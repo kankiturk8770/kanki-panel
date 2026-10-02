@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Kanki Panel</title>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;800;900&family=Orbitron:wght@700;900&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+:root{--g:#F5C451;--gl:#FFE9A6;--gd:#B8862B;--sh:#FFE08A;--ok:#FFB547;--red:#FF6B6B;--cy:#6FE7FF;--t:#F7F1E3;--s:#A89C82;--ln:rgba(245,196,81,.25);--card1:rgba(28,23,14,.92);--card2:rgba(12,10,6,.95)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;min-height:100%}
+body{background:linear-gradient(#0c0a06,#17110a 45%,#050403);color:var(--t);font-family:Vazirmatn,Tahoma,sans-serif;padding-bottom:110px;overflow-x:hidden}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 50% -10%,rgba(245,196,81,.20),transparent 55%)}
+body:after{content:"";position:fixed;left:-20%;right:-20%;bottom:0;height:38vh;pointer-events:none;opacity:.12;
+ background:repeating-linear-gradient(90deg,var(--g) 0 1px,transparent 1px 60px),repeating-linear-gradient(0deg,var(--g) 0 1px,transparent 1px 40px);
+ transform:perspective(300px) rotateX(60deg);transform-origin:bottom}
+.stars i{position:fixed;width:3px;height:3px;border-radius:50%;background:var(--gl);box-shadow:0 0 8px var(--g);animation:tw 3s infinite;pointer-events:none}
+@keyframes tw{50%{opacity:.2}}
+.en{font-family:Poppins,sans-serif;direction:ltr;unicode-bidi:isolate}
+.wrap{max-width:980px;margin:auto;padding:14px 16px;position:relative;z-index:1}
+.hdr{display:flex;align-items:center;gap:10px;margin:4px 0 14px}
+.brand{font-family:Orbitron;font-weight:900;font-size:22px;color:var(--g);letter-spacing:1px;text-shadow:0 0 18px rgba(245,196,81,.55);direction:ltr}
+.icb{width:44px;height:44px;border-radius:50%;border:1.3px solid rgba(245,196,81,.7);background:linear-gradient(#2a2212,#0e0b07);color:var(--g);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px}
+.card{background:linear-gradient(var(--card1),var(--card2));border:1px solid var(--ln);border-radius:26px;padding:16px;margin-bottom:14px;box-shadow:0 10px 30px rgba(0,0,0,.35)}
+.title{color:var(--g);font-weight:900;font-size:17px;margin:2px 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.mini{background:linear-gradient(rgba(245,196,81,.10),rgba(14,11,7,.6));border:1px solid var(--ln);border-radius:18px;padding:12px}
+.mini small{color:var(--s);display:block;font-size:12px}.mini b{font-size:22px;color:var(--t);font-family:Poppins}
+.btn{background:linear-gradient(var(--sh),var(--g),var(--gd));color:#1A1206;border:none;border-radius:16px;padding:11px 16px;font-weight:900;font-family:inherit;font-size:14px;cursor:pointer}
+.btn2{background:rgba(255,255,255,.05);color:var(--g);border:1px solid var(--ln);border-radius:14px;padding:8px 12px;font-family:inherit;font-size:13px;cursor:pointer}
+.btn2.red{color:var(--red);border-color:rgba(255,107,107,.45)}.btn2.on{background:rgba(245,196,81,.2);border-color:var(--g)}
+.pill{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;border:1px solid}
+.Active{color:var(--ok);border-color:var(--ok)}.Expired,.Limited,.Disabled{color:var(--red);border-color:var(--red)}
+input,select,textarea{width:100%;background:#0e0b07;color:var(--t);border:1px solid var(--ln);border-radius:14px;padding:11px;margin:4px 0 10px;font-family:inherit;font-size:14px}
+input:focus,textarea:focus{outline:none;border-color:var(--g)}
+label{font-size:12px;color:var(--s)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sp{flex:1}
+.bar{height:6px;background:rgba(255,255,255,.08);border-radius:6px;overflow:hidden;margin-top:6px}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--gd),var(--g),var(--gl))}
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}.chip{white-space:nowrap;padding:7px 14px;border-radius:14px;border:1px solid var(--ln);color:var(--t);background:rgba(255,255,255,.04);cursor:pointer;font-size:13px}
+.chip.on{background:linear-gradient(var(--sh),var(--g),var(--gd));color:#1A1206;font-weight:900;border:none}
+.ucard{display:block;border-radius:20px;border:1px solid var(--ln);background:rgba(255,255,255,.035);padding:12px;margin-bottom:10px;cursor:pointer}
+.ucard.sel{border-color:var(--g);background:rgba(245,196,81,.12)}
+.ring{width:84px;height:84px;margin:auto;position:relative}.ring span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:Poppins;font-weight:700}
+.svc{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid rgba(245,196,81,.08)}
+.dot{width:9px;height:9px;border-radius:50%;box-shadow:0 0 10px currentColor}
+.nav{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(10px + env(safe-area-inset-bottom));width:min(560px,calc(100% - 24px));display:flex;gap:4px;padding:6px;border-radius:30px;
+ background:linear-gradient(rgba(28,23,14,.96),rgba(12,10,6,.98));border:1px solid rgba(245,196,81,.35);z-index:5;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.nav div{flex:1;height:48px;border-radius:22px;display:flex;align-items:center;justify-content:center;gap:6px;color:var(--s);cursor:pointer;font-weight:900;font-size:12px}
+.nav div.on{flex:1.7;background:linear-gradient(var(--sh),var(--g),var(--gd));color:#1A1206}.nav svg{width:21px;height:21px}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.7);display:none;align-items:flex-end;justify-content:center;z-index:9}
+.sheet .card{width:100%;max-width:640px;max-height:92vh;overflow:auto;border-radius:28px 28px 0 0;margin:0}
+code.cp{display:block;direction:ltr;word-break:break-all;background:#0e0b07;border:1px dashed var(--ln);border-radius:12px;padding:9px;font-size:11px;cursor:pointer;color:var(--gl)}
+.chk{display:inline-flex;gap:6px;align-items:center;margin:0 0 6px 14px;font-size:13px}.chk input{width:auto;margin:0;accent-color:var(--g)}
+#toast{position:fixed;top:16px;left:50%;transform:translateX(-50%);background:#1d170d;border:1px solid var(--g);padding:10px 16px;border-radius:14px;display:none;z-index:20}
+#qr{background:#fff;padding:10px;border-radius:16px;width:max-content;margin:8px auto}
+</style>
+</head>
+<body>
+<div class="stars" id="stars"></div>
+
+<div class="wrap" id="login" style="max-width:400px;margin-top:10vh">
+  <div style="text-align:center;margin-bottom:16px">
+    <svg width="74" height="82" viewBox="0 0 100 110"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFE9A6"/><stop offset=".5" stop-color="#F5C451"/><stop offset="1" stop-color="#7A5512"/></linearGradient></defs><path d="M50 5 L87 17 L87 55 Q87 80 50 104 Q13 80 13 55 L13 17 Z" fill="url(#lg)"/><path d="M50 13 L80 23 L80 55 Q80 75 50 95 Q20 75 20 55 L20 23 Z" fill="#1d150a"/><path d="M36 33h9v16l13-16h11L53 52l17 21H59L45 57v16h-9z" fill="url(#lg)"/></svg>
+    <div class="brand" style="font-size:26px">KANKI PANEL</div>
+  </div>
+  <div class="card">
+    <label>نام کاربری</label><input id="lu" autocomplete="username">
+    <label>رمز عبور</label><input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key=='Enter')login()">
+    <button class="btn" style="width:100%" onclick="login()">ورود به پنل</button>
+    <p id="lerr" style="color:var(--red);text-align:center"></p>
+  </div>
+</div>
+
+<div class="wrap" id="app" style="display:none">
+  <div class="hdr">
+    <svg width="40" height="44" viewBox="0 0 100 110"><path d="M50 5 L87 17 L87 55 Q87 80 50 104 Q13 80 13 55 L13 17 Z" fill="url(#lg)"/><path d="M50 13 L80 23 L80 55 Q80 75 50 95 Q20 75 20 55 L20 23 Z" fill="#1d150a"/><path d="M36 33h9v16l13-16h11L53 52l17 21H59L45 57v16h-9z" fill="#F5C451"/></svg>
+    <span class="brand">KANKI PANEL</span><span class="sp"></span>
+    <div class="icb" title="همگام‌سازی" onclick="doSync()">⟳</div>
+    <div class="icb" title="خروج" onclick="localStorage.removeItem('kt');location.reload()">⎋</div>
+  </div>
+  <div id="view"></div>
+</div>
+
+<div class="nav" id="nav" style="display:none"></div>
+<div class="sheet" id="sheet" onclick="if(event.target.id=='sheet')closeSheet()"><div class="card" id="sbody"></div></div>
+<div id="toast"></div>
+
+<script>
+let T=localStorage.getItem('kt')||'',S={tab:'dash',users:[],nodes:[],plans:[],settings:{},ov:{},sys:{},bot:{},sec:{},filter:'all',q:'',sel:new Set(),selMode:false};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fmtB=b=>{b=+b||0;const u=['B','KB','MB','GB','TB'];let i=0;while(b>=1024&&i<4){b/=1024;i++}return b.toFixed(i?1:0)+' '+u[i]};
+function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';clearTimeout(e._t);e._t=setTimeout(()=>e.style.display='none',2600)}
+async function api(p,o={}){o.headers=Object.assign({'Authorization':'Bearer '+T},o.body&&!(o.body instanceof Blob)&&!(o.body instanceof ArrayBuffer)?{'Content-Type':'application/json'}:{},o.headers||{});
+ const r=await fetch(p,o);if(r.status==401){localStorage.removeItem('kt');location.reload();return}
+ const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
+async function login(){try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('lu').value,password:$('lp').value})});
+ const j=await r.json();if(!r.ok)throw new Error(j.error||'خطا');T=j.token;localStorage.setItem('kt',T);start()}catch(e){$('lerr').textContent=e.message}}
+for(let i=0;i<26;i++){const s=document.createElement('i');s.style.left=Math.random()*100+'%';s.style.top=Math.random()*100+'%';s.style.animationDelay=Math.random()*3+'s';$('stars').appendChild(s)}
+
+const ICON={dash:'<path d="M3 11l9-8 9 8M5 9v11h14V9"/><path d="M10 20v-6h4v6"/>',users:'<circle cx="9" cy="8" r="4"/><path d="M2 21c0-4 3-6 7-6s7 2 7 6"/><path d="M16 4a4 4 0 010 8M22 21c0-3-2-5-4-6"/>',
+ nodes:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/>',plans:'<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9h10M7 13h6"/>',set:'<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>'};
+const TABS=[['dash','داشبورد'],['users','کاربران'],['nodes','نودها'],['plans','پلن‌ها'],['set','تنظیمات']];
+function nav(){$('nav').innerHTML=TABS.map(t=>`<div class="${S.tab==t[0]?'on':''}" onclick="go('${t[0]}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[t[0]]}</svg>${S.tab==t[0]?t[1]:''}</div>`).join('')}
+function go(t){S.tab=t;S.selMode=false;S.sel.clear();render();if(t=='set')loadSet();window.scrollTo(0,0)}
+async function load(){try{[S.ov,S.users,S.nodes,S.plans,S.sys]=await Promise.all([api('/api/overview'),api('/api/users'),api('/api/nodes'),api('/api/plans'),api('/api/system')]);render()}catch(e){toast(e.message)}}
+async function loadSet(){try{[S.settings,S.bot,S.sec]=await Promise.all([api('/api/settings'),api('/api/bot'),api('/api/security')]);render()}catch(e){toast(e.message)}}
+function start(){$('login').style.display='none';$('app').style.display='block';$('nav').style.display='flex';load();setInterval(()=>{if(!$('sheet').style.display||$('sheet').style.display=='none')load()},20000)}
+async function doSync(){try{await api('/api/sync',{method:'POST'});toast('همگام‌سازی انجام شد');load()}catch(e){toast(e.message)}}
+
+function ring(p,label,sub){const r=36,c=2*Math.PI*r,o=c*(1-Math.min(100,p||0)/100);
+ return `<div><div class="ring"><svg width="84" height="84"><circle cx="42" cy="42" r="${r}" stroke="rgba(255,255,255,.08)" stroke-width="8" fill="none"/>
+ <circle cx="42" cy="42" r="${r}" stroke="url(#lg)" stroke-width="8" fill="none" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${o}" transform="rotate(-90 42 42)"/></svg><span>${Math.round(p||0)}%</span></div>
+ <div style="text-align:center;margin-top:6px;font-weight:800">${label}</div><div class="en" style="text-align:center;color:var(--s);font-size:11px">${sub||''}</div></div>`}
+const SVC={wireguard:'WireGuard',amneziawg:'AmneziaWG',hysteria2:'Hysteria2',web:'Web (Caddy)',panel:'Kanki Panel'};
+
+function render(){nav();const v=$('view');
+ if(S.tab=='dash'){const o=S.ov,s=S.sys,mem=s.mem_total?s.mem_used/s.mem_total*100:0,dk=s.disk_total?s.disk_used/s.disk_total*100:0,up=s.uptime||0;
+  v.innerHTML=`<div class="grid">
+   <div class="mini"><small>کاربران</small><b>${o.users||0}</b></div><div class="mini"><small>فعال</small><b style="color:var(--ok)">${o.active||0}</b></div>
+   <div class="mini"><small>آنلاین</small><b style="color:var(--cy)">${o.online||0}</b></div><div class="mini"><small>منقضی/تمام‌حجم</small><b style="color:var(--red)">${o.expired||0}</b></div>
+   <div class="mini"><small>مصرف کل</small><b class="en">${o.traffic_gb||0} GB</b></div><div class="mini"><small>نودها</small><b class="en">${o.nodes_online||0}/${o.nodes||0}</b></div>
+   <div class="mini"><small>فروش ربات</small><b>${o.sales||0}</b></div><div class="mini"><small>درآمد (تومان)</small><b>${(o.revenue||0).toLocaleString()}</b></div></div>
+  <div class="card" style="margin-top:14px"><div class="title">وضعیت سرور</div><div class="grid" style="grid-template-columns:repeat(3,1fr)">
+   ${ring(s.cpu,'CPU',(s.cores||1)+' core')}${ring(mem,'RAM',fmtB(s.mem_used)+' / '+fmtB(s.mem_total))}${ring(dk,'Disk',fmtB(s.disk_used)+' / '+fmtB(s.disk_total))}</div>
+   <div class="row" style="margin-top:12px;color:var(--s);font-size:13px"><span>⏱ آپ‌تایم: <b class="en" style="color:var(--t)">${Math.floor(up/86400)}d ${Math.floor(up%86400/3600)}h</b></span><span class="sp"></span>
+   <span class="en">↓ ${fmtB(s.net_rx)}  ↑ ${fmtB(s.net_tx)}</span></div></div>
+  <div class="card"><div class="title">سرویس‌ها</div>${(s.services||[]).map(x=>`<div class="svc"><span class="dot" style="color:${x.active?'var(--ok)':'var(--red)'};background:currentColor"></span>
+   <b class="sp">${SVC[x.key]||x.key}</b><span class="en" style="color:var(--s);font-size:12px">${esc(x.state)}</span><button class="btn2" onclick="restartSvc('${x.key}')">ری‌استارت</button></div>`).join('')}</div>
+  <div class="card"><div class="title">دسترسی سریع</div><div class="row"><button class="btn" onclick="userForm()">+ کاربر جدید</button><button class="btn2" onclick="doSync()">⟳ همگام‌سازی</button>
+   <button class="btn2" onclick="dlBackup()">💾 بکاپ</button><button class="btn2" onclick="go('set')">⚙️ تنظیمات</button></div>
+   <p style="color:var(--s);font-size:12px;margin:10px 0 0" class="en">Kanki Panel v${esc(s.version||'')}</p></div>`}
+ if(S.tab=='users'){const F=[['all','همه'],['active','فعال'],['online','آنلاین'],['expired','منقضی/تمام'],['disabled','غیرفعال']];
+  const list=S.users.filter(u=>(!S.q||u.username.toLowerCase().includes(S.q.toLowerCase())||String(u.id)==S.q)&&(S.filter=='all'||(S.filter=='active'&&u.status=='Active')||(S.filter=='online'&&u.online_connections>0)||(S.filter=='expired'&&(u.status=='Expired'||u.status=='Limited'))||(S.filter=='disabled'&&!u.enabled)));
+  v.innerHTML=`<div class="card"><div class="row"><input placeholder="جستجوی نام یا شناسه…" style="flex:1;margin:0" value="${esc(S.q)}" oninput="S.q=this.value;render();this.focus();this.setSelectionRange(this.value.length,this.value.length)">
+   <button class="btn" onclick="userForm()">+ جدید</button></div><div class="chips" style="margin-top:10px">${F.map(f=>`<div class="chip ${S.filter==f[0]?'on':''}" onclick="S.filter='${f[0]}';render()">${f[1]}</div>`).join('')}
+   <div class="chip ${S.selMode?'on':''}" onclick="S.selMode=!S.selMode;S.sel.clear();render()">☑ انتخاب گروهی</div></div>
+   ${S.selMode?`<div class="row" style="margin-top:10px"><span style="color:var(--s)">${S.sel.size} انتخاب</span><span class="sp"></span>
+    <button class="btn2" onclick="bulk('extend',{days:30})">+۳۰ روز</button><button class="btn2" onclick="bulk('extend',{gb:10})">+۱۰ گیگ</button><button class="btn2" onclick="bulk('reset')">ریست</button>
+    <button class="btn2" onclick="bulk('enable')">فعال</button><button class="btn2" onclick="bulk('disable')">غیرفعال</button><button class="btn2 red" onclick="if(confirm('حذف کاربران انتخاب‌شده؟'))bulk('delete')">حذف</button></div>`:''}</div>
+  ${list.map(u=>{const pc=u.traffic_limit_gb>0?Math.min(100,u.traffic_used_gb/u.traffic_limit_gb*100):0,sel=S.sel.has(u.id);
+   return `<div class="ucard ${sel?'sel':''}" onclick="${S.selMode?`tog(${u.id})`:`userView(${u.id})`}"><div class="row"><b style="font-size:15px" class="en">${esc(u.username)}</b><span class="pill ${u.status}">${u.status}</span>
+   ${u.online_connections>0?'<span class="pill" style="color:var(--cy);border-color:var(--cy)">● online</span>':''}<span class="sp"></span><span style="color:var(--s);font-size:12px">${left(u)}</span></div>
+   <div class="bar"><i style="width:${pc}%"></i></div><div class="row" style="margin-top:6px;font-size:12px;color:var(--s)"><span class="en">${u.traffic_used_gb} / ${u.traffic_limit_gb||'∞'} GB</span><span class="sp"></span><span class="en">👥 ${u.online_connections}/${u.max_connections}</span></div></div>`}).join('')||'<div class="card" style="text-align:center;color:var(--s)">کاربری نیست</div>'}`}
+ if(S.tab=='nodes'){v.innerHTML=`<div class="card"><div class="row"><div class="title sp" style="margin:0">نودها (سرورها)</div><button class="btn" onclick="nodeForm()">+ افزودن نود</button></div>
+  <p style="color:var(--s);font-size:12px">روی سرور جدید اسکریپت نصب را با گزینه‌ی 2 (node) اجرا کنید و اطلاعات نمایش‌داده‌شده را اینجا وارد کنید.</p></div>`+
+  S.nodes.map(n=>`<div class="card"><div class="row"><span class="dot" style="color:${n.online?'var(--ok)':'var(--red)'};background:currentColor"></span><b style="font-size:16px">${esc(n.name)}</b>
+  ${n.id=='local'?'<span class="pill Active">اصلی</span>':''}<span class="sp"></span>${n.id!='local'?`<button class="btn2" onclick="api('/api/nodes/${n.id}/toggle',{method:'POST'}).then(load)">${n.enabled?'خاموش':'روشن'}</button>
+  <button class="btn2 red" onclick="if(confirm('حذف نود؟'))api('/api/nodes/${n.id}',{method:'DELETE'}).then(load)">حذف</button>`:''}</div>
+  <div class="grid" style="margin-top:10px;grid-template-columns:repeat(3,1fr)"><div class="mini"><small>WireGuard</small><b class="en" style="font-size:15px">${esc(n.info.wg_port||'—')}</b></div>
+  <div class="mini"><small>AmneziaWG</small><b class="en" style="font-size:15px">${esc(n.info.awg_port||'—')}</b></div><div class="mini"><small>Hysteria2</small><b class="en" style="font-size:15px">${esc(n.info.hy2_port||'—')}</b></div></div>
+  <p class="en" style="color:var(--s);font-size:11px;margin:8px 0 0">${esc(n.id)} · ${esc(n.endpoint||'panel domain')}</p></div>`).join('')}
+ if(S.tab=='plans'){v.innerHTML=`<div class="card"><div class="title">پلن جدید</div><div class="grid"><div><label>نام</label><input id="pn"></div><div><label>روز</label><input id="pd" type="number" value="30"></div>
+  <div><label>حجم (GB)</label><input id="pg" type="number" value="50"></div><div><label>تومان</label><input id="pt" type="number"></div><div><label>دلار</label><input id="pu" type="number" step="0.01"></div>
+  <div><label>اتصال همزمان</label><input id="pc" type="number" value="1"></div></div><button class="btn" onclick="addPlan()">+ افزودن پلن</button></div>`+
+  S.plans.map(p=>`<div class="card"><div class="row"><b style="font-size:16px">${esc(p.name)}</b><span class="sp"></span><button class="btn2 red" onclick="api('/api/plans/${p.id}',{method:'DELETE'}).then(load)">حذف</button></div>
+  <div class="row" style="margin-top:8px;color:var(--s)"><span class="en">${p.gb} GB</span>·<span>${p.days} روز</span>·<span>${p.conns} کاربر</span><span class="sp"></span><b style="color:var(--g)">${p.toman.toLocaleString()} تومان</b><span class="en">${p.usd}$</span></div></div>`).join('')}
+ if(S.tab=='set')renderSet()}
+
+function left(u){if(!u.expires_ts)return 'نامحدود';const s=u.expires_ts-Date.now()/1000;if(s<=0)return 'منقضی';const d=Math.floor(s/86400);return d?d+' روز':Math.floor(s/3600)+' ساعت'}
+function tog(id){S.sel.has(id)?S.sel.delete(id):S.sel.add(id);render()}
+async function bulk(action,extra){if(!S.sel.size)return toast('کاربری انتخاب نشده');try{await api('/api/users/bulk',{method:'POST',body:JSON.stringify(Object.assign({ids:[...S.sel],action},extra||{}))});toast('انجام شد');S.sel.clear();load()}catch(e){toast(e.message)}}
+async function restartSvc(k){if(!confirm('ری‌استارت '+(SVC[k]||k)+'؟'))return;try{await api('/api/services/'+k+'/restart',{method:'POST'});toast('ری‌استارت شد');setTimeout(load,2500)}catch(e){toast(e.message)}}
+
+function openSheet(h){$('sbody').innerHTML=h+'<button class="btn2" style="margin-top:12px;width:100%" onclick="closeSheet()">بستن</button>';$('sheet').style.display='flex'}
+function closeSheet(){$('sheet').style.display='none'}
+function protoChecks(sel){return [['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2']].map(p=>`<label class="chk"><input type="checkbox" class="up" value="${p[0]}" ${sel.includes(p[0])?'checked':''}>${p[1]}</label>`).join('')}
+function nodeChecks(sel){return S.nodes.map(n=>`<label class="chk"><input type="checkbox" class="un" value="${n.id}" ${(!sel||sel.split(',').includes(n.id))?'checked':''}>${esc(n.name)}</label>`).join('')}
+const picked=c=>[...document.querySelectorAll('.'+c+':checked')].map(x=>x.value);
+function nodesPayload(){const n=picked('un');return n.length==S.nodes.length?[]:n}
+function userForm(){openSheet(`<div class="title">کاربر جدید</div><div class="grid"><div><label>نام کاربری (خالی = خودکار)</label><input id="un"></div><div><label>تعداد (ساخت گروهی)</label><input id="uc" type="number" value="1"></div>
+ <div><label>حجم GB (صفر = نامحدود)</label><input id="ug" type="number" value="50"></div><div><label>روز (صفر = نامحدود)</label><input id="ud" type="number" value="30"></div><div><label>اتصال همزمان</label><input id="um" type="number" value="1"></div></div>
+ <label>پروتکل‌ها</label><div>${protoChecks((S.settings.default_protocols||'wg,awg,hy2').split(','))}</div><label>نودها</label><div>${nodeChecks('')}</div>
+ <label>یادداشت</label><input id="unt"><button class="btn" style="width:100%" onclick="createUser()">ساخت کاربر</button>`)}
+async function createUser(){try{const r=await api('/api/users',{method:'POST',body:JSON.stringify({username:$('un').value,count:+$('uc').value,traffic_limit_gb:+$('ug').value,days:+$('ud').value,max_connections:+$('um').value,protocols:picked('up'),nodes:nodesPayload(),notes:$('unt').value})});
+ toast('ساخته شد');await load();if(r.length==1)userView(r[0].id);else closeSheet()}catch(e){toast(e.message)}}
+const copy=t=>{navigator.clipboard.writeText(t);toast('کپی شد')};
+function dtLocal(ts){if(!ts)return '';const d=new Date(ts*1000),p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`}
+function userView(id){const u=S.users.find(x=>x.id==id);if(!u)return;const nodes=S.nodes.filter(n=>!u.nodes||u.nodes.split(',').includes(n.id));
+ openSheet(`<div class="row"><b style="font-size:18px" class="en">${esc(u.username)}</b><span class="pill ${u.status}">${u.status}</span><span class="sp"></span><span style="color:var(--s);font-size:12px">#${u.id}</span></div>
+ <div class="grid" style="margin:12px 0"><div class="mini"><small>مصرف</small><b class="en" style="font-size:16px">${u.traffic_used_gb} / ${u.traffic_limit_gb||'∞'} GB</b></div><div class="mini"><small>زمان</small><b style="font-size:16px">${left(u)}</b></div>
+ <div class="mini"><small>آنلاین</small><b class="en" style="font-size:16px">${u.online_connections}/${u.max_connections}</b></div><div class="mini"><small>آخرین اتصال</small><b class="en" style="font-size:12px">${esc((u.last_seen_at||'—').replace('T',' ').replace('Z',''))}</b></div></div>
+ <label>لینک اشتراک (اپ کانکی / مرورگر)</label><code class="cp" onclick="copy(this.innerText)">${esc(u.link)}</code>
+ <label>کد ورود اپ</label><code class="cp" onclick="copy(this.innerText)">${esc(u.code)}</code><div id="qr"></div>
+ <label>دانلود کانفیگ‌ها</label><div class="row" style="margin-bottom:10px">${nodes.map(n=>(u.protocols.includes('wg')?`<a class="btn2" target="_blank" href="/api/config/${u.id}/wireguard?sub=${u.code}&node=${n.id}">WG · ${esc(n.name)}</a>`:'')+(u.protocols.includes('awg')?`<a class="btn2" target="_blank" href="/api/config/${u.id}/amneziawg?sub=${u.code}&node=${n.id}">AWG · ${esc(n.name)}</a>`:'')+(u.protocols.includes('hy2')?`<button class="btn2" onclick="fetch('/api/config/${u.id}/hysteria2?sub=${u.code}&node=${n.id}').then(r=>r.text()).then(copy)">HY2 · ${esc(n.name)}</button>`:'')).join('')}</div>
+ <div class="title" style="margin-top:6px">ویرایش</div><div class="grid"><div><label>حجم کل GB</label><input id="eg" type="number" value="${u.traffic_limit_gb}"></div><div><label>اتصال همزمان</label><input id="em" type="number" value="${u.max_connections}"></div>
+ <div><label>تاریخ انقضا (خالی = نامحدود)</label><input id="ee" type="datetime-local" value="${dtLocal(u.expires_ts)}"></div></div>
+ <label>پروتکل‌ها</label><div>${protoChecks(u.protocols.split(','))}</div><label>نودها</label><div>${nodeChecks(u.nodes)}</div><label>یادداشت</label><input id="en" value="${esc(u.notes)}">
+ <button class="btn" style="width:100%" onclick="saveUser(${id})">ذخیره تغییرات</button>
+ <div class="row" style="margin-top:12px"><button class="btn2" onclick="act(${id},'extend',{days:30})">+۳۰ روز</button><button class="btn2" onclick="act(${id},'extend',{gb:10})">+۱۰ گیگ</button>
+ <button class="btn2" onclick="act(${id},'reset')">ریست حجم</button><button class="btn2" onclick="act(${id},'toggle')">${u.enabled?'غیرفعال':'فعال'} کردن</button>
+ <button class="btn2" onclick="if(confirm('لینک قبلی باطل شود؟'))act(${id},'regen')">لینک جدید</button>
+ <button class="btn2 red" onclick="if(confirm('حذف کامل کاربر؟'))api('/api/users/${id}',{method:'DELETE'}).then(()=>{closeSheet();load()})">حذف</button></div>`);
+ try{new QRCode($('qr'),{text:u.link,width:170,height:170})}catch(e){$('qr').style.display='none'}}
+async function saveUser(id){const e=$('ee').value;try{await api('/api/users/'+id,{method:'PUT',body:JSON.stringify({traffic_limit_gb:+$('eg').value,max_connections:+$('em').value,expires_ts:e?Math.floor(new Date(e).getTime()/1000):0,protocols:picked('up'),nodes:nodesPayload(),notes:$('en').value})});
+ toast('ذخیره شد');await load();userView(id)}catch(x){toast(x.message)}}
+async function act(id,a,b){try{await api('/api/users/'+id+'/'+a,{method:'POST',body:JSON.stringify(Object.assign({days:0,gb:0},b||{}))});toast('انجام شد');await load();userView(id)}catch(e){toast(e.message)}}
+function nodeForm(){openSheet(`<div class="title">افزودن نود</div><label>نام (مثلاً FRANCE)</label><input id="nn"><label>آدرس API نود</label><input id="na" class="en" placeholder="http://1.2.3.4:2096">
+ <label>آدرس اتصال کلاینت‌ها (دامنه یا IP نود)</label><input id="ne" class="en"><label>توکن نود</label><input id="nt" class="en"><button class="btn" style="width:100%" onclick="addNode()">افزودن</button>`)}
+async function addNode(){try{await api('/api/nodes',{method:'POST',body:JSON.stringify({name:$('nn').value,address:$('na').value,endpoint:$('ne').value,token:$('nt').value})});toast('نود اضافه شد');closeSheet();load()}catch(e){toast(e.message)}}
+async function addPlan(){try{await api('/api/plans',{method:'POST',body:JSON.stringify({name:$('pn').value,days:+$('pd').value,gb:+$('pg').value,toman:+$('pt').value,usd:+$('pu').value,conns:+$('pc').value})});toast('اضافه شد');load()}catch(e){toast(e.message)}}
+
+function renderSet(){const s=S.settings,f=(k,l,t='text')=>`<div><label>${l}</label><input id="s_${k}" type="${t}" value="${esc(s[k])}"></div>`,
+ o=(k,l)=>`<label class="chk"><input type="checkbox" id="s_${k}" ${s[k]=='1'?'checked':''}>${l}</label>`,b=S.bot,sec=S.sec;
+ $('view').innerHTML=`<div class="card"><div class="title">🤖 ربات تلگرام</div><p style="color:var(--s);font-size:13px;margin-top:0">وضعیت: ${b.token_set?'<b style="color:var(--ok)">متصل</b> <span class="en">'+esc(b.token_masked)+'</span>':'<b style="color:var(--red)">تنظیم نشده</b>'}</p>
+  <label>توکن جدید ربات (خالی = بدون تغییر)</label><input id="bt" class="en" placeholder="123456:ABC..."><label>آیدی عددی ادمین‌ها (با کاما)</label><input id="ba" class="en" value="${esc(b.admins)}">
+  <button class="btn" onclick="saveBot()">ذخیره و راه‌اندازی مجدد ربات</button></div>
+ <div class="card"><div class="title">🛒 فروش و ربات</div><div>${o('sales_on','فروش')}${o('trial_on','تست رایگان')}${o('warn_on','هشدار اتمام')}${o('backup_on','بکاپ روزانه به تلگرام')}</div>
+  <div class="grid">${f('trial_gb','حجم تست (GB)')}${f('trial_days','مدت تست (روز)')}${f('support','آیدی پشتیبانی')}${f('channel','کانال اجباری (@...)')}${f('app_link','لینک دانلود اپ')}${f('ref_gb','هدیه دعوت (GB)')}${f('ref_days','هدیه دعوت (روز)')}</div>${f('welcome','متن خوش‌آمد ربات')}</div>
+ <div class="card"><div class="title">💳 پرداخت</div><div>${o('card_on','کارت به کارت')}${o('zp_on','زرین‌پال')}${o('np_on','ارزی خودکار (NOWPayments)')}${o('wallet_on','کیف پول ارزی')}</div>
+  <div class="grid">${f('card_number','شماره کارت')}${f('card_holder','نام صاحب کارت')}${f('zp_merchant','مرچنت زرین‌پال')}${f('zp_callback','آدرس بازگشت زرین‌پال')}${f('np_key','API Key NOWPayments')}${f('np_coins','ارزها')}</div>${f('wallet_text','آدرس کیف پول‌ها')}</div>
+ <div class="card"><div class="title">🔌 اتصال</div><div class="grid">${f('dns','DNS کلاینت‌ها')}${f('mtu','MTU')}${f('default_protocols','پروتکل‌های پیش‌فرض (wg,awg,hy2)')}</div></div>
+ <button class="btn" style="width:100%;margin-bottom:14px" onclick="saveSettings()">ذخیره‌ی تنظیمات</button>
+ <div class="card"><div class="title">🔐 امنیت</div><div class="grid"><div><label>نام کاربری ادمین</label><input id="au" value="${esc(sec.admin_user)}"></div><div><label>رمز جدید</label><input id="ap" type="password"></div></div>
+  <button class="btn2" onclick="savePass()">تغییر نام کاربری و رمز</button>
+  <label style="display:block;margin-top:14px">کلید API (برای اتصال برنامه‌های خارجی)</label><code class="cp" id="ak" onclick="this.innerText==='••••••••••'?this.innerText=S.sec.api_key:copy(this.innerText)">••••••••••</code>
+  <button class="btn2 red" style="margin-top:8px" onclick="regenKey()">ساخت کلید جدید</button></div>
+ <div class="card"><div class="title">💾 بکاپ و بازگردانی</div><div class="row"><button class="btn" onclick="dlBackup()">دانلود بکاپ</button>
+  <label class="btn2" style="margin:0">بازگردانی بکاپ<input type="file" accept=".db" style="display:none" onchange="restore(this.files[0])"></label></div></div>`}
+async function saveSettings(){const b={};Object.keys(S.settings).forEach(k=>{const e=$('s_'+k);if(e)b[k]=e.type=='checkbox'?(e.checked?'1':'0'):e.value});try{await api('/api/settings',{method:'PUT',body:JSON.stringify(b)});toast('ذخیره شد');loadSet()}catch(e){toast(e.message)}}
+async function saveBot(){try{await api('/api/bot',{method:'PUT',body:JSON.stringify({token:$('bt').value,admins:$('ba').value})});toast('ذخیره شد؛ پنل چند ثانیه‌ی دیگر برمی‌گردد');setTimeout(()=>location.reload(),4000)}catch(e){toast(e.message)}}
+async function savePass(){try{await api('/api/security/password',{method:'POST',body:JSON.stringify({username:$('au').value,password:$('ap').value})});toast('تغییر کرد؛ دوباره وارد شوید');localStorage.removeItem('kt');setTimeout(()=>location.reload(),1500)}catch(e){toast(e.message)}}
+async function regenKey(){if(!confirm('کلید قبلی باطل شود؟'))return;try{const r=await api('/api/security/apikey',{method:'POST'});S.sec.api_key=r.api_key;$('ak').innerText=r.api_key;toast('کلید جدید ساخته شد')}catch(e){toast(e.message)}}
+async function dlBackup(){const r=await fetch('/api/backup',{headers:{Authorization:'Bearer '+T}});const b=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='kanki-backup.db';a.click()}
+async function restore(f){if(!f||!confirm('همه‌ی اطلاعات فعلی با این بکاپ جایگزین شود؟'))return;try{await api('/api/restore',{method:'POST',body:await f.arrayBuffer()});toast('بازگردانی شد؛ پنل چند ثانیه‌ی دیگر برمی‌گردد');setTimeout(()=>location.reload(),4000)}catch(e){toast(e.message)}}
+if(T)start();
+</script>
+</body>
+</html>
