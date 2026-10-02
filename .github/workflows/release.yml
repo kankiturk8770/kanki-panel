@@ -1,0 +1,37 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: ساخت فایل اجرایی
+        run: cargo build --release
+
+      - name: آماده‌سازی خروجی
+        run: |
+          cp target/release/kanki-panel kanki-panel
+          sha256sum kanki-panel > kanki-panel.sha256
+
+      - name: انتشار در Releases (تگ latest)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Kanki Panel (latest)
+          make_latest: true
+          files: |
+            kanki-panel
+            kanki-panel.sha256

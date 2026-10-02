@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kanki Panel</title>
+<style>
+:root{--gold:#F5C451;--gold2:#B8862B;--ink:#0b0906;--card:#15110a;--line:#4a3b18;--text:#F7F1E3;--sub:#A89C82;--ok:#FFB547;--red:#FF6B6B}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% 0,#2a2010 0,#0b0906 60%);color:var(--text);font-family:Vazirmatn,Tahoma,sans-serif;min-height:100vh}
+a{color:var(--gold)}button,input,select,textarea{font-family:inherit;font-size:14px}
+.wrap{max-width:1100px;margin:auto;padding:16px}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:14px}.logo{font-weight:900;font-size:20px;color:var(--gold);letter-spacing:1px;direction:ltr}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}.tab{padding:9px 16px;border-radius:14px;border:1px solid var(--line);background:#120e08;color:var(--sub);cursor:pointer}
+.tab.on{background:linear-gradient(#FFE08A,var(--gold),var(--gold2));color:#1a1206;font-weight:900;border:none}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.stat{background:#1d170d;border-radius:14px;padding:12px}.stat b{font-size:22px;color:var(--gold);display:block}
+.btn{background:linear-gradient(#FFE08A,var(--gold),var(--gold2));color:#1a1206;border:none;border-radius:12px;padding:9px 14px;font-weight:800;cursor:pointer}
+.btn2{background:transparent;color:var(--gold);border:1px solid var(--line);border-radius:12px;padding:7px 11px;cursor:pointer}
+.btn2.red{color:var(--red);border-color:#5a2020}
+input,select,textarea{width:100%;background:#0e0b07;color:var(--text);border:1px solid var(--line);border-radius:12px;padding:10px;margin:4px 0 10px}
+label{font-size:12px;color:var(--sub)}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:8px;border-bottom:1px solid #241c0e;text-align:right}th{color:var(--sub);font-weight:400}
+.pill{padding:2px 9px;border-radius:10px;font-size:11px;border:1px solid}.Active{color:var(--ok);border-color:var(--ok)}.Expired,.Limited,.Disabled{color:var(--red);border-color:var(--red)}
+.bar{height:5px;background:#2a2518;border-radius:5px;overflow:hidden;margin-top:4px}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--gold2),var(--gold))}
+.modal{position:fixed;inset:0;background:#000b;display:none;align-items:center;justify-content:center;padding:16px;z-index:9}.modal .card{width:100%;max-width:520px;max-height:90vh;overflow:auto}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.ltr{direction:ltr;unicode-bidi:isolate}.muted{color:var(--sub);font-size:12px}
+.chk{display:inline-flex;gap:6px;align-items:center;margin-left:12px}.chk input{width:auto;margin:0}
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1d170d;border:1px solid var(--gold);padding:10px 16px;border-radius:12px;display:none;z-index:20}
+@media(max-width:700px){.hide-m{display:none}}
+</style>
+</head>
+<body>
+<div class="wrap" id="login" style="max-width:380px;margin-top:12vh">
+  <div class="card" style="text-align:center">
+    <div class="logo" style="font-size:26px">KANKI PANEL</div>
+    <p class="muted">ورود مدیر</p>
+    <input id="lu" placeholder="نام کاربری" autocomplete="username">
+    <input id="lp" type="password" placeholder="رمز عبور" autocomplete="current-password">
+    <button class="btn" style="width:100%" onclick="login()">ورود</button>
+    <p id="lerr" style="color:var(--red)"></p>
+  </div>
+</div>
+
+<div class="wrap" id="app" style="display:none">
+  <div class="top"><span class="logo">KANKI PANEL</span><span style="flex:1"></span>
+    <button class="btn2" onclick="api('/api/sync',{method:'POST'}).then(()=>{toast('همگام‌سازی انجام شد');load()})">⟳ همگام‌سازی</button>
+    <button class="btn2" onclick="localStorage.removeItem('kt');location.reload()">خروج</button></div>
+  <div class="tabs" id="tabs"></div>
+  <div id="view"></div>
+</div>
+
+<div class="modal" id="modal"><div class="card" id="mbody"></div></div>
+<div id="toast"></div>
+
+<script>
+let T=localStorage.getItem('kt')||'',S={tab:'dash',users:[],nodes:[],plans:[],settings:{},ov:{}};
+const $=id=>document.getElementById(id);
+function toast(t){const e=$('toast');e.textContent=t;e.style.display='block';setTimeout(()=>e.style.display='none',2500)}
+async function api(p,o={}){o.headers=Object.assign({'Content-Type':'application/json','Authorization':'Bearer '+T},o.headers||{});
+ const r=await fetch(p,o);if(r.status==401){localStorage.removeItem('kt');location.reload()}
+ const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j}
+async function login(){try{const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:$('lu').value,password:$('lp').value})});
+ const j=await r.json();if(!r.ok)throw new Error(j.error);T=j.token;localStorage.setItem('kt',T);start()}catch(e){$('lerr').textContent=e.message}}
+const TABS=[['dash','داشبورد'],['users','کاربران'],['nodes','نودها'],['plans','پلن‌ها'],['settings','تنظیمات']];
+function tabs(){$('tabs').innerHTML=TABS.map(t=>`<div class="tab ${S.tab==t[0]?'on':''}" onclick="S.tab='${t[0]}';render()">${t[1]}</div>`).join('')}
+async function load(){[S.ov,S.users,S.nodes,S.plans,S.settings]=await Promise.all([api('/api/overview'),api('/api/users'),api('/api/nodes'),api('/api/plans'),api('/api/settings')]);render()}
+function start(){$('login').style.display='none';$('app').style.display='block';load();setInterval(()=>{if(S.tab=='dash'||S.tab=='users')load()},30000)}
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function left(u){if(!u.expires_ts)return 'نامحدود';const s=u.expires_ts-Date.now()/1000;if(s<=0)return 'منقضی';return Math.floor(s/86400)+' روز'}
+function render(){tabs();const v=$('view');
+ if(S.tab=='dash'){const o=S.ov;v.innerHTML=`<div class="grid">
+  <div class="stat">کاربران<b>${o.users}</b><span class="muted">فعال ${o.active}</span></div>
+  <div class="stat">آنلاین<b>${o.online}</b></div><div class="stat">مصرف کل<b class="ltr">${o.traffic_gb} GB</b></div>
+  <div class="stat">نودها<b>${o.nodes_online}/${o.nodes}</b></div><div class="stat">فروش ربات<b>${o.sales}</b></div>
+  <div class="stat">درآمد ریالی<b>${(o.revenue||0).toLocaleString()}</b></div></div>
+  <div class="card"><b>کلید API</b><p class="muted">برای اتصال برنامه‌ها و ربات‌های خارجی (Authorization: Bearer …)</p><code class="ltr" style="word-break:break-all">${esc(o.api_key)}</code></div>
+  <div class="card"><a class="btn" href="#" onclick="dl();return false">💾 دانلود بکاپ دیتابیس</a></div>`}
+ if(S.tab=='users'){v.innerHTML=`<div class="card"><div class="row"><input id="q" placeholder="جستجو…" style="flex:1;margin:0" oninput="utable()"><button class="btn" onclick="userForm()">+ کاربر جدید</button></div></div><div class="card" style="overflow:auto"><div id="ut"></div></div>`;utable()}
+ if(S.tab=='nodes'){v.innerHTML=`<div class="card"><button class="btn" onclick="nodeForm()">+ افزودن نود</button><p class="muted">روی سرور جدید اسکریپت نصب را با گزینه‌ی «نود» اجرا کنید، سپس آدرس API و توکن را اینجا وارد کنید.</p></div>`+
+  S.nodes.map(n=>`<div class="card"><div class="row"><b>${esc(n.name)}</b><span class="pill ${n.online?'Active':'Expired'}">${n.online?'آنلاین':'آفلاین'}</span><span style="flex:1"></span>
+  ${n.id!='local'?`<button class="btn2" onclick="api('/api/nodes/${n.id}/toggle',{method:'POST'}).then(load)">${n.enabled?'خاموش':'روشن'}</button><button class="btn2 red" onclick="if(confirm('حذف نود؟'))api('/api/nodes/${n.id}',{method:'DELETE'}).then(load)">حذف</button>`:''}</div>
+  <p class="muted ltr">${esc(n.id)} · ${esc(n.endpoint||'(دامنه‌ی پنل)')} · WG:${esc(n.info.wg_port||'—')} · AWG:${esc(n.info.awg_port||'—')} · HY2:${esc(n.info.hy2_port||'—')}</p></div>`).join('')}
+ if(S.tab=='plans'){v.innerHTML=`<div class="card"><div class="grid"><div><label>نام</label><input id="pn"></div><div><label>روز</label><input id="pd" type="number" value="30"></div>
+  <div><label>حجم (GB)</label><input id="pg" type="number" value="50"></div><div><label>قیمت (تومان)</label><input id="pt" type="number"></div>
+  <div><label>قیمت (دلار)</label><input id="pu" type="number" step="0.01"></div><div><label>اتصال همزمان</label><input id="pc" type="number" value="1"></div></div>
+  <button class="btn" onclick="addPlan()">+ افزودن پلن</button></div>`+S.plans.map(p=>`<div class="card row"><b>${esc(p.name)}</b><span class="muted">${p.gb}GB · ${p.days} روز · ${p.toman.toLocaleString()} تومان · ${p.usd}$</span><span style="flex:1"></span><button class="btn2 red" onclick="api('/api/plans/${p.id}',{method:'DELETE'}).then(load)">حذف</button></div>`).join('')}
+ if(S.tab=='settings'){const s=S.settings,f=(k,l,t='text')=>`<div><label>${l}</label><input id="s_${k}" type="${t}" value="${esc(s[k])}"></div>`,
+  o=(k,l)=>`<label class="chk"><input type="checkbox" id="s_${k}" ${s[k]=='1'?'checked':''}> ${l}</label>`;
+  v.innerHTML=`<div class="card"><b>اتصال</b><div class="grid">${f('dns','DNS کلاینت‌ها')}${f('mtu','MTU')}${f('default_protocols','پروتکل‌های پیش‌فرض (wg,awg,hy2)')}</div></div>
+  <div class="card"><b>ربات و فروش</b><div class="row" style="margin:8px 0">${o('sales_on','فروش')}${o('trial_on','تست رایگان')}${o('warn_on','هشدار اتمام')}${o('backup_on','بکاپ روزانه')}</div>
+  <div class="grid">${f('trial_gb','حجم تست (GB)')}${f('trial_days','مدت تست (روز)')}${f('support','پشتیبانی')}${f('channel','کانال اجباری (@...)')}${f('app_link','لینک دانلود اپ')}${f('ref_gb','هدیه دعوت (GB)')}${f('ref_days','هدیه دعوت (روز)')}</div>${f('welcome','متن خوش‌آمد')}</div>
+  <div class="card"><b>پرداخت</b><div class="row" style="margin:8px 0">${o('card_on','کارت')}${o('zp_on','زرین‌پال')}${o('np_on','ارزی خودکار')}${o('wallet_on','کیف پول')}</div>
+  <div class="grid">${f('card_number','شماره کارت')}${f('card_holder','نام صاحب کارت')}${f('zp_merchant','مرچنت زرین‌پال')}${f('zp_callback','آدرس بازگشت زرین‌پال')}${f('np_key','API Key NOWPayments')}${f('np_coins','ارزها')}</div>${f('wallet_text','آدرس کیف پول‌ها')}</div>
+  <button class="btn" onclick="saveSettings()">ذخیره‌ی تنظیمات</button>`}}
+function utable(){const q=($('q')?.value||'').toLowerCase();const us=S.users.filter(u=>!q||u.username.toLowerCase().includes(q)||String(u.id)==q);
+ $('ut').innerHTML=`<table><tr><th>کاربر</th><th>وضعیت</th><th>مصرف</th><th class="hide-m">زمان</th><th class="hide-m">آنلاین</th><th></th></tr>`+us.map(u=>{const pc=u.traffic_limit_gb>0?Math.min(100,u.traffic_used_gb/u.traffic_limit_gb*100):0;
+ return `<tr><td><b>${esc(u.username)}</b><div class="muted">#${u.id}</div></td><td><span class="pill ${u.status}">${u.status}</span></td>
+ <td class="ltr">${u.traffic_used_gb}/${u.traffic_limit_gb||'∞'} GB<div class="bar"><i style="width:${pc}%"></i></div></td><td class="hide-m">${left(u)}</td><td class="hide-m">${u.online_connections}/${u.max_connections}</td>
+ <td><button class="btn2" onclick="userView(${u.id})">مدیریت</button></td></tr>`}).join('')+'</table>'}
+function modal(h){$('mbody').innerHTML=h+'<button class="btn2" style="margin-top:8px" onclick="$(\'modal\').style.display=\'none\'">بستن</button>';$('modal').style.display='flex'}
+function protoChecks(sel){return ['wg','awg','hy2'].map(p=>`<label class="chk"><input type="checkbox" class="up" value="${p}" ${sel.includes(p)?'checked':''}> ${({wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2'})[p]}</label>`).join('')}
+function nodeChecks(sel){return S.nodes.map(n=>`<label class="chk"><input type="checkbox" class="un" value="${n.id}" ${(!sel||sel.split(',').includes(n.id))?'checked':''}> ${esc(n.name)}</label>`).join('')}
+function picked(c){return [...document.querySelectorAll('.'+c+':checked')].map(x=>x.value)}
+function userForm(){modal(`<b>کاربر جدید</b><div class="grid"><div><label>نام کاربری (خالی = خودکار)</label><input id="un"></div><div><label>تعداد (ساخت گروهی)</label><input id="uc" type="number" value="1"></div>
+ <div><label>حجم (GB، صفر = نامحدود)</label><input id="ug" type="number" value="50"></div><div><label>روز (صفر = نامحدود)</label><input id="ud" type="number" value="30"></div>
+ <div><label>اتصال همزمان</label><input id="um" type="number" value="1"></div></div><label>پروتکل‌ها</label><div>${protoChecks((S.settings.default_protocols||'wg,awg,hy2').split(','))}</div>
+ <label>نودها</label><div>${nodeChecks('')}</div><label>یادداشت</label><input id="unt"><button class="btn" onclick="createUser()">ساخت</button>`)}
+async function createUser(){const nodes=picked('un');try{const r=await api('/api/users',{method:'POST',body:JSON.stringify({username:$('un').value,count:+$('uc').value,traffic_limit_gb:+$('ug').value,days:+$('ud').value,
+ max_connections:+$('um').value,protocols:picked('up'),nodes:nodes.length==S.nodes.length?[]:nodes,notes:$('unt').value})});toast('ساخته شد');await load();if(r.length==1)userView(r[0].id)}catch(e){toast(e.message)}}
+function userView(id){const u=S.users.find(x=>x.id==id);if(!u)return;modal(`<b>${esc(u.username)}</b> <span class="pill ${u.status}">${u.status}</span>
+ <p class="muted">لینک اشتراک</p><code class="ltr" style="word-break:break-all;cursor:pointer" onclick="navigator.clipboard.writeText(this.innerText);toast('کپی شد')">${esc(u.link)}</code>
+ <p class="muted">کد ورود اپ</p><code class="ltr" style="cursor:pointer" onclick="navigator.clipboard.writeText(this.innerText);toast('کپی شد')">${esc(u.code)}</code>
+ <div class="grid" style="margin-top:10px"><div><label>حجم کل (GB)</label><input id="eg" type="number" value="${u.traffic_limit_gb}"></div><div><label>اتصال همزمان</label><input id="em" type="number" value="${u.max_connections}"></div></div>
+ <label>پروتکل‌ها</label><div>${protoChecks(u.protocols.split(','))}</div><label>نودها</label><div>${nodeChecks(u.nodes)}</div>
+ <div class="row" style="margin-top:8px"><button class="btn" onclick="saveUser(${id})">ذخیره</button>
+ <button class="btn2" onclick="act(${id},'extend',{days:30,gb:0})">+۳۰ روز</button><button class="btn2" onclick="act(${id},'extend',{days:0,gb:10})">+۱۰ گیگ</button>
+ <button class="btn2" onclick="act(${id},'reset')">ریست حجم</button><button class="btn2" onclick="act(${id},'toggle')">${u.enabled?'غیرفعال':'فعال'}</button>
+ <button class="btn2" onclick="if(confirm('لینک قبلی باطل شود؟'))act(${id},'regen')">لینک جدید</button>
+ <button class="btn2 red" onclick="if(confirm('حذف کامل؟'))api('/api/users/${id}',{method:'DELETE'}).then(()=>{$('modal').style.display='none';load()})">حذف</button></div>`)}
+async function saveUser(id){const nodes=picked('un');try{await api('/api/users/'+id,{method:'PUT',body:JSON.stringify({traffic_limit_gb:+$('eg').value,max_connections:+$('em').value,protocols:picked('up'),nodes:nodes.length==S.nodes.length?[]:nodes})});toast('ذخیره شد');await load();userView(id)}catch(e){toast(e.message)}}
+async function act(id,a,b){try{await api('/api/users/'+id+'/'+a,{method:'POST',body:JSON.stringify(b||{})});toast('انجام شد');await load();userView(id)}catch(e){toast(e.message)}}
+function nodeForm(){modal(`<b>افزودن نود</b><label>نام (مثلاً FRANCE)</label><input id="nn"><label>آدرس API نود</label><input id="na" class="ltr" placeholder="http://1.2.3.4:2096">
+ <label>آدرس اتصال کلاینت‌ها (دامنه یا IP نود)</label><input id="ne" class="ltr" placeholder="fr.example.com"><label>توکن نود (در پایان نصب نود نمایش داده شد)</label><input id="nt" class="ltr"><button class="btn" onclick="addNode()">افزودن</button>`)}
+async function addNode(){try{await api('/api/nodes',{method:'POST',body:JSON.stringify({name:$('nn').value,address:$('na').value,endpoint:$('ne').value,token:$('nt').value})});toast('نود اضافه شد');$('modal').style.display='none';load()}catch(e){toast(e.message)}}
+async function addPlan(){try{await api('/api/plans',{method:'POST',body:JSON.stringify({name:$('pn').value,days:+$('pd').value,gb:+$('pg').value,toman:+$('pt').value,usd:+$('pu').value,conns:+$('pc').value})});toast('اضافه شد');load()}catch(e){toast(e.message)}}
+async function saveSettings(){const b={};Object.keys(S.settings).forEach(k=>{const e=$('s_'+k);if(e)b[k]=e.type=='checkbox'?(e.checked?'1':'0'):e.value});try{await api('/api/settings',{method:'PUT',body:JSON.stringify(b)});toast('ذخیره شد');load()}catch(e){toast(e.message)}}
+async function dl(){const r=await fetch('/api/backup',{headers:{Authorization:'Bearer '+T}});const b=await r.blob();const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='kanki-backup.db';a.click()}
+$('modal').onclick=e=>{if(e.target.id=='modal')$('modal').style.display='none'};
+if(T)start();
+</script>
+</body>
+</html>
