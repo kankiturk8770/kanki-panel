@@ -14,7 +14,7 @@ Auth header: `Authorization: Bearer <token>`. Create tokens in **Security > API 
 | POST | `/api/users/:id/:action` | users:write | `extend {days,gb}`, `reset`, `toggle`, `enable`, `disable`, `regen` |
 | POST | `/api/bulk/users` | users:write | `{ids:[..], action, days?, gb?}` |
 
-Protocols: `wg`, `awg`, `hy2`, `ovpn`. Empty `nodes` = every node that accepts unassigned users.
+Protocols: `wg`, `awg`, `hy2`. Empty `nodes` = every node that accepts unassigned users.
 
 ## Nodes
 | Method | Path | Scope |
@@ -41,12 +41,13 @@ Public (no auth): `POST /join/register` with `{token, node_token, address, endpo
 |---|---|---|---|
 | GET | `/api/system` | admin | cpu %, load, memory, disk, uptime, service states |
 | GET | `/api/live` | admin | `ts` (ms), `cpu_total` / `cpu_idle` (cumulative jiffies), `mem_*`, `swap_*`, `iface`, `net_rx` / `net_tx` (cumulative bytes), `tcp_est`, `tcp_listen`, `udp`, `load`, `cores`, `uptime`. Rates = difference between two samples |
-| POST | `/api/services/:name/:action` | admin | `name`: `wireguard`, `amneziawg`, `hysteria2`, `openvpn-udp`, `openvpn-tcp`, `web`, `panel`, `node`. `action`: `start`, `stop`, `restart` (`web` / `panel` / `node`: restart only) |
+| GET | `/api/logs?src=all&n=300` | admin | live log from journald. `src`: `all`, `panel`, `wireguard`, `amneziawg`, `hysteria2`, `web`, `node`. Returns `{src, lines:[{ts, p (priority 0-7), u (unit), m}]}` |
+| POST | `/api/services/:name/:action` | admin | `name`: `wireguard`, `amneziawg`, `hysteria2`, `web`, `panel`, `node`. `action`: `start`, `stop`, `restart` (`web` / `panel` / `node`: restart only) |
 
 ## Public (no auth)
 | Path | What |
 |---|---|
-| `/sub/bub-<id>-<code>` | subscription page (Kanki app compatible) |
-| `/sub/bub-<id>-<code>/raw` | base64 list for v2rayNG / Hiddify |
-| `/sub/bub-<id>-<code>/json` | JSON for apps |
-| `/api/config/:id/{wireguard,amneziawg,openvpn,hysteria2}?sub=..&node=..[&t=tcp]` | config file; add `/qr` or `/uri` |
+| `/sub/kanki-<id>-<code>` | subscription page (older links with another prefix keep working) |
+| `/sub/kanki-<id>-<code>/raw` | base64 list for v2rayNG / Hiddify |
+| `/sub/kanki-<id>-<code>/json` | JSON for apps |
+| `/api/config/:id/{wireguard,amneziawg,hysteria2}?sub=..&node=..` | config file; add `/qr` or `/uri` |

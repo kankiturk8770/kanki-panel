@@ -574,10 +574,14 @@ async fn force_sync(State(app): St, h: HeaderMap) -> Response {
     Json(json!({ "ok": true })).into_response()
 }
 
-// ============================================================ subscription page (Kanki app compatible)
+// ============================================================ subscription page (Kanki app)
 
+/// "<prefix>-<id>-<code>": new links use the kanki prefix, links made by older versions keep working
 fn parse_code(code: &str) -> Option<(i64, String)> {
-    let rest = code.strip_prefix("bub-")?;
+    let (prefix, rest) = code.split_once('-')?;
+    if prefix.is_empty() || !prefix.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
     let (id, c) = rest.split_once('-')?;
     Some((id.parse().ok()?, c.to_string()))
 }

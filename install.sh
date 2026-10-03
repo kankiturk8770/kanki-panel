@@ -195,89 +195,6 @@ EOF
   systemctl restart hysteria-server.service && ok "Hysteria2 is running" || warn "Hysteria2 failed to start"
 }
 
-setup_openvpn(){ # $1=auth url
-  say "Installing OpenVPN (UDP ${OVPN_UDP_PORT:-off} / TCP ${OVPN_TCP_PORT:-off}) ..."
-  apt-get install -y -qq openvpn >/dev/null 2>&1 || { warn "OpenVPN could not be installed"; OVPN_UDP_PORT=""; OVPN_TCP_PORT=""; return; }
-  local D=/etc/openvpn/server
-  mkdir -p $D
-  if [ ! -f $D/ca.crt ] || [ ! -f $D/server.crt ]; then
-    openssl ecparam -name prime256v1 -genkey -noout -out $D/ca.key
-    openssl req -x509 -new -key $D/ca.key -days 3650 -subj "/CN=Kanki-CA" -out $D/ca.crt
-    openssl ecparam -name prime256v1 -genkey -noout -out $D/server.key
-    openssl req -new -key $D/server.key -subj "/CN=kanki-server" -out /tmp/kanki-srv.csr
-    printf "basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyAgreement\nextendedKeyUsage=serverAuth\n" > /tmp/kanki-srv.ext
-    openssl x509 -req -in /tmp/kanki-srv.csr -CA $D/ca.crt -CAkey $D/ca.key -CAcreateserial -days 3650 -extfile /tmp/kanki-srv.ext -out $D/server.crt >/dev/null 2>&1
-    rm -f /tmp/kanki-srv.csr /tmp/kanki-srv.ext
-    openvpn --genkey secret $D/tc.key 2>/dev/null || openvpn --genkey --secret $D/tc.key
-    chmod 600 $D/ca.key $D/server.key $D/tc.key
-  fi
-  cat > $ENV_DIR/ovpn-auth.sh <<EOF
-#!/bin/sh
-U=\$(sed -n 1p "\$1"); P=\$(sed -n 2p "\$1")
-curl -sf -o /dev/null --max-time 5 --data-urlencode "u=\$U" --data-urlencode "p=\$P" "$1" && exit 0
-exit 1
-EOF
-  chmod 755 $ENV_DIR/ovpn-auth.sh
-  ovpn_conf(){ # $1=name $2=proto $3=port $4=subnet $5=mgmt
-    cat > $D/$1.conf <<EOF
-port $3
-proto $2
-dev tun-$1
-dev-type tun
-ca ca.crt
-cert server.crt
-key server.key
-dh none
-ecdh-curve prime256v1
-tls-crypt tc.key
-topology subnet
-server $4 255.255.0.0
-push "redirect-gateway def1 bypass-dhcp"
-push "dhcp-option DNS 1.1.1.1"
-push "dhcp-option DNS 8.8.8.8"
-keepalive 10 60
-data-ciphers AES-128-GCM:AES-256-GCM:CHACHA20-POLY1305
-verify-client-cert none
-username-as-common-name
-duplicate-cn
-script-security 2
-auth-user-pass-verify $ENV_DIR/ovpn-auth.sh via-file
-management 127.0.0.1 $5
-max-clients 4096
-persist-key
-persist-tun
-user nobody
-group nogroup
-verb 3
-$( [ "$2" = udp ] && echo "explicit-exit-notify 1" )
-EOF
-  }
-  mkdir -p /etc/systemd/system/openvpn-server@.service.d
-  printf '[Service]\nLimitNPROC=infinity\n' > /etc/systemd/system/openvpn-server@.service.d/kanki.conf
-  systemctl daemon-reload
-  if [ -n "$OVPN_UDP_PORT" ]; then
-    OVPN_UDP_MGMT=$(rnum 40000 44999); ovpn_conf udp udp "$OVPN_UDP_PORT" 10.68.0.0 "$OVPN_UDP_MGMT"
-    systemctl enable -q openvpn-server@udp; systemctl restart openvpn-server@udp && ok "OpenVPN UDP is running" || warn "OpenVPN UDP failed to start"
-  fi
-  if [ -n "$OVPN_TCP_PORT" ]; then
-    OVPN_TCP_MGMT=$(rnum 45000 49999); ovpn_conf tcp tcp-server "$OVPN_TCP_PORT" 10.69.0.0 "$OVPN_TCP_MGMT"
-    systemctl enable -q openvpn-server@tcp; systemctl restart openvpn-server@tcp && ok "OpenVPN TCP is running" || warn "OpenVPN TCP failed to start"
-  fi
-  # NAT for the OpenVPN subnets (survives reboot)
-  cat > $ENV_DIR/nat.sh <<'EOF'
-#!/bin/sh
-ETH=$(ip route show default | awk '{print $5; exit}')
-for N in 10.68.0.0/16 10.69.0.0/16; do
-  iptables -t nat -C POSTROUTING -s $N -o $ETH -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s $N -o $ETH -j MASQUERADE
-  iptables -C FORWARD -s $N -j ACCEPT 2>/dev/null || iptables -I FORWARD -s $N -j ACCEPT
-  iptables -C FORWARD -d $N -j ACCEPT 2>/dev/null || iptables -I FORWARD -d $N -j ACCEPT
-done
-EOF
-  chmod 755 $ENV_DIR/nat.sh
-  printf '[Unit]\nDescription=Kanki NAT\nAfter=network-online.target\nWants=network-online.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=%s/nat.sh\n[Install]\nWantedBy=multi-user.target\n' "$ENV_DIR" > /etc/systemd/system/kanki-nat.service
-  systemctl daemon-reload; systemctl enable -q --now kanki-nat.service || true
-}
-
 install_caddy(){
   if ! command -v caddy >/dev/null; then
     apt-get update -qq; apt-get install -y -qq caddy >/dev/null 2>&1 || true
@@ -348,11 +265,6 @@ ask_protocols(){
   ask_port WG_PORT "WireGuard UDP port" 51820
   ask_port AWG_PORT "AmneziaWG UDP port" 51821
   if yes_no "Install Hysteria2?" Y; then ask_port HY2_PORT "Hysteria2 UDP port" 8443; else HY2_PORT=""; fi
-  OVPN_UDP_PORT=""; OVPN_TCP_PORT=""
-  if yes_no "Install OpenVPN?" Y; then
-    ask_port OVPN_UDP_PORT "OpenVPN UDP port" 1194
-    ask_port OVPN_TCP_PORT "OpenVPN TCP port" 1443
-  fi
 }
 
 # =====================================================================
@@ -376,17 +288,15 @@ install_panel(){
   BOT_ADMINS=""; [ -n "$BOT_TOKEN" ] && ask BOT_ADMINS "Bot admin numeric ID(s), comma separated"
 
   HY2_STATS_PORT=$(rnum 30000 39999); HY2_OBFS=$(rand 20); HY2_SECRET=$(rand 24)
-  OVPN_UDP_MGMT=""; OVPN_TCP_MGMT=""
   echo; say "Summary"
   echo "  Domain: $DOMAIN  HTTPS: $HTTPS_PORT  Endpoint: $ENDPOINT  Server: $LOCAL_NAME"
-  echo "  WireGuard: $WG_PORT  AmneziaWG: $AWG_PORT  Hysteria2: ${HY2_PORT:-off}  OpenVPN: ${OVPN_UDP_PORT:-off}/udp ${OVPN_TCP_PORT:-off}/tcp"
+  echo "  WireGuard: $WG_PORT  AmneziaWG: $AWG_PORT  Hysteria2: ${HY2_PORT:-off}"
   echo "  Bot: $([ -n "$BOT_TOKEN" ] && echo yes || echo no)"
   yes_no "Start installation?" Y || exit 0
   base_packages; download_bin
   get_cert "$DOMAIN" "$EMAIL"
   setup_wireguard; setup_amneziawg
   [ -n "$HY2_PORT" ] && setup_hysteria "http://127.0.0.1:$PANEL_PORT/hy2/auth"
-  [ -n "$OVPN_UDP_PORT$OVPN_TCP_PORT" ] && setup_openvpn "http://127.0.0.1:$PANEL_PORT/ovpn/auth"
   umask 077
   cat > $ENV <<EOF
 MODE=panel
@@ -404,16 +314,12 @@ HY2_PORT=$HY2_PORT
 HY2_OBFS=$HY2_OBFS
 HY2_SECRET=$HY2_SECRET
 HY2_STATS_PORT=$HY2_STATS_PORT
-OVPN_UDP_PORT=$OVPN_UDP_PORT
-OVPN_TCP_PORT=$OVPN_TCP_PORT
-OVPN_UDP_MGMT=$OVPN_UDP_MGMT
-OVPN_TCP_MGMT=$OVPN_TCP_MGMT
 DATA_DIR=/var/lib/kanki
 EOF
   umask 022
   setup_caddy "https://$DOMAIN:$HTTPS_PORT" "$PANEL_PORT"
   service kanki-panel serve
-  open_ports 80/tcp "$HTTPS_PORT/tcp" "$WG_PORT/udp" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}" "${OVPN_UDP_PORT:+$OVPN_UDP_PORT/udp}" "${OVPN_TCP_PORT:+$OVPN_TCP_PORT/tcp}"
+  open_ports 80/tcp "$HTTPS_PORT/tcp" "$WG_PORT/udp" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}"
   echo; ok "Installation complete!"
   echo -e "   Panel:  ${C}https://$DOMAIN:$HTTPS_PORT/admin${N}"
   echo -e "   Login:  ${C}$ADMIN_USER${N} / (the password you entered)"
@@ -430,7 +336,6 @@ install_node(){
     if [ -n "$DOMAIN" ] && [ -z "$EMAIL" ]; then EMAIL="admin@$DOMAIN"; fi
     free_port NODE_PUBLIC_PORT 2096; free_port NODE_PORT "$(rnum 20000 29999)"
     free_port WG_PORT 51820; free_port AWG_PORT 51821; free_port HY2_PORT 8443
-    free_port OVPN_UDP_PORT 1194; free_port OVPN_TCP_PORT 1443
   else
     ask DOMAIN "Node domain (recommended for TLS; empty = self-signed certificate)"
     EMAIL=""; [ -n "$DOMAIN" ] && ask EMAIL "Email for SSL"
@@ -439,12 +344,10 @@ install_node(){
     ask_protocols
   fi
   HY2_STATS_PORT=$(rnum 30000 39999); HY2_OBFS=$(rand 20); HY2_SECRET=$(rand 24); NODE_TOKEN=$(rand 48); INSECURE=""
-  OVPN_UDP_MGMT=""; OVPN_TCP_MGMT=""
   base_packages; download_bin
   if [ -n "$DOMAIN" ]; then get_cert "$DOMAIN" "$EMAIL"; else self_signed; INSECURE=1; fi
   setup_wireguard; setup_amneziawg
   [ -n "$HY2_PORT" ] && setup_hysteria "http://127.0.0.1:$NODE_PORT/hy2/auth"
-  [ -n "$OVPN_UDP_PORT$OVPN_TCP_PORT" ] && setup_openvpn "http://127.0.0.1:$NODE_PORT/ovpn/auth"
   umask 077
   cat > $ENV <<EOF
 MODE=node
@@ -458,16 +361,12 @@ HY2_OBFS=$HY2_OBFS
 HY2_SECRET=$HY2_SECRET
 HY2_STATS_PORT=$HY2_STATS_PORT
 HY2_INSECURE=$INSECURE
-OVPN_UDP_PORT=$OVPN_UDP_PORT
-OVPN_TCP_PORT=$OVPN_TCP_PORT
-OVPN_UDP_MGMT=$OVPN_UDP_MGMT
-OVPN_TCP_MGMT=$OVPN_TCP_MGMT
 DATA_DIR=/var/lib/kanki
 EOF
   umask 022
   setup_caddy "https://:$NODE_PUBLIC_PORT" "$NODE_PORT"
   service kanki-node node
-  open_ports "$NODE_PUBLIC_PORT/tcp" "$WG_PORT/udp" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}" "${OVPN_UDP_PORT:+$OVPN_UDP_PORT/udp}" "${OVPN_TCP_PORT:+$OVPN_TCP_PORT/tcp}"
+  open_ports "$NODE_PUBLIC_PORT/tcp" "$WG_PORT/udp" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}"
   if [ -n "$KANKI_JOIN" ]; then register_node; return 0; fi
   IP=$(pubip)
   echo; ok "Node installed! In the panel go to Nodes > Add node and enter:"
@@ -544,7 +443,7 @@ reset_admin(){
 }
 
 status(){
-  for s in kanki-panel kanki-node caddy wg-quick@wg0 awg-quick@awg0 hysteria-server openvpn-server@udp openvpn-server@tcp; do
+  for s in kanki-panel kanki-node caddy wg-quick@wg0 awg-quick@awg0 hysteria-server; do
     systemctl list-unit-files "$s.service" >/dev/null 2>&1 || continue
     st=$(systemctl is-active "$s" 2>/dev/null || true)
     [ "$st" = "inactive" ] && ! systemctl is-enabled "$s" >/dev/null 2>&1 && continue
@@ -559,7 +458,7 @@ uninstall(){
   rm -f /etc/systemd/system/kanki-panel.service /etc/systemd/system/kanki-node.service "$BIN" /usr/local/bin/kanki
   rm -rf /var/lib/kanki "$ENV_DIR"
   systemctl daemon-reload
-  ok "Removed (WireGuard / AmneziaWG / Hysteria2 / OpenVPN / Caddy were left untouched)"
+  ok "Removed (WireGuard / AmneziaWG / Hysteria2 / Caddy were left untouched)"
 }
 
 if [ -n "$KANKI_JOIN" ]; then join_node; exit $?; fi

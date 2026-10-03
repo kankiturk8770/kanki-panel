@@ -1,6 +1,18 @@
 # Kanki Panel v2
 
-Lightweight **WireGuard · AmneziaWG · Hysteria2 · OpenVPN (UDP/TCP)** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
+Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
+
+
+## New in 2.3
+- The panel is called **Kanki Panel** and has its own logo (an uploaded logo still replaces it).
+- No OpenVPN anywhere: not in the panel, not on the subscription page, not installed by `install.sh` or by node join.
+- **Dashboard**: every node says *Connected* / *Disconnected*, plus a **live log** (journald) with **All / Errors / Debug** tabs and a source picker.
+- **Traffic & stats**: total usage, quota of limited users with percent used, live network chart, usage by protocol and node, per-user usage list.
+- **Port management**: ports and service state for the main server and every node, conflict warning, ready `ufw` command, all-servers table.
+- **Sales bot**: create / test / pause / edit / delete the Telegram bot, sales settings (trial, card to card, online payments, referral, messages) and plans.
+- **Backup > Transfer from BUB panel** (step 1): checks a BUB backup in the browser and makes a copyable structure report (no passwords or keys).
+- Compact user sheet: five buttons (edit, link, QR, reset, delete), one panel at a time.
+- Neon accents and a soft light theme.
 
 ## Project layout
 ```
@@ -12,7 +24,7 @@ kanki-panel/
 │   ├── core/               db.rs (SQLite), util.rs (crypto, TOTP, QR, helpers)
 │   ├── http/               api.rs (users, nodes, configs, sub page), auth.rs (security center),
 │   │                       admin.rs (system, update, bulk), backup.rs (encrypted backup, Telegram)
-│   ├── vpn/                wg.rs, hy2.rs, ovpn.rs, sync.rs (node sync + traffic + limits)
+│   ├── vpn/                wg.rs, hy2.rs, sync.rs (node sync + traffic + limits)
 │   └── telegram/           bot.rs (sales bot: plans, payments, trials, referrals, admin panel)
 ├── assets/web/             index.html (admin panel), sub.html (subscription page)
 ├── docs/                   INSTALL.md, API.md, CHANGES.md
@@ -37,9 +49,9 @@ The installer is fully in English. Afterwards just run `kanki` for the menu (ins
 - **Sales bot**: lives in Telegram. Set the token at install or with `kanki` > 4; plans, prices, payments, trials and referrals are managed from the bot's admin panel.
 - **Backup**: AES-256 encrypted archive (database + server keys/configs + certificates), restore with optional full server migration, scheduled Telegram backups (token, chat id auto-detect, interval, passphrase, test, send now).
 - **Security center**: scoped API tokens (shown once), TOTP 2FA, active sessions with IP/device and revoke, IP allow/deny (CIDR), session lifetime, enforce 2FA, login history, audit log, brute-force lockout.
-- **Settings**: panel name, FA/EN, dark/light, refresh interval, 5 color themes, public endpoint, subscription base URL, apply endpoint to all nodes, DNS/MTU, default protocols, AmneziaWG compatibility mode, OpenVPN inline credentials, connection-limit enforcement.
+- **Settings**: panel name, FA/EN, dark / soft light, refresh interval, 5 color themes, public endpoint, subscription base URL, apply endpoint to all nodes, DNS/MTU, default protocols, AmneziaWG compatibility mode, connection-limit enforcement.
 - **System**: CPU / RAM / storage / swap / network and service control live on the Dashboard. One-click self-update (header button) with sha256 verification.
-- **Subscription page** `/sub/bub-…`: same URL format the Kanki app uses. Data and time rings, Jalali expiry, copyable subscription + raw links, per-node protocol cards (download / info / QR / URI) and app / support buttons (from the sales settings: App link, Support ID). `/sub/<code>/raw` for v2rayNG / Hiddify, `/sub/<code>/json` for apps.
+- **Subscription page** `/sub/kanki-<id>-<code>` (links made by older versions keep working). Data and time rings, Jalali expiry, copyable subscription + raw links, per-node protocol cards (download / info / QR / URI) and app / support buttons (from the sales settings: App link, Support ID). `/sub/<code>/raw` for v2rayNG / Hiddify, `/sub/<code>/json` for apps.
 
 ## Add a node (one command)
 1. In the panel: **Nodes > Add node** (optionally type the node's domain), then **Create join command**.
@@ -66,4 +78,4 @@ kanki-panel version
 
 ## Notes
 - The panel domain must point **directly** (no Cloudflare proxy) to the server; port 80 must be free while getting SSL.
-- WireGuard/AmneziaWG can't tell devices apart, so the connection limit is enforced for OpenVPN and Hysteria2; WG/AWG show live usage.
+- WireGuard/AmneziaWG can't tell devices apart, so the connection limit is enforced for Hysteria2; WG/AWG show live usage.

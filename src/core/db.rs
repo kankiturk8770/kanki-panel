@@ -49,7 +49,7 @@ impl User {
     }
 
     pub fn sub_code(&self) -> String {
-        format!("bub-{}-{}", self.id, self.code)
+        format!("kanki-{}-{}", self.id, self.code)
     }
 
     pub fn used_gb(&self) -> f64 {
@@ -211,6 +211,10 @@ impl Db {
         let _ = c.execute("UPDATE nodes SET drain=0 WHERE drain IS NULL", []);
         let _ = c.execute("UPDATE nodes SET maint=0 WHERE maint IS NULL", []);
         let _ = c.execute("UPDATE nodes SET accept_all=1 WHERE accept_all IS NULL", []);
+        // v2.3: the panel is called Kanki Panel and has no OpenVPN
+        let _ = c.execute("UPDATE settings SET v='Kanki Panel' WHERE k='panel_name' AND v IN ('KANKI VPN','KANKI-VPN','Kanki VPN')", []);
+        let _ = c.execute("UPDATE settings SET v=trim(replace(','||v||',', ',ovpn,', ','), ',') WHERE k='default_protocols' AND ','||v||',' LIKE '%,ovpn,%'", []);
+        let _ = c.execute("UPDATE users SET protocols=trim(replace(','||protocols||',', ',ovpn,', ','), ',') WHERE ','||protocols||',' LIKE '%,ovpn,%'", []);
         // keep logs bounded
         let _ = c.execute("DELETE FROM audit WHERE id NOT IN (SELECT id FROM audit ORDER BY id DESC LIMIT 5000)", []);
         let _ = c.execute("DELETE FROM login_log WHERE id NOT IN (SELECT id FROM login_log ORDER BY id DESC LIMIT 2000)", []);
@@ -373,8 +377,8 @@ pub fn default_setting(k: &str) -> &'static str {
     match k {
         "dns" => "1.1.1.1, 8.8.8.8",
         "mtu" => "1380",
-        "default_protocols" => "wg,awg,hy2,ovpn",
-        "panel_name" => "KANKI VPN",
+        "default_protocols" => "wg,awg,hy2",
+        "panel_name" => "Kanki Panel",
         "lang" => "fa",
         "theme" => "dark",
         "color" => "gold",

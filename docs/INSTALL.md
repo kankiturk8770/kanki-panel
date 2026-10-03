@@ -21,7 +21,7 @@ Choose **1**. The installer asks for:
 | Public host for users | empty = panel domain |
 | Server name | shown to users on the subscription page |
 | Internal panel port | local only, random by default |
-| WireGuard / AmneziaWG / Hysteria2 / OpenVPN ports | each protocol can be skipped |
+| WireGuard / AmneziaWG / Hysteria2 ports | Hysteria2 can be skipped |
 | Telegram bot token + admin IDs | optional, can be set later |
 
 A summary is shown before anything is installed.
@@ -48,7 +48,6 @@ No domain on the node? Tick **Self-signed certificate** when adding it.
 | `/etc/kanki/tls/` | certificate used by Caddy / Hysteria2 |
 | `/etc/wireguard/wg0.conf`, `/etc/amnezia/amneziawg/awg0.conf` | WG / AWG servers |
 | `/etc/hysteria/config.yaml` | Hysteria2 |
-| `/etc/openvpn/server/` | OpenVPN (udp.conf, tcp.conf, keys) |
 | `/etc/caddy/Caddyfile` | HTTPS front |
 
 ## Locked out?

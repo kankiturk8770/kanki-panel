@@ -1,3 +1,20 @@
+# v2.3.0
+
+## New
+- **Kanki Panel** name and a built-in logo (K with two node links). Existing panels named "KANKI VPN" are renamed on start; an uploaded logo still wins.
+- **Live log on the dashboard** (`GET /api/logs`): source picker (all, panel, WireGuard, AmneziaWG, Hysteria2, Caddy), **All / Errors / Debug** tabs with counts, pause, copy, auto refresh every 5 s.
+- Dashboard nodes card says **Connected / Disconnected** for every server, with an "all servers connected" summary.
+- **Traffic & stats** page: total recorded usage, quota of limited users and percent used, live network chart, by protocol, by node, per-user usage list (tap opens the user).
+- **Port management** page: per server (main + nodes) WireGuard / AmneziaWG / Hysteria2 / panel / node API ports with service state, public address, conflict warning, check now, copyable `ufw` command and an all-servers table.
+- **Sales bot** page in the menu: create, test connection, pause / resume, edit, delete; sales settings (sales on, warnings, support, app link, required channel, welcome text, free trial, referral reward, card to card, NOWPayments, ZarinPal, wallet) and plans.
+- **Backup > Transfer from BUB panel to Kanki Panel**, step 1: reads a BUB backup in the browser (gzip, tar, zip, SQLite, JSON, OpenSSL-encrypted with the passphrase) and shows a copyable report of files, tables and columns. No secrets go into the report. Step 2 (import with the same links and keys) comes once the format is confirmed.
+- Neon accents on buttons, toggles and active items; new **soft light** theme (warm sand, darker gold).
+
+## Changed
+- **OpenVPN removed**: not offered by the installer or node join, gone from services, settings, user forms, configs and the subscription page. Existing users and the default protocol list lose `ovpn` on start.
+- New subscription links look like `/sub/kanki-<id>-<code>`. Links made by older versions keep working.
+- User sheet is compact: name, status, three small stats and five buttons (edit, link, QR, reset, delete); only one panel opens at a time.
+
 # v2.2.0
 
 ## New

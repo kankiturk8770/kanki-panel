@@ -6,9 +6,10 @@
 <meta name="robots" content="noindex">
 <meta name="theme-color" content="#0b0906">
 <title>{{TITLE}}</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23FFE9A6%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23B8862B%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2259%22%20height%3D%2259%22%20rx%3D%2217%22%20fill%3D%22%230f0b06%22%20stroke%3D%22url%28%23g%29%22%20stroke-width%3D%222.2%22%2F%3E%3Cpath%20d%3D%22M23%2017v30M42%2017.5L25.5%2032.5%2042.5%2047%22%20fill%3D%22none%22%20stroke%3D%22url%28%23g%29%22%20stroke-width%3D%226.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Ccircle%20cx%3D%2243%22%20cy%3D%2216.5%22%20r%3D%224.4%22%20fill%3D%22%23FFE9A6%22%2F%3E%3Ccircle%20cx%3D%2243.5%22%20cy%3D%2247.5%22%20r%3D%224.4%22%20fill%3D%22%23FFE9A6%22%2F%3E%3C%2Fsvg%3E">
 <style>
 :root{--g:#F5C451;--gl:#FFE9A6;--gd:#B8862B;--ok:#3ddc97;--warn:#ffb547;--bad:#ff6b6b;--t:#F7F1E3;--s:#A89C82;--ln:rgba(245,196,81,.22);--c1:rgba(28,23,14,.94);--c2:rgba(12,10,6,.96);--bg1:#0c0a06;--bg2:#17110a;--in:rgba(0,0,0,.28)}
-body.light{--t:#2a2010;--s:#7a6a4a;--ln:rgba(184,134,43,.3);--c1:#fffaf0;--c2:#fbf3e2;--bg1:#f7f0e2;--bg2:#efe3c9;--in:rgba(255,255,255,.7);--ok:#12915b;--warn:#b86e00;--bad:#d23c3c}
+body.light{--g:#c9952f;--gl:#e9c46e;--gd:#94681a;--t:#2b2216;--s:#75664b;--ln:rgba(140,100,30,.25);--c1:#f7f1e5;--c2:#efe6d3;--bg1:#e9e0cd;--bg2:#ddd1b8;--in:rgba(255,255,255,.45);--ok:#12915b;--warn:#b86e00;--bad:#d23c3c}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 [hidden]{display:none!important}
 html,body{margin:0}
@@ -63,7 +64,11 @@ button,input{font:inherit;color:inherit}
 .lrow input{flex:1;min-width:0;direction:ltr;text-align:left;background:var(--in);border:1px solid var(--ln);border-radius:12px;padding:9px 10px;font-size:12px;color:var(--s)}
 .hint{display:block;color:var(--s);font-size:11px;margin-top:8px}
 .btn,.b2{display:flex;align-items:center;justify-content:center;text-align:center;border-radius:12px;padding:9px 12px;font-size:13px;cursor:pointer;text-decoration:none;white-space:nowrap}
-.btn{background:linear-gradient(var(--gl),var(--g),var(--gd));color:#1a1206;font-weight:800;border:0}
+.btn{background:linear-gradient(var(--gl),var(--g),var(--gd));color:#1a1206;font-weight:800;border:0;box-shadow:inset 0 0 0 1px rgba(255,233,166,.45),0 0 12px rgba(245,196,81,.5),0 0 28px rgba(245,196,81,.2)}
+.btn:hover{box-shadow:inset 0 0 0 1px rgba(255,233,166,.7),0 0 18px rgba(245,196,81,.7),0 0 40px rgba(245,196,81,.3)}
+.b2:hover,.chip:hover{box-shadow:0 0 10px rgba(245,196,81,.35)}
+body.light .btn{box-shadow:0 3px 12px rgba(201,149,47,.4)}
+.logo.svgl{background:none;box-shadow:none;filter:drop-shadow(0 0 8px rgba(245,196,81,.45))}.logo .klogo{width:100%;height:100%;display:block}
 .b2{background:transparent;border:1px solid var(--ln);color:var(--t)}
 .b2:hover{border-color:var(--g);color:var(--g)}
 /* configs */
@@ -78,7 +83,7 @@ button,input{font:inherit;color:inherit}
 .ph{display:flex;align-items:center;gap:9px;margin-bottom:9px}
 .ph b{display:block}.ph small{display:block;color:var(--s);font-size:10px}
 .pl{width:30px;height:30px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-weight:900;color:#fff}
-.pl-openvpn{background:#e8772e}.pl-wireguard{background:#1fa36b}.pl-amneziawg{background:#7c5cf0}.pl-hysteria2{background:#d1497a}
+.pl-wireguard{background:#1fa36b}.pl-amneziawg{background:#7c5cf0}.pl-hysteria2{background:#d1497a}
 .acts{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .acts .btn,.acts .b2{padding:8px 6px;font-size:12px;white-space:normal}
 .uri{grid-column:1/-1;direction:ltr;display:block;word-break:break-all;background:rgba(0,0,0,.25);padding:8px;border-radius:10px;font-size:10px;max-height:64px;overflow:auto}
@@ -106,7 +111,7 @@ body.light .mbox pre{background:rgba(0,0,0,.06)}
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs><linearGradient id="gg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFE9A6"/><stop offset="1" stop-color="#B8862B"/></linearGradient></defs></svg>
 <main class="sub-shell" data-token="{{SUB}}" data-expires="{{EXP}}" data-traffic-limit="{{LIM}}" data-traffic-used="{{USED}}">
   <div class="top">
-    <div class="brand"><div class="logo" id="lg">K</div><div><b id="pn">KANKI VPN</b><small data-i18n="vpn_sub">VPN Subscription</small></div></div>
+    <div class="brand"><div class="logo" id="lg">K</div><div><b id="pn">Kanki Panel</b><small data-i18n="vpn_sub">VPN Subscription</small></div></div>
     <div class="tools"><button class="chip" id="th" aria-label="theme">◐</button><button class="chip" id="lang">EN</button></div>
   </div>
 
@@ -164,8 +169,8 @@ body.light .mbox pre{background:rgba(0,0,0,.06)}
 (function(){
 "use strict";
 var D=JSON.parse(document.getElementById('data').textContent);
-var T={fa:{vpn_sub:'اشتراک VPN',ready:'اشتراک VPN شما آماده استفاده است',left_data:'حجم باقی‌مانده',used:'مصرف‌شده',conns:'اتصال همزمان',last_seen:'آخرین اتصال',exp_date:'تاریخ انقضا',left_time:'زمان باقی‌مانده',your_configs:'کانفیگ‌های شما',dl_conf:'دانلود کانفیگ',dl_tcp:'دانلود کانفیگ TCP',dl_udp:'دانلود کانفیگ UDP',show_info:'نمایش اطلاعات',qr:'دانلود QR Code',get_uri:'دریافت URI',copy_uri:'کپی URI',main_server:'سرور اصلی',node:'نود',unlimited:'نامحدود',expired:'منقضی',never:'هنوز وصل نشده',days:'روز',hours:'ساعت',s_ago:'ثانیه پیش',m_ago:'دقیقه پیش',h_ago:'ساعت پیش',Active:'فعال',Disabled:'غیرفعال',Expired:'منقضی',Limited:'اتمام حجم',copied:'کپی شد',copy:'کپی',no_cfg:'هنوز کانفیگی برای شما فعال نشده',user:'نام کاربری',pass:'رمز عبور',loading:'در حال دریافت…',sub_link:'لینک اشتراک',raw_hint:'لینک دوم برای v2rayNG و Hiddify است',help:'راهنما و پشتیبانی',help_sub:'اپ را نصب کن یا با پشتیبانی در تماس باش',get_app:'دانلود اپ',support:'پشتیبانی',of:'از'},
-en:{vpn_sub:'VPN Subscription',ready:'Your VPN subscription is ready',left_data:'Data remaining',used:'Used',conns:'Connections',last_seen:'Last connection',exp_date:'Expiry',left_time:'Time remaining',your_configs:'Your configs',dl_conf:'Download config',dl_tcp:'TCP config',dl_udp:'UDP config',show_info:'Show info',qr:'QR Code',get_uri:'Get URI',copy_uri:'Copy URI',main_server:'Main server',node:'Node',unlimited:'Unlimited',expired:'Expired',never:'Never',days:'days',hours:'hours',s_ago:'s ago',m_ago:'min ago',h_ago:'h ago',Active:'Active',Disabled:'Disabled',Expired:'Expired',Limited:'Out of data',copied:'Copied',copy:'Copy',no_cfg:'No configs are active for you yet',user:'Username',pass:'Password',loading:'Loading…',sub_link:'Subscription link',raw_hint:'Second link is for v2rayNG / Hiddify',help:'Help',help_sub:'Install the app or contact support',get_app:'Get the app',support:'Support',of:'of'}};
+var T={fa:{vpn_sub:'اشتراک VPN',ready:'اشتراک VPN شما آماده استفاده است',left_data:'حجم باقی‌مانده',used:'مصرف‌شده',conns:'اتصال همزمان',last_seen:'آخرین اتصال',exp_date:'تاریخ انقضا',left_time:'زمان باقی‌مانده',your_configs:'کانفیگ‌های شما',dl_conf:'دانلود کانفیگ',show_info:'نمایش اطلاعات',qr:'دانلود QR Code',get_uri:'دریافت URI',copy_uri:'کپی URI',main_server:'سرور اصلی',node:'نود',unlimited:'نامحدود',expired:'منقضی',never:'هنوز وصل نشده',days:'روز',hours:'ساعت',s_ago:'ثانیه پیش',m_ago:'دقیقه پیش',h_ago:'ساعت پیش',Active:'فعال',Disabled:'غیرفعال',Expired:'منقضی',Limited:'اتمام حجم',copied:'کپی شد',copy:'کپی',no_cfg:'هنوز کانفیگی برای شما فعال نشده',loading:'در حال دریافت…',sub_link:'لینک اشتراک',raw_hint:'لینک دوم برای v2rayNG و Hiddify است',help:'راهنما و پشتیبانی',help_sub:'اپ را نصب کن یا با پشتیبانی در تماس باش',get_app:'دانلود اپ',support:'پشتیبانی',of:'از'},
+en:{vpn_sub:'VPN Subscription',ready:'Your VPN subscription is ready',left_data:'Data remaining',used:'Used',conns:'Connections',last_seen:'Last connection',exp_date:'Expiry',left_time:'Time remaining',your_configs:'Your configs',dl_conf:'Download config',show_info:'Show info',qr:'QR Code',get_uri:'Get URI',copy_uri:'Copy URI',main_server:'Main server',node:'Node',unlimited:'Unlimited',expired:'Expired',never:'Never',days:'days',hours:'hours',s_ago:'s ago',m_ago:'min ago',h_ago:'h ago',Active:'Active',Disabled:'Disabled',Expired:'Expired',Limited:'Out of data',copied:'Copied',copy:'Copy',no_cfg:'No configs are active for you yet',loading:'Loading…',sub_link:'Subscription link',raw_hint:'Second link is for v2rayNG / Hiddify',help:'Help',help_sub:'Install the app or contact support',get_app:'Get the app',support:'Support',of:'of'}};
 var L=localStorage.getItem('kk_lang')||'fa';
 function $(i){return document.getElementById(i)}
 function t(k){return (T[L]&&T[L][k])||k}
@@ -193,8 +198,8 @@ function render(){
  document.documentElement.lang=L;document.documentElement.dir=L=='fa'?'rtl':'ltr';
  $('lang').textContent=L=='fa'?'EN':'FA';
  document.querySelectorAll('[data-i18n]').forEach(function(e){e.textContent=t(e.dataset.i18n)});
- var pn=D.panel_name||'KANKI VPN';$('pn').textContent=pn;
- var lg=$('lg');if(logoOk(D.logo)){lg.className='logo has-img';lg.innerHTML='<img alt="" src="'+D.logo+'">'}else{lg.className='logo';lg.textContent=pn.charAt(0)}
+ var pn=D.panel_name||'Kanki Panel';$('pn').textContent=pn;
+ var lg=$('lg');if(logoOk(D.logo)){lg.className='logo has-img';lg.innerHTML='<img alt="" src="'+D.logo+'">'}else{lg.className='logo svgl';lg.innerHTML='<svg class="klogo" viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="kg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFE9A6"/><stop offset="1" stop-color="#B8862B"/></linearGradient><radialGradient id="kb" cx=".3" cy=".22" r=".95"><stop offset="0" stop-color="#2c2213"/><stop offset="1" stop-color="#0b0906"/></radialGradient></defs><rect x="2.5" y="2.5" width="59" height="59" rx="17" fill="url(#kb)" stroke="url(#kg)" stroke-width="2.2"/><path d="M23 17v30M42 17.5L25.5 32.5 42.5 47" fill="none" stroke="url(#kg)" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="43" cy="16.5" r="4.4" fill="#FFE9A6"/><circle cx="43.5" cy="47.5" r="4.4" fill="#FFE9A6"/></svg>'}
  $('av').textContent=(D.username||'K').charAt(0).toUpperCase();
  // status pill: green = active, orange = out of data / expired, red = disabled
  var st=$('st');st.textContent=t(D.status);st.className='pill'+(D.active?'':(D.status=='Disabled'?' bad':' warn'));
@@ -222,7 +227,8 @@ function render(){
  var base=location.origin+'/sub/'+D.sub;
  $('subu').value=base;$('cpu').dataset.text=base;$('rawu').value=base+'/raw';$('cpr').dataset.text=base+'/raw';
  $('ver').textContent=pn+' v'+D.version;
- var nodes=$('nodes');if(!nodes.querySelector('.node'))nodes.innerHTML='<div class="card empty">'+t('no_cfg')+'</div>';
+ var nodes=$('nodes');nodes.querySelectorAll('[data-proto="openvpn"]').forEach(function(e){e.remove()});nodes.querySelectorAll('.node').forEach(function(n){if(!n.querySelector('.row'))n.remove()});
+ if(!nodes.querySelector('.node'))nodes.innerHTML='<div class="card empty">'+t('no_cfg')+'</div>';
  helpLinks();
 }
 // ---- app / support buttons (only http(s) links or a Telegram id are accepted)
@@ -246,7 +252,7 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
  if(a=='qr')return modal('QR Code','<div class="qr"><img alt="QR" src="'+u+'"></div>');
  if(a=='info'||a=='uri'){modal(a=='uri'?'URI':t('show_info'),'<p>'+t('loading')+'</p>');
   fetch(u).then(function(r){return r.text()}).then(function(x){
-   var extra=(u.indexOf('/openvpn')>0)?'<p>'+t('user')+': <b dir="ltr">'+esc(D.ovpn_user)+'</b><br>'+t('pass')+': <b dir="ltr">'+esc(D.ovpn_pass)+'</b></p>':'';
+   var extra='';
    $('mb').innerHTML=extra+'<pre id="cfg">'+esc(x)+'</pre><button class="btn" id="cp" style="width:100%">'+t('copy')+'</button>';
    $('cp').onclick=function(){copy(x)}})}
 });

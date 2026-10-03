@@ -19,8 +19,6 @@ pub const SERVICES: &[(&str, &str)] = &[
     ("wireguard", "wg-quick@wg0"),
     ("amneziawg", "awg-quick@awg0"),
     ("hysteria2", "hysteria-server"),
-    ("openvpn-udp", "openvpn-server@udp"),
-    ("openvpn-tcp", "openvpn-server@tcp"),
     ("web", "caddy"),
     ("panel", "kanki-panel"),
     ("node", "kanki-node"),
@@ -65,6 +63,7 @@ pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/system", get(system))
         .route("/api/live", get(live))
+        .route("/api/logs", get(logs))
         .route("/api/services/:name/:action", post(service_action))
         .route("/api/bot", get(bot_get).put(bot_put).delete(bot_delete))
         .route("/api/bot/test", post(bot_test))
@@ -232,6 +231,50 @@ async fn live(State(app): St, h: HeaderMap) -> Response {
         "iface": iface, "net_rx": rx, "net_tx": tx,
         "tcp_est": tcp_est, "tcp_listen": tcp_listen, "udp": udp,
     })).into_response()
+}
+
+// ---------------------------------------------------------------- live logs (journald) for the dashboard
+/// `src` is a key of SERVICES or "all"; returns the newest `n` lines, oldest first
+async fn logs(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    let _ = guard!(app, h, "admin");
+    let src = q.get("src").cloned().unwrap_or_else(|| "all".to_string());
+    let n: usize = q.get("n").and_then(|x| x.parse().ok()).unwrap_or(300);
+    let n = n.clamp(20, 2000);
+    let units: Vec<&str> = if src == "all" {
+        SERVICES.iter().map(|(_, u)| *u).collect()
+    } else {
+        match SERVICES.iter().find(|(k, _)| *k == src) {
+            Some((_, u)) => vec![*u],
+            None => return err(StatusCode::BAD_REQUEST, "unknown source"),
+        }
+    };
+    let mut args: Vec<String> = vec!["--no-pager".into(), "-o".into(), "json".into(), "-n".into(), n.to_string()];
+    for u in &units {
+        args.push("-u".into());
+        args.push(u.to_string());
+    }
+    let out = tokio::task::spawn_blocking(move || Command::new("journalctl").args(&args).output()).await;
+    let text = match out {
+        Ok(Ok(o)) => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => String::new(),
+    };
+    let mut lines: Vec<Value> = Vec::new();
+    for l in text.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(l) else { continue };
+        let msg = match &v["MESSAGE"] {
+            Value::String(s) => s.clone(),
+            Value::Array(a) => {
+                let b: Vec<u8> = a.iter().filter_map(|x| x.as_u64()).map(|x| x as u8).collect();
+                String::from_utf8_lossy(&b).to_string()
+            }
+            _ => continue,
+        };
+        let prio: i64 = v["PRIORITY"].as_str().and_then(|x| x.parse().ok()).unwrap_or(6);
+        let ts: i64 = v["__REALTIME_TIMESTAMP"].as_str().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0) / 1_000_000;
+        let unit = v["_SYSTEMD_UNIT"].as_str().or(v["SYSLOG_IDENTIFIER"].as_str()).unwrap_or("").to_string();
+        lines.push(json!({ "ts": ts, "p": prio, "u": unit, "m": msg }));
+    }
+    Json(json!({ "src": src, "lines": lines })).into_response()
 }
 
 // ---------------------------------------------------------------- Telegram sales bot
