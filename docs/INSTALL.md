@@ -16,7 +16,7 @@ Choose **1**. The installer asks for:
 |---|---|
 | GitHub repo | `user/repo` (saved for updates) |
 | Panel domain + email | Must point straight to the server (no Cloudflare proxy). Port 80 free for SSL. |
-| Panel HTTPS port | default 443 |
+| Panel HTTPS port | default 2053 (pick another free port if 2053 is taken; 443 only if nothing else uses it) |
 | Admin username / password | password min 8 chars |
 | Public host for users | empty = panel domain |
 | Server name | shown to users on the subscription page |

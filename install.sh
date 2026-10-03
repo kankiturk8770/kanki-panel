@@ -274,7 +274,7 @@ install_panel(){
   ask DOMAIN "Panel domain (must point directly to this server's IP)"
   [ -n "$DOMAIN" ] || die "Domain is required"
   ask EMAIL "Email for SSL"
-  ask_port HTTPS_PORT "Panel HTTPS port" 443
+  ask_port HTTPS_PORT "Panel HTTPS port" 2053
   ask ADMIN_USER "Admin username" admin
   while true; do
     read -rsp "Admin password (min 8 chars): " ADMIN_PASS; echo

@@ -1,3 +1,8 @@
+# v2.3.1
+
+## Changed
+- Installer: the default panel HTTPS port is now **2053** (was 443). On servers where another panel or website already uses 443, Caddy no longer fails with "address already in use" when you just press Enter.
+
 # v2.3.0
 
 ## New
