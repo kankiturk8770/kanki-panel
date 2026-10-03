@@ -18,15 +18,17 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: ساخت فایل اجرایی
+      - name: Build
         run: cargo build --release
 
-      - name: آماده‌سازی خروجی
+      - name: Package
         run: |
           cp target/release/kanki-panel kanki-panel
           sha256sum kanki-panel > kanki-panel.sha256
+          grep -m1 '^version' Cargo.toml | cut -d'"' -f2 > version.txt
+          cat version.txt
 
-      - name: انتشار در Releases (تگ latest)
+      - name: Publish to Releases (tag "latest")
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
@@ -35,3 +37,4 @@ jobs:
           files: |
             kanki-panel
             kanki-panel.sha256
+            version.txt
