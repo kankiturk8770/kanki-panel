@@ -62,7 +62,14 @@ download_bin(){
     (cd /tmp && sha256sum -c kanki-panel.sha256 >/dev/null) || die "Checksum mismatch, aborting"
   fi
   install -m 755 /tmp/kanki-panel "$BIN"
-  curl -fsSL "https://raw.githubusercontent.com/$REPO/main/install.sh" -o /usr/local/bin/kanki 2>/dev/null && chmod +x /usr/local/bin/kanki || true
+  # write to a temp file and rename: the running script keeps reading its old copy
+  # (writing over it in place made bash read the new text mid-run: "syntax error near ')'")
+  local tmp; tmp=$(mktemp /usr/local/bin/.kanki.XXXXXX) || return 0
+  if curl -fsSL "https://raw.githubusercontent.com/$REPO/main/install.sh" -o "$tmp" 2>/dev/null && bash -n "$tmp" 2>/dev/null; then
+    chmod +x "$tmp" && mv -f "$tmp" /usr/local/bin/kanki
+  else
+    rm -f "$tmp"
+  fi
   ok "$($BIN version)"
 }
 

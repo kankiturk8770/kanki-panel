@@ -9,6 +9,9 @@
 - **Add a tunnel server with one command** (Tunnels > + Server): run it as root on the server; it installs the agent, turns on BBR, and the server shows up here as Connected within a few seconds. The agent keeps the last tunnel list on disk, so tunnels keep running after a reboot even if the panel is briefly unreachable.
 - The panel server itself is a tunnel endpoint too (shown as the local server), running the engine in-process — no extra install.
 
+## Fixed
+- `kanki` > Update no longer prints `syntax error near unexpected token ')'` at the end: the menu script now replaces itself with an atomic rename instead of writing over the running file.
+
 ## Not yet (planned)
 - Private network between servers (each server gets an internal address) and GRE links.
 - Built-in speed test and automatic transport selection.
