@@ -20,6 +20,8 @@ button,input{font:inherit;color:inherit}
 .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
 .logo{flex:none;width:42px;height:42px;border-radius:14px;background:linear-gradient(145deg,var(--gl),var(--g),var(--gd));color:#1a1206;font-weight:900;font-size:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 18px rgba(245,196,81,.35)}
+.logo.has-img{background:none;box-shadow:none;padding:0;overflow:hidden}
+.logo img{width:100%;height:100%;object-fit:contain;display:block}
 .brand b{display:block;color:var(--g);letter-spacing:1px;font-size:16px;direction:ltr;text-align:start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .brand small{color:var(--s);font-size:11px}
 .tools{display:flex;gap:6px}
@@ -186,11 +188,13 @@ var CIRC=2*Math.PI*52;
 function ring(id,frac){var e=$(id);frac=Math.max(0,Math.min(1,frac));
  e.style.strokeDasharray=(CIRC*frac).toFixed(1)+' '+CIRC.toFixed(1);e.setAttribute('class','rf'+(frac<.05?' bad':frac<.15?' warn':''))}
 var fr={data:0,time:0},first=true;
+function logoOk(x){return /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+\/=]+$/.test(x||'')}
 function render(){
  document.documentElement.lang=L;document.documentElement.dir=L=='fa'?'rtl':'ltr';
  $('lang').textContent=L=='fa'?'EN':'FA';
  document.querySelectorAll('[data-i18n]').forEach(function(e){e.textContent=t(e.dataset.i18n)});
- var pn=D.panel_name||'KANKI VPN';$('pn').textContent=pn;$('lg').textContent=pn.charAt(0);
+ var pn=D.panel_name||'KANKI VPN';$('pn').textContent=pn;
+ var lg=$('lg');if(logoOk(D.logo)){lg.className='logo has-img';lg.innerHTML='<img alt="" src="'+D.logo+'">'}else{lg.className='logo';lg.textContent=pn.charAt(0)}
  $('av').textContent=(D.username||'K').charAt(0).toUpperCase();
  // status pill: green = active, orange = out of data / expired, red = disabled
  var st=$('st');st.textContent=t(D.status);st.className='pill'+(D.active?'':(D.status=='Disabled'?' bad':' warn'));

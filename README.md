@@ -31,15 +31,25 @@ The installer is fully in English. Afterwards just run `kanki` for the menu (ins
 3. For every extra server run it again and choose **2**, then add the node in **Nodes > Add node** with the address + token it prints.
 
 ## Features
-- **Dashboard** (home page): live CPU / RAM / storage / swap gauges, network speed chart (peak + total since boot), TCP / UDP connections, user counters (tap one to open the filtered Users page) and the VPN services with start / stop / restart. Refreshes every 1 / 2 / 5 / 10 s and can be paused.
-- **Users**: one card per user with on/off switch, status, protocol tags, Jalali expiry + days left, connections, usage bar and 5 quick buttons (edit, link, QR, reset, delete). Search, status / protocol filters, sorting, select all + bulk bar (enable, disable, reset, extend, delete) and pagination (12 / 24 / 48 / 96). The edit sheet has a Jalali date field, quick add of days and GB, subscription link + QR, configs and a new-link button.
-- **Nodes**: users, last contact, sync state (synced / config mismatch), Drain, Maintenance, health check, sync, repair agent, remote agent update, edit (name, note, "sync users without a node here", panel or custom endpoint), delete. Node API runs behind TLS (Caddy).
+- **Dashboard** (home page): live CPU / RAM / storage / swap gauges, network speed chart (peak + total since boot), TCP / UDP connections, user counters (tap one to open the filtered Users page) and the VPN services with start / stop / restart. Refreshes every 1 / 2 / 5 / 10 s and can be paused. Nodes are listed with their online state, sync state and last contact.
+- **Users**: small name boxes with a status dot. Tap one to open the user: info, subscription link, QR, configs, quick add of days / GB (Jalali date field) and the edit form. Search, status / protocol filters, sorting, select mode with bulk bar (enable, disable, reset, extend, delete) and pagination.
+- **Nodes**: add a server with one command (Nodes > Add node, see below). Per node: users, last contact, sync state, Drain, Maintenance, health check, sync, repair agent, remote agent update, edit, and **Add to all users / Remove from all users**.
 - **Sales bot**: lives in Telegram. Set the token at install or with `kanki` > 4; plans, prices, payments, trials and referrals are managed from the bot's admin panel.
 - **Backup**: AES-256 encrypted archive (database + server keys/configs + certificates), restore with optional full server migration, scheduled Telegram backups (token, chat id auto-detect, interval, passphrase, test, send now).
 - **Security center**: scoped API tokens (shown once), TOTP 2FA, active sessions with IP/device and revoke, IP allow/deny (CIDR), session lifetime, enforce 2FA, login history, audit log, brute-force lockout.
 - **Settings**: panel name, FA/EN, dark/light, refresh interval, 5 color themes, public endpoint, subscription base URL, apply endpoint to all nodes, DNS/MTU, default protocols, AmneziaWG compatibility mode, OpenVPN inline credentials, connection-limit enforcement.
 - **System**: CPU / RAM / storage / swap / network and service control live on the Dashboard. One-click self-update (header button) with sha256 verification.
 - **Subscription page** `/sub/bub-…`: same URL format the Kanki app uses. Data and time rings, Jalali expiry, copyable subscription + raw links, per-node protocol cards (download / info / QR / URI) and app / support buttons (from the sales settings: App link, Support ID). `/sub/<code>/raw` for v2rayNG / Hiddify, `/sub/<code>/json` for apps.
+
+## Add a node (one command)
+1. In the panel: **Nodes > Add node** (optionally type the node's domain), then **Create join command**.
+2. Paste the command on the new Ubuntu / Debian server as root. It installs only the VPN cores and the node agent (no panel) and registers itself.
+3. The panel shows the node as soon as it joins. Press **Add to all users** if every user should get it.
+
+The command is valid for one hour and one node. If the panel cannot reach the node, open the node API port (2096 unless busy) in the node's firewall and run the same command again.
+
+## Logo
+**Settings > Logo** > Choose image. It is used in the header, side menu, login page and the subscription page.
 
 ## Docs
 - [Installation guide](docs/INSTALL.md)

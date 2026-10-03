@@ -318,7 +318,7 @@ async fn bulk(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
 }
 
 // ---------------------------------------------------------------- self-update (GitHub Releases "latest")
-fn repo() -> String {
+pub fn repo() -> String {
     std::env::var("KANKI_REPO").ok().filter(|s| !s.is_empty())
         .unwrap_or_else(|| read("/etc/kanki/repo").trim().to_string())
 }

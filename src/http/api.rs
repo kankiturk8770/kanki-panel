@@ -85,6 +85,8 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/nodes", get(nodes_list).post(nodes_add))
         .route("/api/nodes/:id", axum::routing::put(nodes_edit).delete(nodes_delete))
         .route("/api/nodes/:id/:action", post(nodes_action))
+        .route("/api/node-join", post(node_join_token))
+        .route("/join/register", post(node_join_register))
         .route("/api/settings", get(settings_get).put(settings_put))
         .route("/api/settings/apply-endpoint", post(apply_endpoint_all))
         .route("/api/plans", get(plans_list).post(plans_add))
@@ -379,6 +381,31 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
         "drain" => { let _ = app.db.exec("UPDATE nodes SET drain=1-drain WHERE id=?1", &[&id]); spawn_sync(&app); }
         "maint" | "maintenance" => { let _ = app.db.exec("UPDATE nodes SET maint=1-maint WHERE id=?1", &[&id]); spawn_sync(&app); }
         "sync" => { sync::sync_all(&app).await; }
+        "assign-all" | "unassign-all" => {
+            let add = action == "assign-all";
+            if !add && id == "local" {
+                return err(StatusCode::BAD_REQUEST, "the main server cannot be removed from all users");
+            }
+            // users without a node list follow the node's accept_all flag, users with a list need the id in it
+            let _ = app.db.exec("UPDATE nodes SET accept_all=?1 WHERE id=?2", &[&(add as i64), &id]);
+            for u in app.db.users() {
+                if !u.explicit_nodes() {
+                    continue;
+                }
+                let mut list: Vec<String> = u.nodes.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
+                let has = list.iter().any(|x| *x == id);
+                if add && !has {
+                    list.push(id.clone());
+                } else if !add && has {
+                    list.retain(|x| *x != id);
+                } else {
+                    continue;
+                }
+                let joined = list.join(",");
+                let _ = app.db.exec("UPDATE users SET nodes=?1 WHERE id=?2", &[&joined, &u.id]);
+            }
+            spawn_sync(&app);
+        }
         "health" => {
             let t0 = std::time::Instant::now();
             let info = if n.id == "local" { Some(sync::local_info(&app)) } else { sync::remote_info(&app, &n.address, &n.token, n.insecure).await };
@@ -405,13 +432,74 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
     Json(json!({"ok": true})).into_response()
 }
 
+// ============================================================ node join (one-time token)
+
+/// Admin: make a one-time token (valid for 1 hour). The new server runs the installer with it and registers itself.
+async fn node_join_token(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let token = rand_token(40);
+    let exp = now() + 3600;
+    app.db.set("join_token", &token);
+    app.db.set("join_expires", &exp.to_string());
+    Json(json!({ "token": token, "expires": exp, "panel": origin(&app), "repo": crate::admin::repo() })).into_response()
+}
+
+/// Public: called by the installer on the new server once its agent runs. The one-time token is the only credential.
+async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
+    let want = app.db.get("join_token");
+    let given = b["token"].as_str().unwrap_or("").trim().to_string();
+    let exp: i64 = app.db.get("join_expires").parse().unwrap_or(0);
+    if want.is_empty() || given.is_empty() || !util::ct_eq(&given, &want) || exp < now() {
+        return err(StatusCode::FORBIDDEN, "the join token is wrong, already used or expired");
+    }
+    let name = b["name"].as_str().unwrap_or("").trim().to_string();
+    let addr = b["address"].as_str().unwrap_or("").trim().trim_end_matches('/').to_string();
+    let endpoint = b["endpoint"].as_str().unwrap_or("").trim().to_string();
+    let token = b["node_token"].as_str().unwrap_or("").trim().to_string();
+    let insecure = b["insecure"].as_bool().unwrap_or(false);
+    if token.is_empty() || !addr.starts_with("https://") {
+        return err(StatusCode::BAD_REQUEST, "address (https://...) and node_token are required");
+    }
+    let name = if name.is_empty() { format!("node-{}", rand_token(4).to_lowercase()) } else { name };
+    let Some(info) = sync::remote_info(&app, &addr, &token, insecure).await else {
+        return err(StatusCode::BAD_GATEWAY, "the panel cannot reach the node (open the node API port in its firewall, then run the same command again)");
+    };
+    let mode = if endpoint.is_empty() { "panel" } else { "custom" };
+    // the same server registering twice (re-run after a firewall fix) updates its row instead of adding a copy
+    let existing = app.db.nodes().into_iter().find(|n| n.address == addr).map(|n| n.id);
+    let id = match existing {
+        Some(id) => {
+            let _ = app.db.exec(
+                "UPDATE nodes SET token=?1, endpoint=?2, endpoint_mode=?3, insecure=?4, info=?5, online=1 WHERE id=?6",
+                &[&token, &endpoint, &mode, &(insecure as i64), &info.to_string(), &id],
+            );
+            id
+        }
+        None => {
+            let id = format!("node-{}", rand_token(10).to_lowercase());
+            let r = app.db.exec(
+                "INSERT INTO nodes(id,name,address,endpoint,token,info,online,insecure,endpoint_mode,note) VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9)",
+                &[&id, &name, &addr, &endpoint, &token, &info.to_string(), &(insecure as i64), &mode, &"joined with a one-time token"],
+            );
+            if let Err(e) = r {
+                return err(StatusCode::BAD_REQUEST, &e);
+            }
+            id
+        }
+    };
+    // one use only
+    app.db.set("join_token", "");
+    spawn_sync(&app);
+    Json(json!({ "ok": true, "id": id })).into_response()
+}
+
 // ============================================================ settings / plans
 
 pub const SETTING_KEYS: &[&str] = &[
     "dns", "mtu", "default_protocols", "sales_on", "trial_on", "trial_gb", "trial_days", "card_on", "card_number", "card_holder",
     "wallet_on", "wallet_text", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
     "welcome", "ref_gb", "ref_days", "warn_on", "backup_on", "channel",
-    "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "ovpn_inline_auth", "conn_limit_on",
+    "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "ovpn_inline_auth", "conn_limit_on", "logo",
 ];
 
 async fn settings_get(State(app): St, h: HeaderMap) -> Response {
@@ -546,6 +634,7 @@ fn sub_data(app: &App, u: &User) -> Value {
         "online": u.online, "max_conn": u.max_conn, "last_seen_ts": u.last_seen,
         "panel_name": app.db.get("panel_name"), "version": crate::VERSION, "nodes": nodes,
         "ovpn_user": u.username, "ovpn_pass": u.code, "support": app.db.get("support"), "app_link": app.db.get("app_link"),
+        "logo": app.db.get("logo"),
     })
 }
 

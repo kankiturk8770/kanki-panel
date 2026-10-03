@@ -303,6 +303,50 @@ html[dir=rtl] .u-meta b.ltr,html[dir=rtl] .g3s b.ltr{text-align:right}
  .nbig{gap:14px}.nbig b{font-size:19px}
  .ph h2{font-size:20px}
 }
+/* ---- v2.2: icons, logo, name boxes, nodes card, join ---- */
+.logo.has-img{background:none;box-shadow:none;padding:0;overflow:hidden}
+.logo img{width:100%;height:100%;object-fit:contain;display:block}
+.ib svg{display:block}
+nav.side a{padding:7px 9px;gap:11px;margin-bottom:3px}
+.ni{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;flex:none;color:var(--a);background:color-mix(in srgb,var(--a) 10%,transparent);border:1px solid var(--ln);transition:.15s}
+nav.side a:hover .ni{border-color:var(--a)}
+nav.side a.on .ni{background:linear-gradient(145deg,var(--al),var(--a),var(--ad));color:#1a1206;border-color:transparent;box-shadow:0 4px 14px color-mix(in srgb,var(--a) 35%,transparent)}
+.gh svg{color:var(--a);display:block}
+.b2 svg,.btn svg{vertical-align:-3px}
+.okb{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+/* users: small name boxes, details open on tap */
+.uchips{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+@media(max-width:430px){.uchips{grid-template-columns:repeat(2,1fr)}}
+.uchip{display:flex;align-items:center;gap:8px;min-width:0;padding:11px 12px;border-radius:14px;border:1px solid var(--ln);background:linear-gradient(165deg,var(--c1),var(--c2));color:var(--t);font:inherit;font-weight:700;font-size:13px;cursor:pointer;text-align:start;transition:border-color .15s}
+.uchip:hover{border-color:var(--a)}
+.uchip .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;text-align:start}
+.uchip.st-disabled{opacity:.55}
+.uchip.sel{border-color:var(--a);box-shadow:0 0 0 2px color-mix(in srgb,var(--a) 30%,transparent)}
+.uchip .tick{display:none;place-items:center;width:18px;height:18px;border-radius:6px;border:1.5px solid color-mix(in srgb,var(--a) 55%,transparent);color:transparent;flex:none}
+.selmode .uchip .tick{display:grid}
+.selmode .uchip.sel .tick{background:var(--a);border-color:var(--a);color:#1a1206}
+#selm.on{background:var(--a);color:#1a1206}
+.selbar.hide{display:none}
+/* dashboard: nodes */
+.nds{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.nd{display:grid;grid-template-columns:auto 1fr auto;gap:6px 11px;align-items:center;width:100%;text-align:start;border:1px solid var(--ln);border-radius:14px;padding:10px 12px;background:var(--in);color:var(--t);font:inherit;cursor:pointer}
+.nd:hover{border-color:var(--a)}
+.nd .nn{min-width:0}.nd .nn b{display:block;font-size:13px}
+.nd .nn small{display:block;color:var(--s);font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;text-align:start}
+.nd .nb{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+.nd .nxw{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 16px;color:var(--s);font-size:11px}
+.nd .nx b{color:var(--t);font-weight:700}
+@media(min-width:620px){.nd{grid-template-columns:auto 1.6fr auto auto}.nd .nxw{grid-column:auto;display:flex;gap:18px}.nd .nx{display:block}.nd .nx small{display:block;color:var(--s);font-size:10.5px}.nd .nx b{font-size:12.5px}}
+/* add node: join command */
+.cmd{user-select:all;-webkit-user-select:all;margin:6px 0 10px;font-size:11.5px;line-height:1.7}
+.jw{display:flex;align-items:center;gap:9px;margin-top:12px;padding:10px 12px;border:1px dashed var(--ln);border-radius:12px;color:var(--s);font-size:13px}
+.jw b{margin-inline-start:auto;color:var(--a)}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid color-mix(in srgb,var(--a) 30%,transparent);border-top-color:var(--a);animation:sp 1s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.spin{animation:none}}
+.jok{display:flex;align-items:center;gap:12px;margin-top:12px;padding:12px;border:1px solid color-mix(in srgb,var(--ok) 45%,transparent);border-radius:14px;background:color-mix(in srgb,var(--ok) 8%,transparent)}
+.jok small{display:block;color:var(--s)}.jok div div{color:var(--ok);font-size:12px;margin-top:2px}
+.okc{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:var(--ok);color:#06210f;flex:none}
 </style>
 </head>
 <body>
@@ -318,6 +362,7 @@ html[dir=rtl] .u-meta b.ltr,html[dir=rtl] .g3s b.ltr{text-align:right}
 "use strict";
 var FA={"Users":"کاربران","Nodes":"نودها","Sales bot":"ربات فروش","Backup":"بکاپ و ریستور","Security":"مرکز امنیت","Settings":"تنظیمات","System":"وضعیت سرور","Logout":"خروج","Login":"ورود","Username":"نام کاربری","Password":"رمز عبور","2FA code":"کد دومرحله‌ای","Volume, time, connections, nodes and configs":"حجم، زمان، اتصال، نود و کانفیگ‌ها","New user":"کاربر جدید","Online":"آنلاین","Total users":"کل کاربران","Offline":"آفلاین","Active":"فعال","Finished":"تمام‌شده","Disabled":"غیرفعال","Created configs":"کانفیگ‌های ساخته‌شده","users total":"کاربر","Select all":"انتخاب همه","selected":"انتخاب‌شده","Bulk actions":"عملیات گروهی","Search by name or note…":"جستجو بر اساس نام یا یادداشت…","All":"همه","Expired / out of data":"منقضی / اتمام حجم","Refresh":"تازه‌سازی","Enable":"فعال‌سازی","Disable":"غیرفعال‌سازی","Reset traffic":"ریست ترافیک","Add 30 days":"افزودن ۳۰ روز","Delete":"حذف","Edit user":"ویرایش کاربر","Credit & limits":"اعتبار و محدودیت","Expiry date":"تاریخ انقضا","Total volume (0 = unlimited)":"حجم کل (صفر = نامحدود)","Connections":"تعداد اتصال","Quick add days":"افزودن روز سریع","Quick add volume":"افزودن حجم سریع","Protocol access":"دسترسی پروتکل‌ها","Node access & note":"دسترسی نود و یادداشت","Note":"یادداشت","Freeze user":"فریز کاربر","Unfreeze user":"رفع فریز","Download config":"دانلود کانفیگ","Subscription link":"لینک اشتراک","Save changes":"ذخیره تغییرات","Unlimited":"نامحدود","Days":"روز","Count":"تعداد","Create":"ساخت","Copy":"کپی","Open page":"باز کردن صفحه","User link":"لینک کاربر","Copied":"کپی شد","Saved":"ذخیره شد","Done":"انجام شد","Are you sure?":"مطمئنی؟","Main server and extra nodes":"سرور اصلی و نودهای اضافه","Add node":"افزودن نود","Local":"محلی","Last contact":"آخرین ارتباط","Sync":"همگام‌سازی","Synced":"همگام","Config mismatch":"اختلاف کانفیگ","Maintenance":"تعمیرات","Drain":"Drain","Accepting":"پذیرش فعال","Draining":"در حال تخلیه","Under maintenance":"در تعمیر","Health":"سلامت","Edit":"ویرایش","Repair agent":"تعمیر Agent","Update agent":"آپدیت Agent","Delete node":"حذف نود","Main panel server · local management":"سرور اصلی پنل · مدیریت محلی","Edit node":"ویرایش نود","Node name":"نام نود","Sync users without a specific node to this node":"کاربران بدون نود مشخص را روی این نود همگام کن","Users connection endpoint":"Endpoint اتصال کاربران","Use the panel endpoint":"استفاده از Endpoint پنل","Custom IP / domain for this node":"IP / دامنه اختصاصی این نود","Cancel":"انصراف","Save":"ذخیره","API address":"آدرس API","Node token":"توکن نود","Connection endpoint (empty = panel endpoint)":"آدرس اتصال (خالی = Endpoint پنل)","Self-signed certificate (no domain on node)":"گواهی خودامضا (نود بدون دامنه)","seconds ago":"ثانیه پیش","minutes ago":"دقیقه پیش","hours ago":"ساعت پیش","this server":"همین سرور","never":"هرگز","Insecure: plain HTTP. Reinstall the node with the new installer to get TLS.":"ناامن: HTTP ساده. نود را با نصاب جدید دوباره نصب کن تا TLS بگیرد.","Build and manage the sales bot":"ساخت و مدیریت ربات فروش","Create bot":"ساخت ربات","Test connection":"تست اتصال","Pause":"توقف","Resume":"ادامه","Delete bot":"حذف ربات","Sales panels are added from inside Telegram":"پنل‌های فروش از داخل تلگرام اضافه می‌شوند","Bot token":"توکن ربات","Admin numeric IDs (comma separated)":"آیدی عددی ادمین‌ها (با کاما)","Paused":"متوقف","Plans":"پلن‌ها","Name":"نام","Price (Toman)":"قیمت (تومان)","Price (USD)":"قیمت (دلار)","Add plan":"افزودن پلن","Sales settings":"تنظیمات فروش","Full backup of users, credentials, certificates, VPN settings, nodes and panel state":"بکاپ کامل کاربران، اعتبارنامه‌ها، گواهی‌ها، تنظیمات VPN، نودها و وضعیت پنل","Encrypted archive. File name includes date and time.":"آرشیو کامل و رمزنگاری‌شده. نام فایل شامل تاریخ و ساعت است.","Passphrase (min 6)":"Passphrase (حداقل ۶)","Download backup":"دانلود بکاپ","Restore":"ریستور","Pick a backup file; if encrypted, enter its passphrase.":"فایل بکاپ را انتخاب کن؛ اگر رمز دارد وارد کن.","Choose file":"انتخاب فایل","No file chosen":"فایلی انتخاب نشده","Also restore server keys & configs (same/new server migration)":"کلیدها و کانفیگ‌های سرور هم برگردد (انتقال سرور)","Restore backup":"ریستور بکاپ","Telegram auto backup":"بکاپ خودکار تلگرام","Encrypted backup sent to Telegram on schedule":"بکاپ رمزنگاری‌شده را طبق زمان‌بندی به تلگرام بفرست","Chat ID":"Chat ID","Auto after /start (or first bot admin)":"خودکار بعد از /start (یا اولین ادمین ربات)","Backup interval (hours)":"فاصله بکاپ (ساعت)","Default backup passphrase":"رمز پیش‌فرض بکاپ","Send backup now":"ارسال بکاپ الان","Save settings":"ذخیره تنظیمات","On":"فعال","Off":"غیرفعال","Empty = use the sales bot token":"خالی = همان توکن ربات فروش","Last":"آخرین","Login, sessions, 2FA, IP policy and API":"ورود، نشست‌ها، احراز هویت دومرحله‌ای، سیاست IP و API","Create API token":"ساخت توکن API","Current account":"حساب فعلی","Active sessions":"نشست‌های فعال","Network policy":"سیاست شبکه","Open":"باز","Restricted":"محدود","API tokens":"توکن‌های API","The full token is shown only once.":"توکن کامل فقط یک بار نمایش داده می‌شود.","Revoke":"باطل کردن","Two-step login":"ورود دومرحله‌ای","TOTP with apps like Google Authenticator / 2FAS":"TOTP با برنامه‌هایی مثل Google Authenticator / 2FAS","Enable 2FA":"فعال‌سازی 2FA","Disable 2FA":"غیرفعال‌سازی","Devices and IPs logged in to the panel":"دستگاه‌ها و IPهایی که به پنل وارد شده‌اند","Log out others":"خروج بقیه","current":"فعلی","IP restriction":"محدودیت IP","Allow/Deny for the admin panel, one IP or CIDR per line":"Allow/Deny برای پنل مدیریت؛ هر خط یک IP یا CIDR","IP / CIDR allowed, one per line":"IP / CIDR مجاز، هر خط یک مورد","IP / CIDR blocked, one per line":"IP / CIDR مسدود، هر خط یک مورد","Session lifetime (hours)":"عمر Session (ساعت)","Enforce 2FA for admin":"اجبار 2FA برای ادمین","Save security policy":"ذخیره سیاست امنیت","Login history":"تاریخچه ورود","Successful / failed logins (secrets never stored)":"ورود موفق/ناموفق بدون ثبت رمز یا Secret","Audit log":"Audit Log","Admin changes with actor, path, IP and result":"تغییرات مدیریتی با Actor، مسیر، IP و نتیجه","Change login":"تغییر نام کاربری / رمز","Current password":"رمز فعلی","New username (optional)":"نام کاربری جدید (اختیاری)","New password (min 8)":"رمز جدید (حداقل ۸)","Legacy API key":"کلید API قدیمی","Regenerate":"ساخت دوباره","Scan with your authenticator app, then enter the 6-digit code":"با برنامه احراز هویت اسکن کن و کد ۶ رقمی را وارد کن","Confirm":"تأیید","Token name":"نام توکن","Scopes":"دسترسی‌ها","Copy it now, it won't be shown again":"همین حالا کپی کن، دوباره نمایش داده نمی‌شود","Appearance, web access and public endpoint":"ظاهر، دسترسی وب و Endpoint عمومی","General":"عمومی","Panel name":"نام پنل","Language":"زبان","Theme":"پوسته","Dark":"تیره","Light":"روشن","Auto refresh":"تازه‌سازی","Panel color":"رنگ پنل","Gold":"طلایی","Turquoise":"فیروزه‌ای","Violet":"بنفش","Emerald":"زمردی","Rose":"صورتی","Web panel":"وب پنل","Web bind":"Web Bind","Web port":"پورت وب","Bind and port are where the panel itself listens; changing them needs a panel restart (edit /etc/kanki/kanki.env).":"Bind و Port فقط آدرس گوش‌دادن خود پنل هستند؛ تغییرشان نیاز به ری‌استارت پنل دارد (فایل /etc/kanki/kanki.env).","Public endpoint":"Endpoint عمومی","Public VPN host or IP":"هاست یا IP عمومی VPN","Subscription base URL":"آدرس پایه اشتراک","Public host used inside user configs.":"Public Host داخل کانفیگ‌های کاربر استفاده می‌شود.","Apply this endpoint to Main and all nodes":"این Endpoint برای Main و همه Nodeها اعمال شود","Save & apply":"ذخیره و اعمال","VPN":"VPN","Default protocols for new users":"پروتکل‌های پیش‌فرض کاربر جدید","AmneziaWG compatibility mode (only Jc/Jmin/Jmax/S1/S2/H1-H4)":"حالت سازگاری AmneziaWG (فقط Jc/Jmin/Jmax/S1/S2/H1-H4)","Put OpenVPN username/password inside the .ovpn file":"نام کاربری/رمز OpenVPN داخل فایل .ovpn باشد","Enforce connection limit (OpenVPN / Hysteria2)":"اعمال محدودیت اتصال همزمان (OpenVPN / Hysteria2)","seconds":"ثانیه","Update":"آپدیت","Current version":"نسخه فعلی","Latest version":"آخرین نسخه","Check for update":"بررسی آپدیت","Install update":"نصب آپدیت","You are on the latest version.":"نسخه فعلی بروز است.","A new version is available.":"نسخه جدید موجود است.","Updates come from the GitHub releases of your repo.":"آپدیت از Releases مخزن گیت‌هاب شما دریافت می‌شود.","Services":"سرویس‌ها","Restart":"ری‌استارت","Uptime":"آپتایم","Memory":"حافظه","Disk":"دیسک","Network":"شبکه","days":"روز","Restore done, panel is restarting…":"ریستور انجام شد، پنل در حال ری‌استارت است…","Loading…":"در حال بارگذاری…","No users yet":"هنوز کاربری نیست","Main server":"سرور اصلی","Node":"نود","Optional, created if empty":"اختیاری؛ خالی بماند خودکار ساخته می‌شود","Expired":"منقضی","Limited":"اتمام حجم","Download configs":"دانلود کانفیگ‌ها","No configs: user has no nodes or protocols":"کانفیگی نیست: کاربر نود یا پروتکلی ندارد","Install the node with the installer (option 2), then paste the API address and token it prints.":"نود را با نصاب (گزینه ۲) نصب کن، بعد آدرس API و توکنی که چاپ می‌کند را اینجا بزن.","Advanced":"پیشرفته","Panel":"پنل","Checking…":"در حال بررسی…","Card number":"شماره کارت","Card holder":"نام صاحب کارت","Support ID":"آیدی پشتیبانی","App link":"لینک اپ","Required channel":"کانال اجباری","Welcome text":"متن خوش‌آمد","Free trial":"تست رایگان","Trial GB":"حجم تست (GB)","Trial days":"روز تست","Card to card":"کارت به کارت","ZarinPal":"زرین‌پال","Merchant ID":"مرچنت","Crypto (NOWPayments)":"ارزی (NOWPayments)","API key":"کلید API","Coins":"ارزها","Referral gift GB":"هدیه دعوت (GB)","Referral gift days":"هدیه دعوت (روز)","Sales on":"فروش فعال","Expiry warnings":"هشدار اتمام","Daily backup to bot admins":"بکاپ روزانه برای ادمین‌های ربات","Enable sales bot features":"قابلیت‌های فروش","DNS":"DNS","MTU":"MTU","last used":"آخرین استفاده","Your IP":"IP شما","Backup file":"بکاپ","Admins":"ادمین‌ها","Toman":"تومان","Bind and port are where the panel itself listens; changing them needs a panel restart. File:":"Bind و Port فقط آدرس گوش‌دادن خود پنل هستند؛ تغییرشان نیاز به ری‌استارت پنل دارد. فایل:","Panel address":"آدرس پنل","Select":"انتخاب","Copy link":"کپی لینک","Configs":"کانفیگ‌ها","Reset":"ریست","Used":"مصرف","Page":"صفحه"};
 Object.assign(FA,{"Dashboard": "داشبورد", "Live": "زنده", "Paused": "متوقف", "Reconnecting…": "در حال اتصال مجدد…", "CPU": "CPU", "RAM": "RAM", "Storage": "فضای ذخیره", "Swap": "Swap", "Load": "لود", "Cores": "هسته", "No swap": "بدون Swap", "Network speed": "سرعت شبکه", "Download": "دانلود", "Upload": "آپلود", "Peak": "پیک", "Total since boot": "مجموع از بوت", "TCP / UDP connections": "اتصال‌های TCP / UDP", "TCP listening": "TCP در حال گوش‌دادن", "Start": "روشن", "Stop": "خاموش", "Running": "در حال اجرا", "Stopped": "متوقف", "Failed": "ناموفق", "Start, stop or restart the VPN services": "سرویس‌های VPN را روشن، خاموش یا ری‌استارت کن", "Only restart is allowed for this service": "این سرویس فقط ری‌استارت می‌شود", "Total traffic": "کل ترافیک", "Newest": "جدیدترین", "Oldest": "قدیمی‌ترین", "Most used": "بیشترین مصرف", "Nearest expiry": "نزدیک‌ترین انقضا", "Last seen": "آخرین اتصال", "All protocols": "همه پروتکل‌ها", "Status": "وضعیت", "Protocol": "پروتکل", "Sort": "مرتب‌سازی", "Clear selection": "لغو انتخاب", "Extend": "تمدید", "Days to add": "روز اضافه", "GB to add": "گیگ اضافه", "Apply": "اعمال", "Enter days or GB": "روز یا گیگ را وارد کن", "Delete selected users?": "کاربران انتخاب‌شده حذف شوند؟", "No match": "موردی پیدا نشد", "Create the first user": "ساخت اولین کاربر", "Prev": "قبلی", "Next": "بعدی", "per page": "در هر صفحه", "match": "نتیجه", "Expiry": "انقضا", "Link": "لینک", "New link": "لینک جدید", "Created": "ساخته‌شده", "Invalid date": "تاریخ نامعتبر", "Date (Jalali)": "تاریخ شمسی", "Date": "تاریخ", "less than a day": "کمتر از یک روز", "days left": "روز مانده"});
+Object.assign(FA,{"Add to all users": "افزودن به همه کاربران", "Remove from all users": "حذف از همه کاربران", "Add this node to ALL users?": "این نود به همه کاربران اضافه شود؟", "Remove this node from ALL users?": "این نود از همه کاربران حذف شود؟", "Run one command on the new server (Ubuntu / Debian, as root). It installs only what a node needs and joins this panel by itself.": "روی سرور جدید (اوبونتو / دبیان، با کاربر root) فقط یک دستور بزن. فقط چیزهایی که نود لازم دارد نصب می‌شود و خودش به این پنل وصل می‌شود.", "Node domain (optional, for a real SSL certificate)": "دامنه نود (اختیاری، برای گواهی SSL واقعی)", "Create join command": "ساخت دستور اتصال", "Run this on the new server": "این را روی سرور جدید اجرا کن", "Copy command": "کپی دستور", "Update source (GitHub repo) is not set: replace USER/REPO in the command.": "منبع آپدیت (مخزن گیت‌هاب) تنظیم نشده: USER/REPO را در دستور عوض کن.", "Waiting for the node to connect…": "منتظر اتصال نود…", "Valid for one hour and one node. Create a new command for the next node.": "یک ساعت و فقط برای یک نود اعتبار دارد. برای نود بعدی دستور جدید بساز.", "The command expired. Create a new one.": "دستور منقضی شد. یکی جدید بساز.", "joined the panel": "به پنل پیوست", "Add by hand (advanced)": "افزودن دستی (پیشرفته)", "Manage": "مدیریت", "No extra nodes yet. Add one with a single command.": "هنوز نود اضافه‌ای نیست. با یک دستور اضافه کن.", "Logo": "لوگو", "Shown in the header, the side menu, the login page and the subscription page.": "در هدر، منو، صفحه ورود و صفحه اشتراک نمایش داده می‌شود.", "Choose image": "انتخاب تصویر", "Remove": "حذف", "Image is too complex, use a simpler logo": "تصویر خیلی سنگین است، لوگوی ساده‌تری انتخاب کن", "Cannot read this image": "این تصویر خوانده نشد"});
 var S={lang:localStorage.getItem('kk_lang')||'fa',theme:localStorage.getItem('kk_theme')||'dark',color:localStorage.getItem('kk_color')||'gold',token:localStorage.getItem('kk_tok')||'',me:null,page:'dash',users:[],nodes:[],ov:null,sel:{},q:'',filter:'all',pf:'all',sort:'new',size:12,pg:1,timer:null,timer2:null};
 function t(k){return S.lang=='fa'&&FA[k]?FA[k]:k}
 function $(s,r){return (r||document).querySelector(s)}
@@ -367,6 +412,29 @@ var ICO={edit:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/>',
  ext:'<path d="M14 5h5v5M19 5l-8 8M17 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h4"/>',
  refresh:'<path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.5h-4.5"/>'};
 function ic(n,sz){sz=sz||18;return '<svg viewBox="0 0 24 24" width="'+sz+'" height="'+sz+'" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICO[n]+'</svg>'}
+Object.assign(ICO,{
+ dash:'<rect x="3.5" y="3.5" width="7" height="8.5" rx="2"/><rect x="13.5" y="3.5" width="7" height="5.5" rx="2"/><rect x="13.5" y="12" width="7" height="8.5" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/>',
+ users:'<circle cx="9" cy="8.2" r="3.3"/><path d="M3.2 19.5c.4-3.3 2.7-5.2 5.8-5.2s5.4 1.9 5.8 5.2"/><path d="M15.6 5.2a3.2 3.2 0 0 1 0 6"/><path d="M17.4 14.6c2 .5 3.2 2.2 3.4 4.4"/>',
+ nodes:'<rect x="3.5" y="4" width="17" height="6.5" rx="2.2"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="2.2"/><path d="M7.2 7.25h.01M7.2 16.75h.01M11 7.25h6M11 16.75h6"/>',
+ backup:'<ellipse cx="12" cy="6" rx="7.5" ry="3"/><path d="M4.5 6v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6"/><path d="M4.5 12v6c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3v-6"/>',
+ security:'<path d="M12 3.4l7 2.8v5.3c0 4.4-2.9 7.7-7 9-4.1-1.3-7-4.6-7-9V6.2l7-2.8z"/><path d="M8.9 12.1l2.2 2.2 4-4.3"/>',
+ settings:'<path d="M4 7h8.5M17.5 7H20M4 17h3M12 17h8"/><circle cx="15" cy="7" r="2.5"/><circle cx="9.5" cy="17" r="2.5"/>',
+ logout:'<path d="M9.5 4H6.5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3"/><path d="M15 8l4 4-4 4M19 12H9.5"/>',
+ menu:'<path d="M4 7h16M4 12h16M4 17h10"/>',
+ moon:'<path d="M20 14.2A8 8 0 1 1 9.8 4a6.6 6.6 0 0 0 10.2 10.2z"/>',
+ plus:'<path d="M12 5v14M5 12h14"/>',
+ check:'<path d="M5 12.5l4.2 4.2L19 7"/>',
+ sel:'<rect x="4" y="4" width="16" height="16" rx="4.5"/><path d="M8.5 12.2l2.5 2.5 4.5-5"/>',
+ cpu:'<rect x="6" y="6" width="12" height="12" rx="2.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
+ ram:'<rect x="3" y="7.5" width="18" height="8.5" rx="2"/><path d="M7 7.5v8.5M11 7.5v8.5M15 7.5v8.5M6.5 16v2.5M17.5 16v2.5"/>',
+ disk:'<rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M3.5 12h17"/><path d="M8 15.5h.01M11.5 15.5h5"/>',
+ swap:'<path d="M6 8h12l-3.2-3.2M18 16H6l3.2 3.2"/>',
+ image:'<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4"/>'});
+// logo: the uploaded image (Settings > Logo) or the first letter; cached so the login page can show it too
+function logoOk(s){return /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+\/=]+$/.test(s||'')}
+function curLogo(){var l=(S.me&&S.me.logo)||(S.me?'':localStorage.getItem('kk_logo'))||'';return logoOk(l)?l:''}
+function logoCls(){return 'logo'+(curLogo()?' has-img':'')}
+function logoInner(letter){var l=curLogo();return l?'<img src="'+l+'" alt="">':esc(letter)}
 
 // ---------------------------------------------------------------- tiny live-chart renderer (SVG, newest point on the right edge)
 function smoothPath(pts){var i,d;if(pts.length<3){d='';for(i=0;i<pts.length;i++)d+=(i?'L':'M')+pts[i][0].toFixed(1)+' '+pts[i][1].toFixed(1);return d}
@@ -399,7 +467,7 @@ function dl(blobRes){var a=document.createElement('a');a.href=URL.createObjectUR
 
 // ---------------------------------------------------------------- login
 function loginView(otp){applyLook();clearInterval(S.timer);clearInterval(S.timer2);
- $('#app').innerHTML='<div class="login"><div class="logo">K</div><div class="card"><h3 style="text-align:center;margin-bottom:12px">'+esc(document.title)+'</h3>'+
+ $('#app').innerHTML='<div class="login"><div class="'+logoCls()+'">'+logoInner('K')+'</div><div class="card"><h3 style="text-align:center;margin-bottom:12px">'+esc(document.title)+'</h3>'+
  '<label class="f">'+t('Username')+'</label><input id="lu" autocomplete="username" class="ltr">'+
  '<label class="f">'+t('Password')+'</label><input id="lp" type="password" autocomplete="current-password" class="ltr">'+
  '<div id="otpw" class="'+(otp?'':'hide')+'"><label class="f">'+t('2FA code')+'</label><input id="lo" inputmode="numeric" maxlength="6" class="ltr" autocomplete="one-time-code"></div>'+
@@ -413,12 +481,12 @@ function loginView(otp){applyLook();clearInterval(S.timer);clearInterval(S.timer
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
 // ---------------------------------------------------------------- shell
-var PAGES=[['dash','Dashboard','📊'],['users','Users','👥'],['nodes','Nodes','🖥'],['backup','Backup','💾'],['security','Security','🛡'],['settings','Settings','⚙']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['nodes','Nodes','nodes'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 function shell(){var me=S.me||{};
- $('#app').innerHTML='<header><button class="ib" id="mn">☰</button><div class="logo">'+esc((me.panel_name||'K').charAt(0))+'</div><div class="bn"><b>'+esc(me.panel_name||'KANKI VPN')+'</b><small class="ltr">v'+esc(me.version||'')+'</small></div><div class="sp"></div>'+
- '<button class="ib" id="upd"><span class="dot" id="updot"></span><span class="uv"> v'+esc(me.version||'')+'</span></button><button class="ib '+(S.lang=='fa'?'on':'')+'" data-l="fa">FA</button><button class="ib '+(S.lang=='en'?'on':'')+'" data-l="en">EN</button><button class="ib" id="thm">◐</button><button class="ib" id="lo" title="'+t('Logout')+'">⎋</button></header>'+
- '<nav class="side" id="side"><div class="row" style="margin:0 6px 14px"><div class="logo">'+esc((me.panel_name||'K').charAt(0))+'</div><div class="bn"><b>'+esc(me.panel_name||'')+'</b><small>'+esc(me.user||'')+'</small></div></div>'+
- PAGES.map(function(p){return '<a href="#'+p[0]+'" data-p="'+p[0]+'"><span>'+p[2]+'</span>'+t(p[1])+'</a>'}).join('')+'<a href="#" id="lo2"><span>⎋</span>'+t('Logout')+'</a></nav><div class="shade" id="shade"></div><main id="pg"></main>';
+ $('#app').innerHTML='<header><button class="ib" id="mn" aria-label="menu">'+ic('menu',20)+'</button><div class="'+logoCls()+'">'+logoInner((me.panel_name||'K').charAt(0))+'</div><div class="bn"><b>'+esc(me.panel_name||'KANKI VPN')+'</b><small class="ltr">v'+esc(me.version||'')+'</small></div><div class="sp"></div>'+
+ '<button class="ib" id="upd"><span class="dot" id="updot"></span><span class="uv"> v'+esc(me.version||'')+'</span></button><button class="ib '+(S.lang=='fa'?'on':'')+'" data-l="fa">FA</button><button class="ib '+(S.lang=='en'?'on':'')+'" data-l="en">EN</button><button class="ib" id="thm" aria-label="theme">'+ic('moon',17)+'</button><button class="ib" id="lo" title="'+t('Logout')+'" aria-label="logout">'+ic('logout',17)+'</button></header>'+
+ '<nav class="side" id="side"><div class="row" style="margin:0 6px 14px"><div class="'+logoCls()+'">'+logoInner((me.panel_name||'K').charAt(0))+'</div><div class="bn"><b>'+esc(me.panel_name||'')+'</b><small>'+esc(me.user||'')+'</small></div></div>'+
+ PAGES.map(function(p){return '<a href="#'+p[0]+'" data-p="'+p[0]+'"><span class="ni">'+ic(p[2],19)+'</span>'+t(p[1])+'</a>'}).join('')+'<a href="#" id="lo2"><span class="ni">'+ic('logout',19)+'</span>'+t('Logout')+'</a></nav><div class="shade" id="shade"></div><main id="pg"></main>';
  $('#mn').onclick=function(){$('#side').classList.add('on');$('#shade').classList.add('on')};
  $('#shade').onclick=function(){$('#side').classList.remove('on');$('#shade').classList.remove('on')};
  $$('#side a[data-p]').forEach(function(a){a.onclick=function(){$('#shade').click()}});
@@ -433,7 +501,7 @@ function route(){var p=(location.hash||'#dash').slice(1);if(!PAGES.some(function
  ({dash:pDash,users:pUsers,nodes:pNodes,backup:pBackup,security:pSecurity,settings:pSettings})[p]()}
 window.addEventListener('hashchange',function(){if(S.token&&S.me)route()});
 function autoRefresh(fn){clearInterval(S.timer);var sec=Math.max(5,(S.me&&S.me.refresh)||10);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')fn()},sec*1000)}
-function boot(){api('GET','/api/me').then(function(me){S.me=me;if(me.panel_name)document.title=me.panel_name;
+function boot(){api('GET','/api/me').then(function(me){S.me=me;try{localStorage.setItem('kk_logo',me.logo||'')}catch(e){}if(me.panel_name)document.title=me.panel_name;
   if(!localStorage.getItem('kk_color')&&me.color)S.color=me.color;if(!localStorage.getItem('kk_lang')&&me.lang)S.lang=me.lang;if(!localStorage.getItem('kk_theme')&&me.theme)S.theme=me.theme;
   applyLook();shell();route()}).catch(function(e){if(e.message!='unauthorized')loginView()})}
 
@@ -457,7 +525,8 @@ function pDash(){dbReset();
  '<select id="d_iv" style="width:auto;padding:6px 9px;font-size:12px">'+[1,2,5,10].map(function(n){return '<option value="'+n+'"'+(n==DB.iv?' selected':'')+'>'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select>'+
  '<button class="ib" id="d_pause" title="'+t('Pause')+'">❚❚</button></div></div>'+
  '<div class="kpis" id="kpis"></div>'+
- '<div class="gg">'+gcard('cpu','CPU','⚙')+gcard('ram','RAM','▤')+gcard('disk','Storage','⛁')+gcard('swap','Swap','⇄')+'</div>'+
+ '<div class="gg">'+gcard('cpu','CPU',ic('cpu',16))+gcard('ram','RAM',ic('ram',16))+gcard('disk','Storage',ic('disk',16))+gcard('swap','Swap',ic('swap',16))+'</div>'+
+ '<div class="card" id="nc" style="margin-bottom:12px"></div>'+
  '<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('Network speed')+'</h3><small class="muted ltr" id="n_if"></small></div>'+
   '<div class="nbig"><div class="dn"><small>↓ '+t('Download')+'</small><b id="n_rx" class="ltr">—</b></div><div class="upl"><small>↑ '+t('Upload')+'</small><b id="n_tx" class="ltr">—</b></div></div></div>'+
   '<div class="ch tall" id="ch_net"></div>'+
@@ -500,10 +569,22 @@ function dashDraw(rxs,txs){var l=DB.last;if(!l||!$('#d_sub'))return;
  $('#c_tcp').textContent=N(l.tcp_est);$('#c_udp').textContent=N(l.udp);$('#c_sub').textContent=t('TCP listening')+': '+N(l.tcp_listen);
  $('#ch_con').innerHTML=areaChart([{v:DB.h.tcp,c:'a'},{v:DB.h.udp,c:'b'}],{h:132,cap:DB.max})}
 function dashSys(){if(S.page!='dash'||document.visibilityState!='visible')return;
- Promise.all([api('GET','/api/system'),api('GET','/api/overview')]).then(function(r){if(S.page!='dash')return;DB.sys=r[0];DB.ov=r[1];
+ Promise.all([api('GET','/api/system'),api('GET','/api/overview'),api('GET','/api/nodes').catch(function(){return null})]).then(function(r){if(S.page!='dash')return;DB.sys=r[0];DB.ov=r[1];if(r[2]){S.nodes=r[2];drawNodesCard(r[2])}
   var s=r[0],dp=pc(s.disk_used,s.disk_total);DB.dp=dp;if(!DB.h.disk.length)for(var i=0;i<DB.max;i++)DB.h.disk.push(dp);
   setRing('disk',dp,N(bytes(s.disk_used))+' / '+N(bytes(s.disk_total)),'');$('#ch_disk').innerHTML=areaChart([{v:DB.h.disk,c:'a'}],{h:54,max:100,cap:DB.max});
   drawKpis(r[1]);drawSvcs(s.services||[])}).catch(function(){})}
+function nState(n){if(n.id=='local')return{c:'g',l:'Main server'};if(!n.online)return{c:'r',l:'Offline'};if(n.maint)return{c:'y',l:'Under maintenance'};if(n.drain)return{c:'y',l:'Draining'};return{c:'g',l:'Online'}}
+function goNodes(add){S.openAdd=!!add;if(location.hash=='#nodes')route();else location.hash='#nodes'}
+function drawNodesCard(list){var el=$('#nc');if(!el)return;
+ var up=list.filter(function(n){return n.id=='local'||n.online}).length;
+ el.innerHTML='<div class="nh"><div><h3>'+t('Nodes')+'</h3><small class="muted">'+N(up)+' / '+N(list.length)+' '+t('Online')+'</small></div>'+
+  '<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="b2" data-nd="add">'+ic('plus',15)+' '+t('Add node')+'</button><button class="b2" data-nd="all">'+t('Manage')+'</button></div></div>'+
+  '<div class="nds">'+list.map(function(n){var s=nState(n),loc=n.id=='local',sy=loc?null:n.sync_state=='synced'?['g','Synced']:n.sync_state=='mismatch'?['y','Config mismatch']:null;
+   return '<button class="nd" data-nd="all"><span class="dot '+s.c+'"></span><span class="nn"><b>'+esc(n.name)+'</b><small class="ltr">'+esc(loc?'local':String(n.address||'').replace(/^https?:\/\//,''))+'</small></span>'+
+    '<span class="nb"><span class="badge '+s.c+'">'+t(s.l)+'</span>'+(sy?'<span class="badge '+sy[0]+'">'+t(sy[1])+'</span>':'')+'</span>'+
+    '<span class="nxw"><span class="nx"><small>'+t('Users')+'</small> <b>'+N(n.users)+'</b></span><span class="nx"><small>'+t('Last contact')+'</small> <b>'+(loc?t('this server'):ago(n.last_sync))+'</b></span></span></button>'}).join('')+'</div>'+
+  (list.length<2?'<p class="muted" style="margin:10px 0 0">'+t('No extra nodes yet. Add one with a single command.')+'</p>':'');
+ el.onclick=function(e){var b=e.target.closest('[data-nd]');if(!b)return;goNodes(b.dataset.nd=='add')}}
 function drawKpis(o){var el=$('#kpis');if(!el||!o)return;
  var it=[['a','Total users',o.users,'all'],['g','Online',o.online,'online'],['g','Active',o.active,'active'],['y','Expired / out of data',o.expired,'finished'],['r','Disabled',o.disabled,'disabled'],['a','Total traffic',N(o.traffic_gb)+' GB','']];
  el.innerHTML=it.map(function(x){return '<button class="kpi '+x[0]+'" '+(x[3]?'data-go="'+x[3]+'"':'')+'><small>'+t(x[1])+'</small><b class="ltr">'+(typeof x[2]=='number'?N(x[2]):x[2])+'</b></button>'}).join('')}
@@ -529,17 +610,17 @@ function ustate(u){if(!u.enabled)return 'disabled';if(u.status!='Active')return 
 function usage(u){var lim=u.traffic_limit_gb;return lim>0?Math.min(100,Math.round(100*u.traffic_used_gb/lim)):-1}
 function findU(id){for(var i=0;i<S.users.length;i++)if(S.users[i].id==id)return S.users[i]}
 function pUsers(){var pg=$('#pg');
- S.size=+localStorage.getItem('kk_size')||12;S.sort=localStorage.getItem('kk_sort')||'new';S.pf=S.pf||'all';S.filter=S.filter||'all';S.q=S.q||'';S.pg=1;S.sel={};
+ S.size=+localStorage.getItem('kk_size2')||48;S.sort=localStorage.getItem('kk_sort')||'new';S.pf=S.pf||'all';S.filter=S.filter||'all';S.q=S.q||'';S.pg=1;S.sel={};S.selMode=false;
  var fo=[['all','All'],['online','Online'],['offline','Offline'],['active','Active'],['finished','Expired / out of data'],['disabled','Disabled']],
   so=[['new','Newest'],['old','Oldest'],['name','Name'],['usage','Most used'],['expiry','Nearest expiry'],['seen','Last seen']],
   po=[['all','All protocols']].concat(PROTOS);
  var opt=function(a,cur,tr){return a.map(function(x){return '<option value="'+x[0]+'"'+(x[0]==cur?' selected':'')+'>'+(tr===false?esc(x[1]):t(x[1]))+'</option>'}).join('')};
- pg.innerHTML='<div class="ph"><div><h2>'+t('Users')+'</h2><p id="ucount"></p></div><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ib" id="rf" title="'+t('Refresh')+'">'+ic('refresh',17)+'</button><button class="btn" onclick="newUser()">+ '+t('New user')+'</button></div></div>'+
+ pg.innerHTML='<div class="ph"><div><h2>'+t('Users')+'</h2><p id="ucount"></p></div><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ib" id="selm" title="'+t('Select')+'" aria-label="'+t('Select')+'">'+ic('sel',18)+'</button><button class="ib" id="rf" title="'+t('Refresh')+'">'+ic('refresh',17)+'</button><button class="btn" onclick="newUser()">+ '+t('New user')+'</button></div></div>'+
  '<div class="card strip" id="ust"></div>'+
  '<div class="utools"><div class="srch"><input id="q" type="search" autocomplete="off" placeholder="'+t('Search by name or note…')+'" value="'+esc(S.q)+'"><button id="qx" class="'+(S.q?'':'hide')+'" aria-label="clear">✕</button></div>'+
   '<select id="flt" aria-label="'+t('Status')+'">'+opt(fo,S.filter)+'</select><select id="pf" aria-label="'+t('Protocol')+'">'+opt(po,S.pf,false).replace('>All protocols<','>'+t('All protocols')+'<')+'</select><select id="srt" aria-label="'+t('Sort')+'">'+opt(so,S.sort)+'</select></div>'+
- '<div class="selbar"><label><span class="ck"><input type="checkbox" id="sall"><i></i></span><span>'+t('Select all')+' (<span id="sallc">0</span>)</span></label></div>'+
- '<div class="ucards2" id="ul"><div class="empty2">'+t('Loading…')+'</div></div><div class="pager2" id="pager"></div>'+
+ '<div class="selbar hide" id="selbar"><label><span class="ck"><input type="checkbox" id="sall"><i></i></span><span>'+t('Select all')+' (<span id="sallc">0</span>)</span></label></div>'+
+ '<div class="uchips" id="ul"><div class="empty2">'+t('Loading…')+'</div></div><div class="pager2" id="pager"></div>'+
  '<div class="bulk hide" id="bulk"><span class="cnt" id="bcnt"></span><button class="b2" data-b="enable">'+t('Enable')+'</button><button class="b2" data-b="disable">'+t('Disable')+'</button><button class="b2" data-b="reset">'+t('Reset traffic')+'</button><button class="b2" data-b="extend">'+t('Extend')+'</button><button class="b2 bd" data-b="delete">'+t('Delete')+'</button><button class="ib" data-b="clear" title="'+t('Clear selection')+'">✕</button></div>';
  $('#q').oninput=function(){S.q=this.value;$('#qx').classList.toggle('hide',!this.value);S.pg=1;pruneSel();drawUsers()};
  $('#qx').onclick=function(){$('#q').value='';S.q='';this.classList.add('hide');S.pg=1;pruneSel();drawUsers()};
@@ -547,15 +628,14 @@ function pUsers(){var pg=$('#pg');
  $('#pf').onchange=function(){S.pf=this.value;S.pg=1;pruneSel();drawUsers()};
  $('#srt').onchange=function(){S.sort=this.value;localStorage.setItem('kk_sort',S.sort);S.pg=1;drawUsers()};
  $('#rf').onclick=function(){loadUsers()};
+ $('#selm').onclick=function(){S.selMode=!S.selMode;if(!S.selMode)S.sel={};this.classList.toggle('on',S.selMode);drawUsers()};
  $('#sall').onchange=function(){var all=this.checked;filtered().forEach(function(u){if(all)S.sel[u.id]=1;else delete S.sel[u.id]});drawUsers()};
  $('#ust').onclick=function(e){var b=e.target.closest('[data-f]');if(!b)return;S.filter=b.dataset.f;S.pg=1;$('#flt').value=S.filter;pruneSel();drawUsers();drawStats()};
- $('#ul').onclick=function(e){var b=e.target.closest('[data-a]');if(!b)return;var a=b.dataset.a,id=+b.dataset.id,u=findU(id);
-  if(a=='edit')editUser(id);else if(a=='copy'){if(u)copy(u.link)}else if(a=='qr')qrModal(id);else if(a=='reset')resetU(id);else if(a=='del')delU(id);else if(a=='new')newUser()};
- $('#ul').onchange=function(e){var c=e.target,id=+c.dataset.id;
-  if(c.dataset.a=='sel'){if(c.checked)S.sel[id]=1;else delete S.sel[id];c.closest('.uc2').classList.toggle('sel',c.checked);drawSelBar(filtered());drawBulk()}
-  else if(c.dataset.a=='sw')toggleU(id,c)};
+ $('#ul').onclick=function(e){var b=e.target.closest('[data-id]');if(b){var id=+b.dataset.id;
+   if(S.selMode){if(S.sel[id])delete S.sel[id];else S.sel[id]=1;b.classList.toggle('sel',!!S.sel[id]);drawSelBar(filtered());drawBulk()}else editUser(id);return}
+  if(e.target.closest('[data-a=new]'))newUser()};
  $('#pager').onclick=function(e){var b=e.target.closest('[data-pg]');if(b&&!b.disabled){S.pg=+b.dataset.pg;drawUsers();window.scrollTo(0,0)}};
- $('#pager').onchange=function(e){if(e.target.id=='psz'){S.size=+e.target.value;localStorage.setItem('kk_size',S.size);S.pg=1;drawUsers()}};
+ $('#pager').onchange=function(e){if(e.target.id=='psz'){S.size=+e.target.value;localStorage.setItem('kk_size2',S.size);S.pg=1;drawUsers()}};
  $('#bulk').onclick=function(e){var b=e.target.closest('[data-b]');if(b)bulkDo(b.dataset.b)};
  loadUsers();api('GET','/api/nodes').then(function(n){S.nodes=n}).catch(function(){});autoRefresh(loadUsers)}
 function loadUsers(){return Promise.all([api('GET','/api/users'),api('GET','/api/overview')]).then(function(r){S.users=r[0];S.ov=r[1];
@@ -574,10 +654,12 @@ function filtered(){var q=S.q.trim().toLowerCase(),f=S.filter;
 function pruneSel(){var ok={};filtered().forEach(function(u){ok[u.id]=1});Object.keys(S.sel).forEach(function(k){if(!ok[k])delete S.sel[k]})}
 function drawUsers(){var el=$('#ul');if(!el)return;var list=filtered(),pages=Math.max(1,Math.ceil(list.length/S.size));if(S.pg>pages)S.pg=pages;if(S.pg<1)S.pg=1;
  var part=list.slice((S.pg-1)*S.size,S.pg*S.size);
- el.innerHTML=part.length?part.map(ucard).join(''):'<div class="empty2">'+(S.users.length?t('No match'):t('No users yet')+'<br><button class="btn" data-a="new">+ '+t('Create the first user')+'</button>')+'</div>';
+ el.className='uchips'+(S.selMode?' selmode':'');
+ el.innerHTML=part.length?part.map(uchip).join(''):'<div class="empty2">'+(S.users.length?t('No match'):t('No users yet')+'<br><button class="btn" data-a="new">+ '+t('Create the first user')+'</button>')+'</div>';
  drawPager(pages);drawSelBar(list);drawBulk();
  $('#ucount').textContent=N(S.users.length)+' '+t('users total')+(list.length!=S.users.length?' · '+N(list.length)+' '+t('match'):'')}
 function drawSelBar(list){var c=$('#sall');if(!c)return;var n=0;list.forEach(function(u){if(S.sel[u.id])n++});
+ $('#selbar').classList.toggle('hide',!S.selMode);
  c.checked=list.length>0&&n==list.length;c.indeterminate=n>0&&n<list.length;$('#sallc').textContent=N(list.length)}
 function drawBulk(){var b=$('#bulk');if(!b)return;var n=Object.keys(S.sel).length;b.classList.toggle('hide',!n);$('#bcnt').textContent=N(n)+' '+t('selected')}
 function drawPager(pages){var el=$('#pager');if(!el)return;var h='',i,nums=[];
@@ -585,25 +667,10 @@ function drawPager(pages){var el=$('#pager');if(!el)return;var h='',i,nums=[];
   h+='<button class="b2" data-pg="'+(S.pg-1)+'" '+(S.pg<=1?'disabled':'')+'>'+t('Prev')+'</button>';
   nums.forEach(function(n){h+=n==='…'?'<span class="dots">…</span>':'<button class="b2'+(n==S.pg?' on':'')+'" data-pg="'+n+'">'+N(n)+'</button>'});
   h+='<button class="b2" data-pg="'+(S.pg+1)+'" '+(S.pg>=pages?'disabled':'')+'>'+t('Next')+'</button>'}
- h+='<select id="psz" aria-label="'+t('per page')+'">'+[12,24,48,96].map(function(n){return '<option value="'+n+'"'+(n==S.size?' selected':'')+'>'+N(n)+' '+t('per page')+'</option>'}).join('')+'</select>';
+ h+='<select id="psz" aria-label="'+t('per page')+'">'+[24,48,96,200].map(function(n){return '<option value="'+n+'"'+(n==S.size?' selected':'')+'>'+N(n)+' '+t('per page')+'</option>'}).join('')+'</select>';
  el.innerHTML=h}
-function ucard(u){var st=ustate(u),p=usage(u),on=u.online_connections>0,cls=st=='active'?'g':st=='finished'?'y':'r',
-  lbl=t(st=='active'?'Active':st=='finished'?(u.status=='Limited'?'Limited':'Expired'):'Disabled'),
-  tags=(u.protocols||'').split(',').filter(Boolean).map(function(x){return '<span class="ptag" style="--pc:'+(PCOL[x]||'#999')+'">'+esc(pname(x))+'</span>'}).join('')||'<span class="ptag none">—</span>',
-  id=u.id;
- return '<div class="uc2 st-'+st+(S.sel[id]?' sel':'')+'">'+
- '<div class="u-top"><label class="ck"><input type="checkbox" data-a="sel" data-id="'+id+'" '+(S.sel[id]?'checked':'')+' aria-label="'+t('Select')+'"><i></i></label>'+
-  '<span class="dot '+(st=='disabled'?'r':st=='finished'?'y':(on?'g':''))+'"></span><button class="nm" data-a="edit" data-id="'+id+'">'+esc(u.username)+'</button>'+
-  '<span class="u-st '+cls+'">'+lbl+'</span><label class="sw"><input type="checkbox" data-a="sw" data-id="'+id+'" '+(u.enabled?'checked':'')+' aria-label="'+t('Enable')+'"><span></span></label></div>'+
- '<div class="u-tags">'+tags+'</div>'+
- '<div class="u-meta"><div><small>'+t('Expiry')+'</small><b>'+jdate(u.expires_ts)+'</b><small>'+leftTxt(u.expires_ts)+'</small></div>'+
-  '<div><small>'+t('Connections')+'</small><b class="ltr">'+N(u.online_connections)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b><small>'+(u.last_seen_ts?ago(u.last_seen_ts):t('never'))+'</small></div></div>'+
- '<div class="u-use"><div class="h"><span>'+t('Used')+'</span><b class="ltr">'+N(gbtxt(u.traffic_used_gb))+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</b><em>'+(p<0?'∞':N(p)+'%')+'</em></div>'+
-  '<div class="trk"><div class="fil'+(p>=85?' hot':'')+'" style="width:'+(p<0?100:Math.max(2,p))+'%"></div></div></div>'+
- '<div class="qb5"><button data-a="edit" data-id="'+id+'">'+ic('edit')+'<span>'+t('Edit')+'</span></button><button data-a="copy" data-id="'+id+'">'+ic('link')+'<span>'+t('Link')+'</span></button>'+
-  '<button data-a="qr" data-id="'+id+'">'+ic('qr')+'<span>QR</span></button><button data-a="reset" data-id="'+id+'">'+ic('reset')+'<span>'+t('Reset')+'</span></button>'+
-  '<button class="x" data-a="del" data-id="'+id+'">'+ic('trash')+'<span>'+t('Delete')+'</span></button></div></div>'}
-
+function uchip(u){var st=ustate(u),on=u.online_connections>0,dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':'');
+ return '<button class="uchip st-'+st+(S.sel[u.id]?' sel':'')+'" data-id="'+u.id+'" title="'+esc(u.username)+'"><span class="dot '+dot+'"></span><span class="nm">'+esc(u.username)+'</span><span class="tick">'+ic('check',13)+'</span></button>'}
 // ---- single-user actions
 function toggleU(id,cb){cb.disabled=true;api('POST','/api/users/'+id+'/toggle').then(function(){toast(t('Done'));loadUsers()}).catch(function(e){cb.checked=!cb.checked;cb.disabled=false;fail(e)})}
 function resetU(id){confirmDo(function(){api('POST','/api/users/'+id+'/reset').then(function(){toast(t('Done'));loadUsers()}).catch(fail)})}
@@ -668,9 +735,10 @@ function formBody(){var ts=readExp();if(isNaN(ts)){toast(t('Invalid date'),1);re
 function newUser(){modal(mhead(t('New user'))+ufForm(null)+'<button class="btn" style="width:100%;margin-top:12px" id="f_save">'+t('Create')+'</button>','wide');wireForm(null);
  $('#f_save').onclick=function(){var b=formBody();if(!b)return;b.username=$('#f_name').value.trim();b.count=+$('#f_count').value||1;var me=this;me.disabled=true;
   api('POST','/api/users',b).then(function(r){toast(t('Saved'));return loadUsers().then(function(){var u=r&&r.length==1&&findU(r[0].id);if(u)editUser(u.id);else closeModal()})}).catch(function(e){me.disabled=false;fail(e)})}}
-function editUser(id){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(u),cls=st=='active'?'g':st=='finished'?'y':'r',lbl=t(st=='active'?'Active':st=='finished'?(u.status=='Limited'?'Limited':'Expired'):'Disabled');
+function editUser(id){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(u),tg=(u.protocols||'').split(',').filter(Boolean).map(function(x){return '<span class="ptag" style="--pc:'+(PCOL[x]||'#999')+'">'+esc(pname(x))+'</span>'}).join(''),cls=st=='active'?'g':st=='finished'?'y':'r',lbl=t(st=='active'?'Active':st=='finished'?(u.status=='Limited'?'Limited':'Expired'):'Disabled');
  modal('<div class="mh"><div class="row" style="flex-wrap:nowrap;min-width:0"><span class="dot '+(u.online_connections>0?'g':'')+'"></span><b class="ltr" style="font-size:17px;overflow:hidden;text-overflow:ellipsis">'+esc(u.username)+'</b><span class="u-st '+cls+'" id="e_badge">'+lbl+'</span></div>'+
   '<div class="row" style="flex-wrap:nowrap"><label class="sw"><input type="checkbox" id="e_sw" '+(u.enabled?'checked':'')+'><span></span></label><button class="ib" onclick="closeModal()">✕</button></div></div>'+
+ '<div class="u-tags" style="margin:0 0 10px">'+(tg||'<span class="ptag none">—</span>')+'</div>'+
  '<div class="g3s"><div><small>'+t('Used')+'</small><b class="ltr">'+N(gbtxt(u.traffic_used_gb))+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</b><div class="trk"><div class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?100:Math.max(2,p))+'%"></div></div></div>'+
   '<div><small>'+t('Expiry date')+'</small><b>'+jdate(u.expires_ts)+'</b><small>'+leftTxt(u.expires_ts)+'</small></div>'+
   '<div><small>'+t('Connections')+'</small><b class="ltr">'+N(u.online_connections)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b><small>'+(u.last_seen_ts?ago(u.last_seen_ts):t('never'))+'</small></div></div>'+
@@ -689,7 +757,7 @@ function editUser(id){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(u),c
 
 // ---------------------------------------------------------------- nodes
 function pNodes(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Nodes')+'</h2><p>'+t('Main server and extra nodes')+'</p></div><button class="btn" onclick="nodeAdd()">+ '+t('Add node')+'</button></div><div class="ncards" id="nl">'+t('Loading…')+'</div>';
- loadNodes();autoRefresh(loadNodes)}
+ loadNodes();autoRefresh(loadNodes);if(S.openAdd){S.openAdd=false;setTimeout(nodeAdd,150)}}
 function loadNodes(){api('GET','/api/nodes').then(function(n){S.nodes=n;drawNodes()}).catch(fail)}
 function drawNodes(){var el=$('#nl');if(!el)return;el.innerHTML=S.nodes.map(function(n){var loc=n.id=='local';
  var st=n.sync_state=='synced'?'<span style="color:var(--ok)">'+t('Synced')+'</span>':n.sync_state=='mismatch'?'<span style="color:var(--warn)">'+t('Config mismatch')+'</span>':'<span style="color:var(--bad)">'+(n.online?'—':t('Offline'))+'</span>';
@@ -702,6 +770,7 @@ function drawNodes(){var el=$('#nl');if(!el)return;el.innerHTML=S.nodes.map(func
  '<p class="muted" style="margin:8px 0">'+acc+' · '+esc(n.effective_endpoint||'')+(n.note?' · '+esc(n.note):'')+'</p>'+
  '<div class="g2"><button class="b2" onclick="nAct(\''+n.id+'\',\'sync\')">↻ '+t('Sync')+'</button><button class="b2" onclick="nHealth(\''+n.id+'\')">♡ '+t('Health')+'</button><button class="b2" onclick="nodeEdit(\''+n.id+'\')">✎ '+t('Edit')+'</button><button class="b2" onclick="nAct(\''+n.id+'\',\'repair\')">↻ '+t('Repair agent')+'</button>'+
  (loc?'':'<button class="b2" onclick="nAct(\''+n.id+'\',\'update\')">⇪ '+t('Update agent')+'</button><button class="b2 bd" onclick="nDel(\''+n.id+'\')">⌫ '+t('Delete node')+'</button>')+'</div>'+
+ '<div class="g2" style="margin-top:8px"><button class="b2 okb" onclick="nAssign(\''+n.id+'\',1)">'+ic('plus',15)+' '+t('Add to all users')+'</button>'+(loc?'':'<button class="b2 bd" onclick="nAssign(\''+n.id+'\',0)">'+ic('trash',15)+' '+t('Remove from all users')+'</button>')+'</div>'+
  (loc?'<p class="muted" style="margin:8px 0 0">'+t('Main panel server · local management')+'</p>':'')+'</div>'}).join('')}
 function findN(id){for(var i=0;i<S.nodes.length;i++)if(S.nodes[i].id==id)return S.nodes[i]}
 function nAct(id,a){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+a).then(function(r){toast(r.ok===false?(r.result&&r.result.error||'failed'):t('Done'),r.ok===false);loadNodes()}).catch(fail)}
@@ -709,12 +778,44 @@ function nDel(id){confirmDo(function(){api('DELETE','/api/nodes/'+encodeURICompo
 function nHealth(id){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/health').then(function(r){var n=findN(id);
  modal(mhead(t('Health'),n?n.name:'')+'<p>'+(r.ok?'<span class="badge g">OK</span>':'<span class="badge r">'+t('Offline')+'</span>')+' <span class="ltr">'+r.ms+' ms</span> '+(r.version?'· v'+esc(r.version):'')+(r.load?' · load '+esc(r.load):'')+'</p>'+
  '<div class="list">'+((r.services||[]).map(function(s){return '<div class="li"><span>'+esc(s.key)+' <small class="ltr">'+esc(s.unit)+'</small></span><span class="badge '+(s.active?'g':'r')+'">'+esc(s.state)+'</span></div>'}).join(''))+'</div>')}).catch(fail)}
-function nodeAdd(){modal(mhead(t('Add node'))+'<p class="muted">'+t('Install the node with the installer (option 2), then paste the API address and token it prints.')+'</p>'+
- '<label class="f">'+t('Node name')+'</label><input id="n_name" placeholder="Node 1"><label class="f">'+t('API address')+'</label><input id="n_addr" class="ltr" placeholder="https://node1.example.com:2096">'+
- '<label class="f">'+t('Node token')+'</label><input id="n_tok" class="ltr"><label class="f">'+t('Connection endpoint (empty = panel endpoint)')+'</label><input id="n_ep" class="ltr" placeholder="node1.example.com">'+
- '<label class="chk" style="margin-top:10px"><input type="checkbox" id="n_ins">'+t('Self-signed certificate (no domain on node)')+'</label><label class="f">'+t('Note')+'</label><input id="n_note">'+
- '<div class="g2" style="margin-top:12px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="n_go">'+t('Save')+'</button></div>');
+function nAssign(id,add){var n=findN(id);if(!confirm(t(add?'Add this node to ALL users?':'Remove this node from ALL users?')+(n?' ('+n.name+')':'')))return;
+ toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+(add?'assign-all':'unassign-all')).then(function(){toast(t('Done'));loadNodes()}).catch(fail)}
+function nodeAdd(){
+ var manual='<label class="f">'+t('Node name')+'</label><input id="n_name" placeholder="Node 1"><label class="f">'+t('API address')+'</label><input id="n_addr" class="ltr" placeholder="https://node1.example.com:2096">'+
+  '<label class="f">'+t('Node token')+'</label><input id="n_tok" class="ltr"><label class="f">'+t('Connection endpoint (empty = panel endpoint)')+'</label><input id="n_ep" class="ltr" placeholder="node1.example.com">'+
+  '<label class="chk" style="margin-top:10px"><input type="checkbox" id="n_ins">'+t('Self-signed certificate (no domain on node)')+'</label><label class="f">'+t('Note')+'</label><input id="n_note">'+
+  '<div class="g2" style="margin-top:12px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="n_go">'+t('Save')+'</button></div>';
+ modal(mhead(t('Add node'))+
+  '<p class="muted" style="margin:0 0 8px">'+t('Run one command on the new server (Ubuntu / Debian, as root). It installs only what a node needs and joins this panel by itself.')+'</p>'+
+  '<div id="j_in"><label class="f">'+t('Node domain (optional, for a real SSL certificate)')+'</label><input id="j_dom" class="ltr" placeholder="node1.example.com" autocomplete="off" autocapitalize="off"><button class="btn" style="width:100%;margin-top:10px" id="j_go">'+t('Create join command')+'</button></div>'+
+  '<div id="j_out"></div>'+
+  '<details class="box" style="margin-top:12px"><summary><b>'+t('Add by hand (advanced)')+'</b></summary><p class="muted">'+t('Install the node with the installer (option 2), then paste the API address and token it prints.')+'</p>'+manual+'</details>','wide');
+ $('#j_go').onclick=function(){joinStart(this)};
  $('#n_go').onclick=function(){this.disabled=true;var me=this;api('POST','/api/nodes',{name:$('#n_name').value,address:$('#n_addr').value,token:$('#n_tok').value,endpoint:$('#n_ep').value,insecure:$('#n_ins').checked,note:$('#n_note').value}).then(function(){closeModal();toast(t('Done'));loadNodes()}).catch(function(e){me.disabled=false;fail(e)})}}
+function joinStart(btn){btn.disabled=true;
+ Promise.all([api('GET','/api/nodes'),api('POST','/api/node-join')]).then(function(r){
+  var before=r[0].map(function(n){return n.id}),j=r[1],dom=($('#j_dom').value||'').trim().replace(/[^A-Za-z0-9.\-]/g,''),repo=j.repo||'',
+   cmd=(repo?'KANKI_REPO='+repo+' ':'')+(dom?'KANKI_DOMAIN='+dom+' ':'')+'KANKI_JOIN='+j.token+' KANKI_PANEL='+(j.panel||location.origin)+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'USER/REPO')+'/main/install.sh)';
+  $('#j_in').classList.add('hide');
+  $('#j_out').innerHTML='<label class="f">'+t('Run this on the new server')+'</label><pre class="cmd" id="j_cmd">'+esc(cmd)+'</pre>'+
+   '<button class="btn" style="width:100%" id="j_cp">'+ic('link',16)+' '+t('Copy command')+'</button>'+
+   (repo?'':'<div class="warnbox">'+t('Update source (GitHub repo) is not set: replace USER/REPO in the command.')+'</div>')+
+   '<div class="jw" id="j_wait"><span class="spin"></span><span>'+t('Waiting for the node to connect…')+'</span><b class="ltr" id="j_left"></b></div>'+
+   '<p class="muted" style="margin:6px 0 0">'+t('Valid for one hour and one node. Create a new command for the next node.')+'</p>';
+  $('#j_cp').onclick=function(){copy(cmd)};
+  joinWatch(before,j.expires)}).catch(function(e){btn.disabled=false;fail(e)})}
+function joinWatch(before,exp){clearInterval(S.joinT);
+ var tick=function(){var w=$('#j_wait');if(!w||!$('#modal').classList.contains('on')){clearInterval(S.joinT);return}
+  var s=Math.max(0,exp-Math.floor(Date.now()/1000)),l=$('#j_left');if(l)l.textContent=N(p2(Math.floor(s/60)))+':'+N(p2(s%60));
+  if(s<=0){clearInterval(S.joinT);w.innerHTML='<span class="bad2">'+t('The command expired. Create a new one.')+'</span>';return}
+  api('GET','/api/nodes').then(function(list){var nn=list.filter(function(n){return before.indexOf(n.id)<0});if(nn.length){clearInterval(S.joinT);S.nodes=list;joinDone(nn[0])}}).catch(function(){})};
+ tick();S.joinT=setInterval(tick,3000)}
+function joinDone(n){var o=$('#j_out');if(!o)return;
+ o.innerHTML='<div class="jok"><span class="okc">'+ic('check',22)+'</span><div><b>'+esc(n.name)+'</b><small class="ltr">'+esc(String(n.address||'').replace(/^https?:\/\//,''))+'</small><div>'+t('joined the panel')+'</div></div></div>'+
+  '<div class="g2" style="margin-top:12px"><button class="btn" id="j_all">'+ic('plus',15)+' '+t('Add to all users')+'</button><button class="b2" id="j_ok">'+t('Done')+'</button></div>';
+ loadNodes();
+ $('#j_ok').onclick=function(){closeModal();if(S.page=='nodes')loadNodes()};
+ $('#j_all').onclick=function(){var b=this;b.disabled=true;api('POST','/api/nodes/'+encodeURIComponent(n.id)+'/assign-all').then(function(){toast(t('Done'));closeModal();loadNodes()}).catch(function(e){b.disabled=false;fail(e)})}}
 function nodeEdit(id){var n=findN(id);if(!n)return;var loc=n.id=='local',panel=n.endpoint_mode=='panel'||!n.endpoint;
  modal(mhead(t('Edit node'),loc?'local':n.address)+'<label class="f">'+t('Node name')+'</label><input id="e_name" value="'+esc(n.name)+'"><label class="f">'+t('Note')+'</label><input id="e_note" value="'+esc(n.note)+'">'+
  '<label class="chk" style="margin-top:10px"><input type="checkbox" id="e_acc" '+(n.accept_all?'checked':'')+'>'+t('Sync users without a specific node to this node')+'</label>'+
@@ -783,9 +884,23 @@ function chPass(){api('POST','/api/security/password',{current:$('#cp_cur').valu
 function savePolicy(){api('POST','/api/security/policy',{ip_allow:$('#ip_a').value,ip_deny:$('#ip_d').value,session_hours:+$('#ip_h').value||24,force_2fa:$('#ip_f').checked}).then(function(){toast(t('Saved'));loadSec()}).catch(fail)}
 
 // ---------------------------------------------------------------- settings
+function logoCard(){var l=curLogo();return '<div class="card"><h3>'+t('Logo')+'</h3><p class="sub">'+t('Shown in the header, the side menu, the login page and the subscription page.')+'</p>'+
+ '<div class="row" style="gap:10px"><div class="'+logoCls()+'" id="lg_prev" style="width:56px;height:56px;border-radius:16px;font-size:24px">'+logoInner(((S.me&&S.me.panel_name)||'K').charAt(0))+'</div>'+
+ '<label class="btn" for="lg_file" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">'+ic('image',16)+' '+t('Choose image')+'</label><input type="file" id="lg_file" accept="image/*" class="hide">'+
+ '<button class="b2'+(l?'':' hide')+'" id="lg_rm">'+t('Remove')+'</button></div></div>'}
+function setLogo(data){return api('PUT','/api/settings',{logo:data}).then(function(){S.me.logo=data;try{localStorage.setItem('kk_logo',data)}catch(e){}toast(t('Saved'));shell();route()})}
+function wireLogo(){var f=$('#lg_file');if(!f)return;
+ f.onchange=function(){var file=f.files&&f.files[0];if(!file)return;var rd=new FileReader();
+  rd.onload=function(){var im=new Image();im.onload=function(){var best='',sz=[256,192,128],iw=im.width||256,ih=im.height||256;
+    for(var i=0;i<sz.length&&!best;i++){var cv=document.createElement('canvas');cv.width=cv.height=sz[i];var cx=cv.getContext('2d'),r=Math.min(sz[i]/iw,sz[i]/ih),w=iw*r,h=ih*r;
+     cx.drawImage(im,(sz[i]-w)/2,(sz[i]-h)/2,w,h);var d=cv.toDataURL('image/png');if(d.length<150000)best=d}
+    if(!best)return toast(t('Image is too complex, use a simpler logo'),1);setLogo(best).catch(fail)};
+   im.onerror=function(){toast(t('Cannot read this image'),1)};im.src=rd.result};
+  rd.readAsDataURL(file)};
+ var rm=$('#lg_rm');if(rm)rm.onclick=function(){confirmDo(function(){setLogo('').catch(fail)})}}
 function pSettings(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Settings')+'</h2><p>'+t('Appearance, web access and public endpoint')+'</p></div></div><div id="st">'+t('Loading…')+'</div>';
  api('GET','/api/settings').then(function(s){var dp=(s.default_protocols||'').split(',');
- $('#st').innerHTML='<div class="card"><h3>'+t('General')+'</h3><div class="g2"><div><label class="f">'+t('Panel name')+'</label><input id="s_pn" value="'+esc(s.panel_name)+'"></div><div><label class="f">'+t('Language')+'</label><select id="s_lang"><option value="fa">فارسی</option><option value="en">English</option></select></div>'+
+ $('#st').innerHTML=logoCard()+'<div class="card"><h3>'+t('General')+'</h3><div class="g2"><div><label class="f">'+t('Panel name')+'</label><input id="s_pn" value="'+esc(s.panel_name)+'"></div><div><label class="f">'+t('Language')+'</label><select id="s_lang"><option value="fa">فارسی</option><option value="en">English</option></select></div>'+
  '<div><label class="f">'+t('Theme')+'</label><select id="s_th"><option value="dark">'+t('Dark')+'</option><option value="light">'+t('Light')+'</option></select></div><div><label class="f">'+t('Auto refresh')+'</label><select id="s_rf"><option value="5">5 '+t('seconds')+'</option><option value="10">10 '+t('seconds')+'</option><option value="30">30 '+t('seconds')+'</option><option value="60">60 '+t('seconds')+'</option></select></div>'+
  '<div><label class="f">'+t('Panel color')+'</label><select id="s_col"><option value="gold">'+t('Gold')+'</option><option value="turquoise">'+t('Turquoise')+'</option><option value="violet">'+t('Violet')+'</option><option value="emerald">'+t('Emerald')+'</option><option value="rose">'+t('Rose')+'</option></select></div></div>'+
  '<div class="box"><b>'+t('Web panel')+'</b><div class="g2"><div><label class="f">'+t('Web bind')+'</label><input class="ltr" readonly value="'+esc(s.web_bind)+'"></div><div><label class="f">'+t('Web port')+'</label><input class="ltr" readonly value="'+esc(s.web_port)+'"></div></div><p class="muted">'+t('Bind and port are where the panel itself listens; changing them needs a panel restart. File:')+' <span class="ltr" style="display:inline-block;white-space:nowrap">/etc/kanki/kanki.env</span><br>'+t('Panel address')+': <span class="ltr">https://'+esc(s.domain)+(s.https_port&&s.https_port!='443'?':'+esc(s.https_port):'')+'/admin</span></p></div>'+
@@ -794,7 +909,7 @@ function pSettings(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Settings'
  '<label class="f">'+t('Default protocols for new users')+'</label>'+PROTOS.map(function(p){return '<label class="chk"><input type="checkbox" class="s_dp" value="'+p[0]+'" '+(dp.indexOf(p[0])>=0?'checked':'')+'>'+p[1]+'</label>'}).join('')+
  '<div style="margin-top:8px"><label class="chk"><input type="checkbox" id="s_awg" '+(s.awg_compat=='1'?'checked':'')+'>'+t('AmneziaWG compatibility mode (only Jc/Jmin/Jmax/S1/S2/H1-H4)')+'</label><label class="chk"><input type="checkbox" id="s_oia" '+(s.ovpn_inline_auth!='0'?'checked':'')+'>'+t('Put OpenVPN username/password inside the .ovpn file')+'</label><label class="chk"><input type="checkbox" id="s_cl" '+(s.conn_limit_on!='0'?'checked':'')+'>'+t('Enforce connection limit (OpenVPN / Hysteria2)')+'</label></div></div>'+
  '<div style="text-align:center"><button class="btn" id="s_go">'+t('Save & apply')+'</button></div>';
- $('#s_lang').value=s.lang||'fa';$('#s_th').value=s.theme||'dark';$('#s_rf').value=s.refresh||'10';$('#s_col').value=s.color||'gold';
+ wireLogo();$('#s_lang').value=s.lang||'fa';$('#s_th').value=s.theme||'dark';$('#s_rf').value=s.refresh||'10';$('#s_col').value=s.color||'gold';
  $('#s_go').onclick=function(){var b={panel_name:$('#s_pn').value,lang:$('#s_lang').value,theme:$('#s_th').value,refresh:$('#s_rf').value,color:$('#s_col').value,endpoint:$('#s_ep').value,sub_base:$('#s_sb').value,dns:$('#s_dns').value,mtu:$('#s_mtu').value,
   default_protocols:$$('.s_dp').filter(function(x){return x.checked}).map(function(x){return x.value}).join(','),awg_compat:$('#s_awg').checked?'1':'0',ovpn_inline_auth:$('#s_oia').checked?'1':'0',conn_limit_on:$('#s_cl').checked?'1':'0'};
   var all=$('#s_all').checked;api('PUT','/api/settings',b).then(function(){return all?api('POST','/api/settings/apply-endpoint'):null}).then(function(){

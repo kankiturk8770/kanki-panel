@@ -38,6 +38,13 @@ yes_no(){ local a; read -rp "$1 [${2:-Y}/$( [ "${2:-Y}" = Y ] && echo n || echo 
 
 # ---------------- GitHub repo (binary releases)
 REPO="${KANKI_REPO:-$(cat $ENV_DIR/repo 2>/dev/null || true)}"
+# one-command node join: the panel (Nodes > Add node) prints a line that sets these two
+KANKI_JOIN="${KANKI_JOIN:-}"; KANKI_PANEL="${KANKI_PANEL:-}"
+envget(){ grep -m1 "^$1=" "$ENV" 2>/dev/null | cut -d= -f2-; }
+free_port(){ # $1=var $2=preferred port: keep it when free, otherwise take a random free one (no questions)
+  local p="$2"
+  while port_busy "$p"; do p=$(rnum 20000 59999); done
+  printf -v "$1" '%s' "$p"; }
 need_repo(){
   if [ -z "$REPO" ]; then ask REPO "GitHub repo (e.g. username/kanki-panel)"; fi
   [ -n "$REPO" ] || die "Repo is required"
@@ -417,11 +424,20 @@ EOF
 install_node(){
   echo; say "Node installation (extra server)"
   need_repo
-  ask DOMAIN "Node domain (recommended for TLS; empty = self-signed certificate)"
-  EMAIL=""; [ -n "$DOMAIN" ] && ask EMAIL "Email for SSL"
-  ask_port NODE_PUBLIC_PORT "Node API port (HTTPS)" 2096
-  ask_port NODE_PORT "Internal agent port (local only)" "$(rnum 20000 29999)"
-  ask_protocols
+  if [ -n "$KANKI_JOIN" ]; then
+    # join mode: nothing is asked, every protocol is installed on its default port (a random free one if busy)
+    DOMAIN="${KANKI_DOMAIN:-}"; EMAIL="${KANKI_EMAIL:-}"
+    if [ -n "$DOMAIN" ] && [ -z "$EMAIL" ]; then EMAIL="admin@$DOMAIN"; fi
+    free_port NODE_PUBLIC_PORT 2096; free_port NODE_PORT "$(rnum 20000 29999)"
+    free_port WG_PORT 51820; free_port AWG_PORT 51821; free_port HY2_PORT 8443
+    free_port OVPN_UDP_PORT 1194; free_port OVPN_TCP_PORT 1443
+  else
+    ask DOMAIN "Node domain (recommended for TLS; empty = self-signed certificate)"
+    EMAIL=""; [ -n "$DOMAIN" ] && ask EMAIL "Email for SSL"
+    ask_port NODE_PUBLIC_PORT "Node API port (HTTPS)" 2096
+    ask_port NODE_PORT "Internal agent port (local only)" "$(rnum 20000 29999)"
+    ask_protocols
+  fi
   HY2_STATS_PORT=$(rnum 30000 39999); HY2_OBFS=$(rand 20); HY2_SECRET=$(rand 24); NODE_TOKEN=$(rand 48); INSECURE=""
   OVPN_UDP_MGMT=""; OVPN_TCP_MGMT=""
   base_packages; download_bin
@@ -452,6 +468,7 @@ EOF
   setup_caddy "https://:$NODE_PUBLIC_PORT" "$NODE_PORT"
   service kanki-node node
   open_ports "$NODE_PUBLIC_PORT/tcp" "$WG_PORT/udp" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}" "${OVPN_UDP_PORT:+$OVPN_UDP_PORT/udp}" "${OVPN_TCP_PORT:+$OVPN_TCP_PORT/tcp}"
+  if [ -n "$KANKI_JOIN" ]; then register_node; return 0; fi
   IP=$(pubip)
   echo; ok "Node installed! In the panel go to Nodes > Add node and enter:"
   echo -e "   API address:  ${C}https://${DOMAIN:-$IP}:$NODE_PUBLIC_PORT${N}"
@@ -459,6 +476,43 @@ EOF
   echo -e "   Node token:   ${C}$NODE_TOKEN${N}"
   [ -n "$INSECURE" ] && echo -e "   ${Y}No domain: tick 'Self-signed certificate' when adding the node.${N}"
   echo "   Tip: allow port $NODE_PUBLIC_PORT only from the main panel IP for extra safety."
+}
+
+register_node(){ # tells the panel about this node; needs DOMAIN NODE_PUBLIC_PORT NODE_TOKEN INSECURE KANKI_PANEL KANKI_JOIN
+  local host name ins body res
+  host="${DOMAIN:-$(pubip)}"
+  name="$(hostname | tr -cd 'A-Za-z0-9._-')"; name="${name:-node}"
+  ins=false; [ -n "$INSECURE" ] && ins=true
+  body="{\"token\":\"$KANKI_JOIN\",\"name\":\"$name\",\"address\":\"https://$host:$NODE_PUBLIC_PORT\",\"endpoint\":\"$host\",\"node_token\":\"$NODE_TOKEN\",\"insecure\":$ins}"
+  say "Telling the panel about this node ..."
+  res=$(curl -sS -m 90 -X POST -H 'Content-Type: application/json' -d "$body" "$KANKI_PANEL/join/register" 2>&1) \
+    || res=$(curl -sSk -m 90 -X POST -H 'Content-Type: application/json' -d "$body" "$KANKI_PANEL/join/register" 2>&1) || true
+  if echo "$res" | grep -q '"ok":true'; then
+    echo; ok "Done! This server is now a node of $KANKI_PANEL (open Nodes in the panel)."
+  else
+    echo; warn "The node is installed but the panel did not accept it: $res"
+    echo "   1) Open TCP port $NODE_PUBLIC_PORT in this server's firewall (cloud panel too), then run the same command again."
+    echo "   2) Or add it by hand in the panel: Nodes > Add node > manual, with these values:"
+    echo -e "      API address:  ${C}https://$host:$NODE_PUBLIC_PORT${N}"
+    echo -e "      Endpoint:     ${C}$host${N}"
+    echo -e "      Node token:   ${C}$NODE_TOKEN${N}"
+    [ -n "$INSECURE" ] && echo "      (tick 'Self-signed certificate')"
+    return 1
+  fi
+}
+
+join_node(){
+  [ -n "$KANKI_PANEL" ] || die "KANKI_PANEL is missing. Copy the full command from the panel (Nodes > Add node)."
+  KANKI_PANEL="${KANKI_PANEL%/}"
+  echo; say "Joining the panel $KANKI_PANEL"
+  if [ -x "$BIN" ] && [ "$(envget MODE)" = node ]; then
+    say "This server already runs the Kanki node agent, so it is only registered again."
+    DOMAIN=$(envget DOMAIN); NODE_PUBLIC_PORT=$(envget NODE_PUBLIC_PORT); NODE_TOKEN=$(envget NODE_TOKEN)
+    INSECURE=""; if [ -n "$(envget HY2_INSECURE)" ]; then INSECURE=1; fi
+    register_node
+  else
+    install_node
+  fi
 }
 
 update(){
@@ -507,6 +561,8 @@ uninstall(){
   systemctl daemon-reload
   ok "Removed (WireGuard / AmneziaWG / Hysteria2 / OpenVPN / Caddy were left untouched)"
 }
+
+if [ -n "$KANKI_JOIN" ]; then join_node; exit $?; fi
 
 echo -e "${Y}"
 echo "  =================================="

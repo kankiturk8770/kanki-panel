@@ -243,6 +243,7 @@ pub fn ui_settings(app: &App) -> Value {
     json!({
         "panel_name": g("panel_name"), "lang": g("lang"), "theme": g("theme"), "color": g("color"),
         "refresh": g("refresh").parse::<i64>().unwrap_or(10), "version": crate::VERSION,
+        "logo": g("logo"),
     })
 }
 

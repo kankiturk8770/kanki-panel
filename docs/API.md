@@ -22,6 +22,11 @@ Protocols: `wg`, `awg`, `hy2`, `ovpn`. Empty `nodes` = every node that accepts u
 | GET / POST | `/api/nodes` | nodes |
 | PUT / DELETE | `/api/nodes/:id` | nodes |
 | POST | `/api/nodes/:id/{toggle,drain,maint,sync,health,repair,update}` | nodes |
+| POST | `/api/nodes/:id/assign-all` | nodes | node accepts unassigned users and is added to every user that has a node list |
+| POST | `/api/nodes/:id/unassign-all` | nodes | the reverse (not allowed for `local`) |
+| POST | `/api/node-join` | nodes | returns `{token, expires, panel, repo}`: one-time join token, valid 1 hour |
+
+Public (no auth): `POST /join/register` with `{token, node_token, address, endpoint, insecure, name}`. Called by the installer; the panel checks the node answers on `address`, adds it and burns the token.
 
 ## Settings & backup
 | Method | Path | Scope |
