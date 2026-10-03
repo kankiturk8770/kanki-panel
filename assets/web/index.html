@@ -499,6 +499,31 @@ html{background:#0c0a06}html:has(body.light){background:#e9e0cd}
 .tropt b{display:block;font-size:13px}.tropt small{display:block;color:var(--s);font-size:11px;margin-top:2px;line-height:1.5}
 #tdc .nh{align-items:flex-start}
 @media (max-width:620px){.tgrid{grid-template-columns:repeat(2,1fr)}.tkpi{grid-template-columns:1fr 1fr}.tkpi>div:last-child{grid-column:1/-1}.tropt,.seg{grid-template-columns:1fr}}
+
+/* ---- v2.4.1: compact dashboard, themed dropdowns, coloured config buttons ---- */
+html{background:#0c0a06;color-scheme:dark}
+html:has(body.light){background:#f6efe0;color-scheme:light}
+body.light{color-scheme:light}
+select option,select optgroup{background:var(--bg2);color:var(--t)}
+input:-webkit-autofill,input:-webkit-autofill:focus{-webkit-box-shadow:0 0 0 40px var(--bg2) inset;-webkit-text-fill-color:var(--t);caret-color:var(--t)}
+*{scrollbar-color:color-mix(in srgb,var(--a) 35%,transparent) transparent}
+.gg{gap:8px}
+.gc{padding:8px 10px 5px;border-radius:17px}
+.gh{font-size:11px;margin-bottom:2px}.gh b{font-size:12px}
+.gb{gap:8px}
+.ring{width:52px;height:52px}
+.rt{font-size:16px}
+.gi b{font-size:12px}.gi small{font-size:10.5px;margin-top:1px}
+.gc .ch{height:28px;margin-top:3px}
+#ch_net,#ch_con{height:76px;margin-top:6px}
+#pg .nh .nbig{gap:14px}#pg .nh .nbig b{font-size:17px}
+#pg .nh h3{font-size:15px}
+.nf{margin-top:5px;font-size:10.5px}
+#tr_ch{height:96px}
+@media(max-width:620px){.ring{width:46px;height:46px}.rt{font-size:17px}#pg .nh .nbig b{font-size:15px}#ch_net,#ch_con{height:64px}}
+.cfgb{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:11px;font-size:12.5px;font-weight:700;text-decoration:none;color:var(--pc)!important;border:1px solid color-mix(in srgb,var(--pc) 55%,transparent);background:color-mix(in srgb,var(--pc) 14%,transparent);transition:background .15s,box-shadow .15s}
+.cfgb:hover{background:color-mix(in srgb,var(--pc) 24%,transparent);box-shadow:0 0 12px color-mix(in srgb,var(--pc) 35%,transparent)}
+.cfgb svg{flex:none}
 </style>
 </head>
 <body>
@@ -838,8 +863,9 @@ function qrModal(id){var u=findU(id);if(!u)return;
 function sheetCfg(id){var u=findU(id);if(!u)return;var un=u.nodes.split(',').filter(Boolean),pr=u.protocols.split(','),map={wg:'wireguard',awg:'amneziawg',hy2:'hysteria2'},rows='';
  S.nodes.forEach(function(n){if(un.length&&un.indexOf(n.id)<0)return;if(!un.length&&!n.accept_all)return;var inf=n.info||{},b='';
   pr.forEach(function(p){if(!map[p])return;var base='/api/config/'+u.id+'/'+map[p]+'?sub='+encodeURIComponent(u.code)+'&node='+encodeURIComponent(n.id);
-   if(p=='wg'&&inf.wg_pub)b+='<a class="b2" href="'+base+'">WireGuard</a>';if(p=='awg'&&inf.awg_pub)b+='<a class="b2" href="'+base+'">AmneziaWG</a>';
-   if(p=='hy2'&&inf.hy2_port)b+='<a class="b2" target="_blank" href="'+base+'">Hysteria2</a>'});
+   var cb=function(nm,tg){return '<a class="cfgb" style="--pc:'+PCOL[p]+'"'+(tg?' target="_blank"':'')+' href="'+base+'">'+ic('dl',14)+nm+'</a>'};
+   if(p=='wg'&&inf.wg_pub)b+=cb('WireGuard');if(p=='awg'&&inf.awg_pub)b+=cb('AmneziaWG');
+   if(p=='hy2'&&inf.hy2_port)b+=cb('Hysteria2',1)});
   if(b)rows+='<div class="li" style="flex-wrap:wrap"><b>'+esc(n.name)+'</b><span class="row">'+b+'</span></div>'});
  $('#sx').innerHTML='<div class="list" style="margin:8px 0">'+(rows||'<p class="muted">'+t('No configs: user has no nodes or protocols')+'</p>')+'</div>'}
 
