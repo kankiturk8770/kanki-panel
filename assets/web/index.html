@@ -458,6 +458,47 @@ textarea[data-bs]{width:100%;min-height:62px}
 html{background:#0c0a06}html:has(body.light){background:#e9e0cd}
 .bmeta{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--s);margin:-4px 0 12px}.bmeta b{color:var(--t);font-weight:600;white-space:nowrap}
 .pprice{display:flex;flex-direction:column;align-items:flex-end;line-height:1.25}.pprice small{color:var(--s);font-size:11px}
+/* Kanki Tunnel (v2.4) */
+.tmapc{padding:10px 10px 12px;overflow:hidden}
+.tmap{width:100%;height:auto;display:block;max-height:520px}
+.tmap .tcap{fill:var(--s);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+.tmap .tnm{fill:var(--t);font-size:12.5px;font-weight:700}
+.tmap .tini{fill:#2a1d06;font-size:14px;font-weight:900}
+.tmap .tlab text{font-size:10.5px;font-weight:700}
+.tmap .tfl{stroke-dasharray:3 15;stroke-linecap:round;animation:tnflow 1.1s linear infinite}
+.tmap .tpulse{transform-box:fill-box;transform-origin:center;animation:tnpulse 2.2s ease-out infinite}
+.tmap .tnode{cursor:default}
+@keyframes tnflow{to{stroke-dashoffset:-36}}
+@keyframes tnpulse{0%{opacity:.75;transform:scale(1)}100%{opacity:0;transform:scale(1.75)}}
+@media (prefers-reduced-motion:reduce){.tmap .tfl,.tmap .tpulse,.tflow em{animation:none}}
+.tempty{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:26px 14px;color:var(--a)}
+.tempty b{color:var(--t)}
+.tkpi{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px}
+.tkpi>div{background:var(--in);border:1px solid var(--ln);border-radius:12px;padding:8px 10px;min-width:0}
+.tkpi small{display:block;color:var(--s);font-size:11px}.tkpi b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.tcard{margin:0 0 10px}
+.tpath{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:12.5px;color:var(--s);min-width:0}
+.tpath span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40%}
+.tflow{position:relative;flex:1;min-width:40px;height:3px;border-radius:3px;background:color-mix(in srgb,var(--c) 25%,transparent);overflow:hidden;font-style:normal}
+.tflow em{position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--c),transparent);width:40%;animation:tnbar 1.4s linear infinite}
+[dir=rtl] .tflow em{animation-name:tnbar-r}
+@keyframes tnbar{from{transform:translateX(-100%)}to{transform:translateX(260%)}}
+@keyframes tnbar-r{from{transform:translateX(100%)}to{transform:translateX(-260%)}}
+.tst{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:700;border:1px solid;border-radius:20px;padding:3px 9px;white-space:nowrap}
+.tst i{width:7px;height:7px;border-radius:50%;box-shadow:0 0 8px currentColor}
+.tgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:10px 0 6px}
+.tgrid>div{background:var(--in);border:1px solid var(--ln);border-radius:11px;padding:6px 8px;min-width:0}
+.tgrid small{display:block;color:var(--s);font-size:10.5px}.tgrid b{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.tmeta{font-size:11.5px;margin:4px 0 0;word-break:break-word;text-align:start}
+.g1{display:grid;grid-template-columns:1fr;gap:8px}
+.b2.sm{padding:5px 10px;font-size:12px;border-radius:10px;text-decoration:none;display:inline-flex;align-items:center;gap:5px}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.seg button,.tropt button{background:var(--in);color:var(--t);border:1px solid var(--ln);border-radius:12px;padding:9px 10px;font:inherit;font-size:12.5px;cursor:pointer;text-align:start}
+.seg button.on,.tropt button.on{border-color:var(--a);background:color-mix(in srgb,var(--a) 14%,transparent);box-shadow:0 0 0 1px var(--a),0 0 14px color-mix(in srgb,var(--a) 35%,transparent)}
+.tropt{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.tropt b{display:block;font-size:13px}.tropt small{display:block;color:var(--s);font-size:11px;margin-top:2px;line-height:1.5}
+#tdc .nh{align-items:flex-start}
+@media (max-width:620px){.tgrid{grid-template-columns:repeat(2,1fr)}.tkpi{grid-template-columns:1fr 1fr}.tkpi>div:last-child{grid-column:1/-1}.tropt,.seg{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -487,7 +528,7 @@ function api(m,p,b,raw){var o={method:m,headers:{}};if(S.token)o.headers.Authori
  return fetch(p,o).then(function(r){if(r.status==401&&p!='/api/login'){logout(true);throw new Error('unauthorized')}
   if(raw&&raw.blob)return r.ok?r.blob().then(function(bl){return{blob:bl,name:((r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/)||[])[1]}}):r.json().then(function(j){throw new Error(j.error||r.status)});
   return r.text().then(function(x){var j;try{j=x?JSON.parse(x):{}}catch(e){j={error:x}}if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})})}
-function fail(e){if(e&&e.message!='unauthorized')toast(e.message||String(e),1)}
+function fail(e){if(e&&e.message!='unauthorized')toast(t(e.message||String(e)),1)}
 function copy(s){if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(s).then(function(){toast(t('Copied'))});else{var a=document.createElement('textarea');a.value=s;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();toast(t('Copied'))}}
 function bytes(n){n=+n||0;var u=['B','KB','MB','GB','TB'],i=0;while(n>=1024&&i<4){n/=1024;i++}return n.toFixed(i>=3?2:0)+' '+u[i]}
 function gbtxt(g){g=+g||0;return g<1?Math.round(g*1024)+' MB':g.toFixed(2)+' GB'}
@@ -593,7 +634,7 @@ function loginView(otp){applyLook();clearInterval(S.timer);clearInterval(S.timer
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
 // ---------------------------------------------------------------- shell
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['nodes','Nodes','nodes'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['nodes','Nodes','nodes'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 function shell(){var me=S.me||{};
  $('#app').innerHTML='<header><button class="ib" id="mn" aria-label="menu">'+ic('menu',20)+'</button><div class="'+logoCls()+'">'+logoInner((me.panel_name||'K').charAt(0))+'</div><div class="bn"><b>'+esc(me.panel_name||'Kanki Panel')+'</b><small class="ltr">v'+esc(me.version||'')+'</small></div><div class="sp"></div>'+
  '<button class="ib" id="upd"><span class="dot" id="updot"></span><span class="uv"> v'+esc(me.version||'')+'</span></button><button class="ib '+(S.lang=='fa'?'on':'')+'" data-l="fa">FA</button><button class="ib '+(S.lang=='en'?'on':'')+'" data-l="en">EN</button><button class="ib" id="thm" aria-label="theme">'+ic('moon',17)+'</button><button class="ib" id="lo" title="'+t('Logout')+'" aria-label="logout">'+ic('logout',17)+'</button></header>'+
@@ -609,8 +650,8 @@ function shell(){var me=S.me||{};
  api('GET','/api/update/check').then(function(r){var d=$('#updot');if(d)d.className='dot '+(r.available?'y':(r.error?'':'g'))}).catch(function(){});
 }
 function route(){var p=(location.hash||'#dash').slice(1);if(!PAGES.some(function(x){return x[0]==p}))p='dash';S.page=p;
- $$('#side a[data-p]').forEach(function(a){a.classList.toggle('on',a.dataset.p==p)});clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);window.scrollTo(0,0);
- ({dash:pDash,users:pUsers,nodes:pNodes,traffic:pTraffic,ports:pPorts,bot:pBot,backup:pBackup,security:pSecurity,settings:pSettings})[p]()}
+ $$('#side a[data-p]').forEach(function(a){a.classList.toggle('on',a.dataset.p==p)});clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);window.scrollTo(0,0);
+ ({dash:pDash,users:pUsers,nodes:pNodes,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,backup:pBackup,security:pSecurity,settings:pSettings})[p]()}
 window.addEventListener('hashchange',function(){if(S.token&&S.me)route()});
 function autoRefresh(fn){clearInterval(S.timer);var sec=Math.max(5,(S.me&&S.me.refresh)||10);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')fn()},sec*1000)}
 function boot(){api('GET','/api/me').then(function(me){S.me=me;try{localStorage.setItem('kk_logo',me.logo||'')}catch(e){}if(me.panel_name)document.title=me.panel_name;
@@ -646,10 +687,10 @@ function pDash(){dbReset();
  '<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('TCP / UDP connections')+'</h3><small class="muted" id="c_sub"></small></div>'+
   '<div class="nbig"><div class="dn"><small>TCP</small><b id="c_tcp" class="ltr">—</b></div><div class="upl"><small>UDP</small><b id="c_udp" class="ltr">—</b></div></div></div>'+
   '<div class="ch tall" id="ch_con"></div></div>'+
- '<div class="card"><h3>'+t('Services')+'</h3><p class="sub">'+t('Start, stop or restart the VPN services')+'</p><div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></div>'+logCard();
+ '<div class="card"><h3>'+t('Services')+'</h3><p class="sub">'+t('Start, stop or restart the VPN services')+'</p><div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></div>'+tunDashCard()+logCard();
  $('#d_iv').onchange=function(){DB.iv=+this.value;localStorage.setItem('kk_div',DB.iv);dashTimers()};
  $('#d_pause').onclick=function(){DB.paused=!DB.paused;if(!DB.paused)DB.last=null;this.textContent=DB.paused?'▶':'❚❚';this.title=DB.paused?t('Resume'):t('Pause');dashLive(DB.paused?'off':'')};
- $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};logWire();
+ $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};logWire();tunDashWire();
  $('#kpis').onclick=function(e){var b=e.target.closest('[data-go]');if(b)goUsers(b.dataset.go)};
  dashTick();dashSys();dashTimers()}
 function dashTimers(){clearInterval(S.timer);clearInterval(S.timer2);S.timer=setInterval(dashTick,DB.iv*1000);S.timer2=setInterval(dashSys,10000)}
@@ -1206,6 +1247,150 @@ function ptCheck(n){toast(t('Checking…'));if(n.id=='local'){api('GET','/api/sy
  api('POST','/api/nodes/'+encodeURIComponent(n.id)+'/health').then(function(r){if(r.services){n.info=n.info||{};n.info.services=r.services}toast(r.ok?t('Done'):t('Offline'),!r.ok);ptDraw()}).catch(fail)}
 
 Object.assign(FA,{"Admin numeric ID(s), comma separated": "آیدی عددی ادمین(ها)، با کاما جدا کن", "All servers": "همه سرورها", "All servers connected": "همه سرورها وصل‌اند", "All services": "همه سرویس‌ها", "Bot admins": "ادمین‌های ربات", "Bot token (from @BotFather)": "توکن ربات (از ‎@BotFather)", "Plans, prices and payments can also be managed inside the bot (Admin panel button).": "پلن‌ها، قیمت‌ها و پرداخت‌ها را داخل خود ربات هم می‌شود مدیریت کرد (دکمه پنل ادمین).", "By node": "بر اساس نود", "By protocol": "بر اساس پروتکل", "Check now": "بررسی الان", "Create and manage the sales bot": "ساخت و مدیریت ربات فروش", "Download and upload, every 2 seconds": "دانلود و آپلود، هر ۲ ثانیه", "Edit bot": "ویرایش ربات", "Empty = keep the current token": "خالی = همان توکن فعلی بماند", "Enforce connection limit (Hysteria2)": "اعمال محدودیت اتصال (Hysteria2)", "Firewall": "فایروال", "Get your numeric Telegram ID from @userinfobot.": "آیدی عددی تلگرامت را از ‎@userinfobot بگیر.", "How the bot sells: trials, payments, referrals and messages.": "نحوه فروش ربات: تست رایگان، پرداخت، دعوت دوستان و پیام‌ها.", "If a port is closed, run this on that server as root:": "اگر پورتی بسته است، این را روی همان سرور با root اجرا کن:", "In Telegram open @BotFather, send /newbot and copy the token it gives.": "در تلگرام ‎@BotFather را باز کن، ‎/newbot را بفرست و توکنی که می‌دهد را کپی کن.", "Live log": "لاگ زنده", "Live network traffic": "ترافیک لحظه‌ای شبکه", "Live speed": "سرعت لحظه‌ای", "Logs are not available": "لاگ در دسترس نیست", "Main": "اصلی", "New link (the old one stops working)": "لینک جدید (لینک قبلی از کار می‌افتد)", "No debug lines": "خط دیباگی نیست", "No errors": "خطایی نیست", "No log lines yet": "هنوز لاگی نیست", "No plans yet": "هنوز پلنی ساخته نشده", "No port information yet. Press Check now.": "هنوز اطلاعات پورت نیامده. «بررسی الان» را بزن.", "No sales bot yet": "هنوز ربات فروش ساخته نشده", "Node API (HTTPS)": "API نود (HTTPS)", "Online payments": "درگاه‌های پرداخت آنلاین", "Panel (HTTPS)": "پنل (HTTPS)", "Panel (internal)": "پنل (داخلی)", "Panel / API": "پنل / API", "Panel and VPN services on this server": "پنل و سرویس‌های VPN همین سرور", "Panel is restarting…": "پنل در حال ری‌استارت…", "Plan name": "نام پلن", "Port conflict: another service on this server uses the same port": "تداخل پورت: سرویس دیگری روی همین سرور همین پورت را دارد", "Port management": "مدیریت پورت‌ها", "Ports used on the main server and on every node": "پورت‌های سرور اصلی و همه نودها", "Press Create bot and paste both.": "«ساخت ربات» را بزن و هر دو را وارد کن.", "Quota of limited users": "مجموع سهمیه کاربران محدود", "Referral reward": "هدیه دعوت دوستان", "Save sales settings": "ذخیره تنظیمات فروش", "Search": "جستجو", "Server": "سرور", "Show all": "نمایش همه", "Soft light": "روشن ملایم", "Telegram sales bot": "ربات فروش تلگرام", "Text shown to the buyer": "متنی که به خریدار نشان داده می‌شود", "The panel restarts for a few seconds after saving.": "بعد از ذخیره، پنل چند ثانیه ری‌استارت می‌شود.", "Token": "توکن", "Token is required": "توکن لازم است", "Total recorded usage": "مصرف کل ثبت‌شده", "Traffic & stats": "ترافیک و آمار", "Used volume, limit and percent": "حجم مصرفی، سقف و درصد مصرف", "Users usage": "مصرف کاربران", "Users usage and live network traffic": "مصرف کاربران و ترافیک زنده شبکه", "Web (Caddy)": "وب (Caddy)", "Welcome message": "پیام خوش‌آمد", "What buyers can choose in the bot": "پلن‌هایی که خریدار در ربات می‌بیند", "connections": "اتصال", "local only (127.0.0.1)": "فقط داخلی (127.0.0.1)", "of it used": "از آن مصرف شده", "server(s) disconnected": "سرور قطع است", "users": "کاربر", "Sales enabled": "فروش فعال باشد", "Warn buyers before expiry / end of data": "هشدار به خریدار قبل از پایان زمان یا حجم", "App download link": "لینک دانلود اپ", "Required channel (empty = none)": "کانال اجباری (خالی = ندارد)", "Give a free trial": "تست رایگان بده", "Trial volume (GB)": "حجم تست (گیگ)", "Reward volume (GB)": "حجم هدیه (گیگ)", "Reward days": "روزهای هدیه", "Accept card to card": "پرداخت کارت به کارت فعال باشد", "Card holder name": "نام صاحب کارت", "NOWPayments (crypto)": "NOWPayments (ارز دیجیتال)", "NOWPayments API key": "کلید API در NOWPayments", "ZarinPal merchant ID": "مرچنت زرین‌پال", "ZarinPal callback URL": "آدرس بازگشت زرین‌پال", "Wallet / manual payment": "کیف پول / پرداخت دستی", "Connected": "وصل", "Disconnected": "قطع", "Errors": "خطا", "Debug": "دیباگ", "Unknown": "نامشخص"});
+// ---------------------------------------------------------------- Kanki Tunnel (v2.4)
+ICO.tunnel='<path d="M3 19v-7a9 9 0 0 1 18 0v7"/><path d="M7.5 19v-6.5a4.5 4.5 0 0 1 9 0V19"/><path d="M1.5 19h21"/>';
+var TN={d:null};
+function tunLoad(){return api('GET','/api/tunnels').then(function(d){TN.d=d;return d})}
+function tunSrv(id){var l=(TN.d&&TN.d.servers)||[];for(var i=0;i<l.length;i++)if(l[i].id==id)return l[i];return {id:id,name:id}}
+function tunStateTxt(s){return {up:t('Connected'),partial:t('Connecting…'),down:t('Disconnected'),off:t('Off')}[s]||s}
+function tunCol(s){return s=='up'?'#3ddc97':s=='partial'?'#f5b942':s=='off'?'#8a8f98':'#ff6b6b'}
+function tunTr(x){return {tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP'}[x]||x}
+function tunCmd(s,d){var repo=(d&&d.repo)||'',panel=(d&&d.panel)||location.origin;
+ return (repo?'KANKI_REPO='+repo+' ':'')+'KANKI_TUNNEL='+s.id+':'+s.token+' KANKI_PANEL='+panel+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'USER/REPO')+'/main/install.sh)'}
+
+// ---- the live map: entries on one side, exits on the other, water flowing through connected tunnels
+function tunMap(d,small){var sv=d.servers||[],tl=d.tunnels||[];
+ if(!tl.length&&sv.length<2)return '<div class="tempty">'+ic('tunnel',34)+'<b>'+t('No tunnels yet')+'</b><span class="muted">'+t('Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.')+'</span></div>';
+ var isE={},isX={};tl.forEach(function(x){isE[x.entry]=1;isX[x.exit]=1});
+ var L=[],R=[],M=[];sv.forEach(function(s){if(isE[s.id]&&isX[s.id])M.push(s);else if(isE[s.id])L.push(s);else if(isX[s.id])R.push(s);else M.push(s)});
+ var W=640,rows=Math.max(L.length,R.length,M.length,1),H=Math.max(small?150:190,rows*(small?78:96)+60),pos={};
+ function place(arr,x){arr.forEach(function(s,i){pos[s.id]={x:x,y:Math.round(H/2+(i-(arr.length-1)/2)*(small?78:96))+8}})}
+ place(L,110);place(R,530);place(M,320);
+ var o='<svg class="tmap" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet" direction="ltr"><defs>'+
+  '<radialGradient id="tnG" cx="35%" cy="30%" r="75%"><stop offset="0" stop-color="#fff7d6"/><stop offset=".45" stop-color="#e9c46e"/><stop offset="1" stop-color="#8a6420"/></radialGradient>'+
+  '<filter id="tnGl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
+ if(L.length)o+='<text class="tcap" x="110" y="20" text-anchor="middle">'+esc(t('Entry'))+'</text>';
+ if(R.length)o+='<text class="tcap" x="530" y="20" text-anchor="middle">'+esc(t('Exit'))+'</text>';
+ tl.forEach(function(x,i){var a=pos[x.entry],b=pos[x.exit];if(!a||!b)return;
+  var off=(i%3-1)*10,mx=(a.x+b.x)/2,c1y=a.y+off,c2y=b.y+off,dd='M'+a.x+' '+a.y+' C'+mx+' '+c1y+' '+mx+' '+c2y+' '+b.x+' '+b.y,col=tunCol(x.state),id='tnp'+i;
+  o+='<path d="'+dd+'" stroke="'+col+'" stroke-width="7" stroke-opacity=".12" fill="none"/>'+
+   '<path id="'+id+'" d="'+dd+'" stroke="'+col+'" stroke-width="2.4" stroke-opacity="'+(x.state=='up'?'.55':'.85')+'" fill="none"'+(x.state=='down'?' stroke-dasharray="4 7"':'')+'/>';
+  if(x.state=='up'||x.state=='partial'){var dur=x.state=='up'?Math.max(1.2,Math.min(4,1.2+((x.entry_status&&x.entry_status.rtt_ms)||0)/120)):5;
+   o+='<path d="'+dd+'" class="tfl" stroke="'+col+'" stroke-width="2.4" fill="none" filter="url(#tnGl)"/>';
+   for(var k=0;k<3;k++)o+='<circle r="'+(k?2.6:3.6)+'" fill="'+col+'" filter="url(#tnGl)"><animateMotion dur="'+dur.toFixed(2)+'s" begin="-'+(k*dur/3).toFixed(2)+'s" repeatCount="indefinite"><mpath href="#'+id+'"/></animateMotion></circle>';
+   if(x.state=='up')o+='<circle r="2.2" fill="#fff" opacity=".85"><animateMotion dur="'+(dur*1.3).toFixed(2)+'s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#'+id+'"/></animateMotion></circle>'}
+  var u=[.5,.32,.68][i%3],v=1-u,px=v*v*v*a.x+3*v*v*u*mx+3*v*u*u*mx+u*u*u*b.x,py=v*v*v*a.y+3*v*v*u*c1y+3*v*u*u*c2y+u*u*u*b.y,es=x.entry_status||{},lab=tunTr(x.transport)+(x.state=='up'&&es.rtt_ms?' · '+es.rtt_ms+'ms':'');
+  if(!small||tl.length<5)o+='<g class="tlab"><rect x="'+(px-lab.length*3.4-8)+'" y="'+(py-21)+'" width="'+(lab.length*6.8+16)+'" height="17" rx="8.5" fill="var(--c2)" stroke="'+col+'" stroke-opacity=".5"/><text x="'+px+'" y="'+(py-9)+'" text-anchor="middle" fill="'+col+'">'+esc(lab)+'</text></g>'});
+ sv.forEach(function(s){var p=pos[s.id];if(!p)return;var col=s.online?'#3ddc97':'#ff6b6b',nm=s.name.length>14?s.name.slice(0,13)+'…':s.name;
+  o+='<g class="tnode"'+(small?'':' data-ts="'+esc(s.id)+'"')+'>'+(s.online?'<circle cx="'+p.x+'" cy="'+p.y+'" r="25" fill="none" stroke="'+col+'" class="tpulse"/>':'')+
+   '<circle cx="'+p.x+'" cy="'+p.y+'" r="24" fill="var(--c2)" stroke="'+col+'" stroke-width="2" filter="url(#tnGl)"/>'+
+   '<circle cx="'+p.x+'" cy="'+p.y+'" r="17" fill="url(#tnG)"/>'+
+   '<text x="'+p.x+'" y="'+(p.y+5)+'" text-anchor="middle" class="tini">'+esc((s.local?'★':s.name.charAt(0)).toUpperCase())+'</text>'+
+   '<text x="'+p.x+'" y="'+(p.y+42)+'" text-anchor="middle" class="tnm">'+esc(nm)+'</text>'+
+   '<circle cx="'+(p.x+18)+'" cy="'+(p.y-18)+'" r="5" fill="'+col+'" stroke="var(--c2)" stroke-width="2"/></g>'});
+ return o+'</svg>'}
+
+// ---- the page
+function pTunnels(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnels')+'</h2><p>'+t('Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit')+'</p></div>'+
+ '<div class="row" style="gap:6px"><button class="b2" onclick="tunServerAdd()">+ '+t('Server')+'</button><button class="btn" onclick="tunEdit()">+ '+t('Tunnel')+'</button></div></div>'+
+ '<div class="card tmapc"><div id="tn_map"><span class="muted">'+t('Loading…')+'</span></div><div class="tkpi" id="tn_kpi"></div></div>'+
+ '<div class="nh" style="margin-top:4px"><h3>'+t('Tunnels')+'</h3></div><div id="tn_list"></div>'+
+ '<div class="nh" style="margin-top:14px"><h3>'+t('Servers')+'</h3><span class="muted">'+t('Servers that only carry tunnels get a small agent: no VPN is installed on them')+'</span></div><div class="ncards" id="tn_srv"></div>';
+ tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
+function tunRefresh(quiet){return tunLoad().then(tunDraw).catch(function(e){if(!quiet)fail(e)})}
+function tunDraw(d){if(!$('#tn_map'))return;var sv=d.servers||[],tl=d.tunnels||[];
+ $('#tn_map').innerHTML=tunMap(d);
+ var up=tl.filter(function(x){return x.state=='up'}).length,on=sv.filter(function(s){return s.online}).length,rx=0,tx=0;
+ tl.forEach(function(x){var s=x.entry_status;if(s){rx+=s.rx_bytes||0;tx+=s.tx_bytes||0}});
+ $('#tn_kpi').innerHTML='<div><small>'+t('Tunnels connected')+'</small><b style="color:'+(up==tl.length&&tl.length?'var(--ok)':'inherit')+'">'+N(up)+' / '+N(tl.length)+'</b></div><div><small>'+t('Servers online')+'</small><b>'+N(on)+' / '+N(sv.length)+'</b></div><div><small>'+t('Through the tunnels')+'</small><b class="ltr">↑ '+bytes(tx)+' · ↓ '+bytes(rx)+'</b></div>';
+ $('#tn_list').innerHTML=tl.length?tl.map(tunCard).join(''):'<div class="card muted" style="text-align:center">'+t('No tunnels yet')+' · <a href="javascript:tunEdit()">'+t('Make the first tunnel')+'</a></div>';
+ $('#tn_srv').innerHTML=sv.map(tunSrvCard).join('')}
+function tunCard(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},col=tunCol(x.state),err=es.error||xx.error||'';
+ var ports=[];if(x.tcp&&x.tcp.length)ports.push('TCP '+x.tcp.join(', '));if(x.udp&&x.udp.length)ports.push('UDP '+x.udp.join(', '));
+ return '<div class="card tcard" style="border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">'+
+  '<div style="min-width:0"><b>'+esc(x.name)+'</b><div class="tpath"><span>'+esc(e.name)+'</span><i class="tflow" style="--c:'+col+'"><em></em></i><span>'+esc(xs.name)+'</span></div></div>'+
+  '<div class="row" style="gap:8px;flex-wrap:nowrap"><span class="tst" style="color:'+col+';border-color:'+col+'"><i style="background:'+col+'"></i>'+tunStateTxt(x.state)+'</span>'+sw('',x.enabled,"tunAct('"+x.id+"','"+(x.enabled?'disable':'enable')+"')")+'</div></div>'+
+  '<div class="tgrid"><div><small>'+t('Transport')+'</small><b>'+esc(tunTr(x.transport))+'</b></div><div><small>'+t('Ping')+'</small><b class="ltr">'+(es.rtt_ms?es.rtt_ms+' ms':'—')+'</b></div>'+
+  '<div><small>'+t('Links')+'</small><b class="ltr">'+N(es.links||0)+' / '+N(es.want||x.conns||1)+'</b></div><div><small>'+t('Traffic')+'</small><b class="ltr">↑'+bytes(es.tx_bytes||0)+' ↓'+bytes(es.rx_bytes||0)+'</b></div></div>'+
+  '<p class="muted ltr tmeta">'+esc((x.mode=='direct'?t('direct'):t('reverse'))+' · '+t('port')+' '+x.port+' · '+(x.dial_host||'?')+' · '+ports.join(' · '))+'</p>'+
+  (err&&x.state!='up'?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(err)+'</div>':'')+
+  '<div class="g3" style="margin-top:10px"><button class="b2" onclick="tunEdit(\''+x.id+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2" onclick="tunAct(\''+x.id+'\',\'restart\')">'+ic('refresh',15)+' '+t('Reconnect')+'</button><button class="b2 bd" onclick="tunDel(\''+x.id+'\')">'+ic('trash',15)+' '+t('Delete')+'</button></div></div>'}
+function tunSrvCard(s){var col=s.online?'var(--ok)':'var(--bad)';
+ return '<div class="card" style="margin:0;border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start"><div class="row"><div class="logo" style="width:34px;height:34px;font-size:14px">'+esc(s.local?'★':s.name.charAt(0).toUpperCase())+'</div><div><b>'+esc(s.name)+'</b><div class="muted ltr">'+esc(s.host||t('address unknown yet'))+'</div></div></div>'+
+  '<span class="badge '+(s.online?'g':'r')+'">'+(s.local?t('Panel server'):s.online?t('Connected'):t('Disconnected'))+'</span></div>'+
+  '<p class="muted" style="margin:8px 0">'+(s.local?t('Runs inside the panel'):(s.last_seen?t('Last contact')+': '+ago(s.last_seen):t('Not connected yet: run its command on the server')))+(s.version?' · v'+esc(s.version):'')+'</p>'+
+  '<div class="g'+(s.local?'1':'3')+'"><button class="b2" onclick="tunSrvEdit(\''+s.id+'\')">'+ic('edit',15)+' '+t('Edit')+'</button>'+(s.local?'':'<button class="b2" onclick="tunSrvCmd(\''+s.id+'\')">'+ic('link',15)+' '+t('Command')+'</button><button class="b2 bd" onclick="tunSrvDel(\''+s.id+'\')">'+ic('trash',15)+' '+t('Delete')+'</button>')+'</div></div>'}
+function tunAct(id,a){api('POST','/api/tunnels/'+id+'/'+a).then(function(){toast(a=='restart'?t('The tunnel reconnects in a few seconds'):t('Done'));tunRefresh()}).catch(fail)}
+function tunDel(id){confirmDo(function(){api('DELETE','/api/tunnels/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)})}
+function tunSrvDel(id){confirmDo(function(){api('DELETE','/api/tunnels/servers/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)})}
+
+// ---- servers
+function tunCmdBox(s,d){var cmd=tunCmd(s,d);
+ return '<label class="f">'+t('Run this on the server, as root (Ubuntu / Debian)')+'</label><pre class="cmd" id="tn_cmd">'+esc(cmd)+'</pre><button class="btn" style="width:100%" id="tn_cp">'+ic('link',16)+' '+t('Copy command')+'</button>'+
+  '<p class="muted" style="margin:10px 0 0">'+t('It installs only the tunnel agent: no VPN, no web panel. The server appears here as Connected within a few seconds.')+'</p>'+
+  ((d&&d.repo)?'':'<div class="warnbox">'+t('Set the update source (GitHub repo) in Settings first, or replace USER/REPO in the command.')+'</div>')}
+function tunServerAdd(){modal(mhead(t('Add a tunnel server'))+'<p class="muted" style="margin:0 0 8px">'+t('For example your Iran server. Only the tunnel agent is installed on it.')+'</p>'+
+ '<div id="tn_in"><label class="f">'+t('Server name')+'</label><input id="tn_nm" placeholder="Iran-1"><label class="f">'+t('Address other servers use to reach it (optional)')+'</label><input id="tn_ad" class="ltr" placeholder="ir.example.com"><small class="muted">'+t('Empty = the IP it connects from')+'</small>'+
+ '<button class="btn" style="width:100%;margin-top:12px" id="tn_go">'+t('Create command')+'</button></div><div id="tn_out"></div>');
+ $('#tn_go').onclick=function(){var me=this;me.disabled=true;api('POST','/api/tunnels/servers',{name:$('#tn_nm').value,addr:$('#tn_ad').value}).then(function(r){
+  $('#tn_in').classList.add('hide');$('#tn_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)};tunRefresh(true)}).catch(function(e){me.disabled=false;fail(e)})}}
+function tunSrvCmd(id){if(!confirm(t('A new command makes the old one stop working. Continue?')))return;
+ api('PUT','/api/tunnels/servers/'+id,{new_token:true}).then(function(r){var s=tunSrv(id);modal(mhead(t('Command for')+' '+s.name)+tunCmdBox({id:id,token:r.token},r));$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}).catch(fail)}
+function tunSrvEdit(id){var s=tunSrv(id);
+ modal(mhead(t('Edit server'))+(s.local?'':'<label class="f">'+t('Server name')+'</label><input id="ts_nm" value="'+esc(s.name)+'">')+
+  '<label class="f">'+t('Address other servers use to reach it')+'</label><input id="ts_ad" class="ltr" value="'+esc(s.addr||'')+'" placeholder="'+esc(s.host||'')+'"><small class="muted">'+t('Empty = automatic')+'</small>'+
+  '<div class="g2" style="margin-top:12px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="ts_go">'+t('Save')+'</button></div>');
+ $('#ts_go').onclick=function(){var b={addr:$('#ts_ad').value};if($('#ts_nm'))b.name=$('#ts_nm').value;api('PUT','/api/tunnels/servers/'+id,b).then(function(){closeModal();toast(t('Done'));tunRefresh()}).catch(fail)}}
+
+// ---- tunnel wizard
+var TNP={balanced:4,speed:8,gaming:2};
+function tunFreePort(listener,skip){var used={};((TN.d&&TN.d.tunnels)||[]).forEach(function(x){if(x.id==skip)return;var l=x.mode=='direct'?x.exit:x.entry;if(l==listener)used[x.port]=1;if(x.entry==listener)(x.tcp||[]).forEach(function(p){used[+String(p).split(':')[0]]=1})});
+ for(var p=3080;p<3200;p++)if(!used[p])return p;return 3080}
+function tunEdit(id){if(!TN.d)return tunLoad().then(function(){tunEdit(id)});
+ var x=id?((TN.d.tunnels||[]).filter(function(z){return z.id==id})[0]||{}):{},sv=TN.d.servers||[];
+ var remote=sv.filter(function(s){return !s.local});
+ var dE=x.entry||(remote[0]&&remote[0].id)||'',dX=x.exit||'local';
+ var opt=function(sel){return sv.map(function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'}).join('')};
+ var prof=x.conns==8?'speed':x.conns==2?'gaming':'balanced',tr=x.transport||'tcpmux',mode=x.mode||'reverse';
+ var trs=[['tcpmux',t('Fast and steady, several links at once (recommended)')],['tcp',t('One plain link')],['ws',t('Looks like a WebSocket, works behind a CDN')],['wss',t('Looks like an HTTPS site, hardest to spot')],['quic',t('Over QUIC (UDP), fast and encrypted')],['kcp',t('Over KCP (UDP), good on weak/lossy internet')]];
+ modal(mhead(id?t('Edit tunnel'):t('New tunnel'))+
+  (sv.length<2?'<div class="warnbox">'+t('First add your entry server with “+ Server”.')+'</div>':'')+
+  '<label class="f">'+t('Name')+'</label><input id="tw_nm" value="'+esc(x.name||'')+'" placeholder="Iran → '+esc(tunSrv(dX).name)+'">'+
+  '<div class="g2"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="tw_en">'+opt(dE)+'</select></div><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="tw_ex">'+opt(dX)+'</select></div></div>'+
+  '<label class="f">'+t('Who connects')+'</label><div class="seg" id="tw_md"><button data-v="reverse" class="'+(mode=='reverse'?'on':'')+'">'+t('Exit → entry (reverse, recommended)')+'</button><button data-v="direct" class="'+(mode=='direct'?'on':'')+'">'+t('Entry → exit (direct)')+'</button></div>'+
+  '<label class="f">'+t('Transport')+'</label><div class="tropt" id="tw_tr">'+trs.map(function(o){return '<button data-v="'+o[0]+'" class="'+(tr==o[0]?'on':'')+'"><b>'+tunTr(o[0])+'</b><small>'+o[1]+'</small></button>'}).join('')+'</div>'+
+  '<div class="g2"><div><label class="f">'+t('Tunnel port')+'</label><input id="tw_pt" type="number" class="ltr" value="'+(x.port||'')+'"></div><div><label class="f">'+t('Profile')+'</label><select id="tw_pf"><option value="balanced"'+(prof=='balanced'?' selected':'')+'>'+t('Balanced')+'</option><option value="speed"'+(prof=='speed'?' selected':'')+'>'+t('Most speed')+'</option><option value="gaming"'+(prof=='gaming'?' selected':'')+'>'+t('Gaming (low ping)')+'</option></select></div></div>'+
+  '<small class="muted" id="tw_ph"></small>'+
+  '<div class="nh" style="margin-top:12px"><b>'+t('Ports to carry')+'</b><button class="b2 sm" id="tw_vpn">'+ic('ports',14)+' '+t('VPN ports of the panel server')+'</button></div>'+
+  '<div class="g2"><div><label class="f">TCP</label><input id="tw_tcp" class="ltr" value="'+esc((x.tcp||[]).join(', '))+'" placeholder="443, 2053"></div><div><label class="f">UDP</label><input id="tw_udp" class="ltr" value="'+esc((x.udp||[]).join(', '))+'" placeholder="51820, 51821, 8443"></div></div>'+
+  '<small class="muted">'+t('Users connect to these ports on the entry; they reach the same ports on the exit. Use 8443:443 to change the port, 1000-1010 for a range.')+'</small>'+
+  '<details class="box" style="margin-top:10px"><summary><b>'+t('Advanced')+'</b></summary>'+
+  '<label class="f">'+t('Address to dial (empty = the server’s address)')+'</label><input id="tw_dl" class="ltr" value="'+esc(x.dial||'')+'">'+
+  '<label class="f">'+t('Target on the exit')+'</label><input id="tw_tg" class="ltr" value="'+esc(x.target||'')+'" placeholder="127.0.0.1">'+
+  '<div class="g2"><div><label class="f">SNI / Host (ws, wss, quic)</label><input id="tw_sni" class="ltr" value="'+esc(x.sni||'')+'"></div><div><label class="f">'+t('Path')+' (ws, wss)</label><input id="tw_pa" class="ltr" value="'+esc(x.path||'')+'" placeholder="/"></div></div></details>'+
+  '<div class="g2" style="margin-top:14px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="tw_go">'+(id?t('Save'):t('Make the tunnel'))+'</button></div>','wide');
+ var st={mode:mode,tr:tr};
+ function hint(){var en=$('#tw_en').value,ex=$('#tw_ex').value,l=st.mode=='direct'?ex:en;if(!$('#tw_pt').value||!id&&!$('#tw_pt').dataset.touched)$('#tw_pt').value=tunFreePort(l,id);
+  var ls=tunSrv(l),port=$('#tw_pt').value;$('#tw_ph').textContent=t('Open this port on')+' '+ls.name+': '+port+'/TCP'+(en==ex?' · '+t('The entry and the exit must be different'):'')}
+ $('#tw_pt').oninput=function(){this.dataset.touched=1;hint()};
+ $('#tw_en').onchange=hint;$('#tw_ex').onchange=hint;
+ $('#tw_md').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.mode=b.dataset.v;$$('#tw_md button').forEach(function(z){z.classList.toggle('on',z==b)});hint()};
+ $('#tw_tr').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.tr=b.dataset.v;$$('#tw_tr button').forEach(function(z){z.classList.toggle('on',z==b)})};
+ $('#tw_vpn').onclick=function(){api('GET','/api/nodes').then(function(ns){var n=ns.filter(function(z){return z.id=='local'})[0]||{},i=n.info||{},u=[];
+  [i.wg_port,i.awg_port,i.hy2_port].forEach(function(p){if(p&&u.indexOf(String(p))<0)u.push(String(p))});
+  $('#tw_udp').value=u.join(', ');$('#tw_tcp').value=String(location.port||443);toast(t('Ports of the panel server were filled in'))}).catch(fail)};
+ hint();
+ $('#tw_go').onclick=function(){var me=this,b={name:$('#tw_nm').value,entry:$('#tw_en').value,exit:$('#tw_ex').value,mode:st.mode,transport:st.tr,port:+$('#tw_pt').value||0,conns:TNP[$('#tw_pf').value]||4,
+  tcp:$('#tw_tcp').value,udp:$('#tw_udp').value,dial:$('#tw_dl').value,target:$('#tw_tg').value,sni:$('#tw_sni').value,path:$('#tw_pa').value};if(id)b.id=id;
+  me.disabled=true;api('POST','/api/tunnels',b).then(function(){closeModal();toast(id?t('Saved: the tunnel restarts with the new settings'):t('The tunnel is made: it connects in a few seconds'));tunRefresh()}).catch(function(e){me.disabled=false;fail(e)})}}
+
+// ---- dashboard card
+function tunDashCard(){return '<div class="card" id="tdc"><div class="nh"><div><h3>'+ic('tunnel',16)+' '+t('Tunnels')+'</h3><p class="sub" id="tdc_s">…</p></div><a class="b2 sm" href="#tunnels">'+t('Manage')+'</a></div><div id="tdc_m"></div></div>'}
+function tunDashWire(){if(!$('#tdc'))return;var go=function(){tunLoad().then(function(d){if(!$('#tdc'))return;var tl=d.tunnels||[],up=tl.filter(function(x){return x.state=='up'}).length;
+  $('#tdc_s').textContent=tl.length?(up==tl.length?t('All tunnels connected'):N(tl.length-up)+' '+t('tunnel(s) not connected'))+' · '+N(up)+' / '+N(tl.length):t('No tunnels yet');
+  $('#tdc_m').innerHTML=tunMap(d,true)}).catch(function(){})};go();clearInterval(S.timer4);S.timer4=setInterval(function(){if(document.visibilityState=='visible')go()},5000)}
+
+Object.assign(FA,{"A new command makes the old one stop working. Continue?": "با ساختن دستور جدید، دستور قبلی دیگر کار نمی‌کند. ادامه بدهم؟", "Add a tunnel server": "افزودن سرور تانل", "Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.": "اول سرور ورودی (مثلاً سرور ایران) را اضافه کن، بعد یک تانل به سرور پنل یا سرور دیگری بساز.", "Address other servers use to reach it": "آدرسی که سرورهای دیگر با آن وصل می‌شوند", "Address other servers use to reach it (optional)": "آدرسی که سرورهای دیگر با آن وصل می‌شوند (اختیاری)", "Address to dial (empty = the server’s address)": "آدرس اتصال (خالی = آدرس خود سرور)", "All tunnels connected": "همه‌ی تانل‌ها وصل‌اند", "Balanced": "متعادل", "Command": "دستور", "Command for": "دستور برای", "Connecting…": "در حال اتصال…", "Create command": "ساخت دستور", "Edit server": "ویرایش سرور", "Edit tunnel": "ویرایش تانل", "Empty = automatic": "خالی = خودکار", "Empty = the IP it connects from": "خالی = همان آی‌پی که از آن وصل می‌شود", "Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit": "تانل رمزنگاری‌شده بین سرورها: کاربر به سرور ورودی وصل می‌شود و ترافیک از سرور خروجی بیرون می‌رود", "Entry": "ورودی", "Entry (users connect here)": "ورودی (کاربرها به این وصل می‌شوند)", "Entry → exit (direct)": "ورودی ← به خروجی وصل شود (مستقیم)", "Exit": "خروجی", "Exit (traffic leaves here)": "خروجی (ترافیک از اینجا بیرون می‌رود)", "Exit → entry (reverse, recommended)": "خروجی ← به ورودی وصل شود (معکوس، پیشنهادی)", "Fast and steady, several links at once (recommended)": "سریع و پایدار، چند اتصال هم‌زمان (پیشنهادی)", "First add your entry server with “+ Server”.": "اول سرور ورودی را با «+ سرور» اضافه کن.", "For example your Iran server. Only the tunnel agent is installed on it.": "مثلاً سرور ایران. فقط عامل تانل روی آن نصب می‌شود.", "Gaming (low ping)": "گیم (پینگ کم)", "It installs only the tunnel agent: no VPN, no web panel. The server appears here as Connected within a few seconds.": "فقط عامل تانل نصب می‌شود؛ نه VPN و نه پنل وب. چند ثانیه بعد سرور اینجا «وصل» نشان داده می‌شود.", "Links": "اتصال‌ها", "Looks like a WebSocket, works behind a CDN": "شبیه وب‌سوکت، پشت CDN هم کار می‌کند", "Looks like an HTTPS site, hardest to spot": "شبیه یک سایت HTTPS، سخت‌تر از همه شناسایی می‌شود", "Make the first tunnel": "اولین تانل را بساز", "Make the tunnel": "ساخت تانل", "Most speed": "بیشترین سرعت", "New tunnel": "تانل جدید", "No tunnels yet": "هنوز تانلی ساخته نشده", "Not connected yet: run its command on the server": "هنوز وصل نشده: دستورش را روی سرور اجرا کن", "One plain link": "یک اتصال ساده", "Open this port on": "این پورت را باز کن روی", "Panel server": "سرور پنل", "Path": "مسیر", "Ping": "پینگ", "Ports of the panel server were filled in": "پورت‌های سرور پنل وارد شد", "Ports to carry": "پورت‌هایی که از تانل رد می‌شوند", "Profile": "پروفایل", "Reconnect": "اتصال دوباره", "Run this on the server, as root (Ubuntu / Debian)": "این را روی سرور با کاربر root اجرا کن (اوبونتو / دبیان)", "Runs inside the panel": "داخل خود پنل اجرا می‌شود", "Saved: the tunnel restarts with the new settings": "ذخیره شد: تانل با تنظیمات جدید دوباره وصل می‌شود", "Server name": "نام سرور", "Servers": "سرورها", "Servers online": "سرورهای وصل", "Servers that only carry tunnels get a small agent: no VPN is installed on them": "روی سرورهایی که فقط تانل دارند یک عامل کوچک نصب می‌شود؛ هیچ VPN نصب نمی‌شود", "Set the update source (GitHub repo) in Settings first, or replace USER/REPO in the command.": "اول منبع آپدیت (مخزن گیت‌هاب) را در تنظیمات بگذار، یا USER/REPO را در دستور عوض کن.", "Target on the exit": "مقصد روی سرور خروجی", "The entry and the exit must be different": "ورودی و خروجی باید دو سرور متفاوت باشند", "The tunnel is made: it connects in a few seconds": "تانل ساخته شد: تا چند ثانیه‌ی دیگر وصل می‌شود", "The tunnel reconnects in a few seconds": "تانل تا چند ثانیه‌ی دیگر دوباره وصل می‌شود", "Through the tunnels": "عبوری از تانل‌ها", "Traffic": "ترافیک", "Transport": "روش انتقال", "Tunnel": "تانل", "Tunnel port": "پورت تانل", "Tunnels": "تانل‌ها", "Tunnels connected": "تانل‌های وصل", "Users connect to these ports on the entry; they reach the same ports on the exit. Use 8443:443 to change the port, 1000-1010 for a range.": "کاربرها به این پورت‌ها روی سرور ورودی وصل می‌شوند و به همان پورت‌ها روی خروجی می‌رسند. برای تغییر پورت 8443:443 و برای بازه 1000-1010 بنویس.", "Who connects": "چه کسی وصل شود", "address unknown yet": "آدرس هنوز معلوم نیست", "direct": "مستقیم", "panel": "پنل", "port": "پورت", "reverse": "معکوس", "tunnel(s) not connected": "تانل وصل نیست", "Server": "سرور", "Off": "خاموش", "Manage": "مدیریت", "Advanced": "پیشرفته", "choose the entry and the exit server": "سرور ورودی و خروجی را انتخاب کن", "the entry and the exit must be two different servers": "ورودی و خروجی باید دو سرور متفاوت باشند", "the tunnel port is required": "پورت تانل لازم است", "add at least one TCP or UDP port to forward": "حداقل یک پورت TCP یا UDP اضافه کن", "the tunnel port is also in the forwarded TCP ports": "پورت تانل نباید جزو پورت‌های عبوری TCP باشد", "the panel server cannot be removed": "سرور پنل حذف نمی‌شود", "VPN ports of the panel server": "پورت‌های VPN سرور پنل", "Over QUIC (UDP), fast and encrypted": "روی QUIC (UDP)، سریع و رمزنگاری‌شده", "Over KCP (UDP), good on weak/lossy internet": "روی KCP (UDP)، مناسب اینترنت ضعیف و پرافت"});
 applyLook();if(S.token)boot();else loginView();
 </script>
 </body>

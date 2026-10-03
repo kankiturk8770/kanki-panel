@@ -29,6 +29,9 @@ mod wg;
 #[path = "telegram/bot.rs"]
 mod bot;
 
+// tunnel: encrypted tunnels between servers (Kanki Tunnel)
+mod tunnel;
+
 use std::collections::HashMap;
 use std::sync::atomic::AtomicI64;
 use std::sync::{Arc, Mutex};
@@ -71,7 +74,7 @@ impl App {
 }
 
 fn usage() {
-    println!("kanki-panel {}\n\nCommands:\n  serve                      run the main panel (default)\n  node                       run the node agent\n  hash-password <pass>       print a password hash\n  reset-admin <user> <pass>  reset admin login, sessions and 2FA\n  reset-security             clear IP allow/deny lists and disable 2FA\n  set-bot <token> <admins>   set / change the Telegram sales bot (empty token = remove)\n  version", VERSION);
+    println!("kanki-panel {}\n\nCommands:\n  serve                      run the main panel (default)\n  node                       run the node agent\n  tunnel-agent               run the tunnel agent (servers that only carry tunnels)\n  hash-password <pass>       print a password hash\n  reset-admin <user> <pass>  reset admin login, sessions and 2FA\n  reset-security             clear IP allow/deny lists and disable 2FA\n  set-bot <token> <admins>   set / change the Telegram sales bot (empty token = remove)\n  version", VERSION);
 }
 
 #[tokio::main]
@@ -90,6 +93,10 @@ async fn main() {
         }
         "help" | "--help" | "-h" => {
             usage();
+            return;
+        }
+        "tunnel-agent" => {
+            tunnel::agent::run(VERSION).await;
             return;
         }
         _ => {}
@@ -175,6 +182,7 @@ async fn main() {
     // upgrade legacy sha256 admin hash stored in the db is done at next successful login
 
     tokio::spawn(sync::run(app.clone()));
+    tokio::spawn(tunnel::panel::local_loop(app.clone()));
     tokio::spawn(backup::telegram_loop(app.clone()));
     if let Some(b) = bot::Bot::new(app.clone()) {
         tokio::spawn(b.run());

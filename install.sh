@@ -40,6 +40,8 @@ yes_no(){ local a; read -rp "$1 [${2:-Y}/$( [ "${2:-Y}" = Y ] && echo n || echo 
 REPO="${KANKI_REPO:-$(cat $ENV_DIR/repo 2>/dev/null || true)}"
 # one-command node join: the panel (Nodes > Add node) prints a line that sets these two
 KANKI_JOIN="${KANKI_JOIN:-}"; KANKI_PANEL="${KANKI_PANEL:-}"
+# one-command tunnel server (Tunnels > + Server): KANKI_TUNNEL=ID:TOKEN
+KANKI_TUNNEL="${KANKI_TUNNEL:-}"
 envget(){ grep -m1 "^$1=" "$ENV" 2>/dev/null | cut -d= -f2-; }
 free_port(){ # $1=var $2=preferred port: keep it when free, otherwise take a random free one (no questions)
   local p="$2"
@@ -414,11 +416,50 @@ join_node(){
   fi
 }
 
+install_tunnel_agent(){
+  [ -n "$KANKI_PANEL" ] || die "KANKI_PANEL is missing. Copy the full command from the panel (Tunnels > + Server)."
+  KANKI_PANEL="${KANKI_PANEL%/}"
+  local id="${KANKI_TUNNEL%%:*}" tok="${KANKI_TUNNEL#*:}" ins="" code
+  { [ -n "$id" ] && [ -n "$tok" ] && [ "$id" != "$tok" ]; } || die "KANKI_TUNNEL must look like ID:TOKEN. Copy the full command from the panel."
+  echo; say "Installing the Kanki tunnel agent for $KANKI_PANEL"
+  say "Only the tunnel agent is installed here: no VPN, no web panel."
+  need_repo
+  command -v curl >/dev/null || { apt-get update -qq; apt-get install -y -qq curl ca-certificates >/dev/null; }
+  download_bin
+  # any HTTP answer means the panel is reachable; only a TLS problem needs the insecure flag
+  code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$KANKI_PANEL/tunnel/agent" 2>/dev/null || true)
+  if [ -z "$code" ] || [ "$code" = "000" ]; then
+    code=$(curl -sk -m 15 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$KANKI_PANEL/tunnel/agent" 2>/dev/null || true)
+    if [ -n "$code" ] && [ "$code" != "000" ]; then ins=1; warn "The panel's certificate is not trusted from here; continuing without checking it."
+    else warn "This server cannot reach $KANKI_PANEL right now. The agent keeps trying by itself."; fi
+  fi
+  mkdir -p "$ENV_DIR" /var/lib/kanki
+  umask 077
+  printf 'PANEL_URL=%s\nAGENT_ID=%s\nAGENT_TOKEN=%s\nINSECURE=%s\n' "$KANKI_PANEL" "$id" "$tok" "$ins" > "$ENV_DIR/tunnel.env"
+  umask 022
+  # long-distance TCP links keep their speed better with BBR
+  if modprobe tcp_bbr 2>/dev/null || grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
+    printf 'net.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr\nnet.core.rmem_max=16777216\nnet.core.wmem_max=16777216\n' > /etc/sysctl.d/90-kanki-tunnel.conf
+    sysctl -q --system >/dev/null 2>&1 || true
+  fi
+  service kanki-tunnel tunnel-agent
+  sleep 4
+  if systemctl is-active --quiet kanki-tunnel; then
+    echo; ok "Done! This server is connected to the panel. Open Tunnels in the panel: it shows as Connected."
+    echo "   Make a tunnel there; the agent opens the ports it needs (when ufw is active)."
+    echo "   If your cloud provider has its own firewall, open the tunnel port there too."
+  else
+    journalctl -u kanki-tunnel -n 20 --no-pager || true
+    die "The tunnel agent did not start (see above)."
+  fi
+}
+
 update(){
   need_repo
   download_bin
   systemctl restart kanki-panel 2>/dev/null || true
   systemctl restart kanki-node 2>/dev/null || true
+  systemctl restart kanki-tunnel 2>/dev/null || true
   ok "Updated to $($BIN version)"
   if grep -q '^MODE=node' $ENV 2>/dev/null && ! grep -q '^NODE_BIND=' $ENV; then
     warn "This node uses the old plain-HTTP API. Reinstall it (option 2) to get TLS."
@@ -443,7 +484,7 @@ reset_admin(){
 }
 
 status(){
-  for s in kanki-panel kanki-node caddy wg-quick@wg0 awg-quick@awg0 hysteria-server; do
+  for s in kanki-panel kanki-node kanki-tunnel caddy wg-quick@wg0 awg-quick@awg0 hysteria-server; do
     systemctl list-unit-files "$s.service" >/dev/null 2>&1 || continue
     st=$(systemctl is-active "$s" 2>/dev/null || true)
     [ "$st" = "inactive" ] && ! systemctl is-enabled "$s" >/dev/null 2>&1 && continue
@@ -454,13 +495,14 @@ status(){
 
 uninstall(){
   yes_no "Remove the panel, database and settings?" N || exit 0
-  systemctl disable --now kanki-panel kanki-node 2>/dev/null || true
-  rm -f /etc/systemd/system/kanki-panel.service /etc/systemd/system/kanki-node.service "$BIN" /usr/local/bin/kanki
+  systemctl disable --now kanki-panel kanki-node kanki-tunnel 2>/dev/null || true
+  rm -f /etc/systemd/system/kanki-panel.service /etc/systemd/system/kanki-node.service /etc/systemd/system/kanki-tunnel.service /etc/sysctl.d/90-kanki-tunnel.conf "$ENV_DIR/tunnel.env" "$BIN" /usr/local/bin/kanki
   rm -rf /var/lib/kanki "$ENV_DIR"
   systemctl daemon-reload
   ok "Removed (WireGuard / AmneziaWG / Hysteria2 / Caddy were left untouched)"
 }
 
+if [ -n "$KANKI_TUNNEL" ]; then install_tunnel_agent; exit $?; fi
 if [ -n "$KANKI_JOIN" ]; then join_node; exit $?; fi
 
 echo -e "${Y}"

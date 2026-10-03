@@ -18,6 +18,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Tunnel tests (a real entry and exit on this machine, TCP and UDP)
+        run: cargo test -- --nocapture --test-threads=4
+
       - name: Build
         run: cargo build --release
 

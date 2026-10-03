@@ -51,3 +51,17 @@ Public (no auth): `POST /join/register` with `{token, node_token, address, endpo
 | `/sub/kanki-<id>-<code>/raw` | base64 list for v2rayNG / Hiddify |
 | `/sub/kanki-<id>-<code>/json` | JSON for apps |
 | `/api/config/:id/{wireguard,amneziawg,hysteria2}?sub=..&node=..` | config file; add `/qr` or `/uri` |
+
+## Tunnels (Kanki Tunnel)
+Scope `nodes` unless noted. Tunnel servers, tunnels and the panel's own tunnel endpoint.
+
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/api/tunnels` | `{servers, tunnels, panel, repo}`. Each tunnel carries `state` (`up`/`partial`/`down`/`off`), `entry_status`, `exit_status`, `dial_host`. Each server carries `online`, `host`, `version`, `last_seen` |
+| POST | `/api/tunnels` | create (no `id`) or edit (with `id`). Fields: `name`, `entry`, `exit` (server ids; `local` = panel server), `mode` (`reverse`/`direct`), `transport` (`tcp`/`tcpmux`/`ws`/`wss`/`quic`/`kcp`), `port`, `conns`, `tcp[]`, `udp[]` (`443`, `8443:443`, `1000-1010`), `target`, `sni`, `path`, `dial`, `enabled` |
+| DELETE | `/api/tunnels/:id` | remove a tunnel |
+| POST | `/api/tunnels/:id/:action` | `enable`, `disable`, `restart` (restart = new token, both sides reconnect) |
+| POST | `/api/tunnels/servers` `{name, addr?}` | add a tunnel server; returns `{id, token, panel, repo}` for the join command |
+| PUT | `/api/tunnels/servers/:id` `{name?, addr?, new_token?}` | edit; `id=local` sets the panel's own reachable address (`tun_local_addr`) |
+| DELETE | `/api/tunnels/servers/:id` | remove (fails while tunnels still use it) |
+| POST | `/tunnel/agent` | **public**: a tunnel agent reports `{id, token, version, status[]}` every 5 s and gets back `{tunnels:[Spec]}`. Unknown/removed server → `410` (agent stops its tunnels); wrong token → `403` |

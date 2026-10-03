@@ -3,6 +3,12 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 2.4 — Kanki Tunnel
+- **Tunnels** between your servers, managed from the panel (menu: Tunnels). Users connect to the **entry** server (for example in Iran) and traffic leaves from the **exit** server abroad. The entry server runs only a tiny **tunnel agent** — no VPN, no web panel.
+- **Animated map** on the Tunnels page and the Dashboard showing which server connects to which, with live state (connected / connecting / down), transport and ping.
+- **Six transports**: `tcp`, `tcpmux`, `ws`, `wss`, `quic`, `kcp`. Both TCP and UDP are carried, so WireGuard, AmneziaWG and Hysteria2 pass through. Reverse or direct mode. Every link is encrypted (X25519 + ChaCha20-Poly1305) with the tunnel token and reconnects on its own.
+- **Add a tunnel server with one command** (Tunnels > + Server); it installs only the agent and shows up as Connected within seconds. See [the install guide](docs/INSTALL.md#add-a-tunnel-server-kanki-tunnel).
+
 ## New in 2.3
 - The panel is called **Kanki Panel** and has its own logo (an uploaded logo still replaces it).
 - No OpenVPN anywhere: not in the panel, not on the subscription page, not installed by `install.sh` or by node join.
@@ -24,6 +30,9 @@ kanki-panel/
 │   ├── http/               api.rs (users, nodes, configs, sub page), auth.rs (security center),
 │   │                       admin.rs (system, update, bulk), backup.rs (encrypted backup, Telegram)
 │   ├── vpn/                wg.rs, hy2.rs, sync.rs (node sync + traffic + limits)
+│   ├── tunnel/             Kanki Tunnel: link.rs (transports + crypto), quic.rs (quic/kcp),
+│   │                       mux.rs (many streams per link), engine.rs (run tunnels), agent.rs
+│   │                       (tunnel-only server), panel.rs (API + in-panel engine), tests.rs
 │   └── telegram/           bot.rs (sales bot: plans, payments, trials, referrals, admin panel)
 ├── assets/web/             index.html (admin panel), sub.html (subscription page)
 ├── docs/                   INSTALL.md, API.md, CHANGES.md

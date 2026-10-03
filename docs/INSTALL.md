@@ -56,3 +56,24 @@ kanki-panel reset-admin <user> <pass>   # forgot password / lost 2FA phone
 kanki-panel reset-security              # blocked by IP allow/deny list
 systemctl restart kanki-panel
 ```
+
+## Add a tunnel server (Kanki Tunnel)
+A server that only carries tunnels (for example in Iran) does **not** get the VPN panel — only a small agent.
+
+1. In the panel: **Tunnels > + Server**, give it a name, press **Create command**.
+2. Run the command it shows, as root, on that server (Ubuntu / Debian):
+   ```bash
+   KANKI_REPO=<user/repo> KANKI_TUNNEL=<id>:<token> KANKI_PANEL=<panel-origin> \
+     bash <(curl -fsSL https://raw.githubusercontent.com/<user/repo>/main/install.sh)
+   ```
+   It installs the `kanki` binary, writes `/etc/kanki/tunnel.env`, turns on BBR and starts the
+   `kanki-tunnel` service (`kanki tunnel-agent`). The server appears in the panel as Connected
+   within a few seconds.
+3. Make a tunnel: **Tunnels > + Tunnel**. Entry = this server, Exit = the panel/VPN server.
+   Pick the ports to carry (for the VPN there is a one-tap "VPN ports of the panel server"
+   preset). Open the tunnel port in the entry server's cloud firewall.
+4. Point your users at the entry server's address (node Endpoint / Public Host) so they connect
+   through it; traffic leaves from the exit.
+
+Files on a tunnel server: `/etc/kanki/tunnel.env` (panel URL, id, token), `/var/lib/kanki/tunnels.json`
+(last tunnel list, so tunnels survive a reboot), `/etc/systemd/system/kanki-tunnel.service`.

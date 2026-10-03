@@ -102,6 +102,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::auth::router())
         .merge(crate::admin::router())
         .merge(crate::backup::router())
+        .merge(crate::tunnel::panel::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
         .layer(axum::extract::DefaultBodyLimit::max(128 * 1024 * 1024))
         .with_state(app)
