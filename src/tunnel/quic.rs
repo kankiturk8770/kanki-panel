@@ -28,19 +28,19 @@ pub struct QuicIo {
 
 impl AsyncRead for QuicIo {
     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.recv).poll_read(cx, buf)
+        AsyncRead::poll_read(Pin::new(&mut self.recv), cx, buf)
     }
 }
 
 impl AsyncWrite for QuicIo {
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
-        Pin::new(&mut self.send).poll_write(cx, buf)
+        AsyncWrite::poll_write(Pin::new(&mut self.send), cx, buf)
     }
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.send).poll_flush(cx)
+        AsyncWrite::poll_flush(Pin::new(&mut self.send), cx)
     }
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.send).poll_shutdown(cx)
+        AsyncWrite::poll_shutdown(Pin::new(&mut self.send), cx)
     }
 }
 
