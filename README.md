@@ -10,7 +10,6 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with 
 - **Traffic & stats**: total usage, quota of limited users with percent used, live network chart, usage by protocol and node, per-user usage list.
 - **Port management**: ports and service state for the main server and every node, conflict warning, ready `ufw` command, all-servers table.
 - **Sales bot**: create / test / pause / edit / delete the Telegram bot, sales settings (trial, card to card, online payments, referral, messages) and plans.
-- **Backup > Transfer from BUB panel** (step 1): checks a BUB backup in the browser and makes a copyable structure report (no passwords or keys).
 - Compact user sheet: five buttons (edit, link, QR, reset, delete), one panel at a time.
 - Neon accents and a soft light theme.
 

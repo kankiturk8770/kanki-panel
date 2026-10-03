@@ -7,7 +7,6 @@
 - **Traffic & stats** page: total recorded usage, quota of limited users and percent used, live network chart, by protocol, by node, per-user usage list (tap opens the user).
 - **Port management** page: per server (main + nodes) WireGuard / AmneziaWG / Hysteria2 / panel / node API ports with service state, public address, conflict warning, check now, copyable `ufw` command and an all-servers table.
 - **Sales bot** page in the menu: create, test connection, pause / resume, edit, delete; sales settings (sales on, warnings, support, app link, required channel, welcome text, free trial, referral reward, card to card, NOWPayments, ZarinPal, wallet) and plans.
-- **Backup > Transfer from BUB panel to Kanki Panel**, step 1: reads a BUB backup in the browser (gzip, tar, zip, SQLite, JSON, OpenSSL-encrypted with the passphrase) and shows a copyable report of files, tables and columns. No secrets go into the report. Step 2 (import with the same links and keys) comes once the format is confirmed.
 - Neon accents on buttons, toggles and active items; new **soft light** theme (warm sand, darker gold).
 
 ## Changed
