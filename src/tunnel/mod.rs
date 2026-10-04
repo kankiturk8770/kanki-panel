@@ -4,6 +4,7 @@ pub mod engine;
 pub mod link;
 pub mod mux;
 pub mod panel;
+pub mod probe;
 pub mod quic;
 
 #[cfg(test)]

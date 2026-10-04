@@ -264,7 +264,13 @@ async fn reader(s: Arc<Session>, mut rx: Rx) {
                     }
                 } else {
                     let target = String::from_utf8_lossy(&p[1..1 + tl]).to_string();
-                    exit_udp(&s, id, &target, data).await;
+                    if target == super::probe::ECHO {
+                        // smart-tunnel test: echo straight back through the tunnel
+                        s.shared.rx_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
+                        let _ = s.send(frame(UDP, id, p)).await;
+                    } else {
+                        exit_udp(&s, id, &target, data).await;
+                    }
                 }
             }
             PING => {
@@ -301,11 +307,23 @@ async fn keepalive(s: Arc<Session>) {
 
 /// exit: dials the target of a stream the entry opened
 async fn exit_open(s: Arc<Session>, id: u32, target: String, rx: mpsc::UnboundedReceiver<Vec<u8>>, credit: Arc<Semaphore>) {
-    if !s.shared.may_dial(&target) {
+    // the smart-tunnel test service lives inside the exit itself
+    let target = if target == super::probe::SPEED {
+        match super::probe::speed_addr().await {
+            Some(a) => a.to_string(),
+            None => {
+                let _ = s.send(frame(RST, id, &[])).await;
+                s.remove(id);
+                return;
+            }
+        }
+    } else if !s.shared.may_dial(&target) {
         let _ = s.send(frame(RST, id, &[])).await;
         s.remove(id);
         return;
-    }
+    } else {
+        target
+    };
     match tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(target.as_str())).await {
         Ok(Ok(tcp)) => {
             let _ = tcp.set_nodelay(true);

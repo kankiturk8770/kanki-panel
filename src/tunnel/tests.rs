@@ -211,3 +211,43 @@ fn ports_parse() {
     let p = super::engine::parse_ports(&["443".into(), "8443:443".into(), "1000-1002".into(), "x".into()]);
     assert_eq!(p, vec![(443, 443), (1000, 1000), (1001, 1001), (1002, 1002), (8443, 443)]);
 }
+
+/// Smart tunnel: the entry measures ping, TCP speed and UDP loss through a test tunnel.
+async fn probe_case(transport: &str, base: u16) {
+    let (mut entry, mut exit) = pair(transport, "reverse", base, "token-for-tests-0123456789");
+    for s in [&mut entry, &mut exit] {
+        s.probe = true;
+        s.tcp.clear();
+        s.udp.clear();
+    }
+    let e = Running::start(entry);
+    let x = Running::start(exit);
+    let mut res = None;
+    for _ in 0..600 {
+        if let Some(p) = e.status().probe {
+            if p["done"].as_bool() == Some(true) {
+                res = Some(p);
+                break;
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let r = res.expect("probe finished");
+    println!("probe {}: {}", transport, r);
+    assert!(r["tcp_error"].is_null(), "tcp error: {}", r);
+    assert!(r["down_mbps"].as_f64().unwrap_or(0.0) > 0.0, "download: {}", r);
+    assert!(r["up_mbps"].as_f64().unwrap_or(0.0) > 0.0, "upload: {}", r);
+    assert!(r["udp_loss"].as_f64().unwrap_or(100.0) < 50.0, "udp: {}", r);
+    e.stop();
+    x.stop();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn probe_tcpmux() {
+    probe_case("tcpmux", 42100).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn probe_quic() {
+    probe_case("quic", 42200).await;
+}

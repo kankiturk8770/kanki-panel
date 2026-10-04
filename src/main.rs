@@ -28,6 +28,8 @@ mod wg;
 // telegram: built-in sales bot
 #[path = "telegram/bot.rs"]
 mod bot;
+#[path = "telegram/channel.rs"]
+mod channel;
 
 // tunnel: encrypted tunnels between servers (Kanki Tunnel)
 mod tunnel;
@@ -184,6 +186,7 @@ async fn main() {
     tokio::spawn(sync::run(app.clone()));
     tokio::spawn(tunnel::panel::local_loop(app.clone()));
     tokio::spawn(backup::telegram_loop(app.clone()));
+    tokio::spawn(channel::channel_loop(app.clone()));
     if let Some(b) = bot::Bot::new(app.clone()) {
         tokio::spawn(b.run());
         eprintln!("telegram bot started");

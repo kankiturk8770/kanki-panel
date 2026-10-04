@@ -6,6 +6,9 @@ use std::sync::Mutex;
 
 pub struct Db(pub Mutex<Connection>);
 
+/// Serialises picking a free user number + inserting it.
+static SLOT: Mutex<()> = Mutex::new(());
+
 #[derive(Clone, Debug, Serialize)]
 pub struct User {
     pub id: i64,
@@ -201,6 +204,9 @@ impl Db {
             "ALTER TABLE nodes ADD COLUMN accept_all INTEGER DEFAULT 1",
             "ALTER TABLE nodes ADD COLUMN endpoint_mode TEXT DEFAULT 'custom'",
             "ALTER TABLE nodes ADD COLUMN sync_state TEXT DEFAULT ''",
+            // v2.5: plans carry how many countries (servers) they give; discount codes can expire
+            "ALTER TABLE plans ADD COLUMN countries INTEGER DEFAULT 0",
+            "ALTER TABLE discounts ADD COLUMN expires INTEGER DEFAULT 0",
         ] {
             let _ = c.execute(m, []);
         }
@@ -276,19 +282,63 @@ impl Db {
         self.users().into_iter().filter(|u| u.tg_id == tg).collect()
     }
 
+    /// Lowest free user number: id n is unused and no user is called USERn / USERn-TEST.
+    /// Deleted users free their number, so the next new user takes it again.
+    pub fn next_slot(&self) -> i64 {
+        let rows: Vec<(i64, String)> = self.with(|c| {
+            let mut out = vec![];
+            if let Ok(mut st) = c.prepare("SELECT id, username FROM users") {
+                if let Ok(it) = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))) {
+                    for x in it.flatten() {
+                        out.push(x);
+                    }
+                }
+            }
+            out
+        });
+        let ids: std::collections::HashSet<i64> = rows.iter().map(|x| x.0).collect();
+        let names: std::collections::HashSet<String> = rows.iter().map(|x| x.1.to_uppercase()).collect();
+        let mut n = 1i64;
+        while ids.contains(&n) || names.contains(&format!("USER{}", n)) || names.contains(&format!("USER{}-TEST", n)) {
+            n += 1;
+        }
+        n
+    }
+
+    /// Creates a user. An empty username (or "auto") gives USER<n>; "auto-test" gives USER<n>-TEST
+    /// (a free trial). The user's id is always that same lowest free number.
     #[allow(clippy::too_many_arguments)]
     pub fn create_user(&self, username: &str, limit_gb: f64, days: i64, max_conn: i64, protocols: &str, nodes: &str, notes: &str, tg_id: i64) -> Result<User, String> {
         let code = crate::util::rand_digits(19);
         let exp = if days > 0 { now() + days * 86400 } else { 0 };
+        let _g = SLOT.lock().unwrap_or_else(|e| e.into_inner());
+        let n = self.next_slot();
+        let name = match username.trim() {
+            "" | "auto" => format!("USER{}", n),
+            "auto-test" => format!("USER{}-TEST", n),
+            x => x.to_string(),
+        };
         let id = self.with(|c| {
             c.execute(
-                "INSERT INTO users(username,code,limit_gb,expires_at,max_conn,protocols,nodes,notes,tg_id,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
-                params![username, code, limit_gb, exp, max_conn, protocols, nodes, notes, tg_id, now()],
+                "INSERT INTO users(id,username,code,limit_gb,expires_at,max_conn,protocols,nodes,notes,tg_id,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                params![n, name, code, limit_gb, exp, max_conn, protocols, nodes, notes, tg_id, now()],
             )
             .map(|_| c.last_insert_rowid())
-            .map_err(|e| e.to_string())
+            .map_err(|e| if e.to_string().contains("UNIQUE") { "this username already exists".to_string() } else { e.to_string() })
         })?;
         self.user(id).ok_or_else(|| "not found".into())
+    }
+
+    /// A trial (USER<n>-TEST) that is bought / renewed becomes USER<n>.
+    pub fn promote_trial(&self, id: i64) {
+        if let Some(u) = self.user(id) {
+            let up = u.username.to_uppercase();
+            if let Some(base) = up.strip_suffix("-TEST") {
+                if base.starts_with("USER") && self.count(&format!("SELECT COUNT(*) FROM users WHERE UPPER(username)='{}'", base.replace('\'', ""))) == 0 {
+                    let _ = self.exec("UPDATE users SET username=?1 WHERE id=?2", &[&base.to_string(), &id]);
+                }
+            }
+        }
     }
 
     pub fn exec(&self, sql: &str, p: &[&dyn rusqlite::ToSql]) -> Result<usize, String> {
@@ -312,9 +362,13 @@ impl Db {
         self.with(|c| c.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0))
     }
 
+    /// Removes a user completely: account, keys / peers and unpaid orders; paid orders keep their
+    /// amount for the sales total but no longer point at the (now free) user number.
     pub fn delete_user(&self, id: i64) {
         let _ = self.exec("DELETE FROM users WHERE id=?1", &[&id]);
         let _ = self.exec("DELETE FROM peers WHERE user_id=?1", &[&id]);
+        let _ = self.exec("DELETE FROM orders WHERE target=?1 AND status NOT IN ('done','approved')", &[&id]);
+        let _ = self.exec("UPDATE orders SET target=0 WHERE target=?1", &[&id]);
     }
 
     // ---------------- نودها

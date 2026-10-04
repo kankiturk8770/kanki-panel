@@ -144,9 +144,188 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             target: t.target.clone(),
             cert: String::new(),
             key: String::new(),
+            probe: false,
         });
     }
+    // a running smart-tunnel test adds one short-lived test tunnel per transport
+    if let Some(p) = probe_job().lock().unwrap().clone() {
+        if !p.finished && now() - p.started < PROBE_MAX && (p.entry == sid || p.exit == sid) {
+            let role = if p.entry == sid { "entry" } else { "exit" };
+            let listener = if p.mode == "direct" { &p.exit } else { &p.entry };
+            let host = host_of(app, listener);
+            for (i, tr) in PROBE_TRANSPORTS.iter().enumerate() {
+                let port = p.port + i as u16;
+                out.push(Spec {
+                    id: format!("probe-{}-{}", p.id, tr),
+                    name: format!("test {}", tr),
+                    role: role.into(),
+                    mode: p.mode.clone(),
+                    transport: tr.to_string(),
+                    port,
+                    remote: hostport(&host, port),
+                    token: p.token.clone(),
+                    conns: 2,
+                    sni: String::new(),
+                    path: "/".into(),
+                    tcp: vec![],
+                    udp: vec![],
+                    target: String::new(),
+                    cert: String::new(),
+                    key: String::new(),
+                    probe: true,
+                });
+            }
+        }
+    }
     out
+}
+
+// ------------------------------------------------------------------ smart tunnel (test every transport)
+
+const PROBE_TRANSPORTS: &[&str] = &["tcpmux", "tcp", "ws", "wss", "quic", "kcp"];
+/// a test never runs longer than this (seconds)
+const PROBE_MAX: i64 = 200;
+
+#[derive(Clone, Default)]
+struct ProbeJob {
+    id: String,
+    entry: String,
+    exit: String,
+    mode: String,
+    port: u16,
+    token: String,
+    started: i64,
+    finished: bool,
+    results: Vec<Value>,
+}
+
+fn probe_job() -> &'static Mutex<Option<ProbeJob>> {
+    static P: OnceLock<Mutex<Option<ProbeJob>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(None))
+}
+
+/// Higher is better. Download counts most, then upload; UDP loss and ping pull it down.
+/// A transport whose UDP does not work keeps a third of its score (fine for TCP-only use).
+fn probe_score(r: &Value) -> f64 {
+    let down = r["down_mbps"].as_f64().unwrap_or(0.0);
+    let up = r["up_mbps"].as_f64().unwrap_or(0.0);
+    if down <= 0.0 && up <= 0.0 {
+        return 0.0;
+    }
+    let ping = r["ping_ms"].as_f64().unwrap_or(500.0);
+    let tcp = (down * 0.6 + up * 0.4) / (1.0 + ping / 300.0);
+    let udp = match r["udp_loss"].as_f64() {
+        Some(l) => (1.0 - l / 100.0).max(0.0).powi(2),
+        None => 0.33,
+    };
+    (tcp * udp * 10.0).round() / 10.0
+}
+
+async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let entry = b["entry"].as_str().unwrap_or("").to_string();
+    let exit = b["exit"].as_str().unwrap_or("").to_string();
+    let known = |id: &str| id == "local" || servers(&app).iter().any(|s| s.id == id);
+    if entry.is_empty() || exit.is_empty() || entry == exit || !known(&entry) || !known(&exit) {
+        return err(StatusCode::BAD_REQUEST, "pick two different servers");
+    }
+    let mode = if b["mode"].as_str() == Some("direct") { "direct" } else { "reverse" };
+    let port = b["port"].as_u64().unwrap_or(3990).clamp(1024, 65000) as u16;
+    // the test ports must not collide with a tunnel that already listens there
+    let listener = if mode == "direct" { &exit } else { &entry };
+    for t in tunnels(&app) {
+        let l = if t.mode == "direct" { &t.exit } else { &t.entry };
+        if l == listener && t.port >= port && t.port < port + PROBE_TRANSPORTS.len() as u16 {
+            return err(StatusCode::BAD_REQUEST, &format!("port {} is used by tunnel {}; pick another test port", t.port, t.name));
+        }
+    }
+    let job = ProbeJob {
+        id: rand_token(6).to_lowercase(),
+        entry,
+        exit,
+        mode: mode.into(),
+        port,
+        token: rand_token(32),
+        started: now(),
+        finished: false,
+        results: vec![],
+    };
+    let id = job.id.clone();
+    *probe_job().lock().unwrap() = Some(job);
+    Json(json!({"ok": true, "id": id, "transports": PROBE_TRANSPORTS})).into_response()
+}
+
+async fn probe_get(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let mut g = probe_job().lock().unwrap();
+    let Some(p) = g.as_mut() else { return Json(json!({"job": null})).into_response() };
+    let t = now();
+    if !p.finished {
+        let seen = seen().lock().unwrap().clone();
+        let entry_st = seen.get(&p.entry).map(|x| x.status.clone()).unwrap_or_default();
+        let exit_st = seen.get(&p.exit).map(|x| x.status.clone()).unwrap_or_default();
+        let mut all_done = true;
+        let mut res = vec![];
+        for tr in PROBE_TRANSPORTS {
+            let sid = format!("probe-{}-{}", p.id, tr);
+            let es = entry_st.iter().find(|s| s.id == sid);
+            let xs = exit_st.iter().find(|s| s.id == sid);
+            let mut r = es.and_then(|s| s.probe.clone()).unwrap_or_else(|| json!({"done": false, "stage": "starting"}));
+            if r["done"].as_bool() != Some(true) {
+                all_done = false;
+            }
+            r["transport"] = json!(tr);
+            r["port"] = json!(p.port + PROBE_TRANSPORTS.iter().position(|x| x == tr).unwrap_or(0) as u16);
+            r["links"] = json!(es.map(|s| s.links).unwrap_or(0).max(xs.map(|s| s.links).unwrap_or(0)));
+            if r["error"].is_null() {
+                let e = es.map(|s| s.error.clone()).filter(|e| !e.is_empty()).or_else(|| xs.map(|s| s.error.clone()).filter(|e| !e.is_empty()));
+                if let Some(e) = e {
+                    r["last_error"] = json!(e);
+                }
+            }
+            r["score"] = json!(probe_score(&r));
+            res.push(r);
+        }
+        p.results = res;
+        if all_done || t - p.started >= PROBE_MAX {
+            // stop the test tunnels; keep the results on screen
+            p.finished = true;
+        }
+    }
+    let mut ranked = p.results.clone();
+    ranked.sort_by(|a, b| b["score"].as_f64().unwrap_or(0.0).partial_cmp(&a["score"].as_f64().unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal));
+    let best = ranked.first().filter(|r| r["score"].as_f64().unwrap_or(0.0) > 0.0).map(|r| r["transport"].clone());
+    // best for UDP (WireGuard / Hysteria2): lowest loss, then lowest ping, among working ones
+    let best_udp = p
+        .results
+        .iter()
+        .filter(|r| r["udp_loss"].is_number() && r["udp_loss"].as_f64().unwrap_or(100.0) < 50.0)
+        .min_by(|a, b| {
+            let ka = a["udp_loss"].as_f64().unwrap_or(100.0) * 1000.0 + a["udp_ping_ms"].as_f64().unwrap_or(9999.0);
+            let kb = b["udp_loss"].as_f64().unwrap_or(100.0) * 1000.0 + b["udp_ping_ms"].as_f64().unwrap_or(9999.0);
+            ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|r| r["transport"].clone());
+    let best_tcp = p
+        .results
+        .iter()
+        .filter(|r| r["down_mbps"].as_f64().unwrap_or(0.0) > 0.0)
+        .max_by(|a, b| a["down_mbps"].as_f64().unwrap_or(0.0).partial_cmp(&b["down_mbps"].as_f64().unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|r| r["transport"].clone());
+    Json(json!({"job": {
+        "id": p.id, "entry": p.entry, "exit": p.exit, "mode": p.mode, "port": p.port,
+        "started": p.started, "elapsed": t - p.started, "max": PROBE_MAX, "finished": p.finished,
+        "results": ranked, "best": best, "best_udp": best_udp, "best_tcp": best_tcp,
+    }}))
+    .into_response()
+}
+
+async fn probe_stop(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "nodes");
+    if let Some(p) = probe_job().lock().unwrap().as_mut() {
+        p.finished = true;
+    }
+    Json(json!({"ok": true})).into_response()
 }
 
 // ------------------------------------------------------------------ the engine on the panel server
@@ -181,6 +360,7 @@ pub async fn local_loop(app: Arc<App>) {
 pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/tunnels", get(list).post(save))
+        .route("/api/tunnels/probe", get(probe_get).post(probe_start).delete(probe_stop))
         .route("/api/tunnels/servers", post(server_add))
         .route("/api/tunnels/servers/:id", delete(server_del).put(server_edit))
         .route("/api/tunnels/:id", delete(tunnel_del))

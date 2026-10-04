@@ -17,7 +17,9 @@ pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
     let mut want = vec![];
     for s in specs {
         if s.listens() && s.port > 0 {
-            want.push(format!("{}/tcp", s.port));
+            // quic and kcp run over UDP
+            let proto = if s.transport == "quic" || s.transport == "kcp" { "udp" } else { "tcp" };
+            want.push(format!("{}/{}", s.port, proto));
         }
         if s.role == "entry" {
             for (a, _) in parse_ports(&s.tcp) {

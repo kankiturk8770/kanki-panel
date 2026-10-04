@@ -88,6 +88,8 @@ struct Plan {
     toman: i64,
     usd: f64,
     conns: i64,
+    /// how many countries (servers) the plan gives; 0 = all
+    countries: i64,
 }
 
 /// Bot token: panel setting first, then install-time env
@@ -172,9 +174,10 @@ impl Bot {
 
     fn plans(&self, only_active: bool) -> Vec<(Plan, bool)> {
         self.db().with(|c| {
-            let mut s = c.prepare("SELECT id,name,days,gb,toman,usd,conns,active FROM plans ORDER BY toman").unwrap();
+            let mut s = c.prepare("SELECT id,name,days,gb,toman,usd,conns,active,COALESCE(countries,0) FROM plans ORDER BY toman").unwrap();
             let v: Vec<(Plan, bool)> = s.query_map([], |r| Ok((Plan {
                 id: r.get(0)?, name: r.get(1)?, days: r.get(2)?, gb: r.get(3)?, toman: r.get(4)?, usd: r.get(5)?, conns: r.get(6)?,
+                countries: r.get(8)?,
             }, r.get::<_, i64>(7)? == 1))).unwrap().filter_map(|x| x.ok()).filter(|(_, a)| *a || !only_active).collect();
             v
         })
@@ -194,8 +197,30 @@ impl Bot {
     }
 
     fn create_account(&self, tg: i64, gb: f64, days: i64, conns: i64, notes: &str) -> Result<User, String> {
-        let name = format!("tg{}_{}", tg, rand_token(4).to_lowercase());
-        let u = self.db().create_user(&name, gb, days, conns, &self.db().get("default_protocols"), "", notes, tg)?;
+        self.create_account_n(tg, gb, days, conns, notes, 0)
+    }
+
+    /// The `countries` least-loaded servers (0 = every server, the normal case).
+    fn pick_nodes(&self, countries: i64) -> String {
+        if countries <= 0 {
+            return String::new();
+        }
+        let mut ns: Vec<(String, usize)> = self.db().nodes().into_iter().filter(|n| n.enabled && !n.drain && !n.maint).map(|n| {
+            let load = self.db().users().iter().filter(|u| u.on(&n)).count();
+            (n.id, load)
+        }).collect();
+        if (ns.len() as i64) <= countries {
+            return String::new();
+        }
+        ns.sort_by_key(|x| x.1);
+        ns.into_iter().take(countries as usize).map(|x| x.0).collect::<Vec<_>>().join(",")
+    }
+
+    fn create_account_n(&self, tg: i64, gb: f64, days: i64, conns: i64, notes: &str, countries: i64) -> Result<User, String> {
+        // USER<n> for buyers, USER<n>-TEST for free trials (same number when the trial is bought)
+        let name = if notes == "trial" { "auto-test" } else { "auto" };
+        let nodes = self.pick_nodes(countries);
+        let u = self.db().create_user(name, gb, days, conns, &self.db().get("default_protocols"), &nodes, notes, tg)?;
         let a = self.app.clone();
         tokio::spawn(async move { sync::sync_all(&a).await });
         Ok(u)
@@ -301,7 +326,8 @@ impl Bot {
             Wait::DiscountUse => {
                 let code = text.to_uppercase();
                 let pct: Option<i64> = self.db().with(|c| c.query_row(
-                    "SELECT percent FROM discounts WHERE code=?1 AND uses_left>0", [&code], |r| r.get(0)).ok());
+                    "SELECT percent FROM discounts WHERE code=?1 AND uses_left>0 AND (COALESCE(expires,0)=0 OR expires>?2)",
+                    rusqlite::params![&code, now()], |r| r.get(0)).ok());
                 match pct {
                     Some(p) => {
                         let plan_id = {
@@ -503,8 +529,9 @@ impl Bot {
         if pe.discount.is_empty() { rows.push(vec![b("🎟 کد تخفیف دارم", "disc")]); }
         rows.push(vec![b("⬅️ بازگشت", "home")]);
         let txt = format!(
-            "📦 <b>{}</b>\nحجم: {} GB · مدت: {} روز · {} کاربر\nقیمت: <b>{}</b>{}{}\n\nروش پرداخت را انتخاب کنید:",
-            esc(&p.name), p.gb, p.days, p.conns, toman(t),
+            "📦 <b>{}</b>\nحجم: {} · مدت: {} روز · {} کاربر{}\nقیمت: <b>{}</b>{}{}\n\nروش پرداخت را انتخاب کنید:",
+            esc(&p.name), if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, p.days, p.conns,
+            if p.countries > 0 { format!(" · {} کشور", p.countries) } else { String::new() }, toman(t),
             if u > 0.0 { format!("  ·  <b>{}$</b>", u) } else { String::new() },
             if pe.percent > 0 { format!("\n🎟 تخفیف {}٪ اعمال شده", pe.percent) } else { String::new() }
         );
@@ -615,10 +642,25 @@ impl Bot {
         if o.6 == "done" { return; }
         let _ = self.db().exec("UPDATE orders SET status='done' WHERE id=?1", &[&oid]);
         let Some(p) = self.plan(o.2) else { return };
+        // a buyer who still has a free-trial account gets that same account (USER<n>-TEST -> USER<n>)
+        let trial = self.db().users_of_tg(o.1).into_iter().find(|u| u.username.to_uppercase().ends_with("-TEST"));
         let res: Result<User, String> = if o.3 == "renew" && o.4 > 0 {
-            self.db().extend(o.4, p.days, p.gb).and_then(|_| self.db().user(o.4).ok_or("not found".into()))
+            self.db().extend(o.4, p.days, p.gb).and_then(|_| {
+                self.db().promote_trial(o.4);
+                self.db().user(o.4).ok_or("not found".into())
+            })
+        } else if let Some(t) = trial {
+            let exp = if p.days > 0 { crate::util::now() + p.days * 86400 } else { 0 };
+            let lim = if p.gb > 0.0 { t.used_gb() + p.gb } else { 0.0 };
+            let note = format!("order #{}", oid);
+            self.db()
+                .exec("UPDATE users SET expires_at=?1, limit_gb=?2, max_conn=?3, notes=?4, warned=0, enabled=1 WHERE id=?5", &[&exp, &lim, &p.conns, &note, &t.id])
+                .and_then(|_| {
+                    self.db().promote_trial(t.id);
+                    self.db().user(t.id).ok_or("not found".into())
+                })
         } else {
-            self.create_account(o.1, p.gb, p.days, p.conns, &format!("order #{}", oid))
+            self.create_account_n(o.1, p.gb, p.days, p.conns, &format!("order #{}", oid), p.countries)
         };
         match res {
             Ok(u) => {
@@ -709,7 +751,7 @@ impl Bot {
             vec![b("💳 پرداخت‌ها", "a:pay"), b("🖥 نودها", "a:nodes")],
             vec![b("🎟 کدهای تخفیف", "a:disc"), b("👥 دعوت و هدیه", "a:ref")],
             vec![b("📣 پیام همگانی", "a:bc"), b("💾 بکاپ الان", "a:backup")],
-            vec![b("⚙️ تنظیمات عمومی", "a:gen")],
+            vec![b("📢 کانال هوشمند", "a:ch"), b("⚙️ تنظیمات عمومی", "a:gen")],
             vec![b("⬅️ بازگشت", "home")],
         ])
     }
@@ -806,11 +848,66 @@ impl Bot {
                 Some(ik(vec![vec![b("✏️ گیگ هدیه", "set:ref_gb"), b("✏️ روز هدیه", "set:ref_days")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; return true; }
             "a:bc" => { set_wait(Wait::Broadcast); { self.edit(chat, mid, "📣 پیام را بفرستید (متن، عکس، ویدیو…):", back).await; return true; } }
             "a:backup" => {
-                let pass = self.db().get("tgb_pass");
+                let pass = crate::backup::backup_pass(&self.app);
                 if let Ok((bytes, name)) = make_archive(&self.app, &pass) {
-                    let cap = if pass.is_empty() { "💾 بکاپ کامل (بدون رمز)" } else { "💾 بکاپ کامل (رمزدار)" };
-                    self.send_doc(chat, bytes, &name, cap).await;
+                    self.send_doc(chat, bytes, &name, "💾 بکاپ کامل پنل (رمزدار — رمز در پنل > بکاپ)").await;
                 }
+                return true;
+            }
+            "a:ch" | "a:cht" => {
+                if d == "a:cht" {
+                    db.set("ch_on", if db.on("ch_on") { "0" } else { "1" });
+                }
+                let id = db.get("ch_id");
+                let txt = format!(
+                    "📢 <b>کانال هوشمند</b>\n\nکانال: {}\nوضعیت: {}\nهر {} ساعت یک پست (به‌جز ۱ تا ۸ صبح)\nپست‌های ارسال‌شده: {}\n\nربات باید ادمین کانال باشد. تنظیمات کامل در پنل وب > ربات فروش.",
+                    if id.is_empty() { "تنظیم نشده".to_string() } else { esc(&id) },
+                    if db.on("ch_on") { "🟢 روشن" } else { "⚪️ خاموش" },
+                    db.get("ch_hours").parse::<i64>().unwrap_or(8), db.get("ch_count").parse::<i64>().unwrap_or(0)
+                );
+                let kb = ik(vec![
+                    vec![b("📝 پست پیشنهادی", "a:chp"), b("🔥 کمپین تخفیف ۲۰٪", "a:chc")],
+                    vec![b(&format!("{} انتشار خودکار", self.onoff("ch_on")), "a:cht")],
+                    vec![b("⬅️ پنل مدیریت", "adm")],
+                ]);
+                self.edit(chat, mid, &txt, Some(kb)).await;
+                return true;
+            }
+            "a:chp" => {
+                let (kind, text) = crate::channel::make_post(&self.app, "auto");
+                db.set("ch_draft", &text);
+                db.set("ch_draft_kind", &kind);
+                let kb = ik(vec![
+                    vec![b("📤 ارسال به کانال", "a:chs"), b("🔄 یکی دیگر", "a:chp")],
+                    vec![b("⬅️ کانال هوشمند", "a:ch")],
+                ]);
+                self.edit(chat, mid, &format!("👁 <b>پیش‌نمایش</b>\n➖➖➖➖➖\n{}", text), Some(kb)).await;
+                return true;
+            }
+            "a:chs" => {
+                let text = db.get("ch_draft");
+                let back = Some(ik(vec![vec![b("⬅️ کانال هوشمند", "a:ch")]]));
+                let r = crate::channel::send_to_channel(&self.app, &text).await;
+                let msg = match r {
+                    Ok(_) => "✅ در کانال منتشر شد.".to_string(),
+                    Err(e) => format!("⚠️ ارسال نشد: <code>{}</code>\nآیدی کانال را در پنل وب بررسی کنید و ربات را ادمین کانال کنید.", esc(&e)),
+                };
+                self.edit(chat, mid, &msg, back).await;
+                return true;
+            }
+            "a:chc" => {
+                let back = Some(ik(vec![vec![b("⬅️ کانال هوشمند", "a:ch")]]));
+                let msg = match crate::channel::new_campaign(&self.app, 20, 48, 300) {
+                    Ok(code) => {
+                        let (_, text) = crate::channel::make_post(&self.app, "offer");
+                        match crate::channel::send_to_channel(&self.app, &text).await {
+                            Ok(_) => format!("🔥 کمپین ساخته و منتشر شد.\nکد: <code>{}</code> · ۲۰٪ · ۴۸ ساعت", esc(&code)),
+                            Err(e) => format!("کد <code>{}</code> ساخته شد ولی ارسال به کانال نشد: <code>{}</code>", esc(&code), esc(&e)),
+                        }
+                    }
+                    Err(e) => format!("⚠️ {}", esc(&e)),
+                };
+                self.edit(chat, mid, &msg, back).await;
                 return true;
             }
             "a:gen" => { self.edit(chat, mid, &format!("⚙️ <b>تنظیمات عمومی</b>\nپشتیبانی: {}\nکانال اجباری: {}\nلینک اپ: {}",
@@ -910,7 +1007,7 @@ impl Bot {
                 let gb: f64 = parts[0].parse().unwrap_or(0.0);
                 let days: i64 = parts[1].parse().unwrap_or(30);
                 let conns: i64 = parts.get(2).and_then(|x| x.parse().ok()).unwrap_or(1);
-                let name = parts.get(3).map(|s| s.to_string()).unwrap_or_else(|| format!("u{}", rand_token(6).to_lowercase()));
+                let name = parts.get(3).map(|s| s.to_string()).unwrap_or_else(|| "auto".to_string());
                 match db.create_user(&name, gb, days, conns, &db.get("default_protocols"), "", "admin", 0) {
                     Ok(u) => {
                         let a = self.app.clone();
@@ -923,7 +1020,7 @@ impl Bot {
             Wait::Extend(id) => {
                 let days: i64 = parts.first().and_then(|x| x.parse().ok()).unwrap_or(0);
                 let gb: f64 = parts.get(1).and_then(|x| x.parse().ok()).unwrap_or(0.0);
-                match db.extend(id, days, gb) {
+                match db.extend(id, days, gb).map(|_| db.promote_trial(id)) {
                     Ok(_) => {
                         let a = self.app.clone();
                         tokio::spawn(async move { sync::sync_all(&a).await });

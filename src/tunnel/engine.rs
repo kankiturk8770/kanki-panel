@@ -44,6 +44,8 @@ pub struct Spec {
     /// wss listener: certificate files (empty = self-signed)
     pub cert: String,
     pub key: String,
+    /// smart-tunnel test: no user ports; the entry measures this transport once and reports it
+    pub probe: bool,
 }
 
 impl Spec {
@@ -113,6 +115,8 @@ pub struct Status {
     pub since: u64,
     pub transport: String,
     pub listening: bool,
+    /// smart-tunnel test result (entry side of a probe)
+    pub probe: Option<serde_json::Value>,
 }
 
 struct State {
@@ -121,6 +125,7 @@ struct State {
     error: Mutex<String>,
     rr: AtomicUsize,
     next_udp: AtomicU32,
+    probe: Mutex<Option<serde_json::Value>>,
 }
 
 impl State {
@@ -177,6 +182,7 @@ impl Running {
             error: Mutex::new(String::new()),
             rr: AtomicUsize::new(0),
             next_udp: AtomicU32::new(1),
+            probe: Mutex::new(None),
         });
         let mut tasks = vec![];
         if spec.listens() {
@@ -194,6 +200,9 @@ impl Running {
             for (a, b) in parse_ports(&spec.udp) {
                 tasks.push(tokio::spawn(user_udp(a, format!("{}:{}", host, b), state.clone())));
             }
+        }
+        if spec.probe && spec.role == "entry" {
+            tasks.push(tokio::spawn(probe_task(state.clone())));
         }
         Running { spec, state, tasks }
     }
@@ -227,6 +236,7 @@ impl Running {
             since: alive.iter().map(|s| s.since).min().unwrap_or(0) / 1000,
             transport: self.spec.transport.clone(),
             listening: self.spec.listens(),
+            probe: self.state.probe.lock().unwrap().clone(),
         }
     }
 }
@@ -371,6 +381,34 @@ async fn user_udp(port: u16, target: String, state: Arc<State>) {
             }
         }
     }
+}
+
+/// One measurement per probe tunnel; probes on one server run one after another so they do not
+/// share the bandwidth and spoil each other's numbers.
+static PROBE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+async fn probe_task(state: Arc<State>) {
+    *state.probe.lock().unwrap() = Some(serde_json::json!({"done": false, "stage": "connecting"}));
+    // wait up to 40 s for the first link
+    let mut sess = None;
+    for _ in 0..200 {
+        if let Some(s) = state.pick(0) {
+            sess = Some(s);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    let Some(s) = sess else {
+        let e = state.error.lock().unwrap().clone();
+        *state.probe.lock().unwrap() = Some(serde_json::json!({"done": true, "failed": true,
+            "error": if e.is_empty() { "no connection (is the test port open in the firewall?)".to_string() } else { e }}));
+        return;
+    };
+    *state.probe.lock().unwrap() = Some(serde_json::json!({"done": false, "stage": "waiting"}));
+    let _g = PROBE_LOCK.lock().await;
+    *state.probe.lock().unwrap() = Some(serde_json::json!({"done": false, "stage": "testing"}));
+    let r = super::probe::measure(s, state.shared.clone()).await;
+    *state.probe.lock().unwrap() = Some(r);
 }
 
 /// Keeps the running tunnels equal to the wanted list.

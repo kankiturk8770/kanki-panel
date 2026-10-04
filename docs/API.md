@@ -65,3 +65,18 @@ Scope `nodes` unless noted. Tunnel servers, tunnels and the panel's own tunnel e
 | PUT | `/api/tunnels/servers/:id` `{name?, addr?, new_token?}` | edit; `id=local` sets the panel's own reachable address (`tun_local_addr`) |
 | DELETE | `/api/tunnels/servers/:id` | remove (fails while tunnels still use it) |
 | POST | `/tunnel/agent` | **public**: a tunnel agent reports `{id, token, version, status[]}` every 5 s and gets back `{tunnels:[Spec]}`. Unknown/removed server → `410` (agent stops its tunnels); wrong token → `403` |
+
+## v2.5 additions
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/plans/bulk` `{plans:[{name,days,gb,toman,conns,countries}], replace?, rules?}` | add many plans (smart builder); `replace` deletes the old ones first |
+| PUT | `/api/plans/:id` `{active?, toman?, name?}` | show / hide or edit a plan |
+| GET / POST | `/api/discounts` `{code, percent, uses, hours}` | list / add codes (`hours` 0 = no end) |
+| DELETE | `/api/discounts/:code` | remove a code |
+| GET / PUT | `/api/channel` | smart channel settings: `on, id, hours, kinds, sign, code, auto_offer` |
+| POST | `/api/channel/preview` `{kind}` | build a post (`auto` or a kind) without sending |
+| POST | `/api/channel/post` `{text, kind?}` | publish to the channel |
+| POST | `/api/channel/campaign` `{percent, hours, uses, post?}` | new expiring code + offer post |
+| POST | `/api/db/clean` | clean and compact the database |
+| GET / PUT | `/api/tgbackup` | also `mode` (`nightly`/`hours`), `at` (`03:00`, Iran time), `pass` |
+| POST / GET / DELETE | `/api/tunnels/probe` | smart tunnel: start `{entry, exit, mode, port}`, read progress + ranking, stop |

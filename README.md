@@ -3,6 +3,13 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 2.5
+- Users are named **USER1, USER2, …** (lowest free number; a deleted user's number is reused; bot trials are USER<n>-TEST and become USER<n> when bought).
+- Sales bot: **smart plan builder** (price per GB / country / connection), expiring **discount codes**, and a **smart channel** that writes and publishes posts by itself.
+- **Nightly encrypted backup** to the bot with automatic database cleaning; the panel has its own backup passphrase.
+- **⚡ Smart tunnel**: tests all six transports between two servers and builds the tunnel with the best one.
+- Simpler Security center and a more compact dashboard.
+
 ## New in 2.4 — Kanki Tunnel
 - **Tunnels** between your servers, managed from the panel (menu: Tunnels). Users connect to the **entry** server (for example in Iran) and traffic leaves from the **exit** server abroad. The entry server runs only a tiny **tunnel agent** — no VPN, no web panel.
 - **Animated map** on the Tunnels page and the Dashboard showing which server connects to which, with live state (connected / connecting / down), transport and ping.
