@@ -88,26 +88,29 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<ClientObfs> {
     // socket that KCP will talk to, in the clear, on loopback
     let inner = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
     let local = inner.local_addr()?;
-    let task = tokio::spawn(async move {
-        // learn KCP's source address on its first packet to us
-        let mut kcp_addr: Option<SocketAddr> = None;
-        let mut a = [0u8; 65535];
-        let mut b = [0u8; 65535];
+    // KCP's loopback source address, learned from its first packet; shared with the inbound task
+    let kcp_addr: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
+    // KCP -> wrap -> peer
+    let (inner1, outer1, ka1) = (inner.clone(), outer.clone(), kcp_addr.clone());
+    let out_task = tokio::spawn(async move {
+        let mut a = vec![0u8; 65535];
         loop {
-            tokio::select! {
-                r = inner.recv_from(&mut a) => {
-                    let Ok((n, from)) = r else { break };
-                    kcp_addr = Some(from);
-                    let _ = outer.send(&wrap(&key, &a[..n])).await;
-                }
-                r = outer.recv(&mut b) => {
-                    let Ok(n) = r else { break };
-                    if let (Some(dst), Some(data)) = (kcp_addr, unwrap(&key, &b[..n])) {
-                        let _ = inner.send_to(&data, dst).await;
-                    }
-                }
+            let Ok((n, from)) = inner1.recv_from(&mut a).await else { break };
+            *ka1.lock().await = Some(from);
+            let _ = outer1.send(&wrap(&key, &a[..n])).await;
+        }
+    });
+    // peer -> unwrap -> KCP
+    let task = tokio::spawn(async move {
+        let mut b = vec![0u8; 65535];
+        loop {
+            let Ok(n) = outer.recv(&mut b).await else { break };
+            let dst = *kcp_addr.lock().await;
+            if let (Some(dst), Some(data)) = (dst, unwrap(&key, &b[..n])) {
+                let _ = inner.send_to(&data, dst).await;
             }
         }
+        out_task.abort();
     });
     Ok(ClientObfs { local, _task: task })
 }
