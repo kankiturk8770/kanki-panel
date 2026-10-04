@@ -21,26 +21,21 @@ pub const ECHO: &str = "kanki:echo";
 const MAX_BYTES: u32 = 16 * 1024 * 1024;
 const PHASE: Duration = Duration::from_secs(6);
 
-static SERVER: tokio::sync::OnceCell<SocketAddr> = tokio::sync::OnceCell::const_new();
-
-/// exit: address of the local speed service (started on first use, loopback only).
+/// exit: address of a local speed service for ONE test stream (loopback only).
+///
+/// Each stream gets its own short-lived listener that serves a single connection. A shared,
+/// process-wide listener would be bound to the runtime that created it and die with that runtime
+/// (this broke the probe tests, which each run on their own runtime); a per-stream one lives and
+/// dies with the tunnel session that asked for it.
 pub async fn speed_addr() -> Option<SocketAddr> {
-    SERVER
-        .get_or_try_init(|| async {
-            let l = TcpListener::bind("127.0.0.1:0").await?;
-            let a = l.local_addr()?;
-            tokio::spawn(async move {
-                loop {
-                    if let Ok((c, _)) = l.accept().await {
-                        tokio::spawn(serve(c));
-                    }
-                }
-            });
-            Ok::<SocketAddr, std::io::Error>(a)
-        })
-        .await
-        .ok()
-        .copied()
+    let l = TcpListener::bind("127.0.0.1:0").await.ok()?;
+    let a = l.local_addr().ok()?;
+    tokio::spawn(async move {
+        if let Ok(Ok((c, _))) = tokio::time::timeout(Duration::from_secs(15), l.accept()).await {
+            serve(c).await;
+        }
+    });
+    Some(a)
 }
 
 /// 'P' -> one byte back (repeatable) · 'D'+n -> n bytes down · 'U'+n -> read n bytes, one byte back
