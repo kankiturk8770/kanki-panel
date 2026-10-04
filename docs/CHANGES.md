@@ -1,3 +1,11 @@
+# v2.7.0 — whitelist mode (CDN)
+- **New transport `cdn`** for networks that only let traffic to whitelisted (domestic) addresses through. The entry (inside) never connects to the exit directly: it connects to a CDN edge that stays reachable (for example ArvanCloud) over TLS + WebSocket, and the CDN forwards the WebSocket to the exit (your origin). The exit listens on plain WebSocket on the tunnel port. It is always `direct` mode and is never part of the automatic rotation.
+- **Separate SNI and Host.** The TLS handshake can say one name (`SNI`, a list is allowed, one is tried after another) while the WebSocket request says your CDN domain (`Host`).
+- **Several edge addresses.** `Address to dial` can list several CDN edge IPs; every link starts on a different one and a link that fails moves to the next. A link that worked keeps its address.
+- **TLS hello in tiny pieces.** The first bytes of the connection (the ClientHello with the SNI) leave in 2–7 byte segments, which defeats SNI filters that do not reassemble packets. On by default in the form; turn it off if the CDN refuses.
+- Tunnel form: choose “Whitelist mode”, fill the CDN block. Guide in `docs/WHITELIST.md` (Persian). **Update the exit server's agent too** (an old agent does not know `cdn`).
+- Fixed the smart-tunnel test of QUIC (the shared speed service of the exit lived on the runtime of the first test; now each test stream gets its own).
+
 # v2.6.0 — stronger tunnel camouflage
 - **KCP is now fully hidden.** KCP used to send its 24-byte header in the clear, so deep packet inspection could tell "this is KCP". Now every UDP datagram is wrapped — an 8-byte random nonce, random padding and ChaCha20 over the whole thing, keyed by the tunnel token — so from outside it is just short, random-looking UDP of changing length, with no KCP signature. The two ends unwrap it; anyone else (and any wrong token) sees noise.
 - **QUIC looks like HTTP/3.** QUIC now advertises the `h3` protocol (ALPN) and uses a believable SNI (default `www.cloudflare.com`, or the SNI you set), so it blends in with normal HTTP/3 web traffic instead of announcing a custom protocol. This also fixes QUIC tunnels that would not connect in 2.5.

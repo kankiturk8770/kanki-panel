@@ -18,7 +18,8 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with 
 ## New in 2.4 — Kanki Tunnel
 - **Tunnels** between your servers, managed from the panel (menu: Tunnels). Users connect to the **entry** server (for example in Iran) and traffic leaves from the **exit** server abroad. The entry server runs only a tiny **tunnel agent** — no VPN, no web panel.
 - **Animated map** on the Tunnels page and the Dashboard showing which server connects to which, with live state (connected / connecting / down), transport and ping.
-- **Six transports**: `tcp`, `tcpmux`, `ws`, `wss`, `quic`, `kcp`. Both TCP and UDP are carried, so WireGuard, AmneziaWG and Hysteria2 pass through. Reverse or direct mode. Every link is encrypted (X25519 + ChaCha20-Poly1305) with the tunnel token and reconnects on its own.
+- **Whitelist mode (`cdn`)**: reach the exit only through a CDN edge (ArvanCloud…) with its own SNI / Host, several edge IPs and a split TLS hello — see `docs/WHITELIST.md`.
+- **Six transports** (plus `cdn`): `tcp`, `tcpmux`, `ws`, `wss`, `quic`, `kcp`. Both TCP and UDP are carried, so WireGuard, AmneziaWG and Hysteria2 pass through. Reverse or direct mode. Every link is encrypted (X25519 + ChaCha20-Poly1305) with the tunnel token and reconnects on its own.
 - **Add a tunnel server with one command** (Tunnels > + Server); it installs only the agent and shows up as Connected within seconds. See [the install guide](docs/INSTALL.md#add-a-tunnel-server-kanki-tunnel).
 
 ## New in 2.3

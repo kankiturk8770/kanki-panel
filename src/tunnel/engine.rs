@@ -25,17 +25,25 @@ pub struct Spec {
     pub role: String,
     /// "reverse" (exit dials entry) | "direct" (entry dials exit)
     pub mode: String,
-    /// "tcp" | "tcpmux" | "ws" | "wss" | "quic" | "kcp"
+    /// "tcp" | "tcpmux" | "ws" | "wss" | "quic" | "kcp" | "cdn"
+    /// (`cdn`: for whitelist-only networks. The dialer reaches the origin through a CDN edge over
+    /// TLS + WebSocket; the origin listens on plain WebSocket. Always `direct`.)
     pub transport: String,
     /// tunnel port on the listening side
     pub port: u16,
-    /// dialing side: "host:port" of the listening side
+    /// dialing side: "host:port" of the listening side. For `cdn` it may list several edge
+    /// addresses separated by commas; a failed link moves on to the next one.
     pub remote: String,
     pub token: String,
     /// parallel links (tcpmux / ws / wss)
     pub conns: u32,
+    /// TLS server name (wss / quic / cdn). For `cdn` it may list several names, comma separated.
     pub sni: String,
+    /// `cdn`: the HTTP Host header (the domain set up on the CDN); empty = same as the SNI
+    pub host: String,
     pub path: String,
+    /// `cdn`: send the TLS ClientHello in tiny TCP segments (defeats SNI filters that do not reassemble)
+    pub frag: bool,
     /// forwarded ports: "443" or "8443:443" (port on the entry : port on the exit)
     pub tcp: Vec<String>,
     pub udp: Vec<String>,
@@ -288,22 +296,40 @@ async fn listen_loop(spec: Spec, state: Arc<State>) {
     }
 }
 
+/// "a, b;c d" -> ["a", "b", "c", "d"]
+fn split_list(s: &str) -> Vec<String> {
+    s.split(|c: char| c == ',' || c == ';' || c.is_whitespace()).map(|x| x.trim()).filter(|x| !x.is_empty()).map(|x| x.to_string()).collect()
+}
+
 async fn dial_loop(spec: Spec, state: Arc<State>, n: u32) {
     // links start a little apart so they do not all hit the other side at once
     tokio::time::sleep(Duration::from_millis(150 * n as u64)).await;
+    // several edge addresses / TLS names (cdn): every link starts on a different one, and a link
+    // that fails moves to the next combination. A link that worked keeps its address.
+    let (remotes, snis) = if spec.transport == "cdn" { (split_list(&spec.remote), split_list(&spec.sni)) } else { (vec![], vec![]) };
+    let mut attempt = n as usize;
     let mut wait = 1u64;
     loop {
         let t0 = now_ms();
-        match link::dial(&spec.transport, &spec.remote, &spec.sni, &spec.path, &spec.token).await {
+        let remote = if remotes.is_empty() { spec.remote.clone() } else { remotes[attempt % remotes.len()].clone() };
+        let sni = if snis.is_empty() {
+            spec.sni.clone()
+        } else {
+            let step = attempt / remotes.len().max(1);
+            snis[step % snis.len()].clone()
+        };
+        match link::dial(&spec.transport, &remote, &sni, &spec.host, &spec.path, &spec.token, spec.frag).await {
             Ok(raw) => match run_link(&spec, &state, raw, true).await {
                 Ok(()) => {}
                 Err(e) => state.set_err(e),
             },
-            Err(e) => state.set_err(format!("{}: {}", spec.remote, e)),
+            Err(e) => state.set_err(format!("{}: {}", remote, e)),
         }
-        // a link that lived for a while resets the back-off
+        // a link that lived for a while resets the back-off and keeps its address
         if now_ms().saturating_sub(t0) > 20_000 {
             wait = 1;
+        } else {
+            attempt += 1;
         }
         tokio::time::sleep(Duration::from_secs(wait)).await;
         wait = (wait * 2).min(10);

@@ -206,6 +206,47 @@ async fn tunnel_reconnects_after_exit_restart() {
     exit.stop();
 }
 
+/// A stand-in for the CDN edge: it ends TLS (any name works) and passes the bytes on to the origin.
+async fn fake_cdn(front: u16, origin: u16) {
+    let acc = super::link::tls_acceptor("", "").unwrap();
+    let l = TcpListener::bind(("127.0.0.1", front)).await.unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((tcp, _)) = l.accept().await else { break };
+            let acc = acc.clone();
+            tokio::spawn(async move {
+                let Ok(mut tls) = acc.accept(tcp).await else { return };
+                let Ok(mut up) = TcpStream::connect(("127.0.0.1", origin)).await else { return };
+                let _ = tokio::io::copy_bidirectional(&mut tls, &mut up).await;
+            });
+        }
+    });
+}
+
+/// Whitelist mode: the entry reaches the exit only through a CDN edge (TLS with a front name,
+/// WebSocket with the CDN host, ClientHello in tiny pieces); the exit listens on plain WebSocket.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_cdn_direct() {
+    let base = 42500;
+    tcp_echo(base + 2).await;
+    udp_echo(base + 4).await;
+    fake_cdn(base + 5, base).await;
+    let (mut es, xs) = pair("cdn", "direct", base, "token-for-tests-0123456789");
+    // two edge addresses: the first is dead, the dialer must move on to the second
+    es.remote = format!("127.0.0.1:{},127.0.0.1:{}", base + 6, base + 5);
+    es.sni = "front.example.test".into();
+    es.host = "cdn.example.test".into();
+    es.frag = true;
+    let entry = Running::start(es);
+    let exit = Running::start(xs);
+    assert!(wait_links(&entry, 3).await, "cdn: entry got no links: {:?}", entry.status().error);
+    assert!(wait_links(&exit, 3).await, "cdn: exit got no links: {:?}", exit.status().error);
+    check_tcp(base + 1, 300_000).await;
+    check_udp(base + 3).await;
+    entry.stop();
+    exit.stop();
+}
+
 #[test]
 fn ports_parse() {
     let p = super::engine::parse_ports(&["443".into(), "8443:443".into(), "1000-1002".into(), "x".into()]);

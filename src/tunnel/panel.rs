@@ -46,8 +46,12 @@ pub struct Tunnel {
     pub udp: Vec<String>,
     pub target: String,
     pub sni: String,
+    /// cdn transport: the domain set up on the CDN (HTTP Host header)
+    pub host: String,
     pub path: String,
     pub dial: String,
+    /// cdn transport: split the TLS ClientHello into tiny segments
+    pub frag: bool,
     pub enabled: bool,
     pub created: i64,
     /// rotating tunnel: if it stays down, switch to the next transport in `order`
@@ -126,6 +130,23 @@ fn hostport(host: &str, port: u16) -> String {
     }
 }
 
+/// cdn transport: the addresses the dialer connects to, comma separated. Each item is an edge IP
+/// or name, with a port if written ("1.2.3.4:443"), otherwise 443. Without any address the CDN
+/// domain itself is used (it resolves to the edge, but DNS can be filtered: IPs are safer).
+fn cdn_remote(t: &Tunnel) -> String {
+    let src = [t.dial.as_str(), t.host.as_str(), t.sni.as_str()].into_iter().find(|x| !x.trim().is_empty()).unwrap_or("");
+    let mut out = vec![];
+    for item in src.split(|c: char| c == ',' || c == ';' || c.is_whitespace()).map(|x| x.trim()).filter(|x| !x.is_empty()) {
+        let has_port = match item.rsplit_once(':') {
+            // "1.2.3.4:443", "name:443", "[::1]:443" — but not a bare IPv6 address
+            Some((h, p)) => !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) && (!h.contains(':') || h.ends_with(']')),
+            None => false,
+        };
+        out.push(if has_port { item.to_string() } else { hostport(item, 443) });
+    }
+    out.join(",")
+}
+
 /// The tunnels server `sid` has to run.
 fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
     let mut out = vec![];
@@ -138,6 +159,8 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
         // the side that listens is the entry in reverse mode and the exit in direct mode
         let listener = if mode == "reverse" { &t.entry } else { &t.exit };
         let host = if !t.dial.trim().is_empty() { t.dial.trim().to_string() } else { host_of(app, listener) };
+        // cdn: the dialer goes to the CDN edge (port 443 unless written), not to the origin port
+        let remote = if t.transport == "cdn" { cdn_remote(&t) } else { hostport(&host, t.port) };
         out.push(Spec {
             id: t.id.clone(),
             name: t.name.clone(),
@@ -145,10 +168,12 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             mode: mode.into(),
             transport: t.transport.clone(),
             port: t.port,
-            remote: hostport(&host, t.port),
+            remote,
             token: t.token.clone(),
             conns: t.conns,
             sni: t.sni.clone(),
+            host: t.host.clone(),
+            frag: t.frag,
             path: t.path.clone(),
             tcp: t.tcp.clone(),
             udp: t.udp.clone(),
@@ -177,6 +202,8 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                     token: p.token.clone(),
                     conns: 2,
                     sni: String::new(),
+                    host: String::new(),
+                    frag: false,
                     path: "/".into(),
                     tcp: vec![],
                     udp: vec![],
@@ -357,7 +384,7 @@ fn rotate_tick(app: &App) {
     let mut changed = false;
     let mut ds = down_since().lock().unwrap();
     for tu in list.iter_mut() {
-        if !tu.enabled || !tu.auto {
+        if !tu.enabled || !tu.auto || tu.transport == "cdn" {
             ds.remove(&tu.id);
             continue;
         }
@@ -521,7 +548,7 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     if b.get("transport").is_some() {
         let tr = s("transport");
-        t.transport = if ["tcp", "tcpmux", "ws", "wss", "quic", "kcp"].contains(&tr.as_str()) { tr } else { "tcpmux".into() };
+        t.transport = if ["tcp", "tcpmux", "ws", "wss", "quic", "kcp", "cdn"].contains(&tr.as_str()) { tr } else { "tcpmux".into() };
     }
     if let Some(p) = b["port"].as_u64() {
         t.port = p.min(65535) as u16;
@@ -535,16 +562,20 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if b.get("udp").is_some() {
         t.udp = clean_list(&b["udp"]);
     }
-    for k in ["target", "sni", "path", "dial"] {
+    for k in ["target", "sni", "path", "dial", "host"] {
         if b.get(k).is_some() {
             let v = s(k);
             match k {
                 "target" => t.target = v,
                 "sni" => t.sni = v,
                 "path" => t.path = v,
+                "host" => t.host = v,
                 _ => t.dial = v,
             }
         }
+    }
+    if let Some(f) = b["frag"].as_bool() {
+        t.frag = f;
     }
     if let Some(e) = b["enabled"].as_bool() {
         t.enabled = e;
@@ -567,6 +598,14 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     if t.conns == 0 {
         t.conns = 4;
+    }
+    if t.transport == "cdn" {
+        // the entry (inside) must be the one that dials: a CDN only carries connections that go to it
+        t.mode = "direct".into();
+        t.auto = false;
+        if t.path.is_empty() {
+            t.path = "/".into();
+        }
     }
     // checks
     let known: Vec<String> = std::iter::once("local".to_string()).chain(servers(&app).into_iter().map(|s| s.id)).collect();

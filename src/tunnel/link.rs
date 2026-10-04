@@ -14,7 +14,9 @@ use futures_util::{SinkExt, StreamExt};
 use hkdf::Hkdf;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
@@ -248,9 +250,61 @@ fn tune(s: &TcpStream) {
     let _ = s.set_nodelay(true);
 }
 
+/// A TCP stream whose first bytes leave in many tiny segments (2 to 7 bytes each).
+///
+/// Used for the TLS ClientHello of the `cdn` transport: a DPI box that looks for the SNI inside
+/// the first packet without putting the pieces back together sees nothing readable. A real
+/// server (the CDN) reassembles the stream and does not notice.
+pub struct FragIo {
+    inner: TcpStream,
+    left: usize,
+}
+
+impl FragIo {
+    pub fn new(inner: TcpStream, first_bytes: usize) -> FragIo {
+        FragIo { inner, left: first_bytes }
+    }
+}
+
+impl AsyncRead for FragIo {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for FragIo {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+        if self.left > 0 && !buf.is_empty() {
+            let chunk = 2 + (self.left % 6);
+            let n = buf.len().min(chunk).min(self.left);
+            let r = Pin::new(&mut self.inner).poll_write(cx, &buf[..n]);
+            if let Poll::Ready(Ok(w)) = r {
+                self.left = self.left.saturating_sub(w);
+            }
+            return r;
+        }
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+/// How many bytes at the start of a `cdn` connection are sent in tiny pieces (covers the SNI).
+const FRAG_BYTES: usize = 220;
+
 /// Dials the other side over the chosen transport and returns the raw connection.
-/// `remote` = "host:port"; `sni`/`path` are used by ws / wss.
-pub async fn dial(transport: &str, remote: &str, sni: &str, path: &str, token: &str) -> Res<Raw> {
+/// `remote` = "host:port"; `sni`, `host`, `path` are used by ws / wss / cdn.
+///
+/// `cdn` is for networks that only let traffic to whitelisted addresses through (a CDN edge such
+/// as ArvanCloud): TCP goes to `remote` (the edge address), the TLS handshake says `sni`, and the
+/// WebSocket request says `Host: host` so the CDN routes it to your origin. `sni` and `host` may
+/// differ (a whitelisted front name in the handshake, your own domain in the request). With
+/// `frag` the ClientHello is split into tiny segments.
+pub async fn dial(transport: &str, remote: &str, sni: &str, host_header: &str, path: &str, token: &str, frag: bool) -> Res<Raw> {
     // UDP-based transports do not start from a TCP connection
     match transport {
         "quic" => return Ok(Raw::Stream(super::quic::dial(remote, sni).await?)),
@@ -274,6 +328,21 @@ pub async fn dial(transport: &str, remote: &str, sni: &str, path: &str, token: &
             let io: BoxIo = Box::new(tls);
             let url = format!("ws://{}{}", sni, path);
             let (ws, _) = tokio_tungstenite::client_async(url.as_str(), io).await?;
+            Ok(Raw::Ws(ws))
+        }
+        "cdn" => {
+            // the Host header is the CDN domain; when it is not set, it follows the SNI
+            let req_host = if host_header.is_empty() { sni.clone() } else { host_header.to_string() };
+            let name = server_name(&sni)?;
+            let io: BoxIo = if frag {
+                Box::new(tls_connector().connect(name, FragIo::new(tcp, FRAG_BYTES)).await?)
+            } else {
+                Box::new(tls_connector().connect(name, tcp).await?)
+            };
+            let url = format!("ws://{}{}", req_host, path);
+            let (ws, _) = tokio::time::timeout(Duration::from_secs(12), tokio_tungstenite::client_async(url.as_str(), io))
+                .await
+                .map_err(|_| "the CDN did not answer the WebSocket request")??;
             Ok(Raw::Ws(ws))
         }
         _ => Ok(Raw::Stream(Box::new(tcp))),
@@ -326,7 +395,8 @@ impl Listener {
 pub async fn accept_tcp(transport: &str, tcp: TcpStream, tls: Option<&tokio_rustls::TlsAcceptor>) -> Res<Raw> {
     tune(&tcp);
     match transport {
-        "ws" => {
+        // `cdn`: the CDN terminates TLS and talks plain WebSocket to this origin
+        "ws" | "cdn" => {
             let io: BoxIo = Box::new(tcp);
             let ws = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::accept_async(io)).await.map_err(|_| "ws timeout")??;
             Ok(Raw::Ws(ws))

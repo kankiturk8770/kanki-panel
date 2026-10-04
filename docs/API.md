@@ -58,7 +58,7 @@ Scope `nodes` unless noted. Tunnel servers, tunnels and the panel's own tunnel e
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/api/tunnels` | `{servers, tunnels, panel, repo}`. Each tunnel carries `state` (`up`/`partial`/`down`/`off`), `entry_status`, `exit_status`, `dial_host`. Each server carries `online`, `host`, `version`, `last_seen` |
-| POST | `/api/tunnels` | create (no `id`) or edit (with `id`). Fields: `name`, `entry`, `exit` (server ids; `local` = panel server), `mode` (`reverse`/`direct`), `transport` (`tcp`/`tcpmux`/`ws`/`wss`/`quic`/`kcp`), `port`, `conns`, `tcp[]`, `udp[]` (`443`, `8443:443`, `1000-1010`), `target`, `sni`, `path`, `dial`, `enabled` |
+| POST | `/api/tunnels` | create (no `id`) or edit (with `id`). Fields: `name`, `entry`, `exit` (server ids; `local` = panel server), `mode` (`reverse`/`direct`), `transport` (`tcp`/`tcpmux`/`ws`/`wss`/`quic`/`kcp`/`cdn`), `port`, `conns`, `tcp[]`, `udp[]` (`443`, `8443:443`, `1000-1010`), `target`, `sni`, `host`, `path`, `dial`, `frag`, `enabled` (`cdn`: `dial` = CDN edge addresses, `host` = CDN domain, `sni` = TLS names, `frag` = split the TLS hello; always `direct`) |
 | DELETE | `/api/tunnels/:id` | remove a tunnel |
 | POST | `/api/tunnels/:id/:action` | `enable`, `disable`, `restart` (restart = new token, both sides reconnect) |
 | POST | `/api/tunnels/servers` `{name, addr?}` | add a tunnel server; returns `{id, token, panel, repo}` for the join command |
