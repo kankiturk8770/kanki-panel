@@ -3,6 +3,7 @@ pub mod agent;
 pub mod engine;
 pub mod link;
 pub mod mux;
+pub mod obfs;
 pub mod panel;
 pub mod probe;
 pub mod quic;

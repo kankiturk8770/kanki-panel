@@ -250,11 +250,11 @@ fn tune(s: &TcpStream) {
 
 /// Dials the other side over the chosen transport and returns the raw connection.
 /// `remote` = "host:port"; `sni`/`path` are used by ws / wss.
-pub async fn dial(transport: &str, remote: &str, sni: &str, path: &str) -> Res<Raw> {
+pub async fn dial(transport: &str, remote: &str, sni: &str, path: &str, token: &str) -> Res<Raw> {
     // UDP-based transports do not start from a TCP connection
     match transport {
         "quic" => return Ok(Raw::Stream(super::quic::dial(remote, sni).await?)),
-        "kcp" => return Ok(Raw::Stream(super::quic::kcp_dial(remote).await?)),
+        "kcp" => return Ok(Raw::Stream(super::quic::kcp_dial(remote, token).await?)),
         _ => {}
     }
     let tcp = tokio::time::timeout(Duration::from_secs(10), TcpStream::connect(remote)).await.map_err(|_| "connect timeout")??;
@@ -290,10 +290,10 @@ pub enum Listener {
 
 impl Listener {
     /// Binds the right kind of listener for the transport on `0.0.0.0:port`.
-    pub async fn bind(transport: &str, port: u16, cert: &str, key: &str) -> Res<Listener> {
+    pub async fn bind(transport: &str, port: u16, cert: &str, key: &str, token: &str) -> Res<Listener> {
         match transport {
             "quic" => Ok(Listener::Quic(super::quic::QuicListener::bind(port).await?)),
-            "kcp" => Ok(Listener::Kcp(super::quic::KcpListener::bind(port).await?)),
+            "kcp" => Ok(Listener::Kcp(super::quic::KcpListener::bind(port, token).await?)),
             _ => {
                 let tls = if transport == "wss" { Some(Arc::new(tls_acceptor(cert, key)?)) } else { None };
                 let l = TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
@@ -369,7 +369,7 @@ pub fn tls_acceptor(cert_file: &str, key_file: &str) -> Res<tokio_rustls::TlsAcc
         }
         (certs, key)
     } else {
-        let ck = rcgen::generate_simple_self_signed(vec!["kanki.tunnel".to_string()])?;
+        let ck = rcgen::generate_simple_self_signed(vec!["www.bing.com".to_string()])?;
         let cert = rustls::pki_types::CertificateDer::from(ck.cert.der().to_vec());
         let key = rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(ck.key_pair.serialize_der()));
         (vec![cert], key)

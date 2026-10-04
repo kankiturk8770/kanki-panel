@@ -252,7 +252,7 @@ async fn run_link(spec: &Spec, state: &Arc<State>, raw: link::Raw, client: bool)
 
 async fn listen_loop(spec: Spec, state: Arc<State>) {
     let mut l = loop {
-        match link::Listener::bind(&spec.transport, spec.port, &spec.cert, &spec.key).await {
+        match link::Listener::bind(&spec.transport, spec.port, &spec.cert, &spec.key, &spec.token).await {
             Ok(l) => break l,
             Err(e) => {
                 state.set_err(format!("cannot listen on port {}: {}", spec.port, e));
@@ -294,7 +294,7 @@ async fn dial_loop(spec: Spec, state: Arc<State>, n: u32) {
     let mut wait = 1u64;
     loop {
         let t0 = now_ms();
-        match link::dial(&spec.transport, &spec.remote, &spec.sni, &spec.path).await {
+        match link::dial(&spec.transport, &spec.remote, &spec.sni, &spec.path, &spec.token).await {
             Ok(raw) => match run_link(&spec, &state, raw, true).await {
                 Ok(()) => {}
                 Err(e) => state.set_err(e),

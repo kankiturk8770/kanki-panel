@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 2.6 — tunnel camouflage
+- **KCP header fully hidden** (ChaCha20 per-datagram wrap with random padding, keyed by the token) — no KCP signature on the wire.
+- **QUIC disguised as HTTP/3** (`h3` ALPN + believable SNI); also fixes QUIC tunnels that would not connect.
+- **SNI spoof** for WSS with quick-pick domains in the tunnel form.
+
 ## New in 2.5
 - Users are named **USER1, USER2, …** (lowest free number; a deleted user's number is reused; bot trials are USER<n>-TEST and become USER<n> when bought).
 - Sales bot: **smart plan builder** (price per GB / country / connection), expiring **discount codes**, and a **smart channel** that writes and publishes posts by itself.

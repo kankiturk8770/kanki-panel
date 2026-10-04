@@ -54,14 +54,14 @@ fn transport_config() -> Arc<TransportConfig> {
 
 fn server_config() -> Res<ServerConfig> {
     // a throwaway self-signed certificate; identity is proven by the token handshake inside
-    let ck = rcgen::generate_simple_self_signed(vec!["kanki.tunnel".to_string()])?;
+    let ck = rcgen::generate_simple_self_signed(vec!["www.cloudflare.com".to_string()])?;
     let cert = rustls::pki_types::CertificateDer::from(ck.cert.der().to_vec());
     let key = rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(ck.key_pair.serialize_der()));
     let mut tls = rustls::ServerConfig::builder_with_provider(super::link::provider())
         .with_protocol_versions(&[&rustls::version::TLS13])?
         .with_no_client_auth()
         .with_single_cert(vec![cert], key)?;
-    tls.alpn_protocols = vec![b"kanki".to_vec()];
+    tls.alpn_protocols = vec![b"h3".to_vec()];
     let qsc = QuicServerConfig::try_from(tls)?;
     let mut cfg = ServerConfig::with_crypto(Arc::new(qsc));
     cfg.transport_config(transport_config());
@@ -75,7 +75,7 @@ fn client_config() -> Res<ClientConfig> {
         .dangerous()
         .with_custom_certificate_verifier(Arc::new(super::link::NoVerify(p)))
         .with_no_client_auth();
-    tls.alpn_protocols = vec![b"kanki".to_vec()];
+    tls.alpn_protocols = vec![b"h3".to_vec()];
     let qcc = QuicClientConfig::try_from(tls)?;
     let mut cfg = ClientConfig::new(Arc::new(qcc));
     cfg.transport_config(transport_config());
@@ -123,7 +123,7 @@ pub async fn dial(remote: &str, sni: &str) -> Res<BoxIo> {
     let bind: SocketAddr = if addr.is_ipv6() { "[::]:0".parse()? } else { "0.0.0.0:0".parse()? };
     let mut endpoint = Endpoint::client(bind)?;
     endpoint.set_default_client_config(client_config()?);
-    let name = if sni.is_empty() { "kanki.tunnel" } else { sni };
+    let name = if sni.is_empty() { "www.cloudflare.com" } else { sni };
     let conn = tokio::time::timeout(Duration::from_secs(12), endpoint.connect(addr, name)?).await.map_err(|_| "quic connect timeout")??;
     use tokio::io::AsyncWriteExt;
     let (mut send, recv) = conn.open_bi().await?;
@@ -145,16 +145,19 @@ fn kcp_config() -> tokio_kcp::KcpConfig {
     c
 }
 
-/// A KCP listener over a UDP socket.
+/// A KCP listener. KCP runs on a private loopback socket; the obfuscation relay owns the public
+/// UDP port, so nothing with a KCP header is ever sent on the wire.
 pub struct KcpListener {
     inner: tokio_kcp::KcpListener,
+    _obfs: super::obfs::ServerObfs,
 }
 
 impl KcpListener {
-    pub async fn bind(port: u16) -> Res<KcpListener> {
-        let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
-        let inner = tokio_kcp::KcpListener::bind(kcp_config(), addr).await?;
-        Ok(KcpListener { inner })
+    pub async fn bind(port: u16, token: &str) -> Res<KcpListener> {
+        let inner = tokio_kcp::KcpListener::bind(kcp_config(), "127.0.0.1:0").await?;
+        let local = inner.local_addr()?;
+        let obfs = super::obfs::server(port, token, local).await?;
+        Ok(KcpListener { inner, _obfs: obfs })
     }
     pub async fn accept(&mut self) -> Res<BoxIo> {
         let (stream, _) = self.inner.accept().await?;
@@ -162,12 +165,39 @@ impl KcpListener {
     }
 }
 
-/// Dials a KCP server.
-pub async fn kcp_dial(remote: &str) -> Res<BoxIo> {
+/// Dials a KCP server through the obfuscation relay.
+pub async fn kcp_dial(remote: &str, token: &str) -> Res<BoxIo> {
     let addr: SocketAddr = tokio::net::lookup_host(remote).await?.next().ok_or("cannot resolve the tunnel address")?;
+    let obfs = super::obfs::client(addr, token).await?;
     let cfg = kcp_config();
-    let stream = tokio::time::timeout(Duration::from_secs(12), tokio_kcp::KcpStream::connect(&cfg, addr)).await.map_err(|_| "kcp connect timeout")??;
-    Ok(Box::new(stream))
+    let stream = tokio::time::timeout(Duration::from_secs(12), tokio_kcp::KcpStream::connect(&cfg, obfs.local))
+        .await
+        .map_err(|_| "kcp connect timeout")??;
+    // keep the relay alive for the life of the stream
+    Ok(Box::new(KcpIo { stream, _obfs: obfs }))
+}
+
+/// A KCP stream that also owns its obfuscation relay.
+pub struct KcpIo {
+    stream: tokio_kcp::KcpStream,
+    _obfs: super::obfs::ClientObfs,
+}
+
+impl AsyncRead for KcpIo {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        AsyncRead::poll_read(Pin::new(&mut self.stream), cx, buf)
+    }
+}
+impl AsyncWrite for KcpIo {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+        AsyncWrite::poll_write(Pin::new(&mut self.stream), cx, buf)
+    }
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        AsyncWrite::poll_flush(Pin::new(&mut self.stream), cx)
+    }
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        AsyncWrite::poll_shutdown(Pin::new(&mut self.stream), cx)
+    }
 }
 
 // the first byte sent by the QUIC dialer is swallowed by the server side before the handshake

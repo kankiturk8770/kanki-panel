@@ -1,3 +1,9 @@
+# v2.6.0 — stronger tunnel camouflage
+- **KCP is now fully hidden.** KCP used to send its 24-byte header in the clear, so deep packet inspection could tell "this is KCP". Now every UDP datagram is wrapped — an 8-byte random nonce, random padding and ChaCha20 over the whole thing, keyed by the tunnel token — so from outside it is just short, random-looking UDP of changing length, with no KCP signature. The two ends unwrap it; anyone else (and any wrong token) sees noise.
+- **QUIC looks like HTTP/3.** QUIC now advertises the `h3` protocol (ALPN) and uses a believable SNI (default `www.cloudflare.com`, or the SNI you set), so it blends in with normal HTTP/3 web traffic instead of announcing a custom protocol. This also fixes QUIC tunnels that would not connect in 2.5.
+- **SNI spoof for WSS.** In the tunnel form (Advanced) you can set the SNI / Host; with WSS the TLS handshake then looks like an HTTPS connection to that domain (e.g. `www.google.com`). Quick-pick buttons for common domains were added. The exit accepts any SNI, so it just works.
+- The default self-signed certificate for WSS now uses a believable name (`www.bing.com`) instead of an obviously custom one.
+
 # v2.5.0
 
 ## Users: tidy USER numbering

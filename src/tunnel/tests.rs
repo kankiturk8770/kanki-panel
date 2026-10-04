@@ -251,3 +251,32 @@ async fn probe_tcpmux() {
 async fn probe_quic() {
     probe_case("quic", 42200).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn probe_kcp_obfs() {
+    probe_case("kcp", 42300).await;
+}
+
+#[test]
+fn obfs_roundtrip() {
+    // the obfuscation must survive any payload and hide the original bytes
+    let key = {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(b"kanki-obfs|");
+        h.update(b"the-token");
+        let out: [u8; 32] = h.finalize().into();
+        out
+    };
+    for len in [1usize, 24, 200, 1400] {
+        let data: Vec<u8> = (0..len).map(|i| (i * 7) as u8).collect();
+        let wrapped = super::obfs::test_wrap(&key, &data);
+        assert!(wrapped != data, "wrapped must differ from plaintext");
+        assert!(wrapped.len() > data.len(), "wrapped carries nonce + pad");
+        let back = super::obfs::test_unwrap(&key, &wrapped).expect("unwrap");
+        assert_eq!(back, data, "obfs must round-trip");
+        // a wrong key must not produce the original
+        let bad = [9u8; 32];
+        assert!(super::obfs::test_unwrap(&bad, &wrapped).map(|x| x == data).unwrap_or(false) == false);
+    }
+}
