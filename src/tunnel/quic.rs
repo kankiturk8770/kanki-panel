@@ -48,7 +48,13 @@ fn transport_config() -> Arc<TransportConfig> {
     let mut t = TransportConfig::default();
     // keep the link alive through NAT / idle; the record keepalive also runs on top
     t.keep_alive_interval(Some(Duration::from_secs(8)));
-    t.max_idle_timeout(Some(Duration::from_secs(30).try_into().unwrap()));
+    t.max_idle_timeout(Some(Duration::from_secs(45).try_into().unwrap()));
+    // big flow-control windows so a fast burst on one stream is not stalled or reset
+    t.stream_receive_window((8u32 * 1024 * 1024).into());
+    t.receive_window((32u32 * 1024 * 1024).into());
+    t.send_window(32 * 1024 * 1024);
+    t.max_concurrent_bidi_streams(64u32.into());
+    t.max_concurrent_uni_streams(0u32.into());
     Arc::new(t)
 }
 
