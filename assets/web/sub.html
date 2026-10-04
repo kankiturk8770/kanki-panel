@@ -8,12 +8,14 @@
 <title>{{TITLE}}</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23FFE9A6%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23B8862B%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2259%22%20height%3D%2259%22%20rx%3D%2217%22%20fill%3D%22%230f0b06%22%20stroke%3D%22url%28%23g%29%22%20stroke-width%3D%222.2%22%2F%3E%3Cpath%20d%3D%22M23%2017v30M42%2017.5L25.5%2032.5%2042.5%2047%22%20fill%3D%22none%22%20stroke%3D%22url%28%23g%29%22%20stroke-width%3D%226.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Ccircle%20cx%3D%2243%22%20cy%3D%2216.5%22%20r%3D%224.4%22%20fill%3D%22%23FFE9A6%22%2F%3E%3Ccircle%20cx%3D%2243.5%22%20cy%3D%2247.5%22%20r%3D%224.4%22%20fill%3D%22%23FFE9A6%22%2F%3E%3C%2Fsvg%3E">
 <style>
+@font-face{font-family:Vazirmatn;src:url(/assets/vazirmatn.woff) format("woff");font-weight:100 900;font-style:normal;font-display:swap}
+
 :root{--g:#F5C451;--gl:#FFE9A6;--gd:#B8862B;--ok:#3ddc97;--warn:#ffb547;--bad:#ff6b6b;--t:#F7F1E3;--s:#A89C82;--ln:rgba(245,196,81,.22);--c1:rgba(28,23,14,.94);--c2:rgba(12,10,6,.96);--bg1:#0c0a06;--bg2:#17110a;--in:rgba(0,0,0,.28)}
 body.light{--g:#c9952f;--gl:#e9c46e;--gd:#94681a;--t:#2b2216;--s:#75664b;--ln:rgba(140,100,30,.25);--c1:#f7f1e5;--c2:#efe6d3;--bg1:#e9e0cd;--bg2:#ddd1b8;--in:rgba(255,255,255,.45);--ok:#12915b;--warn:#b86e00;--bad:#d23c3c}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 [hidden]{display:none!important}
 html,body{margin:0}
-body{min-height:100vh;background:linear-gradient(var(--bg1),var(--bg2) 50%,var(--bg1));background-attachment:fixed;color:var(--t);font-family:Vazirmatn,"Segoe UI",Tahoma,sans-serif;font-size:14px}
+body{min-height:100vh;background:linear-gradient(var(--bg1),var(--bg2) 50%,var(--bg1));background-attachment:fixed;color:var(--t);font-family:Vazirmatn,"Segoe UI",Tahoma,sans-serif;font-size:14px;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 50% -10%,rgba(245,196,81,.18),transparent 55%)}
 button,input{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--gl);outline-offset:2px}
@@ -145,6 +147,12 @@ body.light{color-scheme:light}
 .proto .acts .b2{color:var(--pc,var(--t));border-color:color-mix(in srgb,var(--pc,var(--g)) 50%,transparent);background:color-mix(in srgb,var(--pc,var(--g)) 10%,transparent)}
 .proto .acts .b2:hover{color:var(--pc,var(--g));background:color-mix(in srgb,var(--pc,var(--g)) 20%,transparent);box-shadow:none}
 footer{margin-top:12px}
+/* Vazirmatn for Persian; English a little bolder and clearer */
+input,select,textarea,button{font-family:inherit}
+html[lang=en] body{font-weight:500;letter-spacing:.012em}
+html[lang=en] small,html[lang=en] .muted,html[lang=en] .sub{font-weight:500}
+.ltr,code,pre,[dir=ltr]{font-weight:500;letter-spacing:.012em}
+b .ltr,.ltr b,b.ltr,strong.ltr{font-weight:700}
 </style>
 </head>
 <body>

@@ -8,6 +8,8 @@
 <title>Kanki Panel</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23FFE9A6%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23B8862B%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20x%3D%222.5%22%20y%3D%222.5%22%20width%3D%2259%22%20height%3D%2259%22%20rx%3D%2217%22%20fill%3D%22%230f0b06%22%20stroke%3D%22url%28%23g%29%22%20stroke-width%3D%222.2%22%2F%3E%3Cpath%20d%3D%22M23%2017v30M42%2017.5L25.5%2032.5%2042.5%2047%22%20fill%3D%22none%22%20stroke%3D%22url%28%23g%29%22%20stroke-width%3D%226.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Ccircle%20cx%3D%2243%22%20cy%3D%2216.5%22%20r%3D%224.4%22%20fill%3D%22%23FFE9A6%22%2F%3E%3Ccircle%20cx%3D%2243.5%22%20cy%3D%2247.5%22%20r%3D%224.4%22%20fill%3D%22%23FFE9A6%22%2F%3E%3C%2Fsvg%3E">
 <style>
+@font-face{font-family:Vazirmatn;src:url(/assets/vazirmatn.woff) format("woff");font-weight:100 900;font-style:normal;font-display:swap}
+
 :root{--a:#F5C451;--al:#FFE9A6;--ad:#B8862B;--ok:#3ddc97;--bad:#ff6b6b;--warn:#ffb547;--info:#6fb6ff;--t:#F7F1E3;--s:#A89C82;--ln:rgba(245,196,81,.2);--c1:rgba(28,23,14,.94);--c2:rgba(12,10,6,.97);--bg1:#0c0a06;--bg2:#17110a;--in:rgba(0,0,0,.28)}
 body.c-turquoise{--a:#2fd6d6;--al:#9ff3f3;--ad:#1590a8;--ln:rgba(47,214,214,.2)}
 body.c-violet{--a:#a78bfa;--al:#ddd3ff;--ad:#6d4fd8;--ln:rgba(167,139,250,.22)}
@@ -16,7 +18,7 @@ body.c-rose{--a:#fb7185;--al:#ffd0d7;--ad:#c23a55;--ln:rgba(251,113,133,.22)}
 body.light{--t:#2a2010;--s:#7a6a4a;--c1:#fffaf0;--c2:#fbf4e4;--bg1:#f6efe0;--bg2:#ece0c6;--in:rgba(255,255,255,.7);--ln:rgba(120,90,30,.22)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0}
-body{min-height:100vh;background:linear-gradient(var(--bg1),var(--bg2) 50%,var(--bg1));background-attachment:fixed;color:var(--t);font-family:Vazirmatn,"Segoe UI",Tahoma,sans-serif;font-size:14px}
+body{min-height:100vh;background:linear-gradient(var(--bg1),var(--bg2) 50%,var(--bg1));background-attachment:fixed;color:var(--t);font-family:Vazirmatn,"Segoe UI",Tahoma,sans-serif;font-size:14px;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 50% -10%,color-mix(in srgb,var(--a) 18%,transparent),transparent 55%)}
 a{color:var(--a)}
 .ltr{direction:ltr;unicode-bidi:isolate}
@@ -547,6 +549,12 @@ input:-webkit-autofill,input:-webkit-autofill:focus{-webkit-box-shadow:0 0 0 40p
 .cfgb:hover{background:color-mix(in srgb,var(--pc) 24%,transparent);box-shadow:0 0 12px color-mix(in srgb,var(--pc) 35%,transparent)}
 .cfgb svg{flex:none}
 .secx summary{cursor:pointer;list-style:none;display:flex;gap:8px;align-items:center;flex-wrap:wrap}.secx summary::-webkit-details-marker{display:none}.secx summary:before{content:"▸";color:var(--a)}.secx[open] summary:before{content:"▾"}
+/* Vazirmatn for Persian; English a little bolder and clearer */
+input,select,textarea,button{font-family:inherit}
+html[lang=en] body{font-weight:500;letter-spacing:.012em}
+html[lang=en] small,html[lang=en] .muted,html[lang=en] .sub{font-weight:500}
+.ltr,code,pre,[dir=ltr]{font-weight:500;letter-spacing:.012em}
+b .ltr,.ltr b,b.ltr,strong.ltr{font-weight:700}
 </style>
 </head>
 <body>

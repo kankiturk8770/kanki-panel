@@ -78,6 +78,11 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/admin", get(|| async {
             ([(header::CACHE_CONTROL, "no-store"), (header::X_FRAME_OPTIONS, "DENY")], Html(include_str!("../../assets/web/index.html")))
         }))
+        // Vazirmatn (SIL Open Font License), shared by the panel and the subscription page
+        .route("/assets/vazirmatn.woff", get(|| async {
+            ([(header::CONTENT_TYPE, "font/woff"), (header::CACHE_CONTROL, "public, max-age=2592000, immutable")],
+             &include_bytes!("../../assets/web/vazirmatn.woff")[..])
+        }))
         .route("/api/overview", get(overview))
         .route("/api/users", get(users_list).post(users_create))
         .route("/api/users/:id", axum::routing::put(users_update).delete(users_delete))
