@@ -50,7 +50,18 @@ pub struct Tunnel {
     pub dial: String,
     pub enabled: bool,
     pub created: i64,
+    /// rotating tunnel: if it stays down, switch to the next transport in `order`
+    pub auto: bool,
+    pub order: Vec<String>,
+    /// last automatic switch (shown in the panel)
+    pub switched: i64,
+    pub switch_note: String,
 }
+
+/// Default rotation: KCP first (balanced, reverse), then the others.
+pub const AUTO_ORDER: &[&str] = &["kcp", "tcpmux", "quic", "ws", "wss", "tcp"];
+/// a tunnel that is down this long (both servers online) moves to the next transport
+const AUTO_AFTER: i64 = 45;
 
 #[derive(Clone, Default)]
 struct Seen {
@@ -328,6 +339,63 @@ async fn probe_stop(State(app): St, h: HeaderMap) -> Response {
     Json(json!({"ok": true})).into_response()
 }
 
+// ------------------------------------------------------------------ rotating tunnels
+
+fn down_since() -> &'static Mutex<HashMap<String, i64>> {
+    static D: OnceLock<Mutex<HashMap<String, i64>>> = OnceLock::new();
+    D.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// For rotating tunnels: when both servers are online but the tunnel has had no link for
+/// AUTO_AFTER seconds, switch to the next transport (balanced profile, reverse mode). A tunnel
+/// whose server is offline is left alone: the other tunnels keep carrying the users meanwhile.
+fn rotate_tick(app: &App) {
+    let t = now();
+    let seen = seen().lock().unwrap().clone();
+    let fresh = |sid: &str| seen.get(sid).map(|x| t - x.at < 20).unwrap_or(false);
+    let mut list = tunnels(app);
+    let mut changed = false;
+    let mut ds = down_since().lock().unwrap();
+    for tu in list.iter_mut() {
+        if !tu.enabled || !tu.auto {
+            ds.remove(&tu.id);
+            continue;
+        }
+        let links = |sid: &str| seen.get(sid).and_then(|x| x.status.iter().find(|s| s.id == tu.id).map(|s| s.links)).unwrap_or(0);
+        let both_online = fresh(&tu.entry) && fresh(&tu.exit);
+        let up = links(&tu.entry) > 0 && links(&tu.exit) > 0;
+        if up || !both_online {
+            ds.remove(&tu.id);
+            continue;
+        }
+        let since = *ds.entry(tu.id.clone()).or_insert(t);
+        // give a fresh switch time to connect
+        if t - since < AUTO_AFTER || t - tu.switched < AUTO_AFTER {
+            continue;
+        }
+        let order: Vec<String> = if tu.order.is_empty() { AUTO_ORDER.iter().map(|x| x.to_string()).collect() } else { tu.order.clone() };
+        let pos = order.iter().position(|x| *x == tu.transport);
+        let next = match pos {
+            Some(i) => order[(i + 1) % order.len()].clone(),
+            None => order[0].clone(),
+        };
+        if next == tu.transport {
+            continue;
+        }
+        tu.switch_note = format!("{} → {}", tu.transport, next);
+        tu.transport = next;
+        tu.mode = "reverse".into();
+        tu.conns = 4;
+        tu.switched = t;
+        ds.insert(tu.id.clone(), t);
+        changed = true;
+    }
+    drop(ds);
+    if changed {
+        save_tunnels(app, &list);
+    }
+}
+
 // ------------------------------------------------------------------ the engine on the panel server
 
 pub async fn local_loop(app: Arc<App>) {
@@ -351,6 +419,7 @@ pub async fn local_loop(app: Arc<App>) {
             "local".into(),
             Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st },
         );
+        rotate_tick(&app);
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
@@ -479,6 +548,13 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     if let Some(e) = b["enabled"].as_bool() {
         t.enabled = e;
+    }
+    if let Some(a) = b["auto"].as_bool() {
+        t.auto = a;
+    }
+    if b["order"].is_array() || b["order"].is_string() {
+        let o: Vec<String> = clean_list(&b["order"]).into_iter().filter(|x| AUTO_ORDER.contains(&x.as_str())).collect();
+        t.order = o;
     }
     if t.name.is_empty() {
         t.name = format!("tunnel-{}", &t.id[..4.min(t.id.len())]);
