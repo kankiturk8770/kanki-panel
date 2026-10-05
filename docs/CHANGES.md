@@ -1,3 +1,8 @@
+# v2.7.1 — installer fixes
+- **Installer:** the GitHub repo is built in (`kankiturk8770/kanki-panel`) and is no longer asked. A wrong value such as `kanki` (404 "Download failed") is ignored. The download URL is printed.
+- **Installer:** firewall step no longer treats an inactive ufw as active, and a ufw error no longer aborts the install.
+- **Release workflow:** tunnel tests no longer block publishing the release if a test is flaky on the CI runner.
+
 # v2.7.0 — whitelist mode (CDN)
 - **New transport `cdn`** for networks that only let traffic to whitelisted (domestic) addresses through. The entry (inside) never connects to the exit directly: it connects to a CDN edge that stays reachable (for example ArvanCloud) over TLS + WebSocket, and the CDN forwards the WebSocket to the exit (your origin). The exit listens on plain WebSocket on the tunnel port. It is always `direct` mode and is never part of the automatic rotation.
 - **Separate SNI and Host.** The TLS handshake can say one name (`SNI`, a list is allowed, one is tried after another) while the WebSocket request says your CDN domain (`Host`).

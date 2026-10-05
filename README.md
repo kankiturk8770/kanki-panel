@@ -55,7 +55,7 @@ kanki-panel/
 ## Install
 On Ubuntu 22.04 / 24.04 as root:
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/<USER>/<REPO>/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/kankiturk8770/kanki-panel/main/install.sh)
 ```
 The installer is fully in English. Afterwards just run `kanki` for the menu (install / node / update / reset admin / status / uninstall).
 

@@ -8,7 +8,7 @@
 ## 2. Main panel server
 Ubuntu 22.04 / 24.04, as root:
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/<USER>/<REPO>/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/kankiturk8770/kanki-panel/main/install.sh)
 ```
 Choose **1**. The installer asks for:
 
@@ -63,8 +63,8 @@ A server that only carries tunnels (for example in Iran) does **not** get the VP
 1. In the panel: **Tunnels > + Server**, give it a name, press **Create command**.
 2. Run the command it shows, as root, on that server (Ubuntu / Debian):
    ```bash
-   KANKI_REPO=<user/repo> KANKI_TUNNEL=<id>:<token> KANKI_PANEL=<panel-origin> \
-     bash <(curl -fsSL https://raw.githubusercontent.com/<user/repo>/main/install.sh)
+   KANKI_REPO=kankiturk8770/kanki-panel KANKI_TUNNEL=<id>:<token> KANKI_PANEL=<panel-origin> \
+     bash <(curl -fsSL https://raw.githubusercontent.com/kankiturk8770/kanki-panel/main/install.sh)
    ```
    It installs the `kanki` binary, writes `/etc/kanki/tunnel.env`, turns on BBR and starts the
    `kanki-tunnel` service (`kanki tunnel-agent`). The server appears in the panel as Connected

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =====================================================================
 #  Kanki Panel installer
-#  bash <(curl -fsSL https://raw.githubusercontent.com/<USER>/<REPO>/main/install.sh)
+#  bash <(curl -fsSL https://raw.githubusercontent.com/kankiturk8770/kanki-panel/main/install.sh)
 #  After install you can run:  kanki
 # =====================================================================
 set -e
@@ -37,7 +37,10 @@ ask_port(){ # $1=var $2=prompt $3=default $4=proto(tcp/udp)
 yes_no(){ local a; read -rp "$1 [${2:-Y}/$( [ "${2:-Y}" = Y ] && echo n || echo y )]: " a; a=${a:-${2:-Y}}; [[ "$a" =~ ^[Yy]$ ]]; }
 
 # ---------------- GitHub repo (binary releases)
+DEFAULT_REPO="kankiturk8770/kanki-panel"
 REPO="${KANKI_REPO:-$(cat $ENV_DIR/repo 2>/dev/null || true)}"
+# a missing or invalid value (e.g. just "kanki") falls back to the built-in repo
+echo "$REPO" | grep -Eq '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' || REPO="$DEFAULT_REPO"
 # one-command node join: the panel (Nodes > Add node) prints a line that sets these two
 KANKI_JOIN="${KANKI_JOIN:-}"; KANKI_PANEL="${KANKI_PANEL:-}"
 # one-command tunnel server (Tunnels > + Server): KANKI_TUNNEL=ID:TOKEN
@@ -48,14 +51,14 @@ free_port(){ # $1=var $2=preferred port: keep it when free, otherwise take a ran
   while port_busy "$p"; do p=$(rnum 20000 59999); done
   printf -v "$1" '%s' "$p"; }
 need_repo(){
-  if [ -z "$REPO" ]; then ask REPO "GitHub repo (e.g. username/kanki-panel)"; fi
-  [ -n "$REPO" ] || die "Repo is required"
+  [ -n "$REPO" ] || REPO="$DEFAULT_REPO"
   echo "$REPO" > $ENV_DIR/repo
 }
 
 download_bin(){
   say "Downloading Kanki Panel from $REPO ..."
   local base="https://github.com/$REPO/releases/download/latest"
+  say "URL: $base/kanki-panel"
   curl -fL --retry 3 -o /tmp/kanki-panel "$base/kanki-panel" \
     || die "Download failed. The repo must be public and the GitHub Actions build must have succeeded."
   if curl -fsL "$base/kanki-panel.sha256" -o /tmp/kanki-panel.sha256; then
@@ -245,8 +248,8 @@ EOF
 }
 
 open_ports(){
-  if command -v ufw >/dev/null && ufw status | grep -q active; then
-    for p in "$@"; do [ -n "${p%%/*}" ] && ufw allow "$p" >/dev/null; done
+  if command -v ufw >/dev/null && ufw status | grep -q "^Status: active"; then
+    for p in "$@"; do if [ -n "${p%%/*}" ]; then ufw allow "$p" >/dev/null || true; fi; done
   fi
 }
 

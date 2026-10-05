@@ -977,7 +977,7 @@ function nodeAdd(){
 function joinStart(btn){btn.disabled=true;
  Promise.all([api('GET','/api/nodes'),api('POST','/api/node-join')]).then(function(r){
   var before=r[0].map(function(n){return n.id}),j=r[1],dom=($('#j_dom').value||'').trim().replace(/[^A-Za-z0-9.\-]/g,''),repo=j.repo||'',
-   cmd=(repo?'KANKI_REPO='+repo+' ':'')+(dom?'KANKI_DOMAIN='+dom+' ':'')+'KANKI_JOIN='+j.token+' KANKI_PANEL='+(j.panel||location.origin)+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'USER/REPO')+'/main/install.sh)';
+   cmd=(repo?'KANKI_REPO='+repo+' ':'')+(dom?'KANKI_DOMAIN='+dom+' ':'')+'KANKI_JOIN='+j.token+' KANKI_PANEL='+(j.panel||location.origin)+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'kankiturk8770/kanki-panel')+'/main/install.sh)';
   $('#j_in').classList.add('hide');
   $('#j_out').innerHTML='<label class="f">'+t('Run this on the new server')+'</label><pre class="cmd" id="j_cmd">'+esc(cmd)+'</pre>'+
    '<button class="btn" style="width:100%" id="j_cp">'+ic('link',16)+' '+t('Copy command')+'</button>'+
@@ -1381,7 +1381,7 @@ function tunStateTxt(s){return {up:t('Connected'),partial:t('Connecting…'),dow
 function tunCol(s){return s=='up'?'#3ddc97':s=='partial'?'#f5b942':s=='off'?'#8a8f98':'#ff6b6b'}
 function tunTr(x){return {tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP',cdn:'CDN (whitelist)'}[x]||x}
 function tunCmd(s,d){var repo=(d&&d.repo)||'',panel=(d&&d.panel)||location.origin;
- return (repo?'KANKI_REPO='+repo+' ':'')+'KANKI_TUNNEL='+s.id+':'+s.token+' KANKI_PANEL='+panel+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'USER/REPO')+'/main/install.sh)'}
+ return (repo?'KANKI_REPO='+repo+' ':'')+'KANKI_TUNNEL='+s.id+':'+s.token+' KANKI_PANEL='+panel+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'kankiturk8770/kanki-panel')+'/main/install.sh)'}
 
 // ---- the live map: entries on one side, exits on the other, water flowing through connected tunnels
 function tunMap(d,small){var sv=d.servers||[],tl=d.tunnels||[];
