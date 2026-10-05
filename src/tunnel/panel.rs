@@ -662,8 +662,12 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         t.conns = 4;
     }
     if t.transport == "cdn" {
-        // the entry (inside) must be the one that dials: a CDN only carries connections that go to it
-        t.mode = "direct".into();
+        // both directions work: "direct" = the CDN points to the exit and the entry dials the CDN;
+        // "reverse" = the CDN points to the entry (e.g. an Iranian CDN in front of the Iran server)
+        // and the exit dials the CDN. Either way the side that dials only ever talks to the CDN.
+        if t.host.trim().is_empty() && t.sni.trim().is_empty() && t.dial.trim().is_empty() {
+            return err(StatusCode::BAD_REQUEST, "enter the domain you put on the CDN");
+        }
         t.auto = false;
         if t.path.is_empty() {
             t.path = "/".into();

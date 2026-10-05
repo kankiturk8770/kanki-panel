@@ -27,7 +27,8 @@ pub struct Spec {
     pub mode: String,
     /// "tcp" | "tcpmux" | "ws" | "wss" | "quic" | "kcp" | "cdn"
     /// (`cdn`: for whitelist-only networks. The dialer reaches the origin through a CDN edge over
-    /// TLS + WebSocket; the origin listens on plain WebSocket. Always `direct`.)
+    /// TLS + WebSocket; the origin listens on plain WebSocket. Works in both modes: `direct` = the
+    /// CDN is in front of the exit, `reverse` = the CDN is in front of the entry.)
     pub transport: String,
     /// tunnel port on the listening side
     pub port: u16,
