@@ -493,6 +493,35 @@ reset_admin(){
   systemctl restart kanki-panel && ok "Admin login reset (2FA disabled, all sessions logged out)"
 }
 
+change_ports(){
+  [ -f "$ENV" ] || die "Kanki is not installed on this server"
+  local WGC=/etc/wireguard/wg0.conf AWGC=/etc/amnezia/amneziawg/awg0.conf HYC=/etc/hysteria/config.yaml
+  local cw ca ch np
+  cw=$(awk -F' *= *' '/^ListenPort/{print $2; exit}' $WGC 2>/dev/null || true)
+  ca=$(awk -F' *= *' '/^ListenPort/{print $2; exit}' $AWGC 2>/dev/null || true)
+  ch=$(grep -E '^HY2_PORT=' $ENV | cut -d= -f2 || true)
+  echo "Current ports:  WireGuard ${cw:-off}   AmneziaWG ${ca:-off}   Hysteria2 ${ch:-off}   (all UDP)"
+  echo "Leave a question empty to keep the port. Users' old WireGuard/AmneziaWG files stop working after a change; subscription links update by themselves."
+  ask np "New WireGuard port" "$cw"
+  if [ -n "$cw" ] && [ "$np" != "$cw" ]; then
+    if port_busy "$np"; then warn "Port $np is in use, WireGuard left as it was"; else
+      sed -i "s/^ListenPort *=.*/ListenPort = $np/" $WGC && systemctl restart wg-quick@wg0 && ok "WireGuard -> $np"; open_ports "$np/udp"; fi
+  fi
+  ask np "New AmneziaWG port" "$ca"
+  if [ -n "$ca" ] && [ "$np" != "$ca" ]; then
+    if port_busy "$np"; then warn "Port $np is in use, AmneziaWG left as it was"; else
+      sed -i "s/^ListenPort *=.*/ListenPort = $np/" $AWGC && systemctl restart awg-quick@awg0 && ok "AmneziaWG -> $np"; open_ports "$np/udp"; fi
+  fi
+  ask np "New Hysteria2 port" "$ch"
+  if [ -n "$ch" ] && [ "$np" != "$ch" ]; then
+    if port_busy "$np"; then warn "Port $np is in use, Hysteria2 left as it was"; else
+      sed -i "s/^listen: .*/listen: :$np/" $HYC && sed -i "s/^HY2_PORT=.*/HY2_PORT=$np/" $ENV && systemctl restart hysteria-server && ok "Hysteria2 -> $np"; open_ports "$np/udp"; fi
+  fi
+  systemctl restart kanki-panel 2>/dev/null || true
+  systemctl restart kanki-node 2>/dev/null || true
+  ok "Done. The panel shows the new ports within a minute. If a cloud firewall is used, open the new UDP ports there too."
+}
+
 status(){
   for s in kanki-panel kanki-node kanki-tunnel caddy wg-quick@wg0 awg-quick@awg0 hysteria-server; do
     systemctl list-unit-files "$s.service" >/dev/null 2>&1 || continue
@@ -527,6 +556,7 @@ echo "  4) Telegram sales bot (set / change)"
 echo "  5) Reset admin login"
 echo "  6) Status"
 echo "  7) Uninstall"
+echo "  8) Change WireGuard / AmneziaWG / Hysteria2 ports"
 read -rp "  Choose: " CH
 case "$CH" in
   1) install_panel ;;
@@ -536,5 +566,6 @@ case "$CH" in
   5) reset_admin ;;
   6) status ;;
   7) uninstall ;;
+  8) change_ports ;;
   *) die "Invalid choice" ;;
 esac

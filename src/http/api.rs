@@ -510,7 +510,7 @@ pub const SETTING_KEYS: &[&str] = &[
     "dns", "mtu", "default_protocols", "sales_on", "trial_on", "trial_gb", "trial_days", "card_on", "card_number", "card_holder",
     "wallet_on", "wallet_text", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
     "welcome", "ref_gb", "ref_days", "warn_on", "backup_on", "channel",
-    "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "ovpn_inline_auth", "conn_limit_on", "logo", "price_rules",
+    "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "ovpn_inline_auth", "conn_limit_on", "tg_alerts", "logo", "price_rules",
 ];
 
 async fn settings_get(State(app): St, h: HeaderMap) -> Response {

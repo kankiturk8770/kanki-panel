@@ -1,3 +1,22 @@
+# v2.7.8 — tunnel map and compact cards
+- **Tunnel map:** a server that is in no tunnel (like a node that is not used yet) now sits in its own dashed row at the bottom (“Not in a tunnel”) instead of floating in the middle over the link labels. Links got four glowing particles with fading tails, and nodes get two staggered ripples.
+- **Tunnel cards** are smaller: three info cells, traffic moved to the small line below, one row of three buttons, less padding.
+- **Node cards** are smaller: less padding, smaller buttons and cells.
+
+# v2.7.7 — bot plans menu, channel post bank
+- **Bot plans list** is ordered by duration, then number of users, then price. The message groups the plans under “1 ماهه / 2 ماهه…”, and every button has the same short shape (duration · users · volume · price), so one-month single-user and one-month two-user plans no longer mix.
+- **Channel posts:** the word bank grew a lot (about 60 tips and FAQs, 8 step-by-step guides, more hooks, benefits and calls to action), so the auto posts repeat much less.
+
+# v2.7.6 — node as tunnel server
+- **Edit node > “Also use this node as a tunnel server”:** creates the tunnel server entry for that node and shows the one-line command that installs only the tunnel agent on it (no second VPN, no web panel). Then pick the node as entry or exit when you make a tunnel.
+
+# v2.7.5 — change service ports
+- **`kanki` menu, option 8:** change the WireGuard, AmneziaWG and Hysteria2 UDP ports of a panel or node after installation (edits the configs, the env file, restarts the services, opens the firewall). The port is refused if something already listens on it. The panel reads the new ports from the node by itself.
+
+# v2.7.4 — offline alerts
+- **Telegram alert** to the bot admins when a node, tunnel server or tunnel stays down for about 90 seconds, and another one when it is back. Checked every 30 s, silent for 2 minutes after a panel restart. Switch: Settings > “Telegram alert when a node or tunnel goes offline” (on by default; needs the Telegram bot).
+- Keeping the Main server free of users was already possible: edit the node and untick “Sync users without a specific node to this node”.
+
 # v2.7.3 — CDN in both directions, simple form
 - **CDN transport now works in reverse too.** If your domain is on a CDN that points to the Iran server (e.g. ArvanCloud), the foreign server connects in through the CDN; Iran only has to accept the CDN. The old direction (Iran dials a CDN in front of the exit) still works. The mode buttons are relabelled in plain words when CDN is chosen.
 - **Simple CDN form:** domain + tunnel port are enough. Edge IPs, SNI names (domain fronting) and the split hello moved under “Extra disguise (optional)”. The panel states exactly what to set on the CDN for the chosen direction. A domain is required.

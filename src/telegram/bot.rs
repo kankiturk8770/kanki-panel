@@ -263,6 +263,8 @@ impl Bot {
         }
         let me = self.clone();
         tokio::spawn(async move { me.background().await });
+        let me2 = self.clone();
+        tokio::spawn(async move { me2.watch().await });
         let mut offset = 0i64;
         loop {
             if self.db().on("bot_paused") {
@@ -503,17 +505,29 @@ impl Bot {
     }
 
     async fn plans_menu(&self, chat: i64, mid: i64, pattern: &str) {
+        // ordered by duration, then number of users, then price; the text groups them by duration
+        let mut list: Vec<Plan> = self.plans(true).into_iter().map(|x| x.0).collect();
+        list.sort_by(|x, y| (x.days, x.conns, x.toman).cmp(&(y.days, y.conns, y.toman)));
         let mut rows: Kb = vec![];
-        for (p, _) in self.plans(true) {
+        let mut txt = String::from("🛒 <b>یک پلن انتخاب کنید:</b>\n");
+        let mut last_days: i64 = -1;
+        for p in list.iter() {
             let price = if p.toman > 0 { toman(p.toman) } else { format!("{}$", p.usd) };
+            let dur = if p.days > 0 && p.days % 30 == 0 { format!("{} ماهه", p.days / 30) } else { format!("{} روزه", p.days) };
+            let vol = if p.gb > 0.0 { format!("{}GB", p.gb) } else { "نامحدود".to_string() };
+            if p.days != last_days {
+                txt.push_str(&format!("\n📅 <b>{}</b>\n", dur));
+                last_days = p.days;
+            }
+            txt.push_str(&format!("• {} — 👤 {} کاربر — {} — {}\n", esc(&p.name), p.conns, vol, price));
             let data = if pattern.contains("{}") { pattern.replace("{}", &p.id.to_string()) } else { format!("{}:{}", pattern, p.id) };
-            rows.push(vec![b(&format!("{} · {}GB · {} روز · {}", p.name, p.gb, p.days, price), &data)]);
+            rows.push(vec![b(&format!("📅 {} · 👤 {} · {} · {}", dur, p.conns, vol, price), &data)]);
         }
         if rows.is_empty() {
             return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]))).await;
         }
         rows.push(vec![b("⬅️ بازگشت", "home")]);
-        self.edit(chat, mid, "🛒 <b>یک پلن انتخاب کنید:</b>", Some(ik(rows))).await;
+        self.edit(chat, mid, &txt, Some(ik(rows))).await;
     }
 
     async fn show_plan(&self, chat: i64, mid: Option<i64>, uid: i64, pid: i64) {
@@ -1060,6 +1074,52 @@ impl Bot {
     }
 
     // ============================================================ کارهای زمان‌بندی‌شده
+    /// Telegram alert to the admins when a node, tunnel server or tunnel stays down for about
+    /// 90 seconds, and another one when it is back. Off when the setting `tg_alerts` is "0".
+    async fn watch(self: Arc<Self>) {
+        // after a panel restart the agents need a moment to report again
+        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+        // key -> (consecutive bad checks, alert already sent)
+        let mut st: HashMap<String, (u32, bool)> = HashMap::new();
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            if self.db().get("tg_alerts") == "0" {
+                continue;
+            }
+            let mut items: Vec<(String, String, bool)> = self
+                .db()
+                .nodes()
+                .into_iter()
+                .filter(|n| n.enabled)
+                .map(|n| (format!("node:{}", n.id), format!("نود {}", n.name), n.online))
+                .collect();
+            items.extend(crate::tunnel::panel::health(&self.app));
+            let keys: Vec<String> = items.iter().map(|i| i.0.clone()).collect();
+            st.retain(|k, _| keys.contains(k));
+            for (key, name, ok) in items {
+                let mut msg: Option<String> = None;
+                {
+                    let e = st.entry(key).or_insert((0, false));
+                    if ok {
+                        if e.1 {
+                            msg = Some(format!("🟢 <b>{}</b> دوباره آنلاین شد", esc(&name)));
+                        }
+                        *e = (0, false);
+                    } else {
+                        e.0 += 1;
+                        if e.0 >= 3 && !e.1 {
+                            e.1 = true;
+                            msg = Some(format!("🔴 <b>{}</b> آفلاین است", esc(&name)));
+                        }
+                    }
+                }
+                if let Some(m) = msg {
+                    self.notify_admins(&m, None, None).await;
+                }
+            }
+        }
+    }
+
     async fn background(self: Arc<Self>) {
         let mut tick: u64 = 0;
         loop {

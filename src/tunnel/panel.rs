@@ -452,6 +452,26 @@ pub async fn local_loop(app: Arc<App>) {
 }
 
 
+/// (key, display name, ok) for every tunnel server and every tunnel that can be judged right now.
+/// Used by the Telegram alerts. A tunnel is only judged when both of its servers are reporting.
+pub fn health(app: &App) -> Vec<(String, String, bool)> {
+    let seen = seen().lock().unwrap().clone();
+    let t = now();
+    let fresh = |sid: &str| sid == "local" || seen.get(sid).map(|x| t - x.at < 20).unwrap_or(false);
+    let mut out = vec![];
+    for sv in servers(app) {
+        out.push((format!("ts:{}", sv.id), format!("سرور تانل {}", sv.name), fresh(&sv.id)));
+    }
+    for tu in tunnels(app) {
+        if !tu.enabled || !fresh(&tu.entry) || !fresh(&tu.exit) {
+            continue;
+        }
+        let links = |sid: &str| seen.get(sid).and_then(|x| x.status.iter().find(|q| q.id == tu.id).map(|q| q.links)).unwrap_or(0);
+        out.push((format!("tu:{}", tu.id), format!("تانل {}", tu.name), links(&tu.entry) > 0 && links(&tu.exit) > 0));
+    }
+    out
+}
+
 /// Tries the CDN path from the panel: for every edge address (and SNI name) it connects, does the
 /// TLS hello with that SNI, sends the WebSocket request with the Host header and reports whether the
 /// CDN passed it to the origin. No tunnel is needed. Note: this runs on the panel server, not on the

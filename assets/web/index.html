@@ -556,6 +556,27 @@ html[lang=en] body{font-weight:500;letter-spacing:.012em}
 html[lang=en] small,html[lang=en] .muted,html[lang=en] .sub{font-weight:500}
 .ltr,code,pre,[dir=ltr]{font-weight:500;letter-spacing:.012em}
 b .ltr,.ltr b,b.ltr,strong.ltr{font-weight:700}
+
+/* v2.7.8 compact tunnel and node cards */
+.tcard{padding:10px 12px;margin:0 0 8px;border-radius:16px}
+.tcard .tgrid{grid-template-columns:repeat(3,1fr);gap:5px;margin:7px 0 4px}
+.tcard .tgrid>div{padding:4px 7px;border-radius:9px}
+.tcard .tgrid small{font-size:10px}.tcard .tgrid b{font-size:12px}
+.tcard .g3{grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px!important}
+.tcard .b2{padding:6px 4px;font-size:12px;border-radius:10px}
+.tcard .tmeta{font-size:11px;margin:2px 0 0}
+.tcard .tpath{margin-top:2px}
+.tmap .tp2{animation-delay:1.1s}
+.ncards{gap:8px}
+.ncards .card{padding:10px 12px;border-radius:16px}
+.ncards .g3{margin:6px 0!important;gap:5px}
+.ncards .pc{padding:4px 6px!important;border-radius:9px}
+.ncards .pc small{font-size:10px}.ncards .pc b{font-size:12px}
+.ncards .g2{gap:5px}
+.ncards .b2{padding:6px 4px;font-size:12px;border-radius:10px}
+.ncards .muted{font-size:11.5px}
+.ncards p.muted{margin:5px 0!important}
+.ncards .warnbox{margin:6px 0;padding:6px 8px;font-size:11.5px}
 </style>
 </head>
 <body>
@@ -998,9 +1019,11 @@ function joinDone(n){var o=$('#j_out');if(!o)return;
  loadNodes();
  $('#j_ok').onclick=function(){closeModal();if(S.page=='nodes')loadNodes()};
  $('#j_all').onclick=function(){var b=this;b.disabled=true;api('POST','/api/nodes/'+encodeURIComponent(n.id)+'/assign-all').then(function(){toast(t('Done'));closeModal();loadNodes()}).catch(function(e){b.disabled=false;fail(e)})}}
+function nodeTun(id){var n=findN(id);if(!n)return;var host=String(n.address||'').replace(/^https?:\/\//,'').replace(/[:\/].*$/,'');
+ api('POST','/api/tunnels/servers',{name:n.name,addr:host}).then(function(r){modal(mhead(t('Also use this node as a tunnel server'),n.name)+tunCmdBox(r,r));$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}).catch(fail)}
 function nodeEdit(id){var n=findN(id);if(!n)return;var loc=n.id=='local',panel=n.endpoint_mode=='panel'||!n.endpoint;
  modal(mhead(t('Edit node'),loc?'local':n.address)+'<label class="f">'+t('Node name')+'</label><input id="e_name" value="'+esc(n.name)+'"><label class="f">'+t('Note')+'</label><input id="e_note" value="'+esc(n.note)+'">'+
- '<label class="chk" style="margin-top:10px"><input type="checkbox" id="e_acc" '+(n.accept_all?'checked':'')+'>'+t('Sync users without a specific node to this node')+'</label>'+
+ '<label class="chk" style="margin-top:10px"><input type="checkbox" id="e_acc" '+(n.accept_all?'checked':'')+'>'+t('Sync users without a specific node to this node')+'</label>'+(loc?'':'<button type="button" class="btn" style="width:100%;margin-top:10px" onclick="nodeTun(\''+n.id+'\')">'+t('Also use this node as a tunnel server')+'</button>')+
  '<div class="box"><b>'+t('Users connection endpoint')+'</b><label class="chk"><input type="radio" name="e_m" value="panel" '+(panel?'checked':'')+'>'+t('Use the panel endpoint')+'</label><label class="chk"><input type="radio" name="e_m" value="custom" '+(panel?'':'checked')+'>'+t('Custom IP / domain for this node')+'</label><input id="e_ep" class="ltr" value="'+esc(n.endpoint)+'" style="margin-top:6px"></div>'+
  (loc?'':'<details class="box"><summary>'+t('Advanced')+'</summary><label class="f">'+t('API address')+'</label><input id="e_addr" class="ltr" value="'+esc(n.address)+'"><label class="f">'+t('Node token')+'</label><input id="e_tok" class="ltr" placeholder="••••••"><label class="chk" style="margin-top:8px"><input type="checkbox" id="e_ins" '+(n.insecure?'checked':'')+'>'+t('Self-signed certificate (no domain on node)')+'</label></details>')+
  '<div class="g2" style="margin-top:12px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="e_go">'+t('Save')+'</button></div>');
@@ -1099,11 +1122,11 @@ function pSettings(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Settings'
  '<div class="box"><b>'+t('Public endpoint')+'</b><div class="g2"><div><label class="f">'+t('Public VPN host or IP')+'</label><input id="s_ep" class="ltr" value="'+esc(s.endpoint)+'" placeholder="'+esc(s.domain)+'"></div><div><label class="f">'+t('Subscription base URL')+'</label><input id="s_sb" class="ltr" value="'+esc(s.sub_base)+'" placeholder="https://panel.example.com"></div></div><p class="muted">'+t('Public host used inside user configs.')+'</p><label class="chk"><input type="checkbox" id="s_all">'+t('Apply this endpoint to Main and all nodes')+'</label></div></div>'+
  '<div class="card"><h3>'+t('VPN')+'</h3><div class="g2"><div><label class="f">'+t('DNS')+'</label><input id="s_dns" class="ltr" value="'+esc(s.dns)+'"></div><div><label class="f">'+t('MTU')+'</label><input id="s_mtu" class="ltr" value="'+esc(s.mtu)+'"></div></div>'+
  '<label class="f">'+t('Default protocols for new users')+'</label>'+PROTOS.map(function(p){return '<label class="chk"><input type="checkbox" class="s_dp" value="'+p[0]+'" '+(dp.indexOf(p[0])>=0?'checked':'')+'>'+p[1]+'</label>'}).join('')+
- '<div style="margin-top:8px"><label class="chk"><input type="checkbox" id="s_awg" '+(s.awg_compat=='1'?'checked':'')+'>'+t('AmneziaWG compatibility mode (only Jc/Jmin/Jmax/S1/S2/H1-H4)')+'</label><label class="chk"><input type="checkbox" id="s_cl" '+(s.conn_limit_on!='0'?'checked':'')+'>'+t('Enforce connection limit (Hysteria2)')+'</label></div></div>'+
+ '<div style="margin-top:8px"><label class="chk"><input type="checkbox" id="s_awg" '+(s.awg_compat=='1'?'checked':'')+'>'+t('AmneziaWG compatibility mode (only Jc/Jmin/Jmax/S1/S2/H1-H4)')+'</label><label class="chk"><input type="checkbox" id="s_cl" '+(s.conn_limit_on!='0'?'checked':'')+'>'+t('Enforce connection limit (Hysteria2)')+'</label><label class="chk"><input type="checkbox" id="s_ta" '+(s.tg_alerts!='0'?'checked':'')+'>'+t('Telegram alert when a node or tunnel goes offline')+'</label></div></div>'+
  '<div style="text-align:center"><button class="btn" id="s_go">'+t('Save & apply')+'</button></div>';
  wireLogo();$('#s_lang').value=s.lang||'fa';$('#s_th').value=s.theme||'dark';$('#s_rf').value=s.refresh||'10';$('#s_col').value=s.color||'gold';
  $('#s_go').onclick=function(){var b={panel_name:$('#s_pn').value,lang:$('#s_lang').value,theme:$('#s_th').value,refresh:$('#s_rf').value,color:$('#s_col').value,endpoint:$('#s_ep').value,sub_base:$('#s_sb').value,dns:$('#s_dns').value,mtu:$('#s_mtu').value,
-  default_protocols:$$('.s_dp').filter(function(x){return x.checked}).map(function(x){return x.value}).join(','),awg_compat:$('#s_awg').checked?'1':'0',conn_limit_on:$('#s_cl').checked?'1':'0'};
+  default_protocols:$$('.s_dp').filter(function(x){return x.checked}).map(function(x){return x.value}).join(','),awg_compat:$('#s_awg').checked?'1':'0',conn_limit_on:$('#s_cl').checked?'1':'0',tg_alerts:$('#s_ta').checked?'1':'0'};
   var all=$('#s_all').checked;api('PUT','/api/settings',b).then(function(){return all?api('POST','/api/settings/apply-endpoint'):null}).then(function(){
    S.lang=b.lang;S.theme=b.theme;S.color=b.color;localStorage.setItem('kk_lang',S.lang);localStorage.setItem('kk_theme',S.theme);localStorage.setItem('kk_color',S.color);toast(t('Saved'));boot()}).catch(fail)}}).catch(fail)}
 
@@ -1387,27 +1410,31 @@ function tunCmd(s,d){var repo=(d&&d.repo)||'',panel=(d&&d.panel)||location.origi
 function tunMap(d,small){var sv=d.servers||[],tl=d.tunnels||[];
  if(!tl.length&&sv.length<2)return '<div class="tempty">'+ic('tunnel',34)+'<b>'+t('No tunnels yet')+'</b><span class="muted">'+t('Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.')+'</span></div>';
  var isE={},isX={};tl.forEach(function(x){isE[x.entry]=1;isX[x.exit]=1});
- var L=[],R=[],M=[];sv.forEach(function(s){if(isE[s.id]&&isX[s.id])M.push(s);else if(isE[s.id])L.push(s);else if(isX[s.id])R.push(s);else M.push(s)});
- var W=640,rows=Math.max(L.length,R.length,M.length,1),H=Math.max(small?150:190,rows*(small?78:96)+60),pos={};
- function place(arr,x){arr.forEach(function(s,i){pos[s.id]={x:x,y:Math.round(H/2+(i-(arr.length-1)/2)*(small?78:96))+8}})}
+ var L=[],R=[],M=[],I=[];sv.forEach(function(s){if(isE[s.id]&&isX[s.id])M.push(s);else if(isE[s.id])L.push(s);else if(isX[s.id])R.push(s);else I.push(s)});
+ var W=640,rows=Math.max(L.length,R.length,M.length,1),Hm=Math.max(small?150:190,rows*(small?78:96)+60),IH=I.length?(small?70:84):0,H=Hm+IH,pos={};
+ function place(arr,x){arr.forEach(function(s,i){pos[s.id]={x:x,y:Math.round(Hm/2+(i-(arr.length-1)/2)*(small?78:96))+8}})}
  place(L,110);place(R,530);place(M,320);
+ I.forEach(function(s,i){pos[s.id]={x:Math.round(W*(i+1)/(I.length+1)),y:Hm+Math.round(IH/2)-2}});
  var o='<svg class="tmap" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="xMidYMid meet" direction="ltr"><defs>'+
   '<radialGradient id="tnG" cx="35%" cy="30%" r="75%"><stop offset="0" stop-color="#fff7d6"/><stop offset=".45" stop-color="#e9c46e"/><stop offset="1" stop-color="#8a6420"/></radialGradient>'+
   '<filter id="tnGl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
  if(L.length)o+='<text class="tcap" x="110" y="20" text-anchor="middle">'+esc(t('Entry'))+'</text>';
  if(R.length)o+='<text class="tcap" x="530" y="20" text-anchor="middle">'+esc(t('Exit'))+'</text>';
+ if(I.length)o+='<line x1="40" y1="'+(Hm-6)+'" x2="'+(W-40)+'" y2="'+(Hm-6)+'" stroke="var(--ln)" stroke-dasharray="3 6"/><text class="tcap" x="'+(W/2)+'" y="'+(Hm+8)+'" text-anchor="middle">'+esc(t('Not in a tunnel'))+'</text>';
  tl.forEach(function(x,i){var a=pos[x.entry],b=pos[x.exit];if(!a||!b)return;
   var off=(i%3-1)*10,mx=(a.x+b.x)/2,c1y=a.y+off,c2y=b.y+off,dd='M'+a.x+' '+a.y+' C'+mx+' '+c1y+' '+mx+' '+c2y+' '+b.x+' '+b.y,col=tunCol(x.state),id='tnp'+i;
   o+='<path d="'+dd+'" stroke="'+col+'" stroke-width="7" stroke-opacity=".12" fill="none"/>'+
    '<path id="'+id+'" d="'+dd+'" stroke="'+col+'" stroke-width="2.4" stroke-opacity="'+(x.state=='up'?'.55':'.85')+'" fill="none"'+(x.state=='down'?' stroke-dasharray="4 7"':'')+'/>';
   if(x.state=='up'||x.state=='partial'){var dur=x.state=='up'?Math.max(1.2,Math.min(4,1.2+((x.entry_status&&x.entry_status.rtt_ms)||0)/120)):5;
    o+='<path d="'+dd+'" class="tfl" stroke="'+col+'" stroke-width="2.4" fill="none" filter="url(#tnGl)"/>';
-   for(var k=0;k<3;k++)o+='<circle r="'+(k?2.6:3.6)+'" fill="'+col+'" filter="url(#tnGl)"><animateMotion dur="'+dur.toFixed(2)+'s" begin="-'+(k*dur/3).toFixed(2)+'s" repeatCount="indefinite"><mpath href="#'+id+'"/></animateMotion></circle>';
+   for(var k=0;k<4;k++){var bg=(k*dur/4).toFixed(2);o+='<circle r="'+(k%2?2.4:3.4)+'" fill="'+col+'" filter="url(#tnGl)"><animateMotion dur="'+dur.toFixed(2)+'s" begin="-'+bg+'s" repeatCount="indefinite"><mpath href="#'+id+'"/></animateMotion></circle>'+
+    '<circle r="1.8" fill="'+col+'" opacity=".4"><animateMotion dur="'+dur.toFixed(2)+'s" begin="-'+(+bg+dur*0.06).toFixed(2)+'s" repeatCount="indefinite"><mpath href="#'+id+'"/></animateMotion></circle>'+
+    '<circle r="1.1" fill="'+col+'" opacity=".22"><animateMotion dur="'+dur.toFixed(2)+'s" begin="-'+(+bg+dur*0.12).toFixed(2)+'s" repeatCount="indefinite"><mpath href="#'+id+'"/></animateMotion></circle>'}
    if(x.state=='up')o+='<circle r="2.2" fill="#fff" opacity=".85"><animateMotion dur="'+(dur*1.3).toFixed(2)+'s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear"><mpath href="#'+id+'"/></animateMotion></circle>'}
   var u=[.5,.32,.68][i%3],v=1-u,px=v*v*v*a.x+3*v*v*u*mx+3*v*u*u*mx+u*u*u*b.x,py=v*v*v*a.y+3*v*v*u*c1y+3*v*u*u*c2y+u*u*u*b.y,es=x.entry_status||{},lab=tunTr(x.transport)+(x.state=='up'&&es.rtt_ms?' · '+es.rtt_ms+'ms':'');
   if(!small||tl.length<5)o+='<g class="tlab"><rect x="'+(px-lab.length*3.4-8)+'" y="'+(py-21)+'" width="'+(lab.length*6.8+16)+'" height="17" rx="8.5" fill="var(--c2)" stroke="'+col+'" stroke-opacity=".5"/><text x="'+px+'" y="'+(py-9)+'" text-anchor="middle" fill="'+col+'">'+esc(lab)+'</text></g>'});
  sv.forEach(function(s){var p=pos[s.id];if(!p)return;var col=s.online?'#3ddc97':'#ff6b6b',nm=s.name.length>14?s.name.slice(0,13)+'…':s.name;
-  o+='<g class="tnode"'+(small?'':' data-ts="'+esc(s.id)+'"')+'>'+(s.online?'<circle cx="'+p.x+'" cy="'+p.y+'" r="25" fill="none" stroke="'+col+'" class="tpulse"/>':'')+
+  o+='<g class="tnode"'+(small?'':' data-ts="'+esc(s.id)+'"')+'>'+(s.online?'<circle cx="'+p.x+'" cy="'+p.y+'" r="25" fill="none" stroke="'+col+'" class="tpulse"/><circle cx="'+p.x+'" cy="'+p.y+'" r="25" fill="none" stroke="'+col+'" class="tpulse tp2"/>':'')+
    '<circle cx="'+p.x+'" cy="'+p.y+'" r="24" fill="var(--c2)" stroke="'+col+'" stroke-width="2" filter="url(#tnGl)"/>'+
    '<circle cx="'+p.x+'" cy="'+p.y+'" r="17" fill="url(#tnG)"/>'+
    '<text x="'+p.x+'" y="'+(p.y+5)+'" text-anchor="middle" class="tini">'+esc((s.local?'★':s.name.charAt(0)).toUpperCase())+'</text>'+
@@ -1436,8 +1463,8 @@ function tunCard(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{
   '<div style="min-width:0"><b>'+esc(x.name)+'</b>'+(x.auto?' <span class="rotb" title="'+esc(x.switch_note?t('Last switch')+': '+x.switch_note+' · '+ago(x.switched):t('Rotating tunnel'))+'">🔁 '+t('Rotating')+(x.switch_note?' · '+esc(x.switch_note):'')+'</span>':'')+'<div class="tpath"><span>'+esc(e.name)+'</span><i class="tflow" style="--c:'+col+'"><em></em></i><span>'+esc(xs.name)+'</span></div></div>'+
   '<div class="row" style="gap:8px;flex-wrap:nowrap"><span class="tst" style="color:'+col+';border-color:'+col+'"><i style="background:'+col+'"></i>'+tunStateTxt(x.state)+'</span>'+sw('',x.enabled,"tunAct('"+x.id+"','"+(x.enabled?'disable':'enable')+"')")+'</div></div>'+
   '<div class="tgrid"><div><small>'+t('Transport')+'</small><b>'+esc(tunTr(x.transport))+'</b></div><div><small>'+t('Ping')+'</small><b class="ltr">'+(es.rtt_ms?es.rtt_ms+' ms':'—')+'</b></div>'+
-  '<div><small>'+t('Links')+'</small><b class="ltr">'+N(es.links||0)+' / '+N(es.want||x.conns||1)+'</b></div><div><small>'+t('Traffic')+'</small><b class="ltr">↑'+bytes(es.tx_bytes||0)+' ↓'+bytes(es.rx_bytes||0)+'</b></div></div>'+
-  '<p class="muted ltr tmeta">'+esc((x.mode=='direct'?t('direct'):t('reverse'))+' · '+t('port')+' '+x.port+' · '+(x.dial_host||'?')+' · '+ports.join(' · '))+'</p>'+
+  '<div><small>'+t('Links')+'</small><b class="ltr">'+N(es.links||0)+' / '+N(es.want||x.conns||1)+'</b></div></div>'+
+  '<p class="muted ltr tmeta">↑'+bytes(es.tx_bytes||0)+' ↓'+bytes(es.rx_bytes||0)+' · '+esc((x.mode=='direct'?t('direct'):t('reverse'))+' · '+t('port')+' '+x.port+' · '+(x.dial_host||'?')+' · '+ports.join(' · '))+'</p>'+
   (err&&x.state!='up'?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(err)+'</div>':'')+
   '<div class="g3" style="margin-top:10px"><button class="b2" onclick="tunEdit(\''+x.id+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2" onclick="tunAct(\''+x.id+'\',\'restart\')">'+ic('refresh',15)+' '+t('Reconnect')+'</button><button class="b2 bd" onclick="tunDel(\''+x.id+'\')">'+ic('trash',15)+' '+t('Delete')+'</button></div></div>'}
 function tunSrvCard(s){var col=s.online?'var(--ok)':'var(--bad)';
@@ -1616,7 +1643,7 @@ Object.assign(FA,{"SNI spoof / Host (wss, quic, ws)": "جعل SNI / Host (wss، 
 
 Object.assign(FA,{"Add at least one CDN edge address":"حداقل یک آی‌پی لبه CDN بنویس","Testing…":"در حال تست…"});
 
-Object.assign(FA,{"Easy setup: choose above which server the CDN points to, type your domain here and the tunnel port below. The panel does the rest.":"راه‌اندازی ساده: بالا انتخاب کن CDN به کدام سرور اشاره دارد، دامنه را همین‌جا و پورت تانل را پایین بنویس. بقیه را پنل انجام می‌دهد.","Extra disguise (optional)":"پوشش اضافه (اختیاری)","empty = use the domain":"خالی = از خود دامنه استفاده شود","CDN points to the Iran server: the foreign server connects in (recommended)":"CDN به سرور ایران اشاره می‌کند: سرور خارج وصل می‌شود (پیشنهادی)","CDN points to the foreign server: the Iran server connects out":"CDN به سرور خارج اشاره می‌کند: سرور ایران وصل می‌شود","On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور ایران (ورودی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور ایران باز کن.","On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور خارج (خروجی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور خروجی باز کن.","enter the domain you put on the CDN":"دامنه‌ای که روی CDN گذاشتی را بنویس"});
+Object.assign(FA,{"Not in a tunnel":"بدون تانل","Also use this node as a tunnel server":"این نود را سرور تانل هم بکن","Telegram alert when a node or tunnel goes offline":"هشدار تلگرام وقتی نود یا تانل آفلاین شد","Easy setup: choose above which server the CDN points to, type your domain here and the tunnel port below. The panel does the rest.":"راه‌اندازی ساده: بالا انتخاب کن CDN به کدام سرور اشاره دارد، دامنه را همین‌جا و پورت تانل را پایین بنویس. بقیه را پنل انجام می‌دهد.","Extra disguise (optional)":"پوشش اضافه (اختیاری)","empty = use the domain":"خالی = از خود دامنه استفاده شود","CDN points to the Iran server: the foreign server connects in (recommended)":"CDN به سرور ایران اشاره می‌کند: سرور خارج وصل می‌شود (پیشنهادی)","CDN points to the foreign server: the Iran server connects out":"CDN به سرور خارج اشاره می‌کند: سرور ایران وصل می‌شود","On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور ایران (ورودی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور ایران باز کن.","On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور خارج (خروجی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور خروجی باز کن.","enter the domain you put on the CDN":"دامنه‌ای که روی CDN گذاشتی را بنویس"});
 </script>
 <script type="text/plain" id="scanTpl">
 #!/bin/bash
