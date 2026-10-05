@@ -1,3 +1,8 @@
+# v2.7.2 — SNI spoof / CDN guide, CDN test, edge scanner
+- **Guide** (small, collapsible) in the tunnel form, under Advanced and inside the CDN block: what to do when the Iran server shows offline (white IP, reverse mode, CDN mode), what SNI spoofing really is (a disguise on WSS/QUIC/CDN, not a separate tunnel; useless if the IP itself is blocked), that it carries WireGuard / AmneziaWG / Hysteria2 like any other tunnel, and what CDN fronting was (SNI = allowed name, Host = your domain). Persian and English.
+- **Test CDN** button: `POST /api/tunnels/cdntest` tries every edge address x SNI name from the panel server (TLS hello with that SNI, WebSocket request with your Host) and shows OK / error and time. It proves the CDN + exit setup; the network of the entry is proven by its own tunnel.
+- **Scan script** button: generates `scan.sh` filled with your Host / SNI / path / edges. Run it on the Iran (entry) server to find which IPs of a /24 range pass the WebSocket (`OK-WS`) or only reach the CDN (`REACH`).
+
 # v2.7.1 — installer fixes
 - **Installer:** the GitHub repo is built in (`kankiturk8770/kanki-panel`) and is no longer asked. A wrong value such as `kanki` (404 "Download failed") is ignored. The download URL is printed.
 - **Installer:** firewall step no longer treats an inactive ufw as active, and a ufw error no longer aborts the install.

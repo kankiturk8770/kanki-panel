@@ -451,11 +451,73 @@ pub async fn local_loop(app: Arc<App>) {
     }
 }
 
+
+/// Tries the CDN path from the panel: for every edge address (and SNI name) it connects, does the
+/// TLS hello with that SNI, sends the WebSocket request with the Host header and reports whether the
+/// CDN passed it to the origin. No tunnel is needed. Note: this runs on the panel server, not on the
+/// entry, so it proves the CDN + origin setup; the network of the entry is proven by its tunnel.
+async fn cdn_test(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let list = |k: &str| -> Vec<String> {
+        b[k].as_str()
+            .unwrap_or("")
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .map(|x| x.trim().to_string())
+            .filter(|x| !x.is_empty())
+            .collect()
+    };
+    let edges: Vec<String> = list("edges")
+        .into_iter()
+        .map(|e| if e.contains(':') { e } else { format!("{}:443", e) })
+        .collect();
+    if edges.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "add at least one CDN edge address");
+    }
+    let mut snis = list("sni");
+    if snis.is_empty() {
+        snis.push(String::new());
+    }
+    let host = b["host"].as_str().unwrap_or("").trim().to_string();
+    let path = b["path"].as_str().unwrap_or("/").trim().to_string();
+    let frag = b["frag"].as_bool().unwrap_or(true);
+    let mut tasks = vec![];
+    'outer: for e in edges.iter() {
+        for sni in snis.iter() {
+            if tasks.len() >= 24 {
+                break 'outer;
+            }
+            let (e, sni, host, path) = (e.clone(), sni.clone(), host.clone(), path.clone());
+            tasks.push(tokio::spawn(async move {
+                let t0 = std::time::Instant::now();
+                let r = tokio::time::timeout(
+                    Duration::from_secs(15),
+                    super::link::dial("cdn", &e, &sni, &host, &path, "", frag),
+                )
+                .await;
+                let ms = t0.elapsed().as_millis() as u64;
+                match r {
+                    Ok(Ok(_)) => json!({"edge": e, "sni": sni, "ok": true, "ms": ms}),
+                    Ok(Err(er)) => json!({"edge": e, "sni": sni, "ok": false, "ms": ms, "error": er.to_string()}),
+                    Err(_) => json!({"edge": e, "sni": sni, "ok": false, "ms": ms, "error": "timeout"}),
+                }
+            }));
+        }
+    }
+    let mut out = vec![];
+    for t in tasks {
+        if let Ok(v) = t.await {
+            out.push(v);
+        }
+    }
+    Json(json!({"results": out})).into_response()
+}
+
 // ------------------------------------------------------------------ routes
 
 pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/tunnels", get(list).post(save))
+        .route("/api/tunnels/cdntest", post(cdn_test))
         .route("/api/tunnels/probe", get(probe_get).post(probe_start).delete(probe_stop))
         .route("/api/tunnels/servers", post(server_add))
         .route("/api/tunnels/servers/:id", delete(server_del).put(server_edit))

@@ -1490,7 +1490,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<label class="f">'+t('Host: your domain on the CDN')+'</label><input id="tw_chost" class="ltr" value="'+esc(x.host||'')+'" placeholder="tun.example.com">'+
   '<label class="f">'+t('SNI names (comma separated, empty = same as Host)')+'</label><input id="tw_csni" class="ltr" value="'+esc(x.sni||'')+'" placeholder="tun.example.com, www.aparat.com">'+
   '<div class="spoofc" id="tw_cspoof">'+['www.aparat.com','www.telewebion.com','www.rubika.ir','www.digikala.com','divar.ir'].map(function(d){return '<button type="button" data-sp="'+d+'">'+d+'</button>'}).join('')+'</div>'+
-  '<label class="chk"><input type="checkbox" id="tw_frag" '+(x.frag!==false?'checked':'')+'><span><b>'+t('Split the TLS hello into tiny pieces')+'</b><small>'+t('Hides the SNI from filters that do not reassemble packets. Turn it off if the CDN refuses.')+'</small></span></label></div>'+
+  '<label class="chk"><input type="checkbox" id="tw_frag" '+(x.frag!==false?'checked':'')+'><span><b>'+t('Split the TLS hello into tiny pieces')+'</b><small>'+t('Hides the SNI from filters that do not reassemble packets. Turn it off if the CDN refuses.')+'</small></span></label>'+cdnTools()+'</div>'+
   '<div class="g2"><div><label class="f">'+t('Tunnel port')+'</label><input id="tw_pt" type="number" class="ltr" value="'+(x.port||'')+'"></div><div><label class="f">'+t('Profile')+'</label><select id="tw_pf"><option value="balanced"'+(prof=='balanced'?' selected':'')+'>'+t('Balanced')+'</option><option value="speed"'+(prof=='speed'?' selected':'')+'>'+t('Most speed')+'</option><option value="gaming"'+(prof=='gaming'?' selected':'')+'>'+t('Gaming (low ping)')+'</option></select></div></div>'+
   '<small class="muted" id="tw_ph"></small>'+
   '<div class="nh" style="margin-top:12px"><b>'+t('Ports to carry')+'</b><button class="b2 sm" id="tw_vpn">'+ic('ports',14)+' '+t('VPN ports of the panel server')+'</button></div>'+
@@ -1502,7 +1502,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<label class="f">'+t('Target on the exit')+'</label><input id="tw_tg" class="ltr" value="'+esc(x.target||'')+'" placeholder="127.0.0.1">'+
   '<div class="g2"><div><label class="f">'+t('SNI spoof / Host (wss, quic, ws)')+'</label><input id="tw_sni" class="ltr" value="'+esc(x.sni||'')+'" placeholder="www.google.com"></div><div><label class="f">'+t('Path')+' (ws, wss)</label><input id="tw_pa" class="ltr" value="'+esc(x.path||'')+'" placeholder="/"></div></div>'+
   '<div class="spoofc" id="tw_spoof">'+['www.google.com','www.cloudflare.com','www.bing.com','www.microsoft.com','cdn.jsdelivr.net','www.aparat.com'].map(function(d){return '<button type="button" data-sp="'+d+'">'+d+'</button>'}).join('')+'</div>'+
-  '<small class="muted">'+t('With WSS the handshake looks like an HTTPS connection to this domain. QUIC and KCP are fully encrypted (KCP’s header is hidden too), so they look like plain UDP.')+'</small></details>'+
+  '<small class="muted">'+t('With WSS the handshake looks like an HTTPS connection to this domain. QUIC and KCP are fully encrypted (KCP’s header is hidden too), so they look like plain UDP.')+'</small>'+spGuide()+'</details>'+
   '<div class="g2" style="margin-top:14px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="tw_go">'+(id?t('Save'):t('Make the tunnel'))+'</button></div>','wide');
  var st={mode:mode,tr:tr};
  function hint(){var en=$('#tw_en').value,ex=$('#tw_ex').value,l=st.mode=='direct'?ex:en;if(!$('#tw_pt').value||!id&&!$('#tw_pt').dataset.touched)$('#tw_pt').value=(st.tr=='cdn'?8080:tunFreePort(l,id));
@@ -1518,11 +1518,45 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   [i.wg_port,i.awg_port,i.hy2_port].forEach(function(p){if(p&&u.indexOf(String(p))<0)u.push(String(p))});
   $('#tw_udp').value=u.join(', ');$('#tw_tcp').value=String(location.port||443);toast(t('Ports of the panel server were filled in'))}).catch(fail)};
  hint();cdnUi();
+ var ct=$('#tw_ctest');if(ct)ct.onclick=cdnTest;var cn=$('#tw_cscan');if(cn)cn.onclick=cdnScan;
  var sp=$('#tw_spoof');if(sp)sp.onclick=function(e){var b=e.target.closest('[data-sp]');if(b)$('#tw_sni').value=b.dataset.sp};
  var cs=$('#tw_cspoof');if(cs)cs.onclick=function(e){var b=e.target.closest('[data-sp]');if(!b)return;var i=$('#tw_csni'),v=i.value.trim();i.value=v?(v.split(/[\s,]+/).indexOf(b.dataset.sp)<0?v+', '+b.dataset.sp:v):b.dataset.sp};
  $('#tw_go').onclick=function(){var me=this,b={name:$('#tw_nm').value,entry:$('#tw_en').value,exit:$('#tw_ex').value,mode:st.tr=='cdn'?'direct':st.mode,transport:st.tr,port:+$('#tw_pt').value||0,conns:TNP[$('#tw_pf').value]||4,
   tcp:$('#tw_tcp').value,udp:$('#tw_udp').value,dial:st.tr=='cdn'?$('#tw_cdl').value:$('#tw_dl').value,target:$('#tw_tg').value,sni:st.tr=='cdn'?$('#tw_csni').value:$('#tw_sni').value,path:$('#tw_pa').value,auto:st.tr!='cdn'&&$('#tw_au').checked,host:st.tr=='cdn'?$('#tw_chost').value:'',frag:st.tr=='cdn'&&$('#tw_frag').checked};if(id)b.id=id;
   me.disabled=true;api('POST','/api/tunnels',b).then(function(){closeModal();toast(id?t('Saved: the tunnel restarts with the new settings'):t('The tunnel is made: it connects in a few seconds'));tunRefresh()}).catch(function(e){me.disabled=false;fail(e)})}}
+
+
+// ---- SNI spoof / CDN guide, panel-side CDN test and an edge scanner script for the entry server
+function spGuide(){var fa=S.lang=='fa';
+ var h=fa?[
+ ['سرور ایران «آفلاین» است؟','یعنی پنل نمی‌تواند به آن برسد یا ایران نمی‌تواند به خارج وصل شود (آی‌پی سفید / لیست سفید). سه راه: ① آی‌پی سفید: سرور داخلی که به خارج راه دارد. ② حالت معکوس (Reverse): سرور خارج به ایران وصل می‌شود؛ وقتی ایران نمی‌تواند به بیرون درخواست بفرستد ولی ورودی از بیرون باز است (پورت تانل روی ایران باز باشد). ③ حالت CDN: ایران فقط به آی‌پی داخلی CDN (مثلاً آروان‌کلود) وصل می‌شود.'],
+ ['SNI اسپوف چیست؟','تانل جدا نیست؛ فقط یک پوشش روی WSS / QUIC / CDN است و اسم سایت دیگری را در دست‌دادن TLS می‌نویسد. فقط وقتی کمک می‌کند که فیلتر روی نام SNI تصمیم بگیرد. اگر آی‌پی را ببندند، SNI کمکی نمی‌کند. جعل آی‌پی مبدأ (بستهٔ خام) روی تانل TCP کار نمی‌کند و در پنل نیست.'],
+ ['با وایرگارد و بقیه کار می‌کند؟','بله. پورت‌های وایرگارد / آمنزیا / هیستریا۲ را در UDP و TCP تانل بگذار؛ تانل فقط ترافیک را حمل می‌کند و پروتکل VPN عوض نمی‌شود.'],
+ ['CDN فرانتینگ چه بود؟','قبلاً (مثل گوگل و آمازون): SNI نام یک سایت مجاز، ولی هدر Host دامنهٔ خودت؛ CDN با Host مسیر می‌داد و فیلتر فقط SNI مجاز را می‌دید. بیشتر CDNهای بزرگ بستند؛ بعضی هنوز می‌پذیرند و باید تست شود. در حالت CDN پنل، SNI و Host جدا نوشته می‌شوند، یعنی همین کار.'],
+ ['وقتی اینترنت به‌هم ریخت','دامنه را روی CDN بگذار (WebSocket روشن)، چند آی‌پی لبه بنویس، «تست CDN» را بزن (از سرور پنل، سلامت CDN و مبدأ)، و برای پیدا کردن آی‌پی بازِ یک رنج، «اسکریپت اسکن» را روی سرور ایران اجرا کن.']
+ ]:[
+ ['Iran server shows offline?','The panel cannot reach it, or Iran cannot reach abroad (whitelist / white IP). Three ways: (1) a white IP: an inside server that can reach abroad. (2) Reverse mode: the foreign server dials Iran; use it when Iran cannot send requests out but inbound works (open the tunnel port on Iran). (3) CDN mode: Iran only talks to a domestic CDN IP (for example ArvanCloud).'],
+ ['What is SNI spoofing?','Not a separate tunnel: a disguise on WSS / QUIC / CDN that puts another site name in the TLS hello. It only helps when the filter decides by SNI name. If the IP itself is blocked it does nothing. Real source-IP spoofing (raw packets) does not work for a TCP tunnel and is not in the panel.'],
+ ['Does it work with WireGuard etc.?','Yes. Put the WireGuard / AmneziaWG / Hysteria2 ports in the tunnel TCP and UDP lists; the tunnel only carries the traffic, the VPN protocol stays the same.'],
+ ['What was CDN fronting?','Old trick (Google, Amazon): SNI = an allowed site, HTTP Host = your own domain; the CDN routed by Host and the filter saw only the allowed SNI. Big CDNs closed it; some still allow it and it must be tested. In the panel CDN mode SNI and Host are separate, which is exactly this.'],
+ ['When everything breaks','Put your domain on a CDN (WebSocket on), list several edge IPs, press “Test CDN” (runs from the panel server: checks CDN and origin), and run the “Scan script” on the Iran server to find open IPs inside a range.']
+ ];
+ return '<details class="box" style="margin-top:10px"><summary><b>'+(fa?'راهنمای SNI اسپوف و CDN':'SNI spoof & CDN guide')+'</b></summary>'+h.map(function(r){return '<small class="muted" style="display:block;margin:7px 0 0"><b>'+r[0]+'</b> '+r[1]+'</small>'}).join('')+'</details>'}
+function cdnTools(){var fa=S.lang=='fa';
+ return '<div class="nh" style="margin-top:10px"><b>'+(fa?'تست و ابزار':'Test & tools')+'</b><span><button type="button" class="b2 sm" id="tw_ctest">'+(fa?'تست CDN':'Test CDN')+'</button> <button type="button" class="b2 sm" id="tw_cscan">'+(fa?'اسکریپت اسکن':'Scan script')+'</button></span></div>'+
+ '<small class="muted" style="display:block;margin-top:4px">'+(fa?'تست از سرور پنل انجام می‌شود و نشان می‌دهد CDN و سرور خروجی درست وصل‌اند. اتصال از داخل ایران را اسکریپت اسکن روی سرور ایران نشان می‌دهد.':'The test runs from the panel server and shows that the CDN and the exit are wired correctly. The scan script run on the Iran server shows what works from inside.')+'</small>'+
+ '<div id="tw_ctres" class="list" style="margin-top:6px"></div><div id="tw_scres"></div>'+spGuide()}
+function cdnTest(){var b={edges:$('#tw_cdl').value,host:$('#tw_chost').value.trim(),sni:$('#tw_csni').value,path:$('#tw_pa').value||'/',frag:$('#tw_frag').checked},o=$('#tw_ctres'),me=$('#tw_ctest');
+ if(!b.edges.trim()){toast(t('Add at least one CDN edge address'),1);return}
+ me.disabled=true;o.innerHTML='<small class="muted">'+t('Testing…')+'</small>';
+ api('POST','/api/tunnels/cdntest',b).then(function(r){me.disabled=false;var l=r.results||[];
+  o.innerHTML=l.map(function(z){return '<div class="li"><span><b class="ltr">'+esc(z.edge)+'</b><small>'+(z.sni?'SNI '+esc(z.sni)+' · ':'')+N(z.ms)+' ms'+(z.ok?'':' · '+esc(z.error||''))+'</small></span><span>'+(z.ok?'✅':'❌')+'</span></div>'}).join('')||'—'}).catch(function(e){me.disabled=false;o.innerHTML='';fail(e)})}
+function cdnScan(){var fa=S.lang=='fa',tp=document.getElementById('scanTpl');if(!tp)return;
+ var host=$('#tw_chost').value.trim(),sni=$('#tw_csni').value.trim().split(/[\s,]+/).filter(Boolean).join(' ')||host||'www.aparat.com',
+  edges=$('#tw_cdl').value.trim().split(/[\s,]+/).filter(Boolean).map(function(e){return e.split(':')[0]}).join(' ')||'185.143.232.0/24',path=$('#tw_pa').value||'/';
+ var sc=tp.textContent.replace(/^\n/,'').split('@@HOST@@').join(host||'tun.example.com').split('@@SNIS@@').join(sni).split('@@EDGES@@').join(edges).split('@@PATH@@').join(path);
+ $('#tw_scres').innerHTML='<small class="muted" style="display:block;margin-top:6px">'+(fa?'این را روی سرور ایران (ورودی) اجرا کن: bash scan.sh   یا با رنج دیگر: bash scan.sh 185.143.233.0/24. خروجی OK-WS یعنی آن آی‌پی WebSocket تو را رد کرد؛ REACH یعنی لبهٔ CDN باز است ولی مسیر/Host درست نیست.':'Run this on the Iran (entry) server: bash scan.sh   or with another range: bash scan.sh 185.143.233.0/24. OK-WS means that IP passed your WebSocket; REACH means the CDN edge is open but the path/Host is not right.')+'</small><textarea id="tw_scta" class="ltr" rows="9" style="width:100%;font-size:11px" readonly></textarea><button type="button" class="b2 sm" id="tw_sccp">'+t('Copy')+'</button>';
+ $('#tw_scta').value=sc;$('#tw_sccp').onclick=function(){copy($('#tw_scta').value)}}
 
 // ---- smart tunnel: test every transport between two servers, then build with the best one
 var TS={timer:0};
@@ -1576,6 +1610,27 @@ Object.assign(FA,{"Login, 2FA, sessions and IP access": "ورود، دومرحل
 Object.assign(FA,{"Rotating tunnel": "تانل چرخشی", "Rotating": "چرخشی", "Last switch": "آخرین تغییر", "If it stays down, it switches by itself: KCP → TCP Mux → QUIC → WS → WSS → TCP (balanced, reverse)": "اگر قطع بماند، خودکار روش بعدی را امتحان می‌کند: KCP ← TCP Mux ← QUIC ← WS ← WSS ← TCP (متعادل، معکوس)"});
 
 Object.assign(FA,{"SNI spoof / Host (wss, quic, ws)": "جعل SNI / Host (wss، quic، ws)", "With WSS the handshake looks like an HTTPS connection to this domain. QUIC and KCP are fully encrypted (KCP’s header is hidden too), so they look like plain UDP.": "با WSS، دست‌دادن اتصال شبیه یک اتصال HTTPS به این دامنه دیده می‌شود. QUIC و KCP کاملاً رمزند (هدر KCP هم مخفی است) و شبیه UDP ساده‌اند."});
+
+Object.assign(FA,{"Add at least one CDN edge address":"حداقل یک آی‌پی لبه CDN بنویس","Testing…":"در حال تست…"});
+</script>
+<script type="text/plain" id="scanTpl">
+#!/bin/bash
+# Kanki CDN edge scanner - run it on the ENTRY server (inside).
+# Usage: bash scan.sh              (uses the edges below)
+#        bash scan.sh 185.143.233.0/24 1.2.3.4   (any /24 ranges or single IPs)
+HOST="@@HOST@@"
+SNIS="@@SNIS@@"
+PORT=443
+URLPATH="@@PATH@@"
+IPS="$*"
+[ -z "$IPS" ] && IPS="@@EDGES@@"
+expand(){ for x in $IPS; do case "$x" in */24) b=${x%.*}; for i in $(seq 1 254); do echo "$b.$i"; done;; *) echo "$x";; esac; done; }
+probe(){ ip=$1; sni=$2
+  c=$(curl -sk --http1.1 -m 6 --resolve "$sni:$PORT:$ip" -H "Host: $HOST" -H "Connection: Upgrade" -H "Upgrade: websocket" -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" -o /dev/null -w "%{http_code}" "https://$sni:$PORT$URLPATH" 2>/dev/null)
+  case "$c" in 101) echo "OK-WS   $ip  sni=$sni";; 000|"") ;; *) echo "REACH   $ip  sni=$sni  http=$c";; esac; }
+export -f probe; export HOST PORT URLPATH
+for s in $SNIS; do expand | xargs -P 40 -I{} bash -c 'probe {} '"$s"; done
+echo "done"
 </script>
 </body>
 </html>
