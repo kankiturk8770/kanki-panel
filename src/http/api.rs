@@ -759,6 +759,7 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
     let page = include_str!("../../assets/web/sub.html")
         .replace("{{TITLE}}", &esc(&u.username))
         .replace("{{SUB}}", &sub)
+        .replace("{{STATUS}}", u.status())
         .replace("{{EXP}}", &iso(u.expires_at))
         .replace("{{LIM}}", &format!("{:.6}", u.limit_gb))
         .replace("{{USED}}", &format!("{:.6}", u.used_gb()))

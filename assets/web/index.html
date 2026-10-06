@@ -1424,8 +1424,18 @@ function tunSrv(id){var l=(TN.d&&TN.d.servers)||[];for(var i=0;i<l.length;i++)if
 function tunStateTxt(s){return {up:t('Connected'),partial:t('Connecting…'),down:t('Disconnected'),off:t('Off')}[s]||s}
 function tunCol(s){return s=='up'?'#3ddc97':s=='partial'?'#f5b942':s=='off'?'#8a8f98':'#ff6b6b'}
 function tunTr(x){return {tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP',cdn:'CDN (whitelist)'}[x]||x}
-function tunCmd(s,d){var repo=(d&&d.repo)||'',panel=(d&&d.panel)||location.origin;
- return (repo?'KANKI_REPO='+repo+' ':'')+'KANKI_TUNNEL='+s.id+':'+s.token+' KANKI_PANEL='+panel+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'kankiturk8770/kanki-panel')+'/main/install.sh)'}
+// GRE: the panel builds its side by itself; this script builds the other side on the server
+// (a systemd service, so it comes back after a reboot) and, when the panel has a domain, points that
+// domain at the panel's address inside the GRE link so the agent talks to the panel through it
+function tunGreScript(g){var n=g.n,hosts=!g.is_ip,
+ ex='ip link del kgre0 2>/dev/null; ip tunnel add kgre0 mode gre remote '+g.panel_ip+' ttl 255 && ip addr add 10.77.'+n+'.2/30 dev kgre0 && ip link set kgre0 mtu 1400 up'+(hosts?'; grep -q "# kanki-gre" /etc/hosts || echo "10.77.'+n+'.1 '+g.domain+' # kanki-gre" >> /etc/hosts':''),
+ xs='ip link del kgre0 2>/dev/null'+(hosts?'; sed -i "/# kanki-gre/d" /etc/hosts':'');
+ return ['# GRE link to the panel',"cat >/etc/systemd/system/kanki-gre.service <<'EOF'",'[Unit]','Description=Kanki GRE link to the panel','After=network-online.target','Wants=network-online.target',
+  '[Service]','Type=oneshot','RemainAfterExit=yes',"ExecStart=/bin/sh -c '"+ex+"'","ExecStop=/bin/sh -c '"+xs+"'",'[Install]','WantedBy=multi-user.target','EOF',
+  '(ufw allow from '+g.panel_ip+' proto gre >/dev/null 2>&1 || true)','systemctl daemon-reload && systemctl enable --now kanki-gre'].join('\n')}
+function tunCmd(s,d){var repo=(d&&d.repo)||'',panel=(d&&d.panel)||location.origin,g=d&&d.gre,pre='';
+ if(g&&g.panel_ip){pre=tunGreScript(g)+'\n';if(g.is_ip)panel='https://10.77.'+g.n+'.1'+(g.port?':'+g.port:'')}
+ return pre+(repo?'KANKI_REPO='+repo+' ':'')+'KANKI_TUNNEL='+s.id+':'+s.token+' KANKI_PANEL='+panel+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'kankiturk8770/kanki-panel')+'/main/install.sh)'}
 
 // ---- the live map: entries on one side, exits on the other, water flowing through connected tunnels
 function tunMap(d,small){var sv=d.servers||[],tl=d.tunnels||[];
@@ -1501,19 +1511,34 @@ function tunSrvDel(id){confirmDo(function(){api('DELETE','/api/tunnels/servers/'
 function tunCmdBox(s,d){var cmd=tunCmd(s,d);
  return '<label class="f">'+t('Run this on the server, as root (Ubuntu / Debian)')+'</label><pre class="cmd" id="tn_cmd">'+esc(cmd)+'</pre><button class="btn" style="width:100%" id="tn_cp">'+ic('link',16)+' '+t('Copy command')+'</button>'+
   '<p class="muted" style="margin:10px 0 0">'+t('It installs only the tunnel agent: no VPN, no web panel. The server appears here as Connected within a few seconds.')+'</p>'+
-  ((d&&d.repo)?'':'<div class="warnbox">'+t('Set the update source (GitHub repo) in Settings first, or replace USER/REPO in the command.')+'</div>')}
+  tunGreNote(d&&d.gre)+((d&&d.repo)?'':'<div class="warnbox">'+t('Set the update source (GitHub repo) in Settings first, or replace USER/REPO in the command.')+'</div>')}
+function tunGreNote(g){if(!g)return '';return '<p class="muted" style="margin:10px 0 0">🔗 '+t('GRE link: the panel already built its side. The first lines of the command build the other side on the server, then the agent connects to the panel through the link.')+'</p>'+(g.panel_ip?'':'<div class="warnbox">'+t('The panel IP could not be found from its address. Type it in the GRE box (Edit server) and make the command again.')+'</div>')}
+function tunGreBox(pre,s){s=s||{};return '<label style="display:flex;gap:8px;align-items:center;margin-top:12px;cursor:pointer"><input type="checkbox" id="'+pre+'_gre" style="width:auto"'+(s.gre_ip?' checked':'')+'><span>'+t('Only GRE passes to this server')+'</span></label>'+
+ '<div id="'+pre+'_gx" class="'+(s.gre_ip?'':'hide')+'"><small class="muted">'+t('When TCP to the panel is blocked but GRE passes, the panel builds a GRE link to the server and the agent connects through it. Needs root on both servers.')+'</small>'+
+ '<label class="f">'+t('Public IP of this server')+'</label><input id="'+pre+'_gi" class="ltr" placeholder="1.2.3.4" value="'+esc(s.gre_ip||'')+'">'+
+ '<label class="f">'+t('IP of the panel server (empty = automatic)')+'</label><input id="'+pre+'_gp" class="ltr" placeholder="5.6.7.8" value="'+esc(s.gre_panel_ip||'')+'"></div>'}
+function tunGreWire(pre){$('#'+pre+'_gre').onchange=function(){$('#'+pre+'_gx').classList.toggle('hide',!this.checked)}}
+function tunGreBody(pre,b){var on=$('#'+pre+'_gre').checked;b.gre_ip=on?$('#'+pre+'_gi').value.trim():'';b.gre_panel_ip=on?$('#'+pre+'_gp').value.trim():'';return b}
 function tunServerAdd(){modal(mhead(t('Add a tunnel server'))+'<p class="muted" style="margin:0 0 8px">'+t('For example your Iran server. Only the tunnel agent is installed on it.')+'</p>'+
  '<div id="tn_in"><label class="f">'+t('Server name')+'</label><input id="tn_nm" placeholder="Iran-1"><label class="f">'+t('Address other servers use to reach it (optional)')+'</label><input id="tn_ad" class="ltr" placeholder="ir.example.com"><small class="muted">'+t('Empty = the IP it connects from')+'</small>'+
+ tunGreBox('tn')+
  '<button class="btn" style="width:100%;margin-top:12px" id="tn_go">'+t('Create command')+'</button></div><div id="tn_out"></div>');
- $('#tn_go').onclick=function(){var me=this;me.disabled=true;api('POST','/api/tunnels/servers',{name:$('#tn_nm').value,addr:$('#tn_ad').value}).then(function(r){
+ tunGreWire('tn');
+ $('#tn_go').onclick=function(){var me=this,b=tunGreBody('tn',{name:$('#tn_nm').value,addr:$('#tn_ad').value});if(b.gre_ip===''&&$('#tn_gre').checked){toast(t('Type the public IP of the server'),1);return}me.disabled=true;api('POST','/api/tunnels/servers',b).then(function(r){
   $('#tn_in').classList.add('hide');$('#tn_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)};tunRefresh(true)}).catch(function(e){me.disabled=false;fail(e)})}}
 function tunSrvCmd(id){if(!confirm(t('A new command makes the old one stop working. Continue?')))return;
  api('PUT','/api/tunnels/servers/'+id,{new_token:true}).then(function(r){var s=tunSrv(id);modal(mhead(t('Command for')+' '+s.name)+tunCmdBox({id:id,token:r.token},r));$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}).catch(fail)}
 function tunSrvEdit(id){var s=tunSrv(id);
  modal(mhead(t('Edit server'))+(s.local?'':'<label class="f">'+t('Server name')+'</label><input id="ts_nm" value="'+esc(s.name)+'">')+
-  '<label class="f">'+t('Address other servers use to reach it')+'</label><input id="ts_ad" class="ltr" value="'+esc(s.addr||'')+'" placeholder="'+esc(s.host||'')+'"><small class="muted">'+t('Empty = automatic')+'</small>'+
+  '<label class="f">'+t('Address other servers use to reach it')+'</label><input id="ts_ad" class="ltr" value="'+esc(s.addr||'')+'" placeholder="'+esc(s.host||'')+'"><small class="muted">'+t('Empty = automatic')+'</small>'+(s.local?'':tunGreBox('te',s))+
   '<div class="g2" style="margin-top:12px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="ts_go">'+t('Save')+'</button></div>');
- $('#ts_go').onclick=function(){var b={addr:$('#ts_ad').value};if($('#ts_nm'))b.name=$('#ts_nm').value;api('PUT','/api/tunnels/servers/'+id,b).then(function(){closeModal();toast(t('Done'));tunRefresh()}).catch(fail)}}
+ if(!s.local)tunGreWire('te');
+ $('#ts_go').onclick=function(){var b={addr:$('#ts_ad').value};if($('#ts_nm'))b.name=$('#ts_nm').value;
+  if(!s.local){tunGreBody('te',b);if($('#te_gre').checked&&!b.gre_ip){toast(t('Type the public IP of the server'),1);return}}
+  api('PUT','/api/tunnels/servers/'+id,b).then(function(r){tunRefresh();
+   if(r.gre){modal(mhead(t('GRE link'))+'<label class="f">'+t('Run this on the server, as root (Ubuntu / Debian)')+'</label><pre class="cmd" id="tn_cmd">'+esc(tunGreScript(r.gre))+'</pre><button class="btn" style="width:100%" id="tn_cp">'+ic('link',16)+' '+t('Copy command')+'</button>'+tunGreNote(r.gre)+
+    (r.gre.is_ip?'<div class="warnbox">'+t('The panel address is an IP, so the agent keeps using it. To send the agent through the link make a new command (Command button of the server).')+'</div>':''));$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}
+   else{closeModal();toast(t('Done'))}}).catch(fail)}}
 
 // ---- tunnel wizard
 var TNP={balanced:4,speed:8,gaming:2};
@@ -1537,7 +1562,7 @@ function tunNodeFor(sid){return api('GET','/api/nodes').then(function(ns){
 function tunNodePorts(n){var i=(n&&n.info)||{},tcp=[],udp=[],add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
  [i.wg_port,i.awg_port,i.hy2_port,i.ovpn_udp].forEach(function(v){add(udp,v)});add(tcp,i.ovpn_tcp);return {tcp:tcp,udp:udp}}
 function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pre)});
- var x=id?((TN.d.tunnels||[]).filter(function(z){return z.id==id})[0]||{}):(pre||{}),sv=TN.d.servers||[];
+ var x=id?Object.assign({},(TN.d.tunnels||[]).filter(function(z){return z.id==id})[0]||{},pre||{}):(pre||{}),sv=TN.d.servers||[];
  var remote=sv.filter(function(s){return !s.local});
  var dE=x.entry||(remote[0]&&remote[0].id)||'',dX=x.exit||'local';
  var opt=function(sel){return sv.map(function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'}).join('')};
@@ -1548,7 +1573,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<label class="f">'+t('Name')+'</label><input id="tw_nm" value="'+esc(x.name||'')+'" placeholder="Iran → '+esc(tunSrv(dX).name)+'">'+
   '<div class="g2"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="tw_en">'+opt(dE)+'</select></div><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="tw_ex">'+opt(dX)+'</select></div></div>'+
   '<label class="f">'+t('Who connects')+'</label><div class="seg" id="tw_md"><button data-v="reverse" class="'+(mode=='reverse'?'on':'')+'">'+t('Exit → entry (reverse, recommended)')+'</button><button data-v="direct" class="'+(mode=='direct'?'on':'')+'">'+t('Entry → exit (direct)')+'</button></div>'+
-  '<label class="f">'+t('Transport')+'</label><div class="tropt" id="tw_tr">'+trs.map(function(o){return '<button data-v="'+o[0]+'" class="'+(tr==o[0]?'on':'')+'"><b>'+tunTr(o[0])+'</b><small>'+o[1]+'</small></button>'}).join('')+'</div>'+
+  '<div class="nh" style="margin-top:10px"><label class="f" style="margin:0">'+t('Transport')+'</label><button type="button" class="b2 sm" id="tw_smart">⚡ '+t('Find the best transport')+'</button></div><div class="tropt" id="tw_tr">'+trs.map(function(o){return '<button data-v="'+o[0]+'" class="'+(tr==o[0]?'on':'')+'"><b>'+tunTr(o[0])+'</b><small>'+o[1]+'</small></button>'}).join('')+'</div>'+
   '<div id="tw_cdn" class="box" style="display:none;margin-top:10px"><b>'+t('Whitelist mode (CDN)')+'</b>'+
   '<small class="muted" style="display:block;margin:4px 0 8px">'+t('Easy setup: choose above which server the CDN points to, type your domain here and the tunnel port below. The panel does the rest.')+'</small>'+
   '<label class="f">'+t('Host: your domain on the CDN')+'</label><input id="tw_chost" class="ltr" value="'+esc(x.host||'')+'" placeholder="tun.example.com">'+
@@ -1601,6 +1626,9 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   var h=$('#tw_cdh');if(h)h.textContent=on?(st.mode=='reverse'?t('On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.'):t('On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.')):'';hint()}
  $('#tw_tr').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.tr=b.dataset.v;$$('#tw_tr button').forEach(function(z){z.classList.toggle('on',z==b)});cdnUi()};
  $('#tw_vpn').onclick=function(){fillPorts(true)};
+ $('#tw_smart').onclick=function(){if($('#tw_en').value==$('#tw_ex').value){toast(t('The entry and the exit must be different'),1);return}
+  var L=function(v){return String(v||'').split(/[\s,]+/).filter(Boolean)},g=function(k){var e=$(k);return e?e.value:''};
+  tunSmart({entry:$('#tw_en').value,exit:$('#tw_ex').value,prof:$('#tw_pf').value,apply:{id:id,snap:{name:$('#tw_nm').value,mode:st.mode,transport:st.tr,port:+$('#tw_pt').value||0,conns:TNP[$('#tw_pf').value]||4,tcp:L($('#tw_tcp').value),udp:L($('#tw_udp').value),dial:g('#tw_dl'),target:g('#tw_tg'),sni:g('#tw_sni'),path:g('#tw_pa'),auto:!!($('#tw_au')&&$('#tw_au').checked)}}})};
  hint();cdnUi();if(!id&&!(x.tcp||[]).length&&!(x.udp||[]).length)fillPorts(false);
  var ct=$('#tw_ctest');if(ct)ct.onclick=cdnTest;var cn=$('#tw_cscan');if(cn)cn.onclick=cdnScan;
  var sp=$('#tw_spoof');if(sp)sp.onclick=function(e){var b=e.target.closest('[data-sp]');if(b)$('#tw_sni').value=b.dataset.sp};
@@ -1642,42 +1670,81 @@ function cdnScan(){var fa=S.lang=='fa',tp=document.getElementById('scanTpl');if(
  $('#tw_scres').innerHTML='<small class="muted" style="display:block;margin-top:6px">'+(fa?'این را روی سرور ایران (ورودی) اجرا کن: bash scan.sh   یا با رنج دیگر: bash scan.sh 185.143.233.0/24. خروجی OK-WS یعنی آن آی‌پی WebSocket تو را رد کرد؛ REACH یعنی لبهٔ CDN باز است ولی مسیر/Host درست نیست.':'Run this on the Iran (entry) server: bash scan.sh   or with another range: bash scan.sh 185.143.233.0/24. OK-WS means that IP passed your WebSocket; REACH means the CDN edge is open but the path/Host is not right.')+'</small><textarea id="tw_scta" class="ltr" rows="9" style="width:100%;font-size:11px" readonly></textarea><button type="button" class="b2 sm" id="tw_sccp">'+t('Copy')+'</button>';
  $('#tw_scta').value=sc;$('#tw_sccp').onclick=function(){copy($('#tw_scta').value)}}
 
-// ---- smart tunnel: test every transport between two servers, then build with the best one
-var TS={timer:0};
-function tunSmart(){if(!TN.d)return tunLoad().then(tunSmart);var sv=TN.d.servers||[],remote=sv.filter(function(s){return !s.local});
+// ---- smart tunnel: test every transport in BOTH directions between two servers, score them for the
+// chosen profile, and apply the best one in the tunnel form. Nothing is created on the servers.
+var TS={timer:0,prof:'balanced',ctx:{},j:null};
+function tunSmart(o){if(!TN.d)return tunLoad().then(function(){tunSmart(o)});if(o)TS.ctx=o;var c=TS.ctx||{},sv=TN.d.servers||[],remote=sv.filter(function(s){return !s.local});
+ if(c.prof)TS.prof=c.prof;
  api('GET','/api/tunnels/probe').then(function(r){if(r.job&&!r.job.finished)return tunSmartRun();
- var opt=function(sel){return sv.map(function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'}).join('')};
- modal(mhead('⚡ '+t('Smart tunnel'))+'<p class="sub">'+t('Tests all six transports between two servers (ping, TCP download / upload, UDP loss) and tells you which one is best for this route.')+'</p>'+
+ var opt=function(sel){return sv.map(function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'}).join('')},
+  po=function(k,l){return '<option value="'+k+'"'+(TS.prof==k?' selected':'')+'>'+l+'</option>'};
+ modal(mhead('⚡ '+t('Smart tunnel'))+'<p class="sub"><b>'+t('Find the best transport')+'</b><br>'+t('Before making the tunnel, every transport (TCP, KCP, WS, WSS, QUIC) is tried in both directions between your two servers. It takes about one to two minutes. Each gets a score from 0 to 100 and the best one is suggested with its reason.')+'</p>'+
+  '<ul class="sub" style="margin:4px 0 8px;padding-inline-start:18px;line-height:1.7"><li>'+t('Scores follow your profile (gaming, balanced, ultra speed)')+'</li><li>'+t('Tells which ones did not pass and probably why')+'</li><li>'+t('If one direction is closed it says so and suggests the other')+'</li><li>'+t('One click applies it in making or editing a tunnel')+'</li><li>'+t('No tunnel is made and nothing changes on the servers')+'</li></ul>'+
   (sv.length<2?'<div class="warnbox">'+t('First add your entry server with “+ Server”.')+'</div>':'')+
-  '<div class="g2"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="ts_en">'+opt((remote[0]||{}).id)+'</select></div><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="ts_ex">'+opt('local')+'</select></div></div>'+
-  '<div class="g2"><div><label class="f">'+t('Who connects')+'</label><select id="ts_md"><option value="reverse">'+t('Exit → entry (reverse, recommended)')+'</option><option value="direct">'+t('Entry → exit (direct)')+'</option></select></div><div><label class="f">'+t('Test ports (first of six)')+'</label><input id="ts_pt" type="number" class="ltr" value="3990"></div></div>'+
+  '<div class="g2"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="ts_en">'+opt(c.entry||(remote[0]||{}).id)+'</select></div><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="ts_ex">'+opt(c.exit||'local')+'</select></div></div>'+
+  '<div class="g2"><div><label class="f">'+t('Profile')+'</label><select id="ts_pf">'+po('balanced',t('Balanced'))+po('speed',t('Most speed'))+po('gaming',t('Gaming (low ping)'))+'</select></div><div><label class="f">'+t('Test ports (first of twelve)')+'</label><input id="ts_pt" type="number" class="ltr" value="3990"></div></div>'+
   '<p class="muted" id="ts_note" style="font-size:12px;margin:8px 0 0"></p>'+
   (r.job&&r.job.finished?'<button class="b2" style="width:100%;margin-top:10px" onclick="tunSmartRun()">'+t('Show the last result')+'</button>':'')+
   '<button class="btn" style="width:100%;margin-top:10px" id="ts_go">'+t('Start the test')+'</button>');
- var note=function(){var md=$('#ts_md').value,l=md=='direct'?$('#ts_ex').value:$('#ts_en').value,p=+$('#ts_pt').value||3990;$('#ts_note').textContent=t('Takes about 2 minutes. Ports')+' '+N(p)+'–'+N(p+5)+' (TCP + UDP) '+t('must be open in the cloud firewall of')+' '+tunSrv(l).name+'.'};
- ['ts_md','ts_en','ts_ex','ts_pt'].forEach(function(k){$('#'+k).onchange=note;$('#'+k).oninput=note});note();
- $('#ts_go').onclick=function(){var me=this;me.disabled=true;api('POST','/api/tunnels/probe',{entry:$('#ts_en').value,exit:$('#ts_ex').value,mode:$('#ts_md').value,port:+$('#ts_pt').value||3990}).then(tunSmartRun).catch(function(e){me.disabled=false;fail(e)})}}).catch(fail)}
+ var note=function(){var p=+$('#ts_pt').value||3990;$('#ts_note').textContent=t('Takes about a minute. Ports')+' '+N(p)+'–'+N(p+5)+' '+t('on the entry')+' · '+N(p+6)+'–'+N(p+11)+' '+t('on the exit')+' (TCP + UDP) '+t('must be open in the cloud firewall')+'.'};
+ ['ts_pt'].forEach(function(k){$('#'+k).onchange=note;$('#'+k).oninput=note});note();
+ $('#ts_pf').onchange=function(){TS.prof=this.value};
+ $('#ts_go').onclick=function(){var me=this;me.disabled=true;TS.prof=$('#ts_pf').value;api('POST','/api/tunnels/probe',{entry:$('#ts_en').value,exit:$('#ts_ex').value,port:+$('#ts_pt').value||3990}).then(tunSmartRun).catch(function(e){me.disabled=false;fail(e)})}}).catch(fail)}
 function tunSmartRun(){modal(mhead('⚡ '+t('Smart tunnel'))+'<div id="ts_box"><span class="muted">'+t('Loading…')+'</span></div>');clearInterval(TS.timer);
- var go=function(){if(!$('#ts_box')){clearInterval(TS.timer);return}api('GET','/api/tunnels/probe').then(function(r){var j=r.job;if(!j||!$('#ts_box'))return;tunSmartDraw(j);if(j.finished)clearInterval(TS.timer)}).catch(function(){})};
+ $('#ts_box').onclick=function(e){var b=e.target.closest('[data-use],[data-prof],[data-ts]');if(!b)return;
+  if(b.dataset.prof){TS.prof=b.dataset.prof;if(TS.j)tunSmartDraw(TS.j)}
+  else if(b.dataset.use){var u=b.dataset.use.split('|');tunSmartUse(u[0],u[1])}
+  else if(b.dataset.ts=='again')tunSmart();
+  else if(b.dataset.ts=='stop')api('DELETE','/api/tunnels/probe').then(function(){closeModal()})};
+ var go=function(){if(!$('#ts_box')){clearInterval(TS.timer);return}api('GET','/api/tunnels/probe').then(function(r){var j=r.job;if(!j||!$('#ts_box'))return;TS.j=j;tunSmartDraw(j);if(j.finished)clearInterval(TS.timer)}).catch(function(){})};
  go();TS.timer=setInterval(go,2000)}
-function tunSmartDraw(j){var stg={starting:t('Starting…'),connecting:t('Connecting…'),waiting:t('In line…'),testing:t('Testing…')},
- pct=Math.min(100,Math.round(j.elapsed*100/90)),best=j.best,
- rows=(j.results||[]).map(function(r,i){var ok=r.done&&!r.failed&&(r.down_mbps>0),cls=r.transport==best?'best':ok?'':r.done?'bad':'run';
-  var st=!r.done?'<span class="muted">'+(stg[r.stage]||stg.starting)+'</span>':r.failed?'<span class="r">'+esc(t('No connection'))+'</span>':'';
-  var nums=r.done&&!r.failed?'<span class="ltr">'+(r.ping_ms!=null?N(r.ping_ms)+' ms':'—')+'</span><span class="ltr">↓ '+(r.down_mbps!=null?N(r.down_mbps):'—')+'</span><span class="ltr">↑ '+(r.up_mbps!=null?N(r.up_mbps):'—')+'</span><span class="ltr">'+(r.udp_loss!=null?N(r.udp_loss)+'%':'✕')+'</span>':'';
-  return '<div class="tsr '+cls+'"><b>'+(r.transport==best?'🏆 ':'')+tunTr(r.transport)+'</b>'+(st||nums)+'<em class="ltr">'+(r.done&&!r.failed?N(r.score):'')+'</em></div>'+
-   (r.done&&(r.failed||r.tcp_error)?'<small class="tse ltr">'+esc(r.error||r.tcp_error||r.last_error||'')+'</small>':'')}).join('');
- var h='<p class="sub">'+esc(tunSrv(j.entry).name)+' → '+esc(tunSrv(j.exit).name)+' · '+(j.mode=='direct'?t('direct'):t('reverse'))+'</p>'+
-  (j.finished?'':'<div class="tsbar"><i style="width:'+pct+'%"></i></div>')+
-  '<div class="tsh"><b>'+t('Transport')+'</b><span>'+t('Ping')+'</span><span>↓ Mbps</span><span>↑ Mbps</span><span>'+t('UDP loss')+'</span><em>'+t('Score')+'</em></div>'+rows;
- if(j.finished){h+=best?'<div class="tsbest">🏆 '+t('Best for this route')+': <b>'+tunTr(best)+'</b>'+(j.best_udp&&j.best_udp!=best?'<br><small>'+t('Best for UDP (WireGuard / Hysteria2)')+': '+tunTr(j.best_udp)+'</small>':'')+'</div>'+
-   '<button class="btn" style="width:100%;margin-top:10px" onclick="tunSmartUse(\''+best+'\')">'+t('Build the tunnel with')+' '+tunTr(best)+'</button>'+
-   (j.best_udp&&j.best_udp!=best?'<button class="b2" style="width:100%;margin-top:8px" onclick="tunSmartUse(\''+j.best_udp+'\')">'+t('Build with')+' '+tunTr(j.best_udp)+' ('+t('for UDP')+')</button>':''):
-   '<div class="warnbox">'+t('No transport could connect. Open the test ports in the cloud firewall of the listening server and try again.')+'</div>';
-  h+='<button class="b2" style="width:100%;margin-top:8px" onclick="tunSmart()">'+t('Test again')+'</button>'}
- else h+='<button class="b2 bd" style="width:100%;margin-top:10px" onclick="api(\'DELETE\',\'/api/tunnels/probe\').then(function(){closeModal()})">'+t('Stop the test')+'</button>';
+function tunOk(r){return !!(r&&r.done&&!r.failed&&r.down_mbps>0)}
+function tunScore(r,P){return tunOk(r)&&r.scores?(r.scores[P]||0):0}
+// the likely reason a transport did not pass (or passes badly), from what the other transports did
+function tunWhy(r,j){var L=j.results||[],same=L.filter(function(z){return z.mode==r.mode&&z.transport!=r.transport}),
+ okTr=function(n){return same.some(function(z){return z.transport==n&&tunOk(z)})},
+ anyTcp=same.some(function(z){return z.transport!='quic'&&z.transport!='kcp'&&tunOk(z)}),udpTr=r.transport=='quic'||r.transport=='kcp';
+ if(!tunOk(r)){
+  if(udpTr)return anyTcp?t('UDP is probably blocked on this route: the TCP transports pass'):t('Nothing passes in this direction');
+  if(r.transport=='wss'&&okTr('ws'))return t('TLS looks filtered: plain WebSocket passes but WSS does not');
+  if(r.transport=='ws'&&okTr('wss'))return t('Plain HTTP looks filtered: WSS passes but WebSocket does not');
+  if(!anyTcp)return t('The port is closed or this direction is blocked: check the cloud firewall');
+  return t('This transport is filtered on the route while others pass')}
+ if(r.udp_error||(r.udp_loss!=null&&r.udp_loss>=50))return t('TCP works but UDP does not pass well: WireGuard / Hysteria2 may suffer');
+ return ''}
+function tunDirName(m){return m=='direct'?t('Entry → exit (direct)'):t('Exit → entry (reverse, recommended)')}
+function tunSmartDraw(j){var P=TS.prof||'balanced',stg={starting:t('Starting…'),connecting:t('Connecting…'),waiting:t('In line…'),testing:t('Testing…')},
+ pct=Math.min(100,Math.round(j.elapsed*100/60)),L=j.results||[],pick=function(m){var c=L.filter(function(r){return(!m||r.mode==m)&&tunOk(r)});
+  c.sort(function(a,b){return tunScore(b,P)-tunScore(a,P)||(b.down_mbps||0)-(a.down_mbps||0)});return c[0]||null},
+ best=pick(),bR=pick('reverse'),bD=pick('direct'),
+ row=function(r){var ok=tunOk(r),isb=best&&r===best&&j.finished,cls=isb?'best':ok?'':r.done?'bad':'run',
+  st=!r.done?'<span class="muted">'+(stg[r.stage]||stg.starting)+'</span>':r.failed?'<span class="r">'+esc(t('No connection'))+'</span>':'',
+  nums=r.done&&!r.failed?'<span class="ltr">'+(r.ping_ms!=null?N(r.ping_ms)+' ms':'—')+'</span><span class="ltr">↓ '+(r.down_mbps!=null?N(r.down_mbps):'—')+'</span><span class="ltr">↑ '+(r.up_mbps!=null?N(r.up_mbps):'—')+'</span><span class="ltr">'+(r.udp_loss!=null?N(r.udp_loss)+'%':'✕')+'</span>':'',
+  why=r.done?tunWhy(r,j):'',raw=r.done&&!ok?(r.error||r.tcp_error||r.last_error||''):'';
+  return '<div class="tsr '+cls+'"><b>'+(isb?'🏆 ':'')+tunTr(r.transport)+'</b>'+(st||nums)+'<em class="ltr">'+(ok?N(tunScore(r,P)):'')+'</em></div>'+
+   (why?'<small class="tse">'+esc(why)+'</small>':'')+(raw?'<small class="tse ltr">'+esc(raw)+'</small>':'')};
+ var h='<p class="sub">'+esc(tunSrv(j.entry).name)+' ⇄ '+esc(tunSrv(j.exit).name)+'</p>'+
+  '<div class="seg" style="margin:6px 0">'+[['balanced',t('Balanced')],['speed',t('Most speed')],['gaming',t('Gaming (low ping)')]].map(function(o){return '<button data-prof="'+o[0]+'" class="'+(P==o[0]?'on':'')+'">'+o[1]+'</button>'}).join('')+'</div>'+
+  (j.finished?'':'<div class="tsbar"><i style="width:'+pct+'%"></i></div>');
+ ['reverse','direct'].forEach(function(m){var rs=L.filter(function(r){return r.mode==m}),n=rs.filter(tunOk).length,done=rs.every(function(r){return r.done});
+  h+='<div class="nh" style="margin-top:12px"><b>'+tunDirName(m)+'</b><small class="muted">'+(done||j.finished?N(n)+' / '+N(rs.length)+' '+t('passed'):'')+'</small></div>'+
+   '<div class="tsh"><b>'+t('Transport')+'</b><span>'+t('Ping')+'</span><span>↓ Mbps</span><span>↑ Mbps</span><span>'+t('UDP loss')+'</span><em>'+t('Score')+'</em></div>'+rs.map(row).join('')});
+ if(j.finished){var nR=L.filter(function(r){return r.mode=='reverse'&&tunOk(r)}).length,nD=L.filter(function(r){return r.mode=='direct'&&tunOk(r)}).length;
+  if(!best)h+='<div class="warnbox">'+t('No transport could connect in either direction. Open the test ports in the cloud firewall of both servers and try again. If only GRE passes between the two servers, add or edit the server with the “Only GRE passes” option.')+'</div>';
+  else{
+   if(!nR||!nD)h+='<div class="warnbox">'+(!nR?t('The reverse direction (exit → entry) is closed: the entry cannot be reached from the exit. Use the direct direction.'):t('The direct direction (entry → exit) is closed: the entry cannot dial the exit. Use the reverse direction.'))+'</div>';
+   var d=function(r){return r.mode=='direct'?t('direct'):t('reverse')};
+   h+='<div class="tsbest">🏆 '+t('Best for this route')+': <b>'+tunTr(best.transport)+'</b> · '+d(best)+' · <span class="ltr">'+N(tunScore(best,P))+' / 100</span><br><small>'+
+    (best.ping_ms!=null?N(best.ping_ms)+' ms · ':'')+'↓ '+N(best.down_mbps||0)+' · ↑ '+N(best.up_mbps||0)+' Mbps · UDP '+(best.udp_loss!=null?N(best.udp_loss)+'%':'✕')+'</small></div>'+
+    '<button class="btn" style="width:100%;margin-top:10px" data-use="'+best.mode+'|'+best.transport+'">'+(TS.ctx&&TS.ctx.apply?t('Apply to the tunnel'):t('Build the tunnel with'))+' '+tunTr(best.transport)+' ('+d(best)+')</button>';
+   var other=best.mode=='direct'?bR:bD;
+   if(other)h+='<button class="b2" style="width:100%;margin-top:8px" data-use="'+other.mode+'|'+other.transport+'">'+t('Use')+' '+tunTr(other.transport)+' ('+d(other)+') · '+N(tunScore(other,P))+'</button>'}
+  h+='<button class="b2" style="width:100%;margin-top:8px" data-ts="again">'+t('Test again')+'</button>'}
+ else h+='<button class="b2 bd" style="width:100%;margin-top:10px" data-ts="stop">'+t('Stop the test')+'</button>';
  $('#ts_box').innerHTML=h}
-function tunSmartUse(tr){api('GET','/api/tunnels/probe').then(function(r){var j=r.job||{};closeModal();tunEdit(null,{entry:j.entry,exit:j.exit,mode:j.mode,transport:tr})}).catch(fail)}
+function tunSmartUse(mode,tr){api('GET','/api/tunnels/probe').then(function(r){var j=r.job||{},c=TS.ctx||{};closeModal();
+ if(c.apply)tunEdit(c.apply.id,Object.assign({},c.apply.snap,{entry:j.entry,exit:j.exit,mode:mode,transport:tr}));
+ else tunEdit(null,{entry:j.entry,exit:j.exit,mode:mode,transport:tr});TS.ctx={}}).catch(fail)}
 
 // ---- dashboard card
 function tunDashCard(){return '<div class="card" id="tdc"><div class="nh"><div><h3>'+ic('tunnel',16)+' '+t('Tunnels')+'</h3><p class="sub" id="tdc_s">…</p></div><a class="b2 sm" href="#tunnels">'+t('Manage')+'</a></div><div id="tdc_m"></div></div>'}
@@ -1698,6 +1765,8 @@ Object.assign(FA,{"SNI spoof / Host (wss, quic, ws)": "جعل SNI / Host (wss، 
 Object.assign(FA,{"Add at least one CDN edge address":"حداقل یک آی‌پی لبه CDN بنویس","Testing…":"در حال تست…"});
 
 Object.assign(FA,{"Ports of the exit server":"پورت‌های سرور خروجی","Ports of":"پورت‌های","were filled in":"وارد شد","Moved on the entry because they were taken":"روی ورودی عوض شد چون پر بود","No node found for this server: type the ports by hand":"نودی برای این سرور پیدا نشد: پورت‌ها را دستی بنویس","This port is already used by another tunnel":"این پورت را تانل دیگری دارد","the tunnel port is also in the forwarded UDP ports":"پورت تانل نباید جزو پورت‌های عبوری UDP باشد"});
+Object.assign(FA,{"Tests every transport (TCP, KCP, WS, WSS, QUIC) in both directions between two servers, scores each one from 0 to 100 for your profile and tells you which is best and why. No tunnel is created and nothing changes on the servers.":"همه‌ی ترنسپورت‌ها (TCP، KCP، WS، WSS، QUIC) در هر دو جهت بین دو سرور امتحان می‌شوند، برای پروفایل تو از ۰ تا ۱۰۰ نمره می‌گیرند و بهترین با دلیلش پیشنهاد می‌شود. تانلی ساخته نمی‌شود و چیزی روی سرورها عوض نمی‌شود.","Test ports (first of twelve)":"پورت‌های تست (اولی از دوازده)","Takes about a minute. Ports":"حدود یک دقیقه طول می‌کشد. پورت‌های","on the entry":"روی ورودی","on the exit":"روی خروجی","must be open in the cloud firewall":"باید در فایروال سرویس‌دهنده باز باشند","passed":"رد شد","Find the best transport":"پیدا کردن بهترین ترنسپورت","Apply to the tunnel":"اعمال روی تانل","Use":"استفاده از","reverse":"معکوس","direct":"مستقیم","UDP is probably blocked on this route: the TCP transports pass":"احتمالاً UDP روی این مسیر بسته است: ترنسپورت‌های TCP رد می‌شوند","Nothing passes in this direction":"در این جهت هیچ چیز رد نمی‌شود","TLS looks filtered: plain WebSocket passes but WSS does not":"TLS احتمالاً فیلتر شده: WebSocket ساده رد می‌شود ولی WSS نه","Plain HTTP looks filtered: WSS passes but WebSocket does not":"HTTP ساده احتمالاً فیلتر شده: WSS رد می‌شود ولی WebSocket نه","The port is closed or this direction is blocked: check the cloud firewall":"پورت بسته است یا این جهت مسدود است: فایروال سرویس‌دهنده را چک کن","This transport is filtered on the route while others pass":"این ترنسپورت روی مسیر فیلتر شده در حالی که بقیه رد می‌شوند","TCP works but UDP does not pass well: WireGuard / Hysteria2 may suffer":"TCP کار می‌کند ولی UDP خوب رد نمی‌شود: وایرگارد و هیستریا۲ ممکن است ضعیف شوند","No transport could connect in either direction. Open the test ports in the cloud firewall of both servers and try again.":"در هیچ جهتی ترنسپورتی وصل نشد. پورت‌های تست را در فایروال هر دو سرور باز کن و دوباره امتحان کن.","The reverse direction (exit → entry) is closed: the entry cannot be reached from the exit. Use the direct direction.":"جهت معکوس (خروجی ← ورودی) بسته است: خروجی نمی‌تواند به ورودی برسد. از جهت مستقیم استفاده کن.","The direct direction (entry → exit) is closed: the entry cannot dial the exit. Use the reverse direction.":"جهت مستقیم (ورودی ← خروجی) بسته است: ورودی نمی‌تواند به خروجی وصل شود. از جهت معکوس استفاده کن."});
+Object.assign(FA,{"Only GRE passes to this server":"فقط GRE به این سرور رد می‌شود","When TCP to the panel is blocked but GRE passes, the panel builds a GRE link to the server and the agent connects through it. Needs root on both servers.":"وقتی TCP به پنل بسته است ولی GRE رد می‌شود، پنل خودش لینک GRE را تا سرور می‌سازد و ایجنت از روی آن وصل می‌شود. روی هر دو سرور باید root باشی.","Public IP of this server":"آی‌پی عمومی این سرور","IP of the panel server (empty = automatic)":"آی‌پی سرور پنل (خالی = خودکار)","Type the public IP of the server":"آی‌پی عمومی سرور را بنویس","GRE link":"لینک GRE","GRE link: the panel already built its side. The first lines of the command build the other side on the server, then the agent connects to the panel through the link.":"لینک GRE: پنل سمت خودش را ساخته است. خط‌های اول دستور سمت دیگر را روی سرور می‌سازند و بعد ایجنت از راه لینک به پنل وصل می‌شود.","The panel IP could not be found from its address. Type it in the GRE box (Edit server) and make the command again.":"آی‌پی پنل از روی آدرسش پیدا نشد. آن را در کادر GRE (ویرایش سرور) بنویس و دوباره دستور بساز.","The panel address is an IP, so the agent keeps using it. To send the agent through the link make a new command (Command button of the server).":"آدرس پنل آی‌پی است و ایجنت همان را نگه می‌دارد. برای عبور ایجنت از لینک، دستور تازه بساز (دکمهٔ دستور سرور).","Before making the tunnel, every transport (TCP, KCP, WS, WSS, QUIC) is tried in both directions between your two servers. It takes about one to two minutes. Each gets a score from 0 to 100 and the best one is suggested with its reason.":"قبل از ساختن تانل، همهٔ ترنسپورت‌ها (TCP، KCP، WS، WSS، QUIC) در هر دو جهت بین دو سرور امتحان می‌شوند. حدود یک تا دو دقیقه طول می‌کشد. به هر کدام نمرهٔ ۰ تا ۱۰۰ داده می‌شود و بهترین با دلیلش پیشنهاد می‌شود.","Scores follow your profile (gaming, balanced, ultra speed)":"نمره‌ها بر اساس پروفایل شما (گیمینگ، متعادل، اولترا اسپید) حساب می‌شوند","Tells which ones did not pass and probably why":"می‌گوید کدام‌ها رد نشدند و احتمالاً چرا","If one direction is closed it says so and suggests the other":"اگر یک جهت بسته باشد، همین را می‌گوید و جهت دیگر را پیشنهاد می‌دهد","One click applies it in making or editing a tunnel":"با یک کلیک در ساخت یا ویرایش تانل اعمال می‌شود","No tunnel is made and nothing changes on the servers":"هیچ تانلی ساخته نمی‌شود و چیزی روی سرورها عوض نمی‌شود","No transport could connect in either direction. Open the test ports in the cloud firewall of both servers and try again. If only GRE passes between the two servers, add or edit the server with the “Only GRE passes” option.":"هیچ ترنسپورتی در هیچ جهتی وصل نشد. پورت‌های تست را در فایروال ابری هر دو سرور باز کن و دوباره امتحان کن. اگر بین دو سرور فقط GRE رد می‌شود، سرور را با گزینهٔ «فقط GRE» اضافه یا ویرایش کن."});
 Object.assign(FA,{"Update all":"آپدیت همه","Update every node, every tunnel server and the panel itself to the latest version?":"همهٔ نودها، سرورهای تانل و خود پنل به آخرین نسخه آپدیت شوند؟","Updating…":"در حال آپدیت…","Panel":"پنل","Nodes":"نودها","no answer: update it once with the kanki command":"جواب نداد: یک‌بار با دستور kanki آپدیتش کن","Tunnel servers (updating by themselves)":"سرورهای تانل (خودشان آپدیت می‌شوند)","Both a node and a tunnel server (updated once, through the node)":"هم نود هم سرور تانل (یک‌بار، از طریق نود)","These agents are too old to update remotely. Run the command kanki on them and choose 3 (Update) once:":"این ایجنت‌ها برای آپدیت از راه دور قدیمی‌اند. روی آن‌ها دستور kanki را بزن و گزینهٔ 3 (Update) را انتخاب کن (فقط یک‌بار):","Everything is already up to date":"همه‌چیز آپدیت است","VPN ports (UDP)":"پورت‌های VPN (UDP)","Applied on the server at once: config, service and firewall. Old WireGuard/AmneziaWG files stop working; subscription links update by themselves.":"روی خود سرور همان لحظه اعمال می‌شود: کانفیگ، سرویس و فایروال. فایل‌های قدیمی وایرگارد/آمنزیا کار نمی‌کنند؛ لینک اشتراک خودش به‌روز می‌شود.","Apply ports":"اعمال پورت‌ها","No port changed":"پورتی عوض نشده","Applying…":"در حال اعمال…","Not in a tunnel":"بدون تانل","Also use this node as a tunnel server":"این نود را سرور تانل هم بکن","Telegram alert when a node or tunnel goes offline":"هشدار تلگرام وقتی نود یا تانل آفلاین شد","Easy setup: choose above which server the CDN points to, type your domain here and the tunnel port below. The panel does the rest.":"راه‌اندازی ساده: بالا انتخاب کن CDN به کدام سرور اشاره دارد، دامنه را همین‌جا و پورت تانل را پایین بنویس. بقیه را پنل انجام می‌دهد.","Extra disguise (optional)":"پوشش اضافه (اختیاری)","empty = use the domain":"خالی = از خود دامنه استفاده شود","CDN points to the Iran server: the foreign server connects in (recommended)":"CDN به سرور ایران اشاره می‌کند: سرور خارج وصل می‌شود (پیشنهادی)","CDN points to the foreign server: the Iran server connects out":"CDN به سرور خارج اشاره می‌کند: سرور ایران وصل می‌شود","On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور ایران (ورودی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور ایران باز کن.","On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور خارج (خروجی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور خروجی باز کن.","enter the domain you put on the CDN":"دامنه‌ای که روی CDN گذاشتی را بنویس"});
 </script>
 <script type="text/plain" id="scanTpl">

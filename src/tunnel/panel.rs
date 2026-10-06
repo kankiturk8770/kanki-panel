@@ -28,6 +28,12 @@ pub struct TServer {
     /// address other servers dial (domain or IP); empty = the IP the agent was seen from
     pub addr: String,
     pub created: i64,
+    /// GRE link to this server, for when only GRE passes between it and the panel: its public IPv4
+    /// (empty = no GRE), the link number (the link uses 10.77.N.0/30) and an optional IPv4 of the
+    /// panel server (empty = resolved from the panel address)
+    pub gre_ip: String,
+    pub gre_n: u8,
+    pub gre_panel_ip: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -183,35 +189,39 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             probe: false,
         });
     }
-    // a running smart-tunnel test adds one short-lived test tunnel per transport
+    // a running smart-tunnel test adds one short-lived test tunnel per transport and per direction:
+    // reverse (the exit dials the entry) on the first six ports, direct (the entry dials the exit)
+    // on the next six
     if let Some(p) = probe_job().lock().unwrap().clone() {
         if !p.finished && now() - p.started < PROBE_MAX && (p.entry == sid || p.exit == sid) {
             let role = if p.entry == sid { "entry" } else { "exit" };
-            let listener = if p.mode == "direct" { &p.exit } else { &p.entry };
-            let host = host_of(app, listener);
-            for (i, tr) in PROBE_TRANSPORTS.iter().enumerate() {
-                let port = p.port + i as u16;
-                out.push(Spec {
-                    id: format!("probe-{}-{}", p.id, tr),
-                    name: format!("test {}", tr),
-                    role: role.into(),
-                    mode: p.mode.clone(),
-                    transport: tr.to_string(),
-                    port,
-                    remote: hostport(&host, port),
-                    token: p.token.clone(),
-                    conns: 2,
-                    sni: String::new(),
-                    host: String::new(),
-                    frag: false,
-                    path: "/".into(),
-                    tcp: vec![],
-                    udp: vec![],
-                    target: String::new(),
-                    cert: String::new(),
-                    key: String::new(),
-                    probe: true,
-                });
+            for (mi, mode) in PROBE_MODES.iter().enumerate() {
+                let listener = if *mode == "direct" { &p.exit } else { &p.entry };
+                let host = host_of(app, listener);
+                for (i, tr) in PROBE_TRANSPORTS.iter().enumerate() {
+                    let port = p.port + (mi * PROBE_TRANSPORTS.len() + i) as u16;
+                    out.push(Spec {
+                        id: format!("probe-{}-{}-{}", p.id, mode, tr),
+                        name: format!("test {} {}", mode, tr),
+                        role: role.into(),
+                        mode: mode.to_string(),
+                        transport: tr.to_string(),
+                        port,
+                        remote: hostport(&host, port),
+                        token: p.token.clone(),
+                        conns: 2,
+                        sni: String::new(),
+                        host: String::new(),
+                        frag: false,
+                        path: "/".into(),
+                        tcp: vec![],
+                        udp: vec![],
+                        target: String::new(),
+                        cert: String::new(),
+                        key: String::new(),
+                        probe: true,
+                    });
+                }
             }
         }
     }
@@ -221,8 +231,10 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
 // ------------------------------------------------------------------ smart tunnel (test every transport)
 
 const PROBE_TRANSPORTS: &[&str] = &["tcpmux", "tcp", "ws", "wss", "quic", "kcp"];
+/// both directions are measured: the side that listens differs, so the ports differ too
+const PROBE_MODES: &[&str] = &["reverse", "direct"];
 /// a test never runs longer than this (seconds)
-const PROBE_MAX: i64 = 200;
+const PROBE_MAX: i64 = 150;
 
 #[derive(Clone, Default)]
 struct ProbeJob {
@@ -242,21 +254,25 @@ fn probe_job() -> &'static Mutex<Option<ProbeJob>> {
     P.get_or_init(|| Mutex::new(None))
 }
 
-/// Higher is better. Download counts most, then upload; UDP loss and ping pull it down.
-/// A transport whose UDP does not work keeps a third of its score (fine for TCP-only use).
-fn probe_score(r: &Value) -> f64 {
+/// Score 0 to 100 for each profile. Ping, TCP speed (download 60 %, upload 40 %, 80 Mbps counts as
+/// full marks) and UDP loss are weighed differently: gaming wants low ping and clean UDP, "speed"
+/// wants throughput, "balanced" sits between. A transport whose UDP does not work keeps a low UDP
+/// part (fine for TCP-only use); one that moved no data scores 0.
+fn probe_scores(r: &Value) -> Value {
     let down = r["down_mbps"].as_f64().unwrap_or(0.0);
     let up = r["up_mbps"].as_f64().unwrap_or(0.0);
     if down <= 0.0 && up <= 0.0 {
-        return 0.0;
+        return json!({"gaming": 0, "balanced": 0, "speed": 0});
     }
     let ping = r["ping_ms"].as_f64().unwrap_or(500.0);
-    let tcp = (down * 0.6 + up * 0.4) / (1.0 + ping / 300.0);
-    let udp = match r["udp_loss"].as_f64() {
-        Some(l) => (1.0 - l / 100.0).max(0.0).powi(2),
-        None => 0.33,
+    let ping_s = (1.0 - ping / 400.0).clamp(0.0, 1.0);
+    let speed_s = ((down * 0.6 + up * 0.4) / 80.0).clamp(0.0, 1.0);
+    let udp_s = match r["udp_loss"].as_f64() {
+        Some(l) => (1.0 - l / 100.0).clamp(0.0, 1.0).powi(2),
+        None => 0.3,
     };
-    (tcp * udp * 10.0).round() / 10.0
+    let f = |wp: f64, ws: f64, wu: f64| (100.0 * (wp * ping_s + ws * speed_s + wu * udp_s)).round();
+    json!({"gaming": f(0.45, 0.15, 0.40), "balanced": f(0.30, 0.40, 0.30), "speed": f(0.10, 0.70, 0.20)})
 }
 
 async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
@@ -267,13 +283,12 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
     if entry.is_empty() || exit.is_empty() || entry == exit || !known(&entry) || !known(&exit) {
         return err(StatusCode::BAD_REQUEST, "pick two different servers");
     }
-    let mode = if b["mode"].as_str() == Some("direct") { "direct" } else { "reverse" };
-    let port = b["port"].as_u64().unwrap_or(3990).clamp(1024, 65000) as u16;
-    // the test ports must not collide with a tunnel that already listens there
-    let listener = if mode == "direct" { &exit } else { &entry };
+    let port = b["port"].as_u64().unwrap_or(3990).clamp(1024, 64000) as u16;
+    // the test ports must not collide with a tunnel that already listens there (on either server)
+    let span = (PROBE_TRANSPORTS.len() * PROBE_MODES.len()) as u16;
     for t in tunnels(&app) {
         let l = if t.mode == "direct" { &t.exit } else { &t.entry };
-        if l == listener && t.port >= port && t.port < port + PROBE_TRANSPORTS.len() as u16 {
+        if (*l == entry || *l == exit) && t.port >= port && t.port < port + span {
             return err(StatusCode::BAD_REQUEST, &format!("port {} is used by tunnel {}; pick another test port", t.port, t.name));
         }
     }
@@ -281,7 +296,7 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         id: rand_token(6).to_lowercase(),
         entry,
         exit,
-        mode: mode.into(),
+        mode: "both".into(),
         port,
         token: rand_token(32),
         started: now(),
@@ -290,7 +305,7 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
     };
     let id = job.id.clone();
     *probe_job().lock().unwrap() = Some(job);
-    Json(json!({"ok": true, "id": id, "transports": PROBE_TRANSPORTS})).into_response()
+    Json(json!({"ok": true, "id": id, "transports": PROBE_TRANSPORTS, "modes": PROBE_MODES})).into_response()
 }
 
 async fn probe_get(State(app): St, h: HeaderMap) -> Response {
@@ -304,25 +319,28 @@ async fn probe_get(State(app): St, h: HeaderMap) -> Response {
         let exit_st = seen.get(&p.exit).map(|x| x.status.clone()).unwrap_or_default();
         let mut all_done = true;
         let mut res = vec![];
-        for tr in PROBE_TRANSPORTS {
-            let sid = format!("probe-{}-{}", p.id, tr);
-            let es = entry_st.iter().find(|s| s.id == sid);
-            let xs = exit_st.iter().find(|s| s.id == sid);
-            let mut r = es.and_then(|s| s.probe.clone()).unwrap_or_else(|| json!({"done": false, "stage": "starting"}));
-            if r["done"].as_bool() != Some(true) {
-                all_done = false;
-            }
-            r["transport"] = json!(tr);
-            r["port"] = json!(p.port + PROBE_TRANSPORTS.iter().position(|x| x == tr).unwrap_or(0) as u16);
-            r["links"] = json!(es.map(|s| s.links).unwrap_or(0).max(xs.map(|s| s.links).unwrap_or(0)));
-            if r["error"].is_null() {
-                let e = es.map(|s| s.error.clone()).filter(|e| !e.is_empty()).or_else(|| xs.map(|s| s.error.clone()).filter(|e| !e.is_empty()));
-                if let Some(e) = e {
-                    r["last_error"] = json!(e);
+        for (mi, mode) in PROBE_MODES.iter().enumerate() {
+            for (i, tr) in PROBE_TRANSPORTS.iter().enumerate() {
+                let sid = format!("probe-{}-{}-{}", p.id, mode, tr);
+                let es = entry_st.iter().find(|s| s.id == sid);
+                let xs = exit_st.iter().find(|s| s.id == sid);
+                let mut r = es.and_then(|s| s.probe.clone()).unwrap_or_else(|| json!({"done": false, "stage": "starting"}));
+                if r["done"].as_bool() != Some(true) {
+                    all_done = false;
                 }
+                r["mode"] = json!(mode);
+                r["transport"] = json!(tr);
+                r["port"] = json!(p.port + (mi * PROBE_TRANSPORTS.len() + i) as u16);
+                r["links"] = json!(es.map(|s| s.links).unwrap_or(0).max(xs.map(|s| s.links).unwrap_or(0)));
+                if r["error"].is_null() {
+                    let e = es.map(|s| s.error.clone()).filter(|e| !e.is_empty()).or_else(|| xs.map(|s| s.error.clone()).filter(|e| !e.is_empty()));
+                    if let Some(e) = e {
+                        r["last_error"] = json!(e);
+                    }
+                }
+                r["scores"] = probe_scores(&r);
+                res.push(r);
             }
-            r["score"] = json!(probe_score(&r));
-            res.push(r);
         }
         p.results = res;
         if all_done || t - p.started >= PROBE_MAX {
@@ -330,30 +348,10 @@ async fn probe_get(State(app): St, h: HeaderMap) -> Response {
             p.finished = true;
         }
     }
-    let mut ranked = p.results.clone();
-    ranked.sort_by(|a, b| b["score"].as_f64().unwrap_or(0.0).partial_cmp(&a["score"].as_f64().unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal));
-    let best = ranked.first().filter(|r| r["score"].as_f64().unwrap_or(0.0) > 0.0).map(|r| r["transport"].clone());
-    // best for UDP (WireGuard / Hysteria2): lowest loss, then lowest ping, among working ones
-    let best_udp = p
-        .results
-        .iter()
-        .filter(|r| r["udp_loss"].is_number() && r["udp_loss"].as_f64().unwrap_or(100.0) < 50.0)
-        .min_by(|a, b| {
-            let ka = a["udp_loss"].as_f64().unwrap_or(100.0) * 1000.0 + a["udp_ping_ms"].as_f64().unwrap_or(9999.0);
-            let kb = b["udp_loss"].as_f64().unwrap_or(100.0) * 1000.0 + b["udp_ping_ms"].as_f64().unwrap_or(9999.0);
-            ka.partial_cmp(&kb).unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|r| r["transport"].clone());
-    let best_tcp = p
-        .results
-        .iter()
-        .filter(|r| r["down_mbps"].as_f64().unwrap_or(0.0) > 0.0)
-        .max_by(|a, b| a["down_mbps"].as_f64().unwrap_or(0.0).partial_cmp(&b["down_mbps"].as_f64().unwrap_or(0.0)).unwrap_or(std::cmp::Ordering::Equal))
-        .map(|r| r["transport"].clone());
     Json(json!({"job": {
         "id": p.id, "entry": p.entry, "exit": p.exit, "mode": p.mode, "port": p.port,
         "started": p.started, "elapsed": t - p.started, "max": PROBE_MAX, "finished": p.finished,
-        "results": ranked, "best": best, "best_udp": best_udp, "best_tcp": best_tcp,
+        "results": p.results.clone(),
     }}))
     .into_response()
 }
@@ -447,6 +445,12 @@ pub async fn local_loop(app: Arc<App>) {
             Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st },
         );
         rotate_tick(&app);
+        let want: Vec<(u8, String)> = servers(&app)
+            .iter()
+            .filter(|x| x.gre_n > 0 && x.gre_ip.parse::<std::net::Ipv4Addr>().is_ok())
+            .map(|x| (x.gre_n, x.gre_ip.clone()))
+            .collect();
+        let _ = tokio::task::spawn_blocking(move || gre_ensure(&want)).await;
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
@@ -568,6 +572,7 @@ async fn list(State(app): St, h: HeaderMap) -> Response {
         srv.push(json!({
             "id": s.id, "name": s.name, "local": false, "addr": s.addr, "host": host_of(&app, &s.id),
             "ip": x.ip, "online": x.at > 0 && t - x.at < 20, "last_seen": x.at, "version": x.version,
+            "gre_ip": s.gre_ip, "gre_n": s.gre_n, "gre_panel_ip": s.gre_panel_ip,
         }));
     }
     let mut tl = vec![];
@@ -792,6 +797,130 @@ async fn tunnel_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(S
     Json(json!({ "ok": true })).into_response()
 }
 
+// ------------------------------------------------------------------ GRE link to a tunnel server
+
+fn gre_applied() -> &'static Mutex<HashMap<u8, String>> {
+    static G: OnceLock<Mutex<HashMap<u8, String>>> = OnceLock::new();
+    G.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Makes the panel side of every GRE link exist: interface kgreN, address 10.77.N.1/30. Links that
+/// are no longer wanted are removed. Safe to call every few seconds; it only acts on a difference.
+fn gre_ensure(want: &[(u8, String)]) {
+    use std::process::Command;
+    let run = |args: &[&str]| Command::new("ip").args(args).output().map(|o| o.status.success()).unwrap_or(false);
+    let existing: Vec<String> = match Command::new("ip").args(["-o", "link", "show"]).output() {
+        Ok(o) => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter_map(|l| {
+                let name = l.split_whitespace().nth(1)?.trim_end_matches(':');
+                Some(name.split('@').next().unwrap_or(name).to_string())
+            })
+            .filter(|n| n.starts_with("kgre"))
+            .collect(),
+        Err(_) => return,
+    };
+    if existing.is_empty() && want.is_empty() {
+        return;
+    }
+    let mut ap = gre_applied().lock().unwrap();
+    for name in &existing {
+        if !want.iter().any(|(n, _)| format!("kgre{}", n) == *name) {
+            run(&["link", "del", name.as_str()]);
+        }
+    }
+    ap.retain(|n, _| want.iter().any(|(w, _)| w == n));
+    for (n, remote) in want {
+        let name = format!("kgre{}", n);
+        let exists = existing.contains(&name);
+        if exists && ap.get(n).map(|r| r == remote).unwrap_or(false) {
+            continue;
+        }
+        if exists {
+            run(&["link", "del", name.as_str()]);
+        }
+        let addr = format!("10.77.{}.1/30", n);
+        let ok = run(&["tunnel", "add", name.as_str(), "mode", "gre", "remote", remote.as_str(), "ttl", "255"])
+            && run(&["addr", "add", addr.as_str(), "dev", name.as_str()])
+            && run(&["link", "set", name.as_str(), "mtu", "1400", "up"]);
+        if ok {
+            // best effort: let the GRE packets of that server through ufw
+            let _ = Command::new("ufw").args(["allow", "from", remote.as_str(), "proto", "gre"]).output();
+            ap.insert(*n, remote.clone());
+        }
+    }
+}
+
+/// IPv4 of the panel server, as the other end of a GRE link must dial it
+async fn panel_ipv4(app: &App, over: &str) -> String {
+    if over.parse::<std::net::Ipv4Addr>().is_ok() {
+        return over.to_string();
+    }
+    let origin = crate::api::origin(app);
+    let host = origin.trim_start_matches("https://").trim_start_matches("http://").split('/').next().unwrap_or("").to_string();
+    let name = host.split(':').next().unwrap_or("").to_string();
+    if name.parse::<std::net::Ipv4Addr>().is_ok() {
+        return name;
+    }
+    match tokio::net::lookup_host((name.as_str(), 443)).await {
+        Ok(it) => it
+            .filter_map(|a| match a {
+                std::net::SocketAddr::V4(v) => Some(v.ip().to_string()),
+                _ => None,
+            })
+            .next()
+            .unwrap_or_default(),
+        Err(_) => String::new(),
+    }
+}
+
+/// What the page needs to build the other end of the GRE link (null when the server has none)
+async fn gre_info(app: &App, s: &TServer) -> Value {
+    if s.gre_n == 0 || s.gre_ip.is_empty() {
+        return Value::Null;
+    }
+    let origin = crate::api::origin(app);
+    let host = origin.trim_start_matches("https://").trim_start_matches("http://").split('/').next().unwrap_or("").to_string();
+    let (name, port) = match host.split_once(':') {
+        Some((a, b)) => (a.to_string(), b.to_string()),
+        None => (host.clone(), String::new()),
+    };
+    let is_ip = name.parse::<std::net::Ipv4Addr>().is_ok();
+    let panel_ip = panel_ipv4(app, &s.gre_panel_ip).await;
+    json!({ "n": s.gre_n, "ip": s.gre_ip, "panel_ip": panel_ip, "domain": name, "port": port, "is_ip": is_ip })
+}
+
+/// Applies the GRE fields of a request to a server. A missing key leaves the link as it is; an empty
+/// gre_ip turns it off. Returns an error text for an address that is not an IPv4.
+fn gre_apply_body(list: &mut Vec<TServer>, id: &str, b: &Value) -> Result<(), String> {
+    let used: Vec<u8> = list.iter().filter(|x| x.id != id).map(|x| x.gre_n).collect();
+    let Some(s) = list.iter_mut().find(|x| x.id == id) else { return Ok(()) };
+    if let Some(v) = b["gre_ip"].as_str() {
+        let v = v.trim();
+        if v.is_empty() {
+            s.gre_ip.clear();
+            s.gre_n = 0;
+            s.gre_panel_ip.clear();
+        } else {
+            if v.parse::<std::net::Ipv4Addr>().is_err() {
+                return Err("the GRE address must be an IPv4 address like 1.2.3.4".into());
+            }
+            s.gre_ip = v.to_string();
+            if s.gre_n == 0 {
+                s.gre_n = (1..=250u8).find(|n| !used.contains(n)).unwrap_or(1);
+            }
+        }
+    }
+    if let Some(v) = b["gre_panel_ip"].as_str() {
+        let v = v.trim();
+        if !v.is_empty() && v.parse::<std::net::Ipv4Addr>().is_err() {
+            return Err("the panel IP must be an IPv4 address like 1.2.3.4".into());
+        }
+        s.gre_panel_ip = v.to_string();
+    }
+    Ok(())
+}
+
 async fn server_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
     let mut list = servers(&app);
@@ -802,10 +931,16 @@ async fn server_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
         token: rand_token(40),
         addr: b["addr"].as_str().unwrap_or("").trim().to_string(),
         created: now(),
+        ..Default::default()
     };
     list.push(s.clone());
+    if let Err(e) = gre_apply_body(&mut list, &s.id, &b) {
+        return err(StatusCode::BAD_REQUEST, &e);
+    }
     save_servers(&app, &list);
-    Json(json!({ "ok": true, "id": s.id, "token": s.token, "name": s.name, "panel": crate::api::origin(&app), "repo": crate::admin::repo() })).into_response()
+    let s = list.iter().find(|x| x.id == s.id).cloned().unwrap_or(s);
+    let gre = gre_info(&app, &s).await;
+    Json(json!({ "ok": true, "id": s.id, "token": s.token, "name": s.name, "panel": crate::api::origin(&app), "repo": crate::admin::repo(), "gre": gre })).into_response()
 }
 
 async fn server_edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
@@ -832,8 +967,13 @@ async fn server_edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
     } else {
         None
     };
+    if let Err(e) = gre_apply_body(&mut list, &id, &b) {
+        return err(StatusCode::BAD_REQUEST, &e);
+    }
     save_servers(&app, &list);
-    Json(json!({ "ok": true, "token": token, "panel": crate::api::origin(&app), "repo": crate::admin::repo() })).into_response()
+    let cur = list.iter().find(|x| x.id == id).cloned().unwrap_or_default();
+    let gre = gre_info(&app, &cur).await;
+    Json(json!({ "ok": true, "token": token, "panel": crate::api::origin(&app), "repo": crate::admin::repo(), "gre": gre })).into_response()
 }
 
 async fn server_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {

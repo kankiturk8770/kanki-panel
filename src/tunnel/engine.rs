@@ -416,9 +416,9 @@ static PROBE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 async fn probe_task(state: Arc<State>) {
     *state.probe.lock().unwrap() = Some(serde_json::json!({"done": false, "stage": "connecting"}));
-    // wait up to 40 s for the first link
+    // wait up to 20 s for the first link (the agents fetch their list every 5 s)
     let mut sess = None;
-    for _ in 0..200 {
+    for _ in 0..100 {
         if let Some(s) = state.pick(0) {
             sess = Some(s);
             break;

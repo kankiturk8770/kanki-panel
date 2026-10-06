@@ -19,7 +19,7 @@ pub const ECHO: &str = "kanki:echo";
 
 /// Bytes moved per direction in a test (stops earlier when the time is up).
 const MAX_BYTES: u32 = 16 * 1024 * 1024;
-const PHASE: Duration = Duration::from_secs(6);
+const PHASE: Duration = Duration::from_secs(2);
 
 /// exit: address of a local speed service for ONE test stream (loopback only).
 ///
@@ -159,14 +159,14 @@ async fn tcp_test(s: &Arc<Session>) -> Result<(u64, f64, f64), String> {
     Ok((ping, down, up))
 }
 
-/// UDP: 40 small packets through the tunnel and back; loss % and median ping.
+/// UDP: 20 small packets through the tunnel and back; loss % and median ping.
 async fn udp_test(s: &Arc<Session>, shared: &Arc<Shared>, flow: u32) -> Result<(f64, u64), String> {
     // the tunnel delivers replies to (a, b): a sends them, b receives them
     let a = Arc::new(UdpSocket::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?);
     let b = UdpSocket::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
     let b_addr = b.local_addr().map_err(|e| e.to_string())?;
     shared.udp_back.lock().unwrap().insert(flow, (a.clone(), b_addr, now_ms()));
-    const N: u64 = 40;
+    const N: u64 = 20;
     let start = now_ms();
     let sender = {
         let s = s.clone();
@@ -210,8 +210,8 @@ async fn udp_test(s: &Arc<Session>, shared: &Arc<Shared>, flow: u32) -> Result<(
 /// Full measurement of one transport. Never fails: errors are reported in the result.
 pub async fn measure(s: Arc<Session>, shared: Arc<Shared>) -> Value {
     let t = Instant::now();
-    let tcp = tokio::time::timeout(Duration::from_secs(30), tcp_test(&s)).await.unwrap_or(Err("TCP test timed out".into()));
-    let udp = tokio::time::timeout(Duration::from_secs(10), udp_test(&s, &shared, 0x7FFF_FF00)).await.unwrap_or(Err("UDP test timed out".into()));
+    let tcp = tokio::time::timeout(Duration::from_secs(20), tcp_test(&s)).await.unwrap_or(Err("TCP test timed out".into()));
+    let udp = tokio::time::timeout(Duration::from_secs(6), udp_test(&s, &shared, 0x7FFF_FF00)).await.unwrap_or(Err("UDP test timed out".into()));
     let mut v = json!({"done": true, "secs": t.elapsed().as_secs()});
     match tcp {
         Ok((ping, down, up)) => {
