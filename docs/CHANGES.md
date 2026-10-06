@@ -1,3 +1,11 @@
+# v2.7.12 — tunnel form and port fixes
+- **Tunnel port could not be edited:** the form refilled the box with a free port the moment it was cleared, so a new number could never be typed. The port now fills itself only until you type one; a cleared box stays empty.
+- **Ports of the chosen server fill themselves:** pick the exit server and its VPN ports (WireGuard, AmneziaWG, Hysteria2, OpenVPN from the Nodes page) are written into the TCP / UDP boxes. The button “Ports of the exit server” does it again by hand, for any server (it was only the panel server before).
+- **Same entry, several tunnels:** if the entry already uses a port (another tunnel, or its own VPN) the port is moved to a free one on the entry, written as `51821:51820`, and the form says which ones moved.
+- **Free tunnel port** is now picked per protocol (UDP for QUIC / KCP) and a warning shows when the port is already used.
+- **Port check on save** rewritten: tunnel port and forwarded ports are compared per server and per protocol (TCP / UDP), in both directions, and only between enabled tunnels. No more false “already used” on a different server.
+- Transports: only tcpmux, tcp, ws, wss and cdn pass through networks that block UDP; WireGuard / Hysteria2 UDP travels inside them. QUIC and KCP are UDP themselves.
+
 # v2.7.11 — build fix
 - Fixed the compile error `no field 0 on type Arc<App>` in Update all (`app.0.clone()` -> `app.clone()`). It stopped the whole build, so no release was published.
 

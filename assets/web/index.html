@@ -1517,8 +1517,25 @@ function tunSrvEdit(id){var s=tunSrv(id);
 
 // ---- tunnel wizard
 var TNP={balanced:4,speed:8,gaming:2};
-function tunFreePort(listener,skip){var used={};((TN.d&&TN.d.tunnels)||[]).forEach(function(x){if(x.id==skip)return;var l=x.mode=='direct'?x.exit:x.entry;if(l==listener)used[x.port]=1;if(x.entry==listener)(x.tcp||[]).forEach(function(p){used[+String(p).split(':')[0]]=1})});
- for(var p=3080;p<3200;p++)if(!used[p])return p;return 3080}
+function tunUdpTr(tr){return tr=='quic'||tr=='kcp'}
+// entry-side ports written in a list: "443", "8443:443", "1000-1010", comma separated
+function tunEntryPorts(list){var out=[];(Array.isArray(list)?list:String(list||'').split(/[\s,]+/)).forEach(function(it){String(it).split(',').forEach(function(q){q=q.trim();if(!q)return;var m;
+ if((m=q.match(/^(\d+)\s*:\s*\d+$/)))out.push(+m[1]);else if((m=q.match(/^(\d+)\s*-\s*(\d+)$/))){for(var i=+m[1];i<=+m[2]&&i-m[1]<512;i++)out.push(i)}else if(/^\d+$/.test(q))out.push(+q)})});return out}
+// ports already taken on a server by the other enabled tunnels (tunnel port + ports opened on the entry)
+function tunPortUse(sid,skip){var u={tcp:{},udp:{}};((TN.d&&TN.d.tunnels)||[]).forEach(function(x){if(x.id==skip||x.enabled===false)return;var l=x.mode=='direct'?x.exit:x.entry;
+ if(l==sid)(tunUdpTr(x.transport)?u.udp:u.tcp)[x.port]=1;
+ if(x.entry==sid){tunEntryPorts(x.tcp).forEach(function(p){u.tcp[p]=1});tunEntryPorts(x.udp).forEach(function(p){u.udp[p]=1})}});return u}
+function tunFreePort(listener,skip,udp){var u=tunPortUse(listener,skip)[udp?'udp':'tcp'];
+ for(var p=3080;p<3500;p++)if(!u[p])return p;return 3080}
+// the node (from Nodes) that lives on a tunnel server: same address / IP, or the same name
+function tunNodeFor(sid){return api('GET','/api/nodes').then(function(ns){
+ if(sid=='local')return ns.filter(function(z){return z.id=='local'})[0]||null;
+ var sv=tunSrv(sid),hs=function(a){return String(a||'').toLowerCase().replace(/^https?:\/\//,'').replace(/[:\/].*$/,'')},
+  keys=[sv.addr,sv.ip,sv.host].map(hs).filter(Boolean),nm=String(sv.name||'').trim().toLowerCase(),f=ns.filter(function(n){return n.id!='local'});
+ return f.filter(function(n){return keys.indexOf(hs(n.address))>=0||keys.indexOf(hs(n.effective_endpoint))>=0})[0]||f.filter(function(n){return String(n.name||'').trim().toLowerCase()==nm})[0]||null})}
+// the VPN ports a node serves (from the node info the panel already keeps)
+function tunNodePorts(n){var i=(n&&n.info)||{},tcp=[],udp=[],add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
+ [i.wg_port,i.awg_port,i.hy2_port,i.ovpn_udp].forEach(function(v){add(udp,v)});add(tcp,i.ovpn_tcp);return {tcp:tcp,udp:udp}}
 function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pre)});
  var x=id?((TN.d.tunnels||[]).filter(function(z){return z.id==id})[0]||{}):(pre||{}),sv=TN.d.servers||[];
  var remote=sv.filter(function(s){return !s.local});
@@ -1544,7 +1561,8 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   cdnTools()+'</div>'+
   '<div class="g2"><div><label class="f">'+t('Tunnel port')+'</label><input id="tw_pt" type="number" class="ltr" value="'+(x.port||'')+'"></div><div><label class="f">'+t('Profile')+'</label><select id="tw_pf"><option value="balanced"'+(prof=='balanced'?' selected':'')+'>'+t('Balanced')+'</option><option value="speed"'+(prof=='speed'?' selected':'')+'>'+t('Most speed')+'</option><option value="gaming"'+(prof=='gaming'?' selected':'')+'>'+t('Gaming (low ping)')+'</option></select></div></div>'+
   '<small class="muted" id="tw_ph"></small>'+
-  '<div class="nh" style="margin-top:12px"><b>'+t('Ports to carry')+'</b><button class="b2 sm" id="tw_vpn">'+ic('ports',14)+' '+t('VPN ports of the panel server')+'</button></div>'+
+  '<div class="nh" style="margin-top:12px"><b>'+t('Ports to carry')+'</b><button class="b2 sm" id="tw_vpn">'+ic('ports',14)+' '+t('Ports of the exit server')+'</button></div>'+
+  '<small class="muted" id="tw_pn" style="display:block;margin-bottom:6px"></small>'+
   '<div class="g2"><div><label class="f">TCP</label><input id="tw_tcp" class="ltr" value="'+esc((x.tcp||[]).join(', '))+'" placeholder="443, 2053"></div><div><label class="f">UDP</label><input id="tw_udp" class="ltr" value="'+esc((x.udp||[]).join(', '))+'" placeholder="51820, 51821, 8443"></div></div>'+
   '<small class="muted">'+t('Users connect to these ports on the entry; they reach the same ports on the exit. Use 8443:443 to change the port, 1000-1010 for a range.')+'</small>'+
   '<label class="chk rotk"><input type="checkbox" id="tw_au" '+(x.auto?'checked':'')+'><span><b>🔁 '+t('Rotating tunnel')+'</b><small>'+t('If it stays down, it switches by itself: KCP → TCP Mux → QUIC → WS → WSS → TCP (balanced, reverse)')+'</small></span></label>'+
@@ -1556,19 +1574,34 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<small class="muted">'+t('With WSS the handshake looks like an HTTPS connection to this domain. QUIC and KCP are fully encrypted (KCP’s header is hidden too), so they look like plain UDP.')+'</small>'+spGuide()+'</details>'+
   '<div class="g2" style="margin-top:14px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="tw_go">'+(id?t('Save'):t('Make the tunnel'))+'</button></div>','wide');
  var st={mode:mode,tr:tr};
- function hint(){var en=$('#tw_en').value,ex=$('#tw_ex').value,l=st.mode=='direct'?ex:en;if(!$('#tw_pt').value||!id&&!$('#tw_pt').dataset.touched)$('#tw_pt').value=(st.tr=='cdn'?8080:tunFreePort(l,id));
-  var ls=tunSrv(l),port=$('#tw_pt').value;$('#tw_ph').textContent=t('Open this port on')+' '+ls.name+': '+port+'/TCP'+(en==ex?' · '+t('The entry and the exit must be different'):'')}
+ function hint(){var en=$('#tw_en').value,ex=$('#tw_ex').value,l=st.mode=='direct'?ex:en,pt=$('#tw_pt');
+  // fill the port by itself only until the person types one; a field they cleared or typed stays theirs
+  if(!pt.dataset.touched&&!(id&&pt.value))pt.value=(st.tr=='cdn'?8080:tunFreePort(l,id,tunUdpTr(st.tr)));
+  var ls=tunSrv(l),port=pt.value,udp=tunUdpTr(st.tr),busy=port&&tunPortUse(l,id)[udp?'udp':'tcp'][+port];
+  $('#tw_ph').textContent=t('Open this port on')+' '+ls.name+': '+port+(udp?'/UDP':'/TCP')+(en==ex?' · '+t('The entry and the exit must be different'):'')+(busy?' · ⚠ '+t('This port is already used by another tunnel'):'');
+  $('#tw_ph').style.color=busy?'var(--bad)':''}
  $('#tw_pt').oninput=function(){this.dataset.touched=1;hint()};
- $('#tw_en').onchange=hint;$('#tw_ex').onchange=hint;
+ $('#tw_tcp').oninput=function(){this.dataset.touched=1};$('#tw_udp').oninput=function(){this.dataset.touched=1};
+ // writes the VPN ports of the chosen exit server (from Nodes) into the TCP / UDP boxes; a port that the
+ // entry already uses for another tunnel (or for its own VPN) is moved to a free one: 51821:51820
+ function fillPorts(manual){var en=$('#tw_en').value,ex=$('#tw_ex').value,pn=$('#tw_pn');if(en==ex)return;
+  if(!manual&&($('#tw_tcp').dataset.touched||$('#tw_udp').dataset.touched))return;
+  Promise.all([tunNodeFor(ex),tunNodeFor(en)]).then(function(r){var n=r[0],m=r[1];
+   if(!n){if(manual)toast(t('No node found for this server: type the ports by hand'));return}
+   var P=tunNodePorts(n),E=m?tunNodePorts(m):{tcp:[],udp:[]},use=tunPortUse(en,id),l=st.mode=='direct'?ex:en,pt=+$('#tw_pt').value,moved=[];
+   E.tcp.forEach(function(p){use.tcp[p]=1});E.udp.forEach(function(p){use.udp[p]=1});
+   if(l==en&&pt)(tunUdpTr(st.tr)?use.udp:use.tcp)[pt]=1;
+   var mp=function(arr,u){return arr.map(function(p){var q=p;while(u[q]&&q<65535)q++;u[q]=1;if(q!=p)moved.push(q+'→'+p);return q==p?String(p):q+':'+p})};
+   $('#tw_tcp').value=mp(P.tcp,use.tcp).join(', ');$('#tw_udp').value=mp(P.udp,use.udp).join(', ');
+   if(pn)pn.textContent=t('Ports of')+' '+n.name+' '+t('were filled in')+(moved.length?' · '+t('Moved on the entry because they were taken')+': '+moved.join(', '):'')}).catch(function(e){if(manual)fail(e)})}
+ $('#tw_en').onchange=function(){hint();if(!id)fillPorts(false)};$('#tw_ex').onchange=function(){hint();if(!id)fillPorts(false)};
  $('#tw_md').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.mode=b.dataset.v;$$('#tw_md button').forEach(function(z){z.classList.toggle('on',z==b)});cdnUi()};
  function cdnUi(){var on=st.tr=='cdn';$('#tw_cdn').style.display=on?'block':'none';var rk=document.querySelector('.rotk');if(rk)rk.style.display=on?'none':'';
   $$('#tw_md button').forEach(function(z){var v=z.dataset.v;z.textContent=on?(v=='reverse'?t('CDN points to the Iran server: the foreign server connects in (recommended)'):t('CDN points to the foreign server: the Iran server connects out')):(v=='reverse'?t('Exit → entry (reverse, recommended)'):t('Entry → exit (direct)'));z.classList.toggle('on',v==st.mode)});
   var h=$('#tw_cdh');if(h)h.textContent=on?(st.mode=='reverse'?t('On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.'):t('On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.')):'';hint()}
  $('#tw_tr').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.tr=b.dataset.v;$$('#tw_tr button').forEach(function(z){z.classList.toggle('on',z==b)});cdnUi()};
- $('#tw_vpn').onclick=function(){api('GET','/api/nodes').then(function(ns){var n=ns.filter(function(z){return z.id=='local'})[0]||{},i=n.info||{},u=[];
-  [i.wg_port,i.awg_port,i.hy2_port].forEach(function(p){if(p&&u.indexOf(String(p))<0)u.push(String(p))});
-  $('#tw_udp').value=u.join(', ');$('#tw_tcp').value=String(location.port||443);toast(t('Ports of the panel server were filled in'))}).catch(fail)};
- hint();cdnUi();
+ $('#tw_vpn').onclick=function(){fillPorts(true)};
+ hint();cdnUi();if(!id&&!(x.tcp||[]).length&&!(x.udp||[]).length)fillPorts(false);
  var ct=$('#tw_ctest');if(ct)ct.onclick=cdnTest;var cn=$('#tw_cscan');if(cn)cn.onclick=cdnScan;
  var sp=$('#tw_spoof');if(sp)sp.onclick=function(e){var b=e.target.closest('[data-sp]');if(b)$('#tw_sni').value=b.dataset.sp};
  var cs=$('#tw_cspoof');if(cs)cs.onclick=function(e){var b=e.target.closest('[data-sp]');if(!b)return;var i=$('#tw_csni'),v=i.value.trim();i.value=v?(v.split(/[\s,]+/).indexOf(b.dataset.sp)<0?v+', '+b.dataset.sp:v):b.dataset.sp};
@@ -1664,6 +1697,7 @@ Object.assign(FA,{"SNI spoof / Host (wss, quic, ws)": "جعل SNI / Host (wss، 
 
 Object.assign(FA,{"Add at least one CDN edge address":"حداقل یک آی‌پی لبه CDN بنویس","Testing…":"در حال تست…"});
 
+Object.assign(FA,{"Ports of the exit server":"پورت‌های سرور خروجی","Ports of":"پورت‌های","were filled in":"وارد شد","Moved on the entry because they were taken":"روی ورودی عوض شد چون پر بود","No node found for this server: type the ports by hand":"نودی برای این سرور پیدا نشد: پورت‌ها را دستی بنویس","This port is already used by another tunnel":"این پورت را تانل دیگری دارد","the tunnel port is also in the forwarded UDP ports":"پورت تانل نباید جزو پورت‌های عبوری UDP باشد"});
 Object.assign(FA,{"Update all":"آپدیت همه","Update every node, every tunnel server and the panel itself to the latest version?":"همهٔ نودها، سرورهای تانل و خود پنل به آخرین نسخه آپدیت شوند؟","Updating…":"در حال آپدیت…","Panel":"پنل","Nodes":"نودها","no answer: update it once with the kanki command":"جواب نداد: یک‌بار با دستور kanki آپدیتش کن","Tunnel servers (updating by themselves)":"سرورهای تانل (خودشان آپدیت می‌شوند)","Both a node and a tunnel server (updated once, through the node)":"هم نود هم سرور تانل (یک‌بار، از طریق نود)","These agents are too old to update remotely. Run the command kanki on them and choose 3 (Update) once:":"این ایجنت‌ها برای آپدیت از راه دور قدیمی‌اند. روی آن‌ها دستور kanki را بزن و گزینهٔ 3 (Update) را انتخاب کن (فقط یک‌بار):","Everything is already up to date":"همه‌چیز آپدیت است","VPN ports (UDP)":"پورت‌های VPN (UDP)","Applied on the server at once: config, service and firewall. Old WireGuard/AmneziaWG files stop working; subscription links update by themselves.":"روی خود سرور همان لحظه اعمال می‌شود: کانفیگ، سرویس و فایروال. فایل‌های قدیمی وایرگارد/آمنزیا کار نمی‌کنند؛ لینک اشتراک خودش به‌روز می‌شود.","Apply ports":"اعمال پورت‌ها","No port changed":"پورتی عوض نشده","Applying…":"در حال اعمال…","Not in a tunnel":"بدون تانل","Also use this node as a tunnel server":"این نود را سرور تانل هم بکن","Telegram alert when a node or tunnel goes offline":"هشدار تلگرام وقتی نود یا تانل آفلاین شد","Easy setup: choose above which server the CDN points to, type your domain here and the tunnel port below. The panel does the rest.":"راه‌اندازی ساده: بالا انتخاب کن CDN به کدام سرور اشاره دارد، دامنه را همین‌جا و پورت تانل را پایین بنویس. بقیه را پنل انجام می‌دهد.","Extra disguise (optional)":"پوشش اضافه (اختیاری)","empty = use the domain":"خالی = از خود دامنه استفاده شود","CDN points to the Iran server: the foreign server connects in (recommended)":"CDN به سرور ایران اشاره می‌کند: سرور خارج وصل می‌شود (پیشنهادی)","CDN points to the foreign server: the Iran server connects out":"CDN به سرور خارج اشاره می‌کند: سرور ایران وصل می‌شود","On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور ایران (ورودی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور ایران باز کن.","On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور خارج (خروجی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور خروجی باز کن.","enter the domain you put on the CDN":"دامنه‌ای که روی CDN گذاشتی را بنویس"});
 </script>
 <script type="text/plain" id="scanTpl">

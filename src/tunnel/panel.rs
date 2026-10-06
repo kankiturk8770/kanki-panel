@@ -709,33 +709,49 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if parse_ports(&t.tcp).is_empty() && parse_ports(&t.udp).is_empty() {
         return err(StatusCode::BAD_REQUEST, "add at least one TCP or UDP port to forward");
     }
-    // the ports the entry opens must not collide with the tunnel port or with other tunnels on the same server
+    // Ports each server must listen on, per protocol: the tunnel port on the listening side
+    // (UDP for quic / kcp, TCP for the rest) and the forwarded ports on the entry. Two enabled
+    // tunnels may not need the same port of the same protocol on the same server.
+    let is_udp_tr = |tr: &str| tr == "quic" || tr == "kcp";
     let listener = if t.mode == "direct" { t.exit.clone() } else { t.entry.clone() };
-    let mine_tcp: HashSet<u16> = parse_ports(&t.tcp).into_iter().map(|p| p.0).collect();
-    if listener == t.entry && mine_tcp.contains(&t.port) {
-        return err(StatusCode::BAD_REQUEST, "the tunnel port is also in the forwarded TCP ports");
+    let mine_tcp: Vec<u16> = parse_ports(&t.tcp).into_iter().map(|p| p.0).collect();
+    let mine_udp: Vec<u16> = parse_ports(&t.udp).into_iter().map(|p| p.0).collect();
+    let my_udp_tr = is_udp_tr(&t.transport);
+    if listener == t.entry {
+        let clash = if my_udp_tr { mine_udp.contains(&t.port) } else { mine_tcp.contains(&t.port) };
+        if clash {
+            return err(StatusCode::BAD_REQUEST, if my_udp_tr { "the tunnel port is also in the forwarded UDP ports" } else { "the tunnel port is also in the forwarded TCP ports" });
+        }
     }
     for o in list.iter().filter(|o| o.id != t.id && o.enabled) {
-        let o_listener = if o.mode == "direct" { &o.exit } else { &o.entry };
-        let mut taken_tcp: HashSet<u16> = HashSet::new();
-        let mut taken_udp: HashSet<u16> = HashSet::new();
-        if *o_listener == listener {
-            taken_tcp.insert(o.port);
+        let o_listener: String = if o.mode == "direct" { o.exit.clone() } else { o.entry.clone() };
+        let o_udp_tr = is_udp_tr(&o.transport);
+        let o_tcp: Vec<u16> = parse_ports(&o.tcp).into_iter().map(|p| p.0).collect();
+        let o_udp: Vec<u16> = parse_ports(&o.udp).into_iter().map(|p| p.0).collect();
+        // tunnel port against the tunnel port of the other one
+        if o_listener == listener && o_udp_tr == my_udp_tr && o.port == t.port {
+            return err(StatusCode::CONFLICT, &format!("port {} is already used by the tunnel \"{}\"", t.port, o.name));
         }
-        if o.entry == t.entry {
-            taken_tcp.extend(parse_ports(&o.tcp).into_iter().map(|p| p.0));
-            taken_udp.extend(parse_ports(&o.udp).into_iter().map(|p| p.0));
-        }
-        if o.entry == listener || o_listener.as_str() == listener {
-            if taken_tcp.contains(&t.port) {
+        // my tunnel port against the ports the other one opens on its entry
+        if o.entry == listener {
+            let used = if my_udp_tr { &o_udp } else { &o_tcp };
+            if used.contains(&t.port) {
                 return err(StatusCode::CONFLICT, &format!("port {} is already used by the tunnel \"{}\"", t.port, o.name));
             }
         }
+        // the tunnel port of the other one against the ports I open on my entry
+        if t.entry == o_listener {
+            let mine = if o_udp_tr { &mine_udp } else { &mine_tcp };
+            if mine.contains(&o.port) {
+                return err(StatusCode::CONFLICT, &format!("port {} is already used by the tunnel \"{}\"", o.port, o.name));
+            }
+        }
+        // forwarded ports against forwarded ports on the same entry
         if o.entry == t.entry {
-            if let Some(p) = mine_tcp.iter().find(|p| taken_tcp.contains(p)) {
+            if let Some(p) = mine_tcp.iter().find(|p| o_tcp.contains(p)) {
                 return err(StatusCode::CONFLICT, &format!("TCP port {} is already used by the tunnel \"{}\"", p, o.name));
             }
-            if let Some(p) = parse_ports(&t.udp).into_iter().map(|p| p.0).find(|p| taken_udp.contains(p)) {
+            if let Some(p) = mine_udp.iter().find(|p| o_udp.contains(p)) {
                 return err(StatusCode::CONFLICT, &format!("UDP port {} is already used by the tunnel \"{}\"", p, o.name));
             }
         }
