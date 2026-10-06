@@ -920,7 +920,7 @@ async fn update_all(State(app): St, h: HeaderMap) -> Response {
         if !cur.is_empty() && cur == target {
             continue;
         }
-        let a = app.0.clone();
+        let a = app.clone();
         jobs.push(tokio::spawn(async move {
             let r = crate::sync::remote_post(&a, &n, "/agent/update").await;
             let ok = r.as_ref().map(|v| v["ok"].as_bool().unwrap_or(false)).unwrap_or(false);

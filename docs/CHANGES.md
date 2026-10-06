@@ -1,3 +1,6 @@
+# v2.7.11 — build fix
+- Fixed the compile error `no field 0 on type Arc<App>` in Update all (`app.0.clone()` -> `app.clone()`). It stopped the whole build, so no release was published.
+
 # v2.7.10 — Update all fix
 - **Update all** (button on the Nodes and the Tunnels page; it already existed) wrongly treated every tunnel-only server below v2.7.10 as “update by hand”, so it never updated them. The limit is now v2.7.0, the first version whose agent can update itself from the panel. One click now updates every node and every tunnel server, a machine that is both is updated once, and the panel itself last.
 
