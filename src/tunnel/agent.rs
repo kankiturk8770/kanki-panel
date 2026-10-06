@@ -51,6 +51,42 @@ pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
     }
 }
 
+/// Downloads the panel's own binary (same file, same machine type), checks its sha256, swaps it in
+/// and exits; systemd starts the new one. Used when the panel asks for an update (Update all).
+async fn update_from_panel(http: &reqwest::Client, panel: &str, id: &str, token: &str) -> Result<(), String> {
+    let r = http
+        .post(format!("{}/tunnel/binary", panel))
+        .json(&json!({ "id": id, "token": token, "arch": std::env::consts::ARCH }))
+        .timeout(Duration::from_secs(300))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !r.status().is_success() {
+        return Err(format!("the panel answered {}", r.status()));
+    }
+    let want = r.headers().get("x-sha256").and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
+    let bytes = r.bytes().await.map_err(|e| e.to_string())?;
+    let got = {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(&bytes);
+        hex::encode(h.finalize())
+    };
+    if want.is_empty() || want != got {
+        return Err("checksum mismatch, update aborted".into());
+    }
+    let path = std::env::current_exe().map_err(|e| e.to_string())?;
+    let tmp = path.with_extension("new");
+    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
+    }
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    eprintln!("updated from the panel: restarting");
+    std::process::exit(0);
+}
+
 pub async fn run(version: &str) {
     let env = crate::util::load_env(ENV_FILE);
     let panel = env.get("PANEL_URL").cloned().unwrap_or_default().trim_end_matches('/').to_string();
@@ -96,6 +132,11 @@ pub async fn run(version: &str) {
             Ok(r) if r.status().is_success() => {
                 fails = 0;
                 if let Ok(v) = r.json::<Value>().await {
+                    if v["update"].as_bool() == Some(true) {
+                        if let Err(e) = update_from_panel(&http, &panel, &id, &token).await {
+                            eprintln!("update from the panel failed: {}", e);
+                        }
+                    }
                     if let Ok(specs) = serde_json::from_value::<Vec<Spec>>(v["tunnels"].clone()) {
                         let text = serde_json::to_string(&specs).unwrap_or_default();
                         if text != last {

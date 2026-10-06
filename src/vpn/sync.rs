@@ -258,6 +258,12 @@ pub async fn remote_post(app: &App, n: &Node, path: &str) -> Option<Value> {
     r.json::<Value>().await.ok()
 }
 
+pub async fn remote_post_json(app: &App, n: &Node, path: &str, body: &Value) -> Option<Value> {
+    let r = app.client(n.insecure).post(format!("{}{}", n.address.trim_end_matches('/'), path))
+        .header("X-Node-Token", &n.token).json(body).timeout(std::time::Duration::from_secs(60)).send().await.ok()?;
+    r.json::<Value>().await.ok()
+}
+
 /// Forever loop
 pub async fn run(app: Arc<App>) {
     loop {

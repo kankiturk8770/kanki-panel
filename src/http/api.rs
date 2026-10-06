@@ -90,6 +90,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/nodes", get(nodes_list).post(nodes_add))
         .route("/api/nodes/:id", axum::routing::put(nodes_edit).delete(nodes_delete))
         .route("/api/nodes/:id/:action", post(nodes_action))
+        .route("/api/node-ports/:id", post(node_ports))
         .route("/api/node-join", post(node_join_token))
         .route("/join/register", post(node_join_register))
         .route("/api/settings", get(settings_get).put(settings_put))
@@ -121,6 +122,7 @@ pub fn node_router(app: Arc<App>) -> Router {
         .route("/agent/sync", post(agent_sync))
         .route("/agent/repair", post(agent_repair))
         .route("/agent/update", post(agent_update))
+        .route("/agent/ports", post(agent_ports))
         .route("/hy2/auth", post(hy2_auth))
         .route("/ovpn/auth", post(ovpn_auth))
         .with_state(app)
@@ -382,6 +384,18 @@ async fn nodes_delete(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
     let _ = app.db.exec("DELETE FROM nodes WHERE id=?1", &[&id]);
     let _ = app.db.exec("DELETE FROM peers WHERE node_id=?1", &[&id]);
     Json(json!({ "ok": true })).into_response()
+}
+
+/// Changes the WireGuard / AmneziaWG / Hysteria2 ports of a node (or of the panel server) in one go
+async fn node_ports(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let Some(n) = app.db.node(&id) else { return err(StatusCode::NOT_FOUND, "not found") };
+    let r = if n.id == "local" { Some(crate::admin::set_ports(&b)) } else { sync::remote_post_json(&app, &n, "/agent/ports", &b).await };
+    spawn_sync(&app);
+    match r {
+        Some(v) => Json(v).into_response(),
+        None => err(StatusCode::BAD_GATEWAY, "the node did not answer: update the node agent first (Update agent), then try again"),
+    }
 }
 
 async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(String, String)>) -> Response {
@@ -945,12 +959,23 @@ async fn agent_repair(State(app): St, h: HeaderMap) -> Response {
     Json(crate::admin::repair_services()).into_response()
 }
 
+async fn agent_ports(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    if !node_authed(&app, &h) {
+        return err(StatusCode::UNAUTHORIZED, "bad token");
+    }
+    Json(crate::admin::set_ports(&b)).into_response()
+}
+
 async fn agent_update(State(app): St, h: HeaderMap) -> Response {
     if !node_authed(&app, &h) {
         return err(StatusCode::UNAUTHORIZED, "bad token");
     }
     match crate::admin::self_update(&app).await {
-        Ok(v) => Json(json!({"ok": true, "version": v})).into_response(),
+        Ok(v) => {
+            // the tunnel agent of this machine (when there is one) runs the same file: restart it onto the new one
+            let _ = std::process::Command::new("systemctl").args(["restart", "kanki-tunnel"]).spawn();
+            Json(json!({"ok": true, "version": v})).into_response()
+        }
         Err(e) => Json(json!({"ok": false, "error": e})).into_response(),
     }
 }

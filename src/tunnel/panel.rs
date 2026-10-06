@@ -544,6 +544,8 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/tunnels/:id", delete(tunnel_del))
         .route("/api/tunnels/:id/:action", post(tunnel_action))
         .route("/tunnel/agent", post(agent_report))
+        .route("/tunnel/binary", post(agent_binary))
+        .route("/api/update-all", post(update_all))
 }
 
 fn status_json(st: Option<&Status>) -> Value {
@@ -851,5 +853,112 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         id.clone(),
         Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status },
     );
-    Json(json!({ "tunnels": specs_for(&app, &id) })).into_response()
+    let ver = b["version"].as_str().unwrap_or("");
+    let until = app.db.get("tun_update_until").parse::<i64>().unwrap_or(0);
+    let update = now() < until && !ver.is_empty() && ver != crate::VERSION;
+    Json(json!({ "tunnels": specs_for(&app, &id), "update": update })).into_response()
+}
+
+/// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)
+async fn agent_binary(State(app): St, Json(b): Json<Value>) -> Response {
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let token = b["token"].as_str().unwrap_or("").to_string();
+    let Some(s) = servers(&app).into_iter().find(|s| s.id == id) else {
+        return (StatusCode::GONE, "unknown server").into_response();
+    };
+    if token.is_empty() || !util::ct_eq(&token, &s.token) {
+        return err(StatusCode::FORBIDDEN, "wrong token");
+    }
+    if now() >= app.db.get("tun_update_until").parse::<i64>().unwrap_or(0) {
+        return err(StatusCode::CONFLICT, "no update was requested");
+    }
+    if b["arch"].as_str().unwrap_or("") != std::env::consts::ARCH {
+        return err(StatusCode::CONFLICT, "this server has a different CPU type than the panel; update it by hand");
+    }
+    let Ok(path) = std::env::current_exe() else { return err(StatusCode::INTERNAL_SERVER_ERROR, "no binary") };
+    let Ok(bytes) = std::fs::read(&path) else { return err(StatusCode::INTERNAL_SERVER_ERROR, "cannot read the binary") };
+    let sum = {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(&bytes);
+        hex::encode(h.finalize())
+    };
+    (StatusCode::OK, [("x-sha256", sum)], bytes).into_response()
+}
+
+/// One click: updates every node, asks every tunnel-only server to update from the panel, then the
+/// panel itself. A machine that is both a node and a tunnel server is updated once (through its node).
+async fn update_all(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "admin");
+    let latest = crate::admin::latest_version(&app).await.unwrap_or_default();
+    let target = if latest.is_empty() { crate::VERSION.to_string() } else { latest.clone() };
+    let panel_old = !latest.is_empty() && crate::admin::newer(&latest, crate::VERSION);
+    let seen_now = seen().lock().unwrap().clone();
+    let srv = servers(&app);
+    let mut covered: HashSet<String> = HashSet::new();
+    let mut jobs = vec![];
+    for n in app.db.nodes().into_iter().filter(|n| n.id != "local" && n.enabled) {
+        let host = n
+            .address
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .split(|c| c == '/' || c == ':')
+            .next()
+            .unwrap_or("")
+            .to_lowercase();
+        let ips: Vec<String> = match tokio::net::lookup_host((host.as_str(), 443u16)).await {
+            Ok(it) => it.map(|a| a.ip().to_string()).collect(),
+            Err(_) => vec![],
+        };
+        for s in srv.iter() {
+            let ip = seen_now.get(&s.id).map(|x| x.ip.clone()).unwrap_or_default();
+            if s.addr.trim().to_lowercase() == host || (!ip.is_empty() && ips.contains(&ip)) {
+                covered.insert(s.id.clone());
+            }
+        }
+        let cur = serde_json::from_str::<Value>(&n.info).ok().and_then(|v| v["version"].as_str().map(|x| x.to_string())).unwrap_or_default();
+        if !cur.is_empty() && cur == target {
+            continue;
+        }
+        let a = app.0.clone();
+        jobs.push(tokio::spawn(async move {
+            let r = crate::sync::remote_post(&a, &n, "/agent/update").await;
+            let ok = r.as_ref().map(|v| v["ok"].as_bool().unwrap_or(false)).unwrap_or(false);
+            let e = r.as_ref().and_then(|v| v["error"].as_str().map(|x| x.to_string())).unwrap_or_default();
+            json!({ "name": n.name, "ok": ok, "error": e })
+        }));
+    }
+    // tunnel-only servers: agents from v2.7.0 on update themselves from the panel; older ones need the command once
+    let mut flagged: Vec<String> = vec![];
+    let mut manual: Vec<String> = vec![];
+    for s in srv.iter().filter(|s| !covered.contains(&s.id)) {
+        let Some(x) = seen_now.get(&s.id) else { continue };
+        if now() - x.at >= 20 || x.version.is_empty() || x.version == target {
+            continue;
+        }
+        // the agent code that updates itself from the panel exists since 2.7.0
+        if crate::admin::newer("2.7.0", &x.version) {
+            manual.push(s.name.clone());
+        } else {
+            flagged.push(s.name.clone());
+        }
+    }
+    if !flagged.is_empty() {
+        app.db.set("tun_update_until", &(now() + 900).to_string());
+    }
+    let mut nodes_out = vec![];
+    for j in jobs {
+        if let Ok(v) = j.await {
+            nodes_out.push(v);
+        }
+    }
+    let mut panel_msg = json!("current");
+    if panel_old {
+        panel_msg = match crate::admin::self_update(&app).await {
+            Ok(v) => json!(format!("updating to {}", v)),
+            Err(e) => json!(format!("failed: {}", e)),
+        };
+    }
+    let covered_names: Vec<String> = srv.iter().filter(|s| covered.contains(&s.id)).map(|s| s.name.clone()).collect();
+    Json(json!({ "ok": true, "latest": latest, "panel": panel_msg, "nodes": nodes_out, "agents": flagged, "manual": manual, "also_nodes": covered_names })).into_response()
 }

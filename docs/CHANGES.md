@@ -1,3 +1,13 @@
+# v2.7.10 — Update all fix
+- **Update all** (button on the Nodes and the Tunnels page; it already existed) wrongly treated every tunnel-only server below v2.7.10 as “update by hand”, so it never updated them. The limit is now v2.7.0, the first version whose agent can update itself from the panel. One click now updates every node and every tunnel server, a machine that is both is updated once, and the panel itself last.
+
+# v2.7.10 — Update all
+- **Update all** button (Nodes and Tunnels pages): one click updates every node (they download the release themselves), asks every tunnel-only server to update from the panel (the agent downloads the panel's own binary, verifies its sha256, swaps it and restarts; no GitHub access needed on that server), and then updates the panel. A machine that is both a node and a tunnel server is recognised (same host name or same IP) and updated once, through its node; the node update now also restarts that machine's tunnel agent.
+- Tunnel agents older than 2.7.10 cannot update remotely: the result lists them, run `kanki` > 3 (Update) on them once.
+
+# v2.7.9 — change VPN ports from the panel
+- **Edit node > “VPN ports (UDP)”:** change the WireGuard, AmneziaWG and Hysteria2 ports of any node (or of the panel server) from the panel. The panel sends the order to the node agent (`POST /agent/ports`); the node checks the port is free, edits its configs, applies them (WireGuard/AmneziaWG live, so connected users stay), restarts Hysteria2, opens ufw and restarts its agent. The node must run v2.7.9 (Update agent first).
+
 # v2.7.8 — tunnel map and compact cards
 - **Tunnel map:** a server that is in no tunnel (like a node that is not used yet) now sits in its own dashed row at the bottom (“Not in a tunnel”) instead of floating in the middle over the link labels. Links got four glowing particles with fading tails, and nodes get two staggered ripples.
 - **Tunnel cards** are smaller: three info cells, traffic moved to the small line below, one row of three buttons, less padding.

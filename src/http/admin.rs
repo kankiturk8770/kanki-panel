@@ -45,6 +45,133 @@ pub fn service_states() -> Value {
     json!(v)
 }
 
+// ------------------------------------------------------------ change the VPN ports of this server
+
+fn set_line(path: &str, prefix: &str, new: &str) -> Result<(), String> {
+    let t = std::fs::read_to_string(path).map_err(|e| format!("{}: {}", path, e))?;
+    let mut hit = false;
+    let out: Vec<String> = t
+        .lines()
+        .map(|l| {
+            if !hit && l.starts_with(prefix) {
+                hit = true;
+                new.to_string()
+            } else {
+                l.to_string()
+            }
+        })
+        .collect();
+    if !hit {
+        return Err(format!("{} has no {} line", path, prefix));
+    }
+    std::fs::write(path, out.join("\n") + "\n").map_err(|e| format!("{}: {}", path, e))
+}
+
+fn conf_port(path: &str, key: &str) -> Option<u16> {
+    read(path).lines().find(|l| l.starts_with(key)).and_then(|l| l.split('=').nth(1)).and_then(|v| v.trim().parse().ok())
+}
+
+fn parse_port(v: &Value) -> Result<Option<u16>, String> {
+    let s = match v {
+        Value::String(x) => x.trim().to_string(),
+        Value::Number(n) => n.to_string(),
+        _ => String::new(),
+    };
+    if s.is_empty() {
+        return Ok(None);
+    }
+    match s.parse::<u16>() {
+        Ok(p) if p >= 1 => Ok(Some(p)),
+        _ => Err(format!("invalid port {}", s)),
+    }
+}
+
+fn apply_wg(tool: &str, iface: &str, conf: &str, unit: &str, port: u16) -> Result<(), String> {
+    set_line(conf, "ListenPort", &format!("ListenPort = {}", port))?;
+    // change it live so the connected users are not dropped; fall back to a restart
+    let live = Command::new(tool).args(["set", iface, "listen-port", &port.to_string()]).status().map(|s| s.success()).unwrap_or(false);
+    if !live {
+        Command::new("systemctl").args(["restart", unit]).status().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn apply_hy2(hyc: &str, envf: &str, port: u16) -> Result<(), String> {
+    set_line(hyc, "listen:", &format!("listen: :{}", port))?;
+    set_line(envf, "HY2_PORT=", &format!("HY2_PORT={}", port))?;
+    Command::new("systemctl").args(["restart", "hysteria-server"]).status().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Changes the WireGuard / AmneziaWG / Hysteria2 UDP ports of this server: edits the configs, applies
+/// them, opens the firewall. Empty = keep. Body: {"wg": "", "awg": "", "hy2": ""}
+pub fn set_ports(b: &Value) -> Value {
+    const WGC: &str = "/etc/wireguard/wg0.conf";
+    const AWGC: &str = "/etc/amnezia/amneziawg/awg0.conf";
+    const HYC: &str = "/etc/hysteria/config.yaml";
+    const ENVF: &str = "/etc/kanki/kanki.env";
+    let (pw, pa, ph) = match (parse_port(&b["wg"]), parse_port(&b["awg"]), parse_port(&b["hy2"])) {
+        (Ok(x), Ok(y), Ok(z)) => (x, y, z),
+        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => return json!({"ok": false, "error": e}),
+    };
+    let reqs: [(&str, Option<u16>, Option<u16>); 3] = [
+        ("wg", pw, conf_port(WGC, "ListenPort")),
+        ("awg", pa, conf_port(AWGC, "ListenPort")),
+        ("hy2", ph, conf_port(ENVF, "HY2_PORT")),
+    ];
+    let mut finals: Vec<u16> = vec![];
+    for (_, n, c) in reqs.iter() {
+        if let Some(p) = (*n).or(*c) {
+            finals.push(p);
+        }
+    }
+    let mut uniq = finals.clone();
+    uniq.sort();
+    uniq.dedup();
+    if uniq.len() != finals.len() {
+        return json!({"ok": false, "error": "the WireGuard, AmneziaWG and Hysteria2 ports must all be different"});
+    }
+    let mut done: Vec<String> = vec![];
+    let mut errs: Vec<String> = vec![];
+    let mut hy2_changed = false;
+    for (name, new, cur) in reqs.iter() {
+        let Some(p) = *new else { continue };
+        if Some(p) == *cur {
+            continue;
+        }
+        if cur.is_none() {
+            errs.push(format!("{} is not installed on this server", name));
+            continue;
+        }
+        if std::net::UdpSocket::bind(("0.0.0.0", p)).is_err() {
+            errs.push(format!("{}: UDP port {} is already in use", name, p));
+            continue;
+        }
+        let r = match *name {
+            "wg" => apply_wg("wg", "wg0", WGC, "wg-quick@wg0", p),
+            "awg" => apply_wg("awg", "awg0", AWGC, "awg-quick@awg0", p),
+            _ => apply_hy2(HYC, ENVF, p),
+        };
+        match r {
+            Ok(()) => {
+                done.push(format!("{} -> {}", name, p));
+                if *name == "hy2" {
+                    hy2_changed = true;
+                }
+                let _ = Command::new("sh")
+                    .args(["-c", &format!("command -v ufw >/dev/null 2>&1 && ufw status | grep -q '^Status: active' && ufw allow {}/udp >/dev/null 2>&1; true", p)])
+                    .status();
+            }
+            Err(e) => errs.push(format!("{}: {}", name, e)),
+        }
+    }
+    if hy2_changed {
+        // the panel / node reads HY2_PORT at start: restart it a moment after this answer is sent
+        let _ = Command::new("sh").args(["-c", "sleep 2; systemctl restart kanki-panel 2>/dev/null; systemctl restart kanki-node 2>/dev/null"]).spawn();
+    }
+    json!({"ok": errs.is_empty(), "changed": done, "errors": errs})
+}
+
 /// Restart VPN services that are installed; returns their new state
 pub fn repair_services() -> Value {
     let mut out = vec![];
@@ -366,7 +493,7 @@ pub fn repo() -> String {
         .unwrap_or_else(|| read("/etc/kanki/repo").trim().to_string())
 }
 
-async fn latest_version(app: &App) -> Result<String, String> {
+pub async fn latest_version(app: &App) -> Result<String, String> {
     let r = repo();
     if r.is_empty() {
         return Err("GitHub repo is not configured (/etc/kanki/repo)".into());
@@ -379,7 +506,7 @@ async fn latest_version(app: &App) -> Result<String, String> {
     Ok(res.text().await.map_err(|e| e.to_string())?.trim().to_string())
 }
 
-fn newer(latest: &str, cur: &str) -> bool {
+pub fn newer(latest: &str, cur: &str) -> bool {
     let p = |s: &str| -> Vec<u64> { s.trim_start_matches('v').split('.').map(|x| x.parse().unwrap_or(0)).collect() };
     p(latest) > p(cur)
 }
