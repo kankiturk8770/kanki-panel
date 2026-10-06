@@ -934,7 +934,6 @@ impl Bot {
                     vec![b("⬅️ پنل مدیریت", "adm")]]))).await; return true; }
             _ => return false,
         }
-        true
     }
 
     async fn admin_cb(&self, uid: i64, chat: i64, mid: i64, d: &str) {

@@ -862,7 +862,7 @@ async fn panel_ipv4(app: &App, over: &str) -> String {
     if name.parse::<std::net::Ipv4Addr>().is_ok() {
         return name;
     }
-    match tokio::net::lookup_host((name.as_str(), 443)).await {
+    let resolved = match tokio::net::lookup_host((name.as_str(), 443)).await {
         Ok(it) => it
             .filter_map(|a| match a {
                 std::net::SocketAddr::V4(v) => Some(v.ip().to_string()),
@@ -871,7 +871,8 @@ async fn panel_ipv4(app: &App, over: &str) -> String {
             .next()
             .unwrap_or_default(),
         Err(_) => String::new(),
-    }
+    };
+    resolved
 }
 
 /// What the page needs to build the other end of the GRE link (null when the server has none)
