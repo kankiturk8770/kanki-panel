@@ -1,3 +1,7 @@
+## UI update
+- New side-menu page **Tunnel servers**: add/edit/delete tunnel servers there; the Tunnels page now only has tunnels.
+- New tunnel map animation: glowing tubes, comet packets, return pulses, arrival ripples, orbiting node rings, dotted background; the map no longer restarts every refresh.
+
 # v2.8.0 — AmneziaWG tunnel between servers
 - **New tunnel type “AmneziaWG”** (Tunnels > + Tunnel > Tunnel type). A layer-3 link between two servers, like WireGuard, with the AmneziaWG obfuscation. It does not need the Amnezia app. The panel makes the keys and the obfuscation numbers (Jc, Jmin, Jmax, S1, S2, H1-H4, optional I1) **once and gives both ends exactly the same values**, so the “numbers differ” failure cannot happen. The agent writes `/etc/amnezia/amneziawg/kawg<id>.conf` and runs `awg-quick up`; if AmneziaWG is missing on a Debian / Ubuntu server it installs it itself (Amnezia PPA). Inside the link: entry `10.88.N.1`, exit `10.88.N.2`.
 - **AmneziaWG inside any transport (the “hide” switch).** The AmneziaWG UDP can travel through WebSocket, WSS (with SNI spoof), CDN (whitelist mode, both directions), TCP Mux, QUIC or KCP. The interface then only talks to `127.0.0.1`, the engine carries the packets, and the AmneziaWG port is closed to everyone else (iptables, “no active probing”). The network only sees the chosen transport.
