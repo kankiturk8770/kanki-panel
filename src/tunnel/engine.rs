@@ -55,6 +55,10 @@ pub struct Spec {
     pub key: String,
     /// smart-tunnel test: no user ports; the entry measures this transport once and reports it
     pub probe: bool,
+    /// entry: address the forwarded ports listen on (empty = every address)
+    pub bind: String,
+    /// an AmneziaWG interface instead of a Kanki link (handled by `awg`, not by the engine)
+    pub awg: Option<super::awg::AwgSpec>,
 }
 
 impl Spec {
@@ -66,6 +70,10 @@ impl Spec {
             "tcp" => 1,
             _ => self.conns.clamp(1, 16),
         }
+    }
+    fn bind_host(&self) -> String {
+        let b = self.bind.trim();
+        if b.is_empty() { "0.0.0.0".into() } else { b.to_string() }
     }
     fn target_host(&self) -> String {
         let t = self.target.trim();
@@ -204,10 +212,10 @@ impl Running {
         if spec.role == "entry" {
             let host = spec.target_host();
             for (a, b) in parse_ports(&spec.tcp) {
-                tasks.push(tokio::spawn(user_tcp(a, format!("{}:{}", host, b), state.clone())));
+                tasks.push(tokio::spawn(user_tcp(spec.bind_host(), a, format!("{}:{}", host, b), state.clone())));
             }
             for (a, b) in parse_ports(&spec.udp) {
-                tasks.push(tokio::spawn(user_udp(a, format!("{}:{}", host, b), state.clone())));
+                tasks.push(tokio::spawn(user_udp(spec.bind_host(), a, format!("{}:{}", host, b), state.clone())));
             }
         }
         if spec.probe && spec.role == "entry" {
@@ -337,8 +345,8 @@ async fn dial_loop(spec: Spec, state: Arc<State>, n: u32) {
     }
 }
 
-async fn user_tcp(port: u16, target: String, state: Arc<State>) {
-    let addr = format!("0.0.0.0:{}", port);
+async fn user_tcp(bind: String, port: u16, target: String, state: Arc<State>) {
+    let addr = format!("{}:{}", bind, port);
     let l = loop {
         match TcpListener::bind(&addr).await {
             Ok(l) => break l,
@@ -365,8 +373,8 @@ async fn user_tcp(port: u16, target: String, state: Arc<State>) {
     }
 }
 
-async fn user_udp(port: u16, target: String, state: Arc<State>) {
-    let addr = format!("0.0.0.0:{}", port);
+async fn user_udp(bind: String, port: u16, target: String, state: Arc<State>) {
+    let addr = format!("{}:{}", bind, port);
     let sock = loop {
         match UdpSocket::bind(&addr).await {
             Ok(s) => break Arc::new(s),
@@ -451,6 +459,9 @@ impl Default for Manager {
 
 impl Manager {
     pub async fn apply(&self, specs: Vec<Spec>) {
+        // AmneziaWG interfaces are not engine links: they are handed to the awg worker
+        let (aw, specs): (Vec<Spec>, Vec<Spec>) = specs.into_iter().partition(|s| s.awg.is_some());
+        super::awg::set_desired(aw.into_iter().filter_map(|s| s.awg).collect());
         let mut run = self.running.lock().await;
         let keys: Vec<String> = run.keys().cloned().collect();
         for k in keys {
@@ -472,6 +483,8 @@ impl Manager {
     }
 
     pub async fn statuses(&self) -> Vec<Status> {
-        self.running.lock().await.values().map(|r| r.status()).collect()
+        let mut v: Vec<Status> = self.running.lock().await.values().map(|r| r.status()).collect();
+        v.extend(tokio::task::spawn_blocking(super::awg::statuses).await.unwrap_or_default());
+        v
     }
 }

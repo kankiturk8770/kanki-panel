@@ -1,6 +1,7 @@
 //! Tunnels in the panel: tunnel servers (lightweight agents, no VPN on them), tunnels between two
 //! servers, the endpoint agents talk to, and the copy of the engine that runs on the panel itself.
 
+use super::awg::{self, AwgCfg, AwgSpec};
 use super::engine::{parse_ports, Manager, Spec, Status};
 use crate::api::err;
 use crate::guard;
@@ -66,6 +67,11 @@ pub struct Tunnel {
     /// last automatic switch (shown in the panel)
     pub switched: i64,
     pub switch_note: String,
+    /// "" = a Kanki tunnel (ports through an encrypted link); "awg" = an AmneziaWG link between the
+    /// two servers (a layer-3 interface); "awgwrap" is only used inside the panel for the engine
+    /// tunnel that carries an AmneziaWG link's UDP
+    pub kind: String,
+    pub awg: AwgCfg,
 }
 
 /// Default rotation: KCP first (balanced, reverse), then the others.
@@ -156,11 +162,32 @@ fn cdn_remote(t: &Tunnel) -> String {
 /// The tunnels server `sid` has to run.
 fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
     let mut out = vec![];
+    // an AmneziaWG link that travels inside a Kanki transport gets one more (engine) tunnel that
+    // carries its UDP: entry 127.0.0.1:wrap_port -> exit 127.0.0.1:port
+    let mut all: Vec<Tunnel> = vec![];
     for t in tunnels(app) {
+        if t.kind == "awg" && t.awg.wrap {
+            let mut w = t.clone();
+            w.id = format!("{}~w", t.id);
+            w.kind = "awgwrap".into();
+            w.tcp = vec![];
+            w.udp = vec![format!("{}:{}", t.awg.wrap_port, t.awg.port)];
+            w.target = "127.0.0.1".into();
+            w.auto = false;
+            all.push(w);
+        }
+        all.push(t);
+    }
+    for t in all {
         if !t.enabled || (t.entry != sid && t.exit != sid) || t.entry == t.exit {
             continue;
         }
         let role = if t.entry == sid { "entry" } else { "exit" };
+        if t.kind == "awg" {
+            let a = awg_spec(app, &t, role);
+            out.push(Spec { id: t.id.clone(), name: t.name.clone(), role: role.into(), transport: "awg".into(), awg: Some(a), ..Default::default() });
+            continue;
+        }
         let mode = if t.mode == "direct" { "direct" } else { "reverse" };
         // the side that listens is the entry in reverse mode and the exit in direct mode
         let listener = if mode == "reverse" { &t.entry } else { &t.exit };
@@ -187,6 +214,8 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             cert: String::new(),
             key: String::new(),
             probe: false,
+            bind: if t.kind == "awgwrap" { "127.0.0.1".into() } else { String::new() },
+            awg: None,
         });
     }
     // a running smart-tunnel test adds one short-lived test tunnel per transport and per direction:
@@ -220,12 +249,229 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                         cert: String::new(),
                         key: String::new(),
                         probe: true,
+                        bind: String::new(),
+                        awg: None,
                     });
                 }
             }
         }
     }
     out
+}
+
+// ------------------------------------------------------------------ AmneziaWG link
+
+/// what one side of an AmneziaWG tunnel runs
+fn awg_spec(app: &App, t: &Tunnel, role: &str) -> AwgSpec {
+    let c = &t.awg;
+    let entry = role == "entry";
+    let mode = if t.mode == "direct" { "direct" } else { "reverse" };
+    let listener = if mode == "reverse" { &t.entry } else { &t.exit };
+    let me = if entry { &t.entry } else { &t.exit };
+    let (endpoint, open_udp) = if c.wrap {
+        // the engine carries the UDP; the interface only talks to this machine
+        (if entry { format!("127.0.0.1:{}", c.wrap_port) } else { String::new() }, 0)
+    } else if me == listener {
+        (String::new(), c.port)
+    } else {
+        let host = if !t.dial.trim().is_empty() { t.dial.trim().to_string() } else { host_of(app, listener) };
+        (hostport(&host, c.port), 0)
+    };
+    AwgSpec {
+        tid: t.id.clone(),
+        iface: awg::iface_name(&t.id),
+        role: role.into(),
+        private: if entry { c.entry_priv.clone() } else { c.exit_priv.clone() },
+        peer_pub: if entry { c.exit_pub.clone() } else { c.entry_pub.clone() },
+        psk: c.psk.clone(),
+        address: format!("{}/30", if entry { c.entry_ip() } else { c.exit_ip() }),
+        peer_ip: if entry { c.exit_ip() } else { c.entry_ip() },
+        listen: c.port,
+        endpoint,
+        keepalive: c.keepalive,
+        mtu: c.mtu_or_default(),
+        params: c.params.clone(),
+        lockdown: c.wrap && c.lockdown,
+        nat_exit: c.nat_exit,
+        routes: if entry { c.routes.clone() } else { vec![] },
+        src_routes: if entry { c.src_routes.clone() } else { vec![] },
+        fwd_tcp: if entry { c.fwd_tcp.clone() } else { vec![] },
+        fwd_udp: if entry { c.fwd_udp.clone() } else { vec![] },
+        fwd_target: c.fwd_target.clone(),
+        open_udp,
+        table: 20000 + c.n as u32,
+    }
+}
+
+/// a network wider than /8 sent through the link would also catch the server's own SSH / panel traffic
+fn awg_wide_check(list: Vec<String>) -> Result<Vec<String>, String> {
+    for c in &list {
+        let bits: u8 = c.split_once('/').and_then(|x| x.1.parse().ok()).unwrap_or(32);
+        if bits < 8 {
+            return Err(format!("{} is too wide: it would also catch the server's own connections (SSH, the panel). Use /8 or narrower, or route by source network instead", c));
+        }
+    }
+    Ok(list)
+}
+
+/// reads the AmneziaWG part of the form: makes keys and obfuscation numbers the first time
+fn awg_apply_body(list: &[Tunnel], t: &mut Tunnel, a: &Value) -> Result<(), String> {
+    let mut c = t.awg.clone();
+    if c.n == 0 {
+        let used: HashSet<u8> = list.iter().filter(|o| o.kind == "awg" && o.id != t.id).map(|o| o.awg.n).collect();
+        c.n = (1..=250u8).find(|n| !used.contains(n)).ok_or("too many AmneziaWG tunnels")?;
+    }
+    if c.entry_priv.is_empty() || c.exit_priv.is_empty() || a["regen_keys"].as_bool() == Some(true) {
+        let (ep, eb) = awg::gen_keypair();
+        let (xp, xb) = awg::gen_keypair();
+        c.entry_priv = ep;
+        c.entry_pub = eb;
+        c.exit_priv = xp;
+        c.exit_pub = xb;
+        c.psk = awg::gen_psk();
+    }
+    if let Some(p) = a["profile"].as_str() {
+        let p = if ["classic", "heavy", "mimic"].contains(&p) { p } else { "classic" };
+        if p != c.profile {
+            c.profile = p.into();
+            c.params.clear();
+        }
+    }
+    if c.params.is_empty() || a["regen_params"].as_bool() == Some(true) {
+        c.params = awg::gen_params(&c.profile);
+    }
+    if let Some(v) = a["port"].as_u64() {
+        c.port = v.min(65535) as u16;
+    }
+    if c.port == 0 {
+        return Err("the AmneziaWG port is required".into());
+    }
+    if let Some(v) = a["wrap"].as_bool() {
+        c.wrap = v;
+    }
+    if let Some(v) = a["mtu"].as_u64() {
+        c.mtu = if v == 0 { 0 } else { v.clamp(1000, 1500) as u16 };
+    }
+    if let Some(v) = a["keepalive"].as_u64() {
+        c.keepalive = v.min(600) as u16;
+    }
+    if let Some(v) = a["lockdown"].as_bool() {
+        c.lockdown = v;
+    }
+    if let Some(v) = a["nat_exit"].as_bool() {
+        c.nat_exit = v;
+    }
+    if a.get("routes").is_some() {
+        c.routes = awg_wide_check(awg::clean_cidrs(&clean_list(&a["routes"])))?;
+    }
+    if a.get("src_routes").is_some() {
+        c.src_routes = awg_wide_check(awg::clean_cidrs(&clean_list(&a["src_routes"])))?;
+    }
+    if a.get("fwd_tcp").is_some() {
+        c.fwd_tcp = clean_list(&a["fwd_tcp"]);
+    }
+    if a.get("fwd_udp").is_some() {
+        c.fwd_udp = clean_list(&a["fwd_udp"]);
+    }
+    if let Some(v) = a["fwd_target"].as_str() {
+        let v = v.trim();
+        if !v.is_empty() && v.parse::<std::net::Ipv4Addr>().is_err() {
+            return Err("the forward target must be an IPv4 address".into());
+        }
+        c.fwd_target = v.to_string();
+    }
+    if let Some(v) = a["wrap_port"].as_u64() {
+        c.wrap_port = v.min(65535) as u16;
+    }
+    if c.wrap && c.wrap_port == 0 {
+        c.wrap_port = 41000 + c.n as u16;
+    }
+    if c.wrap && c.wrap_port == c.port {
+        return Err("the local port of the wrapper must differ from the AmneziaWG port".into());
+    }
+    t.auto = false;
+    t.tcp = vec![];
+    if c.wrap {
+        if !["tcp", "tcpmux", "ws", "wss", "quic", "kcp", "cdn"].contains(&t.transport.as_str()) {
+            t.transport = "tcpmux".into();
+        }
+        t.udp = vec![format!("{}:{}", c.wrap_port, c.port)];
+        t.target = "127.0.0.1".into();
+    } else {
+        t.transport = "awg".into();
+        t.port = 0;
+        t.udp = vec![];
+    }
+    t.awg = c;
+    Ok(())
+}
+
+/// agents must know AmneziaWG; the UDP ports of the link must be free on both servers
+fn awg_checks(app: &App, list: &[Tunnel], t: &Tunnel) -> Result<(), String> {
+    let names: HashMap<String, String> = servers(app).into_iter().map(|s| (s.id, s.name)).collect();
+    if t.enabled {
+        let sn = seen().lock().unwrap();
+        for sid in [&t.entry, &t.exit] {
+            if sid == "local" {
+                continue;
+            }
+            if let Some(x) = sn.get(sid.as_str()) {
+                if !x.version.is_empty() && ver_lt(&x.version, "2.8.0") {
+                    return Err(format!("the agent of \"{}\" is v{}: update it first (Update all), it does not know AmneziaWG tunnels", names.get(sid.as_str()).cloned().unwrap_or_default(), x.version));
+                }
+            }
+        }
+    }
+    for sid in [&t.entry, &t.exit] {
+        let mut used: HashMap<u16, String> = HashMap::new();
+        for o in list.iter().filter(|o| o.id != t.id && o.enabled) {
+            let l = if o.mode == "direct" { &o.exit } else { &o.entry };
+            if o.kind == "awg" {
+                if o.entry == *sid || o.exit == *sid {
+                    used.insert(o.awg.port, o.name.clone());
+                }
+                if o.awg.wrap && o.entry == *sid {
+                    used.insert(o.awg.wrap_port, o.name.clone());
+                }
+                if o.awg.wrap && l == sid && (o.transport == "quic" || o.transport == "kcp") {
+                    used.insert(o.port, o.name.clone());
+                }
+            } else {
+                if l == sid && (o.transport == "quic" || o.transport == "kcp") {
+                    used.insert(o.port, o.name.clone());
+                }
+                if o.entry == *sid {
+                    for (a, _) in parse_ports(&o.udp) {
+                        used.insert(a, o.name.clone());
+                    }
+                }
+            }
+        }
+        let mut mine = vec![t.awg.port];
+        if t.awg.wrap && *sid == t.entry {
+            mine.push(t.awg.wrap_port);
+        }
+        for p in mine {
+            if let Some(n) = used.get(&p) {
+                return Err(format!("UDP port {} is already used by the tunnel \"{}\"", p, n));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// "2.7.12" < "2.8.0"
+fn ver_lt(a: &str, b: &str) -> bool {
+    let p = |v: &str| -> Vec<u32> { v.trim_start_matches('v').split('.').map(|x| x.parse().unwrap_or(0)).collect() };
+    p(a) < p(b)
+}
+
+async fn awg_conf(State(app): St, h: HeaderMap, Path((id, side)): Path<(String, String)>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let Some(t) = tunnels(&app).into_iter().find(|t| t.id == id && t.kind == "awg") else { return err(StatusCode::NOT_FOUND, "tunnel not found") };
+    let role = if side == "exit" { "exit" } else { "entry" };
+    let body = awg::render(&awg_spec(&app, &t, role));
+    Json(json!({ "conf": body, "side": role, "file": format!("{}-{}.conf", awg::iface_name(&t.id), role) })).into_response()
 }
 
 // ------------------------------------------------------------------ smart tunnel (test every transport)
@@ -546,6 +792,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/tunnels/servers", post(server_add))
         .route("/api/tunnels/servers/:id", delete(server_del).put(server_edit))
         .route("/api/tunnels/:id", delete(tunnel_del))
+        .route("/api/tunnels/:id/awgconf/:side", get(awg_conf))
         .route("/api/tunnels/:id/:action", post(tunnel_action))
         .route("/tunnel/agent", post(agent_report))
         .route("/tunnel/binary", post(agent_binary))
@@ -591,6 +838,17 @@ async fn list(State(app): St, h: HeaderMap) -> Response {
             "down"
         };
         let mut v = serde_json::to_value(&tu).unwrap_or(Value::Null);
+        if tu.kind == "awg" {
+            for k in ["entry_priv", "exit_priv", "psk"] {
+                v["awg"][k] = json!("");
+            }
+            v["awg"]["entry_ip"] = json!(tu.awg.entry_ip());
+            v["awg"]["exit_ip"] = json!(tu.awg.exit_ip());
+            let wid = format!("{}~w", tu.id);
+            let w = |sid: &str| seen.get(sid).and_then(|x| x.status.iter().find(|s| s.id == wid).cloned());
+            v["wrap_entry"] = status_json(w(&tu.entry).as_ref());
+            v["wrap_exit"] = status_json(w(&tu.exit).as_ref());
+        }
         v["state"] = json!(state);
         v["entry_status"] = status_json(es.as_ref());
         v["exit_status"] = status_json(xs.as_ref());
@@ -700,6 +958,14 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
             t.path = "/".into();
         }
     }
+    if b.get("kind").is_some() {
+        t.kind = if s("kind") == "awg" { "awg".into() } else { String::new() };
+    }
+    if t.kind == "awg" {
+        if let Err(e) = awg_apply_body(&list, &mut t, &b["awg"]) {
+            return err(StatusCode::BAD_REQUEST, &e);
+        }
+    }
     // checks
     let known: Vec<String> = std::iter::once("local".to_string()).chain(servers(&app).into_iter().map(|s| s.id)).collect();
     if !known.contains(&t.entry) || !known.contains(&t.exit) {
@@ -707,6 +973,20 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     if t.entry == t.exit {
         return err(StatusCode::BAD_REQUEST, "the entry and the exit must be two different servers");
+    }
+    if t.kind == "awg" {
+        if let Err(e) = awg_checks(&app, &list, &t) {
+            return err(StatusCode::CONFLICT, &e);
+        }
+        if !t.awg.wrap {
+            if let Some(x) = list.iter_mut().find(|x| x.id == t.id) {
+                *x = t.clone();
+            } else {
+                list.push(t.clone());
+            }
+            save_tunnels(&app, &list);
+            return Json(json!({ "ok": true, "id": t.id })).into_response();
+        }
     }
     if t.port == 0 {
         return err(StatusCode::BAD_REQUEST, "the tunnel port is required");
@@ -728,7 +1008,7 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
             return err(StatusCode::BAD_REQUEST, if my_udp_tr { "the tunnel port is also in the forwarded UDP ports" } else { "the tunnel port is also in the forwarded TCP ports" });
         }
     }
-    for o in list.iter().filter(|o| o.id != t.id && o.enabled) {
+    for o in list.iter().filter(|o| o.id != t.id && o.enabled && !(o.kind == "awg" && !o.awg.wrap)) {
         let o_listener: String = if o.mode == "direct" { o.exit.clone() } else { o.entry.clone() };
         let o_udp_tr = is_udp_tr(&o.transport);
         let o_tcp: Vec<u16> = parse_ports(&o.tcp).into_iter().map(|p| p.0).collect();
@@ -790,7 +1070,24 @@ async fn tunnel_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(S
         "enable" => t.enabled = true,
         "disable" => t.enabled = false,
         // a new token makes both sides drop their links and make new ones
-        "restart" | "rekey" => t.token = rand_token(40),
+        "restart" | "rekey" => {
+            t.token = rand_token(40);
+            // a new pre-shared key makes both ends bring the AmneziaWG interface down and up again
+            if t.kind == "awg" {
+                t.awg.psk = awg::gen_psk();
+            }
+        }
+        // AmneziaWG: new obfuscation numbers / new keys, sent to both sides at once
+        "awg-params" if t.kind == "awg" => t.awg.params = awg::gen_params(&t.awg.profile),
+        "awg-keys" if t.kind == "awg" => {
+            let (ep, eb) = awg::gen_keypair();
+            let (xp, xb) = awg::gen_keypair();
+            t.awg.entry_priv = ep;
+            t.awg.entry_pub = eb;
+            t.awg.exit_priv = xp;
+            t.awg.exit_pub = xb;
+            t.awg.psk = awg::gen_psk();
+        }
         _ => return err(StatusCode::BAD_REQUEST, "unknown action"),
     }
     save_tunnels(&app, &list);

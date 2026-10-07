@@ -328,3 +328,79 @@ fn obfs_roundtrip() {
         assert!(super::obfs::test_unwrap(&bad, &wrapped).map(|x| x == data).unwrap_or(false) == false);
     }
 }
+
+
+// ---------------------------------------------------------------- AmneziaWG tunnel
+
+#[test]
+fn awg_params_are_valid() {
+    for profile in ["classic", "heavy", "mimic"] {
+        for _ in 0..200 {
+            let m = super::awg::gen_params(profile);
+            let g = |k: &str| m.get(k).unwrap().parse::<u32>().unwrap();
+            assert!(g("Jc") >= 4 && g("Jc") <= 12);
+            assert!(g("Jmin") < g("Jmax") && g("Jmax") <= 1280);
+            assert!(g("S1") != g("S2") && g("S1") + 56 != g("S2"));
+            let h = [g("H1"), g("H2"), g("H3"), g("H4")];
+            for (i, a) in h.iter().enumerate() {
+                assert!(*a >= 5);
+                for b in &h[i + 1..] {
+                    assert_ne!(a, b);
+                }
+            }
+            assert_eq!(m.contains_key("I1"), profile == "mimic");
+        }
+    }
+}
+
+#[test]
+fn awg_keys_are_base64_32_bytes() {
+    let (p, q) = super::awg::gen_keypair();
+    assert_eq!(p.len(), 44);
+    assert_eq!(q.len(), 44);
+    assert!(p.ends_with('=') && q.ends_with('='));
+    assert_ne!(p, q);
+    assert_eq!(super::awg::gen_psk().len(), 44);
+    assert_eq!(super::awg::b64(b"Man"), "TWFu");
+    assert_eq!(super::awg::b64(b"Ma"), "TWE=");
+}
+
+#[test]
+fn awg_cidrs_and_config() {
+    let c = super::awg::clean_cidrs(&["1.1.1.1, 8.8.0.0/16 bad 300.1.1.1".to_string()]);
+    assert_eq!(c, vec!["1.1.1.1/32".to_string(), "8.8.0.0/16".to_string()]);
+    let mut s = super::awg::AwgSpec {
+        tid: "t".into(),
+        iface: "kawgtest".into(),
+        role: "entry".into(),
+        private: "PRIV".into(),
+        peer_pub: "PUB".into(),
+        psk: "PSK".into(),
+        address: "10.88.1.1/30".into(),
+        peer_ip: "10.88.1.2".into(),
+        listen: 51900,
+        endpoint: "203.0.113.5:51900".into(),
+        keepalive: 25,
+        mtu: 1380,
+        routes: vec!["1.1.1.1/32".into()],
+        fwd_tcp: vec!["8443:443".into()],
+        ..Default::default()
+    };
+    s.params = super::awg::gen_params("classic");
+    let t = super::awg::render(&s);
+    assert!(t.contains("Table = off"));
+    assert!(t.contains("Endpoint = 203.0.113.5:51900"));
+    assert!(t.contains("AllowedIPs = 10.88.1.2/32, 1.1.1.1/32"));
+    assert!(t.contains("--dport 8443 -j DNAT --to-destination 10.88.1.2:443"));
+    assert!(t.contains("Jc = "));
+    s.role = "exit".into();
+    s.address = "10.88.1.2/30".into();
+    s.peer_ip = "10.88.1.1".into();
+    s.endpoint.clear();
+    s.nat_exit = true;
+    s.lockdown = true;
+    let t = super::awg::render(&s);
+    assert!(t.contains("-s 10.88.1.0/30 ! -o %i -j MASQUERADE"));
+    assert!(t.contains("--dport 51900 ! -i lo -j DROP"));
+    assert!(!t.contains("Endpoint"));
+}

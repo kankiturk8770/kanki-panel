@@ -100,3 +100,7 @@ kanki-panel version
 ## Notes
 - The panel domain must point **directly** (no Cloudflare proxy) to the server; port 80 must be free while getting SSL.
 - WireGuard/AmneziaWG can't tell devices apart, so the connection limit is enforced for Hysteria2; WG/AWG show live usage.
+
+
+## AmneziaWG tunnel (v2.8.0)
+A layer-3 AmneziaWG link between two servers, managed from Tunnels > + Tunnel > AmneziaWG: shared keys and obfuscation numbers made by the panel, optional hiding inside WS / WSS / CDN / QUIC / KCP / TCP Mux, exit NAT, source/destination routing and port forwarding. See `docs/AWG-TUNNEL.md`.

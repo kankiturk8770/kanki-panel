@@ -16,6 +16,20 @@ const CACHE: &str = "/var/lib/kanki/tunnels.json";
 pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
     let mut want = vec![];
     for s in specs {
+        if let Some(a) = &s.awg {
+            if a.open_udp > 0 {
+                want.push(format!("{}/udp", a.open_udp));
+            }
+            if a.role == "entry" {
+                for (p, _) in parse_ports(&a.fwd_tcp) {
+                    want.push(format!("{}/tcp", p));
+                }
+                for (p, _) in parse_ports(&a.fwd_udp) {
+                    want.push(format!("{}/udp", p));
+                }
+            }
+            continue;
+        }
         if s.listens() && s.port > 0 {
             // quic and kcp run over UDP
             let proto = if s.transport == "quic" || s.transport == "kcp" { "udp" } else { "tcp" };
