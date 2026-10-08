@@ -1,3 +1,7 @@
+# v2.8.5 — New tunnel map animation
+- The tunnel map (Tunnels page and the dashboard card) is now drawn on a canvas and keeps running between refreshes. Each connected tunnel is a glowing fibre: packets leave the entry plain, pass a lock in the middle and arrive encrypted in the tunnel colour, return packets flow back, the exit shows arrival ripples. More traffic = more packets, higher ping = slower packets. A partial tunnel flickers, a down tunnel is a red dashed line with a broken spark. Servers have a breathing halo, a turning orbit and a small satellite. Works in both themes and respects "reduce motion".
+- Checked: every transport (TCP Mux, TCP, WebSocket, WSS, QUIC, KCP, CDN; direct and reverse) passes the real end-to-end tests on GitHub Actions.
+
 # v2.8.4 — New panel look, Settings rebuilt
 - **New look:** the side menu is grouped (Overview · Users & sales · Network · System) with the version / update status and logout at the bottom; a top bar shows where you are (panel › group › page), a FA/EN switch, theme, update and the signed-in admin. Every page header gets its page icon. Calmer cards, inputs with a focus ring, dotted background. Light theme and phones included.
 - **Settings rebuilt** into seven sections, each with its own Save and Undo and a dot in the menu while it has unsaved changes:
