@@ -38,12 +38,14 @@ pub struct Spec {
     pub token: String,
     /// parallel links (tcpmux / ws / wss)
     pub conns: u32,
-    /// TLS server name (wss / quic / cdn). For `cdn` it may list several names, comma separated.
+    /// SNI spoof: the server name written in the TLS hello (wss / quic / cdn). It may list several
+    /// names, comma separated: every link starts on a different one and a failed link moves on.
+    /// (`ws` has no TLS: there this is only the HTTP Host header when `host` is empty.)
     pub sni: String,
-    /// `cdn`: the HTTP Host header (the domain set up on the CDN); empty = same as the SNI
+    /// HTTP Host header of the WebSocket request (ws / wss / cdn); empty = same as the SNI
     pub host: String,
     pub path: String,
-    /// `cdn`: send the TLS ClientHello in tiny TCP segments (defeats SNI filters that do not reassemble)
+    /// wss / cdn: send the TLS ClientHello in tiny TCP segments (defeats SNI filters that do not reassemble)
     pub frag: bool,
     /// forwarded ports: "443" or "8443:443" (port on the entry : port on the exit)
     pub tcp: Vec<String>,
@@ -313,9 +315,10 @@ fn split_list(s: &str) -> Vec<String> {
 async fn dial_loop(spec: Spec, state: Arc<State>, n: u32) {
     // links start a little apart so they do not all hit the other side at once
     tokio::time::sleep(Duration::from_millis(150 * n as u64)).await;
-    // several edge addresses / TLS names (cdn): every link starts on a different one, and a link
-    // that fails moves to the next combination. A link that worked keeps its address.
-    let (remotes, snis) = if spec.transport == "cdn" { (split_list(&spec.remote), split_list(&spec.sni)) } else { (vec![], vec![]) };
+    // several edge addresses (cdn) and TLS names (wss / quic / cdn): every link starts on a different
+    // one, and a link that fails moves to the next combination. A link that worked keeps its address.
+    let remotes = if spec.transport == "cdn" { split_list(&spec.remote) } else { vec![] };
+    let snis = if matches!(spec.transport.as_str(), "cdn" | "wss" | "quic") { split_list(&spec.sni) } else { vec![] };
     let mut attempt = n as usize;
     let mut wait = 1u64;
     loop {

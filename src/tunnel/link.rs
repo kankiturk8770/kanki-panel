@@ -297,7 +297,8 @@ impl AsyncWrite for FragIo {
 const FRAG_BYTES: usize = 220;
 
 /// Dials the other side over the chosen transport and returns the raw connection.
-/// `remote` = "host:port"; `sni`, `host`, `path` are used by ws / wss / cdn.
+/// `remote` = "host:port"; `sni` (TLS name: wss / quic / cdn), `host` (HTTP Host: ws / wss / cdn)
+/// and `path` (ws / wss / cdn). `frag` splits the TLS hello (wss / cdn).
 ///
 /// `cdn` is for networks that only let traffic to whitelisted addresses through (a CDN edge such
 /// as ArvanCloud): TCP goes to `remote` (the edge address), the TLS handshake says `sni`, and the
@@ -316,23 +317,31 @@ pub async fn dial(transport: &str, remote: &str, sni: &str, host_header: &str, p
     let host = remote.rsplit_once(':').map(|x| x.0).unwrap_or(remote).trim_matches(|c| c == '[' || c == ']').to_string();
     let sni = if sni.is_empty() { host.clone() } else { sni.to_string() };
     let path = if path.is_empty() { "/".to_string() } else if path.starts_with('/') { path.to_string() } else { format!("/{}", path) };
+    // HTTP Host of the WebSocket request: the one written, else the SNI (else the address)
+    let req_host = if host_header.trim().is_empty() { sni.clone() } else { host_header.trim().to_string() };
+    // a list typed into the name field (ws keeps only the first one)
+    let req_host = req_host.split(|c: char| c == ',' || c == ';' || c.is_whitespace()).find(|x| !x.is_empty()).unwrap_or(&host).to_string();
     match transport {
         "ws" => {
             let io: BoxIo = Box::new(tcp);
-            let url = format!("ws://{}{}", sni, path);
+            let url = format!("ws://{}{}", req_host, path);
             let (ws, _) = tokio_tungstenite::client_async(url.as_str(), io).await?;
             Ok(Raw::Ws(ws))
         }
         "wss" => {
-            let tls = tls_connector().connect(server_name(&sni)?, tcp).await?;
-            let io: BoxIo = Box::new(tls);
-            let url = format!("ws://{}{}", sni, path);
+            // SNI spoof: the TLS hello carries `sni`; with `frag` it leaves in tiny pieces
+            let name = server_name(&sni)?;
+            let io: BoxIo = if frag {
+                Box::new(tls_connector().connect(name, FragIo::new(tcp, FRAG_BYTES)).await?)
+            } else {
+                Box::new(tls_connector().connect(name, tcp).await?)
+            };
+            let url = format!("ws://{}{}", req_host, path);
             let (ws, _) = tokio_tungstenite::client_async(url.as_str(), io).await?;
             Ok(Raw::Ws(ws))
         }
         "cdn" => {
             // the Host header is the CDN domain; when it is not set, it follows the SNI
-            let req_host = if host_header.is_empty() { sni.clone() } else { host_header.to_string() };
             let name = server_name(&sni)?;
             let io: BoxIo = if frag {
                 Box::new(tls_connector().connect(name, FragIo::new(tcp, FRAG_BYTES)).await?)

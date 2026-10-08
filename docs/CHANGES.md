@@ -1,3 +1,14 @@
+# v2.8.6 — Tunnel form tidied, SNI spoof completed
+- **New tunnel form** in six numbered sections: 1 Route (entry ⇄ exit, who connects) · 2 Tunnel type · 3 Transport (grouped: looks like web traffic / encrypted TCP / over UDP / whitelist, each with TLS·SNI·UDP·HTTP tags) · 4 Disguise · 5 Ports · 6 More. Works on phones.
+- **Disguise only shows what the chosen transport can use.** SNI spoof is not a separate protocol: it is the site name shown in the TLS hello, so it exists only for WSS, QUIC and CDN. WS has no TLS (Host header and path only). TCP, TCP Mux and KCP are encrypted from the first byte and have nothing to disguise; the form says so instead of showing empty boxes.
+- **SNI spoof completed in the engine:**
+  - several SNI names (comma separated) for WSS and QUIC too (before: CDN only). Every link takes another name and a link that fails moves to the next one.
+  - "Split the TLS hello into tiny pieces" now also works for WSS (before: CDN only).
+  - a separate HTTP Host header for WS and WSS (empty = the SNI).
+  - quick picks for common names (google, cloudflare, bing, microsoft, apple, jsdelivr).
+- New end-to-end tests: WSS with several SNI names + Host + split hello (reverse and direct), QUIC with several SNI names, WS with a Host header.
+- After updating the panel press **Update all** so the tunnel agents get the new engine.
+
 # v2.8.5 — New tunnel map animation
 - The tunnel map (Tunnels page and the dashboard card) is now drawn on a canvas and keeps running between refreshes. Each connected tunnel is a glowing fibre: packets leave the entry plain, pass a lock in the middle and arrive encrypted in the tunnel colour, return packets flow back, the exit shows arrival ripples. More traffic = more packets, higher ping = slower packets. A partial tunnel flickers, a down tunnel is a red dashed line with a broken spark. Servers have a breathing halo, a turning orbit and a small satellite. Works in both themes and respects "reduce motion".
 - Checked: every transport (TCP Mux, TCP, WebSocket, WSS, QUIC, KCP, CDN; direct and reverse) passes the real end-to-end tests on GitHub Actions.

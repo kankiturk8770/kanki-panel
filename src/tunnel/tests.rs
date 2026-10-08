@@ -111,9 +111,16 @@ async fn check_udp(port: u16) {
 }
 
 async fn run_case(transport: &str, mode: &str, base: u16) {
+    run_case_with(transport, mode, base, |_| {}).await;
+}
+
+/// Same as `run_case`, with a change to both sides (for example an SNI spoof).
+async fn run_case_with(transport: &str, mode: &str, base: u16, tweak: impl Fn(&mut Spec)) {
     tcp_echo(base + 2).await;
     udp_echo(base + 4).await;
-    let (es, xs) = pair(transport, mode, base, "token-for-tests-0123456789");
+    let (mut es, mut xs) = pair(transport, mode, base, "token-for-tests-0123456789");
+    tweak(&mut es);
+    tweak(&mut xs);
     let entry = Running::start(es);
     let exit = Running::start(xs);
     let want = if transport == "tcp" { 1 } else { 3 };
@@ -162,6 +169,36 @@ async fn tunnel_tcpmux_direct() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_wss_direct() {
     run_case("wss", "direct", 41500).await;
+}
+
+// SNI spoof: several names (each link takes another), Host header and a split TLS hello
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_wss_spoof_reverse() {
+    run_case_with("wss", "reverse", 43000, |s| {
+        s.sni = "www.google.com, www.bing.com".into();
+        s.host = "cdn.example.org".into();
+        s.frag = true;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_wss_spoof_direct() {
+    run_case_with("wss", "direct", 43100, |s| {
+        s.sni = "www.microsoft.com".into();
+        s.frag = true;
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_quic_spoof_reverse() {
+    run_case_with("quic", "reverse", 43200, |s| s.sni = "www.cloudflare.com, www.apple.com".into()).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_ws_host_reverse() {
+    run_case_with("ws", "reverse", 43300, |s| s.host = "www.example.com".into()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
