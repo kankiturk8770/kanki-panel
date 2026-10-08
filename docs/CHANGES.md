@@ -1,4 +1,5 @@
 # v2.8.1 — Tunnel servers menu, new tunnel animation, plan categories
+- **Bot:** the free trial can be taken only once per Telegram user (admins included). It is claimed before the account is created, so double taps cannot make two, and an existing trial account also counts.
 - **Bot:** plan menus no longer repeat the plan list in the text (only the category name and one short line above the buttons); the "my services" menu text is shorter. New admin button **📌 Pin for everyone**: pin a message in your chat with the bot, tap the button, and it is copied and pinned in every user chat.
 - **Smart channel:** six new post types (Story, A day with us, Question for the audience, Q&A, Short punch, Before and after), ~100 new lines, and posts that mix scene + bridge + benefit + punchline + CTA at random, adapting to the time of day and weekends. Existing channels get the new types enabled automatically once.
 - **Bot:** when plans have categories, the bot first shows the categories as buttons; tapping one shows only that category's plans (with a back button to the categories). Works for new purchases and renewals.

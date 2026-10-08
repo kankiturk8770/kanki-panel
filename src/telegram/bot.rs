@@ -802,18 +802,27 @@ impl Bot {
         if !self.db().on("trial_on") {
             return self.edit(chat, mid, "تست رایگان فعلاً غیرفعال است.", back).await;
         }
+        // one free trial per Telegram user, for everyone (admins too): a flag in bot_users, or an existing trial account
         let used: i64 = self.db().with(|c| c.query_row("SELECT trial_used FROM bot_users WHERE tg_id=?1", [uid], |r| r.get(0)).unwrap_or(0));
-        if used == 1 && !self.admin(uid) {
-            return self.edit(chat, mid, "شما قبلاً از تست رایگان استفاده کرده‌اید 🙂", back).await;
+        let had_trial = self.db().users_of_tg(uid).iter().any(|u| u.notes == "trial");
+        let again = "شما قبلاً تست رایگان خودتون رو گرفتید 🙂\nبرای ادامه، از «خرید اشتراک» استفاده کنید 🛒";
+        if used == 1 || had_trial {
+            return self.edit(chat, mid, again, back).await;
+        }
+        // claim it first so a double tap cannot create two accounts
+        let claimed = self.db().exec("UPDATE bot_users SET trial_used=1 WHERE tg_id=?1 AND COALESCE(trial_used,0)=0", &[&uid]).unwrap_or(0);
+        if claimed == 0 {
+            return self.edit(chat, mid, again, back).await;
         }
         let gb: f64 = self.db().get("trial_gb").parse().unwrap_or(1.0);
         let days: i64 = self.db().get("trial_days").parse().unwrap_or(1);
         match self.create_account(uid, gb, days, 1, "trial") {
             Ok(u) => {
-                let _ = self.db().exec("UPDATE bot_users SET trial_used=1 WHERE tg_id=?1", &[&uid]);
                 self.edit(chat, mid, &format!("🎁 <b>اکانت تست شما آماده است</b>\n\n{}", self.account_text(&u)), back).await;
             }
             Err(e) => {
+                // nothing was created: give the trial back
+                let _ = self.db().exec("UPDATE bot_users SET trial_used=0 WHERE tg_id=?1", &[&uid]);
                 self.notify_admins(&format!("⚠️ خطای ساخت تست: <code>{}</code>", esc(&e)), None, None).await;
                 self.edit(chat, mid, "⚠️ ساخت اکانت تست ناموفق بود.", back).await;
             }
