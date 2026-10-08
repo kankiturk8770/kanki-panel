@@ -17,6 +17,7 @@ enum Wait {
     Make,
     Extend(i64),
     Broadcast,
+    BroadcastPin,
     DiscountAdd,
     DiscountUse,
 }
@@ -123,6 +124,34 @@ impl Bot {
     }
 
     // ============================================================ Bot API
+    /// Copies one message to every bot user (optionally pinning it in each chat); returns how many got it.
+    async fn broadcast(&self, from: i64, msg_id: i64, pin: bool) -> i64 {
+        let db = &self.app.db;
+        let ids: Vec<i64> = db.with(|c| {
+            let mut s = c.prepare("SELECT tg_id FROM bot_users WHERE blocked=0").unwrap();
+            let v: Vec<i64> = s.query_map([], |r| r.get(0)).unwrap().filter_map(|x| x.ok()).collect();
+            v
+        });
+        let mut ok = 0;
+        for t in ids {
+            match self.call("copyMessage", json!({"chat_id": t, "from_chat_id": from, "message_id": msg_id})).await {
+                Some(res) => {
+                    ok += 1;
+                    if pin {
+                        if let Some(nid) = res["message_id"].as_i64() {
+                            let _ = self.call("pinChatMessage", json!({"chat_id": t, "message_id": nid, "disable_notification": true})).await;
+                        }
+                    }
+                }
+                None => {
+                    let _ = db.exec("UPDATE bot_users SET blocked=1 WHERE tg_id=?1", &[&t]);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+        }
+        ok
+    }
+
     async fn call(&self, m: &str, body: Value) -> Option<Value> {
         let r = self.http.post(format!("https://api.telegram.org/bot{}/{}", self.token, m))
             .json(&body).send().await.ok()?;
@@ -429,7 +458,7 @@ impl Bot {
                 let pre = if d == "my" { "acc" } else { "rnw" };
                 let mut rows: Kb = accs.iter().map(|u| vec![b(&format!("{} {}", if u.active() { "🟢" } else { "🔴" }, u.username), &format!("{}:{}", pre, u.id))]).collect();
                 rows.push(back("home"));
-                return self.edit(chat, mid, "سرویس موردنظر را انتخاب کنید:", Some(ik(rows))).await;
+                return self.edit(chat, mid, if d == "my" { "📊 سرویس خودتون رو از پایین انتخاب کنید 👇" } else { "🔁 سرویسی که می‌خواید تمدید کنید رو از پایین انتخاب کنید 👇" }, Some(ik(rows))).await;
             }
             "ref" => {
                 let me = self.call("getMe", json!({})).await.and_then(|v| v["username"].as_str().map(|s| s.to_string())).unwrap_or_default();
@@ -530,38 +559,31 @@ impl Bot {
         cats.sort();
         let has_other = list.iter().any(|p| p.category.is_empty());
         let mode = if pattern == "pl" { "b".to_string() } else { format!("r{}", pattern.rsplit(':').next().unwrap_or("0")) };
-        let mut title = String::from("🛒 <b>یک پلن انتخاب کنید:</b>\n");
+        let mut title = String::from("سلام 👋\nپلن خودتون رو از پایین انتخاب کنید 👇");
         let mut back_to = "home".to_string();
         if !cats.is_empty() {
             if sel == "m" {
                 let mut rows: Kb = cats.iter().enumerate().map(|(i, c)| vec![b(&format!("📂 {}", c.1), &format!("pcat:{}:{}", mode, i))]).collect();
                 if has_other { rows.push(vec![b("📦 سایر پلن‌ها", &format!("pcat:{}:o", mode))]); }
                 rows.push(vec![b("⬅️ بازگشت", "home")]);
-                return self.edit(chat, mid, "🛒 <b>یک دسته‌بندی انتخاب کنید:</b>", Some(ik(rows))).await;
+                return self.edit(chat, mid, "سلام 👋\nدسته‌بندی موردنظرتون رو از پایین انتخاب کنید 👇", Some(ik(rows))).await;
             }
             let want: String = if sel == "o" {
                 String::new()
             } else {
                 sel.parse::<usize>().ok().and_then(|i| cats.get(i)).map(|c| c.1.clone()).unwrap_or_default()
             };
-            if !want.is_empty() { title = format!("📂 <b>{}</b>\n", esc(&want)); }
+            title = if want.is_empty() { "📦 <b>سایر پلن‌ها</b>\nپلن خودتون رو از پایین انتخاب کنید 👇".to_string() } else { format!("📂 <b>{}</b>\nپلن خودتون رو از پایین انتخاب کنید 👇", esc(&want)) };
             list.retain(|p| p.category == want);
             back_to = format!("pcat:{}:m", mode);
         }
         // ordered by duration, then number of users, then price; the text groups them by duration
         list.sort_by(|x, y| (x.days, x.conns, x.toman).cmp(&(y.days, y.conns, y.toman)));
         let mut rows: Kb = vec![];
-        let mut txt = title;
-        let mut last_days: i64 = -1;
         for p in list.iter() {
             let price = if p.toman > 0 { toman(p.toman) } else { format!("{}$", p.usd) };
             let dur = if p.days > 0 && p.days % 30 == 0 { format!("{} ماهه", p.days / 30) } else { format!("{} روزه", p.days) };
             let vol = if p.gb > 0.0 { format!("{}GB", p.gb) } else { "نامحدود".to_string() };
-            if p.days != last_days {
-                txt.push_str(&format!("\n📅 <b>{}</b>\n", dur));
-                last_days = p.days;
-            }
-            txt.push_str(&format!("• {} — 👤 {} کاربر — {} — {}\n", esc(&p.name), p.conns, vol, price));
             let data = if pattern.contains("{}") { pattern.replace("{}", &p.id.to_string()) } else { format!("{}:{}", pattern, p.id) };
             rows.push(vec![b(&format!("📅 {} · 👤 {} · {} · {}", dur, p.conns, vol, price), &data)]);
         }
@@ -569,7 +591,7 @@ impl Bot {
             return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b("⬅️ بازگشت", &back_to)]]))).await;
         }
         rows.push(vec![b("⬅️ بازگشت", &back_to)]);
-        self.edit(chat, mid, &txt, Some(ik(rows))).await;
+        self.edit(chat, mid, &title, Some(ik(rows))).await;
     }
 
     async fn show_plan(&self, chat: i64, mid: Option<i64>, uid: i64, pid: i64) {
@@ -806,7 +828,8 @@ impl Bot {
             vec![b("📦 پلن‌ها", "a:plans"), b("🎁 تست رایگان", "a:trial")],
             vec![b("💳 پرداخت‌ها", "a:pay"), b("🖥 نودها", "a:nodes")],
             vec![b("🎟 کدهای تخفیف", "a:disc"), b("👥 دعوت و هدیه", "a:ref")],
-            vec![b("📣 پیام همگانی", "a:bc"), b("💾 بکاپ الان", "a:backup")],
+            vec![b("📣 پیام همگانی", "a:bc"), b("📌 سنجاق برای همه", "a:bcp")],
+            vec![b("💾 بکاپ الان", "a:backup")],
             vec![b("📢 کانال هوشمند", "a:ch"), b("⚙️ تنظیمات عمومی", "a:gen")],
             vec![b("⬅️ بازگشت", "home")],
         ])
@@ -903,6 +926,19 @@ impl Bot {
             "a:ref" => { self.edit(chat, mid, &format!("👥 <b>هدیه‌ی دعوت</b>\nبه ازای اولین خرید هر دعوت‌شده: {} GB و {} روز", db.get("ref_gb"), db.get("ref_days")),
                 Some(ik(vec![vec![b("✏️ گیگ هدیه", "set:ref_gb"), b("✏️ روز هدیه", "set:ref_days")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; return true; }
             "a:bc" => { set_wait(Wait::Broadcast); { self.edit(chat, mid, "📣 پیام را بفرستید (متن، عکس، ویدیو…):", back).await; return true; } }
+            "a:bcp" => {
+                // use the message the admin pinned in this chat; otherwise ask for one
+                let pinned = self.call("getChat", json!({"chat_id": chat})).await.and_then(|c| c["pinned_message"]["message_id"].as_i64());
+                if let Some(pm) = pinned {
+                    self.edit(chat, mid, "📌 در حال ارسال و سنجاق برای همه…", None).await;
+                    let n = self.broadcast(chat, pm, true).await;
+                    self.send(chat, &format!("📌 برای {} کاربر ارسال و سنجاق شد.", n), Some(self.adm_kb())).await;
+                    return true;
+                }
+                set_wait(Wait::BroadcastPin);
+                self.edit(chat, mid, "📌 پیامی که می‌خواید برای همه سنجاق بشه رو بفرستید.\n(یا اول همون پیام رو همین‌جا تو چت ربات سنجاق کنید و دوباره این دکمه رو بزنید.)", back).await;
+                return true;
+            }
             "a:backup" => {
                 let pass = crate::backup::backup_pass(&self.app);
                 if let Ok((bytes, name)) = make_archive(&self.app, &pass) {
@@ -1092,22 +1128,14 @@ impl Bot {
                 self.send(chat, if r.is_ok() { "✅ کد تخفیف ساخته شد" } else { "⚠️ خطا" }, kb).await;
             }
             Wait::Broadcast => {
-                let ids: Vec<i64> = db.with(|c| {
-                    let mut s = c.prepare("SELECT tg_id FROM bot_users WHERE blocked=0").unwrap();
-                    let v: Vec<i64> = s.query_map([], |r| r.get(0)).unwrap().filter_map(|x| x.ok()).collect();
-                    v
-                });
                 let (from, msg_id) = (m["chat"]["id"].as_i64().unwrap_or(chat), m["message_id"].as_i64().unwrap_or(0));
-                let mut ok = 0;
-                for t in ids {
-                    if self.call("copyMessage", json!({"chat_id": t, "from_chat_id": from, "message_id": msg_id})).await.is_some() {
-                        ok += 1;
-                    } else {
-                        let _ = db.exec("UPDATE bot_users SET blocked=1 WHERE tg_id=?1", &[&t]);
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                }
-                self.send(chat, &format!("📣 برای {} کاربر ارسال شد.", ok), kb).await;
+                let ok = self.broadcast(from, msg_id, false).await;
+                self.send(chat, &format!("{} برای {} کاربر ارسال شد.", "📣", ok), kb).await;
+            }
+            Wait::BroadcastPin => {
+                let (from, msg_id) = (m["chat"]["id"].as_i64().unwrap_or(chat), m["message_id"].as_i64().unwrap_or(0));
+                let ok = self.broadcast(from, msg_id, true).await;
+                self.send(chat, &format!("{} برای {} کاربر ارسال شد.", "📌", ok), kb).await;
             }
             _ => {}
         }
