@@ -1,0 +1,85 @@
+name: diag-tunnel-tests
+on:
+  push:
+    branches: [diag-tunnel-tests]
+jobs:
+  t:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: compile tests
+        run: cargo test --no-run
+      - name: tunnel_wss_spoof_reverse
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_wss_spoof_reverse --nocapture
+      - name: tunnel_wss_spoof_direct
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_wss_spoof_direct --nocapture
+      - name: tunnel_quic_spoof_reverse
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_quic_spoof_reverse --nocapture
+      - name: tunnel_ws_host_reverse
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_ws_host_reverse --nocapture
+      - name: tunnel_tcpmux_reverse
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_tcpmux_reverse --nocapture
+      - name: tunnel_tcp_reverse
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_tcp_reverse --nocapture
+      - name: tunnel_ws_reverse
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_ws_reverse --nocapture
+      - name: tunnel_wss_reverse
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_wss_reverse --nocapture
+      - name: tunnel_tcpmux_direct
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_tcpmux_direct --nocapture
+      - name: tunnel_wss_direct
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_wss_direct --nocapture
+      - name: tunnel_quic_reverse
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_quic_reverse --nocapture
+      - name: tunnel_kcp_reverse
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_kcp_reverse --nocapture
+      - name: tunnel_cdn_direct
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_cdn_direct --nocapture
+      - name: tunnel_wrong_token_is_refused
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_wrong_token_is_refused --nocapture
+      - name: tunnel_reconnects_after_exit_restart
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::tunnel_reconnects_after_exit_restart --nocapture
+      - name: probe_tcpmux
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::probe_tcpmux --nocapture
+      - name: probe_quic
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::probe_quic --nocapture
+      - name: probe_kcp_obfs
+        if: always()
+        timeout-minutes: 4
+        run: cargo test --quiet -- --exact tunnel::tests::probe_kcp_obfs --nocapture
