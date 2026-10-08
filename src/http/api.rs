@@ -522,7 +522,16 @@ pub const SETTING_KEYS: &[&str] = &[
     "wallet_on", "wallet_text", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
     "welcome", "ref_gb", "ref_days", "warn_on", "backup_on", "channel",
     "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "conn_limit_on", "tg_alerts", "logo", "price_rules",
+    // v2.8.4: ready values of the "New user" form
+    "def_gb", "def_days", "def_conns",
 ];
+
+/// "owner/repo" with only the characters GitHub allows
+fn valid_repo(r: &str) -> bool {
+    let mut it = r.split('/');
+    let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+    matches!((it.next(), it.next(), it.next()), (Some(a), Some(b), None) if ok(a) && ok(b))
+}
 
 async fn settings_get(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "settings");
@@ -534,12 +543,28 @@ async fn settings_get(State(app): St, h: HeaderMap) -> Response {
     m.insert("web_port".into(), json!(app.env.get("PANEL_PORT").cloned().unwrap_or_default()));
     m.insert("domain".into(), json!(app.env.get("DOMAIN").cloned().unwrap_or_default()));
     m.insert("https_port".into(), json!(app.env.get("HTTPS_PORT").cloned().unwrap_or_else(|| "443".into())));
+    // update source: /etc/kanki/repo, unless KANKI_REPO is set in the environment
+    m.insert("update_repo".into(), json!(crate::admin::repo()));
+    m.insert("repo_env".into(), json!(std::env::var("KANKI_REPO").map(|s| !s.is_empty()).unwrap_or(false)));
     Json(Value::Object(m)).into_response()
 }
 
 async fn settings_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "settings");
     if let Some(o) = b.as_object() {
+        if let Some(r) = o.get("update_repo").and_then(|v| v.as_str()) {
+            let r = r.trim().trim_start_matches("https://github.com/").trim_end_matches('/').trim_end_matches(".git");
+            if r.is_empty() {
+                let _ = std::fs::remove_file("/etc/kanki/repo");
+            } else if valid_repo(r) {
+                let _ = std::fs::create_dir_all("/etc/kanki");
+                if let Err(e) = std::fs::write("/etc/kanki/repo", format!("{}\n", r)) {
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, &format!("cannot write /etc/kanki/repo: {}", e));
+                }
+            } else {
+                return err(StatusCode::BAD_REQUEST, "update source must look like owner/repo");
+            }
+        }
         for (k, v) in o {
             if SETTING_KEYS.contains(&k.as_str()) {
                 let s = match v { Value::String(s) => s.clone(), Value::Bool(x) => if *x { "1".into() } else { "0".into() }, other => other.to_string() };

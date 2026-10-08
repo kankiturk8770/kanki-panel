@@ -585,6 +585,132 @@ b .ltr,.ltr b,b.ltr,strong.ltr{font-weight:700}
 .ncards .muted{font-size:11.5px}
 .ncards p.muted{margin:5px 0!important}
 .ncards .warnbox{margin:6px 0;padding:6px 8px;font-size:11.5px}
+
+/* =====================================================================
+   v2.8.4 — Kanki design: own layout and look (grouped sidebar, top bar,
+   calmer cards, settings with sections). Loaded last, so it wins.
+   ===================================================================== */
+:root{--r:14px;--r2:18px;--c1:#15110b;--c2:#110e09;--bg1:#090705;--bg2:#0c0a07;--in:rgba(255,255,255,.035);--ln:rgba(245,196,81,.13);--ln2:rgba(255,255,255,.07);--sbw:256px;
+ --sh:0 1px 0 rgba(255,255,255,.035) inset,0 18px 40px -22px rgba(0,0,0,.75)}
+body.light{--c1:#fbf6ec;--c2:#f5eedf;--bg1:#efe7d6;--bg2:#e9e0cc;--in:rgba(255,255,255,.6);--ln:rgba(140,100,30,.2);--ln2:rgba(90,60,10,.08);--sh:0 1px 0 rgba(255,255,255,.7) inset,0 14px 30px -20px rgba(90,60,10,.35)}
+body{background:var(--bg1);font-size:13.5px}
+body:before{background:radial-gradient(900px 520px at 100% -10%,color-mix(in srgb,var(--a) 13%,transparent),transparent 70%),radial-gradient(700px 500px at 0% 110%,color-mix(in srgb,var(--a) 6%,transparent),transparent 70%)}
+body:after{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;opacity:.5;background-image:radial-gradient(color-mix(in srgb,var(--a) 22%,transparent) .8px,transparent .8px);background-size:26px 26px;-webkit-mask-image:linear-gradient(#000,transparent 55%);mask-image:linear-gradient(#000,transparent 55%)}
+body.light:after{opacity:.35}
+/* cards */
+.card,.gc,.kpi,.stat,.uc2,.uchip,.mbox{background:linear-gradient(180deg,var(--c1),var(--c2));border:1px solid var(--ln);box-shadow:var(--sh)}
+.card{border-radius:var(--r2);padding:16px 18px;margin-bottom:14px}
+.card h3{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
+.card .sub{font-size:12px;line-height:1.7}
+body.light .card{box-shadow:var(--sh)}
+.box{border-color:var(--ln2);background:var(--in);border-radius:var(--r)}
+/* controls */
+input,select,textarea{background:var(--in);border:1px solid var(--ln2);border-radius:12px;padding:10px 12px;transition:border-color .15s,box-shadow .15s}
+input:focus,select:focus,textarea:focus{border-color:color-mix(in srgb,var(--a) 70%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--a) 16%,transparent)}
+input[readonly]{opacity:.75;cursor:default}
+label.f{font-size:12px;font-weight:600;color:var(--s);margin:10px 0 5px}
+.btn{border-radius:12px;padding:10px 18px;box-shadow:0 6px 18px -8px color-mix(in srgb,var(--a) 70%,transparent),inset 0 1px 0 rgba(255,255,255,.35)}
+.btn:hover:not(:disabled){box-shadow:0 8px 22px -8px color-mix(in srgb,var(--a) 85%,transparent),inset 0 1px 0 rgba(255,255,255,.45)}
+.b2{border-color:var(--ln2);background:var(--in)}
+.ib{background:var(--in);border-color:var(--ln2);border-radius:11px}
+/* ---- shell: sidebar ---- */
+nav.side{width:var(--sbw);padding:14px 12px 12px;display:flex;flex-direction:column;gap:2px;background:linear-gradient(180deg,var(--c1),var(--c2)),var(--bg1);border-inline-end:1px solid var(--ln2)}
+.sbrand{display:flex;align-items:center;gap:10px;padding:4px 6px 14px;margin-bottom:6px;border-bottom:1px solid var(--ln2)}
+.sbrand .logo{width:40px;height:40px}
+.sbrand b{display:block;font-size:14.5px;color:var(--t);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sbrand small{display:block;color:var(--s);font-size:11px}
+.sgrp{font-size:10.5px;font-weight:800;letter-spacing:.06em;color:color-mix(in srgb,var(--s) 80%,transparent);padding:12px 12px 5px;text-transform:uppercase}
+nav.side a{position:relative;padding:8px 10px;border-radius:11px;gap:10px;margin:0;font-weight:600;color:color-mix(in srgb,var(--t) 82%,transparent)}
+nav.side a .ni{width:30px;height:30px;border-radius:9px;background:transparent;border:0;color:var(--s)}
+nav.side a:hover{background:var(--in);color:var(--t)}
+nav.side a:hover .ni{color:var(--a)}
+nav.side a.on{background:color-mix(in srgb,var(--a) 12%,transparent);color:var(--t)}
+nav.side a.on .ni{background:linear-gradient(145deg,var(--al),var(--a),var(--ad));color:#1a1206;box-shadow:0 4px 14px -4px color-mix(in srgb,var(--a) 80%,transparent)}
+nav.side a.on:before{content:"";position:absolute;inset-block:9px;inset-inline-start:-12px;width:3px;border-radius:3px;background:var(--a);box-shadow:0 0 10px var(--a)}
+.sfoot{margin-top:auto;padding-top:10px;display:flex;flex-direction:column;gap:8px}
+.sver{display:flex;align-items:center;gap:9px;width:100%;padding:10px 11px;border-radius:12px;border:1px solid var(--ln2);background:var(--in);color:var(--t);font:inherit;cursor:pointer;text-align:start}
+.sver:hover{border-color:var(--a)}
+.sver b{display:block;font-size:12.5px}.sver small{display:block;color:var(--s);font-size:10.5px}
+.sver .dot{flex:none}
+nav.side a.lo2{color:var(--s)}
+nav.side a.lo2:hover{color:var(--bad);background:color-mix(in srgb,var(--bad) 8%,transparent)}
+nav.side a.lo2:hover .ni{color:var(--bad)}
+/* ---- shell: top bar ---- */
+header.top{gap:10px;padding:10px 16px;min-height:60px;background:color-mix(in srgb,var(--bg1) 78%,transparent);border-bottom:1px solid var(--ln2)}
+.tb-title{min-width:0;display:flex;flex-direction:column}
+.tb-title small{color:var(--s);font-size:11px;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.tb-title b{font-size:15.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tb-act{display:flex;align-items:center;gap:6px}
+.segl{display:inline-flex;padding:3px;border-radius:11px;border:1px solid var(--ln2);background:var(--in)}
+.segl button{border:0;background:transparent;color:var(--s);font:inherit;font-size:11.5px;font-weight:800;padding:5px 9px;border-radius:8px;cursor:pointer}
+.segl button.on{background:linear-gradient(var(--al),var(--a),var(--ad));color:#1a1206}
+.uchip2{display:inline-flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;border-radius:12px;border:1px solid var(--ln2);background:var(--in)}
+html[dir=rtl] .uchip2{padding:4px 4px 4px 10px}
+.uchip2 i{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-style:normal;font-weight:900;color:#1a1206;background:linear-gradient(145deg,var(--al),var(--a),var(--ad))}
+.uchip2 span{font-size:12px;font-weight:700;direction:ltr}
+#mlogo{display:none}
+@media(max-width:1099px){#mlogo{display:flex;width:34px;height:34px}.tb-title small{display:none}}
+@media(max-width:560px){.uchip2,.uv{display:none}header.top{padding:8px 10px}.tb-title b{font-size:14px}}
+@media(min-width:1100px){
+ nav.side{top:0;width:var(--sbw);z-index:9}
+ header.top{margin-inline-start:var(--sbw)}
+ main{margin-inline-start:var(--sbw);padding:20px 26px 70px;max-width:1360px}
+}
+/* ---- page header ---- */
+.ph{align-items:center;margin:2px 0 18px;padding-bottom:14px;border-bottom:1px solid var(--ln2)}
+.ph>div:first-child{display:flex;align-items:center;gap:12px}
+.ph h2{font-size:21px;font-weight:900;letter-spacing:-.01em}
+.ph p{font-size:12.5px;margin-top:3px}
+.phi{width:44px;height:44px;border-radius:13px;flex:none;display:grid;place-items:center;color:var(--a);background:color-mix(in srgb,var(--a) 10%,transparent);border:1px solid color-mix(in srgb,var(--a) 28%,transparent)}
+.ph .phx{display:block}
+/* ---- settings ---- */
+.stw{display:grid;grid-template-columns:230px minmax(0,1fr);gap:18px;align-items:start}
+.stn{position:sticky;top:78px;display:flex;flex-direction:column;gap:3px;padding:8px;border-radius:var(--r2);border:1px solid var(--ln);background:linear-gradient(180deg,var(--c1),var(--c2));box-shadow:var(--sh)}
+.stn button{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border:0;border-radius:11px;background:transparent;color:color-mix(in srgb,var(--t) 82%,transparent);font:inherit;font-weight:600;font-size:13px;cursor:pointer;text-align:start}
+.stn button span.si{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--s);flex:none}
+.stn button:hover{background:var(--in);color:var(--t)}
+.stn button.on{background:color-mix(in srgb,var(--a) 13%,transparent);color:var(--t)}
+.stn button.on span.si{color:#1a1206;background:linear-gradient(145deg,var(--al),var(--a),var(--ad))}
+.stn button em{margin-inline-start:auto;width:7px;height:7px;border-radius:50%;background:var(--warn);box-shadow:0 0 8px var(--warn);display:none}
+.stn button.dirty em{display:block}
+.sts{display:none}.sts.on{display:block;animation:stin .22s ease}
+@keyframes stin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.sth{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.sth .phi{width:40px;height:40px;border-radius:12px}
+.sth b{display:block;font-size:17px;font-weight:900}.sth small{display:block;color:var(--s);font-size:12px;margin-top:2px;line-height:1.6}
+.sgrid{display:grid;grid-template-columns:1fr 1fr;gap:4px 14px}
+.sgrid .full{grid-column:1/-1}
+.hint{color:var(--s);font-size:11.5px;line-height:1.7;margin-top:5px}
+.srow{display:flex;align-items:center;gap:14px;padding:12px 2px;border-bottom:1px dashed var(--ln2)}
+.srow:last-child{border-bottom:0}
+.srow .tx{flex:1;min-width:0}.srow .tx b{display:block;font-size:13.5px}.srow .tx small{display:block;color:var(--s);font-size:11.5px;line-height:1.65;margin-top:2px}
+.sbar{display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--ln2)}
+.sbar .muted{margin-inline-end:auto}
+.chipset{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.chipset button{border:1px solid var(--ln2);background:var(--in);color:var(--s);border-radius:9px;padding:4px 10px;font:inherit;font-size:11.5px;cursor:pointer}
+.chipset button:hover{border-color:var(--a);color:var(--a)}
+.thc{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.thc button{position:relative;border:1px solid var(--ln2);border-radius:14px;padding:10px;background:var(--in);color:var(--t);font:inherit;font-weight:700;cursor:pointer;text-align:start}
+.thc button i{display:block;height:54px;border-radius:9px;margin-bottom:8px;border:1px solid rgba(127,127,127,.25)}
+.thc button.on{border-color:var(--a);box-shadow:0 0 0 2px color-mix(in srgb,var(--a) 35%,transparent)}
+.swc{display:flex;flex-wrap:wrap;gap:10px}
+.swc button{width:42px;height:42px;border-radius:12px;border:2px solid transparent;cursor:pointer;background:var(--sc);box-shadow:inset 0 1px 0 rgba(255,255,255,.35)}
+.swc button.on{border-color:var(--t);box-shadow:0 0 0 3px color-mix(in srgb,var(--sc) 45%,transparent),inset 0 1px 0 rgba(255,255,255,.35)}
+.pgs{display:flex;flex-wrap:wrap;gap:8px}
+.pgs label{display:inline-flex;align-items:center;gap:8px;padding:9px 12px;border-radius:12px;border:1px solid var(--ln2);background:var(--in);cursor:pointer;font-weight:700;font-size:13px}
+.pgs label:has(input:checked){border-color:var(--pc);background:color-mix(in srgb,var(--pc) 12%,transparent)}
+.pgs label i{width:9px;height:9px;border-radius:50%;background:var(--pc)}
+.vcard{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.vcard>div{border:1px solid var(--ln2);background:var(--in);border-radius:14px;padding:12px 14px}
+.vcard small{display:block;color:var(--s);font-size:11.5px}.vcard b{display:block;font-size:20px;margin-top:3px;direction:ltr;text-align:start}
+.vmsg{margin-top:10px;padding:10px 12px;border-radius:12px;font-size:12.5px;border:1px solid var(--ln2);background:var(--in)}
+.vmsg.ok{border-color:color-mix(in srgb,var(--ok) 45%,transparent);color:var(--ok)}.vmsg.up{border-color:color-mix(in srgb,var(--warn) 55%,transparent);color:var(--warn)}.vmsg.er{border-color:color-mix(in srgb,var(--bad) 45%,transparent);color:var(--bad)}
+.ioc{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.ioc>div{border:1px solid var(--ln2);background:var(--in);border-radius:14px;padding:14px}
+.ioc b{display:flex;align-items:center;gap:8px;font-size:14px}.ioc p{color:var(--s);font-size:12px;line-height:1.7;margin:6px 0 12px}
+.cpy{display:flex;gap:6px}.cpy input{flex:1}
+@media(max-width:900px){.stw{grid-template-columns:1fr}.stn{position:sticky;top:62px;z-index:3;flex-direction:row;overflow-x:auto;scrollbar-width:none;padding:6px}.stn::-webkit-scrollbar{display:none}.stn button{width:auto;flex:none;white-space:nowrap;padding:7px 10px}.stn button span.si{width:24px;height:24px}}
+@media(max-width:620px){.sgrid,.vcard,.ioc,.thc{grid-template-columns:1fr}.card{padding:14px}}
 </style>
 </head>
 <body>
@@ -721,21 +847,40 @@ function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(func
 
 // ---------------------------------------------------------------- shell
 var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['nodes','Nodes','nodes'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
-function shell(){var me=S.me||{};
- $('#app').innerHTML='<header><button class="ib" id="mn" aria-label="menu">'+ic('menu',20)+'</button><div class="'+logoCls()+'">'+logoInner((me.panel_name||'K').charAt(0))+'</div><div class="bn"><b>'+esc(me.panel_name||'Kanki Panel')+'</b><small class="ltr">v'+esc(me.version||'')+'</small></div><div class="sp"></div>'+
- '<button class="ib" id="upd"><span class="dot" id="updot"></span><span class="uv"> v'+esc(me.version||'')+'</span></button><button class="ib '+(S.lang=='fa'?'on':'')+'" data-l="fa">FA</button><button class="ib '+(S.lang=='en'?'on':'')+'" data-l="en">EN</button><button class="ib" id="thm" aria-label="theme">'+ic('moon',17)+'</button><button class="ib" id="lo" title="'+t('Logout')+'" aria-label="logout">'+ic('logout',17)+'</button></header>'+
- '<nav class="side" id="side"><div class="row" style="margin:0 6px 14px"><div class="'+logoCls()+'">'+logoInner((me.panel_name||'K').charAt(0))+'</div><div class="bn"><b>'+esc(me.panel_name||'')+'</b><small>'+esc(me.user||'')+'</small></div></div>'+
- PAGES.map(function(p){return '<a href="#'+p[0]+'" data-p="'+p[0]+'"><span class="ni">'+ic(p[2],19)+'</span>'+t(p[1])+'</a>'}).join('')+'<a href="#" id="lo2"><span class="ni">'+ic('logout',19)+'</span>'+t('Logout')+'</a></nav><div class="shade" id="shade"></div><main id="pg"></main>';
+// sidebar groups (v2.8.4): [label, page keys]
+var NAVG=[['Overview',['dash','traffic']],['Users & sales',['users','bot']],['Network',['nodes','servers','tunnels','ports']],['System',['backup','security','settings']]];
+function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
+function grpOf(k){for(var i=0;i<NAVG.length;i++)if(NAVG[i][1].indexOf(k)>=0)return NAVG[i][0];return ''}
+function shell(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.charAt(0);
+ $('#app').innerHTML='<header class="top"><button class="ib" id="mn" aria-label="menu">'+ic('menu',20)+'</button><div class="'+logoCls()+'" id="mlogo">'+logoInner(L)+'</div>'+
+ '<div class="tb-title"><small><span>'+esc(nm)+'</span><span>›</span><span id="tbsec"></span></small><b id="tbt"></b></div><div class="sp"></div>'+
+ '<div class="tb-act"><div class="segl"><button data-l="fa" class="'+(S.lang=='fa'?'on':'')+'">FA</button><button data-l="en" class="'+(S.lang=='en'?'on':'')+'">EN</button></div>'+
+ '<button class="ib" id="thm" title="'+t('Theme')+'" aria-label="theme">'+ic('moon',17)+'</button>'+
+ '<button class="ib" id="upd" title="'+t('Update')+'"><span class="dot" id="updot"></span><span class="uv ltr">v'+esc(me.version||'')+'</span></button>'+
+ '<div class="uchip2" title="'+esc(me.user||'')+'"><i>'+esc((me.user||'A').charAt(0).toUpperCase())+'</i><span>'+esc(me.user||'')+'</span></div>'+
+ '<button class="ib" id="lo" title="'+t('Logout')+'" aria-label="logout">'+ic('logout',17)+'</button></div></header>'+
+ '<nav class="side" id="side"><div class="sbrand"><div class="'+logoCls()+'">'+logoInner(L)+'</div><div style="min-width:0"><b>'+esc(nm)+'</b><small>'+t('VPN management')+'</small></div></div>'+
+ NAVG.map(function(g){return '<div class="sgrp">'+t(g[0])+'</div>'+g[1].map(function(k){var p=pgOf(k);return '<a href="#'+p[0]+'" data-p="'+p[0]+'"><span class="ni">'+ic(p[2],18)+'</span>'+t(p[1])+'</a>'}).join('')}).join('')+
+ '<div class="sfoot"><button class="sver" id="upd2"><span class="dot" id="updot2"></span><span><b class="ltr">v'+esc(me.version||'')+'</b><small id="updt">'+t('Check for update')+'</small></span></button>'+
+ '<a href="#" id="lo2" class="lo2"><span class="ni">'+ic('logout',18)+'</span>'+t('Logout')+'</a></div></nav><div class="shade" id="shade"></div><main id="pg"></main>';
  $('#mn').onclick=function(){$('#side').classList.add('on');$('#shade').classList.add('on')};
  $('#shade').onclick=function(){$('#side').classList.remove('on');$('#shade').classList.remove('on')};
  $$('#side a[data-p]').forEach(function(a){a.onclick=function(){$('#shade').click()}});
  $$('[data-l]').forEach(function(b){b.onclick=function(){S.lang=b.dataset.l;localStorage.setItem('kk_lang',S.lang);applyLook();shell();route()}});
  $('#thm').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook()};
  $('#lo').onclick=function(){logout()};$('#lo2').onclick=function(e){e.preventDefault();logout()};
- $('#upd').onclick=updateModal;
- api('GET','/api/update/check').then(function(r){var d=$('#updot');if(d)d.className='dot '+(r.available?'y':(r.error?'':'g'))}).catch(function(){});
+ $('#upd').onclick=updateModal;$('#upd2').onclick=function(){$('#shade').click();location.hash='#settings';S.stsec='upd';if(S.page=='settings')route()};
+ // page headers get the page icon, whenever a page draws (or redraws) its header
+ if(window.MutationObserver)new MutationObserver(decoratePh).observe($('#pg'),{childList:true,subtree:true});
+ api('GET','/api/update/check').then(function(r){var c='dot '+(r.available?'y':(r.error?'':'g'));
+  ['#updot','#updot2'].forEach(function(x){var d=$(x);if(d)d.className=c});
+  var u=$('#updt');if(u)u.textContent=r.available?t('A new version is available.'):(r.error?t('Update source not set'):t('You are on the latest version.'))}).catch(function(){});
 }
+function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
+ var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);
+ var i=document.createElement('span');i.className='phi';i.innerHTML=ic(pgOf(S.page)[2],22);d.appendChild(i);d.appendChild(inner)}
 function route(){var p=(location.hash||'#dash').slice(1);if(!PAGES.some(function(x){return x[0]==p}))p='dash';S.page=p;
+ var tb=$('#tbt');if(tb){tb.textContent=t(pgOf(p)[1]);$('#tbsec').textContent=t(grpOf(p))}
  $$('#side a[data-p]').forEach(function(a){a.classList.toggle('on',a.dataset.p==p)});clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);window.scrollTo(0,0);
  ({dash:pDash,users:pUsers,nodes:pNodes,servers:pServers,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,backup:pBackup,security:pSecurity,settings:pSettings})[p]()}
 window.addEventListener('hashchange',function(){if(S.token&&S.me)route()});
@@ -944,12 +1089,12 @@ function prevExp(){var el=$('#f_prev');if(!el)return;var ts=readExp();
 function qDays(n){var cur=readExp(),now=Math.floor(Date.now()/1000);if(isNaN(cur)||!cur||cur<now)cur=now;setExp(cur+n*86400)}
 function qGB(n,u){var cur=+$('#f_gb').value||0,used=u?u.traffic_used_gb:0,base=cur>0?(used>=cur?used:cur):0;$('#f_gb').value=Math.round((base+n)*100)/100}
 function ufForm(u){var protos=u?u.protocols.split(','):((S.me&&S.me.default_protocols)||'wg,awg,hy2').split(','),un=u?u.nodes.split(',').filter(Boolean):[],
-  exp=u?u.expires_ts:Math.floor(Date.now()/1000)+30*86400,h='<div class="g2f">';
+  me0=S.me||{},dd=Math.max(1,+me0.def_days||30),exp=u?u.expires_ts:Math.floor(Date.now()/1000)+dd*86400,h='<div class="g2f">';
  h+='<div class="full"><label class="f">'+t('Username')+'</label><input id="f_name" class="ltr" autocomplete="off" value="'+esc(u?u.username:'')+'" placeholder="'+(u?'':t('Optional, created if empty'))+'"></div>';
  h+='<div class="full"><label class="f">'+t('Expiry date')+' <small>('+t(S.lang=='fa'?'Date (Jalali)':'Date')+')</small></label><div class="jd"><input id="f_date" class="ltr" inputmode="numeric" autocomplete="off" placeholder="'+N(S.lang=='fa'?'1405/01/01':'2026-01-31')+'" value="'+esc(dateVal(exp))+'"><input id="f_time" type="time" value="'+timeVal(exp)+'"><button type="button" class="ib" id="f_inf" title="'+t('Unlimited')+'">∞</button></div><div class="muted" id="f_prev" style="margin-top:5px"></div>'+
   '<div class="qchips" id="qd"><span class="muted">'+t('Quick add days')+'</span>'+[7,30,60,90,180,365].map(function(n){return '<button type="button" data-qd="'+n+'">+'+N(n)+'</button>'}).join('')+'</div></div>';
- h+='<div><label class="f">'+t('Total volume (0 = unlimited)')+'</label><div class="row" style="flex-wrap:nowrap"><input type="number" min="0" step="0.5" id="f_gb" value="'+(u?u.traffic_limit_gb:30)+'"><button type="button" class="ib" id="f_gbinf" title="'+t('Unlimited')+'">∞</button></div></div>';
- h+='<div><label class="f">'+t('Connections')+'</label><input type="number" min="0" id="f_conn" value="'+(u?u.max_connections:1)+'"></div>';
+ h+='<div><label class="f">'+t('Total volume (0 = unlimited)')+'</label><div class="row" style="flex-wrap:nowrap"><input type="number" min="0" step="0.5" id="f_gb" value="'+(u?u.traffic_limit_gb:(me0.def_gb!=null&&me0.def_gb!==''?+me0.def_gb:30))+'"><button type="button" class="ib" id="f_gbinf" title="'+t('Unlimited')+'">∞</button></div></div>';
+ h+='<div><label class="f">'+t('Connections')+'</label><input type="number" min="0" id="f_conn" value="'+(u?u.max_connections:Math.max(1,+me0.def_conns||1))+'"></div>';
  h+='<div class="full"><div class="qchips" id="qg" style="margin-top:0"><span class="muted">'+t('Quick add volume')+'</span>'+[5,10,20,50,100].map(function(n){return '<button type="button" data-qg="'+n+'">+'+N(n)+' GB</button>'}).join('')+'</div></div>';
  if(!u)h+='<div><label class="f">'+t('Count')+'</label><input type="number" min="1" max="200" id="f_count" value="1"></div><div></div>';
  h+='</div><div class="chips">'+PROTOS.map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(protos.indexOf(p[0])>=0?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>';
@@ -1142,22 +1287,124 @@ function wireLogo(){var f=$('#lg_file');if(!f)return;
    im.onerror=function(){toast(t('Cannot read this image'),1)};im.src=rd.result};
   rd.readAsDataURL(file)};
  var rm=$('#lg_rm');if(rm)rm.onclick=function(){confirmDo(function(){setLogo('').catch(fail)})}}
-function pSettings(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Settings')+'</h2><p>'+t('Appearance, web access and public endpoint')+'</p></div></div><div id="st">'+t('Loading…')+'</div>';
- api('GET','/api/settings').then(function(s){var dp=(s.default_protocols||'').split(',');
- $('#st').innerHTML=logoCard()+'<div class="card"><h3>'+t('General')+'</h3><div class="g2"><div><label class="f">'+t('Panel name')+'</label><input id="s_pn" value="'+esc(s.panel_name)+'"></div><div><label class="f">'+t('Language')+'</label><select id="s_lang"><option value="fa">فارسی</option><option value="en">English</option></select></div>'+
- '<div><label class="f">'+t('Theme')+'</label><select id="s_th"><option value="dark">'+t('Dark')+'</option><option value="light">'+t('Soft light')+'</option></select></div><div><label class="f">'+t('Auto refresh')+'</label><select id="s_rf"><option value="5">5 '+t('seconds')+'</option><option value="10">10 '+t('seconds')+'</option><option value="30">30 '+t('seconds')+'</option><option value="60">60 '+t('seconds')+'</option></select></div>'+
- '<div><label class="f">'+t('Panel color')+'</label><select id="s_col"><option value="gold">'+t('Gold')+'</option><option value="turquoise">'+t('Turquoise')+'</option><option value="violet">'+t('Violet')+'</option><option value="emerald">'+t('Emerald')+'</option><option value="rose">'+t('Rose')+'</option></select></div></div>'+
- '<div class="box"><b>'+t('Web panel')+'</b><div class="g2"><div><label class="f">'+t('Web bind')+'</label><input class="ltr" readonly value="'+esc(s.web_bind)+'"></div><div><label class="f">'+t('Web port')+'</label><input class="ltr" readonly value="'+esc(s.web_port)+'"></div></div><p class="muted">'+t('Bind and port are where the panel itself listens; changing them needs a panel restart. File:')+' <span class="ltr" style="display:inline-block;white-space:nowrap">/etc/kanki/kanki.env</span><br>'+t('Panel address')+': <span class="ltr">https://'+esc(s.domain)+(s.https_port&&s.https_port!='443'?':'+esc(s.https_port):'')+'/admin</span></p></div>'+
- '<div class="box"><b>'+t('Public endpoint')+'</b><div class="g2"><div><label class="f">'+t('Public VPN host or IP')+'</label><input id="s_ep" class="ltr" value="'+esc(s.endpoint)+'" placeholder="'+esc(s.domain)+'"></div><div><label class="f">'+t('Subscription base URL')+'</label><input id="s_sb" class="ltr" value="'+esc(s.sub_base)+'" placeholder="https://panel.example.com"></div></div><p class="muted">'+t('Public host used inside user configs.')+'</p><label class="chk"><input type="checkbox" id="s_all">'+t('Apply this endpoint to Main and all nodes')+'</label></div></div>'+
- '<div class="card"><h3>'+t('VPN')+'</h3><div class="g2"><div><label class="f">'+t('DNS')+'</label><input id="s_dns" class="ltr" value="'+esc(s.dns)+'"></div><div><label class="f">'+t('MTU')+'</label><input id="s_mtu" class="ltr" value="'+esc(s.mtu)+'"></div></div>'+
- '<label class="f">'+t('Default protocols for new users')+'</label>'+PROTOS.map(function(p){return '<label class="chk"><input type="checkbox" class="s_dp" value="'+p[0]+'" '+(dp.indexOf(p[0])>=0?'checked':'')+'>'+p[1]+'</label>'}).join('')+
- '<div style="margin-top:8px"><label class="chk"><input type="checkbox" id="s_awg" '+(s.awg_compat=='1'?'checked':'')+'>'+t('AmneziaWG compatibility mode (only Jc/Jmin/Jmax/S1/S2/H1-H4)')+'</label><label class="chk"><input type="checkbox" id="s_cl" '+(s.conn_limit_on!='0'?'checked':'')+'>'+t('Enforce connection limit (Hysteria2)')+'</label><label class="chk"><input type="checkbox" id="s_ta" '+(s.tg_alerts!='0'?'checked':'')+'>'+t('Telegram alert when a node or tunnel goes offline')+'</label></div></div>'+
- '<div style="text-align:center"><button class="btn" id="s_go">'+t('Save & apply')+'</button></div>';
- wireLogo();$('#s_lang').value=s.lang||'fa';$('#s_th').value=s.theme||'dark';$('#s_rf').value=s.refresh||'10';$('#s_col').value=s.color||'gold';
- $('#s_go').onclick=function(){var b={panel_name:$('#s_pn').value,lang:$('#s_lang').value,theme:$('#s_th').value,refresh:$('#s_rf').value,color:$('#s_col').value,endpoint:$('#s_ep').value,sub_base:$('#s_sb').value,dns:$('#s_dns').value,mtu:$('#s_mtu').value,
-  default_protocols:$$('.s_dp').filter(function(x){return x.checked}).map(function(x){return x.value}).join(','),awg_compat:$('#s_awg').checked?'1':'0',conn_limit_on:$('#s_cl').checked?'1':'0',tg_alerts:$('#s_ta').checked?'1':'0'};
-  var all=$('#s_all').checked;api('PUT','/api/settings',b).then(function(){return all?api('POST','/api/settings/apply-endpoint'):null}).then(function(){
-   S.lang=b.lang;S.theme=b.theme;S.color=b.color;localStorage.setItem('kk_lang',S.lang);localStorage.setItem('kk_theme',S.theme);localStorage.setItem('kk_color',S.color);toast(t('Saved'));boot()}).catch(fail)}}).catch(fail)}
+// ---------------------------------------------------------------- settings (v2.8.4: sections, each saved on its own)
+ICO.bell='<path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2H4.5z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>';
+ICO.globe='<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.6 3.5 5.4 3.5 8.5s-1.1 5.9-3.5 8.5c-2.4-2.6-3.5-5.4-3.5-8.5S9.6 6.1 12 3.5z"/>';
+ICO.shield2='<path d="M12 3.4l7 2.8v5.3c0 4.4-2.9 7.7-7 9-4.1-1.3-7-4.6-7-9V6.2l7-2.8z"/><path d="M9 12h6M12 9v6"/>';
+ICO.brush='<path d="M14.5 4.5l5 5-8.2 8.2a3 3 0 0 1-4.3 0l-.7-.7a3 3 0 0 1 0-4.3z"/><path d="M6.3 13l4.7 4.7M3.5 20.5c1.8 0 3-1 3-2.5"/>';
+ICO.box='<path d="M4 7.5l8-4 8 4v9l-8 4-8-4z"/><path d="M4 7.5l8 4 8-4M12 11.5v9"/>';
+var STSEC=[
+ ['look','Appearance','brush','Name, logo, language, theme and colour of the panel',['panel_name','lang','theme','color','refresh']],
+ ['net','Addresses','globe','Panel address, the public VPN address and subscription links',['endpoint','sub_base']],
+ ['vpn','VPN & protocols','shield2','DNS, MTU and protocol behaviour on every server',['dns','mtu','awg_compat','conn_limit_on']],
+ ['newu','New users','users','Ready values for the “New user” form',['default_protocols','def_gb','def_days','def_conns']],
+ ['ntf','Notifications','bell','Telegram messages for you and for your buyers',['tg_alerts','warn_on','backup_on']],
+ ['upd','Update & version','refresh','Version, update source and installing updates',['update_repo']],
+ ['io','Export & import','box','Move all settings to another panel or keep a copy',[]]];
+var ST_SKIP=['web_bind','web_port','domain','https_port','repo_env'];
+function stSw(k,title,desc){return '<div class="srow"><div class="tx"><b>'+t(title)+'</b><small>'+t(desc)+'</small></div><label class="sw"><input type="checkbox" data-k="'+k+'"><span></span></label></div>'}
+function stIn(k,label,ph,hint,cls,type){return '<div class="'+(cls||'')+'"><label class="f">'+t(label)+'</label><input data-k="'+k+'"'+(type?' type="'+type+'" min="0"':'')+' class="'+(type?'':'ltr')+'" placeholder="'+esc(ph||'')+'">'+(hint?'<div class="hint">'+t(hint)+'</div>':'')+'</div>'}
+function stPick(k,items,cls){return '<input type="hidden" data-k="'+k+'"><div class="'+cls+'" data-pick="'+k+'">'+items.join('')+'</div>'}
+function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_port!='443'?':'+s.https_port:'')+'/admin';
+ switch(id){
+ case 'look':return '<div class="sgrid">'+stIn('panel_name','Panel name','Kanki Panel','Shown in the menu, the browser tab and the login page.')+
+  '<div><label class="f">'+t('Auto refresh')+'</label><select data-k="refresh">'+[5,10,30,60].map(function(n){return '<option value="'+n+'">'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select><div class="hint">'+t('How often lists and the dashboard refresh themselves.')+'</div></div>'+
+  '<div class="full"><label class="f">'+t('Logo')+'</label><div class="row" style="gap:10px"><div class="'+logoCls()+'" id="lg_prev" style="width:52px;height:52px;border-radius:15px">'+logoInner(((S.me&&S.me.panel_name)||'K').charAt(0))+'</div>'+
+  '<label class="b2" for="lg_file" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">'+ic('image',16)+' '+t('Choose image')+'</label><input type="file" id="lg_file" accept="image/*" class="hide">'+
+  '<button class="b2 bd'+(curLogo()?'':' hide')+'" id="lg_rm">'+t('Remove')+'</button></div><div class="hint">'+t('Saved at once. Shown in the header, the menu, the login page and the subscription page.')+'</div></div>'+
+  '<div class="full"><label class="f">'+t('Language')+'</label>'+stPick('lang',['<button type="button" data-v="fa">فارسی<small class="muted" style="display:block;font-weight:500">راست به چپ</small></button>','<button type="button" data-v="en">English<small class="muted" style="display:block;font-weight:500">Left to right</small></button>'],'thc')+'</div>'+
+  '<div class="full"><label class="f">'+t('Theme')+'</label>'+stPick('theme',['<button type="button" data-v="dark"><i style="background:linear-gradient(135deg,#1c160d,#070604)"></i>'+t('Dark')+'</button>','<button type="button" data-v="light"><i style="background:linear-gradient(135deg,#fffaf0,#e6dcc6)"></i>'+t('Soft light')+'</button>'],'thc')+'</div>'+
+  '<div class="full"><label class="f">'+t('Panel color')+'</label>'+stPick('color',[['gold','#F5C451'],['turquoise','#2fd6d6'],['violet','#a78bfa'],['emerald','#34d399'],['rose','#fb7185']].map(function(c){return '<button type="button" data-v="'+c[0]+'" style="--sc:'+c[1]+'" title="'+t(c[0].charAt(0).toUpperCase()+c[0].slice(1))+'"></button>'}),'swc')+'</div></div>';
+ case 'net':return '<div class="sgrid"><div class="full"><label class="f">'+t('Panel address')+'</label><div class="cpy"><input class="ltr" readonly value="'+esc(addr)+'"><button class="b2" type="button" onclick="copy(\''+esc(addr)+'\')">'+ic('copy',15)+'</button></div></div>'+
+  stIn('endpoint','Public VPN host or IP',s.domain||'vpn.example.com','Written inside every user config. Empty = the panel domain.','full')+
+  stIn('sub_base','Subscription base URL','https://sub.example.com','Base of the subscription links (for example a CDN domain). Empty = the panel address.','full')+
+  '<div class="full">'+'<div class="srow"><div class="tx"><b>'+t('Use this address on every node too')+'</b><small>'+t('Nodes that have their own address switch back to this one when you save.')+'</small></div><label class="sw"><input type="checkbox" id="st_all"><span></span></label></div></div>'+
+  '<div class="full box"><b>'+t('Web panel')+'</b><div class="g2"><div><label class="f">'+t('Web bind')+'</label><input class="ltr" readonly value="'+esc(s.web_bind)+'"></div><div><label class="f">'+t('Web port')+'</label><input class="ltr" readonly value="'+esc(s.web_port)+'"></div></div><div class="hint">'+t('Bind and port are where the panel itself listens; changing them needs a panel restart. File:')+' <span class="ltr">/etc/kanki/kanki.env</span></div></div></div>';
+ case 'vpn':return '<div class="sgrid"><div><label class="f">DNS</label><input data-k="dns" class="ltr" placeholder="1.1.1.1, 8.8.8.8"><div class="chipset" data-fill="dns">'+
+  [['Cloudflare','1.1.1.1, 1.0.0.1'],['Google','8.8.8.8, 8.8.4.4'],['Quad9','9.9.9.9, 149.112.112.112'],['AdGuard','94.140.14.14, 94.140.15.15']].map(function(d){return '<button type="button" data-v="'+d[1]+'">'+d[0]+'</button>'}).join('')+'</div><div class="hint">'+t('DNS servers given to every user config, comma separated.')+'</div></div>'+
+  '<div><label class="f">MTU</label><input data-k="mtu" class="ltr" inputmode="numeric" placeholder="1380"><div class="chipset" data-fill="mtu">'+['1280','1380','1420'].map(function(m){return '<button type="button" data-v="'+m+'">'+m+'</button>'}).join('')+'</div><div class="hint">'+t('Lower it (1280) if some sites do not open on mobile data.')+'</div></div>'+
+  '<div class="full" style="margin-top:6px">'+stSw('awg_compat','AmneziaWG compatibility mode','Only Jc/Jmin/Jmax/S1/S2/H1-H4, for old AmneziaWG apps.')+stSw('conn_limit_on','Enforce connection limit (Hysteria2)','A user cannot connect from more devices than his limit.')+'</div></div>';
+ case 'newu':return '<label class="f" style="margin-top:0">'+t('Default protocols for new users')+'</label><input type="hidden" data-k="default_protocols"><div class="pgs" data-multi="default_protocols">'+
+  PROTOS.map(function(x){return '<label style="--pc:'+(window.PCOL?PCOL[x[0]]:'var(--a)')+'"><input type="checkbox" value="'+x[0]+'" class="hide"><i></i>'+x[1]+'</label>'}).join('')+'</div><div class="hint">'+t('Also used by the sales bot when it makes an account.')+'</div>'+
+  '<div class="g3" style="margin-top:6px">'+stIn('def_gb','Volume (GB)','30','0 = unlimited','', 'number')+stIn('def_days','Days','30','','', 'number')+stIn('def_conns','Connections','1','','', 'number')+'</div>';
+ case 'ntf':return stSw('tg_alerts','Server alerts','Telegram message to the bot admins when a node, tunnel server or tunnel goes offline, and when it is back.')+
+  stSw('warn_on','Warn buyers','The buyer gets a message before his time or data runs out.')+stSw('backup_on','Daily backup to bot admins','An encrypted full backup is sent to the bot admins once a day.')+
+  '<div class="hint" style="margin-top:8px">'+t('These messages are sent by the sales bot; set it up first in')+' <a href="#bot">'+t('Sales bot')+'</a>.</div>';
+ case 'upd':return '<div class="vcard"><div><small>'+t('Current version')+'</small><b>v'+esc(S.me.version)+'</b></div><div><small>'+t('Latest version')+'</small><b id="st_lv">…</b></div></div><div class="vmsg" id="st_um">'+t('Checking…')+'</div>'+
+  '<div class="row" style="margin-top:10px"><button class="b2" type="button" id="st_chk">'+ic('refresh',15)+' '+t('Check for update')+'</button><button class="btn hide" type="button" id="st_go">'+t('Install update')+'</button></div>'+
+  '<div class="sgrid" style="margin-top:8px">'+stIn('update_repo','Update source (GitHub repo)','owner/kanki-panel','Releases of this repository are used for updates, for “Update all” and for new tunnel servers.','full')+'</div>'+
+  (s.repo_env?'<div class="warnbox">'+t('KANKI_REPO in /etc/kanki/kanki.env is set; it wins over this field.')+'</div>':'')+
+  '<div class="hint">'+t('Nodes and tunnel servers are updated together with')+' <a href="#nodes">'+t('Nodes')+' › '+t('Update all')+'</a>.</div>';
+ case 'io':return '<div class="ioc"><div><b>'+ic('dl',18)+' '+t('Export')+'</b><p>'+t('A JSON file with every panel and sales setting. It holds payment keys too, keep it private. Users are not in it; use Backup for that.')+'</p><button class="btn" type="button" id="st_exp">'+t('Download settings')+'</button></div>'+
+  '<div><b>'+ic('refresh',18)+' '+t('Import')+'</b><p>'+t('Pick a settings file exported from a Kanki panel. Only known settings are taken; users, nodes and keys are not touched.')+'</p><label class="b2" for="st_imf" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center">'+ic('dl',15)+' '+t('Choose file')+'</label><input type="file" id="st_imf" accept=".json,application/json" class="hide"></div></div>';
+ }return ''}
+function pSettings(){var cur=S.stsec||'look';
+ $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Settings')+'</h2><p>'+t('Everything about how the panel looks and works, in one place')+'</p></div></div><div id="st">'+t('Loading…')+'</div>';
+ api('GET','/api/settings').then(function(s){S.st=s;if(!STSEC.some(function(x){return x[0]==cur}))cur='look';
+  $('#st').innerHTML='<div class="stw"><div class="stn" role="tablist">'+STSEC.map(function(x){return '<button type="button" data-sec="'+x[0]+'" class="'+(x[0]==cur?'on':'')+'"><span class="si">'+ic(x[2],17)+'</span>'+t(x[1])+'<em></em></button>'}).join('')+'</div><div>'+
+  STSEC.map(function(x){return '<section class="sts card'+(x[0]==cur?' on':'')+'" data-sec="'+x[0]+'"><div class="sth"><span class="phi">'+ic(x[2],20)+'</span><div><b>'+t(x[1])+'</b><small>'+t(x[3])+'</small></div></div>'+stBody(x[0],s)+
+   (x[4].length?'<div class="sbar"><span class="muted" data-msg></span><button class="b2" type="button" data-undo disabled>'+t('Undo')+'</button><button class="btn" type="button" data-save disabled>'+t('Save')+'</button></div>':'')+'</section>'}).join('')+'</div></div>';
+  stFill(s);stWire();wireLogo();stUpdate(false)}).catch(fail)}
+function stVal(el){return el.type=='checkbox'?(el.checked?'1':'0'):el.value}
+function stFill(s){$$('#st [data-k]').forEach(function(el){var k=el.dataset.k,v=s[k]==null?'':String(s[k]);
+  if(k=='refresh'&&!v)v='10';if(k=='lang'&&!v)v='fa';if(k=='theme'&&!v)v='dark';if(k=='color'&&!v)v='gold';
+  if(k=='conn_limit_on'||k=='tg_alerts')v=v=='0'?'0':'1';
+  if(el.type=='checkbox')el.checked=v=='1';else el.value=v;el._orig=stVal(el)});
+ stSync($('#st'))}
+// pickers and protocol chips follow their hidden input
+function stSync(root){$$('[data-pick]',root).forEach(function(g){var h=$('#st [data-k="'+g.dataset.pick+'"]');$$('button',g).forEach(function(b){b.classList.toggle('on',b.dataset.v==h.value)})});
+ $$('[data-multi]',root).forEach(function(g){var h=$('#st [data-k="'+g.dataset.multi+'"]'),on=h.value.split(',');$$('input',g).forEach(function(c){c.checked=on.indexOf(c.value)>=0})})}
+function stDirty(sec){var any=false;$$('[data-k]',sec).forEach(function(el){if(stVal(el)!==el._orig)any=true});
+ $$('[data-save],[data-undo]',sec).forEach(function(b){b.disabled=!any});var m=$('[data-msg]',sec);if(m)m.textContent=any?t('Unsaved changes'):'';
+ var nb=$('.stn button[data-sec="'+sec.dataset.sec+'"]');if(nb)nb.classList.toggle('dirty',any)}
+function stWire(){
+ $$('.stn button').forEach(function(b){b.onclick=function(){S.stsec=b.dataset.sec;$$('.stn button').forEach(function(x){x.classList.toggle('on',x==b)});$$('.sts').forEach(function(x){x.classList.toggle('on',x.dataset.sec==b.dataset.sec)});if(b.dataset.sec=='upd')stUpdate(false)}});
+ $$('.sts').forEach(function(sec){sec.addEventListener('input',function(){stDirty(sec)});sec.addEventListener('change',function(){stDirty(sec)})});
+ $$('#st [data-pick] button').forEach(function(b){b.onclick=function(){var g=b.parentNode,h=$('#st [data-k="'+g.dataset.pick+'"]');h.value=b.dataset.v;$$('button',g).forEach(function(x){x.classList.toggle('on',x==b)});stDirty(g.closest('.sts'))}});
+ $$('#st [data-multi] input').forEach(function(c){c.onchange=function(){var g=c.closest('[data-multi]'),h=$('#st [data-k="'+g.dataset.multi+'"]');h.value=$$('input',g).filter(function(x){return x.checked}).map(function(x){return x.value}).join(',');stDirty(g.closest('.sts'))}});
+ $$('#st [data-fill] button').forEach(function(b){b.onclick=function(){var g=b.parentNode,i=$('#st [data-k="'+g.dataset.fill+'"]');i.value=b.dataset.v;stDirty(g.closest('.sts'))}});
+ $$('.sts [data-undo]').forEach(function(b){b.onclick=function(){var sec=b.closest('.sts');
+  $$('[data-k]',sec).forEach(function(el){if(el.type=='checkbox')el.checked=el._orig=='1';else el.value=el._orig});stSync(sec);stDirty(sec)}});
+ $$('.sts [data-save]').forEach(function(b){b.onclick=function(){stSave(b.closest('.sts'),b)}});
+ var ck=$('#st_chk');if(ck)ck.onclick=function(){stUpdate(true)};
+ var go=$('#st_go');if(go)go.onclick=function(){go.disabled=true;api('POST','/api/update/apply').then(function(r){toast('v'+r.version+' ✓');setTimeout(function(){location.reload()},5000)}).catch(function(e){go.disabled=false;fail(e)})};
+ var ex=$('#st_exp');if(ex)ex.onclick=stExport;
+ var im=$('#st_imf');if(im)im.onchange=function(){stImport(im)}}
+function stSave(sec,btn){var id=sec.dataset.sec,body={};$$('[data-k]',sec).forEach(function(el){body[el.dataset.k]=stVal(el)});
+ if(id=='newu'&&!body.default_protocols)return toast(t('Choose at least one protocol'),1);
+ if(id=='upd'&&body.update_repo&&!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(body.update_repo))return toast(t('Write it as owner/repo'),1);
+ if(id=='vpn'&&body.mtu&&!(+body.mtu>=1200&&+body.mtu<=1500))return toast(t('MTU must be between 1200 and 1500'),1);
+ var all=id=='net'&&$('#st_all')&&$('#st_all').checked;btn.disabled=true;
+ api('PUT','/api/settings',body).then(function(){return all?api('POST','/api/settings/apply-endpoint'):null}).then(function(){
+  Object.assign(S.st,body);$$('[data-k]',sec).forEach(function(el){el._orig=stVal(el)});stDirty(sec);toast(t('Saved'));
+  if(id=='newu'&&S.me){S.me.default_protocols=body.default_protocols;S.me.def_gb=body.def_gb;S.me.def_days=body.def_days;S.me.def_conns=body.def_conns}
+  if(id=='look'){S.lang=body.lang;S.theme=body.theme;S.color=body.color;localStorage.setItem('kk_lang',S.lang);localStorage.setItem('kk_theme',S.theme);localStorage.setItem('kk_color',S.color);S.stsec='look';boot()}
+  if(id=='upd')stUpdate(true)}).catch(function(e){btn.disabled=false;fail(e)})}
+function stUpdate(force){var m=$('#st_um');if(!m||(!force&&m._done))return;m._done=1;m.className='vmsg';m.textContent=t('Checking…');
+ api('GET','/api/update/check').then(function(r){$('#st_lv').textContent=r.latest?'v'+r.latest:'—';
+  m.className='vmsg '+(r.error?'er':(r.available?'up':'ok'));m.textContent=r.error?t(r.error):(r.available?t('A new version is available.'):t('You are on the latest version.'));
+  $('#st_go').classList.toggle('hide',!r.available)}).catch(function(e){m.className='vmsg er';m.textContent=t(e.message||'')})}
+function stExport(){api('GET','/api/settings').then(function(s){var o={};Object.keys(s).forEach(function(k){if(ST_SKIP.indexOf(k)<0)o[k]=s[k]});
+ var d=new Date(),name='kanki-settings-'+d.getFullYear()+p2(d.getMonth()+1)+p2(d.getDate())+'.json';
+ dl({blob:new Blob([JSON.stringify({kanki_settings:1,version:S.me.version,settings:o},null,2)],{type:'application/json'}),name:name});toast(t('Done'))}).catch(fail)}
+function stImport(inp){var f=inp.files&&inp.files[0];if(!f)return;var rd=new FileReader();
+ rd.onload=function(){var j;try{j=JSON.parse(rd.result)}catch(e){inp.value='';return toast(t('This is not a settings file'),1)}
+  var o=j&&j.settings&&typeof j.settings=='object'?j.settings:null;if(!o){inp.value='';return toast(t('This is not a settings file'),1)}
+  ST_SKIP.forEach(function(k){delete o[k]});var n=Object.keys(o).length;
+  if(!confirm(t('Replace the current settings with the file?')+' ('+N(n)+')')){inp.value='';return}
+  api('PUT','/api/settings',o).then(function(){toast(t('Saved'));S.stsec='io';boot()}).catch(fail)};
+ rd.readAsText(f)}
+Object.assign(FA,{"Overview":"نمای کلی","Users & sales":"کاربران و فروش","Network":"شبکه","System":"سیستم","VPN management":"مدیریت وی‌پی‌ان","Update source not set":"منبع آپدیت تنظیم نشده",
+ "Everything about how the panel looks and works, in one place":"همه‌ی تنظیمات ظاهر و کارکرد پنل، یک‌جا","Appearance":"ظاهر و برند","Addresses":"آدرس‌ها","VPN & protocols":"VPN و پروتکل‌ها","New users":"کاربر جدید","Notifications":"اعلان‌ها","Update & version":"آپدیت و نسخه","Export & import":"خروجی و ورودی",
+ "Name, logo, language, theme and colour of the panel":"نام، لوگو، زبان، پوسته و رنگ پنل","Panel address, the public VPN address and subscription links":"آدرس پنل، آدرس عمومی VPN و لینک‌های اشتراک","DNS, MTU and protocol behaviour on every server":"DNS، MTU و رفتار پروتکل‌ها روی همه‌ی سرورها","Ready values for the “New user” form":"مقدارهای آماده‌ی فرم «کاربر جدید»","Telegram messages for you and for your buyers":"پیام‌های تلگرامی برای خودت و خریدارها","Version, update source and installing updates":"نسخه، منبع آپدیت و نصب آپدیت","Move all settings to another panel or keep a copy":"انتقال همه‌ی تنظیمات به پنل دیگر یا نگه‌داشتن یک نسخه",
+ "Shown in the menu, the browser tab and the login page.":"در منو، تب مرورگر و صفحه‌ی ورود نشان داده می‌شود.","How often lists and the dashboard refresh themselves.":"فاصله‌ی تازه‌سازی خودکار فهرست‌ها و داشبورد.","Logo":"لوگو","Choose image":"انتخاب تصویر","Remove":"حذف","Saved at once. Shown in the header, the menu, the login page and the subscription page.":"همان لحظه ذخیره می‌شود. در بالای پنل، منو، صفحه‌ی ورود و صفحه‌ی اشتراک دیده می‌شود.",
+ "Written inside every user config. Empty = the panel domain.":"داخل کانفیگ همه‌ی کاربرها نوشته می‌شود. خالی = دامنه‌ی پنل.","Base of the subscription links (for example a CDN domain). Empty = the panel address.":"ابتدای لینک‌های اشتراک (مثلاً دامنه‌ی CDN). خالی = آدرس پنل.","Use this address on every node too":"همین آدرس روی همه‌ی نودها هم استفاده شود","Nodes that have their own address switch back to this one when you save.":"نودهایی که آدرس اختصاصی دارند، با ذخیره به همین آدرس برمی‌گردند.",
+ "DNS servers given to every user config, comma separated.":"DNSهایی که داخل کانفیگ کاربرها قرار می‌گیرند؛ با کاما جدا کن.","Lower it (1280) if some sites do not open on mobile data.":"اگر بعضی سایت‌ها روی اینترنت موبایل باز نمی‌شوند، کمش کن (1280).","AmneziaWG compatibility mode":"حالت سازگاری AmneziaWG","Only Jc/Jmin/Jmax/S1/S2/H1-H4, for old AmneziaWG apps.":"فقط Jc/Jmin/Jmax/S1/S2/H1-H4؛ برای اپ‌های قدیمی AmneziaWG.","A user cannot connect from more devices than his limit.":"کاربر نمی‌تواند با دستگاه‌های بیشتر از سقفش وصل شود.",
+ "Also used by the sales bot when it makes an account.":"ربات فروش هم هنگام ساخت اکانت از همین‌ها استفاده می‌کند.","Volume (GB)":"حجم (گیگ)","0 = unlimited":"0 = نامحدود","Choose at least one protocol":"حداقل یک پروتکل انتخاب کن",
+ "Server alerts":"هشدار سرورها","Telegram message to the bot admins when a node, tunnel server or tunnel goes offline, and when it is back.":"وقتی نود، سرور تانل یا تانلی قطع و دوباره وصل شود، به ادمین‌های ربات پیام می‌رود.","Warn buyers":"هشدار به خریدارها","The buyer gets a message before his time or data runs out.":"قبل از تمام شدن زمان یا حجم، به خریدار پیام می‌رود.","An encrypted full backup is sent to the bot admins once a day.":"روزی یک بار بکاپ کامل رمزدار برای ادمین‌های ربات فرستاده می‌شود.","These messages are sent by the sales bot; set it up first in":"این پیام‌ها را ربات فروش می‌فرستد؛ اول آن را راه بینداز در",
+ "Update source (GitHub repo)":"منبع آپدیت (مخزن گیت‌هاب)","Releases of this repository are used for updates, for “Update all” and for new tunnel servers.":"Releaseهای همین مخزن برای آپدیت پنل، «آپدیت همه» و نصب سرورهای تانل استفاده می‌شود.","KANKI_REPO in /etc/kanki/kanki.env is set; it wins over this field.":"مقدار KANKI_REPO در فایل /etc/kanki/kanki.env تنظیم شده و بر این فیلد مقدم است.","Nodes and tunnel servers are updated together with":"نودها و سرورهای تانل با این دکمه با هم آپدیت می‌شوند:","Update all":"آپدیت همه","Write it as owner/repo":"به شکل owner/repo بنویس","MTU must be between 1200 and 1500":"MTU باید بین 1200 تا 1500 باشد",
+ "Export":"خروجی","Import":"ورودی","A JSON file with every panel and sales setting. It holds payment keys too, keep it private. Users are not in it; use Backup for that.":"یک فایل JSON از همه‌ی تنظیمات پنل و فروش. کلیدهای پرداخت هم داخلش هست؛ جایی منتشرش نکن. کاربرها داخلش نیستند؛ برای آن از بکاپ استفاده کن.","Download settings":"دانلود تنظیمات","Pick a settings file exported from a Kanki panel. Only known settings are taken; users, nodes and keys are not touched.":"فایل تنظیماتی که از یک پنل کانکی گرفته‌ای را انتخاب کن. فقط تنظیمات شناخته‌شده خوانده می‌شوند؛ به کاربرها، نودها و کلیدها دست نمی‌خورد.","This is not a settings file":"این فایل تنظیمات نیست","Replace the current settings with the file?":"تنظیمات فعلی با فایل جایگزین شود؟",
+ "Unsaved changes":"تغییرات ذخیره‌نشده","Undo":"برگرداندن","Image is too complex, use a simpler logo":"تصویر خیلی پیچیده است؛ لوگوی ساده‌تری انتخاب کن","Cannot read this image":"این تصویر خوانده نمی‌شود","Telegram alert when a node or tunnel goes offline":"هشدار تلگرام وقتی نود یا تانل قطع شود","Dashboard":"داشبورد"});
 
 // ---------------------------------------------------------------- update
 function updateModal(){modal(mhead(t('Update')+' '+((S.me&&S.me.panel_name)||''))+'<div class="g2"><div class="pc" style="flex-direction:column"><small class="muted">'+t('Current version')+'</small><b class="ltr" id="u_c">v'+esc(S.me.version)+'</b></div><div class="pc" style="flex-direction:column"><small class="muted">'+t('Latest version')+'</small><b class="ltr" id="u_l">…</b></div></div><p id="u_m" class="muted"></p>'+

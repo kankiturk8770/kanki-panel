@@ -452,6 +452,9 @@ pub fn default_setting(k: &str) -> &'static str {
         "warn_on" => "1",
         "backup_on" => "1",
         "welcome" => "به ربات فروش خوش آمدید 🌟",
+        "def_gb" => "30",
+        "def_days" => "30",
+        "def_conns" => "1",
         _ => "",
     }
 }

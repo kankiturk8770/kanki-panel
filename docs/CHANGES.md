@@ -1,3 +1,15 @@
+# v2.8.4 — New panel look, Settings rebuilt
+- **New look:** the side menu is grouped (Overview · Users & sales · Network · System) with the version / update status and logout at the bottom; a top bar shows where you are (panel › group › page), a FA/EN switch, theme, update and the signed-in admin. Every page header gets its page icon. Calmer cards, inputs with a focus ring, dotted background. Light theme and phones included.
+- **Settings rebuilt** into seven sections, each with its own Save and Undo and a dot in the menu while it has unsaved changes:
+  - *Appearance*: name, logo (saved at once), language, theme and colour as visual pickers, auto refresh.
+  - *Addresses*: panel address (copy), public VPN host, subscription base URL, "use this address on every node", web bind/port (read only).
+  - *VPN & protocols*: DNS with Cloudflare / Google / Quad9 / AdGuard presets, MTU with presets (checked: 1200–1500), AmneziaWG compatibility, Hysteria2 connection limit.
+  - *New users* (new): default protocols, volume, days and connections; the "New user" form starts with these.
+  - *Notifications*: server alerts, buyer warnings, daily backup to bot admins.
+  - *Update & version*: current / latest version, check and install, and the **update source (GitHub repo) can now be set from the panel** (written to /etc/kanki/repo; KANKI_REPO in the environment still wins).
+  - *Export & import* (new): download all settings as JSON and load them into another panel (users, nodes and keys are not in it).
+- API: settings `def_gb`, `def_days`, `def_conns`; `update_repo` (GET returns the current source, PUT checks the owner/repo form); `/api/me` also returns the new-user defaults.
+
 # v2.8.3 — Connection tutorial button, everything editable from the bot
 - **Connection tutorial (🎬 آموزش‌ها):** in the bot's admin menu, tap «➕ آموزش جدید» and send the video (a gif, file, photo or plain text also works). The first line of the caption becomes the title and the whole caption is shown under the video. While there is no tutorial the button is hidden; as soon as one is saved:
   - the main menu shows «🎬 آموزش اتصال» (one tutorial: sent at once; several: a list),

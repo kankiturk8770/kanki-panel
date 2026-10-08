@@ -244,6 +244,7 @@ pub fn ui_settings(app: &App) -> Value {
         "panel_name": g("panel_name"), "lang": g("lang"), "theme": g("theme"), "color": g("color"),
         "refresh": g("refresh").parse::<i64>().unwrap_or(10), "version": crate::VERSION,
         "logo": g("logo"),
+        "def_gb": g("def_gb"), "def_days": g("def_days"), "def_conns": g("def_conns"),
     })
 }
 
