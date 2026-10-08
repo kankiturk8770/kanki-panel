@@ -23,13 +23,6 @@ const FILES: &[&str] = &[
     "/etc/wireguard/wg0.conf",
     "/etc/amnezia/amneziawg/awg0.conf",
     "/etc/hysteria/config.yaml",
-    "/etc/openvpn/server/ca.crt",
-    "/etc/openvpn/server/ca.key",
-    "/etc/openvpn/server/server.crt",
-    "/etc/openvpn/server/server.key",
-    "/etc/openvpn/server/tc.key",
-    "/etc/openvpn/server/udp.conf",
-    "/etc/openvpn/server/tcp.conf",
     "/etc/kanki/tls/fullchain.pem",
     "/etc/kanki/tls/privkey.pem",
 ];

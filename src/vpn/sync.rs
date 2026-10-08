@@ -18,9 +18,6 @@ pub struct SyncReq {
     /// sub code -> username (Hysteria2)
     #[serde(default)]
     pub hy2: HashMap<String, String>,
-    /// username -> sub code (OpenVPN)
-    #[serde(default)]
-    pub ovpn: HashMap<String, String>,
     /// username -> (max connections, online across all nodes)
     #[serde(default)]
     pub limits: HashMap<String, (i64, i64)>,
@@ -36,10 +33,6 @@ pub struct SyncResp {
     pub hy2: HashMap<String, (i64, i64)>,
     #[serde(default)]
     pub hy2_online: HashMap<String, i64>,
-    #[serde(default)]
-    pub ovpn: HashMap<String, (i64, i64)>,
-    #[serde(default)]
-    pub ovpn_online: HashMap<String, i64>,
 }
 
 fn loadavg() -> String {
@@ -50,17 +43,12 @@ fn loadavg() -> String {
 pub fn local_info(app: &App) -> Value {
     let e = &app.env;
     let g = |k: &str| e.get(k).cloned().unwrap_or_default();
-    let (ovpn_udp, ovpn_tcp) = (g("OVPN_UDP_PORT"), g("OVPN_TCP_PORT"));
-    let has_ovpn = !ovpn_udp.is_empty() || !ovpn_tcp.is_empty();
     json!({
         "wg_pub": wg::iface_pub("wg"), "wg_port": wg::listen_port("wg"),
         "awg_pub": wg::iface_pub("awg"), "awg_port": wg::listen_port("awg"),
         "awg": wg::awg_params(),
         "hy2_port": g("HY2_PORT"), "hy2_obfs": g("HY2_OBFS"), "hy2_sni": g("DOMAIN"),
         "hy2_insecure": g("HY2_INSECURE"),
-        "ovpn_udp": ovpn_udp, "ovpn_tcp": ovpn_tcp,
-        "ovpn_ca": if has_ovpn { crate::ovpn::read_ca() } else { String::new() },
-        "ovpn_tc": if has_ovpn { crate::ovpn::read_tc() } else { String::new() },
         "services": crate::admin::service_states(), "version": crate::VERSION, "load": loadavg(),
     })
 }
@@ -68,9 +56,7 @@ pub fn local_info(app: &App) -> Value {
 /// Apply on this server
 pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     *app.hy2_allowed.lock().unwrap() = req.hy2.clone();
-    *app.ovpn_allowed.lock().unwrap() = req.ovpn.clone();
     *app.limits.lock().unwrap() = req.limits.clone();
-    let ovpn_allowed = req.ovpn.clone();
     let hy2_names: HashSet<String> = req.hy2.values().cloned().collect();
     let (wgv, awgv) = (req.wg, req.awg);
     let (w, a) = tokio::task::spawn_blocking(move || (wg::apply("wg", &wgv), wg::apply("awg", &awgv)))
@@ -83,24 +69,23 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     // disconnect Hysteria2 users who are no longer allowed (expired / over quota / disabled)
     let kick: Vec<String> = hy2_online.keys().filter(|k| !hy2_names.contains(*k)).cloned().collect();
     crate::hy2::kick(&port, &secret, &kick).await;
-    let (ovpn, ovpn_online) = crate::ovpn::poll(app, &ovpn_allowed).await;
     let mut rep: HashMap<String, i64> = HashMap::new();
-    for (k, v) in hy2_online.iter().chain(ovpn_online.iter()) {
+    for (k, v) in hy2_online.iter() {
         *rep.entry(k.clone()).or_default() += v;
     }
     *app.reported.lock().unwrap() = rep;
-    SyncResp { wg: w, awg: a, hy2, hy2_online, ovpn, ovpn_online }
+    SyncResp { wg: w, awg: a, hy2, hy2_online }
 }
 
-/// Live hy2 + OpenVPN sessions of a user on this server
+/// Live Hysteria2 sessions of a user on this server
 pub async fn live_sessions(app: &App, username: &str) -> i64 {
     let port = app.env.get("HY2_STATS_PORT").cloned().unwrap_or_default();
     let secret = app.env.get("HY2_SECRET").cloned().unwrap_or_default();
     let h = crate::hy2::online(&port, &secret).await.get(username).copied().unwrap_or(0);
-    h + crate::ovpn::online_of(app, username).await
+    h
 }
 
-/// Connection-limit check used by Hysteria2 / OpenVPN auth
+/// Connection-limit check used by Hysteria2 auth
 pub async fn conn_allowed(app: &App, username: &str) -> bool {
     let (max, total) = app.limits.lock().unwrap().get(username).copied().unwrap_or((0, 0));
     if max <= 0 {
@@ -139,9 +124,6 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
         }
         if u.has_proto("hy2") {
             req.hy2.insert(u.code.clone(), u.username.clone());
-        }
-        if u.has_proto("ovpn") {
-            req.ovpn.insert(u.username.clone(), u.code.clone());
         }
         req.limits.insert(u.username.clone(), (if limit_on { u.max_conn } else { 0 }, u.online));
     }
@@ -206,12 +188,12 @@ pub async fn sync_all(app: &Arc<App>) {
                 *e = (*e).max(st.handshake);
             }
         }
-        for (name, (rx, tx)) in resp.hy2.iter().chain(resp.ovpn.iter()) {
+        for (name, (rx, tx)) in resp.hy2.iter() {
             if let Some(uid) = by_name.get(name) {
                 *add_bytes.entry(*uid).or_default() += rx + tx;
             }
         }
-        for (name, c) in resp.hy2_online.iter().chain(resp.ovpn_online.iter()) {
+        for (name, c) in resp.hy2_online.iter() {
             if let Some(uid) = by_name.get(name) {
                 if *c > 0 {
                     *online.entry(*uid).or_default() += c;

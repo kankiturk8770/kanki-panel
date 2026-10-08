@@ -232,7 +232,7 @@ setup_caddy(){ # $1=site address $2=upstream port
 }
 $1 {
   tls $TLS/fullchain.pem $TLS/privkey.pem
-  @blocked path /hy2/* /ovpn/*
+  @blocked path /hy2/*
   respond @blocked 404
   header {
     Strict-Transport-Security "max-age=31536000"

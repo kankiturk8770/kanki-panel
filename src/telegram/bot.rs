@@ -220,10 +220,56 @@ impl Bot {
     fn account_text(&self, u: &User) -> String {
         let left = if u.limit_gb > 0.0 { format!("{:.2} GB", (u.limit_gb - u.used_gb()).max(0.0)) } else { "نامحدود".into() };
         let st = if u.active() { "🟢 فعال" } else { "🔴 غیرفعال" };
+        let link = self.db().get("app_link");
+        let step1 = if link.is_empty() { String::new() } else { format!("1️⃣ برنامه رو از لینک زیر نصب کنید:\n{}\n\n", esc(&link)) };
+        let step2 = if link.is_empty() { "با این کد وارد برنامه‌ی کانکی بشید:" } else { "2️⃣ با این کد وارد برنامه بشید:" };
         format!(
-            "👤 <b>{}</b>  ·  {}\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n🔗 لینک اشتراک:\n<code>{}/sub/{}</code>\n\n🔑 کد ورود به اپ:\n<code>{}</code>",
-            esc(&u.username), st, left, u.used_gb(), left_text(u), u.online, u.max_conn, origin(&self.app), u.sub_code(), u.sub_code()
+            "👤 <b>{}</b>  ·  {}\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n📱 <b>بهترین راه (پیشنهاد ما): برنامه‌ی کانکی</b>\n{}{}\n<code>{}</code>\n\n🔗 لینک اشتراک (برای برنامه‌های دیگه):\n<code>{}/sub/{}</code>",
+            esc(&u.username), st, left, u.used_gb(), left_text(u), u.online, u.max_conn, step1, step2, u.sub_code(), origin(&self.app), u.sub_code()
         )
+    }
+
+    /// What the customer gets after a purchase / trial / "my service": the account plus a hint about the config buttons.
+    fn account_msg(&self, u: &User) -> String {
+        format!("{}\n\n⚙️ کانفیگ دستی (WireGuard، AmneziaWG، Hysteria2) رو هم می‌تونید از دکمه‌های زیر بگیرید 👇", self.account_text(u))
+    }
+
+    /// Buttons that send the config files, in a fixed order, followed by `extra` rows.
+    fn acct_kb(&self, u: &User, mut extra: Kb) -> Value {
+        let mut have: Vec<&str> = vec![];
+        for n in crate::api::user_nodes(&self.app, u) {
+            for p in crate::api::node_protos(u, &n) {
+                if !have.contains(&p) { have.push(p); }
+            }
+        }
+        let mut rows: Kb = vec![];
+        for (p, code, title) in [("wireguard", "w", "WireGuard"), ("amneziawg", "a", "AmneziaWG"), ("hysteria2", "h", "Hysteria2")] {
+            if have.contains(&p) {
+                rows.push(vec![b(&format!("📥 کانفیگ {}", title), &format!("cfg:{}:{}", u.id, code))]);
+            }
+        }
+        rows.append(&mut extra);
+        ik(rows)
+    }
+
+    /// Sends the config(s) of one protocol: a file per server (Hysteria2 as a copyable link).
+    async fn send_configs(&self, chat: i64, qid: &str, u: &User, code: &str) {
+        let (proto, title) = match code { "w" => ("wireguard", "WireGuard"), "a" => ("amneziawg", "AmneziaWG"), _ => ("hysteria2", "Hysteria2") };
+        let mut sent = 0;
+        for n in crate::api::user_nodes(&self.app, u) {
+            if sent >= 8 || !crate::api::node_protos(u, &n).contains(&proto) { continue; }
+            let Some((name, text)) = crate::api::bot_config(&self.app, u, &n, proto).await else { continue };
+            if proto == "hysteria2" {
+                self.send(chat, &format!("📥 <b>{} · {}</b>\n\n<code>{}</code>\n\nلینک بالا رو کپی کنید و داخل برنامه (کانکی، Hiddify و مشابه) اضافه کنید.", title, esc(&n.name), esc(text.trim())), None).await;
+            } else {
+                let cap = format!("📥 {} · {}\nفایل رو داخل برنامه‌ی {} وارد (Import) کنید.", title, n.name, title);
+                self.send_doc(chat, text.into_bytes(), &name, &cap).await;
+            }
+            sent += 1;
+        }
+        if sent == 0 {
+            self.answer(qid, "این پروتکل برای سرویس شما فعال نیست.", true).await;
+        }
     }
 
     fn create_account(&self, tg: i64, gb: f64, days: i64, conns: i64, notes: &str) -> Result<User, String> {
@@ -482,6 +528,15 @@ impl Bot {
 
         let (head, rest) = d.split_once(':').unwrap_or((d.as_str(), ""));
         match head {
+            "cfg" => {
+                let mut parts = rest.split(':');
+                let id: i64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                let code = parts.next().unwrap_or("");
+                if let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) {
+                    self.send_configs(chat, &qid, &u, code).await;
+                }
+                return;
+            }
             "pcat" => {
                 let (mode, sel) = rest.split_once(':').unwrap_or(("b", "m"));
                 let pattern = if mode == "b" { "pl".to_string() } else { format!("rpl:{{}}:{}", mode.get(1..).unwrap_or("0")) };
@@ -522,7 +577,7 @@ impl Bot {
             "acc" => {
                 let id: i64 = rest.parse().unwrap_or(0);
                 if let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) {
-                    return self.edit(chat, mid, &self.account_text(&u), Some(ik(vec![vec![b("🔁 تمدید همین سرویس", &format!("rnw:{}", id))], back("my")]))).await;
+                    return self.edit(chat, mid, &self.account_msg(&u), Some(self.acct_kb(&u, vec![vec![b("🔁 تمدید همین سرویس", &format!("rnw:{}", id))], back("my")]))).await;
                 }
                 return;
             }
@@ -743,7 +798,7 @@ impl Bot {
         match res {
             Ok(u) => {
                 let head = if o.3 == "renew" { "✅ <b>اشتراک شما تمدید شد</b>" } else { "✅ <b>اشتراک شما فعال شد</b>" };
-                self.send(o.1, &format!("{}\n\n{}", head, self.account_text(&u)), None).await;
+                self.send(o.1, &format!("{}\n\n{}", head, self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b("🏠 منوی اصلی", "home")]]))).await;
                 if !o.9.is_empty() {
                     let _ = self.db().exec("UPDATE discounts SET uses_left=uses_left-1 WHERE code=?1", &[&o.9]);
                 }
@@ -818,7 +873,7 @@ impl Bot {
         let days: i64 = self.db().get("trial_days").parse().unwrap_or(1);
         match self.create_account(uid, gb, days, 1, "trial") {
             Ok(u) => {
-                self.edit(chat, mid, &format!("🎁 <b>اکانت تست شما آماده است</b>\n\n{}", self.account_text(&u)), back).await;
+                self.edit(chat, mid, &format!("🎁 <b>اکانت تست شما آماده است</b>\n\n{}", self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b("⬅️ بازگشت", "home")]]))).await;
             }
             Err(e) => {
                 // nothing was created: give the trial back

@@ -24,7 +24,6 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with 
 
 ## New in 2.3
 - The panel is called **Kanki Panel** and has its own logo (an uploaded logo still replaces it).
-- No OpenVPN anywhere: not in the panel, not on the subscription page, not installed by `install.sh` or by node join.
 - **Dashboard**: every node says *Connected* / *Disconnected*, plus a **live log** (journald) with **All / Errors / Debug** tabs and a source picker.
 - **Traffic & stats**: total usage, quota of limited users with percent used, live network chart, usage by protocol and node, per-user usage list.
 - **Port management**: ports and service state for the main server and every node, conflict warning, ready `ufw` command, all-servers table.

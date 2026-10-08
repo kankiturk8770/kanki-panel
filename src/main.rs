@@ -1,4 +1,4 @@
-//! Kanki Panel: WireGuard / AmneziaWG / Hysteria2 / OpenVPN panel with a built-in Telegram sales bot
+//! Kanki Panel: WireGuard / AmneziaWG / Hysteria2 panel with a built-in Telegram sales bot
 // core: storage + shared helpers
 #[path = "core/db.rs"]
 mod db;
@@ -18,8 +18,6 @@ mod backup;
 // vpn: protocol engines + node sync
 #[path = "vpn/hy2.rs"]
 mod hy2;
-#[path = "vpn/ovpn.rs"]
-mod ovpn;
 #[path = "vpn/sync.rs"]
 mod sync;
 #[path = "vpn/wg.rs"]
@@ -46,14 +44,10 @@ pub struct App {
     pub env: HashMap<String, String>,
     /// sub code -> username (Hysteria2 users allowed on this server)
     pub hy2_allowed: Mutex<HashMap<String, String>>,
-    /// username -> sub code (OpenVPN users allowed on this server)
-    pub ovpn_allowed: Mutex<HashMap<String, String>>,
     /// username -> (max connections, online across all nodes at last sync)
     pub limits: Mutex<HashMap<String, (i64, i64)>>,
-    /// username -> hy2+ovpn sessions this server reported at last sync
+    /// username -> hy2 sessions this server reported at last sync
     pub reported: Mutex<HashMap<String, i64>>,
-    /// OpenVPN per-session byte counters ("port:client_id" -> bytes)
-    pub ovpn_last: Mutex<HashMap<String, i64>>,
     /// failed logins per IP: (count, first failure ts)
     pub login_fails: Mutex<HashMap<String, (u32, i64)>>,
     /// only one sync round at a time (prevents double-counted traffic)
@@ -151,10 +145,8 @@ async fn main() {
         db,
         env,
         hy2_allowed: Mutex::new(HashMap::new()),
-        ovpn_allowed: Mutex::new(HashMap::new()),
         limits: Mutex::new(HashMap::new()),
         reported: Mutex::new(HashMap::new()),
-        ovpn_last: Mutex::new(HashMap::new()),
         login_fails: Mutex::new(HashMap::new()),
         sync_lock: tokio::sync::Mutex::new(()),
         bot_alive: AtomicI64::new(0),

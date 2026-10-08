@@ -1,4 +1,4 @@
-//! Web: management API, subscription page, client configs, node agent, Hysteria2/OpenVPN auth
+//! Web: management API, subscription page, client configs, node agent, Hysteria2 auth
 use crate::db::{Node, User};
 use crate::guard;
 use crate::sync::{self, SyncReq};
@@ -8,7 +8,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
-use axum::{Form, Json, Router};
+use axum::{Json, Router};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -106,7 +106,6 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/config/:id/:proto", get(config_file))
         .route("/api/config/:id/:proto/:extra", get(config_file_extra))
         .route("/hy2/auth", post(hy2_auth))
-        .route("/ovpn/auth", post(ovpn_auth))
         .merge(crate::auth::router())
         .merge(crate::admin::router())
         .merge(crate::backup::router())
@@ -125,7 +124,6 @@ pub fn node_router(app: Arc<App>) -> Router {
         .route("/agent/update", post(agent_update))
         .route("/agent/ports", post(agent_ports))
         .route("/hy2/auth", post(hy2_auth))
-        .route("/ovpn/auth", post(ovpn_auth))
         .with_state(app)
 }
 
@@ -141,7 +139,7 @@ async fn overview(State(app): St, h: HeaderMap) -> Response {
         }).unwrap_or((0, 0))
     });
     let mut protos: HashMap<&str, usize> = HashMap::new();
-    for p in ["wg", "awg", "hy2", "ovpn"] {
+    for p in ["wg", "awg", "hy2"] {
         protos.insert(p, us.iter().filter(|u| u.has_proto(p)).count());
     }
     let online = us.iter().filter(|u| u.online > 0).count();
@@ -306,8 +304,6 @@ fn node_json(app: &App, n: &Node, users: &[User]) -> Value {
     let info = node_info(n);
     let mut info_pub = info.clone();
     if let Some(o) = info_pub.as_object_mut() {
-        o.remove("ovpn_ca");
-        o.remove("ovpn_tc");
     }
     let assigned = users.iter().filter(|u| u.on(n)).count();
     json!({
@@ -525,7 +521,7 @@ pub const SETTING_KEYS: &[&str] = &[
     "dns", "mtu", "default_protocols", "sales_on", "trial_on", "trial_gb", "trial_days", "card_on", "card_number", "card_holder",
     "wallet_on", "wallet_text", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
     "welcome", "ref_gb", "ref_days", "warn_on", "backup_on", "channel",
-    "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "ovpn_inline_auth", "conn_limit_on", "tg_alerts", "logo", "price_rules",
+    "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "conn_limit_on", "tg_alerts", "logo", "price_rules",
 ];
 
 async fn settings_get(State(app): St, h: HeaderMap) -> Response {
@@ -683,16 +679,15 @@ fn hy2_uri(app: &App, u: &User, n: &Node) -> Option<String> {
     Some(format!("hysteria2://{}@{}:{}/?{}#{}", u.code, endpoint(app, n), port, q.join("&"), pct(&n.name)))
 }
 
-fn user_nodes(app: &App, u: &User) -> Vec<Node> {
+pub fn user_nodes(app: &App, u: &User) -> Vec<Node> {
     app.db.nodes().into_iter().filter(|n| n.usable() && u.on(n)).collect()
 }
 
 /// Which protocols this user can actually use on this node
-fn node_protos(u: &User, n: &Node) -> Vec<&'static str> {
+pub fn node_protos(u: &User, n: &Node) -> Vec<&'static str> {
     let info = node_info(n);
     let mut v = vec![];
     let has = |k: &str| info[k].as_str().map(|s| !s.is_empty()).unwrap_or(false);
-    if u.has_proto("ovpn") && (has("ovpn_udp") || has("ovpn_tcp")) && has("ovpn_ca") { v.push("openvpn"); }
     if u.has_proto("wg") && has("wg_pub") { v.push("wireguard"); }
     if u.has_proto("awg") && has("awg_pub") { v.push("amneziawg"); }
     if u.has_proto("hy2") && has("hy2_port") { v.push("hysteria2"); }
@@ -704,7 +699,6 @@ fn sub_data(app: &App, u: &User) -> Value {
         let info = node_info(n);
         json!({
             "id": n.id, "name": n.name, "main": n.id == "local", "protocols": node_protos(u, n),
-            "ovpn_udp": info["ovpn_udp"].as_str().unwrap_or("") != "", "ovpn_tcp": info["ovpn_tcp"].as_str().unwrap_or("") != "",
             "hy2": hy2_uri(app, u, n),
         })
     }).collect();
@@ -713,7 +707,7 @@ fn sub_data(app: &App, u: &User) -> Value {
         "limit_gb": u.limit_gb, "used_gb": u.used_gb(), "expires_ts": u.expires_at, "created_ts": u.created_at,
         "online": u.online, "max_conn": u.max_conn, "last_seen_ts": u.last_seen,
         "panel_name": app.db.get("panel_name"), "version": crate::VERSION, "nodes": nodes,
-        "ovpn_user": u.username, "ovpn_pass": u.code, "support": app.db.get("support"), "app_link": app.db.get("app_link"),
+        "support": app.db.get("support"), "app_link": app.db.get("app_link"),
         "logo": app.db.get("logo"),
     })
 }
@@ -727,20 +721,10 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
     for n in user_nodes(&app, &u) {
         let mut rows = String::new();
         for p in node_protos(&u, &n) {
-            let (title, letter) = match p { "openvpn" => ("OpenVPN", "O"), "wireguard" => ("WireGuard", "W"), "amneziawg" => ("AmneziaWG", "A"), _ => ("Hysteria2", "H") };
+            let (title, letter) = match p { "wireguard" => ("WireGuard", "W"), "amneziawg" => ("AmneziaWG", "A"), _ => ("Hysteria2", "H") };
             let base = format!("/api/config/{}/{}?sub={}&amp;node={}", u.id, p, sub, esc(&n.id));
             let mut btns = String::new();
             match p {
-                "openvpn" => {
-                    let info = node_info(&n);
-                    if info["ovpn_tcp"].as_str().unwrap_or("") != "" {
-                        btns.push_str(&format!("<a class=\"btn\" href=\"{}&amp;t=tcp\" data-i18n=\"dl_tcp\">TCP config</a>", base));
-                    }
-                    if info["ovpn_udp"].as_str().unwrap_or("") != "" {
-                        btns.push_str(&format!("<a class=\"btn\" href=\"{}&amp;t=udp\" data-i18n=\"dl_udp\">UDP config</a>", base));
-                    }
-                    btns.push_str(&format!("<button class=\"b2\" data-act=\"info\" data-url=\"{}&amp;t=udp\" data-i18n=\"show_info\">Show info</button>", base));
-                }
                 "hysteria2" => {
                     if let Some(hu) = hy2_uri(&app, &u, &n) {
                         btns.push_str(&format!("<code class=\"uri\">{}</code>", esc(&hu)));
@@ -834,6 +818,20 @@ fn text_conf(s: String) -> Response {
     ([(header::CONTENT_TYPE, "text/plain; charset=utf-8".to_string())], s).into_response()
 }
 
+/// For the sales bot: the config of one protocol on one server -> (file name, text).
+pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str) -> Option<(String, String)> {
+    let mut q: HashMap<String, String> = HashMap::new();
+    q.insert("sub".to_string(), u.sub_code().to_string());
+    q.insert("node".to_string(), n.id.clone());
+    let resp = build_config(State(app.clone()), u.id, proto.to_string(), q, "").await;
+    if resp.status() != StatusCode::OK {
+        return None;
+    }
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.ok()?;
+    let text = String::from_utf8(bytes.to_vec()).ok()?;
+    Some((format!("{}-{}-{}.conf", u.username, n.name.replace(' ', "_"), proto), text))
+}
+
 async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String, String>, extra: &str) -> Response {
     let sub = q.get("sub").cloned().unwrap_or_default();
     let code = parse_code(&sub).map(|x| x.1).unwrap_or(sub);
@@ -853,22 +851,6 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
     if proto == "hysteria2" {
         let s = hy2_uri(&app, &u, &n).unwrap_or_default();
         return if extra == "qr" { qr(&s) } else { text_conf(s) };
-    }
-    if proto == "openvpn" {
-        if !u.has_proto("ovpn") {
-            return (StatusCode::FORBIDDEN, "protocol not allowed").into_response();
-        }
-        let t = q.get("t").map(|s| s.as_str()).unwrap_or("udp");
-        let t = if t == "tcp" { "tcp" } else { "udp" };
-        let Some(s) = crate::ovpn::client_config(&app, &u, &n, &endpoint(&app, &n), t) else {
-            return (StatusCode::NOT_FOUND, "OpenVPN is not installed on this server").into_response();
-        };
-        if extra == "qr" {
-            return qr(&s);
-        }
-        let fname = format!("{}-{}-openvpn-{}.ovpn", u.username, n.name.replace(' ', "_"), t);
-        return ([(header::CONTENT_TYPE, "application/x-openvpn-profile".to_string()),
-                 (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", fname))], s).into_response();
     }
     let p = match proto.as_str() { "amneziawg" => "awg", "wireguard" => "wg", _ => return (StatusCode::NOT_FOUND, "proto").into_response() };
     if !u.has_proto(p) {
@@ -916,7 +898,7 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
       (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", fname))], s).into_response()
 }
 
-// ============================================================ Hysteria2 / OpenVPN auth (local only, blocked at Caddy)
+// ============================================================ Hysteria2 auth (local only, blocked at Caddy)
 
 async fn hy2_auth(State(app): St, Json(b): Json<Value>) -> Response {
     let auth = b["auth"].as_str().unwrap_or("").to_string();
@@ -927,20 +909,6 @@ async fn hy2_auth(State(app): St, Json(b): Json<Value>) -> Response {
         }
     }
     Json(json!({ "ok": false })).into_response()
-}
-
-async fn ovpn_auth(State(app): St, Form(f): Form<HashMap<String, String>>) -> Response {
-    let user = f.get("u").cloned().unwrap_or_default();
-    let pass = f.get("p").cloned().unwrap_or_default();
-    let code = app.ovpn_allowed.lock().unwrap().get(&user).cloned();
-    let ok = match code {
-        Some(c) => {
-            let p = parse_code(pass.trim()).map(|x| x.1).unwrap_or_else(|| pass.trim().to_string());
-            util::ct_eq(&p, &c) && sync::conn_allowed(&app, &user).await
-        }
-        None => false,
-    };
-    if ok { (StatusCode::OK, "ok").into_response() } else { (StatusCode::FORBIDDEN, "denied").into_response() }
 }
 
 // ============================================================ node agent

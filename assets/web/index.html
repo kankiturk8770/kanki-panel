@@ -818,7 +818,7 @@ function goNodes(add){S.openAdd=!!add;if(location.hash=='#nodes')route();else lo
 function drawKpis(o){var el=$('#kpis');if(!el||!o)return;
  var it=[['a','Total users',o.users,'all'],['g','Online',o.online,'online'],['g','Active',o.active,'active'],['y','Expired / out of data',o.expired,'finished'],['r','Disabled',o.disabled,'disabled'],['a','Total traffic',N(o.traffic_gb)+' GB','']];
  el.innerHTML=it.map(function(x){return '<button class="kpi '+x[0]+'" '+(x[3]?'data-go="'+x[3]+'"':'')+'><small>'+t(x[1])+'</small><b class="ltr">'+(typeof x[2]=='number'?N(x[2]):x[2])+'</b></button>'}).join('')}
-function drawSvcs(list){var el=$('#svcs');if(!el)return;list=(list||[]).filter(function(x){return String(x.key).indexOf('openvpn')!==0});
+function drawSvcs(list){var el=$('#svcs');if(!el)return;list=(list||[]);
  if(!list.length){el.innerHTML='<span class="muted">—</span>';return}
  el.innerHTML=list.map(function(x){var fixed=['web','panel','node'].indexOf(x.key)>=0,k=esc(x.key);
   return '<div class="svc"><div class="sn"><span class="dot '+(x.active?'g':'r')+'"></span><div><b>'+esc(SVN[x.key]||x.key)+'</b><small class="ltr">'+esc(x.unit)+'</small></div></div>'+
@@ -1229,7 +1229,7 @@ function logDraw(){var tb=$('#lg_tabs'),bx=$('#lg_box');if(!tb||!bx)return;
 
 // ---- user sheet: small, one panel at a time (edit / link / QR), five quick buttons
 function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(u),
-  tg=(u.protocols||'').split(',').filter(function(x){return x&&x!='ovpn'}).map(function(x){return '<span class="ptag" style="--pc:'+(PCOL[x]||'#999')+'">'+esc(pname(x))+'</span>'}).join(''),
+  tg=(u.protocols||'').split(',').filter(function(x){return x}).map(function(x){return '<span class="ptag" style="--pc:'+(PCOL[x]||'#999')+'">'+esc(pname(x))+'</span>'}).join(''),
   cls=st=='active'?'g':st=='finished'?'y':'r',lbl=t(st=='active'?'Active':st=='finished'?(u.status=='Limited'?'Limited':'Expired'):'Disabled'),cur='';
  modal('<div class="us-h"><span class="dot '+(u.online_connections>0?'g':'')+'"></span><b class="ltr nm">'+esc(u.username)+'</b><span class="u-st '+cls+'" id="e_badge">'+lbl+'</span><span class="sp"></span>'+
   '<label class="sw"><input type="checkbox" id="e_sw" '+(u.enabled?'checked':'')+' aria-label="'+t('Enable')+'"><span></span></label><button class="ib" onclick="closeModal()" aria-label="close">✕</button></div>'+
@@ -1585,7 +1585,7 @@ function tunNodeFor(sid){return api('GET','/api/nodes').then(function(ns){
  return f.filter(function(n){return keys.indexOf(hs(n.address))>=0||keys.indexOf(hs(n.effective_endpoint))>=0})[0]||f.filter(function(n){return String(n.name||'').trim().toLowerCase()==nm})[0]||null})}
 // the VPN ports a node serves (from the node info the panel already keeps)
 function tunNodePorts(n){var i=(n&&n.info)||{},tcp=[],udp=[],add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
- [i.wg_port,i.awg_port,i.hy2_port,i.ovpn_udp].forEach(function(v){add(udp,v)});add(tcp,i.ovpn_tcp);return {tcp:tcp,udp:udp}}
+ [i.wg_port,i.awg_port,i.hy2_port].forEach(function(v){add(udp,v)});return {tcp:tcp,udp:udp}}
 function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pre)});
  var x=id?Object.assign({},(TN.d.tunnels||[]).filter(function(z){return z.id==id})[0]||{},pre||{}):(pre||{}),sv=TN.d.servers||[];
  var remote=sv.filter(function(s){return !s.local});

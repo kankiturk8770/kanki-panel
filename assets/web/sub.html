@@ -275,7 +275,7 @@ function render(){
  var base=location.origin+'/sub/'+D.sub;
  $('subu').value=base;$('cpu').dataset.text=base;$('rawu').value=base+'/raw';$('cpr').dataset.text=base+'/raw';
  $('ver').textContent=pn+' v'+D.version;
- var nodes=$('nodes');nodes.querySelectorAll('[data-proto="openvpn"]').forEach(function(e){e.remove()});nodes.querySelectorAll('.node').forEach(function(n){if(!n.querySelector('.row'))n.remove()});
+ var nodes=$('nodes');nodes.querySelectorAll('.node').forEach(function(n){if(!n.querySelector('.row'))n.remove()});
  if(!nodes.querySelector('.node'))nodes.innerHTML='<div class="card empty">'+t('no_cfg')+'</div>';
  helpLinks();
 }

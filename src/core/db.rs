@@ -173,7 +173,7 @@ impl Db {
             "PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE, code TEXT,
                 limit_gb REAL DEFAULT 0, used_bytes INTEGER DEFAULT 0, expires_at INTEGER DEFAULT 0, max_conn INTEGER DEFAULT 1,
-                enabled INTEGER DEFAULT 1, protocols TEXT DEFAULT 'wg,awg,hy2,ovpn', nodes TEXT DEFAULT '', notes TEXT DEFAULT '',
+                enabled INTEGER DEFAULT 1, protocols TEXT DEFAULT 'wg,awg,hy2', nodes TEXT DEFAULT '', notes TEXT DEFAULT '',
                 tg_id INTEGER DEFAULT 0, created_at INTEGER DEFAULT 0, last_seen INTEGER DEFAULT 0, online INTEGER DEFAULT 0, warned INTEGER DEFAULT 0);
             CREATE TABLE IF NOT EXISTS peers(user_id INTEGER, node_id TEXT, proto TEXT, privkey TEXT, pubkey TEXT, psk TEXT, ip TEXT,
                 rx INTEGER DEFAULT 0, tx INTEGER DEFAULT 0, PRIMARY KEY(user_id,node_id,proto));
@@ -218,7 +218,7 @@ impl Db {
         let _ = c.execute("UPDATE nodes SET drain=0 WHERE drain IS NULL", []);
         let _ = c.execute("UPDATE nodes SET maint=0 WHERE maint IS NULL", []);
         let _ = c.execute("UPDATE nodes SET accept_all=1 WHERE accept_all IS NULL", []);
-        // v2.3: the panel is called Kanki Panel and has no OpenVPN
+        // cleanup: drop a retired protocol name from old data
         let _ = c.execute("UPDATE settings SET v='Kanki Panel' WHERE k='panel_name' AND v IN ('KANKI VPN','KANKI-VPN','Kanki VPN')", []);
         let _ = c.execute("UPDATE settings SET v=trim(replace(','||v||',', ',ovpn,', ','), ',') WHERE k='default_protocols' AND ','||v||',' LIKE '%,ovpn,%'", []);
         let _ = c.execute("UPDATE users SET protocols=trim(replace(','||protocols||',', ',ovpn,', ','), ',') WHERE ','||protocols||',' LIKE '%,ovpn,%'", []);
@@ -440,7 +440,6 @@ pub fn default_setting(k: &str) -> &'static str {
         "refresh" => "10",
         "session_hours" => "24",
         "awg_compat" => "0",
-        "ovpn_inline_auth" => "1",
         "tgb_hours" => "24",
         "sales_on" => "1",
         "trial_on" => "1",
