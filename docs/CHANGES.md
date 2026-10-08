@@ -1,4 +1,6 @@
-## UI update
+# v2.8.1 — Tunnel servers menu, new tunnel animation, plan categories
+- **Plan categories:** plans can be put in named categories (Bot and sales > Plans). Add a category when creating a plan or in the smart builder, move a plan with the folder button, rename a category from its header. The Telegram bot lists plans grouped by category.
+
 - New side-menu page **Tunnel servers**: add/edit/delete tunnel servers there; the Tunnels page now only has tunnels.
 - New tunnel map animation: glowing tubes, comet packets, return pulses, arrival ripples, orbiting node rings, dotted background; the map no longer restarts every refresh.
 

@@ -97,6 +97,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/settings/apply-endpoint", post(apply_endpoint_all))
         .route("/api/plans", get(plans_list).post(plans_add))
         .route("/api/plans/bulk", post(plans_bulk))
+        .route("/api/plans/category", axum::routing::put(plans_cat_rename))
         .route("/api/plans/:id", axum::routing::delete(plans_delete).put(plans_update))
         .route("/api/sync", post(force_sync))
         .route("/sub/:code", get(sub_page))
@@ -563,11 +564,11 @@ async fn apply_endpoint_all(State(app): St, h: HeaderMap) -> Response {
 async fn plans_list(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "settings");
     let v: Vec<Value> = app.db.with(|c| {
-        let mut s = c.prepare("SELECT id,name,days,gb,toman,usd,conns,active,COALESCE(countries,0) FROM plans ORDER BY toman").unwrap();
+        let mut s = c.prepare("SELECT id,name,days,gb,toman,usd,conns,active,COALESCE(countries,0),COALESCE(category,'') FROM plans ORDER BY toman").unwrap();
         let rows: Vec<Value> = s.query_map([], |r| {
             Ok(json!({ "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "days": r.get::<_, i64>(2)?,
                 "gb": r.get::<_, f64>(3)?, "toman": r.get::<_, i64>(4)?, "usd": r.get::<_, f64>(5)?,
-                "conns": r.get::<_, i64>(6)?, "active": r.get::<_, i64>(7)? == 1, "countries": r.get::<_, i64>(8)? }))
+                "conns": r.get::<_, i64>(6)?, "active": r.get::<_, i64>(7)? == 1, "countries": r.get::<_, i64>(8)?, "category": r.get::<_, String>(9)? }))
         }).unwrap().filter_map(|x| x.ok()).collect();
         rows
     });
@@ -576,11 +577,12 @@ async fn plans_list(State(app): St, h: HeaderMap) -> Response {
 
 fn insert_plan(app: &App, b: &Value) -> Result<usize, String> {
     let name = b["name"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty()).unwrap_or("Plan").to_string();
+    let cat = b["category"].as_str().map(|s| s.trim().to_string()).unwrap_or_default();
     app.db.exec(
-        "INSERT INTO plans(name,days,gb,toman,usd,conns,countries,active) VALUES(?1,?2,?3,?4,?5,?6,?7,1)",
+        "INSERT INTO plans(name,days,gb,toman,usd,conns,countries,active,category) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8)",
         &[&name, &(num(&b["days"]).unwrap_or(30.0) as i64), &num(&b["gb"]).unwrap_or(0.0).max(0.0),
           &(num(&b["toman"]).unwrap_or(0.0).max(0.0) as i64), &num(&b["usd"]).unwrap_or(0.0).max(0.0),
-          &(num(&b["conns"]).unwrap_or(1.0).max(1.0) as i64), &(num(&b["countries"]).unwrap_or(0.0).max(0.0) as i64)],
+          &(num(&b["conns"]).unwrap_or(1.0).max(1.0) as i64), &(num(&b["countries"]).unwrap_or(0.0).max(0.0) as i64), &cat],
     )
 }
 
@@ -618,9 +620,21 @@ async fn plans_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
     if let Some(t) = num(&b["toman"]) {
         let _ = app.db.exec("UPDATE plans SET toman=?1 WHERE id=?2", &[&(t.max(0.0) as i64), &id]);
     }
+    if let Some(cat) = b["category"].as_str() {
+        let _ = app.db.exec("UPDATE plans SET category=?1 WHERE id=?2", &[&cat.trim().to_string(), &id]);
+    }
     if let Some(nm) = b["name"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         let _ = app.db.exec("UPDATE plans SET name=?1 WHERE id=?2", &[&nm.to_string(), &id]);
     }
+    Json(json!({ "ok": true })).into_response()
+}
+
+/// Rename a plan category (from = "" renames the uncategorised plans, to = "" removes the category).
+async fn plans_cat_rename(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "settings");
+    let from = b["from"].as_str().unwrap_or("").trim().to_string();
+    let to = b["to"].as_str().unwrap_or("").trim().to_string();
+    let _ = app.db.exec("UPDATE plans SET category=?1 WHERE COALESCE(category,'')=?2", &[&to, &from]);
     Json(json!({ "ok": true })).into_response()
 }
 

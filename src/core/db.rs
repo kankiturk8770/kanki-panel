@@ -206,6 +206,7 @@ impl Db {
             "ALTER TABLE nodes ADD COLUMN sync_state TEXT DEFAULT ''",
             // v2.5: plans carry how many countries (servers) they give; discount codes can expire
             "ALTER TABLE plans ADD COLUMN countries INTEGER DEFAULT 0",
+            "ALTER TABLE plans ADD COLUMN category TEXT DEFAULT ''",
             "ALTER TABLE discounts ADD COLUMN expires INTEGER DEFAULT 0",
         ] {
             let _ = c.execute(m, []);

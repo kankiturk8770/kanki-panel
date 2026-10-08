@@ -90,6 +90,7 @@ struct Plan {
     conns: i64,
     /// how many countries (servers) the plan gives; 0 = all
     countries: i64,
+    category: String,
 }
 
 /// Bot token: panel setting first, then install-time env
@@ -174,10 +175,10 @@ impl Bot {
 
     fn plans(&self, only_active: bool) -> Vec<(Plan, bool)> {
         self.db().with(|c| {
-            let mut s = c.prepare("SELECT id,name,days,gb,toman,usd,conns,active,COALESCE(countries,0) FROM plans ORDER BY toman").unwrap();
+            let mut s = c.prepare("SELECT id,name,days,gb,toman,usd,conns,active,COALESCE(countries,0),COALESCE(category,'') FROM plans ORDER BY toman").unwrap();
             let v: Vec<(Plan, bool)> = s.query_map([], |r| Ok((Plan {
                 id: r.get(0)?, name: r.get(1)?, days: r.get(2)?, gb: r.get(3)?, toman: r.get(4)?, usd: r.get(5)?, conns: r.get(6)?,
-                countries: r.get(8)?,
+                countries: r.get(8)?, category: r.get(9)?,
             }, r.get::<_, i64>(7)? == 1))).unwrap().filter_map(|x| x.ok()).filter(|(_, a)| *a || !only_active).collect();
             v
         })
@@ -507,14 +508,22 @@ impl Bot {
     async fn plans_menu(&self, chat: i64, mid: i64, pattern: &str) {
         // ordered by duration, then number of users, then price; the text groups them by duration
         let mut list: Vec<Plan> = self.plans(true).into_iter().map(|x| x.0).collect();
-        list.sort_by(|x, y| (x.days, x.conns, x.toman).cmp(&(y.days, y.conns, y.toman)));
+        list.sort_by(|x, y| (&x.category, x.days, x.conns, x.toman).cmp(&(&y.category, y.days, y.conns, y.toman)));
         let mut rows: Kb = vec![];
         let mut txt = String::from("🛒 <b>یک پلن انتخاب کنید:</b>\n");
         let mut last_days: i64 = -1;
+        let mut last_cat = String::new();
         for p in list.iter() {
             let price = if p.toman > 0 { toman(p.toman) } else { format!("{}$", p.usd) };
             let dur = if p.days > 0 && p.days % 30 == 0 { format!("{} ماهه", p.days / 30) } else { format!("{} روزه", p.days) };
             let vol = if p.gb > 0.0 { format!("{}GB", p.gb) } else { "نامحدود".to_string() };
+            if p.category != last_cat {
+                if !p.category.is_empty() {
+                    txt.push_str(&format!("\n📂 <b>{}</b>\n", esc(&p.category)));
+                }
+                last_cat = p.category.clone();
+                last_days = -1;
+            }
             if p.days != last_days {
                 txt.push_str(&format!("\n📅 <b>{}</b>\n", dur));
                 last_days = p.days;
