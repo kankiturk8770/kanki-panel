@@ -453,6 +453,11 @@ impl Bot {
 
         let (head, rest) = d.split_once(':').unwrap_or((d.as_str(), ""));
         match head {
+            "pcat" => {
+                let (mode, sel) = rest.split_once(':').unwrap_or(("b", "m"));
+                let pattern = if mode == "b" { "pl".to_string() } else { format!("rpl:{{}}:{}", mode.get(1..).unwrap_or("0")) };
+                return self.plans_menu_sel(chat, mid, &pattern, sel).await;
+            }
             "pl" | "rpl" => {
                 let mut parts = rest.split(':');
                 let pid: i64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
@@ -506,24 +511,52 @@ impl Bot {
     }
 
     async fn plans_menu(&self, chat: i64, mid: i64, pattern: &str) {
-        // ordered by duration, then number of users, then price; the text groups them by duration
+        self.plans_menu_sel(chat, mid, pattern, "m").await
+    }
+
+    /// sel: "m" = category menu (or the flat list when there are no categories), "o" = plans without a category, "<n>" = n-th category.
+    async fn plans_menu_sel(&self, chat: i64, mid: i64, pattern: &str, sel: &str) {
         let mut list: Vec<Plan> = self.plans(true).into_iter().map(|x| x.0).collect();
-        list.sort_by(|x, y| (&x.category, x.days, x.conns, x.toman).cmp(&(&y.category, y.days, y.conns, y.toman)));
+        // categories are ordered by their shortest duration, then by name
+        let mut cats: Vec<(i64, String)> = vec![];
+        for p in list.iter() {
+            if p.category.is_empty() { continue; }
+            if let Some(i) = cats.iter().position(|c| c.1 == p.category) {
+                if p.days < cats[i].0 { cats[i].0 = p.days; }
+            } else {
+                cats.push((p.days, p.category.clone()));
+            }
+        }
+        cats.sort();
+        let has_other = list.iter().any(|p| p.category.is_empty());
+        let mode = if pattern == "pl" { "b".to_string() } else { format!("r{}", pattern.rsplit(':').next().unwrap_or("0")) };
+        let mut title = String::from("🛒 <b>یک پلن انتخاب کنید:</b>\n");
+        let mut back_to = "home".to_string();
+        if !cats.is_empty() {
+            if sel == "m" {
+                let mut rows: Kb = cats.iter().enumerate().map(|(i, c)| vec![b(&format!("📂 {}", c.1), &format!("pcat:{}:{}", mode, i))]).collect();
+                if has_other { rows.push(vec![b("📦 سایر پلن‌ها", &format!("pcat:{}:o", mode))]); }
+                rows.push(vec![b("⬅️ بازگشت", "home")]);
+                return self.edit(chat, mid, "🛒 <b>یک دسته‌بندی انتخاب کنید:</b>", Some(ik(rows))).await;
+            }
+            let want: String = if sel == "o" {
+                String::new()
+            } else {
+                sel.parse::<usize>().ok().and_then(|i| cats.get(i)).map(|c| c.1.clone()).unwrap_or_default()
+            };
+            if !want.is_empty() { title = format!("📂 <b>{}</b>\n", esc(&want)); }
+            list.retain(|p| p.category == want);
+            back_to = format!("pcat:{}:m", mode);
+        }
+        // ordered by duration, then number of users, then price; the text groups them by duration
+        list.sort_by(|x, y| (x.days, x.conns, x.toman).cmp(&(y.days, y.conns, y.toman)));
         let mut rows: Kb = vec![];
-        let mut txt = String::from("🛒 <b>یک پلن انتخاب کنید:</b>\n");
+        let mut txt = title;
         let mut last_days: i64 = -1;
-        let mut last_cat = String::new();
         for p in list.iter() {
             let price = if p.toman > 0 { toman(p.toman) } else { format!("{}$", p.usd) };
             let dur = if p.days > 0 && p.days % 30 == 0 { format!("{} ماهه", p.days / 30) } else { format!("{} روزه", p.days) };
             let vol = if p.gb > 0.0 { format!("{}GB", p.gb) } else { "نامحدود".to_string() };
-            if p.category != last_cat {
-                if !p.category.is_empty() {
-                    txt.push_str(&format!("\n📂 <b>{}</b>\n", esc(&p.category)));
-                }
-                last_cat = p.category.clone();
-                last_days = -1;
-            }
             if p.days != last_days {
                 txt.push_str(&format!("\n📅 <b>{}</b>\n", dur));
                 last_days = p.days;
@@ -533,9 +566,9 @@ impl Bot {
             rows.push(vec![b(&format!("📅 {} · 👤 {} · {} · {}", dur, p.conns, vol, price), &data)]);
         }
         if rows.is_empty() {
-            return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]))).await;
+            return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b("⬅️ بازگشت", &back_to)]]))).await;
         }
-        rows.push(vec![b("⬅️ بازگشت", "home")]);
+        rows.push(vec![b("⬅️ بازگشت", &back_to)]);
         self.edit(chat, mid, &txt, Some(ik(rows))).await;
     }
 
