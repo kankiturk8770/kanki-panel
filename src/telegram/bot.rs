@@ -20,6 +20,14 @@ enum Wait {
     BroadcastPin,
     DiscountAdd,
     DiscountUse,
+    /// next message from the admin (video, file, photo or text) becomes a new tutorial
+    GuideNew,
+    GuideTitle(i64),
+    GuideCap(i64),
+    GuideFile(i64),
+    /// (plan id, column)
+    PlanField(i64, String),
+    CatRename(String),
 }
 
 #[derive(Clone, Default)]
@@ -44,6 +52,104 @@ type Kb = Vec<Vec<(String, String)>>;
 
 fn b(t: &str, d: &str) -> (String, String) {
     (t.to_string(), d.to_string())
+}
+
+/// Every customer-facing button whose text the admin can change from the bot: (key, default text, where it shows).
+/// The text is kept in the setting `btn_<key>`; an empty setting means the default.
+const BTNS: &[(&str, &str, &str)] = &[
+    ("buy", "🛒 خرید اشتراک", "منوی اصلی"),
+    ("trial", "🎁 تست رایگان", "منوی اصلی"),
+    ("my", "📊 سرویس‌های من", "منوی اصلی"),
+    ("renew", "🔁 تمدید", "منوی اصلی"),
+    ("guide", "🎬 آموزش اتصال", "منوی اصلی (فقط وقتی آموزشی اضافه شده باشد)"),
+    ("ref", "👥 دعوت دوستان", "منوی اصلی"),
+    ("app", "📱 دانلود اپ", "منوی اصلی"),
+    ("support", "💬 پشتیبانی", "منوی اصلی"),
+    ("guide_acc", "🎬 آموزش اتصال و استفاده از اپ", "زیر پیام اشتراک و دانلود اپ"),
+    ("cfg_w", "📥 کانفیگ WireGuard", "زیر پیام اشتراک"),
+    ("cfg_a", "📥 کانفیگ AmneziaWG", "زیر پیام اشتراک"),
+    ("cfg_h", "📥 کانفیگ Hysteria2", "زیر پیام اشتراک"),
+    ("renew_this", "🔁 تمدید همین سرویس", "زیر پیام اشتراک"),
+    ("other_plans", "📦 سایر پلن‌ها", "فهرست دسته‌بندی پلن‌ها"),
+    ("disc", "🎟 کد تخفیف دارم", "صفحه‌ی پرداخت"),
+    ("pay_card", "💳 کارت به کارت", "صفحه‌ی پرداخت"),
+    ("pay_zp", "🏦 درگاه بانکی (زرین‌پال)", "صفحه‌ی پرداخت"),
+    ("pay_np", "🪙 درگاه ارزی (خودکار)", "صفحه‌ی پرداخت"),
+    ("pay_wallet", "💰 ارز دیجیتال (کیف پول)", "صفحه‌ی پرداخت"),
+    ("back", "⬅️ بازگشت", "همه‌ی صفحه‌ها"),
+    ("home", "🏠 منوی اصلی", "بعد از خرید و زیر آموزش‌ها"),
+];
+
+/// Buttons of the main menu, in order; each one can also be hidden (`hide_<key>` = 1).
+const MAIN_BTNS: &[&str] = &["buy", "trial", "my", "renew", "guide", "ref", "app", "support"];
+
+/// Messages the admin can rewrite from the bot: (setting key, default, title). HTML (<b>, <i>, <code>) is allowed.
+const TEXTS: &[(&str, &str, &str)] = &[
+    ("welcome", "به ربات فروش خوش آمدید 🌟", "پیام خوش‌آمد (منوی اصلی)"),
+    ("txt_menu", "از منوی زیر استفاده کنید 👇", "جواب پیام‌های بی‌ربط"),
+    ("txt_cats", "سلام 👋\nدسته‌بندی موردنظرتون رو از پایین انتخاب کنید 👇", "بالای دسته‌بندی پلن‌ها"),
+    ("txt_plans", "سلام 👋\nپلن خودتون رو از پایین انتخاب کنید 👇", "بالای فهرست پلن‌ها"),
+    ("txt_trial_ready", "🎁 <b>اکانت تست شما آماده است</b>", "بالای پیام اکانت تست"),
+    ("txt_bought", "✅ <b>اشتراک شما فعال شد</b>", "بالای پیام بعد از خرید"),
+    ("txt_renewed", "✅ <b>اشتراک شما تمدید شد</b>", "بالای پیام بعد از تمدید"),
+    ("txt_cfg", "⚙️ کانفیگ دستی (WireGuard، AmneziaWG، Hysteria2) رو هم می‌تونید از دکمه‌های زیر بگیرید 👇", "پایین پیام اشتراک"),
+    ("txt_app", "بعد از نصب، «کد ورود» سرویس را در اپ وارد کنید.", "زیر لینک دانلود اپ"),
+    ("txt_guides", "🎬 آموزش موردنظرتون رو از پایین انتخاب کنید 👇", "بالای فهرست آموزش‌ها"),
+];
+
+fn is_text_key(k: &str) -> bool {
+    TEXTS.iter().any(|t| t.0 == k)
+}
+
+/// Which admin page a setting belongs to (where to go back after editing it).
+fn back_view(k: &str) -> &'static str {
+    match k {
+        "trial_gb" | "trial_days" => "a:trial",
+        "card_number" | "card_holder" | "zp_merchant" | "zp_callback" | "np_key" | "np_coins" | "wallet_text" => "a:pay",
+        "ref_gb" | "ref_days" => "a:ref",
+        "app_link" | "support" | "channel" => "a:links",
+        _ if k.starts_with("btn_") => "a:btns",
+        _ if is_text_key(k) => "a:txts",
+        _ => "a:gen",
+    }
+}
+
+/// Human name of a setting, for the "send the new value" prompt.
+fn key_title(k: &str) -> String {
+    if let Some(x) = k.strip_prefix("btn_") {
+        if let Some(t) = BTNS.iter().find(|t| t.0 == x) {
+            return format!("دکمه‌ی «{}»", t.1);
+        }
+    }
+    if let Some(t) = TEXTS.iter().find(|t| t.0 == k) {
+        return format!("متن «{}»", t.2);
+    }
+    match k {
+        "app_link" => "لینک دانلود اپ".into(),
+        "support" => "پشتیبانی (آیدی یا لینک)".into(),
+        "channel" => "کانال اجباری (مثل @mychannel)".into(),
+        "trial_gb" => "حجم تست (گیگ)".into(),
+        "trial_days" => "مدت تست (روز)".into(),
+        "ref_gb" => "گیگ هدیه‌ی دعوت".into(),
+        "ref_days" => "روز هدیه‌ی دعوت".into(),
+        _ => k.to_string(),
+    }
+}
+
+/// The media of a message the admin sent for a tutorial: (kind, file id or text).
+fn media_of(m: &Value) -> Option<(String, String)> {
+    let id = |v: &Value| v["file_id"].as_str().map(|s| s.to_string());
+    if let Some(f) = id(&m["video"]) { return Some(("video".into(), f)); }
+    if let Some(f) = id(&m["animation"]) { return Some(("animation".into(), f)); }
+    if let Some(f) = id(&m["document"]) { return Some(("document".into(), f)); }
+    if let Some(f) = m["photo"].as_array().and_then(|a| a.last()).and_then(id) { return Some(("photo".into(), f)); }
+    let t = m["text"].as_str().unwrap_or("").trim();
+    if !t.is_empty() { return Some(("text".into(), String::new())); }
+    None
+}
+
+fn kind_title(k: &str) -> &'static str {
+    match k { "video" => "ویدیو", "animation" => "گیف", "document" => "فایل", "photo" => "عکس", _ => "متن" }
 }
 
 fn ik(rows: Kb) -> Value {
@@ -121,6 +227,84 @@ impl Bot {
 
     fn admin(&self, id: i64) -> bool {
         self.admins.contains(&id)
+    }
+
+    // ============================================================ editable texts, buttons and tutorials
+    /// Text of a customer button (the admin's own text, or the default).
+    fn bt(&self, k: &str) -> String {
+        let v = self.db().get(&format!("btn_{}", k));
+        if !v.trim().is_empty() {
+            return v;
+        }
+        BTNS.iter().find(|t| t.0 == k).map(|t| t.1.to_string()).unwrap_or_else(|| k.to_string())
+    }
+
+    /// A message text (the admin's own text, or the default).
+    fn tx(&self, k: &str) -> String {
+        let v = self.db().get(k);
+        if !v.trim().is_empty() {
+            return v;
+        }
+        TEXTS.iter().find(|t| t.0 == k).map(|t| t.1.to_string()).unwrap_or_default()
+    }
+
+    /// Tutorials, in order; the first one is the "connection tutorial" under the account message.
+    /// Kept as JSON in the setting `guides`: [{id, title, kind, file, caption}].
+    fn guides(&self) -> Vec<Value> {
+        serde_json::from_str::<Value>(&self.db().get("guides")).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default()
+    }
+
+    fn save_guides(&self, g: &[Value]) {
+        self.db().set("guides", &Value::Array(g.to_vec()).to_string());
+    }
+
+    fn guide(&self, id: i64) -> Option<Value> {
+        self.guides().into_iter().find(|g| g["id"].as_i64() == Some(id))
+    }
+
+    /// Changes one field of a tutorial.
+    fn guide_set(&self, id: i64, field: &str, value: Value) {
+        let mut g = self.guides();
+        for x in g.iter_mut() {
+            if x["id"].as_i64() == Some(id) {
+                x[field] = value.clone();
+            }
+        }
+        self.save_guides(&g);
+    }
+
+    /// Sends one tutorial (video, gif, file, photo or text) with a button back to the main menu.
+    async fn send_guide(&self, chat: i64, g: &Value) {
+        let kind = g["kind"].as_str().unwrap_or("text");
+        let file = g["file"].as_str().unwrap_or("");
+        let title = g["title"].as_str().unwrap_or("");
+        let cap = g["caption"].as_str().filter(|c| !c.trim().is_empty()).unwrap_or(title).to_string();
+        let kb = ik(vec![vec![b(&self.bt("home"), "home")]]);
+        let (method, field) = match kind {
+            "video" => ("sendVideo", "video"),
+            "animation" => ("sendAnimation", "animation"),
+            "photo" => ("sendPhoto", "photo"),
+            "document" => ("sendDocument", "document"),
+            _ => ("", ""),
+        };
+        if method.is_empty() || file.is_empty() {
+            self.send(chat, &esc(&cap), Some(kb)).await;
+            return;
+        }
+        let short: String = cap.chars().take(1000).collect();
+        let mut body = json!({"chat_id": chat, "caption": esc(&short), "parse_mode": "HTML", "reply_markup": kb});
+        body[field] = json!(file);
+        if kind == "video" {
+            body["supports_streaming"] = json!(true);
+        }
+        if self.call(method, body).await.is_none() {
+            self.send(chat, "⚠️ ارسال آموزش ناموفق بود؛ لطفاً به پشتیبانی پیام بدید.", None).await;
+        }
+    }
+
+    /// The tutorial button for under the account / app messages (only when a tutorial exists).
+    fn guide_row(&self) -> Option<Vec<(String, String)>> {
+        if self.guides().is_empty() { None } else { Some(vec![b(&self.bt("guide_acc"), "guide1")]) }
     }
 
     // ============================================================ Bot API
@@ -231,7 +415,7 @@ impl Bot {
 
     /// What the customer gets after a purchase / trial / "my service": the account plus a hint about the config buttons.
     fn account_msg(&self, u: &User) -> String {
-        format!("{}\n\n⚙️ کانفیگ دستی (WireGuard، AmneziaWG، Hysteria2) رو هم می‌تونید از دکمه‌های زیر بگیرید 👇", self.account_text(u))
+        format!("{}\n\n{}", self.account_text(u), self.tx("txt_cfg"))
     }
 
     /// Buttons that send the config files, in a fixed order, followed by `extra` rows.
@@ -243,9 +427,13 @@ impl Bot {
             }
         }
         let mut rows: Kb = vec![];
-        for (p, code, title) in [("wireguard", "w", "WireGuard"), ("amneziawg", "a", "AmneziaWG"), ("hysteria2", "h", "Hysteria2")] {
+        // the connection tutorial first, so a new customer sees it before the manual configs
+        if let Some(r) = self.guide_row() {
+            rows.push(r);
+        }
+        for (p, code) in [("wireguard", "w"), ("amneziawg", "a"), ("hysteria2", "h")] {
             if have.contains(&p) {
-                rows.push(vec![b(&format!("📥 کانفیگ {}", title), &format!("cfg:{}:{}", u.id, code))]);
+                rows.push(vec![b(&self.bt(&format!("cfg_{}", code)), &format!("cfg:{}:{}", u.id, code))]);
             }
         }
         rows.append(&mut extra);
@@ -303,12 +491,24 @@ impl Bot {
     }
 
     fn home_kb(&self, uid: i64) -> Value {
-        let mut rows: Kb = vec![
-            vec![b("🛒 خرید اشتراک", "buy"), b("🎁 تست رایگان", "trial")],
-            vec![b("📊 سرویس‌های من", "my"), b("🔁 تمدید", "renew")],
-            vec![b("👥 دعوت دوستان", "ref"), b("📱 دانلود اپ", "app")],
-            vec![b("💬 پشتیبانی", "support")],
-        ];
+        // visible buttons two per row; the tutorial button gets a row of its own
+        let has_guides = !self.guides().is_empty();
+        let mut rows: Kb = vec![];
+        let mut pair: Vec<(String, String)> = vec![];
+        for k in MAIN_BTNS {
+            if self.db().on(&format!("hide_{}", k)) || (*k == "guide" && !has_guides) {
+                continue;
+            }
+            let btn = b(&self.bt(k), k);
+            if *k == "guide" {
+                if !pair.is_empty() { rows.push(std::mem::take(&mut pair)); }
+                rows.push(vec![btn]);
+                continue;
+            }
+            pair.push(btn);
+            if pair.len() == 2 { rows.push(std::mem::take(&mut pair)); }
+        }
+        if !pair.is_empty() { rows.push(pair); }
         if self.admin(uid) {
             rows.push(vec![b("👑 پنل مدیریت", "adm")]);
         }
@@ -390,13 +590,13 @@ impl Bot {
             if !self.joined(uid).await {
                 return self.ask_join(chat).await;
             }
-            self.send(chat, &self.db().get("welcome"), Some(self.home_kb(uid))).await;
+            self.send(chat, &self.tx("welcome"), Some(self.home_kb(uid))).await;
             return;
         }
         self.touch(uid, &name, 0);
         let wait = self.waits.lock().unwrap().remove(&uid);
         let Some(w) = wait else {
-            self.send(chat, "از منوی زیر استفاده کنید 👇", Some(self.home_kb(uid))).await;
+            self.send(chat, &self.tx("txt_menu"), Some(self.home_kb(uid))).await;
             return;
         };
         match w {
@@ -477,7 +677,8 @@ impl Bot {
         let name = q["from"]["first_name"].as_str().unwrap_or("").to_string();
         self.touch(uid, &name, 0);
         self.answer(&qid, "", false).await;
-        let back = |to: &str| vec![b("⬅️ بازگشت", to)];
+        let back_lbl = self.bt("back");
+        let back = |to: &str| vec![b(&back_lbl, to)];
 
         if !self.joined(uid).await {
             return self.ask_join(chat).await;
@@ -486,7 +687,7 @@ impl Bot {
         match d.as_str() {
             "home" => {
                 self.waits.lock().unwrap().remove(&uid);
-                return self.edit(chat, mid, &self.db().get("welcome"), Some(self.home_kb(uid))).await;
+                return self.edit(chat, mid, &self.tx("welcome"), Some(self.home_kb(uid))).await;
             }
             "buy" => {
                 if !self.db().on("sales_on") && !self.admin(uid) {
@@ -515,8 +716,29 @@ impl Bot {
             }
             "app" => {
                 let l = self.db().get("app_link");
-                return self.edit(chat, mid, &format!("📱 <b>دانلود اپ</b>\n\n{}\n\nبعد از نصب، «کد ورود» سرویس را در اپ وارد کنید.",
-                    if l.is_empty() { "لینک هنوز تنظیم نشده.".to_string() } else { esc(&l) }), Some(ik(vec![back("home")]))).await;
+                let mut rows: Kb = vec![];
+                if let Some(r) = self.guide_row() { rows.push(r); }
+                rows.push(back("home"));
+                return self.edit(chat, mid, &format!("📱 <b>دانلود اپ</b>\n\n{}\n\n{}",
+                    if l.is_empty() { "لینک هنوز تنظیم نشده.".to_string() } else { esc(&l) }, self.tx("txt_app")), Some(ik(rows))).await;
+            }
+            "guide" => {
+                let g = self.guides();
+                if g.len() == 1 {
+                    return self.send_guide(chat, &g[0]).await;
+                }
+                if g.is_empty() {
+                    return self.edit(chat, mid, "هنوز آموزشی اضافه نشده است.", Some(ik(vec![back("home")]))).await;
+                }
+                let mut rows: Kb = g.iter().map(|x| vec![b(&format!("🎬 {}", x["title"].as_str().unwrap_or("")), &format!("gd:{}", x["id"].as_i64().unwrap_or(0)))]).collect();
+                rows.push(back("home"));
+                return self.edit(chat, mid, &self.tx("txt_guides"), Some(ik(rows))).await;
+            }
+            "guide1" => {
+                if let Some(g) = self.guides().first() {
+                    self.send_guide(chat, g).await;
+                }
+                return;
             }
             "support" => return self.edit(chat, mid, &format!("💬 پشتیبانی: {}", esc(&self.db().get("support"))), Some(ik(vec![back("home")]))).await,
             "disc" => {
@@ -528,6 +750,12 @@ impl Bot {
 
         let (head, rest) = d.split_once(':').unwrap_or((d.as_str(), ""));
         match head {
+            "gd" => {
+                if let Some(g) = self.guide(rest.parse().unwrap_or(0)) {
+                    self.send_guide(chat, &g).await;
+                }
+                return;
+            }
             "cfg" => {
                 let mut parts = rest.split(':');
                 let id: i64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
@@ -577,7 +805,7 @@ impl Bot {
             "acc" => {
                 let id: i64 = rest.parse().unwrap_or(0);
                 if let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) {
-                    return self.edit(chat, mid, &self.account_msg(&u), Some(self.acct_kb(&u, vec![vec![b("🔁 تمدید همین سرویس", &format!("rnw:{}", id))], back("my")]))).await;
+                    return self.edit(chat, mid, &self.account_msg(&u), Some(self.acct_kb(&u, vec![vec![b(&self.bt("renew_this"), &format!("rnw:{}", id))], back("my")]))).await;
                 }
                 return;
             }
@@ -614,14 +842,15 @@ impl Bot {
         cats.sort();
         let has_other = list.iter().any(|p| p.category.is_empty());
         let mode = if pattern == "pl" { "b".to_string() } else { format!("r{}", pattern.rsplit(':').next().unwrap_or("0")) };
-        let mut title = String::from("سلام 👋\nپلن خودتون رو از پایین انتخاب کنید 👇");
+        let mut title = self.tx("txt_plans");
+        let back_lbl = self.bt("back");
         let mut back_to = "home".to_string();
         if !cats.is_empty() {
             if sel == "m" {
                 let mut rows: Kb = cats.iter().enumerate().map(|(i, c)| vec![b(&format!("📂 {}", c.1), &format!("pcat:{}:{}", mode, i))]).collect();
-                if has_other { rows.push(vec![b("📦 سایر پلن‌ها", &format!("pcat:{}:o", mode))]); }
-                rows.push(vec![b("⬅️ بازگشت", "home")]);
-                return self.edit(chat, mid, "سلام 👋\nدسته‌بندی موردنظرتون رو از پایین انتخاب کنید 👇", Some(ik(rows))).await;
+                if has_other { rows.push(vec![b(&self.bt("other_plans"), &format!("pcat:{}:o", mode))]); }
+                rows.push(vec![b(&back_lbl, "home")]);
+                return self.edit(chat, mid, &self.tx("txt_cats"), Some(ik(rows))).await;
             }
             let want: String = if sel == "o" {
                 String::new()
@@ -643,9 +872,9 @@ impl Bot {
             rows.push(vec![b(&format!("📅 {} · 👤 {} · {} · {}", dur, p.conns, vol, price), &data)]);
         }
         if rows.is_empty() {
-            return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b("⬅️ بازگشت", &back_to)]]))).await;
+            return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b(&back_lbl, &back_to)]]))).await;
         }
-        rows.push(vec![b("⬅️ بازگشت", &back_to)]);
+        rows.push(vec![b(&back_lbl, &back_to)]);
         self.edit(chat, mid, &title, Some(ik(rows))).await;
     }
 
@@ -655,12 +884,12 @@ impl Bot {
         let (t, u) = self.price(&p, &pe);
         let db = self.db();
         let mut rows: Kb = vec![];
-        if db.on("card_on") && !db.get("card_number").is_empty() && t > 0 { rows.push(vec![b("💳 کارت به کارت", "pay:card")]); }
-        if db.on("zp_on") && !db.get("zp_merchant").is_empty() && t > 0 { rows.push(vec![b("🏦 درگاه بانکی (زرین‌پال)", "pay:zp")]); }
-        if db.on("np_on") && !db.get("np_key").is_empty() && u > 0.0 { rows.push(vec![b("🪙 درگاه ارزی (خودکار)", "pay:np")]); }
-        if db.on("wallet_on") && !db.get("wallet_text").is_empty() && u > 0.0 { rows.push(vec![b("💰 ارز دیجیتال (کیف پول)", "pay:wallet")]); }
-        if pe.discount.is_empty() { rows.push(vec![b("🎟 کد تخفیف دارم", "disc")]); }
-        rows.push(vec![b("⬅️ بازگشت", "home")]);
+        if db.on("card_on") && !db.get("card_number").is_empty() && t > 0 { rows.push(vec![b(&self.bt("pay_card"), "pay:card")]); }
+        if db.on("zp_on") && !db.get("zp_merchant").is_empty() && t > 0 { rows.push(vec![b(&self.bt("pay_zp"), "pay:zp")]); }
+        if db.on("np_on") && !db.get("np_key").is_empty() && u > 0.0 { rows.push(vec![b(&self.bt("pay_np"), "pay:np")]); }
+        if db.on("wallet_on") && !db.get("wallet_text").is_empty() && u > 0.0 { rows.push(vec![b(&self.bt("pay_wallet"), "pay:wallet")]); }
+        if pe.discount.is_empty() { rows.push(vec![b(&self.bt("disc"), "disc")]); }
+        rows.push(vec![b(&self.bt("back"), "home")]);
         let txt = format!(
             "📦 <b>{}</b>\nحجم: {} · مدت: {} روز · {} کاربر{}\nقیمت: <b>{}</b>{}{}\n\nروش پرداخت را انتخاب کنید:",
             esc(&p.name), if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, p.days, p.conns,
@@ -797,8 +1026,8 @@ impl Bot {
         };
         match res {
             Ok(u) => {
-                let head = if o.3 == "renew" { "✅ <b>اشتراک شما تمدید شد</b>" } else { "✅ <b>اشتراک شما فعال شد</b>" };
-                self.send(o.1, &format!("{}\n\n{}", head, self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b("🏠 منوی اصلی", "home")]]))).await;
+                let head = if o.3 == "renew" { self.tx("txt_renewed") } else { self.tx("txt_bought") };
+                self.send(o.1, &format!("{}\n\n{}", head, self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b(&self.bt("home"), "home")]]))).await;
                 if !o.9.is_empty() {
                     let _ = self.db().exec("UPDATE discounts SET uses_left=uses_left-1 WHERE code=?1", &[&o.9]);
                 }
@@ -853,7 +1082,7 @@ impl Bot {
     }
 
     async fn trial(&self, uid: i64, chat: i64, mid: i64) {
-        let back = Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]));
+        let back = Some(ik(vec![vec![b(&self.bt("back"), "home")]]));
         if !self.db().on("trial_on") {
             return self.edit(chat, mid, "تست رایگان فعلاً غیرفعال است.", back).await;
         }
@@ -873,7 +1102,7 @@ impl Bot {
         let days: i64 = self.db().get("trial_days").parse().unwrap_or(1);
         match self.create_account(uid, gb, days, 1, "trial") {
             Ok(u) => {
-                self.edit(chat, mid, &format!("🎁 <b>اکانت تست شما آماده است</b>\n\n{}", self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b("⬅️ بازگشت", "home")]]))).await;
+                self.edit(chat, mid, &format!("{}\n\n{}", self.tx("txt_trial_ready"), self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b(&self.bt("back"), "home")]]))).await;
             }
             Err(e) => {
                 // nothing was created: give the trial back
@@ -889,11 +1118,12 @@ impl Bot {
         ik(vec![
             vec![b("📈 آمار", "a:stats"), b("🧾 سفارش‌های باز", "a:pend")],
             vec![b("🔍 جستجوی کاربر", "a:search"), b("➕ ساخت کانفیگ", "a:mk")],
-            vec![b("📦 پلن‌ها", "a:plans"), b("🎁 تست رایگان", "a:trial")],
-            vec![b("💳 پرداخت‌ها", "a:pay"), b("🖥 نودها", "a:nodes")],
-            vec![b("🎟 کدهای تخفیف", "a:disc"), b("👥 دعوت و هدیه", "a:ref")],
+            vec![b("📦 پلن‌ها", "a:plans"), b("📂 دسته‌بندی‌ها", "a:cats")],
+            vec![b("🎬 آموزش‌ها", "a:guides"), b("🎨 دکمه‌ها و متن‌ها", "a:ui")],
+            vec![b("🎁 تست رایگان", "a:trial"), b("💳 پرداخت‌ها", "a:pay")],
+            vec![b("🖥 نودها", "a:nodes"), b("🎟 کدهای تخفیف", "a:disc")],
+            vec![b("👥 دعوت و هدیه", "a:ref"), b("💾 بکاپ الان", "a:backup")],
             vec![b("📣 پیام همگانی", "a:bc"), b("📌 سنجاق برای همه", "a:bcp")],
-            vec![b("💾 بکاپ الان", "a:backup")],
             vec![b("📢 کانال هوشمند", "a:ch"), b("⚙️ تنظیمات عمومی", "a:gen")],
             vec![b("⬅️ بازگشت", "home")],
         ])
@@ -952,14 +1182,82 @@ impl Bot {
             "a:mk" => { set_wait(Wait::Make); { self.edit(chat, mid, "➕ بفرستید: <code>حجم_گیگ روز تعداد_اتصال [نام]</code>\nمثلاً: <code>50 30 2 ali</code>", back).await; return true; } }
             "a:plans" => {
                 let mut kb: Kb = self.plans(false).into_iter().map(|(p, a)| vec![
-                    b(&format!("{} {} · {}G · {}d · {} · {}$", if a { "🟢" } else { "⚪️" }, p.name, p.gb, p.days, p.toman, p.usd), &format!("pt:{}", p.id)),
-                    b("🗑", &format!("pd:{}", p.id)),
+                    b(&format!("{} {} · {}G · {}d · {} · {}$", if a { "🟢" } else { "⚪️" }, p.name, p.gb, p.days, p.toman, p.usd), &format!("pv:{}", p.id)),
                 ]).collect();
-                kb.push(vec![b("➕ افزودن پلن", "pa")]);
+                kb.push(vec![b("➕ افزودن پلن", "pa"), b("📂 دسته‌بندی‌ها", "a:cats")]);
                 kb.push(vec![b("⬅️ پنل مدیریت", "adm")]);
-                { self.edit(chat, mid, "📦 <b>پلن‌ها</b> (روی هر پلن بزنید تا فعال/غیرفعال شود)", Some(ik(kb))).await; return true; }
+                { self.edit(chat, mid, "📦 <b>پلن‌ها</b>\nروی هر پلن بزنید تا همه‌چیزش (نام، مدت، حجم، قیمت، تعداد کاربر، کشورها، دسته) را عوض کنید، روشن/خاموش یا حذفش کنید.", Some(ik(kb))).await; return true; }
             }
-            "pa" => { set_wait(Wait::Plan); { self.edit(chat, mid, "بفرستید:\n<code>نام | روز | گیگ | تومان | دلار | اتصال</code>\nمثلاً:\n<code>یک‌ماهه | 30 | 50 | 150000 | 2.5 | 1</code>", back).await; return true; } }
+            "pa" => { set_wait(Wait::Plan); { self.edit(chat, mid, "بفرستید:\n<code>نام | روز | گیگ | تومان | دلار | اتصال | دسته</code>\n(دسته اختیاری است)\nمثلاً:\n<code>یک‌ماهه | 30 | 50 | 150000 | 2.5 | 1 | اقتصادی</code>", back).await; return true; } }
+            "a:cats" => {
+                let cats = self.categories();
+                let mut kb: Kb = cats.iter().enumerate().map(|(i, (c, n))| vec![b(&format!("📂 {} · {} پلن", c, n), &format!("ck:{}", i))]).collect();
+                kb.push(vec![b("📦 پلن‌ها", "a:plans")]);
+                kb.push(vec![b("⬅️ پنل مدیریت", "adm")]);
+                let txt = if cats.is_empty() {
+                    "📂 <b>دسته‌بندی‌ها</b>\n\nهنوز دسته‌ای نیست. از صفحه‌ی هر پلن («📂 دسته») یا موقع افزودن پلن، اسم دسته را بدهید تا ساخته شود."
+                } else {
+                    "📂 <b>دسته‌بندی‌ها</b>\n\nروی هر دسته بزنید تا اسمش را عوض یا حذفش کنید. دسته‌ی هر پلن از صفحه‌ی همان پلن تعیین می‌شود."
+                };
+                self.edit(chat, mid, txt, Some(ik(kb))).await;
+                return true;
+            }
+            "a:ui" => {
+                let kb = ik(vec![
+                    vec![b("🔘 متن دکمه‌ها", "a:btns"), b("📝 متن پیام‌ها", "a:txts")],
+                    vec![b("🔗 لینک‌ها", "a:links"), b("🎬 آموزش‌ها", "a:guides")],
+                    vec![b("⬅️ پنل مدیریت", "adm")],
+                ]);
+                self.edit(chat, mid, "🎨 <b>دکمه‌ها و متن‌ها</b>\n\nاز اینجا متن همه‌ی دکمه‌ها و پیام‌های ربات، لینک‌ها و آموزش‌ها را عوض کنید. دکمه‌های منوی اصلی را می‌شود پنهان هم کرد.", Some(kb)).await;
+                return true;
+            }
+            "a:btns" => {
+                let mut kb: Kb = BTNS.iter().map(|(k, _, _)| {
+                    let hidden = MAIN_BTNS.contains(k) && db.on(&format!("hide_{}", k));
+                    vec![b(&format!("{}{}", if hidden { "🚫 " } else { "" }, self.bt(k)), &format!("bv:{}", k))]
+                }).collect();
+                kb.push(vec![b("⬅️ دکمه‌ها و متن‌ها", "a:ui")]);
+                self.edit(chat, mid, "🔘 <b>متن دکمه‌ها</b>\n\nروی هر دکمه بزنید تا متنش را عوض کنید (🚫 = پنهان).", Some(ik(kb))).await;
+                return true;
+            }
+            "a:txts" => {
+                let mut kb: Kb = TEXTS.iter().map(|(k, _, title)| vec![b(&format!("📝 {}", title), &format!("tv:{}", k))]).collect();
+                kb.push(vec![b("⬅️ دکمه‌ها و متن‌ها", "a:ui")]);
+                self.edit(chat, mid, "📝 <b>متن پیام‌ها</b>\n\nروی هر پیام بزنید تا متنش را ببینید و عوض کنید.", Some(ik(kb))).await;
+                return true;
+            }
+            "a:links" => {
+                let show = |k: &str| { let v = db.get(k); if v.is_empty() { "تنظیم نشده".to_string() } else { esc(&v) } };
+                let txt = format!("🔗 <b>لینک‌ها</b>\n\n📱 لینک دانلود اپ:\n{}\n\n💬 پشتیبانی:\n{}\n\n📢 کانال اجباری:\n{}", show("app_link"), show("support"), show("channel"));
+                let kb = ik(vec![
+                    vec![b("✏️ لینک دانلود اپ", "set:app_link")],
+                    vec![b("✏️ پشتیبانی", "set:support"), b("✏️ کانال اجباری", "set:channel")],
+                    vec![b("⬅️ دکمه‌ها و متن‌ها", "a:ui")],
+                ]);
+                self.edit(chat, mid, &txt, Some(kb)).await;
+                return true;
+            }
+            "a:guides" => {
+                let g = self.guides();
+                let mut kb: Kb = g.iter().enumerate().map(|(i, x)| vec![b(
+                    &format!("{}{} · {}", if i == 0 { "⭐️ " } else { "🎬 " }, x["title"].as_str().unwrap_or(""), kind_title(x["kind"].as_str().unwrap_or(""))),
+                    &format!("gv:{}", x["id"].as_i64().unwrap_or(0)),
+                )]).collect();
+                kb.push(vec![b("➕ آموزش جدید", "gn")]);
+                kb.push(vec![b("⬅️ پنل مدیریت", "adm")]);
+                let txt = if g.is_empty() {
+                    "🎬 <b>آموزش‌ها</b>\n\nهنوز آموزشی نیست، پس دکمه‌ی «آموزش اتصال» به کاربرها نشان داده نمی‌شود.\n«➕ آموزش جدید» را بزنید و ویدیو را بفرستید تا دکمه روشن شود."
+                } else {
+                    "🎬 <b>آموزش‌ها</b>\n\n⭐️ آموزش اول همان است که با دکمه‌ی «آموزش اتصال» زیر پیام اشتراک و دانلود اپ فرستاده می‌شود. اگر بیشتر از یکی باشد، دکمه‌ی منوی اصلی فهرست همه را نشان می‌دهد."
+                };
+                self.edit(chat, mid, txt, Some(ik(kb))).await;
+                return true;
+            }
+            "gn" => {
+                set_wait(Wait::GuideNew);
+                self.edit(chat, mid, "🎬 ویدیوی آموزش را بفرستید (یا گیف، فایل، عکس یا یک متن).\nاگر زیر ویدیو متنی بنویسید، خط اولش عنوان آموزش و کلش متن زیر ویدیو می‌شود.", Some(ik(vec![vec![b("⬅️ آموزش‌ها", "a:guides")]]))).await;
+                return true;
+            }
             "a:trial" => { self.edit(chat, mid, &format!("🎁 <b>تست رایگان</b>\nحجم: {} GB · مدت: {} روز", db.get("trial_gb"), db.get("trial_days")),
                 Some(ik(vec![vec![b(&format!("{} روشن/خاموش", self.onoff("trial_on")), "tg:trial_on")],
                     vec![b("✏️ حجم", "set:trial_gb"), b("✏️ مدت", "set:trial_days")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; return true; }
@@ -1073,9 +1371,106 @@ impl Bot {
                     vec![b(&format!("{} بکاپ روزانه", self.onoff("backup_on")), "tg:backup_on")],
                     vec![b("✏️ پشتیبانی", "set:support"), b("✏️ کانال اجباری", "set:channel")],
                     vec![b("✏️ لینک اپ", "set:app_link"), b("✏️ خوش‌آمد", "set:welcome")],
+                    vec![b("🎨 دکمه‌ها و متن‌ها", "a:ui")],
                     vec![b("⬅️ پنل مدیریت", "adm")]]))).await; return true; }
             _ => return false,
         }
+    }
+
+    /// Plan categories (name, number of plans), by name.
+    fn categories(&self) -> Vec<(String, usize)> {
+        let mut out: Vec<(String, usize)> = vec![];
+        for (p, _) in self.plans(false) {
+            if p.category.is_empty() { continue; }
+            if let Some(i) = out.iter().position(|c| c.0 == p.category) {
+                out[i].1 += 1;
+            } else {
+                out.push((p.category.clone(), 1));
+            }
+        }
+        out.sort();
+        out
+    }
+
+    async fn plan_view(&self, chat: i64, mid: i64, id: i64) {
+        let Some((p, active)) = self.plans(false).into_iter().find(|x| x.0.id == id) else {
+            return self.edit(chat, mid, "پلن پیدا نشد.", Some(ik(vec![vec![b("📦 پلن‌ها", "a:plans")]]))).await;
+        };
+        let txt = format!(
+            "📦 <b>{}</b>  {}\n\n📅 مدت: {} روز\n📊 حجم: {}\n💰 قیمت: {} · {}$\n👤 تعداد کاربر: {}\n🌍 کشورها: {}\n📂 دسته: {}",
+            esc(&p.name), if active { "🟢 فعال" } else { "⚪️ غیرفعال" }, p.days,
+            if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, toman(p.toman), p.usd, p.conns,
+            if p.countries > 0 { p.countries.to_string() } else { "همه".into() },
+            if p.category.is_empty() { "بدون دسته".to_string() } else { esc(&p.category) }
+        );
+        let e = |f: &str, t: &str| b(t, &format!("pe:{}:{}", id, f));
+        let kb = ik(vec![
+            vec![e("name", "✏️ نام"), e("days", "✏️ مدت (روز)")],
+            vec![e("gb", "✏️ حجم (گیگ)"), e("conns", "✏️ تعداد کاربر")],
+            vec![e("toman", "✏️ قیمت تومان"), e("usd", "✏️ قیمت دلار")],
+            vec![e("countries", "✏️ تعداد کشور"), e("category", "📂 دسته")],
+            vec![b(if active { "⏸ غیرفعال کن" } else { "▶️ فعال کن" }, &format!("pt:{}", id)), b("🗑 حذف", &format!("pd:{}", id))],
+            vec![b("⬅️ پلن‌ها", "a:plans")],
+        ]);
+        self.edit(chat, mid, &txt, Some(kb)).await;
+    }
+
+    async fn cat_view(&self, chat: i64, mid: i64, i: usize) {
+        let cats = self.categories();
+        let Some((name, n)) = cats.get(i).cloned() else {
+            return self.edit(chat, mid, "دسته پیدا نشد.", Some(ik(vec![vec![b("📂 دسته‌بندی‌ها", "a:cats")]]))).await;
+        };
+        let plans: Vec<String> = self.plans(false).into_iter().filter(|x| x.0.category == name).map(|x| format!("• {}", esc(&x.0.name))).collect();
+        let kb = ik(vec![
+            vec![b("✏️ تغییر نام", &format!("cr:{}", i)), b("🗑 حذف دسته", &format!("cx:{}", i))],
+            vec![b("⬅️ دسته‌بندی‌ها", "a:cats")],
+        ]);
+        self.edit(chat, mid, &format!("📂 <b>{}</b> · {} پلن\n\n{}\n\nبا حذف دسته، پلن‌هایش پاک نمی‌شوند؛ فقط بدون دسته می‌شوند.", esc(&name), n, plans.join("\n")), Some(kb)).await;
+    }
+
+    async fn btn_view(&self, chat: i64, mid: i64, k: &str) {
+        let Some((_, def, place)) = BTNS.iter().find(|t| t.0 == k).cloned() else { return };
+        let main = MAIN_BTNS.contains(&k);
+        let hidden = main && self.db().on(&format!("hide_{}", k));
+        let mut txt = format!("🔘 <b>دکمه</b>\n\nمتن فعلی: <b>{}</b>\nپیش‌فرض: {}\nجای دکمه: {}", esc(&self.bt(k)), esc(def), place);
+        if main { txt.push_str(&format!("\nوضعیت: {}", if hidden { "🚫 پنهان" } else { "👁 نمایش" })); }
+        if k == "guide" || k == "guide_acc" { txt.push_str("\n\nاین دکمه فقط وقتی دیده می‌شود که در «🎬 آموزش‌ها» حداقل یک آموزش باشد."); }
+        let mut rows: Kb = vec![vec![b("✏️ متن جدید", &format!("set:btn_{}", k)), b("↩️ پیش‌فرض", &format!("rs:btn_{}", k))]];
+        if main { rows.push(vec![b(if hidden { "👁 نمایش بده" } else { "🚫 پنهان کن" }, &format!("hd:{}", k))]); }
+        rows.push(vec![b("⬅️ متن دکمه‌ها", "a:btns")]);
+        self.edit(chat, mid, &txt, Some(ik(rows))).await;
+    }
+
+    async fn txt_view(&self, chat: i64, mid: i64, k: &str) {
+        let Some((_, _, title)) = TEXTS.iter().find(|t| t.0 == k).cloned() else { return };
+        let kb = ik(vec![
+            vec![b("✏️ متن جدید", &format!("set:{}", k)), b("↩️ پیش‌فرض", &format!("rs:{}", k))],
+            vec![b("⬅️ متن پیام‌ها", "a:txts")],
+        ]);
+        self.edit(chat, mid, &format!("📝 <b>{}</b>\n➖➖➖➖➖\n{}\n➖➖➖➖➖\nمی‌توانید از &lt;b&gt;پررنگ&lt;/b&gt; و &lt;code&gt;کد&lt;/code&gt; هم استفاده کنید.", title, self.tx(k)), Some(kb)).await;
+    }
+
+    async fn guide_view(&self, chat: i64, mid: i64, id: i64) {
+        let g = self.guides();
+        let Some(pos) = g.iter().position(|x| x["id"].as_i64() == Some(id)) else {
+            return self.edit(chat, mid, "آموزش پیدا نشد.", Some(ik(vec![vec![b("⬅️ آموزش‌ها", "a:guides")]]))).await;
+        };
+        let x = &g[pos];
+        let cap = x["caption"].as_str().unwrap_or("");
+        let txt = format!(
+            "🎬 <b>{}</b>{}\nنوع: {}\nمتن زیر آموزش: {}",
+            esc(x["title"].as_str().unwrap_or("")), if pos == 0 { "  ⭐️ (آموزش اتصال اصلی)" } else { "" },
+            kind_title(x["kind"].as_str().unwrap_or("")), if cap.trim().is_empty() { "— (عنوان نشان داده می‌شود)".to_string() } else { esc(cap) }
+        );
+        let mut rows: Kb = vec![
+            vec![b("▶️ پیش‌نمایش", &format!("gp:{}", id))],
+            vec![b("✏️ عنوان", &format!("gt:{}", id)), b("✏️ متن زیر آموزش", &format!("gc:{}", id))],
+            vec![b("🔄 جایگزینی ویدیو/فایل", &format!("gr:{}", id))],
+        ];
+        if pos > 0 { rows.push(vec![b("⭐️ آموزش اصلی کن (اول فهرست)", &format!("gu:{}", id))]); }
+        rows.push(vec![b("🗑 حذف", &format!("gx:{}", id))]);
+        rows.push(vec![b("⬅️ آموزش‌ها", "a:guides")]);
+        self.edit(chat, mid, &txt, Some(ik(rows))).await;
     }
 
     async fn admin_cb(&self, uid: i64, chat: i64, mid: i64, d: &str) {
@@ -1094,17 +1489,112 @@ impl Bot {
             }
             "set" => {
                 set_wait(Wait::Set(rest.to_string()));
-                self.edit(chat, mid, &format!("مقدار جدید «{}» را بفرستید.\nمقدار فعلی: <code>{}</code>", rest, esc(&db.get(rest))), back).await;
+                let cur = if let Some(k) = rest.strip_prefix("btn_") { self.bt(k) } else if is_text_key(rest) { self.tx(rest) } else { db.get(rest) };
+                let to = match rest.strip_prefix("btn_") { Some(k) => format!("bv:{}", k), None if is_text_key(rest) => format!("tv:{}", rest), None => back_view(rest).to_string() };
+                self.edit(chat, mid, &format!("✏️ مقدار جدید برای {} را بفرستید.\n\nمقدار فعلی:\n<code>{}</code>", key_title(rest), esc(&cur)),
+                    Some(ik(vec![vec![b("⬅️ انصراف", &to)]]))).await;
+            }
+            "rs" => {
+                db.set(rest, "");
+                match rest.strip_prefix("btn_") {
+                    Some(k) => self.btn_view(chat, mid, k).await,
+                    None => self.txt_view(chat, mid, rest).await,
+                }
+            }
+            "hd" => {
+                let k = format!("hide_{}", rest);
+                db.set(&k, if db.on(&k) { "0" } else { "1" });
+                self.btn_view(chat, mid, rest).await;
+            }
+            "bv" => self.btn_view(chat, mid, rest).await,
+            "tv" => self.txt_view(chat, mid, rest).await,
+            "pv" => self.plan_view(chat, mid, rest.parse().unwrap_or(0)).await,
+            "pe" => {
+                let (id, f) = rest.split_once(':').unwrap_or(("0", ""));
+                let id: i64 = id.parse().unwrap_or(0);
+                let hint = match f {
+                    "name" => "نام جدید پلن",
+                    "days" => "مدت به روز (مثلاً 30)",
+                    "gb" => "حجم به گیگ (0 = نامحدود)",
+                    "conns" => "تعداد کاربر همزمان",
+                    "toman" => "قیمت به تومان (فقط عدد)",
+                    "usd" => "قیمت به دلار (مثلاً 2.5؛ 0 = بدون پرداخت ارزی)",
+                    "countries" => "تعداد کشور (0 = همه‌ی سرورها)",
+                    "category" => "اسم دسته (برای «بدون دسته» یک خط تیره - بفرستید)",
+                    _ => return,
+                };
+                let mut msg = format!("✏️ {} را بفرستید.", hint);
+                if f == "category" {
+                    let cats: Vec<String> = self.categories().into_iter().map(|c| format!("<code>{}</code>", esc(&c.0))).collect();
+                    if !cats.is_empty() { msg.push_str(&format!("\n\nدسته‌های فعلی: {}", cats.join("، "))); }
+                }
+                set_wait(Wait::PlanField(id, f.to_string()));
+                self.edit(chat, mid, &msg, Some(ik(vec![vec![b("⬅️ انصراف", &format!("pv:{}", id))]]))).await;
             }
             "pt" => {
                 let id: i64 = rest.parse().unwrap_or(0);
                 let _ = db.exec("UPDATE plans SET active=1-active WHERE id=?1", &[&id]);
-                self.admin_view(uid, chat, mid, "a:plans").await;
+                self.plan_view(chat, mid, id).await;
             }
             "pd" => {
                 let id: i64 = rest.parse().unwrap_or(0);
+                self.edit(chat, mid, "⚠️ این پلن حذف شود؟", Some(ik(vec![vec![b("🗑 بله، حذف کن", &format!("pdy:{}", id))], vec![b("⬅️ نه", &format!("pv:{}", id))]]))).await;
+            }
+            "pdy" => {
+                let id: i64 = rest.parse().unwrap_or(0);
                 let _ = db.exec("DELETE FROM plans WHERE id=?1", &[&id]);
                 self.admin_view(uid, chat, mid, "a:plans").await;
+            }
+            "ck" => self.cat_view(chat, mid, rest.parse().unwrap_or(usize::MAX)).await,
+            "cr" | "cx" => {
+                let Some((name, _)) = self.categories().get(rest.parse().unwrap_or(usize::MAX)).cloned() else {
+                    self.admin_view(uid, chat, mid, "a:cats").await;
+                    return;
+                };
+                if head == "cx" {
+                    let _ = db.exec("UPDATE plans SET category='' WHERE category=?1", &[&name]);
+                    self.admin_view(uid, chat, mid, "a:cats").await;
+                    return;
+                }
+                set_wait(Wait::CatRename(name.clone()));
+                self.edit(chat, mid, &format!("✏️ اسم جدید دسته‌ی «{}» را بفرستید.", esc(&name)), Some(ik(vec![vec![b("⬅️ انصراف", "a:cats")]]))).await;
+            }
+            "gv" => self.guide_view(chat, mid, rest.parse().unwrap_or(0)).await,
+            "gp" => {
+                if let Some(g) = self.guide(rest.parse().unwrap_or(0)) {
+                    self.send_guide(chat, &g).await;
+                }
+            }
+            "gt" | "gc" | "gr" => {
+                let id: i64 = rest.parse().unwrap_or(0);
+                let (w, msg) = match head {
+                    "gt" => (Wait::GuideTitle(id), "✏️ عنوان جدید آموزش را بفرستید (روی دکمه‌ی فهرست آموزش‌ها نشان داده می‌شود)."),
+                    "gc" => (Wait::GuideCap(id), "✏️ متن زیر آموزش را بفرستید. برای پاک کردن، یک خط تیره - بفرستید."),
+                    _ => (Wait::GuideFile(id), "🔄 ویدیو (یا گیف، فایل، عکس یا متن) جدید را بفرستید."),
+                };
+                set_wait(w);
+                self.edit(chat, mid, msg, Some(ik(vec![vec![b("⬅️ انصراف", &format!("gv:{}", id))]]))).await;
+            }
+            "gu" => {
+                let id: i64 = rest.parse().unwrap_or(0);
+                let mut g = self.guides();
+                if let Some(pos) = g.iter().position(|x| x["id"].as_i64() == Some(id)) {
+                    let x = g.remove(pos);
+                    g.insert(0, x);
+                    self.save_guides(&g);
+                }
+                self.guide_view(chat, mid, id).await;
+            }
+            "gx" => {
+                let id: i64 = rest.parse().unwrap_or(0);
+                self.edit(chat, mid, "⚠️ این آموزش حذف شود؟", Some(ik(vec![vec![b("🗑 بله، حذف کن", &format!("gxy:{}", id))], vec![b("⬅️ نه", &format!("gv:{}", id))]]))).await;
+            }
+            "gxy" => {
+                let id: i64 = rest.parse().unwrap_or(0);
+                let mut g = self.guides();
+                g.retain(|x| x["id"].as_i64() != Some(id));
+                self.save_guides(&g);
+                self.admin_view(uid, chat, mid, "a:guides").await;
             }
             "dd" => {
                 let _ = db.exec("DELETE FROM discounts WHERE code=?1", &[&rest]);
@@ -1140,14 +1630,118 @@ impl Bot {
         let kb = Some(self.adm_kb());
         let parts: Vec<&str> = text.split_whitespace().collect();
         match w {
-            Wait::Set(k) => { db.set(&k, text); self.send(chat, "✅ ذخیره شد", kb).await; }
+            Wait::Set(k) => {
+                let v = text.trim();
+                let retry = |to: String| Some(ik(vec![vec![b("✏️ دوباره", &format!("set:{}", k))], vec![b("⬅️ بازگشت", &to)]]));
+                let to = match k.strip_prefix("btn_") { Some(x) => format!("bv:{}", x), None if is_text_key(&k) => format!("tv:{}", k), None => back_view(&k).to_string() };
+                if v.is_empty() {
+                    self.send(chat, "⚠️ لطفاً یک متن بفرستید.", retry(to)).await;
+                    return;
+                }
+                if k.starts_with("btn_") && v.chars().count() > 60 {
+                    self.send(chat, "⚠️ متن دکمه حداکثر ۶۰ حرف باشد.", retry(to)).await;
+                    return;
+                }
+                // messages are sent as HTML: make sure Telegram accepts this one before saving it
+                if is_text_key(&k) && self.send(chat, &format!("👁 پیش‌نمایش:\n\n{}", v), None).await.is_none() {
+                    self.send(chat, "⚠️ تلگرام این متن را قبول نکرد (احتمالاً علامت &lt; یا &gt; یا تگ ناقص دارد). ذخیره نشد.", retry(to)).await;
+                    return;
+                }
+                db.set(&k, v);
+                self.send(chat, "✅ ذخیره شد", None).await;
+                if let Some(x) = k.strip_prefix("btn_") {
+                    self.btn_view(chat, 0, x).await;
+                } else if is_text_key(&k) {
+                    self.txt_view(chat, 0, &k).await;
+                } else {
+                    self.admin_view(uid, chat, 0, back_view(&k)).await;
+                }
+            }
             Wait::Plan => {
                 let f: Vec<&str> = text.split('|').map(|x| x.trim()).collect();
                 if f.len() < 6 { self.send(chat, "⚠️ فرمت نادرست است.", kb).await; return; }
-                let r = db.exec("INSERT INTO plans(name,days,gb,toman,usd,conns) VALUES(?1,?2,?3,?4,?5,?6)", &[
+                let cat = f.get(6).map(|c| c.to_string()).unwrap_or_default();
+                let r = db.exec("INSERT INTO plans(name,days,gb,toman,usd,conns,category) VALUES(?1,?2,?3,?4,?5,?6,?7)", &[
                     &f[0], &f[1].parse::<i64>().unwrap_or(30), &f[2].parse::<f64>().unwrap_or(0.0),
-                    &f[3].parse::<i64>().unwrap_or(0), &f[4].parse::<f64>().unwrap_or(0.0), &f[5].parse::<i64>().unwrap_or(1)]);
-                self.send(chat, if r.is_ok() { "✅ پلن اضافه شد" } else { "⚠️ خطا" }, kb).await;
+                    &f[3].parse::<i64>().unwrap_or(0), &f[4].parse::<f64>().unwrap_or(0.0), &f[5].parse::<i64>().unwrap_or(1), &cat]);
+                self.send(chat, if r.is_ok() { "✅ پلن اضافه شد" } else { "⚠️ خطا" }, None).await;
+                self.admin_view(uid, chat, 0, "a:plans").await;
+            }
+            Wait::PlanField(id, f) => {
+                let v = text.trim();
+                let again = Some(ik(vec![vec![b("✏️ دوباره", &format!("pe:{}:{}", id, f))], vec![b("⬅️ پلن", &format!("pv:{}", id))]]));
+                let r = match f.as_str() {
+                    "name" if !v.is_empty() => db.exec("UPDATE plans SET name=?1 WHERE id=?2", &[&v, &id]),
+                    "category" => {
+                        let c = if v == "-" || v == "—" { "" } else { v };
+                        db.exec("UPDATE plans SET category=?1 WHERE id=?2", &[&c, &id])
+                    }
+                    "days" | "conns" | "toman" | "countries" => match v.parse::<i64>() {
+                        Ok(n) if n >= 0 => db.exec(&format!("UPDATE plans SET {}=?1 WHERE id=?2", f), &[&n, &id]),
+                        _ => Err("bad".into()),
+                    },
+                    "gb" | "usd" => match v.parse::<f64>() {
+                        Ok(n) if n >= 0.0 => db.exec(&format!("UPDATE plans SET {}=?1 WHERE id=?2", f), &[&n, &id]),
+                        _ => Err("bad".into()),
+                    },
+                    _ => Err("bad".into()),
+                };
+                if r.is_err() {
+                    self.send(chat, "⚠️ مقدار نادرست است (برای عددها فقط عدد بفرستید).", again).await;
+                    return;
+                }
+                self.send(chat, "✅ ذخیره شد", None).await;
+                self.plan_view(chat, 0, id).await;
+            }
+            Wait::CatRename(old) => {
+                let v = text.trim();
+                if v.is_empty() || v == "-" {
+                    self.send(chat, "⚠️ اسم دسته خالی نباشد.", Some(ik(vec![vec![b("⬅️ دسته‌بندی‌ها", "a:cats")]]))).await;
+                    return;
+                }
+                let _ = db.exec("UPDATE plans SET category=?1 WHERE category=?2", &[&v, &old]);
+                self.send(chat, "✅ اسم دسته عوض شد", None).await;
+                self.admin_view(uid, chat, 0, "a:cats").await;
+            }
+            Wait::GuideNew | Wait::GuideFile(_) => {
+                let Some((kind, file)) = media_of(m) else {
+                    self.send(chat, "⚠️ ویدیو، گیف، فایل، عکس یا متن بفرستید.", Some(ik(vec![vec![b("⬅️ آموزش‌ها", "a:guides")]]))).await;
+                    return;
+                };
+                // the caption under the video (or the text itself, for a text tutorial)
+                let cap = m["caption"].as_str().or_else(|| m["text"].as_str()).unwrap_or("").trim().to_string();
+                let mut g = self.guides();
+                let id = if let Wait::GuideFile(id) = w {
+                    for x in g.iter_mut() {
+                        if x["id"].as_i64() == Some(id) {
+                            x["kind"] = json!(kind);
+                            x["file"] = json!(file);
+                            if !cap.is_empty() { x["caption"] = json!(cap); }
+                        }
+                    }
+                    id
+                } else {
+                    let id = g.iter().filter_map(|x| x["id"].as_i64()).max().unwrap_or(0) + 1;
+                    let first: String = cap.lines().next().unwrap_or("").trim().chars().take(40).collect();
+                    let title = if !first.is_empty() { first } else if g.is_empty() { "آموزش اتصال".to_string() } else { format!("آموزش {}", g.len() + 1) };
+                    g.push(json!({"id": id, "title": title, "kind": kind, "file": file, "caption": cap}));
+                    id
+                };
+                self.save_guides(&g);
+                self.send(chat, "✅ آموزش ذخیره شد. دکمه‌ی «آموزش اتصال» حالا برای کاربرها فعال است.", None).await;
+                self.guide_view(chat, 0, id).await;
+            }
+            Wait::GuideTitle(id) => {
+                let v: String = text.trim().chars().take(40).collect();
+                if v.is_empty() { self.send(chat, "⚠️ عنوان خالی نباشد.", Some(ik(vec![vec![b("⬅️ آموزش", &format!("gv:{}", id))]]))).await; return; }
+                self.guide_set(id, "title", json!(v));
+                self.guide_view(chat, 0, id).await;
+            }
+            Wait::GuideCap(id) => {
+                let v = text.trim();
+                let v = if v == "-" || v == "—" { "" } else { v };
+                self.guide_set(id, "caption", json!(v));
+                self.guide_view(chat, 0, id).await;
             }
             Wait::Search => {
                 let q = text.to_lowercase();

@@ -1,3 +1,17 @@
+# v2.8.3 — Connection tutorial button, everything editable from the bot
+- **Connection tutorial (🎬 آموزش‌ها):** in the bot's admin menu, tap «➕ آموزش جدید» and send the video (a gif, file, photo or plain text also works). The first line of the caption becomes the title and the whole caption is shown under the video. While there is no tutorial the button is hidden; as soon as one is saved:
+  - the main menu shows «🎬 آموزش اتصال» (one tutorial: sent at once; several: a list),
+  - the account message after a purchase, free trial, renewal or «سرویس‌های من» gets «🎬 آموزش اتصال و استفاده از اپ» as its first button, above the WireGuard / AmneziaWG / Hysteria2 config buttons,
+  - the «📱 دانلود اپ» message gets the same button.
+  Each tutorial can be previewed, renamed, given a new caption, have its video replaced, be made the main one (⭐️ first in the list, the one sent under the account message) or be deleted. Tutorials are stored as Telegram file ids in the `guides` setting, so they are part of every backup.
+- **Buttons and texts (🎨 دکمه‌ها و متن‌ها):** the text of every customer button (main menu, account message, config buttons, payment methods, discount, back / main menu…) can be changed or reset to the default; main-menu buttons can also be hidden. Bot messages (welcome, menu reply, plan / category headers, trial / purchase / renewal headers, config hint, app download hint, tutorial list header) are editable too; a new message is previewed and only saved when Telegram accepts its HTML. Links (app download, support, required channel) have their own page.
+- **Plans:** tapping a plan opens its page: change name, days, GB, Toman price, USD price, users, number of countries and category, turn it on/off, delete it (with confirmation). A new plan can be given a category as a 7th field.
+- **Categories (📂 دسته‌بندی‌ها):** list of categories with the number of plans; rename a category (all its plans move with it) or remove it (its plans stay, without a category).
+- After editing a value the bot goes back to the page it came from instead of the main admin menu.
+
+# v2.8.2 — version bump
+- Version number raised to 2.8.2 (panel, nodes and tunnel agents report 2.8.2). No other changes since v2.8.1.
+
 # v2.8.1 — Tunnel servers menu, new tunnel animation, plan categories
 - **Cleanup:** every trace of OpenVPN is removed from the code (module, auth route, sync fields, subscription page, config download, backup list, settings). The panel only has WireGuard, AmneziaWG and Hysteria2.
 - **Bot:** after a purchase, free trial or "my service" the customer now gets (1) the app download link and the login code together as the recommended way, (2) the subscription link, and (3) buttons to receive manual configs one by one in a fixed order: WireGuard, AmneziaWG, Hysteria2. WireGuard/AmneziaWG arrive as files, Hysteria2 as a copyable link, one per server.
