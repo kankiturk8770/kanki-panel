@@ -221,6 +221,18 @@ mod tests {
         Transmit { destination: to, ecn: None, contents: data, segment_size: None, src_ip: None }
     }
 
+    /// Sends one datagram the way quinn does: when the socket is not writable yet, wait for it
+    /// (a fresh tokio socket reports `WouldBlock` until its first readiness event arrives).
+    async fn send(s: &Arc<MaskedSocket>, to: SocketAddr, data: &[u8]) {
+        loop {
+            s.io.writable().await.unwrap();
+            match s.try_send(&tx(to, data)) {
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
+                r => break r.unwrap(),
+            }
+        }
+    }
+
     /// Reads whatever the socket delivers next (up to 3 s).
     async fn recv_one(s: &Arc<MaskedSocket>) -> Option<(Vec<u8>, SocketAddr)> {
         let mut storage = vec![0u8; 4096];
@@ -249,14 +261,14 @@ mod tests {
         raw.send_to(&[7u8; 300], ba).unwrap();
         raw.send_to(b"GET / HTTP/1.1\r\n\r\n", ba).unwrap();
         // a datagram masked with another key is junk too
-        wrong.try_send(&tx(ba, b"from the wrong key")).unwrap();
-        a.try_send(&tx(ba, b"hello through the mask")).unwrap();
+        send(&wrong, ba, b"from the wrong key").await;
+        send(&a, ba, b"hello through the mask").await;
         let (data, from) = recv_one(&b).await.expect("the masked datagram must arrive");
         assert_eq!(data, b"hello through the mask");
         assert_eq!(from, aa);
 
         // and back
-        b.try_send(&tx(aa, &[1u8; 1200])).unwrap();
+        send(&b, aa, &[1u8; 1200]).await;
         let (data, from) = recv_one(&a).await.expect("reply must arrive");
         assert_eq!(data, vec![1u8; 1200]);
         assert_eq!(from, ba);
