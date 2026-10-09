@@ -354,6 +354,9 @@ nav.side a.on .ni{background:linear-gradient(145deg,var(--al),var(--a),var(--ad)
 .logo.svgl{background:none;padding:0;overflow:visible;box-shadow:none;filter:drop-shadow(0 0 8px color-mix(in srgb,var(--a) 45%,transparent))}
 .logo .klogo{width:100%;height:100%;display:block}
 .okt{color:var(--ok)}
+.tschk{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;margin:4px 0 2px}
+.chk.sm{font-size:12.5px}.chk.sm span{line-height:1.3}
+.tsbase{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 11px;border-radius:12px;border:1px solid var(--a);background:color-mix(in srgb,var(--a) 10%,transparent);margin:8px 0 2px}.tsbase b{font-size:13px}
 /* neon: buttons, toggles, active items glow a little in the accent color */
 .btn{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--al) 45%,transparent),0 0 12px color-mix(in srgb,var(--a) 50%,transparent),0 0 30px color-mix(in srgb,var(--a) 20%,transparent);transition:box-shadow .2s,transform .1s,filter .2s}
 .btn:hover:not(:disabled){box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--al) 70%,transparent),0 0 18px color-mix(in srgb,var(--a) 70%,transparent),0 0 44px color-mix(in srgb,var(--a) 30%,transparent);filter:brightness(1.05)}
@@ -1673,7 +1676,7 @@ function botAppMsg(){var el=$('#bt_am');if(!el)return;S.amDur=S.amDur==null?60:S
    api('PUT','/api/app-msg',{text:tx,minutes:S.amDur,users:$('#am_u').value}).then(function(){toast(t('Sent'));botAppMsg()}).catch(fail)};
   var d=$('#am_del');if(d)d.onclick=function(){confirmDo(function(){api('DELETE','/api/app-msg').then(function(){toast(t('Done'));botAppMsg()}).catch(fail)})}
  }).catch(fail)}
-Object.assign(FA,{"App message":"پیام اپ","30 min":"۳۰ دقیقه","1 hour":"۱ ساعت","3 hours":"۳ ساعت","6 hours":"۶ ساعت","12 hours":"۱۲ ساعت","1 day":"۱ روز","3 days":"۳ روز","7 days":"۷ روز","Until I remove it":"تا وقتی خودم پاکش کنم",
+Object.assign(FA,{"Which methods to test":"کدام روش‌ها تست شوند","Raw ping (no tunnel)":"پینگ خام (بدون تانل)","the plain ping between the two servers, as a reference":"پینگ ساده‌ی بین دو سرور، به‌عنوان مرجع","Raw ping":"پینگ خام","Pick at least one method":"حداقل یک روش را انتخاب کن","No answer":"جوابی نیامد","loss":"افت","This is the base ping of the route; a good tunnel stays close to it.":"این پینگ پایه‌ی مسیر است؛ تانل خوب نزدیک به همین می‌ماند.","App message":"پیام اپ","30 min":"۳۰ دقیقه","1 hour":"۱ ساعت","3 hours":"۳ ساعت","6 hours":"۶ ساعت","12 hours":"۱۲ ساعت","1 day":"۱ روز","3 days":"۳ روز","7 days":"۷ روز","Until I remove it":"تا وقتی خودم پاکش کنم",
  "min":"دقیقه","left":"مانده","Showing in the app":"در حال نمایش در اپ","For":"برای","All users":"همه کاربران","Remove now":"همین الان پاک کن","No message is showing in the app right now.":"الان هیچ پیامی در اپ نمایش داده نمی‌شود.",
  "Write a message; the robot on the first screen of the Kanki app shows it to users, and it disappears by itself when the time is over.":"یک پیام بنویس؛ ربات صفحه‌ی اول اپ کانکی آن را به کاربرها نشان می‌دهد و وقتی زمانش تمام شد خودش پاک می‌شود.",
  "Message":"متن پیام","e.g. The Germany server is under maintenance for one hour.":"مثلاً: سرور آلمان تا یک ساعت در حال تعمیر است.","Show for":"مدت نمایش","Only for these users (empty = everyone)":"فقط برای این کاربرها (خالی = همه)",
@@ -1792,7 +1795,8 @@ function tunLoad(){return api('GET','/api/tunnels').then(function(d){TN.d=d;retu
 function tunSrv(id){var l=(TN.d&&TN.d.servers)||[];for(var i=0;i<l.length;i++)if(l[i].id==id)return l[i];return {id:id,name:id}}
 function tunStateTxt(s){return {up:t('Connected'),partial:t('Connecting…'),down:t('Disconnected'),off:t('Off')}[s]||s}
 function tunCol(s){return s=='up'?'#3ddc97':s=='partial'?'#f5b942':s=='off'?'#8a8f98':'#ff6b6b'}
-function tunTr(x){return {tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP',hq:'HQ (masked QUIC)',h2:'H2 (HTTP/2 + TLS)',dual:'Dual (HQ + H2)',cdn:'CDN (whitelist)',awg:'AmneziaWG'}[x]||x}
+function tunTr(x){return {tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP',hq:'HQ (masked QUIC)',h2:'H2 (HTTP/2 + TLS)',dual:'Dual (HQ + H2)',cdn:'CDN (whitelist)',awg:'AmneziaWG',baseline:t('Raw ping')}[x]||x}
+var TS_TR=[['tcpmux','TCP Mux'],['tcp','TCP'],['ws','WebSocket'],['wss','WSS (TLS)'],['quic','QUIC'],['kcp','KCP'],['hq','HQ (masked QUIC)'],['h2','H2 (HTTP/2 + TLS)']];
 // GRE: the panel builds its side by itself; this script builds the other side on the server
 // (a systemd service, so it comes back after a reboot) and, when the panel has a domain, points that
 // domain at the panel's address inside the GRE link so the agent talks to the panel through it
@@ -2180,13 +2184,16 @@ function tunSmart(o){if(!TN.d)return tunLoad().then(function(){tunSmart(o)});if(
   (sv.length<2?'<div class="warnbox">'+t('First add your entry server in the “Tunnel servers” menu.')+'</div>':'')+
   '<div class="g2"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="ts_en">'+opt(c.entry||(remote[0]||{}).id)+'</select></div><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="ts_ex">'+opt(c.exit||'local')+'</select></div></div>'+
   '<div class="g2"><div><label class="f">'+t('Profile')+'</label><select id="ts_pf">'+po('balanced',t('Balanced'))+po('speed',t('Most speed'))+po('gaming',t('Gaming (low ping)'))+'</select></div><div><label class="f">'+t('Test ports (first of sixteen)')+'</label><input id="ts_pt" type="number" class="ltr" value="3990"></div></div>'+
+  '<label class="f" style="margin-top:10px">'+t('Which methods to test')+'</label>'+
+  '<div class="tschk" id="ts_tr">'+TS_TR.map(function(x){return '<label class="chk sm"><input type="checkbox" value="'+x[0]+'" checked><span>'+x[1]+'</span></label>'}).join('')+'</div>'+
+  '<label class="chk sm" style="margin-top:4px"><input type="checkbox" id="ts_base" checked><span><b>'+t('Raw ping (no tunnel)')+'</b> · '+t('the plain ping between the two servers, as a reference')+'</span></label>'+
   '<p class="muted" id="ts_note" style="font-size:12px;margin:8px 0 0"></p>'+
   (r.job&&r.job.finished?'<button class="b2" style="width:100%;margin-top:10px" onclick="tunSmartRun()">'+t('Show the last result')+'</button>':'')+
   '<button class="btn" style="width:100%;margin-top:10px" id="ts_go">'+t('Start the test')+'</button>');
  var note=function(){var p=+$('#ts_pt').value||3990;$('#ts_note').textContent=t('Takes about a minute. Ports')+' '+N(p)+'–'+N(p+7)+' '+t('on the entry')+' · '+N(p+8)+'–'+N(p+15)+' '+t('on the exit')+' (TCP + UDP) '+t('must be open in the cloud firewall')+'.'};
  ['ts_pt'].forEach(function(k){$('#'+k).onchange=note;$('#'+k).oninput=note});note();
  $('#ts_pf').onchange=function(){TS.prof=this.value};
- $('#ts_go').onclick=function(){var me=this;me.disabled=true;TS.prof=$('#ts_pf').value;api('POST','/api/tunnels/probe',{entry:$('#ts_en').value,exit:$('#ts_ex').value,port:+$('#ts_pt').value||3990}).then(tunSmartRun).catch(function(e){me.disabled=false;fail(e)})}}).catch(fail)}
+ $('#ts_go').onclick=function(){var me=this;me.disabled=true;TS.prof=$('#ts_pf').value;var trs=[].map.call(document.querySelectorAll('#ts_tr input:checked'),function(x){return x.value});if(!trs.length){me.disabled=false;return toast(t('Pick at least one method'),1)}api('POST','/api/tunnels/probe',{entry:$('#ts_en').value,exit:$('#ts_ex').value,port:+$('#ts_pt').value||3990,transports:trs,baseline:$('#ts_base').checked}).then(tunSmartRun).catch(function(e){me.disabled=false;fail(e)})}}).catch(fail)}
 function tunSmartRun(){modal(mhead('⚡ '+t('Smart tunnel'))+'<div id="ts_box"><span class="muted">'+t('Loading…')+'</span></div>');clearInterval(TS.timer);
  $('#ts_box').onclick=function(e){var b=e.target.closest('[data-use],[data-prof],[data-ts]');if(!b)return;
   if(b.dataset.prof){TS.prof=b.dataset.prof;if(TS.j)tunSmartDraw(TS.j)}
@@ -2221,10 +2228,12 @@ function tunSmartDraw(j){var P=TS.prof||'balanced',stg={starting:t('Starting…'
   why=r.done?tunWhy(r,j):'',raw=r.done&&!ok?(r.error||r.tcp_error||r.last_error||''):'';
   return '<div class="tsr '+cls+'"><b>'+(isb?'🏆 ':'')+tunTr(r.transport)+'</b>'+(st||nums)+'<em class="ltr">'+(ok?N(tunScore(r,P)):'')+'</em></div>'+
    (why?'<small class="tse">'+esc(why)+'</small>':'')+(raw?'<small class="tse ltr">'+esc(raw)+'</small>':'')};
- var h='<p class="sub">'+esc(tunSrv(j.entry).name)+' ⇄ '+esc(tunSrv(j.exit).name)+'</p>'+
+ var base=L.filter(function(r){return r.baseline})[0];
+ var baseRow=base?'<div class="tsbase"><b>📡 '+t('Raw ping (no tunnel)')+'</b>'+(!base.done?'<span class="muted">'+(stg[base.stage]||stg.testing)+'</span>':base.failed?'<span class="r">'+esc(base.error||t('No answer'))+'</span>':'<span class="ltr">'+(base.ping_ms!=null?N(base.ping_ms)+' ms':'—')+(base.loss?' · '+N(base.loss)+'% '+t('loss'):'')+'</span>')+'</div>'+(base&&base.done&&!base.failed?'<small class="tse">'+t('This is the base ping of the route; a good tunnel stays close to it.')+'</small>':''):'';
+ var h='<p class="sub">'+esc(tunSrv(j.entry).name)+' ⇄ '+esc(tunSrv(j.exit).name)+'</p>'+baseRow+
   '<div class="seg" style="margin:6px 0">'+[['balanced',t('Balanced')],['speed',t('Most speed')],['gaming',t('Gaming (low ping)')]].map(function(o){return '<button data-prof="'+o[0]+'" class="'+(P==o[0]?'on':'')+'">'+o[1]+'</button>'}).join('')+'</div>'+
   (j.finished?'':'<div class="tsbar"><i style="width:'+pct+'%"></i></div>');
- ['reverse','direct'].forEach(function(m){var rs=L.filter(function(r){return r.mode==m}),n=rs.filter(tunOk).length,done=rs.every(function(r){return r.done});
+ ['reverse','direct'].forEach(function(m){var rs=L.filter(function(r){return r.mode==m&&!r.baseline}),n=rs.filter(tunOk).length,done=rs.every(function(r){return r.done});
   h+='<div class="nh" style="margin-top:12px"><b>'+tunDirName(m)+'</b><small class="muted">'+(done||j.finished?N(n)+' / '+N(rs.length)+' '+t('passed'):'')+'</small></div>'+
    '<div class="tsh"><b>'+t('Transport')+'</b><span>'+t('Ping')+'</span><span>↓ Mbps</span><span>↑ Mbps</span><span>'+t('UDP loss')+'</span><em>'+t('Score')+'</em></div>'+rs.map(row).join('')});
  if(j.finished){var nR=L.filter(function(r){return r.mode=='reverse'&&tunOk(r)}).length,nD=L.filter(function(r){return r.mode=='direct'&&tunOk(r)}).length;

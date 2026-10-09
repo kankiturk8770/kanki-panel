@@ -212,6 +212,14 @@ impl Running {
             probe: Mutex::new(None),
         });
         let mut tasks = vec![];
+        if spec.transport == "baseline" {
+            // raw network ping, no tunnel: the entry pings the exit directly (ICMP). Fully isolated
+            // from the link/mux engine; the exit side does nothing. Never carries user traffic.
+            if spec.role == "entry" {
+                tasks.push(tokio::spawn(baseline_task(spec.remote.clone(), state.clone())));
+            }
+            return Running { spec, state, tasks };
+        }
         if spec.listens() {
             tasks.push(tokio::spawn(listen_loop(spec.clone(), state.clone())));
         } else {
@@ -443,6 +451,73 @@ async fn user_udp(bind: String, port: u16, target: String, state: Arc<State>) {
 /// One measurement per probe tunnel; probes on one server run one after another so they do not
 /// share the bandwidth and spoil each other's numbers.
 static PROBE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Raw base ping between the two servers: no tunnel at all, the entry ICMP-pings the exit host.
+/// Shows the network's own latency so one can see how much each tunnel adds on top.
+async fn baseline_task(remote: String, state: Arc<State>) {
+    *state.probe.lock().unwrap() = Some(serde_json::json!({"done": false, "stage": "testing"}));
+    let host = remote.trim().trim_start_matches('[').trim_end_matches(']').to_string();
+    let r = tokio::task::spawn_blocking(move || baseline_ping(&host)).await
+        .unwrap_or_else(|_| serde_json::json!({"done": true, "failed": true, "baseline": true, "error": "baseline test failed"}));
+    *state.probe.lock().unwrap() = Some(r);
+}
+
+fn baseline_ping(host: &str) -> serde_json::Value {
+    use serde_json::json;
+    // host is an IP or domain; ping runs without a shell, but keep it to safe characters anyway
+    if host.is_empty() || !host.chars().all(|c| c.is_ascii_alphanumeric() || ".:-_".contains(c)) {
+        return json!({"done": true, "failed": true, "baseline": true, "error": "the exit server has no address set"});
+    }
+    let out = match std::process::Command::new("ping").args(["-n", "-c", "6", "-w", "10", host]).output() {
+        Ok(o) => o,
+        Err(_) => return json!({"done": true, "failed": true, "baseline": true, "error": "ping is not installed on the entry server (apt install -y iputils-ping)"}),
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    match parse_ping(&text) {
+        Some((ms, loss)) => json!({"done": true, "baseline": true, "ping_ms": (ms * 10.0).round() / 10.0, "loss": loss}),
+        None => json!({"done": true, "failed": true, "baseline": true,
+            "error": "the exit did not answer ICMP (ping may be blocked between the two servers)"}),
+    }
+}
+
+/// (avg RTT ms, packet-loss %) from `ping` output, or None when nothing came back.
+fn parse_ping(text: &str) -> Option<(f64, f64)> {
+    // "rtt min/avg/max/mdev = 1.1/2.2/3.3/0.4 ms" -> the avg (second number)
+    let avg = text.lines().find(|l| l.contains("min/avg/max"))
+        .and_then(|l| l.split('=').nth(1))
+        .and_then(|s| s.trim().split('/').nth(1))
+        .and_then(|s| s.trim().parse::<f64>().ok())?;
+    // "6 packets transmitted, 6 received, 0% packet loss"
+    let loss = text.lines().find(|l| l.contains("packet loss"))
+        .and_then(|l| l.split(',').find(|p| p.contains("packet loss")))
+        .and_then(|p| p.trim().split('%').next())
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .unwrap_or(0.0);
+    Some((avg, loss))
+}
+
+#[cfg(test)]
+mod baseline_tests {
+    use super::parse_ping;
+
+    #[test]
+    fn reads_avg_and_loss() {
+        let ok = "PING 1.2.3.4 (1.2.3.4) 56(84) bytes of data.\n\
+            64 bytes from 1.2.3.4: icmp_seq=1 ttl=52 time=41.2 ms\n\
+            \n--- 1.2.3.4 ping statistics ---\n\
+            6 packets transmitted, 6 received, 0% packet loss, time 5007ms\n\
+            rtt min/avg/max/mdev = 40.1/42.3/45.0/1.2 ms\n";
+        assert_eq!(parse_ping(ok), Some((42.3, 0.0)));
+
+        let lossy = "--- h ping statistics ---\n\
+            6 packets transmitted, 3 received, 50% packet loss, time 5010ms\n\
+            rtt min/avg/max/mdev = 90.0/95.5/101.0/4.0 ms\n";
+        assert_eq!(parse_ping(lossy), Some((95.5, 50.0)));
+
+        let dead = "6 packets transmitted, 0 received, 100% packet loss, time 5100ms\n";
+        assert_eq!(parse_ping(dead), None);
+    }
+}
 
 async fn probe_task(state: Arc<State>) {
     *state.probe.lock().unwrap() = Some(serde_json::json!({"done": false, "stage": "connecting"}));

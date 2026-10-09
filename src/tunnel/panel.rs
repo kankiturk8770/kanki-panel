@@ -245,11 +245,37 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
     if let Some(p) = probe_job().lock().unwrap().clone() {
         if !p.finished && now() - p.started < PROBE_MAX && (p.entry == sid || p.exit == sid) {
             let role = if p.entry == sid { "entry" } else { "exit" };
+            // the raw ping has no tunnel: only the entry acts, pinging the exit host directly
+            if p.baseline && p.entry == sid {
+                out.push(Spec {
+                    id: format!("probe-{}-baseline", p.id),
+                    name: "baseline ping".into(),
+                    role: "entry".into(),
+                    mode: "direct".into(),
+                    transport: "baseline".into(),
+                    port: 0,
+                    remote: host_of(app, &p.exit),
+                    token: p.token.clone(),
+                    conns: 1,
+                    sni: String::new(),
+                    host: String::new(),
+                    frag: false,
+                    path: "/".into(),
+                    tcp: vec![],
+                    udp: vec![],
+                    target: String::new(),
+                    cert: String::new(),
+                    key: String::new(),
+                    probe: true,
+                    bind: String::new(),
+                    awg: None,
+                });
+            }
             for (mi, mode) in PROBE_MODES.iter().enumerate() {
                 let listener = if *mode == "direct" { &p.exit } else { &p.entry };
                 let host = host_of(app, listener);
-                for (i, tr) in PROBE_TRANSPORTS.iter().enumerate() {
-                    let port = p.port + (mi * PROBE_TRANSPORTS.len() + i) as u16;
+                for (i, tr) in p.transports.iter().enumerate() {
+                    let port = p.port + (mi * p.transports.len() + i) as u16;
                     out.push(Spec {
                         id: format!("probe-{}-{}-{}", p.id, mode, tr),
                         name: format!("test {} {}", mode, tr),
@@ -537,6 +563,10 @@ struct ProbeJob {
     started: i64,
     finished: bool,
     results: Vec<Value>,
+    /// which transports this run tests (a subset of PROBE_TRANSPORTS the admin ticked)
+    transports: Vec<String>,
+    /// also measure the raw server-to-server ping (no tunnel) as a reference
+    baseline: bool,
 }
 
 fn probe_job() -> &'static Mutex<Option<ProbeJob>> {
@@ -574,8 +604,19 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         return err(StatusCode::BAD_REQUEST, "pick two different servers");
     }
     let port = b["port"].as_u64().unwrap_or(3990).clamp(1024, 64000) as u16;
+    // which transports to test: the ones the admin ticked, or all of them
+    let all: Vec<String> = PROBE_TRANSPORTS.iter().map(|x| x.to_string()).collect();
+    let transports: Vec<String> = match b["transports"].as_array() {
+        Some(a) => {
+            let picked: Vec<String> = a.iter().filter_map(|x| x.as_str())
+                .filter(|x| PROBE_TRANSPORTS.contains(x)).map(|x| x.to_string()).collect();
+            if picked.is_empty() { all } else { picked }
+        }
+        None => all,
+    };
+    let baseline = b["baseline"].as_bool().unwrap_or(true);
     // the test ports must not collide with a tunnel that already listens there (on either server)
-    let span = (PROBE_TRANSPORTS.len() * PROBE_MODES.len()) as u16;
+    let span = (transports.len() * PROBE_MODES.len()) as u16;
     for t in tunnels(&app) {
         let l = if t.mode == "direct" { &t.exit } else { &t.entry };
         if (*l == entry || *l == exit) && t.port >= port && t.port < port + span {
@@ -592,10 +633,12 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         started: now(),
         finished: false,
         results: vec![],
+        transports: transports.clone(),
+        baseline,
     };
     let id = job.id.clone();
     *probe_job().lock().unwrap() = Some(job);
-    Json(json!({"ok": true, "id": id, "transports": PROBE_TRANSPORTS, "modes": PROBE_MODES})).into_response()
+    Json(json!({"ok": true, "id": id, "transports": transports, "baseline": baseline, "modes": PROBE_MODES})).into_response()
 }
 
 async fn probe_get(State(app): St, h: HeaderMap) -> Response {
@@ -609,8 +652,20 @@ async fn probe_get(State(app): St, h: HeaderMap) -> Response {
         let exit_st = seen.get(&p.exit).map(|x| x.status.clone()).unwrap_or_default();
         let mut all_done = true;
         let mut res = vec![];
+        if p.baseline {
+            let sid = format!("probe-{}-baseline", p.id);
+            let mut r = entry_st.iter().find(|s| s.id == sid).and_then(|s| s.probe.clone())
+                .unwrap_or_else(|| json!({"done": false, "stage": "testing"}));
+            if r["done"].as_bool() != Some(true) {
+                all_done = false;
+            }
+            r["baseline"] = json!(true);
+            r["transport"] = json!("baseline");
+            r["mode"] = json!("baseline");
+            res.push(r);
+        }
         for (mi, mode) in PROBE_MODES.iter().enumerate() {
-            for (i, tr) in PROBE_TRANSPORTS.iter().enumerate() {
+            for (i, tr) in p.transports.iter().enumerate() {
                 let sid = format!("probe-{}-{}-{}", p.id, mode, tr);
                 let es = entry_st.iter().find(|s| s.id == sid);
                 let xs = exit_st.iter().find(|s| s.id == sid);
@@ -620,7 +675,7 @@ async fn probe_get(State(app): St, h: HeaderMap) -> Response {
                 }
                 r["mode"] = json!(mode);
                 r["transport"] = json!(tr);
-                r["port"] = json!(p.port + (mi * PROBE_TRANSPORTS.len() + i) as u16);
+                r["port"] = json!(p.port + (mi * p.transports.len() + i) as u16);
                 r["links"] = json!(es.map(|s| s.links).unwrap_or(0).max(xs.map(|s| s.links).unwrap_or(0)));
                 if r["error"].is_null() {
                     let e = es.map(|s| s.error.clone()).filter(|e| !e.is_empty()).or_else(|| xs.map(|s| s.error.clone()).filter(|e| !e.is_empty()));

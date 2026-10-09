@@ -1,3 +1,9 @@
+# v2.9.6 — Smart tunnel: pick which methods to test, and a raw-ping reference
+- **Tick the methods you want.** The smart tunnel test now shows a checkbox per transport (TCP Mux, TCP, WebSocket, WSS, QUIC, KCP, HQ, H2); only the ticked ones are tested, so you can try one at a time. The test ports and the firewall note follow the number you picked.
+- **Raw ping (no tunnel).** A new reference row at the top measures the plain server-to-server ping (ICMP, entry → exit) with no tunnel, so you can see the base latency of the route and how much each tunnel adds on top. It is a reference only — never scored, never picked as "best", and it carries no traffic. If `ping` is missing it says how to install it (`apt install -y iputils-ping`); if ICMP is blocked between the servers it says so.
+- The raw-ping path is fully isolated from the link/mux tunnel engine (a separate task that only runs `ping`), so it cannot affect real tunnels.
+- Test: the ping-output parser (avg RTT + packet loss, including a 100%-loss "no answer").
+
 # v2.9.5 — Finished trials are removed, config names, clearer config help in the bot
 - **Finished free trials are deleted** (within a minute, by the bot; the nightly clean-up does it too). Their number goes to the next new customer, so the user list stays in order (16 customer, 17 trial → deleted → the next buyer is 17). The person gets a message with a Buy button. A trial is kept while its owner has a receipt / payment waiting, so a pending purchase can still renew that same account; a trial that is bought, renewed or extended becomes a normal account and is never removed. A finished trial cannot be taken again.
 - One-time fix on update: old trials that were already extended (renamed from USER<n>-TEST to USER<n>) lose their "trial" note, so they are never deleted.
