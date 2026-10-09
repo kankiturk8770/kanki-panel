@@ -387,6 +387,23 @@ fn busy() -> &'static AtomicBool {
     &B
 }
 
+/// Locks the shared state, recovering the data even if a previous panic poisoned the lock. A
+/// wedged lock must never stop reconcile from running again: if it did, a removed AmneziaWG
+/// interface would never be brought down and would keep its UDP port (a kernel interface holds the
+/// port across restarts), which is exactly the "the port stays busy after I delete the tunnel" bug.
+fn guard() -> std::sync::MutexGuard<'static, Shared> {
+    shared().lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Clears the `busy` flag whatever happens to the worker thread (even a panic inside reconcile),
+/// so the next `set_desired` can always start a fresh reconcile instead of being locked out forever.
+struct BusyGuard;
+impl Drop for BusyGuard {
+    fn drop(&mut self) {
+        busy().store(false, Ordering::SeqCst);
+    }
+}
+
 fn sh(cmd: &str) -> (bool, String) {
     match Command::new("sh").arg("-c").arg(cmd).stdin(Stdio::null()).output() {
         Ok(o) => {
@@ -433,18 +450,18 @@ fn conf_path(iface: &str) -> String {
 }
 
 fn reconcile() {
-    let want = shared().lock().unwrap().want.clone();
+    let want = guard().want.clone();
     let tools = if want.is_empty() {
         // no AmneziaWG interface is wanted: do not touch the system (before, every tunnel server
         // added the Amnezia PPA and installed its packages at start even if it never ran an AmneziaWG link)
         Ok(())
     } else {
-        let cached = shared().lock().unwrap().installed.clone();
+        let cached = guard().installed.clone();
         match cached {
             Some(Ok(())) => Ok(()),
             _ => {
                 let r = ensure_tools();
-                shared().lock().unwrap().installed = Some(r.clone());
+                guard().installed = Some(r.clone());
                 r
             }
         }
@@ -487,7 +504,7 @@ fn reconcile() {
                             let _ = sh(&format!("awg-quick down {} 2>&1", w.iface));
                         } else {
                             eprintln!("awg tunnel {}: up", w.iface);
-                            shared().lock().unwrap().since.insert(w.iface.clone(), crate::util::now() as u64);
+                            guard().since.insert(w.iface.clone(), crate::util::now() as u64);
                         }
                     }
                 }
@@ -496,13 +513,13 @@ fn reconcile() {
                     let (ok, out) = sh(&format!("ping -c 1 -W 1 -I {} {} 2>/dev/null | sed -n 's/.*time=\\([0-9.]*\\) ms.*/\\1/p'", w.iface, w.peer_ip));
                     if ok {
                         if let Ok(v) = out.trim().parse::<f64>() {
-                            shared().lock().unwrap().rtt.insert(w.iface.clone(), v.round() as u64);
+                            guard().rtt.insert(w.iface.clone(), v.round() as u64);
                         }
                     }
                 }
             }
         }
-        shared().lock().unwrap().errors.insert(w.iface.clone(), err);
+        guard().errors.insert(w.iface.clone(), err);
     }
 }
 
@@ -510,7 +527,7 @@ fn reconcile() {
 /// thread (the first run may install packages), so the agent keeps reporting meanwhile.
 pub fn set_desired(want: Vec<AwgSpec>) {
     let run = {
-        let mut s = shared().lock().unwrap();
+        let mut s = guard();
         let changed = s.want != want;
         let stale = s.stamp.map(|t| t.elapsed() > Duration::from_secs(20)).unwrap_or(true);
         if changed {
@@ -525,22 +542,30 @@ pub fn set_desired(want: Vec<AwgSpec>) {
         return;
     }
     std::thread::spawn(|| {
+        // the flag is cleared on the way out no matter what (see BusyGuard)
+        let _reset = BusyGuard;
         loop {
-            let before = shared().lock().unwrap().want.clone();
-            reconcile();
-            shared().lock().unwrap().stamp = Some(Instant::now());
-            if shared().lock().unwrap().want == before {
+            let before = guard().want.clone();
+            // a panic inside reconcile (a failed command, a bad config) must not kill the worker and
+            // leave `busy` stuck: catch it, record the time, and carry on with the next round
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(reconcile));
+            guard().stamp = Some(Instant::now());
+            if r.is_err() {
+                // a reconcile that panicked will keep panicking on the same input: stop looping and
+                // wait for the next set_desired rather than spin
+                break;
+            }
+            if guard().want == before {
                 break;
             }
         }
-        busy().store(false, Ordering::SeqCst);
     });
 }
 
 /// status of every wanted interface, shaped like the engine's status so the panel treats it alike
 pub fn statuses() -> Vec<super::engine::Status> {
     let (want, errors, rtt, since) = {
-        let s = shared().lock().unwrap();
+        let s = guard();
         (s.want.clone(), s.errors.clone(), s.rtt.clone(), s.since.clone())
     };
     let now = crate::util::now();
@@ -580,4 +605,40 @@ pub fn statuses() -> Vec<super::engine::Status> {
         });
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The core of the port-leak fix: a panic that poisons the shared lock must not wedge the
+    /// AmneziaWG worker. `guard()` has to keep handing back the data so reconcile can run again and
+    /// bring down removed interfaces (otherwise their UDP ports stay held forever).
+    #[test]
+    fn a_poisoned_lock_does_not_wedge_the_worker() {
+        // poison the lock on purpose, the way a real panic inside a held guard would
+        let _ = std::panic::catch_unwind(|| {
+            let _g = shared().lock().unwrap();
+            panic!("boom while holding the lock");
+        });
+        assert!(shared().lock().is_err(), "the lock must now be poisoned for the test to mean anything");
+
+        // guard() must still work (recover the data), not panic
+        let before = guard().want.len();
+        guard().stamp = Some(Instant::now());
+        assert_eq!(guard().want.len(), before, "guard() recovered the data after poisoning");
+    }
+
+    /// The busy flag must be released even if the worker thread unwinds, so the next set_desired is
+    /// never locked out.
+    #[test]
+    fn busy_guard_always_clears_the_flag() {
+        busy().store(false, Ordering::SeqCst);
+        let _ = std::panic::catch_unwind(|| {
+            let _reset = BusyGuard;
+            busy().store(true, Ordering::SeqCst);
+            panic!("worker blew up");
+        });
+        assert!(!busy().load(Ordering::SeqCst), "busy must be false again after a panic in the worker");
+    }
 }

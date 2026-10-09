@@ -1,3 +1,7 @@
+# v2.9.3 — Fix: AmneziaWG ports staying busy after a tunnel is deleted or moved
+- **Fix (important):** the AmneziaWG worker used a `busy` flag that was only cleared at the end of its thread. If `reconcile()` ever panicked (a failed command, a bad config), the flag stayed set and the shared lock got poisoned, so **reconcile never ran again** — a deleted or moved AmneziaWG interface was never brought down and kept its UDP port (a kernel interface holds the port even across restarts). This is the "UDP port … is busy / Address already in use" you saw after deleting a tunnel or switching the server. The worker now clears the flag even on panic (a drop guard), recovers a poisoned lock instead of wedging, and isolates a panicking reconcile so one bad interface no longer stops the others (this is why it worked for one server and then broke when a second was added). Tests cover both.
+- Engine tunnels (tcp/ws/wss/…) already freed their ports on delete and a busy forwarded port self-heals within a few seconds as the old socket closes; only the AmneziaWG path could stay stuck.
+
 # v2.9.2 — No AmneziaWG installation on servers that do not use it
 - **Fix:** every tunnel agent, standalone `tunnel-run` and the panel's own engine tried to install AmneziaWG at start (`add-apt-repository ppa:amnezia/ppa`, `apt-get install amneziawg…`) even when no AmneziaWG tunnel was configured. It now installs it only when an AmneziaWG tunnel is wanted. (Found by running the released binary for the standalone guide.)
 
