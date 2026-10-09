@@ -1,0 +1,553 @@
+name: diag-v290
+on:
+  push:
+    branches: [diag-v290]
+jobs:
+  t:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: compile tests
+        run: cargo test --no-run
+      - name: tests::tunnel_tcpmux_reverse
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_tcpmux_reverse --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_tcpmux_reverse::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_tcp_reverse
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_tcp_reverse --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_tcp_reverse::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_ws_reverse
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_ws_reverse --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_ws_reverse::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_wss_reverse
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_wss_reverse --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_wss_reverse::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_tcpmux_direct
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_tcpmux_direct --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_tcpmux_direct::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_wss_direct
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_wss_direct --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_wss_direct::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_wss_spoof_reverse
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_wss_spoof_reverse --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_wss_spoof_reverse::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_wss_spoof_direct
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_wss_spoof_direct --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_wss_spoof_direct::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_quic_spoof_reverse
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_quic_spoof_reverse --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_quic_spoof_reverse::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_ws_host_reverse
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_ws_host_reverse --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_ws_host_reverse::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_quic_reverse
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_quic_reverse --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_quic_reverse::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_kcp_reverse
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_kcp_reverse --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_kcp_reverse::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_hq_reverse
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_hq_reverse --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_hq_reverse::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_hq_direct_spoof
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_hq_direct_spoof --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_hq_direct_spoof::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_h2_reverse
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_h2_reverse --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_h2_reverse::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_h2_direct_spoof
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_h2_direct_spoof --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_h2_direct_spoof::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_dual_uses_hq_when_udp_works
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_dual_uses_hq_when_udp_works --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_dual_uses_hq_when_udp_works::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_dual_falls_back_to_h2
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_dual_falls_back_to_h2 --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_dual_falls_back_to_h2::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_hq_is_silent_to_scanners
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_hq_is_silent_to_scanners --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_hq_is_silent_to_scanners::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_wrong_token_is_refused_hq_and_h2
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_wrong_token_is_refused_hq_and_h2 --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_wrong_token_is_refused_hq_and_h2::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_wrong_token_is_refused
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_wrong_token_is_refused --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_wrong_token_is_refused::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_reconnects_after_exit_restart
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_reconnects_after_exit_restart --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_reconnects_after_exit_restart::$m"
+            exit 1
+          fi
+      - name: tests::tunnel_cdn_direct
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::tunnel_cdn_direct --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::tunnel_cdn_direct::$m"
+            exit 1
+          fi
+      - name: tests::probe_tcpmux
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::probe_tcpmux --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::probe_tcpmux::$m"
+            exit 1
+          fi
+      - name: tests::probe_quic
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::probe_quic --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::probe_quic::$m"
+            exit 1
+          fi
+      - name: tests::probe_kcp_obfs
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::probe_kcp_obfs --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::probe_kcp_obfs::$m"
+            exit 1
+          fi
+      - name: tests::probe_hq
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::probe_hq --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::probe_hq::$m"
+            exit 1
+          fi
+      - name: tests::probe_h2
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::tests::probe_h2 --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED tests::probe_h2::$m"
+            exit 1
+          fi
+      - name: dual::tests::bad_flag_comes_and_goes
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::dual::tests::bad_flag_comes_and_goes --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED dual::tests::bad_flag_comes_and_goes::$m"
+            exit 1
+          fi
+      - name: dual::tests::bad_flag_expires
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::dual::tests::bad_flag_expires --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED dual::tests::bad_flag_expires::$m"
+            exit 1
+          fi
+      - name: hq::tests::masked_socket_roundtrip_and_junk
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::hq::tests::masked_socket_roundtrip_and_junk --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED hq::tests::masked_socket_roundtrip_and_junk::$m"
+            exit 1
+          fi
+      - name: h2ws::tests::websocket_over_h2_in_memory
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::h2ws::tests::websocket_over_h2_in_memory --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED h2ws::tests::websocket_over_h2_in_memory::$m"
+            exit 1
+          fi
+      - name: h2ws::tests::plain_request_gets_the_decoy
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::h2ws::tests::plain_request_gets_the_decoy --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED h2ws::tests::plain_request_gets_the_decoy::$m"
+            exit 1
+          fi
+      - name: salamander::tests::roundtrip_many_sizes
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::salamander::tests::roundtrip_many_sizes --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED salamander::tests::roundtrip_many_sizes::$m"
+            exit 1
+          fi
+      - name: salamander::tests::wrong_secret_is_dropped
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::salamander::tests::wrong_secret_is_dropped --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED salamander::tests::wrong_secret_is_dropped::$m"
+            exit 1
+          fi
+      - name: salamander::tests::garbage_is_dropped
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::salamander::tests::garbage_is_dropped --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED salamander::tests::garbage_is_dropped::$m"
+            exit 1
+          fi
+      - name: salamander::tests::too_short_and_bad_padding
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::salamander::tests::too_short_and_bad_padding --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED salamander::tests::too_short_and_bad_padding::$m"
+            exit 1
+          fi
+      - name: salamander::tests::nothing_fixed_on_the_wire
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::salamander::tests::nothing_fixed_on_the_wire --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED salamander::tests::nothing_fixed_on_the_wire::$m"
+            exit 1
+          fi
+      - name: salamander::tests::big_packets_get_little_padding
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::salamander::tests::big_packets_get_little_padding --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED salamander::tests::big_packets_get_little_padding::$m"
+            exit 1
+          fi
+      - name: salamander::tests::appends_after_existing_bytes
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::salamander::tests::appends_after_existing_bytes --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED salamander::tests::appends_after_existing_bytes::$m"
+            exit 1
+          fi
+      - name: agent::standalone_tests::one_object_or_a_list
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::agent::standalone_tests::one_object_or_a_list --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED agent::standalone_tests::one_object_or_a_list::$m"
+            exit 1
+          fi
+      - name: agent::standalone_tests::bad_descriptions_are_refused_with_a_reason
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::agent::standalone_tests::bad_descriptions_are_refused_with_a_reason --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED agent::standalone_tests::bad_descriptions_are_refused_with_a_reason::$m"
+            exit 1
+          fi
+      - name: agent::standalone_tests::shipped_examples_are_valid
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::agent::standalone_tests::shipped_examples_are_valid --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED agent::standalone_tests::shipped_examples_are_valid::$m"
+            exit 1
+          fi
+      - name: agent::standalone_tests::firewall_list_has_both_protocols_for_dual
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set +e
+          cargo test --quiet -- --exact tunnel::agent::standalone_tests::firewall_list_has_both_protocols_for_dual --nocapture > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED agent::standalone_tests::firewall_list_has_both_protocols_for_dual::$m"
+            exit 1
+          fi
+      - name: other tests (not tunnel)
+        if: always()
+        timeout-minutes: 6
+        run: |
+          set +e
+          cargo test --quiet -- --skip tunnel:: > out.txt 2>&1
+          rc=$?
+          if [ $rc -ne 0 ]; then
+            m=$(grep -v '^$' out.txt | tail -n 40 | cut -c1-400 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=FAILED other tests::$m"
+            exit 1
+          fi
