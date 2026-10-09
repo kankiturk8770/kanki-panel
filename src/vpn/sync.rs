@@ -50,6 +50,7 @@ pub fn local_info(app: &App) -> Value {
         "hy2_port": g("HY2_PORT"), "hy2_obfs": g("HY2_OBFS"), "hy2_sni": g("DOMAIN"),
         "hy2_insecure": g("HY2_INSECURE"),
         "services": crate::admin::service_states(), "version": crate::VERSION, "load": loadavg(),
+        "stats": crate::admin::node_stats(),
     })
 }
 

@@ -210,6 +210,32 @@ async fn qr(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String
     }
 }
 
+/// CPU, memory, disk and connections of this server, sent with the node info so the panel can judge its health
+pub fn node_stats() -> Value {
+    let load: Vec<f64> = read("/proc/loadavg").split_whitespace().take(3).filter_map(|x| x.parse().ok()).collect();
+    let cores = read("/proc/cpuinfo").lines().filter(|l| l.starts_with("processor")).count().max(1);
+    let (mut mt, mut ma, mut swt, mut swf) = (0f64, 0f64, 0f64, 0f64);
+    for l in read("/proc/meminfo").lines() {
+        let v: f64 = l.split_whitespace().nth(1).and_then(|x| x.parse().ok()).unwrap_or(0.0);
+        if l.starts_with("MemTotal:") { mt = v; }
+        if l.starts_with("MemAvailable:") { ma = v; }
+        if l.starts_with("SwapTotal:") { swt = v; }
+        if l.starts_with("SwapFree:") { swf = v; }
+    }
+    let df: Vec<String> = sh("df", &["-B1", "--output=size,used", "/"]).lines().nth(1).unwrap_or("").split_whitespace().map(|s| s.to_string()).collect();
+    let (dt, du): (f64, f64) = (df.first().and_then(|x| x.parse().ok()).unwrap_or(0.0), df.get(1).and_then(|x| x.parse().ok()).unwrap_or(0.0));
+    let up: f64 = read("/proc/uptime").split_whitespace().next().and_then(|x| x.parse().ok()).unwrap_or(0.0);
+    json!({
+        "cores": cores, "load": load,
+        "cpu": ((load.first().copied().unwrap_or(0.0) / cores as f64) * 100.0).min(100.0).round(),
+        "mem_total": mt * 1024.0, "mem_used": (mt - ma) * 1024.0,
+        "swap_total": swt * 1024.0, "swap_used": (swt - swf) * 1024.0,
+        "disk_total": dt, "disk_used": du, "uptime": up,
+        "tcp": count_socks("/proc/net/tcp", "01") + count_socks("/proc/net/tcp6", "01"),
+        "udp": count_socks("/proc/net/udp", "") + count_socks("/proc/net/udp6", ""),
+    })
+}
+
 async fn system(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "admin");
     let load: Vec<f64> = read("/proc/loadavg").split_whitespace().take(3).filter_map(|x| x.parse().ok()).collect();

@@ -35,6 +35,7 @@ Public (no auth): `POST /join/register` with `{token, node_token, address, endpo
 | POST | `/api/backup` `{passphrase}` | backup |
 | POST | `/api/restore` (file body, headers `X-Passphrase`, `X-Full: 1`) | login session |
 | GET / PUT | `/api/tgbackup`, POST `/api/tgbackup/{test,send}` | backup |
+| GET / PUT / DELETE | `/api/app-msg` — PUT `{text (max 500), minutes (0 = until removed), users ("" = everyone, or usernames separated by commas)}` | settings |
 
 ## System
 | Method | Path | Scope | Notes |
@@ -49,7 +50,7 @@ Public (no auth): `POST /join/register` with `{token, node_token, address, endpo
 |---|---|
 | `/sub/kanki-<id>-<code>` | subscription page (older links with another prefix keep working) |
 | `/sub/kanki-<id>-<code>/raw` | base64 list for v2rayNG / Hiddify |
-| `/sub/kanki-<id>-<code>/json` | JSON for apps |
+| `/sub/kanki-<id>-<code>/json` | JSON for apps; `app_msg` is `{id, text, until}` (unix seconds, 0 = no end) while an app message is active for this user, else `null`. The same JSON is inside the subscription page (`<script id="data">`) |
 | `/api/config/:id/{wireguard,amneziawg,hysteria2}?sub=..&node=..` | config file; add `/qr` or `/uri` |
 
 ## Tunnels (Kanki Tunnel)

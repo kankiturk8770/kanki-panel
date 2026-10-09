@@ -95,6 +95,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/join/register", post(node_join_register))
         .route("/api/settings", get(settings_get).put(settings_put))
         .route("/api/settings/apply-endpoint", post(apply_endpoint_all))
+        .route("/api/app-msg", get(app_msg_get).put(app_msg_put).delete(app_msg_delete))
         .route("/api/plans", get(plans_list).post(plans_add))
         .route("/api/plans/bulk", post(plans_bulk))
         .route("/api/plans/category", axum::routing::put(plans_cat_rename))
@@ -303,10 +304,7 @@ pub fn node_info(n: &Node) -> Value {
 }
 
 fn node_json(app: &App, n: &Node, users: &[User]) -> Value {
-    let info = node_info(n);
-    let mut info_pub = info.clone();
-    if let Some(o) = info_pub.as_object_mut() {
-    }
+    let info_pub = node_info(n);
     let assigned = users.iter().filter(|u| u.on(n)).count();
     json!({
         "id": n.id, "name": n.name, "address": n.address, "endpoint": n.endpoint, "endpoint_mode": n.endpoint_mode,
@@ -584,6 +582,65 @@ async fn apply_endpoint_all(State(app): St, h: HeaderMap) -> Response {
     Json(json!({"ok": true})).into_response()
 }
 
+// ============================================================ message for the Kanki app (shown by its robot)
+
+/// The app message for this user, or None when there is none, it has run out, or it is meant for other users
+fn app_msg(app: &App, username: &str) -> Option<Value> {
+    let text = app.db.get("app_msg");
+    if text.trim().is_empty() {
+        return None;
+    }
+    let until: i64 = app.db.get("app_msg_until").parse().unwrap_or(0);
+    if until > 0 && now() >= until {
+        return None;
+    }
+    let to = app.db.get("app_msg_users");
+    if !to.trim().is_empty() && !to.split(|c: char| c == ',' || c.is_whitespace()).any(|x| x.eq_ignore_ascii_case(username)) {
+        return None;
+    }
+    Some(json!({ "id": app.db.get("app_msg_id"), "text": text, "until": until }))
+}
+
+async fn app_msg_get(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    let until: i64 = app.db.get("app_msg_until").parse().unwrap_or(0);
+    let text = app.db.get("app_msg");
+    let active = !text.trim().is_empty() && (until == 0 || now() < until);
+    Json(json!({ "text": text, "until": until, "users": app.db.get("app_msg_users"), "active": active, "now": now() })).into_response()
+}
+
+/// { text, minutes (0 = until removed), users ("" = everyone, or usernames separated by commas) }
+async fn app_msg_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "settings");
+    let text = b["text"].as_str().unwrap_or("").trim().to_string();
+    if text.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "the message is empty");
+    }
+    if text.chars().count() > 500 {
+        return err(StatusCode::BAD_REQUEST, "the message is longer than 500 characters");
+    }
+    let minutes = b["minutes"].as_i64().unwrap_or(60).clamp(0, 60 * 24 * 30);
+    let users: Vec<String> = b["users"].as_str().unwrap_or("")
+        .split(|c: char| c == ',' || c.is_whitespace()).filter(|x| !x.is_empty()).map(|x| x.to_string()).collect();
+    if let Some(bad) = users.iter().find(|x| !valid_username(x)) {
+        return err(StatusCode::BAD_REQUEST, &format!("not a username: {}", bad));
+    }
+    let until = if minutes == 0 { 0 } else { now() + minutes * 60 };
+    app.db.set("app_msg", &text);
+    app.db.set("app_msg_until", &until.to_string());
+    app.db.set("app_msg_users", &users.join(","));
+    // a new id makes the app show it again even to users who closed the previous message
+    app.db.set("app_msg_id", &format!("{}-{}", now(), rand_token(4)));
+    Json(json!({ "ok": true, "until": until })).into_response()
+}
+
+async fn app_msg_delete(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    app.db.set("app_msg", "");
+    app.db.set("app_msg_until", "0");
+    Json(json!({ "ok": true })).into_response()
+}
+
 async fn plans_list(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "settings");
     let v: Vec<Value> = app.db.with(|c| {
@@ -723,7 +780,6 @@ pub fn node_protos(u: &User, n: &Node) -> Vec<&'static str> {
 
 fn sub_data(app: &App, u: &User) -> Value {
     let nodes: Vec<Value> = user_nodes(app, u).iter().map(|n| {
-        let info = node_info(n);
         json!({
             "id": n.id, "name": n.name, "main": n.id == "local", "protocols": node_protos(u, n),
             "hy2": hy2_uri(app, u, n),
@@ -736,6 +792,7 @@ fn sub_data(app: &App, u: &User) -> Value {
         "panel_name": app.db.get("panel_name"), "version": crate::VERSION, "nodes": nodes,
         "support": app.db.get("support"), "app_link": app.db.get("app_link"),
         "logo": app.db.get("logo"),
+        "app_msg": app_msg(app, &u.username),
     })
 }
 

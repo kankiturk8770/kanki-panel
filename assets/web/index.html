@@ -726,6 +726,17 @@ html[dir=rtl] .uchip2{padding:4px 4px 4px 10px}
 .camn{display:flex;gap:9px;align-items:flex-start;padding:10px 12px;margin-top:8px;border-radius:12px;border:1px dashed var(--ln2);color:var(--s);font-size:12px;line-height:1.75}.camn svg{flex:none;color:var(--a);margin-top:2px}
 #tw_cdn{margin-top:8px!important}
 @media(max-width:560px){.trte{grid-template-columns:1fr}.trte .arr{display:none}}
+.nodec{margin:0;border-inline-start:3px solid var(--ok)}.nodec.hy{border-inline-start-color:var(--warn)}.nodec.hr{border-inline-start-color:var(--bad)}
+.nhd{display:flex;align-items:center;gap:10px}.nnm{flex:1;min-width:0}.nnm .muted{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nsum{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:10px 0 6px}.nsum span{display:flex;flex-direction:column;gap:2px;padding:5px 8px;border-radius:10px;background:rgba(127,127,127,.07)}.nsum small{color:var(--s);font-size:10.5px}.nsum b{font-size:12px}
+.nms{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:4px 0}.nm i{display:block;height:5px;border-radius:5px;background:rgba(127,127,127,.18);overflow:hidden;margin-top:3px}.nm s{display:block;height:100%;border-radius:5px;transition:width .4s}
+.nmh{display:flex;justify-content:space-between;font-size:11px}.nmh small{color:var(--s)}.nmx{grid-column:1/-1;margin:2px 0!important;font-size:11.5px}
+.nwhy{list-style:none;margin:6px 0 0;padding:0;font-size:11.5px}.nwhy li{padding:3px 0;display:flex;gap:6px}.nwhy li:before{content:'•'}.nwhy .l2{color:var(--bad)}.nwhy .l1{color:var(--warn)}.nwhy .l0{color:var(--s)}
+.nmore{width:100%;margin-top:8px;display:flex;justify-content:center;align-items:center;gap:6px;background:none;border:1px dashed var(--ln);color:var(--s);border-radius:10px;padding:6px;cursor:pointer;font:inherit;font-size:12px}.nmore:hover{color:var(--t);border-color:var(--a)}
+.ndet{margin-top:8px}.nkv{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:6px}.nkv span{display:flex;flex-direction:column;padding:5px 8px;border-radius:10px;background:rgba(127,127,127,.07)}.nkv small{color:var(--s);font-size:10.5px}.nkv b{font-size:12px}
+.amcur{padding:10px 12px;border-radius:12px;border:1px solid var(--ln);margin:8px 0;white-space:pre-wrap}.amcur.on{border-color:var(--ok)}
+.amdur{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}.amdur button{padding:6px 10px;border-radius:10px;border:1px solid var(--ln);background:none;color:var(--t);cursor:pointer;font:inherit;font-size:12px}.amdur button.on{border-color:var(--a);color:var(--a)}
+@media(max-width:620px){.nkv{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -1130,19 +1141,54 @@ function newUser(){modal(mhead(t('New user'))+ufForm(null)+'<button class="btn" 
 function pNodes(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Nodes')+'</h2><p>'+t('Main server and extra nodes')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="nodeAdd()">+ '+t('Add node')+'</button></div></div><div class="ncards" id="nl">'+t('Loading…')+'</div>';
  loadNodes();autoRefresh(loadNodes);if(S.openAdd){S.openAdd=false;setTimeout(nodeAdd,150)}}
 function loadNodes(){api('GET','/api/nodes').then(function(n){S.nodes=n;drawNodes()}).catch(fail)}
-function drawNodes(){var el=$('#nl');if(!el)return;el.innerHTML=S.nodes.map(function(n){var loc=n.id=='local';
- var st=n.sync_state=='synced'?'<span style="color:var(--ok)">'+t('Synced')+'</span>':n.sync_state=='mismatch'?'<span style="color:var(--warn)">'+t('Config mismatch')+'</span>':'<span style="color:var(--bad)">'+(n.online?'—':t('Offline'))+'</span>';
+// ---- node health: judged from the last sync and the CPU / RAM / disk the node reports
+function panelVer(){var l=(S.nodes||[]).filter(function(x){return x.id=='local'})[0];return l&&l.info&&l.info.version||''}
+function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bump=function(l,m){r.push([l,m]);if(l>lv)lv=l};
+ if(!loc&&!n.online)return{lv:2,c:'r',l:'Problem',r:[[2,'Not reachable: check the server, its agent and the firewall']]};
+ if(!loc&&n.last_sync&&Date.now()/1000-n.last_sync>180)bump(1,'No contact for more than 3 minutes');
+ if(n.sync_state=='mismatch')bump(1,'Some users are not on this server yet (config mismatch): press Sync');
+ (i.services||[]).forEach(function(s){if(!s.active)bump(2,t('Service stopped')+': '+s.key+' ('+s.state+')')});
+ if(st){var cpu=+st.cpu||0,mem=pc(st.mem_used,st.mem_total),dk=pc(st.disk_used,st.disk_total),sw=pc(st.swap_used,st.swap_total);
+  if(cpu>=90)bump(2,t('CPU is full')+' ('+N(Math.round(cpu))+'%)');else if(cpu>=70)bump(1,t('CPU is busy')+' ('+N(Math.round(cpu))+'%)');
+  if(mem>=92)bump(2,t('RAM is almost full')+' ('+N(Math.round(mem))+'%)');else if(mem>=80)bump(1,t('RAM is getting full')+' ('+N(Math.round(mem))+'%)');
+  if(dk>=95)bump(2,t('Disk is almost full')+' ('+N(Math.round(dk))+'%)');else if(dk>=85)bump(1,t('Disk is getting full')+' ('+N(Math.round(dk))+'%)');
+  if(st.swap_total>0&&sw>=50)bump(1,t('Using a lot of swap: the server needs more RAM')+' ('+N(Math.round(sw))+'%)');
+ }else if(!loc)bump(0,'Press Update agent to see CPU, RAM and disk of this node');
+ var pv=panelVer();if(!loc&&pv&&i.version&&i.version!=pv)bump(1,t('Agent is on an older version')+' (v'+i.version+'): '+t('press Update agent'));
+ if(n.maint)bump(1,'Under maintenance: new users are not sent here');
+ return lv==2?{lv:2,c:'r',l:'Problem',r:r}:lv==1?{lv:1,c:'y',l:'Under pressure',r:r}:{lv:0,c:'g',l:'Healthy',r:r}}
+function upTime(s){s=+s||0;var d=Math.floor(s/86400),h=Math.floor(s%86400/3600);return d?N(d)+' '+t('days')+' '+N(h)+' '+t('hours'):N(h)+' '+t('hours')+' '+N(Math.floor(s%3600/60))+' '+t('min')}
+function nMeter(lbl,p,txt){var c=p>=90?'var(--bad)':p>=70?'var(--warn)':'var(--ok)';
+ return '<div class="nm"><div class="nmh"><small>'+t(lbl)+'</small><b class="ltr">'+txt+'</b></div><i><s style="width:'+Math.round(p)+'%;background:'+c+'"></s></i></div>'}
+S.nopen=S.nopen||{};
+function drawNodes(){var el=$('#nl');if(!el)return;el.innerHTML=S.nodes.map(function(n){var loc=n.id=='local',h=nHealthOf(n),st=(n.info||{}).stats,op=!!S.nopen[n.id],id=esc(n.id);
+ var sy=n.sync_state=='synced'?'<span class="okt">'+t('Synced')+'</span>':n.sync_state=='mismatch'?'<span style="color:var(--warn)">'+t('Config mismatch')+'</span>':'<span class="bad2">'+(n.online?'—':t('Offline'))+'</span>';
  var acc=n.maint?t('Under maintenance'):n.drain?t('Draining'):t('Accepting');
- var badge=loc?'<span class="badge g">'+t('Local')+'</span>':n.online?'<span class="badge g">'+t('Online')+'</span>':'<span class="badge r">'+t('Offline')+'</span>';
- return '<div class="card" style="border-inline-start:3px solid '+(n.online?'var(--ok)':'var(--bad)')+';margin:0"><div class="row" style="justify-content:space-between;align-items:flex-start"><div class="row"><div class="logo" style="width:34px;height:34px;font-size:14px">'+(loc?'B':'N')+'</div><div><b>'+esc(n.name)+'</b><div class="muted ltr">'+esc(loc?'local':n.address.replace(/^https?:\/\//,''))+'</div></div></div>'+badge+'</div>'+
- (n.plain_http?'<div class="warnbox">'+t('Insecure: plain HTTP. Reinstall the node with the new installer to get TLS.')+'</div>':'')+
- '<div class="g3" style="margin:10px 0"><div class="pc" style="flex-direction:column"><small class="muted">'+t('Users')+'</small><b>'+n.users+'</b></div><div class="pc" style="flex-direction:column"><small class="muted">'+t('Last contact')+'</small><b style="font-size:12px">'+(loc?t('this server'):ago(n.last_sync))+'</b></div><div class="pc" style="flex-direction:column"><small class="muted">'+t('Sync')+'</small><b style="font-size:12px">'+st+'</b></div></div>'+
- '<div class="g2"><button class="b2 '+(n.drain?'on':'')+'" onclick="nAct(\''+n.id+'\',\'drain\')">'+t('Drain')+'</button><button class="b2 '+(n.maint?'on':'')+'" onclick="nAct(\''+n.id+'\',\'maint\')">'+t('Maintenance')+'</button></div>'+
- '<p class="muted" style="margin:8px 0">'+acc+' · '+esc(n.effective_endpoint||'')+(n.note?' · '+esc(n.note):'')+'</p>'+
- '<div class="g2"><button class="b2" onclick="nAct(\''+n.id+'\',\'sync\')">↻ '+t('Sync')+'</button><button class="b2" onclick="nHealth(\''+n.id+'\')">♡ '+t('Health')+'</button><button class="b2" onclick="nodeEdit(\''+n.id+'\')">✎ '+t('Edit')+'</button><button class="b2" onclick="nAct(\''+n.id+'\',\'repair\')">↻ '+t('Repair agent')+'</button>'+
- (loc?'':'<button class="b2" onclick="nAct(\''+n.id+'\',\'update\')">⇪ '+t('Update agent')+'</button><button class="b2 bd" onclick="nDel(\''+n.id+'\')">⌫ '+t('Delete node')+'</button>')+'</div>'+
- '<div class="g2" style="margin-top:8px"><button class="b2 okb" onclick="nAssign(\''+n.id+'\',1)">'+ic('plus',15)+' '+t('Add to all users')+'</button>'+(loc?'':'<button class="b2 bd" onclick="nAssign(\''+n.id+'\',0)">'+ic('trash',15)+' '+t('Remove from all users')+'</button>')+'</div>'+
- (loc?'<p class="muted" style="margin:8px 0 0">'+t('Main panel server · local management')+'</p>':'')+'</div>'}).join('')}
+ var meters=st?nMeter('CPU',+st.cpu||0,N(Math.round(+st.cpu||0))+'%')+nMeter('RAM',pc(st.mem_used,st.mem_total),N(Math.round(pc(st.mem_used,st.mem_total)))+'%')+nMeter('Disk',pc(st.disk_used,st.disk_total),N(Math.round(pc(st.disk_used,st.disk_total)))+'%')
+  :'<p class="muted nmx">'+t(loc||n.online?'Press Update agent to see CPU, RAM and disk of this node':'Not reachable')+'</p>';
+ var det=st?'<div class="nkv">'+
+   '<span><small>'+t('CPU')+'</small><b class="ltr">'+N(st.cores)+' '+t('cores')+' · load '+N((st.load||[]).map(function(x){return (+x).toFixed(2)}).join(' '))+'</b></span>'+
+   '<span><small>'+t('RAM')+'</small><b class="ltr">'+N(bytes(st.mem_used))+' / '+N(bytes(st.mem_total))+'</b></span>'+
+   (st.swap_total>0?'<span><small>'+t('Swap')+'</small><b class="ltr">'+N(bytes(st.swap_used))+' / '+N(bytes(st.swap_total))+'</b></span>':'')+
+   '<span><small>'+t('Disk')+'</small><b class="ltr">'+N(bytes(st.disk_used))+' / '+N(bytes(st.disk_total))+'</b></span>'+
+   '<span><small>'+t('Connections')+'</small><b class="ltr">TCP '+N(st.tcp)+' · UDP '+N(st.udp)+'</b></span>'+
+   '<span><small>'+t('Uptime')+'</small><b>'+upTime(st.uptime)+'</b></span></div>':'';
+ return '<div class="card nodec h'+h.c+'"><div class="nhd"><div class="logo" style="width:34px;height:34px;font-size:14px">'+(loc?'B':'N')+'</div>'+
+  '<div class="nnm"><b>'+esc(n.name)+'</b><div class="muted ltr">'+esc(loc?'local':n.address.replace(/^https?:\/\//,''))+'</div></div>'+
+  '<span class="badge '+h.c+'"><span class="dot '+h.c+'"></span> '+t(h.l)+'</span></div>'+
+  (n.plain_http?'<div class="warnbox">'+t('Insecure: plain HTTP. Reinstall the node with the new installer to get TLS.')+'</div>':'')+
+  '<div class="nsum"><span><small>'+t('Users')+'</small><b>'+N(n.users)+'</b></span><span><small>'+t('Last contact')+'</small><b>'+(loc?t('this server'):ago(n.last_sync))+'</b></span><span><small>'+t('Sync')+'</small><b>'+sy+'</b></span></div>'+
+  '<div class="nms">'+meters+'</div>'+
+  (h.r.length?'<ul class="nwhy">'+h.r.map(function(x){return '<li class="l'+x[0]+'">'+t(x[1])+'</li>'}).join('')+'</ul>':'')+
+  '<button class="nmore" data-nopen="'+id+'" aria-expanded="'+op+'">'+t(op?'Hide details':'Details & settings')+' <span class="arr">'+(op?'▴':'▾')+'</span></button>'+
+  '<div class="ndet'+(op?'':' hide')+'">'+det+
+   '<p class="muted" style="margin:8px 0">'+acc+' · '+esc(n.effective_endpoint||'')+((n.info||{}).version?' · v'+esc(n.info.version):'')+(n.note?' · '+esc(n.note):'')+'</p>'+
+   '<div class="g2"><button class="b2 '+(n.drain?'on':'')+'" onclick="nAct(\''+id+'\',\'drain\')">'+t('Drain')+'</button><button class="b2 '+(n.maint?'on':'')+'" onclick="nAct(\''+id+'\',\'maint\')">'+t('Maintenance')+'</button>'+
+   '<button class="b2" onclick="nAct(\''+id+'\',\'sync\')">↻ '+t('Sync')+'</button><button class="b2" onclick="nHealth(\''+id+'\')">♡ '+t('Health')+'</button><button class="b2" onclick="nodeEdit(\''+id+'\')">✎ '+t('Edit')+'</button><button class="b2" onclick="nAct(\''+id+'\',\'repair\')">↻ '+t('Repair agent')+'</button>'+
+   (loc?'':'<button class="b2" onclick="nAct(\''+id+'\',\'update\')">⇪ '+t('Update agent')+'</button><button class="b2 bd" onclick="nDel(\''+id+'\')">⌫ '+t('Delete node')+'</button>')+
+   '<button class="b2 okb" onclick="nAssign(\''+id+'\',1)">'+ic('plus',15)+' '+t('Add to all users')+'</button>'+(loc?'':'<button class="b2 bd" onclick="nAssign(\''+id+'\',0)">'+ic('trash',15)+' '+t('Remove from all users')+'</button>')+'</div>'+
+   (loc?'<p class="muted" style="margin:8px 0 0">'+t('Main panel server · local management')+'</p>':'')+'</div></div>'}).join('');
+ el.onclick=function(e){var b=e.target.closest('[data-nopen]');if(!b)return;var k=b.dataset.nopen;S.nopen[k]=!S.nopen[k];drawNodes()}}
 function findN(id){for(var i=0;i<S.nodes.length;i++)if(S.nodes[i].id==id)return S.nodes[i]}
 function nAct(id,a){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+a).then(function(r){toast(r.ok===false?(r.result&&r.result.error||'failed'):t('Done'),r.ok===false);loadNodes()}).catch(fail)}
 function nDel(id){confirmDo(function(){api('DELETE','/api/nodes/'+encodeURIComponent(id)).then(function(){toast(t('Done'));loadNodes()}).catch(fail)})}
@@ -1454,9 +1500,10 @@ function drawNodesCard(list){var el=$('#nc');if(!el)return;
  el.innerHTML='<div class="nh"><div><h3>'+t('Nodes')+'</h3><small class="'+(all?'okt':'bad2')+'">'+(all?'✓ '+t('All servers connected'):N(list.length-up)+' '+t('server(s) disconnected'))+' · '+N(up)+' / '+N(list.length)+'</small></div>'+
   '<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="b2" data-nd="add">'+ic('plus',15)+' '+t('Add node')+'</button><button class="b2" data-nd="all">'+t('Manage')+'</button></div></div>'+
   '<div class="nds">'+list.map(function(n){var s=nState(n),loc=n.id=='local',sy=loc?null:n.sync_state=='synced'?['g','Synced']:n.sync_state=='mismatch'?['y','Config mismatch']:null;
+   var hh=nHealthOf(n),stt=(n.info||{}).stats;if(s.c=='g'&&hh.c!='g')s={c:hh.c,l:hh.l};
    return '<button class="nd" data-nd="all"><span class="dot '+s.c+'"></span><span class="nn"><b>'+esc(n.name)+'</b><small class="ltr">'+esc(loc?'local':String(n.address||'').replace(/^https?:\/\//,''))+'</small></span>'+
     '<span class="nb"><span class="badge '+s.c+' cn">'+(s.c=='g'?ic('check',12)+' ':'')+t(s.l)+'</span>'+(loc?'<span class="badge">'+t('Main server')+'</span>':'')+(sy?'<span class="badge '+sy[0]+'">'+t(sy[1])+'</span>':'')+'</span>'+
-    '<span class="nxw"><span class="nx"><small>'+t('Users')+'</small> <b>'+N(n.users)+'</b></span><span class="nx"><small>'+t('Last contact')+'</small> <b>'+(loc?t('this server'):ago(n.last_sync))+'</b></span></span></button>'}).join('')+'</div>'+
+    '<span class="nxw"><span class="nx"><small>'+t('Users')+'</small> <b>'+N(n.users)+'</b></span><span class="nx"><small>'+t('Last contact')+'</small> <b>'+(loc?t('this server'):ago(n.last_sync))+'</b></span>'+(stt?'<span class="nx"><small>CPU</small> <b>'+N(Math.round(+stt.cpu||0))+'%</b></span><span class="nx"><small>RAM</small> <b>'+N(Math.round(pc(stt.mem_used,stt.mem_total)))+'%</b></span>':'')+'</span></button>'}).join('')+'</div>'+
   (list.length<2?'<p class="muted" style="margin:10px 0 0">'+t('No extra nodes yet. Add one with a single command.')+'</p>':'');
  el.onclick=function(e){var b=e.target.closest('[data-nd]');if(!b)return;goNodes(b.dataset.nd=='add')}}
 
@@ -1534,7 +1581,7 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
    '<div class="g4b"><button class="b2" id="bt_test">'+ic('send',15)+' '+t('Test connection')+'</button><button class="b2" id="bt_pause">'+ic(b.paused?'play':'pause',15)+' '+t(b.paused?'Resume':'Pause')+'</button><button class="b2" id="bt_edit">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2 bd" id="bt_del">'+ic('trash',15)+' '+t('Delete bot')+'</button></div></div>'
   :'<div class="card bempty"><span class="bav big">'+ic('bot',30)+'</span><h3>'+t('No sales bot yet')+'</h3><ol class="steps"><li>'+t('In Telegram open @BotFather, send /newbot and copy the token it gives.')+'</li><li>'+t('Get your numeric Telegram ID from @userinfobot.')+'</li><li>'+t('Press Create bot and paste both.')+'</li></ol><button class="btn" id="bt_new2">+ '+t('Create bot')+'</button></div>';
  S.btab=S.btab||'sales';
- var tabs=[['sales','Sales settings'],['plans','Plans'],['disc','Discount codes'],['chan','Smart channel']];
+ var tabs=[['sales','Sales settings'],['plans','Plans'],['disc','Discount codes'],['chan','Smart channel'],['appmsg','App message']];
  el.innerHTML=head+'<div class="seg btabs" id="bt_tabs">'+tabs.map(function(x){return '<button data-bt="'+x[0]+'" class="'+(S.btab==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
   '<div data-btp="sales"><div class="card"><h3>'+ic('settings',16)+' '+t('Sales settings')+'</h3><p class="sub">'+t('How the bot sells: trials, payments, referrals and messages.')+'</p>'+
    '<div class="chips">'+bsChk('sales_on','Sales enabled')+bsChk('warn_on','Warn buyers before expiry / end of data')+'</div>'+
@@ -1548,9 +1595,9 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
     '<div class="chips">'+bsChk('zp_on','ZarinPal')+'</div><div class="g2f">'+bsIn('zp_merchant','ZarinPal merchant ID','',0,1)+bsIn('zp_callback','ZarinPal callback URL','https://…',0,1)+'</div>'+
     '<div class="chips">'+bsChk('wallet_on','Wallet / manual payment')+'</div><label class="f">'+t('Text shown to the buyer')+'</label><textarea data-bs="wallet_text" rows="2">'+esc((S.bset||{}).wallet_text||'')+'</textarea></details>'+
    '<button class="btn" style="width:100%;margin-top:10px" id="bs_save">'+t('Save sales settings')+'</button></div></div>'+
-  '<div data-btp="plans">'+botSmart()+botPlans()+'</div><div data-btp="disc"><div id="bt_disc"></div></div><div data-btp="chan"><div id="bt_chan"></div></div>';
+  '<div data-btp="plans">'+botSmart()+botPlans()+'</div><div data-btp="disc"><div id="bt_disc"></div></div><div data-btp="chan"><div id="bt_chan"></div></div><div data-btp="appmsg"><div id="bt_am"></div></div>';
  var showTab=function(k){S.btab=k;$$('#bt_tabs [data-bt]').forEach(function(b){b.classList.toggle('on',b.dataset.bt==k)});$$('[data-btp]').forEach(function(d){d.style.display=d.dataset.btp==k?'':'none'});
-  if(k=='disc')botDisc();if(k=='chan')botChan()};
+  if(k=='disc')botDisc();if(k=='chan')botChan();if(k=='appmsg')botAppMsg()};
  $('#bt_tabs').onclick=function(e){var b=e.target.closest('[data-bt]');if(b)showTab(b.dataset.bt)};showTab(S.btab);smartWire();
  var w=function(id,fn){var x=$(id);if(x)x.onclick=fn};
  w('#bt_new',function(){botModal(false)});w('#bt_new2',function(){botModal(false)});w('#bt_edit',function(){botModal(true)});
@@ -1596,6 +1643,42 @@ function smartWire(){var pv=function(){var el=$('#sp_prev');if(!el)return;var l=
  $$('[data-sr]').forEach(function(x){x.oninput=pv});pv();
  var send=function(rep){var r=smartRead(),l=smartList(r);if(!l.length)return;var go=function(){api('POST','/api/plans/bulk',{plans:l,replace:rep,rules:r}).then(function(x){toast(t('Saved')+' · '+N(x.added));botLoad()}).catch(fail)};rep?confirmDo(go):go()};
  var a=$('#sp_add'),b=$('#sp_rep');if(a)a.onclick=function(){send(false)};if(b)b.onclick=function(){send(true)}}
+
+
+// ---- message shown by the robot inside the Kanki app (read from the subscription page, so no extra address is needed)
+var AM_DUR=[[30,'30 min'],[60,'1 hour'],[180,'3 hours'],[360,'6 hours'],[720,'12 hours'],[1440,'1 day'],[4320,'3 days'],[10080,'7 days'],[0,'Until I remove it']];
+function amLeft(until,now){if(!until)return t('Until I remove it');var s=Math.max(0,until-now),h=Math.floor(s/3600),m=Math.ceil(s%3600/60);
+ return (h?N(h)+' '+t('hours')+' ':'')+N(m)+' '+t('min')+' '+t('left')}
+function botAppMsg(){var el=$('#bt_am');if(!el)return;S.amDur=S.amDur==null?60:S.amDur;
+ api('GET','/api/app-msg').then(function(m){
+  var cur=m.active?'<div class="amcur on"><div class="row" style="justify-content:space-between;gap:8px"><span class="badge g"><span class="dot g"></span> '+t('Showing in the app')+'</span><small class="muted">'+amLeft(m.until,m.now)+'</small></div>'+
+    '<p style="margin:8px 0">'+esc(m.text)+'</p><small class="muted">'+t('For')+': '+(m.users?'<span class="ltr">'+esc(m.users)+'</span>':t('All users'))+'</small>'+
+    '<button class="b2 bd" style="width:100%;margin-top:8px" id="am_del">'+ic('trash',15)+' '+t('Remove now')+'</button></div>'
+   :'<div class="amcur"><span class="muted">'+t('No message is showing in the app right now.')+'</span></div>';
+  el.innerHTML='<div class="card"><h3>'+ic('bot',16)+' '+t('App message')+'</h3><p class="sub">'+t('Write a message; the robot on the first screen of the Kanki app shows it to users, and it disappears by itself when the time is over.')+'</p>'+cur+
+   '<label class="f">'+t('Message')+'</label><textarea id="am_t" rows="3" maxlength="500" placeholder="'+t('e.g. The Germany server is under maintenance for one hour.')+'"></textarea><small class="muted" id="am_c"></small>'+
+   '<label class="f">'+t('Show for')+'</label><div class="amdur" id="am_d">'+AM_DUR.map(function(x){return '<button data-m="'+x[0]+'" class="'+(S.amDur==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
+   '<label class="f">'+t('Only for these users (empty = everyone)')+'</label><input id="am_u" class="ltr" placeholder="user1, user2">'+
+   '<button class="btn" style="width:100%;margin-top:10px" id="am_go">'+ic('send',15)+' '+t(m.active?'Replace the message':'Send to the app')+'</button>'+
+   '<p class="hint" style="margin-top:8px">'+t('The app picks the message up when it is opened, then every 30 seconds while connected (every 5 minutes when not). A user who closes the message will not see it again; a new message is shown again.')+'</p></div>';
+  var ta=$('#am_t'),cnt=function(){$('#am_c').textContent=N(ta.value.length)+' / '+N(500)};ta.oninput=cnt;cnt();
+  $('#am_d').onclick=function(e){var b=e.target.closest('[data-m]');if(!b)return;S.amDur=+b.dataset.m;$$('#am_d [data-m]').forEach(function(x){x.classList.toggle('on',x==b)})};
+  $('#am_go').onclick=function(){var tx=ta.value.trim();if(!tx)return toast(t('Write the message first'),1);
+   api('PUT','/api/app-msg',{text:tx,minutes:S.amDur,users:$('#am_u').value}).then(function(){toast(t('Sent'));botAppMsg()}).catch(fail)};
+  var d=$('#am_del');if(d)d.onclick=function(){confirmDo(function(){api('DELETE','/api/app-msg').then(function(){toast(t('Done'));botAppMsg()}).catch(fail)})}
+ }).catch(fail)}
+Object.assign(FA,{"App message":"پیام اپ","30 min":"۳۰ دقیقه","1 hour":"۱ ساعت","3 hours":"۳ ساعت","6 hours":"۶ ساعت","12 hours":"۱۲ ساعت","1 day":"۱ روز","3 days":"۳ روز","7 days":"۷ روز","Until I remove it":"تا وقتی خودم پاکش کنم",
+ "min":"دقیقه","left":"مانده","Showing in the app":"در حال نمایش در اپ","For":"برای","All users":"همه کاربران","Remove now":"همین الان پاک کن","No message is showing in the app right now.":"الان هیچ پیامی در اپ نمایش داده نمی‌شود.",
+ "Write a message; the robot on the first screen of the Kanki app shows it to users, and it disappears by itself when the time is over.":"یک پیام بنویس؛ ربات صفحه‌ی اول اپ کانکی آن را به کاربرها نشان می‌دهد و وقتی زمانش تمام شد خودش پاک می‌شود.",
+ "Message":"متن پیام","e.g. The Germany server is under maintenance for one hour.":"مثلاً: سرور آلمان تا یک ساعت در حال تعمیر است.","Show for":"مدت نمایش","Only for these users (empty = everyone)":"فقط برای این کاربرها (خالی = همه)",
+ "Replace the message":"جایگزین کردن پیام","Send to the app":"ارسال به اپ","Write the message first":"اول متن پیام را بنویس","Sent":"ارسال شد",
+ "The app picks the message up when it is opened, then every 30 seconds while connected (every 5 minutes when not). A user who closes the message will not see it again; a new message is shown again.":"اپ پیام را موقع باز شدن می‌گیرد؛ بعد وقتی وصل است هر ۳۰ ثانیه و وقتی وصل نیست هر ۵ دقیقه. کاربری که پیام را ببندد دیگر آن را نمی‌بیند؛ پیام جدید دوباره نشان داده می‌شود.",
+ "Healthy":"سالم","Under pressure":"تحت فشار","Problem":"مشکل دارد","Details & settings":"جزئیات و تنظیمات","Hide details":"بستن جزئیات","cores":"هسته","hours":"ساعت","Not reachable":"در دسترس نیست",
+ "Not reachable: check the server, its agent and the firewall":"در دسترس نیست: سرور، Agent و فایروال را چک کن","No contact for more than 3 minutes":"بیش از ۳ دقیقه ارتباطی نبوده",
+ "Some users are not on this server yet (config mismatch): press Sync":"بعضی کاربرها هنوز روی این سرور نیستند (اختلاف کانفیگ): همگام‌سازی را بزن","Service stopped":"سرویس خاموش است",
+ "CPU is full":"CPU پر است","CPU is busy":"CPU شلوغ است","RAM is almost full":"رم تقریباً پر است","RAM is getting full":"رم دارد پر می‌شود","Disk is almost full":"دیسک تقریباً پر است","Disk is getting full":"دیسک دارد پر می‌شود",
+ "Using a lot of swap: the server needs more RAM":"از Swap زیاد استفاده می‌کند: سرور رم بیشتری لازم دارد","Press Update agent to see CPU, RAM and disk of this node":"برای دیدن CPU، رم و دیسک این نود «آپدیت Agent» را بزن",
+ "Agent is on an older version":"Agent نسخه‌ی قدیمی‌تری دارد","press Update agent":"آپدیت Agent را بزن","Under maintenance: new users are not sent here":"در تعمیر: کاربر جدید به اینجا فرستاده نمی‌شود"});
 
 // ---- discount codes
 function botDisc(){var el=$('#bt_disc');if(!el)return;api('GET','/api/discounts').then(function(l){
