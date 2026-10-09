@@ -434,7 +434,11 @@ fn conf_path(iface: &str) -> String {
 
 fn reconcile() {
     let want = shared().lock().unwrap().want.clone();
-    let tools = {
+    let tools = if want.is_empty() {
+        // no AmneziaWG interface is wanted: do not touch the system (before, every tunnel server
+        // added the Amnezia PPA and installed its packages at start even if it never ran an AmneziaWG link)
+        Ok(())
+    } else {
         let cached = shared().lock().unwrap().installed.clone();
         match cached {
             Some(Ok(())) => Ok(()),

@@ -29,8 +29,8 @@ CONF=$CONF_DIR/tunnel.json
 UNIT=/etc/systemd/system/$NAME.service
 SYSCTL=/etc/sysctl.d/91-$NAME.conf
 REPO=${KANKI_REPO:-kankiturk8770/kanki-panel}
-# `tunnel-run --check` exists from this version on
-MIN_VERSION=2.9.1
+# `tunnel-run --check` exists from 2.9.1; 2.9.2 stops the needless AmneziaWG installation at start
+MIN_VERSION=2.9.2
 
 Y='\033[1;33m'; R='\033[1;31m'; N='\033[0m'; G='\033[1;32m'
 say(){ echo -e "${Y}>> $*${N}"; }
