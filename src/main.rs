@@ -70,7 +70,7 @@ impl App {
 }
 
 fn usage() {
-    println!("kanki-panel {}\n\nCommands:\n  serve                      run the main panel (default)\n  node                       run the node agent\n  tunnel-agent               run the tunnel agent (servers that only carry tunnels)\n  tunnel-run <file.json>     run a standalone tunnel from a JSON file (no panel)\n  hash-password <pass>       print a password hash\n  reset-admin <user> <pass>  reset admin login, sessions and 2FA\n  reset-security             clear IP allow/deny lists and disable 2FA\n  set-bot <token> <admins>   set / change the Telegram sales bot (empty token = remove)\n  version", VERSION);
+    println!("kanki-panel {}\n\nCommands:\n  serve                      run the main panel (default)\n  node                       run the node agent\n  tunnel-agent               run the tunnel agent (servers that only carry tunnels)\n  tunnel-run <file.json>     run a standalone tunnel from a JSON file (no panel); add --check to only validate it\n  hash-password <pass>       print a password hash\n  reset-admin <user> <pass>  reset admin login, sessions and 2FA\n  reset-security             clear IP allow/deny lists and disable 2FA\n  set-bot <token> <admins>   set / change the Telegram sales bot (empty token = remove)\n  version", VERSION);
 }
 
 #[tokio::main]
@@ -101,6 +101,11 @@ async fn main() {
                 eprintln!("usage: kanki-panel tunnel-run <tunnel.json>   (see docs/examples/)");
                 std::process::exit(1);
             };
+            // `--check`: only validate the file and print the ports to open (starts nothing)
+            if args.get(3).map(|s| s.as_str()) == Some("--check") {
+                tunnel::agent::check_file(path);
+                return;
+            }
             tunnel::agent::run_file(path).await;
             return;
         }

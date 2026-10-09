@@ -6,7 +6,7 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with 
 ## New in 2.9 — tunnel for hostile networks
 - **Three new transports:** `hq` (QUIC under a random per-packet mask, nothing on the wire looks like QUIC, packet sizes hidden), `h2` (WebSocket over HTTP/2 over TLS 1.3 with browser-like ALPN / ciphers / settings, four links per TCP connection, an ordinary web page for strangers) and `dual` (`hq` first, `h2` automatically when UDP does not get through, one port number for both).
 - Records on these transports carry random padding. Scanners get no answer on the UDP port.
-- **Standalone mode, no panel:** `kanki-panel tunnel-run file.json` (examples in `docs/examples/`). See `docs/HQ-TUNNEL.md`.
+- **Standalone mode, no panel:** `kanki-panel tunnel-run file.json` (examples in `docs/examples/`). Install it as a systemd service on two servers with `scripts/install-standalone.sh` (step-by-step guide in Persian: `docs/STANDALONE-FA.md`). See `docs/HQ-TUNNEL.md`.
 - Tunnel listeners are bounded now (limited half-open connections and handshakes, 1 MiB WebSocket messages before the token is proven), and the KCP relay no longer leaks sockets and tasks.
 - **The new transport code has not been compiled by its author's environment**: run `cargo test tunnel::` (the CI does) before relying on it.
 
@@ -57,7 +57,8 @@ kanki-panel/
 │   │                       engine), tests.rs
 │   └── telegram/           bot.rs (sales bot: plans, payments, trials, referrals, admin panel)
 ├── assets/web/             index.html (admin panel), sub.html (subscription page)
-├── docs/                   INSTALL.md, API.md, CHANGES.md, HQ-TUNNEL.md, examples/
+├── docs/                   INSTALL.md, API.md, CHANGES.md, HQ-TUNNEL.md, STANDALONE-FA.md, examples/, systemd/
+├── scripts/                install-standalone.sh (standalone tunnel as a systemd service)
 └── .github/workflows/      release.yml (builds the binary into Releases "latest")
 ```
 

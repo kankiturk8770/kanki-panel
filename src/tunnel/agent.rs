@@ -229,6 +229,14 @@ pub fn parse_spec_file(text: &str) -> Result<Vec<Spec>, String> {
         if s.token.len() < 16 {
             return Err(format!("tunnel {}: \"token\" is the shared secret of both ends; use at least 16 random characters", s.id));
         }
+        // the example files carry public placeholders: running one unchanged would give the tunnel a
+        // secret everybody knows, or point it at an address that does not exist
+        if s.token.contains("CHANGE-ME") {
+            return Err(format!("tunnel {}: \"token\" is still the placeholder from the example; make your own, the same on both servers (for example: openssl rand -hex 24)", s.id));
+        }
+        if s.remote.contains("_PUBLIC_IP") {
+            return Err(format!("tunnel {}: \"remote\" still has the placeholder {}; write the real address of the other server", s.id, s.remote));
+        }
         if s.listens() && s.port == 0 {
             return Err(format!("tunnel {}: this side listens, so \"port\" is required", s.id));
         }
@@ -279,6 +287,30 @@ pub fn firewall_list(specs: &[Spec]) -> Vec<String> {
     v
 }
 
+/// `kanki-panel tunnel-run <file.json> --check`: only reads and validates the file. Prints the ports
+/// to open in the firewall, one `port/proto` per line on stdout, and exits 0; or prints the reason on
+/// stderr and exits 1. Nothing is started. (The installer script uses this before it touches the system.)
+pub fn check_file(path: &str) {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("cannot read {}: {}", path, e);
+            std::process::exit(1);
+        }
+    };
+    match parse_spec_file(&text) {
+        Ok(specs) => {
+            for p in firewall_list(&specs) {
+                println!("{}", p);
+            }
+        }
+        Err(e) => {
+            eprintln!("{}: {}", path, e);
+            std::process::exit(1);
+        }
+    }
+}
+
 /// `kanki-panel tunnel-run <file.json>`: runs the tunnels of the file on this machine, with no panel
 /// and no database. Put the entry description on the first server (Node A) and the exit description
 /// on the second (Node B). Ctrl-C stops it.
@@ -323,7 +355,7 @@ pub async fn run_file(path: &str) {
                 s.streams,
                 if s.error.is_empty() { String::new() } else { format!(" · last error: {}", s.error) }
             );
-            // print when something changed, plus a reminder every minute
+            // print when something changed (with traffic the byte counters change every time)
             if line != last {
                 eprintln!("{}", line);
                 last = line;
@@ -375,7 +407,12 @@ mod standalone_tests {
             include_str!("../../docs/examples/node-a-entry-reverse.json"),
             include_str!("../../docs/examples/node-b-exit-reverse.json"),
         ] {
-            let s = parse_spec_file(text).expect("an example file must be valid");
+            // an unchanged example is refused on purpose (public secret, address that does not exist) ...
+            let why = parse_spec_file(text).unwrap_err();
+            assert!(why.contains("placeholder"), "{}", why);
+            // ... and valid once the two placeholders are filled in
+            let filled = text.replace("CHANGE-ME-same-secret-on-both-nodes-32+chars", "0123456789abcdef0123456789abcdef").replace("NODE_A_PUBLIC_IP", "203.0.113.5").replace("NODE_B_PUBLIC_IP", "203.0.113.6");
+            let s = parse_spec_file(&filled).expect("an example file must be valid");
             assert_eq!(s[0].transport, "dual");
         }
     }

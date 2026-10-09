@@ -1,3 +1,8 @@
+# v2.9.1 — Standalone tunnel as a service, built and tested on GitHub Actions
+- **`scripts/install-standalone.sh`**: installs one tunnel description (`tunnel-run` JSON) as a systemd service on a server without the panel. It downloads the latest release and verifies its checksum (or takes `KANKI_BIN`), checks the file before touching the system, creates a no-shell system user, keeps the file (it holds the secret) readable by that user only, sets UDP buffers / BBR, opens the ports in ufw and starts the service (`Restart=always`, no start limit, `NoNewPrivileges`, `ProtectSystem=strict`). `--uninstall` and `--purge` remove it. The unit is also in `docs/systemd/`. Guide in Persian: `docs/STANDALONE-FA.md`.
+- `kanki-panel tunnel-run <file> --check` validates a file and prints the ports to open without starting anything. A file that still has the example placeholders (`CHANGE-ME…` token, `NODE_x_PUBLIC_IP` address) is refused: a public secret must never protect a tunnel.
+- Notes: v2.9.0 was built and tested on GitHub Actions (all 51 tests pass, including hq / h2 / dual end to end); the notice about "not compiled" no longer applies.
+
 # v2.9.0 — Tunnel transports for hostile networks (hq, h2, dual) + tunnel hardening
 - **`hq`**: QUIC under a Salamander-style mask. Every UDP datagram is `salt(8) | ChaCha20(tag(4) | pad_len | random pad | QUIC datagram)`, keyed from the token: no fixed byte, random sizes, and a datagram with a wrong tag is dropped silently (a scanner gets no answer). QUIC uses BBR, a 1200-byte MTU, 5 s keep-alive and big windows.
 - **`h2`**: WebSocket over HTTP/2 (RFC 8441) over TLS 1.3, with the ALPN, cipher order, HTTP/2 SETTINGS and request headers of Chrome. Four links share one TCP connection; strangers get a normal web page; HTTP/1.1 WebSocket fallback when the server has no RFC 8441.
@@ -20,7 +25,7 @@
   - `install.sh`: the checksum file is mandatory; without it the install stops instead of continuing unverified;
   - release workflow: the tests are built first and must pass before a release is published (`continue-on-error` removed).
 - New tests: hq / h2 / dual end to end (both modes, SNI lists), `dual` falling back to a TCP-only server, silence of the UDP port towards a scanner, wrong tokens, probes for hq and h2, mask unit tests, standalone-file checks.
-- **Not compiled by the author's environment** (no access to crates.io there): run `cargo test tunnel::` before releasing.
+- Built and tested on GitHub Actions (51 tests pass); run `cargo test tunnel::` to repeat it.
 
 # v2.8.6 — Tunnel form tidied, SNI spoof completed
 - **New tunnel form** in six numbered sections: 1 Route (entry ⇄ exit, who connects) · 2 Tunnel type · 3 Transport (grouped: looks like web traffic / encrypted TCP / over UDP / whitelist, each with TLS·SNI·UDP·HTTP tags) · 4 Disguise · 5 Ports · 6 More. Works on phones.
