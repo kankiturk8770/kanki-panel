@@ -16,7 +16,7 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with 
 - **SNI spoof** for WSS with quick-pick domains in the tunnel form.
 
 ## New in 2.5
-- Users are named **USER1, USER2, …** (lowest free number; a deleted user's number is reused; bot trials are USER<n>-TEST and become USER<n> when bought).
+- Every user gets the lowest free number (a deleted user's number is reused). Names are English letters and digits only, 3–12 characters (like `mahtab87`); bot customers get the name they choose or the English letters of their Telegram name, and an empty name in the panel gives USER<n>. Bot trials that run out are deleted, and a trial that is bought becomes that same account.
 - Sales bot: **smart plan builder** (price per GB / country / connection), expiring **discount codes**, and a **smart channel** that writes and publishes posts by itself.
 - **Nightly encrypted backup** to the bot with automatic database cleaning; the panel has its own backup passphrase.
 - **⚡ Smart tunnel**: tests all six transports between two servers and builds the tunnel with the best one.

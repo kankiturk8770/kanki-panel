@@ -1114,9 +1114,15 @@ function prevExp(){var el=$('#f_prev');if(!el)return;var ts=readExp();
  var d=new Date(ts*1000);el.innerHTML=leftTxt(ts)+' · <span class="ltr muted">'+d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+p2(d.getHours())+':'+p2(d.getMinutes())+'</span>'}
 function qDays(n){var cur=readExp(),now=Math.floor(Date.now()/1000);if(isNaN(cur)||!cur||cur<now)cur=now;setExp(cur+n*86400)}
 function qGB(n,u){var cur=+$('#f_gb').value||0,used=u?u.traffic_used_gb:0,base=cur>0?(used>=cur?used:cur):0;$('#f_gb').value=Math.round((base+n)*100)/100}
+// user / config names: English letters and digits, 3-12, starting with a letter (WireGuard apps refuse other names)
+var NAME_ERR='name: English letters and digits only, 3-12 characters, starting with a letter (like mahtab87)';
+function nameOk(v){return /^[A-Za-z][A-Za-z0-9]{2,11}$/.test(v)}
+Object.assign(FA,{"English letters and digits, 3-12, starting with a letter (like mahtab87). No spaces, emoji or symbols.":"فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف و اولش حرف (مثل mahtab87). فاصله، ایموجی و علامت ننویس.",
+ "name: English letters and digits only, 3-12 characters, starting with a letter (like mahtab87)":"نام فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف و اولش حرف باشد (مثل mahtab87)",
+ "this name is already used by another user":"این نام را کاربر دیگری دارد"});
 function ufForm(u){var protos=u?u.protocols.split(','):((S.me&&S.me.default_protocols)||'wg,awg,hy2').split(','),un=u?u.nodes.split(',').filter(Boolean):[],
   me0=S.me||{},dd=Math.max(1,+me0.def_days||30),exp=u?u.expires_ts:Math.floor(Date.now()/1000)+dd*86400,h='<div class="g2f">';
- h+='<div class="full"><label class="f">'+t('Username')+'</label><input id="f_name" class="ltr" autocomplete="off" value="'+esc(u?u.username:'')+'" placeholder="'+(u?'':t('Optional, created if empty'))+'"></div>';
+ h+='<div class="full"><label class="f">'+t('Username')+'</label><input id="f_name" class="ltr" autocomplete="off" value="'+esc(u?u.username:'')+'" placeholder="'+(u?'':t('Optional, created if empty'))+'" maxlength="12"><small class="muted">'+t('English letters and digits, 3-12, starting with a letter (like mahtab87). No spaces, emoji or symbols.')+'</small></div>';
  h+='<div class="full"><label class="f">'+t('Expiry date')+' <small>('+t(S.lang=='fa'?'Date (Jalali)':'Date')+')</small></label><div class="jd"><input id="f_date" class="ltr" inputmode="numeric" autocomplete="off" placeholder="'+N(S.lang=='fa'?'1405/01/01':'2026-01-31')+'" value="'+esc(dateVal(exp))+'"><input id="f_time" type="time" value="'+timeVal(exp)+'"><button type="button" class="ib" id="f_inf" title="'+t('Unlimited')+'">∞</button></div><div class="muted" id="f_prev" style="margin-top:5px"></div>'+
   '<div class="qchips" id="qd"><span class="muted">'+t('Quick add days')+'</span>'+[7,30,60,90,180,365].map(function(n){return '<button type="button" data-qd="'+n+'">+'+N(n)+'</button>'}).join('')+'</div></div>';
  h+='<div><label class="f">'+t('Total volume (0 = unlimited)')+'</label><div class="row" style="flex-wrap:nowrap"><input type="number" min="0" step="0.5" id="f_gb" value="'+(u?u.traffic_limit_gb:(me0.def_gb!=null&&me0.def_gb!==''?+me0.def_gb:30))+'"><button type="button" class="ib" id="f_gbinf" title="'+t('Unlimited')+'">∞</button></div></div>';
@@ -1134,7 +1140,7 @@ function formBody(){var ts=readExp();if(isNaN(ts)){toast(t('Invalid date'),1);re
  var pr=$$('.f_pr').filter(function(x){return x.checked}).map(function(x){return x.value}),nd=$$('.f_nd'),ns=nd.filter(function(x){return x.checked}).map(function(x){return x.value});if(ns.length==nd.length)ns=[];
  return {expires_ts:ts,traffic_limit_gb:+$('#f_gb').value||0,max_connections:+$('#f_conn').value||0,protocols:pr,nodes:ns,notes:$('#f_note').value}}
 function newUser(){modal(mhead(t('New user'))+ufForm(null)+'<button class="btn" style="width:100%;margin-top:12px" id="f_save">'+t('Create')+'</button>','wide');wireForm(null);
- $('#f_save').onclick=function(){var b=formBody();if(!b)return;b.username=$('#f_name').value.trim();b.count=+$('#f_count').value||1;var me=this;me.disabled=true;
+ $('#f_save').onclick=function(){var b=formBody();if(!b)return;b.username=$('#f_name').value.trim();if(b.username&&!nameOk(b.username))return toast(t(NAME_ERR),1);b.count=+$('#f_count').value||1;var me=this;me.disabled=true;
   api('POST','/api/users',b).then(function(r){toast(t('Saved'));return loadUsers().then(function(){var u=r&&r.length==1&&findU(r[0].id);if(u)editUser(u.id,'link');else closeModal()})}).catch(function(e){me.disabled=false;fail(e)})}}
 
 // ---------------------------------------------------------------- nodes
@@ -1552,7 +1558,7 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
  function show(k){var el=$('#us_p');cur=k;$$('#us_q [data-t]').forEach(function(b){b.classList.toggle('on',b.dataset.t==k)});
   if(!k){el.innerHTML='';return}
   if(k=='edit'){el.innerHTML=ufForm(u)+'<button class="btn" style="width:100%;margin-top:10px" id="f_save">'+t('Save changes')+'</button><button class="lnk" id="s_rg">'+ic('refresh',14)+' '+t('New link (the old one stops working)')+'</button>';wireForm(u);
-   $('#f_save').onclick=function(){var b=formBody();if(!b)return;var nm=$('#f_name').value.trim();if(nm&&nm!=u.username)b.username=nm;var me=this;me.disabled=true;
+   $('#f_save').onclick=function(){var b=formBody();if(!b)return;var nm=$('#f_name').value.trim();if(nm&&nm!=u.username){if(!nameOk(nm))return toast(t(NAME_ERR),1);b.username=nm}var me=this;me.disabled=true;
     api('PUT','/api/users/'+u.id,b).then(function(){toast(t('Saved'));closeModal();loadUsers()}).catch(function(e){me.disabled=false;fail(e)})};
    $('#s_rg').onclick=function(){confirmDo(function(){api('POST','/api/users/'+u.id+'/regen').then(function(){toast(t('Done'));return loadUsers()}).then(function(){editUser(id,'link')}).catch(fail)})};return}
   if(k=='link'){el.innerHTML='<small class="muted">'+t('Subscription link')+' · '+t('Created')+' '+(u.created_at?jdate(Date.parse(u.created_at)/1000):'—')+'</small><div class="lk">'+esc(u.link)+'</div>'+

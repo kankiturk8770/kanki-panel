@@ -174,13 +174,18 @@ pub fn clean_db(app: &App) -> Value {
     let audit = n("DELETE FROM audit WHERE ts<?1", month);
     let sessions = n("DELETE FROM sessions WHERE expires<?1", t);
     let orders = n("DELETE FROM orders WHERE status IN ('pending','waiting','rejected','error') AND created<?1", week);
+    // free trials that are over (the bot removes them within a minute; this also covers a paused bot)
+    let trials = app.db.finished_trials();
+    for u in &trials {
+        app.db.delete_user(u.id);
+    }
     // peers of users that no longer exist
     let peers = app.db.exec("DELETE FROM peers WHERE user_id NOT IN (SELECT id FROM users)", &[]).unwrap_or(0) as i64;
     let before = std::fs::metadata(db_path(app)).map(|m| m.len()).unwrap_or(0);
     let _ = app.db.with(|c| c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM; PRAGMA optimize;"));
     let after = std::fs::metadata(db_path(app)).map(|m| m.len()).unwrap_or(0);
     app.db.set("db_cleaned", &t.to_string());
-    json!({"logins": logins, "audit": audit, "sessions": sessions, "orders": orders, "peers": peers, "before": before, "after": after})
+    json!({"trials": trials.len(), "logins": logins, "audit": audit, "sessions": sessions, "orders": orders, "peers": peers, "before": before, "after": after})
 }
 
 fn db_path(app: &App) -> String {

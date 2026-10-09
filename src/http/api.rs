@@ -2,7 +2,7 @@
 use crate::db::{Node, User};
 use crate::guard;
 use crate::sync::{self, SyncReq};
-use crate::util::{self, esc, iso, now, pct, rand_token};
+use crate::util::{self, esc, iso, now, pct, rand_token, valid_cfg_name};
 use crate::App;
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -51,6 +51,66 @@ pub fn endpoint(app: &App, n: &Node) -> String {
         panel_endpoint(app)
     } else {
         n.endpoint.trim().to_string()
+    }
+}
+
+const NAME_ERR: &str = "name: English letters and digits only, 3-12 characters, starting with a letter (like mahtab87)";
+
+/// File name of a WireGuard / AmneziaWG config. Both apps use the file name as the tunnel name and refuse
+/// a name longer than 15 characters or with characters other than letters, digits and _ = + . -
+/// (the import fails with "Invalid name"), so it is <user, up to 9>-<server, 3>-<a | w>, like mahtab87-ger-a.
+pub fn conf_file_name(app: &App, u: &User, n: &Node, proto: &str) -> String {
+    let nodes = user_nodes(app, u);
+    let names: Vec<(&str, &str)> = nodes.iter().map(|x| (x.id.as_str(), x.name.as_str())).collect();
+    conf_name(&u.username, u.id, &n.id, &n.name, &names, proto)
+}
+
+/// `nodes`: (id, name) of every server of this user, to tell apart servers whose names start the same way
+fn conf_name(user: &str, uid: i64, node_id: &str, node_name: &str, nodes: &[(&str, &str)], proto: &str) -> String {
+    let code = |name: &str| -> String {
+        let c: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).take(3).collect::<String>().to_lowercase();
+        if c.is_empty() { "srv".into() } else { c }
+    };
+    // two servers of this user with the same first letters get a number instead of their third letter
+    let mine = code(node_name);
+    let mut srv = mine.clone();
+    let same: Vec<&(&str, &str)> = nodes.iter().filter(|x| code(x.1) == mine).collect();
+    if same.len() > 1 {
+        let idx = same.iter().position(|x| x.0 == node_id).unwrap_or(0) + 1;
+        srv = format!("{}{}", mine.chars().take(2).collect::<String>(), idx % 10);
+    }
+    let who: String = user.chars().filter(|c| c.is_ascii_alphanumeric() || "_=+.-".contains(*c)).take(9).collect();
+    let who = if who.is_empty() { format!("u{}", uid) } else { who };
+    format!("{}-{}-{}.conf", who, srv, if proto == "amneziawg" { "a" } else { "w" })
+}
+
+#[cfg(test)]
+mod conf_name_tests {
+    use super::conf_name;
+
+    /// WireGuard / AmneziaWG: [a-zA-Z0-9_=+.-]{1,15} after ".conf" is cut off
+    fn ok(f: &str) -> bool {
+        let n = f.strip_suffix(".conf").unwrap();
+        (1..=15).contains(&n.len()) && n.chars().all(|c| c.is_ascii_alphanumeric() || "_=+.-".contains(c))
+    }
+
+    #[test]
+    fn names_fit_wireguard() {
+        let nodes = [("local", "GERMANY-GAMING"), ("node-a", "Finland 1"), ("node-b", "Finland 2"), ("node-c", "🇹🇷 ترکیه")];
+        assert_eq!(conf_name("mahtab87", 2, "local", "GERMANY-GAMING", &nodes, "amneziawg"), "mahtab87-ger-a.conf");
+        assert_eq!(conf_name("mahtab87", 2, "node-a", "Finland 1", &nodes, "wireguard"), "mahtab87-fi1-w.conf");
+        assert_eq!(conf_name("mahtab87", 2, "node-b", "Finland 2", &nodes, "wireguard"), "mahtab87-fi2-w.conf");
+        assert_eq!(conf_name("mahtab87", 2, "node-c", "🇹🇷 ترکیه", &nodes, "wireguard"), "mahtab87-srv-w.conf");
+        assert_eq!(conf_name("USER17-TEST", 17, "local", "GERMANY-GAMING", &nodes, "wireguard"), "USER17-TE-ger-w.conf");
+        assert_eq!(conf_name("علی", 9, "local", "Main", &[("local", "Main")], "amneziawg"), "u9-mai-a.conf");
+        for (id, nm) in nodes {
+            for u in ["abcdefghijkl", "USER123456-TEST", "a.b_c", "x"] {
+                for p in ["wireguard", "amneziawg"] {
+                    let f = conf_name(u, 123456, id, nm, &nodes, p);
+                    assert!(ok(&f), "{}", f);
+                }
+            }
+        }
     }
 }
 
@@ -181,8 +241,8 @@ async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     let _ = guard!(app, h, "users:write");
     let count = num(&b["count"]).unwrap_or(1.0).clamp(1.0, 200.0) as i64;
     let base = b["username"].as_str().unwrap_or("").trim().to_string();
-    if !base.is_empty() && !valid_username(&base) {
-        return err(StatusCode::BAD_REQUEST, "username: only letters, digits, _ - . (max 40)");
+    if !base.is_empty() && !valid_cfg_name(&base) {
+        return err(StatusCode::BAD_REQUEST, NAME_ERR);
     }
     let gb = num(&b["traffic_limit_gb"]).or_else(|| num(&b["traffic_limit"])).unwrap_or(0.0).max(0.0);
     let days = num(&b["days"]).unwrap_or(30.0) as i64;
@@ -196,7 +256,9 @@ async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         let name = if base.is_empty() {
             "auto".to_string() // USER<n>, lowest free number
         } else if count > 1 {
-            format!("{}_{}", base, i + 1)
+            // base1, base2 … (still letters and digits only, at most 12 characters)
+            let suf = (i + 1).to_string();
+            format!("{}{}", base.chars().take(12 - suf.len()).collect::<String>(), suf)
         } else {
             base.clone()
         };
@@ -233,11 +295,16 @@ async fn users_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
     let enabled = b["enabled"].as_bool().unwrap_or(u.enabled) as i64;
     let mut username = u.username.clone();
     if let Some(n) = b["username"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty() && *s != u.username) {
-        if !valid_username(n) {
-            return err(StatusCode::BAD_REQUEST, "username: only letters, digits, _ - . (max 40)");
+        if !valid_cfg_name(n) {
+            return err(StatusCode::BAD_REQUEST, NAME_ERR);
+        }
+        if app.db.name_taken(n, id) {
+            return err(StatusCode::BAD_REQUEST, "this name is already used by another user");
         }
         username = n.to_string();
     }
+    // a trial that gets more time or data from the admin is not a trial any more (it must not be deleted when it ends)
+    let changed_credit = exp != u.expires_at || (gb - u.limit_gb).abs() > f64::EPSILON;
     let r = app.db.exec(
         "UPDATE users SET username=?1, limit_gb=?2, expires_at=?3, max_conn=?4, protocols=?5, nodes=?6, notes=?7, enabled=?8, warned=0 WHERE id=?9",
         &[&username, &gb, &exp, &conns, &protos, &nodes, &notes, &enabled, &id],
@@ -250,9 +317,9 @@ async fn users_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
     let add_gb = num(&b["add_gb"]).unwrap_or(0.0);
     if add_days > 0 || add_gb > 0.0 {
         let _ = app.db.extend(id, add_days, add_gb);
-        if add_days > 0 || add_gb > 0.0 {
-            app.db.promote_trial(id);
-        }
+    }
+    if add_days > 0 || add_gb > 0.0 || changed_credit {
+        app.db.promote_trial(id);
     }
     spawn_sync(&app);
     Json(user_json(&app, &app.db.user(id).unwrap_or(u))).into_response()
@@ -913,7 +980,7 @@ pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str) -> Opti
     }
     let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.ok()?;
     let text = String::from_utf8(bytes.to_vec()).ok()?;
-    Some((format!("{}-{}-{}.conf", u.username, n.name.replace(' ', "_"), proto), text))
+    Some((conf_file_name(app, u, n, proto), text))
 }
 
 async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String, String>, extra: &str) -> Response {
@@ -977,7 +1044,7 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
     if extra == "text" {
         return text_conf(s);
     }
-    let fname = format!("{}-{}-{}.conf", u.username, n.name.replace(' ', "_"), proto);
+    let fname = conf_file_name(&app, &u, &n, &proto);
     ([(header::CONTENT_TYPE, "text/plain; charset=utf-8".to_string()),
       (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", fname))], s).into_response()
 }

@@ -2,7 +2,7 @@
 use crate::api::origin;
 use crate::backup::make_archive;
 use crate::db::User;
-use crate::util::{esc, now, rand_token};
+use crate::util::{cfg_name_from, esc, now, rand_token, valid_cfg_name};
 use crate::{sync, App};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -28,6 +28,10 @@ enum Wait {
     /// (plan id, column)
     PlanField(i64, String),
     CatRename(String),
+    /// a customer types the name of their config, then this continues ("trial" or "buy")
+    CfgName(String),
+    /// a customer renames one of their accounts
+    Rename(i64),
 }
 
 #[derive(Clone, Default)]
@@ -44,6 +48,8 @@ pub struct Bot {
     token: String,
     admins: Vec<i64>,
     http: reqwest::Client,
+    /// Telegram Bot API address (a local fake one in the tests)
+    api: String,
     waits: Mutex<HashMap<i64, Wait>>,
     pend: Mutex<HashMap<i64, Pending>>,
 }
@@ -70,6 +76,7 @@ const BTNS: &[(&str, &str, &str)] = &[
     ("cfg_a", "📥 کانفیگ AmneziaWG", "زیر پیام اشتراک"),
     ("cfg_h", "📥 کانفیگ Hysteria2", "زیر پیام اشتراک"),
     ("renew_this", "🔁 تمدید همین سرویس", "زیر پیام اشتراک"),
+    ("rename", "✏️ تغییر نام کانفیگ", "زیر پیام اشتراک"),
     ("other_plans", "📦 سایر پلن‌ها", "فهرست دسته‌بندی پلن‌ها"),
     ("disc", "🎟 کد تخفیف دارم", "صفحه‌ی پرداخت"),
     ("pay_card", "💳 کارت به کارت", "صفحه‌ی پرداخت"),
@@ -92,7 +99,7 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("txt_trial_ready", "🎁 <b>اکانت تست شما آماده است</b>", "بالای پیام اکانت تست"),
     ("txt_bought", "✅ <b>اشتراک شما فعال شد</b>", "بالای پیام بعد از خرید"),
     ("txt_renewed", "✅ <b>اشتراک شما تمدید شد</b>", "بالای پیام بعد از تمدید"),
-    ("txt_cfg", "⚙️ کانفیگ دستی (WireGuard، AmneziaWG، Hysteria2) رو هم می‌تونید از دکمه‌های زیر بگیرید 👇", "پایین پیام اشتراک"),
+    ("txt_cfg", "⚙️ اگه با برنامه‌ی دیگه‌ای (WireGuard، AmneziaWG، Hiddify…) وصل می‌شید، کانفیگ مخصوصش رو از دکمه‌های زیر بگیرید. همراه هر کانفیگ نوشته شده با کدوم برنامه کار می‌کنه و چطور واردش کنید 👇", "پایین پیام اشتراک"),
     ("txt_app", "بعد از نصب، «کد ورود» سرویس را در اپ وارد کنید.", "زیر لینک دانلود اپ"),
     ("txt_guides", "🎬 آموزش موردنظرتون رو از پایین انتخاب کنید 👇", "بالای فهرست آموزش‌ها"),
 ];
@@ -220,7 +227,7 @@ impl Bot {
         let admins = bot_admins_raw(&app)
             .split(',').filter_map(|x| x.trim().parse().ok()).collect();
         Some(Arc::new(Bot {
-            app, token, admins, http: reqwest::Client::new(),
+            app, token, admins, http: reqwest::Client::new(), api: "https://api.telegram.org".into(),
             waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()),
         }))
     }
@@ -337,7 +344,7 @@ impl Bot {
     }
 
     async fn call(&self, m: &str, body: Value) -> Option<Value> {
-        let r = self.http.post(format!("https://api.telegram.org/bot{}/{}", self.token, m))
+        let r = self.http.post(format!("{}/bot{}/{}", self.api, self.token, m))
             .json(&body).send().await.ok()?;
         let v: Value = r.json().await.ok()?;
         if v["ok"].as_bool() == Some(true) { Some(v["result"].clone()) } else { None }
@@ -378,7 +385,7 @@ impl Bot {
         let part = reqwest::multipart::Part::bytes(bytes).file_name(name.to_string());
         let form = reqwest::multipart::Form::new()
             .text("chat_id", chat.to_string()).text("caption", caption.to_string()).part("document", part);
-        let _ = self.http.post(format!("https://api.telegram.org/bot{}/sendDocument", self.token)).multipart(form).send().await;
+        let _ = self.http.post(format!("{}/bot{}/sendDocument", self.api, self.token)).multipart(form).send().await;
     }
 
     // ============================================================ کمکی‌های داده
@@ -436,27 +443,28 @@ impl Bot {
                 rows.push(vec![b(&self.bt(&format!("cfg_{}", code)), &format!("cfg:{}:{}", u.id, code))]);
             }
         }
+        rows.push(vec![b(&self.bt("rename"), &format!("ren:{}", u.id))]);
         rows.append(&mut extra);
         ik(rows)
     }
 
-    /// Sends the config(s) of one protocol: a file per server (Hysteria2 as a copyable link).
+    /// Sends the config(s) of one protocol: first a short "which app and how" guide, then a file per server
+    /// (Hysteria2 as a copyable link).
     async fn send_configs(&self, chat: i64, qid: &str, u: &User, code: &str) {
         let (proto, title) = match code { "w" => ("wireguard", "WireGuard"), "a" => ("amneziawg", "AmneziaWG"), _ => ("hysteria2", "Hysteria2") };
-        let mut sent = 0;
-        for n in crate::api::user_nodes(&self.app, u) {
-            if sent >= 8 || !crate::api::node_protos(u, &n).contains(&proto) { continue; }
+        let nodes: Vec<_> = crate::api::user_nodes(&self.app, u).into_iter().filter(|n| crate::api::node_protos(u, n).contains(&proto)).take(8).collect();
+        if nodes.is_empty() {
+            return self.answer(qid, "این پروتکل برای سرویس شما فعال نیست.", true).await;
+        }
+        self.send(chat, &cfg_help(code), None).await;
+        for n in nodes {
             let Some((name, text)) = crate::api::bot_config(&self.app, u, &n, proto).await else { continue };
             if proto == "hysteria2" {
-                self.send(chat, &format!("📥 <b>{} · {}</b>\n\n<code>{}</code>\n\nلینک بالا رو کپی کنید و داخل برنامه (کانکی، Hiddify و مشابه) اضافه کنید.", title, esc(&n.name), esc(text.trim())), None).await;
+                self.send(chat, &format!("📥 <b>{} · {}</b>\n\n<code>{}</code>\n\n☝️ روی لینک بزنید تا کپی بشه.", title, esc(&n.name), esc(text.trim())), None).await;
             } else {
-                let cap = format!("📥 {} · {}\nفایل رو داخل برنامه‌ی {} وارد (Import) کنید.", title, n.name, title);
+                let cap = format!("📥 {} · {}\nاسم داخل برنامه: {}", title, n.name, name.trim_end_matches(".conf"));
                 self.send_doc(chat, text.into_bytes(), &name, &cap).await;
             }
-            sent += 1;
-        }
-        if sent == 0 {
-            self.answer(qid, "این پروتکل برای سرویس شما فعال نیست.", true).await;
         }
     }
 
@@ -480,11 +488,29 @@ impl Bot {
         ns.into_iter().take(countries as usize).map(|x| x.0).collect::<Vec<_>>().join(",")
     }
 
+    /// The config name for a customer: the name they chose, else the English letters and digits of their
+    /// Telegram name, else of their @username. None = ask them (see `Wait::CfgName`).
+    fn cfg_name_for(&self, tg: i64) -> Option<String> {
+        let r: Option<(String, String, String, String)> = self.db().with(|c| c.query_row(
+            "SELECT COALESCE(cfg_name,''), COALESCE(name,''), COALESCE(lname,''), COALESCE(uname,'') FROM bot_users WHERE tg_id=?1",
+            [tg], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).ok());
+        let (chosen, first, last, uname) = r?;
+        if valid_cfg_name(&chosen) {
+            return Some(chosen);
+        }
+        cfg_name_from(&format!("{}{}", first, last)).or_else(|| cfg_name_from(&uname))
+    }
+
     fn create_account_n(&self, tg: i64, gb: f64, days: i64, conns: i64, notes: &str, countries: i64) -> Result<User, String> {
-        // USER<n> for buyers, USER<n>-TEST for free trials (same number when the trial is bought)
-        let name = if notes == "trial" { "auto-test" } else { "auto" };
+        // the customer's own name (mahtab87; mahtab872 … when taken); USER<n> only when there is no usable name.
+        // The number (id) is always the lowest free one, so a deleted trial's number goes to the next customer.
+        let name = match self.cfg_name_for(tg) {
+            Some(n) => format!("pick:{}", n),
+            None if notes == "trial" => "auto-test".to_string(),
+            None => "auto".to_string(),
+        };
         let nodes = self.pick_nodes(countries);
-        let u = self.db().create_user(name, gb, days, conns, &self.db().get("default_protocols"), &nodes, notes, tg)?;
+        let u = self.db().create_user(&name, gb, days, conns, &self.db().get("default_protocols"), &nodes, notes, tg)?;
         let a = self.app.clone();
         tokio::spawn(async move { sync::sync_all(&a).await });
         Ok(u)
@@ -569,11 +595,47 @@ impl Bot {
         }
     }
 
-    fn touch(&self, uid: i64, name: &str, ref_by: i64) {
+    fn touch(&self, uid: i64, from: &Value, ref_by: i64) {
+        let name = from["first_name"].as_str().unwrap_or("");
+        let lname = from["last_name"].as_str().unwrap_or("");
+        let uname = from["username"].as_str().unwrap_or("");
         let _ = self.db().exec(
-            "INSERT INTO bot_users(tg_id,name,joined,ref_by) VALUES(?1,?2,?3,?4) ON CONFLICT(tg_id) DO UPDATE SET name=excluded.name",
-            &[&uid, &name, &now(), &ref_by],
+            "INSERT INTO bot_users(tg_id,name,joined,ref_by,lname,uname) VALUES(?1,?2,?3,?4,?5,?6) \
+             ON CONFLICT(tg_id) DO UPDATE SET name=excluded.name, lname=excluded.lname, uname=excluded.uname",
+            &[&uid, &name, &now(), &ref_by, &lname, &uname],
         );
+    }
+
+    /// The "type a name for your config" message
+    fn name_prompt(&self, why: &str) -> String {
+        format!("{}✏️ <b>یک نام برای کانفیگ خودتون بفرستید</b>\n\n\
+            ✅ فقط <b>حروف انگلیسی و عدد</b>، بین ۳ تا ۱۲ حرف، اولش هم حرف باشه. مثل:\n\
+            <code>mahtab87</code>   <code>erfan456</code>   <code>ali2</code>\n\n\
+            ❌ فاصله، ایموجی، استیکر، حروف فارسی و علامت‌ها (مثل _ - . @) ننویسید.\n\n\
+            نام رو همین‌جا تایپ کنید و بفرستید 👇", why)
+    }
+
+    /// After the name was asked: go on with the free trial or the plan list.
+    async fn after_name(&self, uid: i64, chat: i64, next: &str) {
+        match next {
+            "trial" => self.trial(uid, chat, 0).await,
+            _ => {
+                self.pend.lock().unwrap().insert(uid, Pending { kind: "new".into(), ..Default::default() });
+                self.plans_menu(chat, 0, "pl").await
+            }
+        }
+    }
+
+    /// Checks a typed config name: Ok(name) or Err(message to send back)
+    fn check_name(&self, text: &str, except: i64) -> Result<String, String> {
+        let t = text.trim();
+        if !valid_cfg_name(t) {
+            return Err(self.name_prompt("⚠️ این نام قابل قبول نیست.\n\n"));
+        }
+        if self.db().name_taken(t, except) {
+            return Err(format!("⚠️ نام <code>{}</code> قبلاً گرفته شده. یه نام دیگه بفرستید (مثلاً یه عدد آخرش اضافه کنید، مثل <code>{}7</code>).", esc(t), esc(&t.chars().take(11).collect::<String>())));
+        }
+        Ok(t.to_string())
     }
 
     // ============================================================ پیام‌ها
@@ -585,7 +647,7 @@ impl Bot {
         if text.starts_with("/start") {
             let ref_by = text.split_whitespace().nth(1).and_then(|s| s.strip_prefix("ref_")).and_then(|s| s.parse::<i64>().ok())
                 .filter(|r| *r != uid).unwrap_or(0);
-            self.touch(uid, &name, ref_by);
+            self.touch(uid, &m["from"], ref_by);
             self.waits.lock().unwrap().remove(&uid);
             if !self.joined(uid).await {
                 return self.ask_join(chat).await;
@@ -593,7 +655,7 @@ impl Bot {
             self.send(chat, &self.tx("welcome"), Some(self.home_kb(uid))).await;
             return;
         }
-        self.touch(uid, &name, 0);
+        self.touch(uid, &m["from"], 0);
         let wait = self.waits.lock().unwrap().remove(&uid);
         let Some(w) = wait else {
             self.send(chat, &self.tx("txt_menu"), Some(self.home_kb(uid))).await;
@@ -601,6 +663,37 @@ impl Bot {
         };
         match w {
             Wait::Receipt(method) => self.got_receipt(uid, chat, &name, &method, m).await,
+            Wait::CfgName(next) => match self.check_name(&text, 0) {
+                Ok(n) => {
+                    let _ = self.db().exec("UPDATE bot_users SET cfg_name=?1 WHERE tg_id=?2", &[&n, &uid]);
+                    self.send(chat, &format!("✅ نام کانفیگ شما: <b>{}</b>", esc(&n)), None).await;
+                    self.after_name(uid, chat, &next).await;
+                }
+                Err(e) => {
+                    self.waits.lock().unwrap().insert(uid, Wait::CfgName(next));
+                    self.send(chat, &e, Some(ik(vec![vec![b(&self.bt("back"), "home")]]))).await;
+                }
+            },
+            Wait::Rename(id) => {
+                let Some(u) = self.db().user(id).filter(|u| u.tg_id == uid || self.admin(uid)) else { return };
+                match self.check_name(&text, id) {
+                    Ok(n) => {
+                        let _ = self.db().exec("UPDATE users SET username=?1 WHERE id=?2", &[&n, &id]);
+                        if u.tg_id == uid {
+                            let _ = self.db().exec("UPDATE bot_users SET cfg_name=?1 WHERE tg_id=?2", &[&n, &uid]);
+                        }
+                        let a = self.app.clone();
+                        tokio::spawn(async move { sync::sync_all(&a).await });
+                        let u2 = self.db().user(id).unwrap_or(u);
+                        self.send(chat, &format!("✅ نام کانفیگ شد <b>{}</b>\n\nکد و لینک اشتراک شما عوض نشده و برنامه‌ی کانکی همون‌طور وصل می‌مونه. اگه از WireGuard یا AmneziaWG استفاده می‌کنید و اسم جدید رو می‌خواید، کانفیگ رو دوباره بگیرید.\n\n{}", esc(&n), self.account_msg(&u2)),
+                            Some(self.acct_kb(&u2, vec![vec![b(&self.bt("home"), "home")]]))).await;
+                    }
+                    Err(e) => {
+                        self.waits.lock().unwrap().insert(uid, Wait::Rename(id));
+                        self.send(chat, &e, Some(ik(vec![vec![b(&self.bt("back"), &format!("acc:{}", id))]]))).await;
+                    }
+                }
+            }
             Wait::DiscountUse => {
                 let code = text.to_uppercase();
                 let pct: Option<i64> = self.db().with(|c| c.query_row(
@@ -674,8 +767,7 @@ impl Bot {
         let mid = q["message"]["message_id"].as_i64().unwrap_or(0);
         let qid = q["id"].as_str().unwrap_or("").to_string();
         let d = q["data"].as_str().unwrap_or("").to_string();
-        let name = q["from"]["first_name"].as_str().unwrap_or("").to_string();
-        self.touch(uid, &name, 0);
+        self.touch(uid, &q["from"], 0);
         self.answer(&qid, "", false).await;
         let back_lbl = self.bt("back");
         let back = |to: &str| vec![b(&back_lbl, to)];
@@ -693,10 +785,20 @@ impl Bot {
                 if !self.db().on("sales_on") && !self.admin(uid) {
                     return self.edit(chat, mid, "⛔ فروش موقتاً بسته است.", Some(ik(vec![back("home")]))).await;
                 }
+                if self.cfg_name_for(uid).is_none() {
+                    self.waits.lock().unwrap().insert(uid, Wait::CfgName("buy".into()));
+                    return self.edit(chat, mid, &self.name_prompt(""), Some(ik(vec![back("home")]))).await;
+                }
                 self.pend.lock().unwrap().insert(uid, Pending { kind: "new".into(), ..Default::default() });
                 return self.plans_menu(chat, mid, "pl").await;
             }
-            "trial" => return self.trial(uid, chat, mid).await,
+            "trial" => {
+                if self.db().on("trial_on") && !self.trial_taken(uid) && self.cfg_name_for(uid).is_none() {
+                    self.waits.lock().unwrap().insert(uid, Wait::CfgName("trial".into()));
+                    return self.edit(chat, mid, &self.name_prompt(""), Some(ik(vec![back("home")]))).await;
+                }
+                return self.trial(uid, chat, mid).await;
+            }
             "my" | "renew" => {
                 let accs = self.db().users_of_tg(uid);
                 if accs.is_empty() {
@@ -809,6 +911,15 @@ impl Bot {
                 let id: i64 = rest.parse().unwrap_or(0);
                 if let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) {
                     return self.edit(chat, mid, &self.account_msg(&u), Some(self.acct_kb(&u, vec![vec![b(&self.bt("renew_this"), &format!("rnw:{}", id))], back("my")]))).await;
+                }
+                return;
+            }
+            "ren" => {
+                let id: i64 = rest.parse().unwrap_or(0);
+                if let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) {
+                    self.waits.lock().unwrap().insert(uid, Wait::Rename(id));
+                    let head = format!("نام فعلی: <b>{}</b>\n\n", esc(&u.username));
+                    return self.edit(chat, mid, &self.name_prompt(&head), Some(ik(vec![back(&format!("acc:{}", id))]))).await;
                 }
                 return;
             }
@@ -1017,7 +1128,7 @@ impl Bot {
         }
         let Some(p) = self.plan(o.2) else { return };
         // a buyer who still has a free-trial account gets that same account (USER<n>-TEST -> USER<n>)
-        let trial = self.db().users_of_tg(o.1).into_iter().find(|u| u.username.to_uppercase().ends_with("-TEST"));
+        let trial = self.db().users_of_tg(o.1).into_iter().find(|u| u.notes == "trial" || u.username.to_uppercase().ends_with("-TEST"));
         let res: Result<User, String> = if o.3 == "renew" && o.4 > 0 {
             self.db().extend(o.4, p.days, p.gb).and_then(|_| {
                 self.db().promote_trial(o.4);
@@ -1096,16 +1207,20 @@ impl Bot {
         }
     }
 
+    /// One free trial per Telegram user, for everyone (admins too): a flag in bot_users, or an existing trial account.
+    /// The flag stays after the finished trial is deleted, so it cannot be taken again.
+    fn trial_taken(&self, uid: i64) -> bool {
+        let used: i64 = self.db().with(|c| c.query_row("SELECT trial_used FROM bot_users WHERE tg_id=?1", [uid], |r| r.get(0)).unwrap_or(0));
+        used == 1 || self.db().users_of_tg(uid).iter().any(|u| u.notes == "trial")
+    }
+
     async fn trial(&self, uid: i64, chat: i64, mid: i64) {
         let back = Some(ik(vec![vec![b(&self.bt("back"), "home")]]));
         if !self.db().on("trial_on") {
             return self.edit(chat, mid, "تست رایگان فعلاً غیرفعال است.", back).await;
         }
-        // one free trial per Telegram user, for everyone (admins too): a flag in bot_users, or an existing trial account
-        let used: i64 = self.db().with(|c| c.query_row("SELECT trial_used FROM bot_users WHERE tg_id=?1", [uid], |r| r.get(0)).unwrap_or(0));
-        let had_trial = self.db().users_of_tg(uid).iter().any(|u| u.notes == "trial");
         let again = "شما قبلاً تست رایگان خودتون رو گرفتید 🙂\nبرای ادامه، از «خرید اشتراک» استفاده کنید 🛒";
-        if used == 1 || had_trial {
+        if self.trial_taken(uid) {
             return self.edit(chat, mid, again, back).await;
         }
         // claim it first so a double tap cannot create two accounts
@@ -1772,6 +1887,10 @@ impl Bot {
                 let days: i64 = parts[1].parse().unwrap_or(30);
                 let conns: i64 = parts.get(2).and_then(|x| x.parse().ok()).unwrap_or(1);
                 let name = parts.get(3).map(|s| s.to_string()).unwrap_or_else(|| "auto".to_string());
+                if name != "auto" && !valid_cfg_name(&name) {
+                    self.send(chat, "⚠️ نام فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف و اولش حرف (مثل mahtab87).", kb).await;
+                    return;
+                }
                 match db.create_user(&name, gb, days, conns, &db.get("default_protocols"), "", "admin", 0) {
                     Ok(u) => {
                         let a = self.app.clone();
@@ -1862,6 +1981,21 @@ impl Bot {
         }
     }
 
+    /// Free trials that are over are deleted (their number goes to the next new customer) and the owner is told.
+    async fn clean_trials(&self) {
+        let done = self.db().finished_trials();
+        for u in &done {
+            self.db().delete_user(u.id);
+            if u.tg_id != 0 {
+                self.send(u.tg_id, &format!("🎁 تست رایگان شما (<b>{}</b>) تموم شد.\n\nامیدواریم راضی بوده باشید 🙏 برای ادامه، یک اشتراک بخرید 👇", esc(&u.username)),
+                    Some(ik(vec![vec![b(&self.bt("buy"), "buy")]]))).await;
+            }
+        }
+        if !done.is_empty() {
+            sync::sync_all(&self.app).await;
+        }
+    }
+
     async fn background(self: Arc<Self>) {
         let mut tick: u64 = 0;
         loop {
@@ -1878,6 +2012,7 @@ impl Bot {
                     self.fulfill(oid).await;
                 }
             }
+            self.clean_trials().await;
             // هشدار اتمام حجم/زمان (هر ۳۰ دقیقه)
             if tick % 30 == 0 && self.db().on("warn_on") {
                 for u in self.db().users().into_iter().filter(|u| u.tg_id != 0) {
@@ -1908,5 +2043,194 @@ impl Bot {
                 }
             }
         }
+    }
+}
+
+/// "Which app and how": sent before the config files of one protocol (w = WireGuard, a = AmneziaWG, h = Hysteria2)
+fn cfg_help(code: &str) -> String {
+    let easy = "\n\n💡 <b>راحت‌ترین راه:</b> برنامه‌ی کانکی؛ فقط «کد ورود» رو واردش کنید و دیگه به این فایل‌ها نیازی ندارید.";
+    match code {
+        "w" => format!("📘 <b>کانفیگ WireGuard</b>\n\n\
+            ✅ با این برنامه‌ها کار می‌کنه: <b>WireGuard</b>، <b>AmneziaWG</b> و <b>کانکی</b>\n\n\
+            <b>روش وصل شدن با WireGuard:</b>\n\
+            1️⃣ برنامه‌ی WireGuard رو از گوگل‌پلی نصب کنید.\n\
+            2️⃣ فایل پایین رو دانلود کنید (یک بار روش بزنید).\n\
+            3️⃣ توی برنامه دکمه‌ی ➕ رو بزنید ← «Import from file or archive» ← همین فایل رو انتخاب کنید.\n\
+            4️⃣ کلید کنار اسم کانفیگ رو روشن کنید ✅{}", easy),
+        "a" => format!("📙 <b>کانفیگ AmneziaWG</b>\n\n\
+            ⚠️ این کانفیگ با برنامه‌ی WireGuard معمولی <b>وصل نمی‌شه</b>!\n\
+            ✅ فقط با این برنامه‌ها: <b>کانکی</b> یا <b>AmneziaWG</b>\n\n\
+            <b>روش وصل شدن با AmneziaWG:</b>\n\
+            1️⃣ برنامه‌ی AmneziaWG رو از گوگل‌پلی نصب کنید.\n\
+            2️⃣ فایل پایین رو دانلود کنید (یک بار روش بزنید).\n\
+            3️⃣ توی برنامه دکمه‌ی ➕ رو بزنید ← «Import from file or archive» ← همین فایل رو انتخاب کنید.\n\
+            4️⃣ کلید کنار اسم کانفیگ رو روشن کنید ✅{}", easy),
+        _ => format!("📗 <b>کانفیگ Hysteria2</b>\n\n\
+            ✅ با این برنامه‌ها کار می‌کنه: <b>کانکی</b>، <b>Hiddify</b> و <b>v2rayNG</b>\n\n\
+            <b>روش وصل شدن با Hiddify یا v2rayNG:</b>\n\
+            1️⃣ روی لینک پایین بزنید تا کپی بشه.\n\
+            2️⃣ توی برنامه دکمه‌ی ➕ رو بزنید ← «Import from clipboard» (وارد کردن از کلیپ‌بورد).\n\
+            3️⃣ کانفیگ رو انتخاب کنید و دکمه‌ی اتصال رو بزنید ✅{}", easy),
+    }
+}
+
+#[cfg(test)]
+mod flow_tests {
+    //! The customer journey against a fake Telegram API: name prompt, trial, end of the trial, number reuse,
+    //! purchase over a trial, rename.
+    use super::*;
+    use std::sync::atomic::AtomicI64;
+
+    type Log = Arc<Mutex<Vec<(String, Value)>>>;
+
+    async fn fake_telegram() -> (String, Log) {
+        let log: Log = Arc::new(Mutex::new(vec![]));
+        let l2 = log.clone();
+        let router = axum::Router::new().route("/:bot/:method", axum::routing::post(
+            move |axum::extract::Path((_bot, m)): axum::extract::Path<(String, String)>, body: String| {
+                let l = l2.clone();
+                async move {
+                    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+                    let bad_edit = m == "editMessageText" && v["message_id"].as_i64() == Some(0);
+                    l.lock().unwrap().push((m, v));
+                    // like Telegram: a message that does not exist cannot be edited
+                    axum::Json(if bad_edit { json!({"ok": false}) } else { json!({"ok": true, "result": {"message_id": 7}}) })
+                }
+            }));
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(l, router).await.unwrap() });
+        (format!("http://{}", addr), log)
+    }
+
+    async fn bot() -> (Arc<Bot>, Log) {
+        let dir = std::env::temp_dir().join(format!("kanki-bot-test-{}", rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
+        db.set("trial_on", "1");
+        let app = Arc::new(App {
+            db, env: HashMap::new(),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(),
+        });
+        let (api, log) = fake_telegram().await;
+        let bot = Arc::new(Bot {
+            app, token: "TEST".into(), admins: vec![], http: reqwest::Client::new(), api,
+            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()),
+        });
+        (bot, log)
+    }
+
+    fn from(id: i64, first: &str, uname: &str) -> Value {
+        json!({"id": id, "first_name": first, "username": uname})
+    }
+
+    async fn tap(bot: &Bot, f: Value, data: &str) {
+        let chat = f["id"].clone();
+        bot.on_callback(&json!({"id": "q", "from": f, "data": data, "message": {"message_id": 5, "chat": {"id": chat}}})).await;
+    }
+
+    async fn say(bot: &Bot, f: Value, text: &str) {
+        let chat = f["id"].clone();
+        bot.on_message(&json!({"from": f, "chat": {"id": chat}, "text": text})).await;
+    }
+
+    /// The last text sent to / edited for this chat
+    fn last(log: &Log, chat: i64) -> String {
+        log.lock().unwrap().iter().rev()
+            .find(|(m, v)| (m == "sendMessage" || m == "editMessageText") && v["chat_id"].as_i64() == Some(chat))
+            .map(|(_, v)| v["text"].as_str().unwrap_or("").to_string()).unwrap_or_default()
+    }
+
+    fn accounts(bot: &Bot, tg: i64) -> Vec<(i64, String, String)> {
+        let mut v: Vec<_> = bot.db().users_of_tg(tg).into_iter().map(|u| (u.id, u.username, u.notes)).collect();
+        v.sort();
+        v
+    }
+
+    fn order(bot: &Bot, tg: i64, plan: i64, kind: &str, target: i64, status: &str) -> i64 {
+        bot.db().with(|c| {
+            c.execute("INSERT INTO orders(tg_id,plan_id,kind,target,method,amount,status,ref,discount,created) VALUES(?1,?2,?3,?4,'card','1',?5,'','',?6)",
+                rusqlite::params![tg, plan, kind, target, status, now()]).unwrap();
+            c.last_insert_rowid()
+        })
+    }
+
+    #[tokio::test]
+    async fn customer_journey() {
+        let (bot, log) = bot().await;
+        let plan = bot.db().with(|c| {
+            c.execute("INSERT INTO plans(name,days,gb,toman,usd,conns,active) VALUES('m',30,10,100000,1,1,1)", []).unwrap();
+            c.last_insert_rowid()
+        });
+
+        // A: a Telegram name with nothing usable (only emoji / fancy letters) is asked for a name first
+        let a = from(100, "🌙✨ 𝓜𝓪𝓱", "");
+        tap(&bot, a.clone(), "trial").await;
+        assert!(last(&log, 100).contains("یک نام برای کانفیگ"), "{}", last(&log, 100));
+        assert!(accounts(&bot, 100).is_empty());
+        say(&bot, a.clone(), "ma tab!").await;
+        assert!(last(&log, 100).contains("قابل قبول نیست"));
+        say(&bot, a.clone(), "mahtab87").await;
+        assert_eq!(accounts(&bot, 100), vec![(1, "mahtab87".into(), "trial".into())]);
+        assert!(last(&log, 100).contains("mahtab87"));
+
+        // B: the English letters of the Telegram name are used without asking; a taken name gets a number
+        let bb = from(200, "Mahtab87 ✨", "");
+        tap(&bot, bb.clone(), "trial").await;
+        assert_eq!(accounts(&bot, 200), vec![(2, "mahtab872".into(), "trial".into())]);
+
+        // one trial per person
+        tap(&bot, a.clone(), "trial").await;
+        assert!(last(&log, 100).contains("قبلاً تست رایگان"));
+
+        // A's trial ends: it is deleted and A is told; number 1 is free again
+        bot.db().exec("UPDATE users SET expires_at=?1 WHERE id=1", &[&(now() - 5)]).unwrap();
+        bot.clean_trials().await;
+        assert!(accounts(&bot, 100).is_empty());
+        assert!(last(&log, 100).contains("تموم شد"));
+        tap(&bot, a.clone(), "trial").await;
+        assert!(last(&log, 100).contains("قبلاً تست رایگان"), "a finished trial cannot be taken again");
+
+        // C buys: the account takes the freed number 1 and C's own name
+        let c = from(300, "Erfan", "erfan_x");
+        tap(&bot, c.clone(), "home").await;
+        let o = order(&bot, 300, plan, "new", 0, "approved");
+        bot.fulfill(o).await;
+        assert_eq!(accounts(&bot, 300), vec![(1, "erfan".into(), format!("order #{}", o))]);
+
+        // B is over the data limit but has a receipt waiting for approval: the trial is kept
+        bot.db().exec("UPDATE users SET used_bytes=?1 WHERE id=2", &[&(20i64 << 30)]).unwrap();
+        let pending = order(&bot, 200, plan, "new", 0, "pending");
+        bot.clean_trials().await;
+        assert_eq!(accounts(&bot, 200).len(), 1);
+        // the receipt is approved: B keeps the same account (same number and link), now a normal account
+        bot.db().exec("UPDATE orders SET status='approved' WHERE id=?1", &[&pending]).unwrap();
+        bot.fulfill(pending).await;
+        assert_eq!(accounts(&bot, 200), vec![(2, "mahtab872".into(), format!("order #{}", pending))]);
+        bot.clean_trials().await;
+        assert_eq!(accounts(&bot, 200).len(), 1, "a bought account is never removed as a trial");
+
+        // B renames the account: rules and taken names are checked
+        tap(&bot, bb.clone(), "ren:2").await;
+        assert!(last(&log, 200).contains("نام فعلی"));
+        say(&bot, bb.clone(), "ERFAN").await;
+        assert!(last(&log, 200).contains("قبلاً گرفته شده"));
+        say(&bot, bb.clone(), "sara22").await;
+        assert_eq!(accounts(&bot, 200)[0].1, "sara22");
+        // someone else cannot rename B's account
+        tap(&bot, c.clone(), "ren:2").await;
+        say(&bot, c.clone(), "hacked1").await;
+        assert_eq!(accounts(&bot, 200)[0].1, "sara22");
+
+        // a new buyer without a usable name is asked before the plans are shown
+        let d = from(400, "علی", "");
+        tap(&bot, d.clone(), "buy").await;
+        assert!(last(&log, 400).contains("یک نام برای کانفیگ"));
+        say(&bot, d.clone(), "ali2").await;
+        let o = order(&bot, 400, plan, "new", 0, "approved");
+        bot.fulfill(o).await;
+        assert_eq!(accounts(&bot, 400), vec![(3, "ali2".into(), format!("order #{}", o))]);
     }
 }

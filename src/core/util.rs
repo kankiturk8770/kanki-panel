@@ -298,3 +298,40 @@ pub fn qr_svg(data: &str) -> Option<String> {
             .build(),
     )
 }
+
+/// A user / config name: English letters and digits only, starting with a letter, 3 to 12 characters (like mahtab87).
+/// WireGuard and AmneziaWG apps refuse tunnel names with other characters, so names stay this simple.
+pub fn valid_cfg_name(s: &str) -> bool {
+    let n = s.chars().count();
+    (3..=12).contains(&n) && s.chars().all(|c| c.is_ascii_alphanumeric()) && s.starts_with(|c: char| c.is_ascii_alphabetic())
+}
+
+/// A config name made from a Telegram name: only its English letters and digits are kept (emoji, stickers,
+/// symbols, spaces and other alphabets are dropped), in lower case. None when less than 3 usable characters remain.
+pub fn cfg_name_from(s: &str) -> Option<String> {
+    let t: String = s.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase();
+    let t: String = t.trim_start_matches(|c: char| c.is_ascii_digit()).chars().take(12).collect();
+    if valid_cfg_name(&t) { Some(t) } else { None }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn config_names() {
+        assert!(valid_cfg_name("mahtab87"));
+        assert!(valid_cfg_name("Erfan456"));
+        assert!(!valid_cfg_name("ab"));
+        assert!(!valid_cfg_name("87mahtab"));
+        assert!(!valid_cfg_name("mah_tab"));
+        assert!(!valid_cfg_name("mahtab 87"));
+        assert!(!valid_cfg_name("مهتاب"));
+        assert!(!valid_cfg_name("abcdefghijklm"));
+        assert_eq!(cfg_name_from("✨Mahtab 87🌙"), Some("mahtab87".into()));
+        assert_eq!(cfg_name_from("𝓜𝓪𝓱𝓽𝓪𝓫"), None);
+        assert_eq!(cfg_name_from("علی ali"), Some("ali".into()));
+        assert_eq!(cfg_name_from("2024_erfan_dev_account"), Some("erfandevacco".into()));
+        assert_eq!(cfg_name_from("محمد"), None);
+    }
+}

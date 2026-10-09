@@ -208,6 +208,10 @@ impl Db {
             "ALTER TABLE plans ADD COLUMN countries INTEGER DEFAULT 0",
             "ALTER TABLE plans ADD COLUMN category TEXT DEFAULT ''",
             "ALTER TABLE discounts ADD COLUMN expires INTEGER DEFAULT 0",
+            // v2.9.4: the config name a customer chose, and the Telegram @username / last name (to suggest one)
+            "ALTER TABLE bot_users ADD COLUMN cfg_name TEXT DEFAULT ''",
+            "ALTER TABLE bot_users ADD COLUMN uname TEXT DEFAULT ''",
+            "ALTER TABLE bot_users ADD COLUMN lname TEXT DEFAULT ''",
         ] {
             let _ = c.execute(m, []);
         }
@@ -222,6 +226,14 @@ impl Db {
         let _ = c.execute("UPDATE settings SET v='Kanki Panel' WHERE k='panel_name' AND v IN ('KANKI VPN','KANKI-VPN','Kanki VPN')", []);
         let _ = c.execute("UPDATE settings SET v=trim(replace(','||v||',', ',ovpn,', ','), ',') WHERE k='default_protocols' AND ','||v||',' LIKE '%,ovpn,%'", []);
         let _ = c.execute("UPDATE users SET protocols=trim(replace(','||protocols||',', ',ovpn,', ','), ',') WHERE ','||protocols||',' LIKE '%,ovpn,%'", []);
+        // v2.9.4: a trial is a user whose note is "trial"; finished trials are deleted. Before, a trial that was
+        // extended / renewed kept that note (only USER<n>-TEST was renamed to USER<n>), so clear it once on those
+        // accounts: they are customers now and must never be removed.
+        let migrated: bool = c.query_row("SELECT 1 FROM settings WHERE k='mig_trial_notes'", [], |_| Ok(())).is_ok();
+        if !migrated {
+            let _ = c.execute("UPDATE users SET notes='' WHERE notes='trial' AND UPPER(username) NOT LIKE '%-TEST'", []);
+            let _ = c.execute("INSERT OR REPLACE INTO settings(k,v) VALUES('mig_trial_notes','1')", []);
+        }
         // keep logs bounded
         let _ = c.execute("DELETE FROM audit WHERE id NOT IN (SELECT id FROM audit ORDER BY id DESC LIMIT 5000)", []);
         let _ = c.execute("DELETE FROM login_log WHERE id NOT IN (SELECT id FROM login_log ORDER BY id DESC LIMIT 2000)", []);
@@ -306,8 +318,41 @@ impl Db {
         n
     }
 
+    /// Is this name used by another user (any upper / lower case)?
+    pub fn name_taken(&self, name: &str, except: i64) -> bool {
+        self.with(|c| c.query_row("SELECT COUNT(*) FROM users WHERE UPPER(username)=UPPER(?1) AND id<>?2", params![name, except], |r| r.get::<_, i64>(0)).unwrap_or(1)) > 0
+    }
+
+    /// `base` when it is free, else base2, base3, … (kept within 12 characters)
+    pub fn free_name(&self, base: &str) -> String {
+        if !self.name_taken(base, 0) {
+            return base.to_string();
+        }
+        for i in 2..10_000 {
+            let suf = i.to_string();
+            let cand = format!("{}{}", base.chars().take(12 - suf.len()).collect::<String>(), suf);
+            if !self.name_taken(&cand, 0) {
+                return cand;
+            }
+        }
+        format!("{}{}", base.chars().take(6).collect::<String>(), crate::util::rand_digits(6))
+    }
+
+    /// Free trials whose time or data is over: they are deleted so their number is given to the next new user.
+    /// A trial whose owner has an order that is not settled yet (a receipt waiting for approval, a payment
+    /// being checked) is kept: the order may renew exactly this account.
+    pub fn finished_trials(&self) -> Vec<User> {
+        self.users().into_iter().filter(|u| u.notes == "trial" && (u.expired() || u.over_quota())).filter(|u| {
+            let open: i64 = self.with(|c| c.query_row(
+                "SELECT COUNT(*) FROM orders WHERE status IN ('pending','waiting','error') AND (target=?1 OR (?2<>0 AND tg_id=?2))",
+                params![u.id, u.tg_id], |r| r.get(0)).unwrap_or(1));
+            open == 0
+        }).collect()
+    }
+
     /// Creates a user. An empty username (or "auto") gives USER<n>; "auto-test" gives USER<n>-TEST
-    /// (a free trial). The user's id is always that same lowest free number.
+    /// (a free trial); "pick:<name>" gives that name, or name2, name3… when it is taken.
+    /// The user's id is always the lowest free number, so the numbers of deleted users are used again.
     #[allow(clippy::too_many_arguments)]
     pub fn create_user(&self, username: &str, limit_gb: f64, days: i64, max_conn: i64, protocols: &str, nodes: &str, notes: &str, tg_id: i64) -> Result<User, String> {
         let code = crate::util::rand_digits(19);
@@ -317,8 +362,15 @@ impl Db {
         let name = match username.trim() {
             "" | "auto" => format!("USER{}", n),
             "auto-test" => format!("USER{}-TEST", n),
-            x => x.to_string(),
+            x => match x.strip_prefix("pick:") {
+                Some(base) => self.free_name(base),
+                None => x.to_string(),
+            },
         };
+        // mahtab87 and MAHTAB87 would look like the same customer
+        if self.name_taken(&name, 0) {
+            return Err("this name is already used by another user".into());
+        }
         let id = self.with(|c| {
             c.execute(
                 "INSERT INTO users(id,username,code,limit_gb,expires_at,max_conn,protocols,nodes,notes,tg_id,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
@@ -330,8 +382,10 @@ impl Db {
         self.user(id).ok_or_else(|| "not found".into())
     }
 
-    /// A trial (USER<n>-TEST) that is bought / renewed becomes USER<n>.
+    /// A trial that is bought / renewed / extended becomes a normal account (never deleted as a finished trial);
+    /// an old style name USER<n>-TEST becomes USER<n>.
     pub fn promote_trial(&self, id: i64) {
+        let _ = self.exec("UPDATE users SET notes='' WHERE id=?1 AND notes='trial'", &[&id]);
         if let Some(u) = self.user(id) {
             let up = u.username.to_uppercase();
             if let Some(base) = up.strip_suffix("-TEST") {
