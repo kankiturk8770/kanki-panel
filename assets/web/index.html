@@ -1703,7 +1703,7 @@ function tunLoad(){return api('GET','/api/tunnels').then(function(d){TN.d=d;retu
 function tunSrv(id){var l=(TN.d&&TN.d.servers)||[];for(var i=0;i<l.length;i++)if(l[i].id==id)return l[i];return {id:id,name:id}}
 function tunStateTxt(s){return {up:t('Connected'),partial:t('Connecting…'),down:t('Disconnected'),off:t('Off')}[s]||s}
 function tunCol(s){return s=='up'?'#3ddc97':s=='partial'?'#f5b942':s=='off'?'#8a8f98':'#ff6b6b'}
-function tunTr(x){return {tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP',cdn:'CDN (whitelist)',awg:'AmneziaWG'}[x]||x}
+function tunTr(x){return {tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP',hq:'HQ (masked QUIC)',h2:'H2 (HTTP/2 + TLS)',dual:'Dual (HQ + H2)',cdn:'CDN (whitelist)',awg:'AmneziaWG'}[x]||x}
 // GRE: the panel builds its side by itself; this script builds the other side on the server
 // (a systemd service, so it comes back after a reboot) and, when the panel has a domain, points that
 // domain at the panel's address inside the GRE link so the agent talks to the panel through it
@@ -1882,17 +1882,19 @@ function tunSrvEdit(id){var s=tunSrv(id);
 
 // ---- tunnel wizard
 var TNP={balanced:4,speed:8,gaming:2};
-function tunUdpTr(tr){return tr=='quic'||tr=='kcp'}
+function tunUdpTr(tr){return tr=='quic'||tr=='kcp'||tr=='hq'}
+// dual listens on UDP and TCP of the same port number
+function tunBoth(tr){return tr=='dual'}
 // entry-side ports written in a list: "443", "8443:443", "1000-1010", comma separated
 function tunEntryPorts(list){var out=[];(Array.isArray(list)?list:String(list||'').split(/[\s,]+/)).forEach(function(it){String(it).split(',').forEach(function(q){q=q.trim();if(!q)return;var m;
  if((m=q.match(/^(\d+)\s*:\s*\d+$/)))out.push(+m[1]);else if((m=q.match(/^(\d+)\s*-\s*(\d+)$/))){for(var i=+m[1];i<=+m[2]&&i-m[1]<512;i++)out.push(i)}else if(/^\d+$/.test(q))out.push(+q)})});return out}
 // ports already taken on a server by the other enabled tunnels (tunnel port + ports opened on the entry)
 function tunPortUse(sid,skip){var u={tcp:{},udp:{}};((TN.d&&TN.d.tunnels)||[]).forEach(function(x){if(x.id==skip||x.enabled===false)return;var l=x.mode=='direct'?x.exit:x.entry;
- if(l==sid)(tunUdpTr(x.transport)?u.udp:u.tcp)[x.port]=1;
+ if(l==sid){if(tunBoth(x.transport)){u.udp[x.port]=1;u.tcp[x.port]=1}else(tunUdpTr(x.transport)?u.udp:u.tcp)[x.port]=1}
  if(x.entry==sid){tunEntryPorts(x.tcp).forEach(function(p){u.tcp[p]=1});tunEntryPorts(x.udp).forEach(function(p){u.udp[p]=1})}
  if(x.kind=='awg'&&x.awg){if(x.entry==sid||x.exit==sid)u.udp[x.awg.port]=1;if(x.awg.wrap&&x.entry==sid)u.udp[x.awg.wrap_port]=1}});return u}
-function tunFreePort(listener,skip,udp){var u=tunPortUse(listener,skip)[udp?'udp':'tcp'];
- for(var p=3080;p<3500;p++)if(!u[p])return p;return 3080}
+function tunFreePort(listener,skip,udp,both){var U=tunPortUse(listener,skip),u=U[udp?'udp':'tcp'];
+ for(var p=3080;p<3500;p++)if(!u[p]&&(!both||!(U.udp[p]||U.tcp[p])))return p;return 3080}
 // the node (from Nodes) that lives on a tunnel server: same address / IP, or the same name
 function tunNodeFor(sid){return api('GET','/api/nodes').then(function(ns){
  if(sid=='local')return ns.filter(function(z){return z.id=='local'})[0]||null;
@@ -1909,9 +1911,10 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  var opt=function(sel){return sv.map(function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'}).join('')};
  var prof=x.conns==8?'speed':x.conns==2?'gaming':'balanced',tr=x.transport||'tcpmux',mode=x.mode||'reverse',kind=x.kind=='awg'?'awg':'',A=x.awg||{};if(tr=='awg')tr='tcpmux';
  var awp=A.params||{},awpt=Object.keys(awp).map(function(k){return k+'='+awp[k]}).join('  ');
- var trs=[['Looks like web traffic',[['wss',t('Looks like an HTTPS site, hardest to spot'),['TLS','SNI']],['ws',t('Looks like a WebSocket, works behind a CDN'),['HTTP']]]],
+ var trs=[['Hardest to block',[['dual',t('UDP first (masked QUIC); if UDP is cut, HTTP/2 over TLS on the same port number'),['UDP','TCP','TLS']],['h2',t('WebSocket over HTTP/2, TLS 1.3 like a browser, many links in one connection'),['TLS','SNI','H2']]]],
+  ['Looks like web traffic',[['wss',t('Looks like an HTTPS site, hardest to spot'),['TLS','SNI']],['ws',t('Looks like a WebSocket, works behind a CDN'),['HTTP']]]],
   ['Encrypted TCP',[['tcpmux',t('Fast and steady, several links at once'),['TCP']],['tcp',t('One plain link'),['TCP']]]],
-  ['Over UDP',[['quic',t('Over QUIC (UDP), fast and encrypted'),['UDP','SNI']],['kcp',t('Over KCP (UDP), good on weak/lossy internet'),['UDP']]]],
+  ['Over UDP',[['quic',t('Over QUIC (UDP), fast and encrypted'),['UDP','SNI']],['kcp',t('Over KCP (UDP), good on weak/lossy internet'),['UDP']],['hq',t('QUIC under a random mask: no QUIC signature, packet sizes hidden'),['UDP','SNI','Mask']]]],
   ['Whitelist',[['cdn',t('Whitelist mode: through a CDN (ArvanCloud), for when only domestic sites open'),['TLS','SNI','CDN']]]]];
  var sec=function(n,title,extra){return '<div class="tws"><h4><i>'+N(n)+'</i>'+t(title)+(extra||'')+'</h4>'};
  modal(mhead(id?t('Edit tunnel'):t('New tunnel'))+
@@ -1972,9 +1975,9 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  var st={mode:mode,tr:tr,kind:kind,wrap:!!A.wrap};
  function hint(){var en=$('#tw_en').value,ex=$('#tw_ex').value,l=st.mode=='direct'?ex:en,pt=$('#tw_pt');
   // fill the port by itself only until the person types one; a field they cleared or typed stays theirs
-  if(!pt.dataset.touched&&!(id&&pt.value))pt.value=(st.tr=='cdn'?8080:tunFreePort(l,id,tunUdpTr(st.tr)));
-  var ls=tunSrv(l),port=pt.value,udp=tunUdpTr(st.tr),busy=port&&tunPortUse(l,id)[udp?'udp':'tcp'][+port];
-  $('#tw_ph').textContent=t('Open this port on')+' '+ls.name+': '+port+(udp?'/UDP':'/TCP')+(en==ex?' · '+t('The entry and the exit must be different'):'')+(busy?' · ⚠ '+t('This port is already used by another tunnel'):'');
+  if(!pt.dataset.touched&&!(id&&pt.value))pt.value=(st.tr=='cdn'?8080:tunFreePort(l,id,tunUdpTr(st.tr),tunBoth(st.tr)));
+  var ls=tunSrv(l),port=pt.value,udp=tunUdpTr(st.tr),both=tunBoth(st.tr),PU=tunPortUse(l,id),busy=port&&(both?(PU.udp[+port]||PU.tcp[+port]):PU[udp?'udp':'tcp'][+port]);
+  $('#tw_ph').textContent=t('Open this port on')+' '+ls.name+': '+port+(both?'/UDP + '+port+'/TCP':udp?'/UDP':'/TCP')+(en==ex?' · '+t('The entry and the exit must be different'):'')+(busy?' · ⚠ '+t('This port is already used by another tunnel'):'');
   $('#tw_ph').style.color=busy?'var(--bad)':'';
   var ap=$('#tw_aw_pt');if(ap&&!ap.dataset.touched&&!(id&&ap.value)){var ue=tunPortUse(en,id).udp,ux=tunPortUse(ex,id).udp,q=51900;while((ue[q]||ux[q])&&q<65000)q++;ap.value=q}}
  $('#tw_pt').oninput=function(){this.dataset.touched=1;hint()};
@@ -1987,7 +1990,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
    if(!n){if(manual)toast(t('No node found for this server: type the ports by hand'));return}
    var P=tunNodePorts(n),E=m?tunNodePorts(m):{tcp:[],udp:[]},use=tunPortUse(en,id),l=st.mode=='direct'?ex:en,pt=+$('#tw_pt').value,moved=[];
    E.tcp.forEach(function(p){use.tcp[p]=1});E.udp.forEach(function(p){use.udp[p]=1});
-   if(l==en&&pt)(tunUdpTr(st.tr)?use.udp:use.tcp)[pt]=1;
+   if(l==en&&pt){if(tunBoth(st.tr)){use.udp[pt]=1;use.tcp[pt]=1}else(tunUdpTr(st.tr)?use.udp:use.tcp)[pt]=1}
    var mp=function(arr,u){return arr.map(function(p){var q=p;while(u[q]&&q<65535)q++;u[q]=1;if(q!=p)moved.push(q+'→'+p);return q==p?String(p):q+':'+p})};
    $('#tw_tcp').value=mp(P.tcp,use.tcp).join(', ');$('#tw_udp').value=mp(P.udp,use.udp).join(', ');
    if(pn)pn.textContent=t('Ports of')+' '+n.name+' '+t('were filled in')+(moved.length?' · '+t('Moved on the entry because they were taken')+': '+moved.join(', '):'')}).catch(function(e){if(manual)fail(e)})}
@@ -1999,7 +2002,10 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   kcp:{n:'KCP is fully encrypted UDP (its header is hidden too); there is no site name to disguise.'},
   ws:{host:1,path:1,n:'WS has no TLS, so there is no SNI: only the Host header and the path of the WebSocket request can be changed.'},
   wss:{sni:1,frag:1,host:1,path:1,n:'SNI spoof: the TLS hello shows another site name. It only helps when the filter decides by name; it does nothing if the IP is blocked.'},
-  quic:{sni:1,n:'The QUIC hello carries a site name too (default www.cloudflare.com).'},cdn:{cdn:1}};
+  quic:{sni:1,n:'The QUIC hello carries a site name too (default www.cloudflare.com).'},
+  hq:{sni:1,n:'Every UDP packet is masked with a key made from the token: no QUIC signature, random sizes. Unmasked packets get no answer. The QUIC hello carries a site name (default www.cloudflare.com).'},
+  h2:{sni:1,frag:1,host:1,path:1,n:'TLS 1.3 with the ALPN, ciphers and HTTP/2 settings of a browser; a stranger who opens the site gets an ordinary web page. Use port 443.'},
+  dual:{sni:1,frag:1,host:1,path:1,n:'Tries masked QUIC first and switches to HTTP/2 over TLS by itself when UDP does not pass. Open the port on UDP and TCP; port 443 is best.'},cdn:{cdn:1}};
  function camUi(){var c=CAM[st.tr]||{},sh=function(i,v){var e=$(i);if(e)e.style.display=v?'':'none'};
   sh('#tw_snw',c.sni);sh('#tw_fragw',c.frag);sh('#tw_hw',c.host);sh('#tw_pw',c.path||c.cdn);sh('#tw_hpw',c.host||c.path||c.cdn);
   var n=$('#tw_camn');n.innerHTML=c.n?ic(c.sni||c.host?'security':'check',16)+'<span>'+t(c.n)+'</span>':'';n.style.display=c.n?'':'none';
@@ -2084,11 +2090,11 @@ function tunSmart(o){if(!TN.d)return tunLoad().then(function(){tunSmart(o)});if(
   '<ul class="sub" style="margin:4px 0 8px;padding-inline-start:18px;line-height:1.7"><li>'+t('Scores follow your profile (gaming, balanced, ultra speed)')+'</li><li>'+t('Tells which ones did not pass and probably why')+'</li><li>'+t('If one direction is closed it says so and suggests the other')+'</li><li>'+t('One click applies it in making or editing a tunnel')+'</li><li>'+t('No tunnel is made and nothing changes on the servers')+'</li></ul>'+
   (sv.length<2?'<div class="warnbox">'+t('First add your entry server in the “Tunnel servers” menu.')+'</div>':'')+
   '<div class="g2"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="ts_en">'+opt(c.entry||(remote[0]||{}).id)+'</select></div><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="ts_ex">'+opt(c.exit||'local')+'</select></div></div>'+
-  '<div class="g2"><div><label class="f">'+t('Profile')+'</label><select id="ts_pf">'+po('balanced',t('Balanced'))+po('speed',t('Most speed'))+po('gaming',t('Gaming (low ping)'))+'</select></div><div><label class="f">'+t('Test ports (first of twelve)')+'</label><input id="ts_pt" type="number" class="ltr" value="3990"></div></div>'+
+  '<div class="g2"><div><label class="f">'+t('Profile')+'</label><select id="ts_pf">'+po('balanced',t('Balanced'))+po('speed',t('Most speed'))+po('gaming',t('Gaming (low ping)'))+'</select></div><div><label class="f">'+t('Test ports (first of sixteen)')+'</label><input id="ts_pt" type="number" class="ltr" value="3990"></div></div>'+
   '<p class="muted" id="ts_note" style="font-size:12px;margin:8px 0 0"></p>'+
   (r.job&&r.job.finished?'<button class="b2" style="width:100%;margin-top:10px" onclick="tunSmartRun()">'+t('Show the last result')+'</button>':'')+
   '<button class="btn" style="width:100%;margin-top:10px" id="ts_go">'+t('Start the test')+'</button>');
- var note=function(){var p=+$('#ts_pt').value||3990;$('#ts_note').textContent=t('Takes about a minute. Ports')+' '+N(p)+'–'+N(p+5)+' '+t('on the entry')+' · '+N(p+6)+'–'+N(p+11)+' '+t('on the exit')+' (TCP + UDP) '+t('must be open in the cloud firewall')+'.'};
+ var note=function(){var p=+$('#ts_pt').value||3990;$('#ts_note').textContent=t('Takes about a minute. Ports')+' '+N(p)+'–'+N(p+7)+' '+t('on the entry')+' · '+N(p+8)+'–'+N(p+15)+' '+t('on the exit')+' (TCP + UDP) '+t('must be open in the cloud firewall')+'.'};
  ['ts_pt'].forEach(function(k){$('#'+k).onchange=note;$('#'+k).oninput=note});note();
  $('#ts_pf').onchange=function(){TS.prof=this.value};
  $('#ts_go').onclick=function(){var me=this;me.disabled=true;TS.prof=$('#ts_pf').value;api('POST','/api/tunnels/probe',{entry:$('#ts_en').value,exit:$('#ts_ex').value,port:+$('#ts_pt').value||3990}).then(tunSmartRun).catch(function(e){me.disabled=false;fail(e)})}}).catch(fail)}
@@ -2105,11 +2111,12 @@ function tunScore(r,P){return tunOk(r)&&r.scores?(r.scores[P]||0):0}
 // the likely reason a transport did not pass (or passes badly), from what the other transports did
 function tunWhy(r,j){var L=j.results||[],same=L.filter(function(z){return z.mode==r.mode&&z.transport!=r.transport}),
  okTr=function(n){return same.some(function(z){return z.transport==n&&tunOk(z)})},
- anyTcp=same.some(function(z){return z.transport!='quic'&&z.transport!='kcp'&&tunOk(z)}),udpTr=r.transport=='quic'||r.transport=='kcp';
+ anyTcp=same.some(function(z){return z.transport!='quic'&&z.transport!='kcp'&&z.transport!='hq'&&tunOk(z)}),udpTr=r.transport=='quic'||r.transport=='kcp'||r.transport=='hq';
  if(!tunOk(r)){
   if(udpTr)return anyTcp?t('UDP is probably blocked on this route: the TCP transports pass'):t('Nothing passes in this direction');
   if(r.transport=='wss'&&okTr('ws'))return t('TLS looks filtered: plain WebSocket passes but WSS does not');
   if(r.transport=='ws'&&okTr('wss'))return t('Plain HTTP looks filtered: WSS passes but WebSocket does not');
+  if(r.transport=='h2'&&okTr('wss'))return t('HTTP/2 does not get through (or the server is older than 2.9): WSS passes but H2 does not');
   if(!anyTcp)return t('The port is closed or this direction is blocked: check the cloud firewall');
   return t('This transport is filtered on the route while others pass')}
  if(r.udp_error||(r.udp_loss!=null&&r.udp_loss>=50))return t('TCP works but UDP does not pass well: WireGuard / Hysteria2 may suffer');
@@ -2172,6 +2179,7 @@ Object.assign(FA,{"Only GRE passes to this server":"فقط GRE به این سر�
 Object.assign(FA,{"Tunnel type": "نوع تانل", "Kanki tunnel": "تانل کانکی", "link between the two servers": "لینک بین دو سرور", "A WireGuard-like link with obfuscated packets. The panel makes the keys and the obfuscation numbers and gives both ends the same ones; the agents install AmneziaWG by themselves when it is missing. Inside the link the entry is 10.88.N.1 and the exit 10.88.N.2.": "لینک شبیه وایرگارد با بسته‌های مبهم‌سازی‌شده. پنل کلیدها و اعداد مبهم‌سازی (Jc، S1، H1…) را می‌سازد و دقیقاً یکسان به هر دو سمت می‌دهد؛ اگر AmneziaWG روی سرور نباشد، ایجنت خودش نصبش می‌کند. داخل لینک، ورودی 10.88.N.1 و خروجی 10.88.N.2 است.", "Hide it inside a transport": "پنهان کردن داخل یک ترنسپورت", "The AmneziaWG packets travel inside the transport chosen below (WebSocket, WSS, CDN, QUIC, KCP, TCP Mux), so the network only sees that transport. Best for strong filtering.": "بسته‌های AmneziaWG داخل ترنسپورتی که پایین انتخاب می‌کنی (وب‌سوکت، WSS، CDN، QUIC، KCP، TCP Mux) رد می‌شوند و شبکه فقط همان ترنسپورت را می‌بیند. برای فیلترینگ سنگین بهترین است.", "AmneziaWG UDP port": "پورت UDP آمنزیا", "Obfuscation profile": "پروفایل مبهم‌سازی", "Classic (Jc, S1, S2, H1-H4)": "کلاسیک (Jc، S1، S2، H1-H4)", "Heavy (more junk, bigger padding)": "سنگین (بسته‌ی زائد بیشتر، پدینگ بزرگ‌تر)", "Mimic QUIC (adds I1, needs AmneziaWG tools 1.5+)": "تقلید QUIC (I1 اضافه می‌شود، نیاز به AmneziaWG نسخه ۱.۵ به بالا)", "MTU (0 = automatic)": "MTU (۰ = خودکار)", "Keepalive (seconds)": "Keepalive (ثانیه)", "New obfuscation numbers": "اعداد مبهم‌سازی جدید", "New keys": "کلیدهای جدید", "Close the AmneziaWG port to the outside": "بستن پورت AmneziaWG به روی بیرون", "Only the transport can reach it; scanners cannot probe the port.": "فقط ترنسپورت به آن می‌رسد؛ اسکنرها نمی‌توانند پورت را کاوش کنند.", "Routing through the link": "مسیریابی از داخل لینک", "The exit does NAT (masquerade)": "خروجی NAT می‌کند (masquerade)", "Needed so what enters the link can reach the internet from the exit.": "لازم است تا ترافیکی که وارد لینک می‌شود از خروجی به اینترنت برسد.", "Destination networks sent through the link": "شبکه‌های مقصدی که از لینک می‌روند", "All traffic from these networks goes through the link": "کل ترافیکِ این شبکه‌ها (مبدأ) از لینک می‌رود", "For example the subnet of the VPN users of the entry: their internet then leaves from the exit. SSH of the entry itself is never touched.": "مثلاً ساب‌نت کاربران VPN سرور ورودی: اینترنتشان از خروجی بیرون می‌رود. به SSH خود سرور ورودی دست زده نمی‌شود.", "Entry public TCP ports sent into the link": "پورت‌های TCP عمومی ورودی که به لینک می‌روند", "Entry public UDP ports sent into the link": "پورت‌های UDP عمومی ورودی که به لینک می‌روند", "Forward to (empty = the exit inside the link)": "مقصد (خالی = خروجی داخل لینک)", "Show the config of the entry": "نمایش کانفیگ ورودی", "Show the config of the exit": "نمایش کانفیگ خروجی", "Config": "کانفیگ", "Save it as the file below in /etc/amnezia/amneziawg/ and run awg-quick up. It holds a private key: do not share it.": "با همین نام فایل در /etc/amnezia/amneziawg/ ذخیره کن و awg-quick up بزن. کلید خصوصی دارد؛ جایی منتشرش نکن."});
 Object.assign(FA,{"Tunnel servers":"سرورهای تانل","Story":"داستان کوتاه","A day with us":"یک روز با ما","Question for the audience":"سؤال از مخاطب","Q&A":"پرسش و پاسخ","Short punch":"جمله‌ی کوتاه و جذاب","Before and after":"قبل و بعد","Category":"دسته‌بندی","Category name":"نام دسته‌بندی","Rename category":"تغییر نام دسته","Move to category":"انتقال به دسته‌بندی","Other":"بدون دسته"});
 Object.assign(FA,{"Update all":"آپدیت همه","Update every node, every tunnel server and the panel itself to the latest version?":"همهٔ نودها، سرورهای تانل و خود پنل به آخرین نسخه آپدیت شوند؟","Updating…":"در حال آپدیت…","Panel":"پنل","Nodes":"نودها","no answer: update it once with the kanki command":"جواب نداد: یک‌بار با دستور kanki آپدیتش کن","Tunnel servers (updating by themselves)":"سرورهای تانل (خودشان آپدیت می‌شوند)","Both a node and a tunnel server (updated once, through the node)":"هم نود هم سرور تانل (یک‌بار، از طریق نود)","These agents are too old to update remotely. Run the command kanki on them and choose 3 (Update) once:":"این ایجنت‌ها برای آپدیت از راه دور قدیمی‌اند. روی آن‌ها دستور kanki را بزن و گزینهٔ 3 (Update) را انتخاب کن (فقط یک‌بار):","Everything is already up to date":"همه‌چیز آپدیت است","VPN ports (UDP)":"پورت‌های VPN (UDP)","Applied on the server at once: config, service and firewall. Old WireGuard/AmneziaWG files stop working; subscription links update by themselves.":"روی خود سرور همان لحظه اعمال می‌شود: کانفیگ، سرویس و فایروال. فایل‌های قدیمی وایرگارد/آمنزیا کار نمی‌کنند؛ لینک اشتراک خودش به‌روز می‌شود.","Apply ports":"اعمال پورت‌ها","No port changed":"پورتی عوض نشده","Applying…":"در حال اعمال…","Not in a tunnel":"بدون تانل","Also use this node as a tunnel server":"این نود را سرور تانل هم بکن","Telegram alert when a node or tunnel goes offline":"هشدار تلگرام وقتی نود یا تانل آفلاین شد","Easy setup: choose above which server the CDN points to, type your domain here and the tunnel port below. The panel does the rest.":"راه‌اندازی ساده: بالا انتخاب کن CDN به کدام سرور اشاره دارد، دامنه را همین‌جا و پورت تانل را پایین بنویس. بقیه را پنل انجام می‌دهد.","Extra disguise (optional)":"پوشش اضافه (اختیاری)","empty = use the domain":"خالی = از خود دامنه استفاده شود","CDN points to the Iran server: the foreign server connects in (recommended)":"CDN به سرور ایران اشاره می‌کند: سرور خارج وصل می‌شود (پیشنهادی)","CDN points to the foreign server: the Iran server connects out":"CDN به سرور خارج اشاره می‌کند: سرور ایران وصل می‌شود","On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور ایران (ورودی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور ایران باز کن.","On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور خارج (خروجی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور خروجی باز کن.","enter the domain you put on the CDN":"دامنه‌ای که روی CDN گذاشتی را بنویس"});
+Object.assign(FA,{"Hardest to block": "سخت‌ترین برای مسدودسازی", "UDP first (masked QUIC); if UDP is cut, HTTP/2 over TLS on the same port number": "اول UDP (QUIC ماسک‌شده)؛ اگر UDP قطع بود، HTTP/2 روی TLS با همان شمارهٔ پورت", "WebSocket over HTTP/2, TLS 1.3 like a browser, many links in one connection": "وب‌سوکت روی HTTP/2 با TLS 1.3 مثل مرورگر؛ چند لینک در یک اتصال", "QUIC under a random mask: no QUIC signature, packet sizes hidden": "QUIC زیر یک ماسک تصادفی: بدون امضای QUIC و با اندازهٔ بستهٔ پنهان", "Every UDP packet is masked with a key made from the token: no QUIC signature, random sizes. Unmasked packets get no answer. The QUIC hello carries a site name (default www.cloudflare.com).": "هر بستهٔ UDP با کلیدی که از توکن ساخته می‌شود ماسک می‌شود: بدون امضای QUIC و با اندازه‌های تصادفی. بسته‌ای که ماسک درست نداشته باشد هیچ پاسخی نمی‌گیرد. هلوی QUIC یک نام سایت دارد (پیش‌فرض www.cloudflare.com).", "TLS 1.3 with the ALPN, ciphers and HTTP/2 settings of a browser; a stranger who opens the site gets an ordinary web page. Use port 443.": "TLS 1.3 با ALPN، رمزها و تنظیمات HTTP/2 شبیه مرورگر؛ کسی که سایت را باز کند یک صفحهٔ وب معمولی می‌بیند. از پورت 443 استفاده کن.", "Tries masked QUIC first and switches to HTTP/2 over TLS by itself when UDP does not pass. Open the port on UDP and TCP; port 443 is best.": "اول QUIC ماسک‌شده را امتحان می‌کند و اگر UDP رد نشد خودکار به HTTP/2 روی TLS می‌رود. پورت را هم روی UDP و هم روی TCP باز کن؛ پورت 443 بهترین است.", "HTTP/2 does not get through (or the server is older than 2.9): WSS passes but H2 does not": "HTTP/2 رد نمی‌شود (یا نسخهٔ سرور قدیمی‌تر از 2.9 است): WSS رد می‌شود ولی H2 نه", "Test ports (first of sixteen)": "پورت‌های تست (اولی از شانزده)"});
 </script>
 <script type="text/plain" id="scanTpl">
 #!/bin/bash

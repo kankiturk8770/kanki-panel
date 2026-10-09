@@ -6,7 +6,7 @@
 //! links. Neither opens a target itself — they only carry the encrypted tunnel, exactly like the
 //! TCP and WebSocket transports.
 
-use super::link::{BoxIo, Res};
+use super::link::{Bag, BoxIo, Inbox, Raw, Res};
 use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig};
 use std::net::SocketAddr;
@@ -14,7 +14,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 // ------------------------------------------------------------------ QUIC
 
@@ -24,6 +25,12 @@ pub struct QuicIo {
     recv: quinn::RecvStream,
     // the connection is kept alive as long as the stream is
     _conn: quinn::Connection,
+}
+
+impl QuicIo {
+    pub(super) fn new(send: quinn::SendStream, recv: quinn::RecvStream, conn: quinn::Connection) -> QuicIo {
+        QuicIo { send, recv, _conn: conn }
+    }
 }
 
 impl AsyncRead for QuicIo {
@@ -58,7 +65,7 @@ fn transport_config() -> Arc<TransportConfig> {
     Arc::new(t)
 }
 
-fn server_config() -> Res<ServerConfig> {
+pub(super) fn server_config(transport: Arc<TransportConfig>) -> Res<ServerConfig> {
     // a throwaway self-signed certificate; identity is proven by the token handshake inside
     let ck = rcgen::generate_simple_self_signed(vec!["www.cloudflare.com".to_string()])?;
     let cert = rustls::pki_types::CertificateDer::from(ck.cert.der().to_vec());
@@ -70,11 +77,11 @@ fn server_config() -> Res<ServerConfig> {
     tls.alpn_protocols = vec![b"h3".to_vec()];
     let qsc = QuicServerConfig::try_from(tls)?;
     let mut cfg = ServerConfig::with_crypto(Arc::new(qsc));
-    cfg.transport_config(transport_config());
+    cfg.transport_config(transport);
     Ok(cfg)
 }
 
-fn client_config() -> Res<ClientConfig> {
+pub(super) fn client_config(transport: Arc<TransportConfig>) -> Res<ClientConfig> {
     let p = super::link::provider();
     let mut tls = rustls::ClientConfig::builder_with_provider(p.clone())
         .with_protocol_versions(&[&rustls::version::TLS13])?
@@ -84,43 +91,71 @@ fn client_config() -> Res<ClientConfig> {
     tls.alpn_protocols = vec![b"h3".to_vec()];
     let qcc = QuicClientConfig::try_from(tls)?;
     let mut cfg = ClientConfig::new(Arc::new(qcc));
-    cfg.transport_config(transport_config());
+    cfg.transport_config(transport);
     Ok(cfg)
 }
 
-/// A QUIC listener: one endpoint, from which we accept connections and their first stream.
-pub struct QuicListener {
-    endpoint: Endpoint,
+/// Starts a QUIC listener on `0.0.0.0:port`. Every accepted connection is handled in a task of its
+/// own, so a client that stalls its handshake cannot hold up the others.
+pub async fn serve_quic(port: u16, out: Inbox, sem: Arc<Semaphore>) -> Res<Bag> {
+    let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
+    let endpoint = Endpoint::server(server_config(transport_config())?, addr)?;
+    Ok(accept_loop(endpoint, out, sem))
 }
 
-impl QuicListener {
-    pub async fn bind(port: u16) -> Res<QuicListener> {
-        let addr: SocketAddr = format!("0.0.0.0:{}", port).parse()?;
-        let endpoint = Endpoint::server(server_config()?, addr)?;
-        Ok(QuicListener { endpoint })
-    }
-
-    /// Accepts the next QUIC connection and its first bidirectional stream.
-    pub async fn accept(&self) -> Res<BoxIo> {
-        loop {
-            let incoming = self.endpoint.accept().await.ok_or("quic endpoint closed")?;
-            // handle each connection's first stream; a failed one must not stop the listener
-            match accept_one(incoming).await {
-                Ok(io) => return Ok(io),
-                Err(_) => continue,
-            }
+/// Accepts the connections of a QUIC endpoint (used by `quic` and by `hq`).
+pub(super) fn accept_loop(endpoint: Endpoint, out: Inbox, sem: Arc<Semaphore>) -> Bag {
+    let ep = endpoint.clone();
+    let task = tokio::spawn(async move {
+        while let Some(incoming) = ep.accept().await {
+            let Ok(permit) = sem.clone().try_acquire_owned() else {
+                incoming.refuse();
+                continue;
+            };
+            tokio::spawn(serve_conn(incoming, out.clone(), permit));
         }
-    }
+    });
+    Bag { tasks: vec![task], endpoints: vec![endpoint] }
 }
 
-async fn accept_one(incoming: quinn::Incoming) -> Res<BoxIo> {
-    use tokio::io::AsyncReadExt;
-    let conn = tokio::time::timeout(Duration::from_secs(12), incoming).await.map_err(|_| "quic accept timeout")??;
-    let (send, mut recv) = tokio::time::timeout(Duration::from_secs(12), conn.accept_bi()).await.map_err(|_| "quic stream timeout")??;
-    // swallow the one priming byte the dialer sent to open the stream
-    let mut one = [0u8; QUIC_PRIME.len()];
-    tokio::time::timeout(Duration::from_secs(12), AsyncReadExt::read_exact(&mut recv, &mut one)).await.map_err(|_| "quic prime timeout")??;
-    Ok(Box::new(QuicIo { send, recv, _conn: conn }))
+/// One QUIC connection: finishes its handshake, then hands every stream the dialer opens to the
+/// engine (after swallowing the priming byte). The semaphore permit is held only until the first
+/// stream is ready, or until the 12 s limits run out.
+async fn serve_conn(incoming: quinn::Incoming, out: Inbox, permit: OwnedSemaphorePermit) {
+    let peer = incoming.remote_address().ip().to_string();
+    let conn = match tokio::time::timeout(Duration::from_secs(12), incoming).await {
+        Ok(Ok(c)) => c,
+        _ => return,
+    };
+    let mut permit = Some(permit);
+    let mut first = true;
+    loop {
+        let st = if first {
+            match tokio::time::timeout(Duration::from_secs(12), conn.accept_bi()).await {
+                Ok(r) => r,
+                Err(_) => break,
+            }
+        } else {
+            conn.accept_bi().await
+        };
+        first = false;
+        let (send, mut recv) = match st {
+            Ok(x) => x,
+            Err(_) => break,
+        };
+        let (out, conn2, p, peer2) = (out.clone(), conn.clone(), permit.take(), peer.clone());
+        tokio::spawn(async move {
+            let _p = p;
+            // swallow the one priming byte the dialer sent to open the stream
+            let mut one = [0u8; QUIC_PRIME.len()];
+            match tokio::time::timeout(Duration::from_secs(12), AsyncReadExt::read_exact(&mut recv, &mut one)).await {
+                Ok(Ok(_)) => {}
+                _ => return,
+            }
+            let io: BoxIo = Box::new(QuicIo::new(send, recv, conn2));
+            let _ = out.send((Raw::Stream(io), peer2)).await;
+        });
+    }
 }
 
 /// Dials a QUIC server and opens one bidirectional stream.
@@ -128,7 +163,7 @@ pub async fn dial(remote: &str, sni: &str) -> Res<BoxIo> {
     let addr: SocketAddr = tokio::net::lookup_host(remote).await?.next().ok_or("cannot resolve the tunnel address")?;
     let bind: SocketAddr = if addr.is_ipv6() { "[::]:0".parse()? } else { "0.0.0.0:0".parse()? };
     let mut endpoint = Endpoint::client(bind)?;
-    endpoint.set_default_client_config(client_config()?);
+    endpoint.set_default_client_config(client_config(transport_config())?);
     let name = if sni.is_empty() { "www.cloudflare.com" } else { sni };
     let conn = tokio::time::timeout(Duration::from_secs(12), endpoint.connect(addr, name)?).await.map_err(|_| "quic connect timeout")??;
     use tokio::io::AsyncWriteExt;
@@ -151,24 +186,30 @@ fn kcp_config() -> tokio_kcp::KcpConfig {
     c
 }
 
-/// A KCP listener. KCP runs on a private loopback socket; the obfuscation relay owns the public
-/// UDP port, so nothing with a KCP header is ever sent on the wire.
-pub struct KcpListener {
-    inner: tokio_kcp::KcpListener,
-    _obfs: super::obfs::ServerObfs,
-}
-
-impl KcpListener {
-    pub async fn bind(port: u16, token: &str) -> Res<KcpListener> {
-        let inner = tokio_kcp::KcpListener::bind(kcp_config(), "127.0.0.1:0").await?;
-        let local = inner.local_addr()?;
-        let obfs = super::obfs::server(port, token, local).await?;
-        Ok(KcpListener { inner, _obfs: obfs })
-    }
-    pub async fn accept(&mut self) -> Res<BoxIo> {
-        let (stream, _) = self.inner.accept().await?;
-        Ok(Box::new(stream))
-    }
+/// Starts a KCP listener. KCP runs on a private loopback socket; the obfuscation relay owns the
+/// public UDP port, so nothing with a KCP header is ever sent on the wire.
+pub async fn serve_kcp(port: u16, token: &str, out: Inbox, _sem: Arc<Semaphore>) -> Res<Bag> {
+    let mut inner = tokio_kcp::KcpListener::bind(kcp_config(), "127.0.0.1:0").await?;
+    let local = inner.local_addr()?;
+    let obfs = super::obfs::server(port, token, local).await?;
+    let task = tokio::spawn(async move {
+        // the relay lives as long as this loop; when the loop is stopped the relay stops with it
+        let _obfs = obfs;
+        loop {
+            let stream = match inner.accept().await {
+                Ok((s, _)) => s,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_millis(200)).await;
+                    continue;
+                }
+            };
+            let io: BoxIo = Box::new(stream);
+            if out.send((Raw::Stream(io), "kcp".to_string())).await.is_err() {
+                break;
+            }
+        }
+    });
+    Ok(Bag { tasks: vec![task], endpoints: vec![] })
 }
 
 /// Dials a KCP server through the obfuscation relay.

@@ -1,0 +1,16 @@
+{
+  "id": "a-to-b",
+  "name": "Node A -> Node B",
+  "role": "entry",
+  "mode": "direct",
+  "transport": "dual",
+  "remote": "NODE_B_PUBLIC_IP:443",
+  "token": "CHANGE-ME-same-secret-on-both-nodes-32+chars",
+  "conns": 4,
+  "sni": "www.microsoft.com, www.cloudflare.com",
+  "host": "www.microsoft.com",
+  "path": "/",
+  "frag": true,
+  "tcp": ["8443:443", "2222:22"],
+  "udp": ["51820"]
+}

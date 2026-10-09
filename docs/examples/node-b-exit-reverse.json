@@ -1,0 +1,15 @@
+{
+  "id": "b-dials-a",
+  "name": "Node B dials Node A",
+  "role": "exit",
+  "mode": "reverse",
+  "transport": "dual",
+  "remote": "NODE_A_PUBLIC_IP:443",
+  "token": "CHANGE-ME-same-secret-on-both-nodes-32+chars",
+  "conns": 4,
+  "sni": "www.microsoft.com, www.cloudflare.com",
+  "host": "www.microsoft.com",
+  "path": "/",
+  "frag": true,
+  "target": "127.0.0.1"
+}

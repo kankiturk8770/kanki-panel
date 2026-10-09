@@ -25,7 +25,11 @@ pub struct Spec {
     pub role: String,
     /// "reverse" (exit dials entry) | "direct" (entry dials exit)
     pub mode: String,
-    /// "tcp" | "tcpmux" | "ws" | "wss" | "quic" | "kcp" | "cdn"
+    /// "tcp" | "tcpmux" | "ws" | "wss" | "quic" | "kcp" | "cdn" | "hq" | "h2" | "dual"
+    /// (`hq`: QUIC under a masking layer, nothing on the wire looks like QUIC. `h2`: WebSocket over
+    /// HTTP/2 over TLS 1.3 with browser-like ALPN and settings, many links share one TCP connection.
+    /// `dual`: `hq` first, `h2` when UDP does not get through; the listener serves both on one port
+    /// number. `hq`, `h2` and `dual` also pad every record to hide its real size.)
     /// (`cdn`: for whitelist-only networks. The dialer reaches the origin through a CDN edge over
     /// TLS + WebSocket; the origin listens on plain WebSocket. Works in both modes: `direct` = the
     /// CDN is in front of the exit, `reverse` = the CDN is in front of the entry.)
@@ -66,6 +70,10 @@ pub struct Spec {
 impl Spec {
     pub fn listens(&self) -> bool {
         (self.role == "entry" && self.mode != "direct") || (self.role == "exit" && self.mode == "direct")
+    }
+    /// records carry random padding (both ends decide this from the transport name)
+    fn padded(&self) -> bool {
+        matches!(self.transport.as_str(), "hq" | "h2" | "dual")
     }
     fn links(&self) -> u32 {
         match self.transport.as_str() {
@@ -260,8 +268,12 @@ impl Running {
     }
 }
 
-async fn run_link(spec: &Spec, state: &Arc<State>, raw: link::Raw, client: bool) -> Res<()> {
-    let (tx, rx) = link::handshake(raw, &spec.token, client).await?;
+/// `hs_permit`: on the listening side, one of the limited places for handshakes in progress; it is
+/// given back as soon as the handshake is over (a link that lives on does not hold it).
+async fn run_link(spec: &Spec, state: &Arc<State>, raw: link::Raw, client: bool, hs_permit: Option<tokio::sync::OwnedSemaphorePermit>) -> Res<()> {
+    let hs = link::handshake(raw, &spec.token, client, spec.padded()).await;
+    drop(hs_permit);
+    let (tx, rx) = hs?;
     let s = Session::start(tx, rx, spec.role == "entry", state.shared.clone(), &spec.transport);
     state.add(s.clone());
     s.closed().await;
@@ -286,6 +298,9 @@ async fn listen_loop(spec: Spec, state: Arc<State>) {
         }
     }
     let spec = Arc::new(spec);
+    // at most this many token handshakes at the same time: a connection that got through TLS or
+    // QUIC but then says nothing must not be able to pile up without limit
+    let hs_slots = Arc::new(tokio::sync::Semaphore::new(256));
     loop {
         let (raw, peer) = match l.accept().await {
             Ok(x) => x,
@@ -294,12 +309,16 @@ async fn listen_loop(spec: Spec, state: Arc<State>) {
                 continue;
             }
         };
+        let Ok(permit) = hs_slots.clone().try_acquire_owned() else {
+            drop(raw);
+            continue;
+        };
         let (spec, state) = (spec.clone(), state.clone());
         tokio::spawn(async move {
-            if let Err(e) = run_link(&spec, &state, raw, false).await {
+            if let Err(e) = run_link(&spec, &state, raw, false, Some(permit)).await {
                 // wrong tokens from scanners are not worth showing; real failures are
                 let m = e.to_string();
-                if !m.contains("bad record") && !m.contains("bad hello") {
+                if !m.contains("bad record") && !m.contains("bad hello") && !m.contains("handshake timeout") {
                     state.set_err(format!("{}: {}", peer, m));
                 }
             }
@@ -318,7 +337,7 @@ async fn dial_loop(spec: Spec, state: Arc<State>, n: u32) {
     // several edge addresses (cdn) and TLS names (wss / quic / cdn): every link starts on a different
     // one, and a link that fails moves to the next combination. A link that worked keeps its address.
     let remotes = if spec.transport == "cdn" { split_list(&spec.remote) } else { vec![] };
-    let snis = if matches!(spec.transport.as_str(), "cdn" | "wss" | "quic") { split_list(&spec.sni) } else { vec![] };
+    let snis = if matches!(spec.transport.as_str(), "cdn" | "wss" | "quic" | "hq" | "h2" | "dual") { split_list(&spec.sni) } else { vec![] };
     let mut attempt = n as usize;
     let mut wait = 1u64;
     loop {
@@ -331,7 +350,7 @@ async fn dial_loop(spec: Spec, state: Arc<State>, n: u32) {
             snis[step % snis.len()].clone()
         };
         match link::dial(&spec.transport, &remote, &sni, &spec.host, &spec.path, &spec.token, spec.frag).await {
-            Ok(raw) => match run_link(&spec, &state, raw, true).await {
+            Ok(raw) => match run_link(&spec, &state, raw, true, None).await {
                 Ok(()) => {}
                 Err(e) => state.set_err(e),
             },

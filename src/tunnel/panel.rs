@@ -74,8 +74,29 @@ pub struct Tunnel {
     pub awg: AwgCfg,
 }
 
-/// Default rotation: KCP first (balanced, reverse), then the others.
-pub const AUTO_ORDER: &[&str] = &["kcp", "tcpmux", "quic", "ws", "wss", "tcp"];
+/// Every transport a tunnel can use (the panel accepts nothing else).
+pub const TRANSPORTS: &[&str] = &["tcp", "tcpmux", "ws", "wss", "quic", "kcp", "cdn", "hq", "h2", "dual"];
+/// Agents older than this run `hq` / `h2` / `dual` as plain TCP (they do not know the names), so
+/// a tunnel with one of them is refused while an agent is older.
+const NEW_TRANSPORTS_FROM: &str = "2.9.0";
+
+fn is_new_transport(tr: &str) -> bool {
+    matches!(tr, "hq" | "h2" | "dual")
+}
+
+/// (TCP, UDP): the protocols the tunnel port of a transport occupies on the listening server.
+/// `dual` listens on both, on the same port number.
+fn port_protos(tr: &str) -> (bool, bool) {
+    match tr {
+        "quic" | "kcp" | "hq" => (false, true),
+        "dual" => (true, true),
+        _ => (true, false),
+    }
+}
+
+/// Default rotation: `dual` first (QUIC under a mask with an HTTP/2 fallback on the same port),
+/// then KCP (balanced, reverse) and the others. A tunnel that is down moves to the next one.
+pub const AUTO_ORDER: &[&str] = &["dual", "kcp", "tcpmux", "quic", "ws", "wss", "tcp"];
 /// a tunnel that is down this long (both servers online) moves to the next transport
 const AUTO_AFTER: i64 = 45;
 
@@ -392,7 +413,7 @@ fn awg_apply_body(list: &[Tunnel], t: &mut Tunnel, a: &Value) -> Result<(), Stri
     t.auto = false;
     t.tcp = vec![];
     if c.wrap {
-        if !["tcp", "tcpmux", "ws", "wss", "quic", "kcp", "cdn"].contains(&t.transport.as_str()) {
+        if !TRANSPORTS.contains(&t.transport.as_str()) {
             t.transport = "tcpmux".into();
         }
         t.udp = vec![format!("{}:{}", c.wrap_port, c.port)];
@@ -403,6 +424,29 @@ fn awg_apply_body(list: &[Tunnel], t: &mut Tunnel, a: &Value) -> Result<(), Stri
         t.udp = vec![];
     }
     t.awg = c;
+    Ok(())
+}
+
+/// `hq` / `h2` / `dual` need an agent that knows them: an older one would treat the name as plain
+/// TCP and the two ends would never agree. (Agents that have not reported yet are let through.)
+fn transport_checks(app: &App, t: &Tunnel) -> Result<(), String> {
+    if !t.enabled || !is_new_transport(&t.transport) {
+        return Ok(());
+    }
+    let names: HashMap<String, String> = servers(app).into_iter().map(|s| (s.id, s.name)).collect();
+    let sn = seen().lock().unwrap();
+    for sid in [&t.entry, &t.exit] {
+        if let Some(x) = sn.get(sid.as_str()) {
+            if !x.version.is_empty() && ver_lt(&x.version, NEW_TRANSPORTS_FROM) {
+                return Err(format!(
+                    "the agent of \"{}\" is v{}: update it first (Update all), it does not know the {} transport",
+                    names.get(sid.as_str()).cloned().unwrap_or_default(),
+                    x.version,
+                    t.transport
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -433,11 +477,11 @@ fn awg_checks(app: &App, list: &[Tunnel], t: &Tunnel) -> Result<(), String> {
                 if o.awg.wrap && o.entry == *sid {
                     used.insert(o.awg.wrap_port, o.name.clone());
                 }
-                if o.awg.wrap && l == sid && (o.transport == "quic" || o.transport == "kcp") {
+                if o.awg.wrap && l == sid && port_protos(&o.transport).1 {
                     used.insert(o.port, o.name.clone());
                 }
             } else {
-                if l == sid && (o.transport == "quic" || o.transport == "kcp") {
+                if l == sid && port_protos(&o.transport).1 {
                     used.insert(o.port, o.name.clone());
                 }
                 if o.entry == *sid {
@@ -476,7 +520,7 @@ async fn awg_conf(State(app): St, h: HeaderMap, Path((id, side)): Path<(String, 
 
 // ------------------------------------------------------------------ smart tunnel (test every transport)
 
-const PROBE_TRANSPORTS: &[&str] = &["tcpmux", "tcp", "ws", "wss", "quic", "kcp"];
+const PROBE_TRANSPORTS: &[&str] = &["tcpmux", "tcp", "ws", "wss", "quic", "kcp", "hq", "h2"];
 /// both directions are measured: the side that listens differs, so the ports differ too
 const PROBE_MODES: &[&str] = &["reverse", "direct"];
 /// a test never runs longer than this (seconds)
@@ -895,7 +939,7 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     if b.get("transport").is_some() {
         let tr = s("transport");
-        t.transport = if ["tcp", "tcpmux", "ws", "wss", "quic", "kcp", "cdn"].contains(&tr.as_str()) { tr } else { "tcpmux".into() };
+        t.transport = if TRANSPORTS.contains(&tr.as_str()) { tr } else { "tcpmux".into() };
     }
     if let Some(p) = b["port"].as_u64() {
         t.port = p.min(65535) as u16;
@@ -931,7 +975,7 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         t.auto = a;
     }
     if b["order"].is_array() || b["order"].is_string() {
-        let o: Vec<String> = clean_list(&b["order"]).into_iter().filter(|x| AUTO_ORDER.contains(&x.as_str())).collect();
+        let o: Vec<String> = clean_list(&b["order"]).into_iter().filter(|x| AUTO_ORDER.contains(&x.as_str()) || x == "hq" || x == "h2").collect();
         t.order = o;
     }
     if t.name.is_empty() {
@@ -974,6 +1018,9 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if t.entry == t.exit {
         return err(StatusCode::BAD_REQUEST, "the entry and the exit must be two different servers");
     }
+    if let Err(e) = transport_checks(&app, &t) {
+        return err(StatusCode::CONFLICT, &e);
+    }
     if t.kind == "awg" {
         if let Err(e) = awg_checks(&app, &list, &t) {
             return err(StatusCode::CONFLICT, &e);
@@ -995,41 +1042,38 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         return err(StatusCode::BAD_REQUEST, "add at least one TCP or UDP port to forward");
     }
     // Ports each server must listen on, per protocol: the tunnel port on the listening side
-    // (UDP for quic / kcp, TCP for the rest) and the forwarded ports on the entry. Two enabled
+    // (UDP for quic / kcp / hq, TCP for the rest, both for dual) and the forwarded ports on the entry. Two enabled
     // tunnels may not need the same port of the same protocol on the same server.
-    let is_udp_tr = |tr: &str| tr == "quic" || tr == "kcp";
     let listener = if t.mode == "direct" { t.exit.clone() } else { t.entry.clone() };
     let mine_tcp: Vec<u16> = parse_ports(&t.tcp).into_iter().map(|p| p.0).collect();
     let mine_udp: Vec<u16> = parse_ports(&t.udp).into_iter().map(|p| p.0).collect();
-    let my_udp_tr = is_udp_tr(&t.transport);
+    let my_pr = port_protos(&t.transport);
+    // does a tunnel port (of a transport with these protocols) hit one of these forwarded ports?
+    let hits = |pr: (bool, bool), port: u16, tcp: &[u16], udp: &[u16]| (pr.0 && tcp.contains(&port)) || (pr.1 && udp.contains(&port));
     if listener == t.entry {
-        let clash = if my_udp_tr { mine_udp.contains(&t.port) } else { mine_tcp.contains(&t.port) };
-        if clash {
-            return err(StatusCode::BAD_REQUEST, if my_udp_tr { "the tunnel port is also in the forwarded UDP ports" } else { "the tunnel port is also in the forwarded TCP ports" });
+        if my_pr.0 && mine_tcp.contains(&t.port) {
+            return err(StatusCode::BAD_REQUEST, "the tunnel port is also in the forwarded TCP ports");
+        }
+        if my_pr.1 && mine_udp.contains(&t.port) {
+            return err(StatusCode::BAD_REQUEST, "the tunnel port is also in the forwarded UDP ports");
         }
     }
     for o in list.iter().filter(|o| o.id != t.id && o.enabled && !(o.kind == "awg" && !o.awg.wrap)) {
         let o_listener: String = if o.mode == "direct" { o.exit.clone() } else { o.entry.clone() };
-        let o_udp_tr = is_udp_tr(&o.transport);
+        let o_pr = port_protos(&o.transport);
         let o_tcp: Vec<u16> = parse_ports(&o.tcp).into_iter().map(|p| p.0).collect();
         let o_udp: Vec<u16> = parse_ports(&o.udp).into_iter().map(|p| p.0).collect();
-        // tunnel port against the tunnel port of the other one
-        if o_listener == listener && o_udp_tr == my_udp_tr && o.port == t.port {
+        // tunnel port against the tunnel port of the other one (a protocol both use)
+        if o_listener == listener && ((my_pr.0 && o_pr.0) || (my_pr.1 && o_pr.1)) && o.port == t.port {
             return err(StatusCode::CONFLICT, &format!("port {} is already used by the tunnel \"{}\"", t.port, o.name));
         }
         // my tunnel port against the ports the other one opens on its entry
-        if o.entry == listener {
-            let used = if my_udp_tr { &o_udp } else { &o_tcp };
-            if used.contains(&t.port) {
-                return err(StatusCode::CONFLICT, &format!("port {} is already used by the tunnel \"{}\"", t.port, o.name));
-            }
+        if o.entry == listener && hits(my_pr, t.port, &o_tcp, &o_udp) {
+            return err(StatusCode::CONFLICT, &format!("port {} is already used by the tunnel \"{}\"", t.port, o.name));
         }
         // the tunnel port of the other one against the ports I open on my entry
-        if t.entry == o_listener {
-            let mine = if o_udp_tr { &mine_udp } else { &mine_tcp };
-            if mine.contains(&o.port) {
-                return err(StatusCode::CONFLICT, &format!("port {} is already used by the tunnel \"{}\"", o.port, o.name));
-            }
+        if t.entry == o_listener && hits(o_pr, o.port, &mine_tcp, &mine_udp) {
+            return err(StatusCode::CONFLICT, &format!("port {} is already used by the tunnel \"{}\"", o.port, o.name));
         }
         // forwarded ports against forwarded ports on the same entry
         if o.entry == t.entry {

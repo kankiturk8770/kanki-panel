@@ -31,9 +31,15 @@ pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
             continue;
         }
         if s.listens() && s.port > 0 {
-            // quic and kcp run over UDP
-            let proto = if s.transport == "quic" || s.transport == "kcp" { "udp" } else { "tcp" };
-            want.push(format!("{}/{}", s.port, proto));
+            // quic, kcp and hq run over UDP; dual listens on UDP and TCP of the same number
+            let protos: &[&str] = match s.transport.as_str() {
+                "quic" | "kcp" | "hq" => &["udp"],
+                "dual" => &["tcp", "udp"],
+                _ => &["tcp"],
+            };
+            for proto in protos {
+                want.push(format!("{}/{}", s.port, proto));
+            }
         }
         if s.role == "entry" {
             for (a, _) in parse_ports(&s.tcp) {
@@ -186,5 +192,200 @@ pub async fn run(version: &str) {
             }
         }
         tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+}
+
+// ------------------------------------------------------------------ standalone mode (no panel)
+
+/// Reads the tunnel descriptions of a standalone run: one `Spec` object or a list of them. Gives
+/// every tunnel without an id one (`t1`, `t2`, …) and refuses descriptions that cannot work.
+pub fn parse_spec_file(text: &str) -> Result<Vec<Spec>, String> {
+    let mut specs: Vec<Spec> = match serde_json::from_str::<Vec<Spec>>(text) {
+        Ok(v) => v,
+        Err(_) => vec![serde_json::from_str::<Spec>(text).map_err(|e| format!("the file is not a tunnel description: {}", e))?],
+    };
+    if specs.is_empty() {
+        return Err("the file has no tunnel".into());
+    }
+    for (i, s) in specs.iter_mut().enumerate() {
+        if s.id.trim().is_empty() {
+            s.id = format!("t{}", i + 1);
+        }
+        if s.name.trim().is_empty() {
+            s.name = s.id.clone();
+        }
+        if s.mode.is_empty() {
+            s.mode = "reverse".into();
+        }
+        if s.role != "entry" && s.role != "exit" {
+            return Err(format!("tunnel {}: \"role\" must be \"entry\" (the side users connect to) or \"exit\" (the side that reaches the targets)", s.id));
+        }
+        if s.mode != "reverse" && s.mode != "direct" {
+            return Err(format!("tunnel {}: \"mode\" must be \"reverse\" or \"direct\"", s.id));
+        }
+        if !super::panel::TRANSPORTS.contains(&s.transport.as_str()) {
+            return Err(format!("tunnel {}: unknown transport \"{}\" (use one of: {})", s.id, s.transport, super::panel::TRANSPORTS.join(", ")));
+        }
+        if s.token.len() < 16 {
+            return Err(format!("tunnel {}: \"token\" is the shared secret of both ends; use at least 16 random characters", s.id));
+        }
+        if s.listens() && s.port == 0 {
+            return Err(format!("tunnel {}: this side listens, so \"port\" is required", s.id));
+        }
+        if !s.listens() && s.remote.trim().is_empty() {
+            return Err(format!("tunnel {}: this side dials, so \"remote\" (host:port of the other side) is required", s.id));
+        }
+        if s.role == "entry" && parse_ports(&s.tcp).is_empty() && parse_ports(&s.udp).is_empty() && !s.probe {
+            return Err(format!("tunnel {}: the entry needs at least one port in \"tcp\" or \"udp\" to carry", s.id));
+        }
+        if s.path.is_empty() {
+            s.path = "/".into();
+        }
+    }
+    let mut ids = HashSet::new();
+    for s in &specs {
+        if !ids.insert(s.id.clone()) {
+            return Err(format!("two tunnels have the id \"{}\"", s.id));
+        }
+    }
+    Ok(specs)
+}
+
+/// What a person has to open in the firewall for these tunnels, one "port/proto" per item.
+pub fn firewall_list(specs: &[Spec]) -> Vec<String> {
+    let mut v = vec![];
+    for s in specs {
+        if s.listens() && s.port > 0 {
+            let protos: &[&str] = match s.transport.as_str() {
+                "quic" | "kcp" | "hq" => &["udp"],
+                "dual" => &["tcp", "udp"],
+                _ => &["tcp"],
+            };
+            for p in protos {
+                v.push(format!("{}/{}", s.port, p));
+            }
+        }
+        if s.role == "entry" {
+            for (a, _) in parse_ports(&s.tcp) {
+                v.push(format!("{}/tcp", a));
+            }
+            for (a, _) in parse_ports(&s.udp) {
+                v.push(format!("{}/udp", a));
+            }
+        }
+    }
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// `kanki-panel tunnel-run <file.json>`: runs the tunnels of the file on this machine, with no panel
+/// and no database. Put the entry description on the first server (Node A) and the exit description
+/// on the second (Node B). Ctrl-C stops it.
+pub async fn run_file(path: &str) {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("cannot read {}: {}", path, e);
+            std::process::exit(1);
+        }
+    };
+    let specs = match parse_spec_file(&text) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{}: {}", path, e);
+            std::process::exit(1);
+        }
+    };
+    eprintln!("kanki tunnel: {} tunnel(s) from {}", specs.len(), path);
+    eprintln!("open in the firewall of this server: {}", firewall_list(&specs).join(" "));
+    let mgr = Manager::default();
+    mgr.apply(specs).await;
+    let mut last = String::new();
+    loop {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                eprintln!("stopping");
+                return;
+            }
+            _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+        }
+        for s in mgr.statuses().await {
+            let line = format!(
+                "{} [{}] links {}/{} rtt {} ms, in {} B, out {} B, streams {}{}",
+                s.id,
+                s.transport,
+                s.links,
+                s.want,
+                s.rtt_ms,
+                s.rx_bytes,
+                s.tx_bytes,
+                s.streams,
+                if s.error.is_empty() { String::new() } else { format!(" · last error: {}", s.error) }
+            );
+            // print when something changed, plus a reminder every minute
+            if line != last {
+                eprintln!("{}", line);
+                last = line;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod standalone_tests {
+    use super::*;
+
+    const GOOD: &str = r#"{"role":"entry","mode":"direct","transport":"dual","remote":"203.0.113.5:443","token":"0123456789abcdef0123","tcp":["2222:22"]}"#;
+
+    #[test]
+    fn one_object_or_a_list() {
+        let one = parse_spec_file(GOOD).unwrap();
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].id, "t1");
+        assert_eq!(one[0].path, "/");
+        let two = parse_spec_file(&format!("[{},{}]", GOOD.replace("2222:22", "2223:22"), GOOD.replace("\"dual\"", "\"hq\"").replace("2222:22", "2224:22"))).unwrap();
+        assert_eq!(two.len(), 2);
+        assert_eq!(two[1].id, "t2");
+    }
+
+    #[test]
+    fn bad_descriptions_are_refused_with_a_reason() {
+        let bad_role = GOOD.replace("entry", "client");
+        assert!(parse_spec_file(&bad_role).unwrap_err().contains("role"));
+        let bad_tr = GOOD.replace("dual", "carrier-pigeon");
+        assert!(parse_spec_file(&bad_tr).unwrap_err().contains("unknown transport"));
+        let short = GOOD.replace("0123456789abcdef0123", "short");
+        assert!(parse_spec_file(&short).unwrap_err().contains("token"));
+        let no_remote = GOOD.replace("203.0.113.5:443", "");
+        assert!(parse_spec_file(&no_remote).unwrap_err().contains("remote"));
+        let no_ports = GOOD.replace(r#","tcp":["2222:22"]"#, "");
+        assert!(parse_spec_file(&no_ports).unwrap_err().contains("at least one port"));
+        assert!(parse_spec_file("[]").is_err());
+        assert!(parse_spec_file("not json").is_err());
+        let dup = format!("[{},{}]", GOOD.replace("{", "{\"id\":\"a\","), GOOD.replace("{", "{\"id\":\"a\","));
+        assert!(parse_spec_file(&dup).unwrap_err().contains("two tunnels"));
+    }
+
+    #[test]
+    fn shipped_examples_are_valid() {
+        for text in [
+            include_str!("../../docs/examples/node-a-entry.json"),
+            include_str!("../../docs/examples/node-b-exit.json"),
+            include_str!("../../docs/examples/node-a-entry-reverse.json"),
+            include_str!("../../docs/examples/node-b-exit-reverse.json"),
+        ] {
+            let s = parse_spec_file(text).expect("an example file must be valid");
+            assert_eq!(s[0].transport, "dual");
+        }
+    }
+
+    #[test]
+    fn firewall_list_has_both_protocols_for_dual() {
+        let exit = r#"{"role":"exit","mode":"direct","transport":"dual","port":443,"token":"0123456789abcdef0123"}"#;
+        let s = parse_spec_file(exit).unwrap();
+        assert_eq!(firewall_list(&s), vec!["443/tcp".to_string(), "443/udp".to_string()]);
+        let entry = parse_spec_file(GOOD).unwrap();
+        assert_eq!(firewall_list(&entry), vec!["2222/tcp".to_string()]);
     }
 }

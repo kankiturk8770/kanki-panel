@@ -112,7 +112,9 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::channel::router())
         .merge(crate::tunnel::panel::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
-        .layer(axum::extract::DefaultBodyLimit::max(128 * 1024 * 1024))
+        // 2 MiB for every route: login, join and hy2/auth are open to strangers and must not make the
+        // server buffer more. Only the backup upload gets a bigger limit (see backup::router).
+        .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024))
         .with_state(app)
 }
 

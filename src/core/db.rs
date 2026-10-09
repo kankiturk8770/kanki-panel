@@ -335,7 +335,8 @@ impl Db {
         if let Some(u) = self.user(id) {
             let up = u.username.to_uppercase();
             if let Some(base) = up.strip_suffix("-TEST") {
-                if base.starts_with("USER") && self.count(&format!("SELECT COUNT(*) FROM users WHERE UPPER(username)='{}'", base.replace('\'', ""))) == 0 {
+                let taken: i64 = self.with(|c| c.query_row("SELECT COUNT(*) FROM users WHERE UPPER(username)=?1", [base], |r| r.get(0)).unwrap_or(1));
+                if base.starts_with("USER") && taken == 0 {
                     let _ = self.exec("UPDATE users SET username=?1 WHERE id=?2", &[&base.to_string(), &id]);
                 }
             }

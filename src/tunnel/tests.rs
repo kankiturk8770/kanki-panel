@@ -211,6 +211,110 @@ async fn tunnel_kcp_reverse() {
     run_case("kcp", "reverse", 41900).await;
 }
 
+// ---------------------------------------------------------------- hq / h2 / dual
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_hq_reverse() {
+    run_case("hq", "reverse", 44000).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_hq_direct_spoof() {
+    run_case_with("hq", "direct", 44100, |s| s.sni = "www.microsoft.com, www.apple.com".into()).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_h2_reverse() {
+    run_case("h2", "reverse", 44200).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_h2_direct_spoof() {
+    run_case_with("h2", "direct", 44300, |s| {
+        s.sni = "www.cloudflare.com".into();
+        s.host = "www.cloudflare.com".into();
+        s.frag = true;
+    })
+    .await;
+}
+
+/// `dual` with both layers available: the masked QUIC path must win, and UDP must not be marked bad.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_dual_uses_hq_when_udp_works() {
+    let base = 44400;
+    run_case("dual", "direct", base).await;
+    assert!(!super::dual::udp_is_bad(&format!("127.0.0.1:{}", base)), "UDP works here, it must not be marked bad");
+}
+
+/// `dual` when UDP does not get through: the server here only has the TCP layer (`h2`), so the
+/// masked QUIC attempt gets no answer and the HTTP/2 layer must carry the tunnel.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_dual_falls_back_to_h2() {
+    let base = 44500;
+    tcp_echo(base + 2).await;
+    udp_echo(base + 4).await;
+    let (es, mut xs) = pair("dual", "direct", base, "token-for-tests-0123456789");
+    // direct mode: the exit listens; give it only the TCP layer
+    xs.transport = "h2".into();
+    let exit = Running::start(xs);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let entry = Running::start(es);
+    assert!(wait_links(&entry, 3).await, "dual did not fall back to h2: {:?}", entry.status().error);
+    assert!(wait_links(&exit, 3).await, "exit got no links: {:?}", exit.status().error);
+    check_tcp(base + 1, 400_000).await;
+    check_udp(base + 3).await;
+    assert!(super::dual::udp_is_bad(&format!("127.0.0.1:{}", base)), "the dead UDP path must be remembered");
+    entry.stop();
+    exit.stop();
+}
+
+/// The `hq` port gives no answer to anything that is not masked with the token's key.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_hq_is_silent_to_scanners() {
+    let base = 44600;
+    tcp_echo(base + 2).await;
+    udp_echo(base + 4).await;
+    let (es, xs) = pair("hq", "reverse", base, "token-for-tests-0123456789");
+    // reverse mode: the entry listens
+    let entry = Running::start(es);
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    let scanner = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    scanner.connect(("127.0.0.1", base)).await.unwrap();
+    // something that looks like a QUIC Initial, an HTTP request, and plain noise
+    let mut quic_like = vec![0u8; 1200];
+    quic_like[0] = 0xc0;
+    quic_like[1..5].copy_from_slice(&[0, 0, 0, 1]);
+    let mut noise = vec![0u8; 300];
+    rand::thread_rng().fill_bytes(&mut noise);
+    let http = b"GET / HTTP/1.1\r\nHost: x\r\n\r\n".to_vec();
+    for pkt in [quic_like, http, noise] {
+        scanner.send(&pkt).await.unwrap();
+        let mut b = vec![0u8; 2048];
+        let got = tokio::time::timeout(Duration::from_millis(600), scanner.recv(&mut b)).await;
+        assert!(!matches!(got, Ok(Ok(_))), "the hq port answered a stranger's packet");
+    }
+    // and the real exit still gets in afterwards
+    let exit = Running::start(xs);
+    assert!(wait_links(&entry, 3).await, "entry got no links after the scan: {:?}", entry.status().error);
+    check_tcp(base + 1, 50_000).await;
+    entry.stop();
+    exit.stop();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tunnel_wrong_token_is_refused_hq_and_h2() {
+    for (tr, base) in [("hq", 44700u16), ("h2", 44750u16)] {
+        let (es, xs) = pair(tr, "reverse", base, "a-different-token-xxxxxxxxx");
+        let entry = Running::start(es);
+        let exit = Running::start(xs);
+        tokio::time::sleep(Duration::from_secs(4)).await;
+        assert_eq!(entry.status().links, 0, "{}: a wrong token must not connect", tr);
+        assert_eq!(exit.status().links, 0, "{}: a wrong token must not connect", tr);
+        entry.stop();
+        exit.stop();
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_wrong_token_is_refused() {
     let base = 41600;
@@ -342,27 +446,30 @@ async fn probe_kcp_obfs() {
     probe_case("kcp", 42300).await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn probe_hq() {
+    probe_case("hq", 44800).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn probe_h2() {
+    probe_case("h2", 44900).await;
+}
+
 #[test]
 fn obfs_roundtrip() {
-    // the obfuscation must survive any payload and hide the original bytes
-    let key = {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        h.update(b"kanki-obfs|");
-        h.update(b"the-token");
-        let out: [u8; 32] = h.finalize().into();
-        out
-    };
-    for len in [1usize, 24, 200, 1400] {
+    // the obfuscation must survive any payload, hide the original bytes and refuse another secret
+    let m = super::salamander::Mask::new("the-token");
+    for len in [1usize, 24, 200, 1350] {
         let data: Vec<u8> = (0..len).map(|i| (i * 7) as u8).collect();
-        let wrapped = super::obfs::test_wrap(&key, &data);
+        let mut wrapped = vec![];
+        m.seal(&data, &mut wrapped);
         assert!(wrapped != data, "wrapped must differ from plaintext");
-        assert!(wrapped.len() > data.len(), "wrapped carries nonce + pad");
-        let back = super::obfs::test_unwrap(&key, &wrapped).expect("unwrap");
-        assert_eq!(back, data, "obfs must round-trip");
-        // a wrong key must not produce the original
-        let bad = [9u8; 32];
-        assert!(super::obfs::test_unwrap(&bad, &wrapped).map(|x| x == data).unwrap_or(false) == false);
+        assert!(wrapped.len() > data.len(), "wrapped carries salt + check + pad length");
+        let mut other = wrapped.clone();
+        assert!(super::salamander::Mask::new("another-token").open(&mut other).is_none(), "another secret must not open it");
+        let (s, e) = m.open(&mut wrapped).expect("unwrap");
+        assert_eq!(&wrapped[s..e], &data[..], "obfs must round-trip");
     }
 }
 

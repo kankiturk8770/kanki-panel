@@ -61,9 +61,10 @@ download_bin(){
   say "URL: $base/kanki-panel"
   curl -fL --retry 3 -o /tmp/kanki-panel "$base/kanki-panel" \
     || die "Download failed. The repo must be public and the GitHub Actions build must have succeeded."
-  if curl -fsL "$base/kanki-panel.sha256" -o /tmp/kanki-panel.sha256; then
-    (cd /tmp && sha256sum -c kanki-panel.sha256 >/dev/null) || die "Checksum mismatch, aborting"
-  fi
+  # no checksum file = no installation (a missing file must not silently skip the check)
+  curl -fsL --retry 3 "$base/kanki-panel.sha256" -o /tmp/kanki-panel.sha256 \
+    || die "Could not download kanki-panel.sha256, aborting (the binary was not verified)"
+  (cd /tmp && sha256sum -c kanki-panel.sha256 >/dev/null) || die "Checksum mismatch, aborting"
   install -m 755 /tmp/kanki-panel "$BIN"
   # write to a temp file and rename: the running script keeps reading its old copy
   # (writing over it in place made bash read the new text mid-run: "syntax error near ')'")

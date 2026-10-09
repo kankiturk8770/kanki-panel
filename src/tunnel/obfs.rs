@@ -1,86 +1,53 @@
 //! UDP obfuscation for KCP, so nothing on the wire looks like KCP.
 //!
 //! KCP's own 24-byte header is sent in the clear, which lets deep packet inspection recognise
-//! "this is KCP" even though the payload is encrypted. To hide it, every UDP datagram is wrapped:
+//! "this is KCP" even though the payload is encrypted. To hide it, every UDP datagram is wrapped
+//! with the same mask the `hq` transport uses (see `salamander.rs`):
 //!
-//!   [ 8-byte random nonce ][ ChaCha20( 1-byte pad-len | pad | kcp-datagram ) ]
+//!   [ 8-byte random salt ][ mask( 4-byte check | pad length | random pad | kcp datagram ) ]
 //!
 //! The key comes from the tunnel token, so only the two ends can unwrap it; everyone else sees a
-//! short random-looking UDP datagram with a varying length. We do this with a relay: KCP talks to
-//! a private loopback socket, and this relay carries the bytes to the real peer, wrapping on the
-//! way out and unwrapping on the way in. KCP and quinn stay unchanged.
+//! short random-looking UDP datagram with a varying length, and a datagram that does not unwrap
+//! is dropped without any answer. We do this with a relay: KCP talks to a private loopback socket,
+//! and this relay carries the bytes to the real peer, wrapping on the way out and unwrapping on
+//! the way in. KCP and quinn stay unchanged.
+//!
+//! Both relays stop their tasks when they are dropped (a link that ends must not leave sockets and
+//! tasks behind), and the server relay keeps a bounded table of peers that is cleaned up when a
+//! peer goes quiet.
 
 use super::link::Res;
-use chacha20::cipher::{KeyIvInit, StreamCipher};
-use chacha20::ChaCha20;
-use rand::RngCore;
-use sha2::{Digest, Sha256};
+use super::salamander::Mask;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
-const NONCE: usize = 8;
-const MAX_PAD: usize = 32;
-
-fn key_of(token: &str) -> [u8; 32] {
-    let mut h = Sha256::new();
-    h.update(b"kanki-obfs|");
-    h.update(token.as_bytes());
-    h.finalize().into()
-}
-
-/// Wraps one KCP datagram into an obfuscated datagram.
-fn wrap(key: &[u8; 32], data: &[u8]) -> Vec<u8> {
-    let mut rng = rand::thread_rng();
-    let mut nonce = [0u8; NONCE];
-    rng.fill_bytes(&mut nonce);
-    let pad = (rng.next_u32() as usize) % (MAX_PAD + 1);
-    let mut body = Vec::with_capacity(1 + pad + data.len());
-    body.push(pad as u8);
-    body.resize(1 + pad, 0);
-    rng.fill_bytes(&mut body[1..1 + pad]);
-    body.extend_from_slice(data);
-    // ChaCha20 nonce is 12 bytes: our 8 random bytes + 4 zero bytes
-    let mut n12 = [0u8; 12];
-    n12[..NONCE].copy_from_slice(&nonce);
-    let mut c = ChaCha20::new(key.into(), (&n12).into());
-    c.apply_keystream(&mut body);
-    let mut out = Vec::with_capacity(NONCE + body.len());
-    out.extend_from_slice(&nonce);
-    out.extend_from_slice(&body);
-    out
-}
-
-/// Unwraps an obfuscated datagram back to the KCP datagram. Returns None if it is too short or the
-/// padding length is impossible (a stray/scan packet).
-fn unwrap(key: &[u8; 32], pkt: &[u8]) -> Option<Vec<u8>> {
-    if pkt.len() < NONCE + 1 {
-        return None;
-    }
-    let mut n12 = [0u8; 12];
-    n12[..NONCE].copy_from_slice(&pkt[..NONCE]);
-    let mut body = pkt[NONCE..].to_vec();
-    let mut c = ChaCha20::new(key.into(), (&n12).into());
-    c.apply_keystream(&mut body);
-    let pad = body[0] as usize;
-    if 1 + pad > body.len() {
-        return None;
-    }
-    Some(body[1 + pad..].to_vec())
-}
+/// most clients one server relay serves at the same time
+const MAX_PEERS: usize = 1024;
+/// a client that sent nothing for this long is forgotten
+const PEER_IDLE: Duration = Duration::from_secs(90);
 
 /// Client side: binds a private loopback socket for KCP to dial, and relays to `remote` with
-/// obfuscation. Returns the loopback address KCP should connect to. The relay lives until the
-/// returned guard is dropped (we leak it for the life of the link by keeping it in the guard).
+/// obfuscation. `local` is the loopback address KCP should connect to. The relay lives until this
+/// guard is dropped.
 pub struct ClientObfs {
     pub local: SocketAddr,
-    _task: tokio::task::JoinHandle<()>,
+    tasks: Vec<JoinHandle<()>>,
+}
+
+impl Drop for ClientObfs {
+    fn drop(&mut self) {
+        for t in &self.tasks {
+            t.abort();
+        }
+    }
 }
 
 pub async fn client(remote: SocketAddr, token: &str) -> Res<ClientObfs> {
-    let key = key_of(token);
+    let mask = Arc::new(Mask::new(token));
     // socket that talks (obfuscated) to the real peer
     let bind: SocketAddr = if remote.is_ipv6() { "[::]:0".parse()? } else { "0.0.0.0:0".parse()? };
     let outer = Arc::new(UdpSocket::bind(bind).await?);
@@ -90,29 +57,46 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<ClientObfs> {
     let local = inner.local_addr()?;
     // KCP's loopback source address, learned from its first packet; shared with the inbound task
     let kcp_addr: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
-    // KCP -> wrap -> peer
-    let (inner1, outer1, ka1) = (inner.clone(), outer.clone(), kcp_addr.clone());
+    // KCP -> mask -> peer
+    let (inner1, outer1, ka1, mask1) = (inner.clone(), outer.clone(), kcp_addr.clone(), mask.clone());
     let out_task = tokio::spawn(async move {
         let mut a = vec![0u8; 65535];
+        let mut w: Vec<u8> = Vec::with_capacity(2048);
         loop {
             let Ok((n, from)) = inner1.recv_from(&mut a).await else { break };
-            *ka1.lock().await = Some(from);
-            let _ = outer1.send(&wrap(&key, &a[..n])).await;
+            *ka1.lock().unwrap() = Some(from);
+            w.clear();
+            mask1.seal(&a[..n], &mut w);
+            let _ = outer1.send(&w).await;
         }
     });
-    // peer -> unwrap -> KCP
-    let task = tokio::spawn(async move {
+    // peer -> unmask -> KCP
+    let in_task = tokio::spawn(async move {
         let mut b = vec![0u8; 65535];
         loop {
-            let Ok(n) = outer.recv(&mut b).await else { break };
-            let dst = *kcp_addr.lock().await;
-            if let (Some(dst), Some(data)) = (dst, unwrap(&key, &b[..n])) {
-                let _ = inner.send_to(&data, dst).await;
+            let n = match outer.recv(&mut b).await {
+                Ok(n) => n,
+                // an ICMP "port unreachable" from a server that is not up yet: keep waiting
+                Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => continue,
+                Err(_) => break,
+            };
+            let dst = *kcp_addr.lock().unwrap();
+            if let Some(dst) = dst {
+                if let Some((s, e)) = mask.open(&mut b[..n]) {
+                    let _ = inner.send_to(&b[s..e], dst).await;
+                }
             }
         }
-        out_task.abort();
     });
-    Ok(ClientObfs { local, _task: task })
+    Ok(ClientObfs { local, tasks: vec![out_task, in_task] })
+}
+
+/// One real client as the KCP listener sees it: its own loopback socket, and the task that carries
+/// KCP's answers back to the client.
+struct Peer {
+    sock: Arc<UdpSocket>,
+    last: Instant,
+    pump: JoinHandle<()>,
 }
 
 /// Server side: owns the public UDP socket, unwraps incoming datagrams and forwards them (in the
@@ -120,59 +104,100 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<ClientObfs> {
 /// serves every client on the port, keyed by their address.
 pub struct ServerObfs {
     pub kcp_addr: SocketAddr,
-    _task: tokio::task::JoinHandle<()>,
+    tasks: Vec<JoinHandle<()>>,
+    peers: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+}
+
+impl Drop for ServerObfs {
+    fn drop(&mut self) {
+        for t in &self.tasks {
+            t.abort();
+        }
+        for (_, p) in self.peers.lock().unwrap().drain() {
+            p.pump.abort();
+        }
+    }
+}
+
+/// KCP -> mask -> client, for one client.
+async fn pump(sock: Arc<UdpSocket>, public: Arc<UdpSocket>, mask: Arc<Mask>, to: SocketAddr) {
+    let mut b = vec![0u8; 65535];
+    let mut w: Vec<u8> = Vec::with_capacity(2048);
+    loop {
+        let n = match sock.recv(&mut b).await {
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        w.clear();
+        mask.seal(&b[..n], &mut w);
+        let _ = public.send_to(&w, to).await;
+    }
 }
 
 pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<ServerObfs> {
-    let key = key_of(token);
+    let mask = Arc::new(Mask::new(token));
     let public = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", port)).await?);
     // For each real client we open a private loopback socket toward the KCP listener, so KCP sees
-    // distinct peers. back[kcp_side_local_addr] = real client address.
-    let peers: Arc<Mutex<HashMap<SocketAddr, Arc<UdpSocket>>>> = Arc::new(Mutex::new(HashMap::new()));
-    let task = tokio::spawn(async move {
-        let mut buf = [0u8; 65535];
+    // distinct peers.
+    let peers: Arc<Mutex<HashMap<SocketAddr, Peer>>> = Arc::new(Mutex::new(HashMap::new()));
+
+    let (public1, mask1, peers1) = (public.clone(), mask.clone(), peers.clone());
+    let main_task = tokio::spawn(async move {
+        let mut buf = vec![0u8; 65535];
         loop {
-            let Ok((n, from)) = public.recv_from(&mut buf).await else { break };
-            let Some(data) = unwrap(&key, &buf[..n]) else { continue };
-            // find or create the loopback socket that represents this client to the KCP listener
-            let sock = {
-                let mut g = peers.lock().await;
-                if let Some(s) = g.get(&from) {
-                    s.clone()
-                } else {
-                    let Ok(s) = UdpSocket::bind("127.0.0.1:0").await else { continue };
-                    let s = Arc::new(s);
-                    if s.connect(kcp_local).await.is_err() {
-                        continue;
-                    }
-                    g.insert(from, s.clone());
-                    // pump KCP -> client for this peer
-                    let (public2, key2, from2, s2) = (public.clone(), key, from, s.clone());
-                    tokio::spawn(async move {
-                        let mut b = [0u8; 65535];
-                        loop {
-                            match s2.recv(&mut b).await {
-                                Ok(n) => {
-                                    let _ = public2.send_to(&wrap(&key2, &b[..n]), from2).await;
-                                }
-                                Err(_) => break,
-                            }
-                        }
-                    });
-                    s
+            let (n, from) = match public1.recv_from(&mut buf).await {
+                Ok(x) => x,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    continue;
                 }
             };
-            let _ = sock.send(&data).await;
+            // not ours (a scanner, a probe, noise): no peer, no socket, no answer
+            let Some((s, e)) = mask1.open(&mut buf[..n]) else { continue };
+            let known = {
+                let mut g = peers1.lock().unwrap();
+                let r = g.get_mut(&from).map(|p| {
+                    p.last = Instant::now();
+                    p.sock.clone()
+                });
+                r
+            };
+            let sock = match known {
+                Some(sock) => sock,
+                None => {
+                    let full = peers1.lock().unwrap().len() >= MAX_PEERS;
+                    if full {
+                        continue;
+                    }
+                    let Ok(sock) = UdpSocket::bind("127.0.0.1:0").await else { continue };
+                    if sock.connect(kcp_local).await.is_err() {
+                        continue;
+                    }
+                    let sock = Arc::new(sock);
+                    let pump = tokio::spawn(pump(sock.clone(), public1.clone(), mask1.clone(), from));
+                    peers1.lock().unwrap().insert(from, Peer { sock: sock.clone(), last: Instant::now(), pump });
+                    sock
+                }
+            };
+            let _ = sock.send(&buf[s..e]).await;
         }
     });
-    Ok(ServerObfs { kcp_addr: kcp_local, _task: task })
-}
 
-#[cfg(test)]
-pub fn test_wrap(key: &[u8; 32], data: &[u8]) -> Vec<u8> {
-    wrap(key, data)
-}
-#[cfg(test)]
-pub fn test_unwrap(key: &[u8; 32], pkt: &[u8]) -> Option<Vec<u8>> {
-    unwrap(key, pkt)
+    // forget clients that went quiet (and clients whose pump died)
+    let peers2 = peers.clone();
+    let reaper = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            let mut g = peers2.lock().unwrap();
+            g.retain(|_, p| {
+                let keep = !p.pump.is_finished() && p.last.elapsed() < PEER_IDLE;
+                if !keep {
+                    p.pump.abort();
+                }
+                keep
+            });
+        }
+    });
+
+    Ok(ServerObfs { kcp_addr: kcp_local, tasks: vec![main_task, reaper], peers })
 }

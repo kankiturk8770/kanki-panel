@@ -133,6 +133,10 @@ pub async fn middleware(State(app): St, req: Request, next: Next) -> Response {
     if is_admin_surface(&path) && !ip_allowed(&app, &ip) {
         return (StatusCode::FORBIDDEN, "forbidden").into_response();
     }
+    // the restore upload may be up to 128 MiB: do not read a byte of it for someone who is not signed in
+    if path == "/api/restore" && identify(&app, req.headers()).is_none() {
+        return deny();
+    }
     let audited = path.starts_with("/api/") && method != Method::GET && path != "/api/login" && !path.starts_with("/api/config/");
     let actor = if audited { identify(&app, req.headers()).map(|a| a.0).unwrap_or_else(|| "anonymous".into()) } else { String::new() };
     let res = next.run(req).await;
@@ -182,6 +186,10 @@ fn locked(app: &App, ip: &str) -> bool {
 
 fn fail(app: &App, ip: &str) {
     let mut m = app.login_fails.lock().unwrap();
+    // forget old entries so the table cannot grow without limit (many source addresses)
+    if m.len() > 5000 {
+        m.retain(|_, (_, t)| now() - *t < FAIL_WINDOW);
+    }
     let e = m.entry(ip.to_string()).or_insert((0, now()));
     if now() - e.1 >= FAIL_WINDOW {
         *e = (0, now());
@@ -197,7 +205,13 @@ async fn login(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let u = b["username"].as_str().unwrap_or("").trim().to_string();
     let p = b["password"].as_str().unwrap_or("");
     let stored = admin_pass_hash(&app);
-    let ok = util::ct_eq(&u, &admin_user(&app)) && !stored.is_empty() && util::check_password(&stored, p);
+    // PBKDF2 takes about a tenth of a second of CPU: keep it off the async worker threads
+    let ok = if util::ct_eq(&u, &admin_user(&app)) && !stored.is_empty() {
+        let (st, pw) = (stored.clone(), p.to_string());
+        tokio::task::spawn_blocking(move || util::check_password(&st, &pw)).await.unwrap_or(false)
+    } else {
+        false
+    };
     if !ok {
         fail(&app, &ip);
         log_login(&app, &u, &ip, "password", false);

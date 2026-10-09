@@ -5,7 +5,7 @@ use crate::guard;
 use crate::util::{now, rand_token, stamp};
 use crate::App;
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -27,11 +27,21 @@ const FILES: &[&str] = &[
     "/etc/kanki/tls/privkey.pem",
 ];
 
+/// Creates a directory only the owner can enter. Backups hold password hashes, API keys and the
+/// private keys of the VPN servers, so nothing of them may sit in a folder others can list.
+fn private_dir(path: &str) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir_all(path).map_err(|e| e.to_string())?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())
+}
+
 pub fn db_snapshot(app: &App) -> Option<Vec<u8>> {
-    let path = format!("/tmp/kanki-db-{}.db", rand_token(8));
-    app.db.with(|c| c.execute(&format!("VACUUM INTO '{}'", path), [])).ok()?;
-    let b = std::fs::read(&path).ok();
-    let _ = std::fs::remove_file(&path);
+    let dir = format!("/tmp/kanki-snap-{}", rand_token(12));
+    private_dir(&dir).ok()?;
+    let path = format!("{}/snap.db", dir);
+    let ok = app.db.with(|c| c.execute(&format!("VACUUM INTO '{}'", path), [])).is_ok();
+    let b = if ok { std::fs::read(&path).ok() } else { None };
+    let _ = std::fs::remove_dir_all(&dir);
     b
 }
 
@@ -51,7 +61,8 @@ fn run(cmd: &str, args: &[&str], pass: Option<&str>) -> Result<(), String> {
 
 /// Returns (bytes, file name). Encrypted when a passphrase is given.
 pub fn make_archive(app: &App, pass: &str) -> Result<(Vec<u8>, String), String> {
-    let dir = format!("/tmp/kanki-bk-{}", rand_token(10));
+    let dir = format!("/tmp/kanki-bk-{}", rand_token(12));
+    private_dir(&dir)?;
     std::fs::create_dir_all(format!("{}/files", dir)).map_err(|e| e.to_string())?;
     let res = (|| -> Result<(Vec<u8>, String), String> {
         let db = db_snapshot(app).ok_or("database snapshot failed")?;
@@ -83,7 +94,8 @@ pub fn make_archive(app: &App, pass: &str) -> Result<(Vec<u8>, String), String> 
 
 /// Accepts .kbk (encrypted), .tar.gz, or a raw SQLite file from older versions
 pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<String, String> {
-    let dir = format!("/tmp/kanki-rs-{}", rand_token(10));
+    let dir = format!("/tmp/kanki-rs-{}", rand_token(12));
+    private_dir(&dir)?;
     std::fs::create_dir_all(format!("{}/x", dir)).map_err(|e| e.to_string())?;
     let res = (|| -> Result<String, String> {
         let dbfile: String;
@@ -108,8 +120,20 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<String,
             let x = format!("{}/x", dir);
             run("tar", &["-xzf", &tgz, "-C", &x], None).map_err(|_| "archive is damaged".to_string())?;
             dbfile = format!("{}/kanki.db", x);
-            if full && std::path::Path::new(&format!("{}/files", x)).exists() {
-                run("cp", &["-a", &format!("{}/files/.", x), "/"], None)?;
+            if full {
+                // only the known server files, and only as plain files: a backup (or a file that was
+                // passed off as one) must not be able to write anywhere else on this machine
+                for f in FILES {
+                    let src = format!("{}/files{}", x, f);
+                    let is_plain = std::fs::symlink_metadata(&src).map(|m| m.is_file()).unwrap_or(false);
+                    if !is_plain {
+                        continue;
+                    }
+                    if let Some(parent) = std::path::Path::new(f).parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    std::fs::copy(&src, f).map_err(|e| format!("{}: {}", f, e))?;
+                }
             }
         }
         let head = std::fs::read(&dbfile).map_err(|_| "database missing in backup".to_string())?;
@@ -131,7 +155,8 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<String,
 pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/backup", get(backup_legacy).post(backup_download))
-        .route("/api/restore", post(restore_upload))
+        // a backup file can be big; only a signed-in admin gets that far (see auth::middleware)
+        .route("/api/restore", post(restore_upload).layer(DefaultBodyLimit::max(128 * 1024 * 1024)))
         .route("/api/tgbackup", get(tgb_get).put(tgb_put))
         .route("/api/tgbackup/test", post(tgb_test))
         .route("/api/tgbackup/send", post(tgb_send))

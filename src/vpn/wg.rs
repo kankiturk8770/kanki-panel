@@ -113,8 +113,19 @@ pub fn apply(proto: &str, desired: &[PeerSpec]) -> HashMap<String, PeerStat> {
         if current.contains_key(&p.pubkey) {
             continue;
         }
-        let path = format!("/tmp/kanki-psk-{}", crate::util::rand_token(8));
-        if std::fs::write(&path, &p.psk).is_ok() {
+        // the key file is created for the owner only (0600) and never overwrites an existing file
+        let path = format!("/tmp/kanki-psk-{}", crate::util::rand_token(16));
+        let wrote = {
+            use std::os::unix::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+                .and_then(|mut f| f.write_all(p.psk.as_bytes()))
+                .is_ok()
+        };
+        if wrote {
             let allowed = format!("{}/32", p.ip);
             let _ = run(t, &["set", i, "peer", p.pubkey.as_str(), "preshared-key", path.as_str(), "allowed-ips", allowed.as_str()], None);
             let _ = std::fs::remove_file(&path);

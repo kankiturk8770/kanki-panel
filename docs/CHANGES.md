@@ -1,3 +1,27 @@
+# v2.9.0 — Tunnel transports for hostile networks (hq, h2, dual) + tunnel hardening
+- **`hq`**: QUIC under a Salamander-style mask. Every UDP datagram is `salt(8) | ChaCha20(tag(4) | pad_len | random pad | QUIC datagram)`, keyed from the token: no fixed byte, random sizes, and a datagram with a wrong tag is dropped silently (a scanner gets no answer). QUIC uses BBR, a 1200-byte MTU, 5 s keep-alive and big windows.
+- **`h2`**: WebSocket over HTTP/2 (RFC 8441) over TLS 1.3, with the ALPN, cipher order, HTTP/2 SETTINGS and request headers of Chrome. Four links share one TCP connection; strangers get a normal web page; HTTP/1.1 WebSocket fallback when the server has no RFC 8441.
+- **`dual`**: `hq` first, `h2` when UDP does not work (1.5 s head start, then both race; UDP is remembered as bad for 90 s). The listener serves UDP and TCP on the same port number.
+- **Padded records** on hq / h2 / dual: `[u16 real length][data][random pad]` inside the AEAD.
+- **Standalone mode:** `kanki-panel tunnel-run file.json` runs tunnels without the panel; the file is checked and the ports to open are printed. Examples in `docs/examples/`.
+- Panel: new "Hardest to block" group in the tunnel form, port checks know that `dual` uses TCP and UDP, tunnels with the new transports are refused while an agent is older than 2.9.0, the smart tunnel tests `hq` and `h2` too (16 test ports instead of 12), rotation order starts with `dual`.
+- **Hardening of the existing tunnel code:**
+  - listeners accept in their own tasks; TLS / WebSocket / QUIC handshakes run per connection with a limit (256 half-open, 256 token handshakes), so one slow client cannot hold the door; before, accepting was one connection at a time, so a client that connected and said nothing held the accept loop of `ws` / `wss` / `cdn` for up to 10–20 s each;
+  - WebSocket messages are limited to 1 MiB before the token is proven (the library default is 64 MiB);
+  - **KCP wire format changed** (the KCP mask is now the same one `hq` uses, with a check value and padding): both ends of a KCP tunnel must be updated together (Update all);
+  - the KCP relay frees its sockets and tasks when a link ends and keeps a bounded peer table (before, every link left a pair of tasks and sockets behind).
+- **Audit fixes in the rest of the panel:**
+  - request bodies are limited to 2 MiB everywhere (the restore upload gets 128 MiB), and an unauthenticated `/api/restore` is refused before the body is read;
+  - backup / restore work in private (0700) temporary folders; a restore copies only the known files, as plain files;
+  - the failed-login table is pruned, and the password hash check runs off the async runtime (a burst of logins no longer stalls the panel);
+  - `promote_trial` uses a parameterised query;
+  - Telegram bot: a payment is claimed atomically before it is fulfilled (two taps / two callbacks cannot fulfil it twice), the referral reward is claimed atomically too, and renew / replace actions check that the service belongs to the user;
+  - WireGuard: the pre-shared-key temporary file is created with mode 0600, a random name and `create_new`;
+  - `install.sh`: the checksum file is mandatory; without it the install stops instead of continuing unverified;
+  - release workflow: the tests are built first and must pass before a release is published (`continue-on-error` removed).
+- New tests: hq / h2 / dual end to end (both modes, SNI lists), `dual` falling back to a TCP-only server, silence of the UDP port towards a scanner, wrong tokens, probes for hq and h2, mask unit tests, standalone-file checks.
+- **Not compiled by the author's environment** (no access to crates.io there): run `cargo test tunnel::` before releasing.
+
 # v2.8.6 — Tunnel form tidied, SNI spoof completed
 - **New tunnel form** in six numbered sections: 1 Route (entry ⇄ exit, who connects) · 2 Tunnel type · 3 Transport (grouped: looks like web traffic / encrypted TCP / over UDP / whitelist, each with TLS·SNI·UDP·HTTP tags) · 4 Disguise · 5 Ports · 6 More. Works on phones.
 - **Disguise only shows what the chosen transport can use.** SNI spoof is not a separate protocol: it is the site name shown in the TLS hello, so it exists only for WSS, QUIC and CDN. WS has no TLS (Host header and path only). TCP, TCP Mux and KCP are encrypted from the first byte and have nothing to disguise; the form says so instead of showing empty boxes.

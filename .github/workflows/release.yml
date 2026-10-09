@@ -18,9 +18,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Tunnel tests (a real entry and exit on this machine, TCP and UDP)
-        continue-on-error: true   # a flaky network test must never block the release
-        run: cargo test -- --nocapture --test-threads=4
+      # The tests must be able to stop a release: the binary updates every server by itself, so a
+      # broken tunnel would spread. Compile them first (a compile error is never "flaky"), then run
+      # them; a failed run gets one more try on a single thread because the tests use real sockets.
+      - name: Compile the tests
+        run: cargo test --no-run
+
+      - name: Tests (a real entry and exit on this machine, TCP and UDP)
+        run: cargo test -- --nocapture --test-threads=4 || cargo test -- --nocapture --test-threads=1
 
       - name: Build
         run: cargo build --release

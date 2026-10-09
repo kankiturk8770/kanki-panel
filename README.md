@@ -3,6 +3,13 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 2.9 — tunnel for hostile networks
+- **Three new transports:** `hq` (QUIC under a random per-packet mask, nothing on the wire looks like QUIC, packet sizes hidden), `h2` (WebSocket over HTTP/2 over TLS 1.3 with browser-like ALPN / ciphers / settings, four links per TCP connection, an ordinary web page for strangers) and `dual` (`hq` first, `h2` automatically when UDP does not get through, one port number for both).
+- Records on these transports carry random padding. Scanners get no answer on the UDP port.
+- **Standalone mode, no panel:** `kanki-panel tunnel-run file.json` (examples in `docs/examples/`). See `docs/HQ-TUNNEL.md`.
+- Tunnel listeners are bounded now (limited half-open connections and handshakes, 1 MiB WebSocket messages before the token is proven), and the KCP relay no longer leaks sockets and tasks.
+- **The new transport code has not been compiled by its author's environment**: run `cargo test tunnel::` (the CI does) before relying on it.
+
 ## New in 2.6 — tunnel camouflage
 - **KCP header fully hidden** (ChaCha20 per-datagram wrap with random padding, keyed by the token) — no KCP signature on the wire.
 - **QUIC disguised as HTTP/3** (`h3` ALPN + believable SNI); also fixes QUIC tunnels that would not connect.
@@ -43,11 +50,14 @@ kanki-panel/
 │   │                       admin.rs (system, update, bulk), backup.rs (encrypted backup, Telegram)
 │   ├── vpn/                wg.rs, hy2.rs, sync.rs (node sync + traffic + limits)
 │   ├── tunnel/             Kanki Tunnel: link.rs (transports + crypto), quic.rs (quic/kcp),
+│   │                       hq.rs + salamander.rs (masked QUIC), h2ws.rs (WebSocket over HTTP/2),
+│   │                       dual.rs (hq with h2 fallback), obfs.rs (KCP mask relay),
 │   │                       mux.rs (many streams per link), engine.rs (run tunnels), agent.rs
-│   │                       (tunnel-only server), panel.rs (API + in-panel engine), tests.rs
+│   │                       (tunnel-only server, standalone `tunnel-run`), panel.rs (API + in-panel
+│   │                       engine), tests.rs
 │   └── telegram/           bot.rs (sales bot: plans, payments, trials, referrals, admin panel)
 ├── assets/web/             index.html (admin panel), sub.html (subscription page)
-├── docs/                   INSTALL.md, API.md, CHANGES.md
+├── docs/                   INSTALL.md, API.md, CHANGES.md, HQ-TUNNEL.md, examples/
 └── .github/workflows/      release.yml (builds the binary into Releases "latest")
 ```
 

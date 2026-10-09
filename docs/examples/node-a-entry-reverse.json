@@ -1,0 +1,12 @@
+{
+  "id": "b-dials-a",
+  "name": "Node B dials Node A",
+  "role": "entry",
+  "mode": "reverse",
+  "transport": "dual",
+  "port": 443,
+  "token": "CHANGE-ME-same-secret-on-both-nodes-32+chars",
+  "conns": 4,
+  "tcp": ["8443:443", "2222:22"],
+  "udp": ["51820"]
+}

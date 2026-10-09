@@ -779,7 +779,10 @@ impl Bot {
                     pe.plan = pid;
                     if head == "rpl" {
                         pe.kind = "renew".into();
-                        pe.target = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                        let target: i64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                        // the account in the button must be the buyer's own (or the buyer is an admin)
+                        let mine = self.app.db.user(target).map(|u| u.tg_id == uid || self.admin(uid)).unwrap_or(false);
+                        pe.target = if mine { target } else { 0 };
                     } else if pe.kind.is_empty() {
                         pe.kind = "new".into();
                     }
@@ -811,6 +814,10 @@ impl Bot {
             }
             "rnw" => {
                 let id: i64 = rest.parse().unwrap_or(0);
+                // only the owner (or an admin) renews an account
+                if self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)).is_none() {
+                    return;
+                }
                 self.pend.lock().unwrap().insert(uid, Pending { kind: "renew".into(), target: id, ..Default::default() });
                 return self.plans_menu(chat, mid, &format!("rpl:{{}}:{}", id)).await;
             }
@@ -1002,7 +1009,12 @@ impl Bot {
     async fn fulfill(&self, oid: i64) {
         let Some(o) = self.order(oid) else { return };
         if o.6 == "done" { return; }
-        let _ = self.db().exec("UPDATE orders SET status='done' WHERE id=?1", &[&oid]);
+        // every update runs in its own task, so a double tap on "check payment" runs this twice at the
+        // same time: only the call that really flips the status may deliver the service
+        match self.db().exec("UPDATE orders SET status='done' WHERE id=?1 AND status<>'done'", &[&oid]) {
+            Ok(1) => {}
+            _ => return,
+        }
         let Some(p) = self.plan(o.2) else { return };
         // a buyer who still has a free-trial account gets that same account (USER<n>-TEST -> USER<n>)
         let trial = self.db().users_of_tg(o.1).into_iter().find(|u| u.username.to_uppercase().ends_with("-TEST"));
@@ -1048,7 +1060,10 @@ impl Bot {
             "SELECT ref_by, ref_rewarded FROM bot_users WHERE tg_id=?1", [tg], |r| Ok((r.get(0)?, r.get(1)?))).ok());
         let Some((by, done)) = r else { return };
         if by == 0 || done == 1 { return; }
-        let _ = self.db().exec("UPDATE bot_users SET ref_rewarded=1 WHERE tg_id=?1", &[&tg]);
+        match self.db().exec("UPDATE bot_users SET ref_rewarded=1 WHERE tg_id=?1 AND ref_rewarded=0", &[&tg]) {
+            Ok(1) => {}
+            _ => return,
+        }
         let gb: f64 = self.db().get("ref_gb").parse().unwrap_or(0.0);
         let days: i64 = self.db().get("ref_days").parse().unwrap_or(0);
         if let Some(u) = self.db().users_of_tg(by).first() {
