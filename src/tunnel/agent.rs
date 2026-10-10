@@ -172,7 +172,11 @@ pub async fn run(version: &str) {
             Ok(r) if r.status().is_success() => {
                 fails = 0;
                 if let Ok(v) = r.json::<Value>().await {
-                    if v["update"].as_bool() == Some(true) {
+                    // without a verified panel certificate anyone on the path could answer here,
+                    // so never replace our own (root) binary in INSECURE mode
+                    if v["update"].as_bool() == Some(true) && insecure {
+                        eprintln!("update skipped: INSECURE=1 (panel certificate not verified); update this server by hand");
+                    } else if v["update"].as_bool() == Some(true) {
                         if let Err(e) = update_from_panel(&http, &panel, &id, &token).await {
                             eprintln!("update from the panel failed: {}", e);
                         }

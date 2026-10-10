@@ -1045,6 +1045,10 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     for k in ["target", "sni", "path", "dial", "host"] {
         if b.get(k).is_some() {
             let v = s(k);
+            // these end up in tunnel configs (awg-quick runs them as root): one line, host-like text only
+            if v.chars().any(|c| c.is_control()) || (k == "dial" && !host_ok(&v)) {
+                return err(StatusCode::BAD_REQUEST, &format!("invalid {}", k));
+            }
             match k {
                 "target" => t.target = v,
                 "sni" => t.sni = v,
@@ -1360,7 +1364,7 @@ async fn server_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
         id: format!("t{}", rand_token(7).to_lowercase()),
         name: if name.is_empty() { format!("server-{}", list.len() + 1) } else { name },
         token: rand_token(40),
-        addr: b["addr"].as_str().unwrap_or("").trim().to_string(),
+        addr: { let a = b["addr"].as_str().unwrap_or("").trim(); if !host_ok(a) { return err(StatusCode::BAD_REQUEST, "invalid address"); } a.to_string() },
         created: now(),
         ..Default::default()
     };
@@ -1378,6 +1382,9 @@ async fn server_edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
     let _ = guard!(app, h, "nodes");
     if id == "local" {
         if let Some(a) = b["addr"].as_str() {
+            if !host_ok(a.trim()) {
+                return err(StatusCode::BAD_REQUEST, "invalid address");
+            }
             app.db.set("tun_local_addr", a.trim());
         }
         return Json(json!({ "ok": true })).into_response();
@@ -1390,6 +1397,9 @@ async fn server_edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
         }
     }
     if let Some(a) = b["addr"].as_str() {
+        if !host_ok(a.trim()) {
+            return err(StatusCode::BAD_REQUEST, "invalid address");
+        }
         s.addr = a.trim().to_string();
     }
     let token = if b["new_token"].as_bool().unwrap_or(false) {
@@ -1479,6 +1489,8 @@ async fn agent_binary(State(app): St, Json(b): Json<Value>) -> Response {
 /// panel itself. A machine that is both a node and a tunnel server is updated once (through its node).
 async fn update_all(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "admin");
+    // installs a new binary as root: same session-only rule as /api/update/apply
+    if let Err(e) = crate::auth::check_session(&app, &h) { return e; }
     let latest = crate::admin::latest_version(&app).await.unwrap_or_default();
     let target = if latest.is_empty() { crate::VERSION.to_string() } else { latest.clone() };
     let panel_old = !latest.is_empty() && crate::admin::newer(&latest, crate::VERSION);
@@ -1550,4 +1562,9 @@ async fn update_all(State(app): St, h: HeaderMap) -> Response {
     }
     let covered_names: Vec<String> = srv.iter().filter(|s| covered.contains(&s.id)).map(|s| s.name.clone()).collect();
     Json(json!({ "ok": true, "latest": latest, "panel": panel_msg, "nodes": nodes_out, "agents": flagged, "manual": manual, "also_nodes": covered_names })).into_response()
+}
+
+/// A host, IP, [IPv6] or host:port as typed by the admin; empty means "not set".
+fn host_ok(v: &str) -> bool {
+    v.len() <= 255 && v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-' | '_' | '[' | ']'))
 }

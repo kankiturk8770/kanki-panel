@@ -380,7 +380,9 @@ pub fn render(s: &AwgSpec) -> String {
     allowed.dedup();
     c.push_str(&format!("AllowedIPs = {}\n", allowed.join(", ")));
     if !s.endpoint.is_empty() {
-        c.push_str(&format!("Endpoint = {}\n", s.endpoint));
+        // never let a value add lines to a file whose PostUp/PostDown run as root
+        let ep: String = s.endpoint.chars().filter(|c| !c.is_control()).collect();
+        c.push_str(&format!("Endpoint = {}\n", ep));
     }
     if s.keepalive > 0 {
         c.push_str(&format!("PersistentKeepalive = {}\n", s.keepalive));

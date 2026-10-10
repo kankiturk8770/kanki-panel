@@ -218,7 +218,7 @@ fn file_response(bytes: Vec<u8>, name: &str) -> Response {
 
 /// Old API: plain SQLite file
 async fn backup_legacy(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "backup");
+    let _ = guard!(app, h, "admin"); // full DB incl. the admin api_key: admin scope only
     match db_snapshot(&app) {
         Some(b) => file_response(b, &format!("kanki-backup-{}.db", stamp(now()))),
         None => err(StatusCode::INTERNAL_SERVER_ERROR, "backup failed"),
@@ -226,7 +226,7 @@ async fn backup_legacy(State(app): St, h: HeaderMap) -> Response {
 }
 
 async fn backup_download(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
-    let _ = guard!(app, h, "backup");
+    let _ = guard!(app, h, "admin"); // full DB incl. the admin api_key: admin scope only
     // empty = the panel's own backup passphrase, so a download is never left unencrypted
     let mut pass = b["passphrase"].as_str().unwrap_or("").to_string();
     if pass.is_empty() {
@@ -271,7 +271,7 @@ fn tgb_token(app: &App) -> String {
 }
 
 async fn tgb_get(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "backup");
+    let _ = guard!(app, h, "admin"); // full DB incl. the admin api_key: admin scope only
     let t = app.db.get("tgb_token");
     Json(json!({
         "on": app.db.on("tgb_on"), "token_set": !t.is_empty(), "uses_bot_token": t.is_empty() && !crate::bot::bot_token(&app).is_empty(),

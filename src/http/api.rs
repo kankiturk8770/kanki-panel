@@ -402,6 +402,9 @@ async fn nodes_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respon
     if !addr.starts_with("http://") && !addr.starts_with("https://") {
         return err(StatusCode::BAD_REQUEST, "API address must start with https:// (or http:// for old nodes)");
     }
+    if !node_addr_ok(&addr) {
+        return err(StatusCode::BAD_REQUEST, "API address must be scheme://host[:port] with no path, query or user info");
+    }
     let Some(info) = sync::remote_info(&app, &addr, &token, insecure).await else {
         return err(StatusCode::BAD_GATEWAY, "cannot reach the node (check address / token / firewall / certificate)");
     };
@@ -428,6 +431,9 @@ async fn nodes_edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b
     let ep = b["endpoint"].as_str().map(|s| s.trim().to_string()).unwrap_or(n.endpoint.clone());
     let addr = b["address"].as_str().map(|s| s.trim().trim_end_matches('/').to_string()).filter(|s| !s.is_empty()).unwrap_or(n.address.clone());
     let token = b["token"].as_str().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or(n.token.clone());
+    if addr != n.address && !node_addr_ok(&addr) {
+        return err(StatusCode::BAD_REQUEST, "API address must be scheme://host[:port] with no path, query or user info");
+    }
     let insecure = b["insecure"].as_bool().unwrap_or(n.insecure) as i64;
     let r = app.db.exec(
         "UPDATE nodes SET name=?1, note=?2, accept_all=?3, endpoint_mode=?4, endpoint=?5, address=?6, token=?7, insecure=?8 WHERE id=?9",
@@ -621,6 +627,10 @@ async fn settings_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     if let Some(o) = b.as_object() {
         if let Some(r) = o.get("update_repo").and_then(|v| v.as_str()) {
             let r = r.trim().trim_start_matches("https://github.com/").trim_end_matches('/').trim_end_matches(".git");
+            // the update source decides what runs as root, so changing it needs a login session
+            if r != crate::admin::repo() {
+                if let Err(e) = crate::auth::check_session(&app, &h) { return e; }
+            }
             if r.is_empty() {
                 let _ = std::fs::remove_file("/etc/kanki/repo");
             } else if valid_repo(r) {
@@ -1112,4 +1122,11 @@ async fn agent_update(State(app): St, h: HeaderMap) -> Response {
         }
         Err(e) => Json(json!({"ok": false, "error": e})).into_response(),
     }
+}
+
+/// Node API addresses are only scheme://host[:port]: no path/query/fragment/userinfo that could
+/// turn the panel's "{addr}/agent/info" probe into a request for some other internal URL.
+fn node_addr_ok(a: &str) -> bool {
+    let rest = a.strip_prefix("https://").or_else(|| a.strip_prefix("http://")).unwrap_or("");
+    !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-' | '[' | ']'))
 }
