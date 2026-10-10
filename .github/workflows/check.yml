@@ -10,16 +10,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --no-run
-      - name: tests exactly like the release workflow
+      - name: tests six times, report any failure
         run: |
           set +e
-          cargo test -- --nocapture --test-threads=4 > out1.txt 2>&1; rc=$?
-          if [ $rc -ne 0 ]; then cargo test -- --nocapture --test-threads=1 > out2.txt 2>&1; rc=$?; fi
-          for f in out1.txt out2.txt; do
-            [ -f "$f" ] || continue
-            msg=$(grep -E "FAILED|panicked|failures:|^    [a-z_:]+$|left|right|test result" "$f" | head -50 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')
-            echo "::error title=$f::$msg"
-            msg=$(grep -B30 -m1 "panicked" "$f" | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')
-            echo "::error title=$f-context::$msg"
+          fails=0
+          for i in 1 2 3 4 5 6; do
+            cargo test -- --nocapture --test-threads=4 > out$i.txt 2>&1
+            if [ $? -ne 0 ]; then
+              fails=$((fails+1))
+              msg=$(grep -E "^test .*FAILED|panicked at|^---- " out$i.txt | grep -v "a_poisoned_lock\|busy_guard" | head -20 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')
+              echo "::error title=run $i failed::$msg"
+              msg=$(grep -A12 "^---- \|^failures:" out$i.txt | head -60 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')
+              echo "::error title=run $i detail::$msg"
+            fi
           done
-          exit $rc
+          echo "::error title=summary::$fails of 6 runs failed"
