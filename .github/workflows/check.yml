@@ -1,0 +1,25 @@
+name: check (branch, no release)
+on:
+  push:
+    branches-ignore: [main]
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --no-run
+      - name: tests exactly like the release workflow
+        run: |
+          set +e
+          cargo test -- --nocapture --test-threads=4 > out1.txt 2>&1; rc=$?
+          if [ $rc -ne 0 ]; then cargo test -- --nocapture --test-threads=1 > out2.txt 2>&1; rc=$?; fi
+          for f in out1.txt out2.txt; do
+            [ -f "$f" ] || continue
+            msg=$(grep -E "FAILED|panicked|failures:|^    [a-z_:]+$|left|right|test result" "$f" | head -50 | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')
+            echo "::error title=$f::$msg"
+            msg=$(grep -B30 -m1 "panicked" "$f" | sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g')
+            echo "::error title=$f-context::$msg"
+          done
+          exit $rc
