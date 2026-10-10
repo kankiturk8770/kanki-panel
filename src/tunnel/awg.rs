@@ -9,7 +9,7 @@
 //! quic / kcp). Then the engine carries the UDP and the interface only talks to 127.0.0.1.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -17,6 +17,29 @@ use std::time::{Duration, Instant};
 
 pub const CONF_DIR: &str = "/etc/amnezia/amneziawg";
 const PREFIX: &str = "kawg";
+
+/// Owner names of the kanki jobs that run AmneziaWG interfaces (also their single-instance lock
+/// names, see `instance.rs`). A standalone `tunnel-run` uses "tunnel-run-<hash of its file>".
+pub const OWNER_PANEL: &str = "panel";
+pub const OWNER_AGENT: &str = "tunnel-agent";
+/// first line of every interface file: which job wrote it
+const OWNER_LINE: &str = "# owner: ";
+/// An interface whose owner is not running is left alone this long before another job removes it
+/// or takes it over. Covers a restart or an update of the owner (a few seconds) with a wide margin,
+/// and still frees the UDP port of a job that is gone for good.
+const ORPHAN_GRACE: Duration = Duration::from_secs(90);
+
+static OWNER: OnceLock<String> = OnceLock::new();
+
+/// Which job this process is (set once at start). Every interface file it writes carries this name,
+/// and it only ever brings down or removes interfaces that are its own (or truly abandoned).
+pub fn set_owner(name: &str) {
+    let _ = OWNER.set(name.to_string());
+}
+
+fn owner() -> &'static str {
+    OWNER.get().map(|s| s.as_str()).unwrap_or("kanki")
+}
 
 // ------------------------------------------------------------------ what the panel stores
 
@@ -365,6 +388,58 @@ pub fn render(s: &AwgSpec) -> String {
     c
 }
 
+// ------------------------------------------------------------------ who owns an interface
+
+/// What is written to disk: the owner line, then the config.
+fn file_text(owner: &str, s: &AwgSpec) -> String {
+    format!("{}{}\n{}", OWNER_LINE, owner, render(s))
+}
+
+/// (owner, config without the owner line). Files written before v2.9.8 have no owner line.
+fn split_owner(text: &str) -> (Option<String>, &str) {
+    match text.strip_prefix(OWNER_LINE) {
+        Some(rest) => {
+            let (first, body) = rest.split_once('\n').unwrap_or((rest, ""));
+            let o = first.trim();
+            (if o.is_empty() { None } else { Some(o.to_string()) }, body)
+        }
+        None => (None, text),
+    }
+}
+
+/// Whether this process may touch an interface that has a file on disk.
+#[derive(Debug, Clone, PartialEq)]
+enum Claim {
+    /// ours, or abandoned long enough: manage it (write, bring up, bring down, remove)
+    Ours,
+    /// another kanki job on this machine runs it right now: never touch it
+    Theirs(String),
+    /// its owner is not running: (owner, seconds left) before it becomes ours
+    Orphan(String, u64),
+}
+
+/// The ownership rule. Before v2.9.8 every job removed every `kawg*` interface it did not want
+/// itself, so two jobs on one server (two panels, or the panel and a tunnel agent) tore down each
+/// other's interfaces and brought their own back up, over and over.
+/// * a file with our name is ours;
+/// * a file with no owner (written before v2.9.8) is ours at once when we want it (we take it
+///   over without restarting it); otherwise it is treated as abandoned;
+/// * a file of another job is left alone while that job runs (or while we cannot tell);
+/// * a file whose owner is not running becomes ours after [`ORPHAN_GRACE`], so the UDP port of a
+///   job that is gone for good is still freed.
+fn claim(file_owner: Option<&str>, me: &str, wanted: bool, alive: Option<bool>, orphan_for: Duration) -> Claim {
+    match file_owner {
+        Some(o) if o == me => Claim::Ours,
+        None if wanted => Claim::Ours,
+        Some(o) if alive != Some(false) => Claim::Theirs(o.to_string()),
+        _ if orphan_for >= ORPHAN_GRACE => Claim::Ours,
+        _ => Claim::Orphan(
+            file_owner.unwrap_or("an older kanki-panel").to_string(),
+            (ORPHAN_GRACE - orphan_for).as_secs().max(1),
+        ),
+    }
+}
+
 // ------------------------------------------------------------------ running it
 
 #[derive(Default)]
@@ -375,6 +450,10 @@ struct Shared {
     rtt: HashMap<String, u64>,
     installed: Option<Result<(), String>>,
     since: HashMap<String, u64>,
+    /// interface -> when it was first seen without a running owner
+    orphan_since: HashMap<String, Instant>,
+    /// wanted interfaces this process is not running (another job has them): no stats for them
+    not_ours: HashSet<String>,
 }
 
 fn shared() -> &'static Mutex<Shared> {
@@ -466,29 +545,96 @@ fn reconcile() {
             }
         }
     };
-    // interfaces that are not wanted any more
+    let me = owner().to_string();
+    let wanted = |i: &str| want.iter().any(|w| w.iface == i);
+
+    // every kawg interface file on this machine and who wrote it
+    let mut files: Vec<(String, Option<String>)> = vec![];
     if let Ok(rd) = std::fs::read_dir(CONF_DIR) {
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
             if let Some(i) = name.strip_suffix(".conf") {
-                if i.starts_with(PREFIX) && !want.iter().any(|w| w.iface == i) {
-                    eprintln!("awg tunnel {}: removing", i);
-                    let _ = sh(&format!("awg-quick down {} 2>&1", i));
-                    let _ = std::fs::remove_file(e.path());
+                if i.starts_with(PREFIX) {
+                    let text = std::fs::read_to_string(e.path()).unwrap_or_default();
+                    files.push((i.to_string(), split_owner(&text).0));
                 }
             }
         }
     }
+
+    // which of them this process may touch (see `claim`)
+    let now = Instant::now();
+    let mut claims: HashMap<String, Claim> = HashMap::new();
+    for (iface, fo) in &files {
+        let alive = match fo.as_deref() {
+            Some(o) if o != me => crate::instance::alive(o),
+            _ => Some(false),
+        };
+        let first = guard().orphan_since.get(iface).cloned();
+        let c = claim(fo.as_deref(), &me, wanted(iface), alive, first.map(|t| now - t).unwrap_or(Duration::ZERO));
+        match &c {
+            Claim::Orphan(o, left) => {
+                if first.is_none() {
+                    eprintln!("awg tunnel {}: its owner ({}) is not running; it is removed or taken over in {} s unless that comes back", iface, o, left);
+                    guard().orphan_since.insert(iface.clone(), now);
+                }
+            }
+            _ => {
+                guard().orphan_since.remove(iface);
+            }
+        }
+        claims.insert(iface.clone(), c);
+    }
+    guard().orphan_since.retain(|k, _| files.iter().any(|(i, _)| i == k));
+
+    // interfaces that are not wanted any more: only our own ones (or abandoned ones) go
+    for (iface, fo) in &files {
+        if wanted(iface) || claims.get(iface) != Some(&Claim::Ours) {
+            continue;
+        }
+        match fo.as_deref() {
+            Some(o) if o == me => eprintln!("awg tunnel {}: removing", iface),
+            Some(o) => eprintln!("awg tunnel {}: removing (its owner {} stopped long ago)", iface, o),
+            None => eprintln!("awg tunnel {}: removing (left over from an older version)", iface),
+        }
+        let _ = sh(&format!("awg-quick down {} 2>&1", iface));
+        let _ = std::fs::remove_file(conf_path(iface));
+    }
+
+    let mut not_ours: HashSet<String> = HashSet::new();
     for w in &want {
         let mut err = String::new();
-        match &tools {
-            Err(e) => err = e.clone(),
-            Ok(()) => {
-                let text = render(w);
+        match (&tools, claims.get(&w.iface)) {
+            (_, Some(Claim::Theirs(o))) => {
+                // another kanki job on this server runs this very interface: leave it alone, or the
+                // two would take it from each other every few seconds
+                not_ours.insert(w.iface.clone());
+                err = format!(
+                    "another kanki job on this server ({}) already runs {}; it is left alone. A tunnel cannot have both \
+                     ends on one server: if this machine is also added as a tunnel server, remove that entry",
+                    o, w.iface
+                );
+            }
+            (_, Some(Claim::Orphan(o, left))) => {
+                not_ours.insert(w.iface.clone());
+                err = format!("{} was run by {}, which is not running now: taking it over in {} s", w.iface, o, left);
+            }
+            (Err(e), _) => err = e.clone(),
+            (Ok(()), _) => {
+                let text = file_text(&me, w);
                 let path = conf_path(&w.iface);
-                let same = std::fs::read_to_string(&path).map(|t| t == text).unwrap_or(false);
+                let old = std::fs::read_to_string(&path).ok();
+                let same = old.as_deref() == Some(text.as_str());
+                // same config, only the owner line differs (a file from before v2.9.8): no restart needed
+                let same_conf = old.as_deref().map(|t| split_owner(t).1 == render(w)).unwrap_or(false);
                 let up = up_now(&w.iface);
-                if !same || !up {
+                if up && !same && same_conf {
+                    if let Err(e) = std::fs::write(&path, &text) {
+                        err = format!("cannot write {}: {}", path, e);
+                    } else {
+                        let _ = sh(&format!("chmod 600 {}", path));
+                    }
+                } else if !same || !up {
                     let _ = std::fs::create_dir_all(CONF_DIR);
                     if up {
                         let _ = sh(&format!("awg-quick down {} 2>&1", w.iface));
@@ -521,6 +667,7 @@ fn reconcile() {
         }
         guard().errors.insert(w.iface.clone(), err);
     }
+    guard().not_ours = not_ours;
 }
 
 /// Called every few seconds with the interfaces this server should have. Work runs on a background
@@ -564,14 +711,16 @@ pub fn set_desired(want: Vec<AwgSpec>) {
 
 /// status of every wanted interface, shaped like the engine's status so the panel treats it alike
 pub fn statuses() -> Vec<super::engine::Status> {
-    let (want, errors, rtt, since) = {
+    let (want, errors, rtt, since, not_ours) = {
         let s = guard();
-        (s.want.clone(), s.errors.clone(), s.rtt.clone(), s.since.clone())
+        (s.want.clone(), s.errors.clone(), s.rtt.clone(), s.since.clone(), s.not_ours.clone())
     };
     let now = crate::util::now();
     let mut out = vec![];
     for w in want {
-        let (_, dump) = sh(&format!("awg show {} dump 2>/dev/null", w.iface));
+        // an interface another job runs: its counters are not this tunnel's, so report it as down
+        // with the reason instead of borrowing that job's handshake
+        let dump = if not_ours.contains(&w.iface) { String::new() } else { sh(&format!("awg show {} dump 2>/dev/null", w.iface)).1 };
         let mut hs = 0i64;
         let (mut rx, mut tx) = (0u64, 0u64);
         for line in dump.lines().skip(1) {
@@ -627,6 +776,71 @@ mod tests {
         let before = guard().want.len();
         guard().stamp = Some(Instant::now());
         assert_eq!(guard().want.len(), before, "guard() recovered the data after poisoning");
+    }
+
+    fn spec() -> AwgSpec {
+        AwgSpec {
+            tid: "t1".into(),
+            iface: "kawgt1".into(),
+            role: "exit".into(),
+            address: "10.88.1.2/30".into(),
+            peer_ip: "10.88.1.1".into(),
+            listen: 51900,
+            mtu: 1380,
+            ..Default::default()
+        }
+    }
+
+    /// The bug of v2.9.7: two jobs on one server (PIDs 499002 and 499035 in the log) each removed the
+    /// other's interface because it was not in their own list. Now a file of another running job is
+    /// never ours, whatever we want.
+    #[test]
+    fn another_running_job_keeps_its_interface() {
+        let any = Duration::from_secs(3600);
+        assert_eq!(claim(Some("tunnel-agent"), "panel", false, Some(true), any), Claim::Theirs("tunnel-agent".into()), "not wanted by us: not removed");
+        assert_eq!(claim(Some("tunnel-agent"), "panel", true, Some(true), any), Claim::Theirs("tunnel-agent".into()), "wanted by both: not taken over");
+        assert_eq!(claim(Some("panel"), "tunnel-agent", false, Some(true), any), Claim::Theirs("panel".into()), "the same the other way round");
+        // cannot tell whether it runs: leave it alone too
+        assert_eq!(claim(Some("tunnel-agent"), "panel", false, None, any), Claim::Theirs("tunnel-agent".into()));
+    }
+
+    #[test]
+    fn own_interfaces_are_managed_as_before() {
+        assert_eq!(claim(Some("panel"), "panel", true, Some(false), Duration::ZERO), Claim::Ours);
+        assert_eq!(claim(Some("panel"), "panel", false, Some(false), Duration::ZERO), Claim::Ours, "a tunnel we deleted goes at once");
+        // a file from before v2.9.8 that we want is taken over at once (and not restarted)
+        assert_eq!(claim(None, "panel", true, Some(false), Duration::ZERO), Claim::Ours);
+    }
+
+    /// The port-leak fix of v2.9.3 must still hold: an interface of a job that is gone for good is
+    /// freed, just not during the few seconds that job needs to restart.
+    #[test]
+    fn an_abandoned_interface_is_freed_after_the_grace_period() {
+        let c = claim(Some("tunnel-agent"), "panel", false, Some(false), Duration::ZERO);
+        assert!(matches!(c, Claim::Orphan(ref o, s) if o == "tunnel-agent" && s == ORPHAN_GRACE.as_secs()), "{:?}", c);
+        assert!(matches!(claim(Some("tunnel-agent"), "panel", false, Some(false), Duration::from_secs(10)), Claim::Orphan(_, 80)), "a restart is waited for");
+        assert_eq!(claim(Some("tunnel-agent"), "panel", false, Some(false), ORPHAN_GRACE), Claim::Ours, "then it is removed");
+        assert_eq!(claim(Some("tunnel-agent"), "panel", true, Some(false), ORPHAN_GRACE), Claim::Ours, "or taken over when we want it");
+        // a leftover of an older version nobody wants
+        assert!(matches!(claim(None, "panel", false, Some(false), Duration::ZERO), Claim::Orphan(_, _)));
+        assert_eq!(claim(None, "panel", false, Some(false), ORPHAN_GRACE), Claim::Ours);
+    }
+
+    #[test]
+    fn the_owner_line_round_trips_and_does_not_change_the_config() {
+        let s = spec();
+        let text = file_text("tunnel-agent", &s);
+        assert!(text.starts_with("# owner: tunnel-agent\n"));
+        let (o, body) = split_owner(&text);
+        assert_eq!(o.as_deref(), Some("tunnel-agent"));
+        assert_eq!(body, render(&s), "the config itself is exactly what the panel offers for download");
+        // a file written before v2.9.8
+        let old = render(&s);
+        let (o, body) = split_owner(&old);
+        assert_eq!(o, None);
+        assert_eq!(body, old);
+        // the owner line is a comment, so awg-quick ignores it
+        assert!(text.lines().next().unwrap().starts_with('#'));
     }
 
     /// The busy flag must be released even if the worker thread unwinds, so the next set_desired is

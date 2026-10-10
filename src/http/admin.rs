@@ -579,6 +579,9 @@ pub async fn self_update(app: &App) -> Result<String, String> {
     }
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
     let v = latest_version(app).await.unwrap_or_default();
+    // a tunnel agent on this same machine runs the same file: move it to the new version too
+    // (only if it is running), so an old copy is never left removing the panel's interfaces
+    let _ = Command::new("systemctl").args(["try-restart", "kanki-tunnel"]).spawn();
     restart_self();
     Ok(v)
 }

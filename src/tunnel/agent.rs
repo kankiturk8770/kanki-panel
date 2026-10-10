@@ -71,6 +71,22 @@ pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
     }
 }
 
+/// Logs a clear warning when another tunnel-running kanki job (`other`) runs on this machine too.
+/// They no longer fight (each keeps to its own AmneziaWG interfaces), but a panel server that is
+/// also registered as a separate tunnel server is almost always a mistake: the panel already runs
+/// the tunnels of its own machine as the server "local", and a tunnel cannot have both ends here.
+pub fn warn_if_sharing_machine(other: &str, other_name: &str) {
+    if crate::instance::alive(other) == Some(true) {
+        eprintln!(
+            "warning: the {} runs on this server too. Each one now keeps to its own AmneziaWG interfaces, \
+             so they no longer remove each other's tunnels. But the panel already runs this server's tunnels \
+             as its own server (\"local\"): if this machine is also added under Tunnels > servers, remove that \
+             entry and uninstall kanki-tunnel here (systemctl disable --now kanki-tunnel).",
+            other_name
+        );
+    }
+}
+
 /// Downloads the panel's own binary (same file, same machine type), checks its sha256, swaps it in
 /// and exits; systemd starts the new one. Used when the panel asks for an update (Update all).
 async fn update_from_panel(http: &reqwest::Client, panel: &str, id: &str, token: &str) -> Result<(), String> {
@@ -117,7 +133,11 @@ pub async fn run(version: &str) {
         eprintln!("{} is missing PANEL_URL / AGENT_ID / AGENT_TOKEN. Copy the command from the panel (Tunnels > Add server).", ENV_FILE);
         std::process::exit(1);
     }
+    // only one tunnel agent per machine; a second copy waits here and touches nothing
+    let _instance = crate::instance::hold_or_wait(super::awg::OWNER_AGENT, "tunnel agent").await;
+    super::awg::set_owner(super::awg::OWNER_AGENT);
     eprintln!("kanki tunnel agent {} for {} (server {})", version, panel, id);
+    warn_if_sharing_machine(super::awg::OWNER_PANEL, "Kanki panel (kanki-panel)");
     let mgr = Arc::new(Manager::default());
     let opened = Mutex::new(HashSet::new());
     let mut last = String::new();
@@ -311,6 +331,16 @@ pub fn check_file(path: &str) {
     }
 }
 
+/// Name of a standalone run: "tunnel-run-" + the first 8 hex digits of the sha256 of the file's
+/// full path, so two different files on one machine are two jobs and the same file is one.
+pub fn run_owner(path: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let full = std::fs::canonicalize(path).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| path.to_string());
+    let mut h = Sha256::new();
+    h.update(full.as_bytes());
+    format!("tunnel-run-{}", &hex::encode(h.finalize())[..8])
+}
+
 /// `kanki-panel tunnel-run <file.json>`: runs the tunnels of the file on this machine, with no panel
 /// and no database. Put the entry description on the first server (Node A) and the exit description
 /// on the second (Node B). Ctrl-C stops it.
@@ -329,6 +359,10 @@ pub async fn run_file(path: &str) {
             std::process::exit(1);
         }
     };
+    // one copy per file; the name also marks the AmneziaWG interfaces this run owns
+    let owner = run_owner(path);
+    let _instance = crate::instance::hold_or_wait(&owner, &format!("tunnel-run of {}", path)).await;
+    super::awg::set_owner(&owner);
     eprintln!("kanki tunnel: {} tunnel(s) from {}", specs.len(), path);
     eprintln!("open in the firewall of this server: {}", firewall_list(&specs).join(" "));
     let mgr = Manager::default();

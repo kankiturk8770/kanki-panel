@@ -2,6 +2,8 @@
 // core: storage + shared helpers
 #[path = "core/db.rs"]
 mod db;
+#[path = "core/instance.rs"]
+mod instance;
 #[path = "core/util.rs"]
 mod util;
 
@@ -147,6 +149,18 @@ async fn main() {
         println!("IP policy cleared and 2FA disabled.");
         return;
     }
+
+    // The panel runs tunnels and AmneziaWG interfaces on this machine (its own tunnel server,
+    // "local"), so only one copy may run: a second one waits here and touches nothing. Two copies
+    // tore down each other's AmneziaWG interfaces every few seconds.
+    let _instance = if cmd == "node" {
+        None
+    } else {
+        let held = instance::hold_or_wait(tunnel::awg::OWNER_PANEL, "panel").await;
+        tunnel::awg::set_owner(tunnel::awg::OWNER_PANEL);
+        tunnel::agent::warn_if_sharing_machine(tunnel::awg::OWNER_AGENT, "Kanki tunnel agent (kanki-tunnel)");
+        held
+    };
 
     let mk = |insecure: bool| {
         reqwest::Client::builder()
