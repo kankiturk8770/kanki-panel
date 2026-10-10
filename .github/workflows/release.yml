@@ -24,6 +24,11 @@ jobs:
       - name: Compile the tests
         run: cargo test --no-run
 
+      # the tests listen on fixed ports 41000-44999; keep Linux from giving those ports to
+      # outgoing connections of other tests running at the same time ("address in use" flakes)
+      - name: Reserve the test ports
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=41000-44999
+
       - name: Tests (a real entry and exit on this machine, TCP and UDP)
         run: cargo test -- --nocapture --test-threads=4 || cargo test -- --nocapture --test-threads=1
 
