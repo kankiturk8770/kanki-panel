@@ -109,6 +109,15 @@ fn is_text_key(k: &str) -> bool {
 }
 
 /// Which admin page a setting belongs to (where to go back after editing it).
+/// Settings a bot admin may change from Telegram. Everything else in the settings table
+/// (api_key, admin_pass, totp_on, ip_allow, bot_admins, tgb_pass, tun_list, ...) stays panel-only.
+fn bot_key_ok(k: &str) -> bool {
+    k.starts_with("btn_") || is_text_key(k) || matches!(k,
+        "trial_gb" | "trial_days" | "trial_on" | "card_number" | "card_holder" | "card_on" | "zp_merchant" | "zp_callback" | "zp_on"
+        | "np_key" | "np_coins" | "np_on" | "wallet_text" | "wallet_on" | "ref_gb" | "ref_days" | "app_link" | "support" | "channel"
+        | "welcome" | "sales_on" | "warn_on" | "backup_on")
+}
+
 fn back_view(k: &str) -> &'static str {
     match k {
         "trial_gb" | "trial_days" => "a:trial",
@@ -727,9 +736,10 @@ impl Bot {
     }
 
     async fn got_receipt(&self, uid: i64, chat: i64, name: &str, method: &str, m: &Value) {
-        let pe = self.pend.lock().unwrap().get(&uid).cloned();
-        let Some(pe) = pe else { return };
-        let Some(p) = self.plan(pe.plan) else { return };
+        let Some((p, pe)) = self.checkout(uid, method) else {
+            self.send(chat, "⚠️ این پلن یا روش پرداخت الان در دسترس نیست.", None).await;
+            return;
+        };
         let photo = m["photo"].as_array().and_then(|a| a.last()).and_then(|x| x["file_id"].as_str()).map(|s| s.to_string());
         let reference = photo.clone().unwrap_or_else(|| m["text"].as_str().unwrap_or("").to_string());
         let (t, u) = self.price(&p, &pe);
@@ -749,15 +759,42 @@ impl Bot {
         }
     }
 
+    /// Re-checks, at order time, what the menus only checked when they were drawn: the plan is still
+    /// active, sales are open (for new purchases), the payment method is on, and the discount code is
+    /// still valid. An expired/used-up code is dropped instead of being applied again.
+    fn checkout(&self, uid: i64, method: &str) -> Option<(Plan, Pending)> {
+        let mut pe = self.pend.lock().unwrap().get(&uid).cloned()?;
+        let db = self.db();
+        let is_new = pe.kind.is_empty() || pe.kind == "new";
+        if (is_new && !db.on("sales_on")) || !db.on(&format!("{}_on", method)) {
+            return None;
+        }
+        let (p, _) = self.plans(true).into_iter().find(|x| x.0.id == pe.plan)?;
+        if !pe.discount.is_empty() {
+            let ok: Option<i64> = db.with(|c| c.query_row(
+                "SELECT percent FROM discounts WHERE code=?1 AND uses_left>0 AND (COALESCE(expires,0)=0 OR expires>?2)",
+                rusqlite::params![&pe.discount, now()], |r| r.get(0)).ok());
+            if ok.is_none() {
+                pe.discount.clear();
+                pe.percent = 0;
+                if let Some(g) = self.pend.lock().unwrap().get_mut(&uid) { g.discount.clear(); g.percent = 0; }
+            }
+        }
+        Some((p, pe))
+    }
+
     fn new_order(&self, uid: i64, p: &Plan, pe: &Pending, method: &str, amount: &str, status: &str, reference: &str) -> i64 {
         let kind = if pe.kind.is_empty() { "new".to_string() } else { pe.kind.clone() };
-        self.db().with(|c| {
+        let id = self.db().with(|c| {
             let _ = c.execute(
                 "INSERT INTO orders(tg_id,plan_id,kind,target,method,amount,status,ref,discount,created) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
                 rusqlite::params![uid, p.id, kind, pe.target, method, amount, status, reference, pe.discount, now()],
             );
             c.last_insert_rowid()
-        })
+        });
+        // one discount code = one order; it has to be entered again for the next one
+        if let Some(g) = self.pend.lock().unwrap().get_mut(&uid) { g.discount.clear(); g.percent = 0; }
+        id
     }
 
     // ============================================================ دکمه‌ها
@@ -1022,9 +1059,10 @@ impl Bot {
     }
 
     async fn pay(&self, uid: i64, chat: i64, mid: i64, method: &str) {
-        let pe = self.pend.lock().unwrap().get(&uid).cloned();
-        let Some(pe) = pe else { return };
-        let Some(p) = self.plan(pe.plan) else { return };
+        let Some((p, pe)) = self.checkout(uid, method) else {
+            self.edit(chat, mid, "⚠️ این پلن یا روش پرداخت الان در دسترس نیست.", Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]))).await;
+            return;
+        };
         let (t, u) = self.price(&p, &pe);
         let db = self.db();
         let home = Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]));
@@ -1065,9 +1103,10 @@ impl Bot {
     }
 
     async fn np_start(&self, uid: i64, chat: i64, mid: i64, coin: &str) {
-        let pe = self.pend.lock().unwrap().get(&uid).cloned();
-        let Some(pe) = pe else { return };
-        let Some(p) = self.plan(pe.plan) else { return };
+        let Some((p, pe)) = self.checkout(uid, "np") else {
+            self.edit(chat, mid, "⚠️ این پلن یا روش پرداخت الان در دسترس نیست.", Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]))).await;
+            return;
+        };
         let (_, usd) = self.price(&p, &pe);
         let oid = self.new_order(uid, &p, &pe, "np", &usd.to_string(), "waiting", "");
         let r = self.http.post("https://api.nowpayments.io/v1/payment").header("x-api-key", self.db().get("np_key")).json(&json!({
@@ -1152,7 +1191,7 @@ impl Bot {
                 let head = if o.3 == "renew" { self.tx("txt_renewed") } else { self.tx("txt_bought") };
                 self.send(o.1, &format!("{}\n\n{}", head, self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b(&self.bt("home"), "home")]]))).await;
                 if !o.9.is_empty() {
-                    let _ = self.db().exec("UPDATE discounts SET uses_left=uses_left-1 WHERE code=?1", &[&o.9]);
+                    let _ = self.db().exec("UPDATE discounts SET uses_left=uses_left-1 WHERE code=?1 AND uses_left>0", &[&o.9]);
                 }
                 self.reward_referrer(o.1).await;
                 let a = self.app.clone();
@@ -1611,6 +1650,9 @@ impl Bot {
         let back = Some(ik(vec![vec![b("⬅️ پنل مدیریت", "adm")]]));
         let set_wait = |w: Wait| { self.waits.lock().unwrap().insert(uid, w); };
         let (head, rest) = d.split_once(':').unwrap_or((d, ""));
+        if matches!(head, "tg" | "set" | "rs") && !bot_key_ok(rest) {
+            return;
+        }
         match head {
             "tg" => {
                 db.set(rest, if db.on(rest) { "0" } else { "1" });
@@ -1761,6 +1803,9 @@ impl Bot {
         let parts: Vec<&str> = text.split_whitespace().collect();
         match w {
             Wait::Set(k) => {
+                if !bot_key_ok(&k) {
+                    return;
+                }
                 let v = text.trim();
                 let retry = |to: String| Some(ik(vec![vec![b("✏️ دوباره", &format!("set:{}", k))], vec![b("⬅️ بازگشت", &to)]]));
                 let to = match k.strip_prefix("btn_") { Some(x) => format!("bv:{}", x), None if is_text_key(&k) => format!("tv:{}", k), None => back_view(&k).to_string() };
@@ -2036,7 +2081,7 @@ impl Bot {
             }
             // بکاپ روزانه برای ادمین‌ها
             if tick % (24 * 60) == 0 && self.db().on("backup_on") {
-                if let Ok((bytes, name)) = make_archive(&self.app, &self.db().get("tgb_pass")) {
+                if let Ok((bytes, name)) = make_archive(&self.app, &crate::backup::backup_pass(&self.app)) {
                     for a in self.admins.clone() {
                         self.send_doc(a, bytes.clone(), &name, "💾 بکاپ خودکار روزانه").await;
                     }

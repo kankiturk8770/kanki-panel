@@ -258,6 +258,8 @@ pub fn load_env(path: &str) -> HashMap<String, String> {
 
 pub fn esc(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&#39;")
+        // braces too: page templates use {{PLACEHOLDERS}}, so escaped text must never contain one
+        .replace('{', "&#123;").replace('}', "&#125;")
 }
 
 /// RFC 3986 percent-encoding (unreserved chars kept)

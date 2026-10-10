@@ -776,7 +776,7 @@ function gbtxt(g){g=+g||0;return g<1?Math.round(g*1024)+' MB':g.toFixed(2)+' GB'
 
 // ---------------------------------------------------------------- Persian digits + Jalali (Shamsi) calendar
 var PD='۰۱۲۳۴۵۶۷۸۹',AD='٠١٢٣٤٥٦٧٨٩';
-function N(x){x=String(x==null?'':x);return S.lang=='fa'?x.replace(/\d/g,function(d){return PD.charAt(+d)}):x}
+function N(x){x=esc(x);return S.lang=='fa'?x.replace(/\d/g,function(d){return PD.charAt(+d)}):x}
 function unN(s){return String(s==null?'':s).replace(/[۰-۹]/g,function(d){return PD.indexOf(d)}).replace(/[٠-٩]/g,function(d){return AD.indexOf(d)})}
 function dv(a,b){return Math.floor(a/b)}
 function g2j(gy,gm,gd){var gdm=[0,31,59,90,120,151,181,212,243,273,304,334],gy2=gm>2?gy+1:gy,days=355666+365*gy+dv(gy2+3,4)-dv(gy2+99,100)+dv(gy2+399,400)+gd+gdm[gm-1],jy=-1595+33*dv(days,12053);
@@ -1156,14 +1156,14 @@ function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bu
  if(!loc&&!n.online)return{lv:2,c:'r',l:'Problem',r:[[2,'Not reachable: check the server, its agent and the firewall']]};
  if(!loc&&n.last_sync&&Date.now()/1000-n.last_sync>180)bump(1,'No contact for more than 3 minutes');
  if(n.sync_state=='mismatch')bump(1,'Some users are not on this server yet (config mismatch): press Sync');
- (i.services||[]).forEach(function(s){if(!s.active)bump(2,t('Service stopped')+': '+s.key+' ('+s.state+')')});
+ (i.services||[]).forEach(function(s){if(!s.active)bump(2,t('Service stopped')+': '+esc(s.key)+' ('+esc(s.state)+')')});
  if(st){var cpu=+st.cpu||0,mem=pc(st.mem_used,st.mem_total),dk=pc(st.disk_used,st.disk_total),sw=pc(st.swap_used,st.swap_total);
   if(cpu>=90)bump(2,t('CPU is full')+' ('+N(Math.round(cpu))+'%)');else if(cpu>=70)bump(1,t('CPU is busy')+' ('+N(Math.round(cpu))+'%)');
   if(mem>=92)bump(2,t('RAM is almost full')+' ('+N(Math.round(mem))+'%)');else if(mem>=80)bump(1,t('RAM is getting full')+' ('+N(Math.round(mem))+'%)');
   if(dk>=95)bump(2,t('Disk is almost full')+' ('+N(Math.round(dk))+'%)');else if(dk>=85)bump(1,t('Disk is getting full')+' ('+N(Math.round(dk))+'%)');
   if(st.swap_total>0&&sw>=50)bump(1,t('Using a lot of swap: the server needs more RAM')+' ('+N(Math.round(sw))+'%)');
  }else if(!loc)bump(0,'Press Update agent to see CPU, RAM and disk of this node');
- var pv=panelVer();if(!loc&&pv&&i.version&&i.version!=pv)bump(1,t('Agent is on an older version')+' (v'+i.version+'): '+t('press Update agent'));
+ var pv=panelVer();if(!loc&&pv&&i.version&&i.version!=pv)bump(1,t('Agent is on an older version')+' (v'+esc(i.version)+'): '+t('press Update agent'));
  if(n.maint)bump(1,'Under maintenance: new users are not sent here');
  return lv==2?{lv:2,c:'r',l:'Problem',r:r}:lv==1?{lv:1,c:'y',l:'Under pressure',r:r}:{lv:0,c:'g',l:'Healthy',r:r}}
 function upTime(s){s=+s||0;var d=Math.floor(s/86400),h=Math.floor(s%86400/3600);return d?N(d)+' '+t('days')+' '+N(h)+' '+t('hours'):N(h)+' '+t('hours')+' '+N(Math.floor(s%3600/60))+' '+t('min')}

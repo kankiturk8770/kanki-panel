@@ -459,6 +459,10 @@ async fn bot_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response
         }
     }
     if let Some(a) = b["admins"].as_str() {
+        // bot admins get backups and user management, so only a login session may change them
+        if a.trim() != app.db.get("bot_admins") {
+            if let Err(e) = crate::auth::check_session(&app, &h) { return e; }
+        }
         app.db.set("bot_admins", a.trim());
     }
     restart_self();
