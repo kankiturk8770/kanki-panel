@@ -212,9 +212,16 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
         let mode = if t.mode == "direct" { "direct" } else { "reverse" };
         // the side that listens is the entry in reverse mode and the exit in direct mode
         let listener = if mode == "reverse" { &t.entry } else { &t.exit };
-        let host = if !t.dial.trim().is_empty() { t.dial.trim().to_string() } else { host_of(app, listener) };
-        // cdn: the dialer goes to the CDN edge (port 443 unless written), not to the origin port
-        let remote = if t.transport == "cdn" { cdn_remote(&t) } else { hostport(&host, t.port) };
+        let listens = sid == listener;
+        // only the dialer uses `remote`. Giving the listener a `remote` (which it never dials) let a
+        // change in the peer's seen address restart its listener for nothing -> the 4-5 s flap.
+        let remote = if listens {
+            String::new()
+        } else {
+            let host = if !t.dial.trim().is_empty() { t.dial.trim().to_string() } else { host_of(app, listener) };
+            // cdn: the dialer goes to the CDN edge (port 443 unless written), not to the origin port
+            if t.transport == "cdn" { cdn_remote(&t) } else { hostport(&host, t.port) }
+        };
         out.push(Spec {
             id: t.id.clone(),
             name: t.name.clone(),
@@ -304,6 +311,33 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
         }
     }
     out
+}
+
+/// The address to remember for a node: keep the real one we already have when a new report arrives
+/// with no usable source IP (empty or loopback), so a node's tunnels are not restarted for nothing.
+fn sticky_ip(prev: &str, fresh: &str) -> String {
+    let bogus = fresh.is_empty() || fresh == "127.0.0.1";
+    let good_prev = !prev.is_empty() && prev != "127.0.0.1";
+    if bogus && good_prev { prev.to_string() } else { fresh.to_string() }
+}
+
+#[cfg(test)]
+mod flap_tests {
+    use super::sticky_ip;
+
+    #[test]
+    fn keeps_a_real_address_through_a_bogus_report() {
+        // first real report sets it
+        assert_eq!(sticky_ip("", "5.5.5.5"), "5.5.5.5");
+        // a report with no X-Forwarded-For (-> 127.0.0.1) must NOT overwrite the real one
+        assert_eq!(sticky_ip("5.5.5.5", "127.0.0.1"), "5.5.5.5");
+        assert_eq!(sticky_ip("5.5.5.5", ""), "5.5.5.5");
+        // a genuinely new real address is taken
+        assert_eq!(sticky_ip("5.5.5.5", "6.6.6.6"), "6.6.6.6");
+        // with nothing good yet, use whatever came (even loopback, for a truly local node)
+        assert_eq!(sticky_ip("", "127.0.0.1"), "127.0.0.1");
+        assert_eq!(sticky_ip("127.0.0.1", "6.6.6.6"), "6.6.6.6");
+    }
 }
 
 // ------------------------------------------------------------------ AmneziaWG link
@@ -1401,11 +1435,13 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         return err(StatusCode::FORBIDDEN, "wrong token");
     }
     let status: Vec<Status> = serde_json::from_value(b["status"].clone()).unwrap_or_default();
-    let ip = util::client_ip(&h);
-    seen().lock().unwrap().insert(
-        id.clone(),
-        Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status },
-    );
+    let fresh_ip = util::client_ip(&h);
+    {
+        let mut sn = seen().lock().unwrap();
+        let prev = sn.get(&id).map(|x| x.ip.clone()).unwrap_or_default();
+        let ip = sticky_ip(&prev, &fresh_ip);
+        sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status });
+    }
     let ver = b["version"].as_str().unwrap_or("");
     let until = app.db.get("tun_update_until").parse::<i64>().unwrap_or(0);
     let update = now() < until && !ver.is_empty() && ver != crate::VERSION;
