@@ -536,6 +536,10 @@ status(){
 uninstall(){
   yes_no "Remove the panel, database and settings?" N || exit 0
   systemctl disable --now kanki-panel kanki-node kanki-tunnel 2>/dev/null || true
+  # Hysteria2 tunnels made by the agent: stop them so their ports are free
+  for u in /etc/systemd/system/kanki-hy2-*.service; do [ -e "$u" ] || continue; n=$(basename "$u" .service)
+    systemctl disable --now "$n" 2>/dev/null || true; [ -f "/etc/kanki/hy2tun/$n-down.sh" ] && sh "/etc/kanki/hy2tun/$n-down.sh" 2>/dev/null; rm -f "$u"; done
+  rm -rf /etc/kanki/hy2tun; systemctl daemon-reload 2>/dev/null || true
   rm -f /etc/systemd/system/kanki-panel.service /etc/systemd/system/kanki-node.service /etc/systemd/system/kanki-tunnel.service /etc/sysctl.d/90-kanki-tunnel.conf "$ENV_DIR/tunnel.env" "$BIN" /usr/local/bin/kanki
   rm -rf /var/lib/kanki "$ENV_DIR"
   systemctl daemon-reload

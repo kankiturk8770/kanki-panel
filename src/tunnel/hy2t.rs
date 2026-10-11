@@ -123,7 +123,9 @@ impl Hy2Spec {
 }
 
 fn short(tid: &str) -> String {
-    tid.chars().filter(|c| c.is_ascii_alphanumeric()).take(8).collect::<String>().to_lowercase()
+    // the whole id (panel ids are 10 characters): two tunnels never share a unit or a TUN name.
+    // 12 at most keeps the TUN name ("khy" + id) inside Linux's 15-character limit.
+    tid.chars().filter(|c| c.is_ascii_alphanumeric()).take(12).collect::<String>().to_lowercase()
 }
 
 pub fn unit_name(tid: &str) -> String {
@@ -423,6 +425,18 @@ fn apply_one(s: &Hy2Spec, bin: &str) -> Result<(), String> {
     let _ = std::fs::create_dir_all(CONF_DIR);
     let u = s.unit();
     let mut changed = false;
+    // routes of the previous settings go before new ones are written (the new unit may have no
+    // stop script any more, or a different list of networks)
+    let down = format!("{}/{}-down.sh", CONF_DIR, u);
+    let new_down = if s.role == "entry" && !s.src_routes.is_empty() { Some(route_script(s, false)) } else { None };
+    if let Ok(old) = std::fs::read_to_string(&down) {
+        if new_down.as_deref() != Some(old.as_str()) {
+            let _ = sh(&format!("sh {} 2>&1", down));
+            let _ = std::fs::remove_file(&down);
+            let _ = std::fs::remove_file(format!("{}/{}-up.sh", CONF_DIR, u));
+            changed = true;
+        }
+    }
     if s.role == "exit" {
         changed |= write_if_changed(&format!("{}/{}.crt", CONF_DIR, u), &s.cert, 0o600)?;
         changed |= write_if_changed(&format!("{}/{}.key", CONF_DIR, u), &s.key, 0o600)?;
@@ -450,6 +464,12 @@ fn apply_one(s: &Hy2Spec, bin: &str) -> Result<(), String> {
 fn remove_unit(u: &str) {
     eprintln!("hy2 tunnel {}: removing", u);
     let _ = sh(&format!("systemctl disable --now -q {}.service 2>&1", u));
+    // stopped for sure (frees the UDP port and the forwarded ports) even if disable failed
+    let _ = sh(&format!("systemctl kill -q {}.service 2>&1; systemctl reset-failed -q {}.service 2>&1", u, u));
+    let down = format!("{}/{}-down.sh", CONF_DIR, u);
+    if std::path::Path::new(&down).exists() {
+        let _ = sh(&format!("sh {} 2>&1", down));
+    }
     let _ = std::fs::remove_file(format!("{}/{}.service", UNIT_DIR, u));
     for ext in [".yaml", ".crt", ".key", "-up.sh", "-down.sh"] {
         let _ = std::fs::remove_file(format!("{}/{}{}", CONF_DIR, u, ext));
@@ -649,7 +669,7 @@ mod tests {
         assert!(c.contains("salamander"));
         assert!(c.contains("listen: 0.0.0.0:8080\n    remote: \"127.0.0.1:80\""));
         assert!(c.contains("udpForwarding:\n  - listen: 0.0.0.0:51820"));
-        assert!(c.contains("name: \"khyabcdef12\""));
+        assert!(c.contains("name: \"khyabcdef1234\""));
         assert!(!c.contains("route:"), "Hysteria must not add routes by itself");
     }
 
@@ -666,7 +686,7 @@ mod tests {
     fn route_script_only_touches_listed_sources() {
         let up = route_script(&spec("entry"), true);
         assert!(up.contains("ip rule add from 10.8.0.0/24 table 21003"));
-        assert!(up.contains("ip route replace default dev khyabcdef12 table 21003"));
+        assert!(up.contains("ip route replace default dev khyabcdef1234 table 21003"));
         let down = route_script(&spec("entry"), false);
         assert!(!down.contains("ip rule add"));
     }
@@ -683,5 +703,45 @@ mod tests {
         assert_eq!(clean_host(" www.bing.com\"; rm "), "www.bing.comrm");
         assert_eq!(clean_url("https://www.bing.com/x"), "https://www.bing.com/");
         assert_eq!(clean_url("http://a.com"), "");
+    }
+}
+
+/// Create -> edit -> delete on a real machine: every port must be free afterwards. Needs root,
+/// the hysteria binary and systemd (or a stand-in); runs only with HY2_LIFE=1.
+#[cfg(test)]
+mod lifecycle {
+    use super::*;
+    fn busy_port(udp: bool, p: u16) -> bool {
+        if udp { std::net::UdpSocket::bind(("0.0.0.0", p)).is_err() } else { std::net::TcpListener::bind(("0.0.0.0", p)).is_err() }
+    }
+    #[test]
+    fn create_then_delete_frees_ports() {
+        if std::env::var("HY2_LIFE").is_err() { return; }
+        let (cert, key, pin) = gen_cert("www.bing.com").unwrap();
+        let base = Hy2Spec { tid: "lifetest01".into(), name: "life".into(), listen: 18555, server: "127.0.0.1:18555".into(), auth: "password1234".into(), obfs: "obfspassword".into(), cert, key, pin, sni: "www.bing.com".into(), fwd_tcp: vec!["18601:22".into()], fwd_udp: vec!["18602:53".into()], n: 9, mtu: 1400, ..Default::default() };
+        let mut exit = base.clone(); exit.role = "exit".into(); exit.stats_port = 61009; exit.stats_secret = "s".into();
+        let mut entry = base.clone(); entry.tid = "lifetest02".into(); entry.role = "entry".into();
+        set_desired(vec![exit.clone(), entry.clone()]);
+        std::thread::sleep(Duration::from_secs(5));
+        println!("errors: {:?}", guard().errors);
+        assert!(busy_port(true, 18555), "exit UDP port is listening");
+        assert!(busy_port(false, 18601), "entry TCP forward is listening");
+        assert!(busy_port(true, 18602), "entry UDP forward is listening");
+        let st = statuses();
+        println!("{:?}", st.iter().map(|s| (s.role.clone(), s.links, s.error.clone())).collect::<Vec<_>>());
+        assert!(st.iter().all(|s| s.links == 1), "both sides report connected");
+        // edit: exit moves to another port -> the old one is freed
+        let mut exit2 = exit.clone(); exit2.listen = 18556; let mut entry2 = entry.clone(); entry2.server = "127.0.0.1:18556".into();
+        set_desired(vec![exit2, entry2]);
+        std::thread::sleep(Duration::from_secs(4));
+        assert!(!busy_port(true, 18555) && busy_port(true, 18556), "port change frees the old port");
+        // delete the tunnel on both servers
+        set_desired(vec![]);
+        std::thread::sleep(Duration::from_secs(3));
+        for (u, p) in [(true, 18556), (false, 18601), (true, 18602), (false, 61009)] {
+            assert!(!busy_port(u, p), "port {} is free after delete", p);
+        }
+        
+        assert!(std::fs::read_dir(UNIT_DIR).map(|d| d.flatten().all(|e| !e.file_name().to_string_lossy().starts_with(PREFIX))).unwrap_or(true), "no unit left");
     }
 }

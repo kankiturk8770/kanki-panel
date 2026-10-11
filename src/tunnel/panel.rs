@@ -592,7 +592,7 @@ async fn awg_conf(State(app): St, h: HeaderMap, Path((id, side)): Path<(String, 
 // ------------------------------------------------------------------ Hysteria2 link
 
 /// Agents from this version on know Hysteria2 links (an older one would run the name as plain TCP).
-const HY2_FROM: &str = "3.1.0";
+const HY2_FROM: &str = "3.1.1";
 
 /// what one side of a Hysteria2 tunnel runs
 fn hy2_spec(app: &App, t: &Tunnel, role: &str) -> Hy2Spec {
@@ -620,7 +620,9 @@ fn hy2_spec(app: &App, t: &Tunnel, role: &str) -> Hy2Spec {
         src_routes: if entry { c.src_routes.clone() } else { vec![] },
         n: c.n,
         mtu: c.mtu,
-        stats_port: if entry { 0 } else { 37000 + c.n as u16 },
+        // 61001..61250: outside Linux's ephemeral range and the 20000-59999 range the installer
+        // picks its random ports from (the VPN Hysteria2 stats port is 30000-39999)
+        stats_port: if entry { 0 } else { 61000 + c.n as u16 },
         // the stats API only listens on 127.0.0.1 of the exit; its secret is derived from the password
         stats_secret: if entry { String::new() } else { format!("s{}", &c.auth[..c.auth.len().min(24)]) },
     }

@@ -1,3 +1,12 @@
+# v3.1.1 — Hysteria2 tunnel: ports are always freed
+- **Deleting (or disabling) a Hysteria2 tunnel frees every port on both servers**, the panel server and tunnel-agent-only servers alike: the tunnel's UDP port, the forwarded TCP / UDP ports and its stats port. The service is stopped, disabled and removed with its files; the routes of the "whole network" mode are taken down. Changing a port frees the old one at once.
+- Every tunnel now has its own service and TUN name made from its whole id (before, two tunnels could share one).
+- The internal stats port moved to 61001–61250, so it can never take the port of the VPN Hysteria2 (30000–39999) or one the installer picks.
+- Editing a tunnel removes the routes of its old networks before the new ones are set.
+- `install.sh` › Uninstall also stops and removes the Hysteria2 tunnels.
+- Hysteria2 tunnels need agents v3.1.1 (Update all).
+- Test: create → change port → delete with the real hysteria binary; every port is free afterwards.
+
 # v3.1.0 — Hysteria2 tunnel between two servers
 - **New tunnel type: ⚡ Hysteria2** (Tunnels › + Tunnel › Tunnel type). The exit runs a Hysteria2 server, the entry a Hysteria2 client: the official `hysteria` binary, each tunnel in its own systemd unit `kanki-hy2-<id>.service`, so the Hysteria2 that serves VPN users is not touched.
 - The panel makes the password, a Salamander obfuscation password (on by default) and a self-signed certificate; the client pins the certificate's SHA-256.
