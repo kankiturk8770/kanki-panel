@@ -447,47 +447,97 @@ fn from_panel(tmp: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Gets the official binary onto this server, trying in turn: GitHub and download.hysteria.network
-/// (a direct download, checked to be a real program), then the panel (which has it, has it cached
-/// from another server, or downloads it itself), then the official installer script.
+/// the official installer (the same `get.hy2.sh` the panel's install.sh uses), saved to a file;
+/// GitHub's copy of the same script when get.hy2.sh cannot be reached
+fn fetch_installer() -> Option<String> {
+    let path = "/tmp/kanki-hy2-install.sh";
+    for url in ["https://get.hy2.sh/", "https://raw.githubusercontent.com/apernet/hysteria/master/scripts/install_server.sh"] {
+        if sh(&format!("curl -fsSL --connect-timeout 10 --max-time 60 -o {} '{}' 2>&1", path, url)).0
+            && std::fs::read_to_string(path).map(|t| t.starts_with("#!") && t.contains("hysteria")).unwrap_or(false)
+        {
+            return Some(path.into());
+        }
+    }
+    let _ = std::fs::remove_file(path);
+    None
+}
+
+/// runs the installer the way a root shell would (it uses tput and $HOME; the agent's service has neither)
+fn run_installer(script: &str, args: &str) -> String {
+    let (_, out) = sh(&format!("TERM=dumb HOME=/root bash {} {} 2>&1", script, args));
+    // its last error line, without colour codes
+    out.lines()
+        .rev()
+        .find(|l| l.contains("error") || l.contains("rror:"))
+        .map(|l| l.chars().filter(|c| !c.is_control()).collect::<String>().replace("[0m", "").replace("[31m", ""))
+        .unwrap_or_default()
+}
+
+/// Gets the official binary onto this server, the same way the panel installs Hysteria2 for users:
+/// 1. the official installer `get.hy2.sh`, exactly like install.sh does;
+/// 2. the same GitHub file that installer downloads (also download.hysteria.network), installed
+///    with the same installer (`--local`): the installer first asks api.hy2.io for the newest
+///    version and gives up when only that site is unreachable, even if GitHub works;
+/// 3. the panel (its own copy, one given by the other server of the tunnel, or one it downloads).
 fn ensure_bin() -> Result<String, String> {
     if let Some(b) = find_bin() {
         return Ok(b);
     }
     eprintln!("hy2 tunnel: installing Hysteria2 ...");
+    let mut why = vec![];
+    let script = fetch_installer();
+    match &script {
+        Some(sc) => {
+            let e = run_installer(sc, "");
+            if let Some(b) = find_bin() {
+                eprintln!("hy2 tunnel: installed with get.hy2.sh");
+                return Ok(b);
+            }
+            why.push(format!("get.hy2.sh: {}", if e.is_empty() { "failed".into() } else { e }));
+        }
+        None => why.push("get.hy2.sh: unreachable".into()),
+    }
     let tmp = "/usr/local/bin/.hysteria.kanki-new";
     let _ = std::fs::create_dir_all("/usr/local/bin");
-    let mut why = vec![];
-    // a copy the panel server keeps for its agents (the panel itself runs this code too)
-    if let Some(a) = arch_name(std::env::consts::ARCH) {
-        let c = format!("{}/hysteria-linux-{}", CACHE_DIR, a);
-        if std::path::Path::new(&c).exists() && sh(&format!("cp -f {} {}", c, tmp)).0 && take(tmp) {
-            return find_bin().ok_or_else(|| "install failed".to_string());
+    let install = |tmp: &str| -> bool {
+        if let Some(sc) = &script {
+            let ok = std::fs::read(tmp).map(|b| looks_like_binary(&b)).unwrap_or(false);
+            if ok {
+                let _ = run_installer(sc, &format!("--local {}", tmp));
+                if find_bin().is_some() {
+                    let _ = std::fs::remove_file(tmp);
+                    return true;
+                }
+            }
         }
-    }
+        take(tmp)
+    };
     for url in download_urls(std::env::consts::ARCH) {
-        let (ok, out) = sh(&format!("curl -fsSL --connect-timeout 10 --max-time 120 -o {} '{}' 2>&1", tmp, url));
-        if ok && take(tmp) {
+        let (ok, out) = sh(&format!("curl -fsSL --connect-timeout 10 --max-time 180 -o {} '{}' 2>&1", tmp, url));
+        if ok && install(tmp) {
             eprintln!("hy2 tunnel: installed from {}", url);
             return find_bin().ok_or_else(|| "install failed".to_string());
         }
         let _ = std::fs::remove_file(tmp);
         why.push(format!("{}: {}", url.split('/').nth(2).unwrap_or(""), if ok { "not a program (filtered?)".to_string() } else { out.lines().last().unwrap_or("unreachable").trim().to_string() }));
     }
+    // a copy the panel server keeps for its agents (when this server is the panel itself)
+    if let Some(a) = arch_name(std::env::consts::ARCH) {
+        let c = format!("{}/hysteria-linux-{}", CACHE_DIR, a);
+        if std::path::Path::new(&c).exists() && sh(&format!("cp -f {} {}", c, tmp)).0 && install(tmp) {
+            return find_bin().ok_or_else(|| "install failed".to_string());
+        }
+    }
     match from_panel(tmp) {
-        Ok(()) if take(tmp) => {
+        Ok(()) if install(tmp) => {
             eprintln!("hy2 tunnel: installed from the panel");
             return find_bin().ok_or_else(|| "install failed".to_string());
         }
         Ok(()) => why.push("panel: the file is not a working program".into()),
         Err(e) => why.push(format!("panel: {}", e)),
     }
-    let _ = sh("bash -c 'bash <(curl -fsSL --max-time 120 https://get.hy2.sh/)' >/dev/null 2>&1");
-    if let Some(b) = find_bin() {
-        return Ok(b);
-    }
     Err(format!(
-        "Hysteria2 could not be installed on this server ({}). It is fetched by itself as soon as one source works: install it on the other server of the tunnel or on the panel server and it is passed on through the panel.",
+        "Hysteria2 could not be installed on this server ({}). It is installed by itself as soon as one source works: once the other server of the tunnel has it, it is passed on through the panel.",
         why.join("; ")
     ))
 }
@@ -905,5 +955,21 @@ mod fetch_through_panel {
         let _ = std::fs::rename("/usr/local/bin/hysteria", "/opt/kanki-test/hysteria");
         super::share_with_panel("/opt/kanki-test/hysteria");
         assert!(std::path::Path::new(&cache).exists(), "the panel got a copy");
+    }
+}
+
+/// The official installer fails when api.hy2.io is blocked; the same GitHub file must still get
+/// installed. Runs only with HY2_INSTALL=1 (needs root and internet).
+#[cfg(test)]
+mod install_official {
+    #[test]
+    fn installs_when_only_the_version_api_is_blocked() {
+        if std::env::var("HY2_INSTALL").is_err() {
+            return;
+        }
+        let _ = std::fs::remove_file("/usr/local/bin/hysteria");
+        let r = super::ensure_bin();
+        println!("{:?}", r);
+        assert_eq!(r.as_deref(), Ok("/usr/local/bin/hysteria"));
     }
 }

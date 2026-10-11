@@ -182,9 +182,26 @@ self_signed(){
   tls_perms
 }
 
+# The official installer (get.hy2.sh). It first asks api.hy2.io for the newest version and gives up
+# when only that site is blocked: then the same GitHub file is downloaded and handed to the same
+# installer (--local), so the result is identical.
+hy2_install(){
+  command -v hysteria >/dev/null && return 0
+  bash <(curl -fsSL https://get.hy2.sh/ 2>/dev/null) >/dev/null 2>&1; command -v hysteria >/dev/null && return 0
+  local a f=/tmp/kanki-hysteria.bin s=/tmp/kanki-hy2-install.sh u
+  case "$(uname -m)" in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; armv7*|armv6*) a=arm;; i?86) a=386;; riscv64) a=riscv64;; s390x) a=s390x;; *) return 1;; esac
+  curl -fsSL --max-time 60 -o $s https://get.hy2.sh/ 2>/dev/null || curl -fsSL --max-time 60 -o $s https://raw.githubusercontent.com/apernet/hysteria/master/scripts/install_server.sh 2>/dev/null || s=""
+  for u in "https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-$a" "https://download.hysteria.network/app/latest/hysteria-linux-$a"; do
+    if curl -fsSL --connect-timeout 10 --max-time 180 -o $f "$u" 2>/dev/null && [ "$(head -c4 $f | tail -c3)" = "ELF" ]; then
+      if [ -n "$s" ]; then bash $s --local $f >/dev/null 2>&1; else install -Dm755 $f /usr/local/bin/hysteria; fi
+    fi
+    rm -f $f; command -v hysteria >/dev/null && { rm -f $s; return 0; }
+  done
+  rm -f $s; return 1
+}
 setup_hysteria(){ # $1=auth url
   say "Installing Hysteria2 on UDP $HY2_PORT ..."
-  command -v hysteria >/dev/null || bash <(curl -fsSL https://get.hy2.sh/) >/dev/null 2>&1 || { warn "Hysteria2 could not be installed"; HY2_PORT=""; return; }
+  hy2_install || { warn "Hysteria2 could not be installed"; HY2_PORT=""; return; }
   id hysteria >/dev/null 2>&1 && usermod -aG kankitls hysteria
   mkdir -p /etc/hysteria
   cat > /etc/hysteria/config.yaml <<EOF

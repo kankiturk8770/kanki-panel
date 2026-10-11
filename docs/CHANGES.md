@@ -1,3 +1,11 @@
+# v3.1.3 — Hysteria2 is installed the same way as for VPN users
+- **The cause** of "Hysteria2 is not installed" on the Iran server: the official installer `get.hy2.sh` first asks `api.hy2.io` for the newest version and stops when only that site is unreachable, even when GitHub works.
+- **Tunnel agents now install Hysteria2 exactly like the panel does for users:** first `get.hy2.sh`; if it stops, the same GitHub file it would download (or the copy on download.hysteria.network) is installed **with the same installer** (`--local`), so the result is identical (binary, user, service files). Then, as before, the panel / the other server of the tunnel.
+- The installer runs with `TERM` and `HOME` set (the agent's service had neither).
+- `install.sh` uses the same fallback when it installs Hysteria2 for VPN users, so a node where `api.hy2.io` is blocked still gets Hysteria2.
+- The CPU type is picked by itself; there is nothing to choose.
+- Hysteria2 tunnels need agents v3.1.3 (Update all).
+
 # v3.1.2 — Hysteria2 tunnel: installs on servers that cannot reach GitHub
 - **The bug:** on a server in Iran the tunnel stopped at "Hysteria2 is not installed and could not be installed": GitHub was unreachable there and the panel only offered its own copy, which it did not have.
 - **Now the binary is fetched in this order:** GitHub, then `download.hysteria.network` (a direct download, checked to be a real program and not a filter page), then **the panel**, then the official script.

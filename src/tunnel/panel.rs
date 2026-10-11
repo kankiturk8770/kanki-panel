@@ -592,7 +592,7 @@ async fn awg_conf(State(app): St, h: HeaderMap, Path((id, side)): Path<(String, 
 // ------------------------------------------------------------------ Hysteria2 link
 
 /// Agents from this version on know Hysteria2 links (an older one would run the name as plain TCP).
-const HY2_FROM: &str = "3.1.2";
+const HY2_FROM: &str = "3.1.3";
 
 /// what one side of a Hysteria2 tunnel runs
 fn hy2_spec(app: &App, t: &Tunnel, role: &str) -> Hy2Spec {
