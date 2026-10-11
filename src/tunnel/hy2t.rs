@@ -352,59 +352,186 @@ fn find_bin() -> Option<String> {
     if ok && !out.is_empty() { Some(out.lines().next().unwrap_or("").to_string()) } else { None }
 }
 
-/// The official installer first; when GitHub cannot be reached (often the case in Iran) the
-/// binary of the panel server is fetched through the panel (tunnel agents only).
+/// Hysteria2 release name of a CPU type ("x86_64" -> "amd64")
+pub fn arch_name(arch: &str) -> Option<&'static str> {
+    Some(match arch {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        "arm" => "arm",
+        "x86" => "386",
+        "riscv64" => "riscv64",
+        "s390x" => "s390x",
+        "loongarch64" => "loong64",
+        _ => return None,
+    })
+}
+
+/// where the binary is downloaded from: GitHub, then the project's own download server
+pub fn download_urls(arch: &str) -> Vec<String> {
+    let Some(a) = arch_name(arch) else { return vec![] };
+    vec![
+        format!("https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-{}", a),
+        format!("https://download.hysteria.network/app/latest/hysteria-linux-{}", a),
+    ]
+}
+
+/// a real Linux program of a sane size (a filtered network often answers with an HTML page)
+pub fn looks_like_binary(b: &[u8]) -> bool {
+    b.len() > 3_000_000 && b.starts_with(b"\x7fELF")
+}
+
+pub const CACHE_DIR: &str = "/var/lib/kanki/hy2bin";
+
+fn sha256_hex(b: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b);
+    hex::encode(h.finalize())
+}
+
+/// checks a downloaded file and moves it to /usr/local/bin/hysteria
+fn take(tmp: &str) -> bool {
+    let ok = std::fs::read(tmp).map(|b| looks_like_binary(&b)).unwrap_or(false) && {
+        let _ = sh(&format!("chmod 755 {}", tmp));
+        sh(&format!("{} version 2>&1 | grep -qi version", tmp)).0
+    };
+    if ok {
+        let _ = std::fs::create_dir_all("/usr/local/bin");
+        ok && sh(&format!("mv -f {} /usr/local/bin/hysteria", tmp)).0
+    } else {
+        let _ = std::fs::remove_file(tmp);
+        false
+    }
+}
+
+fn agent_env() -> Option<(String, String, String, bool)> {
+    let env = crate::util::load_env(super::agent::ENV_FILE);
+    let panel = env.get("PANEL_URL").cloned().unwrap_or_default().trim_end_matches('/').to_string();
+    let id = env.get("AGENT_ID").cloned().unwrap_or_default();
+    let token = env.get("AGENT_TOKEN").cloned().unwrap_or_default();
+    if panel.is_empty() || id.is_empty() || token.is_empty() {
+        return None;
+    }
+    Some((panel, id, token, env.get("INSECURE").map(|v| v == "1").unwrap_or(false)))
+}
+
+/// asks the panel for the binary of this CPU type (it has its own, a cached one, or downloads it)
+fn from_panel(tmp: &str) -> Result<(), String> {
+    let Some((panel, id, token, insecure)) = agent_env() else { return Err("not a tunnel agent".into()) };
+    let body = serde_json::json!({ "id": id, "token": token, "arch": std::env::consts::ARCH }).to_string();
+    let hdr = format!("{}.h", tmp);
+    let cmd = format!(
+        "curl -fsS {}--max-time 300 -H 'content-type: application/json' --data '{}' -D {} -o {} '{}/tunnel/hy2bin' 2>&1",
+        if insecure { "-k " } else { "" },
+        body.replace('\'', ""),
+        hdr,
+        tmp,
+        panel.replace('\'', "")
+    );
+    let (ok, out) = sh(&cmd);
+    let want = std::fs::read_to_string(&hdr)
+        .unwrap_or_default()
+        .lines()
+        .find_map(|l| l.to_lowercase().strip_prefix("x-sha256:").map(|v| v.trim().to_string()))
+        .unwrap_or_default();
+    let _ = std::fs::remove_file(&hdr);
+    if !ok {
+        let _ = std::fs::remove_file(tmp);
+        return Err(format!("the panel did not give it ({})", out.lines().last().unwrap_or("").trim()));
+    }
+    let got = std::fs::read(tmp).map(|b| sha256_hex(&b)).unwrap_or_default();
+    if want.is_empty() || want != got {
+        let _ = std::fs::remove_file(tmp);
+        return Err("the file from the panel was damaged on the way".into());
+    }
+    Ok(())
+}
+
+/// Gets the official binary onto this server, trying in turn: GitHub and download.hysteria.network
+/// (a direct download, checked to be a real program), then the panel (which has it, has it cached
+/// from another server, or downloads it itself), then the official installer script.
 fn ensure_bin() -> Result<String, String> {
     if let Some(b) = find_bin() {
         return Ok(b);
     }
     eprintln!("hy2 tunnel: installing Hysteria2 ...");
+    let tmp = "/usr/local/bin/.hysteria.kanki-new";
+    let _ = std::fs::create_dir_all("/usr/local/bin");
+    let mut why = vec![];
+    // a copy the panel server keeps for its agents (the panel itself runs this code too)
+    if let Some(a) = arch_name(std::env::consts::ARCH) {
+        let c = format!("{}/hysteria-linux-{}", CACHE_DIR, a);
+        if std::path::Path::new(&c).exists() && sh(&format!("cp -f {} {}", c, tmp)).0 && take(tmp) {
+            return find_bin().ok_or_else(|| "install failed".to_string());
+        }
+    }
+    for url in download_urls(std::env::consts::ARCH) {
+        let (ok, out) = sh(&format!("curl -fsSL --connect-timeout 10 --max-time 120 -o {} '{}' 2>&1", tmp, url));
+        if ok && take(tmp) {
+            eprintln!("hy2 tunnel: installed from {}", url);
+            return find_bin().ok_or_else(|| "install failed".to_string());
+        }
+        let _ = std::fs::remove_file(tmp);
+        why.push(format!("{}: {}", url.split('/').nth(2).unwrap_or(""), if ok { "not a program (filtered?)".to_string() } else { out.lines().last().unwrap_or("unreachable").trim().to_string() }));
+    }
+    match from_panel(tmp) {
+        Ok(()) if take(tmp) => {
+            eprintln!("hy2 tunnel: installed from the panel");
+            return find_bin().ok_or_else(|| "install failed".to_string());
+        }
+        Ok(()) => why.push("panel: the file is not a working program".into()),
+        Err(e) => why.push(format!("panel: {}", e)),
+    }
     let _ = sh("bash -c 'bash <(curl -fsSL --max-time 120 https://get.hy2.sh/)' >/dev/null 2>&1");
     if let Some(b) = find_bin() {
         return Ok(b);
     }
-    let env = crate::util::load_env(super::agent::ENV_FILE);
-    let panel = env.get("PANEL_URL").cloned().unwrap_or_default().trim_end_matches('/').to_string();
-    let id = env.get("AGENT_ID").cloned().unwrap_or_default();
-    let token = env.get("AGENT_TOKEN").cloned().unwrap_or_default();
-    if !panel.is_empty() && !id.is_empty() && !token.is_empty() {
-        let k = if env.get("INSECURE").map(|v| v == "1").unwrap_or(false) { "-k " } else { "" };
-        let body = serde_json::json!({ "id": id, "token": token, "arch": std::env::consts::ARCH }).to_string();
-        let tmp = "/usr/local/bin/hysteria.kanki-new";
-        let cmd = format!(
-            "curl -fsS {}--max-time 300 -H 'content-type: application/json' --data '{}' -D /tmp/kanki-hy2bin.h -o {} '{}/tunnel/hy2bin'",
-            k,
-            body.replace('\'', ""),
-            tmp,
-            panel.replace('\'', "")
-        );
-        let (ok, out) = sh(&cmd);
-        if ok {
-            let want = std::fs::read_to_string("/tmp/kanki-hy2bin.h")
-                .unwrap_or_default()
-                .lines()
-                .find_map(|l| l.to_lowercase().strip_prefix("x-sha256:").map(|v| v.trim().to_string()))
-                .unwrap_or_default();
-            let got = std::fs::read(tmp)
-                .map(|b| {
-                    use sha2::{Digest, Sha256};
-                    let mut h = Sha256::new();
-                    h.update(&b);
-                    hex::encode(h.finalize())
-                })
-                .unwrap_or_default();
-            if !want.is_empty() && want == got {
-                let _ = sh(&format!("chmod 755 {} && mv -f {} /usr/local/bin/hysteria", tmp, tmp));
-            } else {
-                let _ = std::fs::remove_file(tmp);
-            }
-        } else {
-            eprintln!("hy2 tunnel: the panel did not give the binary: {}", out);
-            let _ = std::fs::remove_file(tmp);
-        }
-        let _ = std::fs::remove_file("/tmp/kanki-hy2bin.h");
+    Err(format!(
+        "Hysteria2 could not be installed on this server ({}). It is fetched by itself as soon as one source works: install it on the other server of the tunnel or on the panel server and it is passed on through the panel.",
+        why.join("; ")
+    ))
+}
+
+/// After this server has the binary: give the panel a copy if it has none for this CPU type, so
+/// servers that cannot download it (Iran) get it from the panel. Once per run.
+fn share_with_panel(bin: &str) {
+    static DONE: AtomicBool = AtomicBool::new(false);
+    if DONE.load(Ordering::SeqCst) {
+        return;
     }
-    find_bin().ok_or_else(|| "Hysteria2 is not installed and could not be installed (GitHub unreachable, and the panel server has no hysteria binary of the same CPU type). Run: bash <(curl -fsSL https://get.hy2.sh/)".into())
+    let Some((panel, id, token, insecure)) = agent_env() else {
+        DONE.store(true, Ordering::SeqCst);
+        return;
+    };
+    let k = if insecure { "-k " } else { "" };
+    let body = serde_json::json!({ "id": id, "token": token, "arch": std::env::consts::ARCH, "check": true }).to_string();
+    let (ok, out) = sh(&format!("curl -fsS {}--max-time 20 -H 'content-type: application/json' --data '{}' '{}/tunnel/hy2bin' 2>/dev/null", k, body.replace('\'', ""), panel.replace('\'', "")));
+    if !ok {
+        return; // an older panel or no answer: try again next round
+    }
+    let have = serde_json::from_str::<serde_json::Value>(&out).ok().and_then(|v| v["have"].as_bool()).unwrap_or(true);
+    if !have {
+        let Ok(bytes) = std::fs::read(bin) else { return };
+        if !looks_like_binary(&bytes) {
+            DONE.store(true, Ordering::SeqCst);
+            return;
+        }
+        let (ok, _) = sh(&format!(
+            "curl -fsS {}--max-time 600 -H 'x-id: {}' -H 'x-token: {}' -H 'x-arch: {}' -H 'x-sha256: {}' -H 'content-type: application/octet-stream' --data-binary @{} '{}/tunnel/hy2bin/put' >/dev/null 2>&1",
+            k,
+            id.replace('\'', ""),
+            token.replace('\'', ""),
+            std::env::consts::ARCH,
+            sha256_hex(&bytes),
+            bin,
+            panel.replace('\'', "")
+        ));
+        if !ok {
+            return;
+        }
+        eprintln!("hy2 tunnel: gave the panel a copy of hysteria for the other servers");
+    }
+    DONE.store(true, Ordering::SeqCst);
 }
 
 fn write_if_changed(path: &str, text: &str, mode: u32) -> Result<bool, String> {
@@ -504,6 +631,9 @@ fn reconcile() {
             }
         }
     };
+    if let Ok(b) = &bin {
+        share_with_panel(b);
+    }
     for w in &want {
         let err = match &bin {
             Err(e) => e.clone(),
@@ -743,5 +873,37 @@ mod lifecycle {
         }
         
         assert!(std::fs::read_dir(UNIT_DIR).map(|d| d.flatten().all(|e| !e.file_name().to_string_lossy().starts_with(PREFIX))).unwrap_or(true), "no unit left");
+    }
+}
+
+/// A server that cannot reach GitHub gets hysteria through the panel. Needs a running panel and
+/// /etc/kanki/tunnel.env; runs only with HY2_FETCH=1.
+#[cfg(test)]
+mod fetch_through_panel {
+    #[test]
+    fn blocked_server_gets_it_from_the_panel() {
+        if std::env::var("HY2_FETCH").is_err() {
+            return;
+        }
+        let _ = std::fs::remove_file("/usr/local/bin/hysteria");
+        // straight from the panel over HTTP (not a local copy)
+        let tmp = "/usr/local/bin/.hysteria.test";
+        let r = super::from_panel(tmp);
+        println!("from panel: {:?}", r);
+        assert!(r.is_ok());
+        assert!(super::take(tmp), "the file works");
+        // the whole chain with GitHub blocked
+        let _ = std::fs::remove_file("/usr/local/bin/hysteria");
+        let r = super::ensure_bin();
+        println!("{:?}", r);
+        assert_eq!(r.as_deref(), Ok("/usr/local/bin/hysteria"));
+        // a server that has it gives the panel a copy when the panel has none
+        let cache = format!("{}/hysteria-linux-{}", super::CACHE_DIR, super::arch_name(std::env::consts::ARCH).unwrap());
+        let _ = std::fs::remove_file(&cache);
+        // (panel and agent share this test machine: keep the panel from seeing the agent's copy)
+        let _ = std::fs::create_dir_all("/opt/kanki-test");
+        let _ = std::fs::rename("/usr/local/bin/hysteria", "/opt/kanki-test/hysteria");
+        super::share_with_panel("/opt/kanki-test/hysteria");
+        assert!(std::path::Path::new(&cache).exists(), "the panel got a copy");
     }
 }

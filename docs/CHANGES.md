@@ -1,3 +1,12 @@
+# v3.1.2 — Hysteria2 tunnel: installs on servers that cannot reach GitHub
+- **The bug:** on a server in Iran the tunnel stopped at "Hysteria2 is not installed and could not be installed": GitHub was unreachable there and the panel only offered its own copy, which it did not have.
+- **Now the binary is fetched in this order:** GitHub, then `download.hysteria.network` (a direct download, checked to be a real program and not a filter page), then **the panel**, then the official script.
+- **The panel finds it for any CPU type:** its own copy, a copy it keeps in `/var/lib/kanki/hy2bin`, or it downloads it itself.
+- **Servers share it:** as soon as one server of a tunnel has hysteria (for example the foreign server), it gives the panel a copy, and the Iran server gets it from the panel a few seconds later. No manual step.
+- The upload only accepts a tunnel server's token (checked before the file is read) and a real program whose checksum matches.
+- The tunnel card now says which server an error comes from.
+- Hysteria2 tunnels need agents v3.1.2 (Update all).
+
 # v3.1.1 — Hysteria2 tunnel: ports are always freed
 - **Deleting (or disabling) a Hysteria2 tunnel frees every port on both servers**, the panel server and tunnel-agent-only servers alike: the tunnel's UDP port, the forwarded TCP / UDP ports and its stats port. The service is stopped, disabled and removed with its files; the routes of the "whole network" mode are taken down. Changing a port frees the old one at once.
 - Every tunnel now has its own service and TUN name made from its whole id (before, two tunnels could share one).

@@ -137,6 +137,13 @@ pub async fn middleware(State(app): St, req: Request, next: Next) -> Response {
     if path == "/api/restore" && identify(&app, req.headers()).is_none() {
         return deny();
     }
+    // the hysteria upload of a tunnel agent may be big: check its server token before reading the body
+    if path == "/tunnel/hy2bin/put" {
+        let hv = |k: &str| req.headers().get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+        if !crate::tunnel::panel::agent_token_ok(&app, &hv("x-id"), &hv("x-token")) {
+            return deny();
+        }
+    }
     let audited = path.starts_with("/api/") && method != Method::GET && path != "/api/login" && !path.starts_with("/api/config/");
     let actor = if audited { identify(&app, req.headers()).map(|a| a.0).unwrap_or_else(|| "anonymous".into()) } else { String::new() };
     let res = next.run(req).await;

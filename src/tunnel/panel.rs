@@ -592,7 +592,7 @@ async fn awg_conf(State(app): St, h: HeaderMap, Path((id, side)): Path<(String, 
 // ------------------------------------------------------------------ Hysteria2 link
 
 /// Agents from this version on know Hysteria2 links (an older one would run the name as plain TCP).
-const HY2_FROM: &str = "3.1.1";
+const HY2_FROM: &str = "3.1.2";
 
 /// what one side of a Hysteria2 tunnel runs
 fn hy2_spec(app: &App, t: &Tunnel, role: &str) -> Hy2Spec {
@@ -728,23 +728,84 @@ async fn hy2_conf(State(app): St, h: HeaderMap, Path((id, side)): Path<(String, 
     Json(json!({ "conf": body, "side": role, "file": format!("{}.yaml", sp.unit()) })).into_response()
 }
 
-/// Public (agent token): the panel server's own hysteria binary, for a tunnel server that cannot
-/// reach GitHub to install it
-async fn agent_hy2bin(State(app): St, Json(b): Json<Value>) -> Response {
-    let id = b["id"].as_str().unwrap_or("").to_string();
-    let token = b["token"].as_str().unwrap_or("").to_string();
-    let Some(s) = servers(&app).into_iter().find(|s| s.id == id) else {
-        return (StatusCode::GONE, "unknown server").into_response();
+/// The hysteria binary for a CPU type: the panel server's own (same type), a copy kept in
+/// CACHE_DIR (downloaded by the panel or given by another server), or downloaded now.
+async fn hy2bin_bytes(arch: &str, fetch: bool) -> Option<Vec<u8>> {
+    let a = hy2t::arch_name(arch)?;
+    if arch == std::env::consts::ARCH {
+        for p in ["/usr/local/bin/hysteria", "/usr/bin/hysteria"] {
+            if let Ok(b) = tokio::fs::read(p).await {
+                if hy2t::looks_like_binary(&b) {
+                    return Some(b);
+                }
+            }
+        }
+    }
+    let cache = format!("{}/hysteria-linux-{}", hy2t::CACHE_DIR, a);
+    if let Ok(b) = tokio::fs::read(&cache).await {
+        if hy2t::looks_like_binary(&b) {
+            return Some(b);
+        }
+    }
+    if !fetch {
+        return None;
+    }
+    // one download at a time (two agents asking at once must not download twice)
+    static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _g = LOCK.lock().await;
+    if let Ok(b) = tokio::fs::read(&cache).await {
+        if hy2t::looks_like_binary(&b) {
+            return Some(b);
+        }
+    }
+    let http = reqwest::Client::builder().timeout(Duration::from_secs(180)).build().ok()?;
+    for url in hy2t::download_urls(arch) {
+        match http.get(&url).send().await {
+            Ok(r) if r.status().is_success() => match r.bytes().await {
+                Ok(b) if hy2t::looks_like_binary(&b) => {
+                    let _ = tokio::fs::create_dir_all(hy2t::CACHE_DIR).await;
+                    let _ = tokio::fs::write(&cache, &b).await;
+                    eprintln!("hy2 tunnel: downloaded {} for the agents", url);
+                    return Some(b.to_vec());
+                }
+                Ok(_) => eprintln!("hy2 tunnel: {} is not a program (filtered?)", url),
+                Err(e) => eprintln!("hy2 tunnel: {}: {}", url, e),
+            },
+            Ok(r) => eprintln!("hy2 tunnel: {}: {}", url, r.status()),
+            Err(e) => eprintln!("hy2 tunnel: {}: {}", url, e),
+        }
+    }
+    None
+}
+
+/// a tunnel server's id and token are right (used before a big upload is read)
+pub fn agent_token_ok(app: &App, id: &str, token: &str) -> bool {
+    !token.is_empty() && servers(app).into_iter().any(|s| s.id == id && util::ct_eq(token, &s.token))
+}
+
+fn agent_ok(app: &App, id: &str, token: &str) -> Result<(), Response> {
+    let Some(s) = servers(app).into_iter().find(|s| s.id == id) else {
+        return Err((StatusCode::GONE, "unknown server").into_response());
     };
-    if token.is_empty() || !util::ct_eq(&token, &s.token) {
-        return err(StatusCode::FORBIDDEN, "wrong token");
+    if token.is_empty() || !util::ct_eq(token, &s.token) {
+        return Err(err(StatusCode::FORBIDDEN, "wrong token"));
     }
-    if b["arch"].as_str().unwrap_or("") != std::env::consts::ARCH {
-        return err(StatusCode::CONFLICT, "this server has a different CPU type than the panel");
+    Ok(())
+}
+
+/// Public (agent token): the hysteria binary for a tunnel server that cannot download it itself.
+/// With "check": only says whether the panel already has one for that CPU type.
+async fn agent_hy2bin(State(app): St, Json(b): Json<Value>) -> Response {
+    if let Err(r) = agent_ok(&app, b["id"].as_str().unwrap_or(""), b["token"].as_str().unwrap_or("")) {
+        return r;
     }
-    let path = ["/usr/local/bin/hysteria", "/usr/bin/hysteria"].into_iter().find(|p| std::path::Path::new(p).exists());
-    let Some(path) = path else { return err(StatusCode::NOT_FOUND, "Hysteria2 is not installed on the panel server") };
-    let Ok(bytes) = std::fs::read(path) else { return err(StatusCode::INTERNAL_SERVER_ERROR, "cannot read the binary") };
+    let arch = b["arch"].as_str().unwrap_or("").to_string();
+    if b["check"].as_bool() == Some(true) {
+        return Json(json!({ "have": hy2bin_bytes(&arch, false).await.is_some() })).into_response();
+    }
+    let Some(bytes) = hy2bin_bytes(&arch, true).await else {
+        return err(StatusCode::NOT_FOUND, "the panel has no hysteria for this CPU type and cannot download it either");
+    };
     let sum = {
         use sha2::{Digest, Sha256};
         let mut h = Sha256::new();
@@ -752,6 +813,33 @@ async fn agent_hy2bin(State(app): St, Json(b): Json<Value>) -> Response {
         hex::encode(h.finalize())
     };
     (StatusCode::OK, [("x-sha256", sum)], bytes).into_response()
+}
+
+/// Public (agent token): a tunnel server that has hysteria gives the panel a copy for the others
+async fn agent_hy2bin_put(State(app): St, h: HeaderMap, body: axum::body::Bytes) -> Response {
+    let hv = |k: &str| h.get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    if let Err(r) = agent_ok(&app, &hv("x-id"), &hv("x-token")) {
+        return r;
+    }
+    let Some(a) = hy2t::arch_name(&hv("x-arch")) else { return err(StatusCode::BAD_REQUEST, "unknown CPU type") };
+    let sum = {
+        use sha2::{Digest, Sha256};
+        let mut s = Sha256::new();
+        s.update(&body);
+        hex::encode(s.finalize())
+    };
+    if !hy2t::looks_like_binary(&body) || sum != hv("x-sha256").to_lowercase() {
+        return err(StatusCode::BAD_REQUEST, "not a hysteria binary");
+    }
+    let cache = format!("{}/hysteria-linux-{}", hy2t::CACHE_DIR, a);
+    if !std::path::Path::new(&cache).exists() {
+        let _ = tokio::fs::create_dir_all(hy2t::CACHE_DIR).await;
+        let tmp = format!("{}.part", cache);
+        if tokio::fs::write(&tmp, &body).await.is_ok() {
+            let _ = tokio::fs::rename(&tmp, &cache).await;
+        }
+    }
+    Json(json!({ "ok": true })).into_response()
 }
 
 // ------------------------------------------------------------------ smart tunnel (test every transport)
@@ -1107,6 +1195,8 @@ pub fn router() -> Router<Arc<App>> {
         .route("/tunnel/agent", post(agent_report))
         .route("/tunnel/binary", post(agent_binary))
         .route("/tunnel/hy2bin", post(agent_hy2bin))
+        // a hysteria binary is ~20 MB (the rest of the panel keeps the 2 MiB limit)
+        .route("/tunnel/hy2bin/put", post(agent_hy2bin_put).layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)))
         .route("/api/update-all", post(update_all))
 }
 
