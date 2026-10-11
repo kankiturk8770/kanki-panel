@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.1 — Hysteria2 tunnel between two servers
+- Tunnels › + Tunnel › **⚡ Hysteria2**: the exit runs a Hysteria2 server, the entry connects to it (Salamander obfuscation, pinned certificate). Forward ports through it, or send the whole internet of the entry's VPN users (for example `10.8.0.0/24`) out from the exit. Guide: `docs/HY2-TUNNEL.md`.
+
 ## New in 2.9 — tunnel for hostile networks
 - **Three new transports:** `hq` (QUIC under a random per-packet mask, nothing on the wire looks like QUIC, packet sizes hidden), `h2` (WebSocket over HTTP/2 over TLS 1.3 with browser-like ALPN / ciphers / settings, four links per TCP connection, an ordinary web page for strangers) and `dual` (`hq` first, `h2` automatically when UDP does not get through, one port number for both).
 - Records on these transports carry random padding. Scanners get no answer on the UDP port.

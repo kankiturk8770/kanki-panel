@@ -2,6 +2,7 @@
 //! servers, the endpoint agents talk to, and the copy of the engine that runs on the panel itself.
 
 use super::awg::{self, AwgCfg, AwgSpec};
+use super::hy2t::{self, Hy2Cfg, Hy2Spec};
 use super::engine::{parse_ports, Manager, Spec, Status};
 use crate::api::err;
 use crate::guard;
@@ -72,6 +73,8 @@ pub struct Tunnel {
     /// tunnel that carries an AmneziaWG link's UDP
     pub kind: String,
     pub awg: AwgCfg,
+    /// kind "hy2": a Hysteria2 link (the exit runs the server, the entry the client)
+    pub hy2: Hy2Cfg,
 }
 
 /// Every transport a tunnel can use (the panel accepts nothing else).
@@ -88,7 +91,7 @@ fn is_new_transport(tr: &str) -> bool {
 /// `dual` listens on both, on the same port number.
 fn port_protos(tr: &str) -> (bool, bool) {
     match tr {
-        "quic" | "kcp" | "hq" => (false, true),
+        "quic" | "kcp" | "hq" | "hy2" => (false, true),
         "dual" => (true, true),
         _ => (true, false),
     }
@@ -209,6 +212,11 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             out.push(Spec { id: t.id.clone(), name: t.name.clone(), role: role.into(), transport: "awg".into(), awg: Some(a), ..Default::default() });
             continue;
         }
+        if t.kind == "hy2" {
+            let y = hy2_spec(app, &t, role);
+            out.push(Spec { id: t.id.clone(), name: t.name.clone(), role: role.into(), transport: "hy2".into(), hy2: Some(y), ..Default::default() });
+            continue;
+        }
         let mode = if t.mode == "direct" { "direct" } else { "reverse" };
         // the side that listens is the entry in reverse mode and the exit in direct mode
         let listener = if mode == "reverse" { &t.entry } else { &t.exit };
@@ -244,6 +252,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             probe: false,
             bind: if t.kind == "awgwrap" { "127.0.0.1".into() } else { String::new() },
             awg: None,
+            hy2: None,
         });
     }
     // a running smart-tunnel test adds one short-lived test tunnel per transport and per direction:
@@ -276,6 +285,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                     probe: true,
                     bind: String::new(),
                     awg: None,
+                    hy2: None,
                 });
             }
             for (mi, mode) in PROBE_MODES.iter().enumerate() {
@@ -305,6 +315,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                         probe: true,
                         bind: String::new(),
                         awg: None,
+                        hy2: None,
                     });
                 }
             }
@@ -578,6 +589,169 @@ async fn awg_conf(State(app): St, h: HeaderMap, Path((id, side)): Path<(String, 
     Json(json!({ "conf": body, "side": role, "file": format!("{}-{}.conf", awg::iface_name(&t.id), role) })).into_response()
 }
 
+// ------------------------------------------------------------------ Hysteria2 link
+
+/// Agents from this version on know Hysteria2 links (an older one would run the name as plain TCP).
+const HY2_FROM: &str = "3.1.0";
+
+/// what one side of a Hysteria2 tunnel runs
+fn hy2_spec(app: &App, t: &Tunnel, role: &str) -> Hy2Spec {
+    let c = &t.hy2;
+    let entry = role == "entry";
+    let host = if !t.dial.trim().is_empty() { t.dial.trim().to_string() } else { host_of(app, &t.exit) };
+    Hy2Spec {
+        tid: t.id.clone(),
+        name: t.name.clone(),
+        role: role.into(),
+        listen: c.port,
+        server: if entry { hostport(&host, c.port) } else { String::new() },
+        auth: c.auth.clone(),
+        obfs: c.obfs.clone(),
+        cert: if entry { String::new() } else { c.cert.clone() },
+        key: if entry { String::new() } else { c.key.clone() },
+        masq: if entry { String::new() } else { c.masq.clone() },
+        pin: if entry { c.pin.clone() } else { String::new() },
+        sni: if entry { c.sni.clone() } else { String::new() },
+        up_mbps: c.up_mbps,
+        down_mbps: c.down_mbps,
+        fwd_tcp: if entry { t.tcp.clone() } else { vec![] },
+        fwd_udp: if entry { t.udp.clone() } else { vec![] },
+        target: if entry { t.target.clone() } else { String::new() },
+        src_routes: if entry { c.src_routes.clone() } else { vec![] },
+        n: c.n,
+        mtu: c.mtu,
+        stats_port: if entry { 0 } else { 37000 + c.n as u16 },
+        // the stats API only listens on 127.0.0.1 of the exit; its secret is derived from the password
+        stats_secret: if entry { String::new() } else { format!("s{}", &c.auth[..c.auth.len().min(24)]) },
+    }
+}
+
+/// reads the Hysteria2 part of the form: makes the passwords and the certificate the first time
+fn hy2_apply_body(list: &[Tunnel], t: &mut Tunnel, a: &Value) -> Result<(), String> {
+    let mut c = t.hy2.clone();
+    if c.n == 0 {
+        let used: HashSet<u8> = list.iter().filter(|o| o.kind == "hy2" && o.id != t.id).map(|o| o.hy2.n).collect();
+        c.n = (1..=250u8).find(|n| !used.contains(n)).ok_or("too many Hysteria2 tunnels")?;
+    }
+    if let Some(v) = a["port"].as_u64() {
+        c.port = v.min(65535) as u16;
+    }
+    if c.port == 0 {
+        return Err("the Hysteria2 UDP port is required".into());
+    }
+    if let Some(v) = a["sni"].as_str() {
+        let h = hy2t::clean_host(v);
+        c.sni = if h.is_empty() { "www.bing.com".into() } else { h };
+    }
+    if let Some(v) = a["masq"].as_str() {
+        let u = hy2t::clean_url(v);
+        if !v.trim().is_empty() && u.is_empty() {
+            return Err("the masquerade site must be an https:// address".into());
+        }
+        c.masq = u;
+    }
+    if c.auth.is_empty() || a["regen"].as_bool() == Some(true) {
+        c.auth = rand_token(32);
+    }
+    if let Some(v) = a["obfs"].as_bool() {
+        if !v {
+            c.obfs.clear();
+        } else if c.obfs.is_empty() {
+            c.obfs = rand_token(24);
+        }
+    } else if t.hy2.auth.is_empty() {
+        // new tunnel without a choice: obfuscation on (no QUIC / HTTP/3 signature on the wire)
+        c.obfs = rand_token(24);
+    }
+    if a["regen"].as_bool() == Some(true) && !c.obfs.is_empty() {
+        c.obfs = rand_token(24);
+    }
+    if c.cert.is_empty() || c.pin.is_empty() || a["regen"].as_bool() == Some(true) || c.sni != t.hy2.sni {
+        let (cert, key, pin) = hy2t::gen_cert(&c.sni)?;
+        c.cert = cert;
+        c.key = key;
+        c.pin = pin;
+    }
+    if let Some(v) = a["up_mbps"].as_u64() {
+        c.up_mbps = v.min(100_000) as u32;
+    }
+    if let Some(v) = a["down_mbps"].as_u64() {
+        c.down_mbps = v.min(100_000) as u32;
+    }
+    if let Some(v) = a["mtu"].as_u64() {
+        c.mtu = if v == 0 { 1400 } else { v.clamp(1200, 1500) as u16 };
+    }
+    if a.get("src_routes").is_some() {
+        c.src_routes = awg_wide_check(awg::clean_cidrs(&clean_list(&a["src_routes"])))?;
+    }
+    // Hysteria2 is always client (entry) -> server (exit)
+    t.mode = "direct".into();
+    t.transport = "hy2".into();
+    t.port = c.port;
+    t.conns = 1;
+    t.auto = false;
+    t.hy2 = c;
+    Ok(())
+}
+
+/// agents must know Hysteria2 links
+fn hy2_checks(app: &App, t: &Tunnel) -> Result<(), String> {
+    if !t.enabled {
+        return Ok(());
+    }
+    let names: HashMap<String, String> = servers(app).into_iter().map(|s| (s.id, s.name)).collect();
+    let sn = seen().lock().unwrap();
+    for sid in [&t.entry, &t.exit] {
+        if sid == "local" {
+            continue;
+        }
+        if let Some(x) = sn.get(sid.as_str()) {
+            if !x.version.is_empty() && ver_lt(&x.version, HY2_FROM) {
+                return Err(format!("the agent of \"{}\" is v{}: update it first (Update all), it does not know Hysteria2 tunnels", names.get(sid.as_str()).cloned().unwrap_or_default(), x.version));
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn hy2_conf(State(app): St, h: HeaderMap, Path((id, side)): Path<(String, String)>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let Some(t) = tunnels(&app).into_iter().find(|t| t.id == id && t.kind == "hy2") else { return err(StatusCode::NOT_FOUND, "tunnel not found") };
+    let role = if side == "exit" { "exit" } else { "entry" };
+    let sp = hy2_spec(&app, &t, role);
+    let mut body = hy2t::render(&sp);
+    if role == "exit" {
+        body.push_str(&format!("\n# --- {}/{}.crt ---\n{}\n# --- {}/{}.key ---\n{}", hy2t::CONF_DIR, sp.unit(), t.hy2.cert, hy2t::CONF_DIR, sp.unit(), t.hy2.key));
+    }
+    Json(json!({ "conf": body, "side": role, "file": format!("{}.yaml", sp.unit()) })).into_response()
+}
+
+/// Public (agent token): the panel server's own hysteria binary, for a tunnel server that cannot
+/// reach GitHub to install it
+async fn agent_hy2bin(State(app): St, Json(b): Json<Value>) -> Response {
+    let id = b["id"].as_str().unwrap_or("").to_string();
+    let token = b["token"].as_str().unwrap_or("").to_string();
+    let Some(s) = servers(&app).into_iter().find(|s| s.id == id) else {
+        return (StatusCode::GONE, "unknown server").into_response();
+    };
+    if token.is_empty() || !util::ct_eq(&token, &s.token) {
+        return err(StatusCode::FORBIDDEN, "wrong token");
+    }
+    if b["arch"].as_str().unwrap_or("") != std::env::consts::ARCH {
+        return err(StatusCode::CONFLICT, "this server has a different CPU type than the panel");
+    }
+    let path = ["/usr/local/bin/hysteria", "/usr/bin/hysteria"].into_iter().find(|p| std::path::Path::new(p).exists());
+    let Some(path) = path else { return err(StatusCode::NOT_FOUND, "Hysteria2 is not installed on the panel server") };
+    let Ok(bytes) = std::fs::read(path) else { return err(StatusCode::INTERNAL_SERVER_ERROR, "cannot read the binary") };
+    let sum = {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(&bytes);
+        hex::encode(h.finalize())
+    };
+    (StatusCode::OK, [("x-sha256", sum)], bytes).into_response()
+}
+
 // ------------------------------------------------------------------ smart tunnel (test every transport)
 
 const PROBE_TRANSPORTS: &[&str] = &["tcpmux", "tcp", "ws", "wss", "quic", "kcp", "hq", "h2"];
@@ -761,7 +935,7 @@ fn rotate_tick(app: &App) {
     let mut changed = false;
     let mut ds = down_since().lock().unwrap();
     for tu in list.iter_mut() {
-        if !tu.enabled || !tu.auto || tu.transport == "cdn" {
+        if !tu.enabled || !tu.auto || tu.transport == "cdn" || !tu.kind.is_empty() {
             ds.remove(&tu.id);
             continue;
         }
@@ -926,9 +1100,11 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/tunnels/servers/:id", delete(server_del).put(server_edit))
         .route("/api/tunnels/:id", delete(tunnel_del))
         .route("/api/tunnels/:id/awgconf/:side", get(awg_conf))
+        .route("/api/tunnels/:id/hy2conf/:side", get(hy2_conf))
         .route("/api/tunnels/:id/:action", post(tunnel_action))
         .route("/tunnel/agent", post(agent_report))
         .route("/tunnel/binary", post(agent_binary))
+        .route("/tunnel/hy2bin", post(agent_hy2bin))
         .route("/api/update-all", post(update_all))
 }
 
@@ -981,6 +1157,12 @@ async fn list(State(app): St, h: HeaderMap) -> Response {
             let w = |sid: &str| seen.get(sid).and_then(|x| x.status.iter().find(|s| s.id == wid).cloned());
             v["wrap_entry"] = status_json(w(&tu.entry).as_ref());
             v["wrap_exit"] = status_json(w(&tu.exit).as_ref());
+        }
+        if tu.kind == "hy2" {
+            for k in ["auth", "obfs", "cert", "key"] {
+                v["hy2"][k] = json!("");
+            }
+            v["hy2"]["obfs_on"] = json!(!tu.hy2.obfs.is_empty());
         }
         v["state"] = json!(state);
         v["entry_status"] = status_json(es.as_ref());
@@ -1092,7 +1274,16 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         }
     }
     if b.get("kind").is_some() {
-        t.kind = if s("kind") == "awg" { "awg".into() } else { String::new() };
+        t.kind = match s("kind").as_str() {
+            "awg" => "awg".into(),
+            "hy2" => "hy2".into(),
+            _ => String::new(),
+        };
+    }
+    if t.kind == "hy2" {
+        if let Err(e) = hy2_apply_body(&list, &mut t, &b["hy2"]) {
+            return err(StatusCode::BAD_REQUEST, &e);
+        }
     }
     if t.kind == "awg" {
         if let Err(e) = awg_apply_body(&list, &mut t, &b["awg"]) {
@@ -1124,10 +1315,16 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
             return Json(json!({ "ok": true, "id": t.id })).into_response();
         }
     }
+    if t.kind == "hy2" {
+        if let Err(e) = hy2_checks(&app, &t) {
+            return err(StatusCode::CONFLICT, &e);
+        }
+    }
     if t.port == 0 {
         return err(StatusCode::BAD_REQUEST, "the tunnel port is required");
     }
-    if parse_ports(&t.tcp).is_empty() && parse_ports(&t.udp).is_empty() {
+    let hy2_src = t.kind == "hy2" && !t.hy2.src_routes.is_empty();
+    if !hy2_src && parse_ports(&t.tcp).is_empty() && parse_ports(&t.udp).is_empty() {
         return err(StatusCode::BAD_REQUEST, "add at least one TCP or UDP port to forward");
     }
     // Ports each server must listen on, per protocol: the tunnel port on the listening side
@@ -1208,6 +1405,10 @@ async fn tunnel_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(S
             // a new pre-shared key makes both ends bring the AmneziaWG interface down and up again
             if t.kind == "awg" {
                 t.awg.psk = awg::gen_psk();
+            }
+            // a new password makes both ends restart their Hysteria2 service
+            if t.kind == "hy2" {
+                t.hy2.auth = rand_token(32);
             }
         }
         // AmneziaWG: new obfuscation numbers / new keys, sent to both sides at once

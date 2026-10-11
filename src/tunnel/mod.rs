@@ -4,6 +4,7 @@ pub mod awg;
 pub mod dual;
 pub mod engine;
 pub mod h2ws;
+pub mod hy2t;
 pub mod hq;
 pub mod link;
 pub mod mux;

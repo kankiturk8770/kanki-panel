@@ -1,3 +1,12 @@
+# v3.1.0 — Hysteria2 tunnel between two servers
+- **New tunnel type: ⚡ Hysteria2** (Tunnels › + Tunnel › Tunnel type). The exit runs a Hysteria2 server, the entry a Hysteria2 client: the official `hysteria` binary, each tunnel in its own systemd unit `kanki-hy2-<id>.service`, so the Hysteria2 that serves VPN users is not touched.
+- The panel makes the password, a Salamander obfuscation password (on by default) and a self-signed certificate; the client pins the certificate's SHA-256.
+- **Forwarded ports:** users connect to a port on the entry and land on the same (or another) port of the exit — TCP and UDP.
+- **Whole networks through the exit:** the client's TUN carries everything coming from the listed source networks (for example the WireGuard users of the entry, `10.8.0.0/24`); only those networks are routed, SSH and the server itself are not.
+- Optional Brutal speeds (Mbit/s), masquerade site, TUN MTU; "show the config" for each side; status from the exit's traffic-stats API and the client's log.
+- The agents install Hysteria2 by themselves (`get.hy2.sh`, or the panel server's binary when GitHub is unreachable). Agents must be v3.1.0 (Update all). Guide in Persian: `docs/HY2-TUNNEL.md`.
+- Tests: client / server config text, the route script, the certificate pin, input cleaning.
+
 # v2.9.7 — Fix: tunnels flapping every few seconds (connect, drop, reconnect)
 - **The bug:** a tunnel between two servers connected, went down a few seconds later, came back, and kept doing that on a ~5-second beat. Cause: for a node with no stored address, the panel rebuilt the peer address from the node's source IP on every report. When that IP wavered — most often a report with no `X-Forwarded-For` falling back to `127.0.0.1` — the tunnel spec changed, and the engine rebuilds a tunnel whenever its spec changes at all, so it tore the link down and set it up again every cycle.
 - **Fix 1 — the listening side carries no peer address.** Only the side that dials needs the peer's address; the side that listens never uses it. It no longer carries one, so a change in the peer's seen address can't restart a listener for nothing.

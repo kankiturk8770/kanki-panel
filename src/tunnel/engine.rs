@@ -65,6 +65,9 @@ pub struct Spec {
     pub bind: String,
     /// an AmneziaWG interface instead of a Kanki link (handled by `awg`, not by the engine)
     pub awg: Option<super::awg::AwgSpec>,
+    /// a Hysteria2 link instead of a Kanki link (handled by `hy2t`, not by the engine)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hy2: Option<super::hy2t::Hy2Spec>,
 }
 
 impl Spec {
@@ -559,6 +562,9 @@ impl Manager {
         // AmneziaWG interfaces are not engine links: they are handed to the awg worker
         let (aw, specs): (Vec<Spec>, Vec<Spec>) = specs.into_iter().partition(|s| s.awg.is_some());
         super::awg::set_desired(aw.into_iter().filter_map(|s| s.awg).collect());
+        // Hysteria2 links run the official hysteria binary under systemd
+        let (hy, specs): (Vec<Spec>, Vec<Spec>) = specs.into_iter().partition(|s| s.hy2.is_some());
+        super::hy2t::set_desired(hy.into_iter().filter_map(|s| s.hy2).collect());
         let mut run = self.running.lock().await;
         let keys: Vec<String> = run.keys().cloned().collect();
         for k in keys {
@@ -582,6 +588,7 @@ impl Manager {
     pub async fn statuses(&self) -> Vec<Status> {
         let mut v: Vec<Status> = self.running.lock().await.values().map(|r| r.status()).collect();
         v.extend(tokio::task::spawn_blocking(super::awg::statuses).await.unwrap_or_default());
+        v.extend(tokio::task::spawn_blocking(super::hy2t::statuses).await.unwrap_or_default());
         v
     }
 }

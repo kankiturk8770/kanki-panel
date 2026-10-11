@@ -30,6 +30,19 @@ pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
             }
             continue;
         }
+        if let Some(y) = &s.hy2 {
+            if y.role == "exit" && y.listen > 0 {
+                want.push(format!("{}/udp", y.listen));
+            } else {
+                for (p, _) in parse_ports(&y.fwd_tcp) {
+                    want.push(format!("{}/tcp", p));
+                }
+                for (p, _) in parse_ports(&y.fwd_udp) {
+                    want.push(format!("{}/udp", p));
+                }
+            }
+            continue;
+        }
         if s.listens() && s.port > 0 {
             // quic, kcp and hq run over UDP; dual listens on UDP and TCP of the same number
             let protos: &[&str] = match s.transport.as_str() {
