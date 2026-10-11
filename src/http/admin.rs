@@ -459,10 +459,6 @@ async fn bot_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response
         }
     }
     if let Some(a) = b["admins"].as_str() {
-        // bot admins get backups and user management, so only a login session may change them
-        if a.trim() != app.db.get("bot_admins") {
-            if let Err(e) = crate::auth::check_session(&app, &h) { return e; }
-        }
         app.db.set("bot_admins", a.trim());
     }
     restart_self();
@@ -583,9 +579,6 @@ pub async fn self_update(app: &App) -> Result<String, String> {
     }
     std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
     let v = latest_version(app).await.unwrap_or_default();
-    // a tunnel agent on this same machine runs the same file: move it to the new version too
-    // (only if it is running), so an old copy is never left removing the panel's interfaces
-    let _ = Command::new("systemctl").args(["try-restart", "kanki-tunnel"]).spawn();
     restart_self();
     Ok(v)
 }

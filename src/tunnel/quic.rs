@@ -180,7 +180,11 @@ fn kcp_config() -> tokio_kcp::KcpConfig {
     let mut c = tokio_kcp::KcpConfig::default();
     c.stream = true;
     c.nodelay = tokio_kcp::KcpNoDelayConfig::fastest();
-    c.mtu = 1350;
+    // 1150 leaves room in the 1232-byte wire budget (salamander.rs MAX_WIRE) so the obfuscation
+    // relay can add its random padding to full-size KCP datagrams too. With mtu 1350 every full
+    // datagram was exactly 13 + 1350 = 1363 bytes on the wire — a fixed-size signature DPI can
+    // recognise even though the KCP header itself is hidden.
+    c.mtu = 1150;
     c.wnd_size = (1024, 1024);
     c.session_expire = Duration::from_secs(45);
     c
@@ -188,7 +192,7 @@ fn kcp_config() -> tokio_kcp::KcpConfig {
 
 /// Starts a KCP listener. KCP runs on a private loopback socket; the obfuscation relay owns the
 /// public UDP port, so nothing with a KCP header is ever sent on the wire.
-pub async fn serve_kcp(port: u16, token: &str, out: Inbox, _sem: Arc<Semaphore>) -> Res<Bag> {
+pub async fn serve_kcp(port: u16, token: &str, out: Inbox, sem: Arc<Semaphore>) -> Res<Bag> {
     let mut inner = tokio_kcp::KcpListener::bind(kcp_config(), "127.0.0.1:0").await?;
     let local = inner.local_addr()?;
     let obfs = super::obfs::server(port, token, local).await?;
@@ -203,13 +207,42 @@ pub async fn serve_kcp(port: u16, token: &str, out: Inbox, _sem: Arc<Semaphore>)
                     continue;
                 }
             };
-            let io: BoxIo = Box::new(stream);
+            // bound half-open / concurrent sessions exactly like the QUIC listener: a permit is
+            // held for the life of the stream, so a flood of handshakes cannot exhaust the server
+            let Ok(permit) = sem.clone().try_acquire_owned() else {
+                drop(stream);
+                continue;
+            };
+            let io: BoxIo = Box::new(KcpHeld { stream, _permit: permit });
             if out.send((Raw::Stream(io), "kcp".to_string())).await.is_err() {
                 break;
             }
         }
     });
     Ok(Bag { tasks: vec![task], endpoints: vec![] })
+}
+
+/// A KCP server-side stream that keeps its semaphore permit until it is dropped.
+struct KcpHeld {
+    stream: tokio_kcp::KcpStream,
+    _permit: OwnedSemaphorePermit,
+}
+
+impl AsyncRead for KcpHeld {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        AsyncRead::poll_read(Pin::new(&mut self.stream), cx, buf)
+    }
+}
+impl AsyncWrite for KcpHeld {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+        AsyncWrite::poll_write(Pin::new(&mut self.stream), cx, buf)
+    }
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        AsyncWrite::poll_flush(Pin::new(&mut self.stream), cx)
+    }
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        AsyncWrite::poll_shutdown(Pin::new(&mut self.stream), cx)
+    }
 }
 
 /// Dials a KCP server through the obfuscation relay.
