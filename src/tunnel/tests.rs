@@ -7,6 +7,8 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
 
+// Test ports are 21000-24999: below Linux's ephemeral range (32768-60999), so an outgoing
+// connection of another test running at the same time can never take one first (AddrInUse).
 async fn tcp_echo(port: u16) {
     let l = TcpListener::bind(("127.0.0.1", port)).await.unwrap();
     tokio::spawn(async move {
@@ -143,38 +145,38 @@ async fn run_case_with(transport: &str, mode: &str, base: u16, tweak: impl Fn(&m
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_tcpmux_reverse() {
-    run_case("tcpmux", "reverse", 41000).await;
+    run_case("tcpmux", "reverse", 21000).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_tcp_reverse() {
-    run_case("tcp", "reverse", 41100).await;
+    run_case("tcp", "reverse", 21100).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_ws_reverse() {
-    run_case("ws", "reverse", 41200).await;
+    run_case("ws", "reverse", 21200).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_wss_reverse() {
-    run_case("wss", "reverse", 41300).await;
+    run_case("wss", "reverse", 21300).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_tcpmux_direct() {
-    run_case("tcpmux", "direct", 41400).await;
+    run_case("tcpmux", "direct", 21400).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_wss_direct() {
-    run_case("wss", "direct", 41500).await;
+    run_case("wss", "direct", 21500).await;
 }
 
 // SNI spoof: several names (each link takes another), Host header and a split TLS hello
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_wss_spoof_reverse() {
-    run_case_with("wss", "reverse", 43000, |s| {
+    run_case_with("wss", "reverse", 23000, |s| {
         s.sni = "www.google.com, www.bing.com".into();
         s.host = "cdn.example.org".into();
         s.frag = true;
@@ -184,7 +186,7 @@ async fn tunnel_wss_spoof_reverse() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_wss_spoof_direct() {
-    run_case_with("wss", "direct", 43100, |s| {
+    run_case_with("wss", "direct", 23100, |s| {
         s.sni = "www.microsoft.com".into();
         s.frag = true;
     })
@@ -193,44 +195,44 @@ async fn tunnel_wss_spoof_direct() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_quic_spoof_reverse() {
-    run_case_with("quic", "reverse", 43200, |s| s.sni = "www.cloudflare.com, www.apple.com".into()).await;
+    run_case_with("quic", "reverse", 23200, |s| s.sni = "www.cloudflare.com, www.apple.com".into()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_ws_host_reverse() {
-    run_case_with("ws", "reverse", 43300, |s| s.host = "www.example.com".into()).await;
+    run_case_with("ws", "reverse", 23300, |s| s.host = "www.example.com".into()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_quic_reverse() {
-    run_case("quic", "reverse", 41800).await;
+    run_case("quic", "reverse", 21800).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_kcp_reverse() {
-    run_case("kcp", "reverse", 41900).await;
+    run_case("kcp", "reverse", 21900).await;
 }
 
 // ---------------------------------------------------------------- hq / h2 / dual
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_hq_reverse() {
-    run_case("hq", "reverse", 44000).await;
+    run_case("hq", "reverse", 24000).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_hq_direct_spoof() {
-    run_case_with("hq", "direct", 44100, |s| s.sni = "www.microsoft.com, www.apple.com".into()).await;
+    run_case_with("hq", "direct", 24100, |s| s.sni = "www.microsoft.com, www.apple.com".into()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_h2_reverse() {
-    run_case("h2", "reverse", 44200).await;
+    run_case("h2", "reverse", 24200).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_h2_direct_spoof() {
-    run_case_with("h2", "direct", 44300, |s| {
+    run_case_with("h2", "direct", 24300, |s| {
         s.sni = "www.cloudflare.com".into();
         s.host = "www.cloudflare.com".into();
         s.frag = true;
@@ -241,7 +243,7 @@ async fn tunnel_h2_direct_spoof() {
 /// `dual` with both layers available: the masked QUIC path must win, and UDP must not be marked bad.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_dual_uses_hq_when_udp_works() {
-    let base = 44400;
+    let base = 24400;
     run_case("dual", "direct", base).await;
     assert!(!super::dual::udp_is_bad(&format!("127.0.0.1:{}", base)), "UDP works here, it must not be marked bad");
 }
@@ -250,7 +252,7 @@ async fn tunnel_dual_uses_hq_when_udp_works() {
 /// masked QUIC attempt gets no answer and the HTTP/2 layer must carry the tunnel.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_dual_falls_back_to_h2() {
-    let base = 44500;
+    let base = 24500;
     tcp_echo(base + 2).await;
     udp_echo(base + 4).await;
     let (es, mut xs) = pair("dual", "direct", base, "token-for-tests-0123456789");
@@ -271,7 +273,7 @@ async fn tunnel_dual_falls_back_to_h2() {
 /// The `hq` port gives no answer to anything that is not masked with the token's key.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_hq_is_silent_to_scanners() {
-    let base = 44600;
+    let base = 24600;
     tcp_echo(base + 2).await;
     udp_echo(base + 4).await;
     let (es, xs) = pair("hq", "reverse", base, "token-for-tests-0123456789");
@@ -317,7 +319,7 @@ async fn tunnel_wrong_token_is_refused_hq_and_h2() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_wrong_token_is_refused() {
-    let base = 41600;
+    let base = 21600;
     let (es, xs) = pair("tcpmux", "reverse", base, "a-different-token-xxxxxxxxx");
     let entry = Running::start(es);
     let exit = Running::start(xs);
@@ -330,7 +332,7 @@ async fn tunnel_wrong_token_is_refused() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_reconnects_after_exit_restart() {
-    let base = 41700;
+    let base = 21700;
     tcp_echo(base + 2).await;
     udp_echo(base + 4).await;
     let (es, xs) = pair("tcpmux", "reverse", base, "token-for-tests-0123456789");
@@ -368,7 +370,7 @@ async fn fake_cdn(front: u16, origin: u16) {
 /// WebSocket with the CDN host, ClientHello in tiny pieces); the exit listens on plain WebSocket.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tunnel_cdn_direct() {
-    let base = 42500;
+    let base = 22500;
     tcp_echo(base + 2).await;
     udp_echo(base + 4).await;
     fake_cdn(base + 5, base).await;
@@ -433,27 +435,27 @@ async fn probe_case_strict(transport: &str, base: u16, want_throughput: bool) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn probe_tcpmux() {
-    probe_case("tcpmux", 42100).await;
+    probe_case("tcpmux", 22100).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn probe_quic() {
-    probe_case("quic", 42200).await;
+    probe_case("quic", 22200).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn probe_kcp_obfs() {
-    probe_case("kcp", 42300).await;
+    probe_case("kcp", 22300).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn probe_hq() {
-    probe_case("hq", 44800).await;
+    probe_case("hq", 24800).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn probe_h2() {
-    probe_case("h2", 44900).await;
+    probe_case("h2", 24900).await;
 }
 
 #[test]
