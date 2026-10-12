@@ -1658,6 +1658,13 @@ function smartWire(){var pv=function(){var el=$('#sp_prev');if(!el)return;var l=
 var AM_DUR=[[30,'30 min'],[60,'1 hour'],[180,'3 hours'],[360,'6 hours'],[720,'12 hours'],[1440,'1 day'],[4320,'3 days'],[10080,'7 days'],[0,'Until I remove it']];
 function amLeft(until,now){if(!until)return t('Until I remove it');var s=Math.max(0,until-now),h=Math.floor(s/3600),m=Math.ceil(s%3600/60);
  return (h?N(h)+' '+t('hours')+' ':'')+N(m)+' '+t('min')+' '+t('left')}
+function emerCard(el,url){var c=document.createElement('div');c.className='card';c.id='em_card';
+ c.innerHTML='<h3>'+ic('shield2',16)+' '+t('Emergency address')+'</h3><p class="sub">'+t('When the internet is cut, the Kanki app shows a small emergency button on its first screen and in Servers. It opens this address. Point the domain (ArvanCloud CDN or plain DNS) to this panel, and make sure the server answers to it.')+'</p>'+
+  '<label class="f">'+t('Domain')+'</label><input id="em_u" class="ltr" placeholder="https://chat.kanki.pro" value="'+esc(url)+'">'+
+  '<button class="btn" style="width:100%;margin-top:10px" id="em_go">'+t('Save')+'</button>'+
+  '<p class="hint" style="margin-top:8px">'+t('Public page of this address')+': <span class="ltr">'+esc(url||'https://…')+'/emergency</span></p>';
+ el.appendChild(c);
+ $('#em_go').onclick=function(){api('PUT','/api/app-emergency',{url:$('#em_u').value}).then(function(r){toast(t('Saved'));$('#em_card').remove();emerCard(el,r.url)}).catch(fail)}}
 function botAppMsg(){var el=$('#bt_am');if(!el)return;S.amDur=S.amDur==null?60:S.amDur;
  api('GET','/api/app-msg').then(function(m){
   var cur=m.active?'<div class="amcur on"><div class="row" style="justify-content:space-between;gap:8px"><span class="badge g"><span class="dot g"></span> '+t('Showing in the app')+'</span><small class="muted">'+amLeft(m.until,m.now)+'</small></div>'+
@@ -1675,6 +1682,7 @@ function botAppMsg(){var el=$('#bt_am');if(!el)return;S.amDur=S.amDur==null?60:S
   $('#am_go').onclick=function(){var tx=ta.value.trim();if(!tx)return toast(t('Write the message first'),1);
    api('PUT','/api/app-msg',{text:tx,minutes:S.amDur,users:$('#am_u').value}).then(function(){toast(t('Sent'));botAppMsg()}).catch(fail)};
   var d=$('#am_del');if(d)d.onclick=function(){confirmDo(function(){api('DELETE','/api/app-msg').then(function(){toast(t('Done'));botAppMsg()}).catch(fail)})}
+  api('GET','/api/app-emergency').then(function(em){emerCard(el,em.url||'')}).catch(function(){});
  }).catch(fail)}
 Object.assign(FA,{"Which methods to test":"کدام روش‌ها تست شوند","Raw ping (no tunnel)":"پینگ خام (بدون تانل)","the plain ping between the two servers, as a reference":"پینگ ساده‌ی بین دو سرور، به‌عنوان مرجع","Raw ping":"پینگ خام","Pick at least one method":"حداقل یک روش را انتخاب کن","No answer":"جوابی نیامد","loss":"افت","This is the base ping of the route; a good tunnel stays close to it.":"این پینگ پایه‌ی مسیر است؛ تانل خوب نزدیک به همین می‌ماند.","App message":"پیام اپ","30 min":"۳۰ دقیقه","1 hour":"۱ ساعت","3 hours":"۳ ساعت","6 hours":"۶ ساعت","12 hours":"۱۲ ساعت","1 day":"۱ روز","3 days":"۳ روز","7 days":"۷ روز","Until I remove it":"تا وقتی خودم پاکش کنم",
  "min":"دقیقه","left":"مانده","Showing in the app":"در حال نمایش در اپ","For":"برای","All users":"همه کاربران","Remove now":"همین الان پاک کن","No message is showing in the app right now.":"الان هیچ پیامی در اپ نمایش داده نمی‌شود.",
@@ -1905,11 +1913,14 @@ function tmRound(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+
 function pTunnels(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnels')+'</h2><p>'+t('Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit')+'</p></div>'+
  '<div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="b2 smartb" onclick="tunSmart()">⚡ '+t('Smart tunnel')+'</button><button class="btn" onclick="tunEdit()">+ '+t('Tunnel')+'</button></div></div>'+
  '<div class="card tmapc"><div id="tn_map"><span class="muted">'+t('Loading…')+'</span></div><div class="tkpi" id="tn_kpi"></div></div>'+
- '<div class="nh" style="margin-top:4px"><h3>'+t('Tunnels')+'</h3></div><div id="tn_list"></div>'+
+ '<div class="warnbox" id="tn_warn" style="display:none;margin:8px 0"></div><div class="nh" style="margin-top:4px"><h3>'+t('Tunnels')+'</h3></div><div id="tn_list"></div>'+
  '';
  tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
 function tunRefresh(quiet){return tunLoad().then(tunDraw).catch(function(e){if(!quiet)fail(e)})}
 function tunDraw(d){var m=$('#tn_map'),sl=$('#tn_srv');if(!m&&!sl)return;var sv=d.servers||[],tl=d.tunnels||[];
+ // warning: enabled Kanki tunnels are all down while AmneziaWG (direct) exists
+ var kd=tl.filter(function(x){return x.enabled&&x.kind!='awg'}),allDown=kd.length>0&&kd.every(function(x){return x.state=='down'}),hasAwg=tl.some(function(x){return x.kind=='awg'&&x.enabled});
+ var wb=$('#tn_warn');if(wb){wb.style.display=allDown?'block':'none';wb.innerHTML=allDown?'<b>⚠ '+t('The tunnels are not connected.')+'</b> '+t(hasAwg?'Tell the users to use the direct mode (AmneziaWG) now.':'No direct mode (AmneziaWG) tunnel exists yet: make one so the users can still connect.'):''}
  var up=tl.filter(function(x){return x.state=='up'}).length,on=sv.filter(function(s){return s.online}).length,rx=0,tx=0;
  tl.forEach(function(x){var s=x.entry_status;if(s){rx+=s.rx_bytes||0;tx+=s.tx_bytes||0}});
  if(m){var sig=JSON.stringify([sv.map(function(s){return [s.id,s.name,s.online,s.local]}),tl.map(function(x){return [x.id,x.entry,x.exit,x.state,x.transport,Math.round(((x.entry_status||{}).rtt_ms||0)/10)]})]);

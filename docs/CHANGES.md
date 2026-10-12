@@ -1,3 +1,9 @@
+# v3.2.0 — Emergency address, public emergency page, tunnel-down warning
+- **Emergency address:** the admin sets the domain (for example `https://chat.kanki.pro`) in the app-message card. The Kanki app shows an emergency button on its first screen and in Servers; it opens `<domain>/emergency`, and remembers the address so it works while the internet is cut.
+- **Public emergency page** (`/emergency`): shows the current app message and how to connect in an emergency. It is served on whatever domain points to the panel.
+- **Tunnel-down warning:** when every enabled Kanki tunnel is down, the Tunnels page says so and tells you to switch the users to the direct mode (AmneziaWG).
+- Point the domain to the panel server (or its CDN) and make sure the server answers to it (Caddy site for that host).
+
 # v3.1.3 — Hysteria2 is installed the same way as for VPN users
 - **The cause** of "Hysteria2 is not installed" on the Iran server: the official installer `get.hy2.sh` first asks `api.hy2.io` for the newest version and stops when only that site is unreachable, even when GitHub works.
 - **Tunnel agents now install Hysteria2 exactly like the panel does for users:** first `get.hy2.sh`; if it stops, the same GitHub file it would download (or the copy on download.hysteria.network) is installed **with the same installer** (`--local`), so the result is identical (binary, user, service files). Then, as before, the panel / the other server of the tunnel.

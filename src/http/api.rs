@@ -156,6 +156,8 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/settings", get(settings_get).put(settings_put))
         .route("/api/settings/apply-endpoint", post(apply_endpoint_all))
         .route("/api/app-msg", get(app_msg_get).put(app_msg_put).delete(app_msg_delete))
+        .route("/api/app-emergency", get(emergency_get).put(emergency_put))
+        .route("/emergency", get(emergency_page))
         .route("/api/plans", get(plans_list).post(plans_add))
         .route("/api/plans/bulk", post(plans_bulk))
         .route("/api/plans/category", axum::routing::put(plans_cat_rename))
@@ -708,6 +710,74 @@ async fn app_msg_delete(State(app): St, h: HeaderMap) -> Response {
     Json(json!({ "ok": true })).into_response()
 }
 
+// ============================================================ emergency address (for when the internet is cut)
+
+/// The address the Kanki app opens when the internet is cut, e.g. https://chat.kanki.pro (empty = none)
+fn emergency_url(app: &App) -> String {
+    app.db.get("app_emergency")
+}
+
+async fn emergency_get(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    Json(json!({ "url": emergency_url(&app) })).into_response()
+}
+
+/// { url } — an https:// domain (letters, digits, dots, dashes, optional path); empty removes it
+async fn emergency_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "settings");
+    let raw = b["url"].as_str().unwrap_or("").trim().trim_end_matches('/').to_string();
+    if raw.is_empty() {
+        app.db.set("app_emergency", "");
+        return Json(json!({ "ok": true, "url": "" })).into_response();
+    }
+    let host = raw.strip_prefix("https://").unwrap_or("");
+    let host_part = host.split('/').next().unwrap_or("");
+    let ok_host = !host_part.is_empty()
+        && host_part.len() <= 253
+        && host_part.split('.').all(|l| !l.is_empty() && l.len() <= 63 && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') && !l.starts_with('-') && !l.ends_with('-'));
+    if !raw.starts_with("https://") || !ok_host || host_part.contains(':') {
+        return err(StatusCode::BAD_REQUEST, "enter a domain like https://chat.example.com");
+    }
+    let url = format!("https://{}", host);
+    app.db.set("app_emergency", &url);
+    Json(json!({ "ok": true, "url": url })).into_response()
+}
+
+/// Public page on the emergency domain: the admin's current message, and how to use the app now
+async fn emergency_page(State(app): St) -> Response {
+    let text = app.db.get("app_msg");
+    let until: i64 = app.db.get("app_msg_until").parse().unwrap_or(0);
+    let to = app.db.get("app_msg_users");
+    let shown = !text.trim().is_empty() && (until == 0 || now() < until) && to.trim().is_empty();
+    let msg = if shown {
+        format!(r#"<div class="msg">{}</div>"#, esc(&text))
+    } else {
+        r#"<div class="msg muted">الان پیامی برای نمایش نیست.</div>"#.to_string()
+    };
+    let name = esc(&app.db.get("panel_name"));
+    let html = format!(
+        r#"<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{name}</title><style>
+:root{{--bg:#0b0b0d;--card:#17161a;--gold:#d4a84b;--text:#f3ede0;--muted:#9a9489}}
+@media (prefers-color-scheme: light){{:root:not([data-theme="dark"]){{--bg:#f6f2ea;--card:#fff;--gold:#a9782a;--text:#241d10;--muted:#6f6758}}}}
+body{{margin:0;background:var(--bg);color:var(--text);font-family:Vazirmatn,Tahoma,sans-serif;line-height:1.9}}
+.wrap{{max-width:560px;margin:0 auto;padding:16px}}
+h1{{font-size:20px;color:var(--gold);margin:12px 0}}
+.card{{background:var(--card);border:1px solid var(--gold);border-radius:16px;padding:16px;margin:12px 0}}
+.msg{{font-size:15px;white-space:pre-wrap}} .muted{{color:var(--muted)}}
+p{{margin:8px 0}}
+</style></head><body><div class="wrap">
+<h1>{name}</h1>
+<div class="card"><b>پیام مدیر</b>{msg}</div>
+<div class="card"><b>راهنمای اتصال در شرایط قطع اینترنت</b>
+<p>۱. اپ را باز کنید و از بخش سرورها، روی سرور داخلی وصل شوید.</p>
+<p>۲. اگر تانل‌ها وصل نشدند، حالت «مستقیم» (AmneziaWG) را انتخاب کنید.</p>
+<p>۳. این صفحه را هر وقت اینترنت قطع شد باز کنید تا پیام تازه را ببینید.</p></div>
+</div></body></html>"#
+    );
+    ([(header::CACHE_CONTROL, "no-store")], Html(html)).into_response()
+}
+
 async fn plans_list(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "settings");
     let v: Vec<Value> = app.db.with(|c| {
@@ -860,6 +930,7 @@ fn sub_data(app: &App, u: &User) -> Value {
         "support": app.db.get("support"), "app_link": app.db.get("app_link"),
         "logo": app.db.get("logo"),
         "app_msg": app_msg(app, &u.username),
+        "emergency": emergency_url(&app),
     })
 }
 
