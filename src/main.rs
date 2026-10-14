@@ -14,6 +14,8 @@ mod api;
 mod auth;
 #[path = "http/backup.rs"]
 mod backup;
+#[path = "http/subdomain.rs"]
+mod subdomain;
 
 // vpn: protocol engines + node sync
 #[path = "vpn/hy2.rs"]
