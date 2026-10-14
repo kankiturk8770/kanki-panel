@@ -1220,6 +1220,7 @@ pub fn router() -> Router<Arc<App>> {
         // a hysteria binary is ~20 MB (the rest of the panel keeps the 2 MiB limit)
         .route("/tunnel/hy2bin/put", post(agent_hy2bin_put).layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)))
         .route("/api/update-all", post(update_all))
+        .route("/api/auto-update", get(auto_update_get).put(auto_update_put))
         .route("/api/emergency", get(emer_get).put(emer_put))
         .route("/api/emergency/rekey", post(emer_rekey))
 }
@@ -1994,6 +1995,13 @@ async fn agent_binary(State(app): St, Json(b): Json<Value>) -> Response {
 /// panel itself. A machine that is both a node and a tunnel server is updated once (through its node).
 async fn update_all(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "admin");
+    Json(run_update_all(&app).await).into_response()
+}
+
+/// "Update all": the nodes, the tunnel servers (they take the panel's binary), then the panel itself.
+/// Used by the button and by the nightly automatic update.
+pub(crate) async fn run_update_all(app: &Arc<App>) -> Value {
+    let app = app.clone();
     let latest = crate::admin::latest_version(&app).await.unwrap_or_default();
     let target = if latest.is_empty() { crate::VERSION.to_string() } else { latest.clone() };
     let panel_old = !latest.is_empty() && crate::admin::newer(&latest, crate::VERSION);
@@ -2064,5 +2072,81 @@ async fn update_all(State(app): St, h: HeaderMap) -> Response {
         };
     }
     let covered_names: Vec<String> = srv.iter().filter(|s| covered.contains(&s.id)).map(|s| s.name.clone()).collect();
-    Json(json!({ "ok": true, "latest": latest, "panel": panel_msg, "nodes": nodes_out, "agents": flagged, "manual": manual, "also_nodes": covered_names })).into_response()
+    json!({ "ok": true, "latest": latest, "panel": panel_msg, "nodes": nodes_out, "agents": flagged, "manual": manual, "also_nodes": covered_names })
+}
+
+// ------------------------------------------------------------------ automatic update every night at 03:30 (Tehran)
+
+/// Tehran is UTC+3:30 all year (no summer time since 2022): 03:30 there is 00:00 UTC.
+const TEHRAN_OFFSET: i64 = 3 * 3600 + 1800;
+
+/// (day number, minute of the day) in Tehran time
+fn tehran_now() -> (i64, i64) {
+    let t = now() + TEHRAN_OFFSET;
+    (t / 86400, (t % 86400) / 60)
+}
+
+/// the next 03:30 Tehran time, as a unix timestamp
+fn next_run_ts() -> i64 {
+    let t = now() + TEHRAN_OFFSET;
+    let mut run = (t / 86400) * 86400 + 210 * 60;
+    if run <= t {
+        run += 86400;
+    }
+    run - TEHRAN_OFFSET
+}
+
+/// Checks once a minute; between 03:30 and 04:00 Tehran time, once a day, runs "Update all" when the
+/// switch is on. Components already on the newest version are left alone.
+pub async fn auto_update_loop(app: Arc<App>) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        if app.db.get("auto_update") != "1" {
+            continue;
+        }
+        let (day, minute) = tehran_now();
+        if !(210..240).contains(&minute) || app.db.get("auto_update_day") == day.to_string() {
+            continue;
+        }
+        // marked first: the panel restarts itself during the update and must not run it twice
+        app.db.set("auto_update_day", &day.to_string());
+        let latest = crate::admin::latest_version(&app).await.unwrap_or_default();
+        let msg = if latest.is_empty() {
+            "GitHub could not be reached; nothing was updated".to_string()
+        } else {
+            let r = run_update_all(&app).await;
+            let nodes = r["nodes"].as_array().map(|a| a.len()).unwrap_or(0);
+            let agents = r["agents"].as_array().map(|a| a.len()).unwrap_or(0);
+            format!("v{}: panel {}, {} node(s), {} tunnel server(s)", latest, r["panel"].as_str().unwrap_or(""), nodes, agents)
+        };
+        eprintln!("automatic update: {}", msg);
+        app.db.set("auto_update_last", &json!({ "ts": now(), "msg": msg }).to_string());
+    }
+}
+
+async fn auto_update_get(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "admin");
+    let last: Value = serde_json::from_str(&app.db.get("auto_update_last")).unwrap_or(Value::Null);
+    Json(json!({ "on": app.db.get("auto_update") == "1", "next": next_run_ts(), "last": last })).into_response()
+}
+
+async fn auto_update_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "admin");
+    let on = b["on"].as_bool().unwrap_or(false);
+    app.db.set("auto_update", if on { "1" } else { "" });
+    Json(json!({ "ok": true, "on": on, "next": next_run_ts() })).into_response()
+}
+
+#[cfg(test)]
+mod auto_update_tests {
+    #[test]
+    fn next_run_is_0330_tehran_within_a_day() {
+        let n = super::next_run_ts();
+        let now = crate::util::now();
+        // 03:30 Tehran (UTC+3:30) is midnight UTC
+        assert_eq!(n % 86400, 0);
+        assert!(n > now && n <= now + 86400);
+        let (_, minute) = super::tehran_now();
+        assert!((0..1440).contains(&minute));
+    }
 }

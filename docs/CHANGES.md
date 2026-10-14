@@ -1,3 +1,7 @@
+# v3.3.2 — Automatic update every night
+- **Automatic update switch** (in the update window of the version button, and in Settings › Update): every night at **03:30 Tehran time**, if GitHub has a newer version, the panel runs "Update all" by itself: the nodes, the tunnel servers, then the panel. Components already on the newest version are left alone. The window shows the next run and the result of the last one. "Update all" by hand works as before.
+- After an update the **emergency chat** moves to the new version too (before, it kept running the old binary until restarted).
+
 # v3.3.1 — Emergency chat: automatic SSL, better admin page, fixes
 - **Automatic SSL:** choose "Automatic SSL" and the Iran server gets (and renews) a Let's Encrypt certificate for the domain by itself (certbot; port 80 must be free). Other choices: SSL from the CDN (ArvanCloud), your own certificate, or plain HTTP.
 - **Admin page rebuilt:** every customer listed with search, conversations first with unread counts, delivery ticks (green ✓✓ when the app has the message), a config mode (each line is sent as its own config, with a copy button), picture zoom, the main panel's look, works on phones.

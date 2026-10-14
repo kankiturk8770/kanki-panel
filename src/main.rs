@@ -199,6 +199,9 @@ async fn main() {
 
     tokio::spawn(sync::run(app.clone()));
     tokio::spawn(tunnel::panel::local_loop(app.clone()));
+    tokio::spawn(tunnel::panel::auto_update_loop(app.clone()));
+    // an updated panel also moves an emergency chat on this server onto the new binary
+    tokio::task::spawn_blocking(emergency::restart_if_outdated);
     tokio::spawn(backup::telegram_loop(app.clone()));
     tokio::spawn(channel::channel_loop(app.clone()));
     if let Some(b) = bot::Bot::new(app.clone()) {

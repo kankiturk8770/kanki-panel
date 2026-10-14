@@ -1402,7 +1402,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
  case 'ntf':return stSw('tg_alerts','Server alerts','Telegram message to the bot admins when a node, tunnel server or tunnel goes offline, and when it is back.')+
   stSw('warn_on','Warn buyers','The buyer gets a message before his time or data runs out.')+stSw('backup_on','Daily backup to bot admins','An encrypted full backup is sent to the bot admins once a day.')+
   '<div class="hint" style="margin-top:8px">'+t('These messages are sent by the sales bot; set it up first in')+' <a href="#bot">'+t('Sales bot')+'</a>.</div>';
- case 'upd':return '<div class="vcard"><div><small>'+t('Current version')+'</small><b>v'+esc(S.me.version)+'</b></div><div><small>'+t('Latest version')+'</small><b id="st_lv">…</b></div></div><div class="vmsg" id="st_um">'+t('Checking…')+'</div>'+
+ case 'upd':return '<div class="vcard"><div><small>'+t('Current version')+'</small><b>v'+esc(S.me.version)+'</b></div><div><small>'+t('Latest version')+'</small><b id="st_lv">…</b></div></div><div class="vmsg" id="st_um">'+t('Checking…')+'</div>'+autoUpdBox()+
   '<div class="row" style="margin-top:10px"><button class="b2" type="button" id="st_chk">'+ic('refresh',15)+' '+t('Check for update')+'</button><button class="btn hide" type="button" id="st_go">'+t('Install update')+'</button></div>'+
   '<div class="sgrid" style="margin-top:8px">'+stIn('update_repo','Update source (GitHub repo)','owner/kanki-panel','Releases of this repository are used for updates, for “Update all” and for new tunnel servers.','full')+'</div>'+
   (s.repo_env?'<div class="warnbox">'+t('KANKI_REPO in /etc/kanki/kanki.env is set; it wins over this field.')+'</div>':'')+
@@ -1455,7 +1455,7 @@ function stSave(sec,btn){var id=sec.dataset.sec,body={};$$('[data-k]',sec).forEa
   if(id=='upd')stUpdate(true)}).catch(function(e){btn.disabled=false;fail(e)})}
 function stSub(d){var g=$('#sd_go'),m=$('#sd_msg');g.disabled=true;m.textContent=d?t('Getting the SSL certificate… this can take up to one minute'):'…';
  api('POST','/api/sub-domain',{domain:d}).then(function(r){S.st.sub_domain=r.domain||'';toast(t('Done'));pSettings()}).catch(function(e){g.disabled=false;m.textContent=e.message||'';fail(e)})}
-function stUpdate(force){var m=$('#st_um');if(!m||(!force&&m._done))return;m._done=1;m.className='vmsg';m.textContent=t('Checking…');
+function stUpdate(force){autoUpdWire();var m=$('#st_um');if(!m||(!force&&m._done))return;m._done=1;m.className='vmsg';m.textContent=t('Checking…');
  api('GET','/api/update/check').then(function(r){$('#st_lv').textContent=r.latest?'v'+r.latest:'—';
   m.className='vmsg '+(r.error?'er':(r.available?'up':'ok'));m.textContent=r.error?t(r.error):(r.available?t('A new version is available.'):t('You are on the latest version.'));
   $('#st_go').classList.toggle('hide',!r.available)}).catch(function(e){m.className='vmsg er';m.textContent=t(e.message||'')})}
@@ -1482,10 +1482,20 @@ Object.assign(FA,{"Overview":"نمای کلی","Users & sales":"کاربران �
  "Unsaved changes":"تغییرات ذخیره‌نشده","Undo":"برگرداندن","Image is too complex, use a simpler logo":"تصویر خیلی پیچیده است؛ لوگوی ساده‌تری انتخاب کن","Cannot read this image":"این تصویر خوانده نمی‌شود","Telegram alert when a node or tunnel goes offline":"هشدار تلگرام وقتی نود یا تانل قطع شود","Dashboard":"داشبورد"});
 
 // ---------------------------------------------------------------- update
-function updateModal(){modal(mhead(t('Update')+' '+((S.me&&S.me.panel_name)||''))+'<div class="g2"><div class="pc" style="flex-direction:column"><small class="muted">'+t('Current version')+'</small><b class="ltr" id="u_c">v'+esc(S.me.version)+'</b></div><div class="pc" style="flex-direction:column"><small class="muted">'+t('Latest version')+'</small><b class="ltr" id="u_l">…</b></div></div><p id="u_m" class="muted"></p>'+
+// automatic update every night at 03:30 Tehran time (the same as “Update all”)
+function autoUpdBox(){return '<label class="chk" style="margin:10px 0"><input type="checkbox" id="au_on"><span><b>🌙 '+t('Automatic update')+'</b><small id="au_txt" style="display:block;margin-top:2px">'+t('Every night at 03:30 Tehran time, if GitHub has a new version: the panel, the nodes, the tunnel servers and the emergency chat are updated by themselves.')+'</small></span></label>'}
+function auTxt(r){var el=$('#au_txt');if(!el||!r)return;var f=function(ts,o){return new Date(ts*1000).toLocaleString(S.lang=='fa'?'fa-IR':'en-GB',Object.assign({timeZone:'Asia/Tehran',hour:'2-digit',minute:'2-digit'},o))};
+ var x=t('Every night at 03:30 Tehran time, if GitHub has a new version: the panel, the nodes, the tunnel servers and the emergency chat are updated by themselves.');
+ if(r.on)x+=' · '+t('Next run')+': '+f(r.next,{weekday:'short'});
+ if(r.last&&r.last.ts)x+=' · '+t('Last run')+': '+f(r.last.ts,{month:'short',day:'numeric'})+' — '+r.last.msg;el.textContent=x}
+function autoUpdWire(){var c=$('#au_on');if(!c||c._w)return;c._w=1;
+ api('GET','/api/auto-update').then(function(r){c.checked=r.on;auTxt(r)}).catch(function(){c.closest('label').style.display='none'});
+ c.onchange=function(){var on=c.checked;api('PUT','/api/auto-update',{on:on}).then(function(){toast(on?t('Automatic update is on'):t('Automatic update is off'));return api('GET','/api/auto-update').then(auTxt)}).catch(function(e){c.checked=!on;fail(e)})}}
+Object.assign(FA,{"Automatic update":"آپدیت خودکار","Every night at 03:30 Tehran time, if GitHub has a new version: the panel, the nodes, the tunnel servers and the emergency chat are updated by themselves.":"هر شب ساعت ۳:۳۰ به وقت تهران، اگر نسخه‌ی جدیدی در گیت‌هاب باشد: پنل، نودها، سرورهای تانل و چت اضطراری خودکار آپدیت می‌شوند.","Next run":"اجرای بعدی","Last run":"آخرین اجرا","Automatic update is on":"آپدیت خودکار روشن شد","Automatic update is off":"آپدیت خودکار خاموش شد"});
+function updateModal(){modal(mhead(t('Update')+' '+((S.me&&S.me.panel_name)||''))+'<div class="g2"><div class="pc" style="flex-direction:column"><small class="muted">'+t('Current version')+'</small><b class="ltr" id="u_c">v'+esc(S.me.version)+'</b></div><div class="pc" style="flex-direction:column"><small class="muted">'+t('Latest version')+'</small><b class="ltr" id="u_l">…</b></div></div><p id="u_m" class="muted"></p>'+autoUpdBox()+
  '<div class="row" style="justify-content:center"><button class="btn" id="u_chk">'+t('Check for update')+'</button><button class="btn hide" id="u_go">'+t('Install update')+'</button></div><p class="muted">'+t('Updates come from the GitHub releases of your repo.')+'</p>');
  function chk(){$('#u_m').textContent=t('Checking…');api('GET','/api/update/check').then(function(r){$('#u_l').textContent=r.latest?'v'+r.latest:'—';$('#u_m').textContent=r.error?r.error:(r.available?t('A new version is available.'):t('You are on the latest version.'));$('#u_go').classList.toggle('hide',!r.available)}).catch(fail)}
- $('#u_chk').onclick=chk;$('#u_go').onclick=function(){this.disabled=true;api('POST','/api/update/apply').then(function(r){toast('v'+r.version+' ✓');setTimeout(function(){location.reload()},5000)}).catch(fail)};chk()}
+ autoUpdWire();$('#u_chk').onclick=chk;$('#u_go').onclick=function(){this.disabled=true;api('POST','/api/update/apply').then(function(r){toast('v'+r.version+' ✓');setTimeout(function(){location.reload()},5000)}).catch(fail)};chk()}
 
 // ================================================================ v2.3: Kanki Panel
 Object.assign(ICO,{

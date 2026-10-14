@@ -148,6 +148,8 @@ pub async fn run(version: &str) {
         .danger_accept_invalid_certs(insecure)
         .build()
         .expect("http");
+    // an updated agent also moves the emergency chat onto the new binary
+    let _ = tokio::task::spawn_blocking(crate::emergency::restart_if_outdated).await;
     let mut fails = 0u32;
     // the last error of setting up the emergency chat (reported to the panel)
     let emer_err: Mutex<Option<String>> = Mutex::new(None);

@@ -618,6 +618,8 @@ pub async fn run() {
         None
     };
     eprintln!("kanki emergency chat on {} ({})", addr, if tls.is_some() { "https" } else { "http" });
+    // the version this chat runs: after an update the agent / panel restarts it onto the new binary
+    let _ = std::fs::write(RUNNING_VER, crate::VERSION);
     loop {
         let Ok((sock, peer)) = l.accept().await else { continue };
         let app = app.clone().layer(Extension(Peer(peer)));
@@ -749,6 +751,18 @@ fn get_cert(domain: &str) -> Result<(), String> {
     } else {
         let why = out.lines().rev().find(|l| l.contains("Detail") || l.contains("Problem") || l.contains("Error") || l.contains("Could not")).unwrap_or("certbot failed").trim().to_string();
         Err(format!("SSL for {} failed: {}. Port 80 of this server must be free and {} must point to it.", domain, why, domain))
+    }
+}
+
+const RUNNING_VER: &str = "/var/lib/kanki/emergency/running.ver";
+
+/// After the agent or the panel was updated, the chat still runs the old binary in memory:
+/// restart it once so it runs the new one too. Blocking (systemctl).
+pub fn restart_if_outdated() {
+    let Ok(v) = std::fs::read_to_string(RUNNING_VER) else { return };
+    if v.trim() != crate::VERSION && std::path::Path::new(UNIT).exists() && running() {
+        eprintln!("emergency chat: restarting onto v{}", crate::VERSION);
+        let _ = sh("systemctl restart kanki-emergency.service");
     }
 }
 
