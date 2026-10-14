@@ -149,15 +149,28 @@ pub async fn run(version: &str) {
         .build()
         .expect("http");
     let mut fails = 0u32;
+    // the last error of setting up the emergency chat (reported to the panel)
+    let emer_err: Mutex<Option<String>> = Mutex::new(None);
     loop {
         let st = mgr.statuses().await;
-        let body = json!({ "id": id, "token": token, "version": version, "status": st });
+        let (emer_ver, mut emer_st) = tokio::task::spawn_blocking(|| (crate::emergency::applied_ver(), crate::emergency::status()))
+            .await
+            .unwrap_or_default();
+        if let Some(e) = emer_err.lock().unwrap().clone() {
+            if emer_st.is_object() {
+                emer_st["error"] = json!(e);
+            } else {
+                emer_st = json!({ "active": false, "error": e });
+            }
+        }
+        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st });
         match http.post(format!("{}/tunnel/agent", panel)).json(&body).send().await {
             Ok(r) if r.status().as_u16() == 410 => {
                 // this server was removed in the panel
                 if !last.is_empty() {
                     eprintln!("the panel removed this server: stopping every tunnel");
                     mgr.apply(vec![]).await;
+                    let _ = tokio::task::spawn_blocking(|| crate::emergency::deploy(None)).await;
                     let _ = std::fs::remove_file(CACHE);
                     last.clear();
                 }
@@ -165,6 +178,20 @@ pub async fn run(version: &str) {
             Ok(r) if r.status().is_success() => {
                 fails = 0;
                 if let Ok(v) = r.json::<Value>().await {
+                    // the emergency chat: "set" (new config), "keep" (unchanged) or "off"
+                    match v["emergency"]["mode"].as_str() {
+                        Some("set") => {
+                            if let (Ok(c), Some(ver)) = (serde_json::from_value::<crate::emergency::EmerCfg>(v["emergency"]["cfg"].clone()), v["emergency"]["ver"].as_str().map(|s| s.to_string())) {
+                                let r = tokio::task::spawn_blocking(move || crate::emergency::deploy(Some((&c, &ver)))).await.unwrap_or(Err("deploy crashed".into()));
+                                *emer_err.lock().unwrap() = r.err();
+                            }
+                        }
+                        Some("off") => {
+                            let r = tokio::task::spawn_blocking(|| crate::emergency::deploy(None)).await.unwrap_or(Ok(()));
+                            *emer_err.lock().unwrap() = r.err();
+                        }
+                        _ => {}
+                    }
                     if v["update"].as_bool() == Some(true) {
                         if let Err(e) = update_from_panel(&http, &panel, &id, &token).await {
                             eprintln!("update from the panel failed: {}", e);

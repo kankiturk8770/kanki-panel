@@ -18,6 +18,7 @@ mod backup;
 mod subdomain;
 
 // vpn: protocol engines + node sync
+mod emergency;
 #[path = "vpn/hy2.rs"]
 mod hy2;
 #[path = "vpn/sync.rs"]
@@ -91,6 +92,11 @@ async fn main() {
         }
         "help" | "--help" | "-h" => {
             usage();
+            return;
+        }
+        // the emergency chat server on an Iran server (started by the tunnel agent)
+        "emergency" => {
+            emergency::run().await;
             return;
         }
         "tunnel-agent" => {

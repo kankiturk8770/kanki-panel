@@ -602,7 +602,9 @@ checksum = "2c3e324da4c95177d6291d4c8730197c0d1822f8a9766814a4a44fa5ab797c9c"
 dependencies = [
  "atomic-waker",
  "bytes",
+ "futures-channel",
  "futures-core",
+ "h2",
  "http",
  "http-body",
  "httparse",
@@ -826,7 +828,7 @@ dependencies = [
 
 [[package]]
 name = "kanki-panel"
-version = "3.2.1"
+version = "3.3.0"
 dependencies = [
  "axum",
  "bytes",
@@ -839,11 +841,13 @@ dependencies = [
  "hkdf",
  "hmac",
  "http",
+ "hyper-util",
  "qrcode",
  "quinn",
  "rand 0.8.8",
  "rcgen",
  "reqwest",
+ "ring",
  "rusqlite",
  "rustls",
  "serde",
@@ -854,6 +858,7 @@ dependencies = [
  "tokio-rustls",
  "tokio-tungstenite",
  "tokio_kcp",
+ "tower",
  "x25519-dalek",
 ]
 

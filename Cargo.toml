@@ -1,6 +1,6 @@
 [package]
 name = "kanki-panel"
-version = "3.2.1"
+version = "3.3.0"
 edition = "2021"
 
 [dependencies]
@@ -32,6 +32,12 @@ tokio_kcp = "0.9"
 h2 = "0.4"
 http = "1"
 bytes = "1"
+# emergency chat server (signing + serving axum over TLS)
+ring = "0.17"
+hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
 
 [profile.release]
 opt-level = 3

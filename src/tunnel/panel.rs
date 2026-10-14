@@ -109,6 +109,8 @@ struct Seen {
     version: String,
     ip: String,
     status: Vec<Status>,
+    /// the emergency chat on this server (Null when it does not run one)
+    emergency: Value,
 }
 
 fn seen() -> &'static Mutex<HashMap<String, Seen>> {
@@ -1085,8 +1087,28 @@ pub async fn local_loop(app: Arc<App>) {
         let st = mgr.statuses().await;
         seen().lock().unwrap().insert(
             "local".into(),
-            Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st },
+            Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, emergency: Value::Null },
         );
+        // the emergency chat may run on the panel server itself
+        let want = if app.db.get("emer_server") == "local" { emer_cfg(&app) } else { None };
+        let st = tokio::task::spawn_blocking(move || {
+            let r = match &want {
+                // a new config, or the chat stopped: (re)install and start it
+                Some((c, ver)) if crate::emergency::applied_ver() != *ver || !crate::emergency::running() => crate::emergency::deploy(Some((c, ver))),
+                Some(_) => Ok(()),
+                None => crate::emergency::deploy(None),
+            };
+            let mut s = crate::emergency::status();
+            if let Err(e) = r {
+                s["error"] = json!(e);
+            }
+            s
+        })
+        .await
+        .unwrap_or(Value::Null);
+        if let Some(x) = seen().lock().unwrap().get_mut("local") {
+            x.emergency = st;
+        }
         rotate_tick(&app);
         let want: Vec<(u8, String)> = servers(&app)
             .iter()
@@ -1198,6 +1220,8 @@ pub fn router() -> Router<Arc<App>> {
         // a hysteria binary is ~20 MB (the rest of the panel keeps the 2 MiB limit)
         .route("/tunnel/hy2bin/put", post(agent_hy2bin_put).layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)))
         .route("/api/update-all", post(update_all))
+        .route("/api/emergency", get(emer_get).put(emer_put))
+        .route("/api/emergency/rekey", post(emer_rekey))
 }
 
 fn status_json(st: Option<&Status>) -> Value {
@@ -1716,6 +1740,168 @@ async fn server_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
     Json(json!({ "ok": true })).into_response()
 }
 
+// ------------------------------------------------------------------ emergency chat (runs on a server inside Iran)
+
+/// The config the chosen server runs, and its version (a hash, so it is sent only on change)
+pub(crate) fn emer_cfg(app: &App) -> Option<(crate::emergency::EmerCfg, String)> {
+    if app.db.get("emer_on") != "1" || app.db.get("emer_sign").is_empty() || app.db.get("emer_admin").is_empty() {
+        return None;
+    }
+    let users = app
+        .db
+        .users()
+        .into_iter()
+        .map(|u| crate::emergency::EUser { h: crate::emergency::user_hash(&u.sub_code()), u: u.username })
+        .collect();
+    let c = crate::emergency::EmerCfg {
+        port: app.db.get("emer_port").parse().unwrap_or(0),
+        cert: app.db.get("emer_cert"),
+        key: app.db.get("emer_key"),
+        admin_hash: app.db.get("emer_admin"),
+        sign_key: app.db.get("emer_sign"),
+        name: app.db.get("panel_name"),
+        users,
+    };
+    if c.port == 0 {
+        return None;
+    }
+    let ver = util::sha256_hex(&serde_json::to_string(&c).unwrap_or_default());
+    Some((c, ver))
+}
+
+/// The address the app talks to: http(s)://domain[:port]. Empty when the chat is off.
+pub(crate) fn emer_url(app: &App) -> String {
+    if app.db.get("emer_on") != "1" {
+        return String::new();
+    }
+    let tls = !app.db.get("emer_cert").is_empty();
+    let port: u16 = app.db.get("emer_port").parse().unwrap_or(0);
+    let d = app.db.get("emer_domain");
+    if d.is_empty() || port == 0 {
+        return String::new();
+    }
+    let def = if tls { 443 } else { 80 };
+    format!("{}://{}{}", if tls { "https" } else { "http" }, d, if port == def { String::new() } else { format!(":{}", port) })
+}
+
+/// The public key the app checks admin messages with (empty when the chat is off)
+pub(crate) fn emer_pub(app: &App) -> String {
+    if app.db.get("emer_on") != "1" { String::new() } else { app.db.get("emer_pub") }
+}
+
+async fn emer_get(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    let sid = app.db.get("emer_server");
+    let st = seen().lock().unwrap().get(&sid).map(|x| x.emergency.clone()).unwrap_or(Value::Null);
+    let users = app.db.users().len();
+    Json(json!({
+        "on": app.db.get("emer_on") == "1", "server": sid, "domain": app.db.get("emer_domain"),
+        "port": app.db.get("emer_port").parse::<u16>().unwrap_or(0), "tls": !app.db.get("emer_cert").is_empty(),
+        "has_password": !app.db.get("emer_admin").is_empty(), "url": emer_url(&app), "status": st, "customers": users,
+        "key": app.db.get("emer_pub").chars().rev().take(12).collect::<String>(),
+    }))
+    .into_response()
+}
+
+fn host_ok(d: &str) -> bool {
+    if d.parse::<std::net::IpAddr>().is_ok() {
+        return true;
+    }
+    !d.is_empty()
+        && d.len() <= 253
+        && d.contains('.')
+        && d.split('.').all(|l| !l.is_empty() && l.len() <= 63 && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') && !l.starts_with('-') && !l.ends_with('-'))
+}
+
+/// { on, server, domain, port, cert, key, password, clear_tls }. Everything is checked first;
+/// nothing is saved when one value is wrong.
+async fn emer_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "settings");
+    let s = |k: &str| b[k].as_str().unwrap_or("").trim().to_string();
+    let on = b["on"].as_bool().unwrap_or(false);
+    let server = if b.get("server").is_some() { s("server") } else { app.db.get("emer_server") };
+    if on && !(server == "local" || servers(&app).iter().any(|x| x.id == server)) {
+        return err(StatusCode::BAD_REQUEST, "choose the server inside Iran");
+    }
+    let domain = if b.get("domain").is_some() {
+        s("domain").trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_lowercase()
+    } else {
+        app.db.get("emer_domain")
+    };
+    if !domain.is_empty() && !host_ok(&domain) {
+        return err(StatusCode::BAD_REQUEST, "enter a domain like chat.example.com");
+    }
+    let port = match b["port"].as_u64() {
+        Some(p) if p == 0 || p > 65535 || p == 22 => return err(StatusCode::BAD_REQUEST, "choose a port between 1 and 65535 (not 22)"),
+        Some(p) => p.to_string(),
+        None => app.db.get("emer_port"),
+    };
+    let (cert, key) = (s("cert"), s("key"));
+    let tls = if !cert.is_empty() || !key.is_empty() {
+        if !cert.contains("BEGIN CERTIFICATE") {
+            return err(StatusCode::BAD_REQUEST, "the certificate must be PEM (-----BEGIN CERTIFICATE-----)");
+        }
+        if !key.contains("BEGIN PRIVATE KEY") {
+            return err(StatusCode::BAD_REQUEST, "the key must be PKCS#8 PEM (-----BEGIN PRIVATE KEY-----). Convert it: openssl pkcs8 -topk8 -nocrypt -in key.pem");
+        }
+        Some((cert, key))
+    } else if b["clear_tls"].as_bool() == Some(true) {
+        Some((String::new(), String::new()))
+    } else {
+        None
+    };
+    let pw = b["password"].as_str().unwrap_or("");
+    if !pw.is_empty() && pw.chars().count() < 10 {
+        return err(StatusCode::BAD_REQUEST, "the password must be at least 10 characters");
+    }
+    if on {
+        if pw.is_empty() && app.db.get("emer_admin").is_empty() {
+            return err(StatusCode::BAD_REQUEST, "set the admin password of the emergency chat");
+        }
+        if domain.is_empty() || port.is_empty() {
+            return err(StatusCode::BAD_REQUEST, "enter the domain and the port");
+        }
+    }
+    let sign = if app.db.get("emer_sign").is_empty() {
+        match crate::emergency::gen_sign_key() {
+            Ok(k) => Some(k),
+            Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+        }
+    } else {
+        None
+    };
+    // all checked: save
+    app.db.set("emer_server", &server);
+    app.db.set("emer_domain", &domain);
+    app.db.set("emer_port", &port);
+    if let Some((c, k)) = tls {
+        app.db.set("emer_cert", &c);
+        app.db.set("emer_key", &k);
+    }
+    if !pw.is_empty() {
+        app.db.set("emer_admin", &util::hash_password(pw));
+    }
+    if let Some((k, p)) = sign {
+        app.db.set("emer_sign", &k);
+        app.db.set("emer_pub", &p);
+    }
+    app.db.set("emer_on", if on { "1" } else { "" });
+    Json(json!({ "ok": true, "url": emer_url(&app) })).into_response()
+}
+
+/// a new signing key: apps trust it after they refresh their subscription (while the internet works)
+async fn emer_rekey(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    match crate::emergency::gen_sign_key() {
+        Ok((k, p)) => {
+            app.db.set("emer_sign", &k);
+            app.db.set("emer_pub", &p);
+            Json(json!({ "ok": true })).into_response()
+        }
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+    }
+}
+
 /// Public: a tunnel agent reports its tunnels and gets the list it should run.
 async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let id = b["id"].as_str().unwrap_or("").to_string();
@@ -1733,12 +1919,19 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         let mut sn = seen().lock().unwrap();
         let prev = sn.get(&id).map(|x| x.ip.clone()).unwrap_or_default();
         let ip = sticky_ip(&prev, &fresh_ip);
-        sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status });
+        sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status, emergency: b["emergency"].clone() });
     }
     let ver = b["version"].as_str().unwrap_or("");
     let until = app.db.get("tun_update_until").parse::<i64>().unwrap_or(0);
     let update = now() < until && !ver.is_empty() && ver != crate::VERSION;
-    Json(json!({ "tunnels": specs_for(&app, &id), "update": update })).into_response()
+    // the emergency chat: only the chosen server runs it; the config is sent only when it changed
+    let emergency = match (app.db.get("emer_server") == id).then(|| emer_cfg(&app)).flatten() {
+        // same config and running: nothing to do (a stopped chat gets the config again, so it restarts)
+        Some((_, v)) if b["emer_ver"].as_str() == Some(v.as_str()) && b["emergency"]["active"].as_bool() == Some(true) => json!({ "mode": "keep" }),
+        Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c }),
+        None => json!({ "mode": "off" }),
+    };
+    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)

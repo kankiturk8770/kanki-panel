@@ -867,6 +867,9 @@ fn sub_data(app: &App, u: &User) -> Value {
         "support": app.db.get("support"), "app_link": app.db.get("app_link"),
         "logo": app.db.get("logo"),
         "app_msg": app_msg(app, &u.username),
+        // the emergency chat on the server inside Iran, and the key that signs the admin's messages
+        "emergency": crate::tunnel::panel::emer_url(app),
+        "emergency_key": crate::tunnel::panel::emer_pub(app),
     })
 }
 

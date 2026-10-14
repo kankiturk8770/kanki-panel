@@ -583,7 +583,7 @@ pub async fn accept_tcp(transport: &str, tcp: TcpStream, tls: Option<&tokio_rust
 
 // ------------------------------------------------------------------ TLS (wss)
 
-pub(super) fn provider() -> Arc<rustls::crypto::CryptoProvider> {
+pub(crate) fn provider() -> Arc<rustls::crypto::CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
 
@@ -599,7 +599,7 @@ pub fn tls_acceptor(cert_file: &str, key_file: &str) -> Res<tokio_rustls::TlsAcc
 
 /// Same, with the ALPN protocols the server offers (in order of preference) and, with
 /// `tls13_only`, nothing older than TLS 1.3.
-pub(super) fn tls_acceptor_with(cert_file: &str, key_file: &str, alpn: &[&[u8]], tls13_only: bool) -> Res<tokio_rustls::TlsAcceptor> {
+pub(crate) fn tls_acceptor_with(cert_file: &str, key_file: &str, alpn: &[&[u8]], tls13_only: bool) -> Res<tokio_rustls::TlsAcceptor> {
     let (certs, key) = if !cert_file.is_empty() && !key_file.is_empty() {
         let c = std::fs::read(cert_file)?;
         let k = std::fs::read(key_file)?;
@@ -648,7 +648,7 @@ fn pem_blocks(data: &[u8], label: &str) -> Vec<Vec<u8>> {
     out
 }
 
-fn b64decode(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn b64decode(s: &str) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(s.len() * 3 / 4);
     let mut buf = 0u32;
     let mut bits = 0;
