@@ -1,3 +1,10 @@
+# v3.3.1 — Emergency chat: automatic SSL, better admin page, fixes
+- **Automatic SSL:** choose "Automatic SSL" and the Iran server gets (and renews) a Let's Encrypt certificate for the domain by itself (certbot; port 80 must be free). Other choices: SSL from the CDN (ArvanCloud), your own certificate, or plain HTTP.
+- **Admin page rebuilt:** every customer listed with search, conversations first with unread counts, delivery ticks (green ✓✓ when the app has the message), a config mode (each line is sent as its own config, with a copy button), picture zoom, the main panel's look, works on phones.
+- **Fix:** messages showed twice on the admin page (two refreshes at once). They were stored once.
+- **Fix:** behind ArvanCloud the app sometimes said "not registered": the CDN cached answers. Every answer is now `no-store`.
+- The first load shows the newest 200 messages.
+
 # v3.3.0 — Emergency chat on a server inside Iran
 - **New page: Emergency chat.** Choose a server inside Iran, a domain and a port; the panel installs a small chat server there through its agent (`kanki-panel emergency`, service `kanki-emergency`) and keeps the customer list on it while the internet works.
 - Customers write from the Kanki app (text and screenshots); the admin answers and sends configs at `<domain>/admin`, from inside Iran, with the password set in the panel.

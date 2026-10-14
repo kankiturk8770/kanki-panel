@@ -1675,7 +1675,7 @@ function emLoad(){Promise.all([api('GET','/api/emergency'),api('GET','/api/tunne
    (st&&st.active?'<p>'+t('Unread messages')+': <b>'+N(st.unread||0)+'</b></p>':'')+
    (st&&st.error?'<div class="warnbox ltr">'+esc(st.error)+'</div>':'')+
    (old?'<div class="warnbox">'+t('The agent of this server is old: press “Update all” in Tunnel servers first.')+'</div>':'')+
-   (e.on&&!e.tls?'<div class="warnbox">'+t('Without a certificate (HTTP) the chat works, but messages and your password are not encrypted on the way. Get an SSL certificate before the internet is cut and paste it below. Your configs stay safe: they are signed.')+'</div>':'')+
+   (e.on&&e.ssl=='http'?'<div class="warnbox">'+t('Without a certificate (HTTP) the chat works, but messages and your password are not encrypted on the way. Get an SSL certificate before the internet is cut and paste it below. Your configs stay safe: they are signed.')+'</div>':'')+
    '<p class="hint">'+t('Customers known to the chat')+': '+N(e.customers||0)+(e.key?' · '+t('Signing key')+' …<span class="ltr">'+esc(e.key)+'</span>':'')+'</p></div>'+
   '<div class="card"><h3>'+t('Settings')+'</h3>'+
    '<label class="chk"><input type="checkbox" id="em_on" '+(e.on?'checked':'')+'><span><b>'+t('Emergency chat is on')+'</b></span></label>'+
@@ -1684,15 +1684,17 @@ function emLoad(){Promise.all([api('GET','/api/emergency'),api('GET','/api/tunne
    '<div><label class="f">'+t('Port')+'</label><input id="em_p" type="number" class="ltr" value="'+(e.port||8080)+'"></div></div>'+
    '<small class="muted">'+t('With ArvanCloud CDN use a port it forwards (80, 8080, 443, 2053, 8443 …). Open the port on the server.')+'</small>'+
    '<label class="f">'+t('Admin password of the chat')+'</label><input id="em_pw" type="password" autocomplete="new-password" placeholder="'+(e.has_password?t('unchanged'):t('at least 10 characters'))+'">'+
-   '<details class="box" style="margin-top:10px" '+(e.tls?'':'')+'><summary><b>'+t('SSL certificate (optional, recommended)')+'</b> '+(e.tls?'<span class="badge g">'+t('set')+'</span>':'')+'</summary>'+
-    '<label class="f">'+t('Certificate (PEM, full chain)')+'</label><textarea id="em_c" rows="4" class="ltr" placeholder="-----BEGIN CERTIFICATE-----"></textarea>'+
-    '<label class="f">'+t('Private key (PKCS#8 PEM)')+'</label><textarea id="em_k" rows="4" class="ltr" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>'+
-    (e.tls?'<label class="chk"><input type="checkbox" id="em_ct"><span><b>'+t('Remove the certificate (use HTTP)')+'</b></span></label>':'')+'</details>'+
+   '<label class="f">SSL</label><select id="em_ssl">'+[['auto','Automatic SSL (Let’s Encrypt, recommended)'],['cdn','SSL from the CDN (ArvanCloud)'],['manual','My own certificate'],['http','No SSL (HTTP)']].map(function(o){return '<option value="'+o[0]+'"'+(e.ssl==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select>'+
+   '<small class="muted" id="em_sslh"></small>'+
+   '<div id="em_pem" style="display:none"><label class="f">'+t('Certificate (PEM, full chain)')+'</label><textarea id="em_c" rows="4" class="ltr" placeholder="-----BEGIN CERTIFICATE-----"></textarea>'+
+    '<label class="f">'+t('Private key (PKCS#8 PEM)')+'</label><textarea id="em_k" rows="4" class="ltr" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></div>'+
    '<button class="btn" style="width:100%;margin-top:12px" id="em_go">'+t('Save')+'</button>'+
    '<button class="b2 bd" style="width:100%;margin-top:8px" id="em_rk">'+t('New signing key')+'</button>'+
    '<p class="hint">'+t('A new signing key is only needed if the server was compromised. Apps learn the new key when they refresh their subscription, so do it while the internet still works.')+'</p></div>';
- $('#em_go').onclick=function(){var me=this,b={on:$('#em_on').checked,server:$('#em_sv').value,domain:$('#em_d').value,port:+$('#em_p').value||0,password:$('#em_pw').value,cert:$('#em_c').value,key:$('#em_k').value,clear_tls:!!($('#em_ct')&&$('#em_ct').checked)};
+ $('#em_go').onclick=function(){var me=this,b={on:$('#em_on').checked,server:$('#em_sv').value,domain:$('#em_d').value,port:+$('#em_p').value||0,password:$('#em_pw').value,cert:$('#em_c').value,key:$('#em_k').value,ssl:$('#em_ssl').value};
   me.disabled=true;api('PUT','/api/emergency',b).then(function(){toast(t('Saved: the server sets it up in a few seconds'));emLoad()}).catch(function(x){me.disabled=false;fail(x)})};
+ var sslH={auto:'The server gets and renews a free certificate by itself. Do it before the internet is cut. Port 80 of the server must be free and the domain must point to it (ArvanCloud: DNS or CDN both work).',cdn:'ArvanCloud shows HTTPS to the users with its own certificate and talks to the server on the port above with HTTP. In ArvanCloud set the origin port to this port.',manual:'Paste a certificate you already have.',http:'Works, but messages and your password travel unencrypted. Configs stay safe: they are signed.'};
+ var sslUi=function(){var v=$('#em_ssl').value;$('#em_pem').style.display=v=='manual'?'':'none';$('#em_sslh').textContent=t(sslH[v]||'')};$('#em_ssl').onchange=sslUi;sslUi();
  $('#em_rk').onclick=function(){confirmDo(function(){api('POST','/api/emergency/rekey').then(function(){toast(t('Done'));emLoad()}).catch(fail)})};
  clearTimeout(S.emT);S.emT=setTimeout(function(){if($('#em')&&!$('#modal').classList.contains('on')&&document.activeElement.tagName!='INPUT'&&document.activeElement.tagName!='TEXTAREA')emLoad()},8000)
 }).catch(fail)}
@@ -1710,7 +1712,11 @@ Object.assign(FA,{"Emergency chat":"چت اضطراری","Talk to your customers
  "Admin password of the chat":"رمز ادمین چت","unchanged":"بدون تغییر","at least 10 characters":"حداقل ۱۰ کاراکتر","SSL certificate (optional, recommended)":"گواهی SSL (اختیاری، پیشنهادی)","set":"گذاشته شده",
  "Certificate (PEM, full chain)":"گواهی (PEM، زنجیره‌ی کامل)","Private key (PKCS#8 PEM)":"کلید خصوصی (PKCS#8 PEM)","Remove the certificate (use HTTP)":"حذف گواهی (استفاده از HTTP)",
  "New signing key":"کلید امضای جدید","A new signing key is only needed if the server was compromised. Apps learn the new key when they refresh their subscription, so do it while the internet still works.":"کلید امضای جدید فقط وقتی لازم است که سرور لو رفته باشد. اپ‌ها کلید جدید را با به‌روز شدن اشتراک می‌گیرند، پس این کار را تا وقتی اینترنت وصل است انجام بده.",
- "Domain":"دامنه","Saved: the server sets it up in a few seconds":"ذخیره شد: سرور تا چند ثانیه‌ی دیگر راه‌اندازی‌اش می‌کند","Off":"خاموش"});
+ "Domain":"دامنه","Automatic SSL (Let’s Encrypt, recommended)":"SSL خودکار (Let’s Encrypt، پیشنهادی)","SSL from the CDN (ArvanCloud)":"SSL از CDN (ابرآروان)","My own certificate":"گواهی خودم","No SSL (HTTP)":"بدون SSL (HTTP)",
+ "The server gets and renews a free certificate by itself. Do it before the internet is cut. Port 80 of the server must be free and the domain must point to it (ArvanCloud: DNS or CDN both work).":"سرور خودش گواهی رایگان می‌گیرد و تمدید می‌کند. قبل از قطعی اینترنت انجامش بده. پورت ۸۰ سرور باید آزاد باشد و دامنه به آن اشاره کند (ابرآروان: هم DNS هم CDN کار می‌کند).",
+ "ArvanCloud shows HTTPS to the users with its own certificate and talks to the server on the port above with HTTP. In ArvanCloud set the origin port to this port.":"ابرآروان با گواهی خودش HTTPS را به کاربر نشان می‌دهد و با HTTP روی پورت بالا با سرور حرف می‌زند. در ابرآروان پورت مبدأ را همین پورت بگذار.",
+ "Paste a certificate you already have.":"گواهی‌ای که داری را بچسبان.","Works, but messages and your password travel unencrypted. Configs stay safe: they are signed.":"کار می‌کند، ولی پیام‌ها و رمزت رمزنگاری‌نشده می‌روند. کانفیگ‌ها امن می‌مانند چون امضا می‌شوند.",
+ "Saved: the server sets it up in a few seconds":"ذخیره شد: سرور تا چند ثانیه‌ی دیگر راه‌اندازی‌اش می‌کند","Off":"خاموش"});
 
 // ---- message shown by the robot inside the Kanki app (read from the subscription page, so no extra address is needed)
 var AM_DUR=[[30,'30 min'],[60,'1 hour'],[180,'3 hours'],[360,'6 hours'],[720,'12 hours'],[1440,'1 day'],[4320,'3 days'],[10080,'7 days'],[0,'Until I remove it']];

@@ -1755,12 +1755,13 @@ pub(crate) fn emer_cfg(app: &App) -> Option<(crate::emergency::EmerCfg, String)>
         .collect();
     let c = crate::emergency::EmerCfg {
         port: app.db.get("emer_port").parse().unwrap_or(0),
-        cert: app.db.get("emer_cert"),
-        key: app.db.get("emer_key"),
+        cert: if emer_ssl(app) == "manual" { app.db.get("emer_cert") } else { String::new() },
+        key: if emer_ssl(app) == "manual" { app.db.get("emer_key") } else { String::new() },
         admin_hash: app.db.get("emer_admin"),
         sign_key: app.db.get("emer_sign"),
         name: app.db.get("panel_name"),
         users,
+        acme_domain: if emer_ssl(app) == "auto" { app.db.get("emer_domain") } else { String::new() },
     };
     if c.port == 0 {
         return None;
@@ -1769,12 +1770,27 @@ pub(crate) fn emer_cfg(app: &App) -> Option<(crate::emergency::EmerCfg, String)>
     Some((c, ver))
 }
 
+/// "auto" (Let's Encrypt on the Iran server), "cdn" (the CDN does HTTPS, the server plain HTTP),
+/// "manual" (pasted PEM) or "http"
+fn emer_ssl(app: &App) -> String {
+    let m = app.db.get("emer_ssl");
+    if !m.is_empty() {
+        return m;
+    }
+    if app.db.get("emer_cert").is_empty() { "http".into() } else { "manual".into() }
+}
+
 /// The address the app talks to: http(s)://domain[:port]. Empty when the chat is off.
 pub(crate) fn emer_url(app: &App) -> String {
     if app.db.get("emer_on") != "1" {
         return String::new();
     }
-    let tls = !app.db.get("emer_cert").is_empty();
+    let mode = emer_ssl(app);
+    if mode == "cdn" {
+        let d = app.db.get("emer_domain");
+        return if d.is_empty() { String::new() } else { format!("https://{}", d) };
+    }
+    let tls = mode == "auto" || mode == "manual";
     let port: u16 = app.db.get("emer_port").parse().unwrap_or(0);
     let d = app.db.get("emer_domain");
     if d.is_empty() || port == 0 {
@@ -1796,7 +1812,7 @@ async fn emer_get(State(app): St, h: HeaderMap) -> Response {
     let users = app.db.users().len();
     Json(json!({
         "on": app.db.get("emer_on") == "1", "server": sid, "domain": app.db.get("emer_domain"),
-        "port": app.db.get("emer_port").parse::<u16>().unwrap_or(0), "tls": !app.db.get("emer_cert").is_empty(),
+        "port": app.db.get("emer_port").parse::<u16>().unwrap_or(0), "tls": !app.db.get("emer_cert").is_empty(), "ssl": emer_ssl(&app),
         "has_password": !app.db.get("emer_admin").is_empty(), "url": emer_url(&app), "status": st, "customers": users,
         "key": app.db.get("emer_pub").chars().rev().take(12).collect::<String>(),
     }))
@@ -1870,7 +1886,20 @@ async fn emer_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respons
     } else {
         None
     };
+    let ssl = s("ssl");
+    if !ssl.is_empty() && !["auto", "cdn", "manual", "http"].contains(&ssl.as_str()) {
+        return err(StatusCode::BAD_REQUEST, "unknown SSL mode");
+    }
+    if ssl == "auto" && domain.parse::<std::net::IpAddr>().is_ok() {
+        return err(StatusCode::BAD_REQUEST, "automatic SSL needs a domain, not an IP");
+    }
+    if ssl == "manual" && tls.as_ref().map(|t| t.0.is_empty()).unwrap_or(app.db.get("emer_cert").is_empty()) {
+        return err(StatusCode::BAD_REQUEST, "paste the certificate and the key, or choose another SSL mode");
+    }
     // all checked: save
+    if !ssl.is_empty() {
+        app.db.set("emer_ssl", &ssl);
+    }
     app.db.set("emer_server", &server);
     app.db.set("emer_domain", &domain);
     app.db.set("emer_port", &port);

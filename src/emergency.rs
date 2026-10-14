@@ -65,12 +65,18 @@ pub struct EmerCfg {
     /// shown on the pages
     pub name: String,
     pub users: Vec<EUser>,
+    /// automatic SSL: the agent gets a Let's Encrypt certificate for this domain (certbot)
+    pub acme_domain: String,
 }
 
 impl EmerCfg {
     pub fn tls(&self) -> bool {
-        !self.cert.trim().is_empty() && !self.key.trim().is_empty()
+        (!self.cert.trim().is_empty() && !self.key.trim().is_empty()) || !self.acme_domain.is_empty()
     }
+}
+
+fn acme_files(d: &str) -> (String, String) {
+    (format!("/etc/letsencrypt/live/{}/fullchain.pem", d), format!("/etc/letsencrypt/live/{}/privkey.pem", d))
 }
 
 pub fn user_hash(code: &str) -> String {
@@ -229,7 +235,7 @@ fn insert(srv: &Srv, user: &str, admin: bool, kind: &str, body: &str, img: Optio
     let db = srv.db.lock().unwrap_or_else(|e| e.into_inner());
     db.execute(
         "INSERT INTO msgs(user,admin,kind,body,img,ts,seen) VALUES(?1,?2,?3,?4,?5,?6,?7)",
-        params![user, admin as i64, kind, body, img, ts, admin as i64],
+        params![user, admin as i64, kind, body, img, ts, 0i64],
     )
     .map_err(|e| e.to_string())?;
     let id = db.last_insert_rowid();
@@ -259,11 +265,17 @@ fn insert(srv: &Srv, user: &str, admin: bool, kind: &str, body: &str, img: Optio
 
 fn list(srv: &Srv, user: &str, after: i64) -> Vec<Value> {
     let db = srv.db.lock().unwrap_or_else(|e| e.into_inner());
-    let Ok(mut st) = db.prepare("SELECT id,admin,kind,body,ts,sig,img IS NOT NULL FROM msgs WHERE user=?1 AND id>?2 ORDER BY id LIMIT 200") else { return vec![] };
+    // first load (after = 0): the newest 200; later: what came after
+    let q = if after == 0 {
+        "SELECT * FROM (SELECT id,admin,kind,body,ts,sig,img IS NOT NULL,seen FROM msgs WHERE user=?1 AND id>?2 ORDER BY id DESC LIMIT 200) ORDER BY id"
+    } else {
+        "SELECT id,admin,kind,body,ts,sig,img IS NOT NULL,seen FROM msgs WHERE user=?1 AND id>?2 ORDER BY id LIMIT 200"
+    };
+    let Ok(mut st) = db.prepare(q) else { return vec![] };
     let rows = st.query_map(params![user, after], |r| {
         Ok(json!({
             "id": r.get::<_, i64>(0)?, "admin": r.get::<_, i64>(1)? == 1, "kind": r.get::<_, String>(2)?,
-            "body": r.get::<_, String>(3)?, "ts": r.get::<_, i64>(4)?, "sig": r.get::<_, String>(5)?, "img": r.get::<_, bool>(6)?,
+            "body": r.get::<_, String>(3)?, "ts": r.get::<_, i64>(4)?, "sig": r.get::<_, String>(5)?, "img": r.get::<_, bool>(6)?, "seen": r.get::<_, i64>(7)? == 1,
         }))
     });
     rows.map(|it| it.flatten().collect()).unwrap_or_default()
@@ -303,7 +315,10 @@ async fn u_messages(State(s): St, Extension(p): Extension<Peer>, h: HeaderMap, Q
         Ok(u) => u,
         Err(r) => return r,
     };
-    Json(json!({ "user": u, "messages": list(&s, &u, q.after) })).into_response()
+    let msgs = list(&s, &u, q.after);
+    // the app has them now: the admin sees a green tick
+    let _ = s.db.lock().unwrap_or_else(|e| e.into_inner()).execute("UPDATE msgs SET seen=1 WHERE user=?1 AND admin=1 AND seen=0", params![u]);
+    Json(json!({ "user": u, "messages": msgs })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -417,8 +432,11 @@ async fn a_thread(State(s): St, h: HeaderMap, Path(user): Path<String>, Query(q)
         return err(StatusCode::UNAUTHORIZED, "sign in");
     }
     let msgs = list(&s, &user, q.after);
-    let _ = s.db.lock().unwrap_or_else(|e| e.into_inner()).execute("UPDATE msgs SET seen=1 WHERE user=?1 AND admin=0", params![user]);
-    Json(json!({ "messages": msgs })).into_response()
+    let db = s.db.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = db.execute("UPDATE msgs SET seen=1 WHERE user=?1 AND admin=0", params![user]);
+    // admin messages up to this id have reached the app (green ticks)
+    let seen_upto: i64 = db.query_row("SELECT COALESCE(MAX(id),0) FROM msgs WHERE user=?1 AND admin=1 AND seen=1", params![user], |r| r.get(0)).unwrap_or(0);
+    Json(json!({ "messages": msgs, "seen_upto": seen_upto })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -519,6 +537,12 @@ fn router(srv: Arc<Srv>) -> Router {
         .route("/api/a/image/:id", get(a_image_get))
         .route("/api/a/users", get(a_users))
         .layer(DefaultBodyLimit::max(2 * 1024 * 1024))
+        .layer(axum::middleware::map_response(|mut r: Response| async move {
+            if !r.headers().contains_key(header::CACHE_CONTROL) {
+                r.headers_mut().insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
+            }
+            r
+        }))
         .with_state(srv)
 }
 
@@ -573,13 +597,16 @@ pub async fn run() {
     };
     let tls = if cfg.tls() {
         let _ = std::fs::create_dir_all(DATA_DIR);
-        let (cf, kf) = (format!("{}/tls.crt", DATA_DIR), format!("{}/tls.key", DATA_DIR));
-        let _ = std::fs::write(&cf, &cfg.cert);
-        let _ = std::fs::write(&kf, &cfg.key);
-        {
+        let (cf, kf) = if !cfg.acme_domain.is_empty() {
+            acme_files(&cfg.acme_domain)
+        } else {
+            let (cf, kf) = (format!("{}/tls.crt", DATA_DIR), format!("{}/tls.key", DATA_DIR));
+            let _ = std::fs::write(&cf, &cfg.cert);
+            let _ = std::fs::write(&kf, &cfg.key);
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&kf, std::fs::Permissions::from_mode(0o600));
-        }
+            (cf, kf)
+        };
         match crate::tunnel::link::tls_acceptor_with(&cf, &kf, &[b"http/1.1"], false) {
             Ok(a) => Some(a),
             Err(e) => {
@@ -672,8 +699,12 @@ pub fn deploy(cfg: Option<(&EmerCfg, &str)>) -> Result<(), String> {
         let _ = sh("systemctl daemon-reload");
         let _ = sh("systemctl enable -q kanki-emergency.service");
     }
+    // automatic SSL: get the certificate once (certbot renews it and restarts the chat by itself)
+    if !c.acme_domain.is_empty() && !std::path::Path::new(&acme_files(&c.acme_domain).0).exists() {
+        get_cert(&c.acme_domain)?;
+    }
     // a new port or certificate needs a restart; the customer list and the password are re-read live
-    let restart_key = util::sha256_hex(&format!("{}|{}|{}", c.port, c.cert, c.key));
+    let restart_key = util::sha256_hex(&format!("{}|{}|{}|{}", c.port, c.cert, c.key, c.acme_domain));
     let old_key = std::fs::read_to_string(RESTART_FILE).unwrap_or_default();
     let active = sh("systemctl is-active --quiet kanki-emergency.service").0;
     if unit_changed || old_key.trim() != restart_key || !active {
@@ -690,6 +721,35 @@ pub fn deploy(cfg: Option<(&EmerCfg, &str)>) -> Result<(), String> {
     }
     let _ = std::fs::write(VER_FILE, ver);
     Ok(())
+}
+
+/// Let's Encrypt certificate with certbot (standalone: port 80 of this server must be free and the
+/// domain must reach it; ArvanCloud passes port 80 through). Installs certbot when missing.
+fn get_cert(domain: &str) -> Result<(), String> {
+    if !domain.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+        return Err("bad domain".into());
+    }
+    if !sh("command -v certbot").0 {
+        eprintln!("emergency chat: installing certbot ...");
+        let _ = sh("export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq certbot >/dev/null 2>&1 || (apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq certbot >/dev/null 2>&1)");
+        if !sh("command -v certbot").0 {
+            return Err("certbot could not be installed (apt install certbot)".into());
+        }
+    }
+    if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
+        let _ = sh("ufw allow 80/tcp >/dev/null 2>&1");
+    }
+    eprintln!("emergency chat: getting a certificate for {} ...", domain);
+    let (ok, out) = sh(&format!(
+        "timeout 240 certbot certonly --standalone -d {} --non-interactive --agree-tos --register-unsafely-without-email --key-type ecdsa --deploy-hook 'systemctl restart kanki-emergency.service' 2>&1",
+        domain
+    ));
+    if ok && std::path::Path::new(&acme_files(domain).0).exists() {
+        Ok(())
+    } else {
+        let why = out.lines().rev().find(|l| l.contains("Detail") || l.contains("Problem") || l.contains("Error") || l.contains("Could not")).unwrap_or("certbot failed").trim().to_string();
+        Err(format!("SSL for {} failed: {}. Port 80 of this server must be free and {} must point to it.", domain, why, domain))
+    }
 }
 
 /// is the chat service running on this machine?
