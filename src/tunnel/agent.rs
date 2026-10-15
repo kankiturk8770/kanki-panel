@@ -156,6 +156,8 @@ pub async fn run(version: &str) {
     let emer_err: Mutex<Option<String>> = Mutex::new(None);
     // the last error of setting up Kanki DNS
     let dns_err: Mutex<Option<String>> = Mutex::new(None);
+    // the last error of setting up Xray
+    let xray_err: Mutex<Option<String>> = Mutex::new(None);
     loop {
         let st = mgr.statuses().await;
         let (emer_ver, mut emer_st) = tokio::task::spawn_blocking(|| (crate::emergency::applied_ver(), crate::emergency::status()))
@@ -176,7 +178,15 @@ pub async fn run(version: &str) {
                 dns_st = json!({ "active": false, "deploy_error": e });
             }
         }
-        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st });
+        let (xray_ver, mut xray_st) = tokio::task::spawn_blocking(|| (crate::xray::applied_ver(), crate::xray::status())).await.unwrap_or_default();
+        if let Some(e) = xray_err.lock().unwrap().clone() {
+            if xray_st.is_object() {
+                xray_st["deploy_error"] = json!(e);
+            } else {
+                xray_st = json!({ "active": false, "deploy_error": e });
+            }
+        }
+        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st });
         match http.post(format!("{}/tunnel/agent", panel)).json(&body).send().await {
             Ok(r) if r.status().as_u16() == 410 => {
                 // this server was removed in the panel
@@ -185,6 +195,7 @@ pub async fn run(version: &str) {
                     mgr.apply(vec![]).await;
                     let _ = tokio::task::spawn_blocking(|| crate::emergency::deploy(None)).await;
                     let _ = tokio::task::spawn_blocking(|| crate::dns::deploy(None)).await;
+                    let _ = tokio::task::spawn_blocking(|| crate::xray::deploy(None, None)).await;
                     let _ = std::fs::remove_file(CACHE);
                     last.clear();
                 }
@@ -217,6 +228,21 @@ pub async fn run(version: &str) {
                         Some("off") => {
                             let r = tokio::task::spawn_blocking(|| crate::dns::deploy(None)).await.unwrap_or(Ok(()));
                             *dns_err.lock().unwrap() = r.err();
+                        }
+                        _ => {}
+                    }
+                    // Xray: "set" (new config), "keep" (unchanged) or "off"
+                    match v["xray"]["mode"].as_str() {
+                        Some("set") => {
+                            if let (Ok(c), Some(ver)) = (serde_json::from_value::<crate::xray::XrayCfg>(v["xray"]["cfg"].clone()), v["xray"]["ver"].as_str().map(|s| s.to_string())) {
+                                let (p, i, t) = (panel.clone(), id.clone(), token.clone());
+                                let r = tokio::task::spawn_blocking(move || crate::xray::deploy(Some((&c, &ver)), Some((&p, &i, &t)))).await.unwrap_or(Err("deploy crashed".into()));
+                                *xray_err.lock().unwrap() = r.err();
+                            }
+                        }
+                        Some("off") => {
+                            let r = tokio::task::spawn_blocking(|| crate::xray::deploy(None, None)).await.unwrap_or(Ok(()));
+                            *xray_err.lock().unwrap() = r.err();
                         }
                         _ => {}
                     }

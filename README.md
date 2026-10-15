@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.4 — Kanki DNS and Xray
+- **Kanki DNS** (menu: Kanki DNS): a private smart DNS only your subscribers can use. Sanctioned services go through your DNS servers (an exit abroad, optionally a relay inside Iran in front of it), everything else goes direct. DNS, DoT and DoH; the panel sets the DNS records and gets the SSL certificate itself (Cloudflare / ArvanCloud API).
+- **Xray** (menu: Xray): VLESS / VMess / Trojan / Shadowsocks inbounds with TCP, WS, gRPC, HTTPUpgrade, XHTTP, mKCP and TLS / REALITY, on the panel server or any agent server. The clients are your own users (tick Xray on the user).
+- Add node now asks for the type: VPN, Xray, DNS exit or DNS relay. Guide: `docs/DNS-XRAY-FA.md`.
+
 ## New in 3.1 — Hysteria2 tunnel between two servers
 - Tunnels › + Tunnel › **⚡ Hysteria2**: the exit runs a Hysteria2 server, the entry connects to it (Salamander obfuscation, pinned certificate). Forward ports through it, or send the whole internet of the entry's VPN users (for example `10.8.0.0/24`) out from the exit. Guide: `docs/HY2-TUNNEL.md`.
 

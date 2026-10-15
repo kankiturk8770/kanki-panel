@@ -246,10 +246,15 @@ pub fn ingest(app: &App, sid: &str, st: &Value) {
         return;
     }
     last_status().lock().unwrap().insert(sid.to_string(), (now(), st.clone()));
+    count_usage(app, &format!("dns_prev_{}", sid), st);
+}
+
+/// Add the bytes a server counted since its last report to each user's traffic. `st` has the run id of
+/// the counting process and its running totals: { "run": "...", "users": { "<id>": [bytes, ...] } }.
+pub fn count_usage(app: &App, key: &str, st: &Value) {
     let Some(run) = st["run"].as_str() else { return };
     let Some(users) = st["users"].as_object() else { return };
-    let key = format!("dns_prev_{}", sid);
-    let prev: Value = serde_json::from_str(&app.db.get(&key)).unwrap_or(json!({}));
+    let prev: Value = serde_json::from_str(&app.db.get(key)).unwrap_or(json!({}));
     let same = prev["run"].as_str() == Some(run);
     let mut cur = serde_json::Map::new();
     let mut changed = !same;
@@ -266,7 +271,7 @@ pub fn ingest(app: &App, sid: &str, st: &Value) {
         }
     }
     if changed {
-        app.db.set(&key, &json!({ "run": run, "users": cur }).to_string());
+        app.db.set(key, &json!({ "run": run, "users": cur }).to_string());
     }
 }
 

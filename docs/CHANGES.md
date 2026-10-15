@@ -1,3 +1,16 @@
+# v3.4.0 — Kanki DNS and Xray
+- **New page: Kanki DNS.** A private smart DNS for subscribers, written for the panel (`kanki-panel dns`, service `kanki-dns`): DNS on UDP/TCP 53, DoT on 853 and DoH on 443. Names of sanctioned services resolve to the DNS server, which carries those connections on by their SNI (443) or Host (80) without decrypting them; everything else resolves normally and goes direct. No speed limit.
+- **Only subscribers:** each user has a DNS token (from the subscription code). `<token>.<server>` (Android Private DNS) or `/dns-query/<token>` (DoH) knows the user and allows the address it came from for a while, so plain DNS and the relayed connections work from there too. Anybody else gets REFUSED. The app can also call `/r/<token>` when its network changes.
+- **Exit and relay servers:** an exit server abroad carries the connections itself; a relay server inside Iran answers its own address and sends the connections to its exit through a hidden Kanki tunnel (any transport). Relays come first in the subscription.
+- **Services:** the catalog of ~800 names in groups (games, downloads, AI, developer tools…), on/off per group, plus your own domains. List from doctor-dns (MIT, see `assets/dns/LICENSE-doctor-dns`), logos from Simple Icons.
+- **Certificates by the panel:** with a Cloudflare or ArvanCloud API token the panel sets an A record for every DNS server (and `*.` it) and gets one Let's Encrypt certificate for all of them with the DNS challenge, renewed every 60 days. Nothing has to reach the Iran servers. A pasted certificate works too.
+- **New page: Xray.** Inbounds like 3X-UI: VLESS, VMess, Trojan and Shadowsocks (2022) over TCP, WebSocket, gRPC, HTTPUpgrade, XHTTP or mKCP, with TLS or REALITY (keys made by the panel), share links for a CDN in front. The clients are the panel's own users who have Xray ticked (optionally only some of them per inbound); traffic is counted into their usage; no speed limit.
+- Xray runs on the panel server or on any agent server; the agent installs Xray-core (from GitHub, or through the panel when GitHub is blocked), checks every config with `xray run -test` before using it and restarts only on changes.
+- **Node types:** Nodes › Add node asks VPN / Xray / DNS exit / DNS relay. Users get **Xray** and **DNS** checkboxes beside WireGuard, AmneziaWG and Hysteria2.
+- The subscription (page, JSON for the app, raw for v2rayNG / Hiddify) carries the Xray links and the DNS addresses.
+- CI tests every branch; only `main` publishes a release.
+- Guide in Persian: `docs/DNS-XRAY-FA.md`.
+
 # v3.3.2 — Automatic update every night
 - **Automatic update switch** (in the update window of the version button, and in Settings › Update): every night at **03:30 Tehran time**, if GitHub has a newer version, the panel runs "Update all" by itself: the nodes, the tunnel servers, then the panel. Components already on the newest version are left alone. The window shows the next run and the result of the last one. "Update all" by hand works as before.
 - After an update the **emergency chat** moves to the new version too (before, it kept running the old binary until restarted).

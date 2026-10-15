@@ -2,7 +2,8 @@ name: build
 
 on:
   push:
-    branches: [main]
+    # every branch is built and tested; only main publishes a release (servers update from it)
+    branches: ['**']
   workflow_dispatch:
 
 permissions:
@@ -31,6 +32,7 @@ jobs:
         run: cargo build --release
 
       - name: Package
+        if: github.ref == 'refs/heads/main'
         run: |
           cp target/release/kanki-panel kanki-panel
           sha256sum kanki-panel > kanki-panel.sha256
@@ -38,6 +40,7 @@ jobs:
           cat version.txt
 
       - name: Publish to Releases (tag "latest")
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest

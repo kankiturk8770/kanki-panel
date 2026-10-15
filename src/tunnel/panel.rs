@@ -1985,7 +1985,13 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c }),
         None => json!({ "mode": "off" }),
     };
-    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns })).into_response()
+    crate::xray::panel::ingest(&app, &id, &b["xray"]);
+    let xray = match crate::xray::panel::cfg_for(&app, &id) {
+        Some((_, v)) if b["xray_ver"].as_str() == Some(v.as_str()) && b["xray"]["active"].as_bool() == Some(true) => json!({ "mode": "keep" }),
+        Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c }),
+        None => json!({ "mode": "off" }),
+    };
+    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)

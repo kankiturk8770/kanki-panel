@@ -173,6 +173,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/sub/:code", get(sub_page))
         .route("/sub/:code/raw", get(sub_raw))
         .route("/sub/:code/json", get(sub_json))
+        .route("/sub/:code/xqr/:i", get(sub_xray_qr))
         .route("/api/config/:id/:proto", get(config_file))
         .route("/api/config/:id/:proto/:extra", get(config_file_extra))
         .route("/hy2/auth", post(hy2_auth))
@@ -183,6 +184,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::channel::router())
         .merge(crate::tunnel::panel::router())
         .merge(crate::dns::panel::router())
+        .merge(crate::xray::panel::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
         // 2 MiB for every route: login, join and hy2/auth are open to strangers and must not make the
         // server buffer more. Only the backup upload gets a bigger limit (see backup::router).
@@ -877,6 +879,8 @@ fn sub_data(app: &App, u: &User) -> Value {
         "emergency_key": crate::tunnel::panel::emer_pub(app),
         // Kanki DNS: the user's token and each DNS server's addresses (Null = no DNS for this user)
         "dns": crate::dns::panel::sub_info(app, u),
+        // Xray share links of this user (Null = no Xray)
+        "xray": crate::xray::panel::sub_info(app, u),
     })
 }
 
@@ -921,6 +925,35 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
             ));
         }
     }
+    // Xray links (copy / QR) and the user's Kanki DNS addresses
+    let xl = crate::xray::panel::user_links(&app, &u);
+    if !xl.is_empty() {
+        let mut rows = String::new();
+        for (i, (name, l)) in xl.iter().enumerate() {
+            let proto = l.split("://").next().unwrap_or("xray").to_uppercase();
+            rows.push_str(&format!(
+                "<div class=\"row proto\" data-proto=\"xray\"><div class=\"ph\"><i class=\"pl pl-xray\">X</i><div><b>{}</b><small>{}</small></div></div><div class=\"acts\"><code class=\"uri\">{}</code><button class=\"b2\" data-act=\"copy\" data-text=\"{}\" data-i18n=\"copy_uri\">Copy URI</button><button class=\"b2\" data-act=\"qr\" data-url=\"/sub/{}/xqr/{}\" data-i18n=\"qr\">QR Code</button></div></div>",
+                esc(if name.is_empty() { &proto } else { name }), esc(&proto), esc(l), esc(l), sub, i
+            ));
+        }
+        nodes_html.push_str(&format!("<section class=\"node\" data-node=\"xray\"><h3>Xray</h3>{}</section>", rows));
+    }
+    let dns = crate::dns::panel::sub_info(&app, &u);
+    if let Some(list) = dns["servers"].as_array().filter(|l| !l.is_empty()) {
+        let mut rows = String::new();
+        for x in list {
+            let s = |k: &str| x[k].as_str().unwrap_or("").to_string();
+            let mut acts = String::new();
+            for (label, v) in [("Private DNS (DoT)", s("dot")), ("DoH", s("doh")), ("DNS", s("ip"))] {
+                if !v.is_empty() {
+                    acts.push_str(&format!("<code class=\"uri\">{}: {}</code><button class=\"b2\" data-act=\"copy\" data-text=\"{}\" data-i18n=\"copy\">Copy</button>", label, esc(&v), esc(&v)));
+                }
+            }
+            let title = if s("note").is_empty() { s("name") } else { format!("{} · {}", s("name"), s("note")) };
+            rows.push_str(&format!("<div class=\"row proto\" data-proto=\"dns\"><div class=\"ph\"><i class=\"pl pl-dns\">D</i><div><b>{}</b><small>{}</small></div></div><div class=\"acts\">{}</div></div>", esc(&title), esc(&s("role")), acts));
+        }
+        nodes_html.push_str(&format!("<section class=\"node\" data-node=\"dns\"><h3>Kanki DNS</h3>{}</section>", rows));
+    }
     let data = serde_json::to_string(&sub_data(&app, &u)).unwrap_or_default().replace("</", "<\\/");
     let page = include_str!("../../assets/web/sub.html")
         .replace("{{TITLE}}", &esc(&u.username))
@@ -932,6 +965,17 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
         .replace("{{NODES}}", &nodes_html)
         .replace("{{DATA}}", &data);
     ([(header::CACHE_CONTROL, "no-store")], Html(page)).into_response()
+}
+
+/// QR code of the user's i-th Xray link
+async fn sub_xray_qr(State(app): St, Path((code, i)): Path<(String, usize)>) -> Response {
+    let Some((id, c)) = parse_code(&code) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
+    let Some(u) = app.db.user_by_code(id, &c) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
+    let Some((_, l)) = crate::xray::panel::user_links(&app, &u).into_iter().nth(i) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
+    match util::qr_svg(&l) {
+        Some(svg) => ([(header::CONTENT_TYPE, "image/svg+xml".to_string()), (header::CACHE_CONTROL, "no-store".to_string())], svg).into_response(),
+        None => (StatusCode::PAYLOAD_TOO_LARGE, "too large for a QR code").into_response(),
+    }
 }
 
 async fn sub_json(State(app): St, Path(code): Path<String>) -> Response {
@@ -955,6 +999,7 @@ async fn sub_raw(State(app): St, Path(code): Path<String>) -> Response {
             }
         }
     }
+    lines.extend(crate::xray::panel::user_links(&app, &u).into_iter().map(|x| x.1));
     let used = u.used_bytes.max(0);
     let total = (u.limit_gb * 1_073_741_824.0) as i64;
     let info = format!("upload=0; download={}; total={}; expire={}", used, total, u.expires_at);
