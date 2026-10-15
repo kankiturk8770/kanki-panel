@@ -18,6 +18,7 @@ mod backup;
 mod subdomain;
 
 // vpn: protocol engines + node sync
+mod dns;
 mod emergency;
 #[path = "vpn/hy2.rs"]
 mod hy2;
@@ -73,7 +74,7 @@ impl App {
 }
 
 fn usage() {
-    println!("kanki-panel {}\n\nCommands:\n  serve                      run the main panel (default)\n  node                       run the node agent\n  tunnel-agent               run the tunnel agent (servers that only carry tunnels)\n  tunnel-run <file.json>     run a standalone tunnel from a JSON file (no panel); add --check to only validate it\n  hash-password <pass>       print a password hash\n  reset-admin <user> <pass>  reset admin login, sessions and 2FA\n  reset-security             clear IP allow/deny lists and disable 2FA\n  set-bot <token> <admins>   set / change the Telegram sales bot (empty token = remove)\n  version", VERSION);
+    println!("kanki-panel {}\n\nCommands:\n  serve                      run the main panel (default)\n  node                       run the node agent\n  tunnel-agent               run the tunnel agent (servers that only carry tunnels)\n  dns                        run Kanki DNS from /etc/kanki/dns.json (started by the agent)\n  tunnel-run <file.json>     run a standalone tunnel from a JSON file (no panel); add --check to only validate it\n  hash-password <pass>       print a password hash\n  reset-admin <user> <pass>  reset admin login, sessions and 2FA\n  reset-security             clear IP allow/deny lists and disable 2FA\n  set-bot <token> <admins>   set / change the Telegram sales bot (empty token = remove)\n  version", VERSION);
 }
 
 #[tokio::main]
@@ -97,6 +98,11 @@ async fn main() {
         // the emergency chat server on an Iran server (started by the tunnel agent)
         "emergency" => {
             emergency::run().await;
+            return;
+        }
+        // Kanki DNS on a DNS server (started by the agent)
+        "dns" => {
+            dns::run().await;
             return;
         }
         "tunnel-agent" => {
@@ -202,6 +208,7 @@ async fn main() {
     tokio::spawn(tunnel::panel::auto_update_loop(app.clone()));
     // an updated panel also moves an emergency chat on this server onto the new binary
     tokio::task::spawn_blocking(emergency::restart_if_outdated);
+    tokio::spawn(dns::acme::renew_loop(app.clone()));
     tokio::spawn(backup::telegram_loop(app.clone()));
     tokio::spawn(channel::channel_loop(app.clone()));
     if let Some(b) = bot::Bot::new(app.clone()) {

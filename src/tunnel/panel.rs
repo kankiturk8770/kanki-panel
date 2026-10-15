@@ -323,7 +323,24 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             }
         }
     }
+    // Kanki DNS: the tunnel from a relay inside Iran to its exit abroad
+    out.extend(crate::dns::panel::relay_specs(app, sid));
     out
+}
+
+/// The address an agent server last reported from (DNS answers it for routed names).
+pub(crate) fn seen_ip(sid: &str) -> Option<String> {
+    seen().lock().unwrap().get(sid).map(|x| x.ip.clone()).filter(|x| !x.is_empty())
+}
+
+/// "host:port" other servers dial server `sid` on.
+pub(crate) fn dial_addr(app: &App, sid: &str, port: u16) -> String {
+    hostport(&host_of(app, sid), port)
+}
+
+/// id -> name of every agent server.
+pub(crate) fn server_names(app: &App) -> HashMap<String, String> {
+    servers(app).into_iter().map(|s| (s.id, s.name)).collect()
 }
 
 /// The address to remember for a node: keep the real one we already have when a new report arrives
@@ -1961,7 +1978,14 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c }),
         None => json!({ "mode": "off" }),
     };
-    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency })).into_response()
+    // Kanki DNS: usage since the last report, and the config when it changed
+    crate::dns::panel::ingest(&app, &id, &b["dns"]);
+    let dns = match crate::dns::panel::cfg_for(&app, &id) {
+        Some((_, v)) if b["dns_ver"].as_str() == Some(v.as_str()) && b["dns"]["active"].as_bool() == Some(true) => json!({ "mode": "keep" }),
+        Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c }),
+        None => json!({ "mode": "off" }),
+    };
+    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)

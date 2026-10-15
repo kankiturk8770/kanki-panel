@@ -148,6 +148,10 @@ pub fn master_router(app: Arc<App>) -> Router {
             ([(header::CONTENT_TYPE, "font/woff"), (header::CACHE_CONTROL, "public, max-age=2592000, immutable")],
              &include_bytes!("../../assets/web/vazirmatn.woff")[..])
         }))
+        // the panel's extension script (DNS, Xray and node types): no secrets in it
+        .route("/assets/kanki-ext.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/ext.js"))
+        }))
         .route("/api/overview", get(overview))
         .route("/api/users", get(users_list).post(users_create))
         .route("/api/users/:id", axum::routing::put(users_update).delete(users_delete))
@@ -178,6 +182,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::subdomain::router())
         .merge(crate::channel::router())
         .merge(crate::tunnel::panel::router())
+        .merge(crate::dns::panel::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
         // 2 MiB for every route: login, join and hy2/auth are open to strangers and must not make the
         // server buffer more. Only the backup upload gets a bigger limit (see backup::router).
@@ -208,7 +213,7 @@ async fn overview(State(app): St, h: HeaderMap) -> Response {
         }).unwrap_or((0, 0))
     });
     let mut protos: HashMap<&str, usize> = HashMap::new();
-    for p in ["wg", "awg", "hy2"] {
+    for p in ["wg", "awg", "hy2", "xray", "dns"] {
         protos.insert(p, us.iter().filter(|u| u.has_proto(p)).count());
     }
     let online = us.iter().filter(|u| u.online > 0).count();
@@ -870,6 +875,8 @@ fn sub_data(app: &App, u: &User) -> Value {
         // the emergency chat on the server inside Iran, and the key that signs the admin's messages
         "emergency": crate::tunnel::panel::emer_url(app),
         "emergency_key": crate::tunnel::panel::emer_pub(app),
+        // Kanki DNS: the user's token and each DNS server's addresses (Null = no DNS for this user)
+        "dns": crate::dns::panel::sub_info(app, u),
     })
 }
 
