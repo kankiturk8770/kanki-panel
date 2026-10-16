@@ -25,7 +25,8 @@ pub struct Spec {
     pub role: String,
     /// "reverse" (exit dials entry) | "direct" (entry dials exit)
     pub mode: String,
-    /// "tcp" | "tcpmux" | "ws" | "wss" | "quic" | "kcp" | "cdn" | "hq" | "h2" | "dual"
+    /// "tcp" | "tcpmux" | "ws" | "wss" | "quic" | "kcp" | "cdn" | "hq" | "h2" | "dual" |
+    /// "game" | "faketcp"
     /// (`hq`: QUIC under a masking layer, nothing on the wire looks like QUIC. `h2`: WebSocket over
     /// HTTP/2 over TLS 1.3 with browser-like ALPN and settings, many links share one TCP connection.
     /// `dual`: `hq` first, `h2` when UDP does not get through; the listener serves both on one port
@@ -33,6 +34,10 @@ pub struct Spec {
     /// (`cdn`: for whitelist-only networks. The dialer reaches the origin through a CDN edge over
     /// TLS + WebSocket; the origin listens on plain WebSocket. Works in both modes: `direct` = the
     /// CDN is in front of the exit, `reverse` = the CDN is in front of the entry.)
+    /// (`game`: KCP at its fastest setting under the UDP mask, with Reed-Solomon FEC and optional
+    /// packet duplication — built for gaming: a lost packet is rebuilt on the spot instead of
+    /// waiting for a resend. `faketcp`: KCP over fake TCP packets (udp2raw style), for networks
+    /// that throttle or cut UDP; on the wire there is only a TCP session.)
     pub transport: String,
     /// tunnel port on the listening side
     pub port: u16,
@@ -68,6 +73,15 @@ pub struct Spec {
     /// a Hysteria2 link instead of a Kanki link (handled by `hy2t`, not by the engine)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hy2: Option<super::hy2t::Hy2Spec>,
+    /// `game`: FEC "data:parity" ("8:3", "" = 8:3, "off" = no FEC) and packet duplication
+    pub fec: String,
+    pub dup: bool,
+}
+
+impl Spec {
+    pub fn game_opts(&self) -> super::game::GameOpts {
+        super::game::GameOpts::parse(&self.fec, self.dup)
+    }
 }
 
 impl Spec {
@@ -285,7 +299,7 @@ async fn run_link(spec: &Spec, state: &Arc<State>, raw: link::Raw, client: bool,
     let hs = link::handshake(raw, &spec.token, client, spec.padded()).await;
     drop(hs_permit);
     let (tx, rx) = hs?;
-    let s = Session::start(tx, rx, spec.role == "entry", state.shared.clone(), &spec.transport);
+    let s = Session::start(tx, rx, spec.role == "entry", state.shared.clone());
     state.add(s.clone());
     s.closed().await;
     state.drop_dead();
@@ -294,7 +308,7 @@ async fn run_link(spec: &Spec, state: &Arc<State>, raw: link::Raw, client: bool,
 
 async fn listen_loop(spec: Spec, state: Arc<State>) {
     let mut l = loop {
-        match link::Listener::bind(&spec.transport, spec.port, &spec.cert, &spec.key, &spec.token).await {
+        match link::Listener::bind(&spec.transport, spec.port, &spec.cert, &spec.key, &spec.token, spec.game_opts()).await {
             Ok(l) => break l,
             Err(e) => {
                 state.set_err(format!("cannot listen on port {}: {}", spec.port, e));
@@ -349,6 +363,8 @@ async fn dial_loop(spec: Spec, state: Arc<State>, n: u32) {
     // one, and a link that fails moves to the next combination. A link that worked keeps its address.
     let remotes = if spec.transport == "cdn" { split_list(&spec.remote) } else { vec![] };
     let snis = if matches!(spec.transport.as_str(), "cdn" | "wss" | "quic" | "hq" | "h2" | "dual") { split_list(&spec.sni) } else { vec![] };
+    // the HTTP Host header may list several names too (cdn / wss / ws): a failed link tries the next
+    let hosts = if matches!(spec.transport.as_str(), "cdn" | "wss" | "ws") { split_list(&spec.host) } else { vec![] };
     let mut attempt = n as usize;
     let mut wait = 1u64;
     loop {
@@ -360,7 +376,8 @@ async fn dial_loop(spec: Spec, state: Arc<State>, n: u32) {
             let step = attempt / remotes.len().max(1);
             snis[step % snis.len()].clone()
         };
-        match link::dial(&spec.transport, &remote, &sni, &spec.host, &spec.path, &spec.token, spec.frag).await {
+        let host = if hosts.is_empty() { spec.host.clone() } else { hosts[(attempt / (remotes.len().max(1) * snis.len().max(1))) % hosts.len()].clone() };
+        match link::dial(&spec.transport, &remote, &sni, &host, &spec.path, &spec.token, spec.frag, spec.game_opts()).await {
             Ok(raw) => match run_link(&spec, &state, raw, true, None).await {
                 Ok(()) => {}
                 Err(e) => state.set_err(e),
@@ -406,6 +423,10 @@ async fn user_tcp(bind: String, port: u16, target: String, state: Arc<State>) {
     }
 }
 
+/// Most UDP flows one user-facing port keeps at the same time; a flood past this evicts the
+/// idlest flows instead of growing without bounds (see below)
+const MAX_UDP_FLOWS: usize = 8192;
+
 async fn user_udp(bind: String, port: u16, target: String, state: Arc<State>) {
     let addr = format!("{}:{}", bind, port);
     let sock = loop {
@@ -429,6 +450,18 @@ async fn user_udp(bind: String, port: u16, target: String, state: Arc<State>) {
                 f.0
             }
             None => {
+                // a UDP flood from many forged sources would otherwise open a flow (and on the
+                // exit, a socket) per source until fds and memory run out: cap the table and
+                // evict the idlest eighth when it is full (in a batch, so a flood does not cost
+                // a scan of the whole table per packet)
+                if flows.len() >= MAX_UDP_FLOWS {
+                    let mut back = state.shared.udp_back.lock().unwrap();
+                    for a in super::mux::oldest_eighth(flows.iter().map(|(a, f)| (*a, f.1))) {
+                        if let Some((fid, _)) = flows.remove(&a) {
+                            back.remove(&fid);
+                        }
+                    }
+                }
                 let id = state.next_udp.fetch_add(1, Ordering::Relaxed);
                 flows.insert(from, (id, now));
                 id

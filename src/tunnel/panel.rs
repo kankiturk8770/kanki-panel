@@ -75,24 +75,45 @@ pub struct Tunnel {
     pub awg: AwgCfg,
     /// kind "hy2": a Hysteria2 link (the exit runs the server, the entry the client)
     pub hy2: Hy2Cfg,
+    /// game transport: FEC "data:parity" ("8:3"; "off" disables) and packet duplication
+    pub fec: String,
+    pub dup: bool,
 }
 
 /// Every transport a tunnel can use (the panel accepts nothing else).
-pub const TRANSPORTS: &[&str] = &["tcp", "tcpmux", "ws", "wss", "quic", "kcp", "cdn", "hq", "h2", "dual"];
+pub const TRANSPORTS: &[&str] = &["tcp", "tcpmux", "ws", "wss", "quic", "kcp", "cdn", "hq", "h2", "dual", "game", "faketcp"];
 /// Agents older than this run `hq` / `h2` / `dual` as plain TCP (they do not know the names), so
 /// a tunnel with one of them is refused while an agent is older.
 const NEW_TRANSPORTS_FROM: &str = "2.9.0";
+/// `game` and `faketcp` exist from this agent version on.
+const GAME_TRANSPORTS_FROM: &str = "3.5.3";
 
 fn is_new_transport(tr: &str) -> bool {
-    matches!(tr, "hq" | "h2" | "dual")
+    matches!(tr, "hq" | "h2" | "dual" | "game" | "faketcp")
+}
+
+/// the agent version a transport needs
+fn transport_min_version(tr: &str) -> &'static str {
+    if matches!(tr, "game" | "faketcp") {
+        GAME_TRANSPORTS_FROM
+    } else {
+        NEW_TRANSPORTS_FROM
+    }
+}
+
+/// whether an agent of version `ver` knows transport `tr` (an unknown version is let through)
+fn agent_knows(ver: &str, tr: &str) -> bool {
+    !is_new_transport(tr) || ver.is_empty() || !ver_lt(ver, transport_min_version(tr))
 }
 
 /// (TCP, UDP): the protocols the tunnel port of a transport occupies on the listening server.
 /// `dual` listens on both, on the same port number.
 fn port_protos(tr: &str) -> (bool, bool) {
     match tr {
-        "quic" | "kcp" | "hq" | "hy2" => (false, true),
+        "quic" | "kcp" | "hq" | "hy2" | "game" => (false, true),
         "dual" => (true, true),
+        // faketcp carries UDP inside fake TCP packets: the port is a TCP port on the wire
+        "faketcp" => (true, false),
         _ => (true, false),
     }
 }
@@ -255,6 +276,8 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             bind: if t.kind == "awgwrap" { "127.0.0.1".into() } else { String::new() },
             awg: None,
             hy2: None,
+            fec: t.fec.clone(),
+            dup: t.dup,
         });
     }
     // a running smart-tunnel test adds one short-lived test tunnel per transport and per direction:
@@ -288,6 +311,8 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                     bind: String::new(),
                     awg: None,
                     hy2: None,
+                    fec: String::new(),
+                    dup: false,
                 });
             }
             for (mi, mode) in PROBE_MODES.iter().enumerate() {
@@ -318,6 +343,8 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                         bind: String::new(),
                         awg: None,
                         hy2: None,
+                        fec: String::new(),
+                        dup: false,
                     });
                 }
             }
@@ -519,21 +546,25 @@ fn awg_apply_body(list: &[Tunnel], t: &mut Tunnel, a: &Value) -> Result<(), Stri
 
 /// `hq` / `h2` / `dual` need an agent that knows them: an older one would treat the name as plain
 /// TCP and the two ends would never agree. (Agents that have not reported yet are let through.)
+/// The rotation `order` is checked too: the tunnel may switch to any of its entries.
 fn transport_checks(app: &App, t: &Tunnel) -> Result<(), String> {
-    if !t.enabled || !is_new_transport(&t.transport) {
+    if !t.enabled || !std::iter::once(&t.transport).chain(t.order.iter()).any(|tr| is_new_transport(tr)) {
         return Ok(());
     }
     let names: HashMap<String, String> = servers(app).into_iter().map(|s| (s.id, s.name)).collect();
     let sn = seen().lock().unwrap();
-    for sid in [&t.entry, &t.exit] {
-        if let Some(x) = sn.get(sid.as_str()) {
-            if !x.version.is_empty() && ver_lt(&x.version, NEW_TRANSPORTS_FROM) {
-                return Err(format!(
-                    "the agent of \"{}\" is v{}: update it first (Update all), it does not know the {} transport",
-                    names.get(sid.as_str()).cloned().unwrap_or_default(),
-                    x.version,
-                    t.transport
-                ));
+    for tr in std::iter::once(&t.transport).chain(t.order.iter()) {
+        for sid in [&t.entry, &t.exit] {
+            if let Some(x) = sn.get(sid.as_str()) {
+                if !agent_knows(&x.version, tr) {
+                    return Err(format!(
+                        "the agent of \"{}\" is v{}: update it first (Update all), it does not know the {} transport{}",
+                        names.get(sid.as_str()).cloned().unwrap_or_default(),
+                        x.version,
+                        tr,
+                        if *tr == t.transport { "" } else { " (in the rotation order)" }
+                    ));
+                }
             }
         }
     }
@@ -863,7 +894,7 @@ async fn agent_hy2bin_put(State(app): St, h: HeaderMap, body: axum::body::Bytes)
 
 // ------------------------------------------------------------------ smart tunnel (test every transport)
 
-const PROBE_TRANSPORTS: &[&str] = &["tcpmux", "tcp", "ws", "wss", "quic", "kcp", "hq", "h2"];
+const PROBE_TRANSPORTS: &[&str] = &["tcpmux", "tcp", "ws", "wss", "quic", "kcp", "hq", "h2", "game", "faketcp"];
 /// both directions are measured: the side that listens differs, so the ports differ too
 const PROBE_MODES: &[&str] = &["reverse", "direct"];
 /// a test never runs longer than this (seconds)
@@ -931,6 +962,17 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         }
         None => all,
     };
+    // an agent too old for a transport would run it as plain TCP and report plain-TCP numbers
+    // under its name: such transports are left out of the test
+    let (transports, skipped): (Vec<String>, Vec<String>) = {
+        let sn = seen().lock().unwrap();
+        let ver = |sid: &str| sn.get(sid).map(|x| x.version.clone()).unwrap_or_default();
+        let (ve, vx) = (ver(&entry), ver(&exit));
+        transports.into_iter().partition(|tr| agent_knows(&ve, tr) && agent_knows(&vx, tr))
+    };
+    if transports.is_empty() {
+        return err(StatusCode::BAD_REQUEST, &format!("the agents are too old for {}: update them first (Update all)", skipped.join(", ")));
+    }
     let baseline = b["baseline"].as_bool().unwrap_or(true);
     // the test ports must not collide with a tunnel that already listens there (on either server)
     let span = (transports.len() * PROBE_MODES.len()) as u16;
@@ -955,7 +997,12 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
     };
     let id = job.id.clone();
     *probe_job().lock().unwrap() = Some(job);
-    Json(json!({"ok": true, "id": id, "transports": transports, "baseline": baseline, "modes": PROBE_MODES})).into_response()
+    let note = if skipped.is_empty() {
+        String::new()
+    } else {
+        format!("not tested, an agent is too old for them (update it first): {}", skipped.join(", "))
+    };
+    Json(json!({"ok": true, "id": id, "transports": transports, "skipped": skipped, "note": note, "baseline": baseline, "modes": PROBE_MODES})).into_response()
 }
 
 async fn probe_get(State(app): St, h: HeaderMap) -> Response {
@@ -1061,14 +1108,11 @@ fn rotate_tick(app: &App) {
             continue;
         }
         let order: Vec<String> = if tu.order.is_empty() { AUTO_ORDER.iter().map(|x| x.to_string()).collect() } else { tu.order.clone() };
-        let pos = order.iter().position(|x| *x == tu.transport);
-        let next = match pos {
-            Some(i) => order[(i + 1) % order.len()].clone(),
-            None => order[0].clone(),
-        };
-        if next == tu.transport {
+        // only transports both agents know (an older agent would run the name as plain TCP)
+        let ver = |sid: &str| seen.get(sid).map(|x| x.version.as_str()).unwrap_or("");
+        let Some(next) = next_transport(&order, &tu.transport, |tr| agent_knows(ver(&tu.entry), tr) && agent_knows(ver(&tu.exit), tr)) else {
             continue;
-        }
+        };
         tu.switch_note = format!("{} → {}", tu.transport, next);
         tu.transport = next;
         tu.mode = "reverse".into();
@@ -1081,6 +1125,12 @@ fn rotate_tick(app: &App) {
     if changed {
         save_tunnels(app, &list);
     }
+}
+
+/// the transport after `cur` in `order` that `ok` allows (wrapping around), or None
+fn next_transport(order: &[String], cur: &str, ok: impl Fn(&str) -> bool) -> Option<String> {
+    let start = order.iter().position(|x| x == cur).map(|i| i + 1).unwrap_or(0);
+    (0..order.len()).map(|k| &order[(start + k) % order.len()]).find(|x| ok(x.as_str()) && x.as_str() != cur).cloned()
 }
 
 // ------------------------------------------------------------------ the engine on the panel server
@@ -1197,7 +1247,7 @@ async fn cdn_test(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respons
                 let t0 = std::time::Instant::now();
                 let r = tokio::time::timeout(
                     Duration::from_secs(15),
-                    super::link::dial("cdn", &e, &sni, &host, &path, "", frag),
+                    super::link::dial("cdn", &e, &sni, &host, &path, "", frag, super::game::GameOpts::default()),
                 )
                 .await;
                 let ms = t0.elapsed().as_millis() as u64;
@@ -1373,6 +1423,16 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if let Some(f) = b["frag"].as_bool() {
         t.frag = f;
     }
+    if b.get("fec").is_some() {
+        let f = s("fec");
+        // "8:3" style, 1-64 data and 1-32 parity shards, or "off"
+        if f.is_empty() || f == "off" || f.split(':').all(|x| x.trim().parse::<u8>().map(|v| v <= 64).unwrap_or(false)) {
+            t.fec = f;
+        }
+    }
+    if let Some(d) = b["dup"].as_bool() {
+        t.dup = d;
+    }
     if let Some(e) = b["enabled"].as_bool() {
         t.enabled = e;
     }
@@ -1380,7 +1440,7 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         t.auto = a;
     }
     if b["order"].is_array() || b["order"].is_string() {
-        let o: Vec<String> = clean_list(&b["order"]).into_iter().filter(|x| AUTO_ORDER.contains(&x.as_str()) || x == "hq" || x == "h2").collect();
+        let o: Vec<String> = clean_list(&b["order"]).into_iter().filter(|x| AUTO_ORDER.contains(&x.as_str()) || matches!(x.as_str(), "hq" | "h2" | "game" | "faketcp")).collect();
         t.order = o;
     }
     if t.name.is_empty() {
@@ -2178,5 +2238,38 @@ mod auto_update_tests {
         assert!(n > now && n <= now + 86400);
         let (_, minute) = super::tehran_now();
         assert!((0..1440).contains(&minute));
+    }
+}
+
+#[cfg(test)]
+mod version_gate_tests {
+    use super::{agent_knows, next_transport};
+
+    #[test]
+    fn old_agents_do_not_get_game_or_faketcp() {
+        assert!(!agent_knows("3.5.2", "game"));
+        assert!(!agent_knows("3.5.2", "faketcp"));
+        assert!(agent_knows("3.5.3", "game"));
+        assert!(agent_knows("3.6.0", "faketcp"));
+        assert!(agent_knows("3.5.2", "hq"));
+        assert!(!agent_knows("2.8.0", "hq"));
+        assert!(agent_knows("1.0.0", "tcp"));
+        // not reported yet
+        assert!(agent_knows("", "game"));
+    }
+
+    #[test]
+    fn rotation_skips_transports_an_agent_does_not_know() {
+        let order: Vec<String> = ["kcp", "game", "faketcp", "tcp"].iter().map(|x| x.to_string()).collect();
+        let old = |tr: &str| agent_knows("3.5.2", tr);
+        assert_eq!(next_transport(&order, "kcp", old).as_deref(), Some("tcp"));
+        assert_eq!(next_transport(&order, "tcp", old).as_deref(), Some("kcp"));
+        let new = |tr: &str| agent_knows("3.5.3", tr);
+        assert_eq!(next_transport(&order, "kcp", new).as_deref(), Some("game"));
+        // current transport not in the list: start from the top
+        assert_eq!(next_transport(&order, "ws", old).as_deref(), Some("kcp"));
+        // nothing else allowed
+        let only: Vec<String> = vec!["kcp".into(), "game".into()];
+        assert_eq!(next_transport(&only, "kcp", old), None);
     }
 }

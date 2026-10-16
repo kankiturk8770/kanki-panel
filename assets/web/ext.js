@@ -7,8 +7,13 @@ function KEXT(){
  ICO.dns='<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>';
  ICO.xray='<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>';
  Object.assign(FA,KFA);
+ if(window.AD_FA)Object.assign(FA,AD_FA);
 }
 var KFA={
+ "Anti-DPI tunnels":"تانل‌های ضد DPI",
+ "Certificate changed":"گواهی عوض شده",
+ "The node's certificate changed (reinstalled?): run its join command again, or remove and add the node":"گواهی نود عوض شده (دوباره نصب شده؟): دستور اتصال نود را دوباره اجرا کن، یا نود را حذف و دوباره اضافه کن",
+ "Not tested, an agent is too old (update it first)":"تست نشد، ایجنت قدیمی است (اول آپدیتش کن)",
  // menu
  "VPN services":"سرویس‌های VPN","All VPN services":"همه‌ی سرویس‌های VPN","Kanki VPN and Xray side by side":"کانکی VPN و Xray کنار هم","Kanki VPN":"کانکی VPN","WireGuard · AmneziaWG · Hysteria2":"WireGuard · AmneziaWG · Hysteria2",
  "VLESS · VMess · Trojan · Shadowsocks":"VLESS · VMess · Trojan · Shadowsocks","Kanki DNS":"دی‌ان‌اس کانکی","Overview":"نمای کلی","Status of the DNS servers":"وضعیت سرورهای DNS","DNS servers":"سرورهای DNS",

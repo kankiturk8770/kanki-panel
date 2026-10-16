@@ -320,7 +320,7 @@ async fn tls_alpn(connector: &tokio_rustls::TlsConnector, remote: &str, sni: &st
     let name = link::server_name(sni)?;
     let limit = Duration::from_secs(10);
     if frag {
-        let t = tokio::time::timeout(limit, connector.connect(name, link::FragIo::new(tcp, link::FRAG_BYTES))).await.map_err(|_| "tls timeout")??;
+        let t = tokio::time::timeout(limit, connector.connect(name, link::FragIo::new(tcp, link::frag_bytes()))).await.map_err(|_| "tls timeout")??;
         let h2 = t.get_ref().1.alpn_protocol() == Some(ALPN_H2);
         let io: BoxIo = Box::new(t);
         Ok((io, h2))

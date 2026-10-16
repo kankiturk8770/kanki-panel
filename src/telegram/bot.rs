@@ -2112,7 +2112,7 @@ mod flow_tests {
             db, env: HashMap::new(),
             hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
             login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
-            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
         });
         let (api, log) = fake_telegram().await;
         let bot = Arc::new(Bot {

@@ -136,9 +136,13 @@ ExecStart=/usr/local/bin/kanki-tunnel-run tunnel-run /etc/kanki-tunnel-run/tunne
 Restart=always
 RestartSec=2
 LimitNOFILE=65535
-# lets a non-root user listen on 443 and other ports below 1024
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# lets a non-root user listen on 443 and other ports below 1024; the faketcp transport also needs
+# raw sockets (CAP_NET_RAW) and one iptables rule that hides its RSTs (CAP_NET_ADMIN; iptables
+# runs as a child process and inherits both). With iptables-legacy the rule can still fail as
+# non-root (it cannot create /run/xtables.lock here): the link then works without it, and the
+# log says why
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW CAP_NET_ADMIN
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

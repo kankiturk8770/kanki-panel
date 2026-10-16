@@ -415,36 +415,38 @@ fn agent_env() -> Option<(String, String, String, bool)> {
     Some((panel, id, token, env.get("INSECURE").map(|v| v == "1").unwrap_or(false)))
 }
 
+/// One POST to the panel through the agent's own client (CA-checked, or pinned to
+/// /etc/kanki/panel.pin with INSECURE=1), so the connection whose certificate is checked is the
+/// one that carries the data. Returns the `x-sha256` header and the body. Runs on the reconcile
+/// thread, which has no async runtime of its own.
+fn panel_post(insecure: bool, timeout: Duration, url: &str, headers: &[(&str, String)], body: Vec<u8>) -> Result<(String, Vec<u8>), String> {
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
+    rt.block_on(async {
+        let mut rq = super::agent::panel_client(insecure, timeout).post(url).body(body);
+        for (k, v) in headers {
+            rq = rq.header(*k, v.as_str());
+        }
+        let r = rq.send().await.map_err(|e| crate::pin::error_text(&e))?;
+        if !r.status().is_success() {
+            return Err(format!("the panel answered {}", r.status()));
+        }
+        let sum = r.headers().get("x-sha256").and_then(|v| v.to_str().ok()).unwrap_or("").trim().to_lowercase();
+        let b = r.bytes().await.map_err(|e| crate::pin::error_text(&e))?;
+        Ok((sum, b.to_vec()))
+    })
+}
+
 /// asks the panel for the binary of this CPU type (it has its own, a cached one, or downloads it)
 fn from_panel(tmp: &str) -> Result<(), String> {
     let Some((panel, id, token, insecure)) = agent_env() else { return Err("not a tunnel agent".into()) };
     let body = serde_json::json!({ "id": id, "token": token, "arch": std::env::consts::ARCH }).to_string();
-    let hdr = format!("{}.h", tmp);
-    let cmd = format!(
-        "curl -fsS {}--max-time 300 -H 'content-type: application/json' --data '{}' -D {} -o {} '{}/tunnel/hy2bin' 2>&1",
-        if insecure { "-k " } else { "" },
-        body.replace('\'', ""),
-        hdr,
-        tmp,
-        panel.replace('\'', "")
-    );
-    let (ok, out) = sh(&cmd);
-    let want = std::fs::read_to_string(&hdr)
-        .unwrap_or_default()
-        .lines()
-        .find_map(|l| l.to_lowercase().strip_prefix("x-sha256:").map(|v| v.trim().to_string()))
-        .unwrap_or_default();
-    let _ = std::fs::remove_file(&hdr);
-    if !ok {
-        let _ = std::fs::remove_file(tmp);
-        return Err(format!("the panel did not give it ({})", out.lines().last().unwrap_or("").trim()));
-    }
-    let got = std::fs::read(tmp).map(|b| sha256_hex(&b)).unwrap_or_default();
-    if want.is_empty() || want != got {
-        let _ = std::fs::remove_file(tmp);
+    let json = [("content-type", "application/json".to_string())];
+    let (want, bytes) = panel_post(insecure, Duration::from_secs(300), &format!("{}/tunnel/hy2bin", panel), &json, body.into_bytes())
+        .map_err(|e| format!("the panel did not give it ({})", e))?;
+    if want.is_empty() || want != sha256_hex(&bytes) {
         return Err("the file from the panel was damaged on the way".into());
     }
-    Ok(())
+    std::fs::write(tmp, &bytes).map_err(|e| format!("cannot write {}: {}", tmp, e))
 }
 
 /// the official installer (the same `get.hy2.sh` the panel's install.sh uses), saved to a file;
@@ -553,30 +555,33 @@ fn share_with_panel(bin: &str) {
         DONE.store(true, Ordering::SeqCst);
         return;
     };
-    let k = if insecure { "-k " } else { "" };
+    let url = format!("{}/tunnel/hy2bin", panel);
     let body = serde_json::json!({ "id": id, "token": token, "arch": std::env::consts::ARCH, "check": true }).to_string();
-    let (ok, out) = sh(&format!("curl -fsS {}--max-time 20 -H 'content-type: application/json' --data '{}' '{}/tunnel/hy2bin' 2>/dev/null", k, body.replace('\'', ""), panel.replace('\'', "")));
-    if !ok {
-        return; // an older panel or no answer: try again next round
-    }
-    let have = serde_json::from_str::<serde_json::Value>(&out).ok().and_then(|v| v["have"].as_bool()).unwrap_or(true);
+    let json = [("content-type", "application/json".to_string())];
+    let out = match panel_post(insecure, Duration::from_secs(20), &url, &json, body.into_bytes()) {
+        Ok((_, out)) => out,
+        Err(e) => {
+            if e.contains(crate::pin::MISMATCH) {
+                eprintln!("hy2 tunnel: not sharing the binary: {}", e);
+            }
+            return; // an older panel or no answer: try again next round
+        }
+    };
+    let have = serde_json::from_slice::<serde_json::Value>(&out).ok().and_then(|v| v["have"].as_bool()).unwrap_or(true);
     if !have {
         let Ok(bytes) = std::fs::read(bin) else { return };
         if !looks_like_binary(&bytes) {
             DONE.store(true, Ordering::SeqCst);
             return;
         }
-        let (ok, _) = sh(&format!(
-            "curl -fsS {}--max-time 600 -H 'x-id: {}' -H 'x-token: {}' -H 'x-arch: {}' -H 'x-sha256: {}' -H 'content-type: application/octet-stream' --data-binary @{} '{}/tunnel/hy2bin/put' >/dev/null 2>&1",
-            k,
-            id.replace('\'', ""),
-            token.replace('\'', ""),
-            std::env::consts::ARCH,
-            sha256_hex(&bytes),
-            bin,
-            panel.replace('\'', "")
-        ));
-        if !ok {
+        let headers = [
+            ("x-id", id),
+            ("x-token", token),
+            ("x-arch", std::env::consts::ARCH.to_string()),
+            ("x-sha256", sha256_hex(&bytes)),
+            ("content-type", "application/octet-stream".to_string()),
+        ];
+        if panel_post(insecure, Duration::from_secs(600), &format!("{}/put", url), &headers, bytes).is_err() {
             return;
         }
         eprintln!("hy2 tunnel: gave the panel a copy of hysteria for the other servers");

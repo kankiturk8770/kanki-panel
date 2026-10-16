@@ -11,6 +11,22 @@ use std::time::Duration;
 
 pub const ENV_FILE: &str = "/etc/kanki/tunnel.env";
 const CACHE: &str = "/var/lib/kanki/tunnels.json";
+/// TOFU pin of the panel's certificate for INSECURE installs (see `panel_client`)
+pub const PIN_FILE: &str = "/etc/kanki/panel.pin";
+
+/// The HTTP client for talking to the panel. With INSECURE=1 (the agent's curl could not verify
+/// the panel: old CA bundle, IP address, filtering) the certificate is still CA-checked first
+/// with built-in roots; when that fails it is pinned instead: the first certificate seen is
+/// stored in /etc/kanki/panel.pin and any later change is refused (a MITM cannot keep
+/// impersonating the panel after first contact). For zero first-contact trust, copy the pin
+/// file to the server by hand.
+pub fn panel_client(insecure: bool, timeout: Duration) -> reqwest::Client {
+    if insecure {
+        crate::pin::pinned_client(std::path::Path::new(PIN_FILE), timeout)
+    } else {
+        reqwest::Client::builder().timeout(timeout).build().expect("http")
+    }
+}
 
 /// Opens the ports a tunnel listens on in ufw (only when ufw is active). Remembers what it opened.
 pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
@@ -44,9 +60,10 @@ pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
             continue;
         }
         if s.listens() && s.port > 0 {
-            // quic, kcp and hq run over UDP; dual listens on UDP and TCP of the same number
+            // quic, kcp, hq and game run over UDP; dual listens on UDP and TCP of the same number;
+            // faketcp's packets are TCP on the wire
             let protos: &[&str] = match s.transport.as_str() {
-                "quic" | "kcp" | "hq" => &["udp"],
+                "quic" | "kcp" | "hq" | "game" => &["udp"],
                 "dual" => &["tcp", "udp"],
                 _ => &["tcp"],
             };
@@ -93,7 +110,7 @@ async fn update_from_panel(http: &reqwest::Client, panel: &str, id: &str, token:
         .timeout(Duration::from_secs(300))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| crate::pin::error_text(&e))?;
     if !r.status().is_success() {
         return Err(format!("the panel answered {}", r.status()));
     }
@@ -143,11 +160,12 @@ pub async fn run(version: &str) {
             last = t;
         }
     }
-    let http = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .danger_accept_invalid_certs(insecure)
-        .build()
-        .expect("http");
+    // INSECURE=1: a CA-valid certificate is still accepted (and re-pinned), anything else is
+    // pinned on first contact (see `panel_client`)
+    if insecure {
+        eprintln!("warning: INSECURE=1 — a panel certificate that is not CA-valid will be pinned on first contact ({})", PIN_FILE);
+    }
+    let http = panel_client(insecure, Duration::from_secs(20));
     // an updated agent also moves the emergency chat onto the new binary
     let _ = tokio::task::spawn_blocking(crate::emergency::restart_if_outdated).await;
     let _ = tokio::task::spawn_blocking(crate::dns::restart_if_outdated).await;
@@ -283,7 +301,7 @@ pub async fn run(version: &str) {
             Err(e) => {
                 fails += 1;
                 if fails % 12 == 1 {
-                    eprintln!("cannot reach the panel ({}); the tunnels keep running", e);
+                    eprintln!("cannot reach the panel ({}); the tunnels keep running", crate::pin::error_text(&e));
                 }
             }
         }
@@ -322,8 +340,13 @@ pub fn parse_spec_file(text: &str) -> Result<Vec<Spec>, String> {
         if !super::panel::TRANSPORTS.contains(&s.transport.as_str()) {
             return Err(format!("tunnel {}: unknown transport \"{}\" (use one of: {})", s.id, s.transport, super::panel::TRANSPORTS.join(", ")));
         }
-        if s.token.len() < 16 {
-            return Err(format!("tunnel {}: \"token\" is the shared secret of both ends; use at least 16 random characters", s.id));
+        // the UDP mask key comes from this token and the wire shows a 4-byte tag of it, so a
+        // short token can be brute-forced offline by a watcher: require real entropy
+        if s.token.len() < 24 {
+            return Err(format!(
+                "tunnel {}: \"token\" is the shared secret of both ends and a watcher can brute-force a short one offline; use at least 24 random characters (for example: openssl rand -hex 24)",
+                s.id
+            ));
         }
         // the example files carry public placeholders: running one unchanged would give the tunnel a
         // secret everybody knows, or point it at an address that does not exist
@@ -464,7 +487,7 @@ pub async fn run_file(path: &str) {
 mod standalone_tests {
     use super::*;
 
-    const GOOD: &str = r#"{"role":"entry","mode":"direct","transport":"dual","remote":"203.0.113.5:443","token":"0123456789abcdef0123","tcp":["2222:22"]}"#;
+    const GOOD: &str = r#"{"role":"entry","mode":"direct","transport":"dual","remote":"203.0.113.5:443","token":"0123456789abcdef01234567","tcp":["2222:22"]}"#;
 
     #[test]
     fn one_object_or_a_list() {
@@ -483,7 +506,7 @@ mod standalone_tests {
         assert!(parse_spec_file(&bad_role).unwrap_err().contains("role"));
         let bad_tr = GOOD.replace("dual", "carrier-pigeon");
         assert!(parse_spec_file(&bad_tr).unwrap_err().contains("unknown transport"));
-        let short = GOOD.replace("0123456789abcdef0123", "short");
+        let short = GOOD.replace("0123456789abcdef01234567", "short");
         assert!(parse_spec_file(&short).unwrap_err().contains("token"));
         let no_remote = GOOD.replace("203.0.113.5:443", "");
         assert!(parse_spec_file(&no_remote).unwrap_err().contains("remote"));
@@ -507,7 +530,7 @@ mod standalone_tests {
             let why = parse_spec_file(text).unwrap_err();
             assert!(why.contains("placeholder"), "{}", why);
             // ... and valid once the two placeholders are filled in
-            let filled = text.replace("CHANGE-ME-same-secret-on-both-nodes-32+chars", "0123456789abcdef0123456789abcdef").replace("NODE_A_PUBLIC_IP", "203.0.113.5").replace("NODE_B_PUBLIC_IP", "203.0.113.6");
+            let filled = text.replace("CHANGE-ME-same-secret-on-both-nodes-32+chars", "0123456789abcdef01234567456789abcdef").replace("NODE_A_PUBLIC_IP", "203.0.113.5").replace("NODE_B_PUBLIC_IP", "203.0.113.6");
             let s = parse_spec_file(&filled).expect("an example file must be valid");
             assert_eq!(s[0].transport, "dual");
         }
@@ -515,7 +538,7 @@ mod standalone_tests {
 
     #[test]
     fn firewall_list_has_both_protocols_for_dual() {
-        let exit = r#"{"role":"exit","mode":"direct","transport":"dual","port":443,"token":"0123456789abcdef0123"}"#;
+        let exit = r#"{"role":"exit","mode":"direct","transport":"dual","port":443,"token":"0123456789abcdef01234567"}"#;
         let s = parse_spec_file(exit).unwrap();
         assert_eq!(firewall_list(&s), vec!["443/tcp".to_string(), "443/udp".to_string()]);
         let entry = parse_spec_file(GOOD).unwrap();
