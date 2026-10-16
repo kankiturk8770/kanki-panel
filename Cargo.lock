@@ -828,7 +828,7 @@ dependencies = [
 
 [[package]]
 name = "kanki-panel"
-version = "3.5.1"
+version = "3.5.2"
 dependencies = [
  "axum",
  "bytes",

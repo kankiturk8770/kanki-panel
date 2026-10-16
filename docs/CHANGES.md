@@ -1,3 +1,10 @@
+# v3.5.2 — certbot frees port 80 by itself
+- **Port 80 is handled by itself**, when the certificate is taken and on every renewal: whatever listens there (Caddy, nginx, an Xray inbound, a Docker container …) is stopped for the few seconds certbot needs and started again right after, even when certbot fails or hangs. The holder is found from `/proc` (no tools needed).
+- **Kanki DNS does not stop for SSL:** it answers Let's Encrypt itself on port 80 (`certbot --webroot`), so the users' DNS keeps working while the certificate is taken or renewed.
+- **Renewal that does not break:** besides certbot's own renewal, the agent checks every 12 hours and renews a certificate with fewer than 25 days left with what holds port 80 at that moment. After a renewal every service that uses the certificate is restarted (a domain can serve DNS and Xray together).
+- After a failure certbot waits 10 minutes, then 20, 40 … up to a day, instead of disturbing the server every round. A program on port 80 that is not a service is named in the error instead of being killed.
+- The emergency chat uses the same certbot code.
+
 # v3.5.1 — SSL with certbot, DNS and Xray kept apart
 - **SSL is taken on the server itself with certbot** (`certbot certonly --standalone -d <domain>`, no e-mail), like the emergency chat: an Xray server with its domain gets its certificate as soon as it is added (TLS inbounds with "Automatic" use it), and every Kanki DNS server gets one for its own name. certbot renews by itself; a Kanki service holding port 80 (Kanki DNS, an Xray inbound on 80) is stopped for those seconds and started again. A failure shows on the server card and is tried again after 10 minutes.
 - **Removed:** certificates and DNS records through the Cloudflare / ArvanCloud API (Kanki DNS and Xray), and the "Xray DNS servers" setting. Kanki DNS and Xray no longer share any setting.

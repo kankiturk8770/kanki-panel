@@ -155,16 +155,6 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
     };
     let _ = std::fs::create_dir_all("/etc/kanki");
     let _ = std::fs::create_dir_all(DATA_DIR);
-    // SSL with certbot for this server's name (Kanki DNS holds port 80: stopped for those seconds);
-    // DNS itself works without it, only DoT / DoH wait for the certificate
-    let mut ssl_err = String::new();
-    if c.acme && !c.host.is_empty() {
-        if let Err(e) = crate::certbot::ensure(&c.host, Some("kanki-dns.service"), &["kanki-dns.service"]) {
-            eprintln!("dns: {}", e);
-            ssl_err = e;
-        }
-    }
-    let _ = std::fs::write(SSL_ERR_FILE, &ssl_err);
     let text = serde_json::to_string(c).map_err(|e| e.to_string())?;
     if std::fs::read_to_string(CONF_FILE).map(|t| t != text).unwrap_or(true) {
         let tmp = format!("{}.new", CONF_FILE);
@@ -187,11 +177,14 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
         let _ = sh("systemctl enable -q kanki-dns.service");
     }
     // ports, certificate, role and relay path need a restart; users and names are re-read live
-    let restart_key = crate::util::sha256_hex(&format!(
-        "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        c.role, c.host, c.cert, c.key, c.dns_port, c.dot_port, c.https_port, c.http_port, c.intake_port, c.exit_addr,
-        format!("{}|{}", c.answer_ip, c.acme && crate::certbot::have(&c.host))
-    ));
+    let key_of = |c: &DnsCfg| {
+        crate::util::sha256_hex(&format!(
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            c.role, c.host, c.cert, c.key, c.dns_port, c.dot_port, c.https_port, c.http_port, c.intake_port, c.exit_addr,
+            format!("{}|{}", c.answer_ip, c.acme && crate::certbot::have(&c.host))
+        ))
+    };
+    let restart_key = key_of(c);
     let old_key = std::fs::read_to_string(RESTART_FILE).unwrap_or_default();
     let active = sh("systemctl is-active --quiet kanki-dns.service").0;
     if unit_changed || old_key.trim() != restart_key || !active {
@@ -209,6 +202,36 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
             }
         }
     }
+    // SSL with certbot for this server's name, now that the service runs: Kanki DNS answers Let's Encrypt
+    // itself on port 80, so DNS does not stop; DNS works without it, only DoT / DoH wait for the certificate
+    let mut ssl_err = String::new();
+    if c.acme && !c.host.is_empty() {
+        let had = crate::certbot::have(&c.host);
+        if !had && c.http_port == 80 {
+            // just started: let it take port 80 first, so certbot sees it and does not stop it
+            for _ in 0..20 {
+                if crate::certbot::port80_used() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        }
+        match crate::certbot::ensure(&c.host, &["kanki-dns.service"]) {
+            Ok(()) if !had => {
+                // the service was restarted onto the new certificate
+                if !sh("systemctl is-active --quiet kanki-dns.service").0 {
+                    let _ = sh("systemctl restart kanki-dns.service");
+                }
+                let _ = std::fs::write(RESTART_FILE, key_of(c));
+            }
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("dns: {}", e);
+                ssl_err = e;
+            }
+        }
+    }
+    let _ = std::fs::write(SSL_ERR_FILE, &ssl_err);
     // no certificate yet: the config is sent again next round and certbot tries again (after 10 minutes)
     let _ = std::fs::write(VER_FILE, if c.acme && !c.host.is_empty() && !crate::certbot::have(&c.host) { format!("{}-nossl", ver) } else { ver.to_string() });
     Ok(())

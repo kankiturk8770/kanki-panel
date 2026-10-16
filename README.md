@@ -3,8 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
-## New in 3.5.1 — SSL with certbot on the server
+## New in 3.5.2 — SSL with certbot on the server
 - An Xray server or a Kanki DNS server gets its SSL by itself with certbot (domain, no e-mail). The Cloudflare / ArvanCloud API way is gone.
+- Port 80 is freed by itself for certbot (Caddy, nginx, an inbound … are set aside for a few seconds and come back), also on renewal. Kanki DNS answers Let's Encrypt itself, so DNS never stops.
 
 ## New in 3.5 — a menu that opens in place, stronger Xray and DNS pages
 - **Menu:** groups open in place (VPN services › All / Kanki VPN / Xray, Kanki DNS › Overview / Servers / Services / Users / Settings, Tunnels, Sales, System). On a phone there is no hamburger: a section bar under the top bar opens a drop-down of tiles (VPN: Kanki VPN and Xray side by side).

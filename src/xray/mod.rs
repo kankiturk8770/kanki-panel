@@ -214,11 +214,10 @@ fn certs_for(config: &mut Value, extra: &[String]) -> bool {
         cert_errors().lock().unwrap().clear();
         return false;
     }
-    // an Xray inbound on port 80 holds the port certbot needs: stop Xray for those seconds
-    let on80 = config["inbounds"].as_array().into_iter().flatten().any(|ib| ib["port"].as_u64() == Some(80));
+    // whatever holds port 80 (an Xray inbound too) is set aside for certbot and given back right after
     let mut errs = HashMap::new();
     for d in &domains {
-        if let Err(e) = crate::certbot::ensure(d, if on80 { Some("kanki-xray.service") } else { None }, &["kanki-xray.service"]) {
+        if let Err(e) = crate::certbot::ensure(d, &["kanki-xray.service"]) {
             errs.insert(d.clone(), e);
         }
     }

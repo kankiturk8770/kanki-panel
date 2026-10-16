@@ -151,6 +151,8 @@ pub async fn run(version: &str) {
     // an updated agent also moves the emergency chat onto the new binary
     let _ = tokio::task::spawn_blocking(crate::emergency::restart_if_outdated).await;
     let _ = tokio::task::spawn_blocking(crate::dns::restart_if_outdated).await;
+    // certificates close to their end are renewed with what holds port 80 at that moment
+    crate::certbot::renew_loop();
     let mut fails = 0u32;
     // the last error of setting up the emergency chat (reported to the panel)
     let emer_err: Mutex<Option<String>> = Mutex::new(None);
