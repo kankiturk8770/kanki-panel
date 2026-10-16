@@ -106,6 +106,8 @@ pub struct Inbound {
     pub kcp_cong: bool,
     /// VLESS / Trojan over TCP: where other traffic goes
     pub fallbacks: Vec<Fallback>,
+    /// TLS: the panel gets (and renews) a Let's Encrypt certificate for the SNI by itself
+    pub acme: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -196,6 +198,113 @@ pub struct XraySettings {
     pub outs: Vec<XOut>,
     /// the outbound everything else goes to ("" = direct)
     pub default_out: String,
+    /// automatic certificates: "cloudflare" | "arvan" ("" = the same as Kanki DNS), its API token, ACME e-mail
+    pub provider: String,
+    pub api_token: String,
+    pub email: String,
+    /// do not point the domain at the server (the A record is managed by hand)
+    pub no_a: bool,
+}
+
+// ------------------------------------------------------------------ automatic certificates
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct XCert {
+    pub cert: String,
+    pub key: String,
+    /// issued at, last try, last error
+    pub at: i64,
+    pub tried: i64,
+    pub err: String,
+}
+
+const CERT_RENEW: i64 = 60 * 86400;
+
+pub fn certs(app: &App) -> HashMap<String, XCert> {
+    serde_json::from_str(&app.db.get("xray_certs")).unwrap_or_default()
+}
+
+fn cert_update(app: &App, domain: &str, f: impl FnOnce(&mut XCert)) {
+    let mut c = certs(app);
+    f(c.entry(domain.to_string()).or_default());
+    app.db.set("xray_certs", &serde_json::to_string(&c).unwrap_or_default());
+}
+
+/// The provider, token and e-mail for certificates: Xray's own, else the ones of Kanki DNS.
+fn cert_creds(app: &App, s: &XraySettings) -> Option<(String, String, String)> {
+    if !s.provider.is_empty() && !s.api_token.is_empty() {
+        return Some((s.provider.clone(), s.api_token.clone(), s.email.clone()));
+    }
+    let d = crate::dns::panel::settings(app);
+    (!d.provider.is_empty() && !d.api_token.is_empty()).then(|| (d.provider.clone(), d.api_token.clone(), if s.email.is_empty() { d.email } else { s.email.clone() }))
+}
+
+fn cert_busy() -> &'static Mutex<std::collections::HashSet<String>> {
+    static B: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    B.get_or_init(|| Mutex::new(Default::default()))
+}
+
+/// Point the domain at its server and get its certificate (in the background, about a minute).
+pub fn cert_start(app: &Arc<App>, domain: &str, sid: &str) -> Result<(), String> {
+    let s = settings(app);
+    let (kind, token, email) = cert_creds(app, &s).ok_or("choose the DNS provider (Cloudflare or ArvanCloud) and its API token in Xray › Settings (or in Kanki DNS)")?;
+    let domain = domain.trim().trim_matches('.').to_ascii_lowercase();
+    if !cert_busy().lock().unwrap().insert(domain.clone()) {
+        return Ok(());
+    }
+    let ip = if s.no_a { String::new() } else { server_address(app, &s, sid) };
+    let app = app.clone();
+    tokio::spawn(async move {
+        cert_update(&app, &domain, |c| c.tried = now());
+        let r = async {
+            if ip.parse::<std::net::Ipv4Addr>().is_ok() {
+                crate::dns::acme::set_a_record(&app, &kind, &token, &domain, &ip).await?;
+            }
+            crate::dns::acme::issue_for(&app, &kind, &token, &email, std::slice::from_ref(&domain)).await
+        }
+        .await;
+        match r {
+            Ok((cert, key)) => {
+                eprintln!("xray certificate for {}: issued", domain);
+                cert_update(&app, &domain, |c| {
+                    c.cert = cert;
+                    c.key = key;
+                    c.at = now();
+                    c.err.clear();
+                })
+            }
+            Err(e) => {
+                eprintln!("xray certificate for {}: {}", domain, e);
+                cert_update(&app, &domain, |c| c.err = e)
+            }
+        }
+        cert_busy().lock().unwrap().remove(&domain);
+    });
+    Ok(())
+}
+
+/// Every 6 hours: certificates that are missing or 60 days old are fetched again.
+pub async fn cert_loop(app: Arc<App>) {
+    tokio::time::sleep(std::time::Duration::from_secs(90)).await;
+    loop {
+        let s = settings(&app);
+        let have = certs(&app);
+        let mut seen = std::collections::HashSet::new();
+        for ib in s.inbounds.iter().filter(|ib| s.on && ib.enabled && ib.acme && ib.security == "tls" && !ib.sni.is_empty()) {
+            let d = ib.sni.trim().to_ascii_lowercase();
+            if !seen.insert(d.clone()) {
+                continue;
+            }
+            let c = have.get(&d).cloned().unwrap_or_default();
+            let due = c.cert.is_empty() || now() - c.at > CERT_RENEW;
+            // after a failure wait 6 hours before trying again
+            if due && now() - c.tried > 6 * 3600 - 60 {
+                let _ = cert_start(&app, &d, &ib.server);
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(6 * 3600)).await;
+    }
 }
 
 pub fn settings(app: &App) -> XraySettings {
@@ -734,6 +843,22 @@ fn runnable(app: &App) -> XraySettings {
     let mut s = settings(app);
     let t = ib_traffic(app);
     s.inbounds.retain(|ib| ib.enabled && ib_state(ib, t.get(&ib.id).copied().unwrap_or(0)).is_empty());
+    let c = certs(app);
+    s.inbounds.retain_mut(|ib| {
+        if !(ib.acme && ib.security == "tls") {
+            return true;
+        }
+        match c.get(&ib.sni.trim().to_ascii_lowercase()).filter(|x| !x.cert.is_empty()) {
+            Some(x) => {
+                ib.cert = x.cert.clone();
+                ib.key = x.key.clone();
+                ib.cert_file.clear();
+                true
+            }
+            // no certificate yet: Xray would refuse the whole config
+            None => false,
+        }
+    });
     s
 }
 
@@ -772,7 +897,13 @@ pub fn link(app: &App, s: &XraySettings, ib: &Inbound, u: &User) -> Option<Strin
 }
 
 fn link_with(_s: &XraySettings, ib: &Inbound, u: &User, server_addr: &str) -> Option<String> {
-    let host = if ib.link_host.trim().is_empty() { server_addr.to_string() } else { ib.link_host.trim().to_string() };
+    let host = if !ib.link_host.trim().is_empty() {
+        ib.link_host.trim().to_string()
+    } else if ib.acme && ib.security == "tls" && !ib.sni.trim().is_empty() {
+        ib.sni.trim().to_string()
+    } else {
+        server_addr.to_string()
+    };
     if host.is_empty() {
         return None;
     }
@@ -946,6 +1077,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/xray/inbounds/:id/clone", post(clone_inbound))
         .route("/api/xray/inbounds/:id/clients", get(inbound_clients))
         .route("/api/xray/inbounds/:id/json", get(inbound_preview))
+        .route("/api/xray/inbounds/:id/cert", post(cert_now))
         .route("/api/xray/outs/check", post(check_out))
         .route("/api/xray/keys", post(new_keys))
         .route("/api/xray/config/:id", get(preview))
@@ -969,6 +1101,7 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
         .collect();
     let users = xray_users(&app);
     let totals = ib_traffic(&app);
+    let xc = certs(&app);
     let inbounds: Vec<Value> = s
         .inbounds
         .iter()
@@ -978,6 +1111,14 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
             let used = totals.get(&ib.id).copied().unwrap_or(0);
             v["traffic"] = json!(used);
             v["state"] = json!(ib_state(ib, used));
+            if ib.acme {
+                let c = xc.get(&ib.sni).cloned().unwrap_or_default();
+                let busy = cert_busy().lock().unwrap().contains(&ib.sni);
+                v["cert_state"] = json!({ "present": !c.cert.is_empty(), "at": c.at, "err": c.err, "busy": busy });
+                if c.cert.is_empty() && ib.enabled && v["state"] == "" {
+                    v["state"] = json!("nocert");
+                }
+            }
             v["server_name"] = json!(names.get(&ib.server).cloned().unwrap_or_default());
             // the private keys never leave the panel in a listing
             v["key"] = json!(if ib.key.is_empty() { "" } else { "set" });
@@ -993,11 +1134,17 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
             online.push(json!({ "id": id, "name": uname.get(&id).cloned().unwrap_or_else(|| format!("#{}", id)), "server": names.get(sid).cloned().unwrap_or_default() }));
         }
     }
+    let dns_creds = {
+        let d = crate::dns::panel::settings(&app);
+        (!d.provider.is_empty() && !d.api_token.is_empty()).then_some(d.provider)
+    };
     Json(json!({
         "on": s.on, "version": s.version, "block_private": s.block_private, "block_bt": s.block_bt, "rules": s.rules, "outbounds": s.outbounds,
         "log_level": s.log_level, "domain_strategy": s.domain_strategy, "dns": s.dns, "ipv4": s.ipv4, "block_ads": s.block_ads, "block_ir": s.block_ir,
         "rule_list": s.rule_list, "outs": s.outs.iter().map(|o| { let mut v = serde_json::to_value(o).unwrap_or(json!({})); v["error"] = json!(out_json(o, s.ipv4).err()); v }).collect::<Vec<_>>(),
         "default_out": s.default_out, "online": online,
+        "provider": s.provider, "email": s.email, "has_token": !s.api_token.is_empty(), "no_a": s.no_a,
+        "dns_creds": dns_creds,
         "servers": servers, "inbounds": inbounds, "users": users.len(),
         "agents": names.iter().map(|(k, v)| json!({ "id": k, "name": v })).collect::<Vec<_>>(),
         "user_list": all_users.iter().filter(|u| u.has_proto("xray")).map(|u| json!({ "id": u.id, "name": u.username })).collect::<Vec<_>>(),
@@ -1074,6 +1221,21 @@ async fn put_settings(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
             Ok(x) => s.rule_list = x,
             Err(e) => return err(StatusCode::BAD_REQUEST, &e.to_string()),
         }
+    }
+    if let Some(v) = b["provider"].as_str() {
+        if !["", "cloudflare", "arvan"].contains(&v) {
+            return err(StatusCode::BAD_REQUEST, "provider: cloudflare, arvan or empty (the same as Kanki DNS)");
+        }
+        s.provider = v.to_string();
+    }
+    if let Some(v) = b["api_token"].as_str().map(|x| x.trim()).filter(|x| !x.is_empty()) {
+        s.api_token = v.to_string();
+    }
+    if let Some(v) = b["email"].as_str() {
+        s.email = v.trim().to_string();
+    }
+    if let Some(v) = b["no_a"].as_bool() {
+        s.no_a = v;
     }
     if let Some(v) = b["default_out"].as_str() {
         s.default_out = v.trim().to_string();
@@ -1199,7 +1361,26 @@ async fn put_inbound(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
             ib.short_ids = hex::encode(rand::random::<[u8; 8]>());
         }
     }
-    if ib.security == "tls" && !ib.cert_file.trim().is_empty() {
+    if ib.security != "tls" {
+        ib.acme = false;
+    }
+    let mut start_cert = false;
+    if ib.acme {
+        let d = ib.sni.trim().trim_matches('.').to_ascii_lowercase();
+        let ok = d.contains('.') && d.split('.').all(|l| !l.is_empty() && l.len() <= 63 && l.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'));
+        if !ok {
+            return err(StatusCode::BAD_REQUEST, "automatic certificate: write the domain in SNI (like de.example.com)");
+        }
+        if cert_creds(&app, &s).is_none() {
+            return err(StatusCode::BAD_REQUEST, "automatic certificate: choose the DNS provider and its API token in Xray › Settings (or in Kanki DNS)");
+        }
+        ib.sni = d;
+        ib.cert.clear();
+        ib.key.clear();
+        ib.cert_file.clear();
+        ib.key_file.clear();
+        start_cert = certs(&app).get(&ib.sni).map(|c| c.cert.is_empty()).unwrap_or(true);
+    } else if ib.security == "tls" && !ib.cert_file.trim().is_empty() {
         if !ib.cert_file.trim().starts_with('/') || !ib.key_file.trim().starts_with('/') {
             return err(StatusCode::BAD_REQUEST, "certificate and key files are full paths on the server, like /etc/letsencrypt/live/x/fullchain.pem");
         }
@@ -1250,7 +1431,21 @@ async fn put_inbound(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         None => s.inbounds.push(ib.clone()),
     }
     save(&app, &s);
+    if start_cert {
+        let _ = cert_start(&app, &ib.sni, &ib.server);
+    }
     Json(json!({ "ok": true, "id": ib.id })).into_response()
+}
+
+/// Get the certificate of an inbound now.
+async fn cert_now(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let s = settings(&app);
+    let Some(ib) = s.inbounds.iter().find(|x| x.id == id && x.acme) else { return err(StatusCode::NOT_FOUND, "this inbound has no automatic certificate") };
+    match cert_start(&app, &ib.sni, &ib.server) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e),
+    }
 }
 
 async fn del_inbound(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
@@ -1340,7 +1535,8 @@ async fn new_keys(State(app): St, h: HeaderMap) -> Response {
 
 async fn preview(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
     let _ = guard!(app, h, "nodes");
-    let s = settings(&app);
+    // what the server really gets (no stopped inbounds, certificates filled in)
+    let s = runnable(&app);
     Json(build_config(&s, &id, &xray_users(&app))).into_response()
 }
 
@@ -1445,6 +1641,15 @@ mod tests {
         ib.total_gb = 0.0;
         ib.expire = 1;
         assert_eq!(ib_state(&ib, 0), "expired");
+    }
+
+    #[test]
+    fn automatic_certificates_use_the_domain() {
+        let u = User { id: 3, username: "ali".into(), code: "99887766".into(), enabled: true, protocols: "xray".into(), ..emit::test_user() };
+        let ib = Inbound { id: "a".into(), protocol: "trojan".into(), port: 443, network: "tcp".into(), security: "tls".into(), sni: "de.example.com".into(), acme: true, ..Default::default() };
+        let l = link_with(&XraySettings::default(), &ib, &u, "1.2.3.4").unwrap();
+        assert!(l.contains("@de.example.com:443?"), "{}", l);
+        assert!(l.contains("sni=de.example.com"));
     }
 
     #[test]
