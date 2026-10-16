@@ -701,9 +701,10 @@ pub fn deploy(cfg: Option<(&EmerCfg, &str)>) -> Result<(), String> {
         let _ = sh("systemctl daemon-reload");
         let _ = sh("systemctl enable -q kanki-emergency.service");
     }
-    // automatic SSL: get the certificate once (certbot renews it and restarts the chat by itself)
-    if !c.acme_domain.is_empty() && !std::path::Path::new(&acme_files(&c.acme_domain).0).exists() {
-        get_cert(&c.acme_domain)?;
+    // automatic SSL: get the certificate once (certbot renews it and restarts the chat by itself);
+    // whatever holds port 80 (Caddy, nginx …) is set aside for those seconds and given back right after
+    if !c.acme_domain.is_empty() {
+        crate::certbot::ensure(&c.acme_domain, &["kanki-emergency.service"])?;
     }
     // a new port or certificate needs a restart; the customer list and the password are re-read live
     let restart_key = util::sha256_hex(&format!("{}|{}|{}|{}", c.port, c.cert, c.key, c.acme_domain));
@@ -723,35 +724,6 @@ pub fn deploy(cfg: Option<(&EmerCfg, &str)>) -> Result<(), String> {
     }
     let _ = std::fs::write(VER_FILE, ver);
     Ok(())
-}
-
-/// Let's Encrypt certificate with certbot (standalone: port 80 of this server must be free and the
-/// domain must reach it; ArvanCloud passes port 80 through). Installs certbot when missing.
-fn get_cert(domain: &str) -> Result<(), String> {
-    if !domain.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
-        return Err("bad domain".into());
-    }
-    if !sh("command -v certbot").0 {
-        eprintln!("emergency chat: installing certbot ...");
-        let _ = sh("export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq certbot >/dev/null 2>&1 || (apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq certbot >/dev/null 2>&1)");
-        if !sh("command -v certbot").0 {
-            return Err("certbot could not be installed (apt install certbot)".into());
-        }
-    }
-    if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
-        let _ = sh("ufw allow 80/tcp >/dev/null 2>&1");
-    }
-    eprintln!("emergency chat: getting a certificate for {} ...", domain);
-    let (ok, out) = sh(&format!(
-        "timeout 240 certbot certonly --standalone -d {} --non-interactive --agree-tos --register-unsafely-without-email --key-type ecdsa --deploy-hook 'systemctl restart kanki-emergency.service' 2>&1",
-        domain
-    ));
-    if ok && std::path::Path::new(&acme_files(domain).0).exists() {
-        Ok(())
-    } else {
-        let why = out.lines().rev().find(|l| l.contains("Detail") || l.contains("Problem") || l.contains("Error") || l.contains("Could not")).unwrap_or("certbot failed").trim().to_string();
-        Err(format!("SSL for {} failed: {}. Port 80 of this server must be free and {} must point to it.", domain, why, domain))
-    }
 }
 
 const RUNNING_VER: &str = "/var/lib/kanki/emergency/running.ver";

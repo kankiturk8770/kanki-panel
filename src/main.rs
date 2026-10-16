@@ -214,6 +214,8 @@ async fn main() {
     // an updated panel also moves an emergency chat on this server onto the new binary
     tokio::task::spawn_blocking(emergency::restart_if_outdated);
     tokio::spawn(xray::panel::local_loop(app.clone()));
+    // certificates of this server (Xray, emergency chat) that are close to their end
+    certbot::renew_loop();
     tokio::spawn(backup::telegram_loop(app.clone()));
     tokio::spawn(channel::channel_loop(app.clone()));
     if let Some(b) = bot::Bot::new(app.clone()) {

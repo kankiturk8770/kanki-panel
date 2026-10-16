@@ -782,6 +782,12 @@ async fn https(eng: &Arc<Engine>, mut s: TcpStream, ip: IpAddr, tls: Option<Arc<
 /// Port 80: a subscriber's request for a routed host is carried on; `/kdns/r/<token>` registers.
 async fn http(eng: &Arc<Engine>, mut s: TcpStream, ip: IpAddr) {
     let Some((pre, host, path)) = read_head(&mut s).await else { return };
+    // Let's Encrypt checking this server's name for certbot (webroot): DNS keeps running meanwhile
+    if let Some(body) = crate::certbot::challenge(&path) {
+        let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+        let _ = s.write_all(resp.as_bytes()).await;
+        return;
+    }
     let live = eng.live();
     if live.own(&host) || host.parse::<IpAddr>().is_ok() {
         let body = match path.strip_prefix("/kdns/r/").map(|t| t.trim_end_matches('/').to_ascii_lowercase()) {
