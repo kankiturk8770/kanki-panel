@@ -10,7 +10,7 @@ function p_xray(){XR.tab=S.sub||'overview';
 function tab_xray(sub){XR.tab=sub||'overview';if(XR.d)xrDraw(XR.d);else xrLoad()}
 function xrTabs(d){var el=$('#xr_tabs');if(!el)return;var cnt={inbounds:d.inbounds.length,clients:(d.online||[]).length,routing:(d.rule_list||[]).length+(d.outs||[]).length};
  el.innerHTML=XTABS.map(function(x){return '<a href="#xray/'+x[0]+'" class="'+(XR.tab==x[0]?'on':'')+'">'+ic(x[2],15)+t(x[1])+(cnt[x[0]]?' <em>'+N(cnt[x[0]])+'</em>':'')+'</a>'}).join('')}
-function xrLoad(quiet){return api('GET','/api/xray').then(function(d){XR.d=d;if(S.page!='xray')return d;if(quiet){xrTabs(d);
+function xrLoad(quiet){return api('GET','/api/xray').then(function(d){XR.d=d;if(S.page=='nodes'&&$('#nl_x'))$('#nl_x').innerHTML=xrServers(d);if(S.page!='xray')return d;if(quiet){xrTabs(d);
    if(XR.tab=='overview'&&$('#xr_srv')){$('#xr_srv').innerHTML=xrServers(d);$('#xr_kv').innerHTML=xrKpis(d);return d}
    if(XR.tab=='inbounds'&&$('#xr_ib')){$('#xr_ib').innerHTML=xrInbounds(d);return d}
    if(XR.tab=='clients'&&$('#xr_on')){$('#xr_on').innerHTML=xrOnline(d);return d}
@@ -27,14 +27,14 @@ function xrKpis(d){var act=d.inbounds.filter(function(x){return x.enabled&&!x.st
 function xrOverview(d,el){
  el.innerHTML=(d.on?'':'<div class="warnbox">'+t('Xray is off: nothing runs on the servers and no links go to the users.')+' <a href="#xray/settings">'+t('Turn it on')+'</a></div>')+
   '<div class="kv k5" id="xr_kv">'+xrKpis(d)+'</div>'+
-  '<div class="g2"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Xray servers')+'</h3><button class="b2" onclick="xrAddNode()">'+ic('plus',14)+' '+t('Add server')+'</button></div><div id="xr_srv" style="margin-top:10px">'+xrServers(d)+'</div></div>'+
+  '<div class="g2"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Xray servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="xr_srv" style="margin-top:10px">'+xrServers(d)+'</div></div>'+
   '<div class="card"><div class="nh"><h3>'+ic('xray',16)+' '+t('Inbounds')+'</h3><a class="b2" href="#xray/inbounds">'+t('Manage')+'</a></div><div style="margin-top:6px">'+(d.inbounds.length?d.inbounds.map(function(ib){return xrMiniRow(ib)}).join(''):'<p class="muted">'+t('No inbound yet.')+' <a href="#" onclick="xrInbound();return false">'+t('Make the first one')+'</a></p>')+'</div></div></div>'+
   '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0">'+t('1) Add a server (the panel server or any tunnel server). 2) Make inbounds on it. 3) Tick Xray for a user: the links of every inbound go into the user\'s subscription, and the traffic counts toward the user\'s volume.')+'</p></div>'}
 function xrProtoShort(p){return {vless:'VL',vmess:'VM',trojan:'TR',shadowsocks:'SS'}[p]||p}
 function xrMiniRow(ib){var st=xrState(ib);return '<div class="vrow"><span class="dot '+st[0]+'"></span><div class="nm"><b>'+esc(ib.remark||ib.protocol)+'</b><small class="ltr">'+esc(ib.protocol.toUpperCase())+' · '+esc(ib.network)+(ib.security!='none'?' · '+esc(ib.security.toUpperCase()):'')+' · :'+ib.port+'</small></div><span class="chipx '+st[0]+'">'+t(st[1])+'</span><b class="ltr" style="font-size:12px">'+N(bytes(ib.traffic))+'</b></div>'}
 function xrState(ib){if(!ib.enabled)return ['r','Off'];if(ib.state=='depleted')return ['y','Traffic used up'];if(ib.state=='expired')return ['y','Expired'];if(ib.state=='nocert')return [ib.cert_err?'r':'y',ib.cert_err?'Certificate error':'Waiting for the certificate'];var s=(XR.d&&XR.d.servers||[]).filter(function(x){return x.server==ib.server})[0];
  if(s&&s.status&&s.status.active)return ['g','Running'];return ['y','Waiting for the server…']}
-function xrServers(d){if(!d.servers.length)return '<p class="muted">'+t('Add an Xray server first')+'</p>';
+function xrServers(d){if(!d.servers.length)return '<p class="muted">'+t('No Xray server yet: add one in Servers')+'</p>';
  return d.servers.map(function(x){var st=x.status||{},on=st.active,errs=[st.deploy_error,st.error].filter(Boolean),n=d.inbounds.filter(function(i){return i.server==x.server}).length;
   return '<div class="vrow" style="flex-wrap:wrap;align-items:flex-start"><span class="dot '+(on?'g':'r')+'" style="margin-top:6px"></span><div class="nm"><b>'+esc(x.name||x.server)+(x.server=='local'?' <span class="rotb">'+t('Panel server')+'</span>':'')+'</b><small class="ltr">'+esc(x.effective||'?')+(st.core?' · Xray '+esc(st.core):'')+' · '+N(n)+' '+t('inbounds')+'</small></div>'+
    '<span class="chipx '+(on?'g':'r')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span>'+xrCertChip(x)+

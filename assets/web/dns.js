@@ -9,7 +9,7 @@ function p_dns(){DN.tab=S.sub||'overview';
 function tab_dns(sub){DN.tab=sub||'overview';if(DN.d)dnsDraw(DN.d);else dnsLoad()}
 function dnsTabs(d){var el=$('#dn_tabs');if(!el)return;var cnt={servers:d.servers.length,users:d.users};
  el.innerHTML=DTABS.map(function(x){return '<a href="#dns/'+x[0]+'" class="'+(DN.tab==x[0]?'on':'')+'">'+ic(x[2],15)+t(x[1])+(cnt[x[0]]?' <em>'+N(cnt[x[0]])+'</em>':'')+'</a>'}).join('')}
-function dnsLoad(quiet){return api('GET','/api/dns').then(function(d){DN.d=d;if(S.page!='dns')return d;
+function dnsLoad(quiet){return api('GET','/api/dns').then(function(d){DN.d=d;if(S.page=='nodes'&&$('#nl_d'))$('#nl_d').innerHTML=dnsServers(d);if(S.page!='dns')return d;
   if(quiet){dnsTabs(d);if(DN.tab=='overview'&&$('#dn_kv')){$('#dn_kv').innerHTML=dnsKpis(d);$('#dn_top').innerHTML=dnsTop(d);$('#dn_topo').innerHTML=dnsTopo(d);return d}
    if(DN.tab=='servers'&&$('#dn_srv')){$('#dn_srv').innerHTML=dnsServers(d);return d}
    if(DN.tab=='users'&&$('#dn_ul')){dnsUsersLoad();return d}
@@ -52,13 +52,13 @@ function dnsCheckWire(){var go=function(){var v=$('#dn_ck').value.trim();if(!v)r
  $('#dn_ckb').onclick=go;$('#dn_ck').onkeydown=function(e){if(e.key=='Enter')go()}}
 
 // ---- servers tab
-function dnsServersTab(d,el){el.innerHTML=dnsWarn(d)+'<div class="row" style="gap:8px;margin-bottom:12px"><button class="btn" onclick="dnsAdd(\'exit\')">+ '+t('Add DNS server')+' ('+t('Exit')+')</button><button class="b2" onclick="dnsAdd(\'relay\')">+ '+t('Add relay')+' ('+t('Iran')+')</button></div><div id="dn_srv">'+dnsServers(d)+'</div>'}
+function dnsServersTab(d,el){el.innerHTML=dnsWarn(d)+'<div class="row" style="gap:8px;margin-bottom:12px"><a class="b2" href="#nodes">'+t('Add or remove DNS servers in Servers')+'</a></div><div id="dn_srv">'+dnsServers(d)+'</div>'}
 function dnsCertChip(x){var st=x.status||{};if(!x.host)return '<span class="chipx">SSL · '+t('no name')+'</span>';
  return st.ssl?'<span class="chipx g">SSL ✓</span>':st.ssl_error?'<span class="chipx r" title="'+esc(st.ssl_error)+'">SSL · '+t('error')+'</span>':'<span class="chipx y">SSL · '+t('waiting')+'</span>'}
 function dnsCertState(d){var c=d.cert||{};
  return c.present?'<div class="vrow"><span class="dot g"></span><div class="nm"><b>'+t('A pasted certificate is used on every DNS server')+'</b></div><button class="b2 bd" id="dn_crm">'+t('Remove it (back to certbot)')+'</button></div>'
   :'<div class="vrow"><span class="dot g"></span><div class="nm"><b>'+t('Automatic: certbot on each DNS server')+'</b><small>'+t('Each server gets a Let\'s Encrypt certificate for its own name and renews it by itself')+'</small></div></div>'}
-function dnsServers(d){if(!d.servers.length)return '<div class="card" style="text-align:center;padding:30px"><p class="muted">'+t('Add an exit DNS server first')+'</p><button class="btn" onclick="dnsAdd(\'exit\')">+ '+t('Add DNS server')+'</button></div>';
+function dnsServers(d){if(!d.servers.length)return '<div class="card" style="text-align:center;padding:30px"><p class="muted">'+t('Add an exit DNS server first')+'</p><a class="btn" href="#nodes">'+t('Servers')+'</a></div>';
  return '<div class="ibl">'+d.servers.map(function(x){var st=x.status||{},on=st.active,q=st.q||{},errs=(st.errors||[]).concat(st.deploy_error?[st.deploy_error]:[]).concat(st.error?[st.error]:[]),relay=x.role=='relay';
   var hit=q.total?Math.round(100*(q.cache||0)/q.total):0;
   return '<div class="ibc"><div class="hd"><span class="pi">'+(relay?'IR':'EX')+'</span><div class="nm"><b>'+esc(x.name||x.server)+'</b><small>'+(relay?t('Relay (inside Iran)')+' → '+esc(dnsName(x.exit)):t('Exit (abroad)'))+'</small></div><span class="chipx '+(on?'g':x.status_at?'r':'y')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span></div>'+

@@ -86,6 +86,7 @@ textarea{min-height:80px;resize:vertical}
 .sw input:checked+span{background:var(--a)}
 html[dir=rtl] .sw input:checked+span:before{transform:translateX(-20px)}html[dir=ltr] .sw input:checked+span:before{transform:translateX(20px)}
 .ncards{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+.srvsec{margin-bottom:22px}.srvsec+.srvsec{border-top:1px solid var(--ln);padding-top:18px}.srvh{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}.srvh b{display:block;font-size:15px}.srvh small{color:var(--s);font-size:12px}.srvh .sp{flex:1}.srvh .btn.sm,.srvh .b2.sm{padding:7px 12px;font-size:13px}
 .ncards .g2{grid-template-columns:1fr 1fr}.ncards .g3{grid-template-columns:repeat(3,1fr)}
 .badge{font-size:11px;border-radius:9px;padding:2px 8px;border:1px solid var(--ln)}
 .badge.g{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent)}.badge.r{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,transparent)}.badge.y{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
@@ -790,6 +791,8 @@ a.b2{text-decoration:none;display:inline-flex;align-items:center;justify-content
 .vside>.vh .phi{width:46px;height:46px}
 .vside>.vh b{display:block;font-size:17px}.vside>.vh small{display:block;color:var(--s);font-size:12px}
 .vside>.vh .sp{flex:1}
+.vhb{display:flex;gap:6px;flex-wrap:wrap;align-items:center}.vhb .b2.sm{padding:6px 11px;font-size:12.5px;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+.vmore{display:block;text-align:center;margin-top:8px;font-size:13px;color:var(--a);text-decoration:none}
 .kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
 .kv>div{border:1px solid var(--ln2);background:var(--in);border-radius:12px;padding:8px 10px;min-width:0}
 .kv small{display:block;color:var(--s);font-size:11px}.kv b{display:block;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -988,11 +991,11 @@ function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(func
 
 // ---------------------------------------------------------------- shell
 ICO.chev='<path d="M6 9l6 6 6-6"/>';
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Kanki VPN','nodes'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 // sidebar groups (v2.8.4): [label, page keys]
 // menu (v3.5): single pages and groups that open in place. An item is [page, sub page, label, note].
-var NAV=[{p:'dash'},{p:'users'},
- {g:'vpn',l:'VPN services',i:'shield2',items:[['vpn','','All VPN services','Kanki VPN and Xray side by side'],['nodes','','Kanki VPN','WireGuard · AmneziaWG · Hysteria2'],['xray','','Xray','VLESS · VMess · Trojan · Shadowsocks'],['antidpi','','Anti-DPI tunnels','REALITY · WS/gRPC behind CDN · Hysteria2']]},
+var NAV=[{p:'dash'},{p:'users'},{p:'nodes'},
+ {g:'vpn',l:'VPN services',i:'shield2',items:[['vpn','','All VPN services','Kanki VPN and Xray side by side'],['xray','','Xray','VLESS · VMess · Trojan · Shadowsocks'],['antidpi','','Anti-DPI tunnels','REALITY · WS/gRPC behind CDN · Hysteria2']]},
  {g:'dnsg',l:'Kanki DNS',i:'dns',items:[['dns','overview','Overview','Status of the DNS servers'],['dns','servers','DNS servers','Exits abroad and relays in Iran'],['dns','services','Services','What goes through the DNS'],['dns','users','DNS users','Registered addresses and use'],['dns','settings','Settings and SSL','Domain, certificate, upstreams']]},
  {g:'net',l:'Tunnels',i:'tunnel',items:[['servers','','Tunnel servers',''],['tunnels','','Tunnels',''],['ports','','Port management','']]},
  {g:'sales',l:'Sales & support',i:'bot',items:[['bot','','Sales bot',''],['emergency','','Emergency chat','']]},
@@ -1294,9 +1297,16 @@ function newUser(){modal(mhead(t('New user'))+ufForm(null)+'<button class="btn" 
   api('POST','/api/users',b).then(function(r){toast(t('Saved'));return loadUsers().then(function(){var u=r&&r.length==1&&findU(r[0].id);if(u)editUser(u.id,'link');else closeModal()})}).catch(function(e){me.disabled=false;fail(e)})}}
 
 // ---------------------------------------------------------------- nodes
-function pNodes(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Nodes')+'</h2><p>'+t('Main server and extra nodes')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="nodeAdd()">+ '+t('Add node')+'</button></div></div><div class="ncards" id="nl">'+t('Loading…')+'</div>';
+function pNodes(){var sec=function(id,icon,title,sub,btns,body){return '<section class="srvsec" id="'+id+'"><div class="srvh"><span class="phi">'+ic(icon,20)+'</span><div><b>'+t(title)+'</b><small>'+t(sub)+'</small></div><span class="sp"></span>'+btns+'</div>'+body+'</section>'};
+ var add=function(fn,label,cls){return '<button class="'+(cls||'btn')+' sm" onclick="'+fn+'">'+ic('plus',14)+' '+t(label)+'</button>'};
+ $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Servers')+'</h2><p>'+t('Every server of the panel: Kanki VPN, Xray and Kanki DNS')+'</p></div><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button></div>'+
+  sec('sv_k','nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2',add('(window._nodeAdd||nodeAdd)()','Add server'),'<div class="ncards" id="nl">'+t('Loading…')+'</div>')+
+  (window.xrServers?sec('sv_x','xray','Xray','VLESS · VMess · Trojan · Shadowsocks',add('xrAddNode()','Add server'),'<div class="card" id="nl_x">'+t('Loading…')+'</div>'):'')+
+  (window.dnsServers?sec('sv_d','dns','Kanki DNS','For the app: games and sanctioned sites',add("dnsAdd('exit')",'Exit server (abroad)')+add("dnsAdd('relay')",'Relay (Iran)','b2'),'<div id="nl_d">'+t('Loading…')+'</div>'):'');
  loadNodes();autoRefresh(loadNodes);if(S.openAdd){S.openAdd=false;setTimeout(nodeAdd,150)}}
-function loadNodes(){api('GET','/api/nodes').then(function(n){S.nodes=n;drawNodes()}).catch(fail)}
+function loadNodes(){api('GET','/api/nodes').then(function(n){S.nodes=n;drawNodes()}).catch(fail);
+ if(window.xrServers)api('GET','/api/xray').then(function(d){XR.d=d;var el=$('#nl_x');if(el&&S.page=='nodes')el.innerHTML=xrServers(d)}).catch(function(){});
+ if(window.dnsServers)api('GET','/api/dns').then(function(d){DN.d=d;var el=$('#nl_d');if(el&&S.page=='nodes')el.innerHTML=dnsServers(d)}).catch(function(){})}
 // ---- node health: judged from the last sync and the CPU / RAM / disk the node reports
 function panelVer(){var l=(S.nodes||[]).filter(function(x){return x.id=='local'})[0];return l&&l.info&&l.info.version||''}
 function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bump=function(l,m){r.push([l,m]);if(l>lv)lv=l};

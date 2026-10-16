@@ -10,6 +10,12 @@ function KEXT(){
  if(window.AD_FA)Object.assign(FA,AD_FA);
 }
 var KFA={
+ "Every server of the panel: Kanki VPN, Xray and Kanki DNS":"همه‌ی سرورهای پنل: VPN کانکی، Xray و DNS کانکی",
+ "For the app: games and sanctioned sites":"برای اپ: بازی و سایت‌های تحریمی",
+ "Exit server (abroad)":"سرور خروجی (خارج)","Relay (Iran)":"ریلی (ایران)",
+ "No Xray server yet: add one in Servers":"هنوز سرور Xray نیست: در «سرورها» اضافه کن",
+ "Add or remove DNS servers in Servers":"افزودن و حذف سرور DNS در «سرورها»",
+ "and":"و","more inbounds":"اینباند دیگر",
  "Anti-DPI tunnels":"تانل‌های ضد DPI",
  "Certificate changed":"گواهی عوض شده",
  "The node's certificate changed (reinstalled?): run its join command again, or remove and add the node":"گواهی نود عوض شده (دوباره نصب شده؟): دستور اتصال نود را دوباره اجرا کن، یا نود را حذف و دوباره اضافه کن",
@@ -145,22 +151,24 @@ function p_vpn(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('VPN services'
   '<div class="vside" id="vh_d" style="margin-top:14px"></div>';
  var go=function(){Promise.all([api('GET','/api/nodes').catch(function(){return []}),api('GET','/api/overview').catch(function(){return {}}),api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null})]).then(function(r){if(S.page!='vpn')return;S.nodes=r[0]||[];if(r[2])XR.d=r[2];if(r[3])DN.d=r[3];vhKanki(r[0]||[],r[1]||{});vhXray(r[2]);vhDns(r[3])})};
  go();clearInterval(S.timer);S.timer=setInterval(function(){if(document.visibilityState=='visible'&&!$('#modal').classList.contains('on'))go()},8000)}
-function vhHead(icon,title,sub,btns){return '<div class="vh"><span class="phi">'+ic(icon,24)+'</span><div><b>'+t(title)+'</b><small>'+t(sub)+'</small></div><span class="sp"></span>'+(btns||'')+'</div>'}
+function vhHead(icon,title,sub,btns){return '<div class="vh"><span class="phi">'+ic(icon,24)+'</span><div><b>'+t(title)+'</b><small>'+t(sub)+'</small></div><span class="sp"></span><div class="vhb">'+(btns||'')+'</div></div>'}
+function vhBtn(href,label,on){return '<a class="b2 sm" href="'+href+'"'+(on?' onclick="'+on+';return false"':'')+'>'+label+'</a>'}
 function vhKanki(nodes,o){var up=nodes.filter(function(n){return n.id=='local'||n.online}).length,pr=o.protocols||{};
- $('#vh_k').innerHTML=vhHead('nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2')+
+ $('#vh_k').innerHTML=vhHead('nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2',vhBtn('#nodes',t('Servers')))+
   '<div class="kv"><div><small>'+t('Nodes online')+'</small><b>'+N(up)+' / '+N(nodes.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N(o.online||0)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(o.traffic_gb||0)+' GB</b></div></div>'+
   '<label class="f">'+t('Users by protocol')+'</label><div class="chs" style="display:flex;gap:6px;flex-wrap:wrap">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2']].map(function(p){return '<span class="chipx a" style="font-size:12px;padding:4px 10px">'+p[1]+' · '+N(pr[p[0]]||0)+'</span>'}).join('')+'</div>'+
   nodes.map(function(n){var s=nState(n),loc=n.id=='local';return '<div class="vrow"><span class="dot '+s.c+'"></span><div class="nm"><b>'+esc(n.name)+(loc?' <span class="rotb">'+t('Main server')+'</span>':'')+'</b><small class="ltr">'+esc(loc?'local':String(n.address||'').replace(/^https?:\/\//,''))+'</small></div><span class="chipx">'+N(n.users||0)+' '+t('users')+'</span></div>'}).join('')+
-  '<div class="g2" style="margin-top:12px"><a class="b2" style="text-align:center;text-decoration:none" href="#nodes">'+t('Manage nodes')+'</a><button class="btn" onclick="_nodeAdd&&_nodeAdd()">+ '+t('Add node')+'</button></div>'}
+''}
 function vhXray(d){var el=$('#vh_x');if(!d){el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks')+'<p class="muted">—</p>';return}
  var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length,tot=d.inbounds.reduce(function(a,b){return a+(+b.traffic||0)},0);
- el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks','<span class="chipx '+(d.on?'g':'r')+'">'+(d.on?t('On'):t('Off'))+'</span>')+
+ var more=d.inbounds.length-5;
+ el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks','<span class="chipx '+(d.on?'g':'r')+'">'+(d.on?t('On'):t('Off'))+'</span>'+vhBtn('#',ic('plus',13)+' '+t('New inbound'),'xrInbound()')+vhBtn('#xray/inbounds',t('Open')))+
   (d.on?'':'<div class="warnbox">'+t('Xray is off')+' · <a href="#xray/settings">'+t('Turn it on')+'</a></div>')+
   '<div class="kv"><div><small>'+t('Working inbounds')+'</small><b>'+N(act)+' / '+N(d.inbounds.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N((d.online||[]).length)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(bytes(tot))+'</b></div></div>'+
-  (d.inbounds.length?d.inbounds.map(function(ib){return xrMiniRow(ib)}).join(''):'<p class="muted">'+t('No inbound yet.')+'</p>')+
-  '<div class="g2" style="margin-top:12px"><a class="b2" style="text-align:center;text-decoration:none" href="#xray/inbounds">'+t('Manage Xray')+'</a><button class="btn" onclick="xrInbound()">+ '+t('New inbound')+'</button></div>'}
+  (d.inbounds.length?d.inbounds.slice(0,5).map(function(ib){return xrMiniRow(ib)}).join(''):'<p class="muted">'+t('No inbound yet.')+'</p>')+
+  (more>0?'<a class="vmore" href="#xray/inbounds">'+t('and')+' '+N(more)+' '+t('more inbounds')+' ›</a>':'')}
 function vhDns(d){var el=$('#vh_d');if(!d){el.style.display='none';return}var run=d.servers.filter(function(x){return x.status&&x.status.active}).length;
- el.innerHTML=vhHead('dns','Kanki DNS (sanctions)','Private DNS for sanctioned sites','<span class="chipx '+(d.on?'g':'r')+'">'+(d.on?t('On'):t('Off'))+'</span><a class="b2" href="#dns/overview">'+t('Open')+'</a>')+
+ el.innerHTML=vhHead('dns','Kanki DNS (sanctions)','Private DNS for sanctioned sites','<span class="chipx '+(d.on?'g':'r')+'">'+(d.on?t('On'):t('Off'))+'</span>'+vhBtn('#dns/overview',t('Open')))+
   '<div class="kv"><div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(d.servers.length)+'</b></div><div><small>'+t('Users with DNS')+'</small><b>'+N(d.users)+'</b></div><div><small>'+t('Allowed addresses')+'</small><b>'+N(d.servers.reduce(function(a,x){return a+(+(x.status||{}).allowed||0)},0))+'</b></div></div>'}
 
 // ---------------------------------------------------------------- user form: what the user gets, service by service
