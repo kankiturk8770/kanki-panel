@@ -33,6 +33,8 @@ pub struct DnsSrv {
     pub role: String,
     /// first label of the server's DNS name: <label>.<base>
     pub label: String,
+    /// the server's own full DNS name (instead of <label>.<base>)
+    pub domain: String,
     /// IPv4 answered for routed names (empty = the address the agent reports from)
     pub ip: String,
     /// relay: the exit server it carries connections to
@@ -137,6 +139,9 @@ fn valid_name(d: &str) -> bool {
 }
 
 pub fn host_of(s: &DnsSettings, srv: &DnsSrv) -> String {
+    if !srv.domain.trim().is_empty() {
+        return srv.domain.trim().trim_matches('.').to_ascii_lowercase();
+    }
     if s.base.trim().is_empty() || srv.label.trim().is_empty() {
         String::new()
     } else {
@@ -394,7 +399,7 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
         .map(|x| {
             let (at, status) = st.get(&x.server).cloned().unwrap_or((0, Value::Null));
             json!({
-                "server": x.server, "name": names.get(&x.server).cloned().unwrap_or_default(), "role": x.role, "label": x.label,
+                "server": x.server, "name": names.get(&x.server).cloned().unwrap_or_default(), "role": x.role, "label": x.label, "domain": x.domain,
                 "ip": x.ip, "answer_ip": answer_ip(x), "exit": x.exit, "transport": x.transport, "tunnel_port": x.tunnel_port,
                 "note": x.note, "hidden": x.hidden, "host": host_of(&s, x), "status": status, "status_at": at,
             })
@@ -479,7 +484,8 @@ async fn put_settings(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         s.key = key;
     }
     save(&app, &mut s);
-    Json(json!({ "ok": true })).into_response()
+    let started = cert_kick(&app);
+    Json(json!({ "ok": true, "cert": started })).into_response()
 }
 
 async fn put_server(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
@@ -503,6 +509,13 @@ async fn put_server(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
             return err(StatusCode::BAD_REQUEST, "the server label is letters, digits and '-' (like de or ir1)");
         }
         x.label = v;
+    }
+    if let Some(v) = b["domain"].as_str() {
+        let v = v.trim().trim_matches('.').to_ascii_lowercase();
+        if !v.is_empty() && !valid_name(&v) {
+            return err(StatusCode::BAD_REQUEST, "the server's domain is not a valid name (like de.dns.example.com)");
+        }
+        x.domain = v;
     }
     if let Some(v) = b["ip"].as_str() {
         let v = v.trim().to_string();
@@ -539,12 +552,36 @@ async fn put_server(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
     if x.role == "relay" && s.servers.iter().any(|o| o.role == "relay" && o.exit == x.server) {
         return err(StatusCode::BAD_REQUEST, "other relays use this server as their exit");
     }
+    let host = host_of(&s, &x);
+    if !host.is_empty() && s.servers.iter().any(|o| o.server != x.server && host_of(&s, o) == host) {
+        return err(StatusCode::BAD_REQUEST, "another DNS server already has this name");
+    }
     match s.servers.iter_mut().find(|o| o.server == x.server) {
         Some(o) => *o = x,
         None => s.servers.push(x),
     }
     save(&app, &mut s);
-    Json(json!({ "ok": true })).into_response()
+    let started = cert_kick(&app);
+    Json(json!({ "ok": true, "cert": started })).into_response()
+}
+
+/// Start getting the certificate (and the records) when the names changed or it is missing / old.
+/// Returns whether it started.
+pub fn cert_kick(app: &Arc<App>) -> bool {
+    let s = settings(app);
+    let names = super::acme::cert_names(&s).join(",");
+    let due = s.on && !s.provider.is_empty() && !s.api_token.is_empty() && !names.is_empty() && (s.cert.is_empty() || s.cert_names != names || now() - s.cert_at > 60 * 86400);
+    if !due || ACME_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return false;
+    }
+    let a = app.clone();
+    tokio::spawn(async move {
+        if let Err(e) = super::acme::run_once(&a).await {
+            update(&a, |x| x.acme_err = e.clone());
+        }
+        ACME_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+    });
+    true
 }
 
 async fn del_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {

@@ -37,9 +37,10 @@ function xrState(ib){if(!ib.enabled)return ['r','Off'];if(ib.state=='depleted')r
 function xrServers(d){if(!d.servers.length)return '<p class="muted">'+t('Add an Xray server first')+'</p>';
  return d.servers.map(function(x){var st=x.status||{},on=st.active,errs=[st.deploy_error,st.error].filter(Boolean),n=d.inbounds.filter(function(i){return i.server==x.server}).length;
   return '<div class="vrow" style="flex-wrap:wrap;align-items:flex-start"><span class="dot '+(on?'g':'r')+'" style="margin-top:6px"></span><div class="nm"><b>'+esc(x.name||x.server)+(x.server=='local'?' <span class="rotb">'+t('Panel server')+'</span>':'')+'</b><small class="ltr">'+esc(x.effective||'?')+(st.core?' · Xray '+esc(st.core):'')+' · '+N(n)+' '+t('inbounds')+'</small></div>'+
-   '<span class="chipx '+(on?'g':'r')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span>'+
-   '<div class="row" style="gap:4px;width:100%;justify-content:flex-end"><button class="ib" title="'+t('Edit')+'" onclick="xrSrvEdit(\''+x.server+'\')">'+ic('edit',15)+'</button><button class="ib" title="'+t('Config')+'" onclick="xrPreview(\''+x.server+'\')">{ }</button><button class="ib bd" title="'+t('Delete')+'" onclick="xrSrvDel(\''+x.server+'\')">'+ic('trash',15)+'</button></div>'+
-   (errs.length?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+errs.map(esc).join('<br>')+'</div>':'')+'</div>'}).join('')}
+   '<span class="chipx '+(on?'g':'r')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span>'+xrCertChip(x.cert_state)+
+   '<div class="row" style="gap:4px;width:100%;justify-content:flex-end">'+(x.domain?'<button class="b2" onclick="xrSrvCert(\''+x.server+'\')">'+ic('refresh',14)+' SSL</button>':'')+'<button class="ib" title="'+t('Edit')+'" onclick="xrSrvEdit(\''+x.server+'\')">'+ic('edit',15)+'</button><button class="ib" title="'+t('Config')+'" onclick="xrPreview(\''+x.server+'\')">{ }</button><button class="ib bd" title="'+t('Delete')+'" onclick="xrSrvDel(\''+x.server+'\')">'+ic('trash',15)+'</button></div>'+
+   (errs.length?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+errs.map(esc).join('<br>')+'</div>':'')+
+   (x.cert_state&&x.cert_state.err&&!x.cert_state.present?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">SSL: '+esc(x.cert_state.err)+'</div>':'')+'</div>'}).join('')}
 
 // ---- inbounds tab
 function xrIbTab(d,el){
@@ -158,16 +159,24 @@ function xrSettings(d,el){
 // ---- servers
 function xrAddNode(){var go=function(){var d=XR.d,used=d.servers.map(function(x){return x.server}),ag=d.agents.filter(function(a){return used.indexOf(a.id)<0});
   modal(mhead(t('Add server'),'Xray')+'<p class="muted" style="margin:0 0 6px">'+t('Xray can run on the panel server or on any tunnel server. A new server gets a one-line install command.')+'</p><label class="f">'+t('Agent server')+'</label><select id="xa_sv"><option value="__new">'+t('New server (install command)')+'</option>'+ag.map(function(a){return '<option value="'+esc(a.id)+'">'+esc(a.id=='local'?a.name+' ('+t('Panel server')+')':a.name)+'</option>'}).join('')+'</select>'+
-   '<div id="xa_nw"><label class="f">'+t('Server name')+'</label><input id="xa_nm" placeholder="Xray-DE"></div><label class="f">'+t('Address for links')+'</label><input id="xa_ad" class="ltr" placeholder="'+t('automatic')+'"><p class="hint">'+t('A domain or IP the users connect to; empty = the IP the server reports from')+'</p>'+
+   '<div id="xa_nw"><label class="f">'+t('Server name')+'</label><input id="xa_nm" placeholder="Xray-DE"></div>'+xrDomainFields({address:'',ssl:true})+
    '<button class="btn" style="width:100%;margin-top:12px" id="xa_go">'+t('Save')+'</button><div id="xa_out"></div>');
-  var sv=function(){$('#xa_nw').style.display=$('#xa_sv').value=='__new'?'':'none'};$('#xa_sv').onchange=sv;sv();
+  var sv=function(){$('#xa_nw').style.display=$('#xa_sv').value=='__new'?'':'none'};$('#xa_sv').onchange=sv;sv();xrDomainWire();
   $('#xa_go').onclick=function(){var me=this,nw=$('#xa_sv').value=='__new';me.disabled=true;
    (nw?api('POST','/api/tunnels/servers',{name:$('#xa_nm').value||'Xray'}):Promise.resolve({id:$('#xa_sv').value})).then(function(r){
-    return api('POST','/api/xray/servers',{server:r.id,address:$('#xa_ad').value}).then(function(){toast(t('Saved'));if(nw){me.style.display='none';$('#xa_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}else closeModal();xrLoad()})}).catch(function(e){me.disabled=false;fail(e)})}};
+    return api('POST','/api/xray/servers',{server:r.id,address:$('#xa_ad').value,ssl:$('#xa_ssl').checked}).then(function(){toast(t($('#xa_ssl').checked&&xrIsDomain($('#xa_ad').value)?'Saved: getting SSL (about a minute)':'Saved'));if(nw){me.style.display='none';$('#xa_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}else closeModal();xrLoad()})}).catch(function(e){me.disabled=false;fail(e)})}};
  if(XR.d)go();else xrLoad().then(go)}
+function xrIsDomain(v){v=(v||'').trim();return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(v)&&!/^[\d.]+$/.test(v)}
+function xrDomainFields(x){var d=XR.d||{},cr=d.provider&&d.has_token?d.provider:d.dns_creds;
+ return '<label class="f">'+t('Domain of this server (or IP)')+'</label><input id="xa_ad" class="ltr" placeholder="de.example.com" value="'+esc(x.address||'')+'"><p class="hint">'+t('Users connect to this address; empty = the IP the server reports from')+'</p>'+
+  '<div class="srow" id="xa_sslw"><div class="tx"><b>'+t('Get SSL for this domain by itself')+'</b><small>'+t('The panel points the domain at this server and gets a Let\'s Encrypt certificate; every TLS inbound of this server uses it. Renewed every 60 days.')+'</small></div><label class="sw"><input type="checkbox" id="xa_ssl" '+(x.ssl!==false?'checked':'')+'><span></span></label></div>'+
+  (cr?'':'<div class="warnbox" id="xa_nocr">'+t('For SSL by itself, first set the DNS provider and API token (Xray › Settings or Kanki DNS › Settings and SSL).')+'</div>')}
+function xrDomainWire(){var f=function(){var w=$('#xa_sslw');if(w)w.style.display=xrIsDomain($('#xa_ad').value)?'':'none'};$('#xa_ad').oninput=f;f()}
 function xrSrvEdit(id){var x=XR.d.servers.filter(function(s){return s.server==id})[0];if(!x)return;
- modal(mhead(t('Edit'),x.name)+'<label class="f">'+t('Address for links')+'</label><input id="xe_ad" class="ltr" placeholder="'+esc(x.effective||t('automatic'))+'" value="'+esc(x.address)+'"><button class="btn" style="width:100%;margin-top:12px" id="xe_go">'+t('Save')+'</button>');
- $('#xe_go').onclick=function(){api('POST','/api/xray/servers',{server:id,address:$('#xe_ad').value}).then(function(){closeModal();toast(t('Saved'));xrLoad()}).catch(fail)}}
+ modal(mhead(t('Edit'),x.name)+xrDomainFields({address:x.address,ssl:x.ssl||!x.address})+'<button class="btn" style="width:100%;margin-top:12px" id="xe_go">'+t('Save')+'</button>');xrDomainWire();
+ $('#xe_go').onclick=function(){var ssl=$('#xa_ssl').checked&&xrIsDomain($('#xa_ad').value);api('POST','/api/xray/servers',{server:id,address:$('#xa_ad').value,ssl:ssl}).then(function(){closeModal();toast(t(ssl?'Saved: getting SSL (about a minute)':'Saved'));xrLoad();setTimeout(function(){xrLoad(true)},5000)}).catch(fail)}}
+function xrSrvCert(id){api('POST','/api/xray/servers/'+encodeURIComponent(id)+'/cert').then(function(){toast(t('Working… about a minute'));setTimeout(function(){xrLoad(true)},5000)}).catch(fail)}
+function xrCertChip(c){if(!c)return '';return c.busy?'<span class="chipx y">SSL · '+t('Working…')+'</span>':c.present?'<span class="chipx g">SSL ✓ '+ago(c.at)+'</span>':c.err?'<span class="chipx r" title="'+esc(c.err)+'">SSL · '+t('error')+'</span>':'<span class="chipx y">SSL · '+t('waiting')+'</span>'}
 function xrSrvDel(id){confirmDo(function(){api('DELETE','/api/xray/servers/'+encodeURIComponent(id)).then(function(){toast(t('Done'));xrLoad()}).catch(fail)})}
 function xrPreview(id){api('GET','/api/xray/config/'+encodeURIComponent(id)).then(function(c){xrJsonModal(t('Config')+' · '+xrName(id),c)}).catch(fail)}
 function xrJsonModal(title,v){var tx=JSON.stringify(v,null,2);modal(mhead(title)+'<pre class="ltr" style="max-height:60vh;overflow:auto;white-space:pre">'+esc(tx)+'</pre><button class="b2" style="width:100%;margin-top:8px" id="xj_cp">'+ic('copy',15)+' '+t('Copy')+'</button>','wide');$('#xj_cp').onclick=function(){copy(tx)}}
@@ -255,17 +264,19 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
   $$('#xi_fbl [data-fd]').forEach(function(b){b.onclick=function(){FB.splice(+b.dataset.fd,1);fbDraw()}})};
  fbDraw();$('#xi_fba').onclick=function(){FB.push({dest:'',path:'',alpn:'',name:'',xver:0});fbDraw()};
  $$('#xi_tabs [data-ft]').forEach(function(b){b.onclick=function(){$$('#xi_tabs [data-ft]').forEach(function(x){x.classList.toggle('on',x==b)});$$('.fsec').forEach(function(s){s.classList.toggle('on',s.dataset.fs==b.dataset.ft)})}});
- var cm=ib.acme?'auto':ib.cert_file?'file':(id?'pem':(XR.d.provider&&XR.d.has_token||XR.d.dns_creds?'auto':'pem'));$$('[data-cm]').forEach(function(x){x.classList.toggle('on',x.dataset.cm==cm)});$$('[data-cm]').forEach(function(b){b.onclick=function(){cm=b.dataset.cm;$$('[data-cm]').forEach(function(x){x.classList.toggle('on',x==b)});ui()}});
+ var srvDom=function(){var x=d.servers.filter(function(z){return z.server==$('#xi_sv').value})[0];return x&&x.domain||''};
+ var cm=ib.acme?'auto':ib.cert_file?'file':(id?'pem':(srvDom()||XR.d.provider&&XR.d.has_token||XR.d.dns_creds?'auto':'pem'));
+ var sniPh=function(){var dm=srvDom();$('#xi_sni').placeholder=cm=='auto'&&dm?dm:'example.com';var h=$('#xi_cdom');if(h)h.innerHTML=dm?t('Empty SNI = the server\'s domain and certificate')+': <b class="ltr">'+esc(dm)+'</b>':t('This server has no domain: write one in SNI, or give the server a domain (Edit server).')};$$('[data-cm]').forEach(function(x){x.classList.toggle('on',x.dataset.cm==cm)});$$('[data-cm]').forEach(function(b){b.onclick=function(){cm=b.dataset.cm;$$('[data-cm]').forEach(function(x){x.classList.toggle('on',x==b)});ui()}});
  var show=function(i,on){var e=$(i);if(e)e.style.display=on?'':'none'};
  var ui=function(){var pr=$('#xi_pr').value,nw=$('#xi_nw').value,ss=pr=='shadowsocks';if(ss){$('#xi_nw').value='tcp';nw='tcp'}
   if($('#xi_sc').value=='reality'&&(['vless','trojan'].indexOf(pr)<0||['tcp','grpc','xhttp'].indexOf(nw)<0))$('#xi_sc').value='tls';
   var sc=ss?'none':$('#xi_sc').value;
   show('#xi_secw',!ss);show('#xi_ssn',ss);show('#xi_ss',ss);show('#xi_tp',['ws','httpupgrade','xhttp'].indexOf(nw)>=0||nw=='tcp'&&$('#xi_hh').checked);show('#xi_wsx',nw=='ws');show('#xi_xm',nw=='xhttp');show('#xi_gr',nw=='grpc');show('#xi_th',nw=='tcp'&&sc=='none'&&!ss);show('#xi_kc',nw=='kcp');show('#xi_ppw',nw!='kcp');
   show('#xi_fl',pr=='vless'&&nw=='tcp'&&sc!='none');show('#xi_tls',sc=='tls');show('#xi_rl',sc=='reality');show('#xi_fpw',sc!='none'||$('#xi_lt').checked);$('#xi_nw').disabled=ss;
-  show('#xi_cpem',cm=='pem');show('#xi_cfile',cm=='file');show('#xi_cauto',cm=='auto');
+  show('#xi_cpem',cm=='pem');show('#xi_cfile',cm=='file');show('#xi_cauto',cm=='auto');sniPh();
   var fbOk=(pr=='vless'||pr=='trojan')&&nw=='tcp'&&sc!='reality';$('#xi_tabs [data-ft="fb"]').style.display=fbOk?'':'none';
   [].forEach.call($('#xi_sc').options,function(o){if(o.value=='reality')o.disabled=['vless','trojan'].indexOf(pr)<0||['tcp','grpc','xhttp'].indexOf(nw)<0})};
- ['#xi_pr','#xi_nw','#xi_sc','#xi_lt','#xi_hh'].forEach(function(s){$(s).onchange=ui});ui();
+ ['#xi_pr','#xi_nw','#xi_sc','#xi_lt','#xi_hh','#xi_sv'].forEach(function(s){$(s).onchange=ui});ui();
  $('#xi_dp').onchange=function(){if(!this.value)return;$('#xi_de').value=this.value;$('#xi_na').value=this.value.split(':')[0];this.value=''};
  $('#xi_sig').onclick=function(){var r='';for(var i=0;i<8;i++)r+=Math.floor(Math.random()*256).toString(16).padStart(2,'0');$('#xi_si').value=r};
  $('#xi_rp').onclick=function(){$('#xi_pt').value=xrFreePort($('#xi_sv').value,true)};
@@ -290,12 +301,12 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
    only:$$('.xi_u').filter(function(c){return c.checked}).map(function(c){return +c.value}),fallbacks:FB.filter(function(f){return String(f.dest).trim()})};
   if(b.private&&b.private!='set'&&!b.public)return toast(t('Public key'),1);
   if(!b.port)return toast(t('the port is required'),1);
-  if(b.acme&&b.security=='tls'&&!b.sni)return toast(t('Write the domain in SNI'),1);
+  if(b.acme&&b.security=='tls'&&!b.sni&&!srvDom())return toast(t('Write the domain in SNI'),1);
   me.disabled=true;api('POST','/api/xray/inbounds',b).then(function(){closeModal();toast(t('Saved'));xrLoad()}).catch(function(e){me.disabled=false;fail(e)})}}
 function xrCertAuto(ib){var d=XR.d,c=ib.cert_state||{},cr=d.provider&&d.has_token?d.provider:d.dns_creds;
  var st=!ib.acme?'':c.present?'<div class="vrow"><span class="dot g"></span><div class="nm"><b>'+t('Certificate')+': '+t('issued')+'</b><small>'+ago(c.at)+' · '+t('renewed by itself every 60 days')+'</small></div><button type="button" class="b2" onclick="xrCertNow(\''+ib.id+'\')">'+t('Get again')+'</button></div>'
   :'<div class="vrow"><span class="dot '+(c.err?'r':'y')+'"></span><div class="nm"><b>'+(c.busy?t('Working… about a minute'):c.err?t('Certificate error'):t('Waiting for the certificate'))+'</b>'+(c.err?'<small class="ltr" style="color:var(--bad)">'+esc(c.err)+'</small>':'')+'</div><button type="button" class="b2" onclick="xrCertNow(\''+ib.id+'\')">'+t('Try now')+'</button></div>';
- return '<p class="hint" style="margin-top:0">'+t('Write the domain in SNI above. The panel points the domain at this server and gets a Let\'s Encrypt certificate with a DNS challenge (works for servers inside Iran too, nothing has to be open on the server), and renews it every 60 days. The links use the domain.')+'</p>'+
+ return '<p class="hint" id="xi_cdom" style="margin-top:0"></p><p class="hint" style="margin-top:0">'+t('Write the domain in SNI above. The panel points the domain at this server and gets a Let\'s Encrypt certificate with a DNS challenge (works for servers inside Iran too, nothing has to be open on the server), and renews it every 60 days. The links use the domain.')+'</p>'+
   (cr?'<p class="hint">'+t('DNS provider')+': <b>'+esc(cr=='arvan'?'ArvanCloud':'Cloudflare')+'</b>'+(d.provider&&d.has_token?'':' ('+t('the same as Kanki DNS')+')')+'</p>':'<div class="warnbox">'+t('First set the DNS provider and its API token in Xray › Settings.')+' <a href="#xray/settings" onclick="closeModal()">'+t('Settings')+'</a></div>')+st}
 function xrCertNow(id){api('POST','/api/xray/inbounds/'+encodeURIComponent(id)+'/cert').then(function(){toast(t('Working… about a minute'));setTimeout(function(){xrLoad(true)},4000)}).catch(fail)}
 function xrFreePort(sid,random){var used=(XR.d&&XR.d.inbounds||[]).filter(function(x){return x.server==sid}).map(function(x){return +x.port}),bad=[53,80,853,10085,10853,10854];
