@@ -934,6 +934,7 @@ pub fn ingest(app: &App, sid: &str, st: &Value) {
 
 /// The panel server itself can run Xray too: deploy and count here every 15 seconds.
 pub async fn local_loop(app: Arc<App>) {
+    let mut last_err = String::new();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(15)).await;
         let cfg = cfg_for(&app, "local");
@@ -951,11 +952,18 @@ pub async fn local_loop(app: Arc<App>) {
         })
         .await;
         if let Ok((res, mut st)) = r {
-            if let Err(e) = res {
-                eprintln!("xray: {}", e);
-                if st.is_object() {
-                    st["deploy_error"] = json!(e);
+            match res {
+                Err(e) => {
+                    // the same error is logged once, not on every round
+                    if e != last_err {
+                        eprintln!("xray: {}", e);
+                        last_err = e.clone();
+                    }
+                    if st.is_object() {
+                        st["deploy_error"] = json!(e);
+                    }
                 }
+                Ok(()) => last_err.clear(),
             }
             ingest(&app, "local", &st);
         }

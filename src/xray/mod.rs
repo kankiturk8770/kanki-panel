@@ -68,6 +68,26 @@ fn install(version: &str, panel: Option<(&str, &str, &str)>) -> Result<(), Strin
     if std::path::Path::new(BIN).exists() && have.trim() == want {
         return Ok(());
     }
+    // a failed install is tried again after a pause, not on every round (every 15 s it filled the log)
+    if let Some((at, ver, e)) = last_fail().lock().unwrap().clone() {
+        if ver == want && at.elapsed() < std::time::Duration::from_secs(300) {
+            return Err(e);
+        }
+    }
+    let r = install_now(version, want, panel);
+    *last_fail().lock().unwrap() = match &r {
+        Err(e) => Some((std::time::Instant::now(), want.to_string(), e.clone())),
+        Ok(()) => None,
+    };
+    r
+}
+
+fn last_fail() -> &'static Mutex<Option<(std::time::Instant, String, String)>> {
+    static L: std::sync::OnceLock<Mutex<Option<(std::time::Instant, String, String)>>> = std::sync::OnceLock::new();
+    L.get_or_init(|| Mutex::new(None))
+}
+
+fn install_now(version: &str, want: &str, panel: Option<(&str, &str, &str)>) -> Result<(), String> {
     let zip = zip_name().ok_or("this CPU type has no Xray build")?;
     let direct = release_url(version, zip);
     let via_panel = match panel {
@@ -79,11 +99,11 @@ fn install(version: &str, panel: Option<(&str, &str, &str)>) -> Result<(), Strin
         None => String::new(),
     };
     let script = format!(
-        "set -e; T=$(mktemp -d); trap 'rm -rf \"$T\"' EXIT; \
+        "set -e; mkdir -p /var/lib/kanki/tmp; T=$(mktemp -d -p /var/lib/kanki/tmp); trap 'rm -rf \"$T\"' EXIT; \
          (curl -fsSL --max-time 300 -o \"$T/x.zip\" {direct}{via_panel}); \
          if command -v unzip >/dev/null 2>&1; then unzip -o -q \"$T/x.zip\" -d \"$T/x\"; \
          else python3 -c 'import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \"$T/x.zip\" \"$T/x\"; fi; \
-         test -s \"$T/x/xray\"; \"$T/x/xray\" version >/dev/null; \
+         test -s \"$T/x/xray\"; chmod 755 \"$T/x/xray\"; \"$T/x/xray\" version >/dev/null; \
          mkdir -p {assets}; for f in geoip.dat geosite.dat; do [ -f \"$T/x/$f\" ] && cp -f \"$T/x/$f\" {assets}/; done; \
          install -m 755 \"$T/x/xray\" {bin}.new && mv -f {bin}.new {bin}",
         direct = q(&direct),

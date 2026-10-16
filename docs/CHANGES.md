@@ -1,3 +1,9 @@
+# v3.5.4 — Xray install fix, installs without root login
+
+- **Xray-core install failed with "Permission denied"** on servers without `unzip`: Python's zip extraction drops the executable bit, so the new `xray` could not run. The file is now made executable before it is tested, and the download goes to `/var/lib/kanki/tmp` instead of `/tmp` (which some servers mount `noexec`).
+- **A failed Xray install no longer retries every 15 seconds:** it waits 5 minutes before the next try, and the panel logs the same error once instead of on every round.
+- **Install as a normal user:** `install.sh`, the `kanki` command and `install-standalone.sh` no longer stop with "Please run as root" for a user like `ubuntu`: they run themselves again with `sudo`, keeping the `KANKI_*` settings, so the one-line join commands the panel prints work as they are. A `bash <(curl ...)` start fetches the installer again into a file, since sudo cannot reopen the pipe.
+
 # v3.5.3 — Game and FakeTCP transports, Anti-DPI menu, security hardening
 
 **Fixes found in review (before release)**

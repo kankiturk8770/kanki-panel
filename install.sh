@@ -10,7 +10,26 @@ say(){ echo -e "${Y}>> $*${N}"; }
 ok(){ echo -e "${G}[ok] $*${N}"; }
 warn(){ echo -e "${R}[!] $*${N}"; }
 die(){ echo -e "${R}[x] $*${N}"; exit 1; }
-[ "$(id -u)" = "0" ] || die "Please run as root (sudo -i)"
+# not root (e.g. the "ubuntu" user of a cloud server): run again with sudo, keeping the KANKI_* settings
+if [ "$(id -u)" != "0" ]; then
+  command -v sudo >/dev/null || die "Please run as root (this server has no sudo)"
+  say "Not root: running again with sudo ..."
+  keep=()
+  for v in KANKI_REPO KANKI_JOIN KANKI_PANEL KANKI_TUNNEL KANKI_DOMAIN KANKI_EMAIL; do
+    if [ -n "${!v:-}" ]; then keep+=("$v=${!v}"); fi
+  done
+  # started as a file (the "kanki" command): run that file. Started as `bash <(curl ...)` or
+  # `curl ... | bash`: the script is a pipe sudo cannot reopen, so fetch it again into a file
+  if [ -f "$0" ] && [ -r "$0" ]; then
+    self="$0"
+  else
+    r="${KANKI_REPO:-}"; echo "$r" | grep -Eq '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' || r="kankiturk8770/kanki-panel"
+    self=$(mktemp) || die "mktemp failed"
+    curl -fsSL "https://raw.githubusercontent.com/$r/main/install.sh" -o "$self" \
+      || die "Could not download the installer again; run it as root (sudo -i)"
+  fi
+  exec sudo env "${keep[@]}" bash "$self" "$@"
+fi
 command -v apt-get >/dev/null || die "Only Ubuntu / Debian are supported"
 
 ENV_DIR=/etc/kanki; ENV=$ENV_DIR/kanki.env; BIN=/usr/local/bin/kanki-panel; TLS=$ENV_DIR/tls

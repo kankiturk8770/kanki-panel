@@ -38,7 +38,12 @@ ok(){ echo -e "${G}[ok] $*${N}"; }
 warn(){ echo -e "${R}[!] $*${N}"; }
 die(){ echo -e "${R}[x] $*${N}" >&2; exit 1; }
 
-[ "$(id -u)" = "0" ] || die "Please run as root (sudo -i)"
+# not root (e.g. the "ubuntu" user of a cloud server): run again with sudo
+if [ "$(id -u)" != "0" ]; then
+  command -v sudo >/dev/null || die "Please run as root (this server has no sudo)"
+  [ -f "$0" ] || die "Please run as root: sudo bash install-standalone.sh ..."
+  exec sudo env ${KANKI_REPO:+KANKI_REPO="$KANKI_REPO"} ${KANKI_BIN:+KANKI_BIN="$KANKI_BIN"} bash "$0" "$@"
+fi
 command -v systemctl >/dev/null || die "systemd is required"
 
 usage(){
