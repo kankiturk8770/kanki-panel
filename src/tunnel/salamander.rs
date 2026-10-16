@@ -36,11 +36,18 @@ pub const TAG: usize = 4;
 pub const HEAD: usize = SALT + TAG + 1;
 /// no datagram leaves bigger than this (unless QUIC itself produced a bigger one)
 pub const MAX_WIRE: usize = 1232;
+/// the smallest per-secret cap: hq's 1200-byte QUIC packets (1213 on the wire) still get 0–8
+/// random bytes, so even the biggest packets do not leave with one fixed size
+const MIN_CAP: usize = 1221;
 
 #[derive(Clone)]
 pub struct Mask {
     key: [u8; 32],
     tag: [u8; TAG],
+    /// the largest wire datagram of this tunnel: derived from the secret (1221–1232), so two
+    /// tunnels — and the same tunnel at two times with different tokens — do not share the
+    /// fixed ~1213–1232-byte first-packet size a filter could recognise
+    wire_cap: usize,
 }
 
 impl Mask {
@@ -55,7 +62,8 @@ impl Mask {
         let t: [u8; 32] = h.finalize().into();
         let mut tag = [0u8; TAG];
         tag.copy_from_slice(&t[..TAG]);
-        Mask { key, tag }
+        let wire_cap = MIN_CAP + (t[4] as usize % (MAX_WIRE - MIN_CAP + 1));
+        Mask { key, tag, wire_cap }
     }
 
     /// XORs `data` with the keystream of this salt (the same call masks and unmasks).
@@ -69,8 +77,8 @@ impl Mask {
     }
 
     /// How many bytes of padding a payload of this size may get at most.
-    pub fn pad_cap(len: usize) -> usize {
-        let room = MAX_WIRE.saturating_sub(HEAD + len);
+    pub fn pad_cap(&self, len: usize) -> usize {
+        let room = self.wire_cap.saturating_sub(HEAD + len);
         let want = if len > 900 {
             32
         } else if len > 400 {
@@ -84,7 +92,7 @@ impl Mask {
     /// Appends the masked datagram for `payload` to `out`.
     pub fn seal(&self, payload: &[u8], out: &mut Vec<u8>) {
         let mut rng = rand::thread_rng();
-        let cap = Mask::pad_cap(payload.len());
+        let cap = self.pad_cap(payload.len());
         let pad = if cap == 0 { 0 } else { (rng.next_u32() as usize) % (cap + 1) };
         let start = out.len();
         out.reserve(HEAD + pad + payload.len());
@@ -217,6 +225,25 @@ mod tests {
             let mut w = vec![];
             m.seal(&p, &mut w);
             assert!(w.len() <= HEAD + 1200 + 32);
+        }
+    }
+
+    /// Whatever the secret, full hq (1200) and KCP (1150) packets still get random padding.
+    #[test]
+    fn full_packets_vary_in_size_for_every_secret() {
+        for i in 0..64 {
+            let m = Mask::new(&format!("token-{i}"));
+            assert!((MIN_CAP..=MAX_WIRE).contains(&m.wire_cap));
+            for n in [1150usize, 1200] {
+                let mut lens = std::collections::HashSet::new();
+                for _ in 0..200 {
+                    let mut w = vec![];
+                    m.seal(&sample(n), &mut w);
+                    assert!(w.len() <= MAX_WIRE);
+                    lens.insert(w.len());
+                }
+                assert!(lens.len() > 4, "secret {i}, n={n}: only {} sizes", lens.len());
+            }
         }
     }
 

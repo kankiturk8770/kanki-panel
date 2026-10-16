@@ -862,6 +862,7 @@ a.b2{text-decoration:none;display:inline-flex;align-items:center;justify-content
 <div id="toast"></div>
 <script src="/assets/kanki-ext.js"></script>
 <script src="/assets/kanki-xray.js"></script>
+<script src="/assets/kanki-antidpi.js"></script>
 <script src="/assets/kanki-dns.js"></script>
 <script>
 "use strict";
@@ -987,11 +988,11 @@ function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(func
 
 // ---------------------------------------------------------------- shell
 ICO.chev='<path d="M6 9l6 6 6-6"/>';
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Kanki VPN','nodes'],['xray','Xray','xray'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Kanki VPN','nodes'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 // sidebar groups (v2.8.4): [label, page keys]
 // menu (v3.5): single pages and groups that open in place. An item is [page, sub page, label, note].
 var NAV=[{p:'dash'},{p:'users'},
- {g:'vpn',l:'VPN services',i:'shield2',items:[['vpn','','All VPN services','Kanki VPN and Xray side by side'],['nodes','','Kanki VPN','WireGuard · AmneziaWG · Hysteria2'],['xray','','Xray','VLESS · VMess · Trojan · Shadowsocks']]},
+ {g:'vpn',l:'VPN services',i:'shield2',items:[['vpn','','All VPN services','Kanki VPN and Xray side by side'],['nodes','','Kanki VPN','WireGuard · AmneziaWG · Hysteria2'],['xray','','Xray','VLESS · VMess · Trojan · Shadowsocks'],['antidpi','','Anti-DPI tunnels','REALITY · WS/gRPC behind CDN · Hysteria2']]},
  {g:'dnsg',l:'Kanki DNS',i:'dns',items:[['dns','overview','Overview','Status of the DNS servers'],['dns','servers','DNS servers','Exits abroad and relays in Iran'],['dns','services','Services','What goes through the DNS'],['dns','users','DNS users','Registered addresses and use'],['dns','settings','Settings and SSL','Domain, certificate, upstreams']]},
  {g:'net',l:'Tunnels',i:'tunnel',items:[['servers','','Tunnel servers',''],['tunnels','','Tunnels',''],['ports','','Port management','']]},
  {g:'sales',l:'Sales & support',i:'bot',items:[['bot','','Sales bot',''],['emergency','','Emergency chat','']]},
@@ -1299,6 +1300,7 @@ function loadNodes(){api('GET','/api/nodes').then(function(n){S.nodes=n;drawNode
 // ---- node health: judged from the last sync and the CPU / RAM / disk the node reports
 function panelVer(){var l=(S.nodes||[]).filter(function(x){return x.id=='local'})[0];return l&&l.info&&l.info.version||''}
 function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bump=function(l,m){r.push([l,m]);if(l>lv)lv=l};
+ if(!loc&&n.sync_state=='pin mismatch')return{lv:2,c:'r',l:'Problem',r:[[2,'The node\'s certificate changed (reinstalled?): run its join command again, or remove and add the node']]};
  if(!loc&&!n.online)return{lv:2,c:'r',l:'Problem',r:[[2,'Not reachable: check the server, its agent and the firewall']]};
  if(!loc&&n.last_sync&&Date.now()/1000-n.last_sync>180)bump(1,'No contact for more than 3 minutes');
  if(n.sync_state=='mismatch')bump(1,'Some users are not on this server yet (config mismatch): press Sync');
@@ -1317,7 +1319,7 @@ function nMeter(lbl,p,txt){var c=p>=90?'var(--bad)':p>=70?'var(--warn)':'var(--o
  return '<div class="nm"><div class="nmh"><small>'+t(lbl)+'</small><b class="ltr">'+txt+'</b></div><i><s style="width:'+Math.round(p)+'%;background:'+c+'"></s></i></div>'}
 S.nopen=S.nopen||{};
 function drawNodes(){var el=$('#nl');if(!el)return;el.innerHTML=S.nodes.map(function(n){var loc=n.id=='local',h=nHealthOf(n),st=(n.info||{}).stats,op=!!S.nopen[n.id],id=esc(n.id);
- var sy=n.sync_state=='synced'?'<span class="okt">'+t('Synced')+'</span>':n.sync_state=='mismatch'?'<span style="color:var(--warn)">'+t('Config mismatch')+'</span>':'<span class="bad2">'+(n.online?'—':t('Offline'))+'</span>';
+ var sy=n.sync_state=='synced'?'<span class="okt">'+t('Synced')+'</span>':n.sync_state=='mismatch'?'<span style="color:var(--warn)">'+t('Config mismatch')+'</span>':n.sync_state=='pin mismatch'?'<span class="bad2">'+t('Certificate changed')+'</span>':'<span class="bad2">'+(n.online?'—':t('Offline'))+'</span>';
  var acc=n.maint?t('Under maintenance'):n.drain?t('Draining'):t('Accepting');
  var meters=st?nMeter('CPU',+st.cpu||0,N(Math.round(+st.cpu||0))+'%')+nMeter('RAM',pc(st.mem_used,st.mem_total),N(Math.round(pc(st.mem_used,st.mem_total)))+'%')+nMeter('Disk',pc(st.disk_used,st.disk_total),N(Math.round(pc(st.disk_used,st.disk_total)))+'%')
   :'<p class="muted nmx">'+t(loc||n.online?'Press Update agent to see CPU, RAM and disk of this node':'Not reachable')+'</p>';
@@ -1669,7 +1671,7 @@ function drawNodesCard(list){var el=$('#nc');if(!el)return;
  var up=list.filter(function(n){return n.id=='local'||n.online}).length,all=up==list.length;
  el.innerHTML='<div class="nh"><div><h3>'+t('Nodes')+'</h3><small class="'+(all?'okt':'bad2')+'">'+(all?'✓ '+t('All servers connected'):N(list.length-up)+' '+t('server(s) disconnected'))+' · '+N(up)+' / '+N(list.length)+'</small></div>'+
   '<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="b2" data-nd="add">'+ic('plus',15)+' '+t('Add node')+'</button><button class="b2" data-nd="all">'+t('Manage')+'</button></div></div>'+
-  '<div class="nds">'+list.map(function(n){var s=nState(n),loc=n.id=='local',sy=loc?null:n.sync_state=='synced'?['g','Synced']:n.sync_state=='mismatch'?['y','Config mismatch']:null;
+  '<div class="nds">'+list.map(function(n){var s=nState(n),loc=n.id=='local',sy=loc?null:n.sync_state=='synced'?['g','Synced']:n.sync_state=='mismatch'?['y','Config mismatch']:n.sync_state=='pin mismatch'?['r','Certificate changed']:null;
    var hh=nHealthOf(n),stt=(n.info||{}).stats;if(s.c=='g'&&hh.c!='g')s={c:hh.c,l:hh.l};
    return '<button class="nd" data-nd="all"><span class="dot '+s.c+'"></span><span class="nn"><b>'+esc(n.name)+'</b><small class="ltr">'+esc(loc?'local':String(n.address||'').replace(/^https?:\/\//,''))+'</small></span>'+
     '<span class="nb"><span class="badge '+s.c+' cn">'+(s.c=='g'?ic('check',12)+' ':'')+t(s.l)+'</span>'+(loc?'<span class="badge">'+t('Main server')+'</span>':'')+(sy?'<span class="badge '+sy[0]+'">'+t(sy[1])+'</span>':'')+'</span>'+
@@ -2015,8 +2017,8 @@ function tunLoad(){return api('GET','/api/tunnels').then(function(d){TN.d=d;retu
 function tunSrv(id){var l=(TN.d&&TN.d.servers)||[];for(var i=0;i<l.length;i++)if(l[i].id==id)return l[i];return {id:id,name:id}}
 function tunStateTxt(s){return {up:t('Connected'),partial:t('Connecting…'),down:t('Disconnected'),off:t('Off')}[s]||s}
 function tunCol(s){return s=='up'?'#3ddc97':s=='partial'?'#f5b942':s=='off'?'#8a8f98':'#ff6b6b'}
-function tunTr(x){return {tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP',hq:'HQ (masked QUIC)',h2:'H2 (HTTP/2 + TLS)',dual:'Dual (HQ + H2)',cdn:'CDN (whitelist)',awg:'AmneziaWG',hy2:'Hysteria2',baseline:t('Raw ping')}[x]||x}
-var TS_TR=[['tcpmux','TCP Mux'],['tcp','TCP'],['ws','WebSocket'],['wss','WSS (TLS)'],['quic','QUIC'],['kcp','KCP'],['hq','HQ (masked QUIC)'],['h2','H2 (HTTP/2 + TLS)']];
+function tunTr(x){return {tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP',hq:'HQ (masked QUIC)',h2:'H2 (HTTP/2 + TLS)',dual:'Dual (HQ + H2)',cdn:'CDN (whitelist)',game:t('Game (KCP + FEC)'),faketcp:'FakeTCP (UDP→TCP)',awg:'AmneziaWG',hy2:'Hysteria2',baseline:t('Raw ping')}[x]||x}
+var TS_TR=[['tcpmux','TCP Mux'],['tcp','TCP'],['ws','WebSocket'],['wss','WSS (TLS)'],['quic','QUIC'],['kcp','KCP'],['hq','HQ (masked QUIC)'],['h2','H2 (HTTP/2 + TLS)'],['game',t('Game (KCP + FEC)')],['faketcp','FakeTCP (UDP→TCP)']];
 // GRE: the panel builds its side by itself; this script builds the other side on the server
 // (a systemd service, so it comes back after a reboot) and, when the panel has a domain, points that
 // domain at the panel's address inside the GRE link so the agent talks to the panel through it
@@ -2195,7 +2197,7 @@ function tunSrvEdit(id){var s=tunSrv(id);
 
 // ---- tunnel wizard
 var TNP={balanced:4,speed:8,gaming:2};
-function tunUdpTr(tr){return tr=='quic'||tr=='kcp'||tr=='hq'||tr=='hy2'}
+function tunUdpTr(tr){return tr=='quic'||tr=='kcp'||tr=='hq'||tr=='hy2'||tr=='game'}
 // dual listens on UDP and TCP of the same port number
 function tunBoth(tr){return tr=='dual'}
 // entry-side ports written in a list: "443", "8443:443", "1000-1010", comma separated
@@ -2224,10 +2226,11 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  var opt=function(sel){return sv.map(function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'}).join('')};
  var prof=x.conns==8?'speed':x.conns==2?'gaming':'balanced',tr=x.transport||'tcpmux',mode=x.mode||'reverse',kind=(x.kind=='awg'||x.kind=='hy2')?x.kind:'',A=x.awg||{},Y=x.hy2||{};if(tr=='awg'||tr=='hy2')tr='tcpmux';
  var awp=A.params||{},awpt=Object.keys(awp).map(function(k){return k+'='+awp[k]}).join('  ');
- var trs=[['Hardest to block',[['dual',t('UDP first (masked QUIC); if UDP is cut, HTTP/2 over TLS on the same port number'),['UDP','TCP','TLS']],['h2',t('WebSocket over HTTP/2, TLS 1.3 like a browser, many links in one connection'),['TLS','SNI','H2']]]],
+ var trs=[['Hardest to block',[['dual',t('UDP first (masked QUIC); if UDP is cut, HTTP/2 over TLS on the same port number'),['UDP','TCP','TLS']],['h2',t('WebSocket over HTTP/2, TLS 1.3 like a browser, many links in one connection'),['TLS','SNI','H2']],['faketcp',t('UDP traffic inside fake TCP packets (udp2raw style): passes where UDP is cut or slowed; needs root on both servers'),['TCP','UDP']]]],
   ['Looks like web traffic',[['wss',t('Looks like an HTTPS site, hardest to spot'),['TLS','SNI']],['ws',t('Looks like a WebSocket, works behind a CDN'),['HTTP']]]],
   ['Encrypted TCP',[['tcpmux',t('Fast and steady, several links at once'),['TCP']],['tcp',t('One plain link'),['TCP']]]],
   ['Over UDP',[['quic',t('Over QUIC (UDP), fast and encrypted'),['UDP','SNI']],['kcp',t('Over KCP (UDP), good on weak/lossy internet'),['UDP']],['hq',t('QUIC under a random mask: no QUIC signature, packet sizes hidden'),['UDP','SNI','Mask']]]],
+  ['Gaming',[['game',t('KCP + Reed-Solomon FEC and optional packet duplication: recovers lost packets without waiting, the lowest ping under loss'),['UDP','FEC']]]],
   ['Whitelist',[['cdn',t('Whitelist mode: through a CDN (ArvanCloud), for when only domestic sites open'),['TLS','SNI','CDN']]]]];
  var sec=function(n,title,extra){return '<div class="tws"><h4><i>'+N(n)+'</i>'+t(title)+(extra||'')+'</h4>'};
  modal(mhead(id?t('Edit tunnel'):t('New tunnel'))+
@@ -2268,7 +2271,11 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '</div>'+
   '<div id="tw_trw">'+sec(3,'Transport','<button type="button" class="b2 sm" id="tw_smart">⚡ '+t('Find the best transport')+'</button>')+
   '<div id="tw_tr">'+trs.map(function(g){return '<div class="trgl">'+t(g[0])+'</div><div class="tropt">'+g[1].map(function(o){return '<button data-v="'+o[0]+'" class="'+(tr==o[0]?'on':'')+'"><b>'+tunTr(o[0])+o[2].map(function(z){return '<em class="ttg">'+z+'</em>'}).join('')+'</b><small>'+o[1]+'</small></button>'}).join('')+'</div>'}).join('')+'</div>'+
-  '<small class="muted" style="display:block;margin-top:8px">'+t('On filtered networks WSS and WS usually pass; plain TCP, TCP Mux, QUIC and KCP are often cut. Use “Find the best transport” to test them between these two servers.')+'</small></div>'+
+  '<small class="muted" style="display:block;margin-top:8px">'+t('On filtered networks WSS and WS usually pass; plain TCP, TCP Mux, QUIC and KCP are often cut. Use “Find the best transport” to test them between these two servers.')+'</small>'+
+  '<div id="tw_gm" class="box" style="display:none;margin-top:10px"><b>🎮 '+t('Gaming options')+'</b>'+
+  '<small class="muted" style="display:block;margin:4px 0 8px">'+t('FEC sends extra repair packets so a lost packet is rebuilt at the other end instead of being waited for (about 40–100 ms saved per loss). 8:3 means 3 repair packets per 8 data packets (~37% more traffic). Duplication sends every packet twice: best ping, double the traffic. For WireGuard on top of this tunnel, FEC 8:3 is the sweet spot.')+'</small>'+
+  '<div class="g2"><div><label class="f">'+t('FEC data:parity')+'</label><input id="tw_fec" class="ltr" value="'+esc(x.fec||'8:3')+'" placeholder="8:3 · off"></div>'+
+  '<div style="align-self:end"><label class="chk"><input type="checkbox" id="tw_dup" '+(x.dup?'checked':'')+'><span><b>'+t('Send every packet twice')+'</b><small>'+t('The first copy that arrives wins; near-zero visible loss, double traffic')+'</small></span></label></div></div></div></div>'+
   // 4) disguise: only what the chosen transport can use
   sec(4,'Disguise','<small id="tw_camt"></small>')+
   '<div class="camn" id="tw_camn"></div>'+
@@ -2333,9 +2340,11 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   quic:{sni:1,n:'The QUIC hello carries a site name too (default www.cloudflare.com).'},
   hq:{sni:1,n:'Every UDP packet is masked with a key made from the token: no QUIC signature, random sizes. Unmasked packets get no answer. The QUIC hello carries a site name (default www.cloudflare.com).'},
   h2:{sni:1,frag:1,host:1,path:1,n:'TLS 1.3 with the ALPN, ciphers and HTTP/2 settings of a browser; a stranger who opens the site gets an ordinary web page. Use port 443.'},
-  dual:{sni:1,frag:1,host:1,path:1,n:'Tries masked QUIC first and switches to HTTP/2 over TLS by itself when UDP does not pass. Open the port on UDP and TCP; port 443 is best.'},cdn:{cdn:1}};
+  dual:{sni:1,frag:1,host:1,path:1,n:'Tries masked QUIC first and switches to HTTP/2 over TLS by itself when UDP does not pass. Open the port on UDP and TCP; port 443 is best.'},
+  game:{n:'Every UDP packet is masked with a key made from the token, so no KCP signature shows; sizes and timing look random. FEC repairs losses without a retransmit.'},
+  faketcp:{n:'UDP travels inside hand-crafted TCP packets with a fake handshake: to DPI it is an ordinary TCP session, but with the speed of UDP. Both servers need root and the port on TCP.'},cdn:{cdn:1}};
  function camUi(){var c=CAM[st.tr]||{},sh=function(i,v){var e=$(i);if(e)e.style.display=v?'':'none'};
-  sh('#tw_snw',c.sni);sh('#tw_fragw',c.frag);sh('#tw_hw',c.host);sh('#tw_pw',c.path||c.cdn);sh('#tw_hpw',c.host||c.path||c.cdn);
+  sh('#tw_snw',c.sni);sh('#tw_fragw',c.frag);sh('#tw_hw',c.host);sh('#tw_pw',c.path||c.cdn);sh('#tw_hpw',c.host||c.path||c.cdn);sh('#tw_gm',st.tr=='game');
   var n=$('#tw_camn');n.innerHTML=c.n?ic(c.sni||c.host?'security':'check',16)+'<span>'+t(c.n)+'</span>':'';n.style.display=c.n?'':'none';
   $('#tw_camt').textContent=c.sni?t('SNI spoof'):c.host?t('Host / path'):c.cdn?t('CDN'):t('Not needed');
   var g=$('#tw_spg');if(g)g.innerHTML=c.sni?spGuide():'';
@@ -2351,13 +2360,13 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  var c1=$('#tw_aw_c1'),c2=$('#tw_aw_c2');if(c1)c1.onclick=function(){awgConf(id,'entry')};if(c2)c2.onclick=function(){awgConf(id,'exit')};
  $('#tw_smart').onclick=function(){if($('#tw_en').value==$('#tw_ex').value){toast(t('The entry and the exit must be different'),1);return}
   var L=function(v){return String(v||'').split(/[\s,]+/).filter(Boolean)},g=function(k){var e=$(k);return e?e.value:''};
-  tunSmart({entry:$('#tw_en').value,exit:$('#tw_ex').value,prof:$('#tw_pf').value,apply:{id:id,snap:{name:$('#tw_nm').value,mode:st.mode,transport:st.tr,port:+$('#tw_pt').value||0,conns:TNP[$('#tw_pf').value]||4,tcp:L($('#tw_tcp').value),udp:L($('#tw_udp').value),dial:g('#tw_dl'),target:g('#tw_tg'),sni:g('#tw_sni'),host:g('#tw_host'),frag:!!($('#tw_frag2')&&$('#tw_frag2').checked),path:g('#tw_pa'),auto:!!($('#tw_au')&&$('#tw_au').checked)}}})};
+  tunSmart({entry:$('#tw_en').value,exit:$('#tw_ex').value,prof:$('#tw_pf').value,apply:{id:id,snap:{name:$('#tw_nm').value,mode:st.mode,transport:st.tr,port:+$('#tw_pt').value||0,conns:TNP[$('#tw_pf').value]||4,tcp:L($('#tw_tcp').value),udp:L($('#tw_udp').value),dial:g('#tw_dl'),target:g('#tw_tg'),sni:g('#tw_sni'),host:g('#tw_host'),frag:!!($('#tw_frag2')&&$('#tw_frag2').checked),path:g('#tw_pa'),auto:!!($('#tw_au')&&$('#tw_au').checked),fec:st.tr=='game'?g('#tw_fec'):'',dup:st.tr=='game'&&!!($('#tw_dup')&&$('#tw_dup').checked)}}})};
  hint();kindUi();if(!id&&!(x.tcp||[]).length&&!(x.udp||[]).length&&st.kind!='awg')fillPorts(false);
  var ct=$('#tw_ctest');if(ct)ct.onclick=cdnTest;var cn=$('#tw_cscan');if(cn)cn.onclick=cdnScan;
  var sp=$('#tw_spoof');if(sp)sp.onclick=function(e){var b=e.target.closest('[data-sp]');if(!b)return;var i=$('#tw_sni'),v=i.value.trim();i.value=v?(v.split(/[\s,]+/).indexOf(b.dataset.sp)<0?v+', '+b.dataset.sp:v):b.dataset.sp};
  var cs=$('#tw_cspoof');if(cs)cs.onclick=function(e){var b=e.target.closest('[data-sp]');if(!b)return;var i=$('#tw_csni'),v=i.value.trim();i.value=v?(v.split(/[\s,]+/).indexOf(b.dataset.sp)<0?v+', '+b.dataset.sp:v):b.dataset.sp};
  $('#tw_go').onclick=function(){var me=this,b={name:$('#tw_nm').value,entry:$('#tw_en').value,exit:$('#tw_ex').value,mode:st.mode,transport:st.tr,port:+$('#tw_pt').value||0,conns:TNP[$('#tw_pf').value]||4,
-  tcp:$('#tw_tcp').value,udp:$('#tw_udp').value,dial:st.tr=='cdn'?$('#tw_cdl').value:$('#tw_dl').value,target:$('#tw_tg').value,sni:st.tr=='cdn'?$('#tw_csni').value:$('#tw_sni').value,path:$('#tw_pa').value,auto:st.tr!='cdn'&&$('#tw_au').checked,host:st.tr=='cdn'?$('#tw_chost').value:$('#tw_host').value,frag:st.tr=='cdn'?$('#tw_frag').checked:$('#tw_frag2').checked};if(id)b.id=id;
+  tcp:$('#tw_tcp').value,udp:$('#tw_udp').value,dial:st.tr=='cdn'?$('#tw_cdl').value:$('#tw_dl').value,target:$('#tw_tg').value,sni:st.tr=='cdn'?$('#tw_csni').value:$('#tw_sni').value,path:$('#tw_pa').value,auto:st.tr!='cdn'&&$('#tw_au').checked,host:st.tr=='cdn'?$('#tw_chost').value:$('#tw_host').value,frag:st.tr=='cdn'?$('#tw_frag').checked:$('#tw_frag2').checked,fec:st.tr=='game'?($('#tw_fec').value||'8:3'):'',dup:st.tr=='game'&&$('#tw_dup').checked};if(id)b.id=id;
   if(st.kind=='awg'){var g2=function(k){var e=$(k);return e?e.value:''};b.kind='awg';b.auto=false;b.awg={wrap:st.wrap,port:+g2('#tw_aw_pt')||0,profile:g2('#tw_aw_pf'),mtu:+g2('#tw_aw_mtu')||0,keepalive:+g2('#tw_aw_ka')||0,lockdown:!!($('#tw_aw_lk')&&$('#tw_aw_lk').checked),nat_exit:!!$('#tw_aw_nat').checked,routes:g2('#tw_aw_rt'),src_routes:g2('#tw_aw_sr'),fwd_tcp:g2('#tw_aw_ft'),fwd_udp:g2('#tw_aw_fu'),fwd_target:g2('#tw_aw_tg'),regen_params:!!($('#tw_aw_rp')&&$('#tw_aw_rp').checked),regen_keys:!!($('#tw_aw_rk')&&$('#tw_aw_rk').checked)};if(!st.wrap)b.port=0}
   else if(st.kind=='hy2'){var g3=function(k){var e=$(k);return e?e.value:''};b.kind='hy2';b.auto=false;b.mode='direct';b.transport='tcpmux';b.hy2={port:+g3('#tw_hy_pt')||0,sni:g3('#tw_hy_sni'),obfs:!!$('#tw_hy_ob').checked,up_mbps:+g3('#tw_hy_up')||0,down_mbps:+g3('#tw_hy_dn')||0,src_routes:g3('#tw_hy_sr'),masq:g3('#tw_hy_mq'),mtu:+g3('#tw_hy_mtu')||0,regen:!!($('#tw_hy_rg')&&$('#tw_hy_rg').checked)};b.port=b.hy2.port}else b.kind='';
   me.disabled=true;api('POST','/api/tunnels',b).then(function(){closeModal();toast(id?t('Saved: the tunnel restarts with the new settings'):t('The tunnel is made: it connects in a few seconds'));tunRefresh()}).catch(function(e){me.disabled=false;fail(e)})}}
@@ -2372,6 +2381,14 @@ Object.assign(FA,{"Route":"مسیر","Tunnel type":"نوع تانل","Transport"
  "KCP is fully encrypted UDP (its header is hidden too); there is no site name to disguise.":"KCP یک UDP کاملاً رمزنگاری‌شده است (حتی هدرش)؛ اسم سایتی برای پوشاندن ندارد.","WS has no TLS, so there is no SNI: only the Host header and the path of the WebSocket request can be changed.":"WS رمزنگاری TLS ندارد، پس SNI هم ندارد؛ فقط هدر Host و مسیر درخواست WebSocket قابل تغییرند.",
  "SNI spoof: the TLS hello shows another site name. It only helps when the filter decides by name; it does nothing if the IP is blocked.":"SNI اسپوف: در دست‌دادن TLS اسم یک سایت دیگر نشان داده می‌شود. فقط وقتی کمک می‌کند که فیلتر بر اساس اسم تصمیم بگیرد؛ اگر خود آی‌پی بسته باشد اثری ندارد.",
  "The QUIC hello carries a site name too (default www.cloudflare.com).":"دست‌دادن QUIC هم اسم سایت دارد (پیش‌فرض www.cloudflare.com).","SNI spoof":"SNI اسپوف","Host / path":"Host / مسیر","Not needed":"لازم نیست"});
+Object.assign(FA,{"Game (KCP + FEC)":"گیم (KCP + FEC)","Gaming":"گیمینگ","Gaming options":"تنظیمات گیمینگ","FEC data:parity":"FEC داده:تکمیلی",
+ "KCP + Reed-Solomon FEC and optional packet duplication: recovers lost packets without waiting, the lowest ping under loss":"KCP به‌همراه FEC (رید-سولومون) و ارسال دوبارهٔ اختیاری بسته‌ها: بستهٔ گمشده بدون انتظار بازسازی می‌شود؛ کمترین پینگ در شبکهٔ پرلاست",
+ "UDP traffic inside fake TCP packets (udp2raw style): passes where UDP is cut or slowed; needs root on both servers":"ترافیک UDP داخل بسته‌های TCP ساختگی (سبک udp2raw): جایی که UDP قطع یا محدود است رد می‌شود؛ روی هر دو سرور root لازم است",
+ "FEC sends extra repair packets so a lost packet is rebuilt at the other end instead of being waited for (about 40–100 ms saved per loss). 8:3 means 3 repair packets per 8 data packets (~37% more traffic). Duplication sends every packet twice: best ping, double the traffic. For WireGuard on top of this tunnel, FEC 8:3 is the sweet spot.":"FEC بسته‌های ترمیمی اضافه می‌فرستد تا بستهٔ گمشده به‌جای انتظار، در مقصد بازسازی شود (هر لاست حدود ۴۰ تا ۱۰۰ میلی‌ثانیه صرفه‌جویی). 8:3 یعنی به ازای هر ۸ بستهٔ داده ۳ بستهٔ ترمیمی (حدود ۳۷٪ ترافیک بیشتر). ارسال دوباره هر بسته را دو بار می‌فرستد: بهترین پینگ، دو برابر ترافیک. برای وایرگارد روی این تانل، FEC 8:3 نقطهٔ مطلوب است.",
+ "Send every packet twice":"هر بسته دو بار فرستاده شود","The first copy that arrives wins; near-zero visible loss, double traffic":"اولین نسخه‌ای که برسد برنده است؛ لاست تقریباً صفر، ترافیک دو برابر",
+ "Every UDP packet is masked with a key made from the token, so no KCP signature shows; sizes and timing look random. FEC repairs losses without a retransmit.":"هر بستهٔ UDP با کلید ساخته‌شده از توکن ماسک می‌شود؛ امضای KCP دیده نمی‌شود و اندازه‌ها و زمان‌بندی تصادفی به نظر می‌رسد. FEC لاست‌ها را بدون ارسال مجدد ترمیم می‌کند.",
+ "UDP travels inside hand-crafted TCP packets with a fake handshake: to DPI it is an ordinary TCP session, but with the speed of UDP. Both servers need root and the port on TCP.":"UDP داخل بسته‌های TCP دست‌ساز با دست‌دادن ساختگی حرکت می‌کند: برای DPI یک نشست TCP معمولی است، اما با سرعت UDP. هر دو سرور به root و پورت روی TCP نیاز دارند.",
+ "Test ports (first of the range)":"پورت‌های تست (اول محدوده)"});
 
 // ---- Hysteria2: show the config of one side
 function hy2Conf(id,side){api('GET','/api/tunnels/'+id+'/hy2conf/'+side).then(function(r){modal(mhead(t('Config')+' · '+(side=='exit'?t('Exit'):t('Entry')))+'<p class="muted">'+'hysteria '+(side=='exit'?'server':'client')+' -c … · '+t('It holds the password: do not share it.')+' <span class="ltr">'+esc(r.file)+'</span></p><pre class="ltr" style="white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:50vh;overflow:auto">'+esc(r.conf)+'</pre><button class="btn" id="hy_cp" style="width:100%;margin-top:8px">'+t('Copy')+'</button>');$('#hy_cp').onclick=function(){copy(r.conf)}}).catch(fail)}
@@ -2394,13 +2411,17 @@ function spGuide(){var fa=S.lang=='fa';
  ['SNI اسپوف چیست؟','تانل جدا نیست؛ فقط یک پوشش روی WSS / QUIC / CDN است و اسم سایت دیگری را در دست‌دادن TLS می‌نویسد. فقط وقتی کمک می‌کند که فیلتر روی نام SNI تصمیم بگیرد. اگر آی‌پی را ببندند، SNI کمکی نمی‌کند. جعل آی‌پی مبدأ (بستهٔ خام) روی تانل TCP کار نمی‌کند و در پنل نیست.'],
  ['با وایرگارد و بقیه کار می‌کند؟','بله. پورت‌های وایرگارد / آمنزیا / هیستریا۲ را در UDP و TCP تانل بگذار؛ تانل فقط ترافیک را حمل می‌کند و پروتکل VPN عوض نمی‌شود.'],
  ['CDN فرانتینگ چه بود؟','قبلاً (مثل گوگل و آمازون): SNI نام یک سایت مجاز، ولی هدر Host دامنهٔ خودت؛ CDN با Host مسیر می‌داد و فیلتر فقط SNI مجاز را می‌دید. بیشتر CDNهای بزرگ بستند؛ بعضی هنوز می‌پذیرند و باید تست شود. در حالت CDN پنل، SNI و Host جدا نوشته می‌شوند، یعنی همین کار.'],
- ['وقتی اینترنت به‌هم ریخت','دامنه را روی CDN بگذار (WebSocket روشن)، چند آی‌پی لبه بنویس، «تست CDN» را بزن (از سرور پنل، سلامت CDN و مبدأ)، و برای پیدا کردن آی‌پی بازِ یک رنج، «اسکریپت اسکن» را روی سرور ایران اجرا کن.']
+ ['وقتی اینترنت به‌هم ریخت','دامنه را روی CDN بگذار (WebSocket روشن)، چند آی‌پی لبه بنویس، «تست CDN» را بزن (از سرور پنل، سلامت CDN و مبدأ)، و برای پیدا کردن آی‌پی بازِ یک رنج، «اسکریپت اسکن» را روی سرور ایران اجرا کن.'],
+ ['قدم‌به‌قدم با ابرآروان','① در پنل ابرآروان، CDN را برای دامنه روشن کن (رکورد پروکسی‌دار) و رکورد A را به آی‌پی سرور ایران اشاره بده. ② در تنظیمات CDN گزینهٔ WebSocket را فعال کن؛ TLS را روی Full بگذار؛ پروتکل مبدأ HTTP و پورت مبدأ = پورت تانل (پیش‌فرض ۸۰۸۰). ③ اینجا تانل جدید بساز: روش «CDN (لیست سفید)»، حالت «سرور خارج وصل می‌شود (توصیه‌شده)»، Host = دامنهٔ خودت، پورت ۸۰۸۰. پورت ۸۰۸۰/TCP روی سرور ایران باز باشد. ④ تانل را ذخیره کن و «تست CDN» را بزن. ⑤ اختیاری ولی توصیه‌شده: چند SNI داخلی مثل www.aparat.com و www.digikala.com بنویس و «تکه‌تکه کردن دست‌دادن TLS» روشن باشد. ⑥ اگر بعضی آی‌پی‌های لبه بسته‌اند، «اسکریپت اسکن» را روی سرور ایران اجرا کن و آی‌پی‌های باز را در «آدرس‌های لبهٔ CDN» بگذار.'],
+ ['وایرگارد پشت چه تانلی؟','دست‌دادن وایرگارد خام خیلی زود توسط DPI شناسایی می‌شود. راه‌حل: پورت UDP وایرگارد (مثلاً 51820) را در لیست UDP یک تانل game (FEC 8:3) یا faketcp بگذار و Endpoint کاربران را آدرس سرور ایران بزن. روی تانل game بستهٔ گمشده با FEC بازسازی می‌شود (بدون تأخیر ارسال مجدد)؛ روی faketcp کل ترافیک شبیه TCP دیده می‌شود و محدودیت UDP اپراتور دور زده می‌شود. AmneziaWG هم اگر امضای WG بسته باشد، همین کار را با پوشش داخلی خودش می‌کند.']
  ]:[
  ['Iran server shows offline?','The panel cannot reach it, or Iran cannot reach abroad (whitelist / white IP). Three ways: (1) a white IP: an inside server that can reach abroad. (2) Reverse mode: the foreign server dials Iran; use it when Iran cannot send requests out but inbound works (open the tunnel port on Iran). (3) CDN mode: put your domain on a CDN. If the CDN (for example ArvanCloud) points to the Iran server, choose “the foreign server connects in”; if it points to the foreign server, choose “the Iran server connects out”. Just type the domain and the port. Save the tunnel first, then press “Test CDN”.'],
  ['What is SNI spoofing?','Not a separate tunnel: a disguise on WSS / QUIC / CDN that puts another site name in the TLS hello. It only helps when the filter decides by SNI name. If the IP itself is blocked it does nothing. Real source-IP spoofing (raw packets) does not work for a TCP tunnel and is not in the panel.'],
  ['Does it work with WireGuard etc.?','Yes. Put the WireGuard / AmneziaWG / Hysteria2 ports in the tunnel TCP and UDP lists; the tunnel only carries the traffic, the VPN protocol stays the same.'],
  ['What was CDN fronting?','Old trick (Google, Amazon): SNI = an allowed site, HTTP Host = your own domain; the CDN routed by Host and the filter saw only the allowed SNI. Big CDNs closed it; some still allow it and it must be tested. In the panel CDN mode SNI and Host are separate, which is exactly this.'],
- ['When everything breaks','Put your domain on a CDN (WebSocket on), list several edge IPs, press “Test CDN” (runs from the panel server: checks CDN and origin), and run the “Scan script” on the Iran server to find open IPs inside a range.']
+ ['When everything breaks','Put your domain on a CDN (WebSocket on), list several edge IPs, press “Test CDN” (runs from the panel server: checks CDN and origin), and run the “Scan script” on the Iran server to find open IPs inside a range.'],
+ ['Step by step with ArvanCloud','(1) In ArvanCloud turn CDN on for your domain (proxied record) and point the A record at the Iran server IP. (2) In the CDN settings turn WebSocket on; TLS = Full; origin protocol HTTP, origin port = the tunnel port (default 8080). (3) Here: new tunnel, transport “CDN (whitelist)”, mode “the foreign server connects in (recommended)”, Host = your domain, port 8080. Port 8080/TCP must be open on the Iran server. (4) Save the tunnel, then press “Test CDN”. (5) Optional but recommended: write a few domestic SNIs (www.aparat.com, www.digikala.com) and keep “Split the TLS hello” on. (6) If some edge IPs are blocked, run the “Scan script” on the Iran server and put the open ones in “CDN edge addresses”.'],
+ ['WireGuard behind which tunnel?','A raw WireGuard handshake is spotted by DPI quickly. The fix: put the WireGuard UDP port (for example 51820) in the UDP list of a game (FEC 8:3) or faketcp tunnel and set the users’ Endpoint to the Iran server address. On game, lost packets are rebuilt by FEC (no retransmit delay); on faketcp the whole flow looks like TCP and operator UDP throttling does not apply. AmneziaWG does the same with its built-in disguise when the WG signature itself is blocked.']
  ];
  return '<details class="box" style="margin-top:10px"><summary><b>'+(fa?'راهنمای SNI اسپوف و CDN':'SNI spoof & CDN guide')+'</b></summary>'+h.map(function(r){return '<small class="muted" style="display:block;margin:7px 0 0"><b>'+r[0]+'</b> '+r[1]+'</small>'}).join('')+'</details>'}
 function cdnTools(){var fa=S.lang=='fa';
@@ -2431,17 +2452,18 @@ function tunSmart(o){if(!TN.d)return tunLoad().then(function(){tunSmart(o)});if(
   '<ul class="sub" style="margin:4px 0 8px;padding-inline-start:18px;line-height:1.7"><li>'+t('Scores follow your profile (gaming, balanced, ultra speed)')+'</li><li>'+t('Tells which ones did not pass and probably why')+'</li><li>'+t('If one direction is closed it says so and suggests the other')+'</li><li>'+t('One click applies it in making or editing a tunnel')+'</li><li>'+t('No tunnel is made and nothing changes on the servers')+'</li></ul>'+
   (sv.length<2?'<div class="warnbox">'+t('First add your entry server in the “Tunnel servers” menu.')+'</div>':'')+
   '<div class="g2"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="ts_en">'+opt(c.entry||(remote[0]||{}).id)+'</select></div><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="ts_ex">'+opt(c.exit||'local')+'</select></div></div>'+
-  '<div class="g2"><div><label class="f">'+t('Profile')+'</label><select id="ts_pf">'+po('balanced',t('Balanced'))+po('speed',t('Most speed'))+po('gaming',t('Gaming (low ping)'))+'</select></div><div><label class="f">'+t('Test ports (first of sixteen)')+'</label><input id="ts_pt" type="number" class="ltr" value="3990"></div></div>'+
+  '<div class="g2"><div><label class="f">'+t('Profile')+'</label><select id="ts_pf">'+po('balanced',t('Balanced'))+po('speed',t('Most speed'))+po('gaming',t('Gaming (low ping)'))+'</select></div><div><label class="f">'+t('Test ports (first of the range)')+'</label><input id="ts_pt" type="number" class="ltr" value="3990"></div></div>'+
   '<label class="f" style="margin-top:10px">'+t('Which methods to test')+'</label>'+
   '<div class="tschk" id="ts_tr">'+TS_TR.map(function(x){return '<label class="chk sm"><input type="checkbox" value="'+x[0]+'" checked><span>'+x[1]+'</span></label>'}).join('')+'</div>'+
   '<label class="chk sm" style="margin-top:4px"><input type="checkbox" id="ts_base" checked><span><b>'+t('Raw ping (no tunnel)')+'</b> · '+t('the plain ping between the two servers, as a reference')+'</span></label>'+
   '<p class="muted" id="ts_note" style="font-size:12px;margin:8px 0 0"></p>'+
   (r.job&&r.job.finished?'<button class="b2" style="width:100%;margin-top:10px" onclick="tunSmartRun()">'+t('Show the last result')+'</button>':'')+
   '<button class="btn" style="width:100%;margin-top:10px" id="ts_go">'+t('Start the test')+'</button>');
- var note=function(){var p=+$('#ts_pt').value||3990;$('#ts_note').textContent=t('Takes about a minute. Ports')+' '+N(p)+'–'+N(p+7)+' '+t('on the entry')+' · '+N(p+8)+'–'+N(p+15)+' '+t('on the exit')+' (TCP + UDP) '+t('must be open in the cloud firewall')+'.'};
- ['ts_pt'].forEach(function(k){$('#'+k).onchange=note;$('#'+k).oninput=note});note();
+ var note=function(){var p=+$('#ts_pt').value||3990,n=document.querySelectorAll('#ts_tr input:checked').length||TS_TR.length;
+  $('#ts_note').textContent=t('Takes about a minute. Ports')+' '+N(p)+'–'+N(p+n-1)+' '+t('on the entry')+' · '+N(p+n)+'–'+N(p+2*n-1)+' '+t('on the exit')+' (TCP + UDP) '+t('must be open in the cloud firewall')+'.'};
+ ['ts_pt'].forEach(function(k){$('#'+k).onchange=note;$('#'+k).oninput=note});$('#ts_tr').onchange=note;note();
  $('#ts_pf').onchange=function(){TS.prof=this.value};
- $('#ts_go').onclick=function(){var me=this;me.disabled=true;TS.prof=$('#ts_pf').value;var trs=[].map.call(document.querySelectorAll('#ts_tr input:checked'),function(x){return x.value});if(!trs.length){me.disabled=false;return toast(t('Pick at least one method'),1)}api('POST','/api/tunnels/probe',{entry:$('#ts_en').value,exit:$('#ts_ex').value,port:+$('#ts_pt').value||3990,transports:trs,baseline:$('#ts_base').checked}).then(tunSmartRun).catch(function(e){me.disabled=false;fail(e)})}}).catch(fail)}
+ $('#ts_go').onclick=function(){var me=this;me.disabled=true;TS.prof=$('#ts_pf').value;var trs=[].map.call(document.querySelectorAll('#ts_tr input:checked'),function(x){return x.value});if(!trs.length){me.disabled=false;return toast(t('Pick at least one method'),1)}api('POST','/api/tunnels/probe',{entry:$('#ts_en').value,exit:$('#ts_ex').value,port:+$('#ts_pt').value||3990,transports:trs,baseline:$('#ts_base').checked}).then(function(r){if(r&&r.note)toast(t('Not tested, an agent is too old (update it first)')+': '+(r.skipped||[]).join(', '),1);tunSmartRun()}).catch(function(e){me.disabled=false;fail(e)})}}).catch(fail)}
 function tunSmartRun(){modal(mhead('⚡ '+t('Smart tunnel'))+'<div id="ts_box"><span class="muted">'+t('Loading…')+'</span></div>');clearInterval(TS.timer);
  $('#ts_box').onclick=function(e){var b=e.target.closest('[data-use],[data-prof],[data-ts]');if(!b)return;
   if(b.dataset.prof){TS.prof=b.dataset.prof;if(TS.j)tunSmartDraw(TS.j)}

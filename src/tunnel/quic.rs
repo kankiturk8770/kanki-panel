@@ -66,8 +66,9 @@ fn transport_config() -> Arc<TransportConfig> {
 }
 
 pub(super) fn server_config(transport: Arc<TransportConfig>) -> Res<ServerConfig> {
-    // a throwaway self-signed certificate; identity is proven by the token handshake inside
-    let ck = rcgen::generate_simple_self_signed(vec!["www.cloudflare.com".to_string()])?;
+    // a throwaway self-signed certificate with a randomized name (a fixed name is a scanner
+    // fingerprint); identity is proven by the token handshake inside
+    let ck = rcgen::generate_simple_self_signed(vec![super::link::random_cert_name()])?;
     let cert = rustls::pki_types::CertificateDer::from(ck.cert.der().to_vec());
     let key = rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(ck.key_pair.serialize_der()));
     let mut tls = rustls::ServerConfig::builder_with_provider(super::link::provider())
@@ -223,9 +224,9 @@ pub async fn serve_kcp(port: u16, token: &str, out: Inbox, sem: Arc<Semaphore>) 
 }
 
 /// A KCP server-side stream that keeps its semaphore permit until it is dropped.
-struct KcpHeld {
-    stream: tokio_kcp::KcpStream,
-    _permit: OwnedSemaphorePermit,
+pub(crate) struct KcpHeld {
+    pub(crate) stream: tokio_kcp::KcpStream,
+    pub(crate) _permit: OwnedSemaphorePermit,
 }
 
 impl AsyncRead for KcpHeld {

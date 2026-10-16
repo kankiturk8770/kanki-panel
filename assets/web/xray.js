@@ -204,7 +204,7 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
    '<div><label class="f">'+t('Port')+'</label><div class="inl"><input id="xi_pt" class="ltr" type="number" min="1" max="65535" value="'+(ib.port||'')+'"><button type="button" class="ib" id="xi_rp" title="'+t('Random free port')+'">🎲</button></div></div>'+
    inp('xi_ls0','Listen address',ib.listen,'0.0.0.0')+'</div>'+
    '<div id="xi_ss" class="g2"><div><label class="f">'+t('Method')+'</label><select id="xi_sm">'+opt(['2022-blake3-aes-128-gcm','2022-blake3-aes-256-gcm','2022-blake3-chacha20-poly1305','chacha20-ietf-poly1305','aes-256-gcm','aes-128-gcm'],ib.ss_method)+'</select></div></div>'+
-   '<div class="chipset" style="margin-top:12px"><span class="muted">'+t('Quick setup')+':</span>'+[['vr','VLESS + REALITY'],['vx','VLESS + XHTTP + REALITY'],['vw','VLESS + WS (CDN)'],['vg','VLESS + gRPC + REALITY'],['tt','Trojan + TLS'],['ss','Shadowsocks 2022']].map(function(x){return '<button type="button" data-pre="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div></div>'+
+   '<div class="chipset" style="margin-top:12px"><span class="muted">'+t('Quick setup')+':</span>'+[['vr','VLESS + REALITY'],['vx','VLESS + XHTTP + REALITY'],['vw','VLESS + WS (CDN)'],['vg','VLESS + gRPC + REALITY'],['gc','VLESS + gRPC + TLS (CDN)'],['tt','Trojan + TLS'],['ss','Shadowsocks 2022']].map(function(x){return '<button type="button" data-pre="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div></div>'+
   // transport
   '<div class="fsec" data-fs="tr"><div class="g2"><div><label class="f">'+t('Transport')+'</label><select id="xi_nw">'+opt([['tcp','TCP (RAW)'],['ws','WebSocket'],['grpc','gRPC'],['httpupgrade','HTTPUpgrade'],['xhttp','XHTTP'],['kcp','mKCP']],ib.network)+'</select></div></div>'+
    '<div id="xi_tp" class="g2">'+inp('xi_pa','Path',ib.path,t('random if empty'))+inp('xi_ho','Host',ib.host,'')+'</div>'+
@@ -275,7 +275,7 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
  $('#xi_uq').oninput=function(){var q=this.value.toLowerCase();$$('#xi_ul [data-un]').forEach(function(l){l.style.display=!q||l.dataset.un.indexOf(q)>=0?'':'none'})};
  $('#xi_ua').onclick=function(){$$('.xi_u').forEach(function(c){if(c.parentNode.style.display!='none')c.checked=true})};$('#xi_un').onclick=function(){$$('.xi_u').forEach(function(c){c.checked=false})};
  $$('[data-pre]').forEach(function(b){b.onclick=function(){var k=b.dataset.pre,set=function(i,v){$(i).value=v};
-  var P={vr:['vless','tcp','reality','xtls-rprx-vision',443],vx:['vless','xhttp','reality','',443],vw:['vless','ws','none','',8080],vg:['vless','grpc','reality','',443],tt:['trojan','tcp','tls','',443],ss:['shadowsocks','tcp','none','',8388]}[k];
+  var P={vr:['vless','tcp','reality','xtls-rprx-vision',443],vx:['vless','xhttp','reality','',443],vw:['vless','ws','none','',8080],vg:['vless','grpc','reality','',443],gc:['vless','grpc','tls','',443],tt:['trojan','tcp','tls','',443],ss:['shadowsocks','tcp','none','',8388]}[k];
   set('#xi_pr',P[0]);set('#xi_nw',P[1]);set('#xi_sc',P[2]);set('#xi_flw',P[3]);if(!$('#xi_rm').value)$('#xi_rm').value=b.textContent.replace(/\s+/g,'').replace(/\+/g,'-');
   var used=XR.d.inbounds.some(function(x){return x.id!=id&&x.server==$('#xi_sv').value&&x.port==P[4]});$('#xi_pt').value=used?xrFreePort($('#xi_sv').value,true):P[4];
   if(P[2]=='reality'&&!$('#xi_de').value){$('#xi_de').value='www.microsoft.com:443';$('#xi_na').value='www.microsoft.com'}if(k=='vw')$('#xi_lt').checked=false;ui();toast(t('Filled in: check the Security tab'))}});

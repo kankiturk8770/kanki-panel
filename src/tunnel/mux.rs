@@ -73,15 +73,16 @@ pub struct Session {
     last_rx: AtomicU64,
     alive: AtomicBool,
     dead_tx: watch::Sender<bool>,
+    /// when the writer last put a frame on the link (ms)
+    last_tx: AtomicU64,
     /// exit: UDP flow id -> socket that talks to the target
-    udp_out: Mutex<HashMap<u32, Arc<UdpSocket>>>,
-    pub transport: String,
+    udp_out: Mutex<HashMap<u32, ExitFlow>>,
     pub since: u64,
 }
 
 impl Session {
     /// Starts the reader, writer and keepalive tasks of a link and returns the session.
-    pub fn start(tx: Tx, rx: Rx, entry: bool, shared: Arc<Shared>, transport: &str) -> Arc<Session> {
+    pub fn start(tx: Tx, rx: Rx, entry: bool, shared: Arc<Shared>) -> Arc<Session> {
         let (out, out_rx) = mpsc::channel::<Vec<u8>>(1024);
         let (dead_tx, _) = watch::channel(false);
         let s = Arc::new(Session {
@@ -94,8 +95,8 @@ impl Session {
             last_rx: AtomicU64::new(now_ms()),
             alive: AtomicBool::new(true),
             dead_tx,
+            last_tx: AtomicU64::new(now_ms()),
             udp_out: Mutex::new(HashMap::new()),
-            transport: transport.to_string(),
             since: now_ms(),
         });
         tokio::spawn(writer(s.clone(), tx, out_rx));
@@ -136,7 +137,29 @@ impl Session {
         if !self.is_alive() {
             return false;
         }
-        self.out.send(f).await.is_ok()
+        // a stuck writer (dead socket that has not errored yet) fills the bounded queue and
+        // every sender would wait forever; instead of wedging until the watchdog fires, treat a
+        // writer that wrote nothing for 5 s as a dead link and kill it so the tunnel reconnects
+        // at once. A sender that only waits its turn behind a busy (but moving) writer keeps
+        // waiting.
+        loop {
+            match tokio::time::timeout(Duration::from_secs(5), self.out.reserve()).await {
+                Ok(Ok(permit)) => {
+                    permit.send(f);
+                    return true;
+                }
+                Ok(Err(_)) => return false,
+                Err(_) => {
+                    if !self.is_alive() {
+                        return false;
+                    }
+                    if now_ms().saturating_sub(self.last_tx.load(Ordering::Relaxed)) > 5_000 {
+                        self.kill();
+                        return false;
+                    }
+                }
+            }
+        }
     }
 
     fn add_slot(&self, id: u32) -> (mpsc::UnboundedReceiver<Vec<u8>>, Arc<Semaphore>) {
@@ -210,6 +233,7 @@ async fn writer(s: Arc<Session>, mut tx: Tx, mut out_rx: mpsc::Receiver<Vec<u8>>
                 if tx.send(&f).await.is_err() {
                     break;
                 }
+                s.last_tx.store(now_ms(), Ordering::Relaxed);
             }
             _ = dead.changed() => break,
         }
@@ -336,14 +360,55 @@ async fn exit_open(s: Arc<Session>, id: u32, target: String, rx: mpsc::Unbounded
     }
 }
 
+/// Most UDP out-sockets the exit keeps at once; past this, the idlest flows are evicted (like
+/// the entry does) instead of letting a flood exhaust file descriptors
+const MAX_EXIT_UDP: usize = 8192;
+/// an exit flow socket is closed after this long without traffic (no reply ever / replied)
+const EXIT_UDP_IDLE_NEW: u64 = 30_000;
+const EXIT_UDP_IDLE: u64 = 180_000;
+
+/// exit: one UDP flow's socket, when it was last used (ms) and its reply task
+struct ExitFlow {
+    sock: Arc<UdpSocket>,
+    last: u64,
+    task: tokio::task::AbortHandle,
+}
+
+/// The keys of the oldest eighth of `entries` (by last use), so a full flow table is evicted in
+/// a batch: one pass over the table per n/8 new flows instead of one per new flow.
+pub(super) fn oldest_eighth<K: Copy>(entries: impl Iterator<Item = (K, u64)>) -> Vec<K> {
+    let mut v: Vec<(K, u64)> = entries.collect();
+    let n = (v.len() / 8).max(1).min(v.len());
+    if n < v.len() {
+        v.select_nth_unstable_by_key(n, |e| e.1);
+    }
+    v.truncate(n);
+    v.into_iter().map(|e| e.0).collect()
+}
+
 /// exit: sends a UDP packet to its target, opening a socket for a new flow
 async fn exit_udp(s: &Arc<Session>, id: u32, target: &str, data: &[u8]) {
-    let existing = s.udp_out.lock().unwrap().get(&id).cloned();
+    let existing = s.udp_out.lock().unwrap().get_mut(&id).map(|f| {
+        f.last = now_ms();
+        f.sock.clone()
+    });
     let sock = match existing {
         Some(x) => x,
         None => {
             if !s.shared.may_dial(target) {
                 return;
+            }
+            // one socket per flow: past the cap the least recently used flows are closed, so a
+            // UDP flood can neither exhaust fds nor lock real flows out
+            {
+                let mut out = s.udp_out.lock().unwrap();
+                if out.len() >= MAX_EXIT_UDP {
+                    for old in oldest_eighth(out.iter().map(|(k, f)| (*k, f.last))) {
+                        if let Some(f) = out.remove(&old) {
+                            f.task.abort();
+                        }
+                    }
+                }
             }
             let bind = if target.starts_with('[') { "[::]:0" } else { "0.0.0.0:0" };
             let Ok(sock) = UdpSocket::bind(bind).await else { return };
@@ -351,8 +416,10 @@ async fn exit_udp(s: &Arc<Session>, id: u32, target: &str, data: &[u8]) {
                 return;
             }
             let sock = Arc::new(sock);
-            s.udp_out.lock().unwrap().insert(id, sock.clone());
-            tokio::spawn(exit_udp_back(s.clone(), id, sock.clone()));
+            let task = tokio::spawn(exit_udp_back(s.clone(), id, sock.clone())).abort_handle();
+            if let Some(f) = s.udp_out.lock().unwrap().insert(id, ExitFlow { sock: sock.clone(), last: now_ms(), task }) {
+                f.task.abort();
+            }
             sock
         }
     };
@@ -363,13 +430,18 @@ async fn exit_udp(s: &Arc<Session>, id: u32, target: &str, data: &[u8]) {
 async fn exit_udp_back(s: Arc<Session>, id: u32, sock: Arc<UdpSocket>) {
     let mut buf = vec![0u8; 65536];
     let mut dead = s.dead_tx.subscribe();
+    let mut replied = false;
     loop {
         let r = tokio::select! {
-            r = tokio::time::timeout(Duration::from_secs(180), sock.recv(&mut buf)) => r,
+            r = tokio::time::timeout(Duration::from_secs(10), sock.recv(&mut buf)) => r,
             _ = dead.changed() => break,
         };
         match r {
             Ok(Ok(n)) => {
+                replied = true;
+                if let Some(f) = s.udp_out.lock().unwrap().get_mut(&id) {
+                    f.last = now_ms();
+                }
                 let mut p = Vec::with_capacity(1 + n);
                 p.push(0);
                 p.extend_from_slice(&buf[..n]);
@@ -378,10 +450,23 @@ async fn exit_udp_back(s: Arc<Session>, id: u32, sock: Arc<UdpSocket>) {
                     break;
                 }
             }
-            _ => break,
+            Ok(Err(_)) => break,
+            // quiet for a while: close the flow once it has been idle too long (sooner if the
+            // target never answered, as flood flows do)
+            Err(_) => {
+                let last = s.udp_out.lock().unwrap().get(&id).map(|f| f.last).unwrap_or(0);
+                let limit = if replied { EXIT_UDP_IDLE } else { EXIT_UDP_IDLE_NEW };
+                if now_ms().saturating_sub(last) > limit {
+                    break;
+                }
+            }
         }
     }
-    s.udp_out.lock().unwrap().remove(&id);
+    // only our own entry: the flow may have been evicted and opened again since
+    let mut out = s.udp_out.lock().unwrap();
+    if out.get(&id).is_some_and(|f| Arc::ptr_eq(&f.sock, &sock)) {
+        out.remove(&id);
+    }
 }
 
 /// Copies one TCP connection both ways through the mux, with flow control.
@@ -428,4 +513,19 @@ async fn pipe(s: Arc<Session>, id: u32, tcp: TcpStream, mut rx: mpsc::UnboundedR
     tokio::join!(up, down);
     s.remove(id);
     s.shared.streams.fetch_sub(1, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::oldest_eighth;
+
+    #[test]
+    fn evicts_the_oldest_eighth() {
+        // keys 0..800, last use = key reversed, so the oldest are the highest keys
+        let mut got = oldest_eighth((0u32..800).map(|k| (k, 1000 - k as u64)));
+        got.sort();
+        assert_eq!(got, (700..800).collect::<Vec<_>>());
+        assert_eq!(oldest_eighth([(7u32, 5)].into_iter()), vec![7], "a tiny table still frees one");
+        assert!(oldest_eighth(std::iter::empty::<(u32, u64)>()).is_empty());
+    }
 }

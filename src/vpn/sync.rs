@@ -149,11 +149,13 @@ pub async fn sync_all(app: &Arc<App>) {
         }
         let (req, map) = desired_for(app, &users, &n);
         let want = req.wg.len() + req.awg.len();
-        let resp: Option<SyncResp> = if local { Some(apply_local(app, req).await) } else { remote_sync(app, &n, &req).await };
-        let ok = resp.is_some();
+        let resp: Result<SyncResp, String> = if local { Ok(apply_local(app, req).await) } else { remote_sync(app, &n, &req).await };
+        let ok = resp.is_ok();
         let state = match &resp {
-            None => "offline",
-            Some(r) => {
+            // a pin mismatch is not just "offline": it is logged and kept apart
+            Err(e) if e.contains(crate::pin::MISMATCH) => "pin mismatch",
+            Err(_) => "offline",
+            Ok(r) => {
                 let have = map.iter().filter(|(_, proto, pk)| if proto == "wg" { r.wg.contains_key(pk) } else { r.awg.contains_key(pk) }).count();
                 if have == want { "synced" } else { "mismatch" }
             }
@@ -168,7 +170,7 @@ pub async fn sync_all(app: &Arc<App>) {
                 let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id=?2", &[&info.to_string(), &n.id]);
             }
         }
-        let Some(resp) = resp else { continue };
+        let Ok(resp) = resp else { continue };
 
         for (uid, proto, pubk) in map {
             let stats = if proto == "wg" { &resp.wg } else { &resp.awg };
@@ -217,32 +219,50 @@ pub async fn sync_all(app: &Arc<App>) {
     }
 }
 
-async fn remote_sync(app: &App, n: &Node, req: &SyncReq) -> Option<SyncResp> {
-    let r = app.client(n.insecure).post(format!("{}/agent/sync", n.address.trim_end_matches('/')))
-        .header("X-Node-Token", &n.token).json(req).send().await.ok()?;
-    if !r.status().is_success() {
-        return None;
+/// Why a request to a node failed. A certificate pin mismatch is logged and says how to reset it
+/// (otherwise the node would only show as offline).
+pub fn node_err(addr: &str, e: &reqwest::Error) -> String {
+    match crate::pin::mismatch_of(e) {
+        Some(m) => {
+            eprintln!("node {}: {}", addr, m);
+            format!("{} (if the node was reinstalled: run its join command again, or remove the node and add it again)", m)
+        }
+        None => crate::pin::error_text(e),
     }
-    r.json::<SyncResp>().await.ok()
+}
+
+async fn remote_sync(app: &App, n: &Node, req: &SyncReq) -> Result<SyncResp, String> {
+    let r = app.node_client(&n.id, n.insecure).post(format!("{}/agent/sync", n.address.trim_end_matches('/')))
+        .header("X-Node-Token", &n.token).json(req).send().await.map_err(|e| node_err(&n.address, &e))?;
+    if !r.status().is_success() {
+        return Err(format!("the node answered {}", r.status()));
+    }
+    r.json::<SyncResp>().await.map_err(|e| e.to_string())
 }
 
 pub async fn remote_info(app: &App, addr: &str, token: &str, insecure: bool) -> Option<Value> {
-    let r = app.client(insecure).get(format!("{}/agent/info", addr.trim_end_matches('/')))
-        .header("X-Node-Token", token).send().await.ok()?;
+    remote_info_res(app, addr, token, insecure).await.ok()
+}
+
+/// `remote_info` with the reason it failed
+pub async fn remote_info_res(app: &App, addr: &str, token: &str, insecure: bool) -> Result<Value, String> {
+    // keyed by address: for a node being added this is also the TOFU first contact
+    let r = app.node_client(addr, insecure).get(format!("{}/agent/info", addr.trim_end_matches('/')))
+        .header("X-Node-Token", token).send().await.map_err(|e| node_err(addr, &e))?;
     if !r.status().is_success() {
-        return None;
+        return Err(format!("the node answered {}", r.status()));
     }
-    r.json::<Value>().await.ok()
+    r.json::<Value>().await.map_err(|e| e.to_string())
 }
 
 pub async fn remote_post(app: &App, n: &Node, path: &str) -> Option<Value> {
-    let r = app.client(n.insecure).post(format!("{}{}", n.address.trim_end_matches('/'), path))
+    let r = app.node_client(&n.id, n.insecure).post(format!("{}{}", n.address.trim_end_matches('/'), path))
         .header("X-Node-Token", &n.token).timeout(std::time::Duration::from_secs(120)).send().await.ok()?;
     r.json::<Value>().await.ok()
 }
 
 pub async fn remote_post_json(app: &App, n: &Node, path: &str, body: &Value) -> Option<Value> {
-    let r = app.client(n.insecure).post(format!("{}{}", n.address.trim_end_matches('/'), path))
+    let r = app.node_client(&n.id, n.insecure).post(format!("{}{}", n.address.trim_end_matches('/'), path))
         .header("X-Node-Token", &n.token).json(body).timeout(std::time::Duration::from_secs(60)).send().await.ok()?;
     r.json::<Value>().await.ok()
 }

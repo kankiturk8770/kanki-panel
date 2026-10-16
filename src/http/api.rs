@@ -158,6 +158,9 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/assets/kanki-dns.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/dns.js"))
         }))
+        .route("/assets/kanki-antidpi.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/antidpi.js"))
+        }))
         .route("/api/overview", get(overview))
         .route("/api/users", get(users_list).post(users_create))
         .route("/api/users/:id", axum::routing::put(users_update).delete(users_delete))
@@ -421,8 +424,10 @@ async fn nodes_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respon
     if !addr.starts_with("http://") && !addr.starts_with("https://") {
         return err(StatusCode::BAD_REQUEST, "API address must start with https:// (or http:// for old nodes)");
     }
-    let Some(info) = sync::remote_info(&app, &addr, &token, insecure).await else {
-        return err(StatusCode::BAD_GATEWAY, "cannot reach the node (check address / token / firewall / certificate)");
+    let info = match sync::remote_info_res(&app, &addr, &token, insecure).await {
+        Ok(i) => i,
+        Err(e) if e.contains(crate::pin::MISMATCH) => return err(StatusCode::BAD_GATEWAY, &e),
+        Err(_) => return err(StatusCode::BAD_GATEWAY, "cannot reach the node (check address / token / firewall / certificate)"),
     };
     let id = format!("node-{}", rand_token(10).to_lowercase());
     let mode = if endpoint.is_empty() { "panel" } else { "custom" };
@@ -432,6 +437,10 @@ async fn nodes_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respon
     );
     if let Err(e) = r {
         return err(StatusCode::BAD_REQUEST, &e);
+    }
+    if insecure {
+        // the certificate seen just now is the one later syncs expect
+        app.adopt_node_pin(&addr, &id);
     }
     spawn_sync(&app);
     Json(json!({ "ok": true, "id": id })).into_response()
@@ -455,6 +464,11 @@ async fn nodes_edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b
     if let Err(e) = r {
         return err(StatusCode::BAD_REQUEST, &e);
     }
+    // another server (or certificate setting): its old pins would refuse it
+    if addr != n.address || (insecure != 0) != n.insecure {
+        app.forget_node_pins(&id, &n.address);
+        app.forget_node_pins(&id, &addr);
+    }
     spawn_sync(&app);
     Json(json!({"ok": true})).into_response()
 }
@@ -463,6 +477,9 @@ async fn nodes_delete(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
     let _ = guard!(app, h, "nodes");
     if id == "local" {
         return err(StatusCode::BAD_REQUEST, "the main server cannot be deleted");
+    }
+    if let Some(n) = app.db.node(&id) {
+        app.forget_node_pins(&n.id, &n.address);
     }
     let _ = app.db.exec("DELETE FROM nodes WHERE id=?1", &[&id]);
     let _ = app.db.exec("DELETE FROM peers WHERE node_id=?1", &[&id]);
@@ -516,11 +533,11 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
         }
         "health" => {
             let t0 = std::time::Instant::now();
-            let info = if n.id == "local" { Some(sync::local_info(&app)) } else { sync::remote_info(&app, &n.address, &n.token, n.insecure).await };
+            let info = if n.id == "local" { Ok(sync::local_info(&app)) } else { sync::remote_info_res(&app, &n.address, &n.token, n.insecure).await };
             let ms = t0.elapsed().as_millis() as i64;
             return match info {
-                Some(i) => Json(json!({"ok": true, "ms": ms, "services": i["services"], "version": i["version"], "load": i["load"]})).into_response(),
-                None => Json(json!({"ok": false, "ms": ms})).into_response(),
+                Ok(i) => Json(json!({"ok": true, "ms": ms, "services": i["services"], "version": i["version"], "load": i["load"]})).into_response(),
+                Err(e) => Json(json!({"ok": false, "ms": ms, "error": e})).into_response(),
             };
         }
         "repair" => {
@@ -569,12 +586,16 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
         return err(StatusCode::BAD_REQUEST, "address (https://...) and node_token are required");
     }
     let name = if name.is_empty() { format!("node-{}", rand_token(4).to_lowercase()) } else { name };
+    // the same server registering twice (re-run after a firewall fix, or a reinstall with a new
+    // self-signed certificate) updates its row instead of adding a copy, with fresh pins
+    let existing = app.db.nodes().into_iter().find(|n| n.address == addr).map(|n| n.id);
+    if let Some(id) = &existing {
+        app.forget_node_pins(id, &addr);
+    }
     let Some(info) = sync::remote_info(&app, &addr, &token, insecure).await else {
         return err(StatusCode::BAD_GATEWAY, "the panel cannot reach the node (open the node API port in its firewall, then run the same command again)");
     };
     let mode = if endpoint.is_empty() { "panel" } else { "custom" };
-    // the same server registering twice (re-run after a firewall fix) updates its row instead of adding a copy
-    let existing = app.db.nodes().into_iter().find(|n| n.address == addr).map(|n| n.id);
     let id = match existing {
         Some(id) => {
             let _ = app.db.exec(
@@ -595,6 +616,9 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
             id
         }
     };
+    if insecure {
+        app.adopt_node_pin(&addr, &id);
+    }
     // one use only
     app.db.set("join_token", "");
     spawn_sync(&app);

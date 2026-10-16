@@ -313,11 +313,13 @@ pub(super) fn ws_config() -> WebSocketConfig {
     c
 }
 
-/// A TCP stream whose first bytes leave in many tiny segments (2 to 7 bytes each).
+/// A TCP stream whose first bytes leave in many tiny segments (2 to 9 bytes each, random).
 ///
-/// Used for the TLS ClientHello of the `cdn` transport: a DPI box that looks for the SNI inside
-/// the first packet without putting the pieces back together sees nothing readable. A real
-/// server (the CDN) reassembles the stream and does not notice.
+/// Used for the TLS ClientHello of the `cdn` / `wss` transports: a DPI box that looks for the SNI
+/// inside the first packet without putting the pieces back together sees nothing readable. A real
+/// server (the CDN) reassembles the stream and does not notice. The chunk sizes are random per
+/// write and the fragmented run length is random per connection, so the splitting itself is not a
+/// fixed fingerprint either.
 pub struct FragIo {
     inner: TcpStream,
     left: usize,
@@ -338,7 +340,7 @@ impl AsyncRead for FragIo {
 impl AsyncWrite for FragIo {
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
         if self.left > 0 && !buf.is_empty() {
-            let chunk = 2 + (self.left % 6);
+            let chunk = 2 + (rand::random::<u32>() % 8) as usize;
             let n = buf.len().min(chunk).min(self.left);
             let r = Pin::new(&mut self.inner).poll_write(cx, &buf[..n]);
             if let Poll::Ready(Ok(w)) = r {
@@ -356,8 +358,29 @@ impl AsyncWrite for FragIo {
     }
 }
 
-/// How many bytes at the start of a `cdn` connection are sent in tiny pieces (covers the SNI).
-pub(super) const FRAG_BYTES: usize = 220;
+/// How many bytes at the start of a connection are sent in tiny pieces (covers the ClientHello,
+/// which is 250-600 bytes with common extensions). Random per connection, 260-620 bytes.
+/// A plausible, randomized certificate name for the throwaway self-signed certs: a fixed name
+/// (the old www.bing.com / www.cloudflare.com) is a static fingerprint a scanner can enumerate
+/// the whole internet for. Identity is proven by the token handshake inside the TLS, never by
+/// this certificate.
+pub(crate) fn random_cert_name() -> String {
+    const DOMAINS: &[&str] = &[
+        "cdn.cloudflare.net", "edge.microsoft.com", "static.apple.com", "ssl.gstatic.com",
+        "cdn.jsdelivr.net", "update.googleapis.com", "eu-central-1.amazonaws.com", "fastly.net",
+    ];
+    let mut r = [0u8; 6];
+    for b in &mut r {
+        *b = (rand::random::<u32>() % 256) as u8;
+    }
+    let host: String = r.iter().map(|b| format!("{:02x}", b)).collect();
+    let d = DOMAINS[(rand::random::<u32>() as usize) % DOMAINS.len()];
+    format!("{}.{}", host, d)
+}
+
+pub(super) fn frag_bytes() -> usize {
+    260 + (rand::random::<u32>() % 360) as usize
+}
 
 /// Connects to `remote` and returns the TCP stream (10 s limit), with TCP_NODELAY on.
 pub(super) async fn tcp_connect(remote: &str) -> Res<TcpStream> {
@@ -372,7 +395,7 @@ pub(super) async fn tls_connect(connector: &tokio_rustls::TlsConnector, sni: &st
     let name = server_name(sni)?;
     let limit = Duration::from_secs(12);
     let io: BoxIo = if frag {
-        Box::new(tokio::time::timeout(limit, connector.connect(name, FragIo::new(tcp, FRAG_BYTES))).await.map_err(|_| "tls timeout")??)
+        Box::new(tokio::time::timeout(limit, connector.connect(name, FragIo::new(tcp, frag_bytes()))).await.map_err(|_| "tls timeout")??)
     } else {
         Box::new(tokio::time::timeout(limit, connector.connect(name, tcp)).await.map_err(|_| "tls timeout")??)
     };
@@ -391,12 +414,14 @@ pub(super) async fn tls_connect(connector: &tokio_rustls::TlsConnector, sni: &st
 ///
 /// `hq` is QUIC under a masking layer (see `salamander.rs`); `h2` is WebSocket over HTTP/2 over
 /// TLS 1.3 (see `h2ws.rs`); `dual` tries `hq` first and falls back to `h2` (see `dual.rs`).
-pub async fn dial(transport: &str, remote: &str, sni: &str, host_header: &str, path: &str, token: &str, frag: bool) -> Res<Raw> {
+pub async fn dial(transport: &str, remote: &str, sni: &str, host_header: &str, path: &str, token: &str, frag: bool, gopt: super::game::GameOpts) -> Res<Raw> {
     let (path, req_host, sni_name) = request_parts(remote, sni, host_header, path);
     match transport {
         // UDP-based transports do not start from a TCP connection
         "quic" => return Ok(Raw::Stream(super::quic::dial(remote, sni).await?)),
         "kcp" => return Ok(Raw::Stream(super::quic::kcp_dial(remote, token).await?)),
+        "game" => return Ok(Raw::Stream(super::game::dial_game(remote, token, gopt).await?)),
+        "faketcp" => return Ok(Raw::Stream(super::faketcp::dial_faketcp(remote, token).await?)),
         "hq" => return Ok(Raw::Stream(super::hq::dial(remote, sni, token).await?)),
         "h2" => return super::h2ws::dial(remote, &sni_name, &req_host, &path, frag).await,
         "dual" => return super::dual::dial(remote, sni, &sni_name, &req_host, &path, token, frag).await,
@@ -411,15 +436,19 @@ pub async fn dial(transport: &str, remote: &str, sni: &str, host_header: &str, p
             Ok(Raw::Ws(ws))
         }
         "wss" => {
-            // SNI spoof: the TLS hello carries `sni`; with `frag` it leaves in tiny pieces
-            let io = tls_connect(&tls_connector(), &sni_name, tcp, frag).await?;
+            // SNI spoof: the TLS hello carries `sni`; with `frag` it leaves in tiny pieces. The
+            // cipher suites are listed in Chrome's order so the hello is less different from a
+            // browser's (a plain rustls hello is itself a recognisable fingerprint).
+            let io = tls_connect(&tls_connector_with(&[b"http/1.1"], true), &sni_name, tcp, frag).await?;
             let url = format!("ws://{}{}", req_host, path);
             let (ws, _) = tokio_tungstenite::client_async_with_config(url.as_str(), io, Some(ws_config())).await?;
             Ok(Raw::Ws(ws))
         }
         "cdn" => {
             // the Host header is the CDN domain; when it is not set, it follows the SNI
-            let io = tls_connect(&tls_connector(), &sni_name, tcp, frag).await?;
+            // only http/1.1: the WebSocket upgrade below is HTTP/1.1, and an edge that picks h2
+            // would not understand it
+            let io = tls_connect(&tls_connector_with(&[b"http/1.1"], true), &sni_name, tcp, frag).await?;
             let url = format!("ws://{}{}", req_host, path);
             let (ws, _) = tokio::time::timeout(Duration::from_secs(12), tokio_tungstenite::client_async_with_config(url.as_str(), io, Some(ws_config())))
                 .await
@@ -489,14 +518,17 @@ pub struct Listener {
 
 impl Listener {
     /// Binds the right kind of listener for the transport on `0.0.0.0:port`.
-    /// (`dual` binds both UDP and TCP on that port number.)
-    pub async fn bind(transport: &str, port: u16, cert: &str, key: &str, token: &str) -> Res<Listener> {
+    /// (`dual` binds both UDP and TCP on that port number; `faketcp` listens for raw TCP packets
+    /// and needs no real TCP socket.)
+    pub async fn bind(transport: &str, port: u16, cert: &str, key: &str, token: &str, gopt: super::game::GameOpts) -> Res<Listener> {
         let (tx, rx) = tokio::sync::mpsc::channel::<(Raw, String)>(64);
         let sem = Arc::new(tokio::sync::Semaphore::new(MAX_PENDING));
         let mut bag = Bag::default();
         match transport {
             "quic" => bag.merge(super::quic::serve_quic(port, tx, sem).await?),
             "kcp" => bag.merge(super::quic::serve_kcp(port, token, tx, sem).await?),
+            "game" => bag.merge(super::game::serve_game(port, token, gopt, tx, sem).await?),
+            "faketcp" => bag.merge(super::faketcp::serve_faketcp(port, token, tx, sem).await?),
             "hq" => bag.merge(super::hq::serve(port, token, tx, sem).await?),
             "h2" => {
                 let tls = Arc::new(super::h2ws::acceptor(cert, key)?);
@@ -614,7 +646,7 @@ pub(crate) fn tls_acceptor_with(cert_file: &str, key_file: &str, alpn: &[&[u8]],
         }
         (certs, key)
     } else {
-        let ck = rcgen::generate_simple_self_signed(vec!["www.bing.com".to_string()])?;
+        let ck = rcgen::generate_simple_self_signed(vec![random_cert_name()])?;
         let cert = rustls::pki_types::CertificateDer::from(ck.cert.der().to_vec());
         let key = rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(ck.key_pair.serialize_der()));
         (vec![cert], key)
@@ -672,10 +704,6 @@ pub(crate) fn b64decode(s: &str) -> Option<Vec<u8>> {
         }
     }
     Some(out)
-}
-
-pub(super) fn tls_connector() -> tokio_rustls::TlsConnector {
-    tls_connector_with(&[], false)
 }
 
 /// Where a cipher suite stands in a Chrome ClientHello (lower = earlier).

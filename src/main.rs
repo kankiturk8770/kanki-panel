@@ -6,6 +6,8 @@ mod db;
 mod util;
 #[path = "core/certbot.rs"]
 mod certbot;
+#[path = "core/pin.rs"]
+mod pin;
 
 // http: web panel, REST API, security, backups
 #[path = "http/admin.rs"]
@@ -67,15 +69,56 @@ pub struct App {
     pub http: reqwest::Client,
     /// for nodes explicitly marked "self-signed certificate"
     pub http_insecure: reqwest::Client,
+    /// pinned (TOFU) clients for nodes with self-signed certificates, one per node
+    pub pin_clients: Mutex<HashMap<String, Arc<reqwest::Client>>>,
 }
 
 impl App {
     pub fn client(&self, insecure: bool) -> &reqwest::Client {
         if insecure { &self.http_insecure } else { &self.http }
     }
+    /// HTTP client for one node: CA-checked, or certificate-pinned (TOFU) when the node has a
+    /// self-signed certificate. The pin lives in {data_dir}/nodepins/<key>.pin: the first
+    /// certificate seen is kept and any later change is refused (a MITM cannot keep
+    /// impersonating the node after first contact).
+    pub fn node_client(&self, key: &str, insecure: bool) -> Arc<reqwest::Client> {
+        if !insecure {
+            return Arc::new(self.http.clone());
+        }
+        let key = pin_key(key);
+        let mut g = self.pin_clients.lock().unwrap();
+        g.entry(key.clone())
+            .or_insert_with(|| Arc::new(crate::pin::pinned_client(&self.node_pin_file(&key), std::time::Duration::from_secs(125))))
+            .clone()
+    }
+    /// {data_dir}/nodepins/<key>.pin
+    pub fn node_pin_file(&self, key: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(self.data_dir()).join("nodepins").join(format!("{}.pin", pin_key(key)))
+    }
+    /// Forgets the certificate pins of a node (by id and by address, files and cached clients):
+    /// on delete, on a new address / certificate setting, and when a reinstalled node joins again
+    /// (its self-signed certificate is new). The next contact pins again.
+    pub fn forget_node_pins(&self, id: &str, addr: &str) {
+        let mut g = self.pin_clients.lock().unwrap();
+        for key in [id, addr] {
+            let _ = std::fs::remove_file(self.node_pin_file(key));
+            g.remove(&pin_key(key));
+        }
+    }
+    /// The pin a node's first contact made (keyed by address) also becomes the pin of its id,
+    /// so the certificate the admin added is the one later syncs expect.
+    pub fn adopt_node_pin(&self, addr: &str, id: &str) {
+        let _ = std::fs::copy(self.node_pin_file(addr), self.node_pin_file(id));
+        self.pin_clients.lock().unwrap().remove(&pin_key(id));
+    }
     pub fn data_dir(&self) -> String {
         self.env.get("DATA_DIR").cloned().unwrap_or_else(|| "/var/lib/kanki".into())
     }
+}
+
+/// a node id or address as a file name
+fn pin_key(key: &str) -> String {
+    key.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect()
 }
 
 fn usage() {
@@ -86,6 +129,14 @@ fn usage() {
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("serve");
+    // SIGTERM (systemd stop, update) skips Drop: take the faketcp iptables rules away first
+    tokio::spawn(async {
+        if let Ok(mut s) = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            s.recv().await;
+            tunnel::faketcp::remove_own_rules();
+            std::process::exit(0);
+        }
+    });
 
     match cmd {
         "hash-password" => {
@@ -185,6 +236,7 @@ async fn main() {
         bot_alive: AtomicI64::new(0),
         http: mk(false),
         http_insecure: mk(true),
+        pin_clients: Mutex::new(HashMap::new()),
     });
 
     if cmd == "node" {
