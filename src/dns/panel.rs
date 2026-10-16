@@ -73,6 +73,8 @@ pub struct DnsSettings {
     pub cert_at: i64,
     pub cert_names: String,
     pub acme_err: String,
+    /// user id -> epoch: bumping it makes the servers forget the user's allowed addresses
+    pub kicks: HashMap<String, u64>,
 }
 
 pub fn settings(app: &App) -> DnsSettings {
@@ -159,8 +161,58 @@ fn dns_users(app: &App) -> Vec<DnsUser> {
         .users()
         .into_iter()
         .filter(|u| u.active() && u.has_proto("dns"))
-        .map(|u| DnsUser { id: u.id, name: u.username.clone(), token: user_token(&u.code), max_ips: if limit_on { u.max_conn.max(0) as u32 } else { 0 } })
+        .map(|u| DnsUser {
+            id: u.id,
+            name: u.username.clone(),
+            token: user_token(&u.code),
+            max_ips: if limit_on { u.max_conn.max(0) as u32 } else { 0 },
+            epoch: kick_epoch(app, u.id),
+        })
         .collect()
+}
+
+fn kick_epoch(app: &App, id: i64) -> u64 {
+    settings(app).kicks.get(&id.to_string()).copied().unwrap_or(0)
+}
+
+/// Where a name is routed from: (service label, group label, group key, on) of the first group listing
+/// it or one of its parents; a custom name is ("", "", "custom", true).
+pub fn explain(s: &DnsSettings, name: &str) -> Option<(String, String, String, bool)> {
+    let name = name.trim().trim_matches('.').to_ascii_lowercase();
+    let parents: Vec<String> = {
+        let mut v = vec![];
+        let mut n = name.as_str();
+        loop {
+            v.push(n.to_string());
+            match n.find('.') {
+                Some(i) => n = &n[i + 1..],
+                None => break,
+            }
+        }
+        v
+    };
+    for p in &parents {
+        for svc in catalog()["services"].as_array().into_iter().flatten() {
+            let sk = svc["key"].as_str().unwrap_or("");
+            for g in svc["groups"].as_array().into_iter().flatten() {
+                if g["domains"].as_array().into_iter().flatten().any(|d| d.as_str() == Some(p.as_str())) {
+                    let id = format!("{}/{}", sk, g["key"].as_str().unwrap_or(""));
+                    let on = if g["locked"].as_bool() == Some(true) {
+                        false
+                    } else if g["opt_in"].as_bool() == Some(true) {
+                        s.opt.contains(&id)
+                    } else {
+                        !s.off.contains(&id)
+                    };
+                    return Some((svc["label"].as_str().unwrap_or(sk).to_string(), g["label"].as_str().unwrap_or("").to_string(), id, on));
+                }
+            }
+        }
+        if s.custom.iter().any(|c| c.trim().trim_matches('.').eq_ignore_ascii_case(p)) {
+            return Some((String::new(), String::new(), "custom".into(), true));
+        }
+    }
+    None
 }
 
 /// The config of server `sid` and its version, or None when it runs no DNS.
@@ -316,6 +368,9 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/dns/servers", post(put_server))
         .route("/api/dns/cert", post(cert_now))
         .route("/api/dns/servers/:id", delete(del_server))
+        .route("/api/dns/users", get(get_users))
+        .route("/api/dns/users/:id/kick", post(kick_user))
+        .route("/api/dns/check", post(check_name))
         .route("/assets/dns-icons.json", get(|| async {
             ([(header::CONTENT_TYPE, "application/json"), (header::CACHE_CONTROL, "public, max-age=86400")], include_str!("../../assets/dns/icons.json"))
         }))
@@ -502,6 +557,64 @@ async fn del_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
     save(&app, &mut s);
     app.db.set(&format!("dns_prev_{}", id), "");
     Json(json!({ "ok": true })).into_response()
+}
+
+/// The users with DNS: their queries and bytes on each server (since its service started) and the
+/// addresses allowed for them right now.
+async fn get_users(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let names = crate::tunnel::panel::server_names(&app);
+    let st = last_status().lock().unwrap().clone();
+    let users: Vec<Value> = app
+        .db
+        .users()
+        .iter()
+        .filter(|u| u.has_proto("dns"))
+        .map(|u| {
+            let key = u.id.to_string();
+            let (mut bytes, mut queries) = (0u64, 0u64);
+            let mut ips = vec![];
+            for (sid, (_, v)) in st.iter() {
+                bytes += v["users"][&key][0].as_u64().unwrap_or(0);
+                queries += v["users"][&key][1].as_u64().unwrap_or(0);
+                for ip in v["ips"][&key].as_array().into_iter().flatten().filter_map(|x| x.as_str()) {
+                    ips.push(json!({ "server": names.get(sid).cloned().unwrap_or_else(|| sid.clone()), "ip": ip }));
+                }
+            }
+            json!({
+                "id": u.id, "name": u.username, "active": u.active(), "max": u.max_conn, "bytes": bytes, "queries": queries, "ips": ips,
+                "token": user_token(&u.code), "last_seen": u.last_seen,
+            })
+        })
+        .collect();
+    Json(json!({ "users": users })).into_response()
+}
+
+async fn kick_user(State(app): St, h: HeaderMap, Path(id): Path<i64>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    update(&app, |s| {
+        *s.kicks.entry(id.to_string()).or_insert(0) += 1;
+    });
+    Json(json!({ "ok": true })).into_response()
+}
+
+/// Would this name be routed, and by which service?
+async fn check_name(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let s = settings(&app);
+    let raw = b["name"].as_str().unwrap_or("").trim().to_ascii_lowercase();
+    // a pasted address: keep only the host
+    let name = raw.trim_start_matches("https://").trim_start_matches("http://").split(['/', ':', '?']).next().unwrap_or("").trim_matches('.').to_string();
+    if !valid_name(&name) {
+        return err(StatusCode::BAD_REQUEST, "not a domain name");
+    }
+    let routed = domains(&s).iter().any(|d| name == *d || name.ends_with(&format!(".{}", d)));
+    let why = explain(&s, &name);
+    Json(json!({
+        "name": name, "routed": routed,
+        "service": why.as_ref().map(|w| w.0.clone()), "group": why.as_ref().map(|w| w.1.clone()), "id": why.as_ref().map(|w| w.2.clone()), "group_on": why.as_ref().map(|w| w.3),
+    }))
+    .into_response()
 }
 
 static ACME_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);

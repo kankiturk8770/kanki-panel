@@ -273,6 +273,26 @@ pub fn pct(s: &str) -> String {
     o
 }
 
+/// Undo percent-encoding ('+' stays '+'); bad escapes are kept as they are.
+pub fn pct_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut o = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            let h = |c: u8| (c as char).to_digit(16);
+            if let (Some(x), Some(y)) = (h(b[i + 1]), h(b[i + 2])) {
+                o.push((x * 16 + y) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        o.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&o).to_string()
+}
+
 pub fn b64(data: &[u8]) -> String {
     const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut o = String::new();

@@ -740,6 +740,114 @@ html[dir=rtl] .uchip2{padding:4px 4px 4px 10px}
 .amcur{padding:10px 12px;border-radius:12px;border:1px solid var(--ln);margin:8px 0;white-space:pre-wrap}.amcur.on{border-color:var(--ok)}
 .amdur{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}.amdur button{padding:6px 10px;border-radius:10px;border:1px solid var(--ln);background:none;color:var(--t);cursor:pointer;font:inherit;font-size:12px}.amdur button.on{border-color:var(--a);color:var(--a)}
 @media(max-width:620px){.nkv{grid-template-columns:1fr}}
+
+/* ===== v3.5 menu: groups that open in place (sidebar) and a section bar with drop-down tiles (phone) ===== */
+.snav{display:flex;flex-direction:column;gap:2px}
+.ngrp .ngh{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:11px;background:transparent;color:color-mix(in srgb,var(--t) 82%,transparent);font:inherit;font-weight:600;cursor:pointer;text-align:start}
+.ngrp .ngh .ni{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;color:var(--s)}
+.ngrp .ngh:hover{background:var(--in);color:var(--t)}.ngrp .ngh:hover .ni{color:var(--a)}
+.ngrp .ngl{flex:1}
+.ngrp .chev{display:grid;color:var(--s);transition:transform .2s}
+.ngrp.open .chev{transform:rotate(180deg)}
+.ngrp.cur>.ngh{color:var(--t)}.ngrp.cur>.ngh .ni{color:var(--a);background:color-mix(in srgb,var(--a) 12%,transparent)}
+.ngi{display:none;flex-direction:column;gap:1px;margin:2px 0 6px;padding-inline-start:24px;position:relative}
+.ngi:before{content:"";position:absolute;inset-block:4px;inset-inline-start:24px;width:1px;background:var(--ln2)}
+.ngrp.open .ngi{display:flex;animation:stin .18s ease}
+nav.side .ngi a{padding:7px 12px;font-size:13px;border-radius:9px;margin-inline-start:6px}
+nav.side .ngi a.on{background:color-mix(in srgb,var(--a) 13%,transparent);color:var(--a)}
+nav.side .ngi a.on:before{inset-inline-start:-7px;inset-block:8px}
+.mbar,.msheet{display:none}
+@media(max-width:1099px){
+ .mbar{display:flex;gap:6px;position:sticky;top:60px;z-index:6;overflow-x:auto;scrollbar-width:none;padding:8px 12px;background:color-mix(in srgb,var(--bg1) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--ln2)}
+ .mbar::-webkit-scrollbar{display:none}
+ .mbar a,.mbar button{flex:none;display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border-radius:11px;border:1px solid var(--ln2);background:var(--in);color:var(--t);font:inherit;font-size:12.5px;font-weight:700;text-decoration:none;cursor:pointer;white-space:nowrap}
+ .mbar svg{color:var(--s);transition:transform .2s}
+ .mbar .on{border-color:var(--a);color:var(--a);background:color-mix(in srgb,var(--a) 12%,transparent)}.mbar .on svg{color:var(--a)}
+ .mbar button.open{border-color:var(--a)}.mbar button.open svg:last-child{transform:rotate(180deg)}
+ .msheet{position:fixed;top:110px;inset-inline:12px;z-index:7;max-height:calc(100vh - 130px);overflow:auto;padding:12px;border:1px solid var(--ln);border-top:0;border-radius:0 0 18px 18px;background:linear-gradient(180deg,var(--c1),var(--c2)),var(--bg1);box-shadow:0 18px 40px rgba(0,0,0,.35)}
+ .msheet.on{display:block;animation:stin .18s ease}
+}
+@media(max-width:560px){.mbar{top:52px}.msheet{top:101px}}
+.mvpn{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.mtiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.mtile{display:flex;flex-direction:column;gap:3px;padding:11px 12px;border-radius:14px;border:1px solid var(--ln2);background:var(--in);color:var(--t);text-decoration:none;min-width:0}
+.mtile .ni{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;color:var(--a);background:color-mix(in srgb,var(--a) 12%,transparent);margin-bottom:4px}
+.mtile b{font-size:13.5px}.mtile small{color:var(--s);font-size:11px;line-height:1.5}
+.mtile.big{padding:14px;border-color:color-mix(in srgb,var(--a) 40%,transparent)}.mtile.big .ni{width:42px;height:42px;border-radius:13px}.mtile.big b{font-size:15px}
+.mtile:hover{border-color:var(--a)}
+a.b2{text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+/* page tabs (Xray, DNS) */
+.ptabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:-4px 0 14px;padding-bottom:2px}.ptabs::-webkit-scrollbar{display:none}
+.ptabs a{flex:none;display:inline-flex;align-items:center;gap:7px;padding:8px 13px;border-radius:12px;border:1px solid var(--ln2);background:var(--in);color:var(--s);font-weight:700;font-size:13px;text-decoration:none;white-space:nowrap}
+.ptabs a:hover{color:var(--t);border-color:var(--a)}
+.ptabs a.on{color:#1a1206;background:linear-gradient(var(--al),var(--a),var(--ad));border-color:transparent}
+.ptabs a em{font-style:normal;font-size:11px;padding:0 6px;border-radius:8px;background:rgba(127,127,127,.22)}
+/* VPN hub, Xray and DNS building blocks */
+.vhub{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+@media(max-width:900px){.vhub{grid-template-columns:1fr}}
+.vside{border:1px solid var(--ln);border-radius:var(--r2,20px);padding:16px;background:linear-gradient(180deg,var(--c1),var(--c2));box-shadow:var(--sh)}
+.vside>.vh{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.vside>.vh .phi{width:46px;height:46px}
+.vside>.vh b{display:block;font-size:17px}.vside>.vh small{display:block;color:var(--s);font-size:12px}
+.vside>.vh .sp{flex:1}
+.kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
+.kv>div{border:1px solid var(--ln2);background:var(--in);border-radius:12px;padding:8px 10px;min-width:0}
+.kv small{display:block;color:var(--s);font-size:11px}.kv b{display:block;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kv.k4{grid-template-columns:repeat(4,1fr)}.kv.k5{grid-template-columns:repeat(5,1fr)}
+@media(max-width:620px){.kv.k4,.kv.k5{grid-template-columns:repeat(2,1fr)}.kv{grid-template-columns:repeat(2,1fr)}}
+.vrow{display:flex;align-items:center;gap:10px;border:1px solid var(--ln2);border-radius:13px;padding:9px 11px;background:var(--in);margin-top:7px;min-width:0}
+.vrow .nm{flex:1;min-width:0}.vrow .nm b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.vrow .nm small{display:block;color:var(--s);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chipx{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:8px;border:1px solid var(--ln2);color:var(--s);white-space:nowrap}
+.chipx.a{color:var(--a);border-color:color-mix(in srgb,var(--a) 45%,transparent)}.chipx.g{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
+.chipx.r{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}.chipx.y{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}.chipx.b{color:var(--info);border-color:color-mix(in srgb,var(--info) 45%,transparent)}
+.ibl{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:12px}
+@media(max-width:400px){.ibl{grid-template-columns:1fr}}
+.ibc{border:1px solid var(--ln);border-radius:18px;padding:13px;background:linear-gradient(180deg,var(--c1),var(--c2));box-shadow:var(--sh);display:flex;flex-direction:column;gap:9px;min-width:0}
+.ibc.off{opacity:.62}
+.ibc .hd{display:flex;align-items:flex-start;gap:10px}
+.ibc .hd .pi{width:40px;height:40px;border-radius:12px;flex:none;display:grid;place-items:center;font-weight:900;font-size:12px;color:#1a1206;background:linear-gradient(145deg,var(--al),var(--a),var(--ad))}
+.ibc .hd .nm{flex:1;min-width:0}.ibc .hd .nm b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ibc .hd .nm small{display:block;color:var(--s);font-size:11.5px}
+.ibc .chs{display:flex;flex-wrap:wrap;gap:5px}
+.ibc .use{font-size:11.5px;color:var(--s);display:flex;justify-content:space-between;gap:8px}
+.ibc .acts2{display:grid;grid-template-columns:repeat(6,1fr);gap:5px}
+.ibc .acts2 button{display:flex;flex-direction:column;align-items:center;gap:2px;border:1px solid var(--ln2);background:var(--in);color:var(--t);border-radius:11px;padding:7px 0;cursor:pointer;font:inherit;font-size:10px}
+.ibc .acts2 button span{color:var(--s);font-size:10px}
+.ibc .acts2 button:hover{border-color:var(--a)}.ibc .acts2 .x{color:var(--bad)}
+.ftabs{display:flex;gap:4px;padding:4px;border-radius:13px;border:1px solid var(--ln2);background:var(--in);margin:6px 0 10px;overflow-x:auto;scrollbar-width:none}.ftabs::-webkit-scrollbar{display:none}
+.ftabs button{flex:1 0 auto;border:0;background:transparent;color:var(--s);font:inherit;font-size:12.5px;font-weight:800;padding:7px 10px;border-radius:9px;cursor:pointer;white-space:nowrap}
+.ftabs button.on{background:linear-gradient(var(--al),var(--a),var(--ad));color:#1a1206}
+.fsec{display:none}.fsec.on{display:block;animation:stin .18s ease}
+.inl{display:flex;gap:6px;align-items:stretch}.inl input,.inl select{flex:1;min-width:0}.inl .ib{flex:none;height:auto}
+.ckrow{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.rl{border:1px solid var(--ln2);border-radius:14px;padding:10px 12px;background:var(--in);margin-bottom:8px;display:flex;gap:10px;align-items:center}
+.rl .nm{flex:1;min-width:0}.rl .nm b{display:block}.rl .nm small{display:block;color:var(--s);font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rl .arrow{font-weight:900;color:var(--a);white-space:nowrap}
+.secc{border:1px solid var(--ln);border-radius:16px;background:linear-gradient(180deg,var(--c1),var(--c2));margin-bottom:10px;overflow:hidden}
+.secc>summary{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;list-style:none;font-weight:800}
+.secc>summary::-webkit-details-marker{display:none}
+.secc>summary .cnt{margin-inline-start:auto;color:var(--s);font-size:12px;font-weight:600}
+.secc>summary .chev{display:grid;color:var(--s);transition:transform .2s}
+.secc[open]>summary .chev{transform:rotate(180deg)}
+.secc .bd2{padding:0 14px 14px}
+.svcg{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px}
+.svi{border:1px solid var(--ln2);border-radius:13px;padding:9px 10px;background:var(--in)}
+.svi .t{display:flex;align-items:center;gap:8px;font-weight:800}
+.svi .t svg{flex:none}
+.svi label{display:flex;align-items:flex-start;gap:8px;margin-top:6px;font-size:12.5px;cursor:pointer}
+.svi label small{color:var(--s)}
+.topo{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px}
+.topo .nd{border:1px solid var(--ln2);border-radius:11px;padding:6px 10px;background:var(--in);white-space:nowrap}
+.topo .ar{color:var(--a);font-weight:900}
+.cpl{display:flex;gap:6px;align-items:center;margin-top:6px}.cpl code{flex:1;min-width:0;direction:ltr;text-align:left;font-size:11.5px;background:var(--in);border:1px solid var(--ln2);border-radius:10px;padding:7px 9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bars{display:flex;flex-direction:column;gap:6px}
+.bars .br{display:grid;grid-template-columns:minmax(90px,170px) 1fr auto;gap:8px;align-items:center;font-size:12px}
+.bars .br .tk{height:8px;border-radius:6px;background:rgba(127,127,127,.18);overflow:hidden}.bars .br .tk i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--ad),var(--a))}
+.ufsvc{border:1px solid var(--ln2);border-radius:15px;padding:10px 12px;background:var(--in);margin-top:8px}
+.ufsvc>.hd{display:flex;align-items:center;gap:10px}
+.ufsvc>.hd .ni{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;color:var(--a);background:color-mix(in srgb,var(--a) 12%,transparent);flex:none}
+.ufsvc>.hd .nm{flex:1;min-width:0}.ufsvc>.hd .nm b{display:block}.ufsvc>.hd .nm small{display:block;color:var(--s);font-size:11px}
+.ufsvc .bd3{margin-top:8px;display:none}.ufsvc.on .bd3{display:block}
+.ufsvc.on{border-color:color-mix(in srgb,var(--a) 45%,transparent)}
 </style>
 </head>
 <body>
@@ -753,6 +861,8 @@ html[dir=rtl] .uchip2{padding:4px 4px 4px 10px}
 <div class="modal" id="modal"><div class="mbox" id="mbox"></div></div>
 <div id="toast"></div>
 <script src="/assets/kanki-ext.js"></script>
+<script src="/assets/kanki-xray.js"></script>
+<script src="/assets/kanki-dns.js"></script>
 <script>
 "use strict";
 var FA={"Users":"کاربران","Separate subscription domain":"دامنه‌ی جدا برای لینک ساب","A domain that points to this server. The panel gets its SSL by itself and serves only the subscription pages on it, so the panel address stays hidden.":"دامنه‌ای که به همین سرور اشاره می‌کند. پنل خودش SSL می‌گیرد و فقط صفحه‌های ساب را روی آن نشان می‌دهد، پس آدرس پنل پنهان می‌ماند.","Set up SSL and use it":"گرفتن SSL و استفاده","Getting the SSL certificate… this can take up to one minute":"در حال گرفتن SSL… تا یک دقیقه طول می‌کشد","Nodes":"نودها","Sales bot":"ربات فروش","Backup":"بکاپ و ریستور","Security":"مرکز امنیت","Settings":"تنظیمات","System":"وضعیت سرور","Logout":"خروج","Login":"ورود","Username":"نام کاربری","Password":"رمز عبور","2FA code":"کد دومرحله‌ای","Volume, time, connections, nodes and configs":"حجم، زمان، اتصال، نود و کانفیگ‌ها","New user":"کاربر جدید","Online":"آنلاین","Total users":"کل کاربران","Offline":"آفلاین","Active":"فعال","Finished":"تمام‌شده","Disabled":"غیرفعال","Created configs":"کانفیگ‌های ساخته‌شده","users total":"کاربر","Select all":"انتخاب همه","selected":"انتخاب‌شده","Bulk actions":"عملیات گروهی","Search by name or note…":"جستجو بر اساس نام یا یادداشت…","All":"همه","Expired / out of data":"منقضی / اتمام حجم","Refresh":"تازه‌سازی","Enable":"فعال‌سازی","Disable":"غیرفعال‌سازی","Reset traffic":"ریست ترافیک","Add 30 days":"افزودن ۳۰ روز","Delete":"حذف","Edit user":"ویرایش کاربر","Credit & limits":"اعتبار و محدودیت","Expiry date":"تاریخ انقضا","Total volume (0 = unlimited)":"حجم کل (صفر = نامحدود)","Connections":"تعداد اتصال","Quick add days":"افزودن روز سریع","Quick add volume":"افزودن حجم سریع","Protocol access":"دسترسی پروتکل‌ها","Node access & note":"دسترسی نود و یادداشت","Note":"یادداشت","Freeze user":"فریز کاربر","Unfreeze user":"رفع فریز","Download config":"دانلود کانفیگ","Subscription link":"لینک اشتراک","Save changes":"ذخیره تغییرات","Unlimited":"نامحدود","Days":"روز","Count":"تعداد","Create":"ساخت","Copy":"کپی","Open page":"باز کردن صفحه","User link":"لینک کاربر","Copied":"کپی شد","Saved":"ذخیره شد","Done":"انجام شد","Are you sure?":"مطمئنی؟","Main server and extra nodes":"سرور اصلی و نودهای اضافه","Add node":"افزودن نود","Local":"محلی","Last contact":"آخرین ارتباط","Sync":"همگام‌سازی","Synced":"همگام","Config mismatch":"اختلاف کانفیگ","Maintenance":"تعمیرات","Drain":"Drain","Accepting":"پذیرش فعال","Draining":"در حال تخلیه","Under maintenance":"در تعمیر","Health":"سلامت","Edit":"ویرایش","Repair agent":"تعمیر Agent","Update agent":"آپدیت Agent","Delete node":"حذف نود","Main panel server · local management":"سرور اصلی پنل · مدیریت محلی","Edit node":"ویرایش نود","Node name":"نام نود","Sync users without a specific node to this node":"کاربران بدون نود مشخص را روی این نود همگام کن","Users connection endpoint":"Endpoint اتصال کاربران","Use the panel endpoint":"استفاده از Endpoint پنل","Custom IP / domain for this node":"IP / دامنه اختصاصی این نود","Cancel":"انصراف","Save":"ذخیره","API address":"آدرس API","Node token":"توکن نود","Connection endpoint (empty = panel endpoint)":"آدرس اتصال (خالی = Endpoint پنل)","Self-signed certificate (no domain on node)":"گواهی خودامضا (نود بدون دامنه)","seconds ago":"ثانیه پیش","minutes ago":"دقیقه پیش","hours ago":"ساعت پیش","this server":"همین سرور","never":"هرگز","Insecure: plain HTTP. Reinstall the node with the new installer to get TLS.":"ناامن: HTTP ساده. نود را با نصاب جدید دوباره نصب کن تا TLS بگیرد.","Build and manage the sales bot":"ساخت و مدیریت ربات فروش","Create bot":"ساخت ربات","Test connection":"تست اتصال","Pause":"توقف","Resume":"ادامه","Delete bot":"حذف ربات","Sales panels are added from inside Telegram":"پنل‌های فروش از داخل تلگرام اضافه می‌شوند","Bot token":"توکن ربات","Admin numeric IDs (comma separated)":"آیدی عددی ادمین‌ها (با کاما)","Paused":"متوقف","Plans":"پلن‌ها","Name":"نام","Price (Toman)":"قیمت (تومان)","Price (USD)":"قیمت (دلار)","Add plan":"افزودن پلن","Sales settings":"تنظیمات فروش","Full backup of users, credentials, certificates, VPN settings, nodes and panel state":"بکاپ کامل کاربران، اعتبارنامه‌ها، گواهی‌ها، تنظیمات VPN، نودها و وضعیت پنل","Encrypted archive. File name includes date and time.":"آرشیو کامل و رمزنگاری‌شده. نام فایل شامل تاریخ و ساعت است.","Passphrase (min 6)":"Passphrase (حداقل ۶)","Download backup":"دانلود بکاپ","Restore":"ریستور","Pick a backup file; if encrypted, enter its passphrase.":"فایل بکاپ را انتخاب کن؛ اگر رمز دارد وارد کن.","Choose file":"انتخاب فایل","No file chosen":"فایلی انتخاب نشده","Also restore server keys & configs (same/new server migration)":"کلیدها و کانفیگ‌های سرور هم برگردد (انتقال سرور)","Restore backup":"ریستور بکاپ","Telegram auto backup":"بکاپ خودکار تلگرام","Encrypted backup sent to Telegram on schedule":"بکاپ رمزنگاری‌شده را طبق زمان‌بندی به تلگرام بفرست","Chat ID":"Chat ID","Auto after /start (or first bot admin)":"خودکار بعد از /start (یا اولین ادمین ربات)","Backup interval (hours)":"فاصله بکاپ (ساعت)","Default backup passphrase":"رمز پیش‌فرض بکاپ","Send backup now":"ارسال بکاپ الان","Save settings":"ذخیره تنظیمات","On":"فعال","Off":"غیرفعال","Empty = use the sales bot token":"خالی = همان توکن ربات فروش","Last":"آخرین","Login, sessions, 2FA, IP policy and API":"ورود، نشست‌ها، احراز هویت دومرحله‌ای، سیاست IP و API","Create API token":"ساخت توکن API","Current account":"حساب فعلی","Active sessions":"نشست‌های فعال","Network policy":"سیاست شبکه","Open":"باز","Restricted":"محدود","API tokens":"توکن‌های API","The full token is shown only once.":"توکن کامل فقط یک بار نمایش داده می‌شود.","Revoke":"باطل کردن","Two-step login":"ورود دومرحله‌ای","TOTP with apps like Google Authenticator / 2FAS":"TOTP با برنامه‌هایی مثل Google Authenticator / 2FAS","Enable 2FA":"فعال‌سازی 2FA","Disable 2FA":"غیرفعال‌سازی","Devices and IPs logged in to the panel":"دستگاه‌ها و IPهایی که به پنل وارد شده‌اند","Log out others":"خروج بقیه","current":"فعلی","IP restriction":"محدودیت IP","Allow/Deny for the admin panel, one IP or CIDR per line":"Allow/Deny برای پنل مدیریت؛ هر خط یک IP یا CIDR","IP / CIDR allowed, one per line":"IP / CIDR مجاز، هر خط یک مورد","IP / CIDR blocked, one per line":"IP / CIDR مسدود، هر خط یک مورد","Session lifetime (hours)":"عمر Session (ساعت)","Enforce 2FA for admin":"اجبار 2FA برای ادمین","Save security policy":"ذخیره سیاست امنیت","Login history":"تاریخچه ورود","Successful / failed logins (secrets never stored)":"ورود موفق/ناموفق بدون ثبت رمز یا Secret","Audit log":"Audit Log","Admin changes with actor, path, IP and result":"تغییرات مدیریتی با Actor، مسیر، IP و نتیجه","Change login":"تغییر نام کاربری / رمز","Current password":"رمز فعلی","New username (optional)":"نام کاربری جدید (اختیاری)","New password (min 8)":"رمز جدید (حداقل ۸)","Legacy API key":"کلید API قدیمی","Regenerate":"ساخت دوباره","Scan with your authenticator app, then enter the 6-digit code":"با برنامه احراز هویت اسکن کن و کد ۶ رقمی را وارد کن","Confirm":"تأیید","Token name":"نام توکن","Scopes":"دسترسی‌ها","Copy it now, it won't be shown again":"همین حالا کپی کن، دوباره نمایش داده نمی‌شود","Appearance, web access and public endpoint":"ظاهر، دسترسی وب و Endpoint عمومی","General":"عمومی","Panel name":"نام پنل","Language":"زبان","Theme":"پوسته","Dark":"تیره","Light":"روشن","Auto refresh":"تازه‌سازی","Panel color":"رنگ پنل","Gold":"طلایی","Turquoise":"فیروزه‌ای","Violet":"بنفش","Emerald":"زمردی","Rose":"صورتی","Web panel":"وب پنل","Web bind":"Web Bind","Web port":"پورت وب","Bind and port are where the panel itself listens; changing them needs a panel restart (edit /etc/kanki/kanki.env).":"Bind و Port فقط آدرس گوش‌دادن خود پنل هستند؛ تغییرشان نیاز به ری‌استارت پنل دارد (فایل /etc/kanki/kanki.env).","Public endpoint":"Endpoint عمومی","Public VPN host or IP":"هاست یا IP عمومی VPN","Subscription base URL":"آدرس پایه اشتراک","Public host used inside user configs.":"Public Host داخل کانفیگ‌های کاربر استفاده می‌شود.","Apply this endpoint to Main and all nodes":"این Endpoint برای Main و همه Nodeها اعمال شود","Save & apply":"ذخیره و اعمال","VPN":"VPN","Default protocols for new users":"پروتکل‌های پیش‌فرض کاربر جدید","AmneziaWG compatibility mode (only Jc/Jmin/Jmax/S1/S2/H1-H4)":"حالت سازگاری AmneziaWG (فقط Jc/Jmin/Jmax/S1/S2/H1-H4)","seconds":"ثانیه","Update":"آپدیت","Current version":"نسخه فعلی","Latest version":"آخرین نسخه","Check for update":"بررسی آپدیت","Install update":"نصب آپدیت","You are on the latest version.":"نسخه فعلی بروز است.","A new version is available.":"نسخه جدید موجود است.","Updates come from the GitHub releases of your repo.":"آپدیت از Releases مخزن گیت‌هاب شما دریافت می‌شود.","Services":"سرویس‌ها","Restart":"ری‌استارت","Uptime":"آپتایم","Memory":"حافظه","Disk":"دیسک","Network":"شبکه","days":"روز","Restore done, panel is restarting…":"ریستور انجام شد، پنل در حال ری‌استارت است…","Loading…":"در حال بارگذاری…","No users yet":"هنوز کاربری نیست","Main server":"سرور اصلی","Node":"نود","Optional, created if empty":"خالی بماند: خودکار USER1، USER2 و…","Expired":"منقضی","Limited":"اتمام حجم","Download configs":"دانلود کانفیگ‌ها","No configs: user has no nodes or protocols":"کانفیگی نیست: کاربر نود یا پروتکلی ندارد","Install the node with the installer (option 2), then paste the API address and token it prints.":"نود را با نصاب (گزینه ۲) نصب کن، بعد آدرس API و توکنی که چاپ می‌کند را اینجا بزن.","Advanced":"پیشرفته","Panel":"پنل","Checking…":"در حال بررسی…","Card number":"شماره کارت","Card holder":"نام صاحب کارت","Support ID":"آیدی پشتیبانی","App link":"لینک اپ","Required channel":"کانال اجباری","Welcome text":"متن خوش‌آمد","Free trial":"تست رایگان","Trial GB":"حجم تست (GB)","Trial days":"روز تست","Card to card":"کارت به کارت","ZarinPal":"زرین‌پال","Merchant ID":"مرچنت","Crypto (NOWPayments)":"ارزی (NOWPayments)","API key":"کلید API","Coins":"ارزها","Referral gift GB":"هدیه دعوت (GB)","Referral gift days":"هدیه دعوت (روز)","Sales on":"فروش فعال","Expiry warnings":"هشدار اتمام","Daily backup to bot admins":"بکاپ روزانه برای ادمین‌های ربات","Enable sales bot features":"قابلیت‌های فروش","DNS":"DNS","MTU":"MTU","last used":"آخرین استفاده","Your IP":"IP شما","Backup file":"بکاپ","Admins":"ادمین‌ها","Toman":"تومان","Bind and port are where the panel itself listens; changing them needs a panel restart. File:":"Bind و Port فقط آدرس گوش‌دادن خود پنل هستند؛ تغییرشان نیاز به ری‌استارت پنل دارد. فایل:","Panel address":"آدرس پنل","Select":"انتخاب","Copy link":"کپی لینک","Configs":"کانفیگ‌ها","Reset":"ریست","Used":"مصرف","Page":"صفحه"};
@@ -876,13 +986,45 @@ function loginView(otp){applyLook();clearInterval(S.timer);clearInterval(S.timer
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
 // ---------------------------------------------------------------- shell
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['nodes','Nodes','nodes'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+ICO.chev='<path d="M6 9l6 6 6-6"/>';
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Kanki VPN','nodes'],['xray','Xray','xray'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 // sidebar groups (v2.8.4): [label, page keys]
-var NAVG=[['Overview',['dash','traffic']],['Users & sales',['users','bot','emergency']],['Network',['nodes','servers','tunnels','ports']],['System',['backup','security','settings']]];
+// menu (v3.5): single pages and groups that open in place. An item is [page, sub page, label, note].
+var NAV=[{p:'dash'},{p:'users'},
+ {g:'vpn',l:'VPN services',i:'shield2',items:[['vpn','','All VPN services','Kanki VPN and Xray side by side'],['nodes','','Kanki VPN','WireGuard · AmneziaWG · Hysteria2'],['xray','','Xray','VLESS · VMess · Trojan · Shadowsocks']]},
+ {g:'dnsg',l:'Kanki DNS',i:'dns',items:[['dns','overview','Overview','Status of the DNS servers'],['dns','servers','DNS servers','Exits abroad and relays in Iran'],['dns','services','Services','What goes through the DNS'],['dns','users','DNS users','Registered addresses and use'],['dns','settings','Settings and SSL','Domain, certificate, upstreams']]},
+ {g:'net',l:'Tunnels',i:'tunnel',items:[['servers','','Tunnel servers',''],['tunnels','','Tunnels',''],['ports','','Port management','']]},
+ {g:'sales',l:'Sales & support',i:'bot',items:[['bot','','Sales bot',''],['emergency','','Emergency chat','']]},
+ {p:'traffic'},
+ {g:'sys',l:'System',i:'settings',items:[['backup','','Backup',''],['security','','Security',''],['settings','','Settings','']]}];
+var NAVG=[];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
-function grpOf(k){for(var i=0;i<NAVG.length;i++)if(NAVG[i][1].indexOf(k)>=0)return NAVG[i][0];return ''}
+function grpOf(k){for(var i=0;i<NAV.length;i++){var g=NAV[i];if(g.items&&g.items.some(function(x){return x[0]==k}))return g.l}return ''}
+function navGroupOf(k){for(var i=0;i<NAV.length;i++){var g=NAV[i];if(g.items&&g.items.some(function(x){return x[0]==k}))return g.g}return ''}
+var NAVOPEN={};try{NAVOPEN=JSON.parse(localStorage.getItem('kk_nav')||'{}')||{}}catch(e){}
+function navHref(x){return '#'+x[0]+(x[1]?'/'+x[1]:'')}
+function navSide(){return NAV.map(function(n){
+  if(n.p){var p=pgOf(n.p);return '<a href="#'+p[0]+'" data-p="'+p[0]+'"><span class="ni">'+ic(p[2],18)+'</span>'+t(p[1])+'</a>'}
+  return '<div class="ngrp" data-g="'+n.g+'"><button class="ngh" data-g="'+n.g+'"><span class="ni">'+ic(n.i,18)+'</span><span class="ngl">'+t(n.l)+'</span><span class="chev">'+ic('chev',14)+'</span></button>'+
+   '<div class="ngi">'+n.items.map(function(x){return '<a href="'+navHref(x)+'" data-p="'+x[0]+'" data-s="'+x[1]+'">'+t(x[2])+'</a>'}).join('')+'</div></div>'}).join('')}
+function navBar(){return '<div class="mbar" id="mbar">'+NAV.map(function(n){
+  if(n.p){var p=pgOf(n.p);return '<a href="#'+p[0]+'" data-p="'+p[0]+'">'+ic(p[2],17)+'<span>'+t(p[1])+'</span></a>'}
+  return '<button data-g="'+n.g+'">'+ic(n.i,17)+'<span>'+t(n.l)+'</span>'+ic('chev',12)+'</button>'}).join('')+'</div><div class="msheet" id="msheet"></div>'}
+function navSheet(g){var sh=$('#msheet'),n=NAV.filter(function(x){return x.g==g})[0];if(!sh)return;
+ if(!n||sh.dataset.g==g){sh.classList.remove('on');sh.dataset.g='';$$('#mbar [data-g]').forEach(function(b){b.classList.remove('open')});return}
+ sh.dataset.g=g;$$('#mbar [data-g]').forEach(function(b){b.classList.toggle('open',b.dataset.g==g)});
+ var tile=function(x,big){return '<a class="mtile'+(big?' big':'')+'" href="'+navHref(x)+'"><span class="ni">'+ic(pgOf(x[0])[2],big?24:18)+'</span><b>'+t(x[2])+'</b>'+(x[3]?'<small>'+t(x[3])+'</small>':'')+'</a>'};
+ sh.innerHTML=g=='vpn'?'<div class="mvpn">'+tile(n.items[1],1)+tile(n.items[2],1)+'</div><div class="mtiles">'+tile(n.items[0])+'</div>':'<div class="mtiles">'+n.items.map(function(x){return tile(x)}).join('')+'</div>';
+ sh.classList.add('on')}
+function navMark(p,sub){var g=navGroupOf(p),first=$('#side a[data-p="'+p+'"]');
+ $$('#side a[data-p]').forEach(function(a){var on=a.dataset.p==p&&(a.dataset.s?(a.dataset.s==sub||!sub&&a===first):true);a.classList.toggle('on',on)});
+ $$('#side .ngrp').forEach(function(d){var open=d.dataset.g==g||NAVOPEN[d.dataset.g];d.classList.toggle('open',!!open);d.classList.toggle('cur',d.dataset.g==g)});
+ $$('#mbar [data-p]').forEach(function(a){a.classList.toggle('on',a.dataset.p==p)});
+ $$('#mbar [data-g]').forEach(function(b){b.classList.toggle('on',b.dataset.g==g)});
+ var sh=$('#msheet');if(sh){sh.classList.remove('on');sh.dataset.g='';$$('#mbar [data-g]').forEach(function(b){b.classList.remove('open')})}
+ var cur=$('#mbar .on'),bar=$('#mbar');if(cur&&bar&&bar.scrollWidth>bar.clientWidth)try{cur.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}}
 function shell(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.charAt(0);
- $('#app').innerHTML='<header class="top"><button class="ib" id="mn" aria-label="menu">'+ic('menu',20)+'</button><div class="'+logoCls()+'" id="mlogo">'+logoInner(L)+'</div>'+
+ $('#app').innerHTML='<header class="top"><div class="'+logoCls()+'" id="mlogo">'+logoInner(L)+'</div>'+
  '<div class="tb-title"><small><span>'+esc(nm)+'</span><span>›</span><span id="tbsec"></span></small><b id="tbt"></b></div><div class="sp"></div>'+
  '<div class="tb-act"><div class="segl"><button data-l="fa" class="'+(S.lang=='fa'?'on':'')+'">FA</button><button data-l="en" class="'+(S.lang=='en'?'on':'')+'">EN</button></div>'+
  '<button class="ib" id="thm" title="'+t('Theme')+'" aria-label="theme">'+ic('moon',17)+'</button>'+
@@ -890,12 +1032,14 @@ function shell(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.charAt(0);
  '<div class="uchip2" title="'+esc(me.user||'')+'"><i>'+esc((me.user||'A').charAt(0).toUpperCase())+'</i><span>'+esc(me.user||'')+'</span></div>'+
  '<button class="ib" id="lo" title="'+t('Logout')+'" aria-label="logout">'+ic('logout',17)+'</button></div></header>'+
  '<nav class="side" id="side"><div class="sbrand"><div class="'+logoCls()+'">'+logoInner(L)+'</div><div style="min-width:0"><b>'+esc(nm)+'</b><small>'+t('VPN management')+'</small></div></div>'+
- NAVG.map(function(g){return '<div class="sgrp">'+t(g[0])+'</div>'+g[1].map(function(k){var p=pgOf(k);return '<a href="#'+p[0]+'" data-p="'+p[0]+'"><span class="ni">'+ic(p[2],18)+'</span>'+t(p[1])+'</a>'}).join('')}).join('')+
+ '<div class="snav">'+navSide()+'</div>'+
  '<div class="sfoot"><button class="sver" id="upd2"><span class="dot" id="updot2"></span><span><b class="ltr">v'+esc(me.version||'')+'</b><small id="updt">'+t('Check for update')+'</small></span></button>'+
- '<a href="#" id="lo2" class="lo2"><span class="ni">'+ic('logout',18)+'</span>'+t('Logout')+'</a></div></nav><div class="shade" id="shade"></div><main id="pg"></main>';
- $('#mn').onclick=function(){$('#side').classList.add('on');$('#shade').classList.add('on')};
+ '<a href="#" id="lo2" class="lo2"><span class="ni">'+ic('logout',18)+'</span>'+t('Logout')+'</a></div></nav><div class="shade" id="shade"></div>'+navBar()+'<main id="pg"></main>';
  $('#shade').onclick=function(){$('#side').classList.remove('on');$('#shade').classList.remove('on')};
- $$('#side a[data-p]').forEach(function(a){a.onclick=function(){$('#shade').click()}});
+ $$('#side .ngh').forEach(function(b){b.onclick=function(){var d=b.parentNode,o=!d.classList.contains('open');d.classList.toggle('open',o);NAVOPEN[b.dataset.g]=o;try{localStorage.setItem('kk_nav',JSON.stringify(NAVOPEN))}catch(e){}}});
+ $$('#mbar [data-g]').forEach(function(b){b.onclick=function(e){e.stopPropagation();navSheet(b.dataset.g)}});
+ $('#msheet').onclick=function(e){if(e.target.closest('a'))navMark(S.page,S.sub)};
+ if(!window._navDoc){window._navDoc=1;document.addEventListener('click',function(e){var sh=$('#msheet');if(sh&&sh.classList.contains('on')&&!e.target.closest('#msheet,#mbar'))navMark(S.page,S.sub)})}
  $$('[data-l]').forEach(function(b){b.onclick=function(){S.lang=b.dataset.l;localStorage.setItem('kk_lang',S.lang);applyLook();shell();route()}});
  $('#thm').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook()};
  $('#lo').onclick=function(){logout()};$('#lo2').onclick=function(e){e.preventDefault();logout()};
@@ -909,11 +1053,13 @@ function shell(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.charAt(0);
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);
  var i=document.createElement('span');i.className='phi';i.innerHTML=ic(pgOf(S.page)[2],22);d.appendChild(i);d.appendChild(inner)}
-function route(){var p=(location.hash||'#dash').slice(1);if(!PAGES.some(function(x){return x[0]==p}))p='dash';S.page=p;
+function route(){var h=(location.hash||'#dash').slice(1).split('/'),p=h[0];S.sub=h[1]||'';if(!PAGES.some(function(x){return x[0]==p})){p='dash';S.sub=''}S.page=p;
  var tb=$('#tbt');if(tb){tb.textContent=t(pgOf(p)[1]);$('#tbsec').textContent=t(grpOf(p))}
- $$('#side a[data-p]').forEach(function(a){a.classList.toggle('on',a.dataset.p==p)});clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);window.scrollTo(0,0);
+ navMark(p,S.sub);clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);window.scrollTo(0,0);
  (({dash:pDash,users:pUsers,nodes:pNodes,servers:pServers,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,emergency:pEmergency,backup:pBackup,security:pSecurity,settings:pSettings})[p]||window['p_'+p])()}
-window.addEventListener('hashchange',function(){if(S.token&&S.me)route()});
+window.addEventListener('hashchange',function(){if(!S.token||!S.me)return;var h=(location.hash||'#dash').slice(1).split('/');
+ // moving between the tabs of the page already open: only the tab changes
+ if(h[0]==S.page&&window['tab_'+S.page]&&$('#pg .ptabs')){S.sub=h[1]||'';navMark(S.page,S.sub);window['tab_'+S.page](S.sub);return}route()});
 function autoRefresh(fn){clearInterval(S.timer);var sec=Math.max(5,(S.me&&S.me.refresh)||10);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')fn()},sec*1000)}
 function boot(){api('GET','/api/me').then(function(me){S.me=me;try{localStorage.setItem('kk_logo',me.logo||'')}catch(e){}if(me.panel_name)document.title=me.panel_name;
   if(!localStorage.getItem('kk_color')&&me.color)S.color=me.color;if(!localStorage.getItem('kk_lang')&&me.lang)S.lang=me.lang;if(!localStorage.getItem('kk_theme')&&me.theme)S.theme=me.theme;
@@ -1133,8 +1279,7 @@ function ufForm(u){var protos=u?u.protocols.split(','):((S.me&&S.me.default_prot
  h+='<div><label class="f">'+t('Connections')+'</label><input type="number" min="0" id="f_conn" value="'+(u?u.max_connections:Math.max(1,+me0.def_conns||1))+'"></div>';
  h+='<div class="full"><div class="qchips" id="qg" style="margin-top:0"><span class="muted">'+t('Quick add volume')+'</span>'+[5,10,20,50,100].map(function(n){return '<button type="button" data-qg="'+n+'">+'+N(n)+' GB</button>'}).join('')+'</div></div>';
  if(!u)h+='<div><label class="f">'+t('Count')+'</label><input type="number" min="1" max="200" id="f_count" value="1"></div><div></div>';
- h+='</div><div class="chips">'+PROTOS.map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(protos.indexOf(p[0])>=0?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>';
- if(S.nodes.length>1)h+='<div class="chips">'+S.nodes.map(function(n){return '<label class="chk"><input type="checkbox" class="f_nd" value="'+esc(n.id)+'" '+(un.length==0||un.indexOf(n.id)>=0?'checked':'')+'>'+esc(n.name)+'</label>'}).join('')+'</div>';
+ h+='</div>'+ufServices(protos,un);
  return h+'<input id="f_note" placeholder="'+t('Note')+'" value="'+esc(u?u.notes:'')+'" style="margin-top:8px">'}
 function wireForm(u){$('#f_date').oninput=prevExp;$('#f_time').oninput=prevExp;
  $('#f_inf').onclick=function(){$('#f_date').value='';prevExp()};$('#f_gbinf').onclick=function(){$('#f_gb').value=0};

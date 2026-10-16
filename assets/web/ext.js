@@ -1,187 +1,164 @@
-// Kanki Panel extensions (v3.4): Kanki DNS and Xray pages, node types, DNS / Xray access for users.
+// Kanki Panel extensions (v3.5): the VPN services page (Kanki VPN | Xray), node types, the services part of
+// the user form, and the Persian text of the menu, Xray (xray.js) and Kanki DNS (dns.js).
 // Loaded before the main script; KEXT() runs once the main script has defined its tables.
 function KEXT(){
  PROTOS.push(['xray','Xray'],['dns','DNS']);
  PCOL.xray='#e0a020';PCOL.dns='#2a9df4';
  ICO.dns='<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>';
  ICO.xray='<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>';
- PAGES.splice(3,0,['dns','Kanki DNS','dns'],['xray','Xray','xray']);
- NAVG.forEach(function(g){if(g[1].indexOf('nodes')>=0)g[1].splice(1,0,'dns','xray')});
- Object.assign(FA,{"Kanki DNS":"دی‌ان‌اس کانکی","Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct":"DNS هوشمند اختصاصی مشتری‌ها: سرویس‌های تحریمی از سرورهای شما رد می‌شوند و بقیه مستقیم",
- "DNS is on":"DNS روشن است","DNS domain":"دامنه‌ی DNS","Each DNS server gets a name under it, like de.dns.example.com":"هر سرور DNS یک اسم زیر آن می‌گیرد، مثل de.dns.example.com",
- "Upstream resolvers":"DNSهای بالادست","An allowed address stays open for (hours)":"مدت باز ماندن IP ثبت‌شده (ساعت)","Certificate and records":"گواهی SSL و رکوردها",
- "Provider":"سرویس DNS دامنه","Manual (paste a certificate)":"دستی (گواهی را خودت بگذار)","API token":"توکن API","unchanged":"بدون تغییر","E-mail for Let's Encrypt (optional)":"ایمیل برای Let's Encrypt (اختیاری)",
- "Set records and get the certificate now":"الان رکوردها را بساز و گواهی بگیر","Working… about a minute":"در حال انجام… حدود یک دقیقه","Certificate":"گواهی","none yet":"هنوز ندارد","issued":"صادر شده",
- "DNS servers":"سرورهای DNS","Exit (abroad)":"خروجی (خارج)","Relay (inside Iran)":"ریلی (داخل ایران)","Exit":"خروجی","Relay":"ریلی","Label":"برچسب","Answer IP":"IP پاسخ",
- "automatic":"خودکار","Running":"در حال اجرا","Not running":"اجرا نمی‌شود","Waiting for the server…":"در انتظار سرور…","Allowed addresses":"IPهای مجاز","Connections":"اتصال‌ها",
- "Add DNS server":"افزودن سرور DNS","Add relay":"افزودن ریلی","Agent server":"سرور (ایجنت)","New server (install command)":"سرور جدید (دستور نصب)","Its exit":"خروجی آن",
- "Transport to the exit":"ترنسپورت تا خروجی","Tunnel port on the relay":"پورت تانل روی ریلی","Note for subscribers":"یادداشت برای مشتری‌ها","Hidden from subscribers":"مخفی از مشتری‌ها",
- "Services":"سرویس‌ها","Routed names":"دامنه‌های مسیر‌دهی‌شده","Extra domains, one per line":"دامنه‌های اضافه، هر خط یکی","Users with DNS":"کاربران دارای DNS",
- "Remove from DNS":"حذف از DNS","Save services":"ذخیره سرویس‌ها","How it works":"چطور کار می‌کند","Node type":"نوع نود",
- "VPN node":"نود VPN","WireGuard · AmneziaWG · Hysteria2":"WireGuard · AmneziaWG · Hysteria2","Xray node":"نود Xray","VLESS · VMess · Trojan · Shadowsocks":"VLESS · VMess · Trojan · Shadowsocks",
- "DNS exit node":"نود DNS خروجی","Smart DNS abroad":"DNS هوشمند در خارج","DNS relay node":"نود ریلی DNS","Iran server in front of a DNS exit":"سرور ایران جلوی DNS خروجی",
- "Ports 53, 80, 443 and 853 must be free on this server: give DNS its own server.":"پورت‌های ۵۳، ۸۰، ۴۴۳ و ۸۵۳ روی این سرور باید آزاد باشند: برای DNS سرور جدا بگذار.",
- "Add an exit DNS server first":"اول یک سرور DNS خروجی اضافه کن","Server name":"نام سرور","Create":"ساخت","Other nodes":"نودهای دیگر","Open":"باز کردن",
- "only on request":"فقط با درخواست","cannot be routed":"قابل مسیردهی نیست","Last error":"آخرین خطا",
- "Xray inbounds for your users: every user with Xray ticked is a client of every inbound":"اینباندهای Xray برای کاربرهای خودت: هر کاربری که تیک Xray دارد کلاینت همه‌ی اینباندهاست",
- "Inbound":"اینباند","Inbounds":"اینباندها","Xray servers":"سرورهای Xray","Add server":"افزودن سرور","Xray is on":"Xray روشن است","Xray-core version":"نسخه‌ی Xray-core","empty = latest":"خالی = آخرین نسخه",
- "Block private addresses":"مسدود کردن IPهای داخلی","Block BitTorrent":"مسدود کردن تورنت","Advanced: extra routing rules (JSON array)":"پیشرفته: قوانین مسیریابی اضافه (آرایه‌ی JSON)","Advanced: extra outbounds (JSON array, the first one becomes the default)":"پیشرفته: اوت‌باندهای اضافه (آرایه‌ی JSON، اولی پیش‌فرض می‌شود)",
- "Panel server":"سرور پنل","Address for links":"آدرس در لینک‌ها","Users with Xray":"کاربران دارای Xray","Online":"آنلاین","Remark":"نام","Protocol":"پروتکل","Transport":"ترنسپورت","Security":"امنیت","Port":"پورت",
- "Path":"مسیر (path)","Host":"هاست","Service name":"نام سرویس","Mode":"حالت","HTTP header camouflage":"استتار با هدر HTTP","Flow":"Flow","Method":"روش","SNI":"SNI","ALPN":"ALPN","Fingerprint":"اثرانگشت (fp)",
- "Target (dest)":"مقصد (dest)","Server names":"نام‌های سرور","Private key":"کلید خصوصی","Public key":"کلید عمومی","Short IDs":"Short ID ها","New keys":"کلید جدید","Sniffing":"Sniffing",
- "Share link (for a CDN in front)":"لینک اشتراک (برای CDN جلوی سرور)","Link address":"آدرس لینک","Link port":"پورت لینک","TLS at the CDN":"TLS در CDN","Link SNI":"SNI لینک","Only these users (empty = everyone with Xray)":"فقط این کاربرها (خالی = همه‌ی دارندگان Xray)",
- "Clients":"کلاینت‌ها","Traffic":"ترافیک","Config":"کانفیگ","Delete the inbounds of this server first":"اول اینباندهای این سرور را حذف کن","Add an Xray server first":"اول یک سرور Xray اضافه کن","Certificate (PEM, full chain)":"گواهی (PEM، زنجیره‌ی کامل)","Private key (PKCS#8 PEM)":"کلید خصوصی (PEM)"});
+ Object.assign(FA,KFA);
 }
-var DN={d:null};
-function p_dns(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Kanki DNS')+'</h2><p>'+t('Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="dnsAdd(\'relay\')">+ '+t('Add relay')+'</button><button class="btn" onclick="dnsAdd(\'exit\')">+ '+t('Add DNS server')+'</button></div></div><div id="dn">'+t('Loading…')+'</div>';
- dnsLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))dnsLoad(true)},5000)}
-function dnsLoad(quiet){return api('GET','/api/dns').then(function(d){DN.d=d;if(S.page!='dns')return;if(quiet&&$('#dn_srv')){$('#dn_srv').innerHTML=dnsServers(d);$('#dn_cert').innerHTML=dnsCertState(d);return}dnsDraw(d)}).catch(fail)}
-function dnsName(id){var a=(DN.d&&DN.d.agents)||[];for(var i=0;i<a.length;i++)if(a[i].id==id)return a[i].name;return id}
-function dnsCertState(d){var c=d.cert||{};
- return '<p style="margin:6px 0">'+t('Certificate')+': '+(c.present?'<span class="badge g">'+t('issued')+(d.cert_at?' · '+ago(d.cert_at):'')+'</span>':'<span class="badge r">'+t('none yet')+'</span>')+(d.acme_busy?' <span class="badge">'+t('Working… about a minute')+'</span>':'')+'</p>'+
-  (d.cert_names?'<p class="muted ltr" style="margin:0">'+esc(d.cert_names.split(',').join('  '))+'</p>':'')+
-  (d.acme_err?'<div class="warnbox ltr">'+t('Last error')+': '+esc(d.acme_err)+'</div>':'')}
-function dnsServers(d){if(!d.servers.length)return '<p class="muted">'+t('Add an exit DNS server first')+'</p>';
- return d.servers.map(function(x){var st=x.status||{},on=st.active,col=on?'var(--ok)':'var(--bad)',errs=(st.errors||[]).concat(st.deploy_error?[st.deploy_error]:[]).concat(st.error?[st.error]:[]);
-  return '<div class="card" style="margin:0 0 8px;border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px"><div style="min-width:0"><b>'+esc(x.name||x.server)+'</b> <span class="rotb">'+(x.role=='relay'?'🇮🇷 '+t('Relay')+' → '+esc(dnsName(x.exit)):'🌍 '+t('Exit'))+'</span>'+(x.hidden?' <span class="badge">'+t('Hidden from subscribers')+'</span>':'')+
-   '<div class="muted ltr">'+esc(x.host||'—')+' · '+esc(x.answer_ip||'?')+'</div></div><span class="badge '+(on?'g':'r')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span></div>'+
-   (on?'<p class="muted" style="margin:6px 0 0">'+t('Allowed addresses')+': <b>'+N(st.allowed||0)+'</b> · '+t('Connections')+': <b>'+N(st.conns||0)+'</b></p>':'')+
-   (errs.length?'<div class="warnbox ltr" style="margin:6px 0 0">'+errs.map(esc).join('<br>')+'</div>':'')+
-   '<div class="g2" style="margin-top:8px"><button class="b2" onclick="dnsEdit(\''+x.server+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2 bd" onclick="dnsDel(\''+x.server+'\')">'+ic('trash',15)+' '+t('Remove from DNS')+'</button></div></div>'}).join('')}
-function dnsDraw(d){var el=$('#dn');if(!el)return;
- var kpi='<div class="card" style="padding:10px"><div class="tkpi" style="margin:0"><div><small>'+t('Status')+'</small><b>'+(d.on?t('On'):t('Off'))+'</b></div><div><small>'+t('Users with DNS')+'</small><b>'+N(d.users)+'</b></div><div><small>'+t('Routed names')+'</small><b>'+N(d.domains)+'</b></div><div><small>'+t('DNS servers')+'</small><b>'+N(d.servers.length)+'</b></div></div></div>';
- var set='<div class="card"><h3>'+t('Settings')+'</h3><label class="chk"><input type="checkbox" id="dn_on" '+(d.on?'checked':'')+'><span><b>'+t('DNS is on')+'</b></span></label>'+
-  '<label class="f">'+t('DNS domain')+'</label><input id="dn_base" class="ltr" placeholder="dns.example.com" value="'+esc(d.base)+'"><small class="muted">'+t('Each DNS server gets a name under it, like de.dns.example.com')+'</small>'+
-  '<div class="g2"><div><label class="f">'+t('Upstream resolvers')+'</label><input id="dn_up" class="ltr" value="'+esc(d.upstreams.join(', '))+'"></div><div><label class="f">'+t('An allowed address stays open for (hours)')+'</label><input id="dn_h" type="number" min="1" class="ltr" value="'+d.ip_hours+'"></div></div>'+
-  '<button class="btn" style="width:100%;margin-top:12px" id="dn_save">'+t('Save')+'</button></div>';
- var cert='<div class="card"><h3>'+t('Certificate and records')+'</h3><div id="dn_cert">'+dnsCertState(d)+'</div>'+
-  '<label class="f">'+t('Provider')+'</label><select id="dn_pv">'+[['',t('Manual (paste a certificate)')],['cloudflare','Cloudflare'],['arvan','ArvanCloud']].map(function(o){return '<option value="'+o[0]+'"'+(d.provider==o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select>'+
-  '<div id="dn_auto"><div class="g2"><div><label class="f">'+t('API token')+'</label><input id="dn_tok" type="password" class="ltr" autocomplete="off" placeholder="'+(d.has_token?t('unchanged'):'')+'"></div><div><label class="f">'+t("E-mail for Let's Encrypt (optional)")+'</label><input id="dn_em" class="ltr" value="'+esc(d.email||'')+'"></div></div>'+
-   '<button class="b2" style="width:100%;margin-top:10px" id="dn_iss">'+t('Set records and get the certificate now')+'</button></div>'+
-  '<div id="dn_man"><label class="f">'+t('Certificate (PEM, full chain)')+'</label><textarea id="dn_c" rows="3" class="ltr" placeholder="-----BEGIN CERTIFICATE-----"></textarea><label class="f">'+t('Private key (PKCS#8 PEM)')+'</label><textarea id="dn_k" rows="3" class="ltr" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></div>'+
-  '<button class="btn" style="width:100%;margin-top:12px" id="dn_csave">'+t('Save')+'</button></div>';
- el.innerHTML=kpi+'<div class="g2">'+set+cert+'</div><div class="card"><h3>'+t('DNS servers')+'</h3><div id="dn_srv">'+dnsServers(d)+'</div></div><div class="card"><h3>'+t('Services')+'</h3><div id="dn_svc"></div></div>';
- var pv=function(){var a=$('#dn_pv').value!='';$('#dn_auto').style.display=a?'':'none';$('#dn_man').style.display=a?'none':''};$('#dn_pv').onchange=pv;pv();
- $('#dn_save').onclick=function(){api('PUT','/api/dns',{on:$('#dn_on').checked,base:$('#dn_base').value,upstreams:$('#dn_up').value,ip_hours:+$('#dn_h').value||12}).then(function(){toast(t('Saved'));dnsLoad()}).catch(fail)};
- $('#dn_csave').onclick=function(){var b={provider:$('#dn_pv').value,api_token:$('#dn_tok').value,email:$('#dn_em').value};if(!b.provider&&$('#dn_c').value.trim()){b.cert=$('#dn_c').value;b.key=$('#dn_k').value}
-  api('PUT','/api/dns',b).then(function(){toast(t('Saved'));dnsLoad()}).catch(fail)};
- $('#dn_iss').onclick=function(){var me=this;me.disabled=true;api('PUT','/api/dns',{provider:$('#dn_pv').value,api_token:$('#dn_tok').value,email:$('#dn_em').value}).then(function(){return api('POST','/api/dns/cert')}).then(function(){toast(t('Working… about a minute'));setTimeout(function(){me.disabled=false;dnsLoad(true)},5000)}).catch(function(e){me.disabled=false;fail(e)})};
- dnsServices(d)}
-function dnsGroupOn(d,id,g){if(g.locked)return false;if(g.opt_in)return d.opt.indexOf(id)>=0;return d.off.indexOf(id)<0}
-function dnsServices(d){var cat=d.catalog||{},secs=cat.sections||[],svcs=cat.services||[],el=$('#dn_svc');
- var draw=function(icons){el.innerHTML=secs.map(function(sec){var list=svcs.filter(function(s){return s.section==sec.key});if(!list.length)return '';
-   return '<h4 style="margin:14px 0 6px">'+esc(sec.label)+'</h4><div class="ncards">'+list.map(function(s){var icn=icons[s.key];
-    return '<div class="card" style="margin:0;padding:10px"><div class="row" style="gap:8px">'+(icn?'<svg viewBox="0 0 24 24" width="22" height="22" style="flex:none"><path fill="#'+esc(icn.hex=='000000'?'888888':icn.hex)+'" d="'+esc(icn.path)+'"/></svg>':'<span class="ni">'+ic('dns',18)+'</span>')+'<b>'+esc(s.label)+'</b></div>'+
-     s.groups.map(function(g){var id=s.key+'/'+g.key,on=dnsGroupOn(d,id,g);
-      return '<label class="chk" style="margin-top:6px" title="'+esc(g.note||'')+'"><input type="checkbox" class="dn_g" data-id="'+esc(id)+'" data-opt="'+(g.opt_in?1:0)+'" '+(on?'checked':'')+(g.locked?' disabled':'')+'><span>'+esc(g.label)+' <small class="muted">('+N(g.domains.length)+')'+(g.locked?' · '+t('cannot be routed'):g.opt_in?' · '+t('only on request'):'')+'</small>'+(g.note?'<br><small class="muted">'+esc(g.note)+'</small>':'')+'</span></label>'}).join('')+'</div>'}).join('')+'</div>'}).join('')+
-   '<label class="f" style="margin-top:14px">'+t('Extra domains, one per line')+'</label><textarea id="dn_cu" rows="4" class="ltr" placeholder="example.com">'+esc((d.custom||[]).join('\n'))+'</textarea>'+
-   '<button class="btn" style="width:100%;margin-top:12px" id="dn_svs">'+t('Save services')+'</button>';
-  $('#dn_svs').onclick=function(){var off=[],opt=[];$$('.dn_g').forEach(function(c){if(c.disabled)return;if(c.dataset.opt=='1'){if(c.checked)opt.push(c.dataset.id)}else if(!c.checked)off.push(c.dataset.id)});
-   api('PUT','/api/dns',{off:off,opt:opt,custom:$('#dn_cu').value.split('\n').map(function(x){return x.trim()}).filter(Boolean)}).then(function(){toast(t('Saved'));dnsLoad()}).catch(fail)}};
- if(DN.icons)draw(DN.icons);else fetch('/assets/dns-icons.json').then(function(r){return r.json()}).then(function(j){DN.icons=j.icons||{};draw(DN.icons)}).catch(function(){DN.icons={};draw({})})}
-function dnsForm(x,role){var d=DN.d,exits=d.servers.filter(function(s){return s.role=='exit'&&s.server!=(x&&x.server)}),agents=d.agents.filter(function(a){return !d.servers.some(function(s){return s.server==a.id&&(!x||s.server!=x.server)})});
- if(role=='relay'&&!exits.length){toast(t('Add an exit DNS server first'),1);return null}
- var h='<p class="muted" style="margin:0 0 6px">'+t('Ports 53, 80, 443 and 853 must be free on this server: give DNS its own server.')+'</p>';
- if(!x)h+='<label class="f">'+t('Agent server')+'</label><select id="dx_sv"><option value="__new">'+t('New server (install command)')+'</option>'+agents.map(function(a){return '<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>'}).join('')+'</select><div id="dx_nw"><label class="f">'+t('Server name')+'</label><input id="dx_nm" placeholder="'+(role=='relay'?'Iran-DNS':'DNS-DE')+'"></div>';
- h+='<div class="g2"><div><label class="f">'+t('Label')+'</label><input id="dx_lb" class="ltr" placeholder="'+(role=='relay'?'ir1':'de')+'" value="'+esc(x?x.label:'')+'"></div><div><label class="f">'+t('Answer IP')+'</label><input id="dx_ip" class="ltr" placeholder="'+t('automatic')+'" value="'+esc(x?x.ip:'')+'"></div></div>';
- if(role=='relay')h+='<label class="f">'+t('Its exit')+'</label><select id="dx_ex">'+exits.map(function(s){return '<option value="'+esc(s.server)+'"'+(x&&x.exit==s.server?' selected':'')+'>'+esc(s.name)+'</option>'}).join('')+'</select>'+
-  '<div class="g2"><div><label class="f">'+t('Transport to the exit')+'</label><select id="dx_tr">'+['tcpmux','dual','h2','hq','wss','ws','kcp','quic','tcp'].map(function(v){return '<option'+((x&&x.transport||'tcpmux')==v?' selected':'')+'>'+v+'</option>'}).join('')+'</select></div><div><label class="f">'+t('Tunnel port on the relay')+'</label><input id="dx_tp" type="number" class="ltr" value="'+((x&&x.tunnel_port)||8446)+'"></div></div>';
- h+='<label class="f">'+t('Note for subscribers')+'</label><input id="dx_nt" value="'+esc(x?x.note:'')+'"><label class="chk" style="margin-top:8px"><input type="checkbox" id="dx_hd" '+(x&&x.hidden?'checked':'')+'><span>'+t('Hidden from subscribers')+'</span></label>';
- return h+'<button class="btn" style="width:100%;margin-top:12px" id="dx_go">'+t('Save')+'</button><div id="dx_out"></div>'}
-function dnsBody(role,sid){var b={server:sid,role:role,label:$('#dx_lb').value,ip:$('#dx_ip').value,note:$('#dx_nt').value,hidden:$('#dx_hd').checked};
- if(role=='relay'){b.exit=$('#dx_ex').value;b.transport=$('#dx_tr').value;b.tunnel_port=+$('#dx_tp').value||8446}return b}
-function dnsAdd(role){var go=function(){var h=dnsForm(null,role);if(h===null)return;modal(mhead(t(role=='relay'?'Add relay':'Add DNS server'),t(role=='relay'?'Relay (inside Iran)':'Exit (abroad)'))+h);
-  var sv=function(){$('#dx_nw').style.display=$('#dx_sv').value=='__new'?'':'none'};$('#dx_sv').onchange=sv;sv();
-  $('#dx_go').onclick=function(){var me=this;me.disabled=true;var nw=$('#dx_sv').value=='__new';
-   (nw?api('POST','/api/tunnels/servers',{name:$('#dx_nm').value||((role=='relay'?'DNS-relay-':'DNS-')+($('#dx_lb').value||''))}):Promise.resolve({id:$('#dx_sv').value})).then(function(r){
-    return api('POST','/api/dns/servers',dnsBody(role,r.id)).then(function(){toast(t('Saved'));if(nw){$('#dx_go').style.display='none';$('#dx_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}else closeModal();dnsLoad()})}).catch(function(e){me.disabled=false;fail(e)})}};
- if(DN.d)go();else dnsLoad().then(go)}
-function dnsEdit(id){var x=DN.d.servers.filter(function(s){return s.server==id})[0];if(!x)return;var h=dnsForm(x,x.role);if(h===null)return;
- modal(mhead(t('Edit'),x.name)+h);$('#dx_go').onclick=function(){api('POST','/api/dns/servers',dnsBody(x.role,id)).then(function(){toast(t('Saved'));closeModal();dnsLoad()}).catch(fail)}}
-function dnsDel(id){confirmDo(function(){api('DELETE','/api/dns/servers/'+encodeURIComponent(id)).then(function(){toast(t('Done'));dnsLoad()}).catch(fail)})}
+var KFA={
+ // menu
+ "VPN services":"سرویس‌های VPN","All VPN services":"همه‌ی سرویس‌های VPN","Kanki VPN and Xray side by side":"کانکی VPN و Xray کنار هم","Kanki VPN":"کانکی VPN","WireGuard · AmneziaWG · Hysteria2":"WireGuard · AmneziaWG · Hysteria2",
+ "VLESS · VMess · Trojan · Shadowsocks":"VLESS · VMess · Trojan · Shadowsocks","Kanki DNS":"دی‌ان‌اس کانکی","Overview":"نمای کلی","Status of the DNS servers":"وضعیت سرورهای DNS","DNS servers":"سرورهای DNS",
+ "Exits abroad and relays in Iran":"خروجی‌های خارج و ریلی‌های ایران","Services":"سرویس‌ها","What goes through the DNS":"چه چیزهایی از DNS رد می‌شود","DNS users":"کاربران DNS","Registered addresses and use":"IPهای ثبت‌شده و مصرف",
+ "Settings and SSL":"تنظیمات و SSL","Domain, certificate, upstreams":"دامنه، گواهی، DNS بالادست","Tunnels":"تانل‌ها","Sales & support":"فروش و پشتیبانی","System":"سیستم",
+ // VPN hub
+ "Both kinds of VPN your users get, side by side":"هر دو نوع VPN که کاربرها می‌گیرند، کنار هم","Our own protocols on the nodes":"پروتکل‌های خودمان روی نودها","3X-UI style inbounds":"اینباندها به سبک 3X-UI",
+ "Nodes online":"نودهای آنلاین","Manage nodes":"مدیریت نودها","Add node":"افزودن نود","Manage Xray":"مدیریت Xray","New inbound":"اینباند جدید","Users by protocol":"کاربران هر پروتکل",
+ "Online now":"الان آنلاین","Users with Xray":"کاربران دارای Xray","Working inbounds":"اینباندهای فعال","Total traffic":"ترافیک کل","No inbound yet.":"هنوز اینباندی نیست.","Make the first one":"اولی را بساز","Main server":"سرور اصلی",
+ "Xray is off":"Xray خاموش است","Turn it on":"روشنش کن","Kanki DNS (sanctions)":"دی‌ان‌اس کانکی (رفع تحریم)","Open":"باز کردن",
+ // user form
+ "Services of this user":"سرویس‌های این کاربر","Everything":"همه","Kanki VPN only":"فقط کانکی VPN","Xray only":"فقط Xray","DNS only":"فقط DNS","Protocols":"پروتکل‌ها","Servers":"سرورها",
+ "Links of every Xray inbound go into the subscription":"لینک همه‌ی اینباندهای Xray در ساب می‌آید","Private DNS for sanctioned sites":"DNS اختصاصی برای سایت‌های تحریمی","Is off in the panel":"در پنل خاموش است",
+ "No Xray inbound yet":"هنوز اینباند Xray نیست","No DNS server yet":"هنوز سرور DNS نیست","inbounds":"اینباند","on":"روشن",
+ // node types
+ "Node type":"نوع نود","VPN node":"نود VPN","Xray node":"نود Xray","DNS exit node":"نود DNS خروجی","Smart DNS abroad":"DNS هوشمند در خارج","DNS relay node":"نود ریلی DNS","Iran server in front of a DNS exit":"سرور ایران جلوی DNS خروجی",
+ // Xray
+ "Xray inbounds for your users: every user with Xray ticked is a client of every inbound":"اینباندهای Xray برای کاربرهای خودت: هر کاربری که تیک Xray دارد کلاینت همه‌ی اینباندهاست",
+ "Inbound":"اینباند","Inbounds":"اینباندها","Online clients":"کلاینت‌های آنلاین","Routing and outbounds":"روتینگ و خروجی‌ها","Xray servers":"سرورهای Xray","Add server":"افزودن سرور",
+ "Xray is off: nothing runs on the servers and no links go to the users.":"Xray خاموش است: روی سرورها چیزی اجرا نمی‌شود و لینکی به کاربرها نمی‌رسد.",
+ "1) Add a server (the panel server or any tunnel server). 2) Make inbounds on it. 3) Tick Xray for a user: the links of every inbound go into the user's subscription, and the traffic counts toward the user's volume.":"۱) یک سرور اضافه کن (سرور پنل یا هر سرور تانل). ۲) روی آن اینباند بساز. ۳) برای کاربر تیک Xray بزن: لینک همه‌ی اینباندها در ساب او می‌آید و ترافیکش از حجم خودش کم می‌شود.",
+ "Off":"خاموش","Traffic used up":"حجم تمام شد","Expired":"منقضی","Running":"در حال اجرا","Not running":"اجرا نمی‌شود","Waiting for the server…":"در انتظار سرور…","Panel server":"سرور پنل",
+ "All servers":"همه‌ی سرورها","Search":"جستجو","Nothing found":"چیزی پیدا نشد","Fallbacks":"فال‌بک","users only":"کاربر خاص","Traffic":"ترافیک","Clients":"کلاینت‌ها","Expires":"پایان",
+ "Links":"لینک‌ها","Copy":"کپی","Reset":"صفر کردن","Delete":"حذف","Edit":"ویرایش","days":"روز",
+ "Users whose Xray traffic moved in the last few seconds":"کاربرهایی که در چند ثانیه‌ی اخیر ترافیک Xray داشته‌اند","All users":"همه‌ی کاربرها","Nobody is online right now":"الان کسی آنلاین نیست",
+ "Ready-made rules":"قانون‌های آماده","Block private addresses":"مسدود کردن IPهای داخلی","Users cannot reach the server's own network (10.x, 192.168.x …)":"کاربرها به شبکه‌ی داخلی سرور (10.x، 192.168.x …) دسترسی ندارند",
+ "Block BitTorrent":"مسدود کردن تورنت","Torrent traffic gets abuse reports to your servers":"تورنت برای سرورهایت گزارش تخلف می‌آورد","Block ads":"مسدود کردن تبلیغات","Ad and tracker domains (geosite:category-ads-all)":"دامنه‌های تبلیغ و ردیاب (geosite:category-ads-all)",
+ "Block Iranian sites":"مسدود کردن سایت‌های ایرانی",".ir domains and Iranian addresses do not go through the server: they should be opened directly":"دامنه‌های .ir و IPهای ایران از سرور رد نمی‌شوند: باید مستقیم باز شوند",
+ "Outbounds":"خروجی‌ها (اوت‌باند)","Where traffic leaves the server: directly, or on to another server (chain)":"ترافیک از کجا خارج شود: مستقیم، یا ادامه به یک سرور دیگر (زنجیره)","Add outbound":"افزودن خروجی",
+ "Default outbound (what no rule catches)":"خروجی پیش‌فرض (هر چه قانونی نگیرد)","Routing rules":"قانون‌های مسیریابی","Checked from top to bottom; the first rule that matches decides":"از بالا به پایین چک می‌شوند؛ اولین قانونی که بخورد تصمیم می‌گیرد",
+ "Add rule":"افزودن قانون","Domain strategy":"روش دامنه (Domain strategy)","by name (fastest)":"با اسم (سریع‌ترین)","resolve when no name rule matched":"اگر قانون اسمی نخورد، IP بگیر","always resolve for IP rules":"برای قانون‌های IP همیشه IP بگیر",
+ "Advanced: raw JSON":"پیشرفته: JSON خام","Advanced: extra routing rules (JSON array)":"پیشرفته: قوانین مسیریابی اضافه (آرایه‌ی JSON)","Advanced: extra outbounds (JSON array, the first one becomes the default)":"پیشرفته: اوت‌باندهای اضافه (آرایه‌ی JSON، اولی پیش‌فرض می‌شود)",
+ "Changes reach the servers within a few seconds of saving":"تغییرات چند ثانیه بعد از ذخیره به سرورها می‌رسد","Save routing":"ذخیره‌ی روتینگ","Block":"مسدود","Direct":"مستقیم",
+ "Straight to the internet from this server":"مستقیم از همین سرور به اینترنت","built in":"پیش‌ساخته","Dropped":"دور ریخته می‌شود","port":"پورت","users":"کاربر","Rule":"قانون",
+ "No rules yet: everything goes to the default outbound.":"هنوز قانونی نیست: همه چیز به خروجی پیش‌فرض می‌رود.","A rule still sends traffic to this outbound":"هنوز قانونی ترافیک را به این خروجی می‌فرستد",
+ "Another server (from its link)":"سرور دیگر (از لینکش)","Direct (freedom)":"مستقیم (freedom)","Block (blackhole)":"مسدود (blackhole)","Edit outbound":"ویرایش خروجی","Tag (name)":"تگ (اسم)","Type":"نوع",
+ "Link of the other server (vless, vmess, trojan or ss)":"لینک سرور دیگر (vless، vmess، trojan یا ss)",
+ "Typical use: this server is in Iran and the link is of a server abroad, so users connect inside Iran and leave from abroad.":"کاربرد معمول: این سرور در ایران است و لینک مال سرور خارج؛ کاربر داخل ایران وصل می‌شود و از خارج بیرون می‌رود.",
+ "Address":"آدرس","Port":"پورت","Username (optional)":"نام کاربری (اختیاری)","Password":"رمز","The whole outbound (JSON object)":"کل اوت‌باند (آبجکت JSON)","Check":"بررسی","OK":"تأیید",
+ "an outbound tag is English letters, digits, - and _":"تگ خروجی فقط حروف انگلیسی، عدد، - و _","This tag is already used":"این تگ قبلاً استفاده شده","Press Save routing to apply":"برای اعمال، «ذخیره‌ی روتینگ» را بزن",
+ "Edit rule":"ویرایش قانون","Name":"نام","like: AI sites through Germany":"مثلاً: سایت‌های هوش مصنوعی از آلمان","Domains (one per line)":"دامنه‌ها (هر خط یکی)","IP addresses and ranges (one per line)":"IPها و رنج‌ها (هر خط یکی)",
+ "Ports":"پورت‌ها","Network":"شبکه","Any":"همه","Sniffed protocol":"پروتکل تشخیص‌داده‌شده","Only from these inbounds":"فقط از این اینباندها","Only for these users":"فقط برای این کاربرها","Send to":"بفرست به",
+ "Give the rule at least one condition":"حداقل یک شرط برای قانون بگذار","Settings":"تنظیمات","Xray is on":"Xray روشن است","Off: Xray stops on every server and the links leave the subscriptions":"خاموش: Xray روی همه‌ی سرورها می‌ایستد و لینک‌ها از ساب‌ها حذف می‌شوند",
+ "IPv4 only":"فقط IPv4","For servers whose IPv6 does not work well":"برای سرورهایی که IPv6 آن‌ها خوب کار نمی‌کند","Xray-core version":"نسخه‌ی Xray-core","empty = latest":"خالی = آخرین نسخه","A release tag like v26.3.27":"یک تگ ریلیز مثل v26.3.27",
+ "Log level":"سطح لاگ","Xray DNS servers (comma separated, empty = the server's own)":"DNSهای Xray (با کاما، خالی = DNS خود سرور)","Save":"ذخیره",
+ "Xray can run on the panel server or on any tunnel server. A new server gets a one-line install command.":"Xray روی سرور پنل یا هر سرور تانل اجرا می‌شود. سرور جدید یک دستور نصب یک‌خطی می‌گیرد.",
+ "Agent server":"سرور (ایجنت)","New server (install command)":"سرور جدید (دستور نصب)","Server name":"نام سرور","Address for links":"آدرس در لینک‌ها","automatic":"خودکار",
+ "A domain or IP the users connect to; empty = the IP the server reports from":"دامنه یا IPی که کاربرها به آن وصل می‌شوند؛ خالی = IPی که سرور از آن گزارش می‌دهد",
+ "Config":"کانفیگ","A copy was made (off until you check it)":"کپی ساخته شد (تا چکش نکنی خاموش است)","Reset the traffic of this inbound to zero?":"ترافیک این اینباند صفر شود؟",
+ "Users and links":"کاربرها و لینک‌ها","Inactive":"غیرفعال","No address":"آدرس ندارد","No users with Xray yet: tick Xray in a user's form":"هنوز کاربری Xray ندارد: در فرم کاربر تیک Xray را بزن",
+ "Add an Xray server first":"اول یک سرور Xray اضافه کن","Basic":"اصلی","Transport":"ترنسپورت","Security":"امنیت","Sniffing":"Sniffing","Link and CDN":"لینک و CDN","Limits and users":"محدودیت و کاربرها",
+ "Remark":"نام","Protocol":"پروتکل","Random free port":"پورت آزاد تصادفی","Listen address":"آدرس listen","Method":"روش","Quick setup":"ساخت سریع","random if empty":"خالی = تصادفی",
+ "Path":"مسیر (path)","Host":"هاست","Heartbeat (seconds, 0 = off)":"ضربان (ثانیه، ۰ = خاموش)","Mode":"حالت","Padding (bytes)":"پدینگ (بایت)","Service name":"نام سرویس","Authority (in the link)":"Authority (در لینک)",
+ "Multi mode (in the link)":"حالت Multi (در لینک)","HTTP header camouflage":"استتار با هدر HTTP","The TCP stream starts like a plain HTTP request (path and Host above)":"اتصال TCP مثل یک درخواست HTTP ساده شروع می‌شود (path و Host بالا)",
+ "MTU":"MTU","TTI (ms)":"TTI (میلی‌ثانیه)","Uplink (MB/s)":"آپلود (مگابایت/ثانیه)","Downlink (MB/s)":"دانلود (مگابایت/ثانیه)","Congestion control":"کنترل ازدحام",
+ "Accept PROXY protocol":"پذیرش PROXY protocol","Only when nginx / HAProxy in front sends it":"فقط وقتی nginx / HAProxy جلوی سرور آن را می‌فرستد","Flow":"Flow","SNI":"SNI","Lowest TLS version":"کمترین نسخه‌ی TLS","Default":"پیش‌فرض",
+ "Refuse unknown SNI":"رد SNI ناشناس","Only connections for the name above are answered":"فقط به اتصال‌های همین اسم جواب داده می‌شود","Certificate":"گواهی","Paste (PEM)":"چسباندن (PEM)","Files on the server":"فایل روی سرور",
+ "unchanged":"بدون تغییر","Certificate file":"فایل گواهی","Key file":"فایل کلید","Target (dest)":"مقصد (dest)","Suggestions":"پیشنهادها","Server names":"نام‌های سرور","Short IDs":"Short ID ها","New":"جدید",
+ "Private key":"کلید خصوصی","Public key":"کلید عمومی","Largest clock difference (ms, 0 = off)":"بیشترین اختلاف ساعت (میلی‌ثانیه، ۰ = خاموش)","New keys":"کلید جدید","Fingerprint":"اثرانگشت (fp)",
+ "Shadowsocks has no TLS or REALITY: its own encryption is enough.":"Shadowsocks نیازی به TLS یا REALITY ندارد: رمزنگاری خودش کافی است.",
+ "Read the site name from the traffic (needed for domain rules)":"اسم سایت را از ترافیک بخوان (برای قانون‌های دامنه لازم است)","Look at":"بررسی","Use it for the destination too":"برای مقصد هم استفاده شود",
+ "Off = only for routing (recommended)":"خاموش = فقط برای مسیریابی (پیشنهادی)","Metadata only":"فقط متادیتا","Do not read the content, only the connection details":"محتوا خوانده نشود، فقط مشخصات اتصال",
+ "What the users' links say. Leave empty unless a CDN or another address is in front of the server.":"چیزی که در لینک کاربرها نوشته می‌شود. خالی بگذار مگر CDN یا آدرس دیگری جلوی سرور باشد.",
+ "Link address":"آدرس لینک","Link port":"پورت لینک","Link SNI":"SNI لینک","TLS at the CDN":"TLS در CDN","The CDN has the certificate; the server itself speaks plain WS / gRPC / XHTTP":"گواهی دست CDN است؛ خود سرور WS / gRPC / XHTTP ساده دارد",
+ "Total traffic of the inbound (GB, 0 = unlimited)":"حجم کل اینباند (گیگ، ۰ = نامحدود)","Stops on (empty = never)":"تاریخ توقف (خالی = هرگز)",
+ "When the traffic is used up or the date passes, the inbound stops by itself; users keep their own limits as well.":"وقتی حجم تمام شود یا تاریخ برسد، اینباند خودش می‌ایستد؛ محدودیت‌های خود کاربرها هم سر جایش است.",
+ "Only these users (empty = everyone with Xray)":"فقط این کاربرها (خالی = همه‌ی دارندگان Xray)","All":"همه","None":"هیچ",
+ "VLESS / Trojan over TCP with TLS: traffic that is not ours goes to these destinations (a website, another service).":"VLESS / Trojan روی TCP با TLS: ترافیکی که مال ما نیست به این مقصدها می‌رود (یک سایت، سرویس دیگر).",
+ "Add fallback":"افزودن فال‌بک","Destination (port or address:port)":"مقصد (پورت یا آدرس:پورت)","ALPN":"ALPN","SNI (name)":"SNI (اسم)","No fallbacks":"فال‌بکی نیست",
+ "Filled in: check the Security tab":"پر شد: تب امنیت را چک کن","the port is required":"پورت لازم است","Clients online":"کلاینت آنلاین",
+ // Kanki DNS
+ "Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct":"DNS هوشمند اختصاصی مشتری‌ها: سرویس‌های تحریمی از سرورهای شما رد می‌شوند و بقیه مستقیم",
+ "Add relay":"افزودن ریلی","Add DNS server":"افزودن سرور DNS","Status":"وضعیت","On":"روشن","Running servers":"سرورهای در حال اجرا","Users with DNS":"کاربران دارای DNS","Allowed addresses":"IPهای مجاز",
+ "Queries":"درخواست‌ها","routed":"مسیردهی‌شده","DNS is off: nothing runs on the servers.":"DNS خاموش است: روی سرورها چیزی اجرا نمی‌شود.",
+ "No DNS domain yet: encrypted DNS (DoT / DoH) needs one.":"هنوز دامنه‌ی DNS نداری: DNS رمزدار (DoT / DoH) به آن نیاز دارد.",
+ "No certificate yet: DoT / DoH and registering by link do not work without it.":"هنوز گواهی نیست: DoT / DoH و ثبت با لینک بدون آن کار نمی‌کند.","Add an exit DNS server first":"اول یک سرور DNS خروجی اضافه کن",
+ "Path of the traffic":"مسیر ترافیک","Manage":"مدیریت","Busiest services":"پرمصرف‌ترین سرویس‌ها","Routed names asked for most since the DNS services started":"دامنه‌هایی که از شروع سرویس DNS بیشتر از همه پرسیده شده‌اند",
+ "Check a domain":"بررسی یک دامنه","Does this site go through Kanki DNS, and which service lists it?":"این سایت از DNS کانکی رد می‌شود؟ در کدام سرویس است؟",
+ "How it works":"چطور کار می‌کند",
+ "1) A user's phone uses your DNS (Private DNS with the user's own address). 2) Names of sanctioned services (games, AI, developer sites …) are answered with your server's IP; everything else is answered normally and goes direct. 3) Your server passes those connections on without opening them. A relay inside Iran sends them to an exit abroad through a hidden Kanki tunnel.":"۱) گوشی کاربر از DNS شما استفاده می‌کند (Private DNS با آدرس اختصاصی خودش). ۲) اسم سرویس‌های تحریمی (بازی، هوش مصنوعی، سایت‌های برنامه‌نویسی …) با IP سرور شما جواب داده می‌شود؛ بقیه عادی جواب می‌گیرند و مستقیم می‌روند. ۳) سرور شما آن اتصال‌ها را بدون باز کردن رمز رد می‌کند. ریلی داخل ایران آن‌ها را با یک تانل مخفی کانکی به خروجی خارج می‌فرستد.",
+ "Internet":"اینترنت","Nothing yet":"هنوز چیزی نیست","Goes through Kanki DNS":"از DNS کانکی رد می‌شود","Goes direct (not routed)":"مستقیم می‌رود (مسیردهی نمی‌شود)","this group is off":"این گروه خاموش است",
+ "your extra domains":"دامنه‌های اضافه‌ی خودت","Add to extra domains":"افزودن به دامنه‌های اضافه","Turn this group on":"روشن کردن این گروه","Saved":"ذخیره شد","Exit":"خروجی","Iran":"ایران","issued":"صادر شده","none yet":"هنوز ندارد",
+ "Working… about a minute":"در حال انجام… حدود یک دقیقه","Last error":"آخرین خطا","Relay (inside Iran)":"ریلی (داخل ایران)","Exit (abroad)":"خروجی (خارج)","no name":"بدون اسم",
+ "Hidden from subscribers":"مخفی از مشتری‌ها","From cache":"از کش","Refused (not a subscriber)":"رد شده (غیر مشتری)","Connections":"اتصال‌ها","Remove from DNS":"حذف از DNS",
+ "Search services or domains":"جستجوی سرویس یا دامنه","Save services":"ذخیره سرویس‌ها",
+ "Groups marked \"only on request\" stay off until you turn them on. Some names cannot be routed (they check the address).":"گروه‌های «فقط با درخواست» تا روشنشان نکنی خاموش می‌مانند. بعضی اسم‌ها قابل مسیردهی نیستند (آدرس را چک می‌کنند).",
+ "All on":"همه روشن","All off":"همه خاموش","cannot be routed":"قابل مسیردهی نیست","only on request":"فقط با درخواست","Extra domains":"دامنه‌های اضافه","One per line; their subdomains are routed too":"هر خط یکی؛ زیردامنه‌هایشان هم مسیردهی می‌شوند",
+ "routed names now":"دامنه‌ی مسیردهی‌شده","Addresses each user registered (allowed now) and their queries since the DNS services started":"IPهایی که هر کاربر ثبت کرده (الان مجاز) و درخواست‌هایش از شروع سرویس DNS",
+ "No user has DNS yet: tick DNS in a user's form":"هنوز کاربری DNS ندارد: در فرم کاربر تیک DNS را بزن","queries":"درخواست","addresses":"IP","Copy the Private DNS address":"کپی آدرس Private DNS","Forget addresses":"پاک کردن IPها",
+ "The user's phone registers again by itself; someone else using the address loses access. Continue?":"گوشی کاربر خودش دوباره ثبت می‌کند؛ اگر کس دیگری از این IP استفاده می‌کند دسترسی‌اش قطع می‌شود. ادامه بدهم؟",
+ "Done: servers forget them within a few seconds":"انجام شد: سرورها تا چند ثانیه‌ی دیگر فراموششان می‌کنند","DNS is on":"DNS روشن است","Off: DNS stops on every server and leaves the subscriptions":"خاموش: DNS روی همه‌ی سرورها می‌ایستد و از ساب‌ها حذف می‌شود",
+ "DNS domain":"دامنه‌ی DNS","Each DNS server gets a name under it, like de.dns.example.com":"هر سرور DNS یک اسم زیر آن می‌گیرد، مثل de.dns.example.com","Upstream resolvers":"DNSهای بالادست",
+ "AdGuard (no ads)":"AdGuard (بدون تبلیغ)","An allowed address stays open for (hours)":"مدت باز ماندن IP ثبت‌شده (ساعت)","After this long without the user's app registering again, the address is closed":"اگر تا این مدت اپ کاربر دوباره ثبت نکند، IP بسته می‌شود",
+ "Certificate and records":"گواهی SSL و رکوردها","Provider":"سرویس DNS دامنه","Manual (paste a certificate)":"دستی (گواهی را خودت بگذار)",
+ "The panel makes the A records of every server (and *.) with this API token, then gets a wildcard certificate from Let's Encrypt with a DNS challenge and renews it every 60 days. Works for servers inside Iran too.":"پنل با این توکن API رکورد A هر سرور (و *.) را می‌سازد، بعد با چالش DNS از Let's Encrypt گواهی Wildcard می‌گیرد و هر ۶۰ روز تمدید می‌کند. برای سرورهای داخل ایران هم کار می‌کند.",
+ "API token":"توکن API","E-mail for Let's Encrypt (optional)":"ایمیل برای Let's Encrypt (اختیاری)","Set records and get the certificate now":"الان رکوردها را بساز و گواهی بگیر",
+ "Certificate (PEM, full chain)":"گواهی (PEM، زنجیره‌ی کامل)","Private key (PKCS#8 PEM)":"کلید خصوصی (PEM)",
+ "Ports 53, 80, 443 and 853 must be free on this server: give DNS its own server.":"پورت‌های ۵۳، ۸۰، ۴۴۳ و ۸۵۳ روی این سرور باید آزاد باشند: برای DNS سرور جدا بگذار.",
+ "Label":"برچسب","Answer IP":"IP پاسخ","Its exit":"خروجی آن","Transport to the exit":"ترنسپورت تا خروجی","Tunnel port on the relay":"پورت تانل روی ریلی","Note for subscribers":"یادداشت برای مشتری‌ها",
+ "like: best on Irancell":"مثلاً: روی ایرانسل بهتر است","For repairs: the server keeps running but is not offered":"برای تعمیر: سرور روشن می‌ماند ولی به مشتری پیشنهاد نمی‌شود","Done":"انجام شد"};
+// ---------------------------------------------------------------- the VPN services page: Kanki VPN | Xray
+function p_vpn(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('VPN services')+'</h2><p>'+t('Both kinds of VPN your users get, side by side')+'</p></div></div><div class="vhub"><div class="vside" id="vh_k">'+t('Loading…')+'</div><div class="vside" id="vh_x">'+t('Loading…')+'</div></div>'+
+  '<div class="vside" id="vh_d" style="margin-top:14px"></div>';
+ var go=function(){Promise.all([api('GET','/api/nodes').catch(function(){return []}),api('GET','/api/overview').catch(function(){return {}}),api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null})]).then(function(r){if(S.page!='vpn')return;S.nodes=r[0]||[];if(r[2])XR.d=r[2];if(r[3])DN.d=r[3];vhKanki(r[0]||[],r[1]||{});vhXray(r[2]);vhDns(r[3])})};
+ go();clearInterval(S.timer);S.timer=setInterval(function(){if(document.visibilityState=='visible'&&!$('#modal').classList.contains('on'))go()},8000)}
+function vhHead(icon,title,sub,btns){return '<div class="vh"><span class="phi">'+ic(icon,24)+'</span><div><b>'+t(title)+'</b><small>'+t(sub)+'</small></div><span class="sp"></span>'+(btns||'')+'</div>'}
+function vhKanki(nodes,o){var up=nodes.filter(function(n){return n.id=='local'||n.online}).length,pr=o.protocols||{};
+ $('#vh_k').innerHTML=vhHead('nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2')+
+  '<div class="kv"><div><small>'+t('Nodes online')+'</small><b>'+N(up)+' / '+N(nodes.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N(o.online||0)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(o.traffic_gb||0)+' GB</b></div></div>'+
+  '<label class="f">'+t('Users by protocol')+'</label><div class="chs" style="display:flex;gap:6px;flex-wrap:wrap">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2']].map(function(p){return '<span class="chipx a" style="font-size:12px;padding:4px 10px">'+p[1]+' · '+N(pr[p[0]]||0)+'</span>'}).join('')+'</div>'+
+  nodes.map(function(n){var s=nState(n),loc=n.id=='local';return '<div class="vrow"><span class="dot '+s.c+'"></span><div class="nm"><b>'+esc(n.name)+(loc?' <span class="rotb">'+t('Main server')+'</span>':'')+'</b><small class="ltr">'+esc(loc?'local':String(n.address||'').replace(/^https?:\/\//,''))+'</small></div><span class="chipx">'+N(n.users||0)+' '+t('users')+'</span></div>'}).join('')+
+  '<div class="g2" style="margin-top:12px"><a class="b2" style="text-align:center;text-decoration:none" href="#nodes">'+t('Manage nodes')+'</a><button class="btn" onclick="_nodeAdd&&_nodeAdd()">+ '+t('Add node')+'</button></div>'}
+function vhXray(d){var el=$('#vh_x');if(!d){el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks')+'<p class="muted">—</p>';return}
+ var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length,tot=d.inbounds.reduce(function(a,b){return a+(+b.traffic||0)},0);
+ el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks','<span class="chipx '+(d.on?'g':'r')+'">'+(d.on?t('On'):t('Off'))+'</span>')+
+  (d.on?'':'<div class="warnbox">'+t('Xray is off')+' · <a href="#xray/settings">'+t('Turn it on')+'</a></div>')+
+  '<div class="kv"><div><small>'+t('Working inbounds')+'</small><b>'+N(act)+' / '+N(d.inbounds.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N((d.online||[]).length)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(bytes(tot))+'</b></div></div>'+
+  (d.inbounds.length?d.inbounds.map(function(ib){return xrMiniRow(ib)}).join(''):'<p class="muted">'+t('No inbound yet.')+'</p>')+
+  '<div class="g2" style="margin-top:12px"><a class="b2" style="text-align:center;text-decoration:none" href="#xray/inbounds">'+t('Manage Xray')+'</a><button class="btn" onclick="xrInbound()">+ '+t('New inbound')+'</button></div>'}
+function vhDns(d){var el=$('#vh_d');if(!d){el.style.display='none';return}var run=d.servers.filter(function(x){return x.status&&x.status.active}).length;
+ el.innerHTML=vhHead('dns','Kanki DNS (sanctions)','Private DNS for sanctioned sites','<span class="chipx '+(d.on?'g':'r')+'">'+(d.on?t('On'):t('Off'))+'</span><a class="b2" href="#dns/overview">'+t('Open')+'</a>')+
+  '<div class="kv"><div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(d.servers.length)+'</b></div><div><small>'+t('Users with DNS')+'</small><b>'+N(d.users)+'</b></div><div><small>'+t('Allowed addresses')+'</small><b>'+N(d.servers.reduce(function(a,x){return a+(+(x.status||{}).allowed||0)},0))+'</b></div></div>'}
+
+// ---------------------------------------------------------------- user form: what the user gets, service by service
+function ufServices(protos,un){var has=function(p){return protos.indexOf(p)>=0},vpnOn=has('wg')||has('awg')||has('hy2');
+ var card=function(key,icon,title,sub,on,body,head){return '<div class="ufsvc'+(on?' on':'')+'" data-svc="'+key+'"><div class="hd"><span class="ni">'+ic(icon,18)+'</span><div class="nm"><b>'+t(title)+'</b><small>'+t(sub)+'</small></div>'+(head||'')+'</div><div class="bd3">'+body+'</div></div>'};
+ var nodes=S.nodes||[];
+ var h='<label class="f" style="margin-top:12px">'+t('Services of this user')+'</label><div class="chipset" id="uf_pre"><button type="button" data-pre="all">'+t('Everything')+'</button><button type="button" data-pre="vpn">'+t('Kanki VPN only')+'</button><button type="button" data-pre="xray">'+t('Xray only')+'</button><button type="button" data-pre="dns">'+t('DNS only')+'</button></div>';
+ h+=card('vpn','nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2',vpnOn,
+  '<div class="ckrow">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2']].map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(has(p[0])?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>'+
+  (nodes.length>1?'<label class="f">'+t('Servers')+'</label><div class="ckrow">'+nodes.map(function(n){return '<label class="chk"><input type="checkbox" class="f_nd" value="'+esc(n.id)+'" '+(un.length==0||un.indexOf(n.id)>=0?'checked':'')+'>'+esc(n.name)+'</label>'}).join('')+'</div>':''),
+  '<label class="sw"><input type="checkbox" class="uf_all" data-for="vpn" '+(vpnOn?'checked':'')+'><span></span></label>');
+ h+=card('xray','xray','Xray','Links of every Xray inbound go into the subscription',has('xray'),'<div id="uf_xr" class="muted">…</div>','<label class="sw"><input type="checkbox" class="f_pr" value="xray" '+(has('xray')?'checked':'')+'><span></span></label>');
+ h+=card('dns','dns','Kanki DNS','Private DNS for sanctioned sites',has('dns'),'<div id="uf_dn" class="muted">…</div>','<label class="sw"><input type="checkbox" class="f_pr" value="dns" '+(has('dns')?'checked':'')+'><span></span></label>');
+ setTimeout(ufWire,0);return h}
+function ufWire(){if(!$('#uf_pre'))return;
+ var sync=function(){$$('.ufsvc').forEach(function(c){var on=$$('.f_pr',c).some(function(x){return x.checked});c.classList.toggle('on',on);var a=$('.uf_all',c);if(a)a.checked=on})};
+ $$('.uf_all').forEach(function(a){a.onchange=function(){var c=a.closest('.ufsvc');$$('.f_pr',c).forEach(function(x){x.checked=a.checked});sync()}});
+ $$('.ufsvc .f_pr').forEach(function(x){x.addEventListener('change',sync)});
+ $$('#uf_pre [data-pre]').forEach(function(b){b.onclick=function(){var k=b.dataset.pre;$$('.ufsvc').forEach(function(c){var on=k=='all'||c.dataset.svc==k;$$('.f_pr',c).forEach(function(x){x.checked=on})});sync()}});
+ var xr=function(d){var el=$('#uf_xr');if(!el)return;if(!d){el.textContent='—';return}var l=d.inbounds.filter(function(x){return x.enabled});
+  el.innerHTML=(d.on?'':'<span style="color:var(--warn)">'+t('Is off in the panel')+'</span> · ')+(l.length?l.map(function(ib){return '<span class="chipx a" style="margin:2px">'+esc(ib.remark||ib.protocol)+' · '+esc(ib.server_name||ib.server)+'</span>'}).join(''):t('No Xray inbound yet')+' · <a href="#xray/inbounds" onclick="closeModal()">'+t('New inbound')+'</a>')};
+ var dn=function(d){var el=$('#uf_dn');if(!el)return;if(!d){el.textContent='—';return}var l=d.servers.filter(function(x){return !x.hidden});
+  el.innerHTML=(d.on?'':'<span style="color:var(--warn)">'+t('Is off in the panel')+'</span> · ')+(l.length?l.map(function(x){return '<span class="chipx b" style="margin:2px">'+(x.role=='relay'?'🇮🇷 ':'🌍 ')+esc(x.name||x.server)+'</span>'}).join(''):t('No DNS server yet')+' · <a href="#dns/servers" onclick="closeModal()">'+t('Add DNS server')+'</a>')};
+ if(XR.d)xr(XR.d);api('GET','/api/xray').then(function(d){XR.d=d;xr(d)}).catch(function(){xr(null)});
+ if(DN.d)dn(DN.d);api('GET','/api/dns').then(function(d){DN.d=d;dn(d)}).catch(function(){dn(null)})}
 
 // ---- node types: the "Add node" button first asks which kind of node
 var _nodeAdd=null;
 function nodeAddTyped(){var tile=function(k,ico,title,sub){return '<button class="b2" data-nt="'+k+'" style="display:flex;gap:10px;align-items:center;text-align:start;padding:12px;width:100%;margin-bottom:8px"><span class="ni">'+ic(ico,20)+'</span><span><b>'+t(title)+'</b><br><small class="muted">'+t(sub)+'</small></span></button>'};
  modal(mhead(t('Node type'))+tile('vpn','nodes','VPN node','WireGuard · AmneziaWG · Hysteria2')+tile('xray','xray','Xray node','VLESS · VMess · Trojan · Shadowsocks')+tile('dns','dns','DNS exit node','Smart DNS abroad')+tile('relay','dns','DNS relay node','Iran server in front of a DNS exit'));
- $$('[data-nt]').forEach(function(b){b.onclick=function(){var k=b.dataset.nt;if(k=='vpn')return _nodeAdd();if(k=='xray'){closeModal();location.hash='#xray';setTimeout(function(){if(window.xrAddNode)xrAddNode()},300);return}
+ $$('[data-nt]').forEach(function(b){b.onclick=function(){var k=b.dataset.nt;if(k=='vpn')return _nodeAdd();if(k=='xray'){closeModal();xrAddNode();return}
   dnsLoad().then(function(){dnsAdd(k=='relay'?'relay':'exit')})}})}
-
-// ---------------------------------------------------------------- Xray (3X-UI style, our own users)
-var XR={d:null};
-function p_xray(){$('#pg').innerHTML='<div class="ph"><div><h2>Xray</h2><p>'+t('Xray inbounds for your users: every user with Xray ticked is a client of every inbound')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="xrAddNode()">+ '+t('Add server')+'</button><button class="btn" onclick="xrInbound()">+ '+t('Inbound')+'</button></div></div><div id="xr">'+t('Loading…')+'</div>';
- xrLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))xrLoad(true)},5000)}
-function xrLoad(quiet){return api('GET','/api/xray').then(function(d){XR.d=d;if(S.page!='xray')return;if(quiet&&$('#xr_srv')){$('#xr_srv').innerHTML=xrServers(d);$('#xr_ib').innerHTML=xrInbounds(d);return}xrDraw(d)}).catch(fail)}
-function xrName(id){var a=(XR.d&&XR.d.agents)||[];for(var i=0;i<a.length;i++)if(a[i].id==id)return a[i].name;return id}
-function xrServers(d){if(!d.servers.length)return '<p class="muted">'+t('Add an Xray server first')+'</p>';
- return d.servers.map(function(x){var st=x.status||{},on=st.active,col=on?'var(--ok)':'var(--bad)',errs=[st.deploy_error,st.error].filter(Boolean);
-  return '<div class="card" style="margin:0 0 8px;border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start"><div><b>'+esc(x.name||x.server)+'</b>'+(x.server=='local'?' <span class="rotb">'+t('Panel server')+'</span>':'')+'<div class="muted ltr">'+esc(x.effective||'?')+(st.core?' · Xray '+esc(st.core):'')+'</div></div>'+
-   '<span class="badge '+(on?'g':'r')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span></div>'+
-   (on?'<p class="muted" style="margin:6px 0 0">'+t('Online')+': <b>'+N((st.online||[]).length)+'</b></p>':'')+(errs.length?'<div class="warnbox ltr" style="margin:6px 0 0">'+errs.map(esc).join('<br>')+'</div>':'')+
-   '<div class="g3" style="margin-top:8px"><button class="b2" onclick="xrSrvEdit(\''+x.server+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><a class="b2" style="text-align:center" target="_blank" href="#" onclick="xrPreview(\''+x.server+'\');return false">'+t('Config')+'</a><button class="b2 bd" onclick="xrSrvDel(\''+x.server+'\')">'+ic('trash',15)+' '+t('Delete')+'</button></div></div>'}).join('')}
-function xrInbounds(d){if(!d.inbounds.length)return '<p class="muted">—</p>';
- return '<div class="ncards">'+d.inbounds.map(function(ib){var tr=ib.traffic;
-  return '<div class="card" style="margin:0;padding:12px;border-inline-start:3px solid '+(ib.enabled?'var(--a)':'var(--ln)')+'"><div class="row" style="justify-content:space-between;gap:8px"><div style="min-width:0"><b>'+esc(ib.remark||ib.protocol)+'</b><div class="muted ltr">'+esc(ib.server_name||ib.server)+' : '+N(ib.port)+'</div></div>'+sw('',ib.enabled,"xrToggle('"+ib.id+"')")+'</div>'+
-   '<div class="chips" style="margin:8px 0 0"><span class="rotb">'+esc(ib.protocol.toUpperCase())+'</span><span class="rotb">'+esc(ib.network)+'</span>'+(ib.security!='none'?'<span class="rotb">'+esc(ib.security.toUpperCase())+'</span>':'')+(ib.link_tls?'<span class="rotb">CDN</span>':'')+'</div>'+
-   '<p class="muted" style="margin:6px 0 0">'+t('Clients')+': <b>'+N(ib.clients)+'</b>'+(tr?' · '+t('Traffic')+': <b class="ltr">'+bytes(tr)+'</b>':'')+'</p>'+
-   '<div class="g2" style="margin-top:8px"><button class="b2" onclick="xrInbound(\''+ib.id+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2 bd" onclick="xrIbDel(\''+ib.id+'\')">'+ic('trash',15)+' '+t('Delete')+'</button></div></div>'}).join('')+'</div>'}
-function xrDraw(d){var el=$('#xr');if(!el)return;
- var kpi='<div class="card" style="padding:10px"><div class="tkpi" style="margin:0"><div><small>'+t('Status')+'</small><b>'+(d.on?t('On'):t('Off'))+'</b></div><div><small>'+t('Users with Xray')+'</small><b>'+N(d.users)+'</b></div><div><small>'+t('Inbounds')+'</small><b>'+N(d.inbounds.length)+'</b></div><div><small>'+t('Xray servers')+'</small><b>'+N(d.servers.length)+'</b></div></div></div>';
- var set='<div class="card"><h3>'+t('Settings')+'</h3><label class="chk"><input type="checkbox" id="xs_on" '+(d.on?'checked':'')+'><span><b>'+t('Xray is on')+'</b></span></label>'+
-  '<label class="f">'+t('Xray-core version')+'</label><input id="xs_v" class="ltr" placeholder="'+t('empty = latest')+'" value="'+esc(d.version)+'">'+
-  '<label class="chk" style="margin-top:8px"><input type="checkbox" id="xs_bp" '+(d.block_private?'checked':'')+'><span>'+t('Block private addresses')+'</span></label><label class="chk"><input type="checkbox" id="xs_bt" '+(d.block_bt?'checked':'')+'><span>'+t('Block BitTorrent')+'</span></label>'+
-  '<details style="margin-top:8px"><summary class="muted">'+t('Advanced')+'</summary><label class="f">'+t('Advanced: extra routing rules (JSON array)')+'</label><textarea id="xs_r" rows="4" class="ltr" placeholder="[]">'+esc(d.rules)+'</textarea><label class="f">'+t('Advanced: extra outbounds (JSON array, the first one becomes the default)')+'</label><textarea id="xs_o" rows="4" class="ltr" placeholder="[]">'+esc(d.outbounds)+'</textarea></details>'+
-  '<button class="btn" style="width:100%;margin-top:12px" id="xs_go">'+t('Save')+'</button></div>';
- el.innerHTML=kpi+'<div class="g2">'+set+'<div class="card"><h3>'+t('Xray servers')+'</h3><div id="xr_srv">'+xrServers(d)+'</div></div></div><div class="card"><h3>'+t('Inbounds')+'</h3><div id="xr_ib">'+xrInbounds(d)+'</div></div>';
- $('#xs_go').onclick=function(){api('PUT','/api/xray',{on:$('#xs_on').checked,version:$('#xs_v').value,block_private:$('#xs_bp').checked,block_bt:$('#xs_bt').checked,rules:$('#xs_r').value,outbounds:$('#xs_o').value}).then(function(){toast(t('Saved'));xrLoad()}).catch(fail)}}
-function xrAddNode(){var go=function(){var d=XR.d,used=d.servers.map(function(x){return x.server}),ag=d.agents.filter(function(a){return used.indexOf(a.id)<0});
-  modal(mhead(t('Add server'),'Xray')+'<label class="f">'+t('Agent server')+'</label><select id="xa_sv"><option value="__new">'+t('New server (install command)')+'</option>'+ag.map(function(a){return '<option value="'+esc(a.id)+'">'+esc(a.id=='local'?a.name+' ('+t('Panel server')+')':a.name)+'</option>'}).join('')+'</select>'+
-   '<div id="xa_nw"><label class="f">'+t('Server name')+'</label><input id="xa_nm" placeholder="Xray-DE"></div><label class="f">'+t('Address for links')+'</label><input id="xa_ad" class="ltr" placeholder="'+t('automatic')+'">'+
-   '<button class="btn" style="width:100%;margin-top:12px" id="xa_go">'+t('Save')+'</button><div id="xa_out"></div>');
-  var sv=function(){$('#xa_nw').style.display=$('#xa_sv').value=='__new'?'':'none'};$('#xa_sv').onchange=sv;sv();
-  $('#xa_go').onclick=function(){var me=this,nw=$('#xa_sv').value=='__new';me.disabled=true;
-   (nw?api('POST','/api/tunnels/servers',{name:$('#xa_nm').value||'Xray'}):Promise.resolve({id:$('#xa_sv').value})).then(function(r){
-    return api('POST','/api/xray/servers',{server:r.id,address:$('#xa_ad').value}).then(function(){toast(t('Saved'));if(nw){me.style.display='none';$('#xa_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}else closeModal();xrLoad()})}).catch(function(e){me.disabled=false;fail(e)})}};
- if(XR.d)go();else xrLoad().then(go)}
-function xrSrvEdit(id){var x=XR.d.servers.filter(function(s){return s.server==id})[0];if(!x)return;
- modal(mhead(t('Edit'),x.name)+'<label class="f">'+t('Address for links')+'</label><input id="xe_ad" class="ltr" placeholder="'+esc(x.effective||t('automatic'))+'" value="'+esc(x.address)+'"><button class="btn" style="width:100%;margin-top:12px" id="xe_go">'+t('Save')+'</button>');
- $('#xe_go').onclick=function(){api('POST','/api/xray/servers',{server:id,address:$('#xe_ad').value}).then(function(){closeModal();toast(t('Saved'));xrLoad()}).catch(fail)}}
-function xrSrvDel(id){confirmDo(function(){api('DELETE','/api/xray/servers/'+encodeURIComponent(id)).then(function(){toast(t('Done'));xrLoad()}).catch(fail)})}
-function xrIbDel(id){confirmDo(function(){api('DELETE','/api/xray/inbounds/'+encodeURIComponent(id)).then(function(){toast(t('Done'));xrLoad()}).catch(fail)})}
-function xrToggle(id){var ib=XR.d.inbounds.filter(function(x){return x.id==id})[0];if(!ib)return;var b=Object.assign({},ib,{enabled:!ib.enabled});api('POST','/api/xray/inbounds',b).then(function(){xrLoad()}).catch(fail)}
-function xrPreview(id){api('GET','/api/xray/config/'+encodeURIComponent(id)).then(function(c){modal(mhead(t('Config'),xrName(id))+'<pre class="cmd ltr" style="max-height:60vh;overflow:auto;white-space:pre">'+esc(JSON.stringify(c,null,2))+'</pre>','wide')}).catch(fail)}
-function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInbound(id)});if(!d.servers.length)return toast(t('Add an Xray server first'),1);
- var ib=d.inbounds.filter(function(x){return x.id==id})[0]||{enabled:true,protocol:'vless',network:'tcp',security:'reality',port:443,server:d.servers[0].server,flow:'xtls-rprx-vision',dest:'www.microsoft.com:443',names:'www.microsoft.com',fp:'chrome',sniffing:true,ss_method:'2022-blake3-aes-128-gcm',only:[]};
- var opt=function(list,v){return list.map(function(o){o=[].concat(o);return '<option value="'+esc(o[0])+'"'+(o[0]==v?' selected':'')+'>'+esc(o[1]||o[0])+'</option>'}).join('')};
- var inp=function(idn,label,v,ph){return '<div><label class="f">'+t(label)+'</label><input id="'+idn+'" class="ltr" value="'+esc(v==null?'':v)+'" placeholder="'+esc(ph||'')+'"></div>'};
- var h='<div class="g2">'+inp('xi_rm','Remark',ib.remark,'DE-Reality')+'<div><label class="f">'+t('Agent server')+'</label><select id="xi_sv">'+opt(d.servers.map(function(x){return [x.server,x.name||x.server]}),ib.server)+'</select></div>'+
-  '<div><label class="f">'+t('Protocol')+'</label><select id="xi_pr">'+opt([['vless','VLESS'],['vmess','VMess'],['trojan','Trojan'],['shadowsocks','Shadowsocks']],ib.protocol)+'</select></div>'+inp('xi_pt','Port',ib.port,'443')+
-  '<div><label class="f">'+t('Transport')+'</label><select id="xi_nw">'+opt([['tcp','TCP (RAW)'],['ws','WebSocket'],['grpc','gRPC'],['httpupgrade','HTTPUpgrade'],['xhttp','XHTTP'],['kcp','mKCP']],ib.network)+'</select></div>'+
-  '<div id="xi_secw"><label class="f">'+t('Security')+'</label><select id="xi_sc">'+opt([['none','None'],['tls','TLS'],['reality','REALITY']],ib.security)+'</select></div></div>'+
-  '<div id="xi_ss" class="g2"><div><label class="f">'+t('Method')+'</label><select id="xi_sm">'+opt(['2022-blake3-aes-128-gcm','2022-blake3-aes-256-gcm','2022-blake3-chacha20-poly1305','chacha20-ietf-poly1305','aes-256-gcm','aes-128-gcm'],ib.ss_method)+'</select></div></div>'+
-  '<div id="xi_tp" class="g2">'+inp('xi_pa','Path',ib.path,'/')+inp('xi_ho','Host',ib.host,'')+'</div>'+
-  '<div id="xi_xm" class="g2"><div><label class="f">'+t('Mode')+'</label><select id="xi_md">'+opt(['auto','packet-up','stream-up','stream-one'],ib.mode||'auto')+'</select></div></div>'+
-  '<div id="xi_gr" class="g2">'+inp('xi_svn','Service name',ib.service,'')+'</div>'+
-  '<div id="xi_th"><label class="chk" style="margin-top:8px"><input type="checkbox" id="xi_hh" '+(ib.header=='http'?'checked':'')+'><span>'+t('HTTP header camouflage')+'</span></label></div>'+
-  '<div id="xi_fl" class="g2"><div><label class="f">'+t('Flow')+'</label><select id="xi_flw">'+opt([['','none'],['xtls-rprx-vision','xtls-rprx-vision']],ib.flow||'')+'</select></div></div>'+
-  '<div id="xi_tls"><div class="g2">'+inp('xi_sni','SNI',ib.sni,'example.com')+inp('xi_alpn','ALPN',ib.alpn,'h2,http/1.1')+'</div><label class="f">'+t('Certificate (PEM, full chain)')+'</label><textarea id="xi_ce" rows="3" class="ltr" placeholder="-----BEGIN CERTIFICATE-----">'+esc(ib.cert||'')+'</textarea><label class="f">'+t('Private key (PKCS#8 PEM)')+'</label><textarea id="xi_ke" rows="3" class="ltr" placeholder="'+(ib.key=='set'?t('unchanged'):'-----BEGIN PRIVATE KEY-----')+'"></textarea></div>'+
-  '<div id="xi_rl"><div class="g2">'+inp('xi_de','Target (dest)',ib.dest,'www.microsoft.com:443')+inp('xi_na','Server names',ib.names,'www.microsoft.com')+inp('xi_pk','Private key',ib.private=='set'?'':ib.private,ib.private=='set'?t('unchanged'):'')+inp('xi_pb','Public key',ib.public,'')+inp('xi_si','Short IDs',ib.short_ids,'')+inp('xi_sx','spiderX',ib.spx,'/')+'</div><button type="button" class="b2" style="margin-top:8px" id="xi_kg">'+t('New keys')+'</button></div>'+
-  '<div id="xi_fpw" class="g2"><div><label class="f">'+t('Fingerprint')+'</label><select id="xi_fp">'+opt(['chrome','firefox','safari','ios','android','edge','random','randomized'],ib.fp||'chrome')+'</select></div></div>'+
-  '<label class="chk" style="margin-top:8px"><input type="checkbox" id="xi_sn" '+(ib.sniffing?'checked':'')+'><span>'+t('Sniffing')+'</span></label>'+
-  '<details style="margin-top:8px"'+(ib.link_host||ib.link_tls?' open':'')+'><summary class="muted">'+t('Share link (for a CDN in front)')+'</summary><div class="g2">'+inp('xi_lh','Link address',ib.link_host,t('automatic'))+inp('xi_lp','Link port',ib.link_port||'',String(ib.port||''))+inp('xi_ls','Link SNI',ib.link_sni,'')+'</div><label class="chk" style="margin-top:8px"><input type="checkbox" id="xi_lt" '+(ib.link_tls?'checked':'')+'><span>'+t('TLS at the CDN')+'</span></label></details>'+
-  '<details style="margin-top:8px"'+(ib.only&&ib.only.length?' open':'')+'><summary class="muted">'+t('Only these users (empty = everyone with Xray)')+'</summary><div class="chips">'+(d.user_list||[]).map(function(u){return '<label class="chk"><input type="checkbox" class="xi_u" value="'+u.id+'" '+((ib.only||[]).indexOf(u.id)>=0?'checked':'')+'>'+esc(u.name)+'</label>'}).join('')+'</div></details>'+
-  '<button class="btn" style="width:100%;margin-top:12px" id="xi_go">'+t('Save')+'</button>';
- modal(mhead(t(id?'Edit':'Inbound'),id?ib.remark:'Xray')+h,'wide');
- var ui=function(){var pr=$('#xi_pr').value,nw=$('#xi_nw').value,ss=pr=='shadowsocks';if(ss){$('#xi_nw').value='tcp';nw='tcp'}var sc=ss?'none':$('#xi_sc').value,show=function(i,on){$(i).style.display=on?'':'none'};
-  show('#xi_secw',!ss);show('#xi_ss',ss);show('#xi_tp',['ws','httpupgrade','xhttp'].indexOf(nw)>=0);show('#xi_xm',nw=='xhttp');show('#xi_gr',nw=='grpc');show('#xi_th',nw=='tcp'&&sc=='none'&&!ss);
-  show('#xi_fl',pr=='vless'&&nw=='tcp'&&sc!='none');show('#xi_tls',sc=='tls');show('#xi_rl',sc=='reality');show('#xi_fpw',sc!='none'||$('#xi_lt').checked);$('#xi_nw').disabled=ss};
- ['#xi_pr','#xi_nw','#xi_sc','#xi_lt'].forEach(function(s){$(s).onchange=ui});ui();
- $('#xi_kg').onclick=function(){api('POST','/api/xray/keys').then(function(k){$('#xi_pk').value=k.private;$('#xi_pb').value=k.public;if(!$('#xi_si').value)$('#xi_si').value=k.short_id}).catch(fail)};
- $('#xi_go').onclick=function(){var me=this,v=function(i){return $(i).value.trim()};
-  var b={id:id||'',enabled:ib.enabled!==false,remark:v('#xi_rm'),server:$('#xi_sv').value,protocol:$('#xi_pr').value,port:+v('#xi_pt')||0,network:$('#xi_nw').value,security:$('#xi_pr').value=='shadowsocks'?'none':$('#xi_sc').value,
-   path:v('#xi_pa'),host:v('#xi_ho'),mode:$('#xi_md').value,service:v('#xi_svn'),header:$('#xi_hh').checked?'http':'',flow:$('#xi_flw').value,ss_method:$('#xi_sm').value,ss_key:ib.ss_key||'',
-   sni:v('#xi_sni'),alpn:v('#xi_alpn'),cert:$('#xi_ce').value.trim(),key:$('#xi_ke').value.trim()||(ib.key=='set'?'set':''),fp:$('#xi_fp').value,
-   dest:v('#xi_de'),names:v('#xi_na'),private:v('#xi_pk')||(ib.private=='set'?'set':''),public:v('#xi_pb'),short_ids:v('#xi_si'),spx:v('#xi_sx'),sniffing:$('#xi_sn').checked,
-   link_host:v('#xi_lh'),link_port:+v('#xi_lp')||0,link_tls:$('#xi_lt').checked,link_sni:v('#xi_ls'),only:$$('.xi_u').filter(function(c){return c.checked}).map(function(c){return +c.value})};
-  if(b.private&&b.private!='set'&&!b.public)return toast(t('Public key'),1);
-  me.disabled=true;api('POST','/api/xray/inbounds',b).then(function(){closeModal();toast(t('Saved'));xrLoad()}).catch(function(e){me.disabled=false;fail(e)})}}

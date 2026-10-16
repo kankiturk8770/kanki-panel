@@ -52,14 +52,19 @@ impl Live {
 
     /// Is this name (or one of its parents) a routed service?
     pub fn routed(&self, name: &str) -> bool {
+        self.routed_by(name).is_some()
+    }
+
+    /// The listed name that routes `name` (itself or one of its parents).
+    pub fn routed_by<'a>(&self, name: &'a str) -> Option<&'a str> {
         let mut n = name;
         loop {
             if self.routed.contains(n) {
-                return true;
+                return Some(n);
             }
             match n.find('.') {
                 Some(i) => n = &n[i + 1..],
-                None => return false,
+                None => return None,
             }
         }
     }
@@ -106,6 +111,13 @@ pub struct Engine {
     rate: Mutex<HashMap<IpAddr, (f64, Instant)>>,
     pub conns: AtomicUsize,
     pub errors: Mutex<Vec<String>>,
+    /// queries answered: all, routed to us, from the cache, refused (not a subscriber)
+    pub q_total: AtomicU64,
+    pub q_routed: AtomicU64,
+    pub q_cache: AtomicU64,
+    pub q_refused: AtomicU64,
+    /// routed queries per listed name (the busiest services)
+    top: Mutex<HashMap<String, u64>>,
 }
 
 impl Engine {
@@ -118,6 +130,11 @@ impl Engine {
             rate: Mutex::new(HashMap::new()),
             conns: AtomicUsize::new(0),
             errors: Mutex::new(vec![]),
+            q_total: AtomicU64::new(0),
+            q_routed: AtomicU64::new(0),
+            q_cache: AtomicU64::new(0),
+            q_refused: AtomicU64::new(0),
+            top: Mutex::new(HashMap::new()),
         })
     }
 
@@ -126,7 +143,38 @@ impl Engine {
     }
 
     pub fn reload(&self, cfg: DnsCfg) {
+        let old = self.live();
+        // a user whose addresses the admin cleared (a new epoch) must register again
+        let kicked: Vec<i64> = cfg.users.iter().filter(|u| old.by_id.get(&u.id).map(|o| o.epoch != u.epoch).unwrap_or(false)).map(|u| u.id).collect();
         *self.live.write().unwrap() = Arc::new(Live::new(cfg));
+        if !kicked.is_empty() {
+            let mut g = self.gate.lock().unwrap();
+            g.ips.retain(|_, v| !kicked.contains(&v.0));
+            for id in kicked {
+                g.order.remove(&id);
+            }
+        }
+    }
+
+    /// The addresses allowed right now, per user.
+    pub fn ips_snapshot(&self) -> HashMap<i64, Vec<String>> {
+        let now = Instant::now();
+        let g = self.gate.lock().unwrap();
+        let mut out: HashMap<i64, Vec<String>> = HashMap::new();
+        for (ip, (uid, until)) in g.ips.iter() {
+            if *until > now {
+                out.entry(*uid).or_default().push(ip.to_string());
+            }
+        }
+        out
+    }
+
+    /// The busiest routed names (at most `n`).
+    pub fn top(&self, n: usize) -> Vec<(String, u64)> {
+        let mut v: Vec<(String, u64)> = self.top.lock().unwrap().iter().map(|(k, v)| (k.clone(), *v)).collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        v.truncate(n);
+        v
     }
 
     pub fn stat(&self, uid: i64) -> Arc<UserStat> {
@@ -238,9 +286,21 @@ impl Engine {
                 _ => wire::empty(req, &q, wire::NOERROR),
             });
         }
-        let Some(uid) = who else { return Some(wire::empty(req, &q, wire::REFUSED)) };
+        let Some(uid) = who else {
+            self.q_refused.fetch_add(1, Ordering::Relaxed);
+            return Some(wire::empty(req, &q, wire::REFUSED));
+        };
         self.stat(uid).queries.fetch_add(1, Ordering::Relaxed);
-        if q.qclass == 1 && live.routed(&q.name) && !live.answer.is_empty() {
+        self.q_total.fetch_add(1, Ordering::Relaxed);
+        let by = if q.qclass == 1 && !live.answer.is_empty() { live.routed_by(&q.name) } else { None };
+        if let Some(by) = by {
+            if q.qtype == wire::A {
+                self.q_routed.fetch_add(1, Ordering::Relaxed);
+                let mut t = self.top.lock().unwrap();
+                if t.len() < 5000 || t.contains_key(by) {
+                    *t.entry(by.to_string()).or_default() += 1;
+                }
+            }
             match q.qtype {
                 wire::A => return Some(wire::answer_a(req, &q, &live.answer, 60)),
                 // no IPv6 and no HTTPS/SVCB hints: the client must come to us over IPv4
@@ -269,7 +329,10 @@ impl Engine {
             })
         };
         let mut r = match hit {
-            Some(r) => r,
+            Some(r) => {
+                self.q_cache.fetch_add(1, Ordering::Relaxed);
+                r
+            }
             None => {
                 let r = upstream(&live.upstreams, req).await?;
                 let rc = wire::rcode(&r);
@@ -883,8 +946,8 @@ mod tests {
             upstreams: vec!["127.0.0.1:9".into()],
             domains: vec!["playstation.net".into(), "Example.ORG.".into()],
             users: vec![
-                DnsUser { id: 1, name: "a".into(), token: "aaaa1111".into(), max_ips: 2 },
-                DnsUser { id: 2, name: "b".into(), token: "bbbb2222".into(), max_ips: 0 },
+                DnsUser { id: 1, name: "a".into(), token: "aaaa1111".into(), max_ips: 2, ..Default::default() },
+                DnsUser { id: 2, name: "b".into(), token: "bbbb2222".into(), max_ips: 0, ..Default::default() },
             ],
             ..Default::default()
         }
@@ -951,6 +1014,30 @@ mod tests {
         let mut bad = q.clone();
         bad[12] = 0xC0;
         assert_eq!(e.answer(&bad, Some(1)).await.map(|r| wire::rcode(&r)), Some(wire::FORMERR));
+    }
+
+    #[tokio::test]
+    async fn counts_queries_and_forgets_kicked_users() {
+        let e = Engine::new(cfg());
+        let q = wire::build_query(5, "dl.playstation.net", wire::A);
+        e.answer(&q, None).await;
+        e.answer(&q, Some(1)).await;
+        e.answer(&q, Some(1)).await;
+        assert_eq!((e.q_total.load(Ordering::Relaxed), e.q_routed.load(Ordering::Relaxed), e.q_refused.load(Ordering::Relaxed)), (2, 2, 1));
+        assert_eq!(e.top(5), vec![("playstation.net".to_string(), 2)]);
+        let ip: IpAddr = "198.51.100.9".parse().unwrap();
+        e.allow(ip, 1);
+        e.allow("198.51.100.10".parse().unwrap(), 2);
+        assert_eq!(e.ips_snapshot().get(&1), Some(&vec!["198.51.100.9".to_string()]));
+        // the same users again: nothing is forgotten
+        e.reload(cfg());
+        assert_eq!(e.who(ip), Some(1));
+        // a new epoch for user 1: only user 1 must register again
+        let mut c = cfg();
+        c.users[0].epoch = 1;
+        e.reload(c);
+        assert_eq!(e.who(ip), None);
+        assert_eq!(e.who("198.51.100.10".parse().unwrap()), Some(2));
     }
 
     #[tokio::test]
