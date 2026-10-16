@@ -3,15 +3,18 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.5.1 — SSL with certbot on the server
+- An Xray server or a Kanki DNS server gets its SSL by itself with certbot (domain, no e-mail). The Cloudflare / ArvanCloud API way is gone.
+
 ## New in 3.5 — a menu that opens in place, stronger Xray and DNS pages
 - **Menu:** groups open in place (VPN services › All / Kanki VPN / Xray, Kanki DNS › Overview / Servers / Services / Users / Settings, Tunnels, Sales, System). On a phone there is no hamburger: a section bar under the top bar opens a drop-down of tiles (VPN: Kanki VPN and Xray side by side).
 - **VPN services page:** Kanki VPN (WireGuard · AmneziaWG · Hysteria2) and Xray side by side, with Kanki DNS under them.
-- **Xray:** tabs (overview, inbounds, online clients, routing, settings); per inbound traffic kept across restarts, a traffic limit and an end date, clone, reset, users with their links and QR, JSON; more options (listen address, sniffing, PROXY protocol, TLS version / unknown SNI / certificate files, REALITY xver and clock limit, WS heartbeat, XHTTP padding, mKCP tuning, fallbacks); outbounds (another server from its link, SOCKS, HTTP, JSON) and routing rules built in the panel, block ads / Iranian sites. Automatic Let's Encrypt certificates for TLS inbounds (DNS challenge, works for Iran servers).
+- **Xray:** tabs (overview, inbounds, online clients, routing, settings); per inbound traffic kept across restarts, a traffic limit and an end date, clone, reset, users with their links and QR, JSON; more options (listen address, sniffing, PROXY protocol, TLS version / unknown SNI / certificate files, REALITY xver and clock limit, WS heartbeat, XHTTP padding, mKCP tuning, fallbacks); outbounds (another server from its link, SOCKS, HTTP, JSON) and routing rules built in the panel, block ads / Iranian sites.
 - **Kanki DNS:** tabs; queries, routed, cache and refused counts per server, busiest services, the addresses each user registered (and "forget addresses"), a domain checker, collapsible services with search and all on / off.
 - **User form:** services as cards (Kanki VPN with its protocols and servers, Xray with its inbounds, DNS with its servers) and quick choices.
 
 ## New in 3.4 — Kanki DNS and Xray
-- **Kanki DNS** (menu: Kanki DNS): a private smart DNS only your subscribers can use. Sanctioned services go through your DNS servers (an exit abroad, optionally a relay inside Iran in front of it), everything else goes direct. DNS, DoT and DoH; the panel sets the DNS records and gets the SSL certificate itself (Cloudflare / ArvanCloud API).
+- **Kanki DNS** (menu: Kanki DNS): a private smart DNS only your subscribers can use. Sanctioned services go through your DNS servers (an exit abroad, optionally a relay inside Iran in front of it), everything else goes direct. DNS, DoT and DoH; each DNS server gets its SSL itself with certbot.
 - **Xray** (menu: Xray): VLESS / VMess / Trojan / Shadowsocks inbounds with TCP, WS, gRPC, HTTPUpgrade, XHTTP, mKCP and TLS / REALITY, on the panel server or any agent server. The clients are your own users (tick Xray on the user).
 - Add node now asks for the type: VPN, Xray, DNS exit or DNS relay. Guide: `docs/DNS-XRAY-FA.md`.
 

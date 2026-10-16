@@ -23,8 +23,8 @@ function dnsKpis(d){var run=d.servers.filter(function(x){return x.status&&x.stat
   '<div><small>'+t('Users with DNS')+'</small><b>'+N(d.users)+'</b></div><div><small>'+t('Allowed addresses')+'</small><b>'+N(dnsSum(d,function(s){return s.allowed}))+'</b></div>'+
   '<div><small>'+t('Queries')+' / '+t('routed')+'</small><b class="ltr">'+N(q)+' / '+N(r)+'</b></div>'}
 function dnsWarn(d){var w=[];if(!d.on)w.push(t('DNS is off: nothing runs on the servers.')+' <a href="#dns/settings">'+t('Turn it on')+'</a>');
- if(!d.base)w.push(t('No DNS domain yet: encrypted DNS (DoT / DoH) needs one.')+' <a href="#dns/settings">'+t('Settings and SSL')+'</a>');
- else if(!(d.cert&&d.cert.present))w.push(t('No certificate yet: DoT / DoH and registering by link do not work without it.')+' <a href="#dns/settings">'+t('Settings and SSL')+'</a>');
+ if(!d.base&&!d.servers.some(function(x){return x.host}))w.push(t('No DNS domain yet: encrypted DNS (DoT / DoH) needs one.')+' <a href="#dns/settings">'+t('Settings and SSL')+'</a>');
+
  if(!d.servers.some(function(x){return x.role=='exit'}))w.push(t('Add an exit DNS server first'));
  return w.map(function(x){return '<div class="warnbox">'+x+'</div>'}).join('')}
 function dnsOverview(d,el){
@@ -32,7 +32,7 @@ function dnsOverview(d,el){
   '<div class="g2"><div class="card"><div class="nh"><h3>'+ic('tunnel',16)+' '+t('Path of the traffic')+'</h3><a class="b2" href="#dns/servers">'+t('Manage')+'</a></div><div id="dn_topo" style="margin-top:10px">'+dnsTopo(d)+'</div></div>'+
   '<div class="card"><h3>'+ic('traffic',16)+' '+t('Busiest services')+'</h3><p class="sub">'+t('Routed names asked for most since the DNS services started')+'</p><div id="dn_top">'+dnsTop(d)+'</div></div></div>'+
   '<div class="card"><h3>'+ic('globe',16)+' '+t('Check a domain')+'</h3><p class="sub">'+t('Does this site go through Kanki DNS, and which service lists it?')+'</p>'+dnsCheckBox()+'</div>'+
-  '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0;line-height:2">'+t('1) A user\'s phone uses your DNS (Private DNS with the user\'s own address). 2) Names of sanctioned services (games, AI, developer sites …) are answered with your server\'s IP; everything else is answered normally and goes direct. 3) Your server passes those connections on without opening them. A relay inside Iran sends them to an exit abroad through a hidden Kanki tunnel.')+'</p></div>';
+  '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0;line-height:2">'+t('1) The user taps «Unblock» in the Kanki app: the app registers the phone and uses your DNS. 2) Names of sanctioned services (games, AI, developer sites …) are answered with your server\'s IP and the server passes those connections on (SNI proxy), so games and sites open; everything else goes direct at full speed. 3) A relay inside Iran sends them to an exit abroad through a hidden Kanki tunnel.')+'</p></div>';
  dnsCheckWire()}
 function dnsTopo(d){if(!d.servers.length)return '<p class="muted">'+t('Add an exit DNS server first')+'</p>';
  var dot=function(x){var on=x.status&&x.status.active;return '<span class="dot '+(on?'g':x.status_at?'r':'y')+'"></span> '};
@@ -53,12 +53,11 @@ function dnsCheckWire(){var go=function(){var v=$('#dn_ck').value.trim();if(!v)r
 
 // ---- servers tab
 function dnsServersTab(d,el){el.innerHTML=dnsWarn(d)+'<div class="row" style="gap:8px;margin-bottom:12px"><button class="btn" onclick="dnsAdd(\'exit\')">+ '+t('Add DNS server')+' ('+t('Exit')+')</button><button class="b2" onclick="dnsAdd(\'relay\')">+ '+t('Add relay')+' ('+t('Iran')+')</button></div><div id="dn_srv">'+dnsServers(d)+'</div>'}
-function dnsCertChip(d,x){var names=(d.cert_names||'').split(','),has=x.host&&names.indexOf(x.host)>=0&&d.cert&&d.cert.present;
- return d.acme_busy?'<span class="chipx y">SSL · '+t('Working…')+'</span>':has?'<span class="chipx g">SSL ✓ '+ago(d.cert_at)+'</span>':!x.host?'<span class="chipx">SSL · '+t('no name')+'</span>':d.acme_err?'<span class="chipx r" title="'+esc(d.acme_err)+'">SSL · '+t('error')+'</span>':'<span class="chipx y">SSL · '+t('waiting')+'</span>'}
-function dnsCertNow(){api('POST','/api/dns/cert').then(function(){toast(t('Working… about a minute'));setTimeout(function(){dnsLoad(true)},5000)}).catch(fail)}
+function dnsCertChip(x){var st=x.status||{};if(!x.host)return '<span class="chipx">SSL · '+t('no name')+'</span>';
+ return st.ssl?'<span class="chipx g">SSL ✓</span>':st.ssl_error?'<span class="chipx r" title="'+esc(st.ssl_error)+'">SSL · '+t('error')+'</span>':'<span class="chipx y">SSL · '+t('waiting')+'</span>'}
 function dnsCertState(d){var c=d.cert||{};
- return '<div class="vrow"><span class="dot '+(c.present?'g':'r')+'"></span><div class="nm"><b>'+t('Certificate')+': '+(c.present?t('issued'):t('none yet'))+'</b><small><bdi>'+(d.cert_names?esc(d.cert_names.split(',').join('  ')):'—')+'</bdi></small></div>'+(d.cert_at?'<span class="chipx g">'+ago(d.cert_at)+'</span>':'')+(d.acme_busy?'<span class="chipx y">'+t('Working… about a minute')+'</span>':'')+'</div>'+
-  (d.acme_err?'<div class="warnbox ltr">'+t('Last error')+': '+esc(d.acme_err)+'</div>':'')}
+ return c.present?'<div class="vrow"><span class="dot g"></span><div class="nm"><b>'+t('A pasted certificate is used on every DNS server')+'</b></div><button class="b2 bd" id="dn_crm">'+t('Remove it (back to certbot)')+'</button></div>'
+  :'<div class="vrow"><span class="dot g"></span><div class="nm"><b>'+t('Automatic: certbot on each DNS server')+'</b><small>'+t('Each server gets a Let\'s Encrypt certificate for its own name and renews it by itself')+'</small></div></div>'}
 function dnsServers(d){if(!d.servers.length)return '<div class="card" style="text-align:center;padding:30px"><p class="muted">'+t('Add an exit DNS server first')+'</p><button class="btn" onclick="dnsAdd(\'exit\')">+ '+t('Add DNS server')+'</button></div>';
  return '<div class="ibl">'+d.servers.map(function(x){var st=x.status||{},on=st.active,q=st.q||{},errs=(st.errors||[]).concat(st.deploy_error?[st.deploy_error]:[]).concat(st.error?[st.error]:[]),relay=x.role=='relay';
   var hit=q.total?Math.round(100*(q.cache||0)/q.total):0;
@@ -68,7 +67,7 @@ function dnsServers(d){if(!d.servers.length)return '<div class="card" style="tex
    '<div class="kv k4" style="margin:0"><div><small>'+t('Queries')+'</small><b>'+N(q.total||0)+'</b></div><div><small>'+t('routed')+'</small><b>'+N(q.routed||0)+'</b></div><div><small>'+t('From cache')+'</small><b>'+N(hit)+'%</b></div><div><small>'+t('Allowed addresses')+'</small><b>'+N(st.allowed||0)+'</b></div></div>'+
    (q.refused?'<p class="muted" style="margin:0">'+t('Refused (not a subscriber)')+': '+N(q.refused)+' · '+t('Connections')+': '+N(st.conns||0)+'</p>':'')+
    (errs.length?'<div class="warnbox ltr" style="margin:0">'+errs.map(esc).join('<br>')+'</div>':'')+
-   '<div class="row" style="gap:6px">'+dnsCertChip(d,x)+(d.provider&&d.has_token?'<button class="b2" style="margin-inline-start:auto" onclick="dnsCertNow()">'+ic('refresh',14)+' SSL</button>':'')+'</div>'+
+   '<div class="row" style="gap:6px">'+dnsCertChip(x)+'</div>'+(st.ssl_error&&!st.ssl?'<div class="warnbox ltr" style="margin:0">'+esc(st.ssl_error)+'</div>':'')+
    '<div class="g2"><button class="b2" onclick="dnsEdit(\''+x.server+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2 bd" onclick="dnsDel(\''+x.server+'\')">'+ic('trash',15)+' '+t('Remove from DNS')+'</button></div></div>'}).join('')+'</div>'}
 
 // ---- services tab
@@ -119,27 +118,23 @@ function dnsSettingsTab(d,el){
   '<label class="f">'+t('Upstream resolvers')+'</label><input id="dn_up" class="ltr" value="'+esc(d.upstreams.join(', '))+'"><div class="chipset">'+UPSTREAMS.map(function(u){return '<button type="button" data-up="'+u[1]+'">'+esc(t(u[0]))+'</button>'}).join('')+'</div>'+
   '<label class="f">'+t('An allowed address stays open for (hours)')+'</label><input id="dn_h" type="number" min="1" class="ltr" value="'+d.ip_hours+'"><p class="hint">'+t('After this long without the user\'s app registering again, the address is closed')+'</p>'+
   '<div class="sbar"><button class="btn" id="dn_save">'+t('Save')+'</button></div></div>'+
-  '<div class="card"><h3>'+ic('security',16)+' '+t('Certificate and records')+'</h3><div id="dn_cert">'+dnsCertState(d)+'</div>'+
-  '<label class="f">'+t('Provider')+'</label><div class="ftabs" id="dn_pvt">'+[['',t('Manual (paste a certificate)')],['cloudflare','Cloudflare'],['arvan','ArvanCloud']].map(function(o){return '<button type="button" data-pv="'+o[0]+'" class="'+(d.provider==o[0]?'on':'')+'">'+o[1]+'</button>'}).join('')+'</div>'+
-  '<div id="dn_auto"><p class="hint">'+t('The panel makes the A records of every server (and *.) with this API token, then gets a wildcard certificate from Let\'s Encrypt with a DNS challenge and renews it every 60 days. Works for servers inside Iran too.')+'</p><div class="g2"><div><label class="f">'+t('API token')+'</label><input id="dn_tok" type="password" class="ltr" autocomplete="off" placeholder="'+(d.has_token?t('unchanged'):'')+'"></div><div><label class="f">'+t("E-mail for Let's Encrypt (optional)")+'</label><input id="dn_em" class="ltr" value="'+esc(d.email||'')+'"></div></div>'+
-   '<button class="b2" style="width:100%;margin-top:10px" id="dn_iss">'+ic('refresh',14)+' '+t('Set records and get the certificate now')+'</button></div>'+
-  '<div id="dn_man"><label class="f">'+t('Certificate (PEM, full chain)')+'</label><textarea id="dn_c" rows="3" class="ltr" placeholder="-----BEGIN CERTIFICATE-----"></textarea><label class="f">'+t('Private key (PKCS#8 PEM)')+'</label><textarea id="dn_k" rows="3" class="ltr" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></div>'+
-  '<div class="sbar"><button class="btn" id="dn_csave">'+t('Save')+'</button></div></div></div>';
- var pv=d.provider||'',pvu=function(){$('#dn_auto').style.display=pv?'':'none';$('#dn_man').style.display=pv?'none':''};
- $$('#dn_pvt [data-pv]').forEach(function(b){b.onclick=function(){pv=b.dataset.pv;$$('#dn_pvt [data-pv]').forEach(function(x){x.classList.toggle('on',x==b)});pvu()}});pvu();
+  '<div class="card"><h3>'+ic('security',16)+' SSL</h3><div id="dn_cert">'+dnsCertState(d)+'</div>'+
+  '<p class="hint">'+t('Nothing to set: write each server\'s domain (or label + DNS domain), point it to the server, and keep port 80 of the server reachable. The SSL state of every server is on its card.')+'</p>'+
+  '<details style="margin-top:8px"><summary class="muted">'+t('Paste a certificate instead (optional)')+'</summary><label class="f">'+t('Certificate (PEM, full chain)')+'</label><textarea id="dn_c" rows="3" class="ltr" placeholder="-----BEGIN CERTIFICATE-----"></textarea><label class="f">'+t('Private key (PKCS#8 PEM)')+'</label><textarea id="dn_k" rows="3" class="ltr" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>'+
+  '<div class="sbar"><button class="btn" id="dn_csave">'+t('Save')+'</button></div></details></div></div>';
+ var rm=$('#dn_crm');if(rm)rm.onclick=function(){api('PUT','/api/dns',{cert:'',key:''}).then(function(){toast(t('Saved'));dnsLoad()}).catch(fail)};
  $$('[data-up]').forEach(function(b){b.onclick=function(){$('#dn_up').value=b.dataset.up}});
  $('#dn_save').onclick=function(){api('PUT','/api/dns',{on:$('#dn_on').checked,base:$('#dn_base').value,upstreams:$('#dn_up').value,ip_hours:+$('#dn_h').value||12}).then(function(){toast(t('Saved'));dnsLoad()}).catch(fail)};
- $('#dn_csave').onclick=function(){var b={provider:pv,api_token:$('#dn_tok').value,email:$('#dn_em').value};if(!b.provider&&$('#dn_c').value.trim()){b.cert=$('#dn_c').value;b.key=$('#dn_k').value}
-  api('PUT','/api/dns',b).then(function(){toast(t('Saved'));dnsLoad()}).catch(fail)};
- $('#dn_iss').onclick=function(){var me=this;me.disabled=true;api('PUT','/api/dns',{provider:pv,api_token:$('#dn_tok').value,email:$('#dn_em').value}).then(function(){return api('POST','/api/dns/cert')}).then(function(){toast(t('Working… about a minute'));setTimeout(function(){me.disabled=false;dnsLoad(true)},5000)}).catch(function(e){me.disabled=false;fail(e)})}}
+ $('#dn_csave').onclick=function(){var c=$('#dn_c').value.trim();if(!c)return toast(t('Paste the certificate first'),1);
+  api('PUT','/api/dns',{cert:c,key:$('#dn_k').value}).then(function(){toast(t('Saved'));dnsLoad()}).catch(fail)};}
 
 // ---- add / edit a DNS server
 function dnsForm(x,role){var d=DN.d,exits=d.servers.filter(function(s){return s.role=='exit'&&s.server!=(x&&x.server)}),agents=d.agents.filter(function(a){return !d.servers.some(function(s){return s.server==a.id&&(!x||s.server!=x.server)})});
  if(role=='relay'&&!exits.length){toast(t('Add an exit DNS server first'),1);return null}
  var h='<p class="muted" style="margin:0 0 6px">'+t('Ports 53, 80, 443 and 853 must be free on this server: give DNS its own server.')+'</p>';
  if(!x)h+='<label class="f">'+t('Agent server')+'</label><select id="dx_sv"><option value="__new">'+t('New server (install command)')+'</option>'+agents.map(function(a){return '<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>'}).join('')+'</select><div id="dx_nw"><label class="f">'+t('Server name')+'</label><input id="dx_nm" placeholder="'+(role=='relay'?'Iran-DNS':'DNS-DE')+'"></div>';
- h+='<label class="f">'+t('Domain of this DNS server')+'</label><input id="dx_dm" class="ltr" placeholder="'+(d.base?(role=='relay'?'ir1.':'de.')+esc(d.base):'de.dns.example.com')+'" value="'+esc(x?x.domain||'':'')+'"><p class="hint">'+t('Empty = label + DNS domain. The panel points it (and *.) at this server and gets the SSL for it by itself.')+'</p>'+
-  (d.provider&&d.has_token?'':'<div class="warnbox">'+t('For SSL by itself, set the DNS provider and API token in Settings and SSL.')+' <a href="#dns/settings" onclick="closeModal()">'+t('Settings and SSL')+'</a></div>')+
+ h+='<label class="f">'+t('Domain of this DNS server')+'</label><input id="dx_dm" class="ltr" placeholder="'+(d.base?(role=='relay'?'ir1.':'de.')+esc(d.base):'de.dns.example.com')+'" value="'+esc(x?x.domain||'':'')+'"><p class="hint">'+t('Empty = label + DNS domain. Point the domain to this server: its SSL is taken on the server with certbot by itself (port 80 must be reachable).')+'</p>'+
+
   '<div class="g2"><div><label class="f">'+t('Label')+'</label><input id="dx_lb" class="ltr" placeholder="'+(role=='relay'?'ir1':'de')+'" value="'+esc(x?x.label:'')+'"><p class="hint ltr" id="dx_lbh"></p></div><div><label class="f">'+t('Answer IP')+'</label><input id="dx_ip" class="ltr" placeholder="'+t('automatic')+'" value="'+esc(x?x.ip:'')+'"></div></div>';
  if(role=='relay')h+='<label class="f">'+t('Its exit')+'</label><select id="dx_ex">'+exits.map(function(s){return '<option value="'+esc(s.server)+'"'+(x&&x.exit==s.server?' selected':'')+'>'+esc(s.name)+'</option>'}).join('')+'</select>'+
   '<div class="g2"><div><label class="f">'+t('Transport to the exit')+'</label><select id="dx_tr">'+['tcpmux','dual','h2','hq','wss','ws','kcp','quic','tcp'].map(function(v){return '<option'+((x&&x.transport||'tcpmux')==v?' selected':'')+'>'+v+'</option>'}).join('')+'</select></div><div><label class="f">'+t('Tunnel port on the relay')+'</label><input id="dx_tp" type="number" class="ltr" value="'+((x&&x.tunnel_port)||8446)+'"></div></div>';
@@ -152,8 +147,8 @@ function dnsAdd(role){var go=function(){var h=dnsForm(null,role);if(h===null)ret
   var sv=function(){$('#dx_nw').style.display=$('#dx_sv').value=='__new'?'':'none'};$('#dx_sv').onchange=sv;sv();$('#dx_lb').oninput=dnsLbHint;dnsLbHint();
   $('#dx_go').onclick=function(){var me=this;me.disabled=true;var nw=$('#dx_sv').value=='__new';
    (nw?api('POST','/api/tunnels/servers',{name:$('#dx_nm').value||((role=='relay'?'DNS-relay-':'DNS-')+($('#dx_lb').value||''))}):Promise.resolve({id:$('#dx_sv').value})).then(function(r){
-    return api('POST','/api/dns/servers',dnsBody(role,r.id)).then(function(q){toast(t(q&&q.cert?'Saved: getting SSL (about a minute)':'Saved'));if(nw){$('#dx_go').style.display='none';$('#dx_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}else closeModal();dnsLoad()})}).catch(function(e){me.disabled=false;fail(e)})}};
+    return api('POST','/api/dns/servers',dnsBody(role,r.id)).then(function(q){toast(t('Saved'));if(nw){$('#dx_go').style.display='none';$('#dx_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}else closeModal();dnsLoad()})}).catch(function(e){me.disabled=false;fail(e)})}};
  if(DN.d)go();else dnsLoad().then(go)}
 function dnsEdit(id){var x=DN.d.servers.filter(function(s){return s.server==id})[0];if(!x)return;var h=dnsForm(x,x.role);if(h===null)return;
- modal(mhead(t('Edit'),x.name)+h);$('#dx_lb').oninput=dnsLbHint;dnsLbHint();$('#dx_go').onclick=function(){api('POST','/api/dns/servers',dnsBody(x.role,id)).then(function(q){toast(t(q&&q.cert?'Saved: getting SSL (about a minute)':'Saved'));closeModal();dnsLoad()}).catch(fail)}}
+ modal(mhead(t('Edit'),x.name)+h);$('#dx_lb').oninput=dnsLbHint;dnsLbHint();$('#dx_go').onclick=function(){api('POST','/api/dns/servers',dnsBody(x.role,id)).then(function(q){toast(t('Saved'));closeModal();dnsLoad()}).catch(fail)}}
 function dnsDel(id){confirmDo(function(){api('DELETE','/api/dns/servers/'+encodeURIComponent(id)).then(function(){toast(t('Done'));dnsLoad()}).catch(fail)})}

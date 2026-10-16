@@ -15,6 +15,7 @@ const CONF_FILE: &str = "/etc/kanki/xray/config.json";
 pub(crate) const UNIT: &str = "/etc/systemd/system/kanki-xray.service";
 const VER_FILE: &str = "/var/lib/kanki/xray.applied";
 const BIN_VER_FILE: &str = "/var/lib/kanki/xray.binver";
+const EXTRA_CERTS: &str = "/var/lib/kanki/xray.certs";
 pub const API_PORT: u16 = 10085;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -24,6 +25,8 @@ pub struct XrayCfg {
     pub config: Value,
     /// Xray-core release tag to install ("" = the latest release)
     pub version: String,
+    /// domains of this server whose certificate certbot gets now (even before an inbound uses it)
+    pub certs: Vec<String>,
 }
 
 fn sh(cmd: &str) -> (bool, String) {
@@ -121,7 +124,12 @@ pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) 
     };
     install(&c.version, panel)?;
     let _ = std::fs::create_dir_all(CONF_DIR);
-    let text = serde_json::to_string_pretty(&c.config).map_err(|e| e.to_string())?;
+    // automatic SSL: certbot gets the certificates the config uses; an inbound whose certificate is
+    // not there (yet) is left out, so the rest still runs
+    let mut config = c.config.clone();
+    let _ = std::fs::write(EXTRA_CERTS, c.certs.join("\n"));
+    let partial = certs_for(&mut config, &c.certs);
+    let text = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
     let changed = std::fs::read_to_string(CONF_FILE).map(|t| t != text).unwrap_or(true);
     if changed {
         // Xray tells the format by the extension: the file being checked must end in .json
@@ -169,8 +177,64 @@ pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) 
             }
         }
     }
-    let _ = std::fs::write(VER_FILE, ver);
+    // missing certificates: deploy again on the next round (certbot waits 10 minutes after a failure)
+    let _ = std::fs::write(VER_FILE, if partial { format!("{}-nocert", ver) } else { ver.to_string() });
     Ok(())
+}
+
+/// Domains whose certbot certificate the config needs: (domain, file)
+fn acme_domains(config: &Value) -> Vec<String> {
+    let mut v = vec![];
+    for ib in config["inbounds"].as_array().into_iter().flatten() {
+        for c in ib["streamSettings"]["tlsSettings"]["certificates"].as_array().into_iter().flatten() {
+            if let Some(d) = c["certificateFile"].as_str().and_then(|f| f.strip_prefix("/etc/letsencrypt/live/")).and_then(|r| r.strip_suffix("/fullchain.pem")) {
+                if !v.contains(&d.to_string()) {
+                    v.push(d.to_string());
+                }
+            }
+        }
+    }
+    v
+}
+
+fn cert_errors() -> &'static Mutex<HashMap<String, String>> {
+    static E: std::sync::OnceLock<Mutex<HashMap<String, String>>> = std::sync::OnceLock::new();
+    E.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Get the missing certificates; drop the inbounds whose certificate is still missing. true = some were dropped.
+fn certs_for(config: &mut Value, extra: &[String]) -> bool {
+    let mut domains = acme_domains(config);
+    for d in extra {
+        if !domains.contains(d) {
+            domains.push(d.clone());
+        }
+    }
+    if domains.is_empty() {
+        cert_errors().lock().unwrap().clear();
+        return false;
+    }
+    // an Xray inbound on port 80 holds the port certbot needs: stop Xray for those seconds
+    let on80 = config["inbounds"].as_array().into_iter().flatten().any(|ib| ib["port"].as_u64() == Some(80));
+    let mut errs = HashMap::new();
+    for d in &domains {
+        if let Err(e) = crate::certbot::ensure(d, if on80 { Some("kanki-xray.service") } else { None }, &["kanki-xray.service"]) {
+            errs.insert(d.clone(), e);
+        }
+    }
+    let missing: Vec<String> = domains.into_iter().filter(|d| !crate::certbot::have(d)).collect();
+    *cert_errors().lock().unwrap() = errs;
+    if missing.is_empty() {
+        return false;
+    }
+    if let Some(a) = config["inbounds"].as_array_mut() {
+        a.retain(|ib| {
+            !ib["streamSettings"]["tlsSettings"]["certificates"].as_array().into_iter().flatten().any(|c| {
+                c["certificateFile"].as_str().map(|f| missing.iter().any(|d| f == crate::certbot::files(d).0)).unwrap_or(false)
+            })
+        });
+    }
+    true
 }
 
 /// Traffic counted since this process started: user id -> bytes, inbound tag -> bytes
@@ -235,9 +299,16 @@ pub fn status() -> Value {
     }
     let c = counters().lock().unwrap();
     let users: serde_json::Map<String, Value> = c.users.iter().map(|(k, v)| (k.to_string(), json!([v]))).collect();
+    let conf: Value = std::fs::read_to_string(CONF_FILE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let mut certs: Vec<String> = acme_domains(&conf).into_iter().filter(|d| crate::certbot::have(d)).collect();
+    certs.extend(std::fs::read_to_string(EXTRA_CERTS).unwrap_or_default().lines().map(|l| l.trim().to_string()).filter(|d| !d.is_empty() && crate::certbot::have(d)));
+    certs.extend(cert_errors().lock().unwrap().keys().filter(|d| crate::certbot::have(d)).cloned());
+    certs.sort();
+    certs.dedup();
     let mut st = json!({
         "active": active, "run": c.run, "users": users, "inbounds": c.inbounds, "online": c.online,
         "ver": applied_ver(), "core": std::fs::read_to_string(BIN_VER_FILE).unwrap_or_default().trim(),
+        "certs": certs, "cert_errors": cert_errors().lock().unwrap().clone(),
     });
     if !active {
         st["error"] = json!(sh("journalctl -u kanki-xray.service -n 5 --no-pager -o cat 2>/dev/null").1.lines().last().unwrap_or("not running").to_string());

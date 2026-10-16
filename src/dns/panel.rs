@@ -62,19 +62,12 @@ pub struct DnsSettings {
     /// extra routed names
     pub custom: Vec<String>,
     pub ip_hours: u64,
+    /// a certificate pasted by hand (empty = every DNS server gets its own with certbot)
     pub cert: String,
     pub key: String,
     pub servers: Vec<DnsSrv>,
     /// secret the relay keys and tunnel tokens are derived from
     pub secret: String,
-    /// automatic certificate + records: "" (manual) | "cloudflare" | "arvan", its API token, ACME e-mail
-    pub provider: String,
-    pub api_token: String,
-    pub email: String,
-    /// when the certificate was issued and for which names; the last error of the automatic run
-    pub cert_at: i64,
-    pub cert_names: String,
-    pub acme_err: String,
     /// user id -> epoch: bumping it makes the servers forget the user's allowed addresses
     pub kicks: HashMap<String, u64>,
 }
@@ -241,6 +234,8 @@ pub fn cfg_for(app: &App, sid: &str) -> Option<(DnsCfg, String)> {
         users: dns_users(app),
         cert: s.cert.clone(),
         key: s.key.clone(),
+        // no pasted certificate: the server gets its own with certbot for its name
+        acme: s.cert.trim().is_empty() && !host_of(&s, srv).is_empty(),
         dns_port: 53,
         dot_port: 853,
         https_port: 443,
@@ -351,11 +346,15 @@ pub fn sub_info(app: &App, u: &User) -> Value {
         .map(|x| {
             let host = host_of(&s, x);
             let ip = answer_ip(x);
-            let tls = !host.is_empty() && !s.cert.is_empty();
+            // a pasted certificate covers *.name (the DoT name carries the user's token); a certbot one
+            // is for the name itself: DoT on it knows the user by the address the app registered
+            let manual = !s.cert.trim().is_empty();
+            let ssl_ok = manual || last_status().lock().unwrap().get(&x.server).map(|v| v.1["ssl"].as_bool() == Some(true)).unwrap_or(false);
+            let tls = !host.is_empty() && ssl_ok;
             json!({
                 "id": x.server, "name": names.get(&x.server).cloned().unwrap_or_default(), "note": x.note, "role": x.role,
                 "ip": ip, "host": host,
-                "dot": if tls { format!("{}.{}", token, host) } else { String::new() },
+                "dot": if tls { if manual { format!("{}.{}", token, host) } else { host.clone() } } else { String::new() },
                 "doh": if tls { format!("https://{}/dns-query/{}", host, token) } else { String::new() },
                 "register": if tls { format!("https://{}/r/{}", host, token) } else { String::new() },
                 "register_http": if ip.is_empty() { String::new() } else { format!("http://{}/kdns/r/{}", ip, token) },
@@ -371,7 +370,6 @@ pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/dns", get(get_all).put(put_settings))
         .route("/api/dns/servers", post(put_server))
-        .route("/api/dns/cert", post(cert_now))
         .route("/api/dns/servers/:id", delete(del_server))
         .route("/api/dns/users", get(get_users))
         .route("/api/dns/users/:id/kick", post(kick_user))
@@ -408,9 +406,7 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
     let users = app.db.users().iter().filter(|u| u.has_proto("dns")).count();
     Json(json!({
         "on": s.on, "base": s.base, "upstreams": s.upstreams, "off": s.off, "opt": s.opt, "custom": s.custom, "ip_hours": s.ip_hours,
-        "cert": cert_info(&s.cert), "cert_at": s.cert_at, "cert_names": s.cert_names, "acme_err": s.acme_err,
-        "acme_busy": ACME_BUSY.load(std::sync::atomic::Ordering::Relaxed),
-        "provider": s.provider, "email": s.email, "has_token": !s.api_token.is_empty(), "servers": servers, "catalog": catalog(), "domains": domains(&s).len(), "users": users,
+        "cert": cert_info(&s.cert), "servers": servers, "catalog": catalog(), "domains": domains(&s).len(), "users": users,
         "agents": names.iter().map(|(k, v)| json!({"id": k, "name": v})).collect::<Vec<_>>(),
     }))
     .into_response()
@@ -456,18 +452,6 @@ async fn put_settings(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         }
         s.custom = v;
     }
-    if let Some(v) = b["provider"].as_str() {
-        if !["", "cloudflare", "arvan"].contains(&v) {
-            return err(StatusCode::BAD_REQUEST, "provider: cloudflare, arvan or empty (manual certificate)");
-        }
-        s.provider = v.to_string();
-    }
-    if let Some(v) = b["api_token"].as_str().map(|x| x.trim()).filter(|x| !x.is_empty()) {
-        s.api_token = v.to_string();
-    }
-    if let Some(v) = b["email"].as_str() {
-        s.email = v.trim().to_string();
-    }
     if let Some(v) = b["ip_hours"].as_u64() {
         s.ip_hours = v.clamp(1, 24 * 30);
     }
@@ -484,8 +468,7 @@ async fn put_settings(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         s.key = key;
     }
     save(&app, &mut s);
-    let started = cert_kick(&app);
-    Json(json!({ "ok": true, "cert": started })).into_response()
+    Json(json!({ "ok": true })).into_response()
 }
 
 async fn put_server(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
@@ -561,27 +544,7 @@ async fn put_server(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
         None => s.servers.push(x),
     }
     save(&app, &mut s);
-    let started = cert_kick(&app);
-    Json(json!({ "ok": true, "cert": started })).into_response()
-}
-
-/// Start getting the certificate (and the records) when the names changed or it is missing / old.
-/// Returns whether it started.
-pub fn cert_kick(app: &Arc<App>) -> bool {
-    let s = settings(app);
-    let names = super::acme::cert_names(&s).join(",");
-    let due = s.on && !s.provider.is_empty() && !s.api_token.is_empty() && !names.is_empty() && (s.cert.is_empty() || s.cert_names != names || now() - s.cert_at > 60 * 86400);
-    if !due || ACME_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        return false;
-    }
-    let a = app.clone();
-    tokio::spawn(async move {
-        if let Err(e) = super::acme::run_once(&a).await {
-            update(&a, |x| x.acme_err = e.clone());
-        }
-        ACME_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
-    });
-    true
+    Json(json!({ "ok": true })).into_response()
 }
 
 async fn del_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
@@ -654,21 +617,3 @@ async fn check_name(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
     .into_response()
 }
 
-static ACME_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Set the records and get the certificate now (in the background: it takes about a minute).
-async fn cert_now(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "nodes");
-    if ACME_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        return err(StatusCode::CONFLICT, "already working on it");
-    }
-    let a = app.clone();
-    tokio::spawn(async move {
-        let r = super::acme::run_once(&a).await;
-        if let Err(e) = &r {
-            update(&a, |x| x.acme_err = e.clone());
-        }
-        ACME_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
-    });
-    Json(json!({ "ok": true })).into_response()
-}
