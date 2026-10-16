@@ -178,6 +178,8 @@ pub async fn run(version: &str) {
     let dns_err: Mutex<Option<String>> = Mutex::new(None);
     // the last error of setting up Xray
     let xray_err: Mutex<Option<String>> = Mutex::new(None);
+    // the subscription's HTTPS listener (when this Iran server serves it)
+    let mut subsrv = crate::subiran::Runner::from_disk();
     loop {
         let st = mgr.statuses().await;
         let (emer_ver, mut emer_st) = tokio::task::spawn_blocking(|| (crate::emergency::applied_ver(), crate::emergency::status()))
@@ -206,7 +208,7 @@ pub async fn run(version: &str) {
                 xray_st = json!({ "active": false, "deploy_error": e });
             }
         }
-        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st });
+        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status() });
         match http.post(format!("{}/tunnel/agent", panel)).json(&body).send().await {
             Ok(r) if r.status().as_u16() == 410 => {
                 // this server was removed in the panel
@@ -216,6 +218,7 @@ pub async fn run(version: &str) {
                     let _ = tokio::task::spawn_blocking(|| crate::emergency::deploy(None)).await;
                     let _ = tokio::task::spawn_blocking(|| crate::dns::deploy(None)).await;
                     let _ = tokio::task::spawn_blocking(|| crate::xray::deploy(None, None)).await;
+                    subsrv.apply(None);
                     let _ = std::fs::remove_file(CACHE);
                     last.clear();
                 }
@@ -266,6 +269,8 @@ pub async fn run(version: &str) {
                         }
                         _ => {}
                     }
+                    // the subscription listener: its config, or Null (none here)
+                    subsrv.apply(serde_json::from_value(v["subsrv"].clone()).ok());
                     if v["update"].as_bool() == Some(true) {
                         if let Err(e) = update_from_panel(&http, &panel, &id, &token).await {
                             eprintln!("update from the panel failed: {}", e);

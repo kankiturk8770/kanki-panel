@@ -132,7 +132,7 @@ function dnsSettingsTab(d,el){
 function dnsForm(x,role){var d=DN.d,exits=d.servers.filter(function(s){return s.role=='exit'&&s.server!=(x&&x.server)}),agents=d.agents.filter(function(a){return !d.servers.some(function(s){return s.server==a.id&&(!x||s.server!=x.server)})});
  if(role=='relay'&&!exits.length){toast(t('Add an exit DNS server first'),1);return null}
  var h='<p class="muted" style="margin:0 0 6px">'+t('Ports 53, 80, 443 and 853 must be free on this server: give DNS its own server.')+'</p>';
- if(!x)h+='<label class="f">'+t('Agent server')+'</label><select id="dx_sv"><option value="__new">'+t('New server (install command)')+'</option>'+agents.map(function(a){return '<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>'}).join('')+'</select><div id="dx_nw"><label class="f">'+t('Server name')+'</label><input id="dx_nm" placeholder="'+(role=='relay'?'Iran-DNS':'DNS-DE')+'"></div>';
+ if(!x)h+='<label class="f">'+t('Agent server')+'</label><select id="dx_sv"><option value="__new">'+t('New server (install command)')+'</option>'+srvOptGroups(agents,function(a){return '<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>'})+'</select><div id="dx_nw"><label class="f">'+t('Server name')+'</label><input id="dx_nm" placeholder="'+(role=='relay'?'Iran-DNS':'DNS-DE')+'"></div>';
  h+='<label class="f">'+t('Domain of this DNS server')+'</label><input id="dx_dm" class="ltr" placeholder="'+(d.base?(role=='relay'?'ir1.':'de.')+esc(d.base):'de.dns.example.com')+'" value="'+esc(x?x.domain||'':'')+'"><p class="hint">'+t('Empty = label + DNS domain. Point the domain to this server: its SSL is taken on the server with certbot by itself.')+'</p>'+
 
   '<div class="g2"><div><label class="f">'+t('Label')+'</label><input id="dx_lb" class="ltr" placeholder="'+(role=='relay'?'ir1':'de')+'" value="'+esc(x?x.label:'')+'"><p class="hint ltr" id="dx_lbh"></p></div><div><label class="f">'+t('Answer IP')+'</label><input id="dx_ip" class="ltr" placeholder="'+t('automatic')+'" value="'+esc(x?x.ip:'')+'"></div></div>';
@@ -146,7 +146,7 @@ function dnsBody(role,sid){var b={server:sid,role:role,domain:$('#dx_dm').value.
 function dnsAdd(role){var go=function(){var h=dnsForm(null,role);if(h===null)return;modal(mhead(t(role=='relay'?'Add relay':'Add DNS server'),t(role=='relay'?'Relay (inside Iran)':'Exit (abroad)'))+h);
   var sv=function(){$('#dx_nw').style.display=$('#dx_sv').value=='__new'?'':'none'};$('#dx_sv').onchange=sv;sv();$('#dx_lb').oninput=dnsLbHint;dnsLbHint();
   $('#dx_go').onclick=function(){var me=this;me.disabled=true;var nw=$('#dx_sv').value=='__new';
-   (nw?api('POST','/api/tunnels/servers',{name:$('#dx_nm').value||((role=='relay'?'DNS-relay-':'DNS-')+($('#dx_lb').value||''))}):Promise.resolve({id:$('#dx_sv').value})).then(function(r){
+   (nw?api('POST','/api/tunnels/servers',{name:$('#dx_nm').value||((role=='relay'?'DNS-relay-':'DNS-')+($('#dx_lb').value||'')),loc:role=='relay'?'iran':'abroad'}):Promise.resolve({id:$('#dx_sv').value})).then(function(r){
     return api('POST','/api/dns/servers',dnsBody(role,r.id)).then(function(q){toast(t('Saved'));if(nw){$('#dx_go').style.display='none';$('#dx_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}else closeModal();dnsLoad()})}).catch(function(e){me.disabled=false;fail(e)})}};
  if(DN.d)go();else dnsLoad().then(go)}
 function dnsEdit(id){var x=DN.d.servers.filter(function(s){return s.server==id})[0];if(!x)return;var h=dnsForm(x,x.role);if(h===null)return;

@@ -36,6 +36,8 @@ pub struct TServer {
     pub gre_ip: String,
     pub gre_n: u8,
     pub gre_panel_ip: String,
+    /// "iran" | "abroad" ("" = not set yet: guessed from what the server does)
+    pub loc: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -352,7 +354,24 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
     }
     // Kanki DNS: the tunnel from a relay inside Iran to its exit abroad
     out.extend(crate::dns::panel::relay_specs(app, sid));
+    // the subscription on an Iran server: the tunnel from there to the panel
+    out.extend(crate::subiran::specs(app, sid));
     out
+}
+
+/// The tunnels server `sid` runs (for the port checks of other features).
+pub(crate) fn specs_of(app: &App, sid: &str) -> Vec<Spec> {
+    specs_for(app, sid)
+}
+
+/// The admin's tunnels.
+pub(crate) fn kanki_tunnels(app: &App) -> Vec<Tunnel> {
+    tunnels(app)
+}
+
+/// Open links of tunnel `id` on server `sid` at its last report.
+pub(crate) fn links_of(sid: &str, id: &str) -> usize {
+    seen().lock().unwrap().get(sid).and_then(|x| x.status.iter().find(|s| s.id == id).map(|s| s.links)).unwrap_or(0)
 }
 
 /// The address an agent server last reported from (DNS answers it for routed names).
@@ -363,6 +382,43 @@ pub(crate) fn seen_ip(sid: &str) -> Option<String> {
 /// "host:port" other servers dial server `sid` on.
 pub(crate) fn dial_addr(app: &App, sid: &str, port: u16) -> String {
     hostport(&host_of(app, sid), port)
+}
+
+/// "iran" or "abroad" when written, else "".
+fn clean_loc(v: &str) -> String {
+    if v == "iran" || v == "abroad" { v.to_string() } else { String::new() }
+}
+
+/// Where a server whose location is not set probably is, from what it does: a DNS relay, the emergency
+/// chat, the Iran subscription and a tunnel entry are inside Iran; a DNS exit or a tunnel exit is abroad.
+pub(crate) fn guess_loc(sid: &str, list: &[Tunnel], dns_role: &str, iran_jobs: bool) -> String {
+    if dns_role == "relay" || iran_jobs || list.iter().any(|t| t.entry == sid && t.exit != sid) {
+        "iran".into()
+    } else if dns_role == "exit" || list.iter().any(|t| t.exit == sid) {
+        "abroad".into()
+    } else {
+        String::new()
+    }
+}
+
+/// id -> (location, guessed) of every server, the panel's own ("local") included.
+pub(crate) fn server_locs(app: &App) -> HashMap<String, (String, bool)> {
+    let list = tunnels(app);
+    let dns = crate::dns::panel::settings(app);
+    let mut m = HashMap::new();
+    let local = clean_loc(&app.db.get("tun_local_loc"));
+    m.insert("local".to_string(), if local.is_empty() { ("abroad".to_string(), true) } else { (local, false) });
+    for s in servers(app) {
+        let set = clean_loc(&s.loc);
+        if !set.is_empty() {
+            m.insert(s.id, (set, false));
+            continue;
+        }
+        let role = dns.servers.iter().find(|x| x.server == s.id).map(|x| x.role.clone()).unwrap_or_default();
+        let jobs = app.db.get("emer_server") == s.id || crate::subiran::settings(app).server == s.id;
+        m.insert(s.id.clone(), (guess_loc(&s.id, &list, &role, jobs), true));
+    }
+    m
 }
 
 /// id -> name of every agent server.
@@ -1303,9 +1359,11 @@ async fn list(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "nodes");
     let seen = seen().lock().unwrap().clone();
     let t = now();
+    let locs = server_locs(&app);
     let mut srv = vec![json!({
         "id": "local", "name": local_name(&app), "local": true, "addr": app.db.get("tun_local_addr"),
         "host": host_of(&app, "local"), "online": true, "last_seen": t, "version": crate::VERSION,
+        "loc": locs.get("local").map(|x| x.0.clone()).unwrap_or_default(), "loc_guess": locs.get("local").map(|x| x.1).unwrap_or(true),
     })];
     for s in servers(&app) {
         let x = seen.get(&s.id).cloned().unwrap_or_default();
@@ -1313,6 +1371,7 @@ async fn list(State(app): St, h: HeaderMap) -> Response {
             "id": s.id, "name": s.name, "local": false, "addr": s.addr, "host": host_of(&app, &s.id),
             "ip": x.ip, "online": x.at > 0 && t - x.at < 20, "last_seen": x.at, "version": x.version,
             "gre_ip": s.gre_ip, "gre_n": s.gre_n, "gre_panel_ip": s.gre_panel_ip,
+            "loc": locs.get(&s.id).map(|x| x.0.clone()).unwrap_or_default(), "loc_guess": locs.get(&s.id).map(|x| x.1).unwrap_or(true),
         }));
     }
     let mut tl = vec![];
@@ -1756,6 +1815,7 @@ async fn server_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
         name: if name.is_empty() { format!("server-{}", list.len() + 1) } else { name },
         token: rand_token(40),
         addr: b["addr"].as_str().unwrap_or("").trim().to_string(),
+        loc: clean_loc(b["loc"].as_str().unwrap_or("")),
         created: now(),
         ..Default::default()
     };
@@ -1775,6 +1835,9 @@ async fn server_edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
         if let Some(a) = b["addr"].as_str() {
             app.db.set("tun_local_addr", a.trim());
         }
+        if let Some(l) = b["loc"].as_str() {
+            app.db.set("tun_local_loc", &clean_loc(l));
+        }
         return Json(json!({ "ok": true })).into_response();
     }
     let mut list = servers(&app);
@@ -1786,6 +1849,9 @@ async fn server_edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
     }
     if let Some(a) = b["addr"].as_str() {
         s.addr = a.trim().to_string();
+    }
+    if let Some(l) = b["loc"].as_str() {
+        s.loc = clean_loc(l);
     }
     let token = if b["new_token"].as_bool().unwrap_or(false) {
         s.token = rand_token(40);
@@ -2045,13 +2111,15 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c }),
         None => json!({ "mode": "off" }),
     };
+    crate::subiran::ingest(&app, &id, &b["subsrv"]);
     crate::xray::panel::ingest(&app, &id, &b["xray"]);
     let xray = match crate::xray::panel::cfg_for(&app, &id) {
         Some((_, v)) if b["xray_ver"].as_str() == Some(v.as_str()) && b["xray"]["active"].as_bool() == Some(true) => json!({ "mode": "keep" }),
         Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c }),
         None => json!({ "mode": "off" }),
     };
-    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray })).into_response()
+    let subsrv = crate::subiran::cfg_for(&app, &id);
+    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "subsrv": subsrv })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)
@@ -2243,7 +2311,20 @@ mod auto_update_tests {
 
 #[cfg(test)]
 mod version_gate_tests {
-    use super::{agent_knows, next_transport};
+    use super::{agent_knows, guess_loc, next_transport, Tunnel};
+
+    #[test]
+    fn location_is_guessed_from_what_a_server_does() {
+        let t = |e: &str, x: &str| Tunnel { entry: e.into(), exit: x.into(), ..Default::default() };
+        let list = vec![t("ir", "de"), t("ir2", "local")];
+        assert_eq!(guess_loc("ir", &list, "", false), "iran");
+        assert_eq!(guess_loc("ir2", &list, "", false), "iran");
+        assert_eq!(guess_loc("de", &list, "", false), "abroad");
+        assert_eq!(guess_loc("x", &list, "relay", false), "iran");
+        assert_eq!(guess_loc("x", &list, "exit", false), "abroad");
+        assert_eq!(guess_loc("x", &list, "", true), "iran");
+        assert_eq!(guess_loc("x", &list, "", false), "");
+    }
 
     #[test]
     fn old_agents_do_not_get_game_or_faketcp() {

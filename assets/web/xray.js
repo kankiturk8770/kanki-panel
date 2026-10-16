@@ -148,7 +148,7 @@ function xrSettings(d,el){
 
 // ---- servers
 function xrAddNode(){var go=function(){var d=XR.d,used=d.servers.map(function(x){return x.server}),ag=d.agents.filter(function(a){return used.indexOf(a.id)<0});
-  modal(mhead(t('Add server'),'Xray')+'<p class="muted" style="margin:0 0 6px">'+t('Xray can run on the panel server or on any tunnel server. A new server gets a one-line install command.')+'</p><label class="f">'+t('Agent server')+'</label><select id="xa_sv"><option value="__new">'+t('New server (install command)')+'</option>'+ag.map(function(a){return '<option value="'+esc(a.id)+'">'+esc(a.id=='local'?a.name+' ('+t('Panel server')+')':a.name)+'</option>'}).join('')+'</select>'+
+  modal(mhead(t('Add server'),'Xray')+'<p class="muted" style="margin:0 0 6px">'+t('Xray can run on the panel server or on any tunnel server. A new server gets a one-line install command.')+'</p><label class="f">'+t('Agent server')+'</label><select id="xa_sv"><option value="__new">'+t('New server (install command)')+'</option>'+srvOptGroups(ag,function(a){return '<option value="'+esc(a.id)+'">'+esc(a.id=='local'?a.name+' ('+t('Panel server')+')':a.name)+'</option>'})+'</select>'+
    '<div id="xa_nw"><label class="f">'+t('Server name')+'</label><input id="xa_nm" placeholder="Xray-DE"></div>'+xrDomainFields({address:'',ssl:true})+
    '<button class="btn" style="width:100%;margin-top:12px" id="xa_go">'+t('Save')+'</button><div id="xa_out"></div>');
   var sv=function(){$('#xa_nw').style.display=$('#xa_sv').value=='__new'?'':'none'};$('#xa_sv').onchange=sv;sv();xrDomainWire();
