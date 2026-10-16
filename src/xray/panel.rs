@@ -1772,7 +1772,7 @@ mod emit {
                         dest: "www.microsoft.com:443".into(), names: "www.microsoft.com".into(), private: p, public: q, short_ids: "a1b2c3d4".into(),
                         sniffing: true, ..Default::default()
                     };
-                    let s = XraySettings { on: true, servers: vec![XServer { server: "local".into(), address: "203.0.113.9".into() }], inbounds: vec![ib.clone()], block_private: true, block_bt: true, ..Default::default() };
+                    let s = XraySettings { on: true, servers: vec![XServer { server: "local".into(), address: "203.0.113.9".into(), ..Default::default() }], inbounds: vec![ib.clone()], block_private: true, block_bt: true, ..Default::default() };
                     std::fs::write(format!("{}/{}.json", out, ib.remark), build_config(&s, "local", std::slice::from_ref(&u)).to_string()).unwrap();
                     let l = link_with(&s, &ib, &u, "203.0.113.9").unwrap();
                     std::fs::write(format!("{}/{}.link", out, ib.remark), l).unwrap();
@@ -1808,7 +1808,7 @@ mod emit {
         let mut ibs = ibs;
         ibs.push(ss);
         let s = XraySettings {
-            on: true, servers: vec![XServer { server: "local".into(), address: "203.0.113.9".into() }], inbounds: ibs, block_private: true, block_bt: true, block_ads: true, block_ir: true,
+            on: true, servers: vec![XServer { server: "local".into(), address: "203.0.113.9".into(), ..Default::default() }], inbounds: ibs, block_private: true, block_bt: true, block_ads: true, block_ir: true,
             log_level: "info".into(), domain_strategy: "IPIfNonMatch".into(), dns: "1.1.1.1, https://dns.google/dns-query".into(), ipv4: true,
             outs: vec![
                 XOut { tag: "s5".into(), kind: "socks".into(), address: "127.0.0.1".into(), port: 1080, user: "a".into(), pass: "b".into(), ..Default::default() },
