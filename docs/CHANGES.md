@@ -1,3 +1,7 @@
+# v3.5.5 — one Servers page
+- **Servers** (menu, right under Users) holds every server of the panel in three parts: Kanki VPN (WireGuard · AmneziaWG · Hysteria2), Xray and Kanki DNS, each with its own add button (DNS: exit server abroad, relay in Iran). The Xray and DNS pages no longer add servers; they point to Servers.
+- **VPN services page** tidied: small buttons in each card's head instead of the big buttons at the bottom; Xray shows its first 5 inbounds and a link to the rest.
+
 # v3.5.4 — Xray install fix, installs without root login
 
 - **Xray-core install failed with "Permission denied"** on servers without `unzip`: Python's zip extraction drops the executable bit, so the new `xray` could not run. The file is now made executable before it is tested, and the download goes to `/var/lib/kanki/tmp` instead of `/tmp` (which some servers mount `noexec`).
