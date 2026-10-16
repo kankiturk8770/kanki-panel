@@ -28,6 +28,8 @@ pub struct DnsUser {
     pub token: String,
     /// how many addresses may be allowed at once (0 = no limit)
     pub max_ips: u32,
+    /// bumped by the admin to forget the user's allowed addresses
+    pub epoch: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -97,9 +99,12 @@ pub async fn run() {
             }
         }
         let users: serde_json::Map<String, Value> = eng.stats_snapshot().into_iter().map(|(k, (b, q))| (k.to_string(), json!([b, q]))).collect();
+        let ld = |a: &std::sync::atomic::AtomicU64| a.load(std::sync::atomic::Ordering::Relaxed);
         let st = json!({
             "run": run_id, "ts": crate::util::now(), "users": users, "allowed": eng.allowed_count(),
             "conns": eng.conns.load(std::sync::atomic::Ordering::Relaxed), "errors": eng.errors.lock().unwrap().clone(),
+            "q": { "total": ld(&eng.q_total), "routed": ld(&eng.q_routed), "cache": ld(&eng.q_cache), "refused": ld(&eng.q_refused) },
+            "top": eng.top(15), "ips": eng.ips_snapshot(), "version": crate::VERSION,
         });
         let tmp = format!("{}.new", STATS_FILE);
         if std::fs::write(&tmp, st.to_string()).is_ok() {

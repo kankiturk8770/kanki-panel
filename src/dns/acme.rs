@@ -160,19 +160,31 @@ pub async fn sync_records(app: &App, s: &DnsSettings) -> Result<usize, String> {
 
 /// Get a new certificate for every DNS server name. Returns (chain PEM, key PEM).
 pub async fn issue(app: &App, s: &DnsSettings) -> Result<(String, String), String> {
-    use instant_acme::{Account, AccountCredentials, AuthorizationStatus, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderStatus, RetryPolicy};
     let names = cert_names(s);
     if names.is_empty() {
         return Err("no DNS server has a name yet: set the DNS domain and the server labels".into());
     }
-    let p = Prov { app, kind: &s.provider, token: &s.api_token };
+    issue_for(app, &s.provider, &s.api_token, &s.email, &names).await
+}
+
+/// Point `name` at `ip` (an A record) with the provider's API.
+pub async fn set_a_record(app: &App, kind: &str, token: &str, name: &str, ip: &str) -> Result<(), String> {
+    Prov { app, kind, token }.set_a(name, ip).await
+}
+
+/// A Let's Encrypt certificate for `names` with the DNS-01 challenge through the provider's API (Cloudflare
+/// or ArvanCloud). Returns (chain PEM, key PEM).
+pub async fn issue_for(app: &App, kind: &str, token: &str, email: &str, names: &[String]) -> Result<(String, String), String> {
+    use instant_acme::{Account, AccountCredentials, AuthorizationStatus, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderStatus, RetryPolicy};
+    let names = names.to_vec();
+    let p = Prov { app, kind, token };
     let e = |x: instant_acme::Error| format!("Let's Encrypt: {}", x);
     // one account, kept for renewals
     let creds: Option<AccountCredentials> = serde_json::from_str(&app.db.get("dns_acme_account")).ok();
     let account = match creds {
         Some(c) => Account::builder().map_err(e)?.from_credentials(c).await.map_err(e)?,
         None => {
-            let contact = if s.email.trim().is_empty() { vec![] } else { vec![format!("mailto:{}", s.email.trim())] };
+            let contact = if email.trim().is_empty() { vec![] } else { vec![format!("mailto:{}", email.trim())] };
             let contact: Vec<&str> = contact.iter().map(|x| x.as_str()).collect();
             let (a, c) = Account::builder()
                 .map_err(e)?
