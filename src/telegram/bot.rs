@@ -1,5 +1,5 @@
 //! ربات تلگرام داخلی: فروش، پرداخت، سرویس‌ها، مدیریت کامل
-use crate::api::origin;
+use crate::api::{origin, sub_origin};
 use crate::backup::make_archive;
 use crate::db::User;
 use crate::util::{cfg_name_from, esc, now, rand_token, valid_cfg_name};
@@ -416,7 +416,7 @@ impl Bot {
         let step2 = if link.is_empty() { "با این کد وارد برنامه‌ی کانکی بشید:" } else { "2️⃣ با این کد وارد برنامه بشید:" };
         format!(
             "👤 <b>{}</b>  ·  {}\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n📱 <b>بهترین راه (پیشنهاد ما): برنامه‌ی کانکی</b>\n{}{}\n<code>{}</code>\n\n🔗 لینک اشتراک (برای برنامه‌های دیگه):\n<code>{}/sub/{}</code>",
-            esc(&u.username), st, left, u.used_gb(), left_text(u), u.online, u.max_conn, step1, step2, u.sub_code(), origin(&self.app), u.sub_code()
+            esc(&u.username), st, left, u.used_gb(), left_text(u), u.online, u.max_conn, step1, step2, u.sub_code(), sub_origin(&self.app), u.sub_code()
         )
     }
 

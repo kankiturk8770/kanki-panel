@@ -42,6 +42,11 @@ pub fn origin(app: &App) -> String {
     }
 }
 
+/// Base of the subscription links: the Iran server when it serves them, otherwise `origin`
+pub fn sub_origin(app: &App) -> String {
+    crate::subiran::origin(app).unwrap_or_else(|| origin(app))
+}
+
 /// Public host users connect to on the main server (settings > env ENDPOINT > env DOMAIN)
 pub fn panel_endpoint(app: &App) -> String {
     let s = app.db.get("endpoint");
@@ -126,7 +131,7 @@ pub fn valid_username(s: &str) -> bool {
 pub fn user_json(app: &App, u: &User) -> Value {
     json!({
         "id": u.id, "username": u.username, "subscription_id": u.code, "code": u.sub_code(),
-        "link": format!("{}/sub/{}", origin(app), u.sub_code()),
+        "link": format!("{}/sub/{}", sub_origin(app), u.sub_code()),
         "traffic_limit_gb": u.limit_gb, "traffic_used_gb": (u.used_gb() * 100.0).round() / 100.0, "used_bytes": u.used_bytes,
         "expires_at": iso(u.expires_at), "expires_ts": u.expires_at,
         "max_connections": u.max_conn, "online_connections": u.online, "enabled": u.enabled,
@@ -190,6 +195,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::admin::router())
         .merge(crate::backup::router())
         .merge(crate::subdomain::router())
+        .merge(crate::subiran::router())
         .merge(crate::channel::router())
         .merge(crate::tunnel::panel::router())
         .merge(crate::dns::panel::router())
@@ -903,6 +909,8 @@ fn sub_data(app: &App, u: &User) -> Value {
         "panel_name": app.db.get("panel_name"), "version": crate::VERSION, "nodes": nodes,
         "support": app.db.get("support"), "app_link": app.db.get("app_link"),
         "logo": app.db.get("logo"),
+        // the subscription link's base when an Iran server serves it (empty = the page's own address)
+        "sub_base": crate::subiran::origin(app).unwrap_or_default(),
         "app_msg": app_msg(app, &u.username),
         // the emergency chat on the server inside Iran, and the key that signs the admin's messages
         "emergency": crate::tunnel::panel::emer_url(app),

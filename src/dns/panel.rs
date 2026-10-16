@@ -404,10 +404,11 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
         })
         .collect();
     let users = app.db.users().iter().filter(|u| u.has_proto("dns")).count();
+    let locs = crate::tunnel::panel::server_locs(&app);
     Json(json!({
         "on": s.on, "base": s.base, "upstreams": s.upstreams, "off": s.off, "opt": s.opt, "custom": s.custom, "ip_hours": s.ip_hours,
         "cert": cert_info(&s.cert), "servers": servers, "catalog": catalog(), "domains": domains(&s).len(), "users": users,
-        "agents": names.iter().map(|(k, v)| json!({"id": k, "name": v})).collect::<Vec<_>>(),
+        "agents": names.iter().map(|(k, v)| json!({"id": k, "name": v, "loc": locs.get(k).map(|x| x.0.clone()).unwrap_or_default()})).collect::<Vec<_>>(),
     }))
     .into_response()
 }

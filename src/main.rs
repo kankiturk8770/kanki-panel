@@ -20,6 +20,8 @@ mod auth;
 mod backup;
 #[path = "http/subdomain.rs"]
 mod subdomain;
+#[path = "http/subiran.rs"]
+mod subiran;
 
 // vpn: protocol engines + node sync
 mod dns;

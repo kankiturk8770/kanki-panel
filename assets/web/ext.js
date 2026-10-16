@@ -10,6 +10,16 @@ function KEXT(){
  if(window.AD_FA)Object.assign(FA,AD_FA);
 }
 var KFA={
+ // subscription on an Iran server
+ "Serve the subscription from an Iran server":"لینک ساب روی سرور ایران",
+ "For ISPs that block the panel domain: a tunnel server inside Iran serves the subscription pages with its own SSL and carries them to the panel through a hidden tunnel. Subscription links use it once it works.":"برای اینترنت‌هایی که دامنه‌ی پنل را بسته‌اند: یک سرور تانل داخل ایران صفحه‌های ساب را با SSL خودش می‌دهد و از راه یک تانل مخفی به پنل می‌رساند. وقتی کار کرد، لینک‌های ساب از آن ساخته می‌شوند.",
+ "Tunnel server":"سرور تانل","The domain's A record must point to this server's IP":"رکورد A دامنه باید به IP این سرور اشاره کند",
+ "Waiting for the server: getting SSL and starting the listener…":"در انتظار سرور: گرفتن SSL و راه‌اندازی…",
+ "Tunnel to the panel":"تانل به پنل","down":"قطع",
+ // servers inside Iran and abroad
+ "Iran servers":"سرورهای ایران","Abroad servers":"سرورهای خارج","Location":"موقعیت سرور","Inside Iran":"داخل ایران","Abroad":"خارج",
+ "Location guessed: confirm it in Edit":"موقعیت حدس زده شده: در «ویرایش» تأییدش کن","Location not set: choose it in Edit":"موقعیت مشخص نیست: در «ویرایش» انتخابش کن",
+ "Add a tunnel server inside Iran first (Servers), or set its location to Inside Iran.":"اول یک سرور تانل داخل ایران اضافه کن (سرورها)، یا موقعیت سرورت را «داخل ایران» بگذار.",
  "Every server of the panel: Kanki VPN, Xray and Kanki DNS":"همه‌ی سرورهای پنل: VPN کانکی، Xray و DNS کانکی",
  "For the app: games and sanctioned sites":"برای اپ: بازی و سایت‌های تحریمی",
  "Exit server (abroad)":"سرور خروجی (خارج)","Relay (Iran)":"ریلی (ایران)",

@@ -994,6 +994,7 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
     let s = settings(&app);
     let mut names = crate::tunnel::panel::server_names(&app);
     names.insert("local".into(), app.env.get("LOCAL_NAME").cloned().filter(|x| !x.is_empty()).unwrap_or_else(|| "Main".into()));
+    let locs = crate::tunnel::panel::server_locs(&app);
     let st = last_status().lock().unwrap().clone();
     let servers: Vec<Value> = s
         .servers
@@ -1047,7 +1048,7 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
         "rule_list": s.rule_list, "outs": s.outs.iter().map(|o| { let mut v = serde_json::to_value(o).unwrap_or(json!({})); v["error"] = json!(out_json(o, s.ipv4).err()); v }).collect::<Vec<_>>(),
         "default_out": s.default_out, "online": online,
         "servers": servers, "inbounds": inbounds, "users": users.len(),
-        "agents": names.iter().map(|(k, v)| json!({ "id": k, "name": v })).collect::<Vec<_>>(),
+        "agents": names.iter().map(|(k, v)| json!({ "id": k, "name": v, "loc": locs.get(k).map(|x| x.0.clone()).unwrap_or_default() })).collect::<Vec<_>>(),
         "user_list": all_users.iter().filter(|u| u.has_proto("xray")).map(|u| json!({ "id": u.id, "name": u.username })).collect::<Vec<_>>(),
     }))
     .into_response()

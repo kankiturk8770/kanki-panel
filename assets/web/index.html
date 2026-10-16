@@ -1417,7 +1417,7 @@ function nodePorts(id){var n=findN(id);if(!n)return;var inf=n.info||{},b={},ch=0
   if(r.ok===false){toast((r.errors&&r.errors.join(' · '))||r.error||'failed',1);return}
   toast(t('Done')+' · '+(r.changed||[]).join(', '));closeModal();setTimeout(loadNodes,6000);loadNodes()}).catch(fail)}
 function nodeTun(id){var n=findN(id);if(!n)return;var host=String(n.address||'').replace(/^https?:\/\//,'').replace(/[:\/].*$/,'');
- api('POST','/api/tunnels/servers',{name:n.name,addr:host}).then(function(r){modal(mhead(t('Also use this node as a tunnel server'),n.name)+tunCmdBox(r,r));$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}).catch(fail)}
+ api('POST','/api/tunnels/servers',{name:n.name,addr:host,loc:'abroad'}).then(function(r){modal(mhead(t('Also use this node as a tunnel server'),n.name)+tunCmdBox(r,r));$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}).catch(fail)}
 function nodeEdit(id){var n=findN(id);if(!n)return;var loc=n.id=='local',panel=n.endpoint_mode=='panel'||!n.endpoint;
  modal(mhead(t('Edit node'),loc?'local':n.address)+'<label class="f">'+t('Node name')+'</label><input id="e_name" value="'+esc(n.name)+'"><label class="f">'+t('Note')+'</label><input id="e_note" value="'+esc(n.note)+'">'+
  '<label class="chk" style="margin-top:10px"><input type="checkbox" id="e_acc" '+(n.accept_all?'checked':'')+'>'+t('Sync users without a specific node to this node')+'</label>'+'<div class="box" style="margin-top:10px"><b>'+t('VPN ports (UDP)')+'</b><small class="muted" style="display:block;margin:4px 0 6px">'+t('Applied on the server at once: config, service and firewall. Old WireGuard/AmneziaWG files stop working; subscription links update by themselves.')+'</small><div class="g3">'+
@@ -1548,6 +1548,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   stIn('endpoint','Public VPN host or IP',s.domain||'vpn.example.com','Written inside every user config. Empty = the panel domain.','full')+
   stIn('sub_base','Subscription base URL','https://sub.example.com','Base of the subscription links (for example a CDN domain). Empty = the panel address.','full')+
   '<div class="full box"><b>'+t('Separate subscription domain')+'</b><div class="hint">'+t('A domain that points to this server. The panel gets its SSL by itself and serves only the subscription pages on it, so the panel address stays hidden.')+'</div><div class="cpy"><input class="ltr" id="sd_in" placeholder="sub.example.ir" value="'+esc(s.sub_domain||'')+'"><button class="btn" type="button" id="sd_go">'+t('Set up SSL and use it')+'</button>'+(s.sub_domain?'<button class="b2 bd" type="button" id="sd_rm">'+t('Remove')+'</button>':'')+'</div><div class="hint" id="sd_msg">'+(s.sub_domain?'✓ https://'+esc(s.sub_domain)+'/sub/…':'')+'</div></div>'+
+  '<div class="full box" id="si_box"><b>'+t('Serve the subscription from an Iran server')+'</b><div class="hint">'+t('For ISPs that block the panel domain: a tunnel server inside Iran serves the subscription pages with its own SSL and carries them to the panel through a hidden tunnel. Subscription links use it once it works.')+'</div><div id="si_in">'+t('Loading…')+'</div></div>'+
   '<div class="full">'+'<div class="srow"><div class="tx"><b>'+t('Use this address on every node too')+'</b><small>'+t('Nodes that have their own address switch back to this one when you save.')+'</small></div><label class="sw"><input type="checkbox" id="st_all"><span></span></label></div></div>'+
   '<div class="full box"><b>'+t('Web panel')+'</b><div class="g2"><div><label class="f">'+t('Web bind')+'</label><input class="ltr" readonly value="'+esc(s.web_bind)+'"></div><div><label class="f">'+t('Web port')+'</label><input class="ltr" readonly value="'+esc(s.web_port)+'"></div></div><div class="hint">'+t('Bind and port are where the panel itself listens; changing them needs a panel restart. File:')+' <span class="ltr">/etc/kanki/kanki.env</span></div></div></div>';
  case 'vpn':return '<div class="sgrid"><div><label class="f">DNS</label><input data-k="dns" class="ltr" placeholder="1.1.1.1, 8.8.8.8"><div class="chipset" data-fill="dns">'+
@@ -1574,7 +1575,7 @@ function pSettings(){var cur=S.stsec||'look';
   $('#st').innerHTML='<div class="stw"><div class="stn" role="tablist">'+STSEC.map(function(x){return '<button type="button" data-sec="'+x[0]+'" class="'+(x[0]==cur?'on':'')+'"><span class="si">'+ic(x[2],17)+'</span>'+t(x[1])+'<em></em></button>'}).join('')+'</div><div>'+
   STSEC.map(function(x){return '<section class="sts card'+(x[0]==cur?' on':'')+'" data-sec="'+x[0]+'"><div class="sth"><span class="phi">'+ic(x[2],20)+'</span><div><b>'+t(x[1])+'</b><small>'+t(x[3])+'</small></div></div>'+stBody(x[0],s)+
    (x[4].length?'<div class="sbar"><span class="muted" data-msg></span><button class="b2" type="button" data-undo disabled>'+t('Undo')+'</button><button class="btn" type="button" data-save disabled>'+t('Save')+'</button></div>':'')+'</section>'}).join('')+'</div></div>';
-  stFill(s);stWire();wireLogo();stUpdate(false)}).catch(fail)}
+  stFill(s);stWire();wireLogo();stUpdate(false);stIran()}).catch(fail)}
 function stVal(el){return el.type=='checkbox'?(el.checked?'1':'0'):el.value}
 function stFill(s){$$('#st [data-k]').forEach(function(el){var k=el.dataset.k,v=s[k]==null?'':String(s[k]);
   if(k=='refresh'&&!v)v='10';if(k=='lang'&&!v)v='fa';if(k=='theme'&&!v)v='dark';if(k=='color'&&!v)v='gold';
@@ -1611,6 +1612,19 @@ function stSave(sec,btn){var id=sec.dataset.sec,body={};$$('[data-k]',sec).forEa
   if(id=='newu'&&S.me){S.me.default_protocols=body.default_protocols;S.me.def_gb=body.def_gb;S.me.def_days=body.def_days;S.me.def_conns=body.def_conns}
   if(id=='look'){S.lang=body.lang;S.theme=body.theme;S.color=body.color;localStorage.setItem('kk_lang',S.lang);localStorage.setItem('kk_theme',S.theme);localStorage.setItem('kk_color',S.color);S.stsec='look';boot()}
   if(id=='upd')stUpdate(true)}).catch(function(e){btn.disabled=false;fail(e)})}
+// subscription served from a tunnel server inside Iran
+function stIran(){var box=$('#si_in');if(!box)return;api('GET','/api/sub-iran').then(function(r){if(!$('#si_in'))return;
+ var st=r.status||{},msg='';
+ if(r.server){if(r.ready&&st.active!==false)msg='✓ '+esc(r.link)+'/sub/…';else if(st.error)msg='<span style="color:var(--bad,#e5484d)">'+esc(st.error)+'</span>';else msg=t('Waiting for the server: getting SSL and starting the listener…');
+  if(r.tunnel=='down')msg+='<br>'+t('Tunnel to the panel')+': '+t('down');}
+ box.innerHTML='<div class="g3"><div><label class="f">'+t('Tunnel server')+'</label><select id="si_srv"><option value="">—</option>'+(r.agents||[]).filter(function(a){return a.loc=='iran'||a.id==r.server}).map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id==r.server?' selected':'')+'>'+esc(a.name)+(a.ip?' ('+esc(a.ip)+')':'')+'</option>'}).join('')+'</select></div>'+
+  '<div><label class="f">'+t('Domain')+'</label><input class="ltr" id="si_dom" placeholder="sub.example.com" value="'+esc(r.domain||'')+'"></div>'+
+  '<div><label class="f">'+t('Port')+'</label><input class="ltr" id="si_port" inputmode="numeric" value="'+esc(String(r.port||2053))+'"></div></div>'+
+  '<div class="hint" id="si_ip"></div><div class="row" style="margin-top:8px"><button class="btn" type="button" id="si_go">'+t('Save')+'</button>'+(r.server?'<button class="b2 bd" type="button" id="si_rm">'+t('Remove')+'</button>':'')+'</div><div class="hint">'+msg+'</div>';
+ var ipHint=function(){var a=(r.agents||[]).filter(function(x){return x.id==$('#si_srv').value})[0];$('#si_ip').textContent=a?t('The domain\'s A record must point to this server\'s IP')+(a.ip?': '+a.ip:''):((r.agents||[]).some(function(x){return x.loc=='iran'})?'':t('Add a tunnel server inside Iran first (Servers), or set its location to Inside Iran.'))};
+ ipHint();$('#si_srv').onchange=ipHint;
+ $('#si_go').onclick=function(){var b=this;b.disabled=true;api('PUT','/api/sub-iran',{server:$('#si_srv').value,domain:$('#si_dom').value.trim(),port:+$('#si_port').value||2053}).then(function(){toast(t('Saved'));stIran()}).catch(function(e){b.disabled=false;fail(e)})};
+ var rm=$('#si_rm');if(rm)rm.onclick=function(){confirmDo(function(){api('PUT','/api/sub-iran',{server:'',domain:''}).then(function(){toast(t('Done'));stIran()}).catch(fail)})}}).catch(function(e){box.textContent=e.message||''})}
 function stSub(d){var g=$('#sd_go'),m=$('#sd_msg');g.disabled=true;m.textContent=d?t('Getting the SSL certificate… this can take up to one minute'):'…';
  api('POST','/api/sub-domain',{domain:d}).then(function(r){S.st.sub_domain=r.domain||'';toast(t('Done'));pSettings()}).catch(function(e){g.disabled=false;m.textContent=e.message||'';fail(e)})}
 function stUpdate(force){autoUpdWire();var m=$('#st_um');if(!m||(!force&&m._done))return;m._done=1;m.className='vmsg';m.textContent=t('Checking…');
@@ -1830,7 +1844,7 @@ function smartWire(){var pv=function(){var el=$('#sp_prev');if(!el)return;var l=
 // ---- Emergency chat: a small chat server on a server inside Iran, for when the international internet is cut
 function pEmergency(){$('#pg').innerHTML='<div class="ph"><div><h2>'+ic('sos',22)+' '+t('Emergency chat')+'</h2><p>'+t('Talk to your customers and send them configs when the international internet is cut')+'</p></div></div><div id="em">'+t('Loading…')+'</div>';emLoad()}
 function emLoad(){Promise.all([api('GET','/api/emergency'),api('GET','/api/tunnels')]).then(function(r){var e=r[0],sv=(r[1].servers||[]),el=$('#em');if(!el)return;
- var srvOpt=sv.map(function(x){return '<option value="'+esc(x.id)+'"'+(x.id==e.server?' selected':'')+'>'+esc(x.name+(x.local?' ('+t('panel')+')':''))+(x.online?'':' · '+t('Disconnected'))+'</option>'}).join('');
+ var srvOpt=srvOptGroups(sv,function(x){return '<option value="'+esc(x.id)+'"'+(x.id==e.server?' selected':'')+'>'+esc(x.name+(x.local?' ('+t('panel')+')':''))+(x.online?'':' · '+t('Disconnected'))+'</option>'});
  var cur=sv.filter(function(x){return x.id==e.server})[0],old=cur&&!cur.local&&cur.version&&verLt(cur.version,'3.3.0');
  var st=e.status||null,stHtml=!e.on?'<span class="badge">'+t('Off')+'</span>':!st?'<span class="badge r">'+t('Waiting for the server…')+'</span>':st.active?'<span class="badge g"><span class="dot g"></span> '+t('Running')+'</span>':'<span class="badge r">'+t('Not running')+'</span>';
  el.innerHTML='<div class="card"><h3>'+t('How it works')+'</h3><ol class="sub" style="margin:6px 0;padding-inline-start:18px;line-height:2">'+
@@ -2024,6 +2038,11 @@ ICO.tunnel='<path d="M3 19v-7a9 9 0 0 1 18 0v7"/><path d="M7.5 19v-6.5a4.5 4.5 0
 var TN={d:null};
 ICO.srv='<rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M12 6.5h5M12 17.5h5"/>';
 function tunLoad(){return api('GET','/api/tunnels').then(function(d){TN.d=d;return d})}
+// servers in two groups, inside Iran and abroad (a server without a location counts as abroad)
+var SRV_GROUPS=[['iran','Iran servers'],['abroad','Abroad servers']];
+function srvLoc(s){return s.loc=='iran'?'iran':'abroad'}
+function srvOptGroups(list,fn){return SRV_GROUPS.map(function(g){var l=list.filter(function(s){return srvLoc(s)==g[0]});return l.length?'<optgroup label="'+esc(t(g[1]))+'">'+l.map(fn).join('')+'</optgroup>':''}).join('')}
+function srvLocSel(id,v){return '<label class="f">'+t('Location')+'</label><select id="'+id+'">'+(v?'':'<option value="">—</option>')+[['iran','Inside Iran'],['abroad','Abroad']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]==v?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select>'}
 function tunSrv(id){var l=(TN.d&&TN.d.servers)||[];for(var i=0;i<l.length;i++)if(l[i].id==id)return l[i];return {id:id,name:id}}
 function tunStateTxt(s){return {up:t('Connected'),partial:t('Connecting…'),down:t('Disconnected'),off:t('Off')}[s]||s}
 function tunCol(s){return s=='up'?'#3ddc97':s=='partial'?'#f5b942':s=='off'?'#8a8f98':'#ff6b6b'}
@@ -2149,7 +2168,7 @@ function tunDraw(d){var m=$('#tn_map'),sl=$('#tn_srv');if(!m&&!sl)return;var sv=
   $('#tn_kpi').innerHTML='<div><small>'+t('Tunnels connected')+'</small><b style="color:'+(up==tl.length&&tl.length?'var(--ok)':'inherit')+'">'+N(up)+' / '+N(tl.length)+'</b></div><div><small>'+t('Servers online')+'</small><b>'+N(on)+' / '+N(sv.length)+'</b></div><div><small>'+t('Through the tunnels')+'</small><b class="ltr">↑ '+bytes(tx)+' · ↓ '+bytes(rx)+'</b></div>';
   $('#tn_list').innerHTML=tl.length?tl.map(tunCard).join(''):'<div class="card muted" style="text-align:center">'+t('No tunnels yet')+' · <a href="javascript:tunEdit()">'+t('Make the first tunnel')+'</a></div>'}
  if(sl){var k=$('#tn_skpi');if(k)k.innerHTML='<div><small>'+t('Servers online')+'</small><b style="color:'+(on==sv.length&&sv.length?'var(--ok)':'inherit')+'">'+N(on)+' / '+N(sv.length)+'</b></div><div><small>'+t('Tunnels connected')+'</small><b>'+N(up)+' / '+N(tl.length)+'</b></div><div><small>'+t('Through the tunnels')+'</small><b class="ltr">↑ '+bytes(tx)+' · ↓ '+bytes(rx)+'</b></div>';
-  sl.innerHTML=sv.map(tunSrvCard).join('')}}
+  sl.innerHTML=SRV_GROUPS.map(function(g){var l=sv.filter(function(s){return srvLoc(s)==g[0]});return l.length?'<h3 style="grid-column:1/-1;margin:6px 0 0">'+t(g[1])+' <small class="muted">'+N(l.length)+'</small></h3>'+l.map(tunSrvCard).join(''):''}).join('')}}
 function pServers(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnel servers')+'</h2><p>'+t('Servers that only carry tunnels get a small agent: no VPN is installed on them')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="tunServerAdd()">+ '+t('Server')+'</button></div></div><div class="card" style="padding:10px"><div class="tkpi" id="tn_skpi" style="margin:0"></div></div><div class="ncards" id="tn_srv">'+t('Loading…')+'</div>';
  tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
 function tunCard(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},col=tunCol(x.state),err=es.error?e.name+': '+es.error:xx.error?xs.name+': '+xx.error:'',aw=x.kind=='awg'?(x.awg||{}):null,hy=x.kind=='hy2'?(x.hy2||{}):null;
@@ -2167,6 +2186,7 @@ function tunSrvCard(s){var nt=((TN.d&&TN.d.tunnels)||[]).filter(function(x){retu
  return '<div class="card" style="margin:0;border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start"><div class="row"><div class="logo" style="width:34px;height:34px;font-size:14px">'+esc(s.local?'★':s.name.charAt(0).toUpperCase())+'</div><div><b>'+esc(s.name)+'</b><div class="muted ltr">'+esc(s.host||t('address unknown yet'))+'</div></div></div>'+
   '<span class="badge '+(s.online?'g':'r')+'">'+(s.local?t('Panel server'):s.online?t('Connected'):t('Disconnected'))+'</span></div>'+
   '<p class="muted" style="margin:8px 0">'+(s.local?t('Runs inside the panel'):(s.last_seen?t('Last contact')+': '+ago(s.last_seen):t('Not connected yet: run its command on the server')))+(s.version?' · v'+esc(s.version):'')+' · '+t('Tunnels')+' '+N(nt)+'</p>'+
+  (s.local?'':!s.loc?'<p class="hint">'+t('Location not set: choose it in Edit')+'</p>':s.loc_guess?'<p class="hint">'+t('Location guessed: confirm it in Edit')+'</p>':'')+
   '<div class="g'+(s.local?'1':'3')+'"><button class="b2" onclick="tunSrvEdit(\''+s.id+'\')">'+ic('edit',15)+' '+t('Edit')+'</button>'+(s.local?'':'<button class="b2" onclick="tunSrvCmd(\''+s.id+'\')">'+ic('link',15)+' '+t('Command')+'</button><button class="b2 bd" onclick="tunSrvDel(\''+s.id+'\')">'+ic('trash',15)+' '+t('Delete')+'</button>')+'</div></div>'}
 function tunAct(id,a){api('POST','/api/tunnels/'+id+'/'+a).then(function(){toast(a=='restart'?t('The tunnel reconnects in a few seconds'):t('Done'));tunRefresh()}).catch(fail)}
 function tunDel(id){confirmDo(function(){api('DELETE','/api/tunnels/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)})}
@@ -2185,20 +2205,20 @@ function tunGreBox(pre,s){s=s||{};return '<label style="display:flex;gap:8px;ali
 function tunGreWire(pre){$('#'+pre+'_gre').onchange=function(){$('#'+pre+'_gx').classList.toggle('hide',!this.checked)}}
 function tunGreBody(pre,b){var on=$('#'+pre+'_gre').checked;b.gre_ip=on?$('#'+pre+'_gi').value.trim():'';b.gre_panel_ip=on?$('#'+pre+'_gp').value.trim():'';return b}
 function tunServerAdd(){modal(mhead(t('Add a tunnel server'))+'<p class="muted" style="margin:0 0 8px">'+t('For example your Iran server. Only the tunnel agent is installed on it.')+'</p>'+
- '<div id="tn_in"><label class="f">'+t('Server name')+'</label><input id="tn_nm" placeholder="Iran-1"><label class="f">'+t('Address other servers use to reach it (optional)')+'</label><input id="tn_ad" class="ltr" placeholder="ir.example.com"><small class="muted">'+t('Empty = the IP it connects from')+'</small>'+
+ '<div id="tn_in"><label class="f">'+t('Server name')+'</label><input id="tn_nm" placeholder="Iran-1"><label class="f">'+t('Address other servers use to reach it (optional)')+'</label><input id="tn_ad" class="ltr" placeholder="ir.example.com"><small class="muted">'+t('Empty = the IP it connects from')+'</small>'+srvLocSel('tn_lc','iran')+
  tunGreBox('tn')+
  '<button class="btn" style="width:100%;margin-top:12px" id="tn_go">'+t('Create command')+'</button></div><div id="tn_out"></div>');
  tunGreWire('tn');
- $('#tn_go').onclick=function(){var me=this,b=tunGreBody('tn',{name:$('#tn_nm').value,addr:$('#tn_ad').value});if(b.gre_ip===''&&$('#tn_gre').checked){toast(t('Type the public IP of the server'),1);return}me.disabled=true;api('POST','/api/tunnels/servers',b).then(function(r){
+ $('#tn_go').onclick=function(){var me=this,b=tunGreBody('tn',{name:$('#tn_nm').value,addr:$('#tn_ad').value,loc:$('#tn_lc').value});if(b.gre_ip===''&&$('#tn_gre').checked){toast(t('Type the public IP of the server'),1);return}me.disabled=true;api('POST','/api/tunnels/servers',b).then(function(r){
   $('#tn_in').classList.add('hide');$('#tn_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)};tunRefresh(true)}).catch(function(e){me.disabled=false;fail(e)})}}
 function tunSrvCmd(id){if(!confirm(t('A new command makes the old one stop working. Continue?')))return;
  api('PUT','/api/tunnels/servers/'+id,{new_token:true}).then(function(r){var s=tunSrv(id);modal(mhead(t('Command for')+' '+s.name)+tunCmdBox({id:id,token:r.token},r));$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}).catch(fail)}
 function tunSrvEdit(id){var s=tunSrv(id);
  modal(mhead(t('Edit server'))+(s.local?'':'<label class="f">'+t('Server name')+'</label><input id="ts_nm" value="'+esc(s.name)+'">')+
-  '<label class="f">'+t('Address other servers use to reach it')+'</label><input id="ts_ad" class="ltr" value="'+esc(s.addr||'')+'" placeholder="'+esc(s.host||'')+'"><small class="muted">'+t('Empty = automatic')+'</small>'+(s.local?'':tunGreBox('te',s))+
+  '<label class="f">'+t('Address other servers use to reach it')+'</label><input id="ts_ad" class="ltr" value="'+esc(s.addr||'')+'" placeholder="'+esc(s.host||'')+'"><small class="muted">'+t('Empty = automatic')+'</small>'+srvLocSel('ts_lc',s.loc||'')+(s.local?'':tunGreBox('te',s))+
   '<div class="g2" style="margin-top:12px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="ts_go">'+t('Save')+'</button></div>');
  if(!s.local)tunGreWire('te');
- $('#ts_go').onclick=function(){var b={addr:$('#ts_ad').value};if($('#ts_nm'))b.name=$('#ts_nm').value;
+ $('#ts_go').onclick=function(){var b={addr:$('#ts_ad').value};if($('#ts_lc').value)b.loc=$('#ts_lc').value;if($('#ts_nm'))b.name=$('#ts_nm').value;
   if(!s.local){tunGreBody('te',b);if($('#te_gre').checked&&!b.gre_ip){toast(t('Type the public IP of the server'),1);return}}
   api('PUT','/api/tunnels/servers/'+id,b).then(function(r){tunRefresh();
    if(r.gre){modal(mhead(t('GRE link'))+'<label class="f">'+t('Run this on the server, as root (Ubuntu / Debian)')+'</label><pre class="cmd" id="tn_cmd">'+esc(tunGreScript(r.gre))+'</pre><button class="btn" style="width:100%" id="tn_cp">'+ic('link',16)+' '+t('Copy command')+'</button>'+tunGreNote(r.gre)+
@@ -2233,7 +2253,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  var x=id?Object.assign({},(TN.d.tunnels||[]).filter(function(z){return z.id==id})[0]||{},pre||{}):(pre||{}),sv=TN.d.servers||[];
  var remote=sv.filter(function(s){return !s.local});
  var dE=x.entry||(remote[0]&&remote[0].id)||'',dX=x.exit||'local';
- var opt=function(sel){return sv.map(function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'}).join('')};
+ var opt=function(sel){return srvOptGroups(sv,function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'})};
  var prof=x.conns==8?'speed':x.conns==2?'gaming':'balanced',tr=x.transport||'tcpmux',mode=x.mode||'reverse',kind=(x.kind=='awg'||x.kind=='hy2')?x.kind:'',A=x.awg||{},Y=x.hy2||{};if(tr=='awg'||tr=='hy2')tr='tcpmux';
  var awp=A.params||{},awpt=Object.keys(awp).map(function(k){return k+'='+awp[k]}).join('  ');
  var trs=[['Hardest to block',[['dual',t('UDP first (masked QUIC); if UDP is cut, HTTP/2 over TLS on the same port number'),['UDP','TCP','TLS']],['h2',t('WebSocket over HTTP/2, TLS 1.3 like a browser, many links in one connection'),['TLS','SNI','H2']],['faketcp',t('UDP traffic inside fake TCP packets (udp2raw style): passes where UDP is cut or slowed; needs root on both servers'),['TCP','UDP']]]],
@@ -2456,7 +2476,7 @@ var TS={timer:0,prof:'balanced',ctx:{},j:null};
 function tunSmart(o){if(!TN.d)return tunLoad().then(function(){tunSmart(o)});if(o)TS.ctx=o;var c=TS.ctx||{},sv=TN.d.servers||[],remote=sv.filter(function(s){return !s.local});
  if(c.prof)TS.prof=c.prof;
  api('GET','/api/tunnels/probe').then(function(r){if(r.job&&!r.job.finished)return tunSmartRun();
- var opt=function(sel){return sv.map(function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'}).join('')},
+ var opt=function(sel){return srvOptGroups(sv,function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'})},
   po=function(k,l){return '<option value="'+k+'"'+(TS.prof==k?' selected':'')+'>'+l+'</option>'};
  modal(mhead('⚡ '+t('Smart tunnel'))+'<p class="sub"><b>'+t('Find the best transport')+'</b><br>'+t('Before making the tunnel, every transport (TCP, KCP, WS, WSS, QUIC) is tried in both directions between your two servers. It takes about one to two minutes. Each gets a score from 0 to 100 and the best one is suggested with its reason.')+'</p>'+
   '<ul class="sub" style="margin:4px 0 8px;padding-inline-start:18px;line-height:1.7"><li>'+t('Scores follow your profile (gaming, balanced, ultra speed)')+'</li><li>'+t('Tells which ones did not pass and probably why')+'</li><li>'+t('If one direction is closed it says so and suggests the other')+'</li><li>'+t('One click applies it in making or editing a tunnel')+'</li><li>'+t('No tunnel is made and nothing changes on the servers')+'</li></ul>'+
