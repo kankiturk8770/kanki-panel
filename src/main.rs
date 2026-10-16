@@ -4,6 +4,8 @@
 mod db;
 #[path = "core/util.rs"]
 mod util;
+#[path = "core/certbot.rs"]
+mod certbot;
 
 // http: web panel, REST API, security, backups
 #[path = "http/admin.rs"]
@@ -211,8 +213,6 @@ async fn main() {
     tokio::spawn(tunnel::panel::auto_update_loop(app.clone()));
     // an updated panel also moves an emergency chat on this server onto the new binary
     tokio::task::spawn_blocking(emergency::restart_if_outdated);
-    tokio::spawn(dns::acme::renew_loop(app.clone()));
-    tokio::spawn(xray::panel::cert_loop(app.clone()));
     tokio::spawn(xray::panel::local_loop(app.clone()));
     tokio::spawn(backup::telegram_loop(app.clone()));
     tokio::spawn(channel::channel_loop(app.clone()));

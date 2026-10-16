@@ -32,15 +32,15 @@ function xrOverview(d,el){
   '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0">'+t('1) Add a server (the panel server or any tunnel server). 2) Make inbounds on it. 3) Tick Xray for a user: the links of every inbound go into the user\'s subscription, and the traffic counts toward the user\'s volume.')+'</p></div>'}
 function xrProtoShort(p){return {vless:'VL',vmess:'VM',trojan:'TR',shadowsocks:'SS'}[p]||p}
 function xrMiniRow(ib){var st=xrState(ib);return '<div class="vrow"><span class="dot '+st[0]+'"></span><div class="nm"><b>'+esc(ib.remark||ib.protocol)+'</b><small class="ltr">'+esc(ib.protocol.toUpperCase())+' · '+esc(ib.network)+(ib.security!='none'?' · '+esc(ib.security.toUpperCase()):'')+' · :'+ib.port+'</small></div><span class="chipx '+st[0]+'">'+t(st[1])+'</span><b class="ltr" style="font-size:12px">'+N(bytes(ib.traffic))+'</b></div>'}
-function xrState(ib){if(!ib.enabled)return ['r','Off'];if(ib.state=='depleted')return ['y','Traffic used up'];if(ib.state=='expired')return ['y','Expired'];if(ib.state=='nocert')return ['y',ib.cert_state&&ib.cert_state.err?'Certificate error':'Waiting for the certificate'];var s=(XR.d&&XR.d.servers||[]).filter(function(x){return x.server==ib.server})[0];
+function xrState(ib){if(!ib.enabled)return ['r','Off'];if(ib.state=='depleted')return ['y','Traffic used up'];if(ib.state=='expired')return ['y','Expired'];if(ib.state=='nocert')return [ib.cert_err?'r':'y',ib.cert_err?'Certificate error':'Waiting for the certificate'];var s=(XR.d&&XR.d.servers||[]).filter(function(x){return x.server==ib.server})[0];
  if(s&&s.status&&s.status.active)return ['g','Running'];return ['y','Waiting for the server…']}
 function xrServers(d){if(!d.servers.length)return '<p class="muted">'+t('Add an Xray server first')+'</p>';
  return d.servers.map(function(x){var st=x.status||{},on=st.active,errs=[st.deploy_error,st.error].filter(Boolean),n=d.inbounds.filter(function(i){return i.server==x.server}).length;
   return '<div class="vrow" style="flex-wrap:wrap;align-items:flex-start"><span class="dot '+(on?'g':'r')+'" style="margin-top:6px"></span><div class="nm"><b>'+esc(x.name||x.server)+(x.server=='local'?' <span class="rotb">'+t('Panel server')+'</span>':'')+'</b><small class="ltr">'+esc(x.effective||'?')+(st.core?' · Xray '+esc(st.core):'')+' · '+N(n)+' '+t('inbounds')+'</small></div>'+
-   '<span class="chipx '+(on?'g':'r')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span>'+xrCertChip(x.cert_state)+
-   '<div class="row" style="gap:4px;width:100%;justify-content:flex-end">'+(x.domain?'<button class="b2" onclick="xrSrvCert(\''+x.server+'\')">'+ic('refresh',14)+' SSL</button>':'')+'<button class="ib" title="'+t('Edit')+'" onclick="xrSrvEdit(\''+x.server+'\')">'+ic('edit',15)+'</button><button class="ib" title="'+t('Config')+'" onclick="xrPreview(\''+x.server+'\')">{ }</button><button class="ib bd" title="'+t('Delete')+'" onclick="xrSrvDel(\''+x.server+'\')">'+ic('trash',15)+'</button></div>'+
+   '<span class="chipx '+(on?'g':'r')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span>'+xrCertChip(x)+
+   '<div class="row" style="gap:4px;width:100%;justify-content:flex-end">'+'<button class="ib" title="'+t('Edit')+'" onclick="xrSrvEdit(\''+x.server+'\')">'+ic('edit',15)+'</button><button class="ib" title="'+t('Config')+'" onclick="xrPreview(\''+x.server+'\')">{ }</button><button class="ib bd" title="'+t('Delete')+'" onclick="xrSrvDel(\''+x.server+'\')">'+ic('trash',15)+'</button></div>'+
    (errs.length?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+errs.map(esc).join('<br>')+'</div>':'')+
-   (x.cert_state&&x.cert_state.err&&!x.cert_state.present?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">SSL: '+esc(x.cert_state.err)+'</div>':'')+'</div>'}).join('')}
+   (xrCertErr(x)?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+esc(xrCertErr(x))+'</div>':'')+'</div>'}).join('')}
 
 // ---- inbounds tab
 function xrIbTab(d,el){
@@ -142,19 +142,9 @@ function xrSettings(d,el){
   '<div class="srow"><div class="tx"><b>'+t('IPv4 only')+'</b><small>'+t('For servers whose IPv6 does not work well')+'</small></div><label class="sw"><input type="checkbox" id="xs_v4" '+(d.ipv4?'checked':'')+'><span></span></label></div>'+
   '<div class="sgrid"><div><label class="f">'+t('Xray-core version')+'</label><input id="xs_v" class="ltr" placeholder="'+t('empty = latest')+'" value="'+esc(d.version)+'"><p class="hint">'+t('A release tag like v26.3.27')+'</p></div>'+
   '<div><label class="f">'+t('Log level')+'</label><select id="xs_ll">'+['none','error','warning','info','debug'].map(function(x){return '<option'+((d.log_level||'warning')==x?' selected':'')+'>'+x+'</option>'}).join('')+'</select></div>'+
-  '<div class="full"><label class="f">'+t('Xray DNS servers (comma separated, empty = the server\'s own)')+'</label><input id="xs_dns" class="ltr" placeholder="1.1.1.1, https://dns.google/dns-query" value="'+esc(d.dns||'')+'"><div class="chipset">'+['1.1.1.1','8.8.8.8','9.9.9.9','https://1.1.1.1/dns-query','https://dns.google/dns-query','localhost'].map(function(x){return '<button type="button" data-dns="'+x+'">+ '+x+'</button>'}).join('')+'</div></div></div>'+
-  '<div class="sbar"><button class="btn" id="xs_go">'+t('Save')+'</button></div></div>'+
-  '<div class="card"><h3>'+ic('security',16)+' '+t('Automatic certificates')+'</h3><p class="sub">'+t('For TLS inbounds with "Automatic": the panel sets the domain\'s A record and gets a Let\'s Encrypt certificate with a DNS challenge through this API. Empty = the same provider as Kanki DNS.')+'</p>'+
-  '<div class="ftabs" id="xs_pv">'+[['',t('Same as Kanki DNS')],['cloudflare','Cloudflare'],['arvan','ArvanCloud']].map(function(o){return '<button type="button" data-pv="'+o[0]+'" class="'+((d.provider||'')==o[0]?'on':'')+'">'+o[1]+'</button>'}).join('')+'</div>'+
-  '<div id="xs_pvf" class="sgrid"><div><label class="f">'+t('API token')+'</label><input id="xs_tok" type="password" class="ltr" autocomplete="off" placeholder="'+(d.has_token?t('unchanged'):'')+'"></div><div><label class="f">'+t("E-mail for Let's Encrypt (optional)")+'</label><input id="xs_em" class="ltr" value="'+esc(d.email||'')+'"></div></div>'+
-  '<p class="hint" id="xs_pvd">'+(d.dns_creds?t('Kanki DNS uses')+' '+esc(d.dns_creds=='arvan'?'ArvanCloud':'Cloudflare'):'<span style="color:var(--warn)">'+t('Kanki DNS has no provider yet either')+'</span>')+'</p>'+
-  '<div class="srow"><div class="tx"><b>'+t('Point the domain at the server')+'</b><small>'+t('Off when you manage the A record yourself (for example behind a CDN)')+'</small></div><label class="sw"><input type="checkbox" id="xs_na" '+(d.no_a?'':'checked')+'><span></span></label></div>'+
-  '<div class="sbar"><button class="btn" id="xs_cgo">'+t('Save')+'</button></div></div>';
- var pv=d.provider||'',pvu=function(){$('#xs_pvf').style.display=pv?'':'none';$('#xs_pvd').style.display=pv?'none':''};pvu();
- $$('#xs_pv [data-pv]').forEach(function(b){b.onclick=function(){pv=b.dataset.pv;$$('#xs_pv [data-pv]').forEach(function(x){x.classList.toggle('on',x==b)});pvu()}});
- $('#xs_cgo').onclick=function(){api('PUT','/api/xray',{provider:pv,api_token:$('#xs_tok').value,email:$('#xs_em').value,no_a:!$('#xs_na').checked}).then(function(){toast(t('Saved'));xrLoad()}).catch(fail)};
- $$('[data-dns]').forEach(function(b){b.onclick=function(){var i=$('#xs_dns'),v=i.value.split(',').map(function(x){return x.trim()}).filter(Boolean);if(v.indexOf(b.dataset.dns)<0)v.push(b.dataset.dns);i.value=v.join(', ')}});
- $('#xs_go').onclick=function(){api('PUT','/api/xray',{on:$('#xs_on').checked,ipv4:$('#xs_v4').checked,version:$('#xs_v').value,log_level:$('#xs_ll').value,dns:$('#xs_dns').value}).then(function(){toast(t('Saved'));xrLoad()}).catch(fail)}}
+  '</div>'+
+  '<div class="sbar"><button class="btn" id="xs_go">'+t('Save')+'</button></div></div>';
+ $('#xs_go').onclick=function(){api('PUT','/api/xray',{on:$('#xs_on').checked,ipv4:$('#xs_v4').checked,version:$('#xs_v').value,log_level:$('#xs_ll').value}).then(function(){toast(t('Saved'));xrLoad()}).catch(fail)}}
 
 // ---- servers
 function xrAddNode(){var go=function(){var d=XR.d,used=d.servers.map(function(x){return x.server}),ag=d.agents.filter(function(a){return used.indexOf(a.id)<0});
@@ -167,16 +157,17 @@ function xrAddNode(){var go=function(){var d=XR.d,used=d.servers.map(function(x)
     return api('POST','/api/xray/servers',{server:r.id,address:$('#xa_ad').value,ssl:$('#xa_ssl').checked}).then(function(){toast(t($('#xa_ssl').checked&&xrIsDomain($('#xa_ad').value)?'Saved: getting SSL (about a minute)':'Saved'));if(nw){me.style.display='none';$('#xa_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}else closeModal();xrLoad()})}).catch(function(e){me.disabled=false;fail(e)})}};
  if(XR.d)go();else xrLoad().then(go)}
 function xrIsDomain(v){v=(v||'').trim();return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(v)&&!/^[\d.]+$/.test(v)}
-function xrDomainFields(x){var d=XR.d||{},cr=d.provider&&d.has_token?d.provider:d.dns_creds;
+function xrDomainFields(x){
  return '<label class="f">'+t('Domain of this server (or IP)')+'</label><input id="xa_ad" class="ltr" placeholder="de.example.com" value="'+esc(x.address||'')+'"><p class="hint">'+t('Users connect to this address; empty = the IP the server reports from')+'</p>'+
-  '<div class="srow" id="xa_sslw"><div class="tx"><b>'+t('Get SSL for this domain by itself')+'</b><small>'+t('The panel points the domain at this server and gets a Let\'s Encrypt certificate; every TLS inbound of this server uses it. Renewed every 60 days.')+'</small></div><label class="sw"><input type="checkbox" id="xa_ssl" '+(x.ssl!==false?'checked':'')+'><span></span></label></div>'+
-  (cr?'':'<div class="warnbox" id="xa_nocr">'+t('For SSL by itself, first set the DNS provider and API token (Xray › Settings or Kanki DNS › Settings and SSL).')+'</div>')}
+  '<div class="srow" id="xa_sslw"><div class="tx"><b>'+t('Get SSL for this domain by itself')+'</b><small>'+t('certbot on this server gets a Let\'s Encrypt certificate for the domain (no e-mail needed) and renews it by itself; every TLS inbound of this server uses it. The domain must point to this server and port 80 must be reachable.')+'</small></div><label class="sw"><input type="checkbox" id="xa_ssl" '+(x.ssl!==false?'checked':'')+'><span></span></label></div>'}
 function xrDomainWire(){var f=function(){var w=$('#xa_sslw');if(w)w.style.display=xrIsDomain($('#xa_ad').value)?'':'none'};$('#xa_ad').oninput=f;f()}
 function xrSrvEdit(id){var x=XR.d.servers.filter(function(s){return s.server==id})[0];if(!x)return;
  modal(mhead(t('Edit'),x.name)+xrDomainFields({address:x.address,ssl:x.ssl||!x.address})+'<button class="btn" style="width:100%;margin-top:12px" id="xe_go">'+t('Save')+'</button>');xrDomainWire();
  $('#xe_go').onclick=function(){var ssl=$('#xa_ssl').checked&&xrIsDomain($('#xa_ad').value);api('POST','/api/xray/servers',{server:id,address:$('#xa_ad').value,ssl:ssl}).then(function(){closeModal();toast(t(ssl?'Saved: getting SSL (about a minute)':'Saved'));xrLoad();setTimeout(function(){xrLoad(true)},5000)}).catch(fail)}}
-function xrSrvCert(id){api('POST','/api/xray/servers/'+encodeURIComponent(id)+'/cert').then(function(){toast(t('Working… about a minute'));setTimeout(function(){xrLoad(true)},5000)}).catch(fail)}
-function xrCertChip(c){if(!c)return '';return c.busy?'<span class="chipx y">SSL · '+t('Working…')+'</span>':c.present?'<span class="chipx g">SSL ✓ '+ago(c.at)+'</span>':c.err?'<span class="chipx r" title="'+esc(c.err)+'">SSL · '+t('error')+'</span>':'<span class="chipx y">SSL · '+t('waiting')+'</span>'}
+/** SSL of a server's domain, as the server reports it (certbot runs there) */
+function xrCertErr(x){var st=x.status||{};return x.domain&&st.cert_errors&&st.cert_errors[x.domain]&&!(st.certs||[]).includes(x.domain)?st.cert_errors[x.domain]:''}
+function xrCertChip(x){if(!x.domain)return '';var st=x.status||{};
+ return (st.certs||[]).includes(x.domain)?'<span class="chipx g">SSL ✓</span>':xrCertErr(x)?'<span class="chipx r">SSL · '+t('error')+'</span>':'<span class="chipx y" title="'+esc(t('Taken with certbot on the server'))+'">SSL · '+t('waiting')+'</span>'}
 function xrSrvDel(id){confirmDo(function(){api('DELETE','/api/xray/servers/'+encodeURIComponent(id)).then(function(){toast(t('Done'));xrLoad()}).catch(fail)})}
 function xrPreview(id){api('GET','/api/xray/config/'+encodeURIComponent(id)).then(function(c){xrJsonModal(t('Config')+' · '+xrName(id),c)}).catch(fail)}
 function xrJsonModal(title,v){var tx=JSON.stringify(v,null,2);modal(mhead(title)+'<pre class="ltr" style="max-height:60vh;overflow:auto;white-space:pre">'+esc(tx)+'</pre><button class="b2" style="width:100%;margin-top:8px" id="xj_cp">'+ic('copy',15)+' '+t('Copy')+'</button>','wide');$('#xj_cp').onclick=function(){copy(tx)}}
@@ -265,7 +256,7 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
  fbDraw();$('#xi_fba').onclick=function(){FB.push({dest:'',path:'',alpn:'',name:'',xver:0});fbDraw()};
  $$('#xi_tabs [data-ft]').forEach(function(b){b.onclick=function(){$$('#xi_tabs [data-ft]').forEach(function(x){x.classList.toggle('on',x==b)});$$('.fsec').forEach(function(s){s.classList.toggle('on',s.dataset.fs==b.dataset.ft)})}});
  var srvDom=function(){var x=d.servers.filter(function(z){return z.server==$('#xi_sv').value})[0];return x&&x.domain||''};
- var cm=ib.acme?'auto':ib.cert_file?'file':(id?'pem':(srvDom()||XR.d.provider&&XR.d.has_token||XR.d.dns_creds?'auto':'pem'));
+ var cm=ib.acme?'auto':ib.cert_file?'file':(id?'pem':(srvDom()?'auto':'pem'));
  var sniPh=function(){var dm=srvDom();$('#xi_sni').placeholder=cm=='auto'&&dm?dm:'example.com';var h=$('#xi_cdom');if(h)h.innerHTML=dm?t('Empty SNI = the server\'s domain and certificate')+': <b class="ltr">'+esc(dm)+'</b>':t('This server has no domain: write one in SNI, or give the server a domain (Edit server).')};$$('[data-cm]').forEach(function(x){x.classList.toggle('on',x.dataset.cm==cm)});$$('[data-cm]').forEach(function(b){b.onclick=function(){cm=b.dataset.cm;$$('[data-cm]').forEach(function(x){x.classList.toggle('on',x==b)});ui()}});
  var show=function(i,on){var e=$(i);if(e)e.style.display=on?'':'none'};
  var ui=function(){var pr=$('#xi_pr').value,nw=$('#xi_nw').value,ss=pr=='shadowsocks';if(ss){$('#xi_nw').value='tcp';nw='tcp'}
@@ -303,11 +294,9 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
   if(!b.port)return toast(t('the port is required'),1);
   if(b.acme&&b.security=='tls'&&!b.sni&&!srvDom())return toast(t('Write the domain in SNI'),1);
   me.disabled=true;api('POST','/api/xray/inbounds',b).then(function(){closeModal();toast(t('Saved'));xrLoad()}).catch(function(e){me.disabled=false;fail(e)})}}
-function xrCertAuto(ib){var d=XR.d,c=ib.cert_state||{},cr=d.provider&&d.has_token?d.provider:d.dns_creds;
- var st=!ib.acme?'':c.present?'<div class="vrow"><span class="dot g"></span><div class="nm"><b>'+t('Certificate')+': '+t('issued')+'</b><small>'+ago(c.at)+' · '+t('renewed by itself every 60 days')+'</small></div><button type="button" class="b2" onclick="xrCertNow(\''+ib.id+'\')">'+t('Get again')+'</button></div>'
-  :'<div class="vrow"><span class="dot '+(c.err?'r':'y')+'"></span><div class="nm"><b>'+(c.busy?t('Working… about a minute'):c.err?t('Certificate error'):t('Waiting for the certificate'))+'</b>'+(c.err?'<small class="ltr" style="color:var(--bad)">'+esc(c.err)+'</small>':'')+'</div><button type="button" class="b2" onclick="xrCertNow(\''+ib.id+'\')">'+t('Try now')+'</button></div>';
- return '<p class="hint" id="xi_cdom" style="margin-top:0"></p><p class="hint" style="margin-top:0">'+t('Write the domain in SNI above. The panel points the domain at this server and gets a Let\'s Encrypt certificate with a DNS challenge (works for servers inside Iran too, nothing has to be open on the server), and renews it every 60 days. The links use the domain.')+'</p>'+
-  (cr?'<p class="hint">'+t('DNS provider')+': <b>'+esc(cr=='arvan'?'ArvanCloud':'Cloudflare')+'</b>'+(d.provider&&d.has_token?'':' ('+t('the same as Kanki DNS')+')')+'</p>':'<div class="warnbox">'+t('First set the DNS provider and its API token in Xray › Settings.')+' <a href="#xray/settings" onclick="closeModal()">'+t('Settings')+'</a></div>')+st}
-function xrCertNow(id){api('POST','/api/xray/inbounds/'+encodeURIComponent(id)+'/cert').then(function(){toast(t('Working… about a minute'));setTimeout(function(){xrLoad(true)},4000)}).catch(fail)}
+function xrCertAuto(ib){
+ var st=!ib.acme?'':ib.state=='nocert'?'<div class="vrow"><span class="dot '+(ib.cert_err?'r':'y')+'"></span><div class="nm"><b>'+(ib.cert_err?t('Certificate error'):t('Waiting for the certificate'))+'</b>'+(ib.cert_err?'<small class="ltr" style="color:var(--bad)">'+esc(ib.cert_err)+'</small>':'')+'</div></div>'
+  :'<div class="vrow"><span class="dot g"></span><div class="nm"><b>SSL ✓</b><small>'+t('renewed by itself')+'</small></div></div>';
+ return '<p class="hint" id="xi_cdom" style="margin-top:0"></p><p class="hint" style="margin-top:0">'+t('certbot on the server gets a Let\'s Encrypt certificate for this domain by itself (no e-mail needed) and renews it. The domain must point to the server and port 80 must be reachable. The links use the domain.')+'</p>'+st}
 function xrFreePort(sid,random){var used=(XR.d&&XR.d.inbounds||[]).filter(function(x){return x.server==sid}).map(function(x){return +x.port}),bad=[53,80,853,10085,10853,10854];
  if(!random&&used.indexOf(443)<0)return 443;for(var i=0;i<200;i++){var p=10000+Math.floor(Math.random()*50000);if(used.indexOf(p)<0&&bad.indexOf(p)<0)return p}return 20000}

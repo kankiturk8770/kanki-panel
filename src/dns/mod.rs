@@ -1,7 +1,6 @@
 //! Kanki DNS: a private smart DNS for subscribers. Names of sanctioned services resolve to this server,
 //! which carries those connections abroad (directly on an exit server, or through a Kanki tunnel from a
 //! relay server inside Iran). Runs as its own service (`kanki-panel dns`), deployed by the agent.
-pub mod acme;
 pub mod doh;
 pub mod engine;
 pub mod panel;
@@ -18,6 +17,7 @@ const UNIT: &str = "/etc/systemd/system/kanki-dns.service";
 const VER_FILE: &str = "/var/lib/kanki/dns/applied.ver";
 const RESTART_FILE: &str = "/var/lib/kanki/dns/applied.restart";
 const RUNNING_VER: &str = "/var/lib/kanki/dns/running.ver";
+const SSL_ERR_FILE: &str = "/var/lib/kanki/dns/ssl.err";
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
@@ -60,6 +60,8 @@ pub struct DnsCfg {
     pub relay_key: String,
     /// how long an address stays allowed after its last use with the token
     pub ip_hours: u64,
+    /// no certificate in the config: this server gets its own for `host` with certbot
+    pub acme: bool,
 }
 
 /// The DNS token of a subscription code: changes when the user's link is renewed.
@@ -69,7 +71,14 @@ pub fn user_token(code: &str) -> String {
 
 fn load_cfg() -> Result<DnsCfg, String> {
     let t = std::fs::read_to_string(CONF_FILE).map_err(|e| format!("cannot read {}: {}", CONF_FILE, e))?;
-    serde_json::from_str(&t).map_err(|e| format!("{}: {}", CONF_FILE, e))
+    let mut c: DnsCfg = serde_json::from_str(&t).map_err(|e| format!("{}: {}", CONF_FILE, e))?;
+    // the certificate certbot got for this server's name
+    if c.acme && c.cert.trim().is_empty() && !c.host.is_empty() {
+        let (cf, kf) = crate::certbot::files(&c.host);
+        c.cert = std::fs::read_to_string(cf).unwrap_or_default();
+        c.key = std::fs::read_to_string(kf).unwrap_or_default();
+    }
+    Ok(c)
 }
 
 /// `kanki-panel dns`: run the server from /etc/kanki/dns.json (users and names are re-read live)
@@ -146,6 +155,16 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
     };
     let _ = std::fs::create_dir_all("/etc/kanki");
     let _ = std::fs::create_dir_all(DATA_DIR);
+    // SSL with certbot for this server's name (Kanki DNS holds port 80: stopped for those seconds);
+    // DNS itself works without it, only DoT / DoH wait for the certificate
+    let mut ssl_err = String::new();
+    if c.acme && !c.host.is_empty() {
+        if let Err(e) = crate::certbot::ensure(&c.host, Some("kanki-dns.service"), &["kanki-dns.service"]) {
+            eprintln!("dns: {}", e);
+            ssl_err = e;
+        }
+    }
+    let _ = std::fs::write(SSL_ERR_FILE, &ssl_err);
     let text = serde_json::to_string(c).map_err(|e| e.to_string())?;
     if std::fs::read_to_string(CONF_FILE).map(|t| t != text).unwrap_or(true) {
         let tmp = format!("{}.new", CONF_FILE);
@@ -170,7 +189,8 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
     // ports, certificate, role and relay path need a restart; users and names are re-read live
     let restart_key = crate::util::sha256_hex(&format!(
         "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
-        c.role, c.host, c.cert, c.key, c.dns_port, c.dot_port, c.https_port, c.http_port, c.intake_port, c.exit_addr, c.answer_ip
+        c.role, c.host, c.cert, c.key, c.dns_port, c.dot_port, c.https_port, c.http_port, c.intake_port, c.exit_addr,
+        format!("{}|{}", c.answer_ip, c.acme && crate::certbot::have(&c.host))
     ));
     let old_key = std::fs::read_to_string(RESTART_FILE).unwrap_or_default();
     let active = sh("systemctl is-active --quiet kanki-dns.service").0;
@@ -189,7 +209,8 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
             }
         }
     }
-    let _ = std::fs::write(VER_FILE, ver);
+    // no certificate yet: the config is sent again next round and certbot tries again (after 10 minutes)
+    let _ = std::fs::write(VER_FILE, if c.acme && !c.host.is_empty() && !crate::certbot::have(&c.host) { format!("{}-nossl", ver) } else { ver.to_string() });
     Ok(())
 }
 
@@ -215,6 +236,11 @@ pub fn status() -> Value {
     }
     st["active"] = json!(active);
     st["ver"] = json!(applied_ver());
+    // the certificate of this server's name (certbot or pasted) and why certbot failed
+    let host = load_cfg().map(|c| (c.host.clone(), !c.cert.trim().is_empty())).unwrap_or_default();
+    st["ssl"] = json!(host.1);
+    st["ssl_host"] = json!(host.0);
+    st["ssl_error"] = json!(std::fs::read_to_string(SSL_ERR_FILE).unwrap_or_default().trim());
     if !active {
         st["error"] = json!(sh("journalctl -u kanki-dns.service -n 5 --no-pager -o cat 2>/dev/null").1.lines().last().unwrap_or("not running").to_string());
     }
