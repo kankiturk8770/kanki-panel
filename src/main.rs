@@ -22,6 +22,8 @@ mod backup;
 mod subdomain;
 #[path = "http/subiran.rs"]
 mod subiran;
+#[path = "http/exitgeo.rs"]
+mod exitgeo;
 
 // vpn: protocol engines + node sync
 mod dns;
@@ -263,6 +265,8 @@ async fn main() {
     // upgrade legacy sha256 admin hash stored in the db is done at next successful login
 
     tokio::spawn(sync::run(app.clone()));
+    // where each VPN server's traffic leaves (country and city for the app's map)
+    tokio::spawn(exitgeo::run(app.clone()));
     tokio::spawn(tunnel::panel::local_loop(app.clone()));
     tokio::spawn(tunnel::panel::auto_update_loop(app.clone()));
     // an updated panel also moves an emergency chat on this server onto the new binary

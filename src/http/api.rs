@@ -897,10 +897,15 @@ pub fn node_protos(u: &User, n: &Node) -> Vec<&'static str> {
 
 fn sub_data(app: &App, u: &User) -> Value {
     let nodes: Vec<Value> = user_nodes(app, u).iter().map(|n| {
-        json!({
+        let mut v = json!({
             "id": n.id, "name": n.name, "main": n.id == "local", "protocols": node_protos(u, n),
             "hy2": hy2_uri(app, u, n),
-        })
+        });
+        // the real exit of this server's configs (a tunnel endpoint is in Iran; the traffic leaves here)
+        if let (Some(o), Some(e)) = (v.as_object_mut(), crate::exitgeo::fields(app, &n.id).as_object()) {
+            o.extend(e.clone());
+        }
+        v
     }).collect();
     json!({
         "id": u.id, "username": u.username, "sub": u.sub_code(), "status": u.status(), "active": u.active(),
