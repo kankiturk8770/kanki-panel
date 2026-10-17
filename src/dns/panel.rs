@@ -524,6 +524,9 @@ pub fn sub_info(app: &App, u: &User) -> Value {
             let tls = !host.is_empty() && ssl_ok;
             json!({
                 "id": x.server, "name": names.get(&x.server).cloned().unwrap_or_default(), "note": x.note, "role": x.role,
+                // a relay (inside Iran) tunnels to this foreign server: the app shows it as "Iran → <exit>"
+                "exit": if x.role == "relay" { x.exit.clone() } else { String::new() },
+                "exit_name": if x.role == "relay" { names.get(&x.exit).cloned().unwrap_or_default() } else { String::new() },
                 "ip": ip, "host": host,
                 "dot": if tls { if manual { format!("{}.{}", token, host) } else { host.clone() } } else { String::new() },
                 "doh": if tls { format!("https://{}/dns-query/{}", host, token) } else { String::new() },

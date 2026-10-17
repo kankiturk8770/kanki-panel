@@ -1,3 +1,8 @@
+# v3.6.1 — KANKI MIX direct to the foreign server
+- **KANKI MIX connects straight to each foreign server** by default: the `kanki://` link now carries the server's own address (the host of its agent URL; the main server: its DOMAIN), not the node endpoint. The endpoint is often the Iran entry of a tunnel, which added its ping to every game packet.
+- **Route per server** (KANKI MIX page › Servers): "Direct (the server's own address)" or "Through the tunnel (Iran server)". With the tunnel, the link uses the node endpoint and that tunnel must forward the KANKI MIX UDP port. Each server can also have an address of its own (a domain or IP) instead of the automatic one.
+- **Kanki DNS in the app:** each relay in the subscription data now has `exit` / `exit_name` (the foreign server its tunnel reaches), so the app shows it as "Iran → Germany".
+
 # v3.6.0 — KANKI MIX
 - **KANKI MIX** (menu: VPN services › KANKI MIX): our own UDP protocol, next to WireGuard, AmneziaWG and Hysteria2 on every VPN server (the main server and every node). Game UDP goes on a raw datagram path with no queue and no retransmission (in gaming mode each packet is sent twice: at 20% loss 92% arrive instead of 64%); websites go over KCP + FEC; everything is masked with ChaCha20-Poly1305 and has no fixed bytes on the wire.
 - **Nothing to install:** the server binary is built into the panel; each agent writes it to its server, runs it as `kanki-mix.service` and opens the port in ufw. An agent update (or the panel update on the main server) is enough. Default UDP port 4000; each server can have its own port (KANKI MIX page, or the node's Edit › ports), clashes with WireGuard / AmneziaWG / Hysteria2 are refused.

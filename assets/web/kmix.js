@@ -24,7 +24,11 @@ function kmFA(){if(kmFA.done||typeof FA=='undefined')return;kmFA.done=1;ICO.game
  "Each user has their own key (made from the subscription code): resetting the link gives a new key, disabling or expiring cuts the user off at once. Traffic and devices count like the other protocols.":"هر کاربر کلید خودش را دارد (از کد اشتراک ساخته می‌شود): ریست لینک کلید تازه می‌دهد، غیرفعال یا منقضی شدن کاربر را فوراً قطع می‌کند. مصرف و دستگاه‌ها مثل بقیه‌ی پروتکل‌ها شمرده می‌شوند.",
  "Coming next":"به‌زودی","Port hopping during the connection (a new port every few minutes)":"پورت‌هاپینگ وسط اتصال (هر چند دقیقه پورت تازه)",
  "Look like QUIC / HTTP3 on the wire":"شبیه QUIC / HTTP3 روی سیم","Several servers in one link, automatic switch when one is blocked":"چند سرور در یک لینک، تعویض خودکار وقتی یکی بسته شد",
- "Speed limit per user":"محدودیت سرعت برای هر کاربر","port":"پورت","the port must be 1-65535":"پورت باید ۱ تا ۶۵۵۳۵ باشد"})}
+ "Speed limit per user":"محدودیت سرعت برای هر کاربر",
+ "Direct (the server's own address)":"مستقیم (آدرس خود سرور)","Through the tunnel (Iran server)":"از تانل (سرور ایران)",
+ "Address":"آدرس","automatic":"خودکار","Route":"مسیر",
+ "Direct: the app connects straight to the foreign server, lowest ping. Tunnel: the app connects to the Iran server; the tunnel to this server must forward this UDP port.":"مستقیم: اپ مستقیم به سرور خارج وصل می‌شود، کمترین پینگ. تانل: اپ به سرور ایران وصل می‌شود؛ تانل این سرور باید همین پورت UDP را فوروارد کند.",
+ "address: a domain or an IP, like de.example.com":"آدرس: یک دامنه یا IP، مثل de.example.com","port":"پورت","the port must be 1-65535":"پورت باید ۱ تا ۶۵۵۳۵ باشد"})}
 
 function p_kmix(){kmFA();
  $('#pg').innerHTML='<div class="ph"><div><h2>KANKI MIX</h2><p>'+t('Our own protocol on every VPN server: game packets go straight (no queue, sent twice in gaming mode), websites over KCP + FEC.')+'</p></div>'+
@@ -48,8 +52,17 @@ function kmServers(d){if(!d.servers.length)return '<p class="muted">—</p>';
    '<div class="row" style="gap:6px;width:100%;justify-content:flex-end;align-items:center"><small class="muted">'+t('Port of this server')+'</small>'+
    '<input class="ltr km_np" data-id="'+esc(x.id)+'" inputmode="numeric" style="width:96px" placeholder="'+esc(t('default'))+' '+N(d.settings.port)+'" value="'+esc(((d.settings.nodes||{})[x.id]||{}).port||'')+'">'+
    sw('',x.on,"kmNodeOn('"+esc(x.id)+"',this.checked)")+'</div>'+
+   kmRouteRow(d,x)+
    (old?'<div class="warnbox" style="margin:6px 0 0;width:100%">'+t('Update the agent of this server (Servers › Update agent) to run KANKI MIX')+'</div>':'')+
    (x.on&&x.error?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+esc(x.error)+'</div>':'')+'</div>'}).join('')}
+// direct (the foreign server's own address) or through the Iran tunnel, and an optional address of its own
+function kmRouteRow(d,x){var o=(d.settings.nodes||{})[x.id]||{},tun=o.route=='tunnel',id=esc(x.id);
+ return '<div class="row" style="gap:6px;width:100%;justify-content:flex-end;align-items:center;margin-top:6px"><small class="muted">'+t('Route')+'</small>'+
+  '<select class="km_rt" data-id="'+id+'" onchange="kmSaveNodes()" style="width:auto">'+
+   '<option value=""'+(tun?'':' selected')+'>'+t("Direct (the server's own address)")+' · '+esc(x.direct_host||'?')+'</option>'+
+   '<option value="tunnel"'+(tun?' selected':'')+'>'+t('Through the tunnel (Iran server)')+' · '+esc(x.tunnel_host||'?')+'</option></select>'+
+  '<input class="ltr km_host" data-id="'+id+'" style="width:170px" placeholder="'+esc(t('Address'))+': '+esc(t('automatic'))+'" value="'+esc(o.host||'')+'" onchange="kmSaveNodes()"></div>'}
+function kmSaveNodes(){kmPut({nodes:kmNodes()})}
 function kmDraw(d){var el=$('#km');if(!el)return;var s=d.settings;
  var par=[[0,'none'],[2,'light'],[3,'normal'],[5,'strong'],[8,'very strong']];
  el.innerHTML=(s.on?'':'<div class="warnbox">'+t('KANKI MIX is off: it runs on no server and is in no subscription.')+'</div>')+
@@ -65,10 +78,13 @@ function kmDraw(d){var el=$('#km');if(!el)return;var s=d.settings;
    '<button class="btn" style="width:100%;margin-top:12px" id="km_save">'+t('Save')+'</button></div></div>'+
   '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0 0 6px">'+t('1) Keep it on and pick the port (4000 is fine). 2) Tick KANKI MIX for users (or Enable for all users). 3) Every server installs it by itself within a minute; the Kanki app gets the kanki:// link from the subscription, users see no IP or key.')+'</p>'+
    '<p class="sub" style="margin:0">'+t('Each user has their own key (made from the subscription code): resetting the link gives a new key, disabling or expiring cuts the user off at once. Traffic and devices count like the other protocols.')+'</p>'+
+   '<p class="sub" style="margin:6px 0 0">'+t('Direct: the app connects straight to the foreign server, lowest ping. Tunnel: the app connects to the Iran server; the tunnel to this server must forward this UDP port.')+'</p>'+
    '<label class="f">'+t('Coming next')+'</label><div class="chs" style="display:flex;gap:6px;flex-wrap:wrap">'+['Port hopping during the connection (a new port every few minutes)','Look like QUIC / HTTP3 on the wire','Several servers in one link, automatic switch when one is blocked','Speed limit per user'].map(function(x){return '<span class="chipx" style="opacity:.7">'+t(x)+'</span>'}).join('')+'</div></div>';
  $('#km_save').onclick=kmSave}
 function kmNodes(){var d=KM.d,m={};Object.keys((d&&d.settings.nodes)||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});
- $$('.km_np').forEach(function(i){var v=unN(i.value).trim(),o=m[i.dataset.id]||{};o.port=v?+v:0;m[i.dataset.id]=o});return m}
+ $$('.km_np').forEach(function(i){var v=unN(i.value).trim(),o=m[i.dataset.id]||{};o.port=v?+v:0;m[i.dataset.id]=o});
+ $$('.km_rt').forEach(function(i){var o=m[i.dataset.id]||{};o.route=i.value;m[i.dataset.id]=o});
+ $$('.km_host').forEach(function(i){var o=m[i.dataset.id]||{};o.host=i.value.trim();m[i.dataset.id]=o});return m}
 function kmPut(b,done){return api('PUT','/api/kmix',b).then(function(r){toast(t('Saved'));if(done)done(r);return kmLoad()}).catch(fail)}
 function kmSave(){var p=unN($('#km_port').value).trim();if(!/^\d+$/.test(p)||+p<1||+p>65535)return toast(t('the port must be 1-65535'),1);
  kmPut({on:$('#km_on').checked,port:+p,parity:+$('#km_par').value,gaming:$('#km_gm').checked,hop:unN($('#km_hop').value).trim(),nodes:kmNodes()})}

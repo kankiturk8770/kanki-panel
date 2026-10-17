@@ -63,6 +63,11 @@ pub struct NodeOpt {
     pub off: bool,
     /// this server's own port (0 = the default port)
     pub port: u16,
+    /// how the app reaches this server: "" = direct, to the server's own address (lowest ping);
+    /// "tunnel" = through the server's endpoint (the Iran entry; its tunnel must forward the UDP port)
+    pub route: String,
+    /// address the app dials instead of the automatic one ("" = automatic)
+    pub host: String,
 }
 
 #[derive(Clone, Debug)]
@@ -106,6 +111,41 @@ impl Settings {
     pub fn node_port(&self, node_id: &str) -> u16 {
         self.nodes.get(node_id).map(|o| o.port).filter(|p| *p > 0).unwrap_or(self.port)
     }
+    pub fn node_tunnel(&self, node_id: &str) -> bool {
+        self.nodes.get(node_id).map(|o| o.route == "tunnel").unwrap_or(false)
+    }
+}
+
+/// The server's own public address: the host of its agent URL (the main server: its DOMAIN).
+/// Not the node endpoint, which for tunnelled servers is the Iran entry.
+pub fn direct_host(app: &App, n: &Node) -> String {
+    if n.id == "local" {
+        return app.env.get("DOMAIN").cloned().unwrap_or_default().trim().to_string();
+    }
+    let rest = n.address.trim().split("://").last().unwrap_or("");
+    let hostport = rest.split('/').next().unwrap_or("").rsplit('@').next().unwrap_or("");
+    if let Some(v6) = hostport.strip_prefix('[') {
+        return v6.split(']').next().unwrap_or("").to_string();
+    }
+    hostport.split(':').next().unwrap_or("").to_string()
+}
+
+/// The address the app dials for KANKI MIX on this server
+pub fn link_host(app: &App, s: &Settings, n: &Node) -> String {
+    let opt = s.nodes.get(&n.id).cloned().unwrap_or_default();
+    if !opt.host.trim().is_empty() {
+        return opt.host.trim().to_string();
+    }
+    if opt.route == "tunnel" {
+        return crate::api::endpoint(app, n);
+    }
+    let d = direct_host(app, n);
+    if d.is_empty() || d == "127.0.0.1" { crate::api::endpoint(app, n) } else { d }
+}
+
+/// a host name or IP the panel accepts as a KANKI MIX address
+fn valid_host(h: &str) -> bool {
+    !h.is_empty() && h.len() <= 253 && h.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
 }
 
 // ------------------------------------------------------------------ per-user keys
@@ -190,7 +230,7 @@ pub fn link(app: &App, u: &User, n: &Node) -> Option<String> {
     if s.gaming {
         q.push_str("&gaming=1");
     }
-    let host = crate::api::endpoint(app, n);
+    let host = link_host(app, &s, n);
     let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
     Some(format!("kanki://{}@{}:{}?{}#{}", user_key(app, u), host, port, q, crate::util::pct(&n.name)))
 }
@@ -423,7 +463,9 @@ async fn get_all(axum::extract::State(app): St, h: axum::http::HeaderMap) -> axu
         let error = if e.is_empty() { info["kmix_error"].clone() } else { json!(e) };
         json!({
             "id": n.id, "name": n.name, "main": n.id == "local", "online": n.id == "local" || n.online,
-            "endpoint": crate::api::endpoint(&app, n), "on": s.node_on(&n.id), "want_port": s.node_port(&n.id),
+            "endpoint": link_host(&app, &s, n), "direct_host": direct_host(&app, n), "tunnel_host": crate::api::endpoint(&app, n),
+            "route": if s.node_tunnel(&n.id) { "tunnel" } else { "direct" },
+            "on": s.node_on(&n.id), "want_port": s.node_port(&n.id),
             "port": info["kmix_port"], "parity": info["kmix_parity"], "hop": info["kmix_hop"],
             "active": info["kmix_active"], "installed": !info["kmix_port"].is_null(), "users": here,
             "error": error,
@@ -459,8 +501,13 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
     if let Some(o) = b["nodes"].as_object() {
         nodes.clear();
         for (id, v) in o {
-            let opt = NodeOpt { off: v["off"].as_bool().unwrap_or(false), port: port_of(&v["port"]).unwrap_or(0) };
-            if opt.off || opt.port > 0 {
+            let host = v["host"].as_str().unwrap_or("").trim().to_string();
+            if !host.is_empty() && !valid_host(&host) {
+                return crate::api::err(StatusCode::BAD_REQUEST, "address: a domain or an IP, like de.example.com");
+            }
+            let route = if v["route"].as_str() == Some("tunnel") { "tunnel".to_string() } else { String::new() };
+            let opt = NodeOpt { off: v["off"].as_bool().unwrap_or(false), port: port_of(&v["port"]).unwrap_or(0), route, host };
+            if opt.off || opt.port > 0 || !opt.route.is_empty() || !opt.host.is_empty() {
                 nodes.insert(id.clone(), opt);
             }
         }
@@ -520,6 +567,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn route_and_host_options() {
+        let mut s = Settings { on: true, port: 4000, parity: 3, hop: String::new(), gaming: true, nodes: HashMap::new() };
+        assert!(!s.node_tunnel("de"));
+        s.nodes.insert("de".into(), NodeOpt { route: "tunnel".into(), ..Default::default() });
+        assert!(s.node_tunnel("de"));
+        assert!(valid_host("de.example.com") && valid_host("1.2.3.4") && valid_host("[2001:db8::1]"));
+        assert!(!valid_host("") && !valid_host("a b") && !valid_host("x/y"));
+    }
+
+    #[test]
     fn hop_ranges() {
         assert_eq!(hop_range("4001-4010"), Some((4001, 4010)));
         assert_eq!(hop_range(" 5000 - 5999 "), Some((5000, 5999)));
@@ -547,8 +604,8 @@ mod tests {
     #[test]
     fn settings_per_node() {
         let mut s = Settings { on: true, port: 4000, parity: 3, hop: String::new(), gaming: true, nodes: HashMap::new() };
-        s.nodes.insert("n1".into(), NodeOpt { off: false, port: 5000 });
-        s.nodes.insert("n2".into(), NodeOpt { off: true, port: 0 });
+        s.nodes.insert("n1".into(), NodeOpt { off: false, port: 5000, ..Default::default() });
+        s.nodes.insert("n2".into(), NodeOpt { off: true, port: 0, ..Default::default() });
         assert_eq!(s.node_port("n1"), 5000);
         assert_eq!(s.node_port("local"), 4000);
         assert!(s.node_on("n1") && s.node_on("local") && !s.node_on("n2"));
