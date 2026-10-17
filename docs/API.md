@@ -14,7 +14,7 @@ Auth header: `Authorization: Bearer <token>`. Create tokens in **Security > API 
 | POST | `/api/users/:id/:action` | users:write | `extend {days,gb}`, `reset`, `toggle`, `enable`, `disable`, `regen` |
 | POST | `/api/bulk/users` | users:write | `{ids:[..], action, days?, gb?}` |
 
-Protocols: `wg`, `awg`, `hy2`. Empty `nodes` = every node that accepts unassigned users.
+Protocols: `wg`, `awg`, `hy2`, `kmix` (KANKI MIX). Empty `nodes` = every node that accepts unassigned users.
 
 ## Nodes
 | Method | Path | Scope |
@@ -81,3 +81,10 @@ Scope `nodes` unless noted. Tunnel servers, tunnels and the panel's own tunnel e
 | POST | `/api/db/clean` | clean and compact the database |
 | GET / PUT | `/api/tgbackup` | also `mode` (`nightly`/`hours`), `at` (`03:00`, Iran time), `pass` |
 | POST / GET / DELETE | `/api/tunnels/probe` | smart tunnel: start `{entry, exit, mode, port}`, read progress + ranking, stop |
+
+
+## KANKI MIX
+- `GET /api/kmix` (scope `nodes`): settings, every server with its port, state, users and error, user and traffic totals.
+- `PUT /api/kmix` (scope `nodes`): any of `on`, `port`, `parity` (0-10), `gaming`, `hop` ("first-last" or ""), `nodes` (`{"<node id>": {"off": bool, "port": n}}`). A port that clashes with a server's WireGuard / AmneziaWG / Hysteria2 port is refused.
+- `POST /api/kmix/users` (scope `users:write`): `{"on": true}` adds KANKI MIX to every user, `{"on": false}` removes it.
+- Subscription data (`/sub/<code>/json`): each node has `kmix` (the `kanki://` link or null). `GET /api/config/<id>/kankimix[/qr]?sub=…&node=…` returns the link or its QR code.

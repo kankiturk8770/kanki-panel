@@ -19,6 +19,7 @@ pub const SERVICES: &[(&str, &str)] = &[
     ("wireguard", "wg-quick@wg0"),
     ("amneziawg", "awg-quick@awg0"),
     ("hysteria2", "hysteria-server"),
+    ("kankimix", "kanki-mix"),
     ("web", "caddy"),
     ("panel", "kanki-panel"),
     ("node", "kanki-node"),

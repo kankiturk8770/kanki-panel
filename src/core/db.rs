@@ -487,7 +487,11 @@ pub fn default_setting(k: &str) -> &'static str {
     match k {
         "dns" => "1.1.1.1, 8.8.8.8",
         "mtu" => "1380",
-        "default_protocols" => "wg,awg,hy2",
+        "default_protocols" => "wg,awg,hy2,kmix",
+        "kmix_on" => "1",
+        "kmix_port" => "4000",
+        "kmix_parity" => "3",
+        "kmix_gaming" => "1",
         "panel_name" => "Kanki Panel",
         "lang" => "fa",
         "theme" => "dark",

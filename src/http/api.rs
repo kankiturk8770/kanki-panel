@@ -19,7 +19,7 @@ pub fn err(code: StatusCode, msg: &str) -> Response {
     (code, Json(json!({ "error": msg }))).into_response()
 }
 
-fn spawn_sync(app: &Arc<App>) {
+pub(crate) fn spawn_sync(app: &Arc<App>) {
     let a = app.clone();
     tokio::spawn(async move { sync::sync_all(&a).await });
 }
@@ -163,6 +163,9 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/assets/kanki-dns.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/dns.js"))
         }))
+        .route("/assets/kanki-kmix.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/kmix.js"))
+        }))
         .route("/assets/kanki-antidpi.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/antidpi.js"))
         }))
@@ -200,6 +203,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::tunnel::panel::router())
         .merge(crate::dns::panel::router())
         .merge(crate::xray::panel::router())
+        .merge(crate::kmix::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
         // 2 MiB for every route: login, join and hy2/auth are open to strangers and must not make the
         // server buffer more. Only the backup upload gets a bigger limit (see backup::router).
@@ -230,7 +234,7 @@ async fn overview(State(app): St, h: HeaderMap) -> Response {
         }).unwrap_or((0, 0))
     });
     let mut protos: HashMap<&str, usize> = HashMap::new();
-    for p in ["wg", "awg", "hy2", "xray", "dns"] {
+    for p in ["wg", "awg", "hy2", "kmix", "xray", "dns"] {
         protos.insert(p, us.iter().filter(|u| u.has_proto(p)).count());
     }
     let online = us.iter().filter(|u| u.online > 0).count();
@@ -892,6 +896,7 @@ pub fn node_protos(u: &User, n: &Node) -> Vec<&'static str> {
     if u.has_proto("wg") && has("wg_pub") { v.push("wireguard"); }
     if u.has_proto("awg") && has("awg_pub") { v.push("amneziawg"); }
     if u.has_proto("hy2") && has("hy2_port") { v.push("hysteria2"); }
+    if u.has_proto("kmix") && info["kmix_port"].as_u64().is_some() { v.push("kankimix"); }
     v
 }
 
@@ -900,6 +905,8 @@ fn sub_data(app: &App, u: &User) -> Value {
         let mut v = json!({
             "id": n.id, "name": n.name, "main": n.id == "local", "protocols": node_protos(u, n),
             "hy2": hy2_uri(app, u, n),
+            // KANKI MIX: kanki://key@host:port?fec=10-3… (Null = not for this user / not on this server)
+            "kmix": crate::kmix::link(app, u, n),
         });
         // the real exit of this server's configs (a tunnel endpoint is in Iran; the traffic leaves here)
         if let (Some(o), Some(e)) = (v.as_object_mut(), crate::exitgeo::fields(app, &n.id).as_object()) {
@@ -936,12 +943,13 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
     for n in user_nodes(&app, &u) {
         let mut rows = String::new();
         for p in node_protos(&u, &n) {
-            let (title, letter) = match p { "wireguard" => ("WireGuard", "W"), "amneziawg" => ("AmneziaWG", "A"), _ => ("Hysteria2", "H") };
+            let (title, letter) = match p { "wireguard" => ("WireGuard", "W"), "amneziawg" => ("AmneziaWG", "A"), "kankimix" => ("KANKI MIX", "K"), _ => ("Hysteria2", "H") };
             let base = format!("/api/config/{}/{}?sub={}&amp;node={}", u.id, p, sub, esc(&n.id));
             let mut btns = String::new();
             match p {
-                "hysteria2" => {
-                    if let Some(hu) = hy2_uri(&app, &u, &n) {
+                "hysteria2" | "kankimix" => {
+                    let link = if p == "hysteria2" { hy2_uri(&app, &u, &n) } else { crate::kmix::link(&app, &u, &n) };
+                    if let Some(hu) = link {
                         btns.push_str(&format!("<code class=\"uri\">{}</code>", esc(&hu)));
                         btns.push_str(&format!("<button class=\"b2\" data-act=\"copy\" data-text=\"{}\" data-i18n=\"copy_uri\">Copy URI</button>", esc(&hu)));
                         btns.push_str(&format!("<button class=\"b2\" data-act=\"qr\" data-url=\"/api/config/{}/{}/qr?sub={}&amp;node={}\" data-i18n=\"qr\">QR Code</button>", u.id, p, sub, esc(&n.id)));
@@ -1106,6 +1114,10 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
     };
     if proto == "hysteria2" {
         let s = hy2_uri(&app, &u, &n).unwrap_or_default();
+        return if extra == "qr" { qr(&s) } else { text_conf(s) };
+    }
+    if proto == "kankimix" {
+        let Some(s) = crate::kmix::link(&app, &u, &n) else { return (StatusCode::NOT_FOUND, "KANKI MIX is not on for this user / server").into_response() };
         return if extra == "qr" { qr(&s) } else { text_conf(s) };
     }
     let p = match proto.as_str() { "amneziawg" => "awg", "wireguard" => "wg", _ => return (StatusCode::NOT_FOUND, "proto").into_response() };

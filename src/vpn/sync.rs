@@ -21,6 +21,9 @@ pub struct SyncReq {
     /// username -> (max connections, online across all nodes)
     #[serde(default)]
     pub limits: HashMap<String, (i64, i64)>,
+    /// KANKI MIX on this server (None = a panel that does not manage it: leave it as it is)
+    #[serde(default)]
+    pub kmix: Option<crate::kmix::KmixCfg>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -33,6 +36,13 @@ pub struct SyncResp {
     pub hy2: HashMap<String, (i64, i64)>,
     #[serde(default)]
     pub hy2_online: HashMap<String, i64>,
+    /// KANKI MIX: username -> (rx, tx) since the last sync, and devices online
+    #[serde(default)]
+    pub kmix: HashMap<String, (i64, i64)>,
+    #[serde(default)]
+    pub kmix_online: HashMap<String, i64>,
+    #[serde(default)]
+    pub kmix_error: String,
 }
 
 fn loadavg() -> String {
@@ -43,7 +53,7 @@ fn loadavg() -> String {
 pub fn local_info(app: &App) -> Value {
     let e = &app.env;
     let g = |k: &str| e.get(k).cloned().unwrap_or_default();
-    json!({
+    let mut v = json!({
         "wg_pub": wg::iface_pub("wg"), "wg_port": wg::listen_port("wg"),
         "awg_pub": wg::iface_pub("awg"), "awg_port": wg::listen_port("awg"),
         "awg": wg::awg_params(),
@@ -51,7 +61,11 @@ pub fn local_info(app: &App) -> Value {
         "hy2_insecure": g("HY2_INSECURE"),
         "services": crate::admin::service_states(), "version": crate::VERSION, "load": loadavg(),
         "stats": crate::admin::node_stats(),
-    })
+    });
+    if let (Some(o), Some(k)) = (v.as_object_mut(), crate::kmix::info().as_object()) {
+        o.extend(k.clone());
+    }
+    v
 }
 
 /// Apply on this server
@@ -75,7 +89,27 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
         *rep.entry(k.clone()).or_default() += v;
     }
     *app.reported.lock().unwrap() = rep;
-    SyncResp { wg: w, awg: a, hy2, hy2_online }
+    let (mut kmix, mut kmix_online, mut kmix_error) = (HashMap::new(), HashMap::new(), String::new());
+    if let Some(cfg) = req.kmix {
+        // traffic first: a restart below would lose what was not read yet
+        kmix = crate::kmix::traffic().await;
+        let r = tokio::task::spawn_blocking(move || crate::kmix::apply(&cfg)).await.unwrap_or_else(|_| Err("kanki-mix apply crashed".into()));
+        if let Err(e) = r {
+            if last_kmix_err().lock().unwrap().as_deref() != Some(e.as_str()) {
+                eprintln!("kanki-mix: {}", e);
+            }
+            kmix_error = e;
+        }
+        *last_kmix_err().lock().unwrap() = Some(kmix_error.clone()).filter(|e| !e.is_empty());
+        kmix_online = crate::kmix::online().await;
+    }
+    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error }
+}
+
+/// the last KANKI MIX error (the same error is logged once, not every 30 s)
+fn last_kmix_err() -> &'static std::sync::Mutex<Option<String>> {
+    static E: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
+    E.get_or_init(|| std::sync::Mutex::new(None))
 }
 
 /// Live Hysteria2 sessions of a user on this server
@@ -105,6 +139,8 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
     let limit_on = app.db.get("conn_limit_on") != "0";
     let mut req = SyncReq::default();
     let mut map = vec![];
+    let here: Vec<&User> = users.iter().filter(|u| u.active() && u.on(n)).collect();
+    req.kmix = Some(crate::kmix::cfg_for(app, &crate::kmix::settings(app), n, &here));
     for u in users.iter().filter(|u| u.active() && u.on(n)) {
         // drain: no new users here unless explicitly assigned or already present
         if n.drain && !u.explicit_nodes() {
@@ -196,7 +232,7 @@ pub async fn sync_all(app: &Arc<App>) {
                 *add_bytes.entry(*uid).or_default() += rx + tx;
             }
         }
-        for (name, c) in resp.hy2_online.iter() {
+        for (name, c) in resp.hy2_online.iter().chain(resp.kmix_online.iter()) {
             if let Some(uid) = by_name.get(name) {
                 if *c > 0 {
                     *online.entry(*uid).or_default() += c;
@@ -204,6 +240,12 @@ pub async fn sync_all(app: &Arc<App>) {
                 }
             }
         }
+        for (name, (rx, tx)) in resp.kmix.iter() {
+            if let Some(uid) = by_name.get(name) {
+                *add_bytes.entry(*uid).or_default() += rx + tx;
+            }
+        }
+        crate::kmix::note_error(&n.id, &resp.kmix_error);
     }
 
     for u in &users {

@@ -1,7 +1,11 @@
 # Kanki Panel v2
 
-Lightweight **WireGuard · AmneziaWG · Hysteria2** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
+Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
+
+## New in 3.6 — KANKI MIX
+- **Our own protocol** on every VPN server, next to WireGuard / AmneziaWG / Hysteria2: game packets on a raw datagram path (no queue, sent twice in gaming mode), websites over KCP + FEC, a ChaCha20 mask with no fixed bytes. Menu: VPN services › KANKI MIX.
+- The server is built into the panel: agents install and run it themselves (UDP 4000 by default, per-server ports). Every user has their own key; traffic and devices count like the other protocols. The Kanki app gets the `kanki://` link from the subscription.
 
 ## New in 3.5.2 — SSL with certbot on the server
 - An Xray server or a Kanki DNS server gets its SSL by itself with certbot (domain, no e-mail). The Cloudflare / ArvanCloud API way is gone.

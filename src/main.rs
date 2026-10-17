@@ -30,6 +30,8 @@ mod dns;
 mod emergency;
 #[path = "vpn/hy2.rs"]
 mod hy2;
+#[path = "vpn/kmix.rs"]
+mod kmix;
 #[path = "vpn/sync.rs"]
 mod sync;
 #[path = "vpn/wg.rs"]
