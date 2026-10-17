@@ -1,6 +1,6 @@
 // Kanki Panel: the Kanki DNS page (v3.5). Tabs: overview, servers, services, users, settings and SSL.
 var DN={d:null,tab:'overview',q:'',users:null};
-var DTABS=[['overview','Overview','dash'],['servers','DNS servers','srv'],['services','Services','globe'],['users','DNS users','users'],['settings','Settings and SSL','settings']];
+var DTABS=[['overview','Overview','dash'],['servers','DNS servers','srv'],['services','Services','globe'],['users','DNS users','users'],['log','Query log','traffic'],['settings','Settings and SSL','settings']];
 var UPSTREAMS=[['Cloudflare','1.1.1.1, 1.0.0.1'],['Google','8.8.8.8, 8.8.4.4'],['Quad9','9.9.9.9, 149.112.112.112'],['AdGuard (no ads)','94.140.14.14, 94.140.15.15'],['OpenDNS','208.67.222.222, 208.67.220.220']];
 function p_dns(){DN.tab=S.sub||'overview';
  $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Kanki DNS')+'</h2><p>'+t('Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="dnsAdd(\'relay\')">+ '+t('Add relay')+'</button><button class="btn" onclick="dnsAdd(\'exit\')">+ '+t('Add DNS server')+'</button></div></div>'+
@@ -16,7 +16,7 @@ function dnsLoad(quiet){return api('GET','/api/dns').then(function(d){DN.d=d;if(
    if(DN.tab=='settings'&&$('#dn_cert')){$('#dn_cert').innerHTML=dnsCertState(d);return d}return d}
   dnsDraw(d);return d}).catch(fail)}
 function dnsName(id){var a=(DN.d&&DN.d.agents)||[];for(var i=0;i<a.length;i++)if(a[i].id==id)return a[i].name;return id}
-function dnsDraw(d){var el=$('#dn');if(!el)return;dnsTabs(d);({overview:dnsOverview,servers:dnsServersTab,services:dnsServicesTab,users:dnsUsersTab,settings:dnsSettingsTab}[DN.tab]||dnsOverview)(d,el)}
+function dnsDraw(d){var el=$('#dn');if(!el)return;dnsTabs(d);({overview:dnsOverview,servers:dnsServersTab,services:dnsServicesTab,users:dnsUsersTab,log:dnsLogTab,settings:dnsSettingsTab}[DN.tab]||dnsOverview)(d,el)}
 function dnsSum(d,f){return d.servers.reduce(function(a,x){return a+(+f(x.status||{})||0)},0)}
 function dnsKpis(d){var run=d.servers.filter(function(x){return x.status&&x.status.active}).length,q=dnsSum(d,function(s){return s.q&&s.q.total}),r=dnsSum(d,function(s){return s.q&&s.q.routed});
  return '<div><small>'+t('Status')+'</small><b style="color:'+(d.on?'var(--ok)':'var(--bad)')+'">'+(d.on?t('On'):t('Off'))+'</b></div><div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(d.servers.length)+'</b></div>'+
@@ -109,6 +109,30 @@ function dnsUsersDraw(){var el=$('#dn_ul');if(!el)return;var q=($('#dn_uq')&&$('
    (u.ips.length?'<div class="chs" style="width:100%">'+u.ips.map(function(x){return '<span class="chipx ltr">'+esc(x.ip)+' · '+esc(x.server)+'</span>'}).join('')+'</div>':'')+'</div>'}).join('')||'<p class="muted">'+t('Nothing found')+'</p>';
  $$('#dn_ul [data-dot]').forEach(function(b){b.onclick=function(){copy(b.dataset.dot)}});
  $$('#dn_ul [data-kick]').forEach(function(b){b.onclick=function(){if(!confirm(t('The user\'s phone registers again by itself; someone else using the address loses access. Continue?')))return;api('POST','/api/dns/users/'+b.dataset.kick+'/kick').then(function(){toast(t('Done: servers forget them within a few seconds'))}).catch(fail)}})}
+
+// ---- query log tab: every query of the subscribers (newest first, or grouped by name)
+DN.lg={user:0,q:'',kind:'',view:'names'};
+function dnsLogTab(d,el){var us=(DN.users||[]);
+ el.innerHTML='<div class="card"><div class="nh"><div><h3>'+t('Query log')+'</h3><p class="sub" style="margin:0">'+t('Every name your subscribers asked, and whether it went through your server (routed) or straight to the site (direct). Kept in the panel\'s memory; a restart clears it.')+'</p></div><div class="row" style="gap:6px"><button class="b2" id="dl_re">'+t('Refresh')+'</button><button class="b2 bd" id="dl_clr">'+t('Clear')+'</button></div></div>'+
+  '<div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px"><select id="dl_u" style="max-width:200px"><option value="0">'+t('All users')+'</option></select>'+
+  '<select id="dl_k" style="max-width:170px"><option value="">'+t('All queries')+'</option><option value="routed">'+t('Routed only')+'</option><option value="direct">'+t('Direct only')+'</option></select>'+
+  '<input id="dl_q" class="ltr" placeholder="igamecj.com" style="max-width:220px">'+
+  '<select id="dl_v" style="max-width:170px"><option value="names">'+t('Grouped by name')+'</option><option value="items">'+t('Each query')+'</option></select></div>'+
+  '<div id="dl_o" style="margin-top:10px">'+t('Loading…')+'</div></div>';
+ var f=DN.lg;$('#dl_k').value=f.kind;$('#dl_q').value=f.q;$('#dl_v').value=f.view;
+ var fill=function(){var sel=$('#dl_u');if(!sel)return;sel.innerHTML='<option value="0">'+t('All users')+'</option>'+(DN.users||[]).map(function(u){return '<option value="'+u.id+'">'+esc(u.name)+'</option>'}).join('');sel.value=String(f.user)};
+ if(us.length)fill();else api('GET','/api/dns/users').then(function(r){DN.users=r.users||[];fill()}).catch(function(){});
+ var go=function(){f.user=+$('#dl_u').value||0;f.kind=$('#dl_k').value;f.q=$('#dl_q').value.trim();f.view=$('#dl_v').value;dnsLogLoad()};
+ $('#dl_u').onchange=go;$('#dl_k').onchange=go;$('#dl_v').onchange=go;var tm;$('#dl_q').oninput=function(){clearTimeout(tm);tm=setTimeout(go,350)};
+ $('#dl_re').onclick=dnsLogLoad;$('#dl_clr').onclick=function(){if(!confirm(t('Clear the whole query log?')))return;api('DELETE','/api/dns/log').then(dnsLogLoad).catch(fail)};
+ dnsLogLoad()}
+function dnsLogLoad(){var f=DN.lg;api('GET','/api/dns/log?user='+f.user+'&kind='+encodeURIComponent(f.kind)+'&q='+encodeURIComponent(f.q)+'&limit=1000').then(function(r){var el=$('#dl_o');if(!el)return;
+ var tag=function(x){return x.routed?'<span class="chipx" style="border-color:var(--gold)">'+t('routed')+(x.service?' · '+esc(x.service):'')+'</span>':'<span class="chipx">'+t('direct')+'</span>'};
+ var head='<p class="muted" style="margin:0 0 8px">'+N(r.matched)+' '+t('queries')+' · '+t('kept')+' '+N(r.total)+' / '+N(r.max)+'</p>';
+ if(!r.matched){el.innerHTML=head+'<p class="muted">'+t('Nothing yet: queries show up here a few seconds after a subscriber uses DNS (DNS servers must run v3.5.8 or newer).')+'</p>';return}
+ if(DN.lg.view=='names'){el.innerHTML=head+r.names.map(function(x){return '<div class="vrow" style="flex-wrap:wrap"><span class="dot '+(x.routed?'g':'')+'"></span><div class="nm"><b class="ltr"><bdi>'+esc(x.name)+'</bdi></b><small>'+N(x.count)+' '+t('times')+' · '+ago(x.last)+' · '+x.users.map(esc).join('، ')+'</small></div>'+tag(x)+'</div>'}).join('')}
+ else{el.innerHTML=head+r.items.map(function(x){return '<div class="vrow" style="flex-wrap:wrap"><span class="dot '+(x.routed?'g':'')+'"></span><div class="nm"><b class="ltr"><bdi>'+esc(x.name)+'</bdi> <small>'+esc(x.type)+'</small></b><small>'+esc(x.user)+' · '+esc(x.server)+' · '+ago(x.ts)+'</small></div>'+tag(x)+'</div>'}).join('')}
+}).catch(fail)}
 
 // ---- settings tab
 function dnsSettingsTab(d,el){

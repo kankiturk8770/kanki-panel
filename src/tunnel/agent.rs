@@ -225,6 +225,7 @@ pub async fn run(version: &str) {
             }
             Ok(r) if r.status().is_success() => {
                 fails = 0;
+                crate::dns::qlog_ack(&body["dns"]);
                 if let Ok(v) = r.json::<Value>().await {
                     // the emergency chat: "set" (new config), "keep" (unchanged) or "off"
                     match v["emergency"]["mode"].as_str() {

@@ -18,6 +18,10 @@ const VER_FILE: &str = "/var/lib/kanki/dns/applied.ver";
 const RESTART_FILE: &str = "/var/lib/kanki/dns/applied.restart";
 const RUNNING_VER: &str = "/var/lib/kanki/dns/running.ver";
 const SSL_ERR_FILE: &str = "/var/lib/kanki/dns/ssl.err";
+/// the latest queries of subscribers, written by the service for the agent to report
+const QLOG_FILE: &str = "/var/lib/kanki/dns/qlog.json";
+/// queries sent to the panel in one report (the newest when more are waiting)
+const QLOG_PER_REPORT: usize = 2000;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
@@ -97,6 +101,7 @@ pub async fn run() {
     eprintln!("kanki dns {} running", crate::VERSION);
     let run_id = crate::util::rand_token(8);
     let mut last = std::fs::metadata(CONF_FILE).and_then(|m| m.modified()).ok();
+    let mut qlog_written = 0u64;
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         let m = std::fs::metadata(CONF_FILE).and_then(|m| m.modified()).ok();
@@ -119,7 +124,47 @@ pub async fn run() {
         if std::fs::write(&tmp, st.to_string()).is_ok() {
             let _ = std::fs::rename(&tmp, STATS_FILE);
         }
+        // the query log: every query still kept (the agent sends the ones the panel has not had yet)
+        if eng.qlog_last() != qlog_written {
+            qlog_written = eng.qlog_last();
+            let items: Vec<Value> = eng.qlog_after(0).into_iter().map(|q| json!([q.seq, q.ts, q.uid, q.name, q.qtype, q.routed])).collect();
+            let tmp = format!("{}.new", QLOG_FILE);
+            if std::fs::write(&tmp, json!({ "run": run_id, "items": items }).to_string()).is_ok() {
+                let _ = std::fs::rename(&tmp, QLOG_FILE);
+            }
+        }
     }
+}
+
+/// (run id, last query seq) the panel has received from this server
+fn qlog_acked() -> &'static std::sync::Mutex<(String, u64)> {
+    static A: std::sync::OnceLock<std::sync::Mutex<(String, u64)>> = std::sync::OnceLock::new();
+    A.get_or_init(|| std::sync::Mutex::new((String::new(), 0)))
+}
+
+/// The queries the panel has not received yet: { "run": ..., "items": [[seq, ts, uid, name, qtype, routed], ...] }
+fn qlog_pending() -> Value {
+    let Some(v) = std::fs::read_to_string(QLOG_FILE).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { return Value::Null };
+    let run = v["run"].as_str().unwrap_or("").to_string();
+    let after = {
+        let a = qlog_acked().lock().unwrap();
+        if a.0 == run { a.1 } else { 0 }
+    };
+    let mut items: Vec<Value> = v["items"].as_array().into_iter().flatten().filter(|x| x[0].as_u64().unwrap_or(0) > after).cloned().collect();
+    if items.len() > QLOG_PER_REPORT {
+        items.drain(..items.len() - QLOG_PER_REPORT);
+    }
+    if items.is_empty() {
+        return Value::Null;
+    }
+    json!({ "run": run, "items": items })
+}
+
+/// After a report reached the panel: the queries it carried are not sent again.
+pub fn qlog_ack(st: &Value) {
+    let run = st["qlog"]["run"].as_str().unwrap_or("");
+    let Some(last) = st["qlog"]["items"].as_array().and_then(|l| l.last()).and_then(|x| x[0].as_u64()) else { return };
+    *qlog_acked().lock().unwrap() = (run.to_string(), last);
 }
 
 // ------------------------------------------------------------------ deploy (run by the agent)
@@ -148,7 +193,7 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
             let _ = std::fs::remove_file(UNIT);
             let _ = sh("systemctl daemon-reload");
         }
-        for f in [CONF_FILE, VER_FILE, RESTART_FILE, STATS_FILE] {
+        for f in [CONF_FILE, VER_FILE, RESTART_FILE, STATS_FILE, QLOG_FILE] {
             let _ = std::fs::remove_file(f);
         }
         return Ok(());
@@ -259,6 +304,9 @@ pub fn status() -> Value {
     }
     st["active"] = json!(active);
     st["ver"] = json!(applied_ver());
+    if active {
+        st["qlog"] = qlog_pending();
+    }
     // the certificate of this server's name (certbot or pasted) and why certbot failed
     let host = load_cfg().map(|c| (c.host.clone(), !c.cert.trim().is_empty())).unwrap_or_default();
     st["ssl"] = json!(host.1);

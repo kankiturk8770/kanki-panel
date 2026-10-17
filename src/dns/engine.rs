@@ -118,7 +118,24 @@ pub struct Engine {
     pub q_refused: AtomicU64,
     /// routed queries per listed name (the busiest services)
     top: Mutex<HashMap<String, u64>>,
+    /// the latest queries of subscribers (for the panel's query log), oldest first
+    qlog: Mutex<VecDeque<QLog>>,
+    qseq: AtomicU64,
 }
+
+/// One logged query: who asked which name, and the listed name that routed it ("" = answered as is)
+#[derive(Clone, Debug, PartialEq)]
+pub struct QLog {
+    pub seq: u64,
+    pub ts: i64,
+    pub uid: i64,
+    pub name: String,
+    pub qtype: u16,
+    pub routed: String,
+}
+
+/// queries kept on a server between two reports to the panel
+pub const QLOG_KEEP: usize = 4000;
 
 impl Engine {
     pub fn new(cfg: DnsCfg) -> Arc<Engine> {
@@ -135,7 +152,27 @@ impl Engine {
             q_cache: AtomicU64::new(0),
             q_refused: AtomicU64::new(0),
             top: Mutex::new(HashMap::new()),
+            qlog: Mutex::new(VecDeque::new()),
+            qseq: AtomicU64::new(0),
         })
+    }
+
+    fn log_query(&self, uid: i64, name: &str, qtype: u16, routed: Option<&str>) {
+        let seq = self.qseq.fetch_add(1, Ordering::Relaxed) + 1;
+        let mut l = self.qlog.lock().unwrap();
+        if l.len() >= QLOG_KEEP {
+            l.pop_front();
+        }
+        l.push_back(QLog { seq, ts: crate::util::now(), uid, name: name.to_string(), qtype, routed: routed.unwrap_or("").to_string() });
+    }
+
+    /// The logged queries after `seq` (oldest first).
+    pub fn qlog_after(&self, seq: u64) -> Vec<QLog> {
+        self.qlog.lock().unwrap().iter().filter(|q| q.seq > seq).cloned().collect()
+    }
+
+    pub fn qlog_last(&self) -> u64 {
+        self.qseq.load(Ordering::Relaxed)
     }
 
     pub fn live(&self) -> Arc<Live> {
@@ -293,6 +330,7 @@ impl Engine {
         self.stat(uid).queries.fetch_add(1, Ordering::Relaxed);
         self.q_total.fetch_add(1, Ordering::Relaxed);
         let by = if q.qclass == 1 && !live.answer.is_empty() { live.routed_by(&q.name) } else { None };
+        self.log_query(uid, &q.name, q.qtype, by);
         if let Some(by) = by {
             if q.qtype == wire::A {
                 self.q_routed.fetch_add(1, Ordering::Relaxed);
@@ -1031,6 +1069,11 @@ mod tests {
         e.answer(&q, Some(1)).await;
         assert_eq!((e.q_total.load(Ordering::Relaxed), e.q_routed.load(Ordering::Relaxed), e.q_refused.load(Ordering::Relaxed)), (2, 2, 1));
         assert_eq!(e.top(5), vec![("playstation.net".to_string(), 2)]);
+        // only subscribers' queries are logged, with the listed name that routed them
+        let log = e.qlog_after(0);
+        assert_eq!(log.len(), 2);
+        assert_eq!((log[0].uid, log[0].name.as_str(), log[0].qtype, log[0].routed.as_str()), (1, "dl.playstation.net", wire::A, "playstation.net"));
+        assert_eq!(e.qlog_after(log[0].seq).len(), 1);
         let ip: IpAddr = "198.51.100.9".parse().unwrap();
         e.allow(ip, 1);
         e.allow("198.51.100.10".parse().unwrap(), 2);
