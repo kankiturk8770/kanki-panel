@@ -129,7 +129,11 @@ var KFA={
  // Kanki DNS
  "Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct":"DNS هوشمند اختصاصی مشتری‌ها: سرویس‌های تحریمی از سرورهای شما رد می‌شوند و بقیه مستقیم",
  "Add relay":"افزودن ریلی","Add DNS server":"افزودن سرور DNS","Status":"وضعیت","On":"روشن","Running servers":"سرورهای در حال اجرا","Users with DNS":"کاربران دارای DNS","Allowed addresses":"IPهای مجاز",
- "Queries":"درخواست‌ها","routed":"مسیردهی‌شده","DNS is off: nothing runs on the servers.":"DNS خاموش است: روی سرورها چیزی اجرا نمی‌شود.",
+ "Queries":"درخواست‌ها","routed":"مسیردهی‌شده", "Query log":"لاگ درخواست‌ها","Every name your subscribers asked, and whether it went through your server (routed) or straight to the site (direct). Kept in the panel\'s memory; a restart clears it.":"همه‌ی دامنه‌هایی که مشتری‌ها پرسیده‌اند و اینکه از سرور شما رد شده (مسیردهی‌شده) یا مستقیم به سایت رفته (مستقیم). در حافظه‌ی پنل نگه داشته می‌شود و با ری‌استارت پاک می‌شود.",
+ "Refresh":"بروزرسانی","Clear":"پاک کردن","All users":"همه‌ی کاربران","All queries":"همه‌ی درخواست‌ها","Routed only":"فقط مسیردهی‌شده","Direct only":"فقط مستقیم","Grouped by name":"گروه‌بندی بر اساس دامنه","Each query":"تک‌تک درخواست‌ها",
+ "direct":"مستقیم","kept":"نگه‌داشته","times":"بار","Clear the whole query log?":"کل لاگ درخواست‌ها پاک شود؟",
+ "Nothing yet: queries show up here a few seconds after a subscriber uses DNS (DNS servers must run v3.5.8 or newer).":"هنوز چیزی نیست: چند ثانیه بعد از اینکه مشتری از DNS استفاده کند اینجا می‌آید (سرورهای DNS باید نسخه‌ی ۳.۵.۸ یا جدیدتر باشند).",
+"DNS is off: nothing runs on the servers.":"DNS خاموش است: روی سرورها چیزی اجرا نمی‌شود.",
  "No DNS domain yet: encrypted DNS (DoT / DoH) needs one.":"هنوز دامنه‌ی DNS نداری: DNS رمزدار (DoT / DoH) به آن نیاز دارد.",
  "No certificate yet: DoT / DoH and registering by link do not work without it.":"هنوز گواهی نیست: DoT / DoH و ثبت با لینک بدون آن کار نمی‌کند.","Add an exit DNS server first":"اول یک سرور DNS خروجی اضافه کن",
  "Path of the traffic":"مسیر ترافیک","Manage":"مدیریت","Busiest services":"پرمصرف‌ترین سرویس‌ها","Routed names asked for most since the DNS services started":"دامنه‌هایی که از شروع سرویس DNS بیشتر از همه پرسیده شده‌اند",

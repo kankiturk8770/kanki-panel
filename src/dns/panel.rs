@@ -297,8 +297,179 @@ pub fn ingest(app: &App, sid: &str, st: &Value) {
         last_status().lock().unwrap().remove(sid);
         return;
     }
-    last_status().lock().unwrap().insert(sid.to_string(), (now(), st.clone()));
+    let mut kept = st.clone();
+    if let Some(o) = kept.as_object_mut() {
+        if let Some(q) = o.remove("qlog") {
+            qlog_ingest(sid, &q);
+        }
+    }
+    last_status().lock().unwrap().insert(sid.to_string(), (now(), kept));
     count_usage(app, &format!("dns_prev_{}", sid), st);
+}
+
+// ------------------------------------------------------------------ query log
+
+/// queries the panel keeps in memory (all servers together; the oldest go first)
+const QLOG_MAX: usize = 50_000;
+
+struct QEntry {
+    ts: i64,
+    sid: String,
+    uid: i64,
+    name: String,
+    qtype: u16,
+    routed: String,
+}
+
+#[derive(Default)]
+struct QStore {
+    /// server -> (run id, last seq received)
+    seen: HashMap<String, (String, u64)>,
+    items: std::collections::VecDeque<QEntry>,
+}
+
+fn qstore() -> &'static Mutex<QStore> {
+    static S: OnceLock<Mutex<QStore>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new(QStore::default()))
+}
+
+/// Queries a server reported: { "run": ..., "items": [[seq, ts, uid, name, qtype, routed], ...] }
+fn qlog_ingest(sid: &str, q: &Value) {
+    let run = q["run"].as_str().unwrap_or("").to_string();
+    let mut st = qstore().lock().unwrap();
+    let after = st.seen.get(sid).filter(|x| x.0 == run).map(|x| x.1).unwrap_or(0);
+    let mut last = after;
+    for x in q["items"].as_array().into_iter().flatten() {
+        let seq = x[0].as_u64().unwrap_or(0);
+        if seq <= after {
+            continue;
+        }
+        last = last.max(seq);
+        st.items.push_back(QEntry {
+            ts: x[1].as_i64().unwrap_or(0),
+            sid: sid.to_string(),
+            uid: x[2].as_i64().unwrap_or(0),
+            name: x[3].as_str().unwrap_or("").chars().take(255).collect(),
+            qtype: x[4].as_u64().unwrap_or(0) as u16,
+            routed: x[5].as_str().unwrap_or("").to_string(),
+        });
+    }
+    while st.items.len() > QLOG_MAX {
+        st.items.pop_front();
+    }
+    st.seen.insert(sid.to_string(), (run, last));
+}
+
+fn qtype_name(t: u16) -> String {
+    match t {
+        1 => "A".into(),
+        2 => "NS".into(),
+        5 => "CNAME".into(),
+        6 => "SOA".into(),
+        12 => "PTR".into(),
+        15 => "MX".into(),
+        16 => "TXT".into(),
+        28 => "AAAA".into(),
+        33 => "SRV".into(),
+        64 => "SVCB".into(),
+        65 => "HTTPS".into(),
+        _ => t.to_string(),
+    }
+}
+
+/// listed name -> "Service · Group" from the catalog
+fn service_labels() -> &'static HashMap<String, String> {
+    static M: OnceLock<HashMap<String, String>> = OnceLock::new();
+    M.get_or_init(|| {
+        let mut m = HashMap::new();
+        for svc in catalog()["services"].as_array().into_iter().flatten() {
+            let sl = svc["label"].as_str().unwrap_or("");
+            let multi = svc["groups"].as_array().map(|g| g.len() > 1).unwrap_or(false);
+            for g in svc["groups"].as_array().into_iter().flatten() {
+                let label = if multi { format!("{} · {}", sl, g["label"].as_str().unwrap_or("")) } else { sl.to_string() };
+                for d in g["domains"].as_array().into_iter().flatten().filter_map(|d| d.as_str()) {
+                    m.entry(d.to_string()).or_insert_with(|| label.clone());
+                }
+            }
+        }
+        m
+    })
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct LogQuery {
+    /// user id (0 = everybody)
+    user: i64,
+    /// text in the name
+    q: String,
+    /// "routed" | "direct" | "" (all)
+    kind: String,
+    limit: usize,
+}
+
+/// The query log, newest first, and the same queries grouped by name (most asked first).
+async fn get_log(State(app): St, h: HeaderMap, axum::extract::Query(f): axum::extract::Query<LogQuery>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let names = crate::tunnel::panel::server_names(&app);
+    let users: HashMap<i64, String> = app.db.users().into_iter().map(|u| (u.id, u.username)).collect();
+    let labels = service_labels();
+    let q = f.q.trim().to_ascii_lowercase();
+    let limit = if f.limit == 0 { 500 } else { f.limit.min(5000) };
+    let st = qstore().lock().unwrap();
+    let total = st.items.len();
+    let keep = |e: &&QEntry| {
+        (f.user == 0 || e.uid == f.user)
+            && (q.is_empty() || e.name.contains(&q))
+            && match f.kind.as_str() {
+                "routed" => !e.routed.is_empty(),
+                "direct" => e.routed.is_empty(),
+                _ => true,
+            }
+    };
+    let label = |r: &str| if r.is_empty() { String::new() } else { labels.get(r).cloned().unwrap_or_else(|| "custom".into()) };
+    let mut groups: HashMap<&str, (u64, &str, i64, std::collections::BTreeSet<i64>)> = HashMap::new();
+    let mut matched = 0usize;
+    for e in st.items.iter().filter(keep) {
+        matched += 1;
+        let g = groups.entry(e.name.as_str()).or_insert((0, e.routed.as_str(), 0, Default::default()));
+        g.0 += 1;
+        g.2 = g.2.max(e.ts);
+        g.3.insert(e.uid);
+    }
+    let items: Vec<Value> = st
+        .items
+        .iter()
+        .rev()
+        .filter(keep)
+        .take(limit)
+        .map(|e| {
+            json!({
+                "ts": e.ts, "server": names.get(&e.sid).cloned().unwrap_or_else(|| e.sid.clone()),
+                "user": users.get(&e.uid).cloned().unwrap_or_else(|| format!("#{}", e.uid)), "uid": e.uid,
+                "name": e.name, "type": qtype_name(e.qtype), "routed": e.routed, "service": label(&e.routed),
+            })
+        })
+        .collect();
+    let mut by_name: Vec<(&str, (u64, &str, i64, std::collections::BTreeSet<i64>))> = groups.into_iter().collect();
+    by_name.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then(a.0.cmp(b.0)));
+    let by_name: Vec<Value> = by_name
+        .into_iter()
+        .take(limit)
+        .map(|(n, (c, r, last, us))| {
+            json!({
+                "name": n, "count": c, "routed": r, "service": label(r), "last": last,
+                "users": us.iter().map(|u| users.get(u).cloned().unwrap_or_else(|| format!("#{}", u))).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    Json(json!({ "total": total, "matched": matched, "max": QLOG_MAX, "items": items, "names": by_name })).into_response()
+}
+
+async fn clear_log(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "nodes");
+    qstore().lock().unwrap().items.clear();
+    Json(json!({ "ok": true })).into_response()
 }
 
 /// Add the bytes a server counted since its last report to each user's traffic. `st` has the run id of
@@ -373,6 +544,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/dns/servers/:id", delete(del_server))
         .route("/api/dns/users", get(get_users))
         .route("/api/dns/users/:id/kick", post(kick_user))
+        .route("/api/dns/log", get(get_log).delete(clear_log))
         .route("/api/dns/check", post(check_name))
         .route("/assets/dns-icons.json", get(|| async {
             ([(header::CONTENT_TYPE, "application/json"), (header::CACHE_CONTROL, "public, max-age=86400")], include_str!("../../assets/dns/icons.json"))
@@ -618,3 +790,19 @@ async fn check_name(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
     .into_response()
 }
 
+
+#[cfg(test)]
+mod qlog_tests {
+    use super::*;
+
+    #[test]
+    fn a_report_sent_twice_is_kept_once() {
+        let q = json!({ "run": "r1", "items": [[1, 100, 7, "a.example", 1, ""], [2, 101, 7, "igamecj.com", 1, "igamecj.com"]] });
+        qlog_ingest("test-srv", &q);
+        qlog_ingest("test-srv", &q);
+        let st = qstore().lock().unwrap();
+        let mine: Vec<&QEntry> = st.items.iter().filter(|e| e.sid == "test-srv").collect();
+        assert_eq!(mine.len(), 2);
+        assert_eq!(mine[1].routed, "igamecj.com");
+    }
+}
