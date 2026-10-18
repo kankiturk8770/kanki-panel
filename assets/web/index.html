@@ -1792,6 +1792,49 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
 
 // ---- Telegram sales bot page
 var BS_KEYS=['sales_on','warn_on','welcome','support','app_link','channel','trial_on','trial_gb','trial_days','ref_gb','ref_days','card_on','card_number','card_holder','np_on','np_key','np_coins','zp_on','zp_merchant','zp_callback','wallet_on','wallet_text'];
+// ---- the Kanki app's install files: uploaded here, sent by the bot and offered on the subscription page
+function botApk(){var el=$('#bt_apk');if(!el)return;
+ api('GET','/api/apps').then(function(r){var f=r.files||[];
+  var mb=function(n){return (n/1e6).toFixed(1)+' MB'};
+  var row=function(x,i){return '<div class="box" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
+    '<span class="bav" style="width:40px;height:40px;font-weight:900">K</span>'+
+    '<div style="flex:1;min-width:180px"><b>'+esc(x.title)+(i==0&&f.length>1?' <span class="badge g">'+t('Recommended')+'</span>':'')+'</b>'+
+     '<div class="ltr" style="font-size:12px;margin-top:2px">'+esc(x.name)+' · '+mb(x.size)+'</div>'+
+     '<small class="muted">'+esc(x.hint)+' · '+ago(x.at)+(x.bot?'':' · <span style="color:var(--bad)">'+t('Too big for the bot (over 50 MB): only on the subscription page')+'</span>')+'</small></div>'+
+    '<button class="b2" data-apv="'+esc(x.abi)+'" data-v="'+esc(x.version||'')+'">'+ic('edit',15)+' '+t('Version')+'</button>'+
+    '<button class="b2 bd" data-apd="'+esc(x.abi)+'">'+ic('trash',15)+'</button></div>'};
+  el.innerHTML='<div class="card"><h3>'+ic('dl',16)+' '+t('App files')+'</h3>'+
+   '<p class="sub">'+t('Upload the Kanki app (.apk) here, one file per phone type. The bot sends the file itself (📱 Download app) and the subscription page shows a download button for each. A new file of the same type replaces the old one.')+'</p>'+
+   (f.length?f.map(row).join(''):'<p class="muted">'+t('No file yet: the bot and the subscription page show the app download link of Sales settings.')+'</p>')+
+   '<div class="box"><b>'+ic('plus',15)+' '+t('Upload files')+'</b>'+
+    '<input type="file" id="ap_f" accept=".apk,application/vnd.android.package-archive" multiple style="margin:8px 0;width:100%">'+
+    '<div class="g2f"><div><label class="f">'+t('Phone type')+'</label><select id="ap_abi"><option value="">'+t('From the file name (arm64 / armeabi-v7a …)')+'</option>'+
+     '<option value="arm64-v8a">arm64-v8a · '+t('new phones (64-bit)')+'</option><option value="armeabi-v7a">armeabi-v7a · '+t('older phones (32-bit)')+'</option><option value="universal">universal · '+t('every phone')+'</option></select></div>'+
+     '<div><label class="f">'+t('Version')+'</label><input id="ap_v" class="ltr" placeholder="'+t('from the file name, e.g. 1.15.1')+'"></div></div>'+
+    '<div id="ap_prog" class="muted" style="margin-top:6px"></div>'+
+    '<button class="btn" id="ap_go" style="width:100%;margin-top:8px">'+ic('dl',15)+' '+t('Upload')+'</button></div></div>';
+  $('#ap_go').onclick=function(){var files=[].slice.call($('#ap_f').files||[]);if(!files.length)return toast(t('Choose the .apk file(s) first'),1);
+   var me=this;me.disabled=true;var i=0;
+   var next=function(){if(i>=files.length){me.disabled=false;toast(t('Done'));return botApk()}
+    var file=files[i++],q='?name='+encodeURIComponent(file.name)+'&abi='+encodeURIComponent($('#ap_abi').value)+'&version='+encodeURIComponent($('#ap_v').value);
+    var x=new XMLHttpRequest();x.open('POST','/api/apps'+q);if(S.token)x.setRequestHeader('Authorization','Bearer '+S.token);
+    x.setRequestHeader('Content-Type','application/octet-stream');
+    x.upload.onprogress=function(e){if(e.lengthComputable)$('#ap_prog').textContent=file.name+' · '+Math.round(100*e.loaded/e.total)+'%'};
+    x.onload=function(){var j={};try{j=JSON.parse(x.responseText||'{}')}catch(e){}
+     if(x.status>=300){me.disabled=false;$('#ap_prog').textContent='';return toast(file.name+': '+t(j.error||('HTTP '+x.status)),1)}
+     $('#ap_prog').textContent='✓ '+file.name;next()};
+    x.onerror=function(){me.disabled=false;toast(t('Upload failed'),1)};x.send(file)};
+   next()};
+  $$('[data-apd]').forEach(function(b){b.onclick=function(){confirmDo(function(){api('DELETE','/api/apps/'+b.dataset.apd).then(function(){toast(t('Done'));botApk()}).catch(fail)})}});
+  $$('[data-apv]').forEach(function(b){b.onclick=function(){var v=prompt(t('Version'),b.dataset.v);if(v===null)return;
+   api('PUT','/api/apps/'+b.dataset.apv,{version:v}).then(function(){toast(t('Saved'));botApk()}).catch(fail)}});
+ }).catch(fail)}
+Object.assign(FA,{"App files":"فایل‌های اپ","Recommended":"پیشنهادی","Too big for the bot (over 50 MB): only on the subscription page":"برای ربات بزرگ است (بیش از ۵۰ مگ): فقط در صفحه‌ی اشتراک",
+ "Upload the Kanki app (.apk) here, one file per phone type. The bot sends the file itself (📱 Download app) and the subscription page shows a download button for each. A new file of the same type replaces the old one.":"فایل نصبی اپ کانکی (.apk) را اینجا آپلود کن، برای هر نوع گوشی یک فایل. ربات خودش فایل را می‌فرستد (📱 دانلود اپ) و صفحه‌ی اشتراک برای هرکدام دکمه‌ی دانلود نشان می‌دهد. فایل جدیدِ همان نوع جای قبلی را می‌گیرد.",
+ "No file yet: the bot and the subscription page show the app download link of Sales settings.":"هنوز فایلی نیست: ربات و صفحه‌ی اشتراک همان لینک دانلود اپ تنظیمات فروش را نشان می‌دهند.",
+ "Upload files":"آپلود فایل","Phone type":"نوع گوشی","From the file name (arm64 / armeabi-v7a …)":"از روی اسم فایل (arm64 / armeabi-v7a …)","new phones (64-bit)":"گوشی‌های جدید (۶۴ بیتی)","older phones (32-bit)":"گوشی‌های قدیمی (۳۲ بیتی)","every phone":"همه‌ی گوشی‌ها",
+ "Version":"نسخه","from the file name, e.g. 1.15.1":"از روی اسم فایل، مثلاً 1.15.1","Upload":"آپلود","Choose the .apk file(s) first":"اول فایل(های) .apk را انتخاب کن","Upload failed":"آپلود ناموفق بود",
+ "this is not an Android app (.apk)":"این فایل اپ اندروید (.apk) نیست","choose the phone type of this file (arm64, armv7 or universal)":"نوع گوشیِ این فایل را انتخاب کن (arm64، armv7 یا universal)","unknown phone type":"نوع گوشی نامعتبر است"});
 function pBot(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Telegram sales bot')+'</h2><p>'+t('Create and manage the sales bot')+'</p></div><div id="bt_top"></div></div><div id="bt">'+t('Loading…')+'</div>';botLoad()}
 function botLoad(){return Promise.all([api('GET','/api/bot'),api('GET','/api/settings'),api('GET','/api/plans').catch(function(){return []})]).then(function(r){S.bot=r[0];S.bset=r[1];S.plans=r[2]||[];botDraw()}).catch(fail)}
 function bsChk(k,label){return '<label class="chk"><input type="checkbox" data-bs="'+k+'" '+((S.bset||{})[k]=='1'?'checked':'')+'>'+t(label)+'</label>'}
@@ -1805,7 +1848,7 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
    '<div class="g4b"><button class="b2" id="bt_test">'+ic('send',15)+' '+t('Test connection')+'</button><button class="b2" id="bt_pause">'+ic(b.paused?'play':'pause',15)+' '+t(b.paused?'Resume':'Pause')+'</button><button class="b2" id="bt_edit">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2 bd" id="bt_del">'+ic('trash',15)+' '+t('Delete bot')+'</button></div></div>'
   :'<div class="card bempty"><span class="bav big">'+ic('bot',30)+'</span><h3>'+t('No sales bot yet')+'</h3><ol class="steps"><li>'+t('In Telegram open @BotFather, send /newbot and copy the token it gives.')+'</li><li>'+t('Get your numeric Telegram ID from @userinfobot.')+'</li><li>'+t('Press Create bot and paste both.')+'</li></ol><button class="btn" id="bt_new2">+ '+t('Create bot')+'</button></div>';
  S.btab=S.btab||'sales';
- var tabs=[['sales','Sales settings'],['plans','Plans'],['disc','Discount codes'],['chan','Smart channel'],['appmsg','App message']];
+ var tabs=[['sales','Sales settings'],['plans','Plans'],['apk','App files'],['disc','Discount codes'],['chan','Smart channel'],['appmsg','App message']];
  el.innerHTML=head+'<div class="seg btabs" id="bt_tabs">'+tabs.map(function(x){return '<button data-bt="'+x[0]+'" class="'+(S.btab==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
   '<div data-btp="sales"><div class="card"><h3>'+ic('settings',16)+' '+t('Sales settings')+'</h3><p class="sub">'+t('How the bot sells: trials, payments, referrals and messages.')+'</p>'+
    '<div class="chips">'+bsChk('sales_on','Sales enabled')+bsChk('warn_on','Warn buyers before expiry / end of data')+'</div>'+
@@ -1819,9 +1862,9 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
     '<div class="chips">'+bsChk('zp_on','ZarinPal')+'</div><div class="g2f">'+bsIn('zp_merchant','ZarinPal merchant ID','',0,1)+bsIn('zp_callback','ZarinPal callback URL','https://…',0,1)+'</div>'+
     '<div class="chips">'+bsChk('wallet_on','Wallet / manual payment')+'</div><label class="f">'+t('Text shown to the buyer')+'</label><textarea data-bs="wallet_text" rows="2">'+esc((S.bset||{}).wallet_text||'')+'</textarea></details>'+
    '<button class="btn" style="width:100%;margin-top:10px" id="bs_save">'+t('Save sales settings')+'</button></div></div>'+
-  '<div data-btp="plans">'+botSmart()+botPlans()+'</div><div data-btp="disc"><div id="bt_disc"></div></div><div data-btp="chan"><div id="bt_chan"></div></div><div data-btp="appmsg"><div id="bt_am"></div></div>';
+  '<div data-btp="plans">'+botSmart()+botPlans()+'</div><div data-btp="apk"><div id="bt_apk"></div></div><div data-btp="disc"><div id="bt_disc"></div></div><div data-btp="chan"><div id="bt_chan"></div></div><div data-btp="appmsg"><div id="bt_am"></div></div>';
  var showTab=function(k){S.btab=k;$$('#bt_tabs [data-bt]').forEach(function(b){b.classList.toggle('on',b.dataset.bt==k)});$$('[data-btp]').forEach(function(d){d.style.display=d.dataset.btp==k?'':'none'});
-  if(k=='disc')botDisc();if(k=='chan')botChan();if(k=='appmsg')botAppMsg()};
+  if(k=='disc')botDisc();if(k=='chan')botChan();if(k=='appmsg')botAppMsg();if(k=='apk')botApk()};
  $('#bt_tabs').onclick=function(e){var b=e.target.closest('[data-bt]');if(b)showTab(b.dataset.bt)};showTab(S.btab);smartWire();
  var w=function(id,fn){var x=$(id);if(x)x.onclick=fn};
  w('#bt_new',function(){botModal(false)});w('#bt_new2',function(){botModal(false)});w('#bt_edit',function(){botModal(true)});

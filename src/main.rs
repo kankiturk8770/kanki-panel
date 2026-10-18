@@ -18,6 +18,8 @@ mod admin;
 mod api;
 #[path = "http/auth.rs"]
 mod auth;
+#[path = "http/apps.rs"]
+mod apps;
 #[path = "http/backup.rs"]
 mod backup;
 #[path = "http/subdomain.rs"]

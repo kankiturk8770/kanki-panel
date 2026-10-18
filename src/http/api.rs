@@ -200,6 +200,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::auth::router())
         .merge(crate::admin::router())
         .merge(crate::backup::router())
+        .merge(crate::apps::router())
         .merge(crate::subdomain::router())
         .merge(crate::subiran::router())
         .merge(crate::channel::router())
@@ -917,7 +918,7 @@ async fn force_sync(State(app): St, h: HeaderMap) -> Response {
 // ============================================================ subscription page (Kanki app)
 
 /// "<prefix>-<id>-<code>": new links use the kanki prefix, links made by older versions keep working
-fn parse_code(code: &str) -> Option<(i64, String)> {
+pub(crate) fn parse_code(code: &str) -> Option<(i64, String)> {
     let (prefix, rest) = code.split_once('-')?;
     if prefix.is_empty() || !prefix.chars().all(|c| c.is_ascii_alphabetic()) {
         return None;
@@ -983,6 +984,8 @@ fn sub_data(app: &App, u: &User) -> Value {
         "online": u.online, "max_conn": u.max_conn, "last_seen_ts": u.last_seen,
         "panel_name": app.db.get("panel_name"), "version": crate::VERSION, "nodes": nodes,
         "support": app.db.get("support"), "app_link": app.db.get("app_link"),
+        // the app's install files uploaded in the panel (download addresses for this subscriber)
+        "apps": crate::apps::sub_info(app, &u.sub_code()),
         "logo": app.db.get("logo"),
         // the subscription link's base when an Iran server serves it (empty = the page's own address)
         "sub_base": crate::subiran::origin(app).unwrap_or_default(),

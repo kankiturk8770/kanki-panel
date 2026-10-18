@@ -3,6 +3,12 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.6.7 — the app's install files in the panel
+- **Sales bot › App files:** upload the Kanki app (.apk) in the panel, one file per phone type (arm64, armv7, universal; read from the file name, or chosen). A new file of the same type replaces the old one. No GitHub token or download site is needed.
+- **Bot:** «📱 Download app» shows a button per phone type (with which phones it is for and its size) and sends the file itself, named like `KankiVPN-1.15.1-arm64.apk`. After the first send Telegram's file id is kept, so the next customers get it at once. The account message also has the download button.
+- **Subscription page:** a «Kanki VPN app» card with the version and a download button per phone type (the 64-bit one marked as recommended). Downloads go through `/sub/<code>/app/<type>`, so only subscribers get them, also through the Iran subscription server and the separate subscription domain.
+- Files over 50 MB cannot be sent by a Telegram bot: they are offered on the subscription page only.
+
 ## New in 3.6.6 — ports taken by another program
 - **Health** of an Xray or Kanki DNS server lists the ports that service needs but another program holds (for example Caddy or nginx left from an earlier setup on 80 / 443), with the service name and the sites it serves (from the Caddyfile / nginx sites).
 - **Free the ports** (in Health): the server stops and turns off that service, then Kanki DNS / Xray restart onto the ports. Offered only for a plain service that listens from outside on nothing but those ports (HTTP/3 on the same port counts as the same site); never for Kanki's own services, SSH, Docker or the panel's own server. The confirmation names the sites that go down and the command that brings it back.

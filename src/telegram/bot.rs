@@ -159,6 +159,11 @@ fn kind_title(k: &str) -> &'static str {
     match k { "video" => "ویدیو", "animation" => "گیف", "document" => "فایل", "photo" => "عکس", _ => "متن" }
 }
 
+/// "38.2 MB"
+fn mb(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+}
+
 fn ik(rows: Kb) -> Value {
     let r: Vec<Vec<Value>> = rows
         .into_iter()
@@ -381,6 +386,64 @@ impl Bot {
         }
     }
 
+    /// "Download the app": a button per phone type when the files are uploaded in the panel
+    /// (the bot sends the file itself), else the download link of the settings.
+    fn app_menu(&self, with_back: bool) -> (String, Kb) {
+        let files = crate::apps::list(&self.app);
+        let l = self.db().get("app_link");
+        let mut rows: Kb = vec![];
+        let text = if files.is_empty() {
+            format!("📱 <b>دانلود اپ</b>\n\n{}\n\n{}", if l.is_empty() { "لینک هنوز تنظیم نشده.".to_string() } else { esc(&l) }, self.tx("txt_app"))
+        } else {
+            let ver = files.iter().map(|f| f.version.clone()).find(|v| !v.is_empty()).map(|v| format!(" · نسخه‌ی {}", v)).unwrap_or_default();
+            let mut t = format!("📱 <b>دانلود اپ Kanki VPN</b>{}\n\nنسخه‌ی گوشی‌تون رو انتخاب کنید، فایل همین‌جا فرستاده می‌شه 👇\n", ver);
+            for f in &files {
+                let (title, hint) = crate::apps::title(&f.abi);
+                t.push_str(&format!("\n• <b>{}</b>: {}", title, hint));
+                rows.push(vec![b(&format!("⬇️ {} · {}", title, mb(f.size)), &format!("apk:{}", f.abi))]);
+            }
+            t.push_str(&format!("\n\n{}", self.tx("txt_app")));
+            t
+        };
+        if let Some(r) = self.guide_row() { rows.push(r); }
+        if with_back { rows.push(vec![b(&self.bt("back"), "home")]); }
+        (text, rows)
+    }
+
+    /// Sends one install file: by Telegram's id when it was sent before, else uploaded from the panel
+    /// (and its id kept, so the next customer gets it at once).
+    async fn send_apk(&self, chat: i64, abi: &str) {
+        let Some(f) = crate::apps::get_file(&self.app, abi) else {
+            self.send(chat, "⚠️ این فایل دیگه نیست؛ دوباره «📱 دانلود اپ» رو بزنید.", None).await;
+            return;
+        };
+        let (title, _) = crate::apps::title(abi);
+        let cap = format!("📱 <b>{}</b>\n{} · {}\n\n{}", esc(&f.label()), title, mb(f.size), esc(&self.tx("txt_app")));
+        if !f.tg.is_empty() && self.call("sendDocument", json!({"chat_id": chat, "document": f.tg, "caption": cap, "parse_mode": "HTML"})).await.is_some() {
+            return;
+        }
+        if f.size > crate::apps::TG_MAX {
+            let l = self.db().get("app_link");
+            self.send(chat, &format!("⚠️ حجم این فایل برای تلگرام زیاده؛ از صفحه‌ی لینک اشتراک دانلودش کنید.{}", if l.is_empty() { String::new() } else { format!("\n{}", esc(&l)) }), None).await;
+            return;
+        }
+        let Some(bytes) = crate::apps::read(&self.app, abi).await else { return };
+        let _ = self.call("sendChatAction", json!({"chat_id": chat, "action": "upload_document"})).await;
+        let part = reqwest::multipart::Part::bytes(bytes).file_name(f.file_name()).mime_str("application/vnd.android.package-archive").unwrap();
+        let form = reqwest::multipart::Form::new().text("chat_id", chat.to_string()).text("caption", cap).text("parse_mode", "HTML").part("document", part);
+        let r = self.http.post(format!("{}/bot{}/sendDocument", self.api, self.token)).multipart(form).timeout(std::time::Duration::from_secs(600)).send().await;
+        let v: Value = match r {
+            Ok(r) => r.json().await.unwrap_or(Value::Null),
+            Err(_) => Value::Null,
+        };
+        match v["result"]["document"]["file_id"].as_str() {
+            Some(id) => crate::apps::set_tg(&self.app, abi, id),
+            None => {
+                self.send(chat, "⚠️ ارسال فایل ناموفق بود؛ چند دقیقه‌ی دیگه دوباره امتحان کنید یا به پشتیبانی پیام بدید.", None).await;
+            }
+        }
+    }
+
     async fn send_doc(&self, chat: i64, bytes: Vec<u8>, name: &str, caption: &str) {
         let part = reqwest::multipart::Part::bytes(bytes).file_name(name.to_string());
         let form = reqwest::multipart::Form::new()
@@ -412,8 +475,15 @@ impl Bot {
         let left = if u.limit_gb > 0.0 { format!("{:.2} GB", (u.limit_gb - u.used_gb()).max(0.0)) } else { "نامحدود".into() };
         let st = if u.active() { "🟢 فعال" } else { "🔴 غیرفعال" };
         let link = self.db().get("app_link");
-        let step1 = if link.is_empty() { String::new() } else { format!("1️⃣ برنامه رو از لینک زیر نصب کنید:\n{}\n\n", esc(&link)) };
-        let step2 = if link.is_empty() { "با این کد وارد برنامه‌ی کانکی بشید:" } else { "2️⃣ با این کد وارد برنامه بشید:" };
+        let files = !crate::apps::list(&self.app).is_empty();
+        let step1 = if files {
+            "1️⃣ برنامه رو با دکمه‌ی «📱 دانلود اپ» زیر همین پیام بگیرید و نصب کنید.\n\n".to_string()
+        } else if link.is_empty() {
+            String::new()
+        } else {
+            format!("1️⃣ برنامه رو از لینک زیر نصب کنید:\n{}\n\n", esc(&link))
+        };
+        let step2 = if step1.is_empty() { "با این کد وارد برنامه‌ی کانکی بشید:" } else { "2️⃣ با این کد وارد برنامه بشید:" };
         format!(
             "👤 <b>{}</b>  ·  {}\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n📱 <b>بهترین راه (پیشنهاد ما): برنامه‌ی کانکی</b>\n{}{}\n<code>{}</code>\n\n🔗 لینک اشتراک (برای برنامه‌های دیگه):\n<code>{}/sub/{}</code>",
             esc(&u.username), st, left, u.used_gb(), left_text(u), u.online, u.max_conn, step1, step2, u.sub_code(), sub_origin(&self.app), u.sub_code()
@@ -444,6 +514,10 @@ impl Bot {
             }
         }
         rows.push(vec![b(&self.bt("rename"), &format!("ren:{}", u.id))]);
+        // the app's install files (sent as a new message, so this account message stays)
+        if !crate::apps::list(&self.app).is_empty() {
+            rows.push(vec![b(&self.bt("app"), "app2")]);
+        }
         rows.append(&mut extra);
         ik(rows)
     }
@@ -817,12 +891,13 @@ impl Bot {
                     self.db().get("ref_gb"), self.db().get("ref_days"), me, uid, cnt), Some(ik(vec![back("home")]))).await;
             }
             "app" => {
-                let l = self.db().get("app_link");
-                let mut rows: Kb = vec![];
-                if let Some(r) = self.guide_row() { rows.push(r); }
-                rows.push(back("home"));
-                return self.edit(chat, mid, &format!("📱 <b>دانلود اپ</b>\n\n{}\n\n{}",
-                    if l.is_empty() { "لینک هنوز تنظیم نشده.".to_string() } else { esc(&l) }, self.tx("txt_app")), Some(ik(rows))).await;
+                let (text, rows) = self.app_menu(true);
+                return self.edit(chat, mid, &text, Some(ik(rows))).await;
+            }
+            "app2" => {
+                let (text, rows) = self.app_menu(false);
+                self.send(chat, &text, Some(ik(rows))).await;
+                return;
             }
             "guide" => {
                 let g = self.guides();
@@ -852,6 +927,7 @@ impl Bot {
 
         let (head, rest) = d.split_once(':').unwrap_or((d.as_str(), ""));
         match head {
+            "apk" => return self.send_apk(chat, rest).await,
             "gd" => {
                 if let Some(g) = self.guide(rest.parse().unwrap_or(0)) {
                     self.send_guide(chat, &g).await;
@@ -2109,7 +2185,7 @@ mod flow_tests {
         let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
         db.set("trial_on", "1");
         let app = Arc::new(App {
-            db, env: HashMap::new(),
+            db, env: HashMap::from([("DATA_DIR".to_string(), dir.to_string_lossy().to_string())]),
             hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
             login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
             http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
@@ -2155,6 +2231,30 @@ mod flow_tests {
                 rusqlite::params![tg, plan, kind, target, status, now()]).unwrap();
             c.last_insert_rowid()
         })
+    }
+
+    #[tokio::test]
+    async fn sends_the_app_file() {
+        let (bot, log) = bot().await;
+        let u = from(500, "سارا", "");
+        // no file uploaded: the app link of the settings
+        bot.db().set("app_link", "https://example.com/app");
+        tap(&bot, u.clone(), "app").await;
+        assert!(last(&log, 500).contains("https://example.com/app"));
+        // a file uploaded in the panel (sent before, so Telegram knows it by id)
+        let dir = format!("{}/apps", bot.app.data_dir());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(format!("{}/arm64-v8a.apk", dir), b"apk").unwrap();
+        bot.db().set("app_files", r#"[{"abi":"arm64-v8a","version":"1.15.1","size":38200000,"tg":"FILE1"}]"#);
+        tap(&bot, u.clone(), "app").await;
+        let text = last(&log, 500);
+        assert!(text.contains("Kanki VPN") && text.contains("1.15.1"), "{}", text);
+        let kb = log.lock().unwrap().iter().rev().find(|(m, _)| m == "editMessageText").map(|(_, v)| v["reply_markup"].to_string()).unwrap();
+        assert!(kb.contains("apk:arm64-v8a") && kb.contains("38.2 MB"), "{}", kb);
+        tap(&bot, u.clone(), "apk:arm64-v8a").await;
+        let sent = log.lock().unwrap().iter().rev().find(|(m, _)| m == "sendDocument").map(|(_, v)| v.clone()).unwrap();
+        assert_eq!(sent["document"], "FILE1");
+        assert!(sent["caption"].as_str().unwrap().contains("Kanki VPN 1.15.1 · arm64"));
     }
 
     #[tokio::test]

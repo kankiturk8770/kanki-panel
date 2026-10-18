@@ -92,6 +92,20 @@ body.light .btn{box-shadow:0 3px 12px rgba(201,149,47,.4)}
 .uri{grid-column:1/-1;direction:ltr;display:block;word-break:break-all;background:rgba(0,0,0,.25);padding:8px;border-radius:10px;font-size:10px;max-height:64px;overflow:auto}
 body.light .uri{background:rgba(0,0,0,.06)}
 .empty{text-align:center;color:var(--s);padding:22px}
+/* the app's install files */
+.appc{margin-bottom:4px}
+.ah{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.ah b{display:block;font-size:15px}.ah small{display:block;color:var(--s);font-size:11.5px;margin-top:2px}
+.aico{width:40px;height:40px;flex:none;border-radius:13px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:20px;color:#1a1206;background:linear-gradient(var(--gl),var(--g),var(--gd));box-shadow:0 0 14px rgba(245,196,81,.45)}
+.aver{font-size:11px;font-weight:700;color:var(--g);border:1px solid var(--ln);border-radius:99px;padding:1px 8px;margin-inline-start:4px;direction:ltr;unicode-bidi:isolate}
+.arow{display:flex;align-items:center;gap:10px;border:1px solid var(--ln);border-radius:16px;padding:10px;margin-top:8px;background:var(--in)}
+.arow.rec{border-color:var(--g);box-shadow:inset 0 0 0 1px rgba(245,196,81,.25),0 0 14px rgba(245,196,81,.12)}
+.arow .ai{flex:1;min-width:0}
+.arow .ai b{display:flex;align-items:center;gap:6px;font-size:13.5px}
+.arow .ai small{display:block;color:var(--s);font-size:11px;margin-top:2px}
+.arow .ai i{font-style:normal;font-size:10.5px;color:var(--s);direction:ltr;unicode-bidi:isolate}
+.arow .tag{font-size:10px;font-weight:800;color:#1a1206;background:var(--g);border-radius:99px;padding:1px 7px}
+.arow .btn{flex:none;padding:9px 14px}
 /* help */
 .help{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
 .help b{display:block}.help small{color:var(--s)}
@@ -201,6 +215,11 @@ b .ltr,.ltr b,b.ltr,strong.ltr{font-weight:700}
     <small class="hint" data-i18n="raw_hint">Second link is for v2rayNG / Hiddify</small>
   </section>
 
+  <section class="card appc" id="apps" hidden>
+    <div class="ah"><div class="aico">K</div><div><b><span data-i18n="app_title">Kanki VPN app</span> <span id="a_ver" class="aver"></span></b><small data-i18n="app_sub">Pick the version for your phone, then sign in with your subscription code</small></div></div>
+    <div id="a_list"></div>
+  </section>
+
   <div class="sec"><span data-i18n="your_configs">Your configs</span></div>
   <div class="nodes" id="nodes">{{NODES}}</div>
 
@@ -218,8 +237,8 @@ b .ltr,.ltr b,b.ltr,strong.ltr{font-weight:700}
 (function(){
 "use strict";
 var D=JSON.parse(document.getElementById('data').textContent);
-var T={fa:{vpn_sub:'اشتراک VPN',ready:'اشتراک VPN شما آماده استفاده است',left_data:'حجم باقی‌مانده',used:'مصرف‌شده',conns:'اتصال همزمان',last_seen:'آخرین اتصال',exp_date:'تاریخ انقضا',left_time:'زمان باقی‌مانده',your_configs:'کانفیگ‌های شما',dl_conf:'دانلود کانفیگ',show_info:'نمایش اطلاعات',qr:'دانلود QR Code',get_uri:'دریافت URI',copy_uri:'کپی URI',main_server:'سرور اصلی',node:'نود',unlimited:'نامحدود',expired:'منقضی',never:'هنوز وصل نشده',days:'روز',hours:'ساعت',s_ago:'ثانیه پیش',m_ago:'دقیقه پیش',h_ago:'ساعت پیش',Active:'فعال',Disabled:'غیرفعال',Expired:'منقضی',Limited:'اتمام حجم',copied:'کپی شد',copy:'کپی',no_cfg:'هنوز کانفیگی برای شما فعال نشده',loading:'در حال دریافت…',sub_link:'لینک اشتراک',raw_hint:'لینک دوم برای v2rayNG و Hiddify است',help:'راهنما و پشتیبانی',help_sub:'اپ را نصب کن یا با پشتیبانی در تماس باش',get_app:'دانلود اپ',support:'پشتیبانی',of:'از',app_only:'فقط داخل اپ Kanki VPN · اپ رو باز کن و «بروزرسانی» رو بزن'},
-en:{vpn_sub:'VPN Subscription',ready:'Your VPN subscription is ready',left_data:'Data remaining',used:'Used',conns:'Connections',last_seen:'Last connection',exp_date:'Expiry',left_time:'Time remaining',your_configs:'Your configs',dl_conf:'Download config',show_info:'Show info',qr:'QR Code',get_uri:'Get URI',copy_uri:'Copy URI',main_server:'Main server',node:'Node',unlimited:'Unlimited',expired:'Expired',never:'Never',days:'days',hours:'hours',s_ago:'s ago',m_ago:'min ago',h_ago:'h ago',Active:'Active',Disabled:'Disabled',Expired:'Expired',Limited:'Out of data',copied:'Copied',copy:'Copy',no_cfg:'No configs are active for you yet',loading:'Loading…',sub_link:'Subscription link',raw_hint:'Second link is for v2rayNG / Hiddify',help:'Help',help_sub:'Install the app or contact support',get_app:'Get the app',support:'Support',of:'of',app_only:'Only in the Kanki VPN app · open the app and tap Refresh'}};
+var T={fa:{vpn_sub:'اشتراک VPN',ready:'اشتراک VPN شما آماده استفاده است',left_data:'حجم باقی‌مانده',used:'مصرف‌شده',conns:'اتصال همزمان',last_seen:'آخرین اتصال',exp_date:'تاریخ انقضا',left_time:'زمان باقی‌مانده',your_configs:'کانفیگ‌های شما',dl_conf:'دانلود کانفیگ',show_info:'نمایش اطلاعات',qr:'دانلود QR Code',get_uri:'دریافت URI',copy_uri:'کپی URI',main_server:'سرور اصلی',node:'نود',unlimited:'نامحدود',expired:'منقضی',never:'هنوز وصل نشده',days:'روز',hours:'ساعت',s_ago:'ثانیه پیش',m_ago:'دقیقه پیش',h_ago:'ساعت پیش',Active:'فعال',Disabled:'غیرفعال',Expired:'منقضی',Limited:'اتمام حجم',copied:'کپی شد',copy:'کپی',no_cfg:'هنوز کانفیگی برای شما فعال نشده',loading:'در حال دریافت…',sub_link:'لینک اشتراک',raw_hint:'لینک دوم برای v2rayNG و Hiddify است',help:'راهنما و پشتیبانی',help_sub:'اپ را نصب کن یا با پشتیبانی در تماس باش',get_app:'دانلود اپ',support:'پشتیبانی',of:'از',app_title:'اپ Kanki VPN',app_sub:'نسخه‌ی گوشی‌ات رو بگیر و با کد اشتراکت وارد شو',dl:'دانلود',rec:'پیشنهادی',a_arm64:'گوشی‌های جدید (۶۴ بیتی)',h_arm64:'بیشتر گوشی‌های امروزی؛ اگر مطمئن نیستی همین رو بگیر',a_armv7:'گوشی‌های قدیمی (۳۲ بیتی)',h_armv7:'اگه نسخه‌ی ۶۴ بیتی نصب نشد، این رو بگیر',a_universal:'همه‌ی گوشی‌ها',h_universal:'روی هر گوشی نصب می‌شه، فقط حجمش بیشتره',a_x86_64:'شبیه‌ساز اندروید (x86)',h_x86_64:'برای شبیه‌ساز اندروید روی کامپیوتر',app_only:'فقط داخل اپ Kanki VPN · اپ رو باز کن و «بروزرسانی» رو بزن'},
+en:{vpn_sub:'VPN Subscription',ready:'Your VPN subscription is ready',left_data:'Data remaining',used:'Used',conns:'Connections',last_seen:'Last connection',exp_date:'Expiry',left_time:'Time remaining',your_configs:'Your configs',dl_conf:'Download config',show_info:'Show info',qr:'QR Code',get_uri:'Get URI',copy_uri:'Copy URI',main_server:'Main server',node:'Node',unlimited:'Unlimited',expired:'Expired',never:'Never',days:'days',hours:'hours',s_ago:'s ago',m_ago:'min ago',h_ago:'h ago',Active:'Active',Disabled:'Disabled',Expired:'Expired',Limited:'Out of data',copied:'Copied',copy:'Copy',no_cfg:'No configs are active for you yet',loading:'Loading…',sub_link:'Subscription link',raw_hint:'Second link is for v2rayNG / Hiddify',help:'Help',help_sub:'Install the app or contact support',get_app:'Get the app',support:'Support',of:'of',app_title:'Kanki VPN app',app_sub:'Pick the version for your phone, then sign in with your subscription code',dl:'Download',rec:'Recommended',a_arm64:'New phones (64-bit)',h_arm64:'Most phones today; take this one if unsure',a_armv7:'Older phones (32-bit)',h_armv7:'If the 64-bit one does not install, take this one',a_universal:'Every phone',h_universal:'Installs on any phone, only bigger',a_x86_64:'Android emulator (x86)',h_x86_64:'For an Android emulator on a computer',app_only:'Only in the Kanki VPN app · open the app and tap Refresh'}};
 var L=localStorage.getItem('kk_lang')||'fa';
 function $(i){return document.getElementById(i)}
 function t(k){return (T[L]&&T[L][k])||k}
@@ -279,7 +298,15 @@ function render(){
  var nodes=$('nodes');nodes.querySelectorAll('.node').forEach(function(n){if(!n.querySelector('.row'))n.remove()});
  if(!nodes.querySelector('.node'))nodes.innerHTML='<div class="card empty">'+t('no_cfg')+'</div>';
  helpLinks();
+ appFiles();
 }
+// ---- the app's install files uploaded in the panel (one per phone type, the first fits most phones)
+function appFiles(){var a=D.apps||[];$('apps').hidden=!a.length;if(!a.length)return;
+ var v=a.map(function(x){return x.version}).filter(Boolean)[0];$('a_ver').textContent=v?'v'+v:'';$('a_ver').hidden=!v;
+ $('a_list').innerHTML=a.map(function(x,i){var s=x.short,rec=i==0&&a.length>1;
+  return '<div class="arow'+(rec?' rec':'')+'"><div class="ai"><b>'+esc(t('a_'+s))+(rec?'<span class="tag">'+esc(t('rec'))+'</span>':'')+'</b>'+
+   '<small>'+esc(t('h_'+s))+'</small><i>'+esc(x.name)+' · '+(x.size/1e6).toFixed(1)+' MB</i></div>'+
+   '<a class="btn" href="'+esc(x.url)+'" download="'+esc(x.name)+'">⬇ '+esc(t('dl'))+'</a></div>'}).join('')}
 // ---- app / support buttons (only http(s) links or a Telegram id are accepted)
 function safeUrl(v,tg){v=String(v||'').trim();if(/^https?:\/\//i.test(v))return v;
  if(tg){var id=v.replace(/^@/,'');if(/^[A-Za-z0-9_]{4,32}$/.test(id))return 'https://t.me/'+id}return ''}
