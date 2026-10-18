@@ -581,13 +581,15 @@ mod tests {
 
     #[test]
     fn finds_who_holds_a_port() {
-        // this test process listens on a port: found by /proc, and not offered for stopping
+        // this test process listens on a port: found by /proc with its program name (whether it may be
+        // stopped depends on where the tests run: a CI runner is itself a systemd service)
         let l = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
         let port = l.local_addr().unwrap().port();
         let v = taken(&[(port, false)], "");
         assert_eq!(v.len(), 1, "{:?}", v);
         assert_eq!((v[0].port, v[0].udp), (port, false));
-        assert!(!v[0].free);
+        let me = std::fs::read_to_string("/proc/self/comm").unwrap().trim().to_string();
+        assert_eq!(v[0].prog, me);
         // nothing on a port that no one holds; 127.0.0.1 only does not count
         let lo = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         assert!(taken(&[(lo.local_addr().unwrap().port(), false)], "").is_empty());
