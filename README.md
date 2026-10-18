@@ -3,6 +3,12 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.6.5 — Kanki DNS keeps the phone online when DNS abroad is blocked
+- A relay (inside Iran) now asks its exit, through the same hidden tunnel, for every name it does not route (before: it asked 1.1.1.1 / 8.8.8.8 directly from Iran, where answers can be blocked or altered).
+- When nothing abroad answers (the tunnel and the DNS servers abroad are both cut), the server asks the data center's own DNS (from resolv.conf), so Iranian sites keep working and a phone with Private DNS never loses all of its internet. A way that fails is skipped for 20 seconds, so queries do not wait on it.
+- Health (DNS server) shows where the other sites' answers came from: exit through the tunnel, DNS abroad, data center DNS.
+- Ports are unchanged: 53 (UDP/TCP), 853, 443 and 80 on each DNS server, plus the relay's tunnel port (8446 by default). Update the agents on both servers of a relay (the exit answers the relay's questions from this version on; an older exit is simply skipped).
+
 ## New in 3.6.4 — KANKI MIX only in the app
 - The subscription page no longer shows the KANKI MIX link, its copy button or QR code (it works only in the Kanki app, and the link is the user's own key): the row says "Only in the Kanki VPN app". The app still gets the link as before.
 

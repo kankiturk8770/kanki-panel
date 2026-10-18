@@ -119,7 +119,8 @@ pub async fn run() {
         let st = json!({
             "run": run_id, "ts": crate::util::now(), "users": users, "allowed": eng.allowed_count(),
             "conns": eng.conns.load(std::sync::atomic::Ordering::Relaxed), "errors": eng.errors.lock().unwrap().clone(),
-            "q": { "total": ld(&eng.q_total), "routed": ld(&eng.q_routed), "cache": ld(&eng.q_cache), "refused": ld(&eng.q_refused) },
+            "q": { "total": ld(&eng.q_total), "routed": ld(&eng.q_routed), "cache": ld(&eng.q_cache), "refused": ld(&eng.q_refused),
+                   "exit": ld(&eng.q_exit), "direct": ld(&eng.q_direct), "local": ld(&eng.q_local) },
             "top": eng.top(15), "ips": eng.ips_snapshot(), "version": crate::VERSION,
         });
         let tmp = format!("{}.new", STATS_FILE);

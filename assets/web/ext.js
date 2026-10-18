@@ -28,6 +28,8 @@ function srvHealth(kind,id){var d=srvData(kind),x=d&&(d.servers||[]).filter(func
   rows.push(['SSL',x.domain?(st.ssl||(st.certs||[]).length?'<span class="badge g">✓</span>':'<span class="badge y">'+t('waiting')+'</span>'):'—'])}
  else{var q=st.q||{};if(st.version)rows.push([t('Version'),'<span class="ltr">v'+esc(st.version)+'</span>']);
   rows.push([t('Queries'),N(q.total||0)]);rows.push([t('Connections'),N(st.conns||0)]);rows.push([t('Allowed addresses'),N(st.allowed||0)]);
+  // other sites: answered by the exit through the tunnel (relay), directly from abroad, or by the data center's DNS
+  if(q.exit||q.direct||q.local)rows.push([t('Other sites answered by'),[[q.exit,'Exit through the tunnel'],[q.direct,'DNS abroad'],[q.local,'Data center DNS']].filter(function(a){return a[0]}).map(function(a){return t(a[1])+' '+N(a[0])}).join(' · ')]);
   rows.push(['SSL',st.ssl?'<span class="badge g">✓</span>':st.ssl_error?'<span class="badge r">'+t('error')+'</span>':'<span class="badge y">'+t('waiting')+'</span>'])}
  modal(mhead(t('Health'),x.name||x.server)+'<div class="list">'+rows.map(function(r){return '<div class="li"><span>'+r[0]+'</span><span>'+r[1]+'</span></div>'}).join('')+'</div>'+
   (errs.length?'<div class="warnbox ltr" style="margin-top:10px">'+errs.map(esc).join('<br>')+'</div>':'')+
@@ -167,6 +169,7 @@ var KFA={
  "API token":"توکن API","E-mail for Let's Encrypt (optional)":"ایمیل برای Let's Encrypt (اختیاری)", "Filled in: check the Security tab":"پر شد: تب امنیت را چک کن","the port is required":"پورت لازم است","Clients online":"کلاینت آنلاین",
  // Kanki DNS
  "Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct":"DNS هوشمند اختصاصی مشتری‌ها: سرویس‌های تحریمی از سرورهای شما رد می‌شوند و بقیه مستقیم",
+ "Other sites answered by":"جواب سایت‌های دیگر از","Exit through the tunnel":"سرور خارج از تانل","DNS abroad":"DNS خارجی","Data center DNS":"DNS دیتاسنتر",
  "Add relay":"افزودن ریلی","Add DNS server":"افزودن سرور DNS","Status":"وضعیت","On":"روشن","Running servers":"سرورهای در حال اجرا","Users with DNS":"کاربران دارای DNS","Allowed addresses":"IPهای مجاز",
  "Queries":"درخواست‌ها","routed":"مسیردهی‌شده", "Query log":"لاگ درخواست‌ها","Every name your subscribers asked, and whether it went through your server (routed) or straight to the site (direct). Kept in the panel\'s memory; a restart clears it.":"همه‌ی دامنه‌هایی که مشتری‌ها پرسیده‌اند و اینکه از سرور شما رد شده (مسیردهی‌شده) یا مستقیم به سایت رفته (مستقیم). در حافظه‌ی پنل نگه داشته می‌شود و با ری‌استارت پاک می‌شود.",
  "Refresh":"بروزرسانی","Clear":"پاک کردن","All users":"همه‌ی کاربران","All queries":"همه‌ی درخواست‌ها","Routed only":"فقط مسیردهی‌شده","Direct only":"فقط مستقیم","Grouped by name":"گروه‌بندی بر اساس دامنه","Each query":"تک‌تک درخواست‌ها",

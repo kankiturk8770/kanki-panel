@@ -19,6 +19,8 @@ const IDLE: Duration = Duration::from_secs(600);
 const HELLO_WAIT: Duration = Duration::from_secs(10);
 const MAX_CONNS: usize = 8192;
 const CACHE_MAX: usize = 50_000;
+/// a way of answering that failed is not tried again for this long
+const WAY_PAUSE: Duration = Duration::from_secs(20);
 
 /// What the live configuration looks like once prepared for fast lookups.
 pub struct Live {
@@ -28,6 +30,9 @@ pub struct Live {
     by_id: HashMap<i64, DnsUser>,
     answer: Vec<Ipv4Addr>,
     upstreams: Vec<SocketAddr>,
+    /// the data center's own resolvers (from resolv.conf): the last way out, they keep Iranian names
+    /// working when nothing abroad answers
+    system: Vec<SocketAddr>,
 }
 
 impl Live {
@@ -35,7 +40,7 @@ impl Live {
         let routed = cfg.domains.iter().map(|d| d.trim().trim_matches('.').to_ascii_lowercase()).filter(|d| !d.is_empty()).collect();
         let by_token = cfg.users.iter().filter(|u| !u.token.is_empty()).map(|u| (u.token.to_ascii_lowercase(), u.clone())).collect();
         let by_id = cfg.users.iter().map(|u| (u.id, u.clone())).collect();
-        let answer = cfg.answer_ip.split(',').filter_map(|s| s.trim().parse().ok()).collect();
+        let answer: Vec<Ipv4Addr> = cfg.answer_ip.split(',').filter_map(|s| s.trim().parse().ok()).collect();
         let mut upstreams: Vec<SocketAddr> = cfg
             .upstreams
             .iter()
@@ -47,7 +52,8 @@ impl Live {
         if upstreams.is_empty() {
             upstreams = vec!["1.1.1.1:53".parse().unwrap(), "8.8.8.8:53".parse().unwrap()];
         }
-        Live { cfg, routed, by_token, by_id, answer, upstreams }
+        let system = system_resolvers(&upstreams, &answer);
+        Live { cfg, routed, by_token, by_id, answer, upstreams, system }
     }
 
     /// Is this name (or one of its parents) a routed service?
@@ -121,6 +127,14 @@ pub struct Engine {
     /// the latest queries of subscribers (for the panel's query log), oldest first
     qlog: Mutex<VecDeque<QLog>>,
     qseq: AtomicU64,
+    /// other names answered: through the tunnel by the exit (relay), by the upstream resolvers, by
+    /// the data center's resolvers
+    pub q_exit: AtomicU64,
+    pub q_direct: AtomicU64,
+    pub q_local: AtomicU64,
+    /// when the exit (through the tunnel) and the upstream resolvers last failed to answer: they are
+    /// skipped for a while, so a dead way does not make every query wait
+    down: Mutex<HashMap<&'static str, Instant>>,
 }
 
 /// One logged query: who asked which name, and the listed name that routed it ("" = answered as is)
@@ -154,6 +168,10 @@ impl Engine {
             top: Mutex::new(HashMap::new()),
             qlog: Mutex::new(VecDeque::new()),
             qseq: AtomicU64::new(0),
+            q_exit: AtomicU64::new(0),
+            q_direct: AtomicU64::new(0),
+            q_local: AtomicU64::new(0),
+            down: Mutex::new(HashMap::new()),
         })
     }
 
@@ -372,7 +390,7 @@ impl Engine {
                 r
             }
             None => {
-                let r = upstream(&live.upstreams, req).await?;
+                let r = self.resolve(req, live).await?;
                 let rc = wire::rcode(&r);
                 if rc == wire::NOERROR || rc == 3 {
                     if let Some(ttl) = wire::min_ttl(&r, 60) {
@@ -397,6 +415,46 @@ impl Engine {
             r[12..q.end].copy_from_slice(&req[12..q.end]);
         }
         Some(r)
+    }
+
+    /// The answer for a name we do not route.
+    /// 1) a relay (inside Iran) asks its exit through the tunnel: DNS from abroad, not blocked or
+    ///    altered on the way, and it keeps working when DNS servers abroad are blocked from Iran
+    /// 2) the upstream resolvers (1.1.1.1, 8.8.8.8, …) directly
+    /// 3) the data center's own resolvers: when nothing abroad answers (the international internet
+    ///    is cut), Iranian names still resolve, so a phone that uses us never loses all of its internet
+    async fn resolve(&self, req: &[u8], live: &Live) -> Option<Vec<u8>> {
+        if live.cfg.role == "relay" && !live.cfg.exit_addr.is_empty() && self.up("exit") {
+            match via_exit(&live.cfg.exit_addr, &live.cfg.relay_key, req).await {
+                Some(r) => {
+                    self.q_exit.fetch_add(1, Ordering::Relaxed);
+                    return Some(r);
+                }
+                None => self.mark_down("exit"),
+            }
+        }
+        if live.system.is_empty() || self.up("upstream") {
+            if let Some(r) = upstream(&live.upstreams, req).await {
+                self.q_direct.fetch_add(1, Ordering::Relaxed);
+                return Some(r);
+            }
+            if live.system.is_empty() {
+                return None;
+            }
+            self.mark_down("upstream");
+        }
+        let r = upstream(&live.system, req).await?;
+        self.q_local.fetch_add(1, Ordering::Relaxed);
+        Some(r)
+    }
+
+    /// Is this way worth trying (it has not failed in the last few seconds)?
+    fn up(&self, way: &'static str) -> bool {
+        self.down.lock().unwrap().get(way).map(|t| t.elapsed() >= WAY_PAUSE).unwrap_or(true)
+    }
+
+    fn mark_down(&self, way: &'static str) {
+        self.down.lock().unwrap().insert(way, Instant::now());
     }
 
     /// The IPv4 addresses of a routed name, from the upstream resolvers (never our own answer).
@@ -884,6 +942,10 @@ async fn intake(eng: &Arc<Engine>, mut s: TcpStream) {
         return;
     }
     drop(live);
+    if port == "53" {
+        relay_queries(eng, s).await;
+        return;
+    }
     let (pre, name, port) = match port {
         "443" => match read_hello(&mut s).await {
             Some((p, n)) => (p, n, 443),
@@ -899,6 +961,76 @@ async fn intake(eng: &Arc<Engine>, mut s: TcpStream) {
         return;
     }
     carry(eng, s, pre, &name, port, None).await;
+}
+
+/// The exit answering its relay's queries for names it does not route (DNS over TCP: a 2-byte
+/// length, then the message). Answered from the cache or the upstream resolvers, never with our own
+/// address.
+async fn relay_queries(eng: &Arc<Engine>, mut s: TcpStream) {
+    loop {
+        let Ok(Ok(len)) = tokio::time::timeout(Duration::from_secs(30), s.read_u16()).await else { return };
+        let mut req = vec![0u8; len as usize];
+        if tokio::time::timeout(HELLO_WAIT, s.read_exact(&mut req)).await.map(|r| r.is_err()).unwrap_or(true) {
+            return;
+        }
+        let Some(q) = wire::parse_query(&req) else { return };
+        let live = eng.live();
+        let r = eng.forward(&req, &q, &live).await.unwrap_or_else(|| wire::empty(&req, &q, wire::SERVFAIL));
+        let mut out = (r.len() as u16).to_be_bytes().to_vec();
+        out.extend_from_slice(&r);
+        if s.write_all(&out).await.is_err() {
+            return;
+        }
+    }
+}
+
+/// One query of a relay to its exit through the tunnel (None when the exit does not answer).
+async fn via_exit(addr: &str, key: &str, req: &[u8]) -> Option<Vec<u8>> {
+    let f = async {
+        let mut s = TcpStream::connect(addr).await.ok()?;
+        let mut m = format!("KDNS1 {} 53\n", key).into_bytes();
+        m.extend_from_slice(&(req.len() as u16).to_be_bytes());
+        m.extend_from_slice(req);
+        s.write_all(&m).await.ok()?;
+        let len = s.read_u16().await.ok()? as usize;
+        let mut r = vec![0u8; len];
+        s.read_exact(&mut r).await.ok()?;
+        (r.len() >= 12 && r[0..2] == req[0..2]).then_some(r)
+    };
+    tokio::time::timeout(Duration::from_millis(2500), f).await.ok().flatten()
+}
+
+/// The data center's resolvers from resolv.conf (systemd-resolved's real ones first), IPv4 only,
+/// without the upstream resolvers already used and without this server itself.
+fn system_resolvers(upstreams: &[SocketAddr], own: &[Ipv4Addr]) -> Vec<SocketAddr> {
+    let text = ["/run/systemd/resolve/resolv.conf", "/etc/resolv.conf"].iter().filter_map(|f| std::fs::read_to_string(f).ok()).collect::<Vec<_>>().join("\n");
+    parse_resolv(&text, upstreams, own)
+}
+
+fn parse_resolv(text: &str, upstreams: &[SocketAddr], own: &[Ipv4Addr]) -> Vec<SocketAddr> {
+    let mut v: Vec<SocketAddr> = vec![];
+    let mut stub = None;
+    for l in text.lines() {
+        let mut w = l.split_whitespace();
+        if w.next() != Some("nameserver") {
+            continue;
+        }
+        let Some(ip) = w.next().and_then(|x| x.parse::<Ipv4Addr>().ok()) else { continue };
+        // systemd-resolved's stub: only when it is the only one (it asks the real ones itself)
+        if ip == Ipv4Addr::new(127, 0, 0, 53) {
+            stub = Some(SocketAddr::new(IpAddr::V4(ip), 53));
+            continue;
+        }
+        let a = SocketAddr::new(IpAddr::V4(ip), 53);
+        if ip.is_loopback() || ip.is_unspecified() || own.contains(&ip) || upstreams.contains(&a) || v.contains(&a) {
+            continue;
+        }
+        v.push(a);
+    }
+    if v.is_empty() {
+        v.extend(stub);
+    }
+    v
 }
 
 /// Carry a client connection to `name:port` (through the exit when this server is a relay).
@@ -980,6 +1112,7 @@ async fn pump(a: TcpStream, b: TcpStream, stat: Option<Arc<UserStat>>) {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     fn cfg() -> DnsCfg {
@@ -1126,6 +1259,83 @@ mod tests {
             assert!(!public_v4(ip.parse().unwrap()), "{}", ip);
         }
         assert!(public_v4("8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn data_center_resolvers_from_resolv_conf() {
+        let up: Vec<SocketAddr> = vec!["1.1.1.1:53".parse().unwrap()];
+        let own = vec![Ipv4Addr::new(5, 6, 7, 8)];
+        let t = "# comment\nnameserver 127.0.0.53\nnameserver 185.51.200.2\nnameserver 1.1.1.1\nnameserver 5.6.7.8\nnameserver ::1\nnameserver 185.51.200.2\nsearch x";
+        assert_eq!(parse_resolv(t, &up, &own), vec!["185.51.200.2:53".parse::<SocketAddr>().unwrap()]);
+        // only systemd-resolved's stub: it is used
+        assert_eq!(parse_resolv("nameserver 127.0.0.53\n", &up, &own), vec!["127.0.0.53:53".parse::<SocketAddr>().unwrap()]);
+        assert!(parse_resolv("nameserver 127.0.0.1\n", &up, &own).is_empty());
+    }
+
+
+    /// A fake resolver that answers every A query with `ip`.
+    async fn fake_resolver(ip: Ipv4Addr) -> SocketAddr {
+        let up = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let addr = up.local_addr().unwrap();
+        tokio::spawn(async move {
+            let mut b = [0u8; 1500];
+            loop {
+                let Ok((n, from)) = up.recv_from(&mut b).await else { continue };
+                let q = wire::parse_query(&b[..n]).unwrap();
+                let _ = up.send_to(&wire::answer_a(&b[..n], &q, &[ip], 120), from).await;
+            }
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn relay_asks_its_exit_then_the_data_center() {
+        // the exit: its own upstream answers 192.0.2.1, its relay intake listens on a local port
+        let mut xc = cfg();
+        xc.upstreams = vec![fake_resolver(Ipv4Addr::new(192, 0, 2, 1)).await.to_string()];
+        xc.relay_key = "k3y".into();
+        let exit = Engine::new(xc);
+        let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let intake_addr = l.local_addr().unwrap();
+        tokio::spawn(accept_loop(exit.clone(), l, Kind::Intake));
+        // the relay: its direct upstream would answer 192.0.2.2, but the exit comes first
+        let mut rc = cfg();
+        rc.role = "relay".into();
+        rc.upstreams = vec![fake_resolver(Ipv4Addr::new(192, 0, 2, 2)).await.to_string()];
+        rc.exit_addr = intake_addr.to_string();
+        rc.relay_key = "k3y".into();
+        let relay = Engine::new(rc.clone());
+        let r = relay.answer(&wire::build_query(0x1111, "www.other.com", wire::A), Some(1)).await.unwrap();
+        assert_eq!(&r[0..2], &[0x11, 0x11]);
+        assert_eq!(wire::a_records(&r), vec![Ipv4Addr::new(192, 0, 2, 1)]);
+        assert_eq!(relay.q_exit.load(Ordering::Relaxed), 1);
+        // a routed name is still answered with the relay's own address
+        let r = relay.answer(&wire::build_query(1, "dl.playstation.net", wire::A), Some(1)).await.unwrap();
+        assert_eq!(wire::a_records(&r), vec![Ipv4Addr::new(203, 0, 113, 7)]);
+        // a wrong key gets nothing from the exit, so the relay falls back to its upstream
+        let mut bad = rc.clone();
+        bad.relay_key = "wrong".into();
+        let relay2 = Engine::new(bad);
+        let r = relay2.answer(&wire::build_query(2, "www.other.com", wire::A), Some(1)).await.unwrap();
+        assert_eq!(wire::a_records(&r), vec![Ipv4Addr::new(192, 0, 2, 2)]);
+
+        // nothing abroad answers (no exit, upstream dead): the data center's resolver does
+        let dead = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap();
+        let mut cut = rc.clone();
+        cut.exit_addr = dead.to_string();
+        cut.upstreams = vec!["127.0.0.1:9".into()];
+        let relay3 = Engine::new(cut.clone());
+        let mut live = Live::new(cut);
+        live.system = vec![fake_resolver(Ipv4Addr::new(192, 0, 2, 3)).await];
+        *relay3.live.write().unwrap() = Arc::new(live);
+        let r = relay3.answer(&wire::build_query(3, "www.irani.ir", wire::A), Some(1)).await.unwrap();
+        assert_eq!(wire::a_records(&r), vec![Ipv4Addr::new(192, 0, 2, 3)]);
+        // the dead ways are skipped for a while: the next name does not wait for them
+        let t = Instant::now();
+        let r = relay3.answer(&wire::build_query(4, "www.digikala.com", wire::A), Some(1)).await.unwrap();
+        assert_eq!(wire::a_records(&r), vec![Ipv4Addr::new(192, 0, 2, 3)]);
+        assert!(t.elapsed() < Duration::from_millis(800), "{:?}", t.elapsed());
+        assert_eq!(relay3.q_local.load(Ordering::Relaxed), 2);
     }
 
     #[tokio::test]
