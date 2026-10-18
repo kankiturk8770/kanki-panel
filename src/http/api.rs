@@ -137,6 +137,8 @@ pub fn user_json(app: &App, u: &User) -> Value {
         "max_connections": u.max_conn, "online_connections": u.online, "enabled": u.enabled,
         "status": u.status(), "protocols": u.protocols, "nodes": u.nodes, "notes": u.notes,
         "tg_id": u.tg_id, "created_at": iso(u.created_at), "last_seen_at": iso(u.last_seen), "last_seen_ts": u.last_seen,
+        // connected right now: [{ "p": protocol, "s": server }]
+        "live": crate::live::of(app, u.id),
     })
 }
 
@@ -176,6 +178,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/nodes", get(nodes_list).post(nodes_add))
         .route("/api/nodes/:id", axum::routing::put(nodes_edit).delete(nodes_delete))
         .route("/api/nodes/:id/:action", post(nodes_action))
+        .route("/api/protocols/:proto/:action", post(proto_all))
         .route("/api/node-ports/:id", post(node_ports))
         .route("/api/node-join", post(node_join_token))
         .route("/join/register", post(node_join_register))
@@ -237,7 +240,8 @@ async fn overview(State(app): St, h: HeaderMap) -> Response {
     for p in ["wg", "awg", "hy2", "kmix", "xray", "dns"] {
         protos.insert(p, us.iter().filter(|u| u.has_proto(p)).count());
     }
-    let online = us.iter().filter(|u| u.online > 0).count();
+    // online: a VPN session, or Xray / Kanki DNS use right now
+    let online = us.iter().filter(|u| u.online > 0 || crate::live::of(&app, u.id).as_array().is_some_and(|a| !a.is_empty())).count();
     Json(json!({
         "users": us.len(), "active": us.iter().filter(|u| u.active()).count(),
         "online": online, "offline": us.len() - online,
@@ -493,6 +497,7 @@ async fn nodes_delete(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
     }
     let _ = app.db.exec("DELETE FROM nodes WHERE id=?1", &[&id]);
     let _ = app.db.exec("DELETE FROM peers WHERE node_id=?1", &[&id]);
+    crate::live::forget(&id);
     Json(json!({ "ok": true })).into_response()
 }
 
@@ -565,6 +570,64 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
         _ => return err(StatusCode::BAD_REQUEST, "unknown action"),
     }
     Json(json!({"ok": true})).into_response()
+}
+
+/// Ticks (or unticks) a protocol that is not tied to a VPN node (Xray, Kanki DNS) for every user.
+/// Their servers take the new user list on their next report, within a few seconds.
+async fn proto_all(State(app): St, h: HeaderMap, Path((proto, action)): Path<(String, String)>) -> Response {
+    let _ = guard!(app, h, "users:write");
+    if !matches!(proto.as_str(), "xray" | "dns") {
+        return err(StatusCode::BAD_REQUEST, "only xray and dns can be set for all users here");
+    }
+    let add = match action.as_str() {
+        "assign-all" => true,
+        "unassign-all" => false,
+        _ => return err(StatusCode::BAD_REQUEST, "unknown action"),
+    };
+    let mut changed = 0;
+    for u in app.db.users() {
+        let Some(list) = toggle_proto(&u.protocols, &proto, add) else { continue };
+        let _ = app.db.exec("UPDATE users SET protocols=?1 WHERE id=?2", &[&list, &u.id]);
+        changed += 1;
+    }
+    spawn_sync(&app);
+    Json(json!({ "ok": true, "changed": changed })).into_response()
+}
+
+/// The protocol list with `p` added or removed; None when it is already that way.
+fn toggle_proto(list: &str, p: &str, add: bool) -> Option<String> {
+    let mut v: Vec<&str> = list.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()).collect();
+    let has = v.contains(&p);
+    if add == has {
+        return None;
+    }
+    if add {
+        v.push(p);
+    } else {
+        v.retain(|x| *x != p);
+    }
+    Some(v.join(","))
+}
+
+#[cfg(test)]
+mod proto_all_tests {
+    use super::toggle_proto;
+
+    #[test]
+    fn adds_and_removes_one_protocol() {
+        assert_eq!(toggle_proto("wg,awg", "xray", true).as_deref(), Some("wg,awg,xray"));
+        assert_eq!(toggle_proto("wg,xray,awg", "xray", false).as_deref(), Some("wg,awg"));
+        assert_eq!(toggle_proto("", "dns", true).as_deref(), Some("dns"));
+        assert_eq!(toggle_proto("dns", "dns", false).as_deref(), Some(""));
+    }
+
+    #[test]
+    fn leaves_users_that_already_match() {
+        assert_eq!(toggle_proto("wg,xray", "xray", true), None);
+        assert_eq!(toggle_proto("wg", "dns", false), None);
+        // a name that only contains the protocol is a different protocol
+        assert_eq!(toggle_proto("xray2", "xray", false), None);
+    }
 }
 
 // ============================================================ node join (one-time token)

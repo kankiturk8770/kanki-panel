@@ -20,6 +20,8 @@ const RUNNING_VER: &str = "/var/lib/kanki/dns/running.ver";
 const SSL_ERR_FILE: &str = "/var/lib/kanki/dns/ssl.err";
 /// the latest queries of subscribers, written by the service for the agent to report
 const QLOG_FILE: &str = "/var/lib/kanki/dns/qlog.json";
+/// "Repair" from the panel: restart the DNS service on the next deploy even when nothing changed
+const FORCE_FILE: &str = "/var/lib/kanki/dns/force";
 /// queries sent to the panel in one report (the newest when more are waiting)
 const QLOG_PER_REPORT: usize = 2000;
 
@@ -185,6 +187,12 @@ pub fn applied_ver() -> String {
 }
 
 /// Write the config and keep the service in step with it (None = remove the service). Blocking.
+/// The panel asked for a repair: the next deploy writes the service again and restarts it.
+pub fn repair_prep() {
+    let _ = std::fs::create_dir_all(DATA_DIR);
+    let _ = std::fs::write(FORCE_FILE, "1");
+}
+
 pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
     let Some((c, ver)) = cfg else {
         if std::path::Path::new(UNIT).exists() {
@@ -215,8 +223,9 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
         "# written by kanki-panel\n[Unit]\nDescription=Kanki DNS\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nExecStart={} dns\nRestart=always\nRestartSec=3\nLimitNOFILE=1048576\n\n[Install]\nWantedBy=multi-user.target\n",
         exe
     );
+    let forced = std::path::Path::new(FORCE_FILE).exists();
     let unit_changed = std::fs::read_to_string(UNIT).map(|t| t != unit).unwrap_or(true);
-    if unit_changed {
+    if unit_changed || forced {
         std::fs::write(UNIT, &unit).map_err(|e| format!("cannot write {}: {}", UNIT, e))?;
         let _ = sh("systemctl daemon-reload");
         let _ = sh("systemctl enable -q kanki-dns.service");
@@ -232,12 +241,13 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
     let restart_key = key_of(c);
     let old_key = std::fs::read_to_string(RESTART_FILE).unwrap_or_default();
     let active = sh("systemctl is-active --quiet kanki-dns.service").0;
-    if unit_changed || old_key.trim() != restart_key || !active {
+    if unit_changed || forced || old_key.trim() != restart_key || !active {
         let (ok, out) = sh("systemctl restart kanki-dns.service 2>&1");
         if !ok {
             return Err(format!("systemctl restart kanki-dns: {}", out.lines().last().unwrap_or("")));
         }
         let _ = std::fs::write(RESTART_FILE, &restart_key);
+        let _ = std::fs::remove_file(FORCE_FILE);
         eprintln!("dns: started ({})", c.role);
     }
     if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {

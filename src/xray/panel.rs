@@ -916,6 +916,19 @@ fn last_status() -> &'static Mutex<HashMap<String, (i64, Value)>> {
     S.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// (user id, server) of the users whose Xray traffic moved in the last report of each server,
+/// for reports younger than `fresh` seconds
+pub fn online_now(fresh: i64) -> Vec<(i64, String)> {
+    let t = now();
+    last_status()
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(_, (at, _))| t - *at <= fresh)
+        .flat_map(|(sid, (_, v))| v["online"].as_array().cloned().unwrap_or_default().into_iter().filter_map(|x| x.as_i64()).map(move |u| (u, sid.clone())).collect::<Vec<_>>())
+        .collect()
+}
+
 pub fn ingest(app: &App, sid: &str, st: &Value) {
     if st.is_null() {
         last_status().lock().unwrap().remove(sid);
@@ -941,10 +954,14 @@ pub async fn local_loop(app: Arc<App>) {
         if cfg.is_none() && !std::path::Path::new(super::UNIT).exists() {
             continue;
         }
+        let force = take_repair("local") && cfg.is_some();
         let r = tokio::task::spawn_blocking(move || {
             let applied = super::applied_ver();
+            if force {
+                super::repair_prep();
+            }
             let res = match &cfg {
-                Some((c, v)) if *v != applied || !super::running() => super::deploy(Some((c, v)), None),
+                Some((c, v)) if force || *v != applied || !super::running() => super::deploy(Some((c, v)), None),
                 Some(_) => Ok(()),
                 None => super::deploy(None, None),
             };
@@ -970,6 +987,37 @@ pub async fn local_loop(app: Arc<App>) {
     }
 }
 
+// ------------------------------------------------------------------ repair (asked in the panel)
+
+fn repairs() -> &'static Mutex<std::collections::HashSet<String>> {
+    static S: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
+
+/// Was a repair asked for this server? (asked once: reading it clears it)
+pub fn take_repair(sid: &str) -> bool {
+    repairs().lock().unwrap().remove(sid)
+}
+
+/// Seconds since the server last reported (None = never since the panel started)
+fn report_age(sid: &str) -> Option<i64> {
+    last_status().lock().unwrap().get(sid).map(|(at, _)| now() - *at)
+}
+
+async fn repair_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let s = settings(&app);
+    if !s.servers.iter().any(|x| x.server == id) {
+        return err(StatusCode::NOT_FOUND, "this server is not an Xray server");
+    }
+    if cfg_for(&app, &id).is_none() {
+        return err(StatusCode::BAD_REQUEST, "nothing runs on this server: Xray is off, or the server has no inbound that is on");
+    }
+    repairs().lock().unwrap().insert(id.clone());
+    let age = report_age(&id);
+    Json(json!({ "ok": true, "waiting": age.map(|a| a > 60).unwrap_or(true), "age": age })).into_response()
+}
+
 // ------------------------------------------------------------------ admin API
 
 pub fn router() -> Router<Arc<App>> {
@@ -977,6 +1025,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/xray", get(get_all).put(put_settings))
         .route("/api/xray/servers", post(put_server))
         .route("/api/xray/servers/:id", delete(del_server))
+        .route("/api/xray/servers/:id/repair", post(repair_server))
         .route("/api/xray/inbounds", post(put_inbound))
         .route("/api/xray/inbounds/:id", delete(del_inbound))
         .route("/api/xray/inbounds/:id/reset", post(reset_inbound))

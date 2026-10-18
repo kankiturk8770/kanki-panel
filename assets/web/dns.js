@@ -68,7 +68,9 @@ function dnsServers(d){if(!d.servers.length)return '<div class="card" style="tex
    (q.refused?'<p class="muted" style="margin:0">'+t('Refused (not a subscriber)')+': '+N(q.refused)+' · '+t('Connections')+': '+N(st.conns||0)+'</p>':'')+
    (errs.length?'<div class="warnbox ltr" style="margin:0">'+errs.map(esc).join('<br>')+'</div>':'')+
    '<div class="row" style="gap:6px">'+dnsCertChip(x)+'</div>'+(st.ssl_error&&!st.ssl?'<div class="warnbox ltr" style="margin:0">'+esc(st.ssl_error)+'</div>':'')+
-   '<div class="g2"><button class="b2" onclick="dnsEdit(\''+x.server+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2 bd" onclick="dnsDel(\''+x.server+'\')">'+ic('trash',15)+' '+t('Remove from DNS')+'</button></div></div>'}).join('')+'</div>'}
+   '<div class="g2"><button class="b2" onclick="srvRepair(\'dns\',\''+x.server+'\')">↻ '+t('Repair')+'</button><button class="b2" onclick="srvHealth(\'dns\',\''+x.server+'\')">♡ '+t('Health')+'</button>'+
+   '<button class="b2 okb" onclick="protoAll(\'dns\',1)">'+ic('plus',15)+' '+t('Add to all users')+'</button><button class="b2 bd" onclick="protoAll(\'dns\',0)">'+ic('trash',15)+' '+t('Remove from all users')+'</button>'+
+   '<button class="b2" onclick="dnsEdit(\''+x.server+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2 bd" onclick="dnsDel(\''+x.server+'\')">'+ic('trash',15)+' '+t('Remove from DNS')+'</button></div></div>'}).join('')+'</div>'}
 
 // ---- services tab
 function dnsGroupOn(d,id,g){if(g.locked)return false;if(g.opt_in)return d.opt.indexOf(id)>=0;return d.off.indexOf(id)<0}

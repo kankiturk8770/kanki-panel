@@ -2106,16 +2106,19 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     };
     // Kanki DNS: usage since the last report, and the config when it changed
     crate::dns::panel::ingest(&app, &id, &b["dns"]);
+    // a repair asked in the panel: the config goes again with "force", so the server restarts it
+    let dns_force = crate::dns::panel::take_repair(&id);
     let dns = match crate::dns::panel::cfg_for(&app, &id) {
-        Some((_, v)) if b["dns_ver"].as_str() == Some(v.as_str()) && b["dns"]["active"].as_bool() == Some(true) => json!({ "mode": "keep" }),
-        Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c }),
+        Some((_, v)) if !dns_force && b["dns_ver"].as_str() == Some(v.as_str()) && b["dns"]["active"].as_bool() == Some(true) => json!({ "mode": "keep" }),
+        Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c, "force": dns_force }),
         None => json!({ "mode": "off" }),
     };
     crate::subiran::ingest(&app, &id, &b["subsrv"]);
     crate::xray::panel::ingest(&app, &id, &b["xray"]);
+    let xray_force = crate::xray::panel::take_repair(&id);
     let xray = match crate::xray::panel::cfg_for(&app, &id) {
-        Some((_, v)) if b["xray_ver"].as_str() == Some(v.as_str()) && b["xray"]["active"].as_bool() == Some(true) => json!({ "mode": "keep" }),
-        Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c }),
+        Some((_, v)) if !xray_force && b["xray_ver"].as_str() == Some(v.as_str()) && b["xray"]["active"].as_bool() == Some(true) => json!({ "mode": "keep" }),
+        Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c, "force": xray_force }),
         None => json!({ "mode": "off" }),
     };
     let subsrv = crate::subiran::cfg_for(&app, &id);

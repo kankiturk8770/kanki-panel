@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.6.2 — repair for Xray and DNS servers, who is connected with what
+- **Xray and Kanki DNS server cards** (Servers) get the buttons VPN servers have: **Repair** (the server writes its service again and restarts it on its next report, within seconds; an Xray binary that is missing or broken is installed again), **Health** (running or not, last report, errors, SSL, online users / queries) and **Add to all users / Remove from all users** (ticks or unticks Xray or Kanki DNS for every user).
+- **Connected now:** every user shows how they are connected right now and where: WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from the VPN servers, Xray from the Xray servers, Kanki DNS from the DNS queries. Users page: a "Connected now" bar with a count per protocol (tap one to list those users), small protocol tags on each user, and the full list (protocol · server) in the user sheet. "Online" now also counts Xray and DNS use.
+- Repair needs the agent of 3.6.2 on the server for the forced restart (older agents only restart a stopped service): update the tunnel servers after the panel.
+
 ## New in 3.6 — KANKI MIX
 - **Our own protocol** on every VPN server, next to WireGuard / AmneziaWG / Hysteria2: game packets on a raw datagram path (no queue, sent twice in gaming mode), websites over KCP + FEC, a ChaCha20 mask with no fixed bytes. Menu: VPN services › KANKI MIX.
 - The server is built into the panel: agents install and run it themselves (UDP 4000 by default, per-server ports). Every user has their own key; traffic and devices count like the other protocols. The Kanki app gets the `kanki://` link from the subscription.

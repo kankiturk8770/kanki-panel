@@ -8,6 +8,8 @@ mod util;
 mod certbot;
 #[path = "core/pin.rs"]
 mod pin;
+#[path = "core/live.rs"]
+mod live;
 
 // http: web panel, REST API, security, backups
 #[path = "http/admin.rs"]

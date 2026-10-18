@@ -245,7 +245,15 @@ pub async fn run(version: &str) {
                     match v["dns"]["mode"].as_str() {
                         Some("set") => {
                             if let (Ok(c), Some(ver)) = (serde_json::from_value::<crate::dns::DnsCfg>(v["dns"]["cfg"].clone()), v["dns"]["ver"].as_str().map(|s| s.to_string())) {
-                                let r = tokio::task::spawn_blocking(move || crate::dns::deploy(Some((&c, &ver)))).await.unwrap_or(Err("deploy crashed".into()));
+                                let force = v["dns"]["force"].as_bool() == Some(true);
+                                let r = tokio::task::spawn_blocking(move || {
+                                    if force {
+                                        crate::dns::repair_prep();
+                                    }
+                                    crate::dns::deploy(Some((&c, &ver)))
+                                })
+                                .await
+                                .unwrap_or(Err("deploy crashed".into()));
                                 *dns_err.lock().unwrap() = r.err();
                             }
                         }
@@ -260,7 +268,15 @@ pub async fn run(version: &str) {
                         Some("set") => {
                             if let (Ok(c), Some(ver)) = (serde_json::from_value::<crate::xray::XrayCfg>(v["xray"]["cfg"].clone()), v["xray"]["ver"].as_str().map(|s| s.to_string())) {
                                 let (p, i, t) = (panel.clone(), id.clone(), token.clone());
-                                let r = tokio::task::spawn_blocking(move || crate::xray::deploy(Some((&c, &ver)), Some((&p, &i, &t)))).await.unwrap_or(Err("deploy crashed".into()));
+                                let force = v["xray"]["force"].as_bool() == Some(true);
+                                let r = tokio::task::spawn_blocking(move || {
+                                    if force {
+                                        crate::xray::repair_prep();
+                                    }
+                                    crate::xray::deploy(Some((&c, &ver)), Some((&p, &i, &t)))
+                                })
+                                .await
+                                .unwrap_or(Err("deploy crashed".into()));
                                 *xray_err.lock().unwrap() = r.err();
                             }
                         }

@@ -328,6 +328,23 @@ struct QStore {
     items: std::collections::VecDeque<QEntry>,
 }
 
+/// (user id, server) of the users who asked a Kanki DNS server something in the last `secs` seconds
+pub fn active_users(secs: i64) -> Vec<(i64, String)> {
+    let from = now() - secs;
+    let mut v: Vec<(i64, String)> = vec![];
+    // newest first; reports of different servers interleave, so look at a window instead of
+    // stopping at the first old entry
+    for e in qstore().lock().unwrap().items.iter().rev().take(20_000) {
+        if e.ts < from {
+            continue;
+        }
+        if e.uid > 0 && !v.iter().any(|(u, s)| *u == e.uid && *s == e.sid) {
+            v.push((e.uid, e.sid.clone()));
+        }
+    }
+    v
+}
+
 fn qstore() -> &'static Mutex<QStore> {
     static S: OnceLock<Mutex<QStore>> = OnceLock::new();
     S.get_or_init(|| Mutex::new(QStore::default()))
@@ -540,11 +557,43 @@ pub fn sub_info(app: &App, u: &User) -> Value {
 
 // ------------------------------------------------------------------ admin API
 
+// ------------------------------------------------------------------ repair (asked in the panel)
+
+fn repairs() -> &'static Mutex<std::collections::HashSet<String>> {
+    static S: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
+
+/// Was a repair asked for this server? (asked once: reading it clears it)
+pub fn take_repair(sid: &str) -> bool {
+    repairs().lock().unwrap().remove(sid)
+}
+
+/// Seconds since the server last reported (None = never since the panel started)
+fn report_age(sid: &str) -> Option<i64> {
+    last_status().lock().unwrap().get(sid).map(|(at, _)| now() - *at)
+}
+
+async fn repair_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let s = settings(&app);
+    if !s.servers.iter().any(|x| x.server == id) {
+        return err(StatusCode::NOT_FOUND, "this server is not an DNS server");
+    }
+    if cfg_for(&app, &id).is_none() {
+        return err(StatusCode::BAD_REQUEST, "nothing runs on this server: Kanki DNS is off, or this relay has no exit server");
+    }
+    repairs().lock().unwrap().insert(id.clone());
+    let age = report_age(&id);
+    Json(json!({ "ok": true, "waiting": age.map(|a| a > 60).unwrap_or(true), "age": age })).into_response()
+}
+
 pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/dns", get(get_all).put(put_settings))
         .route("/api/dns/servers", post(put_server))
         .route("/api/dns/servers/:id", delete(del_server))
+        .route("/api/dns/servers/:id/repair", post(repair_server))
         .route("/api/dns/users", get(get_users))
         .route("/api/dns/users/:id/kick", post(kick_user))
         .route("/api/dns/log", get(get_log).delete(clear_log))

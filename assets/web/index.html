@@ -320,6 +320,14 @@ nav.side a.on .ni{background:linear-gradient(145deg,var(--al),var(--a),var(--ad)
 .okb{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
 /* users: small name boxes, details open on tap */
 .uchips{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.lvs{display:flex;gap:3px;flex:none}
+.lvs i{font-style:normal;font-size:9.5px;font-weight:800;line-height:1;padding:3px 5px;border-radius:6px;color:#fff;background:var(--pc,#888);direction:ltr}
+.lvbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-4px 0 12px}
+.lvbar .sc{cursor:pointer}
+.lvbar .sc i{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--pc,#888)}
+.lvlist{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
+.lvlist span{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:5px 10px;border-radius:99px;border:1px solid color-mix(in srgb,var(--pc,#888) 55%,transparent);background:color-mix(in srgb,var(--pc,#888) 14%,transparent)}
+.lvlist span b{color:var(--pc,#888);direction:ltr}
 @media(max-width:430px){.uchips{grid-template-columns:repeat(2,1fr)}}
 .uchip{display:flex;align-items:center;gap:8px;min-width:0;padding:11px 12px;border-radius:14px;border:1px solid var(--ln);background:linear-gradient(165deg,var(--c1),var(--c2));color:var(--t);font:inherit;font-weight:700;font-size:13px;cursor:pointer;text-align:start;transition:border-color .15s}
 .uchip:hover{border-color:var(--a)}
@@ -1172,7 +1180,7 @@ function pUsers(){var pg=$('#pg');
   po=[['all','All protocols']].concat(PROTOS);
  var opt=function(a,cur,tr){return a.map(function(x){return '<option value="'+x[0]+'"'+(x[0]==cur?' selected':'')+'>'+(tr===false?esc(x[1]):t(x[1]))+'</option>'}).join('')};
  pg.innerHTML='<div class="ph"><div><h2>'+t('Users')+'</h2><p id="ucount"></p></div><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ib" id="selm" title="'+t('Select')+'" aria-label="'+t('Select')+'">'+ic('sel',18)+'</button><button class="ib" id="rf" title="'+t('Refresh')+'">'+ic('refresh',17)+'</button><button class="btn" onclick="newUser()">+ '+t('New user')+'</button></div></div>'+
- '<div class="card strip" id="ust"></div>'+
+ '<div class="card strip" id="ust"></div><div class="lvbar" id="ulv"></div>'+
  '<div class="utools"><div class="srch"><input id="q" type="search" autocomplete="off" placeholder="'+t('Search by name or note…')+'" value="'+esc(S.q)+'"><button id="qx" class="'+(S.q?'':'hide')+'" aria-label="clear">✕</button></div>'+
   '<select id="flt" aria-label="'+t('Status')+'">'+opt(fo,S.filter)+'</select><select id="pf" aria-label="'+t('Protocol')+'">'+opt(po,S.pf,false).replace('>All protocols<','>'+t('All protocols')+'<')+'</select><select id="srt" aria-label="'+t('Sort')+'">'+opt(so,S.sort)+'</select></div>'+
  '<div class="selbar hide" id="selbar"><label><span class="ck"><input type="checkbox" id="sall"><i></i></span><span>'+t('Select all')+' (<span id="sallc">0</span>)</span></label></div>'+
@@ -1200,12 +1208,24 @@ function drawStats(){var o=S.ov;if(!o||!$('#ust'))return;
  var c=[['g',o.online,'Online','online'],['',o.offline,'Offline','offline'],['g',o.active,'Active','active'],['y',o.expired,'Finished','finished'],['r',o.disabled,'Disabled','disabled']];
  $('#ust').innerHTML='<button class="sc tot'+(S.filter=='all'?' act':'')+'" data-f="all">'+ic('users',14)+' <b>'+N(o.users)+'</b></button>'+
   c.map(function(x){return '<button class="sc'+(S.filter==x[3]?' act':'')+'" data-f="'+x[3]+'"><span class="dot '+x[0]+'"></span>'+t(x[2])+' <b>'+N(x[1])+'</b></button>'}).join('')+
-  '<span class="sc pr" style="border:0;padding:0 2px">|</span>'+PROTOS.map(function(p){return '<span class="sc pr">'+p[1]+' <b>'+N((o.protocols||{})[p[0]]||0)+'</b></span>'}).join('')}
+  '<span class="sc pr" style="border:0;padding:0 2px">|</span>'+PROTOS.map(function(p){return '<span class="sc pr">'+p[1]+' <b>'+N((o.protocols||{})[p[0]]||0)+'</b></span>'}).join('');
+ drawLive()}
+// connected right now, by protocol: a count per protocol, a tap filters the list to it
+function liveOf(u){return u.live||[]}
+function drawLive(){var el=$('#ulv');if(!el)return;var cnt={},any=0;
+ S.users.forEach(function(u){var seen={};liveOf(u).forEach(function(c){if(!seen[c.p]){seen[c.p]=1;cnt[c.p]=(cnt[c.p]||0)+1}});if(liveOf(u).length)any++});
+ if(!any){el.innerHTML='<span class="muted" style="font-size:12px">'+t('Nobody is connected right now')+'</span>';if(S.lv){S.lv='';drawUsers()}return}
+ el.innerHTML='<span class="muted" style="font-size:12px;font-weight:700">'+t('Connected now')+':</span>'+
+  '<button class="sc'+(S.lv?'':' act')+'" data-lv=""><span class="dot g"></span>'+t('All')+' <b>'+N(any)+'</b></button>'+
+  PROTOS.filter(function(p){return cnt[p[0]]}).map(function(p){return '<button class="sc'+(S.lv==p[0]?' act':'')+'" data-lv="'+p[0]+'" style="--pc:'+(PCOL[p[0]]||'#999')+'"><i></i>'+p[1]+' <b>'+N(cnt[p[0]])+'</b></button>'}).join('');
+ el.onclick=function(e){var b=e.target.closest('[data-lv]');if(!b)return;S.lv=b.dataset.lv;S.pg=1;drawLive();drawUsers()}}
+function liveShort(p){return {wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',xray:'XR',dns:'DNS'}[p]||p.toUpperCase()}
 function filtered(){var q=S.q.trim().toLowerCase(),f=S.filter;
  var out=S.users.filter(function(u){
   if(q&&(u.username+' '+u.notes+' '+(u.tg_id||'')).toLowerCase().indexOf(q)<0)return false;
   if(S.pf&&S.pf!='all'&&!hasP(u,S.pf))return false;
-  if(f=='online')return u.online_connections>0;if(f=='offline')return !(u.online_connections>0);if(f!='all')return ustate(u)==f;return true});
+  if(S.lv&&!liveOf(u).some(function(c){return c.p==S.lv}))return false;
+  if(f=='online')return u.online_connections>0||liveOf(u).length>0;if(f=='offline')return !(u.online_connections>0||liveOf(u).length>0);if(f!='all')return ustate(u)==f;return true});
  out.sort(SORTS[S.sort]||SORTS.new);return out}
 function pruneSel(){var ok={};filtered().forEach(function(u){ok[u.id]=1});Object.keys(S.sel).forEach(function(k){if(!ok[k])delete S.sel[k]})}
 function drawUsers(){var el=$('#ul');if(!el)return;var list=filtered(),pages=Math.max(1,Math.ceil(list.length/S.size));if(S.pg>pages)S.pg=pages;if(S.pg<1)S.pg=1;
@@ -1225,8 +1245,11 @@ function drawPager(pages){var el=$('#pager');if(!el)return;var h='',i,nums=[];
   h+='<button class="b2" data-pg="'+(S.pg+1)+'" '+(S.pg>=pages?'disabled':'')+'>'+t('Next')+'</button>'}
  h+='<select id="psz" aria-label="'+t('per page')+'">'+[24,48,96,200].map(function(n){return '<option value="'+n+'"'+(n==S.size?' selected':'')+'>'+N(n)+' '+t('per page')+'</option>'}).join('')+'</select>';
  el.innerHTML=h}
-function uchip(u){var st=ustate(u),on=u.online_connections>0,dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':'');
- return '<button class="uchip st-'+st+(S.sel[u.id]?' sel':'')+'" data-id="'+u.id+'" title="'+esc(u.username)+'"><span class="dot '+dot+'"></span><span class="nm">'+esc(u.username)+'</span><span class="tick">'+ic('check',13)+'</span></button>'}
+function uchip(u){var st=ustate(u),lv=liveOf(u),on=u.online_connections>0||lv.length>0,dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':''),ps=[];
+ lv.forEach(function(c){if(ps.indexOf(c.p)<0)ps.push(c.p)});
+ var tip=u.username+(lv.length?'\n'+lv.map(function(c){return pname(c.p)+' · '+c.s}).join('\n'):'');
+ return '<button class="uchip st-'+st+(S.sel[u.id]?' sel':'')+'" data-id="'+u.id+'" title="'+esc(tip)+'"><span class="dot '+dot+'"></span><span class="nm">'+esc(u.username)+'</span>'+
+  (ps.length?'<span class="lvs">'+ps.slice(0,3).map(function(p){return '<i style="--pc:'+(PCOL[p]||'#888')+'">'+liveShort(p)+'</i>'}).join('')+'</span>':'')+'<span class="tick">'+ic('check',13)+'</span></button>'}
 // ---- single-user actions
 function toggleU(id,cb){cb.disabled=true;api('POST','/api/users/'+id+'/toggle').then(function(){toast(t('Done'));loadUsers()}).catch(function(e){cb.checked=!cb.checked;cb.disabled=false;fail(e)})}
 function resetU(id){confirmDo(function(){api('POST','/api/users/'+id+'/reset').then(function(){toast(t('Done'));loadUsers()}).catch(fail)})}
@@ -1740,9 +1763,10 @@ function logDraw(){var tb=$('#lg_tabs'),bx=$('#lg_box');if(!tb||!bx)return;
 function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(u),
   tg=(u.protocols||'').split(',').filter(function(x){return x}).map(function(x){return '<span class="ptag" style="--pc:'+(PCOL[x]||'#999')+'">'+esc(pname(x))+'</span>'}).join(''),
   cls=st=='active'?'g':st=='finished'?'y':'r',lbl=t(st=='active'?'Active':st=='finished'?(u.status=='Limited'?'Limited':'Expired'):'Disabled'),cur='';
- modal('<div class="us-h"><span class="dot '+(u.online_connections>0?'g':'')+'"></span><b class="ltr nm">'+esc(u.username)+'</b><span class="u-st '+cls+'" id="e_badge">'+lbl+'</span><span class="sp"></span>'+
+ modal('<div class="us-h"><span class="dot '+((u.online_connections>0||liveOf(u).length)?'g':'')+'"></span><b class="ltr nm">'+esc(u.username)+'</b><span class="u-st '+cls+'" id="e_badge">'+lbl+'</span><span class="sp"></span>'+
   '<label class="sw"><input type="checkbox" id="e_sw" '+(u.enabled?'checked':'')+' aria-label="'+t('Enable')+'"><span></span></label><button class="ib" onclick="closeModal()" aria-label="close">✕</button></div>'+
   '<div class="us-tags">'+(tg||'<span class="ptag none">—</span>')+'</div>'+
+  (liveOf(u).length?'<div class="lvlist"><small class="muted" style="width:100%">'+t('Connected now')+'</small>'+liveOf(u).map(function(c){return '<span style="--pc:'+(PCOL[c.p]||'#888')+'"><b>'+esc(pname(c.p))+'</b>'+esc(c.s)+'</span>'}).join('')+'</div>':'<div class="lvlist"><small class="muted">'+t('Not connected right now')+'</small></div>')+
   '<div class="us-st"><div><small>'+t('Used')+'</small><b class="ltr">'+N(gbtxt(u.traffic_used_gb))+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</b><div class="trk"><div class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?100:Math.max(2,p))+'%"></div></div></div>'+
   '<div><small>'+t('Expiry')+'</small><b>'+jdate(u.expires_ts)+'</b><small>'+leftTxt(u.expires_ts)+'</small></div>'+
   '<div><small>'+t('Connections')+'</small><b class="ltr">'+N(u.online_connections)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b><small>'+(u.last_seen_ts?ago(u.last_seen_ts):t('never'))+'</small></div></div>'+
@@ -1999,7 +2023,7 @@ function trDraw(){var el=$('#tr');if(!el)return;var us=S.users||[],tot=0,lim=0,l
   '<div class="card" style="margin-top:12px"><div class="nh"><div><h3>'+t('Users usage')+'</h3><small class="muted">'+t('Used volume, limit and percent')+'</small></div><input id="tr_q" type="search" autocomplete="off" placeholder="'+t('Search')+'" style="max-width:190px"></div><div id="tr_ul" class="trul"></div></div>';
  $('#tr_q').value=TR.q;$('#tr_q').oninput=function(){TR.q=this.value.toLowerCase();trUsers()};trUsers();if(TR.h.rx.length>1)$('#tr_ch').innerHTML=areaChart([{v:TR.h.rx,c:'a'},{v:TR.h.tx,c:'b'}],{h:132,cap:TR.max})}
 function trUsers(){var el=$('#tr_ul');if(!el)return;var l=(S.users||[]).filter(function(u){return !TR.q||u.username.toLowerCase().indexOf(TR.q)>=0}).sort(function(a,b){return b.traffic_used_gb-a.traffic_used_gb}),max=TR.all?l.length:30;
- el.innerHTML=l.slice(0,max).map(function(u){var p=usage(u),st=ustate(u);return '<button class="urow" data-u="'+u.id+'"><span class="dot '+(st=='disabled'?'r':st=='finished'?'y':u.online_connections>0?'g':'')+'"></span><b class="ltr nm">'+esc(u.username)+'</b>'+
+ el.innerHTML=l.slice(0,max).map(function(u){var p=usage(u),st=ustate(u);return '<button class="urow" data-u="'+u.id+'"><span class="dot '+(st=='disabled'?'r':st=='finished'?'y':(u.online_connections>0||liveOf(u).length)?'g':'')+'"></span><b class="ltr nm">'+esc(u.username)+'</b>'+
   '<span class="uu ltr">'+N(gbtxt(u.traffic_used_gb))+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</span><span class="ub"><span class="trk"><span class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?0:Math.max(1,p))+'%"></span></span></span><span class="up ltr">'+(p<0?'∞':N(p)+'%')+'</span></button>'}).join('')+
   (l.length>max?'<button class="b2" style="width:100%;margin-top:8px" id="tr_more">'+t('Show all')+' ('+N(l.length)+')</button>':'')+(l.length?'':'<span class="muted">'+t('No match')+'</span>');
  el.onclick=function(e){var b=e.target.closest('[data-u]');if(b){editUser(+b.dataset.u);return}if(e.target.closest('#tr_more')){TR.all=true;trUsers()}}}

@@ -39,6 +39,8 @@ function xrServers(d){if(!d.servers.length)return '<p class="muted">'+t('No Xray
   return '<div class="vrow" style="flex-wrap:wrap;align-items:flex-start"><span class="dot '+(on?'g':'r')+'" style="margin-top:6px"></span><div class="nm"><b>'+esc(x.name||x.server)+(x.server=='local'?' <span class="rotb">'+t('Panel server')+'</span>':'')+'</b><small class="ltr">'+esc(x.effective||'?')+(st.core?' · Xray '+esc(st.core):'')+' · '+N(n)+' '+t('inbounds')+'</small></div>'+
    '<span class="chipx '+(on?'g':'r')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span>'+xrCertChip(x)+
    '<div class="row" style="gap:4px;width:100%;justify-content:flex-end">'+'<button class="ib" title="'+t('Edit')+'" onclick="xrSrvEdit(\''+x.server+'\')">'+ic('edit',15)+'</button><button class="ib" title="'+t('Config')+'" onclick="xrPreview(\''+x.server+'\')">{ }</button><button class="ib bd" title="'+t('Delete')+'" onclick="xrSrvDel(\''+x.server+'\')">'+ic('trash',15)+'</button></div>'+
+   '<div class="g2" style="width:100%;margin-top:6px"><button class="b2" onclick="srvRepair(\'xray\',\''+x.server+'\')">↻ '+t('Repair')+'</button><button class="b2" onclick="srvHealth(\'xray\',\''+x.server+'\')">♡ '+t('Health')+'</button>'+
+   '<button class="b2 okb" onclick="protoAll(\'xray\',1)">'+ic('plus',15)+' '+t('Add to all users')+'</button><button class="b2 bd" onclick="protoAll(\'xray\',0)">'+ic('trash',15)+' '+t('Remove from all users')+'</button></div>'+
    (errs.length?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+errs.map(esc).join('<br>')+'</div>':'')+
    (xrCertErr(x)?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+esc(xrCertErr(x))+'</div>':'')+'</div>'}).join('')}
 
