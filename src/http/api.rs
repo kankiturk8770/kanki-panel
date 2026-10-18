@@ -1010,9 +1010,17 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
             let base = format!("/api/config/{}/{}?sub={}&amp;node={}", u.id, p, sub, esc(&n.id));
             let mut btns = String::new();
             match p {
-                "hysteria2" | "kankimix" => {
-                    let link = if p == "hysteria2" { hy2_uri(&app, &u, &n) } else { crate::kmix::link(&app, &u, &n) };
-                    if let Some(hu) = link {
+                // KANKI MIX works only in the Kanki app: the page shows no link, copy or QR (the link is
+                // the user's own key; there is no other app to paste it in). The app finds the address
+                // of the link text in the hidden tag, as it found the QR button's before.
+                "kankimix" => {
+                    if crate::kmix::link(&app, &u, &n).is_some() {
+                        btns.push_str(&format!("<i hidden data-url=\"/api/config/{}/kankimix?sub={}&amp;node={}\"></i>", u.id, sub, esc(&n.id)));
+                        btns.push_str("<p class=\"apponly\" data-i18n=\"app_only\">Only in the Kanki VPN app</p>");
+                    }
+                }
+                "hysteria2" => {
+                    if let Some(hu) = hy2_uri(&app, &u, &n) {
                         btns.push_str(&format!("<code class=\"uri\">{}</code>", esc(&hu)));
                         btns.push_str(&format!("<button class=\"b2\" data-act=\"copy\" data-text=\"{}\" data-i18n=\"copy_uri\">Copy URI</button>", esc(&hu)));
                         btns.push_str(&format!("<button class=\"b2\" data-act=\"qr\" data-url=\"/api/config/{}/{}/qr?sub={}&amp;node={}\" data-i18n=\"qr\">QR Code</button>", u.id, p, sub, esc(&n.id)));

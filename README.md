@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.6.4 — KANKI MIX only in the app
+- The subscription page no longer shows the KANKI MIX link, its copy button or QR code (it works only in the Kanki app, and the link is the user's own key): the row says "Only in the Kanki VPN app". The app still gets the link as before.
+
 ## New in 3.6.3 — Xray servers on the app's map
 - Every Xray link in the subscription carries where its traffic leaves to the internet (country, city, map position), looked up from the panel like the VPN servers (the server itself, or the server the default outbound goes on to). The Kanki app names Xray servers by their place and shows them on the map with their flag before the first connect.
 - Exit locations are checked every 10 minutes (was hourly), so a new server shows in the app soon.
