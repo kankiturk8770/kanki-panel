@@ -10,7 +10,60 @@ function KEXT(){
  if(window.AD_FA)Object.assign(FA,AD_FA);
  if(window.kmFA)kmFA();
 }
+// ---- Xray and DNS servers: repair, a quick health view, and the protocol for every user
+function srvData(kind){return kind=='xray'?(window.XR&&XR.d):(window.DN&&DN.d)}
+function srvReload(kind){if(kind=='xray'&&window.xrLoad)xrLoad(true);if(kind=='dns'&&window.dnsLoad)dnsLoad(true)}
+function srvRepair(kind,id){toast(t('Checking…'));
+ api('POST','/api/'+kind+'/servers/'+encodeURIComponent(id)+'/repair').then(function(r){
+  toast(t(r.waiting?'Repair sent: the server has not reported for a while, it is repaired as soon as it is back':'Repair sent: the server restarts it within a few seconds'));
+  setTimeout(function(){srvReload(kind)},9000)}).catch(fail)}
+function srvHealth(kind,id){var d=srvData(kind),x=d&&(d.servers||[]).filter(function(s){return s.server==id})[0];if(!x)return;
+ var st=x.status||{},age=x.status_at?Math.max(0,Math.floor(Date.now()/1000-x.status_at)):-1,fresh=age>=0&&age<=60,
+  errs=[st.deploy_error,st.error].concat(st.errors||[]).filter(Boolean),rows=[];
+ rows.push([t('Service'),st.active?'<span class="badge g">'+t('Running')+'</span>':'<span class="badge r">'+t(x.status_at?'Not running':'Waiting for the server…')+'</span>']);
+ rows.push([t('Last report'),age<0?t('never'):'<span style="color:'+(fresh?'var(--ok)':'var(--bad)')+'">'+ago(x.status_at)+'</span>']);
+ if(kind=='xray'){if(st.core)rows.push(['Xray','<span class="ltr">'+esc(st.core)+'</span>']);
+  var ib=(d.inbounds||[]).filter(function(i){return i.server==id}),on=ib.filter(function(i){return i.enabled}).length;
+  rows.push([t('Inbounds'),N(on)+' / '+N(ib.length)]);rows.push([t('Online now'),N((st.online||[]).length)]);
+  rows.push(['SSL',x.domain?(st.ssl||(st.certs||[]).length?'<span class="badge g">✓</span>':'<span class="badge y">'+t('waiting')+'</span>'):'—'])}
+ else{var q=st.q||{};if(st.version)rows.push([t('Version'),'<span class="ltr">v'+esc(st.version)+'</span>']);
+  rows.push([t('Queries'),N(q.total||0)]);rows.push([t('Connections'),N(st.conns||0)]);rows.push([t('Allowed addresses'),N(st.allowed||0)]);
+  // other sites: answered by the exit through the tunnel (relay), directly from abroad, or by the data center's DNS
+  if(q.exit||q.direct||q.local)rows.push([t('Other sites answered by'),[[q.exit,'Exit through the tunnel'],[q.direct,'DNS abroad'],[q.local,'Data center DNS']].filter(function(a){return a[0]}).map(function(a){return t(a[1])+' '+N(a[0])}).join(' · ')]);
+  rows.push(['SSL',st.ssl?'<span class="badge g">✓</span>':st.ssl_error?'<span class="badge r">'+t('error')+'</span>':'<span class="badge y">'+t('waiting')+'</span>'])}
+ // ports of this service that another program holds (Caddy, nginx … from an earlier setup)
+ var tk=st.taken||[],fr=tk.filter(function(p){return p.free}).map(function(p){return p.unit}).filter(function(u,i,a){return a.indexOf(u)==i});
+ var tkHtml=tk.length?'<div class="warnbox" style="margin-top:10px"><b>'+t('Ports taken by another program')+'</b><br>'+tk.map(function(p){
+   return '<span class="ltr">'+p.port+'/'+p.proto+'</span> · '+esc(p.prog)+(p.unit?' <span class="ltr">('+esc(p.unit)+')</span>':'')+
+    ((p.serves||[]).length?'<br><small>'+t('It serves')+': <span class="ltr">'+esc(p.serves.join(', '))+'</span></small>':'')+
+    (p.free?'':'<br><small>'+esc(t(p.why||''))+'</small>')}).join('<br>')+'</div>'+
+  (fr.length&&x.server!='local'?'<button class="b2 bd" style="width:100%;margin-top:8px" id="hl_free">'+t('Free the ports')+' ('+esc(fr.join(', '))+')</button>':''):'';
+ modal(mhead(t('Health'),x.name||x.server)+'<div class="list">'+rows.map(function(r){return '<div class="li"><span>'+r[0]+'</span><span>'+r[1]+'</span></div>'}).join('')+'</div>'+tkHtml+
+  (errs.length?'<div class="warnbox ltr" style="margin-top:10px">'+errs.map(esc).join('<br>')+'</div>':'')+
+  (!fresh?'<p class="muted" style="margin-top:10px">'+t('The server is not reporting: check that it is on and that its agent runs, then press Repair')+'</p>':'')+
+  '<button class="btn" style="width:100%;margin-top:12px" onclick="closeModal();srvRepair(\''+kind+'\',\''+esc(id)+'\')">↻ '+t('Repair')+'</button>');
+ var fb=$('#hl_free');if(fb)fb.onclick=function(){
+  var sites=[];tk.forEach(function(p){if(p.free)(p.serves||[]).forEach(function(s){if(sites.indexOf(s)<0)sites.push(s)})});
+  var msg=t('Stop and turn off __U__ on this server? Then __S__ takes its ports.').replace('__U__',fr.join(', ')).replace('__S__',kind=='xray'?'Xray':'Kanki DNS')+
+   (sites.length?'\n\n'+t('These sites go down with it')+': '+sites.join(', '):'')+'\n\n'+t('To bring it back')+': systemctl enable --now '+fr.join(' ');
+  if(!confirm(msg))return;
+  api('POST','/api/tunnels/servers/'+encodeURIComponent(id)+'/free-ports',{units:fr}).then(function(){closeModal();toast(t('Sent: the server frees the ports on its next report (a few seconds)'))}).catch(fail)}}
+function protoAll(p,add){var nm=p=='xray'?'Xray':'DNS';
+ if(!confirm(t(add?'Turn on __P__ for ALL users? Every user gets it in the subscription.':'Turn off __P__ for ALL users? It leaves every subscription.').replace('__P__',nm)))return;
+ toast(t('Checking…'));
+ api('POST','/api/protocols/'+p+'/'+(add?'assign-all':'unassign-all')).then(function(r){toast(t('Done')+' · '+N(r.changed||0)+' '+t('users changed'));
+  srvReload(p);if(S.page=='users'&&window.loadUsers)loadUsers()}).catch(fail)}
+
 var KFA={
+ // repair, health, for all users, connected now
+ "Repair":"تعمیر","Health":"سلامت","Service":"سرویس","Last report":"آخرین گزارش","Version":"نسخه",
+ "Repair sent: the server restarts it within a few seconds":"تعمیر فرستاده شد: سرور تا چند ثانیه‌ی دیگر سرویس را دوباره راه می‌اندازد",
+ "Repair sent: the server has not reported for a while, it is repaired as soon as it is back":"تعمیر فرستاده شد: سرور مدتی است گزارش نداده؛ به محض برگشتن تعمیر می‌شود",
+ "The server is not reporting: check that it is on and that its agent runs, then press Repair":"سرور گزارش نمی‌دهد: روشن بودن سرور و اجرای Agent آن را چک کن، بعد «تعمیر» را بزن",
+ "Turn on __P__ for ALL users? Every user gets it in the subscription.":"__P__ برای همه‌ی کاربران روشن شود؟ در اشتراک همه اضافه می‌شود.",
+ "Turn off __P__ for ALL users? It leaves every subscription.":"__P__ برای همه‌ی کاربران خاموش شود؟ از اشتراک همه برداشته می‌شود.",
+ "users changed":"کاربر تغییر کرد",
+ "Connected now":"وصل الان","Not connected right now":"الان وصل نیست","Nobody is connected right now":"الان کسی وصل نیست",
  // subscription on an Iran server
  "Serve the subscription from an Iran server":"لینک ساب روی سرور ایران",
  "For ISPs that block the panel domain: a tunnel server inside Iran serves the subscription pages with its own SSL and carries them to the panel through a hidden tunnel. Subscription links use it once it works.":"برای اینترنت‌هایی که دامنه‌ی پنل را بسته‌اند: یک سرور تانل داخل ایران صفحه‌های ساب را با SSL خودش می‌دهد و از راه یک تانل مخفی به پنل می‌رساند. وقتی کار کرد، لینک‌های ساب از آن ساخته می‌شوند.",
@@ -129,6 +182,9 @@ var KFA={
  "API token":"توکن API","E-mail for Let's Encrypt (optional)":"ایمیل برای Let's Encrypt (اختیاری)", "Filled in: check the Security tab":"پر شد: تب امنیت را چک کن","the port is required":"پورت لازم است","Clients online":"کلاینت آنلاین",
  // Kanki DNS
  "Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct":"DNS هوشمند اختصاصی مشتری‌ها: سرویس‌های تحریمی از سرورهای شما رد می‌شوند و بقیه مستقیم",
+ "Other sites answered by":"جواب سایت‌های دیگر از","Exit through the tunnel":"سرور خارج از تانل","DNS abroad":"DNS خارجی","Data center DNS":"DNS دیتاسنتر",
+ "Ports taken by another program":"پورت‌هایی که برنامه‌ی دیگری گرفته","It serves":"این‌ها را سرو می‌کند","Free the ports":"آزاد کردن پورت‌ها","Stop and turn off __U__ on this server? Then __S__ takes its ports.":"__U__ روی این سرور خاموش و غیرفعال شود؟ بعد __S__ پورت‌هایش را می‌گیرد.","These sites go down with it":"این سایت‌ها هم از دسترس خارج می‌شوند","To bring it back":"برای برگرداندن","Sent: the server frees the ports on its next report (a few seconds)":"فرستاده شد: سرور در گزارش بعدی (چند ثانیه) پورت‌ها را آزاد می‌کند",
+ "another Kanki service":"یک سرویس دیگر کانکی","a Docker container: stop it by hand":"کانتینر داکر است: دستی متوقفش کن","not a service: stop it by hand":"سرویس نیست: دستی متوقفش کن","a system service":"سرویس سیستمی است",
  "Add relay":"افزودن ریلی","Add DNS server":"افزودن سرور DNS","Status":"وضعیت","On":"روشن","Running servers":"سرورهای در حال اجرا","Users with DNS":"کاربران دارای DNS","Allowed addresses":"IPهای مجاز",
  "Queries":"درخواست‌ها","routed":"مسیردهی‌شده", "Query log":"لاگ درخواست‌ها","Every name your subscribers asked, and whether it went through your server (routed) or straight to the site (direct). Kept in the panel\'s memory; a restart clears it.":"همه‌ی دامنه‌هایی که مشتری‌ها پرسیده‌اند و اینکه از سرور شما رد شده (مسیردهی‌شده) یا مستقیم به سایت رفته (مستقیم). در حافظه‌ی پنل نگه داشته می‌شود و با ری‌استارت پاک می‌شود.",
  "Refresh":"بروزرسانی","Clear":"پاک کردن","All users":"همه‌ی کاربران","All queries":"همه‌ی درخواست‌ها","Routed only":"فقط مسیردهی‌شده","Direct only":"فقط مستقیم","Grouped by name":"گروه‌بندی بر اساس دامنه","Each query":"تک‌تک درخواست‌ها",

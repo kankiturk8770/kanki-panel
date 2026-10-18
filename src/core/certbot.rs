@@ -327,9 +327,296 @@ pub fn renew_loop() {
     });
 }
 
+// ------------------------------------------------------------------ ports other programs hold
+
+/// A program that holds a port a Kanki service of this server needs (Kanki DNS: 53 / 853 / 443 / 80,
+/// Xray: its inbound ports), so that service cannot listen there. Shown in the panel (Health).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Taken {
+    pub port: u16,
+    pub udp: bool,
+    pub prog: String,
+    /// its systemd service ("" = not a service)
+    pub unit: String,
+    /// may be stopped for us: a plain service that listens from outside on nothing but ports we need
+    pub free: bool,
+    /// why it may not be stopped from the panel
+    pub why: String,
+    /// the sites it serves (Caddy / nginx), so the admin sees what would go down
+    pub serves: Vec<String>,
+}
+
+/// services never stopped from the panel, whatever port they hold
+const KEEP: &[&str] = &["ssh.service", "sshd.service", "docker.service", "containerd.service", "systemd-resolved.service"];
+
+/// A listening socket: (inode, port, udp, loopback only)
+type Sock = (String, u16, bool, bool);
+
+/// The listening sockets of /proc/net/tcp, tcp6, udp or udp6 text.
+fn parse_sockets(text: &str, udp: bool) -> Vec<Sock> {
+    text.lines()
+        .skip(1)
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            if f.len() <= 9 || f[3] != if udp { "07" } else { "0A" } || f[9] == "0" {
+                return None;
+            }
+            let (addr, port) = f[1].rsplit_once(':')?;
+            let port = u16::from_str_radix(port, 16).ok()?;
+            // 127.x.x.x is stored with its first byte last; ::1 and ::ffff:127.x as below
+            let lo = match addr.len() {
+                8 => addr.ends_with("7F"),
+                32 => addr == "00000000000000000000000001000000" || (addr.starts_with("0000000000000000FFFF0000") && addr.ends_with("7F")),
+                _ => false,
+            };
+            Some((f[9].to_string(), port, udp, lo))
+        })
+        .collect()
+}
+
+fn sockets() -> Vec<Sock> {
+    [("/proc/net/tcp", false), ("/proc/net/tcp6", false), ("/proc/net/udp", true), ("/proc/net/udp6", true)]
+        .iter()
+        .flat_map(|(f, udp)| parse_sockets(&std::fs::read_to_string(f).unwrap_or_default(), *udp))
+        .collect()
+}
+
+/// pid of each of these socket inodes (read from /proc/<pid>/fd)
+fn owners(inodes: &std::collections::HashSet<String>) -> std::collections::HashMap<String, u32> {
+    let mut m = std::collections::HashMap::new();
+    if inodes.is_empty() {
+        return m;
+    }
+    for e in std::fs::read_dir("/proc").into_iter().flatten().flatten() {
+        let Ok(pid) = e.file_name().to_string_lossy().parse::<u32>() else { continue };
+        let Ok(fds) = std::fs::read_dir(format!("/proc/{}/fd", pid)) else { continue };
+        for fd in fds.flatten() {
+            let Ok(l) = std::fs::read_link(fd.path()) else { continue };
+            let l = l.to_string_lossy();
+            if let Some(i) = l.strip_prefix("socket:[").and_then(|x| x.strip_suffix(']')) {
+                if inodes.contains(i) {
+                    m.insert(i.to_string(), pid);
+                }
+            }
+        }
+    }
+    m
+}
+
+/// Who holds the ports in `need` ((port, udp)), other than the service `own` itself. A listener on
+/// 127.0.0.1 only (like systemd-resolved on 53) is left out: it does not stop us from listening.
+pub fn taken(need: &[(u16, bool)], own: &str) -> Vec<Taken> {
+    let socks: Vec<Sock> = sockets().into_iter().filter(|s| !s.3).collect();
+    if !socks.iter().any(|s| need.contains(&(s.1, s.2))) {
+        return vec![];
+    }
+    let inodes = socks.iter().map(|s| s.0.clone()).collect();
+    let pid_of = owners(&inodes);
+    // (unit, program) of each pid, and every outside port of each unit
+    let mut who: std::collections::HashMap<u32, (String, String)> = std::collections::HashMap::new();
+    let mut unit_ports: std::collections::HashMap<String, Vec<(u16, bool)>> = std::collections::HashMap::new();
+    for (inode, port, udp, _) in &socks {
+        let Some(pid) = pid_of.get(inode) else { continue };
+        let (unit, _) = who
+            .entry(*pid)
+            .or_insert_with(|| {
+                (
+                    unit_of(&std::fs::read_to_string(format!("/proc/{}/cgroup", pid)).unwrap_or_default()),
+                    std::fs::read_to_string(format!("/proc/{}/comm", pid)).unwrap_or_default().trim().to_string(),
+                )
+            })
+            .clone();
+        unit_ports.entry(unit).or_default().push((*port, *udp));
+    }
+    let mut out: Vec<Taken> = vec![];
+    for (inode, port, udp, _) in &socks {
+        if !need.contains(&(*port, *udp)) {
+            continue;
+        }
+        let Some(pid) = pid_of.get(inode) else { continue };
+        let (unit, prog) = who.get(pid).cloned().unwrap_or_default();
+        if !own.is_empty() && unit == own {
+            continue;
+        }
+        let (free, why) = judge(&unit, unit_ports.get(&unit).map(|v| v.as_slice()).unwrap_or(&[]), need);
+        let serves = sites_of(&unit);
+        let t = Taken { port: *port, udp: *udp, prog: if prog.is_empty() { "?".into() } else { prog }, unit, free, why, serves };
+        if !out.contains(&t) {
+            out.push(t);
+        }
+    }
+    out.sort_by_key(|a| (a.port, a.udp));
+    out
+}
+
+/// The sites a web server serves, from its config (Caddy: the site addresses of the Caddyfile,
+/// nginx: server_name of the enabled sites)
+fn sites_of(unit: &str) -> Vec<String> {
+    match unit {
+        "caddy.service" => caddy_sites(&std::fs::read_to_string("/etc/caddy/Caddyfile").unwrap_or_default()),
+        "nginx.service" => {
+            let mut v: Vec<String> = std::fs::read_dir("/etc/nginx/sites-enabled")
+                .into_iter()
+                .flatten()
+                .flatten()
+                .flat_map(|e| nginx_names(&std::fs::read_to_string(e.path()).unwrap_or_default()))
+                .collect();
+            v.sort();
+            v.dedup();
+            v
+        }
+        _ => vec![],
+    }
+}
+
+/// "dl.example.com {" at the top level of a Caddyfile (not the global options block or a snippet)
+fn caddy_sites(text: &str) -> Vec<String> {
+    let mut depth = 0i32;
+    let mut v = vec![];
+    for l in text.lines() {
+        let t = l.trim();
+        if t.starts_with('#') {
+            continue;
+        }
+        if depth == 0 && t.ends_with('{') {
+            let head = t.trim_end_matches('{').trim();
+            if !head.is_empty() && !head.starts_with('(') {
+                v.extend(head.split(|c: char| c == ',' || c.is_whitespace()).filter(|s| !s.is_empty()).map(|s| s.to_string()));
+            }
+        }
+        depth += t.matches('{').count() as i32 - t.matches('}').count() as i32;
+    }
+    v
+}
+
+fn nginx_names(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|l| l.trim().strip_prefix("server_name"))
+        .flat_map(|r| r.trim_end_matches(';').split_whitespace().map(|s| s.trim_end_matches(';').to_string()).collect::<Vec<_>>())
+        .filter(|s| !s.is_empty() && s != "_")
+        .collect()
+}
+
+/// May this service be stopped to free our ports? (no = why not)
+fn judge(unit: &str, ports: &[(u16, bool)], need: &[(u16, bool)]) -> (bool, String) {
+    if unit.starts_with("kanki") {
+        return (false, "another Kanki service".into());
+    }
+    if unit.starts_with("docker-") || unit == "docker.service" || unit == "containerd.service" {
+        return (false, "a Docker container: stop it by hand".into());
+    }
+    if !unit.ends_with(".service") || !safe(unit) {
+        return (false, "not a service: stop it by hand".into());
+    }
+    if KEEP.contains(&unit) {
+        return (false, "a system service".into());
+    }
+    // UDP on a port we need on TCP is the same site (HTTP/3 on 443), not something else it serves
+    let mut other: Vec<String> = ports.iter().filter(|p| !need.contains(p) && !(p.1 && need.contains(&(p.0, false)))).map(|(p, u)| format!("{}/{}", p, if *u { "udp" } else { "tcp" })).collect();
+    other.sort();
+    other.dedup();
+    if !other.is_empty() {
+        return (false, format!("it also serves {}: change it by hand", other.join(", ")));
+    }
+    (true, String::new())
+}
+
+/// The panel asked to free our ports from these services: each one that still holds only ports in
+/// `need` is stopped and disabled (so it does not take them again after a reboot). Returns the ones
+/// stopped. Blocking.
+pub fn free_ports(units: &[String], need: &[(u16, bool)]) -> Vec<String> {
+    let ok: Vec<String> = taken(need, "").into_iter().filter(|t| t.free && units.contains(&t.unit)).map(|t| t.unit).collect();
+    let mut done = vec![];
+    for u in ok {
+        if done.contains(&u) {
+            continue;
+        }
+        if sh(&format!("systemctl disable --now {}", u)).0 {
+            eprintln!("ports: stopped {} (it held ports Kanki needs here)", u);
+            done.push(u);
+        }
+    }
+    done
+}
+
+/// `taken`, worked out at most every 30 seconds per service (the agent reports every few seconds).
+pub fn taken_cached(need: &[(u16, bool)], own: &str) -> Vec<Taken> {
+    use std::sync::{Mutex, OnceLock};
+    /// service -> (when, the ports asked, the answer)
+    type Cache = std::collections::HashMap<String, (std::time::Instant, Vec<(u16, bool)>, Vec<Taken>)>;
+    static C: OnceLock<Mutex<Cache>> = OnceLock::new();
+    let c = C.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    if let Some((at, n, v)) = c.lock().unwrap().get(own) {
+        if at.elapsed().as_secs() < 30 && n.as_slice() == need {
+            return v.clone();
+        }
+    }
+    let v = taken(need, own);
+    c.lock().unwrap().insert(own.to_string(), (std::time::Instant::now(), need.to_vec(), v.clone()));
+    v
+}
+
+/// The JSON the agent reports for a list of taken ports.
+pub fn taken_json(v: &[Taken]) -> serde_json::Value {
+    serde_json::Value::Array(
+        v.iter()
+            .map(|t| serde_json::json!({ "port": t.port, "proto": if t.udp { "udp" } else { "tcp" }, "prog": t.prog, "unit": t.unit, "free": t.free, "why": t.why, "serves": t.serves }))
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listening_sockets_and_loopback() {
+        let tcp = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n   0: 3500007F:0035 00000000:0000 0A 00000000:00000000 00:00000000 00000000   991        0 111 1\n   1: 00000000:01BB 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 222 1\n   2: 0100A8C0:01BB 0200A8C0:D431 01 00000000:00000000 00:00000000 00000000     0        0 333 1\n";
+        assert_eq!(parse_sockets(tcp, false), vec![("111".to_string(), 53, false, true), ("222".to_string(), 443, false, false)]);
+        let tcp6 = "  sl  local_address remote_address st\n   0: 00000000000000000000000000000000:0050 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 444 1\n   1: 00000000000000000000000001000000:07E3 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000 0 0 555 1\n";
+        assert_eq!(parse_sockets(tcp6, false), vec![("444".to_string(), 80, false, false), ("555".to_string(), 2019, false, true)]);
+        let udp = "  sl  local_address rem_address   st\n   0: 00000000:01BB 00000000:0000 07 00000000:00000000 00:00000000 00000000 0 0 666 2\n";
+        assert_eq!(parse_sockets(udp, true), vec![("666".to_string(), 443, true, false)]);
+    }
+
+    #[test]
+    fn finds_who_holds_a_port() {
+        // this test process listens on a port: found by /proc with its program name (whether it may be
+        // stopped depends on where the tests run: a CI runner is itself a systemd service)
+        let l = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let v = taken(&[(port, false)], "");
+        assert_eq!(v.len(), 1, "{:?}", v);
+        assert_eq!((v[0].port, v[0].udp), (port, false));
+        let me = std::fs::read_to_string("/proc/self/comm").unwrap().trim().to_string();
+        assert_eq!(v[0].prog, me);
+        // nothing on a port that no one holds; 127.0.0.1 only does not count
+        let lo = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        assert!(taken(&[(lo.local_addr().unwrap().port(), false)], "").is_empty());
+    }
+
+    #[test]
+    fn sites_a_web_server_serves() {
+        let caddy = "{\n  auto_https off\n}\n(common) {\n  header -Server\n}\n# old\ndl.kankipro.cafe {\n    root * /var/www/dl\n    file_server\n}\nhttps://a.example.com:2053, b.example.com {\n  handle {\n    respond 404\n  }\n}\n";
+        assert_eq!(caddy_sites(caddy), vec!["dl.kankipro.cafe", "https://a.example.com:2053", "b.example.com"]);
+        assert_eq!(nginx_names("server {\n  listen 80;\n  server_name  x.com www.x.com;\n}\nserver { server_name _; }"), vec!["x.com", "www.x.com"]);
+    }
+
+    #[test]
+    fn what_may_be_stopped_for_our_ports() {
+        let need = [(53, true), (53, false), (853, false), (443, false), (80, false)];
+        // Caddy on 80 + 443 (also HTTP/3 on udp 443, its admin on 127.0.0.1 is not counted)
+        let caddy = [(80, false), (443, false), (443, true)];
+        assert_eq!(judge("caddy.service", &caddy, &need), (true, String::new()));
+        // the node API on 2096 behind the same Caddy: not touched
+        let (free, why) = judge("caddy.service", &[(443, false), (2096, false)], &need);
+        assert!(!free && why.contains("2096/tcp"), "{}", why);
+        assert!(!judge("kanki-xray.service", &[(443, false)], &need).0);
+        assert!(!judge("sshd.service", &[(443, false)], &need).0);
+        assert!(!judge("docker.service", &[(80, false)], &need).0);
+        assert!(!judge("session-3.scope", &[(80, false)], &need).0);
+        assert!(!judge("", &[(80, false)], &need).0);
+    }
 
     #[test]
     fn challenge_paths_stay_in_the_webroot() {

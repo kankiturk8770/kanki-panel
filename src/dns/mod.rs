@@ -20,6 +20,8 @@ const RUNNING_VER: &str = "/var/lib/kanki/dns/running.ver";
 const SSL_ERR_FILE: &str = "/var/lib/kanki/dns/ssl.err";
 /// the latest queries of subscribers, written by the service for the agent to report
 const QLOG_FILE: &str = "/var/lib/kanki/dns/qlog.json";
+/// "Repair" from the panel: restart the DNS service on the next deploy even when nothing changed
+const FORCE_FILE: &str = "/var/lib/kanki/dns/force";
 /// queries sent to the panel in one report (the newest when more are waiting)
 const QLOG_PER_REPORT: usize = 2000;
 
@@ -117,7 +119,8 @@ pub async fn run() {
         let st = json!({
             "run": run_id, "ts": crate::util::now(), "users": users, "allowed": eng.allowed_count(),
             "conns": eng.conns.load(std::sync::atomic::Ordering::Relaxed), "errors": eng.errors.lock().unwrap().clone(),
-            "q": { "total": ld(&eng.q_total), "routed": ld(&eng.q_routed), "cache": ld(&eng.q_cache), "refused": ld(&eng.q_refused) },
+            "q": { "total": ld(&eng.q_total), "routed": ld(&eng.q_routed), "cache": ld(&eng.q_cache), "refused": ld(&eng.q_refused),
+                   "exit": ld(&eng.q_exit), "direct": ld(&eng.q_direct), "local": ld(&eng.q_local) },
             "top": eng.top(15), "ips": eng.ips_snapshot(), "version": crate::VERSION,
         });
         let tmp = format!("{}.new", STATS_FILE);
@@ -185,6 +188,12 @@ pub fn applied_ver() -> String {
 }
 
 /// Write the config and keep the service in step with it (None = remove the service). Blocking.
+/// The panel asked for a repair: the next deploy writes the service again and restarts it.
+pub fn repair_prep() {
+    let _ = std::fs::create_dir_all(DATA_DIR);
+    let _ = std::fs::write(FORCE_FILE, "1");
+}
+
 pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
     let Some((c, ver)) = cfg else {
         if std::path::Path::new(UNIT).exists() {
@@ -215,8 +224,9 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
         "# written by kanki-panel\n[Unit]\nDescription=Kanki DNS\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nExecStart={} dns\nRestart=always\nRestartSec=3\nLimitNOFILE=1048576\n\n[Install]\nWantedBy=multi-user.target\n",
         exe
     );
+    let forced = std::path::Path::new(FORCE_FILE).exists();
     let unit_changed = std::fs::read_to_string(UNIT).map(|t| t != unit).unwrap_or(true);
-    if unit_changed {
+    if unit_changed || forced {
         std::fs::write(UNIT, &unit).map_err(|e| format!("cannot write {}: {}", UNIT, e))?;
         let _ = sh("systemctl daemon-reload");
         let _ = sh("systemctl enable -q kanki-dns.service");
@@ -232,12 +242,13 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
     let restart_key = key_of(c);
     let old_key = std::fs::read_to_string(RESTART_FILE).unwrap_or_default();
     let active = sh("systemctl is-active --quiet kanki-dns.service").0;
-    if unit_changed || old_key.trim() != restart_key || !active {
+    if unit_changed || forced || old_key.trim() != restart_key || !active {
         let (ok, out) = sh("systemctl restart kanki-dns.service 2>&1");
         if !ok {
             return Err(format!("systemctl restart kanki-dns: {}", out.lines().last().unwrap_or("")));
         }
         let _ = std::fs::write(RESTART_FILE, &restart_key);
+        let _ = std::fs::remove_file(FORCE_FILE);
         eprintln!("dns: started ({})", c.role);
     }
     if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
@@ -282,6 +293,13 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
     Ok(())
 }
 
+/// Restart the service (if this server runs it), e.g. after the ports it needs were freed.
+pub fn restart_if_installed() {
+    if std::path::Path::new(UNIT).exists() {
+        let _ = sh("systemctl restart kanki-dns.service");
+    }
+}
+
 /// After an update the service still runs the old binary: restart it once onto the new one.
 pub fn restart_if_outdated() {
     let Ok(v) = std::fs::read_to_string(RUNNING_VER) else { return };
@@ -289,6 +307,12 @@ pub fn restart_if_outdated() {
         eprintln!("dns: restarting onto v{}", crate::VERSION);
         let _ = sh("systemctl restart kanki-dns.service");
     }
+}
+
+/// The ports Kanki DNS listens on here ((port, udp)), from its config.
+pub fn needed_ports() -> Vec<(u16, bool)> {
+    let Ok(c) = load_cfg() else { return vec![] };
+    [(c.dns_port, true), (c.dns_port, false), (c.dot_port, false), (c.https_port, false), (c.http_port, false)].into_iter().filter(|p| p.0 > 0).collect()
 }
 
 /// What the agent reports about DNS on this server (Null = not installed here).
@@ -312,6 +336,8 @@ pub fn status() -> Value {
     st["ssl"] = json!(host.1);
     st["ssl_host"] = json!(host.0);
     st["ssl_error"] = json!(std::fs::read_to_string(SSL_ERR_FILE).unwrap_or_default().trim());
+    // our ports that another program holds (Caddy, nginx … left from an earlier setup)
+    st["taken"] = crate::certbot::taken_json(&crate::certbot::taken_cached(&needed_ports(), "kanki-dns.service"));
     if !active {
         st["error"] = json!(sh("journalctl -u kanki-dns.service -n 5 --no-pager -o cat 2>/dev/null").1.lines().last().unwrap_or("not running").to_string());
     }

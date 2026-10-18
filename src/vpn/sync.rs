@@ -206,7 +206,12 @@ pub async fn sync_all(app: &Arc<App>) {
                 let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id=?2", &[&info.to_string(), &n.id]);
             }
         }
-        let Ok(resp) = resp else { continue };
+        let Ok(resp) = resp else {
+            crate::live::set_vpn(&n.id, &n.name, vec![]);
+            continue;
+        };
+        // who is connected here right now, and with which protocol (for the panel)
+        let mut here: Vec<(i64, String)> = vec![];
 
         for (uid, proto, pubk) in map {
             let stats = if proto == "wg" { &resp.wg } else { &resp.awg };
@@ -222,6 +227,7 @@ pub async fn sync_all(app: &Arc<App>) {
                 );
             }
             if st.handshake > 0 && now() - st.handshake < 180 {
+                here.push((uid, proto.clone()));
                 *online.entry(uid).or_default() += 1;
                 let e = seen.entry(uid).or_default();
                 *e = (*e).max(st.handshake);
@@ -232,9 +238,10 @@ pub async fn sync_all(app: &Arc<App>) {
                 *add_bytes.entry(*uid).or_default() += rx + tx;
             }
         }
-        for (name, c) in resp.hy2_online.iter().chain(resp.kmix_online.iter()) {
+        for (name, c, proto) in resp.hy2_online.iter().map(|(n, c)| (n, c, "hy2")).chain(resp.kmix_online.iter().map(|(n, c)| (n, c, "kmix"))) {
             if let Some(uid) = by_name.get(name) {
                 if *c > 0 {
+                    here.push((*uid, proto.to_string()));
                     *online.entry(*uid).or_default() += c;
                     seen.insert(*uid, now());
                 }
@@ -246,6 +253,7 @@ pub async fn sync_all(app: &Arc<App>) {
             }
         }
         crate::kmix::note_error(&n.id, &resp.kmix_error);
+        crate::live::set_vpn(&n.id, &n.name, here);
     }
 
     for u in &users {

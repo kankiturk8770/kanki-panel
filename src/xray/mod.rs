@@ -16,6 +16,8 @@ pub(crate) const UNIT: &str = "/etc/systemd/system/kanki-xray.service";
 const VER_FILE: &str = "/var/lib/kanki/xray.applied";
 const BIN_VER_FILE: &str = "/var/lib/kanki/xray.binver";
 const EXTRA_CERTS: &str = "/var/lib/kanki/xray.certs";
+/// "Repair" from the panel: restart Xray on the next deploy even when nothing changed
+const FORCE_FILE: &str = "/var/lib/kanki/xray.force";
 pub const API_PORT: u16 = 10085;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -130,6 +132,17 @@ pub fn applied_ver() -> String {
 
 /// Keep Xray in step with the config (None = remove it). `panel` = (url, id, token) of the agent, for
 /// downloading Xray-core through the panel. Blocking.
+/// The panel asked for a repair: the next deploy checks the Xray binary again (and reinstalls a
+/// missing or broken one right away), writes the service again and restarts Xray.
+pub fn repair_prep() {
+    let _ = std::fs::create_dir_all("/var/lib/kanki");
+    let _ = std::fs::write(FORCE_FILE, "1");
+    *last_fail().lock().unwrap() = None;
+    if !sh(&format!("{} version >/dev/null 2>&1", BIN)).0 {
+        let _ = std::fs::remove_file(BIN_VER_FILE);
+    }
+}
+
 pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) -> Result<(), String> {
     let Some((c, ver)) = cfg else {
         if std::path::Path::new(UNIT).exists() {
@@ -172,14 +185,15 @@ pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) 
         "# written by kanki-panel\n[Unit]\nDescription=Kanki Xray\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nEnvironment=XRAY_LOCATION_ASSET={}\nExecStart={} run -c {}\nRestart=always\nRestartSec=3\nLimitNOFILE=1048576\nAmbientCapabilities=CAP_NET_BIND_SERVICE\n\n[Install]\nWantedBy=multi-user.target\n",
         ASSET_DIR, BIN, CONF_FILE
     );
+    let forced = std::path::Path::new(FORCE_FILE).exists();
     let unit_changed = std::fs::read_to_string(UNIT).map(|t| t != unit).unwrap_or(true);
-    if unit_changed {
+    if unit_changed || forced {
         std::fs::write(UNIT, &unit).map_err(|e| format!("cannot write {}: {}", UNIT, e))?;
         let _ = sh("systemctl daemon-reload");
         let _ = sh("systemctl enable -q kanki-xray.service");
     }
     let active = sh("systemctl is-active --quiet kanki-xray.service").0;
-    if changed || unit_changed || !active {
+    if changed || unit_changed || forced || !active {
         // the traffic not read yet would be lost with the restart
         collect();
         let (ok, out) = sh("systemctl restart kanki-xray.service 2>&1");
@@ -187,6 +201,7 @@ pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) 
             return Err(format!("systemctl restart kanki-xray: {}", out.lines().last().unwrap_or("")));
         }
         eprintln!("xray: (re)started");
+        let _ = std::fs::remove_file(FORCE_FILE);
     }
     if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
         for ib in c.config["inbounds"].as_array().into_iter().flatten() {
@@ -307,6 +322,28 @@ fn collect() {
     c.online = online;
 }
 
+/// Restart Xray (if this server runs it), e.g. after the ports it needs were freed.
+pub fn restart_if_installed() {
+    if std::path::Path::new(UNIT).exists() {
+        let _ = sh("systemctl restart kanki-xray.service");
+    }
+}
+
+/// The ports the Xray inbounds listen on from outside ((port, udp)), from the running config.
+pub fn needed_ports() -> Vec<(u16, bool)> {
+    let conf: Value = std::fs::read_to_string(CONF_FILE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let mut v: Vec<(u16, bool)> = conf["inbounds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|ib| !matches!(ib["listen"].as_str(), Some("127.0.0.1") | Some("::1") | Some("localhost")))
+        .filter_map(|ib| ib["port"].as_u64().filter(|p| *p > 0 && *p < 65536).map(|p| (p as u16, false)))
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
 /// What the agent reports about Xray on this server (Null = not installed here). Blocking.
 pub fn status() -> Value {
     if !std::path::Path::new(UNIT).exists() {
@@ -328,6 +365,8 @@ pub fn status() -> Value {
         "active": active, "run": c.run, "users": users, "inbounds": c.inbounds, "online": c.online,
         "ver": applied_ver(), "core": std::fs::read_to_string(BIN_VER_FILE).unwrap_or_default().trim(),
         "certs": certs, "cert_errors": cert_errors().lock().unwrap().clone(),
+        // inbound ports that another program holds
+        "taken": crate::certbot::taken_json(&crate::certbot::taken_cached(&needed_ports(), "kanki-xray.service")),
     });
     if !active {
         st["error"] = json!(sh("journalctl -u kanki-xray.service -n 5 --no-pager -o cat 2>/dev/null").1.lines().last().unwrap_or("not running").to_string());

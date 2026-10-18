@@ -7,6 +7,9 @@
 //! panel server for "local", the host of the agent address for the others. The country and city
 //! are looked up from this side (outside Iran) and kept in the settings table, so building a
 //! subscription page never waits on the network.
+//!
+//! Xray servers are looked up the same way (keyed "xray:<server id>"), from the server itself or
+//! from the server everything goes on to.
 
 use crate::db::Node;
 use crate::App;
@@ -21,6 +24,11 @@ const TTL: i64 = 7 * 24 * 3600;
 /// node id -> {ip, cc, city, lat, lon, ts}
 fn cache(app: &App) -> serde_json::Map<String, Value> {
     serde_json::from_str::<Value>(&app.db.get(KEY)).ok().and_then(|v| v.as_object().cloned()).unwrap_or_default()
+}
+
+/// The cache key of an Xray server
+pub fn xray_key(sid: &str) -> String {
+    format!("xray:{}", sid)
 }
 
 /// The exit fields one node adds to the app's subscription data (empty strings while unknown).
@@ -45,7 +53,7 @@ fn exit_host(app: &App, n: &Node) -> String {
 }
 
 /// "https://1.2.3.4:2096/x" -> "1.2.3.4", "http://[::1]:80" -> "::1"
-fn host_of_url(url: &str) -> String {
+pub fn host_of_url(url: &str) -> String {
     let rest = url.trim().split("://").last().unwrap_or("");
     let hostport = rest.split('/').next().unwrap_or("");
     let hostport = hostport.rsplit('@').next().unwrap_or("");
@@ -96,38 +104,40 @@ async fn lookup(app: &App, ip: &str) -> Option<(String, String, Option<f64>, Opt
     Some((cc, j["city"].as_str().unwrap_or("").to_string(), j["lat"].as_f64(), j["lon"].as_f64()))
 }
 
-/// Looks up the exit of every node whose address is new or whose answer is old.
+/// Looks up the exit of every node and Xray server whose address is new or whose answer is old.
 pub async fn refresh(app: &App) {
     let mut c = cache(app);
-    let nodes = app.db.nodes();
+    let mut hosts: Vec<(String, String)> = app.db.nodes().iter().map(|n| (n.id.clone(), exit_host(app, n))).collect();
+    hosts.extend(crate::xray::panel::exit_hosts(app).into_iter().map(|(sid, h)| (xray_key(&sid), h)));
     let mut changed = false;
-    for n in &nodes {
-        let Some(ip) = resolve_v4(&exit_host(app, n)).await else { continue };
-        let prev = c.get(&n.id).cloned().unwrap_or(Value::Null);
+    for (key, host) in &hosts {
+        let Some(ip) = resolve_v4(host).await else { continue };
+        let prev = c.get(key).cloned().unwrap_or(Value::Null);
         let fresh = prev["ip"].as_str() == Some(ip.as_str()) && crate::util::now() - prev["ts"].as_i64().unwrap_or(0) < TTL;
         if fresh {
             continue;
         }
         if let Some((cc, city, lat, lon)) = lookup(app, &ip).await {
-            c.insert(n.id.clone(), json!({ "ip": ip, "cc": cc, "city": city, "lat": lat, "lon": lon, "ts": crate::util::now() }));
+            c.insert(key.clone(), json!({ "ip": ip, "cc": cc, "city": city, "lat": lat, "lon": lon, "ts": crate::util::now() }));
             changed = true;
         }
     }
     // servers that were removed from the panel are forgotten
     let before = c.len();
-    c.retain(|k, _| nodes.iter().any(|n| &n.id == k));
+    c.retain(|k, _| hosts.iter().any(|(h, _)| h == k));
     if changed || c.len() != before {
         app.db.set(KEY, &Value::Object(c).to_string());
     }
 }
 
-/// Keeps the exit locations up to date: soon after start, then every hour (only new or old entries
-/// are looked up, so this costs nothing most of the time).
+/// Keeps the exit locations up to date: soon after start, then every 10 minutes, so a new server
+/// shows on the app's map soon (only new or old entries are looked up, so this costs nothing most
+/// of the time).
 pub async fn run(app: Arc<App>) {
     tokio::time::sleep(Duration::from_secs(20)).await;
     loop {
         refresh(&app).await;
-        tokio::time::sleep(Duration::from_secs(3600)).await;
+        tokio::time::sleep(Duration::from_secs(600)).await;
     }
 }
 
@@ -142,5 +152,7 @@ mod tests {
         assert_eq!(host_of_url("https://[2001:db8::1]:443/x"), "2001:db8::1");
         assert_eq!(host_of_url("tr.example.com"), "tr.example.com");
         assert_eq!(host_of_url(""), "");
+        // an Xray outbound link of another server
+        assert_eq!(host_of_url("vless://0f1e-uuid@se.example.com:443"), "se.example.com");
     }
 }

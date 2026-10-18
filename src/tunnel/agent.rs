@@ -241,11 +241,33 @@ pub async fn run(version: &str) {
                         }
                         _ => {}
                     }
+                    // ports the admin asked to free (Health › Free the ports): the services holding them
+                    // are stopped and kept off, then Kanki DNS and Xray restart onto those ports
+                    if let Some(units) = v["free"].as_array().filter(|a| !a.is_empty()) {
+                        let units: Vec<String> = units.iter().filter_map(|u| u.as_str().map(|s| s.to_string())).collect();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let mut need = crate::dns::needed_ports();
+                            need.extend(crate::xray::needed_ports());
+                            if !crate::certbot::free_ports(&units, &need).is_empty() {
+                                crate::dns::restart_if_installed();
+                                crate::xray::restart_if_installed();
+                            }
+                        })
+                        .await;
+                    }
                     // Kanki DNS: "set" (new config), "keep" (unchanged) or "off"
                     match v["dns"]["mode"].as_str() {
                         Some("set") => {
                             if let (Ok(c), Some(ver)) = (serde_json::from_value::<crate::dns::DnsCfg>(v["dns"]["cfg"].clone()), v["dns"]["ver"].as_str().map(|s| s.to_string())) {
-                                let r = tokio::task::spawn_blocking(move || crate::dns::deploy(Some((&c, &ver)))).await.unwrap_or(Err("deploy crashed".into()));
+                                let force = v["dns"]["force"].as_bool() == Some(true);
+                                let r = tokio::task::spawn_blocking(move || {
+                                    if force {
+                                        crate::dns::repair_prep();
+                                    }
+                                    crate::dns::deploy(Some((&c, &ver)))
+                                })
+                                .await
+                                .unwrap_or(Err("deploy crashed".into()));
                                 *dns_err.lock().unwrap() = r.err();
                             }
                         }
@@ -260,7 +282,15 @@ pub async fn run(version: &str) {
                         Some("set") => {
                             if let (Ok(c), Some(ver)) = (serde_json::from_value::<crate::xray::XrayCfg>(v["xray"]["cfg"].clone()), v["xray"]["ver"].as_str().map(|s| s.to_string())) {
                                 let (p, i, t) = (panel.clone(), id.clone(), token.clone());
-                                let r = tokio::task::spawn_blocking(move || crate::xray::deploy(Some((&c, &ver)), Some((&p, &i, &t)))).await.unwrap_or(Err("deploy crashed".into()));
+                                let force = v["xray"]["force"].as_bool() == Some(true);
+                                let r = tokio::task::spawn_blocking(move || {
+                                    if force {
+                                        crate::xray::repair_prep();
+                                    }
+                                    crate::xray::deploy(Some((&c, &ver)), Some((&p, &i, &t)))
+                                })
+                                .await
+                                .unwrap_or(Err("deploy crashed".into()));
                                 *xray_err.lock().unwrap() = r.err();
                             }
                         }

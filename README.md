@@ -3,6 +3,35 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.6.7 — the app's install files in the panel
+- **Sales bot › App files:** upload the Kanki app (.apk) in the panel, one file per phone type (arm64, armv7, universal; read from the file name, or chosen). A new file of the same type replaces the old one. No GitHub token or download site is needed.
+- **Bot:** «📱 Download app» shows a button per phone type (with which phones it is for and its size) and sends the file itself, named like `KankiVPN-1.15.1-arm64.apk`. After the first send Telegram's file id is kept, so the next customers get it at once. The account message also has the download button.
+- **Subscription page:** a «Kanki VPN app» card with the version and a download button per phone type (the 64-bit one marked as recommended). Downloads go through `/sub/<code>/app/<type>`, so only subscribers get them, also through the Iran subscription server and the separate subscription domain.
+- Files over 50 MB cannot be sent by a Telegram bot: they are offered on the subscription page only.
+
+## New in 3.6.6 — ports taken by another program
+- **Health** of an Xray or Kanki DNS server lists the ports that service needs but another program holds (for example Caddy or nginx left from an earlier setup on 80 / 443), with the service name and the sites it serves (from the Caddyfile / nginx sites).
+- **Free the ports** (in Health): the server stops and turns off that service, then Kanki DNS / Xray restart onto the ports. Offered only for a plain service that listens from outside on nothing but those ports (HTTP/3 on the same port counts as the same site); never for Kanki's own services, SSH, Docker or the panel's own server. The confirmation names the sites that go down and the command that brings it back.
+- **Emergency chat port:** the port field suggests the ports a CDN (ArvanCloud, Cloudflare) passes on: HTTP 8080, 8880, 2052, 2082, 2086, 2095 and HTTPS 2053, 2083, 2087, 2096, 8443. The chat cannot take 53 / 80 / 443 / 853 on a server that runs Kanki DNS, or the port of an Xray inbound there (and a DNS server cannot be added where the chat holds those ports).
+
+## New in 3.6.5 — Kanki DNS keeps the phone online when DNS abroad is blocked
+- A relay (inside Iran) now asks its exit, through the same hidden tunnel, for every name it does not route (before: it asked 1.1.1.1 / 8.8.8.8 directly from Iran, where answers can be blocked or altered).
+- When nothing abroad answers (the tunnel and the DNS servers abroad are both cut), the server asks the data center's own DNS (from resolv.conf), so Iranian sites keep working and a phone with Private DNS never loses all of its internet. A way that fails is skipped for 20 seconds, so queries do not wait on it.
+- Health (DNS server) shows where the other sites' answers came from: exit through the tunnel, DNS abroad, data center DNS.
+- Ports are unchanged: 53 (UDP/TCP), 853, 443 and 80 on each DNS server, plus the relay's tunnel port (8446 by default). Update the agents on both servers of a relay (the exit answers the relay's questions from this version on; an older exit is simply skipped).
+
+## New in 3.6.4 — KANKI MIX only in the app
+- The subscription page no longer shows the KANKI MIX link, its copy button or QR code (it works only in the Kanki app, and the link is the user's own key): the row says "Only in the Kanki VPN app". The app still gets the link as before.
+
+## New in 3.6.3 — Xray servers on the app's map
+- Every Xray link in the subscription carries where its traffic leaves to the internet (country, city, map position), looked up from the panel like the VPN servers (the server itself, or the server the default outbound goes on to). The Kanki app names Xray servers by their place and shows them on the map with their flag before the first connect.
+- Exit locations are checked every 10 minutes (was hourly), so a new server shows in the app soon.
+
+## New in 3.6.2 — repair for Xray and DNS servers, who is connected with what
+- **Xray and Kanki DNS server cards** (Servers) get the buttons VPN servers have: **Repair** (the server writes its service again and restarts it on its next report, within seconds; an Xray binary that is missing or broken is installed again), **Health** (running or not, last report, errors, SSL, online users / queries) and **Add to all users / Remove from all users** (ticks or unticks Xray or Kanki DNS for every user).
+- **Connected now:** every user shows how they are connected right now and where: WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from the VPN servers, Xray from the Xray servers, Kanki DNS from the DNS queries. Users page: a "Connected now" bar with a count per protocol (tap one to list those users), small protocol tags on each user, and the full list (protocol · server) in the user sheet. "Online" now also counts Xray and DNS use.
+- Repair needs the agent of 3.6.2 on the server for the forced restart (older agents only restart a stopped service): update the tunnel servers after the panel.
+
 ## New in 3.6 — KANKI MIX
 - **Our own protocol** on every VPN server, next to WireGuard / AmneziaWG / Hysteria2: game packets on a raw datagram path (no queue, sent twice in gaming mode), websites over KCP + FEC, a ChaCha20 mask with no fixed bytes. Menu: VPN services › KANKI MIX.
 - The server is built into the panel: agents install and run it themselves (UDP 4000 by default, per-server ports). Every user has their own key; traffic and devices count like the other protocols. The Kanki app gets the `kanki://` link from the subscription.
