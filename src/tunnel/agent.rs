@@ -241,6 +241,20 @@ pub async fn run(version: &str) {
                         }
                         _ => {}
                     }
+                    // ports the admin asked to free (Health › Free the ports): the services holding them
+                    // are stopped and kept off, then Kanki DNS and Xray restart onto those ports
+                    if let Some(units) = v["free"].as_array().filter(|a| !a.is_empty()) {
+                        let units: Vec<String> = units.iter().filter_map(|u| u.as_str().map(|s| s.to_string())).collect();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let mut need = crate::dns::needed_ports();
+                            need.extend(crate::xray::needed_ports());
+                            if !crate::certbot::free_ports(&units, &need).is_empty() {
+                                crate::dns::restart_if_installed();
+                                crate::xray::restart_if_installed();
+                            }
+                        })
+                        .await;
+                    }
                     // Kanki DNS: "set" (new config), "keep" (unchanged) or "off"
                     match v["dns"]["mode"].as_str() {
                         Some("set") => {

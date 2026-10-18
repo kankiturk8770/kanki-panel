@@ -1891,8 +1891,10 @@ function emLoad(){Promise.all([api('GET','/api/emergency'),api('GET','/api/tunne
    '<label class="chk"><input type="checkbox" id="em_on" '+(e.on?'checked':'')+'><span><b>'+t('Emergency chat is on')+'</b></span></label>'+
    '<label class="f">'+t('Server inside Iran')+'</label><select id="em_sv">'+srvOpt+'</select>'+
    '<div class="g2"><div><label class="f">'+t('Domain')+'</label><input id="em_d" class="ltr" placeholder="chat.kanki.pro" value="'+esc(e.domain||'')+'"></div>'+
-   '<div><label class="f">'+t('Port')+'</label><input id="em_p" type="number" class="ltr" value="'+(e.port||8080)+'"></div></div>'+
-   '<small class="muted">'+t('With ArvanCloud CDN use a port it forwards (80, 8080, 443, 2053, 8443 …). Open the port on the server.')+'</small>'+
+   '<div><label class="f">'+t('Port')+'</label><input id="em_p" type="number" class="ltr" list="em_pl" value="'+(e.port||8080)+'">'+
+    '<datalist id="em_pl">'+[8080,8880,2052,2082,2086,2095,2053,2083,2087,2096,8443,80,443].map(function(p){return '<option value="'+p+'">'}).join('')+'</datalist></div></div>'+
+   '<small class="muted">'+t('With ArvanCloud CDN use a port it forwards (80, 8080, 443, 2053, 8443 …). Open the port on the server.')+' '+
+    t('HTTP (CDN SSL or no SSL): 8080, 8880, 2052, 2082, 2086, 2095 · HTTPS (own SSL): 2053, 2083, 2087, 2096, 8443. Keep 80 and 443 free when Kanki DNS runs on this server.')+'</small>'+
    '<label class="f">'+t('Admin password of the chat')+'</label><input id="em_pw" type="password" autocomplete="new-password" placeholder="'+(e.has_password?t('unchanged'):t('at least 10 characters'))+'">'+
    '<label class="f">SSL</label><select id="em_ssl">'+[['auto','Automatic SSL (Let’s Encrypt, recommended)'],['cdn','SSL from the CDN (ArvanCloud)'],['manual','My own certificate'],['http','No SSL (HTTP)']].map(function(o){return '<option value="'+o[0]+'"'+(e.ssl==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select>'+
    '<small class="muted" id="em_sslh"></small>'+
@@ -1909,6 +1911,7 @@ function emLoad(){Promise.all([api('GET','/api/emergency'),api('GET','/api/tunne
  clearTimeout(S.emT);S.emT=setTimeout(function(){if($('#em')&&!$('#modal').classList.contains('on')&&document.activeElement.tagName!='INPUT'&&document.activeElement.tagName!='TEXTAREA')emLoad()},8000)
 }).catch(fail)}
 function verLt(a,b){var p=function(v){return String(v).replace(/^v/,'').split('.').map(function(x){return +x||0})},x=p(a),y=p(b);for(var i=0;i<3;i++){if((x[i]||0)!=(y[i]||0))return (x[i]||0)<(y[i]||0)}return false}
+Object.assign(FA,{"HTTP (CDN SSL or no SSL): 8080, 8880, 2052, 2082, 2086, 2095 · HTTPS (own SSL): 2053, 2083, 2087, 2096, 8443. Keep 80 and 443 free when Kanki DNS runs on this server.":"پورت HTTP (SSL از CDN یا بدون SSL): 8080، 8880، 2052، 2082، 2086، 2095 · پورت HTTPS (SSL خودت): 2053، 2083، 2087، 2096، 8443. اگر DNS کانکی روی همین سرور است، 80 و 443 را آزاد بگذار."});
 Object.assign(FA,{"Emergency chat":"چت اضطراری","Talk to your customers and send them configs when the international internet is cut":"وقتی اینترنت بین‌الملل قطع است با مشتری‌ها حرف بزن و کانفیگ بفرست","How it works":"چطور کار می‌کند",
  "Choose a server inside Iran (one of your tunnel servers) and a domain that points to it (ArvanCloud CDN or plain DNS).":"یک سرور داخل ایران (یکی از سرورهای تانل) و دامنه‌ای که به آن اشاره می‌کند (CDN ابرآروان یا DNS معمولی) را انتخاب کن.",
  "The panel installs the emergency chat on that server by itself and keeps the list of your customers there while the internet works.":"پنل خودش چت اضطراری را روی همان سرور نصب می‌کند و تا وقتی اینترنت وصل است، لیست مشتری‌ها را آن‌جا به‌روز نگه می‌دارد.",

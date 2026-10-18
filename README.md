@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.6.6 — ports taken by another program
+- **Health** of an Xray or Kanki DNS server lists the ports that service needs but another program holds (for example Caddy or nginx left from an earlier setup on 80 / 443), with the service name and the sites it serves (from the Caddyfile / nginx sites).
+- **Free the ports** (in Health): the server stops and turns off that service, then Kanki DNS / Xray restart onto the ports. Offered only for a plain service that listens from outside on nothing but those ports (HTTP/3 on the same port counts as the same site); never for Kanki's own services, SSH, Docker or the panel's own server. The confirmation names the sites that go down and the command that brings it back.
+- **Emergency chat port:** the port field suggests the ports a CDN (ArvanCloud, Cloudflare) passes on: HTTP 8080, 8880, 2052, 2082, 2086, 2095 and HTTPS 2053, 2083, 2087, 2096, 8443. The chat cannot take 53 / 80 / 443 / 853 on a server that runs Kanki DNS, or the port of an Xray inbound there (and a DNS server cannot be added where the chat holds those ports).
+
 ## New in 3.6.5 — Kanki DNS keeps the phone online when DNS abroad is blocked
 - A relay (inside Iran) now asks its exit, through the same hidden tunnel, for every name it does not route (before: it asked 1.1.1.1 / 8.8.8.8 directly from Iran, where answers can be blocked or altered).
 - When nothing abroad answers (the tunnel and the DNS servers abroad are both cut), the server asks the data center's own DNS (from resolv.conf), so Iranian sites keep working and a phone with Private DNS never loses all of its internet. A way that fails is skipped for 20 seconds, so queries do not wait on it.

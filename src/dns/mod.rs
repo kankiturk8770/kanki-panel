@@ -293,6 +293,13 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
     Ok(())
 }
 
+/// Restart the service (if this server runs it), e.g. after the ports it needs were freed.
+pub fn restart_if_installed() {
+    if std::path::Path::new(UNIT).exists() {
+        let _ = sh("systemctl restart kanki-dns.service");
+    }
+}
+
 /// After an update the service still runs the old binary: restart it once onto the new one.
 pub fn restart_if_outdated() {
     let Ok(v) = std::fs::read_to_string(RUNNING_VER) else { return };
@@ -300,6 +307,12 @@ pub fn restart_if_outdated() {
         eprintln!("dns: restarting onto v{}", crate::VERSION);
         let _ = sh("systemctl restart kanki-dns.service");
     }
+}
+
+/// The ports Kanki DNS listens on here ((port, udp)), from its config.
+pub fn needed_ports() -> Vec<(u16, bool)> {
+    let Ok(c) = load_cfg() else { return vec![] };
+    [(c.dns_port, true), (c.dns_port, false), (c.dot_port, false), (c.https_port, false), (c.http_port, false)].into_iter().filter(|p| p.0 > 0).collect()
 }
 
 /// What the agent reports about DNS on this server (Null = not installed here).
@@ -323,6 +336,8 @@ pub fn status() -> Value {
     st["ssl"] = json!(host.1);
     st["ssl_host"] = json!(host.0);
     st["ssl_error"] = json!(std::fs::read_to_string(SSL_ERR_FILE).unwrap_or_default().trim());
+    // our ports that another program holds (Caddy, nginx … left from an earlier setup)
+    st["taken"] = crate::certbot::taken_json(&crate::certbot::taken_cached(&needed_ports(), "kanki-dns.service"));
     if !active {
         st["error"] = json!(sh("journalctl -u kanki-dns.service -n 5 --no-pager -o cat 2>/dev/null").1.lines().last().unwrap_or("not running").to_string());
     }

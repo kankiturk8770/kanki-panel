@@ -322,6 +322,28 @@ fn collect() {
     c.online = online;
 }
 
+/// Restart Xray (if this server runs it), e.g. after the ports it needs were freed.
+pub fn restart_if_installed() {
+    if std::path::Path::new(UNIT).exists() {
+        let _ = sh("systemctl restart kanki-xray.service");
+    }
+}
+
+/// The ports the Xray inbounds listen on from outside ((port, udp)), from the running config.
+pub fn needed_ports() -> Vec<(u16, bool)> {
+    let conf: Value = std::fs::read_to_string(CONF_FILE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let mut v: Vec<(u16, bool)> = conf["inbounds"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|ib| !matches!(ib["listen"].as_str(), Some("127.0.0.1") | Some("::1") | Some("localhost")))
+        .filter_map(|ib| ib["port"].as_u64().filter(|p| *p > 0 && *p < 65536).map(|p| (p as u16, false)))
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
 /// What the agent reports about Xray on this server (Null = not installed here). Blocking.
 pub fn status() -> Value {
     if !std::path::Path::new(UNIT).exists() {
@@ -343,6 +365,8 @@ pub fn status() -> Value {
         "active": active, "run": c.run, "users": users, "inbounds": c.inbounds, "online": c.online,
         "ver": applied_ver(), "core": std::fs::read_to_string(BIN_VER_FILE).unwrap_or_default().trim(),
         "certs": certs, "cert_errors": cert_errors().lock().unwrap().clone(),
+        // inbound ports that another program holds
+        "taken": crate::certbot::taken_json(&crate::certbot::taken_cached(&needed_ports(), "kanki-xray.service")),
     });
     if !active {
         st["error"] = json!(sh("journalctl -u kanki-xray.service -n 5 --no-pager -o cat 2>/dev/null").1.lines().last().unwrap_or("not running").to_string());

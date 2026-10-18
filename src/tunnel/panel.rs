@@ -1333,6 +1333,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/tunnels/probe", get(probe_get).post(probe_start).delete(probe_stop))
         .route("/api/tunnels/servers", post(server_add))
         .route("/api/tunnels/servers/:id", delete(server_del).put(server_edit))
+        .route("/api/tunnels/servers/:id/free-ports", post(server_free_ports))
         .route("/api/tunnels/:id", delete(tunnel_del))
         .route("/api/tunnels/:id/awgconf/:side", get(awg_conf))
         .route("/api/tunnels/:id/hy2conf/:side", get(hy2_conf))
@@ -1868,6 +1869,38 @@ async fn server_edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
     Json(json!({ "ok": true, "token": token, "panel": crate::api::origin(&app), "repo": crate::admin::repo(), "gre": gre })).into_response()
 }
 
+/// Services the admin asked to stop on a server because they hold ports Kanki DNS or Xray need there
+/// (sent with the server's next report; the server checks each one again before it stops it).
+fn frees() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    static S: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// { units: ["caddy.service"] } (Health › Free the ports)
+async fn server_free_ports(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    if id == "local" {
+        // on the panel's own server a web server usually fronts the panel itself
+        return err(StatusCode::BAD_REQUEST, "on the panel's own server stop it by hand (systemctl disable --now <service>)");
+    }
+    if !servers(&app).iter().any(|s| s.id == id) {
+        return err(StatusCode::NOT_FOUND, "unknown server");
+    }
+    let units: Vec<String> = b["units"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|u| u.as_str())
+        .filter(|u| u.ends_with(".service") && !u.starts_with("kanki") && u.len() < 100 && u.bytes().all(|c| c.is_ascii_alphanumeric() || b"@._-".contains(&c)))
+        .map(|u| u.to_string())
+        .collect();
+    if units.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "no service to stop");
+    }
+    frees().lock().unwrap().insert(id, units);
+    Json(json!({ "ok": true })).into_response()
+}
+
 async fn server_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
     let _ = guard!(app, h, "nodes");
     if id == "local" {
@@ -1944,6 +1977,17 @@ pub(crate) fn emer_url(app: &App) -> String {
     format!("{}://{}{}", if tls { "https" } else { "http" }, d, if port == def { String::new() } else { format!(":{}", port) })
 }
 
+/// Ports Kanki DNS listens on: the emergency chat cannot use them on a DNS server.
+pub(crate) const DNS_PORTS: [u16; 4] = [53, 80, 443, 853];
+
+/// The emergency chat's port when the chat is on and runs on server `sid`.
+pub(crate) fn emer_port_on(app: &App, sid: &str) -> Option<u16> {
+    (app.db.get("emer_on") == "1" && app.db.get("emer_server") == sid).then(|| app.db.get("emer_port").parse().ok()).flatten()
+}
+
+/// Ports a CDN (ArvanCloud, Cloudflare) passes on: HTTP and HTTPS. Suggested for the emergency chat.
+const CDN_PORTS: &str = "HTTP: 80, 8080, 8880, 2052, 2082, 2086, 2095 · HTTPS: 443, 2053, 2083, 2087, 2096, 8443";
+
 /// The public key the app checks admin messages with (empty when the chat is off)
 pub(crate) fn emer_pub(app: &App) -> String {
     if app.db.get("emer_on") != "1" { String::new() } else { app.db.get("emer_pub") }
@@ -2013,6 +2057,18 @@ async fn emer_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respons
     let pw = b["password"].as_str().unwrap_or("");
     if !pw.is_empty() && pw.chars().count() < 10 {
         return err(StatusCode::BAD_REQUEST, "the password must be at least 10 characters");
+    }
+    // the port must be free on that server: Kanki DNS (53, 80, 443, 853) and Xray inbounds run there too
+    if on {
+        let p: u16 = port.parse().unwrap_or(0);
+        let dns = crate::dns::panel::settings(&app);
+        if dns.on && dns.servers.iter().any(|x| x.server == server) && DNS_PORTS.contains(&p) {
+            return err(StatusCode::BAD_REQUEST, &format!("Kanki DNS runs on this server and needs ports 53, 80, 443 and 853: choose another port for the chat ({})", CDN_PORTS));
+        }
+        let xr = crate::xray::panel::settings(&app);
+        if xr.on && xr.inbounds.iter().any(|ib| ib.enabled && ib.server == server && ib.port == p) {
+            return err(StatusCode::BAD_REQUEST, &format!("an Xray inbound uses port {} on this server: choose another port for the chat ({})", p, CDN_PORTS));
+        }
     }
     if on {
         if pw.is_empty() && app.db.get("emer_admin").is_empty() {
@@ -2122,7 +2178,9 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         None => json!({ "mode": "off" }),
     };
     let subsrv = crate::subiran::cfg_for(&app, &id);
-    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "subsrv": subsrv })).into_response()
+    // services to stop for our ports (asked in Health)
+    let free = frees().lock().unwrap().remove(&id).unwrap_or_default();
+    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "subsrv": subsrv, "free": free })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)

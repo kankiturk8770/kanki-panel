@@ -747,6 +747,9 @@ async fn put_server(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
     if let Some(v) = b["hidden"].as_bool() {
         x.hidden = v;
     }
+    if let Some(p) = crate::tunnel::panel::emer_port_on(&app, &x.server).filter(|p| crate::tunnel::panel::DNS_PORTS.contains(p)) {
+        return err(StatusCode::BAD_REQUEST, &format!("the emergency chat uses port {} on this server, and Kanki DNS needs 53, 80, 443 and 853: move the chat to another port first (Emergency chat › Port, e.g. 8080 or 2053)", p));
+    }
     if x.role == "relay" && (x.exit.is_empty() || x.exit == x.server || !s.servers.iter().any(|e| e.server == x.exit && e.role == "exit")) {
         return err(StatusCode::BAD_REQUEST, "a relay needs an exit DNS server (abroad) to carry its connections");
     }
