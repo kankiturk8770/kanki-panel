@@ -893,6 +893,11 @@ fn link_with(_s: &XraySettings, ib: &Inbound, u: &User, server_addr: &str) -> Op
 
 /// Every Xray link of a user (empty when the user has no Xray).
 pub fn user_links(app: &App, u: &User) -> Vec<(String, String)> {
+    user_links_at(app, u).into_iter().map(|(n, l, _)| (n, l)).collect()
+}
+
+/// (name, link, server id) of each Xray share link of a user
+fn user_links_at(app: &App, u: &User) -> Vec<(String, String, String)> {
     let s = runnable(app);
     if !s.on || !u.has_proto("xray") || !u.active() {
         return vec![];
@@ -900,13 +905,51 @@ pub fn user_links(app: &App, u: &User) -> Vec<(String, String)> {
     s.inbounds
         .iter()
         .filter(|ib| ib.enabled && (ib.only.is_empty() || ib.only.contains(&u.id)) && s.servers.iter().any(|x| x.server == ib.server))
-        .filter_map(|ib| link(app, &s, ib, u).map(|l| (ib.remark.clone(), l)))
+        .filter_map(|ib| link(app, &s, ib, u).map(|l| (ib.remark.clone(), l, ib.server.clone())))
         .collect()
 }
 
+/// Each link carries where its traffic leaves to the internet (exit_cc, exit_city, exit_lat,
+/// exit_lon), so the app can name it by its place and put it on the map before the first connect.
 pub fn sub_info(app: &App, u: &User) -> Value {
-    let v: Vec<Value> = user_links(app, u).into_iter().map(|(n, l)| json!({ "name": n, "link": l })).collect();
+    let v: Vec<Value> = user_links_at(app, u)
+        .into_iter()
+        .map(|(n, l, sid)| {
+            let mut x = json!({ "name": n, "link": l });
+            if let (Some(o), Some(e)) = (x.as_object_mut(), crate::exitgeo::fields(app, &crate::exitgeo::xray_key(&sid)).as_object()) {
+                o.extend(e.clone());
+            }
+            x
+        })
+        .collect();
     if v.is_empty() { Value::Null } else { json!(v) }
+}
+
+/// (server id, host) of where the traffic of each Xray server that has a link leaves to the
+/// internet: the host of the default outbound when everything goes on to another server, else the
+/// server itself.
+pub fn exit_hosts(app: &App) -> Vec<(String, String)> {
+    let s = runnable(app);
+    if !s.on {
+        return vec![];
+    }
+    let via = s.outs.iter().find(|o| !s.default_out.is_empty() && o.tag == s.default_out).and_then(|o| match o.kind.as_str() {
+        "socks" | "http" => Some(o.address.trim().to_string()),
+        "link" if !o.link.trim().starts_with("vmess://") => Some(crate::exitgeo::host_of_url(o.link.trim().split('?').next().unwrap_or(""))),
+        _ => None,
+    });
+    s.servers
+        .iter()
+        .filter(|x| s.inbounds.iter().any(|ib| ib.enabled && ib.server == x.server))
+        .map(|x| {
+            let own = if x.server == "local" {
+                app.env.get("DOMAIN").cloned().unwrap_or_default().trim().to_string()
+            } else {
+                crate::tunnel::panel::seen_ip(&x.server).unwrap_or_else(|| x.address.trim().to_string())
+            };
+            (x.server.clone(), via.clone().filter(|h| !h.is_empty()).unwrap_or(own))
+        })
+        .collect()
 }
 
 // ------------------------------------------------------------------ status / usage

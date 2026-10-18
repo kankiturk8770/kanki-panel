@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.6.3 — Xray servers on the app's map
+- Every Xray link in the subscription carries where its traffic leaves to the internet (country, city, map position), looked up from the panel like the VPN servers (the server itself, or the server the default outbound goes on to). The Kanki app names Xray servers by their place and shows them on the map with their flag before the first connect.
+- Exit locations are checked every 10 minutes (was hourly), so a new server shows in the app soon.
+
 ## New in 3.6.2 — repair for Xray and DNS servers, who is connected with what
 - **Xray and Kanki DNS server cards** (Servers) get the buttons VPN servers have: **Repair** (the server writes its service again and restarts it on its next report, within seconds; an Xray binary that is missing or broken is installed again), **Health** (running or not, last report, errors, SSL, online users / queries) and **Add to all users / Remove from all users** (ticks or unticks Xray or Kanki DNS for every user).
 - **Connected now:** every user shows how they are connected right now and where: WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from the VPN servers, Xray from the Xray servers, Kanki DNS from the DNS queries. Users page: a "Connected now" bar with a count per protocol (tap one to list those users), small protocol tags on each user, and the full list (protocol · server) in the user sheet. "Online" now also counts Xray and DNS use.
