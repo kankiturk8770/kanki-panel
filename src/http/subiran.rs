@@ -68,6 +68,14 @@ fn save(app: &App, s: &SubIran) {
     app.db.set("sub_iran", &serde_json::to_string(s).unwrap_or_default());
 }
 
+/// The server was removed from the panel: the subscription is no longer served from it.
+pub(crate) fn forget_server(app: &App, id: &str) {
+    let s = settings(app);
+    if s.server == id {
+        save(app, &SubIran { token: s.token, tunnel_port: s.tunnel_port, ..Default::default() });
+    }
+}
+
 fn on(s: &SubIran) -> bool {
     !s.server.is_empty() && !s.domain.is_empty() && s.port > 0
 }
@@ -258,6 +266,8 @@ async fn put_cfg(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response
 // ------------------------------------------------------------------ the listener (run by the agent)
 
 const CACHE: &str = "/var/lib/kanki/subsrv.json";
+/// marks the listener as a user of its domain's certificate (it reloads a renewed one by itself)
+const SSL_USER: &str = "kanki-subsrv";
 
 /// The HTTPS listener of the agent: started, changed and stopped from the panel's answer.
 #[derive(Default)]
@@ -294,6 +304,20 @@ impl Runner {
             None => {
                 let _ = std::fs::remove_file(CACHE);
             }
+        }
+        // the old listener's port is closed and its certificate is no longer renewed here
+        if let Some(old) = &self.cfg {
+            let same_domain = want.as_ref().map(|w| w.domain == old.domain).unwrap_or(false);
+            let (d, keep) = (old.domain.clone(), want.as_ref().map(|w| w.port));
+            tokio::task::spawn_blocking(move || {
+                match keep {
+                    Some(p) => crate::fw::sync("subsrv", vec![crate::fw::rule(p, false)]),
+                    None => crate::fw::close("subsrv"),
+                }
+                if !same_domain {
+                    crate::certbot::forget(&d, SSL_USER);
+                }
+            });
         }
         self.cfg = want;
     }
@@ -334,7 +358,7 @@ async fn serve(c: SubCfg, status: Arc<Mutex<Value>>) {
     loop {
         // SSL first: certbot frees port 80 by itself, and waits after a failure before it tries again
         let d = c.domain.clone();
-        let r = tokio::task::spawn_blocking(move || crate::certbot::ensure(&d, &[])).await.unwrap_or_else(|e| Err(e.to_string()));
+        let r = tokio::task::spawn_blocking(move || crate::certbot::ensure(&d, &[SSL_USER])).await.unwrap_or_else(|e| Err(e.to_string()));
         let acc = match r.and_then(|_| acceptor(&c.domain)) {
             Ok(a) => a,
             Err(e) => {
@@ -352,10 +376,7 @@ async fn serve(c: SubCfg, status: Arc<Mutex<Value>>) {
             }
         };
         let port = c.port;
-        let _ = tokio::task::spawn_blocking(move || {
-            std::process::Command::new("sh").arg("-c").arg(format!("ufw status 2>/dev/null | grep -q 'Status: active' && ufw allow {}/tcp >/dev/null 2>&1", port)).status()
-        })
-        .await;
+        let _ = tokio::task::spawn_blocking(move || crate::fw::sync("subsrv", vec![crate::fw::rule(port, false)])).await;
         set(true, true, "");
         let mut acc = acc;
         let mut stamp = cert_stamp(&c.domain);

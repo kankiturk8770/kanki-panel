@@ -41,13 +41,28 @@ function srvHealth(kind,id){var d=srvData(kind),x=d&&(d.servers||[]).filter(func
  modal(mhead(t('Health'),x.name||x.server)+'<div class="list">'+rows.map(function(r){return '<div class="li"><span>'+r[0]+'</span><span>'+r[1]+'</span></div>'}).join('')+'</div>'+tkHtml+
   (errs.length?'<div class="warnbox ltr" style="margin-top:10px">'+errs.map(esc).join('<br>')+'</div>':'')+
   (!fresh?'<p class="muted" style="margin-top:10px">'+t('The server is not reporting: check that it is on and that its agent runs, then press Repair')+'</p>':'')+
-  '<button class="btn" style="width:100%;margin-top:12px" onclick="closeModal();srvRepair(\''+kind+'\',\''+esc(id)+'\')">↻ '+t('Repair')+'</button>');
+  '<div id="hl_fw"></div>'+
+  '<div class="g2" style="margin-top:12px"><button class="btn" onclick="closeModal();srvRepair(\''+kind+'\',\''+esc(id)+'\')">↻ '+t('Repair')+'</button>'+
+  '<button class="b2" id="hl_ssl">'+t('Try SSL again')+'</button></div>');
+ $('#hl_ssl').onclick=function(){var b=this;b.disabled=true;api('POST','/api/tunnels/servers/'+encodeURIComponent(id)+'/ssl-retry').then(function(){toast(t('Sent: the server tries SSL again within a minute'))}).catch(function(e){b.disabled=false;fail(e)})};
+ srvFirewall(id,$('#hl_fw'));
  var fb=$('#hl_free');if(fb)fb.onclick=function(){
   var sites=[];tk.forEach(function(p){if(p.free)(p.serves||[]).forEach(function(s){if(sites.indexOf(s)<0)sites.push(s)})});
   var msg=t('Stop and turn off __U__ on this server? Then __S__ takes its ports.').replace('__U__',fr.join(', ')).replace('__S__',kind=='xray'?'Xray':'Kanki DNS')+
    (sites.length?'\n\n'+t('These sites go down with it')+': '+sites.join(', '):'')+'\n\n'+t('To bring it back')+': systemctl enable --now '+fr.join(' ');
   if(!confirm(msg))return;
   api('POST','/api/tunnels/servers/'+encodeURIComponent(id)+'/free-ports',{units:fr}).then(function(){closeModal();toast(t('Sent: the server frees the ports on its next report (a few seconds)'))}).catch(fail)}}
+// the firewall of a server: ports Kanki opened (closed again when what needed them is removed), and open
+// ports nothing uses any more (opened by an older version for something deleted since, or by hand)
+var FW_NAMES={tunnels:'Tunnels',dns:'Kanki DNS',xray:'Xray',emergency:'Emergency chat',kmix:'KANKI MIX',subsrv:'Subscription link',acme:'SSL (port 80)'};
+function srvFirewall(id,box){if(!box)return;api('GET','/api/tunnels/servers/'+encodeURIComponent(id)+'/firewall').then(function(f){if(!f||!box.isConnected)return;
+ var own=f.owners||{},un=f.unused||[],keys=Object.keys(own);if(!keys.length&&!un.length)return;
+ box.innerHTML='<div class="box" style="margin-top:10px;padding:10px 12px"><b>'+t('Firewall (ufw)')+'</b>'+
+  (keys.length?'<div class="list" style="margin-top:6px">'+keys.map(function(k){return '<div class="li"><span>'+esc(t(FW_NAMES[k]||k))+'</span><span class="ltr">'+esc((own[k]||[]).join(' · '))+'</span></div>'}).join('')+'</div>':'')+
+  (un.length?'<div class="warnbox" style="margin-top:8px"><b>'+t('Open ports that nothing uses')+'</b><br><span class="ltr">'+esc(un.join(' · '))+'</span><br><small>'+t('Opened earlier for something that was deleted, or by hand. SSH is never closed.')+'</small></div>'+
+   '<button class="b2 bd" style="width:100%;margin-top:8px" id="fw_close">'+t('Close these ports')+' ('+N(un.length)+')</button>':'')+'</div>';
+ var b=$('#fw_close');if(b)b.onclick=function(){if(!confirm(t('Close these ports in the firewall of this server?')+'\n\n'+un.join(', ')))return;b.disabled=true;
+  api('POST','/api/tunnels/servers/'+encodeURIComponent(id)+'/firewall',{rules:un}).then(function(){toast(t('Sent: the server closes them on its next report (a few seconds)'))}).catch(function(e){b.disabled=false;fail(e)})}}).catch(function(){})}
 function protoAll(p,add){var nm=p=='xray'?'Xray':'DNS';
  if(!confirm(t(add?'Turn on __P__ for ALL users? Every user gets it in the subscription.':'Turn off __P__ for ALL users? It leaves every subscription.').replace('__P__',nm)))return;
  toast(t('Checking…'));
@@ -55,6 +70,10 @@ function protoAll(p,add){var nm=p=='xray'?'Xray':'DNS';
   srvReload(p);if(S.page=='users'&&window.loadUsers)loadUsers()}).catch(fail)}
 
 var KFA={
+ "Firewall (ufw)":"فایروال (ufw)","Open ports that nothing uses":"پورت‌های بازی که هیچ‌چیز از آن‌ها استفاده نمی‌کند","Opened earlier for something that was deleted, or by hand. SSH is never closed.":"قبلاً برای چیزی که حذف شده یا دستی باز شده‌اند. پورت SSH هیچ‌وقت بسته نمی‌شود.",
+ "Close these ports":"بستن این پورت‌ها","Close these ports in the firewall of this server?":"این پورت‌ها در فایروال این سرور بسته شوند؟","Sent: the server closes them on its next report (a few seconds)":"فرستاده شد: سرور در گزارش بعدی (چند ثانیه) آن‌ها را می‌بندد",
+ "Try SSL again":"دوباره گرفتن SSL","Sent: the server tries SSL again within a minute":"فرستاده شد: سرور تا یک دقیقه‌ی دیگر دوباره SSL می‌گیرد",
+ "Tunnels":"تانل‌ها","Emergency chat":"چت اضطراری","Subscription link":"لینک اشتراک","SSL (port 80)":"SSL (پورت ۸۰)",
  // repair, health, for all users, connected now
  "Repair":"تعمیر","Health":"سلامت","Service":"سرویس","Last report":"آخرین گزارش","Version":"نسخه",
  "Repair sent: the server restarts it within a few seconds":"تعمیر فرستاده شد: سرور تا چند ثانیه‌ی دیگر سرویس را دوباره راه می‌اندازد",

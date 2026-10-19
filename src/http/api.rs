@@ -222,6 +222,7 @@ pub fn node_router(app: Arc<App>) -> Router {
         .route("/agent/repair", post(agent_repair))
         .route("/agent/update", post(agent_update))
         .route("/agent/ports", post(agent_ports))
+        .route("/agent/remove", post(agent_remove))
         .route("/hy2/auth", post(hy2_auth))
         .with_state(app)
 }
@@ -493,13 +494,19 @@ async fn nodes_delete(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
     if id == "local" {
         return err(StatusCode::BAD_REQUEST, "the main server cannot be deleted");
     }
+    // the server itself: its users are cut off and KANKI MIX stops (every agent version), then it
+    // removes its VPN services, closes their ports and uninstalls its agent (3.6.8+)
+    let mut removed = false;
     if let Some(n) = app.db.node(&id) {
+        let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), ..Default::default() };
+        let synced = sync::remote_post_json(&app, &n, "/agent/sync", &json!(empty)).await.is_some();
+        removed = synced && sync::remote_post(&app, &n, "/agent/remove").await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false);
         app.forget_node_pins(&n.id, &n.address);
     }
     let _ = app.db.exec("DELETE FROM nodes WHERE id=?1", &[&id]);
     let _ = app.db.exec("DELETE FROM peers WHERE node_id=?1", &[&id]);
     crate::live::forget(&id);
-    Json(json!({ "ok": true })).into_response()
+    Json(json!({ "ok": true, "removed": removed })).into_response()
 }
 
 /// Changes the WireGuard / AmneziaWG / Hysteria2 ports of a node (or of the panel server) in one go
@@ -1289,6 +1296,15 @@ async fn agent_ports(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         return err(StatusCode::UNAUTHORIZED, "bad token");
     }
     Json(crate::admin::set_ports(&b)).into_response()
+}
+
+/// The panel deleted this node: everything the node runs is removed (just after this answer)
+async fn agent_remove(State(app): St, h: HeaderMap) -> Response {
+    if !node_authed(&app, &h) {
+        return err(StatusCode::UNAUTHORIZED, "bad token");
+    }
+    std::thread::spawn(crate::admin::remove_node);
+    Json(json!({"ok": true})).into_response()
 }
 
 async fn agent_update(State(app): St, h: HeaderMap) -> Response {

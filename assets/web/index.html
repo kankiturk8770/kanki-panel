@@ -598,6 +598,7 @@ b .ltr,.ltr b,b.ltr,strong.ltr{font-weight:700}
 .ncards p.muted{margin:5px 0!important}
 .ncards .warnbox{margin:6px 0;padding:6px 8px;font-size:11.5px}
 
+details.twm>summary{list-style:none;cursor:pointer}details.twm>summary::-webkit-details-marker{display:none}details.twm>summary h4:after{content:"▾";margin-inline-start:auto;color:var(--s)}details.twm[open]>summary h4:after{content:"▴"}details.twm>summary h4{display:flex;align-items:center;gap:8px}
 /* =====================================================================
    v2.8.4 — Kanki design: own layout and look (grouped sidebar, top bar,
    calmer cards, settings with sections). Loaded last, so it wins.
@@ -1005,11 +1006,14 @@ var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN ser
 // menu (v3.5): single pages and groups that open in place. An item is [page, sub page, label, note].
 var NAV=[{p:'dash'},{p:'users'},{p:'nodes'},
  {g:'vpn',l:'VPN services',i:'shield2',items:[['vpn','','All VPN services','Kanki VPN and Xray side by side'],['kmix','','KANKI MIX','Our own protocol: games, low ping'],['xray','','Xray','VLESS · VMess · Trojan · Shadowsocks'],['antidpi','','Anti-DPI tunnels','REALITY · WS/gRPC behind CDN · Hysteria2']]},
- {g:'dnsg',l:'Kanki DNS',i:'dns',items:[['dns','overview','Overview','Status of the DNS servers'],['dns','servers','DNS servers','Exits abroad and relays in Iran'],['dns','services','Services','What goes through the DNS'],['dns','users','DNS users','Registered addresses and use'],['dns','settings','Settings and SSL','Domain, certificate, upstreams']]},
- {g:'net',l:'Tunnels',i:'tunnel',items:[['servers','','Tunnel servers',''],['tunnels','','Tunnels',''],['ports','','Port management','']]},
- {g:'sales',l:'Sales & support',i:'bot',items:[['bot','','Sales bot',''],['emergency','','Emergency chat','']]},
+ {g:'net',l:'Tunnels',i:'tunnel',items:[['tunnels','','Tunnels','Links between your servers'],['servers','','Tunnel servers','Iran and abroad servers of the tunnels'],['ports','','Port management','Which port each service uses']]},
+ {g:'dnsg',l:'Kanki DNS',i:'dns',items:[['dns','overview','Overview','Status of the DNS servers'],['dns','servers','DNS servers','Exits abroad and relays in Iran'],['dns','pubg','PUBG and games','Which part of the game goes through'],['dns','services','Services','What goes through the DNS'],['dns','users','DNS users','Registered addresses and use'],['dns','log','Query log','Names your users asked'],['dns','settings','Settings and SSL','Domain, certificate, upstreams']]},
+ {g:'sales',l:'Sales & support',i:'bot',items:[['bot','','Sales bot','Plans, payments, Telegram'],['emergency','','Emergency chat','Talk to users when the internet is cut']]},
  {p:'traffic'},
- {g:'sys',l:'System',i:'settings',items:[['backup','','Backup',''],['security','','Security',''],['settings','','Settings','']]}];
+ {g:'sys',l:'System',i:'settings',items:[['settings','','Settings','How the panel looks and works'],['backup','','Backup','Save and restore everything'],['security','','Security','Password, 2FA, sessions']]}];
+Object.assign(FA,{"rotating tunnel, address to dial, target":"تانل چرخشی، آدرس اتصال، مقصد","Links between your servers":"اتصال بین سرورهایت","Iran and abroad servers of the tunnels":"سرورهای ایران و خارج تانل‌ها","Which port each service uses":"هر سرویس کدام پورت را دارد",
+ "Which part of the game goes through":"کدام بخش بازی از سرور رد شود","Names your users asked":"نام‌هایی که کاربرها پرسیده‌اند","Plans, payments, Telegram":"پلن‌ها، پرداخت، تلگرام","Talk to users when the internet is cut":"گفتگو با کاربرها وقتی اینترنت قطع است",
+ "How the panel looks and works":"ظاهر و کارکرد پنل","Save and restore everything":"ذخیره و بازگردانی همه چیز","Password, 2FA, sessions":"رمز، تأیید دومرحله‌ای، نشست‌ها","PUBG and games":"پابجی و بازی‌ها","Query log":"گزارش پرس‌وجوها"});
 var NAVG=[];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
 function grpOf(k){for(var i=0;i<NAV.length;i++){var g=NAV[i];if(g.items&&g.items.some(function(x){return x[0]==k}))return g.l}return ''}
@@ -1382,7 +1386,8 @@ function drawNodes(){var el=$('#nl');if(!el)return;el.innerHTML=S.nodes.map(func
  el.onclick=function(e){var b=e.target.closest('[data-nopen]');if(!b)return;var k=b.dataset.nopen;S.nopen[k]=!S.nopen[k];drawNodes()}}
 function findN(id){for(var i=0;i<S.nodes.length;i++)if(S.nodes[i].id==id)return S.nodes[i]}
 function nAct(id,a){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+a).then(function(r){toast(r.ok===false?(r.result&&r.result.error||'failed'):t('Done'),r.ok===false);loadNodes()}).catch(fail)}
-function nDel(id){confirmDo(function(){api('DELETE','/api/nodes/'+encodeURIComponent(id)).then(function(){toast(t('Done'));loadNodes()}).catch(fail)})}
+function nDel(id){if(!confirm(t('Delete this server? Its users are cut off and the server itself removes WireGuard, AmneziaWG, Hysteria2 and KANKI MIX, closes their ports and uninstalls the node agent.')))return;toast(t('Removing…'));
+ api('DELETE','/api/nodes/'+encodeURIComponent(id)).then(function(r){toast(r.removed?t('Done: everything was removed from the server too'):t('Deleted from the panel. The server did not answer (or runs an old version): its VPN services stay until you uninstall them there.'),!r.removed);loadNodes()}).catch(fail)}
 function nHealth(id){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/health').then(function(r){var n=findN(id);
  modal(mhead(t('Health'),n?n.name:'')+'<p>'+(r.ok?'<span class="badge g">OK</span>':'<span class="badge r">'+t('Offline')+'</span>')+' <span class="ltr">'+r.ms+' ms</span> '+(r.version?'· v'+esc(r.version):'')+(r.load?' · load '+esc(r.load):'')+'</p>'+
  '<div class="list">'+((r.services||[]).map(function(s){return '<div class="li"><span>'+esc(s.key)+' <small class="ltr">'+esc(s.unit)+'</small></span><span class="badge '+(s.active?'g':'r')+'">'+esc(s.state)+'</span></div>'}).join(''))+'</div>')}).catch(fail)}
@@ -1647,11 +1652,22 @@ function stIran(){var box=$('#si_in');if(!box)return;api('GET','/api/sub-iran').
  box.innerHTML='<div class="g3"><div><label class="f">'+t('Tunnel server')+'</label><select id="si_srv"><option value="">—</option>'+(r.agents||[]).filter(function(a){return a.loc=='iran'||a.id==r.server}).map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id==r.server?' selected':'')+'>'+esc(a.name)+(a.ip?' ('+esc(a.ip)+')':'')+'</option>'}).join('')+'</select></div>'+
   '<div><label class="f">'+t('Domain')+'</label><input class="ltr" id="si_dom" placeholder="sub.example.com" value="'+esc(r.domain||'')+'"></div>'+
   '<div><label class="f">'+t('Port')+'</label><input class="ltr" id="si_port" inputmode="numeric" value="'+esc(String(r.port||2053))+'"></div></div>'+
-  '<div class="hint" id="si_ip"></div><div class="row" style="margin-top:8px"><button class="btn" type="button" id="si_go">'+t('Save')+'</button>'+(r.server?'<button class="b2 bd" type="button" id="si_rm">'+t('Remove')+'</button>':'')+'</div><div class="hint">'+msg+'</div>';
+  '<div class="hint" id="si_ip"></div><div class="row" style="margin-top:8px"><button class="btn" type="button" id="si_go">'+t('Save')+'</button>'+(r.server&&st.error?'<button class="b2" type="button" id="si_re">↻ '+t('Try SSL again')+'</button>':'')+(r.server?'<button class="b2 bd" type="button" id="si_rm">'+t('Remove')+'</button>':'')+'</div><div class="hint">'+msg+'</div>'+
+  (r.server&&st.error?'<details class="secc" style="margin-top:8px" open><summary>'+t('Why SSL is not taken')+'</summary><div class="bd2"><ul style="margin:0;padding-inline-start:18px;line-height:2">'+
+   ['The domain\'s A record must point to this Iran server\'s IP (not to a CDN while the certificate is taken: in ArvanCloud / Cloudflare set it to DNS only).',
+    'Let\'s Encrypt checks from outside Iran: port 80/TCP of the server must be open from abroad. Open it in the data center\'s firewall panel too; when international traffic is cut, SSL cannot be taken until it is back.',
+    'Port 80 busy: the error names the program. A Kanki tunnel that forwards port 80 holds it: take 80 out of that tunnel. Caddy / nginx are set aside by themselves for a few seconds.',
+    'After a failure the server waits (10 minutes, then longer) before it tries again; after fixing the cause press «Try SSL again».'].map(function(x){return '<li>'+esc(t(x))+'</li>'}).join('')+'</ul></div></details>':'');
  var ipHint=function(){var a=(r.agents||[]).filter(function(x){return x.id==$('#si_srv').value})[0];$('#si_ip').textContent=a?t('The domain\'s A record must point to this server\'s IP')+(a.ip?': '+a.ip:''):((r.agents||[]).some(function(x){return x.loc=='iran'})?'':t('Add a tunnel server inside Iran first (Servers), or set its location to Inside Iran.'))};
  ipHint();$('#si_srv').onchange=ipHint;
  $('#si_go').onclick=function(){var b=this;b.disabled=true;api('PUT','/api/sub-iran',{server:$('#si_srv').value,domain:$('#si_dom').value.trim(),port:+$('#si_port').value||2053}).then(function(){toast(t('Saved'));stIran()}).catch(function(e){b.disabled=false;fail(e)})};
- var rm=$('#si_rm');if(rm)rm.onclick=function(){confirmDo(function(){api('PUT','/api/sub-iran',{server:'',domain:''}).then(function(){toast(t('Done'));stIran()}).catch(fail)})}}).catch(function(e){box.textContent=e.message||''})}
+ var rm=$('#si_rm');if(rm)rm.onclick=function(){confirmDo(function(){api('PUT','/api/sub-iran',{server:'',domain:''}).then(function(){toast(t('Done'));stIran()}).catch(fail)})};
+ var re=$('#si_re');if(re)re.onclick=function(){re.disabled=true;api('POST','/api/tunnels/servers/'+encodeURIComponent(r.server)+'/ssl-retry').then(function(){toast(t('Sent: the server tries SSL again within a minute'));setTimeout(stIran,8000)}).catch(function(e){re.disabled=false;fail(e)})}}).catch(function(e){box.textContent=e.message||''})}
+Object.assign(FA,{"Try SSL again":"دوباره گرفتن SSL","Why SSL is not taken":"چرا SSL گرفته نمی‌شود","Sent: the server tries SSL again within a minute":"فرستاده شد: سرور تا یک دقیقه‌ی دیگر دوباره SSL می‌گیرد",
+ "The domain's A record must point to this Iran server's IP (not to a CDN while the certificate is taken: in ArvanCloud / Cloudflare set it to DNS only).":"رکورد A دامنه باید به آی‌پی همین سرور ایران اشاره کند (موقع گرفتن گواهی پشت CDN نباشد: در ابرآروان / کلادفلر روی «فقط DNS» بگذار).",
+ "Let's Encrypt checks from outside Iran: port 80/TCP of the server must be open from abroad. Open it in the data center's firewall panel too; when international traffic is cut, SSL cannot be taken until it is back.":"Let's Encrypt از خارج ایران چک می‌کند: پورت 80/TCP سرور باید از خارج باز باشد. در پنل فایروال دیتاسنتر هم بازش کن؛ وقتی اینترنت بین‌الملل قطع است، تا وصل نشود SSL گرفته نمی‌شود.",
+ "Port 80 busy: the error names the program. A Kanki tunnel that forwards port 80 holds it: take 80 out of that tunnel. Caddy / nginx are set aside by themselves for a few seconds.":"پورت ۸۰ پر: اسم برنامه در خطا هست. اگر یک تانل کانکی پورت ۸۰ را عبور می‌دهد، پورت دست خود اوست: ۸۰ را از آن تانل بردار. Caddy / nginx خودشان چند ثانیه کنار می‌روند.",
+ "After a failure the server waits (10 minutes, then longer) before it tries again; after fixing the cause press «Try SSL again».":"بعد از هر خطا سرور صبر می‌کند (۱۰ دقیقه، بعد بیشتر) و بعد دوباره امتحان می‌کند؛ بعد از رفع مشکل «دوباره گرفتن SSL» را بزن."});
 function stSub(d){var g=$('#sd_go'),m=$('#sd_msg');g.disabled=true;m.textContent=d?t('Getting the SSL certificate… this can take up to one minute'):'…';
  api('POST','/api/sub-domain',{domain:d}).then(function(r){S.st.sub_domain=r.domain||'';toast(t('Done'));pSettings()}).catch(function(e){g.disabled=false;m.textContent=e.message||'';fail(e)})}
 function stUpdate(force){autoUpdWire();var m=$('#st_um');if(!m||(!force&&m._done))return;m._done=1;m.className='vmsg';m.textContent=t('Checking…');
@@ -2263,8 +2279,13 @@ function tunSrvCard(s){var nt=((TN.d&&TN.d.tunnels)||[]).filter(function(x){retu
   (s.local?'':!s.loc?'<p class="hint">'+t('Location not set: choose it in Edit')+'</p>':s.loc_guess?'<p class="hint">'+t('Location guessed: confirm it in Edit')+'</p>':'')+
   '<div class="g'+(s.local?'1':'3')+'"><button class="b2" onclick="tunSrvEdit(\''+s.id+'\')">'+ic('edit',15)+' '+t('Edit')+'</button>'+(s.local?'':'<button class="b2" onclick="tunSrvCmd(\''+s.id+'\')">'+ic('link',15)+' '+t('Command')+'</button><button class="b2 bd" onclick="tunSrvDel(\''+s.id+'\')">'+ic('trash',15)+' '+t('Delete')+'</button>')+'</div></div>'}
 function tunAct(id,a){api('POST','/api/tunnels/'+id+'/'+a).then(function(){toast(a=='restart'?t('The tunnel reconnects in a few seconds'):t('Done'));tunRefresh()}).catch(fail)}
-function tunDel(id){confirmDo(function(){api('DELETE','/api/tunnels/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)})}
-function tunSrvDel(id){confirmDo(function(){api('DELETE','/api/tunnels/servers/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)})}
+function tunDel(id){if(!confirm(t('Delete this tunnel? It stops on both servers and its ports are closed in their firewalls.')))return;api('DELETE','/api/tunnels/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)}
+function tunSrvDel(id){if(!confirm(t('Remove this server from the panel? Within a few seconds it removes everything Kanki installed there (tunnels, Kanki DNS, Xray, emergency chat, subscription link), closes the ports Kanki opened and uninstalls its agent.')))return;api('DELETE','/api/tunnels/servers/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)}
+Object.assign(FA,{"Delete this server? Its users are cut off and the server itself removes WireGuard, AmneziaWG, Hysteria2 and KANKI MIX, closes their ports and uninstalls the node agent.":"این سرور حذف شود؟ کاربرهایش قطع می‌شوند و خود سرور WireGuard، AmneziaWG، Hysteria2 و KANKI MIX را برمی‌دارد، پورت‌هایشان را می‌بندد و ایجنت نود را پاک می‌کند.",
+ "Removing…":"در حال حذف…","Done: everything was removed from the server too":"انجام شد: همه چیز از روی خود سرور هم پاک شد",
+ "Deleted from the panel. The server did not answer (or runs an old version): its VPN services stay until you uninstall them there.":"از پنل حذف شد. سرور جواب نداد (یا نسخه‌اش قدیمی است): سرویس‌های VPN رویش می‌مانند تا خودت آن‌جا پاکشان کنی.",
+ "Delete this tunnel? It stops on both servers and its ports are closed in their firewalls.":"این تانل حذف شود؟ روی هر دو سرور خاموش می‌شود و پورت‌هایش در فایروال هر دو بسته می‌شود.",
+ "Remove this server from the panel? Within a few seconds it removes everything Kanki installed there (tunnels, Kanki DNS, Xray, emergency chat, subscription link), closes the ports Kanki opened and uninstalls its agent.":"این سرور از پنل حذف شود؟ تا چند ثانیه‌ی دیگر هر چه کانکی رویش نصب کرده (تانل‌ها، DNS کانکی، Xray، چت اضطراری، لینک اشتراک) پاک می‌شود، پورت‌هایی که کانکی باز کرده بسته می‌شود و ایجنتش حذف می‌شود."});
 
 // ---- servers
 function tunCmdBox(s,d){var cmd=tunCmd(s,d);
@@ -2405,9 +2426,9 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<small class="muted" id="tw_pn" style="display:block;margin-bottom:6px"></small>'+
   '<div class="g2"><div><label class="f">TCP</label><input id="tw_tcp" class="ltr" value="'+esc((x.tcp||[]).join(', '))+'" placeholder="443, 2053"></div><div><label class="f">UDP</label><input id="tw_udp" class="ltr" value="'+esc((x.udp||[]).join(', '))+'" placeholder="51820, 51821, 8443"></div></div>'+
   '<small class="muted">'+t('Users connect to these ports on the entry; they reach the same ports on the exit. Use 8443:443 to change the port, 1000-1010 for a range.')+'</small></div></div>'+
-  sec(6,'More')+'<label class="chk rotk"><input type="checkbox" id="tw_au" '+(x.auto?'checked':'')+'><span><b>🔁 '+t('Rotating tunnel')+'</b><small>'+t('If it stays down, it switches by itself: KCP → TCP Mux → QUIC → WS → WSS → TCP (balanced, reverse)')+'</small></span></label>'+
+  '<details class="tws twm"'+(x.auto||(x.dial&&x.transport!='cdn')||x.target?' open':'')+'><summary><h4><i>'+N(6)+'</i>'+t('More')+' <small class="muted" style="font-weight:600">'+t('rotating tunnel, address to dial, target')+'</small></h4></summary><label class="chk rotk"><input type="checkbox" id="tw_au" '+(x.auto?'checked':'')+'><span><b>🔁 '+t('Rotating tunnel')+'</b><small>'+t('If it stays down, it switches by itself: KCP → TCP Mux → QUIC → WS → WSS → TCP (balanced, reverse)')+'</small></span></label>'+
   '<div class="g2"><div><label class="f">'+t('Address to dial (empty = the server’s address)')+'</label><input id="tw_dl" class="ltr" value="'+esc(x.transport=='cdn'?'':(x.dial||''))+'"></div>'+
-  '<div><label class="f">'+t('Target on the exit')+'</label><input id="tw_tg" class="ltr" value="'+esc(x.target||'')+'" placeholder="127.0.0.1"></div></div></div>'+
+  '<div><label class="f">'+t('Target on the exit')+'</label><input id="tw_tg" class="ltr" value="'+esc(x.target||'')+'" placeholder="127.0.0.1"></div></div></details>'+
   '<div class="g2" style="margin-top:14px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="tw_go">'+(id?t('Save'):t('Make the tunnel'))+'</button></div>','wide');
  var st={mode:mode,tr:tr,kind:kind,wrap:!!A.wrap};
  function hint(){var en=$('#tw_en').value,ex=$('#tw_ex').value,l=st.mode=='direct'?ex:en,pt=$('#tw_pt');

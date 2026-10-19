@@ -174,6 +174,58 @@ pub fn set_ports(b: &Value) -> Value {
 }
 
 /// Restart VPN services that are installed; returns their new state
+/// This node was deleted in the panel: its VPN services (WireGuard, AmneziaWG, Hysteria2, KANKI MIX)
+/// are stopped and turned off, their firewall ports closed, the web server in front of the node agent
+/// goes when it serves nothing else, and the node agent removes itself. Runs a moment after the answer
+/// was sent (the answer goes through that web server). Blocking.
+pub fn remove_node() {
+    const WGC: &str = "/etc/wireguard/wg0.conf";
+    const AWGC: &str = "/etc/amnezia/amneziawg/awg0.conf";
+    const ENVF: &str = "/etc/kanki/kanki.env";
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    // the main panel runs on this machine too: its VPN is the panel's own, nothing is removed (the
+    // users of this node were already taken off by the empty sync)
+    if std::path::Path::new("/etc/systemd/system/kanki-panel.service").exists() {
+        eprintln!("deleted in the panel, but the main panel runs here: VPN services are kept");
+        return;
+    }
+    let env = crate::util::load_env(ENVF);
+    let mut close: Vec<String> = vec![];
+    for p in [conf_port(WGC, "ListenPort"), conf_port(AWGC, "ListenPort"), conf_port(ENVF, "HY2_PORT")].into_iter().flatten() {
+        close.push(crate::fw::rule(p, true));
+    }
+    let _ = crate::kmix::apply(&crate::kmix::KmixCfg::default());
+    for unit in ["wg-quick@wg0", "awg-quick@awg0", "hysteria-server"] {
+        let _ = Command::new("systemctl").args(["disable", "--now", "-q", unit]).status();
+    }
+    // the web server in front of the node agent: only when its Caddyfile is the one the installer wrote
+    let public = env.get("NODE_PUBLIC_PORT").and_then(|p| p.trim().parse::<u16>().ok());
+    if let Some(pp) = public {
+        let cf = std::fs::read_to_string("/etc/caddy/Caddyfile").unwrap_or_default();
+        let ours = cf.contains(&format!("https://:{} {{", pp)) && cf.matches("reverse_proxy").count() == 1;
+        if ours {
+            let _ = Command::new("systemctl").args(["disable", "--now", "-q", "caddy"]).status();
+        }
+        if ours || !crate::certbot::listening(pp, false) {
+            close.push(crate::fw::rule(pp, false));
+        }
+    }
+    for r in close.iter().filter(|r| crate::fw::valid_rule(r)) {
+        let _ = Command::new("sh").arg("-c").arg(format!("command -v ufw >/dev/null 2>&1 && ufw --force delete allow {} >/dev/null 2>&1", r)).status();
+    }
+    eprintln!("deleted in the panel: VPN services stopped, the node agent removes itself");
+    let _ = std::fs::remove_file(ENVF);
+    let tunnel_too = std::path::Path::new("/etc/systemd/system/kanki-tunnel.service").exists();
+    if !tunnel_too {
+        if let Ok(exe) = std::env::current_exe() {
+            let _ = std::fs::remove_file(exe.to_string_lossy().replace(" (deleted)", ""));
+        }
+    }
+    let _ = Command::new("sh").arg("-c").arg("systemctl disable -q kanki-node 2>/dev/null; rm -f /etc/systemd/system/kanki-node.service; systemctl daemon-reload").status();
+    let _ = Command::new("systemctl").args(["stop", "kanki-node"]).status();
+    std::process::exit(0);
+}
+
 pub fn repair_services() -> Value {
     let mut out = vec![];
     for (k, unit) in SERVICES.iter().filter(|(k, _)| !["web", "panel", "node"].contains(k)) {

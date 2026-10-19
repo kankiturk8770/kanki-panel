@@ -8,6 +8,8 @@ mod util;
 mod certbot;
 #[path = "core/pin.rs"]
 mod pin;
+#[path = "core/fw.rs"]
+mod fw;
 #[path = "core/live.rs"]
 mod live;
 

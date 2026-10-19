@@ -1,6 +1,6 @@
 // Kanki Panel: the Kanki DNS page (v3.5). Tabs: overview, servers, services, users, settings and SSL.
 var DN={d:null,tab:'overview',q:'',users:null};
-var DTABS=[['overview','Overview','dash'],['servers','DNS servers','srv'],['services','Services','globe'],['users','DNS users','users'],['log','Query log','traffic'],['settings','Settings and SSL','settings']];
+var DTABS=[['overview','Overview','dash'],['servers','DNS servers','srv'],['pubg','PUBG and games','globe'],['services','Services','globe'],['users','DNS users','users'],['log','Query log','traffic'],['settings','Settings and SSL','settings']];
 var UPSTREAMS=[['Cloudflare','1.1.1.1, 1.0.0.1'],['Google','8.8.8.8, 8.8.4.4'],['Quad9','9.9.9.9, 149.112.112.112'],['AdGuard (no ads)','94.140.14.14, 94.140.15.15'],['OpenDNS','208.67.222.222, 208.67.220.220']];
 function p_dns(){DN.tab=S.sub||'overview';
  $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Kanki DNS')+'</h2><p>'+t('Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="dnsAdd(\'relay\')">+ '+t('Add relay')+'</button><button class="btn" onclick="dnsAdd(\'exit\')">+ '+t('Add DNS server')+'</button></div></div>'+
@@ -16,7 +16,7 @@ function dnsLoad(quiet){return api('GET','/api/dns').then(function(d){DN.d=d;if(
    if(DN.tab=='settings'&&$('#dn_cert')){$('#dn_cert').innerHTML=dnsCertState(d);return d}return d}
   dnsDraw(d);return d}).catch(fail)}
 function dnsName(id){var a=(DN.d&&DN.d.agents)||[];for(var i=0;i<a.length;i++)if(a[i].id==id)return a[i].name;return id}
-function dnsDraw(d){var el=$('#dn');if(!el)return;dnsTabs(d);({overview:dnsOverview,servers:dnsServersTab,services:dnsServicesTab,users:dnsUsersTab,log:dnsLogTab,settings:dnsSettingsTab}[DN.tab]||dnsOverview)(d,el)}
+function dnsDraw(d){var el=$('#dn');if(!el)return;dnsTabs(d);({overview:dnsOverview,servers:dnsServersTab,pubg:dnsPubgTab,services:dnsServicesTab,users:dnsUsersTab,log:dnsLogTab,settings:dnsSettingsTab}[DN.tab]||dnsOverview)(d,el)}
 function dnsSum(d,f){return d.servers.reduce(function(a,x){return a+(+f(x.status||{})||0)},0)}
 function dnsKpis(d){var run=d.servers.filter(function(x){return x.status&&x.status.active}).length,q=dnsSum(d,function(s){return s.q&&s.q.total}),r=dnsSum(d,function(s){return s.q&&s.q.routed});
  return '<div><small>'+t('Status')+'</small><b style="color:'+(d.on?'var(--ok)':'var(--bad)')+'">'+(d.on?t('On'):t('Off'))+'</b></div><div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(d.servers.length)+'</b></div>'+
@@ -178,3 +178,56 @@ function dnsAdd(role){var go=function(){var h=dnsForm(null,role);if(h===null)ret
 function dnsEdit(id){var x=DN.d.servers.filter(function(s){return s.server==id})[0];if(!x)return;var h=dnsForm(x,x.role);if(h===null)return;
  modal(mhead(t('Edit'),x.name)+h);$('#dx_lb').oninput=dnsLbHint;dnsLbHint();$('#dx_go').onclick=function(){api('POST','/api/dns/servers',dnsBody(x.role,id)).then(function(q){toast(t('Saved'));closeModal();dnsLoad()}).catch(fail)}}
 function dnsDel(id){confirmDo(function(){api('DELETE','/api/dns/servers/'+encodeURIComponent(id)).then(function(){toast(t('Done'));dnsLoad()}).catch(fail)})}
+
+
+// ---- PUBG and games tab: every PUBG Mobile name in one place, what each part does, and which to turn on
+function dnFA(){if(dnFA.done||typeof FA=='undefined')return;dnFA.done=1;Object.assign(FA,{
+ "PUBG and games":"پابجی و بازی‌ها",
+ "PUBG Mobile through Kanki DNS":"پابجی موبایل با DNS کانکی",
+ "Pick one: it changes only the PUBG Mobile names below.":"یکی را انتخاب کن: فقط نام‌های پابجی موبایل پایین عوض می‌شوند.",
+ "Direct":"مستقیم","Nothing of PUBG passes your servers. Fine where the game opens without help.":"هیچ چیز پابجی از سرورهای تو رد نمی‌شود. برای جاهایی که بازی بدون کمک باز می‌شود.",
+ "Login and lobby (recommended)":"ورود و لابی (پیشنهادی)","Login, account, lobby and the UC store go through your server; the match stays direct.":"ورود، حساب، لابی و فروشگاه UC از سرور تو رد می‌شوند؛ خود مسابقه مستقیم می‌ماند.",
+ "Everything":"همه","Also updates and anti-cheat. Use it when the game still stops at login or the update does not download.":"آپدیت و ضدتقلب هم. وقتی بازی هنوز روی ورود می‌ماند یا آپدیت دانلود نمی‌شود.",
+ "Now":"الان","Custom":"دلخواه","Saved: the DNS servers use it within a few seconds":"ذخیره شد: سرورهای DNS تا چند ثانیه‌ی دیگر از آن استفاده می‌کنند",
+ "Parts of PUBG Mobile":"بخش‌های پابجی موبایل","Every name of a ticked part and all its subdomains go through your server.":"همه‌ی نام‌های بخش تیک‌خورده و همه‌ی زیردامنه‌هایشان از سرور تو رد می‌شوند.",
+ "PUBG names your users asked":"نام‌های پابجی که کاربرهایت پرسیده‌اند","From the query log: a direct name that the game needs can be added here.":"از گزارش پرس‌وجوها: اگر نامی که بازی لازم دارد مستقیم رفته، از همین‌جا اضافه‌اش کن.",
+ "Add":"افزودن","No PUBG query in the log yet: open the game on a phone that uses your DNS, then press Refresh.":"هنوز پرس‌وجوی پابجی در گزارش نیست: بازی را روی گوشی‌ای که DNS تو را دارد باز کن، بعد «تازه‌سازی» را بزن.",
+ "PUBG on PC (Krafton)":"پابجی کامپیوتر (Krafton)","It is in Services › Games › Other games.":"در «سرویس‌ها › بازی‌ها › بازی‌های دیگر» است."});}
+var PUBG_ART=[
+ ['How a PUBG Mobile connection goes','مسیر اتصال پابجی موبایل','<ol style="margin:0;padding-inline-start:18px;line-height:2.1"><li><b>ورود و لابی</b> (TCP، روی HTTPS): بازی اول به سرورهای ورود، حساب و لابی وصل می‌شود. این همان جایی است که تحریم و فیلتر جلویش را می‌گیرد و بازی روی «در حال اتصال» می‌ماند. DNS کانکی این بخش را از سرور تو رد می‌کند.</li><li><b>مسابقه</b> (UDP): بعد از لابی، بازی مستقیم با آی‌پی سرور مسابقه حرف می‌زند. این بخش اصلاً از DNS نمی‌گذرد، پس پینگ بازی بالا نمی‌رود و لازم نیست کاری بکنی.</li><li><b>آپدیت و فایل‌ها</b>: دانلودهای حجیم بازی. فقط وقتی آپدیت از ایران دانلود نمی‌شود از سرور رد کن.</li></ol>'],
+ ['I connect straight with my DNS and the game does not open','مستقیم با DNS خودم وصل می‌شوم ولی بازی باز نمی‌شود','<ul style="margin:0;padding-inline-start:18px;line-height:2.1"><li>بخش «ورود، حساب و لابی» به‌صورت پیش‌فرض <b>خاموش</b> است (چون روی بیشتر اپراتورها بازی خودش باز می‌شود). وقتی خاموش است، DNS تو برای پابجی همان آی‌پی واقعی را می‌دهد و بازی مستقیم می‌رود؛ جایی که مستقیم بسته است بازی باز نمی‌شود. حالت <b>«ورود و لابی»</b> را بالا انتخاب کن.</li><li>اگر باز هم روی ورود ماند: حالت <b>«همه»</b> را امتحان کن (ضدتقلب و آپدیت هم رد می‌شوند).</li><li>بعد از عوض کردن، گوشی جواب قبلی DNS را نگه می‌دارد: بازی را کامل ببند، یک بار حالت پرواز را روشن و خاموش کن و دوباره باز کن.</li><li>گوشی باید واقعاً از DNS تو استفاده کند: در اپ کانکی «رفع تحریم» را بزن (یا Private DNS اندروید = آدرس DNS کاربر). اگر کاربر ثبت نشده باشد سرور جواب نمی‌دهد.</li><li>پایین همین صفحه می‌بینی گوشی کاربرها کدام نام‌های پابجی را پرسیده‌اند و کدام <b>مستقیم</b> رفته‌اند. اگر نامی مستقیم رفته که بازی لازمش دارد، «افزودن» را بزن.</li><li>اگر سرور DNS در ایران است (رله)، ترافیک لابی از تانل به سرور خارج می‌رود: تانل رله باید بالا باشد (صفحه‌ی سرورهای DNS).</li></ul>'],
+ ['Which one so that everyone can play?','کدام را روشن کنم که همه بتوانند بازی کنند؟','<p style="margin:0;line-height:2.1">برای بیشتر کاربرها <b>«ورود و لابی (پیشنهادی)»</b> کافی است: فقط اتصال اول و فروشگاه از سرور تو رد می‌شود و خود بازی مستقیم و با پینگ کم می‌ماند. «همه» را فقط وقتی بزن که با «ورود و لابی» هنوز مشکل هست؛ ترافیک آپدیت‌ها هم از سرورهای تو رد می‌شود. DNS فقط HTTPS (پورت ۴۴۳) و HTTP (پورت ۸۰) را رد می‌کند؛ UDP مسابقه همیشه مستقیم است و این درست است.</p>']];
+var PUBG_MODES=[['direct','Direct',[]],['lobby','Login and lobby (recommended)',['main','store']],['all','Everything',['main','store','anticheat','update']]];
+function dnsPubgSvc(d){return ((d.catalog||{}).services||[]).filter(function(s){return s.key=='pubgmobile'})[0]}
+function dnsPubgMode(d){var on=(d.opt||[]).filter(function(x){return x.indexOf('pubgmobile/')==0}).map(function(x){return x.split('/')[1]}).sort().join(',');
+ for(var i=0;i<PUBG_MODES.length;i++)if(PUBG_MODES[i][2].slice().sort().join(',')==on)return PUBG_MODES[i][0];return 'custom'}
+function dnsPubgSave(d,keys){var opt=(d.opt||[]).filter(function(x){return x.indexOf('pubgmobile/')!=0}).concat(keys.map(function(k){return 'pubgmobile/'+k}));
+ var off=(d.off||[]).filter(function(x){return x.indexOf('pubgmobile/')!=0});
+ return api('PUT','/api/dns',{opt:opt,off:off}).then(function(){toast(t('Saved: the DNS servers use it within a few seconds'));return dnsLoad()})}
+function dnsPubgTab(d,el){dnFA();var sv=dnsPubgSvc(d),mode=dnsPubgMode(d),fa=S.lang!='en';
+ if(!sv){el.innerHTML='<div class="card"><p class="muted">PUBG Mobile</p></div>';return}
+ var art=PUBG_ART.map(function(a,i){return '<details class="secc"'+(i<2?' open':'')+'><summary>'+esc(fa?a[1]:a[0])+'<span class="chev">'+ic('chev',14)+'</span></summary><div class="bd2" style="font-size:13px">'+a[2]+'</div></details>'}).join('');
+ el.innerHTML=dnsWarn(d)+
+  '<div class="card"><h3>'+ic('globe',16)+' '+t('PUBG Mobile through Kanki DNS')+'</h3><p class="sub">'+t('Pick one: it changes only the PUBG Mobile names below.')+'</p>'+
+  '<div class="g3" id="pg_modes" style="margin-top:10px">'+PUBG_MODES.map(function(m){var on=m[0]==mode;return '<button type="button" class="b2" data-pm="'+m[0]+'" style="text-align:start;display:block;padding:12px;white-space:normal;'+(on?'border-color:var(--a);background:color-mix(in srgb,var(--a) 12%,transparent)':'')+'"><b style="display:flex;gap:6px;align-items:center">'+(on?'<span class="dot g"></span>':'')+esc(t(m[1]))+(on?' <small class="muted">· '+t('Now')+'</small>':'')+'</b><small class="muted" style="display:block;margin-top:4px;line-height:1.8">'+esc(t(m[0]=='direct'?'Nothing of PUBG passes your servers. Fine where the game opens without help.':m[0]=='lobby'?'Login, account, lobby and the UC store go through your server; the match stays direct.':'Also updates and anti-cheat. Use it when the game still stops at login or the update does not download.'))+'</small></button>'}).join('')+'</div>'+
+  (mode=='custom'?'<p class="hint">'+t('Now')+': '+t('Custom')+'</p>':'')+'</div>'+
+  art+
+  '<div class="card"><h3>'+t('Parts of PUBG Mobile')+'</h3><p class="sub">'+t('Every name of a ticked part and all its subdomains go through your server.')+'</p>'+
+  sv.groups.map(function(g){var id='pubgmobile/'+g.key,on=(d.opt||[]).indexOf(id)>=0;
+   return '<div class="vrow" style="flex-wrap:wrap;align-items:flex-start"><label class="sw" style="flex:none"><input type="checkbox" class="pg_g" data-k="'+esc(g.key)+'" '+(on?'checked':'')+'><span></span></label><div class="nm"><b>'+esc(g.label)+' <small class="muted">('+N(g.domains.length)+')</small></b>'+(g.note?'<small>'+esc(g.note)+'</small>':'')+
+    '<div class="chs" style="margin-top:6px">'+g.domains.map(function(x){return '<span class="chipx ltr">*.'+esc(x)+'</span>'}).join('')+'</div></div></div>'}).join('')+
+  '<div class="sbar"><button class="btn" id="pg_save">'+t('Save')+'</button></div></div>'+
+  '<div class="card"><div class="nh"><div><h3>'+t('PUBG names your users asked')+'</h3><p class="sub" style="margin:0">'+t('From the query log: a direct name that the game needs can be added here.')+'</p></div><button class="b2" id="pg_re">'+t('Refresh')+'</button></div><div id="pg_log" style="margin-top:10px">'+t('Loading…')+'</div></div>'+
+  '<p class="hint">'+t('PUBG on PC (Krafton)')+': '+t('It is in Services › Games › Other games.')+'</p>';
+ $$('#pg_modes [data-pm]').forEach(function(b){b.onclick=function(){var m=PUBG_MODES.filter(function(x){return x[0]==b.dataset.pm})[0];dnsPubgSave(d,m[2]).catch(fail)}});
+ $('#pg_save').onclick=function(){dnsPubgSave(d,$$('.pg_g').filter(function(c){return c.checked}).map(function(c){return c.dataset.k})).catch(fail)};
+ $('#pg_re').onclick=function(){dnsPubgLog(d)};dnsPubgLog(d)}
+// PUBG names in the query log (a few searches merged)
+function dnsPubgLog(d){var el=$('#pg_log');if(!el)return;var keys=['pubg','igamecj','intlgame','gcloud','proximabeta','tencent','anticheat','midas','levelinfinite','tdatamaster','amsoveasea','cloudpvp','igamebuy'],seen={},rows=[];
+ Promise.all(keys.map(function(k){return api('GET','/api/dns/log?kind=&q='+encodeURIComponent(k)+'&limit=300').catch(function(){return {names:[]}})})).then(function(rs){
+  rs.forEach(function(r){(r.names||[]).forEach(function(x){if(seen[x.name])return;seen[x.name]=1;rows.push(x)})});
+  rows.sort(function(a,b){return (a.routed-b.routed)||(b.count-a.count)});
+  var el2=$('#pg_log');if(!el2)return;
+  if(!rows.length){el2.innerHTML='<p class="muted">'+t('No PUBG query in the log yet: open the game on a phone that uses your DNS, then press Refresh.')+'</p>';return}
+  el2.innerHTML=rows.map(function(x){return '<div class="vrow"><span class="dot '+(x.routed?'g':'')+'"></span><div class="nm"><b class="ltr"><bdi>'+esc(x.name)+'</bdi></b><small>'+N(x.count)+' '+t('times')+' · '+(x.routed?t('routed')+(x.service?' · '+esc(x.service):''):t('direct'))+'</small></div>'+(x.routed?'':'<button class="b2" data-add="'+esc(x.name)+'">+ '+t('Add')+'</button>')+'</div>'}).join('');
+  $$('#pg_log [data-add]').forEach(function(b){b.onclick=function(){var c=(DN.d.custom||[]).slice(),n=b.dataset.add;if(c.indexOf(n)<0)c.push(n);api('PUT','/api/dns',{custom:c}).then(function(){toast(t('Saved'));dnsLoad(true).then(function(){dnsPubgLog(DN.d)})}).catch(fail)}})})}

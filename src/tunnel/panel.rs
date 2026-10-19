@@ -134,6 +134,8 @@ struct Seen {
     status: Vec<Status>,
     /// the emergency chat on this server (Null when it does not run one)
     emergency: Value,
+    /// the firewall ports Kanki opened here, and the open ones nothing uses (see `fw::report`)
+    fw: Value,
 }
 
 fn seen() -> &'static Mutex<HashMap<String, Seen>> {
@@ -1193,24 +1195,16 @@ fn next_transport(order: &[String], cur: &str, ok: impl Fn(&str) -> bool) -> Opt
 
 pub async fn local_loop(app: Arc<App>) {
     let mgr = Manager::default();
-    let opened = Mutex::new(HashSet::new());
     loop {
         let specs = specs_for(&app, "local");
         let ps = specs.clone();
-        let set = std::mem::take(&mut *opened.lock().unwrap());
-        let set = tokio::task::spawn_blocking(move || {
-            let m = Mutex::new(set);
-            super::agent::open_ports(&ps, &m);
-            m.into_inner().unwrap_or_default()
-        })
-        .await
-        .unwrap_or_default();
-        *opened.lock().unwrap() = set;
+        // stopped first, so the ports of a deleted tunnel are free when they are closed
         mgr.apply(specs).await;
+        let _ = tokio::task::spawn_blocking(move || super::agent::open_ports(&ps)).await;
         let st = mgr.statuses().await;
         seen().lock().unwrap().insert(
             "local".into(),
-            Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, emergency: Value::Null },
+            Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, emergency: Value::Null, fw: Value::Null },
         );
         // the emergency chat may run on the panel server itself
         let want = if app.db.get("emer_server") == "local" { emer_cfg(&app) } else { None };
@@ -1334,6 +1328,8 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/tunnels/servers", post(server_add))
         .route("/api/tunnels/servers/:id", delete(server_del).put(server_edit))
         .route("/api/tunnels/servers/:id/free-ports", post(server_free_ports))
+        .route("/api/tunnels/servers/:id/ssl-retry", post(server_ssl_retry))
+        .route("/api/tunnels/servers/:id/firewall", get(server_fw).post(server_fw_close))
         .route("/api/tunnels/:id", delete(tunnel_del))
         .route("/api/tunnels/:id/awgconf/:side", get(awg_conf))
         .route("/api/tunnels/:id/hy2conf/:side", get(hy2_conf))
@@ -1876,6 +1872,61 @@ fn frees() -> &'static Mutex<HashMap<String, Vec<String>>> {
     S.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Servers asked to try SSL again at once (sent with their next report)
+fn ssl_retries() -> &'static Mutex<std::collections::HashSet<String>> {
+    static S: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new(std::collections::HashSet::new()))
+}
+
+/// Firewall rules the admin asked to close on a server (open in ufw, nothing uses them)
+fn fw_closes() -> &'static Mutex<HashMap<String, Vec<String>>> {
+    static S: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// "Try SSL again": the server forgets the waits after earlier certbot failures (every SSL of that server)
+pub(crate) fn ask_ssl_retry(id: &str) {
+    ssl_retries().lock().unwrap().insert(id.to_string());
+}
+
+async fn server_ssl_retry(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    if id == "local" {
+        let _ = tokio::task::spawn_blocking(crate::certbot::retry_now).await;
+        return Json(json!({ "ok": true })).into_response();
+    }
+    if !servers(&app).iter().any(|s| s.id == id) {
+        return err(StatusCode::NOT_FOUND, "unknown server");
+    }
+    ask_ssl_retry(&id);
+    Json(json!({ "ok": true })).into_response()
+}
+
+/// The firewall of a server: { owners: { tunnels: [...], dns: [...] }, unused: ["8443/tcp"] }
+async fn server_fw(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let v = if id == "local" { tokio::task::spawn_blocking(crate::fw::report).await.unwrap_or_default() } else { seen().lock().unwrap().get(&id).map(|x| x.fw.clone()).unwrap_or(Value::Null) };
+    Json(v).into_response()
+}
+
+/// { rules: ["8443/tcp"] }: close firewall ports nothing uses (the server checks each one again)
+async fn server_fw_close(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let rules: Vec<String> = b["rules"].as_array().into_iter().flatten().filter_map(|r| r.as_str()).filter(|r| crate::fw::valid_rule(r)).map(|r| r.to_string()).collect();
+    if rules.is_empty() {
+        return err(StatusCode::BAD_REQUEST, "no port to close");
+    }
+    if id == "local" {
+        let _ = tokio::task::spawn_blocking(move || crate::fw::close_unused(&rules)).await;
+        return Json(json!({ "ok": true })).into_response();
+    }
+    if !servers(&app).iter().any(|s| s.id == id) {
+        return err(StatusCode::NOT_FOUND, "unknown server");
+    }
+    fw_closes().lock().unwrap().insert(id, rules);
+    Json(json!({ "ok": true })).into_response()
+}
+
 /// { units: ["caddy.service"] } (Health › Free the ports)
 async fn server_free_ports(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
@@ -1911,8 +1962,20 @@ async fn server_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
         return err(StatusCode::CONFLICT, &format!("delete its tunnels first: {}", used.join(", ")));
     }
     let mut list = servers(&app);
+    if !list.iter().any(|s| s.id == id) {
+        return err(StatusCode::NOT_FOUND, "unknown server");
+    }
     list.retain(|s| s.id != id);
     save_servers(&app, &list);
+    // everything else the panel ran there goes with it; the agent sees it is gone, removes what Kanki
+    // installed (tunnels, Kanki DNS, Xray, emergency chat, subscription listener), closes the firewall
+    // ports it opened and uninstalls itself
+    crate::dns::panel::forget_server(&app, &id);
+    crate::xray::panel::forget_server(&app, &id);
+    crate::subiran::forget_server(&app, &id);
+    if app.db.get("emer_server") == id {
+        app.db.set("emer_server", "");
+    }
     seen().lock().unwrap().remove(&id);
     Json(json!({ "ok": true })).into_response()
 }
@@ -2148,7 +2211,7 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         let mut sn = seen().lock().unwrap();
         let prev = sn.get(&id).map(|x| x.ip.clone()).unwrap_or_default();
         let ip = sticky_ip(&prev, &fresh_ip);
-        sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status, emergency: b["emergency"].clone() });
+        sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status, emergency: b["emergency"].clone(), fw: b["fw"].clone() });
     }
     let ver = b["version"].as_str().unwrap_or("");
     let until = app.db.get("tun_update_until").parse::<i64>().unwrap_or(0);
@@ -2180,7 +2243,9 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     let subsrv = crate::subiran::cfg_for(&app, &id);
     // services to stop for our ports (asked in Health)
     let free = frees().lock().unwrap().remove(&id).unwrap_or_default();
-    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "subsrv": subsrv, "free": free })).into_response()
+    let ssl_retry = ssl_retries().lock().unwrap().remove(&id);
+    let fw_close = fw_closes().lock().unwrap().remove(&id).unwrap_or_default();
+    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)

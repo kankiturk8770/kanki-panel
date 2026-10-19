@@ -213,7 +213,20 @@ fn open_db(path: &str) -> Connection {
          CREATE INDEX IF NOT EXISTS msgs_user ON msgs(user, id);",
     )
     .expect("prepare the chat database");
+    // read receipts (3.6.8): an admin message the customer has read in the app
+    let _ = c.execute("ALTER TABLE msgs ADD COLUMN rd INTEGER NOT NULL DEFAULT 0", []);
     c
+}
+
+/// (the newest admin message the app has, the newest admin message the customer read, the newest
+/// customer message the admin read) of a conversation: every message up to each id has that tick
+fn ticks_of(db: &Connection, user: &str) -> (i64, i64, i64) {
+    let q = |sql: &str| db.query_row(sql, params![user], |r| r.get::<_, i64>(0)).unwrap_or(0);
+    (
+        q("SELECT COALESCE(MAX(id),0) FROM msgs WHERE user=?1 AND admin=1 AND seen=1"),
+        q("SELECT COALESCE(MAX(id),0) FROM msgs WHERE user=?1 AND admin=1 AND rd=1"),
+        q("SELECT COALESCE(MAX(id),0) FROM msgs WHERE user=?1 AND admin=0 AND seen=1"),
+    )
 }
 
 /// image type from its first bytes (only these are accepted)
@@ -267,15 +280,15 @@ fn list(srv: &Srv, user: &str, after: i64) -> Vec<Value> {
     let db = srv.db.lock().unwrap_or_else(|e| e.into_inner());
     // first load (after = 0): the newest 200; later: what came after
     let q = if after == 0 {
-        "SELECT * FROM (SELECT id,admin,kind,body,ts,sig,img IS NOT NULL,seen FROM msgs WHERE user=?1 AND id>?2 ORDER BY id DESC LIMIT 200) ORDER BY id"
+        "SELECT * FROM (SELECT id,admin,kind,body,ts,sig,img IS NOT NULL,seen,rd FROM msgs WHERE user=?1 AND id>?2 ORDER BY id DESC LIMIT 200) ORDER BY id"
     } else {
-        "SELECT id,admin,kind,body,ts,sig,img IS NOT NULL,seen FROM msgs WHERE user=?1 AND id>?2 ORDER BY id LIMIT 200"
+        "SELECT id,admin,kind,body,ts,sig,img IS NOT NULL,seen,rd FROM msgs WHERE user=?1 AND id>?2 ORDER BY id LIMIT 200"
     };
     let Ok(mut st) = db.prepare(q) else { return vec![] };
     let rows = st.query_map(params![user, after], |r| {
         Ok(json!({
             "id": r.get::<_, i64>(0)?, "admin": r.get::<_, i64>(1)? == 1, "kind": r.get::<_, String>(2)?,
-            "body": r.get::<_, String>(3)?, "ts": r.get::<_, i64>(4)?, "sig": r.get::<_, String>(5)?, "img": r.get::<_, bool>(6)?, "seen": r.get::<_, i64>(7)? == 1,
+            "body": r.get::<_, String>(3)?, "ts": r.get::<_, i64>(4)?, "sig": r.get::<_, String>(5)?, "img": r.get::<_, bool>(6)?, "seen": r.get::<_, i64>(7)? == 1, "read": r.get::<_, i64>(8)? == 1,
         }))
     });
     rows.map(|it| it.flatten().collect()).unwrap_or_default()
@@ -316,9 +329,30 @@ async fn u_messages(State(s): St, Extension(p): Extension<Peer>, h: HeaderMap, Q
         Err(r) => return r,
     };
     let msgs = list(&s, &u, q.after);
-    // the app has them now: the admin sees a green tick
-    let _ = s.db.lock().unwrap_or_else(|e| e.into_inner()).execute("UPDATE msgs SET seen=1 WHERE user=?1 AND admin=1 AND seen=0", params![u]);
-    Json(json!({ "user": u, "messages": msgs })).into_response()
+    // the app has them now: the admin sees ✓✓ (delivered); read = the customer opened the chat
+    let db = s.db.lock().unwrap_or_else(|e| e.into_inner());
+    let _ = db.execute("UPDATE msgs SET seen=1 WHERE user=?1 AND admin=1 AND seen=0", params![u]);
+    // the customer's own messages the admin has read (the app shows ✓✓ on every one up to this id)
+    let (_, _, admin_read) = ticks_of(&db, &u);
+    Json(json!({ "user": u, "messages": msgs, "read_upto": admin_read })).into_response()
+}
+
+#[derive(Deserialize)]
+struct ReadBody {
+    /// the newest admin message the customer has seen on screen
+    #[serde(default)]
+    upto: i64,
+}
+
+/// The app: the customer has read the admin's messages up to `upto` (the admin sees blue ✓✓)
+async fn u_read(State(s): St, Extension(p): Extension<Peer>, h: HeaderMap, Json(b): Json<ReadBody>) -> Response {
+    let u = match user_or_deny(&s, &h, &p) {
+        Ok(u) => u,
+        Err(r) => return r,
+    };
+    let db = s.db.lock().unwrap_or_else(|e| e.into_inner());
+    let n = db.execute("UPDATE msgs SET rd=1, seen=1 WHERE user=?1 AND admin=1 AND rd=0 AND id<=?2", params![u, b.upto]).unwrap_or(0);
+    Json(json!({ "ok": true, "marked": n })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -434,9 +468,9 @@ async fn a_thread(State(s): St, h: HeaderMap, Path(user): Path<String>, Query(q)
     let msgs = list(&s, &user, q.after);
     let db = s.db.lock().unwrap_or_else(|e| e.into_inner());
     let _ = db.execute("UPDATE msgs SET seen=1 WHERE user=?1 AND admin=0", params![user]);
-    // admin messages up to this id have reached the app (green ticks)
-    let seen_upto: i64 = db.query_row("SELECT COALESCE(MAX(id),0) FROM msgs WHERE user=?1 AND admin=1 AND seen=1", params![user], |r| r.get(0)).unwrap_or(0);
-    Json(json!({ "messages": msgs, "seen_upto": seen_upto })).into_response()
+    // admin messages up to seen_upto have reached the app (✓✓), up to read_upto the customer read them
+    let (seen_upto, read_upto, _) = ticks_of(&db, &user);
+    Json(json!({ "messages": msgs, "seen_upto": seen_upto, "read_upto": read_upto })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -516,6 +550,11 @@ async fn admin_page(State(s): St) -> Response {
     ([(header::CACHE_CONTROL, "no-store"), (header::X_FRAME_OPTIONS, "DENY")], Html(page)).into_response()
 }
 
+/// the panel's font, so the admin page looks like the panel without reaching the internet
+async fn font() -> Response {
+    ([(header::CONTENT_TYPE, "font/woff"), (header::CACHE_CONTROL, "public, max-age=604800")], &include_bytes!("../assets/web/vazirmatn.woff")[..]).into_response()
+}
+
 async fn home() -> Response {
     ([(header::CACHE_CONTROL, "no-store")], Html("<!doctype html><meta charset=utf-8><title>Kanki</title><p style=\"font-family:sans-serif\">Kanki</p>")).into_response()
 }
@@ -527,6 +566,8 @@ fn router(srv: Arc<Srv>) -> Router {
         .route("/api/e/hello", get(u_hello))
         .route("/api/e/messages", get(u_messages))
         .route("/api/e/send", post(u_send))
+        .route("/api/e/read", post(u_read))
+        .route("/font.woff", get(font))
         .route("/api/e/image", post(u_image))
         .route("/api/e/image/:id", get(u_image_get))
         .route("/api/a/login", post(a_login))
@@ -665,7 +706,13 @@ pub fn applied_ver() -> String {
 /// Makes this server run (`Some`) or stop running (`None`) the emergency chat. Blocking: it calls
 /// systemctl. Messages are kept when it stops, so turning it on again shows the old chats.
 pub fn deploy(cfg: Option<(&EmerCfg, &str)>) -> Result<(), String> {
+    let old_domain = std::fs::read_to_string(CONF_FILE).ok().and_then(|t| serde_json::from_str::<EmerCfg>(&t).ok()).map(|o| o.acme_domain).unwrap_or_default();
     let Some((c, ver)) = cfg else {
+        // removed from this server: its port is closed and its certificate is no longer renewed
+        crate::fw::close("emergency");
+        if !old_domain.is_empty() {
+            crate::certbot::forget(&old_domain, "kanki-emergency.service");
+        }
         if std::path::Path::new(UNIT).exists() {
             eprintln!("emergency chat: stopping");
             let _ = sh("systemctl disable --now -q kanki-emergency.service 2>&1");
@@ -701,6 +748,9 @@ pub fn deploy(cfg: Option<(&EmerCfg, &str)>) -> Result<(), String> {
         let _ = sh("systemctl daemon-reload");
         let _ = sh("systemctl enable -q kanki-emergency.service");
     }
+    if !old_domain.is_empty() && old_domain != c.acme_domain {
+        crate::certbot::forget(&old_domain, "kanki-emergency.service");
+    }
     // automatic SSL: get the certificate once (certbot renews it and restarts the chat by itself);
     // whatever holds port 80 (Caddy, nginx …) is set aside for those seconds and given back right after
     if !c.acme_domain.is_empty() {
@@ -718,10 +768,8 @@ pub fn deploy(cfg: Option<(&EmerCfg, &str)>) -> Result<(), String> {
         let _ = std::fs::write(RESTART_FILE, &restart_key);
         eprintln!("emergency chat: started on port {}", c.port);
     }
-    // ufw only when it is on (the port must be reachable from inside Iran)
-    if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
-        let _ = sh(&format!("ufw allow {}/tcp >/dev/null 2>&1", c.port));
-    }
+    // the port must be reachable from inside Iran (an old port is closed again)
+    crate::fw::sync("emergency", vec![crate::fw::rule(c.port, false)]);
     let _ = std::fs::write(VER_FILE, ver);
     Ok(())
 }
@@ -837,6 +885,37 @@ mod tests {
         assert!(key.verify(text.as_bytes(), &util_b64d(a["sig"].as_str().unwrap()).unwrap()).is_ok());
         // a changed text does not verify
         assert!(key.verify(text.replace("y:1", "evil:1").as_bytes(), &util_b64d(a["sig"].as_str().unwrap()).unwrap()).is_err());
+    }
+
+    #[tokio::test]
+    async fn read_ticks_on_both_sides() {
+        let (s, _, id) = srv();
+        let (_, v) = call(&s, req("POST", "/api/a/login", &[], r#"{"password":"pass-1234"}"#)).await;
+        let tok = format!("Bearer {}", v["token"].as_str().unwrap());
+        let (_, v) = call(&s, req("POST", "/api/e/send", &[("x-kanki-id", &id)], r#"{"text":"salam"}"#)).await;
+        let mine = v["id"].as_i64().unwrap();
+        // the admin has not opened the conversation: the customer's message has one tick
+        let (_, v) = call(&s, req("GET", "/api/e/messages", &[("x-kanki-id", &id)], "")).await;
+        assert_eq!(v["read_upto"], 0);
+        // the admin opens it and answers
+        let (_, v) = call(&s, req("GET", "/api/a/thread/ali", &[("authorization", &tok)], "")).await;
+        assert_eq!((v["seen_upto"].as_i64(), v["read_upto"].as_i64()), (Some(0), Some(0)));
+        let (_, v) = call(&s, req("POST", "/api/a/send", &[("authorization", &tok)], r#"{"user":"ali","text":"salam, befarmaeed"}"#)).await;
+        let ans = v["id"].as_i64().unwrap();
+        // the app fetches: the customer's message was read, the answer is delivered
+        let (_, v) = call(&s, req("GET", "/api/e/messages", &[("x-kanki-id", &id)], "")).await;
+        assert_eq!(v["read_upto"].as_i64(), Some(mine));
+        let (_, v) = call(&s, req("GET", "/api/a/thread/ali", &[("authorization", &tok)], "")).await;
+        assert_eq!((v["seen_upto"].as_i64(), v["read_upto"].as_i64()), (Some(ans), Some(0)));
+        // the customer reads it in the app
+        let (st, v) = call(&s, req("POST", "/api/e/read", &[("x-kanki-id", &id)], &format!(r#"{{"upto":{}}}"#, ans))).await;
+        assert_eq!((st, v["marked"].as_i64()), (StatusCode::OK, Some(1)));
+        let (_, v) = call(&s, req("GET", "/api/a/thread/ali", &[("authorization", &tok)], "")).await;
+        assert_eq!(v["read_upto"].as_i64(), Some(ans));
+        assert_eq!(v["messages"][1]["read"], true);
+        // a stranger cannot mark anything
+        let (st, _) = call(&s, req("POST", "/api/e/read", &[("x-kanki-id", &"0".repeat(64))], r#"{"upto":99}"#)).await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

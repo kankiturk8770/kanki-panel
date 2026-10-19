@@ -1266,6 +1266,18 @@ async fn del_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
     Json(json!({ "ok": true })).into_response()
 }
 
+/// The server was removed from the panel: its Xray inbounds and its Xray entry go (its agent removes
+/// Xray and closes the inbound ports).
+pub(crate) fn forget_server(app: &App, id: &str) {
+    let mut s = settings(app);
+    let (a, b) = (s.inbounds.len(), s.servers.len());
+    s.inbounds.retain(|ib| ib.server != id);
+    s.servers.retain(|x| x.server != id);
+    if s.inbounds.len() != a || s.servers.len() != b {
+        save(app, &s);
+    }
+}
+
 /// Ports another service of the panel already uses on that server.
 fn taken_ports(app: &App, sid: &str) -> Vec<u16> {
     let d = crate::dns::panel::settings(app);

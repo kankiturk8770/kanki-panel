@@ -70,6 +70,8 @@ pub struct DnsSettings {
     pub secret: String,
     /// user id -> epoch: bumping it makes the servers forget the user's allowed addresses
     pub kicks: HashMap<String, u64>,
+    /// catalog changes already carried over (1: PUBG Mobile split into login, store, anti-cheat, updates)
+    pub cat_ver: u32,
 }
 
 pub fn settings(app: &App) -> DnsSettings {
@@ -79,6 +81,17 @@ pub fn settings(app: &App) -> DnsSettings {
     }
     if s.ip_hours == 0 {
         s.ip_hours = 12;
+    }
+    // 3.6.8: the one PUBG Mobile group became four; who had it on keeps every name it routed
+    if s.cat_ver < 1 {
+        if s.opt.iter().any(|x| x == "pubgmobile/main") {
+            for g in ["pubgmobile/store", "pubgmobile/update"] {
+                if !s.opt.iter().any(|x| x == g) {
+                    s.opt.push(g.into());
+                }
+            }
+        }
+        s.cat_ver = 1;
     }
     s
 }
@@ -785,6 +798,21 @@ async fn del_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
     save(&app, &mut s);
     app.db.set(&format!("dns_prev_{}", id), "");
     Json(json!({ "ok": true })).into_response()
+}
+
+/// The server was removed from the panel: it and the relays that sent their connections to it leave
+/// Kanki DNS (their agents remove the DNS service and close its ports).
+pub(crate) fn forget_server(app: &App, id: &str) {
+    let mut s = settings(app);
+    let n = s.servers.len();
+    let gone: Vec<String> = s.servers.iter().filter(|o| o.server == id || (o.role == "relay" && o.exit == id)).map(|o| o.server.clone()).collect();
+    s.servers.retain(|o| !gone.contains(&o.server));
+    if s.servers.len() != n {
+        save(app, &mut s);
+    }
+    for g in gone {
+        app.db.set(&format!("dns_prev_{}", g), "");
+    }
 }
 
 /// The users with DNS: their queries and bytes on each server (since its service started) and the

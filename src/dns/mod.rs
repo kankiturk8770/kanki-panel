@@ -196,17 +196,29 @@ pub fn repair_prep() {
 
 pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
     let Some((c, ver)) = cfg else {
+        let old = load_cfg().ok();
         if std::path::Path::new(UNIT).exists() {
             eprintln!("dns: stopping");
             let _ = sh("systemctl disable --now -q kanki-dns.service 2>&1");
             let _ = std::fs::remove_file(UNIT);
             let _ = sh("systemctl daemon-reload");
         }
-        for f in [CONF_FILE, VER_FILE, RESTART_FILE, STATS_FILE, QLOG_FILE] {
+        for f in [CONF_FILE, VER_FILE, RESTART_FILE, STATS_FILE, QLOG_FILE, SSL_ERR_FILE] {
             let _ = std::fs::remove_file(f);
+        }
+        // removed from this server: its ports are closed and its certificate is no longer renewed
+        crate::fw::close("dns");
+        if let Some(o) = old.filter(|o| o.acme && !o.host.is_empty()) {
+            crate::certbot::forget(&o.host, "kanki-dns.service");
         }
         return Ok(());
     };
+    // a new name: the certificate of the old one is no longer needed here
+    if let Ok(o) = load_cfg() {
+        if o.acme && !o.host.is_empty() && (o.host != c.host || !c.acme) {
+            crate::certbot::forget(&o.host, "kanki-dns.service");
+        }
+    }
     let _ = std::fs::create_dir_all("/etc/kanki");
     let _ = std::fs::create_dir_all(DATA_DIR);
     let text = serde_json::to_string(c).map_err(|e| e.to_string())?;
@@ -251,13 +263,13 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
         let _ = std::fs::remove_file(FORCE_FILE);
         eprintln!("dns: started ({})", c.role);
     }
-    if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
-        for (p, proto) in [(c.dns_port, "udp"), (c.dns_port, "tcp"), (c.dot_port, "tcp"), (c.https_port, "tcp"), (c.http_port, "tcp")] {
-            if p > 0 {
-                let _ = sh(&format!("ufw allow {}/{} >/dev/null 2>&1", p, proto));
-            }
-        }
-    }
+    crate::fw::sync(
+        "dns",
+        [(c.dns_port, true), (c.dns_port, false), (c.dot_port, false), (c.https_port, false), (c.http_port, false)]
+            .into_iter()
+            .filter(|p| p.0 > 0)
+            .map(|(p, udp)| crate::fw::rule(p, udp)),
+    );
     // SSL with certbot for this server's name, now that the service runs: Kanki DNS answers Let's Encrypt
     // itself on port 80, so DNS does not stop; DNS works without it, only DoT / DoH wait for the certificate
     let mut ssl_err = String::new();

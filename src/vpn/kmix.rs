@@ -319,12 +319,9 @@ fn sync_hop(want: Option<(u16, u16, u16)>) {
             let _ = sh(&format!("iptables -t nat {}", r.replacen("-A ", "-D ", 1)));
         }
     }
-    if let (Some(rule), Some((a, b, _))) = (want_rule, want) {
+    if let Some(rule) = want_rule {
         if !ours.iter().any(|r| *r == rule) {
             let _ = sh(&format!("iptables -t nat {}", rule));
-            if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
-                let _ = sh(&format!("ufw allow {}:{}/udp >/dev/null 2>&1", a, b));
-            }
         }
     }
 }
@@ -338,6 +335,7 @@ fn remove() {
         let _ = sh("systemctl daemon-reload");
     }
     sync_hop(None);
+    crate::fw::close("kmix");
     let _ = std::fs::remove_file(STATE_FILE);
 }
 
@@ -386,9 +384,12 @@ pub fn apply(c: &KmixCfg) -> Result<(), String> {
         // the server reads the users again without dropping anyone else
         let _ = sh(&format!("systemctl kill -s HUP {}", UNIT_NAME));
     }
-    if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
-        let _ = sh(&format!("ufw allow {}/udp >/dev/null 2>&1", port));
+    // the port and the extra ports (an old port or range is closed again)
+    let mut rules = vec![crate::fw::rule(port, true)];
+    if let Some((a, b)) = hop {
+        rules.push(format!("{}:{}/udp", a, b));
     }
+    crate::fw::sync("kmix", rules);
     Ok(())
 }
 

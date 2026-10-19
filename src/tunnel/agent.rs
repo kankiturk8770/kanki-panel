@@ -28,8 +28,9 @@ pub fn panel_client(insecure: bool, timeout: Duration) -> reqwest::Client {
     }
 }
 
-/// Opens the ports a tunnel listens on in ufw (only when ufw is active). Remembers what it opened.
-pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
+/// Opens the ports the tunnels listen on in ufw (when ufw is on) and closes the ones of tunnels that
+/// were deleted or changed (see `fw`). Blocking.
+pub fn open_ports(specs: &[Spec]) {
     let mut want = vec![];
     for s in specs {
         if let Some(a) = &s.awg {
@@ -80,25 +81,32 @@ pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
             }
         }
     }
-    let todo: Vec<String> = {
-        let d = done.lock().unwrap();
-        want.into_iter().filter(|p| !d.contains(p)).collect()
+    crate::fw::sync("tunnels", want);
+}
+
+/// This server was removed from the panel: close the ports Kanki opened, then remove the tunnel agent
+/// itself (its service, settings and saved tunnels). The program file stays when the panel or a VPN
+/// node of the same machine still uses it. Blocking; does not return when systemd stops the agent.
+fn uninstall_self() {
+    crate::fw::close_all();
+    let sh = |c: &str| {
+        let _ = std::process::Command::new("sh").arg("-c").arg(c).stdin(std::process::Stdio::null()).status();
     };
-    if todo.is_empty() {
-        return;
-    }
-    let active = std::process::Command::new("ufw")
-        .arg("status")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains("Status: active"))
-        .unwrap_or(false);
-    let mut d = done.lock().unwrap();
-    for p in todo {
-        if active {
-            let _ = std::process::Command::new("ufw").args(["allow", &p]).output();
+    let _ = std::fs::remove_file(ENV_FILE);
+    let _ = std::fs::remove_file(PIN_FILE);
+    let _ = std::fs::remove_file("/var/lib/kanki/subsrv.json");
+    let _ = std::fs::remove_file("/etc/sysctl.d/90-kanki-tunnel.conf");
+    let shared = ["/etc/systemd/system/kanki-panel.service", "/etc/systemd/system/kanki-node.service"].iter().any(|f| std::path::Path::new(f).exists());
+    if !shared {
+        if let Ok(exe) = std::env::current_exe() {
+            let _ = std::fs::remove_file(exe.to_string_lossy().replace(" (deleted)", ""));
         }
-        d.insert(p);
+        let _ = std::fs::remove_file("/usr/local/bin/kanki");
     }
+    eprintln!("removed from the panel: the tunnel agent uninstalls itself");
+    sh("systemctl disable -q kanki-tunnel.service 2>/dev/null; rm -f /etc/systemd/system/kanki-tunnel.service; systemctl daemon-reload");
+    sh("systemctl stop kanki-tunnel.service");
+    std::process::exit(0);
 }
 
 /// Downloads the panel's own binary (same file, same machine type), checks its sha256, swaps it in
@@ -149,14 +157,13 @@ pub async fn run(version: &str) {
     }
     eprintln!("kanki tunnel agent {} for {} (server {})", version, panel, id);
     let mgr = Arc::new(Manager::default());
-    let opened = Mutex::new(HashSet::new());
     let mut last = String::new();
     if let Ok(t) = std::fs::read_to_string(CACHE) {
         if let Ok(specs) = serde_json::from_str::<Vec<Spec>>(&t) {
             eprintln!("starting {} saved tunnel(s)", specs.len());
             let ps = specs.clone();
-            let _ = tokio::task::spawn_blocking(move || open_ports(&ps, &Mutex::new(HashSet::new()))).await;
             mgr.apply(specs).await;
+            let _ = tokio::task::spawn_blocking(move || open_ports(&ps)).await;
             last = t;
         }
     }
@@ -172,6 +179,8 @@ pub async fn run(version: &str) {
     // certificates close to their end are renewed with what holds port 80 at that moment
     crate::certbot::renew_loop();
     let mut fails = 0u32;
+    // answers in a row that say this server was removed from the panel
+    let mut gone = 0u32;
     // the last error of setting up the emergency chat (reported to the panel)
     let emer_err: Mutex<Option<String>> = Mutex::new(None);
     // the last error of setting up Kanki DNS
@@ -208,12 +217,15 @@ pub async fn run(version: &str) {
                 xray_st = json!({ "active": false, "deploy_error": e });
             }
         }
-        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status() });
+        let fw_st = tokio::task::spawn_blocking(crate::fw::report).await.unwrap_or_default();
+        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st });
         match http.post(format!("{}/tunnel/agent", panel)).json(&body).send().await {
             Ok(r) if r.status().as_u16() == 410 => {
-                // this server was removed in the panel
-                if !last.is_empty() {
-                    eprintln!("the panel removed this server: stopping every tunnel");
+                // this server was removed in the panel: everything Kanki put here is removed (a few
+                // answers in a row, so one odd answer does not wipe a working server)
+                gone += 1;
+                if gone >= 3 {
+                    eprintln!("the panel removed this server: removing every tunnel and service Kanki installed here");
                     mgr.apply(vec![]).await;
                     let _ = tokio::task::spawn_blocking(|| crate::emergency::deploy(None)).await;
                     let _ = tokio::task::spawn_blocking(|| crate::dns::deploy(None)).await;
@@ -221,10 +233,14 @@ pub async fn run(version: &str) {
                     subsrv.apply(None);
                     let _ = std::fs::remove_file(CACHE);
                     last.clear();
+                    // the Hysteria2 / AmneziaWG tunnel workers stop their units and routes by themselves
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    let _ = tokio::task::spawn_blocking(uninstall_self).await;
                 }
             }
             Ok(r) if r.status().is_success() => {
                 fails = 0;
+                gone = 0;
                 crate::dns::qlog_ack(&body["dns"]);
                 if let Ok(v) = r.json::<Value>().await {
                     // the emergency chat: "set" (new config), "keep" (unchanged) or "off"
@@ -240,6 +256,15 @@ pub async fn run(version: &str) {
                             *emer_err.lock().unwrap() = r.err();
                         }
                         _ => {}
+                    }
+                    // "Try SSL again" in the panel: no waiting after earlier failures
+                    if v["ssl_retry"].as_bool() == Some(true) {
+                        let _ = tokio::task::spawn_blocking(crate::certbot::retry_now).await;
+                    }
+                    // firewall ports the admin asked to close (open in ufw, nothing listens there)
+                    if let Some(rules) = v["fw_close"].as_array().filter(|a| !a.is_empty()) {
+                        let rules: Vec<String> = rules.iter().filter_map(|u| u.as_str().map(|s| s.to_string())).collect();
+                        let _ = tokio::task::spawn_blocking(move || crate::fw::close_unused(&rules)).await;
                     }
                     // ports the admin asked to free (Health › Free the ports): the services holding them
                     // are stopped and kept off, then Kanki DNS and Xray restart onto those ports
@@ -315,16 +340,9 @@ pub async fn run(version: &str) {
                             last = text;
                         }
                         let ps = specs.clone();
-                        let set = std::mem::take(&mut *opened.lock().unwrap());
-                        let set = tokio::task::spawn_blocking(move || {
-                            let m = Mutex::new(set);
-                            open_ports(&ps, &m);
-                            m.into_inner().unwrap_or_default()
-                        })
-                        .await
-                        .unwrap_or_default();
-                        *opened.lock().unwrap() = set;
+                        // stopped first, so the ports of a deleted tunnel are free when they are closed
                         mgr.apply(specs).await;
+                        let _ = tokio::task::spawn_blocking(move || open_ports(&ps)).await;
                     }
                 }
             }
