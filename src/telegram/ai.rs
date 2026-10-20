@@ -83,11 +83,20 @@ fn theme(kind: &str) -> &'static str {
 /// The facts and the instructions for one post.
 pub fn prompt(app: &App, kind: &str, facts: &str, recent: &[String]) -> (String, String) {
     let c = cfg(app);
-    let system = "You write posts for a Telegram channel that sells VPN subscriptions in Iran. Write in natural, warm, modern Persian (Farsi). \
+    let system = "You write posts for a Telegram channel that sells VPN subscriptions in Iran, in Persian (Farsi). \
+Write like a skilled native Persian copywriter, not a translator: think the post in Persian, never translate English phrases word by word. \
 Rules: output ONLY the post text, nothing before or after it. 350 to 900 characters. A few fitting emojis, not too many. \
 Formatting: only these HTML tags are allowed: <b>, <i>, <u>, <s>, <code>; no Markdown, no other tags, no links, no hashtags (they are added later). \
 Use the prices, plan names, discount code and numbers EXACTLY as given; never invent a price, a code, a percentage or a number. \
-End with a short call to action to buy from the Telegram bot. Never mention politics, never promise anything illegal, never name the filtering authorities."
+End with a short call to action to buy from the Telegram bot. Never mention politics, never promise anything illegal, never name the filtering authorities.\n\
+قواعد نگارش فارسی (مهم‌ترین بخش):\n\
+- هر جمله کامل و درست باشد: فاعل و فعل روشن، فعل در جای درست، زمان فعل‌ها یکدست. جمله‌ی نیمه‌کاره یا درهم ننویس.\n\
+- جمله‌ها کوتاه باشند (حداکثر حدود ۱۵ کلمه) و هر جمله فقط یک حرف بزند.\n\
+- فقط کلمه‌های رایج و طبیعی فارسی امروز؛ هیچ کلمه‌ی ساختگی، بی‌معنی یا بی‌ربط و هیچ ترکیب عجیب ننویس.\n\
+- لحن را یکدست نگه دار: یا محاوره‌ی مؤدب (مثل «می‌تونی»، «وصل می‌شی») یا نوشتاری ساده؛ این دو را در یک پست قاطی نکن. مخاطب را «تو» خطاب کن.\n\
+- نیم‌فاصله را درست بگذار (می‌شود، سرورها، بهترین) و از نشانه‌های فارسی استفاده کن (، ؛ ؟ «»).\n\
+- اگر مطمئن نیستی جمله‌ای درست و روشن است، آن را ساده‌تر بنویس یا ننویس.\n\
+- پیش از پایان، متن را یک بار مثل یک ویراستار فارسی بخوان و هر خطا را درست کن."
         .to_string();
     let mut user = format!("Write one post. Topic: {}.\n\nFacts:\n{}\n", theme(kind), facts);
     if !c.brief.trim().is_empty() {
@@ -164,11 +173,11 @@ enum Fail {
     Again(String),
 }
 
-async fn call(app: &App, pv: &Provider, key: &str, model: &str, system: &str, user: &str) -> Result<String, Fail> {
-    let mut body = json!({ "model": model, "temperature": 0.9, "max_tokens": 2500, "messages": [ { "role": "system", "content": system }, { "role": "user", "content": user } ] });
+async fn call(app: &App, pv: &Provider, key: &str, model: &str, system: &str, user: &str, temp: f64) -> Result<String, Fail> {
+    let mut body = json!({ "model": model, "temperature": temp, "max_tokens": 3000, "messages": [ { "role": "system", "content": system }, { "role": "user", "content": user } ] });
     // the gpt-oss models think first: a little thinking leaves the tokens for the post
     if model.contains("gpt-oss") {
-        body["reasoning_effort"] = json!("low");
+        body["reasoning_effort"] = json!("medium");
     }
     let r = app
         .http
@@ -203,6 +212,34 @@ async fn call(app: &App, pv: &Provider, key: &str, model: &str, system: &str, us
         429 | 500..=599 => Err(Fail::Again(format!("{} answered {}{}", pv.name, code, if msg.is_empty() { String::new() } else { format!(": {}", msg) }))),
         _ => Err(Fail::Key(format!("{} answered {}: {}", pv.name, code, msg))),
     }
+}
+
+const EDITOR: &str = "تو ویراستار حرفه‌ای زبان فارسی هستی. متنی که می‌گیری یک پست تلگرام است. \
+فقط خطاهای آن را درست کن: جمله‌های ناقص، بی‌معنی یا درهم، فعل‌های جاافتاده یا نادرست، ترجمه‌ی تحت‌اللفظی از انگلیسی، \
+کلمه‌های بی‌ربط، املا، نیم‌فاصله (می‌شود، ‌ها، ‌ترین) و نشانه‌گذاری فارسی (، ؛ ؟). جمله‌ای که معنی روشنی ندارد را ساده و روشن بازنویسی کن یا حذف کن. \
+معنی، لحن، ایموجی‌ها، تگ‌های HTML (<b> <i> <u> <s> <code>)، قیمت‌ها، عددها، نام پلن‌ها، کد تخفیف و کلمه‌های لاتین (مثل VPN و نام پروتکل‌ها) را دست نزن. \
+چیز تازه‌ای اضافه نکن. فقط متن نهایی پست را بنویس، بدون هیچ توضیح، عنوان یا علامت نقل‌قول.";
+
+/// A second pass by the same model as a Persian editor: broken or meaningless sentences fixed. The
+/// first text is kept when the editor fails or changes the post too much (numbers lost, length).
+async fn proofread(app: &App, pv: &Provider, key: &str, model: &str, post: &str) -> String {
+    let Ok(t) = call(app, pv, key, model, EDITOR, post, 0.2).await else { return post.to_string() };
+    let fixed = tg_html(&t);
+    let (a, b) = (strip_tags(post).chars().count(), strip_tags(&fixed).chars().count());
+    if b * 10 < a * 6 || b * 10 > a * 15 || !keeps_numbers(post, &fixed) {
+        return post.to_string();
+    }
+    fixed
+}
+
+/// every number of the post (prices, percentages, codes) is still in the edited text
+fn keeps_numbers(old: &str, new: &str) -> bool {
+    let digits = |s: &str| -> Vec<String> {
+        let s: String = s.chars().map(|c| match c { '۰'..='۹' => char::from(b'0' + (c as u32 - '۰' as u32) as u8), _ => c }).collect();
+        s.split(|c: char| !c.is_ascii_digit()).filter(|x| !x.is_empty()).map(|x| x.to_string()).collect()
+    };
+    let n = digits(new);
+    digits(old).iter().all(|d| n.contains(d))
 }
 
 /// The chat models this key may use, from the account's own list.
@@ -241,10 +278,11 @@ pub async fn write(app: &App, system: &str, user: &str) -> Result<(String, Strin
         let model = models[i].clone();
         let mut tries = 0;
         loop {
-            match call(app, c.provider, &key, &model, system, user).await {
+            match call(app, c.provider, &key, &model, system, user, 0.7).await {
                 Ok(t) => {
                     let html = tg_html(&t);
                     if html.chars().count() >= 40 {
+                        let html = proofread(app, c.provider, &key, &model, &html).await;
                         return Ok((model, html));
                     }
                     last = "the AI gave an empty answer".into();
@@ -286,6 +324,12 @@ mod tests {
         // an unclosed tag would make Telegram refuse the message
         assert_eq!(tg_html("<b>باز <i>کج</i>"), "باز <i>کج</i>");
         assert_eq!(strip_tags("<b>a</b> &lt;3 &amp; <i>b</i>"), "a <3 & b");
+    }
+
+    #[test]
+    fn the_editor_may_not_lose_a_number() {
+        assert!(keeps_numbers("پلن ۳۰ روزه ۱۵۰ هزار", "پلن 30 روزه فقط 150 هزار تومان"));
+        assert!(!keeps_numbers("کد KANKI20 با ۲۰٪", "کد KANKI با تخفیف"));
     }
 
     #[test]

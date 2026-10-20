@@ -1,3 +1,9 @@
+# v3.7.2 — better Persian from the channel writer
+- **Writing rules in Persian** for the AI: complete, short sentences; common words only; one tone per post; no word-by-word translation; correct half-spaces and Persian punctuation.
+- **A second pass as a Persian editor:** each post is read once more by the same model, which fixes broken, meaningless or mixed-up sentences and spelling. The first text is kept when the editor drops a number or changes the length too much.
+- The writer thinks a little longer (gpt-oss: medium) and is less random (temperature 0.7).
+- A ready "about us and how to write" text: `docs/AI-BRIEF-FA.md`.
+
 # v3.7.1 — Groq for the channel writer
 - **The AI writer works with Groq** (groq.com, `https://api.groq.com/openai/v1`, keys `gsk_…`) as well as Grok (x.ai, keys `xai-…`): the service is told by the key, or picked in the form. Groq's default model is `openai/gpt-oss-120b` (then llama-3.3-70b-versatile, gpt-oss-20b, llama-3.1-8b-instant, and the models the account lists). Model names may have a slash.
 - **Phones:** the Settings page was wider than the screen (its section bar stretched the page and pulled the hidden menu into view); no page can be wider than the screen any more, wide strips scroll inside themselves.
