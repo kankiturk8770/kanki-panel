@@ -3,7 +3,7 @@
 // The agent writes the built-in server to each server by itself; every user has their own key.
 var KM_ICO='<path d="M6 11h4M8 9v4"/><circle cx="15.5" cy="12.5" r=".6"/><circle cx="17.5" cy="10.5" r=".6"/><path d="M7.5 6h9a5 5 0 0 1 4.8 6.3l-1 3.6a2.6 2.6 0 0 1-4.6.9L14.5 15h-5l-1.2 1.8a2.6 2.6 0 0 1-4.6-.9l-1-3.6A5 5 0 0 1 7.5 6z"/>';
 var KM={d:null};
-function kmFA(){if(kmFA.done||typeof FA=='undefined')return;kmFA.done=1;ICO.game=KM_ICO;Object.assign(FA,{
+function kmFA(){if(kmFA.done||typeof FA=='undefined')return;kmFA.done=1;ICO.game=KM_ICO;Object.assign(FA,{"Second config through the tunnel":"کانفیگ دوم از راه تانل","Users also get":"کاربرها این را هم می‌گیرند","Write the Iran address whose tunnel forwards this UDP port":"آدرس سرور ایرانی را بنویس که تانلش این پورت UDP را عبور می‌دهد","Iran address":"آدرس ایران",
  "Our own protocol: games, low ping":"پروتکل خودمان: بازی، پینگ کم",
  "Our own protocol on every VPN server: game packets go straight (no queue, sent twice in gaming mode), websites over KCP + FEC.":"پروتکل خودمان روی همه‌ی سرورهای VPN: بسته‌های بازی مستقیم می‌روند (بدون صف، در حالت گیمینگ دوتایی)، سایت‌ها روی KCP + FEC.",
  "KANKI MIX is off: it runs on no server and is in no subscription.":"KANKI MIX خاموش است: روی هیچ سروری اجرا نمی‌شود و در هیچ اشتراکی نیست.",
@@ -61,7 +61,12 @@ function kmRouteRow(d,x){var o=(d.settings.nodes||{})[x.id]||{},tun=o.route=='tu
   '<select class="km_rt" data-id="'+id+'" onchange="kmSaveNodes()" style="width:auto">'+
    '<option value=""'+(tun?'':' selected')+'>'+t("Direct (the server's own address)")+' · '+esc(x.direct_host||'?')+'</option>'+
    '<option value="tunnel"'+(tun?' selected':'')+'>'+t('Through the tunnel (Iran server)')+' · '+esc(x.tunnel_host||'?')+'</option></select>'+
-  '<input class="ltr km_host" data-id="'+id+'" style="width:170px" placeholder="'+esc(t('Address'))+': '+esc(t('automatic'))+'" value="'+esc(o.host||'')+'" onchange="kmSaveNodes()"></div>'}
+  '<input class="ltr km_host" data-id="'+id+'" style="width:170px" placeholder="'+esc(t('Address'))+': '+esc(t('automatic'))+'" value="'+esc(o.host||'')+'" onchange="kmSaveNodes()"></div>'+
+  // the second config of every user on this server: through the Iran tunnel
+  '<div class="km2"><label class="chk" style="margin:0"><input type="checkbox" class="km_t2" data-id="'+id+'" '+(o.tun_off?'':'checked')+' onchange="kmSaveNodes()"><span><b>'+t('Second config through the tunnel')+'</b><small>'+
+   (x.second?t('Users also get')+' <span class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</span>':t('Write the Iran address whose tunnel forwards this UDP port'))+'</small></span></label>'+
+   '<div class="row" style="gap:6px"><input class="ltr km_th" data-id="'+id+'" style="width:170px" placeholder="'+esc(t('Iran address'))+': '+esc(t('automatic'))+'" value="'+esc(o.tun_host||'')+'" onchange="kmSaveNodes()">'+
+   '<input class="ltr km_tp" data-id="'+id+'" style="width:90px" inputmode="numeric" placeholder="'+esc(t('Port'))+'" value="'+esc(o.tun_port?String(o.tun_port):'')+'" onchange="kmSaveNodes()"></div></div>'}
 function kmSaveNodes(){kmPut({nodes:kmNodes()})}
 function kmDraw(d){var el=$('#km');if(!el)return;var s=d.settings;
  var par=[[0,'none'],[2,'light'],[3,'normal'],[5,'strong'],[8,'very strong']];
@@ -84,7 +89,10 @@ function kmDraw(d){var el=$('#km');if(!el)return;var s=d.settings;
 function kmNodes(){var d=KM.d,m={};Object.keys((d&&d.settings.nodes)||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});
  $$('.km_np').forEach(function(i){var v=unN(i.value).trim(),o=m[i.dataset.id]||{};o.port=v?+v:0;m[i.dataset.id]=o});
  $$('.km_rt').forEach(function(i){var o=m[i.dataset.id]||{};o.route=i.value;m[i.dataset.id]=o});
- $$('.km_host').forEach(function(i){var o=m[i.dataset.id]||{};o.host=i.value.trim();m[i.dataset.id]=o});return m}
+ $$('.km_host').forEach(function(i){var o=m[i.dataset.id]||{};o.host=i.value.trim();m[i.dataset.id]=o});
+ $$('.km_t2').forEach(function(i){var o=m[i.dataset.id]||{};o.tun_off=!i.checked;m[i.dataset.id]=o});
+ $$('.km_th').forEach(function(i){var o=m[i.dataset.id]||{};o.tun_host=i.value.trim();m[i.dataset.id]=o});
+ $$('.km_tp').forEach(function(i){var v=unN(i.value).trim(),o=m[i.dataset.id]||{};o.tun_port=v?+v:0;m[i.dataset.id]=o});return m}
 function kmPut(b,done){return api('PUT','/api/kmix',b).then(function(r){toast(t('Saved'));if(done)done(r);return kmLoad()}).catch(fail)}
 function kmSave(){var p=unN($('#km_port').value).trim();if(!/^\d+$/.test(p)||+p<1||+p>65535)return toast(t('the port must be 1-65535'),1);
  kmPut({on:$('#km_on').checked,port:+p,parity:+$('#km_par').value,gaming:$('#km_gm').checked,hop:unN($('#km_hop').value).trim(),nodes:kmNodes()})}
