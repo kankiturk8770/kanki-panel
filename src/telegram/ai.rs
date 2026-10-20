@@ -1,5 +1,6 @@
-//! AI writer for the channel posts: Groq (groq.com) or Grok (x.ai), both OpenAI-compatible chat APIs.
-//! The provider is told by the key (Groq keys start with `gsk_`, x.ai keys with `xai-`) unless the
+//! AI writer for the channel posts: Gemini (Google AI Studio, its own generateContent API), Groq
+//! (groq.com) or Grok (x.ai), the last two OpenAI-compatible chat APIs. The provider is told by the key
+//! (Google keys start with `AQ.` or `AIza`, Groq keys with `gsk_`, x.ai keys with `xai-`) unless the
 //! admin picks one.
 //!
 //! The admin pastes an API key and a short brief (who we are, what to stress, the tone) in the panel.
@@ -26,6 +27,14 @@ pub const GROQ: Provider = Provider {
     model: "openai/gpt-oss-120b",
     fallback: &["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b", "llama-3.1-8b-instant"],
 };
+/// Google AI Studio (free tier). Not OpenAI-compatible here: generateContent with an x-goog-api-key header.
+pub const GEMINI: Provider = Provider {
+    name: "gemini",
+    base: "https://generativelanguage.googleapis.com/v1beta",
+    model: "gemini-flash-latest",
+    // free tier: Flash about 20 a day, Flash Lite about 500 a day; Pro and 2.0 have none
+    fallback: &["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+};
 pub const XAI: Provider = Provider { name: "xai", base: "https://api.x.ai/v1", model: "grok-4", fallback: &["grok-4", "grok-3", "grok-3-mini"] };
 
 /// The provider of a key: what the admin chose, else told by the key's prefix (Groq: gsk_)
@@ -33,7 +42,9 @@ pub fn provider_of(choice: &str, key: &str) -> &'static Provider {
     match choice {
         "groq" => &GROQ,
         "xai" => &XAI,
+        "gemini" => &GEMINI,
         _ if key.trim().starts_with("xai-") => &XAI,
+        _ if key.trim().starts_with("AQ.") || key.trim().starts_with("AIza") => &GEMINI,
         _ => &GROQ,
     }
 }
@@ -54,7 +65,11 @@ pub fn cfg(app: &App) -> AiCfg {
     let m = app.db.get("ai_model");
     let m = m.trim();
     // a model of the other provider (left from before) is not sent to this one
-    let foreign = (provider.name == "groq" && m.starts_with("grok")) || (provider.name == "xai" && !m.starts_with("grok"));
+    let foreign = match provider.name {
+        "xai" => !m.starts_with("grok"),
+        "gemini" => !m.starts_with("gemini") && !m.starts_with("gemma"),
+        _ => m.starts_with("grok") || m.starts_with("gemini"),
+    };
     let model = if m.is_empty() || foreign { provider.model.to_string() } else { m.to_string() };
     AiCfg { on: app.db.on("ai_on"), key, model, brief: app.db.get("ai_brief"), provider }
 }
@@ -174,6 +189,9 @@ enum Fail {
 }
 
 async fn call(app: &App, pv: &Provider, key: &str, model: &str, system: &str, user: &str, temp: f64) -> Result<String, Fail> {
+    if pv.name == "gemini" {
+        return call_gemini(app, pv, key, model, system, user, temp).await;
+    }
     let mut body = json!({ "model": model, "temperature": temp, "max_tokens": 3000, "messages": [ { "role": "system", "content": system }, { "role": "user", "content": user } ] });
     // the gpt-oss models think first: a little thinking leaves the tokens for the post
     if model.contains("gpt-oss") {
@@ -242,8 +260,79 @@ fn keeps_numbers(old: &str, new: &str) -> bool {
     digits(old).iter().all(|d| n.contains(d))
 }
 
+async fn call_gemini(app: &App, pv: &Provider, key: &str, model: &str, system: &str, user: &str, temp: f64) -> Result<String, Fail> {
+    let body = json!({
+        "systemInstruction": { "parts": [ { "text": system } ] },
+        "contents": [ { "role": "user", "parts": [ { "text": user } ] } ],
+        // the thinking of the 2.5+ models counts in this too
+        "generationConfig": { "temperature": temp, "maxOutputTokens": 8192 },
+    });
+    let r = app
+        .http
+        .post(format!("{}/models/{}:generateContent", pv.base, model))
+        .header("x-goog-api-key", key)
+        .json(&body)
+        .timeout(Duration::from_secs(120))
+        .send()
+        .await
+        .map_err(|e| Fail::Again(format!("cannot reach Gemini: {}", e)))?;
+    let code = r.status().as_u16();
+    let v: Value = r.json().await.unwrap_or(Value::Null);
+    let msg = v["error"]["message"].as_str().unwrap_or("").to_string();
+    let status = v["error"]["status"].as_str().unwrap_or("");
+    match code {
+        200 => {
+            let text: String = v["candidates"][0]["content"]["parts"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|p| !p["thought"].as_bool().unwrap_or(false))
+                .filter_map(|p| p["text"].as_str())
+                .collect::<Vec<_>>()
+                .join("");
+            let text = text.trim().to_string();
+            if text.chars().count() < 40 {
+                let why = v["candidates"][0]["finishReason"].as_str().or(v["promptFeedback"]["blockReason"].as_str()).unwrap_or("");
+                return Err(Fail::Again(format!("Gemini gave an empty answer{}", if why.is_empty() { String::new() } else { format!(" ({})", why) })));
+            }
+            Ok(text)
+        }
+        404 => Err(Fail::Model(format!("{}: {}", model, if msg.is_empty() { "model not found".into() } else { msg }))),
+        400 if status == "INVALID_ARGUMENT" && msg.to_lowercase().contains("api key") => Err(Fail::Key(format!("the API key was refused: {}", msg))),
+        400 if msg.to_lowercase().contains("model") => Err(Fail::Model(format!("{}: {}", model, msg))),
+        401 | 403 => Err(Fail::Key(format!("the API key was refused ({}): {}", code, msg))),
+        // a model with no free quota at all: the next one, not another try
+        429 if msg.contains("limit: 0") => Err(Fail::Model(format!("{}: no free quota for this model", model))),
+        429 | 500..=599 => Err(Fail::Again(format!("Gemini answered {}{}", code, if msg.is_empty() { String::new() } else { format!(": {}", msg) }))),
+        _ => Err(Fail::Key(format!("Gemini answered {}: {}", code, msg))),
+    }
+}
+
+/// The text models of a Google AI Studio key
+async fn gemini_models(app: &App, pv: &Provider, key: &str) -> Vec<String> {
+    let Ok(r) = app.http.get(format!("{}/models?pageSize=200", pv.base)).header("x-goog-api-key", key).timeout(Duration::from_secs(20)).send().await else { return vec![] };
+    let v: Value = r.json().await.unwrap_or(Value::Null);
+    let mut m: Vec<String> = v["models"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|x| x["supportedGenerationMethods"].as_array().map(|a| a.iter().any(|s| s == "generateContent")).unwrap_or(false))
+        .filter_map(|x| x["name"].as_str().map(|s| s.trim_start_matches("models/").to_string()))
+        .filter(|id| {
+            let l = id.to_lowercase();
+            // Pro and 2.0 have no free quota (a paid key can still name one in the form)
+            l.starts_with("gemini") && !["image", "tts", "audio", "live", "embed", "vision", "robotics", "computer", "pro", "2.0", "1.5", "transcribe"].iter().any(|x| l.contains(x))
+        })
+        .collect();
+    m.sort_by_key(|id| pv.fallback.iter().position(|f| f == id).unwrap_or(99));
+    m
+}
+
 /// The chat models this key may use, from the account's own list.
 async fn listed_models(app: &App, pv: &Provider, key: &str) -> Vec<String> {
+    if pv.name == "gemini" {
+        return gemini_models(app, pv, key).await;
+    }
     let Ok(r) = app.http.get(format!("{}/models", pv.base)).bearer_auth(key).timeout(Duration::from_secs(20)).send().await else { return vec![] };
     let v: Value = r.json().await.unwrap_or(Value::Null);
     let mut m: Vec<String> = v["data"]
@@ -338,6 +427,8 @@ mod tests {
         assert_eq!(provider_of("", "xai-abc").name, "xai");
         assert_eq!(provider_of("xai", "gsk_abc").name, "xai");
         assert_eq!(provider_of("", "").base, "https://api.groq.com/openai/v1");
+        assert_eq!(provider_of("", "AQ.Ab8abc").name, "gemini");
+        assert_eq!(provider_of("", "AIzaSyabc").name, "gemini");
     }
 
     #[test]

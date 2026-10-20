@@ -1,3 +1,7 @@
+# v3.7.4 — Gemini (free) for the channel writer
+- **Gemini from Google AI Studio** (aistudio.google.com/apikey, free tier): keys starting with `AQ.` or `AIza` are told apart by themselves, or Gemini is picked in the form. Google's own generateContent API with the `x-goog-api-key` header. Default model `gemini-flash-latest`, then Flash Lite and 2.5 Flash / Flash Lite, then the text models the key lists (Pro and 2.0 are skipped: no free quota). A model with no free quota moves on to the next one at once.
+- The form names the AI service in use and its default model.
+
 # v3.7.3 — Settings fixed on every screen; no red errors after leaving a page
 - **Settings:** fields, texts and switches were cut off on the left (on phones and narrow windows the switches of "VPN and protocols" could not be seen or used). The server grid of 3.7.0 had reused a class name of the Settings form and forced it 860px wide in eight columns; the grid has its own names now (also for its service buttons, which had changed the node service rows).
 - **"Cannot set properties of null":** a page whose data came back after the admin had already moved to another page (slow server, Iran) tried to draw into a page that was gone and showed a red error. Settings and Backup check first; any such late draw is now silent everywhere.

@@ -976,7 +976,7 @@ async fn ch_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response 
             }
             // the browser filled in the panel's own password instead of the key
             if crate::util::check_password(&crate::auth::admin_pass_hash(&app), v) {
-                return err(StatusCode::BAD_REQUEST, "this is your panel password, not the AI key: paste the key from console.groq.com/keys (it starts with gsk_)");
+                return err(StatusCode::BAD_REQUEST, "this is your panel password, not the AI key: paste the key from aistudio.google.com/apikey (it starts with AQ. or AIza)");
             }
             db.set("ai_key", v);
         }
@@ -989,7 +989,7 @@ async fn ch_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response 
         db.set("ai_model", v);
     }
     if let Some(v) = b["ai_provider"].as_str() {
-        db.set("ai_provider", if ["groq", "xai"].contains(&v) { v } else { "" });
+        db.set("ai_provider", if ["groq", "xai", "gemini"].contains(&v) { v } else { "" });
     }
     if let Some(v) = b["ai_brief"].as_str() {
         db.set("ai_brief", &v.trim().chars().take(3000).collect::<String>());
