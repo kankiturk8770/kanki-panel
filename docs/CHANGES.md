@@ -1,3 +1,7 @@
+# v3.7.1 — Groq for the channel writer
+- **The AI writer works with Groq** (groq.com, `https://api.groq.com/openai/v1`, keys `gsk_…`) as well as Grok (x.ai, keys `xai-…`): the service is told by the key, or picked in the form. Groq's default model is `openai/gpt-oss-120b` (then llama-3.3-70b-versatile, gpt-oss-20b, llama-3.1-8b-instant, and the models the account lists). Model names may have a slash.
+- The key box no longer lets the browser fill in (or offer to save) the panel password, and a panel password pasted by mistake is refused.
+
 # v3.7.0 — new shell, Grok channel writer, second KANKI MIX config
 - **Menu in sections:** Dashboard, Users, Servers, VPN services, Tunnels, Sales & support, Traffic, System. A section with several pages shows them as tabs at the top: VPN services (overview, KANKI MIX, Xray, Kanki DNS, Anti-DPI), Tunnels (tunnels, tunnel servers, ports), Sales & support (sales bot, emergency chat), System (settings, backup, security). The same on phones.
 - **Glass look** in dark and light: frosted cards, menu, top bar and dialogs; gold glass buttons with a light sweep, frosted secondary buttons.

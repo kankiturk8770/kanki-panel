@@ -15,12 +15,12 @@ var V37FA={
  "Settings":"تنظیمات","Backup":"بکاپ","Security":"امنیت","Servers":"سرورها","Every server and what runs on it":"همه‌ی سرورها و سرویس‌هایی که رویشان است",
  "Server":"سرور","Tunnels count":"تانل","Repair":"تعمیر","Health":"سلامت","on":"روشن","off":"خاموش","not installed":"نصب نیست","inbounds":"اینباند",
  "exit":"خروجی","relay":"رله","Iran servers":"سرورهای ایران","Abroad servers":"سرورهای خارج","Press a service to open its settings":"روی هر سرویس بزن تا تنظیمات و تعمیرش باز شود",
- "AI writer (Grok)":"نویسنده‌ی هوش مصنوعی (Grok)",
- "Posts are written by Grok from your real plans, prices and codes, in the tone you describe. When Grok does not answer (it is tried again, and another model is tried), the built-in writer posts instead.":"پست‌ها را Grok از روی پلن‌ها، قیمت‌ها و کدهای واقعی‌ات با لحنی که می‌نویسی می‌نویسد. اگر Grok جواب ندهد (چند بار دوباره امتحان می‌شود و مدل دیگری هم امتحان می‌شود)، نویسنده‌ی داخلی پست را می‌گذارد.",
+ "AI writer (Grok)":"نویسنده‌ی هوش مصنوعی (Groq / Grok)","AI service":"سرویس هوش مصنوعی","Automatic (from the key)":"خودکار (از روی کلید)","Groq (groq.com, key gsk_…)":"Groq (groq.com، کلید gsk_…)","Grok (x.ai, key xai-…)":"Grok (x.ai، کلید xai-…)","Now":"الان","Empty model = the best one of that service; a refused model is replaced by another one of your account.":"مدل خالی = بهترین مدل همان سرویس؛ اگر مدلی قبول نشود، مدل دیگری از حساب خودت امتحان می‌شود.",
+ "Posts are written by Grok from your real plans, prices and codes, in the tone you describe. When Grok does not answer (it is tried again, and another model is tried), the built-in writer posts instead.":"پست‌ها را هوش مصنوعی (Groq یا Grok) از روی پلن‌ها، قیمت‌ها و کدهای واقعی‌ات با لحنی که می‌نویسی می‌نویسد. اگر جواب ندهد (چند بار دوباره امتحان می‌شود و مدل دیگری هم امتحان می‌شود)، نویسنده‌ی داخلی پست را می‌گذارد.",
  "API key":"کلید API","saved":"ذخیره شده","Paste a new key to replace it":"برای عوض کردن، کلید جدید را بچسبان","Model":"مدل",
  "About us and how to write":"درباره‌ی ما و لحن نوشتن","Who you are, what to stress, the tone, words to avoid…":"چه کسی هستید، روی چه چیزی تأکید شود، لحن، کلماتی که نباید بیاید…",
  "Posting times (Iran time)":"ساعت‌های انتشار (به وقت ایران)","Empty = every N hours as above. Three times a day: 10:00, 16:00, 21:30":"خالی = هر چند ساعت یک‌بار (بالا). سه بار در روز: ۱۰:۰۰، ۱۶:۰۰، ۲۱:۳۰",
- "Test the key":"تست کلید","Remove the key":"حذف کلید","Grok works":"Grok کار می‌کند","Last answer":"آخرین جواب","Use 3 times a day":"سه بار در روز",
+ "Test the key":"تست کلید","Remove the key":"حذف کلید","Grok works":"هوش مصنوعی کار می‌کند","Last answer":"آخرین جواب","Use 3 times a day":"سه بار در روز",
  "Written by Grok":"نوشته‌ی Grok","Written by the built-in writer":"نوشته‌ی نویسنده‌ی داخلی",
  "Fast, for games and calls":"سریع، برای بازی و تماس","Steady, works almost everywhere":"پایدار، تقریباً همه‌جا","For strong filtering":"برای فیلترینگ شدید",
  "Over UDP (fast, games)":"روی UDP (سریع، بازی)","Over TCP (steady)":"روی TCP (پایدار)","Advanced (hardest to block)":"پیشرفته (سخت‌ترین برای بستن)"
@@ -143,14 +143,16 @@ if(window.tunEdit){var _te=window.tunEdit;window.tunEdit=function(id,pre){var r=
  setTimeout(function(){if(!$('#tw_pt'))return;var tm;var go=function(){clearTimeout(tm);tm=setTimeout(function(){liveCheck(id)},350)};
   ['#tw_pt','#tw_tcp','#tw_udp'].forEach(function(s){var e=$(s);if(e)e.addEventListener('input',go)});['#tw_en','#tw_ex'].forEach(function(s){var e=$(s);if(e)e.addEventListener('change',go)});
   ['#tw_tr','#tw_md'].forEach(function(s){var e=$(s);if(e)e.addEventListener('click',go)});setTimeout(go,600)},300);return r}}
-Object.assign(V37FA,{"taken by":"گرفته شده توسط","These ports are already taken on the server":"این پورت‌ها روی سرور گرفته شده‌اند","The server has not said which ports are free yet (update it to 3.7)":"سرور هنوز نگفته کدام پورت‌ها آزادند (آن را به ۳.۷ آپدیت کن)","The ports are free on the servers":"پورت‌ها روی سرورها آزادند"});fa();
+Object.assign(V37FA,{"A Groq key starts with gsk_ (console.groq.com/keys), a Grok key with xai- (console.x.ai). Save this one anyway?":"کلید Groq با gsk_ شروع می‌شود (console.groq.com/keys) و کلید Grok با xai- (console.x.ai). همین را ذخیره کنم؟","taken by":"گرفته شده توسط","These ports are already taken on the server":"این پورت‌ها روی سرور گرفته شده‌اند","The server has not said which ports are free yet (update it to 3.7)":"سرور هنوز نگفته کدام پورت‌ها آزادند (آن را به ۳.۷ آپدیت کن)","The ports are free on the servers":"پورت‌ها روی سرورها آزادند"});fa();
 
 // ---------------------------------------------------------------- smart channel: the Grok writer
 function aiCard(c){var st=String(c.ai_status||''),ok=st.indexOf('ok:')==0;
  return '<div class="card" id="v37ai"><div class="nh"><div><h3>🤖 '+t('AI writer (Grok)')+'</h3><p class="sub">'+t('Posts are written by Grok from your real plans, prices and codes, in the tone you describe. When Grok does not answer (it is tried again, and another model is tried), the built-in writer posts instead.')+'</p></div>'+
   '<label class="sw"><input type="checkbox" id="ai_on" '+(c.ai_on?'checked':'')+'><span></span></label></div>'+
-  '<div class="g2f"><div><label class="f">'+t('API key')+(c.ai_has_key?' · <span class="okt">'+t('saved')+' <span class="ltr">'+esc(c.ai_key_hint||'')+'</span></span>':'')+'</label><input id="ai_key" class="ltr" type="password" autocomplete="off" placeholder="'+esc(c.ai_has_key?t('Paste a new key to replace it'):'xai-…')+'"></div>'+
-  '<div><label class="f">'+t('Model')+'</label><input id="ai_model" class="ltr" value="'+esc(c.ai_model||'grok-4')+'" placeholder="grok-4"></div></div>'+
+  '<div class="g2f"><div><label class="f">'+t('API key')+(c.ai_has_key?' · <span class="okt">'+t('saved')+' <span class="ltr">'+esc(c.ai_key_hint||'')+'</span></span>':'')+'</label><input id="ai_key" class="ltr aikey" type="text" name="kk-grok-api" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="'+esc(c.ai_has_key?t('Paste a new key to replace it'):'gsk_… / xai-…')+'"></div>'+
+  '<div><label class="f">'+t('Model')+'</label><input id="ai_model" class="ltr" value="'+esc(c.ai_model||'')+'" placeholder="openai/gpt-oss-120b"></div></div>'+
+  '<label class="f">'+t('AI service')+'</label><select id="ai_pv">'+[['','Automatic (from the key)'],['groq','Groq (groq.com, key gsk_…)'],['xai','Grok (x.ai, key xai-…)']].map(function(o){return '<option value="'+o[0]+'"'+((c.ai_provider||'')==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select>'+
+  '<small class="muted">'+t('Now')+': <b class="ltr">'+esc(c.ai_provider_used=='xai'?'Grok · api.x.ai/v1':'Groq · api.groq.com/openai/v1')+'</b> · '+t('Empty model = the best one of that service; a refused model is replaced by another one of your account.')+'</small>'+
   '<label class="f">'+t('About us and how to write')+'</label><textarea id="ai_brief" rows="4" placeholder="'+esc(t('Who you are, what to stress, the tone, words to avoid…'))+'">'+esc(c.ai_brief||'')+'</textarea>'+
   '<label class="f">'+t('Posting times (Iran time)')+'</label><div class="inl"><input id="ch_times" class="ltr" value="'+esc(c.times||'')+'" placeholder="10:00, 16:00, 21:30"><button type="button" class="b2" id="ai_3x" style="flex:none">'+t('Use 3 times a day')+'</button></div><small class="muted">'+t('Empty = every N hours as above. Three times a day: 10:00, 16:00, 21:30')+'</small>'+
   (st?'<p class="'+(ok?'okt':'r')+'" style="font-size:12px;margin:8px 0 0">'+t('Last answer')+': <span class="ltr">'+esc(ok?st.slice(3):st)+'</span></p>':'')+
@@ -158,10 +160,11 @@ function aiCard(c){var st=String(c.ai_status||''),ok=st.indexOf('ok:')==0;
   '<div id="ai_out" class="chpv" style="display:none;margin-top:10px"></div></div>'}
 function aiWire(){var g=function(id){return $('#'+id)};
  g('ai_3x').onclick=function(){g('ch_times').value='10:00, 16:00, 21:30'};
- g('ai_save').onclick=function(){var b=this;b.disabled=true;api('PUT','/api/channel',{ai_on:g('ai_on').checked,ai_key:g('ai_key').value.trim(),ai_model:g('ai_model').value.trim(),ai_brief:g('ai_brief').value,times:g('ch_times').value.trim()})
+ var keyOk=function(){var k=g('ai_key').value.trim();if(k&&!/^(gsk_|xai-)/.test(k)&&!confirm(t('A Groq key starts with gsk_ (console.groq.com/keys), a Grok key with xai- (console.x.ai). Save this one anyway?')))return false;return true};
+ g('ai_save').onclick=function(){if(!keyOk())return;var b=this;b.disabled=true;api('PUT','/api/channel',{ai_on:g('ai_on').checked,ai_key:g('ai_key').value.trim(),ai_provider:g('ai_pv').value,ai_model:g('ai_model').value.trim(),ai_brief:g('ai_brief').value,times:g('ch_times').value.trim()})
   .then(function(){toast(t('Saved'));botChan()}).catch(function(e){b.disabled=false;fail(e)})};
- g('ai_test').onclick=function(){var b=this,o=g('ai_out');b.disabled=true;o.style.display='';o.innerHTML='<span class="muted">…</span>';
-  var save=g('ai_key').value.trim()?api('PUT','/api/channel',{ai_key:g('ai_key').value.trim(),ai_model:g('ai_model').value.trim()}):Promise.resolve();
+ g('ai_test').onclick=function(){if(!keyOk())return;var b=this,o=g('ai_out');b.disabled=true;o.style.display='';o.innerHTML='<span class="muted">…</span>';
+  var save=api('PUT','/api/channel',{ai_key:g('ai_key').value.trim(),ai_provider:g('ai_pv').value,ai_model:g('ai_model').value.trim()});
   save.then(function(){return api('POST','/api/channel/ai-test')}).then(function(r){o.innerHTML='<b class="okt">✓ '+t('Grok works')+' · <span class="ltr">'+esc(r.model)+'</span></b><br><br>'+String(r.text||'').replace(/\n/g,'<br>');b.disabled=false})
    .catch(function(e){o.innerHTML='<span class="r">'+esc(e.message||'')+'</span>';b.disabled=false})};
  var rm=g('ai_rm');if(rm)rm.onclick=function(){if(!confirm(t('Remove the key')+'?'))return;api('PUT','/api/channel',{ai_key:'-',ai_on:false}).then(function(){toast(t('Done'));botChan()}).catch(fail)}}
@@ -266,6 +269,7 @@ body.v37 .ptabs a.on,body.v37 .seg button.on,body.v37 .segl button.on{background
 @media(max-width:820px){.trcols{grid-template-columns:1fr}}
 /* KANKI MIX second config */
 .km2 .chk span small{display:block;margin-top:2px}
+.aikey{-webkit-text-security:disc}.aikey:focus{-webkit-text-security:none}
 .km2{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;width:100%;margin-top:6px;padding:8px 10px;border-radius:12px;border:1px dashed var(--gb2)}
 `;
 var st=document.createElement('style');st.id='v37css';st.textContent=css;document.head.appendChild(st);

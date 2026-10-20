@@ -1,4 +1,6 @@
-//! AI writer for the channel posts: Grok (x.ai, an OpenAI-compatible chat API).
+//! AI writer for the channel posts: Groq (groq.com) or Grok (x.ai), both OpenAI-compatible chat APIs.
+//! The provider is told by the key (Groq keys start with `gsk_`, x.ai keys with `xai-`) unless the
+//! admin picks one.
 //!
 //! The admin pastes an API key and a short brief (who we are, what to stress, the tone) in the panel.
 //! At each posting time the channel manager asks Grok for one post of the chosen kind, with the real
@@ -10,10 +12,31 @@ use crate::App;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-const API: &str = "https://api.x.ai/v1";
-pub const DEFAULT_MODEL: &str = "grok-4";
-/// tried after the chosen model when it is refused (the account's own list comes first)
-const FALLBACK_MODELS: &[&str] = &["grok-4", "grok-3", "grok-3-mini"];
+/// One OpenAI-compatible provider: (name, base URL, default model, models tried when one is refused)
+pub struct Provider {
+    pub name: &'static str,
+    pub base: &'static str,
+    pub model: &'static str,
+    pub fallback: &'static [&'static str],
+}
+
+pub const GROQ: Provider = Provider {
+    name: "groq",
+    base: "https://api.groq.com/openai/v1",
+    model: "openai/gpt-oss-120b",
+    fallback: &["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b", "llama-3.1-8b-instant"],
+};
+pub const XAI: Provider = Provider { name: "xai", base: "https://api.x.ai/v1", model: "grok-4", fallback: &["grok-4", "grok-3", "grok-3-mini"] };
+
+/// The provider of a key: what the admin chose, else told by the key's prefix (Groq: gsk_)
+pub fn provider_of(choice: &str, key: &str) -> &'static Provider {
+    match choice {
+        "groq" => &GROQ,
+        "xai" => &XAI,
+        _ if key.trim().starts_with("xai-") => &XAI,
+        _ => &GROQ,
+    }
+}
 /// waits before the 2nd and 3rd try of the same model
 const BACKOFF: &[u64] = &[3, 10];
 
@@ -22,11 +45,18 @@ pub struct AiCfg {
     pub key: String,
     pub model: String,
     pub brief: String,
+    pub provider: &'static Provider,
 }
 
 pub fn cfg(app: &App) -> AiCfg {
+    let key = app.db.get("ai_key");
+    let provider = provider_of(&app.db.get("ai_provider"), &key);
     let m = app.db.get("ai_model");
-    AiCfg { on: app.db.on("ai_on"), key: app.db.get("ai_key"), model: if m.trim().is_empty() { DEFAULT_MODEL.into() } else { m.trim().to_string() }, brief: app.db.get("ai_brief") }
+    let m = m.trim();
+    // a model of the other provider (left from before) is not sent to this one
+    let foreign = (provider.name == "groq" && m.starts_with("grok")) || (provider.name == "xai" && !m.starts_with("grok"));
+    let model = if m.is_empty() || foreign { provider.model.to_string() } else { m.to_string() };
+    AiCfg { on: app.db.on("ai_on"), key, model, brief: app.db.get("ai_brief"), provider }
 }
 
 /// what each post kind is about, told to the model
@@ -134,17 +164,21 @@ enum Fail {
     Again(String),
 }
 
-async fn call(app: &App, key: &str, model: &str, system: &str, user: &str) -> Result<String, Fail> {
-    let body = json!({ "model": model, "temperature": 0.9, "max_tokens": 900, "messages": [ { "role": "system", "content": system }, { "role": "user", "content": user } ] });
+async fn call(app: &App, pv: &Provider, key: &str, model: &str, system: &str, user: &str) -> Result<String, Fail> {
+    let mut body = json!({ "model": model, "temperature": 0.9, "max_tokens": 2500, "messages": [ { "role": "system", "content": system }, { "role": "user", "content": user } ] });
+    // the gpt-oss models think first: a little thinking leaves the tokens for the post
+    if model.contains("gpt-oss") {
+        body["reasoning_effort"] = json!("low");
+    }
     let r = app
         .http
-        .post(format!("{}/chat/completions", API))
+        .post(format!("{}/chat/completions", pv.base))
         .bearer_auth(key)
         .json(&body)
         .timeout(Duration::from_secs(90))
         .send()
         .await
-        .map_err(|e| Fail::Again(format!("cannot reach Grok: {}", e)))?;
+        .map_err(|e| Fail::Again(format!("cannot reach {}: {}", pv.name, e)))?;
     let code = r.status().as_u16();
     let v: Value = r.json().await.unwrap_or(Value::Null);
     let msg = v["error"]["message"].as_str().or(v["error"].as_str()).or(v["message"].as_str()).unwrap_or("").to_string();
@@ -152,7 +186,7 @@ async fn call(app: &App, key: &str, model: &str, system: &str, user: &str) -> Re
         200 => {
             let text = v["choices"][0]["message"]["content"].as_str().unwrap_or("").trim().to_string();
             if text.chars().count() < 40 {
-                return Err(Fail::Again("Grok gave an empty answer".into()));
+                return Err(Fail::Again("the AI gave an empty answer".into()));
             }
             Ok(text)
         }
@@ -166,24 +200,28 @@ async fn call(app: &App, key: &str, model: &str, system: &str, user: &str) -> Re
         }
         404 => Err(Fail::Model(format!("{}: {}", model, if msg.is_empty() { "model not found".into() } else { msg }))),
         400 | 422 if msg.to_lowercase().contains("model") => Err(Fail::Model(format!("{}: {}", model, msg))),
-        429 | 500..=599 => Err(Fail::Again(format!("Grok answered {}{}", code, if msg.is_empty() { String::new() } else { format!(": {}", msg) }))),
-        _ => Err(Fail::Key(format!("Grok answered {}: {}", code, msg))),
+        429 | 500..=599 => Err(Fail::Again(format!("{} answered {}{}", pv.name, code, if msg.is_empty() { String::new() } else { format!(": {}", msg) }))),
+        _ => Err(Fail::Key(format!("{} answered {}: {}", pv.name, code, msg))),
     }
 }
 
 /// The chat models this key may use, from the account's own list.
-async fn listed_models(app: &App, key: &str) -> Vec<String> {
-    let Ok(r) = app.http.get(format!("{}/models", API)).bearer_auth(key).timeout(Duration::from_secs(20)).send().await else { return vec![] };
+async fn listed_models(app: &App, pv: &Provider, key: &str) -> Vec<String> {
+    let Ok(r) = app.http.get(format!("{}/models", pv.base)).bearer_auth(key).timeout(Duration::from_secs(20)).send().await else { return vec![] };
     let v: Value = r.json().await.unwrap_or(Value::Null);
     let mut m: Vec<String> = v["data"]
         .as_array()
         .into_iter()
         .flatten()
         .filter_map(|x| x["id"].as_str().map(|s| s.to_string()))
-        .filter(|id| id.starts_with("grok") && !id.contains("image") && !id.contains("vision") && !id.contains("imagine"))
+        .filter(|id| {
+            let l = id.to_lowercase();
+            let text = !["image", "vision", "imagine", "whisper", "tts", "guard", "playai", "orpheus", "distil", "compound", "embed"].iter().any(|x| l.contains(x));
+            text && (pv.name != "xai" || l.starts_with("grok"))
+        })
         .collect();
-    // the newest families first
-    m.sort_by(|a, b| b.cmp(a));
+    // our known good ones first, in their order, then the rest of the list
+    m.sort_by_key(|id| pv.fallback.iter().position(|f| f == id).unwrap_or(99));
     m
 }
 
@@ -192,7 +230,7 @@ async fn listed_models(app: &App, key: &str) -> Vec<String> {
 pub async fn write(app: &App, system: &str, user: &str) -> Result<(String, String), String> {
     let c = cfg(app);
     if c.key.trim().is_empty() {
-        return Err("no Grok API key".into());
+        return Err("no AI API key".into());
     }
     let key = c.key.trim().to_string();
     let mut models = vec![c.model.clone()];
@@ -203,13 +241,13 @@ pub async fn write(app: &App, system: &str, user: &str) -> Result<(String, Strin
         let model = models[i].clone();
         let mut tries = 0;
         loop {
-            match call(app, &key, &model, system, user).await {
+            match call(app, c.provider, &key, &model, system, user).await {
                 Ok(t) => {
                     let html = tg_html(&t);
                     if html.chars().count() >= 40 {
                         return Ok((model, html));
                     }
-                    last = "Grok gave an empty answer".into();
+                    last = "the AI gave an empty answer".into();
                 }
                 Err(Fail::Key(e)) => return Err(e),
                 Err(Fail::Model(e)) => {
@@ -226,7 +264,7 @@ pub async fn write(app: &App, system: &str, user: &str) -> Result<(String, Strin
         }
         if !listed {
             listed = true;
-            for m in listed_models(app, &key).await.into_iter().chain(FALLBACK_MODELS.iter().map(|s| s.to_string())) {
+            for m in listed_models(app, c.provider, &key).await.into_iter().chain(c.provider.fallback.iter().map(|s| s.to_string())) {
                 if !models.contains(&m) {
                     models.push(m);
                 }
@@ -234,7 +272,7 @@ pub async fn write(app: &App, system: &str, user: &str) -> Result<(String, Strin
         }
         i += 1;
     }
-    Err(if last.is_empty() { "Grok did not answer".into() } else { last })
+    Err(if last.is_empty() { "the AI did not answer".into() } else { last })
 }
 
 #[cfg(test)]
@@ -248,6 +286,14 @@ mod tests {
         // an unclosed tag would make Telegram refuse the message
         assert_eq!(tg_html("<b>باز <i>کج</i>"), "باز <i>کج</i>");
         assert_eq!(strip_tags("<b>a</b> &lt;3 &amp; <i>b</i>"), "a <3 & b");
+    }
+
+    #[test]
+    fn the_key_tells_the_provider() {
+        assert_eq!(provider_of("", "gsk_abc").name, "groq");
+        assert_eq!(provider_of("", "xai-abc").name, "xai");
+        assert_eq!(provider_of("xai", "gsk_abc").name, "xai");
+        assert_eq!(provider_of("", "").base, "https://api.groq.com/openai/v1");
     }
 
     #[test]

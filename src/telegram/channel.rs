@@ -925,7 +925,7 @@ async fn ch_get(State(app): St, h: HeaderMap) -> Response {
         "times": db.get("ch_times"),
         "ai_on": db.on("ai_on"), "ai_has_key": !db.get("ai_key").trim().is_empty(),
         "ai_key_hint": key_hint,
-        "ai_model": super::ai::cfg(&app).model, "ai_brief": db.get("ai_brief"), "ai_status": db.get("ai_status"),
+        "ai_model": super::ai::cfg(&app).model, "ai_provider": db.get("ai_provider"), "ai_provider_used": super::ai::cfg(&app).provider.name, "ai_brief": db.get("ai_brief"), "ai_status": db.get("ai_status"),
     }))
     .into_response()
 }
@@ -974,15 +974,22 @@ async fn ch_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response 
             if v.len() > 300 || v.chars().any(|c| c.is_whitespace()) {
                 return err(StatusCode::BAD_REQUEST, "this does not look like an API key");
             }
+            // the browser filled in the panel's own password instead of the key
+            if crate::util::check_password(&crate::auth::admin_pass_hash(&app), v) {
+                return err(StatusCode::BAD_REQUEST, "this is your panel password, not the AI key: paste the key from console.groq.com/keys (it starts with gsk_)");
+            }
             db.set("ai_key", v);
         }
     }
     if let Some(v) = b["ai_model"].as_str() {
         let v = v.trim();
-        if !v.is_empty() && !v.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) {
-            return err(StatusCode::BAD_REQUEST, "model name: letters, digits, - _ .");
+        if !v.is_empty() && (v.len() > 100 || !v.chars().all(|c| c.is_ascii_alphanumeric() || "-_./:".contains(c))) {
+            return err(StatusCode::BAD_REQUEST, "model name: letters, digits, - _ . / (like openai/gpt-oss-120b)");
         }
         db.set("ai_model", v);
+    }
+    if let Some(v) = b["ai_provider"].as_str() {
+        db.set("ai_provider", if ["groq", "xai"].contains(&v) { v } else { "" });
     }
     if let Some(v) = b["ai_brief"].as_str() {
         db.set("ai_brief", &v.trim().chars().take(3000).collect::<String>());
