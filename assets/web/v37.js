@@ -244,6 +244,12 @@ body.v37 .snav{display:flex;flex-direction:column;gap:3px}
 @media(max-width:1099px){.sectabs{top:110px}}
 @media(max-width:620px){.sectabs .sth2{display:none}.sectabs{padding:6px}}
 body.v37 .ptabs a.on,body.v37 .seg button.on,body.v37 .segl button.on{background:linear-gradient(135deg,var(--al),var(--a) 50%,var(--ad))!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.55)}
+/* phones: a wide strip (tabs, settings sections, tables) scrolls inside itself and never makes the
+   whole page wider than the screen (that pulled the hidden menu into view) */
+@media(max-width:900px){.stw{grid-template-columns:minmax(0,1fr)!important}.stw>*,.g2>*,.g3>*,.g4>*,.kv>*{min-width:0}}
+html,body{overflow-x:clip;max-width:100%}
+body.v37 main{min-width:0;max-width:100vw}
+@media(max-width:1099px){body.v37 main{overflow-x:clip}}
 /* flags */
 .flg{font-size:1.05em;line-height:1;display:inline-block;vertical-align:-1px;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}.flg.nf{opacity:.55}
 /* servers grid */
