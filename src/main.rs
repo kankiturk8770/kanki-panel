@@ -30,6 +30,8 @@ mod subdomain;
 mod subiran;
 #[path = "http/exitgeo.rs"]
 mod exitgeo;
+#[path = "http/migrate.rs"]
+mod migrate;
 
 // vpn: protocol engines + node sync
 mod dns;
@@ -269,6 +271,8 @@ async fn main() {
         let name = app.env.get("LOCAL_NAME").cloned().unwrap_or_else(|| "Main".into());
         let _ = app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,online) VALUES('local',?1,'','','',1)", &[&name]);
     }
+    // the first start on a new server after a move
+    migrate::after_move(&app);
     if app.db.get("api_key").is_empty() {
         app.db.set("api_key", &util::rand_token(40));
     }

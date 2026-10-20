@@ -61,6 +61,11 @@ fn run(cmd: &str, args: &[&str], pass: Option<&str>) -> Result<(), String> {
 
 /// Returns (bytes, file name). Encrypted when a passphrase is given.
 pub fn make_archive(app: &App, pass: &str) -> Result<(Vec<u8>, String), String> {
+    make_archive_with(app, pass, false)
+}
+
+/// `with_apps`: also the app install files uploaded in the panel (a move to a new server takes them).
+pub fn make_archive_with(app: &App, pass: &str, with_apps: bool) -> Result<(Vec<u8>, String), String> {
     let dir = format!("/tmp/kanki-bk-{}", rand_token(12));
     private_dir(&dir)?;
     std::fs::create_dir_all(format!("{}/files", dir)).map_err(|e| e.to_string())?;
@@ -79,7 +84,12 @@ pub fn make_archive(app: &App, pass: &str) -> Result<(Vec<u8>, String), String> 
         let meta = json!({"version": crate::VERSION, "ts": now(), "domain": app.env.get("DOMAIN").cloned().unwrap_or_default()});
         std::fs::write(format!("{}/meta.json", dir), meta.to_string()).map_err(|e| e.to_string())?;
         let tgz = format!("{}/out.tar.gz", dir);
-        run("tar", &["-czf", &tgz, "-C", &dir, "kanki.db", "files", "meta.json"], None)?;
+        let data = app.data_dir();
+        if with_apps && std::path::Path::new(&format!("{}/apps", data)).is_dir() {
+            run("tar", &["-czf", &tgz, "-C", &dir, "kanki.db", "files", "meta.json", "-C", &data, "apps"], None)?;
+        } else {
+            run("tar", &["-czf", &tgz, "-C", &dir, "kanki.db", "files", "meta.json"], None)?;
+        }
         let name_base = format!("kanki-backup-{}", stamp(now()));
         if pass.is_empty() {
             return Ok((std::fs::read(&tgz).map_err(|e| e.to_string())?, format!("{}.tar.gz", name_base)));

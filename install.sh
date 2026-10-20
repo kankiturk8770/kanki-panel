@@ -15,7 +15,7 @@ if [ "$(id -u)" != "0" ]; then
   command -v sudo >/dev/null || die "Please run as root (this server has no sudo)"
   say "Not root: running again with sudo ..."
   keep=()
-  for v in KANKI_REPO KANKI_JOIN KANKI_PANEL KANKI_TUNNEL KANKI_DOMAIN KANKI_EMAIL; do
+  for v in KANKI_REPO KANKI_JOIN KANKI_PANEL KANKI_TUNNEL KANKI_DOMAIN KANKI_EMAIL KANKI_MOVE; do
     if [ -n "${!v:-}" ]; then keep+=("$v=${!v}"); fi
   done
   # started as a file (the "kanki" command): run that file. Started as `bash <(curl ...)` or
@@ -582,6 +582,101 @@ uninstall(){
   ok "Removed (WireGuard / AmneziaWG / Hysteria2 / Caddy were left untouched)"
 }
 
+# =====================================================================
+# Move the whole panel here from another server (the old panel's Backup › Move to a new server
+# prints this command). KANKI_MOVE=domain|https port|old server IP|one-time token|passphrase
+move_panel(){
+  local D P OLD T PASS W=/root/kanki-move
+  IFS='|' read -r D P OLD T PASS <<< "$KANKI_MOVE"
+  [ -n "$D" ] && [ -n "$P" ] && [ -n "$OLD" ] && [ -n "$T" ] && [ -n "$PASS" ] || die "The move command is incomplete: copy it again from the old panel"
+  echo; say "Moving the Kanki panel $D here from $OLD"
+  if [ -f "$ENV" ] && grep -q '^MODE=panel' "$ENV"; then yes_no "A Kanki panel is already installed here. Replace it with the one being moved?" N || exit 0; fi
+  need_repo; base_packages; download_bin
+  rm -rf "$W"; mkdir -p "$W"; chmod 700 "$W"
+  say "Downloading the full backup from the old server ..."
+  # by the old server's IP: the domain may already point here
+  local URL="https://$D:$P/move/bundle?t=$T"
+  curl -fsS --retry 3 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL" \
+    || curl -fsSk --retry 2 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL" \
+    || die "Could not download the backup from $OLD:$P. Is the old panel still running? Is the command older than 3 hours (make a new one)?"
+  KANKI_BK_PASS="$PASS" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "$W/b.kbk" -out "$W/b.tgz" -pass env:KANKI_BK_PASS \
+    || die "The backup could not be opened (wrong or damaged): make a new command in the old panel"
+  mkdir -p "$W/x"; tar -xzf "$W/b.tgz" -C "$W/x" || die "The backup is damaged"
+  [ -f "$W/x/kanki.db" ] && [ -f "$W/x/files$ENV" ] || die "The backup has no database or settings"
+  ok "Backup downloaded ($(du -h "$W/b.kbk" | cut -f1))"
+  systemctl stop kanki-panel 2>/dev/null || true
+  # the server files, exactly as they were (keys, configs, certificate)
+  local f
+  for f in $ENV $ENV_DIR/repo /etc/wireguard/wg0.conf /etc/amnezia/amneziawg/awg0.conf /etc/hysteria/config.yaml $TLS/fullchain.pem $TLS/privkey.pem; do
+    if [ -f "$W/x/files$f" ] && [ ! -L "$W/x/files$f" ]; then mkdir -p "$(dirname "$f")"; install -m 600 "$W/x/files$f" "$f"; fi
+  done
+  need_repo
+  # an address that named the old server becomes the domain
+  if [ "$(envget ENDPOINT)" = "$OLD" ]; then sed -i "s|^ENDPOINT=.*|ENDPOINT=$D|" "$ENV"; fi
+  sed -i '/^MOVED_FROM=/d' "$ENV"; echo "MOVED_FROM=$OLD" >> "$ENV"
+  local DATA; DATA=$(envget DATA_DIR); DATA=${DATA:-/var/lib/kanki}
+  mkdir -p "$DATA"; chmod 700 "$DATA"
+  install -m 600 "$W/x/kanki.db" "$DATA/kanki.db"; rm -f "$DATA/kanki.db-wal" "$DATA/kanki.db-shm"
+  if [ -d "$W/x/apps" ]; then rm -rf "$DATA/apps"; cp -a "$W/x/apps" "$DATA/apps"; fi
+  ok "Database, settings, keys and app files restored"
+  DOMAIN=$(envget DOMAIN); HTTPS_PORT=$(envget HTTPS_PORT); PANEL_PORT=$(envget PANEL_PORT); HY2_PORT=$(envget HY2_PORT)
+  WG_PORT=$(grep -m1 '^ListenPort' /etc/wireguard/wg0.conf 2>/dev/null | awk -F= '{gsub(/ /,"",$2);print $2}')
+  AWG_PORT=$(grep -m1 '^ListenPort' /etc/amnezia/amneziawg/awg0.conf 2>/dev/null | awk -F= '{gsub(/ /,"",$2);print $2}')
+  # the network rules of the configs name the old server's network card: use this one's
+  local ETH c; ETH=$(ip route show default | awk '{print $5; exit}')
+  for c in /etc/wireguard/wg0.conf /etc/amnezia/amneziawg/awg0.conf; do
+    [ -f "$c" ] && [ -n "$ETH" ] && sed -i -E "s/ -o [A-Za-z0-9._@-]+ -j MASQUERADE/ -o $ETH -j MASQUERADE/g" "$c"
+  done
+  [ -f /etc/wireguard/wg0.conf ] && setup_wireguard
+  [ -f /etc/amnezia/amneziawg/awg0.conf ] && setup_amneziawg
+  if [ -n "$HY2_PORT" ] && [ -f /etc/hysteria/config.yaml ]; then
+    say "Installing Hysteria2 on UDP $HY2_PORT ..."
+    if hy2_install; then
+      id hysteria >/dev/null 2>&1 && usermod -aG kankitls hysteria
+      systemctl enable -q hysteria-server.service 2>/dev/null || true
+    else
+      warn "Hysteria2 could not be installed"
+    fi
+  fi
+  # a fresh certificate when the domain already points here; else the one from the old server
+  apt-get install -y -qq certbot >/dev/null 2>&1 || true
+  mkdir -p "$TLS"
+  if certbot certonly --standalone -n --agree-tos --register-unsafely-without-email -d "$DOMAIN" >/dev/null 2>&1; then
+    mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+    printf '#!/bin/sh\ncp -L /etc/letsencrypt/live/%s/fullchain.pem %s/fullchain.pem\ncp -L /etc/letsencrypt/live/%s/privkey.pem %s/privkey.pem\nchgrp kankitls %s/*.pem; chmod 640 %s/*.pem\nsystemctl reload caddy 2>/dev/null || true\nsystemctl restart hysteria-server 2>/dev/null || true\n' \
+      "$DOMAIN" "$TLS" "$DOMAIN" "$TLS" "$TLS" "$TLS" > /etc/letsencrypt/renewal-hooks/deploy/kanki.sh
+    chmod +x /etc/letsencrypt/renewal-hooks/deploy/kanki.sh
+    sh /etc/letsencrypt/renewal-hooks/deploy/kanki.sh
+    ok "New SSL certificate for $DOMAIN"
+  else
+    warn "No new certificate yet ($DOMAIN does not point here yet, or port 80 is closed): the old server's certificate is used for now"
+  fi
+  [ -f $TLS/fullchain.pem ] && tls_perms
+  if [ -n "$HY2_PORT" ]; then systemctl restart hysteria-server.service 2>/dev/null || true; fi
+  setup_caddy "https://$DOMAIN:$HTTPS_PORT" "$PANEL_PORT"
+  service kanki-panel serve
+  open_ports 80/tcp "$HTTPS_PORT/tcp" "${WG_PORT:+$WG_PORT/udp}" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}"
+  say "Checking the panel ..."
+  local i up=0
+  for i in $(seq 1 30); do curl -fs -o /dev/null "http://127.0.0.1:$PANEL_PORT/admin" && { up=1; break; }; sleep 1; done
+  [ "$up" = 1 ] || die "The panel did not start here (journalctl -u kanki-panel -n 30). The old panel keeps running; nothing changed there."
+  ok "The panel runs on this server"
+  # the old panel stops (no two panels for the same nodes and bot)
+  if curl -fsS -X POST --max-time 20 --resolve "$D:$P:$OLD" "https://$D:$P/move/done?t=$T" >/dev/null 2>&1 \
+     || curl -fsSk -X POST --max-time 20 --resolve "$D:$P:$OLD" "https://$D:$P/move/done?t=$T" >/dev/null 2>&1; then
+    ok "The old panel ($OLD) was told to stop"
+  else
+    warn "The old panel could not be told: stop it there with: systemctl disable --now kanki-panel"
+  fi
+  rm -rf "$W"
+  local ME; ME=$(pubip)
+  echo; ok "Move complete!"
+  echo -e "   Panel:  ${C}https://$DOMAIN:$HTTPS_PORT/admin${N}  (the same username and password as before)"
+  echo "   The domain $DOMAIN must point to this server: ${ME:-the IP of this server}"
+  echo "   Nodes and tunnel servers find the panel by its domain by themselves; this server's VPN uses the same keys, so the users' configs keep working."
+}
+
+if [ -n "${KANKI_MOVE:-}" ]; then move_panel; exit $?; fi
 if [ -n "$KANKI_TUNNEL" ]; then install_tunnel_agent; exit $?; fi
 if [ -n "$KANKI_JOIN" ]; then join_node; exit $?; fi
 

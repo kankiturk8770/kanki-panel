@@ -170,6 +170,33 @@ if(window.botChan){var _bc=window.botChan;window.botChan=function(){_bc.apply(th
   if($('#ch_save')&&!$('#v37ai')){clearInterval(wait);api('GET','/api/channel').then(function(c){if($('#v37ai'))return;var first=el.querySelector('.card');var d=document.createElement('div');d.innerHTML=aiCard(c);
    if(first&&first.nextSibling)el.insertBefore(d.firstChild,first.nextSibling);else el.appendChild(d.firstChild);aiWire()}).catch(function(){})}},150)}}
 
+// ---------------------------------------------------------------- Backup: move the whole panel to a new server
+Object.assign(V37FA,{"Move the panel to a new server":"انتقال کامل پنل به سرور جدید",
+ "Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.":"همه‌چیز منتقل می‌شود: کاربرها، سرورها، تانل‌ها، DNS، Xray، ربات و پلن‌ها، تنظیمات پنل، کلیدهای WireGuard / AmneziaWG / Hysteria2 همین سرور (کانفیگ کاربرها کار می‌کند)، گواهی و فایل‌های اپ.",
+ "Point the panel's domain to the new server's IP":"دامنه‌ی پنل را روی آی‌پی سرور جدید بگذار","In your DNS (Cloudflare / ArvanCloud): the A record of":"در DNS دامنه (کلادفلر / ابرآروان): رکورد A دامنه‌ی",
+ "= the IP of the new server, without CDN (DNS only). The old panel keeps working by its IP until the move is done.":"= آی‌پی سرور جدید، بدون CDN (فقط DNS). پنل قدیمی تا پایان انتقال با آی‌پی خودش کار می‌کند.",
+ "Make the move command":"ساخت دستور انتقال","Run this on the new server (Ubuntu / Debian, as root)":"این را روی سرور جدید اجرا کن (اوبونتو / دبیان، با root)",
+ "It downloads everything straight from this server, puts it back with the same keys and starts the panel there. Then this panel stops by itself.":"همه‌چیز را مستقیم از همین سرور می‌گیرد، با همان کلیدها برمی‌گرداند و پنل را آن‌جا روشن می‌کند. بعد این پنل خودش خاموش می‌شود.",
+ "This server's IP (empty = found by itself)":"آی‌پی همین سرور (خالی = خودکار)","Valid for 3 hours, one time. It holds the key of the backup: do not share it.":"۳ ساعت و یک‌بار اعتبار دارد. کلید بکاپ داخلش است: به کسی نده.",
+ "Waiting for the new server…":"منتظر سرور جدید…","The new server downloaded the backup":"سرور جدید بکاپ را گرفت","Moved: the panel runs on the new server. This one is stopping.":"انتقال تمام شد: پنل روی سرور جدید اجرا می‌شود و این یکی خاموش می‌شود.",
+ "Cancel the command":"لغو دستور","Copy the command":"کپی دستور","The backup above is complete too: it can also be restored by hand on a new server (Restore with «Also restore server keys»).":"بکاپ بالا هم کامل است: می‌شود آن را دستی هم روی سرور جدید برگرداند (بازگردانی با تیک «کلیدها و تنظیمات سرور»)."});fa();
+function moveCard(){return '<div class="card" id="v37move"><h3>🚚 '+t('Move the panel to a new server')+'</h3><p class="sub">'+t("Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.")+'</p><div id="mv_in">'+t('Loading…')+'</div></div>'}
+function moveDraw(m){var el=$('#mv_in');if(!el)return;
+ var steps='<ol class="steps" style="margin:6px 0 10px;line-height:2"><li><b>'+t("Point the panel's domain to the new server's IP")+'</b><br><small class="muted">'+t('In your DNS (Cloudflare / ArvanCloud): the A record of')+' <span class="ltr">'+esc(m.domain||'')+'</span> '+t('= the IP of the new server, without CDN (DNS only). The old panel keeps working by its IP until the move is done.')+'</small></li>'+
+  '<li><b>'+t('Run this on the new server (Ubuntu / Debian, as root)')+'</b><br><small class="muted">'+t('It downloads everything straight from this server, puts it back with the same keys and starts the panel there. Then this panel stops by itself.')+'</small></li></ol>';
+ if(m.done>0){el.innerHTML='<div class="okbox" style="padding:10px;border-radius:12px;border:1px solid var(--ok)">✓ '+t('Moved: the panel runs on the new server. This one is stopping.')+'</div>';return}
+ if(!m.active){el.innerHTML=steps+'<label class="f">'+t("This server's IP (empty = found by itself)")+'</label><div class="inl"><input id="mv_ip" class="ltr" value="'+esc(m.ip||'')+'" placeholder="1.2.3.4"><button class="btn" id="mv_go" style="flex:none">'+t('Make the move command')+'</button></div>'+
+   '<p class="hint">'+t('The backup above is complete too: it can also be restored by hand on a new server (Restore with «Also restore server keys»).')+'</p>';
+  $('#mv_go').onclick=function(){var b=this;b.disabled=true;api('POST','/api/migrate/start',{ip:$('#mv_ip').value.trim()}).then(moveLoad).catch(function(e){b.disabled=false;fail(e)})};return}
+ el.innerHTML=steps+'<pre class="ltr" id="mv_cmd" style="white-space:pre-wrap;word-break:break-all;font-size:11.5px;padding:10px;border-radius:12px;background:var(--in);border:1px solid var(--gb2);margin:0">'+esc(m.command)+'</pre>'+
+  '<p class="hint">'+t('Valid for 3 hours, one time. It holds the key of the backup: do not share it.')+'</p>'+
+  '<p style="margin:6px 0">'+(m.fetched>0?'<span class="okt">✓ '+t('The new server downloaded the backup')+(m.new_ip?' (<span class="ltr">'+esc(m.new_ip)+'</span>)':'')+'</span>':'<span class="muted">⏳ '+t('Waiting for the new server…')+'</span>')+'</p>'+
+  '<div class="g2"><button class="btn" id="mv_cp">'+t('Copy the command')+'</button><button class="b2 bd" id="mv_x">'+t('Cancel the command')+'</button></div>';
+ $('#mv_cp').onclick=function(){copy(m.command)};$('#mv_x').onclick=function(){api('DELETE','/api/migrate').then(moveLoad).catch(fail)}}
+function moveLoad(){return api('GET','/api/migrate').then(moveDraw).catch(function(e){var el=$('#mv_in');if(el)el.textContent=e.message||''})}
+if(window.pBackup){var _pb=window.pBackup;window.pBackup=function(){_pb.apply(this,arguments);var g=$('#pg .g2');if(g&&!$('#v37move')){var d=document.createElement('div');d.innerHTML=moveCard();g.parentNode.insertBefore(d.firstChild,g.nextSibling)}
+ moveLoad();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page=='backup'&&$('#v37move')&&!$('#modal').classList.contains('on'))moveLoad()},5000)}}
+
 // ---------------------------------------------------------------- the look
 var css=`
 body.v37{--g1:rgba(255,255,255,.055);--g2:rgba(255,255,255,.018);--gb:rgba(255,255,255,.085);--gb2:rgba(255,255,255,.14);--gl:inset 0 1px 0 rgba(255,255,255,.07);--blur:saturate(150%) blur(18px)}
