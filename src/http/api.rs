@@ -1002,7 +1002,7 @@ fn sub_data(app: &App, u: &User) -> Value {
         if let Some(t) = tun {
             let mut e = v.clone();
             e["id"] = json!(format!("{}{}", n.id, TUNNEL_SUFFIX));
-            e["name"] = json!(format!("{} (تانل)", n.name));
+            e["name"] = json!(crate::kmix::tunnel_name(app, n));
             e["main"] = json!(false);
             e["protocols"] = json!(["kankimix"]);
             e["hy2"] = Value::Null;
@@ -1058,7 +1058,12 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
                     if crate::kmix::link(&app, &u, &n).is_some() {
                         btns.push_str(&format!("<i hidden data-url=\"/api/config/{}/kankimix?sub={}&amp;node={}\"></i>", u.id, sub, esc(&n.id)));
                         if crate::kmix::link_tunnel(&app, &u, &n).is_some() {
-                            btns.push_str(&format!("<i hidden data-via=\"tunnel\" data-url=\"/api/config/{}/kankimix?sub={}&amp;node={}{}\"></i>", u.id, sub, esc(&n.id), TUNNEL_SUFFIX));
+                            // the app names each config by the last heading before it: the second one gets
+                            // its own (hidden) heading, then the server's name again for what follows
+                            btns.push_str(&format!(
+                                "<h3 hidden>{}</h3><i hidden data-via=\"tunnel\" data-url=\"/api/config/{}/kankimix?sub={}&amp;node={}{}\"></i><h3 hidden>{}</h3>",
+                                esc(&crate::kmix::tunnel_name(&app, &n)), u.id, sub, esc(&n.id), TUNNEL_SUFFIX, esc(&n.name)
+                            ));
                         }
                         btns.push_str("<p class=\"apponly\" data-i18n=\"app_only\">Only in the Kanki VPN app</p>");
                     }

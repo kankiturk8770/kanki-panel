@@ -1,3 +1,6 @@
+# v3.7.5 — a name for the second KANKI MIX config
+- **KANKI MIX › each server › Second config through the tunnel › Name in the app:** the name the app shows for the config through the Iran tunnel (empty = "<server name> (تانل)"), so the two configs of a server are told apart. Today's app shows it already: the subscription page gives the second config its own (hidden) heading, and the subscription data its own name.
+
 # v3.7.4 — Gemini (free) for the channel writer
 - **Gemini from Google AI Studio** (aistudio.google.com/apikey, free tier): keys starting with `AQ.` or `AIza` are told apart by themselves, or Gemini is picked in the form. Google's own generateContent API with the `x-goog-api-key` header. Default model `gemini-flash-latest`, then Flash Lite and 2.5 Flash / Flash Lite, then the text models the key lists (Pro and 2.0 are skipped: no free quota). A model with no free quota moves on to the next one at once.
 - The form names the AI service in use and its default model.

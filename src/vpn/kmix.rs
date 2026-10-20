@@ -75,6 +75,8 @@ pub struct NodeOpt {
     pub tun_port: u16,
     /// no second config for this server
     pub tun_off: bool,
+    /// the name of the second config in the app ("" = "<server name> (تانل)")
+    pub tun_name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -259,6 +261,13 @@ pub fn link(app: &App, u: &User, n: &Node) -> Option<String> {
     let host = link_host(app, &s, n);
     let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
     Some(format!("kanki://{}@{}:{}?{}#{}", user_key(app, u), host, port, q, crate::util::pct(&n.name)))
+}
+
+/// The name of a server's second (through the tunnel) config, as the app shows it
+pub fn tunnel_name(app: &App, n: &Node) -> String {
+    let s = settings(app);
+    let name = s.nodes.get(&n.id).map(|o| o.tun_name.trim().to_string()).unwrap_or_default();
+    if name.is_empty() { format!("{} (تانل)", n.name) } else { name }
 }
 
 /// The user's second link for one server, through the tunnel (the Iran address): the same key and
@@ -554,11 +563,13 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
             if !tun_host.is_empty() && !valid_host(&tun_host) {
                 return crate::api::err(StatusCode::BAD_REQUEST, "tunnel address: a domain or an IP of the Iran server, like ir.example.com");
             }
+            let tun_name: String = v["tun_name"].as_str().unwrap_or("").trim().chars().filter(|c| !c.is_control() && !"<>\"&".contains(*c)).take(40).collect();
             let opt = NodeOpt {
                 off: v["off"].as_bool().unwrap_or(false), port: port_of(&v["port"]).unwrap_or(0), route, host,
                 tun_host, tun_port: port_of(&v["tun_port"]).unwrap_or(0), tun_off: v["tun_off"].as_bool().unwrap_or(false),
+                tun_name,
             };
-            if opt.off || opt.port > 0 || !opt.route.is_empty() || !opt.host.is_empty() || !opt.tun_host.is_empty() || opt.tun_port > 0 || opt.tun_off {
+            if opt.off || opt.port > 0 || !opt.route.is_empty() || !opt.host.is_empty() || !opt.tun_host.is_empty() || opt.tun_port > 0 || opt.tun_off || !opt.tun_name.is_empty() {
                 nodes.insert(id.clone(), opt);
             }
         }
