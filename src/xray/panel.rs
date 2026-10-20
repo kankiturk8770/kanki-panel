@@ -1415,6 +1415,14 @@ async fn put_inbound(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
     if taken_ports(&app, &ib.server).contains(&ib.port) || s.inbounds.iter().any(|o| o.id != ib.id && o.server == ib.server && o.port == ib.port) {
         return err(StatusCode::BAD_REQUEST, "this port is already used on that server");
     }
+    if ib.enabled {
+        let mine = s.inbounds.iter().any(|o| o.id == ib.id && o.server == ib.server && o.port == ib.port && o.enabled);
+        if !mine {
+            if let Some(e) = crate::tunnel::panel::port_busy(&app, &ib.server, ib.port, false, &["kanki-xray.service"]) {
+                return err(StatusCode::CONFLICT, &e);
+            }
+        }
+    }
     if ib.path.is_empty() && ["ws", "httpupgrade", "xhttp"].contains(&ib.network.as_str()) {
         ib.path = format!("/{}", rand_token(8).to_lowercase());
     }

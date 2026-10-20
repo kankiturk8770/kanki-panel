@@ -697,6 +697,46 @@ pub fn listening(port: u16, udp: bool) -> bool {
     sockets().into_iter().any(|s| !s.3 && s.1 == port && s.2 == udp)
 }
 
+/// Every port listened on from outside: (port, udp, program, systemd unit), at most every 20 seconds
+/// worked out again (the agent reports it every few seconds).
+pub fn listeners() -> Vec<(u16, bool, String, String)> {
+    use std::sync::{Mutex, OnceLock};
+    type C = Option<(std::time::Instant, Vec<(u16, bool, String, String)>)>;
+    static CACHE: OnceLock<Mutex<C>> = OnceLock::new();
+    let c = CACHE.get_or_init(|| Mutex::new(None));
+    if let Some((at, v)) = c.lock().unwrap().as_ref() {
+        if at.elapsed().as_secs() < 20 {
+            return v.clone();
+        }
+    }
+    let socks: Vec<Sock> = sockets().into_iter().filter(|s| !s.3).collect();
+    let inodes = socks.iter().map(|s| s.0.clone()).collect();
+    let pid_of = owners(&inodes);
+    let mut out: Vec<(u16, bool, String, String)> = vec![];
+    for (inode, port, udp, _) in &socks {
+        let (prog, unit) = match pid_of.get(inode) {
+            Some(pid) => (
+                std::fs::read_to_string(format!("/proc/{}/comm", pid)).unwrap_or_default().trim().to_string(),
+                unit_of(&std::fs::read_to_string(format!("/proc/{}/cgroup", pid)).unwrap_or_default()),
+            ),
+            // a kernel socket (WireGuard / AmneziaWG) has no process
+            None => ("kernel".to_string(), String::new()),
+        };
+        let e = (*port, *udp, prog, unit);
+        if !out.contains(&e) {
+            out.push(e);
+        }
+    }
+    out.sort();
+    *c.lock().unwrap() = Some((std::time::Instant::now(), out.clone()));
+    out
+}
+
+/// `listeners` as the agent reports it: [[port, udp, program, unit], ...]
+pub fn listeners_json() -> serde_json::Value {
+    serde_json::Value::Array(listeners().into_iter().map(|(p, u, prog, unit)| serde_json::json!([p, u, prog, unit])).collect())
+}
+
 /// The systemd unit this process runs in (kanki-tunnel.service for the agent)
 fn own_unit() -> String {
     unit_of(&std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default())

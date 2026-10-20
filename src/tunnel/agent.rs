@@ -218,7 +218,8 @@ pub async fn run(version: &str) {
             }
         }
         let fw_st = tokio::task::spawn_blocking(crate::fw::report).await.unwrap_or_default();
-        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st });
+        let listen = tokio::task::spawn_blocking(crate::certbot::listeners_json).await.unwrap_or_default();
+        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen });
         match http.post(format!("{}/tunnel/agent", panel)).json(&body).send().await {
             Ok(r) if r.status().as_u16() == 410 => {
                 // this server was removed in the panel: everything Kanki put here is removed (a few

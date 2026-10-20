@@ -31,6 +31,22 @@ pub fn xray_key(sid: &str) -> String {
     format!("xray:{}", sid)
 }
 
+/// The cache key of a tunnel server
+pub fn srv_key(sid: &str) -> String {
+    format!("srv:{}", sid)
+}
+
+/// The country code (like "DE", "IR") of a node ("<id>"), an Xray server ("xray:<id>") or a tunnel
+/// server ("srv:<id>"); empty while unknown.
+pub fn cc(app: &App, key: &str) -> String {
+    cache(app).get(key).and_then(|e| e["cc"].as_str().map(|s| s.to_string())).unwrap_or_default()
+}
+
+/// Every country code known, by cache key (one read for a whole list)
+pub fn all_cc(app: &App) -> std::collections::HashMap<String, String> {
+    cache(app).into_iter().filter_map(|(k, e)| e["cc"].as_str().map(|c| (k, c.to_string()))).collect()
+}
+
 /// The exit fields one node adds to the app's subscription data (empty strings while unknown).
 pub fn fields(app: &App, node_id: &str) -> Value {
     let c = cache(app);
@@ -109,6 +125,8 @@ pub async fn refresh(app: &App) {
     let mut c = cache(app);
     let mut hosts: Vec<(String, String)> = app.db.nodes().iter().map(|n| (n.id.clone(), exit_host(app, n))).collect();
     hosts.extend(crate::xray::panel::exit_hosts(app).into_iter().map(|(sid, h)| (xray_key(&sid), h)));
+    // tunnel servers (Iran and abroad), for their flags in the panel
+    hosts.extend(crate::tunnel::panel::server_hosts(app).into_iter().map(|(sid, h)| (srv_key(&sid), h)));
     let mut changed = false;
     for (key, host) in &hosts {
         let Some(ip) = resolve_v4(host).await else { continue };

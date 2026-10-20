@@ -417,6 +417,8 @@ fn node_json(app: &App, n: &Node, users: &[User]) -> Value {
         "note": n.note, "insecure": n.insecure, "drain": n.drain, "maint": n.maint, "accept_all": n.accept_all,
         "sync_state": n.sync_state, "users": assigned, "info": info_pub,
         "plain_http": n.id != "local" && n.address.starts_with("http://"),
+        // the country of the server's IP (its flag in the panel); empty while unknown
+        "cc": crate::exitgeo::cc(app, &n.id),
     })
 }
 
@@ -971,20 +973,44 @@ pub fn node_protos(u: &User, n: &Node) -> Vec<&'static str> {
     v
 }
 
+/// id of the second (through the tunnel) KANKI MIX entry of a server in the subscription data
+pub const TUNNEL_SUFFIX: &str = "@tunnel";
+
 fn sub_data(app: &App, u: &User) -> Value {
-    let nodes: Vec<Value> = user_nodes(app, u).iter().map(|n| {
+    let mut nodes: Vec<Value> = vec![];
+    for n in user_nodes(app, u).iter() {
+        let tun = crate::kmix::link_tunnel(app, u, n);
         let mut v = json!({
             "id": n.id, "name": n.name, "main": n.id == "local", "protocols": node_protos(u, n),
             "hy2": hy2_uri(app, u, n),
             // KANKI MIX: kanki://key@host:port?fec=10-3… (Null = not for this user / not on this server)
             "kmix": crate::kmix::link(app, u, n),
+            // the second KANKI MIX config, through the Iran tunnel (Null = none)
+            "kmix_tunnel": tun,
         });
         // the real exit of this server's configs (a tunnel endpoint is in Iran; the traffic leaves here)
         if let (Some(o), Some(e)) = (v.as_object_mut(), crate::exitgeo::fields(app, &n.id).as_object()) {
             o.extend(e.clone());
         }
-        v
-    }).collect();
+        // the second config is also its own entry, so an app that knows only "kmix" lists it as a server
+        // of its own; "via" and "parent" tell a newer app it is the tunnel config of that server
+        if let Some(t) = tun {
+            let mut e = v.clone();
+            e["id"] = json!(format!("{}{}", n.id, TUNNEL_SUFFIX));
+            e["name"] = json!(format!("{} (تانل)", n.name));
+            e["main"] = json!(false);
+            e["protocols"] = json!(["kankimix"]);
+            e["hy2"] = Value::Null;
+            e["kmix"] = json!(t);
+            e["kmix_tunnel"] = Value::Null;
+            e["via"] = json!("tunnel");
+            e["parent"] = json!(n.id);
+            nodes.push(v);
+            nodes.push(e);
+        } else {
+            nodes.push(v);
+        }
+    }
     json!({
         "id": u.id, "username": u.username, "sub": u.sub_code(), "status": u.status(), "active": u.active(),
         "limit_gb": u.limit_gb, "used_gb": u.used_gb(), "expires_ts": u.expires_at, "created_ts": u.created_at,
@@ -1026,6 +1052,9 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
                 "kankimix" => {
                     if crate::kmix::link(&app, &u, &n).is_some() {
                         btns.push_str(&format!("<i hidden data-url=\"/api/config/{}/kankimix?sub={}&amp;node={}\"></i>", u.id, sub, esc(&n.id)));
+                        if crate::kmix::link_tunnel(&app, &u, &n).is_some() {
+                            btns.push_str(&format!("<i hidden data-via=\"tunnel\" data-url=\"/api/config/{}/kankimix?sub={}&amp;node={}{}\"></i>", u.id, sub, esc(&n.id), TUNNEL_SUFFIX));
+                        }
                         btns.push_str("<p class=\"apponly\" data-i18n=\"app_only\">Only in the Kanki VPN app</p>");
                     }
                 }
@@ -1182,6 +1211,11 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
     let code = parse_code(&sub).map(|x| x.1).unwrap_or(sub);
     let Some(u) = app.db.user_by_code(id, &code) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
     let node_id = q.get("node").cloned().unwrap_or_else(|| "local".into());
+    // the second KANKI MIX entry of a server: the same server, the link through the tunnel
+    let (node_id, via_tunnel) = match node_id.strip_suffix(TUNNEL_SUFFIX) {
+        Some(b) => (b.to_string(), true),
+        None => (node_id, q.get("via").map(|v| v == "tunnel").unwrap_or(false)),
+    };
     let Some(n) = app.db.node(&node_id) else { return (StatusCode::NOT_FOUND, "node").into_response() };
     if !u.on(&n) {
         return (StatusCode::FORBIDDEN, "node not allowed").into_response();
@@ -1198,7 +1232,8 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
         return if extra == "qr" { qr(&s) } else { text_conf(s) };
     }
     if proto == "kankimix" {
-        let Some(s) = crate::kmix::link(&app, &u, &n) else { return (StatusCode::NOT_FOUND, "KANKI MIX is not on for this user / server").into_response() };
+        let link = if via_tunnel { crate::kmix::link_tunnel(&app, &u, &n) } else { crate::kmix::link(&app, &u, &n) };
+        let Some(s) = link else { return (StatusCode::NOT_FOUND, "KANKI MIX is not on for this user / server").into_response() };
         return if extra == "qr" { qr(&s) } else { text_conf(s) };
     }
     let p = match proto.as_str() { "amneziawg" => "awg", "wireguard" => "wg", _ => return (StatusCode::NOT_FOUND, "proto").into_response() };

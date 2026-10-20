@@ -624,6 +624,122 @@ pub fn make_post(app: &App, kind: &str) -> (String, String) {
     (kind, text)
 }
 
+/// The facts for the AI writer, as plain lines (prices exactly as the bot sells them).
+fn facts_text(app: &App, f: &Facts, kind: &str) -> String {
+    let mut v = vec![];
+    let d = if kind == "offer" { f.discount.as_ref().map(|x| x.1).unwrap_or(0) } else { 0 };
+    if !f.plans.is_empty() {
+        v.push("Plans (name — volume / days — price):".to_string());
+        for (n, days, g, t, c, k) in f.plans.iter().take(8) {
+            let vol = if *g > 0.0 { format!("{} GB", g) } else { "unlimited".into() };
+            let price = if d > 0 { format!("{} (after {}% off: {})", toman(*t), d, toman(t * (100 - d) / 100)) } else { toman(*t) };
+            v.push(format!("- {} — {} / {} days{}{} — {}", n, vol, days, if *c > 1 { format!(" · {} devices", c) } else { String::new() }, if *k > 0 { format!(" · {} countries", k) } else { String::new() }, price));
+        }
+    }
+    if let Some((c, p, e)) = &f.discount {
+        let left = if *e > 0 { format!(", valid for {} more hours", ((e - now()) / 3600).max(1)) } else { String::new() };
+        v.push(format!("Discount code: {} = {}% off{}", c, p, left));
+    }
+    if let Some((g, d)) = &f.trial {
+        v.push(format!("Free trial: {} GB for {} days, from the bot", g, d));
+    }
+    if let Some((g, d)) = &f.ref_gift {
+        v.push(format!("Referral gift: {} GB and {} days for each friend who buys with your link", g, d));
+    }
+    v.push(format!("Active customers: {}", f.users.max(1)));
+    v.push(format!("Servers in different countries: {}", f.countries.max(1)));
+    let bot = app.db.get("bot_username");
+    if !bot.is_empty() {
+        v.push(format!("Telegram bot to buy from: @{}", bot));
+    }
+    if let Some((_, g, _)) = occasion(now()) {
+        v.push(format!("Today's occasion greeting: {}", g));
+    }
+    v.join("\n")
+}
+
+/// One post: written by Grok when the AI writer is on (the built-in writer when it fails or is off).
+/// Returns (kind, text, who wrote it: "ai:<model>" or "builtin").
+pub async fn make_post_any(app: &App, kind: &str) -> (String, String, String) {
+    let ai = super::ai::cfg(app);
+    if !(ai.on && !ai.key.trim().is_empty()) {
+        let (k, t) = make_post(app, kind);
+        return (k, t, "builtin".into());
+    }
+    let f = facts(app);
+    let kind = if kind == "auto" { auto_kind(app, &f, now()) } else { kind.to_string() };
+    // a post about something that does not exist (no discount, no trial) becomes another kind
+    let kind = match kind.as_str() {
+        "offer" if f.discount.is_none() => "plans".to_string(),
+        "trial" if f.trial.is_none() => "tip".to_string(),
+        "ref" if f.ref_gift.is_none() => "tip".to_string(),
+        "plans" if f.plans.is_empty() => "trust".to_string(),
+        _ => kind,
+    };
+    let recent: Vec<String> = serde_json::from_str(&app.db.get("ai_recent")).unwrap_or_default();
+    let (system, user) = super::ai::prompt(app, &kind, &facts_text(app, &f, &kind), &recent);
+    match super::ai::write(app, &system, &user).await {
+        Ok((model, body)) => {
+            let mut rc = recent;
+            rc.insert(0, body.clone());
+            rc.truncate(3);
+            app.db.set("ai_recent", &serde_json::to_string(&rc).unwrap_or_default());
+            app.db.set("ai_status", &format!("ok:{}", model));
+            let mut r = rand::thread_rng();
+            let s = sign(app);
+            let text = format!("{}\n\n{}{}", body, tags(&mut r), if s.is_empty() { String::new() } else { format!("\n{}", s) });
+            (kind, text, format!("ai:{}", model))
+        }
+        Err(e) => {
+            app.db.set("ai_status", &format!("error: {}", e));
+            let (k, t) = make_post(app, &kind);
+            (k, t, "builtin".into())
+        }
+    }
+}
+
+/// Posting times of the day ("HH:MM" Iran time, sorted); empty = every `ch_hours`.
+fn slots(app: &App) -> Vec<i64> {
+    parse_slots(&app.db.get("ch_times"))
+}
+
+/// "10:00, 16:00" → minutes of the day, sorted; anything else is ignored
+fn parse_slots(t: &str) -> Vec<i64> {
+    let mut v: Vec<i64> = t
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter_map(|x| {
+            let (h, m) = x.trim().split_once(':')?;
+            let (h, m) = (h.parse::<i64>().ok()?, m.parse::<i64>().ok()?);
+            ((0..24).contains(&h) && (0..60).contains(&m)).then(|| h * 60 + m)
+        })
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// Is a post due now? With posting times: the latest time of today that has passed and has no post
+/// since. Otherwise every `ch_hours`, never in the quiet hours (01:00–08:00 Iran time).
+fn due(app: &App, t: i64) -> bool {
+    let last: i64 = app.db.get("ch_last").parse().unwrap_or(0);
+    let sl = slots(app);
+    let local = t + TZ;
+    if !sl.is_empty() {
+        let day0 = local - local % 86400;
+        let mins = (local % 86400) / 60;
+        let Some(s) = sl.iter().rev().find(|s| **s <= mins) else { return false };
+        let slot_at = day0 + s * 60 - TZ;
+        // a slot missed by more than 2 hours (panel was off) is skipped
+        return last < slot_at && t - slot_at < 7200;
+    }
+    let h = (local % 86400) / 3600;
+    if (1..8).contains(&h) {
+        return false;
+    }
+    let every: i64 = app.db.get("ch_hours").parse::<i64>().unwrap_or(8).clamp(1, 72);
+    t - last >= every * 3600
+}
+
 /// Picks a kind: occasions first, a live discount next, otherwise rotate through the
 /// kinds the admin enabled, avoiding the last two kinds that were posted.
 fn auto_kind(app: &App, f: &Facts, t: i64) -> String {
@@ -688,7 +804,23 @@ pub async fn send_to_channel(app: &App, text: &str) -> Result<(), String> {
         .send()
         .await
         .map_err(|e| e.to_string())?;
-    let v: Value = r.json().await.map_err(|e| e.to_string())?;
+    let mut v: Value = r.json().await.map_err(|e| e.to_string())?;
+    // Telegram refused the formatting: the same post as plain text
+    if v["ok"].as_bool() != Some(true) && v["description"].as_str().map(|d| d.contains("parse entities")).unwrap_or(false) {
+        body["text"] = json!(super::ai::strip_tags(text));
+        if let Some(o) = body.as_object_mut() {
+            o.remove("parse_mode");
+        }
+        let r = app
+            .http
+            .post(format!("https://api.telegram.org/bot{}/sendMessage", token))
+            .json(&body)
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        v = r.json().await.map_err(|e| e.to_string())?;
+    }
     if v["ok"].as_bool() == Some(true) {
         app.db.set("ch_last", &now().to_string());
         let n: i64 = app.db.get("ch_count").parse().unwrap_or(0);
@@ -722,7 +854,8 @@ pub fn new_campaign(app: &App, pct: i64, hours: i64, uses: i64) -> Result<String
     Ok(code)
 }
 
-/// Publishes posts on schedule: every `ch_hours`, never in quiet hours (01:00–08:00 Iran time).
+/// Publishes posts on schedule: at the posting times of the day, or every `ch_hours` outside the quiet
+/// hours (01:00–08:00 Iran time).
 /// On an occasion (Nowruz, Yalda…) with auto offers on, a time-limited code is made first.
 pub async fn channel_loop(app: Arc<App>) {
     loop {
@@ -731,13 +864,7 @@ pub async fn channel_loop(app: Arc<App>) {
             continue;
         }
         let t = now();
-        let h = ((t + TZ) % 86400) / 3600;
-        if (1..8).contains(&h) {
-            continue;
-        }
-        let every: i64 = app.db.get("ch_hours").parse::<i64>().unwrap_or(8).clamp(1, 72);
-        let last: i64 = app.db.get("ch_last").parse().unwrap_or(0);
-        if t - last < every * 3600 {
+        if !due(&app, t) {
             continue;
         }
         if app.db.on("ch_auto_offer") {
@@ -749,7 +876,7 @@ pub async fn channel_loop(app: Arc<App>) {
                 }
             }
         }
-        let (kind, text) = make_post(&app, "auto");
+        let (kind, text, _) = make_post_any(&app, "auto").await;
         match send_to_channel(&app, &text).await {
             Ok(_) => {
                 remember(&app, &kind);
@@ -771,6 +898,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/channel", get(ch_get).put(ch_put))
         .route("/api/channel/preview", post(ch_preview))
         .route("/api/channel/post", post(ch_post))
+        .route("/api/channel/ai-test", post(ai_test))
         .route("/api/channel/campaign", post(ch_campaign))
         .route("/api/discounts", get(disc_list).post(disc_add))
         .route("/api/discounts/:code", axum::routing::delete(disc_del))
@@ -781,6 +909,11 @@ async fn ch_get(State(app): St, h: HeaderMap) -> Response {
     migrate_kinds(&app);
     let db = &app.db;
     let kinds = db.get("ch_kinds");
+    let key_hint = {
+        let k = db.get("ai_key");
+        let k = k.trim().to_string();
+        if k.len() > 8 && k.is_ascii() { format!("{}…{}", &k[..4], &k[k.len() - 4..]) } else { String::new() }
+    };
     Json(json!({
         "on": db.on("ch_on"), "id": db.get("ch_id"), "hours": db.get("ch_hours").parse::<i64>().unwrap_or(8),
         "kinds": if kinds.is_empty() { KINDS.iter().map(|k| k.0).collect::<Vec<_>>().join(",") } else { kinds },
@@ -789,6 +922,10 @@ async fn ch_get(State(app): St, h: HeaderMap) -> Response {
         "last": db.get("ch_last").parse::<i64>().unwrap_or(0), "count": db.get("ch_count").parse::<i64>().unwrap_or(0),
         "status": db.get("ch_status"), "bot": db.get("bot_username"),
         "occasion": occasion(now()).map(|o| o.0),
+        "times": db.get("ch_times"),
+        "ai_on": db.on("ai_on"), "ai_has_key": !db.get("ai_key").trim().is_empty(),
+        "ai_key_hint": key_hint,
+        "ai_model": super::ai::cfg(&app).model, "ai_brief": db.get("ai_brief"), "ai_status": db.get("ai_status"),
     }))
     .into_response()
 }
@@ -819,13 +956,61 @@ async fn ch_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response 
         let c: String = v.trim().to_uppercase().chars().filter(|c| c.is_ascii_alphanumeric()).take(10).collect();
         db.set("ch_code", &c);
     }
+    if let Some(v) = b["times"].as_str() {
+        db.set("ch_times", v.trim());
+        if !v.trim().is_empty() && slots(&app).is_empty() {
+            return err(StatusCode::BAD_REQUEST, "write the posting times like 10:00, 16:00, 21:30");
+        }
+    }
+    if let Some(v) = b["ai_on"].as_bool() {
+        db.set("ai_on", if v { "1" } else { "0" });
+    }
+    // an empty key in the form keeps the saved one; "-" removes it
+    if let Some(v) = b["ai_key"].as_str() {
+        let v = v.trim();
+        if v == "-" {
+            db.set("ai_key", "");
+        } else if !v.is_empty() {
+            if v.len() > 300 || v.chars().any(|c| c.is_whitespace()) {
+                return err(StatusCode::BAD_REQUEST, "this does not look like an API key");
+            }
+            db.set("ai_key", v);
+        }
+    }
+    if let Some(v) = b["ai_model"].as_str() {
+        let v = v.trim();
+        if !v.is_empty() && !v.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c)) {
+            return err(StatusCode::BAD_REQUEST, "model name: letters, digits, - _ .");
+        }
+        db.set("ai_model", v);
+    }
+    if let Some(v) = b["ai_brief"].as_str() {
+        db.set("ai_brief", &v.trim().chars().take(3000).collect::<String>());
+    }
     Json(json!({"ok": true})).into_response()
 }
 
 async fn ch_preview(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "settings");
-    let (kind, text) = make_post(&app, b["kind"].as_str().unwrap_or("auto"));
-    Json(json!({"kind": kind, "text": text})).into_response()
+    let (kind, text, by) = make_post_any(&app, b["kind"].as_str().unwrap_or("auto")).await;
+    Json(json!({"kind": kind, "text": text, "by": by, "ai_status": app.db.get("ai_status")})).into_response()
+}
+
+/// "Test the key": one short call to Grok with the saved key and model (nothing is posted).
+async fn ai_test(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    let f = facts(&app);
+    let (system, user) = super::ai::prompt(&app, "mood", &facts_text(&app, &f, "mood"), &[]);
+    match super::ai::write(&app, &system, &user).await {
+        Ok((model, text)) => {
+            app.db.set("ai_status", &format!("ok:{}", model));
+            Json(json!({"ok": true, "model": model, "text": text})).into_response()
+        }
+        Err(e) => {
+            app.db.set("ai_status", &format!("error: {}", e));
+            err(StatusCode::BAD_GATEWAY, &e)
+        }
+    }
 }
 
 async fn ch_post(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
@@ -906,4 +1091,13 @@ async fn disc_del(State(app): St, h: HeaderMap, Path(code): Path<String>) -> Res
     let _ = guard!(app, h, "settings");
     let _ = app.db.exec("DELETE FROM discounts WHERE code=?1", &[&code]);
     Json(json!({"ok": true})).into_response()
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    #[test]
+    fn slot_parsing_ignores_junk() {
+        assert_eq!(super::parse_slots("21:30, 10:00,16:00 25:00 x 10:00"), vec![600, 960, 1290]);
+        assert!(super::parse_slots("").is_empty());
+    }
 }

@@ -68,6 +68,13 @@ pub struct NodeOpt {
     pub route: String,
     /// address the app dials instead of the automatic one ("" = automatic)
     pub host: String,
+    /// the second config, through the tunnel: the Iran address (domain or IP) whose tunnel forwards the
+    /// KANKI MIX UDP port to this server ("" = the server's endpoint, when it is not its own address)
+    pub tun_host: String,
+    /// the UDP port on that Iran address (0 = the same port as the server)
+    pub tun_port: u16,
+    /// no second config for this server
+    pub tun_off: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -141,6 +148,25 @@ pub fn link_host(app: &App, s: &Settings, n: &Node) -> String {
     }
     let d = direct_host(app, n);
     if d.is_empty() || d == "127.0.0.1" { crate::api::endpoint(app, n) } else { d }
+}
+
+/// The second config's address and port (None = no second config for this server): the Iran address
+/// set for it, else the server's endpoint when that is an Iran entry (not the server's own address).
+pub fn tunnel_target(app: &App, s: &Settings, n: &Node, port: u16) -> Option<(String, u16)> {
+    let opt = s.nodes.get(&n.id).cloned().unwrap_or_default();
+    if opt.tun_off {
+        return None;
+    }
+    let p = if opt.tun_port > 0 { opt.tun_port } else { port };
+    if !opt.tun_host.trim().is_empty() {
+        return Some((opt.tun_host.trim().to_string(), p));
+    }
+    let ep = crate::api::endpoint(app, n);
+    let ep_host = ep.trim().trim_start_matches('[').split(']').next().unwrap_or("").to_string();
+    let ep_host = if ep.contains('[') { ep_host } else { ep.split(':').next().unwrap_or("").to_string() };
+    let primary = link_host(app, s, n);
+    let direct = direct_host(app, n);
+    (!ep_host.is_empty() && ep_host != direct && ep_host != primary && ep_host != "127.0.0.1").then_some((ep_host, p))
 }
 
 /// a host name or IP the panel accepts as a KANKI MIX address
@@ -233,6 +259,21 @@ pub fn link(app: &App, u: &User, n: &Node) -> Option<String> {
     let host = link_host(app, &s, n);
     let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
     Some(format!("kanki://{}@{}:{}?{}#{}", user_key(app, u), host, port, q, crate::util::pct(&n.name)))
+}
+
+/// The user's second link for one server, through the tunnel (the Iran address): the same key and
+/// options as the first, another address. None = no second config there.
+pub fn link_tunnel(app: &App, u: &User, n: &Node) -> Option<String> {
+    let first = link(app, u, n)?;
+    let s = settings(app);
+    let info = crate::api::node_info(n);
+    let port = info["kmix_port"].as_u64().filter(|p| *p > 0)? as u16;
+    let (host, tport) = tunnel_target(app, &s, n, port)?;
+    let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
+    let q = first.split_once('?').map(|x| x.1).unwrap_or("").split('#').next().unwrap_or("");
+    // the extra ports exist on the server, not on the Iran address
+    let q: Vec<&str> = q.split('&').filter(|p| !p.starts_with("ports=")).collect();
+    Some(format!("kanki://{}@{}:{}?{}&via=tunnel#{}", user_key(app, u), host, tport, q.join("&"), crate::util::pct(&format!("{} (Tunnel)", n.name))))
 }
 
 // ------------------------------------------------------------------ on the server (agent / main)
@@ -466,6 +507,8 @@ async fn get_all(axum::extract::State(app): St, h: axum::http::HeaderMap) -> axu
             "id": n.id, "name": n.name, "main": n.id == "local", "online": n.id == "local" || n.online,
             "endpoint": link_host(&app, &s, n), "direct_host": direct_host(&app, n), "tunnel_host": crate::api::endpoint(&app, n),
             "route": if s.node_tunnel(&n.id) { "tunnel" } else { "direct" },
+            // the second config through the tunnel: (address, port) it uses, or Null
+            "second": info["kmix_port"].as_u64().and_then(|p| tunnel_target(&app, &s, n, p as u16)).map(|(h, p)| json!({"host": h, "port": p})),
             "on": s.node_on(&n.id), "want_port": s.node_port(&n.id),
             "port": info["kmix_port"], "parity": info["kmix_parity"], "hop": info["kmix_hop"],
             "active": info["kmix_active"], "installed": !info["kmix_port"].is_null(), "users": here,
@@ -507,8 +550,15 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
                 return crate::api::err(StatusCode::BAD_REQUEST, "address: a domain or an IP, like de.example.com");
             }
             let route = if v["route"].as_str() == Some("tunnel") { "tunnel".to_string() } else { String::new() };
-            let opt = NodeOpt { off: v["off"].as_bool().unwrap_or(false), port: port_of(&v["port"]).unwrap_or(0), route, host };
-            if opt.off || opt.port > 0 || !opt.route.is_empty() || !opt.host.is_empty() {
+            let tun_host = v["tun_host"].as_str().unwrap_or("").trim().to_string();
+            if !tun_host.is_empty() && !valid_host(&tun_host) {
+                return crate::api::err(StatusCode::BAD_REQUEST, "tunnel address: a domain or an IP of the Iran server, like ir.example.com");
+            }
+            let opt = NodeOpt {
+                off: v["off"].as_bool().unwrap_or(false), port: port_of(&v["port"]).unwrap_or(0), route, host,
+                tun_host, tun_port: port_of(&v["tun_port"]).unwrap_or(0), tun_off: v["tun_off"].as_bool().unwrap_or(false),
+            };
+            if opt.off || opt.port > 0 || !opt.route.is_empty() || !opt.host.is_empty() || !opt.tun_host.is_empty() || opt.tun_port > 0 || opt.tun_off {
                 nodes.insert(id.clone(), opt);
             }
         }

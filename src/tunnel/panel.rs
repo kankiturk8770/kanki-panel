@@ -136,6 +136,8 @@ struct Seen {
     emergency: Value,
     /// the firewall ports Kanki opened here, and the open ones nothing uses (see `fw::report`)
     fw: Value,
+    /// every port listened on from outside: [[port, udp, program, unit], ...] (Null = older agent)
+    listen: Value,
 }
 
 fn seen() -> &'static Mutex<HashMap<String, Seen>> {
@@ -419,6 +421,15 @@ pub(crate) fn server_locs(app: &App) -> HashMap<String, (String, bool)> {
         let role = dns.servers.iter().find(|x| x.server == s.id).map(|x| x.role.clone()).unwrap_or_default();
         let jobs = app.db.get("emer_server") == s.id || crate::subiran::settings(app).server == s.id;
         m.insert(s.id.clone(), (guess_loc(&s.id, &list, &role, jobs), true));
+    }
+    // a server's IP country beats a guess (an Iran IP = Iran server, any other = abroad)
+    let ccs = crate::exitgeo::all_cc(app);
+    for (id, v) in m.iter_mut() {
+        if v.1 {
+            if let Some(c) = ccs.get(&crate::exitgeo::srv_key(id)).filter(|c| c.len() == 2) {
+                *v = (if c == "IR" { "iran".into() } else { "abroad".into() }, false);
+            }
+        }
     }
     m
 }
@@ -1204,7 +1215,7 @@ pub async fn local_loop(app: Arc<App>) {
         let st = mgr.statuses().await;
         seen().lock().unwrap().insert(
             "local".into(),
-            Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, emergency: Value::Null, fw: Value::Null },
+            Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, emergency: Value::Null, fw: Value::Null, listen: Value::Null },
         );
         // the emergency chat may run on the panel server itself
         let want = if app.db.get("emer_server") == "local" { emer_cfg(&app) } else { None };
@@ -1329,6 +1340,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/tunnels/servers/:id", delete(server_del).put(server_edit))
         .route("/api/tunnels/servers/:id/free-ports", post(server_free_ports))
         .route("/api/tunnels/servers/:id/ssl-retry", post(server_ssl_retry))
+        .route("/api/tunnels/servers/:id/ports", get(server_ports))
         .route("/api/tunnels/servers/:id/firewall", get(server_fw).post(server_fw_close))
         .route("/api/tunnels/:id", delete(tunnel_del))
         .route("/api/tunnels/:id/awgconf/:side", get(awg_conf))
@@ -1352,15 +1364,28 @@ fn status_json(st: Option<&Status>) -> Value {
     }
 }
 
+/// (server id, its public address) of every tunnel server and the panel server, for their flags
+pub fn server_hosts(app: &App) -> Vec<(String, String)> {
+    let mut v = vec![("local".to_string(), host_of(app, "local"))];
+    for s in servers(app) {
+        let h = seen_ip(&s.id).unwrap_or_else(|| host_of(app, &s.id));
+        v.push((s.id.clone(), h));
+    }
+    v.retain(|(_, h)| !h.is_empty());
+    v
+}
+
 async fn list(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "nodes");
     let seen = seen().lock().unwrap().clone();
     let t = now();
     let locs = server_locs(&app);
+    let ccs = crate::exitgeo::all_cc(&app);
+    let cc_of = |id: &str| ccs.get(&crate::exitgeo::srv_key(id)).cloned().unwrap_or_default();
     let mut srv = vec![json!({
         "id": "local", "name": local_name(&app), "local": true, "addr": app.db.get("tun_local_addr"),
         "host": host_of(&app, "local"), "online": true, "last_seen": t, "version": crate::VERSION,
-        "loc": locs.get("local").map(|x| x.0.clone()).unwrap_or_default(), "loc_guess": locs.get("local").map(|x| x.1).unwrap_or(true),
+        "loc": locs.get("local").map(|x| x.0.clone()).unwrap_or_default(), "loc_guess": locs.get("local").map(|x| x.1).unwrap_or(true), "cc": cc_of("local"),
     })];
     for s in servers(&app) {
         let x = seen.get(&s.id).cloned().unwrap_or_default();
@@ -1368,7 +1393,7 @@ async fn list(State(app): St, h: HeaderMap) -> Response {
             "id": s.id, "name": s.name, "local": false, "addr": s.addr, "host": host_of(&app, &s.id),
             "ip": x.ip, "online": x.at > 0 && t - x.at < 20, "last_seen": x.at, "version": x.version,
             "gre_ip": s.gre_ip, "gre_n": s.gre_n, "gre_panel_ip": s.gre_panel_ip,
-            "loc": locs.get(&s.id).map(|x| x.0.clone()).unwrap_or_default(), "loc_guess": locs.get(&s.id).map(|x| x.1).unwrap_or(true),
+            "loc": locs.get(&s.id).map(|x| x.0.clone()).unwrap_or_default(), "loc_guess": locs.get(&s.id).map(|x| x.1).unwrap_or(true), "cc": cc_of(&s.id),
         }));
     }
     let mut tl = vec![];
@@ -1420,6 +1445,113 @@ fn clean_list(v: &Value) -> Vec<String> {
         _ => vec![],
     };
     raw.into_iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
+}
+
+/// The ports server `sid` listens on from outside right now: (port, udp, program, unit). None = not
+/// known (an agent older than 3.7.0, or no report yet).
+pub(crate) fn listening_on(sid: &str) -> Option<Vec<(u16, bool, String, String)>> {
+    if sid == "local" {
+        return Some(crate::certbot::listeners());
+    }
+    let sn = seen().lock().unwrap();
+    let x = sn.get(sid)?;
+    if now() - x.at > 60 {
+        return None;
+    }
+    let a = x.listen.as_array()?;
+    Some(
+        a.iter()
+            .filter_map(|e| Some((e[0].as_u64()? as u16, e[1].as_bool()?, e[2].as_str().unwrap_or("").to_string(), e[3].as_str().unwrap_or("").to_string())))
+            .collect(),
+    )
+}
+
+/// A port another program holds on server `sid` right now (live): its name for the error, None when it
+/// is free, held by `own` (the service that will use it), or the server has not said.
+pub(crate) fn port_busy(app: &App, sid: &str, port: u16, udp: bool, own: &[&str]) -> Option<String> {
+    let l = listening_on(sid)?;
+    let (_, prog, unit) = l.into_iter().map(|(p, u, prog, unit)| ((p, u), prog, unit)).find(|(k, _, _)| *k == (port, udp))?;
+    if own.contains(&unit.as_str()) {
+        return None;
+    }
+    let srv = if sid == "local" { local_name(app) } else { server_names(app).get(sid).cloned().unwrap_or(sid.to_string()) };
+    Some(format!("{} port {} on {} is already used by {}: pick another port", if udp { "UDP" } else { "TCP" }, port, srv, holder_name(&prog, &unit)))
+}
+
+/// What a program holding a port is called in an error
+fn holder_name(prog: &str, unit: &str) -> String {
+    match unit {
+        "kanki-dns.service" => "Kanki DNS".into(),
+        "kanki-xray.service" => "Xray".into(),
+        "kanki-emergency.service" => "the emergency chat".into(),
+        "kanki-mix.service" => "KANKI MIX".into(),
+        "kanki-tunnel.service" | "kanki-panel.service" => "another Kanki tunnel or the subscription link".into(),
+        "" if prog == "kernel" => "WireGuard / AmneziaWG".into(),
+        "" => prog.to_string(),
+        u => format!("{} ({})", prog, u.trim_end_matches(".service")),
+    }
+}
+
+/// Ports tunnel `t` listens on, per server: (server, port, udp)
+fn tunnel_needs(t: &Tunnel) -> Vec<(String, u16, bool)> {
+    let mut v = vec![];
+    // AmneziaWG and Hysteria2 links listen in their own programs (checked by the other tunnels' rules)
+    if t.kind == "hy2" || (t.kind == "awg" && !t.awg.wrap) {
+        return v;
+    }
+    let listener = if t.mode == "direct" { t.exit.clone() } else { t.entry.clone() };
+    let (tcp, udp) = port_protos(&t.transport);
+    if t.port > 0 {
+        if tcp {
+            v.push((listener.clone(), t.port, false));
+        }
+        if udp {
+            v.push((listener.clone(), t.port, true));
+        }
+    }
+    for (p, _) in parse_ports(&t.tcp) {
+        v.push((t.entry.clone(), p, false));
+    }
+    for (p, _) in parse_ports(&t.udp) {
+        v.push((t.entry.clone(), p, true));
+    }
+    v
+}
+
+/// Is a port the tunnel needs already held on its server by something else? (live, from the
+/// servers' own reports). The tunnel's own ports (when it is edited) do not count.
+fn live_clash(app: &App, t: &Tunnel, old: Option<&Tunnel>) -> Option<String> {
+    let names = server_names(app);
+    let own: Vec<(String, u16, bool)> = old.filter(|o| o.enabled).map(tunnel_needs).unwrap_or_default();
+    for (sid, port, udp) in tunnel_needs(t) {
+        let Some(l) = listening_on(&sid) else { continue };
+        for (p, u, prog, unit) in l {
+            if p != port || u != udp {
+                continue;
+            }
+            let ours = unit == "kanki-tunnel.service" || unit.starts_with("kanki-hy2-") || (sid == "local" && unit == "kanki-panel.service");
+            if ours && own.contains(&(sid.clone(), port, udp)) {
+                continue;
+            }
+            let srv = if sid == "local" { local_name(app) } else { names.get(&sid).cloned().unwrap_or(sid.clone()) };
+            return Some(format!("{} port {} on {} is already used by {}: pick another port", if udp { "UDP" } else { "TCP" }, port, srv, holder_name(&prog, &unit)));
+        }
+    }
+    None
+}
+
+/// Live check from the tunnel form: which of these ports are taken on a server
+/// GET /api/tunnels/servers/:id/ports → { known: bool, used: [{port, proto, by}] }
+async fn server_ports(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    match listening_on(&id) {
+        None => Json(json!({ "known": false, "used": [] })).into_response(),
+        Some(l) => Json(json!({
+            "known": true,
+            "used": l.into_iter().map(|(p, u, prog, unit)| json!({ "port": p, "proto": if u { "udp" } else { "tcp" }, "by": holder_name(&prog, &unit), "kanki": unit.starts_with("kanki") })).collect::<Vec<_>>(),
+        }))
+        .into_response(),
+    }
 }
 
 /// Create (no id) or edit (with id) a tunnel.
@@ -1619,6 +1751,13 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
             if let Some(p) = mine_udp.iter().find(|p| o_udp.contains(p)) {
                 return err(StatusCode::CONFLICT, &format!("UDP port {} is already used by the tunnel \"{}\"", p, o.name));
             }
+        }
+    }
+    // what the servers themselves say: a port another program (or another Kanki service) holds
+    if t.enabled {
+        let old = list.iter().find(|x| x.id == t.id).cloned();
+        if let Some(e) = live_clash(&app, &t, old.as_ref()) {
+            return err(StatusCode::CONFLICT, &e);
         }
     }
     if let Some(x) = list.iter_mut().find(|x| x.id == t.id) {
@@ -2132,6 +2271,9 @@ async fn emer_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respons
         if xr.on && xr.inbounds.iter().any(|ib| ib.enabled && ib.server == server && ib.port == p) {
             return err(StatusCode::BAD_REQUEST, &format!("an Xray inbound uses port {} on this server: choose another port for the chat ({})", p, CDN_PORTS));
         }
+        if let Some(e) = port_busy(&app, &server, p, false, &["kanki-emergency.service"]) {
+            return err(StatusCode::CONFLICT, &e);
+        }
     }
     if on {
         if pw.is_empty() && app.db.get("emer_admin").is_empty() {
@@ -2211,7 +2353,7 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         let mut sn = seen().lock().unwrap();
         let prev = sn.get(&id).map(|x| x.ip.clone()).unwrap_or_default();
         let ip = sticky_ip(&prev, &fresh_ip);
-        sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status, emergency: b["emergency"].clone(), fw: b["fw"].clone() });
+        sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status, emergency: b["emergency"].clone(), fw: b["fw"].clone(), listen: b["listen"].clone() });
     }
     let ver = b["version"].as_str().unwrap_or("");
     let until = app.db.get("tun_update_until").parse::<i64>().unwrap_or(0);

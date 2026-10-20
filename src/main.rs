@@ -48,6 +48,8 @@ mod wg;
 mod bot;
 #[path = "telegram/channel.rs"]
 mod channel;
+#[path = "telegram/ai.rs"]
+mod ai;
 
 // tunnel: encrypted tunnels between servers (Kanki Tunnel)
 mod tunnel;

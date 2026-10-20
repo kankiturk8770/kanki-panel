@@ -247,6 +247,12 @@ async fn put_cfg(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response
         return err(StatusCode::BAD_REQUEST, &format!("port {} is already used on that server (another tunnel, Kanki DNS or the SSL check on port 80); pick another one", port));
     }
     let changed = s.server != server || s.domain != domain || s.port != port;
+    // live: a program on that server already listens there (the subscription listener itself does not count)
+    if s.server != server || s.port != port {
+        if let Some(e) = crate::tunnel::panel::port_busy(&app, &server, port, false, &[]) {
+            return err(StatusCode::CONFLICT, &e);
+        }
+    }
     if s.server != server || s.tunnel_port == 0 || taken.contains(&s.tunnel_port) {
         s.tunnel_port = (TUNNEL_PORT..TUNNEL_PORT + 100).find(|p| !taken.contains(p) && *p != port).unwrap_or(TUNNEL_PORT);
     }
