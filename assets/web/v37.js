@@ -83,7 +83,7 @@ window.flagOf=flag;
 if(window.tunSrvCard){var _tsc=window.tunSrvCard;window.tunSrvCard=function(s){var h=_tsc(s);return h.replace('<div><b>','<div><b>'+flag(s.cc)+' ')}}
 
 // ---------------------------------------------------------------- Servers: the grid of every server
-function svcCell(on,label,sub,act,cls){return '<button type="button" class="svc '+(cls||(on?'ok':'no'))+'" '+(act?'onclick="'+act+'"':'disabled')+'><b>'+label+'</b><small>'+sub+'</small></button>'}
+function svcCell(on,label,sub,act,cls){return '<button type="button" class="svcell '+(cls||(on?'ok':'no'))+'" '+(act?'onclick="'+act+'"':'disabled')+'><b>'+label+'</b><small>'+sub+'</small></button>'}
 function nodeGrid(){var el=$('#v37grid');if(!el)return;var ns=S.nodes||[],xr=(window.XR&&XR.d)||null,dn=(window.DN&&DN.d)||null,tn=(window.TN&&TN.d)||null;
  var rows=[];
  ns.forEach(function(n){var i=n.info||{},sv={};(i.services||[]).forEach(function(s){sv[s.key]=s});
@@ -105,7 +105,7 @@ function nodeGrid(){var el=$('#v37grid');if(!el)return;var ns=S.nodes||[],xr=(wi
    (r.xray?svcCell(r.xray.on,'Xray',N(r.xray.n)+' '+t('inbounds'),"location.hash='#xray'",r.xray.on?'ok':'bad'):svcCell(false,'Xray','—','','no'))+
    (r.dns?svcCell(r.dns.on,'DNS',t(r.dns.role=='relay'?'relay':'exit'),"location.hash='#dns/servers'",r.dns.on?'ok':'bad'):svcCell(false,'DNS','—','','no'))+
    (r.tun!=null?svcCell(r.tun>0,t('Tunnels'),N(r.tun),"location.hash='#tunnels'",r.tun>0?'ok':'no'):svcCell(false,t('Tunnels'),'—','','no'))+'</div>'}).join('');
- el.innerHTML='<div class="nh"><div><h3>'+ic('nodes',16)+' '+t('Every server and what runs on it')+'</h3><p class="sub" style="margin:0">'+t('Press a service to open its settings')+'</p></div></div><div class="sgw"><div class="sgrid">'+head+body+'</div></div>'}
+ el.innerHTML='<div class="nh"><div><h3>'+ic('nodes',16)+' '+t('Every server and what runs on it')+'</h3><p class="sub" style="margin:0">'+t('Press a service to open its settings')+'</p></div></div><div class="sgw"><div class="svgrid">'+head+body+'</div></div>'}
 // the actions of one VPN server, from the grid
 window.v37NodeMenu=function(id){var n=(S.nodes||[]).filter(function(x){return x.id==id})[0];if(!n)return;var i=n.info||{},e=esc(id);
  modal(mhead(n.name,flag(n.cc))+
@@ -248,24 +248,25 @@ body.v37 .ptabs a.on,body.v37 .seg button.on,body.v37 .segl button.on{background
    whole page wider than the screen (that pulled the hidden menu into view) */
 @media(max-width:900px){.stw{grid-template-columns:minmax(0,1fr)!important}.stw>*,.g2>*,.g3>*,.g4>*,.kv>*{min-width:0}}
 html,body{overflow-x:clip;max-width:100%}
+@media(max-width:480px){.vrow .nm b{white-space:normal;overflow:visible}}
 body.v37 main{min-width:0;max-width:100vw}
 @media(max-width:1099px){body.v37 main{overflow-x:clip}}
 /* flags */
 .flg{font-size:1.05em;line-height:1;display:inline-block;vertical-align:-1px;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}.flg.nf{opacity:.55}
 /* servers grid */
 .v37grid .sgw{overflow-x:auto;margin-top:12px}
-.sgrid{display:grid;grid-template-columns:minmax(170px,1.4fr) repeat(7,minmax(92px,1fr));gap:6px;min-width:860px}
+.svgrid{display:grid;grid-template-columns:minmax(170px,1.4fr) repeat(7,minmax(92px,1fr));gap:6px;min-width:860px}
 .sgh,.sgr{display:contents}
 .sgh span{font-size:11px;font-weight:800;color:var(--s);padding:2px 6px;text-align:center}
 .sgh span:first-child{text-align:start}
 .sgn{display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:13px;background:var(--in);border:1px solid var(--gb);min-width:0}
 .sgn b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sgn small{color:var(--s);font-size:10.5px;margin-inline-start:auto}
-.svc{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:7px 4px;border-radius:13px;border:1px solid var(--gb);background:var(--in);color:var(--t);font:inherit;cursor:pointer;transition:transform .12s,border-color .15s}
-.svc b{font-size:11.5px}.svc small{font-size:10.5px;color:var(--s)}
-.svc.ok{border-color:color-mix(in srgb,var(--ok) 45%,transparent);background:color-mix(in srgb,var(--ok) 9%,transparent)}
-.svc.bad{border-color:color-mix(in srgb,var(--bad) 50%,transparent);background:color-mix(in srgb,var(--bad) 9%,transparent)}
-.svc.no{opacity:.45;cursor:default}
-.svc:not(:disabled):hover{transform:translateY(-1px);border-color:var(--a)}
+.svcell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:7px 4px;border-radius:13px;border:1px solid var(--gb);background:var(--in);color:var(--t);font:inherit;cursor:pointer;transition:transform .12s,border-color .15s}
+.svcell b{font-size:11.5px}.svcell small{font-size:10.5px;color:var(--s)}
+.svcell.ok{border-color:color-mix(in srgb,var(--ok) 45%,transparent);background:color-mix(in srgb,var(--ok) 9%,transparent)}
+.svcell.bad{border-color:color-mix(in srgb,var(--bad) 50%,transparent);background:color-mix(in srgb,var(--bad) 9%,transparent)}
+.svcell.no{opacity:.45;cursor:default}
+.svcell:not(:disabled):hover{transform:translateY(-1px);border-color:var(--a)}
 /* tunnel transports in three columns */
 .trcols{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .trcol{border:1px solid var(--gb);border-radius:16px;padding:8px;background:var(--in)}

@@ -1,3 +1,8 @@
+# v3.7.3 — Settings fixed on every screen; no red errors after leaving a page
+- **Settings:** fields, texts and switches were cut off on the left (on phones and narrow windows the switches of "VPN and protocols" could not be seen or used). The server grid of 3.7.0 had reused a class name of the Settings form and forced it 860px wide in eight columns; the grid has its own names now (also for its service buttons, which had changed the node service rows).
+- **"Cannot set properties of null":** a page whose data came back after the admin had already moved to another page (slow server, Iran) tried to draw into a page that was gone and showed a red error. Settings and Backup check first; any such late draw is now silent everywhere.
+- Narrow phones: a server name with the "Main server" badge wraps instead of being cut.
+
 # v3.7.2 — better Persian from the channel writer
 - **Writing rules in Persian** for the AI: complete, short sentences; common words only; one tone per post; no word-by-word translation; correct half-spaces and Persian punctuation.
 - **A second pass as a Persian editor:** each post is read once more by the same model, which fixes broken, meaningless or mixed-up sentences and spelling. The first text is kept when the editor drops a number or changes the length too much.

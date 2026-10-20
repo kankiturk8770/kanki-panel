@@ -894,7 +894,10 @@ function api(m,p,b,raw){var o={method:m,headers:{}};if(S.token)o.headers.Authori
  return fetch(p,o).then(function(r){if(r.status==401&&p!='/api/login'){logout(true);throw new Error('unauthorized')}
   if(raw&&raw.blob)return r.ok?r.blob().then(function(bl){return{blob:bl,name:((r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/)||[])[1]}}):r.json().then(function(j){throw new Error(j.error||r.status)});
   return r.text().then(function(x){var j;try{j=x?JSON.parse(x):{}}catch(e){j={error:x}}if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})})}
-function fail(e){if(e&&e.message!='unauthorized')toast(t(e.message||String(e)),1)}
+function fail(e){if(!e||e.message=='unauthorized')return;
+ // a page drawn after the admin already left it: nothing to tell
+ if(e instanceof TypeError&&/of (null|undefined)/.test(e.message)){console.warn(e);return}
+ toast(t(e.message||String(e)),1)}
 function copy(s){if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(s).then(function(){toast(t('Copied'))});else{var a=document.createElement('textarea');a.value=s;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();toast(t('Copied'))}}
 function bytes(n){n=+n||0;var u=['B','KB','MB','GB','TB'],i=0;while(n>=1024&&i<4){n/=1024;i++}return n.toFixed(i>=3?2:0)+' '+u[i]}
 function gbtxt(g){g=+g||0;return g<1?Math.round(g*1024)+' MB':g.toFixed(2)+' GB'}
@@ -1483,7 +1486,7 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
  $('#rs_go').onclick=function(){var f=$('#rs_f').files[0];if(!f)return toast(t('No file chosen'),1);confirmDo(function(){
   api('POST','/api/restore',f,{headers:{'X-Passphrase':$('#rs_p').value,'X-Full':$('#rs_full').checked?'1':'0','Content-Type':'application/octet-stream'}}).then(function(){toast(t('Restore done, panel is restarting…'));setTimeout(function(){location.reload()},4000)}).catch(fail)})};
  var tg={},showPw=false,kb=function(n){return n>1048576?N((n/1048576).toFixed(1))+' MB':N(Math.round(n/1024))+' KB'};
- function tgDraw(){$('#tg_on').checked=!!tg.on;$('#tg_chat').value=tg.chat||'';$('#tg_h').value=tg.hours||24;$('#tg_at').value=tg.at||'03:00';$('#tg_m').value=tg.mode||'nightly';
+ function tgDraw(){if(!$('#tg_on'))return;$('#tg_on').checked=!!tg.on;$('#tg_chat').value=tg.chat||'';$('#tg_h').value=tg.hours||24;$('#tg_at').value=tg.at||'03:00';$('#tg_m').value=tg.mode||'nightly';
   var hrs=tg.mode=='hours';$('#tg_at').style.display=hrs?'none':'';$('#tg_h').style.display=hrs?'':'none';
   $('#tg_pw').textContent=showPw?(tg.pass||''):'••••••••••';
   $('#tg_tn').textContent=tg.token_set?'✓':(tg.uses_bot_token?t('Empty = use the sales bot token'):'');
@@ -1603,7 +1606,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
  }return ''}
 function pSettings(){var cur=S.stsec||'look';
  $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Settings')+'</h2><p>'+t('Everything about how the panel looks and works, in one place')+'</p></div></div><div id="st">'+t('Loading…')+'</div>';
- api('GET','/api/settings').then(function(s){S.st=s;if(!STSEC.some(function(x){return x[0]==cur}))cur='look';
+ api('GET','/api/settings').then(function(s){if(!$('#st'))return;S.st=s;if(!STSEC.some(function(x){return x[0]==cur}))cur='look';
   $('#st').innerHTML='<div class="stw"><div class="stn" role="tablist">'+STSEC.map(function(x){return '<button type="button" data-sec="'+x[0]+'" class="'+(x[0]==cur?'on':'')+'"><span class="si">'+ic(x[2],17)+'</span>'+t(x[1])+'<em></em></button>'}).join('')+'</div><div>'+
   STSEC.map(function(x){return '<section class="sts card'+(x[0]==cur?' on':'')+'" data-sec="'+x[0]+'"><div class="sth"><span class="phi">'+ic(x[2],20)+'</span><div><b>'+t(x[1])+'</b><small>'+t(x[3])+'</small></div></div>'+stBody(x[0],s)+
    (x[4].length?'<div class="sbar"><span class="muted" data-msg></span><button class="b2" type="button" data-undo disabled>'+t('Undo')+'</button><button class="btn" type="button" data-save disabled>'+t('Save')+'</button></div>':'')+'</section>'}).join('')+'</div></div>';
