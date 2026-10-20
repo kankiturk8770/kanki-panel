@@ -697,7 +697,7 @@ pub fn listening(port: u16, udp: bool) -> bool {
     sockets().into_iter().any(|s| !s.3 && s.1 == port && s.2 == udp)
 }
 
-/// Every port listened on from outside: (port, udp, program, systemd unit), at most every 20 seconds
+/// Every port listened on (also 127.0.0.1 only): (port, udp, program, systemd unit), at most every 20 seconds
 /// worked out again (the agent reports it every few seconds).
 pub fn listeners() -> Vec<(u16, bool, String, String)> {
     use std::sync::{Mutex, OnceLock};
@@ -709,7 +709,8 @@ pub fn listeners() -> Vec<(u16, bool, String, String)> {
             return v.clone();
         }
     }
-    let socks: Vec<Sock> = sockets().into_iter().filter(|s| !s.3).collect();
+    // a listener on 127.0.0.1 only still takes the port (0.0.0.0 cannot be bound next to it)
+    let socks: Vec<Sock> = sockets();
     let inodes = socks.iter().map(|s| s.0.clone()).collect();
     let pid_of = owners(&inodes);
     let mut out: Vec<(u16, bool, String, String)> = vec![];
@@ -719,8 +720,9 @@ pub fn listeners() -> Vec<(u16, bool, String, String)> {
                 std::fs::read_to_string(format!("/proc/{}/comm", pid)).unwrap_or_default().trim().to_string(),
                 unit_of(&std::fs::read_to_string(format!("/proc/{}/cgroup", pid)).unwrap_or_default()),
             ),
-            // a kernel socket (WireGuard / AmneziaWG) has no process
-            None => ("kernel".to_string(), String::new()),
+            // a UDP socket with no process is the kernel's (WireGuard / AmneziaWG)
+            None if *udp => ("kernel".to_string(), String::new()),
+            None => ("?".to_string(), String::new()),
         };
         let e = (*port, *udp, prog, unit);
         if !out.contains(&e) {

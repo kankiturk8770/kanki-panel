@@ -1485,8 +1485,10 @@ fn holder_name(prog: &str, unit: &str) -> String {
         "kanki-xray.service" => "Xray".into(),
         "kanki-emergency.service" => "the emergency chat".into(),
         "kanki-mix.service" => "KANKI MIX".into(),
-        "kanki-tunnel.service" | "kanki-panel.service" => "another Kanki tunnel or the subscription link".into(),
+        "kanki-tunnel.service" => "another Kanki tunnel or the subscription link".into(),
+        "kanki-panel.service" => "the panel itself or one of its tunnels".into(),
         "" if prog == "kernel" => "WireGuard / AmneziaWG".into(),
+        "" if prog == "?" || prog.is_empty() => "another program".into(),
         "" => prog.to_string(),
         u => format!("{} ({})", prog, u.trim_end_matches(".service")),
     }
