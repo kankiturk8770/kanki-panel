@@ -458,7 +458,7 @@ impl Bot {
 
     fn plans(&self, only_active: bool) -> Vec<(Plan, bool)> {
         self.db().with(|c| {
-            let mut s = c.prepare("SELECT id,name,days,gb,toman,usd,conns,active,COALESCE(countries,0),COALESCE(category,'') FROM plans ORDER BY toman").unwrap();
+            let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,'') FROM plans ORDER BY toman").unwrap();
             let v: Vec<(Plan, bool)> = s.query_map([], |r| Ok((Plan {
                 id: r.get(0)?, name: r.get(1)?, days: r.get(2)?, gb: r.get(3)?, toman: r.get(4)?, usd: r.get(5)?, conns: r.get(6)?,
                 countries: r.get(8)?, category: r.get(9)?,
@@ -617,7 +617,19 @@ impl Bot {
 
     fn price(&self, p: &Plan, pe: &Pending) -> (i64, f64) {
         let f = (100 - pe.percent.clamp(0, 100)) as f64 / 100.0;
-        (((p.toman as f64) * f).round() as i64, ((p.usd * f) * 100.0).round() / 100.0)
+        (((p.toman as f64) * f).round() as i64, ((plan_usd(&self.db(), p) * f) * 100.0).round() / 100.0)
+    }
+
+    /// Is this payment method offered for these prices? (the same test for the buttons and for the payment)
+    fn method_ok(&self, method: &str, t: i64, u: f64) -> bool {
+        let db = self.db();
+        match method {
+            "card" => db.on("card_on") && !db.get("card_number").is_empty() && t > 0,
+            "zp" => db.on("zp_on") && !db.get("zp_merchant").is_empty() && t > 0,
+            "np" => db.on("np_on") && !db.get("np_key").is_empty() && u > 0.0,
+            "wallet" => db.on("wallet_on") && wallet_has_address(&db) && u > 0.0,
+            _ => false,
+        }
     }
 
     /// عضویت اجباری کانال (اگر تنظیم شده)
@@ -917,7 +929,17 @@ impl Bot {
                 }
                 return;
             }
-            "support" => return self.edit(chat, mid, &format!("💬 پشتیبانی: {}", esc(&self.db().get("support"))), Some(ik(vec![back("home")]))).await,
+            "support" => {
+                let sup = self.db().get("support").trim().to_string();
+                // @id or a t.me link: a button that opens the chat
+                let link = if let Some(id) = sup.strip_prefix('@') { Some(format!("https://t.me/{}", id)) }
+                    else if sup.starts_with("https://") { Some(sup.clone()) } else { None };
+                let mut rows: Kb = vec![];
+                if let Some(l) = link { rows.push(vec![b("💬 پیام به پشتیبانی", &format!("url:{}", l))]); }
+                rows.push(back("home"));
+                return self.edit(chat, mid, &format!("💬 <b>پشتیبانی</b>\n\n{}\n\nسؤال یا مشکلی داشتید، پیام بدهید؛ کد اشتراک یا اسم سرویس را هم بنویسید تا سریع‌تر جواب بگیرید.",
+                    if sup.is_empty() { "—".to_string() } else { esc(&sup) }), Some(ik(rows))).await;
+            }
             "disc" => {
                 self.waits.lock().unwrap().insert(uid, Wait::DiscountUse);
                 return self.edit(chat, mid, "🎟 کد تخفیف را بفرستید:", Some(ik(vec![back("home")]))).await;
@@ -1076,12 +1098,12 @@ impl Bot {
         let Some(p) = self.plan(pid) else { return };
         let pe = self.pend.lock().unwrap().get(&uid).cloned().unwrap_or_default();
         let (t, u) = self.price(&p, &pe);
-        let db = self.db();
         let mut rows: Kb = vec![];
-        if db.on("card_on") && !db.get("card_number").is_empty() && t > 0 { rows.push(vec![b(&self.bt("pay_card"), "pay:card")]); }
-        if db.on("zp_on") && !db.get("zp_merchant").is_empty() && t > 0 { rows.push(vec![b(&self.bt("pay_zp"), "pay:zp")]); }
-        if db.on("np_on") && !db.get("np_key").is_empty() && u > 0.0 { rows.push(vec![b(&self.bt("pay_np"), "pay:np")]); }
-        if db.on("wallet_on") && !db.get("wallet_text").is_empty() && u > 0.0 { rows.push(vec![b(&self.bt("pay_wallet"), "pay:wallet")]); }
+        for (m, k) in [("card", "pay_card"), ("zp", "pay_zp"), ("np", "pay_np"), ("wallet", "pay_wallet")] {
+            if self.method_ok(m, t, u) {
+                rows.push(vec![b(&self.bt(k), &format!("pay:{}", m))]);
+            }
+        }
         if pe.discount.is_empty() { rows.push(vec![b(&self.bt("disc"), "disc")]); }
         rows.push(vec![b(&self.bt("back"), "home")]);
         let txt = format!(
@@ -1104,6 +1126,10 @@ impl Bot {
         let (t, u) = self.price(&p, &pe);
         let db = self.db();
         let home = Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]));
+        // an old button (the method was switched off or the plan has no price for it since)
+        if !self.method_ok(method, t, u) {
+            return self.edit(chat, mid, "⚠️ این روش پرداخت الان فعال نیست؛ روش دیگری انتخاب کنید.", home).await;
+        }
         match method {
             "card" => {
                 self.waits.lock().unwrap().insert(uid, Wait::Receipt("card".into()));
@@ -1113,8 +1139,31 @@ impl Bot {
             }
             "wallet" => {
                 self.waits.lock().unwrap().insert(uid, Wait::Receipt("wallet".into()));
-                self.edit(chat, mid, &format!("💰 <b>پرداخت ارزی</b>\n\nمبلغ: <b>{}$</b>\n\n{}\n\n📸 بعد از پرداخت، عکس یا TXID را بفرستید.",
-                    u, esc(&db.get("wallet_text"))), home).await;
+                let ton = db.get("ton_address").trim().to_string();
+                let usdt = db.get("usdt_address").trim().to_string();
+                let mut txt = format!("💰 <b>پرداخت ارزی</b>\n\nمبلغ: <b>{}$</b>", u);
+                let mut rows: Kb = vec![];
+                if !ton.is_empty() {
+                    // the amount in TON at today's price (when the price can be read), for a ready Tonkeeper link
+                    match ton_usd(&self.app).await {
+                        Some(rate) if rate > 0.0 => {
+                            let amount = ((u / rate) * 1000.0).ceil() / 1000.0;
+                            txt.push_str(&format!("\n\n💎 <b>TON</b> (شبکه‌ی TON): <b>{} TON</b>\nآدرس کیف پول:\n<code>{}</code>", amount, esc(&ton)));
+                            rows.push(vec![b("💎 پرداخت با Tonkeeper", &format!("url:https://app.tonkeeper.com/transfer/{}?amount={}", ton, (amount * 1e9).round() as u64))]);
+                        }
+                        _ => txt.push_str(&format!("\n\n💎 <b>TON</b> (شبکه‌ی TON) به اندازه‌ی {}$\nآدرس کیف پول:\n<code>{}</code>", u, esc(&ton))),
+                    }
+                }
+                if !usdt.is_empty() {
+                    txt.push_str(&format!("\n\n💵 <b>USDT</b> (شبکه‌ی TRC20): <b>{} USDT</b>\nآدرس:\n<code>{}</code>", u, esc(&usdt)));
+                }
+                let extra = db.get("wallet_text");
+                if !extra.trim().is_empty() {
+                    txt.push_str(&format!("\n\n{}", esc(&extra)));
+                }
+                txt.push_str("\n\n👆 روی آدرس بزنید تا کپی شود.\n📸 بعد از پرداخت، <b>عکس رسید یا TXID</b> را همین‌جا بفرستید.");
+                rows.push(vec![b("⬅️ بازگشت", "home")]);
+                self.edit(chat, mid, &txt, Some(ik(rows))).await;
             }
             "np" => {
                 let rows: Kb = db.get("np_coins").split(',').filter(|c| !c.trim().is_empty())
@@ -1362,12 +1411,16 @@ impl Bot {
                     "SELECT COUNT(*), COALESCE(SUM(CASE WHEN method IN ('card','zp') THEN CAST(amount AS INTEGER) END),0) FROM orders WHERE status='done'",
                     [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap_or((0, 0)));
                 let today: i64 = db.with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE status='done' AND created>?1", [now() - 86400], |r| r.get(0)).unwrap_or(0));
+                // crypto orders keep their amount in dollars
+                let usd: f64 = db.with(|c| c.query_row(
+                    "SELECT COALESCE(SUM(CASE WHEN method NOT IN ('card','zp') THEN CAST(amount AS REAL) END),0) FROM orders WHERE status='done'",
+                    [], |r| r.get(0)).unwrap_or(0.0));
                 let ns = db.nodes();
                 let txt = format!(
-                    "📈 <b>آمار</b>\n\n👥 کاربران: <b>{}</b> (فعال: {})\n🟢 آنلاین: <b>{}</b>\n⛔ منقضی/تمام‌حجم: {}\n📊 مصرف کل: {:.1} GB\n🖥 نودها: {}/{} آنلاین\n\n🤖 کاربران ربات: <b>{}</b>\n🧾 فروش: <b>{}</b> (۲۴ ساعت اخیر: {})\n💰 درآمد ریالی: <b>{}</b>",
+                    "📈 <b>آمار</b>\n\n👥 کاربران: <b>{}</b> (فعال: {})\n🟢 آنلاین: <b>{}</b>\n⛔ منقضی/تمام‌حجم: {}\n📊 مصرف کل: {:.1} GB\n🖥 نودها: {}/{} آنلاین\n\n🤖 کاربران ربات: <b>{}</b>\n🧾 فروش: <b>{}</b> (۲۴ ساعت اخیر: {})\n💰 درآمد ریالی: <b>{}</b>\n💎 درآمد ارزی: <b>{:.2}$</b>",
                     us.len(), us.iter().filter(|u| u.active()).count(), us.iter().filter(|u| u.online > 0).count(),
                     us.iter().filter(|u| !u.active()).count(), us.iter().map(|u| u.used_gb()).sum::<f64>(),
-                    ns.iter().filter(|n| n.online).count(), ns.len(), bu, cnt, today, toman(rev));
+                    ns.iter().filter(|n| n.online).count(), ns.len(), bu, cnt, today, toman(rev), usd);
                 { self.edit(chat, mid, &txt, back).await; return true; }
             }
             "a:pend" => {
@@ -2333,4 +2386,35 @@ mod flow_tests {
         bot.fulfill(o).await;
         assert_eq!(accounts(&bot, 400), vec![(3, "ali2".into(), format!("order #{}", o))]);
     }
+}
+
+/// The plan's dollar price: its own, or the toman price at the admin's rate (Sales › Toman per dollar)
+fn plan_usd(db: &crate::db::Db, p: &Plan) -> f64 {
+    if p.usd > 0.0 {
+        return p.usd;
+    }
+    let rate: f64 = db.get("usd_rate").replace([',', '٬'], "").trim().parse().unwrap_or(0.0);
+    if rate > 0.0 && p.toman > 0 { ((p.toman as f64 / rate) * 100.0).round() / 100.0 } else { 0.0 }
+}
+
+/// A wallet address or a payment text the buyer can pay to
+fn wallet_has_address(db: &crate::db::Db) -> bool {
+    ["ton_address", "usdt_address", "wallet_text"].iter().any(|k| !db.get(k).trim().is_empty())
+}
+
+/// Today's TON price in dollars (kept 10 minutes; None when it cannot be read)
+async fn ton_usd(app: &crate::App) -> Option<f64> {
+    let db = &app.db;
+    let at: i64 = db.get("ton_usd_at").parse().unwrap_or(0);
+    let cached: f64 = db.get("ton_usd").parse().unwrap_or(0.0);
+    if cached > 0.0 && crate::util::now() - at < 600 {
+        return Some(cached);
+    }
+    let r = app.http.get("https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd")
+        .timeout(std::time::Duration::from_secs(8)).send().await.ok()?;
+    let v: serde_json::Value = r.json().await.ok()?;
+    let p = v["the-open-network"]["usd"].as_f64().filter(|p| *p > 0.0)?;
+    db.set("ton_usd", &p.to_string());
+    db.set("ton_usd_at", &crate::util::now().to_string());
+    Some(p)
 }

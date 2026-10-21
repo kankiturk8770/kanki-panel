@@ -1,3 +1,11 @@
+# v3.7.6 — crypto payments in the bot; support button
+- **Why the TON wallet did not show:** crypto was offered only for plans with a dollar price, and the plan builder and the plan list never set one; the wallet switch also sat folded away and stayed off.
+- **Sales bot › Crypto payment (TON / USDT)**, its own box: TON wallet address, USDT (TRC20) address, **Toman per dollar** (plans without a dollar price get one from the toman price at this rate), an extra text. Typing an address switches «accept crypto» on; a written address with the switch off is warned about.
+- The buyer sees the amount in dollars and in TON at today's price, the addresses to copy, a **Pay with Tonkeeper** button with the amount filled in, then sends the receipt or TXID for the admin to approve.
+- Plan list: a **$** button sets a plan's dollar price. A plan with an empty price is no longer left out.
+- A payment button pressed after its method was switched off is refused; stats show the crypto income in dollars.
+- **Support** in the bot is a button that opens the support chat.
+
 # v3.7.5 — a name for the second KANKI MIX config
 - **KANKI MIX › each server › Second config through the tunnel › Name in the app:** the name the app shows for the config through the Iran tunnel (empty = "<server name> (تانل)"), so the two configs of a server are told apart. Today's app shows it already: the subscription page gives the second config its own (hidden) heading, and the subscription data its own name.
 

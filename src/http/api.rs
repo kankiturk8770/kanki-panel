@@ -717,7 +717,7 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
 
 pub const SETTING_KEYS: &[&str] = &[
     "dns", "mtu", "default_protocols", "sales_on", "trial_on", "trial_gb", "trial_days", "card_on", "card_number", "card_holder",
-    "wallet_on", "wallet_text", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
+    "wallet_on", "wallet_text", "ton_address", "usdt_address", "usd_rate", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
     "welcome", "ref_gb", "ref_days", "warn_on", "backup_on", "channel",
     "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "conn_limit_on", "tg_alerts", "logo", "price_rules",
     // v2.8.4: ready values of the "New user" form
@@ -843,7 +843,7 @@ async fn app_msg_delete(State(app): St, h: HeaderMap) -> Response {
 async fn plans_list(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "settings");
     let v: Vec<Value> = app.db.with(|c| {
-        let mut s = c.prepare("SELECT id,name,days,gb,toman,usd,conns,active,COALESCE(countries,0),COALESCE(category,'') FROM plans ORDER BY toman").unwrap();
+        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,'') FROM plans ORDER BY toman").unwrap();
         let rows: Vec<Value> = s.query_map([], |r| {
             Ok(json!({ "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "days": r.get::<_, i64>(2)?,
                 "gb": r.get::<_, f64>(3)?, "toman": r.get::<_, i64>(4)?, "usd": r.get::<_, f64>(5)?,
@@ -898,6 +898,9 @@ async fn plans_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
     }
     if let Some(t) = num(&b["toman"]) {
         let _ = app.db.exec("UPDATE plans SET toman=?1 WHERE id=?2", &[&(t.max(0.0) as i64), &id]);
+    }
+    if let Some(u) = num(&b["usd"]) {
+        let _ = app.db.exec("UPDATE plans SET usd=?1 WHERE id=?2", &[&((u.max(0.0) * 100.0).round() / 100.0), &id]);
     }
     if let Some(cat) = b["category"].as_str() {
         let _ = app.db.exec("UPDATE plans SET category=?1 WHERE id=?2", &[&cat.trim().to_string(), &id]);
