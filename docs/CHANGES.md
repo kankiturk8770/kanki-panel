@@ -1,3 +1,7 @@
+# v3.7.7 — KANKI MIX tunnel config only when a tunnel forwards it; chat messages never stored twice
+- **KANKI MIX second config (through the Iran tunnel):** offered only when an enabled tunnel really forwards the server's KANKI MIX UDP port (its exit is that server, or its entry is the server's endpoint and listens on that port), with the tunnel's own Iran address and port. Before, every server behind an Iran endpoint got one even when nothing forwarded the port, so it pointed at a dead port. An address written by hand on the KANKI MIX page is still used as it is.
+- **Emergency chat:** a customer message carries the app's own number (cid); when the app sends it again because the answer was lost, the server returns the stored one instead of saving it twice (text and pictures). Needs app 1.16.3.
+
 # v3.7.6 — crypto payments in the bot; support button
 - **Why the TON wallet did not show:** crypto was offered only for plans with a dollar price, and the plan builder and the plan list never set one; the wallet switch also sat folded away and stayed off.
 - **Sales bot › Crypto payment (TON / USDT)**, its own box: TON wallet address, USDT (TRC20) address, **Toman per dollar** (plans without a dollar price get one from the toman price at this rate), an extra text. Typing an address switches «accept crypto» on; a written address with the switch off is warned about.

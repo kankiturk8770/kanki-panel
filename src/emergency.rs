@@ -215,7 +215,27 @@ fn open_db(path: &str) -> Connection {
     .expect("prepare the chat database");
     // read receipts (3.6.8): an admin message the customer has read in the app
     let _ = c.execute("ALTER TABLE msgs ADD COLUMN rd INTEGER NOT NULL DEFAULT 0", []);
+    // the app's own number of a customer message (3.7.7): a message sent again after a lost answer is
+    // not stored twice
+    let _ = c.execute("ALTER TABLE msgs ADD COLUMN cid INTEGER NOT NULL DEFAULT 0", []);
+    let _ = c.execute("CREATE INDEX IF NOT EXISTS msgs_cid ON msgs(user, cid)", []);
     c
+}
+
+/// The id of the customer's message with this app number, if it is already stored
+fn by_cid(s: &Srv, user: &str, cid: i64) -> Option<i64> {
+    if cid <= 0 {
+        return None;
+    }
+    let db = s.db.lock().unwrap_or_else(|e| e.into_inner());
+    db.query_row("SELECT id FROM msgs WHERE user=?1 AND cid=?2 AND admin=0", params![user, cid], |r| r.get(0)).ok()
+}
+
+fn set_cid(s: &Srv, id: i64, cid: i64) {
+    if cid > 0 {
+        let db = s.db.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = db.execute("UPDATE msgs SET cid=?1 WHERE id=?2", params![cid, id]);
+    }
 }
 
 /// (the newest admin message the app has, the newest admin message the customer read, the newest
@@ -359,6 +379,9 @@ async fn u_read(State(s): St, Extension(p): Extension<Peer>, h: HeaderMap, Json(
 struct SendBody {
     #[serde(default)]
     text: String,
+    /// the app's own number for this message (0 = none)
+    #[serde(default)]
+    cid: i64,
 }
 
 async fn u_send(State(s): St, Extension(p): Extension<Peer>, h: HeaderMap, Json(b): Json<SendBody>) -> Response {
@@ -370,16 +393,23 @@ async fn u_send(State(s): St, Extension(p): Extension<Peer>, h: HeaderMap, Json(
     if text.is_empty() || text.chars().count() > MAX_TEXT {
         return err(StatusCode::BAD_REQUEST, "the message is empty or too long");
     }
+    // sent again (the answer was lost on the way): the stored one counts
+    if let Some(id) = by_cid(&s, &u, b.cid) {
+        return Json(json!({ "ok": true, "id": id, "again": true })).into_response();
+    }
     if !s.allow(&format!("send:{}", u), 20, 300) {
         return err(StatusCode::TOO_MANY_REQUESTS, "too many messages, wait a few minutes");
     }
     match insert(&s, &u, false, "text", text, None) {
-        Ok(id) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Ok(id) => {
+            set_cid(&s, id, b.cid);
+            Json(json!({ "ok": true, "id": id })).into_response()
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
     }
 }
 
-async fn u_image(State(s): St, Extension(p): Extension<Peer>, h: HeaderMap, body: Bytes) -> Response {
+async fn u_image(State(s): St, Extension(p): Extension<Peer>, h: HeaderMap, Query(q): Query<HashMap<String, String>>, body: Bytes) -> Response {
     let u = match user_or_deny(&s, &h, &p) {
         Ok(u) => u,
         Err(r) => return r,
@@ -387,11 +417,18 @@ async fn u_image(State(s): St, Extension(p): Extension<Peer>, h: HeaderMap, body
     if body.len() > MAX_IMAGE || image_type(&body).is_none() {
         return err(StatusCode::BAD_REQUEST, "send a JPEG / PNG / WEBP picture smaller than 1.5 MB");
     }
+    let cid: i64 = q.get("cid").and_then(|v| v.parse().ok()).unwrap_or(0);
+    if let Some(id) = by_cid(&s, &u, cid) {
+        return Json(json!({ "ok": true, "id": id, "again": true })).into_response();
+    }
     if !s.allow(&format!("img:{}", u), 6, 600) {
         return err(StatusCode::TOO_MANY_REQUESTS, "too many pictures, wait a few minutes");
     }
     match insert(&s, &u, false, "image", "", Some(&body)) {
-        Ok(id) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Ok(id) => {
+            set_cid(&s, id, cid);
+            Json(json!({ "ok": true, "id": id })).into_response()
+        }
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
     }
 }
@@ -885,6 +922,23 @@ mod tests {
         assert!(key.verify(text.as_bytes(), &util_b64d(a["sig"].as_str().unwrap()).unwrap()).is_ok());
         // a changed text does not verify
         assert!(key.verify(text.replace("y:1", "evil:1").as_bytes(), &util_b64d(a["sig"].as_str().unwrap()).unwrap()).is_err());
+    }
+
+    #[tokio::test]
+    async fn a_message_sent_again_is_stored_once() {
+        let (s, _, id) = srv();
+        let body = r#"{"text":"salam","cid":1761030000123}"#;
+        let (_, a) = call(&s, req("POST", "/api/e/send", &[("x-kanki-id", &id)], body)).await;
+        // the answer was lost: the app sends the same message again
+        let (st, b) = call(&s, req("POST", "/api/e/send", &[("x-kanki-id", &id)], body)).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(a["id"], b["id"]);
+        assert_eq!(b["again"], true);
+        let (_, v) = call(&s, req("GET", "/api/e/messages", &[("x-kanki-id", &id)], "")).await;
+        assert_eq!(v["messages"].as_array().unwrap().len(), 1);
+        // another message (another number, or none) is stored
+        let (_, c) = call(&s, req("POST", "/api/e/send", &[("x-kanki-id", &id)], r#"{"text":"salam"}"#)).await;
+        assert_ne!(a["id"], c["id"]);
     }
 
     #[tokio::test]

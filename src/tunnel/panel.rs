@@ -1364,6 +1364,40 @@ fn status_json(st: Option<&Status>) -> Value {
     }
 }
 
+/// KANKI MIX's second config: the Iran address and port of an enabled tunnel that really forwards
+/// UDP `port` (None = no tunnel forwards it, so no second config that would point at a dead port).
+/// A tunnel whose exit is the machine of the node (`node_id` / `node_host`) is preferred; else one whose
+/// entry is `entry_host` (the node's endpoint) and listens on that UDP port.
+pub fn udp_forward(app: &App, node_id: &str, node_host: &str, entry_host: &str, port: u16) -> Option<(String, u16)> {
+    let list: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
+    let addr = |sid: &str| seen_ip(sid).filter(|_| sid != "local").unwrap_or_else(|| host_of(app, sid));
+    for t in &list {
+        let exit_here = (t.exit == "local" && node_id == "local")
+            || (!node_host.is_empty() && (addr(&t.exit) == node_host || host_of(app, &t.exit) == node_host || t.target == node_host));
+        if !exit_here {
+            continue;
+        }
+        if let Some((a, _)) = crate::tunnel::engine::parse_ports(&t.udp).into_iter().find(|(_, b)| *b == port) {
+            let h = host_of(app, &t.entry);
+            if !h.is_empty() {
+                return Some((h, a));
+            }
+        }
+    }
+    if entry_host.is_empty() {
+        return None;
+    }
+    for t in &list {
+        if addr(&t.entry) != entry_host && host_of(app, &t.entry) != entry_host {
+            continue;
+        }
+        if crate::tunnel::engine::parse_ports(&t.udp).iter().any(|(a, b)| *a == port && *b == port) {
+            return Some((entry_host.to_string(), port));
+        }
+    }
+    None
+}
+
 /// (server id, its public address) of every tunnel server and the panel server, for their flags
 pub fn server_hosts(app: &App) -> Vec<(String, String)> {
     let mut v = vec![("local".to_string(), host_of(app, "local"))];

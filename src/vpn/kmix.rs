@@ -168,7 +168,13 @@ pub fn tunnel_target(app: &App, s: &Settings, n: &Node, port: u16) -> Option<(St
     let ep_host = if ep.contains('[') { ep_host } else { ep.split(':').next().unwrap_or("").to_string() };
     let primary = link_host(app, s, n);
     let direct = direct_host(app, n);
-    (!ep_host.is_empty() && ep_host != direct && ep_host != primary && ep_host != "127.0.0.1").then_some((ep_host, p))
+    if ep_host.is_empty() || ep_host == direct || ep_host == primary || ep_host == "127.0.0.1" {
+        return None;
+    }
+    // only when a tunnel really forwards the KANKI MIX UDP port (else the config would point at a
+    // dead port); the address and port are the tunnel's own entry
+    let node_host = if n.id == "local" { String::new() } else { crate::exitgeo::host_of_url(&n.address) };
+    crate::tunnel::panel::udp_forward(app, &n.id, &node_host, &ep_host, p)
 }
 
 /// a host name or IP the panel accepts as a KANKI MIX address
