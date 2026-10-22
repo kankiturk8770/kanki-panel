@@ -1,3 +1,7 @@
+# v3.8.2 — a backup brings the panel back on a new server, with nothing left of the install made there
+- **Installer › 9) Restore the panel from a backup file:** for when the old server is gone. Upload the `.kbk` (or `.tar.gz`) to `/root`, run the installer, pick 9, give the passphrase. Everything of a panel installed there before stops; the backup's settings, database, VPN keys and ports are put in place, the VPN configs get this server's network card, Hysteria2 runs only if it ran before, a new SSL certificate is taken (or the backed up one is used), Caddy is set to the backed up panel's own port, and the panel is checked before it says done.
+- **Backup › Restore with the server files** (in the panel): Caddy is now sent to the restored panel's port (before, the panel page answered 502 after the restore, because Caddy still used the port of the install made there), the VPN configs get this server's network card, and WireGuard, AmneziaWG, Hysteria2 and Caddy are restarted with the restored files.
+
 # v3.8.1 — the panel reads its settings even with one broken line
 - A single line of `/etc/kanki/kanki.env` that is not valid UTF-8 (a server name typed in another encoding) made the whole file unreadable: the panel then started on the default port 8080 while Caddy sent requests to the configured one (502, the panel page did not open). Now only that character is replaced and every setting is read.
 

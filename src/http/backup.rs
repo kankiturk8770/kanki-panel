@@ -162,6 +162,122 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<String,
     res
 }
 
+const CADDYFILE: &str = "/etc/caddy/Caddyfile";
+const VPN_CONFS: &[&str] = &["/etc/wireguard/wg0.conf", "/etc/amnezia/amneziawg/awg0.conf"];
+
+/// Every `reverse_proxy 127.0.0.1:<port>` of a Caddyfile sent to `port`.
+fn set_proxy_port(cf: &str, port: &str) -> String {
+    cf.lines().map(|l| {
+        match l.find("reverse_proxy 127.0.0.1:") {
+            Some(i) => {
+                let head = &l[..i + "reverse_proxy 127.0.0.1:".len()];
+                let rest = &l[head.len()..];
+                let tail = rest.trim_start_matches(|c: char| c.is_ascii_digit());
+                format!("{}{}{}", head, port, tail)
+            }
+            None => l.to_string(),
+        }
+    }).collect::<Vec<_>>().join("\n") + if cf.ends_with('\n') { "\n" } else { "" }
+}
+
+/// The network card in the NAT rules of a VPN config (`-o <card> -j MASQUERADE`) set to `eth`.
+fn set_masq_iface(conf: &str, eth: &str) -> String {
+    let mut out = String::new();
+    let mut rest = conf;
+    while let Some(i) = rest.find(" -o ") {
+        let after = &rest[i + 4..];
+        let end = after.find(' ').unwrap_or(after.len());
+        if after[end..].starts_with(" -j MASQUERADE") {
+            out.push_str(&rest[..i + 4]);
+            out.push_str(eth);
+            rest = &after[end..];
+        } else {
+            out.push_str(&rest[..i + 4]);
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The network card of the default route.
+fn default_iface() -> String {
+    for l in std::fs::read_to_string("/proc/net/route").unwrap_or_default().lines().skip(1) {
+        let f: Vec<&str> = l.split_whitespace().collect();
+        if f.len() > 1 && f[1] == "00000000" {
+            return f[0].to_string();
+        }
+    }
+    String::new()
+}
+
+/// After a full restore the server files are the old server's: Caddy still sends the panel's
+/// requests to the port of the install made here (the panel page answered 502), and the VPN
+/// configs name the old server's network card. Both are set to this server.
+fn after_full_restore() {
+    let env = crate::util::load_env(crate::ENV_PATH);
+    if let Some(port) = env.get("PANEL_PORT").filter(|p| p.parse::<u16>().is_ok()) {
+        if let Ok(cf) = std::fs::read_to_string(CADDYFILE) {
+            let n = set_proxy_port(&cf, port);
+            if n != cf {
+                let _ = std::fs::write(CADDYFILE, n);
+            }
+        }
+    }
+    let eth = default_iface();
+    if !eth.is_empty() {
+        for c in VPN_CONFS {
+            if let Ok(t) = std::fs::read_to_string(c) {
+                let n = set_masq_iface(&t, &eth);
+                if n != t {
+                    let _ = std::fs::write(c, n);
+                }
+            }
+        }
+    }
+}
+
+/// The VPN services and Caddy restarted with the restored files (Hysteria2 stopped when the
+/// restored settings have it off). Blocking.
+fn restart_services() {
+    let sc = |args: &[&str]| { let _ = Command::new("systemctl").args(args).output(); };
+    if std::path::Path::new(VPN_CONFS[0]).exists() {
+        sc(&["restart", "wg-quick@wg0"]);
+    }
+    if std::path::Path::new(VPN_CONFS[1]).exists() {
+        sc(&["restart", "awg-quick@awg0"]);
+    }
+    let env = crate::util::load_env(crate::ENV_PATH);
+    if env.get("HY2_PORT").map(|s| s.trim().is_empty()).unwrap_or(true) {
+        sc(&["disable", "--now", "hysteria-server"]);
+    } else {
+        sc(&["restart", "hysteria-server"]);
+    }
+    if std::path::Path::new(CADDYFILE).exists() {
+        sc(&["restart", "caddy"]);
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    #[test]
+    fn caddy_is_sent_to_the_restored_port() {
+        let cf = "{\n  auto_https off\n}\nhttps://a.b:2053 {\n  reverse_proxy 127.0.0.1:20973\n}\nsub.b:2053 {\n  reverse_proxy 127.0.0.1:20973 {\n  }\n}\n";
+        let n = super::set_proxy_port(cf, "29332");
+        assert!(!n.contains("20973"));
+        assert_eq!(n.matches("reverse_proxy 127.0.0.1:29332").count(), 2);
+        assert!(n.ends_with("}\n") && n.contains("reverse_proxy 127.0.0.1:29332 {"));
+    }
+    #[test]
+    fn the_nat_rule_names_this_servers_card() {
+        let c = "PostUp = iptables -t nat -A POSTROUTING -s 10.66.0.0/16 -o ens18 -j MASQUERADE; iptables -A FORWARD -i wg0 -o ens18 -j ACCEPT\nPostDown = iptables -t nat -D POSTROUTING -s 10.66.0.0/16 -o ens18 -j MASQUERADE\n";
+        let n = super::set_masq_iface(c, "eth0");
+        assert_eq!(n.matches("-o eth0 -j MASQUERADE").count(), 2);
+        // only the NAT rules: a FORWARD rule with -o is left as it was
+        assert!(n.contains("-o ens18 -j ACCEPT"));
+    }
+}
+
 pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/backup", get(backup_legacy).post(backup_download))
@@ -266,7 +382,17 @@ async fn restore_upload(State(app): St, h: HeaderMap, body: Bytes) -> Response {
     let data = body.to_vec();
     match tokio::task::spawn_blocking(move || restore(&a, &data, &pass, full)).await {
         Ok(Ok(msg)) => {
-            crate::admin::restart_self();
+            if full {
+                // the old server's files are in place now: set them to this server, then restart
+                after_full_restore();
+                tokio::spawn(async {
+                    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+                    let _ = tokio::task::spawn_blocking(restart_services).await;
+                    std::process::exit(0)
+                });
+            } else {
+                crate::admin::restart_self();
+            }
             Json(json!({"ok": true, "message": msg})).into_response()
         }
         Ok(Err(e)) => err(StatusCode::BAD_REQUEST, &e),

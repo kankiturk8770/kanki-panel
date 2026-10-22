@@ -583,28 +583,15 @@ uninstall(){
 }
 
 # =====================================================================
-# Move the whole panel here from another server (the old panel's Backup › Move to a new server
-# prints this command). KANKI_MOVE=domain|https port|old server IP|one-time token|passphrase
-move_panel(){
-  local D P OLD T PASS W=/root/kanki-move
-  IFS='|' read -r D P OLD T PASS <<< "$KANKI_MOVE"
-  [ -n "$D" ] && [ -n "$P" ] && [ -n "$OLD" ] && [ -n "$T" ] && [ -n "$PASS" ] || die "The move command is incomplete: copy it again from the old panel"
-  echo; say "Moving the Kanki panel $D here from $OLD"
-  if [ -f "$ENV" ] && grep -q '^MODE=panel' "$ENV"; then yes_no "A Kanki panel is already installed here. Replace it with the one being moved?" N || exit 0; fi
-  need_repo; base_packages; download_bin
-  rm -rf "$W"; mkdir -p "$W"; chmod 700 "$W"
-  say "Downloading the full backup from the old server ..."
-  # by the old server's IP: the domain may already point here
-  local URL="https://$D:$P/move/bundle?t=$T"
-  curl -fsS --retry 3 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL" \
-    || curl -fsSk --retry 2 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL" \
-    || die "Could not download the backup from $OLD:$P. Is the old panel still running? Is the command older than 3 hours (make a new one)?"
-  KANKI_BK_PASS="$PASS" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "$W/b.kbk" -out "$W/b.tgz" -pass env:KANKI_BK_PASS \
-    || die "The backup could not be opened (wrong or damaged): make a new command in the old panel"
-  mkdir -p "$W/x"; tar -xzf "$W/b.tgz" -C "$W/x" || die "The backup is damaged"
-  [ -f "$W/x/kanki.db" ] && [ -f "$W/x/files$ENV" ] || die "The backup has no database or settings"
-  ok "Backup downloaded ($(du -h "$W/b.kbk" | cut -f1))"
+# The server files and database of a backup unpacked in $1/x put in place on this server, and every
+# service set up from them (keys, ports, certificate, Caddy in front of the panel's own port).
+# $2 = the old server's IP when moving (empty for a backup file).
+restore_bundle(){
+  local W=$1 OLD=$2
+  # everything of a panel installed here before stops first: the restored one takes its place
   systemctl stop kanki-panel 2>/dev/null || true
+  systemctl stop wg-quick@wg0 awg-quick@awg0 hysteria-server 2>/dev/null || true
+  ip link del wg0 2>/dev/null || true; ip link del awg0 2>/dev/null || true
   # the server files, exactly as they were (keys, configs, certificate)
   local f
   for f in $ENV $ENV_DIR/repo /etc/wireguard/wg0.conf /etc/amnezia/amneziawg/awg0.conf /etc/hysteria/config.yaml $TLS/fullchain.pem $TLS/privkey.pem; do
@@ -612,8 +599,8 @@ move_panel(){
   done
   need_repo
   # an address that named the old server becomes the domain
-  if [ "$(envget ENDPOINT)" = "$OLD" ]; then sed -i "s|^ENDPOINT=.*|ENDPOINT=$D|" "$ENV"; fi
-  sed -i '/^MOVED_FROM=/d' "$ENV"; echo "MOVED_FROM=$OLD" >> "$ENV"
+  if [ -n "$OLD" ] && [ "$(envget ENDPOINT)" = "$OLD" ]; then sed -i "s|^ENDPOINT=.*|ENDPOINT=$D|" "$ENV"; fi
+  sed -i '/^MOVED_FROM=/d' "$ENV"; if [ -n "$OLD" ]; then echo "MOVED_FROM=$OLD" >> "$ENV"; fi
   local DATA; DATA=$(envget DATA_DIR); DATA=${DATA:-/var/lib/kanki}
   mkdir -p "$DATA"; chmod 700 "$DATA"
   install -m 600 "$W/x/kanki.db" "$DATA/kanki.db"; rm -f "$DATA/kanki.db-wal" "$DATA/kanki.db-shm"
@@ -637,6 +624,9 @@ move_panel(){
     else
       warn "Hysteria2 could not be installed"
     fi
+  else
+    # Hysteria2 was off on the backed up server: one left by an install here would hold its port
+    systemctl disable -q --now hysteria-server.service 2>/dev/null || true
   fi
   # a fresh certificate when the domain already points here; else the one from the old server
   apt-get install -y -qq certbot >/dev/null 2>&1 || true
@@ -659,8 +649,32 @@ move_panel(){
   say "Checking the panel ..."
   local i up=0
   for i in $(seq 1 30); do curl -fs -o /dev/null "http://127.0.0.1:$PANEL_PORT/admin" && { up=1; break; }; sleep 1; done
-  [ "$up" = 1 ] || die "The panel did not start here (journalctl -u kanki-panel -n 30). The old panel keeps running; nothing changed there."
+  [ "$up" = 1 ] || die "The panel did not start here (journalctl -u kanki-panel -n 30)"
   ok "The panel runs on this server"
+}
+
+# Move the whole panel here from another server (the old panel's Backup › Move to a new server
+# prints this command). KANKI_MOVE=domain|https port|old server IP|one-time token|passphrase
+move_panel(){
+  local D P OLD T PASS W=/root/kanki-move
+  IFS='|' read -r D P OLD T PASS <<< "$KANKI_MOVE"
+  [ -n "$D" ] && [ -n "$P" ] && [ -n "$OLD" ] && [ -n "$T" ] && [ -n "$PASS" ] || die "The move command is incomplete: copy it again from the old panel"
+  echo; say "Moving the Kanki panel $D here from $OLD"
+  if [ -f "$ENV" ] && grep -q '^MODE=panel' "$ENV"; then yes_no "A Kanki panel is already installed here. Replace it with the one being moved?" N || exit 0; fi
+  need_repo; base_packages; download_bin
+  rm -rf "$W"; mkdir -p "$W"; chmod 700 "$W"
+  say "Downloading the full backup from the old server ..."
+  # by the old server's IP: the domain may already point here
+  local URL="https://$D:$P/move/bundle?t=$T"
+  curl -fsS --retry 3 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL" \
+    || curl -fsSk --retry 2 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL" \
+    || die "Could not download the backup from $OLD:$P. Is the old panel still running? Is the command older than 3 hours (make a new one)?"
+  KANKI_BK_PASS="$PASS" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "$W/b.kbk" -out "$W/b.tgz" -pass env:KANKI_BK_PASS \
+    || die "The backup could not be opened (wrong or damaged): make a new command in the old panel"
+  mkdir -p "$W/x"; tar -xzf "$W/b.tgz" -C "$W/x" || die "The backup is damaged"
+  [ -f "$W/x/kanki.db" ] && [ -f "$W/x/files$ENV" ] || die "The backup has no database or settings"
+  ok "Backup downloaded ($(du -h "$W/b.kbk" | cut -f1))"
+  restore_bundle "$W" "$OLD"
   # the old panel stops (no two panels for the same nodes and bot)
   if curl -fsS -X POST --max-time 20 --resolve "$D:$P:$OLD" "https://$D:$P/move/done?t=$T" >/dev/null 2>&1 \
      || curl -fsSk -X POST --max-time 20 --resolve "$D:$P:$OLD" "https://$D:$P/move/done?t=$T" >/dev/null 2>&1; then
@@ -674,6 +688,32 @@ move_panel(){
   echo -e "   Panel:  ${C}https://$DOMAIN:$HTTPS_PORT/admin${N}  (the same username and password as before)"
   echo "   The domain $DOMAIN must point to this server: ${ME:-the IP of this server}"
   echo "   Nodes and tunnel servers find the panel by its domain by themselves; this server's VPN uses the same keys, so the users' configs keep working."
+}
+
+# Restore the whole panel from a backup file (.kbk, or .tar.gz) uploaded to this server, also when
+# the old server is gone. A panel installed here before is replaced.
+restore_file(){
+  local W=/root/kanki-restore F PASS
+  echo; say "Restore the panel from a backup file"
+  ask F "Path of the backup file on this server" "$(ls -t /root/*.kbk /root/*.tar.gz 2>/dev/null | head -1)"
+  [ -f "$F" ] || die "No file at $F: upload the backup to /root first (SFTP), then run this again"
+  need_repo; base_packages; download_bin
+  rm -rf "$W"; mkdir -p "$W/x"; chmod 700 "$W"
+  if [ "$(head -c 8 "$F")" = "Salted__" ]; then
+    read -rsp "Backup passphrase: " PASS; echo
+    KANKI_BK_PASS="$PASS" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "$F" -out "$W/b.tgz" -pass env:KANKI_BK_PASS 2>/dev/null \
+      || { rm -rf "$W"; die "Wrong passphrase or damaged file"; }
+  else
+    cp "$F" "$W/b.tgz"
+  fi
+  tar -xzf "$W/b.tgz" -C "$W/x" 2>/dev/null || { rm -rf "$W"; die "The backup is damaged"; }
+  [ -f "$W/x/kanki.db" ] && [ -f "$W/x/files$ENV" ] || { rm -rf "$W"; die "The backup has no database or settings"; }
+  restore_bundle "$W" ""
+  rm -rf "$W"
+  local ME; ME=$(pubip)
+  echo; ok "Restore complete!"
+  echo -e "   Panel:  ${C}https://$DOMAIN:$HTTPS_PORT/admin${N}  (the username and password of the backed up panel)"
+  echo "   The domain $DOMAIN must point to this server: ${ME:-the IP of this server}"
 }
 
 if [ -n "${KANKI_MOVE:-}" ]; then move_panel; exit $?; fi
@@ -693,6 +733,7 @@ echo "  5) Reset admin login"
 echo "  6) Status"
 echo "  7) Uninstall"
 echo "  8) Change WireGuard / AmneziaWG / Hysteria2 ports"
+echo "  9) Restore the panel from a backup file"
 read -rp "  Choose: " CH
 case "$CH" in
   1) install_panel ;;
@@ -703,5 +744,6 @@ case "$CH" in
   6) status ;;
   7) uninstall ;;
   8) change_ports ;;
+  9) restore_file ;;
   *) die "Invalid choice" ;;
 esac
