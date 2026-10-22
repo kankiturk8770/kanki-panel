@@ -1,3 +1,6 @@
+# v3.8.1 — the panel reads its settings even with one broken line
+- A single line of `/etc/kanki/kanki.env` that is not valid UTF-8 (a server name typed in another encoding) made the whole file unreadable: the panel then started on the default port 8080 while Caddy sent requests to the configured one (502, the panel page did not open). Now only that character is replaced and every setting is read.
+
 # v3.8.0 — the AMOLED look and a menu grouped by what belongs together
 - **Four looks**, picked from the dots in the top bar: gold on pure black (night), gold on pure white (day), purple on black, purple on white. Cards are flat AMOLED surfaces with a thin edge.
 - **Buttons:** 3D glass, with a soft shine that moves across the main buttons.

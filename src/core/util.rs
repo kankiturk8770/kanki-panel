@@ -242,7 +242,10 @@ pub fn gb(bytes: i64) -> f64 {
 /// KEY=VALUE env file
 pub fn load_env(path: &str) -> HashMap<String, String> {
     let mut m = HashMap::new();
-    if let Ok(t) = std::fs::read_to_string(path) {
+    // read as bytes: one line that is not valid UTF-8 (a name typed in another encoding) must not
+    // make the whole file unreadable (the panel then came up on the default port behind Caddy)
+    if let Ok(raw) = std::fs::read(path) {
+        let t = String::from_utf8_lossy(&raw);
         for line in t.lines() {
             let l = line.trim();
             if l.starts_with('#') {
@@ -353,5 +356,18 @@ mod name_tests {
         assert_eq!(cfg_name_from("علی ali"), Some("ali".into()));
         assert_eq!(cfg_name_from("2024_erfan_dev_account"), Some("erfandevacco".into()));
         assert_eq!(cfg_name_from("محمد"), None);
+    }
+}
+
+#[cfg(test)]
+mod env_tests {
+    #[test]
+    fn a_bad_byte_in_one_line_keeps_the_others() {
+        let p = std::env::temp_dir().join(format!("kanki-env-{}", super::rand_token(8)));
+        std::fs::write(&p, b"PANEL_PORT=20973\nLOCAL_NAME=Ger\xe9many\nDOMAIN=a.b\n").unwrap();
+        let m = super::load_env(p.to_str().unwrap());
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(m.get("PANEL_PORT").map(|s| s.as_str()), Some("20973"));
+        assert_eq!(m.get("DOMAIN").map(|s| s.as_str()), Some("a.b"));
     }
 }
