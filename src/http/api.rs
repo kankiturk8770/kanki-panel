@@ -169,6 +169,10 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/assets/kanki-v37.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/v37.js"))
         }))
+        // 3.8: the AMOLED look (gold / purple, night / day), 3D glass buttons, grouped menu
+        .route("/assets/kanki-look.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/look.js"))
+        }))
         .route("/assets/kanki-kmix.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/kmix.js"))
         }))

@@ -98,14 +98,26 @@ function nodeGrid(){var el=$('#v37grid');if(!el)return;var ns=S.nodes||[],xr=(wi
  if(dn)(dn.servers||[]).forEach(function(x){var r=rows.filter(function(y){return y.id==x.server})[0];if(!r)return;r.dns={role:x.role,on:!!(x.status&&x.status.active)}});
  var vpnRow=function(r,k,label){var v=r[k];var act=r.kind=='node'?(k=='kmix'?"location.hash='#kmix'":"v37NodeMenu('"+esc(r.id)+"')"):'';
   return v?svcCell(v.on,label,v.port?'UDP '+N(v.port):t(v.on?'on':'off'),act,v.on?'ok':'bad'):svcCell(false,label,r.kind=='node'?t('not installed'):'—','', 'no')};
- var head='<div class="sgh"><span>'+t('Server')+'</span><span>WireGuard</span><span>AmneziaWG</span><span>Hysteria2</span><span>KANKI MIX</span><span>Xray</span><span>DNS</span><span>'+t('Tunnels')+'</span></div>';
- var body=rows.map(function(r){
-  return '<div class="sgr"><div class="sgn"><span class="dot '+(r.online?'g':'r')+'"></span>'+flag(r.cc)+'<b>'+esc(r.name)+'</b><small>'+(r.id=='local'?t('Main'):r.kind=='node'?'VPN':(r.loc=='iran'?'IR':'')) +'</small></div>'+
-   vpnRow(r,'wg','WireGuard')+vpnRow(r,'awg','AmneziaWG')+vpnRow(r,'hy2','Hysteria2')+vpnRow(r,'kmix','KANKI MIX')+
-   (r.xray?svcCell(r.xray.on,'Xray',N(r.xray.n)+' '+t('inbounds'),"location.hash='#xray'",r.xray.on?'ok':'bad'):svcCell(false,'Xray','—','','no'))+
-   (r.dns?svcCell(r.dns.on,'DNS',t(r.dns.role=='relay'?'relay':'exit'),"location.hash='#dns/servers'",r.dns.on?'ok':'bad'):svcCell(false,'DNS','—','','no'))+
-   (r.tun!=null?svcCell(r.tun>0,t('Tunnels'),N(r.tun),"location.hash='#tunnels'",r.tun>0?'ok':'no'):svcCell(false,t('Tunnels'),'—','','no'))+'</div>'}).join('');
- el.innerHTML='<div class="nh"><div><h3>'+ic('nodes',16)+' '+t('Every server and what runs on it')+'</h3><p class="sub" style="margin:0">'+t('Press a service to open its settings')+'</p></div></div><div class="sgw"><div class="svgrid">'+head+body+'</div></div>'}
+ // 3.8: one card per server with everything that runs on it, and filters (all, abroad, Iran, DNS)
+ var isIr=function(r){return r.loc=='iran'||String(r.cc||'').toUpperCase()=='IR'};
+ var fl={all:function(){return true},abroad:function(r){return !isIr(r)},iran:isIr,dns:function(r){return !!r.dns}};
+ if(!fl[GF])GF='all';
+ var chips='<div class="sgf">'+[['all','All'],['abroad','Abroad'],['iran','Iran'],['dns','DNS']].map(function(f){
+  return '<button type="button" class="'+(GF==f[0]?'on':'')+'" onclick="v37GF(\''+f[0]+'\')">'+t(f[1])+' <b>'+N(rows.filter(fl[f[0]]).length)+'</b></button>'}).join('')+'</div>';
+ var cards=rows.filter(fl[GF]).map(function(r){
+  var roles=[];if(r.id=='local')roles.push(t('Main'));if(r.kind=='node')roles.push(t('VPN server'));if(r.tun)roles.push(t('Tunnels')+' · '+N(r.tun));
+  if(r.dns)roles.push(t(r.dns.role=='relay'?'DNS relay':'DNS exit'));if(r.xray)roles.push('Xray');
+  var cells=(r.kind=='node'?vpnRow(r,'wg','WireGuard')+vpnRow(r,'awg','AmneziaWG')+vpnRow(r,'hy2','Hysteria2')+vpnRow(r,'kmix','KANKI MIX'):['wg','awg','hy2','kmix'].filter(function(k){return r[k]}).map(function(k){return vpnRow(r,k,({wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',kmix:'KANKI MIX'})[k])}).join(''))+
+   (r.xray?svcCell(r.xray.on,'Xray',N(r.xray.n)+' '+t('inbounds'),"location.hash='#xray'",r.xray.on?'ok':'bad'):'')+
+   (r.dns?svcCell(r.dns.on,'DNS',t(r.dns.role=='relay'?'relay':'exit'),"location.hash='#dns/servers'",r.dns.on?'ok':'bad'):'')+
+   (r.tun!=null?svcCell(r.tun>0,t('Tunnels'),N(r.tun),"location.hash='#tunnels'",r.tun>0?'ok':'no'):'');
+  return '<div class="sgc"><div class="sgn"><span class="dot '+(r.online?'g':'r')+'"></span>'+flag(r.cc)+'<b>'+esc(r.name)+'</b><small>'+(isIr(r)?t('Iran'):t('Abroad'))+'</small></div>'+
+   '<div class="sgr2">'+roles.map(function(x){return '<span>'+esc(x)+'</span>'}).join('')+'</div>'+
+   (cells?'<div class="sgcells">'+cells+'</div>':'<p class="sub" style="margin:0">'+t('No service on this server yet')+'</p>')+'</div>'}).join('');
+ el.innerHTML='<div class="nh"><div><h3>'+ic('nodes',16)+' '+t('Every server and what runs on it')+'</h3><p class="sub" style="margin:0">'+t('Press a service to open its settings')+'</p></div></div>'+chips+
+  '<div class="sgcards">'+(cards||'<p class="sub">'+t('No server here')+'</p>')+'</div>'}
+var GF='all';
+window.v37GF=function(f){GF=f;nodeGrid()};
 // the actions of one VPN server, from the grid
 window.v37NodeMenu=function(id){var n=(S.nodes||[]).filter(function(x){return x.id==id})[0];if(!n)return;var i=n.info||{},e=esc(id);
  modal(mhead(n.name,flag(n.cc))+

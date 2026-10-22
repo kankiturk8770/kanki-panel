@@ -1,3 +1,12 @@
+# v3.8.0 — the AMOLED look and a menu grouped by what belongs together
+- **Four looks**, picked from the dots in the top bar: gold on pure black (night), gold on pure white (day), purple on black, purple on white. Cards are flat AMOLED surfaces with a thin edge.
+- **Buttons:** 3D glass, with a soft shine that moves across the main buttons.
+- **Menu in groups:** Home · Customers (users, sales bot, emergency chat) · Servers & network (servers, tunnels, ports) · Services (VPN services, Kanki DNS) · Reports · System. Servers and Tunnel servers are two tabs of one section. Nothing was removed.
+- **Servers:** one card per server with what runs on it (VPN, Xray, DNS, tunnels), and filters: all, abroad, Iran, DNS.
+- **Phones:** a tab bar at the bottom (home, users, servers, services, more); «more» opens a sheet with every section.
+- **Dashboard:** a row of quick actions (new user, add server, sales bot, backup).
+- Switching day/night no longer drops the glass look until the page is reloaded.
+
 # v3.7.7 — KANKI MIX tunnel config only when a tunnel forwards it; chat messages never stored twice
 - **KANKI MIX second config (through the Iran tunnel):** offered only when an enabled tunnel really forwards the server's KANKI MIX UDP port (its exit is that server, or its entry is the server's endpoint and listens on that port), with the tunnel's own Iran address and port. Before, every server behind an Iran endpoint got one even when nothing forwarded the port, so it pointed at a dead port. An address written by hand on the KANKI MIX page is still used as it is.
 - **Emergency chat:** a customer message carries the app's own number (cid); when the app sends it again because the answer was lost, the server returns the stored one instead of saving it twice (text and pictures). Needs app 1.16.3.
