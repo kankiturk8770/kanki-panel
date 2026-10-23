@@ -780,7 +780,7 @@ async fn dl_script() -> Response {
 }
 
 fn own_binary() -> Option<Vec<u8>> {
-    std::env::current_exe().ok().and_then(|p| std::fs::read(p.to_string_lossy().replace(" (deleted)", "")).ok())
+    crate::util::exe_path().ok().and_then(|p| std::fs::read(p).ok())
 }
 
 fn sha_hex(b: &[u8]) -> String {

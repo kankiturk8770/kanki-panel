@@ -237,7 +237,7 @@ pub fn setup_tunnel_agent(panel: &str, id: &str, token: &str, insecure: bool) ->
     if !panel.starts_with("https://") || panel.len() > 200 || panel.bytes().any(|c| c.is_ascii_whitespace() || c == b'\'' || c == b'"') {
         return Err("bad panel address".into());
     }
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?.to_string_lossy().replace(" (deleted)", "");
+    let exe = crate::util::exe_path().map_err(|e| e.to_string())?.to_string_lossy().to_string();
     let _ = std::fs::create_dir_all("/etc/kanki");
     let _ = std::fs::create_dir_all("/var/lib/kanki");
     let envf = crate::tunnel::agent::ENV_FILE;
@@ -652,14 +652,8 @@ pub async fn self_update(app: &App) -> Result<String, String> {
     if want.is_empty() || want != got {
         return Err("checksum mismatch, update aborted".into());
     }
-    let path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("new");
-    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
-    }
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    let path = crate::util::exe_path().map_err(|e| e.to_string())?;
+    crate::util::swap_program(&path, &bytes)?;
     let v = latest_version(app).await.unwrap_or_default();
     restart_self();
     Ok(v)

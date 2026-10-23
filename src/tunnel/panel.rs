@@ -2471,7 +2471,7 @@ async fn agent_binary(State(app): St, Json(b): Json<Value>) -> Response {
     if b["arch"].as_str().unwrap_or("") != std::env::consts::ARCH {
         return err(StatusCode::CONFLICT, "this server has a different CPU type than the panel; update it by hand");
     }
-    let Ok(path) = std::env::current_exe() else { return err(StatusCode::INTERNAL_SERVER_ERROR, "no binary") };
+    let Ok(path) = crate::util::exe_path() else { return err(StatusCode::INTERNAL_SERVER_ERROR, "no binary") };
     let Ok(bytes) = std::fs::read(&path) else { return err(StatusCode::INTERNAL_SERVER_ERROR, "cannot read the binary") };
     let sum = {
         use sha2::{Digest, Sha256};
