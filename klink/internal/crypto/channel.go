@@ -22,6 +22,16 @@ type Channel struct {
 	key   [32]byte
 	epoch uint64
 	seq   uint64 // آخرین شماره‌ی استفاده‌شده برای ارسال
+
+	// next کلید epoch بعدی را کش می‌کند تا هر بسته‌ی جعلیِ حامل epoch+1 دوباره
+	// HKDF و ساخت AEAD را اجرا نکند (هزینه‌ی CPU برای مهاجم بدون احراز).
+	next    cipher.AEAD
+	nextKey [32]byte
+	// prev کلید epoch قبلی را نگه می‌دارد تا بسته‌های UDP که پیش از rekey
+	// فرستاده شده‌اند ولی دیرتر رسیده‌اند دور ریخته نشوند. replay آن‌ها با پنجره‌ی
+	// جداگانه‌ی همان epoch در لایه‌ی نشست کنترل می‌شود.
+	prev    cipher.AEAD
+	hasPrev bool
 }
 
 // NewChannel یک کانال با کلید ۳۲بایتی می‌سازد.
@@ -33,25 +43,41 @@ func NewChannel(key [32]byte) (*Channel, error) {
 	return &Channel{aead: a, key: key}, nil
 }
 
-func nonceFor(epoch, seq uint64) []byte {
+func nonceFor(n *[chacha20poly1305.NonceSize]byte, epoch, seq uint64) []byte {
 	// nonce = epoch(4B) || seq(8B) — ۱۲ بایت یکتا برای هر بسته در هر epoch.
-	n := make([]byte, chacha20poly1305.NonceSize)
 	binary.BigEndian.PutUint32(n[:4], uint32(epoch))
 	binary.BigEndian.PutUint64(n[4:], seq)
-	return n
+	return n[:]
 }
 
 // Seal متن را رمز و امضا می‌کند و شماره‌ی توالی بسته را برمی‌گرداند.
 // قالب خروجی: epoch(8B) || seq(8B) || ciphertext+tag
 func (c *Channel) Seal(plaintext []byte) (out []byte, seq uint64, err error) {
+	return c.SealTo(nil, plaintext)
+}
+
+// SealTo مثل Seal است ولی خروجی را به انتهای dst اضافه می‌کند تا فرستنده بتواند
+// هدر بسته را از قبل در همان بافر بگذارد و کپی اضافه لازم نباشد.
+func (c *Channel) SealTo(dst, plaintext []byte) (out []byte, seq uint64, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.seq == ^uint64(0) {
+		return nil, 0, errors.New("crypto: sequence exhausted; rekey required")
+	}
 	c.seq++
 	seq = c.seq
-	out = make([]byte, 16, 16+len(plaintext)+chacha20poly1305.Overhead)
-	binary.BigEndian.PutUint64(out[:8], c.epoch)
-	binary.BigEndian.PutUint64(out[8:16], seq)
-	out = c.aead.Seal(out, nonceFor(c.epoch, seq), plaintext, out[:16])
+	need := 16 + len(plaintext) + chacha20poly1305.Overhead
+	if cap(dst)-len(dst) < need {
+		grown := make([]byte, len(dst), len(dst)+need)
+		copy(grown, dst)
+		dst = grown
+	}
+	base := len(dst)
+	out = dst[:base+16]
+	binary.BigEndian.PutUint64(out[base:base+8], c.epoch)
+	binary.BigEndian.PutUint64(out[base+8:base+16], seq)
+	var n [chacha20poly1305.NonceSize]byte
+	out = c.aead.Seal(out, nonceFor(&n, c.epoch, seq), plaintext, out[base:base+16])
 	return out, seq, nil
 }
 
@@ -64,27 +90,37 @@ func (c *Channel) Open(packet []byte) (plaintext []byte, seq uint64, epoch uint6
 	seq = binary.BigEndian.Uint64(packet[8:16])
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// فقط epoch جاری یا epoch بعدی پذیرفته می‌شود. مهم است که پیش از احراز
+	// فقط epoch قبلی، جاری یا بعدی پذیرفته می‌شود. مهم است که پیش از احراز
 	// AEAD هیچ کلید یا شمارنده‌ای تغییر نکند؛ وگرنه یک بسته‌ی جعلی می‌توانست
 	// نشست را به epoch نامعتبر ببرد و denial-of-service ایجاد کند.
-	if epoch != c.epoch && epoch != c.epoch+1 {
+	var aead cipher.AEAD
+	switch {
+	case epoch == c.epoch:
+		aead = c.aead
+	case epoch == c.epoch+1:
+		if c.next == nil {
+			c.nextKey = RekeyKey(c.key, epoch)
+			c.next, err = chacha20poly1305.New(c.nextKey[:])
+			if err != nil {
+				c.next = nil
+				return nil, 0, 0, ErrInvalid
+			}
+		}
+		aead = c.next
+	case c.hasPrev && c.epoch > 0 && epoch == c.epoch-1:
+		aead = c.prev
+	default:
 		return nil, 0, 0, ErrInvalid
 	}
-	aead := c.aead
-	key := c.key
-	if epoch == c.epoch+1 {
-		key = RekeyKey(c.key, epoch)
-		aead, err = chacha20poly1305.New(key[:])
-		if err != nil {
-			return nil, 0, 0, ErrInvalid
-		}
-	}
-	pt, err := aead.Open(nil, nonceFor(epoch, seq), packet[16:], packet[:16])
+	var n [chacha20poly1305.NonceSize]byte
+	pt, err := aead.Open(nil, nonceFor(&n, epoch, seq), packet[16:], packet[:16])
 	if err != nil {
 		return nil, 0, 0, ErrInvalid
 	}
-	if epoch != c.epoch {
-		c.epoch, c.key, c.aead = epoch, key, aead
+	if epoch == c.epoch+1 {
+		c.prev, c.hasPrev = c.aead, true
+		c.epoch, c.key, c.aead = epoch, c.nextKey, c.next
+		c.next, c.nextKey = nil, [32]byte{}
 	}
 	return pt, seq, epoch, nil
 }
@@ -101,20 +137,6 @@ func (c *Channel) Rekey() (epoch uint64) {
 	}
 	c.seq = 0
 	return c.epoch
-}
-
-// advance کلیدهای میانی را تا epoch موردنظر مشتق می‌کند (برای گیرنده).
-func (c *Channel) advance(target uint64) error {
-	for c.epoch < target {
-		c.epoch++
-		c.key = RekeyKey(c.key, c.epoch)
-		a, err := chacha20poly1305.New(c.key[:])
-		if err != nil {
-			return err
-		}
-		c.aead = a
-	}
-	return nil
 }
 
 // ReplayWindow پنجره‌ی لغزان ۶۴بیتی برای تشخیص بسته‌های تکراری (اندازه: ۱۰۲۴ بسته).
@@ -137,10 +159,18 @@ func (w *ReplayWindow) Reset() {
 
 // Check بسته را ثبت می‌کند؛ اگر تکراری یا خارج از پنجره باشد ErrReplay می‌دهد.
 func (w *ReplayWindow) Check(seq uint64) error {
+	_, err := w.CheckNewest(seq)
+	return err
+}
+
+// CheckNewest مثل Check است و علاوه بر آن می‌گوید آیا این بسته جلوترین توالیِ
+// دیده‌شده است. لایه‌ی نشست فقط با چنین بسته‌ای مسیر را مهاجرت می‌دهد تا یک
+// بسته‌ی قدیمیِ دیررسیده از مسیر قبلی، مسیر جدید را برنگرداند.
+func (w *ReplayWindow) CheckNewest(seq uint64) (newest bool, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if seq == 0 {
-		return ErrReplay
+		return false, ErrReplay
 	}
 	if seq > w.maxSeq {
 		shift := seq - w.maxSeq
@@ -166,18 +196,18 @@ func (w *ReplayWindow) Check(seq uint64) error {
 			w.bitmap[0] |= 1
 		}
 		w.maxSeq = seq
-		return nil
+		return true, nil
 	}
 	diff := w.maxSeq - seq
 	if diff >= windowSize {
-		return ErrReplay
+		return false, ErrReplay
 	}
 	word := diff / 64
 	bit := diff % 64
 	mask := uint64(1) << bit
 	if w.bitmap[word]&mask != 0 {
-		return ErrReplay
+		return false, ErrReplay
 	}
 	w.bitmap[word] |= mask
-	return nil
+	return false, nil
 }

@@ -13,6 +13,8 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -25,6 +27,19 @@ import (
 )
 
 const adminCookie = "klink_admin"
+
+// secureAdminCookie نام کوکی روی HTTPS است. پیشوند __Host- مرورگر را وادار
+// می‌کند کوکی را فقط با Secure، بدون Domain و با Path=/ بپذیرد؛ بنابراین
+// زیردامنه‌ی دیگر یا اتصال HTTP نمی‌تواند آن را بازنویسی کند.
+const secureAdminCookie = "__Host-klink_admin"
+
+const (
+	maxAdminSessions  = 32
+	maxTrackedIPs     = 10000
+	loginBurst        = 5
+	loginBlock        = 15 * time.Minute
+	concurrentBcrypts = 4
+)
 
 type adminSession struct {
 	expires time.Time
@@ -39,6 +54,9 @@ type app struct {
 	mu       sync.Mutex
 	sessions map[string]adminSession
 	failures map[string]*loginFailures
+	// bcrypt عمداً کند است؛ این سمافور جلوی مصرف کامل CPU با درخواست‌های
+	// ورود موازی از IPهای زیاد را می‌گیرد.
+	bcryptSlots chan struct{}
 }
 
 type loginFailures struct {
@@ -48,7 +66,39 @@ type loginFailures struct {
 
 func newApp(cfg Config, db *store.Store, log *slog.Logger) *app {
 	return &app{cfg: cfg, db: db, log: log, http: &http.Client{Timeout: 3 * time.Second},
-		sessions: make(map[string]adminSession), failures: make(map[string]*loginFailures)}
+		sessions: make(map[string]adminSession), failures: make(map[string]*loginFailures),
+		bcryptSlots: make(chan struct{}, concurrentBcrypts)}
+}
+
+func (a *app) cookieName() string {
+	if a.cfg.SecureCookies {
+		return secureAdminCookie
+	}
+	return adminCookie
+}
+
+// noDirFS فهرست پوشه‌ها را نمایش نمی‌دهد و فایل‌های پنهان را سرو نمی‌کند.
+type noDirFS struct{ http.FileSystem }
+
+func (fs noDirFS) Open(name string) (http.File, error) {
+	for _, part := range strings.Split(name, "/") {
+		if strings.HasPrefix(part, ".") {
+			return nil, os.ErrNotExist
+		}
+	}
+	f, err := fs.FileSystem.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if st, err := f.Stat(); err == nil && st.IsDir() {
+		index, err := fs.FileSystem.Open(path.Join(name, "index.html"))
+		if err != nil {
+			f.Close()
+			return nil, os.ErrNotExist
+		}
+		index.Close()
+	}
+	return f, nil
 }
 
 func (a *app) routes() http.Handler {
@@ -65,7 +115,8 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/users/{id}/reset", a.requireAuth(a.requireCSRF(a.resetUser)))
 	mux.HandleFunc("POST /api/users/{id}/rotate-token", a.requireAuth(a.requireCSRF(a.rotateToken)))
 	mux.HandleFunc("GET /sub/{token}", a.subscription)
-	mux.Handle("/", http.FileServer(http.Dir(a.cfg.WebRoot)))
+	static := http.FileServer(noDirFS{http.Dir(a.cfg.WebRoot)})
+	mux.Handle("GET /", static)
 	return a.securityHeaders(a.recoverPanics(mux))
 }
 
@@ -75,7 +126,15 @@ func (a *app) securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		// Tailwind به‌صورت فایل محلی ساخته شده است؛ هیچ اسکریپت شخص ثالثی (CDN)
+		// با دسترسی کامل به پنل مدیریت اجرا نمی‌شود و پنل بدون اینترنت آزاد هم
+		// درست نمایش داده می‌شود.
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
+		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
+		if r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -98,13 +157,25 @@ func (a *app) requireCSRF(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, http.StatusForbidden, "missing request header")
 			return
 		}
+		// دفاع دوم در برابر CSRF: درخواست تغییر فقط از همان origin پنل.
+		if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+			writeError(w, http.StatusForbidden, "cross-site request rejected")
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			u, err := url.Parse(origin)
+			if err != nil || !strings.EqualFold(u.Host, r.Host) {
+				writeError(w, http.StatusForbidden, "cross-origin request rejected")
+				return
+			}
+		}
 		next(w, r)
 	}
 }
 
 func (a *app) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		cookie, err := r.Cookie(adminCookie)
+		cookie, err := r.Cookie(a.cookieName())
 		if err != nil || !a.validSession(cookie.Value) {
 			w.Header().Set("WWW-Authenticate", "Cookie")
 			writeError(w, http.StatusUnauthorized, "authentication required")
@@ -129,13 +200,33 @@ func (a *app) validSession(token string) bool {
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	s, ok := a.sessions[token]
+	if ok && !now.Before(s.expires) {
+		delete(a.sessions, token)
+		return false
+	}
+	return ok
+}
+
+// addSessionLocked نشست تازه را ثبت می‌کند؛ نشست‌های منقضی پاک و تعداد نشست‌های
+// هم‌زمان محدود می‌شود (قدیمی‌ترین بیرون می‌رود).
+func (a *app) addSessionLocked(token string, expires time.Time) {
+	now := time.Now()
 	for t, s := range a.sessions {
 		if now.After(s.expires) {
 			delete(a.sessions, t)
 		}
 	}
-	s, ok := a.sessions[token]
-	return ok && now.Before(s.expires)
+	for len(a.sessions) >= maxAdminSessions {
+		var oldest string
+		for t, s := range a.sessions {
+			if oldest == "" || s.expires.Before(a.sessions[oldest].expires) {
+				oldest = t
+			}
+		}
+		delete(a.sessions, oldest)
+	}
+	a.sessions[token] = adminSession{expires: expires}
 }
 
 func clientIP(r *http.Request) string {
@@ -148,14 +239,6 @@ func clientIP(r *http.Request) string {
 
 func (a *app) login(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
-	a.mu.Lock()
-	f := a.failures[ip]
-	if f != nil && time.Now().Before(f.blocked) {
-		a.mu.Unlock()
-		writeError(w, http.StatusTooManyRequests, "too many login attempts; retry later")
-		return
-	}
-	a.mu.Unlock()
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -163,21 +246,44 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	// تلاش پیش از بررسی رمز رزرو می‌شود. قبلاً شمارش پس از bcrypt انجام می‌شد و
+	// مهاجم با ارسال صدها درخواست هم‌زمان محدودیت پنج‌تایی را دور می‌زد.
+	now := time.Now()
+	a.mu.Lock()
+	if len(a.failures) >= maxTrackedIPs {
+		for k, f := range a.failures {
+			if now.After(f.blocked) {
+				delete(a.failures, k)
+			}
+		}
+	}
+	f := a.failures[ip]
+	if f == nil {
+		f = &loginFailures{}
+		a.failures[ip] = f
+	}
+	if now.Before(f.blocked) {
+		a.mu.Unlock()
+		writeError(w, http.StatusTooManyRequests, "too many login attempts; retry later")
+		return
+	}
+	f.count++
+	if f.count >= loginBurst {
+		f.blocked = now.Add(loginBlock)
+		f.count = 0
+	}
+	a.mu.Unlock()
+
+	select {
+	case a.bcryptSlots <- struct{}{}:
+	case <-r.Context().Done():
+		return
+	}
 	usernameOK := subtle.ConstantTimeCompare([]byte(req.Username), []byte(a.cfg.AdminUsername)) == 1
 	passwordOK := bcrypt.CompareHashAndPassword([]byte(a.cfg.AdminPasswordHash), []byte(req.Password)) == nil
+	<-a.bcryptSlots
 	if !usernameOK || !passwordOK {
-		a.mu.Lock()
-		f := a.failures[ip]
-		if f == nil {
-			f = &loginFailures{}
-			a.failures[ip] = f
-		}
-		f.count++
-		if f.count >= 5 {
-			f.blocked = time.Now().Add(15 * time.Minute)
-			f.count = 0
-		}
-		a.mu.Unlock()
+		a.log.Warn("admin login failed", "ip", ip)
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
@@ -189,20 +295,21 @@ func (a *app) login(w http.ResponseWriter, r *http.Request) {
 	ttl := time.Duration(a.cfg.SessionTTLHours) * time.Hour
 	a.mu.Lock()
 	delete(a.failures, ip)
-	a.sessions[token] = adminSession{expires: time.Now().Add(ttl)}
+	a.addSessionLocked(token, time.Now().Add(ttl))
 	a.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: adminCookie, Value: token, Path: "/", HttpOnly: true,
+	a.log.Info("admin login", "ip", ip)
+	http.SetCookie(w, &http.Cookie{Name: a.cookieName(), Value: token, Path: "/", HttpOnly: true,
 		Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode, MaxAge: int(ttl.Seconds())})
 	writeJSON(w, http.StatusOK, map[string]any{"username": a.cfg.AdminUsername})
 }
 
 func (a *app) logout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(adminCookie); err == nil {
+	if cookie, err := r.Cookie(a.cookieName()); err == nil {
 		a.mu.Lock()
 		delete(a.sessions, cookie.Value)
 		a.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: adminCookie, Value: "", Path: "/", HttpOnly: true,
+	http.SetCookie(w, &http.Cookie{Name: a.cookieName(), Value: "", Path: "/", HttpOnly: true,
 		Secure: a.cfg.SecureCookies, SameSite: http.SameSiteStrictMode, MaxAge: -1})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -475,6 +582,7 @@ func (a *app) subscription(w http.ResponseWriter, r *http.Request) {
 		"rekey_packets": 1 << 20, "session_id_bits": 128,
 	}
 	w.Header().Set("Cache-Control", "no-store, private")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow")
 	w.Header().Set("Content-Disposition", `attachment; filename="klink-v1.json"`)
 	writeJSON(w, http.StatusOK, response)
 }

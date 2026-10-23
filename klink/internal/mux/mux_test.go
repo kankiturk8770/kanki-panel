@@ -42,7 +42,7 @@ func TestTCPStream(t *testing.T) {
 		_, _ = conn.Write([]byte("pong"))
 	}()
 	sender := &fakeSender{frames: make(chan []byte, 16)}
-	m := New(sender)
+	m := NewWithPolicy(sender, Policy{AllowLoopback: true})
 	defer m.Close()
 	port := listener.Addr().(*net.TCPAddr).Port
 	open, _ := BuildOpen(7, NetworkTCP, "127.0.0.1", uint16(port))
@@ -73,7 +73,7 @@ func TestUDPAssociation(t *testing.T) {
 		}
 	}()
 	sender := &fakeSender{frames: make(chan []byte, 16)}
-	m := New(sender)
+	m := NewWithPolicy(sender, Policy{AllowLoopback: true})
 	defer m.Close()
 	open, _ := BuildOpen(9, NetworkUDP, "127.0.0.1", uint16(conn.LocalAddr().(*net.UDPAddr).Port))
 	m.HandleFrame(open)

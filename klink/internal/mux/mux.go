@@ -9,8 +9,11 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"strconv"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -28,21 +31,83 @@ const (
 
 	MaxTCPPayload = 16 * 1024
 	MaxUDPPayload = 64*1024 - 1024
+
+	// MaxStreams سقف جریان‌های هم‌زمان (باز یا در حال اتصال) یک نشست است تا یک
+	// کلاینت نتواند با Open بی‌پایان حافظه و سوکت‌های سرور را تمام کند.
+	MaxStreams = 1024
+
+	tcpIdleTimeout = 30 * time.Minute
+	// association UDP بدون ترافیک در هیچ جهت پس از این مدت بسته می‌شود.
+	udpIdleTimeout = 3 * time.Minute
 )
 
 type Sender interface {
 	Send([]byte) error
 }
 
+// payloadLimiter اختیاری است؛ نشست KLINK روی مسیر UDP اندازه‌ی امن کوچک‌تری
+// گزارش می‌کند تا داده‌ی TCP در بسته‌های بزرگ‌تر از MTU فرستاده نشود.
+type payloadLimiter interface {
+	MaxPayload() int
+}
+
+// ErrDestinationBlocked مقصد در فهرست ممنوع (loopback، شبکه‌ی داخلی و …) است.
+var ErrDestinationBlocked = errors.New("mux: destination is not allowed")
+
+// Policy مقصدهای مجاز جریان‌ها را تعیین می‌کند. مقدار صفر امن است: loopback،
+// link-local (از جمله 169.254.169.254 سرویس metadata ابری)، multicast،
+// آدرس‌های نامشخص و شبکه‌های خصوصی مسدودند. بدون این سیاست هر کاربر پروکسی
+// می‌توانست به سرویس‌های داخلی خود سرور (مثل API وضعیت روی 127.0.0.1:9091،
+// پنل یا دیتابیس‌ها) و شبکه‌ی داخلی دیتاسنتر دسترسی پیدا کند (SSRF).
+type Policy struct {
+	AllowPrivate  bool // 10/8، 172.16/12، 192.168/16، 100.64/10، fc00::/7
+	AllowLoopback bool // فقط برای تست
+}
+
+var cgnat = netip.MustParsePrefix("100.64.0.0/10")
+
+func (p Policy) allowed(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	switch {
+	case !ip.IsValid(), ip.IsUnspecified(), ip.IsMulticast(), ip.IsInterfaceLocalMulticast(),
+		ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast():
+		return false
+	case ip.IsLoopback():
+		return p.AllowLoopback
+	case ip.IsPrivate(), cgnat.Contains(ip):
+		return p.AllowPrivate
+	}
+	if ip.Is4() {
+		b := ip.As4()
+		if b[0] == 0 || b[0] >= 240 { // 0.0.0.0/8 و 240.0.0.0/4 (شامل broadcast)
+			return false
+		}
+	}
+	return true
+}
+
+// control پس از resolve شدن DNS و درست پیش از اتصال اجرا می‌شود؛ بنابراین
+// دورزدن با DNS rebinding یا نام‌هایی که به 127.0.0.1 resolve می‌شوند ممکن نیست.
+func (p Policy) control(_, address string, _ syscall.RawConn) error {
+	ap, err := netip.ParseAddrPort(address)
+	if err != nil || !p.allowed(ap.Addr()) {
+		return ErrDestinationBlocked
+	}
+	return nil
+}
+
 type Mux struct {
 	session Sender
+	policy  Policy
 	ctx     context.Context
 	cancel  context.CancelFunc
 	mu      sync.Mutex
 	streams map[uint32]*stream
-	opening map[uint32]bool
+	opening map[uint32]context.CancelFunc
 	closed  bool
 	wg      sync.WaitGroup
+	// dialContext در تست‌ها جایگزین می‌شود.
+	dialContext func(ctx context.Context, network, address string) (net.Conn, error)
 }
 
 type stream struct {
@@ -53,12 +118,18 @@ type stream struct {
 	done      chan struct{}
 	closeOnce sync.Once
 	mux       *Mux
+	lastWrite atomic.Int64
 }
 
-func New(session Sender) *Mux {
+// New یک mux با سیاست امن پیش‌فرض می‌سازد.
+func New(session Sender) *Mux { return NewWithPolicy(session, Policy{}) }
+
+func NewWithPolicy(session Sender, policy Policy) *Mux {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Mux{session: session, ctx: ctx, cancel: cancel,
-		streams: make(map[uint32]*stream), opening: make(map[uint32]bool)}
+	dialer := &net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second, Control: policy.control}
+	return &Mux{session: session, policy: policy, ctx: ctx, cancel: cancel,
+		streams: make(map[uint32]*stream), opening: make(map[uint32]context.CancelFunc),
+		dialContext: dialer.DialContext}
 }
 
 // HandleFrame is the server-side entry point for decrypted session payloads.
@@ -96,29 +167,43 @@ func (m *Mux) open(frame []byte) {
 		return
 	}
 	m.mu.Lock()
-	if m.closed || m.streams[id] != nil || m.opening[id] {
+	if m.closed || m.streams[id] != nil || m.opening[id] != nil || len(m.streams)+len(m.opening) >= MaxStreams {
 		m.mu.Unlock()
 		m.sendStatus(id, StatusFailed)
 		return
 	}
-	m.opening[id] = true
+	ctx, cancel := context.WithTimeout(m.ctx, 15*time.Second)
+	m.opening[id] = cancel
+	m.wg.Add(1)
 	m.mu.Unlock()
 
 	host := string(frame[10:])
-	address := net.JoinHostPort(host, strconv.Itoa(int(port)))
-	ctx, cancel := context.WithTimeout(m.ctx, 15*time.Second)
+	// اتصال در goroutine جدا برقرار می‌شود. قبلاً dial (تا ۱۵ ثانیه) در همان
+	// goroutine خواننده‌ی شبکه انجام می‌شد و یک مقصد کند، دریافت بسته‌های همه‌ی
+	// کاربران را متوقف می‌کرد. کلاینت تا StatusOK داده نمی‌فرستد، پس ترتیب حفظ است.
+	go m.dial(ctx, cancel, id, network, host, port)
+}
+
+func (m *Mux) dial(ctx context.Context, cancel context.CancelFunc, id uint32, network byte, host string, port uint16) {
+	defer m.wg.Done()
 	defer cancel()
-	dialer := net.Dialer{Timeout: 15 * time.Second, KeepAlive: 30 * time.Second}
+	address := net.JoinHostPort(host, strconv.Itoa(int(port)))
 	proto := "tcp"
 	if network == NetworkUDP {
 		proto = "udp"
 	}
-	conn, err := dialer.DialContext(ctx, proto, address)
-	if err != nil {
-		m.mu.Lock()
-		delete(m.opening, id)
+	conn, err := m.dialContext(ctx, proto, address)
+	m.mu.Lock()
+	_, stillOpening := m.opening[id]
+	delete(m.opening, id)
+	if closed := m.closed; err != nil || !stillOpening || closed {
 		m.mu.Unlock()
-		m.sendStatus(id, StatusFailed)
+		if conn != nil {
+			conn.Close()
+		}
+		if stillOpening && !closed {
+			m.sendStatus(id, StatusFailed)
+		}
 		return
 	}
 	if tcp, ok := conn.(*net.TCPConn); ok {
@@ -126,13 +211,7 @@ func (m *Mux) open(frame []byte) {
 	}
 	s := &stream{id: id, network: network, conn: conn, writes: make(chan []byte, 256),
 		done: make(chan struct{}), mux: m}
-	m.mu.Lock()
-	delete(m.opening, id)
-	if m.closed {
-		m.mu.Unlock()
-		conn.Close()
-		return
-	}
+	s.lastWrite.Store(time.Now().UnixNano())
 	m.streams[id] = s
 	m.wg.Add(2)
 	m.mu.Unlock()
@@ -154,6 +233,14 @@ func (m *Mux) data(id uint32, payload []byte) {
 	}
 	// Copy because the session's receive buffer may be reused by its caller.
 	b := append([]byte(nil), payload...)
+	if s.network == NetworkUDP {
+		// UDP خودش گم‌شدن را تحمل می‌کند؛ صف پر نباید خواننده‌ی نشست را معطل کند.
+		select {
+		case s.writes <- b:
+		default:
+		}
+		return
+	}
 	select {
 	case s.writes <- b:
 	case <-s.done:
@@ -175,12 +262,9 @@ func (s *stream) writeLoop() {
 				continue
 			}
 			_ = s.conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
-			var err error
-			if s.network == NetworkTCP {
-				_, err = s.conn.Write(b)
-			} else {
-				_, err = s.conn.Write(b) // connected UDP: one Write preserves one datagram
-			}
+			// برای UDP متصل، هر Write دقیقاً یک دیتاگرام است.
+			_, err := s.conn.Write(b)
+			s.lastWrite.Store(time.Now().UnixNano())
 			if err != nil {
 				s.mux.closeStream(s, true)
 				return
@@ -192,23 +276,39 @@ func (s *stream) writeLoop() {
 func (s *stream) readLoop() {
 	defer s.mux.wg.Done()
 	defer s.mux.closeStream(s, true)
-	buffer := make([]byte, MaxTCPPayload)
+	idle := tcpIdleTimeout
+	size := MaxTCPPayload
 	if s.network == NetworkUDP {
-		buffer = make([]byte, MaxUDPPayload)
+		idle, size = udpIdleTimeout, MaxUDPPayload
 	}
+	// frame = kind(1) || id(4) || data؛ هدر یک‌بار ساخته و بافر دوباره استفاده
+	// می‌شود. Send داده را رمز می‌کند و پس از بازگشت به بافر نیازی ندارد.
+	frame := make([]byte, 5+size)
+	frame[0] = FrameData
+	binary.BigEndian.PutUint32(frame[1:5], s.id)
 	for {
-		_ = s.conn.SetReadDeadline(time.Now().Add(30 * time.Minute))
-		n, err := s.conn.Read(buffer)
+		readSize := size
+		if s.network == NetworkTCP {
+			// روی مسیر UDP قطعه‌ها کوچک می‌شوند تا fragment نشوند؛ گم‌شدن یک
+			// fragment کل بسته‌ی ۱۶KB را از بین می‌برد.
+			if l, ok := s.mux.session.(payloadLimiter); ok {
+				if limit := l.MaxPayload() - 5; limit > 0 && limit < readSize {
+					readSize = limit
+				}
+			}
+		}
+		_ = s.conn.SetReadDeadline(time.Now().Add(idle))
+		n, err := s.conn.Read(frame[5 : 5+readSize])
 		if n > 0 {
-			frame := make([]byte, 5+n)
-			frame[0] = FrameData
-			binary.BigEndian.PutUint32(frame[1:5], s.id)
-			copy(frame[5:], buffer[:n])
-			if err := s.mux.session.Send(frame); err != nil {
+			if err := s.mux.session.Send(frame[:5+n]); err != nil {
 				return
 			}
 		}
 		if err != nil {
+			// اگر فقط در جهت کلاینت → مقصد ترافیک بوده، جریان هنوز فعال است.
+			if isTimeout(err) && time.Since(time.Unix(0, s.lastWrite.Load())) < idle {
+				continue
+			}
 			if errors.Is(err, io.EOF) || isTimeout(err) {
 				return
 			}
@@ -225,6 +325,11 @@ func isTimeout(err error) bool {
 func (m *Mux) closeByID(id uint32, notify bool) {
 	m.mu.Lock()
 	s := m.streams[id]
+	if cancel := m.opening[id]; cancel != nil {
+		// Close پیش از تکمیل اتصال: dial لغو می‌شود و اتصال نیمه‌کاره نشت نمی‌کند.
+		delete(m.opening, id)
+		cancel()
+	}
 	m.mu.Unlock()
 	if s != nil {
 		m.closeStream(s, notify)
@@ -302,6 +407,10 @@ func (m *Mux) Close() {
 	}
 	m.closed = true
 	m.cancel()
+	for id, cancel := range m.opening {
+		delete(m.opening, id)
+		cancel()
+	}
 	streams := make([]*stream, 0, len(m.streams))
 	for _, s := range m.streams {
 		streams = append(streams, s)

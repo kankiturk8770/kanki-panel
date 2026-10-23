@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -56,6 +57,9 @@ type Config struct {
 	StatusListen     string   `json:"status_listen"`
 	StatusToken      string   `json:"status_token"`
 	LogLevel         string   `json:"log_level"`
+	// AllowPrivateDestinations اجازه می‌دهد کاربران به شبکه‌های خصوصی
+	// (10/8، 192.168/16 و …) وصل شوند. loopback و link-local همیشه مسدودند.
+	AllowPrivateDestinations bool `json:"allow_private_destinations"`
 }
 
 func defaultConfig() Config {
@@ -80,8 +84,14 @@ func loadConfig(path string) (Config, error) {
 	if cfg.ListenUDP == "" && cfg.ListenTCP == "" {
 		return cfg, errors.New("at least one of listen_udp or listen_tcp is required")
 	}
-	if cfg.StatusToken == "" {
-		return cfg, errors.New("status_token is required")
+	if len(cfg.StatusToken) < 32 {
+		return cfg, errors.New("status_token is required and must contain at least 32 characters")
+	}
+	if host, _, err := net.SplitHostPort(cfg.StatusListen); err != nil {
+		return cfg, fmt.Errorf("status_listen: %w", err)
+	} else if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		// API وضعیت فهرست کاربران، IPها و مصرف را برمی‌گرداند و نباید عمومی باشد.
+		return cfg, errors.New("status_listen must be a loopback address such as 127.0.0.1:9091")
 	}
 	return cfg, nil
 }
@@ -156,7 +166,7 @@ func main() {
 		HandshakeTimeout: cfg.HandshakeTimeout.Duration, IdleTimeout: cfg.IdleTimeout.Duration,
 		RekeyInterval: cfg.RekeyInterval.Duration, RekeyPackets: cfg.RekeyPackets, Logger: log,
 		OnSession: func(s *session.Session) {
-			m := mux.New(s)
+			m := mux.NewWithPolicy(s, mux.Policy{AllowPrivate: cfg.AllowPrivateDestinations})
 			s.SetHandlers(m.HandleFrame, m.Close)
 		},
 	})
@@ -166,8 +176,11 @@ func main() {
 	}
 	defer manager.Close()
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	listeners := make([]transport.Listener, 0, 2)
 	ports := make([]PortStatus, 0, 2)
+	errCh := make(chan error, 2)
 	if cfg.ListenUDP != "" {
 		l, err := transport.ListenUDP(cfg.ListenUDP)
 		if err != nil {
@@ -176,36 +189,26 @@ func main() {
 		}
 		listeners = append(listeners, l)
 		ports = append(ports, PortStatus{Network: "udp", Address: l.LocalAddr().String(), Listening: true})
+		log.Info("transport listening", "network", "udp", "address", l.LocalAddr().String())
+		// پردازش موازی بسته‌های UDP؛ بسته‌های هر کلاینت به ترتیب در یک worker.
+		go func() {
+			err := l.Serve(runtime.GOMAXPROCS(0)*2, func(p transport.Packet) { manager.HandlePacket(l, p) })
+			if ctx.Err() != nil || errors.Is(err, transport.ErrClosed) || errors.Is(err, net.ErrClosed) {
+				err = nil
+			}
+			errCh <- err
+		}()
 	}
 	if cfg.ListenTCP != "" {
-		l, err := transport.ListenTCP(cfg.ListenTCP, kcrypto.Prologue)
+		// هر اتصال TCP در goroutine خودش پردازش می‌شود.
+		l, err := transport.ListenTCPHandler(cfg.ListenTCP, kcrypto.Prologue, manager.HandlePacket)
 		if err != nil {
 			log.Error("TCP listen failed", "address", cfg.ListenTCP, "error", err)
 			os.Exit(1)
 		}
 		listeners = append(listeners, l)
 		ports = append(ports, PortStatus{Network: "tcp", Address: l.LocalAddr().String(), Listening: true})
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	errCh := make(chan error, len(listeners))
-	for _, listener := range listeners {
-		go func(l transport.Listener) {
-			log.Info("transport listening", "network", l.LocalAddr().Network(), "address", l.LocalAddr().String())
-			for {
-				packet, err := l.ReadPacket()
-				if err != nil {
-					if ctx.Err() != nil || errors.Is(err, transport.ErrClosed) || errors.Is(err, net.ErrClosed) {
-						errCh <- nil
-						return
-					}
-					errCh <- err
-					return
-				}
-				manager.HandlePacket(l, packet)
-			}
-		}(listener)
+		log.Info("transport listening", "network", "tcp", "address", l.LocalAddr().String())
 	}
 
 	status := func() coreStatus {

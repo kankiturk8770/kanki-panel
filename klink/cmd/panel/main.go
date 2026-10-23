@@ -2,18 +2,24 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/kankipro/klink/internal/store"
+	"golang.org/x/crypto/acme"
+	"golang.org/x/crypto/acme/autocert"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -34,6 +40,21 @@ type Config struct {
 	TLSKeyFile        string `json:"tls_key_file"`
 	SecureCookies     bool   `json:"secure_cookies"`
 	SessionTTLHours   int    `json:"session_ttl_hours"`
+
+	// SSL خودکار با Let's Encrypt. اگر acme_domain تنظیم شود، پنل گواهی همان
+	// دامنه را خودش می‌گیرد و پیش از انقضا تمدید می‌کند. اعتبارسنجی HTTP-01 روی
+	// acme_http_listen (پیش‌فرض :80) انجام می‌شود و همان پورت بقیه‌ی درخواست‌ها را
+	// به HTTPS هدایت می‌کند.
+	ACMEDomain     string `json:"acme_domain,omitempty"`
+	ACMEEmail      string `json:"acme_email,omitempty"`
+	ACMECacheDir   string `json:"acme_cache_dir,omitempty"`
+	ACMEHTTPListen string `json:"acme_http_listen,omitempty"`
+	// ACMEDirectoryURL فقط برای تست با staging؛ خالی یعنی Let's Encrypt اصلی.
+	ACMEDirectoryURL string `json:"acme_directory_url,omitempty"`
+}
+
+func (c Config) tlsEnabled() bool {
+	return c.ACMEDomain != "" || c.TLSCertFile != "" || c.TLSKeyFile != ""
 }
 
 func defaultConfig() Config {
@@ -63,7 +84,36 @@ func loadConfig(path string) (Config, error) {
 	if cfg.SessionTTLHours <= 0 {
 		cfg.SessionTTLHours = 12
 	}
+	if (cfg.TLSCertFile == "") != (cfg.TLSKeyFile == "") {
+		return cfg, errors.New("tls_cert_file and tls_key_file must be set together")
+	}
+	if cfg.ACMEDomain != "" {
+		cfg.ACMEDomain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(cfg.ACMEDomain), "."))
+		if net.ParseIP(cfg.ACMEDomain) != nil || !strings.Contains(cfg.ACMEDomain, ".") {
+			return cfg, errors.New("acme_domain must be a DNS name (Let's Encrypt is not used for bare IP addresses)")
+		}
+		if cfg.ACMECacheDir == "" {
+			cfg.ACMECacheDir = "/var/lib/klink/acme"
+		}
+		if cfg.ACMEHTTPListen == "" {
+			cfg.ACMEHTTPListen = ":80"
+		}
+	}
+	if cfg.tlsEnabled() {
+		// روی HTTPS کوکی مدیریت هرگز نباید روی HTTP ساده فرستاده شود.
+		cfg.SecureCookies = true
+	} else if u, err := url.Parse(cfg.PublicURL); err == nil && u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		fmt.Fprintln(os.Stderr, "warning: panel is served over plain HTTP; admin cookie and subscription keys are not protected in transit")
+	}
 	return cfg, nil
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func main() {
@@ -119,12 +169,44 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
+	var redirect *http.Server
+	if cfg.ACMEDomain != "" {
+		if err := os.MkdirAll(cfg.ACMECacheDir, 0o700); err != nil {
+			log.Error("ACME cache directory", "error", err)
+			os.Exit(1)
+		}
+		manager := &autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(cfg.ACMEDomain),
+			Cache:      autocert.DirCache(cfg.ACMECacheDir),
+			Email:      cfg.ACMEEmail,
+		}
+		if cfg.ACMEDirectoryURL != "" {
+			manager.Client = newACMEClient(cfg.ACMEDirectoryURL)
+		}
+		server.TLSConfig = manager.TLSConfig()
+		server.TLSConfig.MinVersion = tls.VersionTLS12
+		redirect = &http.Server{Addr: cfg.ACMEHTTPListen, Handler: manager.HTTPHandler(httpsRedirect(cfg)),
+			ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second,
+			IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8 << 10}
+		go func() {
+			log.Info("ACME HTTP-01 and HTTPS redirect listener started", "address", cfg.ACMEHTTPListen, "domain", cfg.ACMEDomain)
+			if err := redirect.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				errCh <- fmt.Errorf("ACME HTTP listener: %w", err)
+			}
+		}()
+	} else if cfg.TLSCertFile != "" {
+		server.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	}
 	go func() {
-		log.Info("KLINK panel started", "address", cfg.Listen, "tls", cfg.TLSCertFile != "")
-		if cfg.TLSCertFile != "" || cfg.TLSKeyFile != "" {
+		log.Info("KLINK panel started", "address", cfg.Listen, "tls", cfg.tlsEnabled(), "acme_domain", cfg.ACMEDomain)
+		switch {
+		case cfg.ACMEDomain != "":
+			errCh <- server.ListenAndServeTLS("", "")
+		case cfg.TLSCertFile != "":
 			errCh <- server.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
-		} else {
+		default:
 			errCh <- server.ListenAndServe()
 		}
 	}()
@@ -139,5 +221,26 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = server.Shutdown(shutdownCtx)
+	if redirect != nil {
+		_ = redirect.Shutdown(shutdownCtx)
+	}
 	log.Info("KLINK panel stopped")
+}
+
+// httpsRedirect هر درخواست HTTP غیر ACME را به آدرس HTTPS پنل می‌برد.
+func httpsRedirect(cfg Config) http.Handler {
+	_, port, _ := net.SplitHostPort(cfg.Listen)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := cfg.ACMEDomain
+		if port != "" && port != "443" {
+			host = net.JoinHostPort(host, port)
+		}
+		target := url.URL{Scheme: "https", Host: host, Path: r.URL.Path, RawQuery: r.URL.RawQuery}
+		w.Header().Set("Connection", "close")
+		http.Redirect(w, r, target.String(), http.StatusMovedPermanently)
+	})
+}
+
+func newACMEClient(directoryURL string) *acme.Client {
+	return &acme.Client{DirectoryURL: directoryURL}
 }

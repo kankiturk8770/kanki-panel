@@ -5,6 +5,7 @@ package session
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -32,6 +33,34 @@ const (
 )
 
 var errSilent = errors.New("session: silently dropped")
+
+const (
+	// maxPending سقف کل handshakeهای نیمه‌کاره است و maxPendingPerIP سقف هر
+	// آدرس IP؛ بدون سقف دوم یک منبع می‌توانست کل ظرفیت را پر کند و جلوی اتصال
+	// همه‌ی کاربران را بگیرد.
+	maxPending      = 4096
+	maxPendingPerIP = 64
+	// completedTTL مدت نگه‌داری ACK برای ارسال مجدد است. اگر ACK روی UDP گم شود،
+	// کلاینت همان پیام سوم را دوباره می‌فرستد و باید همان ACK را دریافت کند؛ در غیر
+	// این صورت نشستی بی‌صاحب ساخته می‌شد که سهمیه‌ی دستگاه را تا idle timeout اشغال می‌کرد.
+	completedTTL = 30 * time.Second
+)
+
+// متغیر هستند تا تست‌ها بتوانند کوتاهشان کنند.
+var (
+	// staleSessionAge: نشستی که این مدت هیچ بسته‌ی معتبری نفرستاده، هنگام رسیدن
+	// اتصال تازه‌ی همان کاربر جای خود را می‌دهد (کلاینت keepalive هر ۳۰ تا ۶۰ ثانیه دارد).
+	staleSessionAge = 2 * time.Minute
+	// unusedSessionAge: نشستی که پس از handshake هرگز داده‌ای نفرستاده (مثلاً ACK
+	// آن گم شده و کلاینت handshake تازه زده) پس از این مدت قابل جایگزینی است.
+	unusedSessionAge = 15 * time.Second
+)
+
+const (
+	// SafeUDPPayload بیشینه‌ی متن قابل ارسال در یک بسته روی UDP بدون fragment
+	// شدن IP است: 1280 (حداقل MTU در IPv6) منهای IP/UDP، هدر KLINK، AEAD و padding.
+	SafeUDPPayload = 1280 - 48 - DataOffset - 16 - 16 - 64 - 6
+)
 
 type Authenticator interface {
 	Authorize(context.Context, string) (*store.User, error)
@@ -62,31 +91,65 @@ func (e endpoint) key() string {
 	return e.addr.Network() + "/" + e.addr.String()
 }
 
+// ip فقط آدرس IP مبدأ را برای محدودسازی هر منبع برمی‌گرداند.
+func (e endpoint) ip() string {
+	switch a := e.addr.(type) {
+	case *net.UDPAddr:
+		return a.IP.String()
+	case *transport.TCPConnAddr:
+		if ta, ok := a.Conn.RemoteAddr().(*net.TCPAddr); ok {
+			return ta.IP.String()
+		}
+	}
+	host, _, err := net.SplitHostPort(e.addr.String())
+	if err != nil {
+		return e.addr.String()
+	}
+	return host
+}
+
+func (e endpoint) isUDP() bool {
+	_, ok := e.addr.(*net.UDPAddr)
+	return ok
+}
+
 type pendingHandshake struct {
 	state    *kcrypto.HandshakeState
 	endpoint endpoint
+	ip       string
 	expires  time.Time
 }
 
+type completedHandshake struct {
+	sid      [16]byte
+	digest   [32]byte
+	endpoint string
+	expires  time.Time
+}
+
+// userUsage شمارنده‌های مصرف یک کاربر است. هر نشست اشاره‌گر آن را نگه می‌دارد
+// تا مسیر داده برای هر بسته قفل سراسری Manager را نگیرد.
 type userUsage struct {
-	used    int64
-	pending int64
+	used    atomic.Int64
+	pending atomic.Int64
 }
 
 // Manager is safe for concurrent UDP and TCP reader goroutines.
 type Manager struct {
-	cfg      Config
-	mu       sync.RWMutex
-	pending  map[[16]byte]*pendingHandshake
-	sessions map[[16]byte]*Session
-	byUser   map[int64]map[[16]byte]struct{}
-	usage    map[int64]*userUsage
-	rx       atomic.Int64
-	tx       atomic.Int64
-	started  time.Time
-	ctx      context.Context
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
+	cfg       Config
+	mu        sync.RWMutex
+	pending   map[[16]byte]*pendingHandshake
+	pendingIP map[string]int
+	completed map[[16]byte]*completedHandshake
+	sessions  map[[16]byte]*Session
+	byUser    map[int64]map[[16]byte]struct{}
+	usage     map[int64]*userUsage
+	rx        atomic.Int64
+	tx        atomic.Int64
+	started   time.Time
+	ctx       context.Context
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 func NewManager(cfg Config) (*Manager, error) {
@@ -111,6 +174,7 @@ func NewManager(cfg Config) (*Manager, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := &Manager{
 		cfg: cfg, pending: make(map[[16]byte]*pendingHandshake),
+		pendingIP: make(map[string]int), completed: make(map[[16]byte]*completedHandshake),
 		sessions: make(map[[16]byte]*Session), byUser: make(map[int64]map[[16]byte]struct{}),
 		usage: make(map[int64]*userUsage), started: time.Now().UTC(), ctx: ctx, cancel: cancel,
 	}
@@ -155,32 +219,61 @@ func (m *Manager) handleHello1(ep endpoint, raw []byte) error {
 	}
 	var hello [16]byte
 	copy(hello[:], raw[2:18])
-	m.mu.Lock()
-	if len(m.pending) >= 4096 {
-		m.mu.Unlock()
+	ip := ep.ip()
+	m.mu.RLock()
+	_, exists := m.pending[hello]
+	full := len(m.pending) >= maxPending || m.pendingIP[ip] >= maxPendingPerIP
+	m.mu.RUnlock()
+	if exists {
 		return errSilent
 	}
-	if _, exists := m.pending[hello]; exists {
-		m.mu.Unlock()
+	if full && !m.prunePending(ip) {
 		return errSilent
 	}
+	// عملیات DH بیرون از قفل سراسری انجام می‌شود؛ در نسخه‌ی قبل هر handshake
+	// (حتی جعلی) کل مسیر داده‌ی همه‌ی کاربران را تا پایان X25519 متوقف می‌کرد.
 	hs, err := kcrypto.NewResponder(m.cfg.ServerKey)
 	if err != nil {
-		m.mu.Unlock()
 		return err
 	}
 	if _, _, finished, err := hs.ReadMessage(raw[18:]); err != nil || finished {
-		m.mu.Unlock()
 		return errSilent
 	}
 	msg2, _, finished, err := hs.WriteMessage(nil)
 	if err != nil || finished {
+		return errSilent
+	}
+	m.mu.Lock()
+	if _, exists := m.pending[hello]; exists || len(m.pending) >= maxPending || m.pendingIP[ip] >= maxPendingPerIP {
 		m.mu.Unlock()
 		return errSilent
 	}
-	m.pending[hello] = &pendingHandshake{state: hs, endpoint: ep, expires: time.Now().Add(m.cfg.HandshakeTimeout)}
+	m.pending[hello] = &pendingHandshake{state: hs, endpoint: ep, ip: ip, expires: time.Now().Add(m.cfg.HandshakeTimeout)}
+	m.pendingIP[ip]++
 	m.mu.Unlock()
 	return m.writeHandshake(ep, msgHello2, hello, msg2)
+}
+
+// prunePending handshakeهای منقضی را پاک می‌کند و می‌گوید آیا اکنون جا هست.
+func (m *Manager) prunePending(ip string) bool {
+	now := time.Now()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, p := range m.pending {
+		if now.After(p.expires) {
+			m.deletePendingLocked(id, p)
+		}
+	}
+	return len(m.pending) < maxPending && m.pendingIP[ip] < maxPendingPerIP
+}
+
+func (m *Manager) deletePendingLocked(id [16]byte, p *pendingHandshake) {
+	delete(m.pending, id)
+	if m.pendingIP[p.ip] <= 1 {
+		delete(m.pendingIP, p.ip)
+	} else {
+		m.pendingIP[p.ip]--
+	}
 }
 
 func (m *Manager) handleHello3(ep endpoint, raw []byte) error {
@@ -191,12 +284,22 @@ func (m *Manager) handleHello3(ep endpoint, raw []byte) error {
 	copy(hello[:], raw[2:18])
 	m.mu.Lock()
 	pending := m.pending[hello]
-	delete(m.pending, hello) // one attempt only; handshake retries need fresh randomness
-	if pending == nil || time.Now().After(pending.expires) || pending.endpoint.key() != ep.key() {
+	if pending == nil {
+		done := m.completed[hello]
+		m.mu.Unlock()
+		return m.resendAck(ep, hello, raw, done)
+	}
+	// فقط همان مسیری که پیام اول را فرستاده می‌تواند handshake را مصرف کند؛
+	// قبلاً پیام سوم از هر آدرسی handshake را پاک می‌کرد و کاربر واقعی ناکام می‌ماند.
+	if pending.endpoint.key() != ep.key() {
 		m.mu.Unlock()
 		return errSilent
 	}
+	m.deletePendingLocked(hello, pending) // one attempt only; handshake retries need fresh randomness
 	m.mu.Unlock()
+	if time.Now().After(pending.expires) {
+		return errSilent
+	}
 
 	_, binding, finished, err := pending.state.ReadMessage(raw[18:])
 	if err != nil || !finished || len(binding) == 0 {
@@ -237,22 +340,18 @@ func (m *Manager) handleHello3(ep endpoint, raw []byte) error {
 	s := &Session{
 		ID: sid, User: *user, manager: m, inbound: inbound, outbound: outbound,
 		remote: ep, binding: append([]byte(nil), binding...), lastSeen: now, lastRekey: now,
+		created: now,
 	}
 	s.lastSeenUnix.Store(now.UnixNano())
+	s.volumeLimit.Store(user.VolumeLimit)
+	if !m.register(s) {
+		return errSilent
+	}
 	m.mu.Lock()
-	if _, exists := m.sessions[sid]; exists || (user.DeviceLimit > 0 && len(m.byUser[user.ID]) >= user.DeviceLimit) {
-		m.mu.Unlock()
-		return errSilent
+	if len(m.completed) < maxPending {
+		m.completed[hello] = &completedHandshake{sid: sid, digest: sha256.Sum256(raw), endpoint: ep.key(),
+			expires: now.Add(completedTTL)}
 	}
-	if usage := m.usage[user.ID]; usage != nil && user.VolumeLimit > 0 && usage.used >= user.VolumeLimit {
-		m.mu.Unlock()
-		return errSilent
-	}
-	m.sessions[sid] = s
-	if m.byUser[user.ID] == nil {
-		m.byUser[user.ID] = make(map[[16]byte]struct{})
-	}
-	m.byUser[user.ID][sid] = struct{}{}
 	m.mu.Unlock()
 
 	// The third Noise message uses bootstrap framing. Every following TCP frame,
@@ -263,7 +362,7 @@ func (m *Manager) handleHello3(ep endpoint, raw []byte) error {
 	if m.cfg.OnSession != nil {
 		m.cfg.OnSession(s)
 	}
-	if err := m.writeHandshake(ep, msgHelloAck, hello, append(sid[:], []byte{}...)); err != nil {
+	if err := m.writeHandshake(ep, msgHelloAck, hello, sid[:]); err != nil {
 		m.CloseSession(s)
 		return err
 	}
@@ -271,16 +370,106 @@ func (m *Manager) handleHello3(ep endpoint, raw []byte) error {
 	return nil
 }
 
-func (m *Manager) admitUser(u *store.User) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if u.DeviceLimit > 0 && len(m.byUser[u.ID]) >= u.DeviceLimit {
+// resendAck به پیام سومِ تکراری (همان بایت‌ها، از همان مسیر) همان ACK قبلی را
+// می‌دهد. این پاسخ کوچک‌تر از درخواست است و تقویت ترافیک ایجاد نمی‌کند.
+func (m *Manager) resendAck(ep endpoint, hello [16]byte, raw []byte, done *completedHandshake) error {
+	if done == nil || time.Now().After(done.expires) || done.endpoint != ep.key() {
 		return errSilent
 	}
-	if _, ok := m.usage[u.ID]; !ok {
-		m.usage[u.ID] = &userUsage{used: u.UsedBytes}
+	digest := sha256.Sum256(raw)
+	if digest != done.digest {
+		return errSilent
 	}
-	if u.VolumeLimit > 0 && m.usage[u.ID].used >= u.VolumeLimit {
+	m.mu.RLock()
+	_, alive := m.sessions[done.sid]
+	m.mu.RUnlock()
+	if !alive {
+		return errSilent
+	}
+	return m.writeHandshake(ep, msgHelloAck, hello, done.sid[:])
+}
+
+// register نشست را با رعایت محدودیت دستگاه ثبت می‌کند. اگر سهمیه پر باشد،
+// نشست‌های مرده‌ی همان کاربر (بدون بسته‌ی معتبر اخیر) جای خود را به اتصال تازه
+// می‌دهند؛ بدون این کار کاربری که اینترنتش قطع و وصل شده یا برنامه را دوباره باز
+// کرده، تا پایان idle timeout (پیش‌فرض ده دقیقه) نمی‌توانست وصل شود.
+func (m *Manager) register(s *Session) bool {
+	user := s.User
+	for attempt := 0; attempt < 2; attempt++ {
+		m.mu.Lock()
+		if _, exists := m.sessions[s.ID]; exists {
+			m.mu.Unlock()
+			return false
+		}
+		usage := m.usage[user.ID]
+		if usage == nil {
+			usage = &userUsage{}
+			usage.used.Store(user.UsedBytes)
+			m.usage[user.ID] = usage
+		}
+		if user.VolumeLimit > 0 && usage.used.Load() >= user.VolumeLimit {
+			m.mu.Unlock()
+			return false
+		}
+		if user.DeviceLimit > 0 && len(m.byUser[user.ID]) >= user.DeviceLimit {
+			if attempt > 0 {
+				m.mu.Unlock()
+				return false
+			}
+			victims := m.staleSessionsLocked(user.ID, len(m.byUser[user.ID])-user.DeviceLimit+1)
+			m.mu.Unlock()
+			if len(victims) == 0 {
+				return false
+			}
+			for _, v := range victims {
+				m.cfg.Logger.Info("replacing stale session", "user_id", user.ID, "session", v.IDString())
+				m.CloseSession(v)
+			}
+			continue
+		}
+		s.usage = usage
+		m.sessions[s.ID] = s
+		if m.byUser[user.ID] == nil {
+			m.byUser[user.ID] = make(map[[16]byte]struct{})
+		}
+		m.byUser[user.ID][s.ID] = struct{}{}
+		m.mu.Unlock()
+		return true
+	}
+	return false
+}
+
+// staleSessionsLocked حداکثر n نشست مرده‌ی کاربر را، قدیمی‌ترین اول، برمی‌گرداند.
+func (m *Manager) staleSessionsLocked(userID int64, n int) []*Session {
+	now := time.Now()
+	var victims []*Session
+	for sid := range m.byUser[userID] {
+		s := m.sessions[sid]
+		if s == nil {
+			continue
+		}
+		idle := now.Sub(s.LastSeen())
+		if idle > staleSessionAge || (!s.gotData.Load() && now.Sub(s.created) > unusedSessionAge) {
+			victims = append(victims, s)
+		}
+	}
+	for i := 1; i < len(victims); i++ {
+		for j := i; j > 0 && victims[j].LastSeen().Before(victims[j-1].LastSeen()); j-- {
+			victims[j], victims[j-1] = victims[j-1], victims[j]
+		}
+	}
+	if len(victims) > n {
+		victims = victims[:n]
+	}
+	return victims
+}
+
+// admitUser بررسی ارزان حجم پیش از ساخت کلیدها است؛ محدودیت دستگاه در register
+// و به‌صورت اتمیک با ثبت نشست اعمال می‌شود.
+func (m *Manager) admitUser(u *store.User) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if usage := m.usage[u.ID]; usage != nil && u.VolumeLimit > 0 && usage.used.Load() >= u.VolumeLimit {
 		return errSilent
 	}
 	return nil
@@ -311,14 +500,22 @@ func (m *Manager) handleData(ep endpoint, raw []byte, wireBytes int) error {
 
 // Session is one authenticated client device. Many mux streams share it.
 type Session struct {
-	ID          [16]byte
-	User        store.User
-	manager     *Manager
-	inbound     *kcrypto.Channel
-	outbound    *kcrypto.Channel
-	recvMu      sync.Mutex
-	replay      kcrypto.ReplayWindow
+	ID       [16]byte
+	User     store.User
+	manager  *Manager
+	inbound  *kcrypto.Channel
+	outbound *kcrypto.Channel
+	recvMu   sync.Mutex
+	// دو پنجره‌ی replay: windows[cur] برای epoch جاری و دیگری برای epoch قبلی، تا
+	// بسته‌های دیررسیده‌ی پیش از rekey هم پذیرفته شوند و هم replay آن‌ها رد شود.
+	windows     [2]kcrypto.ReplayWindow
+	cur         int
 	replayEpoch uint64
+	hasPrev     bool
+	usage       *userUsage
+	created     time.Time
+	gotData     atomic.Bool
+	volumeLimit atomic.Int64
 
 	mu           sync.RWMutex
 	remote       endpoint
@@ -360,26 +557,43 @@ func (s *Session) accept(ep endpoint, sealed []byte, wireBytes int) error {
 	// خواننده‌های UDP/TCP را حذف می‌کند و هم reset مربوط به epoch را امن می‌سازد.
 	s.recvMu.Lock()
 	plaintext, seq, epoch, err := s.inbound.Open(sealed)
+	newest := false
 	if err == nil {
-		if epoch != s.replayEpoch {
-			s.replay.Reset()
+		switch {
+		case epoch == s.replayEpoch:
+			newest, err = s.windows[s.cur].CheckNewest(seq)
+		case epoch == s.replayEpoch+1:
+			// جابه‌جایی پنجره‌ها به‌جای پاک‌کردن: پنجره‌ی epoch قبلی برای بسته‌های
+			// دیررسیده حفظ می‌شود.
+			s.cur ^= 1
+			s.windows[s.cur].Reset()
+			s.hasPrev = true
 			s.replayEpoch = epoch
+			newest, err = s.windows[s.cur].CheckNewest(seq)
+		case s.hasPrev && s.replayEpoch > 0 && epoch == s.replayEpoch-1:
+			_, err = s.windows[s.cur^1].CheckNewest(seq)
+		default:
+			err = kcrypto.ErrReplay
 		}
-		err = s.replay.Check(seq)
 	}
 	s.recvMu.Unlock()
 	if err != nil {
 		return errSilent
 	}
-	// Migration is accepted only after AEAD and replay validation. An attacker
-	// who merely knows a SessionID cannot redirect traffic or change its epoch.
+	s.gotData.Store(true)
+	// Migration is accepted only after AEAD and replay validation, and only for
+	// the newest packet: a delayed packet from the previous network must not
+	// pull the session back. An attacker who merely knows a SessionID cannot
+	// redirect traffic or change its epoch.
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return errSilent
 	}
-	changed := s.remote.key() != ep.key()
-	s.remote = ep
+	changed := newest && s.remote.key() != ep.key()
+	if changed {
+		s.remote = ep
+	}
 	s.lastSeen = time.Now()
 	s.lastSeenUnix.Store(s.lastSeen.UnixNano())
 	s.mu.Unlock()
@@ -412,22 +626,23 @@ func (s *Session) Send(plaintext []byte) error {
 	if len(plaintext) > 65535-16-16-64 {
 		return errors.New("session: payload too large")
 	}
+	// هدر و متن رمزشده در یک بافر ساخته می‌شوند تا برای هر بسته یک تخصیص و
+	// کپی کامل payload کمتر شود.
+	packet := make([]byte, DataOffset, DataOffset+16+len(plaintext)+16)
+	packet[0], packet[1] = Version, msgData
+	copy(packet[2:18], s.ID[:])
 	s.sendMu.Lock()
 	if s.sendPackets >= s.manager.cfg.RekeyPackets || time.Since(s.lastRekey) >= s.manager.cfg.RekeyInterval {
 		s.outbound.Rekey()
 		s.sendPackets = 0
 		s.lastRekey = time.Now()
 	}
-	sealed, _, err := s.outbound.Seal(plaintext)
+	packet, _, err := s.outbound.SealTo(packet, plaintext)
 	s.sendPackets++
 	s.sendMu.Unlock()
 	if err != nil {
 		return err
 	}
-	packet := make([]byte, DataOffset+len(sealed))
-	packet[0], packet[1] = Version, msgData
-	copy(packet[2:18], s.ID[:])
-	copy(packet[DataOffset:], sealed)
 
 	s.mu.RLock()
 	ep, closed := s.remote, s.closed
@@ -449,25 +664,33 @@ func (s *Session) Send(plaintext []byte) error {
 
 func (s *Session) KeepAlive() error { return s.Send([]byte{0}) }
 
+// MaxPayload بیشینه‌ی متن پیشنهادی برای یک Send است. روی UDP بسته‌های بزرگ‌تر
+// از MTU در IP تکه‌تکه می‌شوند و گم‌شدن هر تکه کل بسته را از بین می‌برد؛ بنابراین
+// mux داده‌ی جریان‌های TCP را روی مسیر UDP در قطعه‌های کوچک‌تر می‌فرستد.
+func (s *Session) MaxPayload() int {
+	s.mu.RLock()
+	udp := s.remote.isUDP()
+	s.mu.RUnlock()
+	if udp {
+		return SafeUDPPayload
+	}
+	return 65535 - 16 - 16 - 64
+}
+
 func (m *Manager) account(s *Session, n int64, inbound bool) bool {
 	if inbound {
 		m.rx.Add(n)
 	} else {
 		m.tx.Add(n)
 	}
-	s.mu.RLock()
-	user := s.User
-	s.mu.RUnlock()
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	u := m.usage[user.ID]
-	if u == nil {
-		u = &userUsage{used: user.UsedBytes}
-		m.usage[user.ID] = u
+	u := s.usage
+	if u == nil { // نشست ثبت‌نشده (فقط در تست‌ها)
+		return true
 	}
-	u.used += n
-	u.pending += n
-	return user.VolumeLimit == 0 || u.used <= user.VolumeLimit
+	used := u.used.Add(n)
+	u.pending.Add(n)
+	limit := s.volumeLimit.Load()
+	return limit == 0 || used <= limit
 }
 
 func (m *Manager) CloseSession(s *Session) {
@@ -516,7 +739,12 @@ func (m *Manager) cleanup(refreshUsers bool) {
 	m.mu.Lock()
 	for id, p := range m.pending {
 		if now.After(p.expires) {
-			delete(m.pending, id)
+			m.deletePendingLocked(id, p)
+		}
+	}
+	for id, c := range m.completed {
+		if now.After(c.expires) {
+			delete(m.completed, id)
 		}
 	}
 	sessions := make([]*Session, 0, len(m.sessions))
@@ -549,26 +777,27 @@ func (m *Manager) cleanup(refreshUsers bool) {
 			s.mu.Lock()
 			s.User = *u
 			s.mu.Unlock()
-			m.mu.Lock()
-			if usage := m.usage[u.ID]; usage != nil {
-				usage.used = u.UsedBytes + usage.pending
+			s.volumeLimit.Store(u.VolumeLimit)
+			if usage := s.usage; usage != nil {
+				usage.used.Store(u.UsedBytes + usage.pending.Load())
+				if u.VolumeLimit > 0 && usage.used.Load() > u.VolumeLimit {
+					m.CloseSession(s)
+				}
 			}
-			m.mu.Unlock()
 		}
 	}
 }
 
 func (m *Manager) flushUsage() {
 	type delta struct{ id, bytes int64 }
-	m.mu.Lock()
+	m.mu.RLock()
 	deltas := make([]delta, 0, len(m.usage))
 	for id, u := range m.usage {
-		if u.pending > 0 {
-			deltas = append(deltas, delta{id, u.pending})
-			u.pending = 0
+		if n := u.pending.Swap(0); n > 0 {
+			deltas = append(deltas, delta{id, n})
 		}
 	}
-	m.mu.Unlock()
+	m.mu.RUnlock()
 	for _, d := range deltas {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		err := m.cfg.Store.AddUsage(ctx, d.id, d.bytes)
@@ -578,8 +807,9 @@ func (m *Manager) flushUsage() {
 			if errors.Is(err, store.ErrNotFound) {
 				delete(m.usage, d.id)
 			} else if u := m.usage[d.id]; u != nil {
-				u.pending += d.bytes
-				u.used -= d.bytes
+				// مصرف واقعاً انجام شده است؛ فقط ذخیره‌اش برای دور بعد می‌ماند.
+				// نسخه‌ی قبل used را کم می‌کرد و هر خطای دیتابیس حجم رایگان می‌داد.
+				u.pending.Add(d.bytes)
 			}
 			m.mu.Unlock()
 			if !errors.Is(err, store.ErrNotFound) {
@@ -640,7 +870,7 @@ func (m *Manager) Snapshot() Status {
 			us.TXBytes += s.txBytes.Load()
 		}
 		if usage := m.usage[id]; usage != nil {
-			us.UsedBytes = usage.used
+			us.UsedBytes = usage.used.Load()
 		}
 		st.Users = append(st.Users, us)
 	}

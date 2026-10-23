@@ -10,5 +10,6 @@
   "rekey_packets": 1048576,
   "status_listen": "127.0.0.1:9091",
   "status_token": "RANDOM_64_HEX_CHARACTERS",
-  "log_level": "info"
+  "log_level": "info",
+  "allow_private_destinations": false
 }

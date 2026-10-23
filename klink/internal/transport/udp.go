@@ -33,9 +33,16 @@ func ListenUDP(addr string) (*UDPListener, error) {
 
 func (l *UDPListener) LocalAddr() net.Addr { return l.conn.LocalAddr() }
 
+var udpBuffers = sync.Pool{New: func() any { b := make([]byte, 65535); return &b }}
+
+// ReadPacket بسته‌ی بعدی را برمی‌گرداند. بافر ۶۴KB خواندن بازیافت می‌شود و فقط
+// به اندازه‌ی واقعی بسته کپی می‌شود؛ قبلاً برای هر دیتاگرام ۶۴KB تخصیص داده
+// می‌شد که زیر بار سنگین فشار شدیدی روی GC می‌گذاشت.
 func (l *UDPListener) ReadPacket() (Packet, error) {
+	bp := udpBuffers.Get().(*[]byte)
+	defer udpBuffers.Put(bp)
+	buf := (*bp)[:l.bufSize]
 	for {
-		buf := make([]byte, l.bufSize)
 		_ = l.conn.SetReadDeadline(time.Now().Add(UDPReadTimeout))
 		n, addr, err := l.conn.ReadFromUDP(buf)
 		if err != nil {
@@ -50,8 +57,57 @@ func (l *UDPListener) ReadPacket() (Packet, error) {
 			}
 			return Packet{}, err
 		}
-		return Packet{Data: buf[:n], Addr: addr}, nil
+		return Packet{Data: append([]byte(nil), buf[:n]...), Addr: addr}, nil
 	}
+}
+
+// Serve بسته‌ها را بین workers گوروتین پخش می‌کند. بسته‌های یک آدرس مبدأ همیشه
+// به یک worker می‌روند تا ترتیب داده‌ی هر کلاینت حفظ شود، ولی handshake کند یا
+// mux معطل یک کاربر دیگر کل سرور را متوقف نمی‌کند. اگر صف یک worker پر باشد
+// بسته مثل هر بسته‌ی UDP گم‌شده دور ریخته می‌شود. تا بسته‌شدن listener برمی‌گردد.
+func (l *UDPListener) Serve(workers int, handler func(Packet)) error {
+	if workers < 1 {
+		workers = 1
+	}
+	queues := make([]chan Packet, workers)
+	var wg sync.WaitGroup
+	for i := range queues {
+		queues[i] = make(chan Packet, 1024)
+		wg.Add(1)
+		go func(q chan Packet) {
+			defer wg.Done()
+			for p := range q {
+				handler(p)
+			}
+		}(queues[i])
+	}
+	defer func() {
+		for _, q := range queues {
+			close(q)
+		}
+		wg.Wait()
+	}()
+	for {
+		p, err := l.ReadPacket()
+		if err != nil {
+			return err
+		}
+		select {
+		case queues[shard(p.Addr.(*net.UDPAddr), workers)] <- p:
+		default:
+		}
+	}
+}
+
+func shard(a *net.UDPAddr, n int) int {
+	// FNV-1a روی IP و پورت؛ سریع و بدون تخصیص.
+	h := uint32(2166136261)
+	for _, b := range a.IP {
+		h = (h ^ uint32(b)) * 16777619
+	}
+	h = (h ^ uint32(a.Port&0xff)) * 16777619
+	h = (h ^ uint32(a.Port>>8)) * 16777619
+	return int(h % uint32(n))
 }
 
 func (l *UDPListener) WriteTo(data []byte, addr net.Addr) error {

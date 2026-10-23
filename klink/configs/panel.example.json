@@ -4,15 +4,19 @@
   "web_root": "/usr/share/klink/web",
   "admin_username": "admin",
   "admin_password_hash": "BCRYPT_HASH_FROM_KLINK_PANEL_HASH_PASSWORD",
-  "public_url": "https://panel.example.com",
+  "public_url": "https://panel.example.com:8080",
   "core_status_url": "http://127.0.0.1:9091/v1/status",
   "core_status_token": "SAME_RANDOM_TOKEN_AS_SERVER",
   "server_public_key": "BASE64_X25519_SERVER_PUBLIC_KEY",
   "udp_endpoint": "vpn.example.com:443",
   "tcp_endpoint": "vpn.example.com:443",
   "obfuscation": "random",
-  "tls_cert_file": "/etc/klink/panel.crt",
-  "tls_key_file": "/etc/klink/panel.key",
+  "tls_cert_file": "",
+  "tls_key_file": "",
   "secure_cookies": true,
-  "session_ttl_hours": 12
+  "session_ttl_hours": 12,
+  "acme_domain": "panel.example.com",
+  "acme_email": "",
+  "acme_cache_dir": "/var/lib/klink/acme",
+  "acme_http_listen": ":80"
 }

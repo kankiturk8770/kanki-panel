@@ -50,13 +50,14 @@ func (f *Framer) WriteFrame(w io.Writer, payload []byte) error {
 	}
 	m := f.lengthMask(f.writes)
 	f.writes++
-	hdr := []byte{byte(len(payload) >> 8), byte(len(payload))}
-	hdr[0] ^= m[0]
-	hdr[1] ^= m[1]
-	if _, err := w.Write(hdr); err != nil {
-		return err
-	}
-	_, err := w.Write(payload)
+	// هدر و payload با یک Write فرستاده می‌شوند: یک syscall و یک سگمنت TCP
+	// به‌جای دو (با NoDelay، هدر دوبایتی قبلاً یک بسته‌ی جدا روی سیم می‌شد که هم
+	// کارایی را کم می‌کرد و هم الگوی قابل‌تشخیصی بود).
+	frame := make([]byte, 2+len(payload))
+	frame[0] = byte(len(payload)>>8) ^ m[0]
+	frame[1] = byte(len(payload)) ^ m[1]
+	copy(frame[2:], payload)
+	_, err := w.Write(frame)
 	return err
 }
 
@@ -89,21 +90,45 @@ type TCPListener struct {
 	nextID    atomic.Uint64
 	closed    atomic.Bool
 	seed      []byte
+	handler   func(Listener, Packet)
+	active    atomic.Int64
 }
 
 type tcpPeer struct {
-	addr    *TCPConnAddr
-	framer  *Framer
-	writeMu sync.Mutex
+	addr     *TCPConnAddr
+	framer   *Framer
+	writeMu  sync.Mutex
+	upgraded atomic.Bool
 }
 
+const (
+	// MaxTCPConns سقف اتصال‌های هم‌زمان است تا باز نگه‌داشتن انبوه اتصال‌ها
+	// توسط مهاجم، حافظه و file descriptorهای سرور را تمام نکند.
+	MaxTCPConns = 32768
+	// TCPHandshakeTimeout مهلت اتصالی است که هنوز handshake یا داده‌ی معتبری
+	// نفرستاده؛ قبلاً چنین اتصالی پنج دقیقه باز می‌ماند (حمله‌ی slowloris).
+	TCPHandshakeTimeout = 30 * time.Second
+)
+
 // ListenTCP روی آدرس داده‌شده گوش می‌دهد؛ seed همان Prologue پروتکل است.
+// قاب‌ها با ReadPacket تحویل داده می‌شوند.
 func ListenTCP(addr string, seed []byte) (*TCPListener, error) {
+	return ListenTCPHandler(addr, seed, nil)
+}
+
+// ListenTCPHandler مثل ListenTCP است ولی هر قاب را مستقیماً در goroutine همان
+// اتصال به handler می‌دهد. این کار دو مزیت دارد: (۱) اتصال‌ها موازی پردازش
+// می‌شوند و یک کاربر کند بقیه را معطل نمی‌کند، (۲) قاب بعدی یک اتصال فقط پس از
+// پردازش کامل قاب قبلی خوانده می‌شود؛ بنابراین ارتقای ماسک framing در مهاجرت
+// TCP (بند ۶ سند پروتکل) پیش از خواندن طول قاب بعدی اعمال شده است. در حالت
+// صف مشترک، قاب دوم گاهی با ماسک قدیمی خوانده می‌شد و اتصال خراب می‌شد.
+func ListenTCPHandler(addr string, seed []byte, handler func(Listener, Packet)) (*TCPListener, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	l := &TCPListener{ln: ln, packets: make(chan Packet, 256), done: make(chan struct{}), seed: append([]byte(nil), seed...)}
+	l := &TCPListener{ln: ln, packets: make(chan Packet, 256), done: make(chan struct{}),
+		seed: append([]byte(nil), seed...), handler: handler}
 	go l.acceptLoop()
 	return l, nil
 }
@@ -117,8 +142,15 @@ func (l *TCPListener) acceptLoop() {
 			if l.closed.Load() {
 				return
 			}
+			// جلوگیری از حلقه‌ی داغ هنگام خطاهایی مثل EMFILE.
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
+		if l.active.Load() >= MaxTCPConns {
+			_ = c.Close()
+			continue
+		}
+		l.active.Add(1)
 		if tc, ok := c.(*net.TCPConn); ok {
 			_ = tc.SetNoDelay(true)
 			_ = tc.SetKeepAlive(true)
@@ -137,16 +169,25 @@ func (l *TCPListener) readLoop(p *tcpPeer) {
 	defer func() {
 		l.conns.Delete(p.addr.ID)
 		_ = p.addr.Conn.Close()
+		l.active.Add(-1)
 	}()
 	var reads uint64
 	for {
 		if l.closed.Load() {
 			return
 		}
-		_ = p.addr.Conn.SetReadDeadline(time.Now().Add(TCPReadTimeout))
+		timeout := TCPReadTimeout
+		if !p.upgraded.Load() {
+			timeout = TCPHandshakeTimeout
+		}
+		_ = p.addr.Conn.SetReadDeadline(time.Now().Add(timeout))
 		payload, err := p.framer.ReadFrame(p.addr.Conn, &reads)
 		if err != nil {
 			return
+		}
+		if l.handler != nil {
+			l.handler(l, Packet{Data: payload, Addr: p.addr})
+			continue
 		}
 		select {
 		case l.packets <- Packet{Data: payload, Addr: p.addr}:
@@ -191,7 +232,9 @@ func (l *TCPListener) WriteTo(data []byte, addr net.Addr) error {
 func (l *TCPListener) UpgradeFraming(addr net.Addr, channelBinding []byte) {
 	if ta, ok := addr.(*TCPConnAddr); ok {
 		if v, ok := l.conns.Load(ta.ID); ok {
-			v.(*tcpPeer).framer.Upgrade(channelBinding)
+			peer := v.(*tcpPeer)
+			peer.framer.Upgrade(channelBinding)
+			peer.upgraded.Store(true)
 		}
 	}
 }
