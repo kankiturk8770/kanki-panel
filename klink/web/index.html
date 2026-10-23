@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="fa" dir="rtl" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>KLINK — پنل مدیریت</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+  <div class="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
+    <div class="absolute -top-40 right-1/4 h-96 w-96 rounded-full bg-cyan-500/10 blur-3xl"></div>
+    <div class="absolute bottom-0 left-0 h-80 w-80 rounded-full bg-violet-500/10 blur-3xl"></div>
+  </div>
+
+  <main id="login-view" class="relative hidden min-h-screen place-items-center px-4 py-12">
+    <section class="w-full max-w-md rounded-3xl border border-white/10 bg-slate-900/80 p-8 shadow-2xl shadow-black/30 backdrop-blur">
+      <div class="mb-8 flex items-center gap-4">
+        <div class="grid h-12 w-12 place-items-center rounded-2xl bg-cyan-400 font-black text-slate-950 shadow-lg shadow-cyan-500/20">K</div>
+        <div><h1 class="text-2xl font-bold">KLINK</h1><p class="mt-1 text-sm text-slate-400">پنل مدیریت پروتکل · نسخه‌ی ۱</p></div>
+      </div>
+      <form id="login-form" class="space-y-5">
+        <label class="block text-sm font-medium text-slate-300">نام کاربری
+          <input id="username" name="username" autocomplete="username" required value="admin" class="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-4 py-3 text-left outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20" dir="ltr">
+        </label>
+        <label class="block text-sm font-medium text-slate-300">رمز عبور
+          <input id="password" name="password" type="password" autocomplete="current-password" required class="mt-2 w-full rounded-xl border border-white/10 bg-slate-950/70 px-4 py-3 text-left outline-none transition focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20" dir="ltr">
+        </label>
+        <p id="login-error" class="hidden rounded-xl border border-red-400/20 bg-red-400/10 px-4 py-3 text-sm text-red-200"></p>
+        <button class="w-full rounded-xl bg-cyan-400 px-4 py-3 font-bold text-slate-950 transition hover:bg-cyan-300 active:scale-[.99] disabled:opacity-50" type="submit">ورود به پنل</button>
+      </form>
+    </section>
+  </main>
+
+  <div id="panel-view" class="relative hidden">
+    <header class="sticky top-0 z-30 border-b border-white/10 bg-slate-950/80 backdrop-blur-xl">
+      <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+        <div class="flex items-center gap-3">
+          <div class="grid h-10 w-10 place-items-center rounded-xl bg-cyan-400 font-black text-slate-950">K</div>
+          <div><div class="font-bold">KLINK <span class="text-xs font-normal text-slate-500">/ v1</span></div><div class="text-xs text-slate-400">مرکز کنترل سرور</div></div>
+        </div>
+        <div class="flex items-center gap-2">
+          <span id="core-badge" class="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-400">در حال بررسی هسته</span>
+          <button id="refresh" title="به‌روزرسانی" class="rounded-xl border border-white/10 bg-white/5 p-2.5 transition hover:bg-white/10" aria-label="به‌روزرسانی">↻</button>
+          <button id="logout" class="rounded-xl border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:bg-white/10">خروج</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+      <section class="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+        <div><p class="mb-2 text-sm font-medium text-cyan-300">نمای زنده</p><h1 class="text-3xl font-bold tracking-tight">داشبورد مدیریت</h1><p class="mt-2 text-sm text-slate-400">کاربران، مصرف و وضعیت سرویس در یک نگاه</p></div>
+        <button id="new-user" class="rounded-xl bg-cyan-400 px-5 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/10 transition hover:bg-cyan-300">＋ ساخت کاربر</button>
+      </section>
+
+      <section class="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+        <article class="stat-card"><div class="stat-label">کاربران آنلاین</div><div id="stat-online" class="stat-value">—</div><div id="stat-sessions" class="stat-note">— نشست</div></article>
+        <article class="stat-card"><div class="stat-label">کل کاربران</div><div id="stat-users" class="stat-value">—</div><div id="stat-enabled" class="stat-note">— فعال</div></article>
+        <article class="stat-card"><div class="stat-label">ترافیک دریافتی</div><div id="stat-rx" class="stat-value text-xl">—</div><div class="stat-note">از زمان راه‌اندازی هسته</div></article>
+        <article class="stat-card"><div class="stat-label">ترافیک ارسالی</div><div id="stat-tx" class="stat-value text-xl">—</div><div id="stat-uptime" class="stat-note">آپ‌تایم —</div></article>
+      </section>
+
+      <section id="ports-section" class="mb-8 rounded-2xl border border-white/10 bg-slate-900/60 p-5">
+        <div class="mb-4 flex items-center justify-between"><h2 class="font-semibold">وضعیت پورت‌ها</h2><span id="last-update" class="text-xs text-slate-500"></span></div>
+        <div id="ports" class="flex flex-wrap gap-2 text-sm text-slate-400">اطلاعاتی در دسترس نیست</div>
+      </section>
+
+      <section class="overflow-hidden rounded-2xl border border-white/10 bg-slate-900/60 shadow-xl shadow-black/10">
+        <div class="flex flex-col gap-3 border-b border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div><h2 class="font-semibold">کاربران KLINK</h2><p class="mt-1 text-xs text-slate-400">حجم صفر و دستگاه صفر یعنی نامحدود</p></div>
+          <input id="search" type="search" placeholder="جست‌وجوی نام…" class="rounded-xl border border-white/10 bg-slate-950/60 px-4 py-2.5 text-sm outline-none focus:border-cyan-400 sm:w-64">
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[900px] text-right text-sm">
+            <thead class="bg-white/[.03] text-xs text-slate-400"><tr><th class="px-5 py-4 font-medium">کاربر</th><th class="px-4 py-4 font-medium">وضعیت</th><th class="px-4 py-4 font-medium">مصرف / حجم</th><th class="px-4 py-4 font-medium">انقضا</th><th class="px-4 py-4 font-medium">دستگاه</th><th class="px-4 py-4 font-medium">اشتراک</th><th class="px-5 py-4 font-medium">عملیات</th></tr></thead>
+            <tbody id="users-body" class="divide-y divide-white/5"></tbody>
+          </table>
+        </div>
+        <div id="empty-users" class="hidden px-6 py-16 text-center"><div class="text-4xl">◇</div><h3 class="mt-4 font-semibold">هنوز کاربری ساخته نشده</h3><p class="mt-2 text-sm text-slate-400">برای صدور کلید و لینک اشتراک، اولین کاربر را بسازید.</p></div>
+      </section>
+    </div>
+  </div>
+
+  <dialog id="user-dialog" class="w-[calc(100%-2rem)] max-w-lg rounded-3xl border border-white/10 bg-slate-900 p-0 text-slate-100 shadow-2xl backdrop:bg-slate-950/80 backdrop:backdrop-blur-sm">
+    <form id="user-form" class="p-6 sm:p-8">
+      <div class="mb-6 flex items-start justify-between"><div><h2 id="dialog-title" class="text-xl font-bold">ساخت کاربر</h2><p class="mt-1 text-sm text-slate-400">کلید X25519 و توکن امن به‌صورت خودکار ساخته می‌شود.</p></div><button id="close-dialog" type="button" class="text-2xl leading-none text-slate-500 hover:text-white">×</button></div>
+      <input id="user-id" type="hidden">
+      <div class="space-y-4">
+        <label class="form-label">نام کاربر<input id="user-name" required maxlength="64" class="form-input" placeholder="مثلاً موبایل علی"></label>
+        <div class="grid grid-cols-2 gap-4">
+          <label class="form-label">حجم (GB)<input id="user-volume" type="number" min="0" step="0.1" value="0" class="form-input" dir="ltr"></label>
+          <label class="form-label">تعداد دستگاه<input id="user-devices" type="number" min="0" max="10000" step="1" value="1" class="form-input" dir="ltr"></label>
+        </div>
+        <label class="form-label">تاریخ انقضا (اختیاری)<input id="user-expiry" type="datetime-local" class="form-input" dir="ltr"></label>
+        <label class="flex items-center gap-3 rounded-xl border border-white/10 bg-slate-950/40 px-4 py-3 text-sm"><input id="user-enabled" type="checkbox" checked class="h-4 w-4 accent-cyan-400">اتصال کاربر فعال باشد</label>
+      </div>
+      <p id="form-error" class="mt-4 hidden rounded-xl bg-red-400/10 px-4 py-3 text-sm text-red-200"></p>
+      <div class="mt-7 flex gap-3"><button id="save-user" type="submit" class="flex-1 rounded-xl bg-cyan-400 px-4 py-3 font-bold text-slate-950 hover:bg-cyan-300">ذخیره کاربر</button><button id="cancel-user" type="button" class="rounded-xl border border-white/10 px-5 py-3 hover:bg-white/5">انصراف</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="link-dialog" class="w-[calc(100%-2rem)] max-w-2xl rounded-3xl border border-white/10 bg-slate-900 p-6 text-slate-100 shadow-2xl backdrop:bg-slate-950/80 sm:p-8">
+    <h2 class="text-xl font-bold">لینک اشتراک</h2><p class="mt-2 text-sm leading-6 text-slate-400">این لینک شامل کلید خصوصی است؛ آن را فقط در اختیار همان کاربر بگذارید. در صورت افشا، توکن را بچرخانید.</p>
+    <textarea id="subscription-link" readonly rows="3" class="mt-5 w-full resize-none rounded-xl border border-white/10 bg-slate-950 p-4 text-xs text-cyan-200 outline-none" dir="ltr"></textarea>
+    <div class="mt-5 flex flex-wrap gap-3"><button id="copy-link" class="rounded-xl bg-cyan-400 px-5 py-2.5 font-bold text-slate-950">کپی لینک</button><a id="download-config" class="rounded-xl border border-white/10 px-5 py-2.5 hover:bg-white/5" download="klink-v1.json">دانلود JSON</a><button id="close-link" class="rounded-xl px-4 py-2.5 text-slate-400">بستن</button></div>
+  </dialog>
+
+  <div id="toast" role="status" class="fixed bottom-5 left-1/2 z-50 hidden -translate-x-1/2 rounded-xl border border-white/10 bg-slate-800 px-5 py-3 text-sm shadow-2xl"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
