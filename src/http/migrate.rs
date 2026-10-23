@@ -177,8 +177,13 @@ const ADDR_KEYS: &[&str] = &["tun_local_addr", "endpoint", "sub_base"];
 const ADDR_JSON_KEYS: &[&str] = &["kmix_nodes", "xray_cfg"];
 
 /// `v` with every exact JSON string `"old"` emptied, and `old` as the host of a URL replaced by `new`
+/// (left as it is when there is no `new`: "https://:2053" would be no address at all)
 fn drop_ip(v: &str, old: &str, new: &str) -> String {
-    v.replace(&format!("\"{}\"", old), "\"\"").replace(&format!("//{}:", old), &format!("//{}:", new)).replace(&format!("//{}/", old), &format!("//{}/", new))
+    let v = v.replace(&format!("\"{}\"", old), "\"\"");
+    if new.is_empty() {
+        return v;
+    }
+    v.replace(&format!("//{}:", old), &format!("//{}:", new)).replace(&format!("//{}/", old), &format!("//{}/", new))
 }
 
 /// On the new server, the first start after a move or a restore from another server: addresses that
@@ -227,5 +232,7 @@ mod tests {
         let x = r#"{"servers":[{"server":"local","address":"1.2.3.4"}],"x":"1.2.3.45"}"#;
         assert_eq!(super::drop_ip(x, "1.2.3.4", "p.example.com"), r#"{"servers":[{"server":"local","address":""}],"x":"1.2.3.45"}"#);
         assert_eq!(super::drop_ip("https://1.2.3.4:2053/x", "1.2.3.4", "p.example.com"), "https://p.example.com:2053/x");
+        // no domain: a URL keeps its host rather than losing it
+        assert_eq!(super::drop_ip("https://1.2.3.4:2053/x", "1.2.3.4", ""), "https://1.2.3.4:2053/x");
     }
 }
