@@ -414,6 +414,22 @@ impl Db {
         self.exec("UPDATE users SET expires_at=?1, limit_gb=?2, warned=0 WHERE id=?3", &[&exp, &lim, &id]).map(|_| ())
     }
 
+    /// هدیه (جبران قطعی): روز به انقضا و حجم به سقف اضافه می‌شود، ولی زمان یا حجم نامحدود
+    /// نامحدود می‌ماند (برخلاف extend که از نامحدود، محدود می‌سازد). true = چیزی عوض شد.
+    pub fn gift(&self, id: i64, days: i64, add_gb: f64) -> Result<bool, String> {
+        let u = self.user(id).ok_or("user not found")?;
+        let exp = if days > 0 && u.expires_at > 0 { u.expires_at.max(now()) + days * 86400 } else { u.expires_at };
+        let lim = if add_gb > 0.0 && u.limit_gb > 0.0 {
+            if u.over_quota() { u.used_gb() + add_gb } else { u.limit_gb + add_gb }
+        } else {
+            u.limit_gb
+        };
+        if exp == u.expires_at && lim == u.limit_gb {
+            return Ok(false);
+        }
+        self.exec("UPDATE users SET expires_at=?1, limit_gb=?2, warned=0 WHERE id=?3", &[&exp, &lim, &id]).map(|_| true)
+    }
+
     pub fn count(&self, sql: &str) -> i64 {
         self.with(|c| c.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0))
     }

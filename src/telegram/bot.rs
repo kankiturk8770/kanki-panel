@@ -32,6 +32,8 @@ enum Wait {
     CfgName(String),
     /// a customer renames one of their accounts
     Rename(i64),
+    /// the admin types "days GB [reason]" of a gift: for one account, or 0 = every active account
+    Gift(i64),
 }
 
 #[derive(Clone, Default)]
@@ -52,6 +54,8 @@ pub struct Bot {
     api: String,
     waits: Mutex<HashMap<i64, Wait>>,
     pend: Mutex<HashMap<i64, Pending>>,
+    /// a gift for everyone waiting for the admin's "yes": admin -> (days, GB, reason)
+    gifts: Mutex<HashMap<i64, (i64, f64, String)>>,
 }
 
 type Kb = Vec<Vec<(String, String)>>;
@@ -102,6 +106,7 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("txt_cfg", "⚙️ اگه با برنامه‌ی دیگه‌ای (WireGuard، AmneziaWG، Hiddify…) وصل می‌شید، کانفیگ مخصوصش رو از دکمه‌های زیر بگیرید. همراه هر کانفیگ نوشته شده با کدوم برنامه کار می‌کنه و چطور واردش کنید 👇", "پایین پیام اشتراک"),
     ("txt_app", "بعد از نصب، «کد ورود» سرویس را در اپ وارد کنید.", "زیر لینک دانلود اپ"),
     ("txt_guides", "🎬 آموزش موردنظرتون رو از پایین انتخاب کنید 👇", "بالای فهرست آموزش‌ها"),
+    ("txt_gift", "🎁 <b>کاربر گرامی، سلام</b> 🌷\n\nاز صبر و همراهی همیشگی شما صمیمانه سپاسگزاریم 💛\nبابت اختلالی که پیش آمد پوزش می‌خواهیم و به رسم جبران، هدیه‌ای کوچک از طرف ما به اشتراک شما اضافه شد:", "پیام هدیه‌ی حجم و زمان (جبران)"),
 ];
 
 fn is_text_key(k: &str) -> bool {
@@ -233,7 +238,7 @@ impl Bot {
             .split(',').filter_map(|x| x.trim().parse().ok()).collect();
         Some(Arc::new(Bot {
             app, token, admins, http: reqwest::Client::new(), api: "https://api.telegram.org".into(),
-            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()),
+            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), gifts: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -1391,6 +1396,7 @@ impl Bot {
         ik(vec![
             vec![b("📈 آمار", "a:stats"), b("🧾 سفارش‌های باز", "a:pend")],
             vec![b("🔍 جستجوی کاربر", "a:search"), b("➕ ساخت کانفیگ", "a:mk")],
+            vec![b("🎁 هدیه حجم و زمان (جبران قطعی)", "a:gift")],
             vec![b("📦 پلن‌ها", "a:plans"), b("📂 دسته‌بندی‌ها", "a:cats")],
             vec![b("🎬 آموزش‌ها", "a:guides"), b("🎨 دکمه‌ها و متن‌ها", "a:ui")],
             vec![b("🎁 تست رایگان", "a:trial"), b("💳 پرداخت‌ها", "a:pay")],
@@ -1411,6 +1417,7 @@ impl Bot {
             vec![b("➕ تمدید/افزایش", &format!("u:ext:{}", id)), b("🔄 ریست حجم", &format!("u:rst:{}", id))],
             vec![b("⏯ فعال/غیرفعال", &format!("u:tgl:{}", id)), b("🔑 لینک جدید", &format!("u:rgn:{}", id))],
             vec![b("🗑 حذف", &format!("u:del:{}", id)), b("🔗 جزئیات", &format!("u:inf:{}", id))],
+            vec![b("🎁 هدیه حجم و زمان", &format!("u:gft:{}", id))],
             vec![b("⬅️ پنل مدیریت", "adm")],
         ])
     }
@@ -1456,6 +1463,16 @@ impl Bot {
                 { self.edit(chat, mid, &format!("🧾 <b>سفارش‌های باز</b>\n\n{}", txt.join("\n")), Some(ik(kb))).await; return true; }
             }
             "a:search" => { set_wait(Wait::Search); { self.edit(chat, mid, "🔍 نام کاربری، شناسه یا آیدی تلگرام را بفرستید:", back).await; return true; } }
+            "a:gift" => {
+                let txt = "🎁 <b>هدیه‌ی حجم و زمان</b>\n\nبرای جبران قطعی سرورها یا هدیه دادن، روز و گیگ به اشتراک اضافه کنید. به هر کاربری که در ربات است، یک پیام زیبا می‌رود.\n\n👥 <b>همه</b>: همه‌ی کاربران روشن و منقضی‌نشده (بدون اکانت‌های تست)\n👤 <b>یک نفر</b>: کاربر را پیدا کنید و در صفحه‌اش «🎁 هدیه حجم و زمان» را بزنید\n\nزمان یا حجم نامحدود، نامحدود می‌ماند.";
+                let kb = ik(vec![
+                    vec![b("👥 هدیه به همه", "gf:all"), b("👤 هدیه به یک نفر", "a:search")],
+                    vec![b("📝 متن پیام هدیه", "tv:txt_gift")],
+                    vec![b("⬅️ پنل مدیریت", "adm")],
+                ]);
+                self.edit(chat, mid, txt, Some(kb)).await;
+                return true;
+            }
             "a:mk" => { set_wait(Wait::Make); { self.edit(chat, mid, "➕ بفرستید: <code>حجم_گیگ روز تعداد_اتصال [نام]</code>\nمثلاً: <code>50 30 2 ali</code>", back).await; return true; } }
             "a:plans" => {
                 let mut kb: Kb = self.plans(false).into_iter().map(|(p, a)| vec![
@@ -1881,6 +1898,21 @@ impl Bot {
                 self.save_guides(&g);
                 self.admin_view(uid, chat, mid, "a:guides").await;
             }
+            "gf" if rest == "all" => {
+                set_wait(Wait::Gift(0));
+                self.edit(chat, mid, &gift_prompt("همه‌ی کاربران فعال"), Some(ik(vec![vec![b("⬅️ انصراف", "a:gift")]]))).await;
+            }
+            "gfy" => {
+                // taken once: a second tap on "yes" gives nothing more
+                let Some((days, gb, why)) = self.gifts.lock().unwrap().remove(&uid) else {
+                    return self.edit(chat, mid, "این هدیه قبلاً داده شده یا لغو شده است.", Some(ik(vec![vec![b("⬅️ هدیه", "a:gift")]]))).await;
+                };
+                self.edit(chat, mid, "⏳ در حال اضافه کردن هدیه و فرستادن پیام‌ها…", None).await;
+                let targets = self.gift_targets(days, gb);
+                let (n, sent) = self.give_gift(&targets, days, gb, &why).await;
+                self.edit(chat, mid, &format!("✅ هدیه داده شد\n\n{}\n👥 سرویس‌ها: <b>{}</b>\n✉️ پیام در تلگرام: <b>{}</b> نفر", gift_line(days, gb), n, sent),
+                    Some(ik(vec![vec![b("⬅️ پنل مدیریت", "adm")]]))).await;
+            }
             "dd" => {
                 let _ = db.exec("DELETE FROM discounts WHERE code=?1", &[&rest]);
                 self.admin_view(uid, chat, mid, "a:disc").await;
@@ -1889,6 +1921,11 @@ impl Bot {
                 let (act, id) = rest.split_once(':').unwrap_or(("", "0"));
                 let id: i64 = id.parse().unwrap_or(0);
                 let r: Result<(), String> = match act {
+                    "gft" => {
+                        let who = db.user(id).map(|u| u.username).unwrap_or_default();
+                        set_wait(Wait::Gift(id));
+                        return self.edit(chat, mid, &gift_prompt(&esc(&who)), Some(ik(vec![vec![b("⬅️ انصراف", &format!("u:inf:{}", id))]]))).await;
+                    }
                     "ext" => { set_wait(Wait::Extend(id)); return self.edit(chat, mid, "بفرستید: <code>روز گیگ</code> (مثلاً <code>30 50</code>)", back).await; }
                     "rst" => db.exec("UPDATE users SET used_bytes=0, warned=0 WHERE id=?1", &[&id]).map(|_| ()),
                     "tgl" => db.exec("UPDATE users SET enabled=1-enabled WHERE id=?1", &[&id]).map(|_| ()),
@@ -2068,6 +2105,41 @@ impl Bot {
                     Err(e) => { self.send(chat, &format!("⚠️ {}", esc(&e)), kb).await; }
                 }
             }
+            Wait::Gift(target) => {
+                let (days, gb, why) = match parse_gift(text) {
+                    Ok(g) => g,
+                    Err(e) => {
+                        self.waits.lock().unwrap().insert(uid, Wait::Gift(target));
+                        let to = if target == 0 { "a:gift".to_string() } else { format!("u:inf:{}", target) };
+                        self.send(chat, &e, Some(ik(vec![vec![b("⬅️ انصراف", &to)]]))).await;
+                        return;
+                    }
+                };
+                if target == 0 {
+                    let targets = self.gift_targets(days, gb);
+                    if targets.is_empty() {
+                        self.send(chat, "کاربری نیست که این هدیه به او برسد (یا همه نامحدودند).", Some(ik(vec![vec![b("⬅️ هدیه", "a:gift")]]))).await;
+                        return;
+                    }
+                    let mut tgs: Vec<i64> = targets.iter().map(|u| u.tg_id).filter(|t| *t > 0).collect();
+                    tgs.sort_unstable();
+                    tgs.dedup();
+                    self.gifts.lock().unwrap().insert(uid, (days, gb, why.clone()));
+                    let note = if why.is_empty() { String::new() } else { format!("\n📝 {}", esc(&why)) };
+                    self.send(chat, &format!("🎁 <b>هدیه به همه</b>\n\n{}{}\n\n👥 سرویس‌ها: <b>{}</b>\n✉️ پیام در تلگرام: <b>{}</b> نفر\n\nداده شود؟", gift_line(days, gb), note, targets.len(), tgs.len()),
+                        Some(ik(vec![vec![b("✅ بله، هدیه بده", "gfy")], vec![b("⬅️ انصراف", "a:gift")]]))).await;
+                    return;
+                }
+                let Some(u) = db.user(target) else { self.send(chat, "پیدا نشد", kb).await; return };
+                let (n, sent) = self.give_gift(std::slice::from_ref(&u), days, gb, &why).await;
+                let t = db.user(target).map(|u| self.account_text(&u)).unwrap_or_default();
+                let head = match (n, sent) {
+                    (0, _) => "ℹ️ چیزی عوض نشد (زمان و حجم این کاربر نامحدود است).".to_string(),
+                    (_, 0) => format!("✅ هدیه داده شد ({})\nاین کاربر در ربات نیست، پیامی نرفت.", gift_line(days, gb).replace('\n', " ")),
+                    _ => format!("✅ هدیه داده شد ({})\n✉️ پیام برای کاربر رفت.", gift_line(days, gb).replace('\n', " ")),
+                };
+                self.send(chat, &format!("{}\n\n{}", head, t), Some(self.user_kb(target))).await;
+            }
             Wait::DiscountAdd => {
                 if parts.len() < 3 { self.send(chat, "⚠️ فرمت نادرست است.", kb).await; return; }
                 let r = db.exec("INSERT OR REPLACE INTO discounts(code,percent,uses_left) VALUES(?1,?2,?3)",
@@ -2087,6 +2159,59 @@ impl Bot {
             _ => {}
         }
         let _ = uid;
+    }
+
+    // ============================================================ هدیه (جبران قطعی)
+    /// Accounts a gift for everyone reaches: on, not a trial, not expired, and with a limited time
+    /// (for days) or a limited volume (for GB), since unlimited stays unlimited.
+    fn gift_targets(&self, days: i64, gb: f64) -> Vec<User> {
+        self.db().users().into_iter()
+            .filter(|u| u.enabled && u.notes != "trial" && !u.expired())
+            .filter(|u| (days > 0 && u.expires_at > 0) || (gb > 0.0 && u.limit_gb > 0.0))
+            .collect()
+    }
+
+    /// Adds the gift to these accounts and tells each Telegram user once (all their accounts in one
+    /// message). Returns (accounts changed, people told).
+    async fn give_gift(&self, users: &[User], days: i64, gb: f64, why: &str) -> (usize, usize) {
+        let db = self.db();
+        let mut by_tg: Vec<(i64, Vec<i64>)> = vec![];
+        let mut n = 0;
+        for u in users {
+            if !matches!(db.gift(u.id, days, gb), Ok(true)) {
+                continue;
+            }
+            n += 1;
+            if u.tg_id > 0 {
+                match by_tg.iter_mut().find(|x| x.0 == u.tg_id) {
+                    Some(x) => x.1.push(u.id),
+                    None => by_tg.push((u.tg_id, vec![u.id])),
+                }
+            }
+        }
+        if n > 0 {
+            let a = self.app.clone();
+            tokio::spawn(async move { sync::sync_all(&a).await });
+        }
+        let note = if why.is_empty() { String::new() } else { format!("\n\n📝 {}", esc(why)) };
+        let kb = Some(ik(vec![vec![b(&self.bt("my"), "my")]]));
+        let mut sent = 0;
+        for (i, (tg, ids)) in by_tg.iter().enumerate() {
+            let accs: Vec<String> = ids.iter().filter_map(|id| db.user(*id)).map(|u| {
+                let left = if u.limit_gb > 0.0 { format!("{:.2} GB", (u.limit_gb - u.used_gb()).max(0.0)) } else { "نامحدود".into() };
+                format!("👤 <b>{}</b>\n📦 حجم باقی‌مانده: <b>{}</b>\n⏳ زمان باقی‌مانده: <b>{}</b>", esc(&u.username), left, left_text(&u))
+            }).collect();
+            let msg = format!("{}\n\n{}{}\n\n{}\n\n✨ ممنون که همراه ما هستید؛ کانکی همیشه کنار شماست 💙",
+                self.tx("txt_gift"), gift_line(days, gb), note, accs.join("\n\n"));
+            if self.send(*tg, &msg, kb.clone()).await.is_some() {
+                sent += 1;
+            }
+            // Telegram allows about 30 messages a second
+            if i + 1 < by_tg.len() {
+                tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+            }
+        }
+        (n, sent)
     }
 
     // ============================================================ کارهای زمان‌بندی‌شده
@@ -2209,6 +2334,40 @@ impl Bot {
 }
 
 /// "Which app and how": sent before the config files of one protocol (w = WireGuard, a = AmneziaWG, h = Hysteria2)
+fn gift_prompt(who: &str) -> String {
+    format!("🎁 هدیه برای <b>{}</b>\n\nبفرستید: <code>روز گیگ [دلیل]</code>\nمثلاً: <code>2 10 قطعی سرورها در شب گذشته</code>\n(فقط زمان: <code>1 0</code> · فقط حجم: <code>0 5</code>)\n\nدلیل اختیاری است و در پیام کاربر نوشته می‌شود.", who)
+}
+
+/// "days GB [reason]" (Persian digits too) -> (days, GB, reason)
+fn parse_gift(text: &str) -> Result<(i64, f64, String), String> {
+    let t: String = text.chars().map(|c| match c {
+        '۰'..='۹' => char::from(b'0' + (c as u32 - '۰' as u32) as u8),
+        '٠'..='٩' => char::from(b'0' + (c as u32 - '٠' as u32) as u8),
+        '٫' => '.',
+        _ => c,
+    }).collect();
+    let mut it = t.split_whitespace();
+    let bad = || "⚠️ فرمت درست: <code>روز گیگ [دلیل]</code> مثلاً <code>2 10</code>".to_string();
+    let days: i64 = it.next().and_then(|x| x.parse().ok()).ok_or_else(bad)?;
+    let gb: f64 = it.next().and_then(|x| x.parse().ok()).ok_or_else(bad)?;
+    if !(0..=365).contains(&days) || !(0.0..=1000.0).contains(&gb) {
+        return Err("⚠️ روز بین 0 تا 365 و گیگ بین 0 تا 1000 باشد.".into());
+    }
+    if days == 0 && gb == 0.0 {
+        return Err("⚠️ حداقل یکی از روز یا گیگ بیشتر از صفر باشد.".into());
+    }
+    let why: String = it.collect::<Vec<_>>().join(" ").chars().take(200).collect();
+    Ok((days, gb, why))
+}
+
+/// "➕ 2 روز\n➕ 10 گیگ"
+fn gift_line(days: i64, gb: f64) -> String {
+    let mut v = vec![];
+    if days > 0 { v.push(format!("➕ <b>{}</b> روز", days)); }
+    if gb > 0.0 { v.push(format!("➕ <b>{}</b> گیگ", gb)); }
+    v.join("\n")
+}
+
 fn cfg_help(code: &str) -> String {
     let easy = "\n\n💡 <b>راحت‌ترین راه:</b> برنامه‌ی کانکی؛ فقط «کد ورود» رو واردش کنید و دیگه به این فایل‌ها نیازی ندارید.";
     match code {
@@ -2278,11 +2437,13 @@ mod flow_tests {
         });
         let (api, log) = fake_telegram().await;
         let bot = Arc::new(Bot {
-            app, token: "TEST".into(), admins: vec![], http: reqwest::Client::new(), api,
-            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()),
+            app, token: "TEST".into(), admins: vec![ADMIN], http: reqwest::Client::new(), api,
+            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), gifts: Mutex::new(HashMap::new()),
         });
         (bot, log)
     }
+
+    const ADMIN: i64 = 9000;
 
     fn from(id: i64, first: &str, uname: &str) -> Value {
         json!({"id": id, "first_name": first, "username": uname})
@@ -2341,6 +2502,62 @@ mod flow_tests {
         let sent = log.lock().unwrap().iter().rev().find(|(m, _)| m == "sendDocument").map(|(_, v)| v.clone()).unwrap();
         assert_eq!(sent["document"], "FILE1");
         assert!(sent["caption"].as_str().unwrap().contains("Kanki VPN 1.15.1 · arm64"));
+    }
+
+    #[tokio::test]
+    async fn gift_for_everyone_and_for_one() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        let p = "wg";
+        let a1 = db.create_user("ali", 10.0, 5, 1, p, "", "", 701).unwrap();
+        let a2 = db.create_user("ali2", 0.0, 0, 1, p, "", "", 701).unwrap(); // unlimited: stays unlimited
+        let tr = db.create_user("tst", 1.0, 1, 1, p, "", "trial", 702).unwrap();
+        let no_tg = db.create_user("panelonly", 20.0, 10, 1, p, "", "", 0).unwrap();
+        let old = db.create_user("gone", 5.0, 3, 1, p, "", "", 703).unwrap();
+        db.exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&(now() - 100), &old.id]).unwrap();
+        // over quota: the gift is counted from what was used
+        db.exec("UPDATE users SET used_bytes=?1 WHERE id=?2", &[&(12i64 << 30), &no_tg.id]).unwrap();
+        db.exec("UPDATE users SET limit_gb=10 WHERE id=?1", &[&no_tg.id]).unwrap();
+        let adm = from(ADMIN, "admin", "");
+
+        // a customer cannot open it
+        tap(&bot, from(701, "Ali", ""), "a:gift").await;
+        assert!(!last(&log, 701).contains("هدیه"));
+
+        tap(&bot, adm.clone(), "a:gift").await;
+        assert!(last(&log, ADMIN).contains("هدیه‌ی حجم و زمان"));
+        tap(&bot, adm.clone(), "gf:all").await;
+        say(&bot, adm.clone(), "دو 10").await;
+        assert!(last(&log, ADMIN).contains("فرمت درست"));
+        // Persian digits and a reason
+        say(&bot, adm.clone(), "۲ ۱۰ قطعی دیشب").await;
+        let confirm = last(&log, ADMIN);
+        assert!(confirm.contains("سرویس‌ها: <b>2</b>") && confirm.contains("<b>1</b> نفر"), "{}", confirm);
+        assert_eq!(db.user(a1.id).unwrap().limit_gb, 10.0, "nothing before yes");
+
+        tap(&bot, adm.clone(), "gfy").await;
+        let u = db.user(a1.id).unwrap();
+        assert_eq!(u.limit_gb, 20.0);
+        assert!((u.expires_at - (a1.expires_at + 2 * 86400)).abs() <= 2);
+        let u2 = db.user(a2.id).unwrap();
+        assert_eq!((u2.limit_gb, u2.expires_at), (0.0, 0));
+        assert_eq!(db.user(tr.id).unwrap().limit_gb, 1.0, "trials get nothing");
+        assert_eq!(db.user(old.id).unwrap().limit_gb, 5.0, "expired get nothing");
+        assert!((db.user(no_tg.id).unwrap().limit_gb - 22.0).abs() < 0.01);
+        let msg = last(&log, 701);
+        assert!(msg.contains("کاربر گرامی") && msg.contains("قطعی دیشب") && msg.contains("<b>ali</b>") && !msg.contains("ali2") && msg.contains("➕ <b>10</b> گیگ"), "{}", msg);
+        assert!(last(&log, ADMIN).contains("هدیه داده شد"));
+        // the yes tapped twice gives nothing more
+        tap(&bot, adm.clone(), "gfy").await;
+        assert_eq!(db.user(a1.id).unwrap().limit_gb, 20.0);
+
+        // one person: even an expired account comes back
+        tap(&bot, adm.clone(), &format!("u:gft:{}", old.id)).await;
+        say(&bot, adm.clone(), "3 0").await;
+        let o = db.user(old.id).unwrap();
+        assert!(o.active() && o.expires_at > now() + 2 * 86400, "{}", o.expires_at);
+        assert!(last(&log, 703).contains("➕ <b>3</b> روز"));
+        assert!(last(&log, ADMIN).contains("پیام برای کاربر رفت"));
     }
 
     #[tokio::test]
