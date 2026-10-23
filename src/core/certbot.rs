@@ -4,6 +4,7 @@
 //! - Kanki DNS on port 80: `certbot --webroot` (Kanki DNS answers Let's Encrypt itself), so DNS never stops;
 //! - anything else on port 80 (Caddy, nginx, an Xray inbound, a Docker container …): it is stopped for the
 //!   few seconds certbot needs and started again right after, even when certbot fails or hangs.
+//!
 //! certbot renews by itself; the agent also checks every 12 hours and renews a certificate that is close to
 //! its end with what holds port 80 at that moment, so a renewal does not fail because the server changed.
 //! After a failure it waits before trying again (10 minutes, then longer, up to a day), so a server that
@@ -115,9 +116,7 @@ fn holders() -> Vec<(String, u32)> {
 fn unit_of(cgroup: &str) -> String {
     cgroup
         .lines()
-        .flat_map(|l| l.split('/'))
-        .filter(|s| s.ends_with(".service") || s.ends_with(".scope"))
-        .last()
+        .flat_map(|l| l.split('/')).rfind(|s| s.ends_with(".service") || s.ends_with(".scope"))
         .unwrap_or("")
         .to_string()
 }

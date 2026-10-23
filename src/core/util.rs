@@ -175,7 +175,7 @@ pub fn totp_check(secret_b32: &str, code: &str) -> bool {
 pub fn client_ip(h: &HeaderMap) -> String {
     h.get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').last())
+        .and_then(|v| v.split(',').next_back())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "127.0.0.1".into())

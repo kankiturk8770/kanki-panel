@@ -922,6 +922,7 @@ pub fn agent_token_ok(app: &App, id: &str, token: &str) -> bool {
     !token.is_empty() && servers(app).into_iter().any(|s| s.id == id && util::ct_eq(token, &s.token))
 }
 
+#[allow(clippy::result_large_err)] // the error is the ready axum answer (401/403)
 fn agent_ok(app: &App, id: &str, token: &str) -> Result<(), Response> {
     let Some(s) = servers(app).into_iter().find(|s| s.id == id) else {
         return Err((StatusCode::GONE, "unknown server").into_response());
@@ -1495,7 +1496,7 @@ async fn list(State(app): St, h: HeaderMap) -> Response {
 fn clean_list(v: &Value) -> Vec<String> {
     let raw: Vec<String> = match v {
         Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(|s| s.to_string()).or_else(|| x.as_u64().map(|n| n.to_string()))).collect(),
-        Value::String(s) => s.split(|c| c == ',' || c == ' ' || c == '\n').map(|x| x.to_string()).collect(),
+        Value::String(s) => s.split([',', ' ', '\n']).map(|x| x.to_string()).collect(),
         _ => vec![],
     };
     raw.into_iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()
@@ -1969,7 +1970,7 @@ async fn gre_info(app: &App, s: &TServer) -> Value {
 
 /// Applies the GRE fields of a request to a server. A missing key leaves the link as it is; an empty
 /// gre_ip turns it off. Returns an error text for an address that is not an IPv4.
-fn gre_apply_body(list: &mut Vec<TServer>, id: &str, b: &Value) -> Result<(), String> {
+fn gre_apply_body(list: &mut [TServer], id: &str, b: &Value) -> Result<(), String> {
     let used: Vec<u8> = list.iter().filter(|x| x.id != id).map(|x| x.gre_n).collect();
     let Some(s) = list.iter_mut().find(|x| x.id == id) else { return Ok(()) };
     if let Some(v) = b["gre_ip"].as_str() {
@@ -2505,7 +2506,7 @@ pub(crate) async fn run_update_all(app: &Arc<App>) -> Value {
             .address
             .trim_start_matches("https://")
             .trim_start_matches("http://")
-            .split(|c| c == '/' || c == ':')
+            .split(['/', ':'])
             .next()
             .unwrap_or("")
             .to_lowercase();

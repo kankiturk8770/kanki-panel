@@ -76,7 +76,7 @@ pub struct H2Io {
 }
 
 fn io_err(e: h2::Error) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, e)
+    io::Error::other(e)
 }
 
 impl H2Io {
@@ -259,13 +259,10 @@ fn decoy(method: &http::Method, path: &str, mut respond: h2::server::SendRespons
         Ok(r) => r,
         Err(_) => return,
     };
-    match respond.send_response(resp, head) {
-        Ok(mut send) => {
-            if !head {
-                let _ = send.send_data(Bytes::from_static(body.as_bytes()), true);
-            }
+    if let Ok(mut send) = respond.send_response(resp, head) {
+        if !head {
+            let _ = send.send_data(Bytes::from_static(body.as_bytes()), true);
         }
-        Err(_) => {}
     }
 }
 

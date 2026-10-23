@@ -103,7 +103,6 @@ struct Peer {
 /// clear) to the local KCP listener, and wraps KCP's replies back out to the right peer. One relay
 /// serves every client on the port, keyed by their address.
 pub struct ServerObfs {
-    pub kcp_addr: SocketAddr,
     tasks: Vec<JoinHandle<()>>,
     peers: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
 }
@@ -199,5 +198,5 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
         }
     });
 
-    Ok(ServerObfs { kcp_addr: kcp_local, tasks: vec![main_task, reaper], peers })
+    Ok(ServerObfs { tasks: vec![main_task, reaper], peers })
 }

@@ -77,6 +77,7 @@ pub fn has_scope(scopes: &[String], need: &str) -> bool {
 }
 
 /// Route guard: Ok(actor) or a 401/403 response
+#[allow(clippy::result_large_err)] // the error is the ready axum answer (401/403)
 pub fn check(app: &App, h: &HeaderMap, scope: &str) -> Result<String, Response> {
     match identify(app, h) {
         None => Err(deny()),
@@ -91,6 +92,7 @@ pub fn check(app: &App, h: &HeaderMap, scope: &str) -> Result<String, Response> 
 }
 
 /// Session-only guard (security-sensitive actions can't be done with API tokens)
+#[allow(clippy::result_large_err)] // the error is the ready axum answer (401/403)
 pub fn check_session(app: &App, h: &HeaderMap) -> Result<String, Response> {
     match identify(app, h) {
         Some((actor, _)) if actor != "api-key" && !actor.starts_with("token:") => Ok(actor),

@@ -246,9 +246,9 @@ pub fn deploy(cfg: Option<(&DnsCfg, &str)>) -> Result<(), String> {
     // ports, certificate, role and relay path need a restart; users and names are re-read live
     let key_of = |c: &DnsCfg| {
         crate::util::sha256_hex(&format!(
-            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
             c.role, c.host, c.cert, c.key, c.dns_port, c.dot_port, c.https_port, c.http_port, c.intake_port, c.exit_addr,
-            format!("{}|{}", c.answer_ip, c.acme && crate::certbot::have(&c.host))
+            c.answer_ip, c.acme && crate::certbot::have(&c.host)
         ))
     };
     let restart_key = key_of(c);

@@ -39,6 +39,9 @@ fn frame(t: u8, id: u32, payload: &[u8]) -> Vec<u8> {
     f
 }
 
+/// (the listening socket, the user's address, last use in ms)
+pub type UdpBack = (Arc<UdpSocket>, SocketAddr, u64);
+
 /// Counters shared by every link of one tunnel side.
 #[derive(Default)]
 pub struct Shared {
@@ -46,7 +49,7 @@ pub struct Shared {
     pub tx_bytes: AtomicU64,
     pub streams: AtomicU64,
     /// entry: UDP flow id -> (the listening socket, the user's address)
-    pub udp_back: Mutex<HashMap<u32, (Arc<UdpSocket>, SocketAddr, u64)>>,
+    pub udp_back: Mutex<HashMap<u32, UdpBack>>,
     /// exit: the only "host:port" targets the entry may ask for (empty = any)
     pub allowed: Mutex<HashSet<String>>,
 }

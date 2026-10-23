@@ -343,26 +343,6 @@ fn restart_services() {
     }
 }
 
-#[cfg(test)]
-mod restore_tests {
-    #[test]
-    fn caddy_is_sent_to_the_restored_port() {
-        let cf = "{\n  auto_https off\n}\nhttps://a.b:2053 {\n  reverse_proxy 127.0.0.1:20973\n}\nsub.b:2053 {\n  reverse_proxy 127.0.0.1:20973 {\n  }\n}\n";
-        let n = super::set_proxy_port(cf, "29332");
-        assert!(!n.contains("20973"));
-        assert_eq!(n.matches("reverse_proxy 127.0.0.1:29332").count(), 2);
-        assert!(n.ends_with("}\n") && n.contains("reverse_proxy 127.0.0.1:29332 {"));
-    }
-    #[test]
-    fn the_nat_rule_names_this_servers_card() {
-        let c = "PostUp = iptables -t nat -A POSTROUTING -s 10.66.0.0/16 -o ens18 -j MASQUERADE; iptables -A FORWARD -i wg0 -o ens18 -j ACCEPT\nPostDown = iptables -t nat -D POSTROUTING -s 10.66.0.0/16 -o ens18 -j MASQUERADE\n";
-        let n = super::set_masq_iface(c, "eth0");
-        assert_eq!(n.matches("-o eth0 -j MASQUERADE").count(), 2);
-        // only the NAT rules: a FORWARD rule with -o is left as it was
-        assert!(n.contains("-o ens18 -j ACCEPT"));
-    }
-}
-
 pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/backup", get(backup_legacy).post(backup_download))
@@ -685,5 +665,25 @@ pub async fn telegram_loop(app: Arc<App>) {
         }
         let r = send_backup(&app).await;
         record(&app, &r);
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    #[test]
+    fn caddy_is_sent_to_the_restored_port() {
+        let cf = "{\n  auto_https off\n}\nhttps://a.b:2053 {\n  reverse_proxy 127.0.0.1:20973\n}\nsub.b:2053 {\n  reverse_proxy 127.0.0.1:20973 {\n  }\n}\n";
+        let n = super::set_proxy_port(cf, "29332");
+        assert!(!n.contains("20973"));
+        assert_eq!(n.matches("reverse_proxy 127.0.0.1:29332").count(), 2);
+        assert!(n.ends_with("}\n") && n.contains("reverse_proxy 127.0.0.1:29332 {"));
+    }
+    #[test]
+    fn the_nat_rule_names_this_servers_card() {
+        let c = "PostUp = iptables -t nat -A POSTROUTING -s 10.66.0.0/16 -o ens18 -j MASQUERADE; iptables -A FORWARD -i wg0 -o ens18 -j ACCEPT\nPostDown = iptables -t nat -D POSTROUTING -s 10.66.0.0/16 -o ens18 -j MASQUERADE\n";
+        let n = super::set_masq_iface(c, "eth0");
+        assert_eq!(n.matches("-o eth0 -j MASQUERADE").count(), 2);
+        // only the NAT rules: a FORWARD rule with -o is left as it was
+        assert!(n.contains("-o ens18 -j ACCEPT"));
     }
 }

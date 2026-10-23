@@ -131,8 +131,8 @@ pub fn tg_html(raw: &str) -> String {
     let mut t = raw.trim().to_string();
     // a model sometimes wraps the post in a code fence or quotes
     if t.starts_with("```") {
-        t = t.trim_start_matches(|c| c == '`').trim_start_matches(|c: char| c.is_ascii_alphabetic()).to_string();
-        t = t.trim_end_matches(|c| c == '`').to_string();
+        t = t.trim_start_matches('`').trim_start_matches(|c: char| c.is_ascii_alphabetic()).to_string();
+        t = t.trim_end_matches('`').to_string();
     }
     let t = t.trim().trim_matches('"').trim();
     let mut s = t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");

@@ -532,29 +532,6 @@ fn parse_ping(text: &str) -> Option<(f64, f64)> {
     Some((avg, loss))
 }
 
-#[cfg(test)]
-mod baseline_tests {
-    use super::parse_ping;
-
-    #[test]
-    fn reads_avg_and_loss() {
-        let ok = "PING 1.2.3.4 (1.2.3.4) 56(84) bytes of data.\n\
-            64 bytes from 1.2.3.4: icmp_seq=1 ttl=52 time=41.2 ms\n\
-            \n--- 1.2.3.4 ping statistics ---\n\
-            6 packets transmitted, 6 received, 0% packet loss, time 5007ms\n\
-            rtt min/avg/max/mdev = 40.1/42.3/45.0/1.2 ms\n";
-        assert_eq!(parse_ping(ok), Some((42.3, 0.0)));
-
-        let lossy = "--- h ping statistics ---\n\
-            6 packets transmitted, 3 received, 50% packet loss, time 5010ms\n\
-            rtt min/avg/max/mdev = 90.0/95.5/101.0/4.0 ms\n";
-        assert_eq!(parse_ping(lossy), Some((95.5, 50.0)));
-
-        let dead = "6 packets transmitted, 0 received, 100% packet loss, time 5100ms\n";
-        assert_eq!(parse_ping(dead), None);
-    }
-}
-
 async fn probe_task(state: Arc<State>) {
     *state.probe.lock().unwrap() = Some(serde_json::json!({"done": false, "stage": "connecting"}));
     // wait up to 20 s for the first link (the agents fetch their list every 5 s)
@@ -623,5 +600,28 @@ impl Manager {
         v.extend(tokio::task::spawn_blocking(super::awg::statuses).await.unwrap_or_default());
         v.extend(tokio::task::spawn_blocking(super::hy2t::statuses).await.unwrap_or_default());
         v
+    }
+}
+
+#[cfg(test)]
+mod baseline_tests {
+    use super::parse_ping;
+
+    #[test]
+    fn reads_avg_and_loss() {
+        let ok = "PING 1.2.3.4 (1.2.3.4) 56(84) bytes of data.\n\
+            64 bytes from 1.2.3.4: icmp_seq=1 ttl=52 time=41.2 ms\n\
+            \n--- 1.2.3.4 ping statistics ---\n\
+            6 packets transmitted, 6 received, 0% packet loss, time 5007ms\n\
+            rtt min/avg/max/mdev = 40.1/42.3/45.0/1.2 ms\n";
+        assert_eq!(parse_ping(ok), Some((42.3, 0.0)));
+
+        let lossy = "--- h ping statistics ---\n\
+            6 packets transmitted, 3 received, 50% packet loss, time 5010ms\n\
+            rtt min/avg/max/mdev = 90.0/95.5/101.0/4.0 ms\n";
+        assert_eq!(parse_ping(lossy), Some((95.5, 50.0)));
+
+        let dead = "6 packets transmitted, 0 received, 100% packet loss, time 5100ms\n";
+        assert_eq!(parse_ping(dead), None);
     }
 }

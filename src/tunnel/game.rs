@@ -10,8 +10,8 @@
 //! Wire payloads (inside the mask, so none of this is visible):
 //! * FEC off: the raw KCP datagram, like the `kcp` transport.
 //! * FEC on:  `0xF3 | group (4, BE) | index (1) | shard` for a data shard and
-//!            `0xF4 | group (4, BE) | index (1) | data count (1) | parity count (1) | shard`
-//!            for a parity shard, where `shard` is `len (2, LE) | KCP datagram`.
+//!   `0xF4 | group (4, BE) | index (1) | data count (1) | parity count (1) | shard`
+//!   for a parity shard, where `shard` is `len (2, LE) | KCP datagram`.
 //!
 //! Both ends get the same settings from the panel, so there is no negotiation. Duplication
 //! sends every masked datagram twice (two different masks, so the copies do not look alike).
@@ -232,10 +232,7 @@ pub async fn client(remote: SocketAddr, token: &str, g: GameOpts) -> Res<ClientG
         let mut a = vec![0u8; 65535];
         loop {
             let got = match out.deadline() {
-                Some(dl) => match tokio::time::timeout_at(dl, inner1.recv_from(&mut a)).await {
-                    Ok(r) => Some(r),
-                    Err(_) => None,
-                },
+                Some(dl) => tokio::time::timeout_at(dl, inner1.recv_from(&mut a)).await.ok(),
                 None => Some(inner1.recv_from(&mut a).await),
             };
             match got {
@@ -306,10 +303,7 @@ async fn pump(sock: Arc<UdpSocket>, public: Arc<UdpSocket>, mask: Arc<Mask>, to:
     let mut b = vec![0u8; 65535];
     loop {
         let got = match out.deadline() {
-            Some(dl) => match tokio::time::timeout_at(dl, sock.recv(&mut b)).await {
-                Ok(r) => Some(r),
-                Err(_) => None,
-            },
+            Some(dl) => tokio::time::timeout_at(dl, sock.recv(&mut b)).await.ok(),
             None => Some(sock.recv(&mut b).await),
         };
         match got {
@@ -393,17 +387,18 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr, g: GameOpts) 
 // ------------------------------------------------------------------ engine glue
 
 fn game_kcp_config() -> tokio_kcp::KcpConfig {
-    let mut c = tokio_kcp::KcpConfig::default();
-    c.stream = true;
-    // the lowest-latency profile: nodelay, 10 ms interval, fast resend after 2 losses, no
-    // congestion control backoff
-    c.nodelay = tokio_kcp::KcpNoDelayConfig::fastest();
-    // 1080 leaves room for the FEC shard header (8) and the mask head and padding within the
-    // 1232-byte wire budget of salamander.rs
-    c.mtu = 1080;
-    c.wnd_size = (1024, 1024);
-    c.session_expire = Duration::from_secs(45);
-    c
+    tokio_kcp::KcpConfig {
+        stream: true,
+        // the lowest-latency profile: nodelay, 10 ms interval, fast resend after 2 losses, no
+        // congestion control backoff
+        nodelay: tokio_kcp::KcpNoDelayConfig::fastest(),
+        // 1080 leaves room for the FEC shard header (8) and the mask head and padding within the
+        // 1232-byte wire budget of salamander.rs
+        mtu: 1080,
+        wnd_size: (1024, 1024),
+        session_expire: Duration::from_secs(45),
+        ..Default::default()
+    }
 }
 
 /// Starts a `game` listener: KCP on a private loopback socket, the FEC/mask relay on the public

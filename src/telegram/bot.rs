@@ -183,7 +183,7 @@ fn toman(n: i64) -> String {
     let s = n.to_string();
     let mut o = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             o.push(',');
         }
         o.push(c);
@@ -640,7 +640,7 @@ impl Bot {
 
     fn price(&self, p: &Plan, pe: &Pending) -> (i64, f64) {
         let f = (100 - pe.percent.clamp(0, 100)) as f64 / 100.0;
-        (((p.toman as f64) * f).round() as i64, ((plan_usd(&self.db(), p) * f) * 100.0).round() / 100.0)
+        (((p.toman as f64) * f).round() as i64, ((plan_usd(self.db(), p) * f) * 100.0).round() / 100.0)
     }
 
     /// Is this payment method offered for these prices? (the same test for the buttons and for the payment)
@@ -650,7 +650,7 @@ impl Bot {
             "card" => db.on("card_on") && !db.get("card_number").is_empty() && t > 0,
             "zp" => db.on("zp_on") && !db.get("zp_merchant").is_empty() && t > 0,
             "np" => db.on("np_on") && !db.get("np_key").is_empty() && u > 0.0,
-            "wallet" => db.on("wallet_on") && wallet_has_address(&db) && u > 0.0,
+            "wallet" => db.on("wallet_on") && wallet_has_address(db) && u > 0.0,
             _ => false,
         }
     }
@@ -858,6 +858,7 @@ impl Bot {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new_order(&self, uid: i64, p: &Plan, pe: &Pending, method: &str, amount: &str, status: &str, reference: &str) -> i64 {
         let kind = if pe.kind.is_empty() { "new".to_string() } else { pe.kind.clone() };
         self.db().with(|c| {
@@ -1101,7 +1102,7 @@ impl Bot {
             back_to = format!("pcat:{}:m", mode);
         }
         // ordered by duration, then number of users, then price; the text groups them by duration
-        list.sort_by(|x, y| (x.days, x.conns, x.toman).cmp(&(y.days, y.conns, y.toman)));
+        list.sort_by_key(|x| (x.days, x.conns, x.toman));
         let mut rows: Kb = vec![];
         for p in list.iter() {
             let price = if p.toman > 0 { toman(p.toman) } else { format!("{}$", p.usd) };
@@ -1428,7 +1429,7 @@ impl Bot {
         let back = Some(ik(vec![vec![b("⬅️ پنل مدیریت", "adm")]]));
         let set_wait = |w: Wait| { self.waits.lock().unwrap().insert(uid, w); };
         match d {
-            "adm" => { self.edit(chat, mid, "👑 <b>پنل مدیریت</b>", Some(self.adm_kb())).await; return true; }
+            "adm" => { self.edit(chat, mid, "👑 <b>پنل مدیریت</b>", Some(self.adm_kb())).await; true }
             "a:stats" => {
                 let us = db.users();
                 let bu: i64 = db.with(|c| c.query_row("SELECT COUNT(*) FROM bot_users", [], |r| r.get(0)).unwrap_or(0));
@@ -1446,7 +1447,7 @@ impl Bot {
                     us.len(), us.iter().filter(|u| u.active()).count(), us.iter().filter(|u| u.online > 0).count(),
                     us.iter().filter(|u| !u.active()).count(), us.iter().map(|u| u.used_gb()).sum::<f64>(),
                     ns.iter().filter(|n| n.online).count(), ns.len(), bu, cnt, today, toman(rev), usd);
-                { self.edit(chat, mid, &txt, back).await; return true; }
+                { self.edit(chat, mid, &txt, back).await; true }
             }
             "a:pend" => {
                 let rows: Vec<(i64, String, String, String, i64)> = db.with(|c| {
@@ -1460,9 +1461,9 @@ impl Bot {
                 let txt: Vec<String> = rows.iter().map(|o| format!("#{} · {} · {} · {} · <code>{}</code>", o.0, o.1, o.2, o.3, o.4)).collect();
                 let mut kb: Kb = rows.iter().filter(|o| o.3 != "waiting").map(|o| vec![b(&format!("✅ تأیید #{}", o.0), &format!("ap:{}", o.0))]).collect();
                 kb.push(vec![b("⬅️ پنل مدیریت", "adm")]);
-                { self.edit(chat, mid, &format!("🧾 <b>سفارش‌های باز</b>\n\n{}", txt.join("\n")), Some(ik(kb))).await; return true; }
+                { self.edit(chat, mid, &format!("🧾 <b>سفارش‌های باز</b>\n\n{}", txt.join("\n")), Some(ik(kb))).await; true }
             }
-            "a:search" => { set_wait(Wait::Search); { self.edit(chat, mid, "🔍 نام کاربری، شناسه یا آیدی تلگرام را بفرستید:", back).await; return true; } }
+            "a:search" => { set_wait(Wait::Search); { self.edit(chat, mid, "🔍 نام کاربری، شناسه یا آیدی تلگرام را بفرستید:", back).await; true } }
             "a:gift" => {
                 let txt = "🎁 <b>هدیه‌ی حجم و زمان</b>\n\nبرای جبران قطعی سرورها یا هدیه دادن، روز و گیگ به اشتراک اضافه کنید. به هر کاربری که در ربات است، یک پیام زیبا می‌رود.\n\n👥 <b>همه</b>: همه‌ی کاربران روشن و منقضی‌نشده (بدون اکانت‌های تست)\n👤 <b>یک نفر</b>: کاربر را پیدا کنید و در صفحه‌اش «🎁 هدیه حجم و زمان» را بزنید\n\nزمان یا حجم نامحدود، نامحدود می‌ماند.";
                 let kb = ik(vec![
@@ -1471,18 +1472,18 @@ impl Bot {
                     vec![b("⬅️ پنل مدیریت", "adm")],
                 ]);
                 self.edit(chat, mid, txt, Some(kb)).await;
-                return true;
+                true
             }
-            "a:mk" => { set_wait(Wait::Make); { self.edit(chat, mid, "➕ بفرستید: <code>حجم_گیگ روز تعداد_اتصال [نام]</code>\nمثلاً: <code>50 30 2 ali</code>", back).await; return true; } }
+            "a:mk" => { set_wait(Wait::Make); { self.edit(chat, mid, "➕ بفرستید: <code>حجم_گیگ روز تعداد_اتصال [نام]</code>\nمثلاً: <code>50 30 2 ali</code>", back).await; true } }
             "a:plans" => {
                 let mut kb: Kb = self.plans(false).into_iter().map(|(p, a)| vec![
                     b(&format!("{} {} · {}G · {}d · {} · {}$", if a { "🟢" } else { "⚪️" }, p.name, p.gb, p.days, p.toman, p.usd), &format!("pv:{}", p.id)),
                 ]).collect();
                 kb.push(vec![b("➕ افزودن پلن", "pa"), b("📂 دسته‌بندی‌ها", "a:cats")]);
                 kb.push(vec![b("⬅️ پنل مدیریت", "adm")]);
-                { self.edit(chat, mid, "📦 <b>پلن‌ها</b>\nروی هر پلن بزنید تا همه‌چیزش (نام، مدت، حجم، قیمت، تعداد کاربر، کشورها، دسته) را عوض کنید، روشن/خاموش یا حذفش کنید.", Some(ik(kb))).await; return true; }
+                { self.edit(chat, mid, "📦 <b>پلن‌ها</b>\nروی هر پلن بزنید تا همه‌چیزش (نام، مدت، حجم، قیمت، تعداد کاربر، کشورها، دسته) را عوض کنید، روشن/خاموش یا حذفش کنید.", Some(ik(kb))).await; true }
             }
-            "pa" => { set_wait(Wait::Plan); { self.edit(chat, mid, "بفرستید:\n<code>نام | روز | گیگ | تومان | دلار | اتصال | دسته</code>\n(دسته اختیاری است)\nمثلاً:\n<code>یک‌ماهه | 30 | 50 | 150000 | 2.5 | 1 | اقتصادی</code>", back).await; return true; } }
+            "pa" => { set_wait(Wait::Plan); { self.edit(chat, mid, "بفرستید:\n<code>نام | روز | گیگ | تومان | دلار | اتصال | دسته</code>\n(دسته اختیاری است)\nمثلاً:\n<code>یک‌ماهه | 30 | 50 | 150000 | 2.5 | 1 | اقتصادی</code>", back).await; true } }
             "a:cats" => {
                 let cats = self.categories();
                 let mut kb: Kb = cats.iter().enumerate().map(|(i, (c, n))| vec![b(&format!("📂 {} · {} پلن", c, n), &format!("ck:{}", i))]).collect();
@@ -1494,7 +1495,7 @@ impl Bot {
                     "📂 <b>دسته‌بندی‌ها</b>\n\nروی هر دسته بزنید تا اسمش را عوض یا حذفش کنید. دسته‌ی هر پلن از صفحه‌ی همان پلن تعیین می‌شود."
                 };
                 self.edit(chat, mid, txt, Some(ik(kb))).await;
-                return true;
+                true
             }
             "a:ui" => {
                 let kb = ik(vec![
@@ -1503,7 +1504,7 @@ impl Bot {
                     vec![b("⬅️ پنل مدیریت", "adm")],
                 ]);
                 self.edit(chat, mid, "🎨 <b>دکمه‌ها و متن‌ها</b>\n\nاز اینجا متن همه‌ی دکمه‌ها و پیام‌های ربات، لینک‌ها و آموزش‌ها را عوض کنید. دکمه‌های منوی اصلی را می‌شود پنهان هم کرد.", Some(kb)).await;
-                return true;
+                true
             }
             "a:btns" => {
                 let mut kb: Kb = BTNS.iter().map(|(k, _, _)| {
@@ -1512,13 +1513,13 @@ impl Bot {
                 }).collect();
                 kb.push(vec![b("⬅️ دکمه‌ها و متن‌ها", "a:ui")]);
                 self.edit(chat, mid, "🔘 <b>متن دکمه‌ها</b>\n\nروی هر دکمه بزنید تا متنش را عوض کنید (🚫 = پنهان).", Some(ik(kb))).await;
-                return true;
+                true
             }
             "a:txts" => {
                 let mut kb: Kb = TEXTS.iter().map(|(k, _, title)| vec![b(&format!("📝 {}", title), &format!("tv:{}", k))]).collect();
                 kb.push(vec![b("⬅️ دکمه‌ها و متن‌ها", "a:ui")]);
                 self.edit(chat, mid, "📝 <b>متن پیام‌ها</b>\n\nروی هر پیام بزنید تا متنش را ببینید و عوض کنید.", Some(ik(kb))).await;
-                return true;
+                true
             }
             "a:links" => {
                 let show = |k: &str| { let v = db.get(k); if v.is_empty() { "تنظیم نشده".to_string() } else { esc(&v) } };
@@ -1529,7 +1530,7 @@ impl Bot {
                     vec![b("⬅️ دکمه‌ها و متن‌ها", "a:ui")],
                 ]);
                 self.edit(chat, mid, &txt, Some(kb)).await;
-                return true;
+                true
             }
             "a:guides" => {
                 let g = self.guides();
@@ -1545,27 +1546,27 @@ impl Bot {
                     "🎬 <b>آموزش‌ها</b>\n\n⭐️ آموزش اول همان است که با دکمه‌ی «آموزش اتصال» زیر پیام اشتراک و دانلود اپ فرستاده می‌شود. اگر بیشتر از یکی باشد، دکمه‌ی منوی اصلی فهرست همه را نشان می‌دهد."
                 };
                 self.edit(chat, mid, txt, Some(ik(kb))).await;
-                return true;
+                true
             }
             "gn" => {
                 set_wait(Wait::GuideNew);
                 self.edit(chat, mid, "🎬 ویدیوی آموزش را بفرستید (یا گیف، فایل، عکس یا یک متن).\nاگر زیر ویدیو متنی بنویسید، خط اولش عنوان آموزش و کلش متن زیر ویدیو می‌شود.", Some(ik(vec![vec![b("⬅️ آموزش‌ها", "a:guides")]]))).await;
-                return true;
+                true
             }
             "a:trial" => { self.edit(chat, mid, &format!("🎁 <b>تست رایگان</b>\nحجم: {} GB · مدت: {} روز", db.get("trial_gb"), db.get("trial_days")),
                 Some(ik(vec![vec![b(&format!("{} روشن/خاموش", self.onoff("trial_on")), "tg:trial_on")],
-                    vec![b("✏️ حجم", "set:trial_gb"), b("✏️ مدت", "set:trial_days")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; return true; }
+                    vec![b("✏️ حجم", "set:trial_gb"), b("✏️ مدت", "set:trial_days")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
             "a:pay" => { self.edit(chat, mid, &format!("💳 <b>روش‌های پرداخت</b>\nکارت: {}", esc(&db.get("card_number"))),
                 Some(ik(vec![
                     vec![b(&format!("{} کارت", self.onoff("card_on")), "tg:card_on"), b("✏️ شماره", "set:card_number"), b("✏️ نام", "set:card_holder")],
                     vec![b(&format!("{} زرین‌پال", self.onoff("zp_on")), "tg:zp_on"), b("✏️ مرچنت", "set:zp_merchant"), b("✏️ بازگشت", "set:zp_callback")],
                     vec![b(&format!("{} ارزی خودکار", self.onoff("np_on")), "tg:np_on"), b("✏️ API Key", "set:np_key"), b("✏️ ارزها", "set:np_coins")],
                     vec![b(&format!("{} کیف پول", self.onoff("wallet_on")), "tg:wallet_on"), b("✏️ آدرس‌ها", "set:wallet_text")],
-                    vec![b("⬅️ پنل مدیریت", "adm")]]))).await; return true; }
+                    vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
             "a:nodes" => {
                 let txt: Vec<String> = db.nodes().iter().map(|n| format!("{} <b>{}</b> · {}", if n.online { "🟢" } else { "🔴" }, esc(&n.name),
                     if n.enabled { "فعال" } else { "خاموش" })).collect();
-                { self.edit(chat, mid, &format!("🖥 <b>نودها</b>\n\n{}\n\nافزودن نود از پنل وب انجام می‌شود.", txt.join("\n")), back).await; return true; }
+                { self.edit(chat, mid, &format!("🖥 <b>نودها</b>\n\n{}\n\nافزودن نود از پنل وب انجام می‌شود.", txt.join("\n")), back).await; true }
             }
             "a:disc" => {
                 let rows: Vec<(String, i64, i64)> = db.with(|c| {
@@ -1576,12 +1577,12 @@ impl Bot {
                 let mut kb: Kb = rows.iter().map(|r| vec![b(&format!("🎟 {} · {}٪ · {} بار", r.0, r.1, r.2), "noop"), b("🗑", &format!("dd:{}", r.0))]).collect();
                 kb.push(vec![b("➕ کد جدید", "da")]);
                 kb.push(vec![b("⬅️ پنل مدیریت", "adm")]);
-                { self.edit(chat, mid, "🎟 <b>کدهای تخفیف</b>", Some(ik(kb))).await; return true; }
+                { self.edit(chat, mid, "🎟 <b>کدهای تخفیف</b>", Some(ik(kb))).await; true }
             }
-            "da" => { set_wait(Wait::DiscountAdd); { self.edit(chat, mid, "بفرستید: <code>کد درصد تعداد</code>\nمثلاً: <code>NOWRUZ 20 100</code>", back).await; return true; } }
+            "da" => { set_wait(Wait::DiscountAdd); { self.edit(chat, mid, "بفرستید: <code>کد درصد تعداد</code>\nمثلاً: <code>NOWRUZ 20 100</code>", back).await; true } }
             "a:ref" => { self.edit(chat, mid, &format!("👥 <b>هدیه‌ی دعوت</b>\nبه ازای اولین خرید هر دعوت‌شده: {} GB و {} روز", db.get("ref_gb"), db.get("ref_days")),
-                Some(ik(vec![vec![b("✏️ گیگ هدیه", "set:ref_gb"), b("✏️ روز هدیه", "set:ref_days")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; return true; }
-            "a:bc" => { set_wait(Wait::Broadcast); { self.edit(chat, mid, "📣 پیام را بفرستید (متن، عکس، ویدیو…):", back).await; return true; } }
+                Some(ik(vec![vec![b("✏️ گیگ هدیه", "set:ref_gb"), b("✏️ روز هدیه", "set:ref_days")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
+            "a:bc" => { set_wait(Wait::Broadcast); { self.edit(chat, mid, "📣 پیام را بفرستید (متن، عکس، ویدیو…):", back).await; true } }
             "a:bcp" => {
                 // use the message the admin pinned in this chat; otherwise ask for one
                 let pinned = self.call("getChat", json!({"chat_id": chat})).await.and_then(|c| c["pinned_message"]["message_id"].as_i64());
@@ -1593,14 +1594,14 @@ impl Bot {
                 }
                 set_wait(Wait::BroadcastPin);
                 self.edit(chat, mid, "📌 پیامی که می‌خواید برای همه سنجاق بشه رو بفرستید.\n(یا اول همون پیام رو همین‌جا تو چت ربات سنجاق کنید و دوباره این دکمه رو بزنید.)", back).await;
-                return true;
+                true
             }
             "a:backup" => {
                 let pass = crate::backup::backup_pass(&self.app);
                 if let Ok((bytes, name)) = make_archive(&self.app, &pass) {
                     self.send_doc(chat, bytes, &name, "💾 بکاپ کامل پنل (رمزدار — رمز در پنل > بکاپ)").await;
                 }
-                return true;
+                true
             }
             "a:ch" | "a:cht" => {
                 if d == "a:cht" {
@@ -1619,7 +1620,7 @@ impl Bot {
                     vec![b("⬅️ پنل مدیریت", "adm")],
                 ]);
                 self.edit(chat, mid, &txt, Some(kb)).await;
-                return true;
+                true
             }
             "a:chp" => {
                 let (kind, text) = crate::channel::make_post(&self.app, "auto");
@@ -1630,7 +1631,7 @@ impl Bot {
                     vec![b("⬅️ کانال هوشمند", "a:ch")],
                 ]);
                 self.edit(chat, mid, &format!("👁 <b>پیش‌نمایش</b>\n➖➖➖➖➖\n{}", text), Some(kb)).await;
-                return true;
+                true
             }
             "a:chs" => {
                 let back = Some(ik(vec![vec![b("⬅️ کانال هوشمند", "a:ch")]]));
@@ -1649,7 +1650,7 @@ impl Bot {
                     Err(e) => format!("⚠️ ارسال نشد: <code>{}</code>\nآیدی کانال را در پنل وب بررسی کنید و ربات را ادمین کانال کنید.", esc(&e)),
                 };
                 self.edit(chat, mid, &msg, back).await;
-                return true;
+                true
             }
             "a:chc" => {
                 let back = Some(ik(vec![vec![b("⬅️ کانال هوشمند", "a:ch")]]));
@@ -1664,7 +1665,7 @@ impl Bot {
                     Err(e) => format!("⚠️ {}", esc(&e)),
                 };
                 self.edit(chat, mid, &msg, back).await;
-                return true;
+                true
             }
             "a:gen" => { self.edit(chat, mid, &format!("⚙️ <b>تنظیمات عمومی</b>\nپشتیبانی: {}\nکانال اجباری: {}\nلینک اپ: {}",
                 esc(&db.get("support")), esc(&db.get("channel")), esc(&db.get("app_link"))),
@@ -1674,8 +1675,8 @@ impl Bot {
                     vec![b("✏️ پشتیبانی", "set:support"), b("✏️ کانال اجباری", "set:channel")],
                     vec![b("✏️ لینک اپ", "set:app_link"), b("✏️ خوش‌آمد", "set:welcome")],
                     vec![b("🎨 دکمه‌ها و متن‌ها", "a:ui")],
-                    vec![b("⬅️ پنل مدیریت", "adm")]]))).await; return true; }
-            _ => return false,
+                    vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
+            _ => false,
         }
     }
 
@@ -2301,7 +2302,7 @@ impl Bot {
             }
             self.clean_trials().await;
             // هشدار اتمام حجم/زمان (هر ۳۰ دقیقه)
-            if tick % 30 == 0 && self.db().on("warn_on") {
+            if tick.is_multiple_of(30) && self.db().on("warn_on") {
                 for u in self.db().users().into_iter().filter(|u| u.tg_id != 0) {
                     let mut flag = u.warned;
                     let mut msg = None;
@@ -2322,7 +2323,7 @@ impl Bot {
                 }
             }
             // بکاپ روزانه برای ادمین‌ها
-            if tick % (24 * 60) == 0 && self.db().on("backup_on") {
+            if tick.is_multiple_of(24 * 60) && self.db().on("backup_on") {
                 if let Ok((bytes, name)) = make_archive(&self.app, &self.db().get("tgb_pass")) {
                     for a in self.admins.clone() {
                         self.send_doc(a, bytes.clone(), &name, "💾 بکاپ خودکار روزانه").await;
@@ -2393,6 +2394,37 @@ fn cfg_help(code: &str) -> String {
             2️⃣ توی برنامه دکمه‌ی ➕ رو بزنید ← «Import from clipboard» (وارد کردن از کلیپ‌بورد).\n\
             3️⃣ کانفیگ رو انتخاب کنید و دکمه‌ی اتصال رو بزنید ✅{}", easy),
     }
+}
+
+/// The plan's dollar price: its own, or the toman price at the admin's rate (Sales › Toman per dollar)
+fn plan_usd(db: &crate::db::Db, p: &Plan) -> f64 {
+    if p.usd > 0.0 {
+        return p.usd;
+    }
+    let rate: f64 = db.get("usd_rate").replace([',', '٬'], "").trim().parse().unwrap_or(0.0);
+    if rate > 0.0 && p.toman > 0 { ((p.toman as f64 / rate) * 100.0).round() / 100.0 } else { 0.0 }
+}
+
+/// A wallet address or a payment text the buyer can pay to
+fn wallet_has_address(db: &crate::db::Db) -> bool {
+    ["ton_address", "usdt_address", "wallet_text"].iter().any(|k| !db.get(k).trim().is_empty())
+}
+
+/// Today's TON price in dollars (kept 10 minutes; None when it cannot be read)
+async fn ton_usd(app: &crate::App) -> Option<f64> {
+    let db = &app.db;
+    let at: i64 = db.get("ton_usd_at").parse().unwrap_or(0);
+    let cached: f64 = db.get("ton_usd").parse().unwrap_or(0.0);
+    if cached > 0.0 && crate::util::now() - at < 600 {
+        return Some(cached);
+    }
+    let r = app.http.get("https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd")
+        .timeout(std::time::Duration::from_secs(8)).send().await.ok()?;
+    let v: serde_json::Value = r.json().await.ok()?;
+    let p = v["the-open-network"]["usd"].as_f64().filter(|p| *p > 0.0)?;
+    db.set("ton_usd", &p.to_string());
+    db.set("ton_usd_at", &crate::util::now().to_string());
+    Some(p)
 }
 
 #[cfg(test)]
@@ -2636,35 +2668,4 @@ mod flow_tests {
         bot.fulfill(o).await;
         assert_eq!(accounts(&bot, 400), vec![(3, "ali2".into(), format!("order #{}", o))]);
     }
-}
-
-/// The plan's dollar price: its own, or the toman price at the admin's rate (Sales › Toman per dollar)
-fn plan_usd(db: &crate::db::Db, p: &Plan) -> f64 {
-    if p.usd > 0.0 {
-        return p.usd;
-    }
-    let rate: f64 = db.get("usd_rate").replace([',', '٬'], "").trim().parse().unwrap_or(0.0);
-    if rate > 0.0 && p.toman > 0 { ((p.toman as f64 / rate) * 100.0).round() / 100.0 } else { 0.0 }
-}
-
-/// A wallet address or a payment text the buyer can pay to
-fn wallet_has_address(db: &crate::db::Db) -> bool {
-    ["ton_address", "usdt_address", "wallet_text"].iter().any(|k| !db.get(k).trim().is_empty())
-}
-
-/// Today's TON price in dollars (kept 10 minutes; None when it cannot be read)
-async fn ton_usd(app: &crate::App) -> Option<f64> {
-    let db = &app.db;
-    let at: i64 = db.get("ton_usd_at").parse().unwrap_or(0);
-    let cached: f64 = db.get("ton_usd").parse().unwrap_or(0.0);
-    if cached > 0.0 && crate::util::now() - at < 600 {
-        return Some(cached);
-    }
-    let r = app.http.get("https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd")
-        .timeout(std::time::Duration::from_secs(8)).send().await.ok()?;
-    let v: serde_json::Value = r.json().await.ok()?;
-    let p = v["the-open-network"]["usd"].as_f64().filter(|p| *p > 0.0)?;
-    db.set("ton_usd", &p.to_string());
-    db.set("ton_usd_at", &crate::util::now().to_string());
-    Some(p)
 }

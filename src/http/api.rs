@@ -565,7 +565,7 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
                     continue;
                 }
                 let mut list: Vec<String> = u.nodes.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
-                let has = list.iter().any(|x| *x == id);
+                let has = list.contains(&id);
                 if add && !has {
                     list.push(id.clone());
                 } else if !add && has {
