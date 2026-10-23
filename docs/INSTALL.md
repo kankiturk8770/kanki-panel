@@ -26,10 +26,16 @@ Choose **1**. The installer asks for:
 
 A summary is shown before anything is installed.
 
-## 3. Extra servers (nodes)
-Run the same command on the new server and choose **2**. At the end it prints:
-`API address`, `Endpoint`, `Node token`. Add them in the panel: **Nodes > Add node**.
-No domain on the node? Tick **Self-signed certificate** when adding it.
+## 3. Extra servers
+The panel runs on one server; every other server is a node of it.
+1. In the panel: **Servers > Add server**. Give it a name, pick Abroad or Inside Iran, optionally a domain (for a
+   real SSL certificate), and whether it serves VPN users (an Iran relay: off).
+2. Run the one command it shows on the new server, as root (Ubuntu / Debian). It installs everything: the server
+   agent (tunnels, Xray, Kanki DNS) and the VPN part (WireGuard, AmneziaWG, Hysteria2, KANKI MIX), on ports no
+   other server of the panel uses. The installer and the program come from the panel itself (GitHub second).
+3. The card shows «agent connected» and «VPN part installed». From then on everything is switched on in the panel.
+
+Servers added before 3.9 have only one of the two parts: press **Install** / **Install VPN** on their card.
 
 ## 4. Day-to-day: `kanki`
 | # | Action |
@@ -57,19 +63,10 @@ kanki-panel reset-security              # blocked by IP allow/deny list
 systemctl restart kanki-panel
 ```
 
-## Add a tunnel server (Kanki Tunnel)
-A server that only carries tunnels (for example in Iran) does **not** get the VPN panel — only a small agent.
-
-1. In the panel: **Tunnels > + Server**, give it a name, press **Create command**.
-2. Run the command it shows, as root, on that server (Ubuntu / Debian):
-   ```bash
-   KANKI_REPO=kankiturk8770/kanki-panel KANKI_TUNNEL=<id>:<token> KANKI_PANEL=<panel-origin> \
-     bash <(curl -fsSL https://raw.githubusercontent.com/kankiturk8770/kanki-panel/main/install.sh)
-   ```
-   It installs the `kanki` binary, writes `/etc/kanki/tunnel.env`, turns on BBR and starts the
-   `kanki-tunnel` service (`kanki tunnel-agent`). The server appears in the panel as Connected
-   within a few seconds.
-3. Make a tunnel: **Tunnels > + Tunnel**. Entry = this server, Exit = the panel/VPN server.
+## A tunnel entry (for example in Iran)
+1. Add it like any server (**Servers > Add server**, Inside Iran). Its VPN is installed but serves nobody.
+   On the server the agent runs as the `kanki-tunnel` service, with `/etc/kanki/tunnel.env`.
+2. Make a tunnel: **Tunnels > + Tunnel**. Entry = this server, Exit = the panel/VPN server.
    Pick the ports to carry (for the VPN there is a one-tap "VPN ports of the panel server"
    preset). Open the tunnel port in the entry server's cloud firewall.
 4. Point your users at the entry server's address (node Endpoint / Public Host) so they connect

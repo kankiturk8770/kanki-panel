@@ -253,7 +253,7 @@ body.v37 .snav{display:flex;flex-direction:column;gap:3px}
 .sectabs .stl a{flex:none;padding:8px 15px;border-radius:11px;color:var(--s);font-weight:800;font-size:13px;text-decoration:none;white-space:nowrap;transition:background .15s,color .15s}
 .sectabs .stl a:hover{color:var(--t);background:var(--in)}
 .sectabs .stl a.on{color:#1a1206;background:linear-gradient(135deg,var(--al),var(--a) 50%,var(--ad));box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 6px 16px -8px color-mix(in srgb,var(--a) 80%,transparent)}
-@media(max-width:1099px){.sectabs{top:110px}}
+@media(max-width:899px){.sectabs{top:110px}}
 @media(max-width:620px){.sectabs .sth2{display:none}.sectabs{padding:6px}}
 body.v37 .ptabs a.on,body.v37 .seg button.on,body.v37 .segl button.on{background:linear-gradient(135deg,var(--al),var(--a) 50%,var(--ad))!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.55)}
 /* phones: a wide strip (tabs, settings sections, tables) scrolls inside itself and never makes the
@@ -262,7 +262,7 @@ body.v37 .ptabs a.on,body.v37 .seg button.on,body.v37 .segl button.on{background
 html,body{overflow-x:clip;max-width:100%}
 @media(max-width:480px){.vrow .nm b{white-space:normal;overflow:visible}}
 body.v37 main{min-width:0;max-width:100vw}
-@media(max-width:1099px){body.v37 main{overflow-x:clip}}
+@media(max-width:899px){body.v37 main{overflow-x:clip}}
 /* flags */
 .flg{font-size:1.05em;line-height:1;display:inline-block;vertical-align:-1px;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}.flg.nf{opacity:.55}
 /* servers grid */

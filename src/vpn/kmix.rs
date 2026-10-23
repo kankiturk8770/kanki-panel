@@ -102,6 +102,24 @@ pub fn settings(app: &App) -> Settings {
     }
 }
 
+/// Gives server `node_id` its own KANKI MIX port (it moves there on its next sync).
+pub fn set_node_port(app: &App, node_id: &str, port: u16) {
+    let mut m: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();
+    m.entry(node_id.to_string()).or_default().port = port;
+    app.db.set("kmix_nodes", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+}
+
+/// The second (tunnel) config of `node_id` follows its port when it used the old one.
+pub fn move_tunnel_port(app: &App, node_id: &str, old: u16, new: u16) {
+    let mut m: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();
+    if let Some(o) = m.get_mut(node_id) {
+        if o.tun_port == old {
+            o.tun_port = new;
+            app.db.set("kmix_nodes", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+        }
+    }
+}
+
 /// "4001-4010" -> Some((4001, 4010)); at most 1000 ports, never port 0
 pub fn hop_range(s: &str) -> Option<(u16, u16)> {
     let (a, b) = s.trim().split_once('-')?;

@@ -106,6 +106,12 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error }
 }
 
+/// when each switched-off node was last given its empty user list
+fn off_checked() -> &'static std::sync::Mutex<HashMap<String, i64>> {
+    static M: std::sync::OnceLock<std::sync::Mutex<HashMap<String, i64>>> = std::sync::OnceLock::new();
+    M.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
 /// the last KANKI MIX error (the same error is logged once, not every 30 s)
 fn last_kmix_err() -> &'static std::sync::Mutex<Option<String>> {
     static E: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
@@ -176,6 +182,28 @@ pub async fn sync_all(app: &Arc<App>) {
     let mut add_bytes: HashMap<i64, i64> = HashMap::new();
     let by_name: HashMap<String, i64> = users.iter().map(|u| (u.username.clone(), u.id)).collect();
 
+    // a node whose VPN is switched off serves nobody: its users are taken off (an empty sync), so a
+    // relay server keeps its ports free and an old peer cannot keep using it
+    for n in app.db.nodes().into_iter().filter(|n| !n.enabled) {
+        // once it is empty, checked again every 5 minutes (an unreachable one must not slow every round)
+        {
+            let mut g = off_checked().lock().unwrap();
+            let last = g.get(&n.id).copied().unwrap_or(0);
+            if n.sync_state == "off" && now() - last < 300 {
+                continue;
+            }
+            g.insert(n.id.clone(), now());
+        }
+        let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), ..Default::default() };
+        let ok = if n.id == "local" { apply_local(app, empty).await; true } else { remote_sync(app, &n, &empty).await.is_ok() };
+        let _ = app.db.exec("UPDATE nodes SET online=?1, sync_state='off' WHERE id=?2", &[&(ok as i64), &n.id]);
+        if ok && n.id != "local" {
+            if let Some(info) = remote_info(app, &n.address, &n.token, n.insecure).await {
+                let _ = app.db.exec("UPDATE nodes SET info=?1, last_sync=?2 WHERE id=?3", &[&info.to_string(), &now(), &n.id]);
+            }
+        }
+        crate::live::set_vpn(&n.id, &n.name, vec![]);
+    }
     for mut n in app.db.nodes().into_iter().filter(|n| n.enabled) {
         let local = n.id == "local";
         if local {
