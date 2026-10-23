@@ -45,6 +45,7 @@ pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/servers", get(list).post(add))
         .route("/api/servers/fix-ports", post(fix_ports))
+        .route("/api/servers/direct", get(direct_get).put(direct_put))
         .route("/api/servers/:id", delete(remove).put(edit))
         .route("/api/servers/:id/complete", post(complete))
         .route("/api/servers/:id/vpn", post(vpn_switch))
@@ -328,6 +329,24 @@ pub async fn fix_ports_of(app: &Arc<App>, only: Option<&str>) -> Value {
 async fn fix_ports(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "nodes");
     Json(fix_ports_of(&app, None).await).into_response()
+}
+
+/// The direct names of the servers (fr.example.com …), the IP each must point at and whether it does
+async fn direct_get(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "nodes");
+    Json(crate::direct::table(&app)).into_response()
+}
+
+/// { base: "example.com" } ("" = the panel domain without its first label)
+async fn direct_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let v = b["base"].as_str().unwrap_or("").trim().trim_matches('.').to_ascii_lowercase();
+    let ok = v.is_empty() || (v.contains('.') && v.len() <= 200 && v.split('.').all(|l| !l.is_empty() && l.len() <= 63 && l.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')));
+    if !ok {
+        return err(StatusCode::BAD_REQUEST, "not a domain (like example.com)");
+    }
+    app.db.set(crate::direct::BASE_KEY, &v);
+    Json(crate::direct::table(&app)).into_response()
 }
 
 // ------------------------------------------------------------------ links between the two parts

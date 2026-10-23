@@ -1032,6 +1032,13 @@ fn sub_data(app: &App, u: &User) -> Value {
         if let (Some(o), Some(e)) = (v.as_object_mut(), crate::exitgeo::fields(app, &n.id).as_object()) {
             o.extend(e.clone());
         }
+        // AmneziaWG: whether its endpoint goes through the tunnel or straight to the server, and the address
+        // of the second, direct config ("" = none; the app no longer guesses it from the server's name)
+        if v["protocols"].as_array().map(|a| a.iter().any(|p| p == "amneziawg")).unwrap_or(false) {
+            let (via, direct) = crate::direct::awg(app, n);
+            v["awg_via"] = json!(via);
+            v["awg_direct"] = json!(direct);
+        }
         // the second config is also its own entry, so an app that knows only "kmix" lists it as a server
         // of its own; "via" and "parent" tell a newer app it is the tunnel config of that server
         if let Some(t) = tun {
@@ -1045,6 +1052,10 @@ fn sub_data(app: &App, u: &User) -> Value {
             e["kmix_tunnel"] = Value::Null;
             e["via"] = json!("tunnel");
             e["parent"] = json!(n.id);
+            if let Some(o) = e.as_object_mut() {
+                o.remove("awg_via");
+                o.remove("awg_direct");
+            }
             nodes.push(v);
             nodes.push(e);
         } else {
