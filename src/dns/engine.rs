@@ -68,9 +68,9 @@ impl Live {
             if self.routed.contains(n) {
                 return Some(n);
             }
-            match n.find('.') {
-                Some(i) => n = &n[i + 1..],
-                None => return None,
+            {
+                let i = n.find('.')?;
+                n = &n[i + 1..]
             }
         }
     }

@@ -131,12 +131,8 @@ impl AsyncUdpSocket for MaskedSocket {
                     Ok((len, addr)) => match self.mask.open(&mut buf[..len]) {
                         Some((s, e)) => {
                             buf.copy_within(s..e, 0);
-                            let mut m = RecvMeta::default();
-                            m.addr = addr;
-                            m.len = e - s;
                             // quinn splits a buffer by `stride`: it must be the datagram size, never 0
-                            m.stride = e - s;
-                            meta[n] = m;
+                            meta[n] = RecvMeta { addr, len: e - s, stride: e - s, ..Default::default() };
                             n += 1;
                         }
                         // not ours: dropped without a trace

@@ -64,7 +64,41 @@ pub fn make_archive(app: &App, pass: &str) -> Result<(Vec<u8>, String), String> 
     make_archive_with(app, pass, false)
 }
 
-/// `with_apps`: also the app install files uploaded in the panel (a move to a new server takes them).
+/// Plain files directly in `src` copied to `dst` (no links, no folders): the app files and the node
+/// certificate pins are flat folders, and nothing else may come out of a backup.
+fn copy_flat(src: &str, dst: &str) -> usize {
+    let Ok(rd) = std::fs::read_dir(src) else { return 0 };
+    let _ = std::fs::create_dir_all(dst);
+    let mut n = 0;
+    for e in rd.flatten() {
+        let Ok(m) = std::fs::symlink_metadata(e.path()) else { continue };
+        let name = e.file_name().to_string_lossy().to_string();
+        if !m.is_file() || name.starts_with('.') || name.contains('/') {
+            continue;
+        }
+        if std::fs::copy(e.path(), format!("{}/{}", dst, name)).is_ok() {
+            n += 1;
+        }
+    }
+    n
+}
+
+/// What a backup holds, written next to it (meta.json): the version, when, the domain and the public
+/// IP of the server it was made on (a restore elsewhere replaces that IP), and counts to check it by.
+fn meta(app: &App, apps: usize) -> Value {
+    json!({
+        "version": crate::VERSION, "ts": now(), "domain": app.env.get("DOMAIN").cloned().unwrap_or_default(),
+        "ip": app.db.get("my_ip"),
+        "users": app.db.count("SELECT COUNT(*) FROM users"),
+        "nodes": app.db.count("SELECT COUNT(*) FROM nodes"),
+        "servers": crate::tunnel::panel::servers(app).len(),
+        "tunnels": crate::tunnel::panel::tunnels(app).len(),
+        "apps": apps,
+    })
+}
+
+/// `with_apps`: also the app install files uploaded in the panel (a download and a move take them;
+/// the nightly Telegram backup does not, a bot cannot send files over 50 MB).
 pub fn make_archive_with(app: &App, pass: &str, with_apps: bool) -> Result<(Vec<u8>, String), String> {
     let dir = format!("/tmp/kanki-bk-{}", rand_token(12));
     private_dir(&dir)?;
@@ -81,15 +115,20 @@ pub fn make_archive_with(app: &App, pass: &str, with_apps: bool) -> Result<(Vec<
                 let _ = std::fs::copy(f, &dst);
             }
         }
-        let meta = json!({"version": crate::VERSION, "ts": now(), "domain": app.env.get("DOMAIN").cloned().unwrap_or_default()});
-        std::fs::write(format!("{}/meta.json", dir), meta.to_string()).map_err(|e| e.to_string())?;
-        let tgz = format!("{}/out.tar.gz", dir);
         let data = app.data_dir();
-        if with_apps && std::path::Path::new(&format!("{}/apps", data)).is_dir() {
-            run("tar", &["-czf", &tgz, "-C", &dir, "kanki.db", "files", "meta.json", "-C", &data, "apps"], None)?;
-        } else {
-            run("tar", &["-czf", &tgz, "-C", &dir, "kanki.db", "files", "meta.json"], None)?;
+        // the certificates of nodes with a self-signed one, as first seen: the new server keeps
+        // trusting exactly those
+        copy_flat(&format!("{}/nodepins", data), &format!("{}/nodepins", dir));
+        let apps = if with_apps { copy_flat(&format!("{}/apps", data), &format!("{}/apps", dir)) } else { 0 };
+        std::fs::write(format!("{}/meta.json", dir), meta(app, apps).to_string()).map_err(|e| e.to_string())?;
+        let tgz = format!("{}/out.tar.gz", dir);
+        let mut items = vec!["kanki.db", "files", "meta.json", "nodepins"];
+        if apps > 0 {
+            items.push("apps");
         }
+        let mut args = vec!["-czf", tgz.as_str(), "-C", dir.as_str()];
+        args.extend(items);
+        run("tar", &args, None)?;
         let name_base = format!("kanki-backup-{}", stamp(now()));
         if pass.is_empty() {
             return Ok((std::fs::read(&tgz).map_err(|e| e.to_string())?, format!("{}.tar.gz", name_base)));
@@ -102,13 +141,21 @@ pub fn make_archive_with(app: &App, pass: &str, with_apps: bool) -> Result<(Vec<
     res
 }
 
+/// What a restore did: a message, and the meta of the backup (Null for an old one)
+pub struct Restored {
+    pub message: String,
+    pub meta: Value,
+}
+
 /// Accepts .kbk (encrypted), .tar.gz, or a raw SQLite file from older versions
-pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<String, String> {
+pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<Restored, String> {
     let dir = format!("/tmp/kanki-rs-{}", rand_token(12));
     private_dir(&dir)?;
     std::fs::create_dir_all(format!("{}/x", dir)).map_err(|e| e.to_string())?;
-    let res = (|| -> Result<String, String> {
+    let res = (|| -> Result<Restored, String> {
         let dbfile: String;
+        let mut meta = Value::Null;
+        let mut extra: Vec<String> = vec![];
         if data.len() > 16 && &data[..15] == b"SQLite format 3" {
             dbfile = format!("{}/kanki.db", dir);
             std::fs::write(&dbfile, data).map_err(|e| e.to_string())?;
@@ -130,6 +177,7 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<String,
             let x = format!("{}/x", dir);
             run("tar", &["-xzf", &tgz, "-C", &x], None).map_err(|_| "archive is damaged".to_string())?;
             dbfile = format!("{}/kanki.db", x);
+            meta = std::fs::read_to_string(format!("{}/meta.json", x)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
             if full {
                 // only the known server files, and only as plain files: a backup (or a file that was
                 // passed off as one) must not be able to write anywhere else on this machine
@@ -144,11 +192,31 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<String,
                     }
                     std::fs::copy(&src, f).map_err(|e| format!("{}: {}", f, e))?;
                 }
+                let ddir = app.data_dir();
+                let pins = copy_flat(&format!("{}/nodepins", x), &format!("{}/nodepins", ddir));
+                if pins > 0 {
+                    extra.push(format!("{} node certificate pins", pins));
+                }
+                if std::path::Path::new(&format!("{}/apps", x)).is_dir() {
+                    let n = copy_flat(&format!("{}/apps", x), &format!("{}/apps", ddir));
+                    if n > 0 {
+                        extra.push(format!("{} app files", n));
+                    }
+                }
             }
         }
         let head = std::fs::read(&dbfile).map_err(|_| "database missing in backup".to_string())?;
         if head.len() < 100 || &head[..15] != b"SQLite format 3" {
             return Err("database in backup is invalid".to_string());
+        }
+        // the database must open and have the panel's tables (a damaged file must not replace a good one)
+        {
+            let c = rusqlite::Connection::open_with_flags(&dbfile, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|_| "database in backup is invalid".to_string())?;
+            let ok: Result<i64, _> = c.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0));
+            let ok2: Result<i64, _> = c.query_row("SELECT COUNT(*) FROM settings", [], |r| r.get(0));
+            if ok.is_err() || ok2.is_err() {
+                return Err("database in backup is damaged (no users / settings table)".to_string());
+            }
         }
         let ddir = app.data_dir();
         let tmp = format!("{}/restore.db", ddir);
@@ -156,10 +224,27 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<String,
         std::fs::rename(&tmp, format!("{}/kanki.db", ddir)).map_err(|e| e.to_string())?;
         let _ = std::fs::remove_file(format!("{}/kanki.db-wal", ddir));
         let _ = std::fs::remove_file(format!("{}/kanki.db-shm", ddir));
-        Ok(if full { "database + server files restored".to_string() } else { "database restored".to_string() })
+        let mut message = if full { "database + server files restored".to_string() } else { "database restored".to_string() };
+        if !extra.is_empty() {
+            message.push_str(&format!(" ({})", extra.join(", ")));
+        }
+        Ok(Restored { message, meta })
     })();
     let _ = std::fs::remove_dir_all(&dir);
     res
+}
+
+/// Marks in the restored settings file that this start follows a restore: from another server (its
+/// IP is replaced in the panel's addresses, see `migrate::after_move`) or this one.
+fn mark_restored(old_ip: &str) {
+    let path = crate::ENV_PATH;
+    let t = std::fs::read_to_string(path).unwrap_or_default();
+    let mut lines: Vec<String> = t.lines().filter(|l| !l.starts_with("MOVED_FROM=") && !l.starts_with("RESTORED_AT=")).map(|l| l.to_string()).collect();
+    if !old_ip.is_empty() {
+        lines.push(format!("MOVED_FROM={}", old_ip));
+    }
+    lines.push(format!("RESTORED_AT={}", now()));
+    let _ = std::fs::write(path, lines.join("\n") + "\n");
 }
 
 const CADDYFILE: &str = "/etc/caddy/Caddyfile";
@@ -258,31 +343,12 @@ fn restart_services() {
     }
 }
 
-#[cfg(test)]
-mod restore_tests {
-    #[test]
-    fn caddy_is_sent_to_the_restored_port() {
-        let cf = "{\n  auto_https off\n}\nhttps://a.b:2053 {\n  reverse_proxy 127.0.0.1:20973\n}\nsub.b:2053 {\n  reverse_proxy 127.0.0.1:20973 {\n  }\n}\n";
-        let n = super::set_proxy_port(cf, "29332");
-        assert!(!n.contains("20973"));
-        assert_eq!(n.matches("reverse_proxy 127.0.0.1:29332").count(), 2);
-        assert!(n.ends_with("}\n") && n.contains("reverse_proxy 127.0.0.1:29332 {"));
-    }
-    #[test]
-    fn the_nat_rule_names_this_servers_card() {
-        let c = "PostUp = iptables -t nat -A POSTROUTING -s 10.66.0.0/16 -o ens18 -j MASQUERADE; iptables -A FORWARD -i wg0 -o ens18 -j ACCEPT\nPostDown = iptables -t nat -D POSTROUTING -s 10.66.0.0/16 -o ens18 -j MASQUERADE\n";
-        let n = super::set_masq_iface(c, "eth0");
-        assert_eq!(n.matches("-o eth0 -j MASQUERADE").count(), 2);
-        // only the NAT rules: a FORWARD rule with -o is left as it was
-        assert!(n.contains("-o ens18 -j ACCEPT"));
-    }
-}
-
 pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/backup", get(backup_legacy).post(backup_download))
         // a backup file can be big; only a signed-in admin gets that far (see auth::middleware)
         .route("/api/restore", post(restore_upload).layer(DefaultBodyLimit::max(128 * 1024 * 1024)))
+        .route("/api/restore/check", get(restore_check))
         .route("/api/tgbackup", get(tgb_get).put(tgb_put))
         .route("/api/tgbackup/test", post(tgb_test))
         .route("/api/tgbackup/send", post(tgb_send))
@@ -361,8 +427,10 @@ async fn backup_download(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> 
     if pass.len() < 6 {
         return err(StatusCode::BAD_REQUEST, "passphrase must be at least 6 characters");
     }
+    // the app install files go in too, unless asked not to (they can be big)
+    let apps = b["apps"].as_bool().unwrap_or(true);
     let a = app.clone();
-    match tokio::task::spawn_blocking(move || make_archive(&a, &pass)).await {
+    match tokio::task::spawn_blocking(move || make_archive_with(&a, &pass, apps)).await {
         Ok(Ok((bytes, name))) => file_response(bytes, &name),
         Ok(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
         Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "backup failed"),
@@ -380,10 +448,14 @@ async fn restore_upload(State(app): St, h: HeaderMap, body: Bytes) -> Response {
     let full = h.get("x-full").and_then(|v| v.to_str().ok()) == Some("1");
     let a = app.clone();
     let data = body.to_vec();
+    let here = app.db.get("my_ip");
     match tokio::task::spawn_blocking(move || restore(&a, &data, &pass, full)).await {
-        Ok(Ok(msg)) => {
+        Ok(Ok(r)) => {
             if full {
                 // the old server's files are in place now: set them to this server, then restart
+                let old = r.meta["ip"].as_str().unwrap_or("").to_string();
+                let moved = if !old.is_empty() && !here.is_empty() && old != here { old } else { String::new() };
+                mark_restored(&moved);
                 after_full_restore();
                 tokio::spawn(async {
                     tokio::time::sleep(std::time::Duration::from_millis(700)).await;
@@ -393,11 +465,38 @@ async fn restore_upload(State(app): St, h: HeaderMap, body: Bytes) -> Response {
             } else {
                 crate::admin::restart_self();
             }
-            Json(json!({"ok": true, "message": msg})).into_response()
+            Json(json!({"ok": true, "message": r.message, "meta": r.meta})).into_response()
         }
         Ok(Err(e)) => err(StatusCode::BAD_REQUEST, &e),
         Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "restore failed"),
     }
+}
+
+/// After a restore: whether every server and service came back (the Backup page shows it)
+async fn restore_check(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "backup");
+    let list = crate::servers::list_json(&app);
+    let mut servers = vec![];
+    for s in list["servers"].as_array().into_iter().flatten() {
+        let agent = &s["agent"];
+        let node = &s["node"];
+        servers.push(json!({
+            "name": s["name"], "local": s["local"],
+            "agent": if agent.is_null() { Value::Null } else { agent["online"].clone() },
+            "vpn": if node.is_null() { Value::Null } else { node["online"].clone() },
+            "vpn_on": node["enabled"].clone(),
+        }));
+    }
+    let services = crate::admin::service_states();
+    Json(json!({
+        "restored_at": app.db.get("restored_at").parse::<i64>().unwrap_or(0),
+        "moved_from": app.env.get("MOVED_FROM").cloned().unwrap_or_default(),
+        "servers": servers, "services": services,
+        "sub_domain": app.db.get("sub_domain"),
+        // the old server's panel still runs the same bot (both answer customers, both post)
+        "bot_conflict": now() - app.db.get("bot_conflict").parse::<i64>().unwrap_or(0) < 300,
+    }))
+    .into_response()
 }
 
 // ---------------------------------------------------------------- Telegram auto backup
@@ -566,5 +665,25 @@ pub async fn telegram_loop(app: Arc<App>) {
         }
         let r = send_backup(&app).await;
         record(&app, &r);
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    #[test]
+    fn caddy_is_sent_to_the_restored_port() {
+        let cf = "{\n  auto_https off\n}\nhttps://a.b:2053 {\n  reverse_proxy 127.0.0.1:20973\n}\nsub.b:2053 {\n  reverse_proxy 127.0.0.1:20973 {\n  }\n}\n";
+        let n = super::set_proxy_port(cf, "29332");
+        assert!(!n.contains("20973"));
+        assert_eq!(n.matches("reverse_proxy 127.0.0.1:29332").count(), 2);
+        assert!(n.ends_with("}\n") && n.contains("reverse_proxy 127.0.0.1:29332 {"));
+    }
+    #[test]
+    fn the_nat_rule_names_this_servers_card() {
+        let c = "PostUp = iptables -t nat -A POSTROUTING -s 10.66.0.0/16 -o ens18 -j MASQUERADE; iptables -A FORWARD -i wg0 -o ens18 -j ACCEPT\nPostDown = iptables -t nat -D POSTROUTING -s 10.66.0.0/16 -o ens18 -j MASQUERADE\n";
+        let n = super::set_masq_iface(c, "eth0");
+        assert_eq!(n.matches("-o eth0 -j MASQUERADE").count(), 2);
+        // only the NAT rules: a FORWARD rule with -o is left as it was
+        assert!(n.contains("-o ens18 -j ACCEPT"));
     }
 }

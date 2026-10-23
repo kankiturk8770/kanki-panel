@@ -97,8 +97,11 @@ fn build_packet(src: SocketAddrV4, dst: SocketAddrV4, seq: u32, ack: u32, flags:
     ip
 }
 
+/// (src, dst, seq, ack, flags, payload)
+type Packet<'a> = (SocketAddrV4, SocketAddrV4, u32, u32, u8, &'a [u8]);
+
 /// Parses an IPv4 + TCP packet: (src, dst, seq, ack, flags, payload) or None.
-fn parse_packet(b: &[u8]) -> Option<(SocketAddrV4, SocketAddrV4, u32, u32, u8, &[u8])> {
+fn parse_packet(b: &[u8]) -> Option<Packet<'_>> {
     if b.len() < 40 || b[0] >> 4 != 4 {
         return None;
     }
@@ -635,14 +638,15 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
 // ------------------------------------------------------------------ engine glue
 
 fn ft_kcp_config() -> tokio_kcp::KcpConfig {
-    let mut c = tokio_kcp::KcpConfig::default();
-    c.stream = true;
-    c.nodelay = tokio_kcp::KcpNoDelayConfig::fastest();
-    // the fake TCP headers (40 bytes) plus the mask head and padding must fit the wire budget
-    c.mtu = 1150;
-    c.wnd_size = (1024, 1024);
-    c.session_expire = Duration::from_secs(45);
-    c
+    tokio_kcp::KcpConfig {
+        stream: true,
+        nodelay: tokio_kcp::KcpNoDelayConfig::fastest(),
+        // the fake TCP headers (40 bytes) plus the mask head and padding must fit the wire budget
+        mtu: 1150,
+        wnd_size: (1024, 1024),
+        session_expire: Duration::from_secs(45),
+        ..Default::default()
+    }
 }
 
 /// Starts a `faketcp` listener: KCP on a private loopback socket, the fake-TCP channel on the

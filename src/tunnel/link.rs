@@ -122,6 +122,7 @@ fn derive(token: &str, shared: &[u8], hello_c: &[u8], hello_s: &[u8]) -> Res<([u
 
 // ------------------------------------------------------------------ raw connection (before the handshake)
 
+#[allow(clippy::large_enum_variant)] // one short-lived value per connection: boxing it buys nothing
 pub enum Raw {
     Stream(BoxIo),
     Ws(WebSocketStream<BoxIo>),
@@ -307,10 +308,7 @@ fn tune(s: &TcpStream) {
 /// 64 KB), and the default limit (64 MiB) would let a stranger who has not proven anything yet
 /// make the server buffer that much per connection.
 pub(super) fn ws_config() -> WebSocketConfig {
-    let mut c = WebSocketConfig::default();
-    c.max_message_size = Some(1 << 20);
-    c.max_frame_size = Some(1 << 20);
-    c
+    WebSocketConfig { max_message_size: Some(1 << 20), max_frame_size: Some(1 << 20), ..Default::default() }
 }
 
 /// A TCP stream whose first bytes leave in many tiny segments (2 to 9 bytes each, random).
@@ -414,6 +412,7 @@ pub(super) async fn tls_connect(connector: &tokio_rustls::TlsConnector, sni: &st
 ///
 /// `hq` is QUIC under a masking layer (see `salamander.rs`); `h2` is WebSocket over HTTP/2 over
 /// TLS 1.3 (see `h2ws.rs`); `dual` tries `hq` first and falls back to `h2` (see `dual.rs`).
+#[allow(clippy::too_many_arguments)]
 pub async fn dial(transport: &str, remote: &str, sni: &str, host_header: &str, path: &str, token: &str, frag: bool, gopt: super::game::GameOpts) -> Res<Raw> {
     let (path, req_host, sni_name) = request_parts(remote, sni, host_header, path);
     match transport {

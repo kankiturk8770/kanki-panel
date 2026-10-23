@@ -15,7 +15,7 @@ if [ "$(id -u)" != "0" ]; then
   command -v sudo >/dev/null || die "Please run as root (this server has no sudo)"
   say "Not root: running again with sudo ..."
   keep=()
-  for v in KANKI_REPO KANKI_JOIN KANKI_PANEL KANKI_TUNNEL KANKI_DOMAIN KANKI_EMAIL KANKI_MOVE; do
+  for v in KANKI_REPO KANKI_JOIN KANKI_PANEL KANKI_TUNNEL KANKI_DOMAIN KANKI_EMAIL KANKI_MOVE KANKI_PORTS KANKI_LOCAL_BIN; do
     if [ -n "${!v:-}" ]; then keep+=("$v=${!v}"); fi
   done
   # started as a file (the "kanki" command): run that file. Started as `bash <(curl ...)` or
@@ -31,6 +31,8 @@ if [ "$(id -u)" != "0" ]; then
   exec sudo env "${keep[@]}" bash "$self" "$@"
 fi
 command -v apt-get >/dev/null || die "Only Ubuntu / Debian are supported"
+# the port checks use `ss` (iproute2); a minimal image without it would see every port as free
+command -v ss >/dev/null || { apt-get update -qq && apt-get install -y -qq iproute2; } >/dev/null 2>&1 || true
 
 ENV_DIR=/etc/kanki; ENV=$ENV_DIR/kanki.env; BIN=/usr/local/bin/kanki-panel; TLS=$ENV_DIR/tls
 mkdir -p "$ENV_DIR"; chmod 711 "$ENV_DIR"
@@ -74,7 +76,41 @@ need_repo(){
   echo "$REPO" > $ENV_DIR/repo
 }
 
+# The program from the panel itself (a new server is given a token for it): works where GitHub is
+# filtered, and the server runs exactly the panel's version. Fails quietly so GitHub is tried next.
+download_from_panel(){
+  local id="" t="" q base="${KANKI_PANEL%/}"
+  [ -n "$base" ] || return 1
+  if [ -n "$KANKI_TUNNEL" ]; then id="${KANKI_TUNNEL%%:*}"; t="${KANKI_TUNNEL#*:}"; else t="$KANKI_JOIN"; fi
+  [ -n "$t" ] || return 1
+  q="id=$id&t=$t&arch=$(uname -m)"
+  say "Downloading Kanki from the panel ($base) ..."
+  curl -fsL --retry 2 --max-time 300 -o /tmp/kanki-panel "$base/dl/kanki-panel?$q" 2>/dev/null || return 1
+  curl -fsL --max-time 30 -o /tmp/kanki-panel.sha256 "$base/dl/kanki-panel.sha256?$q" 2>/dev/null || return 1
+  (cd /tmp && sha256sum -c kanki-panel.sha256 >/dev/null 2>&1) || { warn "The panel's copy did not check out; trying GitHub"; return 1; }
+  install -m 755 /tmp/kanki-panel "$BIN"
+}
+
+# the `kanki` menu command: this installer itself
+install_menu(){
+  local tmp; tmp=$(mktemp /usr/local/bin/.kanki.XXXXXX) || return 0
+  # write to a temp file and rename: the running script keeps reading its old copy
+  # (writing over it in place made bash read the new text mid-run: "syntax error near ')'")
+  if { [ -n "${KANKI_PANEL:-}" ] && curl -fsSL "${KANKI_PANEL%/}/dl/install.sh" -o "$tmp" 2>/dev/null && bash -n "$tmp" 2>/dev/null; } \
+     || { curl -fsSL "https://raw.githubusercontent.com/$REPO/main/install.sh" -o "$tmp" 2>/dev/null && bash -n "$tmp" 2>/dev/null; } \
+     || { [ -f "$0" ] && [ -r "$0" ] && cp "$0" "$tmp" && bash -n "$tmp" 2>/dev/null; }; then
+    chmod +x "$tmp" && mv -f "$tmp" /usr/local/bin/kanki
+  else
+    rm -f "$tmp"
+  fi
+}
+
 download_bin(){
+  # started by the server's own agent (Install VPN in the panel): the program is already here
+  if [ "${KANKI_LOCAL_BIN:-}" = 1 ] && [ -x "$BIN" ]; then
+    ok "Using the Kanki program already on this server ($($BIN version))"; install_menu; return 0
+  fi
+  if download_from_panel; then install_menu; ok "$($BIN version)"; return 0; fi
   say "Downloading Kanki Panel from $REPO ..."
   local base="https://github.com/$REPO/releases/download/latest"
   say "URL: $base/kanki-panel"
@@ -85,14 +121,7 @@ download_bin(){
     || die "Could not download kanki-panel.sha256, aborting (the binary was not verified)"
   (cd /tmp && sha256sum -c kanki-panel.sha256 >/dev/null) || die "Checksum mismatch, aborting"
   install -m 755 /tmp/kanki-panel "$BIN"
-  # write to a temp file and rename: the running script keeps reading its old copy
-  # (writing over it in place made bash read the new text mid-run: "syntax error near ')'")
-  local tmp; tmp=$(mktemp /usr/local/bin/.kanki.XXXXXX) || return 0
-  if curl -fsSL "https://raw.githubusercontent.com/$REPO/main/install.sh" -o "$tmp" 2>/dev/null && bash -n "$tmp" 2>/dev/null; then
-    chmod +x "$tmp" && mv -f "$tmp" /usr/local/bin/kanki
-  else
-    rm -f "$tmp"
-  fi
+  install_menu
   ok "$($BIN version)"
 }
 
@@ -383,8 +412,11 @@ install_node(){
     # join mode: nothing is asked, every protocol is installed on its default port (a random free one if busy)
     DOMAIN="${KANKI_DOMAIN:-}"; EMAIL="${KANKI_EMAIL:-}"
     if [ -n "$DOMAIN" ] && [ -z "$EMAIL" ]; then EMAIL="admin@$DOMAIN"; fi
+    # the panel picks ports no other server of it uses (a tunnel entry can then carry them all)
+    local pw=51820 pa=51821 ph=8443
+    if [[ "${KANKI_PORTS:-}" =~ ^[0-9]+,[0-9]+,[0-9]+,[0-9]+$ ]]; then IFS=, read -r pw pa ph _ <<< "$KANKI_PORTS"; fi
     free_port NODE_PUBLIC_PORT 2096; free_port NODE_PORT "$(rnum 20000 29999)"
-    free_port WG_PORT 51820; free_port AWG_PORT 51821; free_port HY2_PORT 8443
+    free_port WG_PORT "$pw"; free_port AWG_PORT "$pa"; free_port HY2_PORT "$ph"
   else
     ask DOMAIN "Node domain (recommended for TLS; empty = self-signed certificate)"
     EMAIL=""; [ -n "$DOMAIN" ] && ask EMAIL "Email for SSL"
@@ -416,7 +448,7 @@ EOF
   setup_caddy "https://:$NODE_PUBLIC_PORT" "$NODE_PORT"
   service kanki-node node
   open_ports "$NODE_PUBLIC_PORT/tcp" "$WG_PORT/udp" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}"
-  if [ -n "$KANKI_JOIN" ]; then register_node; return 0; fi
+  if [ -n "$KANKI_JOIN" ]; then register_node || return 1; return 0; fi
   IP=$(pubip)
   echo; ok "Node installed! In the panel go to Nodes > Add node and enter:"
   echo -e "   API address:  ${C}https://${DOMAIN:-$IP}:$NODE_PUBLIC_PORT${N}"
@@ -468,8 +500,8 @@ install_tunnel_agent(){
   KANKI_PANEL="${KANKI_PANEL%/}"
   local id="${KANKI_TUNNEL%%:*}" tok="${KANKI_TUNNEL#*:}" ins="" code
   { [ -n "$id" ] && [ -n "$tok" ] && [ "$id" != "$tok" ]; } || die "KANKI_TUNNEL must look like ID:TOKEN. Copy the full command from the panel."
-  echo; say "Installing the Kanki tunnel agent for $KANKI_PANEL"
-  say "Only the tunnel agent is installed here: no VPN, no web panel."
+  echo; say "Installing the Kanki server agent for $KANKI_PANEL"
+  [ -n "$KANKI_JOIN" ] || say "Only the server agent (tunnels, Xray, Kanki DNS) is installed here: no VPN, no web panel."
   need_repo
   command -v curl >/dev/null || { apt-get update -qq; apt-get install -y -qq curl ca-certificates >/dev/null; }
   download_bin
@@ -492,12 +524,36 @@ install_tunnel_agent(){
   service kanki-tunnel tunnel-agent
   sleep 4
   if systemctl is-active --quiet kanki-tunnel; then
-    echo; ok "Done! This server is connected to the panel. Open Tunnels in the panel: it shows as Connected."
-    echo "   Make a tunnel there; the agent opens the ports it needs (when ufw is active)."
-    echo "   If your cloud provider has its own firewall, open the tunnel port there too."
+    echo; ok "The server agent is connected to the panel (Servers shows it as Connected)."
+    if [ -z "$KANKI_JOIN" ]; then
+      echo "   Make a tunnel there; the agent opens the ports it needs (when ufw is active)."
+      echo "   If your cloud provider has its own firewall, open the tunnel port there too."
+    fi
   else
     journalctl -u kanki-tunnel -n 20 --no-pager || true
     die "The tunnel agent did not start (see above)."
+  fi
+}
+
+# One command for a whole server (Servers > Add server in the panel): the server agent (tunnels, Xray,
+# Kanki DNS) and the VPN part (WireGuard, AmneziaWG, Hysteria2, KANKI MIX). What it runs is switched on
+# in the panel; nothing else is typed here. The agent goes first: when the VPN part cannot be finished
+# (a package mirror filtered, a firewall), the server still shows in the panel and the VPN part can be
+# installed again from there with one button.
+install_server(){
+  install_tunnel_agent
+  echo; say "Installing the VPN part (WireGuard, AmneziaWG, Hysteria2, KANKI MIX) ..."
+  local rc
+  set +e
+  ( set -e; KANKI_LOCAL_BIN=1; join_node )
+  rc=$?
+  set -e
+  echo
+  if [ "$rc" = 0 ]; then
+    ok "Server ready. Everything is installed; switch on what it should run in the panel (Servers)."
+  else
+    warn "The VPN part was not finished (see above). Tunnels, Xray and Kanki DNS work on this server."
+    echo "   Fix the cause, then press Install VPN on this server in the panel (Servers), or run the same command again."
   fi
 }
 
@@ -560,7 +616,7 @@ change_ports(){
 }
 
 status(){
-  for s in kanki-panel kanki-node kanki-tunnel caddy wg-quick@wg0 awg-quick@awg0 hysteria-server; do
+  for s in kanki-panel kanki-node kanki-tunnel kanki-mix kanki-xray kanki-dns caddy wg-quick@wg0 awg-quick@awg0 hysteria-server; do
     systemctl list-unit-files "$s.service" >/dev/null 2>&1 || continue
     st=$(systemctl is-active "$s" 2>/dev/null || true)
     [ "$st" = "inactive" ] && ! systemctl is-enabled "$s" >/dev/null 2>&1 && continue
@@ -599,12 +655,15 @@ restore_bundle(){
   done
   need_repo
   # an address that named the old server becomes the domain
-  if [ -n "$OLD" ] && [ "$(envget ENDPOINT)" = "$OLD" ]; then sed -i "s|^ENDPOINT=.*|ENDPOINT=$D|" "$ENV"; fi
-  sed -i '/^MOVED_FROM=/d' "$ENV"; if [ -n "$OLD" ]; then echo "MOVED_FROM=$OLD" >> "$ENV"; fi
+  if [ -n "$OLD" ] && [ "$(envget ENDPOINT)" = "$OLD" ]; then sed -i "s|^ENDPOINT=.*|ENDPOINT=$(envget DOMAIN)|" "$ENV"; fi
+  sed -i '/^MOVED_FROM=/d; /^RESTORED_AT=/d' "$ENV"; if [ -n "$OLD" ]; then echo "MOVED_FROM=$OLD" >> "$ENV"; fi
+  echo "RESTORED_AT=$(date +%s)" >> "$ENV"
   local DATA; DATA=$(envget DATA_DIR); DATA=${DATA:-/var/lib/kanki}
   mkdir -p "$DATA"; chmod 700 "$DATA"
   install -m 600 "$W/x/kanki.db" "$DATA/kanki.db"; rm -f "$DATA/kanki.db-wal" "$DATA/kanki.db-shm"
-  if [ -d "$W/x/apps" ]; then rm -rf "$DATA/apps"; cp -a "$W/x/apps" "$DATA/apps"; fi
+  if [ -d "$W/x/apps" ]; then rm -rf "$DATA/apps"; mkdir -p "$DATA/apps"; find "$W/x/apps" -maxdepth 1 -type f -exec cp {} "$DATA/apps/" \;; fi
+  # the certificates of self-signed nodes as first seen (the panel keeps trusting exactly those)
+  if [ -d "$W/x/nodepins" ]; then mkdir -p "$DATA/nodepins"; find "$W/x/nodepins" -maxdepth 1 -type f -name '*.pin' -exec cp {} "$DATA/nodepins/" \;; fi
   ok "Database, settings, keys and app files restored"
   DOMAIN=$(envget DOMAIN); HTTPS_PORT=$(envget HTTPS_PORT); PANEL_PORT=$(envget PANEL_PORT); HY2_PORT=$(envget HY2_PORT)
   WG_PORT=$(grep -m1 '^ListenPort' /etc/wireguard/wg0.conf 2>/dev/null | awk -F= '{gsub(/ /,"",$2);print $2}')
@@ -708,7 +767,10 @@ restore_file(){
   fi
   tar -xzf "$W/b.tgz" -C "$W/x" 2>/dev/null || { rm -rf "$W"; die "The backup is damaged"; }
   [ -f "$W/x/kanki.db" ] && [ -f "$W/x/files$ENV" ] || { rm -rf "$W"; die "The backup has no database or settings"; }
-  restore_bundle "$W" ""
+  # made on another server: its IP is replaced in the panel's addresses (see meta.json of the backup)
+  local OLDIP ME0; OLDIP=$(grep -o '"ip":"[0-9.]*"' "$W/x/meta.json" 2>/dev/null | cut -d'"' -f4); ME0=$(pubip)
+  [ -n "$OLDIP" ] && [ "$OLDIP" = "$ME0" ] && OLDIP=""
+  restore_bundle "$W" "$OLDIP"
   rm -rf "$W"
   local ME; ME=$(pubip)
   echo; ok "Restore complete!"
@@ -717,6 +779,7 @@ restore_file(){
 }
 
 if [ -n "${KANKI_MOVE:-}" ]; then move_panel; exit $?; fi
+if [ -n "$KANKI_TUNNEL" ] && [ -n "$KANKI_JOIN" ]; then install_server; exit $?; fi
 if [ -n "$KANKI_TUNNEL" ]; then install_tunnel_agent; exit $?; fi
 if [ -n "$KANKI_JOIN" ]; then join_node; exit $?; fi
 

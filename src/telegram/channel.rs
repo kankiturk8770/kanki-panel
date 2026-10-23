@@ -381,7 +381,7 @@ fn toman(n: i64) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, ch) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(ch);
@@ -723,21 +723,31 @@ fn parse_slots(t: &str) -> Vec<i64> {
 fn due(app: &App, t: i64) -> bool {
     let last: i64 = app.db.get("ch_last").parse().unwrap_or(0);
     let sl = slots(app);
-    let local = t + TZ;
     if !sl.is_empty() {
-        let day0 = local - local % 86400;
-        let mins = (local % 86400) / 60;
-        let Some(s) = sl.iter().rev().find(|s| **s <= mins) else { return false };
-        let slot_at = day0 + s * 60 - TZ;
-        // a slot missed by more than 2 hours (panel was off) is skipped
-        return last < slot_at && t - slot_at < 7200;
+        return due_at(&sl, last, t);
     }
+    let local = t + TZ;
     let h = (local % 86400) / 3600;
     if (1..8).contains(&h) {
         return false;
     }
     let every: i64 = app.db.get("ch_hours").parse::<i64>().unwrap_or(8).clamp(1, 72);
     t - last >= every * 3600
+}
+
+/// With posting times `sl` (minutes of the Iran day): is a post due at `t`, the last one at `last`?
+fn due_at(sl: &[i64], last: i64, t: i64) -> bool {
+    let local = t + TZ;
+    let day0 = local - local % 86400;
+    let mins = (local % 86400) / 60;
+    let Some(i) = sl.iter().rposition(|s| *s <= mins) else { return false };
+    let slot_at = day0 + sl[i] * 60 - TZ;
+    // a post made a little before the slot (by hand, from the bot) counts for it: at most 45 minutes
+    // before, and never reaching back to the previous slot
+    let prev_gap = if i > 0 { (sl[i] - sl[i - 1]) * 60 } else { 86400 };
+    let covered_from = slot_at - (45 * 60).min(prev_gap / 2);
+    // a slot missed by more than 2 hours (panel was off) is skipped
+    last < covered_from && t - slot_at < 7200
 }
 
 /// Picks a kind: occasions first, a live discount next, otherwise rotate through the
@@ -780,6 +790,14 @@ fn buy_button(app: &App) -> Option<Value> {
 }
 
 pub async fn send_to_channel(app: &App, text: &str) -> Result<(), String> {
+    // one post at a time, and the same post never twice in a row: a double click on "post now", a tap
+    // the bot gets twice, or the schedule running while a post goes out
+    static SENDING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _one = SENDING.lock().await;
+    let last: i64 = app.db.get("ch_last").parse().unwrap_or(0);
+    if now() - last < 15 * 60 && app.db.get("ch_last_hash") == crate::util::sha256_hex(text) {
+        return Err("this post was already sent a moment ago".into());
+    }
     let token = crate::bot::bot_token(app);
     let ch = app.db.get("ch_id");
     if token.is_empty() {
@@ -823,6 +841,7 @@ pub async fn send_to_channel(app: &App, text: &str) -> Result<(), String> {
     }
     if v["ok"].as_bool() == Some(true) {
         app.db.set("ch_last", &now().to_string());
+        app.db.set("ch_last_hash", &crate::util::sha256_hex(text));
         let n: i64 = app.db.get("ch_count").parse().unwrap_or(0);
         app.db.set("ch_count", &(n + 1).to_string());
         Ok(())
@@ -1102,6 +1121,26 @@ async fn disc_del(State(app): St, h: HeaderMap, Path(code): Path<String>) -> Res
 
 #[cfg(test)]
 mod schedule_tests {
+    #[test]
+    fn a_post_just_before_a_slot_counts_for_it() {
+        // 10:00, 16:00, 21:30 Iran time on one day; times as UTC seconds
+        let day0 = 20_000 * 86400; // a midnight (Iran time) as local seconds
+        let at = |h: i64, m: i64| day0 + h * 3600 + m * 60 - super::TZ;
+        let sl = super::parse_slots("10:00, 16:00, 21:30");
+        let due = |last: i64, t: i64| super::due_at(&sl, last, t);
+        // nothing posted since the morning: 16:00 is due
+        assert!(due(at(10, 1), at(16, 1)));
+        // posted by hand at 15:50: 16:00 is not posted again
+        assert!(!due(at(15, 50), at(16, 1)));
+        // posted at 15:00 (an hour before): 16:00 still goes out
+        assert!(due(at(15, 0), at(16, 1)));
+        // the 16:00 post done: nothing until 21:30
+        assert!(!due(at(16, 2), at(18, 0)));
+        assert!(due(at(16, 2), at(21, 31)));
+        // the panel was off for more than 2 hours after a slot: skipped
+        assert!(!due(at(10, 1), at(18, 30)));
+    }
+
     #[test]
     fn slot_parsing_ignores_junk() {
         assert_eq!(super::parse_slots("21:30, 10:00,16:00 25:00 x 10:00"), vec![600, 960, 1290]);

@@ -45,8 +45,20 @@ fn token_ok(app: &App, t: &str) -> bool {
     !want.is_empty() && !t.is_empty() && now() < exp && crate::util::ct_eq(&sha256_hex(t), &want)
 }
 
+/// Keeps this server's public IPv4 in the settings (refreshed every 6 hours): a backup names the
+/// server it was made on, so a restore on another server knows which address to replace.
+pub async fn ip_loop(app: Arc<App>) {
+    loop {
+        let ip = public_ip(&app).await;
+        if !ip.is_empty() {
+            app.db.set("my_ip", &ip);
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(if ip.is_empty() { 600 } else { 6 * 3600 })).await;
+    }
+}
+
 /// This server's public IPv4 (from outside: the panel server is not behind the filter)
-async fn public_ip(app: &App) -> String {
+pub async fn public_ip(app: &App) -> String {
     for u in ["https://api.ipify.org", "https://ipv4.icanhazip.com", "https://ifconfig.me/ip"] {
         if let Ok(r) = app.http.get(u).timeout(std::time::Duration::from_secs(6)).send().await {
             if let Ok(t) = r.text().await {
@@ -158,19 +170,69 @@ async fn done(State(app): St, Query(q): Query<HashMap<String, String>>) -> Respo
     Json(json!({ "ok": true })).into_response()
 }
 
-/// On the new server, the first start after a move: addresses that named the old server are dropped
-/// (the domain is used instead).
+/// Settings that can hold the panel server's own address. After a move (or a restore on another
+/// server) the old server's IP in them would send users and servers to the old machine.
+const ADDR_KEYS: &[&str] = &["tun_local_addr", "endpoint", "sub_base"];
+/// JSON settings where the old IP is replaced by "" (= the automatic address of this server)
+const ADDR_JSON_KEYS: &[&str] = &["kmix_nodes", "xray_cfg"];
+
+/// `v` with every exact JSON string `"old"` emptied, and `old` as the host of a URL replaced by `new`
+/// (left as it is when there is no `new`: "https://:2053" would be no address at all)
+fn drop_ip(v: &str, old: &str, new: &str) -> String {
+    let v = v.replace(&format!("\"{}\"", old), "\"\"");
+    if new.is_empty() {
+        return v;
+    }
+    v.replace(&format!("//{}:", old), &format!("//{}:", new)).replace(&format!("//{}/", old), &format!("//{}/", new))
+}
+
+/// On the new server, the first start after a move or a restore from another server: addresses that
+/// named the old server are dropped (the domain is used instead).
 pub fn after_move(app: &App) {
+    // any restore (the Backup page shows when, and whether every server came back)
+    if let Some(at) = app.env.get("RESTORED_AT").filter(|v| v.parse::<i64>().is_ok()) {
+        if app.db.get("restored_seen") != *at {
+            app.db.set("restored_seen", at);
+            app.db.set("restored_at", at);
+        }
+    }
     let old = app.env.get("MOVED_FROM").cloned().unwrap_or_default();
     if old.is_empty() || app.db.get("moved_fix") == old {
         return;
     }
-    if app.db.get("tun_local_addr").trim() == old {
-        app.db.set("tun_local_addr", "");
+    let domain = app.env.get("DOMAIN").cloned().unwrap_or_default();
+    for k in ADDR_KEYS {
+        let v = app.db.get(k);
+        if v.trim() == old {
+            app.db.set(k, "");
+        } else if v.contains(&old) && !domain.is_empty() {
+            app.db.set(k, &drop_ip(&v, &old, &domain));
+        }
     }
-    for k in ["mig_token", "mig_pass", "mig_exp", "mig_cmd", "mig_fetched", "mig_done", "mig_new_ip", "mig_ip"] {
+    for k in ADDR_JSON_KEYS {
+        let v = app.db.get(k);
+        if v.contains(&old) {
+            app.db.set(k, &drop_ip(&v, &old, &domain));
+        }
+    }
+    // the panel server's own node row
+    let _ = app.db.exec("UPDATE nodes SET endpoint='', endpoint_mode='panel' WHERE id='local' AND endpoint=?1", &[&old]);
+    for k in ["mig_token", "mig_pass", "mig_exp", "mig_cmd", "mig_fetched", "mig_done", "mig_new_ip", "mig_ip", "my_ip"] {
         app.db.set(k, "");
     }
     app.db.set("moved_fix", &old);
+    app.db.set("restored_at", &now().to_string());
     eprintln!("moved from {}: addresses of the old server cleared", old);
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_old_ip_goes_from_settings() {
+        let x = r#"{"servers":[{"server":"local","address":"1.2.3.4"}],"x":"1.2.3.45"}"#;
+        assert_eq!(super::drop_ip(x, "1.2.3.4", "p.example.com"), r#"{"servers":[{"server":"local","address":""}],"x":"1.2.3.45"}"#);
+        assert_eq!(super::drop_ip("https://1.2.3.4:2053/x", "1.2.3.4", "p.example.com"), "https://p.example.com:2053/x");
+        // no domain: a URL keeps its host rather than losing it
+        assert_eq!(super::drop_ip("https://1.2.3.4:2053/x", "1.2.3.4", ""), "https://1.2.3.4:2053/x");
+    }
 }

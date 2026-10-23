@@ -226,6 +226,35 @@ pub fn remove_node() {
     std::process::exit(0);
 }
 
+/// Runs the server agent (tunnels, Xray, Kanki DNS) next to this node, as the panel asked: the same
+/// program file with `tunnel-agent`, its settings in /etc/kanki/tunnel.env. Blocking.
+pub fn setup_tunnel_agent(panel: &str, id: &str, token: &str, insecure: bool) -> Result<(), String> {
+    let word = |s: &str| !s.is_empty() && s.len() <= 80 && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_');
+    if !word(id) || !word(token) {
+        return Err("bad agent id or token".into());
+    }
+    let panel = panel.trim().trim_end_matches('/');
+    if !panel.starts_with("https://") || panel.len() > 200 || panel.bytes().any(|c| c.is_ascii_whitespace() || c == b'\'' || c == b'"') {
+        return Err("bad panel address".into());
+    }
+    let exe = crate::util::exe_path().map_err(|e| e.to_string())?.to_string_lossy().to_string();
+    let _ = std::fs::create_dir_all("/etc/kanki");
+    let _ = std::fs::create_dir_all("/var/lib/kanki");
+    let envf = crate::tunnel::agent::ENV_FILE;
+    std::fs::write(envf, format!("PANEL_URL={}\nAGENT_ID={}\nAGENT_TOKEN={}\nINSECURE={}\n", panel, id, token, if insecure { "1" } else { "" })).map_err(|e| e.to_string())?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(envf, std::fs::Permissions::from_mode(0o600));
+    }
+    let unit = format!(
+        "[Unit]\nDescription=Kanki (kanki-tunnel)\nAfter=network-online.target wg-quick@wg0.service\n\n[Service]\nExecStart={} tunnel-agent\nRestart=always\nRestartSec=3\nLimitNOFILE=65535\n\n[Install]\nWantedBy=multi-user.target\n",
+        exe
+    );
+    std::fs::write("/etc/systemd/system/kanki-tunnel.service", unit).map_err(|e| e.to_string())?;
+    let ok = Command::new("sh").arg("-c").arg("systemctl daemon-reload && systemctl enable -q kanki-tunnel && systemctl restart kanki-tunnel").status().map(|s| s.success()).unwrap_or(false);
+    if ok { Ok(()) } else { Err("systemctl could not start kanki-tunnel".into()) }
+}
+
 pub fn repair_services() -> Value {
     let mut out = vec![];
     for (k, unit) in SERVICES.iter().filter(|(k, _)| !["web", "panel", "node"].contains(k)) {
@@ -496,6 +525,8 @@ async fn bot_get(State(app): St, h: HeaderMap) -> Response {
         "token_set": !t.is_empty(), "token_masked": mask(&t), "admins": crate::bot::bot_admins_raw(&app),
         "paused": app.db.on("bot_paused"), "online": !t.is_empty() && crate::util::now() - alive < 120,
         "username": app.db.get("bot_username"), "name": app.db.get("bot_name"),
+        // another program polls the same bot (an old panel still running): Telegram answered 409
+        "conflict": crate::util::now() - app.db.get("bot_conflict").parse::<i64>().unwrap_or(0) < 300,
     })).into_response()
 }
 
@@ -623,14 +654,8 @@ pub async fn self_update(app: &App) -> Result<String, String> {
     if want.is_empty() || want != got {
         return Err("checksum mismatch, update aborted".into());
     }
-    let path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("new");
-    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
-    }
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    let path = crate::util::exe_path().map_err(|e| e.to_string())?;
+    crate::util::swap_program(&path, &bytes)?;
     let v = latest_version(app).await.unwrap_or_default();
     restart_self();
     Ok(v)

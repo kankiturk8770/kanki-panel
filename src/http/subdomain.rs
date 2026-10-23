@@ -5,6 +5,10 @@
 //! subscription page, the config downloads and the font on it; the admin panel is not reachable
 //! through that domain. When the certificate cannot be obtained, the old Caddyfile is put back, so a
 //! wrong domain never breaks the panel.
+//!
+//! Servers added while this domain was the panel's link address (before 3.9) were given it as the
+//! panel's address: the agent and join paths (all checked by their own tokens) are passed on too, so
+//! those servers reach the panel.
 use crate::api::err;
 use crate::guard;
 use crate::App;
@@ -40,7 +44,7 @@ fn valid_domain(d: &str) -> bool {
 
 fn block(domain: &str, port: &str) -> String {
     format!(
-        "{b}\n{d} {{\n  @pub path /sub/* /api/config/* /assets/*\n  handle @pub {{\n    reverse_proxy 127.0.0.1:{p}\n  }}\n  handle {{\n    respond 404\n  }}\n  header {{\n    Strict-Transport-Security \"max-age=31536000\"\n    X-Content-Type-Options nosniff\n    Referrer-Policy no-referrer\n    -Server\n  }}\n}}\n{e}\n",
+        "{b}\n{d} {{\n  @pub path /sub/* /api/config/* /assets/* /tunnel/* /join/* /dl/*\n  handle @pub {{\n    reverse_proxy 127.0.0.1:{p}\n  }}\n  handle {{\n    respond 404\n  }}\n  header {{\n    Strict-Transport-Security \"max-age=31536000\"\n    X-Content-Type-Options nosniff\n    Referrer-Policy no-referrer\n    -Server\n  }}\n}}\n{e}\n",
         b = BEGIN, d = domain, p = port, e = END
     )
 }
@@ -156,6 +160,28 @@ fn caddy_error() -> String {
     let (_, out) = run("journalctl", &["-u", "caddy", "-n", "80", "--no-pager"]);
     let l = out.lines().rev().find(|l| l.contains("error")).unwrap_or("").to_string();
     l.chars().rev().take(320).collect::<Vec<_>>().into_iter().rev().collect()
+}
+
+/// At start: the subscription domain is set but the Caddyfile has no (or an older) block for it — after
+/// a restore or a move the installer wrote a fresh Caddyfile — so it is written again.
+pub fn ensure_on_start(app: &App) {
+    let d = app.db.get("sub_domain").trim().to_string();
+    let Some(port) = app.env.get("PANEL_PORT").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) else { return };
+    let Ok(old) = std::fs::read_to_string(CADDYFILE) else { return };
+    if d.is_empty() || !valid_domain(&d) {
+        return;
+    }
+    let new = build(&old, Some(&d), &port);
+    if new == old {
+        return;
+    }
+    match write_and_reload(&new) {
+        Ok(()) => eprintln!("subscription domain {}: Caddy site written again", d),
+        Err(e) => {
+            eprintln!("subscription domain {}: {}", d, e);
+            restore(&old);
+        }
+    }
 }
 
 async fn status(State(app): St, h: HeaderMap) -> Response {

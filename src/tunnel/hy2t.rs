@@ -167,7 +167,7 @@ pub fn clean_url(s: &str) -> String {
 
 fn q(s: &str) -> String {
     // every value we write is made of safe characters, but quote it anyway
-    format!("\"{}\"", s.replace('\\', "").replace('"', ""))
+    format!("\"{}\"", s.replace(['\\', '"'], ""))
 }
 
 fn conf_path(s: &Hy2Spec) -> String {

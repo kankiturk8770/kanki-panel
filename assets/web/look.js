@@ -142,7 +142,7 @@ body.k38 #thm{display:none}
 .sgr2 span{font-size:11px;font-weight:700;padding:2px 8px;border-radius:7px;background:var(--c1);border:1px solid var(--gb);color:var(--s)}
 .sgcells{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px}
 /* phones: bottom tab bar and a sheet with the rest */
-@media(max-width:1099px){
+@media(max-width:899px){
  body.k38 .mbar.k38bar{position:fixed;top:auto;bottom:0;left:0;right:0;z-index:40;overflow:visible;gap:2px;padding:6px max(10px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px));
   background:color-mix(in srgb,var(--c1) 90%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--gb);border-bottom:0}
  body.k38 .mbar.k38bar a,body.k38 .mbar.k38bar button{flex:1;flex-direction:column;gap:2px;justify-content:center;padding:6px 0;border:0;background:transparent;color:var(--s);font-size:10.5px;border-radius:12px}

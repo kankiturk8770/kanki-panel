@@ -178,17 +178,18 @@ pub async fn dial(remote: &str, sni: &str) -> Res<BoxIo> {
 // ------------------------------------------------------------------ KCP
 
 fn kcp_config() -> tokio_kcp::KcpConfig {
-    let mut c = tokio_kcp::KcpConfig::default();
-    c.stream = true;
-    c.nodelay = tokio_kcp::KcpNoDelayConfig::fastest();
-    // 1150 leaves room in the 1232-byte wire budget (salamander.rs MAX_WIRE) so the obfuscation
-    // relay can add its random padding to full-size KCP datagrams too. With mtu 1350 every full
-    // datagram was exactly 13 + 1350 = 1363 bytes on the wire — a fixed-size signature DPI can
-    // recognise even though the KCP header itself is hidden.
-    c.mtu = 1150;
-    c.wnd_size = (1024, 1024);
-    c.session_expire = Duration::from_secs(45);
-    c
+    tokio_kcp::KcpConfig {
+        stream: true,
+        nodelay: tokio_kcp::KcpNoDelayConfig::fastest(),
+        // 1150 leaves room in the 1232-byte wire budget (salamander.rs MAX_WIRE) so the obfuscation
+        // relay can add its random padding to full-size KCP datagrams too. With mtu 1350 every full
+        // datagram was exactly 13 + 1350 = 1363 bytes on the wire — a fixed-size signature DPI can
+        // recognise even though the KCP header itself is hidden.
+        mtu: 1150,
+        wnd_size: (1024, 1024),
+        session_expire: Duration::from_secs(45),
+        ..Default::default()
+    }
 }
 
 /// Starts a KCP listener. KCP runs on a private loopback socket; the obfuscation relay owns the

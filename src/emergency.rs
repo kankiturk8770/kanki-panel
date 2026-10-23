@@ -323,6 +323,7 @@ struct After {
 }
 
 /// unknown ids are counted per client, so codes cannot be guessed
+#[allow(clippy::result_large_err)] // the error is the ready axum answer (401/403)
 fn user_or_deny(srv: &Srv, h: &HeaderMap, p: &Peer) -> Result<String, Response> {
     let ck = client_key(h, p);
     match srv.user_of(h) {

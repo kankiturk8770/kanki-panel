@@ -3,6 +3,12 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.9 — one kind of server, one command
+- **Servers** is one list: the panel runs on one server, every other server is a node. Each card shows what the server runs (VPN for users on/off and its ports, tunnels, Xray, Kanki DNS) and its health.
+- **Add server** gives one command that installs everything on the new server (VPN part and server agent). What it runs is switched on in the panel. Servers made before 3.9 get their missing part with one button.
+- **Unique VPN ports** on every server, so one Iran entry can tunnel all of them; **Fix ports** moves clashing ones (tunnels follow).
+- **Backup** brings everything back on another server: app files, node certificate pins, the subscription domain, and the old server's IP replaced in the panel's addresses. Details: `docs/CHANGES.md`.
+
 ## New in 3.6.7 — the app's install files in the panel
 - **Sales bot › App files:** upload the Kanki app (.apk) in the panel, one file per phone type (arm64, armv7, universal; read from the file name, or chosen). A new file of the same type replaces the old one. No GitHub token or download site is needed.
 - **Bot:** «📱 Download app» shows a button per phone type (with which phones it is for and its size) and sends the file itself, named like `KankiVPN-1.15.1-arm64.apk`. After the first send Telegram's file id is kept, so the next customers get it at once. The account message also has the download button.
@@ -79,7 +85,7 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written i
 - **Animated map** on the Tunnels page and the Dashboard showing which server connects to which, with live state (connected / connecting / down), transport and ping.
 - **Whitelist mode (`cdn`)**: reach the exit only through a CDN edge (ArvanCloud…) with its own SNI / Host, several edge IPs and a split TLS hello — see `docs/WHITELIST.md`.
 - **Six transports** (plus `cdn`): `tcp`, `tcpmux`, `ws`, `wss`, `quic`, `kcp`. Both TCP and UDP are carried, so WireGuard, AmneziaWG and Hysteria2 pass through. Reverse or direct mode. Every link is encrypted (X25519 + ChaCha20-Poly1305) with the tunnel token and reconnects on its own.
-- **Add a tunnel server with one command** (Tunnels > + Server); it installs only the agent and shows up as Connected within seconds. See [the install guide](docs/INSTALL.md#add-a-tunnel-server-kanki-tunnel).
+- **Add a tunnel server with one command** (Tunnels > + Server); it installs only the agent and shows up as Connected within seconds. See [the install guide](docs/INSTALL.md#a-tunnel-entry-for-example-in-iran).
 
 ## New in 2.3
 - The panel is called **Kanki Panel** and has its own logo (an uploaded logo still replaces it).

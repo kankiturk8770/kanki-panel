@@ -173,6 +173,10 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/assets/kanki-look.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/look.js"))
         }))
+        // 3.9: one Servers page (every server is a node; its services switched on in place)
+        .route("/assets/kanki-servers.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/servers.js"))
+        }))
         .route("/assets/kanki-kmix.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/kmix.js"))
         }))
@@ -212,6 +216,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::subdomain::router())
         .merge(crate::subiran::router())
         .merge(crate::migrate::router())
+        .merge(crate::servers::router())
         .merge(crate::channel::router())
         .merge(crate::tunnel::panel::router())
         .merge(crate::dns::panel::router())
@@ -232,6 +237,7 @@ pub fn node_router(app: Arc<App>) -> Router {
         .route("/agent/update", post(agent_update))
         .route("/agent/ports", post(agent_ports))
         .route("/agent/remove", post(agent_remove))
+        .route("/agent/setup-tunnel", post(agent_setup_tunnel))
         .route("/hy2/auth", post(hy2_auth))
         .with_state(app)
 }
@@ -417,7 +423,7 @@ pub fn node_info(n: &Node) -> Value {
     serde_json::from_str(&n.info).unwrap_or(json!({}))
 }
 
-fn node_json(app: &App, n: &Node, users: &[User]) -> Value {
+pub(crate) fn node_json(app: &App, n: &Node, users: &[User]) -> Value {
     let info_pub = node_info(n);
     let assigned = users.iter().filter(|u| u.on(n)).count();
     json!({
@@ -505,19 +511,26 @@ async fn nodes_delete(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
     if id == "local" {
         return err(StatusCode::BAD_REQUEST, "the main server cannot be deleted");
     }
-    // the server itself: its users are cut off and KANKI MIX stops (every agent version), then it
-    // removes its VPN services, closes their ports and uninstalls its agent (3.6.8+)
+    let removed = delete_node(&app, &id).await;
+    Json(json!({ "ok": true, "removed": removed })).into_response()
+}
+
+/// Removes a VPN node: its users are cut off and KANKI MIX stops (every agent version), then it
+/// removes its VPN services, closes their ports and uninstalls its agent (3.6.8+). True when the
+/// node itself confirmed the removal.
+pub(crate) async fn delete_node(app: &Arc<App>, id: &str) -> bool {
     let mut removed = false;
-    if let Some(n) = app.db.node(&id) {
+    if let Some(n) = app.db.node(id) {
         let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), ..Default::default() };
-        let synced = sync::remote_post_json(&app, &n, "/agent/sync", &json!(empty)).await.is_some();
-        removed = synced && sync::remote_post(&app, &n, "/agent/remove").await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false);
+        let synced = sync::remote_post_json(app, &n, "/agent/sync", &json!(empty)).await.is_some();
+        removed = synced && sync::remote_post(app, &n, "/agent/remove").await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false);
         app.forget_node_pins(&n.id, &n.address);
     }
     let _ = app.db.exec("DELETE FROM nodes WHERE id=?1", &[&id]);
     let _ = app.db.exec("DELETE FROM peers WHERE node_id=?1", &[&id]);
-    crate::live::forget(&id);
-    Json(json!({ "ok": true, "removed": removed })).into_response()
+    crate::live::forget(id);
+    crate::servers::node_gone(app, id);
+    removed
 }
 
 /// Changes the WireGuard / AmneziaWG / Hysteria2 ports of a node (or of the panel server) in one go
@@ -552,7 +565,7 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
                     continue;
                 }
                 let mut list: Vec<String> = u.nodes.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
-                let has = list.iter().any(|x| *x == id);
+                let has = list.contains(&id);
                 if add && !has {
                     list.push(id.clone());
                 } else if !add && has {
@@ -658,18 +671,22 @@ async fn node_join_token(State(app): St, h: HeaderMap) -> Response {
     let exp = now() + 3600;
     app.db.set("join_token", &token);
     app.db.set("join_expires", &exp.to_string());
-    Json(json!({ "token": token, "expires": exp, "panel": origin(&app), "repo": crate::admin::repo() })).into_response()
+    Json(json!({ "token": token, "expires": exp, "panel": crate::servers::panel_url(&app), "repo": crate::admin::repo() })).into_response()
 }
 
 /// Public: called by the installer on the new server once its agent runs. The one-time token is the only credential.
 async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
-    let want = app.db.get("join_token");
     let given = b["token"].as_str().unwrap_or("").trim().to_string();
-    let exp: i64 = app.db.get("join_expires").parse().unwrap_or(0);
-    if want.is_empty() || given.is_empty() || !util::ct_eq(&given, &want) || exp < now() {
-        return err(StatusCode::FORBIDDEN, "the join token is wrong, already used or expired");
+    // the token of one server added in Servers (its VPN part), or the panel-wide one of Add node
+    let server = crate::servers::join_server(&app, &given);
+    if server.is_none() {
+        let want = app.db.get("join_token");
+        let exp: i64 = app.db.get("join_expires").parse().unwrap_or(0);
+        if want.is_empty() || given.is_empty() || !util::ct_eq(&given, &want) || exp < now() {
+            return err(StatusCode::FORBIDDEN, "the join token is wrong, already used or expired");
+        }
     }
-    let name = b["name"].as_str().unwrap_or("").trim().to_string();
+    let name = server.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| b["name"].as_str().unwrap_or("").trim().to_string());
     let addr = b["address"].as_str().unwrap_or("").trim().trim_end_matches('/').to_string();
     let endpoint = b["endpoint"].as_str().unwrap_or("").trim().to_string();
     let token = b["node_token"].as_str().unwrap_or("").trim().to_string();
@@ -688,6 +705,8 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
         return err(StatusCode::BAD_GATEWAY, "the panel cannot reach the node (open the node API port in its firewall, then run the same command again)");
     };
     let mode = if endpoint.is_empty() { "panel" } else { "custom" };
+    // a server added in Servers says whether its VPN serves users (a relay in Iran: off)
+    let enabled = server.as_ref().map(|s| s.vpn).unwrap_or(true) as i64;
     let id = match existing {
         Some(id) => {
             let _ = app.db.exec(
@@ -699,8 +718,8 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
         None => {
             let id = format!("node-{}", rand_token(10).to_lowercase());
             let r = app.db.exec(
-                "INSERT INTO nodes(id,name,address,endpoint,token,info,online,insecure,endpoint_mode,note) VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9)",
-                &[&id, &name, &addr, &endpoint, &token, &info.to_string(), &(insecure as i64), &mode, &"joined with a one-time token"],
+                "INSERT INTO nodes(id,name,address,endpoint,token,info,online,insecure,endpoint_mode,note,enabled) VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9,?10)",
+                &[&id, &name, &addr, &endpoint, &token, &info.to_string(), &(insecure as i64), &mode, &"joined with a one-time token", &enabled],
             );
             if let Err(e) = r {
                 return err(StatusCode::BAD_REQUEST, &e);
@@ -712,8 +731,17 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
         app.adopt_node_pin(&addr, &id);
     }
     // one use only
-    app.db.set("join_token", "");
-    spawn_sync(&app);
+    match &server {
+        Some(s) => crate::servers::joined(&app, &s.id, &id),
+        None => app.db.set("join_token", ""),
+    }
+    // a new server never shares a VPN port with another one (a tunnel entry could not carry both)
+    let a = app.clone();
+    let nid = id.clone();
+    tokio::spawn(async move {
+        let _ = crate::servers::fix_ports_of(&a, Some(&nid)).await;
+        sync::sync_all(&a).await;
+    });
     Json(json!({ "ok": true, "id": id })).into_response()
 }
 
@@ -1357,6 +1385,25 @@ async fn agent_remove(State(app): St, h: HeaderMap) -> Response {
     }
     std::thread::spawn(crate::admin::remove_node);
     Json(json!({"ok": true})).into_response()
+}
+
+/// The panel asks this node to run the server agent too (tunnels, Xray, Kanki DNS on the same machine)
+async fn agent_setup_tunnel(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    if !node_authed(&app, &h) {
+        return err(StatusCode::UNAUTHORIZED, "bad token");
+    }
+    let (panel, id, token) = (b["panel"].as_str().unwrap_or(""), b["id"].as_str().unwrap_or(""), b["token"].as_str().unwrap_or(""));
+    let insecure = b["insecure"].as_bool().unwrap_or(false);
+    let r = tokio::task::spawn_blocking({
+        let (p, i, t) = (panel.to_string(), id.to_string(), token.to_string());
+        move || crate::admin::setup_tunnel_agent(&p, &i, &t, insecure)
+    })
+    .await
+    .unwrap_or(Err("setup crashed".into()));
+    match r {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => Json(json!({"ok": false, "error": e})).into_response(),
+    }
 }
 
 async fn agent_update(State(app): St, h: HeaderMap) -> Response {

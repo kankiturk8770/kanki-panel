@@ -481,7 +481,9 @@ async fn get_log(State(app): St, h: HeaderMap, axum::extract::Query(f): axum::ex
             })
         })
         .collect();
-    let mut by_name: Vec<(&str, (u64, &str, i64, std::collections::BTreeSet<i64>))> = groups.into_iter().collect();
+    // name -> (count, routed, last, users)
+    type Group<'a> = (u64, &'a str, i64, std::collections::BTreeSet<i64>);
+    let mut by_name: Vec<(&str, Group)> = groups.into_iter().collect();
     by_name.sort_by(|a, b| b.1 .0.cmp(&a.1 .0).then(a.0.cmp(b.0)));
     let by_name: Vec<Value> = by_name
         .into_iter()

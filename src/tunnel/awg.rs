@@ -201,7 +201,6 @@ pub fn gen_params(profile: &str) -> BTreeMap<String, String> {
         "heavy" => (rnd(40, 150), rnd(40, 150)),
         _ => (rnd(15, 100), rnd(15, 100)),
     };
-    let s1 = s1;
     // the two paddings must differ and S1 + 56 must not equal S2 (the packets would look alike)
     while s2 == s1 || s1 + 56 == s2 {
         s2 = rnd(15, 150);
