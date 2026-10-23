@@ -525,6 +525,8 @@ async fn bot_get(State(app): St, h: HeaderMap) -> Response {
         "token_set": !t.is_empty(), "token_masked": mask(&t), "admins": crate::bot::bot_admins_raw(&app),
         "paused": app.db.on("bot_paused"), "online": !t.is_empty() && crate::util::now() - alive < 120,
         "username": app.db.get("bot_username"), "name": app.db.get("bot_name"),
+        // another program polls the same bot (an old panel still running): Telegram answered 409
+        "conflict": crate::util::now() - app.db.get("bot_conflict").parse::<i64>().unwrap_or(0) < 300,
     })).into_response()
 }
 

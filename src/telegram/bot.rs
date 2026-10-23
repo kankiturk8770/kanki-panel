@@ -349,10 +349,24 @@ impl Bot {
     }
 
     async fn call(&self, m: &str, body: Value) -> Option<Value> {
+        self.call_res(m, body).await.ok()
+    }
+
+    /// A Bot API call with Telegram's reason when it fails
+    async fn call_res(&self, m: &str, body: Value) -> Result<Value, String> {
         let r = self.http.post(format!("{}/bot{}/{}", self.api, self.token, m))
-            .json(&body).send().await.ok()?;
-        let v: Value = r.json().await.ok()?;
-        if v["ok"].as_bool() == Some(true) { Some(v["result"].clone()) } else { None }
+            .json(&body).send().await.map_err(|e| e.to_string())?;
+        let v: Value = r.json().await.map_err(|e| e.to_string())?;
+        if v["ok"].as_bool() == Some(true) {
+            return Ok(v["result"].clone());
+        }
+        let why = v["description"].as_str().unwrap_or("telegram error").to_string();
+        // 409 on getUpdates: another program polls this bot (an old panel still running after a move):
+        // both would answer customers and both would post to the channel
+        if m == "getUpdates" && v["error_code"].as_i64() == Some(409) {
+            self.db().set("bot_conflict", &now().to_string());
+        }
+        Err(why)
     }
 
     async fn send(&self, chat: i64, text: &str, kb: Option<Value>) -> Option<Value> {
@@ -364,8 +378,12 @@ impl Bot {
     async fn edit(&self, chat: i64, mid: i64, text: &str, kb: Option<Value>) {
         let mut body = json!({"chat_id": chat, "message_id": mid, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true});
         if let Some(k) = kb.clone() { body["reply_markup"] = k; }
-        if self.call("editMessageText", body).await.is_none() {
-            self.send(chat, text, kb).await;
+        // a message that cannot be edited any more gets a new one; the same text again (a button tapped
+        // twice) is not a reason to send a second message
+        if let Err(e) = self.call_res("editMessageText", body).await {
+            if !e.contains("message is not modified") {
+                self.send(chat, text, kb).await;
+            }
         }
     }
 
@@ -1277,7 +1295,7 @@ impl Bot {
                 let head = if o.3 == "renew" { self.tx("txt_renewed") } else { self.tx("txt_bought") };
                 self.send(o.1, &format!("{}\n\n{}", head, self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b(&self.bt("home"), "home")]]))).await;
                 if !o.9.is_empty() {
-                    let _ = self.db().exec("UPDATE discounts SET uses_left=uses_left-1 WHERE code=?1", &[&o.9]);
+                    let _ = self.db().exec("UPDATE discounts SET uses_left=uses_left-1 WHERE code=?1 AND uses_left>0", &[&o.9]);
                 }
                 self.reward_referrer(o.1).await;
                 let a = self.app.clone();
@@ -1311,7 +1329,9 @@ impl Bot {
 
     async fn review(&self, chat: i64, mid: i64, q: &Value, approve: bool, oid: i64) {
         let Some(o) = self.order(oid) else { return };
-        if o.6 != "pending" && o.6 != "error" {
+        // approve and reject tapped together (or twice): only the first decision counts
+        let to = if approve { "approved" } else { "rejected" };
+        if !matches!(self.db().exec("UPDATE orders SET status=?1 WHERE id=?2 AND status IN ('pending','error')", &[&to, &oid]), Ok(1)) {
             return self.answer(q["id"].as_str().unwrap_or(""), "این سفارش قبلاً بررسی شده.", true).await;
         }
         let note = if approve { "\n\n✅ تأیید شد" } else { "\n\n❌ رد شد" };
@@ -1324,10 +1344,8 @@ impl Bot {
             self.call("editMessageText", json!({"chat_id": chat, "message_id": mid, "text": t})).await;
         }
         if approve {
-            let _ = self.db().exec("UPDATE orders SET status='approved' WHERE id=?1", &[&oid]);
             self.fulfill(oid).await;
         } else {
-            let _ = self.db().exec("UPDATE orders SET status='rejected' WHERE id=?1", &[&oid]);
             self.send(o.1, &format!("❌ رسید سفارش #{} تأیید نشد. پشتیبانی: {}", oid, esc(&self.db().get("support"))), None).await;
         }
     }
@@ -1598,9 +1616,17 @@ impl Bot {
                 return true;
             }
             "a:chs" => {
-                let text = db.get("ch_draft");
                 let back = Some(ik(vec![vec![b("⬅️ کانال هوشمند", "a:ch")]]));
+                // the draft is taken once: a second tap (or Telegram sending the tap again) does not post it twice
+                let text = db.get("ch_draft");
+                if text.trim().is_empty() || !matches!(db.exec("UPDATE settings SET v='' WHERE k='ch_draft' AND v=?1", &[&text]), Ok(1)) {
+                    self.edit(chat, mid, "این پیش‌نویس قبلاً ارسال شده است.", back).await;
+                    return true;
+                }
                 let r = crate::channel::send_to_channel(&self.app, &text).await;
+                if r.is_err() {
+                    db.set("ch_draft", &text);
+                }
                 let msg = match r {
                     Ok(_) => "✅ در کانال منتشر شد.".to_string(),
                     Err(e) => format!("⚠️ ارسال نشد: <code>{}</code>\nآیدی کانال را در پنل وب بررسی کنید و ربات را ادمین کانال کنید.", esc(&e)),
@@ -2130,6 +2156,13 @@ impl Bot {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             tick += 1;
+            // another panel polls this bot (Telegram answered 409): the admins are told, at most every 6 hours
+            let conflict: i64 = self.db().get("bot_conflict").parse().unwrap_or(0);
+            let told: i64 = self.db().get("bot_conflict_told").parse().unwrap_or(0);
+            if now() - conflict < 300 && now() - told > 6 * 3600 {
+                self.db().set("bot_conflict_told", &now().to_string());
+                self.notify_admins("⚠️ <b>یک برنامه‌ی دیگر هم از همین ربات استفاده می‌کند</b> (مثلاً پنل روی سرور قبلی هنوز روشن است).\nهر دو به مشتری‌ها جواب می‌دهند و هر دو در کانال پست می‌گذارند. پنل قدیمی را خاموش کن: <code>systemctl disable --now kanki-panel</code>", None, None).await;
+            }
             // پرداخت‌های ارزی خودکار
             let waiting: Vec<i64> = self.db().with(|c| {
                 let mut s = c.prepare("SELECT id FROM orders WHERE status='waiting' AND method='np' AND created>?1").unwrap();

@@ -513,6 +513,8 @@ async fn restore_check(State(app): St, h: HeaderMap) -> Response {
         "moved_from": app.env.get("MOVED_FROM").cloned().unwrap_or_default(),
         "servers": servers, "services": services,
         "sub_domain": app.db.get("sub_domain"),
+        // the old server's panel still runs the same bot (both answer customers, both post)
+        "bot_conflict": now() - app.db.get("bot_conflict").parse::<i64>().unwrap_or(0) < 300,
     }))
     .into_response()
 }
