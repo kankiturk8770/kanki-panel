@@ -353,6 +353,14 @@ impl Bot {
         ok
     }
 
+    /// The reason getUpdates last failed ("" = it works). A refusal by Telegram (wrong token, another
+    /// program polling the bot, a webhook) is kept apart from a connection cut on the way.
+    fn set_poll_error(&self, e: &str) {
+        if self.db().get("bot_poll_error") != e {
+            self.db().set("bot_poll_error", e);
+        }
+    }
+
     async fn call(&self, m: &str, body: Value) -> Option<Value> {
         self.call_res(m, body).await.ok()
     }
@@ -682,10 +690,21 @@ impl Bot {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 continue;
             }
-            let up = self.call("getUpdates", json!({"offset": offset, "timeout": 30, "allowed_updates": ["message", "callback_query"]})).await;
-            if up.is_some() {
-                self.app.bot_alive.store(now(), std::sync::atomic::Ordering::Relaxed);
+            let res = self.call_res("getUpdates", json!({"offset": offset, "timeout": 30, "allowed_updates": ["message", "callback_query"]})).await;
+            match &res {
+                Ok(_) => {
+                    self.app.bot_alive.store(now(), std::sync::atomic::Ordering::Relaxed);
+                    self.set_poll_error("");
+                }
+                Err(e) => {
+                    self.set_poll_error(e);
+                    // a webhook left on this token (it was used by another panel or service) blocks getUpdates
+                    if e.contains("webhook is active") {
+                        let _ = self.call_res("deleteWebhook", json!({"drop_pending_updates": false})).await;
+                    }
+                }
             }
+            let up = res.ok();
             let Some(Value::Array(list)) = up else {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 continue;
@@ -2282,6 +2301,14 @@ impl Bot {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             tick += 1;
+            // the bot is alive when Telegram accepts its token and the polling is not refused: a long poll
+            // that a network on the way cuts while nobody writes must not make it look offline
+            if !self.db().on("bot_paused") {
+                let refused = { let e = self.db().get("bot_poll_error"); e.contains("Conflict") || e.contains("Unauthorized") || e.contains("Not Found") || e.contains("webhook") };
+                if !refused && self.call_res("getMe", json!({})).await.is_ok() {
+                    self.app.bot_alive.store(now(), std::sync::atomic::Ordering::Relaxed);
+                }
+            }
             // another panel polls this bot (Telegram answered 409): the admins are told, at most every 6 hours
             let conflict: i64 = self.db().get("bot_conflict").parse().unwrap_or(0);
             let told: i64 = self.db().get("bot_conflict_told").parse().unwrap_or(0);

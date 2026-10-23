@@ -26,6 +26,18 @@ fn cache(app: &App) -> serde_json::Map<String, Value> {
     serde_json::from_str::<Value>(&app.db.get(KEY)).ok().and_then(|v| v.as_object().cloned()).unwrap_or_default()
 }
 
+/// Forgets what is known about a removed server (its keys: the node id, "srv:<id>", "xray:<id>").
+pub fn forget(app: &App, keys: &[String]) {
+    let mut c = cache(app);
+    let n = c.len();
+    for k in keys {
+        c.remove(k);
+    }
+    if c.len() != n {
+        app.db.set(KEY, &Value::Object(c).to_string());
+    }
+}
+
 /// The cache key of an Xray server
 pub fn xray_key(sid: &str) -> String {
     format!("xray:{}", sid)

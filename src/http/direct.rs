@@ -23,6 +23,14 @@ pub const BASE_KEY: &str = "direct_base";
 /// setting: node id -> label ("fr", "fr2", "g"), kept so a server's name never moves
 const NAMES_KEY: &str = "direct_names";
 
+/// A removed server's direct name is freed (another server may take it)
+pub fn forget(app: &App, node_id: &str) {
+    let mut m: HashMap<String, String> = serde_json::from_str(&app.db.get(NAMES_KEY)).unwrap_or_default();
+    if m.remove(node_id).is_some() {
+        app.db.set(NAMES_KEY, &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+    }
+}
+
 /// The domain under which the direct names live
 pub fn base(app: &App) -> String {
     let b = app.db.get(BASE_KEY).trim().trim_matches('.').to_ascii_lowercase();

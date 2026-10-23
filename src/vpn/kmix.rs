@@ -109,6 +109,21 @@ pub fn set_node_port(app: &App, node_id: &str, port: u16) {
     app.db.set("kmix_nodes", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
 }
 
+/// KANKI MIX off (or on again) on server `node_id` only
+pub fn set_node_off(app: &App, node_id: &str, off: bool) {
+    let mut m: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();
+    m.entry(node_id.to_string()).or_default().off = off;
+    app.db.set("kmix_nodes", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+}
+
+/// A removed server's KANKI MIX settings go with it
+pub fn forget_node(app: &App, node_id: &str) {
+    let mut m: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();
+    if m.remove(node_id).is_some() {
+        app.db.set("kmix_nodes", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+    }
+}
+
 /// The second (tunnel) config of `node_id` follows its port when it used the old one.
 pub fn move_tunnel_port(app: &App, node_id: &str, old: u16, new: u16) {
     let mut m: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();

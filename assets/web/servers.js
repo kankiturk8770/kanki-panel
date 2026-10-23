@@ -51,6 +51,54 @@ var SFA={
 };
 if(typeof FA!='undefined')Object.assign(FA,SFA);
 
+if(typeof FA!='undefined')Object.assign(FA,{
+ "Abroad servers":"سرورهای خارج",
+ "Iran servers":"سرورهای ایران",
+ "running":"روشن",
+ "stopped":"متوقف",
+ "off":"خاموش",
+ "none":"ندارد",
+ "connected":"وصل",
+ "Restart VPN services":"ری‌استارت سرویس‌های VPN",
+ "UDP port":"پورت UDP",
+ "Save port":"ذخیره‌ی پورت",
+ "A port is 1-65535":"پورت باید بین ۱ تا ۶۵۵۳۵ باشد",
+ "Already used by":"قبلاً استفاده شده توسط",
+ "pick another port":"پورت دیگری انتخاب کن",
+ "Saving…":"در حال ذخیره…",
+ "Saved: the service restarts on the new port":"ذخیره شد: سرویس روی پورت جدید ری‌استارت می‌شود",
+ "Users' WireGuard / AmneziaWG files of this server must be downloaded again after a port change; subscription links and the app update by themselves.":"بعد از عوض شدن پورت، فایل‌های WireGuard / AmneziaWG کاربرانِ این سرور باید دوباره دانلود شوند؛ لینک ساب و اپ خودشان به‌روز می‌شوند.",
+ "Add this server to all users":"افزودن این سرور به همه‌ی کاربران",
+ "Remove this server from all users":"حذف این سرور از همه‌ی کاربران",
+ "KANKI MIX on this server":"KANKI MIX روی این سرور",
+ "KANKI MIX settings (all servers)":"تنظیمات KANKI MIX (همه‌ی سرورها)",
+ "Xray is not on this server yet.":"Xray هنوز روی این سرور نیست.",
+ "Kanki DNS is not on this server yet.":"DNS کانکی هنوز روی این سرور نیست.",
+ "Install Xray on this server":"نصب Xray روی این سرور",
+ "Install Kanki DNS on this server":"نصب DNS کانکی روی این سرور",
+ "Inbounds":"اینباندها",
+ "Edit":"ویرایش",
+ "Restart":"ری‌استارت",
+ "Use for all users":"فعال برای همه‌ی کاربران",
+ "Take from all users":"غیرفعال برای همه‌ی کاربران",
+ "Remove from this server":"حذف از این سرور",
+ "Who may use it is also set per user (Users › edit).":"اینکه چه کسی از آن استفاده کند، برای هر کاربر هم قابل تنظیم است (کاربران › ویرایش).",
+ "No tunnel uses this server.":"هیچ تانلی از این سرور استفاده نمی‌کند.",
+ "Tunnels page":"صفحه‌ی تانل‌ها",
+ "New tunnel":"تانل جدید",
+ "Turn this on for every user?":"برای همه‌ی کاربران روشن شود؟",
+ "Turn this off for every user?":"برای همه‌ی کاربران خاموش شود؟",
+ "Remove it from this server? The server stops it and frees its ports.":"از این سرور حذف شود؟ سرور آن را متوقف می‌کند و پورت‌هایش آزاد می‌شود.",
+ "Delete this whole server? Everything Kanki installed on it (VPN, tunnels, Xray, DNS) is removed from the server and from the panel, and the server uninstalls itself.":"کل این سرور حذف شود؟ هرچه کانکی رویش نصب کرده (VPN، تانل، Xray، DNS) از روی سرور و از پنل پاک می‌شود و سرور خودش را حذف می‌کند.",
+ "These tunnels use this server:":"این تانل‌ها از این سرور استفاده می‌کنند:",
+ "Delete them too? The other server drops them and closes their ports.":"آن‌ها هم حذف شوند؟ سرور طرف دیگر هم آن‌ها را برمی‌دارد و پورت‌هایشان را می‌بندد.",
+ "Another program uses this bot token (an old panel still running?). Stop it, or make a new token in @BotFather.":"یک برنامه‌ی دیگر هم از توکن این ربات استفاده می‌کند (پنل قبلی هنوز روشن است؟). آن را خاموش کن یا در @BotFather توکن جدید بساز.",
+ "Panel server":"سرور پنل",
+ "agent":"ایجنت",
+ "Removing…":"در حال حذف…",
+ "Removed":"حذف شد",
+ "Saved":"ذخیره شد"
+});
 var SV={d:null,f:'all',open:{},wait:null};
 window.SV=SV;
 
@@ -85,6 +133,27 @@ window.SV=SV;
  '.kxseg{display:grid;grid-template-columns:1fr 1fr;gap:6px}'+
  // pop-ups above the phone's bottom tab bar (it covered their last buttons: "Create command", "Save"…)
  '.modal{z-index:60!important}#toast{z-index:70!important}'+
+ // 3.9.2: one column of compact rows; a row opens with its arrow
+ '.kxl{display:flex;flex-direction:column;gap:8px;max-width:980px}'+
+ '.kxl-h{font-size:12px;color:var(--s);margin:14px 4px 2px;font-weight:700}'+
+ '.kxr{border:1px solid var(--ln);border-radius:16px;background:var(--c1);min-width:0}'+
+ '.kxr.open{border-color:color-mix(in srgb,var(--a) 45%,var(--ln))}'+
+ '.kxr-h{display:flex;align-items:center;gap:8px;width:100%;padding:11px 12px;background:transparent;border:0;color:var(--t);font:inherit;cursor:pointer;text-align:start;min-width:0}'+
+ '.kxr-h b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.kxr-h .sp{flex:1}'+
+ '.kxr-arr{flex:none;width:18px;color:var(--s);transition:transform .15s;display:inline-block}.kxr.open .kxr-arr{transform:rotate(90deg)}'+
+ '[dir=rtl] .kxr-arr{transform:scaleX(-1)}[dir=rtl] .kxr.open .kxr-arr{transform:rotate(90deg)}'+
+ '.kxr-chips{display:flex;gap:4px;flex-wrap:nowrap;overflow:hidden}.kxr-chips span{font-size:11px;border:1px solid var(--ln);border-radius:8px;padding:1px 6px;color:var(--s);white-space:nowrap}'+
+ '.kxr-chips span.on{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}.kxr-chips span.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}'+
+ '.kxr-b{padding:0 12px 12px}'+
+ '.kxv{display:flex;flex-direction:column;border:1px solid var(--ln);border-radius:12px;overflow:hidden;margin-top:8px}'+
+ '.kxv button{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;background:transparent;border:0;border-top:1px solid var(--ln);color:var(--t);font:inherit;font-size:13px;cursor:pointer;text-align:start}'+
+ '.kxv button:first-child{border-top:0}.kxv button:hover{background:color-mix(in srgb,var(--a) 7%,transparent)}'+
+ '.kxv b{min-width:96px;font-weight:700}.kxv small{color:var(--s);font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kxv i{font-style:normal;color:var(--s)}'+
+ '.kxv .st{font-size:11px;border-radius:8px;padding:1px 7px;border:1px solid var(--ln);white-space:nowrap}'+
+ '.kxv .st.g{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}.kxv .st.r{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 50%,transparent)}.kxv .st.n{color:var(--s)}'+
+ '.kxm-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}.kxm-row>div{flex:1;min-width:140px}'+
+ '.kxm-warn{color:var(--warn);font-size:12px;margin-top:6px;min-height:16px}'+
+ '.kxm-btns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:12px}.kxm-btns button,.kxm-btns a{width:100%;text-align:center}'+
  // a short laptop screen: the side menu scrolls instead of cutting off its last items
  '@media(min-width:900px){.side{overflow-y:auto;overscroll-behavior:contain}}'+
  '@media(max-width:520px){.kxp-g{grid-template-columns:1fr}.kxc{padding:12px}.kxc-m{gap:6px}}';
@@ -107,18 +176,21 @@ window.srvLoad=load;
 window.pNodes=function(){
  $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Servers')+'</h2><p>'+t('The panel runs on one server. Every other server is a node: add it with one command, then switch on here what it runs.')+'</p></div>'+
   '<div class="kxp-top"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="srvAdd()">'+ic('plus',15)+' '+t('Add server')+'</button></div></div>'+
-  '<div id="svp_clash"></div><div class="kxp-f" id="svp_f"></div><div class="kxp-g" id="svp_g">'+t('Loading…')+'</div><div id="svp_dir"></div>';
+  '<div id="svp_clash"></div><div class="kxp-f" id="svp_f"></div><div id="svp_g">'+t('Loading…')+'</div><div id="svp_dir"></div>';
  load();directLoad();autoRefresh(function(){load(true)});
  if(S.openAdd){S.openAdd=false;setTimeout(srvAdd,150)}};
 
-function draw(){var g=$('#svp_g');if(!g||!SV.d)return;var list=SV.d.servers||[];
- var fs={all:function(){return true},abroad:function(s){return !isIr(s)},iran:isIr};if(!fs[SV.f])SV.f='all';
- $('#svp_f').innerHTML=[['all','All'],['abroad','Abroad'],['iran','Iran']].map(function(f){return '<button class="'+(SV.f==f[0]?'on':'')+'" onclick="SV.f=\''+f[0]+'\';srvDraw()">'+t(f[1])+'<b>'+N(list.filter(fs[f[0]]).length)+'</b></button>'}).join('');
+function draw(){var g=$('#svp_g');if(!g||!SV.d)return;var list=(SV.d.servers||[]).slice();
+ $('#svp_f').innerHTML='';
  var cl=SV.d.clashes||[];
  $('#svp_clash').innerHTML=cl.length?'<div class="kxp-clash"><div><b>⚠ '+t('Port clash')+'</b><br>'+cl.map(function(c){return 'UDP <b class="ltr">'+N(c.port)+'</b> '+t('is used by')+' '+c.users.map(function(u){return esc(u.name)+' ('+protoName(u.proto)+')'}).join('، ')}).join('<br>')+
   '<p class="muted" style="margin:6px 0 0">'+t('One tunnel entry cannot carry the same port to two servers. Fix moves the later server to a free port; tunnels that carry the old port follow.')+'</p></div><button class="btn" onclick="srvFixPorts()">'+t('Fix ports')+'</button></div>':'';
- var cards=list.filter(fs[SV.f]).map(card).join('');
- g.innerHTML=cards||'<p class="muted">'+t('No server here')+'</p>'}
+ var by=function(x,y){return String(x.name).localeCompare(String(y.name))};
+ var main=list.filter(function(x){return x.local}),out=list.filter(function(x){return !x.local&&!isIr(x)}).sort(by),ir=list.filter(function(x){return !x.local&&isIr(x)}).sort(by);
+ var h='<div class="kxl">'+main.map(row).join('');
+ if(out.length)h+='<div class="kxl-h">'+t('Abroad servers')+' · '+N(out.length)+'</div>'+out.map(row).join('');
+ if(ir.length)h+='<div class="kxl-h">'+t('Iran servers')+' · '+N(ir.length)+'</div>'+ir.map(row).join('');
+ g.innerHTML=h+'</div>'}
 window.srvDraw=draw;
 
 // ---------------------------------------------------------------- direct names (fr.example.com …) for the app's direct configs
@@ -134,54 +206,65 @@ window.directBase=function(){var v=prompt(t('Base domain for the direct names (l
 
 function protoName(p){return ({wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',kmix:'KANKI MIX'})[p]||p}
 
-function card(s){var k=esc(s.key),a=s.agent,n=s.node,j=s.jobs||{},online=s.local||(a&&a.online)||(n&&n.online),h=n&&window.nHealthOf?nHealthOf(n):null;
- var tags='<span class="kxc-tag'+(s.local?' main':'')+'">'+t(s.local?'Panel server':'Node')+'</span><span class="kxc-tag">'+t(isIr(s)?'Iran':'Abroad')+'</span>';
+// what runs on a server, from the panel's own lists: [key, name, state g|r|n, detail]
+function svcs(s){var n=s.node,a=s.agent,i=(n&&n.info)||{},sv={},out=[],p=s.ports||{},sid=a?a.id:'';
+ (i.services||[]).forEach(function(x){sv[x.key]=x});
+ if(n){[['wg','WireGuard','wireguard'],['awg','AmneziaWG','amneziawg'],['hy2','Hysteria2','hysteria2'],['kmix','KANKI MIX','kankimix']].forEach(function(z){
+   var x=sv[z[2]],port=p[z[0]];
+   var st=!port&&!x?'n':!n.enabled?'n':x?(x.active?'g':'r'):'g';
+   var tx=!port&&!x?t('not installed'):!n.enabled?t('off'):x?(x.active?t('running'):t('stopped')):t('running');
+   out.push([z[0],z[1],st,tx,port?'UDP '+N(port):''])})}
+ var xr=(window.XR&&XR.d&&(XR.d.servers||[]).filter(function(x){return x.server==sid})[0])||null,
+  dn=(window.DN&&DN.d&&(DN.d.servers||[]).filter(function(x){return x.server==sid})[0])||null,
+  tl=((window.TN&&TN.d&&TN.d.tunnels)||[]).filter(function(x){return sid&&(x.entry==sid||x.exit==sid)});
+ if(a){out.push(['xray','Xray',xr?((xr.status||{}).active?'g':'r'):'n',xr?((xr.status||{}).active?t('running'):t('stopped')):t('off'),xr?N(((XR.d.inbounds||[]).filter(function(b){return b.server==sid})).length)+' '+t('inbounds'):'']);
+  out.push(['dns',t('Kanki DNS'),dn?((dn.status||{}).active?'g':'r'):'n',dn?((dn.status||{}).active?t('running'):t('stopped')):t('off'),dn?t(dn.role=='relay'?'relay':'exit'):'']);
+  var up=tl.filter(function(x){return x.state=='up'}).length;
+  out.push(['tun',t('Tunnels'),tl.length?(up==tl.length?'g':'r'):'n',tl.length?N(up)+' / '+N(tl.length)+' '+t('connected'):t('none'),''])}
+ return out}
+
+function row(s){var k=esc(s.key),a=s.agent,n=s.node,online=s.local||(a&&a.online)||(n&&n.online),h=n&&window.nHealthOf?nHealthOf(n):null,op=!!SV.open[s.key];
+ var col=h?h.c:(online?'g':'r'),list=svcs(s);
+ var chips=[];
+ if(n)chips.push('<span class="'+(n.enabled?'on':'')+'">VPN'+(n.enabled&&n.users?' · '+N(n.users):'')+'</span>');
+ list.forEach(function(x){if((x[0]=='xray'||x[0]=='dns'||x[0]=='tun')&&x[2]!='n')chips.push('<span class="'+(x[2]=='g'?'on':'bad')+'">'+esc(x[0]=='tun'?t('Tunnels'):x[1])+'</span>')});
+ if(!a&&!s.local)chips.push('<span class="bad">'+t('agent')+' —</span>');
+ if(!n&&a)chips.push('<span class="bad">VPN —</span>');
+ var head='<button class="kxr-h" onclick="srvToggle(\''+k+'\')"><span class="kxr-arr">▸</span><span class="dot '+(online?(col=='r'?'y':col):'r')+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+
+  (s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+'<span class="sp"></span><span class="kxr-chips">'+chips.join('')+'</span></button>';
+ if(!op)return '<div class="kxr">'+head+'</div>';
+ // open: status, what is missing, every service, health, actions
  var st=[];
  if(!s.local)st.push(t('agent')+': <b>'+(a?(a.online?t('Connected'):t('Not connected')):'—')+'</b>');
  if(n)st.push('VPN: <b>'+(n.enabled?(s.local||n.online?t('On'):t('Not connected')):t('Off'))+'</b>');
- if(n&&n.users!=null&&n.enabled)st.push(N(n.users)+' '+t('users'));
+ if(n&&n.enabled)st.push(N(n.users||0)+' '+t('users'));
  var ver=(n&&n.info&&n.info.version)||(a&&a.version)||'';if(ver)st.push('v'+esc(ver));
  if(!s.local&&a&&a.last_seen&&!a.online)st.push(t('Last contact')+' '+ago(a.last_seen));
- // services
- var cells=[];
- if(n){var p=s.ports||{},pl=['wg','awg','hy2','kmix'].filter(function(x){return p[x]}).map(function(x){return ({wg:'WG',awg:'AWG',hy2:'Hy2',kmix:'MIX'})[x]+' '+N(p[x])}).join(' · ');
-  cells.push('<div class="kxs wide '+(n.enabled?'on':'no')+'"><span>'+t('VPN for users')+'</span>'+sw('',n.enabled,"srvVpn('"+k+"',this.checked)")+'</div>');
-  if(pl)cells.push('<button class="kxs '+(n.enabled?'on':'no')+'" style="grid-column:1/-1" onclick="srvPorts(\''+k+'\')"><span>'+t('Ports')+'</span><small class="pl">UDP '+pl+'</small></button>')}
- if(a){var xr=j.xray_on;
-  cells.push('<button class="kxs '+(j.tunnels?'on':'no')+'" onclick="location.hash=\'#tunnels\'"><span>'+t('Tunnels')+'</span><small>'+N(j.tunnels||0)+'</small></button>');
-  cells.push(xr?'<button class="kxs on" onclick="location.hash=\'#xray\'"><span>Xray</span><small>'+N(j.xray||0)+' '+t('inbounds')+'</small></button>':'<button class="kxs add" onclick="srvAddXray(\''+k+'\')"><span>+ '+t('Add Xray')+'</span><small>VLESS · VMess · Trojan</small></button>');
-  cells.push(j.dns?'<button class="kxs on" onclick="location.hash=\'#dns/servers\'"><span>'+t('Kanki DNS')+'</span><small>'+t(j.dns=='relay'?'relay':'exit')+'</small></button>':'<button class="kxs add" onclick="srvAddDns(\''+k+'\','+(isIr(s)?1:0)+')"><span>+ '+t('Add DNS')+'</span><small>'+t(isIr(s)?'relay':'exit')+'</small></button>');
-  if(j.emergency)cells.push('<button class="kxs on" onclick="location.hash=\'#emergency\'"><span>'+t('Emergency chat')+'</span><small>✓</small></button>');
-  if(j.subsrv)cells.push('<button class="kxs on" onclick="location.hash=\'#settings\'"><span>'+t('Subscription')+'</span><small>✓</small></button>')}
- // the part that is missing
  var miss='';
  if(!n&&a){var su=s.setup||null;
   if(s.pending&&!a.last_seen)miss='<div class="kxc-miss"><span>'+t('Waiting for this server: run its command')+'</span><button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+t('Show command')+'</button></div>';
   else if(su&&su.state=='running')miss='<div class="kxc-miss"><span class="spin"></span><span>'+t('Installing the VPN part…')+'</span>'+(su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>';
   else miss='<div class="kxc-miss"><span>'+(su&&su.state=='failed'?'<b class="bad2">'+t('VPN install failed')+'</b>':t('VPN is not installed on this server'))+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\','+(isIr(s)?0:1)+')">'+t(su&&su.state=='failed'?'Try again':'Install VPN')+'</button>'+(su&&su.state=='failed'&&su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>'}
  if(n&&!a&&!s.local)miss='<div class="kxc-miss"><span>'+t('Tunnels, Xray and DNS are not installed on this server')+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\',1)">'+t('Install')+'</button></div>';
- // health
- var met='';var stt=n&&n.info&&n.info.stats;
+ var vpn=n?'<div class="kxs wide '+(n.enabled?'on':'no')+'" style="margin-top:8px"><span>'+t('VPN for users')+'</span>'+sw('',n.enabled,"srvVpn('"+k+"',this.checked)")+'</div>':'';
+ var rows=list.map(function(x){return '<button onclick="srvSvc(\''+k+'\',\''+x[0]+'\')"><b>'+esc(x[1])+'</b><span class="st '+x[2]+'">'+esc(x[3])+'</span><small class="ltr">'+esc(x[4])+'</small><i>⚙</i></button>'}).join('');
+ var stt=n&&n.info&&n.info.stats,met='';
  if(stt&&window.nMeter)met='<div class="kxc-m">'+nMeter('CPU',+stt.cpu||0,N(Math.round(+stt.cpu||0))+'%')+nMeter('RAM',pc(stt.mem_used,stt.mem_total),N(Math.round(pc(stt.mem_used,stt.mem_total)))+'%')+nMeter('Disk',pc(stt.disk_used,stt.disk_total),N(Math.round(pc(stt.disk_used,stt.disk_total)))+'%')+'</div>';
  var why=h&&h.r&&h.r.length&&n.enabled?'<ul class="nwhy">'+h.r.map(function(x){return '<li class="l'+x[0]+'">'+t(x[1])+'</li>'}).join('')+'</ul>':'';
- var op=!!SV.open[s.key];
  var acts=[];
  acts.push('<button class="b2" onclick="srvEdit(\''+k+'\')">'+ic('edit',14)+' '+t('Settings')+'</button>');
  if(n){var ni=esc(n.id);
   acts.push('<button class="b2" onclick="nHealth(\''+ni+'\')">♡ '+t('Health')+'</button>');
   acts.push('<button class="b2" onclick="nAct(\''+ni+'\',\'sync\')">⇄ '+t('Sync')+'</button>');
-  acts.push('<button class="b2" onclick="nAct(\''+ni+'\',\'repair\')">↻ '+t('Repair')+'</button>');
+  acts.push('<button class="b2" onclick="nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button>');
   if(!s.local)acts.push('<button class="b2" onclick="nAct(\''+ni+'\',\'update\')">⇪ '+t('Update agent')+'</button>');
   acts.push('<button class="b2 okb" onclick="nAssign(\''+ni+'\',1)">'+ic('plus',14)+' '+t('Add to all users')+'</button>');
   if(!s.local)acts.push('<button class="b2" onclick="nAssign(\''+ni+'\',0)">'+t('Remove from all users')+'</button>')}
  if(a&&!s.local&&window.tunSrvEdit)acts.push('<button class="b2" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',14)+' '+t('Tunnel agent settings')+'</button>');
  if(!s.local)acts.push('<button class="b2 bd" onclick="srvDel(\''+k+'\')">'+ic('trash',14)+' '+t('Delete server')+'</button>');
- var col=h?h.c:(online?'g':'r');
- return '<div class="kxc'+(online?'':' off')+'"><div class="kxc-h"><span class="dot '+(online?(col=='r'?'y':col):'r')+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b><span class="sp"></span>'+tags+'</div>'+
-  '<div class="kxc-st">'+st.join('<span>·</span>')+'</div>'+
-  (cells.length?'<div class="kxc-sv">'+cells.join('')+'</div>':'')+miss+met+why+
-  '<button class="kxc-more" onclick="SV.open[\''+k+'\']=!SV.open[\''+k+'\'];srvDraw()">'+t(op?'Hide':'Details')+' '+(op?'▴':'▾')+'</button>'+
-  (op?'<div class="kxc-act">'+acts.join('')+'</div>':'')+'</div>'}
+ return '<div class="kxr open">'+head+'<div class="kxr-b"><div class="kxc-st">'+st.join('<span>·</span>')+'</div>'+miss+vpn+
+  (rows?'<div class="kxv">'+rows+'</div>':'')+met+why+'<div class="kxc-act">'+acts.join('')+'</div></div></div>'}
+window.srvToggle=function(key){SV.open[key]=!SV.open[key];draw()};
 
 function find(key){var l=(SV.d&&SV.d.servers)||[];for(var i=0;i<l.length;i++)if(l[i].key==key)return l[i]}
 
@@ -244,13 +327,68 @@ window.srvEdit=function(key){var s=find(key);if(!s)return;var a=s.agent||{};
 window.srvPorts=function(key){var s=find(key);if(!s||!s.node)return;
  if(window.v37NodeMenu)return v37NodeMenu(s.node.id);if(window.nodeEdit)nodeEdit(s.node.id)};
 
-window.srvDel=function(key){if(!confirm(t('Delete this whole server? Its tunnels must be deleted first. The server removes everything Kanki installed on it (VPN, tunnels, Xray, DNS) and uninstalls itself.')))return;
- toast(t('Removing…'));api('DELETE','/api/servers/'+q(key)).then(function(){toast(t('Removed'));load(true)}).catch(fail)};
+// Delete the whole server. When tunnels use it, they are named and can go with it (the Iran entry drops
+// them too and closes their ports).
+window.srvDel=function(key,withTun){var s=find(key)||{};
+ if(!withTun&&!confirm(t('Delete this whole server? Everything Kanki installed on it (VPN, tunnels, Xray, DNS) is removed from the server and from the panel, and the server uninstalls itself.')+' ('+(s.name||'')+')'))return;
+ toast(t('Removing…'));
+ api('DELETE','/api/servers/'+q(key)+(withTun?'?tunnels=1':'')).then(function(){toast(t('Removed'));SV.open[key]=false;load(true)}).catch(function(e){
+  var tl=e&&e.data&&e.data.tunnels;
+  if(tl&&tl.length){var names=tl.map(function(x){var o=find(x.other)||{};return '• '+x.name+(o.name?' ↔ '+o.name:'')}).join('\n');
+   if(confirm(t('These tunnels use this server:')+'\n'+names+'\n\n'+t('Delete them too? The other server drops them and closes their ports.')))srvDel(key,1);return}
+  fail(e)})};
 
 window.srvFixPorts=function(){if(!confirm(t("Users' WireGuard / AmneziaWG files of the moved server must be downloaded again (subscription links and the app update by themselves). Continue?")))return;
  toast(t('Checking…'));api('POST','/api/servers/fix-ports').then(function(r){var m=r.moved||[];
   modal(mhead(t(m.length?'Ports moved':'No clash'))+(m.length?'<div class="list">'+m.map(function(x){return '<div class="li"><span><b>'+esc(x.server)+'</b> '+protoName(x.proto)+(x.error?'<small class="bad2">'+esc(x.error)+'</small>':'')+'</span><span class="ltr">'+N(x.old)+' → '+N(x.new)+' '+(x.ok?'✅':'❌')+'</span></div>'}).join('')+'</div>':''));
   load(true)}).catch(fail)};
+
+// ---------------------------------------------------------------- one service of one server, in a window
+function portBox(id,v){return '<div><label class="f">'+t('UDP port')+'</label><input id="'+id+'" class="ltr" inputmode="numeric" value="'+esc(v||'')+'"></div>'}
+// another server (or another protocol here) already using the port the admin types
+function portClash(key,proto,v){var p=+v;if(!(p>0&&p<65536))return t('A port is 1-65535');var hit='';
+ ((SV.d&&SV.d.servers)||[]).forEach(function(x){var ps=x.ports||{};Object.keys(ps).forEach(function(k){if(+ps[k]==p&&!(x.key==key&&k==proto))hit=x.name+' ('+protoName(k)+')'})});
+ return hit?t('Already used by')+' '+hit+': '+t('pick another port'):''}
+function wirePort(key,proto,id,btn){var el=$('#'+id),w=$('#'+id+'_w'),b=$('#'+btn);if(!el)return;
+ var f=function(){var m=portClash(key,proto,el.value);w.textContent=m;b.disabled=!!m};el.oninput=f;f()}
+function savePort(key,proto,id){var v=+$('#'+id).value,b={};b[proto]=v;toast(t('Saving…'));
+ api('POST','/api/servers/'+q(key)+'/ports',b).then(function(){toast(t('Saved: the service restarts on the new port'));closeModal();load(true)}).catch(fail)}
+window.srvSvc=function(key,svc){var s=find(key);if(!s)return;var n=s.node,a=s.agent,sid=a?a.id:'',p=s.ports||{},ni=n?esc(n.id):'',k=esc(key);
+ var row=svcs(s).filter(function(x){return x[0]==svc})[0]||[svc,svc,'n','',''];
+ var head=mhead(row[1],s.name)+'<p><span class="badge '+(row[2]=='g'?'g':row[2]=='r'?'r':'')+'">'+esc(row[3])+'</span> <span class="ltr muted">'+esc(row[4])+'</span></p>';
+ var h='';
+ if(svc=='wg'||svc=='awg'||svc=='hy2'){
+  h='<div class="kxm-row">'+portBox('sv_p',p[svc])+'<button class="btn" id="sv_ps">'+t('Save port')+'</button></div><div class="kxm-warn" id="sv_p_w"></div>'+
+   '<p class="muted">'+t("Users' WireGuard / AmneziaWG files of this server must be downloaded again after a port change; subscription links and the app update by themselves.")+'</p>'+
+   '<div class="kxm-btns"><button class="b2" onclick="closeModal();nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button><button class="b2" onclick="closeModal();nHealth(\''+ni+'\')">♡ '+t('Health')+'</button>'+
+   '<button class="b2 okb" onclick="closeModal();nAssign(\''+ni+'\',1)">'+t('Add this server to all users')+'</button>'+(s.local?'':'<button class="b2" onclick="closeModal();nAssign(\''+ni+'\',0)">'+t('Remove this server from all users')+'</button>')+'</div>';
+  modal(head+h);wirePort(key,svc,'sv_p','sv_ps');$('#sv_ps').onclick=function(){savePort(key,svc,'sv_p')};return}
+ if(svc=='kmix'){var on=row[2]!='n'||!!p.kmix;
+  h='<div class="kxs wide '+(on?'on':'no')+'"><span>'+t('KANKI MIX on this server')+'</span>'+sw('',on,"srvKmix('"+k+"',this.checked)")+'</div>'+
+   '<div class="kxm-row" style="margin-top:10px">'+portBox('sv_p',p.kmix)+'<button class="btn" id="sv_ps">'+t('Save port')+'</button></div><div class="kxm-warn" id="sv_p_w"></div>'+
+   '<div class="kxm-btns"><a class="b2" href="#kmix" onclick="closeModal()">'+t('KANKI MIX settings (all servers)')+'</a><button class="b2" onclick="closeModal();nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button>'+
+   '<button class="b2 okb" onclick="closeModal();nAssign(\''+ni+'\',1)">'+t('Add this server to all users')+'</button></div>';
+  modal(head+h);wirePort(key,'kmix','sv_p','sv_ps');$('#sv_ps').onclick=function(){savePort(key,'kmix','sv_p')};return}
+ if(svc=='xray'||svc=='dns'){var kind=svc,isOn=row[2]!='n',pa=kind=='xray'?'xray':'dns';
+  if(!isOn){h='<p>'+t(kind=='xray'?'Xray is not on this server yet.':'Kanki DNS is not on this server yet.')+'</p><div class="kxm-btns"><button class="btn" onclick="closeModal();'+(kind=='xray'?"srvAddXray('"+esc(sid)+"')":"srvAddDns('"+esc(sid)+"',"+(isIr(s)?1:0)+")")+'">'+ic('plus',14)+' '+t(kind=='xray'?'Install Xray on this server':'Install Kanki DNS on this server')+'</button></div>';modal(head+h);return}
+  h='<div class="kxm-btns">'+
+   (kind=='xray'?'<a class="b2" href="#xray" onclick="closeModal()">'+t('Inbounds')+'</a>':'<button class="b2" onclick="closeModal();dnsEdit(\''+esc(sid)+'\')">'+ic('edit',14)+' '+t('Edit')+'</button>')+
+   '<button class="b2" onclick="closeModal();srvHealth(\''+kind+'\',\''+esc(sid)+'\')">♡ '+t('Health')+'</button>'+
+   '<button class="b2" onclick="closeModal();srvRepair(\''+kind+'\',\''+esc(sid)+'\')">↻ '+t('Restart')+'</button>'+
+   '<button class="b2 okb" onclick="srvProtoAll(\''+pa+'\',1)">'+t('Use for all users')+'</button>'+
+   '<button class="b2" onclick="srvProtoAll(\''+pa+'\',0)">'+t('Take from all users')+'</button>'+
+   '<button class="b2 bd" onclick="srvSvcOff(\''+kind+'\',\''+esc(sid)+'\')">'+ic('trash',14)+' '+t('Remove from this server')+'</button></div>'+
+   '<p class="muted">'+t('Who may use it is also set per user (Users › edit).')+'</p>';
+  modal(head+h);return}
+ if(svc=='tun'){var tl=((window.TN&&TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.entry==sid||x.exit==sid});
+  h=(tl.length?'<div class="list">'+tl.map(function(x){var o=find(x.entry==sid?x.exit:x.entry)||{name:x.entry==sid?x.exit:x.entry};return '<div class="li"><span><b>'+esc(x.name)+'</b><small>'+esc((x.entry==sid?'→ ':'← ')+o.name)+' · '+esc(x.transport||x.kind||'')+'</small></span><span>'+(x.state=='up'?'✅':x.state=='off'?'⏸':'⚠️')+'</span></div>'}).join('')+'</div>':'<p class="muted">'+t('No tunnel uses this server.')+'</p>')+
+   '<div class="kxm-btns"><a class="b2" href="#tunnels" onclick="closeModal()">'+t('Tunnels page')+'</a><button class="btn" onclick="closeModal();location.hash=\'#tunnels\';setTimeout(function(){window.tunEdit&&tunEdit()},500)">'+ic('plus',14)+' '+t('New tunnel')+'</button></div>';
+  modal(head+h);return}};
+window.srvKmix=function(key,on){api('POST','/api/servers/'+q(key)+'/kmix',{on:on}).then(function(){toast(t('Saved'));load(true)}).catch(fail)};
+window.srvProtoAll=function(pa,add){if(!confirm(t(add?'Turn this on for every user?':'Turn this off for every user?')))return;
+ api('POST','/api/protocols/'+pa+'/'+(add?'assign-all':'unassign-all')).then(function(r){toast(t('Done')+' ('+N(r.changed||0)+')')}).catch(fail)};
+window.srvSvcOff=function(kind,sid){if(!confirm(t('Remove it from this server? The server stops it and frees its ports.')))return;
+ api('DELETE','/api/'+kind+'/servers/'+q(sid)).then(function(){closeModal();toast(t('Removed'));load(true)}).catch(fail)};
 
 // Xray / DNS on one server, from its card
 window.srvAddXray=function(key){if(!window.xrAddNode)return;xrAddNode();var tries=0,iv=setInterval(function(){var sel=$('#xa_sv');if(sel||++tries>40){clearInterval(iv);if(sel){sel.value=key;sel.dispatchEvent(new Event('change'))}}},100)};
