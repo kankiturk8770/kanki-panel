@@ -31,6 +31,8 @@ if [ "$(id -u)" != "0" ]; then
   exec sudo env "${keep[@]}" bash "$self" "$@"
 fi
 command -v apt-get >/dev/null || die "Only Ubuntu / Debian are supported"
+# the port checks use `ss` (iproute2); a minimal image without it would see every port as free
+command -v ss >/dev/null || { apt-get update -qq && apt-get install -y -qq iproute2; } >/dev/null 2>&1 || true
 
 ENV_DIR=/etc/kanki; ENV=$ENV_DIR/kanki.env; BIN=/usr/local/bin/kanki-panel; TLS=$ENV_DIR/tls
 mkdir -p "$ENV_DIR"; chmod 711 "$ENV_DIR"
