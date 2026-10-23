@@ -42,7 +42,12 @@ var SFA={
  "After restore":"بعد از بازگردانی","Restored":"بازگردانی شد","from":"از","Every server is connected":"همه‌ی سرورها وصل‌اند","Not connected yet":"هنوز وصل نیست",
  "The panel on the old server still runs the same Telegram bot: both answer customers and both post to the channel. Stop it there: systemctl disable --now kanki-panel":"پنل روی سرور قبلی هنوز همین ربات تلگرام را اجرا می‌کند: هر دو به مشتری‌ها جواب می‌دهند و هر دو در کانال پست می‌گذارند. آن‌جا خاموشش کن: systemctl disable --now kanki-panel",
  "Include the app files (APK)":"فایل‌های اپ (APK) هم داخل بکاپ باشد",
- "The server agent, VPN and their health in one place: press a service to open its page.":"ایجنت، VPN و سلامت هر سرور یک‌جا؛ روی هر سرویس بزن تا صفحه‌اش باز شود."
+ "The server agent, VPN and their health in one place: press a service to open its page.":"ایجنت، VPN و سلامت هر سرور یک‌جا؛ روی هر سرویس بزن تا صفحه‌اش باز شود.",
+ "Direct domains":"دامنه‌های مستقیم","Domain":"دامنه","Point it at":"آی‌پی که باید روی آن بگذاری","Status":"وضعیت","Through":"مسیر کانفیگ",
+ "Tunnel":"تانل","Direct":"مستقیم","Points at this server":"درست است","Not set yet":"هنوز تنظیم نشده","Points elsewhere":"به سرور دیگری اشاره می‌کند",
+ "Country not known yet":"کشور هنوز معلوم نیست","Change the base domain":"تغییر دامنه‌ی اصلی",
+ "The app's «Amnezia Direct» config of a server behind the tunnel goes straight to the server through its own name. Make each name below an A record pointing at the IP next to it (in Cloudflare: DNS only, grey cloud). Until a name points at the right server, the app is given the server's own address, so a direct config never reaches the wrong server.":"کانفیگ «Amnezia مستقیم» هر سروری که پشت تانل است، با اسم خودش مستقیم به همان سرور وصل می‌شود. برای هر اسم زیر یک رکورد A بساز که به آی‌پی کنارش اشاره کند (در کلادفلر: فقط DNS، ابر خاکستری). تا وقتی اسمی درست تنظیم نشده، آدرس خود سرور به برنامه داده می‌شود؛ پس کانفیگ مستقیم هیچ‌وقت به سرور اشتباه نمی‌رود.",
+ "Base domain for the direct names (like example.com); empty = the panel domain without its first part":"دامنه‌ی اصلی اسم‌های مستقیم (مثل example.com)؛ خالی = دامنه‌ی پنل بدون بخش اولش"
 };
 if(typeof FA!='undefined')Object.assign(FA,SFA);
 
@@ -102,8 +107,8 @@ window.srvLoad=load;
 window.pNodes=function(){
  $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Servers')+'</h2><p>'+t('The panel runs on one server. Every other server is a node: add it with one command, then switch on here what it runs.')+'</p></div>'+
   '<div class="kxp-top"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="srvAdd()">'+ic('plus',15)+' '+t('Add server')+'</button></div></div>'+
-  '<div id="svp_clash"></div><div class="kxp-f" id="svp_f"></div><div class="kxp-g" id="svp_g">'+t('Loading…')+'</div>';
- load();autoRefresh(function(){load(true)});
+  '<div id="svp_clash"></div><div class="kxp-f" id="svp_f"></div><div class="kxp-g" id="svp_g">'+t('Loading…')+'</div><div id="svp_dir"></div>';
+ load();directLoad();autoRefresh(function(){load(true)});
  if(S.openAdd){S.openAdd=false;setTimeout(srvAdd,150)}};
 
 function draw(){var g=$('#svp_g');if(!g||!SV.d)return;var list=SV.d.servers||[];
@@ -115,6 +120,17 @@ function draw(){var g=$('#svp_g');if(!g||!SV.d)return;var list=SV.d.servers||[];
  var cards=list.filter(fs[SV.f]).map(card).join('');
  g.innerHTML=cards||'<p class="muted">'+t('No server here')+'</p>'}
 window.srvDraw=draw;
+
+// ---------------------------------------------------------------- direct names (fr.example.com …) for the app's direct configs
+function directLoad(){api('GET','/api/servers/direct').then(directDraw).catch(function(){})}
+function directDraw(d){var el=$('#svp_dir');if(!el||!d)return;var rows=(d.servers||[]);
+ el.innerHTML='<div class="card" style="margin-top:14px"><h3>'+t('Direct domains')+'</h3><p class="sub">'+t("The app's «Amnezia Direct» config of a server behind the tunnel goes straight to the server through its own name. Make each name below an A record pointing at the IP next to it (in Cloudflare: DNS only, grey cloud). Until a name points at the right server, the app is given the server's own address, so a direct config never reaches the wrong server.")+'</p>'+
+  '<div class="ptab"><table><thead><tr><th>'+t('Name')+'</th><th>'+t('Domain')+'</th><th>'+t('Point it at')+'</th><th>'+t('Status')+'</th><th>'+t('Through')+'</th></tr></thead><tbody>'+
+  rows.map(function(r){var st=!r.host?'<span class="muted">'+t('Country not known yet')+'</span>':r.ok?'✅ '+t('Points at this server'):((r.points_to||[]).length?'⚠️ '+t('Points elsewhere')+' <span class="ltr muted">'+esc(r.points_to.join(', '))+'</span>':'⚪ '+t('Not set yet'));
+   return '<tr><td>'+fl(r.cc)+' '+esc(r.name)+'</td><td class="ltr"><b>'+esc(r.host||'—')+'</b></td><td class="ltr">'+esc(r.ip||'—')+'</td><td>'+st+'</td><td>'+t(r.via=='direct'?'Direct':'Tunnel')+'</td></tr>'}).join('')+
+  '</tbody></table></div><p class="muted" style="margin:8px 0 0">*.<span class="ltr">'+esc(d.base||'—')+'</span> · <a href="javascript:void 0" onclick="directBase()">'+t('Change the base domain')+'</a></p></div>'}
+window.directBase=function(){var v=prompt(t('Base domain for the direct names (like example.com); empty = the panel domain without its first part'),'');if(v===null)return;
+ api('PUT','/api/servers/direct',{base:v.trim()}).then(directDraw).catch(fail)};
 
 function protoName(p){return ({wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',kmix:'KANKI MIX'})[p]||p}
 

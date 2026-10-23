@@ -34,6 +34,8 @@ mod exitgeo;
 mod migrate;
 #[path = "http/servers.rs"]
 mod servers;
+#[path = "http/direct.rs"]
+mod direct;
 
 // vpn: protocol engines + node sync
 mod dns;
@@ -290,6 +292,8 @@ async fn main() {
     tokio::spawn(tunnel::panel::local_loop(app.clone()));
     // a node and an agent of the same machine (added apart before 3.9) are shown as one server
     tokio::spawn(servers::link_loop(app.clone()));
+    // the direct names of the servers (fr.example.com …) for the app's direct configs, checked every 5 minutes
+    tokio::spawn(direct::run(app.clone()));
     // this server's public IP, written into every backup
     tokio::spawn(migrate::ip_loop(app.clone()));
     tokio::spawn(tunnel::panel::auto_update_loop(app.clone()));
