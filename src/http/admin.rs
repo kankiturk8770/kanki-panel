@@ -215,15 +215,59 @@ pub fn remove_node() {
     }
     eprintln!("deleted in the panel: VPN services stopped, the node agent removes itself");
     let _ = std::fs::remove_file(ENVF);
-    let tunnel_too = std::path::Path::new("/etc/systemd/system/kanki-tunnel.service").exists();
-    if !tunnel_too {
-        if let Ok(exe) = std::env::current_exe() {
-            let _ = std::fs::remove_file(exe.to_string_lossy().replace(" (deleted)", ""));
-        }
-    }
+    wipe_vpn_files();
     let _ = Command::new("sh").arg("-c").arg("systemctl disable -q kanki-node 2>/dev/null; rm -f /etc/systemd/system/kanki-node.service; systemctl daemon-reload").status();
+    // the server agent of this machine (when it is still here) takes the rest when it goes
+    wipe_all_if_last();
     let _ = Command::new("systemctl").args(["stop", "kanki-node"]).status();
     std::process::exit(0);
+}
+
+/// The files of the VPN part a removed node leaves (its services are already off): WireGuard and
+/// AmneziaWG configs, Hysteria2's config and units, KANKI MIX, the node's certificate, settings and
+/// kernel settings. Blocking.
+pub fn wipe_vpn_files() {
+    for f in [
+        "/etc/wireguard/wg0.conf",
+        "/etc/amnezia/amneziawg/awg0.conf",
+        "/etc/hysteria/config.yaml",
+        "/etc/systemd/system/kanki-mix.service",
+        "/usr/local/bin/kanki-mix-server",
+        "/etc/letsencrypt/renewal-hooks/deploy/kanki.sh",
+        "/etc/sysctl.d/99-kanki.conf",
+        "/etc/kanki/kanki.env",
+    ] {
+        let _ = std::fs::remove_file(f);
+    }
+    for d in ["/etc/kanki/kmix", "/etc/kanki/tls"] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+    let _ = Command::new("systemctl").arg("daemon-reload").status();
+}
+
+/// When nothing of Kanki is left on this machine (no panel, no node, no server agent), the rest goes
+/// too: /etc/kanki, /var/lib/kanki, the program, the `kanki` command, Xray and the units Kanki wrote.
+/// Called by the node and by the agent as each removes itself, so the one that goes last cleans up.
+/// Blocking.
+pub fn wipe_all_if_last() {
+    let unit = |u: &str| std::path::Path::new(&format!("/etc/systemd/system/{}.service", u)).exists();
+    if unit("kanki-panel") || unit("kanki-node") || unit("kanki-tunnel") {
+        return;
+    }
+    for u in ["kanki-xray", "kanki-dns", "kanki-emergency", "kanki-mix", "kanki-gre"] {
+        let _ = Command::new("sh").arg("-c").arg(format!("systemctl disable --now -q {u} 2>/dev/null; rm -f /etc/systemd/system/{u}.service")).status();
+    }
+    let _ = Command::new("systemctl").arg("daemon-reload").status();
+    if let Ok(exe) = crate::util::exe_path() {
+        let _ = std::fs::remove_file(exe);
+    }
+    for f in ["/usr/local/bin/kanki", "/usr/local/bin/kanki-panel", "/usr/local/bin/kanki-xray", "/usr/local/bin/kanki-mix-server", "/etc/sysctl.d/90-kanki-tunnel.conf"] {
+        let _ = std::fs::remove_file(f);
+    }
+    for d in ["/etc/kanki", "/var/lib/kanki", "/usr/local/share/kanki-xray"] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+    eprintln!("nothing of Kanki is left on this server: its files are removed");
 }
 
 /// Runs the server agent (tunnels, Xray, Kanki DNS) next to this node, as the panel asked: the same
@@ -527,6 +571,8 @@ async fn bot_get(State(app): St, h: HeaderMap) -> Response {
         "username": app.db.get("bot_username"), "name": app.db.get("bot_name"),
         // another program polls the same bot (an old panel still running): Telegram answered 409
         "conflict": crate::util::now() - app.db.get("bot_conflict").parse::<i64>().unwrap_or(0) < 300,
+        // why Telegram refuses the bot right now ("" = it works)
+        "error": app.db.get("bot_poll_error"),
     })).into_response()
 }
 

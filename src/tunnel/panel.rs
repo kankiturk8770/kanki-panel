@@ -2150,7 +2150,7 @@ async fn server_free_ports(State(app): St, h: HeaderMap, Path(id): Path<String>,
 
 async fn server_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
     let _ = guard!(app, h, "nodes");
-    match delete_server(&app, &id) {
+    match delete_server(&app, &id, false) {
         Ok(()) => Json(json!({ "ok": true })).into_response(),
         Err((code, e)) => err(code, &e),
     }
@@ -2159,13 +2159,20 @@ async fn server_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
 /// Removes an agent server from the panel. Its agent sees it is gone, removes what Kanki installed
 /// (tunnels, Kanki DNS, Xray, emergency chat, subscription listener), closes the firewall ports it
 /// opened and uninstalls itself. Refused while tunnels still use it.
-pub(crate) fn delete_server(app: &App, id: &str) -> Result<(), (StatusCode, String)> {
+pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(), (StatusCode, String)> {
     if id == "local" {
         return Err((StatusCode::BAD_REQUEST, "the panel server cannot be removed".into()));
     }
     let used: Vec<String> = tunnels(app).into_iter().filter(|t| t.entry == id || t.exit == id).map(|t| t.name).collect();
-    if !used.is_empty() {
+    if !used.is_empty() && !with_tunnels {
         return Err((StatusCode::CONFLICT, format!("delete its tunnels first: {}", used.join(", "))));
+    }
+    if !used.is_empty() {
+        // the tunnels go too: the server at the other end (the Iran entry) stops them on its next report
+        // and closes the ports they used
+        let mut tl = tunnels(app);
+        tl.retain(|t| t.entry != id && t.exit != id);
+        save_tunnels(app, &tl);
     }
     let mut list = servers(app);
     if !list.iter().any(|s| s.id == id) {
@@ -2179,6 +2186,7 @@ pub(crate) fn delete_server(app: &App, id: &str) -> Result<(), (StatusCode, Stri
     if app.db.get("emer_server") == id {
         app.db.set("emer_server", "");
     }
+    crate::exitgeo::forget(app, &[crate::exitgeo::srv_key(id), crate::exitgeo::xray_key(id)]);
     seen().lock().unwrap().remove(id);
     Ok(())
 }

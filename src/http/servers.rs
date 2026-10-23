@@ -49,6 +49,8 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/servers/:id", delete(remove).put(edit))
         .route("/api/servers/:id/complete", post(complete))
         .route("/api/servers/:id/vpn", post(vpn_switch))
+        .route("/api/servers/:id/ports", post(set_ports))
+        .route("/api/servers/:id/kmix", post(kmix_switch))
         .route("/api/servers/:id/command", get(command_again))
         // outside /api/: a new server fetches them with its one-time token (no admin session there)
         .route("/dl/install.sh", get(dl_script))
@@ -729,19 +731,104 @@ async fn complete(State(app): St, h: HeaderMap, Path(id): Path<String>, body: Op
 }
 
 /// { on: bool } — the VPN of this server serves users, or nobody (it stays installed)
+/// The VPN node of a server key ("local", "node:<id>" or an agent server linked to a node)
+fn node_of_key(app: &App, id: &str) -> Result<String, Response> {
+    if id == "local" {
+        return Ok("local".into());
+    }
+    if let Some(n) = id.strip_prefix("node:") {
+        return Ok(n.to_string());
+    }
+    let list = tp::servers(app);
+    let Some(s) = list.iter().find(|s| s.id == id) else { return Err(err(StatusCode::NOT_FOUND, "unknown server")) };
+    if s.node.is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "the VPN is not installed on this server yet"));
+    }
+    Ok(s.node.clone())
+}
+
+/// Who else uses UDP `port` for a VPN protocol (another server, or another protocol of this one)
+fn port_user(app: &App, nid: &str, proto: &str, port: u16) -> Option<String> {
+    let names: HashMap<String, String> = app.db.nodes().into_iter().map(|n| (n.id, n.name)).collect();
+    all_uses(app).into_iter().find(|u| u.port == port && !(u.node == nid && u.proto == proto)).map(|u| {
+        format!("UDP {} is already used by {} ({})", port, names.get(&u.node).cloned().unwrap_or(u.node.clone()), match u.proto { "wg" => "WireGuard", "awg" => "AmneziaWG", "hy2" => "Hysteria2", _ => "KANKI MIX" })
+    })
+}
+
+/// { wg?, awg?, hy2?, kmix? }: new ports for this server's VPN. A port another server (or another
+/// protocol here) uses is refused, so a tunnel entry can always carry every server.
+async fn set_ports(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let nid = match node_of_key(&app, &id) {
+        Ok(n) => n,
+        Err(r) => return r,
+    };
+    let Some(n) = app.db.node(&nid) else { return err(StatusCode::NOT_FOUND, "unknown server") };
+    let mut want: Vec<(&'static str, u16)> = vec![];
+    for p in PROTOS {
+        if b[p].is_null() {
+            continue;
+        }
+        match num(&b[p]) {
+            Some(port) => want.push((p, port)),
+            None => return err(StatusCode::BAD_REQUEST, "a port must be 1-65535"),
+        }
+    }
+    for (i, (p, port)) in want.iter().enumerate() {
+        if want.iter().skip(i + 1).any(|(_, q)| q == port) {
+            return err(StatusCode::BAD_REQUEST, "two protocols cannot share one port");
+        }
+        if let Some(e) = port_user(&app, &nid, p, *port) {
+            return err(StatusCode::CONFLICT, &e);
+        }
+    }
+    let mut body = json!({});
+    for (p, port) in want.iter().filter(|(p, _)| *p != "kmix") {
+        body[*p] = json!(port);
+    }
+    let mut errors: Vec<String> = vec![];
+    if body.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
+        let r = if nid == "local" {
+            let b2 = body.clone();
+            tokio::task::spawn_blocking(move || crate::admin::set_ports(&b2)).await.ok()
+        } else {
+            crate::sync::remote_post_json(&app, &n, "/agent/ports", &body).await
+        };
+        match r {
+            Some(v) => errors.extend(v["errors"].as_array().into_iter().flatten().filter_map(|e| e.as_str().map(|s| s.to_string()))),
+            None => errors.push("the server did not answer: press Update agent on it, then try again".into()),
+        }
+    }
+    if let Some((_, port)) = want.iter().find(|(p, _)| *p == "kmix") {
+        let old = crate::kmix::settings(&app).node_port(&nid);
+        crate::kmix::set_node_port(&app, &nid, *port);
+        crate::kmix::move_tunnel_port(&app, &nid, old, *port);
+    }
+    crate::api::spawn_sync(&app);
+    if errors.is_empty() {
+        Json(json!({ "ok": true })).into_response()
+    } else {
+        err(StatusCode::BAD_GATEWAY, &errors.join("; "))
+    }
+}
+
+/// { on }: KANKI MIX on this server (the rest of its settings stay)
+async fn kmix_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let nid = match node_of_key(&app, &id) {
+        Ok(n) => n,
+        Err(r) => return r,
+    };
+    crate::kmix::set_node_off(&app, &nid, !b["on"].as_bool().unwrap_or(true));
+    crate::api::spawn_sync(&app);
+    Json(json!({ "ok": true })).into_response()
+}
+
 async fn vpn_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
-    let nid = if id == "local" {
-        "local".to_string()
-    } else if let Some(n) = id.strip_prefix("node:") {
-        n.to_string()
-    } else {
-        let list = tp::servers(&app);
-        let Some(s) = list.iter().find(|s| s.id == id) else { return err(StatusCode::NOT_FOUND, "unknown server") };
-        if s.node.is_empty() {
-            return err(StatusCode::BAD_REQUEST, "the VPN is not installed on this server yet");
-        }
-        s.node.clone()
+    let nid = match node_of_key(&app, &id) {
+        Ok(n) => n,
+        Err(r) => return r,
     };
     let on = b["on"].as_bool().unwrap_or(true);
     if app.db.node(&nid).is_none() {
@@ -758,7 +845,9 @@ async fn vpn_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b
 }
 
 /// Removes the whole server: its agent (tunnels must be deleted first) and its VPN node.
-async fn remove(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+/// Removes the whole server, from the panel and from the server itself. ?tunnels=1: the tunnels that
+/// use it go too (without it, a server with tunnels answers 409 with their names, to ask first).
+async fn remove(State(app): St, h: HeaderMap, Path(id): Path<String>, Query(q): Query<HashMap<String, String>>) -> Response {
     let _ = guard!(app, h, "nodes");
     if id == "local" {
         return err(StatusCode::BAD_REQUEST, "the panel server cannot be removed");
@@ -767,8 +856,17 @@ async fn remove(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Respons
         let removed = crate::api::delete_node(&app, nid).await;
         return Json(json!({ "ok": true, "removed": removed })).into_response();
     }
+    let with_tunnels = q.get("tunnels").map(|v| v == "1").unwrap_or(false);
+    let used: Vec<Value> = tp::tunnels(&app)
+        .into_iter()
+        .filter(|t| t.entry == id || t.exit == id)
+        .map(|t| json!({ "id": t.id, "name": t.name, "other": if t.entry == id { t.exit } else { t.entry } }))
+        .collect();
+    if !used.is_empty() && !with_tunnels {
+        return (StatusCode::CONFLICT, Json(json!({ "error": "tunnels use this server", "tunnels": used }))).into_response();
+    }
     let node = tp::servers(&app).into_iter().find(|s| s.id == id).map(|s| s.node).unwrap_or_default();
-    if let Err((code, e)) = tp::delete_server(&app, &id) {
+    if let Err((code, e)) = tp::delete_server(&app, &id, with_tunnels) {
         return err(code, &e);
     }
     let removed = if node.is_empty() { true } else { crate::api::delete_node(&app, &node).await };

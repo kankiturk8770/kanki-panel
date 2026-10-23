@@ -193,15 +193,11 @@ fn uninstall_self() {
     let _ = std::fs::remove_file(PIN_FILE);
     let _ = std::fs::remove_file("/var/lib/kanki/subsrv.json");
     let _ = std::fs::remove_file("/etc/sysctl.d/90-kanki-tunnel.conf");
-    let shared = ["/etc/systemd/system/kanki-panel.service", "/etc/systemd/system/kanki-node.service"].iter().any(|f| std::path::Path::new(f).exists());
-    if !shared {
-        if let Ok(exe) = std::env::current_exe() {
-            let _ = std::fs::remove_file(exe.to_string_lossy().replace(" (deleted)", ""));
-        }
-        let _ = std::fs::remove_file("/usr/local/bin/kanki");
-    }
+    let _ = std::fs::remove_file(CACHE);
     eprintln!("removed from the panel: the tunnel agent uninstalls itself");
     sh("systemctl disable -q kanki-tunnel.service 2>/dev/null; rm -f /etc/systemd/system/kanki-tunnel.service; systemctl daemon-reload");
+    // the VPN part of this machine (when it is still here) takes the rest when it goes
+    crate::admin::wipe_all_if_last();
     sh("systemctl stop kanki-tunnel.service");
     std::process::exit(0);
 }

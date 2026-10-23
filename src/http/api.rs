@@ -528,6 +528,17 @@ pub(crate) async fn delete_node(app: &Arc<App>, id: &str) -> bool {
     }
     let _ = app.db.exec("DELETE FROM nodes WHERE id=?1", &[&id]);
     let _ = app.db.exec("DELETE FROM peers WHERE node_id=?1", &[&id]);
+    // nothing of it stays in the panel: users' server lists, its KANKI MIX settings, its direct name,
+    // where its traffic left to
+    for u in app.db.users().into_iter().filter(|u| u.nodes.split(',').any(|x| x.trim() == id)) {
+        let left: Vec<&str> = u.nodes.split(',').map(|x| x.trim()).filter(|x| !x.is_empty() && *x != id).collect();
+        // a user who had only this server moves to the panel server (an empty list would mean "every server")
+        let list = if left.is_empty() { "local".to_string() } else { left.join(",") };
+        let _ = app.db.exec("UPDATE users SET nodes=?1 WHERE id=?2", &[&list, &u.id]);
+    }
+    crate::kmix::forget_node(app, id);
+    crate::direct::forget(app, id);
+    crate::exitgeo::forget(app, &[id.to_string()]);
     crate::live::forget(id);
     crate::servers::node_gone(app, id);
     removed
