@@ -177,6 +177,14 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/assets/kanki-servers.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/servers.js"))
         }))
+        // 3.9.3: multi-location tunnels (one tunnel per hop, made and tested together)
+        .route("/assets/kanki-route.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/route.js"))
+        }))
+        // 3.9.3: VPN services in tabs (KANKI MIX, Xray, WireGuard, AmneziaWG, Hysteria2), a row per server
+        .route("/assets/kanki-svc.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/svc.js"))
+        }))
         .route("/assets/kanki-kmix.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/kmix.js"))
         }))
@@ -619,8 +627,8 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
 /// Their servers take the new user list on their next report, within a few seconds.
 async fn proto_all(State(app): St, h: HeaderMap, Path((proto, action)): Path<(String, String)>) -> Response {
     let _ = guard!(app, h, "users:write");
-    if !matches!(proto.as_str(), "xray" | "dns") {
-        return err(StatusCode::BAD_REQUEST, "only xray and dns can be set for all users here");
+    if !matches!(proto.as_str(), "xray" | "dns" | "wg" | "awg" | "hy2" | "kmix") {
+        return err(StatusCode::BAD_REQUEST, "unknown protocol");
     }
     let add = match action.as_str() {
         "assign-all" => true,

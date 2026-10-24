@@ -1633,7 +1633,9 @@ fn live_clash(app: &App, t: &Tunnel, old: Option<&Tunnel>) -> Option<String> {
             if p != port || u != udp {
                 continue;
             }
-            let ours = unit == "kanki-tunnel.service" || unit.starts_with("kanki-hy2-") || (sid == "local" && unit == "kanki-panel.service");
+            // the agent itself, also when it runs without systemd (a container, started by hand): no unit
+            let ours = unit == "kanki-tunnel.service" || unit.starts_with("kanki-hy2-") || (sid == "local" && unit == "kanki-panel.service")
+                || (unit.is_empty() && prog == "kanki-panel");
             if ours && own.contains(&(sid.clone(), port, udp)) {
                 continue;
             }
