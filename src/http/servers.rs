@@ -519,6 +519,7 @@ pub fn list_json(app: &App) -> Value {
         "local": true, "loc": locs.get("local").map(|x| x.0.clone()).unwrap_or_default(), "cc": crate::exitgeo::cc(app, "local"),
         "agent": { "id": "local", "online": true, "last_seen": t, "version": crate::VERSION, "addr": app.db.get("tun_local_addr") },
         "node": node_v("local"), "ports": ports_json(&uses, "local"), "jobs": jobs("local"), "command": Value::Null,
+        "tunnel": crate::twin::info(app, "local", Some("local")),
     }));
     let mut linked: HashSet<String> = HashSet::new();
     for s in &srv {
@@ -539,6 +540,7 @@ pub fn list_json(app: &App) -> Value {
             "planned": s.ports, "pending": pending, "vpn_wanted": s.vpn, "domain": s.domain,
             "setup": setup, "setup_asked": s.setup_at,
             "jobs": jobs(&s.id), "created": s.created,
+            "tunnel": crate::twin::info(app, &s.id, Some(s.node.as_str()).filter(|n| !n.is_empty())),
         }));
     }
     // VPN nodes with no agent yet (added before 3.9)
@@ -547,6 +549,7 @@ pub fn list_json(app: &App) -> Value {
             "key": format!("node:{}", n.id), "name": n.name, "local": false,
             "loc": if crate::exitgeo::cc(app, &n.id) == "IR" { "iran" } else { "abroad" }, "cc": crate::exitgeo::cc(app, &n.id),
             "agent": Value::Null, "node": node_v(&n.id), "ports": ports_json(&uses, &n.id), "jobs": Value::Null,
+            "tunnel": crate::twin::info(app, &format!("node:{}", n.id), Some(n.id.as_str())),
         }));
     }
     let clash: Vec<Value> = cl
@@ -635,6 +638,16 @@ async fn command_again(State(app): St, h: HeaderMap, Path(id): Path<String>) -> 
 /// { name?, loc?, addr? }
 async fn edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
+    // { tunnel: { on, host, name } }: the copy of every config through this server's tunnel
+    if let Some(t) = b.get("tunnel").filter(|t| t.is_object()) {
+        let known = id == "local" || id.starts_with("node:") || tp::servers(&app).iter().any(|s| s.id == id);
+        if !known {
+            return err(StatusCode::NOT_FOUND, "unknown server");
+        }
+        if let Err(e) = crate::twin::save(&app, &id, t) {
+            return err(StatusCode::BAD_REQUEST, &e);
+        }
+    }
     if id == "local" {
         if let Some(n) = b["name"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty()) {
             let _ = app.db.exec("UPDATE nodes SET name=?1 WHERE id='local'", &[&n]);
@@ -858,6 +871,7 @@ async fn remove(State(app): St, h: HeaderMap, Path(id): Path<String>, Query(q): 
     }
     if let Some(nid) = id.strip_prefix("node:") {
         let removed = crate::api::delete_node(&app, nid).await;
+        crate::twin::forget(&app, &id);
         return Json(json!({ "ok": true, "removed": removed })).into_response();
     }
     let with_tunnels = q.get("tunnels").map(|v| v == "1").unwrap_or(false);
@@ -874,6 +888,7 @@ async fn remove(State(app): St, h: HeaderMap, Path(id): Path<String>, Query(q): 
         return err(code, &e);
     }
     let removed = if node.is_empty() { true } else { crate::api::delete_node(&app, &node).await };
+    crate::twin::forget(&app, &id);
     Json(json!({ "ok": true, "removed": removed })).into_response()
 }
 

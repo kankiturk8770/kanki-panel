@@ -36,6 +36,8 @@ mod migrate;
 mod servers;
 #[path = "http/direct.rs"]
 mod direct;
+#[path = "http/twin.rs"]
+mod twin;
 
 // vpn: protocol engines + node sync
 mod dns;
