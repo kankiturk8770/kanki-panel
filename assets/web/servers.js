@@ -109,7 +109,7 @@ if(typeof FA!='undefined')Object.assign(FA,{
  "empty = keep it":"خالی = همان قبلی","Show command":"نمایش دستور","Ports and protocols of this server are in VPN services.":"پورت‌ها و پروتکل‌های این سرور در «سرویس‌های VPN» است.",
  "VPN services":"سرویس‌های VPN","No server yet":"هنوز سروری نیست","Add an Iran server":"افزودن سرور ایران","Add an abroad server":"افزودن سرور خارج",
  "relay":"رله","Not connected":"وصل نیست","Saved":"ذخیره شد","Closed":"بسته شد",
- "Tunnel domain":"دامنه‌ی تانل","Tunnel domain (optional)":"دامنه‌ی تانل (اختیاری)",
+ "tunnel":"تانل","Tunnel domain":"دامنه‌ی تانل","Tunnel domain (optional)":"دامنه‌ی تانل (اختیاری)",
  "If this server has a tunnel, or will have one, write your Iran server's domain here. Every protocol then also gets a second config through it, made by itself.":"اگر برای این سرور تانل زده‌اید یا می‌خواهید بزنید، دامنه‌ی سرور ایرانتان را همین‌جا بنویسید. از همه‌ی پروتکل‌ها (KANKI MIX، امنزیا، وایرگارد، هیستریا، Xray) خودش یک کانفیگ دوم با این دامنه می‌سازد و به برنامه می‌فرستد.",
  "WireGuard comes only this way.":"وایرگارد فقط همین کانفیگ را دارد.",
  "Name of these configs in the app (optional)":"اسم این کانفیگ‌ها در برنامه (اختیاری)",
@@ -126,10 +126,12 @@ window.SV=SV;
 (function(){var st=document.createElement('style');st.textContent=
  '.kxp-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.kxp-top .sp{flex:1}'+
  '.kxtun{margin-top:8px;border:1px solid var(--ln);border-radius:12px;padding:8px 10px}'+
- '.kxtun-p{display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0;flex-wrap:wrap}.kxtun-p b{min-width:92px;font-weight:700}.kxtun-p small{color:var(--s);font-size:10.5px}'+
- '.kxtun-w{font-size:12px;color:var(--warn);margin:8px 2px 0}html[dir=rtl] .kxtun-a{transform:scaleX(-1);display:inline-block}'+
+ '.kxtun-p{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;font-size:12px;padding:4px 0;border-bottom:1px dashed color-mix(in srgb,var(--ln) 60%,transparent)}.kxtun-p:last-child{border:0}'+
+ '.kxtun-p b{font-weight:700}.kxtun-m{margin-inline-start:auto;color:var(--s);overflow-wrap:anywhere;text-align:left}'+
+ '.kxtun-w{font-size:12px;color:var(--warn);margin:8px 2px 0}'+
  '.kxc-tag{font-size:11px;border:1px solid var(--ln);border-radius:8px;padding:1px 7px;color:var(--s);white-space:nowrap;font-weight:600}'+
  '.kxc-tag.main{color:var(--a);border-color:color-mix(in srgb,var(--a) 55%,transparent)}'+
+ '.kxc-tag.tun{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}'+
  '.kxc-miss{border:1px dashed color-mix(in srgb,var(--warn) 60%,transparent);border-radius:12px;padding:8px 10px;margin:8px 0 0;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}'+
  '.kxc-miss span{flex:1;min-width:150px}.kxc-miss pre{width:100%;margin:6px 0 0;white-space:pre-wrap;font-size:11px;max-height:140px;overflow:auto;direction:ltr;text-align:left;background:var(--in);border-radius:8px;padding:6px}'+
  '.kxp-clash{border:1px solid color-mix(in srgb,var(--warn) 55%,transparent);border-radius:16px;padding:12px;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}'+
@@ -147,8 +149,9 @@ window.SV=SV;
  '.kxr{border:1px solid var(--ln);border-radius:14px;background:var(--c1);min-width:0;transition:border-color .2s,box-shadow .2s}'+
  '.kxr:hover{border-color:color-mix(in srgb,var(--a) 30%,var(--ln))}'+
  '.kxr.open{border-color:color-mix(in srgb,var(--a) 55%,var(--ln));box-shadow:0 6px 22px -14px color-mix(in srgb,var(--a) 70%,transparent)}'+
- '.kxr-h{display:flex;align-items:center;gap:8px;width:100%;padding:9px 11px;background:transparent;border:0;color:var(--t);font:inherit;cursor:pointer;text-align:start;min-width:0;border-radius:14px}'+
- '.kxr-h b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.kxr-h .sp{flex:1;min-width:6px}'+
+ // a row head wraps: the name stays whole and the badges go to a second line when the screen is narrow
+ '.kxr-h{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;width:100%;padding:9px 11px;background:transparent;border:0;color:var(--t);font:inherit;cursor:pointer;text-align:start;min-width:0;border-radius:14px}'+
+ '.kxr-h b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:100%}.kxr-h .sp{flex:1;min-width:6px}'+
  '.kxr-h small{color:var(--s);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kxr-h .flg{font-size:16px}'+
  '.kxr-arr{flex:none;display:inline-flex;color:var(--s);transition:transform .2s ease,color .2s}.kxr-arr svg{display:block}'+
  '.kxr-arr{transform:rotate(-90deg)}[dir=rtl] .kxr-arr{transform:rotate(90deg)}.kxr.open .kxr-arr{transform:none;color:var(--a)}'+
@@ -238,7 +241,9 @@ function online(s){var a=s.agent,n=s.node;return !!(s.local||(a&&a.online)||(n&&
 function srvIp(s){var a=s.agent||{},n=s.node||{};return a.addr||a.ip||(n.effective_endpoint&&n.effective_endpoint!=n.endpoint?'':n.endpoint)||''}
 
 function row(s){var n=s.node,a=s.agent,on=online(s),h=n&&window.nHealthOf?nHealthOf(n):null,col=!on?'r':h&&h.c=='r'?'y':h?h.c:'g';
- var tags=(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+(n&&!n.enabled&&!s.local?'<span class="kxc-tag">'+t('relay')+'</span>':'');
+ var tn=s.tunnel||{},tags=(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+(n&&!n.enabled&&!s.local?'<span class="kxc-tag">'+t('relay')+'</span>':'')+
+  // tunnel: its configs point at the Iran entry; + tunnel: a second config of every protocol through its tunnel domain
+  (tn.main_via=='tunnel'?'<span class="kxc-tag tun">'+t('tunnel')+'</span>':tn.on&&tn.uses?'<span class="kxc-tag tun">+ '+t('tunnel')+'</span>':'');
  var head='<span class="dot '+col+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+tags+'<span class="sp"></span>'+
   (on?'':'<span class="kxr-st r">'+t('Not connected')+'</span>')+'<small class="kxr-ip ltr">'+esc(srvIp(s))+'</small>';
  return accRow('srv',s.key,head,function(){return srvBody(s)})}
@@ -310,7 +315,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
 // and the name; below, each port with the one it gets on that address
 function tunBox(s){var tn=s.tunnel||{},n=s.node,ents=entriesOf(s),host=tn.on?(tn.host||tn.uses||''):'';
  var ep=n&&n.endpoint_mode!='panel'?(n.endpoint||''):'',viaIr=ep&&ents.some(function(e){return e.host==ep});
- var rows=tn.on&&tn.uses?(tn.ports||[]).map(function(p){return '<div class="kxtun-p"><b>'+esc(p.proto)+'</b><span class="ltr">'+(p.tcp?'TCP':'UDP')+' '+p.port+'</span><span class="kxtun-a">←</span><span class="ltr">'+esc(tn.uses)+':'+p.via+'</span></div>'}).join(''):'';
+ var rows=tn.on&&tn.uses?(tn.ports||[]).map(function(p){return '<div class="kxtun-p"><b>'+esc(p.proto)+'</b><span class="kxtun-m ltr">'+esc(tn.uses)+':'+p.via+' → '+(p.tcp?'TCP':'UDP')+' '+p.port+'</span></div>'}).join(''):'';
  return '<div class="kxr-sec">'+t('Tunnel domain')+'</div>'+
   '<p class="muted" style="font-size:11.5px;margin:0 2px 6px">'+t('If this server has a tunnel, or will have one, write your Iran server\'s domain here. Every protocol then also gets a second config through it, made by itself.')+' '+t('WireGuard comes only this way.')+'</p>'+
   '<div class="kxf"><div class="wide"><input id="sx_th" class="ltr" value="'+esc(host)+'" placeholder="ir.example.com">'+

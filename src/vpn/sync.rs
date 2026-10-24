@@ -185,6 +185,10 @@ pub async fn sync_all(app: &Arc<App>) {
     // a node whose VPN is switched off serves nobody: its users are taken off (an empty sync), so a
     // relay server keeps its ports free and an old peer cannot keep using it
     for n in app.db.nodes().into_iter().filter(|n| !n.enabled) {
+        // the panel server's own info (version, services, load) stays fresh while its VPN is off too
+        if n.id == "local" {
+            let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id='local'", &[&local_info(app).to_string()]);
+        }
         // once it is empty, checked again every 5 minutes (an unreachable one must not slow every round)
         {
             let mut g = off_checked().lock().unwrap();
@@ -316,6 +320,36 @@ async fn remote_sync(app: &App, n: &Node, req: &SyncReq) -> Result<SyncResp, Str
         return Err(format!("the node answered {}", r.status()));
     }
     r.json::<SyncResp>().await.map_err(|e| e.to_string())
+}
+
+/// Nodes that were just told to update restart onto the new program: their info (and so the version the
+/// panel shows) is read again every few seconds until they report `want`, not only at the next sync round.
+pub fn refresh_after_update(app: &Arc<App>, mut nodes: Vec<Node>, want: &str) {
+    if nodes.is_empty() {
+        return;
+    }
+    let (a, want) = (app.clone(), want.to_string());
+    tokio::spawn(async move {
+        for _ in 0..15 {
+            tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+            let mut left = vec![];
+            for n in nodes {
+                match remote_info(&a, &n.address, &n.token, n.insecure).await {
+                    Some(info) => {
+                        let _ = a.db.exec("UPDATE nodes SET info=?1, online=1 WHERE id=?2", &[&info.to_string(), &n.id]);
+                        if !want.is_empty() && info["version"].as_str() != Some(want.as_str()) {
+                            left.push(n);
+                        }
+                    }
+                    None => left.push(n),
+                }
+            }
+            if left.is_empty() {
+                break;
+            }
+            nodes = left;
+        }
+    });
 }
 
 pub async fn remote_info(app: &App, addr: &str, token: &str, insecure: bool) -> Option<Value> {

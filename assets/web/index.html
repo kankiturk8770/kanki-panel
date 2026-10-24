@@ -1339,7 +1339,11 @@ function loadNodes(){api('GET','/api/nodes').then(function(n){S.nodes=n;drawNode
  if(window.xrServers)api('GET','/api/xray').then(function(d){XR.d=d;var el=$('#nl_x');if(el&&S.page=='nodes')el.innerHTML=xrServers(d)}).catch(function(){});
  if(window.dnsServers)api('GET','/api/dns').then(function(d){DN.d=d;var el=$('#nl_d');if(el&&S.page=='nodes')el.innerHTML=dnsServers(d)}).catch(function(){})}
 // ---- node health: judged from the last sync and the CPU / RAM / disk the node reports
-function panelVer(){var l=(S.nodes||[]).filter(function(x){return x.id=='local'})[0];return l&&l.info&&l.info.version||''}
+// the version the panel really runs (an older saved one of its own server made every up-to-date agent look old)
+function panelVer(){if(S.me&&S.me.version)return S.me.version;var l=(S.nodes||[]).filter(function(x){return x.id=='local'})[0];return l&&l.info&&l.info.version||''}
+// a < b as versions (3.9.10 is newer than 3.9.9)
+function verLt(a,b){var x=String(a).split('.').map(function(v){return parseInt(v,10)||0}),y=String(b).split('.').map(function(v){return parseInt(v,10)||0});
+ for(var i=0;i<Math.max(x.length,y.length);i++){if((x[i]||0)!=(y[i]||0))return (x[i]||0)<(y[i]||0)}return false}
 function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bump=function(l,m){r.push([l,m]);if(l>lv)lv=l};
  if(!loc&&n.sync_state=='pin mismatch')return{lv:2,c:'r',l:'Problem',r:[[2,'The node\'s certificate changed (reinstalled?): run its join command again, or remove and add the node']]};
  if(!loc&&!n.online)return{lv:2,c:'r',l:'Problem',r:[[2,'Not reachable: check the server, its agent and the firewall']]};
@@ -1352,7 +1356,7 @@ function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bu
   if(dk>=95)bump(2,t('Disk is almost full')+' ('+N(Math.round(dk))+'%)');else if(dk>=85)bump(1,t('Disk is getting full')+' ('+N(Math.round(dk))+'%)');
   if(st.swap_total>0&&sw>=50)bump(1,t('Using a lot of swap: the server needs more RAM')+' ('+N(Math.round(sw))+'%)');
  }else if(!loc)bump(0,'Press Update agent to see CPU, RAM and disk of this node');
- var pv=panelVer();if(!loc&&pv&&i.version&&i.version!=pv)bump(1,t('Agent is on an older version')+' (v'+i.version+'): '+t('press Update agent'));
+ var pv=panelVer();if(!loc&&pv&&i.version&&verLt(i.version,pv))bump(1,t('Agent is on an older version')+' (v'+i.version+'): '+t('press Update agent'));
  if(n.maint)bump(1,'Under maintenance: new users are not sent here');
  return lv==2?{lv:2,c:'r',l:'Problem',r:r}:lv==1?{lv:1,c:'y',l:'Under pressure',r:r}:{lv:0,c:'g',l:'Healthy',r:r}}
 function upTime(s){s=+s||0;var d=Math.floor(s/86400),h=Math.floor(s%86400/3600);return d?N(d)+' '+t('days')+' '+N(h)+' '+t('hours'):N(h)+' '+t('hours')+' '+N(Math.floor(s%3600/60))+' '+t('min')}
