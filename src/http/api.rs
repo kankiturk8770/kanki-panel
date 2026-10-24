@@ -1020,12 +1020,13 @@ pub fn user_nodes(app: &App, u: &User) -> Vec<Node> {
     app.db.nodes().into_iter().filter(|n| n.usable() && u.on(n)).collect()
 }
 
-/// Which protocols this user can actually use on this node
-pub fn node_protos(u: &User, n: &Node) -> Vec<&'static str> {
+/// Which protocols this user can actually use on this node. WireGuard only when the server is
+/// reached through a tunnel: plain WireGuard straight to a server abroad does not pass in Iran.
+pub fn node_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     let info = node_info(n);
     let mut v = vec![];
     let has = |k: &str| info[k].as_str().map(|s| !s.is_empty()).unwrap_or(false);
-    if u.has_proto("wg") && has("wg_pub") { v.push("wireguard"); }
+    if u.has_proto("wg") && has("wg_pub") && crate::direct::through_tunnel(app, n) { v.push("wireguard"); }
     if u.has_proto("awg") && has("awg_pub") { v.push("amneziawg"); }
     if u.has_proto("hy2") && has("hy2_port") { v.push("hysteria2"); }
     if u.has_proto("kmix") && info["kmix_port"].as_u64().is_some() { v.push("kankimix"); }
@@ -1040,7 +1041,7 @@ fn sub_data(app: &App, u: &User) -> Value {
     for n in user_nodes(app, u).iter() {
         let tun = crate::kmix::link_tunnel(app, u, n);
         let mut v = json!({
-            "id": n.id, "name": n.name, "main": n.id == "local", "protocols": node_protos(u, n),
+            "id": n.id, "name": n.name, "main": n.id == "local", "protocols": node_protos(app, u, n),
             "hy2": hy2_uri(app, u, n),
             // KANKI MIX: kanki://key@host:port?fec=10-3… (Null = not for this user / not on this server)
             "kmix": crate::kmix::link(app, u, n),
@@ -1111,7 +1112,7 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
     let mut nodes_html = String::new();
     for n in user_nodes(&app, &u) {
         let mut rows = String::new();
-        for p in node_protos(&u, &n) {
+        for p in node_protos(&app, &u, &n) {
             let (title, letter) = match p { "wireguard" => ("WireGuard", "W"), "amneziawg" => ("AmneziaWG", "A"), "kankimix" => ("KANKI MIX", "K"), _ => ("Hysteria2", "H") };
             let base = format!("/api/config/{}/{}?sub={}&amp;node={}", u.id, p, sub, esc(&n.id));
             let mut btns = String::new();
@@ -1229,7 +1230,8 @@ async fn sub_raw(State(app): St, Path(code): Path<String>) -> Response {
         if let Some(h) = hy2_uri(&app, &u, &n) {
             lines.push(h);
         }
-        if u.has_proto("wg") {
+        // WireGuard only through a tunnel (see node_protos)
+        if node_protos(&app, &u, &n).contains(&"wireguard") {
             if let Some(w) = wg_uri(&app, &u, &n) {
                 lines.push(w);
             }

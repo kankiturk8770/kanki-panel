@@ -160,6 +160,12 @@ pub fn awg(app: &App, n: &Node) -> (&'static str, String) {
     }
 }
 
+/// Users of this server connect through a tunnel: its endpoint (where its configs point) is another
+/// address than the server itself (the Iran entry of a tunnel or a multi-location route).
+pub fn through_tunnel(app: &App, n: &Node) -> bool {
+    !crate::api::endpoint(app, n).trim().is_empty() && awg(app, n).0 == "tunnel"
+}
+
 /// The saved labels, without assigning new ones (a subscription page must not write settings)
 fn labels_ro(app: &App) -> HashMap<String, String> {
     serde_json::from_str(&app.db.get(NAMES_KEY)).unwrap_or_default()
@@ -270,6 +276,18 @@ mod tests {
         // the panel server, endpoint = its own domain
         let local = a.db.node("local").unwrap();
         assert_eq!(awg(&a, &local).0, "direct");
+    }
+
+    #[test]
+    fn wireguard_only_through_a_tunnel() {
+        let a = app();
+        node(&a, "n-tun", "https://5.5.5.1:2096", "ir.example.com", "5.5.5.1", "FR");
+        node(&a, "n-own", "https://6.6.6.6:2096", "6.6.6.6", "6.6.6.6", "DE");
+        assert!(through_tunnel(&a, &a.db.node("n-tun").unwrap()));
+        assert!(!through_tunnel(&a, &a.db.node("n-own").unwrap()));
+        // the panel server with its own domain as the endpoint: direct
+        a.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,online) VALUES('local','Main','','','',1)", &[]).unwrap();
+        assert!(!through_tunnel(&a, &a.db.node("local").unwrap()));
     }
 
     #[test]
