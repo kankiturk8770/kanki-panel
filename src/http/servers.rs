@@ -131,7 +131,10 @@ fn node_uses(n: &Node, km: &crate::kmix::Settings) -> Vec<Use> {
     push("awg", if has("awg_pub") { num(&i["awg_port"]) } else { None });
     push("hy2", num(&i["hy2_port"]));
     let kmix_installed = !i["kmix_port"].is_null() || n.id == "local";
-    push("kmix", if km.node_on(&n.id) && kmix_installed { Some(km.node_port(&n.id)) } else { None });
+    // a server given its own KANKI MIX port when it joined holds it from then on, also before its first
+    // sync installs KANKI MIX there (else the next server added got the same port)
+    let kmix_given = km.nodes.get(&n.id).map(|o| o.port > 0).unwrap_or(false);
+    push("kmix", if km.node_on(&n.id) && (kmix_installed || kmix_given) { Some(km.node_port(&n.id)) } else { None });
     v
 }
 

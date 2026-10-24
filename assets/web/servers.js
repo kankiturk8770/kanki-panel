@@ -1,4 +1,6 @@
 // Kanki Panel 3.9: Servers — one list, one kind of server.
+// 3.9.3: two boxes (abroad, Iran) of compact rows; a row's arrow opens it (one open at a time) with all
+// of the server's own settings. Its VPN ports and protocols are in VPN services (svc.js).
 // The panel runs on one server; every other server is a node of it, added with ONE command that
 // installs everything (VPN, tunnels, Xray, Kanki DNS). What a server runs is switched on here.
 // Loaded after every other script: it replaces the old Servers page (VPN nodes, tunnel servers, Xray
@@ -99,141 +101,146 @@ if(typeof FA!='undefined')Object.assign(FA,{
  "Removed":"حذف شد",
  "Saved":"ذخیره شد"
 });
-var SV={d:null,f:'all',open:{},wait:null};
+if(typeof FA!='undefined')Object.assign(FA,{
+ "Server settings":"تنظیمات سرور","Note":"یادداشت","Users connect to":"کاربرها به این آدرس وصل می‌شوند",
+ "This server's own address":"آدرس خود این سرور","Another address":"آدرس دیگر","Through":"از راه",
+ "Users without their own server list get this server":"کاربرانی که فهرست سرور جدا ندارند این سرور را هم بگیرند",
+ "API address":"آدرس API","Node token":"توکن نود","Self-signed certificate (no domain on the server)":"گواهی خودامضا (بدون دامنه روی سرور)",
+ "empty = keep it":"خالی = همان قبلی","Show command":"نمایش دستور","Ports and protocols of this server are in VPN services.":"پورت‌ها و پروتکل‌های این سرور در «سرویس‌های VPN» است.",
+ "VPN services":"سرویس‌های VPN","No server yet":"هنوز سروری نیست","Add an Iran server":"افزودن سرور ایران","Add an abroad server":"افزودن سرور خارج",
+ "relay":"رله","Not connected":"وصل نیست","Saved":"ذخیره شد","Closed":"بسته شد"
+});
+var SV={d:null,wait:null};
 window.SV=SV;
 
 // ---------------------------------------------------------------- look
 (function(){var st=document.createElement('style');st.textContent=
  '.kxp-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.kxp-top .sp{flex:1}'+
- '.kxp-f{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}.kxp-f button{border:1px solid var(--ln);background:transparent;color:var(--t);border-radius:999px;padding:6px 12px;font:inherit;font-size:12px;cursor:pointer}'+
- '.kxp-f button.on{background:var(--a);color:#1a1206;border-color:var(--a);font-weight:700}.kxp-f b{opacity:.75;margin-inline-start:4px}'+
- '.kxp-g{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;align-items:start}'+
- '.kxc{border:1px solid var(--ln);border-radius:18px;padding:14px;background:var(--c1);min-width:0}'+
- '.kxc.off{opacity:.92}.kxc-h{display:flex;align-items:center;gap:8px;min-width:0}.kxc-h b{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'+
- '.kxc-h .sp{flex:1}.kxc-tag{font-size:11px;border:1px solid var(--ln);border-radius:8px;padding:2px 7px;color:var(--s);white-space:nowrap}'+
+ '.kxc-tag{font-size:11px;border:1px solid var(--ln);border-radius:8px;padding:1px 7px;color:var(--s);white-space:nowrap;font-weight:600}'+
  '.kxc-tag.main{color:var(--a);border-color:color-mix(in srgb,var(--a) 55%,transparent)}'+
- '.kxc-st{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--s);font-size:12px;margin:6px 0 10px}.kxc-st b{color:var(--t);font-weight:600}'+
- '.kxc-sv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}'+
- '.kxs{border:1px solid var(--ln);border-radius:14px;padding:9px 10px;min-width:0;background:transparent;color:var(--t);font:inherit;text-align:start;cursor:pointer;display:flex;flex-direction:column;gap:3px}'+
- '.kxs:hover{border-color:color-mix(in srgb,var(--a) 50%,var(--ln))}.kxs>span{display:flex;align-items:center;gap:6px;font-weight:700;font-size:13px}'+
- '.kxs small{color:var(--s);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kxs.on{border-color:color-mix(in srgb,var(--ok) 55%,transparent)}'+
- '.kxs.on>span:before,.kxs.no>span:before,.kxs.bad>span:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}'+
- '.kxs.no>span:before{background:var(--s);opacity:.5}.kxs.bad>span:before{background:var(--bad)}.kxs.add{border-style:dashed;color:var(--s)}'+
- '.kxs.wide{grid-column:1/-1;flex-direction:row;align-items:center;justify-content:space-between;gap:10px;cursor:default}'+
- '.kxs.wide .sw{flex:none}.kxs .pl{direction:ltr;unicode-bidi:isolate}'+
- '.kxc-miss{border:1px dashed color-mix(in srgb,var(--warn) 60%,transparent);border-radius:14px;padding:10px;margin-top:10px;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}'+
+ '.kxc-miss{border:1px dashed color-mix(in srgb,var(--warn) 60%,transparent);border-radius:12px;padding:8px 10px;margin:8px 0 0;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}'+
  '.kxc-miss span{flex:1;min-width:150px}.kxc-miss pre{width:100%;margin:6px 0 0;white-space:pre-wrap;font-size:11px;max-height:140px;overflow:auto;direction:ltr;text-align:left;background:var(--in);border-radius:8px;padding:6px}'+
- '.kxc-m{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}'+
- '.kxc-more{width:100%;margin-top:10px;border:1px dashed var(--ln);background:transparent;color:var(--s);border-radius:12px;padding:7px;font:inherit;font-size:12px;cursor:pointer}'+
- '.kxc-act{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:8px}.kxc-act button{width:100%}'+
  '.kxp-clash{border:1px solid color-mix(in srgb,var(--warn) 55%,transparent);border-radius:16px;padding:12px;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}'+
  '.kxp-clash div{flex:1;min-width:220px;font-size:12px}.kxp-clash b{color:var(--warn)}'+
  '.kxp-steps{display:grid;gap:6px;margin-top:10px}.kxp-steps div{display:flex;gap:8px;align-items:center;font-size:13px}'+
  '.kxp-ports{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.kxp-ports span{border:1px solid var(--ln);border-radius:8px;padding:2px 8px;font-size:12px;direction:ltr}'+
  '.kxseg{display:grid;grid-template-columns:1fr 1fr;gap:6px}'+
- // pop-ups above the phone's bottom tab bar (it covered their last buttons: "Create command", "Save"…)
  '.modal{z-index:60!important}#toast{z-index:70!important}'+
- // 3.9.2: one column of compact rows; a row opens with its arrow
- '.kxl{display:flex;flex-direction:column;gap:8px;max-width:980px}'+
- '.kxl-h{font-size:12px;color:var(--s);margin:14px 4px 2px;font-weight:700}'+
- '.kxr{border:1px solid var(--ln);border-radius:16px;background:var(--c1);min-width:0}'+
- '.kxr.open{border-color:color-mix(in srgb,var(--a) 45%,var(--ln))}'+
- '.kxr-h{display:flex;align-items:center;gap:8px;width:100%;padding:11px 12px;background:transparent;border:0;color:var(--t);font:inherit;cursor:pointer;text-align:start;min-width:0}'+
- '.kxr-h b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.kxr-h .sp{flex:1}'+
- '.kxr-arr{flex:none;width:18px;color:var(--s);transition:transform .15s;display:inline-block}.kxr.open .kxr-arr{transform:rotate(90deg)}'+
- '[dir=rtl] .kxr-arr{transform:scaleX(-1)}[dir=rtl] .kxr.open .kxr-arr{transform:rotate(90deg)}'+
- '.kxr-chips{display:flex;gap:4px;flex-wrap:nowrap;overflow:hidden}.kxr-chips span{font-size:11px;border:1px solid var(--ln);border-radius:8px;padding:1px 6px;color:var(--s);white-space:nowrap}'+
- '.kxr-chips span.on{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}.kxr-chips span.bad{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}'+
- '.kxr-b{padding:0 12px 12px}'+
- '.kxv{display:flex;flex-direction:column;border:1px solid var(--ln);border-radius:12px;overflow:hidden;margin-top:8px}'+
- '.kxv button{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;background:transparent;border:0;border-top:1px solid var(--ln);color:var(--t);font:inherit;font-size:13px;cursor:pointer;text-align:start}'+
- '.kxv button:first-child{border-top:0}.kxv button:hover{background:color-mix(in srgb,var(--a) 7%,transparent)}'+
- '.kxv b{min-width:96px;font-weight:700}.kxv small{color:var(--s);font-size:12px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kxv i{font-style:normal;color:var(--s)}'+
- '.kxv .st{font-size:11px;border-radius:8px;padding:1px 7px;border:1px solid var(--ln);white-space:nowrap}'+
- '.kxv .st.g{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}.kxv .st.r{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 50%,transparent)}.kxv .st.n{color:var(--s)}'+
- '.kxm-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}.kxm-row>div{flex:1;min-width:140px}'+
- '.kxm-warn{color:var(--warn);font-size:12px;margin-top:6px;min-height:16px}'+
+ // boxes (abroad, Iran) of compact rows; one row open at a time
+ '.kxbox{border:1px solid var(--ln);border-radius:18px;background:color-mix(in srgb,var(--c1) 55%,transparent);padding:10px;margin:0 0 12px;max-width:980px}'+
+ '.kxbox-h{display:flex;align-items:center;gap:8px;padding:2px 4px 8px}.kxbox-h b{font-size:14px}.kxbox-h small{color:var(--s);font-size:12px;border:1px solid var(--ln);border-radius:999px;padding:0 8px}.kxbox-h .sp{flex:1}'+
+ '.kxbox-i{display:inline-flex;width:26px;height:26px;border-radius:9px;align-items:center;justify-content:center;background:color-mix(in srgb,var(--a) 12%,transparent);font-size:15px}'+
+ '.kxbox-e{margin:4px 6px 6px;font-size:12px}'+
+ '.kxl{display:flex;flex-direction:column;gap:6px}'+
+ '.kxr{border:1px solid var(--ln);border-radius:14px;background:var(--c1);min-width:0;transition:border-color .2s,box-shadow .2s}'+
+ '.kxr:hover{border-color:color-mix(in srgb,var(--a) 30%,var(--ln))}'+
+ '.kxr.open{border-color:color-mix(in srgb,var(--a) 55%,var(--ln));box-shadow:0 6px 22px -14px color-mix(in srgb,var(--a) 70%,transparent)}'+
+ '.kxr-h{display:flex;align-items:center;gap:8px;width:100%;padding:9px 11px;background:transparent;border:0;color:var(--t);font:inherit;cursor:pointer;text-align:start;min-width:0;border-radius:14px}'+
+ '.kxr-h b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}.kxr-h .sp{flex:1;min-width:6px}'+
+ '.kxr-h small{color:var(--s);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kxr-h .flg{font-size:16px}'+
+ '.kxr-arr{flex:none;display:inline-flex;color:var(--s);transition:transform .2s ease,color .2s}.kxr-arr svg{display:block}'+
+ '.kxr-arr{transform:rotate(-90deg)}[dir=rtl] .kxr-arr{transform:rotate(90deg)}.kxr.open .kxr-arr{transform:none;color:var(--a)}'+
+ '.kxr-st{font-size:11px;border:1px solid var(--ln);border-radius:8px;padding:1px 7px;white-space:nowrap;color:var(--s)}'+
+ '.kxr-st.g{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}.kxr-st.r{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}.kxr-st.y{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}'+
+ '.kxr-b{overflow:hidden;transition:height .2s ease,opacity .2s ease}.kxr-b.shut{opacity:0}'+
+ '.kxr-in{padding:2px 12px 12px;border-top:1px solid color-mix(in srgb,var(--ln) 70%,transparent)}'+
+ '.kxr-line{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--s);font-size:12px;margin:10px 0 4px}.kxr-line b{color:var(--t);font-weight:600}'+
+ '.kxr-sec{font-size:11px;font-weight:700;color:var(--s);margin:12px 0 4px;letter-spacing:.2px}'+
+ '.kxf{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px}.kxf>div{min-width:0}.kxf label.f{margin:4px 0 3px;font-size:12px}'+
+ '.kxf input,.kxf select{height:36px;padding:0 10px;font-size:13px;border-radius:10px}.kxf .wide{grid-column:1/-1}'+
+ '.kxf .seg button{padding:6px 8px;font-size:12px}'+
+ '.kxsw{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--ln);border-radius:12px;padding:7px 10px;font-size:13px;margin-top:6px}'+
+ '.kxsw span{min-width:0}.kxsw small{display:block;color:var(--s);font-size:11px}'+
+ '.kxchips{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}.kxchips button{border:1px solid var(--ln);background:transparent;color:var(--t);border-radius:999px;padding:3px 9px;font:inherit;font-size:11px;cursor:pointer}'+
+ '.kxchips button:hover,.kxchips button.on{border-color:var(--a);color:var(--a)}'+
+ '.kxm3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:8px}'+
+ '.kxacts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.kxacts button,.kxacts a{flex:0 0 auto}'+
+ '.kxsave{display:flex;gap:6px;justify-content:flex-end;margin-top:10px}'+
+ '.kxm-row{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}.kxm-row>div{flex:1;min-width:120px}'+
+ '.kxm-warn{color:var(--warn);font-size:12px;margin-top:4px;min-height:14px}'+
  '.kxm-btns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:12px}.kxm-btns button,.kxm-btns a{width:100%;text-align:center}'+
- // a short laptop screen: the side menu scrolls instead of cutting off its last items
+ '.kxr-in details.box{margin-top:8px;padding:8px 10px}.kxr-in details.box summary{font-size:12px;font-weight:700;cursor:pointer}'+
  '@media(min-width:900px){.side{overflow-y:auto;overscroll-behavior:contain}}'+
- '@media(max-width:520px){.kxp-g{grid-template-columns:1fr}.kxc{padding:12px}.kxc-m{gap:6px}}';
+ '@media(max-width:600px){.kxf{grid-template-columns:1fr}.kxbox{padding:8px;border-radius:16px}.kxr-h small.kxr-ip{display:none}}';
  document.head.appendChild(st)})();
 
 function fl(cc){return window.flagOf?flagOf(cc):''}
 function isIr(s){return s.loc=='iran'||String(s.cc||'').toUpperCase()=='IR'}
 function q(id){return encodeURIComponent(id)}
-function nodeId(s){return s.node?s.node.id:''}
+
+// ---------------------------------------------------------------- one row open at a time (Servers, VPN services)
+// A list of rows: the arrow of a row opens it and closes the one open before it. Leaving the page, or
+// saving what is in it, closes it. Only the open row's body is drawn; a refresh leaves a row alone
+// while something is being typed in it.
+var ACC={open:{},draw:{},anim:''};
+window.KAcc=ACC;
+window.accRow=function(g,key,head,body,cls){var op=ACC.open[g]==key,an=op&&ACC.anim==g+'|'+key;
+ return '<div class="kxr'+(op?' open':'')+(cls?' '+cls:'')+'" data-acc="'+esc(g)+'" data-key="'+esc(key)+'">'+
+  '<button type="button" class="kxr-h" onclick="accToggle(\''+esc(g)+'\',\''+esc(key)+'\')" aria-expanded="'+op+'"><span class="kxr-arr">'+ic('chev',16)+'</span>'+head+'</button>'+
+  (op?'<div class="kxr-b'+(an?' anim':'')+'"><div class="kxr-in">'+body()+'</div></div>':'')+'</div>'};
+function accEl(g){return document.querySelector('.kxr.open[data-acc="'+g+'"] .kxr-b')}
+window.accToggle=function(g,key){var cur=ACC.open[g]||'',next=cur==key?'':key,old=accEl(g);
+ var go=function(){ACC.open[g]=next;ACC.anim=next?g+'|'+next:'';if(ACC.draw[g])ACC.draw[g](true);ACC.anim='';
+  var b=accEl(g);if(!b||!b.classList.contains('anim'))return;var h=b.scrollHeight;b.style.height='0px';b.classList.add('shut');b.offsetHeight;
+  b.style.height=h+'px';b.classList.remove('shut');setTimeout(function(){b.style.height='';b.classList.remove('anim')},220);
+  var r=b.parentNode.getBoundingClientRect();if(r.bottom>window.innerHeight-70)try{b.parentNode.scrollIntoView({block:'nearest',behavior:'smooth'})}catch(e){}};
+ if(old){old.style.height=old.scrollHeight+'px';old.offsetHeight;old.classList.add('shut');old.style.height='0px';setTimeout(go,180)}else go()};
+window.accClose=function(g){if(ACC.open[g])accToggle(g,ACC.open[g])};
+// something typed (or focused) in the open row of group g: a refresh does not redraw it
+window.accBusy=function(g){var b=accEl(g);if(!b)return false;return !!(b.dataset.dirty||(document.activeElement&&b.contains(document.activeElement)&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))};
+document.addEventListener('input',function(e){var b=e.target&&e.target.closest&&e.target.closest('.kxr-b');if(b)b.dataset.dirty='1'});
+document.addEventListener('keydown',function(e){if(e.key!='Escape'||($('#modal')&&$('#modal').classList.contains('on')))return;Object.keys(ACC.open).forEach(function(g){if(ACC.open[g])accClose(g)})});
 
 // ---------------------------------------------------------------- data
 function load(quiet){
- return Promise.all([api('GET','/api/servers'),api('GET','/api/nodes').catch(function(){return null}),api('GET','/api/tunnels').catch(function(){return null}),
-  api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null})]).then(function(r){
-  SV.d=r[0];if(r[1])S.nodes=r[1];if(r[2]){if(window.TN)TN.d=r[2];else window.TN={d:r[2]}}if(r[3]&&window.XR)XR.d=r[3];if(r[4]&&window.DN)DN.d=r[4];
-  if(S.page=='nodes')draw();waitTick();return SV.d}).catch(function(e){if(!quiet)fail(e)})}
+ return Promise.all([api('GET','/api/servers'),api('GET','/api/nodes').catch(function(){return null}),api('GET','/api/tunnels').catch(function(){return null})]).then(function(r){
+  SV.d=r[0];if(r[1])S.nodes=r[1];if(r[2]){if(window.TN)TN.d=r[2];else window.TN={d:r[2]}}
+  if(S.page=='nodes')draw(!quiet);waitTick();return SV.d}).catch(function(e){if(!quiet)fail(e)})}
 window.srvLoad=load;
 
 // ---------------------------------------------------------------- page
-window.pNodes=function(){
+window.pNodes=function(){ACC.open.srv='';
  $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Servers')+'</h2><p>'+t('The panel runs on one server. Every other server is a node: add it with one command, then switch on here what it runs.')+'</p></div>'+
   '<div class="kxp-top"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="srvAdd()">'+ic('plus',15)+' '+t('Add server')+'</button></div></div>'+
-  '<div id="svp_clash"></div><div class="kxp-f" id="svp_f"></div><div id="svp_g">'+t('Loading…')+'</div><div id="svp_dir"></div>';
- load();directLoad();autoRefresh(function(){load(true)});
+  '<div id="svp_clash"></div><div id="svp_g">'+t('Loading…')+'</div>';
+ load();autoRefresh(function(){load(true)});
  if(S.openAdd){S.openAdd=false;setTimeout(srvAdd,150)}};
+ACC.draw.srv=function(){draw(true)};
 
-function draw(){var g=$('#svp_g');if(!g||!SV.d)return;var list=(SV.d.servers||[]).slice();
- $('#svp_f').innerHTML='';
+function draw(force){var g=$('#svp_g');if(!g||!SV.d)return;
  var cl=SV.d.clashes||[];
  $('#svp_clash').innerHTML=cl.length?'<div class="kxp-clash"><div><b>⚠ '+t('Port clash')+'</b><br>'+cl.map(function(c){return 'UDP <b class="ltr">'+N(c.port)+'</b> '+t('is used by')+' '+c.users.map(function(u){return esc(u.name)+' ('+protoName(u.proto)+')'}).join('، ')}).join('<br>')+
   '<p class="muted" style="margin:6px 0 0">'+t('One tunnel entry cannot carry the same port to two servers. Fix moves the later server to a free port; tunnels that carry the old port follow.')+'</p></div><button class="btn" onclick="srvFixPorts()">'+t('Fix ports')+'</button></div>':'';
- var by=function(x,y){return String(x.name).localeCompare(String(y.name))};
- var main=list.filter(function(x){return x.local}),out=list.filter(function(x){return !x.local&&!isIr(x)}).sort(by),ir=list.filter(function(x){return !x.local&&isIr(x)}).sort(by);
- var h='<div class="kxl">'+main.map(row).join('');
- if(out.length)h+='<div class="kxl-h">'+t('Abroad servers')+' · '+N(out.length)+'</div>'+out.map(row).join('');
- if(ir.length)h+='<div class="kxl-h">'+t('Iran servers')+' · '+N(ir.length)+'</div>'+ir.map(row).join('');
- g.innerHTML=h+'</div>'}
+ if(!force&&accBusy('srv'))return;
+ var list=(SV.d.servers||[]).slice(),by=function(x,y){return (y.local?1:0)-(x.local?1:0)||String(x.name).localeCompare(String(y.name))};
+ var ab=list.filter(function(x){return !isIr(x)}).sort(by),ir=list.filter(isIr).sort(by);
+ g.innerHTML=srvBox('abroad','Abroad servers','🌍',ab)+srvBox('iran','Iran servers',fl('IR'),ir)}
 window.srvDraw=draw;
-
-// ---------------------------------------------------------------- direct names (fr.example.com …) for the app's direct configs
-function directLoad(){api('GET','/api/servers/direct').then(directDraw).catch(function(){})}
-function directDraw(d){var el=$('#svp_dir');if(!el||!d)return;var rows=(d.servers||[]);
- el.innerHTML='<div class="card" style="margin-top:14px"><h3>'+t('Direct domains')+'</h3><p class="sub">'+t("The app's «Amnezia Direct» config of a server behind the tunnel goes straight to the server through its own name. Make each name below an A record pointing at the IP next to it (in Cloudflare: DNS only, grey cloud). Until a name points at the right server, the app is given the server's own address, so a direct config never reaches the wrong server.")+'</p>'+
-  '<div class="ptab"><table><thead><tr><th>'+t('Name')+'</th><th>'+t('Domain')+'</th><th>'+t('Point it at')+'</th><th>'+t('Status')+'</th><th>'+t('Through')+'</th></tr></thead><tbody>'+
-  rows.map(function(r){var st=!r.host?'<span class="muted">'+t('Country not known yet')+'</span>':r.ok?'✅ '+t('Points at this server'):((r.points_to||[]).length?'⚠️ '+t('Points elsewhere')+' <span class="ltr muted">'+esc(r.points_to.join(', '))+'</span>':'⚪ '+t('Not set yet'));
-   return '<tr><td>'+fl(r.cc)+' '+esc(r.name)+'</td><td class="ltr"><b>'+esc(r.host||'—')+'</b></td><td class="ltr">'+esc(r.ip||'—')+'</td><td>'+st+'</td><td>'+t(r.via=='direct'?'Direct':'Tunnel')+'</td></tr>'}).join('')+
-  '</tbody></table></div><p class="muted" style="margin:8px 0 0">*.<span class="ltr">'+esc(d.base||'—')+'</span> · <a href="javascript:void 0" onclick="directBase()">'+t('Change the base domain')+'</a></p></div>'}
-window.directBase=function(){var v=prompt(t('Base domain for the direct names (like example.com); empty = the panel domain without its first part'),'');if(v===null)return;
- api('PUT','/api/servers/direct',{base:v.trim()}).then(directDraw).catch(fail)};
+function srvBox(kind,title,icon,rows){
+ return '<section class="kxbox '+kind+'"><div class="kxbox-h"><span class="kxbox-i">'+icon+'</span><b>'+t(title)+'</b><small>'+N(rows.length)+'</small><span class="sp"></span>'+
+  '<button class="b2 sm" onclick="srvAdd(\''+kind+'\')">'+ic('plus',13)+' '+t(kind=='iran'?'Add an Iran server':'Add an abroad server')+'</button></div>'+
+  (rows.length?'<div class="kxl">'+rows.map(row).join('')+'</div>':'<p class="muted kxbox-e">'+t('No server yet')+'</p>')+'</section>'}
 
 function protoName(p){return ({wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',kmix:'KANKI MIX'})[p]||p}
+function online(s){var a=s.agent,n=s.node;return !!(s.local||(a&&a.online)||(n&&n.online))}
+function srvIp(s){var a=s.agent||{},n=s.node||{};return a.addr||a.ip||(n.effective_endpoint&&n.effective_endpoint!=n.endpoint?'':n.endpoint)||''}
 
-// what runs on a server, from the panel's own lists: [key, name, state g|r|n, detail]
-function svcs(s){var n=s.node,a=s.agent,i=(n&&n.info)||{},sv={},out=[],p=s.ports||{},sid=a?a.id:'';
- (i.services||[]).forEach(function(x){sv[x.key]=x});
- if(n){[['wg','WireGuard','wireguard'],['awg','AmneziaWG','amneziawg'],['hy2','Hysteria2','hysteria2'],['kmix','KANKI MIX','kankimix']].forEach(function(z){
-   var x=sv[z[2]],port=p[z[0]];
-   var st=!port&&!x?'n':!n.enabled?'n':x?(x.active?'g':'r'):'g';
-   var tx=!port&&!x?t('not installed'):!n.enabled?t('off'):x?(x.active?t('running'):t('stopped')):t('running');
-   out.push([z[0],z[1],st,tx,port?'UDP '+N(port):''])})}
- var xr=(window.XR&&XR.d&&(XR.d.servers||[]).filter(function(x){return x.server==sid})[0])||null,
-  dn=(window.DN&&DN.d&&(DN.d.servers||[]).filter(function(x){return x.server==sid})[0])||null,
-  tl=((window.TN&&TN.d&&TN.d.tunnels)||[]).filter(function(x){return sid&&(x.entry==sid||x.exit==sid)});
- if(a){out.push(['xray','Xray',xr?((xr.status||{}).active?'g':'r'):'n',xr?((xr.status||{}).active?t('running'):t('stopped')):t('off'),xr?N(((XR.d.inbounds||[]).filter(function(b){return b.server==sid})).length)+' '+t('inbounds'):'']);
-  out.push(['dns',t('Kanki DNS'),dn?((dn.status||{}).active?'g':'r'):'n',dn?((dn.status||{}).active?t('running'):t('stopped')):t('off'),dn?t(dn.role=='relay'?'relay':'exit'):'']);
-  var up=tl.filter(function(x){return x.state=='up'}).length;
-  out.push(['tun',t('Tunnels'),tl.length?(up==tl.length?'g':'r'):'n',tl.length?N(up)+' / '+N(tl.length)+' '+t('connected'):t('none'),''])}
+function row(s){var n=s.node,a=s.agent,on=online(s),h=n&&window.nHealthOf?nHealthOf(n):null,col=!on?'r':h&&h.c=='r'?'y':h?h.c:'g';
+ var tags=(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+(n&&!n.enabled&&!s.local?'<span class="kxc-tag">'+t('relay')+'</span>':'');
+ var head='<span class="dot '+col+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+tags+'<span class="sp"></span>'+
+  (on?'':'<span class="kxr-st r">'+t('Not connected')+'</span>')+'<small class="kxr-ip ltr">'+esc(srvIp(s))+'</small>';
+ return accRow('srv',s.key,head,function(){return srvBody(s)})}
+
+// the first entries (and their addresses) of the tunnels that bring this server's ports: where its
+// users can connect instead of its own address (Iran → Turkey → here: Iran)
+function entriesOf(s){var sid=s.agent?s.agent.id:(s.local?'local':''),tl=((window.TN&&TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false&&x.kind!='awg'}),out=[];
+ if(!sid)return out;
+ var back=function(id,seen){var prev=tl.filter(function(x){return x.exit==id&&seen.indexOf(x.entry)<0});if(!prev.length)return [id];
+  var r=[];prev.forEach(function(x){back(x.entry,seen.concat([x.entry])).forEach(function(e){if(r.indexOf(e)<0)r.push(e)})});return r};
+ back(sid,[sid]).forEach(function(e){if(e==sid)return;var sv=((TN.d&&TN.d.servers)||[]).filter(function(z){return z.id==e})[0];if(sv&&(sv.host||sv.addr))out.push({id:e,name:sv.name,host:sv.addr||sv.host})});
  return out}
 
-function row(s){var k=esc(s.key),a=s.agent,n=s.node,online=s.local||(a&&a.online)||(n&&n.online),h=n&&window.nHealthOf?nHealthOf(n):null,op=!!SV.open[s.key];
- var col=h?h.c:(online?'g':'r'),list=svcs(s);
- var chips=[];
- if(n)chips.push('<span class="'+(n.enabled?'on':'')+'">VPN'+(n.enabled&&n.users?' · '+N(n.users):'')+'</span>');
- list.forEach(function(x){if((x[0]=='xray'||x[0]=='dns'||x[0]=='tun')&&x[2]!='n')chips.push('<span class="'+(x[2]=='g'?'on':'bad')+'">'+esc(x[0]=='tun'?t('Tunnels'):x[1])+'</span>')});
- if(!a&&!s.local)chips.push('<span class="bad">'+t('agent')+' —</span>');
- if(!n&&a)chips.push('<span class="bad">VPN —</span>');
- var head='<button class="kxr-h" onclick="srvToggle(\''+k+'\')"><span class="kxr-arr">▸</span><span class="dot '+(online?(col=='r'?'y':col):'r')+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+
-  (s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+'<span class="sp"></span><span class="kxr-chips">'+chips.join('')+'</span></button>';
- if(!op)return '<div class="kxr">'+head+'</div>';
- // open: status, what is missing, every service, health, actions
+function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  var st=[];
  if(!s.local)st.push(t('agent')+': <b>'+(a?(a.online?t('Connected'):t('Not connected')):'—')+'</b>');
  if(n)st.push('VPN: <b>'+(n.enabled?(s.local||n.online?t('On'):t('Not connected')):t('Off'))+'</b>');
@@ -246,27 +253,58 @@ function row(s){var k=esc(s.key),a=s.agent,n=s.node,online=s.local||(a&&a.online
   else if(su&&su.state=='running')miss='<div class="kxc-miss"><span class="spin"></span><span>'+t('Installing the VPN part…')+'</span>'+(su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>';
   else miss='<div class="kxc-miss"><span>'+(su&&su.state=='failed'?'<b class="bad2">'+t('VPN install failed')+'</b>':t('VPN is not installed on this server'))+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\','+(isIr(s)?0:1)+')">'+t(su&&su.state=='failed'?'Try again':'Install VPN')+'</button>'+(su&&su.state=='failed'&&su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>'}
  if(n&&!a&&!s.local)miss='<div class="kxc-miss"><span>'+t('Tunnels, Xray and DNS are not installed on this server')+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\',1)">'+t('Install')+'</button></div>';
- var vpn=n?'<div class="kxs wide '+(n.enabled?'on':'no')+'" style="margin-top:8px"><span>'+t('VPN for users')+'</span>'+sw('',n.enabled,"srvVpn('"+k+"',this.checked)")+'</div>':'';
- var rows=list.map(function(x){return '<button onclick="srvSvc(\''+k+'\',\''+x[0]+'\')"><b>'+esc(x[1])+'</b><span class="st '+x[2]+'">'+esc(x[3])+'</span><small class="ltr">'+esc(x[4])+'</small><i>⚙</i></button>'}).join('');
- var stt=n&&n.info&&n.info.stats,met='';
- if(stt&&window.nMeter)met='<div class="kxc-m">'+nMeter('CPU',+stt.cpu||0,N(Math.round(+stt.cpu||0))+'%')+nMeter('RAM',pc(stt.mem_used,stt.mem_total),N(Math.round(pc(stt.mem_used,stt.mem_total)))+'%')+nMeter('Disk',pc(stt.disk_used,stt.disk_total),N(Math.round(pc(stt.disk_used,stt.disk_total)))+'%')+'</div>';
- var why=h&&h.r&&h.r.length&&n.enabled?'<ul class="nwhy">'+h.r.map(function(x){return '<li class="l'+x[0]+'">'+t(x[1])+'</li>'}).join('')+'</ul>':'';
+ // the server itself
+ var h='<div class="kxr-line">'+st.join('<span>·</span>')+'</div>'+miss+
+  '<div class="kxr-sec">'+t('Server settings')+'</div><div class="kxf">'+
+  '<div><label class="f">'+t('Name')+'</label><input id="sx_nm" value="'+esc(s.name)+'" maxlength="40"></div>'+
+  '<div><label class="f">'+t('Location')+'</label><div class="seg kxseg" id="sx_loc"><button type="button" data-l="abroad" class="'+(isIr(s)?'':'on')+'">'+t('Abroad')+'</button><button type="button" data-l="iran" class="'+(isIr(s)?'on':'')+'">'+t('Iran')+'</button></div></div>'+
+  (a?'<div class="wide"><label class="f">'+t('Address other servers use to reach it (optional)')+'</label><input id="sx_ad" class="ltr" value="'+esc(a.addr||'')+'" placeholder="'+esc(a.ip||'')+'"></div>':'')+
+  (n?'<div class="wide"><label class="f">'+t('Note')+'</label><input id="sx_no" value="'+esc(n.note||'')+'"></div>':'')+'</div>';
+ // its VPN: who is sent there and where they connect
+ if(n){var own=!n.endpoint||n.endpoint_mode=='panel',ents=entriesOf(s);
+  h+='<div class="kxr-sec">VPN</div>'+
+   '<div class="kxsw"><span>'+t('VPN for users')+'<small>'+t(n.enabled?'VPN serves users':'VPN is installed but serves nobody (a relay)')+'</small></span>'+sw('',n.enabled,"srvVpn('"+k+"',this.checked)")+'</div>'+
+   '<label class="kxsw" style="cursor:pointer"><span>'+t('Users without their own server list get this server')+'</span><input type="checkbox" id="sx_acc" style="width:auto"'+(n.accept_all?' checked':'')+'></label>'+
+   '<div class="kxf" style="margin-top:4px"><div class="wide"><label class="f">'+t('Users connect to')+'</label><input id="sx_ep" class="ltr" value="'+esc(s.local&&own?'':n.endpoint||'')+'" placeholder="'+esc(n.effective_endpoint||'')+'">'+
+   (ents.length?'<div class="kxchips">'+ents.map(function(e){return '<button type="button" class="'+(n.endpoint==e.host?'on':'')+'" onclick="$(\'#sx_ep\').value=\''+esc(e.host)+'\';$(\'#sx_ep\').dispatchEvent(new Event(\'input\',{bubbles:true}))">'+t('Through')+' '+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+
+    '<button type="button" onclick="$(\'#sx_ep\').value=\''+esc(srvIp(s))+'\';$(\'#sx_ep\').dispatchEvent(new Event(\'input\',{bubbles:true}))">'+t("This server's own address")+'</button></div>':'')+'</div></div>'+
+   (s.local?'':'<details class="box"><summary>'+t('Advanced')+'</summary><div class="kxf"><div class="wide"><label class="f">'+t('API address')+'</label><input id="sx_api" class="ltr" value="'+esc(n.address||'')+'"></div>'+
+    '<div><label class="f">'+t('Node token')+'</label><input id="sx_tok" class="ltr" placeholder="'+t('empty = keep it')+'"></div>'+
+    '<div style="align-self:end"><label class="chk" style="margin:0"><input type="checkbox" id="sx_ins"'+(n.insecure?' checked':'')+'>'+t('Self-signed certificate (no domain on the server)')+'</label></div></div></details>')+
+   '<p class="muted" style="font-size:11px;margin:6px 2px 0">'+t('Ports and protocols of this server are in VPN services.')+' <a href="#vpn">'+t('VPN services')+'</a></p>'}
+ h+='<div class="kxsave"><button class="b2 sm" onclick="accClose(\'srv\')">'+t('Cancel')+'</button><button class="btn sm" onclick="srvSave(\''+k+'\')">'+t('Save')+'</button></div>';
+ // health and what can be done
+ var stt=n&&n.info&&n.info.stats;
+ if(stt&&window.nMeter)h+='<div class="kxm3">'+nMeter('CPU',+stt.cpu||0,N(Math.round(+stt.cpu||0))+'%')+nMeter('RAM',pc(stt.mem_used,stt.mem_total),N(Math.round(pc(stt.mem_used,stt.mem_total)))+'%')+nMeter('Disk',pc(stt.disk_used,stt.disk_total),N(Math.round(pc(stt.disk_used,stt.disk_total)))+'%')+'</div>';
+ var hh=n&&window.nHealthOf?nHealthOf(n):null;
+ if(hh&&hh.r&&hh.r.length&&n.enabled)h+='<ul class="nwhy">'+hh.r.map(function(x){return '<li class="l'+x[0]+'">'+t(x[1])+'</li>'}).join('')+'</ul>';
  var acts=[];
- acts.push('<button class="b2" onclick="srvEdit(\''+k+'\')">'+ic('edit',14)+' '+t('Settings')+'</button>');
- if(n){var ni=esc(n.id);
-  acts.push('<button class="b2" onclick="nHealth(\''+ni+'\')">♡ '+t('Health')+'</button>');
-  acts.push('<button class="b2" onclick="nAct(\''+ni+'\',\'sync\')">⇄ '+t('Sync')+'</button>');
-  acts.push('<button class="b2" onclick="nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button>');
-  if(!s.local)acts.push('<button class="b2" onclick="nAct(\''+ni+'\',\'update\')">⇪ '+t('Update agent')+'</button>');
-  acts.push('<button class="b2 okb" onclick="nAssign(\''+ni+'\',1)">'+ic('plus',14)+' '+t('Add to all users')+'</button>');
-  if(!s.local)acts.push('<button class="b2" onclick="nAssign(\''+ni+'\',0)">'+t('Remove from all users')+'</button>')}
- if(a&&!s.local&&window.tunSrvEdit)acts.push('<button class="b2" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',14)+' '+t('Tunnel agent settings')+'</button>');
- if(!s.local)acts.push('<button class="b2 bd" onclick="srvDel(\''+k+'\')">'+ic('trash',14)+' '+t('Delete server')+'</button>');
- return '<div class="kxr open">'+head+'<div class="kxr-b"><div class="kxc-st">'+st.join('<span>·</span>')+'</div>'+miss+vpn+
-  (rows?'<div class="kxv">'+rows+'</div>':'')+met+why+'<div class="kxc-act">'+acts.join('')+'</div></div></div>'}
-window.srvToggle=function(key){SV.open[key]=!SV.open[key];draw()};
+ if(n){acts.push('<button class="b2 sm" onclick="nHealth(\''+ni+'\')">♡ '+t('Health')+'</button>');
+  acts.push('<button class="b2 sm" onclick="nAct(\''+ni+'\',\'sync\')">⇄ '+t('Sync')+'</button>');
+  acts.push('<button class="b2 sm" onclick="nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button>');
+  if(!s.local)acts.push('<button class="b2 sm" onclick="nAct(\''+ni+'\',\'update\')">⇪ '+t('Update agent')+'</button>');
+  acts.push('<button class="b2 sm okb" onclick="nAssign(\''+ni+'\',1)">'+ic('plus',13)+' '+t('Add to all users')+'</button>');
+  if(!s.local)acts.push('<button class="b2 sm" onclick="nAssign(\''+ni+'\',0)">'+t('Remove from all users')+'</button>')}
+ if(a&&!s.local&&window.tunSrvEdit)acts.push('<button class="b2 sm" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',13)+' '+t('Tunnel agent settings')+'</button>');
+ if(!s.local)acts.push('<button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+ic('link',13)+' '+t('Show command')+'</button>');
+ if(!s.local)acts.push('<button class="b2 sm bd" onclick="srvDel(\''+k+'\')">'+ic('trash',13)+' '+t('Delete server')+'</button>');
+ h+='<div class="kxacts">'+acts.join('')+'</div>';
+ setTimeout(function(){$$('#sx_loc button').forEach(function(b){b.onclick=function(){$$('#sx_loc button').forEach(function(z){z.classList.toggle('on',z==b)});var bb=b.closest('.kxr-b');if(bb)bb.dataset.dirty='1'}})},0);
+ return h}
+
+// Save of the open server: its name, place and address (the server), who gets it and where users connect (its VPN)
+window.srvSave=function(key){var s=find(key);if(!s)return;var n=s.node,a=s.agent,jobs=[];
+ var loc=(($$('#sx_loc button.on')[0]||{}).dataset||{}).l||(isIr(s)?'iran':'abroad');
+ var b={name:$('#sx_nm').value.trim(),loc:loc};if($('#sx_ad'))b.addr=$('#sx_ad').value.trim();
+ jobs.push(api('PUT','/api/servers/'+q(key),b));
+ if(n){var ep=$('#sx_ep').value.trim(),nb={note:$('#sx_no')?$('#sx_no').value:n.note,accept_all:$('#sx_acc').checked,endpoint_mode:ep?'custom':'panel',endpoint:ep};
+  if(!s.local&&!ep){nb.endpoint_mode='custom';nb.endpoint=srvIp(s)||n.endpoint}
+  if($('#sx_api')){var ad=$('#sx_api').value.trim();if(ad)nb.address=ad;if($('#sx_tok').value.trim())nb.token=$('#sx_tok').value.trim();nb.insecure=$('#sx_ins').checked}
+  jobs.push(api('PUT','/api/nodes/'+q(n.id),nb))}
+ Promise.all(jobs).then(function(){toast(t('Saved'));accClose('srv');load(true)}).catch(fail)};
 
 function find(key){var l=(SV.d&&SV.d.servers)||[];for(var i=0;i<l.length;i++)if(l[i].key==key)return l[i]}
+window.srvFind=find;
 
 // ---------------------------------------------------------------- add a server (one command)
 window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
@@ -301,7 +339,7 @@ window.srvCmd=function(key){api('GET','/api/servers/'+q(key)+'/command').then(fu
  modal(mhead(s.name||t('Server'))+'<div id="sa_out"></div>','wide');showCmd(r.command,s.planned,key)}).catch(fail)};
 
 // ---------------------------------------------------------------- one server
-window.srvVpn=function(key,on){if(!confirm(t(on?'Switch the VPN on: users that accept all servers are sent here.':'Switch the VPN off on this server? Its users are taken off; it keeps carrying tunnels.'))){draw();return}
+window.srvVpn=function(key,on){if(!confirm(t(on?'Switch the VPN on: users that accept all servers are sent here.':'Switch the VPN off on this server? Its users are taken off; it keeps carrying tunnels.'))){draw(true);return}
  api('POST','/api/servers/'+q(key)+'/vpn',{on:on}).then(function(){toast(t('Done'));load(true)}).catch(function(e){fail(e);load(true)})};
 
 window.srvComplete=function(key,vpn){var s=find(key)||{};
@@ -313,26 +351,12 @@ window.srvComplete=function(key,vpn){var s=find(key)||{};
   '<div class="g2" style="margin-top:12px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="sc_go">'+t('Install VPN')+'</button></div>');
  $('#sc_go').onclick=function(){var me=this;me.disabled=true;api('POST','/api/servers/'+q(key)+'/complete',{vpn:$('#sc_vpn').checked,domain:$('#sc_dm').value}).then(function(){closeModal();toast(t('Installing the VPN part…'));setTimeout(function(){load(true)},6000)}).catch(function(e){me.disabled=false;fail(e)})}};
 
-window.srvEdit=function(key){var s=find(key);if(!s)return;var a=s.agent||{};
- modal(mhead(t('Settings'),s.name)+'<label class="f">'+t('Name')+'</label><input id="se_nm" value="'+esc(s.name)+'" maxlength="40">'+
-  '<label class="f">'+t('Location')+'</label><div class="seg kxseg" id="se_loc"><button type="button" data-l="abroad">'+t('Abroad')+'</button><button type="button" data-l="iran">'+t('Iran')+'</button></div>'+
-  (s.agent?'<label class="f">'+t('Address other servers use to reach it (optional)')+'</label><input id="se_ad" class="ltr" value="'+esc(a.addr||'')+'" placeholder="'+esc(a.ip||'')+'">':'')+
-  (s.node&&window.nodeEdit?'<button class="b2" style="width:100%;margin-top:10px" onclick="closeModal();nodeEdit(\''+esc(s.node.id)+'\')">'+ic('edit',14)+' VPN: '+t('Settings')+'</button>':'')+
-  '<div class="g2" style="margin-top:12px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="se_go">'+t('Save')+'</button></div>');
- var loc=isIr(s)?'iran':'abroad',set=function(l){loc=l;$$('#se_loc button').forEach(function(b){b.classList.toggle('on',b.dataset.l==l)})};
- $$('#se_loc button').forEach(function(b){b.onclick=function(){set(b.dataset.l)}});set(loc);
- $('#se_go').onclick=function(){var b={name:$('#se_nm').value,loc:loc};if($('#se_ad'))b.addr=$('#se_ad').value;
-  api('PUT','/api/servers/'+q(key),b).then(function(){closeModal();toast(t('Done'));load(true)}).catch(fail)}};
-
-window.srvPorts=function(key){var s=find(key);if(!s||!s.node)return;
- if(window.v37NodeMenu)return v37NodeMenu(s.node.id);if(window.nodeEdit)nodeEdit(s.node.id)};
-
 // Delete the whole server. When tunnels use it, they are named and can go with it (the Iran entry drops
 // them too and closes their ports).
 window.srvDel=function(key,withTun){var s=find(key)||{};
  if(!withTun&&!confirm(t('Delete this whole server? Everything Kanki installed on it (VPN, tunnels, Xray, DNS) is removed from the server and from the panel, and the server uninstalls itself.')+' ('+(s.name||'')+')'))return;
  toast(t('Removing…'));
- api('DELETE','/api/servers/'+q(key)+(withTun?'?tunnels=1':'')).then(function(){toast(t('Removed'));SV.open[key]=false;load(true)}).catch(function(e){
+ api('DELETE','/api/servers/'+q(key)+(withTun?'?tunnels=1':'')).then(function(){toast(t('Removed'));ACC.open.srv='';load(true)}).catch(function(e){
   var tl=e&&e.data&&e.data.tunnels;
   if(tl&&tl.length){var names=tl.map(function(x){var o=find(x.other)||{};return '• '+x.name+(o.name?' ↔ '+o.name:'')}).join('\n');
    if(confirm(t('These tunnels use this server:')+'\n'+names+'\n\n'+t('Delete them too? The other server drops them and closes their ports.')))srvDel(key,1);return}
@@ -341,56 +365,22 @@ window.srvDel=function(key,withTun){var s=find(key)||{};
 window.srvFixPorts=function(){if(!confirm(t("Users' WireGuard / AmneziaWG files of the moved server must be downloaded again (subscription links and the app update by themselves). Continue?")))return;
  toast(t('Checking…'));api('POST','/api/servers/fix-ports').then(function(r){var m=r.moved||[];
   modal(mhead(t(m.length?'Ports moved':'No clash'))+(m.length?'<div class="list">'+m.map(function(x){return '<div class="li"><span><b>'+esc(x.server)+'</b> '+protoName(x.proto)+(x.error?'<small class="bad2">'+esc(x.error)+'</small>':'')+'</span><span class="ltr">'+N(x.old)+' → '+N(x.new)+' '+(x.ok?'✅':'❌')+'</span></div>'}).join('')+'</div>':''));
-  load(true)}).catch(fail)};
+  load(true);if(window.svcReload)svcReload()}).catch(fail)};
 
-// ---------------------------------------------------------------- one service of one server, in a window
-function portBox(id,v){return '<div><label class="f">'+t('UDP port')+'</label><input id="'+id+'" class="ltr" inputmode="numeric" value="'+esc(v||'')+'"></div>'}
+// ---------------------------------------------------------------- a VPN port of one server (used by VPN services)
 // another server (or another protocol here) already using the port the admin types
-function portClash(key,proto,v){var p=+v;if(!(p>0&&p<65536))return t('A port is 1-65535');var hit='';
+window.srvPortClash=function(key,proto,v){var p=+unN(String(v));if(!(p>0&&p<65536))return t('A port is 1-65535');var hit='';
  ((SV.d&&SV.d.servers)||[]).forEach(function(x){var ps=x.ports||{};Object.keys(ps).forEach(function(k){if(+ps[k]==p&&!(x.key==key&&k==proto))hit=x.name+' ('+protoName(k)+')'})});
- return hit?t('Already used by')+' '+hit+': '+t('pick another port'):''}
-function wirePort(key,proto,id,btn){var el=$('#'+id),w=$('#'+id+'_w'),b=$('#'+btn);if(!el)return;
- var f=function(){var m=portClash(key,proto,el.value);w.textContent=m;b.disabled=!!m};el.oninput=f;f()}
-function savePort(key,proto,id){var v=+$('#'+id).value,b={};b[proto]=v;toast(t('Saving…'));
- api('POST','/api/servers/'+q(key)+'/ports',b).then(function(){toast(t('Saved: the service restarts on the new port'));closeModal();load(true)}).catch(fail)}
-window.srvSvc=function(key,svc){var s=find(key);if(!s)return;var n=s.node,a=s.agent,sid=a?a.id:'',p=s.ports||{},ni=n?esc(n.id):'',k=esc(key);
- var row=svcs(s).filter(function(x){return x[0]==svc})[0]||[svc,svc,'n','',''];
- var head=mhead(row[1],s.name)+'<p><span class="badge '+(row[2]=='g'?'g':row[2]=='r'?'r':'')+'">'+esc(row[3])+'</span> <span class="ltr muted">'+esc(row[4])+'</span></p>';
- var h='';
- if(svc=='wg'||svc=='awg'||svc=='hy2'){
-  h='<div class="kxm-row">'+portBox('sv_p',p[svc])+'<button class="btn" id="sv_ps">'+t('Save port')+'</button></div><div class="kxm-warn" id="sv_p_w"></div>'+
-   '<p class="muted">'+t("Users' WireGuard / AmneziaWG files of this server must be downloaded again after a port change; subscription links and the app update by themselves.")+'</p>'+
-   '<div class="kxm-btns"><button class="b2" onclick="closeModal();nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button><button class="b2" onclick="closeModal();nHealth(\''+ni+'\')">♡ '+t('Health')+'</button>'+
-   '<button class="b2 okb" onclick="closeModal();nAssign(\''+ni+'\',1)">'+t('Add this server to all users')+'</button>'+(s.local?'':'<button class="b2" onclick="closeModal();nAssign(\''+ni+'\',0)">'+t('Remove this server from all users')+'</button>')+'</div>';
-  modal(head+h);wirePort(key,svc,'sv_p','sv_ps');$('#sv_ps').onclick=function(){savePort(key,svc,'sv_p')};return}
- if(svc=='kmix'){var on=row[2]!='n'||!!p.kmix;
-  h='<div class="kxs wide '+(on?'on':'no')+'"><span>'+t('KANKI MIX on this server')+'</span>'+sw('',on,"srvKmix('"+k+"',this.checked)")+'</div>'+
-   '<div class="kxm-row" style="margin-top:10px">'+portBox('sv_p',p.kmix)+'<button class="btn" id="sv_ps">'+t('Save port')+'</button></div><div class="kxm-warn" id="sv_p_w"></div>'+
-   '<div class="kxm-btns"><a class="b2" href="#kmix" onclick="closeModal()">'+t('KANKI MIX settings (all servers)')+'</a><button class="b2" onclick="closeModal();nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button>'+
-   '<button class="b2 okb" onclick="closeModal();nAssign(\''+ni+'\',1)">'+t('Add this server to all users')+'</button></div>';
-  modal(head+h);wirePort(key,'kmix','sv_p','sv_ps');$('#sv_ps').onclick=function(){savePort(key,'kmix','sv_p')};return}
- if(svc=='xray'||svc=='dns'){var kind=svc,isOn=row[2]!='n',pa=kind=='xray'?'xray':'dns';
-  if(!isOn){h='<p>'+t(kind=='xray'?'Xray is not on this server yet.':'Kanki DNS is not on this server yet.')+'</p><div class="kxm-btns"><button class="btn" onclick="closeModal();'+(kind=='xray'?"srvAddXray('"+esc(sid)+"')":"srvAddDns('"+esc(sid)+"',"+(isIr(s)?1:0)+")")+'">'+ic('plus',14)+' '+t(kind=='xray'?'Install Xray on this server':'Install Kanki DNS on this server')+'</button></div>';modal(head+h);return}
-  h='<div class="kxm-btns">'+
-   (kind=='xray'?'<a class="b2" href="#xray" onclick="closeModal()">'+t('Inbounds')+'</a>':'<button class="b2" onclick="closeModal();dnsEdit(\''+esc(sid)+'\')">'+ic('edit',14)+' '+t('Edit')+'</button>')+
-   '<button class="b2" onclick="closeModal();srvHealth(\''+kind+'\',\''+esc(sid)+'\')">♡ '+t('Health')+'</button>'+
-   '<button class="b2" onclick="closeModal();srvRepair(\''+kind+'\',\''+esc(sid)+'\')">↻ '+t('Restart')+'</button>'+
-   '<button class="b2 okb" onclick="srvProtoAll(\''+pa+'\',1)">'+t('Use for all users')+'</button>'+
-   '<button class="b2" onclick="srvProtoAll(\''+pa+'\',0)">'+t('Take from all users')+'</button>'+
-   '<button class="b2 bd" onclick="srvSvcOff(\''+kind+'\',\''+esc(sid)+'\')">'+ic('trash',14)+' '+t('Remove from this server')+'</button></div>'+
-   '<p class="muted">'+t('Who may use it is also set per user (Users › edit).')+'</p>';
-  modal(head+h);return}
- if(svc=='tun'){var tl=((window.TN&&TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.entry==sid||x.exit==sid});
-  h=(tl.length?'<div class="list">'+tl.map(function(x){var o=find(x.entry==sid?x.exit:x.entry)||{name:x.entry==sid?x.exit:x.entry};return '<div class="li"><span><b>'+esc(x.name)+'</b><small>'+esc((x.entry==sid?'→ ':'← ')+o.name)+' · '+esc(x.transport||x.kind||'')+'</small></span><span>'+(x.state=='up'?'✅':x.state=='off'?'⏸':'⚠️')+'</span></div>'}).join('')+'</div>':'<p class="muted">'+t('No tunnel uses this server.')+'</p>')+
-   '<div class="kxm-btns"><a class="b2" href="#tunnels" onclick="closeModal()">'+t('Tunnels page')+'</a><button class="btn" onclick="closeModal();location.hash=\'#tunnels\';setTimeout(function(){window.tunEdit&&tunEdit()},500)">'+ic('plus',14)+' '+t('New tunnel')+'</button></div>';
-  modal(head+h);return}};
-window.srvKmix=function(key,on){api('POST','/api/servers/'+q(key)+'/kmix',{on:on}).then(function(){toast(t('Saved'));load(true)}).catch(fail)};
+ return hit?t('Already used by')+' '+hit+': '+t('pick another port'):''};
+window.srvSavePort=function(key,proto,v,done){var b={};b[proto]=+unN(String(v));toast(t('Saving…'));
+ return api('POST','/api/servers/'+q(key)+'/ports',b).then(function(r){toast(t('Saved: the service restarts on the new port'));load(true);if(done)done(r);return r}).catch(fail)};
+window.srvKmix=function(key,on){return api('POST','/api/servers/'+q(key)+'/kmix',{on:on}).then(function(){toast(t('Saved'));load(true)}).catch(fail)};
 window.srvProtoAll=function(pa,add){if(!confirm(t(add?'Turn this on for every user?':'Turn this off for every user?')))return;
  api('POST','/api/protocols/'+pa+'/'+(add?'assign-all':'unassign-all')).then(function(r){toast(t('Done')+' ('+N(r.changed||0)+')')}).catch(fail)};
 window.srvSvcOff=function(kind,sid){if(!confirm(t('Remove it from this server? The server stops it and frees its ports.')))return;
- api('DELETE','/api/'+kind+'/servers/'+q(sid)).then(function(){closeModal();toast(t('Removed'));load(true)}).catch(fail)};
+ api('DELETE','/api/'+kind+'/servers/'+q(sid)).then(function(){closeModal();toast(t('Removed'));load(true);if(window.svcReload)svcReload()}).catch(fail)};
 
-// Xray / DNS on one server, from its card
+// Xray / DNS on one server
 window.srvAddXray=function(key){if(!window.xrAddNode)return;xrAddNode();var tries=0,iv=setInterval(function(){var sel=$('#xa_sv');if(sel||++tries>40){clearInterval(iv);if(sel){sel.value=key;sel.dispatchEvent(new Event('change'))}}},100)};
 window.srvAddDns=function(key,iran){if(!window.dnsAdd)return;dnsAdd(iran?'relay':'exit');var tries=0,iv=setInterval(function(){var sel=$('#dx_sv');if(sel||++tries>40){clearInterval(iv);if(sel){sel.value=key;sel.dispatchEvent(new Event('change'))}}},100)};
 
