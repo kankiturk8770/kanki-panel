@@ -1,6 +1,6 @@
 // Kanki Panel 3.8: the AMOLED look. Loaded after kanki-v37.js, it changes how the panel looks and how
 // the menu is grouped, never how a page works:
-//  - pure black (night) and pure white (day), gold or purple, picked from four dots in the top bar
+//  - pure black (night) and pure white (day) from one button in the top bar; the colors in Settings
 //  - 3D glass buttons with a soft moving shine
 //  - the menu in groups of things that belong together (customers, servers and network, services,
 //    reports, system); Servers and Tunnel servers are tabs of one section
@@ -12,7 +12,7 @@ var V=window.V37;if(!V)return;
 var FA38={"Home":"خانه","Customers":"مشتری‌ها","Servers & network":"سرورها و شبکه","Services":"سرویس‌ها","Reports":"گزارش","More":"بیشتر",
  "Abroad":"خارج","Iran":"ایران","All":"همه","VPN server":"سرور VPN","DNS exit":"خروجی DNS","DNS relay":"واسط DNS","No service on this server yet":"هنوز سرویسی روی این سرور نیست",
  "No server here":"سروری در این دسته نیست","Quick actions":"کارهای سریع","New user":"کاربر جدید","Add server":"افزودن سرور","Sales bot":"ربات فروش","Backup":"بکاپ",
- "Gold · night":"طلایی · شب","Gold · day":"طلایی · روز","Purple · night":"بنفش · شب","Purple · day":"بنفش · روز","Panel color":"رنگ پنل"};
+ "Gold · night":"طلایی · شب","Gold · day":"طلایی · روز","Purple · night":"بنفش · شب","Purple · day":"بنفش · روز","Panel color":"رنگ پنل","Day":"روز","Night":"شب"};
 function fa(){if(typeof FA!='undefined')Object.assign(FA,FA38)}
 fa();
 
@@ -58,19 +58,16 @@ var _nm=window.navMark;
 window.navMark=function(p){_nm.apply(this,arguments);var sk=V.secOf(p)[0],mb=$('#mmore');
  if(mb)mb.classList.toggle('on',!BAR.some(function(b){return b[0]==sk}));k38More(0)};
 
-// ---------------------------------------------------------------- the four looks
-var LOOKS=[['gold','dark','Gold · night','#000','#f5c518'],['gold','light','Gold · day','#fff','#f2b705'],['violet','dark','Purple · night','#000','#9d63ff'],['violet','light','Purple · day','#fff','#8b4dff']];
-function looksHtml(){return LOOKS.map(function(l,i){var on=(S.color||'gold')==l[0]&&(S.theme||'dark')==l[1];
- return '<button type="button" data-lk="'+i+'" class="'+(on?'on':'')+'" title="'+t(l[2])+'" aria-label="'+t(l[2])+'"><i style="background:linear-gradient(135deg,'+l[3]+' 50%,'+l[4]+' 50%)"></i></button>'}).join('')}
-function drawLooks(){$$('.k38looks').forEach(function(b){b.innerHTML=looksHtml()})}
-document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('[data-lk]');if(!b)return;var l=LOOKS[+b.dataset.lk];
- S.color=l[0];S.theme=l[1];try{localStorage.setItem('kk_color',S.color);localStorage.setItem('kk_theme',S.theme)}catch(x){}applyLook()});
+// ---------------------------------------------------------------- night / day in the top bar
+// (3.9.3) The top bar has only one button: night or day. The panel's colors are chosen in Settings ›
+// Look, not in the bar.
+ICO.sun38='<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>';
+function drawLooks(){var b=$('#thm');if(!b)return;var night=(S.theme||'dark')!='light';
+ b.innerHTML=ic(night?'sun38':'moon',17)+'<span>'+t(night?'Day':'Night')+'</span>';b.title=t(night?'Day':'Night');b.setAttribute('aria-label',b.title);b.classList.add('k38dn')}
 var _al=window.applyLook;
 window.applyLook=function(){_al.apply(this,arguments);document.body.classList.add('k38');if($('#side'))document.body.classList.add('v37');drawLooks()};
 var _sh=window.shell;
-window.shell=function(){_sh.apply(this,arguments);document.body.classList.add('k38');
- var thm=$('#thm');if(thm&&!$('.tb-act .k38looks')){var d=document.createElement('div');d.className='k38looks';d.setAttribute('role','group');d.setAttribute('aria-label',t('Panel color'));thm.parentNode.insertBefore(d,thm)}
- drawLooks()};
+window.shell=function(){_sh.apply(this,arguments);document.body.classList.add('k38');drawLooks()};
 
 // ---------------------------------------------------------------- dashboard: quick actions
 if(window.pDash){var _pd=window.pDash;window.pDash=function(){_pd.apply(this,arguments);var ph=$('#pg .ph');if(!ph||$('#k38qa'))return;
@@ -120,11 +117,8 @@ body.k38 nav.side .ngt{font-size:11px;font-weight:800;color:var(--s);padding:12p
 body.k38 nav.side .ngt:first-child{padding-top:2px}
 body.k38 nav.side a.on{background:linear-gradient(180deg,color-mix(in srgb,var(--a) 16%,transparent),color-mix(in srgb,var(--a) 4%,transparent))!important;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--a) 22%,transparent)}
 /* the four looks in the top bar */
-.k38looks{display:flex;gap:3px;padding:3px;border-radius:13px;background:var(--in);border:1px solid var(--gb)}
-.k38looks button{width:28px;height:28px;border-radius:9px;border:0;background:transparent;display:grid;place-items:center;cursor:pointer;padding:0}
-.k38looks button.on{background:var(--c1);box-shadow:0 0 0 1px var(--gb2),0 2px 6px rgba(0,0,0,.25)}
-.k38looks i{width:15px;height:15px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(128,128,128,.45)}
-body.k38 #thm{display:none}
+body.k38 #thm.k38dn{display:inline-flex;align-items:center;gap:6px;width:auto;padding:0 12px;font:inherit;font-size:12px;font-weight:700}
+@media(max-width:620px){body.k38 #thm.k38dn span{display:none}body.k38 #thm.k38dn{padding:0;width:38px;justify-content:center}}
 /* dashboard quick actions */
 .k38qa{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px;padding:12px 14px;border-radius:18px;border:1px solid var(--gb);background:var(--c1)}
 .k38qa>b{font-size:13.5px}.k38qb{display:flex;gap:8px;flex-wrap:wrap;flex:1;justify-content:flex-end}
@@ -164,7 +158,7 @@ body.k38 #thm{display:none}
 .k38tile{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px;border-radius:14px;background:var(--in);border:1px solid var(--gb);color:var(--t);text-decoration:none;font-size:11.5px;font-weight:700;text-align:center}
 .k38tile svg{color:var(--a)}body.k38.light .k38tile svg{color:var(--ad)}
 .k38tile.on{border-color:var(--a);box-shadow:inset 0 0 0 1px var(--a)}
-@media(max-width:620px){body.k38 header.top .segl{display:none}.k38looks button{width:24px;height:24px}.k38looks i{width:13px;height:13px}.k38qb{justify-content:flex-start}}
+@media(max-width:620px){body.k38 header.top .segl{display:none}.k38qb{justify-content:flex-start}}
 `;
 var st=document.createElement('style');st.id='k38css';st.textContent=css;document.head.appendChild(st);
 })();
