@@ -2754,3 +2754,31 @@ mod version_gate_tests {
         assert_eq!(next_transport(&only, "kcp", old), None);
     }
 }
+
+#[cfg(test)]
+mod route_tests {
+    use super::{walk_back, Tunnel};
+
+    fn hop(e: &str, x: &str, udp: &[&str]) -> Tunnel {
+        Tunnel { entry: e.into(), exit: x.into(), udp: udp.iter().map(|s| s.to_string()).collect(), enabled: true, ..Default::default() }
+    }
+
+    #[test]
+    fn a_multi_location_route_is_followed_to_its_first_entry() {
+        // Iran → Turkey → Germany; on the Turkey hop the port moved (4002 on Turkey to 4001 on Germany)
+        let list = vec![hop("ir", "tr", &["51824", "4002"]), hop("tr", "de", &["51824", "4002:4001"])];
+        assert_eq!(walk_back(&list, "de", 4001), vec![("de".to_string(), 4001), ("tr".to_string(), 4002), ("ir".to_string(), 4002)]);
+        assert_eq!(walk_back(&list, "de", 51824).last().cloned(), Some(("ir".to_string(), 51824)));
+        // a port no tunnel carries stays where it is
+        assert_eq!(walk_back(&list, "de", 8445), vec![("de".to_string(), 8445)]);
+        // one hop only
+        assert_eq!(walk_back(&list, "tr", 4002).last().cloned(), Some(("ir".to_string(), 4002)));
+    }
+
+    #[test]
+    fn a_loop_of_tunnels_does_not_go_round_forever() {
+        let list = vec![hop("a", "b", &["5000"]), hop("b", "a", &["5000"])];
+        assert_eq!(walk_back(&list, "b", 5000), vec![("b".to_string(), 5000), ("a".to_string(), 5000)]);
+    }
+}
+

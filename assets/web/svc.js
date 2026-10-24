@@ -147,7 +147,8 @@ if(window.kmDraw){
  // the settings of every server, in the list; the page keeps its numbers and the general settings
  var _kd=window.kmDraw;
  window.kmDraw=function(d){_kd(d);var c=$('#km_srv');if(!c)return;var card=c.closest('.card'),g=card&&card.parentNode;
-  if(g&&g.classList.contains('g2')){g.style.gridTemplateColumns='minmax(0,1.6fr) minmax(0,1fr)';g.style.alignItems='start'}};
+  if(g&&g.classList.contains('g2'))g.classList.add('kmg2')};
+ (function(){var st=document.createElement('style');st.textContent='.kmg2{align-items:start}@media(min-width:900px){.kmg2{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)!important}}';document.head.appendChild(st)})();
  var _kl=window.kmLoad;
  window.kmLoad=function(quiet){return srvLoad(true).then(function(){return api('GET','/api/kmix')}).then(function(d){KM.d=d;if(S.page!='kmix')return d;
   if($('#km_srv')){$('#km_kv').innerHTML=kmKpis(d);if(!quiet||!accBusy('km'))$('#km_srv').innerHTML=kmServers(d);return d}kmDraw(d);return d}).catch(fail)};

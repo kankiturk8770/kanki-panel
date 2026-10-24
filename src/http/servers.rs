@@ -733,8 +733,8 @@ async fn complete(State(app): St, h: HeaderMap, Path(id): Path<String>, body: Op
     Json(json!({ "ok": true })).into_response()
 }
 
-/// { on: bool } — the VPN of this server serves users, or nobody (it stays installed)
 /// The VPN node of a server key ("local", "node:<id>" or an agent server linked to a node)
+#[allow(clippy::result_large_err)] // the error is the ready axum answer (404/400)
 fn node_of_key(app: &App, id: &str) -> Result<String, Response> {
     if id == "local" {
         return Ok("local".into());
@@ -827,6 +827,7 @@ async fn kmix_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
     Json(json!({ "ok": true })).into_response()
 }
 
+/// { on: bool } — the VPN of this server serves users, or nobody (it stays installed)
 async fn vpn_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
     let nid = match node_of_key(&app, &id) {
@@ -974,6 +975,21 @@ mod tests {
         assert_eq!(remap(&v(&["4000,51820"]), 51820, 51830), Some(v(&["4000,51830"])));
         assert_eq!(remap(&v(&["3990-4010"]), 4000, 4001), None);
         assert_eq!(remap(&v(&["4000:5000"]), 4000, 4001), None);
+    }
+
+    #[test]
+    fn a_new_server_holds_its_kanki_mix_port_before_it_is_installed() {
+        let n = crate::db::Node {
+            id: "n1".into(), name: "Germany".into(), address: String::new(), endpoint: String::new(), token: String::new(),
+            enabled: true, online: true, last_sync: 0, info: r#"{"wg_pub":"k","wg_port":"51824"}"#.into(), note: String::new(),
+            insecure: false, drain: false, maint: false, accept_all: true, endpoint_mode: "custom".into(), sync_state: String::new(),
+        };
+        let mut km = crate::kmix::Settings { on: true, port: 4000, parity: 3, hop: String::new(), gaming: true, nodes: Default::default() };
+        // not installed and no port of its own: nothing to hold yet
+        assert!(!node_uses(&n, &km).iter().any(|u| u.proto == "kmix"));
+        // given 4001 when it joined: held from then on, so the next server gets another one
+        km.nodes.insert("n1".into(), crate::kmix::NodeOpt { port: 4001, ..Default::default() });
+        assert!(node_uses(&n, &km).contains(&Use { node: "n1".into(), proto: "kmix", port: 4001 }));
     }
 
     #[test]
