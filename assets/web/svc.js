@@ -13,7 +13,7 @@ if(typeof FA!='undefined')Object.assign(FA,{
  "On for all users":"روشن برای همه‌ی کاربران","Off for all users":"خاموش برای همه‌ی کاربران",
  "WireGuard reaches users only through a tunnel: write the tunnel domain of this server in Servers.":"وایرگارد فقط از راه تانل به کاربر می‌رسد: در «سرورها» دامنه‌ی تانل این سرور را بنویس.",
  "Write the tunnel domain of this server in Servers: the second config is made by itself.":"دامنه‌ی تانل این سرور را در «سرورها» بنویس: کانفیگ دوم خودش ساخته می‌شود.",
- "Only for KANKI MIX (optional)":"فقط برای KANKI MIX (اختیاری)","the tunnel domain of the server":"دامنه‌ی تانل سرور",
+ "Only for KANKI MIX (optional)":"فقط برای KANKI MIX (اختیاری)","not running":"KANKI MIX روی این سرور اجرا نمی‌شود: «ری‌استارت سرویس‌های VPN» را بزن","the tunnel domain of the server":"دامنه‌ی تانل سرور",
  "Running servers":"سرورهای فعال","Users with it":"کاربرانی که دارند","Through a tunnel":"از راه تانل","Direct":"مستقیم",
  "running":"روشن","stopped":"متوقف","not installed":"نصب نیست","relay":"رله","off":"خاموش",
  "UDP port":"پورت UDP","Save port":"ذخیره‌ی پورت","Users connect to":"کاربرها به این آدرس وصل می‌شوند","change in Servers":"تغییر در صفحه‌ی سرورها",
@@ -93,8 +93,11 @@ function tunCopy(p,s,r){var tn=s.tunnel||{},name={wg:'WireGuard',awg:'AmneziaWG'
  return ''}
 function pvRow(p,s){var st=pvState(p,s),port=st[2];
  var head='<span class="dot '+(st[0]=='n'?'':st[0])+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+'<span class="sp"></span>'+
-  '<span class="kxr-st '+st[0]+'">'+esc(st[1])+'</span>'+(port?'<small class="ltr">UDP '+N(port)+'</small>':'');
+  '<span class="kxr-st '+st[0]+'">'+esc(st[1])+'</span>'+tunTag(p,s)+(port?'<small class="ltr">UDP '+N(port)+'</small>':'');
  return accRow('pv_'+p,s.key,head,function(){return pvBody(p,s)})}
+// the row's tunnel badge: its configs point at an Iran entry, or it also has a copy through its tunnel domain
+function tunTag(p,s){var tn=s.tunnel||{},has=(tn.ports||[]).some(function(z){return z.proto=={wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2'}[p]});
+ return tn.main_via=='tunnel'?'<span class="kxr-st g">'+t('tunnel')+'</span>':tn.on&&tn.uses&&has?'<span class="kxr-st g">+ '+t('tunnel')+'</span>':''}
 function pvBody(p,s){var n=s.node,i=n.info||{},st=pvState(p,s),port=st[2],k=esc(s.key),ni=esc(n.id),r=routeVia(agentOf(s),port);
  var h='<div class="kxr-line"><span><b>'+esc(st[1])+'</b></span>'+(n.enabled?'<span>·</span><span>'+N(n.users||0)+' '+t('users')+'</span>':'')+
   '<span>·</span><span>'+t('Users connect to')+': <b class="ltr">'+esc(n.effective_endpoint||'—')+'</b> <a href="#nodes" style="font-size:11px">'+t('change in Servers')+'</a></span></div>'+
@@ -144,7 +147,7 @@ if(window.kmDraw){
    '<div><label class="f">'+t('Port')+'</label><input id="km_tp1" class="ltr" inputmode="numeric" placeholder="'+esc(String((via&&via.port)||port||''))+'" value="'+esc(o.tun_port?String(o.tun_port):'')+'"></div>'+
    '<div class="wide"><label class="f">'+t('Name in the app')+'</label><input id="km_tn1" maxlength="40" placeholder="'+esc(x.name+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'"></div></div></details>'+
    '<div class="kxr-line">'+(via?viaLine(via,x.name):(o.tun_host&&!o.tun_off?'<span class="warnbox" style="margin:0;width:100%">'+t('No Kanki tunnel carries this port to the server. Make a tunnel (or a multi-location route) that carries it, or forward it on that address some other way.')+'</span>':''))+'</div>'+
-   (x.on&&x.error?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(x.error)+'</div>':'')+
+   (x.on&&x.error?'<div class="warnbox'+(x.error=='not running'?'':' ltr')+'" style="margin:6px 0 0">'+esc(t(x.error))+'</div>':'')+
    '<div class="kxsave"><button class="b2 sm" onclick="accClose(\'km\')">'+t('Cancel')+'</button><button class="btn sm" onclick="kmSaveOne(\''+id+'\')">'+t('Save')+'</button></div>'+
    '<div class="kxacts"><button class="b2 sm" onclick="nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button><a class="b2 sm" href="#tunnels">'+t('Tunnels page')+'</a></div>';
   setTimeout(function(){var el=$('#km_p1'),w=$('#km_pw'),b=$('#km_ps');if(!el)return;var f=function(){var m=srvPortClash(r.key,'kmix',el.value);w.textContent=m;b.disabled=!!m};el.oninput=f;f();

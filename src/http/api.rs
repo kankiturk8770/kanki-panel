@@ -642,7 +642,12 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
                 return err(StatusCode::BAD_REQUEST, "use the panel update button for the main server");
             }
             let r = sync::remote_post(&app, &n, "/agent/update").await;
-            return Json(json!({"ok": r.as_ref().map(|v| v["ok"].as_bool().unwrap_or(false)).unwrap_or(false), "result": r})).into_response();
+            let ok = r.as_ref().map(|v| v["ok"].as_bool().unwrap_or(false)).unwrap_or(false);
+            if ok {
+                let want = r.as_ref().and_then(|v| v["version"].as_str().map(|x| x.to_string())).unwrap_or_default();
+                sync::refresh_after_update(&app, vec![n.clone()], &want);
+            }
+            return Json(json!({"ok": ok, "result": r})).into_response();
         }
         _ => return err(StatusCode::BAD_REQUEST, "unknown action"),
     }
@@ -1091,6 +1096,15 @@ pub fn twin_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     v
 }
 
+/// { protocol: "tunnel" | "direct" } of one subscription entry (`twin`: the copies through the tunnel)
+fn via_proto(app: &App, n: &Node, protos: &[&str], twin: bool) -> Value {
+    let ep = if crate::direct::through_tunnel(app, n) { "tunnel" } else { "direct" };
+    let kmix = if crate::kmix::settings(app).nodes.get(&n.id).map(|o| o.route == "tunnel").unwrap_or(false) { "tunnel" } else { "direct" };
+    let m: serde_json::Map<String, Value> =
+        protos.iter().map(|p| (p.to_string(), json!(if twin { "tunnel" } else if *p == "kankimix" { kmix } else { ep }))).collect();
+    Value::Object(m)
+}
+
 /// The name of a server's second entry in the app
 pub fn twin_name(app: &App, n: &Node) -> String {
     crate::twin::of_node(app, n).map(|t| t.name).unwrap_or_else(|| crate::kmix::tunnel_name(app, n))
@@ -1115,6 +1129,9 @@ fn sub_data(app: &App, u: &User) -> Value {
         if let (Some(o), Some(e)) = (v.as_object_mut(), crate::exitgeo::fields(app, &n.id).as_object()) {
             o.extend(e.clone());
         }
+        // each protocol of this entry: "tunnel" when its config points at an Iran entry, "direct" when at the
+        // server itself (the app labels them; KANKI MIX has its own address setting)
+        v["via_proto"] = via_proto(app, n, node_protos(app, u, n).as_slice(), false);
         // AmneziaWG: whether its endpoint goes through the tunnel or straight to the server, and the address
         // of the second, direct config ("" = none; the app no longer guesses it from the server's name)
         if v["protocols"].as_array().map(|a| a.iter().any(|p| p == "amneziawg")).unwrap_or(false) {
@@ -1137,6 +1154,7 @@ fn sub_data(app: &App, u: &User) -> Value {
             e["kmix"] = json!(tun);
             e["kmix_tunnel"] = Value::Null;
             e["via"] = json!("tunnel");
+            e["via_proto"] = via_proto(app, n, &tp, true);
             e["parent"] = json!(n.id);
             if let Some(o) = e.as_object_mut() {
                 o.remove("awg_via");

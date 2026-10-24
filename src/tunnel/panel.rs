@@ -2599,7 +2599,8 @@ pub(crate) async fn run_update_all(app: &Arc<App>) -> Value {
     let srv = servers(&app);
     let mut covered: HashSet<String> = HashSet::new();
     let mut jobs = vec![];
-    for n in app.db.nodes().into_iter().filter(|n| n.id != "local" && n.enabled) {
+    // every node, a relay whose VPN serves nobody too (it runs the same program)
+    for n in app.db.nodes().into_iter().filter(|n| n.id != "local") {
         let host = n
             .address
             .trim_start_matches("https://")
@@ -2627,7 +2628,7 @@ pub(crate) async fn run_update_all(app: &Arc<App>) -> Value {
             let r = crate::sync::remote_post(&a, &n, "/agent/update").await;
             let ok = r.as_ref().map(|v| v["ok"].as_bool().unwrap_or(false)).unwrap_or(false);
             let e = r.as_ref().and_then(|v| v["error"].as_str().map(|x| x.to_string())).unwrap_or_default();
-            json!({ "name": n.name, "ok": ok, "error": e })
+            (ok.then(|| n.clone()), json!({ "name": n.name, "ok": ok, "error": e }))
         }));
     }
     // tunnel-only servers: agents from v2.7.0 on update themselves from the panel; older ones need the command once
@@ -2649,11 +2650,14 @@ pub(crate) async fn run_update_all(app: &Arc<App>) -> Value {
         app.db.set("tun_update_until", &(now() + 900).to_string());
     }
     let mut nodes_out = vec![];
+    let mut restarting = vec![];
     for j in jobs {
-        if let Ok(v) = j.await {
+        if let Ok((n, v)) = j.await {
             nodes_out.push(v);
+            restarting.extend(n);
         }
     }
+    crate::sync::refresh_after_update(&app, restarting, &target);
     let mut panel_msg = json!("current");
     if panel_old {
         panel_msg = match crate::admin::self_update(&app).await {

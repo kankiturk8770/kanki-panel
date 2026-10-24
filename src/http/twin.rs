@@ -141,7 +141,12 @@ pub fn info(app: &App, key: &str, nid: Option<&str>) -> Value {
     let auto = if sid.is_empty() { String::new() } else { crate::tunnel::panel::entry_host(app, &sid) };
     let host = if o.host.is_empty() { auto.clone() } else { o.host.clone() };
     let mut ports: Vec<Value> = vec![];
+    // where the server's own (main) configs point: its own address, or an Iran entry ("tunnel")
+    let mut main_via = "direct";
     if let Some(n) = nid.and_then(|id| app.db.node(id)) {
+        if crate::direct::through_tunnel(app, &n) {
+            main_via = "tunnel";
+        }
         let i = crate::api::node_info(&n);
         let num = |k: &str| i[k].as_str().and_then(|s| s.parse::<u16>().ok()).or_else(|| i[k].as_u64().map(|p| p as u16)).filter(|p| *p > 0);
         let tw = Twin { host: host.clone(), name: String::new(), sid: sid.clone() };
@@ -160,7 +165,7 @@ pub fn info(app: &App, key: &str, nid: Option<&str>) -> Value {
             ports.push(json!({ "proto": name, "port": ib.port, "via": tw.port(app, ib.port, tcp), "tcp": tcp }));
         }
     }
-    json!({ "on": o.on, "host": o.host, "name": o.name, "auto": auto, "uses": host, "ports": ports })
+    json!({ "on": o.on, "host": o.host, "name": o.name, "auto": auto, "uses": host, "ports": ports, "main_via": main_via })
 }
 
 #[cfg(test)]
