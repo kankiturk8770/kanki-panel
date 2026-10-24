@@ -530,7 +530,7 @@ impl Bot {
     fn acct_kb(&self, u: &User, mut extra: Kb) -> Value {
         let mut have: Vec<&str> = vec![];
         for n in crate::api::user_nodes(&self.app, u) {
-            for p in crate::api::node_protos(u, &n) {
+            for p in crate::api::node_protos(&self.app, u, &n) {
                 if !have.contains(&p) { have.push(p); }
             }
         }
@@ -557,7 +557,7 @@ impl Bot {
     /// (Hysteria2 as a copyable link).
     async fn send_configs(&self, chat: i64, qid: &str, u: &User, code: &str) {
         let (proto, title) = match code { "w" => ("wireguard", "WireGuard"), "a" => ("amneziawg", "AmneziaWG"), _ => ("hysteria2", "Hysteria2") };
-        let nodes: Vec<_> = crate::api::user_nodes(&self.app, u).into_iter().filter(|n| crate::api::node_protos(u, n).contains(&proto)).take(8).collect();
+        let nodes: Vec<_> = crate::api::user_nodes(&self.app, u).into_iter().filter(|n| crate::api::node_protos(&self.app, u, n).contains(&proto)).take(8).collect();
         if nodes.is_empty() {
             return self.answer(qid, "این پروتکل برای سرویس شما فعال نیست.", true).await;
         }

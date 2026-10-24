@@ -93,6 +93,12 @@ pub struct Tunnel {
     /// game transport: FEC "data:parity" ("8:3"; "off" disables) and packet duplication
     pub fec: String,
     pub dup: bool,
+    /// a multi-location route (Iran → Turkey → Germany) is one tunnel per hop; its hops share this id
+    /// ("" = a tunnel of its own). `hop` is the place on the route, 0 = the hop from the first entry.
+    pub chain: String,
+    pub hop: u8,
+    /// the route's name, the same on every hop
+    pub chain_name: String,
 }
 
 /// Every transport a tunnel can use (the panel accepts nothing else).
@@ -1389,6 +1395,9 @@ fn status_json(st: Option<&Status>) -> Value {
 /// UDP `port` (None = no tunnel forwards it, so no second config that would point at a dead port).
 /// A tunnel whose exit is the machine of the node (`node_id` / `node_host`) is preferred; else one whose
 /// entry is `entry_host` (the node's endpoint) and listens on that UDP port.
+///
+/// A multi-location route (Iran → Turkey → Germany: one tunnel per hop) is followed back to its first
+/// entry: the app dials Iran, whose port reaches Turkey, whose same port reaches Germany.
 pub fn udp_forward(app: &App, node_id: &str, node_host: &str, entry_host: &str, port: u16) -> Option<(String, u16)> {
     let list: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
     let addr = |sid: &str| seen_ip(sid).filter(|_| sid != "local").unwrap_or_else(|| host_of(app, sid));
@@ -1399,9 +1408,10 @@ pub fn udp_forward(app: &App, node_id: &str, node_host: &str, entry_host: &str, 
             continue;
         }
         if let Some((a, _)) = crate::tunnel::engine::parse_ports(&t.udp).into_iter().find(|(_, b)| *b == port) {
-            let h = host_of(app, &t.entry);
+            let (sid, p) = walk_back(&list, &t.entry, a).pop().unwrap_or_else(|| (t.entry.clone(), a));
+            let h = host_of(app, &sid);
             if !h.is_empty() {
-                return Some((h, a));
+                return Some((h, p));
             }
         }
     }
@@ -1417,6 +1427,43 @@ pub fn udp_forward(app: &App, node_id: &str, node_host: &str, entry_host: &str, 
         }
     }
     None
+}
+
+/// From server `sid`, where UDP `port` arrives, back through the hops of a multi-location route: the
+/// tunnel whose exit is `sid` and that forwards some entry port to `port`, then the one before it…
+/// [(sid, port), (the server before, its port), …, (the first entry, its port)].
+fn walk_back(list: &[Tunnel], sid: &str, port: u16) -> Vec<(String, u16)> {
+    let mut back = vec![(sid.to_string(), port)];
+    // a route has a few hops; a loop of tunnels (A → B → A) stops where it started
+    for _ in 0..8 {
+        let (cur, p) = back.last().cloned().unwrap_or_default();
+        let prev = list.iter().find_map(|t| {
+            (t.exit == cur && !back.iter().any(|(s, _)| *s == t.entry))
+                .then(|| crate::tunnel::engine::parse_ports(&t.udp).into_iter().find(|(_, b)| *b == p).map(|(a, _)| (t.entry.clone(), a)))
+                .flatten()
+        });
+        match prev {
+            Some(x) => back.push(x),
+            None => break,
+        }
+    }
+    back
+}
+
+/// The servers a UDP port of server `sid` comes in through, first entry first (["Iran", "Turkey"]),
+/// and the port on the first entry. None = no tunnel brings it there.
+pub fn udp_route(app: &App, sid: &str, port: u16) -> Option<(Vec<String>, u16)> {
+    let list: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
+    let back = walk_back(&list, sid, port);
+    let first = back.last().map(|x| x.1).unwrap_or(port);
+    (back.len() > 1).then(|| (back[1..].iter().rev().map(|(s, _)| server_name(app, s)).collect(), first))
+}
+
+fn server_name(app: &App, sid: &str) -> String {
+    if sid == "local" {
+        return local_name(app);
+    }
+    servers(app).into_iter().find(|s| s.id == sid).map(|s| s.name).unwrap_or_else(|| sid.to_string())
 }
 
 /// (server id, its public address) of every tunnel server and the panel server, for their flags
@@ -1586,7 +1633,9 @@ fn live_clash(app: &App, t: &Tunnel, old: Option<&Tunnel>) -> Option<String> {
             if p != port || u != udp {
                 continue;
             }
-            let ours = unit == "kanki-tunnel.service" || unit.starts_with("kanki-hy2-") || (sid == "local" && unit == "kanki-panel.service");
+            // the agent itself, also when it runs without systemd (a container, started by hand): no unit
+            let ours = unit == "kanki-tunnel.service" || unit.starts_with("kanki-hy2-") || (sid == "local" && unit == "kanki-panel.service")
+                || (unit.is_empty() && prog == "kanki-panel");
             if ours && own.contains(&(sid.clone(), port, udp)) {
                 continue;
             }
@@ -1677,6 +1726,15 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     if let Some(d) = b["dup"].as_bool() {
         t.dup = d;
+    }
+    if b.get("chain").is_some() {
+        t.chain = s("chain").chars().filter(|c| c.is_ascii_alphanumeric()).take(16).collect();
+    }
+    if let Some(n) = b["hop"].as_u64() {
+        t.hop = n.min(15) as u8;
+    }
+    if b.get("chain_name").is_some() {
+        t.chain_name = s("chain_name").chars().filter(|c| !c.is_control() && !"<>\"".contains(*c)).take(40).collect();
     }
     if let Some(e) = b["enabled"].as_bool() {
         t.enabled = e;
@@ -2696,3 +2754,31 @@ mod version_gate_tests {
         assert_eq!(next_transport(&only, "kcp", old), None);
     }
 }
+
+#[cfg(test)]
+mod route_tests {
+    use super::{walk_back, Tunnel};
+
+    fn hop(e: &str, x: &str, udp: &[&str]) -> Tunnel {
+        Tunnel { entry: e.into(), exit: x.into(), udp: udp.iter().map(|s| s.to_string()).collect(), enabled: true, ..Default::default() }
+    }
+
+    #[test]
+    fn a_multi_location_route_is_followed_to_its_first_entry() {
+        // Iran → Turkey → Germany; on the Turkey hop the port moved (4002 on Turkey to 4001 on Germany)
+        let list = vec![hop("ir", "tr", &["51824", "4002"]), hop("tr", "de", &["51824", "4002:4001"])];
+        assert_eq!(walk_back(&list, "de", 4001), vec![("de".to_string(), 4001), ("tr".to_string(), 4002), ("ir".to_string(), 4002)]);
+        assert_eq!(walk_back(&list, "de", 51824).last().cloned(), Some(("ir".to_string(), 51824)));
+        // a port no tunnel carries stays where it is
+        assert_eq!(walk_back(&list, "de", 8445), vec![("de".to_string(), 8445)]);
+        // one hop only
+        assert_eq!(walk_back(&list, "tr", 4002).last().cloned(), Some(("ir".to_string(), 4002)));
+    }
+
+    #[test]
+    fn a_loop_of_tunnels_does_not_go_round_forever() {
+        let list = vec![hop("a", "b", &["5000"]), hop("b", "a", &["5000"])];
+        assert_eq!(walk_back(&list, "b", 5000), vec![("b".to_string(), 5000), ("a".to_string(), 5000)]);
+    }
+}
+

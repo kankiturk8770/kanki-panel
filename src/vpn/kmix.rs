@@ -194,6 +194,9 @@ pub fn tunnel_target(app: &App, s: &Settings, n: &Node, port: u16) -> Option<(St
     }
     let p = if opt.tun_port > 0 { opt.tun_port } else { port };
     if !opt.tun_host.trim().is_empty() {
+        // a typed Iran address: the port is the one the route really carries to this server (a tunnel
+        // that moved it on the way, 4002:4001), unless a port was typed too
+        let p = if opt.tun_port > 0 { opt.tun_port } else { route_of(app, n, port).map(|r| r.1).unwrap_or(port) };
         return Some((opt.tun_host.trim().to_string(), p));
     }
     let ep = crate::api::endpoint(app, n);
@@ -208,6 +211,17 @@ pub fn tunnel_target(app: &App, s: &Settings, n: &Node, port: u16) -> Option<(St
     // dead port); the address and port are the tunnel's own entry
     let node_host = if n.id == "local" { String::new() } else { crate::exitgeo::host_of_url(&n.address) };
     crate::tunnel::panel::udp_forward(app, &n.id, &node_host, &ep_host, p)
+}
+
+/// The tunnels that bring UDP `port` to server `n`: the servers on the way, first entry first, and the
+/// port on that first entry. None = no Kanki tunnel carries it there.
+pub fn route_of(app: &App, n: &Node, port: u16) -> Option<(Vec<String>, u16)> {
+    let sid = if n.id == "local" {
+        "local".to_string()
+    } else {
+        crate::tunnel::panel::servers(app).into_iter().find(|s| s.node == n.id).map(|s| s.id)?
+    };
+    crate::tunnel::panel::udp_route(app, &sid, port)
 }
 
 /// a host name or IP the panel accepts as a KANKI MIX address
@@ -557,6 +571,9 @@ async fn get_all(axum::extract::State(app): St, h: axum::http::HeaderMap) -> axu
             "route": if s.node_tunnel(&n.id) { "tunnel" } else { "direct" },
             // the second config through the tunnel: (address, port) it uses, or Null
             "second": info["kmix_port"].as_u64().and_then(|p| tunnel_target(&app, &s, n, p as u16)).map(|(h, p)| json!({"host": h, "port": p})),
+            // the Kanki tunnels that bring this server's port (["Iran", "Turkey"]), Null = none: a typed
+            // Iran address then needs a forward made some other way
+            "route_via": info["kmix_port"].as_u64().and_then(|p| route_of(&app, n, p as u16)).map(|(v, p)| json!({"via": v, "port": p})),
             "on": s.node_on(&n.id), "want_port": s.node_port(&n.id),
             "port": info["kmix_port"], "parity": info["kmix_parity"], "hop": info["kmix_hop"],
             "active": info["kmix_active"], "installed": !info["kmix_port"].is_null(), "users": here,
