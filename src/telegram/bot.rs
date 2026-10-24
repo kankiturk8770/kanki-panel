@@ -530,7 +530,7 @@ impl Bot {
     fn acct_kb(&self, u: &User, mut extra: Kb) -> Value {
         let mut have: Vec<&str> = vec![];
         for n in crate::api::user_nodes(&self.app, u) {
-            for p in crate::api::node_protos(&self.app, u, &n) {
+            for p in crate::api::node_protos(&self.app, u, &n).into_iter().chain(crate::api::twin_protos(&self.app, u, &n)) {
                 if !have.contains(&p) { have.push(p); }
             }
         }
@@ -557,17 +557,28 @@ impl Bot {
     /// (Hysteria2 as a copyable link).
     async fn send_configs(&self, chat: i64, qid: &str, u: &User, code: &str) {
         let (proto, title) = match code { "w" => ("wireguard", "WireGuard"), "a" => ("amneziawg", "AmneziaWG"), _ => ("hysteria2", "Hysteria2") };
-        let nodes: Vec<_> = crate::api::user_nodes(&self.app, u).into_iter().filter(|n| crate::api::node_protos(&self.app, u, n).contains(&proto)).take(8).collect();
-        if nodes.is_empty() {
+        // each server's direct config, then its copy through the tunnel (WireGuard only that one)
+        let mut list: Vec<(crate::db::Node, bool)> = vec![];
+        for n in crate::api::user_nodes(&self.app, u) {
+            if crate::api::node_protos(&self.app, u, &n).contains(&proto) {
+                list.push((n.clone(), false));
+            }
+            if crate::api::twin_protos(&self.app, u, &n).contains(&proto) {
+                list.push((n, true));
+            }
+        }
+        list.truncate(8);
+        if list.is_empty() {
             return self.answer(qid, "این پروتکل برای سرویس شما فعال نیست.", true).await;
         }
         self.send(chat, &cfg_help(code), None).await;
-        for n in nodes {
-            let Some((name, text)) = crate::api::bot_config(&self.app, u, &n, proto).await else { continue };
+        for (n, tunnel) in list {
+            let Some((name, text)) = crate::api::bot_config(&self.app, u, &n, proto, tunnel).await else { continue };
+            let server = if tunnel { crate::api::twin_name(&self.app, &n) } else { n.name.clone() };
             if proto == "hysteria2" {
-                self.send(chat, &format!("📥 <b>{} · {}</b>\n\n<code>{}</code>\n\n☝️ روی لینک بزنید تا کپی بشه.", title, esc(&n.name), esc(text.trim())), None).await;
+                self.send(chat, &format!("📥 <b>{} · {}</b>\n\n<code>{}</code>\n\n☝️ روی لینک بزنید تا کپی بشه.", title, esc(&server), esc(text.trim())), None).await;
             } else {
-                let cap = format!("📥 {} · {}\nاسم داخل برنامه: {}", title, n.name, name.trim_end_matches(".conf"));
+                let cap = format!("📥 {} · {}\nاسم داخل برنامه: {}", title, server, name.trim_end_matches(".conf"));
                 self.send_doc(chat, text.into_bytes(), &name, &cap).await;
             }
         }

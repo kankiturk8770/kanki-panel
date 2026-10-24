@@ -75,6 +75,21 @@ pub fn conf_file_name(app: &App, u: &User, n: &Node, proto: &str) -> String {
     conf_name(&u.username, u.id, &n.id, &n.name, &names, proto)
 }
 
+/// The file name of a config, the copy through the tunnel ending in "t" (mahtab87-ger-at): the user part
+/// is one letter shorter so the name still fits WireGuard's 15
+pub fn conf_file_name_via(app: &App, u: &User, n: &Node, proto: &str, tunnel: bool) -> String {
+    let f = conf_file_name(app, u, n, proto);
+    if tunnel { tunnel_file(&f) } else { f }
+}
+
+fn tunnel_file(f: &str) -> String {
+    let stem = f.trim_end_matches(".conf");
+    let mut parts = stem.rsplitn(3, '-');
+    let (letter, srv, who) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    let who: String = if stem.len() >= 15 { who.chars().take(who.chars().count().saturating_sub(1)).collect() } else { who.to_string() };
+    format!("{}-{}-{}t.conf", who, srv, letter)
+}
+
 /// `nodes`: (id, name) of every server of this user, to tell apart servers whose names start the same way
 fn conf_name(user: &str, uid: i64, node_id: &str, node_name: &str, nodes: &[(&str, &str)], proto: &str) -> String {
     let code = |name: &str| -> String {
@@ -102,6 +117,17 @@ mod conf_name_tests {
     fn ok(f: &str) -> bool {
         let n = f.strip_suffix(".conf").unwrap();
         (1..=15).contains(&n.len()) && n.chars().all(|c| c.is_ascii_alphanumeric() || "_=+.-".contains(c))
+    }
+
+    #[test]
+    fn tunnel_copies_end_in_t_and_still_fit() {
+        let f = |stem: &str| super::tunnel_file(&format!("{}.conf", stem));
+        assert_eq!(f("mahtab87-ger-a"), "mahtab87-ger-at.conf");
+        assert_eq!(f("abcdefghi-ger-w"), "abcdefgh-ger-wt.conf");
+        assert_eq!(f("u9-ab-a"), "u9-ab-at.conf");
+        for x in ["mahtab87-ger-at.conf", "abcdefgh-ger-wt.conf"] {
+            assert!(ok(x), "{}", x);
+        }
     }
 
     #[test]
@@ -996,13 +1022,23 @@ pub(crate) fn parse_code(code: &str) -> Option<(i64, String)> {
 }
 
 fn hy2_uri(app: &App, u: &User, n: &Node) -> Option<String> {
+    hy2_link(app, u, n, None)
+}
+
+/// The Hysteria2 link, straight to the server or through its tunnel (`tw`)
+fn hy2_link(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Option<String> {
     let info = node_info(n);
     let port = info["hy2_port"].as_str().unwrap_or("");
     if port.is_empty() || !u.has_proto("hy2") {
         return None;
     }
     let mut q = vec![];
-    let sni = info["hy2_sni"].as_str().unwrap_or("");
+    let mut sni = info["hy2_sni"].as_str().unwrap_or("").to_string();
+    // through the tunnel the address is the Iran one: the certificate is still the server's own name
+    let ep = endpoint(app, n);
+    if sni.is_empty() && tw.is_some() && ep.parse::<std::net::IpAddr>().is_err() && !ep.contains(':') {
+        sni = ep.clone();
+    }
     if !sni.is_empty() {
         q.push(format!("sni={}", sni));
     }
@@ -1013,7 +1049,11 @@ fn hy2_uri(app: &App, u: &User, n: &Node) -> Option<String> {
     if !obfs.is_empty() {
         q.push(format!("obfs=salamander&obfs-password={}", pct(obfs)));
     }
-    Some(format!("hysteria2://{}@{}:{}/?{}#{}", u.code, endpoint(app, n), port, q.join("&"), pct(&n.name)))
+    let (addr, name) = match tw {
+        Some(t) => (t.addr(t.port(app, port.parse().unwrap_or(0), false)), format!("{} (Tunnel)", n.name)),
+        None => (format!("{}:{}", ep, port), n.name.clone()),
+    };
+    Some(format!("hysteria2://{}@{}/?{}#{}", u.code, addr, q.join("&"), pct(&name)))
 }
 
 pub fn user_nodes(app: &App, u: &User) -> Vec<Node> {
@@ -1033,7 +1073,30 @@ pub fn node_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     v
 }
 
-/// id of the second (through the tunnel) KANKI MIX entry of a server in the subscription data
+/// What a server's second entry (its configs through the tunnel) offers this user: every protocol when
+/// the server has a tunnel (Servers page), else only KANKI MIX's own second config (KANKI MIX page).
+/// WireGuard is here even when the main entry has none: through the tunnel it passes.
+pub fn twin_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
+    let kmix = crate::kmix::link_tunnel(app, u, n).is_some();
+    if crate::twin::of_node(app, n).is_none() {
+        return if kmix { vec!["kankimix"] } else { vec![] };
+    }
+    let info = node_info(n);
+    let has = |k: &str| info[k].as_str().map(|s| !s.is_empty()).unwrap_or(false);
+    let mut v = vec![];
+    if u.has_proto("wg") && has("wg_pub") { v.push("wireguard"); }
+    if u.has_proto("awg") && has("awg_pub") { v.push("amneziawg"); }
+    if u.has_proto("hy2") && has("hy2_port") { v.push("hysteria2"); }
+    if kmix { v.push("kankimix"); }
+    v
+}
+
+/// The name of a server's second entry in the app
+pub fn twin_name(app: &App, n: &Node) -> String {
+    crate::twin::of_node(app, n).map(|t| t.name).unwrap_or_else(|| crate::kmix::tunnel_name(app, n))
+}
+
+/// id of the second (through the tunnel) entry of a server in the subscription data
 pub const TUNNEL_SUFFIX: &str = "@tunnel";
 
 fn sub_data(app: &App, u: &User) -> Value {
@@ -1059,22 +1122,30 @@ fn sub_data(app: &App, u: &User) -> Value {
             v["awg_via"] = json!(via);
             v["awg_direct"] = json!(direct);
         }
-        // the second config is also its own entry, so an app that knows only "kmix" lists it as a server
-        // of its own; "via" and "parent" tell a newer app it is the tunnel config of that server
-        if let Some(t) = tun {
+        // the configs through the tunnel are the server's second entry, so every app (one that knows only
+        // "kmix" too) lists them as a server of their own; "via" and "parent" tell a newer app they are the
+        // tunnel configs of that server
+        let tp = twin_protos(app, u, n);
+        if !tp.is_empty() {
+            let tw = crate::twin::of_node(app, n);
             let mut e = v.clone();
             e["id"] = json!(format!("{}{}", n.id, TUNNEL_SUFFIX));
-            e["name"] = json!(crate::kmix::tunnel_name(app, n));
+            e["name"] = json!(twin_name(app, n));
             e["main"] = json!(false);
-            e["protocols"] = json!(["kankimix"]);
-            e["hy2"] = Value::Null;
-            e["kmix"] = json!(t);
+            e["protocols"] = json!(tp);
+            e["hy2"] = if tp.contains(&"hysteria2") { json!(hy2_link(app, u, n, tw.as_ref())) } else { Value::Null };
+            e["kmix"] = json!(tun);
             e["kmix_tunnel"] = Value::Null;
             e["via"] = json!("tunnel");
             e["parent"] = json!(n.id);
             if let Some(o) = e.as_object_mut() {
                 o.remove("awg_via");
                 o.remove("awg_direct");
+            }
+            // its AmneziaWG goes through the tunnel and has no direct copy (the main entry is the direct one)
+            if tp.contains(&"amneziawg") {
+                e["awg_via"] = json!("tunnel");
+                e["awg_direct"] = json!("");
             }
             nodes.push(v);
             nodes.push(e);
@@ -1104,6 +1175,50 @@ fn sub_data(app: &App, u: &User) -> Value {
     })
 }
 
+/// One protocol of one server on the subscription page (`tunnel`: its copy through the server's tunnel)
+fn proto_row(app: &App, u: &User, n: &Node, p: &str, tunnel: bool) -> String {
+    let sub = u.sub_code();
+    let (title, letter) = match p { "wireguard" => ("WireGuard", "W"), "amneziawg" => ("AmneziaWG", "A"), "kankimix" => ("KANKI MIX", "K"), _ => ("Hysteria2", "H") };
+    let node = format!("{}{}", esc(&n.id), if tunnel { TUNNEL_SUFFIX } else { "" });
+    let base = format!("/api/config/{}/{}?sub={}&amp;node={}", u.id, p, sub, node);
+    let mut btns = String::new();
+    match p {
+        // KANKI MIX works only in the Kanki app: the page shows no link, copy or QR (the link is the user's
+        // own key; there is no other app to paste it in). The app finds the address of the link text in the
+        // hidden tag, as it found the QR button's before.
+        "kankimix" => {
+            let link = if tunnel { crate::kmix::link_tunnel(app, u, n) } else { crate::kmix::link(app, u, n) };
+            if link.is_some() {
+                btns.push_str(&format!(
+                    "<i hidden{} data-url=\"/api/config/{}/kankimix?sub={}&amp;node={}\"></i>",
+                    if tunnel { " data-via=\"tunnel\"" } else { "" }, u.id, sub, node
+                ));
+                btns.push_str("<p class=\"apponly\" data-i18n=\"app_only\">Only in the Kanki VPN app</p>");
+            }
+        }
+        "hysteria2" => {
+            let tw = if tunnel { crate::twin::of_node(app, n) } else { None };
+            if let Some(hu) = hy2_link(app, u, n, tw.as_ref()) {
+                btns.push_str(&format!("<code class=\"uri\">{}</code>", esc(&hu)));
+                btns.push_str(&format!("<button class=\"b2\" data-act=\"copy\" data-text=\"{}\" data-i18n=\"copy_uri\">Copy URI</button>", esc(&hu)));
+                btns.push_str(&format!("<button class=\"b2\" data-act=\"qr\" data-url=\"/api/config/{}/{}/qr?sub={}&amp;node={}\" data-i18n=\"qr\">QR Code</button>", u.id, p, sub, node));
+            }
+        }
+        _ => {
+            btns.push_str(&format!("<a class=\"btn\" href=\"{}\" data-i18n=\"dl_conf\">Download config</a>", base));
+            btns.push_str(&format!("<button class=\"b2\" data-act=\"info\" data-url=\"{}\" data-i18n=\"show_info\">Show info</button>", base));
+            btns.push_str(&format!("<button class=\"b2\" data-act=\"qr\" data-url=\"/api/config/{}/{}/qr?sub={}&amp;node={}\" data-i18n=\"qr\">QR Code</button>", u.id, p, sub, node));
+            if p == "wireguard" {
+                btns.push_str(&format!("<button class=\"b2\" data-act=\"uri\" data-url=\"/api/config/{}/{}/uri?sub={}&amp;node={}\" data-i18n=\"get_uri\">Get URI</button>", u.id, p, sub, node));
+            }
+        }
+    }
+    format!(
+        "<div class=\"row proto\" data-proto=\"{p}\"><div class=\"ph\"><i class=\"pl pl-{p}\">{l}</i><div><b>{t}</b><small>{p}</small></div></div><div class=\"acts\">{b}</div></div>",
+        p = p, l = letter, t = title, b = btns
+    )
+}
+
 async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
     let Some((id, c)) = parse_code(&code) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
     let Some(u) = app.db.user_by_code(id, &c) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
@@ -1111,54 +1226,20 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
     // server-rendered config links keep the exact URL format the Kanki Android app reads
     let mut nodes_html = String::new();
     for n in user_nodes(&app, &u) {
-        let mut rows = String::new();
-        for p in node_protos(&app, &u, &n) {
-            let (title, letter) = match p { "wireguard" => ("WireGuard", "W"), "amneziawg" => ("AmneziaWG", "A"), "kankimix" => ("KANKI MIX", "K"), _ => ("Hysteria2", "H") };
-            let base = format!("/api/config/{}/{}?sub={}&amp;node={}", u.id, p, sub, esc(&n.id));
-            let mut btns = String::new();
-            match p {
-                // KANKI MIX works only in the Kanki app: the page shows no link, copy or QR (the link is
-                // the user's own key; there is no other app to paste it in). The app finds the address
-                // of the link text in the hidden tag, as it found the QR button's before.
-                "kankimix" => {
-                    if crate::kmix::link(&app, &u, &n).is_some() {
-                        btns.push_str(&format!("<i hidden data-url=\"/api/config/{}/kankimix?sub={}&amp;node={}\"></i>", u.id, sub, esc(&n.id)));
-                        if crate::kmix::link_tunnel(&app, &u, &n).is_some() {
-                            // the app names each config by the last heading before it: the second one gets
-                            // its own (hidden) heading, then the server's name again for what follows
-                            btns.push_str(&format!(
-                                "<h3 hidden>{}</h3><i hidden data-via=\"tunnel\" data-url=\"/api/config/{}/kankimix?sub={}&amp;node={}{}\"></i><h3 hidden>{}</h3>",
-                                esc(&crate::kmix::tunnel_name(&app, &n)), u.id, sub, esc(&n.id), TUNNEL_SUFFIX, esc(&n.name)
-                            ));
-                        }
-                        btns.push_str("<p class=\"apponly\" data-i18n=\"app_only\">Only in the Kanki VPN app</p>");
-                    }
-                }
-                "hysteria2" => {
-                    if let Some(hu) = hy2_uri(&app, &u, &n) {
-                        btns.push_str(&format!("<code class=\"uri\">{}</code>", esc(&hu)));
-                        btns.push_str(&format!("<button class=\"b2\" data-act=\"copy\" data-text=\"{}\" data-i18n=\"copy_uri\">Copy URI</button>", esc(&hu)));
-                        btns.push_str(&format!("<button class=\"b2\" data-act=\"qr\" data-url=\"/api/config/{}/{}/qr?sub={}&amp;node={}\" data-i18n=\"qr\">QR Code</button>", u.id, p, sub, esc(&n.id)));
-                    }
-                }
-                _ => {
-                    btns.push_str(&format!("<a class=\"btn\" href=\"{}\" data-i18n=\"dl_conf\">Download config</a>", base));
-                    btns.push_str(&format!("<button class=\"b2\" data-act=\"info\" data-url=\"{}\" data-i18n=\"show_info\">Show info</button>", base));
-                    btns.push_str(&format!("<button class=\"b2\" data-act=\"qr\" data-url=\"/api/config/{}/{}/qr?sub={}&amp;node={}\" data-i18n=\"qr\">QR Code</button>", u.id, p, sub, esc(&n.id)));
-                    if p == "wireguard" {
-                        btns.push_str(&format!("<button class=\"b2\" data-act=\"uri\" data-url=\"/api/config/{}/{}/uri?sub={}&amp;node={}\" data-i18n=\"get_uri\">Get URI</button>", u.id, p, sub, esc(&n.id)));
-                    }
-                }
-            }
-            rows.push_str(&format!(
-                "<div class=\"row proto\" data-proto=\"{p}\"><div class=\"ph\"><i class=\"pl pl-{p}\">{l}</i><div><b>{t}</b><small>{p}</small></div></div><div class=\"acts\">{b}</div></div>",
-                p = p, l = letter, t = title, b = btns
-            ));
-        }
+        let rows: String = node_protos(&app, &u, &n).into_iter().map(|p| proto_row(&app, &u, &n, p, false)).collect();
         if !rows.is_empty() {
             nodes_html.push_str(&format!(
                 "<section class=\"node\" data-node=\"{}\"><h3>{}<small data-i18n=\"{}\"></small></h3>{}</section>",
                 esc(&n.id), esc(&n.name), if n.id == "local" { "main_server" } else { "node" }, rows
+            ));
+        }
+        // the configs through the server's tunnel: its second entry, under its own heading (the app names
+        // each config by the last heading before it)
+        let rows: String = twin_protos(&app, &u, &n).into_iter().map(|p| proto_row(&app, &u, &n, p, true)).collect();
+        if !rows.is_empty() {
+            nodes_html.push_str(&format!(
+                "<section class=\"node\" data-node=\"{}{}\" data-via=\"tunnel\"><h3>{}<small data-i18n=\"tunnel\"></small></h3>{}</section>",
+                esc(&n.id), TUNNEL_SUFFIX, esc(&twin_name(&app, &n)), rows
             ));
         }
     }
@@ -1232,9 +1313,18 @@ async fn sub_raw(State(app): St, Path(code): Path<String>) -> Response {
         }
         // WireGuard only through a tunnel (see node_protos)
         if node_protos(&app, &u, &n).contains(&"wireguard") {
-            if let Some(w) = wg_uri(&app, &u, &n) {
+            if let Some(w) = wg_uri(&app, &u, &n, None) {
                 lines.push(w);
             }
+        }
+        // the copies through the server's tunnel
+        let tp = twin_protos(&app, &u, &n);
+        let tw = crate::twin::of_node(&app, &n);
+        if tp.contains(&"hysteria2") {
+            lines.extend(hy2_link(&app, &u, &n, tw.as_ref()));
+        }
+        if tp.contains(&"wireguard") {
+            lines.extend(wg_uri(&app, &u, &n, tw.as_ref()));
         }
     }
     lines.extend(crate::xray::panel::user_links(&app, &u).into_iter().map(|x| x.1));
@@ -1245,15 +1335,20 @@ async fn sub_raw(State(app): St, Path(code): Path<String>) -> Response {
      util::b64(lines.join("\n").as_bytes())).into_response()
 }
 
-fn wg_uri(app: &App, u: &User, n: &Node) -> Option<String> {
+/// The WireGuard link, to the server's endpoint or through its tunnel (`tw`)
+fn wg_uri(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Option<String> {
     let info = node_info(n);
     let spub = info["wg_pub"].as_str().filter(|s| !s.is_empty())?.to_string();
     let port = info["wg_port"].as_str().unwrap_or("").to_string();
     let peer = app.db.ensure_peer(u.id, &n.id, "wg")?;
+    let (addr, name) = match tw {
+        Some(t) => (t.addr(t.port(app, port.parse().unwrap_or(0), false)), format!("{}-{}-tunnel", n.name, u.username)),
+        None => (format!("{}:{}", endpoint(app, n), port), format!("{}-{}", n.name, u.username)),
+    };
     Some(format!(
-        "wireguard://{}@{}:{}?publickey={}&presharedkey={}&address={}&mtu={}#{}",
-        pct(&peer.privkey), endpoint(app, n), port, pct(&spub), pct(&peer.psk), pct(&format!("{}/32", peer.ip)),
-        app.db.get("mtu"), pct(&format!("{}-{}", n.name, u.username))
+        "wireguard://{}@{}?publickey={}&presharedkey={}&address={}&mtu={}#{}",
+        pct(&peer.privkey), addr, pct(&spub), pct(&peer.psk), pct(&format!("{}/32", peer.ip)),
+        app.db.get("mtu"), pct(&name)
     ))
 }
 
@@ -1270,17 +1365,18 @@ fn text_conf(s: String) -> Response {
 }
 
 /// For the sales bot: the config of one protocol on one server -> (file name, text).
-pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str) -> Option<(String, String)> {
+/// `tunnel`: the copy through the server's tunnel.
+pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str, tunnel: bool) -> Option<(String, String)> {
     let mut q: HashMap<String, String> = HashMap::new();
     q.insert("sub".to_string(), u.sub_code().to_string());
-    q.insert("node".to_string(), n.id.clone());
+    q.insert("node".to_string(), if tunnel { format!("{}{}", n.id, TUNNEL_SUFFIX) } else { n.id.clone() });
     let resp = build_config(State(app.clone()), u.id, proto.to_string(), q, "").await;
     if resp.status() != StatusCode::OK {
         return None;
     }
     let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.ok()?;
     let text = String::from_utf8(bytes.to_vec()).ok()?;
-    Some((conf_file_name(app, u, n, proto), text))
+    Some((conf_file_name_via(app, u, n, proto, tunnel), text))
 }
 
 async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String, String>, extra: &str) -> Response {
@@ -1304,8 +1400,17 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
             None => (StatusCode::PAYLOAD_TOO_LARGE, "too large for a QR code").into_response(),
         }
     };
+    // the copy through the server's tunnel: its Iran address and the port that address carries here
+    let tw = if via_tunnel && proto != "kankimix" {
+        match crate::twin::of_node(&app, &n) {
+            Some(t) => Some(t),
+            None => return (StatusCode::NOT_FOUND, "this server has no tunnel").into_response(),
+        }
+    } else {
+        None
+    };
     if proto == "hysteria2" {
-        let s = hy2_uri(&app, &u, &n).unwrap_or_default();
+        let s = hy2_link(&app, &u, &n, tw.as_ref()).unwrap_or_default();
         return if extra == "qr" { qr(&s) } else { text_conf(s) };
     }
     if proto == "kankimix" {
@@ -1318,7 +1423,7 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
         return (StatusCode::FORBIDDEN, "protocol not allowed").into_response();
     }
     if p == "wg" && extra == "uri" {
-        return text_conf(wg_uri(&app, &u, &n).unwrap_or_default());
+        return text_conf(wg_uri(&app, &u, &n, tw.as_ref()).unwrap_or_default());
     }
     let spub = info[format!("{}_pub", p)].as_str().unwrap_or("").to_string();
     let port = info[format!("{}_port", p)].as_str().unwrap_or("").to_string();
@@ -1344,9 +1449,13 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
             }
         }
     }
+    let ep = match &tw {
+        Some(t) => t.addr(t.port(&app, port.parse().unwrap_or(0), false)),
+        None => format!("{}:{}", endpoint(&app, &n), port),
+    };
     s.push_str(&format!(
-        "\n[Peer]\nPublicKey = {}\nPresharedKey = {}\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = {}:{}\nPersistentKeepalive = 25\n",
-        spub, peer.psk, endpoint(&app, &n), port
+        "\n[Peer]\nPublicKey = {}\nPresharedKey = {}\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = {}\nPersistentKeepalive = 25\n",
+        spub, peer.psk, ep
     ));
     if extra == "qr" {
         return qr(&s);
@@ -1354,7 +1463,7 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
     if extra == "text" {
         return text_conf(s);
     }
-    let fname = conf_file_name(&app, &u, &n, &proto);
+    let fname = conf_file_name_via(&app, &u, &n, &proto, tw.is_some());
     ([(header::CONTENT_TYPE, "text/plain; charset=utf-8".to_string()),
       (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", fname))], s).into_response()
 }

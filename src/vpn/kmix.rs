@@ -199,6 +199,11 @@ pub fn tunnel_target(app: &App, s: &Settings, n: &Node, port: u16) -> Option<(St
         let p = if opt.tun_port > 0 { opt.tun_port } else { route_of(app, n, port).map(|r| r.1).unwrap_or(port) };
         return Some((opt.tun_host.trim().to_string(), p));
     }
+    // the server's tunnel (Servers page) gives every protocol a copy through its Iran address
+    if let Some(t) = crate::twin::of_node(app, n) {
+        let p = if opt.tun_port > 0 { opt.tun_port } else { t.port(app, port, false) };
+        return Some((t.host, p));
+    }
     let ep = crate::api::endpoint(app, n);
     let ep_host = ep.trim().trim_start_matches('[').split(']').next().unwrap_or("").to_string();
     let ep_host = if ep.contains('[') { ep_host } else { ep.split(':').next().unwrap_or("").to_string() };
@@ -320,7 +325,7 @@ pub fn link(app: &App, u: &User, n: &Node) -> Option<String> {
 pub fn tunnel_name(app: &App, n: &Node) -> String {
     let s = settings(app);
     let name = s.nodes.get(&n.id).map(|o| o.tun_name.trim().to_string()).unwrap_or_default();
-    if name.is_empty() { format!("{} (تانل)", n.name) } else { name }
+    if name.is_empty() { crate::twin::default_name(&n.name) } else { name }
 }
 
 /// The user's second link for one server, through the tunnel (the Iran address): the same key and

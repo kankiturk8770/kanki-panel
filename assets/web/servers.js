@@ -108,7 +108,16 @@ if(typeof FA!='undefined')Object.assign(FA,{
  "API address":"آدرس API","Node token":"توکن نود","Self-signed certificate (no domain on the server)":"گواهی خودامضا (بدون دامنه روی سرور)",
  "empty = keep it":"خالی = همان قبلی","Show command":"نمایش دستور","Ports and protocols of this server are in VPN services.":"پورت‌ها و پروتکل‌های این سرور در «سرویس‌های VPN» است.",
  "VPN services":"سرویس‌های VPN","No server yet":"هنوز سروری نیست","Add an Iran server":"افزودن سرور ایران","Add an abroad server":"افزودن سرور خارج",
- "relay":"رله","Not connected":"وصل نیست","Saved":"ذخیره شد","Closed":"بسته شد"
+ "relay":"رله","Not connected":"وصل نیست","Saved":"ذخیره شد","Closed":"بسته شد",
+ "Tunnel domain":"دامنه‌ی تانل","Tunnel domain (optional)":"دامنه‌ی تانل (اختیاری)",
+ "If this server has a tunnel, or will have one, write your Iran server's domain here. Every protocol then also gets a second config through it, made by itself.":"اگر برای این سرور تانل زده‌اید یا می‌خواهید بزنید، دامنه‌ی سرور ایرانتان را همین‌جا بنویسید. از همه‌ی پروتکل‌ها (KANKI MIX، امنزیا، وایرگارد، هیستریا، Xray) خودش یک کانفیگ دوم با این دامنه می‌سازد و به برنامه می‌فرستد.",
+ "WireGuard comes only this way.":"وایرگارد فقط همین کانفیگ را دارد.",
+ "Name of these configs in the app (optional)":"اسم این کانفیگ‌ها در برنامه (اختیاری)",
+  "Iran address (domain or IP)":"آدرس ایران (دامنه یا IP)","Name in the app":"اسم کانفیگ‌ها در برنامه",
+ "tunnel address: a domain or IP only (like ir.example.com)":"آدرس تانل: فقط دامنه یا IP (مثل ir.example.com)",
+ "tunnel name: up to 40 letters, no < > \"":"اسم تانل: حداکثر ۴۰ حرف، بدون < > \"",
+"Ports through the tunnel":"پورت‌ها از راه تانل",
+ "Users connect to the Iran address already, so the main configs go through the tunnel too. For direct configs set it to this server's own address.":"«کاربرها به این آدرس وصل می‌شوند» الان آدرس ایران است، پس کانفیگ‌های اصلی هم از تانل می‌روند. برای کانفیگ مستقیم آن را آدرس خود این سرور بگذار."
 });
 var SV={d:null,wait:null};
 window.SV=SV;
@@ -116,6 +125,9 @@ window.SV=SV;
 // ---------------------------------------------------------------- look
 (function(){var st=document.createElement('style');st.textContent=
  '.kxp-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.kxp-top .sp{flex:1}'+
+ '.kxtun{margin-top:8px;border:1px solid var(--ln);border-radius:12px;padding:8px 10px}'+
+ '.kxtun-p{display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0;flex-wrap:wrap}.kxtun-p b{min-width:92px;font-weight:700}.kxtun-p small{color:var(--s);font-size:10.5px}'+
+ '.kxtun-w{font-size:12px;color:var(--warn);margin:8px 2px 0}html[dir=rtl] .kxtun-a{transform:scaleX(-1);display:inline-block}'+
  '.kxc-tag{font-size:11px;border:1px solid var(--ln);border-radius:8px;padding:1px 7px;color:var(--s);white-space:nowrap;font-weight:600}'+
  '.kxc-tag.main{color:var(--a);border-color:color-mix(in srgb,var(--a) 55%,transparent)}'+
  '.kxc-miss{border:1px dashed color-mix(in srgb,var(--warn) 60%,transparent);border-radius:12px;padding:8px 10px;margin:8px 0 0;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}'+
@@ -272,6 +284,8 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
     '<div><label class="f">'+t('Node token')+'</label><input id="sx_tok" class="ltr" placeholder="'+t('empty = keep it')+'"></div>'+
     '<div style="align-self:end"><label class="chk" style="margin:0"><input type="checkbox" id="sx_ins"'+(n.insecure?' checked':'')+'>'+t('Self-signed certificate (no domain on the server)')+'</label></div></div></details>')+
    '<p class="muted" style="font-size:11px;margin:6px 2px 0">'+t('Ports and protocols of this server are in VPN services.')+' <a href="#vpn">'+t('VPN services')+'</a></p>'}
+ // its tunnel: a second copy of every config through the Iran address
+ if(!isIr(s)&&(n||(s.jobs&&s.jobs.xray))&&s.tunnel)h+=tunBox(s);
  h+='<div class="kxsave"><button class="b2 sm" onclick="accClose(\'srv\')">'+t('Cancel')+'</button><button class="btn sm" onclick="srvSave(\''+k+'\')">'+t('Save')+'</button></div>';
  // health and what can be done
  var stt=n&&n.info&&n.info.stats;
@@ -292,10 +306,24 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  setTimeout(function(){$$('#sx_loc button').forEach(function(b){b.onclick=function(){$$('#sx_loc button').forEach(function(z){z.classList.toggle('on',z==b)});var bb=b.closest('.kxr-b');if(bb)bb.dataset.dirty='1'}})},0);
  return h}
 
+// The tunnel of a server: on/off, the Iran address (chips: the first server of each tunnel that ends here)
+// and the name; below, each port with the one it gets on that address
+function tunBox(s){var tn=s.tunnel||{},n=s.node,ents=entriesOf(s),host=tn.on?(tn.host||tn.uses||''):'';
+ var ep=n&&n.endpoint_mode!='panel'?(n.endpoint||''):'',viaIr=ep&&ents.some(function(e){return e.host==ep});
+ var rows=tn.on&&tn.uses?(tn.ports||[]).map(function(p){return '<div class="kxtun-p"><b>'+esc(p.proto)+'</b><span class="ltr">'+(p.tcp?'TCP':'UDP')+' '+p.port+'</span><span class="kxtun-a">←</span><span class="ltr">'+esc(tn.uses)+':'+p.via+'</span></div>'}).join(''):'';
+ return '<div class="kxr-sec">'+t('Tunnel domain')+'</div>'+
+  '<p class="muted" style="font-size:11.5px;margin:0 2px 6px">'+t('If this server has a tunnel, or will have one, write your Iran server\'s domain here. Every protocol then also gets a second config through it, made by itself.')+' '+t('WireGuard comes only this way.')+'</p>'+
+  '<div class="kxf"><div class="wide"><input id="sx_th" class="ltr" value="'+esc(host)+'" placeholder="ir.example.com">'+
+   (ents.length?'<div class="kxchips">'+ents.map(function(e){return '<button type="button" class="'+(host==e.host?'on':'')+'" onclick="$(\'#sx_th\').value=\''+esc(e.host)+'\';$(\'#sx_th\').dispatchEvent(new Event(\'input\',{bubbles:true}))">'+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+'</div>':'')+'</div>'+
+  '<div class="wide"><label class="f">'+t('Name of these configs in the app (optional)')+'</label><input id="sx_tn" value="'+esc(tn.name||'')+'" maxlength="40" placeholder="'+esc(s.name+' (تانل)')+'"></div></div>'+
+  (viaIr?'<p class="kxtun-w">'+t('Users connect to the Iran address already, so the main configs go through the tunnel too. For direct configs set it to this server\'s own address.')+'</p>':'')+
+  (rows?'<div class="kxtun"><div class="muted" style="font-size:11px;margin-bottom:4px">'+t('Ports through the tunnel')+'</div>'+rows+'</div>':'')}
+
 // Save of the open server: its name, place and address (the server), who gets it and where users connect (its VPN)
 window.srvSave=function(key){var s=find(key);if(!s)return;var n=s.node,a=s.agent,jobs=[];
  var loc=(($$('#sx_loc button.on')[0]||{}).dataset||{}).l||(isIr(s)?'iran':'abroad');
  var b={name:$('#sx_nm').value.trim(),loc:loc};if($('#sx_ad'))b.addr=$('#sx_ad').value.trim();
+ if($('#sx_th')){var th=$('#sx_th').value.trim();b.tunnel={on:!!th,host:th,name:$('#sx_tn').value.trim()}}
  jobs.push(api('PUT','/api/servers/'+q(key),b));
  if(n){var ep=$('#sx_ep').value.trim(),nb={note:$('#sx_no')?$('#sx_no').value:n.note,accept_all:$('#sx_acc').checked,endpoint_mode:ep?'custom':'panel',endpoint:ep};
   if(!s.local&&!ep){nb.endpoint_mode='custom';nb.endpoint=srvIp(s)||n.endpoint}
@@ -313,12 +341,14 @@ window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
   '<div id="sa_in"><label class="f">'+t('Server name')+'</label><input id="sa_nm" placeholder="Germany-1" maxlength="40">'+
   '<label class="f">'+t('Location')+'</label><div class="seg kxseg" id="sa_loc"><button type="button" data-l="abroad">'+t('Abroad')+'</button><button type="button" data-l="iran">'+t('Inside Iran (relay / tunnel entry)')+'</button></div>'+
   '<label class="f">'+t('Domain (optional, for a real SSL certificate)')+'</label><input id="sa_dm" class="ltr" placeholder="de1.example.com" autocomplete="off" autocapitalize="off">'+
+  '<div id="sa_tunw"><label class="f">'+t('Tunnel domain (optional)')+'</label><input id="sa_tun" class="ltr" placeholder="ir.example.com" autocomplete="off" autocapitalize="off">'+
+  '<p class="muted" style="font-size:11px;margin:4px 2px 0">'+t('If this server has a tunnel, or will have one, write your Iran server\'s domain here. Every protocol then also gets a second config through it, made by itself.')+'</p></div>'+
   '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_vpn">'+t('Serve VPN users on this server')+'</label>'+
   '<button class="btn" style="width:100%;margin-top:12px" id="sa_go">'+t('Create command')+'</button></div><div id="sa_out"></div>','wide');
- var setLoc=function(l){loc=l;$$('#sa_loc button').forEach(function(b){b.classList.toggle('on',b.dataset.l==l)});$('#sa_vpn').checked=l!='iran'};
+ var setLoc=function(l){loc=l;$$('#sa_loc button').forEach(function(b){b.classList.toggle('on',b.dataset.l==l)});$('#sa_vpn').checked=l!='iran';$('#sa_tunw').style.display=l=='iran'?'none':''};
  $$('#sa_loc button').forEach(function(b){b.onclick=function(){setLoc(b.dataset.l)}});setLoc(loc);
  $('#sa_go').onclick=function(){var me=this;me.disabled=true;
-  api('POST','/api/servers',{name:$('#sa_nm').value,loc:loc,domain:$('#sa_dm').value,vpn:$('#sa_vpn').checked}).then(function(r){
+  api('POST','/api/servers',{name:$('#sa_nm').value,loc:loc,domain:$('#sa_dm').value,vpn:$('#sa_vpn').checked,tunnel_host:loc=='iran'?'':$('#sa_tun').value.trim()}).then(function(r){
    $('#sa_in').classList.add('hide');showCmd(r.command,r.ports,r.id);load(true)}).catch(function(e){me.disabled=false;fail(e)})}};
 
 function showCmd(cmd,ports,id){var o=$('#sa_out')||$('#mbox');if(!o)return;

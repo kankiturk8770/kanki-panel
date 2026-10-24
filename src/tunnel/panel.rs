@@ -1433,13 +1433,19 @@ pub fn udp_forward(app: &App, node_id: &str, node_host: &str, entry_host: &str, 
 /// tunnel whose exit is `sid` and that forwards some entry port to `port`, then the one before it…
 /// [(sid, port), (the server before, its port), …, (the first entry, its port)].
 fn walk_back(list: &[Tunnel], sid: &str, port: u16) -> Vec<(String, u16)> {
+    walk_back_by(list, sid, port, false)
+}
+
+/// `walk_back` for a TCP port (`tcp`) or a UDP one
+fn walk_back_by(list: &[Tunnel], sid: &str, port: u16, tcp: bool) -> Vec<(String, u16)> {
     let mut back = vec![(sid.to_string(), port)];
     // a route has a few hops; a loop of tunnels (A → B → A) stops where it started
     for _ in 0..8 {
         let (cur, p) = back.last().cloned().unwrap_or_default();
         let prev = list.iter().find_map(|t| {
+            let ports = if tcp { &t.tcp } else { &t.udp };
             (t.exit == cur && !back.iter().any(|(s, _)| *s == t.entry))
-                .then(|| crate::tunnel::engine::parse_ports(&t.udp).into_iter().find(|(_, b)| *b == p).map(|(a, _)| (t.entry.clone(), a)))
+                .then(|| crate::tunnel::engine::parse_ports(ports).into_iter().find(|(_, b)| *b == p).map(|(a, _)| (t.entry.clone(), a)))
                 .flatten()
         });
         match prev {
@@ -1457,6 +1463,32 @@ pub fn udp_route(app: &App, sid: &str, port: u16) -> Option<(Vec<String>, u16)> 
     let back = walk_back(&list, sid, port);
     let first = back.last().map(|x| x.1).unwrap_or(port);
     (back.len() > 1).then(|| (back[1..].iter().rev().map(|(s, _)| server_name(app, s)).collect(), first))
+}
+
+/// The first entry of the tunnels that bring TCP or UDP `port` to server `sid`, and the port there.
+/// None = no Kanki tunnel carries it.
+pub fn port_entry(app: &App, sid: &str, port: u16, tcp: bool) -> Option<(String, u16)> {
+    let list: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
+    let back = walk_back_by(&list, sid, port, tcp);
+    (back.len() > 1).then(|| back.last().cloned()).flatten()
+}
+
+/// The address of the first server of the tunnels (or the route) that end at server `sid`: the Iran
+/// entry users would connect to. "" = no tunnel ends there.
+pub fn entry_host(app: &App, sid: &str) -> String {
+    let list: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
+    let mut cur = sid.to_string();
+    let mut seen_ids = vec![cur.clone()];
+    for _ in 0..8 {
+        match list.iter().find(|t| t.exit == cur && !seen_ids.contains(&t.entry)) {
+            Some(t) => {
+                cur = t.entry.clone();
+                seen_ids.push(cur.clone());
+            }
+            None => break,
+        }
+    }
+    if cur == sid { String::new() } else { host_of(app, &cur) }
 }
 
 fn server_name(app: &App, sid: &str) -> String {
@@ -2757,7 +2789,7 @@ mod version_gate_tests {
 
 #[cfg(test)]
 mod route_tests {
-    use super::{walk_back, Tunnel};
+    use super::{walk_back, walk_back_by, Tunnel};
 
     fn hop(e: &str, x: &str, udp: &[&str]) -> Tunnel {
         Tunnel { entry: e.into(), exit: x.into(), udp: udp.iter().map(|s| s.to_string()).collect(), enabled: true, ..Default::default() }
@@ -2773,6 +2805,18 @@ mod route_tests {
         assert_eq!(walk_back(&list, "de", 8445), vec![("de".to_string(), 8445)]);
         // one hop only
         assert_eq!(walk_back(&list, "tr", 4002).last().cloned(), Some(("ir".to_string(), 4002)));
+    }
+
+    #[test]
+    fn tcp_ports_follow_their_own_lists() {
+        let mut a = hop("ir", "tr", &["4002"]);
+        a.tcp = vec!["443:8443".into()];
+        let mut b = hop("tr", "de", &["4002"]);
+        b.tcp = vec!["8443:2083".into()];
+        let list = vec![a, b];
+        assert_eq!(walk_back_by(&list, "de", 2083, true).last().cloned(), Some(("ir".to_string(), 443)));
+        // the UDP list does not carry it
+        assert_eq!(walk_back_by(&list, "de", 2083, false).len(), 1);
     }
 
     #[test]
