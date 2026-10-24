@@ -583,6 +583,8 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     // a relay in Iran carries tunnels; its VPN is installed but serves nobody until switched on
     let vpn = b["vpn"].as_bool().unwrap_or(loc != "iran");
+    // its tunnel domain (the Iran server's): every config gets its copy through it once the server joins
+    let tun = b["tunnel_host"].as_str().unwrap_or("").trim().to_string();
     let s = TServer {
         id: format!("t{}", rand_token(7).to_lowercase()),
         name: if name.is_empty() { format!("server-{}", list.len() + 1) } else { name },
@@ -596,6 +598,11 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         domain,
         ..Default::default()
     };
+    if !tun.is_empty() {
+        if let Err(e) = crate::twin::save(&app, &s.id, &json!({ "on": true, "host": tun })) {
+            return err(StatusCode::BAD_REQUEST, &e);
+        }
+    }
     list.push(s.clone());
     tp::save_servers(&app, &list);
     Json(json!({ "ok": true, "id": s.id, "command": command(&app, &s), "expires": s.join_exp, "ports": s.ports })).into_response()

@@ -11,7 +11,9 @@ if(typeof FA!='undefined')Object.assign(FA,{
  "WireGuard with obfuscated packets (Jc, S1, S2, H1-H4): passes most filters directly.":"WireGuard با بسته‌های مبهم (Jc، S1، S2، H1-H4): مستقیم از بیشتر فیلترها رد می‌شود.",
  "QUIC-based, fast on lossy internet, with Salamander obfuscation.":"بر پایه‌ی QUIC، سریع روی اینترنت پرافت، با مبهم‌سازی Salamander.",
  "On for all users":"روشن برای همه‌ی کاربران","Off for all users":"خاموش برای همه‌ی کاربران",
- "WireGuard reaches users only through a tunnel: turn on \"This server has a tunnel\" in Servers.":"وایرگارد فقط از راه تانل به کاربر می‌رسد: در «سرورها» تیک «این سرور تانل دارد» را بزن.",
+ "WireGuard reaches users only through a tunnel: write the tunnel domain of this server in Servers.":"وایرگارد فقط از راه تانل به کاربر می‌رسد: در «سرورها» دامنه‌ی تانل این سرور را بنویس.",
+ "Write the tunnel domain of this server in Servers: the second config is made by itself.":"دامنه‌ی تانل این سرور را در «سرورها» بنویس: کانفیگ دوم خودش ساخته می‌شود.",
+ "Only for KANKI MIX (optional)":"فقط برای KANKI MIX (اختیاری)","the tunnel domain of the server":"دامنه‌ی تانل سرور",
  "Running servers":"سرورهای فعال","Users with it":"کاربرانی که دارند","Through a tunnel":"از راه تانل","Direct":"مستقیم",
  "running":"روشن","stopped":"متوقف","not installed":"نصب نیست","relay":"رله","off":"خاموش",
  "UDP port":"پورت UDP","Save port":"ذخیره‌ی پورت","Users connect to":"کاربرها به این آدرس وصل می‌شوند","change in Servers":"تغییر در صفحه‌ی سرورها",
@@ -87,7 +89,7 @@ function drawPv(p,force){var g='pv_'+p,el=$('#pv_list');if(!el||!SV.d)return;
 // the copy of this protocol through the server's tunnel (Servers page › Tunnel), or why there is none
 function tunCopy(p,s,r){var tn=s.tunnel||{},name={wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',kmix:'KANKI MIX'}[p],x=(tn.ports||[]).filter(function(z){return z.proto==name})[0];
  if(tn.on&&tn.uses&&x)return '<div class="kxr-line"><span class="kxr-st g">+ '+t('tunnel')+'</span><span>'+t('Users also get')+' <b class="ltr">'+esc(tn.uses)+':'+x.via+'</b></span> <a href="#nodes" style="font-size:11px">'+t('change in Servers')+'</a></div>';
- if(p=='wg'&&!r)return '<div class="kxr-line"><span class="warnbox" style="margin:0;width:100%">'+t('WireGuard reaches users only through a tunnel: turn on "This server has a tunnel" in Servers.')+'</span></div>';
+ if(p=='wg'&&!r)return '<div class="kxr-line"><span class="warnbox" style="margin:0;width:100%">'+t('WireGuard reaches users only through a tunnel: write the tunnel domain of this server in Servers.')+'</span></div>';
  return ''}
 function pvRow(p,s){var st=pvState(p,s),port=st[2];
  var head='<span class="dot '+(st[0]=='n'?'':st[0])+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+'<span class="sp"></span>'+
@@ -135,10 +137,12 @@ if(window.kmDraw){
    '<div class="kxr-sec">'+t('Route')+'</div><div class="kxf"><div><select id="km_rt1"><option value=""'+(tun?'':' selected')+'>'+t("Direct (the server's own address)")+' · '+esc(x.direct_host||'?')+'</option><option value="tunnel"'+(tun?' selected':'')+'>'+t('Through the tunnel (Iran server)')+' · '+esc(x.tunnel_host||'?')+'</option></select></div>'+
    '<div><input id="km_ho1" class="ltr" placeholder="'+esc(t('Address'))+': '+esc(t('automatic'))+'" value="'+esc(o.host||'')+'"></div></div>'+
    '<div class="kxr-sec">'+t('Second config through the tunnel')+'</div>'+
-   '<label class="kxsw" style="cursor:pointer"><span>'+(x.second?t('Users also get')+' <b class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</b>':t('Write the Iran address whose tunnel forwards this UDP port'))+'</span><input type="checkbox" id="km_t21" style="width:auto"'+(o.tun_off?'':' checked')+'></label>'+
-   '<div class="kxf" style="margin-top:6px"><div><label class="f">'+t('Iran address')+'</label><input id="km_th1" class="ltr" placeholder="'+esc(t('automatic'))+'" value="'+esc(o.tun_host||'')+'"></div>'+
+   // the server's tunnel domain (Servers page) gives it by itself; the fields below only change it for KANKI MIX
+   '<label class="kxsw" style="cursor:pointer"><span>'+(x.second?t('Users also get')+' <b class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</b>':t('Write the tunnel domain of this server in Servers: the second config is made by itself.'))+'</span><input type="checkbox" id="km_t21" style="width:auto"'+(o.tun_off?'':' checked')+'></label>'+
+   '<details class="box" style="margin-top:6px"'+(o.tun_host||o.tun_port||o.tun_name?' open':'')+'><summary>'+t('Only for KANKI MIX (optional)')+'</summary>'+
+   '<div class="kxf"><div><label class="f">'+t('Iran address')+'</label><input id="km_th1" class="ltr" placeholder="'+esc(t('the tunnel domain of the server'))+'" value="'+esc(o.tun_host||'')+'"></div>'+
    '<div><label class="f">'+t('Port')+'</label><input id="km_tp1" class="ltr" inputmode="numeric" placeholder="'+esc(String((via&&via.port)||port||''))+'" value="'+esc(o.tun_port?String(o.tun_port):'')+'"></div>'+
-   '<div class="wide"><label class="f">'+t('Name in the app')+'</label><input id="km_tn1" maxlength="40" placeholder="'+esc(x.name+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'"></div></div>'+
+   '<div class="wide"><label class="f">'+t('Name in the app')+'</label><input id="km_tn1" maxlength="40" placeholder="'+esc(x.name+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'"></div></div></details>'+
    '<div class="kxr-line">'+(via?viaLine(via,x.name):(o.tun_host&&!o.tun_off?'<span class="warnbox" style="margin:0;width:100%">'+t('No Kanki tunnel carries this port to the server. Make a tunnel (or a multi-location route) that carries it, or forward it on that address some other way.')+'</span>':''))+'</div>'+
    (x.on&&x.error?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(x.error)+'</div>':'')+
    '<div class="kxsave"><button class="b2 sm" onclick="accClose(\'km\')">'+t('Cancel')+'</button><button class="btn sm" onclick="kmSaveOne(\''+id+'\')">'+t('Save')+'</button></div>'+
