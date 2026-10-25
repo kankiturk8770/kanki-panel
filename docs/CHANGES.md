@@ -1,3 +1,8 @@
+# v3.9.10 — a shorter subscription page
+- **Hysteria2:** one card with the countries as flags and one «Copy all» button: one config per country, the one through the tunnel (a server without a tunnel gives its own), one per line so v2rayNG imports them at once. No tunnel / direct columns, no per-config copy / QR.
+- **Xray:** next to Hysteria2, the number of configs, «Copy sub link» (the new `/sub/<code>/xray`, only the Xray links, for v2rayNG / V2Box) and «Copy all» (one per line), instead of a row per link.
+- The server sections the Kanki app reads are unchanged.
+
 # v3.9.9 — giveaway prizes from the channel bot
 - **Sales bot: giveaway prizes.** A winner of a channel giveaway opens the bot with a personal link (`/start c_…`) and gets a prize account (e.g. `ElClasicoW1`, 5 GB / 30 days) at once. The link is signed (HMAC-SHA256) with a secret shared with the channel bot, works only for the Telegram account it was made for, and only once; GB and days are inside the signature, so they can't be changed. Admins are told about every prize given.
 - Set the secret once: an admin sends `/claimkey <secret>` to the bot (the message is deleted). `GIVEAWAY_SECRET` in kanki.env works too.
