@@ -3,6 +3,14 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.9.8 — the whole Vazirmatn font
+- The panel, the subscription page and the emergency chat use the full Vazirmatn font (every weight, all 1333 glyphs; the old file was a cut-down copy).
+
+## New in 3.9.7 — a shorter subscription page
+- The configs are grouped by protocol: one card for WireGuard, AmneziaWG, Hysteria2 and Xray, a row per country (flag and city of the real exit), the config through the tunnel and the direct one side by side, each with short Download / Copy / QR buttons. Links are no longer printed in full.
+- KANKI MIX is one card that explains it works only in the Kanki app (and lists its countries); a tip says how to add every config at once to V2Box / v2rayNG / Hiddify with the second link.
+- The server-written sections stay in the page (hidden), so the Kanki app reads the page exactly as before.
+
 ## New in 3.9.6 — "Download the app" link for the channel
 - `https://t.me/<bot>?start=app` opens the bot straight on the app download menu (a button per phone type; the bot sends the file). Sales bot › App files shows the link with a copy button, for a "Download the app" button under a channel post.
 
