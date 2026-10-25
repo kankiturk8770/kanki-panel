@@ -4,6 +4,7 @@
 //! - Kanki DNS on port 80: `certbot --webroot` (Kanki DNS answers Let's Encrypt itself), so DNS never stops;
 //! - anything else on port 80 (Caddy, nginx, an Xray inbound, a Docker container …): it is stopped for the
 //!   few seconds certbot needs and started again right after, even when certbot fails or hangs.
+//!
 //! certbot renews by itself; the agent also checks every 12 hours and renews a certificate that is close to
 //! its end with what holds port 80 at that moment, so a renewal does not fail because the server changed.
 //! After a failure it waits before trying again (10 minutes, then longer, up to a day), so a server that
@@ -69,6 +70,8 @@ struct Port80 {
     kdns: bool,
     /// programs that are not a service: cannot be set aside safely
     other: Vec<String>,
+    /// this program itself (a Kanki tunnel that carries port 80): cannot stop itself
+    me: bool,
 }
 
 /// socket inodes listening on TCP `port` in /proc/net/tcp or tcp6 text
@@ -113,18 +116,19 @@ fn holders() -> Vec<(String, u32)> {
 fn unit_of(cgroup: &str) -> String {
     cgroup
         .lines()
-        .flat_map(|l| l.split('/'))
-        .filter(|s| s.ends_with(".service") || s.ends_with(".scope"))
-        .last()
+        .flat_map(|l| l.split('/')).rfind(|s| s.ends_with(".service") || s.ends_with(".scope"))
         .unwrap_or("")
         .to_string()
 }
 
 fn port80() -> Port80 {
     let mut p = Port80::default();
+    let me = own_unit();
     for (name, pid) in holders() {
         let unit = unit_of(&std::fs::read_to_string(format!("/proc/{}/cgroup", pid)).unwrap_or_default());
-        if unit == "kanki-dns.service" {
+        if pid == std::process::id() || (!me.is_empty() && unit == me && me.ends_with(".service")) {
+            p.me = true;
+        } else if unit == "kanki-dns.service" {
             p.kdns = true;
         } else if let Some(id) = unit.strip_prefix("docker-").and_then(|s| s.strip_suffix(".scope")) {
             // a container on the host network
@@ -189,7 +193,7 @@ fn units(domain: &str) -> Vec<String> {
 /// certbot's own renewals restart what uses the certificate (read from the state dir at that time)
 fn write_deploy_hook() {
     let script = format!(
-        "#!/bin/sh\n# written by kanki-panel: restart the services that use a renewed certificate\nf={}/$(basename \"$RENEWED_LINEAGE\").units\n[ -f \"$f\" ] || exit 0\nwhile read -r u || [ -n \"$u\" ]; do [ -n \"$u\" ] && systemctl restart \"$u\"; done < \"$f\"\nexit 0\n",
+        "#!/bin/sh\n# written by kanki-panel: restart the services that use a renewed certificate\nf={}/$(basename \"$RENEWED_LINEAGE\").units\n[ -f \"$f\" ] || exit 0\nwhile read -r u || [ -n \"$u\" ]; do case \"$u\" in *.service) systemctl restart \"$u\";; esac; done < \"$f\"\nexit 0\n",
         STATE_DIR
     );
     if std::fs::read_to_string(DEPLOY_HOOK).map(|t| t != script).unwrap_or(true) {
@@ -256,10 +260,15 @@ fn obtain(domain: &str) -> Result<(), String> {
         }
     }
     write_deploy_hook();
-    if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
-        let _ = sh("ufw allow 80/tcp >/dev/null 2>&1");
-    }
+    // Let's Encrypt checks the domain on port 80 (closed again when no certificate is kept here)
+    crate::fw::sync("acme", vec!["80/tcp".to_string()]);
     let p = port80();
+    if p.me {
+        return fail(format!(
+            "SSL for {}: port 80 of this server is used by Kanki itself (a tunnel carries port 80, or the panel listens there). Take port 80 out of that tunnel (Tunnels › the tunnel › ports) and press \"Try SSL again\".",
+            domain
+        ));
+    }
     if !p.other.is_empty() {
         return fail(format!(
             "SSL for {}: port 80 is used by {}, which is not a service that can be stopped and started again. Stop it, or run it as a systemd service.",
@@ -267,7 +276,19 @@ fn obtain(domain: &str) -> Result<(), String> {
             p.other.join(", ")
         ));
     }
-    let (how, give_back) = port80_plan(&p, has_v6(domain));
+    let (mut how, give_back) = port80_plan(&p, has_v6(domain));
+    // nothing on port 80: Kanki answers Let's Encrypt itself from the webroot (no second program has to
+    // bind the port, and a bind error names the real reason)
+    let mut _responder = None;
+    if give_back.is_empty() && !how.contains("--webroot") {
+        match Responder::start() {
+            Ok(r) => {
+                _responder = Some(r);
+                how = format!(" --webroot -w {}", WEBROOT);
+            }
+            Err(e) => eprintln!("certbot: {}; certbot binds port 80 itself", e),
+        }
+    }
     if how.contains("--webroot") {
         let _ = std::fs::create_dir_all(format!("{}/.well-known/acme-challenge", WEBROOT));
     } else if !give_back.is_empty() {
@@ -285,9 +306,12 @@ fn obtain(domain: &str) -> Result<(), String> {
     if !give_back.is_empty() {
         let _ = sh(&give_back.join("; "));
     }
+    drop(_responder);
     if ok && have(domain) && !expiring(domain) {
         let _ = std::fs::remove_file(&fail_file);
-        for u in units(domain) {
+        let _ = std::fs::write(ours_file(domain), "1");
+        // the services that use it (a name without ".service" marks a user inside the agent itself)
+        for u in units(domain).into_iter().filter(|u| u.ends_with(".service")) {
             let _ = sh(&format!("systemctl restart {} 2>&1", u));
         }
         eprintln!("certbot: {} done", domain);
@@ -300,7 +324,140 @@ fn obtain(domain: &str) -> Result<(), String> {
         .unwrap_or("certbot failed")
         .trim()
         .to_string();
-    fail(format!("SSL for {} failed: {}. {} must point to this server and port 80 must be reachable from outside.", domain, why, domain))
+    fail(explain(domain, &why, &out))
+}
+
+/// The reason of a failed certbot run in plain words, with what to do.
+fn explain(domain: &str, why: &str, out: &str) -> String {
+    let has = |s: &str| out.contains(s);
+    let what = if has("Could not bind") || has("Address already in use") {
+        let p = port80();
+        let mut v: Vec<String> = p.units.iter().chain(p.containers.iter()).cloned().chain(p.other.iter().cloned()).collect();
+        if p.kdns {
+            v.push("kanki-dns".into());
+        }
+        format!("port 80 is busy on this server{}", if v.is_empty() { String::new() } else { format!(" ({})", v.join(", ")) })
+    } else if has("NXDOMAIN") || has("No valid IP addresses found") || has("DNS problem") {
+        format!("{} has no A record yet (or the DNS change has not spread): point it to this server's IP", domain)
+    } else if has("Timeout during connect") || has("Connection refused") || has("Timeout after connect") || has("connection reset") {
+        "Let's Encrypt (outside Iran) could not reach port 80 of this server: the data center or the country's filter blocks port 80 from outside, a firewall of the provider is closed, or the domain points to another IP. Open port 80/TCP in the provider's panel, or switch the domain's record to \"DNS only\" (no CDN) while the certificate is taken".to_string()
+    } else if has("too many certificates") || has("rateLimited") || has("too many failed authorizations") {
+        "Let's Encrypt's limit for this domain was reached; wait an hour (or a week for the weekly limit) or use another subdomain".to_string()
+    } else if has("Invalid response") || has("unauthorized") || has("403") || has("404") {
+        format!("Let's Encrypt reached another server for {}: its A record (or a CDN in front) does not lead to this server", domain)
+    } else {
+        String::new()
+    };
+    if what.is_empty() {
+        format!("SSL for {} failed: {}. {} must point to this server and port 80 must be reachable from outside.", domain, why, domain)
+    } else {
+        format!("SSL for {} failed: {}. ({})", domain, what, why)
+    }
+}
+
+/// Answers Let's Encrypt on port 80 from the webroot while certbot runs, when nothing else listens there.
+struct Responder {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    th: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Responder {
+    fn start() -> Result<Responder, String> {
+        let l = std::net::TcpListener::bind("[::]:80").or_else(|_| std::net::TcpListener::bind("0.0.0.0:80")).map_err(|e| format!("port 80: {}", e))?;
+        l.set_nonblocking(true).map_err(|e| e.to_string())?;
+        let _ = std::fs::create_dir_all(format!("{}/.well-known/acme-challenge", WEBROOT));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let st = stop.clone();
+        let th = std::thread::spawn(move || {
+            while !st.load(std::sync::atomic::Ordering::Relaxed) {
+                match l.accept() {
+                    Ok((s, _)) => {
+                        std::thread::spawn(move || answer(s));
+                    }
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                }
+            }
+        });
+        Ok(Responder { stop, th: Some(th) })
+    }
+}
+
+impl Drop for Responder {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(t) = self.th.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+/// one HTTP request: the challenge file, or 404
+fn answer(mut s: std::net::TcpStream) {
+    use std::io::{Read, Write};
+    let _ = s.set_nonblocking(false);
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+    let _ = s.set_write_timeout(Some(std::time::Duration::from_secs(5)));
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 2048];
+    while buf.len() < 8192 && !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+        match s.read(&mut tmp) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => buf.extend_from_slice(&tmp[..n]),
+        }
+    }
+    let head = String::from_utf8_lossy(&buf);
+    let path = head.lines().next().and_then(|l| l.split(' ').nth(1)).unwrap_or("");
+    let reply = match challenge(path) {
+        Some(body) => format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body),
+        None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string(),
+    };
+    let _ = s.write_all(reply.as_bytes());
+}
+
+fn ours_file(domain: &str) -> String {
+    format!("{}/{}.ours", STATE_DIR, domain)
+}
+
+/// "Try SSL again" in the panel: forget the waits after earlier failures, so the next round tries at once.
+pub fn retry_now() {
+    for e in std::fs::read_dir(STATE_DIR).into_iter().flatten().flatten() {
+        if e.file_name().to_string_lossy().ends_with(".fail") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// The service `unit` no longer uses the certificate of `domain` (it was removed from this server). When
+/// nothing uses it any more, a certificate Kanki got is deleted (no renewals for nothing) and port 80 is
+/// closed when no certificate is left. Blocking.
+pub fn forget(domain: &str, unit: &str) {
+    if !valid_domain(domain) {
+        return;
+    }
+    let mut u = units(domain);
+    if !u.iter().any(|x| x == unit) && Path::new(&units_file(domain)).exists() && !u.is_empty() {
+        return;
+    }
+    u.retain(|x| x != unit);
+    if !u.is_empty() {
+        let _ = std::fs::write(units_file(domain), u.join("\n") + "\n");
+        return;
+    }
+    let _ = std::fs::remove_file(units_file(domain));
+    let _ = std::fs::remove_file(format!("{}/{}.fail", STATE_DIR, domain));
+    if Path::new(&ours_file(domain)).exists() {
+        if sh("command -v certbot").0 {
+            let (ok, _) = sh(&format!("certbot delete --cert-name {} --non-interactive >/dev/null 2>&1", domain));
+            if ok {
+                eprintln!("certbot: certificate of {} deleted (nothing uses it any more)", domain);
+            }
+        }
+        let _ = std::fs::remove_file(ours_file(domain));
+    }
+    let any_left = std::fs::read_dir(STATE_DIR).into_iter().flatten().flatten().any(|e| e.file_name().to_string_lossy().ends_with(".units"));
+    if !any_left {
+        crate::fw::close("acme");
+    }
 }
 
 /// Renew the certificates that are close to their end with what holds port 80 now (in case certbot's own
@@ -519,6 +676,71 @@ fn judge(unit: &str, ports: &[(u16, bool)], need: &[(u16, bool)]) -> (bool, Stri
         return (false, format!("it also serves {}: change it by hand", other.join(", ")));
     }
     (true, String::new())
+}
+
+/// Does a program that is not Kanki listen on this port from outside? (then its firewall rule stays open)
+pub fn foreign_listener(port: u16, udp: bool) -> bool {
+    let socks: Vec<Sock> = sockets().into_iter().filter(|s| !s.3 && s.1 == port && s.2 == udp).collect();
+    if socks.is_empty() {
+        return false;
+    }
+    let inodes = socks.iter().map(|s| s.0.clone()).collect();
+    owners(&inodes).values().any(|pid| {
+        let unit = unit_of(&std::fs::read_to_string(format!("/proc/{}/cgroup", pid)).unwrap_or_default());
+        !unit.starts_with("kanki")
+    })
+}
+
+/// Does anything listen on this port from outside?
+pub fn listening(port: u16, udp: bool) -> bool {
+    sockets().into_iter().any(|s| !s.3 && s.1 == port && s.2 == udp)
+}
+
+/// Every port listened on (also 127.0.0.1 only): (port, udp, program, systemd unit), at most every 20 seconds
+/// worked out again (the agent reports it every few seconds).
+pub fn listeners() -> Vec<(u16, bool, String, String)> {
+    use std::sync::{Mutex, OnceLock};
+    type C = Option<(std::time::Instant, Vec<(u16, bool, String, String)>)>;
+    static CACHE: OnceLock<Mutex<C>> = OnceLock::new();
+    let c = CACHE.get_or_init(|| Mutex::new(None));
+    if let Some((at, v)) = c.lock().unwrap().as_ref() {
+        if at.elapsed().as_secs() < 20 {
+            return v.clone();
+        }
+    }
+    // a listener on 127.0.0.1 only still takes the port (0.0.0.0 cannot be bound next to it)
+    let socks: Vec<Sock> = sockets();
+    let inodes = socks.iter().map(|s| s.0.clone()).collect();
+    let pid_of = owners(&inodes);
+    let mut out: Vec<(u16, bool, String, String)> = vec![];
+    for (inode, port, udp, _) in &socks {
+        let (prog, unit) = match pid_of.get(inode) {
+            Some(pid) => (
+                std::fs::read_to_string(format!("/proc/{}/comm", pid)).unwrap_or_default().trim().to_string(),
+                unit_of(&std::fs::read_to_string(format!("/proc/{}/cgroup", pid)).unwrap_or_default()),
+            ),
+            // a UDP socket with no process is the kernel's (WireGuard / AmneziaWG)
+            None if *udp => ("kernel".to_string(), String::new()),
+            None => ("?".to_string(), String::new()),
+        };
+        let e = (*port, *udp, prog, unit);
+        if !out.contains(&e) {
+            out.push(e);
+        }
+    }
+    out.sort();
+    *c.lock().unwrap() = Some((std::time::Instant::now(), out.clone()));
+    out
+}
+
+/// `listeners` as the agent reports it: [[port, udp, program, unit], ...]
+pub fn listeners_json() -> serde_json::Value {
+    serde_json::Value::Array(listeners().into_iter().map(|(p, u, prog, unit)| serde_json::json!([p, u, prog, unit])).collect())
+}
+
+/// The systemd unit this process runs in (kanki-tunnel.service for the agent)
+fn own_unit() -> String {
+    unit_of(&std::fs::read_to_string("/proc/self/cgroup").unwrap_or_default())
 }
 
 /// The panel asked to free our ports from these services: each one that still holds only ports in

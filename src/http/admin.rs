@@ -174,6 +174,131 @@ pub fn set_ports(b: &Value) -> Value {
 }
 
 /// Restart VPN services that are installed; returns their new state
+/// This node was deleted in the panel: its VPN services (WireGuard, AmneziaWG, Hysteria2, KANKI MIX)
+/// are stopped and turned off, their firewall ports closed, the web server in front of the node agent
+/// goes when it serves nothing else, and the node agent removes itself. Runs a moment after the answer
+/// was sent (the answer goes through that web server). Blocking.
+pub fn remove_node() {
+    const WGC: &str = "/etc/wireguard/wg0.conf";
+    const AWGC: &str = "/etc/amnezia/amneziawg/awg0.conf";
+    const ENVF: &str = "/etc/kanki/kanki.env";
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    // the main panel runs on this machine too: its VPN is the panel's own, nothing is removed (the
+    // users of this node were already taken off by the empty sync)
+    if std::path::Path::new("/etc/systemd/system/kanki-panel.service").exists() {
+        eprintln!("deleted in the panel, but the main panel runs here: VPN services are kept");
+        return;
+    }
+    let env = crate::util::load_env(ENVF);
+    let mut close: Vec<String> = vec![];
+    for p in [conf_port(WGC, "ListenPort"), conf_port(AWGC, "ListenPort"), conf_port(ENVF, "HY2_PORT")].into_iter().flatten() {
+        close.push(crate::fw::rule(p, true));
+    }
+    let _ = crate::kmix::apply(&crate::kmix::KmixCfg::default());
+    for unit in ["wg-quick@wg0", "awg-quick@awg0", "hysteria-server"] {
+        let _ = Command::new("systemctl").args(["disable", "--now", "-q", unit]).status();
+    }
+    // the web server in front of the node agent: only when its Caddyfile is the one the installer wrote
+    let public = env.get("NODE_PUBLIC_PORT").and_then(|p| p.trim().parse::<u16>().ok());
+    if let Some(pp) = public {
+        let cf = std::fs::read_to_string("/etc/caddy/Caddyfile").unwrap_or_default();
+        let ours = cf.contains(&format!("https://:{} {{", pp)) && cf.matches("reverse_proxy").count() == 1;
+        if ours {
+            let _ = Command::new("systemctl").args(["disable", "--now", "-q", "caddy"]).status();
+        }
+        if ours || !crate::certbot::listening(pp, false) {
+            close.push(crate::fw::rule(pp, false));
+        }
+    }
+    for r in close.iter().filter(|r| crate::fw::valid_rule(r)) {
+        let _ = Command::new("sh").arg("-c").arg(format!("command -v ufw >/dev/null 2>&1 && ufw --force delete allow {} >/dev/null 2>&1", r)).status();
+    }
+    eprintln!("deleted in the panel: VPN services stopped, the node agent removes itself");
+    let _ = std::fs::remove_file(ENVF);
+    wipe_vpn_files();
+    let _ = Command::new("sh").arg("-c").arg("systemctl disable -q kanki-node 2>/dev/null; rm -f /etc/systemd/system/kanki-node.service; systemctl daemon-reload").status();
+    // the server agent of this machine (when it is still here) takes the rest when it goes
+    wipe_all_if_last();
+    let _ = Command::new("systemctl").args(["stop", "kanki-node"]).status();
+    std::process::exit(0);
+}
+
+/// The files of the VPN part a removed node leaves (its services are already off): WireGuard and
+/// AmneziaWG configs, Hysteria2's config and units, KANKI MIX, the node's certificate, settings and
+/// kernel settings. Blocking.
+pub fn wipe_vpn_files() {
+    for f in [
+        "/etc/wireguard/wg0.conf",
+        "/etc/amnezia/amneziawg/awg0.conf",
+        "/etc/hysteria/config.yaml",
+        "/etc/systemd/system/kanki-mix.service",
+        "/usr/local/bin/kanki-mix-server",
+        "/etc/letsencrypt/renewal-hooks/deploy/kanki.sh",
+        "/etc/sysctl.d/99-kanki.conf",
+        "/etc/kanki/kanki.env",
+    ] {
+        let _ = std::fs::remove_file(f);
+    }
+    for d in ["/etc/kanki/kmix", "/etc/kanki/tls"] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+    let _ = Command::new("systemctl").arg("daemon-reload").status();
+}
+
+/// When nothing of Kanki is left on this machine (no panel, no node, no server agent), the rest goes
+/// too: /etc/kanki, /var/lib/kanki, the program, the `kanki` command, Xray and the units Kanki wrote.
+/// Called by the node and by the agent as each removes itself, so the one that goes last cleans up.
+/// Blocking.
+pub fn wipe_all_if_last() {
+    let unit = |u: &str| std::path::Path::new(&format!("/etc/systemd/system/{}.service", u)).exists();
+    if unit("kanki-panel") || unit("kanki-node") || unit("kanki-tunnel") {
+        return;
+    }
+    for u in ["kanki-xray", "kanki-dns", "kanki-emergency", "kanki-mix", "kanki-gre"] {
+        let _ = Command::new("sh").arg("-c").arg(format!("systemctl disable --now -q {u} 2>/dev/null; rm -f /etc/systemd/system/{u}.service")).status();
+    }
+    let _ = Command::new("systemctl").arg("daemon-reload").status();
+    if let Ok(exe) = crate::util::exe_path() {
+        let _ = std::fs::remove_file(exe);
+    }
+    for f in ["/usr/local/bin/kanki", "/usr/local/bin/kanki-panel", "/usr/local/bin/kanki-xray", "/usr/local/bin/kanki-mix-server", "/etc/sysctl.d/90-kanki-tunnel.conf"] {
+        let _ = std::fs::remove_file(f);
+    }
+    for d in ["/etc/kanki", "/var/lib/kanki", "/usr/local/share/kanki-xray"] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+    eprintln!("nothing of Kanki is left on this server: its files are removed");
+}
+
+/// Runs the server agent (tunnels, Xray, Kanki DNS) next to this node, as the panel asked: the same
+/// program file with `tunnel-agent`, its settings in /etc/kanki/tunnel.env. Blocking.
+pub fn setup_tunnel_agent(panel: &str, id: &str, token: &str, insecure: bool) -> Result<(), String> {
+    let word = |s: &str| !s.is_empty() && s.len() <= 80 && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_');
+    if !word(id) || !word(token) {
+        return Err("bad agent id or token".into());
+    }
+    let panel = panel.trim().trim_end_matches('/');
+    if !panel.starts_with("https://") || panel.len() > 200 || panel.bytes().any(|c| c.is_ascii_whitespace() || c == b'\'' || c == b'"') {
+        return Err("bad panel address".into());
+    }
+    let exe = crate::util::exe_path().map_err(|e| e.to_string())?.to_string_lossy().to_string();
+    let _ = std::fs::create_dir_all("/etc/kanki");
+    let _ = std::fs::create_dir_all("/var/lib/kanki");
+    let envf = crate::tunnel::agent::ENV_FILE;
+    std::fs::write(envf, format!("PANEL_URL={}\nAGENT_ID={}\nAGENT_TOKEN={}\nINSECURE={}\n", panel, id, token, if insecure { "1" } else { "" })).map_err(|e| e.to_string())?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(envf, std::fs::Permissions::from_mode(0o600));
+    }
+    let unit = format!(
+        "[Unit]\nDescription=Kanki (kanki-tunnel)\nAfter=network-online.target wg-quick@wg0.service\n\n[Service]\nExecStart={} tunnel-agent\nRestart=always\nRestartSec=3\nLimitNOFILE=65535\n\n[Install]\nWantedBy=multi-user.target\n",
+        exe
+    );
+    std::fs::write("/etc/systemd/system/kanki-tunnel.service", unit).map_err(|e| e.to_string())?;
+    let ok = Command::new("sh").arg("-c").arg("systemctl daemon-reload && systemctl enable -q kanki-tunnel && systemctl restart kanki-tunnel").status().map(|s| s.success()).unwrap_or(false);
+    if ok { Ok(()) } else { Err("systemctl could not start kanki-tunnel".into()) }
+}
+
 pub fn repair_services() -> Value {
     let mut out = vec![];
     for (k, unit) in SERVICES.iter().filter(|(k, _)| !["web", "panel", "node"].contains(k)) {
@@ -444,6 +569,10 @@ async fn bot_get(State(app): St, h: HeaderMap) -> Response {
         "token_set": !t.is_empty(), "token_masked": mask(&t), "admins": crate::bot::bot_admins_raw(&app),
         "paused": app.db.on("bot_paused"), "online": !t.is_empty() && crate::util::now() - alive < 120,
         "username": app.db.get("bot_username"), "name": app.db.get("bot_name"),
+        // another program polls the same bot (an old panel still running): Telegram answered 409
+        "conflict": crate::util::now() - app.db.get("bot_conflict").parse::<i64>().unwrap_or(0) < 300,
+        // why Telegram refuses the bot right now ("" = it works)
+        "error": app.db.get("bot_poll_error"),
     })).into_response()
 }
 
@@ -571,14 +700,8 @@ pub async fn self_update(app: &App) -> Result<String, String> {
     if want.is_empty() || want != got {
         return Err("checksum mismatch, update aborted".into());
     }
-    let path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("new");
-    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
-    }
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    let path = crate::util::exe_path().map_err(|e| e.to_string())?;
+    crate::util::swap_program(&path, &bytes)?;
     let v = latest_version(app).await.unwrap_or_default();
     restart_self();
     Ok(v)

@@ -108,8 +108,9 @@ pub async fn dial(remote: &str, sni_raw: &str, sni_name: &str, req_host: &str, p
     let mut hq = Guard(tokio::spawn(async move { hq::dial(&hq_remote, &hq_sni, &hq_token).await.map(Raw::Stream) }));
 
     // phase 1: hq alone
-    match tokio::time::timeout(HQ_HEAD_START, &mut hq.0).await {
-        Ok(joined) => match flat(joined) {
+    // (a timeout means hq is still working on it)
+    if let Ok(joined) = tokio::time::timeout(HQ_HEAD_START, &mut hq.0).await {
+        match flat(joined) {
             Ok(raw) => {
                 mark_good(remote);
                 return Ok(raw);
@@ -126,8 +127,7 @@ pub async fn dial(remote: &str, sni_raw: &str, sni_name: &str, req_host: &str, p
                     }
                 };
             }
-        },
-        Err(_) => {} // hq is still working on it
+        }
     }
 
     // phase 2: both run, the first success wins

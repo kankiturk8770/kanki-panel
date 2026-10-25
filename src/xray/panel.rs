@@ -896,17 +896,45 @@ pub fn user_links(app: &App, u: &User) -> Vec<(String, String)> {
     user_links_at(app, u).into_iter().map(|(n, l, _)| (n, l)).collect()
 }
 
-/// (name, link, server id) of each Xray share link of a user
+/// (name, link, server id) of each Xray share link of a user; each link of a server that has a tunnel
+/// (Servers page) is followed by its copy through the tunnel's Iran address
 fn user_links_at(app: &App, u: &User) -> Vec<(String, String, String)> {
     let s = runnable(app);
     if !s.on || !u.has_proto("xray") || !u.active() {
         return vec![];
     }
-    s.inbounds
-        .iter()
-        .filter(|ib| ib.enabled && (ib.only.is_empty() || ib.only.contains(&u.id)) && s.servers.iter().any(|x| x.server == ib.server))
-        .filter_map(|ib| link(app, &s, ib, u).map(|l| (ib.remark.clone(), l, ib.server.clone())))
-        .collect()
+    let mut out = vec![];
+    for ib in s.inbounds.iter().filter(|ib| ib.enabled && (ib.only.is_empty() || ib.only.contains(&u.id)) && s.servers.iter().any(|x| x.server == ib.server)) {
+        let Some(l) = link(app, &s, ib, u) else { continue };
+        out.push((ib.remark.clone(), l, ib.server.clone()));
+        if let Some(t) = link_tunnel(app, &s, ib, u) {
+            out.push((t.0, t.1, ib.server.clone()));
+        }
+    }
+    out
+}
+
+/// (name, link) of an inbound's copy through its server's tunnel: the Iran address and the port it carries
+/// to this inbound; TLS keeps the server's own name. None = the server has no tunnel, or the link already
+/// goes through another address (a CDN or a typed link address).
+fn link_tunnel(app: &App, s: &XraySettings, ib: &Inbound, u: &User) -> Option<(String, String)> {
+    if !ib.link_host.trim().is_empty() || ib.link_port > 0 {
+        return None;
+    }
+    let tw = crate::twin::of_server(app, &ib.server)?;
+    let own = server_address(app, s, &ib.server);
+    let mut x = ib.clone();
+    x.link_host = tw.host.clone();
+    x.link_port = tw.port(app, ib.port, ib.network != "kcp");
+    let tls = ib.security == "tls" || ib.link_tls;
+    let own_name = if ib.acme && !ib.sni.trim().is_empty() { ib.sni.trim().to_string() } else { own };
+    if tls && x.link_sni.is_empty() && ib.sni.trim().is_empty() && own_name.parse::<std::net::IpAddr>().is_err() && !own_name.is_empty() {
+        x.link_sni = own_name;
+    }
+    let base = if ib.remark.is_empty() { ib.protocol.clone() } else { ib.remark.clone() };
+    x.remark = format!("{}-tunnel", base);
+    let l = link_with(s, &x, u, "")?;
+    Some((format!("{} (تانل)", base), l))
 }
 
 /// Each link carries where its traffic leaves to the internet (exit_cc, exit_city, exit_lat,
@@ -1266,6 +1294,18 @@ async fn del_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
     Json(json!({ "ok": true })).into_response()
 }
 
+/// The server was removed from the panel: its Xray inbounds and its Xray entry go (its agent removes
+/// Xray and closes the inbound ports).
+pub(crate) fn forget_server(app: &App, id: &str) {
+    let mut s = settings(app);
+    let (a, b) = (s.inbounds.len(), s.servers.len());
+    s.inbounds.retain(|ib| ib.server != id);
+    s.servers.retain(|x| x.server != id);
+    if s.inbounds.len() != a || s.servers.len() != b {
+        save(app, &s);
+    }
+}
+
 /// Ports another service of the panel already uses on that server.
 fn taken_ports(app: &App, sid: &str) -> Vec<u16> {
     let d = crate::dns::panel::settings(app);
@@ -1402,6 +1442,14 @@ async fn put_inbound(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
     }
     if taken_ports(&app, &ib.server).contains(&ib.port) || s.inbounds.iter().any(|o| o.id != ib.id && o.server == ib.server && o.port == ib.port) {
         return err(StatusCode::BAD_REQUEST, "this port is already used on that server");
+    }
+    if ib.enabled {
+        let mine = s.inbounds.iter().any(|o| o.id == ib.id && o.server == ib.server && o.port == ib.port && o.enabled);
+        if !mine {
+            if let Some(e) = crate::tunnel::panel::port_busy(&app, &ib.server, ib.port, false, &["kanki-xray.service"]) {
+                return err(StatusCode::CONFLICT, &e);
+            }
+        }
     }
     if ib.path.is_empty() && ["ws", "httpupgrade", "xhttp"].contains(&ib.network.as_str()) {
         ib.path = format!("/{}", rand_token(8).to_lowercase());
@@ -1630,6 +1678,52 @@ mod tests {
         assert_eq!(v["user"], json!(["u4"]));
         assert!(rule_json(&XRule { outbound: "nope".into(), ..r.clone() }, &tags).is_none());
         assert!(rule_json(&XRule { outbound: "de".into(), ..Default::default() }, &tags).is_none());
+    }
+
+    #[test]
+    fn a_server_with_a_tunnel_gets_a_copy_of_each_link_through_iran() {
+        use std::sync::atomic::AtomicI64;
+        use std::sync::{Arc, Mutex};
+        let dir = std::env::temp_dir().join(format!("kanki-xtwin-test-{}", rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let app = Arc::new(App {
+            db: crate::db::Db::open(dir.join("kanki.db").to_str().unwrap()),
+            env: HashMap::new(),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        });
+        let (p, q) = reality_keys();
+        let x = XraySettings {
+            on: true,
+            servers: vec![XServer { server: "de".into(), address: "de.example.com".into(), ssl: false }],
+            inbounds: vec![
+                Inbound { id: "t".into(), server: "de".into(), enabled: true, protocol: "trojan".into(), port: 2083, network: "tcp".into(), security: "tls".into(), remark: "tr".into(), ..Default::default() },
+                Inbound { id: "r".into(), server: "de".into(), enabled: true, protocol: "vless".into(), port: 443, network: "tcp".into(), security: "reality".into(),
+                    dest: "www.microsoft.com:443".into(), names: "www.microsoft.com".into(), private: p, public: q, short_ids: "abcd".into(), ..Default::default() },
+                // a CDN link keeps its own address: no copy
+                Inbound { id: "c".into(), server: "de".into(), enabled: true, protocol: "vless".into(), port: 8080, network: "ws".into(), security: "none".into(), link_host: "cdn.example.com".into(), ..Default::default() },
+            ],
+            ..Default::default()
+        };
+        app.db.set("xray_cfg", &serde_json::to_string(&x).unwrap());
+        // Iran → Germany: TCP 443 on Iran is 2083 here, 8443 on Iran is 443 here
+        let t = crate::tunnel::panel::Tunnel { entry: "ir".into(), exit: "de".into(), tcp: vec!["443:2083".into(), "8443:443".into()], enabled: true, ..Default::default() };
+        app.db.set("tun_list", &serde_json::to_string(&vec![t]).unwrap());
+        app.db.set("srv_tunnel", &json!({ "de": { "on": true, "host": "ir.example.com" } }).to_string());
+        let u = User { id: 3, username: "ali".into(), code: "99887766".into(), enabled: true, protocols: "xray".into(), ..emit::test_user() };
+        let l = user_links_at(&app, &u);
+        let names: Vec<&str> = l.iter().map(|x| x.0.as_str()).collect();
+        assert_eq!(names, vec!["tr", "tr (تانل)", "", "vless (تانل)", ""], "{:?}", l);
+        assert!(l[0].1.contains("@de.example.com:2083?"), "{}", l[0].1);
+        // through Iran on the port the tunnel carries; TLS keeps the server's own name
+        assert!(l[1].1.contains("@ir.example.com:443?"), "{}", l[1].1);
+        assert!(l[1].1.contains("sni=de.example.com"), "{}", l[1].1);
+        assert!(l[3].1.contains("@ir.example.com:8443?") && l[3].1.contains("sni=www.microsoft.com"), "{}", l[3].1);
+        assert!(l[4].1.contains("@cdn.example.com:"), "{}", l[4].1);
+        // tunnel off: only the server's own links
+        app.db.set("srv_tunnel", "{}");
+        assert_eq!(user_links_at(&app, &u).len(), 3);
     }
 
     #[test]

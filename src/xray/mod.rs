@@ -144,6 +144,7 @@ pub fn repair_prep() {
 }
 
 pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) -> Result<(), String> {
+    let old_domains = cert_domains_on_disk();
     let Some((c, ver)) = cfg else {
         if std::path::Path::new(UNIT).exists() {
             eprintln!("xray: stopping");
@@ -153,8 +154,22 @@ pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) 
         }
         let _ = std::fs::remove_file(CONF_FILE);
         let _ = std::fs::remove_file(VER_FILE);
+        let _ = std::fs::remove_file(EXTRA_CERTS);
+        // removed from this server: its ports are closed and its certificates are no longer renewed
+        crate::fw::close("xray");
+        for d in old_domains {
+            crate::certbot::forget(&d, "kanki-xray.service");
+        }
         return Ok(());
     };
+    // domains no inbound uses any more: their certificates are no longer renewed
+    {
+        let mut now = acme_domains(&c.config);
+        now.extend(c.certs.iter().cloned());
+        for d in old_domains.iter().filter(|d| !now.contains(d)) {
+            crate::certbot::forget(d, "kanki-xray.service");
+        }
+    }
     install(&c.version, panel)?;
     let _ = std::fs::create_dir_all(CONF_DIR);
     // automatic SSL: certbot gets the certificates the config uses; an inbound whose certificate is
@@ -203,18 +218,32 @@ pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) 
         eprintln!("xray: (re)started");
         let _ = std::fs::remove_file(FORCE_FILE);
     }
-    if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
-        for ib in c.config["inbounds"].as_array().into_iter().flatten() {
-            if let Some(p) = ib["port"].as_u64() {
-                if ib["listen"].as_str() != Some("127.0.0.1") {
-                    let _ = sh(&format!("ufw allow {}/tcp >/dev/null 2>&1; ufw allow {}/udp >/dev/null 2>&1", p, p));
-                }
+    // the inbound ports (a deleted inbound's port is closed again)
+    let mut rules = vec![];
+    for ib in c.config["inbounds"].as_array().into_iter().flatten() {
+        if let Some(p) = ib["port"].as_u64().filter(|p| *p > 0 && *p < 65536) {
+            if !matches!(ib["listen"].as_str(), Some("127.0.0.1") | Some("::1") | Some("localhost")) {
+                rules.push(crate::fw::rule(p as u16, false));
+                rules.push(crate::fw::rule(p as u16, true));
             }
         }
     }
+    crate::fw::sync("xray", rules);
     // missing certificates: deploy again on the next round (certbot waits 10 minutes after a failure)
     let _ = std::fs::write(VER_FILE, if partial { format!("{}-nocert", ver) } else { ver.to_string() });
     Ok(())
+}
+
+/// The certbot domains of the config this server runs now (before a new one is written)
+fn cert_domains_on_disk() -> Vec<String> {
+    let conf: Value = std::fs::read_to_string(CONF_FILE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let mut v = acme_domains(&conf);
+    for d in std::fs::read_to_string(EXTRA_CERTS).unwrap_or_default().lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()) {
+        if !v.contains(&d) {
+            v.push(d);
+        }
+    }
+    v
 }
 
 /// Domains whose certbot certificate the config needs: (domain, file)

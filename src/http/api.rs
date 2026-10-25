@@ -75,6 +75,21 @@ pub fn conf_file_name(app: &App, u: &User, n: &Node, proto: &str) -> String {
     conf_name(&u.username, u.id, &n.id, &n.name, &names, proto)
 }
 
+/// The file name of a config, the copy through the tunnel ending in "t" (mahtab87-ger-at): the user part
+/// is one letter shorter so the name still fits WireGuard's 15
+pub fn conf_file_name_via(app: &App, u: &User, n: &Node, proto: &str, tunnel: bool) -> String {
+    let f = conf_file_name(app, u, n, proto);
+    if tunnel { tunnel_file(&f) } else { f }
+}
+
+fn tunnel_file(f: &str) -> String {
+    let stem = f.trim_end_matches(".conf");
+    let mut parts = stem.rsplitn(3, '-');
+    let (letter, srv, who) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    let who: String = if stem.len() >= 15 { who.chars().take(who.chars().count().saturating_sub(1)).collect() } else { who.to_string() };
+    format!("{}-{}-{}t.conf", who, srv, letter)
+}
+
 /// `nodes`: (id, name) of every server of this user, to tell apart servers whose names start the same way
 fn conf_name(user: &str, uid: i64, node_id: &str, node_name: &str, nodes: &[(&str, &str)], proto: &str) -> String {
     let code = |name: &str| -> String {
@@ -102,6 +117,17 @@ mod conf_name_tests {
     fn ok(f: &str) -> bool {
         let n = f.strip_suffix(".conf").unwrap();
         (1..=15).contains(&n.len()) && n.chars().all(|c| c.is_ascii_alphanumeric() || "_=+.-".contains(c))
+    }
+
+    #[test]
+    fn tunnel_copies_end_in_t_and_still_fit() {
+        let f = |stem: &str| super::tunnel_file(&format!("{}.conf", stem));
+        assert_eq!(f("mahtab87-ger-a"), "mahtab87-ger-at.conf");
+        assert_eq!(f("abcdefghi-ger-w"), "abcdefgh-ger-wt.conf");
+        assert_eq!(f("u9-ab-a"), "u9-ab-at.conf");
+        for x in ["mahtab87-ger-at.conf", "abcdefgh-ger-wt.conf"] {
+            assert!(ok(x), "{}", x);
+        }
     }
 
     #[test]
@@ -165,6 +191,26 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/assets/kanki-dns.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/dns.js"))
         }))
+        // 3.7: the new shell (menu in sections, glass look, server grid, Grok channel writer)
+        .route("/assets/kanki-v37.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/v37.js"))
+        }))
+        // 3.8: the AMOLED look (gold / purple, night / day), 3D glass buttons, grouped menu
+        .route("/assets/kanki-look.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/look.js"))
+        }))
+        // 3.9: one Servers page (every server is a node; its services switched on in place)
+        .route("/assets/kanki-servers.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/servers.js"))
+        }))
+        // 3.9.3: multi-location tunnels (one tunnel per hop, made and tested together)
+        .route("/assets/kanki-route.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/route.js"))
+        }))
+        // 3.9.3: VPN services in tabs (KANKI MIX, Xray, WireGuard, AmneziaWG, Hysteria2), a row per server
+        .route("/assets/kanki-svc.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/svc.js"))
+        }))
         .route("/assets/kanki-kmix.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/kmix.js"))
         }))
@@ -203,6 +249,8 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::apps::router())
         .merge(crate::subdomain::router())
         .merge(crate::subiran::router())
+        .merge(crate::migrate::router())
+        .merge(crate::servers::router())
         .merge(crate::channel::router())
         .merge(crate::tunnel::panel::router())
         .merge(crate::dns::panel::router())
@@ -222,6 +270,8 @@ pub fn node_router(app: Arc<App>) -> Router {
         .route("/agent/repair", post(agent_repair))
         .route("/agent/update", post(agent_update))
         .route("/agent/ports", post(agent_ports))
+        .route("/agent/remove", post(agent_remove))
+        .route("/agent/setup-tunnel", post(agent_setup_tunnel))
         .route("/hy2/auth", post(hy2_auth))
         .with_state(app)
 }
@@ -407,7 +457,7 @@ pub fn node_info(n: &Node) -> Value {
     serde_json::from_str(&n.info).unwrap_or(json!({}))
 }
 
-fn node_json(app: &App, n: &Node, users: &[User]) -> Value {
+pub(crate) fn node_json(app: &App, n: &Node, users: &[User]) -> Value {
     let info_pub = node_info(n);
     let assigned = users.iter().filter(|u| u.on(n)).count();
     json!({
@@ -416,6 +466,8 @@ fn node_json(app: &App, n: &Node, users: &[User]) -> Value {
         "note": n.note, "insecure": n.insecure, "drain": n.drain, "maint": n.maint, "accept_all": n.accept_all,
         "sync_state": n.sync_state, "users": assigned, "info": info_pub,
         "plain_http": n.id != "local" && n.address.starts_with("http://"),
+        // the country of the server's IP (its flag in the panel); empty while unknown
+        "cc": crate::exitgeo::cc(app, &n.id),
     })
 }
 
@@ -493,13 +545,37 @@ async fn nodes_delete(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
     if id == "local" {
         return err(StatusCode::BAD_REQUEST, "the main server cannot be deleted");
     }
-    if let Some(n) = app.db.node(&id) {
+    let removed = delete_node(&app, &id).await;
+    Json(json!({ "ok": true, "removed": removed })).into_response()
+}
+
+/// Removes a VPN node: its users are cut off and KANKI MIX stops (every agent version), then it
+/// removes its VPN services, closes their ports and uninstalls its agent (3.6.8+). True when the
+/// node itself confirmed the removal.
+pub(crate) async fn delete_node(app: &Arc<App>, id: &str) -> bool {
+    let mut removed = false;
+    if let Some(n) = app.db.node(id) {
+        let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), ..Default::default() };
+        let synced = sync::remote_post_json(app, &n, "/agent/sync", &json!(empty)).await.is_some();
+        removed = synced && sync::remote_post(app, &n, "/agent/remove").await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false);
         app.forget_node_pins(&n.id, &n.address);
     }
     let _ = app.db.exec("DELETE FROM nodes WHERE id=?1", &[&id]);
     let _ = app.db.exec("DELETE FROM peers WHERE node_id=?1", &[&id]);
-    crate::live::forget(&id);
-    Json(json!({ "ok": true })).into_response()
+    // nothing of it stays in the panel: users' server lists, its KANKI MIX settings, its direct name,
+    // where its traffic left to
+    for u in app.db.users().into_iter().filter(|u| u.nodes.split(',').any(|x| x.trim() == id)) {
+        let left: Vec<&str> = u.nodes.split(',').map(|x| x.trim()).filter(|x| !x.is_empty() && *x != id).collect();
+        // a user who had only this server moves to the panel server (an empty list would mean "every server")
+        let list = if left.is_empty() { "local".to_string() } else { left.join(",") };
+        let _ = app.db.exec("UPDATE users SET nodes=?1 WHERE id=?2", &[&list, &u.id]);
+    }
+    crate::kmix::forget_node(app, id);
+    crate::direct::forget(app, id);
+    crate::exitgeo::forget(app, &[id.to_string()]);
+    crate::live::forget(id);
+    crate::servers::node_gone(app, id);
+    removed
 }
 
 /// Changes the WireGuard / AmneziaWG / Hysteria2 ports of a node (or of the panel server) in one go
@@ -534,7 +610,7 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
                     continue;
                 }
                 let mut list: Vec<String> = u.nodes.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
-                let has = list.iter().any(|x| *x == id);
+                let has = list.contains(&id);
                 if add && !has {
                     list.push(id.clone());
                 } else if !add && has {
@@ -566,7 +642,12 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
                 return err(StatusCode::BAD_REQUEST, "use the panel update button for the main server");
             }
             let r = sync::remote_post(&app, &n, "/agent/update").await;
-            return Json(json!({"ok": r.as_ref().map(|v| v["ok"].as_bool().unwrap_or(false)).unwrap_or(false), "result": r})).into_response();
+            let ok = r.as_ref().map(|v| v["ok"].as_bool().unwrap_or(false)).unwrap_or(false);
+            if ok {
+                let want = r.as_ref().and_then(|v| v["version"].as_str().map(|x| x.to_string())).unwrap_or_default();
+                sync::refresh_after_update(&app, vec![n.clone()], &want);
+            }
+            return Json(json!({"ok": ok, "result": r})).into_response();
         }
         _ => return err(StatusCode::BAD_REQUEST, "unknown action"),
     }
@@ -577,8 +658,8 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
 /// Their servers take the new user list on their next report, within a few seconds.
 async fn proto_all(State(app): St, h: HeaderMap, Path((proto, action)): Path<(String, String)>) -> Response {
     let _ = guard!(app, h, "users:write");
-    if !matches!(proto.as_str(), "xray" | "dns") {
-        return err(StatusCode::BAD_REQUEST, "only xray and dns can be set for all users here");
+    if !matches!(proto.as_str(), "xray" | "dns" | "wg" | "awg" | "hy2" | "kmix") {
+        return err(StatusCode::BAD_REQUEST, "unknown protocol");
     }
     let add = match action.as_str() {
         "assign-all" => true,
@@ -640,18 +721,22 @@ async fn node_join_token(State(app): St, h: HeaderMap) -> Response {
     let exp = now() + 3600;
     app.db.set("join_token", &token);
     app.db.set("join_expires", &exp.to_string());
-    Json(json!({ "token": token, "expires": exp, "panel": origin(&app), "repo": crate::admin::repo() })).into_response()
+    Json(json!({ "token": token, "expires": exp, "panel": crate::servers::panel_url(&app), "repo": crate::admin::repo() })).into_response()
 }
 
 /// Public: called by the installer on the new server once its agent runs. The one-time token is the only credential.
 async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
-    let want = app.db.get("join_token");
     let given = b["token"].as_str().unwrap_or("").trim().to_string();
-    let exp: i64 = app.db.get("join_expires").parse().unwrap_or(0);
-    if want.is_empty() || given.is_empty() || !util::ct_eq(&given, &want) || exp < now() {
-        return err(StatusCode::FORBIDDEN, "the join token is wrong, already used or expired");
+    // the token of one server added in Servers (its VPN part), or the panel-wide one of Add node
+    let server = crate::servers::join_server(&app, &given);
+    if server.is_none() {
+        let want = app.db.get("join_token");
+        let exp: i64 = app.db.get("join_expires").parse().unwrap_or(0);
+        if want.is_empty() || given.is_empty() || !util::ct_eq(&given, &want) || exp < now() {
+            return err(StatusCode::FORBIDDEN, "the join token is wrong, already used or expired");
+        }
     }
-    let name = b["name"].as_str().unwrap_or("").trim().to_string();
+    let name = server.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| b["name"].as_str().unwrap_or("").trim().to_string());
     let addr = b["address"].as_str().unwrap_or("").trim().trim_end_matches('/').to_string();
     let endpoint = b["endpoint"].as_str().unwrap_or("").trim().to_string();
     let token = b["node_token"].as_str().unwrap_or("").trim().to_string();
@@ -670,6 +755,8 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
         return err(StatusCode::BAD_GATEWAY, "the panel cannot reach the node (open the node API port in its firewall, then run the same command again)");
     };
     let mode = if endpoint.is_empty() { "panel" } else { "custom" };
+    // a server added in Servers says whether its VPN serves users (a relay in Iran: off)
+    let enabled = server.as_ref().map(|s| s.vpn).unwrap_or(true) as i64;
     let id = match existing {
         Some(id) => {
             let _ = app.db.exec(
@@ -681,8 +768,8 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
         None => {
             let id = format!("node-{}", rand_token(10).to_lowercase());
             let r = app.db.exec(
-                "INSERT INTO nodes(id,name,address,endpoint,token,info,online,insecure,endpoint_mode,note) VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9)",
-                &[&id, &name, &addr, &endpoint, &token, &info.to_string(), &(insecure as i64), &mode, &"joined with a one-time token"],
+                "INSERT INTO nodes(id,name,address,endpoint,token,info,online,insecure,endpoint_mode,note,enabled) VALUES(?1,?2,?3,?4,?5,?6,1,?7,?8,?9,?10)",
+                &[&id, &name, &addr, &endpoint, &token, &info.to_string(), &(insecure as i64), &mode, &"joined with a one-time token", &enabled],
             );
             if let Err(e) = r {
                 return err(StatusCode::BAD_REQUEST, &e);
@@ -694,8 +781,17 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
         app.adopt_node_pin(&addr, &id);
     }
     // one use only
-    app.db.set("join_token", "");
-    spawn_sync(&app);
+    match &server {
+        Some(s) => crate::servers::joined(&app, &s.id, &id),
+        None => app.db.set("join_token", ""),
+    }
+    // a new server never shares a VPN port with another one (a tunnel entry could not carry both)
+    let a = app.clone();
+    let nid = id.clone();
+    tokio::spawn(async move {
+        let _ = crate::servers::fix_ports_of(&a, Some(&nid)).await;
+        sync::sync_all(&a).await;
+    });
     Json(json!({ "ok": true, "id": id })).into_response()
 }
 
@@ -703,7 +799,7 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
 
 pub const SETTING_KEYS: &[&str] = &[
     "dns", "mtu", "default_protocols", "sales_on", "trial_on", "trial_gb", "trial_days", "card_on", "card_number", "card_holder",
-    "wallet_on", "wallet_text", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
+    "wallet_on", "wallet_text", "ton_address", "usdt_address", "usd_rate", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
     "welcome", "ref_gb", "ref_days", "warn_on", "backup_on", "channel",
     "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "conn_limit_on", "tg_alerts", "logo", "price_rules",
     // v2.8.4: ready values of the "New user" form
@@ -829,7 +925,7 @@ async fn app_msg_delete(State(app): St, h: HeaderMap) -> Response {
 async fn plans_list(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "settings");
     let v: Vec<Value> = app.db.with(|c| {
-        let mut s = c.prepare("SELECT id,name,days,gb,toman,usd,conns,active,COALESCE(countries,0),COALESCE(category,'') FROM plans ORDER BY toman").unwrap();
+        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,'') FROM plans ORDER BY toman").unwrap();
         let rows: Vec<Value> = s.query_map([], |r| {
             Ok(json!({ "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "days": r.get::<_, i64>(2)?,
                 "gb": r.get::<_, f64>(3)?, "toman": r.get::<_, i64>(4)?, "usd": r.get::<_, f64>(5)?,
@@ -885,6 +981,9 @@ async fn plans_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
     if let Some(t) = num(&b["toman"]) {
         let _ = app.db.exec("UPDATE plans SET toman=?1 WHERE id=?2", &[&(t.max(0.0) as i64), &id]);
     }
+    if let Some(u) = num(&b["usd"]) {
+        let _ = app.db.exec("UPDATE plans SET usd=?1 WHERE id=?2", &[&((u.max(0.0) * 100.0).round() / 100.0), &id]);
+    }
     if let Some(cat) = b["category"].as_str() {
         let _ = app.db.exec("UPDATE plans SET category=?1 WHERE id=?2", &[&cat.trim().to_string(), &id]);
     }
@@ -928,13 +1027,23 @@ pub(crate) fn parse_code(code: &str) -> Option<(i64, String)> {
 }
 
 fn hy2_uri(app: &App, u: &User, n: &Node) -> Option<String> {
+    hy2_link(app, u, n, None)
+}
+
+/// The Hysteria2 link, straight to the server or through its tunnel (`tw`)
+fn hy2_link(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Option<String> {
     let info = node_info(n);
     let port = info["hy2_port"].as_str().unwrap_or("");
     if port.is_empty() || !u.has_proto("hy2") {
         return None;
     }
     let mut q = vec![];
-    let sni = info["hy2_sni"].as_str().unwrap_or("");
+    let mut sni = info["hy2_sni"].as_str().unwrap_or("").to_string();
+    // through the tunnel the address is the Iran one: the certificate is still the server's own name
+    let ep = endpoint(app, n);
+    if sni.is_empty() && tw.is_some() && ep.parse::<std::net::IpAddr>().is_err() && !ep.contains(':') {
+        sni = ep.clone();
+    }
     if !sni.is_empty() {
         q.push(format!("sni={}", sni));
     }
@@ -945,39 +1054,123 @@ fn hy2_uri(app: &App, u: &User, n: &Node) -> Option<String> {
     if !obfs.is_empty() {
         q.push(format!("obfs=salamander&obfs-password={}", pct(obfs)));
     }
-    Some(format!("hysteria2://{}@{}:{}/?{}#{}", u.code, endpoint(app, n), port, q.join("&"), pct(&n.name)))
+    let (addr, name) = match tw {
+        Some(t) => (t.addr(t.port(app, port.parse().unwrap_or(0), false)), format!("{} (Tunnel)", n.name)),
+        None => (format!("{}:{}", ep, port), n.name.clone()),
+    };
+    Some(format!("hysteria2://{}@{}/?{}#{}", u.code, addr, q.join("&"), pct(&name)))
 }
 
 pub fn user_nodes(app: &App, u: &User) -> Vec<Node> {
     app.db.nodes().into_iter().filter(|n| n.usable() && u.on(n)).collect()
 }
 
-/// Which protocols this user can actually use on this node
-pub fn node_protos(u: &User, n: &Node) -> Vec<&'static str> {
+/// Which protocols this user can actually use on this node. WireGuard only when the server is
+/// reached through a tunnel: plain WireGuard straight to a server abroad does not pass in Iran.
+pub fn node_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     let info = node_info(n);
     let mut v = vec![];
     let has = |k: &str| info[k].as_str().map(|s| !s.is_empty()).unwrap_or(false);
-    if u.has_proto("wg") && has("wg_pub") { v.push("wireguard"); }
+    if u.has_proto("wg") && has("wg_pub") && crate::direct::through_tunnel(app, n) { v.push("wireguard"); }
     if u.has_proto("awg") && has("awg_pub") { v.push("amneziawg"); }
     if u.has_proto("hy2") && has("hy2_port") { v.push("hysteria2"); }
     if u.has_proto("kmix") && info["kmix_port"].as_u64().is_some() { v.push("kankimix"); }
     v
 }
 
+/// What a server's second entry (its configs through the tunnel) offers this user: every protocol when
+/// the server has a tunnel (Servers page), else only KANKI MIX's own second config (KANKI MIX page).
+/// WireGuard is here even when the main entry has none: through the tunnel it passes.
+pub fn twin_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
+    let kmix = crate::kmix::link_tunnel(app, u, n).is_some();
+    if crate::twin::of_node(app, n).is_none() {
+        return if kmix { vec!["kankimix"] } else { vec![] };
+    }
+    let info = node_info(n);
+    let has = |k: &str| info[k].as_str().map(|s| !s.is_empty()).unwrap_or(false);
+    let mut v = vec![];
+    if u.has_proto("wg") && has("wg_pub") { v.push("wireguard"); }
+    if u.has_proto("awg") && has("awg_pub") { v.push("amneziawg"); }
+    if u.has_proto("hy2") && has("hy2_port") { v.push("hysteria2"); }
+    if kmix { v.push("kankimix"); }
+    v
+}
+
+/// { protocol: "tunnel" | "direct" } of one subscription entry (`twin`: the copies through the tunnel)
+fn via_proto(app: &App, n: &Node, protos: &[&str], twin: bool) -> Value {
+    let ep = if crate::direct::through_tunnel(app, n) { "tunnel" } else { "direct" };
+    let kmix = if crate::kmix::settings(app).nodes.get(&n.id).map(|o| o.route == "tunnel").unwrap_or(false) { "tunnel" } else { "direct" };
+    let m: serde_json::Map<String, Value> =
+        protos.iter().map(|p| (p.to_string(), json!(if twin { "tunnel" } else if *p == "kankimix" { kmix } else { ep }))).collect();
+    Value::Object(m)
+}
+
+/// The name of a server's second entry in the app
+pub fn twin_name(app: &App, n: &Node) -> String {
+    crate::twin::of_node(app, n).map(|t| t.name).unwrap_or_else(|| crate::kmix::tunnel_name(app, n))
+}
+
+/// id of the second (through the tunnel) entry of a server in the subscription data
+pub const TUNNEL_SUFFIX: &str = "@tunnel";
+
 fn sub_data(app: &App, u: &User) -> Value {
-    let nodes: Vec<Value> = user_nodes(app, u).iter().map(|n| {
+    let mut nodes: Vec<Value> = vec![];
+    for n in user_nodes(app, u).iter() {
+        let tun = crate::kmix::link_tunnel(app, u, n);
         let mut v = json!({
-            "id": n.id, "name": n.name, "main": n.id == "local", "protocols": node_protos(u, n),
+            "id": n.id, "name": n.name, "main": n.id == "local", "protocols": node_protos(app, u, n),
             "hy2": hy2_uri(app, u, n),
             // KANKI MIX: kanki://key@host:port?fec=10-3… (Null = not for this user / not on this server)
             "kmix": crate::kmix::link(app, u, n),
+            // the second KANKI MIX config, through the Iran tunnel (Null = none)
+            "kmix_tunnel": tun,
         });
         // the real exit of this server's configs (a tunnel endpoint is in Iran; the traffic leaves here)
         if let (Some(o), Some(e)) = (v.as_object_mut(), crate::exitgeo::fields(app, &n.id).as_object()) {
             o.extend(e.clone());
         }
-        v
-    }).collect();
+        // each protocol of this entry: "tunnel" when its config points at an Iran entry, "direct" when at the
+        // server itself (the app labels them; KANKI MIX has its own address setting)
+        v["via_proto"] = via_proto(app, n, node_protos(app, u, n).as_slice(), false);
+        // AmneziaWG: whether its endpoint goes through the tunnel or straight to the server, and the address
+        // of the second, direct config ("" = none; the app no longer guesses it from the server's name)
+        if v["protocols"].as_array().map(|a| a.iter().any(|p| p == "amneziawg")).unwrap_or(false) {
+            let (via, direct) = crate::direct::awg(app, n);
+            v["awg_via"] = json!(via);
+            v["awg_direct"] = json!(direct);
+        }
+        // the configs through the tunnel are the server's second entry, so every app (one that knows only
+        // "kmix" too) lists them as a server of their own; "via" and "parent" tell a newer app they are the
+        // tunnel configs of that server
+        let tp = twin_protos(app, u, n);
+        if !tp.is_empty() {
+            let tw = crate::twin::of_node(app, n);
+            let mut e = v.clone();
+            e["id"] = json!(format!("{}{}", n.id, TUNNEL_SUFFIX));
+            e["name"] = json!(twin_name(app, n));
+            e["main"] = json!(false);
+            e["protocols"] = json!(tp);
+            e["hy2"] = if tp.contains(&"hysteria2") { json!(hy2_link(app, u, n, tw.as_ref())) } else { Value::Null };
+            e["kmix"] = json!(tun);
+            e["kmix_tunnel"] = Value::Null;
+            e["via"] = json!("tunnel");
+            e["via_proto"] = via_proto(app, n, &tp, true);
+            e["parent"] = json!(n.id);
+            if let Some(o) = e.as_object_mut() {
+                o.remove("awg_via");
+                o.remove("awg_direct");
+            }
+            // its AmneziaWG goes through the tunnel and has no direct copy (the main entry is the direct one)
+            if tp.contains(&"amneziawg") {
+                e["awg_via"] = json!("tunnel");
+                e["awg_direct"] = json!("");
+            }
+            nodes.push(v);
+            nodes.push(e);
+        } else {
+            nodes.push(v);
+        }
+    }
     json!({
         "id": u.id, "username": u.username, "sub": u.sub_code(), "status": u.status(), "active": u.active(),
         "limit_gb": u.limit_gb, "used_gb": u.used_gb(), "expires_ts": u.expires_at, "created_ts": u.created_at,
@@ -1000,6 +1193,50 @@ fn sub_data(app: &App, u: &User) -> Value {
     })
 }
 
+/// One protocol of one server on the subscription page (`tunnel`: its copy through the server's tunnel)
+fn proto_row(app: &App, u: &User, n: &Node, p: &str, tunnel: bool) -> String {
+    let sub = u.sub_code();
+    let (title, letter) = match p { "wireguard" => ("WireGuard", "W"), "amneziawg" => ("AmneziaWG", "A"), "kankimix" => ("KANKI MIX", "K"), _ => ("Hysteria2", "H") };
+    let node = format!("{}{}", esc(&n.id), if tunnel { TUNNEL_SUFFIX } else { "" });
+    let base = format!("/api/config/{}/{}?sub={}&amp;node={}", u.id, p, sub, node);
+    let mut btns = String::new();
+    match p {
+        // KANKI MIX works only in the Kanki app: the page shows no link, copy or QR (the link is the user's
+        // own key; there is no other app to paste it in). The app finds the address of the link text in the
+        // hidden tag, as it found the QR button's before.
+        "kankimix" => {
+            let link = if tunnel { crate::kmix::link_tunnel(app, u, n) } else { crate::kmix::link(app, u, n) };
+            if link.is_some() {
+                btns.push_str(&format!(
+                    "<i hidden{} data-url=\"/api/config/{}/kankimix?sub={}&amp;node={}\"></i>",
+                    if tunnel { " data-via=\"tunnel\"" } else { "" }, u.id, sub, node
+                ));
+                btns.push_str("<p class=\"apponly\" data-i18n=\"app_only\">Only in the Kanki VPN app</p>");
+            }
+        }
+        "hysteria2" => {
+            let tw = if tunnel { crate::twin::of_node(app, n) } else { None };
+            if let Some(hu) = hy2_link(app, u, n, tw.as_ref()) {
+                btns.push_str(&format!("<code class=\"uri\">{}</code>", esc(&hu)));
+                btns.push_str(&format!("<button class=\"b2\" data-act=\"copy\" data-text=\"{}\" data-i18n=\"copy_uri\">Copy URI</button>", esc(&hu)));
+                btns.push_str(&format!("<button class=\"b2\" data-act=\"qr\" data-url=\"/api/config/{}/{}/qr?sub={}&amp;node={}\" data-i18n=\"qr\">QR Code</button>", u.id, p, sub, node));
+            }
+        }
+        _ => {
+            btns.push_str(&format!("<a class=\"btn\" href=\"{}\" data-i18n=\"dl_conf\">Download config</a>", base));
+            btns.push_str(&format!("<button class=\"b2\" data-act=\"info\" data-url=\"{}\" data-i18n=\"show_info\">Show info</button>", base));
+            btns.push_str(&format!("<button class=\"b2\" data-act=\"qr\" data-url=\"/api/config/{}/{}/qr?sub={}&amp;node={}\" data-i18n=\"qr\">QR Code</button>", u.id, p, sub, node));
+            if p == "wireguard" {
+                btns.push_str(&format!("<button class=\"b2\" data-act=\"uri\" data-url=\"/api/config/{}/{}/uri?sub={}&amp;node={}\" data-i18n=\"get_uri\">Get URI</button>", u.id, p, sub, node));
+            }
+        }
+    }
+    format!(
+        "<div class=\"row proto\" data-proto=\"{p}\"><div class=\"ph\"><i class=\"pl pl-{p}\">{l}</i><div><b>{t}</b><small>{p}</small></div></div><div class=\"acts\">{b}</div></div>",
+        p = p, l = letter, t = title, b = btns
+    )
+}
+
 async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
     let Some((id, c)) = parse_code(&code) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
     let Some(u) = app.db.user_by_code(id, &c) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
@@ -1007,46 +1244,20 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
     // server-rendered config links keep the exact URL format the Kanki Android app reads
     let mut nodes_html = String::new();
     for n in user_nodes(&app, &u) {
-        let mut rows = String::new();
-        for p in node_protos(&u, &n) {
-            let (title, letter) = match p { "wireguard" => ("WireGuard", "W"), "amneziawg" => ("AmneziaWG", "A"), "kankimix" => ("KANKI MIX", "K"), _ => ("Hysteria2", "H") };
-            let base = format!("/api/config/{}/{}?sub={}&amp;node={}", u.id, p, sub, esc(&n.id));
-            let mut btns = String::new();
-            match p {
-                // KANKI MIX works only in the Kanki app: the page shows no link, copy or QR (the link is
-                // the user's own key; there is no other app to paste it in). The app finds the address
-                // of the link text in the hidden tag, as it found the QR button's before.
-                "kankimix" => {
-                    if crate::kmix::link(&app, &u, &n).is_some() {
-                        btns.push_str(&format!("<i hidden data-url=\"/api/config/{}/kankimix?sub={}&amp;node={}\"></i>", u.id, sub, esc(&n.id)));
-                        btns.push_str("<p class=\"apponly\" data-i18n=\"app_only\">Only in the Kanki VPN app</p>");
-                    }
-                }
-                "hysteria2" => {
-                    if let Some(hu) = hy2_uri(&app, &u, &n) {
-                        btns.push_str(&format!("<code class=\"uri\">{}</code>", esc(&hu)));
-                        btns.push_str(&format!("<button class=\"b2\" data-act=\"copy\" data-text=\"{}\" data-i18n=\"copy_uri\">Copy URI</button>", esc(&hu)));
-                        btns.push_str(&format!("<button class=\"b2\" data-act=\"qr\" data-url=\"/api/config/{}/{}/qr?sub={}&amp;node={}\" data-i18n=\"qr\">QR Code</button>", u.id, p, sub, esc(&n.id)));
-                    }
-                }
-                _ => {
-                    btns.push_str(&format!("<a class=\"btn\" href=\"{}\" data-i18n=\"dl_conf\">Download config</a>", base));
-                    btns.push_str(&format!("<button class=\"b2\" data-act=\"info\" data-url=\"{}\" data-i18n=\"show_info\">Show info</button>", base));
-                    btns.push_str(&format!("<button class=\"b2\" data-act=\"qr\" data-url=\"/api/config/{}/{}/qr?sub={}&amp;node={}\" data-i18n=\"qr\">QR Code</button>", u.id, p, sub, esc(&n.id)));
-                    if p == "wireguard" {
-                        btns.push_str(&format!("<button class=\"b2\" data-act=\"uri\" data-url=\"/api/config/{}/{}/uri?sub={}&amp;node={}\" data-i18n=\"get_uri\">Get URI</button>", u.id, p, sub, esc(&n.id)));
-                    }
-                }
-            }
-            rows.push_str(&format!(
-                "<div class=\"row proto\" data-proto=\"{p}\"><div class=\"ph\"><i class=\"pl pl-{p}\">{l}</i><div><b>{t}</b><small>{p}</small></div></div><div class=\"acts\">{b}</div></div>",
-                p = p, l = letter, t = title, b = btns
-            ));
-        }
+        let rows: String = node_protos(&app, &u, &n).into_iter().map(|p| proto_row(&app, &u, &n, p, false)).collect();
         if !rows.is_empty() {
             nodes_html.push_str(&format!(
                 "<section class=\"node\" data-node=\"{}\"><h3>{}<small data-i18n=\"{}\"></small></h3>{}</section>",
                 esc(&n.id), esc(&n.name), if n.id == "local" { "main_server" } else { "node" }, rows
+            ));
+        }
+        // the configs through the server's tunnel: its second entry, under its own heading (the app names
+        // each config by the last heading before it)
+        let rows: String = twin_protos(&app, &u, &n).into_iter().map(|p| proto_row(&app, &u, &n, p, true)).collect();
+        if !rows.is_empty() {
+            nodes_html.push_str(&format!(
+                "<section class=\"node\" data-node=\"{}{}\" data-via=\"tunnel\"><h3>{}<small data-i18n=\"tunnel\"></small></h3>{}</section>",
+                esc(&n.id), TUNNEL_SUFFIX, esc(&twin_name(&app, &n)), rows
             ));
         }
     }
@@ -1118,10 +1329,20 @@ async fn sub_raw(State(app): St, Path(code): Path<String>) -> Response {
         if let Some(h) = hy2_uri(&app, &u, &n) {
             lines.push(h);
         }
-        if u.has_proto("wg") {
-            if let Some(w) = wg_uri(&app, &u, &n) {
+        // WireGuard only through a tunnel (see node_protos)
+        if node_protos(&app, &u, &n).contains(&"wireguard") {
+            if let Some(w) = wg_uri(&app, &u, &n, None) {
                 lines.push(w);
             }
+        }
+        // the copies through the server's tunnel
+        let tp = twin_protos(&app, &u, &n);
+        let tw = crate::twin::of_node(&app, &n);
+        if tp.contains(&"hysteria2") {
+            lines.extend(hy2_link(&app, &u, &n, tw.as_ref()));
+        }
+        if tp.contains(&"wireguard") {
+            lines.extend(wg_uri(&app, &u, &n, tw.as_ref()));
         }
     }
     lines.extend(crate::xray::panel::user_links(&app, &u).into_iter().map(|x| x.1));
@@ -1132,15 +1353,20 @@ async fn sub_raw(State(app): St, Path(code): Path<String>) -> Response {
      util::b64(lines.join("\n").as_bytes())).into_response()
 }
 
-fn wg_uri(app: &App, u: &User, n: &Node) -> Option<String> {
+/// The WireGuard link, to the server's endpoint or through its tunnel (`tw`)
+fn wg_uri(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Option<String> {
     let info = node_info(n);
     let spub = info["wg_pub"].as_str().filter(|s| !s.is_empty())?.to_string();
     let port = info["wg_port"].as_str().unwrap_or("").to_string();
     let peer = app.db.ensure_peer(u.id, &n.id, "wg")?;
+    let (addr, name) = match tw {
+        Some(t) => (t.addr(t.port(app, port.parse().unwrap_or(0), false)), format!("{}-{}-tunnel", n.name, u.username)),
+        None => (format!("{}:{}", endpoint(app, n), port), format!("{}-{}", n.name, u.username)),
+    };
     Some(format!(
-        "wireguard://{}@{}:{}?publickey={}&presharedkey={}&address={}&mtu={}#{}",
-        pct(&peer.privkey), endpoint(app, n), port, pct(&spub), pct(&peer.psk), pct(&format!("{}/32", peer.ip)),
-        app.db.get("mtu"), pct(&format!("{}-{}", n.name, u.username))
+        "wireguard://{}@{}?publickey={}&presharedkey={}&address={}&mtu={}#{}",
+        pct(&peer.privkey), addr, pct(&spub), pct(&peer.psk), pct(&format!("{}/32", peer.ip)),
+        app.db.get("mtu"), pct(&name)
     ))
 }
 
@@ -1157,17 +1383,18 @@ fn text_conf(s: String) -> Response {
 }
 
 /// For the sales bot: the config of one protocol on one server -> (file name, text).
-pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str) -> Option<(String, String)> {
+/// `tunnel`: the copy through the server's tunnel.
+pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str, tunnel: bool) -> Option<(String, String)> {
     let mut q: HashMap<String, String> = HashMap::new();
     q.insert("sub".to_string(), u.sub_code().to_string());
-    q.insert("node".to_string(), n.id.clone());
+    q.insert("node".to_string(), if tunnel { format!("{}{}", n.id, TUNNEL_SUFFIX) } else { n.id.clone() });
     let resp = build_config(State(app.clone()), u.id, proto.to_string(), q, "").await;
     if resp.status() != StatusCode::OK {
         return None;
     }
     let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.ok()?;
     let text = String::from_utf8(bytes.to_vec()).ok()?;
-    Some((conf_file_name(app, u, n, proto), text))
+    Some((conf_file_name_via(app, u, n, proto, tunnel), text))
 }
 
 async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String, String>, extra: &str) -> Response {
@@ -1175,6 +1402,11 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
     let code = parse_code(&sub).map(|x| x.1).unwrap_or(sub);
     let Some(u) = app.db.user_by_code(id, &code) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
     let node_id = q.get("node").cloned().unwrap_or_else(|| "local".into());
+    // the second KANKI MIX entry of a server: the same server, the link through the tunnel
+    let (node_id, via_tunnel) = match node_id.strip_suffix(TUNNEL_SUFFIX) {
+        Some(b) => (b.to_string(), true),
+        None => (node_id, q.get("via").map(|v| v == "tunnel").unwrap_or(false)),
+    };
     let Some(n) = app.db.node(&node_id) else { return (StatusCode::NOT_FOUND, "node").into_response() };
     if !u.on(&n) {
         return (StatusCode::FORBIDDEN, "node not allowed").into_response();
@@ -1186,12 +1418,22 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
             None => (StatusCode::PAYLOAD_TOO_LARGE, "too large for a QR code").into_response(),
         }
     };
+    // the copy through the server's tunnel: its Iran address and the port that address carries here
+    let tw = if via_tunnel && proto != "kankimix" {
+        match crate::twin::of_node(&app, &n) {
+            Some(t) => Some(t),
+            None => return (StatusCode::NOT_FOUND, "this server has no tunnel").into_response(),
+        }
+    } else {
+        None
+    };
     if proto == "hysteria2" {
-        let s = hy2_uri(&app, &u, &n).unwrap_or_default();
+        let s = hy2_link(&app, &u, &n, tw.as_ref()).unwrap_or_default();
         return if extra == "qr" { qr(&s) } else { text_conf(s) };
     }
     if proto == "kankimix" {
-        let Some(s) = crate::kmix::link(&app, &u, &n) else { return (StatusCode::NOT_FOUND, "KANKI MIX is not on for this user / server").into_response() };
+        let link = if via_tunnel { crate::kmix::link_tunnel(&app, &u, &n) } else { crate::kmix::link(&app, &u, &n) };
+        let Some(s) = link else { return (StatusCode::NOT_FOUND, "KANKI MIX is not on for this user / server").into_response() };
         return if extra == "qr" { qr(&s) } else { text_conf(s) };
     }
     let p = match proto.as_str() { "amneziawg" => "awg", "wireguard" => "wg", _ => return (StatusCode::NOT_FOUND, "proto").into_response() };
@@ -1199,7 +1441,7 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
         return (StatusCode::FORBIDDEN, "protocol not allowed").into_response();
     }
     if p == "wg" && extra == "uri" {
-        return text_conf(wg_uri(&app, &u, &n).unwrap_or_default());
+        return text_conf(wg_uri(&app, &u, &n, tw.as_ref()).unwrap_or_default());
     }
     let spub = info[format!("{}_pub", p)].as_str().unwrap_or("").to_string();
     let port = info[format!("{}_port", p)].as_str().unwrap_or("").to_string();
@@ -1225,9 +1467,13 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
             }
         }
     }
+    let ep = match &tw {
+        Some(t) => t.addr(t.port(&app, port.parse().unwrap_or(0), false)),
+        None => format!("{}:{}", endpoint(&app, &n), port),
+    };
     s.push_str(&format!(
-        "\n[Peer]\nPublicKey = {}\nPresharedKey = {}\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = {}:{}\nPersistentKeepalive = 25\n",
-        spub, peer.psk, endpoint(&app, &n), port
+        "\n[Peer]\nPublicKey = {}\nPresharedKey = {}\nAllowedIPs = 0.0.0.0/0, ::/0\nEndpoint = {}\nPersistentKeepalive = 25\n",
+        spub, peer.psk, ep
     ));
     if extra == "qr" {
         return qr(&s);
@@ -1235,7 +1481,7 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
     if extra == "text" {
         return text_conf(s);
     }
-    let fname = conf_file_name(&app, &u, &n, &proto);
+    let fname = conf_file_name_via(&app, &u, &n, &proto, tw.is_some());
     ([(header::CONTENT_TYPE, "text/plain; charset=utf-8".to_string()),
       (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", fname))], s).into_response()
 }
@@ -1289,6 +1535,34 @@ async fn agent_ports(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         return err(StatusCode::UNAUTHORIZED, "bad token");
     }
     Json(crate::admin::set_ports(&b)).into_response()
+}
+
+/// The panel deleted this node: everything the node runs is removed (just after this answer)
+async fn agent_remove(State(app): St, h: HeaderMap) -> Response {
+    if !node_authed(&app, &h) {
+        return err(StatusCode::UNAUTHORIZED, "bad token");
+    }
+    std::thread::spawn(crate::admin::remove_node);
+    Json(json!({"ok": true})).into_response()
+}
+
+/// The panel asks this node to run the server agent too (tunnels, Xray, Kanki DNS on the same machine)
+async fn agent_setup_tunnel(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    if !node_authed(&app, &h) {
+        return err(StatusCode::UNAUTHORIZED, "bad token");
+    }
+    let (panel, id, token) = (b["panel"].as_str().unwrap_or(""), b["id"].as_str().unwrap_or(""), b["token"].as_str().unwrap_or(""));
+    let insecure = b["insecure"].as_bool().unwrap_or(false);
+    let r = tokio::task::spawn_blocking({
+        let (p, i, t) = (panel.to_string(), id.to_string(), token.to_string());
+        move || crate::admin::setup_tunnel_agent(&p, &i, &t, insecure)
+    })
+    .await
+    .unwrap_or(Err("setup crashed".into()));
+    match r {
+        Ok(()) => Json(json!({"ok": true})).into_response(),
+        Err(e) => Json(json!({"ok": false, "error": e})).into_response(),
+    }
 }
 
 async fn agent_update(State(app): St, h: HeaderMap) -> Response {

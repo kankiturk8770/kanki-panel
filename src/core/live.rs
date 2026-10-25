@@ -32,9 +32,12 @@ pub fn forget(node_id: &str) {
     vpn().lock().unwrap().remove(node_id);
 }
 
+/// user id -> [(protocol, server)]
+type UserServers = HashMap<i64, Vec<(String, String)>>;
+
 /// user id -> [(protocol, server)], built at most every few seconds
-fn cache() -> &'static Mutex<(i64, HashMap<i64, Vec<(String, String)>>)> {
-    static S: OnceLock<Mutex<(i64, HashMap<i64, Vec<(String, String)>>)>> = OnceLock::new();
+fn cache() -> &'static Mutex<(i64, UserServers)> {
+    static S: OnceLock<Mutex<(i64, UserServers)>> = OnceLock::new();
     S.get_or_init(|| Mutex::new((0, HashMap::new())))
 }
 

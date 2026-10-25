@@ -68,6 +68,15 @@ pub struct NodeOpt {
     pub route: String,
     /// address the app dials instead of the automatic one ("" = automatic)
     pub host: String,
+    /// the second config, through the tunnel: the Iran address (domain or IP) whose tunnel forwards the
+    /// KANKI MIX UDP port to this server ("" = the server's endpoint, when it is not its own address)
+    pub tun_host: String,
+    /// the UDP port on that Iran address (0 = the same port as the server)
+    pub tun_port: u16,
+    /// no second config for this server
+    pub tun_off: bool,
+    /// the name of the second config in the app ("" = "<server name> (تانل)")
+    pub tun_name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -90,6 +99,39 @@ pub fn settings(app: &App) -> Settings {
         hop: valid_hop(&db.get("kmix_hop")).unwrap_or_default(),
         gaming: db.get("kmix_gaming") != "0",
         nodes: serde_json::from_str(&db.get("kmix_nodes")).unwrap_or_default(),
+    }
+}
+
+/// Gives server `node_id` its own KANKI MIX port (it moves there on its next sync).
+pub fn set_node_port(app: &App, node_id: &str, port: u16) {
+    let mut m: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();
+    m.entry(node_id.to_string()).or_default().port = port;
+    app.db.set("kmix_nodes", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+}
+
+/// KANKI MIX off (or on again) on server `node_id` only
+pub fn set_node_off(app: &App, node_id: &str, off: bool) {
+    let mut m: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();
+    m.entry(node_id.to_string()).or_default().off = off;
+    app.db.set("kmix_nodes", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+}
+
+/// A removed server's KANKI MIX settings go with it
+pub fn forget_node(app: &App, node_id: &str) {
+    let mut m: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();
+    if m.remove(node_id).is_some() {
+        app.db.set("kmix_nodes", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+    }
+}
+
+/// The second (tunnel) config of `node_id` follows its port when it used the old one.
+pub fn move_tunnel_port(app: &App, node_id: &str, old: u16, new: u16) {
+    let mut m: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();
+    if let Some(o) = m.get_mut(node_id) {
+        if o.tun_port == old {
+            o.tun_port = new;
+            app.db.set("kmix_nodes", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+        }
     }
 }
 
@@ -141,6 +183,50 @@ pub fn link_host(app: &App, s: &Settings, n: &Node) -> String {
     }
     let d = direct_host(app, n);
     if d.is_empty() || d == "127.0.0.1" { crate::api::endpoint(app, n) } else { d }
+}
+
+/// The second config's address and port (None = no second config for this server): the Iran address
+/// set for it, else the server's endpoint when that is an Iran entry (not the server's own address).
+pub fn tunnel_target(app: &App, s: &Settings, n: &Node, port: u16) -> Option<(String, u16)> {
+    let opt = s.nodes.get(&n.id).cloned().unwrap_or_default();
+    if opt.tun_off {
+        return None;
+    }
+    let p = if opt.tun_port > 0 { opt.tun_port } else { port };
+    if !opt.tun_host.trim().is_empty() {
+        // a typed Iran address: the port is the one the route really carries to this server (a tunnel
+        // that moved it on the way, 4002:4001), unless a port was typed too
+        let p = if opt.tun_port > 0 { opt.tun_port } else { route_of(app, n, port).map(|r| r.1).unwrap_or(port) };
+        return Some((opt.tun_host.trim().to_string(), p));
+    }
+    // the server's tunnel (Servers page) gives every protocol a copy through its Iran address
+    if let Some(t) = crate::twin::of_node(app, n) {
+        let p = if opt.tun_port > 0 { opt.tun_port } else { t.port(app, port, false) };
+        return Some((t.host, p));
+    }
+    let ep = crate::api::endpoint(app, n);
+    let ep_host = ep.trim().trim_start_matches('[').split(']').next().unwrap_or("").to_string();
+    let ep_host = if ep.contains('[') { ep_host } else { ep.split(':').next().unwrap_or("").to_string() };
+    let primary = link_host(app, s, n);
+    let direct = direct_host(app, n);
+    if ep_host.is_empty() || ep_host == direct || ep_host == primary || ep_host == "127.0.0.1" {
+        return None;
+    }
+    // only when a tunnel really forwards the KANKI MIX UDP port (else the config would point at a
+    // dead port); the address and port are the tunnel's own entry
+    let node_host = if n.id == "local" { String::new() } else { crate::exitgeo::host_of_url(&n.address) };
+    crate::tunnel::panel::udp_forward(app, &n.id, &node_host, &ep_host, p)
+}
+
+/// The tunnels that bring UDP `port` to server `n`: the servers on the way, first entry first, and the
+/// port on that first entry. None = no Kanki tunnel carries it there.
+pub fn route_of(app: &App, n: &Node, port: u16) -> Option<(Vec<String>, u16)> {
+    let sid = if n.id == "local" {
+        "local".to_string()
+    } else {
+        crate::tunnel::panel::servers(app).into_iter().find(|s| s.node == n.id).map(|s| s.id)?
+    };
+    crate::tunnel::panel::udp_route(app, &sid, port)
 }
 
 /// a host name or IP the panel accepts as a KANKI MIX address
@@ -235,6 +321,28 @@ pub fn link(app: &App, u: &User, n: &Node) -> Option<String> {
     Some(format!("kanki://{}@{}:{}?{}#{}", user_key(app, u), host, port, q, crate::util::pct(&n.name)))
 }
 
+/// The name of a server's second (through the tunnel) config, as the app shows it
+pub fn tunnel_name(app: &App, n: &Node) -> String {
+    let s = settings(app);
+    let name = s.nodes.get(&n.id).map(|o| o.tun_name.trim().to_string()).unwrap_or_default();
+    if name.is_empty() { crate::twin::default_name(&n.name) } else { name }
+}
+
+/// The user's second link for one server, through the tunnel (the Iran address): the same key and
+/// options as the first, another address. None = no second config there.
+pub fn link_tunnel(app: &App, u: &User, n: &Node) -> Option<String> {
+    let first = link(app, u, n)?;
+    let s = settings(app);
+    let info = crate::api::node_info(n);
+    let port = info["kmix_port"].as_u64().filter(|p| *p > 0)? as u16;
+    let (host, tport) = tunnel_target(app, &s, n, port)?;
+    let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
+    let q = first.split_once('?').map(|x| x.1).unwrap_or("").split('#').next().unwrap_or("");
+    // the extra ports exist on the server, not on the Iran address
+    let q: Vec<&str> = q.split('&').filter(|p| !p.starts_with("ports=")).collect();
+    Some(format!("kanki://{}@{}:{}?{}&via=tunnel#{}", user_key(app, u), host, tport, q.join("&"), crate::util::pct(&format!("{} (Tunnel)", n.name))))
+}
+
 // ------------------------------------------------------------------ on the server (agent / main)
 
 fn sh(cmd: &str) -> (bool, String) {
@@ -319,12 +427,9 @@ fn sync_hop(want: Option<(u16, u16, u16)>) {
             let _ = sh(&format!("iptables -t nat {}", r.replacen("-A ", "-D ", 1)));
         }
     }
-    if let (Some(rule), Some((a, b, _))) = (want_rule, want) {
+    if let Some(rule) = want_rule {
         if !ours.iter().any(|r| *r == rule) {
             let _ = sh(&format!("iptables -t nat {}", rule));
-            if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
-                let _ = sh(&format!("ufw allow {}:{}/udp >/dev/null 2>&1", a, b));
-            }
         }
     }
 }
@@ -338,6 +443,7 @@ fn remove() {
         let _ = sh("systemctl daemon-reload");
     }
     sync_hop(None);
+    crate::fw::close("kmix");
     let _ = std::fs::remove_file(STATE_FILE);
 }
 
@@ -386,9 +492,12 @@ pub fn apply(c: &KmixCfg) -> Result<(), String> {
         // the server reads the users again without dropping anyone else
         let _ = sh(&format!("systemctl kill -s HUP {}", UNIT_NAME));
     }
-    if sh("ufw status 2>/dev/null | grep -q 'Status: active'").0 {
-        let _ = sh(&format!("ufw allow {}/udp >/dev/null 2>&1", port));
+    // the port and the extra ports (an old port or range is closed again)
+    let mut rules = vec![crate::fw::rule(port, true)];
+    if let Some((a, b)) = hop {
+        rules.push(format!("{}:{}/udp", a, b));
     }
+    crate::fw::sync("kmix", rules);
     Ok(())
 }
 
@@ -465,6 +574,11 @@ async fn get_all(axum::extract::State(app): St, h: axum::http::HeaderMap) -> axu
             "id": n.id, "name": n.name, "main": n.id == "local", "online": n.id == "local" || n.online,
             "endpoint": link_host(&app, &s, n), "direct_host": direct_host(&app, n), "tunnel_host": crate::api::endpoint(&app, n),
             "route": if s.node_tunnel(&n.id) { "tunnel" } else { "direct" },
+            // the second config through the tunnel: (address, port) it uses, or Null
+            "second": info["kmix_port"].as_u64().and_then(|p| tunnel_target(&app, &s, n, p as u16)).map(|(h, p)| json!({"host": h, "port": p})),
+            // the Kanki tunnels that bring this server's port (["Iran", "Turkey"]), Null = none: a typed
+            // Iran address then needs a forward made some other way
+            "route_via": info["kmix_port"].as_u64().and_then(|p| route_of(&app, n, p as u16)).map(|(v, p)| json!({"via": v, "port": p})),
             "on": s.node_on(&n.id), "want_port": s.node_port(&n.id),
             "port": info["kmix_port"], "parity": info["kmix_parity"], "hop": info["kmix_hop"],
             "active": info["kmix_active"], "installed": !info["kmix_port"].is_null(), "users": here,
@@ -506,8 +620,17 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
                 return crate::api::err(StatusCode::BAD_REQUEST, "address: a domain or an IP, like de.example.com");
             }
             let route = if v["route"].as_str() == Some("tunnel") { "tunnel".to_string() } else { String::new() };
-            let opt = NodeOpt { off: v["off"].as_bool().unwrap_or(false), port: port_of(&v["port"]).unwrap_or(0), route, host };
-            if opt.off || opt.port > 0 || !opt.route.is_empty() || !opt.host.is_empty() {
+            let tun_host = v["tun_host"].as_str().unwrap_or("").trim().to_string();
+            if !tun_host.is_empty() && !valid_host(&tun_host) {
+                return crate::api::err(StatusCode::BAD_REQUEST, "tunnel address: a domain or an IP of the Iran server, like ir.example.com");
+            }
+            let tun_name: String = v["tun_name"].as_str().unwrap_or("").trim().chars().filter(|c| !c.is_control() && !"<>\"&".contains(*c)).take(40).collect();
+            let opt = NodeOpt {
+                off: v["off"].as_bool().unwrap_or(false), port: port_of(&v["port"]).unwrap_or(0), route, host,
+                tun_host, tun_port: port_of(&v["tun_port"]).unwrap_or(0), tun_off: v["tun_off"].as_bool().unwrap_or(false),
+                tun_name,
+            };
+            if opt.off || opt.port > 0 || !opt.route.is_empty() || !opt.host.is_empty() || !opt.tun_host.is_empty() || opt.tun_port > 0 || opt.tun_off || !opt.tun_name.is_empty() {
                 nodes.insert(id.clone(), opt);
             }
         }

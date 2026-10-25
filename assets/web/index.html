@@ -140,7 +140,7 @@ details.box summary{cursor:pointer;list-style:none}details.box summary::-webkit-
 body{font-variant-numeric:tabular-nums}
 .card{box-shadow:inset 0 1px 0 rgba(255,233,166,.05),0 8px 26px rgba(0,0,0,.22)}
 button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid var(--al);outline-offset:2px}
-@media(min-width:1100px){
+@media(min-width:900px){
  nav.side{transform:none!important;top:59px;width:236px;z-index:4}
  nav.side>.row:first-child{display:none}
  #mn{display:none}.shade{display:none!important}
@@ -598,6 +598,7 @@ b .ltr,.ltr b,b.ltr,strong.ltr{font-weight:700}
 .ncards p.muted{margin:5px 0!important}
 .ncards .warnbox{margin:6px 0;padding:6px 8px;font-size:11.5px}
 
+details.twm>summary{list-style:none;cursor:pointer}details.twm>summary::-webkit-details-marker{display:none}details.twm>summary h4:after{content:"▾";margin-inline-start:auto;color:var(--s)}details.twm[open]>summary h4:after{content:"▴"}details.twm>summary h4{display:flex;align-items:center;gap:8px}
 /* =====================================================================
    v2.8.4 — Kanki design: own layout and look (grouped sidebar, top bar,
    calmer cards, settings with sections). Loaded last, so it wins.
@@ -661,9 +662,9 @@ html[dir=rtl] .uchip2{padding:4px 4px 4px 10px}
 .uchip2 i{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-style:normal;font-weight:900;color:#1a1206;background:linear-gradient(145deg,var(--al),var(--a),var(--ad))}
 .uchip2 span{font-size:12px;font-weight:700;direction:ltr}
 #mlogo{display:none}
-@media(max-width:1099px){#mlogo{display:flex;width:34px;height:34px}.tb-title small{display:none}}
+@media(max-width:899px){#mlogo{display:flex;width:34px;height:34px}.tb-title small{display:none}}
 @media(max-width:560px){.uchip2,.uv{display:none}header.top{padding:8px 10px}.tb-title b{font-size:14px}}
-@media(min-width:1100px){
+@media(min-width:900px){
  nav.side{top:0;width:var(--sbw);z-index:9}
  header.top{margin-inline-start:var(--sbw)}
  main{margin-inline-start:var(--sbw);padding:20px 26px 70px;max-width:1360px}
@@ -766,7 +767,7 @@ nav.side .ngi a{padding:7px 12px;font-size:13px;border-radius:9px;margin-inline-
 nav.side .ngi a.on{background:color-mix(in srgb,var(--a) 13%,transparent);color:var(--a)}
 nav.side .ngi a.on:before{inset-inline-start:-7px;inset-block:8px}
 .mbar,.msheet{display:none}
-@media(max-width:1099px){
+@media(max-width:899px){
  .mbar{display:flex;gap:6px;position:sticky;top:60px;z-index:6;overflow-x:auto;scrollbar-width:none;padding:8px 12px;background:color-mix(in srgb,var(--bg1) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--ln2)}
  .mbar::-webkit-scrollbar{display:none}
  .mbar a,.mbar button{flex:none;display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border-radius:11px;border:1px solid var(--ln2);background:var(--in);color:var(--t);font:inherit;font-size:12.5px;font-weight:700;text-decoration:none;cursor:pointer;white-space:nowrap}
@@ -893,7 +894,10 @@ function api(m,p,b,raw){var o={method:m,headers:{}};if(S.token)o.headers.Authori
  return fetch(p,o).then(function(r){if(r.status==401&&p!='/api/login'){logout(true);throw new Error('unauthorized')}
   if(raw&&raw.blob)return r.ok?r.blob().then(function(bl){return{blob:bl,name:((r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/)||[])[1]}}):r.json().then(function(j){throw new Error(j.error||r.status)});
   return r.text().then(function(x){var j;try{j=x?JSON.parse(x):{}}catch(e){j={error:x}}if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})})}
-function fail(e){if(e&&e.message!='unauthorized')toast(t(e.message||String(e)),1)}
+function fail(e){if(!e||e.message=='unauthorized')return;
+ // a page drawn after the admin already left it: nothing to tell
+ if(e instanceof TypeError&&/of (null|undefined)/.test(e.message)){console.warn(e);return}
+ toast(t(e.message||String(e)),1)}
 function copy(s){if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(s).then(function(){toast(t('Copied'))});else{var a=document.createElement('textarea');a.value=s;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();toast(t('Copied'))}}
 function bytes(n){n=+n||0;var u=['B','KB','MB','GB','TB'],i=0;while(n>=1024&&i<4){n/=1024;i++}return n.toFixed(i>=3?2:0)+' '+u[i]}
 function gbtxt(g){g=+g||0;return g<1?Math.round(g*1024)+' MB':g.toFixed(2)+' GB'}
@@ -1005,11 +1009,14 @@ var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN ser
 // menu (v3.5): single pages and groups that open in place. An item is [page, sub page, label, note].
 var NAV=[{p:'dash'},{p:'users'},{p:'nodes'},
  {g:'vpn',l:'VPN services',i:'shield2',items:[['vpn','','All VPN services','Kanki VPN and Xray side by side'],['kmix','','KANKI MIX','Our own protocol: games, low ping'],['xray','','Xray','VLESS · VMess · Trojan · Shadowsocks'],['antidpi','','Anti-DPI tunnels','REALITY · WS/gRPC behind CDN · Hysteria2']]},
- {g:'dnsg',l:'Kanki DNS',i:'dns',items:[['dns','overview','Overview','Status of the DNS servers'],['dns','servers','DNS servers','Exits abroad and relays in Iran'],['dns','services','Services','What goes through the DNS'],['dns','users','DNS users','Registered addresses and use'],['dns','settings','Settings and SSL','Domain, certificate, upstreams']]},
- {g:'net',l:'Tunnels',i:'tunnel',items:[['servers','','Tunnel servers',''],['tunnels','','Tunnels',''],['ports','','Port management','']]},
- {g:'sales',l:'Sales & support',i:'bot',items:[['bot','','Sales bot',''],['emergency','','Emergency chat','']]},
+ {g:'net',l:'Tunnels',i:'tunnel',items:[['tunnels','','Tunnels','Links between your servers'],['servers','','Tunnel servers','Iran and abroad servers of the tunnels'],['ports','','Port management','Which port each service uses']]},
+ {g:'dnsg',l:'Kanki DNS',i:'dns',items:[['dns','overview','Overview','Status of the DNS servers'],['dns','servers','DNS servers','Exits abroad and relays in Iran'],['dns','pubg','PUBG and games','Which part of the game goes through'],['dns','services','Services','What goes through the DNS'],['dns','users','DNS users','Registered addresses and use'],['dns','log','Query log','Names your users asked'],['dns','settings','Settings and SSL','Domain, certificate, upstreams']]},
+ {g:'sales',l:'Sales & support',i:'bot',items:[['bot','','Sales bot','Plans, payments, Telegram'],['emergency','','Emergency chat','Talk to users when the internet is cut']]},
  {p:'traffic'},
- {g:'sys',l:'System',i:'settings',items:[['backup','','Backup',''],['security','','Security',''],['settings','','Settings','']]}];
+ {g:'sys',l:'System',i:'settings',items:[['settings','','Settings','How the panel looks and works'],['backup','','Backup','Save and restore everything'],['security','','Security','Password, 2FA, sessions']]}];
+Object.assign(FA,{"rotating tunnel, address to dial, target":"تانل چرخشی، آدرس اتصال، مقصد","Links between your servers":"اتصال بین سرورهایت","Iran and abroad servers of the tunnels":"سرورهای ایران و خارج تانل‌ها","Which port each service uses":"هر سرویس کدام پورت را دارد",
+ "Which part of the game goes through":"کدام بخش بازی از سرور رد شود","Names your users asked":"نام‌هایی که کاربرها پرسیده‌اند","Plans, payments, Telegram":"پلن‌ها، پرداخت، تلگرام","Talk to users when the internet is cut":"گفتگو با کاربرها وقتی اینترنت قطع است",
+ "How the panel looks and works":"ظاهر و کارکرد پنل","Save and restore everything":"ذخیره و بازگردانی همه چیز","Password, 2FA, sessions":"رمز، تأیید دومرحله‌ای، نشست‌ها","PUBG and games":"پابجی و بازی‌ها","Query log":"گزارش پرس‌وجوها"});
 var NAVG=[];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
 function grpOf(k){for(var i=0;i<NAV.length;i++){var g=NAV[i];if(g.items&&g.items.some(function(x){return x[0]==k}))return g.l}return ''}
@@ -1332,7 +1339,11 @@ function loadNodes(){api('GET','/api/nodes').then(function(n){S.nodes=n;drawNode
  if(window.xrServers)api('GET','/api/xray').then(function(d){XR.d=d;var el=$('#nl_x');if(el&&S.page=='nodes')el.innerHTML=xrServers(d)}).catch(function(){});
  if(window.dnsServers)api('GET','/api/dns').then(function(d){DN.d=d;var el=$('#nl_d');if(el&&S.page=='nodes')el.innerHTML=dnsServers(d)}).catch(function(){})}
 // ---- node health: judged from the last sync and the CPU / RAM / disk the node reports
-function panelVer(){var l=(S.nodes||[]).filter(function(x){return x.id=='local'})[0];return l&&l.info&&l.info.version||''}
+// the version the panel really runs (an older saved one of its own server made every up-to-date agent look old)
+function panelVer(){if(S.me&&S.me.version)return S.me.version;var l=(S.nodes||[]).filter(function(x){return x.id=='local'})[0];return l&&l.info&&l.info.version||''}
+// a < b as versions (3.9.10 is newer than 3.9.9)
+function verLt(a,b){var x=String(a).split('.').map(function(v){return parseInt(v,10)||0}),y=String(b).split('.').map(function(v){return parseInt(v,10)||0});
+ for(var i=0;i<Math.max(x.length,y.length);i++){if((x[i]||0)!=(y[i]||0))return (x[i]||0)<(y[i]||0)}return false}
 function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bump=function(l,m){r.push([l,m]);if(l>lv)lv=l};
  if(!loc&&n.sync_state=='pin mismatch')return{lv:2,c:'r',l:'Problem',r:[[2,'The node\'s certificate changed (reinstalled?): run its join command again, or remove and add the node']]};
  if(!loc&&!n.online)return{lv:2,c:'r',l:'Problem',r:[[2,'Not reachable: check the server, its agent and the firewall']]};
@@ -1345,7 +1356,7 @@ function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bu
   if(dk>=95)bump(2,t('Disk is almost full')+' ('+N(Math.round(dk))+'%)');else if(dk>=85)bump(1,t('Disk is getting full')+' ('+N(Math.round(dk))+'%)');
   if(st.swap_total>0&&sw>=50)bump(1,t('Using a lot of swap: the server needs more RAM')+' ('+N(Math.round(sw))+'%)');
  }else if(!loc)bump(0,'Press Update agent to see CPU, RAM and disk of this node');
- var pv=panelVer();if(!loc&&pv&&i.version&&i.version!=pv)bump(1,t('Agent is on an older version')+' (v'+i.version+'): '+t('press Update agent'));
+ var pv=panelVer();if(!loc&&pv&&i.version&&verLt(i.version,pv))bump(1,t('Agent is on an older version')+' (v'+i.version+'): '+t('press Update agent'));
  if(n.maint)bump(1,'Under maintenance: new users are not sent here');
  return lv==2?{lv:2,c:'r',l:'Problem',r:r}:lv==1?{lv:1,c:'y',l:'Under pressure',r:r}:{lv:0,c:'g',l:'Healthy',r:r}}
 function upTime(s){s=+s||0;var d=Math.floor(s/86400),h=Math.floor(s%86400/3600);return d?N(d)+' '+t('days')+' '+N(h)+' '+t('hours'):N(h)+' '+t('hours')+' '+N(Math.floor(s%3600/60))+' '+t('min')}
@@ -1382,7 +1393,8 @@ function drawNodes(){var el=$('#nl');if(!el)return;el.innerHTML=S.nodes.map(func
  el.onclick=function(e){var b=e.target.closest('[data-nopen]');if(!b)return;var k=b.dataset.nopen;S.nopen[k]=!S.nopen[k];drawNodes()}}
 function findN(id){for(var i=0;i<S.nodes.length;i++)if(S.nodes[i].id==id)return S.nodes[i]}
 function nAct(id,a){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+a).then(function(r){toast(r.ok===false?(r.result&&r.result.error||'failed'):t('Done'),r.ok===false);loadNodes()}).catch(fail)}
-function nDel(id){confirmDo(function(){api('DELETE','/api/nodes/'+encodeURIComponent(id)).then(function(){toast(t('Done'));loadNodes()}).catch(fail)})}
+function nDel(id){if(!confirm(t('Delete this server? Its users are cut off and the server itself removes WireGuard, AmneziaWG, Hysteria2 and KANKI MIX, closes their ports and uninstalls the node agent.')))return;toast(t('Removing…'));
+ api('DELETE','/api/nodes/'+encodeURIComponent(id)).then(function(r){toast(r.removed?t('Done: everything was removed from the server too'):t('Deleted from the panel. The server did not answer (or runs an old version): its VPN services stay until you uninstall them there.'),!r.removed);loadNodes()}).catch(fail)}
 function nHealth(id){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/health').then(function(r){var n=findN(id);
  modal(mhead(t('Health'),n?n.name:'')+'<p>'+(r.ok?'<span class="badge g">OK</span>':'<span class="badge r">'+t('Offline')+'</span>')+' <span class="ltr">'+r.ms+' ms</span> '+(r.version?'· v'+esc(r.version):'')+(r.load?' · load '+esc(r.load):'')+'</p>'+
  '<div class="list">'+((r.services||[]).map(function(s){return '<div class="li"><span>'+esc(s.key)+' <small class="ltr">'+esc(s.unit)+'</small></span><span class="badge '+(s.active?'g':'r')+'">'+esc(s.state)+'</span></div>'}).join(''))+'</div>')}).catch(fail)}
@@ -1478,7 +1490,7 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
  $('#rs_go').onclick=function(){var f=$('#rs_f').files[0];if(!f)return toast(t('No file chosen'),1);confirmDo(function(){
   api('POST','/api/restore',f,{headers:{'X-Passphrase':$('#rs_p').value,'X-Full':$('#rs_full').checked?'1':'0','Content-Type':'application/octet-stream'}}).then(function(){toast(t('Restore done, panel is restarting…'));setTimeout(function(){location.reload()},4000)}).catch(fail)})};
  var tg={},showPw=false,kb=function(n){return n>1048576?N((n/1048576).toFixed(1))+' MB':N(Math.round(n/1024))+' KB'};
- function tgDraw(){$('#tg_on').checked=!!tg.on;$('#tg_chat').value=tg.chat||'';$('#tg_h').value=tg.hours||24;$('#tg_at').value=tg.at||'03:00';$('#tg_m').value=tg.mode||'nightly';
+ function tgDraw(){if(!$('#tg_on'))return;$('#tg_on').checked=!!tg.on;$('#tg_chat').value=tg.chat||'';$('#tg_h').value=tg.hours||24;$('#tg_at').value=tg.at||'03:00';$('#tg_m').value=tg.mode||'nightly';
   var hrs=tg.mode=='hours';$('#tg_at').style.display=hrs?'none':'';$('#tg_h').style.display=hrs?'':'none';
   $('#tg_pw').textContent=showPw?(tg.pass||''):'••••••••••';
   $('#tg_tn').textContent=tg.token_set?'✓':(tg.uses_bot_token?t('Empty = use the sales bot token'):'');
@@ -1598,7 +1610,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
  }return ''}
 function pSettings(){var cur=S.stsec||'look';
  $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Settings')+'</h2><p>'+t('Everything about how the panel looks and works, in one place')+'</p></div></div><div id="st">'+t('Loading…')+'</div>';
- api('GET','/api/settings').then(function(s){S.st=s;if(!STSEC.some(function(x){return x[0]==cur}))cur='look';
+ api('GET','/api/settings').then(function(s){if(!$('#st'))return;S.st=s;if(!STSEC.some(function(x){return x[0]==cur}))cur='look';
   $('#st').innerHTML='<div class="stw"><div class="stn" role="tablist">'+STSEC.map(function(x){return '<button type="button" data-sec="'+x[0]+'" class="'+(x[0]==cur?'on':'')+'"><span class="si">'+ic(x[2],17)+'</span>'+t(x[1])+'<em></em></button>'}).join('')+'</div><div>'+
   STSEC.map(function(x){return '<section class="sts card'+(x[0]==cur?' on':'')+'" data-sec="'+x[0]+'"><div class="sth"><span class="phi">'+ic(x[2],20)+'</span><div><b>'+t(x[1])+'</b><small>'+t(x[3])+'</small></div></div>'+stBody(x[0],s)+
    (x[4].length?'<div class="sbar"><span class="muted" data-msg></span><button class="b2" type="button" data-undo disabled>'+t('Undo')+'</button><button class="btn" type="button" data-save disabled>'+t('Save')+'</button></div>':'')+'</section>'}).join('')+'</div></div>';
@@ -1647,11 +1659,22 @@ function stIran(){var box=$('#si_in');if(!box)return;api('GET','/api/sub-iran').
  box.innerHTML='<div class="g3"><div><label class="f">'+t('Tunnel server')+'</label><select id="si_srv"><option value="">—</option>'+(r.agents||[]).filter(function(a){return a.loc=='iran'||a.id==r.server}).map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id==r.server?' selected':'')+'>'+esc(a.name)+(a.ip?' ('+esc(a.ip)+')':'')+'</option>'}).join('')+'</select></div>'+
   '<div><label class="f">'+t('Domain')+'</label><input class="ltr" id="si_dom" placeholder="sub.example.com" value="'+esc(r.domain||'')+'"></div>'+
   '<div><label class="f">'+t('Port')+'</label><input class="ltr" id="si_port" inputmode="numeric" value="'+esc(String(r.port||2053))+'"></div></div>'+
-  '<div class="hint" id="si_ip"></div><div class="row" style="margin-top:8px"><button class="btn" type="button" id="si_go">'+t('Save')+'</button>'+(r.server?'<button class="b2 bd" type="button" id="si_rm">'+t('Remove')+'</button>':'')+'</div><div class="hint">'+msg+'</div>';
+  '<div class="hint" id="si_ip"></div><div class="row" style="margin-top:8px"><button class="btn" type="button" id="si_go">'+t('Save')+'</button>'+(r.server&&st.error?'<button class="b2" type="button" id="si_re">↻ '+t('Try SSL again')+'</button>':'')+(r.server?'<button class="b2 bd" type="button" id="si_rm">'+t('Remove')+'</button>':'')+'</div><div class="hint">'+msg+'</div>'+
+  (r.server&&st.error?'<details class="secc" style="margin-top:8px" open><summary>'+t('Why SSL is not taken')+'</summary><div class="bd2"><ul style="margin:0;padding-inline-start:18px;line-height:2">'+
+   ['The domain\'s A record must point to this Iran server\'s IP (not to a CDN while the certificate is taken: in ArvanCloud / Cloudflare set it to DNS only).',
+    'Let\'s Encrypt checks from outside Iran: port 80/TCP of the server must be open from abroad. Open it in the data center\'s firewall panel too; when international traffic is cut, SSL cannot be taken until it is back.',
+    'Port 80 busy: the error names the program. A Kanki tunnel that forwards port 80 holds it: take 80 out of that tunnel. Caddy / nginx are set aside by themselves for a few seconds.',
+    'After a failure the server waits (10 minutes, then longer) before it tries again; after fixing the cause press «Try SSL again».'].map(function(x){return '<li>'+esc(t(x))+'</li>'}).join('')+'</ul></div></details>':'');
  var ipHint=function(){var a=(r.agents||[]).filter(function(x){return x.id==$('#si_srv').value})[0];$('#si_ip').textContent=a?t('The domain\'s A record must point to this server\'s IP')+(a.ip?': '+a.ip:''):((r.agents||[]).some(function(x){return x.loc=='iran'})?'':t('Add a tunnel server inside Iran first (Servers), or set its location to Inside Iran.'))};
  ipHint();$('#si_srv').onchange=ipHint;
  $('#si_go').onclick=function(){var b=this;b.disabled=true;api('PUT','/api/sub-iran',{server:$('#si_srv').value,domain:$('#si_dom').value.trim(),port:+$('#si_port').value||2053}).then(function(){toast(t('Saved'));stIran()}).catch(function(e){b.disabled=false;fail(e)})};
- var rm=$('#si_rm');if(rm)rm.onclick=function(){confirmDo(function(){api('PUT','/api/sub-iran',{server:'',domain:''}).then(function(){toast(t('Done'));stIran()}).catch(fail)})}}).catch(function(e){box.textContent=e.message||''})}
+ var rm=$('#si_rm');if(rm)rm.onclick=function(){confirmDo(function(){api('PUT','/api/sub-iran',{server:'',domain:''}).then(function(){toast(t('Done'));stIran()}).catch(fail)})};
+ var re=$('#si_re');if(re)re.onclick=function(){re.disabled=true;api('POST','/api/tunnels/servers/'+encodeURIComponent(r.server)+'/ssl-retry').then(function(){toast(t('Sent: the server tries SSL again within a minute'));setTimeout(stIran,8000)}).catch(function(e){re.disabled=false;fail(e)})}}).catch(function(e){box.textContent=e.message||''})}
+Object.assign(FA,{"Try SSL again":"دوباره گرفتن SSL","Why SSL is not taken":"چرا SSL گرفته نمی‌شود","Sent: the server tries SSL again within a minute":"فرستاده شد: سرور تا یک دقیقه‌ی دیگر دوباره SSL می‌گیرد",
+ "The domain's A record must point to this Iran server's IP (not to a CDN while the certificate is taken: in ArvanCloud / Cloudflare set it to DNS only).":"رکورد A دامنه باید به آی‌پی همین سرور ایران اشاره کند (موقع گرفتن گواهی پشت CDN نباشد: در ابرآروان / کلادفلر روی «فقط DNS» بگذار).",
+ "Let's Encrypt checks from outside Iran: port 80/TCP of the server must be open from abroad. Open it in the data center's firewall panel too; when international traffic is cut, SSL cannot be taken until it is back.":"Let's Encrypt از خارج ایران چک می‌کند: پورت 80/TCP سرور باید از خارج باز باشد. در پنل فایروال دیتاسنتر هم بازش کن؛ وقتی اینترنت بین‌الملل قطع است، تا وصل نشود SSL گرفته نمی‌شود.",
+ "Port 80 busy: the error names the program. A Kanki tunnel that forwards port 80 holds it: take 80 out of that tunnel. Caddy / nginx are set aside by themselves for a few seconds.":"پورت ۸۰ پر: اسم برنامه در خطا هست. اگر یک تانل کانکی پورت ۸۰ را عبور می‌دهد، پورت دست خود اوست: ۸۰ را از آن تانل بردار. Caddy / nginx خودشان چند ثانیه کنار می‌روند.",
+ "After a failure the server waits (10 minutes, then longer) before it tries again; after fixing the cause press «Try SSL again».":"بعد از هر خطا سرور صبر می‌کند (۱۰ دقیقه، بعد بیشتر) و بعد دوباره امتحان می‌کند؛ بعد از رفع مشکل «دوباره گرفتن SSL» را بزن."});
 function stSub(d){var g=$('#sd_go'),m=$('#sd_msg');g.disabled=true;m.textContent=d?t('Getting the SSL certificate… this can take up to one minute'):'…';
  api('POST','/api/sub-domain',{domain:d}).then(function(r){S.st.sub_domain=r.domain||'';toast(t('Done'));pSettings()}).catch(function(e){g.disabled=false;m.textContent=e.message||'';fail(e)})}
 function stUpdate(force){autoUpdWire();var m=$('#st_um');if(!m||(!force&&m._done))return;m._done=1;m.className='vmsg';m.textContent=t('Checking…');
@@ -1791,7 +1814,7 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
  if(tab)show(tab)}
 
 // ---- Telegram sales bot page
-var BS_KEYS=['sales_on','warn_on','welcome','support','app_link','channel','trial_on','trial_gb','trial_days','ref_gb','ref_days','card_on','card_number','card_holder','np_on','np_key','np_coins','zp_on','zp_merchant','zp_callback','wallet_on','wallet_text'];
+var BS_KEYS=['sales_on','warn_on','welcome','support','app_link','channel','trial_on','trial_gb','trial_days','ref_gb','ref_days','card_on','card_number','card_holder','np_on','np_key','np_coins','zp_on','zp_merchant','zp_callback','wallet_on','wallet_text','ton_address','usdt_address','usd_rate'];
 // ---- the Kanki app's install files: uploaded here, sent by the bot and offered on the subscription page
 function botApk(){var el=$('#bt_apk');if(!el)return;
  api('GET','/api/apps').then(function(r){var f=r.files||[];
@@ -1847,6 +1870,7 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
  var st=b.paused?['y','Paused']:b.online?['g','Online']:['r','Offline'];
  var head=has?'<div class="card bcard"><div class="bh"><span class="bav">'+ic('bot',24)+'</span><div class="bn2"><b>'+esc(b.name||t('Sales bot'))+'</b>'+(b.username?'<a class="ltr" target="_blank" rel="noopener" href="https://t.me/'+encodeURIComponent(b.username)+'">@'+esc(b.username)+'</a>':'')+'</div>'+
    '<span class="badge '+st[0]+'"><span class="dot '+st[0]+'"></span> '+t(st[1])+'</span></div>'+
+   (!b.paused&&!b.online&&b.error?'<div class="warnbox ltr" style="margin:10px 0">'+esc(b.error)+'</div>':'')+(b.conflict?'<div class="warnbox">'+t('Another program uses this bot token (an old panel still running?). Stop it, or make a new token in @BotFather.')+'</div>':'')+
    '<p class="muted" style="margin:10px 0">'+t('Plans, prices and payments can also be managed inside the bot (Admin panel button).')+'</p><div class="bmeta"><span>'+t('Bot admins')+': <b class="ltr">'+esc(b.admins||'—')+'</b></span><span>'+t('Token')+': <b class="ltr">'+esc(b.token_masked||'')+'</b></span></div>'+
    '<div class="g4b"><button class="b2" id="bt_test">'+ic('send',15)+' '+t('Test connection')+'</button><button class="b2" id="bt_pause">'+ic(b.paused?'play':'pause',15)+' '+t(b.paused?'Resume':'Pause')+'</button><button class="b2" id="bt_edit">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2 bd" id="bt_del">'+ic('trash',15)+' '+t('Delete bot')+'</button></div></div>'
   :'<div class="card bempty"><span class="bav big">'+ic('bot',30)+'</span><h3>'+t('No sales bot yet')+'</h3><ol class="steps"><li>'+t('In Telegram open @BotFather, send /newbot and copy the token it gives.')+'</li><li>'+t('Get your numeric Telegram ID from @userinfobot.')+'</li><li>'+t('Press Create bot and paste both.')+'</li></ol><button class="btn" id="bt_new2">+ '+t('Create bot')+'</button></div>';
@@ -1860,15 +1884,25 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
    '<div class="box"><b>'+ic('gift',15)+' '+t('Free trial')+'</b><div class="chips">'+bsChk('trial_on','Give a free trial')+'</div><div class="g2f">'+bsIn('trial_gb','Trial volume (GB)','1','number')+bsIn('trial_days','Trial days','1','number')+'</div></div>'+
    '<div class="box"><b>'+ic('users',15)+' '+t('Referral reward')+'</b><div class="g2f">'+bsIn('ref_gb','Reward volume (GB)','5','number')+bsIn('ref_days','Reward days','3','number')+'</div></div>'+
    '<div class="box"><b>'+ic('card',15)+' '+t('Card to card')+'</b><div class="chips">'+bsChk('card_on','Accept card to card')+'</div><div class="g2f">'+bsIn('card_number','Card number','6037 ....',0,1)+bsIn('card_holder','Card holder name','')+'</div></div>'+
+   '<div class="box"><b>💎 '+t('Crypto payment (TON / USDT)')+'</b><div class="chips">'+bsChk('wallet_on','Accept crypto to my wallet')+'</div>'+
+    '<div class="g2f">'+bsIn('ton_address','TON wallet address (Tonkeeper…)','UQ…',0,1)+bsIn('usdt_address','USDT address (TRC20)','T…',0,1)+'</div>'+
+    '<div class="g2f">'+bsIn('usd_rate','Toman per dollar (for plans without a dollar price)','100000','number')+'<div></div></div>'+
+    '<p class="hint">'+t('The buyer sees the amount in dollars and in TON (at today\'s price), your addresses to copy and a Tonkeeper button, then sends the receipt or TXID for you to approve. Plans without a dollar price get it from the toman price at this rate; with no rate and no dollar price, crypto is not offered for that plan.')+'</p>'+
+    '<label class="f">'+t('Extra text for the buyer (optional)')+'</label><textarea data-bs="wallet_text" rows="2">'+esc((S.bset||{}).wallet_text||'')+'</textarea>'+
+    '<p class="r" id="bs_wwarn" style="display:none;font-size:12px;margin:6px 0 0">'+t('An address is written but «Accept crypto to my wallet» is off: buyers will not see it.')+'</p></div>'+
    '<details class="box"><summary><b>'+ic('globe',15)+' '+t('Online payments')+'</b></summary>'+
     '<div class="chips">'+bsChk('np_on','NOWPayments (crypto)')+'</div><div class="g2f">'+bsIn('np_key','NOWPayments API key','',0,1)+bsIn('np_coins','Coins','usdttrc20,trx,ton',0,1)+'</div>'+
     '<div class="chips">'+bsChk('zp_on','ZarinPal')+'</div><div class="g2f">'+bsIn('zp_merchant','ZarinPal merchant ID','',0,1)+bsIn('zp_callback','ZarinPal callback URL','https://…',0,1)+'</div>'+
-    '<div class="chips">'+bsChk('wallet_on','Wallet / manual payment')+'</div><label class="f">'+t('Text shown to the buyer')+'</label><textarea data-bs="wallet_text" rows="2">'+esc((S.bset||{}).wallet_text||'')+'</textarea></details>'+
+    '</details>'+
    '<button class="btn" style="width:100%;margin-top:10px" id="bs_save">'+t('Save sales settings')+'</button></div></div>'+
   '<div data-btp="plans">'+botSmart()+botPlans()+'</div><div data-btp="apk"><div id="bt_apk"></div></div><div data-btp="disc"><div id="bt_disc"></div></div><div data-btp="chan"><div id="bt_chan"></div></div><div data-btp="appmsg"><div id="bt_am"></div></div>';
  var showTab=function(k){S.btab=k;$$('#bt_tabs [data-bt]').forEach(function(b){b.classList.toggle('on',b.dataset.bt==k)});$$('[data-btp]').forEach(function(d){d.style.display=d.dataset.btp==k?'':'none'});
   if(k=='disc')botDisc();if(k=='chan')botChan();if(k=='appmsg')botAppMsg();if(k=='apk')botApk()};
  $('#bt_tabs').onclick=function(e){var b=e.target.closest('[data-bt]');if(b)showTab(b.dataset.bt)};showTab(S.btab);smartWire();
+ // crypto: typing an address switches «accept crypto» on; a written address with the switch off is warned about
+ (function(){var on=$('[data-bs="wallet_on"]'),ww=$('#bs_wwarn');if(!on)return;var has=function(){return ['ton_address','usdt_address'].some(function(k){var x=$('[data-bs="'+k+'"]');return x&&x.value.trim()})};
+  var chk=function(){if(ww)ww.style.display=has()&&!on.checked?'':'none'};
+  ['ton_address','usdt_address'].forEach(function(k){var x=$('[data-bs="'+k+'"]');if(x)x.addEventListener('input',function(){if(this.value.trim())on.checked=true;chk()})});on.addEventListener('change',chk);chk()})();
  var w=function(id,fn){var x=$(id);if(x)x.onclick=fn};
  w('#bt_new',function(){botModal(false)});w('#bt_new2',function(){botModal(false)});w('#bt_edit',function(){botModal(true)});
  w('#bt_test',function(){toast(t('Checking…'));api('POST','/api/bot/test').then(function(r){toast(r.ok?'✓ @'+(r.username||''):(r.error||t('Failed')),!r.ok)}).catch(fail)});
@@ -1878,12 +1912,12 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
   api('PUT','/api/settings',body).then(function(){toast(t('Saved'));botLoad()}).catch(fail)});
  w('#pl_add',function(){var n=$('#pl_n').value.trim();if(!n)return toast(t('Plan name'),1);
   api('POST','/api/plans',{name:n,days:+$('#pl_d').value||30,gb:+$('#pl_g').value||0,toman:+$('#pl_t').value||0,usd:+$('#pl_u').value||0,conns:+$('#pl_c').value||1,category:($('#pl_cat').value||'').trim()}).then(function(){toast(t('Saved'));botLoad()}).catch(fail)});
- var pl=$('#pl_list');if(pl)pl.onclick=function(e){var a=e.target.closest('[data-pact]');if(a){api('PUT','/api/plans/'+a.dataset.pact,{active:a.dataset.a=='1'}).then(botLoad).catch(fail);return}var m=e.target.closest('[data-pcat]');if(m){var x0=(S.plans||[]).filter(function(z){return z.id==m.dataset.pcat})[0]||{},v=prompt(t('Category name'),x0.category||'');if(v!==null)api('PUT','/api/plans/'+m.dataset.pcat,{category:v.trim()}).then(botLoad).catch(fail);return}
+ var pl=$('#pl_list');if(pl)pl.onclick=function(e){var a=e.target.closest('[data-pact]');if(a){api('PUT','/api/plans/'+a.dataset.pact,{active:a.dataset.a=='1'}).then(botLoad).catch(fail);return}var pu=e.target.closest('[data-pusd]');if(pu){var x1=(S.plans||[]).filter(function(z){return z.id==pu.dataset.pusd})[0]||{},v1=prompt(t('Dollar price (crypto)')+' · 0 = '+t('from the toman price at the dollar rate'),x1.usd||0);if(v1!==null)api('PUT','/api/plans/'+pu.dataset.pusd,{usd:+unN(v1)||0}).then(botLoad).catch(fail);return}var m=e.target.closest('[data-pcat]');if(m){var x0=(S.plans||[]).filter(function(z){return z.id==m.dataset.pcat})[0]||{},v=prompt(t('Category name'),x0.category||'');if(v!==null)api('PUT','/api/plans/'+m.dataset.pcat,{category:v.trim()}).then(botLoad).catch(fail);return}
  var rn=e.target.closest('[data-crn]');if(rn){var v2=prompt(t('Category name'),rn.dataset.crn);if(v2!==null)api('PUT','/api/plans/category',{from:rn.dataset.crn,to:v2.trim()}).then(botLoad).catch(fail);return}
  var b=e.target.closest('[data-pdel]');if(b)confirmDo(function(){api('DELETE','/api/plans/'+b.dataset.pdel).then(function(){toast(t('Done'));botLoad()}).catch(fail)})}}
 function plCats(p){var o=[];(p||[]).forEach(function(x){if(x.category&&o.indexOf(x.category)<0)o.push(x.category)});return o.sort()}
 function plRow(x){return '<div class="li"><span><b>'+esc(x.name)+'</b><small>'+N(x.days)+' '+t('days')+' · '+(x.gb>0?N(x.gb)+' GB':'∞')+' · '+N(x.conns)+' '+t('connections')+(x.countries>0?' · '+N(x.countries)+' '+t('countries'):'')+(x.active?'':' · '+t('Hidden'))+'</small></span>'+
-  '<span class="row" style="gap:8px;flex-wrap:nowrap"><span class="pprice"><b>'+N(Number(x.toman||0).toLocaleString('en-US'))+' '+t('Toman')+'</b>'+(x.usd?'<small class="ltr">$'+x.usd+'</small>':'')+'</span><button class="ib" data-pcat="'+x.id+'" title="'+t('Move to category')+'">📂</button><button class="ib'+(x.active?' on':'')+'" data-pact="'+x.id+'" data-a="'+(x.active?0:1)+'" title="'+t(x.active?'Shown in the bot':'Hidden')+'">'+(x.active?'👁':'—')+'</button><button class="ib" data-pdel="'+x.id+'" aria-label="'+t('Delete')+'">'+ic('trash',14)+'</button></span></div>'}
+  '<span class="row" style="gap:8px;flex-wrap:nowrap"><span class="pprice"><b>'+N(Number(x.toman||0).toLocaleString('en-US'))+' '+t('Toman')+'</b>'+(x.usd?'<small class="ltr">$'+x.usd+'</small>':'')+'</span><button class="ib" data-pusd="'+x.id+'" title="'+t('Dollar price (crypto)')+'">$</button><button class="ib" data-pcat="'+x.id+'" title="'+t('Move to category')+'">📂</button><button class="ib'+(x.active?' on':'')+'" data-pact="'+x.id+'" data-a="'+(x.active?0:1)+'" title="'+t(x.active?'Shown in the bot':'Hidden')+'">'+(x.active?'👁':'—')+'</button><button class="ib" data-pdel="'+x.id+'" aria-label="'+t('Delete')+'">'+ic('trash',14)+'</button></span></div>'}
 function plGroups(p){if(!p.length)return '<span class="muted">'+t('No plans yet')+'</span>';var g={},ord=[];p.forEach(function(x){var k=x.category||'';if(!g[k]){g[k]=[];ord.push(k)}g[k].push(x)});
  if(ord.length==1&&ord[0]==='')return '<div class="list">'+p.map(plRow).join('')+'</div>';
  ord.sort(function(a,b){return a===''?1:b===''?-1:a.localeCompare(b)});
@@ -2109,6 +2143,7 @@ function ptDraw(){var el=$('#pt');if(!el)return;var ns=S.nodes||[];if(!ns.some(f
 function ptCheck(n){toast(t('Checking…'));if(n.id=='local'){api('GET','/api/system').then(function(s){S.psys=s;ptDraw();toast(t('Done'))}).catch(fail);return}
  api('POST','/api/nodes/'+encodeURIComponent(n.id)+'/health').then(function(r){if(r.services){n.info=n.info||{};n.info.services=r.services}toast(r.ok?t('Done'):t('Offline'),!r.ok);ptDraw()}).catch(fail)}
 
+Object.assign(FA,{"Dollar price (crypto)":"قیمت دلاری (پرداخت ارزی)","from the toman price at the dollar rate":"از روی قیمت تومان با نرخ دلار","Crypto payment (TON / USDT)":"پرداخت ارزی (TON / USDT)","Accept crypto to my wallet":"دریافت ارز به کیف پول خودم","TON wallet address (Tonkeeper…)":"آدرس کیف پول TON (تون‌کیپر…)","USDT address (TRC20)":"آدرس USDT (شبکه‌ی TRC20)","Toman per dollar (for plans without a dollar price)":"نرخ دلار به تومان (برای پلن‌های بدون قیمت دلاری)","Extra text for the buyer (optional)":"متن اضافه برای خریدار (اختیاری)","An address is written but «Accept crypto to my wallet» is off: buyers will not see it.":"آدرس نوشته شده ولی «دریافت ارز به کیف پول خودم» خاموش است: خریدارها آن را نمی‌بینند.","The buyer sees the amount in dollars and in TON (at today\'s price), your addresses to copy and a Tonkeeper button, then sends the receipt or TXID for you to approve. Plans without a dollar price get it from the toman price at this rate; with no rate and no dollar price, crypto is not offered for that plan.":"خریدار مبلغ را به دلار و به TON (با قیمت امروز)، آدرس‌هایت را برای کپی و دکمه‌ی تون‌کیپر می‌بیند و بعد رسید یا TXID را می‌فرستد تا تأیید کنی. پلنی که قیمت دلاری ندارد، قیمتش از روی تومان با همین نرخ حساب می‌شود؛ بدون نرخ و بدون قیمت دلاری، پرداخت ارزی برای آن پلن نشان داده نمی‌شود."});
 Object.assign(FA,{"Admin numeric ID(s), comma separated": "آیدی عددی ادمین(ها)، با کاما جدا کن", "All servers": "همه سرورها", "All servers connected": "همه سرورها وصل‌اند", "All services": "همه سرویس‌ها", "Bot admins": "ادمین‌های ربات", "Bot token (from @BotFather)": "توکن ربات (از ‎@BotFather)", "Plans, prices and payments can also be managed inside the bot (Admin panel button).": "پلن‌ها، قیمت‌ها و پرداخت‌ها را داخل خود ربات هم می‌شود مدیریت کرد (دکمه پنل ادمین).", "By node": "بر اساس نود", "By protocol": "بر اساس پروتکل", "Check now": "بررسی الان", "Create and manage the sales bot": "ساخت و مدیریت ربات فروش", "Download and upload, every 2 seconds": "دانلود و آپلود، هر ۲ ثانیه", "Edit bot": "ویرایش ربات", "Empty = keep the current token": "خالی = همان توکن فعلی بماند", "Enforce connection limit (Hysteria2)": "اعمال محدودیت اتصال (Hysteria2)", "Firewall": "فایروال", "Get your numeric Telegram ID from @userinfobot.": "آیدی عددی تلگرامت را از ‎@userinfobot بگیر.", "How the bot sells: trials, payments, referrals and messages.": "نحوه فروش ربات: تست رایگان، پرداخت، دعوت دوستان و پیام‌ها.", "If a port is closed, run this on that server as root:": "اگر پورتی بسته است، این را روی همان سرور با root اجرا کن:", "In Telegram open @BotFather, send /newbot and copy the token it gives.": "در تلگرام ‎@BotFather را باز کن، ‎/newbot را بفرست و توکنی که می‌دهد را کپی کن.", "Live log": "لاگ زنده", "Live network traffic": "ترافیک لحظه‌ای شبکه", "Live speed": "سرعت لحظه‌ای", "Logs are not available": "لاگ در دسترس نیست", "Main": "اصلی", "New link (the old one stops working)": "لینک جدید (لینک قبلی از کار می‌افتد)", "No debug lines": "خط دیباگی نیست", "No errors": "خطایی نیست", "No log lines yet": "هنوز لاگی نیست", "No plans yet": "هنوز پلنی ساخته نشده", "No port information yet. Press Check now.": "هنوز اطلاعات پورت نیامده. «بررسی الان» را بزن.", "No sales bot yet": "هنوز ربات فروش ساخته نشده", "Node API (HTTPS)": "API نود (HTTPS)", "Online payments": "درگاه‌های پرداخت آنلاین", "Panel (HTTPS)": "پنل (HTTPS)", "Panel (internal)": "پنل (داخلی)", "Panel / API": "پنل / API", "Panel and VPN services on this server": "پنل و سرویس‌های VPN همین سرور", "Panel is restarting…": "پنل در حال ری‌استارت…", "Plan name": "نام پلن", "Port conflict: another service on this server uses the same port": "تداخل پورت: سرویس دیگری روی همین سرور همین پورت را دارد", "Port management": "مدیریت پورت‌ها", "Ports used on the main server and on every node": "پورت‌های سرور اصلی و همه نودها", "Press Create bot and paste both.": "«ساخت ربات» را بزن و هر دو را وارد کن.", "Quota of limited users": "مجموع سهمیه کاربران محدود", "Referral reward": "هدیه دعوت دوستان", "Save sales settings": "ذخیره تنظیمات فروش", "Search": "جستجو", "Server": "سرور", "Show all": "نمایش همه", "Soft light": "روشن ملایم", "Telegram sales bot": "ربات فروش تلگرام", "Text shown to the buyer": "متنی که به خریدار نشان داده می‌شود", "The panel restarts for a few seconds after saving.": "بعد از ذخیره، پنل چند ثانیه ری‌استارت می‌شود.", "Token": "توکن", "Token is required": "توکن لازم است", "Total recorded usage": "مصرف کل ثبت‌شده", "Traffic & stats": "ترافیک و آمار", "Used volume, limit and percent": "حجم مصرفی، سقف و درصد مصرف", "Users usage": "مصرف کاربران", "Users usage and live network traffic": "مصرف کاربران و ترافیک زنده شبکه", "Web (Caddy)": "وب (Caddy)", "Welcome message": "پیام خوش‌آمد", "What buyers can choose in the bot": "پلن‌هایی که خریدار در ربات می‌بیند", "connections": "اتصال", "local only (127.0.0.1)": "فقط داخلی (127.0.0.1)", "of it used": "از آن مصرف شده", "server(s) disconnected": "سرور قطع است", "users": "کاربر", "Sales enabled": "فروش فعال باشد", "Warn buyers before expiry / end of data": "هشدار به خریدار قبل از پایان زمان یا حجم", "App download link": "لینک دانلود اپ", "Required channel (empty = none)": "کانال اجباری (خالی = ندارد)", "Give a free trial": "تست رایگان بده", "Trial volume (GB)": "حجم تست (گیگ)", "Reward volume (GB)": "حجم هدیه (گیگ)", "Reward days": "روزهای هدیه", "Accept card to card": "پرداخت کارت به کارت فعال باشد", "Card holder name": "نام صاحب کارت", "NOWPayments (crypto)": "NOWPayments (ارز دیجیتال)", "NOWPayments API key": "کلید API در NOWPayments", "ZarinPal merchant ID": "مرچنت زرین‌پال", "ZarinPal callback URL": "آدرس بازگشت زرین‌پال", "Wallet / manual payment": "کیف پول / پرداخت دستی", "Connected": "وصل", "Disconnected": "قطع", "Errors": "خطا", "Debug": "دیباگ", "Unknown": "نامشخص"});
 // ---------------------------------------------------------------- Kanki Tunnel (v2.4)
 ICO.tunnel='<path d="M3 19v-7a9 9 0 0 1 18 0v7"/><path d="M7.5 19v-6.5a4.5 4.5 0 0 1 9 0V19"/><path d="M1.5 19h21"/>';
@@ -2266,8 +2301,13 @@ function tunSrvCard(s){var nt=((TN.d&&TN.d.tunnels)||[]).filter(function(x){retu
   (s.local?'':!s.loc?'<p class="hint">'+t('Location not set: choose it in Edit')+'</p>':s.loc_guess?'<p class="hint">'+t('Location guessed: confirm it in Edit')+'</p>':'')+
   '<div class="g'+(s.local?'1':'3')+'"><button class="b2" onclick="tunSrvEdit(\''+s.id+'\')">'+ic('edit',15)+' '+t('Edit')+'</button>'+(s.local?'':'<button class="b2" onclick="tunSrvCmd(\''+s.id+'\')">'+ic('link',15)+' '+t('Command')+'</button><button class="b2 bd" onclick="tunSrvDel(\''+s.id+'\')">'+ic('trash',15)+' '+t('Delete')+'</button>')+'</div></div>'}
 function tunAct(id,a){api('POST','/api/tunnels/'+id+'/'+a).then(function(){toast(a=='restart'?t('The tunnel reconnects in a few seconds'):t('Done'));tunRefresh()}).catch(fail)}
-function tunDel(id){confirmDo(function(){api('DELETE','/api/tunnels/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)})}
-function tunSrvDel(id){confirmDo(function(){api('DELETE','/api/tunnels/servers/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)})}
+function tunDel(id){if(!confirm(t('Delete this tunnel? It stops on both servers and its ports are closed in their firewalls.')))return;api('DELETE','/api/tunnels/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)}
+function tunSrvDel(id){if(!confirm(t('Remove this server from the panel? Within a few seconds it removes everything Kanki installed there (tunnels, Kanki DNS, Xray, emergency chat, subscription link), closes the ports Kanki opened and uninstalls its agent.')))return;api('DELETE','/api/tunnels/servers/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)}
+Object.assign(FA,{"Delete this server? Its users are cut off and the server itself removes WireGuard, AmneziaWG, Hysteria2 and KANKI MIX, closes their ports and uninstalls the node agent.":"این سرور حذف شود؟ کاربرهایش قطع می‌شوند و خود سرور WireGuard، AmneziaWG، Hysteria2 و KANKI MIX را برمی‌دارد، پورت‌هایشان را می‌بندد و ایجنت نود را پاک می‌کند.",
+ "Removing…":"در حال حذف…","Done: everything was removed from the server too":"انجام شد: همه چیز از روی خود سرور هم پاک شد",
+ "Deleted from the panel. The server did not answer (or runs an old version): its VPN services stay until you uninstall them there.":"از پنل حذف شد. سرور جواب نداد (یا نسخه‌اش قدیمی است): سرویس‌های VPN رویش می‌مانند تا خودت آن‌جا پاکشان کنی.",
+ "Delete this tunnel? It stops on both servers and its ports are closed in their firewalls.":"این تانل حذف شود؟ روی هر دو سرور خاموش می‌شود و پورت‌هایش در فایروال هر دو بسته می‌شود.",
+ "Remove this server from the panel? Within a few seconds it removes everything Kanki installed there (tunnels, Kanki DNS, Xray, emergency chat, subscription link), closes the ports Kanki opened and uninstalls its agent.":"این سرور از پنل حذف شود؟ تا چند ثانیه‌ی دیگر هر چه کانکی رویش نصب کرده (تانل‌ها، DNS کانکی، Xray، چت اضطراری، لینک اشتراک) پاک می‌شود، پورت‌هایی که کانکی باز کرده بسته می‌شود و ایجنتش حذف می‌شود."});
 
 // ---- servers
 function tunCmdBox(s,d){var cmd=tunCmd(s,d);
@@ -2333,12 +2373,12 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  var opt=function(sel){return srvOptGroups(sv,function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'})};
  var prof=x.conns==8?'speed':x.conns==2?'gaming':'balanced',tr=x.transport||'tcpmux',mode=x.mode||'reverse',kind=(x.kind=='awg'||x.kind=='hy2')?x.kind:'',A=x.awg||{},Y=x.hy2||{};if(tr=='awg'||tr=='hy2')tr='tcpmux';
  var awp=A.params||{},awpt=Object.keys(awp).map(function(k){return k+'='+awp[k]}).join('  ');
- var trs=[['Hardest to block',[['dual',t('UDP first (masked QUIC); if UDP is cut, HTTP/2 over TLS on the same port number'),['UDP','TCP','TLS']],['h2',t('WebSocket over HTTP/2, TLS 1.3 like a browser, many links in one connection'),['TLS','SNI','H2']],['faketcp',t('UDP traffic inside fake TCP packets (udp2raw style): passes where UDP is cut or slowed; needs root on both servers'),['TCP','UDP']]]],
-  ['Looks like web traffic',[['wss',t('Looks like an HTTPS site, hardest to spot'),['TLS','SNI']],['ws',t('Looks like a WebSocket, works behind a CDN'),['HTTP']]]],
-  ['Encrypted TCP',[['tcpmux',t('Fast and steady, several links at once'),['TCP']],['tcp',t('One plain link'),['TCP']]]],
-  ['Over UDP',[['quic',t('Over QUIC (UDP), fast and encrypted'),['UDP','SNI']],['kcp',t('Over KCP (UDP), good on weak/lossy internet'),['UDP']],['hq',t('QUIC under a random mask: no QUIC signature, packet sizes hidden'),['UDP','SNI','Mask']]]],
-  ['Gaming',[['game',t('KCP + Reed-Solomon FEC and optional packet duplication: recovers lost packets without waiting, the lowest ping under loss'),['UDP','FEC']]]],
-  ['Whitelist',[['cdn',t('Whitelist mode: through a CDN (ArvanCloud), for when only domestic sites open'),['TLS','SNI','CDN']]]]];
+ var TRD={dual:[t('UDP first (masked QUIC); if UDP is cut, HTTP/2 over TLS on the same port number'),['UDP','TCP','TLS']],h2:[t('WebSocket over HTTP/2, TLS 1.3 like a browser, many links in one connection'),['TLS','SNI','H2']],faketcp:[t('UDP traffic inside fake TCP packets (udp2raw style): passes where UDP is cut or slowed; needs root on both servers'),['TCP','UDP']],
+  wss:[t('Looks like an HTTPS site, hardest to spot'),['TLS','SNI']],ws:[t('Looks like a WebSocket, works behind a CDN'),['HTTP']],tcpmux:[t('Fast and steady, several links at once'),['TCP']],tcp:[t('One plain link'),['TCP']],
+  quic:[t('Over QUIC (UDP), fast and encrypted'),['UDP','SNI']],kcp:[t('Over KCP (UDP), good on weak/lossy internet'),['UDP']],hq:[t('QUIC under a random mask: no QUIC signature, packet sizes hidden'),['UDP','SNI','Mask']],
+  game:[t('KCP + Reed-Solomon FEC and optional packet duplication: recovers lost packets without waiting, the lowest ping under loss'),['UDP','FEC']],cdn:[t('Whitelist mode: through a CDN (ArvanCloud), for when only domestic sites open'),['TLS','SNI','CDN']]};
+ // three groups: over UDP (fast, games), over TCP (steady), advanced (hardest to block / whitelist)
+ var trs=[['Over UDP (fast, games)',['game','kcp','quic','hq']],['Over TCP (steady)',['tcpmux','wss','ws','tcp']],['Advanced (hardest to block)',['dual','h2','faketcp','cdn']]].map(function(g){return [g[0],g[1].map(function(k){return [k,TRD[k][0],TRD[k][1]]})]});
  var sec=function(n,title,extra){return '<div class="tws"><h4><i>'+N(n)+'</i>'+t(title)+(extra||'')+'</h4>'};
  modal(mhead(id?t('Edit tunnel'):t('New tunnel'))+
   (sv.length<2?'<div class="warnbox">'+t('First add your entry server in the “Tunnel servers” menu.')+'</div>':'')+
@@ -2377,7 +2417,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '</div>'+
   '</div>'+
   '<div id="tw_trw">'+sec(3,'Transport','<button type="button" class="b2 sm" id="tw_smart">⚡ '+t('Find the best transport')+'</button>')+
-  '<div id="tw_tr">'+trs.map(function(g){return '<div class="trgl">'+t(g[0])+'</div><div class="tropt">'+g[1].map(function(o){return '<button data-v="'+o[0]+'" class="'+(tr==o[0]?'on':'')+'"><b>'+tunTr(o[0])+o[2].map(function(z){return '<em class="ttg">'+z+'</em>'}).join('')+'</b><small>'+o[1]+'</small></button>'}).join('')+'</div>'}).join('')+'</div>'+
+  '<div id="tw_tr" class="trcols">'+trs.map(function(g,gi){return '<div class="trcol trc'+gi+'"><div class="trgl">'+t(g[0])+'</div><div class="tropt">'+g[1].map(function(o){return '<button data-v="'+o[0]+'" class="'+(tr==o[0]?'on':'')+'"><b>'+tunTr(o[0])+o[2].map(function(z){return '<em class="ttg">'+z+'</em>'}).join('')+'</b><small>'+o[1]+'</small></button>'}).join('')+'</div></div>'}).join('')+'</div>'+
   '<small class="muted" style="display:block;margin-top:8px">'+t('On filtered networks WSS and WS usually pass; plain TCP, TCP Mux, QUIC and KCP are often cut. Use “Find the best transport” to test them between these two servers.')+'</small>'+
   '<div id="tw_gm" class="box" style="display:none;margin-top:10px"><b>🎮 '+t('Gaming options')+'</b>'+
   '<small class="muted" style="display:block;margin:4px 0 8px">'+t('FEC sends extra repair packets so a lost packet is rebuilt at the other end instead of being waited for (about 40–100 ms saved per loss). 8:3 means 3 repair packets per 8 data packets (~37% more traffic). Duplication sends every packet twice: best ping, double the traffic. For WireGuard on top of this tunnel, FEC 8:3 is the sweet spot.')+'</small>'+
@@ -2408,9 +2448,9 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<small class="muted" id="tw_pn" style="display:block;margin-bottom:6px"></small>'+
   '<div class="g2"><div><label class="f">TCP</label><input id="tw_tcp" class="ltr" value="'+esc((x.tcp||[]).join(', '))+'" placeholder="443, 2053"></div><div><label class="f">UDP</label><input id="tw_udp" class="ltr" value="'+esc((x.udp||[]).join(', '))+'" placeholder="51820, 51821, 8443"></div></div>'+
   '<small class="muted">'+t('Users connect to these ports on the entry; they reach the same ports on the exit. Use 8443:443 to change the port, 1000-1010 for a range.')+'</small></div></div>'+
-  sec(6,'More')+'<label class="chk rotk"><input type="checkbox" id="tw_au" '+(x.auto?'checked':'')+'><span><b>🔁 '+t('Rotating tunnel')+'</b><small>'+t('If it stays down, it switches by itself: KCP → TCP Mux → QUIC → WS → WSS → TCP (balanced, reverse)')+'</small></span></label>'+
+  '<details class="tws twm"'+(x.auto||(x.dial&&x.transport!='cdn')||x.target?' open':'')+'><summary><h4><i>'+N(6)+'</i>'+t('More')+' <small class="muted" style="font-weight:600">'+t('rotating tunnel, address to dial, target')+'</small></h4></summary><label class="chk rotk"><input type="checkbox" id="tw_au" '+(x.auto?'checked':'')+'><span><b>🔁 '+t('Rotating tunnel')+'</b><small>'+t('If it stays down, it switches by itself: KCP → TCP Mux → QUIC → WS → WSS → TCP (balanced, reverse)')+'</small></span></label>'+
   '<div class="g2"><div><label class="f">'+t('Address to dial (empty = the server’s address)')+'</label><input id="tw_dl" class="ltr" value="'+esc(x.transport=='cdn'?'':(x.dial||''))+'"></div>'+
-  '<div><label class="f">'+t('Target on the exit')+'</label><input id="tw_tg" class="ltr" value="'+esc(x.target||'')+'" placeholder="127.0.0.1"></div></div></div>'+
+  '<div><label class="f">'+t('Target on the exit')+'</label><input id="tw_tg" class="ltr" value="'+esc(x.target||'')+'" placeholder="127.0.0.1"></div></div></details>'+
   '<div class="g2" style="margin-top:14px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="tw_go">'+(id?t('Save'):t('Make the tunnel'))+'</button></div>','wide');
  var st={mode:mode,tr:tr,kind:kind,wrap:!!A.wrap};
  function hint(){var en=$('#tw_en').value,ex=$('#tw_ex').value,l=st.mode=='direct'?ex:en,pt=$('#tw_pt');
@@ -2676,5 +2716,10 @@ export -f probe; export HOST PORT URLPATH
 for s in $SNIS; do expand | xargs -P 40 -I{} bash -c 'probe {} '"$s"; done
 echo "done"
 </script>
+<script src="/assets/kanki-v37.js"></script>
+<script src="/assets/kanki-look.js"></script>
+<script src="/assets/kanki-servers.js"></script>
+<script src="/assets/kanki-route.js"></script>
+<script src="/assets/kanki-svc.js"></script>
 </body>
 </html>

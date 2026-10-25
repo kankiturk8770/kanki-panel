@@ -28,8 +28,9 @@ pub fn panel_client(insecure: bool, timeout: Duration) -> reqwest::Client {
     }
 }
 
-/// Opens the ports a tunnel listens on in ufw (only when ufw is active). Remembers what it opened.
-pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
+/// Opens the ports the tunnels listen on in ufw (when ufw is on) and closes the ones of tunnels that
+/// were deleted or changed (see `fw`). Blocking.
+pub fn open_ports(specs: &[Spec]) {
     let mut want = vec![];
     for s in specs {
         if let Some(a) = &s.awg {
@@ -80,25 +81,125 @@ pub fn open_ports(specs: &[Spec], done: &Mutex<HashSet<String>>) {
             }
         }
     }
-    let todo: Vec<String> = {
-        let d = done.lock().unwrap();
-        want.into_iter().filter(|p| !d.contains(p)).collect()
-    };
-    if todo.is_empty() {
-        return;
+    crate::fw::sync("tunnels", want);
+}
+
+// ------------------------------------------------------------------ installing the VPN part (asked in the panel)
+
+const SETUP_DIR: &str = "/var/lib/kanki";
+
+fn setup_file(name: &str) -> String {
+    format!("{}/setup.{}", SETUP_DIR, name)
+}
+
+/// The VPN install the panel asked for: {req, state: running|done|failed, code, tail} (Null = none)
+pub fn setup_status() -> Value {
+    let Ok(t) = std::fs::read_to_string(setup_file("json")) else { return Value::Null };
+    let mut v: Value = serde_json::from_str(&t).unwrap_or(Value::Null);
+    if !v.is_object() {
+        return Value::Null;
     }
-    let active = std::process::Command::new("ufw")
-        .arg("status")
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains("Status: active"))
-        .unwrap_or(false);
-    let mut d = done.lock().unwrap();
-    for p in todo {
-        if active {
-            let _ = std::process::Command::new("ufw").args(["allow", &p]).output();
+    let log = std::fs::read_to_string(setup_file("log")).unwrap_or_default();
+    // colours of the installer out, the last lines in
+    let clean: String = log.replace("\u{1b}[1;33m", "").replace("\u{1b}[1;31m", "").replace("\u{1b}[1;32m", "").replace("\u{1b}[1;36m", "").replace("\u{1b}[0m", "");
+    let lines: Vec<&str> = clean.lines().filter(|l| !l.trim().is_empty()).collect();
+    v["tail"] = json!(lines[lines.len().saturating_sub(12)..].join("\n"));
+    match std::fs::read_to_string(setup_file("exit")).ok().and_then(|c| c.trim().parse::<i32>().ok()) {
+        Some(0) => v["state"] = json!("done"),
+        Some(c) => {
+            v["state"] = json!("failed");
+            v["code"] = json!(c);
         }
-        d.insert(p);
+        None => {
+            // still running, unless it was cut off (a reboot) long ago
+            let started = v["started"].as_i64().unwrap_or(0);
+            v["state"] = json!(if crate::util::now() - started > 3600 { "failed" } else { "running" });
+        }
     }
+    v
+}
+
+/// Runs the installer of this very program for the VPN part of this server (WireGuard, AmneziaWG,
+/// Hysteria2, KANKI MIX and the node agent), the way the panel asked. It runs as its own systemd
+/// unit, so a restart of this agent does not cut it off. Blocking, returns at once.
+fn start_setup(cfg: &Value) -> Result<(), String> {
+    let req = cfg["req"].as_i64().unwrap_or(0);
+    let s = |k: &str| cfg[k].as_str().unwrap_or("").trim().to_string();
+    let (panel, join, ports, domain, repo) = (s("panel"), s("join"), s("ports"), s("domain"), s("repo"));
+    let safe = |v: &str, extra: &[u8]| v.bytes().all(|c| c.is_ascii_alphanumeric() || extra.contains(&c));
+    if req == 0 || join.len() < 20 || !safe(&join, b"") {
+        return Err("bad request".into());
+    }
+    if !panel.starts_with("https://") || !safe(&panel, b":/.-_[]") {
+        return Err("bad panel address".into());
+    }
+    if !safe(&ports, b",") || !safe(&domain, b".-") || !safe(&repo, b"/.-_") {
+        return Err("bad request".into());
+    }
+    // the same request is started once
+    if let Ok(t) = std::fs::read_to_string(setup_file("json")) {
+        if serde_json::from_str::<Value>(&t).ok().and_then(|v| v["req"].as_i64()) == Some(req) {
+            return Ok(());
+        }
+    }
+    let _ = std::fs::create_dir_all(SETUP_DIR);
+    let script = setup_file("sh");
+    std::fs::write(&script, crate::servers::INSTALL_SH).map_err(|e| e.to_string())?;
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700));
+    }
+    let _ = std::fs::remove_file(setup_file("exit"));
+    let _ = std::fs::write(setup_file("log"), "");
+    let _ = std::fs::write(setup_file("json"), json!({ "req": req, "started": crate::util::now() }).to_string());
+    let mut env = format!("KANKI_PANEL='{}' KANKI_JOIN='{}' KANKI_PORTS='{}' KANKI_LOCAL_BIN=1", panel, join, ports);
+    if !domain.is_empty() {
+        env.push_str(&format!(" KANKI_DOMAIN='{}'", domain));
+    }
+    if !repo.is_empty() {
+        env.push_str(&format!(" KANKI_REPO='{}'", repo));
+    }
+    let inner = format!("{} bash {} > {} 2>&1 < /dev/null; echo $? > {}", env, script, setup_file("log"), setup_file("exit"));
+    let unit = format!("kanki-setup-{}", req);
+    let ok = std::process::Command::new("systemd-run")
+        .args(["--unit", &unit, "--collect", "--quiet", "/bin/sh", "-c", &inner])
+        .stdin(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !ok {
+        // no systemd-run: a detached shell
+        std::process::Command::new("setsid")
+            .args(["-f", "/bin/sh", "-c", &inner])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    eprintln!("installing the VPN part of this server, as the panel asked ({})", setup_file("log"));
+    Ok(())
+}
+
+/// This server was removed from the panel: close the ports Kanki opened, then remove the tunnel agent
+/// itself (its service, settings and saved tunnels). The program file stays when the panel or a VPN
+/// node of the same machine still uses it. Blocking; does not return when systemd stops the agent.
+fn uninstall_self() {
+    crate::fw::close_all();
+    let sh = |c: &str| {
+        let _ = std::process::Command::new("sh").arg("-c").arg(c).stdin(std::process::Stdio::null()).status();
+    };
+    let _ = std::fs::remove_file(ENV_FILE);
+    let _ = std::fs::remove_file(PIN_FILE);
+    let _ = std::fs::remove_file("/var/lib/kanki/subsrv.json");
+    let _ = std::fs::remove_file("/etc/sysctl.d/90-kanki-tunnel.conf");
+    let _ = std::fs::remove_file(CACHE);
+    eprintln!("removed from the panel: the tunnel agent uninstalls itself");
+    sh("systemctl disable -q kanki-tunnel.service 2>/dev/null; rm -f /etc/systemd/system/kanki-tunnel.service; systemctl daemon-reload");
+    // the VPN part of this machine (when it is still here) takes the rest when it goes
+    crate::admin::wipe_all_if_last();
+    sh("systemctl stop kanki-tunnel.service");
+    std::process::exit(0);
 }
 
 /// Downloads the panel's own binary (same file, same machine type), checks its sha256, swaps it in
@@ -125,14 +226,8 @@ async fn update_from_panel(http: &reqwest::Client, panel: &str, id: &str, token:
     if want.is_empty() || want != got {
         return Err("checksum mismatch, update aborted".into());
     }
-    let path = std::env::current_exe().map_err(|e| e.to_string())?;
-    let tmp = path.with_extension("new");
-    std::fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
-    }
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    let path = crate::util::exe_path().map_err(|e| e.to_string())?;
+    crate::util::swap_program(&path, &bytes)?;
     eprintln!("updated from the panel: restarting");
     std::process::exit(0);
 }
@@ -149,14 +244,13 @@ pub async fn run(version: &str) {
     }
     eprintln!("kanki tunnel agent {} for {} (server {})", version, panel, id);
     let mgr = Arc::new(Manager::default());
-    let opened = Mutex::new(HashSet::new());
     let mut last = String::new();
     if let Ok(t) = std::fs::read_to_string(CACHE) {
         if let Ok(specs) = serde_json::from_str::<Vec<Spec>>(&t) {
             eprintln!("starting {} saved tunnel(s)", specs.len());
             let ps = specs.clone();
-            let _ = tokio::task::spawn_blocking(move || open_ports(&ps, &Mutex::new(HashSet::new()))).await;
             mgr.apply(specs).await;
+            let _ = tokio::task::spawn_blocking(move || open_ports(&ps)).await;
             last = t;
         }
     }
@@ -172,6 +266,8 @@ pub async fn run(version: &str) {
     // certificates close to their end are renewed with what holds port 80 at that moment
     crate::certbot::renew_loop();
     let mut fails = 0u32;
+    // answers in a row that say this server was removed from the panel
+    let mut gone = 0u32;
     // the last error of setting up the emergency chat (reported to the panel)
     let emer_err: Mutex<Option<String>> = Mutex::new(None);
     // the last error of setting up Kanki DNS
@@ -208,12 +304,17 @@ pub async fn run(version: &str) {
                 xray_st = json!({ "active": false, "deploy_error": e });
             }
         }
-        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status() });
+        let fw_st = tokio::task::spawn_blocking(crate::fw::report).await.unwrap_or_default();
+        let listen = tokio::task::spawn_blocking(crate::certbot::listeners_json).await.unwrap_or_default();
+        let setup_st = tokio::task::spawn_blocking(setup_status).await.unwrap_or_default();
+        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st });
         match http.post(format!("{}/tunnel/agent", panel)).json(&body).send().await {
             Ok(r) if r.status().as_u16() == 410 => {
-                // this server was removed in the panel
-                if !last.is_empty() {
-                    eprintln!("the panel removed this server: stopping every tunnel");
+                // this server was removed in the panel: everything Kanki put here is removed (a few
+                // answers in a row, so one odd answer does not wipe a working server)
+                gone += 1;
+                if gone >= 3 {
+                    eprintln!("the panel removed this server: removing every tunnel and service Kanki installed here");
                     mgr.apply(vec![]).await;
                     let _ = tokio::task::spawn_blocking(|| crate::emergency::deploy(None)).await;
                     let _ = tokio::task::spawn_blocking(|| crate::dns::deploy(None)).await;
@@ -221,10 +322,14 @@ pub async fn run(version: &str) {
                     subsrv.apply(None);
                     let _ = std::fs::remove_file(CACHE);
                     last.clear();
+                    // the Hysteria2 / AmneziaWG tunnel workers stop their units and routes by themselves
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    let _ = tokio::task::spawn_blocking(uninstall_self).await;
                 }
             }
             Ok(r) if r.status().is_success() => {
                 fails = 0;
+                gone = 0;
                 crate::dns::qlog_ack(&body["dns"]);
                 if let Ok(v) = r.json::<Value>().await {
                     // the emergency chat: "set" (new config), "keep" (unchanged) or "off"
@@ -240,6 +345,15 @@ pub async fn run(version: &str) {
                             *emer_err.lock().unwrap() = r.err();
                         }
                         _ => {}
+                    }
+                    // "Try SSL again" in the panel: no waiting after earlier failures
+                    if v["ssl_retry"].as_bool() == Some(true) {
+                        let _ = tokio::task::spawn_blocking(crate::certbot::retry_now).await;
+                    }
+                    // firewall ports the admin asked to close (open in ufw, nothing listens there)
+                    if let Some(rules) = v["fw_close"].as_array().filter(|a| !a.is_empty()) {
+                        let rules: Vec<String> = rules.iter().filter_map(|u| u.as_str().map(|s| s.to_string())).collect();
+                        let _ = tokio::task::spawn_blocking(move || crate::fw::close_unused(&rules)).await;
                     }
                     // ports the admin asked to free (Health › Free the ports): the services holding them
                     // are stopped and kept off, then Kanki DNS and Xray restart onto those ports
@@ -300,6 +414,13 @@ pub async fn run(version: &str) {
                         }
                         _ => {}
                     }
+                    // the VPN part of this server, when the admin pressed "Install VPN" in the panel
+                    if v["setup"].is_object() {
+                        let c = v["setup"].clone();
+                        if let Ok(Err(e)) = tokio::task::spawn_blocking(move || start_setup(&c)).await {
+                            eprintln!("VPN install: {}", e);
+                        }
+                    }
                     // the subscription listener: its config, or Null (none here)
                     subsrv.apply(serde_json::from_value(v["subsrv"].clone()).ok());
                     if v["update"].as_bool() == Some(true) {
@@ -315,16 +436,9 @@ pub async fn run(version: &str) {
                             last = text;
                         }
                         let ps = specs.clone();
-                        let set = std::mem::take(&mut *opened.lock().unwrap());
-                        let set = tokio::task::spawn_blocking(move || {
-                            let m = Mutex::new(set);
-                            open_ports(&ps, &m);
-                            m.into_inner().unwrap_or_default()
-                        })
-                        .await
-                        .unwrap_or_default();
-                        *opened.lock().unwrap() = set;
+                        // stopped first, so the ports of a deleted tunnel are free when they are closed
                         mgr.apply(specs).await;
+                        let _ = tokio::task::spawn_blocking(move || open_ports(&ps)).await;
                     }
                 }
             }

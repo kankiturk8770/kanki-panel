@@ -175,7 +175,7 @@ pub fn totp_check(secret_b32: &str, code: &str) -> bool {
 pub fn client_ip(h: &HeaderMap) -> String {
     h.get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.split(',').last())
+        .and_then(|v| v.split(',').next_back())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "127.0.0.1".into())
@@ -242,7 +242,10 @@ pub fn gb(bytes: i64) -> f64 {
 /// KEY=VALUE env file
 pub fn load_env(path: &str) -> HashMap<String, String> {
     let mut m = HashMap::new();
-    if let Ok(t) = std::fs::read_to_string(path) {
+    // read as bytes: one line that is not valid UTF-8 (a name typed in another encoding) must not
+    // make the whole file unreadable (the panel then came up on the default port behind Caddy)
+    if let Ok(raw) = std::fs::read(path) {
+        let t = String::from_utf8_lossy(&raw);
         for line in t.lines() {
             let l = line.trim();
             if l.starts_with('#') {
@@ -254,6 +257,33 @@ pub fn load_env(path: &str) -> HashMap<String, String> {
         }
     }
     m
+}
+
+/// The file this program runs from. When it was replaced while running (an update, or the other Kanki
+/// service of the same machine updated the shared file), Linux names it "<path> (deleted)": the path
+/// itself is what is meant.
+pub fn exe_path() -> std::io::Result<std::path::PathBuf> {
+    let p = std::env::current_exe()?;
+    let s = p.to_string_lossy();
+    Ok(match s.strip_suffix(" (deleted)") {
+        Some(real) => std::path::PathBuf::from(real),
+        None => p,
+    })
+}
+
+/// Puts `bytes` in place of the program file `path` (mode 755). Written to a temporary file of this
+/// process first and renamed over it: a crash never leaves half a program, and two updates of the same
+/// file at once (the node and the agent of one server) never write into one temporary file.
+pub fn swap_program(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "kanki-panel".into());
+    let tmp = path.with_file_name(format!(".{}.{}.new", name, std::process::id()));
+    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        e.to_string()
+    })
 }
 
 pub fn esc(s: &str) -> String {
@@ -335,6 +365,22 @@ pub fn cfg_name_from(s: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+mod exe_tests {
+    #[test]
+    fn a_program_is_swapped_whole() {
+        let d = std::env::temp_dir().join(format!("kanki-swap-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("kanki-panel");
+        std::fs::write(&f, b"old").unwrap();
+        super::swap_program(&f, b"new program").unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"new program");
+        // nothing else is left next to it
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
 mod name_tests {
     use super::*;
 
@@ -353,5 +399,18 @@ mod name_tests {
         assert_eq!(cfg_name_from("علی ali"), Some("ali".into()));
         assert_eq!(cfg_name_from("2024_erfan_dev_account"), Some("erfandevacco".into()));
         assert_eq!(cfg_name_from("محمد"), None);
+    }
+}
+
+#[cfg(test)]
+mod env_tests {
+    #[test]
+    fn a_bad_byte_in_one_line_keeps_the_others() {
+        let p = std::env::temp_dir().join(format!("kanki-env-{}", super::rand_token(8)));
+        std::fs::write(&p, b"PANEL_PORT=20973\nLOCAL_NAME=Ger\xe9many\nDOMAIN=a.b\n").unwrap();
+        let m = super::load_env(p.to_str().unwrap());
+        let _ = std::fs::remove_file(&p);
+        assert_eq!(m.get("PANEL_PORT").map(|s| s.as_str()), Some("20973"));
+        assert_eq!(m.get("DOMAIN").map(|s| s.as_str()), Some("a.b"));
     }
 }

@@ -106,6 +106,12 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error }
 }
 
+/// when each switched-off node was last given its empty user list
+fn off_checked() -> &'static std::sync::Mutex<HashMap<String, i64>> {
+    static M: std::sync::OnceLock<std::sync::Mutex<HashMap<String, i64>>> = std::sync::OnceLock::new();
+    M.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
 /// the last KANKI MIX error (the same error is logged once, not every 30 s)
 fn last_kmix_err() -> &'static std::sync::Mutex<Option<String>> {
     static E: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
@@ -176,6 +182,32 @@ pub async fn sync_all(app: &Arc<App>) {
     let mut add_bytes: HashMap<i64, i64> = HashMap::new();
     let by_name: HashMap<String, i64> = users.iter().map(|u| (u.username.clone(), u.id)).collect();
 
+    // a node whose VPN is switched off serves nobody: its users are taken off (an empty sync), so a
+    // relay server keeps its ports free and an old peer cannot keep using it
+    for n in app.db.nodes().into_iter().filter(|n| !n.enabled) {
+        // the panel server's own info (version, services, load) stays fresh while its VPN is off too
+        if n.id == "local" {
+            let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id='local'", &[&local_info(app).to_string()]);
+        }
+        // once it is empty, checked again every 5 minutes (an unreachable one must not slow every round)
+        {
+            let mut g = off_checked().lock().unwrap();
+            let last = g.get(&n.id).copied().unwrap_or(0);
+            if n.sync_state == "off" && now() - last < 300 {
+                continue;
+            }
+            g.insert(n.id.clone(), now());
+        }
+        let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), ..Default::default() };
+        let ok = if n.id == "local" { apply_local(app, empty).await; true } else { remote_sync(app, &n, &empty).await.is_ok() };
+        let _ = app.db.exec("UPDATE nodes SET online=?1, sync_state='off' WHERE id=?2", &[&(ok as i64), &n.id]);
+        if ok && n.id != "local" {
+            if let Some(info) = remote_info(app, &n.address, &n.token, n.insecure).await {
+                let _ = app.db.exec("UPDATE nodes SET info=?1, last_sync=?2 WHERE id=?3", &[&info.to_string(), &now(), &n.id]);
+            }
+        }
+        crate::live::set_vpn(&n.id, &n.name, vec![]);
+    }
     for mut n in app.db.nodes().into_iter().filter(|n| n.enabled) {
         let local = n.id == "local";
         if local {
@@ -288,6 +320,36 @@ async fn remote_sync(app: &App, n: &Node, req: &SyncReq) -> Result<SyncResp, Str
         return Err(format!("the node answered {}", r.status()));
     }
     r.json::<SyncResp>().await.map_err(|e| e.to_string())
+}
+
+/// Nodes that were just told to update restart onto the new program: their info (and so the version the
+/// panel shows) is read again every few seconds until they report `want`, not only at the next sync round.
+pub fn refresh_after_update(app: &Arc<App>, mut nodes: Vec<Node>, want: &str) {
+    if nodes.is_empty() {
+        return;
+    }
+    let (a, want) = (app.clone(), want.to_string());
+    tokio::spawn(async move {
+        for _ in 0..15 {
+            tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+            let mut left = vec![];
+            for n in nodes {
+                match remote_info(&a, &n.address, &n.token, n.insecure).await {
+                    Some(info) => {
+                        let _ = a.db.exec("UPDATE nodes SET info=?1, online=1 WHERE id=?2", &[&info.to_string(), &n.id]);
+                        if !want.is_empty() && info["version"].as_str() != Some(want.as_str()) {
+                            left.push(n);
+                        }
+                    }
+                    None => left.push(n),
+                }
+            }
+            if left.is_empty() {
+                break;
+            }
+            nodes = left;
+        }
+    });
 }
 
 pub async fn remote_info(app: &App, addr: &str, token: &str, insecure: bool) -> Option<Value> {

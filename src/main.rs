@@ -8,6 +8,8 @@ mod util;
 mod certbot;
 #[path = "core/pin.rs"]
 mod pin;
+#[path = "core/fw.rs"]
+mod fw;
 #[path = "core/live.rs"]
 mod live;
 
@@ -28,6 +30,14 @@ mod subdomain;
 mod subiran;
 #[path = "http/exitgeo.rs"]
 mod exitgeo;
+#[path = "http/migrate.rs"]
+mod migrate;
+#[path = "http/servers.rs"]
+mod servers;
+#[path = "http/direct.rs"]
+mod direct;
+#[path = "http/twin.rs"]
+mod twin;
 
 // vpn: protocol engines + node sync
 mod dns;
@@ -46,6 +56,8 @@ mod wg;
 mod bot;
 #[path = "telegram/channel.rs"]
 mod channel;
+#[path = "telegram/ai.rs"]
+mod ai;
 
 // tunnel: encrypted tunnels between servers (Kanki Tunnel)
 mod tunnel;
@@ -265,6 +277,12 @@ async fn main() {
         let name = app.env.get("LOCAL_NAME").cloned().unwrap_or_else(|| "Main".into());
         let _ = app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,online) VALUES('local',?1,'','','',1)", &[&name]);
     }
+    // the first start on a new server after a move or a restore
+    migrate::after_move(&app);
+    {
+        let a = app.clone();
+        std::thread::spawn(move || subdomain::ensure_on_start(&a));
+    }
     if app.db.get("api_key").is_empty() {
         app.db.set("api_key", &util::rand_token(40));
     }
@@ -274,6 +292,12 @@ async fn main() {
     // where each VPN server's traffic leaves (country and city for the app's map)
     tokio::spawn(exitgeo::run(app.clone()));
     tokio::spawn(tunnel::panel::local_loop(app.clone()));
+    // a node and an agent of the same machine (added apart before 3.9) are shown as one server
+    tokio::spawn(servers::link_loop(app.clone()));
+    // the direct names of the servers (fr.example.com …) for the app's direct configs, checked every 5 minutes
+    tokio::spawn(direct::run(app.clone()));
+    // this server's public IP, written into every backup
+    tokio::spawn(migrate::ip_loop(app.clone()));
     tokio::spawn(tunnel::panel::auto_update_loop(app.clone()));
     // an updated panel also moves an emergency chat on this server onto the new binary
     tokio::task::spawn_blocking(emergency::restart_if_outdated);

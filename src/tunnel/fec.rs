@@ -134,7 +134,7 @@ impl FecDecoder {
     /// Records a parity shard and returns the packets it let us rebuild.
     pub fn parity(&mut self, group: u32, index: u8, data_count: u8, parity_count: u8, shard: &[u8]) -> Vec<Vec<u8>> {
         let (k, m) = (data_count as usize, parity_count as usize);
-        if k == 0 || m == 0 || index as usize >= m || shard.is_empty() || shard.len() % 2 != 0 {
+        if k == 0 || m == 0 || index as usize >= m || shard.is_empty() || !shard.len().is_multiple_of(2) {
             return Vec::new();
         }
         let Some(g) = self.group(group) else { return Vec::new() };
