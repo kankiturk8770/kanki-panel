@@ -1,3 +1,7 @@
+# v3.9.9 — giveaway prizes from the channel bot
+- **Sales bot: giveaway prizes.** A winner of a channel giveaway opens the bot with a personal link (`/start c_…`) and gets a prize account (e.g. `ElClasicoW1`, 5 GB / 30 days) at once. The link is signed (HMAC-SHA256) with a secret shared with the channel bot, works only for the Telegram account it was made for, and only once; GB and days are inside the signature, so they can't be changed. Admins are told about every prize given.
+- Set the secret once: an admin sends `/claimkey <secret>` to the bot (the message is deleted). `GIVEAWAY_SECRET` in kanki.env works too.
+
 # v3.9.5 — the right agent versions, tunnel badges, tidier rows on phones
 - **Fix: up-to-date servers showed yellow, «Agent is on an older version (v3.9.4)».** Each agent was compared with the panel server's own saved info, which was refreshed only while the panel server's VPN served users; with it off the saved version stayed old, so every updated agent looked old. Agents are now compared with the version the panel really runs, only an agent that is really older is flagged, and the panel server's own info stays fresh with its VPN off too.
 - **Update all** also updates relay servers (VPN off), and right after an update (all, or one server's «Update agent») each server is read again every few seconds until it reports the new version, instead of waiting for the next sync round.
