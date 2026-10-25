@@ -2,7 +2,9 @@
 use crate::api::{origin, sub_origin};
 use crate::backup::make_archive;
 use crate::db::User;
-use crate::util::{cfg_name_from, esc, now, rand_token, valid_cfg_name};
+use crate::util::{cfg_name_from, ct_eq, esc, now, rand_token, valid_cfg_name};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use crate::{sync, App};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -221,6 +223,58 @@ struct Plan {
 pub fn bot_token(app: &App) -> String {
     let t = app.db.get("bot_token");
     if t.is_empty() { app.env.get("BOT_TOKEN").cloned().unwrap_or_default() } else { t }
+}
+
+/// Shared secret with the channel bot that signs giveaway prize claims: panel setting (set with /claimkey), then env.
+pub fn giveaway_secret(app: &App) -> String {
+    let s = app.db.get("giveaway_secret");
+    if s.is_empty() { app.env.get("GIVEAWAY_SECRET").cloned().unwrap_or_default() } else { s }
+}
+
+/// A giveaway prize from the channel bot: t.me/<this bot>?start=c_<gid>_<n>_<tg>_<gb>_<days>_<tag>_<sig>.
+/// n: 0 = the exact score prediction, 1.. = the draw winners. sig = first 20 hex of
+/// HMAC-SHA256(secret, "kgw1:<gid>.<n>.<tg>.<gb>.<days>.<tag>").
+#[derive(Debug, PartialEq)]
+pub struct Claim {
+    pub gid: i64,
+    pub n: i64,
+    pub tg: i64,
+    pub gb: i64,
+    pub days: i64,
+    pub tag: String,
+}
+
+pub fn claim_sig(secret: &str, payload: &str) -> String {
+    let mut m = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("hmac key");
+    m.update(format!("kgw1:{}", payload).as_bytes());
+    hex::encode(m.finalize().into_bytes())[..20].to_string()
+}
+
+/// Checks the shape, the limits and the signature. Every number must be written plainly ("5", not "05"),
+/// so one claim has exactly one spelling.
+pub fn parse_claim(p: &str, secret: &str) -> Result<Claim, &'static str> {
+    if secret.len() < 16 {
+        return Err("off");
+    }
+    let f: Vec<&str> = p.split('_').collect();
+    if f.len() != 7 {
+        return Err("bad");
+    }
+    let num = |s: &str| -> Result<i64, &'static str> {
+        let v: i64 = s.parse().map_err(|_| "bad")?;
+        if v.to_string() != s { Err("bad") } else { Ok(v) }
+    };
+    let (gid, n, tg, gb, days) = (num(f[0])?, num(f[1])?, num(f[2])?, num(f[3])?, num(f[4])?);
+    let tag = f[5];
+    let ok_tag = (1..=10).contains(&tag.len()) && tag.chars().all(|c| c.is_ascii_alphanumeric());
+    if gid < 1 || !(0..=50).contains(&n) || tg < 1 || !(1..=100).contains(&gb) || !(1..=90).contains(&days) || !ok_tag {
+        return Err("bad");
+    }
+    let payload = format!("{}.{}.{}.{}.{}.{}", f[0], f[1], f[2], f[3], f[4], tag);
+    if f[6].len() != 20 || !ct_eq(&claim_sig(secret, &payload), f[6]) {
+        return Err("bad");
+    }
+    Ok(Claim { gid, n, tg, gb, days, tag: tag.to_string() })
 }
 
 pub fn bot_admins_raw(app: &App) -> String {
@@ -791,6 +845,10 @@ impl Bot {
             if !self.joined(uid).await {
                 return self.ask_join(chat).await;
             }
+            // a giveaway prize from the channel bot (see `Claim`)
+            if let Some(p) = text.split_whitespace().nth(1).and_then(|s| s.strip_prefix("c_")) {
+                return self.claim_prize(uid, chat, p).await;
+            }
             // t.me/<bot>?start=app (a "download the app" button in the channel): the download menu at once
             if text.split_whitespace().nth(1) == Some("app") {
                 let (t, rows) = self.app_menu(true);
@@ -798,6 +856,21 @@ impl Bot {
                 return;
             }
             self.send(chat, &self.tx("welcome"), Some(self.home_kb(uid))).await;
+            return;
+        }
+        // the giveaway secret, sent once by an admin (the message is deleted so it doesn't stay in the chat)
+        if let Some(k) = text.strip_prefix("/claimkey") {
+            if !self.admin(uid) {
+                return;
+            }
+            let k = k.trim();
+            let _ = self.call("deleteMessage", json!({"chat_id": chat, "message_id": m["message_id"]})).await;
+            if k.len() < 32 || !k.chars().all(|c| c.is_ascii_alphanumeric()) {
+                self.send(chat, "⚠️ کلید باید حداقل ۳۲ حرف و فقط حروف انگلیسی و عدد باشه.", None).await;
+                return;
+            }
+            self.db().set("giveaway_secret", k);
+            self.send(chat, "✅ کلید جایزه‌های قرعه‌کشی ذخیره شد.", None).await;
             return;
         }
         self.touch(uid, &m["from"], 0);
@@ -1389,6 +1462,50 @@ impl Bot {
             self.fulfill(oid).await;
         } else {
             self.send(o.1, &format!("❌ رسید سفارش #{} تأیید نشد. پشتیبانی: {}", oid, esc(&self.db().get("support"))), None).await;
+        }
+    }
+
+    /// A giveaway prize: only for the Telegram account in the claim, only once (the claims row is taken before
+    /// anything is created, so a double tap or a forwarded link can't make a second account).
+    async fn claim_prize(&self, uid: i64, chat: i64, p: &str) {
+        let home = Some(ik(vec![vec![b(&self.bt("home"), "home")]]));
+        let c = match parse_claim(p, &giveaway_secret(&self.app)) {
+            Ok(c) => c,
+            Err(e) => {
+                let t = if e == "off" { "⏳ تحویل جایزه‌ها هنوز فعال نشده؛ کمی بعد دوباره امتحان کنید." } else { "⛔️ این لینک جایزه معتبر نیست." };
+                self.send(chat, t, home).await;
+                return;
+            }
+        };
+        if c.tg != uid {
+            self.send(chat, "⛔️ این جایزه برای حساب تلگرام دیگه‌ایه و فقط خود برنده می‌تونه بگیرتش.", home).await;
+            return;
+        }
+        let key = format!("{}:{}:{}", c.tag, c.gid, c.n);
+        let claimed = self.db().exec("INSERT OR IGNORE INTO claims(id, tg_id, user_id, created) VALUES(?1, ?2, 0, ?3)", &[&key, &uid, &now()]).unwrap_or(0);
+        if claimed == 0 {
+            self.send(chat, "✅ این جایزه قبلاً تحویل داده شده.\nاکانتت رو از «سرویس‌های من» ببین.", home).await;
+            return;
+        }
+        // ElClasicoP (the prediction) / ElClasicoW1 … (the draw); a number is added when the name is taken
+        let base: String = c.tag.chars().take(9).collect();
+        let base = if c.n == 0 { format!("{}P", base) } else { format!("{}W{}", base, c.n) };
+        let notes = format!("giveaway {}", key);
+        match self.db().create_user(&format!("pick:{}", base), c.gb as f64, c.days, 1, &self.db().get("default_protocols"), &self.pick_nodes(0), &notes, uid) {
+            Ok(u) => {
+                let _ = self.db().exec("UPDATE claims SET user_id=?1 WHERE id=?2", &[&u.id, &key]);
+                let a = self.app.clone();
+                tokio::spawn(async move { sync::sync_all(&a).await });
+                let head = format!("🎁 <b>جایزه‌ی قرعه‌کشی شما آماده است</b> ({} گیگ، {} روزه)", c.gb, c.days);
+                self.send(chat, &format!("{}\n\n{}", head, self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b(&self.bt("home"), "home")]]))).await;
+                self.notify_admins(&format!("🎁 جایزه‌ی قرعه‌کشی تحویل شد: <b>{}</b> ({} گیگ، {} روز) · {} · <code>{}</code>", esc(&u.username), c.gb, c.days, esc(&key), uid), None, None).await;
+            }
+            Err(e) => {
+                // nothing was created: the claim can be tried again
+                let _ = self.db().exec("DELETE FROM claims WHERE id=?1", &[&key]);
+                self.notify_admins(&format!("⚠️ خطای ساخت جایزه‌ی قرعه‌کشی {}: <code>{}</code>", esc(&key), esc(&e)), None, None).await;
+                self.send(chat, "⚠️ ساخت اکانت جایزه ناموفق بود؛ کمی بعد دوباره امتحان کنید.", home).await;
+            }
         }
     }
 
@@ -2554,6 +2671,69 @@ mod flow_tests {
                 rusqlite::params![tg, plan, kind, target, status, now()]).unwrap();
             c.last_insert_rowid()
         })
+    }
+
+    fn claim_link(secret: &str, gid: i64, n: i64, tg: i64, gb: i64, days: i64, tag: &str) -> String {
+        let payload = format!("{}.{}.{}.{}.{}.{}", gid, n, tg, gb, days, tag);
+        format!("/start c_{}_{}_{}_{}_{}_{}_{}", gid, n, tg, gb, days, tag, claim_sig(secret, &payload))
+    }
+
+    #[tokio::test]
+    async fn giveaway_prize_once_and_only_for_the_winner() {
+        let (bot, log) = bot().await;
+        let secret = "0123456789abcdef0123456789abcdef0123456789abcdef";
+        let link = claim_link(secret, 6, 1, 501, 5, 30, "ElClasico");
+        // not configured yet
+        say(&bot, from(501, "Ali", "ali"), &link).await;
+        assert!(last(&log, 501).contains("فعال نشده"));
+        assert!(accounts(&bot, 501).is_empty());
+        // only an admin sets the key; too short is refused
+        say(&bot, from(501, "Ali", "ali"), &format!("/claimkey {}", secret)).await;
+        assert_eq!(bot.db().get("giveaway_secret"), "");
+        say(&bot, from(ADMIN, "Boss", "boss"), "/claimkey short").await;
+        assert_eq!(bot.db().get("giveaway_secret"), "");
+        say(&bot, from(ADMIN, "Boss", "boss"), &format!("/claimkey {}", secret)).await;
+        assert_eq!(bot.db().get("giveaway_secret"), secret);
+        // someone else can't use the winner's link
+        say(&bot, from(502, "Reza", "reza"), &link).await;
+        assert!(last(&log, 502).contains("حساب تلگرام دیگه"));
+        assert!(accounts(&bot, 502).is_empty());
+        // the winner gets one account with the prize's volume and days
+        say(&bot, from(501, "Ali", "ali"), &link).await;
+        let acc = accounts(&bot, 501);
+        assert_eq!(acc.len(), 1, "{:?}", acc);
+        assert_eq!(acc[0].1, "ElClasicoW1");
+        assert_eq!(acc[0].2, "giveaway ElClasico:6:1");
+        let u = bot.db().user(acc[0].0).unwrap();
+        assert_eq!(u.limit_gb, 5.0);
+        assert!(u.expires_at > now() + 29 * 86400 && u.expires_at <= now() + 30 * 86400);
+        // the same link again: nothing new
+        say(&bot, from(501, "Ali", "ali"), &link).await;
+        assert!(last(&log, 501).contains("قبلاً تحویل"));
+        assert_eq!(accounts(&bot, 501).len(), 1);
+        // a changed volume / user / padded number breaks the signature
+        let forged = link.replace("_5_30_", "_50_30_");
+        say(&bot, from(501, "Ali", "ali"), &forged).await;
+        assert!(last(&log, 501).contains("معتبر نیست"));
+        let padded = link.replace("c_6_1_", "c_06_1_");
+        say(&bot, from(501, "Ali", "ali"), &padded).await;
+        assert!(last(&log, 501).contains("معتبر نیست"));
+        assert_eq!(accounts(&bot, 501).len(), 1);
+        // the prediction prize (n = 0) is a separate prize
+        say(&bot, from(501, "Ali", "ali"), &claim_link(secret, 6, 0, 501, 20, 30, "ElClasico")).await;
+        let acc = accounts(&bot, 501);
+        assert_eq!(acc.len(), 2);
+        assert!(acc.iter().any(|a| a.1 == "ElClasicoP"));
+    }
+
+    #[test]
+    fn claim_signature_matches_the_channel_bot() {
+        // same input as lib/claim.js in the channel bot: HMAC-SHA256("secret", "kgw1:6.1.4002.5.30.ElClasico")
+        // the exact link the channel bot makes for this winner (node: claimParam('secret-secret-secret', …))
+        assert_eq!(claim_sig("secret-secret-secret", "6.1.4002.5.30.ElClasico"), "469fe127b8e46f504285");
+        let c = parse_claim("6_1_4002_5_30_ElClasico_469fe127b8e46f504285", "secret-secret-secret").unwrap();
+        assert_eq!(c, Claim { gid: 6, n: 1, tg: 4002, gb: 5, days: 30, tag: "ElClasico".into() });
+        assert_eq!(parse_claim("6_1_4002_500_30_ElClasico_00000000000000000000", "secret-secret-secret"), Err("bad"));
     }
 
     #[tokio::test]

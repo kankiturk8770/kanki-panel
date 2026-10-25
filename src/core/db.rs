@@ -192,7 +192,8 @@ impl Db {
             CREATE TABLE IF NOT EXISTS api_tokens(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, hash TEXT UNIQUE, prefix TEXT,
                 scopes TEXT, created INTEGER, last_used INTEGER DEFAULT 0);
             CREATE TABLE IF NOT EXISTS login_log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, username TEXT, ip TEXT, method TEXT, ok INTEGER);
-            CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, actor TEXT, method TEXT, path TEXT, status INTEGER, ip TEXT);",
+            CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, actor TEXT, method TEXT, path TEXT, status INTEGER, ip TEXT);
+            CREATE TABLE IF NOT EXISTS claims(id TEXT PRIMARY KEY, tg_id INTEGER, user_id INTEGER DEFAULT 0, created INTEGER);",
         )
         .expect("schema");
         // forward-only migrations (errors = column already exists)
