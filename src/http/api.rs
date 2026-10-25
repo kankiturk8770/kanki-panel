@@ -240,6 +240,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/sub/:code/raw", get(sub_raw))
         .route("/sub/:code/json", get(sub_json))
         .route("/sub/:code/xray", get(sub_xray))
+        .route("/sub/:code/v2", get(sub_v2))
         .route("/sub/:code/xqr/:i", get(sub_xray_qr))
         .route("/api/config/:id/:proto", get(config_file))
         .route("/api/config/:id/:proto/:extra", get(config_file_extra))
@@ -1319,6 +1320,24 @@ async fn sub_json(State(app): St, Path(code): Path<String>) -> Response {
     let Some((id, c)) = parse_code(&code) else { return err(StatusCode::NOT_FOUND, "not found") };
     let Some(u) = app.db.user_by_code(id, &c) else { return err(StatusCode::NOT_FOUND, "not found") };
     Json(sub_data(&app, &u)).into_response()
+}
+
+/// The combined subscription the page offers for v2rayNG / V2Box: one Hysteria2 link per server (through
+/// its tunnel when it has one, like the page shows) and every Xray link (base64)
+async fn sub_v2(State(app): St, Path(code): Path<String>) -> Response {
+    let Some((id, c)) = parse_code(&code) else { return (StatusCode::NOT_FOUND, "").into_response() };
+    let Some(u) = app.db.user_by_code(id, &c) else { return (StatusCode::NOT_FOUND, "").into_response() };
+    let mut lines: Vec<String> = vec![];
+    for n in user_nodes(&app, &u) {
+        let tw = crate::twin::of_node(&app, &n);
+        let hy = if twin_protos(&app, &u, &n).contains(&"hysteria2") { hy2_link(&app, &u, &n, tw.as_ref()) } else { None };
+        lines.extend(hy.or_else(|| hy2_uri(&app, &u, &n)));
+    }
+    lines.extend(crate::xray::panel::user_links(&app, &u).into_iter().map(|x| x.1));
+    let total = (u.limit_gb * 1_073_741_824.0) as i64;
+    let info = format!("upload=0; download={}; total={}; expire={}", u.used_bytes.max(0), total, u.expires_at);
+    ([(header::HeaderName::from_static("subscription-userinfo"), info), (header::CONTENT_TYPE, "text/plain; charset=utf-8".to_string())],
+     util::b64(lines.join("\n").as_bytes())).into_response()
 }
 
 /// Subscription of only the user's Xray links (base64, for v2rayNG / V2Box)

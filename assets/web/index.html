@@ -726,6 +726,13 @@ html[dir=rtl] .uchip2{padding:4px 4px 4px 10px}
 @media(max-width:620px){.sgrid,.vcard,.ioc,.thc{grid-template-columns:1fr}.card{padding:14px}}
 .tmapcv{width:100%;height:auto;display:block;border-radius:16px}
 .tws{border:1px solid var(--ln2);background:var(--in);border-radius:16px;padding:12px 14px 14px;margin-top:12px}
+/* tunnel form: «Advanced settings» folds open and shut smoothly */
+.adv{margin-top:12px;border:1px solid var(--ln2);border-radius:16px;background:var(--in)}
+.advh{all:unset;box-sizing:border-box;width:100%;display:flex;align-items:center;gap:9px;padding:12px 14px;cursor:pointer;font-weight:800;font-size:14px;border-radius:16px}
+.advh:focus-visible{outline:2px solid var(--a)}.advh>i{margin-inline-start:auto;font-style:normal;color:var(--s);transition:transform .3s ease}.adv.on .advh>i{transform:rotate(180deg)}
+.advb{display:grid;grid-template-rows:0fr;transition:grid-template-rows .35s ease}.adv.on .advb{grid-template-rows:1fr}
+.advi{overflow:hidden;min-height:0;padding:0 10px;transition:padding .35s ease}.adv.on .advi{padding-bottom:12px}.advi>.tws:first-child,.advi>div>.tws:first-child{margin-top:0}
+.adv .tws{background:transparent}
 .tws>h4{display:flex;align-items:center;gap:9px;margin:0 0 2px;font-size:14px;font-weight:800}
 .tws>h4>i{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;font-style:normal;font-size:12.5px;font-weight:900;color:#1a1206;background:linear-gradient(145deg,var(--al),var(--a),var(--ad));flex:none}
 .tws>h4>small,.tws>h4>button{margin-inline-start:auto}.tws>h4>small{font-weight:600;color:var(--a);font-size:11.5px}
@@ -809,6 +816,17 @@ a.b2{text-decoration:none;display:inline-flex;align-items:center;justify-content
 @media(max-width:620px){.kv.k4,.kv.k5{grid-template-columns:repeat(2,1fr)}.kv{grid-template-columns:repeat(2,1fr)}}
 .vrow{display:flex;align-items:center;gap:10px;border:1px solid var(--ln2);border-radius:13px;padding:9px 11px;background:var(--in);margin-top:7px;min-width:0}
 .vrow .nm{flex:1;min-width:0}.vrow .nm b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.vrow .nm small{display:block;color:var(--s);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* VPN services page: compact cards, tiles and rows (ids beat the theme's own card rules) */
+#pg .vhub{gap:10px}#pg #vh_d{margin-top:10px!important}
+#pg .vside{padding:12px!important;border-radius:16px!important}
+#pg .vside>.vh{gap:9px;margin-bottom:8px}#pg .vside>.vh .phi{width:34px;height:34px;border-radius:11px}#pg .vside>.vh .phi svg{width:18px;height:18px}
+#pg .vside>.vh b{font-size:15px}#pg .vside>.vh small{font-size:11px}
+#pg .vside .vhb{gap:5px}#pg .vside .vhb .b2.sm,#pg .vside .vhb .chipx{padding:4px 9px;font-size:11.5px}
+#pg .vside .kv{gap:6px;margin:8px 0}#pg .vside .kv>div{padding:6px 9px!important;border-radius:11px!important}
+#pg .vside .kv small{font-size:10.5px}#pg .vside .kv b{font-size:14px}
+#pg .vside label.f{margin:6px 0 4px;font-size:11.5px}#pg .vside .chs .chipx{font-size:11px!important;padding:3px 8px!important}
+#pg .vside .vrow{gap:8px;padding:6px 9px;margin-top:5px;border-radius:10px}#pg .vside .vrow .nm b{font-size:13px}#pg .vside .vrow .nm small{font-size:10.5px}
+#pg .vside .vrow .chipx{font-size:10.5px;padding:2px 7px}#pg .vside .vmore{margin-top:6px;font-size:12px}
 .chipx{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:800;padding:2px 7px;border-radius:8px;border:1px solid var(--ln2);color:var(--s);white-space:nowrap}
 .chipx.a{color:var(--a);border-color:color-mix(in srgb,var(--a) 45%,transparent)}.chipx.g{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}
 .chipx.r{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}.chipx.y{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}.chipx.b{color:var(--info);border-color:color-mix(in srgb,var(--info) 45%,transparent)}
@@ -2180,16 +2198,22 @@ function tunCmd(s,d){var repo=(d&&d.repo)||'',panel=(d&&d.panel)||location.origi
 var TM={reg:{},raf:0,t0:(window.performance?performance.now():Date.now())};
 function tunMap(d,small){var sv=d.servers||[],tl=d.tunnels||[];
  if(!tl.length&&sv.length<2)return '<div class="tempty">'+ic('tunnel',34)+'<b>'+t('No tunnels yet')+'</b><span class="muted">'+t('Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.')+'</span></div>';
- var isE={},isX={};tl.forEach(function(x){isE[x.entry]=1;isX[x.exit]=1});
- var L=[],R=[],M=[],I=[];sv.forEach(function(s){if(isE[s.id]&&isX[s.id])M.push(s);else if(isE[s.id])L.push(s);else if(isX[s.id])R.push(s);else I.push(s)});
- var W=640,gap=small?84:104,rows=Math.max(L.length,R.length,M.length,1),Hm=Math.max(small?160:210,rows*gap+70),IH=I.length?(small?92:96):0,H=Hm+IH,pos={};
- function place(arr,x){arr.forEach(function(s,i){pos[s.id]={x:x,y:Math.round(Hm/2+(i-(arr.length-1)/2)*gap)+10}})}
- place(L,112);place(R,528);place(M,320);
- I.forEach(function(s,i){pos[s.id]={x:Math.round(W*(i+1)/(I.length+1)),y:Hm+Math.round(IH/2)-4}});
+ // atom layout: the entry server with the most tunnels (an Iran one first) is the nucleus in the middle,
+ // every other server sits on one orbit around it at equal angles, joined or not
+ var ne={};tl.forEach(function(x){ne[x.entry]=(ne[x.entry]||0)+1});
+ var hub=sv.slice().sort(function(a,b){return (ne[b.id]||0)-(ne[a.id]||0)||(srvLoc(b)=='iran')-(srvLoc(a)=='iran')})[0]||{};
+ // servers joined by a tunnel that does not touch the nucleus sit next to each other on the orbit,
+ // so that line stays short and does not cross the middle
+ var nb={},seen={},ring=[];tl.forEach(function(x){if(x.entry!=hub.id&&x.exit!=hub.id){(nb[x.entry]=nb[x.entry]||[]).push(x.exit);(nb[x.exit]=nb[x.exit]||[]).push(x.entry)}});
+ var walk=function(id){if(seen[id]||id==hub.id)return;var s0=sv.filter(function(z){return z.id==id})[0];if(!s0)return;seen[id]=1;ring.push(s0);(nb[id]||[]).forEach(walk)};
+ sv.forEach(function(z){walk(z.id)});
+ var W=640,H=small?470:540,cx=W/2,cy=H/2,R=Math.min(W,H)/2-74,pos={};
+ pos[hub.id]={x:cx,y:cy};
+ ring.forEach(function(s,i){var a=-Math.PI/2+i*2*Math.PI/ring.length;pos[s.id]={x:Math.round(cx+Math.cos(a)*R),y:Math.round(cy+Math.sin(a)*R)}});
  var key=small?'s':'m',st=TM.reg[key]||(TM.reg[key]={rate:{},last:{}}),now=Date.now();
  tl.forEach(function(x){var es=x.entry_status||{},by=(es.rx_bytes||0)+(es.tx_bytes||0),l=st.last[x.id];
   if(l&&now-l.t>500){var r=(by-l.b)/((now-l.t)/1000);if(r>=0)st.rate[x.id]=r}if(!l||now-l.t>500)st.last[x.id]={b:by,t:now}});
- st.m={W:W,H:H,Hm:Hm,small:!!small,pos:pos,sv:sv,tl:tl,cap:{L:L.length,R:R.length,I:I.length}};
+ st.m={W:W,H:H,small:!!small,pos:pos,sv:sv,tl:tl,hub:hub.id,cx:cx,cy:cy,R:R,n:ring.length};
  tmStart();
  return '<canvas class="tmapcv" data-tm="'+key+'" style="aspect-ratio:'+W+'/'+H+'" role="img" aria-label="'+esc(t('Tunnels'))+'"></canvas>'}
 function tmStart(){if(TM.raf)return;
@@ -2207,19 +2231,23 @@ function tmDraw(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;var m=st
  var c=cv.getContext('2d'),k=pw/m.W,th=(T%1<.02||!st.th)?(st.th=tmTheme()):st.th,W=m.W,H=m.H,TAU=Math.PI*2;
  c.setTransform(k,0,0,k,0,0);c.clearRect(0,0,W,H);
  // ---- background: soft side glows, dot grid, drifting dust
- var bg=c.createLinearGradient(0,0,W,0);bg.addColorStop(0,tmA(th.a,th.light?.10:.08));bg.addColorStop(.5,tmA(th.a,0));bg.addColorStop(1,'rgba(61,220,151,'+(th.light?.10:.07)+')');
+ var bg=c.createRadialGradient(m.cx,m.cy,10,m.cx,m.cy,Math.max(W,H)*.6);bg.addColorStop(0,tmA(th.a,th.light?.13:.11));bg.addColorStop(.55,tmA(th.a,th.light?.04:.03));bg.addColorStop(1,'rgba(61,220,151,'+(th.light?.07:.05)+')');
  c.fillStyle=bg;tmRound(c,0,0,W,H,16);c.fill();
  c.fillStyle=tmA(th.a,th.light?.18:.13);for(var gx=11;gx<W;gx+=22)for(var gy=11;gy<H;gy+=22){c.beginPath();c.arc(gx,gy,.9,0,TAU);c.fill()}
  for(var q=0;q<22;q++){var sx=(q*97.3+T*(6+q%5*3))%W,sy=(q*53.7+Math.sin(T*.4+q)*14+H)%H,sa=.25+.25*Math.sin(T*1.3+q*2.1);c.fillStyle=tmA(th.al,(sa*(th.light?.5:.7)).toFixed(3));c.beginPath();c.arc(sx,sy,q%4?0.9:1.5,0,TAU);c.fill()}
- c.font='800 10.5px Vazirmatn,sans-serif';c.textAlign='center';c.fillStyle=th.s;
- if(m.cap.L)c.fillText(t('Entry').toUpperCase(),112,22);if(m.cap.R)c.fillText(t('Exit').toUpperCase(),528,22);
- if(m.cap.I){c.strokeStyle=tmA(th.a,.25);c.setLineDash([3,6]);c.beginPath();c.moveTo(40,m.Hm-8);c.lineTo(W-40,m.Hm-8);c.stroke();c.setLineDash([]);c.fillText(t('Not in a tunnel'),W/2,m.Hm+8)}
- // ---- tunnels
+ // the orbit the servers sit on (slowly turning) and a faint inner shell
+ if(m.n){c.strokeStyle=tmA(th.a,.28);c.lineWidth=1.2;c.setLineDash([4,7]);c.lineDashOffset=-T*6;c.beginPath();c.arc(m.cx,m.cy,m.R,0,TAU);c.stroke();
+  c.strokeStyle=tmA(th.a,.12);c.setLineDash([2,9]);c.lineDashOffset=T*4;c.beginPath();c.arc(m.cx,m.cy,m.R*.55,0,TAU);c.stroke();c.setLineDash([])}
+ // ---- tunnels (their labels are drawn after all of them, on top)
+ var labs=[];
  m.tl.forEach(function(x,i){var A=m.pos[x.entry],B=m.pos[x.exit];if(!A||!B)return;
-  var off=(i%3-1)*12,mx=(A.x+B.x)/2,c1={x:mx,y:A.y+off},c2={x:mx,y:B.y+off},col=tmRgb(tunCol(x.state)),es=x.entry_status||{};
+  var pk=[x.entry,x.exit].sort().join('|'),same=m.tl.filter(function(z){return [z.entry,z.exit].sort().join('|')==pk}),k=same.indexOf(x),off=(k-(same.length-1)/2)*34;
+  var dx=B.x-A.x,dy=B.y-A.y,dl=Math.sqrt(dx*dx+dy*dy)||1,px=-dy/dl*off,py=dx/dl*off,spoke=x.entry==m.hub||x.exit==m.hub,mid={x:(A.x+B.x)/2,y:(A.y+B.y)/2};
+  var q=spoke?{x:mid.x+px*1.3,y:mid.y+py*1.3}:{x:mid.x+(m.cx-mid.x)*.2+px,y:mid.y+(m.cy-mid.y)*.2+py};
+  var c1={x:A.x+(q.x-A.x)*2/3,y:A.y+(q.y-A.y)*2/3},c2={x:B.x+(q.x-B.x)*2/3,y:B.y+(q.y-B.y)*2/3},col=tmRgb(tunCol(x.state)),es=x.entry_status||{};
   var bz=function(u){var v=1-u;return {x:v*v*v*A.x+3*v*v*u*c1.x+3*v*u*u*c2.x+u*u*u*B.x,y:v*v*v*A.y+3*v*v*u*c1.y+3*v*u*u*c2.y+u*u*u*B.y}};
   var path=function(){c.beginPath();c.moveTo(A.x,A.y);c.bezierCurveTo(c1.x,c1.y,c2.x,c2.y,B.x,B.y)};
-  var lt=[.5,.38,.62][i%3],up=x.state=='up',part=x.state=='partial',down=!up&&!part,flick=part?(.65+.35*Math.sin(T*7+i)):1;
+  var lt=.24,up=x.state=='up',part=x.state=='partial',down=!up&&!part,flick=part?(.65+.35*Math.sin(T*7+i)):1;
   c.lineCap='round';
   // fibre: wide halo, body, bright core
   path();c.strokeStyle=tmA(col,(.07*flick).toFixed(3));c.lineWidth=18;c.stroke();
@@ -2247,10 +2275,16 @@ function tmDraw(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;var m=st
    c.beginPath();for(var hx=0;hx<6;hx++){var aa=Math.PI/6+hx*Math.PI/3;c[hx?'lineTo':'moveTo'](Math.cos(aa)*hr,Math.sin(aa)*hr)}c.closePath();c.fillStyle=th.disc;c.fill();c.strokeStyle=tmA(col,(.6+.4*lockHot).toFixed(3));c.lineWidth=1.6;c.stroke();
    c.strokeStyle=tmA(tmMix(col,[255,255,255],lockHot*.6),.95);c.lineWidth=1.4;c.beginPath();c.arc(0,-1.5,2.6,Math.PI,0);c.stroke();c.fillStyle=c.strokeStyle;c.fillRect(-3.6,-1.2,7.2,5.2);c.restore()}
   // label: transport · ping
-  if(!m.small||m.tl.length<5){var lab=tunTr(x.transport)+(up&&rtt?' · '+rtt+'ms':''),lp=bz(lt);c.font='700 10.5px Vazirmatn,sans-serif';var lw=c.measureText(lab).width+18,ly=lp.y-(down?22:28);
-   c.fillStyle=th.disc;tmRound(c,lp.x-lw/2,ly-11,lw,19,9.5);c.fill();c.strokeStyle=tmA(col,.55);c.lineWidth=1;c.stroke();c.fillStyle=tmA(col,1);c.textAlign='center';c.fillText(lab,lp.x,ly+3)}});
+  // label: short name • ping in the middle of the line; tunnels between the same two servers share one
+  // stacked label (drawn once, by the first of them) so their texts never cover each other
+  if(k==0&&(!m.small||m.tl.length<7)){var ub=same.length>1?.5:m.n>6&&i%2?.64:.52,q0=spoke?mid:{x:mid.x+(m.cx-mid.x)*.2,y:mid.y+(m.cy-mid.y)*.2},v0=1-ub,
+    bp={x:v0*v0*A.x+2*v0*ub*q0.x+ub*ub*B.x,y:v0*v0*A.y+2*v0*ub*q0.y+ub*ub*B.y},lh=19,gp=4,tot=same.length*lh+(same.length-1)*gp;
+   labs.push(function(){c.font='700 10.5px Vazirmatn,sans-serif';c.direction='ltr';c.textAlign='center';
+   same.forEach(function(z,zi){var zr=(z.entry_status||{}).rtt_ms||0,zc=tmRgb(tunCol(z.state)),lab=tunShort(z)+(z.state=='up'&&zr?' • '+zr+'ms':''),lw=c.measureText(lab).width+16,ly=bp.y-tot/2+zi*(lh+gp)+lh/2;
+    c.fillStyle=th.disc;tmRound(c,bp.x-lw/2,ly-lh/2,lw,lh,9.5);c.fill();c.strokeStyle=tmA(zc,.6);c.lineWidth=1;c.stroke();c.fillStyle=tmA(zc,1);c.fillText(lab,bp.x,ly+4)})})}});
+ labs.forEach(function(f){f()});
  // ---- servers
- m.sv.forEach(function(s,i){var P=m.pos[s.id];if(!P)return;var col=tmRgb(s.online?'#3ddc97':'#ff6b6b'),br=.5+.5*Math.sin(T*2.1+i);
+ m.sv.forEach(function(s,i){var P=m.pos[s.id];if(!P)return;var col=tmRgb(s.online?'#3ddc97':'#ff6b6b'),br=.5+.5*Math.sin(T*2.1+i),Z=s.id==m.hub?1.25:1;c.save();c.translate(P.x,P.y);c.scale(Z,Z);c.translate(-P.x,-P.y);
   if(s.online){var hg=c.createRadialGradient(P.x,P.y,10,P.x,P.y,46);hg.addColorStop(0,tmA(col,(.16+.08*br).toFixed(3)));hg.addColorStop(1,tmA(col,0));c.fillStyle=hg;c.beginPath();c.arc(P.x,P.y,46,0,TAU);c.fill();
    c.setLineDash([3,9]);c.lineDashOffset=-T*9;c.strokeStyle=tmA(col,.5);c.lineWidth=1.4;c.beginPath();c.arc(P.x,P.y,33,0,TAU);c.stroke();c.setLineDash([]);
    c.save();c.translate(P.x,P.y);c.rotate(-.35);c.strokeStyle=tmA(th.a,.35);c.lineWidth=1;c.beginPath();c.ellipse(0,0,39,13,0,0,TAU);c.stroke();
@@ -2260,8 +2294,12 @@ function tmDraw(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;var m=st
   c.strokeStyle=tmA(col,.95);c.lineWidth=2;c.beginPath();c.arc(P.x,P.y,24,0,TAU);c.stroke();
   var cg=c.createRadialGradient(P.x-5,P.y-6,2,P.x,P.y,18);cg.addColorStop(0,'#fff7d6');cg.addColorStop(.45,tmA(th.al,1));cg.addColorStop(1,tmA(th.ad,1));c.fillStyle=s.online?cg:'rgba(140,140,150,.55)';c.beginPath();c.arc(P.x,P.y,17,0,TAU);c.fill();
   c.fillStyle='#2a1d06';c.font='900 14px Vazirmatn,sans-serif';c.textAlign='center';c.fillText((s.local?'★':s.name.charAt(0)).toUpperCase(),P.x,P.y+5);
-  c.fillStyle=th.t;c.font='700 12.5px Vazirmatn,sans-serif';c.fillText(s.name.length>14?s.name.slice(0,13)+'…':s.name,P.x,P.y+43);
-  c.fillStyle=tmA(col,1);c.strokeStyle=th.disc;c.lineWidth=2;c.beginPath();c.arc(P.x+18,P.y-18,5,0,TAU);c.fill();c.stroke()})}
+  c.fillStyle=tmA(col,1);c.strokeStyle=th.disc;c.lineWidth=2;c.beginPath();c.arc(P.x+18,P.y-18,5,0,TAU);c.fill();c.stroke();c.restore();
+  var mx=m.n>9?10:14,nm=s.name.length>mx?s.name.slice(0,mx-1)+'…':s.name;c.font='700 12.5px Vazirmatn,sans-serif';var nw=c.measureText(nm).width+12,ny=s.id!=m.hub&&P.y<m.cy-20?P.y-24*Z-14:P.y+24*Z+19; // the name on the outer side, away from the lines
+  c.fillStyle=tmA(tmRgb(th.disc),.72);tmRound(c,P.x-nw/2,ny-13,nw,18,9);c.fill();c.fillStyle=th.t;c.textAlign='center';c.direction=/[\u0600-\u06FF]/.test(nm)?'rtl':'ltr';c.fillText(nm,P.x,ny)})}
+// short tunnel names for the map: HQ-QUIC, KCP, WSS, AWG+WS …
+function tunShort(x){var S={tcpmux:'TCP-Mux',tcp:'TCP',ws:'WS',wss:'WSS',quic:'QUIC',kcp:'KCP',hq:'HQ-QUIC',h2:'H2',dual:'Dual',cdn:'CDN',game:'Game-FEC',faketcp:'FakeTCP'};
+ if(x.kind=='hy2')return 'Hy2';if(x.kind=='awg')return 'AWG'+(x.awg&&x.awg.wrap?'+'+(S[x.transport]||x.transport):'');return S[x.transport]||x.transport||'?'}
 function tmRound(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
 
 // ---- the page
@@ -2366,6 +2404,15 @@ function tunNodeFor(sid){return api('GET','/api/nodes').then(function(ns){
 // the VPN ports a node serves (from the node info the panel already keeps)
 function tunNodePorts(n){var i=(n&&n.info)||{},tcp=[],udp=[],add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
  [i.wg_port,i.awg_port,i.hy2_port].forEach(function(v){add(udp,v)});return {tcp:tcp,udp:udp}}
+// the ports of the Xray inbounds and of Kanki DNS that run on a server (Tunnel servers id, or "local"):
+// KCP on UDP, Shadowsocks on both, the rest on TCP; DNS 53 (UDP + TCP), DoT 853, DoH 443
+function tunSvcPorts(sid){var o={tcp:[],udp:[]},add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&o[l].indexOf(v)<0)o[l].push(v)},none=function(){return null};
+ return Promise.all([api('GET','/api/xray').catch(none),api('GET','/api/dns').catch(none)]).then(function(r){var x=r[0],d=r[1];
+  ((x&&x.on&&x.inbounds)||[]).forEach(function(ib){if(ib.enabled===false||ib.server!=sid)return;
+   if(ib.network=='kcp')add('udp',ib.port);else{add('tcp',ib.port);if(ib.protocol=='shadowsocks')add('udp',ib.port)}});
+  if(d&&d.on&&(d.servers||[]).some(function(z){return z.server==sid})){add('udp',53);add('tcp',53);add('tcp',853);add('tcp',443)}
+  return o})}
+function tunMerge(a,b){[['tcp'],['udp']].forEach(function(k){k=k[0];(b[k]||[]).forEach(function(p){if(a[k].indexOf(p)<0)a[k].push(p)})});return a}
 function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pre)});
  var x=id?Object.assign({},(TN.d.tunnels||[]).filter(function(z){return z.id==id})[0]||{},pre||{}):(pre||{}),sv=TN.d.servers||[];
  var remote=sv.filter(function(s){return !s.local});
@@ -2379,7 +2426,8 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   game:[t('KCP + Reed-Solomon FEC and optional packet duplication: recovers lost packets without waiting, the lowest ping under loss'),['UDP','FEC']],cdn:[t('Whitelist mode: through a CDN (ArvanCloud), for when only domestic sites open'),['TLS','SNI','CDN']]};
  // three groups: over UDP (fast, games), over TCP (steady), advanced (hardest to block / whitelist)
  var trs=[['Over UDP (fast, games)',['game','kcp','quic','hq']],['Over TCP (steady)',['tcpmux','wss','ws','tcp']],['Advanced (hardest to block)',['dual','h2','faketcp','cdn']]].map(function(g){return [g[0],g[1].map(function(k){return [k,TRD[k][0],TRD[k][1]]})]});
- var sec=function(n,title,extra){return '<div class="tws"><h4><i>'+N(n)+'</i>'+t(title)+(extra||'')+'</h4>'};
+ var advOpen=!!(id&&((x.transport!='cdn'&&(x.sni||x.host||x.path||x.frag||x.dial))||x.auto||x.target||prof!='balanced'));
+ var sec=function(n,title,extra){return '<div class="tws"><h4>'+(n?'<i>'+N(n)+'</i>':'')+t(title)+(extra||'')+'</h4>'};
  modal(mhead(id?t('Edit tunnel'):t('New tunnel'))+
   (sv.length<2?'<div class="warnbox">'+t('First add your entry server in the “Tunnel servers” menu.')+'</div>':'')+
   sec(1,'Route')+'<label class="f">'+t('Name')+'</label><input id="tw_nm" value="'+esc(x.name||'')+'" placeholder="Iran → '+esc(tunSrv(dX).name)+'">'+
@@ -2423,15 +2471,6 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<small class="muted" style="display:block;margin:4px 0 8px">'+t('FEC sends extra repair packets so a lost packet is rebuilt at the other end instead of being waited for (about 40–100 ms saved per loss). 8:3 means 3 repair packets per 8 data packets (~37% more traffic). Duplication sends every packet twice: best ping, double the traffic. For WireGuard on top of this tunnel, FEC 8:3 is the sweet spot.')+'</small>'+
   '<div class="g2"><div><label class="f">'+t('FEC data:parity')+'</label><input id="tw_fec" class="ltr" value="'+esc(x.fec||'8:3')+'" placeholder="8:3 · off"></div>'+
   '<div style="align-self:end"><label class="chk"><input type="checkbox" id="tw_dup" '+(x.dup?'checked':'')+'><span><b>'+t('Send every packet twice')+'</b><small>'+t('The first copy that arrives wins; near-zero visible loss, double traffic')+'</small></span></label></div></div></div></div>'+
-  // 4) disguise: only what the chosen transport can use
-  sec(4,'Disguise','<small id="tw_camt"></small>')+
-  '<div class="camn" id="tw_camn"></div>'+
-  '<div id="tw_cam"><div id="tw_snw"><label class="f">'+t('SNI names (TLS hello)')+'</label><input id="tw_sni" class="ltr" value="'+esc(x.transport=='cdn'?'':(x.sni||''))+'" placeholder="www.google.com, www.bing.com">'+
-  '<div class="spoofc" id="tw_spoof">'+['www.google.com','www.cloudflare.com','www.bing.com','www.microsoft.com','www.apple.com','cdn.jsdelivr.net'].map(function(d){return '<button type="button" data-sp="'+d+'">'+d+'</button>'}).join('')+'</div>'+
-  '<small class="muted" style="display:block;margin-top:5px">'+t('Several names, comma separated: every link uses another one and a link that fails moves to the next. Empty = the server address.')+'</small></div>'+
-  '<label class="chk" id="tw_fragw"><input type="checkbox" id="tw_frag2" '+(x.transport!='cdn'&&x.frag?'checked':'')+'><span><b>'+t('Split the TLS hello into tiny pieces')+'</b><small>'+t('Hides the SNI from filters that do not reassemble packets.')+'</small></span></label>'+
-  '<div class="g2" id="tw_hpw"><div id="tw_hw"><label class="f">'+t('Host header (HTTP)')+'</label><input id="tw_host" class="ltr" value="'+esc(x.transport=='cdn'?'':(x.host||''))+'" placeholder="'+t('empty = same as the SNI')+'"></div><div id="tw_pw"><label class="f">'+t('Path')+'</label><input id="tw_pa" class="ltr" value="'+esc(x.path||'')+'" placeholder="/"></div></div>'+
-  '<div id="tw_spg"></div></div>'+
   '<div id="tw_cdn" class="box" style="display:none;margin-top:10px"><b>'+t('Whitelist mode (CDN)')+'</b>'+
   '<small class="muted" style="display:block;margin:4px 0 8px">'+t('Easy setup: choose above which server the CDN points to, type your domain here and the tunnel port below. The panel does the rest.')+'</small>'+
   '<label class="f">'+t('Host: your domain on the CDN')+'</label><input id="tw_chost" class="ltr" value="'+esc(x.host||'')+'" placeholder="tun.example.com">'+
@@ -2441,18 +2480,32 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<label class="f">'+t('SNI names (comma separated, empty = same as Host)')+'</label><input id="tw_csni" class="ltr" value="'+esc(x.sni||'')+'" placeholder="tun.example.com, www.aparat.com">'+
   '<div class="spoofc" id="tw_cspoof">'+['www.aparat.com','www.telewebion.com','www.rubika.ir','www.digikala.com','divar.ir'].map(function(d){return '<button type="button" data-sp="'+d+'">'+d+'</button>'}).join('')+'</div>'+
   '<label class="chk"><input type="checkbox" id="tw_frag" '+(x.frag!==false?'checked':'')+'><span><b>'+t('Split the TLS hello into tiny pieces')+'</b><small>'+t('Hides the SNI from filters that do not reassemble packets. Turn it off if the CDN refuses.')+'</small></span></label></details>'+
-  cdnTools()+'</div></div></div>'+
-  sec(5,'Ports')+'<div class="g2" id="tw_ptrow"><div><label class="f">'+t('Tunnel port')+'</label><input id="tw_pt" type="number" class="ltr" value="'+(x.port||'')+'"></div><div><label class="f">'+t('Profile')+'</label><select id="tw_pf"><option value="balanced"'+(prof=='balanced'?' selected':'')+'>'+t('Balanced')+'</option><option value="speed"'+(prof=='speed'?' selected':'')+'>'+t('Most speed')+'</option><option value="gaming"'+(prof=='gaming'?' selected':'')+'>'+t('Gaming (low ping)')+'</option></select></div></div>'+
+  cdnTools()+'</div></div>'+
+  sec(4,'Ports')+'<div id="tw_ptrow"><label class="f">'+t('Tunnel port')+'</label><input id="tw_pt" type="number" class="ltr" value="'+(x.port||'')+'"></div>'+
   '<small class="muted" id="tw_ph"></small>'+
   '<div id="tw_pc"><div class="nh" style="margin-top:12px"><b>'+t('Ports to carry')+'</b><button class="b2 sm" id="tw_vpn">'+ic('ports',14)+' '+t('Ports of the exit server')+'</button></div>'+
   '<small class="muted" id="tw_pn" style="display:block;margin-bottom:6px"></small>'+
   '<div class="g2"><div><label class="f">TCP</label><input id="tw_tcp" class="ltr" value="'+esc((x.tcp||[]).join(', '))+'" placeholder="443, 2053"></div><div><label class="f">UDP</label><input id="tw_udp" class="ltr" value="'+esc((x.udp||[]).join(', '))+'" placeholder="51820, 51821, 8443"></div></div>'+
   '<small class="muted">'+t('Users connect to these ports on the entry; they reach the same ports on the exit. Use 8443:443 to change the port, 1000-1010 for a range.')+'</small></div></div>'+
-  '<details class="tws twm"'+(x.auto||(x.dial&&x.transport!='cdn')||x.target?' open':'')+'><summary><h4><i>'+N(6)+'</i>'+t('More')+' <small class="muted" style="font-weight:600">'+t('rotating tunnel, address to dial, target')+'</small></h4></summary><label class="chk rotk"><input type="checkbox" id="tw_au" '+(x.auto?'checked':'')+'><span><b>🔁 '+t('Rotating tunnel')+'</b><small>'+t('If it stays down, it switches by itself: KCP → TCP Mux → QUIC → WS → WSS → TCP (balanced, reverse)')+'</small></span></label>'+
+  // everything that is not needed to run the tunnel: folded under «Advanced settings»
+  '<div class="adv'+(advOpen?' on':'')+'" id="tw_adv"><button type="button" class="advh" aria-expanded="'+advOpen+'">'+ic('settings',16)+'<span>'+t('Advanced settings')+'</span><i>▾</i></button><div class="advb"><div class="advi">'+
+  '<div id="tw_dsg">'+sec(0,'Disguise','<small id="tw_camt"></small>')+
+  '<div class="camn" id="tw_camn"></div>'+
+  '<div id="tw_cam"><div id="tw_snw"><label class="f">'+t('SNI names (TLS hello)')+'</label><input id="tw_sni" class="ltr" value="'+esc(x.transport=='cdn'?'':(x.sni||''))+'" placeholder="www.google.com, www.bing.com">'+
+  '<div class="spoofc" id="tw_spoof">'+['www.google.com','www.cloudflare.com','www.bing.com','www.microsoft.com','www.apple.com','cdn.jsdelivr.net'].map(function(d){return '<button type="button" data-sp="'+d+'">'+d+'</button>'}).join('')+'</div>'+
+  '<small class="muted" style="display:block;margin-top:5px">'+t('Several names, comma separated: every link uses another one and a link that fails moves to the next. Empty = the server address.')+'</small></div>'+
+  '<label class="chk" id="tw_fragw"><input type="checkbox" id="tw_frag2" '+(x.transport!='cdn'&&x.frag?'checked':'')+'><span><b>'+t('Split the TLS hello into tiny pieces')+'</b><small>'+t('Hides the SNI from filters that do not reassemble packets.')+'</small></span></label>'+
+  '<div class="g2" id="tw_hpw"><div id="tw_hw"><label class="f">'+t('Host header (HTTP)')+'</label><input id="tw_host" class="ltr" value="'+esc(x.transport=='cdn'?'':(x.host||''))+'" placeholder="'+t('empty = same as the SNI')+'"></div><div id="tw_pw"><label class="f">'+t('Path')+'</label><input id="tw_pa" class="ltr" value="'+esc(x.path||'')+'" placeholder="/"></div></div>'+
+  '<div id="tw_spg"></div></div>'+
+  '</div></div>'+
+  '<div class="tws" id="tw_pfw"><h4>'+t('Profile')+'</h4><select id="tw_pf"><option value="balanced"'+(prof=='balanced'?' selected':'')+'>'+t('Balanced')+'</option><option value="speed"'+(prof=='speed'?' selected':'')+'>'+t('Most speed')+'</option><option value="gaming"'+(prof=='gaming'?' selected':'')+'>'+t('Gaming (low ping)')+'</option></select></div>'+
+  '<div class="tws" id="tw_more"><h4>'+t('More')+' <small class="muted" style="font-weight:600">'+t('rotating tunnel, address to dial, target')+'</small></h4><label class="chk rotk"><input type="checkbox" id="tw_au" '+(x.auto?'checked':'')+'><span><b>🔁 '+t('Rotating tunnel')+'</b><small>'+t('If it stays down, it switches by itself: KCP → TCP Mux → QUIC → WS → WSS → TCP (balanced, reverse)')+'</small></span></label>'+
   '<div class="g2"><div><label class="f">'+t('Address to dial (empty = the server’s address)')+'</label><input id="tw_dl" class="ltr" value="'+esc(x.transport=='cdn'?'':(x.dial||''))+'"></div>'+
-  '<div><label class="f">'+t('Target on the exit')+'</label><input id="tw_tg" class="ltr" value="'+esc(x.target||'')+'" placeholder="127.0.0.1"></div></div></details>'+
+  '<div><label class="f">'+t('Target on the exit')+'</label><input id="tw_tg" class="ltr" value="'+esc(x.target||'')+'" placeholder="127.0.0.1"></div></div></div>'+
+  '</div></div></div>'+
   '<div class="g2" style="margin-top:14px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="tw_go">'+(id?t('Save'):t('Make the tunnel'))+'</button></div>','wide');
  var st={mode:mode,tr:tr,kind:kind,wrap:!!A.wrap};
+ $('#tw_adv .advh').onclick=function(){var a=$('#tw_adv'),on=a.classList.toggle('on');this.setAttribute('aria-expanded',on)};
  function hint(){var en=$('#tw_en').value,ex=$('#tw_ex').value,l=st.mode=='direct'?ex:en,pt=$('#tw_pt');
   // fill the port by itself only until the person types one; a field they cleared or typed stays theirs
   if(!pt.dataset.touched&&!(id&&pt.value))pt.value=(st.tr=='cdn'?8080:tunFreePort(l,id,tunUdpTr(st.tr),tunBoth(st.tr)));
@@ -2467,18 +2520,20 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  // entry already uses for another tunnel (or for its own VPN) is moved to a free one: 51821:51820
  function fillPorts(manual){var en=$('#tw_en').value,ex=$('#tw_ex').value,pn=$('#tw_pn');if(en==ex||st.kind=='awg')return;
   if(!manual&&($('#tw_tcp').dataset.touched||$('#tw_udp').dataset.touched))return;
-  Promise.all([tunNodeFor(ex),tunNodeFor(en)]).then(function(r){var n=r[0],m=r[1];
-   if(!n){if(manual)toast(t('No node found for this server: type the ports by hand'));return}
-   var P=tunNodePorts(n),E=m?tunNodePorts(m):{tcp:[],udp:[]},use=tunPortUse(en,id),l=st.mode=='direct'?ex:en,pt=+$('#tw_pt').value,moved=[];
+  Promise.all([tunNodeFor(ex),tunNodeFor(en),tunSvcPorts(ex),tunSvcPorts(en)]).then(function(r){var n=r[0],m=r[1],sx=r[2];
+   var P=tunMerge(n?tunNodePorts(n):{tcp:[],udp:[]},sx),E=tunMerge(m?tunNodePorts(m):{tcp:[],udp:[]},r[3]);
+   if(!P.tcp.length&&!P.udp.length){if(manual)toast(t('No node found for this server: type the ports by hand'));return}
+   var use=tunPortUse(en,id),l=st.mode=='direct'?ex:en,pt=+$('#tw_pt').value,moved=[];
    E.tcp.forEach(function(p){use.tcp[p]=1});E.udp.forEach(function(p){use.udp[p]=1});
    if(l==en&&pt){if(tunBoth(st.tr)){use.udp[pt]=1;use.tcp[pt]=1}else(tunUdpTr(st.tr)?use.udp:use.tcp)[pt]=1}
    var mp=function(arr,u){return arr.map(function(p){var q=p;while(u[q]&&q<65535)q++;u[q]=1;if(q!=p)moved.push(q+'→'+p);return q==p?String(p):q+':'+p})};
    $('#tw_tcp').value=mp(P.tcp,use.tcp).join(', ');$('#tw_udp').value=mp(P.udp,use.udp).join(', ');
-   if(pn)pn.textContent=t('Ports of')+' '+n.name+' '+t('were filled in')+(moved.length?' · '+t('Moved on the entry because they were taken')+': '+moved.join(', '):'')}).catch(function(e){if(manual)fail(e)})}
+   var what=[n?'VPN':'',sx.tcp.length||sx.udp.length?'Xray / DNS':''].filter(Boolean).join(' + ');
+   if(pn)pn.textContent=t('Ports of')+' '+(n?n.name:tunSrv(ex).name)+' ('+what+') '+t('were filled in')+(moved.length?' · '+t('Moved on the entry because they were taken')+': '+moved.join(', '):'')}).catch(function(e){if(manual)fail(e)})}
  $('#tw_en').onchange=function(){hint();if(!id)fillPorts(false)};$('#tw_ex').onchange=function(){hint();if(!id)fillPorts(false)};
  $('#tw_md').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.mode=b.dataset.v;$$('#tw_md button').forEach(function(z){z.classList.toggle('on',z==b)});cdnUi()};
  function kindUi(){var aw=st.kind=='awg',hy=st.kind=='hy2',tr=(!aw||st.wrap)&&!hy;$('#tw_awg').style.display=aw?'block':'none';$('#tw_hy').style.display=hy?'block':'none';
-  if(hy)st.mode='direct';var md=$('#tw_md');md.style.display=hy?'none':'';if(md.previousElementSibling)md.previousElementSibling.style.display=hy?'none':'';$('#tw_trw').style.display=tr?'':'none';$('#tw_ptrow').style.display=tr?'':'none';$('#tw_ph').style.display=tr?'':'none';$('#tw_pc').style.display=aw?'none':'';$('#tw_aw_lkw').style.display=st.wrap?'':'none';var s5=$('#tw_ptrow').closest('.tws');if(s5)s5.style.display=(!aw||st.wrap)?'':'none';$$('#tw_kd button').forEach(function(z){z.classList.toggle('on',z.dataset.v==st.kind)});cdnUi()}
+  if(hy)st.mode='direct';var md=$('#tw_md');md.style.display=hy?'none':'';if(md.previousElementSibling)md.previousElementSibling.style.display=hy?'none':'';$('#tw_trw').style.display=tr?'':'none';$('#tw_ptrow').style.display=tr?'':'none';$('#tw_pfw').style.display=tr?'':'none';$('#tw_dsg').style.display=tr?'':'none';$('#tw_ph').style.display=tr?'':'none';$('#tw_pc').style.display=aw?'none':'';$('#tw_aw_lkw').style.display=st.wrap?'':'none';var s5=$('#tw_ptrow').closest('.tws');if(s5)s5.style.display=(!aw||st.wrap)?'':'none';$$('#tw_kd button').forEach(function(z){z.classList.toggle('on',z.dataset.v==st.kind)});cdnUi()}
  // what each transport can disguise: SNI (TLS name), split hello, Host header, path
  var CAM={tcpmux:{n:'TCP Mux has no site name: it is encrypted from the first byte, so there is nothing to disguise.'},tcp:{n:'TCP has no site name: it is encrypted from the first byte, so there is nothing to disguise.'},
   kcp:{n:'KCP is fully encrypted UDP (its header is hidden too); there is no site name to disguise.'},
@@ -2519,7 +2574,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   me.disabled=true;api('POST','/api/tunnels',b).then(function(){closeModal();toast(id?t('Saved: the tunnel restarts with the new settings'):t('The tunnel is made: it connects in a few seconds'));tunRefresh()}).catch(function(e){me.disabled=false;fail(e)})}}
 
 
-Object.assign(FA,{"Route":"مسیر","Tunnel type":"نوع تانل","Transport":"روش انتقال","Disguise":"پوشش","Ports":"پورت‌ها","More":"بیشتر",
+Object.assign(FA,{"Advanced settings":"تنظیمات پیشرفته","Profile":"پروفایل","Route":"مسیر","Tunnel type":"نوع تانل","Transport":"روش انتقال","Disguise":"پوشش","Ports":"پورت‌ها","More":"بیشتر",
  "Looks like web traffic":"شبیه ترافیک وب","Encrypted TCP":"TCP رمزنگاری‌شده","Over UDP":"روی UDP","Whitelist":"لیست سفید","Fast and steady, several links at once":"سریع و پایدار، چند اتصال هم‌زمان",
  "On filtered networks WSS and WS usually pass; plain TCP, TCP Mux, QUIC and KCP are often cut. Use “Find the best transport” to test them between these two servers.":"در شبکه‌های فیلترشده معمولاً WSS و WS رد می‌شوند و TCP، TCP Mux، QUIC و KCP اغلب قطع‌اند. با «پیدا کردن بهترین روش» همه را بین همین دو سرور تست کن.",
  "SNI names (TLS hello)":"اسم‌های SNI (داخل دست‌دادن TLS)","Several names, comma separated: every link uses another one and a link that fails moves to the next. Empty = the server address.":"چند اسم با کاما: هر اتصال یکی را برمی‌دارد و اتصالی که قطع شود سراغ بعدی می‌رود. خالی = آدرس خود سرور.",

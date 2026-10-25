@@ -1,3 +1,10 @@
+# v3.9.11 — tidier tunnels, compact VPN page, one V2Ray block on the subscription page
+- **Tunnel form:** only what is needed to run a tunnel shows (route, type, transport, ports; the CDN domain when CDN is picked). Disguise, profile and «More» are folded under **Advanced settings**, which opens and closes smoothly (open by itself when an edited tunnel already uses them).
+- **Ports of the exit server** also fills in the exit's **Xray inbound** ports (KCP on UDP, Shadowsocks on both, the rest on TCP) and **Kanki DNS** (53 UDP/TCP, 853, 443), in the tunnel form and the multi-location route form.
+- **Tunnel map, atom style:** the entry server (the one with the most tunnels, an Iran one first) is in the middle; every other server sits on one orbit around it at equal angles, joined or not. Connected tunnels are animated lines; labels are short and on the middle of the line (`HQ-QUIC • 82ms`, `KCP • 89ms`); tunnels between the same two servers share one stacked label; server names sit on the outer side.
+- **VPN services page:** smaller cards, tiles and rows.
+- **Subscription page:** Hysteria2 and Xray are one card: the countries, «Copy all configs» (every Hysteria2 and Xray link, one per line) and a yellow «Copy sub link» for the new combined `/sub/<code>/v2` (one Hysteria2 per server, through its tunnel when it has one, plus every Xray link).
+
 # v3.9.10 — a shorter subscription page
 - **Hysteria2:** one card with the countries as flags and one «Copy all» button: one config per country, the one through the tunnel (a server without a tunnel gives its own), one per line so v2rayNG imports them at once. No tunnel / direct columns, no per-config copy / QR.
 - **Xray:** next to Hysteria2, the number of configs, «Copy sub link» (the new `/sub/<code>/xray`, only the Xray links, for v2rayNG / V2Box) and «Copy all» (one per line), instead of a row per link.

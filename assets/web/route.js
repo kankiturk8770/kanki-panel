@@ -161,15 +161,16 @@ function autoPorts(paint){var taken={};
   if(h.port&&(h.typed||h.id)&&!h.auto){taken[k][h.port]=1;return}
   var p=tunFreePort(l,h.id||null,udp,both);while(taken[k][p]&&p<3500)p++;taken[k][p]=1;h.port=p;h.auto=false});
  if(paint)$$('#rt_path .rt-pt').forEach(function(s){var h=R.hops[+s.dataset.h];if(h&&h.port&&!s.value)s.value=h.port})}
-// the ports of the last server: its VPN ports (UDP) and its Xray inbounds (TCP)
+// the ports of the last server: its VPN ports (UDP), its Xray inbounds and its Kanki DNS (tunSvcPorts)
 function fillPorts(manual){readForm();var last=R.stops[R.stops.length-1];if(!last)return;
  var s=((R.srvs&&R.srvs.servers)||[]).filter(function(x){return (x.agent&&x.agent.id==last)||(last=='local'&&x.local)})[0],n=s&&s.node,i=(n&&n.info)||{},udp=[],tcp=[];
  var add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
  [i.wg_port,i.awg_port,i.hy2_port,i.kmix_port].forEach(function(v){add(udp,v)});
- ((R.xr&&R.xr.inbounds)||[]).filter(function(b){return b.server==last&&b.enabled!==false}).forEach(function(b){add(b.network=='kcp'?udp:tcp,b.port)});
- if(!udp.length&&!tcp.length){if(manual)toast(t('No node found for this server: type the ports by hand'),1);return}
- if(!manual&&(R.tcp||R.udp))return;
- $('#rt_tcp').value=tcp.join(', ');$('#rt_udp').value=udp.join(', ');readForm()}
+ (window.tunSvcPorts?tunSvcPorts(last):Promise.resolve({tcp:[],udp:[]})).then(function(o){
+  o.tcp.forEach(function(v){add(tcp,v)});o.udp.forEach(function(v){add(udp,v)});
+  if(!udp.length&&!tcp.length){if(manual)toast(t('No node found for this server: type the ports by hand'),1);return}
+  if(!manual&&(R.tcp||R.udp))return;
+  $('#rt_tcp').value=tcp.join(', ');$('#rt_udp').value=udp.join(', ');readForm()})}
 
 // ---------------------------------------------------------------- smart test, hop by hop
 function probeWait(){return new Promise(function(res){var iv=setInterval(function(){api('GET','/api/tunnels/probe').then(function(r){var j=r.job;if(!j||j.finished){clearInterval(iv);res(j)}else{var p=Math.min(99,Math.round(j.elapsed*100/60));R.onp&&R.onp(p)}}).catch(function(){})},2000)})}
