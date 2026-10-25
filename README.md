@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.6.8 — "Download the app" link for the channel
+- `https://t.me/<bot>?start=app` opens the bot straight on the app download menu (a button per phone type; the bot sends the file). Sales bot › App files shows the link with a copy button, for a "Download the app" button under a channel post.
+
 ## New in 3.6.7 — the app's install files in the panel
 - **Sales bot › App files:** upload the Kanki app (.apk) in the panel, one file per phone type (arm64, armv7, universal; read from the file name, or chosen). A new file of the same type replaces the old one. No GitHub token or download site is needed.
 - **Bot:** «📱 Download app» shows a button per phone type (with which phones it is for and its size) and sends the file itself, named like `KankiVPN-1.15.1-arm64.apk`. After the first send Telegram's file id is kept, so the next customers get it at once. The account message also has the download button.
