@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.9.6 — "Download the app" link for the channel
+- `https://t.me/<bot>?start=app` opens the bot straight on the app download menu (a button per phone type; the bot sends the file). Sales bot › App files shows the link with a copy button, for a "Download the app" button under a channel post.
+
 ## New in 3.9 — one kind of server, one command
 - **Servers** is one list: the panel runs on one server, every other server is a node. Each card shows what the server runs (VPN for users on/off and its ports, tunnels, Xray, Kanki DNS) and its health.
 - **Add server** gives one command that installs everything on the new server (VPN part and server agent). What it runs is switched on in the panel. Servers made before 3.9 get their missing part with one button.

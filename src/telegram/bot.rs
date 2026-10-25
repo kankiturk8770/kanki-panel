@@ -791,6 +791,12 @@ impl Bot {
             if !self.joined(uid).await {
                 return self.ask_join(chat).await;
             }
+            // t.me/<bot>?start=app (a "download the app" button in the channel): the download menu at once
+            if text.split_whitespace().nth(1) == Some("app") {
+                let (t, rows) = self.app_menu(true);
+                self.send(chat, &t, Some(ik(rows))).await;
+                return;
+            }
             self.send(chat, &self.tx("welcome"), Some(self.home_kb(uid))).await;
             return;
         }
@@ -2572,6 +2578,11 @@ mod flow_tests {
         let sent = log.lock().unwrap().iter().rev().find(|(m, _)| m == "sendDocument").map(|(_, v)| v.clone()).unwrap();
         assert_eq!(sent["document"], "FILE1");
         assert!(sent["caption"].as_str().unwrap().contains("Kanki VPN 1.15.1 · arm64"));
+        // the channel's "download the app" link opens the same menu right away
+        say(&bot, from(501, "رضا", ""), "/start app").await;
+        let m = log.lock().unwrap().iter().rev().find(|(m, v)| m == "sendMessage" && v["chat_id"] == 501).map(|(_, v)| v.clone()).unwrap();
+        assert!(m["text"].as_str().unwrap().contains("دانلود اپ Kanki VPN"));
+        assert!(m["reply_markup"].to_string().contains("apk:arm64-v8a"));
     }
 
     #[tokio::test]

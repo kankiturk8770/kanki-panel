@@ -1828,6 +1828,8 @@ function botApk(){var el=$('#bt_apk');if(!el)return;
     '<button class="b2 bd" data-apd="'+esc(x.abi)+'">'+ic('trash',15)+'</button></div>'};
   el.innerHTML='<div class="card"><h3>'+ic('dl',16)+' '+t('App files')+'</h3>'+
    '<p class="sub">'+t('Upload the Kanki app (.apk) here, one file per phone type. The bot sends the file itself (📱 Download app) and the subscription page shows a download button for each. A new file of the same type replaces the old one.')+'</p>'+
+   ((S.bot||{}).username?'<div class="box"><b>'+t('Link for your channel')+'</b><small class="muted" style="display:block;margin:4px 0 6px">'+t('Put it on a “Download the app” button: the bot opens straight on the download menu.')+'</small>'+
+    '<div class="row" style="gap:8px"><input readonly class="ltr" style="flex:1" id="ap_dl" value="https://t.me/'+esc(S.bot.username)+'?start=app"><button class="b2" id="ap_cp">'+ic('copy',15)+'</button></div></div>':'')+
    (f.length?f.map(row).join(''):'<p class="muted">'+t('No file yet: the bot and the subscription page show the app download link of Sales settings.')+'</p>')+
    '<div class="box"><b>'+ic('plus',15)+' '+t('Upload files')+'</b>'+
     '<input type="file" id="ap_f" accept=".apk,application/vnd.android.package-archive" multiple style="margin:8px 0;width:100%">'+
@@ -1848,11 +1850,12 @@ function botApk(){var el=$('#bt_apk');if(!el)return;
      $('#ap_prog').textContent='✓ '+file.name;next()};
     x.onerror=function(){me.disabled=false;toast(t('Upload failed'),1)};x.send(file)};
    next()};
+  var cp=$('#ap_cp');if(cp)cp.onclick=function(){var i=$('#ap_dl');i.select();try{navigator.clipboard.writeText(i.value)}catch(e){document.execCommand('copy')}toast(t('Copied'))};
   $$('[data-apd]').forEach(function(b){b.onclick=function(){confirmDo(function(){api('DELETE','/api/apps/'+b.dataset.apd).then(function(){toast(t('Done'));botApk()}).catch(fail)})}});
   $$('[data-apv]').forEach(function(b){b.onclick=function(){var v=prompt(t('Version'),b.dataset.v);if(v===null)return;
    api('PUT','/api/apps/'+b.dataset.apv,{version:v}).then(function(){toast(t('Saved'));botApk()}).catch(fail)}});
  }).catch(fail)}
-Object.assign(FA,{"App files":"فایل‌های اپ","Recommended":"پیشنهادی","Too big for the bot (over 50 MB): only on the subscription page":"برای ربات بزرگ است (بیش از ۵۰ مگ): فقط در صفحه‌ی اشتراک",
+Object.assign(FA,{"App files":"فایل‌های اپ","Link for your channel":"لینک برای کانال","Put it on a “Download the app” button: the bot opens straight on the download menu.":"این لینک را روی دکمه‌ی «دانلود اپ» کانال بگذار: ربات مستقیم روی منوی دانلود باز می‌شود.","Recommended":"پیشنهادی","Too big for the bot (over 50 MB): only on the subscription page":"برای ربات بزرگ است (بیش از ۵۰ مگ): فقط در صفحه‌ی اشتراک",
  "Upload the Kanki app (.apk) here, one file per phone type. The bot sends the file itself (📱 Download app) and the subscription page shows a download button for each. A new file of the same type replaces the old one.":"فایل نصبی اپ کانکی (.apk) را اینجا آپلود کن، برای هر نوع گوشی یک فایل. ربات خودش فایل را می‌فرستد (📱 دانلود اپ) و صفحه‌ی اشتراک برای هرکدام دکمه‌ی دانلود نشان می‌دهد. فایل جدیدِ همان نوع جای قبلی را می‌گیرد.",
  "No file yet: the bot and the subscription page show the app download link of Sales settings.":"هنوز فایلی نیست: ربات و صفحه‌ی اشتراک همان لینک دانلود اپ تنظیمات فروش را نشان می‌دهند.",
  "Upload files":"آپلود فایل","Phone type":"نوع گوشی","From the file name (arm64 / armeabi-v7a …)":"از روی اسم فایل (arm64 / armeabi-v7a …)","new phones (64-bit)":"گوشی‌های جدید (۶۴ بیتی)","older phones (32-bit)":"گوشی‌های قدیمی (۳۲ بیتی)","every phone":"همه‌ی گوشی‌ها",
