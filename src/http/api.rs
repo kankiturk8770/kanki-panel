@@ -221,6 +221,10 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/assets/kanki-skin.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/skin.js"))
         }))
+        // 3.10: where things live (menu sections, Xray in two parts, server drawers, dashboard, tunnel map)
+        .route("/assets/kanki-hub.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/hub.js"))
+        }))
         .route("/api/overview", get(overview))
         .route("/api/users", get(users_list).post(users_create))
         .route("/api/users/:id", axum::routing::put(users_update).delete(users_delete))
