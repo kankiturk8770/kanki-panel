@@ -3,6 +3,13 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.10 — a tidier panel
+- **Menu:** KANKI MIX and Xray are sections of their own, next to VPN services and Kanki DNS. Xray has two parts: *Servers & network* (servers, routing, settings) and *Inbounds* (inbounds, online clients).
+- **KANKI MIX and Xray servers are cards:** a tap opens that server's settings in a side drawer (a bottom sheet on phones); Esc or a tap outside closes it.
+- **Dashboard:** a status line on top (servers online, tunnels up, stopped services, users online), the numbers with an icon each, live traffic beside server resources, servers beside tunnels, services beside connections, the log last. "New user" and "Add server" sit in the header.
+- **Tunnel map:** Iran entries and exits abroad in columns ordered to cut crossings; every tunnel has its own curve and its own end points (no shared lines, no label behind a server), its short protocol name and live ping in the middle. Neon lines with light packets, like before; columns turn into rows on phones.
+- **Look:** a new sign-in screen, user tiles with a data-used bar and days left, a sticky save bar in Settings.
+
 ## New in 3.9.8 — the whole Vazirmatn font
 - The panel, the subscription page and the emergency chat use the full Vazirmatn font (every weight, all 1333 glyphs; the old file was a cut-down copy).
 
