@@ -155,11 +155,17 @@ window.tunMap=function(d,small){var sv=d.servers||[],tl=(d.tunnels||[]).filter(f
   else{var same=P[x.entry].c==P[x.exit].c,dx=same?70*dirX:(b.x-a.x)*.5;d='M'+a.x+' '+a.y+' C'+(a.x+dx)+' '+a.y+' '+(b.x-(same?-dx:dx))+' '+b.y+' '+b.x+' '+b.y}
   paths.push({x:x,d:d,a:a,b:b})});
  var col=function(x){return x.enabled===false?'#8a8f98':tunCol(x.state)};
- var now=(Date.now()-TMH.t0)/1000;
+ var now=(Date.now()-TMH.t0)/1000,fid=small?'s':'m',grads={};
+ // a packet is one dot: white centre, tunnel colour, soft glow (a gradient, so no filter has to run per frame)
+ var grad=function(c){var k=c.replace('#','');if(!grads[k])grads[k]='<radialGradient id="k310p'+fid+k+'"><stop offset="0" stop-color="#fff"/><stop offset=".28" stop-color="'+c+'"/><stop offset=".55" stop-color="'+c+'" stop-opacity=".35"/><stop offset="1" stop-color="'+c+'" stop-opacity="0"/></radialGradient>';return 'url(#k310p'+fid+k+')'};
+ var pkts=function(d,c,dur,now,x){var es=x.entry_status||{},by=(es.rx_bytes||0)+(es.tx_bytes||0),n=x.state=='up'?Math.max(2,Math.min(5,2+Math.round(Math.log(1+by/1e8)/Math.log(10)))):1,T=(+dur)*2.2,h='';
+  for(var j=0;j<n;j++){var b=-((now+j*T/n)%T).toFixed(2);h+='<circle r="7" class="pk" fill="'+grad(c)+'"><animateMotion dur="'+T.toFixed(2)+'s" begin="'+b+'s" repeatCount="indefinite" path="'+d+'"/></circle>'}
+  if(x.state=='up')for(j=0;j<Math.ceil(n/2);j++){b=-((now+j*T/n+T*.37)%(T*1.3)).toFixed(2);h+='<circle r="4.5" class="pk rt" fill="'+grad('#6fe7ff')+'"><animateMotion dur="'+(T*1.3).toFixed(2)+'s" begin="'+b+'s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear" path="'+d+'"/></circle>'}
+  return h};
  out+='<g class="tme">'+paths.map(function(p){var x=p.x,c=col(x),up=x.state=='up'||x.state=='partial',dur=(1.1+Math.min(3,tmPing(x)/120)).toFixed(2);
   return '<g class="tml'+(up?'':' dn')+(TMH.hot==x.id?' hot':'')+'" data-t="'+esc(x.id)+'" tabindex="0" role="img" aria-label="'+esc(tmName(byId[x.entry])+' → '+tmName(byId[x.exit])+' · '+tunShort(x)+(up&&tmPing(x)?' · '+tmPing(x)+' ms':''))+'">'+
-   '<path d="'+p.d+'" class="h" stroke="'+c+'"/><path d="'+p.d+'" class="b" stroke="'+c+'"/>'+
-   (up?'<path d="'+p.d+'" class="f" stroke="'+c+'" style="animation-duration:'+dur+'s;animation-delay:-'+(now%dur).toFixed(2)+'s"/>':'')+
+   '<path d="'+p.d+'" class="h" stroke="'+c+'" filter="url(#k310g'+fid+')"/><path d="'+p.d+'" class="b" stroke="'+c+'"/><path d="'+p.d+'" class="k"/>'+
+   (up?'<path d="'+p.d+'" class="f" stroke="'+c+'" style="animation-duration:'+dur+'s;animation-delay:-'+(now%dur).toFixed(2)+'s"/>'+pkts(p.d,c,dur,now,x):'')+
    '<path d="'+p.d+'" class="hit"/><circle cx="'+p.a.x+'" cy="'+p.a.y+'" r="3.4" fill="'+c+'" class="pt"/><circle cx="'+p.b.x+'" cy="'+p.b.y+'" r="3.4" fill="'+c+'" class="pt"/></g>'}).join('')+'</g>';
  // labels in the middle of each curve, moved along it only when another label is already there
  var bez=function(p,u){var m=p.d.match(/-?[\d.]+/g).map(Number),v=1-u;return {x:v*v*v*m[0]+3*v*v*u*m[2]+3*v*u*u*m[4]+u*u*u*m[6],y:v*v*v*m[1]+3*v*v*u*m[3]+3*v*u*u*m[5]+u*u*u*m[7]}};
@@ -168,18 +174,19 @@ window.tunMap=function(d,small){var sv=d.servers||[],tl=(d.tunnels||[]).filter(f
   [.5,.4,.6,.32,.68,.25,.75].some(function(u){var q=bez(p,u),r={x:q.x-w/2,y:q.y-h/2,w:w,h:h};
    if(!boxes.some(function(o){return r.x<o.x+o.w+4&&o.x<r.x+r.w+4&&r.y<o.y+o.h+3&&o.y<r.y+r.h+3})){spot=r;return true}});
   if(!spot){var q=bez(p,.5);spot={x:q.x-w/2,y:q.y-h/2,w:w,h:h}}boxes.push(spot);
-  return '<g class="tbg'+(TMH.hot==x.id?' hot':'')+'" data-t="'+esc(x.id)+'"><rect x="'+spot.x.toFixed(1)+'" y="'+spot.y.toFixed(1)+'" width="'+w+'" height="'+h+'" rx="10.5" stroke="'+c+'"/>'+
+  return '<g class="tbg'+(TMH.hot==x.id?' hot':'')+'" data-t="'+esc(x.id)+'" color="'+c+'"><rect x="'+spot.x.toFixed(1)+'" y="'+spot.y.toFixed(1)+'" width="'+w+'" height="'+h+'" rx="10.5" stroke="'+c+'"/>'+
    '<text x="'+(spot.x+10).toFixed(1)+'" y="'+(spot.y+14.5).toFixed(1)+'" class="p" direction="ltr">'+esc(lab)+'</text>'+
    '<text x="'+(spot.x+w-10).toFixed(1)+'" y="'+(spot.y+14.5).toFixed(1)+'" class="m" text-anchor="end" fill="'+c+'" direction="ltr">'+esc(ms)+'</text></g>'}).join('')+'</g>';
  // servers
  out+='<g class="tmn">'+sv.map(function(s){var p=P[s.id],on=s.online,c=on?'var(--ok)':'var(--bad)',ir=srvLoc(s)=='iran',nt=portsOf(s.id),mx=vert?Math.max(6,Math.floor(nw/8)):(small?15:18);
-  return '<g class="tmnd'+(ir?' ir':'')+(on?'':' off')+(nt?'':' lone')+'"><rect x="'+(p.x-nw/2).toFixed(1)+'" y="'+(p.y-nh/2).toFixed(1)+'" width="'+nw.toFixed(1)+'" height="'+nh+'" rx="13"/>'+
-   '<circle cx="'+(p.x+(nw/2-12)*(rtl?1:-1)).toFixed(1)+'" cy="'+(p.y-nh/2+12)+'" r="4" fill="'+c+'"/>'+
+  var rx=(p.x-nw/2).toFixed(1),ry=(p.y-nh/2).toFixed(1),rw=nw.toFixed(1);
+  return '<g class="tmnd'+(ir?' ir':'')+(on?'':' off')+(nt?'':' lone')+'">'+(on&&nt?'<rect x="'+rx+'" y="'+ry+'" width="'+rw+'" height="'+nh+'" rx="13" class="hl" filter="url(#k310g'+fid+')"/>':'')+'<rect x="'+rx+'" y="'+ry+'" width="'+rw+'" height="'+nh+'" rx="13" class="bx"/>'+
+   '<circle cx="'+(p.x+(nw/2-12)*(rtl?1:-1)).toFixed(1)+'" cy="'+(p.y-nh/2+12)+'" r="4" fill="'+c+'" class="sd"/>'+
    '<text x="'+p.x.toFixed(1)+'" y="'+(p.y-1)+'" text-anchor="middle" class="n">'+esc(tmClip(s.name,mx))+'</text>'+
    '<text x="'+p.x.toFixed(1)+'" y="'+(p.y+15)+'" text-anchor="middle" class="s">'+(s.local?'★ ':'')+(nt?N(nt)+' '+t('Tunnels'):t('no tunnels'))+'</text></g>'}).join('')+'</g>';
  var heads='';
  if(!vert){var hl=[t('Iran · entry'),t('Abroad · exit'),t('Next hop')];cols.forEach(function(c,ci){var x=nw/2+8+ci*((W-nw-16)/Math.max(1,nc-1));if(rtl)x=W-x;heads+='<text x="'+x.toFixed(1)+'" y="14" text-anchor="middle" class="ch">'+hl[ci]+'</text>'})}
- return '<div class="k310tm'+(small?' sm':'')+'"><svg viewBox="0 0 '+W+' '+H+'" role="group" aria-label="'+esc(t('Tunnels'))+'">'+heads+out+'</svg></div>'};
+ return '<div class="k310tm'+(small?' sm':'')+'"><svg viewBox="0 0 '+W+' '+H+'" role="group" aria-label="'+esc(t('Tunnels'))+'"><defs><filter id="k310g'+fid+'" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="5"/></filter>'+Object.keys(grads).map(function(k){return grads[k]}).join('')+'</defs>'+heads+out+'</svg></div>'};
 // hover / focus / tap: one tunnel lit, the others dimmed
 function tmHot(id){TMH.hot=id||'';$$('.k310tm svg').forEach(function(s){s.classList.toggle('dim',!!id);$$('[data-t]',s).forEach(function(g){g.classList.toggle('hot',g.dataset.t==id)})})}
 document.addEventListener('mouseover',function(e){var g=e.target.closest&&e.target.closest('.k310tm [data-t]');if(g)tmHot(g.dataset.t);else if(TMH.hot&&e.target.closest&&e.target.closest('.k310tm'))tmHot('')});
@@ -240,23 +247,31 @@ html[dir=rtl] .k310cards{--k310dx:-100%}
 @media(max-width:620px){#pg .ph .row:has(#d_live){flex-wrap:wrap!important}}
 
 /* tunnel map */
-.k310tm{width:100%;overflow:hidden;border-radius:16px;background:radial-gradient(120% 90% at 50% 0%,color-mix(in srgb,var(--a) 7%,transparent),transparent 60%),var(--in);border:1px solid var(--gb,var(--ln));padding:8px}
+.k310tm{width:100%;overflow:hidden;border-radius:16px;border:1px solid var(--gb,var(--ln));padding:8px;
+ background:radial-gradient(color-mix(in srgb,var(--a) 16%,transparent) .9px,transparent 1.3px) 0 0/22px 22px,radial-gradient(90% 70% at 50% 45%,color-mix(in srgb,var(--a) 10%,transparent),transparent 70%),radial-gradient(60% 50% at 100% 100%,color-mix(in srgb,var(--ok) 7%,transparent),transparent 70%),var(--in)}
 .k310tm svg{display:block;width:100%;height:auto;font-family:Vazirmatn,sans-serif}
 .k310tm .ch{fill:var(--s);font-size:11px;font-weight:800;letter-spacing:.3px}
 .k310tm .tml path{fill:none;stroke-linecap:round}
-.k310tm .tml .h{stroke-width:10;opacity:.09}
-.k310tm .tml .b{stroke-width:2.2;opacity:.55}
-.k310tm .tml .f{stroke-width:2.6;stroke-dasharray:3 15;animation:k310flow linear infinite}
-.k310tm .tml.dn .b{stroke-dasharray:6 6;opacity:.8}
+.k310tm .tml .h{stroke-width:12;opacity:.8}
+.k310tm .tml .b{stroke-width:3;opacity:.95}
+.k310tm .tml .k{stroke:#fff;stroke-width:1;opacity:.45}
+.k310tm .tml .f{stroke:#fff;stroke-width:1.6;stroke-dasharray:2 16;opacity:.75;animation:k310flow linear infinite}
+.k310tm .tml.dn .h{opacity:.35;animation:k310blink 1.6s ease-in-out infinite}
+.k310tm .tml.dn .b{stroke-dasharray:6 7;opacity:.85}.k310tm .tml.dn .k{display:none}
+.k310tm .pk{pointer-events:none}
+@keyframes k310blink{50%{opacity:.08}}
+body.light .k310tm .tml .h{opacity:.3}body.light .k310tm .tml .k{opacity:.25}
 .k310tm .tml .hit{stroke:transparent;stroke-width:16;cursor:pointer}
 .k310tm .tml .pt{stroke:var(--c1);stroke-width:1.5}
 @keyframes k310flow{to{stroke-dashoffset:-36}}
-.k310tm .tbg rect{fill:var(--c1);stroke-width:1.2}
+.k310tm .tbg rect{fill:var(--c1);stroke-width:1.4;filter:drop-shadow(0 0 5px currentColor)}
 .k310tm .tbg text{font-size:10.5px;font-weight:800;font-family:ui-monospace,Menlo,Consolas,monospace}
 .k310tm .tbg .p{fill:var(--t)}
-.k310tm .tmnd rect{fill:var(--c2);stroke:var(--gb2,var(--ln));stroke-width:1.2}
-.k310tm .tmnd.ir rect{stroke:color-mix(in srgb,var(--a) 50%,transparent)}
-.k310tm .tmnd.off rect{stroke:color-mix(in srgb,var(--bad) 55%,transparent);stroke-dasharray:4 4}
+.k310tm .tmnd .bx{fill:var(--c2);stroke:color-mix(in srgb,var(--a) 70%,transparent);stroke-width:1.4}
+.k310tm .tmnd .hl{fill:none;stroke:var(--a);stroke-width:5;opacity:.75;animation:k310breathe 3.2s ease-in-out infinite}
+.k310tm .tmnd.off .bx{stroke:color-mix(in srgb,var(--bad) 70%,transparent);stroke-dasharray:4 4}
+.k310tm .tmnd .sd{filter:drop-shadow(0 0 4px currentColor)}
+@keyframes k310breathe{50%{opacity:.25}}
 .k310tm .tmnd.lone{opacity:.6}
 .k310tm .tmnd .n{fill:var(--t);font-size:13px;font-weight:800}
 .k310tm .tmnd .s{fill:var(--s);font-size:10.5px;font-weight:600}
@@ -265,7 +280,7 @@ html[dir=rtl] .k310cards{--k310dx:-100%}
 .k310tm svg.dim .tml:not(.hot),.k310tm svg.dim .tbg:not(.hot){opacity:.15}
 .k310tm .tml.hot .b{opacity:1;stroke-width:3}
 .k310tm .tml:focus{outline:none}.k310tm .tml:focus-visible .b{stroke-width:3.4;opacity:1}
-@media(prefers-reduced-motion:reduce){.k310tm .tml .f{animation:none;stroke-dasharray:none;opacity:.85}.k310cards .kxr.open>.kxr-b{animation:none}.k310cards .kxr{transition:none}}
+@media(prefers-reduced-motion:reduce){.k310tm .pk{display:none}.k310tm .tmnd .hl,.k310tm .tml.dn .h{animation:none}.k310tm .tml .f{animation:none;opacity:0}.k310cards .kxr.open>.kxr-b{animation:none}.k310cards .kxr{transition:none}}
 
 /* settings: the section list stays in view, the save bar sticks to the bottom of the section */
 @media(min-width:900px){#st .stn{position:sticky;top:84px;align-self:start}}
