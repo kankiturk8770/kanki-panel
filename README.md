@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.10.1 — one Services section, the old neon map back
+- **Services:** one section again; KANKI MIX, Xray, WireGuard, AmneziaWG, Hysteria2, Anti-DPI and Kanki DNS are tabs at its top. Xray's own tabs: Servers, Inbounds, Online clients, Routing, Settings.
+- **One word for a server:** nodes and tunnel servers are just servers, everywhere in the panel (a server is added once, in Servers).
+- **Tunnel map:** the old neon drawing again (glowing lines, packets that change colour at the lock and come back, a turning ring around every server), in columns so lines and labels never cover a server or each other.
+
 ## New in 3.10 — a tidier panel
 - **Menu:** KANKI MIX and Xray are sections of their own, next to VPN services and Kanki DNS. Xray has two parts: *Servers & network* (servers, routing, settings) and *Inbounds* (inbounds, online clients).
 - **KANKI MIX and Xray servers are cards:** a tap opens that server's settings in a side drawer (a bottom sheet on phones); Esc or a tap outside closes it.

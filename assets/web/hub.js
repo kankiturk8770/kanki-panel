@@ -28,10 +28,7 @@ var SECS=[
  ['nodes','Servers','nodes',[['nodes','','Servers']],'Servers & network'],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
  ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI']],'Services'],
- ['kmsec','KANKI MIX','game',[['kmix','','KANKI MIX']],'Services'],
- ['xrsec','Xray','xray',[['xray','overview','Servers & network'],['xray','inbounds','Inbounds']],'Services'],
- ['dnssec','Kanki DNS','dns',[['dns','','Kanki DNS']],'Services'],
+ ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
  ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
 // the sections other layers already know keep their objects (some code holds on to them)
@@ -60,19 +57,21 @@ new MutationObserver(function(){if($('#sectabs'))markTabs()}).observe(document.b
 var _route=window.route;
 window.route=function(){if((location.hash||'')=='#xray'){location.replace('#xray/overview');return}return _route.apply(this,arguments)};
 
-// ---------------------------------------------------------------- Xray in two parts
-var XPART={net:[['overview','Xray servers','srv'],['routing','Routing and outbounds','tunnel'],['settings','Settings','settings']],
- ib:[['inbounds','Inbounds','xray'],['clients','Online clients','users']]};
-function xPart(tab){return XPART.ib.some(function(x){return x[0]==tab})?'ib':'net'}
-if(window.xrTabs){
- window.xrTabs=function(d){var el=$('#xr_tabs');if(!el)return;var cnt={inbounds:d.inbounds.length,clients:(d.online||[]).length,routing:(d.rule_list||[]).length+(d.outs||[]).length,overview:d.servers.length};
-  el.innerHTML=XPART[xPart(XR.tab)].map(function(x){return '<a href="#xray/'+x[0]+'" class="'+(XR.tab==x[0]?'on':'')+'">'+ic(x[2],15)+t(x[1])+(cnt[x[0]]?' <em>'+N(cnt[x[0]])+'</em>':'')+'</a>'}).join('');
-  var pg=$('#pg');if(pg)pg.dataset.xpart=xPart(XR.tab)};
- // part one shows the servers across the page; the inbounds have their own part
- var _xo=window.xrOverview;
- if(_xo)window.xrOverview=function(d,el){_xo.apply(this,arguments);var s=$('#xr_srv',el),c=s&&s.closest('.card'),g=c&&c.parentNode;
-  if(g&&g.classList.contains('g2')){$$(':scope>.card',g).forEach(function(x){if(x!=c)x.remove()});g.classList.add('k310one')}};
-}
+// ---------------------------------------------------------------- Xray: servers first, inbounds their own tab
+// the servers tab shows the servers across the page; the inbounds are on the next tab
+if(window.XTABS){XTABS.length=0;[['overview','Servers','srv'],['inbounds','Inbounds','xray'],['clients','Online clients','users'],['routing','Routing and outbounds','tunnel'],['settings','Settings','settings']].forEach(function(x){XTABS.push(x)})}
+var _xo=window.xrOverview;
+if(_xo)window.xrOverview=function(d,el){_xo.apply(this,arguments);var s=$('#xr_srv',el),c=s&&s.closest('.card'),g=c&&c.parentNode;
+ if(g&&g.classList.contains('g2')){$$(':scope>.card',g).forEach(function(x){if(x!=c)x.remove()});g.classList.add('k310one')}};
+
+// ---------------------------------------------------------------- one word for a server
+// a server is added once, in Servers; nodes and tunnel servers are the same servers
+var WFA=[[/سرورهای تانل/g,'سرورها'],[/سرور تانل/g,'سرور'],[/Nodeها/g,'سرورها'],[/نودهای/g,'سرورهای'],[/نودها/g,'سرورها'],[/نودی/g,'سروری'],[/نود/g,'سرور']],
+ WEN=[[/\bTunnel servers\b/g,'Servers'],[/\btunnel servers\b/g,'servers'],[/\bTunnel server\b/g,'Server'],[/\btunnel server\b/g,'server'],[/\bNodes\b/g,'Servers'],[/\bnodes\b/g,'servers'],[/\bNode\b/g,'Server'],[/\bnode\b/g,'server']];
+if(typeof FA!='undefined')Object.assign(FA,{"Both a node and a tunnel server (updated once, through the node)":"سرور (یک‌بار آپدیت می‌شود)",
+ "Also use this node as a tunnel server":"تانل هم روی این سرور ساخته شود","Tunnel servers (updating by themselves)":"سرورها (خودشان آپدیت می‌شوند)"});
+var _t=window.t;
+window.t=function(k){var s=_t.apply(this,arguments);if(typeof s!='string')return s;(S.lang=='fa'?WFA:WEN).forEach(function(r){s=s.replace(r[0],r[1])});return s};
 
 // ---------------------------------------------------------------- server cards with a side drawer
 // KANKI MIX (km) and Xray (xr) rows become cards; the open one shows its settings in a drawer
@@ -112,87 +111,126 @@ window.pDash=function(){_pd.apply(this,arguments);var pg=$('#pg'),ph=$('#pg .ph'
  if(lg)pg.appendChild(lg);
  strip();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page!='dash'){clearInterval(S.timer4);return}strip()},3000)};
 
-// ---------------------------------------------------------------- tunnel map (SVG)
-var TMH={hot:'',t0:Date.now()};
-function tmName(s){return s?s.name:'?'}
-function tmClip(s,n){s=String(s||'');return s.length>n?s.slice(0,n-1)+'…':s}
-function tmPing(x){return ((x.entry_status||{}).rtt_ms)||0}
-window.tunMap=function(d,small){var sv=d.servers||[],tl=(d.tunnels||[]).filter(function(x){return x.entry&&x.exit&&x.entry!=x.exit});
- if(!tl.length&&sv.length<2)return '<div class="tempty">'+ic('tunnel',34)+'<b>'+t('No tunnels yet')+'</b><span class="muted">'+t('Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.')+'</span></div>';
- var byId={};sv.forEach(function(s){byId[s.id]=s});
- tl=tl.filter(function(x){return byId[x.entry]&&byId[x.exit]});
- // columns: Iran entries, then exits abroad, then the servers a second hop goes on to
+// ---------------------------------------------------------------- tunnel map
+// The old neon map (glowing fibres, packets that turn into the tunnel colour at the lock, cyan packets
+// coming back, servers with a turning ring and a little satellite), laid out so nothing overlaps:
+// Iran entries in one column, exits abroad in the next (a third for second hops; rows on phones),
+// the columns ordered to cut crossings, every tunnel leaving and reaching its server at its own point,
+// and its label (short name · ping) in the middle of its own line, never over a server or another label.
+function tmLayout(d,small){var sv=d.servers||[],byId={};sv.forEach(function(s){byId[s.id]=s});
+ var tl=(d.tunnels||[]).filter(function(x){return x.entry!=x.exit&&byId[x.entry]&&byId[x.exit]});
  var lay={};sv.forEach(function(s){lay[s.id]=srvLoc(s)=='iran'?0:1});
  for(var it=0;it<3;it++)tl.forEach(function(x){if(lay[x.entry]>=1&&lay[x.exit]>=1&&lay[x.exit]<=lay[x.entry]&&!tl.some(function(z){return z.exit==x.exit&&lay[z.entry]==0}))lay[x.exit]=Math.min(2,lay[x.entry]+1)});
- var cols=[[],[],[]];sv.forEach(function(s){cols[lay[s.id]].push(s)});if(!cols[2].length)cols.pop();
- // order every column by where its tunnels go (fewer crossings), a few rounds both ways
- var pos={};var setPos=function(){cols.forEach(function(c){c.forEach(function(s,i){pos[s.id]=c.length>1?i/(c.length-1):.5})})};setPos();
+ var cols=[[],[],[]];sv.forEach(function(s){cols[lay[s.id]].push(s)});while(cols.length>1&&!cols[cols.length-1].length)cols.pop();if(!cols[0].length&&cols.length>1)cols.shift();
+ var pos={},setPos=function(){cols.forEach(function(c){c.forEach(function(s,i){pos[s.id]=c.length>1?i/(c.length-1):.5})})};setPos();
  var bary=function(s){var nb=[];tl.forEach(function(x){if(x.entry==s.id)nb.push(pos[x.exit]);if(x.exit==s.id)nb.push(pos[x.entry])});return nb.length?nb.reduce(function(a,b){return a+b},0)/nb.length:pos[s.id]};
- for(it=0;it<6;it++){cols.forEach(function(c){c.sort(function(a,b){return bary(a)-bary(b)||(a.local?-1:0)})});setPos()}
- // then swap neighbours while that removes crossings (exact count; a panel has a few dozen tunnels at most)
+ for(it=0;it<6;it++){cols.forEach(function(c){c.sort(function(a,b){return bary(a)-bary(b)})});setPos()}
  var cross=function(){var n=0;for(var i=0;i<tl.length;i++)for(var j=i+1;j<tl.length;j++){var x=tl[i],y=tl[j];
    if(x.entry==y.entry||x.exit==y.exit||x.entry==y.exit||x.exit==y.entry)continue;
-   if((pos[x.entry]-pos[y.entry])*(pos[x.exit]-pos[y.exit])<0&&lay[x.entry]==lay[y.entry]&&lay[x.exit]==lay[y.exit])n++}return n};
+   if(lay[x.entry]==lay[y.entry]&&lay[x.exit]==lay[y.exit]&&(pos[x.entry]-pos[y.entry])*(pos[x.exit]-pos[y.exit])<0)n++}return n};
  var best=cross(),more=best>0;for(it=0;it<20&&more;it++){more=false;
   cols.forEach(function(c){for(var i=0;i+1<c.length;i++){var s0=c[i];c[i]=c[i+1];c[i+1]=s0;setPos();var n=cross();if(n<best){best=n;more=true}else{c[i+1]=c[i];c[i]=s0;setPos()}}})}
  var vert=window.innerWidth<640,rtl=document.documentElement.dir=='rtl',nc=cols.length,maxN=Math.max.apply(null,cols.map(function(c){return c.length}).concat([1]));
- var W=vert?380:(small?640:880),nw=vert?Math.min(118,(W-10)/maxN-10):(small?132:156),nh=vert?44:50,gap=12;
- var portsOf=function(id){return tl.filter(function(x){return x.entry==id||x.exit==id}).length};
- var rowH=vert?0:Math.max(nh+34,Math.max.apply(null,sv.map(function(s){return portsOf(s.id)}).concat([1]))*gap+26);
- var H=vert?Math.max(420,nc*190):Math.max(small?240:300,maxN*rowH+48),P={};
- cols.forEach(function(c,ci){var n=c.length;c.forEach(function(s,i){
-  if(vert){var step=W/n;P[s.id]={x:step*(i+.5),y:46+ci*((H-92)/Math.max(1,nc-1)),c:ci}}
-  else{var step=(H-40)/n,cx=nw/2+8+ci*((W-nw-16)/Math.max(1,nc-1));if(rtl)cx=W-cx;P[s.id]={x:cx,y:32+step*(i+.5),c:ci}}})});
- // every tunnel gets its own point on each server it touches, sorted by where the other end is
- var dirX=rtl?-1:1,ends={};
- sv.forEach(function(s){var p=P[s.id];[['out','entry','exit'],['in','exit','entry']].forEach(function(k){
-  var es=tl.filter(function(x){return x[k[1]]==s.id}).sort(function(a,b){var A=P[a[k[2]]],B=P[b[k[2]]];return vert?A.x-B.x:A.y-B.y});
-  es.forEach(function(x,j){var off=(j-(es.length-1)/2)*gap,fwd=P[x[k[2]]].c>=p.c;
-   var pt=vert?{x:p.x+off,y:p.y+(fwd?nh/2:-nh/2)}:{x:p.x+(fwd?nw/2:-nw/2)*dirX,y:p.y+off};(ends[x.id]=ends[x.id]||{})[k[0]]=pt})})});
- var paths=[],boxes=[],out='';
- tl.forEach(function(x,i){var a=ends[x.id].out,b=ends[x.id].in,d;if(!a||!b)return;
-  if(vert){var dy=(b.y-a.y)*.5;d='M'+a.x+' '+a.y+' C'+a.x+' '+(a.y+dy)+' '+b.x+' '+(b.y-dy)+' '+b.x+' '+b.y}
-  else{var same=P[x.entry].c==P[x.exit].c,dx=same?70*dirX:(b.x-a.x)*.5;d='M'+a.x+' '+a.y+' C'+(a.x+dx)+' '+a.y+' '+(b.x-(same?-dx:dx))+' '+b.y+' '+b.x+' '+b.y}
-  paths.push({x:x,d:d,a:a,b:b})});
- var col=function(x){return x.enabled===false?'#8a8f98':tunCol(x.state)};
- var now=(Date.now()-TMH.t0)/1000,fid=small?'s':'m',grads={};
- // a packet is one dot: white centre, tunnel colour, soft glow (a gradient, so no filter has to run per frame)
- var grad=function(c){var k=c.replace('#','');if(!grads[k])grads[k]='<radialGradient id="k310p'+fid+k+'"><stop offset="0" stop-color="#fff"/><stop offset=".28" stop-color="'+c+'"/><stop offset=".55" stop-color="'+c+'" stop-opacity=".35"/><stop offset="1" stop-color="'+c+'" stop-opacity="0"/></radialGradient>';return 'url(#k310p'+fid+k+')'};
- var pkts=function(d,c,dur,now,x){var es=x.entry_status||{},by=(es.rx_bytes||0)+(es.tx_bytes||0),n=x.state=='up'?Math.max(2,Math.min(5,2+Math.round(Math.log(1+by/1e8)/Math.log(10)))):1,T=(+dur)*2.2,h='';
-  for(var j=0;j<n;j++){var b=-((now+j*T/n)%T).toFixed(2);h+='<circle r="7" class="pk" fill="'+grad(c)+'"><animateMotion dur="'+T.toFixed(2)+'s" begin="'+b+'s" repeatCount="indefinite" path="'+d+'"/></circle>'}
-  if(x.state=='up')for(j=0;j<Math.ceil(n/2);j++){b=-((now+j*T/n+T*.37)%(T*1.3)).toFixed(2);h+='<circle r="4.5" class="pk rt" fill="'+grad('#6fe7ff')+'"><animateMotion dur="'+(T*1.3).toFixed(2)+'s" begin="'+b+'s" repeatCount="indefinite" keyPoints="1;0" keyTimes="0;1" calcMode="linear" path="'+d+'"/></circle>'}
-  return h};
- out+='<g class="tme">'+paths.map(function(p){var x=p.x,c=col(x),up=x.state=='up'||x.state=='partial',dur=(1.1+Math.min(3,tmPing(x)/120)).toFixed(2);
-  return '<g class="tml'+(up?'':' dn')+(TMH.hot==x.id?' hot':'')+'" data-t="'+esc(x.id)+'" tabindex="0" role="img" aria-label="'+esc(tmName(byId[x.entry])+' → '+tmName(byId[x.exit])+' · '+tunShort(x)+(up&&tmPing(x)?' · '+tmPing(x)+' ms':''))+'">'+
-   '<path d="'+p.d+'" class="h" stroke="'+c+'" filter="url(#k310g'+fid+')"/><path d="'+p.d+'" class="b" stroke="'+c+'"/><path d="'+p.d+'" class="k"/>'+
-   (up?'<path d="'+p.d+'" class="f" stroke="'+c+'" style="animation-duration:'+dur+'s;animation-delay:-'+(now%dur).toFixed(2)+'s"/>'+pkts(p.d,c,dur,now,x):'')+
-   '<path d="'+p.d+'" class="hit"/><circle cx="'+p.a.x+'" cy="'+p.a.y+'" r="3.4" fill="'+c+'" class="pt"/><circle cx="'+p.b.x+'" cy="'+p.b.y+'" r="3.4" fill="'+c+'" class="pt"/></g>'}).join('')+'</g>';
- // labels in the middle of each curve, moved along it only when another label is already there
- var bez=function(p,u){var m=p.d.match(/-?[\d.]+/g).map(Number),v=1-u;return {x:v*v*v*m[0]+3*v*v*u*m[2]+3*v*u*u*m[4]+u*u*u*m[6],y:v*v*v*m[1]+3*v*v*u*m[3]+3*v*u*u*m[5]+u*u*u*m[7]}};
- out+='<g class="tmb">'+paths.map(function(p){var x=p.x,c=col(x),up=x.state=='up'||x.state=='partial',pg=tmPing(x),
-  lab=tunShort(x),ms=up?(pg?N(pg)+'ms':'…'):t('down'),w=Math.round((lab.length+String(ms).length)*6.4+26),h=21,spot=null;
-  [.5,.4,.6,.32,.68,.25,.75].some(function(u){var q=bez(p,u),r={x:q.x-w/2,y:q.y-h/2,w:w,h:h};
-   if(!boxes.some(function(o){return r.x<o.x+o.w+4&&o.x<r.x+r.w+4&&r.y<o.y+o.h+3&&o.y<r.y+r.h+3})){spot=r;return true}});
-  if(!spot){var q=bez(p,.5);spot={x:q.x-w/2,y:q.y-h/2,w:w,h:h}}boxes.push(spot);
-  return '<g class="tbg'+(TMH.hot==x.id?' hot':'')+'" data-t="'+esc(x.id)+'" color="'+c+'"><rect x="'+spot.x.toFixed(1)+'" y="'+spot.y.toFixed(1)+'" width="'+w+'" height="'+h+'" rx="10.5" stroke="'+c+'"/>'+
-   '<text x="'+(spot.x+10).toFixed(1)+'" y="'+(spot.y+14.5).toFixed(1)+'" class="p" direction="ltr">'+esc(lab)+'</text>'+
-   '<text x="'+(spot.x+w-10).toFixed(1)+'" y="'+(spot.y+14.5).toFixed(1)+'" class="m" text-anchor="end" fill="'+c+'" direction="ltr">'+esc(ms)+'</text></g>'}).join('')+'</g>';
- // servers
- out+='<g class="tmn">'+sv.map(function(s){var p=P[s.id],on=s.online,c=on?'var(--ok)':'var(--bad)',ir=srvLoc(s)=='iran',nt=portsOf(s.id),mx=vert?Math.max(6,Math.floor(nw/8)):(small?15:18);
-  var rx=(p.x-nw/2).toFixed(1),ry=(p.y-nh/2).toFixed(1),rw=nw.toFixed(1);
-  return '<g class="tmnd'+(ir?' ir':'')+(on?'':' off')+(nt?'':' lone')+'">'+(on&&nt?'<rect x="'+rx+'" y="'+ry+'" width="'+rw+'" height="'+nh+'" rx="13" class="hl" filter="url(#k310g'+fid+')"/>':'')+'<rect x="'+rx+'" y="'+ry+'" width="'+rw+'" height="'+nh+'" rx="13" class="bx"/>'+
-   '<circle cx="'+(p.x+(nw/2-12)*(rtl?1:-1)).toFixed(1)+'" cy="'+(p.y-nh/2+12)+'" r="4" fill="'+c+'" class="sd"/>'+
-   '<text x="'+p.x.toFixed(1)+'" y="'+(p.y-1)+'" text-anchor="middle" class="n">'+esc(tmClip(s.name,mx))+'</text>'+
-   '<text x="'+p.x.toFixed(1)+'" y="'+(p.y+15)+'" text-anchor="middle" class="s">'+(s.local?'★ ':'')+(nt?N(nt)+' '+t('Tunnels'):t('no tunnels'))+'</text></g>'}).join('')+'</g>';
- var heads='';
- if(!vert){var hl=[t('Iran · entry'),t('Abroad · exit'),t('Next hop')];cols.forEach(function(c,ci){var x=nw/2+8+ci*((W-nw-16)/Math.max(1,nc-1));if(rtl)x=W-x;heads+='<text x="'+x.toFixed(1)+'" y="14" text-anchor="middle" class="ch">'+hl[ci]+'</text>'})}
- return '<div class="k310tm'+(small?' sm':'')+'"><svg viewBox="0 0 '+W+' '+H+'" role="group" aria-label="'+esc(t('Tunnels'))+'"><defs><filter id="k310g'+fid+'" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="5"/></filter>'+Object.keys(grads).map(function(k){return grads[k]}).join('')+'</defs>'+heads+out+'</svg></div>'};
-// hover / focus / tap: one tunnel lit, the others dimmed
-function tmHot(id){TMH.hot=id||'';$$('.k310tm svg').forEach(function(s){s.classList.toggle('dim',!!id);$$('[data-t]',s).forEach(function(g){g.classList.toggle('hot',g.dataset.t==id)})})}
-document.addEventListener('mouseover',function(e){var g=e.target.closest&&e.target.closest('.k310tm [data-t]');if(g)tmHot(g.dataset.t);else if(TMH.hot&&e.target.closest&&e.target.closest('.k310tm'))tmHot('')});
-document.addEventListener('mouseout',function(e){if(e.target.closest&&e.target.closest('.k310tm')&&!(e.relatedTarget&&e.relatedTarget.closest&&e.relatedTarget.closest('.k310tm')))tmHot('')});
-document.addEventListener('focusin',function(e){var g=e.target.closest&&e.target.closest('.k310tm [data-t]');if(g)tmHot(g.dataset.t)});
-document.addEventListener('focusout',function(e){if(e.target.closest&&e.target.closest('.k310tm'))tmHot('')});
+ var W,H,P={},R=26,mg=78;
+ if(vert){W=420;H=Math.max(560,nc*300);cols.forEach(function(c,ci){c.forEach(function(s,i){P[s.id]={x:W/c.length*(i+.5),y:mg+ci*((H-2*mg)/Math.max(1,nc-1)),c:ci}})})}
+ else{W=small?680:820;var step=Math.max(118,Math.max.apply(null,sv.map(function(s){return tl.filter(function(x){return x.entry==s.id||x.exit==s.id}).length*14+40}).concat([0])));
+  H=Math.max(small?330:380,maxN*step+70);
+  cols.forEach(function(c,ci){var x=mg+ci*((W-2*mg)/Math.max(1,nc-1));if(rtl)x=W-x;c.forEach(function(s,i){P[s.id]={x:x,y:40+(H-70)/c.length*(i+.5),c:ci}})})}
+ // own end point for every tunnel on the side of the disc that faces the other end
+ var E={};
+ sv.forEach(function(s){var p=P[s.id];
+  var es=tl.filter(function(x){return x.entry==s.id||x.exit==s.id}),groups={f:[],r:[]};
+  es.forEach(function(x){var o=P[x.entry==s.id?x.exit:x.entry];(o.c>=p.c?groups.f:groups.r).push(x)});
+  ['f','r'].forEach(function(g){var l=groups[g].sort(function(a,b){var A=P[a.entry==s.id?a.exit:a.entry],B=P[b.entry==s.id?b.exit:b.entry];return vert?A.x-B.x:A.y-B.y}),
+   gp=Math.min(13,40/Math.max(1,l.length-1)),sg=(g=='f'?1:-1)*(vert?1:(rtl?-1:1));
+   l.forEach(function(x,j){var off=(j-(l.length-1)/2)*gp,r2=Math.sqrt(Math.max(0,R*R-off*off)),pt=vert?{x:p.x+off,y:p.y+sg*r2}:{x:p.x+sg*r2,y:p.y+off};
+    (E[x.id]=E[x.id]||{})[x.entry==s.id?'a':'b']=pt;E[x.id][x.entry==s.id?'sa':'sb']=sg})})});
+ // curves leave and arrive straight (sideways, or up/down on phones)
+ tl.forEach(function(x){var e=E[x.id],a=e.a,b=e.b,dd=vert?Math.max(60,Math.abs(b.y-a.y)*.5):Math.max(70,Math.abs(b.x-a.x)*.5);
+  e.c1=vert?{x:a.x,y:a.y+e.sa*dd}:{x:a.x+e.sa*dd,y:a.y};e.c2=vert?{x:b.x,y:b.y+e.sb*dd}:{x:b.x+e.sb*dd,y:b.y}});
+ // labels: on the curve, moved along it until they cover no server, name and no other label
+ var boxes=[],L={};
+ sv.forEach(function(s){var p=P[s.id];boxes.push({x:p.x-44,y:p.y-44,w:88,h:110})});
+ tl.forEach(function(x){var e=E[x.id],rt=(x.entry_status||{}).rtt_ms||0,lab=tunShort(x)+(x.state=='up'&&rt?' • '+rt+'ms':''),w=lab.length*6.6+18,h=19,spot=null;
+  var bz=function(u){var v=1-u;return {x:v*v*v*e.a.x+3*v*v*u*e.c1.x+3*v*u*u*e.c2.x+u*u*u*e.b.x,y:v*v*v*e.a.y+3*v*v*u*e.c1.y+3*v*u*u*e.c2.y+u*u*u*e.b.y}};
+  [.5,.42,.58,.35,.65,.28,.72].some(function(u){var q=bz(u),r={x:q.x-w/2,y:q.y-h/2,w:w,h:h};
+   if(!boxes.some(function(o){return r.x<o.x+o.w+3&&o.x<r.x+r.w+3&&r.y<o.y+o.h+2&&o.y<r.y+r.h+2})){spot=q;boxes.push(r);return true}});
+  L[x.id]=spot||bz(.5);if(!spot)boxes.push({x:L[x.id].x-w/2,y:L[x.id].y-h/2,w:w,h:h})});
+ return {W:W,H:H,small:!!small,pos:P,sv:sv,tl:tl,hub:'',cx:W/2,cy:H/2,R:0,n:sv.length,cols:true,E:E,L:L,mx:vert?Math.max(7,Math.floor(W/Math.max(1,maxN)/8)):16}}
+window.tunMap=function(d,small){var sv=d.servers||[],tl=d.tunnels||[];
+ if(!tl.length&&sv.length<2)return '<div class="tempty">'+ic('tunnel',34)+'<b>'+t('No tunnels yet')+'</b><span class="muted">'+t('Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.')+'</span></div>';
+ var key=small?'s':'m',st=TM.reg[key]||(TM.reg[key]={rate:{},last:{}}),now=Date.now();
+ tl.forEach(function(x){var es=x.entry_status||{},by=(es.rx_bytes||0)+(es.tx_bytes||0),l=st.last[x.id];
+  if(l&&now-l.t>500){var r=(by-l.b)/((now-l.t)/1000);if(r>=0)st.rate[x.id]=r}if(!l||now-l.t>500)st.last[x.id]={b:by,t:now}});
+ st.m=tmLayout(d,small);tmStart();
+ return '<canvas class="tmapcv" data-tm="'+key+'" style="aspect-ratio:'+st.m.W+'/'+st.m.H+'" role="img" aria-label="'+esc(t('Tunnels'))+'"></canvas>'};
+// the drawing is the old one; only where things sit comes from tmLayout
+window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;var m=st.m,w=cv.clientWidth;if(!w)return;
+ var dpr=Math.min(2,window.devicePixelRatio||1),pw=Math.round(w*dpr),ph=Math.round(w*m.H/m.W*dpr);if(cv.width!=pw||cv.height!=ph){cv.width=pw;cv.height=ph}
+ var c=cv.getContext('2d'),k=pw/m.W,th=(T%1<.02||!st.th)?(st.th=tmTheme()):st.th,W=m.W,H=m.H,TAU=Math.PI*2;
+ c.setTransform(k,0,0,k,0,0);c.clearRect(0,0,W,H);
+ // ---- background: soft side glows, dot grid, drifting dust
+ var bg=c.createRadialGradient(m.cx,m.cy,10,m.cx,m.cy,Math.max(W,H)*.6);bg.addColorStop(0,tmA(th.a,th.light?.13:.11));bg.addColorStop(.55,tmA(th.a,th.light?.04:.03));bg.addColorStop(1,'rgba(61,220,151,'+(th.light?.07:.05)+')');
+ c.fillStyle=bg;tmRound(c,0,0,W,H,16);c.fill();
+ c.fillStyle=tmA(th.a,th.light?.18:.13);for(var gx=11;gx<W;gx+=22)for(var gy=11;gy<H;gy+=22){c.beginPath();c.arc(gx,gy,.9,0,TAU);c.fill()}
+ for(var q=0;q<22;q++){var sx=(q*97.3+T*(6+q%5*3))%W,sy=(q*53.7+Math.sin(T*.4+q)*14+H)%H,sa=.25+.25*Math.sin(T*1.3+q*2.1);c.fillStyle=tmA(th.al,(sa*(th.light?.5:.7)).toFixed(3));c.beginPath();c.arc(sx,sy,q%4?0.9:1.5,0,TAU);c.fill()}
+ // the orbit the servers sit on (slowly turning) and a faint inner shell
+ if(m.n&&!m.cols){c.strokeStyle=tmA(th.a,.28);c.lineWidth=1.2;c.setLineDash([4,7]);c.lineDashOffset=-T*6;c.beginPath();c.arc(m.cx,m.cy,m.R,0,TAU);c.stroke();
+  c.strokeStyle=tmA(th.a,.12);c.setLineDash([2,9]);c.lineDashOffset=T*4;c.beginPath();c.arc(m.cx,m.cy,m.R*.55,0,TAU);c.stroke();c.setLineDash([])}
+ // ---- tunnels (their labels are drawn after all of them, on top)
+ var labs=[];
+ m.tl.forEach(function(x,i){var G=m.E[x.id];if(!G)return;var A=G.a,B=G.b,c1=G.c1,c2=G.c2,col=tmRgb(tunCol(x.state)),es=x.entry_status||{},k=0,same=[x];
+  var bz=function(u){var v=1-u;return {x:v*v*v*A.x+3*v*v*u*c1.x+3*v*u*u*c2.x+u*u*u*B.x,y:v*v*v*A.y+3*v*v*u*c1.y+3*v*u*u*c2.y+u*u*u*B.y}};
+  var path=function(){c.beginPath();c.moveTo(A.x,A.y);c.bezierCurveTo(c1.x,c1.y,c2.x,c2.y,B.x,B.y)};
+  var lt=.24,up=x.state=='up',part=x.state=='partial',down=!up&&!part,flick=part?(.65+.35*Math.sin(T*7+i)):1;
+  c.lineCap='round';
+  // fibre: wide halo, body, bright core
+  path();c.strokeStyle=tmA(col,(.07*flick).toFixed(3));c.lineWidth=18;c.stroke();
+  path();c.strokeStyle=tmA(col,(.16*flick).toFixed(3));c.lineWidth=8;c.stroke();
+  if(down){path();c.setLineDash([5,8]);c.lineDashOffset=0;c.strokeStyle=tmA(col,.75);c.lineWidth=2;c.stroke();c.setLineDash([]);
+   var mp=bz(lt),fl=.45+.55*Math.abs(Math.sin(T*5+i));c.strokeStyle=tmA(col,fl.toFixed(3));c.lineWidth=2.4;
+   c.beginPath();c.moveTo(mp.x-6,mp.y-6);c.lineTo(mp.x+6,mp.y+6);c.moveTo(mp.x+6,mp.y-6);c.lineTo(mp.x-6,mp.y+6);c.stroke();
+   for(var z=0;z<5;z++){var ang=z*1.26+T*3,rr=7+((T*18+z*5)%12);c.fillStyle=tmA(col,((1-(rr-7)/12)*.8).toFixed(3));c.beginPath();c.arc(mp.x+Math.cos(ang)*rr,mp.y+Math.sin(ang)*rr,1.3,0,TAU);c.fill()}}
+  else{path();var gr=c.createLinearGradient(A.x,A.y,B.x,B.y);gr.addColorStop(0,tmA(th.al,.85));gr.addColorStop(.5,tmA(col,.9));gr.addColorStop(1,tmA(col,.9));c.strokeStyle=gr;c.lineWidth=2.6;c.stroke();
+   path();c.setLineDash([2,16]);c.lineDashOffset=-T*46;c.strokeStyle='rgba(255,255,255,'+(.55*flick).toFixed(3)+')';c.lineWidth=1.4;c.stroke();c.setLineDash([])}
+  // packets: forward (plain -> encrypted at the lock) and return
+  var rtt=es.rtt_ms||0,dur=up?Math.max(1.5,Math.min(4.6,1.5+rtt/110)):5.4,rate=st.rate[x.id]||0,n=up?Math.max(3,Math.min(9,Math.round(3+Math.log(1+rate/2048)/Math.log(10)*1.6))):part?2:0,lockHot=0;
+  for(var j=0;j<n;j++){var u=((T/dur)+j/n+i*.13)%1;lockHot=Math.max(lockHot,1-Math.min(1,Math.abs(u-lt)*12));
+   for(var tr=7;tr>=0;tr--){var uu=u-tr*.011;if(uu<0)continue;var p=bz(uu),enc=Math.max(0,Math.min(1,(uu-lt+.03)/.06)),pc=tmMix(th.al,col,enc),ra=(tr?2.9*(1-tr*.1):3.6),al=(tr?(1-tr/8)*.55:1)*flick;
+    if(!tr){c.fillStyle=tmA(pc,.28*flick);c.beginPath();c.arc(p.x,p.y,8,0,TAU);c.fill()}
+    c.fillStyle=tr?tmA(pc,al.toFixed(3)):'rgba(255,255,255,'+al.toFixed(3)+')';c.beginPath();c.arc(p.x,p.y,ra,0,TAU);c.fill()}}
+  var nb=up?Math.max(1,Math.floor(n/2)):0;
+  for(j=0;j<nb;j++){u=1-(((T/(dur*1.3))+j/nb+.31+i*.07)%1);for(tr=4;tr>=0;tr--){uu=u+tr*.012;if(uu>1)continue;p=bz(uu);c.fillStyle='rgba(111,231,255,'+(tr?(.45*(1-tr/5)).toFixed(3):'.95')+')';c.beginPath();c.arc(p.x,p.y,tr?1.8:2.2,0,TAU);c.fill()}}
+  // arrival ripples at the exit, launch ring at the entry
+  if(up||part){var ph=((T/dur)*Math.max(1,n))%1;c.strokeStyle=tmA(col,((1-ph)*.55*flick).toFixed(3));c.lineWidth=1.6;c.beginPath();c.arc(B.x,B.y,25+ph*22,0,TAU);c.stroke();
+   var ph2=((T/dur)*Math.max(1,n)+.5)%1;c.strokeStyle=tmA(th.al,((1-ph2)*.35*flick).toFixed(3));c.beginPath();c.arc(A.x,A.y,25+ph2*12,0,TAU);c.stroke()}
+  // the lock in the middle (encryption), lights up when a packet passes
+  var L0=bz(lt);if(!down){var hr=10+lockHot*2.5;c.save();c.translate(L0.x,L0.y);
+   if(lockHot>0){c.fillStyle=tmA(col,(.3*lockHot).toFixed(3));c.beginPath();c.arc(0,0,hr+9,0,TAU);c.fill()}
+   c.beginPath();for(var hx=0;hx<6;hx++){var aa=Math.PI/6+hx*Math.PI/3;c[hx?'lineTo':'moveTo'](Math.cos(aa)*hr,Math.sin(aa)*hr)}c.closePath();c.fillStyle=th.disc;c.fill();c.strokeStyle=tmA(col,(.6+.4*lockHot).toFixed(3));c.lineWidth=1.6;c.stroke();
+   c.strokeStyle=tmA(tmMix(col,[255,255,255],lockHot*.6),.95);c.lineWidth=1.4;c.beginPath();c.arc(0,-1.5,2.6,Math.PI,0);c.stroke();c.fillStyle=c.strokeStyle;c.fillRect(-3.6,-1.2,7.2,5.2);c.restore()}
+  // label: transport · ping
+  // label: short name • ping in the middle of the line; tunnels between the same two servers share one
+  // stacked label (drawn once, by the first of them) so their texts never cover each other
+  if(m.L[x.id]){var bp=m.L[x.id],lh=19,gp=4,tot=lh;
+   labs.push(function(){c.font='700 10.5px Vazirmatn,sans-serif';c.direction='ltr';c.textAlign='center';
+   same.forEach(function(z,zi){var zr=(z.entry_status||{}).rtt_ms||0,zc=tmRgb(tunCol(z.state)),lab=tunShort(z)+(z.state=='up'&&zr?' • '+zr+'ms':''),lw=c.measureText(lab).width+16,ly=bp.y-tot/2+zi*(lh+gp)+lh/2;
+    c.fillStyle=th.disc;tmRound(c,bp.x-lw/2,ly-lh/2,lw,lh,9.5);c.fill();c.strokeStyle=tmA(zc,.6);c.lineWidth=1;c.stroke();c.fillStyle=tmA(zc,1);c.fillText(lab,bp.x,ly+4)})})}});
+ labs.forEach(function(f){f()});
+ // ---- servers
+ m.sv.forEach(function(s,i){var P=m.pos[s.id];if(!P)return;var col=tmRgb(s.online?'#3ddc97':'#ff6b6b'),br=.5+.5*Math.sin(T*2.1+i),Z=s.id==m.hub?1.25:1;c.save();c.translate(P.x,P.y);c.scale(Z,Z);c.translate(-P.x,-P.y);
+  if(s.online){var hg=c.createRadialGradient(P.x,P.y,10,P.x,P.y,46);hg.addColorStop(0,tmA(col,(.16+.08*br).toFixed(3)));hg.addColorStop(1,tmA(col,0));c.fillStyle=hg;c.beginPath();c.arc(P.x,P.y,46,0,TAU);c.fill();
+   c.setLineDash([3,9]);c.lineDashOffset=-T*9;c.strokeStyle=tmA(col,.5);c.lineWidth=1.4;c.beginPath();c.arc(P.x,P.y,33,0,TAU);c.stroke();c.setLineDash([]);
+   c.save();c.translate(P.x,P.y);c.rotate(-.35);c.strokeStyle=tmA(th.a,.35);c.lineWidth=1;c.beginPath();c.ellipse(0,0,39,13,0,0,TAU);c.stroke();
+   var sa=T*1.15+i;c.fillStyle=tmA(th.al,.95);c.beginPath();c.arc(Math.cos(sa)*39,Math.sin(sa)*13,2.2,0,TAU);c.fill();c.restore()}
+  else{var fo=.4+.4*Math.abs(Math.sin(T*3+i));c.strokeStyle=tmA(col,fo.toFixed(3));c.lineWidth=1.4;c.setLineDash([2,5]);c.beginPath();c.arc(P.x,P.y,31,0,TAU);c.stroke();c.setLineDash([])}
+  c.save();c.shadowColor=tmA(col,.7);c.shadowBlur=12;c.fillStyle=th.disc;c.beginPath();c.arc(P.x,P.y,24,0,TAU);c.fill();c.restore();
+  c.strokeStyle=tmA(col,.95);c.lineWidth=2;c.beginPath();c.arc(P.x,P.y,24,0,TAU);c.stroke();
+  var cg=c.createRadialGradient(P.x-5,P.y-6,2,P.x,P.y,18);cg.addColorStop(0,'#fff7d6');cg.addColorStop(.45,tmA(th.al,1));cg.addColorStop(1,tmA(th.ad,1));c.fillStyle=s.online?cg:'rgba(140,140,150,.55)';c.beginPath();c.arc(P.x,P.y,17,0,TAU);c.fill();
+  c.fillStyle='#2a1d06';c.font='900 14px Vazirmatn,sans-serif';c.textAlign='center';c.fillText((s.local?'★':s.name.charAt(0)).toUpperCase(),P.x,P.y+5);
+  c.fillStyle=tmA(col,1);c.strokeStyle=th.disc;c.lineWidth=2;c.beginPath();c.arc(P.x+18,P.y-18,5,0,TAU);c.fill();c.stroke();c.restore();
+  var mx=m.mx||(m.n>9?10:14),nm=s.name.length>mx?s.name.slice(0,mx-1)+'…':s.name;c.font='700 12.5px Vazirmatn,sans-serif';var nw=c.measureText(nm).width+12,ny=s.id!=m.hub&&P.y<m.cy-20?P.y-24*Z-14:P.y+24*Z+19; // the name on the outer side, away from the lines
+  c.fillStyle=tmA(tmRgb(th.disc),.72);tmRound(c,P.x-nw/2,ny-13,nw,18,9);c.fill();c.fillStyle=th.t;c.textAlign='center';c.direction=/[\u0600-\u06FF]/.test(nm)?'rtl':'ltr';c.fillText(nm,P.x,ny)})};
 
 var css=`
 /* Xray part one: servers across the page */
@@ -246,41 +284,7 @@ html[dir=rtl] .k310cards{--k310dx:-100%}
 #pg .ph .row .btn.sm,#pg .ph .row .b2.sm{display:inline-flex;align-items:center;gap:6px}
 @media(max-width:620px){#pg .ph .row:has(#d_live){flex-wrap:wrap!important}}
 
-/* tunnel map */
-.k310tm{width:100%;overflow:hidden;border-radius:16px;border:1px solid var(--gb,var(--ln));padding:8px;
- background:radial-gradient(color-mix(in srgb,var(--a) 16%,transparent) .9px,transparent 1.3px) 0 0/22px 22px,radial-gradient(90% 70% at 50% 45%,color-mix(in srgb,var(--a) 10%,transparent),transparent 70%),radial-gradient(60% 50% at 100% 100%,color-mix(in srgb,var(--ok) 7%,transparent),transparent 70%),var(--in)}
-.k310tm svg{display:block;width:100%;height:auto;font-family:Vazirmatn,sans-serif}
-.k310tm .ch{fill:var(--s);font-size:11px;font-weight:800;letter-spacing:.3px}
-.k310tm .tml path{fill:none;stroke-linecap:round}
-.k310tm .tml .h{stroke-width:12;opacity:.8}
-.k310tm .tml .b{stroke-width:3;opacity:.95}
-.k310tm .tml .k{stroke:#fff;stroke-width:1;opacity:.45}
-.k310tm .tml .f{stroke:#fff;stroke-width:1.6;stroke-dasharray:2 16;opacity:.75;animation:k310flow linear infinite}
-.k310tm .tml.dn .h{opacity:.35;animation:k310blink 1.6s ease-in-out infinite}
-.k310tm .tml.dn .b{stroke-dasharray:6 7;opacity:.85}.k310tm .tml.dn .k{display:none}
-.k310tm .pk{pointer-events:none}
-@keyframes k310blink{50%{opacity:.08}}
-body.light .k310tm .tml .h{opacity:.3}body.light .k310tm .tml .k{opacity:.25}
-.k310tm .tml .hit{stroke:transparent;stroke-width:16;cursor:pointer}
-.k310tm .tml .pt{stroke:var(--c1);stroke-width:1.5}
-@keyframes k310flow{to{stroke-dashoffset:-36}}
-.k310tm .tbg rect{fill:var(--c1);stroke-width:1.4;filter:drop-shadow(0 0 5px currentColor)}
-.k310tm .tbg text{font-size:10.5px;font-weight:800;font-family:ui-monospace,Menlo,Consolas,monospace}
-.k310tm .tbg .p{fill:var(--t)}
-.k310tm .tmnd .bx{fill:var(--c2);stroke:color-mix(in srgb,var(--a) 70%,transparent);stroke-width:1.4}
-.k310tm .tmnd .hl{fill:none;stroke:var(--a);stroke-width:5;opacity:.75;animation:k310breathe 3.2s ease-in-out infinite}
-.k310tm .tmnd.off .bx{stroke:color-mix(in srgb,var(--bad) 70%,transparent);stroke-dasharray:4 4}
-.k310tm .tmnd .sd{filter:drop-shadow(0 0 4px currentColor)}
-@keyframes k310breathe{50%{opacity:.25}}
-.k310tm .tmnd.lone{opacity:.6}
-.k310tm .tmnd .n{fill:var(--t);font-size:13px;font-weight:800}
-.k310tm .tmnd .s{fill:var(--s);font-size:10.5px;font-weight:600}
-.k310tm.sm .tmnd .n{font-size:12px}
-.k310tm .tml,.k310tm .tbg{transition:opacity .18s}
-.k310tm svg.dim .tml:not(.hot),.k310tm svg.dim .tbg:not(.hot){opacity:.15}
-.k310tm .tml.hot .b{opacity:1;stroke-width:3}
-.k310tm .tml:focus{outline:none}.k310tm .tml:focus-visible .b{stroke-width:3.4;opacity:1}
-@media(prefers-reduced-motion:reduce){.k310tm .pk{display:none}.k310tm .tmnd .hl,.k310tm .tml.dn .h{animation:none}.k310tm .tml .f{animation:none;opacity:0}.k310cards .kxr.open>.kxr-b{animation:none}.k310cards .kxr{transition:none}}
+@media(prefers-reduced-motion:reduce){.k310cards .kxr.open>.kxr-b{animation:none}.k310cards .kxr{transition:none}}
 
 /* settings: the section list stays in view, the save bar sticks to the bottom of the section */
 @media(min-width:900px){#st .stn{position:sticky;top:84px;align-self:start}}
