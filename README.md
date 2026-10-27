@@ -5,7 +5,8 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written i
 
 ## New in 3.13 — deletes you can watch
 - **A small "removing…" card** opens after deleting a tunnel, a server, a node, an Xray server or a Kanki DNS server: one line per server (the Iran entry stops the tunnel and frees its ports, the removed server wipes everything and uninstalls itself, the VPN part removes its services) with a spinner, a tick when that server confirmed it, or "off — removed when it is back". It closes by itself when everything is done.
-- **A node that is off when you delete it is no longer left behind**: the panel asks it again every minute for a week, and it removes its VPN services, closes their ports and uninstalls its agent as soon as it answers.
+- **A node that is off when you delete it is no longer left behind**: the panel asks it again every minute for ten minutes, and if it answers in that time it removes its VPN services, closes their ports and uninstalls its agent. A server that stays off is left alone, so the panel is not kept busy.
+- **The tunnel map runs across on phones too**: Iran on the left, the servers abroad on the right.
 
 ## New in 3.12.1 — tighter cores, a tunnel map that branches
 - **Cores:** the core cards carry the name beside the logo (the short line under them); the top of a core page is smaller (title, two small buttons, the numbers as one slim row "Running servers 5 / 6").

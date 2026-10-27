@@ -653,8 +653,9 @@ pub(crate) fn spawn_node_removal(app: &Arc<App>, n: Node) {
     });
 }
 
-/// Every minute the deleted nodes that did not answer are asked again to remove themselves, for a week;
-/// one whose address belongs to a node added again is left alone
+/// Every minute the deleted nodes that did not answer are asked again to remove themselves, for ten
+/// minutes (a server gone for good is not asked forever); one whose address belongs to a node added
+/// again is left alone
 pub async fn leftover_loop(app: Arc<App>) {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
@@ -666,7 +667,7 @@ pub async fn leftover_loop(app: Arc<App>) {
         let tried: Vec<String> = list.iter().map(|x| x.id.clone()).collect();
         let mut keep = vec![];
         for x in list {
-            if now() - x.at > 7 * 86400 || used.contains(&x.address) {
+            if now() - x.at > 600 || used.contains(&x.address) {
                 continue;
             }
             let n = Node { id: x.id.clone(), name: x.name.clone(), address: x.address.clone(), token: x.token.clone(), insecure: x.insecure, ..Default::default() };
