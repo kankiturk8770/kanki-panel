@@ -117,6 +117,15 @@ window.pDash=function(){_pd.apply(this,arguments);var pg=$('#pg'),ph=$('#pg .ph'
 // Iran entries in one column, exits abroad in the next (a third for second hops; rows on phones),
 // the columns ordered to cut crossings, every tunnel leaving and reaching its server at its own point,
 // and its label (short name · ping) in the middle of its own line, never over a server or another label.
+// on the map: the tunnel's shortest name (HQ-QUIC → HQ-Q, Game-FEC → GFEC …)
+var TMS={'HQ-QUIC':'HQ-Q','Game-FEC':'GFEC','TCP-Mux':'TMUX','FakeTCP':'FTCP','QUIC':'Q'};
+function tmShort(x){var n=tunShort(x);return TMS[n]||n.replace('AWG+','A+')}
+// on the map: a server's short name, two letters of its name (and its number), numbered when two share them
+function tmAbbr(sv){var out={},by={};
+ sv.forEach(function(s){var nm=String(s.name||'').trim(),w=nm.match(/[A-Za-z]+/),num=(nm.match(/\d+/)||[''])[0],code=(w?w[0].slice(0,2):(s.cc||nm.slice(0,2))).toUpperCase();
+  (by[code]=by[code]||[]).push({s:s,num:num})});
+ Object.keys(by).forEach(function(c){var l=by[c];l.forEach(function(x,i){out[x.s.id]=c+(l.length>1?(x.num&&l.every(function(y){return y.num}) ?x.num:String(i+1)):x.num)})});
+ return out}
 function tmLayout(d,small){var sv=d.servers||[],byId={};sv.forEach(function(s){byId[s.id]=s});
  var tl=(d.tunnels||[]).filter(function(x){return x.entry!=x.exit&&byId[x.entry]&&byId[x.exit]});
  var lay={};sv.forEach(function(s){lay[s.id]=srvLoc(s)=='iran'?0:1});
@@ -142,7 +151,7 @@ function tmLayout(d,small){var sv=d.servers||[],byId={};sv.forEach(function(s){b
  var E={},lvl={},arr={},has={};tl.forEach(function(x){has[x.entry]=1;(arr[x.exit]=arr[x.exit]||[]).push(x)});
  cols.forEach(function(c){var k=0;c.forEach(function(s){if(has[s.id])lvl[s.id]=k++})});
  Object.keys(arr).forEach(function(id){arr[id].sort(function(a,b){return vert?P[a.entry].x-P[b.entry].x:P[a.entry].y-P[b.entry].y})});
- tl.forEach(function(x){var a=P[x.entry],b=P[x.exit],l=arr[x.exit],j=l.indexOf(x),off=(j-(l.length-1)/2)*10,stem=R+20+(lvl[x.entry]||0)*14,r2=Math.sqrt(Math.max(0,R*R-off*off)),pts;
+ tl.forEach(function(x){var a=P[x.entry],b=P[x.exit],l=arr[x.exit],j=l.indexOf(x),off=l.length>1?(j/(l.length-1)-.5)*2*(R-5):0,stem=R+20+(lvl[x.entry]||0)*14,r2=Math.sqrt(Math.max(0,R*R-off*off)),pts;
   if(vert){var d=b.y>=a.y?1:-1,ty=a.y+d*stem;pts=[{x:a.x,y:a.y+d*R},{x:a.x,y:ty},{x:b.x+off,y:ty},{x:b.x+off,y:b.y-d*r2}]}
   else{var d2=b.x>=a.x?1:-1,tx=a.x+d2*stem;pts=[{x:a.x+d2*R,y:a.y},{x:tx,y:a.y},{x:tx,y:b.y+off},{x:b.x-d2*r2,y:b.y+off}]}
   E[x.id]={pts:pts}});
@@ -151,12 +160,12 @@ function tmLayout(d,small){var sv=d.servers||[],byId={};sv.forEach(function(s){b
  var boxes=[],L={};
  sv.forEach(function(s){var p=P[s.id];boxes.push({x:p.x-44,y:p.y-44,w:88,h:110})});
  tl.forEach(function(x){var pts=E[x.id].pts,p0=pts[pts.length-2],p1=pts[pts.length-1],rt=(x.entry_status||{}).rtt_ms||0,
-  w=Math.max(tunShort(x).length,(rt+'ms').length)*6.8+18,h=32,spot=null;
+  w=Math.max(tmShort(x).length,(rt+'ms').length)*6.8+18,h=32,spot=null;
   var at=function(f){return {x:p0.x+(p1.x-p0.x)*f,y:p0.y+(p1.y-p0.y)*f}};
   [.5,.3,.7,.18,.82,.4,.6,.1,.9].some(function(f){var q=at(f),r={x:q.x-w/2,y:q.y-h/2,w:w,h:h};
    if(!boxes.some(function(o){return r.x<o.x+o.w+3&&o.x<r.x+r.w+3&&r.y<o.y+o.h+3&&o.y<r.y+r.h+3})){spot=q;boxes.push(r);return true}});
   L[x.id]=spot||at(.5);if(!spot)boxes.push({x:L[x.id].x-w/2,y:L[x.id].y-h/2,w:w,h:h})});
- return {W:W,H:H,small:!!small,pos:P,sv:sv,tl:tl,hub:'',cx:W/2,cy:H/2,R:0,n:sv.length,cols:true,E:E,L:L,mx:vert?Math.max(7,Math.floor(W/Math.max(1,maxN)/8)):16}}
+ return {ab:tmAbbr(sv),W:W,H:H,small:!!small,pos:P,sv:sv,tl:tl,hub:'',cx:W/2,cy:H/2,R:0,n:sv.length,cols:true,E:E,L:L,mx:vert?Math.max(7,Math.floor(W/Math.max(1,maxN)/8)):16}}
 window.tunMap=function(d,small){var sv=d.servers||[],tl=d.tunnels||[];
  if(!tl.length&&sv.length<2)return '<div class="tempty">'+ic('tunnel',34)+'<b>'+t('No tunnels yet')+'</b><span class="muted">'+t('Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.')+'</span></div>';
  var key=small?'s':'m',st=TM.reg[key]||(TM.reg[key]={rate:{},last:{}}),now=Date.now();
@@ -214,7 +223,7 @@ window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;v
   // label: short name • ping in the middle of the line; tunnels between the same two servers share one
   // stacked label (drawn once, by the first of them) so their texts never cover each other
   if(m.L[x.id]){var bp=m.L[x.id];
-   labs.push(function(){var zr=es.rtt_ms||0,zc=tmRgb(tunCol(x.state)),l1=tunShort(x),l2=x.state=='down'||x.state=='off'?t('down'):zr?zr+'ms':'…';
+   labs.push(function(){var zr=es.rtt_ms||0,zc=tmRgb(tunCol(x.state)),l1=tmShort(x),l2=x.state=='down'||x.state=='off'?t('down'):zr?zr+'ms':'…';
     c.direction='ltr';c.textAlign='center';c.font='800 10.5px Vazirmatn,sans-serif';var lw=Math.max(c.measureText(l1).width,c.measureText(l2).width)+16,lh=31;
     c.fillStyle=th.disc;tmRound(c,bp.x-lw/2,bp.y-lh/2,lw,lh,9);c.fill();c.strokeStyle=tmA(zc,.7);c.lineWidth=1;c.stroke();
     c.fillStyle=th.t;c.fillText(l1,bp.x,bp.y-2);c.font='700 10px Vazirmatn,sans-serif';c.fillStyle=tmA(zc,1);c.fillText(l2,bp.x,bp.y+11)})}});
@@ -231,7 +240,7 @@ window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;v
   var cg=c.createRadialGradient(P.x-5,P.y-6,2,P.x,P.y,18);cg.addColorStop(0,'#fff7d6');cg.addColorStop(.45,tmA(th.al,1));cg.addColorStop(1,tmA(th.ad,1));c.fillStyle=s.online?cg:'rgba(140,140,150,.55)';c.beginPath();c.arc(P.x,P.y,17,0,TAU);c.fill();
   c.fillStyle='#2a1d06';c.font='900 14px Vazirmatn,sans-serif';c.textAlign='center';c.fillText((s.local?'★':s.name.charAt(0)).toUpperCase(),P.x,P.y+5);
   c.fillStyle=tmA(col,1);c.strokeStyle=th.disc;c.lineWidth=2;c.beginPath();c.arc(P.x+18,P.y-18,5,0,TAU);c.fill();c.stroke();c.restore();
-  var mx=m.mx||(m.n>9?10:14),nm=s.name.length>mx?s.name.slice(0,mx-1)+'…':s.name;c.font='700 12.5px Vazirmatn,sans-serif';var nw=c.measureText(nm).width+12,ny=s.id!=m.hub&&P.y<m.cy-20?P.y-24*Z-14:P.y+24*Z+19; // the name on the outer side, away from the lines
+  var mx=m.mx||(m.n>9?10:14),nm0=(m.ab&&m.ab[s.id])||s.name,nm=nm0.length>mx?nm0.slice(0,mx-1)+'…':nm0;c.font='700 12.5px Vazirmatn,sans-serif';var nw=c.measureText(nm).width+12,ny=s.id!=m.hub&&P.y<m.cy-20?P.y-24*Z-14:P.y+24*Z+19; // the name on the outer side, away from the lines
   c.fillStyle=tmA(tmRgb(th.disc),.72);tmRound(c,P.x-nw/2,ny-13,nw,18,9);c.fill();c.fillStyle=th.t;c.textAlign='center';c.direction=/[\u0600-\u06FF]/.test(nm)?'rtl':'ltr';c.fillText(nm,P.x,ny)})};
 
 var css=`
