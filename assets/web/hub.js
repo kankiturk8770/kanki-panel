@@ -120,11 +120,18 @@ window.pDash=function(){_pd.apply(this,arguments);var pg=$('#pg'),ph=$('#pg .ph'
 // on the map: the tunnel's shortest name (HQ-QUIC → HQ-Q, Game-FEC → GFEC …)
 var TMS={'HQ-QUIC':'HQ-Q','Game-FEC':'GFEC','TCP-Mux':'TMUX','FakeTCP':'FTCP','QUIC':'Q'};
 function tmShort(x){var n=tunShort(x);return TMS[n]||n.replace('AWG+','A+')}
-// on the map: a server's short name, two letters of its name (and its number), numbered when two share them
+// on the map: a server's short name, its country's short code (Germany GR, England UK …) and its number,
+// numbered when two share a code (GR1, GR2); a name with no known country gives its first two letters
+var TMC=[[/german|آلمان|^de$/i,'GR'],[/england|brit|^uk$|united king|انگلیس|بریتانیا|^gb$/i,'UK'],[/nether|holland|هلند|^nl$/i,'NL'],[/swed|سوئد|^se$/i,'SE'],
+ [/turk|ترکیه|^tr$/i,'TR'],[/iran|tehran|tabriz|mashhad|shiraz|isfahan|ایران|تهران|تبریز|مشهد|شیراز|اصفهان|^ir$/i,'IR'],[/finl|فنلاند|^fi$/i,'FI'],[/fran|فرانسه|^fr$/i,'FR'],
+ [/usa|america|united states|آمریکا|^us$/i,'US'],[/canad|کانادا|^ca$/i,'CA'],[/poland|لهستان|^pl$/i,'PL'],[/russia|روسیه|^ru$/i,'RU'],[/emirat|dubai|uae|امارات|دبی|^ae$/i,'AE'],
+ [/armen|ارمنستان|^am$/i,'AM'],[/austria|اتریش|^at$/i,'AT'],[/switz|سوئیس|^ch$/i,'CH'],[/ital|ایتالیا|^it$/i,'IT'],[/spain|اسپانیا|^es$/i,'ES'],[/japan|ژاپن|^jp$/i,'JP'],[/singap|سنگاپور|^sg$/i,'SG']];
+function tmCode(s){var nm=String(s.name||'');for(var i=0;i<TMC.length;i++)if(TMC[i][0].test(nm)||TMC[i][0].test(String(s.cc||'')))return TMC[i][1];
+ var w=nm.match(/[A-Za-z]+/);return (w?w[0].slice(0,2):(s.cc||nm.slice(0,2))).toUpperCase()}
 function tmAbbr(sv){var out={},by={};
- sv.forEach(function(s){var nm=String(s.name||'').trim(),w=nm.match(/[A-Za-z]+/),num=(nm.match(/\d+/)||[''])[0],code=(w?w[0].slice(0,2):(s.cc||nm.slice(0,2))).toUpperCase();
-  (by[code]=by[code]||[]).push({s:s,num:num})});
- Object.keys(by).forEach(function(c){var l=by[c];l.forEach(function(x,i){out[x.s.id]=c+(l.length>1?(x.num&&l.every(function(y){return y.num}) ?x.num:String(i+1)):x.num)})});
+ sv.forEach(function(s){var code=tmCode(s),num=(String(s.name||'').match(/\d+/)||[''])[0];(by[code]=by[code]||[]).push({s:s,num:num})});
+ Object.keys(by).forEach(function(c){var l=by[c],own=l.every(function(y){return y.num})&&new Set(l.map(function(y){return y.num})).size==l.length;
+  l.forEach(function(x,i){out[x.s.id]=c+(l.length>1?(own?x.num:String(i+1)):x.num)})});
  return out}
 function tmLayout(d,small){var sv=d.servers||[],byId={};sv.forEach(function(s){byId[s.id]=s});
  var tl=(d.tunnels||[]).filter(function(x){return x.entry!=x.exit&&byId[x.entry]&&byId[x.exit]});
