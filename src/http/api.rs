@@ -225,6 +225,10 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/assets/kanki-hub.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/hub.js"))
         }))
+        // 3.11: the new design (menu that folds and opens smoothly, top menu, cores rail, country chips, user cards)
+        .route("/assets/kanki-deck.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/deck.js"))
+        }))
         .route("/api/overview", get(overview))
         .route("/api/users", get(users_list).post(users_create))
         .route("/api/users/:id", axum::routing::put(users_update).delete(users_delete))
