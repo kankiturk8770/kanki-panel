@@ -9,6 +9,7 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -597,21 +598,96 @@ async fn nodes_delete(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
     if id == "local" {
         return err(StatusCode::BAD_REQUEST, "the main server cannot be deleted");
     }
-    let removed = delete_node(&app, &id).await;
-    Json(json!({ "ok": true, "removed": removed })).into_response()
+    let n = delete_node(&app, &id);
+    let name = n.as_ref().map(|n| n.name.clone()).unwrap_or_default();
+    let steps = n.iter().map(|n| crate::tunnel::panel::node_step(&n.id, &n.name)).collect();
+    let rid = crate::tunnel::panel::track("node", &name, steps);
+    if let Some(n) = n {
+        spawn_node_removal(&app, n);
+    }
+    Json(json!({ "ok": true, "removal": rid })).into_response()
 }
 
-/// Removes a VPN node: its users are cut off and KANKI MIX stops (every agent version), then it
-/// removes its VPN services, closes their ports and uninstalls its agent (3.6.8+). True when the
-/// node itself confirmed the removal.
-pub(crate) async fn delete_node(app: &Arc<App>, id: &str) -> bool {
-    let mut removed = false;
-    if let Some(n) = app.db.node(id) {
-        let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), ..Default::default() };
-        let synced = sync::remote_post_json(app, &n, "/agent/sync", &json!(empty)).await.is_some();
-        removed = synced && sync::remote_post(app, &n, "/agent/remove").await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false);
-        app.forget_node_pins(&n.id, &n.address);
+/// A node that was deleted while it did not answer: it is asked again until it removes itself
+#[derive(Serialize, Deserialize, Clone)]
+struct Leftover {
+    id: String,
+    name: String,
+    address: String,
+    token: String,
+    insecure: bool,
+    at: i64,
+}
+
+fn leftovers(app: &App) -> Vec<Leftover> {
+    serde_json::from_str(&app.db.get("nodes_leftover")).unwrap_or_default()
+}
+
+fn save_leftovers(app: &App, v: &[Leftover]) {
+    app.db.set("nodes_leftover", &serde_json::to_string(v).unwrap_or_else(|_| "[]".into()));
+}
+
+/// Asks the node to cut its users off, stop KANKI MIX, remove its VPN services, close their ports and
+/// uninstall its agent (3.6.8+). True when the node confirmed it.
+async fn remove_remote(app: &Arc<App>, n: &Node) -> bool {
+    let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), ..Default::default() };
+    let synced = sync::remote_post_json(app, n, "/agent/sync", &json!(empty)).await.is_some();
+    synced && sync::remote_post(app, n, "/agent/remove").await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false)
+}
+
+/// Removes a deleted node from its server in the background; when it does not answer it is kept
+/// and asked again (see `leftover_loop`)
+pub(crate) fn spawn_node_removal(app: &Arc<App>, n: Node) {
+    let app = app.clone();
+    tokio::spawn(async move {
+        if remove_remote(&app, &n).await {
+            app.forget_node_pins(&n.id, &n.address);
+            crate::tunnel::panel::note_node(&n.id, "done");
+            return;
+        }
+        crate::tunnel::panel::note_node(&n.id, "off");
+        let mut l = leftovers(&app);
+        l.retain(|x| x.id != n.id);
+        l.push(Leftover { id: n.id.clone(), name: n.name.clone(), address: n.address.clone(), token: n.token.clone(), insecure: n.insecure, at: now() });
+        save_leftovers(&app, &l);
+    });
+}
+
+/// Every minute the deleted nodes that did not answer are asked again to remove themselves, for a week;
+/// one whose address belongs to a node added again is left alone
+pub async fn leftover_loop(app: Arc<App>) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        let list = leftovers(&app);
+        if list.is_empty() {
+            continue;
+        }
+        let used: Vec<String> = app.db.nodes().into_iter().map(|n| n.address).collect();
+        let tried: Vec<String> = list.iter().map(|x| x.id.clone()).collect();
+        let mut keep = vec![];
+        for x in list {
+            if now() - x.at > 7 * 86400 || used.contains(&x.address) {
+                continue;
+            }
+            let n = Node { id: x.id.clone(), name: x.name.clone(), address: x.address.clone(), token: x.token.clone(), insecure: x.insecure, ..Default::default() };
+            if remove_remote(&app, &n).await {
+                app.forget_node_pins(&n.id, &n.address);
+                crate::tunnel::panel::note_node(&n.id, "done");
+            } else {
+                keep.push(x);
+            }
+        }
+        // a node deleted while this ran is not lost
+        let mut now_list = leftovers(&app);
+        now_list.retain(|x| keep.iter().any(|k| k.id == x.id) || !tried.contains(&x.id));
+        save_leftovers(&app, &now_list);
     }
+}
+
+/// Removes a VPN node from the panel right away (its users, KANKI MIX settings, direct name …) and
+/// gives it back, so its server can be told to remove itself (`spawn_node_removal`).
+pub(crate) fn delete_node(app: &Arc<App>, id: &str) -> Option<Node> {
+    let n = app.db.node(id);
     let _ = app.db.exec("DELETE FROM nodes WHERE id=?1", &[&id]);
     let _ = app.db.exec("DELETE FROM peers WHERE node_id=?1", &[&id]);
     // nothing of it stays in the panel: users' server lists, its KANKI MIX settings, its direct name,
@@ -627,7 +703,7 @@ pub(crate) async fn delete_node(app: &Arc<App>, id: &str) -> bool {
     crate::exitgeo::forget(app, &[id.to_string()]);
     crate::live::forget(id);
     crate::servers::node_gone(app, id);
-    removed
+    n
 }
 
 /// Changes the WireGuard / AmneziaWG / Hysteria2 ports of a node (or of the panel server) in one go

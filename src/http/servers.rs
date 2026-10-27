@@ -877,9 +877,14 @@ async fn remove(State(app): St, h: HeaderMap, Path(id): Path<String>, Query(q): 
         return err(StatusCode::BAD_REQUEST, "the panel server cannot be removed");
     }
     if let Some(nid) = id.strip_prefix("node:") {
-        let removed = crate::api::delete_node(&app, nid).await;
+        let n = crate::api::delete_node(&app, nid);
         crate::twin::forget(&app, &id);
-        return Json(json!({ "ok": true, "removed": removed })).into_response();
+        let name = n.as_ref().map(|n| n.name.clone()).unwrap_or_default();
+        let rid = tp::track("node", &name, n.iter().map(|n| tp::node_step(&n.id, &n.name)).collect());
+        if let Some(n) = n {
+            crate::api::spawn_node_removal(&app, n);
+        }
+        return Json(json!({ "ok": true, "removal": rid })).into_response();
     }
     let with_tunnels = q.get("tunnels").map(|v| v == "1").unwrap_or(false);
     let used: Vec<Value> = tp::tunnels(&app)
@@ -891,12 +896,24 @@ async fn remove(State(app): St, h: HeaderMap, Path(id): Path<String>, Query(q): 
         return (StatusCode::CONFLICT, Json(json!({ "error": "tunnels use this server", "tunnels": used }))).into_response();
     }
     let node = tp::servers(&app).into_iter().find(|s| s.id == id).map(|s| s.node).unwrap_or_default();
+    // what each server has to do: this one removes everything and itself, the other ends stop the tunnels
+    let mut steps = vec![tp::step(&app, &id, "server", "")];
+    let tl: Vec<tp::Tunnel> = tp::tunnels(&app).into_iter().filter(|t| t.entry == id || t.exit == id).collect();
+    steps.extend(tp::tunnel_steps(&app, &tl, &id));
+    let name = steps[0].name.clone();
     if let Err((code, e)) = tp::delete_server(&app, &id, with_tunnels) {
         return err(code, &e);
     }
-    let removed = if node.is_empty() { true } else { crate::api::delete_node(&app, &node).await };
+    let n = if node.is_empty() { None } else { crate::api::delete_node(&app, &node) };
+    if let Some(n) = &n {
+        steps.push(tp::node_step(&n.id, &n.name));
+    }
+    let rid = tp::track("server", &name, steps);
+    if let Some(n) = n {
+        crate::api::spawn_node_removal(&app, n);
+    }
     crate::twin::forget(&app, &id);
-    Json(json!({ "ok": true, "removed": removed })).into_response()
+    Json(json!({ "ok": true, "removal": rid })).into_response()
 }
 
 // ------------------------------------------------------------------ downloads for a new server

@@ -1361,7 +1361,9 @@ async fn del_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
     }
     s.servers.retain(|x| x.server != id);
     save(&app, &s);
-    Json(json!({ "ok": true })).into_response()
+    let st = crate::tunnel::panel::step(&app, &id, "xray", "");
+    let rid = crate::tunnel::panel::track("xray", &st.name.clone(), vec![st]);
+    Json(json!({ "ok": true, "removal": rid })).into_response()
 }
 
 /// The server was removed from the panel: its Xray inbounds and its Xray entry go (its agent removes

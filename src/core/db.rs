@@ -102,7 +102,7 @@ impl User {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct Node {
     pub id: String,
     pub name: String,

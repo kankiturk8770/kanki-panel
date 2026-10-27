@@ -799,7 +799,9 @@ async fn del_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
     s.servers.retain(|o| o.server != id);
     save(&app, &mut s);
     app.db.set(&format!("dns_prev_{}", id), "");
-    Json(json!({ "ok": true })).into_response()
+    let st = crate::tunnel::panel::step(&app, &id, "dns", "");
+    let rid = crate::tunnel::panel::track("dns", &st.name.clone(), vec![st]);
+    Json(json!({ "ok": true, "removal": rid })).into_response()
 }
 
 /// The server was removed from the panel: it and the relays that sent their connections to it leave

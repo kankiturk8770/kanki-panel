@@ -317,3 +317,73 @@ body.kd .uchip.kd-u .nm{flex:1;min-width:0;white-space:normal!important;overflow
 var st=document.createElement('style');st.id='kdcss';st.textContent=css;document.head.appendChild(st);
 look();
 })();
+
+/* 3.13 — what a delete left to do on each server, live: a small card at the bottom lists every
+   server's part (stop the tunnel, remove everything, remove the VPN services) with a spinner,
+   a tick when that server confirmed it, or "off" (it is done when the server comes back). */
+(function(){
+var fa=function(){return (document.documentElement.dir||'rtl')=='rtl'};
+function L(p,e){return fa()?p:e}
+var RM={},timer=0,started=0;
+var WHAT={tunnel:['توقف تانل و آزاد کردن پورت‌ها','stop the tunnel, free its ports'],
+ server:['پاک کردن همه‌چیز و حذف خودِ سرور','remove everything and uninstall'],
+ node:['حذف سرویس‌های VPN و بستن پورت‌ها','remove the VPN services, close ports'],
+ xray:['حذف Xray و بستن پورت‌هایش','remove Xray, close its ports'],
+ dns:['حذف DNS کانکی و بستن پورت‌هایش','remove Kanki DNS, close its ports']};
+var KIND={tunnel:['تانل','tunnel'],server:['سرور','server'],node:['سرور','server'],xray:['Xray','Xray'],dns:['DNS','DNS']};
+function esc2(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function box(){var b=document.getElementById('kdrm');if(!b){b=document.createElement('div');b.id='kdrm';b.setAttribute('role','status');b.setAttribute('aria-live','polite');document.body.appendChild(b);
+ b.onclick=function(e){if(e.target.closest('.kdrm-x'))close()}}return b}
+function close(){var b=document.getElementById('kdrm');if(b){b.classList.remove('on');setTimeout(function(){if(!b.classList.contains('on'))b.remove()},350)}RM={};clearTimeout(timer);timer=0}
+function draw(){
+ var ids=Object.keys(RM);if(!ids.length)return;
+ var all=true,h='';
+ ids.forEach(function(id){var r=RM[id].r;if(!r){all=false;return}
+  var w=KIND[r.kind]||KIND.server;
+  h+='<div class="kdrm-g"><div class="kdrm-n">'+esc2(L(w[0],w[1]))+' <b>'+esc2(r.name)+'</b></div>';
+  if(!r.steps.length)h+='<div class="kdrm-r done"><i></i><span>'+L('از پنل حذف شد','removed from the panel')+'</span></div>';
+  r.steps.forEach(function(s){if(s.state!='done')all=false;var d=WHAT[s.what]||WHAT.server;
+   var tail=s.state=='done'?L('پاک شد','removed'):s.state=='off'?L('خاموش است؛ وقتی برگردد پاک می‌شود','off — removed when it is back'):L('در حال حذف…','removing…');
+   h+='<div class="kdrm-r '+s.state+'"><i></i><span><b>'+esc2(s.name)+'</b> · '+esc2(L(d[0],d[1]))+'<em>'+tail+'</em></span></div>'});
+  h+='</div>'});
+ var late=Date.now()-started>180000;
+ var title=all?L('همه‌چیز پاک شد ✓','everything removed ✓'):late?L('بقیه در پس‌زمینه انجام می‌شود','the rest goes on in the background'):L('در حال حذف از سرورها…','removing from the servers…');
+ var b=box();b.className='on'+(all?' all':'');
+ b.innerHTML='<div class="kdrm-h"><span class="kdrm-sp"></span><b>'+title+'</b><button class="kdrm-x" aria-label="'+L('بستن','close')+'">✕</button></div>'+h;
+ return all||late}
+function poll(){timer=0;var ids=Object.keys(RM);if(!ids.length)return;
+ Promise.all(ids.map(function(id){return window.api('GET','/api/removals/'+encodeURIComponent(id)).then(function(r){if(RM[id])RM[id].r=r}).catch(function(){if(RM[id]&&!RM[id].r)delete RM[id]})})).then(function(){
+  var fin=draw();
+  if(document.querySelector('#kdrm.all')){timer=setTimeout(close,3500);return}
+  // after three minutes it stops asking; what is left is done when those servers come back
+  if(!fin)timer=setTimeout(poll,2000)})}
+function follow(rid){if(!rid)return;if(!Object.keys(RM).length)started=Date.now();RM[rid]={r:null};clearTimeout(timer);timer=setTimeout(poll,600)}
+window.kdFollowRemoval=follow;
+var RX=/^\/api\/(tunnels\/servers\/[^/?]+|tunnels\/(?!servers|probe|cdntest)[^/?]+|servers\/[^/?]+|nodes\/[^/?]+|xray\/servers\/[^/?]+|dns\/servers\/[^/?]+)(\?.*)?$/;
+var _api=window.api;
+window.api=function(m,u){var p=_api.apply(this,arguments);
+ if(m=='DELETE'&&RX.test(u||'')&&p&&p.then)p.then(function(r){if(r&&r.removal)follow(r.removal)},function(){});
+ return p};
+var css=`
+#kdrm{position:fixed;z-index:9998;inset-inline-start:50%;bottom:16px;transform:translate(50%,140%);width:min(380px,calc(100vw - 32px));max-height:min(60vh,420px);overflow:auto;
+ background:#0b0b0b;color:var(--t,#fff);border:1px solid color-mix(in srgb,var(--a,#f5b301) 45%,transparent);border-radius:16px;padding:10px 12px 12px;
+ box-shadow:0 0 0 1px #000,0 10px 40px #000c,0 0 24px color-mix(in srgb,var(--a,#f5b301) 18%,transparent);font-size:12.5px;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .35s;opacity:0}
+[dir=ltr] #kdrm{transform:translate(-50%,140%)}
+#kdrm.on{transform:translate(50%,0);opacity:1}[dir=ltr] #kdrm.on{transform:translate(-50%,0)}
+#kdrm.all{border-color:color-mix(in srgb,var(--ok,#22c55e) 55%,transparent)}
+.kdrm-h{display:flex;align-items:center;gap:8px;margin-bottom:6px}.kdrm-h b{flex:1;font-weight:800;font-size:13px}
+.kdrm-sp,.kdrm-r i{width:14px;height:14px;flex:none;border-radius:50%;border:2px solid color-mix(in srgb,var(--a,#f5b301) 30%,transparent);border-top-color:var(--a,#f5b301);animation:kdrmspin .8s linear infinite}
+#kdrm.all .kdrm-sp{animation:none;border-color:var(--ok,#22c55e);background:var(--ok,#22c55e)}
+.kdrm-x{background:none;border:0;color:var(--s,#aaa);font-size:13px;cursor:pointer;min-width:28px;min-height:28px;border-radius:8px}.kdrm-x:hover{color:var(--t,#fff);background:#ffffff12}
+.kdrm-g{padding:6px 0;border-top:1px solid #ffffff12}.kdrm-n{color:var(--s,#aaa);font-size:11.5px;margin-bottom:4px}.kdrm-n b{color:var(--a,#f5b301)}
+.kdrm-r{display:flex;align-items:flex-start;gap:8px;padding:3px 0;line-height:1.5}.kdrm-r i{margin-top:2px;position:relative}
+.kdrm-r span{flex:1;min-width:0}.kdrm-r em{display:block;font-style:normal;font-size:11px;color:var(--s,#aaa)}
+.kdrm-r.done i{animation:none;border-color:var(--ok,#22c55e);background:var(--ok,#22c55e)}
+.kdrm-r.done i::after{content:'';position:absolute;inset-inline-start:3px;top:0;width:4px;height:7px;border:solid #000;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.kdrm-r.done em{color:var(--ok,#22c55e)}
+.kdrm-r.off i{animation:none;border-color:var(--warn,#f59e0b);border-style:dashed}.kdrm-r.off em{color:var(--warn,#f59e0b)}
+@keyframes kdrmspin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){#kdrm{transition:none}.kdrm-sp,.kdrm-r i{animation:none}}
+`;
+var st=document.createElement('style');st.id='kdrmcss';st.textContent=css;document.head.appendChild(st);
+})();
