@@ -1412,7 +1412,7 @@ function drawNodes(){var el=$('#nl');if(!el)return;el.innerHTML=S.nodes.map(func
 function findN(id){for(var i=0;i<S.nodes.length;i++)if(S.nodes[i].id==id)return S.nodes[i]}
 function nAct(id,a){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+a).then(function(r){toast(r.ok===false?(r.result&&r.result.error||'failed'):t('Done'),r.ok===false);loadNodes()}).catch(fail)}
 function nDel(id){if(!confirm(t('Delete this server? Its users are cut off and the server itself removes WireGuard, AmneziaWG, Hysteria2 and KANKI MIX, closes their ports and uninstalls the node agent.')))return;toast(t('Removing…'));
- api('DELETE','/api/nodes/'+encodeURIComponent(id)).then(function(r){toast(r.removed?t('Done: everything was removed from the server too'):t('Deleted from the panel. The server did not answer (or runs an old version): its VPN services stay until you uninstall them there.'),!r.removed);loadNodes()}).catch(fail)}
+ api('DELETE','/api/nodes/'+encodeURIComponent(id)).then(function(){loadNodes()}).catch(fail)}
 function nHealth(id){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/health').then(function(r){var n=findN(id);
  modal(mhead(t('Health'),n?n.name:'')+'<p>'+(r.ok?'<span class="badge g">OK</span>':'<span class="badge r">'+t('Offline')+'</span>')+' <span class="ltr">'+r.ms+' ms</span> '+(r.version?'· v'+esc(r.version):'')+(r.load?' · load '+esc(r.load):'')+'</p>'+
  '<div class="list">'+((r.services||[]).map(function(s){return '<div class="li"><span>'+esc(s.key)+' <small class="ltr">'+esc(s.unit)+'</small></span><span class="badge '+(s.active?'g':'r')+'">'+esc(s.state)+'</span></div>'}).join(''))+'</div>')}).catch(fail)}

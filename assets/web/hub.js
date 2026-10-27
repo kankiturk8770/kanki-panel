@@ -146,21 +146,20 @@ function tmLayout(d,small){var sv=d.servers||[],byId={};sv.forEach(function(s){b
    if(lay[x.entry]==lay[y.entry]&&lay[x.exit]==lay[y.exit]&&(pos[x.entry]-pos[y.entry])*(pos[x.exit]-pos[y.exit])<0)n++}return n};
  var best=cross(),more=best>0;for(it=0;it<20&&more;it++){more=false;
   cols.forEach(function(c){for(var i=0;i+1<c.length;i++){var s0=c[i];c[i]=c[i+1];c[i+1]=s0;setPos();var n=cross();if(n<best){best=n;more=true}else{c[i+1]=c[i];c[i]=s0;setPos()}}})}
- var vert=window.innerWidth<640,rtl=document.documentElement.dir=='rtl',nc=cols.length,maxN=Math.max.apply(null,cols.map(function(c){return c.length}).concat([1]));
+ // always across: Iran on the left, the servers abroad on the right (phones too, a little narrower)
+ var phone=window.innerWidth<640,nc=cols.length,maxN=Math.max.apply(null,cols.map(function(c){return c.length}).concat([1]));
  var W,H,P={},R=26,mg=78;
- if(vert){W=420;H=Math.max(560,nc*300);cols.forEach(function(c,ci){c.forEach(function(s,i){P[s.id]={x:W/c.length*(i+.5),y:mg+ci*((H-2*mg)/Math.max(1,nc-1)),c:ci}})})}
- else{W=small?680:820;var step=Math.max(118,Math.max.apply(null,sv.map(function(s){return tl.filter(function(x){return x.entry==s.id||x.exit==s.id}).length*14+40}).concat([0])));
+ {W=phone?Math.max(460,250*(nc-1)+140):small?680:820;if(phone)mg=62;var step=Math.max(118,Math.max.apply(null,sv.map(function(s){return tl.filter(function(x){return x.entry==s.id||x.exit==s.id}).length*14+40}).concat([0])));
   H=Math.max(small?330:380,maxN*step+70);
-  cols.forEach(function(c,ci){var x=mg+ci*((W-2*mg)/Math.max(1,nc-1));if(rtl)x=W-x;c.forEach(function(s,i){P[s.id]={x:x,y:40+(H-70)/c.length*(i+.5),c:ci}})})}
+  cols.forEach(function(c,ci){var x=mg+ci*((W-2*mg)/Math.max(1,nc-1));c.forEach(function(s,i){P[s.id]={x:x,y:40+(H-70)/c.length*(i+.5),c:ci}})})}
  // a trunk from each entry: a short stem, one line across, then a straight branch down (or across) to every
  // server it reaches. Branches into one server sit side by side; entries of one column get their own trunk
  // level, so trunks never lie on each other
  var E={},lvl={},arr={},has={};tl.forEach(function(x){has[x.entry]=1;(arr[x.exit]=arr[x.exit]||[]).push(x)});
  cols.forEach(function(c){var k=0;c.forEach(function(s){if(has[s.id])lvl[s.id]=k++})});
- Object.keys(arr).forEach(function(id){arr[id].sort(function(a,b){return vert?P[a.entry].x-P[b.entry].x:P[a.entry].y-P[b.entry].y})});
+ Object.keys(arr).forEach(function(id){arr[id].sort(function(a,b){return P[a.entry].y-P[b.entry].y})});
  tl.forEach(function(x){var a=P[x.entry],b=P[x.exit],l=arr[x.exit],j=l.indexOf(x),off=l.length>1?(j/(l.length-1)-.5)*2*(R-5):0,stem=R+20+(lvl[x.entry]||0)*14,r2=Math.sqrt(Math.max(0,R*R-off*off)),pts;
-  if(vert){var d=b.y>=a.y?1:-1,ty=a.y+d*stem;pts=[{x:a.x,y:a.y+d*R},{x:a.x,y:ty},{x:b.x+off,y:ty},{x:b.x+off,y:b.y-d*r2}]}
-  else{var d2=b.x>=a.x?1:-1,tx=a.x+d2*stem;pts=[{x:a.x+d2*R,y:a.y},{x:tx,y:a.y},{x:tx,y:b.y+off},{x:b.x-d2*r2,y:b.y+off}]}
+  var d2=b.x>=a.x?1:-1,tx=a.x+d2*stem;pts=[{x:a.x+d2*R,y:a.y},{x:tx,y:a.y},{x:tx,y:b.y+off},{x:b.x-d2*r2,y:b.y+off}];
   E[x.id]={pts:pts}});
  // labels (short name, ping under it) on each branch, moved along it until they cover no server, name or
  // other label: neighbouring branches end up with their labels at different heights
@@ -172,7 +171,7 @@ function tmLayout(d,small){var sv=d.servers||[],byId={};sv.forEach(function(s){b
   [.5,.3,.7,.18,.82,.4,.6,.1,.9].some(function(f){var q=at(f),r={x:q.x-w/2,y:q.y-h/2,w:w,h:h};
    if(!boxes.some(function(o){return r.x<o.x+o.w+3&&o.x<r.x+r.w+3&&r.y<o.y+o.h+3&&o.y<r.y+r.h+3})){spot=q;boxes.push(r);return true}});
   L[x.id]=spot||at(.5);if(!spot)boxes.push({x:L[x.id].x-w/2,y:L[x.id].y-h/2,w:w,h:h})});
- return {ab:tmAbbr(sv),W:W,H:H,small:!!small,pos:P,sv:sv,tl:tl,hub:'',cx:W/2,cy:H/2,R:0,n:sv.length,cols:true,E:E,L:L,mx:vert?Math.max(7,Math.floor(W/Math.max(1,maxN)/8)):16}}
+ return {ab:tmAbbr(sv),W:W,H:H,small:!!small,pos:P,sv:sv,tl:tl,hub:'',cx:W/2,cy:H/2,R:0,n:sv.length,cols:true,E:E,L:L,mx:16}}
 window.tunMap=function(d,small){var sv=d.servers||[],tl=d.tunnels||[];
  if(!tl.length&&sv.length<2)return '<div class="tempty">'+ic('tunnel',34)+'<b>'+t('No tunnels yet')+'</b><span class="muted">'+t('Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.')+'</span></div>';
  var key=small?'s':'m',st=TM.reg[key]||(TM.reg[key]={rate:{},last:{}}),now=Date.now();

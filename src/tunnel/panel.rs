@@ -1240,6 +1240,7 @@ pub async fn local_loop(app: Arc<App>) {
         mgr.apply(specs).await;
         let _ = tokio::task::spawn_blocking(move || super::agent::open_ports(&ps)).await;
         let st = mgr.statuses().await;
+        note_report("local", &st, false, false);
         seen().lock().unwrap().insert(
             "local".into(),
             Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, emergency: Value::Null, fw: Value::Null, listen: Value::Null, setup: Value::Null },
@@ -1370,6 +1371,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/tunnels/servers/:id/ports", get(server_ports))
         .route("/api/tunnels/servers/:id/firewall", get(server_fw).post(server_fw_close))
         .route("/api/tunnels/:id", delete(tunnel_del))
+        .route("/api/removals/:id", get(removal_get))
         .route("/api/tunnels/:id/awgconf/:side", get(awg_conf))
         .route("/api/tunnels/:id/hy2conf/:side", get(hy2_conf))
         .route("/api/tunnels/:id/:action", post(tunnel_action))
@@ -1924,8 +1926,11 @@ async fn tunnel_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
     if list.len() == n {
         return err(StatusCode::NOT_FOUND, "tunnel not found");
     }
+    let gone: Vec<Tunnel> = tunnels(&app).into_iter().filter(|t| t.id == id).collect();
     save_tunnels(&app, &list);
-    Json(json!({ "ok": true })).into_response()
+    let name = gone.first().map(|t| t.name.clone()).unwrap_or_default();
+    let rid = track("tunnel", &name, tunnel_steps(&app, &gone, ""));
+    Json(json!({ "ok": true, "removal": rid })).into_response()
 }
 
 async fn tunnel_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(String, String)>) -> Response {
@@ -2240,8 +2245,9 @@ async fn server_free_ports(State(app): St, h: HeaderMap, Path(id): Path<String>,
 
 async fn server_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
     let _ = guard!(app, h, "nodes");
+    let st = step(&app, &id, "server", "");
     match delete_server(&app, &id, false) {
-        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Ok(()) => Json(json!({ "ok": true, "removal": track("server", &st.name.clone(), vec![st]) })).into_response(),
         Err((code, e)) => err(code, &e),
     }
 }
@@ -2504,12 +2510,14 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     let token = b["token"].as_str().unwrap_or("").to_string();
     let Some(s) = servers(&app).into_iter().find(|s| s.id == id) else {
         // unknown or removed: the agent stops its tunnels
+        note_gone(&id);
         return (StatusCode::GONE, "this server is not in the panel any more").into_response();
     };
     if token.is_empty() || !util::ct_eq(&token, &s.token) {
         return err(StatusCode::FORBIDDEN, "wrong token");
     }
     let status: Vec<Status> = serde_json::from_value(b["status"].clone()).unwrap_or_default();
+    note_report(&id, &status, b["xray"]["active"].as_bool() == Some(true), b["dns"]["active"].as_bool() == Some(true));
     let fresh_ip = util::client_ip(&h);
     {
         let mut sn = seen().lock().unwrap();
@@ -2830,3 +2838,171 @@ mod route_tests {
     }
 }
 
+
+// ------------------------------------------------------------------ what a removal left to do on each server
+
+/// One server's part of a removal: "tunnel" (it stops the tunnel and closes its ports), "server"
+/// (its agent removes everything Kanki installed and uninstalls itself) or "node" (the VPN part:
+/// its services, their ports and its agent). state: wait, done; a server not heard from is shown "off".
+#[derive(Serialize, Clone, Debug)]
+pub(crate) struct Step {
+    pub server: String,
+    pub name: String,
+    pub what: String,
+    pub tunnel: String,
+    pub state: String,
+    /// the last time the server was heard from (0 = never)
+    ping: i64,
+    gone: u32,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub(crate) struct Removal {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    pub at: i64,
+    pub steps: Vec<Step>,
+}
+
+fn removals() -> &'static Mutex<HashMap<String, Removal>> {
+    static R: OnceLock<Mutex<HashMap<String, Removal>>> = OnceLock::new();
+    R.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// A server's name and when it was last heard from, for a step
+pub(crate) fn step(app: &App, server: &str, what: &str, tunnel: &str) -> Step {
+    let name = if server == "local" { local_name(app) } else { servers(app).into_iter().find(|s| s.id == server).map(|s| s.name).unwrap_or_else(|| server.to_string()) };
+    let ping = seen().lock().unwrap().get(server).map(|x| x.at).unwrap_or(0);
+    // the panel server stops its own Xray / DNS right away
+    let state = if server == "local" && (what == "xray" || what == "dns") { "done" } else { "wait" };
+    Step { server: server.into(), name, what: what.into(), tunnel: tunnel.into(), state: state.into(), ping, gone: 0 }
+}
+
+/// A step whose server is not a tunnel server (a VPN node): the caller sets its state
+pub(crate) fn node_step(id: &str, name: &str) -> Step {
+    Step { server: format!("node:{}", id), name: name.into(), what: "node".into(), tunnel: String::new(), state: "wait".into(), ping: now(), gone: 0 }
+}
+
+/// Starts following a removal; the id is given to the admin page, which asks how far it got
+pub(crate) fn track(kind: &str, name: &str, steps: Vec<Step>) -> String {
+    let id = rand_token(12);
+    let mut r = removals().lock().unwrap();
+    // an hour is long enough to look at it
+    r.retain(|_, x| now() - x.at < 3600);
+    r.insert(id.clone(), Removal { id: id.clone(), kind: kind.into(), name: name.into(), at: now(), steps });
+    id
+}
+
+/// The tunnels of a server, each as a step on the server at its other end
+pub(crate) fn tunnel_steps(app: &App, list: &[Tunnel], except: &str) -> Vec<Step> {
+    let mut out = vec![];
+    for t in list {
+        for sid in [&t.entry, &t.exit] {
+            if sid != except {
+                out.push(step(app, sid, "tunnel", &t.id));
+            }
+        }
+    }
+    out
+}
+
+/// A server reported what it runs: the tunnels it no longer runs, and Xray / Kanki DNS when they
+/// stopped, are done
+fn note_report(server: &str, status: &[Status], xray_on: bool, dns_on: bool) {
+    let mut r = removals().lock().unwrap();
+    for x in r.values_mut() {
+        for s in x.steps.iter_mut().filter(|s| s.server == server) {
+            let left = match s.what.as_str() {
+                "tunnel" => status.iter().any(|st| st.id == s.tunnel),
+                "xray" => xray_on,
+                "dns" => dns_on,
+                _ => continue,
+            };
+            s.ping = now();
+            if s.state != "done" && !left {
+                s.state = "done".into();
+            }
+        }
+    }
+}
+
+/// A removed server asked again: after three answers its agent removes everything and uninstalls
+fn note_gone(server: &str) {
+    let mut r = removals().lock().unwrap();
+    for x in r.values_mut() {
+        for s in x.steps.iter_mut().filter(|s| s.server == server && s.what == "server") {
+            s.ping = now();
+            s.gone += 1;
+            if s.gone >= 3 {
+                s.state = "done".into();
+            }
+        }
+    }
+}
+
+/// Sets the state of a node's step in every removal that waits on it
+pub(crate) fn note_node(id: &str, state: &str) {
+    let key = format!("node:{}", id);
+    let mut r = removals().lock().unwrap();
+    for x in r.values_mut() {
+        for s in x.steps.iter_mut().filter(|s| s.server == key && s.state != "done") {
+            s.state = state.into();
+            s.ping = now();
+        }
+    }
+}
+
+/// How far a removal got; a step whose server was not heard from for 30 seconds is "off" (it is done
+/// when the server comes back: the tunnel is not in its list any more, a removed server is told so)
+pub(crate) fn removal(id: &str) -> Option<Removal> {
+    let mut x = removals().lock().unwrap().get(id).cloned()?;
+    for s in x.steps.iter_mut() {
+        if s.state != "done" && s.what != "node" && now() - s.ping > 30 {
+            s.state = "off".into();
+        }
+    }
+    Some(x)
+}
+
+async fn removal_get(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    match removal(&id) {
+        Some(x) => Json(json!(x)).into_response(),
+        None => err(StatusCode::NOT_FOUND, "unknown removal"),
+    }
+}
+
+#[cfg(test)]
+mod removal_tests {
+    use super::*;
+
+    fn st(server: &str, what: &str, tunnel: &str) -> Step {
+        Step { server: server.into(), name: server.into(), what: what.into(), tunnel: tunnel.into(), state: "wait".into(), ping: now(), gone: 0 }
+    }
+
+    #[test]
+    fn steps_finish_as_servers_report() {
+        let rid = track("server", "x", vec![st("rt_a", "server", ""), st("rt_b", "tunnel", "rt_t1"), st("rt_c", "xray", "")]);
+        let running = Status { id: "rt_t1".into(), ..Default::default() };
+        note_report("rt_b", std::slice::from_ref(&running), false, false);
+        note_report("rt_c", &[], true, false);
+        note_gone("rt_a");
+        note_gone("rt_a");
+        let r = removal(&rid).unwrap();
+        assert!(r.steps.iter().all(|s| s.state == "wait"));
+        note_report("rt_b", &[], false, false);
+        note_report("rt_c", &[], false, false);
+        note_gone("rt_a");
+        let r = removal(&rid).unwrap();
+        assert!(r.steps.iter().all(|s| s.state == "done"), "{:?}", r.steps);
+    }
+
+    #[test]
+    fn a_silent_server_shows_off() {
+        let mut s = st("rt_off", "tunnel", "t");
+        s.ping = now() - 120;
+        let rid = track("tunnel", "t", vec![s]);
+        assert_eq!(removal(&rid).unwrap().steps[0].state, "off");
+    }
+}
