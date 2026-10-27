@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.13.1 — no more jumps and blinks
+- **Refreshes are calm**: the pages still update every few seconds, but only what changed is touched. An open server drawer keeps where you scrolled to, rows keep their place, and cards, edges and animations no longer restart, so the page does not blink or jump to the top while you work in it.
+
 ## New in 3.13 — deletes you can watch
 - **A small "removing…" card** opens after deleting a tunnel, a server, a node, an Xray server or a Kanki DNS server: one line per server (the Iran entry stops the tunnel and frees its ports, the removed server wipes everything and uninstalls itself, the VPN part removes its services) with a spinner, a tick when that server confirmed it, or "off — removed when it is back". It closes by itself when everything is done.
 - **A node that is off when you delete it is no longer left behind**: the panel asks it again every minute for ten minutes, and if it answers in that time it removes its VPN services, closes their ports and uninstalls its agent. A server that stays off is left alone, so the panel is not kept busy.

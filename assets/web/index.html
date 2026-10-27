@@ -903,6 +903,35 @@ Object.assign(FA,{"Add to all users": "افزودن به همه کاربران",
 var S={lang:localStorage.getItem('kk_lang')||'fa',theme:localStorage.getItem('kk_theme')||'dark',color:localStorage.getItem('kk_color')||'gold',token:localStorage.getItem('kk_tok')||'',me:null,page:'dash',users:[],nodes:[],ov:null,sel:{},q:'',filter:'all',pf:'all',sort:'new',size:12,pg:1,timer:null,timer2:null};
 function t(k){return S.lang=='fa'&&FA[k]?FA[k]:k}
 function $(s,r){return (r||document).querySelector(s)}
+// ---------------------------------------------------------------- calm refreshes
+// The pages redraw their lists every few seconds. Swapping in new HTML rebuilt every element: an open
+// drawer jumped back to its top, rows lost their scroll, entrance animations ran again and the page
+// blinked. Inside a page, new HTML is now laid over what is there: an element that stays is kept and
+// only what changed is touched. (A whole new page, a dialog or an emptied box is still built afresh.)
+(function(){
+var D=Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');if(!D||!D.set)return;
+// what the look layers add after a draw (drawer header, chips, pencils, edges …): left where it is
+var DECO=/(^|\s)(k310dh|kd-crail|kd-pen|kd-edge|k310ki|k310sub|k38qa|k310strip|k310dash|k310res|k310orb|k310brand|kd-lay)(\s|$)/;
+function deco(n){return n.nodeType==1&&DECO.test(n.getAttribute('class')||'')}
+function key(n){return n.nodeType==1?(n.id||'')+'|'+(n.getAttribute('data-key')||'')+'|'+(n.getAttribute('data-acc')||''):''}
+function same(a,b){return a.nodeType==b.nodeType&&a.nodeName==b.nodeName&&key(a)==key(b)}
+function attrs(o,n){var i,a;
+ for(i=o.attributes.length-1;i>=0;i--){a=o.attributes[i].name;if(!n.hasAttribute(a)&&!(o.nodeName=='CANVAS'&&(a=='width'||a=='height')))o.removeAttribute(a)}
+ for(i=0;i<n.attributes.length;i++){a=n.attributes[i];if(o.getAttribute(a.name)!==a.value)o.setAttribute(a.name,a.value)}}
+function node(o,n){if(o.nodeType!=1){if(o.nodeValue!==n.nodeValue)o.nodeValue=n.nodeValue;return}
+ attrs(o,n);if(o.nodeName=='CANVAS'||o.nodeName=='TEXTAREA'&&o===document.activeElement)return;kids(o,n)}
+function kids(o,n){var nk=Array.prototype.slice.call(n.childNodes),i=0;
+ nk.forEach(function(c){while(o.childNodes[i]&&deco(o.childNodes[i]))i++;var cur=o.childNodes[i],m=null;
+  if(cur&&same(cur,c))m=cur;
+  else if(c.nodeType==1&&key(c)!='||')for(var j=i+1;j<o.childNodes.length;j++)if(same(o.childNodes[j],c)){m=o.childNodes[j];break}
+  if(m){if(m!==cur)o.insertBefore(m,cur||null);node(m,c)}else o.insertBefore(c,cur||null);i=Array.prototype.indexOf.call(o.childNodes,m||c)+1});
+ for(var k=o.childNodes.length-1;k>=i;k--){var x=o.childNodes[k];if(!deco(x))o.removeChild(x)}}
+function calm(el){var pg=document.getElementById('pg');
+ return pg&&el!==pg&&el.isConnected&&el.firstChild&&pg.contains(el)&&!el.closest('#modal,.msheet')}
+Object.defineProperty(Element.prototype,'innerHTML',{configurable:true,enumerable:D.enumerable,get:D.get,set:function(h){
+ if(h===''||h==null||this.namespaceURI!='http://www.w3.org/1999/xhtml'||!calm(this))return D.set.call(this,h);
+ var tp=document.createElement('template');D.set.call(tp,h);kids(this,tp.content)}});
+})();
 function $$(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function toast(m,e){var x=$('#toast');x.textContent=m;x.className=e?'e':'';x.style.display='block';clearTimeout(x._t);x._t=setTimeout(function(){x.style.display='none'},2600)}
