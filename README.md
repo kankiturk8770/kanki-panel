@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.12.1 — tighter cores, a tunnel map that branches
+- **Cores:** the core cards carry the name beside the logo (the short line under them); the top of a core page is smaller (title, two small buttons, the numbers as one slim row "Running servers 5 / 6").
+- **Server chips:** a flag (with 1, 2 … when one country has more servers) and three small letters: **P** the panel server (green), **VPN** this core runs there (green, grey when not), **T** it has a tunnel (green, grey when not). The server's name shows on hover.
+- **Tunnel map:** from each Iran server a short stem and one line across, then straight parallel branches to the servers it reaches; each branch carries a label with the short tunnel name and the ping under it, placed at different heights so no two labels touch.
+
 ## New in 3.12 — tidier, steadier
 - **Old look after an update, for good:** every script on the panel page now carries the version (`kanki-hub.js?v=3.12.0`), so a cache in front of the panel (Cloudflare caches `.js` files by itself) can never hand out an old copy of one next to new ones.
 - **No blinking:** a server's open settings no longer replay their entrance animation each time the page refreshes its numbers.

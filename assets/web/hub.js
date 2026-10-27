@@ -136,26 +136,26 @@ function tmLayout(d,small){var sv=d.servers||[],byId={};sv.forEach(function(s){b
  else{W=small?680:820;var step=Math.max(118,Math.max.apply(null,sv.map(function(s){return tl.filter(function(x){return x.entry==s.id||x.exit==s.id}).length*14+40}).concat([0])));
   H=Math.max(small?330:380,maxN*step+70);
   cols.forEach(function(c,ci){var x=mg+ci*((W-2*mg)/Math.max(1,nc-1));if(rtl)x=W-x;c.forEach(function(s,i){P[s.id]={x:x,y:40+(H-70)/c.length*(i+.5),c:ci}})})}
- // own end point for every tunnel on the side of the disc that faces the other end
- var E={};
- sv.forEach(function(s){var p=P[s.id];
-  var es=tl.filter(function(x){return x.entry==s.id||x.exit==s.id}),groups={f:[],r:[]};
-  es.forEach(function(x){var o=P[x.entry==s.id?x.exit:x.entry];(o.c>=p.c?groups.f:groups.r).push(x)});
-  ['f','r'].forEach(function(g){var l=groups[g].sort(function(a,b){var A=P[a.entry==s.id?a.exit:a.entry],B=P[b.entry==s.id?b.exit:b.entry];return vert?A.x-B.x:A.y-B.y}),
-   gp=Math.min(13,40/Math.max(1,l.length-1)),sg=(g=='f'?1:-1)*(vert?1:(rtl?-1:1));
-   l.forEach(function(x,j){var off=(j-(l.length-1)/2)*gp,r2=Math.sqrt(Math.max(0,R*R-off*off)),pt=vert?{x:p.x+off,y:p.y+sg*r2}:{x:p.x+sg*r2,y:p.y+off};
-    (E[x.id]=E[x.id]||{})[x.entry==s.id?'a':'b']=pt;E[x.id][x.entry==s.id?'sa':'sb']=sg})})});
- // curves leave and arrive straight (sideways, or up/down on phones)
- tl.forEach(function(x){var e=E[x.id],a=e.a,b=e.b,dd=vert?Math.max(60,Math.abs(b.y-a.y)*.5):Math.max(70,Math.abs(b.x-a.x)*.5);
-  e.c1=vert?{x:a.x,y:a.y+e.sa*dd}:{x:a.x+e.sa*dd,y:a.y};e.c2=vert?{x:b.x,y:b.y+e.sb*dd}:{x:b.x+e.sb*dd,y:b.y}});
- // labels: on the curve, moved along it until they cover no server, name and no other label
+ // a trunk from each entry: a short stem, one line across, then a straight branch down (or across) to every
+ // server it reaches. Branches into one server sit side by side; entries of one column get their own trunk
+ // level, so trunks never lie on each other
+ var E={},lvl={},arr={},has={};tl.forEach(function(x){has[x.entry]=1;(arr[x.exit]=arr[x.exit]||[]).push(x)});
+ cols.forEach(function(c){var k=0;c.forEach(function(s){if(has[s.id])lvl[s.id]=k++})});
+ Object.keys(arr).forEach(function(id){arr[id].sort(function(a,b){return vert?P[a.entry].x-P[b.entry].x:P[a.entry].y-P[b.entry].y})});
+ tl.forEach(function(x){var a=P[x.entry],b=P[x.exit],l=arr[x.exit],j=l.indexOf(x),off=(j-(l.length-1)/2)*10,stem=R+20+(lvl[x.entry]||0)*14,r2=Math.sqrt(Math.max(0,R*R-off*off)),pts;
+  if(vert){var d=b.y>=a.y?1:-1,ty=a.y+d*stem;pts=[{x:a.x,y:a.y+d*R},{x:a.x,y:ty},{x:b.x+off,y:ty},{x:b.x+off,y:b.y-d*r2}]}
+  else{var d2=b.x>=a.x?1:-1,tx=a.x+d2*stem;pts=[{x:a.x+d2*R,y:a.y},{x:tx,y:a.y},{x:tx,y:b.y+off},{x:b.x-d2*r2,y:b.y+off}]}
+  E[x.id]={pts:pts}});
+ // labels (short name, ping under it) on each branch, moved along it until they cover no server, name or
+ // other label: neighbouring branches end up with their labels at different heights
  var boxes=[],L={};
  sv.forEach(function(s){var p=P[s.id];boxes.push({x:p.x-44,y:p.y-44,w:88,h:110})});
- tl.forEach(function(x){var e=E[x.id],rt=(x.entry_status||{}).rtt_ms||0,lab=tunShort(x)+(x.state=='up'&&rt?' • '+rt+'ms':''),w=lab.length*6.6+18,h=19,spot=null;
-  var bz=function(u){var v=1-u;return {x:v*v*v*e.a.x+3*v*v*u*e.c1.x+3*v*u*u*e.c2.x+u*u*u*e.b.x,y:v*v*v*e.a.y+3*v*v*u*e.c1.y+3*v*u*u*e.c2.y+u*u*u*e.b.y}};
-  [.5,.42,.58,.35,.65,.28,.72].some(function(u){var q=bz(u),r={x:q.x-w/2,y:q.y-h/2,w:w,h:h};
-   if(!boxes.some(function(o){return r.x<o.x+o.w+3&&o.x<r.x+r.w+3&&r.y<o.y+o.h+2&&o.y<r.y+r.h+2})){spot=q;boxes.push(r);return true}});
-  L[x.id]=spot||bz(.5);if(!spot)boxes.push({x:L[x.id].x-w/2,y:L[x.id].y-h/2,w:w,h:h})});
+ tl.forEach(function(x){var pts=E[x.id].pts,p0=pts[pts.length-2],p1=pts[pts.length-1],rt=(x.entry_status||{}).rtt_ms||0,
+  w=Math.max(tunShort(x).length,(rt+'ms').length)*6.8+18,h=32,spot=null;
+  var at=function(f){return {x:p0.x+(p1.x-p0.x)*f,y:p0.y+(p1.y-p0.y)*f}};
+  [.5,.3,.7,.18,.82,.4,.6,.1,.9].some(function(f){var q=at(f),r={x:q.x-w/2,y:q.y-h/2,w:w,h:h};
+   if(!boxes.some(function(o){return r.x<o.x+o.w+3&&o.x<r.x+r.w+3&&r.y<o.y+o.h+3&&o.y<r.y+r.h+3})){spot=q;boxes.push(r);return true}});
+  L[x.id]=spot||at(.5);if(!spot)boxes.push({x:L[x.id].x-w/2,y:L[x.id].y-h/2,w:w,h:h})});
  return {W:W,H:H,small:!!small,pos:P,sv:sv,tl:tl,hub:'',cx:W/2,cy:H/2,R:0,n:sv.length,cols:true,E:E,L:L,mx:vert?Math.max(7,Math.floor(W/Math.max(1,maxN)/8)):16}}
 window.tunMap=function(d,small){var sv=d.servers||[],tl=d.tunnels||[];
  if(!tl.length&&sv.length<2)return '<div class="tempty">'+ic('tunnel',34)+'<b>'+t('No tunnels yet')+'</b><span class="muted">'+t('Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.')+'</span></div>';
@@ -179,10 +179,11 @@ window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;v
   c.strokeStyle=tmA(th.a,.12);c.setLineDash([2,9]);c.lineDashOffset=T*4;c.beginPath();c.arc(m.cx,m.cy,m.R*.55,0,TAU);c.stroke();c.setLineDash([])}
  // ---- tunnels (their labels are drawn after all of them, on top)
  var labs=[];
- m.tl.forEach(function(x,i){var G=m.E[x.id];if(!G)return;var A=G.a,B=G.b,c1=G.c1,c2=G.c2,col=tmRgb(tunCol(x.state)),es=x.entry_status||{},k=0,same=[x];
-  var bz=function(u){var v=1-u;return {x:v*v*v*A.x+3*v*v*u*c1.x+3*v*u*u*c2.x+u*u*u*B.x,y:v*v*v*A.y+3*v*v*u*c1.y+3*v*u*u*c2.y+u*u*u*B.y}};
-  var path=function(){c.beginPath();c.moveTo(A.x,A.y);c.bezierCurveTo(c1.x,c1.y,c2.x,c2.y,B.x,B.y)};
-  var lt=.24,up=x.state=='up',part=x.state=='partial',down=!up&&!part,flick=part?(.65+.35*Math.sin(T*7+i)):1;
+ m.tl.forEach(function(x,i){var G=m.E[x.id];if(!G)return;var pts=G.pts,A=pts[0],B=pts[pts.length-1],col=tmRgb(tunCol(x.state)),es=x.entry_status||{},k=0,same=[x];
+  var segs=[],tot=0;for(var q=0;q+1<pts.length;q++){var sl=Math.hypot(pts[q+1].x-pts[q].x,pts[q+1].y-pts[q].y);segs.push(sl);tot+=sl}
+  var bz=function(u){var d=Math.max(0,Math.min(1,u))*tot;for(var q=0;q<segs.length;q++){if(d<=segs[q]||q==segs.length-1){var f=segs[q]?Math.min(1,d/segs[q]):0;return {x:pts[q].x+(pts[q+1].x-pts[q].x)*f,y:pts[q].y+(pts[q+1].y-pts[q].y)*f}}d-=segs[q]}return B};
+  var path=function(){c.beginPath();c.moveTo(A.x,A.y);for(var q=1;q+1<pts.length;q++)c.arcTo(pts[q].x,pts[q].y,pts[q+1].x,pts[q+1].y,10);c.lineTo(B.x,B.y)};
+  var ls=tot?(tot-segs[segs.length-1])/tot:0,lt=ls+(1-ls)*.22,up=x.state=='up',part=x.state=='partial',down=!up&&!part,flick=part?(.65+.35*Math.sin(T*7+i)):1;
   c.lineCap='round';
   // fibre: wide halo, body, bright core
   path();c.strokeStyle=tmA(col,(.07*flick).toFixed(3));c.lineWidth=18;c.stroke();
@@ -212,10 +213,11 @@ window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;v
   // label: transport · ping
   // label: short name • ping in the middle of the line; tunnels between the same two servers share one
   // stacked label (drawn once, by the first of them) so their texts never cover each other
-  if(m.L[x.id]){var bp=m.L[x.id],lh=19,gp=4,tot=lh;
-   labs.push(function(){c.font='700 10.5px Vazirmatn,sans-serif';c.direction='ltr';c.textAlign='center';
-   same.forEach(function(z,zi){var zr=(z.entry_status||{}).rtt_ms||0,zc=tmRgb(tunCol(z.state)),lab=tunShort(z)+(z.state=='up'&&zr?' • '+zr+'ms':''),lw=c.measureText(lab).width+16,ly=bp.y-tot/2+zi*(lh+gp)+lh/2;
-    c.fillStyle=th.disc;tmRound(c,bp.x-lw/2,ly-lh/2,lw,lh,9.5);c.fill();c.strokeStyle=tmA(zc,.6);c.lineWidth=1;c.stroke();c.fillStyle=tmA(zc,1);c.fillText(lab,bp.x,ly+4)})})}});
+  if(m.L[x.id]){var bp=m.L[x.id];
+   labs.push(function(){var zr=es.rtt_ms||0,zc=tmRgb(tunCol(x.state)),l1=tunShort(x),l2=x.state=='down'||x.state=='off'?t('down'):zr?zr+'ms':'…';
+    c.direction='ltr';c.textAlign='center';c.font='800 10.5px Vazirmatn,sans-serif';var lw=Math.max(c.measureText(l1).width,c.measureText(l2).width)+16,lh=31;
+    c.fillStyle=th.disc;tmRound(c,bp.x-lw/2,bp.y-lh/2,lw,lh,9);c.fill();c.strokeStyle=tmA(zc,.7);c.lineWidth=1;c.stroke();
+    c.fillStyle=th.t;c.fillText(l1,bp.x,bp.y-2);c.font='700 10px Vazirmatn,sans-serif';c.fillStyle=tmA(zc,1);c.fillText(l2,bp.x,bp.y+11)})}});
  labs.forEach(function(f){f()});
  // ---- servers
  m.sv.forEach(function(s,i){var P=m.pos[s.id];if(!P)return;var col=tmRgb(s.online?'#3ddc97':'#ff6b6b'),br=.5+.5*Math.sin(T*2.1+i),Z=s.id==m.hub?1.25:1;c.save();c.translate(P.x,P.y);c.scale(Z,Z);c.translate(-P.x,-P.y);
