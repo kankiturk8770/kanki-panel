@@ -78,13 +78,22 @@ function dressRail(){var st=$('#sectabs');if(!st||V.secOf(S.page)[0]!='vpnsec')r
 // show below the row (the list itself keeps only the open server, without its header)
 var AUTO={};
 function railSig(rows){return rows.map(function(r){return r.dataset.key+(r.classList.contains('open')?'*':'')+$('.kxr-h',r).textContent}).join('|')}
+// a chip: the flag (with 1, 2 … when one country has more servers), and three small letters: P the panel
+// server (green), VPN this core runs there (green) or not (grey), T it has a tunnel (green) or not (grey)
+function chipsHtml(rows){var cnt={},seen={};
+ var info=rows.map(function(r){var h=$('.kxr-h',r),f=$('.flg',h),cc=f?(f.getAttribute('title')||''):'',st=$$('.kxr-st',h),tw=t('tunnel');
+  cnt[cc]=(cnt[cc]||0)+1;return {r:r,f:f?f.outerHTML:'',cc:cc,name:(($('b',h)||{}).textContent||'').trim(),main:!!$('.kxc-tag.main',h),
+   run:!!(st[0]&&st[0].classList.contains('g')&&st[0].textContent.indexOf(tw)<0),tun:st.some(function(x){return x.textContent.indexOf(tw)>=0})}});
+ return info.map(function(x){var n='';if(cnt[x.cc]>1){seen[x.cc]=(seen[x.cc]||0)+1;n='<sup>'+N(seen[x.cc])+'</sup>'}
+  return '<button type="button" class="kd-chip'+(x.r.classList.contains('open')?' on':'')+'" data-key="'+esc(x.r.dataset.key)+'" title="'+esc(x.name)+'" aria-label="'+esc(x.name)+'">'+
+   '<span class="kd-cf">'+x.f+n+'</span><span class="kd-cl">'+(x.main?'<i class="g">P</i>':'')+'<i class="'+(x.run?'g':'')+'">VPN</i><i class="'+(x.tun?'g':'')+'">T</i></span></button>'}).join('')}
 function chips(){if(!document.body.classList.contains('kd-vpn'))return;
  $$('#pg .kxl').forEach(function(l){var rows=$$(':scope>.kxr',l);if(!rows.length||!rows[0].dataset.acc)return;var g=rows[0].dataset.acc;
   l.classList.add('kd-rows');var rail=l.previousElementSibling;
   if(!rail||!rail.classList.contains('kd-crail')){rail=document.createElement('div');rail.className='kd-crail';l.parentNode.insertBefore(rail,l);dragRow(rail);
    rail.addEventListener('click',function(e){var b=e.target.closest('[data-key]');if(!b)return;var r=$$(':scope>.kxr',l).filter(function(x){return x.dataset.key==b.dataset.key})[0],h=r&&$('.kxr-h',r);if(h)h.click()})}
   var sig=railSig(rows);if(rail._sig!==sig){rail._sig=sig;
-   rail.innerHTML=rows.map(function(r){var h=$('.kxr-h',r);return '<button type="button" class="kd-chip'+(r.classList.contains('open')?' on':'')+'" data-key="'+esc(r.dataset.key)+'">'+h.innerHTML+'</button>'}).join('');
+   rail.innerHTML=chipsHtml(rows);
    var on=$('.kd-chip.on',rail);if(on)try{on.scrollIntoView({block:'nearest',inline:'center',behavior:rail._seen?'smooth':'auto'})}catch(e){}rail._seen=1}
   if(!AUTO[g+S.page]){AUTO[g+S.page]=1;if(!rows.some(function(r){return r.classList.contains('open')})){var h=$('.kxr-h',rows[0]);if(h)h.click()}}})}
 window.addEventListener('hashchange',function(){AUTO={}});
@@ -208,12 +217,13 @@ body.kd .sectabs.kd-rail{position:relative;top:auto;display:block;padding:0;bord
 body.kd .sectabs.kd-rail .sth2{display:none}
 body.kd .sectabs.kd-rail .stl{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:8px 6px 12px;border:0;background:none;border-radius:0;cursor:grab;
  -webkit-mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent)}
-body.kd .sectabs.kd-rail .stl a{position:relative;flex:0 0 128px;scroll-snap-align:center;display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:9px 10px!important;border-radius:15px!important;
+body.kd .sectabs.kd-rail .stl a{position:relative;flex:0 0 136px;scroll-snap-align:center;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:7px;row-gap:3px;padding:9px 10px!important;border-radius:15px!important;
  border:1px solid var(--gb2,var(--ln));background:linear-gradient(180deg,color-mix(in srgb,var(--t) 4%,var(--c1)),var(--c2))!important;color:var(--t)!important;white-space:normal;
  transition:transform .45s cubic-bezier(.2,.8,.2,1),box-shadow .45s,border-color .3s!important}
 body.kd .sectabs.kd-rail .stl a:hover{border-color:color-mix(in srgb,var(--cc) 45%,transparent)}
 body.kd .sectabs.kd-rail .stl a b{font-size:12.5px;font-weight:900}
-body.kd .sectabs.kd-rail .stl a small{font-size:10px;font-weight:600;color:var(--s);line-height:1.4}
+body.kd .sectabs.kd-rail .stl a b{grid-column:2;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.kd .sectabs.kd-rail .stl a small{grid-column:1/-1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;font-weight:600;color:var(--s);line-height:1.4}
 .kd-ci{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--cc) 16%,transparent);color:var(--cc);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--cc) 35%,transparent);transition:all .35s}
 body.kd .sectabs.kd-rail .stl a.on{transform:translateY(-3px) scale(1.03);border-color:transparent;box-shadow:0 20px 44px -22px var(--cc)}
 body.kd .sectabs.kd-rail .stl a.on .kd-ci{background:var(--cc);color:#0b0b0a;box-shadow:0 0 24px -2px var(--cc)}
@@ -221,14 +231,16 @@ body.kd .sectabs.kd-rail .stl a.on .kd-ci{background:var(--cc);color:#0b0b0a;box
 .kd-crail{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:6px 4px 12px;margin:0 -4px;cursor:grab;scroll-snap-type:x proximity;
  -webkit-mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent);mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent)}
 .kd-crail::-webkit-scrollbar{display:none}
-.kd-chip{position:relative;flex:none;scroll-snap-align:start;display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:5px 12px;border-radius:13px;border:1px solid var(--gb2,var(--ln));
+.kd-chip{position:relative;flex:none;scroll-snap-align:start;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:3px 9px;border-radius:12px;border:1px solid var(--gb2,var(--ln));
+ background:var(--c1);color:var(--t);font:inherit;cursor:pointer;transition:all .3s cubic-bezier(.2,.8,.2,1)}
+.kd-cf{display:inline-flex;align-items:flex-start;line-height:1}.kd-cf .flg{font-size:20px}.kd-cf sup{font-size:10px;font-weight:900;margin-inline-start:1px;color:var(--a)}
+.kd-cl{display:flex;flex-direction:column;align-items:flex-start;gap:0;line-height:1.05;font-family:ui-monospace,Menlo,Consolas,monospace;direction:ltr}
+.kd-cl i{font-style:normal;font-size:8.5px;font-weight:800;color:var(--s);opacity:.7;letter-spacing:.3px}
+.kd-cl i.g{color:var(--ok);opacity:1}
+.kd-chip.on .kd-cl i{color:rgba(22,15,0,.45)!important}.kd-chip.on .kd-cl i.g{color:#0b4d2c!important}.kd-chip.on .kd-cf sup{color:#160f00!important}
  background:var(--c1);color:var(--t);font:inherit;font-size:12.5px;font-weight:700;white-space:nowrap;cursor:pointer;transition:all .3s cubic-bezier(.2,.8,.2,1)}
 .kd-chip:hover{border-color:color-mix(in srgb,var(--a) 45%,transparent)}
-.kd-chip .kxr-arr,.kd-chip .sp,.kd-chip small,.kd-chip .kd-pen{display:none!important}
-.kd-chip b{font-weight:800}
-.kd-chip .kxr-st,.kd-chip .kxc-tag{font-size:10.5px!important;padding:1px 7px!important}
 .kd-chip.on{background:linear-gradient(180deg,#FFE9A6,var(--a) 55%,var(--ad));color:#160f00;border-color:transparent;box-shadow:0 10px 24px -12px color-mix(in srgb,var(--a) 90%,transparent);--cc:#fff}
-.kd-chip.on *{color:#160f00!important}.kd-chip.on .kxr-st,.kd-chip.on .kxc-tag{background:rgba(0,0,0,.14)!important;border-color:transparent!important}
 body.kd.kd-vpn .kxl.kd-rows{display:block!important}
 body.kd.kd-vpn .kxl.kd-rows>.kxr:not(.open){display:none!important}
 body.kd.kd-vpn .kxl.kd-rows>.kxr>.kxr-h{display:none!important}
@@ -240,10 +252,17 @@ body.kd.kd-vpn .kxl.kd-rows>.kxr.open>.kxr-b.anim{animation:kdrise .45s cubic-be
 body.kd .k310cards .kxr.open>.kxr-b:not(.anim){animation:none!important}
 body.kd.kd-vpn .k310dh,body.kd.kd-vpn #k310scrim{display:none!important}
 body.kd.kd-vpn.k310drw{overflow:visible!important}
+/* the top of a core page: a smaller title, two small buttons, the numbers as one slim row */
+body.kd.kd-vpn #pg>.ph{gap:8px!important;margin-bottom:8px!important;padding-bottom:10px!important}
+body.kd.kd-vpn #pg>.ph h2{font-size:18px!important}body.kd.kd-vpn #pg>.ph p{font-size:12px!important;line-height:1.6;margin-top:2px!important}
+body.kd.kd-vpn #pg>.ph .phi{width:38px!important;height:38px!important}
+body.kd.kd-vpn #pg>.ph .btn,body.kd.kd-vpn #pg>.ph .b2{min-height:32px!important;padding-inline:11px!important;font-size:12px!important;border-radius:10px!important}
+body.kd .kv>div{display:flex!important;align-items:baseline;justify-content:space-between;gap:8px}
+body.kd .kv>div small{white-space:nowrap}
 /* the numbers at the top of a core: slimmer */
-body.kd .kv{gap:8px!important;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))!important}
-body.kd .kv>div{padding:7px 12px!important;border-radius:13px!important}
-body.kd .kv small{font-size:11px!important}body.kd .kv b{font-size:15.5px!important;line-height:1.5}
+body.kd .kv{gap:6px!important;margin:6px 0 10px!important;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))!important}
+body.kd .kv>div{padding:6px 11px!important;border-radius:11px!important}
+body.kd .kv small{font-size:11px!important}body.kd .kv b{font-size:14px!important;line-height:1.4}
 /* Xray's own tabs: one row you swipe sideways */
 #xr_tabs.kd-xtabs{flex-wrap:nowrap!important;overflow-x:auto;cursor:grab;gap:6px;padding:2px 2px 8px}
 #xr_tabs.kd-xtabs a{flex:none;padding:6px 11px!important;font-size:12px!important;min-height:36px;border-radius:11px!important}
@@ -273,7 +292,7 @@ body.kd .g2>.box.kd-tpl>button{grid-column:2;grid-row:1/3;width:auto!important;m
 .kd-rt small{color:var(--s);font-size:10.5px}.kd-rt em{font-style:normal;font-size:9.5px;font-weight:800;padding:0 5px;border-radius:5px;background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
 .kd-rt.pick{border-color:var(--a);box-shadow:0 0 0 1px var(--a)}
 /* ---- every button that holds a word or two: one height, one size ---- */
-body.kd #pg .btn,body.kd #pg .b2,body.kd .modal .btn,body.kd .modal .b2{min-height:40px;padding-top:0!important;padding-bottom:0!important;padding-inline:15px!important;font-size:13px!important;border-radius:12px!important;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+body.kd #pg .btn,body.kd #pg .b2,body.kd .modal .btn,body.kd .modal .b2{min-height:36px;padding-top:0!important;padding-bottom:0!important;padding-inline:15px!important;font-size:13px!important;border-radius:12px!important;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 body.kd #pg .btn.sm,body.kd #pg .b2.sm,body.kd .modal .btn.sm,body.kd .modal .b2.sm{min-height:34px;padding-inline:11px!important;font-size:12px!important;border-radius:10px!important}
 body.kd #pg .ph .row{flex-wrap:wrap;gap:8px!important}
 /* the dashboard numbers: a turning edge in their own colour */
