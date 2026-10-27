@@ -154,6 +154,44 @@ pub fn valid_username(s: &str) -> bool {
     !s.is_empty() && s.len() <= 40 && s.chars().all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c))
 }
 
+/// The panel page with the version on every script it loads (`/assets/kanki-hub.js?v=3.12.0`): a cache in
+/// front of the panel (Cloudflare caches .js by itself) then never hands out an old copy of one of them next
+/// to new ones, which drew the old look after an update.
+fn admin_page() -> &'static str {
+    static PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    PAGE.get_or_init(|| versioned(include_str!("../../assets/web/index.html"), crate::VERSION))
+}
+
+fn versioned(html: &str, v: &str) -> String {
+    let mut out = String::with_capacity(html.len() + 512);
+    let mut rest = html;
+    while let Some(i) = rest.find("src=\"/assets/") {
+        let (head, tail) = rest.split_at(i);
+        out.push_str(head);
+        let end = tail[5..].find('"').map(|e| e + 5).unwrap_or(tail.len());
+        out.push_str(&tail[..end]);
+        if !tail[..end].contains('?') {
+            out.push_str("?v=");
+            out.push_str(v);
+        }
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+#[cfg(test)]
+mod versioned_tests {
+    #[test]
+    fn every_script_gets_the_version() {
+        let h = super::versioned("<script src=\"/assets/kanki-hub.js\"></script><script src=\"/assets/a.js?x=1\"></script><img src=\"/other.png\">", "3.12.0");
+        assert_eq!(h, "<script src=\"/assets/kanki-hub.js?v=3.12.0\"></script><script src=\"/assets/a.js?x=1\"></script><img src=\"/other.png\">");
+        let page = super::admin_page();
+        assert!(page.contains("/assets/kanki-deck.js?v="));
+        assert!(!page.contains("/assets/kanki-hub.js\""));
+    }
+}
+
 pub fn user_json(app: &App, u: &User) -> Value {
     json!({
         "id": u.id, "username": u.username, "subscription_id": u.code, "code": u.sub_code(),
@@ -174,7 +212,7 @@ pub fn master_router(app: Arc<App>) -> Router {
     Router::new()
         .route("/", get(|| async { Redirect::to("/admin") }))
         .route("/admin", get(|| async {
-            ([(header::CACHE_CONTROL, "no-store"), (header::X_FRAME_OPTIONS, "DENY")], Html(include_str!("../../assets/web/index.html")))
+            ([(header::CACHE_CONTROL, "no-store"), (header::X_FRAME_OPTIONS, "DENY")], Html(admin_page()))
         }))
         // Vazirmatn (SIL Open Font License), shared by the panel and the subscription page
         .route("/assets/vazirmatn.woff", get(|| async {

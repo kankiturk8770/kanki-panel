@@ -12,9 +12,11 @@
 var V=window.V37;if(!V)return;
 if(typeof FA!='undefined')Object.assign(FA,{"Cores":"هسته‌ها","Inbounds":"دروازه‌ها","Inbound":"دروازه","+ Inbound":"+ دروازه",
  "Working inbounds":"دروازه‌های فعال","inbounds":"دروازه","No inbound yet.":"هنوز دروازه‌ای نیست.","No inbound on this server yet":"هنوز دروازه‌ای روی این سرور نیست","Make the first one":"اولی را بساز",
- "Side menu":"منوی کنار","Top menu":"منوی بالا","Fold the menu":"جمع کردن منو","Expires":"انقضا","Data":"حجم","Expired":"منقضی",
+ "Side menu":"منوی کنار","Top menu":"منوی بالا","Fold the menu":"جمع کردن منو","Expires":"انقضا","Make this inbound":"ساخت این دروازه","User inbounds (Xray)":"دروازه‌های کاربران (Xray)","Test the sites":"تست سایت‌ها","Testing…":"در حال تست…","Test again":"تست دوباره","Tested from the panel server: TLS 1.3, a valid certificate and HTTP/2. Tap one to use it.":"از سرور پنل تست شد: TLS 1.3، گواهی معتبر و HTTP/2. روی یکی بزن تا انتخاب شود.","Data":"حجم","Expired":"منقضی",
  "All cores at a glance":"همه‌ی هسته‌ها در یک نگاه","Games · low ping":"گیم · پینگ پایین","Plain and fast":"ساده و سریع","Obfuscated WireGuard":"WireGuard مبهم",
  "QUIC · lossy internet":"QUIC · اینترنت پرافت","Blocked sites only":"فقط سایت‌های تحریم‌شده"});
+if(window.REALITY_TARGETS){REALITY_TARGETS.length=0;['www.microsoft.com:443','www.apple.com:443','dl.google.com:443','www.speedtest.net:443','www.cloudflare.com:443','www.yahoo.com:443','www.amazon.com:443','addons.mozilla.org:443','www.samsung.com:443','www.nvidia.com:443',
+ 'www.cisco.com:443','www.mozilla.org:443','www.intel.com:443','www.ebay.com:443','www.bing.com:443','www.asus.com:443','www.digikala.com:443','www.aparat.com:443','divar.ir:443','snapp.ir:443','www.filimo.com:443','www.namava.ir:443'].forEach(function(x){REALITY_TARGETS.push(x)})}
 ICO.cores='<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>';
 var CHEV='<svg class="kd-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>';
 function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){}return null}
@@ -72,13 +74,45 @@ function dressRail(){var st=$('#sectabs');if(!st||V.secOf(S.page)[0]!='vpnsec')r
    a.style.setProperty('--cc',m[2]||'#F5C451');a.innerHTML='<span class="kd-ci">'+ic(m[0],20)+'</span><b>'+esc(name)+'</b><small>'+esc(t(m[1]))+'</small>'});
   dragRow($('.stl',st))}
  var on=$('.stl a.on',st);if(on&&on!==st._on){st._on=on;try{on.scrollIntoView({block:'nearest',inline:'center',behavior:st._seen?'smooth':'auto'})}catch(e){}st._seen=1}}
-// under a core: its servers are country chips; the first one opens by itself so its settings show
+// under a core: its servers are a row of country chips you swipe sideways; the picked one's settings
+// show below the row (the list itself keeps only the open server, without its header)
 var AUTO={};
+function railSig(rows){return rows.map(function(r){return r.dataset.key+(r.classList.contains('open')?'*':'')+$('.kxr-h',r).textContent}).join('|')}
 function chips(){if(!document.body.classList.contains('kd-vpn'))return;
- ['km','xr','pv_wg','pv_awg','pv_hy2'].forEach(function(g){var rows=$$('.kxr[data-acc="'+g+'"]');if(!rows.length||AUTO[g+S.page])return;AUTO[g+S.page]=1;
-  if(!rows.some(function(r){return r.classList.contains('open')})){var h=$('.kxr-h',rows[0]);if(h)h.click()}})}
+ $$('#pg .kxl').forEach(function(l){var rows=$$(':scope>.kxr',l);if(!rows.length||!rows[0].dataset.acc)return;var g=rows[0].dataset.acc;
+  l.classList.add('kd-rows');var rail=l.previousElementSibling;
+  if(!rail||!rail.classList.contains('kd-crail')){rail=document.createElement('div');rail.className='kd-crail';l.parentNode.insertBefore(rail,l);dragRow(rail);
+   rail.addEventListener('click',function(e){var b=e.target.closest('[data-key]');if(!b)return;var r=$$(':scope>.kxr',l).filter(function(x){return x.dataset.key==b.dataset.key})[0],h=r&&$('.kxr-h',r);if(h)h.click()})}
+  var sig=railSig(rows);if(rail._sig!==sig){rail._sig=sig;
+   rail.innerHTML=rows.map(function(r){var h=$('.kxr-h',r);return '<button type="button" class="kd-chip'+(r.classList.contains('open')?' on':'')+'" data-key="'+esc(r.dataset.key)+'">'+h.innerHTML+'</button>'}).join('');
+   var on=$('.kd-chip.on',rail);if(on)try{on.scrollIntoView({block:'nearest',inline:'center',behavior:rail._seen?'smooth':'auto'})}catch(e){}rail._seen=1}
+  if(!AUTO[g+S.page]){AUTO[g+S.page]=1;if(!rows.some(function(r){return r.classList.contains('open')})){var h=$('.kxr-h',rows[0]);if(h)h.click()}}})}
 window.addEventListener('hashchange',function(){AUTO={}});
-new MutationObserver(function(){if($('#sectabs'))dressRail();if(document.body.classList.contains('kd-vpn'))chips()}).observe(document.body,{childList:true,subtree:true});
+// Servers page: two columns of slim cards with a pencil; a tap opens the server's settings in the side drawer
+var PEN='<span class="kd-pen" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg></span>';
+function servers(){var g=$('#svp_g');if(!g||S.page!='nodes')return;g.classList.add('k310cards','kd-srv');
+ $$('.kxr[data-acc] > .kxr-h',g).forEach(function(h){if(!$('.kd-pen',h))h.insertAdjacentHTML('beforeend',PEN)})}
+// Anti-DPI: the methods fold to one line (name, tags, make); a tap shows what each one is for
+function antidpi(){if(S.page!='antidpi')return;$$('#pg .g2>.box').forEach(function(b){if(b.classList.contains('kd-tpl'))return;b.classList.add('kd-tpl');
+ b.addEventListener('click',function(e){if(e.target.closest('button'))return;b.classList.toggle('open')})})}
+// Xray's own tabs: one row you swipe sideways
+function xrTabsRow(){var x=$('#xr_tabs');if(x&&!x._kd){x.classList.add('kd-xtabs');dragRow(x)}}
+// REALITY: test the suggested targets from the panel server and mark the ones that work
+function reality(){var sel=$('#xi_dp');if(!sel||$('#kd_rt'))return;
+ sel.insertAdjacentHTML('afterend','<button type="button" class="b2 sm" id="kd_rt">'+t('Test the sites')+'</button>');
+ $('.inl',$('#xi_rl')).insertAdjacentHTML('afterend','<div id="kd_rtl" class="kd-rtl"></div>');
+ $('#kd_rt').onclick=function(){var b=this,box=$('#kd_rtl');b.disabled=true;b.textContent=t('Testing…');box.innerHTML='';
+  api('POST','/api/xray/reality/test',{targets:REALITY_TARGETS}).then(function(r){b.disabled=false;b.textContent=t('Test again');
+   var res=(r.results||[]).sort(function(a,c){return (c.ok-a.ok)||((a.ms||9e9)-(c.ms||9e9))});
+   box.innerHTML='<small class="muted">'+t('Tested from the panel server: TLS 1.3, a valid certificate and HTTP/2. Tap one to use it.')+'</small><div class="kd-rtg">'+res.map(function(x){var h=x.target.split(':')[0];
+    return '<button type="button" class="kd-rt '+(x.ok?'ok':x.tls13?'mid':'bad')+'" data-t="'+esc(x.target)+'" title="'+esc(x.error||'')+'"><i>'+(x.ok?'✓':'✕')+'</i><span class="ltr">'+esc(h)+'</span>'+(x.ms?'<small class="ltr">'+N(x.ms)+'ms</small>':'')+(/\.ir$/.test(h)?'<em>IR</em>':'')+'</button>'}).join('')+'</div>';
+   $$('.kd-rt',box).forEach(function(c){c.onclick=function(){$('#xi_de').value=c.dataset.t;$('#xi_na').value=c.dataset.t.split(':')[0];$$('.kd-rt',box).forEach(function(z){z.classList.toggle('pick',z==c)})}})}).catch(function(e){b.disabled=false;b.textContent=t('Test the sites');fail(e)})}}
+// the dashboard numbers get a turning edge in their own colour
+function kpiEdges(){$$('#kpis .kpi').forEach(function(k){if(!$('.kd-edge',k))k.insertAdjacentHTML('beforeend','<i class="kd-edge" aria-hidden="true"></i>')})}
+// every turning edge turns in step with the others, and a redraw does not send it back to the start
+var EDGE='.kd-it.on,.kd-tn.on,.kd-rail .stl a.on,.kd-chip.on,.uchip.kd-u,#st .stn button.on,.k310st,.kd-edge,.kxr[data-acc="srv"]>.kxr-h';
+function phase(){var ph=-((Date.now()/1000)%3.2);$$(EDGE).forEach(function(e){if(!e._kdph){e._kdph=1;e.style.setProperty('--kdph',ph.toFixed(2)+'s')}})}
+new MutationObserver(function(){if($('#sectabs'))dressRail();if(document.body.classList.contains('kd-vpn'))chips();servers();antidpi();xrTabsRow();reality();kpiEdges();phase()}).observe(document.body,{childList:true,subtree:true});
 
 // ---------------------------------------------------------------- users: two columns, data and expiry date
 if(window.uchip){
@@ -97,11 +131,11 @@ var css=`
 /* ---- the moving gold edge (needs @property; without it the edge stays still) ---- */
 @property --kda{syntax:"<angle>";initial-value:0deg;inherits:false}
 @keyframes kdang{to{--kda:360deg}}
-body.kd .kd-it.on::after,body.kd .kd-tn.on::after,body.kd .kd-rail .stl a.on::after,body.kd.kd-vpn .kxl>.kxr.open>.kxr-h::after,body.kd .uchip.kd-u:hover::after,body.kd #st .stn button.on::after,body.kd .k310st::after{
+body.kd .kd-it.on::after,body.kd .kd-tn.on::after,body.kd .kd-rail .stl a.on::after,body.kd.kd-vpn .kxl>.kxr.open>.kxr-h::after,body.kd .uchip.kd-u:hover::after,body.kd #st .stn button.on::after,body.kd .k310st::after,body.kd .kd-chip.on::after,body.kd #svp_g.kd-srv .kxr>.kxr-h:hover::after{
  content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;
  background:conic-gradient(from var(--kda),transparent 0 55%,var(--cc,var(--a)) 70%,#fff 74%,var(--cc,var(--a)) 78%,transparent 92%);
- -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);animation:kdang 3.2s linear infinite}
-body.kd .k310st{position:relative}body.kd .k310st::after{opacity:.55;animation-duration:6s}
+ -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);animation:kdang 3.2s linear infinite;animation-delay:var(--kdph,0s)}
+body.kd .k310st{position:relative}body.kd .k310st::after{opacity:.7}
 /* ---- side menu ---- */
 body.kd nav.side .snav{display:flex;flex-direction:column;gap:2px}
 .kd-g{display:flex;flex-direction:column}
@@ -172,30 +206,81 @@ body.kd .msheet.k38sheet.on .k38tiles:nth-of-type(2) .k38tile{animation-delay:.0
 /* ---- Cores: the rail of cards ---- */
 body.kd .sectabs.kd-rail{position:relative;top:auto;display:block;padding:0;border:0;background:none;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none;margin-bottom:10px}
 body.kd .sectabs.kd-rail .sth2{display:none}
-body.kd .sectabs.kd-rail .stl{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:12px 6px 18px;border:0;background:none;border-radius:0;cursor:grab;
+body.kd .sectabs.kd-rail .stl{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:8px 6px 12px;border:0;background:none;border-radius:0;cursor:grab;
  -webkit-mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent)}
-body.kd .sectabs.kd-rail .stl a{position:relative;flex:0 0 156px;scroll-snap-align:center;display:flex;flex-direction:column;align-items:flex-start;gap:5px;padding:12px!important;border-radius:18px!important;
+body.kd .sectabs.kd-rail .stl a{position:relative;flex:0 0 128px;scroll-snap-align:center;display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:9px 10px!important;border-radius:15px!important;
  border:1px solid var(--gb2,var(--ln));background:linear-gradient(180deg,color-mix(in srgb,var(--t) 4%,var(--c1)),var(--c2))!important;color:var(--t)!important;white-space:normal;
  transition:transform .45s cubic-bezier(.2,.8,.2,1),box-shadow .45s,border-color .3s!important}
 body.kd .sectabs.kd-rail .stl a:hover{border-color:color-mix(in srgb,var(--cc) 45%,transparent)}
-body.kd .sectabs.kd-rail .stl a b{font-size:14px;font-weight:900}
-body.kd .sectabs.kd-rail .stl a small{font-size:11px;font-weight:600;color:var(--s);line-height:1.4}
-.kd-ci{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:color-mix(in srgb,var(--cc) 16%,transparent);color:var(--cc);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--cc) 35%,transparent);transition:all .35s}
-body.kd .sectabs.kd-rail .stl a.on{transform:translateY(-5px) scale(1.03);border-color:transparent;box-shadow:0 20px 44px -22px var(--cc)}
+body.kd .sectabs.kd-rail .stl a b{font-size:12.5px;font-weight:900}
+body.kd .sectabs.kd-rail .stl a small{font-size:10px;font-weight:600;color:var(--s);line-height:1.4}
+.kd-ci{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--cc) 16%,transparent);color:var(--cc);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--cc) 35%,transparent);transition:all .35s}
+body.kd .sectabs.kd-rail .stl a.on{transform:translateY(-3px) scale(1.03);border-color:transparent;box-shadow:0 20px 44px -22px var(--cc)}
 body.kd .sectabs.kd-rail .stl a.on .kd-ci{background:var(--cc);color:#0b0b0a;box-shadow:0 0 24px -2px var(--cc)}
-/* ---- Cores: servers as country chips, the picked one opens below them ---- */
-body.kd.kd-vpn .kxl{display:flex!important;flex-direction:row!important;flex-wrap:wrap!important;align-items:center;gap:10px!important}
-body.kd.kd-vpn .kxl>.kxr{display:contents}
-body.kd.kd-vpn .kxl>.kxr>.kxr-h{position:relative;width:max-content!important;max-width:100%;flex:0 0 auto!important;min-height:48px!important;padding:8px 14px!important;border-radius:16px!important;border:1px solid var(--gb2,var(--ln))!important;background:var(--c1)!important;gap:8px!important;flex-wrap:nowrap!important;transform:none!important;transition:all .3s cubic-bezier(.2,.8,.2,1)}
-body.kd.kd-vpn .kxl>.kxr>.kxr-h .kxr-arr,body.kd.kd-vpn .kxl>.kxr>.kxr-h .sp,body.kd.kd-vpn .kxl>.kxr>.kxr-h small{display:none!important}
-body.kd.kd-vpn .kxl>.kxr>.kxr-h:hover{border-color:color-mix(in srgb,var(--a) 45%,transparent)!important}
-body.kd.kd-vpn .kxl>.kxr.open>.kxr-h{background:linear-gradient(180deg,#FFE9A6,var(--a) 55%,var(--ad))!important;color:#160f00!important;border-color:transparent!important;box-shadow:0 12px 30px -12px color-mix(in srgb,var(--a) 90%,transparent);--cc:#fff}
-body.kd.kd-vpn .kxl>.kxr.open>.kxr-h *{color:#160f00!important}
-body.kd.kd-vpn .kxl>.kxr.open>.kxr-h .kxr-st{background:rgba(0,0,0,.14)!important;border-color:transparent!important}
-body.kd.kd-vpn .kxl>.kxr>.kxr-b{order:99;flex:1 0 100%;width:100%;position:static!important;height:auto;max-height:none!important;inset:auto!important;box-shadow:none!important;border:1px solid var(--gb,var(--ln))!important;border-radius:18px!important;
- background:linear-gradient(180deg,color-mix(in srgb,var(--t) 3%,var(--c1)),var(--c2))!important;padding:6px 16px 14px!important;animation:kdrise .5s cubic-bezier(.2,.8,.2,1)!important}
-body.kd.kd-vpn .k310dh{display:none!important}
-body.kd.kd-vpn #k310scrim{display:none!important}
+/* ---- Cores: servers as a row of country chips (swipe sideways); the picked one's settings below ---- */
+.kd-crail{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:6px 4px 12px;margin:0 -4px;cursor:grab;scroll-snap-type:x proximity;
+ -webkit-mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent);mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent)}
+.kd-crail::-webkit-scrollbar{display:none}
+.kd-chip{position:relative;flex:none;scroll-snap-align:start;display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:5px 12px;border-radius:13px;border:1px solid var(--gb2,var(--ln));
+ background:var(--c1);color:var(--t);font:inherit;font-size:12.5px;font-weight:700;white-space:nowrap;cursor:pointer;transition:all .3s cubic-bezier(.2,.8,.2,1)}
+.kd-chip:hover{border-color:color-mix(in srgb,var(--a) 45%,transparent)}
+.kd-chip .kxr-arr,.kd-chip .sp,.kd-chip small,.kd-chip .kd-pen{display:none!important}
+.kd-chip b{font-weight:800}
+.kd-chip .kxr-st,.kd-chip .kxc-tag{font-size:10.5px!important;padding:1px 7px!important}
+.kd-chip.on{background:linear-gradient(180deg,#FFE9A6,var(--a) 55%,var(--ad));color:#160f00;border-color:transparent;box-shadow:0 10px 24px -12px color-mix(in srgb,var(--a) 90%,transparent);--cc:#fff}
+.kd-chip.on *{color:#160f00!important}.kd-chip.on .kxr-st,.kd-chip.on .kxc-tag{background:rgba(0,0,0,.14)!important;border-color:transparent!important}
+body.kd.kd-vpn .kxl.kd-rows{display:block!important}
+body.kd.kd-vpn .kxl.kd-rows>.kxr:not(.open){display:none!important}
+body.kd.kd-vpn .kxl.kd-rows>.kxr>.kxr-h{display:none!important}
+body.kd.kd-vpn .kxl.kd-rows>.kxr.open{border:0!important;background:none!important;box-shadow:none!important;transform:none!important}
+body.kd.kd-vpn .kxl.kd-rows>.kxr.open>.kxr-b{position:static!important;width:auto!important;height:auto!important;max-height:none!important;overflow:visible!important;inset:auto!important;box-shadow:none!important;
+ border:1px solid var(--gb,var(--ln))!important;border-radius:16px!important;background:linear-gradient(180deg,color-mix(in srgb,var(--t) 3%,var(--c1)),var(--c2))!important;padding:4px 14px 12px!important;animation:none!important}
+/* opening one plays the entrance once; the page's own refresh redraws it without moving (no blinking) */
+body.kd.kd-vpn .kxl.kd-rows>.kxr.open>.kxr-b.anim{animation:kdrise .45s cubic-bezier(.2,.8,.2,1)!important}
+body.kd .k310cards .kxr.open>.kxr-b:not(.anim){animation:none!important}
+body.kd.kd-vpn .k310dh,body.kd.kd-vpn #k310scrim{display:none!important}
+body.kd.kd-vpn.k310drw{overflow:visible!important}
+/* the numbers at the top of a core: slimmer */
+body.kd .kv{gap:8px!important;grid-template-columns:repeat(auto-fit,minmax(130px,1fr))!important}
+body.kd .kv>div{padding:7px 12px!important;border-radius:13px!important}
+body.kd .kv small{font-size:11px!important}body.kd .kv b{font-size:15.5px!important;line-height:1.5}
+/* Xray's own tabs: one row you swipe sideways */
+#xr_tabs.kd-xtabs{flex-wrap:nowrap!important;overflow-x:auto;cursor:grab;gap:6px;padding:2px 2px 8px}
+#xr_tabs.kd-xtabs a{flex:none;padding:6px 11px!important;font-size:12px!important;min-height:36px;border-radius:11px!important}
+/* ---- Servers page: two columns of slim cards, a pencil, the settings in the side drawer ---- */
+body.kd #svp_g.kd-srv .kxl{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
+body.kd #svp_g.kd-srv .kxr{border-radius:14px!important}
+body.kd #svp_g.kd-srv .kxr>.kxr-h{position:relative;min-height:52px!important;padding:8px 10px!important;gap:4px 7px!important;row-gap:4px!important;align-content:center}
+body.kd #svp_g.kd-srv .kxr>.kxr-h b{font-size:13px!important;overflow-wrap:anywhere}
+body.kd #svp_g.kd-srv .kxr>.kxr-h .kxr-arr,body.kd #svp_g.kd-srv .kxr>.kxr-h .sp{display:none!important}
+body.kd #svp_g.kd-srv .kxr>.kxr-h .kxc-tag,body.kd #svp_g.kd-srv .kxr>.kxr-h .kxr-st{font-size:10px!important;padding:0 6px!important}
+.kd-pen{order:20;margin-inline-start:auto;width:30px;height:30px;flex:none;border-radius:10px;display:grid;place-items:center;border:1px solid var(--gb2,var(--ln));background:var(--in);color:var(--a)}
+body.kd #svp_g.kd-srv .kxr>.kxr-h:hover .kd-pen{background:var(--a);color:#160f00}
+@media(max-width:380px){body.kd #svp_g.kd-srv .kxl{grid-template-columns:1fr!important}}
+/* ---- Anti-DPI: one line per method; a tap opens what it is for ---- */
+body.kd .g2>.box.kd-tpl{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px 10px;padding:10px 12px!important;cursor:pointer;transition:border-color .2s}
+body.kd .g2>.box.kd-tpl:hover{border-color:color-mix(in srgb,var(--a) 40%,transparent)}
+body.kd .g2>.box.kd-tpl>b{font-size:13.5px}
+body.kd .g2>.box.kd-tpl>span{grid-column:1}
+body.kd .g2>.box.kd-tpl>small{grid-column:1/-1;display:none!important}
+body.kd .g2>.box.kd-tpl.open>small{display:block!important}
+body.kd .g2>.box.kd-tpl>button{grid-column:2;grid-row:1/3;width:auto!important;min-height:36px!important;padding:0 12px!important;font-size:12px!important}
+/* ---- REALITY targets: tested, marked ---- */
+.kd-rtl{margin:6px 0 4px}.kd-rtl>small{display:block;margin-bottom:6px}
+.kd-rtg{display:flex;flex-wrap:wrap;gap:6px}
+.kd-rt{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:10px;border:1px solid var(--gb2,var(--ln));background:var(--in);color:var(--t);font:inherit;font-size:12px;cursor:pointer}
+.kd-rt i{font-style:normal;font-weight:900}.kd-rt.ok i{color:var(--ok)}.kd-rt.mid i{color:var(--warn)}.kd-rt.bad{opacity:.55}.kd-rt.bad i{color:var(--bad)}
+.kd-rt small{color:var(--s);font-size:10.5px}.kd-rt em{font-style:normal;font-size:9.5px;font-weight:800;padding:0 5px;border-radius:5px;background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+.kd-rt.pick{border-color:var(--a);box-shadow:0 0 0 1px var(--a)}
+/* ---- every button that holds a word or two: one height, one size ---- */
+body.kd #pg .btn,body.kd #pg .b2,body.kd .modal .btn,body.kd .modal .b2{min-height:40px;padding-top:0!important;padding-bottom:0!important;padding-inline:15px!important;font-size:13px!important;border-radius:12px!important;display:inline-flex;align-items:center;justify-content:center;gap:6px}
+body.kd #pg .btn.sm,body.kd #pg .b2.sm,body.kd .modal .btn.sm,body.kd .modal .b2.sm{min-height:34px;padding-inline:11px!important;font-size:12px!important;border-radius:10px!important}
+body.kd #pg .ph .row{flex-wrap:wrap;gap:8px!important}
+/* the dashboard numbers: a turning edge in their own colour */
+.kd-edge{position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;
+ background:conic-gradient(from var(--kda),transparent 0 55%,var(--kc,var(--a)) 70%,#fff 74%,var(--kc,var(--a)) 78%,transparent 92%);
+ -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);animation:kdang 3.2s linear infinite;animation-delay:var(--kdph,0s);opacity:.85}
+body.k38 .kpi.g{--kc:var(--ok)}body.k38 .kpi.y{--kc:var(--warn)}body.k38 .kpi.r{--kc:var(--bad)}
 /* ---- users: two columns of slim cards ---- */
 body.kd .uchips{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important}
 body.kd .uchip.kd-u{position:relative;display:flex;flex-direction:column;align-items:stretch;gap:7px;padding:10px 12px!important;border-radius:15px;text-align:start;transition:transform .3s,border-color .3s}

@@ -3,6 +3,16 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.12 — tidier, steadier
+- **Old look after an update, for good:** every script on the panel page now carries the version (`kanki-hub.js?v=3.12.0`), so a cache in front of the panel (Cloudflare caches `.js` files by itself) can never hand out an old copy of one next to new ones.
+- **No blinking:** a server's open settings no longer replay their entrance animation each time the page refreshes its numbers.
+- **Turning gold edges** turn in step and keep turning (the dashboard status line is only redrawn when something changed); the dashboard numbers get one in their own colour.
+- **Cores:** slimmer core cards and numbers; a core's servers are a row of country chips you swipe sideways, the picked one's settings below. Xray's tabs are one row you swipe.
+- **Servers:** two columns of slim cards with a pencil; a tap opens the server's settings in the side drawer (a bottom sheet on phones).
+- **Anti-DPI:** one line per method, a tap shows what it is for.
+- **REALITY targets:** 22 suggestions (16 abroad, 6 Iranian) and **Test the sites** in the gate editor: each is tried from the panel server (TLS 1.3, a valid certificate, HTTP/2) and marked ✓ / ✕ with its time; a tap picks one.
+- Buttons with a word or two share one height and size.
+
 ## New in 3.11 — the new design
 - **Menu:** groups open and close smoothly (items slide in one after another); the open section is lit gold with a turning gold edge. A button folds the menu to icons only, and **Side menu / Top menu** (top bar) puts the whole menu in one row across the top, dragged or scrolled sideways.
 - **Cores** (was VPN services): the tabs are a rail of cards you drag or tap; under a core its servers are country chips, and the picked one opens its settings right below them. Xray inbounds are called **gates**.

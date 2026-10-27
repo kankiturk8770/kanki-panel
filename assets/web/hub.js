@@ -93,7 +93,7 @@ function strip(){var el=$('#k310strip');if(!el)return;var h='';
  var tl=(window.TN&&TN.d&&TN.d.tunnels)||[];if(tl.length){var up=tl.filter(function(x){return x.state=='up'}).length;h+=chip(up==tl.length?'g':up?'y':'r','Tunnels up',N(up)+' / '+N(tl.length))}
  var sv=((DB.sys||{}).services||[]);if(sv.length){var bad=sv.filter(function(x){return !x.active}).length;h+=chip(bad?'y':'g','Services',bad?N(bad)+' '+t('stopped'):t('all running'))}
  if(DB.ov)h+=chip(DB.ov.online?'g':'','Users online',N(DB.ov.online));
- el.innerHTML=h||'<span class="muted">…</span>'}
+ h=h||'<span class="muted">…</span>';if(el._h!==h){el._h=h;el.innerHTML=h}}  // unchanged: leave it, so its turning edges keep turning
 var _dk=window.drawKpis;if(_dk)window.drawKpis=function(){_dk.apply(this,arguments);strip()};
 var _pd=window.pDash;
 window.pDash=function(){_pd.apply(this,arguments);var pg=$('#pg'),ph=$('#pg .ph');if(!pg||!ph||$('#k310dash'))return;

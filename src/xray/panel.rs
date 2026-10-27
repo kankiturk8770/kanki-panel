@@ -1089,6 +1089,75 @@ async fn repair_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> 
     Json(json!({ "ok": true, "waiting": age.map(|a| a > 60).unwrap_or(true), "age": age })).into_response()
 }
 
+// ------------------------------------------------------------------ REALITY targets
+
+/// Sites the inbound editor suggests as a REALITY target: big sites abroad, then Iranian ones. Any of them
+/// may stop fitting (no TLS 1.3, no HTTP/2, blocked), so the editor tests them before one is picked.
+pub const REALITY_TARGETS: &[&str] = &[
+    "www.microsoft.com:443", "www.apple.com:443", "dl.google.com:443", "www.speedtest.net:443", "www.cloudflare.com:443",
+    "www.yahoo.com:443", "www.amazon.com:443", "addons.mozilla.org:443", "www.samsung.com:443", "www.nvidia.com:443",
+    "www.cisco.com:443", "www.mozilla.org:443", "www.intel.com:443", "www.ebay.com:443", "www.bing.com:443", "www.asus.com:443",
+    "www.digikala.com:443", "www.aparat.com:443", "divar.ir:443", "snapp.ir:443", "www.filimo.com:443", "www.namava.ir:443",
+];
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct RealityTest {
+    targets: Vec<String>,
+}
+
+/// POST /api/xray/reality/test {targets: [] = the suggested ones}: can each one be a REALITY target?
+/// Tested from the panel server: TLS 1.3 with a valid certificate for the name, and HTTP/2 offered.
+async fn reality_test(State(app): St, h: HeaderMap, Json(b): Json<RealityTest>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let list: Vec<String> = if b.targets.is_empty() {
+        REALITY_TARGETS.iter().map(|s| s.to_string()).collect()
+    } else {
+        b.targets.into_iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).take(40).collect()
+    };
+    let tasks: Vec<_> = list.into_iter().map(|t| tokio::spawn(async move { let r = probe_reality(&t).await; (t, r) })).collect();
+    let mut out = Vec::new();
+    for task in tasks {
+        if let Ok((t, r)) = task.await {
+            out.push(match r {
+                Ok((ms, h2)) => json!({ "target": t, "ok": h2, "tls13": true, "h2": h2, "ms": ms }),
+                Err(e) => json!({ "target": t, "ok": false, "error": e }),
+            });
+        }
+    }
+    Json(json!({ "results": out })).into_response()
+}
+
+/// "host[:port]" → the TLS 1.3 handshake time in ms and whether HTTP/2 was picked
+async fn probe_reality(target: &str) -> Result<(u64, bool), String> {
+    let (host, port) = split_target(target)?;
+    let roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
+    let mut cfg = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|e| e.to_string())?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    let name = rustls::pki_types::ServerName::try_from(host.clone()).map_err(|_| "bad name".to_string())?;
+    let t0 = std::time::Instant::now();
+    let go = async {
+        let tcp = tokio::net::TcpStream::connect((host.as_str(), port)).await.map_err(|e| format!("connect: {}", e))?;
+        let tls = tokio_rustls::TlsConnector::from(Arc::new(cfg)).connect(name, tcp).await.map_err(|e| format!("tls: {}", e))?;
+        Ok::<bool, String>(tls.get_ref().1.alpn_protocol() == Some(b"h2".as_slice()))
+    };
+    let h2 = tokio::time::timeout(std::time::Duration::from_secs(5), go).await.map_err(|_| "timeout".to_string())??;
+    Ok((t0.elapsed().as_millis() as u64, h2))
+}
+
+fn split_target(t: &str) -> Result<(String, u16), String> {
+    let t = t.trim();
+    match t.rsplit_once(':') {
+        Some((h, p)) if !h.is_empty() => Ok((h.to_string(), p.parse::<u16>().map_err(|_| "bad port".to_string())?)),
+        _ if !t.is_empty() && !t.contains(':') => Ok((t.to_string(), 443)),
+        _ => Err("bad target".into()),
+    }
+}
+
 // ------------------------------------------------------------------ admin API
 
 pub fn router() -> Router<Arc<App>> {
@@ -1105,6 +1174,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/xray/inbounds/:id/json", get(inbound_preview))
         .route("/api/xray/outs/check", post(check_out))
         .route("/api/xray/keys", post(new_keys))
+        .route("/api/xray/reality/test", post(reality_test))
         .route("/api/xray/config/:id", get(preview))
         .route("/tunnel/xraybin", post(agent_xraybin))
 }
@@ -1593,6 +1663,21 @@ async fn agent_xraybin(State(app): St, Json(b): Json<Value>) -> Response {
     match tokio::fs::read(&cache).await {
         Ok(bytes) => (StatusCode::OK, bytes).into_response(),
         Err(_) => err(StatusCode::NOT_FOUND, "no Xray-core"),
+    }
+}
+
+#[cfg(test)]
+mod reality_tests {
+    use super::{split_target, REALITY_TARGETS};
+
+    #[test]
+    fn targets_are_host_and_port() {
+        assert_eq!(split_target("www.apple.com:443").unwrap(), ("www.apple.com".to_string(), 443));
+        assert_eq!(split_target("divar.ir").unwrap(), ("divar.ir".to_string(), 443));
+        assert!(split_target(":443").is_err() && split_target("a:b").is_err() && split_target("").is_err());
+        for t in REALITY_TARGETS {
+            assert!(split_target(t).is_ok(), "{}", t);
+        }
     }
 }
 
