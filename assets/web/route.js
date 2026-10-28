@@ -54,7 +54,7 @@ if(typeof FA!='undefined')Object.assign(FA,{
 
 // ---------------------------------------------------------------- ports of a server, KANKI MIX too
 window.tunNodePorts=function(n){var i=(n&&n.info)||{},tcp=[],udp=[],add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
- [i.wg_port,i.awg_port,i.hy2_port,i.kmix_port].forEach(function(v){add(udp,v)});return {tcp:tcp,udp:udp}};
+ [i.wg_port,i.awg_port,i.hy2_port,i.kmix_port,(i.kc_ports||{}).game].forEach(function(v){add(udp,v)});return {tcp:tcp,udp:udp}};
 
 // ---------------------------------------------------------------- data
 function tl(){return (window.TN&&TN.d&&TN.d.tunnels)||[]}
