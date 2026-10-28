@@ -3,6 +3,13 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.17 — a clean panel UI, one piece each
+- **No more layers:** every part of the panel is defined once. Before, later versions wrapped earlier ones (the page router was wrapped six times, the shell four, the dashboard three …) and patched pages after they were drawn; now each page builds its final layout itself (dashboard, servers, backup, bot channel, Xray, KANKI MIX, tunnels, sign-in).
+- **One stylesheet:** the look is one stylesheet in the page instead of twelve style blocks added by the script one after another; rules that a later rule replaced and rules for parts that no longer exist are gone.
+- **One dictionary, one icon table, one menu table:** the Persian text, the icons and the menu sections are each written once instead of being patched by later parts.
+- **Fixes:** switching night/day no longer drops the menu's look until the next reload; a broken style line that disabled the hover of the Cores server chips is gone.
+- 30 functions and 4 tables that nothing used any more are removed. Every page was compared on a phone and a desktop screen before and after (screenshots and text), clicked through (menus, theme, language, sign-out/in, tunnel form), with no script errors.
+
 ## New in 3.16 — one panel script
 - The panel's script is **one file** now (`assets/web/panel.js`, served as `/assets/kanki-panel.js`) instead of fifteen pieces from different versions (the page's own script and kanki-ext, -xray, -antidpi, -dns, -kmix, -kcore, -v37, -look, -servers, -route, -svc, -skin, -hub, -deck). Seventeen old definitions that a later version replaced before they were ever used (old menus, the old user card, the old tunnel map …) are gone.
 - Nothing looks or works differently: every page was compared on a phone and a desktop screen before and after (screenshots and text), with no script errors.

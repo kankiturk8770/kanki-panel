@@ -2837,7 +2837,7 @@ function confirmDo(fn){if(confirm(t('Are you sure?')))fn()}
 function dl(blobRes){var a=document.createElement('a');a.href=URL.createObjectURL(blobRes.blob);a.download=blobRes.name||'download';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},2000)}
 
 // ---------------------------------------------------------------- login
-function loginView(otp){document.body.className='';applyLook();clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);
+function loginView(otp){$('#app').innerHTML='';document.body.className='';applyLook();clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);
  var sun=function(){return ic(document.body.classList.contains('light')?'moon':'k310sun',17)};
  $('#app').innerHTML='<div class="login k310login"><i class="k310orb a"></i><i class="k310orb b"></i><div class="'+logoCls()+'">'+logoInner('K')+'</div><div class="k310brand">'+t('VPN management panel')+'</div>'+
  '<div class="card"><h3>'+esc(document.title)+'</h3><p class="k310sub">'+t('Sign in to continue')+'</p>'+
