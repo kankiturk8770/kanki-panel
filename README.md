@@ -3,6 +3,12 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.15.3 — a calm panel on phones
+- **Bottom bar:** it scrolls sideways now (an older rule held it still) and keeps one order from the right: Home, Users, Servers, Tunnels, VPN services, Kanki DNS, Sales bot, Emergency chat, Ports, Traffic, System.
+- **Nothing opens by itself:** opening a core page (KANKI MIX, MIX+, Xray …) no longer opens the first server's settings in the drawer with the dark cover; a server opens only when tapped. Every page was checked on a phone-sized screen: no panel opens on its own, no script errors.
+- **Users:** next to each user, what they are connected with, the flag of the server's exit country and a small Iran flag when that server's config goes through an Iran tunnel (from how the server is set up).
+- «MIX+» no longer reads «+MIX» in Persian text.
+
 ## New in 3.15.2 — MIX+ gets its own port on every server
 - Like KANKI MIX: a server that joins gets the next free MIX+ port (4100, 4101, 4102 …), so one Iran entry can carry every server. MIX+ is in the clash check, in «Fix ports» (press it once: servers that all have 4100 move to 4101, 4102 …, and the tunnels that carry the port follow) and in a server's port settings.
 

@@ -26,7 +26,7 @@ var SECS=[
  ['nodes','Servers','nodes',[['nodes','','Servers'],['servers','','Tunnel servers']],'Servers & network'],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
  ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+'],['xray','','Xray'],['antidpi','','Anti-DPI']],'Services'],
+ ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','','Xray'],['antidpi','','Anti-DPI']],'Services'],
  ['dnssec','Kanki DNS','dns',[['dns','','Kanki DNS']],'Services'],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
  ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
@@ -40,8 +40,8 @@ window.navSide=function(){var g='',h='';
  SECS.forEach(function(s){if(s[4]!=g){g=s[4];h+='<div class="ngt">'+t(g)+'</div>'}var f=s[3][0];
   h+='<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'"><span class="ni">'+ic(s[2],18)+'</span>'+t(s[1])+'</a>'});return h};
 
-// phones: every section in the bottom bar (Home first, on the right), swiped sideways
-var BAR=SECS.map(function(s){return [s[0],s[0]=='dash'?'Home':s[1]]});
+// phones: every section in the bottom bar, swiped sideways, in this order from the right
+var BAR=[['dash','Home'],['users','Users'],['nodes','Servers'],['netsec','Tunnels'],['vpnsec','VPN services'],['dnssec','Kanki DNS'],['bot','Sales bot'],['emergency','Emergency chat'],['ports','Ports'],['traffic','Traffic & stats'],['syssec','System']];
 window.navBar=function(){
  return '<div class="mbar k38bar k39bar" id="mbar">'+BAR.map(function(b){var s=secBy(b[0]),f=s[3][0];
   return '<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'">'+ic(s[2],21)+'<span>'+t(b[1])+'</span></a>'}).join('')+'</div>'+
@@ -57,7 +57,7 @@ var _nm=window.navMark;
 window.navMark=function(p){_nm.apply(this,arguments);k38More(0);
  // the open section stays in sight in the scrolling bar
  var a=document.querySelector('#mbar a[data-sec="'+V.secOf(p)[0]+'"]');if(a&&a.scrollIntoView)try{a.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}};
-(function(){var st=document.createElement('style');st.textContent='.k39bar{display:flex!important;overflow-x:auto;scrollbar-width:none;justify-content:flex-start!important;-webkit-overflow-scrolling:touch}.k39bar::-webkit-scrollbar{display:none}.k39bar>a{flex:0 0 auto!important;min-width:68px}.k39bar>a span{white-space:nowrap}';document.head.appendChild(st)})();
+
 
 // ---------------------------------------------------------------- night / day in the top bar
 // (3.9.3) The top bar has only one button: night or day. The panel's colors are chosen in Settings ›
@@ -138,9 +138,9 @@ body.k38 #thm.k38dn{display:inline-flex;align-items:center;gap:6px;width:auto;pa
 .sgcells{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px}
 /* phones: bottom tab bar and a sheet with the rest */
 @media(max-width:899px){
- body.k38 .mbar.k38bar{position:fixed;top:auto;bottom:0;left:0;right:0;z-index:40;overflow:visible;gap:2px;padding:6px max(10px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px));
+ body.k38 .mbar.k38bar{position:fixed;top:auto;bottom:0;left:0;right:0;z-index:40;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scroll-snap-type:x proximity;touch-action:pan-x;gap:2px;padding:6px max(10px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px));
   background:color-mix(in srgb,var(--c1) 90%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--gb);border-bottom:0}
- body.k38 .mbar.k38bar a,body.k38 .mbar.k38bar button{flex:1;flex-direction:column;gap:2px;justify-content:center;padding:6px 0;border:0;background:transparent;color:var(--s);font-size:10.5px;border-radius:12px}
+ body.k38 .mbar.k38bar a,body.k38 .mbar.k38bar button{flex:0 0 auto;min-width:72px;scroll-snap-align:start;white-space:nowrap;flex-direction:column;gap:2px;justify-content:center;padding:6px 8px;border:0;background:transparent;color:var(--s);font-size:10.5px;border-radius:12px}
  body.k38 .mbar.k38bar svg{color:inherit}
  body.k38 .mbar.k38bar .on{color:var(--a);background:transparent}
  body.k38.light .mbar.k38bar .on{color:var(--ad)}

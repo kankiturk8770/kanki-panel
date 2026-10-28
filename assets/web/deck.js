@@ -95,7 +95,8 @@ function chips(){if(!document.body.classList.contains('kd-vpn'))return;
   var sig=railSig(rows);if(rail._sig!==sig){rail._sig=sig;
    rail.innerHTML=chipsHtml(rows);
    var on=$('.kd-chip.on',rail);if(on)try{on.scrollIntoView({block:'nearest',inline:'center',behavior:rail._seen?'smooth':'auto'})}catch(e){}rail._seen=1}
-  if(!AUTO[g+S.page]){AUTO[g+S.page]=1;if(!rows.some(function(r){return r.classList.contains('open')})){var h=$('.kxr-h',rows[0]);if(h)h.click()}}})}
+  // (no server is opened by itself: a server's settings open only when its chip is tapped)
+  })}
 window.addEventListener('hashchange',function(){AUTO={}});
 // Servers page: two columns of slim cards with a pencil; a tap opens the server's settings in the side drawer
 var PEN='<span class="kd-pen" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg></span>';
@@ -130,7 +131,7 @@ if(window.uchip){
   var pc=usage(u),used=(+u.traffic_used_gb||0).toFixed(1),exp=st=='disabled'?t('Disabled'):!u.expires_ts?'∞':u.expires_ts<Date.now()/1000?t('Expired'):jdate(u.expires_ts);
   return '<button class="uchip kd-u st-'+st+(on?' on':'')+(S.sel[u.id]?' sel':'')+'" data-id="'+u.id+'" title="'+esc(u.username)+'">'+
    '<span class="kd-un"><span class="dot '+dot+'"></span><span class="nm">'+esc(u.username)+'</span>'+
-   (ps.length?'<span class="lvs">'+ps.slice(0,3).map(function(p){return '<i style="--pc:'+(PCOL[p]||'#888')+'">'+liveShort(p)+'</i>'}).join('')+'</span>':'')+
+   (ps.length?'<span class="lvs">'+liveBadges(lv)+'</span>':'')+
    '<span class="tick">'+ic('check',13)+'</span></span>'+
    '<span class="k310bar'+(pc<0?' inf':pc>=90?' hot':pc>=70?' warm':'')+'"><i style="width:'+(pc<0?100:Math.max(3,pc))+'%"></i></span>'+
    '<span class="kd-meta"><span>'+t('Data')+' <b class="ltr">'+N(used)+(pc<0?' GB / ∞':' / '+N(u.traffic_limit_gb)+' GB')+'</b></span><span>'+t('Expires')+' <b>'+exp+'</b></span></span></button>'};

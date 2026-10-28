@@ -1024,7 +1024,7 @@ function areaChart(series,o){var W=300,H=o.h||100,cap=o.cap||60,mx=o.max||0,i,j,
 
 function applyLook(){document.documentElement.lang=S.lang;document.documentElement.dir=S.lang=='fa'?'rtl':'ltr';
  document.body.className=(S.theme=='light'?'light ':'')+(S.color&&S.color!='gold'?'c-'+S.color:'')}
-var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+']];
+var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e']];
 function pname(p){for(var i=0;i<PROTOS.length;i++)if(PROTOS[i][0]==p)return PROTOS[i][1];return p}
 function modal(html,cls){var b=$('#mbox');b.className='mbox'+(cls?' '+cls:'');b.innerHTML=html;b.scrollTop=0;$('#modal').classList.add('on');document.body.style.overflow='hidden'}
 function closeModal(){$('#modal').classList.remove('on');document.body.style.overflow=''}
@@ -1052,11 +1052,11 @@ function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(func
 
 // ---------------------------------------------------------------- shell
 ICO.chev='<path d="M6 9l6 6 6-6"/>';
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['kgame','MIX+','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['kgame','MIX+\u200e','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 // sidebar groups (v2.8.4): [label, page keys]
 // menu (v3.5): single pages and groups that open in place. An item is [page, sub page, label, note].
 var NAV=[{p:'dash'},{p:'users'},{p:'nodes'},
- {g:'vpn',l:'VPN services',i:'shield2',items:[['vpn','','All VPN services','Kanki VPN and Xray side by side'],['kmix','','KANKI MIX','Our own protocol: games, low ping'],['kgame','','MIX+','KCP + FEC for games, low lag'],['xray','','Xray','VLESS · VMess · Trojan · Shadowsocks'],['antidpi','','Anti-DPI tunnels','REALITY · WS/gRPC behind CDN · Hysteria2']]},
+ {g:'vpn',l:'VPN services',i:'shield2',items:[['vpn','','All VPN services','Kanki VPN and Xray side by side'],['kmix','','KANKI MIX','Our own protocol: games, low ping'],['kgame','','MIX+\u200e','KCP + FEC for games, low lag'],['xray','','Xray','VLESS · VMess · Trojan · Shadowsocks'],['antidpi','','Anti-DPI tunnels','REALITY · WS/gRPC behind CDN · Hysteria2']]},
  {g:'net',l:'Tunnels',i:'tunnel',items:[['tunnels','','Tunnels','Links between your servers'],['servers','','Tunnel servers','Iran and abroad servers of the tunnels'],['ports','','Port management','Which port each service uses']]},
  {g:'dnsg',l:'Kanki DNS',i:'dns',items:[['dns','overview','Overview','Status of the DNS servers'],['dns','servers','DNS servers','Exits abroad and relays in Iran'],['dns','pubg','PUBG and games','Which part of the game goes through'],['dns','services','Services','What goes through the DNS'],['dns','users','DNS users','Registered addresses and use'],['dns','log','Query log','Names your users asked'],['dns','settings','Settings and SSL','Domain, certificate, upstreams']]},
  {g:'sales',l:'Sales & support',i:'bot',items:[['bot','','Sales bot','Plans, payments, Telegram'],['emergency','','Emergency chat','Talk to users when the internet is cut']]},
@@ -1272,9 +1272,16 @@ function drawLive(){var el=$('#ulv');if(!el)return;var cnt={},any=0;
  if(!any){el.innerHTML='<span class="muted" style="font-size:12px">'+t('Nobody is connected right now')+'</span>';if(S.lv){S.lv='';drawUsers()}return}
  el.innerHTML='<span class="muted" style="font-size:12px;font-weight:700">'+t('Connected now')+':</span>'+
   '<button class="sc'+(S.lv?'':' act')+'" data-lv=""><span class="dot g"></span>'+t('All')+' <b>'+N(any)+'</b></button>'+
-  PROTOS.filter(function(p){return cnt[p[0]]}).map(function(p){return '<button class="sc'+(S.lv==p[0]?' act':'')+'" data-lv="'+p[0]+'" style="--pc:'+(PCOL[p[0]]||'#999')+'"><i></i>'+p[1]+' <b>'+N(cnt[p[0]])+'</b></button>'}).join('');
+  PROTOS.filter(function(p){return cnt[p[0]]}).map(function(p){return '<button class="sc'+(S.lv==p[0]?' act':'')+'" data-lv="'+p[0]+'" style="--pc:'+(PCOL[p[0]]||'#999')+'"><i></i><bdi dir="ltr">'+p[1]+'</bdi> <b>'+N(cnt[p[0]])+'</b></button>'}).join('');
  el.onclick=function(e){var b=e.target.closest('[data-lv]');if(!b)return;S.lv=b.dataset.lv;S.pg=1;drawLive();drawUsers()}}
-function liveShort(p){return {wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',xray:'XR',dns:'DNS'}[p]||p.toUpperCase()}
+function liveShort(p){return {wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',kgame:'MIX+\u200e',xray:'XR',dns:'DNS'}[p]||p.toUpperCase()}
+// what a user is connected with: one badge per protocol, the flag of the server's exit country and a small
+// Iran flag when that config goes through an Iran tunnel
+function liveBadges(lv){var by={},order=[];lv.forEach(function(c){if(!by[c.p]){by[c.p]=[];order.push(c.p)}by[c.p].push(c)});
+ return order.slice(0,3).map(function(p){var fl='',seen={};by[p].forEach(function(c){var k=(c.cc||'')+(c.t?'+':'');if(seen[k])return;seen[k]=1;
+   if(c.cc&&window.flagOf)fl+='<span class="lvf">'+flagOf(c.cc)+'</span>';if(c.t&&window.flagOf)fl+='<span class="lvf lvir">'+flagOf('IR')+'</span>'});
+  return '<i dir="ltr" style="--pc:'+(PCOL[p]||'#888')+'">'+liveShort(p)+(fl?' '+fl:'')+'</i>'}).join('')}
+(function(){var st=document.createElement('style');st.textContent='.uchip.kd-u .kd-un{flex-wrap:wrap}.uchip.kd-u .kd-un .lvs{order:9;flex-basis:100%;display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}.uchip.kd-u .kd-un .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lvs i{display:inline-flex;align-items:center;gap:2px;white-space:nowrap}.lvf{font-size:11px;line-height:1;font-style:normal}.lvf.lvir{font-size:9px;opacity:.9}';document.head.appendChild(st)})();
 function filtered(){var q=S.q.trim().toLowerCase(),f=S.filter;
  var out=S.users.filter(function(u){
   if(q&&(u.username+' '+u.notes+' '+(u.tg_id||'')).toLowerCase().indexOf(q)<0)return false;
@@ -1304,7 +1311,7 @@ function uchip(u){var st=ustate(u),lv=liveOf(u),on=u.online_connections>0||lv.le
  lv.forEach(function(c){if(ps.indexOf(c.p)<0)ps.push(c.p)});
  var tip=u.username+(lv.length?'\n'+lv.map(function(c){return pname(c.p)+' · '+c.s}).join('\n'):'');
  return '<button class="uchip st-'+st+(S.sel[u.id]?' sel':'')+'" data-id="'+u.id+'" title="'+esc(tip)+'"><span class="dot '+dot+'"></span><span class="nm">'+esc(u.username)+'</span>'+
-  (ps.length?'<span class="lvs">'+ps.slice(0,3).map(function(p){return '<i style="--pc:'+(PCOL[p]||'#888')+'">'+liveShort(p)+'</i>'}).join('')+'</span>':'')+'<span class="tick">'+ic('check',13)+'</span></button>'}
+  (ps.length?'<span class="lvs">'+liveBadges(lv)+'</span>':'')+'<span class="tick">'+ic('check',13)+'</span></button>'}
 // ---- single-user actions
 function toggleU(id,cb){cb.disabled=true;api('POST','/api/users/'+id+'/toggle').then(function(){toast(t('Done'));loadUsers()}).catch(function(e){cb.checked=!cb.checked;cb.disabled=false;fail(e)})}
 function resetU(id){confirmDo(function(){api('POST','/api/users/'+id+'/reset').then(function(){toast(t('Done'));loadUsers()}).catch(fail)})}
