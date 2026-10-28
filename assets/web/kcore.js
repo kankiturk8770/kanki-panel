@@ -2,9 +2,9 @@
 // Reed-Solomon FEC under a mask, the Game-FEC transport of the tunnels), a section of its own like
 // KANKI MIX and ticked per user. It runs on every VPN server on a port of its own.
 var KC={d:{},meta:{
- kgame:{name:'MIX+',net:'UDP',desc:'For games (PUBG…): game packets go as datagrams of their own, small ones two or three times; websites and the lobby over KCP + FEC. Nothing on the wire looks like a protocol.'}}};
+ kgame:{name:'MIX+\u200e',net:'UDP',desc:'For games (PUBG…): KCP at its fastest with FEC, a lost packet is rebuilt without waiting. Game and websites ride one stream, like the tunnels; «Game optimization» below sends game packets apart. Nothing on the wire looks like a protocol.'}}};
 function kcFA(){if(kcFA.done||typeof FA=='undefined')return;kcFA.done=1;Object.assign(FA,{
- "For games (PUBG…): game packets go as datagrams of their own, small ones two or three times; websites and the lobby over KCP + FEC. Nothing on the wire looks like a protocol.":"برای بازی (پابجی و …): بسته‌های بازی دیتاگرام جدا می‌روند و بسته‌های کوچک دو یا سه بار؛ سایت‌ها و لابی روی KCP + FEC. روی سیم شبیه هیچ پروتکلی نیست.",
+ "For games (PUBG…): KCP at its fastest with FEC, a lost packet is rebuilt without waiting. Game and websites ride one stream, like the tunnels; «Game optimization» below sends game packets apart. Nothing on the wire looks like a protocol.":"برای بازی (پابجی و …): KCP سریع با FEC؛ بسته‌ی گم‌شده بدون انتظار ساخته می‌شود. بازی و سایت‌ها مثل تانل‌ها در یک جریان می‌روند؛ «بهینه‌سازی بازی» پایین بسته‌های بازی را جدا می‌فرستد. روی سیم شبیه هیچ پروتکلی نیست.",
  "is off: it runs on no server and is in no subscription.":"خاموش است: روی هیچ سروری اجرا نمی‌شود و در هیچ اشتراکی نیست.",
  "Users with it":"کاربران این پروتکل","Running servers":"سرورهای فعال","Online now":"آنلاین الان","Total traffic":"ترافیک کل",
  "Default port":"پورت پیش‌فرض","Every server uses it unless it has its own port below.":"همه‌ی سرورها همین را دارند، مگر سروری که پایین پورت خودش را دارد.",

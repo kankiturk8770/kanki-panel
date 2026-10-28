@@ -33,7 +33,9 @@ pub fn forget(node_id: &str) {
 }
 
 /// user id -> [(protocol, server)]
-type UserServers = HashMap<i64, Vec<(String, String)>>;
+/// (protocol, server name, exit country code, through a tunnel)
+type Conn = (String, String, String, bool);
+type UserServers = HashMap<i64, Vec<Conn>>;
 
 /// user id -> [(protocol, server)], built at most every few seconds
 fn cache() -> &'static Mutex<(i64, UserServers)> {
@@ -41,19 +43,29 @@ fn cache() -> &'static Mutex<(i64, UserServers)> {
     S.get_or_init(|| Mutex::new((0, HashMap::new())))
 }
 
-fn build(app: &App) -> HashMap<i64, Vec<(String, String)>> {
+fn build(app: &App) -> UserServers {
     let t = now();
-    let mut m: HashMap<i64, Vec<(String, String)>> = HashMap::new();
-    let mut add = |uid: i64, p: &str, s: &str| {
+    let mut m: UserServers = HashMap::new();
+    let mut add = |uid: i64, p: &str, s: &str, cc: &str, tun: bool| {
         let v = m.entry(uid).or_default();
-        if !v.iter().any(|(a, b)| a == p && b == s) {
-            v.push((p.to_string(), s.to_string()));
+        if !v.iter().any(|(a, b, _, _)| a == p && b == s) {
+            v.push((p.to_string(), s.to_string(), cc.to_string(), tun));
         }
     };
-    for (at, name, conns) in vpn().lock().unwrap().values() {
+    let kmix = crate::kmix::settings(app);
+    for (nid, (at, name, conns)) in vpn().lock().unwrap().iter() {
         if t - at <= VPN_FRESH {
+            // the real exit of the server, and whether its configs of a protocol go through an Iran
+            // tunnel (from how the server is set up: the panel does not see which address a phone used)
+            let cc = crate::exitgeo::fields(app, nid)["exit_cc"].as_str().unwrap_or("").to_string();
+            let node = app.db.node(nid);
             for (uid, p) in conns {
-                add(*uid, p, name);
+                let tun = node.as_ref().map(|n| match p.as_str() {
+                    "kmix" => kmix.node_tunnel(&n.id),
+                    "kgame" => false,
+                    _ => crate::direct::through_tunnel(app, n),
+                }).unwrap_or(false);
+                add(*uid, p, name, &cc, tun);
             }
         }
     }
@@ -67,10 +79,10 @@ fn build(app: &App) -> HashMap<i64, Vec<(String, String)>> {
         }
     };
     for (uid, sid) in crate::xray::panel::online_now(XRAY_FRESH) {
-        add(uid, "xray", &name_of(&sid));
+        add(uid, "xray", &name_of(&sid), "", false);
     }
     for (uid, sid) in crate::dns::panel::active_users(DNS_FRESH) {
-        add(uid, "dns", &name_of(&sid));
+        add(uid, "dns", &name_of(&sid), "", false);
     }
     for v in m.values_mut() {
         v.sort();
@@ -85,7 +97,7 @@ pub fn of(app: &App, uid: i64) -> Value {
     if t - c.0 >= 3 {
         *c = (t, build(app));
     }
-    json!(c.1.get(&uid).map(|v| v.iter().map(|(p, s)| json!({ "p": p, "s": s })).collect::<Vec<_>>()).unwrap_or_default())
+    json!(c.1.get(&uid).map(|v| v.iter().map(|(p, s, cc, tun)| json!({ "p": p, "s": s, "cc": cc, "t": tun })).collect::<Vec<_>>()).unwrap_or_default())
 }
 
 #[cfg(test)]

@@ -245,9 +245,9 @@ function vhHead(icon,title,sub,btns){return '<div class="vh"><span class="phi">'
 function vhBtn(href,label,on){return '<a class="b2 sm" href="'+href+'"'+(on?' onclick="'+on+';return false"':'')+'>'+label+'</a>'}
 function vhKanki(nodes,o){var up=nodes.filter(function(n){return n.id=='local'||n.online}).length,pr=o.protocols||{};
  // compact: no extra buttons, the protocol counts as a grid, the servers in two columns
- $('#vh_k').innerHTML=vhHead('nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · MIX+','')+
+ $('#vh_k').innerHTML=vhHead('nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · MIX+\u200e','')+
   '<div class="kv"><div><small>'+t('Nodes online')+'</small><b>'+N(up)+' / '+N(nodes.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N(o.online||0)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(o.traffic_gb||0)+' GB</b></div></div>'+
-  '<label class="f">'+t('Users by protocol')+'</label><div class="vhgrid">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+']].map(function(p){return '<div class="vhcell"><small>'+p[1]+'</small><b>'+N(pr[p[0]]||0)+'</b></div>'}).join('')+'</div>'+
+  '<label class="f">'+t('Users by protocol')+'</label><div class="vhgrid">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e']].map(function(p){return '<div class="vhcell"><small>'+p[1]+'</small><b>'+N(pr[p[0]]||0)+'</b></div>'}).join('')+'</div>'+
   '<div class="vhsrv">'+nodes.map(function(n){var s=nState(n),loc=n.id=='local';return '<div class="vhs"><span class="dot '+s.c+'"></span><div class="nm"><b>'+esc(n.name)+'</b><small>'+N(n.users||0)+' '+t('users')+(loc?' · '+t('Main server'):'')+'</small></div></div>'}).join('')+'</div>'}
 (function(){if(document.getElementById('vhcss'))return;var st=document.createElement('style');st.id='vhcss';
  st.textContent='#vh_k{padding:12px!important}#vh_k .vh{margin-bottom:8px}.vhgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}'+
@@ -274,7 +274,7 @@ function ufServices(protos,un){var has=function(p){return protos.indexOf(p)>=0},
  var nodes=S.nodes||[];
  var h='<label class="f" style="margin-top:12px">'+t('Services of this user')+'</label><div class="chipset" id="uf_pre"><button type="button" data-pre="all">'+t('Everything')+'</button><button type="button" data-pre="vpn">'+t('Kanki VPN only')+'</button><button type="button" data-pre="xray">'+t('Xray only')+'</button><button type="button" data-pre="dns">'+t('DNS only')+'</button></div>';
  h+=card('vpn','nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX',vpnOn,
-  '<div class="ckrow">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+']].map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(has(p[0])?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>'+
+  '<div class="ckrow">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e']].map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(has(p[0])?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>'+
   (nodes.length>1?'<label class="f">'+t('Servers')+'</label><div class="ckrow">'+nodes.map(function(n){return '<label class="chk"><input type="checkbox" class="f_nd" value="'+esc(n.id)+'" '+(un.length==0||un.indexOf(n.id)>=0?'checked':'')+'>'+esc(n.name)+'</label>'}).join('')+'</div>':''),
   '<label class="sw"><input type="checkbox" class="uf_all" data-for="vpn" '+(vpnOn?'checked':'')+'><span></span></label>');
  h+=card('xray','xray','Xray','Links of every Xray inbound go into the subscription',has('xray'),'<div id="uf_xr" class="muted">…</div>','<label class="sw"><input type="checkbox" class="f_pr" value="xray" '+(has('xray')?'checked':'')+'><span></span></label>');
