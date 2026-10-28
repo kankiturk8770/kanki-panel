@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.18 — microtun, a light game VPN
+- **microtun** is a new protocol under Services, next to MIX+: a TUN-over-UDP VPN with 28 bytes per packet (WireGuard 32), an X25519 handshake with the user's own key, keys renewed every 2 minutes, a hidden header, and small packets (up to 300 bytes) sent twice so one lost packet does not lag a game. Through 20 % loss each way, 6.7 % of pings were lost (34.8 % without the copies).
+- Tick it per user (or «Enable for all users»). Every server runs it inside its agent on UDP 4200 (4201, 4202 … per server, like MIX+), with interface `mtun0` and NAT; update the agents. Traffic and online users count like the other protocols; a removed or expired user is cut off at the next sync.
+- The page has a **Test link** box: pick a user and copy their `mtun://` link for each server. Test with the Linux client from the Labo repository: `sudo microtun client -url 'LINK'`. The subscription data has the link as `"mtun"` (and through the tunnel on the tunnel entry) for the app.
+
 ## New in 3.17.1 — tunnel names
 - A tunnel left without a name is named after its servers: the Iran server's name, a dash, the abroad server's name (`Tehran-Germany`). The form shows that name as its hint while you pick the servers.
 

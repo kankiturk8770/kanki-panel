@@ -27,6 +27,9 @@ pub struct SyncReq {
     /// Kanki Cores on this server (None = a panel that does not manage them)
     #[serde(default)]
     pub kcore: Option<crate::tunnel::kcore::server::CoreCfg>,
+    /// microtun on this server (None = a panel that does not manage it)
+    #[serde(default)]
+    pub mtun: Option<crate::mtun::MtCfg>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -54,6 +57,13 @@ pub struct SyncResp {
     pub kcore_online: Vec<(String, String, i64)>,
     #[serde(default)]
     pub kcore_error: String,
+    /// microtun: username -> (rx, tx) since the last sync, users online, what failed to start
+    #[serde(default)]
+    pub mtun: HashMap<String, (i64, i64)>,
+    #[serde(default)]
+    pub mtun_online: Vec<String>,
+    #[serde(default)]
+    pub mtun_error: String,
 }
 
 fn loadavg() -> String {
@@ -77,6 +87,9 @@ pub fn local_info(app: &App) -> Value {
         o.extend(k.clone());
     }
     if let (Some(o), Some(k)) = (v.as_object_mut(), crate::kcores::info().as_object()) {
+        o.extend(k.clone());
+    }
+    if let (Some(o), Some(k)) = (v.as_object_mut(), crate::microtun::info().as_object()) {
         o.extend(k.clone());
     }
     v
@@ -121,7 +134,11 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     if let Some(cfg) = req.kcore {
         (kcore, kcore_online, kcore_error) = crate::kcores::apply(cfg).await;
     }
-    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, kcore, kcore_online, kcore_error }
+    let (mut mtun, mut mtun_online, mut mtun_error) = (HashMap::new(), vec![], String::new());
+    if let Some(cfg) = req.mtun {
+        (mtun, mtun_online, mtun_error) = tokio::task::spawn_blocking(move || crate::microtun::apply(cfg)).await.unwrap_or_else(|_| (HashMap::new(), vec![], "microtun apply crashed".into()));
+    }
+    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, kcore, kcore_online, kcore_error, mtun, mtun_online, mtun_error }
 }
 
 /// when each switched-off node was last given its empty user list
@@ -166,6 +183,7 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
     let here: Vec<&User> = users.iter().filter(|u| u.active() && u.on(n)).collect();
     req.kmix = Some(crate::kmix::cfg_for(app, &crate::kmix::settings(app), n, &here));
     req.kcore = Some(crate::kcores::cfg_for(app, n, &here));
+    req.mtun = Some(crate::microtun::cfg_for(app, n, &here));
     for u in users.iter().filter(|u| u.active() && u.on(n)) {
         // drain: no new users here unless explicitly assigned or already present
         if n.drain && !u.explicit_nodes() {
@@ -217,7 +235,7 @@ pub async fn sync_all(app: &Arc<App>) {
             }
             g.insert(n.id.clone(), now());
         }
-        let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(Default::default()), ..Default::default() };
+        let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(Default::default()), mtun: Some(Default::default()), ..Default::default() };
         let ok = if n.id == "local" { apply_local(app, empty).await; true } else { remote_sync(app, &n, &empty).await.is_ok() };
         let _ = app.db.exec("UPDATE nodes SET online=?1, sync_state='off' WHERE id=?2", &[&(ok as i64), &n.id]);
         if ok && n.id != "local" {
@@ -289,7 +307,7 @@ pub async fn sync_all(app: &Arc<App>) {
                 *add_bytes.entry(*uid).or_default() += rx + tx;
             }
         }
-        for (name, c, proto) in resp.hy2_online.iter().map(|(n, c)| (n, c, "hy2")).chain(resp.kmix_online.iter().map(|(n, c)| (n, c, "kmix"))).chain(resp.kcore_online.iter().map(|(n, p, c)| (n, c, p.as_str()))) {
+        for (name, c, proto) in resp.hy2_online.iter().map(|(n, c)| (n, c, "hy2")).chain(resp.kmix_online.iter().map(|(n, c)| (n, c, "kmix"))).chain(resp.kcore_online.iter().map(|(n, p, c)| (n, c, p.as_str()))).chain(resp.mtun_online.iter().map(|n| (n, &1, "mtun"))) {
             if let Some(uid) = by_name.get(name) {
                 if *c > 0 {
                     here.push((*uid, proto.to_string()));
@@ -298,7 +316,7 @@ pub async fn sync_all(app: &Arc<App>) {
                 }
             }
         }
-        for (name, (rx, tx)) in resp.kmix.iter().chain(resp.kcore.iter()) {
+        for (name, (rx, tx)) in resp.kmix.iter().chain(resp.kcore.iter()).chain(resp.mtun.iter()) {
             if let Some(uid) = by_name.get(name) {
                 *add_bytes.entry(*uid).or_default() += rx + tx;
             }

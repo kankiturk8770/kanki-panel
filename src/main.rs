@@ -48,6 +48,10 @@ mod hy2;
 mod kcores;
 #[path = "vpn/kmix.rs"]
 mod kmix;
+#[path = "vpn/microtun.rs"]
+mod microtun;
+#[path = "vpn/mtun.rs"]
+mod mtun;
 #[path = "vpn/sync.rs"]
 mod sync;
 #[path = "vpn/wg.rs"]

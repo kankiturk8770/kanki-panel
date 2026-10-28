@@ -1,3 +1,9 @@
+# v3.18.0 — microtun
+- New user protocol `mtun` with its own page (`/api/mt`, `/api/mt/users`, `/api/mt/links/<user id>`): on/off, default port 4200, per-server port/address/switch, copies of small packets (`burst_max`, `burst_delay_ms`), MTU.
+- `src/vpn/mtun.rs`: the server, on plain threads, wire-compatible with the Go microtun v2 (Labo repository): AES-256-GCM, header masked with AES of the ciphertext sample, X25519 + per-user key handshake, 1024-packet replay window, a new session only after its first data packet, source-address check per user, TUN `mtun0`, forwarding and NAT rules removed again when it stops. Users and copy settings change live; port, key, address and MTU restart it.
+- `src/vpn/microtun.rs`: settings, keys (`mt_obfs`, `mt_secret`, user key = HMAC of id and subscription code), user address 10.77.0.0/16 by id, `mtun` in the sync request/answer (older agents ignore it), `mt_port` / `mt_error` in the server info, `"mtun"` link in the subscription data, ports in port management (4200-4299, 42000-42999).
+- Tested: the Rust server with the Go client (handshake, NAT, 20 %-loss run, traffic), and the whole panel in a test box: user created, link from the page, client connected, traffic and online counted, user removed and added back.
+
 # v3.14.0 — Game-FEC, HQ-QUIC and FakeTCP as VPN protocols
 - Three separate user protocols `kgame`, `khq`, `kftcp`, each with its own page (`/api/kc/<proto>`), settings, per-server port/address/switch and «enable for all users»; the server refuses a user on a protocol they do not have.
 - New `src/tunnel/kcore/`: Game-FEC, HQ-QUIC and FakeTCP served to users as VPN cores (per-user HMAC auth after the link handshake, full proxy to public addresses only, a datagram fast path for game UDP with 1-3 copies of small packets, a replay window that drops the copies, big bodies cut into pieces). The transports are reused as they are.

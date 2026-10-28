@@ -72,7 +72,7 @@ function vhKanki(nodes,o){var up=nodes.filter(function(n){return n.id=='local'||
  // compact: no extra buttons, the protocol counts as a grid, the servers in two columns
  $('#vh_k').innerHTML=vhHead('nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · MIX+\u200e','')+
   '<div class="kv"><div><small>'+t('Nodes online')+'</small><b>'+N(up)+' / '+N(nodes.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N(o.online||0)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(o.traffic_gb||0)+' GB</b></div></div>'+
-  '<label class="f">'+t('Users by protocol')+'</label><div class="vhgrid">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e']].map(function(p){return '<div class="vhcell"><small>'+p[1]+'</small><b>'+N(pr[p[0]]||0)+'</b></div>'}).join('')+'</div>'+
+  '<label class="f">'+t('Users by protocol')+'</label><div class="vhgrid">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e'],['mtun','microtun']].map(function(p){return '<div class="vhcell"><small>'+p[1]+'</small><b>'+N(pr[p[0]]||0)+'</b></div>'}).join('')+'</div>'+
   '<div class="vhsrv">'+nodes.map(function(n){var s=nState(n),loc=n.id=='local';return '<div class="vhs"><span class="dot '+s.c+'"></span><div class="nm"><b>'+esc(n.name)+'</b><small>'+N(n.users||0)+' '+t('users')+(loc?' · '+t('Main server'):'')+'</small></div></div>'}).join('')+'</div>'}
 function vhXray(d){var el=$('#vh_x');if(!d){el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks')+'<p class="muted">—</p>';return}
  var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length,tot=d.inbounds.reduce(function(a,b){return a+(+b.traffic||0)},0);
@@ -87,12 +87,12 @@ function vhDns(d){var el=$('#vh_d');if(!d){el.style.display='none';return}var ru
   '<div class="kv"><div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(d.servers.length)+'</b></div><div><small>'+t('Users with DNS')+'</small><b>'+N(d.users)+'</b></div><div><small>'+t('Allowed addresses')+'</small><b>'+N(d.servers.reduce(function(a,x){return a+(+(x.status||{}).allowed||0)},0))+'</b></div></div>'}
 
 // ---------------------------------------------------------------- user form: what the user gets, service by service
-function ufServices(protos,un){var has=function(p){return protos.indexOf(p)>=0},vpnOn=has('wg')||has('awg')||has('hy2')||has('kmix')||has('kgame');
+function ufServices(protos,un){var has=function(p){return protos.indexOf(p)>=0},vpnOn=has('wg')||has('awg')||has('hy2')||has('kmix')||has('kgame')||has('mtun');
  var card=function(key,icon,title,sub,on,body,head){return '<div class="ufsvc'+(on?' on':'')+'" data-svc="'+key+'"><div class="hd"><span class="ni">'+ic(icon,18)+'</span><div class="nm"><b>'+t(title)+'</b><small>'+t(sub)+'</small></div>'+(head||'')+'</div><div class="bd3">'+body+'</div></div>'};
  var nodes=S.nodes||[];
  var h='<label class="f" style="margin-top:12px">'+t('Services of this user')+'</label><div class="chipset" id="uf_pre"><button type="button" data-pre="all">'+t('Everything')+'</button><button type="button" data-pre="vpn">'+t('Kanki VPN only')+'</button><button type="button" data-pre="xray">'+t('Xray only')+'</button><button type="button" data-pre="dns">'+t('DNS only')+'</button></div>';
  h+=card('vpn','nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX',vpnOn,
-  '<div class="ckrow">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e']].map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(has(p[0])?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>'+
+  '<div class="ckrow">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e'],['mtun','microtun']].map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(has(p[0])?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>'+
   (nodes.length>1?'<label class="f">'+t('Servers')+'</label><div class="ckrow">'+nodes.map(function(n){return '<label class="chk"><input type="checkbox" class="f_nd" value="'+esc(n.id)+'" '+(un.length==0||un.indexOf(n.id)>=0?'checked':'')+'>'+esc(n.name)+'</label>'}).join('')+'</div>':''),
   '<label class="sw"><input type="checkbox" class="uf_all" data-for="vpn" '+(vpnOn?'checked':'')+'><span></span></label>');
  h+=card('xray','xray','Xray','Links of every Xray inbound go into the subscription',has('xray'),'<div id="uf_xr" class="muted">…</div>','<label class="sw"><input type="checkbox" class="f_pr" value="xray" '+(has('xray')?'checked':'')+'><span></span></label>');
@@ -757,14 +757,18 @@ function kmAll(on){if(!confirm(t(on?'KANKI MIX for every user?':'Remove KANKI MI
 // under a mask, the Game-FEC transport of the tunnels), ticked per user like KANKI MIX. It runs on
 // every VPN server on a port of its own.
 var KC={d:{},meta:{
- kgame:{name:'MIX+\u200e',net:'UDP',desc:'For games (PUBG…): KCP at its fastest with FEC, a lost packet is rebuilt without waiting. Game and websites ride one stream, like the tunnels; «Game optimization» below sends game packets apart. Nothing on the wire looks like a protocol.'}}};
+ kgame:{name:'MIX+\u200e',net:'UDP',desc:'For games (PUBG…): KCP at its fastest with FEC, a lost packet is rebuilt without waiting. Game and websites ride one stream, like the tunnels; «Game optimization» below sends game packets apart. Nothing on the wire looks like a protocol.'},
+ mtun:{name:'microtun',net:'UDP',desc:'A light game VPN: 28 bytes per packet (WireGuard 32), keys renewed every 2 minutes, small packets sent twice so one lost packet does not lag. Nothing on the wire looks like a protocol.'}}};
+// the API of a protocol page (microtun has its own)
+function kcApi(p){return p=='mtun'?'/api/mt':'/api/kc/'+p}
 
 function kcPage(p){var m=KC.meta[p];
  $('#pg').innerHTML='<div class="ph"><div><h2>'+esc(m.name)+'</h2><p>'+t(m.desc)+'</p></div>'+
   '<div class="row" style="gap:6px"><button class="b2" onclick="kcAll(\''+p+'\',false)">'+t('Disable for all users')+'</button><button class="btn" onclick="kcAll(\''+p+'\',true)">'+ic('users',15)+' '+t('Enable for all users')+'</button></div></div><div id="kc">'+t('Loading…')+'</div>';
  kcLoad(p);clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))kcLoad(p,true)},8000)}
 function p_kgame(){kcPage('kgame')}
-function kcLoad(p,quiet){return api('GET','/api/kc/'+p).then(function(d){KC.d[p]=d;if(S.page!=p)return d;
+function p_mtun(){kcPage('mtun')}
+function kcLoad(p,quiet){return api('GET',kcApi(p)).then(function(d){KC.d[p]=d;if(S.page!=p)return d;
   if(quiet&&$('#kc_srv')){$('#kc_kv').innerHTML=kcKpis(d);$('#kc_srv').innerHTML=kcServers(d);return d}kcDraw(d);return d}).catch(fail)}
 function kcKpis(d){var s=d.settings,run=d.servers.filter(function(x){return x.port}).length,on=d.servers.filter(function(x){return x.on}).length;
  return '<div><small>'+t('Status')+'</small><b style="color:'+(s.on?'var(--ok)':'var(--bad)')+'">'+(s.on?t('On'):t('Off'))+'</b></div>'+
@@ -796,25 +800,45 @@ function kcDraw(d){var el=$('#kc');if(!el)return;var s=d.settings,p=d.proto,m=KC
    '<label class="f">'+t('Default port')+' · '+m.net+'</label><input id="kc_port" class="ltr" inputmode="numeric" value="'+esc(String(s.port))+'"><small class="muted">'+t('Every server uses it unless it has its own port below.')+'</small>'+
    (p=='kgame'?'<div class="srow" style="margin-top:8px"><div class="tx"><b>'+t('Game optimization')+'</b><small>'+t('Off: exactly like the tunnels (game UDP inside the stream). On: game packets as datagrams of their own, small ones sent several times.')+'</small></div><label class="sw"><input type="checkbox" id="kc_opt" '+(s.optimize?'checked':'')+'><span></span></label></div>':'')+
    (p=='kgame'?copies+'<label class="f">'+t('FEC of the stream (websites, game lobby)')+'</label><select id="kc_fec">'+fecs.map(function(f){return '<option value="'+esc(f)+'"'+(s.fec==f?' selected':'')+'>'+esc(f=='off'?t('off'):f)+'</option>'}).join('')+'</select>':'')+
+   (p=='mtun'?'<label class="f">'+t('Send small packets twice: up to (bytes)')+'</label><input id="kc_bm" class="ltr" inputmode="numeric" value="'+esc(String(s.burst_max))+'"><small class="muted">'+t('0 = off. Game packets are 50-300 bytes; downloads are sent once.')+'</small>'+
+    '<label class="f">'+t('Delay of the second copy (ms)')+'</label><input id="kc_bd" class="ltr" inputmode="numeric" value="'+esc(String(s.burst_delay_ms))+'">'+
+    '<label class="f">MTU</label><input id="kc_mtu" class="ltr" inputmode="numeric" value="'+esc(String(s.mtu))+'">':'')+
    '<button class="btn" style="width:100%;margin-top:12px" id="kc_save">'+t('Save')+'</button></div></div>'+
+  (p=='mtun'?'<div class="card"><h3>'+t('Test link')+'</h3><p class="sub" style="margin:0 0 8px">'+t('A user\'s mtun:// link per server, for the Linux client:')+'</p><code class="ltr" style="display:block;margin-bottom:8px">sudo microtun client -url \'LINK\'</code>'+
+   '<select id="mt_u" onchange="mtLinks()"><option value="">'+t('Choose a user')+'</option>'+(d.user_list||[]).map(function(u){return '<option value="'+u.id+'">'+esc(u.name)+(u.has?'':' ('+t('not ticked')+')')+'</option>'}).join('')+'</select><div id="mt_l" style="margin-top:8px"></div></div>':'')+
   '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0">'+t('Tick it for a user (user form, or Enable for all users). Every server runs it by itself within a minute; the Kanki app gets the link from the subscription. Each user has their own key: a new link is a new key, an expired or disabled user is cut off at once. Open the port at the data center\'s firewall too.')+'</p></div>';
  $('#kc_save').onclick=function(){kcSave(p)}}
 function kcNodes(p){var d=KC.d[p],m={};Object.keys((d&&d.settings.nodes)||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});
  $$('.kc_np').forEach(function(i){var v=unN(i.value).trim(),o=m[i.dataset.id]||{};o.port=v?+v:0;m[i.dataset.id]=o});
  $$('.kc_host').forEach(function(i){var o=m[i.dataset.id]||{};o.host=i.value.trim();m[i.dataset.id]=o});return m}
-function kcPut(p,b){return api('PUT','/api/kc/'+p,b).then(function(){toast(t('Saved'));return kcLoad(p)}).catch(fail)}
+function kcPut(p,b){return api('PUT',kcApi(p),b).then(function(){toast(t('Saved'));return kcLoad(p)}).catch(fail)}
 function kcSaveNodes(p){kcPut(p,{nodes:kcNodes(p)})}
 function kcNodeOn(p,id,on){var m=kcNodes(p),o=m[id]||{};o.off=!on;m[id]=o;kcPut(p,{nodes:m})}
 function kcSave(p){var v=unN($('#kc_port').value).trim();if(!/^\d+$/.test(v)||+v<1||+v>65535)return toast(t('the port must be 1-65535'),1);
  var b={on:$('#kc_on').checked,port:+v,nodes:kcNodes(p)};
- if($('#kc_opt'))b.optimize=$('#kc_opt').checked;if($('#kc_cp'))b.copies=+$('#kc_cp').value;if($('#kc_fec'))b.fec=$('#kc_fec').value;if($('#kc_sni'))b.sni=$('#kc_sni').value.trim();kcPut(p,b)}
+ if($('#kc_opt'))b.optimize=$('#kc_opt').checked;if($('#kc_cp'))b.copies=+$('#kc_cp').value;if($('#kc_fec'))b.fec=$('#kc_fec').value;if($('#kc_sni'))b.sni=$('#kc_sni').value.trim();
+ if($('#kc_bm'))b.burst_max=+unN($('#kc_bm').value)||0;if($('#kc_bd'))b.burst_delay_ms=+unN($('#kc_bd').value)||0;if($('#kc_mtu'))b.mtu=+unN($('#kc_mtu').value)||1420;kcPut(p,b)}
+function mtLinks(){var id=$('#mt_u').value,el=$('#mt_l');if(!id){el.innerHTML='';return}
+ api('GET','/api/mt/links/'+id).then(function(r){el.innerHTML=r.links.length?r.links.map(function(l){return '<label class="f">'+esc(l.server)+(l.tunnel?' · '+t('through the tunnel'):'')+'</label><textarea class="ltr" readonly rows="3" style="width:100%" onclick="this.select()">'+esc(l.url)+'</textarea>'}).join(''):'<div class="warnbox">'+t(r.why)+'</div>'}).catch(fail)}
 function kcAll(p,on){var n=KC.meta[p].name;if(!confirm(on?n+' '+t('for every user?'):n+': '+t('Remove from every user?')))return;
- api('POST','/api/kc/'+p+'/users',{on:on}).then(function(r){toast(t('Saved')+' · '+N(r.changed)+' '+t('users changed'));kcLoad(p)}).catch(fail)}
+ api('POST',kcApi(p)+'/users',{on:on}).then(function(r){toast(t('Saved')+' · '+N(r.changed)+' '+t('users changed'));kcLoad(p)}).catch(fail)}
 
 // ==================================================================== the panel: login, shell, pages
 "use strict";
 // Persian text of the whole panel
 var FA={
+ "A light game VPN: 28 bytes per packet (WireGuard 32), keys renewed every 2 minutes, small packets sent twice so one lost packet does not lag. Nothing on the wire looks like a protocol.":"VPN سبک برای بازی: ۲۸ بایت سربار برای هر بسته (وایرگارد ۳۲)، کلید هر ۲ دقیقه عوض می‌شود و بسته‌های کوچک دو بار فرستاده می‌شوند تا با گم شدن یک بسته لگ نشود. روی سیم شبیه هیچ پروتکلی نیست.",
+ "Send small packets twice: up to (bytes)":"ارسال دوباره‌ی بسته‌های کوچک: تا (بایت)",
+ "0 = off. Game packets are 50-300 bytes; downloads are sent once.":"۰ = خاموش. بسته‌های بازی ۵۰ تا ۳۰۰ بایت‌اند؛ دانلودها یک بار فرستاده می‌شوند.",
+ "Delay of the second copy (ms)":"فاصله‌ی نسخه‌ی دوم (میلی‌ثانیه)",
+ "Test link":"لینک تست",
+ "A user's mtun:// link per server, for the Linux client:":"لینک mtun:// کاربر برای هر سرور، برای کلاینت لینوکس:",
+ "Choose a user":"یک کاربر انتخاب کن",
+ "not ticked":"تیک نخورده",
+ "through the tunnel":"از راه تانل",
+ "microtun is not ticked for this user":"microtun برای این کاربر تیک نخورده است",
+ "this user is not active":"این کاربر فعال نیست",
+ "no server runs microtun for this user yet (update the agents, wait a minute)":"هنوز هیچ سروری microtun را برای این کاربر اجرا نمی‌کند (agentها را آپدیت کن و یک دقیقه صبر کن)",
  "+ Inbound":"+ دروازه",
  ".ir domains and Iranian addresses do not go through the server: they should be opened directly":"دامنه‌های .ir و IPهای ایران از سرور رد نمی‌شوند: باید مستقیم باز شوند",
  "0 = BBR (adapts by itself). A number turns on Brutal: it keeps that speed even with packet loss. Do not write more than the real speed of the servers.":"۰ = BBR (خودش تنظیم می‌شود). اگر عدد بدهی Brutal روشن می‌شود و حتی با افت بسته همان سرعت را نگه می‌دارد. بیشتر از سرعت واقعی سرورها ننویس.",
@@ -2826,7 +2850,7 @@ function applyLook(){document.documentElement.lang=S.lang;document.documentEleme
  var b=document.body.classList;b.toggle('light',S.theme=='light');
  Array.prototype.slice.call(b).forEach(function(c){if(c.indexOf('c-')==0)b.remove(c)});if(S.color&&S.color!='gold')b.add('c-'+S.color);
  b.add('k38');if($('#side'))b.add('v37');V37.drawLooks()}
-var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e'],['xray','Xray'],['dns','DNS']];
+var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e'],['mtun','microtun'],['xray','Xray'],['dns','DNS']];
 function pname(p){for(var i=0;i<PROTOS.length;i++)if(PROTOS[i][0]==p)return PROTOS[i][1];return p}
 function modal(html,cls){var b=$('#mbox');b.className='mbox'+(cls?' '+cls:'');b.innerHTML=html;b.scrollTop=0;$('#modal').classList.add('on');document.body.style.overflow='hidden'}
 function closeModal(){$('#modal').classList.remove('on');document.body.style.overflow=''}
@@ -2855,7 +2879,7 @@ function loginView(otp){$('#app').innerHTML='';document.body.className='';applyL
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
 // ---------------------------------------------------------------- shell
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['kgame','MIX+\u200e','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['kgame','MIX+\u200e','game'],['mtun','microtun','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);
@@ -2930,7 +2954,7 @@ function svc(k,a){var go=function(){toast(t('Checking…'));api('POST','/api/ser
  if(a=='start')go();else confirmDo(go)}
 
 // ---------------------------------------------------------------- users
-var PCOL={wg:'#1fa36b',awg:'#7c5cf0',hy2:'#d1497a',kmix:'#ff7a1a',kgame:'#e0b04a',xray:'#e0a020',dns:'#2a9df4'};
+var PCOL={wg:'#1fa36b',awg:'#7c5cf0',hy2:'#d1497a',kmix:'#ff7a1a',kgame:'#e0b04a',mtun:'#3fb6c9',xray:'#e0a020',dns:'#2a9df4'};
 var SORTS={new:function(a,b){return b.id-a.id},old:function(a,b){return a.id-b.id},name:function(a,b){return a.username.toLowerCase()<b.username.toLowerCase()?-1:1},
  usage:function(a,b){return usageVal(b)-usageVal(a)},expiry:function(a,b){return expVal(a)-expVal(b)},seen:function(a,b){return (b.last_seen_ts||0)-(a.last_seen_ts||0)}};
 function usageVal(u){return u.traffic_limit_gb>0?u.traffic_used_gb/u.traffic_limit_gb:-1}
@@ -2985,7 +3009,7 @@ function drawLive(){var el=$('#ulv');if(!el)return;var cnt={},any=0;
   '<button class="sc'+(S.lv?'':' act')+'" data-lv=""><span class="dot g"></span>'+t('All')+' <b>'+N(any)+'</b></button>'+
   PROTOS.filter(function(p){return cnt[p[0]]}).map(function(p){return '<button class="sc'+(S.lv==p[0]?' act':'')+'" data-lv="'+p[0]+'" style="--pc:'+(PCOL[p[0]]||'#999')+'"><i></i><bdi dir="ltr">'+p[1]+'</bdi> <b>'+N(cnt[p[0]])+'</b></button>'}).join('');
  el.onclick=function(e){var b=e.target.closest('[data-lv]');if(!b)return;S.lv=b.dataset.lv;S.pg=1;drawLive();drawUsers()}}
-function liveShort(p){return {wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',kgame:'MIX+\u200e',xray:'XR',dns:'DNS'}[p]||p.toUpperCase()}
+function liveShort(p){return {wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',kgame:'MIX+\u200e',mtun:'MT',xray:'XR',dns:'DNS'}[p]||p.toUpperCase()}
 // what a user is connected with: one badge per protocol, the flag of the server's exit country and a small
 // Iran flag when that config goes through an Iran tunnel
 function liveBadges(lv){var by={},order=[];lv.forEach(function(c){if(!by[c.p]){by[c.p]=[];order.push(c.p)}by[c.p].push(c)});
@@ -4246,7 +4270,7 @@ var SECS=[
  ['nodes','Servers','nodes',[['nodes','','Servers']],'Servers & network'],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
  ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','Cores','cores',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
+ ['vpnsec','Cores','cores',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['mtun','','microtun'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
  ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
 function secOf(p){for(var i=0;i<SECS.length;i++)if(SECS[i][3].some(function(x){return x[0]==p}))return SECS[i];return SECS[0]}
