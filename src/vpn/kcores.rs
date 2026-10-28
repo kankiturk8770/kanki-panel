@@ -53,7 +53,10 @@ pub struct Settings {
     pub port: u16,
     /// Game-FEC: FEC of the stream ("8:3", "off")
     pub fec: String,
-    /// Game-FEC, HQ-QUIC: copies of each small game packet (1-3)
+    /// Game-FEC, HQ-QUIC: the game datagram fast path (game UDP beside the stream, small packets
+    /// sent `copies` times). Off = UDP inside the stream, exactly like the tunnels.
+    pub optimize: bool,
+    /// copies of each small game packet with `optimize` (1-3)
     pub copies: u8,
     /// HQ-QUIC: the name in the TLS hello
     pub sni: String,
@@ -62,7 +65,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { on: true, port: 0, fec: "8:3".into(), copies: 2, sni: String::new(), nodes: HashMap::new() }
+        Settings { on: true, port: 0, fec: "8:3".into(), optimize: false, copies: 2, sni: String::new(), nodes: HashMap::new() }
     }
 }
 
@@ -148,7 +151,8 @@ pub fn cfg_for(app: &App, n: &Node, users: &[&User]) -> CoreCfg {
             (!cores.is_empty()).then(|| CoreUser { name: u.username.clone(), key: user_key(app, u), max: if limit_on { u.max_conn } else { 0 }, cores })
         })
         .collect();
-    CoreCfg { door: door(app), game: port("game"), hq: port("hq"), faketcp: port("faketcp"), fec: game.fec.clone(), copies: game.copies, users }
+    let fast = on.iter().filter(|x| x.2.optimize && x.1 != "faketcp").map(|x| x.1.to_string()).collect();
+    CoreCfg { door: door(app), game: port("game"), hq: port("hq"), faketcp: port("faketcp"), fec: game.fec.clone(), copies: game.copies, fast, users }
 }
 
 // ------------------------------------------------------------------ links
@@ -374,6 +378,9 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
             Some(f) => s.fec = f,
             None => return bad("FEC is data:parity, like 8:3, or off"),
         }
+    }
+    if let Some(o) = b["optimize"].as_bool() {
+        s.optimize = o && core != "faketcp";
     }
     if let Some(c) = b["copies"].as_u64() {
         s.copies = c.clamp(1, 3) as u8;

@@ -42,6 +42,10 @@ pub struct CoreCfg {
     pub fec: String,
     /// copies of a small game datagram (1-3, 0 = 2)
     pub copies: u8,
+    /// the cores with the game datagram fast path ("game", "hq"); the others carry UDP inside the
+    /// stream, exactly like the tunnels do
+    #[serde(default)]
+    pub fast: Vec<String>,
     pub users: Vec<CoreUser>,
 }
 
@@ -50,8 +54,8 @@ impl CoreCfg {
         !self.door.is_empty() && (self.game > 0 || self.hq > 0 || self.faketcp > 0)
     }
     /// what needs the listeners to start again when it changes (users change in place)
-    fn listen_key(&self) -> (String, u16, u16, u16, String, u8) {
-        (self.door.clone(), self.game, self.hq, self.faketcp, self.fec.clone(), self.copies)
+    fn listen_key(&self) -> (String, u16, u16, u16, String, u8, Vec<String>) {
+        (self.door.clone(), self.game, self.hq, self.faketcp, self.fec.clone(), self.copies, self.fast.clone())
     }
     pub fn copies(&self) -> u8 {
         if self.copies == 0 { 2 } else { self.copies.min(3) }
@@ -84,6 +88,7 @@ impl Slot {
 struct State {
     door: String,
     copies: u8,
+    fast: Vec<String>,
     users: RwLock<HashMap<String, Arc<Slot>>>,
     /// auth nonces seen in the last minutes (an auth is good once)
     seen: Mutex<HashMap<String, u64>>,
@@ -99,7 +104,7 @@ enum Conn {
 
 /// The running cores of this server. Dropping it stops them and frees the ports.
 pub struct CoreServer {
-    key: (String, u16, u16, u16, String, u8),
+    key: (String, u16, u16, u16, String, u8, Vec<String>),
     state: Arc<State>,
     tasks: Vec<JoinHandle<()>>,
     _relay: Option<gamec::Relay>,
@@ -129,6 +134,7 @@ impl CoreServer {
         let state = Arc::new(State {
             door: cfg.door.clone(),
             copies: cfg.copies(),
+            fast: cfg.fast.clone(),
             users: RwLock::new(HashMap::new()),
             seen: Mutex::new(HashMap::new()),
             hub: Arc::new(gamec::Hub::default()),
@@ -347,7 +353,7 @@ async fn serve_conn(st: Arc<State>, c: Conn, kind: &'static str) {
     let mut key = [0u8; 32];
     let mut dg: Option<(Arc<DgLink>, mpsc::Receiver<Vec<u8>>)> = None;
     let mut dm = 0usize;
-    if auth.d && kind != "faketcp" {
+    if auth.d && kind != "faketcp" && st.fast.iter().any(|k| k == kind) {
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key);
         sid = rand::random::<u64>() | 1;
         if kind == "game" {
