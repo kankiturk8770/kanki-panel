@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.15.1 — «Ports of the exit server» for AmneziaWG tunnels too
+- The AmneziaWG tunnel form has the button as well: it fills the entry's TCP and UDP forward fields with every port of the exit server (WireGuard, AmneziaWG, Hysteria2, KANKI MIX, MIX+, Xray, Kanki DNS); a port the entry itself uses moves to the next free one (`4101:4100`).
+- The button of the other tunnels now fills in the MIX+ port too.
+
 ## New in 3.15 — MIX+, a tidier panel on phones
 - **Game-FEC is now MIX+**, our gaming protocol next to KANKI MIX. **HQ-QUIC and FakeTCP are gone** from the panel, the agent and the app (the tunnels keep their own HQ-QUIC and FakeTCP transports).
 - **Phones:** every section sits in the bottom bar (Home on the right), swiped sideways; no «More» sheet.

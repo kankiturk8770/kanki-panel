@@ -2489,6 +2489,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<label class="f">'+t('Destination networks sent through the link')+'</label><input id="tw_aw_rt" class="ltr" value="'+esc((A.routes||[]).join(', '))+'" placeholder="1.1.1.1, 8.8.0.0/16">'+
   '<label class="f">'+t('All traffic from these networks goes through the link')+'</label><input id="tw_aw_sr" class="ltr" value="'+esc((A.src_routes||[]).join(', '))+'" placeholder="10.8.0.0/24">'+
   '<small class="muted" style="display:block">'+t('For example the subnet of the VPN users of the entry: their internet then leaves from the exit. SSH of the entry itself is never touched.')+'</small>'+
+  '<div class="nh" style="margin-top:8px"><span></span><button type="button" class="b2 sm" id="tw_aw_vpn">'+ic('ports',14)+' '+t('Ports of the exit server')+'</button></div><p class="muted" id="tw_aw_pn" style="font-size:11.5px;margin:2px 0 0"></p>'+
   '<div class="g2"><div><label class="f">'+t('Entry public TCP ports sent into the link')+'</label><input id="tw_aw_ft" class="ltr" value="'+esc((A.fwd_tcp||[]).join(', '))+'" placeholder="443, 8443:443"></div><div><label class="f">'+t('Entry public UDP ports sent into the link')+'</label><input id="tw_aw_fu" class="ltr" value="'+esc((A.fwd_udp||[]).join(', '))+'" placeholder="51820"></div></div>'+
   '<label class="f">'+t('Forward to (empty = the exit inside the link)')+'</label><input id="tw_aw_tg" class="ltr" value="'+esc(A.fwd_target||'')+'" placeholder="10.88.N.2"></details>'+
   (id?'<div class="g2" style="margin-top:10px"><button type="button" class="b2 sm" id="tw_aw_c1">'+t('Show the config of the entry')+'</button><button type="button" class="b2 sm" id="tw_aw_c2">'+t('Show the config of the exit')+'</button></div>':'')+
@@ -2586,6 +2587,16 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   var h=$('#tw_cdh');if(h)h.textContent=on?(st.mode=='reverse'?t('On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.'):t('On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.')):'';hint()}
  $('#tw_tr').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.tr=b.dataset.v;$$('#tw_tr button').forEach(function(z){z.classList.toggle('on',z==b)});cdnUi()};
  $('#tw_vpn').onclick=function(){fillPorts(true)};
+ // AmneziaWG: the same ports go into its forward fields (VPN, KANKI MIX, MIX+, Xray, DNS of the exit); a port the
+ // entry itself uses moves to the next free one there ("4101:4100")
+ if($('#tw_aw_vpn'))$('#tw_aw_vpn').onclick=function(){var en=$('#tw_en').value,ex=$('#tw_ex').value,pn=$('#tw_aw_pn');if(en==ex)return;
+  Promise.all([tunNodeFor(ex),tunNodeFor(en),tunSvcPorts(ex),tunSvcPorts(en)]).then(function(r){var n=r[0],m=r[1];
+   var P=tunMerge(n?tunNodePorts(n):{tcp:[],udp:[]},r[2]),E=tunMerge(m?tunNodePorts(m):{tcp:[],udp:[]},r[3]);
+   if(!P.tcp.length&&!P.udp.length){toast(t('No node found for this server: type the ports by hand'));return}
+   var use={tcp:{},udp:{}},moved=[],apt=+(($('#tw_aw_pt')||{}).value||0);E.tcp.forEach(function(p){use.tcp[p]=1});E.udp.forEach(function(p){use.udp[p]=1});if(apt)use.udp[apt]=1;
+   var mp=function(arr,u){return arr.map(function(p){var q=p;while(u[q]&&q<65535)q++;u[q]=1;if(q!=p)moved.push(q+'→'+p);return q==p?String(p):q+':'+p})};
+   $('#tw_aw_ft').value=mp(P.tcp,use.tcp).join(', ');$('#tw_aw_fu').value=mp(P.udp,use.udp).join(', ');
+   if(pn)pn.textContent=t('Ports of')+' '+(n?n.name:tunSrv(ex).name)+' '+t('were filled in')+(moved.length?' · '+t('Moved on the entry because they were taken')+': '+moved.join(', '):'')}).catch(fail)};
  $('#tw_kd').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.kind=b.dataset.v;kindUi()};
  $('#tw_aw_wrap').onchange=function(){st.wrap=this.checked;kindUi()};$('#tw_aw_pt').oninput=function(){this.dataset.touched=1};
  $('#tw_hy_pt').oninput=function(){this.dataset.touched=1};var h1=$('#tw_hy_c1'),h2=$('#tw_hy_c2');if(h1)h1.onclick=function(){hy2Conf(id,'entry')};if(h2)h2.onclick=function(){hy2Conf(id,'exit')};
