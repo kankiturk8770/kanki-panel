@@ -186,6 +186,26 @@ pub(crate) fn save_tunnels(app: &App, v: &[Tunnel]) {
     app.db.set("tun_list", &serde_json::to_string(v).unwrap_or_else(|_| "[]".into()));
 }
 
+/// The name of a tunnel nobody named: the Iran server's name, a dash, the abroad server's name
+/// ("Tehran-Germany"); entry first when both are on the same side.
+pub(crate) fn default_tunnel_name(app: &App, entry: &str, exit: &str) -> String {
+    if entry.is_empty() || exit.is_empty() {
+        return String::new();
+    }
+    let list = servers(app);
+    let name = |id: &str| {
+        if id == "local" {
+            return local_name(app);
+        }
+        list.iter().find(|s| s.id == id).map(|s| s.name.trim().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| id.to_string())
+    };
+    let locs = server_locs(app);
+    let iran = |id: &str| locs.get(id).map(|l| l.0 == "iran").unwrap_or(false);
+    let (a, b) = if iran(exit) && !iran(entry) { (exit, entry) } else { (entry, exit) };
+    let n: String = format!("{}-{}", name(a), name(b)).chars().filter(|c| !c.is_control() && !"<>\"".contains(*c)).collect();
+    n.chars().take(60).collect()
+}
+
 fn local_name(app: &App) -> String {
     app.env.get("LOCAL_NAME").cloned().filter(|s| !s.is_empty()).unwrap_or_else(|| "Main".into())
 }
@@ -1779,6 +1799,9 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if b["order"].is_array() || b["order"].is_string() {
         let o: Vec<String> = clean_list(&b["order"]).into_iter().filter(|x| AUTO_ORDER.contains(&x.as_str()) || matches!(x.as_str(), "hq" | "h2" | "game" | "faketcp")).collect();
         t.order = o;
+    }
+    if t.name.is_empty() {
+        t.name = default_tunnel_name(&app, &t.entry, &t.exit);
     }
     if t.name.is_empty() {
         t.name = format!("tunnel-{}", &t.id[..4.min(t.id.len())]);

@@ -155,7 +155,7 @@ pub fn valid_username(s: &str) -> bool {
     !s.is_empty() && s.len() <= 40 && s.chars().all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c))
 }
 
-/// The panel page with the version on every script it loads (`/assets/kanki-panel.js?v=3.17.0`): a cache in
+/// The panel page with the version on every script it loads (`/assets/kanki-panel.js?v=3.17.1`): a cache in
 /// front of the panel (Cloudflare caches .js by itself) then never hands out an old copy of one of them next
 /// to new ones, which drew the old look after an update.
 fn admin_page() -> &'static str {

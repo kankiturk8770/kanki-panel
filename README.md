@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.17.1 — tunnel names
+- A tunnel left without a name is named after its servers: the Iran server's name, a dash, the abroad server's name (`Tehran-Germany`). The form shows that name as its hint while you pick the servers.
+
 ## New in 3.17 — a clean panel UI, one piece each
 - **No more layers:** every part of the panel is defined once. Before, later versions wrapped earlier ones (the page router was wrapped six times, the shell four, the dashboard three …) and patched pages after they were drawn; now each page builds its final layout itself (dashboard, servers, backup, bot channel, Xray, KANKI MIX, tunnels, sign-in).
 - **One stylesheet:** the look is one stylesheet in the page instead of twelve style blocks added by the script one after another; rules that a later rule replaced and rules for parts that no longer exist are gone.
