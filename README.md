@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.15.2 — MIX+ gets its own port on every server
+- Like KANKI MIX: a server that joins gets the next free MIX+ port (4100, 4101, 4102 …), so one Iran entry can carry every server. MIX+ is in the clash check, in «Fix ports» (press it once: servers that all have 4100 move to 4101, 4102 …, and the tunnels that carry the port follow) and in a server's port settings.
+
 ## New in 3.15.1 — «Ports of the exit server» for AmneziaWG tunnels too
 - The AmneziaWG tunnel form has the button as well: it fills the entry's TCP and UDP forward fields with every port of the exit server (WireGuard, AmneziaWG, Hysteria2, KANKI MIX, MIX+, Xray, Kanki DNS); a port the entry itself uses moves to the next free one (`4101:4100`).
 - The button of the other tunnels now fills in the MIX+ port too.
