@@ -182,13 +182,13 @@ impl Raw {
         sa.sin_port = dst.port().to_be();
         sa.sin_addr = libc::in_addr { s_addr: u32::from_be_bytes(dst.ip().octets()).to_be() };
         let r = unsafe {
-            libc::sendto(self.send_fd, pkt.as_ptr() as *const libc::c_void, pkt.len(), 0, &sa as *const _ as *const libc::sockaddr, std::mem::size_of::<libc::sockaddr_in>() as u32)
+            libc::sendto(self.send_fd, pkt.as_ptr() as *const libc::c_void, pkt.len(), 0, &sa as *const _ as *const libc::sockaddr, std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t)
         };
         if r < 0 {
             // a raw send can block momentarily; wait and try once more
             tokio::time::sleep(Duration::from_millis(2)).await;
             let r = unsafe {
-                libc::sendto(self.send_fd, pkt.as_ptr() as *const libc::c_void, pkt.len(), 0, &sa as *const _ as *const libc::sockaddr, std::mem::size_of::<libc::sockaddr_in>() as u32)
+                libc::sendto(self.send_fd, pkt.as_ptr() as *const libc::c_void, pkt.len(), 0, &sa as *const _ as *const libc::sockaddr, std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t)
             };
             if r < 0 {
                 return Err(std::io::Error::last_os_error());

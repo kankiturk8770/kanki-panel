@@ -52,10 +52,16 @@ pub struct Shared {
     pub udp_back: Mutex<HashMap<u32, UdpBack>>,
     /// exit: the only "host:port" targets the entry may ask for (empty = any)
     pub allowed: Mutex<HashSet<String>>,
+    /// exit: only public IP addresses may be dialed (the user-facing cores of `kcore`; tunnels
+    /// between servers leave it off)
+    pub public_only: AtomicBool,
 }
 
 impl Shared {
     fn may_dial(&self, target: &str) -> bool {
+        if self.public_only.load(Ordering::Relaxed) && !super::kcore::public_target(target) {
+            return false;
+        }
         let a = self.allowed.lock().unwrap();
         a.is_empty() || a.contains(target)
     }

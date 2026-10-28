@@ -250,6 +250,9 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/assets/kanki-svc.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/svc.js"))
         }))
+        .route("/assets/kanki-kcore.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/kcore.js"))
+        }))
         .route("/assets/kanki-kmix.js", get(|| async {
             ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/kmix.js"))
         }))
@@ -309,6 +312,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::dns::panel::router())
         .merge(crate::xray::panel::router())
         .merge(crate::kmix::router())
+        .merge(crate::kcores::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
         // 2 MiB for every route: login, join and hy2/auth are open to strangers and must not make the
         // server buffer more. Only the backup upload gets a bigger limit (see backup::router).
@@ -341,7 +345,7 @@ async fn overview(State(app): St, h: HeaderMap) -> Response {
         }).unwrap_or((0, 0))
     });
     let mut protos: HashMap<&str, usize> = HashMap::new();
-    for p in ["wg", "awg", "hy2", "kmix", "xray", "dns"] {
+    for p in ["wg", "awg", "hy2", "kmix", "kgame", "khq", "kftcp", "xray", "dns"] {
         protos.insert(p, us.iter().filter(|u| u.has_proto(p)).count());
     }
     // online: a VPN session, or Xray / Kanki DNS use right now
@@ -630,7 +634,7 @@ fn save_leftovers(app: &App, v: &[Leftover]) {
 /// Asks the node to cut its users off, stop KANKI MIX, remove its VPN services, close their ports and
 /// uninstall its agent (3.6.8+). True when the node confirmed it.
 async fn remove_remote(app: &Arc<App>, n: &Node) -> bool {
-    let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), ..Default::default() };
+    let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(Default::default()), ..Default::default() };
     let synced = sync::remote_post_json(app, n, "/agent/sync", &json!(empty)).await.is_some();
     synced && sync::remote_post(app, n, "/agent/remove").await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false)
 }
@@ -1253,6 +1257,8 @@ fn sub_data(app: &App, u: &User) -> Value {
             "kmix": crate::kmix::link(app, u, n),
             // the second KANKI MIX config, through the Iran tunnel (Null = none)
             "kmix_tunnel": tun,
+            // Game-FEC / HQ-QUIC / FakeTCP: [{proto: kgame|khq|kftcp, kind, title, url: kcore://…}]
+            "kcore": crate::kcores::links(app, u, n),
         });
         // the real exit of this server's configs (a tunnel endpoint is in Iran; the traffic leaves here)
         if let (Some(o), Some(e)) = (v.as_object_mut(), crate::exitgeo::fields(app, &n.id).as_object()) {
@@ -1282,6 +1288,8 @@ fn sub_data(app: &App, u: &User) -> Value {
             e["hy2"] = if tp.contains(&"hysteria2") { json!(hy2_link(app, u, n, tw.as_ref())) } else { Value::Null };
             e["kmix"] = json!(tun);
             e["kmix_tunnel"] = Value::Null;
+            // the cores are reached on the server's own address (the main entry)
+            e["kcore"] = json!([]);
             e["via"] = json!("tunnel");
             e["via_proto"] = via_proto(app, n, &tp, true);
             e["parent"] = json!(n.id);

@@ -3,6 +3,12 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.14 — three VPN protocols of our own: Game-FEC, HQ-QUIC, FakeTCP
+- **Three new protocols for the Kanki app**, each a section of its own under Services like KANKI MIX, and ticked per user in the user form: **Game-FEC** (4100/UDP), **HQ-QUIC** (4101/UDP), **FakeTCP** (4102/TCP, rooted phones). They run on every VPN server on ports of their own, apart from the tunnels (only the transport code is shared). Update the agents.
+- **Built for PUBG:** game UDP travels as datagrams of its own, never behind a lost packet of the stream; small packets (≤ 400 bytes) go two or three times and the copies are dropped on arrival. Through 15% loss each way 96% (2 copies) or 99.8% (3 copies) of round trips arrive, against 72% with one.
+- Every user has their own key (an HMAC proves it; the key never travels); traffic and devices count as usual; only public addresses are dialed for users. The subscription carries `"kcore": [{proto, kind, title, url}]` per server.
+- **The app's core:** `libkcore.so` (arm64-v8a, armeabi-v7a), release tag `kanki-core`. Details: `docs/KANKI-CORES-FA.md`.
+
 ## New in 3.13.1 — no more jumps and blinks
 - **Refreshes are calm**: the pages still update every few seconds, but only what changed is touched. An open server drawer keeps where you scrolled to, rows keep their place, and cards, edges and animations no longer restart, so the page does not blink or jump to the top while you work in it.
 
