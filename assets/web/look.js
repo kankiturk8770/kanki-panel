@@ -26,7 +26,7 @@ var SECS=[
  ['nodes','Servers','nodes',[['nodes','','Servers'],['servers','','Tunnel servers']],'Servers & network'],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
  ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','Game-FEC'],['khq','','HQ-QUIC'],['kftcp','','FakeTCP'],['xray','','Xray'],['antidpi','','Anti-DPI']],'Services'],
+ ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+'],['xray','','Xray'],['antidpi','','Anti-DPI']],'Services'],
  ['dnssec','Kanki DNS','dns',[['dns','','Kanki DNS']],'Services'],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
  ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
@@ -40,12 +40,11 @@ window.navSide=function(){var g='',h='';
  SECS.forEach(function(s){if(s[4]!=g){g=s[4];h+='<div class="ngt">'+t(g)+'</div>'}var f=s[3][0];
   h+='<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'"><span class="ni">'+ic(s[2],18)+'</span>'+t(s[1])+'</a>'});return h};
 
-// phones: four tabs and "more"
-var BAR=[['dash','Home'],['users','Users'],['nodes','Servers'],['vpnsec','Services']];
+// phones: every section in the bottom bar (Home first, on the right), swiped sideways
+var BAR=SECS.map(function(s){return [s[0],s[0]=='dash'?'Home':s[1]]});
 window.navBar=function(){
- return '<div class="mbar k38bar" id="mbar">'+BAR.map(function(b){var s=secBy(b[0]),f=s[3][0];
-  return '<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'">'+ic(s[2],21)+'<span>'+t(b[1])+'</span></a>'}).join('')+
-  '<button type="button" id="mmore" onclick="k38More()">'+ic('more38',21)+'<span>'+t('More')+'</span></button></div>'+
+ return '<div class="mbar k38bar k39bar" id="mbar">'+BAR.map(function(b){var s=secBy(b[0]),f=s[3][0];
+  return '<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'">'+ic(s[2],21)+'<span>'+t(b[1])+'</span></a>'}).join('')+'</div>'+
   '<div class="k38scrim" id="k38scrim" onclick="k38More(0)"></div><div class="msheet k38sheet" id="msheet"></div>'};
 function sheetHtml(){var g='',h='<i class="k38grab"></i>',open=false;
  SECS.forEach(function(s){if(s[4]!=g){if(open)h+='</div>';g=s[4];h+='<div class="k38g">'+t(g)+'</div><div class="k38tiles">';open=true}var f=s[3][0];
@@ -55,8 +54,10 @@ window.k38More=function(on){var sh=$('#msheet'),sc=$('#k38scrim');if(!sh)return;
  if(on)sh.innerHTML=sheetHtml();sh.classList.toggle('on',!!on);if(sc)sc.classList.toggle('on',!!on)};
 window.navSheet=function(){};
 var _nm=window.navMark;
-window.navMark=function(p){_nm.apply(this,arguments);var sk=V.secOf(p)[0],mb=$('#mmore');
- if(mb)mb.classList.toggle('on',!BAR.some(function(b){return b[0]==sk}));k38More(0)};
+window.navMark=function(p){_nm.apply(this,arguments);k38More(0);
+ // the open section stays in sight in the scrolling bar
+ var a=document.querySelector('#mbar a[data-sec="'+V.secOf(p)[0]+'"]');if(a&&a.scrollIntoView)try{a.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}};
+(function(){var st=document.createElement('style');st.textContent='.k39bar{display:flex!important;overflow-x:auto;scrollbar-width:none;justify-content:flex-start!important;-webkit-overflow-scrolling:touch}.k39bar::-webkit-scrollbar{display:none}.k39bar>a{flex:0 0 auto!important;min-width:68px}.k39bar>a span{white-space:nowrap}';document.head.appendChild(st)})();
 
 // ---------------------------------------------------------------- night / day in the top bar
 // (3.9.3) The top bar has only one button: night or day. The panel's colors are chosen in Settings ›

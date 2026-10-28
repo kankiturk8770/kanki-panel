@@ -27,13 +27,13 @@ fn only_public_targets() {
 
 #[test]
 fn links_round_trip() {
-    let c = ClientCfg { kind: "game".into(), server: "vpn.example.com:4100".into(), door: "d00r+/=".into(), user: "ali reza".into(), key: "k:@ey".into(), fec: "8:3".into(), copies: 3, datagrams: true, sni: String::new() };
+    let c = ClientCfg { kind: "game".into(), server: "vpn.example.com:4100".into(), door: "d00r+/=".into(), user: "ali reza".into(), key: "k:@ey".into(), fec: "8:3".into(), copies: 3, datagrams: true };
     let u = c.to_url("آلمان 🎮");
     let (back, name) = ClientCfg::parse(&u).unwrap();
     assert_eq!(back, c);
     assert_eq!(name, "آلمان 🎮");
     assert!(ClientCfg::parse("kcore://u:k@h:1?type=nope&door=x").is_err());
-    assert!(ClientCfg::parse("kcore://u:k@h:1?type=hq").is_err(), "no door");
+    assert!(ClientCfg::parse("kcore://u:k@h:1?type=game").is_err(), "no door");
 }
 
 async fn free_udp_port() -> u16 {
@@ -107,11 +107,8 @@ async fn run_core(kind: &str, datagrams: bool) {
     });
 
     let port = free_udp_port().await;
-    let mut cfg = CoreCfg { door: "test-door-123".into(), fec: "4:2".into(), copies: 2, fast: if datagrams { vec!["game".into(), "hq".into()] } else { vec![] }, users: vec![CoreUser { name: "ali".into(), key: "k1".into(), max: 0, cores: vec![kind.into()] }, CoreUser { name: "reza".into(), key: "k2".into(), max: 0, cores: vec!["faketcp".into()] }], ..Default::default() };
-    match kind {
-        "game" => cfg.game = port,
-        _ => cfg.hq = port,
-    }
+    let mut cfg = CoreCfg { door: "test-door-123".into(), fec: "4:2".into(), copies: 2, fast: if datagrams { vec!["game".into()] } else { vec![] }, users: vec![CoreUser { name: "ali".into(), key: "k1".into(), max: 0, cores: vec![kind.into()] }, CoreUser { name: "reza".into(), key: "k2".into(), max: 0, cores: vec!["other".into()] }], ..Default::default() };
+    cfg.game = port;
     let srv = CoreServer::start(&cfg).await;
     assert!(srv.errors.is_empty(), "{:?}", srv.errors);
 
@@ -191,10 +188,6 @@ async fn game_core_without_fast_path() {
     run_core("game", false).await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn hq_core_end_to_end() {
-    run_core("hq", true).await;
-}
 
 /// Drops `loss` of the datagrams both ways between the app and the server.
 async fn lossy_proxy(server: SocketAddr, loss: f64) -> SocketAddr {

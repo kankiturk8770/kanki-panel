@@ -4,7 +4,7 @@ use super::super::game::GameOpts;
 use super::super::link::{self, BoxIo, Raw, Res};
 use super::super::mux::{now_ms, Session, Shared};
 use super::dgram::{self, DgLink};
-use super::{gamec, hqc, Auth, Welcome, HELLO, NO, OK};
+use super::{gamec, Auth, Welcome, HELLO, NO, OK};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
@@ -21,7 +21,7 @@ pub struct CoreUser {
     pub key: String,
     /// devices at the same time (0 = no limit)
     pub max: i64,
-    /// the cores this user may use ("game", "hq", "faketcp"); empty = all of them
+    /// the cores this user may use ("game"); empty = all of them
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub cores: Vec<String>,
 }
@@ -32,18 +32,14 @@ pub struct CoreUser {
 pub struct CoreCfg {
     /// the secret of the mask and the link handshake (the same for every user of this server)
     pub door: String,
-    /// Game-FEC (UDP)
+    /// MIX+ (the Game-FEC transport, UDP)
     pub game: u16,
-    /// HQ-QUIC (UDP)
-    pub hq: u16,
-    /// FakeTCP (raw TCP: needs root)
-    pub faketcp: u16,
     /// FEC of the game core's KCP stream: "data:parity", "" = 8:3, "off"
     pub fec: String,
     /// copies of a small game datagram (1-3, 0 = 2)
     pub copies: u8,
-    /// the cores with the game datagram fast path ("game", "hq"); the others carry UDP inside the
-    /// stream, exactly like the tunnels do
+    /// the cores with the game datagram fast path ("game"); off = UDP inside the stream, exactly
+    /// like the tunnels do
     #[serde(default)]
     pub fast: Vec<String>,
     pub users: Vec<CoreUser>,
@@ -51,11 +47,11 @@ pub struct CoreCfg {
 
 impl CoreCfg {
     pub fn any_on(&self) -> bool {
-        !self.door.is_empty() && (self.game > 0 || self.hq > 0 || self.faketcp > 0)
+        !self.door.is_empty() && self.game > 0
     }
     /// what needs the listeners to start again when it changes (users change in place)
-    fn listen_key(&self) -> (String, u16, u16, u16, String, u8, Vec<String>) {
-        (self.door.clone(), self.game, self.hq, self.faketcp, self.fec.clone(), self.copies, self.fast.clone())
+    fn listen_key(&self) -> (String, u16, String, u8, Vec<String>) {
+        (self.door.clone(), self.game, self.fec.clone(), self.copies, self.fast.clone())
     }
     pub fn copies(&self) -> u8 {
         if self.copies == 0 { 2 } else { self.copies.min(3) }
@@ -98,19 +94,15 @@ struct State {
 /// A connection ready for the link handshake, with what its core gives the datagram path.
 enum Conn {
     Game(Raw),
-    Hq(BoxIo, quinn::Connection),
-    Plain(Raw),
 }
 
 /// The running cores of this server. Dropping it stops them and frees the ports.
 pub struct CoreServer {
-    key: (String, u16, u16, u16, String, u8, Vec<String>),
+    key: (String, u16, String, u8, Vec<String>),
     state: Arc<State>,
     tasks: Vec<JoinHandle<()>>,
     _relay: Option<gamec::Relay>,
-    _endpoints: Vec<quinn::Endpoint>,
-    _listeners: Vec<link::Bag>,
-    /// what failed to start (a port in use, no root for FakeTCP …), by core
+    /// what failed to start (a port in use …), by core
     pub errors: Vec<(String, String)>,
 }
 
@@ -118,9 +110,6 @@ impl Drop for CoreServer {
     fn drop(&mut self) {
         for t in &self.tasks {
             t.abort();
-        }
-        for e in &self._endpoints {
-            e.close(0u32.into(), b"bye");
         }
         for s in self.state.users.read().unwrap().values() {
             s.kill_all();
@@ -139,7 +128,7 @@ impl CoreServer {
             seen: Mutex::new(HashMap::new()),
             hub: Arc::new(gamec::Hub::default()),
         });
-        let mut me = CoreServer { key: cfg.listen_key(), state: state.clone(), tasks: vec![], _relay: None, _endpoints: vec![], _listeners: vec![], errors: vec![] };
+        let mut me = CoreServer { key: cfg.listen_key(), state: state.clone(), tasks: vec![], _relay: None, errors: vec![] };
         me.set_users(&cfg.users);
         let (tx, mut rx) = mpsc::channel::<(Conn, &'static str)>(64);
 
@@ -150,38 +139,6 @@ impl CoreServer {
                     me.tasks.push(task);
                 }
                 Err(e) => me.errors.push(("game".into(), e.to_string())),
-            }
-        }
-        if cfg.hq > 0 {
-            let (htx, mut hrx) = mpsc::channel::<hqc::Accepted>(64);
-            match hqc::serve(cfg.hq, &cfg.door, htx).await {
-                Ok(ep) => {
-                    me._endpoints.push(ep);
-                    let tx = tx.clone();
-                    me.tasks.push(tokio::spawn(async move {
-                        while let Some((io, conn)) = hrx.recv().await {
-                            if tx.send((Conn::Hq(io, conn), "hq")).await.is_err() {
-                                break;
-                            }
-                        }
-                    }));
-                }
-                Err(e) => me.errors.push(("hq".into(), e.to_string())),
-            }
-        }
-        if cfg.faketcp > 0 {
-            match link::Listener::bind("faketcp", cfg.faketcp, "", "", &cfg.door, GameOpts::default()).await {
-                Ok(mut l) => {
-                    let tx = tx.clone();
-                    me.tasks.push(tokio::spawn(async move {
-                        while let Ok((raw, _)) = l.accept().await {
-                            if tx.send((Conn::Plain(raw), "faketcp")).await.is_err() {
-                                break;
-                            }
-                        }
-                    }));
-                }
-                Err(e) => me.errors.push(("faketcp".into(), e.to_string())),
             }
         }
         drop(tx);
@@ -328,11 +285,8 @@ fn check(st: &State, a: &Auth, kind: &str) -> Result<Arc<Slot>, &'static str> {
 }
 
 async fn serve_conn(st: Arc<State>, c: Conn, kind: &'static str) {
-    let (raw, quic) = match c {
-        Conn::Game(r) | Conn::Plain(r) => (r, None),
-        Conn::Hq(io, conn) => (Raw::Stream(io), Some(conn)),
-    };
-    let Ok((mut tx, mut rx)) = link::handshake(raw, &st.door, false, super::padded(kind)).await else { return };
+    let Conn::Game(raw) = c;
+    let Ok((mut tx, mut rx)) = link::handshake(raw, &st.door, false, false).await else { return };
     let Ok(Ok(first)) = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await else { return };
     let Some(body) = first.strip_prefix(HELLO) else { return };
     let Ok(auth) = serde_json::from_slice::<Auth>(body) else { return };
@@ -348,33 +302,17 @@ async fn serve_conn(st: Arc<State>, c: Conn, kind: &'static str) {
         }
     };
 
-    // the datagram path of this session (game and hq, when the app wants it)
+    // the datagram path of this session (when the app wants it and it is on for this core)
     let mut sid = 0u64;
     let mut key = [0u8; 32];
     let mut dg: Option<(Arc<DgLink>, mpsc::Receiver<Vec<u8>>)> = None;
     let mut dm = 0usize;
-    if auth.d && kind != "faketcp" && st.fast.iter().any(|k| k == kind) {
+    if auth.d && st.fast.iter().any(|k| k == kind) {
         rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut key);
         sid = rand::random::<u64>() | 1;
         if kind == "game" {
             dg = st.hub.open(sid, &key, st.copies);
             dm = dgram::GAME_MAX_BODY;
-        } else if let Some(conn) = &quic {
-            let link = Arc::new(DgLink::new(sid, &key, false, dgram::Wire::Quic(conn.clone()), 1, hqc::MAX_BODY));
-            let (dtx, drx) = mpsc::channel(1024);
-            let c2 = conn.clone();
-            let l2 = link.clone();
-            tokio::spawn(async move {
-                while let Ok(d) = c2.read_datagram().await {
-                    if let Some(b) = l2.open(&d) {
-                        if dtx.try_send(b).is_err() && dtx.is_closed() {
-                            break;
-                        }
-                    }
-                }
-            });
-            dg = Some((link, drx));
-            dm = hqc::MAX_BODY;
         }
         if dg.is_none() {
             sid = 0;

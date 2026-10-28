@@ -1,13 +1,12 @@
-//! Three VPN protocols of our own for the Kanki app, each a section of its own like KANKI MIX:
-//! **Game-FEC** (`kgame`), **HQ-QUIC** (`khq`) and **FakeTCP** (`kftcp`). They run on every VPN
-//! server on ports of their own, apart from the tunnels; only the transport code is shared with
-//! the tunnels (`tunnel::kcore`).
+//! MIX+ in the panel: our own gaming protocol for the Kanki app, a section of its own like KANKI MIX.
+//! It is the Game-FEC transport of the tunnels (KCP at its fastest with Reed-Solomon FEC under the
+//! mask) served to users (`tunnel::kcore`); user protocol `kgame`. It runs on every VPN server on a
+//! port of its own, apart from the tunnels.
 //!
-//! Each protocol has its own switch, port and options, and is ticked per user like any other
-//! protocol. The panel keeps one secret (`kc_door`, the mask and handshake key the servers share);
-//! each sync sends a server its `CoreCfg` and the agent runs the protocols inside its own process.
-//! Every user has their own key (from the panel's secret and the subscription code); the app gets
-//! a `kcore://` link per protocol and server from the subscription.
+//! The panel keeps one secret (`kc_door`, the mask and handshake key the servers share); each sync
+//! sends a server its `CoreCfg` and the agent runs it inside its own process. Every user has their
+//! own key (from the panel's secret and the subscription code); the app gets a `kcore://` link per
+//! server from the subscription.
 use crate::db::{Node, User};
 use crate::tunnel::kcore;
 use crate::tunnel::kcore::client::ClientCfg;
@@ -22,7 +21,7 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 /// (user protocol, core, default port, name)
-pub const PROTOS: [(&str, &str, u16, &str); 3] = [("kgame", "game", 4100, "Game-FEC"), ("khq", "hq", 4101, "HQ-QUIC"), ("kftcp", "faketcp", 4102, "FakeTCP")];
+pub const PROTOS: [(&str, &str, u16, &str); 1] = [("kgame", "game", 4100, "MIX+")];
 
 /// the core of a user protocol ("kgame" -> "game")
 pub fn core_of(proto: &str) -> Option<&'static str> {
@@ -51,21 +50,19 @@ pub struct NodeOpt {
 pub struct Settings {
     pub on: bool,
     pub port: u16,
-    /// Game-FEC: FEC of the stream ("8:3", "off")
+    /// FEC of the stream ("8:3", "off")
     pub fec: String,
-    /// Game-FEC, HQ-QUIC: the game datagram fast path (game UDP beside the stream, small packets
+    /// the game datagram fast path (game UDP beside the stream, small packets
     /// sent `copies` times). Off = UDP inside the stream, exactly like the tunnels.
     pub optimize: bool,
     /// copies of each small game packet with `optimize` (1-3)
     pub copies: u8,
-    /// HQ-QUIC: the name in the TLS hello
-    pub sni: String,
     pub nodes: HashMap<String, NodeOpt>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { on: true, port: 0, fec: "8:3".into(), optimize: false, copies: 2, sni: String::new(), nodes: HashMap::new() }
+        Settings { on: true, port: 0, fec: "8:3".into(), optimize: false, copies: 2, nodes: HashMap::new() }
     }
 }
 
@@ -78,7 +75,7 @@ impl Settings {
     }
 }
 
-/// The settings of protocol `proto` ("kgame" | "khq" | "kftcp")
+/// The settings of protocol `proto` ("kgame")
 pub fn settings(app: &App, proto: &str) -> Settings {
     let def = PROTOS.iter().find(|p| p.0 == proto).map(|p| p.2).unwrap_or(0);
     let mut s: Settings = serde_json::from_str(&app.db.get(&format!("{}_cfg", proto))).unwrap_or_default();
@@ -151,8 +148,8 @@ pub fn cfg_for(app: &App, n: &Node, users: &[&User]) -> CoreCfg {
             (!cores.is_empty()).then(|| CoreUser { name: u.username.clone(), key: user_key(app, u), max: if limit_on { u.max_conn } else { 0 }, cores })
         })
         .collect();
-    let fast = on.iter().filter(|x| x.2.optimize && x.1 != "faketcp").map(|x| x.1.to_string()).collect();
-    CoreCfg { door: door(app), game: port("game"), hq: port("hq"), faketcp: port("faketcp"), fec: game.fec.clone(), copies: game.copies, fast, users }
+    let fast = on.iter().filter(|x| x.2.optimize).map(|x| x.1.to_string()).collect();
+    CoreCfg { door: door(app), game: port("game"), fec: game.fec.clone(), copies: game.copies, fast, users }
 }
 
 // ------------------------------------------------------------------ links
@@ -193,7 +190,7 @@ fn link_via(app: &App, u: &User, n: &Node, proto: &str, tw: Option<&crate::twin:
     let info = crate::api::node_info(n);
     let port = info["kc_ports"][core].as_u64().filter(|p| *p > 0)? as u16;
     let (server, label) = match tw {
-        Some(t) => (t.addr(t.port(app, port, core == "faketcp")), format!("{} · {}", t.name, name)),
+        Some(t) => (t.addr(t.port(app, port, false)), format!("{} · {}", t.name, name)),
         None => {
             let host = host_of(app, &s, n);
             if host.is_empty() {
@@ -209,7 +206,6 @@ fn link_via(app: &App, u: &User, n: &Node, proto: &str, tw: Option<&crate::twin:
         door: door(app),
         user: u.username.clone(),
         key: user_key(app, u),
-        sni: if core == "hq" { s.sni.clone() } else { String::new() },
         fec: if core == "game" { info["kc_fec"].as_str().unwrap_or(&s.fec).to_string() } else { String::new() },
         copies: s.copies,
         datagrams: true,
@@ -252,12 +248,6 @@ fn fw_rules(c: &CoreCfg) -> Vec<String> {
     let mut v = vec![];
     if c.game > 0 {
         v.push(crate::fw::rule(c.game, true));
-    }
-    if c.hq > 0 {
-        v.push(crate::fw::rule(c.hq, true));
-    }
-    if c.faketcp > 0 {
-        v.push(crate::fw::rule(c.faketcp, false));
     }
     v
 }
@@ -324,7 +314,7 @@ pub fn info() -> Value {
     match g.as_ref() {
         Some(r) => {
             let failed: Vec<&str> = r.srv.errors.iter().map(|(k, _)| k.as_str()).collect();
-            let ports: serde_json::Map<String, Value> = [("game", r.cfg.game), ("hq", r.cfg.hq), ("faketcp", r.cfg.faketcp)]
+            let ports: serde_json::Map<String, Value> = [("game", r.cfg.game)]
                 .iter()
                 .filter(|(k, p)| *p > 0 && !failed.contains(k))
                 .map(|(k, p)| (k.to_string(), json!(p)))
@@ -406,13 +396,10 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
         }
     }
     if let Some(o) = b["optimize"].as_bool() {
-        s.optimize = o && core != "faketcp";
+        s.optimize = o;
     }
     if let Some(c) = b["copies"].as_u64() {
         s.copies = c.clamp(1, 3) as u8;
-    }
-    if let Some(x) = b["sni"].as_str() {
-        s.sni = x.trim().to_string();
     }
     if let Some(n) = b["nodes"].as_object() {
         let mut m = HashMap::new();
@@ -424,7 +411,7 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
         }
         s.nodes = m;
     }
-    // the three run side by side on every server: each needs a port of its own there
+    // (one protocol today; more would each need a port of their own on a server)
     for p in PROTOS.iter().filter(|p| p.1 != core) {
         let o = settings(&app, p.0);
         for n in app.db.nodes() {
@@ -477,9 +464,8 @@ mod tests {
     #[test]
     fn protocols_and_cores() {
         assert_eq!(core_of("kgame"), Some("game"));
-        assert_eq!(core_of("khq"), Some("hq"));
-        assert_eq!(core_of("kftcp"), Some("faketcp"));
-        assert_eq!(proto_of("faketcp"), Some("kftcp"));
+        assert_eq!(core_of("kmix"), None);
+        assert_eq!(proto_of("game"), Some("kgame"));
         assert_eq!(core_of("kmix"), None);
         let mut s = Settings { port: 4100, ..Default::default() };
         s.nodes.insert("n1".into(), NodeOpt { port: 5100, ..Default::default() });

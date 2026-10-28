@@ -174,9 +174,8 @@ impl Hub {
         let Some((link, tx)) = self.sessions.lock().unwrap().get(&sid).cloned() else { return };
         if let Some(body) = link.open(payload) {
             // answers go where the app is now (a phone that moves from Wi-Fi to data keeps playing)
-            if let dgram::Wire::Udp { to, .. } = &link.wire {
-                *to.lock().unwrap() = Some(from);
-            }
+            let dgram::Wire::Udp { to, .. } = &link.wire;
+            *to.lock().unwrap() = Some(from);
             let _ = tx.try_send(body);
         }
     }

@@ -1,15 +1,10 @@
-// Kanki Panel: the Game-FEC, HQ-QUIC and FakeTCP pages. Three VPN protocols of our own for the
-// Kanki app, each a section of its own like KANKI MIX, ticked per user like any other protocol.
-// They run on every VPN server on ports of their own (apart from the tunnels); the app gets a
-// kcore:// link per protocol and server from the subscription.
+// Kanki Panel: the MIX+ page. Our own gaming protocol for the Kanki app (KCP at its fastest with
+// Reed-Solomon FEC under a mask, the Game-FEC transport of the tunnels), a section of its own like
+// KANKI MIX and ticked per user. It runs on every VPN server on a port of its own.
 var KC={d:{},meta:{
- kgame:{name:'Game-FEC',net:'UDP',desc:'For games (PUBG…): game packets go as datagrams of their own, small ones two or three times; websites and the lobby over KCP + FEC. Nothing on the wire looks like a protocol.'},
- khq:{name:'HQ-QUIC',net:'UDP',desc:'QUIC under a mask with BBR: fast on lossy internet, nothing on the wire looks like QUIC. Game packets go as QUIC datagrams.'},
- kftcp:{name:'FakeTCP',net:'TCP',desc:'UDP inside a fake TCP session, for networks that cut or slow UDP. Needs a rooted phone (raw packets).'}}};
+ kgame:{name:'MIX+',net:'UDP',desc:'For games (PUBG…): game packets go as datagrams of their own, small ones two or three times; websites and the lobby over KCP + FEC. Nothing on the wire looks like a protocol.'}}};
 function kcFA(){if(kcFA.done||typeof FA=='undefined')return;kcFA.done=1;Object.assign(FA,{
  "For games (PUBG…): game packets go as datagrams of their own, small ones two or three times; websites and the lobby over KCP + FEC. Nothing on the wire looks like a protocol.":"برای بازی (پابجی و …): بسته‌های بازی دیتاگرام جدا می‌روند و بسته‌های کوچک دو یا سه بار؛ سایت‌ها و لابی روی KCP + FEC. روی سیم شبیه هیچ پروتکلی نیست.",
- "QUIC under a mask with BBR: fast on lossy internet, nothing on the wire looks like QUIC. Game packets go as QUIC datagrams.":"QUIC زیر ماسک با BBR: روی اینترنت پرلاس سریع، روی سیم شبیه QUIC نیست. بسته‌های بازی دیتاگرام QUIC می‌روند.",
- "UDP inside a fake TCP session, for networks that cut or slow UDP. Needs a rooted phone (raw packets).":"UDP داخل یک نشست TCP ساختگی، برای شبکه‌هایی که UDP را می‌بندند یا کند می‌کنند. گوشی روت‌شده لازم دارد (بسته‌ی خام).",
  "is off: it runs on no server and is in no subscription.":"خاموش است: روی هیچ سروری اجرا نمی‌شود و در هیچ اشتراکی نیست.",
  "Users with it":"کاربران این پروتکل","Running servers":"سرورهای فعال","Online now":"آنلاین الان","Total traffic":"ترافیک کل",
  "Default port":"پورت پیش‌فرض","Every server uses it unless it has its own port below.":"همه‌ی سرورها همین را دارند، مگر سروری که پایین پورت خودش را دارد.",
@@ -31,8 +26,6 @@ function kcPage(p){kcFA();var m=KC.meta[p];
   '<div class="row" style="gap:6px"><button class="b2" onclick="kcAll(\''+p+'\',false)">'+t('Disable for all users')+'</button><button class="btn" onclick="kcAll(\''+p+'\',true)">'+ic('users',15)+' '+t('Enable for all users')+'</button></div></div><div id="kc">'+t('Loading…')+'</div>';
  kcLoad(p);clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))kcLoad(p,true)},8000)}
 function p_kgame(){kcPage('kgame')}
-function p_khq(){kcPage('khq')}
-function p_kftcp(){kcPage('kftcp')}
 function kcLoad(p,quiet){return api('GET','/api/kc/'+p).then(function(d){KC.d[p]=d;if(S.page!=p)return d;
   if(quiet&&$('#kc_srv')){$('#kc_kv').innerHTML=kcKpis(d);$('#kc_srv').innerHTML=kcServers(d);return d}kcDraw(d);return d}).catch(fail)}
 function kcKpis(d){var s=d.settings,run=d.servers.filter(function(x){return x.port}).length,on=d.servers.filter(function(x){return x.on}).length;
@@ -63,9 +56,8 @@ function kcDraw(d){var el=$('#kc');if(!el)return;var s=d.settings,p=d.proto,m=KC
   '<div class="card"><h3>'+ic('settings',16)+' '+t('Settings')+'</h3>'+
    '<div class="srow"><div class="tx"><b>'+esc(m.name)+'</b></div><label class="sw"><input type="checkbox" id="kc_on" '+(s.on?'checked':'')+'><span></span></label></div>'+
    '<label class="f">'+t('Default port')+' · '+m.net+'</label><input id="kc_port" class="ltr" inputmode="numeric" value="'+esc(String(s.port))+'"><small class="muted">'+t('Every server uses it unless it has its own port below.')+'</small>'+
-   (p!='kftcp'?'<div class="srow" style="margin-top:8px"><div class="tx"><b>'+t('Game optimization')+'</b><small>'+t('Off: exactly like the tunnels (game UDP inside the stream). On: game packets as datagrams of their own, small ones sent several times.')+'</small></div><label class="sw"><input type="checkbox" id="kc_opt" '+(s.optimize?'checked':'')+'><span></span></label></div>':'')+
+   (p=='kgame'?'<div class="srow" style="margin-top:8px"><div class="tx"><b>'+t('Game optimization')+'</b><small>'+t('Off: exactly like the tunnels (game UDP inside the stream). On: game packets as datagrams of their own, small ones sent several times.')+'</small></div><label class="sw"><input type="checkbox" id="kc_opt" '+(s.optimize?'checked':'')+'><span></span></label></div>':'')+
    (p=='kgame'?copies+'<label class="f">'+t('FEC of the stream (websites, game lobby)')+'</label><select id="kc_fec">'+fecs.map(function(f){return '<option value="'+esc(f)+'"'+(s.fec==f?' selected':'')+'>'+esc(f=='off'?t('off'):f)+'</option>'}).join('')+'</select>':'')+
-   (p=='khq'?'<label class="f">'+t('TLS name')+'</label><input id="kc_sni" class="ltr" placeholder="www.cloudflare.com" value="'+esc(s.sni||'')+'">':'')+
    '<button class="btn" style="width:100%;margin-top:12px" id="kc_save">'+t('Save')+'</button></div></div>'+
   '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0">'+t('Tick it for a user (user form, or Enable for all users). Every server runs it by itself within a minute; the Kanki app gets the link from the subscription. Each user has their own key: a new link is a new key, an expired or disabled user is cut off at once. Open the port at the data center\'s firewall too.')+'</p></div>';
  $('#kc_save').onclick=function(){kcSave(p)}}

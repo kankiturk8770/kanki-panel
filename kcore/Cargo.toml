@@ -2,7 +2,7 @@
 name = "kanki-core"
 version = "1.0.0"
 edition = "2021"
-description = "Kanki Cores (Game-FEC, HQ-QUIC, FakeTCP): the server and the app client in one small binary"
+description = "MIX+ (the Game-FEC transport as a VPN protocol): the server and the app client in one small binary"
 
 # Not part of the panel's build: the transport sources are the panel's own files (src/tunnel/*.rs),
 # compiled here through #[path], so the core and the panel can never speak two versions of them.

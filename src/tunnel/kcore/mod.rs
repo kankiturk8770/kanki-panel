@@ -1,26 +1,17 @@
-//! Kanki Cores: three of the tunnel transports — `game` (Game-FEC), `hq` (HQ-QUIC) and `faketcp`
-//! (FakeTCP) — served to users as VPN cores, like KANKI MIX, so the Kanki app can connect to them.
+//! MIX+: the tunnel transport `game` (Game-FEC: KCP at its fastest with Reed-Solomon FEC under the
+//! UDP mask) served to users as a VPN protocol, like KANKI MIX, so the Kanki app can connect to it.
 //!
-//! The transports themselves are not changed: the masked UDP (`salamander.rs`), the Reed-Solomon
-//! FEC (`fec.rs`), the masked QUIC socket (`hq.rs`), the fake TCP channel (`faketcp.rs`), the
-//! record layer (`link.rs`) and the mux (`mux.rs`) are used as they are. What is added on top:
+//! The transport itself is not changed: the mask (`salamander.rs`), the FEC (`fec.rs`), the record
+//! layer (`link.rs`) and the mux (`mux.rs`) are used as they are. What is added on top:
 //!
-//! * **users**: after the link handshake (keyed by the core's `door` secret, which also keys the
-//!   mask) the app proves which user it is with an HMAC of that user's key. The key itself never
-//!   travels. Each user has their own traffic counters and device limit.
+//! * **users**: after the link handshake (keyed by the `door` secret, which also keys the mask) the
+//!   app proves which user it is with an HMAC of that user's key. The key itself never travels.
+//!   Each user has their own traffic counters and device limit.
 //! * **a full proxy**: the app asks for any `ip:port` (TCP streams and UDP flows over the mux).
 //!   Only public addresses are dialed, so a user can never reach the server's own services.
-//! * **a datagram fast path for games** (`game` and `hq`): game UDP does not ride the reliable
-//!   stream (where one lost packet would hold up every packet behind it). Each game packet is a
-//!   datagram of its own, sealed with a per-session key, and small packets (PUBG's are 40–300
-//!   bytes) are sent two or three times; the receiver keeps the first copy and drops the rest.
-//!   Big UDP packets (video, QUIC downloads) are sent once, so the extra copies cost little.
-//!
-//! ```text
-//!  app ── SOCKS5 (hev-socks5-tunnel) ── kanki-core client ══ game / hq / faketcp ══ server ── internet
-//!                                         TCP  -> mux stream (KCP + FEC / QUIC / fake TCP)
-//!                                         UDP  -> datagram fast path (game, hq) or mux (faketcp)
-//! ```
+//! * **an optional datagram fast path for games** (off by default): game UDP as datagrams of its
+//!   own beside the stream, small packets sent two or three times, copies dropped on arrival. Off,
+//!   game UDP rides the stream exactly like the tunnels.
 //!
 //! `server.rs` is what each VPN server runs (inside the panel agent or as `kanki-core server`),
 //! `client.rs` + `socks.rs` is the app side (`kanki-core client`, built for Android).
@@ -30,7 +21,6 @@
 pub mod client;
 pub mod dgram;
 pub mod gamec;
-pub mod hqc;
 pub mod server;
 #[allow(dead_code)]
 pub mod socks;
@@ -41,7 +31,7 @@ use sha2::Sha256;
 use std::net::{IpAddr, SocketAddr};
 
 /// the cores, in the order the panel and the app show them
-pub const KINDS: &[&str] = &["game", "hq", "faketcp"];
+pub const KINDS: &[&str] = &["game"];
 
 /// first record of the app after the link handshake: `KC1` + JSON `Auth`
 pub const HELLO: &[u8] = b"KC1";
@@ -54,17 +44,9 @@ pub const AUTH_SKEW_SECS: u64 = 120;
 /// Display name of a core
 pub fn title(kind: &str) -> &'static str {
     match kind {
-        "game" => "Game-FEC",
-        "hq" => "HQ-QUIC",
-        "faketcp" => "FakeTCP",
+        "game" => "MIX+",
         _ => "?",
     }
-}
-
-/// Records are padded on `hq`, like the tunnel does (the others carry game traffic, where every
-/// byte counts, and their datagrams are padded by the mask anyway).
-pub fn padded(kind: &str) -> bool {
-    kind == "hq"
 }
 
 /// What the app sends to prove who it is.

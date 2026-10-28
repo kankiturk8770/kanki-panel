@@ -5,7 +5,7 @@ use super::super::game::GameOpts;
 use super::super::link::{self, Raw, Res};
 use super::super::mux::{now_ms, Session, Shared};
 use super::dgram::{self, DgLink};
-use super::{gamec, hqc, Welcome, HELLO, NO, OK};
+use super::{gamec, Welcome, HELLO, NO, OK};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
@@ -18,15 +18,13 @@ use tokio::task::JoinHandle;
 /// Everything the app needs to reach one core (what a `kcore://` link carries).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClientCfg {
-    /// "game" | "hq" | "faketcp"
+    /// "game" (MIX+)
     pub kind: String,
     /// "host:port" of the server
     pub server: String,
     pub door: String,
     pub user: String,
     pub key: String,
-    /// `hq`: the name in the TLS hello ("" = www.cloudflare.com)
-    pub sni: String,
     /// `game`: FEC of the KCP stream, as on the server ("" = 8:3)
     pub fec: String,
     /// copies of a small game datagram (1-3)
@@ -66,7 +64,7 @@ fn pct_encode(s: &str) -> String {
 }
 
 impl ClientCfg {
-    /// `kcore://user:key@host:port?type=game&door=…&fec=8:3&copies=2&sni=…#name`
+    /// `kcore://user:key@host:port?type=game&door=…&fec=8:3&copies=2#name`
     pub fn parse(url: &str) -> Res<(ClientCfg, String)> {
         let rest = url.trim().strip_prefix("kcore://").ok_or("not a kcore:// link")?;
         let (rest, name) = match rest.split_once('#') {
@@ -83,7 +81,6 @@ impl ClientCfg {
             match k {
                 "type" => c.kind = v,
                 "door" => c.door = v,
-                "sni" => c.sni = v,
                 "fec" => c.fec = v,
                 "copies" => c.copies = v.parse().unwrap_or(2),
                 "dg" => c.datagrams = v != "0",
@@ -105,12 +102,7 @@ impl ClientCfg {
         if !self.fec.is_empty() && self.kind == "game" {
             q.push_str(&format!("&fec={}", pct_encode(&self.fec)));
         }
-        if self.kind != "faketcp" {
-            q.push_str(&format!("&copies={}", self.copies.clamp(1, 3)));
-        }
-        if !self.sni.is_empty() && self.kind == "hq" {
-            q.push_str(&format!("&sni={}", pct_encode(&self.sni)));
-        }
+        q.push_str(&format!("&copies={}", self.copies.clamp(1, 3)));
         let mut u = format!("kcore://{}:{}@{}?{}", pct_encode(&self.user), pct_encode(&self.key), self.server, q);
         if !name.is_empty() {
             u.push('#');
@@ -125,8 +117,6 @@ pub struct Link {
     pub session: Arc<Session>,
     pub dg: Option<Arc<DgLink>>,
     tasks: Vec<JoinHandle<()>>,
-    /// what must live as long as the link (the QUIC endpoint)
-    _keep: Option<quinn::Endpoint>,
 }
 
 impl Drop for Link {
@@ -234,26 +224,10 @@ impl Client {
         let c = &self.cfg;
         let addr: SocketAddr = tokio::net::lookup_host(c.server.as_str()).await?.next().ok_or("cannot resolve the server")?;
         let (dtx, mut drx) = mpsc::channel::<Vec<u8>>(1024);
-        let mut keep = None;
-        let mut wire: Option<dgram::Wire> = None;
-        let mut quic: Option<quinn::Connection> = None;
-        let raw = match c.kind.as_str() {
-            "game" => {
-                let (io, sock, mask) = gamec::dial(addr, &c.door, GameOpts::parse(&c.fec, false), dtx).await?;
-                wire = Some(dgram::Wire::Udp { sock, mask, to: Mutex::new(None) });
-                Raw::Stream(io)
-            }
-            "hq" => {
-                let (io, conn, ep) = hqc::dial(addr, &c.sni, &c.door).await?;
-                keep = Some(ep);
-                wire = Some(dgram::Wire::Quic(conn.clone()));
-                quic = Some(conn);
-                Raw::Stream(io)
-            }
-            _ => link::dial("faketcp", &addr.to_string(), "", "", "", &c.door, false, GameOpts::default()).await?,
-        };
-        let (mut tx, mut rx) = link::handshake(raw, &c.door, true, super::padded(&c.kind)).await?;
-        let want_dg = c.datagrams && wire.is_some();
+        let (io, sock, mask) = gamec::dial(addr, &c.door, GameOpts::parse(&c.fec, false), dtx).await?;
+        let wire = dgram::Wire::Udp { sock, mask, to: Mutex::new(None) };
+        let (mut tx, mut rx) = link::handshake(Raw::Stream(io), &c.door, true, false).await?;
+        let want_dg = c.datagrams;
         let auth = super::make_auth(&c.user, &c.key, want_dg);
         let mut m = HELLO.to_vec();
         m.extend_from_slice(&serde_json::to_vec(&auth)?);
@@ -267,33 +241,21 @@ impl Client {
 
         let mut tasks = vec![];
         let mut dg = None;
-        if let (true, Some(wire)) = (want_dg && w.sid != 0, wire) {
+        if want_dg && w.sid != 0 {
             let mut key = [0u8; 32];
             if hex::decode_to_slice(&w.dk, &mut key).is_ok() {
-                let max = match c.kind.as_str() {
-                    "hq" => hqc::MAX_BODY,
-                    _ => dgram::GAME_MAX_BODY,
-                }
-                .min(w.dm as usize);
+                let max = dgram::GAME_MAX_BODY.min(w.dm as usize);
                 let link = Arc::new(DgLink::new(w.sid, &key, true, wire, c.copies, max));
                 let (me, l2) = (self.clone(), link.clone());
-                if let Some(conn) = quic {
-                    tasks.push(tokio::spawn(async move {
-                        while let Ok(d) = conn.read_datagram().await {
-                            me.on_datagram(&l2, &d);
-                        }
-                    }));
-                } else {
-                    tasks.push(tokio::spawn(async move {
-                        while let Some(d) = drx.recv().await {
-                            me.on_datagram(&l2, &d);
-                        }
-                    }));
-                }
+                tasks.push(tokio::spawn(async move {
+                    while let Some(d) = drx.recv().await {
+                        me.on_datagram(&l2, &d);
+                    }
+                }));
                 dg = Some(link);
             }
         }
-        Ok(Link { session, dg, tasks, _keep: keep })
+        Ok(Link { session, dg, tasks })
     }
 
     fn on_datagram(&self, link: &DgLink, d: &[u8]) {
@@ -328,7 +290,7 @@ impl Client {
         let id = self.next_flow.fetch_add(1, Ordering::Relaxed);
         let back = UdpSocket::bind("127.0.0.1:0").await?;
         let back_addr = back.local_addr()?;
-        let max = self.current().and_then(|l| l.dg.as_ref().map(|d| d.max_body)).unwrap_or(if self.cfg.kind == "faketcp" || !self.cfg.datagrams { 0 } else { dgram::GAME_MAX_BODY.min(hqc::MAX_BODY) });
+        let max = self.current().and_then(|l| l.dg.as_ref().map(|d| d.max_body)).unwrap_or(if self.cfg.datagrams { dgram::GAME_MAX_BODY } else { 0 });
         // body = flow (4) + target length (1) + target (up to ~47) + data
         let dg = max > 0 && first + 5 + 47 <= max;
         let me = Arc::downgrade(self);
