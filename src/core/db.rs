@@ -227,6 +227,14 @@ impl Db {
         let _ = c.execute("UPDATE settings SET v='Kanki Panel' WHERE k='panel_name' AND v IN ('KANKI VPN','KANKI-VPN','Kanki VPN')", []);
         let _ = c.execute("UPDATE settings SET v=trim(replace(','||v||',', ',ovpn,', ','), ',') WHERE k='default_protocols' AND ','||v||',' LIKE '%,ovpn,%'", []);
         let _ = c.execute("UPDATE users SET protocols=trim(replace(','||protocols||',', ',ovpn,', ','), ',') WHERE ','||protocols||',' LIKE '%,ovpn,%'", []);
+        // 3.19: MIX+ (and the Game-FEC / HQ-QUIC / FakeTCP names it came from) is gone: its user protocols
+        // and its settings and secrets
+        for p in ["kgame", "khq", "kftcp"] {
+            let pat = format!(",{},", p);
+            let _ = c.execute("UPDATE settings SET v=trim(replace(','||v||',', ?1, ','), ',') WHERE k='default_protocols' AND instr(','||v||',', ?1) > 0", [&pat]);
+            let _ = c.execute("UPDATE users SET protocols=trim(replace(','||protocols||',', ?1, ','), ',') WHERE instr(','||protocols||',', ?1) > 0", [&pat]);
+        }
+        let _ = c.execute("DELETE FROM settings WHERE k IN ('kgame_cfg','khq_cfg','kftcp_cfg','kc_door','kc_secret')", []);
         // v2.9.4: a trial is a user whose note is "trial"; finished trials are deleted. Before, a trial that was
         // extended / renewed kept that note (only USER<n>-TEST was renamed to USER<n>), so clear it once on those
         // accounts: they are customers now and must never be removed.
@@ -532,5 +540,35 @@ pub fn default_setting(k: &str) -> &'static str {
         "def_days" => "30",
         "def_conns" => "1",
         _ => "",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mixplus_is_cleaned_out() {
+        let dir = std::env::temp_dir().join(format!("kanki-db-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("kanki.db");
+        {
+            let db = Db::open(path.to_str().unwrap());
+            db.create_user("a", 1.0, 30, 1, "wg,kgame,mtun", "", "", 0).unwrap();
+            db.create_user("b", 1.0, 30, 1, "kgame", "", "", 0).unwrap();
+            db.create_user("c", 1.0, 30, 1, "awg,khq", "", "", 0).unwrap();
+            db.set("default_protocols", "wg,awg,kgame");
+            db.set("kgame_cfg", "{}");
+            db.set("kc_door", "x");
+        }
+        // the cleanup runs when the database is opened again (on the next start)
+        let db = Db::open(path.to_str().unwrap());
+        let mut protos: Vec<(String, String)> = db.users().iter().map(|u| (u.username.clone(), u.protocols.clone())).collect();
+        protos.sort();
+        assert_eq!(protos, vec![("a".into(), "wg,mtun".into()), ("b".into(), "".into()), ("c".into(), "awg".into())]);
+        assert_eq!(db.get("default_protocols"), "wg,awg");
+        assert_eq!(db.get("kgame_cfg"), "");
+        assert_eq!(db.get("kc_door"), "");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

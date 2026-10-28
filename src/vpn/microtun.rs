@@ -1,10 +1,12 @@
 //! microtun in the panel: the light game VPN (28 bytes per packet, small packets sent twice) as a
-//! protocol of its own, ticked per user like MIX+; user protocol `mtun`. Every VPN server runs it
+//! protocol of its own, ticked per user like KANKI MIX; user protocol `mtun`. Every VPN server runs it
 //! inside its agent (`mtun.rs`) on a UDP port of its own with interface `mtun0` and NAT.
 //!
 //! The panel keeps the header mask key (`mt_obfs`, shared by all servers) and a secret from which
 //! each user's key is made (`mt_secret` + user id + subscription code: a new link is a new key).
-//! Every user has a fixed tunnel address, 10.77.0.0/16 by user id, the same on every server.
+//! Every user has a fixed tunnel address, 10.79.0.0/16 by user id, the same on every server;
+//! a second, third … device gets one of 10.80.0.0/16 from the server, and IPv6 (fd79:4d54::/64) where
+//! the server has it.
 use crate::db::{Node, User};
 use crate::mtun::{MtCfg, MtUser, Server};
 use crate::App;
@@ -19,11 +21,25 @@ use std::sync::Mutex;
 pub const PROTO: &str = "mtun";
 pub const NAME: &str = "microtun";
 pub const DEFAULT_PORT: u16 = 4200;
-/// the server's tunnel address; users get 10.77.0.2 … by id
-const SERVER_ADDR: &str = "10.77.0.1/16";
-const BASE: u32 = u32::from_be_bytes([10, 77, 0, 0]);
+/// the server's tunnel address; users get 10.79.0.2 … by id (10.77.N.0/30 are the GRE links of the
+/// tunnels, 10.66 / 10.67 WireGuard and AmneziaWG)
+const SERVER_ADDR: &str = "10.79.0.1/16";
+const BASE: u32 = u32::from_be_bytes([10, 79, 0, 0]);
+/// the subnet of a user's second, third … device (each server gives them out by itself)
+const DEVICES_ADDR: &str = "10.80.0.1/16";
+/// IPv6 in the tunnel, where the server has IPv6: a device's address is this prefix + its IPv4
+const SERVER_ADDR6: &str = "fd79:4d54::1/64";
 
-pub use crate::kcores::NodeOpt;
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+pub struct NodeOpt {
+    /// microtun off on this server only
+    pub off: bool,
+    /// this server's own port (0 = the default port)
+    pub port: u16,
+    /// address the app dials instead of the server's own ("" = automatic)
+    pub host: String,
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -116,15 +132,22 @@ pub fn cfg_for(app: &App, n: &Node, users: &[&User]) -> MtCfg {
     if !s.node_on(&n.id) {
         return MtCfg::default();
     }
+    let limit_on = app.db.get("conn_limit_on") != "0";
     let users = users
         .iter()
         .filter(|u| u.has_proto(PROTO))
-        .filter_map(|u| Some(MtUser { name: u.username.clone(), key: user_key(app, u), ip: user_ip(u)?.to_string() }))
+        .filter_map(|u| {
+            // devices at the same time: the user's connection limit, when the panel enforces one
+            let max = if limit_on { u.max_conn.max(0) as u32 } else { 0 };
+            Some(MtUser { name: u.username.clone(), key: user_key(app, u), ip: user_ip(u)?.to_string(), max })
+        })
         .collect();
     MtCfg {
         port: s.node_port(&n.id),
         obfs: obfs(app),
         address: SERVER_ADDR.into(),
+        devices: DEVICES_ADDR.into(),
+        address6: SERVER_ADDR6.into(),
         mtu: s.mtu,
         burst_max: s.burst_max,
         burst_delay_ms: s.burst_delay_ms,
@@ -138,7 +161,7 @@ fn pct(s: &str) -> String {
     s.bytes().map(|c| if c.is_ascii_alphanumeric() || b"-_.~".contains(&c) { (c as char).to_string() } else { format!("%{:02X}", c) }).collect()
 }
 
-/// mtun://KEY@host:port?obfs=…&ip=10.77.0.2/16&mtu=1420&burst=300&delay=2#name
+/// mtun://KEY@host:port?obfs=…&ip=10.79.0.2/16&mtu=1420&burst=300&delay=2#name
 /// (`microtun client -url '…'` takes it as it is)
 pub fn to_url(key: &str, server: &str, obfs: &str, ip: Ipv4Addr, s: &Settings, name: &str) -> String {
     format!(
@@ -259,9 +282,9 @@ fn deltas(r: &mut Running) -> HashMap<String, (i64, i64)> {
 
 /// What this server reports (merged into its info): the port that really runs, or why not
 pub fn info() -> Value {
-    let port = running().try_lock().ok().and_then(|g| g.as_ref().map(|r| r.srv.cfg.port)).unwrap_or(0);
+    let (port, v6) = running().try_lock().ok().and_then(|g| g.as_ref().map(|r| (r.srv.cfg.port, r.srv.has_v6()))).unwrap_or((0, false));
     let err = last_error().lock().map(|e| e.clone()).unwrap_or_default();
-    json!({ "mt_port": if port > 0 { json!(port) } else { Value::Null }, "mt_error": err, "mt": true })
+    json!({ "mt_port": if port > 0 { json!(port) } else { Value::Null }, "mt_v6": v6, "mt_error": err, "mt": true })
 }
 
 // ------------------------------------------------------------------ panel API
@@ -296,7 +319,7 @@ async fn get_all(axum::extract::State(app): St, h: axum::http::HeaderMap) -> axu
             json!({
                 "id": n.id, "name": n.name, "main": n.id == "local", "online": n.id == "local" || n.online,
                 "on": s.node_on(&n.id), "want_port": s.node_port(&n.id), "host": host_of(&app, &s, n),
-                "port": info["mt_port"], "reports": info["mt"].as_bool().unwrap_or(false),
+                "port": info["mt_port"], "v6": info["mt_v6"], "reports": info["mt"].as_bool().unwrap_or(false),
                 "error": info["mt_error"].as_str().filter(|e| !e.is_empty()), "version": info["version"],
                 "users": with.iter().filter(|u| u.active() && u.on(n)).count(),
             })
@@ -350,11 +373,11 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
         }
         s.nodes = m;
     }
-    // MIX+ is the other UDP protocol that sits beside it on every server
-    let mp = crate::kcores::settings(&app, "kgame");
+    // KANKI MIX is the other UDP protocol that sits beside it on every server
+    let km = crate::kmix::settings(&app);
     for n in app.db.nodes() {
-        if s.node_on(&n.id) && mp.node_on(&n.id) && s.node_port(&n.id) == mp.node_port(&n.id) {
-            return bad(&format!("MIX+ already uses port {} on {}", s.node_port(&n.id), n.name));
+        if s.node_on(&n.id) && km.node_on(&n.id) && s.node_port(&n.id) == km.node_port(&n.id) {
+            return bad(&format!("KANKI MIX already uses port {} on {}", s.node_port(&n.id), n.name));
         }
     }
     save(&app, &s);
@@ -413,9 +436,9 @@ mod tests {
     #[test]
     fn link_format() {
         let s = Settings::default();
-        let u = to_url(&"ab".repeat(32), "de.example.com:4200", &"cd".repeat(32), Ipv4Addr::new(10, 77, 0, 2), &s, "Germany · microtun");
+        let u = to_url(&"ab".repeat(32), "de.example.com:4200", &"cd".repeat(32), Ipv4Addr::new(10, 79, 0, 2), &s, "Germany · microtun");
         assert!(u.starts_with(&format!("mtun://{}@de.example.com:4200?obfs=", "ab".repeat(32))));
-        assert!(u.contains("&ip=10.77.0.2/16&mtu=1420&burst=300&delay=2#Germany%20%C2%B7%20microtun"));
+        assert!(u.contains("&ip=10.79.0.2/16&mtu=1420&burst=300&delay=2#Germany%20%C2%B7%20microtun"));
     }
 
     #[test]

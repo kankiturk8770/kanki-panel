@@ -266,7 +266,6 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::dns::panel::router())
         .merge(crate::xray::panel::router())
         .merge(crate::kmix::router())
-        .merge(crate::kcores::router())
         .merge(crate::microtun::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
         // 2 MiB for every route: login, join and hy2/auth are open to strangers and must not make the
@@ -300,7 +299,7 @@ async fn overview(State(app): St, h: HeaderMap) -> Response {
         }).unwrap_or((0, 0))
     });
     let mut protos: HashMap<&str, usize> = HashMap::new();
-    for p in ["wg", "awg", "hy2", "kmix", "kgame", "mtun", "khq", "kftcp", "xray", "dns"] {
+    for p in ["wg", "awg", "hy2", "kmix", "mtun", "xray", "dns"] {
         protos.insert(p, us.iter().filter(|u| u.has_proto(p)).count());
     }
     // online: a VPN session, or Xray / Kanki DNS use right now
@@ -589,7 +588,7 @@ fn save_leftovers(app: &App, v: &[Leftover]) {
 /// Asks the node to cut its users off, stop KANKI MIX, remove its VPN services, close their ports and
 /// uninstall its agent (3.6.8+). True when the node confirmed it.
 async fn remove_remote(app: &Arc<App>, n: &Node) -> bool {
-    let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(Default::default()), mtun: Some(Default::default()), ..Default::default() };
+    let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(json!({})), mtun: Some(Default::default()), ..Default::default() };
     let synced = sync::remote_post_json(app, n, "/agent/sync", &json!(empty)).await.is_some();
     synced && sync::remote_post(app, n, "/agent/remove").await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false)
 }
@@ -1212,8 +1211,8 @@ fn sub_data(app: &App, u: &User) -> Value {
             "kmix": crate::kmix::link(app, u, n),
             // the second KANKI MIX config, through the Iran tunnel (Null = none)
             "kmix_tunnel": tun,
-            // Game-FEC / HQ-QUIC / FakeTCP: [{proto: kgame|khq|kftcp, kind, title, url: kcore://…}]
-            "kcore": crate::kcores::links(app, u, n),
+            // MIX+ is gone: always empty, kept for apps that still read the list
+            "kcore": [],
             // microtun: mtun://key@host:port?obfs=…&ip=… (Null = not for this user / not on this server)
             "mtun": crate::microtun::link(app, u, n, false),
         });
@@ -1235,9 +1234,9 @@ fn sub_data(app: &App, u: &User) -> Value {
         // "kmix" too) lists them as a server of their own; "via" and "parent" tell a newer app they are the
         // tunnel configs of that server
         let tp = twin_protos(app, u, n);
-        // a user with only Game-FEC / HQ-QUIC / FakeTCP gets the tunnel entry too
+        // a user with only microtun gets the tunnel entry too
         let mt_tun = crate::microtun::link(app, u, n, true);
-        if !tp.is_empty() || !crate::kcores::links_tunnel(app, u, n).is_empty() || mt_tun.is_some() {
+        if !tp.is_empty() || mt_tun.is_some() {
             let tw = crate::twin::of_node(app, n);
             let mut e = v.clone();
             e["id"] = json!(format!("{}{}", n.id, TUNNEL_SUFFIX));
@@ -1247,8 +1246,6 @@ fn sub_data(app: &App, u: &User) -> Value {
             e["hy2"] = if tp.contains(&"hysteria2") { json!(hy2_link(app, u, n, tw.as_ref())) } else { Value::Null };
             e["kmix"] = json!(tun);
             e["kmix_tunnel"] = Value::Null;
-            // Game-FEC / HQ-QUIC / FakeTCP through the tunnel: the Iran address, the port it carries
-            e["kcore"] = json!(crate::kcores::links_tunnel(app, u, n));
             e["mtun"] = json!(mt_tun);
             e["via"] = json!("tunnel");
             e["via_proto"] = via_proto(app, n, &tp, true);

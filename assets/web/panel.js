@@ -70,9 +70,9 @@ function vhHead(icon,title,sub,btns){return '<div class="vh"><span class="phi">'
 function vhBtn(href,label,on){return '<a class="b2 sm" href="'+href+'"'+(on?' onclick="'+on+';return false"':'')+'>'+label+'</a>'}
 function vhKanki(nodes,o){var up=nodes.filter(function(n){return n.id=='local'||n.online}).length,pr=o.protocols||{};
  // compact: no extra buttons, the protocol counts as a grid, the servers in two columns
- $('#vh_k').innerHTML=vhHead('nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · MIX+\u200e','')+
+ $('#vh_k').innerHTML=vhHead('nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun','')+
   '<div class="kv"><div><small>'+t('Nodes online')+'</small><b>'+N(up)+' / '+N(nodes.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N(o.online||0)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(o.traffic_gb||0)+' GB</b></div></div>'+
-  '<label class="f">'+t('Users by protocol')+'</label><div class="vhgrid">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e'],['mtun','microtun']].map(function(p){return '<div class="vhcell"><small>'+p[1]+'</small><b>'+N(pr[p[0]]||0)+'</b></div>'}).join('')+'</div>'+
+  '<label class="f">'+t('Users by protocol')+'</label><div class="vhgrid">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['mtun','microtun']].map(function(p){return '<div class="vhcell"><small>'+p[1]+'</small><b>'+N(pr[p[0]]||0)+'</b></div>'}).join('')+'</div>'+
   '<div class="vhsrv">'+nodes.map(function(n){var s=nState(n),loc=n.id=='local';return '<div class="vhs"><span class="dot '+s.c+'"></span><div class="nm"><b>'+esc(n.name)+'</b><small>'+N(n.users||0)+' '+t('users')+(loc?' · '+t('Main server'):'')+'</small></div></div>'}).join('')+'</div>'}
 function vhXray(d){var el=$('#vh_x');if(!d){el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks')+'<p class="muted">—</p>';return}
  var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length,tot=d.inbounds.reduce(function(a,b){return a+(+b.traffic||0)},0);
@@ -87,12 +87,12 @@ function vhDns(d){var el=$('#vh_d');if(!d){el.style.display='none';return}var ru
   '<div class="kv"><div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(d.servers.length)+'</b></div><div><small>'+t('Users with DNS')+'</small><b>'+N(d.users)+'</b></div><div><small>'+t('Allowed addresses')+'</small><b>'+N(d.servers.reduce(function(a,x){return a+(+(x.status||{}).allowed||0)},0))+'</b></div></div>'}
 
 // ---------------------------------------------------------------- user form: what the user gets, service by service
-function ufServices(protos,un){var has=function(p){return protos.indexOf(p)>=0},vpnOn=has('wg')||has('awg')||has('hy2')||has('kmix')||has('kgame')||has('mtun');
+function ufServices(protos,un){var has=function(p){return protos.indexOf(p)>=0},vpnOn=has('wg')||has('awg')||has('hy2')||has('kmix')||has('mtun');
  var card=function(key,icon,title,sub,on,body,head){return '<div class="ufsvc'+(on?' on':'')+'" data-svc="'+key+'"><div class="hd"><span class="ni">'+ic(icon,18)+'</span><div class="nm"><b>'+t(title)+'</b><small>'+t(sub)+'</small></div>'+(head||'')+'</div><div class="bd3">'+body+'</div></div>'};
  var nodes=S.nodes||[];
  var h='<label class="f" style="margin-top:12px">'+t('Services of this user')+'</label><div class="chipset" id="uf_pre"><button type="button" data-pre="all">'+t('Everything')+'</button><button type="button" data-pre="vpn">'+t('Kanki VPN only')+'</button><button type="button" data-pre="xray">'+t('Xray only')+'</button><button type="button" data-pre="dns">'+t('DNS only')+'</button></div>';
  h+=card('vpn','nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX',vpnOn,
-  '<div class="ckrow">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e'],['mtun','microtun']].map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(has(p[0])?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>'+
+  '<div class="ckrow">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['mtun','microtun']].map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(has(p[0])?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>'+
   (nodes.length>1?'<label class="f">'+t('Servers')+'</label><div class="ckrow">'+nodes.map(function(n){return '<label class="chk"><input type="checkbox" class="f_nd" value="'+esc(n.id)+'" '+(un.length==0||un.indexOf(n.id)>=0?'checked':'')+'>'+esc(n.name)+'</label>'}).join('')+'</div>':''),
   '<label class="sw"><input type="checkbox" class="uf_all" data-for="vpn" '+(vpnOn?'checked':'')+'><span></span></label>');
  h+=card('xray','xray','Xray','Links of every Xray inbound go into the subscription',has('xray'),'<div id="uf_xr" class="muted">…</div>','<label class="sw"><input type="checkbox" class="f_pr" value="xray" '+(has('xray')?'checked':'')+'><span></span></label>');
@@ -752,21 +752,18 @@ function kmSetNodePort(id,port,done){var go=function(d){var m={};Object.keys(d.s
 function kmAll(on){if(!confirm(t(on?'KANKI MIX for every user?':'Remove KANKI MIX from every user?')))return;
  api('POST','/api/kmix/users',{on:on}).then(function(r){toast(t('Saved')+' · '+N(r.changed)+' '+t('users changed'));kmLoad()}).catch(fail)}
 
-// ==================================================================== MIX+
-// the MIX+ page: our own gaming protocol for the Kanki app (KCP at its fastest with Reed-Solomon FEC
-// under a mask, the Game-FEC transport of the tunnels), ticked per user like KANKI MIX. It runs on
-// every VPN server on a port of its own.
+// ==================================================================== microtun
+// the microtun page: the light game VPN, ticked per user like KANKI MIX. It runs on every VPN server
+// on a port of its own.
 var KC={d:{},meta:{
- kgame:{name:'MIX+\u200e',net:'UDP',desc:'For games (PUBG…): KCP at its fastest with FEC, a lost packet is rebuilt without waiting. Game and websites ride one stream, like the tunnels; «Game optimization» below sends game packets apart. Nothing on the wire looks like a protocol.'},
  mtun:{name:'microtun',net:'UDP',desc:'A light game VPN: 28 bytes per packet (WireGuard 32), keys renewed every 2 minutes, small packets sent twice so one lost packet does not lag. Nothing on the wire looks like a protocol.'}}};
-// the API of a protocol page (microtun has its own)
-function kcApi(p){return p=='mtun'?'/api/mt':'/api/kc/'+p}
+// the API of a protocol page
+function kcApi(p){return '/api/mt'}
 
 function kcPage(p){var m=KC.meta[p];
  $('#pg').innerHTML='<div class="ph"><div><h2>'+esc(m.name)+'</h2><p>'+t(m.desc)+'</p></div>'+
   '<div class="row" style="gap:6px"><button class="b2" onclick="kcAll(\''+p+'\',false)">'+t('Disable for all users')+'</button><button class="btn" onclick="kcAll(\''+p+'\',true)">'+ic('users',15)+' '+t('Enable for all users')+'</button></div></div><div id="kc">'+t('Loading…')+'</div>';
  kcLoad(p);clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))kcLoad(p,true)},8000)}
-function p_kgame(){kcPage('kgame')}
 function p_mtun(){kcPage('mtun')}
 function kcLoad(p,quiet){return api('GET',kcApi(p)).then(function(d){KC.d[p]=d;if(S.page!=p)return d;
   if(quiet&&$('#kc_srv')){$('#kc_kv').innerHTML=kcKpis(d);$('#kc_srv').innerHTML=kcServers(d);return d}kcDraw(d);return d}).catch(fail)}
@@ -781,7 +778,7 @@ function kcServers(d){if(!d.servers.length)return '<p class="muted">—</p>';var
  return d.servers.map(function(x){var st=kcState(x),id=esc(x.id),o=(d.settings.nodes||{})[x.id]||{};
   return '<div class="vrow" style="flex-wrap:wrap;align-items:flex-start"><span class="dot '+(st[0]||'')+'" style="margin-top:6px"></span>'+
    '<div class="nm"><b>'+esc(x.name)+(x.main?' <span class="rotb">'+t('Main server')+'</span>':'')+'</b><small class="ltr">'+esc(x.host||'?')+':'+esc(String(x.port||x.want_port))+' · '+net+'</small></div>'+
-   '<span class="chipx">'+N(x.users)+' '+t('users')+'</span><span class="chipx '+(st[0]||'')+'">'+t(st[1])+'</span>'+
+   '<span class="chipx">'+N(x.users)+' '+t('users')+'</span>'+(x.v6?'<span class="chipx b">IPv6</span>':'')+'<span class="chipx '+(st[0]||'')+'">'+t(st[1])+'</span>'+
    '<div class="row" style="gap:6px;width:100%;justify-content:flex-end;align-items:center;flex-wrap:wrap"><small class="muted">'+t('Port of this server')+'</small>'+
    '<input class="ltr kc_np" data-id="'+id+'" inputmode="numeric" style="width:90px" placeholder="'+esc(t('default'))+' '+N(d.settings.port)+'" value="'+esc(o.port||'')+'" onchange="kcSaveNodes(\''+p+'\')">'+
    '<small class="muted">'+t('Address the app dials')+'</small><input class="ltr kc_host" data-id="'+id+'" style="width:160px" placeholder="'+esc(t('automatic'))+'" value="'+esc(o.host||'')+'" onchange="kcSaveNodes(\''+p+'\')">'+
@@ -789,17 +786,12 @@ function kcServers(d){if(!d.servers.length)return '<p class="muted">—</p>';var
    (x.on&&x.online&&!x.reports&&d.settings.on?'<div class="warnbox" style="margin:6px 0 0;width:100%">'+t('Update the agent of this server to run it')+'</div>':'')+
    (x.on&&x.error?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+esc(x.error)+'</div>':'')+'</div>'}).join('')}
 function kcDraw(d){var el=$('#kc');if(!el)return;var s=d.settings,p=d.proto,m=KC.meta[p];
- var fecs=['off','10:2','8:3','6:3','4:2'];if(fecs.indexOf(s.fec)<0)fecs.push(s.fec);
- var copies='<label class="f">'+t('Copies of each game packet')+' ('+t('Game optimization')+')'+'</label><select id="kc_cp">'+[[1,'1 (no copies)'],[2,'2 (recommended)'],[3,'3 (very lossy internet)']].map(function(c){return '<option value="'+c[0]+'"'+(s.copies==c[0]?' selected':'')+'>'+t(c[1])+'</option>'}).join('')+'</select>'+
-  '<small class="muted">'+t('Only packets up to 400 bytes (PUBG: 40-300 bytes) are copied; downloads are sent once. Through 15% loss each way: 1 copy 72%, 2 copies 96%, 3 copies 99.8% of round trips arrive.')+'</small>';
  el.innerHTML=(s.on?'':'<div class="warnbox">'+esc(m.name)+' '+t('is off: it runs on no server and is in no subscription.')+'</div>')+
   '<div class="kv k5" id="kc_kv">'+kcKpis(d)+'</div>'+
   '<div class="g2"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="kc_srv" style="margin-top:10px">'+kcServers(d)+'</div></div>'+
   '<div class="card"><h3>'+ic('settings',16)+' '+t('Settings')+'</h3>'+
    '<div class="srow"><div class="tx"><b>'+esc(m.name)+'</b></div><label class="sw"><input type="checkbox" id="kc_on" '+(s.on?'checked':'')+'><span></span></label></div>'+
    '<label class="f">'+t('Default port')+' · '+m.net+'</label><input id="kc_port" class="ltr" inputmode="numeric" value="'+esc(String(s.port))+'"><small class="muted">'+t('Every server uses it unless it has its own port below.')+'</small>'+
-   (p=='kgame'?'<div class="srow" style="margin-top:8px"><div class="tx"><b>'+t('Game optimization')+'</b><small>'+t('Off: exactly like the tunnels (game UDP inside the stream). On: game packets as datagrams of their own, small ones sent several times.')+'</small></div><label class="sw"><input type="checkbox" id="kc_opt" '+(s.optimize?'checked':'')+'><span></span></label></div>':'')+
-   (p=='kgame'?copies+'<label class="f">'+t('FEC of the stream (websites, game lobby)')+'</label><select id="kc_fec">'+fecs.map(function(f){return '<option value="'+esc(f)+'"'+(s.fec==f?' selected':'')+'>'+esc(f=='off'?t('off'):f)+'</option>'}).join('')+'</select>':'')+
    (p=='mtun'?'<label class="f">'+t('Send small packets twice: up to (bytes)')+'</label><input id="kc_bm" class="ltr" inputmode="numeric" value="'+esc(String(s.burst_max))+'"><small class="muted">'+t('0 = off. Game packets are 50-300 bytes; downloads are sent once.')+'</small>'+
     '<label class="f">'+t('Delay of the second copy (ms)')+'</label><input id="kc_bd" class="ltr" inputmode="numeric" value="'+esc(String(s.burst_delay_ms))+'">'+
     '<label class="f">MTU</label><input id="kc_mtu" class="ltr" inputmode="numeric" value="'+esc(String(s.mtu))+'">':'')+
@@ -816,7 +808,6 @@ function kcSaveNodes(p){kcPut(p,{nodes:kcNodes(p)})}
 function kcNodeOn(p,id,on){var m=kcNodes(p),o=m[id]||{};o.off=!on;m[id]=o;kcPut(p,{nodes:m})}
 function kcSave(p){var v=unN($('#kc_port').value).trim();if(!/^\d+$/.test(v)||+v<1||+v>65535)return toast(t('the port must be 1-65535'),1);
  var b={on:$('#kc_on').checked,port:+v,nodes:kcNodes(p)};
- if($('#kc_opt'))b.optimize=$('#kc_opt').checked;if($('#kc_cp'))b.copies=+$('#kc_cp').value;if($('#kc_fec'))b.fec=$('#kc_fec').value;if($('#kc_sni'))b.sni=$('#kc_sni').value.trim();
  if($('#kc_bm'))b.burst_max=+unN($('#kc_bm').value)||0;if($('#kc_bd'))b.burst_delay_ms=+unN($('#kc_bd').value)||0;if($('#kc_mtu'))b.mtu=+unN($('#kc_mtu').value)||1420;kcPut(p,b)}
 function mtLinks(){var id=$('#mt_u').value,el=$('#mt_l');if(!id){el.innerHTML='';return}
  api('GET','/api/mt/links/'+id).then(function(r){el.innerHTML=r.links.length?r.links.map(function(l){return '<label class="f">'+esc(l.server)+(l.tunnel?' · '+t('through the tunnel'):'')+'</label><textarea class="ltr" readonly rows="3" style="width:100%" onclick="this.select()">'+esc(l.url)+'</textarea>'}).join(''):'<div class="warnbox">'+t(r.why)+'</div>'}).catch(fail)}
@@ -843,7 +834,6 @@ var FA={
  ".ir domains and Iranian addresses do not go through the server: they should be opened directly":"دامنه‌های .ir و IPهای ایران از سرور رد نمی‌شوند: باید مستقیم باز شوند",
  "0 = BBR (adapts by itself). A number turns on Brutal: it keeps that speed even with packet loss. Do not write more than the real speed of the servers.":"۰ = BBR (خودش تنظیم می‌شود). اگر عدد بدهی Brutal روشن می‌شود و حتی با افت بسته همان سرعت را نگه می‌دارد. بیشتر از سرعت واقعی سرورها ننویس.",
  "0 = unlimited":"0 = نامحدود",
- "1 (no copies)":"۱ (بدون نسخه‌ی اضافه)",
  "1 day":"۱ روز",
  "1 hour":"۱ ساعت",
  "1) A user's phone uses your DNS (Private DNS with the user's own address). 2) Names of sanctioned services (games, AI, developer sites …) are answered with your server's IP; everything else is answered normally and goes direct. 3) Your server passes those connections on without opening them. A relay inside Iran sends them to an exit abroad through a hidden Kanki tunnel.":"۱) گوشی کاربر از DNS شما استفاده می‌کند (Private DNS با آدرس اختصاصی خودش). ۲) اسم سرویس‌های تحریمی (بازی، هوش مصنوعی، سایت‌های برنامه‌نویسی …) با IP سرور شما جواب داده می‌شود؛ بقیه عادی جواب می‌گیرند و مستقیم می‌روند. ۳) سرور شما آن اتصال‌ها را بدون باز کردن رمز رد می‌کند. ریلی داخل ایران آن‌ها را با یک تانل مخفی کانکی به خروجی خارج می‌فرستد.",
@@ -851,9 +841,7 @@ var FA={
  "1) Keep it on and pick the port (4000 is fine). 2) Tick KANKI MIX for users (or Enable for all users). 3) Every server installs it by itself within a minute; the Kanki app gets the kanki:// link from the subscription, users see no IP or key.":"۱) روشن بگذار و پورت را انتخاب کن (۴۰۰۰ خوب است). ۲) KANKI MIX را برای کاربران تیک بزن (یا «روشن برای همه‌ی کاربران»). ۳) هر سرور ظرف یک دقیقه خودش نصبش می‌کند؛ اپ کانکی لینک kanki:// را از اشتراک می‌گیرد و کاربر IP یا کلید نمی‌بیند.",
  "1) The user taps «Unblock» in the Kanki app: the app registers the phone and uses your DNS. 2) Names of sanctioned services (games, AI, developer sites …) are answered with your server's IP and the server passes those connections on (SNI proxy), so games and sites open; everything else goes direct at full speed. 3) A relay inside Iran sends them to an exit abroad through a hidden Kanki tunnel.":"۱) کاربر در برنامه‌ی کانکی «رفع تحریم» را می‌زند: برنامه گوشی را ثبت می‌کند و از DNS شما استفاده می‌کند. ۲) اسم سرویس‌های تحریمی (بازی، هوش مصنوعی، سایت‌های برنامه‌نویسی …) با IP سرور شما جواب می‌گیرند و سرور اتصالشان را رد می‌کند (SNI پروکسی)، پس بازی و سایت باز می‌شود؛ بقیه مستقیم و با سرعت کامل می‌روند. ۳) ریلی داخل ایران آن‌ها را با تانل مخفی کانکی به خروجی خارج می‌فرستد.",
  "12 hours":"۱۲ ساعت",
- "2 (recommended)":"۲ (پیشنهادی)",
  "2FA code":"کد دومرحله‌ای",
- "3 (very lossy internet)":"۳ (اینترنت خیلی پرلاس)",
  "3 days":"۳ روز",
  "3 hours":"۳ ساعت",
  "30 min":"۳۰ دقیقه",
@@ -1122,7 +1110,6 @@ var FA={
  "Connection endpoint (empty = panel endpoint)":"آدرس اتصال (خالی = Endpoint پنل)",
  "Connections":"اتصال‌ها",
  "Copied":"کپی شد",
- "Copies of each game packet":"تعداد نسخه‌ی هر بسته‌ی بازی",
  "Copy":"کپی",
  "Copy command":"کپی دستور",
  "Copy it now, it won't be shown again":"همین حالا کپی کن، دوباره نمایش داده نمی‌شود",
@@ -1339,7 +1326,6 @@ var FA={
  "Extra text for the buyer (optional)":"متن اضافه برای خریدار (اختیاری)",
  "FEC data:parity":"FEC داده:تکمیلی",
  "FEC for websites (TCP)":"FEC برای سایت‌ها (TCP)",
- "FEC of the stream (websites, game lobby)":"FEC جریان (سایت‌ها، لابی بازی)",
  "FEC sends extra repair packets so a lost packet is rebuilt at the other end instead of being waited for (about 40–100 ms saved per loss). 8:3 means 3 repair packets per 8 data packets (~37% more traffic). Duplication sends every packet twice: best ping, double the traffic. For WireGuard on top of this tunnel, FEC 8:3 is the sweet spot.":"FEC بسته‌های ترمیمی اضافه می‌فرستد تا بستهٔ گمشده به‌جای انتظار، در مقصد بازسازی شود (هر لاست حدود ۴۰ تا ۱۰۰ میلی‌ثانیه صرفه‌جویی). 8:3 یعنی به ازای هر ۸ بستهٔ داده ۳ بستهٔ ترمیمی (حدود ۳۷٪ ترافیک بیشتر). ارسال دوباره هر بسته را دو بار می‌فرستد: بهترین پینگ، دو برابر ترافیک. برای وایرگارد روی این تانل، FEC 8:3 نقطهٔ مطلوب است.",
  "Failed":"ناموفق",
  "Fallback when REALITY is not possible (old clients) and you have a clean domain.":"جایگزین وقتی REALITY ممکن نیست (کلاینت قدیمی) و دامنهٔ تمیز داری.",
@@ -1367,7 +1353,6 @@ var FA={
  "For example the subnet of the VPN users of the entry: their internet then leaves from the exit. SSH of the entry itself is never touched.":"مثلاً ساب‌نت کاربران VPN سرور ورودی: اینترنتشان از خروجی بیرون می‌رود. به SSH خود سرور ورودی دست زده نمی‌شود.",
  "For example the subnet of the WireGuard users of the entry: their whole internet goes through Hysteria2 and leaves from the exit. SSH and the entry itself are not touched. The ports below are another way: users connect to a port of the entry and land on the same port of the exit.":"مثلاً شبکهٔ کاربران وایرگارد سرور ورودی (10.8.0.0/24): کل اینترنتشان از داخل هیستریا رد می‌شود و از سرور خارج بیرون می‌رود. SSH و خود سرور ورودی دست نمی‌خورد. پورت‌های پایین راه دیگری است: کاربر به پورت سرور ورودی وصل می‌شود و به همان پورت روی سرور خروجی می‌رسد.",
  "For example your Iran server. Only the tunnel agent is installed on it.":"مثلاً سرور ایران. فقط عامل تانل روی آن نصب می‌شود.",
- "For games (PUBG…): KCP at its fastest with FEC, a lost packet is rebuilt without waiting. Game and websites ride one stream, like the tunnels; «Game optimization» below sends game packets apart. Nothing on the wire looks like a protocol.":"برای بازی (پابجی و …): KCP سریع با FEC؛ بسته‌ی گم‌شده بدون انتظار ساخته می‌شود. بازی و سایت‌ها مثل تانل‌ها در یک جریان می‌روند؛ «بهینه‌سازی بازی» پایین بسته‌های بازی را جدا می‌فرستد. روی سیم شبیه هیچ پروتکلی نیست.",
  "For repairs: the server keeps running but is not offered":"برای تعمیر: سرور روشن می‌ماند ولی به مشتری پیشنهاد نمی‌شود",
  "For servers whose IPv6 does not work well":"برای سرورهایی که IPv6 آن‌ها خوب کار نمی‌کند",
  "For strong filtering":"برای فیلترینگ شدید",
@@ -1388,7 +1373,6 @@ var FA={
  "GRE link: the panel already built its side. The first lines of the command build the other side on the server, then the agent connects to the panel through the link.":"لینک GRE: پنل سمت خودش را ساخته است. خط‌های اول دستور سمت دیگر را روی سرور می‌سازند و بعد ایجنت از راه لینک به پنل وصل می‌شود.",
  "Game (KCP + FEC)":"گیم (KCP + FEC)",
  "Game adds Reed-Solomon FEC and optional duplication on masked KCP — loss is repaired in flight. FakeTCP wraps UDP inside hand-made TCP packets (udp2raw style) so UDP throttling does not apply.":"گیم روی KCP ماسک‌شده FEC رید-سولومون و ارسال دوبارهٔ اختیاری می‌افزاید — لاست در راه ترمیم می‌شود. FakeTCP بسته‌های UDP را داخل TCP دست‌ساز (سبک udp2raw) می‌پیچد تا محدودیت UDP اعمال نشود.",
- "Game optimization":"بهینه‌سازی بازی",
  "Games · low ping":"گیم · پینگ پایین",
  "Gaming":"گیمینگ",
  "Gaming (low ping)":"گیم (پینگ کم)",
@@ -1749,7 +1733,6 @@ var FA={
  "Off when you manage the A record yourself (for example behind a CDN)":"اگر رکورد A را خودت مدیریت می‌کنی (مثلاً پشت CDN) خاموش کن",
  "Off: DNS stops on every server and leaves the subscriptions":"خاموش: DNS روی همه‌ی سرورها می‌ایستد و از ساب‌ها حذف می‌شود",
  "Off: Xray stops on every server and the links leave the subscriptions":"خاموش: Xray روی همه‌ی سرورها می‌ایستد و لینک‌ها از ساب‌ها حذف می‌شوند",
- "Off: exactly like the tunnels (game UDP inside the stream). On: game packets as datagrams of their own, small ones sent several times.":"خاموش: دقیقاً مثل تانل‌ها (UDP بازی داخل همان جریان). روشن: بسته‌های بازی دیتاگرام جدا و بسته‌های کوچک چند بار.",
  "Offline":"آفلاین",
  "Oldest":"قدیمی‌ترین",
  "On":"روشن",
@@ -1773,7 +1756,6 @@ var FA={
  "Only for these users":"فقط برای این کاربرها",
  "Only for these users (empty = everyone)":"فقط برای این کاربرها (خالی = همه)",
  "Only from these inbounds":"فقط از این اینباندها",
- "Only packets up to 400 bytes (PUBG: 40-300 bytes) are copied; downloads are sent once. Through 15% loss each way: 1 copy 72%, 2 copies 96%, 3 copies 99.8% of round trips arrive.":"فقط بسته‌های تا ۴۰۰ بایت (پابجی: ۴۰ تا ۳۰۰ بایت) چندتایی می‌روند؛ دانلودها یک بار. با ۱۵٪ لاس در هر طرف: ۱ نسخه ۷۲٪، ۲ نسخه ۹۶٪، ۳ نسخه ۹۹٫۸٪ رفت‌وبرگشت‌ها می‌رسند.",
  "Only restart is allowed for this service":"این سرویس فقط ری‌استارت می‌شود",
  "Only the transport can reach it; scanners cannot probe the port.":"فقط ترنسپورت به آن می‌رسد؛ اسکنرها نمی‌توانند پورت را کاوش کنند.",
  "Only these users (empty = everyone with Xray)":"فقط این کاربرها (خالی = همه‌ی دارندگان Xray)",
@@ -1866,6 +1848,12 @@ var FA={
  "Ports moved":"پورت‌ها جابه‌جا شدند",
  "Ports of":"پورت‌های",
  "Ports of the exit server":"پورت‌های سرور خروجی",
+ "All ports of the exit server":"همهٔ پورت‌های سرور خروجی",
+ "All ports of":"همهٔ پورت‌های",
+ "Not on this server":"روی این سرور نیست",
+ "not on this server":"روی این سرور نیست",
+ "its ports were added":"پورت‌هایش اضافه شد",
+ "its ports were taken out":"پورت‌هایش برداشته شد",
  "Empty = Iran server-abroad server":"خالی = اسم سرور ایران-اسم سرور خارج",
  "Ports of the panel server were filled in":"پورت‌های سرور پنل وارد شد",
  "Ports taken by another program":"پورت‌هایی که برنامه‌ی دیگری گرفته",
@@ -2850,7 +2838,7 @@ function applyLook(){document.documentElement.lang=S.lang;document.documentEleme
  var b=document.body.classList;b.toggle('light',S.theme=='light');
  Array.prototype.slice.call(b).forEach(function(c){if(c.indexOf('c-')==0)b.remove(c)});if(S.color&&S.color!='gold')b.add('c-'+S.color);
  b.add('k38');if($('#side'))b.add('v37');V37.drawLooks()}
-var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e'],['mtun','microtun'],['xray','Xray'],['dns','DNS']];
+var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['mtun','microtun'],['xray','Xray'],['dns','DNS']];
 function pname(p){for(var i=0;i<PROTOS.length;i++)if(PROTOS[i][0]==p)return PROTOS[i][1];return p}
 function modal(html,cls){var b=$('#mbox');b.className='mbox'+(cls?' '+cls:'');b.innerHTML=html;b.scrollTop=0;$('#modal').classList.add('on');document.body.style.overflow='hidden'}
 function closeModal(){$('#modal').classList.remove('on');document.body.style.overflow=''}
@@ -2879,7 +2867,7 @@ function loginView(otp){$('#app').innerHTML='';document.body.className='';applyL
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
 // ---------------------------------------------------------------- shell
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['kgame','MIX+\u200e','game'],['mtun','microtun','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['mtun','microtun','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);
@@ -2954,7 +2942,7 @@ function svc(k,a){var go=function(){toast(t('Checking…'));api('POST','/api/ser
  if(a=='start')go();else confirmDo(go)}
 
 // ---------------------------------------------------------------- users
-var PCOL={wg:'#1fa36b',awg:'#7c5cf0',hy2:'#d1497a',kmix:'#ff7a1a',kgame:'#e0b04a',mtun:'#3fb6c9',xray:'#e0a020',dns:'#2a9df4'};
+var PCOL={wg:'#1fa36b',awg:'#7c5cf0',hy2:'#d1497a',kmix:'#ff7a1a',mtun:'#3fb6c9',xray:'#e0a020',dns:'#2a9df4'};
 var SORTS={new:function(a,b){return b.id-a.id},old:function(a,b){return a.id-b.id},name:function(a,b){return a.username.toLowerCase()<b.username.toLowerCase()?-1:1},
  usage:function(a,b){return usageVal(b)-usageVal(a)},expiry:function(a,b){return expVal(a)-expVal(b)},seen:function(a,b){return (b.last_seen_ts||0)-(a.last_seen_ts||0)}};
 function usageVal(u){return u.traffic_limit_gb>0?u.traffic_used_gb/u.traffic_limit_gb:-1}
@@ -3009,7 +2997,7 @@ function drawLive(){var el=$('#ulv');if(!el)return;var cnt={},any=0;
   '<button class="sc'+(S.lv?'':' act')+'" data-lv=""><span class="dot g"></span>'+t('All')+' <b>'+N(any)+'</b></button>'+
   PROTOS.filter(function(p){return cnt[p[0]]}).map(function(p){return '<button class="sc'+(S.lv==p[0]?' act':'')+'" data-lv="'+p[0]+'" style="--pc:'+(PCOL[p[0]]||'#999')+'"><i></i><bdi dir="ltr">'+p[1]+'</bdi> <b>'+N(cnt[p[0]])+'</b></button>'}).join('');
  el.onclick=function(e){var b=e.target.closest('[data-lv]');if(!b)return;S.lv=b.dataset.lv;S.pg=1;drawLive();drawUsers()}}
-function liveShort(p){return {wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',kgame:'MIX+\u200e',mtun:'MT',xray:'XR',dns:'DNS'}[p]||p.toUpperCase()}
+function liveShort(p){return {wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',mtun:'MT',xray:'XR',dns:'DNS'}[p]||p.toUpperCase()}
 // what a user is connected with: one badge per protocol, the flag of the server's exit country and a small
 // Iran flag when that config goes through an Iran tunnel
 function liveBadges(lv){var by={},order=[];lv.forEach(function(c){if(!by[c.p]){by[c.p]=[];order.push(c.p)}by[c.p].push(c)});
@@ -3916,12 +3904,13 @@ function tunNodeFor(sid){return api('GET','/api/nodes').then(function(ns){
 // the VPN ports a node serves (from the node info the panel already keeps)
 // the ports of the Xray inbounds and of Kanki DNS that run on a server (Tunnel servers id, or "local"):
 // KCP on UDP, Shadowsocks on both, the rest on TCP; DNS 53 (UDP + TCP), DoT 853, DoH 443
-function tunSvcPorts(sid){var o={tcp:[],udp:[]},add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&o[l].indexOf(v)<0)o[l].push(v)},none=function(){return null};
+function tunSvcGroups(sid){var o={xray:{tcp:[],udp:[]},dns:{tcp:[],udp:[]}},add=function(g,l,v){v=parseInt(v,10);if(v>0&&v<65536&&g[l].indexOf(v)<0)g[l].push(v)},none=function(){return null};
  return Promise.all([api('GET','/api/xray').catch(none),api('GET','/api/dns').catch(none)]).then(function(r){var x=r[0],d=r[1];
   ((x&&x.on&&x.inbounds)||[]).forEach(function(ib){if(ib.enabled===false||ib.server!=sid)return;
-   if(ib.network=='kcp')add('udp',ib.port);else{add('tcp',ib.port);if(ib.protocol=='shadowsocks')add('udp',ib.port)}});
-  if(d&&d.on&&(d.servers||[]).some(function(z){return z.server==sid})){add('udp',53);add('tcp',53);add('tcp',853);add('tcp',443)}
+   if(ib.network=='kcp')add(o.xray,'udp',ib.port);else{add(o.xray,'tcp',ib.port);if(ib.protocol=='shadowsocks')add(o.xray,'udp',ib.port)}});
+  if(d&&d.on&&(d.servers||[]).some(function(z){return z.server==sid})){add(o.dns,'udp',53);add(o.dns,'tcp',53);add(o.dns,'tcp',853);add(o.dns,'tcp',443)}
   return o})}
+function tunSvcPorts(sid){return tunSvcGroups(sid).then(function(g){return tunMerge(tunMerge({tcp:[],udp:[]},g.xray),g.dns)})}
 function tunMerge(a,b){[['tcp'],['udp']].forEach(function(k){k=k[0];(b[k]||[]).forEach(function(p){if(a[k].indexOf(p)<0)a[k].push(p)})});return a}
 function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pre)});
  var x=id?Object.assign({},(TN.d.tunnels||[]).filter(function(z){return z.id==id})[0]||{},pre||{}):(pre||{}),sv=TN.d.servers||[];
@@ -3969,7 +3958,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<label class="f">'+t('Destination networks sent through the link')+'</label><input id="tw_aw_rt" class="ltr" value="'+esc((A.routes||[]).join(', '))+'" placeholder="1.1.1.1, 8.8.0.0/16">'+
   '<label class="f">'+t('All traffic from these networks goes through the link')+'</label><input id="tw_aw_sr" class="ltr" value="'+esc((A.src_routes||[]).join(', '))+'" placeholder="10.8.0.0/24">'+
   '<small class="muted" style="display:block">'+t('For example the subnet of the VPN users of the entry: their internet then leaves from the exit. SSH of the entry itself is never touched.')+'</small>'+
-  '<div class="nh" style="margin-top:8px"><span></span><button type="button" class="b2 sm" id="tw_aw_vpn">'+ic('ports',14)+' '+t('Ports of the exit server')+'</button></div><p class="muted" id="tw_aw_pn" style="font-size:11.5px;margin:2px 0 0"></p>'+
+  '<div class="nh" style="margin-top:8px"><span></span><button type="button" class="b2 sm" id="tw_aw_vpn">'+ic('ports',14)+' '+t('All ports of the exit server')+'</button></div><div class="corechips" id="tw_aw_cc"></div><p class="muted" id="tw_aw_pn" style="font-size:11.5px;margin:2px 0 0"></p>'+
   '<div class="g2"><div><label class="f">'+t('Entry public TCP ports sent into the link')+'</label><input id="tw_aw_ft" class="ltr" value="'+esc((A.fwd_tcp||[]).join(', '))+'" placeholder="443, 8443:443"></div><div><label class="f">'+t('Entry public UDP ports sent into the link')+'</label><input id="tw_aw_fu" class="ltr" value="'+esc((A.fwd_udp||[]).join(', '))+'" placeholder="51820"></div></div>'+
   '<label class="f">'+t('Forward to (empty = the exit inside the link)')+'</label><input id="tw_aw_tg" class="ltr" value="'+esc(A.fwd_target||'')+'" placeholder="10.88.N.2"></details>'+
   (id?'<div class="g2" style="margin-top:10px"><button type="button" class="b2 sm" id="tw_aw_c1">'+t('Show the config of the entry')+'</button><button type="button" class="b2 sm" id="tw_aw_c2">'+t('Show the config of the exit')+'</button></div>':'')+
@@ -3994,7 +3983,8 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   cdnTools()+'</div></div>'+
   sec(4,'Ports')+'<div id="tw_ptrow"><label class="f">'+t('Tunnel port')+'</label><input id="tw_pt" type="number" class="ltr" value="'+(x.port||'')+'"></div>'+
   '<small class="muted" id="tw_ph"></small>'+
-  '<div id="tw_pc"><div class="nh" style="margin-top:12px"><b>'+t('Ports to carry')+'</b><button class="b2 sm" id="tw_vpn">'+ic('ports',14)+' '+t('Ports of the exit server')+'</button></div>'+
+  '<div id="tw_pc"><div class="nh" style="margin-top:12px"><b>'+t('Ports to carry')+'</b><button class="b2 sm" id="tw_vpn">'+ic('ports',14)+' '+t('All ports of the exit server')+'</button></div>'+
+  '<div class="corechips" id="tw_cc"></div>'+
   '<small class="muted" id="tw_pn" style="display:block;margin-bottom:6px"></small>'+
   '<div class="g2"><div><label class="f">TCP</label><input id="tw_tcp" class="ltr" value="'+esc((x.tcp||[]).join(', '))+'" placeholder="443, 2053"></div><div><label class="f">UDP</label><input id="tw_udp" class="ltr" value="'+esc((x.udp||[]).join(', '))+'" placeholder="51820, 51821, 8443"></div></div>'+
   '<small class="muted">'+t('Users connect to these ports on the entry; they reach the same ports on the exit. Use 8443:443 to change the port, 1000-1010 for a range.')+'</small></div></div>'+
@@ -4040,8 +4030,17 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
    var mp=function(arr,u){return arr.map(function(p){var q=p;while(u[q]&&q<65535)q++;u[q]=1;if(q!=p)moved.push(q+'→'+p);return q==p?String(p):q+':'+p})};
    $('#tw_tcp').value=mp(P.tcp,use.tcp).join(', ');$('#tw_udp').value=mp(P.udp,use.udp).join(', ');
    var what=[n?'VPN':'',sx.tcp.length||sx.udp.length?'Xray / DNS':''].filter(Boolean).join(' + ');
-   if(pn)pn.textContent=t('Ports of')+' '+(n?n.name:tunSrv(ex).name)+' ('+what+') '+t('were filled in')+(moved.length?' · '+t('Moved on the entry because they were taken')+': '+moved.join(', '):'')}).catch(function(e){if(manual)fail(e)})}
- $('#tw_en').onchange=function(){hint();if(!id)fillPorts(false)};$('#tw_ex').onchange=function(){hint();if(!id)fillPorts(false)};
+   if(pn)pn.textContent=t('Ports of')+' '+(n?n.name:tunSrv(ex).name)+' ('+what+') '+t('were filled in')+(moved.length?' · '+t('Moved on the entry because they were taken')+': '+moved.join(', '):'');cc.paint();acc.paint()}).catch(function(e){if(manual)fail(e)})}
+ // one button per core of the exit server: its ports go into (or out of) the boxes. Ports the entry
+ // already uses (other tunnels, its own VPN, the tunnel port) are moved there, as above.
+ var entryOwn={tcp:[],udp:[]},loadOwn=function(){var en=$('#tw_en').value;return Promise.all([tunNodeFor(en),tunSvcPorts(en)]).then(function(r){entryOwn=tunMerge(r[0]?tunNodePorts(r[0]):{tcp:[],udp:[]},r[1])}).catch(function(){})};
+ var entryUse=function(){var en=$('#tw_en').value,u=tunPortUse(en,id),l=st.mode=='direct'?$('#tw_ex').value:en,pt=+$('#tw_pt').value;
+  entryOwn.tcp.forEach(function(p){u.tcp[p]=1});entryOwn.udp.forEach(function(p){u.udp[p]=1});
+  if(st.kind=='awg'){var ap=+(($('#tw_aw_pt')||{}).value||0);if(ap)u.udp[ap]=1}else if(l==en&&pt){if(tunBoth(st.tr)){u.udp[pt]=1;u.tcp[pt]=1}else(tunUdpTr(st.tr)?u.udp:u.tcp)[pt]=1}return u};
+ var exitCores=function(){var ex=$('#tw_ex').value;if(ex==$('#tw_en').value)return Promise.resolve([]);return Promise.all([tunNodeFor(ex),tunSvcGroups(ex),loadOwn()]).then(function(r){return tunCoreGroups(r[0]&&r[0].info,r[1])})};
+ var cc=coreChips({box:'#tw_cc',tcp:'#tw_tcp',udp:'#tw_udp',note:'#tw_pn',cores:exitCores,used:entryUse});
+ var acc=coreChips({box:'#tw_aw_cc',tcp:'#tw_aw_ft',udp:'#tw_aw_fu',note:'#tw_aw_pn',cores:exitCores,used:entryUse});
+ $('#tw_en').onchange=function(){hint();cc.load();acc.load();if(!id)fillPorts(false)};$('#tw_ex').onchange=function(){hint();cc.load();acc.load();if(!id)fillPorts(false)};
  $('#tw_md').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.mode=b.dataset.v;$$('#tw_md button').forEach(function(z){z.classList.toggle('on',z==b)});cdnUi()};
  function kindUi(){var aw=st.kind=='awg',hy=st.kind=='hy2',tr=(!aw||st.wrap)&&!hy;$('#tw_awg').style.display=aw?'block':'none';$('#tw_hy').style.display=hy?'block':'none';
   if(hy)st.mode='direct';var md=$('#tw_md');md.style.display=hy?'none':'';if(md.previousElementSibling)md.previousElementSibling.style.display=hy?'none':'';$('#tw_trw').style.display=tr?'':'none';$('#tw_ptrow').style.display=tr?'':'none';$('#tw_pfw').style.display=tr?'':'none';$('#tw_dsg').style.display=tr?'':'none';$('#tw_ph').style.display=tr?'':'none';$('#tw_pc').style.display=aw?'none':'';$('#tw_aw_lkw').style.display=st.wrap?'':'none';var s5=$('#tw_ptrow').closest('.tws');if(s5)s5.style.display=(!aw||st.wrap)?'':'none';$$('#tw_kd button').forEach(function(z){z.classList.toggle('on',z.dataset.v==st.kind)});cdnUi()}
@@ -4067,7 +4066,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   var h=$('#tw_cdh');if(h)h.textContent=on?(st.mode=='reverse'?t('On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.'):t('On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.')):'';hint()}
  $('#tw_tr').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.tr=b.dataset.v;$$('#tw_tr button').forEach(function(z){z.classList.toggle('on',z==b)});cdnUi()};
  $('#tw_vpn').onclick=function(){fillPorts(true)};
- // AmneziaWG: the same ports go into its forward fields (VPN, KANKI MIX, MIX+, Xray, DNS of the exit); a port the
+ // AmneziaWG: the same ports go into its forward fields (VPN, KANKI MIX, microtun, Xray, DNS of the exit); a port the
  // entry itself uses moves to the next free one there ("4101:4100")
  if($('#tw_aw_vpn'))$('#tw_aw_vpn').onclick=function(){var en=$('#tw_en').value,ex=$('#tw_ex').value,pn=$('#tw_aw_pn');if(en==ex)return;
   Promise.all([tunNodeFor(ex),tunNodeFor(en),tunSvcPorts(ex),tunSvcPorts(en)]).then(function(r){var n=r[0],m=r[1];
@@ -4075,7 +4074,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
    if(!P.tcp.length&&!P.udp.length){toast(t('No node found for this server: type the ports by hand'));return}
    var use={tcp:{},udp:{}},moved=[],apt=+(($('#tw_aw_pt')||{}).value||0);E.tcp.forEach(function(p){use.tcp[p]=1});E.udp.forEach(function(p){use.udp[p]=1});if(apt)use.udp[apt]=1;
    var mp=function(arr,u){return arr.map(function(p){var q=p;while(u[q]&&q<65535)q++;u[q]=1;if(q!=p)moved.push(q+'→'+p);return q==p?String(p):q+':'+p})};
-   $('#tw_aw_ft').value=mp(P.tcp,use.tcp).join(', ');$('#tw_aw_fu').value=mp(P.udp,use.udp).join(', ');
+   $('#tw_aw_ft').value=mp(P.tcp,use.tcp).join(', ');$('#tw_aw_fu').value=mp(P.udp,use.udp).join(', ');acc.paint();
    if(pn)pn.textContent=t('Ports of')+' '+(n?n.name:tunSrv(ex).name)+' '+t('were filled in')+(moved.length?' · '+t('Moved on the entry because they were taken')+': '+moved.join(', '):'')}).catch(fail)};
  $('#tw_kd').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.kind=b.dataset.v;kindUi()};
  $('#tw_aw_wrap').onchange=function(){st.wrap=this.checked;kindUi()};$('#tw_aw_pt').oninput=function(){this.dataset.touched=1};
@@ -4084,7 +4083,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  $('#tw_smart').onclick=function(){if($('#tw_en').value==$('#tw_ex').value){toast(t('The entry and the exit must be different'),1);return}
   var L=function(v){return String(v||'').split(/[\s,]+/).filter(Boolean)},g=function(k){var e=$(k);return e?e.value:''};
   tunSmart({entry:$('#tw_en').value,exit:$('#tw_ex').value,prof:$('#tw_pf').value,apply:{id:id,snap:{name:$('#tw_nm').value,mode:st.mode,transport:st.tr,port:+$('#tw_pt').value||0,conns:TNP[$('#tw_pf').value]||4,tcp:L($('#tw_tcp').value),udp:L($('#tw_udp').value),dial:g('#tw_dl'),target:g('#tw_tg'),sni:g('#tw_sni'),host:g('#tw_host'),frag:!!($('#tw_frag2')&&$('#tw_frag2').checked),path:g('#tw_pa'),auto:!!($('#tw_au')&&$('#tw_au').checked),fec:st.tr=='game'?g('#tw_fec'):'',dup:st.tr=='game'&&!!($('#tw_dup')&&$('#tw_dup').checked)}}})};
- hint();kindUi();if(!id&&!(x.tcp||[]).length&&!(x.udp||[]).length&&st.kind!='awg')fillPorts(false);livePorts(id);
+ hint();kindUi();cc.load();acc.load();if(!id&&!(x.tcp||[]).length&&!(x.udp||[]).length&&st.kind!='awg')fillPorts(false);livePorts(id);
  // the name it gets when left empty: Iran server-abroad server
  var nmHint=function(){var e=tunSrv($('#tw_en').value),x2=tunSrv($('#tw_ex').value),ir=function(v){return v.loc=='iran'},a=ir(x2)&&!ir(e)?[x2,e]:[e,x2];$('#tw_nm').placeholder=a[0].name+'-'+a[1].name};
  nmHint();$('#tw_en').addEventListener('change',nmHint);$('#tw_ex').addEventListener('change',nmHint);
@@ -4270,7 +4269,7 @@ var SECS=[
  ['nodes','Servers','nodes',[['nodes','','Servers']],'Servers & network'],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
  ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','Cores','cores',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['mtun','','microtun'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
+ ['vpnsec','Cores','cores',[['vpn','','Overview'],['kmix','','KANKI MIX'],['mtun','','microtun'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
  ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
 function secOf(p){for(var i=0;i<SECS.length;i++)if(SECS[i][3].some(function(x){return x[0]==p}))return SECS[i];return SECS[0]}
@@ -4605,7 +4604,46 @@ window.loadNodes=function(){if(S.page=='nodes'&&$('#svp_g'))return load(true);
 
 // ---------------------------------------------------------------- ports of a server, KANKI MIX too
 window.tunNodePorts=function(n){var i=(n&&n.info)||{},tcp=[],udp=[],add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
- [i.wg_port,i.awg_port,i.hy2_port,i.kmix_port,(i.kc_ports||{}).game].forEach(function(v){add(udp,v)});return {tcp:tcp,udp:udp}};
+ [i.wg_port,i.awg_port,i.hy2_port,i.kmix_port,i.mt_port].forEach(function(v){add(udp,v)});return {tcp:tcp,udp:udp}};
+
+// ---------------------------------------------------------------- one button per core
+// The ports of a server core by core: the VPN ports from what the server reports (`info` of its node),
+// Xray and Kanki DNS from their pages (tunSvcGroups). A core the server does not run has no ports.
+var CORES=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['mtun','microtun'],['xray','Xray'],['dns','Kanki DNS']];
+window.tunCoreGroups=function(info,svc){var i=info||{},one=function(v){v=parseInt(v,10);return v>0&&v<65536?[v]:[]},
+ vpn={wg:one(i.wg_port),awg:one(i.awg_port),hy2:one(i.hy2_port),kmix:one(i.kmix_port),mtun:one(i.mt_port)};
+ return CORES.map(function(c){var g=svc&&svc[c[0]];return {k:c[0],name:c[1],tcp:g?g.tcp.slice():[],udp:g?g.udp.slice():vpn[c[0]]||[]}})};
+// one item of a port box: "51821:51820" is entry 51821, target 51820; a range is neither
+function pItems(v){return String(v||'').split(/[\s,]+/).filter(Boolean)}
+function pTarget(x){var m=String(x).match(/^(\d+)(?::(\d+))?$/);return m?+(m[2]||m[1]):0}
+function pEntry(x){var m=String(x).match(/^(\d+)(?::\d+)?$/);return m?+m[1]:0}
+// A row of buttons, one per core, over a TCP and a UDP port box. A button is lit while all its ports
+// are in the boxes; a tap adds them (moved on the entry past what `used()` says is taken: 51821:51820)
+// or takes them out (except the ports another lit core needs too). o: {box, tcp, udp, cores() ->
+// Promise of tunCoreGroups, used() -> {tcp:{port:1}, udp:{…}} (optional), note (optional), change}
+window.coreChips=function(o){var G=[],seq=0,fld=function(l){return $(l=='tcp'?o.tcp:o.udp)};
+ var lit=function(g){var n=0,all=true;['tcp','udp'].forEach(function(l){var f=fld(l),tg=f?pItems(f.value).map(pTarget):[];g[l].forEach(function(p){n++;if(tg.indexOf(p)<0)all=false})});return n>0&&all};
+ var short=function(a){return a.length>3?a.slice(0,3).join(', ')+' …':a.join(', ')};
+ var paint=function(){var box=$(o.box);if(!box)return;
+  box.innerHTML=G.length?G.map(function(g,ix){var none=!g.tcp.length&&!g.udp.length,on=!none&&lit(g),
+   ps=[g.udp.length?'UDP '+short(g.udp):'',g.tcp.length?'TCP '+short(g.tcp):''].filter(Boolean).join(' · ');
+   return '<button type="button" class="cchip'+(on?' on':'')+'" data-ck="'+ix+'" style="--pc:'+(PCOL[g.k]||'var(--a)')+'"'+(none?' disabled title="'+esc(t('Not on this server'))+'"':'')+'>'+
+    '<i></i><b>'+esc(g.name)+'</b><small class="ltr">'+esc(none?t('not on this server'):ps)+'</small></button>'}).join(''):''};
+ var toggle=function(g){var moved=[];
+  if(lit(g)){var keep={tcp:{},udp:{}};G.forEach(function(h){if(h!==g&&lit(h))['tcp','udp'].forEach(function(l){h[l].forEach(function(p){keep[l][p]=1})})});
+   ['tcp','udp'].forEach(function(l){var f=fld(l);if(f)f.value=pItems(f.value).filter(function(x){var p=pTarget(x);return g[l].indexOf(p)<0||keep[l][p]}).join(', ')})}
+  else{var u=o.used?o.used():{tcp:{},udp:{}};
+   ['tcp','udp'].forEach(function(l){var f=fld(l);if(!f)return;var cur=pItems(f.value),tg=cur.map(pTarget);cur.forEach(function(x){var e=pEntry(x);if(e)u[l][e]=1});
+    g[l].forEach(function(p){if(tg.indexOf(p)>=0)return;var q=p;while(u[l][q]&&q<65535)q++;u[l][q]=1;if(q!=p)moved.push(q+'→'+p);cur.push(q==p?String(p):q+':'+p)});f.value=cur.join(', ')})}
+  ['tcp','udp'].forEach(function(l){var f=fld(l);if(f){f.dataset.touched=1;f.dispatchEvent(new Event('input',{bubbles:true}))}});
+  var nt=o.note&&$(o.note);if(nt)nt.textContent=g.name+': '+t(lit(g)?'its ports were added':'its ports were taken out')+(moved.length?' · '+t('Moved on the entry because they were taken')+': '+moved.join(', '):'');
+  if(o.change)o.change();paint()};
+ var bind=function(){var box=$(o.box);if(!box||box.dataset.ck)return;box.dataset.ck=1;
+  box.addEventListener('click',function(e){var b=e.target.closest('[data-ck]');if(b&&!b.disabled)toggle(G[+b.dataset.ck])});
+  ['tcp','udp'].forEach(function(l){var f=fld(l);if(f)f.addEventListener('input',paint)})};
+ var load=function(){var my=++seq,box=$(o.box);if(!box)return;bind();if(!G.length)box.innerHTML='<small class="muted">'+t('Loading…')+'</small>';
+  o.cores().then(function(g){if(my!=seq)return;G=g||[];paint()}).catch(function(){if(my==seq){G=[];paint()}})};
+ return {load:load,paint:paint}};
 
 // ---------------------------------------------------------------- data
 function tl(){return (TN.d&&TN.d.tunnels)||[]}
@@ -4659,11 +4697,12 @@ function routeOpen(ch,srvs,xr){var sv=TN.d.servers||[],remote=sv.filter(function
   ab=ab.filter(function(s){return !s.local});
   R.stops=[(ir[0]||remote[0]||{}).id||'',ab.length>1?ab[0].id:'',(ab[ab.length-1]||{}).id||'local'];
   R.hops=[{},{}];R.tcp='';R.udp=''}
- R.hops.forEach(function(h){h.transport=h.transport||'kcp';h.mode=h.mode||'reverse';h.prof=h.prof||'balanced'});
+ R.cc=null;R.hops.forEach(function(h){h.transport=h.transport||'kcp';h.mode=h.mode||'reverse';h.prof=h.prof||'balanced'});
  modal(mhead('⛓ '+t('Multi-location tunnel'))+'<p class="sub" style="margin:0 0 8px">'+t('Users connect to the first server; the traffic goes through each next server and leaves from the last. Every hop is a tunnel of its own with its own transport.')+'</p>'+
   '<label class="f">'+t('Route name')+'</label><input id="rt_nm" value="'+esc(R.name)+'" placeholder="Iran → Turkey → Germany" maxlength="40">'+
   '<div class="rt-path" id="rt_path"></div><button type="button" class="rt-add" id="rt_add">+ '+t('Add a stop')+'</button>'+
   '<div class="nh" style="margin-top:14px"><b>'+t('Ports to carry')+'</b><button class="b2 sm" id="rt_vpn">'+ic('ports',14)+' <span id="rt_vpnl"></span></button></div>'+
+  '<div class="corechips" id="rt_cc"></div>'+
   '<small class="muted" style="display:block;margin-bottom:6px">'+t('The same ports on every hop: users reach them on the first server and land on the same ports of the last one.')+'</small>'+
   '<div class="g2"><div><label class="f">TCP</label><input id="rt_tcp" class="ltr" value="'+esc(R.tcp)+'" placeholder="443, 2053"></div><div><label class="f">UDP</label><input id="rt_udp" class="ltr" value="'+esc(R.udp)+'" placeholder="51820, 51821, 8443, 4000"></div></div>'+
   '<label class="chk" style="margin-top:10px"><input type="checkbox" id="rt_use"'+(R.use?' checked':'')+'><span><b>'+t('Users of the last server connect through the first one')+'</b><small>'+t('WireGuard, AmneziaWG and Hysteria2 configs of the last server get the address of the first server; KANKI MIX gets its second config through the route by itself.')+'</small></span></label>'+
@@ -4671,6 +4710,9 @@ function routeOpen(ch,srvs,xr){var sv=TN.d.servers||[],remote=sv.filter(function
  drawPath();
  $('#rt_add').onclick=function(){readForm();R.stops.splice(R.stops.length-1,0,'');R.hops.push({transport:'tcpmux',mode:'reverse',prof:'balanced'});drawPath()};
  $('#rt_vpn').onclick=function(){fillPorts(true)};
+ R.cc=coreChips({box:'#rt_cc',tcp:'#rt_tcp',udp:'#rt_udp',cores:function(){readForm();var last=R.stops[R.stops.length-1];if(!last)return Promise.resolve([]);
+  var sv=((R.srvs&&R.srvs.servers)||[]).filter(function(x){return (x.agent&&x.agent.id==last)||(last=='local'&&x.local)})[0];
+  return tunSvcGroups(last).then(function(g){return tunCoreGroups(sv&&sv.node&&sv.node.info,g)})},change:readForm});R.cc.load();
  $('#rt_test').onclick=function(){readForm();testAll()};
  $('#rt_go').onclick=function(){save(this)};
  if(!ch)fillPorts(false)}
@@ -4694,7 +4736,7 @@ function drawPath(){var el=$('#rt_path');if(!el)return;var n=R.stops.length,h=''
  $$('#rt_path .rt-tr,#rt_path .rt-md').forEach(function(s){s.onchange=function(){var i=+s.dataset.h;readForm();R.hops[i].auto=true;R.hops[i].port=0;autoPorts();drawPath()}});
  $$('#rt_path .rt-pt').forEach(function(s){s.oninput=function(){R.hops[+s.dataset.h].typed=1}});
  autoPorts(true);
- var last=R.stops[n-1],l=$('#rt_vpnl');if(l)l.textContent=t('Ports of')+' '+(last?sname(last):'—')}
+ var last=R.stops[n-1],l=$('#rt_vpnl');if(l)l.textContent=t('All ports of')+' '+(last?sname(last):'—');if(R.cc)R.cc.load()}
 function readForm(){$$('#rt_path .rt-s').forEach(function(s){R.stops[+s.dataset.i]=s.value});
  $$('#rt_path .rt-tr').forEach(function(s){R.hops[+s.dataset.h].transport=s.value});
  $$('#rt_path .rt-md').forEach(function(s){R.hops[+s.dataset.h].mode=s.value});
@@ -4712,12 +4754,12 @@ function autoPorts(paint){var taken={};
 function fillPorts(manual){readForm();var last=R.stops[R.stops.length-1];if(!last)return;
  var s=((R.srvs&&R.srvs.servers)||[]).filter(function(x){return (x.agent&&x.agent.id==last)||(last=='local'&&x.local)})[0],n=s&&s.node,i=(n&&n.info)||{},udp=[],tcp=[];
  var add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
- [i.wg_port,i.awg_port,i.hy2_port,i.kmix_port].forEach(function(v){add(udp,v)});
+ [i.wg_port,i.awg_port,i.hy2_port,i.kmix_port,i.mt_port].forEach(function(v){add(udp,v)});
  tunSvcPorts(last).then(function(o){
   o.tcp.forEach(function(v){add(tcp,v)});o.udp.forEach(function(v){add(udp,v)});
   if(!udp.length&&!tcp.length){if(manual)toast(t('No node found for this server: type the ports by hand'),1);return}
   if(!manual&&(R.tcp||R.udp))return;
-  $('#rt_tcp').value=tcp.join(', ');$('#rt_udp').value=udp.join(', ');readForm()})}
+  $('#rt_tcp').value=tcp.join(', ');$('#rt_udp').value=udp.join(', ');readForm();if(R.cc)R.cc.paint()})}
 
 // ---------------------------------------------------------------- smart test, hop by hop
 function probeWait(){return new Promise(function(res){var iv=setInterval(function(){api('GET','/api/tunnels/probe').then(function(r){var j=r.job;if(!j||j.finished){clearInterval(iv);res(j)}else{var p=Math.min(99,Math.round(j.elapsed*100/60));R.onp&&R.onp(p)}}).catch(function(){})},2000)})}
