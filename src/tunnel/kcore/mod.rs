@@ -25,11 +25,14 @@
 //! `server.rs` is what each VPN server runs (inside the panel agent or as `kanki-core server`),
 //! `client.rs` + `socks.rs` is the app side (`kanki-core client`, built for Android).
 
+// the app side is built into `kanki-core` (kcore/); the panel only runs it in its tests
+#[allow(dead_code)]
 pub mod client;
 pub mod dgram;
 pub mod gamec;
 pub mod hqc;
 pub mod server;
+#[allow(dead_code)]
 pub mod socks;
 
 use hmac::{Hmac, Mac};
@@ -102,6 +105,7 @@ pub fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+#[allow(dead_code)]
 pub fn make_auth(user: &str, key: &str, datagrams: bool) -> Auth {
     let mut n = [0u8; 16];
     rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut n);
@@ -157,6 +161,7 @@ pub fn public_ip(ip: IpAddr) -> bool {
 }
 
 /// "host:port" of a socket address the way the mux expects it ("[v6]:port" for IPv6)
+#[allow(dead_code)]
 pub fn target_of(a: SocketAddr) -> String {
     a.to_string()
 }

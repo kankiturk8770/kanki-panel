@@ -4,6 +4,7 @@ use super::client::{Client, ClientCfg};
 use super::server::{CoreCfg, CoreServer, CoreUser};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
@@ -186,4 +187,94 @@ async fn game_core_without_fast_path() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn hq_core_end_to_end() {
     run_core("hq", true).await;
+}
+
+/// Drops `loss` of the datagrams both ways between the app and the server.
+async fn lossy_proxy(server: SocketAddr, loss: f64) -> SocketAddr {
+    let front = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+    let back = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+    back.connect(server).await.unwrap();
+    let addr = front.local_addr().unwrap();
+    let app: Arc<std::sync::Mutex<Option<SocketAddr>>> = Default::default();
+    let (f1, b1, a1) = (front.clone(), back.clone(), app.clone());
+    tokio::spawn(async move {
+        let mut b = vec![0u8; 65536];
+        while let Ok((n, from)) = f1.recv_from(&mut b).await {
+            *a1.lock().unwrap() = Some(from);
+            if rand::random::<f64>() >= loss {
+                let _ = b1.send(&b[..n]).await;
+            }
+        }
+    });
+    tokio::spawn(async move {
+        let mut b = vec![0u8; 65536];
+        while let Ok(n) = back.recv(&mut b).await {
+            let to = *app.lock().unwrap();
+            if let Some(to) = to {
+                if rand::random::<f64>() >= loss {
+                    let _ = front.send_to(&b[..n], to).await;
+                }
+            }
+        }
+    });
+    addr
+}
+
+/// Share of small game packets that come back through a path losing 15 % each way.
+async fn delivered(copies: u8) -> f64 {
+    LOOPBACK_OK.store(true, Ordering::Relaxed);
+    let us = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let udp_target = us.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut b = vec![0u8; 2048];
+        while let Ok((n, from)) = us.recv_from(&mut b).await {
+            let _ = us.send_to(&b[..n], from).await;
+        }
+    });
+    let port = free_udp_port().await;
+    let cfg = CoreCfg { door: "loss-door".into(), game: port, fec: "4:2".into(), copies, users: vec![CoreUser { name: "u".into(), key: "k".into(), max: 0 }], ..Default::default() };
+    let _srv = CoreServer::start(&cfg).await;
+    let proxy = lossy_proxy(format!("127.0.0.1:{}", port).parse().unwrap(), 0.15).await;
+    let cc = ClientCfg { kind: "game".into(), server: proxy.to_string(), door: cfg.door.clone(), user: "u".into(), key: "k".into(), copies, datagrams: true, ..Default::default() };
+    let client = Client::new(cc).await.unwrap();
+    let sl = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let socks = sl.local_addr().unwrap();
+    drop(sl);
+    tokio::spawn(super::socks::serve(socks, client.clone()));
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (_ctl, relay) = socks_udp(socks).await;
+    let app = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+    // a PUBG-like stream: 400 packets of 80-200 bytes, 2 ms apart
+    let got = Arc::new(std::sync::Mutex::new(std::collections::HashSet::new()));
+    let (a2, g2) = (app.clone(), got.clone());
+    let rx = tokio::spawn(async move {
+        let mut b = vec![0u8; 2048];
+        while let Ok(n) = a2.recv(&mut b).await {
+            if n >= 14 {
+                g2.lock().unwrap().insert(u32::from_be_bytes([b[10], b[11], b[12], b[13]]));
+            }
+        }
+    });
+    for i in 0..400u32 {
+        let mut p = i.to_be_bytes().to_vec();
+        p.resize(80 + (i as usize * 37) % 120, 0x5a);
+        app.send_to(&udp_packet(udp_target, &p), relay).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    rx.abort();
+    let n = got.lock().unwrap().len();
+    n as f64 / 400.0
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn duplicates_beat_loss_for_game_packets() {
+    let one = delivered(1).await;
+    let two = delivered(2).await;
+    let three = delivered(3).await;
+    eprintln!("round trips through 15% loss each way: 1 copy {:.1}%, 2 copies {:.1}%, 3 copies {:.1}%", one * 100.0, two * 100.0, three * 100.0);
+    // expected about 72 %, 95.5 % and 99.3 %
+    assert!(one < 0.85, "{}", one);
+    assert!(two > 0.90, "{}", two);
+    assert!(three > 0.97, "{}", three);
 }

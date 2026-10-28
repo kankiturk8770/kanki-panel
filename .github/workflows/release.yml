@@ -50,3 +50,61 @@ jobs:
             kanki-panel
             kanki-panel.sha256
             version.txt
+
+  # Kanki Cores in one small binary: `kanki-core` for Linux and `libkcore.so` (the same program,
+  # named like a library so Android installs it) for the Kanki app, like libhysteria.so / libkmix.so.
+  # The transport sources are the panel's own files (kcore/src/tunnel/mod.rs), so app and servers
+  # always speak the same version.
+  kanki-core:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kcore
+
+      - name: Build kanki-core (Linux)
+        working-directory: kcore
+        run: cargo build --release --locked
+
+      - name: Build libkcore.so (Android arm64-v8a, armeabi-v7a)
+        working-directory: kcore
+        run: |
+          set -e
+          NDK="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-$ANDROID_NDK}}"
+          if [ ! -d "$NDK" ]; then NDK=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -1); fi
+          TC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "NDK: $NDK"
+          export AR_aarch64_linux_android="$TC/llvm-ar" AR_armv7_linux_androideabi="$TC/llvm-ar"
+          export CC_aarch64_linux_android="$TC/aarch64-linux-android26-clang"
+          export CC_armv7_linux_androideabi="$TC/armv7a-linux-androideabi26-clang"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TC/aarch64-linux-android26-clang"
+          export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$TC/armv7a-linux-androideabi26-clang"
+          # 16 KB pages (Android 15+ devices) as well as 4 KB
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384"
+          cargo build --release --locked --target aarch64-linux-android
+          cargo build --release --locked --target armv7-linux-androideabi
+          mkdir -p ../kcore-out
+          cp target/aarch64-linux-android/release/kanki-core ../kcore-out/libkcore-arm64-v8a.so
+          cp target/armv7-linux-androideabi/release/kanki-core ../kcore-out/libkcore-armeabi-v7a.so
+          cp target/release/kanki-core ../kcore-out/kanki-core-linux-amd64
+          cd ../kcore-out && sha256sum * > SHA256SUMS && file * && cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kanki-core
+          path: kcore-out/
+
+      - name: Publish to Releases (tag "kanki-core")
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: kanki-core
+          name: Kanki Cores (app + Linux)
+          make_latest: false
+          files: kcore-out/*

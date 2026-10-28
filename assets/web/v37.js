@@ -34,7 +34,7 @@ var SECS=[
  ['dash','Dashboard','dash',[['dash','','Dashboard']]],
  ['users','Users','users',[['users','','Users']]],
  ['nodes','Servers','nodes',[['nodes','','Servers']]],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['xray','','Xray'],['dns','','Kanki DNS'],['antidpi','','Anti-DPI']]],
+ ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kcore','','Kanki Cores'],['xray','','Xray'],['dns','','Kanki DNS'],['antidpi','','Anti-DPI']]],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels'],['servers','','Tunnel servers'],['ports','','Ports']]],
  ['salesec','Sales & support','bot',[['bot','','Sales bot'],['emergency','','Emergency chat']]],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']]],

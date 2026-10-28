@@ -1,3 +1,10 @@
+# v3.14.0 — Kanki Cores
+- New `src/tunnel/kcore/`: Game-FEC, HQ-QUIC and FakeTCP served to users as VPN cores (per-user HMAC auth after the link handshake, full proxy to public addresses only, a datagram fast path for game UDP with 1-3 copies of small packets, a replay window that drops the copies, big bodies cut into pieces). The transports are reused as they are.
+- `mux.rs`: `Shared::public_only` (off by default; the tunnels leave it off). `faketcp.rs`: `socklen_t` instead of `u32` so it builds for 32-bit Android (the same type on the servers).
+- Panel: Services › Kanki Cores (`/api/kcore`), `kcore` in the sync request/answer (older agents ignore it), `kc_ports` / `kc_fec` / `kc_error` in the server info, `"kcore"` links in the subscription data, `kcore` as a user protocol.
+- `kcore/`: the `kanki-core` binary (server, client, ping, url), compiled from the panel's own tunnel files; CI builds it for Linux and Android and publishes it under the tag `kanki-core`.
+- Tests: end to end for Game-FEC and HQ-QUIC (TCP, UDP through SOCKS5, wrong key, removed user, ping, traffic), a 15 %-loss run for the game copies, the datagram codec and the FEC relay.
+
 # v3.9.11 — tidier tunnels, compact VPN page, one V2Ray block on the subscription page
 - **Tunnel form:** only what is needed to run a tunnel shows (route, type, transport, ports; the CDN domain when CDN is picked). Disguise, profile and «More» are folded under **Advanced settings**, which opens and closes smoothly (open by itself when an edited tunnel already uses them).
 - **Ports of the exit server** also fills in the exit's **Xray inbound** ports (KCP on UDP, Shadowsocks on both, the rest on TCP) and **Kanki DNS** (53 UDP/TCP, 853, 443), in the tunnel form and the multi-location route form.

@@ -2,3 +2,4 @@
 *.db
 *.kbk
 .DS_Store
+/kcore/target
