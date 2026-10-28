@@ -107,7 +107,7 @@ async fn run_core(kind: &str, datagrams: bool) {
     });
 
     let port = free_udp_port().await;
-    let mut cfg = CoreCfg { door: "test-door-123".into(), fec: "4:2".into(), copies: 2, users: vec![CoreUser { name: "ali".into(), key: "k1".into(), max: 0, cores: vec![kind.into()] }, CoreUser { name: "reza".into(), key: "k2".into(), max: 0, cores: vec!["faketcp".into()] }], ..Default::default() };
+    let mut cfg = CoreCfg { door: "test-door-123".into(), fec: "4:2".into(), copies: 2, fast: if datagrams { vec!["game".into(), "hq".into()] } else { vec![] }, users: vec![CoreUser { name: "ali".into(), key: "k1".into(), max: 0, cores: vec![kind.into()] }, CoreUser { name: "reza".into(), key: "k2".into(), max: 0, cores: vec!["faketcp".into()] }], ..Default::default() };
     match kind {
         "game" => cfg.game = port,
         _ => cfg.hq = port,
@@ -125,7 +125,7 @@ async fn run_core(kind: &str, datagrams: bool) {
     let e = Client::new(bad).await.unwrap().link().await.err().expect("refused").to_string();
     assert!(e.contains("bad key"), "{}", e);
 
-    let cc = ClientCfg { key: "k1".into(), ..ClientCfg { kind: kind.into(), server: format!("127.0.0.1:{}", port), door: cfg.door.clone(), user: "ali".into(), copies: 2, datagrams, ..Default::default() } };
+    let cc = ClientCfg { key: "k1".into(), ..ClientCfg { kind: kind.into(), server: format!("127.0.0.1:{}", port), door: cfg.door.clone(), user: "ali".into(), copies: 2, datagrams: true, ..Default::default() } };
     let client = Client::new(cc.clone()).await.unwrap();
     let sl = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let socks = sl.local_addr().unwrap();
@@ -161,6 +161,9 @@ async fn run_core(kind: &str, datagrams: bool) {
     assert!(tokio::time::timeout(Duration::from_millis(300), app.recv(&mut b)).await.is_err(), "no extra answers");
     if datagrams {
         assert!(client.current().unwrap().dg.is_some(), "fast path is on");
+    } else {
+        // the app asks for it, the server has it off: UDP rides the stream, like the tunnels
+        assert!(client.current().unwrap().dg.is_none(), "fast path is off");
     }
 
     // ping through the link
@@ -236,7 +239,7 @@ async fn delivered(copies: u8) -> f64 {
         }
     });
     let port = free_udp_port().await;
-    let cfg = CoreCfg { door: "loss-door".into(), game: port, fec: "4:2".into(), copies, users: vec![CoreUser { name: "u".into(), key: "k".into(), max: 0, cores: vec![] }], ..Default::default() };
+    let cfg = CoreCfg { door: "loss-door".into(), game: port, fec: "4:2".into(), copies, fast: vec!["game".into()], users: vec![CoreUser { name: "u".into(), key: "k".into(), max: 0, cores: vec![] }], ..Default::default() };
     let _srv = CoreServer::start(&cfg).await;
     let proxy = lossy_proxy(format!("127.0.0.1:{}", port).parse().unwrap(), 0.15).await;
     let cc = ClientCfg { kind: "game".into(), server: proxy.to_string(), door: cfg.door.clone(), user: "u".into(), key: "k".into(), copies, datagrams: true, ..Default::default() };

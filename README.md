@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.14.1 — the new protocols like the tunnels, a 500 MB warning
+- **Game-FEC / HQ-QUIC:** «Game optimization» is a switch on each page and is **off** by default: game UDP rides inside the stream exactly like the tunnels. On = the datagram path with copies of small packets (as in 3.14). Only the server changes; the app stays as it is.
+- **Sales bot:** when 500 MB are left, the customer gets their account card (name, MB left, a usage bar, the code and the subscription link) with the config buttons and «Renew». Checked every 5 minutes; `warn_mb` in the database changes the amount.
+
 ## New in 3.14 — three VPN protocols of our own: Game-FEC, HQ-QUIC, FakeTCP
 - **Three new protocols for the Kanki app**, each a section of its own under Services like KANKI MIX, and ticked per user in the user form: **Game-FEC** (4100/UDP), **HQ-QUIC** (4101/UDP), **FakeTCP** (4102/TCP, rooted phones). They run on every VPN server on ports of their own, apart from the tunnels (only the transport code is shared). Update the agents.
 - **Built for PUBG:** game UDP travels as datagrams of its own, never behind a lost packet of the stream; small packets (≤ 400 bytes) go two or three times and the copies are dropped on arrival. Through 15% loss each way 96% (2 copies) or 99.8% (3 copies) of round trips arrive, against 72% with one.

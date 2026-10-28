@@ -21,7 +21,8 @@ function kcFA(){if(kcFA.done||typeof FA=='undefined')return;kcFA.done=1;Object.a
  "Off on this server":"روی این سرور خاموش","Running":"در حال اجرا","Not running":"اجرا نمی‌شود","Waiting for the server…":"منتظر سرور…",
  "Update the agent of this server to run it":"عامل این سرور را به‌روز کن تا اجرا شود",
  "Enable for all users":"روشن برای همه‌ی کاربران","Disable for all users":"خاموش برای همه‌ی کاربران","for every user?":"برای همه‌ی کاربران روشن شود؟","Remove from every user?":"از همه‌ی کاربران برداشته شود؟","users changed":"کاربر تغییر کرد",
- "How it works":"چطور کار می‌کند",
+ "How it works":"چطور کار می‌کند","Game optimization":"بهینه‌سازی بازی",
+ "Off: exactly like the tunnels (game UDP inside the stream). On: game packets as datagrams of their own, small ones sent several times.":"خاموش: دقیقاً مثل تانل‌ها (UDP بازی داخل همان جریان). روشن: بسته‌های بازی دیتاگرام جدا و بسته‌های کوچک چند بار.",
  "Tick it for a user (user form, or Enable for all users). Every server runs it by itself within a minute; the Kanki app gets the link from the subscription. Each user has their own key: a new link is a new key, an expired or disabled user is cut off at once. Open the port at the data center's firewall too.":"برای کاربر تیکش را بزن (فرم کاربر، یا «روشن برای همه‌ی کاربران»). هر سرور ظرف یک دقیقه خودش اجرایش می‌کند؛ اپ کانکی لینک را از اشتراک می‌گیرد. هر کاربر کلید خودش را دارد: لینک تازه یعنی کلید تازه، کاربر منقضی یا غیرفعال فوراً قطع می‌شود. پورت را در فایروال دیتاسنتر هم باز کن.",
  "the port must be 1-65535":"پورت باید ۱ تا ۶۵۵۳۵ باشد","Save":"ذخیره","Saved":"ذخیره شد","Servers":"سرورها","Settings":"تنظیمات","users":"کاربر","Main server":"سرور اصلی","Status":"وضعیت","On":"روشن","Off":"خاموش"})}
 
@@ -54,7 +55,7 @@ function kcServers(d){if(!d.servers.length)return '<p class="muted">—</p>';var
    (x.on&&x.error?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+esc(x.error)+'</div>':'')+'</div>'}).join('')}
 function kcDraw(d){var el=$('#kc');if(!el)return;var s=d.settings,p=d.proto,m=KC.meta[p];
  var fecs=['off','10:2','8:3','6:3','4:2'];if(fecs.indexOf(s.fec)<0)fecs.push(s.fec);
- var copies='<label class="f">'+t('Copies of each game packet')+'</label><select id="kc_cp">'+[[1,'1 (no copies)'],[2,'2 (recommended)'],[3,'3 (very lossy internet)']].map(function(c){return '<option value="'+c[0]+'"'+(s.copies==c[0]?' selected':'')+'>'+t(c[1])+'</option>'}).join('')+'</select>'+
+ var copies='<label class="f">'+t('Copies of each game packet')+' ('+t('Game optimization')+')'+'</label><select id="kc_cp">'+[[1,'1 (no copies)'],[2,'2 (recommended)'],[3,'3 (very lossy internet)']].map(function(c){return '<option value="'+c[0]+'"'+(s.copies==c[0]?' selected':'')+'>'+t(c[1])+'</option>'}).join('')+'</select>'+
   '<small class="muted">'+t('Only packets up to 400 bytes (PUBG: 40-300 bytes) are copied; downloads are sent once. Through 15% loss each way: 1 copy 72%, 2 copies 96%, 3 copies 99.8% of round trips arrive.')+'</small>';
  el.innerHTML=(s.on?'':'<div class="warnbox">'+esc(m.name)+' '+t('is off: it runs on no server and is in no subscription.')+'</div>')+
   '<div class="kv k5" id="kc_kv">'+kcKpis(d)+'</div>'+
@@ -62,6 +63,7 @@ function kcDraw(d){var el=$('#kc');if(!el)return;var s=d.settings,p=d.proto,m=KC
   '<div class="card"><h3>'+ic('settings',16)+' '+t('Settings')+'</h3>'+
    '<div class="srow"><div class="tx"><b>'+esc(m.name)+'</b></div><label class="sw"><input type="checkbox" id="kc_on" '+(s.on?'checked':'')+'><span></span></label></div>'+
    '<label class="f">'+t('Default port')+' · '+m.net+'</label><input id="kc_port" class="ltr" inputmode="numeric" value="'+esc(String(s.port))+'"><small class="muted">'+t('Every server uses it unless it has its own port below.')+'</small>'+
+   (p!='kftcp'?'<div class="srow" style="margin-top:8px"><div class="tx"><b>'+t('Game optimization')+'</b><small>'+t('Off: exactly like the tunnels (game UDP inside the stream). On: game packets as datagrams of their own, small ones sent several times.')+'</small></div><label class="sw"><input type="checkbox" id="kc_opt" '+(s.optimize?'checked':'')+'><span></span></label></div>':'')+
    (p=='kgame'?copies+'<label class="f">'+t('FEC of the stream (websites, game lobby)')+'</label><select id="kc_fec">'+fecs.map(function(f){return '<option value="'+esc(f)+'"'+(s.fec==f?' selected':'')+'>'+esc(f=='off'?t('off'):f)+'</option>'}).join('')+'</select>':'')+
    (p=='khq'?'<label class="f">'+t('TLS name')+'</label><input id="kc_sni" class="ltr" placeholder="www.cloudflare.com" value="'+esc(s.sni||'')+'">':'')+
    '<button class="btn" style="width:100%;margin-top:12px" id="kc_save">'+t('Save')+'</button></div></div>'+
@@ -75,6 +77,6 @@ function kcSaveNodes(p){kcPut(p,{nodes:kcNodes(p)})}
 function kcNodeOn(p,id,on){var m=kcNodes(p),o=m[id]||{};o.off=!on;m[id]=o;kcPut(p,{nodes:m})}
 function kcSave(p){var v=unN($('#kc_port').value).trim();if(!/^\d+$/.test(v)||+v<1||+v>65535)return toast(t('the port must be 1-65535'),1);
  var b={on:$('#kc_on').checked,port:+v,nodes:kcNodes(p)};
- if($('#kc_cp'))b.copies=+$('#kc_cp').value;if($('#kc_fec'))b.fec=$('#kc_fec').value;if($('#kc_sni'))b.sni=$('#kc_sni').value.trim();kcPut(p,b)}
+ if($('#kc_opt'))b.optimize=$('#kc_opt').checked;if($('#kc_cp'))b.copies=+$('#kc_cp').value;if($('#kc_fec'))b.fec=$('#kc_fec').value;if($('#kc_sni'))b.sni=$('#kc_sni').value.trim();kcPut(p,b)}
 function kcAll(p,on){kcFA();var n=KC.meta[p].name;if(!confirm(on?n+' '+t('for every user?'):n+': '+t('Remove from every user?')))return;
  api('POST','/api/kc/'+p+'/users',{on:on}).then(function(r){toast(t('Saved')+' · '+N(r.changed)+' '+t('users changed'));kcLoad(p)}).catch(fail)}

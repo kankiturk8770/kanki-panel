@@ -2462,17 +2462,34 @@ impl Bot {
                 }
             }
             self.clean_trials().await;
-            // هشدار اتمام حجم/زمان (هر ۳۰ دقیقه)
-            if tick.is_multiple_of(30) && self.db().on("warn_on") {
+            // هشدار اتمام حجم/زمان
+            // (every 5 minutes, so the 500 MB warning comes before the data is gone)
+            if tick.is_multiple_of(5) && self.db().on("warn_on") {
+                // the low-data warning: when this much is left (MB), 500 unless set in the database
+                let warn_mb: f64 = self.db().get("warn_mb").parse().ok().filter(|v: &f64| *v > 0.0).unwrap_or(500.0);
                 for u in self.db().users().into_iter().filter(|u| u.tg_id != 0) {
                     let mut flag = u.warned;
                     let mut msg = None;
                     if !u.active() && flag & 4 == 0 {
                         flag |= 4;
                         msg = Some(format!("⛔ سرویس <b>{}</b> تمام شد. برای ادامه، از «🔁 تمدید» استفاده کنید.", esc(&u.username)));
-                    } else if u.limit_gb > 0.0 && (u.limit_gb - u.used_gb()) < (u.limit_gb * 0.1).max(1.0) && flag & 1 == 0 && u.active() {
+                    } else if u.limit_gb > 0.0 && (u.limit_gb - u.used_gb()) * 1024.0 <= warn_mb && flag & 1 == 0 && u.active() {
                         flag |= 1;
-                        msg = Some(format!("⚠️ حجم سرویس <b>{}</b> رو به اتمام است ({:.2} GB مانده).", esc(&u.username), (u.limit_gb - u.used_gb()).max(0.0)));
+                        // the warning carries the whole account card (name, what is left, the code and the
+                        // subscription link) and the config buttons, so the customer has everything at hand
+                        let left_mb = ((u.limit_gb - u.used_gb()).max(0.0) * 1024.0).round();
+                        let used = (u.used_gb() / u.limit_gb).clamp(0.0, 1.0);
+                        let full = (used * 10.0).round() as usize;
+                        let bar = format!("{}{} {}%", "▰".repeat(full), "▱".repeat(10 - full), (used * 100.0).round());
+                        let t = format!("⚠️ <b>حجم سرویس {} داره تموم میشه</b>
+فقط <b>{} MB</b> مونده.
+<code>{}</code>
+
+{}", esc(&u.username), left_mb, bar, self.account_text(&u));
+                        let renew = vec![b("🔁 تمدید", &format!("rnw:{}", u.id))];
+                        let _ = self.db().exec("UPDATE users SET warned=?1 WHERE id=?2", &[&flag, &u.id]);
+                        self.send(u.tg_id, &t, Some(self.acct_kb(&u, vec![renew]))).await;
+                        continue;
                     } else if u.expires_at > 0 && u.expires_at - now() < 86400 && flag & 2 == 0 && u.active() {
                         flag |= 2;
                         msg = Some(format!("⏳ سرویس <b>{}</b> کمتر از ۲۴ ساعت دیگر منقضی می‌شود.", esc(&u.username)));
