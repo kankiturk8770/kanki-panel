@@ -138,10 +138,10 @@ function nodeAddTyped(){var tile=function(k,ico,title,sub){return '<button class
 var XR={d:null,q:'',srv:'',tab:'overview'};
 var XTABS=[['overview','Overview','dash'],['inbounds','Inbounds','xray'],['clients','Online clients','users'],['routing','Routing and outbounds','tunnel'],['settings','Settings','settings']];
 var REALITY_TARGETS=['www.microsoft.com:443','www.apple.com:443','dl.google.com:443','www.speedtest.net:443','www.cloudflare.com:443','www.yahoo.com:443','www.amazon.com:443','addons.mozilla.org:443','www.samsung.com:443','www.nvidia.com:443'];
-function p_xray(){XR.tab=S.sub||'overview';
- $('#pg').innerHTML='<div class="ph"><div><h2>Xray</h2><p>'+t('Xray inbounds for your users: every user with Xray ticked is a client of every inbound')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="xrAddNode()">'+ic('plus',15)+' '+t('Add server')+'</button><button class="btn" onclick="xrInbound()">+ '+t('Inbound')+'</button></div></div>'+
+function p_xray(){KAcc.open.xr='';XR.tab=S.sub||'overview';
+ $('#pg').innerHTML='<div class="ph"><div><h2>Xray</h2><p>'+t('Xray inbounds for your users: every user with Xray ticked is a client of every inbound')+'</p></div><div class="row" style="gap:6px"><button class="b2" id="xr_all1" onclick="srvProtoAll(\'xray\',0)">'+t('Off for all users')+'</button><button class="b2" onclick="srvProtoAll(\'xray\',1)">'+t('On for all users')+'</button><button class="b2" onclick="xrAddNode()">'+ic('plus',15)+' '+t('Add server')+'</button><button class="btn" onclick="xrInbound()">+ '+t('Inbound')+'</button></div></div>'+
   '<div class="ptabs" id="xr_tabs"></div><div id="xr">'+t('Loading…')+'</div>';
- xrLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))&&(XR.tab=='overview'||XR.tab=='inbounds'||XR.tab=='clients'))xrLoad(true)},5000)}
+ xrLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))&&(XR.tab=='overview'||XR.tab=='inbounds'||XR.tab=='clients'))xrLoad(true)},5000);srvLoad(true)}
 function tab_xray(sub){XR.tab=sub||'overview';if(XR.d)xrDraw(XR.d);else xrLoad()}
 function xrTabs(d){var el=$('#xr_tabs');if(!el)return;var cnt={inbounds:d.inbounds.length,clients:(d.online||[]).length,routing:(d.rule_list||[]).length+(d.outs||[]).length};
  el.innerHTML=XTABS.map(function(x){return '<a href="#xray/'+x[0]+'" class="'+(XR.tab==x[0]?'on':'')+'">'+ic(x[2],15)+t(x[1])+(cnt[x[0]]?' <em>'+N(cnt[x[0]])+'</em>':'')+'</a>'}).join('')}
@@ -162,8 +162,8 @@ function xrKpis(d){var act=d.inbounds.filter(function(x){return x.enabled&&!x.st
 function xrOverview(d,el){
  el.innerHTML=(d.on?'':'<div class="warnbox">'+t('Xray is off: nothing runs on the servers and no links go to the users.')+' <a href="#xray/settings">'+t('Turn it on')+'</a></div>')+
   '<div class="kv k5" id="xr_kv">'+xrKpis(d)+'</div>'+
-  '<div class="g2"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Xray servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="xr_srv" style="margin-top:10px">'+xrServers(d)+'</div></div>'+
-  '<div class="card"><div class="nh"><h3>'+ic('xray',16)+' '+t('Inbounds')+'</h3><a class="b2" href="#xray/inbounds">'+t('Manage')+'</a></div><div style="margin-top:6px">'+(d.inbounds.length?d.inbounds.map(function(ib){return xrMiniRow(ib)}).join(''):'<p class="muted">'+t('No inbound yet.')+' <a href="#" onclick="xrInbound();return false">'+t('Make the first one')+'</a></p>')+'</div></div></div>'+
+  '<div class="g2 k310one"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Xray servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="xr_srv" style="margin-top:10px">'+xrServers(d)+'</div></div>'+
+  '</div>'+
   '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0">'+t('1) Add a server (the panel server or any tunnel server). 2) Make inbounds on it. 3) Tick Xray for a user: the links of every inbound go into the user\'s subscription, and the traffic counts toward the user\'s volume.')+'</p></div>'}
 function xrProtoShort(p){return {vless:'VL',vmess:'VM',trojan:'TR',shadowsocks:'SS'}[p]||p}
 function xrMiniRow(ib){var st=xrState(ib);return '<div class="vrow"><span class="dot '+st[0]+'"></span><div class="nm"><b>'+esc(ib.remark||ib.protocol)+'</b><small class="ltr">'+esc(ib.protocol.toUpperCase())+' · '+esc(ib.network)+(ib.security!='none'?' · '+esc(ib.security.toUpperCase()):'')+' · :'+ib.port+'</small></div><span class="chipx '+st[0]+'">'+t(st[1])+'</span><b class="ltr" style="font-size:12px">'+N(bytes(ib.traffic))+'</b></div>'}
@@ -719,12 +719,12 @@ function dnsPubgLog(d){var el=$('#pg_log');if(!el)return;var keys=['pubg','igame
 var KM_ICO='<path d="M6 11h4M8 9v4"/><circle cx="15.5" cy="12.5" r=".6"/><circle cx="17.5" cy="10.5" r=".6"/><path d="M7.5 6h9a5 5 0 0 1 4.8 6.3l-1 3.6a2.6 2.6 0 0 1-4.6.9L14.5 15h-5l-1.2 1.8a2.6 2.6 0 0 1-4.6-.9l-1-3.6A5 5 0 0 1 7.5 6z"/>';
 var KM={d:null};
 
-function p_kmix(){
+function p_kmix(){KAcc.open.km='';
  $('#pg').innerHTML='<div class="ph"><div><h2>KANKI MIX</h2><p>'+t('Our own protocol on every VPN server: game packets go straight (no queue, sent twice in gaming mode), websites over KCP + FEC.')+'</p></div>'+
   '<div class="row" style="gap:6px"><button class="b2" onclick="kmAll(false)">'+t('Disable for all users')+'</button><button class="btn" onclick="kmAll(true)">'+ic('users',15)+' '+t('Enable for all users')+'</button></div></div><div id="km">'+t('Loading…')+'</div>';
  kmLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))kmLoad(true)},8000)}
-function kmLoad(quiet){return api('GET','/api/kmix').then(function(d){KM.d=d;if(S.page!='kmix')return d;
-  if(quiet&&$('#km_srv')){$('#km_kv').innerHTML=kmKpis(d);$('#km_srv').innerHTML=kmServers(d);return d}kmDraw(d);return d}).catch(fail)}
+function kmLoad(quiet){return srvLoad(true).then(function(){return api('GET','/api/kmix')}).then(function(d){KM.d=d;if(S.page!='kmix')return d;
+  if($('#km_srv')){$('#km_kv').innerHTML=kmKpis(d);if(!quiet||!accBusy('km'))$('#km_srv').innerHTML=kmServers(d);return d}kmDraw(d);return d}).catch(fail)}
 function kmRun(x){return x.active===true}
 function kmKpis(d){var s=d.settings,run=d.servers.filter(kmRun).length,on=d.servers.filter(function(x){return x.on}).length;
  return '<div><small>'+t('Status')+'</small><b style="color:'+(s.on?'var(--ok)':'var(--bad)')+'">'+(s.on?t('On'):t('Off'))+'</b></div>'+
@@ -751,7 +751,7 @@ function kmDraw(d){var el=$('#km');if(!el)return;var s=d.settings;
  var par=[[0,'none'],[2,'light'],[3,'normal'],[5,'strong'],[8,'very strong']];
  el.innerHTML=(s.on?'':'<div class="warnbox">'+t('KANKI MIX is off: it runs on no server and is in no subscription.')+'</div>')+
   '<div class="kv k5" id="km_kv">'+kmKpis(d)+'</div>'+
-  '<div class="g2"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="km_srv" style="margin-top:10px">'+kmServers(d)+'</div></div>'+
+  '<div class="g2 kmg2"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="km_srv" style="margin-top:10px">'+kmServers(d)+'</div></div>'+
   '<div class="card"><h3>'+ic('settings',16)+' '+t('Settings')+'</h3>'+
    '<div class="srow"><div class="tx"><b>'+t('KANKI MIX on')+'</b></div><label class="sw"><input type="checkbox" id="km_on" '+(s.on?'checked':'')+'><span></span></label></div>'+
    '<label class="f">'+t('Default UDP port')+'</label><input id="km_port" class="ltr" inputmode="numeric" value="'+esc(String(s.port))+'"><small class="muted">'+t('Every server uses it unless it has its own port below.')+'</small>'+
@@ -2727,12 +2727,19 @@ Object.defineProperty(Element.prototype,'innerHTML',{configurable:true,enumerabl
 function $$(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function toast(m,e){var x=$('#toast');x.textContent=m;x.className=e?'e':'';x.style.display='block';clearTimeout(x._t);x._t=setTimeout(function(){x.style.display='none'},2600)}
-function api(m,p,b,raw){var o={method:m,headers:{}};if(S.token)o.headers.Authorization='Bearer '+S.token;
+// a delete that leaves work on servers shows its progress (kdFollowRemoval)
+var DELRX=/^\/api\/(tunnels\/servers\/[^/?]+|tunnels\/(?!servers|probe|cdntest)[^/?]+|servers\/[^/?]+|nodes\/[^/?]+|xray\/servers\/[^/?]+|dns\/servers\/[^/?]+)(\?.*)?$/;
+function api(m,p,b,raw){var u=p;
+ // a tunnel server is made in Servers
+ if(m=='POST'&&p=='/api/tunnels/servers'&&b&&!b.gre_ip&&!b.addr){p='/api/servers';b={name:b.name,loc:b.loc||'abroad',vpn:b.loc!='iran'};raw=undefined}
+ var o={method:m,headers:{}};if(S.token)o.headers.Authorization='Bearer '+S.token;
  if(b!==undefined&&!(b instanceof Blob)&&!(b instanceof ArrayBuffer)){o.headers['Content-Type']='application/json';o.body=JSON.stringify(b)}else if(b!==undefined)o.body=b;
  if(raw&&raw.headers)for(var k in raw.headers)o.headers[k]=raw.headers[k];
- return fetch(p,o).then(function(r){if(r.status==401&&p!='/api/login'){logout(true);throw new Error('unauthorized')}
+ var pr=fetch(p,o).then(function(r){if(r.status==401&&p!='/api/login'){logout(true);throw new Error('unauthorized')}
   if(raw&&raw.blob)return r.ok?r.blob().then(function(bl){return{blob:bl,name:((r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/)||[])[1]}}):r.json().then(function(j){throw new Error(j.error||r.status)});
-  return r.text().then(function(x){var j;try{j=x?JSON.parse(x):{}}catch(e){j={error:x}}if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})})}
+  return r.text().then(function(x){var j;try{j=x?JSON.parse(x):{}}catch(e){j={error:x}}if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})});
+ if(m=='DELETE'&&DELRX.test(u||''))pr.then(function(r){if(r&&r.removal&&window.kdFollowRemoval)kdFollowRemoval(r.removal)},function(){});
+ return pr}
 function fail(e){if(!e||e.message=='unauthorized')return;
  // a page drawn after the admin already left it: nothing to tell
  if(e instanceof TypeError&&/of (null|undefined)/.test(e.message)){console.warn(e);return}
@@ -2814,7 +2821,9 @@ function areaChart(series,o){var W=300,H=o.h||100,cap=o.cap||60,mx=o.max||0,i,j,
  return out+'</svg>'}
 
 function applyLook(){document.documentElement.lang=S.lang;document.documentElement.dir=S.lang=='fa'?'rtl':'ltr';
- document.body.className=(S.theme=='light'?'light ':'')+(S.color&&S.color!='gold'?'c-'+S.color:'')}
+ var b=document.body.classList;b.toggle('light',S.theme=='light');
+ Array.prototype.slice.call(b).forEach(function(c){if(c.indexOf('c-')==0)b.remove(c)});if(S.color&&S.color!='gold')b.add('c-'+S.color);
+ b.add('k38');if($('#side'))b.add('v37');V37.drawLooks()}
 var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e']];
 function pname(p){for(var i=0;i<PROTOS.length;i++)if(PROTOS[i][0]==p)return PROTOS[i][1];return p}
 function modal(html,cls){var b=$('#mbox');b.className='mbox'+(cls?' '+cls:'');b.innerHTML=html;b.scrollTop=0;$('#modal').classList.add('on');document.body.style.overflow='hidden'}
@@ -2827,17 +2836,19 @@ function confirmDo(fn){if(confirm(t('Are you sure?')))fn()}
 function dl(blobRes){var a=document.createElement('a');a.href=URL.createObjectURL(blobRes.blob);a.download=blobRes.name||'download';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},2000)}
 
 // ---------------------------------------------------------------- login
-function loginView(otp){applyLook();clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);
- $('#app').innerHTML='<div class="login"><div class="'+logoCls()+'">'+logoInner('K')+'</div><div class="card"><h3 style="text-align:center;margin-bottom:12px">'+esc(document.title)+'</h3>'+
+function loginView(otp){document.body.className='';applyLook();clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);
+ var sun=function(){return ic(document.body.classList.contains('light')?'moon':'k310sun',17)};
+ $('#app').innerHTML='<div class="login k310login"><i class="k310orb a"></i><i class="k310orb b"></i><div class="'+logoCls()+'">'+logoInner('K')+'</div><div class="k310brand">'+t('VPN management panel')+'</div>'+
+ '<div class="card"><h3>'+esc(document.title)+'</h3><p class="k310sub">'+t('Sign in to continue')+'</p>'+
  '<label class="f">'+t('Username')+'</label><input id="lu" autocomplete="username" class="ltr">'+
  '<label class="f">'+t('Password')+'</label><input id="lp" type="password" autocomplete="current-password" class="ltr">'+
  '<div id="otpw" class="'+(otp?'':'hide')+'"><label class="f">'+t('2FA code')+'</label><input id="lo" inputmode="numeric" maxlength="6" class="ltr" autocomplete="one-time-code"></div>'+
  '<button class="btn" style="width:100%;margin-top:14px" id="lb">'+t('Login')+'</button>'+
- '<div class="row" style="justify-content:center;margin-top:10px"><button class="ib" id="ll">'+(S.lang=='fa'?'EN':'FA')+'</button><button class="ib" id="lt">◐</button></div></div></div>';
+ '<div class="row" style="justify-content:center;margin-top:10px"><button class="ib" id="ll" title="'+t('Language')+'" aria-label="'+t('Language')+'">'+(S.lang=='fa'?'EN':'FA')+'</button><button class="ib" id="lt" title="'+t('Light / dark')+'" aria-label="'+t('Light / dark')+'">'+sun()+'</button></div></div></div>';
  function go(){api('POST','/api/login',{username:$('#lu').value,password:$('#lp').value,otp:$('#lo').value}).then(function(r){S.token=r.token;localStorage.setItem('kk_tok',r.token);boot()}).catch(function(e){if(e.data&&e.data.need_otp){$('#otpw').classList.remove('hide');$('#lo').focus()}fail(e)})}
  $('#lb').onclick=go;$$('#lu,#lp,#lo').forEach(function(i){i.onkeydown=function(e){if(e.key=='Enter')go()}});
  $('#ll').onclick=function(){S.lang=S.lang=='fa'?'en':'fa';localStorage.setItem('kk_lang',S.lang);loginView(!$('#otpw').classList.contains('hide'))};
- $('#lt').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook()};
+ $('#lt').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook();this.innerHTML=sun()};
 }
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
@@ -2846,51 +2857,12 @@ ICO.chev='<path d="M6 9l6 6 6-6"/>';
 var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['kgame','MIX+\u200e','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 // sidebar groups (v2.8.4): [label, page keys]
 // menu (v3.5): single pages and groups that open in place. An item is [page, sub page, label, note].
-var NAV=[{p:'dash'},{p:'users'},{p:'nodes'},
- {g:'vpn',l:'VPN services',i:'shield2',items:[['vpn','','All VPN services','Kanki VPN and Xray side by side'],['kmix','','KANKI MIX','Our own protocol: games, low ping'],['kgame','','MIX+\u200e','KCP + FEC for games, low lag'],['xray','','Xray','VLESS · VMess · Trojan · Shadowsocks'],['antidpi','','Anti-DPI tunnels','REALITY · WS/gRPC behind CDN · Hysteria2']]},
- {g:'net',l:'Tunnels',i:'tunnel',items:[['tunnels','','Tunnels','Links between your servers'],['servers','','Tunnel servers','Iran and abroad servers of the tunnels'],['ports','','Port management','Which port each service uses']]},
- {g:'dnsg',l:'Kanki DNS',i:'dns',items:[['dns','overview','Overview','Status of the DNS servers'],['dns','servers','DNS servers','Exits abroad and relays in Iran'],['dns','pubg','PUBG and games','Which part of the game goes through'],['dns','services','Services','What goes through the DNS'],['dns','users','DNS users','Registered addresses and use'],['dns','log','Query log','Names your users asked'],['dns','settings','Settings and SSL','Domain, certificate, upstreams']]},
- {g:'sales',l:'Sales & support',i:'bot',items:[['bot','','Sales bot','Plans, payments, Telegram'],['emergency','','Emergency chat','Talk to users when the internet is cut']]},
- {p:'traffic'},
- {g:'sys',l:'System',i:'settings',items:[['settings','','Settings','How the panel looks and works'],['backup','','Backup','Save and restore everything'],['security','','Security','Password, 2FA, sessions']]}];
 var NAVG=[];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
-var NAVOPEN={};try{NAVOPEN=JSON.parse(localStorage.getItem('kk_nav')||'{}')||{}}catch(e){}
 function navHref(x){return '#'+x[0]+(x[1]?'/'+x[1]:'')}
-function shell(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.charAt(0);
- $('#app').innerHTML='<header class="top"><div class="'+logoCls()+'" id="mlogo">'+logoInner(L)+'</div>'+
- '<div class="tb-title"><small><span>'+esc(nm)+'</span><span>›</span><span id="tbsec"></span></small><b id="tbt"></b></div><div class="sp"></div>'+
- '<div class="tb-act"><div class="segl"><button data-l="fa" class="'+(S.lang=='fa'?'on':'')+'">FA</button><button data-l="en" class="'+(S.lang=='en'?'on':'')+'">EN</button></div>'+
- '<button class="ib" id="thm" title="'+t('Theme')+'" aria-label="theme">'+ic('moon',17)+'</button>'+
- '<button class="ib" id="upd" title="'+t('Update')+'"><span class="dot" id="updot"></span><span class="uv ltr">v'+esc(me.version||'')+'</span></button>'+
- '<div class="uchip2" title="'+esc(me.user||'')+'"><i>'+esc((me.user||'A').charAt(0).toUpperCase())+'</i><span>'+esc(me.user||'')+'</span></div>'+
- '<button class="ib" id="lo" title="'+t('Logout')+'" aria-label="logout">'+ic('logout',17)+'</button></div></header>'+
- '<nav class="side" id="side"><div class="sbrand"><div class="'+logoCls()+'">'+logoInner(L)+'</div><div style="min-width:0"><b>'+esc(nm)+'</b><small>'+t('VPN management')+'</small></div></div>'+
- '<div class="snav">'+navSide()+'</div>'+
- '<div class="sfoot"><button class="sver" id="upd2"><span class="dot" id="updot2"></span><span><b class="ltr">v'+esc(me.version||'')+'</b><small id="updt">'+t('Check for update')+'</small></span></button>'+
- '<a href="#" id="lo2" class="lo2"><span class="ni">'+ic('logout',18)+'</span>'+t('Logout')+'</a></div></nav><div class="shade" id="shade"></div>'+navBar()+'<main id="pg"></main>';
- $('#shade').onclick=function(){$('#side').classList.remove('on');$('#shade').classList.remove('on')};
- $$('#side .ngh').forEach(function(b){b.onclick=function(){var d=b.parentNode,o=!d.classList.contains('open');d.classList.toggle('open',o);NAVOPEN[b.dataset.g]=o;try{localStorage.setItem('kk_nav',JSON.stringify(NAVOPEN))}catch(e){}}});
- $$('#mbar [data-g]').forEach(function(b){b.onclick=function(e){e.stopPropagation();navSheet(b.dataset.g)}});
- $('#msheet').onclick=function(e){if(e.target.closest('a'))navMark(S.page,S.sub)};
- if(!window._navDoc){window._navDoc=1;document.addEventListener('click',function(e){var sh=$('#msheet');if(sh&&sh.classList.contains('on')&&!e.target.closest('#msheet,#mbar'))navMark(S.page,S.sub)})}
- $$('[data-l]').forEach(function(b){b.onclick=function(){S.lang=b.dataset.l;localStorage.setItem('kk_lang',S.lang);applyLook();shell();route()}});
- $('#thm').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook()};
- $('#lo').onclick=function(){logout()};$('#lo2').onclick=function(e){e.preventDefault();logout()};
- $('#upd').onclick=updateModal;$('#upd2').onclick=function(){$('#shade').click();location.hash='#settings';S.stsec='upd';if(S.page=='settings')route()};
- // page headers get the page icon, whenever a page draws (or redraws) its header
- if(window.MutationObserver)new MutationObserver(decoratePh).observe($('#pg'),{childList:true,subtree:true});
- api('GET','/api/update/check').then(function(r){var c='dot '+(r.available?'y':(r.error?'':'g'));
-  ['#updot','#updot2'].forEach(function(x){var d=$(x);if(d)d.className=c});
-  var u=$('#updt');if(u)u.textContent=r.available?t('A new version is available.'):(r.error?t('Update source not set'):t('You are on the latest version.'))}).catch(function(){});
-}
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);
  var i=document.createElement('span');i.className='phi';i.innerHTML=ic(pgOf(S.page)[2],22);d.appendChild(i);d.appendChild(inner)}
-function route(){var h=(location.hash||'#dash').slice(1).split('/'),p=h[0];S.sub=h[1]||'';if(!PAGES.some(function(x){return x[0]==p})){p='dash';S.sub=''}S.page=p;
- var tb=$('#tbt');if(tb){tb.textContent=t(pgOf(p)[1]);$('#tbsec').textContent=t(grpOf(p))}
- navMark(p,S.sub);clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);window.scrollTo(0,0);
- (({dash:pDash,users:pUsers,nodes:pNodes,servers:pServers,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,emergency:pEmergency,backup:pBackup,security:pSecurity,settings:pSettings})[p]||window['p_'+p])()}
 window.addEventListener('hashchange',function(){if(!S.token||!S.me)return;var h=(location.hash||'#dash').slice(1).split('/');
  // moving between the tabs of the page already open: only the tab changes
  if(h[0]==S.page&&window['tab_'+S.page]&&$('#pg .ptabs')){S.sub=h[1]||'';navMark(S.page,S.sub);window['tab_'+S.page](S.sub);return}route()});
@@ -2913,27 +2885,6 @@ function gcard(id,title,icon){return '<div class="gc" id="gc_'+id+'"><div class=
 function setRing(id,p,val,sub){var f=$('#rf_'+id);if(!f)return;f.setAttribute('stroke-dasharray',(p*2.136).toFixed(1)+' 213.6');
  $('#gc_'+id).className='gc'+(p>=90?' hot':p>=70?' warm':'');$('#rt_'+id).textContent=N(Math.round(p))+'%';
  $('#gv_'+id).innerHTML=/^[\d۰-۹]/.test(val)?'<bdi class="ltr">'+esc(val)+'</bdi>':esc(val);$('#gs_'+id).textContent=sub||''}
-function pDash(){dbReset();
- $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Dashboard')+'</h2><p class="ltr" id="d_sub" style="text-align:start">…</p></div>'+
- '<div class="row" style="gap:6px;flex-wrap:nowrap"><span class="live" id="d_live"><i></i><span id="d_lt">'+t('Live')+'</span></span>'+
- '<select id="d_iv" style="width:auto;padding:6px 9px;font-size:12px">'+[1,2,5,10].map(function(n){return '<option value="'+n+'"'+(n==DB.iv?' selected':'')+'>'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select>'+
- '<button class="ib" id="d_pause" title="'+t('Pause')+'">❚❚</button></div></div>'+
- '<div class="kpis" id="kpis"></div>'+
- '<div class="gg">'+gcard('cpu','CPU',ic('cpu',16))+gcard('ram','RAM',ic('ram',16))+gcard('disk','Storage',ic('disk',16))+gcard('swap','Swap',ic('swap',16))+'</div>'+
- '<div class="card" id="nc" style="margin-bottom:12px"></div>'+
- '<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('Network speed')+'</h3><small class="muted ltr" id="n_if"></small></div>'+
-  '<div class="nbig"><div class="dn"><small>↓ '+t('Download')+'</small><b id="n_rx" class="ltr">—</b></div><div class="upl"><small>↑ '+t('Upload')+'</small><b id="n_tx" class="ltr">—</b></div></div></div>'+
-  '<div class="ch tall" id="ch_net"></div>'+
-  '<div class="nf ltr"><span>'+t('Peak')+' ↓ <b id="n_prx">—</b></span><span>'+t('Peak')+' ↑ <b id="n_ptx">—</b></span><span>'+t('Total since boot')+' ↓ <b id="n_trx">—</b></span><span>↑ <b id="n_ttx">—</b></span></div></div>'+
- '<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('TCP / UDP connections')+'</h3><small class="muted" id="c_sub"></small></div>'+
-  '<div class="nbig"><div class="dn"><small>TCP</small><b id="c_tcp" class="ltr">—</b></div><div class="upl"><small>UDP</small><b id="c_udp" class="ltr">—</b></div></div></div>'+
-  '<div class="ch tall" id="ch_con"></div></div>'+
- '<div class="card"><h3>'+t('Services')+'</h3><p class="sub">'+t('Start, stop or restart the VPN services')+'</p><div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></div>'+tunDashCard()+logCard();
- $('#d_iv').onchange=function(){DB.iv=+this.value;localStorage.setItem('kk_div',DB.iv);dashTimers()};
- $('#d_pause').onclick=function(){DB.paused=!DB.paused;if(!DB.paused)DB.last=null;this.textContent=DB.paused?'▶':'❚❚';this.title=DB.paused?t('Resume'):t('Pause');dashLive(DB.paused?'off':'')};
- $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};logWire();tunDashWire();
- $('#kpis').onclick=function(e){var b=e.target.closest('[data-go]');if(b)goUsers(b.dataset.go)};
- dashTick();dashSys();dashTimers()}
 function dashTimers(){clearInterval(S.timer);clearInterval(S.timer2);S.timer=setInterval(dashTick,DB.iv*1000);S.timer2=setInterval(dashSys,10000)}
 function dashLive(state){var l=$('#d_live');if(!l)return;l.className='live'+(state?' '+state:'');$('#d_lt').textContent=state=='bad'?t('Reconnecting…'):state=='off'?t('Paused'):t('Live')}
 function goUsers(f){S.filter=f;S.q='';S.pg=1;S.pf='all';location.hash='#users'}
@@ -2970,9 +2921,6 @@ function dashSys(){if(S.page!='dash'||document.visibilityState!='visible')return
 
 function goNodes(add){S.openAdd=!!add;if(location.hash=='#nodes')route();else location.hash='#nodes'}
 
-function drawKpis(o){var el=$('#kpis');if(!el||!o)return;
- var it=[['a','Total users',o.users,'all'],['g','Online',o.online,'online'],['g','Active',o.active,'active'],['y','Expired / out of data',o.expired,'finished'],['r','Disabled',o.disabled,'disabled'],['a','Total traffic',N(o.traffic_gb)+' GB','']];
- el.innerHTML=it.map(function(x){return '<button class="kpi '+x[0]+'" '+(x[3]?'data-go="'+x[3]+'"':'')+'><small>'+t(x[1])+'</small><b class="ltr">'+(typeof x[2]=='number'?N(x[2]):x[2])+'</b></button>'}).join('')}
 function drawSvcs(list){var el=$('#svcs');if(!el)return;list=(list||[]);
  if(!list.length){el.innerHTML='<span class="muted">—</span>';return}
  el.innerHTML=list.map(function(x){var fixed=['web','panel','node'].indexOf(x.key)>=0,k=esc(x.key);
@@ -3141,16 +3089,6 @@ function newUser(){modal(mhead(t('New user'))+ufForm(null)+'<button class="btn" 
   api('POST','/api/users',b).then(function(r){toast(t('Saved'));return loadUsers().then(function(){var u=r&&r.length==1&&findU(r[0].id);if(u)editUser(u.id,'link');else closeModal()})}).catch(function(e){me.disabled=false;fail(e)})}}
 
 // ---------------------------------------------------------------- nodes
-function pNodes(){var sec=function(id,icon,title,sub,btns,body){return '<section class="srvsec" id="'+id+'"><div class="srvh"><span class="phi">'+ic(icon,20)+'</span><div><b>'+t(title)+'</b><small>'+t(sub)+'</small></div><span class="sp"></span>'+btns+'</div>'+body+'</section>'};
- var add=function(fn,label,cls){return '<button class="'+(cls||'btn')+' sm" onclick="'+fn+'">'+ic('plus',14)+' '+t(label)+'</button>'};
- $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Servers')+'</h2><p>'+t('Every server of the panel: Kanki VPN, Xray and Kanki DNS')+'</p></div><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button></div>'+
-  sec('sv_k','nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX',add('nodeAdd()','Add server'),'<div class="ncards" id="nl">'+t('Loading…')+'</div>')+
-  (window.xrServers?sec('sv_x','xray','Xray','VLESS · VMess · Trojan · Shadowsocks',add('xrAddNode()','Add server'),'<div class="card" id="nl_x">'+t('Loading…')+'</div>'):'')+
-  (window.dnsServers?sec('sv_d','dns','Kanki DNS','For the app: games and sanctioned sites',add("dnsAdd('exit')",'Exit server (abroad)')+add("dnsAdd('relay')",'Relay (Iran)','b2'),'<div id="nl_d">'+t('Loading…')+'</div>'):'');
- loadNodes();autoRefresh(loadNodes);if(S.openAdd){S.openAdd=false;setTimeout(nodeAdd,150)}}
-function loadNodes(){api('GET','/api/nodes').then(function(n){S.nodes=n;drawNodes()}).catch(fail);
- if(window.xrServers)api('GET','/api/xray').then(function(d){XR.d=d;var el=$('#nl_x');if(el&&S.page=='nodes')el.innerHTML=xrServers(d)}).catch(function(){});
- if(window.dnsServers)api('GET','/api/dns').then(function(d){DN.d=d;var el=$('#nl_d');if(el&&S.page=='nodes')el.innerHTML=dnsServers(d)}).catch(function(){})}
 // ---- node health: judged from the last sync and the CPU / RAM / disk the node reports
 // the version the panel really runs (an older saved one of its own server made every up-to-date agent look old)
 function panelVer(){if(S.me&&S.me.version)return S.me.version;var l=(S.nodes||[]).filter(function(x){return x.id=='local'})[0];return l&&l.info&&l.info.version||''}
@@ -3276,7 +3214,7 @@ function nodeEdit(id){var n=findN(id);if(!n)return;var loc=n.id=='local',panel=n
 function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'</h2><p>'+t('Full backup of users, credentials, certificates, VPN settings, nodes and panel state')+'</p></div></div>'+
  '<div class="g2"><div class="card" style="margin:0"><h3>'+t('Backup file')+'</h3><p class="sub">'+t('Encrypted archive. File name includes date and time.')+'</p><div class="row" style="flex-wrap:nowrap"><input id="bk_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"><button class="btn" id="bk_go">'+t('Download backup')+'</button></div></div>'+
  '<div class="card" style="margin:0"><h3>'+t('Restore')+'</h3><p class="sub">'+t('Pick a backup file; if encrypted, enter its passphrase.')+'</p><div class="row" style="flex-wrap:nowrap"><label class="b2" style="white-space:nowrap">'+t('Choose file')+'<input type="file" id="rs_f" class="hide"></label><input id="rs_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"></div><small class="muted" id="rs_n">'+t('No file chosen')+'</small>'+
- '<label class="chk" style="margin-top:8px"><input type="checkbox" id="rs_full">'+t('Also restore server keys & configs (same/new server migration)')+'</label><div style="text-align:center;margin-top:8px"><button class="btn" id="rs_go">'+t('Restore backup')+'</button></div></div></div>'+
+ '<label class="chk" style="margin-top:8px"><input type="checkbox" id="rs_full">'+t('Also restore server keys & configs (same/new server migration)')+'</label><div style="text-align:center;margin-top:8px"><button class="btn" id="rs_go">'+t('Restore backup')+'</button></div></div></div>'+moveCard()+
  '<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><div><h3>🌙 '+t('Nightly backup to the bot')+'</h3><p class="sub">'+t('Every night the database is cleaned and an encrypted backup is sent to Telegram')+'</p></div><label class="sw"><input type="checkbox" id="tg_on"><span></span></label></div>'+
  '<div class="g2"><div><label class="f">'+t('When')+'</label><div class="row" style="flex-wrap:nowrap;gap:6px"><select id="tg_m" style="width:auto"><option value="nightly">'+t('Every night at')+'</option><option value="hours">'+t('Every … hours')+'</option></select><input id="tg_at" class="ltr" style="max-width:90px" placeholder="03:00"><input id="tg_h" type="number" min="1" style="max-width:90px"></div><small class="muted">'+t('Iran time')+'</small></div>'+
  '<div><label class="f">'+t('Chat ID')+'</label><input id="tg_chat" class="ltr" placeholder="'+t('Auto after /start (or first bot admin)')+'"></div></div>'+
@@ -3305,7 +3243,32 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
  $('#tg_test').onclick=function(){api('PUT','/api/tgbackup',tgBody()).then(function(){return api('POST','/api/tgbackup/test')}).then(function(r){toast(r.ok?'✓ @'+r.bot+' → '+r.chat:'failed',!r.ok);tgLoad()}).catch(fail)};
  $('#tg_send').onclick=function(){toast(t('Checking…'));api('POST','/api/tgbackup/send').then(function(){toast(t('Done'));tgLoad()}).catch(function(e){fail(e);tgLoad()})};
  $('#db_cl').onclick=function(){var me=this;me.disabled=true;api('POST','/api/db/clean').then(function(r){me.disabled=false;var x=r.result||{};toast(t('Done')+' · '+kb(x.before||0)+' → '+kb(x.after||0));tgLoad()}).catch(function(e){me.disabled=false;fail(e)})};
- tgLoad()}
+ tgLoad();restoreBox();
+ moveLoad();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page=='backup'&&$('#v37move')&&!$('#modal').classList.contains('on'))moveLoad()},5000)}
+// move the whole panel to a new server
+function moveCard(){return '<div class="card" id="v37move"><h3>🚚 '+t('Move the panel to a new server')+'</h3><p class="sub">'+t("Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.")+'</p><div id="mv_in">'+t('Loading…')+'</div></div>'}
+function moveDraw(m){var el=$('#mv_in');if(!el)return;
+ var steps='<ol class="steps" style="margin:6px 0 10px;line-height:2"><li><b>'+t("Point the panel's domain to the new server's IP")+'</b><br><small class="muted">'+t('In your DNS (Cloudflare / ArvanCloud): the A record of')+' <span class="ltr">'+esc(m.domain||'')+'</span> '+t('= the IP of the new server, without CDN (DNS only). The old panel keeps working by its IP until the move is done.')+'</small></li>'+
+  '<li><b>'+t('Run this on the new server (Ubuntu / Debian, as root)')+'</b><br><small class="muted">'+t('It downloads everything straight from this server, puts it back with the same keys and starts the panel there. Then this panel stops by itself.')+'</small></li></ol>';
+ if(m.done>0){el.innerHTML='<div class="okbox" style="padding:10px;border-radius:12px;border:1px solid var(--ok)">✓ '+t('Moved: the panel runs on the new server. This one is stopping.')+'</div>';return}
+ if(!m.active){el.innerHTML=steps+'<label class="f">'+t("This server's IP (empty = found by itself)")+'</label><div class="inl"><input id="mv_ip" class="ltr" value="'+esc(m.ip||'')+'" placeholder="1.2.3.4"><button class="btn" id="mv_go" style="flex:none">'+t('Make the move command')+'</button></div>'+
+   '<p class="hint">'+t('The backup above is complete too: it can also be restored by hand on a new server (Restore with «Also restore server keys»).')+'</p>';
+  $('#mv_go').onclick=function(){var b=this;b.disabled=true;api('POST','/api/migrate/start',{ip:$('#mv_ip').value.trim()}).then(moveLoad).catch(function(e){b.disabled=false;fail(e)})};return}
+ el.innerHTML=steps+'<pre class="ltr" id="mv_cmd" style="white-space:pre-wrap;word-break:break-all;font-size:11.5px;padding:10px;border-radius:12px;background:var(--in);border:1px solid var(--gb2);margin:0">'+esc(m.command)+'</pre>'+
+  '<p class="hint">'+t('Valid for 3 hours, one time. It holds the key of the backup: do not share it.')+'</p>'+
+  '<p style="margin:6px 0">'+(m.fetched>0?'<span class="okt">✓ '+t('The new server downloaded the backup')+(m.new_ip?' (<span class="ltr">'+esc(m.new_ip)+'</span>)':'')+'</span>':'<span class="muted">⏳ '+t('Waiting for the new server…')+'</span>')+'</p>'+
+  '<div class="g2"><button class="btn" id="mv_cp">'+t('Copy the command')+'</button><button class="b2 bd" id="mv_x">'+t('Cancel the command')+'</button></div>';
+ $('#mv_cp').onclick=function(){copy(m.command)};$('#mv_x').onclick=function(){api('DELETE','/api/migrate').then(moveLoad).catch(fail)}}
+function moveLoad(){return api('GET','/api/migrate').then(moveDraw).catch(function(e){var el=$('#mv_in');if(el)el.textContent=e.message||''})}
+// after a restore: which servers are back
+function restoreBox(){var pg=$('#pg');if(!pg||S.page!='backup'||$('#svp_rs'))return;
+ api('GET','/api/restore/check').then(function(r){if((!r.restored_at||Date.now()/1000-r.restored_at>3*86400)&&!r.bot_conflict||$('#svp_rs')||S.page!='backup')return;
+  var sv=r.servers||[],bad=sv.filter(function(x){return (x.agent===false)||(x.vpn===false&&x.vpn_on)});
+  var c=document.createElement('div');c.className='card';c.id='svp_rs';
+  c.innerHTML='<h3>'+t('After restore')+'</h3><p class="sub">'+t('Restored')+' '+ago(r.restored_at)+(r.moved_from?' · '+t('from')+' <span class="ltr">'+esc(r.moved_from)+'</span>':'')+'</p>'+
+   (r.bot_conflict?'<div class="warnbox">'+t('The panel on the old server still runs the same Telegram bot: both answer customers and both post to the channel. Stop it there: systemctl disable --now kanki-panel')+'</div>':'')+
+   (bad.length?'<div class="list">'+sv.map(function(x){var ok=x.agent!==false&&!(x.vpn===false&&x.vpn_on);return '<div class="li"><span>'+esc(x.name)+'</span><span>'+(ok?'✅':'⏳ '+t('Not connected yet'))+'</span></div>'}).join('')+'</div>':'<p>✅ '+t('Every server is connected')+'</p>');
+  var ph=$('#pg .ph');if(ph)ph.parentNode.insertBefore(c,ph.nextSibling)}).catch(function(){})}
 
 // ---------------------------------------------------------------- security
 function pSecurity(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Security')+'</h2><p>'+t('Login, 2FA, sessions and IP access')+'</p></div></div><div id="sec">'+t('Loading…')+'</div>';loadSec()}
@@ -3809,7 +3772,7 @@ function botChan(){var el=$('#bt_chan');if(!el)return;api('GET','/api/channel').
   '<label class="f">'+t('Post types')+'</label><div class="chips">'+(c.all_kinds||[]).map(function(k){return '<label class="chk"><input type="checkbox" class="ch_k" value="'+k.id+'" '+(ks.indexOf(k.id)>=0?'checked':'')+'>'+t(k.name)+'</label>'}).join('')+'</div>'+
   '<div class="chips">'+'<label class="chk"><input type="checkbox" id="ch_ao" '+(c.auto_offer?'checked':'')+'>'+t('Automatic discount on occasions (Nowruz, Yalda…)')+'</label></div>'+
   '<p class="muted" style="font-size:12px">'+t('No posts between 1 and 8 in the morning.')+' · '+t('Posts sent')+': '+N(c.count)+(c.last?' · '+t('Last')+': '+ago(c.last):'')+(c.occasion?' · 🎉 '+esc(c.occasion):'')+(String(c.status||'').indexOf('error')==0?'<br><span class="r">'+esc(c.status)+'</span>':'')+'</p>'+
-  '<button class="btn" style="width:100%" id="ch_save">'+t('Save')+'</button></div>'+
+  '<button class="btn" style="width:100%" id="ch_save">'+t('Save')+'</button></div>'+aiCard(c)+
   '<div class="card"><div class="nh"><h3>👁 '+t('Post preview')+'</h3><select id="ch_kind" style="width:auto"><option value="auto">'+t('Smart choice')+'</option>'+(c.all_kinds||[]).map(function(k){return '<option value="'+k.id+'">'+t(k.name)+'</option>'}).join('')+'</select></div>'+
   '<div class="chpv" id="ch_pv"><span class="muted">…</span></div><div class="row" style="gap:8px;margin-top:8px"><button class="b2" id="ch_new" style="flex:1">🔄 '+t('Another one')+'</button><button class="btn" id="ch_pub" style="flex:1">📤 '+t('Publish now')+'</button></div></div>'+
   '<div class="card"><h3>🔥 '+t('Discount campaign')+'</h3><p class="sub">'+t('Makes a new code that ends by itself and announces it in the channel.')+'</p><div class="g3f"><div><label class="f">%</label><input id="cc_p" type="number" min="1" max="90" value="20"></div><div><label class="f">'+t('Hours')+'</label><input id="cc_h" type="number" min="1" value="48"></div><div><label class="f">'+t('Uses')+'</label><input id="cc_u" type="number" min="1" value="200"></div></div>'+
@@ -3821,7 +3784,31 @@ function botChan(){var el=$('#bt_chan');if(!el)return;api('GET','/api/channel').
   kinds:$$('.ch_k').filter(function(x){return x.checked}).map(function(x){return x.value}).join(',')}).then(function(){toast(t('Saved'));botChan()}).catch(fail)};
  $('#ch_on').onchange=function(){api('PUT','/api/channel',{on:this.checked}).then(function(){toast(t('Saved'))}).catch(fail)};
  $('#cc_go').onclick=function(){var me=this;me.disabled=true;api('POST','/api/channel/campaign',{percent:+$('#cc_p').value||20,hours:+$('#cc_h').value||48,uses:+$('#cc_u').value||200}).then(function(r){me.disabled=false;
-  toast(r.posted?t('Published')+' · '+r.code:r.code+' · '+(r.error||''),!r.posted);botChan()}).catch(function(e){me.disabled=false;fail(e)})}}).catch(fail)}
+  toast(r.posted?t('Published')+' · '+r.code:r.code+' · '+(r.error||''),!r.posted);botChan()}).catch(function(e){me.disabled=false;fail(e)})};
+ aiWire()}).catch(fail)}
+// the smart channel's AI writer
+function aiCard(c){var st=String(c.ai_status||''),ok=st.indexOf('ok:')==0;
+ return '<div class="card" id="v37ai"><div class="nh"><div><h3>🤖 '+t('AI writer')+'</h3><p class="sub">'+t('Posts are written by the AI from your real plans, prices and codes, in the tone you describe. When it does not answer (it is tried again, and another model is tried), the built-in writer posts instead.')+'</p></div>'+
+  '<label class="sw"><input type="checkbox" id="ai_on" '+(c.ai_on?'checked':'')+'><span></span></label></div>'+
+  '<div class="g2f"><div><label class="f">'+t('API key')+(c.ai_has_key?' · <span class="okt">'+t('saved')+' <span class="ltr">'+esc(c.ai_key_hint||'')+'</span></span>':'')+'</label><input id="ai_key" class="ltr aikey" type="text" name="kk-grok-api" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="'+esc(c.ai_has_key?t('Paste a new key to replace it'):'AQ.… / gsk_… / xai-…')+'"></div>'+
+  '<div><label class="f">'+t('Model')+'</label><input id="ai_model" class="ltr" value="'+esc(c.ai_model||'')+'" placeholder="'+esc(c.ai_provider_used=='gemini'?'gemini-flash-latest':c.ai_provider_used=='xai'?'grok-4':'openai/gpt-oss-120b')+'"></div></div>'+
+  '<label class="f">'+t('AI service')+'</label><select id="ai_pv">'+[['','Automatic (from the key)'],['gemini','Gemini (Google AI Studio, key AQ.… / AIza…)'],['groq','Groq (groq.com, key gsk_…)'],['xai','Grok (x.ai, key xai-…)']].map(function(o){return '<option value="'+o[0]+'"'+((c.ai_provider||'')==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select>'+
+  '<small class="muted">'+t('Now')+': <b class="ltr">'+esc(c.ai_provider_used=='xai'?'Grok · api.x.ai/v1':c.ai_provider_used=='gemini'?'Gemini · generativelanguage.googleapis.com':'Groq · api.groq.com/openai/v1')+'</b> · '+t('Empty model = the best one of that service; a refused model is replaced by another one of your account.')+'</small>'+
+  '<label class="f">'+t('About us and how to write')+'</label><textarea id="ai_brief" rows="4" placeholder="'+esc(t('Who you are, what to stress, the tone, words to avoid…'))+'">'+esc(c.ai_brief||'')+'</textarea>'+
+  '<label class="f">'+t('Posting times (Iran time)')+'</label><div class="inl"><input id="ch_times" class="ltr" value="'+esc(c.times||'')+'" placeholder="10:00, 16:00, 21:30"><button type="button" class="b2" id="ai_3x" style="flex:none">'+t('Use 3 times a day')+'</button></div><small class="muted">'+t('Empty = every N hours as above. Three times a day: 10:00, 16:00, 21:30')+'</small>'+
+  (st?'<p class="'+(ok?'okt':'r')+'" style="font-size:12px;margin:8px 0 0">'+t('Last answer')+': <span class="ltr">'+esc(ok?st.slice(3):st)+'</span></p>':'')+
+  '<div class="g3" style="margin-top:12px"><button class="btn" id="ai_save">'+t('Save')+'</button><button class="b2" id="ai_test">⚡ '+t('Test the key')+'</button>'+(c.ai_has_key?'<button class="b2 bd" id="ai_rm">'+t('Remove the key')+'</button>':'<span></span>')+'</div>'+
+  '<div id="ai_out" class="chpv" style="display:none;margin-top:10px"></div></div>'}
+function aiWire(){var g=function(id){return $('#'+id)};
+ g('ai_3x').onclick=function(){g('ch_times').value='10:00, 16:00, 21:30'};
+ var keyOk=function(){var k=g('ai_key').value.trim();if(k&&!/^(gsk_|xai-|AQ\.|AIza)/.test(k)&&!confirm(t('A Gemini key starts with AQ. or AIza (aistudio.google.com/apikey), a Groq key with gsk_, a Grok key with xai-. Save this one anyway?')))return false;return true};
+ g('ai_save').onclick=function(){if(!keyOk())return;var b=this;b.disabled=true;api('PUT','/api/channel',{ai_on:g('ai_on').checked,ai_key:g('ai_key').value.trim(),ai_provider:g('ai_pv').value,ai_model:g('ai_model').value.trim(),ai_brief:g('ai_brief').value,times:g('ch_times').value.trim()})
+  .then(function(){toast(t('Saved'));botChan()}).catch(function(e){b.disabled=false;fail(e)})};
+ g('ai_test').onclick=function(){if(!keyOk())return;var b=this,o=g('ai_out');b.disabled=true;o.style.display='';o.innerHTML='<span class="muted">…</span>';
+  var save=api('PUT','/api/channel',{ai_key:g('ai_key').value.trim(),ai_provider:g('ai_pv').value,ai_model:g('ai_model').value.trim()});
+  save.then(function(){return api('POST','/api/channel/ai-test')}).then(function(r){o.innerHTML='<b class="okt">✓ '+t('The AI works')+' · <span class="ltr">'+esc(r.model)+'</span></b><br><br>'+String(r.text||'').replace(/\n/g,'<br>');b.disabled=false})
+   .catch(function(e){o.innerHTML='<span class="r">'+esc(e.message||'')+'</span>';b.disabled=false})};
+ var rm=g('ai_rm');if(rm)rm.onclick=function(){if(!confirm(t('Remove the key')+'?'))return;api('PUT','/api/channel',{ai_key:'-',ai_on:false}).then(function(){toast(t('Done'));botChan()}).catch(fail)}}
 function botModal(edit){var b=S.bot||{};modal(mhead(t(edit?'Edit bot':'Create bot'))+
  '<label class="f">'+t('Bot token (from @BotFather)')+'</label><input id="bm_t" class="ltr" autocomplete="off" placeholder="'+(edit?t('Empty = keep the current token'):'123456789:AA…')+'">'+
  '<label class="f">'+t('Admin numeric ID(s), comma separated')+'</label><input id="bm_a" class="ltr" value="'+esc(b.admins||'')+'" placeholder="123456789">'+
@@ -3938,7 +3925,7 @@ function tmRound(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+
 
 // ---- the page
 function pTunnels(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnels')+'</h2><p>'+t('Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit')+'</p></div>'+
- '<div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="b2 smartb" onclick="tunSmart()">⚡ '+t('Smart tunnel')+'</button><button class="btn" onclick="tunEdit()">+ '+t('Tunnel')+'</button></div></div>'+
+ '<div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="b2 smartb" onclick="tunSmart()">⚡ '+t('Smart tunnel')+'</button><button class="b2" id="rt_new" onclick="routeEdit()">⛓ '+t('Multi-location tunnel')+'</button><button class="btn" onclick="tunEdit()">+ '+t('Tunnel')+'</button></div></div>'+
  '<div class="card tmapc"><div id="tn_map"><span class="muted">'+t('Loading…')+'</span></div><div class="tkpi" id="tn_kpi"></div></div>'+
  '<div class="nh" style="margin-top:4px"><h3>'+t('Tunnels')+'</h3></div><div id="tn_list"></div>'+
  '';
@@ -3955,7 +3942,7 @@ function tunDraw(d){var m=$('#tn_map'),sl=$('#tn_srv');if(!m&&!sl)return;var sv=
   sl.innerHTML=SRV_GROUPS.map(function(g){var l=sv.filter(function(s){return srvLoc(s)==g[0]});return l.length?'<h3 style="grid-column:1/-1;margin:6px 0 0">'+t(g[1])+' <small class="muted">'+N(l.length)+'</small></h3>'+l.map(tunSrvCard).join(''):''}).join('')}}
 function pServers(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnel servers')+'</h2><p>'+t('Servers that only carry tunnels get a small agent: no VPN is installed on them')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="tunServerAdd()">+ '+t('Server')+'</button></div></div><div class="card" style="padding:10px"><div class="tkpi" id="tn_skpi" style="margin:0"></div></div><div class="ncards" id="tn_srv">'+t('Loading…')+'</div>';
  tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
-function tunCard(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},col=tunCol(x.state),err=es.error?e.name+': '+es.error:xx.error?xs.name+': '+xx.error:'',aw=x.kind=='awg'?(x.awg||{}):null,hy=x.kind=='hy2'?(x.hy2||{}):null;
+function tunCard(x){if(x.chain)return routeCardOf(x);var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},col=tunCol(x.state),err=es.error?e.name+': '+es.error:xx.error?xs.name+': '+xx.error:'',aw=x.kind=='awg'?(x.awg||{}):null,hy=x.kind=='hy2'?(x.hy2||{}):null;
  if(aw)err=err||(x.wrap_entry||{}).error||(x.wrap_exit||{}).error||'';
  var ports=[];if(x.tcp&&x.tcp.length)ports.push('TCP '+x.tcp.join(', '));if(x.udp&&x.udp.length)ports.push('UDP '+x.udp.join(', '));
  return '<div class="card tcard" style="border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">'+
@@ -3967,7 +3954,7 @@ function tunCard(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{
   (err&&x.state!='up'?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(err)+'</div>':'')+
   '<div class="g3" style="margin-top:10px"><button class="b2" onclick="tunEdit(\''+x.id+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2" onclick="tunAct(\''+x.id+'\',\'restart\')">'+ic('refresh',15)+' '+t('Reconnect')+'</button><button class="b2 bd" onclick="tunDel(\''+x.id+'\')">'+ic('trash',15)+' '+t('Delete')+'</button></div></div>'}
 function tunSrvCard(s){var nt=((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.entry==s.id||x.exit==s.id}).length,col=s.online?'var(--ok)':'var(--bad)';
- return '<div class="card" style="margin:0;border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start"><div class="row"><div class="logo" style="width:34px;height:34px;font-size:14px">'+esc(s.local?'★':s.name.charAt(0).toUpperCase())+'</div><div><b>'+esc(s.name)+'</b><div class="muted ltr">'+esc(s.host||t('address unknown yet'))+'</div></div></div>'+
+ return '<div class="card" style="margin:0;border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start"><div class="row"><div class="logo" style="width:34px;height:34px;font-size:14px">'+esc(s.local?'★':s.name.charAt(0).toUpperCase())+'</div><div><b>'+flag(s.cc)+' '+esc(s.name)+'</b><div class="muted ltr">'+esc(s.host||t('address unknown yet'))+'</div></div></div>'+
   '<span class="badge '+(s.online?'g':'r')+'">'+(s.local?t('Panel server'):s.online?t('Connected'):t('Disconnected'))+'</span></div>'+
   '<p class="muted" style="margin:8px 0">'+(s.local?t('Runs inside the panel'):(s.last_seen?t('Last contact')+': '+ago(s.last_seen):t('Not connected yet: run its command on the server')))+(s.version?' · v'+esc(s.version):'')+' · '+t('Tunnels')+' '+N(nt)+'</p>'+
   (s.local?'':!s.loc?'<p class="hint">'+t('Location not set: choose it in Edit')+'</p>':s.loc_guess?'<p class="hint">'+t('Location guessed: confirm it in Edit')+'</p>':'')+
@@ -3977,7 +3964,10 @@ function tunDel(id){if(!confirm(t('Delete this tunnel? It stops on both servers 
 function tunSrvDel(id){if(!confirm(t('Remove this server from the panel? Within a few seconds it removes everything Kanki installed there (tunnels, Kanki DNS, Xray, emergency chat, subscription link), closes the ports Kanki opened and uninstalls its agent.')))return;api('DELETE','/api/tunnels/servers/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)}
 
 // ---- servers
-function tunCmdBox(s,d){var cmd=tunCmd(s,d);
+function tunCmdBox(s,d){
+ // a server made in Servers has its own command that installs everything
+ if(s&&s.command)return '<label class="f">'+t('Run this on the new server, as root (Ubuntu / Debian)')+'</label><pre class="cmd" id="tn_cmd">'+esc(s.command)+'</pre><button class="btn" style="width:100%" id="tn_cp">'+ic('link',16)+' '+t('Copy command')+'</button>';
+ var cmd=tunCmd(s,d);
  return '<label class="f">'+t('Run this on the server, as root (Ubuntu / Debian)')+'</label><pre class="cmd" id="tn_cmd">'+esc(cmd)+'</pre><button class="btn" style="width:100%" id="tn_cp">'+ic('link',16)+' '+t('Copy command')+'</button>'+
   '<p class="muted" style="margin:10px 0 0">'+t('It installs only the tunnel agent: no VPN, no web panel. The server appears here as Connected within a few seconds.')+'</p>'+
   tunGreNote(d&&d.gre)+((d&&d.repo)?'':'<div class="warnbox">'+t('Set the update source (GitHub repo) in Settings first, or replace USER/REPO in the command.')+'</div>')}
@@ -4194,7 +4184,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  $('#tw_smart').onclick=function(){if($('#tw_en').value==$('#tw_ex').value){toast(t('The entry and the exit must be different'),1);return}
   var L=function(v){return String(v||'').split(/[\s,]+/).filter(Boolean)},g=function(k){var e=$(k);return e?e.value:''};
   tunSmart({entry:$('#tw_en').value,exit:$('#tw_ex').value,prof:$('#tw_pf').value,apply:{id:id,snap:{name:$('#tw_nm').value,mode:st.mode,transport:st.tr,port:+$('#tw_pt').value||0,conns:TNP[$('#tw_pf').value]||4,tcp:L($('#tw_tcp').value),udp:L($('#tw_udp').value),dial:g('#tw_dl'),target:g('#tw_tg'),sni:g('#tw_sni'),host:g('#tw_host'),frag:!!($('#tw_frag2')&&$('#tw_frag2').checked),path:g('#tw_pa'),auto:!!($('#tw_au')&&$('#tw_au').checked),fec:st.tr=='game'?g('#tw_fec'):'',dup:st.tr=='game'&&!!($('#tw_dup')&&$('#tw_dup').checked)}}})};
- hint();kindUi();if(!id&&!(x.tcp||[]).length&&!(x.udp||[]).length&&st.kind!='awg')fillPorts(false);
+ hint();kindUi();if(!id&&!(x.tcp||[]).length&&!(x.udp||[]).length&&st.kind!='awg')fillPorts(false);livePorts(id);
  var ct=$('#tw_ctest');if(ct)ct.onclick=cdnTest;var cn=$('#tw_cscan');if(cn)cn.onclick=cdnScan;
  var sp=$('#tw_spoof');if(sp)sp.onclick=function(e){var b=e.target.closest('[data-sp]');if(!b)return;var i=$('#tw_sni'),v=i.value.trim();i.value=v?(v.split(/[\s,]+/).indexOf(b.dataset.sp)<0?v+', '+b.dataset.sp:v):b.dataset.sp};
  var cs=$('#tw_cspoof');if(cs)cs.onclick=function(e){var b=e.target.closest('[data-sp]');if(!b)return;var i=$('#tw_csni'),v=i.value.trim();i.value=v?(v.split(/[\s,]+/).indexOf(b.dataset.sp)<0?v+', '+b.dataset.sp:v):b.dataset.sp};
@@ -4205,6 +4195,30 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   me.disabled=true;api('POST','/api/tunnels',b).then(function(){closeModal();toast(id?t('Saved: the tunnel restarts with the new settings'):t('The tunnel is made: it connects in a few seconds'));tunRefresh()}).catch(function(e){me.disabled=false;fail(e)})}}
 
 
+
+// ---- the tunnel form: live port check
+// what the servers themselves say is listening, shown while the ports are typed
+var PC={};
+function portsOf(sid){var c=PC[sid];if(c&&Date.now()-c.at<8000)return Promise.resolve(c.v);
+ return api('GET','/api/tunnels/servers/'+encodeURIComponent(sid)+'/ports').then(function(v){PC[sid]={at:Date.now(),v:v};return v}).catch(function(){return {known:false,used:[]}})}
+function portNums(v){var o=[];String(v||'').split(/[\s,]+/).forEach(function(x){var a=x.split(':')[0];var r=a.split('-');if(r.length==2){for(var i=+r[0];i<=+r[1]&&i-+r[0]<2000;i++)o.push(i)}else if(+a>0)o.push(+a)});return o}
+function liveCheck(id){var en=$('#tw_en'),ex=$('#tw_ex');if(!en||!ex)return;var box=$('#v37pc');if(!box){box=document.createElement('div');box.id='v37pc';var ph=$('#tw_ph');if(!ph)return;ph.parentNode.insertBefore(box,ph.nextSibling)}
+ var mode=($('#tw_md button.on')||{dataset:{v:'reverse'}}).dataset.v,trb=$('#tw_tr button.on'),tr=trb?trb.dataset.v:'tcpmux',listener=mode=='direct'?ex.value:en.value;
+ var udp=['quic','kcp','hq','game'].indexOf(tr)>=0,both=tr=='dual',port=+(($('#tw_pt')||{}).value||0);
+ var old=id?((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.id==id})[0]:null;
+ var mine=function(sid,p,u){if(!old||!old.enabled)return false;var ol=old.mode=='direct'?old.exit:old.entry;var ou=['quic','kcp','hq','game','dual'].indexOf(old.transport)>=0,ot=['quic','kcp','hq','game'].indexOf(old.transport)<0;
+  return (sid==ol&&p==old.port&&(u?ou:ot))||(sid==old.entry&&portNums((u?old.udp:old.tcp)||[]).indexOf(p)>=0)};
+ var need=[];if(port){if(!udp||both)need.push([listener,port,false]);if(udp||both)need.push([listener,port,true])}
+ portNums(($('#tw_tcp')||{}).value).forEach(function(p){need.push([en.value,p,false])});portNums(($('#tw_udp')||{}).value).forEach(function(p){need.push([en.value,p,true])});
+ var sids=need.map(function(x){return x[0]}).filter(function(v,i,a){return v&&a.indexOf(v)==i});
+ Promise.all(sids.map(function(sid){return portsOf(sid).then(function(v){return [sid,v]})})).then(function(rs){var msg=[],unknown=[];
+  rs.forEach(function(r){var sid=r[0],v=r[1];if(!v.known){unknown.push(sid);return}
+   need.filter(function(n){return n[0]==sid}).forEach(function(n){var hit=(v.used||[]).filter(function(u){return u.port==n[1]&&(u.proto=='udp')==n[2]})[0];
+    if(hit&&!(hit.kanki&&mine(sid,n[1],n[2])))msg.push((n[2]?'UDP ':'TCP ')+n[1]+' · '+(tunSrv(sid).name||sid)+': '+t('taken by')+' '+hit.by)})});
+  box.className=msg.length?'warnbox':'';box.innerHTML=msg.length?'<b>⚠ '+t('These ports are already taken on the server')+'</b><br>'+msg.map(esc).join('<br>'):(unknown.length?'<small class="muted">'+t('The server has not said which ports are free yet (update it to 3.7)')+'</small>':(need.length?'<small class="okt">✓ '+t('The ports are free on the servers')+'</small>':''))})}
+function livePorts(id){var tm,go=function(){clearTimeout(tm);tm=setTimeout(function(){liveCheck(id)},350)};
+ ['#tw_pt','#tw_tcp','#tw_udp'].forEach(function(s){var e=$(s);if(e)e.addEventListener('input',go)});['#tw_en','#tw_ex'].forEach(function(s){var e=$(s);if(e)e.addEventListener('change',go)});
+ ['#tw_tr','#tw_md'].forEach(function(s){var e=$(s);if(e)e.addEventListener('click',go)});setTimeout(go,600)}
 
 // ---- Hysteria2: show the config of one side
 function hy2Conf(id,side){api('GET','/api/tunnels/'+id+'/hy2conf/'+side).then(function(r){modal(mhead(t('Config')+' · '+(side=='exit'?t('Exit'):t('Entry')))+'<p class="muted">'+'hysteria '+(side=='exit'?'server':'client')+' -c … · '+t('It holds the password: do not share it.')+' <span class="ltr">'+esc(r.file)+'</span></p><pre class="ltr" style="white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:50vh;overflow:auto">'+esc(r.conf)+'</pre><button class="btn" id="hy_cp" style="width:100%;margin-top:8px">'+t('Copy')+'</button>');$('#hy_cp').onclick=function(){copy(r.conf)}}).catch(fail)}
@@ -4373,14 +4387,9 @@ var SECS=[
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']]],
  ['syssec','System','settings',[['settings','','Settings'],['backup','','Backup'],['security','','Security']]]];
 function secOf(p){for(var i=0;i<SECS.length;i++)if(SECS[i][3].some(function(x){return x[0]==p}))return SECS[i];return SECS[0]}
-window.V37={secOf:secOf,SECS:SECS};
+window.V37={secOf:secOf,SECS:SECS,watchPg:watchPg,drawSecTabs:drawSecTabs};
 
 // the old menu groups become plain links to the first page of each section
-window.navMark=function(p,sub){var sk=secOf(p)[0];
- $$('#side a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
- $$('#mbar a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
- var cur=$('#mbar .on'),bar=$('#mbar');if(cur&&bar&&bar.scrollWidth>bar.clientWidth)try{cur.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}
- drawSecTabs(p)};
 
 // the tabs of the section, always the first thing of the page
 function secTabsHtml(p){var s=secOf(p);if(s[3].length<2)return '';
@@ -4395,10 +4404,6 @@ var mo=null;
 function watchPg(){var pg=$('#pg');if(!pg||pg._v37)return;pg._v37=1;if(mo)mo.disconnect();
  mo=new MutationObserver(function(){if(S&&S.page&&secOf(S.page)[3].length>1&&(!$('#sectabs')||pg.firstChild!=$('#sectabs')))drawSecTabs(S.page)});
  mo.observe(pg,{childList:true})}
-var _shell=window.shell;
-window.shell=function(){_shell.apply(this,arguments);document.body.classList.add('v37');watchPg()};
-var _route=window.route;
-window.route=function(){_route.apply(this,arguments);watchPg();drawSecTabs(S.page)};
 
 // ---------------------------------------------------------------- flags
 function flag(cc){cc=String(cc||'').toUpperCase();if(!/^[A-Z]{2}$/.test(cc))return '<span class="flg nf" title="?">🌐</span>';
@@ -4406,7 +4411,6 @@ function flag(cc){cc=String(cc||'').toUpperCase();if(!/^[A-Z]{2}$/.test(cc))retu
 window.flagOf=flag;
 
 // tunnel servers: the flag of each one (Iran and abroad are already apart)
-if(window.tunSrvCard){var _tsc=window.tunSrvCard;window.tunSrvCard=function(s){var h=_tsc(s);return h.replace('<div><b>','<div><b>'+flag(s.cc)+' ')}}
 
 // ---------------------------------------------------------------- Servers: the grid of every server
 function svcCell(on,label,sub,act,cls){return '<button type="button" class="svcell '+(cls||(on?'ok':'no'))+'" '+(act?'onclick="'+act+'"':'disabled')+'><b>'+label+'</b><small>'+sub+'</small></button>'}
@@ -4450,83 +4454,9 @@ window.v37NodeMenu=function(id){var n=(S.nodes||[]).filter(function(x){return x.
   '<div class="list">'+[['WireGuard',i.wg_port],['AmneziaWG',i.awg_port],['Hysteria2',i.hy2_port],['KANKI MIX',i.kmix_port]].map(function(x){return '<div class="li"><span>'+x[0]+'</span><span class="ltr">'+(x[1]?'UDP '+esc(String(x[1])):'—')+'</span></div>'}).join('')+'</div>'+
   '<div class="g2" style="margin-top:12px"><button class="btn" onclick="closeModal();nAct(\''+e+'\',\'repair\')">↻ '+t('Repair')+'</button><button class="b2" onclick="closeModal();nHealth(\''+e+'\')">♡ '+t('Health')+'</button>'+
   '<button class="b2" onclick="closeModal();nAct(\''+e+'\',\'sync\')">⇄ '+t('Sync')+'</button>'+(window.nodePorts?'<button class="b2" onclick="closeModal();nodePorts(\''+e+'\')">'+ic('ports',15)+' '+t('Ports')+'</button>':'<a class="b2" href="#ports" onclick="closeModal()">'+ic('ports',15)+' '+t('Ports')+'</a>')+'</div>')};
-if(window.pNodes){var _pn=window.pNodes;window.pNodes=function(){_pn.apply(this,arguments);var ph=$('#pg .ph');if(ph&&!$('#v37grid')){var c=document.createElement('div');c.className='card v37grid';c.id='v37grid';c.innerHTML=t('Loading…');ph.parentNode.insertBefore(c,ph.nextSibling)}}}
-if(window.loadNodes){var _ln=window.loadNodes;window.loadNodes=function(){_ln.apply(this,arguments);
- api('GET','/api/tunnels').then(function(d){if(window.TN)TN.d=d;else window.TN={d:d};nodeGrid()}).catch(function(){nodeGrid()});setTimeout(nodeGrid,900)}}
-if(window.drawNodes){var _dn=window.drawNodes;window.drawNodes=function(){_dn.apply(this,arguments);
- // a flag in front of each server's name
- var cards=$$('#nl .nodec');(S.nodes||[]).forEach(function(n,i){var b=cards[i]&&cards[i].querySelector('.nnm b');if(b&&!b.querySelector('.flg'))b.insertAdjacentHTML('afterbegin',flag(n.cc)+' ')});nodeGrid()}}
 
-// ---------------------------------------------------------------- tunnel form: live port check
-// what the servers themselves say is listening, shown while the ports are typed
-var PC={};
-function portsOf(sid){var c=PC[sid];if(c&&Date.now()-c.at<8000)return Promise.resolve(c.v);
- return api('GET','/api/tunnels/servers/'+encodeURIComponent(sid)+'/ports').then(function(v){PC[sid]={at:Date.now(),v:v};return v}).catch(function(){return {known:false,used:[]}})}
-function nums(v){var o=[];String(v||'').split(/[\s,]+/).forEach(function(x){var a=x.split(':')[0];var r=a.split('-');if(r.length==2){for(var i=+r[0];i<=+r[1]&&i-+r[0]<2000;i++)o.push(i)}else if(+a>0)o.push(+a)});return o}
-function liveCheck(id){var en=$('#tw_en'),ex=$('#tw_ex');if(!en||!ex)return;var box=$('#v37pc');if(!box){box=document.createElement('div');box.id='v37pc';var ph=$('#tw_ph');if(!ph)return;ph.parentNode.insertBefore(box,ph.nextSibling)}
- var mode=($('#tw_md button.on')||{dataset:{v:'reverse'}}).dataset.v,trb=$('#tw_tr button.on'),tr=trb?trb.dataset.v:'tcpmux',listener=mode=='direct'?ex.value:en.value;
- var udp=['quic','kcp','hq','game'].indexOf(tr)>=0,both=tr=='dual',port=+(($('#tw_pt')||{}).value||0);
- var old=id?((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.id==id})[0]:null;
- var mine=function(sid,p,u){if(!old||!old.enabled)return false;var ol=old.mode=='direct'?old.exit:old.entry;var ou=['quic','kcp','hq','game','dual'].indexOf(old.transport)>=0,ot=['quic','kcp','hq','game'].indexOf(old.transport)<0;
-  return (sid==ol&&p==old.port&&(u?ou:ot))||(sid==old.entry&&nums((u?old.udp:old.tcp)||[]).indexOf(p)>=0)};
- var need=[];if(port){if(!udp||both)need.push([listener,port,false]);if(udp||both)need.push([listener,port,true])}
- nums(($('#tw_tcp')||{}).value).forEach(function(p){need.push([en.value,p,false])});nums(($('#tw_udp')||{}).value).forEach(function(p){need.push([en.value,p,true])});
- var sids=need.map(function(x){return x[0]}).filter(function(v,i,a){return v&&a.indexOf(v)==i});
- Promise.all(sids.map(function(sid){return portsOf(sid).then(function(v){return [sid,v]})})).then(function(rs){var msg=[],unknown=[];
-  rs.forEach(function(r){var sid=r[0],v=r[1];if(!v.known){unknown.push(sid);return}
-   need.filter(function(n){return n[0]==sid}).forEach(function(n){var hit=(v.used||[]).filter(function(u){return u.port==n[1]&&(u.proto=='udp')==n[2]})[0];
-    if(hit&&!(hit.kanki&&mine(sid,n[1],n[2])))msg.push((n[2]?'UDP ':'TCP ')+n[1]+' · '+(tunSrv(sid).name||sid)+': '+t('taken by')+' '+hit.by)})});
-  box.className=msg.length?'warnbox':'';box.innerHTML=msg.length?'<b>⚠ '+t('These ports are already taken on the server')+'</b><br>'+msg.map(esc).join('<br>'):(unknown.length?'<small class="muted">'+t('The server has not said which ports are free yet (update it to 3.7)')+'</small>':(need.length?'<small class="okt">✓ '+t('The ports are free on the servers')+'</small>':''))})}
-if(window.tunEdit){var _te=window.tunEdit;window.tunEdit=function(id,pre){var r=_te.apply(this,arguments);
- setTimeout(function(){if(!$('#tw_pt'))return;var tm;var go=function(){clearTimeout(tm);tm=setTimeout(function(){liveCheck(id)},350)};
-  ['#tw_pt','#tw_tcp','#tw_udp'].forEach(function(s){var e=$(s);if(e)e.addEventListener('input',go)});['#tw_en','#tw_ex'].forEach(function(s){var e=$(s);if(e)e.addEventListener('change',go)});
-  ['#tw_tr','#tw_md'].forEach(function(s){var e=$(s);if(e)e.addEventListener('click',go)});setTimeout(go,600)},300);return r}}
 
-// ---------------------------------------------------------------- smart channel: the Grok writer
-function aiCard(c){var st=String(c.ai_status||''),ok=st.indexOf('ok:')==0;
- return '<div class="card" id="v37ai"><div class="nh"><div><h3>🤖 '+t('AI writer')+'</h3><p class="sub">'+t('Posts are written by the AI from your real plans, prices and codes, in the tone you describe. When it does not answer (it is tried again, and another model is tried), the built-in writer posts instead.')+'</p></div>'+
-  '<label class="sw"><input type="checkbox" id="ai_on" '+(c.ai_on?'checked':'')+'><span></span></label></div>'+
-  '<div class="g2f"><div><label class="f">'+t('API key')+(c.ai_has_key?' · <span class="okt">'+t('saved')+' <span class="ltr">'+esc(c.ai_key_hint||'')+'</span></span>':'')+'</label><input id="ai_key" class="ltr aikey" type="text" name="kk-grok-api" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="'+esc(c.ai_has_key?t('Paste a new key to replace it'):'AQ.… / gsk_… / xai-…')+'"></div>'+
-  '<div><label class="f">'+t('Model')+'</label><input id="ai_model" class="ltr" value="'+esc(c.ai_model||'')+'" placeholder="'+esc(c.ai_provider_used=='gemini'?'gemini-flash-latest':c.ai_provider_used=='xai'?'grok-4':'openai/gpt-oss-120b')+'"></div></div>'+
-  '<label class="f">'+t('AI service')+'</label><select id="ai_pv">'+[['','Automatic (from the key)'],['gemini','Gemini (Google AI Studio, key AQ.… / AIza…)'],['groq','Groq (groq.com, key gsk_…)'],['xai','Grok (x.ai, key xai-…)']].map(function(o){return '<option value="'+o[0]+'"'+((c.ai_provider||'')==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select>'+
-  '<small class="muted">'+t('Now')+': <b class="ltr">'+esc(c.ai_provider_used=='xai'?'Grok · api.x.ai/v1':c.ai_provider_used=='gemini'?'Gemini · generativelanguage.googleapis.com':'Groq · api.groq.com/openai/v1')+'</b> · '+t('Empty model = the best one of that service; a refused model is replaced by another one of your account.')+'</small>'+
-  '<label class="f">'+t('About us and how to write')+'</label><textarea id="ai_brief" rows="4" placeholder="'+esc(t('Who you are, what to stress, the tone, words to avoid…'))+'">'+esc(c.ai_brief||'')+'</textarea>'+
-  '<label class="f">'+t('Posting times (Iran time)')+'</label><div class="inl"><input id="ch_times" class="ltr" value="'+esc(c.times||'')+'" placeholder="10:00, 16:00, 21:30"><button type="button" class="b2" id="ai_3x" style="flex:none">'+t('Use 3 times a day')+'</button></div><small class="muted">'+t('Empty = every N hours as above. Three times a day: 10:00, 16:00, 21:30')+'</small>'+
-  (st?'<p class="'+(ok?'okt':'r')+'" style="font-size:12px;margin:8px 0 0">'+t('Last answer')+': <span class="ltr">'+esc(ok?st.slice(3):st)+'</span></p>':'')+
-  '<div class="g3" style="margin-top:12px"><button class="btn" id="ai_save">'+t('Save')+'</button><button class="b2" id="ai_test">⚡ '+t('Test the key')+'</button>'+(c.ai_has_key?'<button class="b2 bd" id="ai_rm">'+t('Remove the key')+'</button>':'<span></span>')+'</div>'+
-  '<div id="ai_out" class="chpv" style="display:none;margin-top:10px"></div></div>'}
-function aiWire(){var g=function(id){return $('#'+id)};
- g('ai_3x').onclick=function(){g('ch_times').value='10:00, 16:00, 21:30'};
- var keyOk=function(){var k=g('ai_key').value.trim();if(k&&!/^(gsk_|xai-|AQ\.|AIza)/.test(k)&&!confirm(t('A Gemini key starts with AQ. or AIza (aistudio.google.com/apikey), a Groq key with gsk_, a Grok key with xai-. Save this one anyway?')))return false;return true};
- g('ai_save').onclick=function(){if(!keyOk())return;var b=this;b.disabled=true;api('PUT','/api/channel',{ai_on:g('ai_on').checked,ai_key:g('ai_key').value.trim(),ai_provider:g('ai_pv').value,ai_model:g('ai_model').value.trim(),ai_brief:g('ai_brief').value,times:g('ch_times').value.trim()})
-  .then(function(){toast(t('Saved'));botChan()}).catch(function(e){b.disabled=false;fail(e)})};
- g('ai_test').onclick=function(){if(!keyOk())return;var b=this,o=g('ai_out');b.disabled=true;o.style.display='';o.innerHTML='<span class="muted">…</span>';
-  var save=api('PUT','/api/channel',{ai_key:g('ai_key').value.trim(),ai_provider:g('ai_pv').value,ai_model:g('ai_model').value.trim()});
-  save.then(function(){return api('POST','/api/channel/ai-test')}).then(function(r){o.innerHTML='<b class="okt">✓ '+t('The AI works')+' · <span class="ltr">'+esc(r.model)+'</span></b><br><br>'+String(r.text||'').replace(/\n/g,'<br>');b.disabled=false})
-   .catch(function(e){o.innerHTML='<span class="r">'+esc(e.message||'')+'</span>';b.disabled=false})};
- var rm=g('ai_rm');if(rm)rm.onclick=function(){if(!confirm(t('Remove the key')+'?'))return;api('PUT','/api/channel',{ai_key:'-',ai_on:false}).then(function(){toast(t('Done'));botChan()}).catch(fail)}}
-if(window.botChan){var _bc=window.botChan;window.botChan=function(){_bc.apply(this,arguments);var tries=0;
- var wait=setInterval(function(){tries++;var el=$('#bt_chan');if(!el||tries>40){clearInterval(wait);return}
-  if($('#ch_save')&&!$('#v37ai')){clearInterval(wait);api('GET','/api/channel').then(function(c){if($('#v37ai'))return;var first=el.querySelector('.card');var d=document.createElement('div');d.innerHTML=aiCard(c);
-   if(first&&first.nextSibling)el.insertBefore(d.firstChild,first.nextSibling);else el.appendChild(d.firstChild);aiWire()}).catch(function(){})}},150)}}
 
-// ---------------------------------------------------------------- Backup: move the whole panel to a new server
-function moveCard(){return '<div class="card" id="v37move"><h3>🚚 '+t('Move the panel to a new server')+'</h3><p class="sub">'+t("Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.")+'</p><div id="mv_in">'+t('Loading…')+'</div></div>'}
-function moveDraw(m){var el=$('#mv_in');if(!el)return;
- var steps='<ol class="steps" style="margin:6px 0 10px;line-height:2"><li><b>'+t("Point the panel's domain to the new server's IP")+'</b><br><small class="muted">'+t('In your DNS (Cloudflare / ArvanCloud): the A record of')+' <span class="ltr">'+esc(m.domain||'')+'</span> '+t('= the IP of the new server, without CDN (DNS only). The old panel keeps working by its IP until the move is done.')+'</small></li>'+
-  '<li><b>'+t('Run this on the new server (Ubuntu / Debian, as root)')+'</b><br><small class="muted">'+t('It downloads everything straight from this server, puts it back with the same keys and starts the panel there. Then this panel stops by itself.')+'</small></li></ol>';
- if(m.done>0){el.innerHTML='<div class="okbox" style="padding:10px;border-radius:12px;border:1px solid var(--ok)">✓ '+t('Moved: the panel runs on the new server. This one is stopping.')+'</div>';return}
- if(!m.active){el.innerHTML=steps+'<label class="f">'+t("This server's IP (empty = found by itself)")+'</label><div class="inl"><input id="mv_ip" class="ltr" value="'+esc(m.ip||'')+'" placeholder="1.2.3.4"><button class="btn" id="mv_go" style="flex:none">'+t('Make the move command')+'</button></div>'+
-   '<p class="hint">'+t('The backup above is complete too: it can also be restored by hand on a new server (Restore with «Also restore server keys»).')+'</p>';
-  $('#mv_go').onclick=function(){var b=this;b.disabled=true;api('POST','/api/migrate/start',{ip:$('#mv_ip').value.trim()}).then(moveLoad).catch(function(e){b.disabled=false;fail(e)})};return}
- el.innerHTML=steps+'<pre class="ltr" id="mv_cmd" style="white-space:pre-wrap;word-break:break-all;font-size:11.5px;padding:10px;border-radius:12px;background:var(--in);border:1px solid var(--gb2);margin:0">'+esc(m.command)+'</pre>'+
-  '<p class="hint">'+t('Valid for 3 hours, one time. It holds the key of the backup: do not share it.')+'</p>'+
-  '<p style="margin:6px 0">'+(m.fetched>0?'<span class="okt">✓ '+t('The new server downloaded the backup')+(m.new_ip?' (<span class="ltr">'+esc(m.new_ip)+'</span>)':'')+'</span>':'<span class="muted">⏳ '+t('Waiting for the new server…')+'</span>')+'</p>'+
-  '<div class="g2"><button class="btn" id="mv_cp">'+t('Copy the command')+'</button><button class="b2 bd" id="mv_x">'+t('Cancel the command')+'</button></div>';
- $('#mv_cp').onclick=function(){copy(m.command)};$('#mv_x').onclick=function(){api('DELETE','/api/migrate').then(moveLoad).catch(fail)}}
-function moveLoad(){return api('GET','/api/migrate').then(moveDraw).catch(function(e){var el=$('#mv_in');if(el)el.textContent=e.message||''})}
-if(window.pBackup){var _pb=window.pBackup;window.pBackup=function(){_pb.apply(this,arguments);var g=$('#pg .g2');if(g&&!$('#v37move')){var d=document.createElement('div');d.innerHTML=moveCard();g.parentNode.insertBefore(d.firstChild,g.nextSibling)}
- moveLoad();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page=='backup'&&$('#v37move')&&!$('#modal').classList.contains('on'))moveLoad()},5000)}}
 
 // ---------------------------------------------------------------- the look
 var css=`
@@ -4656,11 +4586,6 @@ function sheetHtml(){var g='',h='<i class="k38grab"></i>',open=false;
  SECS.forEach(function(s){if(s[4]!=g){if(open)h+='</div>';g=s[4];h+='<div class="k38g">'+t(g)+'</div><div class="k38tiles">';open=true}var f=s[3][0];
   h+='<a class="k38tile'+(V.secOf(S.page)[0]==s[0]?' on':'')+'" href="#'+f[0]+'">'+ic(s[2],22)+'<span>'+t(s[1])+'</span></a>'});
  return h+(open?'</div>':'')}
-window.navSheet=function(){};
-var _nm=window.navMark;
-window.navMark=function(p){_nm.apply(this,arguments);k38More(0);
- // the open section stays in sight in the scrolling bar
- var a=document.querySelector('#mbar a[data-sec="'+V.secOf(p)[0]+'"]');if(a&&a.scrollIntoView)try{a.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}};
 
 
 // ---------------------------------------------------------------- night / day in the top bar
@@ -4669,18 +4594,10 @@ window.navMark=function(p){_nm.apply(this,arguments);k38More(0);
 ICO.sun38='<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>';
 function drawLooks(){var b=$('#thm');if(!b)return;var night=(S.theme||'dark')!='light';
  b.innerHTML=ic(night?'sun38':'moon',17)+'<span>'+t(night?'Day':'Night')+'</span>';b.title=t(night?'Day':'Night');b.setAttribute('aria-label',b.title);b.classList.add('k38dn')}
-var _al=window.applyLook;
-window.applyLook=function(){_al.apply(this,arguments);document.body.classList.add('k38');if($('#side'))document.body.classList.add('v37');drawLooks()};
-var _sh=window.shell;
-window.shell=function(){_sh.apply(this,arguments);document.body.classList.add('k38');drawLooks()};
+V.drawLooks=drawLooks;
 
 // ---------------------------------------------------------------- dashboard: quick actions
-if(window.pDash){var _pd=window.pDash;window.pDash=function(){_pd.apply(this,arguments);var ph=$('#pg .ph');if(!ph||$('#k38qa'))return;
- var d=document.createElement('div');d.className='k38qa';d.id='k38qa';
- d.innerHTML='<b>'+t('Quick actions')+'</b><div class="k38qb"><button class="btn" onclick="newUser()">'+ic('plus',16)+' '+t('New user')+'</button>'+
-  '<button class="b2" onclick="nodeAddTyped()">'+ic('nodes',16)+' '+t('Add server')+'</button>'+
-  '<a class="b2" href="#bot">'+ic('bot',16)+' '+t('Sales bot')+'</a><a class="b2" href="#backup">'+ic('backup',16)+' '+t('Backup')+'</a></div>';
- ph.parentNode.insertBefore(d,ph.nextSibling)}}
+if(window.pDash){}
 
 // ---------------------------------------------------------------- the look
 var css=`
@@ -4869,7 +4786,7 @@ document.addEventListener('keydown',function(e){if(e.key!='Escape'||($('#modal')
 // ---------------------------------------------------------------- data
 function load(quiet){
  return Promise.all([api('GET','/api/servers'),api('GET','/api/nodes').catch(function(){return null}),api('GET','/api/tunnels').catch(function(){return null})]).then(function(r){
-  SV.d=r[0];if(r[1])S.nodes=r[1];if(r[2]){if(window.TN)TN.d=r[2];else window.TN={d:r[2]}}
+  SV.d=r[0];if(r[1])S.nodes=r[1];if(r[2])TN.d=r[2];
   if(S.page=='nodes')draw(!quiet);waitTick();return SV.d}).catch(function(e){if(!quiet)fail(e)})}
 window.srvLoad=load;
 
@@ -5083,28 +5000,18 @@ window.srvAddDns=function(key,iran){if(!window.dnsAdd)return;dnsAdd(iran?'relay'
 // Add node (dashboard) and + Server (tunnels) open the one Add server
 window.nodeAdd=function(){srvAdd('abroad')};
 window.tunServerAdd=function(){srvAdd('iran')};
+// the servers again (after an action): this page redraws; elsewhere only the data is fetched
+window.loadNodes=function(){if(S.page=='nodes'&&$('#svp_g'))return load(true);
+ api('GET','/api/nodes').then(function(n){S.nodes=n}).catch(fail);
+ api('GET','/api/xray').then(function(d){XR.d=d}).catch(function(){});
+ api('GET','/api/dns').then(function(d){DN.d=d}).catch(function(){});
+ api('GET','/api/tunnels').then(function(d){TN.d=d}).catch(function(){})};
 // "New server" in the Xray / DNS forms makes a whole server too: its command installs everything
-if(window.tunCmdBox){var _tcb=window.tunCmdBox;window.tunCmdBox=function(s,d){if(s&&s.command)return '<label class="f">'+t('Run this on the new server, as root (Ubuntu / Debian)')+'</label><pre class="cmd" id="tn_cmd">'+esc(s.command)+'</pre><button class="btn" style="width:100%" id="tn_cp">'+ic('link',16)+' '+t('Copy command')+'</button>';return _tcb(s,d)}}
-var _api=window.api;
-window.api=function(m,u,b){if(m=='POST'&&u=='/api/tunnels/servers'&&b&&!b.gre_ip&&!b.addr)return _api('POST','/api/servers',{name:b.name,loc:b.loc||'abroad',vpn:b.loc!='iran'});return _api.apply(this,arguments)};
 // actions of the node cards refresh this page
-if(window.loadNodes){var _ln=window.loadNodes;window.loadNodes=function(){if(S.page=='nodes'&&$('#svp_g'))return load(true);return _ln.apply(this,arguments)}}
 
 // the menu: one Servers page (the separate Tunnel servers page is gone)
 if(window.V37&&V37.SECS){V37.SECS.forEach(function(s){s[3]=s[3].filter(function(x){return x[0]!='servers'})})}
-var _route=window.route;
-if(_route)window.route=function(){var h=(location.hash||'').slice(1).split('/')[0];if(h=='servers'){location.replace('#nodes');return}return _route.apply(this,arguments)};
 
-// ---------------------------------------------------------------- Backup: after a restore, and app files
-function restoreBox(){var pg=$('#pg');if(!pg||S.page!='backup'||$('#svp_rs'))return;
- api('GET','/api/restore/check').then(function(r){if((!r.restored_at||Date.now()/1000-r.restored_at>3*86400)&&!r.bot_conflict||$('#svp_rs')||S.page!='backup')return;
-  var sv=r.servers||[],bad=sv.filter(function(x){return (x.agent===false)||(x.vpn===false&&x.vpn_on)});
-  var c=document.createElement('div');c.className='card';c.id='svp_rs';
-  c.innerHTML='<h3>'+t('After restore')+'</h3><p class="sub">'+t('Restored')+' '+ago(r.restored_at)+(r.moved_from?' · '+t('from')+' <span class="ltr">'+esc(r.moved_from)+'</span>':'')+'</p>'+
-   (r.bot_conflict?'<div class="warnbox">'+t('The panel on the old server still runs the same Telegram bot: both answer customers and both post to the channel. Stop it there: systemctl disable --now kanki-panel')+'</div>':'')+
-   (bad.length?'<div class="list">'+sv.map(function(x){var ok=x.agent!==false&&!(x.vpn===false&&x.vpn_on);return '<div class="li"><span>'+esc(x.name)+'</span><span>'+(ok?'✅':'⏳ '+t('Not connected yet'))+'</span></div>'}).join('')+'</div>':'<p>✅ '+t('Every server is connected')+'</p>');
-  var ph=$('#pg .ph');if(ph)ph.parentNode.insertBefore(c,ph.nextSibling)}).catch(function(){})}
-if(window.pBackup){var _pb=window.pBackup;window.pBackup=function(){_pb.apply(this,arguments);setTimeout(restoreBox,400)}}
 })();
 
 // ==================================================================== multi-location routes
@@ -5158,8 +5065,7 @@ function trOpts(sel){return TRS.map(function(g){return '<optgroup label="'+esc(t
  (TRS.some(function(g){return g[1].indexOf(sel)>=0})||!sel?'':'<option value="'+esc(sel)+'" selected>'+esc(tunTr(sel))+'</option>')}
 
 // ---------------------------------------------------------------- the list: the hops of a route are one card
-var _card=window.tunCard;
-window.tunCard=function(x){if(!x.chain)return _card(x);var hs=hopsOf(x.chain);if(hs.length&&hs[0].id!=x.id)return '';return routeCard(hs)};
+window.routeCardOf=function(x){var hs=hopsOf(x.chain);if(hs.length&&hs[0].id!=x.id)return '';return routeCard(hs)};
 function routeCard(hs){var first=hs[0],name=first.chain_name||first.name,states=hs.map(function(x){return x.state}),
  all=states.every(function(s){return s=='up'}),any=states.some(function(s){return s=='up'}),st=all?'up':!hs.some(function(x){return x.enabled})?'off':any?'partial':'down',col=tunCol(st),
  ping=hs.reduce(function(a,x){var r=(x.entry_status||{}).rtt_ms;return a==null||!r?null:a+r},0),ch=esc(first.chain);
@@ -5187,8 +5093,6 @@ window.routeDel=function(ch){if(!confirm(t('Delete the whole route? Every hop st
  Promise.all(hs.map(function(x){return api('DELETE','/api/tunnels/'+x.id)})).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)};
 
 // a button next to "+ Tunnel"
-var _pt=window.pTunnels;
-window.pTunnels=function(){_pt.apply(this,arguments);var r=$('#pg .ph .row');if(r&&!$('#rt_new')){var b=document.createElement('button');b.className='b2';b.id='rt_new';b.innerHTML='⛓ '+t('Multi-location tunnel');b.onclick=function(){routeEdit()};r.insertBefore(b,r.lastElementChild)}};
 
 // ---------------------------------------------------------------- make / edit a route
 var R=null;
@@ -5326,8 +5230,6 @@ if(window.V37&&V37.SECS)V37.SECS.forEach(function(s){if(s[0]!='vpnsec')return;
  s[3]=[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI']]});
 
 // leaving a page closes its open row
-var _route=window.route;
-window.route=function(){Object.keys(ACC.open).forEach(function(k){ACC.open[k]=''});return _route.apply(this,arguments)};
 
 function fl(cc){return window.flagOf?flagOf(cc):''}
 function isIr(s){return s.loc=='iran'||String(s.cc||'').toUpperCase()=='IR'}
@@ -5444,16 +5346,9 @@ if(window.kmDraw){
   var tp=unN($('#km_tp1').value).trim();o.tun_port=tp?+tp:0;o.tun_name=$('#km_tn1').value.trim();m[id]=o;
   api('PUT','/api/kmix',{nodes:m}).then(function(){toast(t('Saved'));accClose('km');kmLoad(true)}).catch(fail)};
  // the settings of every server, in the list; the page keeps its numbers and the general settings
- var _kd=window.kmDraw;
- window.kmDraw=function(d){_kd(d);var c=$('#km_srv');if(!c)return;var card=c.closest('.card'),g=card&&card.parentNode;
-  if(g&&g.classList.contains('g2'))g.classList.add('kmg2')};
- (function(){var st=document.createElement('style');st.textContent='.kmg2{align-items:start}@media(min-width:900px){.kmg2{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)!important}}';document.head.appendChild(st)})();
- var _kl=window.kmLoad;
- window.kmLoad=function(quiet){return srvLoad(true).then(function(){return api('GET','/api/kmix')}).then(function(d){KM.d=d;if(S.page!='kmix')return d;
-  if($('#km_srv')){$('#km_kv').innerHTML=kmKpis(d);if(!quiet||!accBusy('km'))$('#km_srv').innerHTML=kmServers(d);return d}kmDraw(d);return d}).catch(fail)};
- ACC.draw.km=function(){var c=$('#km_srv');if(c&&KM.d)c.innerHTML=kmServers(KM.d)};
- var _pk=window.p_kmix;window.p_kmix=function(){ACC.open.km='';_pk.apply(this,arguments)};
-}
+  (function(){var st=document.createElement('style');st.textContent='.kmg2{align-items:start}@media(min-width:900px){.kmg2{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)!important}}';document.head.appendChild(st)})();
+  ACC.draw.km=function(){var c=$('#km_srv');if(c&&KM.d)c.innerHTML=kmServers(KM.d)};
+ }
 
 // ---------------------------------------------------------------- Xray: a row per server with its inbounds
  window.xrServers=function(d){if(!d.servers.length)return '<p class="muted">'+t('No Xray server yet: add one in Servers')+'</p>';
@@ -5472,10 +5367,7 @@ if(window.kmDraw){
    '<button class="b2 sm" onclick="xrPreview(\''+sid+'\')">{ } '+t('Config')+'</button><button class="b2 sm" onclick="srvRepair(\'xray\',\''+sid+'\')">↻ '+t('Repair')+'</button><button class="b2 sm" onclick="srvHealth(\'xray\',\''+sid+'\')">♡ '+t('Health')+'</button>'+
    '<button class="b2 sm bd" onclick="xrSrvDel(\''+sid+'\')">'+ic('trash',13)+' '+t('Remove Xray from this server')+'</button></div>'}
  ACC.draw.xr=function(){var c=$('#xr_srv');if(c&&XR.d)c.innerHTML=xrServers(XR.d)};
- var _px=window.p_xray;window.p_xray=function(){ACC.open.xr='';_px.apply(this,arguments);srvLoad(true);
-  var r=$('#pg .ph .row');if(r&&!$('#xr_all1')){var a=document.createElement('button');a.className='b2';a.id='xr_all1';a.textContent=t('Off for all users');a.onclick=function(){srvProtoAll('xray',0)};
-   var b=document.createElement('button');b.className='b2';b.textContent=t('On for all users');b.onclick=function(){srvProtoAll('xray',1)};r.insertBefore(b,r.firstChild);r.insertBefore(a,r.firstChild)}};
-})();
+ })();
 
 // ==================================================================== colors and cards
 // Kanki Panel 3.10: the polished look. Loaded last (after kanki-look.js), it changes how the panel looks,
@@ -5497,16 +5389,6 @@ Object.assign(ICO,{
  k310traffic:'<path d="M7 4v14M3.5 14.5L7 18l3.5-3.5"/><path d="M17 20V6M13.5 9.5L17 6l3.5 3.5"/>'});
 
 // ---------------------------------------------------------------- sign-in screen
-var _lv=window.loginView;
-window.loginView=function(){_lv.apply(this,arguments);
- var l=$('.login');if(!l)return;l.classList.add('k310login');
- var c=l.querySelector('.card'),h=c&&c.querySelector('h3');
- if(h){h.removeAttribute('style');h.insertAdjacentHTML('afterend','<p class="k310sub">'+t('Sign in to continue')+'</p>')}
- var lt=$('#lt');if(lt){lt.innerHTML=ic(document.body.classList.contains('light')?'moon':'k310sun',17);lt.title=t('Light / dark');lt.setAttribute('aria-label',t('Light / dark'));
-  var o=lt.onclick;lt.onclick=function(){o.apply(this,arguments);lt.innerHTML=ic(document.body.classList.contains('light')?'moon':'k310sun',17)}}
- var ll=$('#ll');if(ll){ll.title=t('Language');ll.setAttribute('aria-label',t('Language'))}
- l.insertAdjacentHTML('afterbegin','<i class="k310orb a"></i><i class="k310orb b"></i>');
- var lg=l.querySelector('.logo');if(lg)lg.insertAdjacentHTML('afterend','<div class="k310brand">'+t('VPN management panel')+'</div>')};
 
 // ---------------------------------------------------------------- user tiles: data used and days left
 
@@ -5617,7 +5499,6 @@ var SECS=[
 // the sections other layers already know keep their objects (some code holds on to them)
 var old={};V.SECS.forEach(function(s){old[s[0]]=s});
 V.SECS.length=0;SECS.forEach(function(s){var o=old[s[0]];if(o){o.length=0;s.forEach(function(x){o.push(x)});V.SECS.push(o)}else V.SECS.push(s)});
-window.NAV=V.SECS.map(function(s){return {p:s[3][0][0],sec:s[0]}});
 function secBy(k){for(var i=0;i<V.SECS.length;i++)if(V.SECS[i][0]==k)return V.SECS[i];return V.SECS[0]}
 function href(f){return '#'+f[0]+(f[1]?'/'+f[1]:'')}
 function sheetHtml(){var g='',h='<i class="k38grab"></i>',open=false,cur=V.secOf(S.page)[0];
@@ -5630,19 +5511,13 @@ window.k38More=function(on){var sh=$('#msheet'),sc=$('#k38scrim');if(!sh)return;
 function markTabs(){var el=$('#sectabs');if(!el)return;var as=$$('.stl a',el),h=location.hash||'',hit=as.filter(function(a){return a.getAttribute('href')==h});
  if(!hit.length){var p='#'+S.page;hit=as.filter(function(a){return a.getAttribute('href').split('/')[0]==p}).slice(0,1)}
  as.forEach(function(a){a.classList.toggle('on',hit.indexOf(a)>=0)})}
-var _nm=window.navMark;
-window.navMark=function(){_nm.apply(this,arguments);markTabs()};
+V.markTabs=markTabs;
 new MutationObserver(function(){if($('#sectabs'))markTabs()}).observe(document.body,{childList:true,subtree:true});
 // the Xray menu item opens its first part
-var _route=window.route;
-window.route=function(){if((location.hash||'')=='#xray'){location.replace('#xray/overview');return}return _route.apply(this,arguments)};
 
 // ---------------------------------------------------------------- Xray: servers first, inbounds their own tab
 // the servers tab shows the servers across the page; the inbounds are on the next tab
 if(window.XTABS){XTABS.length=0;[['overview','Servers','srv'],['inbounds','Inbounds','xray'],['clients','Online clients','users'],['routing','Routing and outbounds','tunnel'],['settings','Settings','settings']].forEach(function(x){XTABS.push(x)})}
-var _xo=window.xrOverview;
-if(_xo)window.xrOverview=function(d,el){_xo.apply(this,arguments);var s=$('#xr_srv',el),c=s&&s.closest('.card'),g=c&&c.parentNode;
- if(g&&g.classList.contains('g2')){$$(':scope>.card',g).forEach(function(x){if(x!=c)x.remove()});g.classList.add('k310one')}};
 
 // ---------------------------------------------------------------- server cards with a side drawer
 // KANKI MIX (km) and Xray (xr) rows become cards; the open one shows its settings in a drawer
@@ -5659,28 +5534,43 @@ window.addEventListener('hashchange',function(){var sc=$('#k310scrim');if(sc)sc.
 
 // ---------------------------------------------------------------- dashboard
 function chip(c,label,val){return '<span class="k310st '+c+'"><i></i>'+t(label)+'<b class="ltr">'+val+'</b></span>'}
+// the dashboard: a status line, the numbers, then live traffic beside server resources, servers beside tunnels,
+// services beside connections, the activity log last
+window.pDash=function(){dbReset();
+$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Dashboard')+'</h2><p class="ltr" id="d_sub" style="text-align:start">…</p></div>'+
+ '<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" onclick="newUser()">'+ic('plus',15)+' '+t('New user')+'</button><button class="b2 sm" onclick="nodeAddTyped()">'+ic('nodes',15)+' '+t('Add server')+'</button><span class="live" id="d_live"><i></i><span id="d_lt">'+t('Live')+'</span></span>'+
+ '<select id="d_iv" style="width:auto;padding:6px 9px;font-size:12px">'+[1,2,5,10].map(function(n){return '<option value="'+n+'"'+(n==DB.iv?' selected':'')+'>'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select>'+
+ '<button class="ib" id="d_pause" title="'+t('Pause')+'">❚❚</button></div></div>'+
+ '<div class="k310strip" id="k310strip"></div><div class="kpis" id="kpis"></div>'+
+ '<div class="k310dash" id="k310dash">'+
+  '<div class="k310c w8">'+'<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('Network speed')+'</h3><small class="muted ltr" id="n_if"></small></div>'+
+  '<div class="nbig"><div class="dn"><small>↓ '+t('Download')+'</small><b id="n_rx" class="ltr">—</b></div><div class="upl"><small>↑ '+t('Upload')+'</small><b id="n_tx" class="ltr">—</b></div></div></div>'+
+  '<div class="ch tall" id="ch_net"></div>'+
+  '<div class="nf ltr"><span>'+t('Peak')+' ↓ <b id="n_prx">—</b></span><span>'+t('Peak')+' ↑ <b id="n_ptx">—</b></span><span>'+t('Total since boot')+' ↓ <b id="n_trx">—</b></span><span>↑ <b id="n_ttx">—</b></span></div></div>'+'</div>'+
+  '<div class="k310c w4"><div class="card k310res"><h3>'+ic('cpu',16)+' '+t('Server resources')+'</h3>'+'<div class="gg">'+gcard('cpu','CPU',ic('cpu',16))+gcard('ram','RAM',ic('ram',16))+gcard('disk','Storage',ic('disk',16))+gcard('swap','Swap',ic('swap',16))+'</div>'+'</div></div>'+
+  '<div class="k310c w6">'+'<div class="card" id="nc" style="margin-bottom:12px"></div>'+'</div>'+
+  '<div class="k310c w6">'+tunDashCard()+'</div>'+
+  '<div class="k310c w6">'+'<div class="card"><h3>'+t('Services')+'</h3><p class="sub">'+t('Start, stop or restart the VPN services')+'</p><div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></div>'+'</div>'+
+  '<div class="k310c w6">'+'<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('TCP / UDP connections')+'</h3><small class="muted" id="c_sub"></small></div>'+
+  '<div class="nbig"><div class="dn"><small>TCP</small><b id="c_tcp" class="ltr">—</b></div><div class="upl"><small>UDP</small><b id="c_udp" class="ltr">—</b></div></div></div>'+
+  '<div class="ch tall" id="ch_con"></div></div>'+'</div>'+
+ '</div>'+logCard();
+ $('#d_iv').onchange=function(){DB.iv=+this.value;localStorage.setItem('kk_div',DB.iv);dashTimers()};
+ $('#d_pause').onclick=function(){DB.paused=!DB.paused;if(!DB.paused)DB.last=null;this.textContent=DB.paused?'▶':'❚❚';this.title=DB.paused?t('Resume'):t('Pause');dashLive(DB.paused?'off':'')};
+ $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};logWire();tunDashWire();
+ $('#kpis').onclick=function(e){var b=e.target.closest('[data-go]');if(b)goUsers(b.dataset.go)};
+ dashTick();dashSys();dashTimers();
+ strip();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page!='dash'){clearInterval(S.timer4);return}strip()},3000)};
+window.drawKpis=function(o){var el=$('#kpis');if(el&&o){
+ var it=[['a','Total users',o.users,'all'],['g','Online',o.online,'online'],['g','Active',o.active,'active'],['y','Expired / out of data',o.expired,'finished'],['r','Disabled',o.disabled,'disabled'],['a','Total traffic',N(o.traffic_gb)+' GB','']];
+ el.innerHTML=it.map(function(x){return '<button class="kpi '+x[0]+'" '+(x[3]?'data-go="'+x[3]+'"':'')+'><small>'+t(x[1])+'</small><b class="ltr">'+(typeof x[2]=='number'?N(x[2]):x[2])+'</b></button>'}).join('')}
+ strip()};
 function strip(){var el=$('#k310strip');if(!el)return;var h='';
  var ns=S.nodes||[];if(ns.length){var on=ns.filter(function(n){return n.online}).length;h+=chip(on==ns.length?'g':on?'y':'r','Servers online',N(on)+' / '+N(ns.length))}
  var tl=(window.TN&&TN.d&&TN.d.tunnels)||[];if(tl.length){var up=tl.filter(function(x){return x.state=='up'}).length;h+=chip(up==tl.length?'g':up?'y':'r','Tunnels up',N(up)+' / '+N(tl.length))}
  var sv=((DB.sys||{}).services||[]);if(sv.length){var bad=sv.filter(function(x){return !x.active}).length;h+=chip(bad?'y':'g','Services',bad?N(bad)+' '+t('stopped'):t('all running'))}
  if(DB.ov)h+=chip(DB.ov.online?'g':'','Users online',N(DB.ov.online));
  h=h||'<span class="muted">…</span>';if(el._h!==h){el._h=h;el.innerHTML=h}}  // unchanged: leave it, so its turning edges keep turning
-var _dk=window.drawKpis;if(_dk)window.drawKpis=function(){_dk.apply(this,arguments);strip()};
-var _pd=window.pDash;
-window.pDash=function(){_pd.apply(this,arguments);var pg=$('#pg'),ph=$('#pg .ph');if(!pg||!ph||$('#k310dash'))return;
- // the two actions that matter go up next to the live switch; the quick-actions bar goes
- var qa=$('#k38qa'),row=$('.row',ph);
- if(qa){if(row)row.insertAdjacentHTML('afterbegin','<button class="btn sm" onclick="newUser()">'+ic('plus',15)+' '+t('New user')+'</button><button class="b2 sm" onclick="nodeAddTyped()">'+ic('nodes',15)+' '+t('Add server')+'</button>');qa.remove()}
- var st=document.createElement('div');st.className='k310strip';st.id='k310strip';ph.parentNode.insertBefore(st,ph.nextSibling);
- var k=$('#kpis'),gg=$('#pg .gg'),nc=$('#nc'),net=$('#ch_net'),con=$('#ch_con'),sv=$('#svcs'),td=$('#tdc'),lg=$('#lgc');
- var card=function(x){return x&&x.closest('.card')};net=card(net);con=card(con);sv=card(sv);
- var d=document.createElement('div');d.className='k310dash';d.id='k310dash';
- var cell=function(cls,els){var c=document.createElement('div');c.className='k310c '+cls;els.forEach(function(e){if(e)c.appendChild(e)});d.appendChild(c)};
- if(k)k.parentNode.insertBefore(d,k.nextSibling);
- var res=document.createElement('div');res.className='card k310res';res.innerHTML='<h3>'+ic('cpu',16)+' '+t('Server resources')+'</h3>';if(gg)res.appendChild(gg);
- cell('w8',[net]);cell('w4',[res]);cell('w6',[nc]);cell('w6',[td]);cell('w6',[sv]);cell('w6',[con]);
- if(lg)pg.appendChild(lg);
- strip();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page!='dash'){clearInterval(S.timer4);return}strip()},3000)};
 
 // ---------------------------------------------------------------- tunnel map
 // The old neon map (glowing fibres, packets that turn into the tunnel colour at the lock, cyan packets
@@ -5931,21 +5821,58 @@ function look(){document.body.classList.add('kd');document.body.classList.toggle
  $$('.kd-lay button').forEach(function(b){b.classList.toggle('on',(b.dataset.m=='top')==(store('kk_menu')=='top'))})}
 window.kdMenu=function(m){store('kk_menu',m);look();markAll()};
 window.kdMini=function(){store('kk_mini',store('kk_mini')=='1'?'0':'1');look()};
-var _sh=window.shell;
-window.shell=function(){_sh.apply(this,arguments);
- var br=$('#side .sbrand');if(br&&!$('.kd-fold',br))br.insertAdjacentHTML('beforeend','<button type="button" class="kd-fold" onclick="kdMini()" aria-label="'+esc(t('Fold the menu'))+'" title="'+esc(t('Fold the menu'))+'">'+CHEV+'</button>');
- var ta=$('header.top .tb-act');if(ta&&!$('.kd-lay',ta))ta.insertAdjacentHTML('afterbegin','<div class="kd-lay" role="group" aria-label="'+esc(t('Top menu'))+'"><button type="button" data-m="side" onclick="kdMenu(\'side\')">'+t('Side menu')+'</button><button type="button" data-m="top" onclick="kdMenu(\'top\')">'+t('Top menu')+'</button></div>');
- var hd=$('header.top');if(hd&&!$('#kdtop'))hd.insertAdjacentHTML('afterend',topNav());dragRow($('#kdtop'));look()};
+window.shell=function(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.charAt(0);
+ $('#app').innerHTML='<header class="top"><div class="'+logoCls()+'" id="mlogo">'+logoInner(L)+'</div>'+
+ '<div class="tb-title"><small><span>'+esc(nm)+'</span><span>›</span><span id="tbsec"></span></small><b id="tbt"></b></div><div class="sp"></div>'+
+ '<div class="tb-act"><div class="kd-lay" role="group" aria-label="'+esc(t('Top menu'))+'"><button type="button" data-m="side" onclick="kdMenu(\'side\')">'+t('Side menu')+'</button><button type="button" data-m="top" onclick="kdMenu(\'top\')">'+t('Top menu')+'</button></div><div class="segl"><button data-l="fa" class="'+(S.lang=='fa'?'on':'')+'">FA</button><button data-l="en" class="'+(S.lang=='en'?'on':'')+'">EN</button></div>'+
+ '<button class="ib" id="thm" title="'+t('Theme')+'" aria-label="theme">'+ic('moon',17)+'</button>'+
+ '<button class="ib" id="upd" title="'+t('Update')+'"><span class="dot" id="updot"></span><span class="uv ltr">v'+esc(me.version||'')+'</span></button>'+
+ '<div class="uchip2" title="'+esc(me.user||'')+'"><i>'+esc((me.user||'A').charAt(0).toUpperCase())+'</i><span>'+esc(me.user||'')+'</span></div>'+
+ '<button class="ib" id="lo" title="'+t('Logout')+'" aria-label="logout">'+ic('logout',17)+'</button></div></header>'+topNav()+
+ '<nav class="side" id="side"><div class="sbrand"><div class="'+logoCls()+'">'+logoInner(L)+'</div><div style="min-width:0"><b>'+esc(nm)+'</b><small>'+t('VPN management')+'</small></div>'+
+  '<button type="button" class="kd-fold" onclick="kdMini()" aria-label="'+esc(t('Fold the menu'))+'" title="'+esc(t('Fold the menu'))+'">'+CHEV+'</button></div>'+
+ '<div class="snav">'+navSide()+'</div>'+
+ '<div class="sfoot"><button class="sver" id="upd2"><span class="dot" id="updot2"></span><span><b class="ltr">v'+esc(me.version||'')+'</b><small id="updt">'+t('Check for update')+'</small></span></button>'+
+ '<a href="#" id="lo2" class="lo2"><span class="ni">'+ic('logout',18)+'</span>'+t('Logout')+'</a></div></nav><div class="shade" id="shade"></div>'+navBar()+'<main id="pg"></main>';
+ $('#shade').onclick=function(){$('#side').classList.remove('on');$('#shade').classList.remove('on')};
+ $('#msheet').onclick=function(e){if(e.target.closest('a'))navMark(S.page,S.sub)};
+ if(!window._navDoc){window._navDoc=1;document.addEventListener('click',function(e){var sh=$('#msheet');if(sh&&sh.classList.contains('on')&&!e.target.closest('#msheet,#mbar'))navMark(S.page,S.sub)})}
+ $$('[data-l]').forEach(function(b){b.onclick=function(){S.lang=b.dataset.l;localStorage.setItem('kk_lang',S.lang);applyLook();shell();route()}});
+ $('#thm').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook()};
+ $('#lo').onclick=function(){logout()};$('#lo2').onclick=function(e){e.preventDefault();logout()};
+ $('#upd').onclick=updateModal;$('#upd2').onclick=function(){$('#shade').click();location.hash='#settings';S.stsec='upd';if(S.page=='settings')route()};
+ // page headers get the page icon, whenever a page draws (or redraws) its header
+ if(window.MutationObserver)new MutationObserver(decoratePh).observe($('#pg'),{childList:true,subtree:true});
+ api('GET','/api/update/check').then(function(r){var c='dot '+(r.available?'y':(r.error?'':'g'));
+  ['#updot','#updot2'].forEach(function(x){var d=$(x);if(d)d.className=c});
+  var u=$('#updt');if(u)u.textContent=r.available?t('A new version is available.'):(r.error?t('Update source not set'):t('You are on the latest version.'))}).catch(function(){});
+ document.body.classList.add('v37','k38');V.watchPg();V.drawLooks();dragRow($('#kdtop'));look()};
 function markAll(){var sk=V.secOf(S.page)[0];
  $$('#kdtop a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
  var on=$('#kdtop a.on');if(on&&document.body.classList.contains('kd-topm'))try{on.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}
  var a=$('#side a.on'),g=a&&a.closest('.kd-g');if(g&&!g.classList.contains('open')){g.classList.add('open');var b=$('.kd-gh',g);if(b)b.setAttribute('aria-expanded','true')}}
-var _nm=window.navMark;window.navMark=function(){_nm.apply(this,arguments);markAll()};
+// the open section lit in every menu, its tabs on top of the page
+window.navMark=function(p){var sk=V.secOf(p)[0];
+ $$('#side a[data-sec],#mbar a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
+ V.drawSecTabs(p);k38More(0);
+ // the open section stays in sight in the scrolling bar
+ var a=document.querySelector('#mbar a[data-sec="'+sk+'"]');if(a&&a.scrollIntoView)try{a.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}
+ V.markTabs();markAll()};
 
-// ---------------------------------------------------------------- every page comes in card by card
-var _rt=window.route;
-window.route=function(){var r=_rt.apply(this,arguments),pg=$('#pg');if(pg){pg.classList.remove('kd-enter');void pg.offsetWidth;pg.classList.add('kd-enter');clearTimeout(pg._kd);pg._kd=setTimeout(function(){pg.classList.remove('kd-enter')},1400)}
- document.body.classList.toggle('kd-vpn',V.secOf(S.page)[0]=='vpnsec');return r};
+// ---------------------------------------------------------------- pages
+window.route=function(){var hs=location.hash||'';
+ // old addresses
+ if(hs=='#xray'){location.replace('#xray/overview');return}
+ if(hs.slice(1).split('/')[0]=='servers'){location.replace('#nodes');return}
+ Object.keys(KAcc.open).forEach(function(k){KAcc.open[k]=''});
+ var h=(hs||'#dash').slice(1).split('/'),p=h[0];S.sub=h[1]||'';if(!PAGES.some(function(x){return x[0]==p})){p='dash';S.sub=''}S.page=p;
+ var tb=$('#tbt');if(tb){tb.textContent=t(pgOf(p)[1]);$('#tbsec').textContent=t(grpOf(p))}
+ navMark(p,S.sub);clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);window.scrollTo(0,0);
+ (({dash:pDash,users:pUsers,nodes:pNodes,servers:pServers,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,emergency:pEmergency,backup:pBackup,security:pSecurity,settings:pSettings})[p]||window['p_'+p])();
+ V.watchPg();V.drawSecTabs(S.page);
+ // every page comes in card by card
+ var pg=$('#pg');if(pg){pg.classList.remove('kd-enter');void pg.offsetWidth;pg.classList.add('kd-enter');clearTimeout(pg._kd);pg._kd=setTimeout(function(){pg.classList.remove('kd-enter')},1400)}
+ document.body.classList.toggle('kd-vpn',V.secOf(S.page)[0]=='vpnsec')};
 
 // ---------------------------------------------------------------- Cores: a rail of cards
 var CORE={vpn:['dash','All cores at a glance','#F5C451'],kmix:['game','Games · low ping','#ff8a2a'],xray:['xray','VLESS · VMess · Trojan','#6fb6ff'],wg:['shield2','Plain and fast','#3ddc97'],
@@ -6240,11 +6167,6 @@ function poll(){timer=0;var ids=Object.keys(RM);if(!ids.length)return;
   if(!fin)timer=setTimeout(poll,2000)})}
 function follow(rid){if(!rid)return;if(!Object.keys(RM).length)started=Date.now();RM[rid]={r:null};clearTimeout(timer);timer=setTimeout(poll,600)}
 window.kdFollowRemoval=follow;
-var RX=/^\/api\/(tunnels\/servers\/[^/?]+|tunnels\/(?!servers|probe|cdntest)[^/?]+|servers\/[^/?]+|nodes\/[^/?]+|xray\/servers\/[^/?]+|dns\/servers\/[^/?]+)(\?.*)?$/;
-var _api=window.api;
-window.api=function(m,u){var p=_api.apply(this,arguments);
- if(m=='DELETE'&&RX.test(u||'')&&p&&p.then)p.then(function(r){if(r&&r.removal)follow(r.removal)},function(){});
- return p};
 var css=`
 #kdrm{position:fixed;z-index:9998;inset-inline-start:50%;bottom:16px;transform:translate(50%,140%);width:min(380px,calc(100vw - 32px));max-height:min(60vh,420px);overflow:auto;
  background:#0b0b0b;color:var(--t,#fff);border:1px solid color-mix(in srgb,var(--a,#f5b301) 45%,transparent);border-radius:16px;padding:10px 12px 12px;
