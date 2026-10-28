@@ -9,6 +9,7 @@ pub mod game;
 pub mod h2ws;
 pub mod hy2t;
 pub mod hq;
+pub mod kcore;
 pub mod link;
 pub mod mux;
 pub mod obfs;
