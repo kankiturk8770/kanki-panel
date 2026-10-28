@@ -1278,7 +1278,8 @@ fn sub_data(app: &App, u: &User) -> Value {
         // "kmix" too) lists them as a server of their own; "via" and "parent" tell a newer app they are the
         // tunnel configs of that server
         let tp = twin_protos(app, u, n);
-        if !tp.is_empty() {
+        // a user with only Game-FEC / HQ-QUIC / FakeTCP gets the tunnel entry too
+        if !tp.is_empty() || !crate::kcores::links_tunnel(app, u, n).is_empty() {
             let tw = crate::twin::of_node(app, n);
             let mut e = v.clone();
             e["id"] = json!(format!("{}{}", n.id, TUNNEL_SUFFIX));
@@ -1288,8 +1289,8 @@ fn sub_data(app: &App, u: &User) -> Value {
             e["hy2"] = if tp.contains(&"hysteria2") { json!(hy2_link(app, u, n, tw.as_ref())) } else { Value::Null };
             e["kmix"] = json!(tun);
             e["kmix_tunnel"] = Value::Null;
-            // the cores are reached on the server's own address (the main entry)
-            e["kcore"] = json!([]);
+            // Game-FEC / HQ-QUIC / FakeTCP through the tunnel: the Iran address, the port it carries
+            e["kcore"] = json!(crate::kcores::links_tunnel(app, u, n));
             e["via"] = json!("tunnel");
             e["via_proto"] = via_proto(app, n, &tp, true);
             e["parent"] = json!(n.id);
