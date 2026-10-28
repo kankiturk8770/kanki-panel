@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.16 — one panel script
+- The panel's script is **one file** now (`assets/web/panel.js`, served as `/assets/kanki-panel.js`) instead of fifteen pieces from different versions (the page's own script and kanki-ext, -xray, -antidpi, -dns, -kmix, -kcore, -v37, -look, -servers, -route, -svc, -skin, -hub, -deck). Seventeen old definitions that a later version replaced before they were ever used (old menus, the old user card, the old tunnel map …) are gone.
+- Nothing looks or works differently: every page was compared on a phone and a desktop screen before and after (screenshots and text), with no script errors.
+
 ## New in 3.15.3 — a calm panel on phones
 - **Bottom bar:** it scrolls sideways now (an older rule held it still) and keeps one order from the right: Home, Users, Servers, Tunnels, VPN services, Kanki DNS, Sales bot, Emergency chat, Ports, Traffic, System.
 - **Nothing opens by itself:** opening a core page (KANKI MIX, MIX+, Xray …) no longer opens the first server's settings in the drawer with the dark cover; a server opens only when tapped. Every page was checked on a phone-sized screen: no panel opens on its own, no script errors.

@@ -155,7 +155,7 @@ pub fn valid_username(s: &str) -> bool {
     !s.is_empty() && s.len() <= 40 && s.chars().all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c))
 }
 
-/// The panel page with the version on every script it loads (`/assets/kanki-hub.js?v=3.12.0`): a cache in
+/// The panel page with the version on every script it loads (`/assets/kanki-panel.js?v=3.16.0`): a cache in
 /// front of the panel (Cloudflare caches .js by itself) then never hands out an old copy of one of them next
 /// to new ones, which drew the old look after an update.
 fn admin_page() -> &'static str {
@@ -188,8 +188,8 @@ mod versioned_tests {
         let h = super::versioned("<script src=\"/assets/kanki-hub.js\"></script><script src=\"/assets/a.js?x=1\"></script><img src=\"/other.png\">", "3.12.0");
         assert_eq!(h, "<script src=\"/assets/kanki-hub.js?v=3.12.0\"></script><script src=\"/assets/a.js?x=1\"></script><img src=\"/other.png\">");
         let page = super::admin_page();
-        assert!(page.contains("/assets/kanki-deck.js?v="));
-        assert!(!page.contains("/assets/kanki-hub.js\""));
+        assert!(page.contains("/assets/kanki-panel.js?v="));
+        assert!(!page.contains("/assets/kanki-panel.js\""));
     }
 }
 
@@ -221,55 +221,9 @@ pub fn master_router(app: Arc<App>) -> Router {
              &include_bytes!("../../assets/web/vazirmatn.woff")[..])
         }))
         // the panel's extension script (DNS, Xray and node types): no secrets in it
-        .route("/assets/kanki-ext.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/ext.js"))
-        }))
-        .route("/assets/kanki-xray.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/xray.js"))
-        }))
-        .route("/assets/kanki-dns.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/dns.js"))
-        }))
-        // 3.7: the new shell (menu in sections, glass look, server grid, Grok channel writer)
-        .route("/assets/kanki-v37.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/v37.js"))
-        }))
-        // 3.8: the AMOLED look (gold / purple, night / day), 3D glass buttons, grouped menu
-        .route("/assets/kanki-look.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/look.js"))
-        }))
-        // 3.9: one Servers page (every server is a node; its services switched on in place)
-        .route("/assets/kanki-servers.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/servers.js"))
-        }))
-        // 3.9.3: multi-location tunnels (one tunnel per hop, made and tested together)
-        .route("/assets/kanki-route.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/route.js"))
-        }))
-        // 3.9.3: VPN services in tabs (KANKI MIX, Xray, WireGuard, AmneziaWG, Hysteria2), a row per server
-        .route("/assets/kanki-svc.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/svc.js"))
-        }))
-        .route("/assets/kanki-kcore.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/kcore.js"))
-        }))
-        .route("/assets/kanki-kmix.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/kmix.js"))
-        }))
-        .route("/assets/kanki-antidpi.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/antidpi.js"))
-        }))
-        // 3.10: the polished look (sign-in screen, dashboard numbers, user tiles with data used)
-        .route("/assets/kanki-skin.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/skin.js"))
-        }))
-        // 3.10: where things live (menu sections, Xray in two parts, server drawers, dashboard, tunnel map)
-        .route("/assets/kanki-hub.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/hub.js"))
-        }))
-        // 3.11: the new design (menu that folds and opens smoothly, top menu, cores rail, country chips, user cards)
-        .route("/assets/kanki-deck.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/deck.js"))
+        // the whole panel script, one file
+        .route("/assets/kanki-panel.js", get(|| async {
+            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/panel.js"))
         }))
         .route("/api/overview", get(overview))
         .route("/api/users", get(users_list).post(users_create))
