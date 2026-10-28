@@ -21,6 +21,9 @@ pub struct CoreUser {
     pub key: String,
     /// devices at the same time (0 = no limit)
     pub max: i64,
+    /// the cores this user may use ("game", "hq", "faketcp"); empty = all of them
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub cores: Vec<String>,
 }
 
 /// What a server runs. A port of 0 = that core is off.
@@ -59,19 +62,20 @@ impl CoreCfg {
 struct Slot {
     key: String,
     max: i64,
+    cores: Vec<String>,
     shared: Arc<Shared>,
     /// (session id, the session, when it started)
-    live: Mutex<Vec<(u64, Arc<Session>)>>,
+    live: Mutex<Vec<(u64, Arc<Session>, &'static str)>>,
 }
 
 impl Slot {
     fn new(u: &CoreUser) -> Slot {
         let shared = Arc::new(Shared::default());
         shared.public_only.store(true, Ordering::Relaxed);
-        Slot { key: u.key.clone(), max: u.max, shared, live: Mutex::new(vec![]) }
+        Slot { key: u.key.clone(), max: u.max, cores: u.cores.clone(), shared, live: Mutex::new(vec![]) }
     }
     fn kill_all(&self) {
-        for (_, s) in self.live.lock().unwrap().drain(..) {
+        for (_, s, _) in self.live.lock().unwrap().drain(..) {
             s.kill();
         }
     }
@@ -189,7 +193,7 @@ impl CoreServer {
                 st.seen.lock().unwrap().retain(|_, t| now.saturating_sub(*t) < 2 * super::AUTH_SKEW_SECS + 60);
                 // drop the sessions that ended
                 for s in st.users.read().unwrap().values() {
-                    s.live.lock().unwrap().retain(|(_, x)| x.is_alive());
+                    s.live.lock().unwrap().retain(|(_, x, _)| x.is_alive());
                 }
             }
         }));
@@ -207,12 +211,13 @@ impl CoreServer {
         let mut next: HashMap<String, Arc<Slot>> = HashMap::new();
         for u in users.iter().filter(|u| !u.name.is_empty() && !u.key.is_empty()) {
             let slot = match map.remove(&u.name) {
-                Some(old) if old.key == u.key => {
+                // a new key or other cores: the old sessions end (they may be on a core taken away)
+                Some(old) if old.key == u.key && old.cores == u.cores => {
                     if old.max == u.max {
                         old
                     } else {
                         // same counters and sessions, new limit
-                        let s = Arc::new(Slot { key: old.key.clone(), max: u.max, shared: old.shared.clone(), live: Mutex::new(std::mem::take(&mut *old.live.lock().unwrap())) });
+                        let s = Arc::new(Slot { key: old.key.clone(), max: u.max, cores: old.cores.clone(), shared: old.shared.clone(), live: Mutex::new(std::mem::take(&mut *old.live.lock().unwrap())) });
                         s
                     }
                 }
@@ -242,6 +247,7 @@ impl CoreServer {
     }
 
     /// Devices connected now, per user (users with none are left out).
+    #[allow(dead_code)]
     pub fn online(&self) -> HashMap<String, i64> {
         self.state
             .users
@@ -249,10 +255,25 @@ impl CoreServer {
             .unwrap()
             .iter()
             .filter_map(|(n, s)| {
-                let c = s.live.lock().unwrap().iter().filter(|(_, x)| x.is_alive()).count() as i64;
+                let c = s.live.lock().unwrap().iter().filter(|(_, x, _)| x.is_alive()).count() as i64;
                 (c > 0).then(|| (n.clone(), c))
             })
             .collect()
+    }
+
+    /// Devices connected now, per user and core: (user, core, count).
+    pub fn online_by_core(&self) -> Vec<(String, String, i64)> {
+        let mut out = vec![];
+        for (n, s) in self.state.users.read().unwrap().iter() {
+            let mut m: HashMap<&str, i64> = HashMap::new();
+            for (_, x, k) in s.live.lock().unwrap().iter() {
+                if x.is_alive() {
+                    *m.entry(k).or_default() += 1;
+                }
+            }
+            out.extend(m.into_iter().map(|(k, c)| (n.clone(), k.to_string(), c)));
+        }
+        out
     }
 }
 
@@ -280,8 +301,11 @@ async fn start_game(cfg: &CoreCfg, hub: Arc<gamec::Hub>, tx: mpsc::Sender<(Conn,
 }
 
 /// Checks an auth: the user, the MAC, the time, and that the nonce is new.
-fn check(st: &State, a: &Auth) -> Result<Arc<Slot>, &'static str> {
+fn check(st: &State, a: &Auth, kind: &str) -> Result<Arc<Slot>, &'static str> {
     let slot = st.users.read().unwrap().get(&a.u).cloned().ok_or("unknown user")?;
+    if !slot.cores.is_empty() && !slot.cores.iter().any(|c| c == kind) {
+        return Err("this protocol is not on for this user");
+    }
     let now = super::now_secs();
     if now.abs_diff(a.t) > super::AUTH_SKEW_SECS {
         return Err("clock");
@@ -306,7 +330,7 @@ async fn serve_conn(st: Arc<State>, c: Conn, kind: &'static str) {
     let Ok(Ok(first)) = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await else { return };
     let Some(body) = first.strip_prefix(HELLO) else { return };
     let Ok(auth) = serde_json::from_slice::<Auth>(body) else { return };
-    let slot = match check(&st, &auth) {
+    let slot = match check(&st, &auth, kind) {
         Ok(s) => s,
         Err(why) => {
             let mut m = NO.to_vec();
@@ -362,12 +386,12 @@ async fn serve_conn(st: Arc<State>, c: Conn, kind: &'static str) {
     let tag = rand::random::<u64>();
     {
         let mut live = slot.live.lock().unwrap();
-        live.retain(|(_, x)| x.is_alive());
-        live.push((tag, session.clone()));
+        live.retain(|(_, x, _)| x.is_alive());
+        live.push((tag, session.clone(), kind));
         // over the device limit: the oldest device makes room
         if slot.max > 0 {
             while live.len() as i64 > slot.max {
-                let (_, old) = live.remove(0);
+                let (_, old, _) = live.remove(0);
                 old.kill();
             }
         }
@@ -378,7 +402,7 @@ async fn serve_conn(st: Arc<State>, c: Conn, kind: &'static str) {
         e.abort();
     }
     st.hub.close(sid);
-    slot.live.lock().unwrap().retain(|(t, _)| *t != tag);
+    slot.live.lock().unwrap().retain(|(t, _, _)| *t != tag);
 }
 
 /// most UDP flows of one session over the datagram path

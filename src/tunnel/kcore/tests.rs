@@ -107,7 +107,7 @@ async fn run_core(kind: &str, datagrams: bool) {
     });
 
     let port = free_udp_port().await;
-    let mut cfg = CoreCfg { door: "test-door-123".into(), fec: "4:2".into(), copies: 2, users: vec![CoreUser { name: "ali".into(), key: "k1".into(), max: 0 }], ..Default::default() };
+    let mut cfg = CoreCfg { door: "test-door-123".into(), fec: "4:2".into(), copies: 2, users: vec![CoreUser { name: "ali".into(), key: "k1".into(), max: 0, cores: vec![kind.into()] }, CoreUser { name: "reza".into(), key: "k2".into(), max: 0, cores: vec!["faketcp".into()] }], ..Default::default() };
     match kind {
         "game" => cfg.game = port,
         _ => cfg.hq = port,
@@ -118,6 +118,10 @@ async fn run_core(kind: &str, datagrams: bool) {
     // a wrong key is refused
     let bad = ClientCfg { kind: kind.into(), server: format!("127.0.0.1:{}", port), door: cfg.door.clone(), user: "ali".into(), key: "nope".into(), copies: 2, datagrams, ..Default::default() };
     let bad_cfg = bad.clone();
+    // a user without this protocol is refused on it
+    let other = ClientCfg { user: "reza".into(), key: "k2".into(), ..bad.clone() };
+    let e = Client::new(other).await.unwrap().link().await.err().expect("refused").to_string();
+    assert!(e.contains("not on for this user"), "{}", e);
     let e = Client::new(bad).await.unwrap().link().await.err().expect("refused").to_string();
     assert!(e.contains("bad key"), "{}", e);
 
@@ -232,7 +236,7 @@ async fn delivered(copies: u8) -> f64 {
         }
     });
     let port = free_udp_port().await;
-    let cfg = CoreCfg { door: "loss-door".into(), game: port, fec: "4:2".into(), copies, users: vec![CoreUser { name: "u".into(), key: "k".into(), max: 0 }], ..Default::default() };
+    let cfg = CoreCfg { door: "loss-door".into(), game: port, fec: "4:2".into(), copies, users: vec![CoreUser { name: "u".into(), key: "k".into(), max: 0, cores: vec![] }], ..Default::default() };
     let _srv = CoreServer::start(&cfg).await;
     let proxy = lossy_proxy(format!("127.0.0.1:{}", port).parse().unwrap(), 0.15).await;
     let cc = ClientCfg { kind: "game".into(), server: proxy.to_string(), door: cfg.door.clone(), user: "u".into(), key: "k".into(), copies, datagrams: true, ..Default::default() };

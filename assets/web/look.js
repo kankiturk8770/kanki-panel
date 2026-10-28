@@ -26,7 +26,7 @@ var SECS=[
  ['nodes','Servers','nodes',[['nodes','','Servers'],['servers','','Tunnel servers']],'Servers & network'],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
  ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kcore','','Kanki Cores'],['xray','','Xray'],['antidpi','','Anti-DPI']],'Services'],
+ ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','Game-FEC'],['khq','','HQ-QUIC'],['kftcp','','FakeTCP'],['xray','','Xray'],['antidpi','','Anti-DPI']],'Services'],
  ['dnssec','Kanki DNS','dns',[['dns','','Kanki DNS']],'Services'],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
  ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];

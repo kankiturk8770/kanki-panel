@@ -37,7 +37,7 @@ if(typeof FA!='undefined')Object.assign(FA,{
 var P=window.PAGES||[];
 [['wg','WireGuard','shield2'],['awg','AmneziaWG','shield2'],['hy2','Hysteria2','shield2']].forEach(function(x){if(!P.some(function(y){return y[0]==x[0]}))P.push(x)});
 if(window.V37&&V37.SECS)V37.SECS.forEach(function(s){if(s[0]!='vpnsec')return;
- s[3]=[['vpn','','Overview'],['kmix','','KANKI MIX'],['kcore','','Kanki Cores'],['xray','','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI']]});
+ s[3]=[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','Game-FEC'],['khq','','HQ-QUIC'],['kftcp','','FakeTCP'],['xray','','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI']]});
 
 // leaving a page closes its open row
 var _route=window.route;

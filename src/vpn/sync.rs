@@ -46,11 +46,12 @@ pub struct SyncResp {
     pub kmix_online: HashMap<String, i64>,
     #[serde(default)]
     pub kmix_error: String,
-    /// Kanki Cores: username -> (rx, tx) since the last sync, devices online, what failed to start
+    /// Game-FEC / HQ-QUIC / FakeTCP: username -> (rx, tx) since the last sync, devices online
+    /// (username, protocol, count), what failed to start
     #[serde(default)]
     pub kcore: HashMap<String, (i64, i64)>,
     #[serde(default)]
-    pub kcore_online: HashMap<String, i64>,
+    pub kcore_online: Vec<(String, String, i64)>,
     #[serde(default)]
     pub kcore_error: String,
 }
@@ -116,7 +117,7 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
         *last_kmix_err().lock().unwrap() = Some(kmix_error.clone()).filter(|e| !e.is_empty());
         kmix_online = crate::kmix::online().await;
     }
-    let (mut kcore, mut kcore_online, mut kcore_error) = (HashMap::new(), HashMap::new(), String::new());
+    let (mut kcore, mut kcore_online, mut kcore_error) = (HashMap::new(), vec![], String::new());
     if let Some(cfg) = req.kcore {
         (kcore, kcore_online, kcore_error) = crate::kcores::apply(cfg).await;
     }
@@ -164,7 +165,7 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
     let mut map = vec![];
     let here: Vec<&User> = users.iter().filter(|u| u.active() && u.on(n)).collect();
     req.kmix = Some(crate::kmix::cfg_for(app, &crate::kmix::settings(app), n, &here));
-    req.kcore = Some(crate::kcores::cfg_for(app, &crate::kcores::settings(app), n, &here));
+    req.kcore = Some(crate::kcores::cfg_for(app, n, &here));
     for u in users.iter().filter(|u| u.active() && u.on(n)) {
         // drain: no new users here unless explicitly assigned or already present
         if n.drain && !u.explicit_nodes() {
@@ -288,7 +289,7 @@ pub async fn sync_all(app: &Arc<App>) {
                 *add_bytes.entry(*uid).or_default() += rx + tx;
             }
         }
-        for (name, c, proto) in resp.hy2_online.iter().map(|(n, c)| (n, c, "hy2")).chain(resp.kmix_online.iter().map(|(n, c)| (n, c, "kmix"))).chain(resp.kcore_online.iter().map(|(n, c)| (n, c, "kcore"))) {
+        for (name, c, proto) in resp.hy2_online.iter().map(|(n, c)| (n, c, "hy2")).chain(resp.kmix_online.iter().map(|(n, c)| (n, c, "kmix"))).chain(resp.kcore_online.iter().map(|(n, p, c)| (n, c, p.as_str()))) {
             if let Some(uid) = by_name.get(name) {
                 if *c > 0 {
                     here.push((*uid, proto.to_string()));

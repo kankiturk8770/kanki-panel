@@ -345,7 +345,7 @@ async fn overview(State(app): St, h: HeaderMap) -> Response {
         }).unwrap_or((0, 0))
     });
     let mut protos: HashMap<&str, usize> = HashMap::new();
-    for p in ["wg", "awg", "hy2", "kmix", "xray", "dns"] {
+    for p in ["wg", "awg", "hy2", "kmix", "kgame", "khq", "kftcp", "xray", "dns"] {
         protos.insert(p, us.iter().filter(|u| u.has_proto(p)).count());
     }
     // online: a VPN session, or Xray / Kanki DNS use right now
@@ -1257,7 +1257,7 @@ fn sub_data(app: &App, u: &User) -> Value {
             "kmix": crate::kmix::link(app, u, n),
             // the second KANKI MIX config, through the Iran tunnel (Null = none)
             "kmix_tunnel": tun,
-            // Kanki Cores: [{kind: game|hq|faketcp, title, url: kcore://…}] (empty = none here)
+            // Game-FEC / HQ-QUIC / FakeTCP: [{proto: kgame|khq|kftcp, kind, title, url: kcore://…}]
             "kcore": crate::kcores::links(app, u, n),
         });
         // the real exit of this server's configs (a tunnel endpoint is in Iran; the traffic leaves here)

@@ -1,4 +1,5 @@
-# v3.14.0 — Kanki Cores
+# v3.14.0 — Game-FEC, HQ-QUIC and FakeTCP as VPN protocols
+- Three separate user protocols `kgame`, `khq`, `kftcp`, each with its own page (`/api/kc/<proto>`), settings, per-server port/address/switch and «enable for all users»; the server refuses a user on a protocol they do not have.
 - New `src/tunnel/kcore/`: Game-FEC, HQ-QUIC and FakeTCP served to users as VPN cores (per-user HMAC auth after the link handshake, full proxy to public addresses only, a datagram fast path for game UDP with 1-3 copies of small packets, a replay window that drops the copies, big bodies cut into pieces). The transports are reused as they are.
 - `mux.rs`: `Shared::public_only` (off by default; the tunnels leave it off). `faketcp.rs`: `socklen_t` instead of `u32` so it builds for 32-bit Android (the same type on the servers).
 - Panel: Services › Kanki Cores (`/api/kcore`), `kcore` in the sync request/answer (older agents ignore it), `kc_ports` / `kc_fec` / `kc_error` in the server info, `"kcore"` links in the subscription data, `kcore` as a user protocol.
