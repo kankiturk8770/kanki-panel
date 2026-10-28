@@ -87,6 +87,13 @@ pub fn settings(app: &App, proto: &str) -> Settings {
     s
 }
 
+/// Gives server `node_id` its own port for `proto` (it moves there on its next sync).
+pub fn set_node_port(app: &App, proto: &str, node_id: &str, port: u16) {
+    let mut s = settings(app, proto);
+    s.nodes.entry(node_id.to_string()).or_default().port = port;
+    save(app, proto, &s);
+}
+
 fn save(app: &App, proto: &str, s: &Settings) {
     app.db.set(&format!("{}_cfg", proto), &serde_json::to_string(s).unwrap_or_default());
 }
