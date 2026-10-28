@@ -1,7 +1,22 @@
 # Kanki Panel v2
 
-Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
+Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
+
+## New in 3.19 — MIX+ removed, one button per core in the tunnel forms, microtun on several devices
+- **MIX+ is gone from the panel**: its page, the user tick, its port on every server, its subscription links and the `kanki-core` build. Users who had it lose only that tick; its settings and secrets are deleted on the first start. A server still on the old agent stops MIX+ and closes its port at the next sync. The tunnels keep their own **Game-FEC** transport, untouched.
+- **Tunnels: one button per core.** Under «Ports to carry» each core of the exit server has a button of its own with just its name (WireGuard, AmneziaWG, Hysteria2, KANKI MIX, microtun, Xray, Kanki DNS). Tap one and its ports go into the TCP or UDP box they belong to, tap again to take them out; a lit button means all its ports are carried. A port the entry already uses is moved (`51821:51820`), as before. «All ports of the exit server» is still there. The same buttons are in the AmneziaWG form (its forward fields) and in the multi-location form (for the last server). «All ports» now carries microtun too.
+- **microtun 2.1** (still compatible with 2.0 clients):
+  - **Several devices per user**, up to the user's connection limit (8 when there is none). The first device has the user's own address, the next ones get one from the server (10.80.0.0/16). A new device past the limit waits until one of the others has been quiet for 20 s; a device in use is never thrown out.
+  - **IPv6 inside the tunnel** on servers that have IPv6 (ULA `fd79:4d54::/64`, NAT66); the server row shows «IPv6».
+  - **A client whose clock went back reconnects** at once (an init near the server's clock with a new key is taken), instead of waiting until its clock passes the old time. A replayed init is still refused.
+  - Addresses moved from 10.77.0.0/16 (the tunnels' GRE links use 10.77.N.0/30) to **10.79.0.0/16**; links are made new, nothing to do.
+  - Linux client: `microtun` 2.1 in the Labo repository (`-device NAME` for a second client on the same machine).
+
+## New in 3.18 — microtun, a light game VPN
+- **microtun** is a new protocol under Services, next to MIX+: a TUN-over-UDP VPN with 28 bytes per packet (WireGuard 32), an X25519 handshake with the user's own key, keys renewed every 2 minutes, a hidden header, and small packets (up to 300 bytes) sent twice so one lost packet does not lag a game. Through 20 % loss each way, 6.7 % of pings were lost (34.8 % without the copies).
+- Tick it per user (or «Enable for all users»). Every server runs it inside its agent on UDP 4200 (4201, 4202 … per server, like MIX+), with interface `mtun0` and NAT; update the agents. Traffic and online users count like the other protocols; a removed or expired user is cut off at the next sync.
+- The page has a **Test link** box: pick a user and copy their `mtun://` link for each server. Test with the Linux client from the Labo repository: `sudo microtun client -url 'LINK'`. The subscription data has the link as `"mtun"` (and through the tunnel on the tunnel entry) for the app.
 
 ## New in 3.17.1 — tunnel names
 - A tunnel left without a name is named after its servers: the Iran server's name, a dash, the abroad server's name (`Tehran-Germany`). The form shows that name as its hint while you pick the servers.

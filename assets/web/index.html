@@ -532,6 +532,14 @@ button.sc{font:inherit;font-size:11px;color:var(--t);cursor:pointer}
 .pchk{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--ln);border-radius:11px;padding:7px 10px;margin:3px;cursor:pointer;font-size:13px}
 
 .pchk i{width:8px;height:8px;border-radius:50%;background:var(--pc)}
+/* the tunnel forms: one button per core of the exit server (its ports in or out of the port boxes) */
+.corechips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 6px}
+.cchip{display:inline-flex;align-items:center;gap:7px;background:var(--in);color:var(--t);border:1px solid var(--ln);border-radius:999px;padding:7px 14px;font:inherit;font-size:13px;cursor:pointer}
+.cchip i{width:8px;height:8px;border-radius:50%;background:var(--pc);opacity:.45}
+.cchip b{font-size:13px;white-space:nowrap}
+.cchip.on{border-color:var(--pc);background:color-mix(in srgb,var(--pc) 14%,transparent);box-shadow:0 0 0 1px var(--pc)}
+.cchip.on i{opacity:1;box-shadow:0 0 8px var(--pc)}
+.cchip:disabled{opacity:.4;cursor:default}
 
 .bad2{color:var(--bad)}
 

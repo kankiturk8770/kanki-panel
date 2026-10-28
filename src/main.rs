@@ -44,10 +44,12 @@ mod dns;
 mod emergency;
 #[path = "vpn/hy2.rs"]
 mod hy2;
-#[path = "vpn/kcores.rs"]
-mod kcores;
 #[path = "vpn/kmix.rs"]
 mod kmix;
+#[path = "vpn/microtun.rs"]
+mod microtun;
+#[path = "vpn/mtun.rs"]
+mod mtun;
 #[path = "vpn/sync.rs"]
 mod sync;
 #[path = "vpn/wg.rs"]

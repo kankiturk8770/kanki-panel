@@ -62,7 +62,7 @@ fn build(app: &App) -> UserServers {
             for (uid, p) in conns {
                 let tun = node.as_ref().map(|n| match p.as_str() {
                     "kmix" => kmix.node_tunnel(&n.id),
-                    "kgame" => false,
+                    "mtun" => false,
                     _ => crate::direct::through_tunnel(app, n),
                 }).unwrap_or(false);
                 add(*uid, p, name, &cc, tun);
