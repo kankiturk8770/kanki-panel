@@ -1,19 +1,10 @@
-// Kanki Panel: the whole panel script in one file (built from the parts below, in this order).
+// Kanki Panel: the whole panel script.
 
 // ==================================================================== users form, VPN overview
-// Kanki Panel extensions (v3.5): the VPN services page (Kanki VPN | Xray), node types, the services part of
-// the user form, and the Persian text of the menu, Xray (xray.js) and Kanki DNS (dns.js).
-// Loaded before the main script; KEXT() runs once the main script has defined its tables.
-function KEXT(){
- PROTOS.push(['xray','Xray'],['dns','DNS']);
- PCOL.xray='#e0a020';PCOL.dns='#2a9df4';
- ICO.dns='<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>';
- ICO.xray='<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>';
- ICO.game=KM_ICO;
-   }
+// the VPN services page (Kanki VPN | Xray), node types and the services part of the user form
 // ---- Xray and DNS servers: repair, a quick health view, and the protocol for every user
-function srvData(kind){return kind=='xray'?(window.XR&&XR.d):(window.DN&&DN.d)}
-function srvReload(kind){if(kind=='xray'&&window.xrLoad)xrLoad(true);if(kind=='dns'&&window.dnsLoad)dnsLoad(true)}
+function srvData(kind){return kind=='xray'?XR.d:DN.d}
+function srvReload(kind){if(kind=='xray')xrLoad(true);if(kind=='dns')dnsLoad(true)}
 function srvRepair(kind,id){toast(t('Checking…'));
  api('POST','/api/'+kind+'/servers/'+encodeURIComponent(id)+'/repair').then(function(r){
   toast(t(r.waiting?'Repair sent: the server has not reported for a while, it is repaired as soon as it is back':'Repair sent: the server restarts it within a few seconds'));
@@ -68,7 +59,7 @@ function protoAll(p,add){var nm=p=='xray'?'Xray':'DNS';
  if(!confirm(t(add?'Turn on __P__ for ALL users? Every user gets it in the subscription.':'Turn off __P__ for ALL users? It leaves every subscription.').replace('__P__',nm)))return;
  toast(t('Checking…'));
  api('POST','/api/protocols/'+p+'/'+(add?'assign-all':'unassign-all')).then(function(r){toast(t('Done')+' · '+N(r.changed||0)+' '+t('users changed'));
-  srvReload(p);if(S.page=='users'&&window.loadUsers)loadUsers()}).catch(fail)}
+  srvReload(p);if(S.page=='users')loadUsers()}).catch(fail)}
 
 // ---------------------------------------------------------------- the VPN services page: Kanki VPN | Xray
 function p_vpn(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('VPN services')+'</h2><p>'+t('Both kinds of VPN your users get, side by side')+'</p></div></div><div class="vhub"><div class="vside" id="vh_k">'+t('Loading…')+'</div><div class="vside" id="vh_x">'+t('Loading…')+'</div></div>'+
@@ -83,13 +74,6 @@ function vhKanki(nodes,o){var up=nodes.filter(function(n){return n.id=='local'||
   '<div class="kv"><div><small>'+t('Nodes online')+'</small><b>'+N(up)+' / '+N(nodes.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N(o.online||0)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(o.traffic_gb||0)+' GB</b></div></div>'+
   '<label class="f">'+t('Users by protocol')+'</label><div class="vhgrid">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e']].map(function(p){return '<div class="vhcell"><small>'+p[1]+'</small><b>'+N(pr[p[0]]||0)+'</b></div>'}).join('')+'</div>'+
   '<div class="vhsrv">'+nodes.map(function(n){var s=nState(n),loc=n.id=='local';return '<div class="vhs"><span class="dot '+s.c+'"></span><div class="nm"><b>'+esc(n.name)+'</b><small>'+N(n.users||0)+' '+t('users')+(loc?' · '+t('Main server'):'')+'</small></div></div>'}).join('')+'</div>'}
-(function(){if(document.getElementById('vhcss'))return;var st=document.createElement('style');st.id='vhcss';
- st.textContent='#vh_k{padding:12px!important}#vh_k .vh{margin-bottom:8px}.vhgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}'+
-  '.vhcell{border:1px solid var(--line,#333);border-radius:10px;padding:6px 8px;display:flex;justify-content:space-between;align-items:center;gap:6px;min-width:0}'+
-  '.vhcell small{font-size:11px;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.vhcell b{font-size:13px}'+
-  '.vhsrv{display:grid;grid-template-columns:1fr 1fr;gap:6px}.vhs{display:flex;align-items:center;gap:8px;border:1px solid var(--line,#333);border-radius:10px;padding:7px 9px;min-width:0}'+
-  '.vhs .nm{min-width:0}.vhs .nm b{display:block;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.vhs .nm small{font-size:11px;opacity:.75}';
- document.head.appendChild(st)})();
 function vhXray(d){var el=$('#vh_x');if(!d){el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks')+'<p class="muted">—</p>';return}
  var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length,tot=d.inbounds.reduce(function(a,b){return a+(+b.traffic||0)},0);
  var more=d.inbounds.length-5;
@@ -133,11 +117,12 @@ function nodeAddTyped(){var tile=function(k,ico,title,sub){return '<button class
   dnsLoad().then(function(){dnsAdd(k=='relay'?'relay':'exit')})}})}
 
 // ==================================================================== Xray
-// Kanki Panel: the Xray page (v3.5). Tabs: overview, inbounds, online clients, routing, settings.
+// the Xray page. Tabs: servers, inbounds, online clients, routing, settings.
 // Every user with Xray ticked is a client of every inbound (or of the inbounds that list them).
 var XR={d:null,q:'',srv:'',tab:'overview'};
-var XTABS=[['overview','Overview','dash'],['inbounds','Inbounds','xray'],['clients','Online clients','users'],['routing','Routing and outbounds','tunnel'],['settings','Settings','settings']];
-var REALITY_TARGETS=['www.microsoft.com:443','www.apple.com:443','dl.google.com:443','www.speedtest.net:443','www.cloudflare.com:443','www.yahoo.com:443','www.amazon.com:443','addons.mozilla.org:443','www.samsung.com:443','www.nvidia.com:443'];
+var XTABS=[['overview','Servers','srv'],['inbounds','Inbounds','xray'],['clients','Online clients','users'],['routing','Routing and outbounds','tunnel'],['settings','Settings','settings']];
+var REALITY_TARGETS=['www.microsoft.com:443','www.apple.com:443','dl.google.com:443','www.speedtest.net:443','www.cloudflare.com:443','www.yahoo.com:443','www.amazon.com:443','addons.mozilla.org:443','www.samsung.com:443','www.nvidia.com:443',
+ 'www.cisco.com:443','www.mozilla.org:443','www.intel.com:443','www.ebay.com:443','www.bing.com:443','www.asus.com:443','www.digikala.com:443','www.aparat.com:443','divar.ir:443','snapp.ir:443','www.filimo.com:443','www.namava.ir:443'];
 function p_xray(){KAcc.open.xr='';XR.tab=S.sub||'overview';
  $('#pg').innerHTML='<div class="ph"><div><h2>Xray</h2><p>'+t('Xray inbounds for your users: every user with Xray ticked is a client of every inbound')+'</p></div><div class="row" style="gap:6px"><button class="b2" id="xr_all1" onclick="srvProtoAll(\'xray\',0)">'+t('Off for all users')+'</button><button class="b2" onclick="srvProtoAll(\'xray\',1)">'+t('On for all users')+'</button><button class="b2" onclick="xrAddNode()">'+ic('plus',15)+' '+t('Add server')+'</button><button class="btn" onclick="xrInbound()">+ '+t('Inbound')+'</button></div></div>'+
   '<div class="ptabs" id="xr_tabs"></div><div id="xr">'+t('Loading…')+'</div>';
@@ -195,7 +180,6 @@ function xrOnline(d){var on=d.online||[];if(!on.length)return '<p class="muted">
  return '<div class="mtiles">'+on.map(function(u){return '<div class="vrow" style="margin:0"><span class="dot g"></span><div class="nm"><b><bdi>'+esc(u.name)+'</bdi></b><small>'+esc(u.server)+'</small></div></div>'}).join('')+'</div>'}
 
 // ---- routing tab
-function xrOutTags(d){return ['direct','block'].concat((d.outs||[]).map(function(o){return o.tag}))}
 function xrRouting(d,el){XR.rules=JSON.parse(JSON.stringify(d.rule_list||[]));XR.outs=JSON.parse(JSON.stringify(d.outs||[]));
  var pre=function(id,on,title,sub){return '<div class="srow"><div class="tx"><b>'+t(title)+'</b><small>'+t(sub)+'</small></div><label class="sw"><input type="checkbox" id="'+id+'" '+(on?'checked':'')+'><span></span></label></div>'};
  el.innerHTML='<div class="card"><h3>'+ic('security',16)+' '+t('Ready-made rules')+'</h3>'+
@@ -430,11 +414,9 @@ function xrFreePort(sid,random){var used=(XR.d&&XR.d.inbounds||[]).filter(functi
  if(!random&&used.indexOf(443)<0)return 443;for(var i=0;i<200;i++){var p=10000+Math.floor(Math.random()*50000);if(used.indexOf(p)<0&&bad.indexOf(p)<0)return p}return 20000}
 
 // ==================================================================== Anti-DPI
-// Kanki Panel: the Advanced anti-DPI tunnels page (v3.5.3).
-// Curated one-click inbound presets on top of the Xray engine, plus the
-// server-to-server transports that resist DPI. Everything here is created
-// through the normal Xray inbound editor, so links, users and limits work
-// the same as any other inbound.
+// the anti-DPI tunnels page: one-click inbound presets on the Xray engine and the server-to-server
+// transports that resist DPI. Everything is made in the normal Xray inbound editor, so links, users
+// and limits work like any other inbound.
 var AD_METHODS=[
  {pre:'vr',icn:'shield2',tags:['TCP','REALITY','Vision'],dif:1,
   name:'VLESS + REALITY',
@@ -490,7 +472,7 @@ function adNew(pre){if(typeof xrInbound!='function')return toast(t('Xray page is
  var n=0,iv=setInterval(function(){var b=document.querySelector('[data-pre="'+pre+'"]');if(b){b.click();toast(t('Settings are filled in: check the port and press Save'));clearInterval(iv)}else if(++n>50)clearInterval(iv)},100)}
 
 // ==================================================================== Kanki DNS
-// Kanki Panel: the Kanki DNS page (v3.5). Tabs: overview, servers, services, users, settings and SSL.
+// the Kanki DNS page. Tabs: overview, servers, services, users, settings and SSL.
 var DN={d:null,tab:'overview',q:'',users:null};
 var DTABS=[['overview','Overview','dash'],['servers','DNS servers','srv'],['pubg','PUBG and games','globe'],['services','Services','globe'],['users','DNS users','users'],['log','Query log','traffic'],['settings','Settings and SSL','settings']];
 var UPSTREAMS=[['Cloudflare','1.1.1.1, 1.0.0.1'],['Google','8.8.8.8, 8.8.4.4'],['Quad9','9.9.9.9, 149.112.112.112'],['AdGuard (no ads)','94.140.14.14, 94.140.15.15'],['OpenDNS','208.67.222.222, 208.67.220.220']];
@@ -713,10 +695,9 @@ function dnsPubgLog(d){var el=$('#pg_log');if(!el)return;var keys=['pubg','igame
   $$('#pg_log [data-add]').forEach(function(b){b.onclick=function(){var c=(DN.d.custom||[]).slice(),n=b.dataset.add;if(c.indexOf(n)<0)c.push(n);api('PUT','/api/dns',{custom:c}).then(function(){toast(t('Saved'));dnsLoad(true).then(function(){dnsPubgLog(DN.d)})}).catch(fail)}})})}
 
 // ==================================================================== KANKI MIX
-// Kanki Panel: the KANKI MIX page (v3.6). Our own UDP protocol on every VPN server, next to WireGuard,
-// AmneziaWG and Hysteria2: game UDP on a raw datagram path (sent twice in gaming mode), TCP on KCP + FEC.
+// the KANKI MIX page: our own UDP protocol on every VPN server, next to WireGuard, AmneziaWG and
+// Hysteria2: game UDP on a raw datagram path (sent twice in gaming mode), TCP on KCP + FEC.
 // The agent writes the built-in server to each server by itself; every user has their own key.
-var KM_ICO='<path d="M6 11h4M8 9v4"/><circle cx="15.5" cy="12.5" r=".6"/><circle cx="17.5" cy="10.5" r=".6"/><path d="M7.5 6h9a5 5 0 0 1 4.8 6.3l-1 3.6a2.6 2.6 0 0 1-4.6.9L14.5 15h-5l-1.2 1.8a2.6 2.6 0 0 1-4.6-.9l-1-3.6A5 5 0 0 1 7.5 6z"/>';
 var KM={d:null};
 
 function p_kmix(){KAcc.open.km='';
@@ -734,19 +715,6 @@ function kmKpis(d){var s=d.settings,run=d.servers.filter(kmRun).length,on=d.serv
   '<div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(d.traffic_gb)+' GB</b></div>'}
 function kmState(x){if(!x.on)return ['','Off on this server'];if(kmRun(x))return ['g','Running'];if(x.error)return ['r','Not running'];return ['y','Waiting for the server…']}
 // direct (the foreign server's own address) or through the Iran tunnel, and an optional address of its own
-function kmRouteRow(d,x){var o=(d.settings.nodes||{})[x.id]||{},tun=o.route=='tunnel',id=esc(x.id);
- return '<div class="row" style="gap:6px;width:100%;justify-content:flex-end;align-items:center;margin-top:6px"><small class="muted">'+t('Route')+'</small>'+
-  '<select class="km_rt" data-id="'+id+'" onchange="kmSaveNodes()" style="width:auto">'+
-   '<option value=""'+(tun?'':' selected')+'>'+t("Direct (the server's own address)")+' · '+esc(x.direct_host||'?')+'</option>'+
-   '<option value="tunnel"'+(tun?' selected':'')+'>'+t('Through the tunnel (Iran server)')+' · '+esc(x.tunnel_host||'?')+'</option></select>'+
-  '<input class="ltr km_host" data-id="'+id+'" style="width:170px" placeholder="'+esc(t('Address'))+': '+esc(t('automatic'))+'" value="'+esc(o.host||'')+'" onchange="kmSaveNodes()"></div>'+
-  // the second config of every user on this server: through the Iran tunnel
-  '<div class="km2"><label class="chk" style="margin:0"><input type="checkbox" class="km_t2" data-id="'+id+'" '+(o.tun_off?'':'checked')+' onchange="kmSaveNodes()"><span><b>'+t('Second config through the tunnel')+'</b><small>'+
-   (x.second?t('Users also get')+' <span class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</span>':t('Write the Iran address whose tunnel forwards this UDP port'))+'</small></span></label>'+
-   '<div class="row" style="gap:6px"><input class="ltr km_th" data-id="'+id+'" style="width:170px" placeholder="'+esc(t('Iran address'))+': '+esc(t('automatic'))+'" value="'+esc(o.tun_host||'')+'" onchange="kmSaveNodes()">'+
-   '<input class="ltr km_tp" data-id="'+id+'" style="width:90px" inputmode="numeric" placeholder="'+esc(t('Port'))+'" value="'+esc(o.tun_port?String(o.tun_port):'')+'" onchange="kmSaveNodes()"></div>'+
-   '<div class="row" style="gap:6px;margin-top:6px;align-items:center"><small class="muted">'+t('Name in the app')+'</small><input class="km_tn" data-id="'+id+'" maxlength="40" style="flex:1;min-width:150px" placeholder="'+esc((x.name||'')+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'" onchange="kmSaveNodes()"></div></div>'}
-function kmSaveNodes(){kmPut({nodes:kmNodes()})}
 function kmDraw(d){var el=$('#km');if(!el)return;var s=d.settings;
  var par=[[0,'none'],[2,'light'],[3,'normal'],[5,'strong'],[8,'very strong']];
  el.innerHTML=(s.on?'':'<div class="warnbox">'+t('KANKI MIX is off: it runs on no server and is in no subscription.')+'</div>')+
@@ -785,9 +753,9 @@ function kmAll(on){if(!confirm(t(on?'KANKI MIX for every user?':'Remove KANKI MI
  api('POST','/api/kmix/users',{on:on}).then(function(r){toast(t('Saved')+' · '+N(r.changed)+' '+t('users changed'));kmLoad()}).catch(fail)}
 
 // ==================================================================== MIX+
-// Kanki Panel: the MIX+ page. Our own gaming protocol for the Kanki app (KCP at its fastest with
-// Reed-Solomon FEC under a mask, the Game-FEC transport of the tunnels), a section of its own like
-// KANKI MIX and ticked per user. It runs on every VPN server on a port of its own.
+// the MIX+ page: our own gaming protocol for the Kanki app (KCP at its fastest with Reed-Solomon FEC
+// under a mask, the Game-FEC transport of the tunnels), ticked per user like KANKI MIX. It runs on
+// every VPN server on a port of its own.
 var KC={d:{},meta:{
  kgame:{name:'MIX+\u200e',net:'UDP',desc:'For games (PUBG…): KCP at its fastest with FEC, a lost packet is rebuilt without waiting. Game and websites ride one stream, like the tunnels; «Game optimization» below sends game packets apart. Nothing on the wire looks like a protocol.'}}};
 
@@ -2738,7 +2706,7 @@ function api(m,p,b,raw){var u=p;
  var pr=fetch(p,o).then(function(r){if(r.status==401&&p!='/api/login'){logout(true);throw new Error('unauthorized')}
   if(raw&&raw.blob)return r.ok?r.blob().then(function(bl){return{blob:bl,name:((r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/)||[])[1]}}):r.json().then(function(j){throw new Error(j.error||r.status)});
   return r.text().then(function(x){var j;try{j=x?JSON.parse(x):{}}catch(e){j={error:x}}if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})});
- if(m=='DELETE'&&DELRX.test(u||''))pr.then(function(r){if(r&&r.removal&&window.kdFollowRemoval)kdFollowRemoval(r.removal)},function(){});
+ if(m=='DELETE'&&DELRX.test(u||''))pr.then(function(r){if(r&&r.removal)kdFollowRemoval(r.removal)},function(){});
  return pr}
 function fail(e){if(!e||e.message=='unauthorized')return;
  // a page drawn after the admin already left it: nothing to tell
@@ -2771,16 +2739,15 @@ function ago(ts){if(!ts)return t('never');var s=Math.max(0,Math.floor(Date.now()
 function leftTxt(ts){if(!ts)return t('Unlimited');var sec=ts-Date.now()/1000;if(sec<=0)return t('Expired');var d=Math.ceil(sec/86400);return sec<86400?t('less than a day'):N(d)+' '+t('days left')}
 
 // ---------------------------------------------------------------- icons (stroke = currentColor)
-var ICO={edit:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/>',
+var ICO={
+ edit:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/>',
  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
  qr:'<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.2"/><path d="M14 14h3v3M20.5 14v.01M14 20.5h3.5M20.5 17.5v3"/>',
  reset:'<path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 4v4.5h4.5"/>',
  trash:'<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>',
  dl:'<path d="M12 4v10M8 10.5l4 4 4-4M5 19h14"/>',
  ext:'<path d="M14 5h5v5M19 5l-8 8M17 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h4"/>',
- refresh:'<path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.5h-4.5"/>'};
-function ic(n,sz){sz=sz||18;return '<svg viewBox="0 0 24 24" width="'+sz+'" height="'+sz+'" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICO[n]+'</svg>'}
-Object.assign(ICO,{
+ refresh:'<path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.5h-4.5"/>',
  dash:'<rect x="3.5" y="3.5" width="7" height="8.5" rx="2"/><rect x="13.5" y="3.5" width="7" height="5.5" rx="2"/><rect x="13.5" y="12" width="7" height="8.5" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/>',
  users:'<circle cx="9" cy="8.2" r="3.3"/><path d="M3.2 19.5c.4-3.3 2.7-5.2 5.8-5.2s5.4 1.9 5.8 5.2"/><path d="M15.6 5.2a3.2 3.2 0 0 1 0 6"/><path d="M17.4 14.6c2 .5 3.2 2.2 3.4 4.4"/>',
  nodes:'<rect x="3.5" y="4" width="17" height="6.5" rx="2.2"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="2.2"/><path d="M7.2 7.25h.01M7.2 16.75h.01M11 7.25h6M11 16.75h6"/>',
@@ -2797,7 +2764,41 @@ Object.assign(ICO,{
  ram:'<rect x="3" y="7.5" width="18" height="8.5" rx="2"/><path d="M7 7.5v8.5M11 7.5v8.5M15 7.5v8.5M6.5 16v2.5M17.5 16v2.5"/>',
  disk:'<rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M3.5 12h17"/><path d="M8 15.5h.01M11.5 15.5h5"/>',
  swap:'<path d="M6 8h12l-3.2-3.2M18 16H6l3.2 3.2"/>',
- image:'<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4"/>'});
+ image:'<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4"/>',
+ chev:'<path d="M6 9l6 6 6-6"/>',
+ sos:'<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/><path d="M6 6l3.5 3.5M18 6l-3.5 3.5M6 18l3.5-3.5M18 18l-3.5-3.5"/>',
+ bell:'<path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2H4.5z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+ globe:'<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.6 3.8 5.4 3.8 8.5S14.6 17.9 12 20.5C9.4 17.9 8.2 15.1 8.2 12S9.4 6.1 12 3.5z"/>',
+ shield2:'<path d="M12 3.4l7 2.8v5.3c0 4.4-2.9 7.7-7 9-4.1-1.3-7-4.6-7-9V6.2l7-2.8z"/><path d="M9 12h6M12 9v6"/>',
+ brush:'<path d="M14.5 4.5l5 5-8.2 8.2a3 3 0 0 1-4.3 0l-.7-.7a3 3 0 0 1 0-4.3z"/><path d="M6.3 13l4.7 4.7M3.5 20.5c1.8 0 3-1 3-2.5"/>',
+ box:'<path d="M4 7.5l8-4 8 4v9l-8 4-8-4z"/><path d="M4 7.5l8 4 8-4M12 11.5v9"/>',
+ copy:'<rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/>',
+ play:'<path d="M8 5.5v13l10.5-6.5z"/>',
+ pause:'<path d="M8.5 5.5v13M15.5 5.5v13"/>',
+ bot:'<rect x="4.5" y="8" width="15" height="11" rx="3.5"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1.2"/><circle cx="9.3" cy="13.2" r="1.2"/><circle cx="14.7" cy="13.2" r="1.2"/><path d="M9.5 16.5h5M2.5 12.5v3M21.5 12.5v3"/>',
+ traffic:'<path d="M4 19.5h16"/><path d="M7 16v-5M11 16V7M15 16v-7.5M19 16V4.5"/>',
+ ports:'<path d="M9 3.5v4.5M15 3.5v4.5"/><path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0z"/><path d="M12 17v3.5"/>',
+ send:'<path d="M20.5 3.5L3.5 10.5l7 2.5 2.5 7z"/><path d="M10.5 13l5-5"/>',
+ term:'<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M7.5 9.5l3 2.5-3 2.5M12.5 15h4"/>',
+ gift:'<rect x="4" y="9" width="16" height="11" rx="2"/><path d="M4 13h16M12 9v11"/><path d="M12 9c-2.5 0-4.5-1-4.5-2.7S9.6 3.8 12 9zM12 9c2.5 0 4.5-1 4.5-2.7S14.4 3.8 12 9z"/>',
+ card:'<rect x="3" y="6" width="18" height="12.5" rx="2.5"/><path d="M3 10.5h18M7 15h3.5"/>',
+ move:'<path d="M4 8h13.5l-3.5-3.5M20 16H6.5l3.5 3.5"/>',
+ tunnel:'<path d="M3 19v-7a9 9 0 0 1 18 0v7"/><path d="M7.5 19v-6.5a4.5 4.5 0 0 1 9 0V19"/><path d="M1.5 19h21"/>',
+ srv:'<rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M12 6.5h5M12 17.5h5"/>',
+ dns:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+ xray:'<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+ game:'<path d="M6 11h4M8 9v4"/><circle cx="15.5" cy="12.5" r=".6"/><circle cx="17.5" cy="10.5" r=".6"/><path d="M7.5 6h9a5 5 0 0 1 4.8 6.3l-1 3.6a2.6 2.6 0 0 1-4.6.9L14.5 15h-5l-1.2 1.8a2.6 2.6 0 0 1-4.6-.9l-1-3.6A5 5 0 0 1 7.5 6z"/>',
+ more38:'<circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/>',
+ sun38:'<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>',
+ k310sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>',
+ k310online:'<path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 15.8a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1.2"/>',
+ k310ok:'<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-4.9"/>',
+ k310warn:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.2l3 1.8"/>',
+ k310off:'<circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/>',
+ k310traffic:'<path d="M7 4v14M3.5 14.5L7 18l3.5-3.5"/><path d="M17 20V6M13.5 9.5L17 6l3.5 3.5"/>',
+ cores:'<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>'
+};
+function ic(n,sz){sz=sz||18;return '<svg viewBox="0 0 24 24" width="'+sz+'" height="'+sz+'" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICO[n]+'</svg>'}
 // logo: the uploaded image (Settings > Logo) or the first letter; cached so the login page can show it too
 function logoOk(s){return /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+\/=]+$/.test(s||'')}
 function curLogo(){var l=(S.me&&S.me.logo)||(S.me?'':localStorage.getItem('kk_logo'))||'';return logoOk(l)?l:''}
@@ -2824,7 +2825,7 @@ function applyLook(){document.documentElement.lang=S.lang;document.documentEleme
  var b=document.body.classList;b.toggle('light',S.theme=='light');
  Array.prototype.slice.call(b).forEach(function(c){if(c.indexOf('c-')==0)b.remove(c)});if(S.color&&S.color!='gold')b.add('c-'+S.color);
  b.add('k38');if($('#side'))b.add('v37');V37.drawLooks()}
-var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e']];
+var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e'],['xray','Xray'],['dns','DNS']];
 function pname(p){for(var i=0;i<PROTOS.length;i++)if(PROTOS[i][0]==p)return PROTOS[i][1];return p}
 function modal(html,cls){var b=$('#mbox');b.className='mbox'+(cls?' '+cls:'');b.innerHTML=html;b.scrollTop=0;$('#modal').classList.add('on');document.body.style.overflow='hidden'}
 function closeModal(){$('#modal').classList.remove('on');document.body.style.overflow=''}
@@ -2853,13 +2854,8 @@ function loginView(otp){document.body.className='';applyLook();clearInterval(S.t
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
 // ---------------------------------------------------------------- shell
-ICO.chev='<path d="M6 9l6 6 6-6"/>';
 var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['kgame','MIX+\u200e','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
-// sidebar groups (v2.8.4): [label, page keys]
-// menu (v3.5): single pages and groups that open in place. An item is [page, sub page, label, note].
-var NAVG=[];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
-function navHref(x){return '#'+x[0]+(x[1]?'/'+x[1]:'')}
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);
  var i=document.createElement('span');i.className='phi';i.innerHTML=ic(pgOf(S.page)[2],22);d.appendChild(i);d.appendChild(inner)}
@@ -2933,7 +2929,7 @@ function svc(k,a){var go=function(){toast(t('Checking…'));api('POST','/api/ser
  if(a=='start')go();else confirmDo(go)}
 
 // ---------------------------------------------------------------- users
-var PCOL={wg:'#1fa36b',awg:'#7c5cf0',hy2:'#d1497a',kmix:'#ff7a1a',kgame:'#e0b04a'};
+var PCOL={wg:'#1fa36b',awg:'#7c5cf0',hy2:'#d1497a',kmix:'#ff7a1a',kgame:'#e0b04a',xray:'#e0a020',dns:'#2a9df4'};
 var SORTS={new:function(a,b){return b.id-a.id},old:function(a,b){return a.id-b.id},name:function(a,b){return a.username.toLowerCase()<b.username.toLowerCase()?-1:1},
  usage:function(a,b){return usageVal(b)-usageVal(a)},expiry:function(a,b){return expVal(a)-expVal(b)},seen:function(a,b){return (b.last_seen_ts||0)-(a.last_seen_ts||0)}};
 function usageVal(u){return u.traffic_limit_gb>0?u.traffic_used_gb/u.traffic_limit_gb:-1}
@@ -2993,9 +2989,8 @@ function liveShort(p){return {wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',kgame:'MIX+
 // Iran flag when that config goes through an Iran tunnel
 function liveBadges(lv){var by={},order=[];lv.forEach(function(c){if(!by[c.p]){by[c.p]=[];order.push(c.p)}by[c.p].push(c)});
  return order.slice(0,3).map(function(p){var fl='',seen={};by[p].forEach(function(c){var k=(c.cc||'')+(c.t?'+':'');if(seen[k])return;seen[k]=1;
-   if(c.cc&&window.flagOf)fl+='<span class="lvf">'+flagOf(c.cc)+'</span>';if(c.t&&window.flagOf)fl+='<span class="lvf lvir">'+flagOf('IR')+'</span>'});
+   if(c.cc)fl+='<span class="lvf">'+flagOf(c.cc)+'</span>';if(c.t)fl+='<span class="lvf lvir">'+flagOf('IR')+'</span>'});
   return '<i dir="ltr" style="--pc:'+(PCOL[p]||'#888')+'">'+liveShort(p)+(fl?' '+fl:'')+'</i>'}).join('')}
-(function(){var st=document.createElement('style');st.textContent='.uchip.kd-u .kd-un{flex-wrap:wrap}.uchip.kd-u .kd-un .lvs{order:9;flex-basis:100%;display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}.uchip.kd-u .kd-un .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lvs i{display:inline-flex;align-items:center;gap:2px;white-space:nowrap}.lvf{font-size:11px;line-height:1;font-style:normal}.lvf.lvir{font-size:9px;opacity:.9}';document.head.appendChild(st)})();
 function filtered(){var q=S.q.trim().toLowerCase(),f=S.filter;
  var out=S.users.filter(function(u){
   if(q&&(u.username+' '+u.notes+' '+(u.tg_id||'')).toLowerCase().indexOf(q)<0)return false;
@@ -3022,10 +3017,8 @@ function drawPager(pages){var el=$('#pager');if(!el)return;var h='',i,nums=[];
  h+='<select id="psz" aria-label="'+t('per page')+'">'+[24,48,96,200].map(function(n){return '<option value="'+n+'"'+(n==S.size?' selected':'')+'>'+N(n)+' '+t('per page')+'</option>'}).join('')+'</select>';
  el.innerHTML=h}
 // ---- single-user actions
-function toggleU(id,cb){cb.disabled=true;api('POST','/api/users/'+id+'/toggle').then(function(){toast(t('Done'));loadUsers()}).catch(function(e){cb.checked=!cb.checked;cb.disabled=false;fail(e)})}
 function resetU(id){confirmDo(function(){api('POST','/api/users/'+id+'/reset').then(function(){toast(t('Done'));loadUsers()}).catch(fail)})}
 function delU(id){confirmDo(function(){api('DELETE','/api/users/'+id).then(function(){closeModal();toast(t('Done'));loadUsers()}).catch(fail)})}
-function uAct(id,a){api('POST','/api/users/'+id+'/'+a).then(function(){toast(t('Done'));loadUsers()}).catch(fail)}
 
 // ---- bulk actions
 function bulkDo(a){var ids=Object.keys(S.sel).map(Number);if(a=='clear'){S.sel={};drawUsers();return}if(!ids.length)return;if(a=='extend')return bulkExtend(ids);
@@ -3038,9 +3031,6 @@ function bulkExtend(ids){modal(mhead(t('Extend'),N(ids.length)+' '+t('selected')
 
 // ---- QR / configs
 function qrInto(el,text){el.innerHTML='<div class="qr" style="margin:8px 0"></div>';api('GET','/api/qr?text='+encodeURIComponent(text),undefined,{blob:1}).then(function(r){var i=new Image();i.alt='QR';i.src=URL.createObjectURL(r.blob);el.querySelector('.qr').appendChild(i)}).catch(fail)}
-function qrModal(id){var u=findU(id);if(!u)return;
- modal(mhead(u.username,'QR')+'<div id="qrx"></div><div class="lk">'+esc(u.link)+'</div><div class="g2" style="gap:8px"><button class="b2" id="q_cp">'+ic('link',16)+' '+t('Copy link')+'</button><a class="b2" style="text-align:center;text-decoration:none" target="_blank" rel="noopener" href="'+esc(u.link)+'">'+ic('ext',16)+' '+t('Open page')+'</a></div>');
- qrInto($('#qrx'),u.link);$('#q_cp').onclick=function(){copy(u.link)}}
 function sheetCfg(id){var u=findU(id);if(!u)return;var un=u.nodes.split(',').filter(Boolean),pr=u.protocols.split(','),map={wg:'wireguard',awg:'amneziawg',hy2:'hysteria2',kmix:'kankimix'},rows='';
  S.nodes.forEach(function(n){if(un.length&&un.indexOf(n.id)<0)return;if(!un.length&&!n.accept_all)return;var inf=n.info||{},b='';
   pr.forEach(function(p){if(!map[p])return;var base='/api/config/'+u.id+'/'+map[p]+'?sub='+encodeURIComponent(u.code)+'&node='+encodeURIComponent(n.id);
@@ -3108,71 +3098,16 @@ function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bu
  var pv=panelVer();if(!loc&&pv&&i.version&&verLt(i.version,pv))bump(1,t('Agent is on an older version')+' (v'+i.version+'): '+t('press Update agent'));
  if(n.maint)bump(1,'Under maintenance: new users are not sent here');
  return lv==2?{lv:2,c:'r',l:'Problem',r:r}:lv==1?{lv:1,c:'y',l:'Under pressure',r:r}:{lv:0,c:'g',l:'Healthy',r:r}}
-function upTime(s){s=+s||0;var d=Math.floor(s/86400),h=Math.floor(s%86400/3600);return d?N(d)+' '+t('days')+' '+N(h)+' '+t('hours'):N(h)+' '+t('hours')+' '+N(Math.floor(s%3600/60))+' '+t('min')}
 function nMeter(lbl,p,txt){var c=p>=90?'var(--bad)':p>=70?'var(--warn)':'var(--ok)';
  return '<div class="nm"><div class="nmh"><small>'+t(lbl)+'</small><b class="ltr">'+txt+'</b></div><i><s style="width:'+Math.round(p)+'%;background:'+c+'"></s></i></div>'}
 S.nopen=S.nopen||{};
-function drawNodes(){var el=$('#nl');if(!el)return;el.innerHTML=S.nodes.map(function(n){var loc=n.id=='local',h=nHealthOf(n),st=(n.info||{}).stats,op=!!S.nopen[n.id],id=esc(n.id);
- var sy=n.sync_state=='synced'?'<span class="okt">'+t('Synced')+'</span>':n.sync_state=='mismatch'?'<span style="color:var(--warn)">'+t('Config mismatch')+'</span>':n.sync_state=='pin mismatch'?'<span class="bad2">'+t('Certificate changed')+'</span>':'<span class="bad2">'+(n.online?'—':t('Offline'))+'</span>';
- var acc=n.maint?t('Under maintenance'):n.drain?t('Draining'):t('Accepting');
- var meters=st?nMeter('CPU',+st.cpu||0,N(Math.round(+st.cpu||0))+'%')+nMeter('RAM',pc(st.mem_used,st.mem_total),N(Math.round(pc(st.mem_used,st.mem_total)))+'%')+nMeter('Disk',pc(st.disk_used,st.disk_total),N(Math.round(pc(st.disk_used,st.disk_total)))+'%')
-  :'<p class="muted nmx">'+t(loc||n.online?'Press Update agent to see CPU, RAM and disk of this node':'Not reachable')+'</p>';
- var det=st?'<div class="nkv">'+
-   '<span><small>'+t('CPU')+'</small><b class="ltr">'+N(st.cores)+' '+t('cores')+' · load '+N((st.load||[]).map(function(x){return (+x).toFixed(2)}).join(' '))+'</b></span>'+
-   '<span><small>'+t('RAM')+'</small><b class="ltr">'+N(bytes(st.mem_used))+' / '+N(bytes(st.mem_total))+'</b></span>'+
-   (st.swap_total>0?'<span><small>'+t('Swap')+'</small><b class="ltr">'+N(bytes(st.swap_used))+' / '+N(bytes(st.swap_total))+'</b></span>':'')+
-   '<span><small>'+t('Disk')+'</small><b class="ltr">'+N(bytes(st.disk_used))+' / '+N(bytes(st.disk_total))+'</b></span>'+
-   '<span><small>'+t('Connections')+'</small><b class="ltr">TCP '+N(st.tcp)+' · UDP '+N(st.udp)+'</b></span>'+
-   '<span><small>'+t('Uptime')+'</small><b>'+upTime(st.uptime)+'</b></span></div>':'';
- return '<div class="card nodec h'+h.c+'"><div class="nhd"><div class="logo" style="width:34px;height:34px;font-size:14px">'+(loc?'B':'N')+'</div>'+
-  '<div class="nnm"><b>'+esc(n.name)+'</b><div class="muted ltr">'+esc(loc?'local':n.address.replace(/^https?:\/\//,''))+'</div></div>'+
-  '<span class="badge '+h.c+'"><span class="dot '+h.c+'"></span> '+t(h.l)+'</span></div>'+
-  (n.plain_http?'<div class="warnbox">'+t('Insecure: plain HTTP. Reinstall the node with the new installer to get TLS.')+'</div>':'')+
-  '<div class="nsum"><span><small>'+t('Users')+'</small><b>'+N(n.users)+'</b></span><span><small>'+t('Last contact')+'</small><b>'+(loc?t('this server'):ago(n.last_sync))+'</b></span><span><small>'+t('Sync')+'</small><b>'+sy+'</b></span></div>'+
-  '<div class="nms">'+meters+'</div>'+
-  (h.r.length?'<ul class="nwhy">'+h.r.map(function(x){return '<li class="l'+x[0]+'">'+t(x[1])+'</li>'}).join('')+'</ul>':'')+
-  '<button class="nmore" data-nopen="'+id+'" aria-expanded="'+op+'">'+t(op?'Hide details':'Details & settings')+' <span class="arr">'+(op?'▴':'▾')+'</span></button>'+
-  '<div class="ndet'+(op?'':' hide')+'">'+det+
-   '<p class="muted" style="margin:8px 0">'+acc+' · '+esc(n.effective_endpoint||'')+((n.info||{}).version?' · v'+esc(n.info.version):'')+(n.note?' · '+esc(n.note):'')+'</p>'+
-   '<div class="g2"><button class="b2 '+(n.drain?'on':'')+'" onclick="nAct(\''+id+'\',\'drain\')">'+t('Drain')+'</button><button class="b2 '+(n.maint?'on':'')+'" onclick="nAct(\''+id+'\',\'maint\')">'+t('Maintenance')+'</button>'+
-   '<button class="b2" onclick="nAct(\''+id+'\',\'sync\')">↻ '+t('Sync')+'</button><button class="b2" onclick="nHealth(\''+id+'\')">♡ '+t('Health')+'</button><button class="b2" onclick="nodeEdit(\''+id+'\')">✎ '+t('Edit')+'</button><button class="b2" onclick="nAct(\''+id+'\',\'repair\')">↻ '+t('Repair agent')+'</button>'+
-   (loc?'':'<button class="b2" onclick="nAct(\''+id+'\',\'update\')">⇪ '+t('Update agent')+'</button><button class="b2 bd" onclick="nDel(\''+id+'\')">⌫ '+t('Delete node')+'</button>')+
-   '<button class="b2 okb" onclick="nAssign(\''+id+'\',1)">'+ic('plus',15)+' '+t('Add to all users')+'</button>'+(loc?'':'<button class="b2 bd" onclick="nAssign(\''+id+'\',0)">'+ic('trash',15)+' '+t('Remove from all users')+'</button>')+'</div>'+
-   (loc?'<p class="muted" style="margin:8px 0 0">'+t('Main panel server · local management')+'</p>':'')+'</div></div>'}).join('');
- el.onclick=function(e){var b=e.target.closest('[data-nopen]');if(!b)return;var k=b.dataset.nopen;S.nopen[k]=!S.nopen[k];drawNodes()}}
 function findN(id){for(var i=0;i<S.nodes.length;i++)if(S.nodes[i].id==id)return S.nodes[i]}
 function nAct(id,a){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+a).then(function(r){toast(r.ok===false?(r.result&&r.result.error||'failed'):t('Done'),r.ok===false);loadNodes()}).catch(fail)}
-function nDel(id){if(!confirm(t('Delete this server? Its users are cut off and the server itself removes WireGuard, AmneziaWG, Hysteria2 and KANKI MIX, closes their ports and uninstalls the node agent.')))return;toast(t('Removing…'));
- api('DELETE','/api/nodes/'+encodeURIComponent(id)).then(function(){loadNodes()}).catch(fail)}
 function nHealth(id){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/health').then(function(r){var n=findN(id);
  modal(mhead(t('Health'),n?n.name:'')+'<p>'+(r.ok?'<span class="badge g">OK</span>':'<span class="badge r">'+t('Offline')+'</span>')+' <span class="ltr">'+r.ms+' ms</span> '+(r.version?'· v'+esc(r.version):'')+(r.load?' · load '+esc(r.load):'')+'</p>'+
  '<div class="list">'+((r.services||[]).map(function(s){return '<div class="li"><span>'+esc(s.key)+' <small class="ltr">'+esc(s.unit)+'</small></span><span class="badge '+(s.active?'g':'r')+'">'+esc(s.state)+'</span></div>'}).join(''))+'</div>')}).catch(fail)}
 function nAssign(id,add){var n=findN(id);if(!confirm(t(add?'Add this node to ALL users?':'Remove this node from ALL users?')+(n?' ('+n.name+')':'')))return;
  toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+(add?'assign-all':'unassign-all')).then(function(){toast(t('Done'));loadNodes()}).catch(fail)}
-function joinStart(btn){btn.disabled=true;
- Promise.all([api('GET','/api/nodes'),api('POST','/api/node-join')]).then(function(r){
-  var before=r[0].map(function(n){return n.id}),j=r[1],dom=($('#j_dom').value||'').trim().replace(/[^A-Za-z0-9.\-]/g,''),repo=j.repo||'',
-   cmd=(repo?'KANKI_REPO='+repo+' ':'')+(dom?'KANKI_DOMAIN='+dom+' ':'')+'KANKI_JOIN='+j.token+' KANKI_PANEL='+(j.panel||location.origin)+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'kankiturk8770/kanki-panel')+'/main/install.sh)';
-  $('#j_in').classList.add('hide');
-  $('#j_out').innerHTML='<label class="f">'+t('Run this on the new server')+'</label><pre class="cmd" id="j_cmd">'+esc(cmd)+'</pre>'+
-   '<button class="btn" style="width:100%" id="j_cp">'+ic('link',16)+' '+t('Copy command')+'</button>'+
-   (repo?'':'<div class="warnbox">'+t('Update source (GitHub repo) is not set: replace USER/REPO in the command.')+'</div>')+
-   '<div class="jw" id="j_wait"><span class="spin"></span><span>'+t('Waiting for the node to connect…')+'</span><b class="ltr" id="j_left"></b></div>'+
-   '<p class="muted" style="margin:6px 0 0">'+t('Valid for one hour and one node. Create a new command for the next node.')+'</p>';
-  $('#j_cp').onclick=function(){copy(cmd)};
-  joinWatch(before,j.expires)}).catch(function(e){btn.disabled=false;fail(e)})}
-function joinWatch(before,exp){clearInterval(S.joinT);
- var tick=function(){var w=$('#j_wait');if(!w||!$('#modal').classList.contains('on')){clearInterval(S.joinT);return}
-  var s=Math.max(0,exp-Math.floor(Date.now()/1000)),l=$('#j_left');if(l)l.textContent=N(p2(Math.floor(s/60)))+':'+N(p2(s%60));
-  if(s<=0){clearInterval(S.joinT);w.innerHTML='<span class="bad2">'+t('The command expired. Create a new one.')+'</span>';return}
-  api('GET','/api/nodes').then(function(list){var nn=list.filter(function(n){return before.indexOf(n.id)<0});if(nn.length){clearInterval(S.joinT);S.nodes=list;joinDone(nn[0])}}).catch(function(){})};
- tick();S.joinT=setInterval(tick,3000)}
-function joinDone(n){var o=$('#j_out');if(!o)return;
- o.innerHTML='<div class="jok"><span class="okc">'+ic('check',22)+'</span><div><b>'+esc(n.name)+'</b><small class="ltr">'+esc(String(n.address||'').replace(/^https?:\/\//,''))+'</small><div>'+t('joined the panel')+'</div></div></div>'+
-  '<div class="g2" style="margin-top:12px"><button class="btn" id="j_all">'+ic('plus',15)+' '+t('Add to all users')+'</button><button class="b2" id="j_ok">'+t('Done')+'</button></div>';
- loadNodes();
- $('#j_ok').onclick=function(){closeModal();if(S.page=='nodes')loadNodes()};
- $('#j_all').onclick=function(){var b=this;b.disabled=true;api('POST','/api/nodes/'+encodeURIComponent(n.id)+'/assign-all').then(function(){toast(t('Done'));closeModal();loadNodes()}).catch(function(e){b.disabled=false;fail(e)})}}
 function updateAll(){if(!confirm(t('Update every node, every tunnel server and the panel itself to the latest version?')))return;toast(t('Updating…'));
  api('POST','/api/update-all').then(function(r){var h='';
   h+='<p><b>'+t('Panel')+':</b> '+esc(String(r.panel))+(r.latest?' · '+esc(r.latest):'')+'</p>';
@@ -3182,33 +3117,6 @@ function updateAll(){if(!confirm(t('Update every node, every tunnel server and t
   if((r.manual||[]).length)h+='<div class="warnbox">'+t('These agents are too old to update remotely. Run the command kanki on them and choose 3 (Update) once:')+' <b>'+esc(r.manual.join(', '))+'</b></div>';
   if(!(r.nodes||[]).length&&!(r.agents||[]).length&&!(r.manual||[]).length&&String(r.panel)=='current')h+='<p>'+t('Everything is already up to date')+'</p>';
   modal(mhead(t('Update all'),'')+h);setTimeout(function(){if(S.page=='nodes')loadNodes()},8000)}).catch(fail)}
-function nodePorts(id){var n=findN(id);if(!n)return;var inf=n.info||{},b={},ch=0;
- [['wg','e_pwg','wg_port'],['awg','e_paw','awg_port'],['hy2','e_phy','hy2_port']].forEach(function(z){var el=$('#'+z[1]);if(!el||el.disabled)return;var v=unN(el.value).trim();if(v&&v!=String(inf[z[2]]||'')){b[z[0]]=v;ch++}});
- var km=$('#e_pkm'),kv=km?unN(km.value).trim():'';
- if(kv&&kv!=String(inf.kmix_port||'')){if(!ch){kmSetNodePort(id,kv,function(){closeModal();loadNodes()});return}kmSetNodePort(id,kv)}
- if(!ch){toast(t('No port changed'));return}
- toast(t('Applying…'));
- api('POST','/api/node-ports/'+encodeURIComponent(id),b).then(function(r){
-  if(r.ok===false){toast((r.errors&&r.errors.join(' · '))||r.error||'failed',1);return}
-  toast(t('Done')+' · '+(r.changed||[]).join(', '));closeModal();setTimeout(loadNodes,6000);loadNodes()}).catch(fail)}
-function nodeTun(id){var n=findN(id);if(!n)return;var host=String(n.address||'').replace(/^https?:\/\//,'').replace(/[:\/].*$/,'');
- api('POST','/api/tunnels/servers',{name:n.name,addr:host,loc:'abroad'}).then(function(r){modal(mhead(t('Also use this node as a tunnel server'),n.name)+tunCmdBox(r,r));$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}).catch(fail)}
-function nodeEdit(id){var n=findN(id);if(!n)return;var loc=n.id=='local',panel=n.endpoint_mode=='panel'||!n.endpoint;
- modal(mhead(t('Edit node'),loc?'local':n.address)+'<label class="f">'+t('Node name')+'</label><input id="e_name" value="'+esc(n.name)+'"><label class="f">'+t('Note')+'</label><input id="e_note" value="'+esc(n.note)+'">'+
- '<label class="chk" style="margin-top:10px"><input type="checkbox" id="e_acc" '+(n.accept_all?'checked':'')+'>'+t('Sync users without a specific node to this node')+'</label>'+'<div class="box" style="margin-top:10px"><b>'+t('VPN ports (UDP)')+'</b><small class="muted" style="display:block;margin:4px 0 6px">'+t('Applied on the server at once: config, service and firewall. Old WireGuard/AmneziaWG files stop working; subscription links update by themselves.')+'</small><div class="g3">'+
-  '<div><small class="muted">WireGuard</small><input id="e_pwg" class="ltr" inputmode="numeric" value="'+esc(String((n.info||{}).wg_port||''))+'"'+((n.info||{}).wg_port?'':' disabled')+'></div>'+
-  '<div><small class="muted">AmneziaWG</small><input id="e_paw" class="ltr" inputmode="numeric" value="'+esc(String((n.info||{}).awg_port||''))+'"'+((n.info||{}).awg_port?'':' disabled')+'></div>'+
-  '<div><small class="muted">Hysteria2</small><input id="e_phy" class="ltr" inputmode="numeric" value="'+esc(String((n.info||{}).hy2_port||''))+'"'+((n.info||{}).hy2_port?'':' disabled')+'></div>'+
-  '<div><small class="muted">KANKI MIX</small><input id="e_pkm" class="ltr" inputmode="numeric" value="'+esc(String((n.info||{}).kmix_port||''))+'" placeholder="4000"></div></div>'+
-  '<button type="button" class="b2" style="width:100%;margin-top:8px" onclick="nodePorts(\''+n.id+'\')">'+t('Apply ports')+'</button></div>'+
- (loc?'':'<button type="button" class="btn" style="width:100%;margin-top:10px" onclick="nodeTun(\''+n.id+'\')">'+t('Also use this node as a tunnel server')+'</button>')+
- '<div class="box"><b>'+t('Users connection endpoint')+'</b><label class="chk"><input type="radio" name="e_m" value="panel" '+(panel?'checked':'')+'>'+t('Use the panel endpoint')+'</label><label class="chk"><input type="radio" name="e_m" value="custom" '+(panel?'':'checked')+'>'+t('Custom IP / domain for this node')+'</label><input id="e_ep" class="ltr" value="'+esc(n.endpoint)+'" style="margin-top:6px"></div>'+
- (loc?'':'<details class="box"><summary>'+t('Advanced')+'</summary><label class="f">'+t('API address')+'</label><input id="e_addr" class="ltr" value="'+esc(n.address)+'"><label class="f">'+t('Node token')+'</label><input id="e_tok" class="ltr" placeholder="••••••"><label class="chk" style="margin-top:8px"><input type="checkbox" id="e_ins" '+(n.insecure?'checked':'')+'>'+t('Self-signed certificate (no domain on node)')+'</label></details>')+
- '<div class="g2" style="margin-top:12px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="e_go">'+t('Save')+'</button></div>');
- $('#e_go').onclick=function(){var m=($$('input[name=e_m]').filter(function(x){return x.checked})[0]||{}).value;
-  var b={name:$('#e_name').value,note:$('#e_note').value,accept_all:$('#e_acc').checked,endpoint_mode:m,endpoint:$('#e_ep').value};
-  if(!loc){b.address=$('#e_addr').value;if($('#e_tok').value)b.token=$('#e_tok').value;b.insecure=$('#e_ins').checked}
-  api('PUT','/api/nodes/'+encodeURIComponent(id),b).then(function(){closeModal();toast(t('Saved'));loadNodes()}).catch(fail)}}
 
 // ---------------------------------------------------------------- backup
 function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'</h2><p>'+t('Full backup of users, credentials, certificates, VPN settings, nodes and panel state')+'</p></div></div>'+
@@ -3286,13 +3194,6 @@ function loadSec(){api('GET','/api/security').then(function(s){S.sec=s;var el=$(
  '<div class="g2"><div><label class="f">Allow</label><textarea id="ip_a" class="ltr" rows="3" placeholder="'+t('IP / CIDR allowed, one per line')+'">'+esc(s.ip_allow)+'</textarea></div><div><label class="f">Deny</label><textarea id="ip_d" class="ltr" rows="3" placeholder="'+t('IP / CIDR blocked, one per line')+'">'+esc(s.ip_deny)+'</textarea></div></div></details>'+
  '<div style="text-align:center;margin:4px 0 12px"><button class="btn" onclick="savePolicy()">'+t('Save security policy')+'</button></div>'+
  '<div class="card"><h3>'+t('Login history')+'</h3><p class="sub">'+t('Last logins to the panel')+'</p><div class="list">'+(lg.map(function(l){return '<div class="li"><span><b>'+esc(l.username||'—')+'</b><small class="ltr">'+esc(l.ip)+' · '+fmtDate(l.ts,1)+'</small></span><span class="badge '+(l.ok?'g':'r')+'">'+(l.ok?'OK':'FAIL')+'</span></div>'}).join('')||'<span class="muted">—</span>')+'</div></div>'}).catch(fail)}
-function tokModal(){var sc=(S.sec&&S.sec.scopes)||['users:read','users:write','nodes','settings','backup','admin'];
- modal(mhead(t('Create API token'))+'<label class="f">'+t('Token name')+'</label><input id="tk_n"><label class="f">'+t('Scopes')+'</label>'+sc.map(function(x){return '<label class="chk"><input type="checkbox" class="tk_s" value="'+x+'" '+(x.indexOf('users')==0?'checked':'')+'>'+x+'</label>'}).join('')+
- '<div style="text-align:center;margin-top:12px"><button class="btn" id="tk_go">'+t('Create')+'</button></div>');
- $('#tk_go').onclick=function(){api('POST','/api/security/tokens',{name:$('#tk_n').value,scopes:$$('.tk_s').filter(function(x){return x.checked}).map(function(x){return x.value})}).then(function(r){
-  modal(mhead(t('API tokens'))+'<p class="warnbox">'+t("Copy it now, it won't be shown again")+'</p><pre>'+esc(r.token)+'</pre><button class="btn" style="width:100%" onclick="copy(\''+r.token+'\')">'+t('Copy')+'</button>');loadSec()}).catch(fail)}}
-function tokDel(id){confirmDo(function(){api('DELETE','/api/security/tokens/'+id).then(loadSec).catch(fail)})}
-function regenKey(){confirmDo(function(){api('POST','/api/security/apikey').then(function(r){modal(mhead(t('Legacy API key'))+'<pre>'+esc(r.api_key)+'</pre><button class="btn" style="width:100%" onclick="copy(\''+r.api_key+'\')">'+t('Copy')+'</button>');loadSec()}).catch(fail)})}
 function totpSetup(){api('POST','/api/security/2fa/setup').then(function(r){modal(mhead(t('Enable 2FA'))+'<p class="muted">'+t('Scan with your authenticator app, then enter the 6-digit code')+'</p><div class="qr">'+r.qr+'</div><pre>'+esc(r.secret)+'</pre><input id="tf_c" inputmode="numeric" maxlength="6" class="ltr" placeholder="123456"><button class="btn" style="width:100%;margin-top:10px" id="tf_go">'+t('Confirm')+'</button>');
  $('#tf_go').onclick=function(){api('POST','/api/security/2fa/enable',{code:$('#tf_c').value}).then(function(){closeModal();toast(t('Done'));loadSec()}).catch(fail)}}).catch(fail)}
 function totpOff(){var c=prompt(t('2FA code'));if(!c)return;api('POST','/api/security/2fa/disable',{code:c}).then(function(){toast(t('Done'));loadSec()}).catch(fail)}
@@ -3302,10 +3203,6 @@ function chPass(){api('POST','/api/security/password',{current:$('#cp_cur').valu
 function savePolicy(){api('POST','/api/security/policy',{ip_allow:$('#ip_a').value,ip_deny:$('#ip_d').value,session_hours:+$('#ip_h').value||24,force_2fa:$('#ip_f').checked}).then(function(){toast(t('Saved'));loadSec()}).catch(fail)}
 
 // ---------------------------------------------------------------- settings
-function logoCard(){var l=curLogo();return '<div class="card"><h3>'+t('Logo')+'</h3><p class="sub">'+t('Shown in the header, the side menu, the login page and the subscription page.')+'</p>'+
- '<div class="row" style="gap:10px"><div class="'+logoCls()+'" id="lg_prev" style="width:56px;height:56px;border-radius:16px;font-size:24px">'+logoInner(((S.me&&S.me.panel_name)||'K').charAt(0))+'</div>'+
- '<label class="btn" for="lg_file" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">'+ic('image',16)+' '+t('Choose image')+'</label><input type="file" id="lg_file" accept="image/*" class="hide">'+
- '<button class="b2'+(l?'':' hide')+'" id="lg_rm">'+t('Remove')+'</button></div></div>'}
 function setLogo(data){return api('PUT','/api/settings',{logo:data}).then(function(){S.me.logo=data;try{localStorage.setItem('kk_logo',data)}catch(e){}toast(t('Saved'));shell();route()})}
 function wireLogo(){var f=$('#lg_file');if(!f)return;
  f.onchange=function(){var file=f.files&&f.files[0];if(!file)return;var rd=new FileReader();
@@ -3316,13 +3213,7 @@ function wireLogo(){var f=$('#lg_file');if(!f)return;
    im.onerror=function(){toast(t('Cannot read this image'),1)};im.src=rd.result};
   rd.readAsDataURL(file)};
  var rm=$('#lg_rm');if(rm)rm.onclick=function(){confirmDo(function(){setLogo('').catch(fail)})}}
-// ---------------------------------------------------------------- settings (v2.8.4: sections, each saved on its own)
-ICO.sos='<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/><path d="M6 6l3.5 3.5M18 6l-3.5 3.5M6 18l3.5-3.5M18 18l-3.5-3.5"/>';
-ICO.bell='<path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2H4.5z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>';
-ICO.globe='<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.6 3.5 5.4 3.5 8.5s-1.1 5.9-3.5 8.5c-2.4-2.6-3.5-5.4-3.5-8.5S9.6 6.1 12 3.5z"/>';
-ICO.shield2='<path d="M12 3.4l7 2.8v5.3c0 4.4-2.9 7.7-7 9-4.1-1.3-7-4.6-7-9V6.2l7-2.8z"/><path d="M9 12h6M12 9v6"/>';
-ICO.brush='<path d="M14.5 4.5l5 5-8.2 8.2a3 3 0 0 1-4.3 0l-.7-.7a3 3 0 0 1 0-4.3z"/><path d="M6.3 13l4.7 4.7M3.5 20.5c1.8 0 3-1 3-2.5"/>';
-ICO.box='<path d="M4 7.5l8-4 8 4v9l-8 4-8-4z"/><path d="M4 7.5l8 4 8-4M12 11.5v9"/>';
+// ---------------------------------------------------------------- settings: sections, each saved on its own
 var STSEC=[
  ['look','Appearance','brush','Name, logo, language, theme and colour of the panel',['panel_name','lang','theme','color','refresh']],
  ['net','Addresses','globe','Panel address, the public VPN address and subscription links',['endpoint','sub_base']],
@@ -3357,7 +3248,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   '<div><label class="f">MTU</label><input data-k="mtu" class="ltr" inputmode="numeric" placeholder="1380"><div class="chipset" data-fill="mtu">'+['1280','1380','1420'].map(function(m){return '<button type="button" data-v="'+m+'">'+m+'</button>'}).join('')+'</div><div class="hint">'+t('Lower it (1280) if some sites do not open on mobile data.')+'</div></div>'+
   '<div class="full" style="margin-top:6px">'+stSw('awg_compat','AmneziaWG compatibility mode','Only Jc/Jmin/Jmax/S1/S2/H1-H4, for old AmneziaWG apps.')+stSw('conn_limit_on','Enforce connection limit (Hysteria2)','A user cannot connect from more devices than his limit.')+'</div></div>';
  case 'newu':return '<label class="f" style="margin-top:0">'+t('Default protocols for new users')+'</label><input type="hidden" data-k="default_protocols"><div class="pgs" data-multi="default_protocols">'+
-  PROTOS.map(function(x){return '<label style="--pc:'+(window.PCOL?PCOL[x[0]]:'var(--a)')+'"><input type="checkbox" value="'+x[0]+'" class="hide"><i></i>'+x[1]+'</label>'}).join('')+'</div><div class="hint">'+t('Also used by the sales bot when it makes an account.')+'</div>'+
+  PROTOS.map(function(x){return '<label style="--pc:'+((PCOL[x[0]]))+'"><input type="checkbox" value="'+x[0]+'" class="hide"><i></i>'+x[1]+'</label>'}).join('')+'</div><div class="hint">'+t('Also used by the sales bot when it makes an account.')+'</div>'+
   '<div class="g3" style="margin-top:6px">'+stIn('def_gb','Volume (GB)','30','0 = unlimited','', 'number')+stIn('def_days','Days','30','','', 'number')+stIn('def_conns','Connections','1','','', 'number')+'</div>';
  case 'ntf':return stSw('tg_alerts','Server alerts','Telegram message to the bot admins when a node, tunnel server or tunnel goes offline, and when it is back.')+
   stSw('warn_on','Warn buyers','The buyer gets a message before his time or data runs out.')+stSw('backup_on','Daily backup to bot admins','An encrypted full backup is sent to the bot admins once a day.')+
@@ -3464,20 +3355,7 @@ function updateModal(){modal(mhead(t('Update')+' '+((S.me&&S.me.panel_name)||'')
  function chk(){$('#u_m').textContent=t('Checking…');api('GET','/api/update/check').then(function(r){$('#u_l').textContent=r.latest?'v'+r.latest:'—';$('#u_m').textContent=r.error?r.error:(r.available?t('A new version is available.'):t('You are on the latest version.'));$('#u_go').classList.toggle('hide',!r.available)}).catch(fail)}
  autoUpdWire();$('#u_chk').onclick=chk;$('#u_go').onclick=function(){this.disabled=true;api('POST','/api/update/apply').then(function(r){toast('v'+r.version+' ✓');setTimeout(function(){location.reload()},5000)}).catch(fail)};chk()}
 
-// ================================================================ v2.3: Kanki Panel
-Object.assign(ICO,{
- copy:'<rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/>',
- play:'<path d="M8 5.5v13l10.5-6.5z"/>',
- pause:'<path d="M8.5 5.5v13M15.5 5.5v13"/>',
- bot:'<rect x="4.5" y="8" width="15" height="11" rx="3.5"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1.2"/><circle cx="9.3" cy="13.2" r="1.2"/><circle cx="14.7" cy="13.2" r="1.2"/><path d="M9.5 16.5h5M2.5 12.5v3M21.5 12.5v3"/>',
- traffic:'<path d="M4 19.5h16"/><path d="M7 16v-5M11 16V7M15 16v-7.5M19 16V4.5"/>',
- ports:'<path d="M9 3.5v4.5M15 3.5v4.5"/><path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0z"/><path d="M12 17v3.5"/>',
- send:'<path d="M20.5 3.5L3.5 10.5l7 2.5 2.5 7z"/><path d="M10.5 13l5-5"/>',
- term:'<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M7.5 9.5l3 2.5-3 2.5M12.5 15h4"/>',
- gift:'<rect x="4" y="9" width="16" height="11" rx="2"/><path d="M4 13h16M12 9v11"/><path d="M12 9c-2.5 0-4.5-1-4.5-2.7S9.6 3.8 12 9zM12 9c2.5 0 4.5-1 4.5-2.7S14.4 3.8 12 9z"/>',
- card:'<rect x="3" y="6" width="18" height="12.5" rx="2.5"/><path d="M3 10.5h18M7 15h3.5"/>',
- globe:'<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.6 3.8 5.4 3.8 8.5S14.6 17.9 12 20.5C9.4 17.9 8.2 15.1 8.2 12S9.4 6.1 12 3.5z"/>',
- move:'<path d="M4 8h13.5l-3.5-3.5M20 16H6.5l3.5 3.5"/>'});
+// ==================================================================== dashboard, users, bot, chat, traffic, ports, tunnels
 
 // ---- built-in logo: a K made of one stem and two links that end in nodes
 function kLogo(){return '<svg class="klogo" viewBox="0 0 64 64" aria-hidden="true"><rect x="2.5" y="2.5" width="59" height="59" rx="17" fill="url(#gLbg)" stroke="url(#gGold)" stroke-width="2.2"/>'+
@@ -3559,7 +3437,6 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
  if(tab)show(tab)}
 
 // ---- Telegram sales bot page
-var BS_KEYS=['sales_on','warn_on','welcome','support','app_link','channel','trial_on','trial_gb','trial_days','ref_gb','ref_days','card_on','card_number','card_holder','np_on','np_key','np_coins','zp_on','zp_merchant','zp_callback','wallet_on','wallet_text','ton_address','usdt_address','usd_rate'];
 // ---- the Kanki app's install files: uploaded here, sent by the bot and offered on the subscription page
 function botApk(){var el=$('#bt_apk');if(!el)return;
  api('GET','/api/apps').then(function(r){var f=r.files||[];
@@ -3875,10 +3752,8 @@ function ptDraw(){var el=$('#pt');if(!el)return;var ns=S.nodes||[];if(!ns.some(f
 function ptCheck(n){toast(t('Checking…'));if(n.id=='local'){api('GET','/api/system').then(function(s){S.psys=s;ptDraw();toast(t('Done'))}).catch(fail);return}
  api('POST','/api/nodes/'+encodeURIComponent(n.id)+'/health').then(function(r){if(r.services){n.info=n.info||{};n.info.services=r.services}toast(r.ok?t('Done'):t('Offline'),!r.ok);ptDraw()}).catch(fail)}
 
-// ---------------------------------------------------------------- Kanki Tunnel (v2.4)
-ICO.tunnel='<path d="M3 19v-7a9 9 0 0 1 18 0v7"/><path d="M7.5 19v-6.5a4.5 4.5 0 0 1 9 0V19"/><path d="M1.5 19h21"/>';
+// ---------------------------------------------------------------- tunnels
 var TN={d:null};
-ICO.srv='<rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M12 6.5h5M12 17.5h5"/>';
 function tunLoad(){return api('GET','/api/tunnels').then(function(d){TN.d=d;return d})}
 // servers in two groups, inside Iran and abroad (a server without a location counts as abroad)
 var SRV_GROUPS=[['iran','Iran servers'],['abroad','Abroad servers']];
@@ -3903,7 +3778,7 @@ function tunCmd(s,d){var repo=(d&&d.repo)||'',panel=(d&&d.panel)||location.origi
  if(g&&g.panel_ip){pre=tunGreScript(g)+'\n';if(g.is_ip)panel='https://10.77.'+g.n+'.1'+(g.port?':'+g.port:'')}
  return pre+(repo?'KANKI_REPO='+repo+' ':'')+'KANKI_TUNNEL='+s.id+':'+s.token+' KANKI_PANEL='+panel+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'kankiturk8770/kanki-panel')+'/main/install.sh)'}
 
-// ---- the live map (v2.8.5, canvas): entries on one side, exits on the other.
+// ---- the live map (canvas): entries on one side, exits on the other.
 // Each connected tunnel is a glowing fibre: packets leave the entry plain, pass the lock in the middle
 // and arrive encrypted (tunnel colour); smaller return packets flow back. More traffic = more packets,
 // higher ping = slower packets. The animation keeps running between data refreshes.
@@ -4195,7 +4070,6 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   me.disabled=true;api('POST','/api/tunnels',b).then(function(){closeModal();toast(id?t('Saved: the tunnel restarts with the new settings'):t('The tunnel is made: it connects in a few seconds'));tunRefresh()}).catch(function(e){me.disabled=false;fail(e)})}}
 
 
-
 // ---- the tunnel form: live port check
 // what the servers themselves say is listening, shown while the ports are typed
 var PC={};
@@ -4351,45 +4225,29 @@ function tunDashWire(){if(!$('#tdc'))return;var go=function(){tunLoad().then(fun
   $('#tdc_s').textContent=tl.length?(up==tl.length?t('All tunnels connected'):N(tl.length-up)+' '+t('tunnel(s) not connected'))+' · '+N(up)+' / '+N(tl.length):t('No tunnels yet');
   var mh=tunMap(d,true),mb=$('#tdc_m');if(mb&&(!mb.querySelector('canvas')||mh.indexOf('<canvas')<0))mb.innerHTML=mh}).catch(function(){})};go();clearInterval(S.timer4);S.timer4=setInterval(function(){if(document.visibilityState=='visible')go()},5000)}
 
-KEXT();
-// start once every script below has run too (v37, look, skin, hub …): starting here raced them, and a
-// fast /api/me drew the panel before they loaded, so a refresh sometimes showed the old look
-function kankiStart(){applyLook();if(S.token)boot();else loginView()}
-if(document.readyState=='loading')document.addEventListener("DOMContentLoaded",kankiStart);else kankiStart();
-
-
-
-
-
 
 // ==================================================================== menu and sections
-// Kanki Panel 3.7: the new shell. Loaded after every other script, it changes the menu, the look and a
-// few pages without touching how they work:
-//  - a short, flat menu of sections; a section with several pages shows them as tabs at the top
-//    (VPN services: overview, KANKI MIX, Xray, Kanki DNS, Anti-DPI · Tunnels: tunnels, servers, ports ·
-//    Sales: bot, emergency chat · System: settings, backup, security)
-//  - the glass look (cards, buttons, menu, tabs) in dark and light
-//  - Servers: a grid of every server and the services it runs, with country flags
-//  - Tunnel servers: Iran and abroad apart, with flags
-//  - Smart channel: the Grok AI writer and the posting times
+// the shell: a short menu of sections; a section with several pages shows them as tabs at the top.
+// Also here: country flags, the AI writer of the smart channel, moving the panel to a new server.
 (function(){
 'use strict';
 
 // ---------------------------------------------------------------- sections and menu
-// [section key, label, icon, [[page, sub page, tab label], ...]]
+// [section key, label, icon, [[page, sub page, tab label], ...], menu group]
 var SECS=[
- ['dash','Dashboard','dash',[['dash','','Dashboard']]],
- ['users','Users','users',[['users','','Users']]],
- ['nodes','Servers','nodes',[['nodes','','Servers']]],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','','Xray'],['dns','','Kanki DNS'],['antidpi','','Anti-DPI']]],
- ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels'],['servers','','Tunnel servers'],['ports','','Ports']]],
- ['salesec','Sales & support','bot',[['bot','','Sales bot'],['emergency','','Emergency chat']]],
- ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']]],
- ['syssec','System','settings',[['settings','','Settings'],['backup','','Backup'],['security','','Security']]]];
+ ['dash','Dashboard','dash',[['dash','','Dashboard']],'Home'],
+ ['users','Users','users',[['users','','Users']],'Customers'],
+ ['bot','Sales bot','bot',[['bot','','Sales bot']],'Customers'],
+ ['emergency','Emergency chat','sos',[['emergency','','Emergency chat']],'Customers'],
+ ['nodes','Servers','nodes',[['nodes','','Servers']],'Servers & network'],
+ ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
+ ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
+ ['vpnsec','Cores','cores',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
+ ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
+ ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
 function secOf(p){for(var i=0;i<SECS.length;i++)if(SECS[i][3].some(function(x){return x[0]==p}))return SECS[i];return SECS[0]}
 window.V37={secOf:secOf,SECS:SECS,watchPg:watchPg,drawSecTabs:drawSecTabs};
 
-// the old menu groups become plain links to the first page of each section
 
 // the tabs of the section, always the first thing of the page
 function secTabsHtml(p){var s=secOf(p);if(s[3].length<2)return '';
@@ -4410,170 +4268,23 @@ function flag(cc){cc=String(cc||'').toUpperCase();if(!/^[A-Z]{2}$/.test(cc))retu
  return '<span class="flg" title="'+cc+'">'+String.fromCodePoint(0x1F1E6+cc.charCodeAt(0)-65,0x1F1E6+cc.charCodeAt(1)-65)+'</span>'}
 window.flagOf=flag;
 
-// tunnel servers: the flag of each one (Iran and abroad are already apart)
-
-// ---------------------------------------------------------------- Servers: the grid of every server
-function svcCell(on,label,sub,act,cls){return '<button type="button" class="svcell '+(cls||(on?'ok':'no'))+'" '+(act?'onclick="'+act+'"':'disabled')+'><b>'+label+'</b><small>'+sub+'</small></button>'}
-function nodeGrid(){var el=$('#v37grid');if(!el)return;var ns=S.nodes||[],xr=(window.XR&&XR.d)||null,dn=(window.DN&&DN.d)||null,tn=(window.TN&&TN.d)||null;
- var rows=[];
- ns.forEach(function(n){var i=n.info||{},sv={};(i.services||[]).forEach(function(s){sv[s.key]=s});
-  var st=function(key,port){var s=sv[key];if(!port&&!s)return null;return {on:!!(s?s.active:port),port:port}};
-  rows.push({id:n.id,name:n.name,cc:n.cc,kind:'node',online:n.id=='local'||n.online,
-   wg:st('wireguard',i.wg_port),awg:st('amneziawg',i.awg_port),hy2:st('hysteria2',i.hy2_port),kmix:i.kmix_port?{on:i.kmix_active!==false,port:i.kmix_port}:null})});
- // agent servers (Iran / abroad) that run Xray, Kanki DNS or tunnels
- var tsv=(tn&&tn.servers)||[];
- tsv.forEach(function(s){var r=rows.filter(function(x){return x.id==s.id})[0];if(!r){r={id:s.id,name:s.name,cc:s.cc,kind:'agent',online:s.online,loc:s.loc};rows.push(r)}else{r.cc=r.cc||s.cc;r.loc=s.loc}
-  r.tun=((tn&&tn.tunnels)||[]).filter(function(x){return x.entry==s.id||x.exit==s.id}).length});
- if(xr)(xr.servers||[]).forEach(function(x){var r=rows.filter(function(y){return y.id==x.server})[0];if(!r)return;var ib=(xr.inbounds||[]).filter(function(i){return i.server==x.server});r.xray={n:ib.length,on:!!(x.status&&x.status.active)}});
- if(dn)(dn.servers||[]).forEach(function(x){var r=rows.filter(function(y){return y.id==x.server})[0];if(!r)return;r.dns={role:x.role,on:!!(x.status&&x.status.active)}});
- var vpnRow=function(r,k,label){var v=r[k];var act=r.kind=='node'?(k=='kmix'?"location.hash='#kmix'":"v37NodeMenu('"+esc(r.id)+"')"):'';
-  return v?svcCell(v.on,label,v.port?'UDP '+N(v.port):t(v.on?'on':'off'),act,v.on?'ok':'bad'):svcCell(false,label,r.kind=='node'?t('not installed'):'—','', 'no')};
- // 3.8: one card per server with everything that runs on it, and filters (all, abroad, Iran, DNS)
- var isIr=function(r){return r.loc=='iran'||String(r.cc||'').toUpperCase()=='IR'};
- var fl={all:function(){return true},abroad:function(r){return !isIr(r)},iran:isIr,dns:function(r){return !!r.dns}};
- if(!fl[GF])GF='all';
- var chips='<div class="sgf">'+[['all','All'],['abroad','Abroad'],['iran','Iran'],['dns','DNS']].map(function(f){
-  return '<button type="button" class="'+(GF==f[0]?'on':'')+'" onclick="v37GF(\''+f[0]+'\')">'+t(f[1])+' <b>'+N(rows.filter(fl[f[0]]).length)+'</b></button>'}).join('')+'</div>';
- var cards=rows.filter(fl[GF]).map(function(r){
-  var roles=[];if(r.id=='local')roles.push(t('Main'));if(r.kind=='node')roles.push(t('VPN server'));if(r.tun)roles.push(t('Tunnels')+' · '+N(r.tun));
-  if(r.dns)roles.push(t(r.dns.role=='relay'?'DNS relay':'DNS exit'));if(r.xray)roles.push('Xray');
-  var cells=(r.kind=='node'?vpnRow(r,'wg','WireGuard')+vpnRow(r,'awg','AmneziaWG')+vpnRow(r,'hy2','Hysteria2')+vpnRow(r,'kmix','KANKI MIX'):['wg','awg','hy2','kmix'].filter(function(k){return r[k]}).map(function(k){return vpnRow(r,k,({wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',kmix:'KANKI MIX'})[k])}).join(''))+
-   (r.xray?svcCell(r.xray.on,'Xray',N(r.xray.n)+' '+t('inbounds'),"location.hash='#xray'",r.xray.on?'ok':'bad'):'')+
-   (r.dns?svcCell(r.dns.on,'DNS',t(r.dns.role=='relay'?'relay':'exit'),"location.hash='#dns/servers'",r.dns.on?'ok':'bad'):'')+
-   (r.tun!=null?svcCell(r.tun>0,t('Tunnels'),N(r.tun),"location.hash='#tunnels'",r.tun>0?'ok':'no'):'');
-  return '<div class="sgc"><div class="sgn"><span class="dot '+(r.online?'g':'r')+'"></span>'+flag(r.cc)+'<b>'+esc(r.name)+'</b><small>'+(isIr(r)?t('Iran'):t('Abroad'))+'</small></div>'+
-   '<div class="sgr2">'+roles.map(function(x){return '<span>'+esc(x)+'</span>'}).join('')+'</div>'+
-   (cells?'<div class="sgcells">'+cells+'</div>':'<p class="sub" style="margin:0">'+t('No service on this server yet')+'</p>')+'</div>'}).join('');
- el.innerHTML='<div class="nh"><div><h3>'+ic('nodes',16)+' '+t('Every server and what runs on it')+'</h3><p class="sub" style="margin:0">'+t('Press a service to open its settings')+'</p></div></div>'+chips+
-  '<div class="sgcards">'+(cards||'<p class="sub">'+t('No server here')+'</p>')+'</div>'}
-var GF='all';
-window.v37GF=function(f){GF=f;nodeGrid()};
-// the actions of one VPN server, from the grid
-window.v37NodeMenu=function(id){var n=(S.nodes||[]).filter(function(x){return x.id==id})[0];if(!n)return;var i=n.info||{},e=esc(id);
- modal(mhead(n.name,flag(n.cc))+
-  '<div class="list">'+[['WireGuard',i.wg_port],['AmneziaWG',i.awg_port],['Hysteria2',i.hy2_port],['KANKI MIX',i.kmix_port]].map(function(x){return '<div class="li"><span>'+x[0]+'</span><span class="ltr">'+(x[1]?'UDP '+esc(String(x[1])):'—')+'</span></div>'}).join('')+'</div>'+
-  '<div class="g2" style="margin-top:12px"><button class="btn" onclick="closeModal();nAct(\''+e+'\',\'repair\')">↻ '+t('Repair')+'</button><button class="b2" onclick="closeModal();nHealth(\''+e+'\')">♡ '+t('Health')+'</button>'+
-  '<button class="b2" onclick="closeModal();nAct(\''+e+'\',\'sync\')">⇄ '+t('Sync')+'</button>'+(window.nodePorts?'<button class="b2" onclick="closeModal();nodePorts(\''+e+'\')">'+ic('ports',15)+' '+t('Ports')+'</button>':'<a class="b2" href="#ports" onclick="closeModal()">'+ic('ports',15)+' '+t('Ports')+'</a>')+'</div>')};
-
-
-
 
 // ---------------------------------------------------------------- the look
-var css=`
-body.v37{--g1:rgba(255,255,255,.055);--g2:rgba(255,255,255,.018);--gb:rgba(255,255,255,.085);--gb2:rgba(255,255,255,.14);--gl:inset 0 1px 0 rgba(255,255,255,.07);--blur:saturate(150%) blur(18px)}
-body.v37.light{--g1:rgba(255,255,255,.82);--g2:rgba(255,255,255,.55);--gb:rgba(120,90,30,.14);--gb2:rgba(120,90,30,.24);--gl:inset 0 1px 0 rgba(255,255,255,.9)}
-body.v37:before{background:radial-gradient(1100px 620px at 105% -10%,color-mix(in srgb,var(--a) 16%,transparent),transparent 65%),radial-gradient(900px 600px at -10% 110%,color-mix(in srgb,var(--info) 9%,transparent),transparent 65%),radial-gradient(700px 500px at 50% 120%,color-mix(in srgb,var(--a) 7%,transparent),transparent 70%)!important}
-/* glass surfaces */
-body.v37 .card,body.v37 .kv>div,body.v37 .ibc,body.v37 .secc{background:linear-gradient(160deg,var(--g1),var(--g2)),color-mix(in srgb,var(--c2) 70%,transparent)!important;border:1px solid var(--gb)!important;box-shadow:var(--gl),0 18px 44px -26px rgba(0,0,0,.8)!important;border-radius:20px}
-body.v37.light .card,body.v37.light .kv>div,body.v37.light .ibc,body.v37.light .secc{box-shadow:var(--gl),0 14px 34px -22px rgba(90,60,10,.35)!important}
-body.v37 header.top{background:color-mix(in srgb,var(--bg1) 62%,transparent)!important;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border-bottom:1px solid var(--gb)!important}
-body.v37 nav.side{background:linear-gradient(180deg,color-mix(in srgb,var(--c1) 82%,transparent),color-mix(in srgb,var(--c2) 88%,transparent))!important;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border-inline-end:1px solid var(--gb)!important}
-body.v37 .mbox{background:linear-gradient(160deg,var(--g1),var(--g2)),color-mix(in srgb,var(--c2) 92%,transparent)!important;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--gb2)!important;border-radius:22px!important}
-/* buttons: gold glass and frosted glass */
-body.v37 .btn{position:relative;overflow:hidden;border-radius:14px!important;background:linear-gradient(135deg,var(--al) 0%,var(--a) 42%,var(--ad) 100%)!important;color:#1a1206!important;border:1px solid color-mix(in srgb,var(--al) 60%,transparent)!important;
- box-shadow:inset 0 1px 0 rgba(255,255,255,.6),inset 0 -2px 6px rgba(120,80,10,.35),0 10px 24px -10px color-mix(in srgb,var(--a) 85%,transparent)!important;transition:transform .12s,box-shadow .2s,filter .2s}
-body.v37 .btn:before{content:"";position:absolute;inset:0 0 50% 0;background:linear-gradient(180deg,rgba(255,255,255,.45),rgba(255,255,255,0));pointer-events:none;border-radius:inherit}
-body.v37 .btn:after{content:"";position:absolute;top:-50%;bottom:-50%;width:40%;left:-60%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-20deg);transition:left .6s;pointer-events:none}
-body.v37 .btn:hover:not(:disabled):after{left:130%}
-body.v37 .btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.05)}
-body.v37 .btn:active:not(:disabled){transform:translateY(0) scale(.98)}
-body.v37 .b2,body.v37 .ib,body.v37 .sb{background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.025))!important;border:1px solid var(--gb2)!important;border-radius:13px!important;
- box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 6px 16px -10px rgba(0,0,0,.7)!important;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:transform .12s,border-color .15s,background .15s}
-body.v37.light .b2,body.v37.light .ib,body.v37.light .sb{background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(255,255,255,.6))!important;box-shadow:inset 0 1px 0 #fff,0 4px 12px -8px rgba(90,60,10,.4)!important}
-body.v37 .b2:hover:not(:disabled),body.v37 .ib:hover{border-color:color-mix(in srgb,var(--a) 65%,transparent)!important;transform:translateY(-1px)}
-body.v37 .b2.bd{color:var(--bad)}body.v37 .b2.bd:hover{border-color:color-mix(in srgb,var(--bad) 60%,transparent)!important;background:color-mix(in srgb,var(--bad) 10%,transparent)!important}
-body.v37 input,body.v37 select,body.v37 textarea{background:color-mix(in srgb,var(--bg1) 45%,transparent)!important;border:1px solid var(--gb2)!important;border-radius:13px!important}
-body.v37.light input,body.v37.light select,body.v37.light textarea{background:rgba(255,255,255,.75)!important}
-/* menu */
-body.v37 nav.side a{border-radius:13px}
-body.v37 nav.side a .nsc{margin-inline-start:auto;font-style:normal;font-size:10.5px;font-weight:800;padding:1px 7px;border-radius:9px;background:var(--in);color:var(--s)}
-body.v37 nav.side a.on .nsc{background:color-mix(in srgb,var(--a) 22%,transparent);color:var(--t)}
-body.v37 .snav{display:flex;flex-direction:column;gap:3px}
-/* section tabs */
-.sectabs{position:sticky;top:64px;z-index:5;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px;padding:8px 10px;border-radius:18px;border:1px solid var(--gb2);
- background:linear-gradient(160deg,var(--g1),var(--g2)),color-mix(in srgb,var(--bg1) 70%,transparent);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--gl),0 14px 30px -20px rgba(0,0,0,.8)}
-.sectabs .sth2{display:flex;align-items:center;gap:8px;padding-inline:4px}
-.sectabs .sth2 b{font-size:14px}
-.sectabs .sti{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;color:#1a1206;background:linear-gradient(145deg,var(--al),var(--a),var(--ad))}
-.sectabs .stl{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;flex:1;padding:3px;border-radius:14px;background:color-mix(in srgb,var(--bg1) 40%,transparent);border:1px solid var(--gb)}
-.sectabs .stl a{flex:none;padding:8px 15px;border-radius:11px;color:var(--s);font-weight:800;font-size:13px;text-decoration:none;white-space:nowrap;transition:background .15s,color .15s}
-.sectabs .stl a:hover{color:var(--t);background:var(--in)}
-.sectabs .stl a.on{color:#1a1206;background:linear-gradient(135deg,var(--al),var(--a) 50%,var(--ad));box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 6px 16px -8px color-mix(in srgb,var(--a) 80%,transparent)}
-@media(max-width:899px){.sectabs{top:110px}}
-@media(max-width:620px){.sectabs .sth2{display:none}.sectabs{padding:6px}}
-body.v37 .ptabs a.on,body.v37 .seg button.on,body.v37 .segl button.on{background:linear-gradient(135deg,var(--al),var(--a) 50%,var(--ad))!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.55)}
-/* phones: a wide strip (tabs, settings sections, tables) scrolls inside itself and never makes the
-   whole page wider than the screen (that pulled the hidden menu into view) */
-@media(max-width:900px){.stw{grid-template-columns:minmax(0,1fr)!important}.stw>*,.g2>*,.g3>*,.g4>*,.kv>*{min-width:0}}
-html,body{overflow-x:clip;max-width:100%}
-@media(max-width:480px){.vrow .nm b{white-space:normal;overflow:visible}}
-body.v37 main{min-width:0;max-width:100vw}
-@media(max-width:899px){body.v37 main{overflow-x:clip}}
-/* flags */
-.flg{font-size:1.05em;line-height:1;display:inline-block;vertical-align:-1px;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}.flg.nf{opacity:.55}
-/* servers grid */
-.v37grid .sgw{overflow-x:auto;margin-top:12px}
-.svgrid{display:grid;grid-template-columns:minmax(170px,1.4fr) repeat(7,minmax(92px,1fr));gap:6px;min-width:860px}
-.sgh,.sgr{display:contents}
-.sgh span{font-size:11px;font-weight:800;color:var(--s);padding:2px 6px;text-align:center}
-.sgh span:first-child{text-align:start}
-.sgn{display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:13px;background:var(--in);border:1px solid var(--gb);min-width:0}
-.sgn b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sgn small{color:var(--s);font-size:10.5px;margin-inline-start:auto}
-.svcell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:7px 4px;border-radius:13px;border:1px solid var(--gb);background:var(--in);color:var(--t);font:inherit;cursor:pointer;transition:transform .12s,border-color .15s}
-.svcell b{font-size:11.5px}.svcell small{font-size:10.5px;color:var(--s)}
-.svcell.ok{border-color:color-mix(in srgb,var(--ok) 45%,transparent);background:color-mix(in srgb,var(--ok) 9%,transparent)}
-.svcell.bad{border-color:color-mix(in srgb,var(--bad) 50%,transparent);background:color-mix(in srgb,var(--bad) 9%,transparent)}
-.svcell.no{opacity:.45;cursor:default}
-.svcell:not(:disabled):hover{transform:translateY(-1px);border-color:var(--a)}
-/* tunnel transports in three columns */
-.trcols{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.trcol{border:1px solid var(--gb);border-radius:16px;padding:8px;background:var(--in)}
-.trcol .trgl{margin:2px 4px 8px!important}
-.trcol .tropt{display:flex!important;flex-direction:column;gap:6px}
-.trc0 .trgl{color:var(--info)!important}.trc1 .trgl{color:var(--ok)!important}.trc2 .trgl{color:var(--a)!important}
-@media(max-width:820px){.trcols{grid-template-columns:1fr}}
-/* KANKI MIX second config */
-.km2 .chk span small{display:block;margin-top:2px}
-.aikey{-webkit-text-security:disc}.aikey:focus{-webkit-text-security:none}
-.km2{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;width:100%;margin-top:6px;padding:8px 10px;border-radius:12px;border:1px dashed var(--gb2)}
-`;
-var st=document.createElement('style');st.id='v37css';st.textContent=css;document.head.appendChild(st);
 
-// the panel may already have drawn itself before this script ran
-if(window.S&&S.me&&$('#app header.top')){shell();route()}
 })();
 
 // ==================================================================== phone bar, night/day
-// Kanki Panel 3.8: the AMOLED look. Loaded after kanki-v37.js, it changes how the panel looks and how
-// the menu is grouped, never how a page works:
-//  - pure black (night) and pure white (day) from one button in the top bar; the colors in Settings
-//  - 3D glass buttons with a soft moving shine
-//  - the menu in groups of things that belong together (customers, servers and network, services,
-//    reports, system); Servers and Tunnel servers are tabs of one section
-//  - phones: a tab bar at the bottom (home, users, servers, services, more) and a sheet with the rest
-//  - the dashboard gets a row of quick actions
+// the look: night (pure black) and day (pure white) from one button in the top bar, the menu in
+// groups, and on phones a bar of every section at the bottom.
 (function(){
 'use strict';
-var V=window.V37;if(!V)return;
+var V=V37;
 
 // ---------------------------------------------------------------- menu: groups of what belongs together
 // [section key, label, icon, [[page, sub page, tab label], ...], group]
-var SECS=[
- ['dash','Dashboard','dash',[['dash','','Dashboard']],'Home'],
- ['users','Users','users',[['users','','Users']],'Customers'],
- ['bot','Sales bot','bot',[['bot','','Sales bot']],'Customers'],
- ['emergency','Emergency chat','sos',[['emergency','','Emergency chat']],'Customers'],
- ['nodes','Servers','nodes',[['nodes','','Servers'],['servers','','Tunnel servers']],'Servers & network'],
- ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
- ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','','Xray'],['antidpi','','Anti-DPI']],'Services'],
- ['dnssec','Kanki DNS','dns',[['dns','','Kanki DNS']],'Services'],
- ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
- ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
-V.SECS.length=0;SECS.forEach(function(s){V.SECS.push(s)});
-function secBy(k){for(var i=0;i<SECS.length;i++)if(SECS[i][0]==k)return SECS[i];return SECS[0]}
+var DNSSEC=['dnssec','Kanki DNS','dns',[['dns','','Kanki DNS']],'Services'];
+function secBy(k){if(k=='dnssec')return DNSSEC;for(var i=0;i<V.SECS.length;i++)if(V.SECS[i][0]==k)return V.SECS[i];return V.SECS[0]}
 window.grpOf=function(p){return V.secOf(p)[4]||''};
-ICO.more38='<circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/>';
 
 
 // phones: every section in the bottom bar, swiped sideways, in this order from the right
@@ -4582,117 +4293,23 @@ window.navBar=function(){
  return '<div class="mbar k38bar k39bar" id="mbar">'+BAR.map(function(b){var s=secBy(b[0]),f=s[3][0];
   return '<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'">'+ic(s[2],21)+'<span>'+t(b[1])+'</span></a>'}).join('')+'</div>'+
   '<div class="k38scrim" id="k38scrim" onclick="k38More(0)"></div><div class="msheet k38sheet" id="msheet"></div>'};
-function sheetHtml(){var g='',h='<i class="k38grab"></i>',open=false;
- SECS.forEach(function(s){if(s[4]!=g){if(open)h+='</div>';g=s[4];h+='<div class="k38g">'+t(g)+'</div><div class="k38tiles">';open=true}var f=s[3][0];
-  h+='<a class="k38tile'+(V.secOf(S.page)[0]==s[0]?' on':'')+'" href="#'+f[0]+'">'+ic(s[2],22)+'<span>'+t(s[1])+'</span></a>'});
- return h+(open?'</div>':'')}
 
 
 // ---------------------------------------------------------------- night / day in the top bar
-// (3.9.3) The top bar has only one button: night or day. The panel's colors are chosen in Settings ›
+// The top bar has only one button: night or day. The panel's colors are chosen in Settings ›
 // Look, not in the bar.
-ICO.sun38='<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>';
 function drawLooks(){var b=$('#thm');if(!b)return;var night=(S.theme||'dark')!='light';
  b.innerHTML=ic(night?'sun38':'moon',17)+'<span>'+t(night?'Day':'Night')+'</span>';b.title=t(night?'Day':'Night');b.setAttribute('aria-label',b.title);b.classList.add('k38dn')}
 V.drawLooks=drawLooks;
 
-// ---------------------------------------------------------------- dashboard: quick actions
-if(window.pDash){}
 
 // ---------------------------------------------------------------- the look
-var css=`
-html:has(body.k38){background:#000}html:has(body.k38.light){background:#fff}
-body.k38{--bg1:#000;--bg2:#000;--c1:#0b0b0b;--c2:#090909;--in:rgba(255,255,255,.045);--ln:rgba(255,255,255,.09);--ln2:rgba(255,255,255,.07);--t:#f5f5f2;--s:#a3a39b;
- --g1:rgba(255,255,255,.035);--g2:rgba(255,255,255,.012);--gb:rgba(255,255,255,.085);--gb2:rgba(255,255,255,.15);--gl:inset 0 1px 0 rgba(255,255,255,.06);--on:#140f00;background:#000!important}
-body.k38.light{--bg1:#fff;--bg2:#fff;--c1:#fff;--c2:#f7f7f5;--in:rgba(10,10,10,.035);--ln:rgba(10,10,10,.1);--ln2:rgba(10,10,10,.07);--t:#0a0a0a;--s:#5c5c56;
- --g1:#fff;--g2:#fbfbfa;--gb:rgba(10,10,10,.09);--gb2:rgba(10,10,10,.16);--gl:inset 0 1px 0 #fff;background:#fff!important}
-body.k38:not([class*="c-"]){--a:#f5c518;--al:#ffe066;--ad:#d19a00}
-body.k38.light:not([class*="c-"]){--a:#f2b705;--al:#ffd84d;--ad:#8f6800}
-body.k38.c-violet{--a:#9d63ff;--al:#c7a3ff;--ad:#7236f0;--on:#fff}
-body.k38.light.c-violet{--a:#8b4dff;--al:#b48bff;--ad:#5b21d6}
-body.k38:before{background:radial-gradient(900px 420px at 100% -8%,color-mix(in srgb,var(--a) 7%,transparent),transparent 70%)!important}
-body.k38:after{display:none!important}
-/* surfaces: flat AMOLED cards with a thin edge */
-body.k38 .card,body.k38 .kv>div,body.k38 .ibc,body.k38 .secc{background:var(--c1)!important;border:1px solid var(--gb)!important;box-shadow:var(--gl)!important;border-radius:18px}
-body.k38.light .card,body.k38.light .kv>div,body.k38.light .ibc,body.k38.light .secc{box-shadow:0 1px 2px rgba(0,0,0,.04),0 10px 26px -18px rgba(0,0,0,.18)!important}
-body.k38 nav.side{background:var(--c1)!important;border-inline-end:1px solid var(--gb)!important}
-body.k38 header.top{background:color-mix(in srgb,var(--bg1) 80%,transparent)!important}
-body.k38 .mbox{background:var(--c1)!important}
-/* 3D glass buttons */
-body.k38 .btn{color:var(--on)!important;border:1px solid var(--ad)!important;background:linear-gradient(180deg,var(--al) 0%,var(--a) 48%,var(--ad) 100%)!important;
- box-shadow:inset 0 1px 0 rgba(255,255,255,.6),inset 0 -3px 0 rgba(0,0,0,.16),0 8px 22px -8px color-mix(in srgb,var(--a) 70%,transparent),0 2px 0 var(--ad)!important}
-body.k38 .btn:before{inset:1px 1px 50% 1px;border-radius:13px 13px 40% 40%/13px 13px 10px 10px;background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(255,255,255,.04))}
-body.k38 .btn:after{left:auto;right:-60%;transition:none;animation:k38sheen 4.2s ease-in-out infinite}
-body.k38 .btn:hover:not(:disabled):after{left:auto}
-body.k38 .btn:active:not(:disabled){transform:translateY(2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.4),inset 0 -1px 0 rgba(0,0,0,.2),0 3px 10px -4px color-mix(in srgb,var(--a) 60%,transparent)!important}
-@keyframes k38sheen{0%,62%{right:-60%}100%{right:130%}}
-body.k38 .b2,body.k38 .ib,body.k38 .sb{position:relative;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.03) 55%)!important;
- box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -2px 0 rgba(0,0,0,.5),0 6px 16px -10px rgba(0,0,0,.8)!important}
-body.k38.light .b2,body.k38.light .ib,body.k38.light .sb{background:linear-gradient(180deg,#fff,#f3f3f1)!important;box-shadow:inset 0 1px 0 #fff,inset 0 -2px 0 rgba(0,0,0,.06),0 4px 12px -8px rgba(0,0,0,.25)!important}
-body.k38 .b2:active:not(:disabled),body.k38 .ib:active{transform:translateY(1px)}
-body.k38 .sectabs .sti,body.k38 .sectabs .stl a.on,body.k38 .ptabs a.on,body.k38 .seg button.on,body.k38 .segl button.on{color:var(--on)!important}
-body.k38 .sectabs{background:color-mix(in srgb,var(--bg1) 82%,transparent)}
-body.k38 input:focus,body.k38 select:focus,body.k38 textarea:focus{border-color:var(--a)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--a) 18%,transparent)!important}
-@media(prefers-reduced-motion:reduce){body.k38 .btn:after{animation:none;display:none}}
-/* menu groups */
-body.k38 nav.side .ngt{font-size:11px;font-weight:800;color:var(--s);padding:12px 12px 4px;letter-spacing:.2px}
-body.k38 nav.side .ngt:first-child{padding-top:2px}
-body.k38 nav.side a.on{background:linear-gradient(180deg,color-mix(in srgb,var(--a) 16%,transparent),color-mix(in srgb,var(--a) 4%,transparent))!important;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--a) 22%,transparent)}
-/* the four looks in the top bar */
-body.k38 #thm.k38dn{display:inline-flex;align-items:center;gap:6px;width:auto;padding:0 12px;font:inherit;font-size:12px;font-weight:700}
-@media(max-width:620px){body.k38 #thm.k38dn span{display:none}body.k38 #thm.k38dn{padding:0;width:38px;justify-content:center}}
-/* dashboard quick actions */
-.k38qa{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px;padding:12px 14px;border-radius:18px;border:1px solid var(--gb);background:var(--c1)}
-.k38qa>b{font-size:13.5px}.k38qb{display:flex;gap:8px;flex-wrap:wrap;flex:1;justify-content:flex-end}
-.k38qb .btn,.k38qb .b2{display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:var(--t)}
-/* servers: one card per server */
-.sgf{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
-.sgf button{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border-radius:11px;border:1px solid var(--gb);background:var(--in);color:var(--t);font:inherit;font-weight:700;font-size:12.5px;cursor:pointer}
-.sgf button b{font-size:11px;color:var(--s)}
-.sgf button.on{color:var(--on);border-color:var(--ad);background:linear-gradient(180deg,var(--al),var(--a));box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 4px 12px -6px color-mix(in srgb,var(--a) 70%,transparent)}
-.sgf button.on b{color:var(--on);opacity:.7}
-.sgcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));align-items:start;gap:12px;margin-top:12px}
-.sgc{display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:16px;border:1px solid var(--gb);background:var(--in);min-width:0}
-.sgc .sgn{background:transparent;border:0;padding:0}
-.sgr2{display:flex;gap:5px;flex-wrap:wrap}
-.sgr2 span{font-size:11px;font-weight:700;padding:2px 8px;border-radius:7px;background:var(--c1);border:1px solid var(--gb);color:var(--s)}
-.sgcells{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px}
-/* phones: bottom tab bar and a sheet with the rest */
-@media(max-width:899px){
- body.k38 .mbar.k38bar{position:fixed;top:auto;bottom:0;left:0;right:0;z-index:40;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scroll-snap-type:x proximity;touch-action:pan-x;gap:2px;padding:6px max(10px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px));
-  background:color-mix(in srgb,var(--c1) 90%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--gb);border-bottom:0}
- body.k38 .mbar.k38bar a,body.k38 .mbar.k38bar button{flex:0 0 auto;min-width:72px;scroll-snap-align:start;white-space:nowrap;flex-direction:column;gap:2px;justify-content:center;padding:6px 8px;border:0;background:transparent;color:var(--s);font-size:10.5px;border-radius:12px}
- body.k38 .mbar.k38bar svg{color:inherit}
- body.k38 .mbar.k38bar .on{color:var(--a);background:transparent}
- body.k38.light .mbar.k38bar .on{color:var(--ad)}
- body.k38 .mbar.k38bar .on svg{color:inherit;filter:drop-shadow(0 2px 6px color-mix(in srgb,var(--a) 60%,transparent))}
- body.k38 main{padding-bottom:calc(90px + env(safe-area-inset-bottom,0px))!important}
- body.k38 .sectabs{top:64px}
- .k38scrim.on{display:block;position:fixed;inset:0;z-index:44;background:rgba(0,0,0,.5)}
- body.k38 .msheet.k38sheet{top:auto;bottom:0;left:0;right:0;inset-inline:0;z-index:45;max-height:80vh;border:1px solid var(--gb2);border-bottom:0;border-radius:22px 22px 0 0;background:var(--c1);
-  padding:12px max(16px,env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
-}
-@media(max-width:560px){body.k38 .sectabs{top:56px}}
-.k38scrim{display:none}
-.k38grab{display:block;width:44px;height:5px;border-radius:5px;background:var(--gb2);margin:0 auto 10px}
-.k38g{font-size:11px;font-weight:800;color:var(--s);margin:10px 2px 6px}
-.k38tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.k38tile{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px;border-radius:14px;background:var(--in);border:1px solid var(--gb);color:var(--t);text-decoration:none;font-size:11.5px;font-weight:700;text-align:center}
-.k38tile svg{color:var(--a)}body.k38.light .k38tile svg{color:var(--ad)}
-.k38tile.on{border-color:var(--a);box-shadow:inset 0 0 0 1px var(--a)}
-@media(max-width:620px){body.k38 header.top .segl{display:none}.k38qb{justify-content:flex-start}}
-`;
-var st=document.createElement('style');st.id='k38css';st.textContent=css;document.head.appendChild(st);
 })();
 
 // ==================================================================== Servers
-// Kanki Panel 3.9: Servers — one list, one kind of server.
-// 3.9.3: two boxes (abroad, Iran) of compact rows; a row's arrow opens it (one open at a time) with all
-// of the server's own settings. Its VPN ports and protocols are in VPN services (svc.js).
-// The panel runs on one server; every other server is a node of it, added with ONE command that
-// installs everything (VPN, tunnels, Xray, Kanki DNS). What a server runs is switched on here.
-// Loaded after every other script: it replaces the old Servers page (VPN nodes, tunnel servers, Xray
-// and DNS servers in separate lists) and the separate "Tunnel servers" page.
+// Servers: two boxes (abroad, Iran) of compact rows; a row's arrow opens all of that server's settings
+// (one at a time). The panel runs on one server; every other server is added with ONE command that
+// installs everything (VPN, tunnels, Xray, Kanki DNS), and what it runs is switched on here.
 (function(){
 'use strict';
 
@@ -4700,63 +4317,8 @@ var SV={d:null,wait:null};
 window.SV=SV;
 
 // ---------------------------------------------------------------- look
-(function(){var st=document.createElement('style');st.textContent=
- '.kxp-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.kxp-top .sp{flex:1}'+
- '.kxtun{margin-top:8px;border:1px solid var(--ln);border-radius:12px;padding:8px 10px}'+
- '.kxtun-p{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;font-size:12px;padding:4px 0;border-bottom:1px dashed color-mix(in srgb,var(--ln) 60%,transparent)}.kxtun-p:last-child{border:0}'+
- '.kxtun-p b{font-weight:700}.kxtun-m{margin-inline-start:auto;color:var(--s);overflow-wrap:anywhere;text-align:left}'+
- '.kxtun-w{font-size:12px;color:var(--warn);margin:8px 2px 0}'+
- '.kxc-tag{font-size:11px;border:1px solid var(--ln);border-radius:8px;padding:1px 7px;color:var(--s);white-space:nowrap;font-weight:600}'+
- '.kxc-tag.main{color:var(--a);border-color:color-mix(in srgb,var(--a) 55%,transparent)}'+
- '.kxc-tag.tun{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}'+
- '.kxc-miss{border:1px dashed color-mix(in srgb,var(--warn) 60%,transparent);border-radius:12px;padding:8px 10px;margin:8px 0 0;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}'+
- '.kxc-miss span{flex:1;min-width:150px}.kxc-miss pre{width:100%;margin:6px 0 0;white-space:pre-wrap;font-size:11px;max-height:140px;overflow:auto;direction:ltr;text-align:left;background:var(--in);border-radius:8px;padding:6px}'+
- '.kxp-clash{border:1px solid color-mix(in srgb,var(--warn) 55%,transparent);border-radius:16px;padding:12px;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}'+
- '.kxp-clash div{flex:1;min-width:220px;font-size:12px}.kxp-clash b{color:var(--warn)}'+
- '.kxp-steps{display:grid;gap:6px;margin-top:10px}.kxp-steps div{display:flex;gap:8px;align-items:center;font-size:13px}'+
- '.kxp-ports{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.kxp-ports span{border:1px solid var(--ln);border-radius:8px;padding:2px 8px;font-size:12px;direction:ltr}'+
- '.kxseg{display:grid;grid-template-columns:1fr 1fr;gap:6px}'+
- '.modal{z-index:60!important}#toast{z-index:70!important}'+
- // boxes (abroad, Iran) of compact rows; one row open at a time
- '.kxbox{border:1px solid var(--ln);border-radius:18px;background:color-mix(in srgb,var(--c1) 55%,transparent);padding:10px;margin:0 0 12px;max-width:980px}'+
- '.kxbox-h{display:flex;align-items:center;gap:8px;padding:2px 4px 8px}.kxbox-h b{font-size:14px}.kxbox-h small{color:var(--s);font-size:12px;border:1px solid var(--ln);border-radius:999px;padding:0 8px}.kxbox-h .sp{flex:1}'+
- '.kxbox-i{display:inline-flex;width:26px;height:26px;border-radius:9px;align-items:center;justify-content:center;background:color-mix(in srgb,var(--a) 12%,transparent);font-size:15px}'+
- '.kxbox-e{margin:4px 6px 6px;font-size:12px}'+
- '.kxl{display:flex;flex-direction:column;gap:6px}'+
- '.kxr{border:1px solid var(--ln);border-radius:14px;background:var(--c1);min-width:0;transition:border-color .2s,box-shadow .2s}'+
- '.kxr:hover{border-color:color-mix(in srgb,var(--a) 30%,var(--ln))}'+
- '.kxr.open{border-color:color-mix(in srgb,var(--a) 55%,var(--ln));box-shadow:0 6px 22px -14px color-mix(in srgb,var(--a) 70%,transparent)}'+
- // a row head wraps: the name stays whole and the badges go to a second line when the screen is narrow
- '.kxr-h{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;width:100%;padding:9px 11px;background:transparent;border:0;color:var(--t);font:inherit;cursor:pointer;text-align:start;min-width:0;border-radius:14px}'+
- '.kxr-h b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:100%}.kxr-h .sp{flex:1;min-width:6px}'+
- '.kxr-h small{color:var(--s);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kxr-h .flg{font-size:16px}'+
- '.kxr-arr{flex:none;display:inline-flex;color:var(--s);transition:transform .2s ease,color .2s}.kxr-arr svg{display:block}'+
- '.kxr-arr{transform:rotate(-90deg)}[dir=rtl] .kxr-arr{transform:rotate(90deg)}.kxr.open .kxr-arr{transform:none;color:var(--a)}'+
- '.kxr-st{font-size:11px;border:1px solid var(--ln);border-radius:8px;padding:1px 7px;white-space:nowrap;color:var(--s)}'+
- '.kxr-st.g{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}.kxr-st.r{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}.kxr-st.y{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}'+
- '.kxr-b{overflow:hidden;transition:height .2s ease,opacity .2s ease}.kxr-b.shut{opacity:0}'+
- '.kxr-in{padding:2px 12px 12px;border-top:1px solid color-mix(in srgb,var(--ln) 70%,transparent)}'+
- '.kxr-line{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--s);font-size:12px;margin:10px 0 4px}.kxr-line b{color:var(--t);font-weight:600}'+
- '.kxr-sec{font-size:11px;font-weight:700;color:var(--s);margin:12px 0 4px;letter-spacing:.2px}'+
- '.kxf{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px}.kxf>div{min-width:0}.kxf label.f{margin:4px 0 3px;font-size:12px}'+
- '.kxf input,.kxf select{height:36px;padding:0 10px;font-size:13px;border-radius:10px}.kxf .wide{grid-column:1/-1}'+
- '.kxf .seg button{padding:6px 8px;font-size:12px}'+
- '.kxsw{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--ln);border-radius:12px;padding:7px 10px;font-size:13px;margin-top:6px}'+
- '.kxsw span{min-width:0}.kxsw small{display:block;color:var(--s);font-size:11px}'+
- '.kxchips{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}.kxchips button{border:1px solid var(--ln);background:transparent;color:var(--t);border-radius:999px;padding:3px 9px;font:inherit;font-size:11px;cursor:pointer}'+
- '.kxchips button:hover,.kxchips button.on{border-color:var(--a);color:var(--a)}'+
- '.kxm3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:14px}'+
- '.kxacts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.kxacts button,.kxacts a{flex:0 0 auto}'+
- '.kxsave{display:flex;gap:6px;justify-content:flex-end;margin-top:10px}'+
- '.kxm-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.kxm-row>div{flex:0 1 180px;min-width:120px}.kxm-row input{height:36px;font-size:13px}.kxm-row .btn{height:36px;padding:0 14px;font-size:13px}'+
- '.kxm-warn{color:var(--warn);font-size:12px;margin-top:4px;min-height:14px}'+
- '.kxm-btns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:12px}.kxm-btns button,.kxm-btns a{width:100%;text-align:center}'+
- '.kxr-in details.box{margin-top:8px;padding:8px 10px}.kxr-in details.box summary{font-size:12px;font-weight:700;cursor:pointer}'+
- '@media(min-width:900px){.side{overflow-y:auto;overscroll-behavior:contain}}'+
- '@media(max-width:600px){.kxf{grid-template-columns:1fr}.kxbox{padding:8px;border-radius:16px}.kxr-h small.kxr-ip{display:none}}';
- document.head.appendChild(st)})();
 
-function fl(cc){return window.flagOf?flagOf(cc):''}
+function fl(cc){return flagOf(cc)}
 function isIr(s){return s.loc=='iran'||String(s.cc||'').toUpperCase()=='IR'}
 function q(id){return encodeURIComponent(id)}
 
@@ -4817,7 +4379,7 @@ function protoName(p){return ({wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',km
 function online(s){var a=s.agent,n=s.node;return !!(s.local||(a&&a.online)||(n&&n.online))}
 function srvIp(s){var a=s.agent||{},n=s.node||{};return a.addr||a.ip||(n.effective_endpoint&&n.effective_endpoint!=n.endpoint?'':n.endpoint)||''}
 
-function row(s){var n=s.node,a=s.agent,on=online(s),h=n&&window.nHealthOf?nHealthOf(n):null,col=!on?'r':h&&h.c=='r'?'y':h?h.c:'g';
+function row(s){var n=s.node,a=s.agent,on=online(s),h=n?nHealthOf(n):null,col=!on?'r':h&&h.c=='r'?'y':h?h.c:'g';
  var tn=s.tunnel||{},tags=(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+(n&&!n.enabled&&!s.local?'<span class="kxc-tag">'+t('relay')+'</span>':'')+
   // tunnel: its configs point at the Iran entry; + tunnel: a second config of every protocol through its tunnel domain
   (tn.main_via=='tunnel'?'<span class="kxc-tag tun">'+t('tunnel')+'</span>':tn.on&&tn.uses?'<span class="kxc-tag tun">+ '+t('tunnel')+'</span>':'');
@@ -4827,7 +4389,7 @@ function row(s){var n=s.node,a=s.agent,on=online(s),h=n&&window.nHealthOf?nHealt
 
 // the first entries (and their addresses) of the tunnels that bring this server's ports: where its
 // users can connect instead of its own address (Iran → Turkey → here: Iran)
-function entriesOf(s){var sid=s.agent?s.agent.id:(s.local?'local':''),tl=((window.TN&&TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false&&x.kind!='awg'}),out=[];
+function entriesOf(s){var sid=s.agent?s.agent.id:(s.local?'local':''),tl=((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false&&x.kind!='awg'}),out=[];
  if(!sid)return out;
  var back=function(id,seen){var prev=tl.filter(function(x){return x.exit==id&&seen.indexOf(x.entry)<0});if(!prev.length)return [id];
   var r=[];prev.forEach(function(x){back(x.entry,seen.concat([x.entry])).forEach(function(e){if(r.indexOf(e)<0)r.push(e)})});return r};
@@ -4871,8 +4433,8 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  h+='<div class="kxsave"><button class="b2 sm" onclick="accClose(\'srv\')">'+t('Cancel')+'</button><button class="btn sm" onclick="srvSave(\''+k+'\')">'+t('Save')+'</button></div>';
  // health and what can be done
  var stt=n&&n.info&&n.info.stats;
- if(stt&&window.nMeter)h+='<div class="kxm3">'+nMeter('CPU',+stt.cpu||0,N(Math.round(+stt.cpu||0))+'%')+nMeter('RAM',pc(stt.mem_used,stt.mem_total),N(Math.round(pc(stt.mem_used,stt.mem_total)))+'%')+nMeter('Disk',pc(stt.disk_used,stt.disk_total),N(Math.round(pc(stt.disk_used,stt.disk_total)))+'%')+'</div>';
- var hh=n&&window.nHealthOf?nHealthOf(n):null;
+ if(stt)h+='<div class="kxm3">'+nMeter('CPU',+stt.cpu||0,N(Math.round(+stt.cpu||0))+'%')+nMeter('RAM',pc(stt.mem_used,stt.mem_total),N(Math.round(pc(stt.mem_used,stt.mem_total)))+'%')+nMeter('Disk',pc(stt.disk_used,stt.disk_total),N(Math.round(pc(stt.disk_used,stt.disk_total)))+'%')+'</div>';
+ var hh=n?nHealthOf(n):null;
  if(hh&&hh.r&&hh.r.length&&n.enabled)h+='<ul class="nwhy">'+hh.r.map(function(x){return '<li class="l'+x[0]+'">'+t(x[1])+'</li>'}).join('')+'</ul>';
  var acts=[];
  if(n){acts.push('<button class="b2 sm" onclick="nHealth(\''+ni+'\')">♡ '+t('Health')+'</button>');
@@ -4881,7 +4443,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAct(\''+ni+'\',\'update\')">⇪ '+t('Update agent')+'</button>');
   acts.push('<button class="b2 sm okb" onclick="nAssign(\''+ni+'\',1)">'+ic('plus',13)+' '+t('Add to all users')+'</button>');
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAssign(\''+ni+'\',0)">'+t('Remove from all users')+'</button>')}
- if(a&&!s.local&&window.tunSrvEdit)acts.push('<button class="b2 sm" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',13)+' '+t('Tunnel agent settings')+'</button>');
+ if(a&&!s.local)acts.push('<button class="b2 sm" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',13)+' '+t('Tunnel agent settings')+'</button>');
  if(!s.local)acts.push('<button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+ic('link',13)+' '+t('Show command')+'</button>');
  if(!s.local)acts.push('<button class="b2 sm bd" onclick="srvDel(\''+k+'\')">'+ic('trash',13)+' '+t('Delete server')+'</button>');
  h+='<div class="kxacts">'+acts.join('')+'</div>';
@@ -4977,7 +4539,7 @@ window.srvDel=function(key,withTun){var s=find(key)||{};
 window.srvFixPorts=function(){if(!confirm(t("Users' WireGuard / AmneziaWG files of the moved server must be downloaded again (subscription links and the app update by themselves). Continue?")))return;
  toast(t('Checking…'));api('POST','/api/servers/fix-ports').then(function(r){var m=r.moved||[];
   modal(mhead(t(m.length?'Ports moved':'No clash'))+(m.length?'<div class="list">'+m.map(function(x){return '<div class="li"><span><b>'+esc(x.server)+'</b> '+protoName(x.proto)+(x.error?'<small class="bad2">'+esc(x.error)+'</small>':'')+'</span><span class="ltr">'+N(x.old)+' → '+N(x.new)+' '+(x.ok?'✅':'❌')+'</span></div>'}).join('')+'</div>':''));
-  load(true);if(window.svcReload)svcReload()}).catch(fail)};
+  load(true);svcReload()}).catch(fail)};
 
 // ---------------------------------------------------------------- a VPN port of one server (used by VPN services)
 // another server (or another protocol here) already using the port the admin types
@@ -4986,17 +4548,11 @@ window.srvPortClash=function(key,proto,v){var p=+unN(String(v));if(!(p>0&&p<6553
  return hit?t('Already used by')+' '+hit+': '+t('pick another port'):''};
 window.srvSavePort=function(key,proto,v,done){var b={};b[proto]=+unN(String(v));toast(t('Saving…'));
  return api('POST','/api/servers/'+q(key)+'/ports',b).then(function(r){toast(t('Saved: the service restarts on the new port'));load(true);if(done)done(r);return r}).catch(fail)};
-window.srvKmix=function(key,on){return api('POST','/api/servers/'+q(key)+'/kmix',{on:on}).then(function(){toast(t('Saved'));load(true)}).catch(fail)};
 window.srvProtoAll=function(pa,add){if(!confirm(t(add?'Turn this on for every user?':'Turn this off for every user?')))return;
  api('POST','/api/protocols/'+pa+'/'+(add?'assign-all':'unassign-all')).then(function(r){toast(t('Done')+' ('+N(r.changed||0)+')')}).catch(fail)};
-window.srvSvcOff=function(kind,sid){if(!confirm(t('Remove it from this server? The server stops it and frees its ports.')))return;
- api('DELETE','/api/'+kind+'/servers/'+q(sid)).then(function(){closeModal();toast(t('Removed'));load(true);if(window.svcReload)svcReload()}).catch(fail)};
 
-// Xray / DNS on one server
-window.srvAddXray=function(key){if(!window.xrAddNode)return;xrAddNode();var tries=0,iv=setInterval(function(){var sel=$('#xa_sv');if(sel||++tries>40){clearInterval(iv);if(sel){sel.value=key;sel.dispatchEvent(new Event('change'))}}},100)};
-window.srvAddDns=function(key,iran){if(!window.dnsAdd)return;dnsAdd(iran?'relay':'exit');var tries=0,iv=setInterval(function(){var sel=$('#dx_sv');if(sel||++tries>40){clearInterval(iv);if(sel){sel.value=key;sel.dispatchEvent(new Event('change'))}}},100)};
 
-// ---------------------------------------------------------------- the old ways in lead here
+// ---------------------------------------------------------------- adding a server
 // Add node (dashboard) and + Server (tunnels) open the one Add server
 window.nodeAdd=function(){srvAdd('abroad')};
 window.tunServerAdd=function(){srvAdd('iran')};
@@ -5006,59 +4562,27 @@ window.loadNodes=function(){if(S.page=='nodes'&&$('#svp_g'))return load(true);
  api('GET','/api/xray').then(function(d){XR.d=d}).catch(function(){});
  api('GET','/api/dns').then(function(d){DN.d=d}).catch(function(){});
  api('GET','/api/tunnels').then(function(d){TN.d=d}).catch(function(){})};
-// "New server" in the Xray / DNS forms makes a whole server too: its command installs everything
-// actions of the node cards refresh this page
 
-// the menu: one Servers page (the separate Tunnel servers page is gone)
-if(window.V37&&V37.SECS){V37.SECS.forEach(function(s){s[3]=s[3].filter(function(x){return x[0]!='servers'})})}
 
 })();
 
 // ==================================================================== multi-location routes
-// Kanki Panel 3.9.3: multi-location tunnels. A route is several servers in a row (Iran → Turkey →
-// Germany): users connect to the first one, the traffic goes through each next one and leaves from the
-// last. Every hop is a tunnel of its own with its own transport (KCP from Iran to Turkey, TCP Mux from
-// Turkey to Germany…), made, tested, changed and deleted together. The ports carried are the same on
-// every hop, so the configs of the last server work through the first one.
-// Also: "Ports of the exit server" now fills in the KANKI MIX port too.
+// multi-location tunnels: a route is several servers in a row (Iran → Turkey → Germany). Users connect
+// to the first one, the traffic goes through each next one and leaves from the last. Every hop is a
+// tunnel of its own with its own transport, made, tested, changed and deleted together; the ports
+// carried are the same on every hop, so the configs of the last server work through the first one.
 (function(){
 'use strict';
 
-(function(){var st=document.createElement('style');st.textContent=
- '.rt-path{display:flex;flex-direction:column;gap:0;margin:10px 0 4px}'+
- '.rt-stop{display:flex;align-items:center;gap:8px;border:1px solid var(--ln);border-radius:14px;padding:7px 9px;background:var(--c1)}'+
- '.rt-stop>i{flex:none;width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-weight:800;font-size:12px;background:color-mix(in srgb,var(--a) 18%,transparent);color:var(--a)}'+
- '.rt-stop select{flex:1;min-width:0;height:34px;padding:0 8px;font-size:13px}.rt-stop small{color:var(--s);font-size:11px;white-space:nowrap}'+
- '.rt-stop .ib{width:30px;height:30px}'+
- '.rt-hop{position:relative;margin:0 22px;padding:8px 0 8px 14px;border-inline-start:2px dashed color-mix(in srgb,var(--a) 45%,var(--ln))}'+
- '[dir=rtl] .rt-hop{padding:8px 14px 8px 0}'+
- '.rt-hop .rt-hg{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 84px minmax(0,1fr) auto;gap:6px;align-items:end}'+
- '.rt-hop label{font-size:11px;color:var(--s);display:block;margin:0 0 2px}.rt-hop select,.rt-hop input{height:32px;padding:0 8px;font-size:12px;width:100%}'+
- '.rt-hop .b2{height:32px;padding:0 10px;font-size:12px;white-space:nowrap}'+
- '.rt-res{font-size:11px;color:var(--s);margin-top:4px;min-height:14px}.rt-res b{color:var(--ok)}.rt-res .r{color:var(--bad)}'+
- '.rt-add{border:1px dashed var(--ln);background:transparent;color:var(--s);border-radius:12px;padding:6px;font:inherit;font-size:12px;cursor:pointer;margin:8px 0 0;width:100%}'+
- '.rt-add:hover{border-color:var(--a);color:var(--a)}'+
- '.rtc .rt-line{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:8px 0 2px}'+
- '.rtc .rt-n{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--ln);border-radius:999px;padding:3px 10px;font-weight:700;font-size:13px}'+
- '.rtc .rt-l{display:inline-flex;flex-direction:column;align-items:center;min-width:86px;font-size:10px;color:var(--s);line-height:1.3}'+
- '.rtc .rt-l i{display:block;width:100%;height:3px;border-radius:3px;background:var(--c);position:relative;overflow:hidden;margin:2px 0}'+
- '.rtc .rt-l i:after{content:"";position:absolute;inset:0;width:30%;background:linear-gradient(90deg,transparent,#fff8,transparent);animation:rtflow 1.6s linear infinite}'+
- '[dir=rtl] .rtc .rt-l i:after{animation-name:rtflowr}'+
- '@keyframes rtflow{from{transform:translateX(-100%)}to{transform:translateX(340%)}}@keyframes rtflowr{from{transform:translateX(100%)}to{transform:translateX(-340%)}}'+
- '.rtc .rt-badge{font-size:11px;border:1px solid color-mix(in srgb,var(--a) 55%,transparent);color:var(--a);border-radius:8px;padding:1px 7px;margin-inline-start:6px}'+
- '.rtc .rt-hops{display:flex;flex-direction:column;gap:4px;margin-top:8px}.rtc .rt-h{display:flex;align-items:center;gap:8px;font-size:12px;border:1px solid var(--ln);border-radius:10px;padding:5px 8px}'+
- '.rtc .rt-h b{min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rtc .rt-h .ib{width:28px;height:28px}'+
- '@media(max-width:620px){.rt-hop .rt-hg{grid-template-columns:1fr 1fr}.rt-hop{margin:0 10px}}';
- document.head.appendChild(st)})();
 
 // ---------------------------------------------------------------- ports of a server, KANKI MIX too
 window.tunNodePorts=function(n){var i=(n&&n.info)||{},tcp=[],udp=[],add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
  [i.wg_port,i.awg_port,i.hy2_port,i.kmix_port,(i.kc_ports||{}).game].forEach(function(v){add(udp,v)});return {tcp:tcp,udp:udp}};
 
 // ---------------------------------------------------------------- data
-function tl(){return (window.TN&&TN.d&&TN.d.tunnels)||[]}
+function tl(){return (TN.d&&TN.d.tunnels)||[]}
 function hopsOf(chain){return tl().filter(function(x){return x.chain==chain}).sort(function(a,b){return (a.hop||0)-(b.hop||0)})}
-function sname(id){return (window.tunSrv?tunSrv(id):{name:id}).name}
+function sname(id){return tunSrv(id).name}
 function uid(){var s='abcdefghijkmnpqrstuvwxyz23456789',r='';for(var i=0;i<8;i++)r+=s.charAt(Math.floor(Math.random()*s.length));return r}
 var TRS=[['Over UDP (fast, games)',['game','kcp','quic','hq']],['Over TCP (steady)',['tcpmux','wss','ws','tcp']],['Advanced (hardest to block)',['dual','h2','faketcp']]];
 function trOpts(sel){return TRS.map(function(g){return '<optgroup label="'+esc(t(g[0]))+'">'+g[1].map(function(k){return '<option value="'+k+'"'+(k==sel?' selected':'')+'>'+esc(tunTr(k))+'</option>'}).join('')+'</optgroup>'}).join('')+
@@ -5087,12 +4611,11 @@ function routeCard(hs){var first=hs[0],name=first.chain_name||first.name,states=
   '<button class="b2" onclick="routeAct(\''+ch+'\',\'restart\')">'+ic('refresh',15)+' '+t('Reconnect all')+'</button>'+
   '<button class="b2" onclick="routeAct(\''+ch+'\',\''+(hs.some(function(x){return x.enabled})?'disable':'enable')+'\')">'+t(hs.some(function(x){return x.enabled})?'Pause':'Resume')+'</button>'+
   '<button class="b2 bd" onclick="routeDel(\''+ch+'\')">'+ic('trash',15)+' '+t('Delete')+'</button></div></div>'}
-function fl(sid){var s=window.tunSrv?tunSrv(sid):null;return s&&s.cc&&window.flagOf?flagOf(s.cc):''}
+function fl(sid){var s=tunSrv(sid);return s&&s.cc?flagOf(s.cc):''}
 window.routeAct=function(ch,a){var hs=hopsOf(ch);Promise.all(hs.map(function(x){return api('POST','/api/tunnels/'+x.id+'/'+a)})).then(function(){toast(a=='restart'?t('The tunnel reconnects in a few seconds'):t('Done'));tunRefresh()}).catch(fail)};
 window.routeDel=function(ch){if(!confirm(t('Delete the whole route? Every hop stops and its ports are closed.')))return;var hs=hopsOf(ch);
  Promise.all(hs.map(function(x){return api('DELETE','/api/tunnels/'+x.id)})).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)};
 
-// a button next to "+ Tunnel"
 
 // ---------------------------------------------------------------- make / edit a route
 var R=null;
@@ -5123,7 +4646,7 @@ function routeOpen(ch,srvs,xr){var sv=TN.d.servers||[],remote=sv.filter(function
  $('#rt_test').onclick=function(){readForm();testAll()};
  $('#rt_go').onclick=function(){save(this)};
  if(!ch)fillPorts(false)}
-function srvLocOf(s){return window.srvLoc?srvLoc(s):(s.loc||'')}
+function srvLocOf(s){return srvLoc(s)}
 function srvOpts(sel){var sv=TN.d.servers||[];return '<option value="">—</option>'+srvOptGroups(sv,function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'})}
 function drawPath(){var el=$('#rt_path');if(!el)return;var n=R.stops.length,h='';
  R.stops.forEach(function(sid,i){
@@ -5162,7 +4685,7 @@ function fillPorts(manual){readForm();var last=R.stops[R.stops.length-1];if(!las
  var s=((R.srvs&&R.srvs.servers)||[]).filter(function(x){return (x.agent&&x.agent.id==last)||(last=='local'&&x.local)})[0],n=s&&s.node,i=(n&&n.info)||{},udp=[],tcp=[];
  var add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
  [i.wg_port,i.awg_port,i.hy2_port,i.kmix_port].forEach(function(v){add(udp,v)});
- (window.tunSvcPorts?tunSvcPorts(last):Promise.resolve({tcp:[],udp:[]})).then(function(o){
+ tunSvcPorts(last).then(function(o){
   o.tcp.forEach(function(v){add(tcp,v)});o.udp.forEach(function(v){add(udp,v)});
   if(!udp.length&&!tcp.length){if(manual)toast(t('No node found for this server: type the ports by hand'),1);return}
   if(!manual&&(R.tcp||R.udp))return;
@@ -5208,30 +4731,27 @@ function save(btn){readForm();var st=R.stops,n=st.length;
   var last=st[n-1],first=st[0],s=((R.srvs&&R.srvs.servers)||[]).filter(function(x){return (x.agent&&x.agent.id==last)||(last=='local'&&x.local)})[0],f=tunSrv(first);
   if(!s||!s.node||!(f.addr||f.host))return;
   return api('PUT','/api/nodes/'+encodeURIComponent(s.node.id),{endpoint_mode:'custom',endpoint:f.addr||f.host})}).then(function(){
-  closeModal();toast(t(R.chain?'Route saved':'The route is made: it connects in a few seconds'));tunRefresh();if(window.srvLoad)srvLoad(true)}).catch(function(e){
+  closeModal();toast(t(R.chain?'Route saved':'The route is made: it connects in a few seconds'));tunRefresh();srvLoad(true)}).catch(function(e){
   btn.disabled=false;
   if(made.length)Promise.all(made.map(function(id){return api('DELETE','/api/tunnels/'+id)})).then(function(){tunRefresh()});
   toast((e.message||String(e))+(made.length?' · '+t('the hops made so far were taken back'):''),1)})}
 })();
 
 // ==================================================================== VPN services tabs
-// Kanki Panel 3.9.3: VPN services, one tab per service (KANKI MIX, Xray, WireGuard, AmneziaWG,
-// Hysteria2). Each tab lists the servers that run it (abroad and Iran apart), one row per server; a
-// row's arrow opens that service's settings on that server (one row open at a time, closed again on
-// leaving the page or after saving). The Servers page keeps only the servers themselves.
+// VPN services: one tab per service (KANKI MIX, Xray, WireGuard, AmneziaWG, Hysteria2). Each tab
+// lists the servers that run it (abroad and Iran apart); a row's arrow opens that service's settings
+// on that server (one row at a time, closed on leaving the page or after saving).
 (function(){
 'use strict';
-var ACC=window.KAcc;if(!ACC)return;
+var ACC=KAcc;
 
 // ---------------------------------------------------------------- the tabs of VPN services
-var P=window.PAGES||[];
+var P=PAGES;
 [['wg','WireGuard','shield2'],['awg','AmneziaWG','shield2'],['hy2','Hysteria2','shield2']].forEach(function(x){if(!P.some(function(y){return y[0]==x[0]}))P.push(x)});
-if(window.V37&&V37.SECS)V37.SECS.forEach(function(s){if(s[0]!='vpnsec')return;
- s[3]=[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI']]});
 
 // leaving a page closes its open row
 
-function fl(cc){return window.flagOf?flagOf(cc):''}
+function fl(cc){return flagOf(cc)}
 function isIr(s){return s.loc=='iran'||String(s.cc||'').toUpperCase()=='IR'}
 function q(id){return encodeURIComponent(id)}
 function boxes(g,list,row){var ab=list.filter(function(x){return !isIr(x)}),ir=list.filter(isIr);
@@ -5241,12 +4761,12 @@ function srvByNode(nid){return ((SV.d&&SV.d.servers)||[]).filter(function(s){ret
 function agentOf(s){return s.local?'local':(s.agent?s.agent.id:'')}
 
 // the servers a UDP port of a server comes in through (Iran → Turkey), from the tunnels the panel has
-function routeVia(sid,port){var tl=((window.TN&&TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false&&x.kind!='awg'}),names=[],cur=sid,p=+port,seen=[sid];
+function routeVia(sid,port){var tl=((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false&&x.kind!='awg'}),names=[],cur=sid,p=+port,seen=[sid];
  if(!sid||!p)return null;
  for(var k=0;k<8;k++){var hit=null;tl.forEach(function(x){if(hit||x.exit!=cur||seen.indexOf(x.entry)>=0)return;
    (Array.isArray(x.udp)?x.udp:String(x.udp||'').split(',')).join(',').split(',').forEach(function(it){it=String(it).trim();if(!it||hit)return;var a=it,b=it;if(it.indexOf(':')>0){a=it.split(':')[0];b=it.split(':')[1]}
     if(+b==p&&/^\d+$/.test(a))hit={e:x.entry,p:+a}})});
-  if(!hit)break;seen.push(hit.e);names.unshift((window.tunSrv?tunSrv(hit.e):{name:hit.e}).name);cur=hit.e;p=hit.p}
+  if(!hit)break;seen.push(hit.e);names.unshift(tunSrv(hit.e).name);cur=hit.e;p=hit.p}
  return names.length?{via:names,port:p}:null}
 function viaLine(r,me){return r?'<span class="kxr-st g">'+t('Through a tunnel')+'</span> <span>'+r.via.map(esc).join(' → ')+' → '+esc(me)+'</span>'+(r.port?' · <span class="ltr">UDP '+N(r.port)+'</span>':''):''}
 
@@ -5313,7 +4833,6 @@ window.svcDirBase=function(){var v=prompt(t('Base domain for the direct names (l
 window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')};window.p_hy2=function(){protoPage('hy2')};
 
 // ---------------------------------------------------------------- KANKI MIX: a row per server
-if(window.kmDraw){
  window.kmServers=function(d){var list=(d.servers||[]).map(function(x){var s=srvByNode(x.id)||{key:'node:'+x.id,name:x.name,cc:'',loc:''};return {k:x,s:s,key:s.key||x.id,name:x.name,cc:s.cc,loc:s.loc,local:x.main}});
   if(!list.length)return '<p class="muted">—</p>';
   return boxes('km',list,function(r){return kmRow(d,r)})};
@@ -5339,16 +4858,15 @@ if(window.kmDraw){
    '<div class="kxsave"><button class="b2 sm" onclick="accClose(\'km\')">'+t('Cancel')+'</button><button class="btn sm" onclick="kmSaveOne(\''+id+'\')">'+t('Save')+'</button></div>'+
    '<div class="kxacts"><button class="b2 sm" onclick="nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button><a class="b2 sm" href="#tunnels">'+t('Tunnels page')+'</a></div>';
   setTimeout(function(){var el=$('#km_p1'),w=$('#km_pw'),b=$('#km_ps');if(!el)return;var f=function(){var m=srvPortClash(r.key,'kmix',el.value);w.textContent=m;b.disabled=!!m};el.oninput=f;f();
-   b.onclick=function(){if(String(r.key).indexOf('node:')==0&&window.kmSetNodePort)return kmSetNodePort(x.id,+unN(el.value),function(){accClose('km')});srvSavePort(r.key,'kmix',el.value,function(){accClose('km');kmLoad(true)})}},0);
+   b.onclick=function(){if(String(r.key).indexOf('node:')==0)return kmSetNodePort(x.id,+unN(el.value),function(){accClose('km')});srvSavePort(r.key,'kmix',el.value,function(){accClose('km');kmLoad(true)})}},0);
   return h}
  window.kmSaveOne=function(id){var d=KM.d,m={};Object.keys((d&&d.settings.nodes)||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});var o=m[id]||{};
   o.route=$('#km_rt1').value;o.host=$('#km_ho1').value.trim();o.tun_off=!$('#km_t21').checked;o.tun_host=$('#km_th1').value.trim();
   var tp=unN($('#km_tp1').value).trim();o.tun_port=tp?+tp:0;o.tun_name=$('#km_tn1').value.trim();m[id]=o;
   api('PUT','/api/kmix',{nodes:m}).then(function(){toast(t('Saved'));accClose('km');kmLoad(true)}).catch(fail)};
  // the settings of every server, in the list; the page keeps its numbers and the general settings
-  (function(){var st=document.createElement('style');st.textContent='.kmg2{align-items:start}@media(min-width:900px){.kmg2{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)!important}}';document.head.appendChild(st)})();
   ACC.draw.km=function(){var c=$('#km_srv');if(c&&KM.d)c.innerHTML=kmServers(KM.d)};
- }
+ 
 
 // ---------------------------------------------------------------- Xray: a row per server with its inbounds
  window.xrServers=function(d){if(!d.servers.length)return '<p class="muted">'+t('No Xray server yet: add one in Servers')+'</p>';
@@ -5359,9 +4877,9 @@ if(window.kmDraw){
    '<span class="kxr-st '+(on?'g':'r')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span><small>'+N(n)+' '+t('inbounds')+'</small>';
   return accRow('xr',x.server,head,function(){return xrBody(d,r)})}
  function xrBody(d,r){var x=r.x,st=x.status||{},sid=esc(x.server),errs=[st.deploy_error,st.error].filter(Boolean),ibs=d.inbounds.filter(function(i){return i.server==x.server});
-  return '<div class="kxr-line"><span class="ltr">'+esc(x.effective||'?')+'</span>'+(st.core?'<span>·</span><span>Xray '+esc(st.core)+'</span>':'')+'<span>'+(window.xrCertChip?xrCertChip(x):'')+'</span></div>'+
+  return '<div class="kxr-line"><span class="ltr">'+esc(x.effective||'?')+'</span>'+(st.core?'<span>·</span><span>Xray '+esc(st.core)+'</span>':'')+'<span>'+xrCertChip(x)+'</span></div>'+
    (errs.length?'<div class="warnbox ltr" style="margin:6px 0 0">'+errs.map(esc).join('<br>')+'</div>':'')+
-   (window.xrCertErr&&xrCertErr(x)?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(xrCertErr(x))+'</div>':'')+
+   (xrCertErr(x)?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(xrCertErr(x))+'</div>':'')+
    '<div class="kxr-sec">'+t('Inbounds')+'</div>'+(ibs.length?ibs.map(function(ib){return '<div style="cursor:pointer" onclick="xrInbound(\''+esc(ib.id)+'\')">'+xrMiniRow(ib)+'</div>'}).join(''):'<p class="muted" style="margin:4px">'+t('No inbound on this server yet')+'</p>')+
    '<div class="kxacts"><button class="btn sm" onclick="xrInbound()">+ '+t('Inbound')+'</button><button class="b2 sm" onclick="xrSrvEdit(\''+sid+'\')">'+ic('edit',13)+' '+t('Edit server')+'</button>'+
    '<button class="b2 sm" onclick="xrPreview(\''+sid+'\')">{ } '+t('Config')+'</button><button class="b2 sm" onclick="srvRepair(\'xray\',\''+sid+'\')">↻ '+t('Repair')+'</button><button class="b2 sm" onclick="srvHealth(\'xray\',\''+sid+'\')">♡ '+t('Health')+'</button>'+
@@ -5370,135 +4888,33 @@ if(window.kmDraw){
  })();
 
 // ==================================================================== colors and cards
-// Kanki Panel 3.10: the polished look. Loaded last (after kanki-look.js), it changes how the panel looks,
-// never how a page works:
-//  - a new sign-in screen: glow behind a glass card, the panel name and a short line under the logo
-//  - dashboard numbers: a colored edge and an icon per number, bigger digits
-//  - every user tile shows how much data is used (a bar) and the days left, not only the name
-//  - softer cards with a light top edge, a lift on hover, a clear focus ring for the keyboard
-//  - no motion for those who ask their system for less motion
+// cards and colors: the sign-in screen, an icon per dashboard number, data used and days left on
+// every user tile, a clear focus ring, and no motion for those who ask their system for less.
 (function(){
 'use strict';
 
-Object.assign(ICO,{
- k310sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>',
- k310online:'<path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 15.8a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1.2"/>',
- k310ok:'<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-4.9"/>',
- k310warn:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.2l3 1.8"/>',
- k310off:'<circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/>',
- k310traffic:'<path d="M7 4v14M3.5 14.5L7 18l3.5-3.5"/><path d="M17 20V6M13.5 9.5L17 6l3.5 3.5"/>'});
-
-// ---------------------------------------------------------------- sign-in screen
-
-// ---------------------------------------------------------------- user tiles: data used and days left
 
 // ---------------------------------------------------------------- dashboard numbers: an icon per number
 var KICO={all:'users',online:'k310online',active:'k310ok',finished:'k310warn',disabled:'k310off'};
 function kpiIcons(){$$('#kpis .kpi').forEach(function(k){if(k.querySelector('.k310ki'))return;
  k.insertAdjacentHTML('afterbegin','<span class="k310ki">'+ic(KICO[k.dataset.go]||'k310traffic',18)+'</span>')})}
-new MutationObserver(function(){if($('#kpis'))kpiIcons()}).observe(document.body,{childList:true,subtree:true});
+V37.kpiIcons=kpiIcons;
 
-var css=`
-/* sign-in */
-.k310login{position:relative;max-width:400px;margin:0 auto;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;justify-content:center;padding:32px 16px}
-.k310login .logo{position:relative;z-index:1;width:72px;height:72px;margin:0 auto 10px;border-radius:22px;box-shadow:0 18px 50px -12px color-mix(in srgb,var(--a) 65%,transparent)}
-.k310brand{position:relative;z-index:1;text-align:center;font-size:12.5px;font-weight:700;color:var(--s);margin-bottom:18px;letter-spacing:.2px}
-.k310login .card{position:relative;z-index:1;padding:26px 24px 20px;border-radius:24px;border:1px solid var(--gb2,var(--ln));
- background:linear-gradient(180deg,color-mix(in srgb,var(--c1) 82%,transparent),color-mix(in srgb,var(--c2) 92%,transparent))!important;
- backdrop-filter:blur(20px) saturate(140%);-webkit-backdrop-filter:blur(20px) saturate(140%);
- box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 30px 80px -30px rgba(0,0,0,.9),0 0 0 1px color-mix(in srgb,var(--a) 10%,transparent)!important}
-body.light .k310login .card{box-shadow:inset 0 1px 0 #fff,0 30px 70px -34px rgba(60,40,0,.35)!important}
-.k310login .card h3{justify-content:center;font-size:20px;margin:0}
-.k310sub{text-align:center;margin:6px 0 10px;font-size:12.5px;color:var(--s)}
-.k310login input{height:46px;font-size:14px}
-.k310login .btn{height:48px;font-size:15px;font-weight:800;margin-top:20px!important;border-radius:14px}
-.k310login .ib{width:40px;height:40px;display:inline-grid;place-items:center}
-.k310orb{position:fixed;z-index:0;pointer-events:none;border-radius:50%;filter:blur(70px);opacity:.55}
-.k310orb.a{width:420px;height:420px;top:-120px;inset-inline-end:-80px;background:radial-gradient(circle,color-mix(in srgb,var(--a) 55%,transparent),transparent 65%)}
-.k310orb.b{width:360px;height:360px;bottom:-140px;inset-inline-start:-100px;background:radial-gradient(circle,color-mix(in srgb,var(--ad) 45%,transparent),transparent 65%);opacity:.4}
-body.light .k310orb{opacity:.35}
-
-/* cards: a light top edge and a soft depth */
-body.k38 .card{border-radius:20px;background:linear-gradient(180deg,color-mix(in srgb,var(--t) 3.5%,var(--c1)),var(--c2))!important;
- box-shadow:inset 0 1px 0 color-mix(in srgb,var(--t) 7%,transparent),0 20px 44px -30px rgba(0,0,0,.9)!important}
-body.k38.light .card{box-shadow:inset 0 1px 0 #fff,0 16px 36px -28px rgba(0,0,0,.28)!important}
-
-/* dashboard numbers */
-body.k38 .kpis{gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
-@media(min-width:600px){body.k38 .kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(min-width:1280px){body.k38 .kpis{grid-template-columns:repeat(6,minmax(0,1fr))}}
-body.k38 .kpi{position:relative;overflow:hidden;display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:12px;row-gap:2px;align-items:center;
- text-align:start;padding:16px 16px 15px;border-radius:18px;cursor:pointer;--kc:var(--a);
- transition:transform .18s ease,border-color .18s,box-shadow .18s}
-body.k38 .kpi.g{--kc:var(--ok)}body.k38 .kpi.y{--kc:var(--warn)}body.k38 .kpi.r{--kc:var(--bad)}
-body.k38 .kpi:before{content:"";position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,transparent,var(--kc),transparent);opacity:.8}
-body.k38 .kpi:after{content:"";position:absolute;width:140px;height:140px;top:-70px;inset-inline-start:-40px;border-radius:50%;pointer-events:none;
- background:radial-gradient(circle,color-mix(in srgb,var(--kc) 22%,transparent),transparent 70%)}
-body.k38 .kpi .k310ki{grid-row:1/3;width:40px;height:40px;border-radius:13px;display:grid;place-items:center;color:var(--kc);
- background:color-mix(in srgb,var(--kc) 13%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--kc) 26%,transparent)}
-body.k38 .kpi small{grid-column:2;font-size:12px;font-weight:700;color:var(--s);margin:0;white-space:normal;overflow:visible;line-height:1.5}
-body.k38 .kpi b{grid-column:2;white-space:nowrap;font-size:clamp(18px,1.7vw,24px);font-weight:900;line-height:1.15;color:var(--kc);font-variant-numeric:tabular-nums;text-align:start}
-body.k38 .kpi:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--kc) 45%,transparent)!important;box-shadow:0 16px 34px -20px color-mix(in srgb,var(--kc) 55%,transparent)!important}
-
-/* user tiles */
-body.k38 .uchips{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
-body.k38 .uchip.k310u{flex-direction:column;align-items:stretch;gap:9px;padding:13px 14px 12px;border-radius:16px;transition:transform .18s ease,border-color .18s,box-shadow .18s}
-body.k38 .uchip.k310u:hover{transform:translateY(-2px)}
-body.k38 .uchip.k310u.on{border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
-.k310top{display:flex;align-items:center;gap:8px;min-width:0}
-.k310top .nm{font-weight:800;font-size:13.5px}
-.k310bar{display:block;height:6px;border-radius:6px;background:color-mix(in srgb,var(--t) 8%,transparent);overflow:hidden}
-.k310bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(to left,var(--a),var(--ad))}
-html[dir=ltr] .k310bar i{background:linear-gradient(to right,var(--a),var(--ad))}
-.k310bar.inf i{width:100%;opacity:.28;background:repeating-linear-gradient(135deg,var(--a) 0 6px,transparent 6px 12px)}
-.k310bar.warm i{background:var(--warn)}.k310bar.hot i{background:var(--bad)}
-.k310meta{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;font-weight:600;color:var(--s);white-space:nowrap}
-.k310meta span{overflow:hidden;text-overflow:ellipsis}
-.uchip.st-finished .k310meta span:last-child{color:var(--warn)}
-body.light .uchip.st-finished .k310meta span:last-child{color:#a35f00}
-@media(max-width:430px){body.k38 .uchips{grid-template-columns:1fr 1fr}.k310meta{flex-direction:column;gap:2px}}
-
-/* keyboard focus, everywhere */
-body.k38 :is(button,a,.kpi,.uchip,select,input,textarea):focus-visible{outline:2px solid var(--a);outline-offset:2px}
-
-@media(prefers-reduced-motion:reduce){body.k38 .kpi,body.k38 .uchip.k310u{transition:none}body.k38 .kpi:hover,body.k38 .uchip.k310u:hover{transform:none}}
-`;
-var st=document.createElement('style');st.id='k310css';st.textContent=css;document.head.appendChild(st);
 // the sign-in screen may already be drawn before this file ran
 if($('.login')&&!$('.k310login'))loginView(!($('#otpw')||{classList:{contains:function(){return true}}}).classList.contains('hide'));
 })();
 
 // ==================================================================== tunnel map, drawers
-// Kanki Panel 3.10: where things live. Loaded last (after kanki-skin.js), it changes how pages are
-// grouped and laid out, never what a button does:
-//  - the menu: KANKI MIX and Xray are their own sections next to VPN services and Kanki DNS
-//  - Xray in two parts: "Servers & network" (servers, routing, settings) and "Inbounds" (inbounds,
-//    online clients)
-//  - KANKI MIX and Xray servers are cards; a tap opens that server's settings in a side drawer
-//  - the dashboard: a status line on top, then numbers, live traffic beside server health, servers
-//    beside tunnels, services beside connections; the activity log last
-//  - the tunnel map: Iran entries in one column, exits abroad in the next, each tunnel on its own
-//    curve that never shares a line with another, its short protocol name and live ping in the middle
+// where things live: KANKI MIX and Xray servers as cards with a side drawer; the dashboard (a status
+// line, the numbers, then live traffic beside server resources, servers beside tunnels, services beside
+// connections, the log last); the tunnel map (Iran entries in one column, exits in the next, each
+// tunnel on its own curve with its protocol and live ping).
 (function(){
 'use strict';
-var V=window.V37;if(!V)return;
+var V=V37;
 
 // ---------------------------------------------------------------- the menu
 // [section key, label, icon, [[page, sub page, tab label], ...], group]
-var SECS=[
- ['dash','Dashboard','dash',[['dash','','Dashboard']],'Home'],
- ['users','Users','users',[['users','','Users']],'Customers'],
- ['bot','Sales bot','bot',[['bot','','Sales bot']],'Customers'],
- ['emergency','Emergency chat','sos',[['emergency','','Emergency chat']],'Customers'],
- ['nodes','Servers','nodes',[['nodes','','Servers']],'Servers & network'],
- ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
- ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
- ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
- ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
-// the sections other layers already know keep their objects (some code holds on to them)
-var old={};V.SECS.forEach(function(s){old[s[0]]=s});
-V.SECS.length=0;SECS.forEach(function(s){var o=old[s[0]];if(o){o.length=0;s.forEach(function(x){o.push(x)});V.SECS.push(o)}else V.SECS.push(s)});
 function secBy(k){for(var i=0;i<V.SECS.length;i++)if(V.SECS[i][0]==k)return V.SECS[i];return V.SECS[0]}
 function href(f){return '#'+f[0]+(f[1]?'/'+f[1]:'')}
 function sheetHtml(){var g='',h='<i class="k38grab"></i>',open=false,cur=V.secOf(S.page)[0];
@@ -5512,12 +4928,8 @@ function markTabs(){var el=$('#sectabs');if(!el)return;var as=$$('.stl a',el),h=
  if(!hit.length){var p='#'+S.page;hit=as.filter(function(a){return a.getAttribute('href').split('/')[0]==p}).slice(0,1)}
  as.forEach(function(a){a.classList.toggle('on',hit.indexOf(a)>=0)})}
 V.markTabs=markTabs;
-new MutationObserver(function(){if($('#sectabs'))markTabs()}).observe(document.body,{childList:true,subtree:true});
-// the Xray menu item opens its first part
 
-// ---------------------------------------------------------------- Xray: servers first, inbounds their own tab
-// the servers tab shows the servers across the page; the inbounds are on the next tab
-if(window.XTABS){XTABS.length=0;[['overview','Servers','srv'],['inbounds','Inbounds','xray'],['clients','Online clients','users'],['routing','Routing and outbounds','tunnel'],['settings','Settings','settings']].forEach(function(x){XTABS.push(x)})}
+
 
 // ---------------------------------------------------------------- server cards with a side drawer
 // KANKI MIX (km) and Xray (xr) rows become cards; the open one shows its settings in a drawer
@@ -5529,7 +4941,7 @@ function drawerDress(){Object.keys(DRW).forEach(function(g){var box=$(DRW[g]);if
  var g=open.dataset.acc;sc.onclick=function(){accClose(g)};sc.classList.add('on');document.body.classList.add('k310drw');
  var b=$('.kxr-b',open);if(b&&!$('.k310dh',b)){var h=$('.kxr-h',open),nm=h&&$('b',h);
   b.insertAdjacentHTML('afterbegin','<div class="k310dh"><b>'+(nm?esc(nm.textContent):'')+'</b><button type="button" class="ib" aria-label="'+esc(t('Close'))+'" onclick="accClose(\''+g+'\')">✕</button></div>')}}
-new MutationObserver(function(){if($('.k310cards')||$(DRW.km)||$(DRW.xr)||$('#k310scrim.on'))drawerDress()}).observe(document.body,{childList:true,subtree:true});
+V.drawerDress=function(){if($('.k310cards')||$(DRW.km)||$(DRW.xr)||$('#k310scrim.on'))drawerDress()};
 window.addEventListener('hashchange',function(){var sc=$('#k310scrim');if(sc)sc.classList.remove('on');document.body.classList.remove('k310drw')});
 
 // ---------------------------------------------------------------- dashboard
@@ -5567,13 +4979,13 @@ window.drawKpis=function(o){var el=$('#kpis');if(el&&o){
  strip()};
 function strip(){var el=$('#k310strip');if(!el)return;var h='';
  var ns=S.nodes||[];if(ns.length){var on=ns.filter(function(n){return n.online}).length;h+=chip(on==ns.length?'g':on?'y':'r','Servers online',N(on)+' / '+N(ns.length))}
- var tl=(window.TN&&TN.d&&TN.d.tunnels)||[];if(tl.length){var up=tl.filter(function(x){return x.state=='up'}).length;h+=chip(up==tl.length?'g':up?'y':'r','Tunnels up',N(up)+' / '+N(tl.length))}
+ var tl=(TN.d&&TN.d.tunnels)||[];if(tl.length){var up=tl.filter(function(x){return x.state=='up'}).length;h+=chip(up==tl.length?'g':up?'y':'r','Tunnels up',N(up)+' / '+N(tl.length))}
  var sv=((DB.sys||{}).services||[]);if(sv.length){var bad=sv.filter(function(x){return !x.active}).length;h+=chip(bad?'y':'g','Services',bad?N(bad)+' '+t('stopped'):t('all running'))}
  if(DB.ov)h+=chip(DB.ov.online?'g':'','Users online',N(DB.ov.online));
  h=h||'<span class="muted">…</span>';if(el._h!==h){el._h=h;el.innerHTML=h}}  // unchanged: leave it, so its turning edges keep turning
 
 // ---------------------------------------------------------------- tunnel map
-// The old neon map (glowing fibres, packets that turn into the tunnel colour at the lock, cyan packets
+// The neon map (glowing fibres, packets that turn into the tunnel colour at the lock, cyan packets
 // coming back, servers with a turning ring and a little satellite), laid out so nothing overlaps:
 // Iran entries in one column, exits abroad in the next (a third for second hops; rows on phones),
 // the columns ordered to cut crossings, every tunnel leaving and reaching its server at its own point,
@@ -5640,7 +5052,7 @@ window.tunMap=function(d,small){var sv=d.servers||[],tl=d.tunnels||[];
   if(l&&now-l.t>500){var r=(by-l.b)/((now-l.t)/1000);if(r>=0)st.rate[x.id]=r}if(!l||now-l.t>500)st.last[x.id]={b:by,t:now}});
  st.m=tmLayout(d,small);tmStart();
  return '<canvas class="tmapcv" data-tm="'+key+'" style="aspect-ratio:'+st.m.W+'/'+st.m.H+'" role="img" aria-label="'+esc(t('Tunnels'))+'"></canvas>'};
-// the drawing is the old one; only where things sit comes from tmLayout
+// the drawing; where things sit comes from tmLayout
 window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;var m=st.m,w=cv.clientWidth;if(!w)return;
  var dpr=Math.min(2,window.devicePixelRatio||1),pw=Math.round(w*dpr),ph=Math.round(w*m.H/m.W*dpr);if(cv.width!=pw||cv.height!=ph){cv.width=pw;cv.height=ph}
  var c=cv.getContext('2d'),k=pw/m.W,th=(T%1<.02||!st.th)?(st.th=tmTheme()):st.th,W=m.W,H=m.H,TAU=Math.PI*2;
@@ -5710,90 +5122,17 @@ window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;v
   var mx=m.mx||(m.n>9?10:14),nm0=(m.ab&&m.ab[s.id])||s.name,nm=nm0.length>mx?nm0.slice(0,mx-1)+'…':nm0;c.font='700 12.5px Vazirmatn,sans-serif';var nw=c.measureText(nm).width+12,ny=s.id!=m.hub&&P.y<m.cy-20?P.y-24*Z-14:P.y+24*Z+19; // the name on the outer side, away from the lines
   c.fillStyle=tmA(tmRgb(th.disc),.72);tmRound(c,P.x-nw/2,ny-13,nw,18,9);c.fill();c.fillStyle=th.t;c.textAlign='center';c.direction=/[\u0600-\u06FF]/.test(nm)?'rtl':'ltr';c.fillText(nm,P.x,ny)})};
 
-var css=`
-/* Xray part one: servers across the page */
-.g2.k310one{grid-template-columns:1fr!important}
-
-/* server cards with a side drawer (KANKI MIX, Xray) */
-.k310cards .kxl{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr));gap:10px}
-.k310cards .kxr{border-radius:16px;border:1px solid var(--gb,var(--ln));background:linear-gradient(180deg,color-mix(in srgb,var(--t) 3%,var(--c1)),var(--c2));transition:border-color .18s,transform .18s,box-shadow .18s;margin:0!important}
-.k310cards .kxr:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--a) 40%,transparent)}
-/* the open card must not move: a transform would trap the fixed drawer inside the card */
-.k310cards .kxr.open,.k310cards .kxr.open:hover{transform:none!important}
-.k310cards .kxr.open{border-color:var(--a);box-shadow:0 0 0 1px var(--a),0 12px 30px -16px color-mix(in srgb,var(--a) 60%,transparent)}
-.k310cards .kxr-h{flex-wrap:wrap;row-gap:8px;padding:14px!important;min-height:86px;align-content:center}
-.k310cards .kxr-h .sp{flex-basis:100%;height:0}
-.k310cards .kxr-h b{font-size:14px}
-.k310cards .kxr-arr{order:9;margin-inline-start:auto;transform:none!important;opacity:.6}
-html[dir=rtl] .k310cards .kxr-arr svg{transform:scaleX(-1)}
-.k310cards .kxr.open>.kxr-b{position:fixed;z-index:60;top:0;bottom:0;inset-inline-end:0;width:min(460px,100vw);height:auto!important;overflow:auto;overscroll-behavior:contain;
- background:var(--c1);border-inline-start:1px solid var(--gb2,var(--ln));box-shadow:-40px 0 80px -30px rgba(0,0,0,.85);
- padding:0 18px calc(24px + env(safe-area-inset-bottom,0px));animation:k310in .22s cubic-bezier(.2,.8,.2,1)}
-body.light .k310cards .kxr.open>.kxr-b{box-shadow:-30px 0 70px -30px rgba(0,0,0,.3)}
-.k310cards .kxr.open>.kxr-b.shut{animation:k310out .18s ease-in forwards}
-@keyframes k310in{from{transform:translateX(var(--k310dx,100%))}to{transform:none}}
-@keyframes k310out{to{transform:translateX(var(--k310dx,100%))}}
-html[dir=rtl] .k310cards{--k310dx:-100%}
-.k310dh{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:10px;margin:0 -18px 12px;padding:calc(14px + env(safe-area-inset-top,0px)) 18px 12px;background:color-mix(in srgb,var(--c1) 92%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--gb,var(--ln))}
-.k310dh b{flex:1;font-size:16px;font-weight:900}
-.k310scrim{display:none;position:fixed;inset:0;z-index:59;background:rgba(0,0,0,.55);backdrop-filter:blur(2px)}
-.k310scrim.on{display:block}
-@media(max-width:700px){.k310cards .kxr.open>.kxr-b{top:auto;width:100vw;max-height:86vh;border-radius:22px 22px 0 0;border:1px solid var(--gb2,var(--ln));border-bottom:0;--k310dx:0;animation-name:k310up}
- .k310dh{padding-top:14px}}
-@keyframes k310up{from{transform:translateY(100%)}to{transform:none}}
-
-/* dashboard */
-.k310strip{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
-.k310st{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 14px;border-radius:12px;border:1px solid var(--gb,var(--ln));background:var(--c1);font-size:12.5px;font-weight:700;color:var(--s)}
-.k310st b{color:var(--t);font-weight:900}
-.k310st i{width:8px;height:8px;border-radius:50%;background:var(--s)}
-.k310st.g i{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent)}
-.k310st.y i{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 22%,transparent)}
-.k310st.r i{background:var(--bad);box-shadow:0 0 0 3px color-mix(in srgb,var(--bad) 22%,transparent)}
-.k310st.y{border-color:color-mix(in srgb,var(--warn) 35%,transparent)}.k310st.r{border-color:color-mix(in srgb,var(--bad) 35%,transparent)}
-.k310dash{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px;margin:12px 0}
-.k310c{min-width:0;display:grid}.k310c>.card{margin:0!important;min-width:0}
-.k310c.w8{grid-column:span 8}.k310c.w4{grid-column:span 4}.k310c.w6{grid-column:span 6}
-.k310res{display:grid;gap:10px;align-content:start}
-.k310res .gg{display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important;margin:0!important}
-.k310res .gc{padding:10px!important;border-radius:14px!important}
-.k310res .gc .ch,.k310res .gc [id^=ch_]{display:none}
-@media(max-width:1100px){.k310c.w8,.k310c.w4,.k310c.w6{grid-column:span 12}}
-#pg .ph .row .btn.sm,#pg .ph .row .b2.sm{display:inline-flex;align-items:center;gap:6px}
-@media(max-width:620px){#pg .ph .row:has(#d_live){flex-wrap:wrap!important}}
-
-@media(prefers-reduced-motion:reduce){.k310cards .kxr.open>.kxr-b{animation:none}.k310cards .kxr{transition:none}}
-
-/* settings: the section list stays in view, the save bar sticks to the bottom of the section */
-@media(min-width:900px){#st .stn{position:sticky;top:84px;align-self:start}}
-#st .sts .sbar{position:sticky;bottom:12px;z-index:3;border-radius:14px;padding:10px 12px;margin-top:14px;background:color-mix(in srgb,var(--c1) 88%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--gb,var(--ln))}
-#st .sts .sbar:has(button[data-save]:not(:disabled)){border-color:color-mix(in srgb,var(--a) 55%,transparent);box-shadow:0 10px 30px -16px color-mix(in srgb,var(--a) 70%,transparent)}
-#st .stn button.dirty em{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--a);margin-inline-start:auto}
-#st .sts .srow{padding:12px 0;border-bottom:1px solid var(--gb,var(--ln))}
-`;
-var st=document.createElement('style');st.id='k310hub';st.textContent=css;document.head.appendChild(st);
 })();
 
 // ==================================================================== the look: menu, rails, cards
-// Kanki Panel 3.11: the look of the new design. Loaded last (after kanki-hub.js); it changes how the
-// panel looks and moves, never what a button does:
-//  - the side menu: groups that open and close smoothly (items slide in one after another), the open
-//    section lit gold with a turning gold edge; a button folds it to icons only
-//  - "Side menu / Top menu": the whole menu can sit in one row across the top, dragged or scrolled sideways
-//  - Cores (VPN services): the tabs are a rail of cards (drag it, tap one); under a core its servers are
-//    country chips, and the picked one opens its settings right below them
-//  - users in two columns of slim cards: the whole name, data used and the expiry date
-//  - every page comes in with its cards rising one after another
+// the menu and motion: side menu groups that open and close (or the whole menu in one row across the
+// top), the Cores rail of cards with a server's settings right below its chip, users in two columns
+// of slim cards, and pages that come in card by card.
 (function(){
 'use strict';
-var V=window.V37;if(!V)return;
-if(window.REALITY_TARGETS){REALITY_TARGETS.length=0;['www.microsoft.com:443','www.apple.com:443','dl.google.com:443','www.speedtest.net:443','www.cloudflare.com:443','www.yahoo.com:443','www.amazon.com:443','addons.mozilla.org:443','www.samsung.com:443','www.nvidia.com:443',
- 'www.cisco.com:443','www.mozilla.org:443','www.intel.com:443','www.ebay.com:443','www.bing.com:443','www.asus.com:443','www.digikala.com:443','www.aparat.com:443','divar.ir:443','snapp.ir:443','www.filimo.com:443','www.namava.ir:443'].forEach(function(x){REALITY_TARGETS.push(x)})}
-ICO.cores='<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>';
+var V=V37;
 var CHEV='<svg class="kd-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>';
 function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){}return null}
-// the services section is called Cores
-V.SECS.forEach(function(s){if(s[0]=='vpnsec'){s[1]='Cores';s[2]='cores'}});
 
 // ---------------------------------------------------------------- side menu: groups that open and close
 var GOPEN={};try{GOPEN=JSON.parse(store('kk_navg')||'{}')||{}}catch(e){}
@@ -5842,7 +5181,7 @@ window.shell=function(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.cha
  $('#lo').onclick=function(){logout()};$('#lo2').onclick=function(e){e.preventDefault();logout()};
  $('#upd').onclick=updateModal;$('#upd2').onclick=function(){$('#shade').click();location.hash='#settings';S.stsec='upd';if(S.page=='settings')route()};
  // page headers get the page icon, whenever a page draws (or redraws) its header
- if(window.MutationObserver)new MutationObserver(decoratePh).observe($('#pg'),{childList:true,subtree:true});
+ new MutationObserver(decoratePh).observe($('#pg'),{childList:true,subtree:true});
  api('GET','/api/update/check').then(function(r){var c='dot '+(r.available?'y':(r.error?'':'g'));
   ['#updot','#updot2'].forEach(function(x){var d=$(x);if(d)d.className=c});
   var u=$('#updt');if(u)u.textContent=r.available?t('A new version is available.'):(r.error?t('Update source not set'):t('You are on the latest version.'))}).catch(function(){});
@@ -5931,7 +5270,8 @@ function kpiEdges(){$$('#kpis .kpi').forEach(function(k){if(!$('.kd-edge',k))k.i
 // every turning edge turns in step with the others, and a redraw does not send it back to the start
 var EDGE='.kd-it.on,.kd-tn.on,.kd-rail .stl a.on,.kd-chip.on,.uchip.kd-u,#st .stn button.on,.k310st,.kd-edge,.kxr[data-acc="srv"]>.kxr-h';
 function phase(){var ph=-((Date.now()/1000)%3.2);$$(EDGE).forEach(function(e){if(!e._kdph){e._kdph=1;e.style.setProperty('--kdph',ph.toFixed(2)+'s')}})}
-new MutationObserver(function(){if($('#sectabs'))dressRail();if(document.body.classList.contains('kd-vpn'))chips();servers();antidpi();xrTabsRow();reality();kpiEdges();phase()}).observe(document.body,{childList:true,subtree:true});
+// whatever a page draws is dressed right away: number icons, tab marks, drawers, rails and chips
+new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();V.drawerDress();if($('#sectabs'))dressRail();if(document.body.classList.contains('kd-vpn'))chips();servers();antidpi();xrTabsRow();reality();kpiEdges();phase()}).observe(document.body,{childList:true,subtree:true});
 
 // ---------------------------------------------------------------- users: two columns, data and expiry date
  window.uchip=function(u){var st=ustate(u),lv=liveOf(u),on=u.online_connections>0||lv.length>0,dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':''),ps=[];
@@ -5944,185 +5284,6 @@ new MutationObserver(function(){if($('#sectabs'))dressRail();if(document.body.cl
    '<span class="k310bar'+(pc<0?' inf':pc>=90?' hot':pc>=70?' warm':'')+'"><i style="width:'+(pc<0?100:Math.max(3,pc))+'%"></i></span>'+
    '<span class="kd-meta"><span>'+t('Data')+' <b class="ltr">'+N(used)+(pc<0?' GB / ∞':' / '+N(u.traffic_limit_gb)+' GB')+'</b></span><span>'+t('Expires')+' <b>'+exp+'</b></span></span></button>'};
 
-var css=`
-/* ---- the moving gold edge (needs @property; without it the edge stays still) ---- */
-@property --kda{syntax:"<angle>";initial-value:0deg;inherits:false}
-@keyframes kdang{to{--kda:360deg}}
-body.kd .kd-it.on::after,body.kd .kd-tn.on::after,body.kd .kd-rail .stl a.on::after,body.kd.kd-vpn .kxl>.kxr.open>.kxr-h::after,body.kd .uchip.kd-u:hover::after,body.kd #st .stn button.on::after,body.kd .k310st::after,body.kd .kd-chip.on::after,body.kd #svp_g.kd-srv .kxr>.kxr-h:hover::after{
- content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;
- background:conic-gradient(from var(--kda),transparent 0 55%,var(--cc,var(--a)) 70%,#fff 74%,var(--cc,var(--a)) 78%,transparent 92%);
- -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);animation:kdang 3.2s linear infinite;animation-delay:var(--kdph,0s)}
-body.kd .k310st{position:relative}body.kd .k310st::after{opacity:.7}
-/* ---- side menu ---- */
-body.kd nav.side .snav{display:flex;flex-direction:column;gap:2px}
-.kd-g{display:flex;flex-direction:column}
-.kd-gh{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;padding:12px 10px 6px;color:var(--s);font:inherit;font-size:11.5px;font-weight:800;letter-spacing:.3px;cursor:pointer;text-align:start;border-radius:10px}
-.kd-gh:hover{color:var(--t)}
-.kd-chev{margin-inline-start:auto;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
-.kd-g.open>.kd-gh .kd-chev{transform:rotate(-90deg)}
-html[dir=ltr] .kd-chev{transform:scaleX(-1)}html[dir=ltr] .kd-g.open>.kd-gh .kd-chev{transform:scaleX(-1) rotate(-90deg)}
-.kd-gb{display:grid;grid-template-rows:0fr;transition:grid-template-rows .45s cubic-bezier(.2,.8,.2,1)}
-.kd-g.open>.kd-gb{grid-template-rows:1fr}
-.kd-gbi{overflow:hidden;display:flex;flex-direction:column;gap:3px;min-height:0}
-body.kd nav.side a.kd-it{position:relative;display:flex;align-items:center;gap:12px;padding:6px 8px!important;margin:0!important;border-radius:14px!important;font-weight:700;opacity:0;transform:translateX(calc(14px * var(--kdd,1)));
- transition:opacity .35s,transform .45s cubic-bezier(.2,.8,.2,1),background .2s,color .2s}
-html[dir=ltr] body.kd nav.side a.kd-it{--kdd:-1}
-.kd-g.open a.kd-it{opacity:1!important;transform:none!important}
-.kd-g.open a.kd-it.d2{transition-delay:.05s,.05s,0s,0s}.kd-g.open a.kd-it.d3{transition-delay:.1s,.1s,0s,0s}.kd-g.open a.kd-it.d4{transition-delay:.15s,.15s,0s,0s}.kd-g.open a.kd-it.d5{transition-delay:.2s,.2s,0s,0s}
-body.kd nav.side a.kd-it .ni{width:38px;height:38px;flex:none;border-radius:12px;display:grid;place-items:center;background:var(--in);border:1px solid var(--gb,var(--ln));color:var(--a);transition:all .3s}
-body.kd nav.side a.kd-it:hover{background:color-mix(in srgb,var(--a) 7%,transparent)!important;color:var(--t)}
-body.kd nav.side a.kd-it.on{background:linear-gradient(90deg,color-mix(in srgb,var(--a) 3%,transparent),color-mix(in srgb,var(--a) 15%,transparent))!important;color:var(--t)!important;box-shadow:none!important}
-html[dir=ltr] body.kd nav.side a.kd-it.on{background:linear-gradient(270deg,color-mix(in srgb,var(--a) 3%,transparent),color-mix(in srgb,var(--a) 15%,transparent))!important}
-body.kd nav.side a.kd-it.on .ni{background:radial-gradient(circle at 30% 25%,#fff3c4,var(--a) 50%,var(--ad));color:#160f00;border-color:transparent;box-shadow:0 0 22px -4px color-mix(in srgb,var(--a) 85%,transparent)}
-body.kd nav.side a.kd-it.on::before{content:"";position:absolute;inset-inline-start:-12px;top:9px;bottom:9px;width:4px;border-radius:4px;background:var(--a);box-shadow:0 0 14px var(--a);animation:kdbar .45s cubic-bezier(.2,.8,.2,1)}
-@keyframes kdbar{from{transform:scaleY(0)}to{transform:scaleY(1)}}
-.kd-fold{margin-inline-start:auto;width:32px;height:32px;flex:none;border-radius:10px;border:1px solid var(--gb2,var(--ln));background:var(--in);color:var(--t);display:grid;place-items:center;cursor:pointer;transition:transform .45s cubic-bezier(.2,.8,.2,1)}
-html[dir=ltr] .kd-fold svg{transform:scaleX(-1)}
-@media(min-width:900px){
- body.kd nav.side{transition:width .45s cubic-bezier(.2,.8,.2,1)}
- body.kd header.top,body.kd main{transition:margin .45s cubic-bezier(.2,.8,.2,1)}
- body.kd.kd-mini{--sbw:88px}
- body.kd.kd-mini .kd-fold{transform:rotate(180deg)}
- body.kd.kd-mini nav.side .sbrand>div:not(:first-child),body.kd.kd-mini .kd-gh span,body.kd.kd-mini .kd-gh .kd-chev,body.kd.kd-mini a.kd-it .kd-l,body.kd.kd-mini nav.side .sfoot small,body.kd.kd-mini nav.side .sfoot b,body.kd.kd-mini nav.side .lo2{opacity:0;width:0;overflow:hidden;white-space:nowrap}
- body.kd.kd-mini .kd-gh{justify-content:center;padding:8px 0 2px;min-height:10px}body.kd.kd-mini .kd-gh::before{content:"";width:18px;height:2px;border-radius:2px;background:var(--gb2,var(--ln))}
- body.kd.kd-mini nav.side .sbrand{flex-direction:column;gap:8px}body.kd.kd-mini .kd-fold{margin:0}
- body.kd.kd-mini .kd-g>.kd-gb{grid-template-rows:1fr}body.kd.kd-mini a.kd-it{opacity:1!important;transform:none!important;justify-content:center}
- /* the menu across the top */
- body.kd.kd-topm{--sbw:0px}
- body.kd.kd-topm nav.side{display:none}
-}
-.kd-top{display:none}
-body.kd.kd-topm .kd-top{display:flex;position:sticky;top:59px;z-index:6;gap:8px;align-items:center;overflow-x:auto;scrollbar-width:none;padding:8px 18px 10px;cursor:grab;
- background:color-mix(in srgb,var(--bg1) 86%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--gb,var(--ln));
- -webkit-mask-image:linear-gradient(90deg,transparent,#000 24px,#000 calc(100% - 24px),transparent);mask-image:linear-gradient(90deg,transparent,#000 24px,#000 calc(100% - 24px),transparent)}
-.kd-top::-webkit-scrollbar{display:none}
-.kd-top.kd-drag,.kd-rail .stl.kd-drag{cursor:grabbing;scroll-snap-type:none!important}
-.kd-sep{flex:none;font-size:11px;font-weight:800;color:var(--s);padding:0 8px 0 4px}
-.kd-tn{position:relative;flex:none;display:flex;align-items:center;gap:9px;padding:5px 14px 5px 6px;border-radius:15px;border:1px solid var(--gb2,var(--ln));background:var(--c1);color:var(--t);text-decoration:none;font-weight:800;font-size:13px;min-height:46px;transition:all .3s cubic-bezier(.2,.8,.2,1)}
-html[dir=rtl] .kd-tn{padding:5px 6px 5px 14px}
-.kd-tn .ni{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;background:var(--in);color:var(--a)}
-.kd-tn:hover{border-color:color-mix(in srgb,var(--a) 45%,transparent)}
-.kd-tn.on{background:linear-gradient(180deg,color-mix(in srgb,var(--a) 16%,transparent),color-mix(in srgb,var(--a) 4%,transparent));transform:translateY(-2px)}
-.kd-tn.on .ni{background:radial-gradient(circle at 30% 25%,#fff3c4,var(--a) 50%,var(--ad));color:#160f00;box-shadow:0 0 20px -4px var(--a)}
-body.kd.kd-topm .sectabs{top:124px}
-.kd-lay{display:inline-flex;border:1px solid var(--gb2,var(--ln));border-radius:12px;padding:3px;background:var(--in)}
-.kd-lay button{border:0;background:none;border-radius:9px;padding:5px 10px;font:inherit;font-size:11.5px;font-weight:800;color:var(--s);cursor:pointer}
-.kd-lay button.on{background:var(--a);color:#160f00}
-@media(max-width:899px){.kd-lay{display:none}body.kd.kd-topm .kd-top{display:none}}
-/* ---- pages come in card by card ---- */
-@keyframes kdrise{from{opacity:0;transform:translateY(20px) scale(.985)}to{opacity:1;transform:none}}
-#pg.kd-enter>*:not(#sectabs),#pg.kd-enter .k310c,#pg.kd-enter .kpi{animation:kdrise .65s cubic-bezier(.2,.8,.2,1) both}
-#pg.kd-enter>*:nth-child(2){animation-delay:.05s}#pg.kd-enter>*:nth-child(3){animation-delay:.1s}#pg.kd-enter>*:nth-child(4){animation-delay:.15s}#pg.kd-enter>*:nth-child(5){animation-delay:.2s}#pg.kd-enter>*:nth-child(n+6){animation-delay:.25s}
-#pg.kd-enter .kpi:nth-child(2){animation-delay:.08s}#pg.kd-enter .kpi:nth-child(3){animation-delay:.12s}#pg.kd-enter .kpi:nth-child(4){animation-delay:.16s}#pg.kd-enter .kpi:nth-child(5){animation-delay:.2s}#pg.kd-enter .kpi:nth-child(6){animation-delay:.24s}
-#pg.kd-enter .k310c:nth-child(2){animation-delay:.18s}#pg.kd-enter .k310c:nth-child(3){animation-delay:.26s}#pg.kd-enter .k310c:nth-child(4){animation-delay:.32s}#pg.kd-enter .k310c:nth-child(n+5){animation-delay:.38s}
-/* ---- phones: the More sheet slides up, its tiles follow ---- */
-@keyframes kdup{from{transform:translateY(100%)}to{transform:none}}
-body.kd .msheet.k38sheet.on{animation:kdup .42s cubic-bezier(.2,.8,.2,1)}
-body.kd .msheet.k38sheet.on .k38tile{animation:kdrise .5s cubic-bezier(.2,.8,.2,1) both}
-body.kd .msheet.k38sheet.on .k38tiles:nth-of-type(2) .k38tile{animation-delay:.05s}body.kd .msheet.k38sheet.on .k38tiles:nth-of-type(3) .k38tile{animation-delay:.1s}body.kd .msheet.k38sheet.on .k38tiles:nth-of-type(n+4) .k38tile{animation-delay:.15s}
-/* ---- Cores: the rail of cards ---- */
-body.kd .sectabs.kd-rail{position:relative;top:auto;display:block;padding:0;border:0;background:none;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none;margin-bottom:10px}
-body.kd .sectabs.kd-rail .sth2{display:none}
-body.kd .sectabs.kd-rail .stl{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:8px 6px 12px;border:0;background:none;border-radius:0;cursor:grab;
- -webkit-mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent)}
-body.kd .sectabs.kd-rail .stl a{position:relative;flex:0 0 136px;scroll-snap-align:center;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:7px;row-gap:3px;padding:9px 10px!important;border-radius:15px!important;
- border:1px solid var(--gb2,var(--ln));background:linear-gradient(180deg,color-mix(in srgb,var(--t) 4%,var(--c1)),var(--c2))!important;color:var(--t)!important;white-space:normal;
- transition:transform .45s cubic-bezier(.2,.8,.2,1),box-shadow .45s,border-color .3s!important}
-body.kd .sectabs.kd-rail .stl a:hover{border-color:color-mix(in srgb,var(--cc) 45%,transparent)}
-body.kd .sectabs.kd-rail .stl a b{font-size:12.5px;font-weight:900}
-body.kd .sectabs.kd-rail .stl a b{grid-column:2;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-body.kd .sectabs.kd-rail .stl a small{grid-column:1/-1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;font-weight:600;color:var(--s);line-height:1.4}
-.kd-ci{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--cc) 16%,transparent);color:var(--cc);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--cc) 35%,transparent);transition:all .35s}
-body.kd .sectabs.kd-rail .stl a.on{transform:translateY(-3px) scale(1.03);border-color:transparent;box-shadow:0 20px 44px -22px var(--cc)}
-body.kd .sectabs.kd-rail .stl a.on .kd-ci{background:var(--cc);color:#0b0b0a;box-shadow:0 0 24px -2px var(--cc)}
-/* ---- Cores: servers as a row of country chips (swipe sideways); the picked one's settings below ---- */
-.kd-crail{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:6px 4px 12px;margin:0 -4px;cursor:grab;scroll-snap-type:x proximity;
- -webkit-mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent);mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent)}
-.kd-crail::-webkit-scrollbar{display:none}
-.kd-chip{position:relative;flex:none;scroll-snap-align:start;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:3px 9px;border-radius:12px;border:1px solid var(--gb2,var(--ln));
- background:var(--c1);color:var(--t);font:inherit;cursor:pointer;transition:all .3s cubic-bezier(.2,.8,.2,1)}
-.kd-cf{display:inline-flex;align-items:flex-start;line-height:1}.kd-cf .flg{font-size:20px}.kd-cf sup{font-size:10px;font-weight:900;margin-inline-start:1px;color:var(--a)}
-.kd-cl{display:flex;flex-direction:column;align-items:flex-start;gap:0;line-height:1.05;font-family:ui-monospace,Menlo,Consolas,monospace;direction:ltr}
-.kd-cl i{font-style:normal;font-size:8.5px;font-weight:800;color:var(--s);opacity:.7;letter-spacing:.3px}
-.kd-cl i.g{color:var(--ok);opacity:1}
-.kd-chip.on .kd-cl i{color:rgba(22,15,0,.45)!important}.kd-chip.on .kd-cl i.g{color:#0b4d2c!important}.kd-chip.on .kd-cf sup{color:#160f00!important}
- background:var(--c1);color:var(--t);font:inherit;font-size:12.5px;font-weight:700;white-space:nowrap;cursor:pointer;transition:all .3s cubic-bezier(.2,.8,.2,1)}
-.kd-chip:hover{border-color:color-mix(in srgb,var(--a) 45%,transparent)}
-.kd-chip.on{background:linear-gradient(180deg,#FFE9A6,var(--a) 55%,var(--ad));color:#160f00;border-color:transparent;box-shadow:0 10px 24px -12px color-mix(in srgb,var(--a) 90%,transparent);--cc:#fff}
-body.kd.kd-vpn .kxl.kd-rows{display:block!important}
-body.kd.kd-vpn .kxl.kd-rows>.kxr:not(.open){display:none!important}
-body.kd.kd-vpn .kxl.kd-rows>.kxr>.kxr-h{display:none!important}
-body.kd.kd-vpn .kxl.kd-rows>.kxr.open{border:0!important;background:none!important;box-shadow:none!important;transform:none!important}
-body.kd.kd-vpn .kxl.kd-rows>.kxr.open>.kxr-b{position:static!important;width:auto!important;height:auto!important;max-height:none!important;overflow:visible!important;inset:auto!important;box-shadow:none!important;
- border:1px solid var(--gb,var(--ln))!important;border-radius:16px!important;background:linear-gradient(180deg,color-mix(in srgb,var(--t) 3%,var(--c1)),var(--c2))!important;padding:4px 14px 12px!important;animation:none!important}
-/* opening one plays the entrance once; the page's own refresh redraws it without moving (no blinking) */
-body.kd.kd-vpn .kxl.kd-rows>.kxr.open>.kxr-b.anim{animation:kdrise .45s cubic-bezier(.2,.8,.2,1)!important}
-body.kd .k310cards .kxr.open>.kxr-b:not(.anim){animation:none!important}
-body.kd.kd-vpn .k310dh,body.kd.kd-vpn #k310scrim{display:none!important}
-body.kd.kd-vpn.k310drw{overflow:visible!important}
-/* the top of a core page: a smaller title, two small buttons, the numbers as one slim row */
-body.kd.kd-vpn #pg>.ph{gap:8px!important;margin-bottom:8px!important;padding-bottom:10px!important}
-body.kd.kd-vpn #pg>.ph h2{font-size:18px!important}body.kd.kd-vpn #pg>.ph p{font-size:12px!important;line-height:1.6;margin-top:2px!important}
-body.kd.kd-vpn #pg>.ph .phi{width:38px!important;height:38px!important}
-body.kd.kd-vpn #pg>.ph .btn,body.kd.kd-vpn #pg>.ph .b2{min-height:32px!important;padding-inline:11px!important;font-size:12px!important;border-radius:10px!important}
-body.kd .kv>div{display:flex!important;align-items:baseline;justify-content:space-between;gap:8px}
-body.kd .kv>div small{white-space:nowrap}
-/* the numbers at the top of a core: slimmer */
-body.kd .kv{gap:6px!important;margin:6px 0 10px!important;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))!important}
-body.kd .kv>div{padding:6px 11px!important;border-radius:11px!important}
-body.kd .kv small{font-size:11px!important}body.kd .kv b{font-size:14px!important;line-height:1.4}
-/* Xray's own tabs: one row you swipe sideways */
-#xr_tabs.kd-xtabs{flex-wrap:nowrap!important;overflow-x:auto;cursor:grab;gap:6px;padding:2px 2px 8px}
-#xr_tabs.kd-xtabs a{flex:none;padding:6px 11px!important;font-size:12px!important;min-height:36px;border-radius:11px!important}
-/* ---- Servers page: two columns of slim cards, a pencil, the settings in the side drawer ---- */
-body.kd #svp_g.kd-srv .kxl{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
-body.kd #svp_g.kd-srv .kxr{border-radius:14px!important}
-body.kd #svp_g.kd-srv .kxr>.kxr-h{position:relative;min-height:52px!important;padding:8px 10px!important;gap:4px 7px!important;row-gap:4px!important;align-content:center}
-body.kd #svp_g.kd-srv .kxr>.kxr-h b{font-size:13px!important;overflow-wrap:anywhere}
-body.kd #svp_g.kd-srv .kxr>.kxr-h .kxr-arr,body.kd #svp_g.kd-srv .kxr>.kxr-h .sp{display:none!important}
-body.kd #svp_g.kd-srv .kxr>.kxr-h .kxc-tag,body.kd #svp_g.kd-srv .kxr>.kxr-h .kxr-st{font-size:10px!important;padding:0 6px!important}
-.kd-pen{order:20;margin-inline-start:auto;width:30px;height:30px;flex:none;border-radius:10px;display:grid;place-items:center;border:1px solid var(--gb2,var(--ln));background:var(--in);color:var(--a)}
-body.kd #svp_g.kd-srv .kxr>.kxr-h:hover .kd-pen{background:var(--a);color:#160f00}
-@media(max-width:380px){body.kd #svp_g.kd-srv .kxl{grid-template-columns:1fr!important}}
-/* ---- Anti-DPI: one line per method; a tap opens what it is for ---- */
-body.kd .g2>.box.kd-tpl{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px 10px;padding:10px 12px!important;cursor:pointer;transition:border-color .2s}
-body.kd .g2>.box.kd-tpl:hover{border-color:color-mix(in srgb,var(--a) 40%,transparent)}
-body.kd .g2>.box.kd-tpl>b{font-size:13.5px}
-body.kd .g2>.box.kd-tpl>span{grid-column:1}
-body.kd .g2>.box.kd-tpl>small{grid-column:1/-1;display:none!important}
-body.kd .g2>.box.kd-tpl.open>small{display:block!important}
-body.kd .g2>.box.kd-tpl>button{grid-column:2;grid-row:1/3;width:auto!important;min-height:36px!important;padding:0 12px!important;font-size:12px!important}
-/* ---- REALITY targets: tested, marked ---- */
-.kd-rtl{margin:6px 0 4px}.kd-rtl>small{display:block;margin-bottom:6px}
-.kd-rtg{display:flex;flex-wrap:wrap;gap:6px}
-.kd-rt{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:10px;border:1px solid var(--gb2,var(--ln));background:var(--in);color:var(--t);font:inherit;font-size:12px;cursor:pointer}
-.kd-rt i{font-style:normal;font-weight:900}.kd-rt.ok i{color:var(--ok)}.kd-rt.mid i{color:var(--warn)}.kd-rt.bad{opacity:.55}.kd-rt.bad i{color:var(--bad)}
-.kd-rt small{color:var(--s);font-size:10.5px}.kd-rt em{font-style:normal;font-size:9.5px;font-weight:800;padding:0 5px;border-radius:5px;background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
-.kd-rt.pick{border-color:var(--a);box-shadow:0 0 0 1px var(--a)}
-/* ---- every button that holds a word or two: one height, one size ---- */
-body.kd #pg .btn,body.kd #pg .b2,body.kd .modal .btn,body.kd .modal .b2{min-height:36px;padding-top:0!important;padding-bottom:0!important;padding-inline:15px!important;font-size:13px!important;border-radius:12px!important;display:inline-flex;align-items:center;justify-content:center;gap:6px}
-body.kd #pg .btn.sm,body.kd #pg .b2.sm,body.kd .modal .btn.sm,body.kd .modal .b2.sm{min-height:34px;padding-inline:11px!important;font-size:12px!important;border-radius:10px!important}
-body.kd #pg .ph .row{flex-wrap:wrap;gap:8px!important}
-/* the dashboard numbers: a turning edge in their own colour */
-.kd-edge{position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;
- background:conic-gradient(from var(--kda),transparent 0 55%,var(--kc,var(--a)) 70%,#fff 74%,var(--kc,var(--a)) 78%,transparent 92%);
- -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);animation:kdang 3.2s linear infinite;animation-delay:var(--kdph,0s);opacity:.85}
-body.k38 .kpi.g{--kc:var(--ok)}body.k38 .kpi.y{--kc:var(--warn)}body.k38 .kpi.r{--kc:var(--bad)}
-/* ---- users: two columns of slim cards ---- */
-body.kd .uchips{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important}
-body.kd .uchip.kd-u{position:relative;display:flex;flex-direction:column;align-items:stretch;gap:7px;padding:10px 12px!important;border-radius:15px;text-align:start;transition:transform .3s,border-color .3s}
-body.kd .uchip.kd-u:hover{transform:translateY(-2px)}
-body.kd .uchip.kd-u.on{border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
-.kd-un{display:flex;align-items:center;gap:8px;min-width:0}
-body.kd .uchip.kd-u .nm{flex:1;min-width:0;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere;font-weight:800;font-size:13.5px;line-height:1.35}
-.kd-meta{display:flex;justify-content:space-between;gap:4px 10px;flex-wrap:wrap;font-size:11.5px;font-weight:600;color:var(--s)}
-.kd-meta b{color:var(--t);font-weight:800}
-.uchip.st-finished .kd-meta span:last-child b,.uchip.st-disabled .kd-meta span:last-child b{color:var(--bad)}
-.k310bar.hot~.kd-meta span:first-child b{color:var(--bad)}.k310bar.warm~.kd-meta span:first-child b{color:var(--warn)}
-@media(prefers-reduced-motion:reduce){#pg.kd-enter *,body.kd .msheet.k38sheet.on,body.kd .msheet.k38sheet.on .k38tile{animation:none!important}
- body.kd nav.side a.kd-it,.kd-gb,.kd-chev{transition:none!important}body.kd .kd-it.on::after,body.kd .kd-tn.on::after,body.kd .kd-rail .stl a.on::after,body.kd.kd-vpn .kxl>.kxr.open>.kxr-h::after,body.kd .k310st::after{animation:none}}
-`;
-var st=document.createElement('style');st.id='kdcss';st.textContent=css;document.head.appendChild(st);
 look();
 })();
 
@@ -6167,26 +5328,7 @@ function poll(){timer=0;var ids=Object.keys(RM);if(!ids.length)return;
   if(!fin)timer=setTimeout(poll,2000)})}
 function follow(rid){if(!rid)return;if(!Object.keys(RM).length)started=Date.now();RM[rid]={r:null};clearTimeout(timer);timer=setTimeout(poll,600)}
 window.kdFollowRemoval=follow;
-var css=`
-#kdrm{position:fixed;z-index:9998;inset-inline-start:50%;bottom:16px;transform:translate(50%,140%);width:min(380px,calc(100vw - 32px));max-height:min(60vh,420px);overflow:auto;
- background:#0b0b0b;color:var(--t,#fff);border:1px solid color-mix(in srgb,var(--a,#f5b301) 45%,transparent);border-radius:16px;padding:10px 12px 12px;
- box-shadow:0 0 0 1px #000,0 10px 40px #000c,0 0 24px color-mix(in srgb,var(--a,#f5b301) 18%,transparent);font-size:12.5px;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .35s;opacity:0}
-[dir=ltr] #kdrm{transform:translate(-50%,140%)}
-#kdrm.on{transform:translate(50%,0);opacity:1}[dir=ltr] #kdrm.on{transform:translate(-50%,0)}
-#kdrm.all{border-color:color-mix(in srgb,var(--ok,#22c55e) 55%,transparent)}
-.kdrm-h{display:flex;align-items:center;gap:8px;margin-bottom:6px}.kdrm-h b{flex:1;font-weight:800;font-size:13px}
-.kdrm-sp,.kdrm-r i{width:14px;height:14px;flex:none;border-radius:50%;border:2px solid color-mix(in srgb,var(--a,#f5b301) 30%,transparent);border-top-color:var(--a,#f5b301);animation:kdrmspin .8s linear infinite}
-#kdrm.all .kdrm-sp{animation:none;border-color:var(--ok,#22c55e);background:var(--ok,#22c55e)}
-.kdrm-x{background:none;border:0;color:var(--s,#aaa);font-size:13px;cursor:pointer;min-width:28px;min-height:28px;border-radius:8px}.kdrm-x:hover{color:var(--t,#fff);background:#ffffff12}
-.kdrm-g{padding:6px 0;border-top:1px solid #ffffff12}.kdrm-n{color:var(--s,#aaa);font-size:11.5px;margin-bottom:4px}.kdrm-n b{color:var(--a,#f5b301)}
-.kdrm-r{display:flex;align-items:flex-start;gap:8px;padding:3px 0;line-height:1.5}.kdrm-r i{margin-top:2px;position:relative}
-.kdrm-r span{flex:1;min-width:0}.kdrm-r em{display:block;font-style:normal;font-size:11px;color:var(--s,#aaa)}
-.kdrm-r.done i{animation:none;border-color:var(--ok,#22c55e);background:var(--ok,#22c55e)}
-.kdrm-r.done i::after{content:'';position:absolute;inset-inline-start:3px;top:0;width:4px;height:7px;border:solid #000;border-width:0 2px 2px 0;transform:rotate(45deg)}
-.kdrm-r.done em{color:var(--ok,#22c55e)}
-.kdrm-r.off i{animation:none;border-color:var(--warn,#f59e0b);border-style:dashed}.kdrm-r.off em{color:var(--warn,#f59e0b)}
-@keyframes kdrmspin{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){#kdrm{transition:none}.kdrm-sp,.kdrm-r i{animation:none}}
-`;
-var st=document.createElement('style');st.id='kdrmcss';st.textContent=css;document.head.appendChild(st);
 })();
+
+// ==================================================================== start
+applyLook();if(S.token)boot();else loginView();
