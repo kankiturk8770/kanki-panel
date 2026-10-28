@@ -1842,6 +1842,7 @@ var FA={
  "Ports moved":"پورت‌ها جابه‌جا شدند",
  "Ports of":"پورت‌های",
  "Ports of the exit server":"پورت‌های سرور خروجی",
+ "Empty = Iran server-abroad server":"خالی = اسم سرور ایران-اسم سرور خارج",
  "Ports of the panel server were filled in":"پورت‌های سرور پنل وارد شد",
  "Ports taken by another program":"پورت‌هایی که برنامه‌ی دیگری گرفته",
  "Ports through the tunnel":"پورت‌ها از راه تانل",
@@ -3915,7 +3916,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  var sec=function(n,title,extra){return '<div class="tws"><h4>'+(n?'<i>'+N(n)+'</i>':'')+t(title)+(extra||'')+'</h4>'};
  modal(mhead(id?t('Edit tunnel'):t('New tunnel'))+
   (sv.length<2?'<div class="warnbox">'+t('First add your entry server in the “Tunnel servers” menu.')+'</div>':'')+
-  sec(1,'Route')+'<label class="f">'+t('Name')+'</label><input id="tw_nm" value="'+esc(x.name||'')+'" placeholder="Iran → '+esc(tunSrv(dX).name)+'">'+
+  sec(1,'Route')+'<label class="f">'+t('Name')+'</label><input id="tw_nm" value="'+esc(x.name||'')+'" placeholder="'+esc(t('Empty = Iran server-abroad server'))+'">'+
   '<div class="trte"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="tw_en">'+opt(dE)+'</select></div><span class="arr">'+ic('swap',18)+'</span><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="tw_ex">'+opt(dX)+'</select></div></div>'+
   '<label class="f">'+t('Who connects')+'</label><div class="seg" id="tw_md"><button data-v="reverse" class="'+(mode=='reverse'?'on':'')+'">'+t('Exit → entry (reverse, recommended)')+'</button><button data-v="direct" class="'+(mode=='direct'?'on':'')+'">'+t('Entry → exit (direct)')+'</button></div></div>'+
   sec(2,'Tunnel type')+'<div class="seg" id="tw_kd"><button data-v="" class="'+(kind!='awg'?'on':'')+'">'+t('Kanki tunnel')+'</button><button data-v="awg" class="'+(kind=='awg'?'on':'')+'">🛡 AmneziaWG</button><button data-v="hy2" class="'+(kind=='hy2'?'on':'')+'">⚡ Hysteria2</button></div>'+
@@ -4060,6 +4061,9 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   var L=function(v){return String(v||'').split(/[\s,]+/).filter(Boolean)},g=function(k){var e=$(k);return e?e.value:''};
   tunSmart({entry:$('#tw_en').value,exit:$('#tw_ex').value,prof:$('#tw_pf').value,apply:{id:id,snap:{name:$('#tw_nm').value,mode:st.mode,transport:st.tr,port:+$('#tw_pt').value||0,conns:TNP[$('#tw_pf').value]||4,tcp:L($('#tw_tcp').value),udp:L($('#tw_udp').value),dial:g('#tw_dl'),target:g('#tw_tg'),sni:g('#tw_sni'),host:g('#tw_host'),frag:!!($('#tw_frag2')&&$('#tw_frag2').checked),path:g('#tw_pa'),auto:!!($('#tw_au')&&$('#tw_au').checked),fec:st.tr=='game'?g('#tw_fec'):'',dup:st.tr=='game'&&!!($('#tw_dup')&&$('#tw_dup').checked)}}})};
  hint();kindUi();if(!id&&!(x.tcp||[]).length&&!(x.udp||[]).length&&st.kind!='awg')fillPorts(false);livePorts(id);
+ // the name it gets when left empty: Iran server-abroad server
+ var nmHint=function(){var e=tunSrv($('#tw_en').value),x2=tunSrv($('#tw_ex').value),ir=function(v){return v.loc=='iran'},a=ir(x2)&&!ir(e)?[x2,e]:[e,x2];$('#tw_nm').placeholder=a[0].name+'-'+a[1].name};
+ nmHint();$('#tw_en').addEventListener('change',nmHint);$('#tw_ex').addEventListener('change',nmHint);
  var ct=$('#tw_ctest');if(ct)ct.onclick=cdnTest;var cn=$('#tw_cscan');if(cn)cn.onclick=cdnScan;
  var sp=$('#tw_spoof');if(sp)sp.onclick=function(e){var b=e.target.closest('[data-sp]');if(!b)return;var i=$('#tw_sni'),v=i.value.trim();i.value=v?(v.split(/[\s,]+/).indexOf(b.dataset.sp)<0?v+', '+b.dataset.sp:v):b.dataset.sp};
  var cs=$('#tw_cspoof');if(cs)cs.onclick=function(e){var b=e.target.closest('[data-sp]');if(!b)return;var i=$('#tw_csni'),v=i.value.trim();i.value=v?(v.split(/[\s,]+/).indexOf(b.dataset.sp)<0?v+', '+b.dataset.sp:v):b.dataset.sp};
