@@ -1,21 +1,10 @@
-// Kanki Panel: the whole panel script in one file (built from the parts below, in this order).
+// Kanki Panel: the whole panel script.
 
 // ==================================================================== users form, VPN overview
-// Kanki Panel extensions (v3.5): the VPN services page (Kanki VPN | Xray), node types, the services part of
-// the user form, and the Persian text of the menu, Xray (xray.js) and Kanki DNS (dns.js).
-// Loaded before the main script; KEXT() runs once the main script has defined its tables.
-function KEXT(){
- PROTOS.push(['xray','Xray'],['dns','DNS']);
- PCOL.xray='#e0a020';PCOL.dns='#2a9df4';
- ICO.dns='<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>';
- ICO.xray='<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>';
- Object.assign(FA,KFA);
- if(window.AD_FA)Object.assign(FA,AD_FA);
- if(window.kmFA)kmFA();
-}
+// the VPN services page (Kanki VPN | Xray), node types and the services part of the user form
 // ---- Xray and DNS servers: repair, a quick health view, and the protocol for every user
-function srvData(kind){return kind=='xray'?(window.XR&&XR.d):(window.DN&&DN.d)}
-function srvReload(kind){if(kind=='xray'&&window.xrLoad)xrLoad(true);if(kind=='dns'&&window.dnsLoad)dnsLoad(true)}
+function srvData(kind){return kind=='xray'?XR.d:DN.d}
+function srvReload(kind){if(kind=='xray')xrLoad(true);if(kind=='dns')dnsLoad(true)}
 function srvRepair(kind,id){toast(t('Checking…'));
  api('POST','/api/'+kind+'/servers/'+encodeURIComponent(id)+'/repair').then(function(r){
   toast(t(r.waiting?'Repair sent: the server has not reported for a while, it is repaired as soon as it is back':'Repair sent: the server restarts it within a few seconds'));
@@ -70,175 +59,8 @@ function protoAll(p,add){var nm=p=='xray'?'Xray':'DNS';
  if(!confirm(t(add?'Turn on __P__ for ALL users? Every user gets it in the subscription.':'Turn off __P__ for ALL users? It leaves every subscription.').replace('__P__',nm)))return;
  toast(t('Checking…'));
  api('POST','/api/protocols/'+p+'/'+(add?'assign-all':'unassign-all')).then(function(r){toast(t('Done')+' · '+N(r.changed||0)+' '+t('users changed'));
-  srvReload(p);if(S.page=='users'&&window.loadUsers)loadUsers()}).catch(fail)}
+  srvReload(p);if(S.page=='users')loadUsers()}).catch(fail)}
 
-var KFA={
- "Firewall (ufw)":"فایروال (ufw)","Open ports that nothing uses":"پورت‌های بازی که هیچ‌چیز از آن‌ها استفاده نمی‌کند","Opened earlier for something that was deleted, or by hand. SSH is never closed.":"قبلاً برای چیزی که حذف شده یا دستی باز شده‌اند. پورت SSH هیچ‌وقت بسته نمی‌شود.",
- "Close these ports":"بستن این پورت‌ها","Close these ports in the firewall of this server?":"این پورت‌ها در فایروال این سرور بسته شوند؟","Sent: the server closes them on its next report (a few seconds)":"فرستاده شد: سرور در گزارش بعدی (چند ثانیه) آن‌ها را می‌بندد",
- "Try SSL again":"دوباره گرفتن SSL","Sent: the server tries SSL again within a minute":"فرستاده شد: سرور تا یک دقیقه‌ی دیگر دوباره SSL می‌گیرد",
- "Tunnels":"تانل‌ها","Emergency chat":"چت اضطراری","Subscription link":"لینک اشتراک","SSL (port 80)":"SSL (پورت ۸۰)",
- // repair, health, for all users, connected now
- "Repair":"تعمیر","Health":"سلامت","Service":"سرویس","Last report":"آخرین گزارش","Version":"نسخه",
- "Repair sent: the server restarts it within a few seconds":"تعمیر فرستاده شد: سرور تا چند ثانیه‌ی دیگر سرویس را دوباره راه می‌اندازد",
- "Repair sent: the server has not reported for a while, it is repaired as soon as it is back":"تعمیر فرستاده شد: سرور مدتی است گزارش نداده؛ به محض برگشتن تعمیر می‌شود",
- "The server is not reporting: check that it is on and that its agent runs, then press Repair":"سرور گزارش نمی‌دهد: روشن بودن سرور و اجرای Agent آن را چک کن، بعد «تعمیر» را بزن",
- "Turn on __P__ for ALL users? Every user gets it in the subscription.":"__P__ برای همه‌ی کاربران روشن شود؟ در اشتراک همه اضافه می‌شود.",
- "Turn off __P__ for ALL users? It leaves every subscription.":"__P__ برای همه‌ی کاربران خاموش شود؟ از اشتراک همه برداشته می‌شود.",
- "users changed":"کاربر تغییر کرد",
- "Connected now":"وصل الان","Not connected right now":"الان وصل نیست","Nobody is connected right now":"الان کسی وصل نیست",
- // subscription on an Iran server
- "Serve the subscription from an Iran server":"لینک ساب روی سرور ایران",
- "For ISPs that block the panel domain: a tunnel server inside Iran serves the subscription pages with its own SSL and carries them to the panel through a hidden tunnel. Subscription links use it once it works.":"برای اینترنت‌هایی که دامنه‌ی پنل را بسته‌اند: یک سرور تانل داخل ایران صفحه‌های ساب را با SSL خودش می‌دهد و از راه یک تانل مخفی به پنل می‌رساند. وقتی کار کرد، لینک‌های ساب از آن ساخته می‌شوند.",
- "Tunnel server":"سرور تانل","The domain's A record must point to this server's IP":"رکورد A دامنه باید به IP این سرور اشاره کند",
- "Waiting for the server: getting SSL and starting the listener…":"در انتظار سرور: گرفتن SSL و راه‌اندازی…",
- "Tunnel to the panel":"تانل به پنل","down":"قطع",
- // servers inside Iran and abroad
- "Iran servers":"سرورهای ایران","Abroad servers":"سرورهای خارج","Location":"موقعیت سرور","Inside Iran":"داخل ایران","Abroad":"خارج",
- "Location guessed: confirm it in Edit":"موقعیت حدس زده شده: در «ویرایش» تأییدش کن","Location not set: choose it in Edit":"موقعیت مشخص نیست: در «ویرایش» انتخابش کن",
- "Add a tunnel server inside Iran first (Servers), or set its location to Inside Iran.":"اول یک سرور تانل داخل ایران اضافه کن (سرورها)، یا موقعیت سرورت را «داخل ایران» بگذار.",
- "Every server of the panel: Kanki VPN, Xray and Kanki DNS":"همه‌ی سرورهای پنل: VPN کانکی، Xray و DNS کانکی",
- "For the app: games and sanctioned sites":"برای اپ: بازی و سایت‌های تحریمی",
- "Exit server (abroad)":"سرور خروجی (خارج)","Relay (Iran)":"ریلی (ایران)",
- "No Xray server yet: add one in Servers":"هنوز سرور Xray نیست: در «سرورها» اضافه کن",
- "Add or remove DNS servers in Servers":"افزودن و حذف سرور DNS در «سرورها»",
- "and":"و","more inbounds":"اینباند دیگر",
- "Anti-DPI tunnels":"تانل‌های ضد DPI",
- "Certificate changed":"گواهی عوض شده",
- "The node's certificate changed (reinstalled?): run its join command again, or remove and add the node":"گواهی نود عوض شده (دوباره نصب شده؟): دستور اتصال نود را دوباره اجرا کن، یا نود را حذف و دوباره اضافه کن",
- "Not tested, an agent is too old (update it first)":"تست نشد، ایجنت قدیمی است (اول آپدیتش کن)",
- // menu
- "VPN services":"سرویس‌های VPN","All VPN services":"همه‌ی سرویس‌های VPN","Kanki VPN and Xray side by side":"کانکی VPN و Xray کنار هم","Kanki VPN":"کانکی VPN","WireGuard · AmneziaWG · Hysteria2":"WireGuard · AmneziaWG · Hysteria2",
- "VLESS · VMess · Trojan · Shadowsocks":"VLESS · VMess · Trojan · Shadowsocks","Kanki DNS":"دی‌ان‌اس کانکی","Overview":"نمای کلی","Status of the DNS servers":"وضعیت سرورهای DNS","DNS servers":"سرورهای DNS",
- "Exits abroad and relays in Iran":"خروجی‌های خارج و ریلی‌های ایران","Services":"سرویس‌ها","What goes through the DNS":"چه چیزهایی از DNS رد می‌شود","DNS users":"کاربران DNS","Registered addresses and use":"IPهای ثبت‌شده و مصرف",
- "Settings and SSL":"تنظیمات و SSL","Domain, certificate, upstreams":"دامنه، گواهی، DNS بالادست","Tunnels":"تانل‌ها","Sales & support":"فروش و پشتیبانی","System":"سیستم",
- // VPN hub
- "Both kinds of VPN your users get, side by side":"هر دو نوع VPN که کاربرها می‌گیرند، کنار هم","Our own protocols on the nodes":"پروتکل‌های خودمان روی نودها","3X-UI style inbounds":"اینباندها به سبک 3X-UI",
- "Nodes online":"نودهای آنلاین","Manage nodes":"مدیریت نودها","Add node":"افزودن نود","Manage Xray":"مدیریت Xray","New inbound":"اینباند جدید","Users by protocol":"کاربران هر پروتکل",
- "Online now":"الان آنلاین","Users with Xray":"کاربران دارای Xray","Working inbounds":"اینباندهای فعال","Total traffic":"ترافیک کل","No inbound yet.":"هنوز اینباندی نیست.","Make the first one":"اولی را بساز","Main server":"سرور اصلی",
- "Xray is off":"Xray خاموش است","Turn it on":"روشنش کن","Kanki DNS (sanctions)":"دی‌ان‌اس کانکی (رفع تحریم)","Open":"باز کردن",
- // user form
- "Services of this user":"سرویس‌های این کاربر","Everything":"همه","Kanki VPN only":"فقط کانکی VPN","Xray only":"فقط Xray","DNS only":"فقط DNS","Protocols":"پروتکل‌ها","Servers":"سرورها",
- "Links of every Xray inbound go into the subscription":"لینک همه‌ی اینباندهای Xray در ساب می‌آید","Private DNS for sanctioned sites":"DNS اختصاصی برای سایت‌های تحریمی","Is off in the panel":"در پنل خاموش است",
- "No Xray inbound yet":"هنوز اینباند Xray نیست","No DNS server yet":"هنوز سرور DNS نیست","inbounds":"اینباند","on":"روشن",
- // node types
- "Node type":"نوع نود","VPN node":"نود VPN","Xray node":"نود Xray","DNS exit node":"نود DNS خروجی","Smart DNS abroad":"DNS هوشمند در خارج","DNS relay node":"نود ریلی DNS","Iran server in front of a DNS exit":"سرور ایران جلوی DNS خروجی",
- // Xray
- "Xray inbounds for your users: every user with Xray ticked is a client of every inbound":"اینباندهای Xray برای کاربرهای خودت: هر کاربری که تیک Xray دارد کلاینت همه‌ی اینباندهاست",
- "Inbound":"اینباند","Inbounds":"اینباندها","Online clients":"کلاینت‌های آنلاین","Routing and outbounds":"روتینگ و خروجی‌ها","Xray servers":"سرورهای Xray","Add server":"افزودن سرور",
- "Xray is off: nothing runs on the servers and no links go to the users.":"Xray خاموش است: روی سرورها چیزی اجرا نمی‌شود و لینکی به کاربرها نمی‌رسد.",
- "1) Add a server (the panel server or any tunnel server). 2) Make inbounds on it. 3) Tick Xray for a user: the links of every inbound go into the user's subscription, and the traffic counts toward the user's volume.":"۱) یک سرور اضافه کن (سرور پنل یا هر سرور تانل). ۲) روی آن اینباند بساز. ۳) برای کاربر تیک Xray بزن: لینک همه‌ی اینباندها در ساب او می‌آید و ترافیکش از حجم خودش کم می‌شود.",
- "Off":"خاموش","Traffic used up":"حجم تمام شد","Expired":"منقضی","Running":"در حال اجرا","Not running":"اجرا نمی‌شود","Waiting for the server…":"در انتظار سرور…","Panel server":"سرور پنل",
- "All servers":"همه‌ی سرورها","Search":"جستجو","Nothing found":"چیزی پیدا نشد","Fallbacks":"فال‌بک","users only":"کاربر خاص","Traffic":"ترافیک","Clients":"کلاینت‌ها","Expires":"پایان",
- "Links":"لینک‌ها","Copy":"کپی","Reset":"صفر کردن","Delete":"حذف","Edit":"ویرایش","days":"روز",
- "Users whose Xray traffic moved in the last few seconds":"کاربرهایی که در چند ثانیه‌ی اخیر ترافیک Xray داشته‌اند","All users":"همه‌ی کاربرها","Nobody is online right now":"الان کسی آنلاین نیست",
- "Ready-made rules":"قانون‌های آماده","Block private addresses":"مسدود کردن IPهای داخلی","Users cannot reach the server's own network (10.x, 192.168.x …)":"کاربرها به شبکه‌ی داخلی سرور (10.x، 192.168.x …) دسترسی ندارند",
- "Block BitTorrent":"مسدود کردن تورنت","Torrent traffic gets abuse reports to your servers":"تورنت برای سرورهایت گزارش تخلف می‌آورد","Block ads":"مسدود کردن تبلیغات","Ad and tracker domains (geosite:category-ads-all)":"دامنه‌های تبلیغ و ردیاب (geosite:category-ads-all)",
- "Block Iranian sites":"مسدود کردن سایت‌های ایرانی",".ir domains and Iranian addresses do not go through the server: they should be opened directly":"دامنه‌های .ir و IPهای ایران از سرور رد نمی‌شوند: باید مستقیم باز شوند",
- "Outbounds":"خروجی‌ها (اوت‌باند)","Where traffic leaves the server: directly, or on to another server (chain)":"ترافیک از کجا خارج شود: مستقیم، یا ادامه به یک سرور دیگر (زنجیره)","Add outbound":"افزودن خروجی",
- "Default outbound (what no rule catches)":"خروجی پیش‌فرض (هر چه قانونی نگیرد)","Routing rules":"قانون‌های مسیریابی","Checked from top to bottom; the first rule that matches decides":"از بالا به پایین چک می‌شوند؛ اولین قانونی که بخورد تصمیم می‌گیرد",
- "Add rule":"افزودن قانون","Domain strategy":"روش دامنه (Domain strategy)","by name (fastest)":"با اسم (سریع‌ترین)","resolve when no name rule matched":"اگر قانون اسمی نخورد، IP بگیر","always resolve for IP rules":"برای قانون‌های IP همیشه IP بگیر",
- "Advanced: raw JSON":"پیشرفته: JSON خام","Advanced: extra routing rules (JSON array)":"پیشرفته: قوانین مسیریابی اضافه (آرایه‌ی JSON)","Advanced: extra outbounds (JSON array, the first one becomes the default)":"پیشرفته: اوت‌باندهای اضافه (آرایه‌ی JSON، اولی پیش‌فرض می‌شود)",
- "Changes reach the servers within a few seconds of saving":"تغییرات چند ثانیه بعد از ذخیره به سرورها می‌رسد","Save routing":"ذخیره‌ی روتینگ","Block":"مسدود","Direct":"مستقیم",
- "Straight to the internet from this server":"مستقیم از همین سرور به اینترنت","built in":"پیش‌ساخته","Dropped":"دور ریخته می‌شود","port":"پورت","users":"کاربر","Rule":"قانون",
- "No rules yet: everything goes to the default outbound.":"هنوز قانونی نیست: همه چیز به خروجی پیش‌فرض می‌رود.","A rule still sends traffic to this outbound":"هنوز قانونی ترافیک را به این خروجی می‌فرستد",
- "Another server (from its link)":"سرور دیگر (از لینکش)","Direct (freedom)":"مستقیم (freedom)","Block (blackhole)":"مسدود (blackhole)","Edit outbound":"ویرایش خروجی","Tag (name)":"تگ (اسم)","Type":"نوع",
- "Link of the other server (vless, vmess, trojan or ss)":"لینک سرور دیگر (vless، vmess، trojan یا ss)",
- "Typical use: this server is in Iran and the link is of a server abroad, so users connect inside Iran and leave from abroad.":"کاربرد معمول: این سرور در ایران است و لینک مال سرور خارج؛ کاربر داخل ایران وصل می‌شود و از خارج بیرون می‌رود.",
- "Address":"آدرس","Port":"پورت","Username (optional)":"نام کاربری (اختیاری)","Password":"رمز","The whole outbound (JSON object)":"کل اوت‌باند (آبجکت JSON)","Check":"بررسی","OK":"تأیید",
- "an outbound tag is English letters, digits, - and _":"تگ خروجی فقط حروف انگلیسی، عدد، - و _","This tag is already used":"این تگ قبلاً استفاده شده","Press Save routing to apply":"برای اعمال، «ذخیره‌ی روتینگ» را بزن",
- "Edit rule":"ویرایش قانون","Name":"نام","like: AI sites through Germany":"مثلاً: سایت‌های هوش مصنوعی از آلمان","Domains (one per line)":"دامنه‌ها (هر خط یکی)","IP addresses and ranges (one per line)":"IPها و رنج‌ها (هر خط یکی)",
- "Ports":"پورت‌ها","Network":"شبکه","Any":"همه","Sniffed protocol":"پروتکل تشخیص‌داده‌شده","Only from these inbounds":"فقط از این اینباندها","Only for these users":"فقط برای این کاربرها","Send to":"بفرست به",
- "Give the rule at least one condition":"حداقل یک شرط برای قانون بگذار","Settings":"تنظیمات","Xray is on":"Xray روشن است","Off: Xray stops on every server and the links leave the subscriptions":"خاموش: Xray روی همه‌ی سرورها می‌ایستد و لینک‌ها از ساب‌ها حذف می‌شوند",
- "IPv4 only":"فقط IPv4","For servers whose IPv6 does not work well":"برای سرورهایی که IPv6 آن‌ها خوب کار نمی‌کند","Xray-core version":"نسخه‌ی Xray-core","empty = latest":"خالی = آخرین نسخه","A release tag like v26.3.27":"یک تگ ریلیز مثل v26.3.27",
- "Log level":"سطح لاگ","Xray DNS servers (comma separated, empty = the server's own)":"DNSهای Xray (با کاما، خالی = DNS خود سرور)","Save":"ذخیره",
- "Xray can run on the panel server or on any tunnel server. A new server gets a one-line install command.":"Xray روی سرور پنل یا هر سرور تانل اجرا می‌شود. سرور جدید یک دستور نصب یک‌خطی می‌گیرد.",
- "Agent server":"سرور (ایجنت)","New server (install command)":"سرور جدید (دستور نصب)","Server name":"نام سرور","Address for links":"آدرس در لینک‌ها","automatic":"خودکار",
- "A domain or IP the users connect to; empty = the IP the server reports from":"دامنه یا IPی که کاربرها به آن وصل می‌شوند؛ خالی = IPی که سرور از آن گزارش می‌دهد",
- "Config":"کانفیگ","A copy was made (off until you check it)":"کپی ساخته شد (تا چکش نکنی خاموش است)","Reset the traffic of this inbound to zero?":"ترافیک این اینباند صفر شود؟",
- "Users and links":"کاربرها و لینک‌ها","Inactive":"غیرفعال","No address":"آدرس ندارد","No users with Xray yet: tick Xray in a user's form":"هنوز کاربری Xray ندارد: در فرم کاربر تیک Xray را بزن",
- "Add an Xray server first":"اول یک سرور Xray اضافه کن","Basic":"اصلی","Transport":"ترنسپورت","Security":"امنیت","Sniffing":"Sniffing","Link and CDN":"لینک و CDN","Limits and users":"محدودیت و کاربرها",
- "Remark":"نام","Protocol":"پروتکل","Random free port":"پورت آزاد تصادفی","Listen address":"آدرس listen","Method":"روش","Quick setup":"ساخت سریع","random if empty":"خالی = تصادفی",
- "Path":"مسیر (path)","Host":"هاست","Heartbeat (seconds, 0 = off)":"ضربان (ثانیه، ۰ = خاموش)","Mode":"حالت","Padding (bytes)":"پدینگ (بایت)","Service name":"نام سرویس","Authority (in the link)":"Authority (در لینک)",
- "Multi mode (in the link)":"حالت Multi (در لینک)","HTTP header camouflage":"استتار با هدر HTTP","The TCP stream starts like a plain HTTP request (path and Host above)":"اتصال TCP مثل یک درخواست HTTP ساده شروع می‌شود (path و Host بالا)",
- "MTU":"MTU","TTI (ms)":"TTI (میلی‌ثانیه)","Uplink (MB/s)":"آپلود (مگابایت/ثانیه)","Downlink (MB/s)":"دانلود (مگابایت/ثانیه)","Congestion control":"کنترل ازدحام",
- "Accept PROXY protocol":"پذیرش PROXY protocol","Only when nginx / HAProxy in front sends it":"فقط وقتی nginx / HAProxy جلوی سرور آن را می‌فرستد","Flow":"Flow","SNI":"SNI","Lowest TLS version":"کمترین نسخه‌ی TLS","Default":"پیش‌فرض",
- "Refuse unknown SNI":"رد SNI ناشناس","Only connections for the name above are answered":"فقط به اتصال‌های همین اسم جواب داده می‌شود","Certificate":"گواهی","Paste (PEM)":"چسباندن (PEM)","Files on the server":"فایل روی سرور",
- "unchanged":"بدون تغییر","Certificate file":"فایل گواهی","Key file":"فایل کلید","Target (dest)":"مقصد (dest)","Suggestions":"پیشنهادها","Server names":"نام‌های سرور","Short IDs":"Short ID ها","New":"جدید",
- "Private key":"کلید خصوصی","Public key":"کلید عمومی","Largest clock difference (ms, 0 = off)":"بیشترین اختلاف ساعت (میلی‌ثانیه، ۰ = خاموش)","New keys":"کلید جدید","Fingerprint":"اثرانگشت (fp)",
- "Shadowsocks has no TLS or REALITY: its own encryption is enough.":"Shadowsocks نیازی به TLS یا REALITY ندارد: رمزنگاری خودش کافی است.",
- "Read the site name from the traffic (needed for domain rules)":"اسم سایت را از ترافیک بخوان (برای قانون‌های دامنه لازم است)","Look at":"بررسی","Use it for the destination too":"برای مقصد هم استفاده شود",
- "Off = only for routing (recommended)":"خاموش = فقط برای مسیریابی (پیشنهادی)","Metadata only":"فقط متادیتا","Do not read the content, only the connection details":"محتوا خوانده نشود، فقط مشخصات اتصال",
- "What the users' links say. Leave empty unless a CDN or another address is in front of the server.":"چیزی که در لینک کاربرها نوشته می‌شود. خالی بگذار مگر CDN یا آدرس دیگری جلوی سرور باشد.",
- "Link address":"آدرس لینک","Link port":"پورت لینک","Link SNI":"SNI لینک","TLS at the CDN":"TLS در CDN","The CDN has the certificate; the server itself speaks plain WS / gRPC / XHTTP":"گواهی دست CDN است؛ خود سرور WS / gRPC / XHTTP ساده دارد",
- "Total traffic of the inbound (GB, 0 = unlimited)":"حجم کل اینباند (گیگ، ۰ = نامحدود)","Stops on (empty = never)":"تاریخ توقف (خالی = هرگز)",
- "When the traffic is used up or the date passes, the inbound stops by itself; users keep their own limits as well.":"وقتی حجم تمام شود یا تاریخ برسد، اینباند خودش می‌ایستد؛ محدودیت‌های خود کاربرها هم سر جایش است.",
- "Only these users (empty = everyone with Xray)":"فقط این کاربرها (خالی = همه‌ی دارندگان Xray)","All":"همه","None":"هیچ",
- "VLESS / Trojan over TCP with TLS: traffic that is not ours goes to these destinations (a website, another service).":"VLESS / Trojan روی TCP با TLS: ترافیکی که مال ما نیست به این مقصدها می‌رود (یک سایت، سرویس دیگر).",
- "Add fallback":"افزودن فال‌بک","Destination (port or address:port)":"مقصد (پورت یا آدرس:پورت)","ALPN":"ALPN","SNI (name)":"SNI (اسم)","No fallbacks":"فال‌بکی نیست",
- "Domain of this server (or IP)":"دامنه‌ی این سرور (یا IP)","Users connect to this address; empty = the IP the server reports from":"کاربرها به این آدرس وصل می‌شوند؛ خالی = IPی که سرور از آن گزارش می‌دهد",
- "Get SSL for this domain by itself":"گرفتن خودکار SSL برای این دامنه","The panel points the domain at this server and gets a Let's Encrypt certificate; every TLS inbound of this server uses it. Renewed every 60 days.":"پنل دامنه را به همین سرور وصل می‌کند و از Let's Encrypt گواهی می‌گیرد؛ همه‌ی اینباندهای TLS این سرور از آن استفاده می‌کنند. هر ۶۰ روز تمدید می‌شود.",
- "For SSL by itself, first set the DNS provider and API token (Xray › Settings or Kanki DNS › Settings and SSL).":"برای SSL خودکار، اول سرویس DNS و توکن API را بگذار (Xray › تنظیمات یا DNS کانکی › تنظیمات و SSL).",
- "Saved: getting SSL (about a minute)":"ذخیره شد: در حال گرفتن SSL (حدود یک دقیقه)","Working…":"در حال انجام…","error":"خطا","waiting":"در انتظار",
- "Empty SNI = the server's domain and certificate":"SNI خالی = دامنه و گواهی خود سرور","This server has no domain: write one in SNI, or give the server a domain (Edit server).":"این سرور دامنه ندارد: یا در SNI دامنه بنویس، یا برای سرور دامنه بگذار (ویرایش سرور).",
- "Domain of this DNS server":"دامنه‌ی این سرور DNS","Empty = label + DNS domain. The panel points it (and *.) at this server and gets the SSL for it by itself.":"خالی = برچسب + دامنه‌ی DNS. پنل آن را (و *.) به همین سرور وصل می‌کند و SSLش را خودش می‌گیرد.",
- "For SSL by itself, set the DNS provider and API token in Settings and SSL.":"برای SSL خودکار، سرویس DNS و توکن API را در «تنظیمات و SSL» بگذار.", "A pasted certificate is used on every DNS server":"یک گواهی دستی روی همه‌ی سرورهای DNS استفاده می‌شود",
- "Remove it (back to certbot)":"حذفش کن (برگشت به certbot)",
- "Automatic: certbot on each DNS server":"خودکار: certbot روی هر سرور DNS",
- "Each server gets a Let's Encrypt certificate for its own name and renews it by itself":"هر سرور برای اسم خودش از Let's Encrypt گواهی می‌گیرد و خودش تمدید می‌کند",
- "Nothing to set: write each server's domain (or label + DNS domain) and point it to the server. Kanki DNS answers Let's Encrypt itself on port 80, so DNS does not stop. The SSL state of every server is on its card.":"تنظیمی لازم نیست: دامنه‌ی هر سرور را بنویس (یا برچسب + دامنه‌ی DNS) و به همان سرور وصل کن. خود سرویس DNS روی پورت ۸۰ جواب Let's Encrypt را می‌دهد، پس DNS قطع نمی‌شود. وضعیت SSL هر سرور روی کارت خودش است.",
- "Paste a certificate instead (optional)":"به‌جایش گواهی دستی بگذار (اختیاری)",
- "Paste the certificate first":"اول گواهی را بچسبان",
- "Empty = label + DNS domain. Point the domain to this server: its SSL is taken on the server with certbot by itself.":"خالی = برچسب + دامنه‌ی DNS. دامنه را به همین سرور وصل کن: SSL آن را certbot روی خود سرور می‌گیرد.",
- "1) The user taps «Unblock» in the Kanki app: the app registers the phone and uses your DNS. 2) Names of sanctioned services (games, AI, developer sites …) are answered with your server's IP and the server passes those connections on (SNI proxy), so games and sites open; everything else goes direct at full speed. 3) A relay inside Iran sends them to an exit abroad through a hidden Kanki tunnel.":"۱) کاربر در برنامه‌ی کانکی «رفع تحریم» را می‌زند: برنامه گوشی را ثبت می‌کند و از DNS شما استفاده می‌کند. ۲) اسم سرویس‌های تحریمی (بازی، هوش مصنوعی، سایت‌های برنامه‌نویسی …) با IP سرور شما جواب می‌گیرند و سرور اتصالشان را رد می‌کند (SNI پروکسی)، پس بازی و سایت باز می‌شود؛ بقیه مستقیم و با سرعت کامل می‌روند. ۳) ریلی داخل ایران آن‌ها را با تانل مخفی کانکی به خروجی خارج می‌فرستد.",
- "Taken with certbot on the server":"با certbot روی خود سرور گرفته می‌شود",
- "certbot on this server gets a Let's Encrypt certificate for the domain (no e-mail needed) and renews it by itself; every TLS inbound of this server uses it. The domain must point to this server. Whatever uses port 80 (Caddy, nginx, an inbound …) is set aside for a few seconds and comes back by itself.":"certbot روی همین سرور برای دامنه از Let's Encrypt گواهی می‌گیرد (ایمیل لازم نیست) و خودش تمدید می‌کند؛ همه‌ی اینباندهای TLS این سرور از آن استفاده می‌کنند. دامنه باید به همین سرور وصل باشد. هر چه روی پورت ۸۰ باشد (Caddy، nginx، یک اینباند …) چند ثانیه کنار می‌رود و خودش برمی‌گردد.",
- "renewed by itself":"خودش تمدید می‌شود",
- "certbot on the server gets a Let's Encrypt certificate for this domain by itself (no e-mail needed) and renews it. The domain must point to the server; whatever uses port 80 is set aside for a few seconds and comes back by itself. The links use the domain.":"certbot روی سرور خودش برای این دامنه از Let's Encrypt گواهی می‌گیرد (ایمیل لازم نیست) و تمدید می‌کند. دامنه باید به سرور وصل باشد؛ هر چه روی پورت ۸۰ باشد چند ثانیه کنار می‌رود و خودش برمی‌گردد. لینک‌ها با همین دامنه ساخته می‌شوند.",
- "Certificate error":"خطای گواهی","Waiting for the certificate":"در انتظار گواهی","Automatic (Let's Encrypt)":"خودکار (Let's Encrypt)","renewed by itself every 60 days":"هر ۶۰ روز خودش تمدید می‌شود",
- "Get again":"گرفتن دوباره","Try now":"الان امتحان کن","Write the domain in SNI":"دامنه را در SNI بنویس",
- "Write the domain in SNI above. The panel points the domain at this server and gets a Let's Encrypt certificate with a DNS challenge (works for servers inside Iran too, nothing has to be open on the server), and renews it every 60 days. The links use the domain.":"دامنه را در SNI بالا بنویس. پنل دامنه را به همین سرور وصل می‌کند و با چالش DNS از Let's Encrypt گواهی می‌گیرد (برای سرورهای داخل ایران هم کار می‌کند و لازم نیست چیزی روی سرور باز باشد) و هر ۶۰ روز تمدید می‌کند. لینک‌ها با همین دامنه ساخته می‌شوند.",
- "DNS provider":"سرویس DNS","the same as Kanki DNS":"همان DNS کانکی","First set the DNS provider and its API token in Xray › Settings.":"اول سرویس DNS و توکن API را در Xray › تنظیمات بگذار.",
- "Automatic certificates":"گواهی خودکار","For TLS inbounds with \"Automatic\": the panel sets the domain's A record and gets a Let's Encrypt certificate with a DNS challenge through this API. Empty = the same provider as Kanki DNS.":"برای اینباندهای TLS با حالت «خودکار»: پنل با این API رکورد A دامنه را می‌سازد و با چالش DNS از Let's Encrypt گواهی می‌گیرد. خالی = همان سرویس DNS کانکی.",
- "Same as Kanki DNS":"همان DNS کانکی","Kanki DNS uses":"DNS کانکی از این استفاده می‌کند:","Kanki DNS has no provider yet either":"DNS کانکی هم هنوز سرویس DNS ندارد",
- "Point the domain at the server":"وصل کردن دامنه به سرور","Off when you manage the A record yourself (for example behind a CDN)":"اگر رکورد A را خودت مدیریت می‌کنی (مثلاً پشت CDN) خاموش کن",
- "API token":"توکن API","E-mail for Let's Encrypt (optional)":"ایمیل برای Let's Encrypt (اختیاری)", "Filled in: check the Security tab":"پر شد: تب امنیت را چک کن","the port is required":"پورت لازم است","Clients online":"کلاینت آنلاین",
- // Kanki DNS
- "Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct":"DNS هوشمند اختصاصی مشتری‌ها: سرویس‌های تحریمی از سرورهای شما رد می‌شوند و بقیه مستقیم",
- "Other sites answered by":"جواب سایت‌های دیگر از","Exit through the tunnel":"سرور خارج از تانل","DNS abroad":"DNS خارجی","Data center DNS":"DNS دیتاسنتر",
- "Ports taken by another program":"پورت‌هایی که برنامه‌ی دیگری گرفته","It serves":"این‌ها را سرو می‌کند","Free the ports":"آزاد کردن پورت‌ها","Stop and turn off __U__ on this server? Then __S__ takes its ports.":"__U__ روی این سرور خاموش و غیرفعال شود؟ بعد __S__ پورت‌هایش را می‌گیرد.","These sites go down with it":"این سایت‌ها هم از دسترس خارج می‌شوند","To bring it back":"برای برگرداندن","Sent: the server frees the ports on its next report (a few seconds)":"فرستاده شد: سرور در گزارش بعدی (چند ثانیه) پورت‌ها را آزاد می‌کند",
- "another Kanki service":"یک سرویس دیگر کانکی","a Docker container: stop it by hand":"کانتینر داکر است: دستی متوقفش کن","not a service: stop it by hand":"سرویس نیست: دستی متوقفش کن","a system service":"سرویس سیستمی است",
- "Add relay":"افزودن ریلی","Add DNS server":"افزودن سرور DNS","Status":"وضعیت","On":"روشن","Running servers":"سرورهای در حال اجرا","Users with DNS":"کاربران دارای DNS","Allowed addresses":"IPهای مجاز",
- "Queries":"درخواست‌ها","routed":"مسیردهی‌شده", "Query log":"لاگ درخواست‌ها","Every name your subscribers asked, and whether it went through your server (routed) or straight to the site (direct). Kept in the panel\'s memory; a restart clears it.":"همه‌ی دامنه‌هایی که مشتری‌ها پرسیده‌اند و اینکه از سرور شما رد شده (مسیردهی‌شده) یا مستقیم به سایت رفته (مستقیم). در حافظه‌ی پنل نگه داشته می‌شود و با ری‌استارت پاک می‌شود.",
- "Refresh":"بروزرسانی","Clear":"پاک کردن","All users":"همه‌ی کاربران","All queries":"همه‌ی درخواست‌ها","Routed only":"فقط مسیردهی‌شده","Direct only":"فقط مستقیم","Grouped by name":"گروه‌بندی بر اساس دامنه","Each query":"تک‌تک درخواست‌ها",
- "direct":"مستقیم","kept":"نگه‌داشته","times":"بار","Clear the whole query log?":"کل لاگ درخواست‌ها پاک شود؟",
- "Nothing yet: queries show up here a few seconds after a subscriber uses DNS (DNS servers must run v3.5.8 or newer).":"هنوز چیزی نیست: چند ثانیه بعد از اینکه مشتری از DNS استفاده کند اینجا می‌آید (سرورهای DNS باید نسخه‌ی ۳.۵.۸ یا جدیدتر باشند).",
-"DNS is off: nothing runs on the servers.":"DNS خاموش است: روی سرورها چیزی اجرا نمی‌شود.",
- "No DNS domain yet: encrypted DNS (DoT / DoH) needs one.":"هنوز دامنه‌ی DNS نداری: DNS رمزدار (DoT / DoH) به آن نیاز دارد.",
- "No certificate yet: DoT / DoH and registering by link do not work without it.":"هنوز گواهی نیست: DoT / DoH و ثبت با لینک بدون آن کار نمی‌کند.","Add an exit DNS server first":"اول یک سرور DNS خروجی اضافه کن",
- "Path of the traffic":"مسیر ترافیک","Manage":"مدیریت","Busiest services":"پرمصرف‌ترین سرویس‌ها","Routed names asked for most since the DNS services started":"دامنه‌هایی که از شروع سرویس DNS بیشتر از همه پرسیده شده‌اند",
- "Check a domain":"بررسی یک دامنه","Does this site go through Kanki DNS, and which service lists it?":"این سایت از DNS کانکی رد می‌شود؟ در کدام سرویس است؟",
- "How it works":"چطور کار می‌کند",
- "1) A user's phone uses your DNS (Private DNS with the user's own address). 2) Names of sanctioned services (games, AI, developer sites …) are answered with your server's IP; everything else is answered normally and goes direct. 3) Your server passes those connections on without opening them. A relay inside Iran sends them to an exit abroad through a hidden Kanki tunnel.":"۱) گوشی کاربر از DNS شما استفاده می‌کند (Private DNS با آدرس اختصاصی خودش). ۲) اسم سرویس‌های تحریمی (بازی، هوش مصنوعی، سایت‌های برنامه‌نویسی …) با IP سرور شما جواب داده می‌شود؛ بقیه عادی جواب می‌گیرند و مستقیم می‌روند. ۳) سرور شما آن اتصال‌ها را بدون باز کردن رمز رد می‌کند. ریلی داخل ایران آن‌ها را با یک تانل مخفی کانکی به خروجی خارج می‌فرستد.",
- "Internet":"اینترنت","Nothing yet":"هنوز چیزی نیست","Goes through Kanki DNS":"از DNS کانکی رد می‌شود","Goes direct (not routed)":"مستقیم می‌رود (مسیردهی نمی‌شود)","this group is off":"این گروه خاموش است",
- "your extra domains":"دامنه‌های اضافه‌ی خودت","Add to extra domains":"افزودن به دامنه‌های اضافه","Turn this group on":"روشن کردن این گروه","Saved":"ذخیره شد","Exit":"خروجی","Iran":"ایران","issued":"صادر شده","none yet":"هنوز ندارد",
- "Working… about a minute":"در حال انجام… حدود یک دقیقه","Last error":"آخرین خطا","Relay (inside Iran)":"ریلی (داخل ایران)","Exit (abroad)":"خروجی (خارج)","no name":"بدون اسم",
- "Hidden from subscribers":"مخفی از مشتری‌ها","From cache":"از کش","Refused (not a subscriber)":"رد شده (غیر مشتری)","Connections":"اتصال‌ها","Remove from DNS":"حذف از DNS",
- "Search services or domains":"جستجوی سرویس یا دامنه","Save services":"ذخیره سرویس‌ها",
- "Groups marked \"only on request\" stay off until you turn them on. Some names cannot be routed (they check the address).":"گروه‌های «فقط با درخواست» تا روشنشان نکنی خاموش می‌مانند. بعضی اسم‌ها قابل مسیردهی نیستند (آدرس را چک می‌کنند).",
- "All on":"همه روشن","All off":"همه خاموش","cannot be routed":"قابل مسیردهی نیست","only on request":"فقط با درخواست","Extra domains":"دامنه‌های اضافه","One per line; their subdomains are routed too":"هر خط یکی؛ زیردامنه‌هایشان هم مسیردهی می‌شوند",
- "routed names now":"دامنه‌ی مسیردهی‌شده","Addresses each user registered (allowed now) and their queries since the DNS services started":"IPهایی که هر کاربر ثبت کرده (الان مجاز) و درخواست‌هایش از شروع سرویس DNS",
- "No user has DNS yet: tick DNS in a user's form":"هنوز کاربری DNS ندارد: در فرم کاربر تیک DNS را بزن","queries":"درخواست","addresses":"IP","Copy the Private DNS address":"کپی آدرس Private DNS","Forget addresses":"پاک کردن IPها",
- "The user's phone registers again by itself; someone else using the address loses access. Continue?":"گوشی کاربر خودش دوباره ثبت می‌کند؛ اگر کس دیگری از این IP استفاده می‌کند دسترسی‌اش قطع می‌شود. ادامه بدهم؟",
- "Done: servers forget them within a few seconds":"انجام شد: سرورها تا چند ثانیه‌ی دیگر فراموششان می‌کنند","DNS is on":"DNS روشن است","Off: DNS stops on every server and leaves the subscriptions":"خاموش: DNS روی همه‌ی سرورها می‌ایستد و از ساب‌ها حذف می‌شود",
- "DNS domain":"دامنه‌ی DNS","Each DNS server gets a name under it, like de.dns.example.com":"هر سرور DNS یک اسم زیر آن می‌گیرد، مثل de.dns.example.com","Upstream resolvers":"DNSهای بالادست",
- "AdGuard (no ads)":"AdGuard (بدون تبلیغ)","An allowed address stays open for (hours)":"مدت باز ماندن IP ثبت‌شده (ساعت)","After this long without the user's app registering again, the address is closed":"اگر تا این مدت اپ کاربر دوباره ثبت نکند، IP بسته می‌شود",
- "Certificate and records":"گواهی SSL و رکوردها","Provider":"سرویس DNS دامنه","Manual (paste a certificate)":"دستی (گواهی را خودت بگذار)",
- "The panel makes the A records of every server (and *.) with this API token, then gets a wildcard certificate from Let's Encrypt with a DNS challenge and renews it every 60 days. Works for servers inside Iran too.":"پنل با این توکن API رکورد A هر سرور (و *.) را می‌سازد، بعد با چالش DNS از Let's Encrypt گواهی Wildcard می‌گیرد و هر ۶۰ روز تمدید می‌کند. برای سرورهای داخل ایران هم کار می‌کند.",
- "API token":"توکن API","E-mail for Let's Encrypt (optional)":"ایمیل برای Let's Encrypt (اختیاری)","Set records and get the certificate now":"الان رکوردها را بساز و گواهی بگیر",
- "Certificate (PEM, full chain)":"گواهی (PEM، زنجیره‌ی کامل)","Private key (PKCS#8 PEM)":"کلید خصوصی (PEM)",
- "Ports 53, 80, 443 and 853 must be free on this server: give DNS its own server.":"پورت‌های ۵۳، ۸۰، ۴۴۳ و ۸۵۳ روی این سرور باید آزاد باشند: برای DNS سرور جدا بگذار.",
- "Label":"برچسب","Answer IP":"IP پاسخ","Its exit":"خروجی آن","Transport to the exit":"ترنسپورت تا خروجی","Tunnel port on the relay":"پورت تانل روی ریلی","Note for subscribers":"یادداشت برای مشتری‌ها",
- "like: best on Irancell":"مثلاً: روی ایرانسل بهتر است","For repairs: the server keeps running but is not offered":"برای تعمیر: سرور روشن می‌ماند ولی به مشتری پیشنهاد نمی‌شود","Done":"انجام شد"};
 // ---------------------------------------------------------------- the VPN services page: Kanki VPN | Xray
 function p_vpn(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('VPN services')+'</h2><p>'+t('Both kinds of VPN your users get, side by side')+'</p></div></div><div class="vhub"><div class="vside" id="vh_k">'+t('Loading…')+'</div><div class="vside" id="vh_x">'+t('Loading…')+'</div></div>'+
   '<div class="vside" id="vh_d" style="margin-top:14px"></div>';
@@ -252,13 +74,6 @@ function vhKanki(nodes,o){var up=nodes.filter(function(n){return n.id=='local'||
   '<div class="kv"><div><small>'+t('Nodes online')+'</small><b>'+N(up)+' / '+N(nodes.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N(o.online||0)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(o.traffic_gb||0)+' GB</b></div></div>'+
   '<label class="f">'+t('Users by protocol')+'</label><div class="vhgrid">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e']].map(function(p){return '<div class="vhcell"><small>'+p[1]+'</small><b>'+N(pr[p[0]]||0)+'</b></div>'}).join('')+'</div>'+
   '<div class="vhsrv">'+nodes.map(function(n){var s=nState(n),loc=n.id=='local';return '<div class="vhs"><span class="dot '+s.c+'"></span><div class="nm"><b>'+esc(n.name)+'</b><small>'+N(n.users||0)+' '+t('users')+(loc?' · '+t('Main server'):'')+'</small></div></div>'}).join('')+'</div>'}
-(function(){if(document.getElementById('vhcss'))return;var st=document.createElement('style');st.id='vhcss';
- st.textContent='#vh_k{padding:12px!important}#vh_k .vh{margin-bottom:8px}.vhgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}'+
-  '.vhcell{border:1px solid var(--line,#333);border-radius:10px;padding:6px 8px;display:flex;justify-content:space-between;align-items:center;gap:6px;min-width:0}'+
-  '.vhcell small{font-size:11px;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.vhcell b{font-size:13px}'+
-  '.vhsrv{display:grid;grid-template-columns:1fr 1fr;gap:6px}.vhs{display:flex;align-items:center;gap:8px;border:1px solid var(--line,#333);border-radius:10px;padding:7px 9px;min-width:0}'+
-  '.vhs .nm{min-width:0}.vhs .nm b{display:block;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.vhs .nm small{font-size:11px;opacity:.75}';
- document.head.appendChild(st)})();
 function vhXray(d){var el=$('#vh_x');if(!d){el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks')+'<p class="muted">—</p>';return}
  var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length,tot=d.inbounds.reduce(function(a,b){return a+(+b.traffic||0)},0);
  var more=d.inbounds.length-5;
@@ -296,22 +111,22 @@ function ufWire(){if(!$('#uf_pre'))return;
  if(DN.d)dn(DN.d);api('GET','/api/dns').then(function(d){DN.d=d;dn(d)}).catch(function(){dn(null)})}
 
 // ---- node types: the "Add node" button first asks which kind of node
-var _nodeAdd=null;
 function nodeAddTyped(){var tile=function(k,ico,title,sub){return '<button class="b2" data-nt="'+k+'" style="display:flex;gap:10px;align-items:center;text-align:start;padding:12px;width:100%;margin-bottom:8px"><span class="ni">'+ic(ico,20)+'</span><span><b>'+t(title)+'</b><br><small class="muted">'+t(sub)+'</small></span></button>'};
  modal(mhead(t('Node type'))+tile('vpn','nodes','VPN node','WireGuard · AmneziaWG · Hysteria2')+tile('xray','xray','Xray node','VLESS · VMess · Trojan · Shadowsocks')+tile('dns','dns','DNS exit node','Smart DNS abroad')+tile('relay','dns','DNS relay node','Iran server in front of a DNS exit'));
- $$('[data-nt]').forEach(function(b){b.onclick=function(){var k=b.dataset.nt;if(k=='vpn')return _nodeAdd();if(k=='xray'){closeModal();xrAddNode();return}
+ $$('[data-nt]').forEach(function(b){b.onclick=function(){var k=b.dataset.nt;if(k=='vpn')return nodeAdd();if(k=='xray'){closeModal();xrAddNode();return}
   dnsLoad().then(function(){dnsAdd(k=='relay'?'relay':'exit')})}})}
 
 // ==================================================================== Xray
-// Kanki Panel: the Xray page (v3.5). Tabs: overview, inbounds, online clients, routing, settings.
+// the Xray page. Tabs: servers, inbounds, online clients, routing, settings.
 // Every user with Xray ticked is a client of every inbound (or of the inbounds that list them).
 var XR={d:null,q:'',srv:'',tab:'overview'};
-var XTABS=[['overview','Overview','dash'],['inbounds','Inbounds','xray'],['clients','Online clients','users'],['routing','Routing and outbounds','tunnel'],['settings','Settings','settings']];
-var REALITY_TARGETS=['www.microsoft.com:443','www.apple.com:443','dl.google.com:443','www.speedtest.net:443','www.cloudflare.com:443','www.yahoo.com:443','www.amazon.com:443','addons.mozilla.org:443','www.samsung.com:443','www.nvidia.com:443'];
-function p_xray(){XR.tab=S.sub||'overview';
- $('#pg').innerHTML='<div class="ph"><div><h2>Xray</h2><p>'+t('Xray inbounds for your users: every user with Xray ticked is a client of every inbound')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="xrAddNode()">'+ic('plus',15)+' '+t('Add server')+'</button><button class="btn" onclick="xrInbound()">+ '+t('Inbound')+'</button></div></div>'+
+var XTABS=[['overview','Servers','srv'],['inbounds','Inbounds','xray'],['clients','Online clients','users'],['routing','Routing and outbounds','tunnel'],['settings','Settings','settings']];
+var REALITY_TARGETS=['www.microsoft.com:443','www.apple.com:443','dl.google.com:443','www.speedtest.net:443','www.cloudflare.com:443','www.yahoo.com:443','www.amazon.com:443','addons.mozilla.org:443','www.samsung.com:443','www.nvidia.com:443',
+ 'www.cisco.com:443','www.mozilla.org:443','www.intel.com:443','www.ebay.com:443','www.bing.com:443','www.asus.com:443','www.digikala.com:443','www.aparat.com:443','divar.ir:443','snapp.ir:443','www.filimo.com:443','www.namava.ir:443'];
+function p_xray(){KAcc.open.xr='';XR.tab=S.sub||'overview';
+ $('#pg').innerHTML='<div class="ph"><div><h2>Xray</h2><p>'+t('Xray inbounds for your users: every user with Xray ticked is a client of every inbound')+'</p></div><div class="row" style="gap:6px"><button class="b2" id="xr_all1" onclick="srvProtoAll(\'xray\',0)">'+t('Off for all users')+'</button><button class="b2" onclick="srvProtoAll(\'xray\',1)">'+t('On for all users')+'</button><button class="b2" onclick="xrAddNode()">'+ic('plus',15)+' '+t('Add server')+'</button><button class="btn" onclick="xrInbound()">+ '+t('Inbound')+'</button></div></div>'+
   '<div class="ptabs" id="xr_tabs"></div><div id="xr">'+t('Loading…')+'</div>';
- xrLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))&&(XR.tab=='overview'||XR.tab=='inbounds'||XR.tab=='clients'))xrLoad(true)},5000)}
+ xrLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))&&(XR.tab=='overview'||XR.tab=='inbounds'||XR.tab=='clients'))xrLoad(true)},5000);srvLoad(true)}
 function tab_xray(sub){XR.tab=sub||'overview';if(XR.d)xrDraw(XR.d);else xrLoad()}
 function xrTabs(d){var el=$('#xr_tabs');if(!el)return;var cnt={inbounds:d.inbounds.length,clients:(d.online||[]).length,routing:(d.rule_list||[]).length+(d.outs||[]).length};
  el.innerHTML=XTABS.map(function(x){return '<a href="#xray/'+x[0]+'" class="'+(XR.tab==x[0]?'on':'')+'">'+ic(x[2],15)+t(x[1])+(cnt[x[0]]?' <em>'+N(cnt[x[0]])+'</em>':'')+'</a>'}).join('')}
@@ -332,22 +147,13 @@ function xrKpis(d){var act=d.inbounds.filter(function(x){return x.enabled&&!x.st
 function xrOverview(d,el){
  el.innerHTML=(d.on?'':'<div class="warnbox">'+t('Xray is off: nothing runs on the servers and no links go to the users.')+' <a href="#xray/settings">'+t('Turn it on')+'</a></div>')+
   '<div class="kv k5" id="xr_kv">'+xrKpis(d)+'</div>'+
-  '<div class="g2"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Xray servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="xr_srv" style="margin-top:10px">'+xrServers(d)+'</div></div>'+
-  '<div class="card"><div class="nh"><h3>'+ic('xray',16)+' '+t('Inbounds')+'</h3><a class="b2" href="#xray/inbounds">'+t('Manage')+'</a></div><div style="margin-top:6px">'+(d.inbounds.length?d.inbounds.map(function(ib){return xrMiniRow(ib)}).join(''):'<p class="muted">'+t('No inbound yet.')+' <a href="#" onclick="xrInbound();return false">'+t('Make the first one')+'</a></p>')+'</div></div></div>'+
+  '<div class="g2 k310one"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Xray servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="xr_srv" style="margin-top:10px">'+xrServers(d)+'</div></div>'+
+  '</div>'+
   '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0">'+t('1) Add a server (the panel server or any tunnel server). 2) Make inbounds on it. 3) Tick Xray for a user: the links of every inbound go into the user\'s subscription, and the traffic counts toward the user\'s volume.')+'</p></div>'}
 function xrProtoShort(p){return {vless:'VL',vmess:'VM',trojan:'TR',shadowsocks:'SS'}[p]||p}
 function xrMiniRow(ib){var st=xrState(ib);return '<div class="vrow"><span class="dot '+st[0]+'"></span><div class="nm"><b>'+esc(ib.remark||ib.protocol)+'</b><small class="ltr">'+esc(ib.protocol.toUpperCase())+' · '+esc(ib.network)+(ib.security!='none'?' · '+esc(ib.security.toUpperCase()):'')+' · :'+ib.port+'</small></div><span class="chipx '+st[0]+'">'+t(st[1])+'</span><b class="ltr" style="font-size:12px">'+N(bytes(ib.traffic))+'</b></div>'}
 function xrState(ib){if(!ib.enabled)return ['r','Off'];if(ib.state=='depleted')return ['y','Traffic used up'];if(ib.state=='expired')return ['y','Expired'];if(ib.state=='nocert')return [ib.cert_err?'r':'y',ib.cert_err?'Certificate error':'Waiting for the certificate'];var s=(XR.d&&XR.d.servers||[]).filter(function(x){return x.server==ib.server})[0];
  if(s&&s.status&&s.status.active)return ['g','Running'];return ['y','Waiting for the server…']}
-function xrServers(d){if(!d.servers.length)return '<p class="muted">'+t('No Xray server yet: add one in Servers')+'</p>';
- return d.servers.map(function(x){var st=x.status||{},on=st.active,errs=[st.deploy_error,st.error].filter(Boolean),n=d.inbounds.filter(function(i){return i.server==x.server}).length;
-  return '<div class="vrow" style="flex-wrap:wrap;align-items:flex-start"><span class="dot '+(on?'g':'r')+'" style="margin-top:6px"></span><div class="nm"><b>'+esc(x.name||x.server)+(x.server=='local'?' <span class="rotb">'+t('Panel server')+'</span>':'')+'</b><small class="ltr">'+esc(x.effective||'?')+(st.core?' · Xray '+esc(st.core):'')+' · '+N(n)+' '+t('inbounds')+'</small></div>'+
-   '<span class="chipx '+(on?'g':'r')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span>'+xrCertChip(x)+
-   '<div class="row" style="gap:4px;width:100%;justify-content:flex-end">'+'<button class="ib" title="'+t('Edit')+'" onclick="xrSrvEdit(\''+x.server+'\')">'+ic('edit',15)+'</button><button class="ib" title="'+t('Config')+'" onclick="xrPreview(\''+x.server+'\')">{ }</button><button class="ib bd" title="'+t('Delete')+'" onclick="xrSrvDel(\''+x.server+'\')">'+ic('trash',15)+'</button></div>'+
-   '<div class="g2" style="width:100%;margin-top:6px"><button class="b2" onclick="srvRepair(\'xray\',\''+x.server+'\')">↻ '+t('Repair')+'</button><button class="b2" onclick="srvHealth(\'xray\',\''+x.server+'\')">♡ '+t('Health')+'</button>'+
-   '<button class="b2 okb" onclick="protoAll(\'xray\',1)">'+ic('plus',15)+' '+t('Add to all users')+'</button><button class="b2 bd" onclick="protoAll(\'xray\',0)">'+ic('trash',15)+' '+t('Remove from all users')+'</button></div>'+
-   (errs.length?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+errs.map(esc).join('<br>')+'</div>':'')+
-   (xrCertErr(x)?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+esc(xrCertErr(x))+'</div>':'')+'</div>'}).join('')}
 
 // ---- inbounds tab
 function xrIbTab(d,el){
@@ -374,7 +180,6 @@ function xrOnline(d){var on=d.online||[];if(!on.length)return '<p class="muted">
  return '<div class="mtiles">'+on.map(function(u){return '<div class="vrow" style="margin:0"><span class="dot g"></span><div class="nm"><b><bdi>'+esc(u.name)+'</bdi></b><small>'+esc(u.server)+'</small></div></div>'}).join('')+'</div>'}
 
 // ---- routing tab
-function xrOutTags(d){return ['direct','block'].concat((d.outs||[]).map(function(o){return o.tag}))}
 function xrRouting(d,el){XR.rules=JSON.parse(JSON.stringify(d.rule_list||[]));XR.outs=JSON.parse(JSON.stringify(d.outs||[]));
  var pre=function(id,on,title,sub){return '<div class="srow"><div class="tx"><b>'+t(title)+'</b><small>'+t(sub)+'</small></div><label class="sw"><input type="checkbox" id="'+id+'" '+(on?'checked':'')+'><span></span></label></div>'};
  el.innerHTML='<div class="card"><h3>'+ic('security',16)+' '+t('Ready-made rules')+'</h3>'+
@@ -609,11 +414,9 @@ function xrFreePort(sid,random){var used=(XR.d&&XR.d.inbounds||[]).filter(functi
  if(!random&&used.indexOf(443)<0)return 443;for(var i=0;i<200;i++){var p=10000+Math.floor(Math.random()*50000);if(used.indexOf(p)<0&&bad.indexOf(p)<0)return p}return 20000}
 
 // ==================================================================== Anti-DPI
-// Kanki Panel: the Advanced anti-DPI tunnels page (v3.5.3).
-// Curated one-click inbound presets on top of the Xray engine, plus the
-// server-to-server transports that resist DPI. Everything here is created
-// through the normal Xray inbound editor, so links, users and limits work
-// the same as any other inbound.
+// the anti-DPI tunnels page: one-click inbound presets on the Xray engine and the server-to-server
+// transports that resist DPI. Everything is made in the normal Xray inbound editor, so links, users
+// and limits work like any other inbound.
 var AD_METHODS=[
  {pre:'vr',icn:'shield2',tags:['TCP','REALITY','Vision'],dif:1,
   name:'VLESS + REALITY',
@@ -667,36 +470,9 @@ function p_antidpi(){$('#pg').innerHTML='<div class="ph"><div><h2>'+ic('security
   'ℹ️ '+t('TUIC and ShadowTLS are not in Xray-core; Hysteria2 (QUIC + obfs) and the hq transport cover the same ground.')+'</div></div>'}
 function adNew(pre){if(typeof xrInbound!='function')return toast(t('Xray page is not loaded yet'),1);xrInbound();
  var n=0,iv=setInterval(function(){var b=document.querySelector('[data-pre="'+pre+'"]');if(b){b.click();toast(t('Settings are filled in: check the port and press Save'));clearInterval(iv)}else if(++n>50)clearInterval(iv)},100)}
-// Persian text: added to FA by KEXT() once the main script has defined it (it loads after this file)
-var AD_FA={"Advanced anti-DPI tunnels":"تانل‌های پیشرفته ضد DPI","Custom inbound":"اینباند سفارشی","Make this inbound":"ساخت این اینباند","When":"کی","Open the tunnels":"باز کردن تانل‌ها","User inbounds (Xray)":"اینباند کاربران (Xray)","Server-to-server transports":"انتقال‌های سرور‌به‌سرور","Which one, when?":"کدام، چه موقع؟",
- "One-click inbounds with the methods that resist DPI: REALITY, WS/gRPC behind a CDN, Shadowsocks 2022 — plus the server-link transports":"اینباند یک‌کلیکی با روش‌های مقاوم در برابر DPI: REALITY، WS/gRPC پشت CDN، Shadowsocks 2022 — به‌همراه انتقال‌های سرور‌به‌سرور",
- "Pick a method: the inbound editor opens with the right settings filled in. Then press Save — the panel makes keys, certificates and user links by itself.":"یک روش را انتخاب کن: ویرایشگر اینباند با تنظیمات درست باز می‌شود. بعد ذخیره را بزن — پنل خودش کلیدها، گواهی‌ها و لینک کاربران را می‌سازد.",
- "These live in the tunnel wizard; they carry whole VPNs between your Iran and foreign servers.":"این‌ها در ویزارد تانل هستند؛ VPN کامل را بین سرور ایران و خارج حمل می‌کنند.",
- "Settings are filled in: check the port and press Save":"تنظیمات پر شد: پورت را چک کن و ذخیره را بزن","Xray page is not loaded yet":"صفحه Xray هنوز بارگذاری نشده",
- "The strongest known anti-DPI method. The server borrows the TLS certificate of a real site (Microsoft, Apple, …) in real time: to the filter the connection IS a TLS session to that site. No domain, no certificate of your own, nothing to block by name.":"قوی‌ترین روش شناخته‌شده ضد DPI. سرور گواهی TLS یک سایت واقعی (مایکروسافت، اپل و…) را لحظه‌ای قرض می‌گیرد: برای فیلتر، اتصال همان نشست TLS به آن سایت است. نه دامنه لازم است، نه گواهی خودت؛ چیزی برای مسدودکردن با اسم نیست.",
- "Default choice for everyday filtering. Very fast (xtls-rprx-vision has no inner encryption cost).":"انتخاب پیش‌فرض برای فیلترینگ روزمره. خیلی سریع (xtls-rprx-vision هزینهٔ رمزنگاری داخلی ندارد).",
- "REALITY with the XHTTP transport: requests are split and padded, so traffic volume and timing look like ordinary web downloads. Survives traffic-shape analysis better than raw TCP.":"REALITY با انتقال XHTTP: درخواست‌ها تکه‌تکه و پد می‌شوند تا حجم و زمان‌بندی ترافیک شبیه دانلودهای معمولی وب به نظر برسد. در برابر تحلیل شکل ترافیک بهتر از TCP خام دوام می‌آورد.",
- "When plain REALITY works but you also want padding against shape analysis.":"وقتی REALITY ساده کار می‌کند اما پدینگ ضد تحلیل شکل ترافیک هم می‌خواهی.",
- "The domain fronts through a CDN (ArvanCloud, Cloudflare, …). The filter only sees HTTPS to the CDN edge — the real server IP never appears. Works in whitelist mode if the CDN edge is reachable.":"دامنه از پشت CDN (ابرآروان، کلادفلر و…) عبور می‌کند. فیلتر فقط HTTPS به لبهٔ CDN را می‌بیند — آی‌پی واقعی سرور هرگز دیده نمی‌شود. اگر لبهٔ CDN در دسترس باشد، در حالت لیست سفید هم کار می‌کند.",
- "When the server IP is burned, or in whitelist mode with a reachable CDN edge. Set “Link and CDN” in the editor: link address = your CDN domain, TLS at the CDN = on.":"وقتی آی‌پی سرور سوخته، یا در حالت لیست سفید با لبهٔ CDN در دسترس. در ویرایشگر «لینک و CDN» را تنظیم کن: آدرس لینک = دامنهٔ CDN، «TLS روی CDN» = روشن.",
- "Same fronting idea over HTTP/2 gRPC: many streams inside long-lived HTTP/2 connections, which matches API traffic patterns. Needs a CDN that passes gRPC to the origin over HTTPS (ArvanCloud and Cloudflare do); the server uses its own certificate.":"همان ایدهٔ فرانتینگ روی gRPC با HTTP/2: استریم‌های زیاد داخل اتصال‌های HTTP/2 طولانی، شبیه الگوی ترافیک API. به CDN‌ای نیاز دارد که gRPC را با HTTPS به مبدأ برساند (ابرآروان و Cloudflare می‌رسانند)؛ سرور از گواهی خودش استفاده می‌کند.",
- "Alternative fronting when WS is throttled; also good for many parallel streams.":"جایگزین فرانتینگ وقتی WS محدود می‌شود؛ برای استریم‌های موازی زیاد هم خوب است.",
- "A plain TLS server with your own domain and certificate; the password lives inside the TLS handshake. Simple and mature, but the SNI is your own domain — a blocked domain kills it.":"سرور TLS ساده با دامنه و گواهی خودت؛ رمز داخل دست‌دادن TLS است. ساده و بالغ، اما SNI همان دامنهٔ خودت است — با مسدودشدن دامنه می‌میرد.",
- "Fallback when REALITY is not possible (old clients) and you have a clean domain.":"جایگزین وقتی REALITY ممکن نیست (کلاینت قدیمی) و دامنهٔ تمیز داری.",
- "Fully random-looking encrypted traffic with no handshake at all (2022-blake3 methods). Nothing for DPI to fingerprint; carries UDP natively, so it is also a light cover for game/WireGuard UDP.":"ترافیک رمزنگاری‌شدهٔ کاملاً تصادفی به‌نظر بدون هیچ دست‌دادنی (متدهای 2022-blake3). چیزی برای اثرانگشت DPI ندارد؛ UDP را ذاتی حمل می‌کند، پس پوشش سبکی برای UDP گیم/وایرگارد هم هست.",
- "The lightweight stealth UDP cover: no TLS overhead, no handshake, minimal per-packet cost.":"پوشش سبک و مخفی UDP: بدون سربار TLS، بدون دست‌دادن، کمترین هزینهٔ هر بسته.",
- "QUIC-based with Salamander obfuscation: brutal congestion control keeps speed even with loss. In the tunnel wizard pick “Hysteria2” — the panel makes password, certificate and fingerprint pinning itself.":"مبتنی بر QUIC با مبهم‌سازی Salamander: کنترل ازدحام brutal سرعت را حتی با لاست نگه می‌دارد. در ویزارد تانل «Hysteria2» را انتخاب کن — پنل خودش رمز، گواهی و پین اثرانگشت را می‌سازد.",
- "Replaces TUIC for users: same family (QUIC, UDP, 0-RTT). For a user-facing Hysteria2 service use the Kanki VPN page.":"جایگزین TUIC برای کاربران: همان خانواده (QUIC، UDP، ‏0-RTT). برای سرویس Hysteria2 روبه‌کاربر از صفحهٔ Kanki VPN استفاده کن.",
- "WireGuard with junk packets and scrambled headers (Jc/S1/S2/H1-H4): the WG handshake no longer matches the DPI signature. Can itself ride inside WSS / CDN / QUIC / KCP / Game / FakeTCP.":"وایرگارد با بسته‌های جانبی و هدرهای به‌هم‌ریخته (Jc/S1/S2/H1-H4): دست‌دادن WG دیگر با امضای DPI نمی‌خواند. خودش هم می‌تواند داخل WSS / CDN / QUIC / KCP / Game / FakeTCP سوار شود.",
- "When you need a real VPN interface (TUN) between servers or for users.":"وقتی رابط VPN واقعی (TUN) بین سرورها یا برای کاربران لازم است.",
- "Game adds Reed-Solomon FEC and optional duplication on masked KCP — loss is repaired in flight. FakeTCP wraps UDP inside hand-made TCP packets (udp2raw style) so UDP throttling does not apply.":"گیم روی KCP ماسک‌شده FEC رید-سولومون و ارسال دوبارهٔ اختیاری می‌افزاید — لاست در راه ترمیم می‌شود. FakeTCP بسته‌های UDP را داخل TCP دست‌ساز (سبک udp2raw) می‌پیچد تا محدودیت UDP اعمال نشود.",
- "Gaming and WireGuard-over-tunnel: lowest visible loss, and UDP that looks like TCP.":"گیمینگ و وایرگارد روی تانل: کمترین لاست قابل‌مشاهده، و UDP که شبیه TCP است.",
- "Normal filtering:":"فیلترینگ عادی:","Heavy filtering / burned IPs:":"فیلترینگ شدید / آی‌پی سوخته:","Whitelist mode (only domestic sites open):":"حالت لیست سفید (فقط سایت‌های داخلی باز است):","Gaming / UDP:":"گیمینگ / UDP:",
- "fastest, nothing to maintain":"سریع‌ترین، بدون نیاز به نگهداری","the server IP hides behind the edge":"آی‌پی سرور پشت لبه پنهان می‌شود","the CDN transport of the tunnels + an ArvanCloud domain":"انتقال CDN تانل‌ها + یک دامنهٔ ابرآروان","see the whitelist guide in the tunnel wizard":"راهنمای لیست سفید را در ویزارد تانل ببین","for users":"برای کاربران","between the servers":"بین سرورها",
- "TUIC and ShadowTLS are not in Xray-core; Hysteria2 (QUIC + obfs) and the hq transport cover the same ground.":"TUIC و ShadowTLS در هستهٔ Xray نیستند؛ Hysteria2 (QUIC + obfs) و انتقال hq همان کار را می‌کنند."};
 
 // ==================================================================== Kanki DNS
-// Kanki Panel: the Kanki DNS page (v3.5). Tabs: overview, servers, services, users, settings and SSL.
+// the Kanki DNS page. Tabs: overview, servers, services, users, settings and SSL.
 var DN={d:null,tab:'overview',q:'',users:null};
 var DTABS=[['overview','Overview','dash'],['servers','DNS servers','srv'],['pubg','PUBG and games','globe'],['services','Services','globe'],['users','DNS users','users'],['log','Query log','traffic'],['settings','Settings and SSL','settings']];
 var UPSTREAMS=[['Cloudflare','1.1.1.1, 1.0.0.1'],['Google','8.8.8.8, 8.8.4.4'],['Quad9','9.9.9.9, 149.112.112.112'],['AdGuard (no ads)','94.140.14.14, 94.140.15.15'],['OpenDNS','208.67.222.222, 208.67.220.220']];
@@ -879,18 +655,6 @@ function dnsDel(id){confirmDo(function(){api('DELETE','/api/dns/servers/'+encode
 
 
 // ---- PUBG and games tab: every PUBG Mobile name in one place, what each part does, and which to turn on
-function dnFA(){if(dnFA.done||typeof FA=='undefined')return;dnFA.done=1;Object.assign(FA,{
- "PUBG and games":"پابجی و بازی‌ها",
- "PUBG Mobile through Kanki DNS":"پابجی موبایل با DNS کانکی",
- "Pick one: it changes only the PUBG Mobile names below.":"یکی را انتخاب کن: فقط نام‌های پابجی موبایل پایین عوض می‌شوند.",
- "Direct":"مستقیم","Nothing of PUBG passes your servers. Fine where the game opens without help.":"هیچ چیز پابجی از سرورهای تو رد نمی‌شود. برای جاهایی که بازی بدون کمک باز می‌شود.",
- "Login and lobby (recommended)":"ورود و لابی (پیشنهادی)","Login, account, lobby and the UC store go through your server; the match stays direct.":"ورود، حساب، لابی و فروشگاه UC از سرور تو رد می‌شوند؛ خود مسابقه مستقیم می‌ماند.",
- "Everything":"همه","Also updates and anti-cheat. Use it when the game still stops at login or the update does not download.":"آپدیت و ضدتقلب هم. وقتی بازی هنوز روی ورود می‌ماند یا آپدیت دانلود نمی‌شود.",
- "Now":"الان","Custom":"دلخواه","Saved: the DNS servers use it within a few seconds":"ذخیره شد: سرورهای DNS تا چند ثانیه‌ی دیگر از آن استفاده می‌کنند",
- "Parts of PUBG Mobile":"بخش‌های پابجی موبایل","Every name of a ticked part and all its subdomains go through your server.":"همه‌ی نام‌های بخش تیک‌خورده و همه‌ی زیردامنه‌هایشان از سرور تو رد می‌شوند.",
- "PUBG names your users asked":"نام‌های پابجی که کاربرهایت پرسیده‌اند","From the query log: a direct name that the game needs can be added here.":"از گزارش پرس‌وجوها: اگر نامی که بازی لازم دارد مستقیم رفته، از همین‌جا اضافه‌اش کن.",
- "Add":"افزودن","No PUBG query in the log yet: open the game on a phone that uses your DNS, then press Refresh.":"هنوز پرس‌وجوی پابجی در گزارش نیست: بازی را روی گوشی‌ای که DNS تو را دارد باز کن، بعد «تازه‌سازی» را بزن.",
- "PUBG on PC (Krafton)":"پابجی کامپیوتر (Krafton)","It is in Services › Games › Other games.":"در «سرویس‌ها › بازی‌ها › بازی‌های دیگر» است."});}
 var PUBG_ART=[
  ['How a PUBG Mobile connection goes','مسیر اتصال پابجی موبایل','<ol style="margin:0;padding-inline-start:18px;line-height:2.1"><li><b>ورود و لابی</b> (TCP، روی HTTPS): بازی اول به سرورهای ورود، حساب و لابی وصل می‌شود. این همان جایی است که تحریم و فیلتر جلویش را می‌گیرد و بازی روی «در حال اتصال» می‌ماند. DNS کانکی این بخش را از سرور تو رد می‌کند.</li><li><b>مسابقه</b> (UDP): بعد از لابی، بازی مستقیم با آی‌پی سرور مسابقه حرف می‌زند. این بخش اصلاً از DNS نمی‌گذرد، پس پینگ بازی بالا نمی‌رود و لازم نیست کاری بکنی.</li><li><b>آپدیت و فایل‌ها</b>: دانلودهای حجیم بازی. فقط وقتی آپدیت از ایران دانلود نمی‌شود از سرور رد کن.</li></ol>'],
  ['I connect straight with my DNS and the game does not open','مستقیم با DNS خودم وصل می‌شوم ولی بازی باز نمی‌شود','<ul style="margin:0;padding-inline-start:18px;line-height:2.1"><li>بخش «ورود، حساب و لابی» به‌صورت پیش‌فرض <b>خاموش</b> است (چون روی بیشتر اپراتورها بازی خودش باز می‌شود). وقتی خاموش است، DNS تو برای پابجی همان آی‌پی واقعی را می‌دهد و بازی مستقیم می‌رود؛ جایی که مستقیم بسته است بازی باز نمی‌شود. حالت <b>«ورود و لابی»</b> را بالا انتخاب کن.</li><li>اگر باز هم روی ورود ماند: حالت <b>«همه»</b> را امتحان کن (ضدتقلب و آپدیت هم رد می‌شوند).</li><li>بعد از عوض کردن، گوشی جواب قبلی DNS را نگه می‌دارد: بازی را کامل ببند، یک بار حالت پرواز را روشن و خاموش کن و دوباره باز کن.</li><li>گوشی باید واقعاً از DNS تو استفاده کند: در اپ کانکی «رفع تحریم» را بزن (یا Private DNS اندروید = آدرس DNS کاربر). اگر کاربر ثبت نشده باشد سرور جواب نمی‌دهد.</li><li>پایین همین صفحه می‌بینی گوشی کاربرها کدام نام‌های پابجی را پرسیده‌اند و کدام <b>مستقیم</b> رفته‌اند. اگر نامی مستقیم رفته که بازی لازمش دارد، «افزودن» را بزن.</li><li>اگر سرور DNS در ایران است (رله)، ترافیک لابی از تانل به سرور خارج می‌رود: تانل رله باید بالا باشد (صفحه‌ی سرورهای DNS).</li></ul>'],
@@ -902,7 +666,7 @@ function dnsPubgMode(d){var on=(d.opt||[]).filter(function(x){return x.indexOf('
 function dnsPubgSave(d,keys){var opt=(d.opt||[]).filter(function(x){return x.indexOf('pubgmobile/')!=0}).concat(keys.map(function(k){return 'pubgmobile/'+k}));
  var off=(d.off||[]).filter(function(x){return x.indexOf('pubgmobile/')!=0});
  return api('PUT','/api/dns',{opt:opt,off:off}).then(function(){toast(t('Saved: the DNS servers use it within a few seconds'));return dnsLoad()})}
-function dnsPubgTab(d,el){dnFA();var sv=dnsPubgSvc(d),mode=dnsPubgMode(d),fa=S.lang!='en';
+function dnsPubgTab(d,el){var sv=dnsPubgSvc(d),mode=dnsPubgMode(d),fa=S.lang!='en';
  if(!sv){el.innerHTML='<div class="card"><p class="muted">PUBG Mobile</p></div>';return}
  var art=PUBG_ART.map(function(a,i){return '<details class="secc"'+(i<2?' open':'')+'><summary>'+esc(fa?a[1]:a[0])+'<span class="chev">'+ic('chev',14)+'</span></summary><div class="bd2" style="font-size:13px">'+a[2]+'</div></details>'}).join('');
  el.innerHTML=dnsWarn(d)+
@@ -931,44 +695,17 @@ function dnsPubgLog(d){var el=$('#pg_log');if(!el)return;var keys=['pubg','igame
   $$('#pg_log [data-add]').forEach(function(b){b.onclick=function(){var c=(DN.d.custom||[]).slice(),n=b.dataset.add;if(c.indexOf(n)<0)c.push(n);api('PUT','/api/dns',{custom:c}).then(function(){toast(t('Saved'));dnsLoad(true).then(function(){dnsPubgLog(DN.d)})}).catch(fail)}})})}
 
 // ==================================================================== KANKI MIX
-// Kanki Panel: the KANKI MIX page (v3.6). Our own UDP protocol on every VPN server, next to WireGuard,
-// AmneziaWG and Hysteria2: game UDP on a raw datagram path (sent twice in gaming mode), TCP on KCP + FEC.
+// the KANKI MIX page: our own UDP protocol on every VPN server, next to WireGuard, AmneziaWG and
+// Hysteria2: game UDP on a raw datagram path (sent twice in gaming mode), TCP on KCP + FEC.
 // The agent writes the built-in server to each server by itself; every user has their own key.
-var KM_ICO='<path d="M6 11h4M8 9v4"/><circle cx="15.5" cy="12.5" r=".6"/><circle cx="17.5" cy="10.5" r=".6"/><path d="M7.5 6h9a5 5 0 0 1 4.8 6.3l-1 3.6a2.6 2.6 0 0 1-4.6.9L14.5 15h-5l-1.2 1.8a2.6 2.6 0 0 1-4.6-.9l-1-3.6A5 5 0 0 1 7.5 6z"/>';
 var KM={d:null};
-function kmFA(){if(kmFA.done||typeof FA=='undefined')return;kmFA.done=1;ICO.game=KM_ICO;Object.assign(FA,{"Name in the app":"اسم در برنامه","tunnel":"تانل","Second config through the tunnel":"کانفیگ دوم از راه تانل","Users also get":"کاربرها این را هم می‌گیرند","Write the Iran address whose tunnel forwards this UDP port":"آدرس سرور ایرانی را بنویس که تانلش این پورت UDP را عبور می‌دهد","Iran address":"آدرس ایران",
- "Our own protocol: games, low ping":"پروتکل خودمان: بازی، پینگ کم",
- "Our own protocol on every VPN server: game packets go straight (no queue, sent twice in gaming mode), websites over KCP + FEC.":"پروتکل خودمان روی همه‌ی سرورهای VPN: بسته‌های بازی مستقیم می‌روند (بدون صف، در حالت گیمینگ دوتایی)، سایت‌ها روی KCP + FEC.",
- "KANKI MIX is off: it runs on no server and is in no subscription.":"KANKI MIX خاموش است: روی هیچ سروری اجرا نمی‌شود و در هیچ اشتراکی نیست.",
- "Users with KANKI MIX":"کاربران KANKI MIX","Running servers":"سرورهای فعال","Online now":"آنلاین الان","Total traffic":"ترافیک کل",
- "Servers":"سرورها","Settings":"تنظیمات","Save":"ذخیره","Saved":"ذخیره شد","On":"روشن","Off":"خاموش",
- "KANKI MIX on":"KANKI MIX روشن","Default UDP port":"پورت UDP پیش‌فرض","Every server uses it unless it has its own port below.":"همه‌ی سرورها همین را دارند، مگر سروری که پایین پورت خودش را دارد.",
- "FEC for websites (TCP)":"FEC برای سایت‌ها (TCP)","Extra bytes that rebuild lost packets without asking again. Games do not use it (they have gaming mode).":"بایت اضافه که بسته‌ی گم‌شده را بدون درخواست دوباره می‌سازد. بازی‌ها از آن استفاده نمی‌کنند (حالت گیمینگ دارند).",
- "none":"هیچ","light":"سبک","normal":"معمولی","strong":"قوی","very strong":"خیلی قوی",
- "Gaming mode on in the app by default":"حالت گیمینگ در اپ پیش‌فرض روشن","Each game packet is sent twice: at 20% loss 92% arrive instead of 64%. Users can switch it off in the app.":"هر بسته‌ی بازی دو بار فرستاده می‌شود: با ۲۰٪ لاس، ۹۲٪ می‌رسد به جای ۶۴٪. کاربر در اپ می‌تواند خاموشش کند.",
- "Extra ports (port range)":"پورت‌های اضافه (بازه)","Like 4001-4010. They all lead to the main port; the app picks one at random on every connect, so blocking one port is not enough. Empty = off.":"مثلاً 4001-4010. همه به پورت اصلی می‌رسند؛ اپ هر بار یکی را تصادفی انتخاب می‌کند تا بستن یک پورت کافی نباشد. خالی = خاموش.",
- "Enable for all users":"روشن برای همه‌ی کاربران","Disable for all users":"خاموش برای همه‌ی کاربران",
- "KANKI MIX for every user?":"KANKI MIX برای همه‌ی کاربران روشن شود؟","Remove KANKI MIX from every user?":"KANKI MIX از همه‌ی کاربران برداشته شود؟",
- "users changed":"کاربر تغییر کرد","Running":"در حال اجرا","Not running":"اجرا نمی‌شود","Waiting for the server…":"منتظر سرور…","Off on this server":"روی این سرور خاموش",
- "Update the agent of this server (Servers › Update agent) to run KANKI MIX":"عامل این سرور را به‌روز کن (سرورها › به‌روزرسانی عامل) تا KANKI MIX اجرا شود",
- "Port of this server":"پورت این سرور","default":"پیش‌فرض","users":"کاربر","Main server":"سرور اصلی",
- "How it works":"چطور کار می‌کند",
- "1) Keep it on and pick the port (4000 is fine). 2) Tick KANKI MIX for users (or Enable for all users). 3) Every server installs it by itself within a minute; the Kanki app gets the kanki:// link from the subscription, users see no IP or key.":"۱) روشن بگذار و پورت را انتخاب کن (۴۰۰۰ خوب است). ۲) KANKI MIX را برای کاربران تیک بزن (یا «روشن برای همه‌ی کاربران»). ۳) هر سرور ظرف یک دقیقه خودش نصبش می‌کند؛ اپ کانکی لینک kanki:// را از اشتراک می‌گیرد و کاربر IP یا کلید نمی‌بیند.",
- "Each user has their own key (made from the subscription code): resetting the link gives a new key, disabling or expiring cuts the user off at once. Traffic and devices count like the other protocols.":"هر کاربر کلید خودش را دارد (از کد اشتراک ساخته می‌شود): ریست لینک کلید تازه می‌دهد، غیرفعال یا منقضی شدن کاربر را فوراً قطع می‌کند. مصرف و دستگاه‌ها مثل بقیه‌ی پروتکل‌ها شمرده می‌شوند.",
- "Coming next":"به‌زودی","Port hopping during the connection (a new port every few minutes)":"پورت‌هاپینگ وسط اتصال (هر چند دقیقه پورت تازه)",
- "Look like QUIC / HTTP3 on the wire":"شبیه QUIC / HTTP3 روی سیم","Several servers in one link, automatic switch when one is blocked":"چند سرور در یک لینک، تعویض خودکار وقتی یکی بسته شد",
- "Speed limit per user":"محدودیت سرعت برای هر کاربر",
- "Direct (the server's own address)":"مستقیم (آدرس خود سرور)","Through the tunnel (Iran server)":"از تانل (سرور ایران)",
- "Address":"آدرس","automatic":"خودکار","Route":"مسیر",
- "Direct: the app connects straight to the foreign server, lowest ping. Tunnel: the app connects to the Iran server; the tunnel to this server must forward this UDP port.":"مستقیم: اپ مستقیم به سرور خارج وصل می‌شود، کمترین پینگ. تانل: اپ به سرور ایران وصل می‌شود؛ تانل این سرور باید همین پورت UDP را فوروارد کند.",
- "address: a domain or an IP, like de.example.com":"آدرس: یک دامنه یا IP، مثل de.example.com","port":"پورت","the port must be 1-65535":"پورت باید ۱ تا ۶۵۵۳۵ باشد"})}
 
-function p_kmix(){kmFA();
+function p_kmix(){KAcc.open.km='';
  $('#pg').innerHTML='<div class="ph"><div><h2>KANKI MIX</h2><p>'+t('Our own protocol on every VPN server: game packets go straight (no queue, sent twice in gaming mode), websites over KCP + FEC.')+'</p></div>'+
   '<div class="row" style="gap:6px"><button class="b2" onclick="kmAll(false)">'+t('Disable for all users')+'</button><button class="btn" onclick="kmAll(true)">'+ic('users',15)+' '+t('Enable for all users')+'</button></div></div><div id="km">'+t('Loading…')+'</div>';
  kmLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))kmLoad(true)},8000)}
-function kmLoad(quiet){return api('GET','/api/kmix').then(function(d){KM.d=d;if(S.page!='kmix')return d;
-  if(quiet&&$('#km_srv')){$('#km_kv').innerHTML=kmKpis(d);$('#km_srv').innerHTML=kmServers(d);return d}kmDraw(d);return d}).catch(fail)}
+function kmLoad(quiet){return srvLoad(true).then(function(){return api('GET','/api/kmix')}).then(function(d){KM.d=d;if(S.page!='kmix')return d;
+  if($('#km_srv')){$('#km_kv').innerHTML=kmKpis(d);if(!quiet||!accBusy('km'))$('#km_srv').innerHTML=kmServers(d);return d}kmDraw(d);return d}).catch(fail)}
 function kmRun(x){return x.active===true}
 function kmKpis(d){var s=d.settings,run=d.servers.filter(kmRun).length,on=d.servers.filter(function(x){return x.on}).length;
  return '<div><small>'+t('Status')+'</small><b style="color:'+(s.on?'var(--ok)':'var(--bad)')+'">'+(s.on?t('On'):t('Off'))+'</b></div>'+
@@ -977,36 +714,12 @@ function kmKpis(d){var s=d.settings,run=d.servers.filter(kmRun).length,on=d.serv
   '<div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(on)+'</b></div>'+
   '<div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(d.traffic_gb)+' GB</b></div>'}
 function kmState(x){if(!x.on)return ['','Off on this server'];if(kmRun(x))return ['g','Running'];if(x.error)return ['r','Not running'];return ['y','Waiting for the server…']}
-function kmServers(d){if(!d.servers.length)return '<p class="muted">—</p>';
- return d.servers.map(function(x){var st=kmState(x),port=x.port||x.want_port,old=x.on&&!x.installed&&x.online&&!x.error;
-  return '<div class="vrow" style="flex-wrap:wrap;align-items:flex-start"><span class="dot '+(st[0]||'')+'" style="margin-top:6px"></span>'+
-   '<div class="nm"><b>'+esc(x.name)+(x.main?' <span class="rotb">'+t('Main server')+'</span>':'')+'</b><small class="ltr">'+esc(x.endpoint||'?')+':'+esc(String(port))+(x.hop?' · +'+esc(x.hop):'')+(x.parity!=null?' · FEC 10+'+esc(String(x.parity)):'')+'</small></div>'+
-   '<span class="chipx">'+N(x.users)+' '+t('users')+'</span><span class="chipx '+(st[0]||'')+'">'+t(st[1])+'</span>'+
-   '<div class="row" style="gap:6px;width:100%;justify-content:flex-end;align-items:center"><small class="muted">'+t('Port of this server')+'</small>'+
-   '<input class="ltr km_np" data-id="'+esc(x.id)+'" inputmode="numeric" style="width:96px" placeholder="'+esc(t('default'))+' '+N(d.settings.port)+'" value="'+esc(((d.settings.nodes||{})[x.id]||{}).port||'')+'">'+
-   sw('',x.on,"kmNodeOn('"+esc(x.id)+"',this.checked)")+'</div>'+
-   kmRouteRow(d,x)+
-   (old?'<div class="warnbox" style="margin:6px 0 0;width:100%">'+t('Update the agent of this server (Servers › Update agent) to run KANKI MIX')+'</div>':'')+
-   (x.on&&x.error?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+esc(x.error)+'</div>':'')+'</div>'}).join('')}
 // direct (the foreign server's own address) or through the Iran tunnel, and an optional address of its own
-function kmRouteRow(d,x){var o=(d.settings.nodes||{})[x.id]||{},tun=o.route=='tunnel',id=esc(x.id);
- return '<div class="row" style="gap:6px;width:100%;justify-content:flex-end;align-items:center;margin-top:6px"><small class="muted">'+t('Route')+'</small>'+
-  '<select class="km_rt" data-id="'+id+'" onchange="kmSaveNodes()" style="width:auto">'+
-   '<option value=""'+(tun?'':' selected')+'>'+t("Direct (the server's own address)")+' · '+esc(x.direct_host||'?')+'</option>'+
-   '<option value="tunnel"'+(tun?' selected':'')+'>'+t('Through the tunnel (Iran server)')+' · '+esc(x.tunnel_host||'?')+'</option></select>'+
-  '<input class="ltr km_host" data-id="'+id+'" style="width:170px" placeholder="'+esc(t('Address'))+': '+esc(t('automatic'))+'" value="'+esc(o.host||'')+'" onchange="kmSaveNodes()"></div>'+
-  // the second config of every user on this server: through the Iran tunnel
-  '<div class="km2"><label class="chk" style="margin:0"><input type="checkbox" class="km_t2" data-id="'+id+'" '+(o.tun_off?'':'checked')+' onchange="kmSaveNodes()"><span><b>'+t('Second config through the tunnel')+'</b><small>'+
-   (x.second?t('Users also get')+' <span class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</span>':t('Write the Iran address whose tunnel forwards this UDP port'))+'</small></span></label>'+
-   '<div class="row" style="gap:6px"><input class="ltr km_th" data-id="'+id+'" style="width:170px" placeholder="'+esc(t('Iran address'))+': '+esc(t('automatic'))+'" value="'+esc(o.tun_host||'')+'" onchange="kmSaveNodes()">'+
-   '<input class="ltr km_tp" data-id="'+id+'" style="width:90px" inputmode="numeric" placeholder="'+esc(t('Port'))+'" value="'+esc(o.tun_port?String(o.tun_port):'')+'" onchange="kmSaveNodes()"></div>'+
-   '<div class="row" style="gap:6px;margin-top:6px;align-items:center"><small class="muted">'+t('Name in the app')+'</small><input class="km_tn" data-id="'+id+'" maxlength="40" style="flex:1;min-width:150px" placeholder="'+esc((x.name||'')+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'" onchange="kmSaveNodes()"></div></div>'}
-function kmSaveNodes(){kmPut({nodes:kmNodes()})}
 function kmDraw(d){var el=$('#km');if(!el)return;var s=d.settings;
  var par=[[0,'none'],[2,'light'],[3,'normal'],[5,'strong'],[8,'very strong']];
  el.innerHTML=(s.on?'':'<div class="warnbox">'+t('KANKI MIX is off: it runs on no server and is in no subscription.')+'</div>')+
   '<div class="kv k5" id="km_kv">'+kmKpis(d)+'</div>'+
-  '<div class="g2"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="km_srv" style="margin-top:10px">'+kmServers(d)+'</div></div>'+
+  '<div class="g2 kmg2"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="km_srv" style="margin-top:10px">'+kmServers(d)+'</div></div>'+
   '<div class="card"><h3>'+ic('settings',16)+' '+t('Settings')+'</h3>'+
    '<div class="srow"><div class="tx"><b>'+t('KANKI MIX on')+'</b></div><label class="sw"><input type="checkbox" id="km_on" '+(s.on?'checked':'')+'><span></span></label></div>'+
    '<label class="f">'+t('Default UDP port')+'</label><input id="km_port" class="ltr" inputmode="numeric" value="'+esc(String(s.port))+'"><small class="muted">'+t('Every server uses it unless it has its own port below.')+'</small>'+
@@ -1036,34 +749,17 @@ function kmNodeOn(id,on){var m=kmNodes(),o=m[id]||{};o.off=!on;m[id]=o;kmPut({no
 function kmSetNodePort(id,port,done){var go=function(d){var m={};Object.keys(d.settings.nodes||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});var o=m[id]||{};o.port=+port||0;m[id]=o;kmPut({nodes:m},done)};
  if(!/^\d+$/.test(String(port))||+port<1||+port>65535)return toast(t('the port must be 1-65535'),1);
  api('GET','/api/kmix').then(function(d){KM.d=d;go(d)}).catch(fail)}
-function kmAll(on){kmFA();if(!confirm(t(on?'KANKI MIX for every user?':'Remove KANKI MIX from every user?')))return;
+function kmAll(on){if(!confirm(t(on?'KANKI MIX for every user?':'Remove KANKI MIX from every user?')))return;
  api('POST','/api/kmix/users',{on:on}).then(function(r){toast(t('Saved')+' · '+N(r.changed)+' '+t('users changed'));kmLoad()}).catch(fail)}
 
 // ==================================================================== MIX+
-// Kanki Panel: the MIX+ page. Our own gaming protocol for the Kanki app (KCP at its fastest with
-// Reed-Solomon FEC under a mask, the Game-FEC transport of the tunnels), a section of its own like
-// KANKI MIX and ticked per user. It runs on every VPN server on a port of its own.
+// the MIX+ page: our own gaming protocol for the Kanki app (KCP at its fastest with Reed-Solomon FEC
+// under a mask, the Game-FEC transport of the tunnels), ticked per user like KANKI MIX. It runs on
+// every VPN server on a port of its own.
 var KC={d:{},meta:{
  kgame:{name:'MIX+\u200e',net:'UDP',desc:'For games (PUBG…): KCP at its fastest with FEC, a lost packet is rebuilt without waiting. Game and websites ride one stream, like the tunnels; «Game optimization» below sends game packets apart. Nothing on the wire looks like a protocol.'}}};
-function kcFA(){if(kcFA.done||typeof FA=='undefined')return;kcFA.done=1;Object.assign(FA,{
- "For games (PUBG…): KCP at its fastest with FEC, a lost packet is rebuilt without waiting. Game and websites ride one stream, like the tunnels; «Game optimization» below sends game packets apart. Nothing on the wire looks like a protocol.":"برای بازی (پابجی و …): KCP سریع با FEC؛ بسته‌ی گم‌شده بدون انتظار ساخته می‌شود. بازی و سایت‌ها مثل تانل‌ها در یک جریان می‌روند؛ «بهینه‌سازی بازی» پایین بسته‌های بازی را جدا می‌فرستد. روی سیم شبیه هیچ پروتکلی نیست.",
- "is off: it runs on no server and is in no subscription.":"خاموش است: روی هیچ سروری اجرا نمی‌شود و در هیچ اشتراکی نیست.",
- "Users with it":"کاربران این پروتکل","Running servers":"سرورهای فعال","Online now":"آنلاین الان","Total traffic":"ترافیک کل",
- "Default port":"پورت پیش‌فرض","Every server uses it unless it has its own port below.":"همه‌ی سرورها همین را دارند، مگر سروری که پایین پورت خودش را دارد.",
- "Copies of each game packet":"تعداد نسخه‌ی هر بسته‌ی بازی",
- "Only packets up to 400 bytes (PUBG: 40-300 bytes) are copied; downloads are sent once. Through 15% loss each way: 1 copy 72%, 2 copies 96%, 3 copies 99.8% of round trips arrive.":"فقط بسته‌های تا ۴۰۰ بایت (پابجی: ۴۰ تا ۳۰۰ بایت) چندتایی می‌روند؛ دانلودها یک بار. با ۱۵٪ لاس در هر طرف: ۱ نسخه ۷۲٪، ۲ نسخه ۹۶٪، ۳ نسخه ۹۹٫۸٪ رفت‌وبرگشت‌ها می‌رسند.",
- "1 (no copies)":"۱ (بدون نسخه‌ی اضافه)","2 (recommended)":"۲ (پیشنهادی)","3 (very lossy internet)":"۳ (اینترنت خیلی پرلاس)",
- "FEC of the stream (websites, game lobby)":"FEC جریان (سایت‌ها، لابی بازی)","off":"خاموش","TLS name":"نام TLS",
- "Port of this server":"پورت این سرور","default":"پیش‌فرض","Address the app dials":"آدرسی که اپ وصل می‌شود","automatic":"خودکار",
- "Off on this server":"روی این سرور خاموش","Running":"در حال اجرا","Not running":"اجرا نمی‌شود","Waiting for the server…":"منتظر سرور…",
- "Update the agent of this server to run it":"عامل این سرور را به‌روز کن تا اجرا شود",
- "Enable for all users":"روشن برای همه‌ی کاربران","Disable for all users":"خاموش برای همه‌ی کاربران","for every user?":"برای همه‌ی کاربران روشن شود؟","Remove from every user?":"از همه‌ی کاربران برداشته شود؟","users changed":"کاربر تغییر کرد",
- "How it works":"چطور کار می‌کند","Game optimization":"بهینه‌سازی بازی",
- "Off: exactly like the tunnels (game UDP inside the stream). On: game packets as datagrams of their own, small ones sent several times.":"خاموش: دقیقاً مثل تانل‌ها (UDP بازی داخل همان جریان). روشن: بسته‌های بازی دیتاگرام جدا و بسته‌های کوچک چند بار.",
- "Tick it for a user (user form, or Enable for all users). Every server runs it by itself within a minute; the Kanki app gets the link from the subscription. Each user has their own key: a new link is a new key, an expired or disabled user is cut off at once. Open the port at the data center's firewall too.":"برای کاربر تیکش را بزن (فرم کاربر، یا «روشن برای همه‌ی کاربران»). هر سرور ظرف یک دقیقه خودش اجرایش می‌کند؛ اپ کانکی لینک را از اشتراک می‌گیرد. هر کاربر کلید خودش را دارد: لینک تازه یعنی کلید تازه، کاربر منقضی یا غیرفعال فوراً قطع می‌شود. پورت را در فایروال دیتاسنتر هم باز کن.",
- "the port must be 1-65535":"پورت باید ۱ تا ۶۵۵۳۵ باشد","Save":"ذخیره","Saved":"ذخیره شد","Servers":"سرورها","Settings":"تنظیمات","users":"کاربر","Main server":"سرور اصلی","Status":"وضعیت","On":"روشن","Off":"خاموش"})}
 
-function kcPage(p){kcFA();var m=KC.meta[p];
+function kcPage(p){var m=KC.meta[p];
  $('#pg').innerHTML='<div class="ph"><div><h2>'+esc(m.name)+'</h2><p>'+t(m.desc)+'</p></div>'+
   '<div class="row" style="gap:6px"><button class="b2" onclick="kcAll(\''+p+'\',false)">'+t('Disable for all users')+'</button><button class="btn" onclick="kcAll(\''+p+'\',true)">'+ic('users',15)+' '+t('Enable for all users')+'</button></div></div><div id="kc">'+t('Loading…')+'</div>';
  kcLoad(p);clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))kcLoad(p,true)},8000)}
@@ -1112,16 +808,1860 @@ function kcNodeOn(p,id,on){var m=kcNodes(p),o=m[id]||{};o.off=!on;m[id]=o;kcPut(
 function kcSave(p){var v=unN($('#kc_port').value).trim();if(!/^\d+$/.test(v)||+v<1||+v>65535)return toast(t('the port must be 1-65535'),1);
  var b={on:$('#kc_on').checked,port:+v,nodes:kcNodes(p)};
  if($('#kc_opt'))b.optimize=$('#kc_opt').checked;if($('#kc_cp'))b.copies=+$('#kc_cp').value;if($('#kc_fec'))b.fec=$('#kc_fec').value;if($('#kc_sni'))b.sni=$('#kc_sni').value.trim();kcPut(p,b)}
-function kcAll(p,on){kcFA();var n=KC.meta[p].name;if(!confirm(on?n+' '+t('for every user?'):n+': '+t('Remove from every user?')))return;
+function kcAll(p,on){var n=KC.meta[p].name;if(!confirm(on?n+' '+t('for every user?'):n+': '+t('Remove from every user?')))return;
  api('POST','/api/kc/'+p+'/users',{on:on}).then(function(r){toast(t('Saved')+' · '+N(r.changed)+' '+t('users changed'));kcLoad(p)}).catch(fail)}
 
 // ==================================================================== the panel: login, shell, pages
 "use strict";
-var FA={"Users":"کاربران","Separate subscription domain":"دامنه‌ی جدا برای لینک ساب","A domain that points to this server. The panel gets its SSL by itself and serves only the subscription pages on it, so the panel address stays hidden.":"دامنه‌ای که به همین سرور اشاره می‌کند. پنل خودش SSL می‌گیرد و فقط صفحه‌های ساب را روی آن نشان می‌دهد، پس آدرس پنل پنهان می‌ماند.","Set up SSL and use it":"گرفتن SSL و استفاده","Getting the SSL certificate… this can take up to one minute":"در حال گرفتن SSL… تا یک دقیقه طول می‌کشد","Nodes":"نودها","Sales bot":"ربات فروش","Backup":"بکاپ و ریستور","Security":"مرکز امنیت","Settings":"تنظیمات","System":"وضعیت سرور","Logout":"خروج","Login":"ورود","Username":"نام کاربری","Password":"رمز عبور","2FA code":"کد دومرحله‌ای","Volume, time, connections, nodes and configs":"حجم، زمان، اتصال، نود و کانفیگ‌ها","New user":"کاربر جدید","Online":"آنلاین","Total users":"کل کاربران","Offline":"آفلاین","Active":"فعال","Finished":"تمام‌شده","Disabled":"غیرفعال","Created configs":"کانفیگ‌های ساخته‌شده","users total":"کاربر","Select all":"انتخاب همه","selected":"انتخاب‌شده","Bulk actions":"عملیات گروهی","Search by name or note…":"جستجو بر اساس نام یا یادداشت…","All":"همه","Expired / out of data":"منقضی / اتمام حجم","Refresh":"تازه‌سازی","Enable":"فعال‌سازی","Disable":"غیرفعال‌سازی","Reset traffic":"ریست ترافیک","Add 30 days":"افزودن ۳۰ روز","Delete":"حذف","Edit user":"ویرایش کاربر","Credit & limits":"اعتبار و محدودیت","Expiry date":"تاریخ انقضا","Total volume (0 = unlimited)":"حجم کل (صفر = نامحدود)","Connections":"تعداد اتصال","Quick add days":"افزودن روز سریع","Quick add volume":"افزودن حجم سریع","Protocol access":"دسترسی پروتکل‌ها","Node access & note":"دسترسی نود و یادداشت","Note":"یادداشت","Freeze user":"فریز کاربر","Unfreeze user":"رفع فریز","Download config":"دانلود کانفیگ","Subscription link":"لینک اشتراک","Save changes":"ذخیره تغییرات","Unlimited":"نامحدود","Days":"روز","Count":"تعداد","Create":"ساخت","Copy":"کپی","Open page":"باز کردن صفحه","User link":"لینک کاربر","Copied":"کپی شد","Saved":"ذخیره شد","Done":"انجام شد","Are you sure?":"مطمئنی؟","Main server and extra nodes":"سرور اصلی و نودهای اضافه","Add node":"افزودن نود","Local":"محلی","Last contact":"آخرین ارتباط","Sync":"همگام‌سازی","Synced":"همگام","Config mismatch":"اختلاف کانفیگ","Maintenance":"تعمیرات","Drain":"Drain","Accepting":"پذیرش فعال","Draining":"در حال تخلیه","Under maintenance":"در تعمیر","Health":"سلامت","Edit":"ویرایش","Repair agent":"تعمیر Agent","Update agent":"آپدیت Agent","Delete node":"حذف نود","Main panel server · local management":"سرور اصلی پنل · مدیریت محلی","Edit node":"ویرایش نود","Node name":"نام نود","Sync users without a specific node to this node":"کاربران بدون نود مشخص را روی این نود همگام کن","Users connection endpoint":"Endpoint اتصال کاربران","Use the panel endpoint":"استفاده از Endpoint پنل","Custom IP / domain for this node":"IP / دامنه اختصاصی این نود","Cancel":"انصراف","Save":"ذخیره","API address":"آدرس API","Node token":"توکن نود","Connection endpoint (empty = panel endpoint)":"آدرس اتصال (خالی = Endpoint پنل)","Self-signed certificate (no domain on node)":"گواهی خودامضا (نود بدون دامنه)","seconds ago":"ثانیه پیش","minutes ago":"دقیقه پیش","hours ago":"ساعت پیش","this server":"همین سرور","never":"هرگز","Insecure: plain HTTP. Reinstall the node with the new installer to get TLS.":"ناامن: HTTP ساده. نود را با نصاب جدید دوباره نصب کن تا TLS بگیرد.","Build and manage the sales bot":"ساخت و مدیریت ربات فروش","Create bot":"ساخت ربات","Test connection":"تست اتصال","Pause":"توقف","Resume":"ادامه","Delete bot":"حذف ربات","Sales panels are added from inside Telegram":"پنل‌های فروش از داخل تلگرام اضافه می‌شوند","Bot token":"توکن ربات","Admin numeric IDs (comma separated)":"آیدی عددی ادمین‌ها (با کاما)","Paused":"متوقف","Plans":"پلن‌ها","Name":"نام","Price (Toman)":"قیمت (تومان)","Price (USD)":"قیمت (دلار)","Add plan":"افزودن پلن","Sales settings":"تنظیمات فروش","Full backup of users, credentials, certificates, VPN settings, nodes and panel state":"بکاپ کامل کاربران، اعتبارنامه‌ها، گواهی‌ها، تنظیمات VPN، نودها و وضعیت پنل","Encrypted archive. File name includes date and time.":"آرشیو کامل و رمزنگاری‌شده. نام فایل شامل تاریخ و ساعت است.","Passphrase (min 6)":"Passphrase (حداقل ۶)","Download backup":"دانلود بکاپ","Restore":"ریستور","Pick a backup file; if encrypted, enter its passphrase.":"فایل بکاپ را انتخاب کن؛ اگر رمز دارد وارد کن.","Choose file":"انتخاب فایل","No file chosen":"فایلی انتخاب نشده","Also restore server keys & configs (same/new server migration)":"کلیدها و کانفیگ‌های سرور هم برگردد (انتقال سرور)","Restore backup":"ریستور بکاپ","Telegram auto backup":"بکاپ خودکار تلگرام","Encrypted backup sent to Telegram on schedule":"بکاپ رمزنگاری‌شده را طبق زمان‌بندی به تلگرام بفرست","Chat ID":"Chat ID","Auto after /start (or first bot admin)":"خودکار بعد از /start (یا اولین ادمین ربات)","Backup interval (hours)":"فاصله بکاپ (ساعت)","Default backup passphrase":"رمز پیش‌فرض بکاپ","Send backup now":"ارسال بکاپ الان","Save settings":"ذخیره تنظیمات","On":"فعال","Off":"غیرفعال","Empty = use the sales bot token":"خالی = همان توکن ربات فروش","Last":"آخرین","Login, sessions, 2FA, IP policy and API":"ورود، نشست‌ها، احراز هویت دومرحله‌ای، سیاست IP و API","Create API token":"ساخت توکن API","Current account":"حساب فعلی","Active sessions":"نشست‌های فعال","Network policy":"سیاست شبکه","Open":"باز","Restricted":"محدود","API tokens":"توکن‌های API","The full token is shown only once.":"توکن کامل فقط یک بار نمایش داده می‌شود.","Revoke":"باطل کردن","Two-step login":"ورود دومرحله‌ای","TOTP with apps like Google Authenticator / 2FAS":"TOTP با برنامه‌هایی مثل Google Authenticator / 2FAS","Enable 2FA":"فعال‌سازی 2FA","Disable 2FA":"غیرفعال‌سازی","Devices and IPs logged in to the panel":"دستگاه‌ها و IPهایی که به پنل وارد شده‌اند","Log out others":"خروج بقیه","current":"فعلی","IP restriction":"محدودیت IP","Allow/Deny for the admin panel, one IP or CIDR per line":"Allow/Deny برای پنل مدیریت؛ هر خط یک IP یا CIDR","IP / CIDR allowed, one per line":"IP / CIDR مجاز، هر خط یک مورد","IP / CIDR blocked, one per line":"IP / CIDR مسدود، هر خط یک مورد","Session lifetime (hours)":"عمر Session (ساعت)","Enforce 2FA for admin":"اجبار 2FA برای ادمین","Save security policy":"ذخیره سیاست امنیت","Login history":"تاریخچه ورود","Successful / failed logins (secrets never stored)":"ورود موفق/ناموفق بدون ثبت رمز یا Secret","Audit log":"Audit Log","Admin changes with actor, path, IP and result":"تغییرات مدیریتی با Actor، مسیر، IP و نتیجه","Change login":"تغییر نام کاربری / رمز","Current password":"رمز فعلی","New username (optional)":"نام کاربری جدید (اختیاری)","New password (min 8)":"رمز جدید (حداقل ۸)","Legacy API key":"کلید API قدیمی","Regenerate":"ساخت دوباره","Scan with your authenticator app, then enter the 6-digit code":"با برنامه احراز هویت اسکن کن و کد ۶ رقمی را وارد کن","Confirm":"تأیید","Token name":"نام توکن","Scopes":"دسترسی‌ها","Copy it now, it won't be shown again":"همین حالا کپی کن، دوباره نمایش داده نمی‌شود","Appearance, web access and public endpoint":"ظاهر، دسترسی وب و Endpoint عمومی","General":"عمومی","Panel name":"نام پنل","Language":"زبان","Theme":"پوسته","Dark":"تیره","Light":"روشن","Auto refresh":"تازه‌سازی","Panel color":"رنگ پنل","Gold":"طلایی","Turquoise":"فیروزه‌ای","Violet":"بنفش","Emerald":"زمردی","Rose":"صورتی","Web panel":"وب پنل","Web bind":"Web Bind","Web port":"پورت وب","Bind and port are where the panel itself listens; changing them needs a panel restart (edit /etc/kanki/kanki.env).":"Bind و Port فقط آدرس گوش‌دادن خود پنل هستند؛ تغییرشان نیاز به ری‌استارت پنل دارد (فایل /etc/kanki/kanki.env).","Public endpoint":"Endpoint عمومی","Public VPN host or IP":"هاست یا IP عمومی VPN","Subscription base URL":"آدرس پایه اشتراک","Public host used inside user configs.":"Public Host داخل کانفیگ‌های کاربر استفاده می‌شود.","Apply this endpoint to Main and all nodes":"این Endpoint برای Main و همه Nodeها اعمال شود","Save & apply":"ذخیره و اعمال","VPN":"VPN","Default protocols for new users":"پروتکل‌های پیش‌فرض کاربر جدید","AmneziaWG compatibility mode (only Jc/Jmin/Jmax/S1/S2/H1-H4)":"حالت سازگاری AmneziaWG (فقط Jc/Jmin/Jmax/S1/S2/H1-H4)","seconds":"ثانیه","Update":"آپدیت","Current version":"نسخه فعلی","Latest version":"آخرین نسخه","Check for update":"بررسی آپدیت","Install update":"نصب آپدیت","You are on the latest version.":"نسخه فعلی بروز است.","A new version is available.":"نسخه جدید موجود است.","Updates come from the GitHub releases of your repo.":"آپدیت از Releases مخزن گیت‌هاب شما دریافت می‌شود.","Services":"سرویس‌ها","Restart":"ری‌استارت","Uptime":"آپتایم","Memory":"حافظه","Disk":"دیسک","Network":"شبکه","days":"روز","Restore done, panel is restarting…":"ریستور انجام شد، پنل در حال ری‌استارت است…","Loading…":"در حال بارگذاری…","No users yet":"هنوز کاربری نیست","Main server":"سرور اصلی","Node":"نود","Optional, created if empty":"خالی بماند: خودکار USER1، USER2 و…","Expired":"منقضی","Limited":"اتمام حجم","Download configs":"دانلود کانفیگ‌ها","No configs: user has no nodes or protocols":"کانفیگی نیست: کاربر نود یا پروتکلی ندارد","Install the node with the installer (option 2), then paste the API address and token it prints.":"نود را با نصاب (گزینه ۲) نصب کن، بعد آدرس API و توکنی که چاپ می‌کند را اینجا بزن.","Advanced":"پیشرفته","Panel":"پنل","Checking…":"در حال بررسی…","Card number":"شماره کارت","Card holder":"نام صاحب کارت","Support ID":"آیدی پشتیبانی","App link":"لینک اپ","Required channel":"کانال اجباری","Welcome text":"متن خوش‌آمد","Free trial":"تست رایگان","Trial GB":"حجم تست (GB)","Trial days":"روز تست","Card to card":"کارت به کارت","ZarinPal":"زرین‌پال","Merchant ID":"مرچنت","Crypto (NOWPayments)":"ارزی (NOWPayments)","API key":"کلید API","Coins":"ارزها","Referral gift GB":"هدیه دعوت (GB)","Referral gift days":"هدیه دعوت (روز)","Sales on":"فروش فعال","Expiry warnings":"هشدار اتمام","Daily backup to bot admins":"بکاپ روزانه برای ادمین‌های ربات","Enable sales bot features":"قابلیت‌های فروش","DNS":"DNS","MTU":"MTU","last used":"آخرین استفاده","Your IP":"IP شما","Backup file":"بکاپ","Admins":"ادمین‌ها","Toman":"تومان","Bind and port are where the panel itself listens; changing them needs a panel restart. File:":"Bind و Port فقط آدرس گوش‌دادن خود پنل هستند؛ تغییرشان نیاز به ری‌استارت پنل دارد. فایل:","Panel address":"آدرس پنل","Select":"انتخاب","Copy link":"کپی لینک","Configs":"کانفیگ‌ها","Reset":"ریست","Used":"مصرف","Page":"صفحه"};
-Object.assign(FA,{"Dashboard": "داشبورد", "Live": "زنده", "Paused": "متوقف", "Reconnecting…": "در حال اتصال مجدد…", "CPU": "CPU", "RAM": "RAM", "Storage": "فضای ذخیره", "Swap": "Swap", "Load": "لود", "Cores": "هسته", "No swap": "بدون Swap", "Network speed": "سرعت شبکه", "Download": "دانلود", "Upload": "آپلود", "Peak": "پیک", "Total since boot": "مجموع از بوت", "TCP / UDP connections": "اتصال‌های TCP / UDP", "TCP listening": "TCP در حال گوش‌دادن", "Start": "روشن", "Stop": "خاموش", "Running": "در حال اجرا", "Stopped": "متوقف", "Failed": "ناموفق", "Start, stop or restart the VPN services": "سرویس‌های VPN را روشن، خاموش یا ری‌استارت کن", "Only restart is allowed for this service": "این سرویس فقط ری‌استارت می‌شود", "Total traffic": "کل ترافیک", "Newest": "جدیدترین", "Oldest": "قدیمی‌ترین", "Most used": "بیشترین مصرف", "Nearest expiry": "نزدیک‌ترین انقضا", "Last seen": "آخرین اتصال", "All protocols": "همه پروتکل‌ها", "Status": "وضعیت", "Protocol": "پروتکل", "Sort": "مرتب‌سازی", "Clear selection": "لغو انتخاب", "Extend": "تمدید", "Days to add": "روز اضافه", "GB to add": "گیگ اضافه", "Apply": "اعمال", "Enter days or GB": "روز یا گیگ را وارد کن", "Delete selected users?": "کاربران انتخاب‌شده حذف شوند؟", "No match": "موردی پیدا نشد", "Create the first user": "ساخت اولین کاربر", "Prev": "قبلی", "Next": "بعدی", "per page": "در هر صفحه", "match": "نتیجه", "Expiry": "انقضا", "Link": "لینک", "New link": "لینک جدید", "Created": "ساخته‌شده", "Invalid date": "تاریخ نامعتبر", "Date (Jalali)": "تاریخ شمسی", "Date": "تاریخ", "less than a day": "کمتر از یک روز", "days left": "روز مانده"});
-Object.assign(FA,{"Add to all users": "افزودن به همه کاربران", "Remove from all users": "حذف از همه کاربران", "Add this node to ALL users?": "این نود به همه کاربران اضافه شود؟", "Remove this node from ALL users?": "این نود از همه کاربران حذف شود؟", "Run one command on the new server (Ubuntu / Debian, as root). It installs only what a node needs and joins this panel by itself.": "روی سرور جدید (اوبونتو / دبیان، با کاربر root) فقط یک دستور بزن. فقط چیزهایی که نود لازم دارد نصب می‌شود و خودش به این پنل وصل می‌شود.", "Node domain (optional, for a real SSL certificate)": "دامنه نود (اختیاری، برای گواهی SSL واقعی)", "Create join command": "ساخت دستور اتصال", "Run this on the new server": "این را روی سرور جدید اجرا کن", "Copy command": "کپی دستور", "Update source (GitHub repo) is not set: replace USER/REPO in the command.": "منبع آپدیت (مخزن گیت‌هاب) تنظیم نشده: USER/REPO را در دستور عوض کن.", "Waiting for the node to connect…": "منتظر اتصال نود…", "Valid for one hour and one node. Create a new command for the next node.": "یک ساعت و فقط برای یک نود اعتبار دارد. برای نود بعدی دستور جدید بساز.", "The command expired. Create a new one.": "دستور منقضی شد. یکی جدید بساز.", "joined the panel": "به پنل پیوست", "Add by hand (advanced)": "افزودن دستی (پیشرفته)", "Manage": "مدیریت", "No extra nodes yet. Add one with a single command.": "هنوز نود اضافه‌ای نیست. با یک دستور اضافه کن.", "Logo": "لوگو", "Shown in the header, the side menu, the login page and the subscription page.": "در هدر، منو، صفحه ورود و صفحه اشتراک نمایش داده می‌شود.", "Choose image": "انتخاب تصویر", "Remove": "حذف", "Image is too complex, use a simpler logo": "تصویر خیلی سنگین است، لوگوی ساده‌تری انتخاب کن", "Cannot read this image": "این تصویر خوانده نشد"});
+// Persian text of the whole panel
+var FA={
+ "+ Inbound":"+ دروازه",
+ ".ir domains and Iranian addresses do not go through the server: they should be opened directly":"دامنه‌های .ir و IPهای ایران از سرور رد نمی‌شوند: باید مستقیم باز شوند",
+ "0 = BBR (adapts by itself). A number turns on Brutal: it keeps that speed even with packet loss. Do not write more than the real speed of the servers.":"۰ = BBR (خودش تنظیم می‌شود). اگر عدد بدهی Brutal روشن می‌شود و حتی با افت بسته همان سرعت را نگه می‌دارد. بیشتر از سرعت واقعی سرورها ننویس.",
+ "0 = unlimited":"0 = نامحدود",
+ "1 (no copies)":"۱ (بدون نسخه‌ی اضافه)",
+ "1 day":"۱ روز",
+ "1 hour":"۱ ساعت",
+ "1) A user's phone uses your DNS (Private DNS with the user's own address). 2) Names of sanctioned services (games, AI, developer sites …) are answered with your server's IP; everything else is answered normally and goes direct. 3) Your server passes those connections on without opening them. A relay inside Iran sends them to an exit abroad through a hidden Kanki tunnel.":"۱) گوشی کاربر از DNS شما استفاده می‌کند (Private DNS با آدرس اختصاصی خودش). ۲) اسم سرویس‌های تحریمی (بازی، هوش مصنوعی، سایت‌های برنامه‌نویسی …) با IP سرور شما جواب داده می‌شود؛ بقیه عادی جواب می‌گیرند و مستقیم می‌روند. ۳) سرور شما آن اتصال‌ها را بدون باز کردن رمز رد می‌کند. ریلی داخل ایران آن‌ها را با یک تانل مخفی کانکی به خروجی خارج می‌فرستد.",
+ "1) Add a server (the panel server or any tunnel server). 2) Make inbounds on it. 3) Tick Xray for a user: the links of every inbound go into the user's subscription, and the traffic counts toward the user's volume.":"۱) یک سرور اضافه کن (سرور پنل یا هر سرور تانل). ۲) روی آن اینباند بساز. ۳) برای کاربر تیک Xray بزن: لینک همه‌ی اینباندها در ساب او می‌آید و ترافیکش از حجم خودش کم می‌شود.",
+ "1) Keep it on and pick the port (4000 is fine). 2) Tick KANKI MIX for users (or Enable for all users). 3) Every server installs it by itself within a minute; the Kanki app gets the kanki:// link from the subscription, users see no IP or key.":"۱) روشن بگذار و پورت را انتخاب کن (۴۰۰۰ خوب است). ۲) KANKI MIX را برای کاربران تیک بزن (یا «روشن برای همه‌ی کاربران»). ۳) هر سرور ظرف یک دقیقه خودش نصبش می‌کند؛ اپ کانکی لینک kanki:// را از اشتراک می‌گیرد و کاربر IP یا کلید نمی‌بیند.",
+ "1) The user taps «Unblock» in the Kanki app: the app registers the phone and uses your DNS. 2) Names of sanctioned services (games, AI, developer sites …) are answered with your server's IP and the server passes those connections on (SNI proxy), so games and sites open; everything else goes direct at full speed. 3) A relay inside Iran sends them to an exit abroad through a hidden Kanki tunnel.":"۱) کاربر در برنامه‌ی کانکی «رفع تحریم» را می‌زند: برنامه گوشی را ثبت می‌کند و از DNS شما استفاده می‌کند. ۲) اسم سرویس‌های تحریمی (بازی، هوش مصنوعی، سایت‌های برنامه‌نویسی …) با IP سرور شما جواب می‌گیرند و سرور اتصالشان را رد می‌کند (SNI پروکسی)، پس بازی و سایت باز می‌شود؛ بقیه مستقیم و با سرعت کامل می‌روند. ۳) ریلی داخل ایران آن‌ها را با تانل مخفی کانکی به خروجی خارج می‌فرستد.",
+ "12 hours":"۱۲ ساعت",
+ "2 (recommended)":"۲ (پیشنهادی)",
+ "2FA code":"کد دومرحله‌ای",
+ "3 (very lossy internet)":"۳ (اینترنت خیلی پرلاس)",
+ "3 days":"۳ روز",
+ "3 hours":"۳ ساعت",
+ "30 min":"۳۰ دقیقه",
+ "3X-UI style inbounds":"اینباندها به سبک 3X-UI",
+ "6 hours":"۶ ساعت",
+ "7 days":"۷ روز",
+ "= the IP of the new server, without CDN (DNS only). The old panel keeps working by its IP until the move is done.":"= آی‌پی سرور جدید، بدون CDN (فقط DNS). پنل قدیمی تا پایان انتقال با آی‌پی خودش کار می‌کند.",
+ "A Gemini key starts with AQ. or AIza (aistudio.google.com/apikey), a Groq key with gsk_, a Grok key with xai-. Save this one anyway?":"کلید Gemini با AQ. یا AIza شروع می‌شود (aistudio.google.com/apikey)، کلید Groq با gsk_ و کلید Grok با xai-. با این حال ذخیره شود؟",
+ "A Groq key starts with gsk_ (console.groq.com/keys), a Grok key with xai- (console.x.ai). Save this one anyway?":"کلید Groq با gsk_ شروع می‌شود (console.groq.com/keys) و کلید Grok با xai- (console.x.ai). همین را ذخیره کنم؟",
+ "A JSON file with every panel and sales setting. It holds payment keys too, keep it private. Users are not in it; use Backup for that.":"یک فایل JSON از همه‌ی تنظیمات پنل و فروش. کلیدهای پرداخت هم داخلش هست؛ جایی منتشرش نکن. کاربرها داخلش نیستند؛ برای آن از بکاپ استفاده کن.",
+ "A WireGuard-like link with obfuscated packets. The panel makes the keys and the obfuscation numbers and gives both ends the same ones; the agents install AmneziaWG by themselves when it is missing. Inside the link the entry is 10.88.N.1 and the exit 10.88.N.2.":"لینک شبیه وایرگارد با بسته‌های مبهم‌سازی‌شده. پنل کلیدها و اعداد مبهم‌سازی (Jc، S1، H1…) را می‌سازد و دقیقاً یکسان به هر دو سمت می‌دهد؛ اگر AmneziaWG روی سرور نباشد، ایجنت خودش نصبش می‌کند. داخل لینک، ورودی 10.88.N.1 و خروجی 10.88.N.2 است.",
+ "A copy was made (off until you check it)":"کپی ساخته شد (تا چکش نکنی خاموش است)",
+ "A day with us":"یک روز با ما",
+ "A domain or IP the users connect to; empty = the IP the server reports from":"دامنه یا IPی که کاربرها به آن وصل می‌شوند؛ خالی = IPی که سرور از آن گزارش می‌دهد",
+ "A domain that points to this server. The panel gets its SSL by itself and serves only the subscription pages on it, so the panel address stays hidden.":"دامنه‌ای که به همین سرور اشاره می‌کند. پنل خودش SSL می‌گیرد و فقط صفحه‌های ساب را روی آن نشان می‌دهد، پس آدرس پنل پنهان می‌ماند.",
+ "A new command makes the old one stop working. Continue?":"با ساختن دستور جدید، دستور قبلی دیگر کار نمی‌کند. ادامه بدهم؟",
+ "A new signing key is only needed if the server was compromised. Apps learn the new key when they refresh their subscription, so do it while the internet still works.":"کلید امضای جدید فقط وقتی لازم است که سرور لو رفته باشد. اپ‌ها کلید جدید را با به‌روز شدن اشتراک می‌گیرند، پس این کار را تا وقتی اینترنت وصل است انجام بده.",
+ "A new version is available.":"نسخه جدید موجود است.",
+ "A pasted certificate is used on every DNS server":"یک گواهی دستی روی همه‌ی سرورهای DNS استفاده می‌شود",
+ "A plain TLS server with your own domain and certificate; the password lives inside the TLS handshake. Simple and mature, but the SNI is your own domain — a blocked domain kills it.":"سرور TLS ساده با دامنه و گواهی خودت؛ رمز داخل دست‌دادن TLS است. ساده و بالغ، اما SNI همان دامنهٔ خودت است — با مسدودشدن دامنه می‌میرد.",
+ "A port is 1-65535":"پورت باید بین ۱ تا ۶۵۵۳۵ باشد",
+ "A release tag like v26.3.27":"یک تگ ریلیز مثل v26.3.27",
+ "A rule still sends traffic to this outbound":"هنوز قانونی ترافیک را به این خروجی می‌فرستد",
+ "A server cannot come twice on the route":"یک سرور نمی‌تواند دو بار در مسیر باشد",
+ "A user cannot connect from more devices than his limit.":"کاربر نمی‌تواند با دستگاه‌های بیشتر از سقفش وصل شود.",
+ "AI service":"سرویس هوش مصنوعی",
+ "AI writer":"نویسنده‌ی هوش مصنوعی",
+ "AI writer (Grok)":"نویسنده‌ی هوش مصنوعی (Groq / Grok)",
+ "ALPN":"ALPN",
+ "API address":"آدرس API",
+ "API key":"کلید API",
+ "API token":"توکن API",
+ "API tokens":"توکن‌های API",
+ "About us and how to write":"درباره‌ی ما و لحن نوشتن",
+ "Abroad":"خارج",
+ "Abroad servers":"سرورهای خارج",
+ "Abroad · exit":"خارج · خروجی",
+ "Accept PROXY protocol":"پذیرش PROXY protocol",
+ "Accept card to card":"پرداخت کارت به کارت فعال باشد",
+ "Accept crypto to my wallet":"دریافت ارز به کیف پول خودم",
+ "Accepting":"پذیرش فعال",
+ "Active":"فعال",
+ "Active sessions":"نشست‌های فعال",
+ "Ad and tracker domains (geosite:category-ads-all)":"دامنه‌های تبلیغ و ردیاب (geosite:category-ads-all)",
+ "AdGuard (no ads)":"AdGuard (بدون تبلیغ)",
+ "Add":"افزودن",
+ "Add 30 days":"افزودن ۳۰ روز",
+ "Add DNS":"افزودن DNS",
+ "Add DNS server":"افزودن سرور DNS",
+ "Add Xray":"افزودن Xray",
+ "Add a stop":"افزودن ایستگاه",
+ "Add a tunnel server":"افزودن سرور تانل",
+ "Add a tunnel server inside Iran first (Servers), or set its location to Inside Iran.":"اول یک سرور تانل داخل ایران اضافه کن (سرورها)، یا موقعیت سرورت را «داخل ایران» بگذار.",
+ "Add an Iran server":"افزودن سرور ایران",
+ "Add an Xray server first":"اول یک سرور Xray اضافه کن",
+ "Add an abroad server":"افزودن سرور خارج",
+ "Add an exit DNS server first":"اول یک سرور DNS خروجی اضافه کن",
+ "Add at least one CDN edge address":"حداقل یک آی‌پی لبه CDN بنویس",
+ "Add at least one port to carry":"حداقل یک پورت برای عبور اضافه کن",
+ "Add by hand (advanced)":"افزودن دستی (پیشرفته)",
+ "Add code":"افزودن کد",
+ "Add fallback":"افزودن فال‌بک",
+ "Add node":"افزودن نود",
+ "Add or remove DNS servers in Servers":"افزودن و حذف سرور DNS در «سرورها»",
+ "Add outbound":"افزودن خروجی",
+ "Add plan":"افزودن پلن",
+ "Add relay":"افزودن ریلی",
+ "Add rule":"افزودن قانون",
+ "Add server":"افزودن سرور",
+ "Add these plans":"افزودن این پلن‌ها",
+ "Add this node to ALL users?":"این نود به همه کاربران اضافه شود؟",
+ "Add this server to all users":"افزودن این سرور به همه‌ی کاربران",
+ "Add to all users":"افزودن به همه‌ی کاربران",
+ "Add to extra domains":"افزودن به دامنه‌های اضافه",
+ "Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.":"اول سرور ورودی (مثلاً سرور ایران) را اضافه کن، بعد یک تانل به سرور پنل یا سرور دیگری بساز.",
+ "Address":"آدرس",
+ "Address for links":"آدرس در لینک‌ها",
+ "Address other servers use to reach it":"آدرسی که سرورهای دیگر با آن وصل می‌شوند",
+ "Address other servers use to reach it (optional)":"آدرسی که سرورهای دیگر با آن به این سرور وصل می‌شوند (اختیاری)",
+ "Address the app dials":"آدرسی که اپ وصل می‌شود",
+ "Address to dial (empty = the server’s address)":"آدرس اتصال (خالی = آدرس خود سرور)",
+ "Addresses":"آدرس‌ها",
+ "Addresses each user registered (allowed now) and their queries since the DNS services started":"IPهایی که هر کاربر ثبت کرده (الان مجاز) و درخواست‌هایش از شروع سرویس DNS",
+ "Admin changes with actor, path, IP and result":"تغییرات مدیریتی با Actor، مسیر، IP و نتیجه",
+ "Admin chat address (open it from inside Iran)":"آدرس چت ادمین (از داخل ایران باز کن)",
+ "Admin numeric ID(s), comma separated":"آیدی عددی ادمین(ها)، با کاما جدا کن",
+ "Admin numeric IDs (comma separated)":"آیدی عددی ادمین‌ها (با کاما)",
+ "Admin password of the chat":"رمز ادمین چت",
+ "Admins":"ادمین‌ها",
+ "Advanced":"پیشرفته",
+ "Advanced (hardest to block)":"پیشرفته (سخت‌ترین برای بستن)",
+ "Advanced anti-DPI tunnels":"تانل‌های پیشرفته ضد DPI",
+ "Advanced settings":"تنظیمات پیشرفته",
+ "Advanced: extra outbounds (JSON array, the first one becomes the default)":"پیشرفته: اوت‌باندهای اضافه (آرایه‌ی JSON، اولی پیش‌فرض می‌شود)",
+ "Advanced: extra routing rules (JSON array)":"پیشرفته: قوانین مسیریابی اضافه (آرایه‌ی JSON)",
+ "Advanced: raw JSON":"پیشرفته: JSON خام",
+ "After a failure the server waits (10 minutes, then longer) before it tries again; after fixing the cause press «Try SSL again».":"بعد از هر خطا سرور صبر می‌کند (۱۰ دقیقه، بعد بیشتر) و بعد دوباره امتحان می‌کند؛ بعد از رفع مشکل «دوباره گرفتن SSL» را بزن.",
+ "After restore":"بعد از بازگردانی",
+ "After this long without the user's app registering again, the address is closed":"اگر تا این مدت اپ کاربر دوباره ثبت نکند، IP بسته می‌شود",
+ "Agent is on an older version":"Agent نسخه‌ی قدیمی‌تری دارد",
+ "Agent server":"سرور (ایجنت)",
+ "All":"همه",
+ "All VPN services":"همه‌ی سرویس‌های VPN",
+ "All cores at a glance":"همه‌ی هسته‌ها در یک نگاه",
+ "All off":"همه خاموش",
+ "All on":"همه روشن",
+ "All protocols":"همه پروتکل‌ها",
+ "All queries":"همه‌ی درخواست‌ها",
+ "All servers":"همه‌ی سرورها",
+ "All servers connected":"همه سرورها وصل‌اند",
+ "All services":"همه سرویس‌ها",
+ "All traffic from these networks goes through the link":"کل ترافیکِ این شبکه‌ها (مبدأ) از لینک می‌رود",
+ "All tunnels connected":"همه‌ی تانل‌ها وصل‌اند",
+ "All users":"همه‌ی کاربران",
+ "Allow/Deny for the admin panel, one IP or CIDR per line":"Allow/Deny برای پنل مدیریت؛ هر خط یک IP یا CIDR",
+ "Allowed addresses":"IPهای مجاز",
+ "Already used by":"قبلاً استفاده شده توسط",
+ "Also restore server keys & configs (same/new server migration)":"کلیدها و کانفیگ‌های سرور هم برگردد (انتقال سرور)",
+ "Also updates and anti-cheat. Use it when the game still stops at login or the update does not download.":"آپدیت و ضدتقلب هم. وقتی بازی هنوز روی ورود می‌ماند یا آپدیت دانلود نمی‌شود.",
+ "Also use this node as a tunnel server":"تانل هم روی این سرور ساخته شود",
+ "Also used by the sales bot when it makes an account.":"ربات فروش هم هنگام ساخت اکانت از همین‌ها استفاده می‌کند.",
+ "Alternative fronting when WS is throttled; also good for many parallel streams.":"جایگزین فرانتینگ وقتی WS محدود می‌شود؛ برای استریم‌های موازی زیاد هم خوب است.",
+ "AmneziaWG":"AmneziaWG",
+ "AmneziaWG UDP port":"پورت UDP آمنزیا",
+ "AmneziaWG compatibility mode":"حالت سازگاری AmneziaWG",
+ "AmneziaWG compatibility mode (only Jc/Jmin/Jmax/S1/S2/H1-H4)":"حالت سازگاری AmneziaWG (فقط Jc/Jmin/Jmax/S1/S2/H1-H4)",
+ "An address is written but «Accept crypto to my wallet» is off: buyers will not see it.":"آدرس نوشته شده ولی «دریافت ارز به کیف پول خودم» خاموش است: خریدارها آن را نمی‌بینند.",
+ "An allowed address stays open for (hours)":"مدت باز ماندن IP ثبت‌شده (ساعت)",
+ "An encrypted full backup is sent to the bot admins once a day.":"روزی یک بار بکاپ کامل رمزدار برای ادمین‌های ربات فرستاده می‌شود.",
+ "Another address":"آدرس دیگر",
+ "Another one":"یکی دیگر",
+ "Another program uses this bot token (an old panel still running?). Stop it, or make a new token in @BotFather.":"یک برنامه‌ی دیگر هم از توکن این ربات استفاده می‌کند (پنل قبلی هنوز روشن است؟). آن را خاموش کن یا در @BotFather توکن جدید بساز.",
+ "Another server (from its link)":"سرور دیگر (از لینکش)",
+ "Another test is running; it starts when that one ends":"یک تست دیگر در جریان است؛ بعد از تمام شدن آن شروع می‌شود",
+ "Answer IP":"IP پاسخ",
+ "Anti-DPI":"ضد DPI",
+ "Anti-DPI tunnels":"تانل‌های ضد DPI",
+ "Any":"همه",
+ "App download link":"لینک دانلود اپ",
+ "App files":"فایل‌های اپ",
+ "App link":"لینک اپ",
+ "App message":"پیام اپ",
+ "Appearance":"ظاهر و برند",
+ "Appearance, web access and public endpoint":"ظاهر، دسترسی وب و Endpoint عمومی",
+ "Applied on the server at once: config, service and firewall. Old WireGuard/AmneziaWG files stop working; subscription links update by themselves.":"روی خود سرور همان لحظه اعمال می‌شود: کانفیگ، سرویس و فایروال. فایل‌های قدیمی وایرگارد/آمنزیا کار نمی‌کنند؛ لینک اشتراک خودش به‌روز می‌شود.",
+ "Apply":"اعمال",
+ "Apply ports":"اعمال پورت‌ها",
+ "Apply this endpoint to Main and all nodes":"این Endpoint برای Main و همه Nodeها اعمال شود",
+ "Apply to the tunnel":"اعمال روی تانل",
+ "Applying…":"در حال اعمال…",
+ "Are you sure?":"مطمئنی؟",
+ "ArvanCloud shows HTTPS to the users with its own certificate and talks to the server on the port above with HTTP. In ArvanCloud set the origin port to this port.":"ابرآروان با گواهی خودش HTTPS را به کاربر نشان می‌دهد و با HTTP روی پورت بالا با سرور حرف می‌زند. در ابرآروان پورت مبدأ را همین پورت بگذار.",
+ "Audit log":"Audit Log",
+ "Authority (in the link)":"Authority (در لینک)",
+ "Auto after /start (or first bot admin)":"خودکار بعد از /start (یا اولین ادمین ربات)",
+ "Auto refresh":"تازه‌سازی",
+ "Automatic (Let's Encrypt)":"خودکار (Let's Encrypt)",
+ "Automatic (from the key)":"خودکار (از روی کلید)",
+ "Automatic SSL (Let’s Encrypt, recommended)":"SSL خودکار (Let’s Encrypt، پیشنهادی)",
+ "Automatic certificates":"گواهی خودکار",
+ "Automatic discount on occasions (Nowruz, Yalda…)":"تخفیف خودکار در مناسبت‌ها (نوروز، یلدا…)",
+ "Automatic update":"آپدیت خودکار",
+ "Automatic update is off":"آپدیت خودکار خاموش شد",
+ "Automatic update is on":"آپدیت خودکار روشن شد",
+ "Automatic: certbot on each DNS server":"خودکار: certbot روی هر سرور DNS",
+ "Backup":"بکاپ",
+ "Backup file":"بکاپ",
+ "Backup interval (hours)":"فاصله بکاپ (ساعت)",
+ "Balanced":"متعادل",
+ "Base domain for the direct names (like example.com); empty = the panel domain without its first part":"دامنه‌ی اصلی اسم‌های مستقیم (مثل example.com)؛ خالی = دامنه‌ی پنل بدون بخش اولش",
+ "Base of the subscription links (for example a CDN domain). Empty = the panel address.":"ابتدای لینک‌های اشتراک (مثلاً دامنه‌ی CDN). خالی = آدرس پنل.",
+ "Base price per month":"قیمت پایه هر ماه",
+ "Basic":"اصلی",
+ "Before and after":"قبل و بعد",
+ "Before making the tunnel, every transport (TCP, KCP, WS, WSS, QUIC) is tried in both directions between your two servers. It takes about one to two minutes. Each gets a score from 0 to 100 and the best one is suggested with its reason.":"قبل از ساختن تانل، همهٔ ترنسپورت‌ها (TCP، KCP، WS، WSS، QUIC) در هر دو جهت بین دو سرور امتحان می‌شوند. حدود یک تا دو دقیقه طول می‌کشد. به هر کدام نمرهٔ ۰ تا ۱۰۰ داده می‌شود و بهترین با دلیلش پیشنهاد می‌شود.",
+ "Best":"بهترین",
+ "Best for UDP (WireGuard / Hysteria2)":"بهترین برای UDP (وایرگارد / هیستریا)",
+ "Best for this route":"بهترین برای این مسیر",
+ "Big plan discount %":"تخفیف پلن بزرگ ٪",
+ "Bind and port are where the panel itself listens; changing them needs a panel restart (edit /etc/kanki/kanki.env).":"Bind و Port فقط آدرس گوش‌دادن خود پنل هستند؛ تغییرشان نیاز به ری‌استارت پنل دارد (فایل /etc/kanki/kanki.env).",
+ "Bind and port are where the panel itself listens; changing them needs a panel restart. File:":"Bind و Port فقط آدرس گوش‌دادن خود پنل هستند؛ تغییرشان نیاز به ری‌استارت پنل دارد. فایل:",
+ "Block":"مسدود",
+ "Block (blackhole)":"مسدود (blackhole)",
+ "Block BitTorrent":"مسدود کردن تورنت",
+ "Block Iranian sites":"مسدود کردن سایت‌های ایرانی",
+ "Block ads":"مسدود کردن تبلیغات",
+ "Block private addresses":"مسدود کردن IPهای داخلی",
+ "Blocked sites only":"فقط سایت‌های تحریم‌شده",
+ "Bot admins":"ادمین‌های ربات",
+ "Bot token":"توکن ربات",
+ "Bot token (from @BotFather)":"توکن ربات (از ‎@BotFather)",
+ "Both a node and a tunnel server (updated once, through the node)":"سرور (یک‌بار آپدیت می‌شود)",
+ "Both kinds of VPN your users get, side by side":"هر دو نوع VPN که کاربرها می‌گیرند، کنار هم",
+ "Build and manage the sales bot":"ساخت و مدیریت ربات فروش",
+ "Build the tunnel with":"ساخت تانل با",
+ "Build with":"ساخت با",
+ "Bulk actions":"عملیات گروهی",
+ "Busiest services":"پرمصرف‌ترین سرویس‌ها",
+ "Buyers type the code in the bot. Used-up and expired codes are removed by themselves.":"خریدار کد را در ربات وارد می‌کند. کدهای تمام‌شده و منقضی خودکار پاک می‌شوند.",
+ "By node":"بر اساس نود",
+ "By protocol":"بر اساس پروتکل",
+ "CDN edge addresses (IPs, comma separated)":"آدرس‌های لبه CDN (آی‌پی‌ها، با ویرگول جدا کن)",
+ "CDN points to the Iran server: the foreign server connects in (recommended)":"CDN به سرور ایران اشاره می‌کند: سرور خارج وصل می‌شود (پیشنهادی)",
+ "CDN points to the foreign server: the Iran server connects out":"CDN به سرور خارج اشاره می‌کند: سرور ایران وصل می‌شود",
+ "CPU":"CPU",
+ "CPU is busy":"CPU شلوغ است",
+ "CPU is full":"CPU پر است",
+ "Cancel":"انصراف",
+ "Cancel the command":"لغو دستور",
+ "Cannot read this image":"این تصویر خوانده نمی‌شود",
+ "Card holder":"نام صاحب کارت",
+ "Card holder name":"نام صاحب کارت",
+ "Card number":"شماره کارت",
+ "Card to card":"کارت به کارت",
+ "Category":"دسته‌بندی",
+ "Category name":"نام دسته‌بندی",
+ "Certificate":"گواهی",
+ "Certificate (PEM, full chain)":"گواهی (PEM، زنجیره‌ی کامل)",
+ "Certificate and records":"گواهی SSL و رکوردها",
+ "Certificate changed":"گواهی عوض شده",
+ "Certificate error":"خطای گواهی",
+ "Certificate file":"فایل گواهی",
+ "Change":"تغییر",
+ "Change login":"تغییر نام کاربری / رمز",
+ "Change the base domain":"تغییر دامنه‌ی اصلی",
+ "Changes reach the servers within a few seconds of saving":"تغییرات چند ثانیه بعد از ذخیره به سرورها می‌رسد",
+ "Channel":"کانال",
+ "Chat ID":"Chat ID",
+ "Check":"بررسی",
+ "Check a domain":"بررسی یک دامنه",
+ "Check for update":"بررسی آپدیت",
+ "Check now":"بررسی الان",
+ "Checked from top to bottom; the first rule that matches decides":"از بالا به پایین چک می‌شوند؛ اولین قانونی که بخورد تصمیم می‌گیرد",
+ "Checking…":"در حال بررسی…",
+ "Choose a server inside Iran (one of your tunnel servers) and a domain that points to it (ArvanCloud CDN or plain DNS).":"یک سرور داخل ایران (یکی از سرورهای تانل) و دامنه‌ای که به آن اشاره می‌کند (CDN ابرآروان یا DNS معمولی) را انتخاب کن.",
+ "Choose at least one protocol":"حداقل یک پروتکل انتخاب کن",
+ "Choose file":"انتخاب فایل",
+ "Choose image":"انتخاب تصویر",
+ "Choose the .apk file(s) first":"اول فایل(های) .apk را انتخاب کن",
+ "Classic (Jc, S1, S2, H1-H4)":"کلاسیک (Jc، S1، S2، H1-H4)",
+ "Clean database":"تمیز کردن دیتابیس",
+ "Clean now":"تمیز کن",
+ "Clear":"پاک کردن",
+ "Clear selection":"لغو انتخاب",
+ "Clear the whole query log?":"کل لاگ درخواست‌ها پاک شود؟",
+ "Clients":"کلاینت‌ها",
+ "Clients online":"کلاینت آنلاین",
+ "Close":"بستن",
+ "Close the AmneziaWG port to the outside":"بستن پورت AmneziaWG به روی بیرون",
+ "Close these ports":"بستن این پورت‌ها",
+ "Close these ports in the firewall of this server?":"این پورت‌ها در فایروال این سرور بسته شوند؟",
+ "Closed":"بسته شد",
+ "Code":"کد",
+ "Coins":"ارزها",
+ "Coming next":"به‌زودی",
+ "Command":"دستور",
+ "Command for":"دستور برای",
+ "Config":"کانفیگ",
+ "Config mismatch":"اختلاف کانفیگ",
+ "Configs":"کانفیگ‌ها",
+ "Confirm":"تأیید",
+ "Congestion control":"کنترل ازدحام",
+ "Connected":"وصل",
+ "Connected now":"وصل الان",
+ "Connecting…":"در حال اتصال…",
+ "Connection endpoint (empty = panel endpoint)":"آدرس اتصال (خالی = Endpoint پنل)",
+ "Connections":"اتصال‌ها",
+ "Copied":"کپی شد",
+ "Copies of each game packet":"تعداد نسخه‌ی هر بسته‌ی بازی",
+ "Copy":"کپی",
+ "Copy command":"کپی دستور",
+ "Copy it now, it won't be shown again":"همین حالا کپی کن، دوباره نمایش داده نمی‌شود",
+ "Copy link":"کپی لینک",
+ "Copy the Private DNS address":"کپی آدرس Private DNS",
+ "Copy the command":"کپی دستور",
+ "Cores":"هسته‌ها",
+ "Could not make hop":"مرحله ساخته نشد",
+ "Count":"تعداد",
+ "Countries (0 = all)":"کشورها (۰ = همه)",
+ "Country not known yet":"کشور هنوز معلوم نیست",
+ "Create":"ساخت",
+ "Create API token":"ساخت توکن API",
+ "Create and manage the sales bot":"ساخت و مدیریت ربات فروش",
+ "Create bot":"ساخت ربات",
+ "Create command":"ساخت دستور",
+ "Create join command":"ساخت دستور اتصال",
+ "Create the first user":"ساخت اولین کاربر",
+ "Created":"ساخته‌شده",
+ "Created configs":"کانفیگ‌های ساخته‌شده",
+ "Credit & limits":"اعتبار و محدودیت",
+ "Crypto (NOWPayments)":"ارزی (NOWPayments)",
+ "Crypto payment (TON / USDT)":"پرداخت ارزی (TON / USDT)",
+ "Current account":"حساب فعلی",
+ "Current password":"رمز فعلی",
+ "Current version":"نسخه فعلی",
+ "Custom":"دلخواه",
+ "Custom IP / domain for this node":"IP / دامنه اختصاصی این نود",
+ "Custom inbound":"اینباند سفارشی",
+ "Customers":"مشتری‌ها",
+ "Customers known to the chat":"مشتری‌های شناخته‌شده در چت",
+ "DNS":"DNS",
+ "DNS abroad":"DNS خارجی",
+ "DNS domain":"دامنه‌ی DNS",
+ "DNS exit":"خروجی DNS",
+ "DNS exit node":"نود DNS خروجی",
+ "DNS is off: nothing runs on the servers.":"DNS خاموش است: روی سرورها چیزی اجرا نمی‌شود.",
+ "DNS is on":"DNS روشن است",
+ "DNS only":"فقط DNS",
+ "DNS provider":"سرویس DNS",
+ "DNS relay":"واسط DNS",
+ "DNS relay node":"نود ریلی DNS",
+ "DNS servers":"سرورهای DNS",
+ "DNS servers given to every user config, comma separated.":"DNSهایی که داخل کانفیگ کاربرها قرار می‌گیرند؛ با کاما جدا کن.",
+ "DNS users":"کاربران DNS",
+ "DNS, MTU and protocol behaviour on every server":"DNS، MTU و رفتار پروتکل‌ها روی همه‌ی سرورها",
+ "Daily backup to bot admins":"بکاپ روزانه برای ادمین‌های ربات",
+ "Dark":"تیره",
+ "Dashboard":"داشبورد",
+ "Data":"حجم",
+ "Data center DNS":"DNS دیتاسنتر",
+ "Database size":"حجم دیتابیس",
+ "Date":"تاریخ",
+ "Date (Jalali)":"تاریخ شمسی",
+ "Day":"روز",
+ "Days":"روز",
+ "Days to add":"روز اضافه",
+ "Debug":"دیباگ",
+ "Default":"پیش‌فرض",
+ "Default UDP port":"پورت UDP پیش‌فرض",
+ "Default backup passphrase":"رمز پیش‌فرض بکاپ",
+ "Default choice for everyday filtering. Very fast (xtls-rprx-vision has no inner encryption cost).":"انتخاب پیش‌فرض برای فیلترینگ روزمره. خیلی سریع (xtls-rprx-vision هزینهٔ رمزنگاری داخلی ندارد).",
+ "Default outbound (what no rule catches)":"خروجی پیش‌فرض (هر چه قانونی نگیرد)",
+ "Default port":"پورت پیش‌فرض",
+ "Default protocols for new users":"پروتکل‌های پیش‌فرض کاربر جدید",
+ "Delete":"حذف",
+ "Delete bot":"حذف ربات",
+ "Delete node":"حذف نود",
+ "Delete selected users?":"کاربران انتخاب‌شده حذف شوند؟",
+ "Delete server":"حذف سرور",
+ "Delete the whole route? Every hop stops and its ports are closed.":"کل مسیر حذف شود؟ همه‌ی مرحله‌ها خاموش می‌شوند و پورت‌هایشان بسته می‌شود.",
+ "Delete them too? The other server drops them and closes their ports.":"آن‌ها هم حذف شوند؟ سرور طرف دیگر هم آن‌ها را برمی‌دارد و پورت‌هایشان را می‌بندد.",
+ "Delete this server? Its users are cut off and the server itself removes WireGuard, AmneziaWG, Hysteria2 and KANKI MIX, closes their ports and uninstalls the node agent.":"این سرور حذف شود؟ کاربرهایش قطع می‌شوند و خود سرور WireGuard، AmneziaWG، Hysteria2 و KANKI MIX را برمی‌دارد، پورت‌هایشان را می‌بندد و ایجنت نود را پاک می‌کند.",
+ "Delete this tunnel? It stops on both servers and its ports are closed in their firewalls.":"این تانل حذف شود؟ روی هر دو سرور خاموش می‌شود و پورت‌هایش در فایروال هر دو بسته می‌شود.",
+ "Delete this whole server? Everything Kanki installed on it (VPN, tunnels, Xray, DNS) is removed from the server and from the panel, and the server uninstalls itself.":"کل این سرور حذف شود؟ هرچه کانکی رویش نصب کرده (VPN، تانل، Xray، DNS) از روی سرور و از پنل پاک می‌شود و سرور خودش را حذف می‌کند.",
+ "Delete this whole server? Its tunnels must be deleted first. The server removes everything Kanki installed on it (VPN, tunnels, Xray, DNS) and uninstalls itself.":"کل این سرور حذف شود؟ اول تانل‌هایش را حذف کن. سرور هرچه کانکی رویش نصب کرده (VPN، تانل، Xray، DNS) را پاک می‌کند و خودش را حذف می‌کند.",
+ "Deleted from the panel. The server did not answer (or runs an old version): its VPN services stay until you uninstall them there.":"از پنل حذف شد. سرور جواب نداد (یا نسخه‌اش قدیمی است): سرویس‌های VPN رویش می‌مانند تا خودت آن‌جا پاکشان کنی.",
+ "Destination (port or address:port)":"مقصد (پورت یا آدرس:پورت)",
+ "Destination networks sent through the link":"شبکه‌های مقصدی که از لینک می‌روند",
+ "Details":"جزئیات",
+ "Details & settings":"جزئیات و تنظیمات",
+ "Devices and IPs logged in to the panel":"دستگاه‌ها و IPهایی که به پنل وارد شده‌اند",
+ "Direct":"مستقیم",
+ "Direct (freedom)":"مستقیم (freedom)",
+ "Direct (the server's own address)":"مستقیم (آدرس خود سرور)",
+ "Direct domains":"دامنه‌های مستقیم",
+ "Direct name":"اسم مستقیم",
+ "Direct only":"فقط مستقیم",
+ "Direct: the app connects straight to the foreign server, lowest ping. Tunnel: the app connects to the Iran server; the tunnel to this server must forward this UDP port.":"مستقیم: اپ مستقیم به سرور خارج وصل می‌شود، کمترین پینگ. تانل: اپ به سرور ایران وصل می‌شود؛ تانل این سرور باید همین پورت UDP را فوروارد کند.",
+ "Direction":"جهت",
+ "Disable":"غیرفعال‌سازی",
+ "Disable 2FA":"غیرفعال‌سازی",
+ "Disable for all users":"خاموش برای همه‌ی کاربران",
+ "Disabled":"غیرفعال",
+ "Disconnected":"قطع",
+ "Discount campaign":"کمپین تخفیف",
+ "Discount code prefix":"پیشوند کد تخفیف",
+ "Discount codes":"کدهای تخفیف",
+ "Disguise":"پوشش",
+ "Disk":"دیسک",
+ "Disk is almost full":"دیسک تقریباً پر است",
+ "Disk is getting full":"دیسک دارد پر می‌شود",
+ "Do not read the content, only the connection details":"محتوا خوانده نشود، فقط مشخصات اتصال",
+ "Does this site go through Kanki DNS, and which service lists it?":"این سایت از DNS کانکی رد می‌شود؟ در کدام سرویس است؟",
+ "Dollar price (crypto)":"قیمت دلاری (پرداخت ارزی)",
+ "Domain":"دامنه",
+ "Domain (optional, for a real SSL certificate)":"دامنه (اختیاری، برای SSL واقعی)",
+ "Domain of this DNS server":"دامنه‌ی این سرور DNS",
+ "Domain of this server (or IP)":"دامنه‌ی این سرور (یا IP)",
+ "Domain strategy":"روش دامنه (Domain strategy)",
+ "Domain, certificate, upstreams":"دامنه، گواهی، DNS بالادست",
+ "Domains (one per line)":"دامنه‌ها (هر خط یکی)",
+ "Done":"انجام شد",
+ "Done: everything was removed from the server too":"انجام شد: همه چیز از روی خود سرور هم پاک شد",
+ "Done: servers forget them within a few seconds":"انجام شد: سرورها تا چند ثانیه‌ی دیگر فراموششان می‌کنند",
+ "Downlink (MB/s)":"دانلود (مگابایت/ثانیه)",
+ "Download":"دانلود",
+ "Download and upload, every 2 seconds":"دانلود و آپلود، هر ۲ ثانیه",
+ "Download backup":"دانلود بکاپ",
+ "Download config":"دانلود کانفیگ",
+ "Download configs":"دانلود کانفیگ‌ها",
+ "Download settings":"دانلود تنظیمات",
+ "Download speed of the entry, Mbit/s (0 = automatic)":"سرعت دانلود ورودی، مگابیت (۰ = خودکار)",
+ "Drain":"Drain",
+ "Draining":"در حال تخلیه",
+ "Dropped":"دور ریخته می‌شود",
+ "Durations (days)":"مدت‌ها (روز)",
+ "E-mail for Let's Encrypt (optional)":"ایمیل برای Let's Encrypt (اختیاری)",
+ "Each DNS server gets a name under it, like de.dns.example.com":"هر سرور DNS یک اسم زیر آن می‌گیرد، مثل de.dns.example.com",
+ "Each extra connection / month":"هر اتصال اضافه / ماه",
+ "Each extra country / month":"هر کشور اضافه / ماه",
+ "Each game packet is sent twice: at 20% loss 92% arrive instead of 64%. Users can switch it off in the app.":"هر بسته‌ی بازی دو بار فرستاده می‌شود: با ۲۰٪ لاس، ۹۲٪ می‌رسد به جای ۶۴٪. کاربر در اپ می‌تواند خاموشش کند.",
+ "Each query":"تک‌تک درخواست‌ها",
+ "Each server gets a Let's Encrypt certificate for its own name and renews it by itself":"هر سرور برای اسم خودش از Let's Encrypt گواهی می‌گیرد و خودش تمدید می‌کند",
+ "Each user has their own key (made from the subscription code): resetting the link gives a new key, disabling or expiring cuts the user off at once. Traffic and devices count like the other protocols.":"هر کاربر کلید خودش را دارد (از کد اشتراک ساخته می‌شود): ریست لینک کلید تازه می‌دهد، غیرفعال یا منقضی شدن کاربر را فوراً قطع می‌کند. مصرف و دستگاه‌ها مثل بقیه‌ی پروتکل‌ها شمرده می‌شوند.",
+ "Easy setup: choose above which server the CDN points to, type your domain here and the tunnel port below. The panel does the rest.":"راه‌اندازی ساده: بالا انتخاب کن CDN به کدام سرور اشاره دارد، دامنه را همین‌جا و پورت تانل را پایین بنویس. بقیه را پنل انجام می‌دهد.",
+ "Edit":"ویرایش",
+ "Edit bot":"ویرایش ربات",
+ "Edit hop":"ویرایش مرحله",
+ "Edit node":"ویرایش نود",
+ "Edit outbound":"ویرایش خروجی",
+ "Edit rule":"ویرایش قانون",
+ "Edit server":"ویرایش سرور",
+ "Edit tunnel":"ویرایش تانل",
+ "Edit user":"ویرایش کاربر",
+ "Emerald":"زمردی",
+ "Emergency chat":"چت اضطراری",
+ "Emergency chat is on":"چت اضطراری روشن است",
+ "Empty = automatic":"خالی = خودکار",
+ "Empty = every N hours as above. Three times a day: 10:00, 16:00, 21:30":"خالی = هر چند ساعت یک‌بار (بالا). سه بار در روز: ۱۰:۰۰، ۱۶:۰۰، ۲۱:۳۰",
+ "Empty = keep the current token":"خالی = همان توکن فعلی بماند",
+ "Empty = label + DNS domain. Point the domain to this server: its SSL is taken on the server with certbot by itself.":"خالی = برچسب + دامنه‌ی DNS. دامنه را به همین سرور وصل کن: SSL آن را certbot روی خود سرور می‌گیرد.",
+ "Empty = label + DNS domain. The panel points it (and *.) at this server and gets the SSL for it by itself.":"خالی = برچسب + دامنه‌ی DNS. پنل آن را (و *.) به همین سرور وصل می‌کند و SSLش را خودش می‌گیرد.",
+ "Empty = panel backup passphrase":"خالی = رمز بکاپ پنل",
+ "Empty = the IP it connects from":"خالی = همان آی‌پی که از آن وصل می‌شود",
+ "Empty = use the sales bot token":"خالی = همان توکن ربات فروش",
+ "Empty SNI = the server's domain and certificate":"SNI خالی = دامنه و گواهی خود سرور",
+ "Empty model = the best one of that service; a refused model is replaced by another one of your account.":"مدل خالی = بهترین مدل همان سرویس؛ اگر مدلی قبول نشود، مدل دیگری از حساب خودت امتحان می‌شود.",
+ "Enable":"فعال‌سازی",
+ "Enable 2FA":"فعال‌سازی 2FA",
+ "Enable for all users":"روشن برای همه‌ی کاربران",
+ "Enable sales bot features":"قابلیت‌های فروش",
+ "Encrypted TCP":"TCP رمزنگاری‌شده",
+ "Encrypted archive. File name includes date and time.":"آرشیو کامل و رمزنگاری‌شده. نام فایل شامل تاریخ و ساعت است.",
+ "Encrypted backup sent to Telegram on schedule":"بکاپ رمزنگاری‌شده را طبق زمان‌بندی به تلگرام بفرست",
+ "Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit":"تانل رمزنگاری‌شده بین سرورها: کاربر به سرور ورودی وصل می‌شود و ترافیک از سرور خروجی بیرون می‌رود",
+ "Enforce 2FA for admin":"اجبار 2FA برای ادمین",
+ "Enforce connection limit (Hysteria2)":"اعمال محدودیت اتصال (Hysteria2)",
+ "English letters and digits, 3-12, starting with a letter (like mahtab87). No spaces, emoji or symbols.":"فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف و اولش حرف (مثل mahtab87). فاصله، ایموجی و علامت ننویس.",
+ "Enter days or GB":"روز یا گیگ را وارد کن",
+ "Entry":"ورودی",
+ "Entry (users connect here)":"ورودی (کاربرها به این وصل می‌شوند)",
+ "Entry public TCP ports sent into the link":"پورت‌های TCP عمومی ورودی که به لینک می‌روند",
+ "Entry public UDP ports sent into the link":"پورت‌های UDP عمومی ورودی که به لینک می‌روند",
+ "Entry → exit (direct)":"ورودی ← به خروجی وصل شود (مستقیم)",
+ "Errors":"خطا",
+ "Every UDP packet is masked with a key made from the token, so no KCP signature shows; sizes and timing look random. FEC repairs losses without a retransmit.":"هر بستهٔ UDP با کلید ساخته‌شده از توکن ماسک می‌شود؛ امضای KCP دیده نمی‌شود و اندازه‌ها و زمان‌بندی تصادفی به نظر می‌رسد. FEC لاست‌ها را بدون ارسال مجدد ترمیم می‌کند.",
+ "Every UDP packet is masked with a key made from the token: no QUIC signature, random sizes. Unmasked packets get no answer. The QUIC hello carries a site name (default www.cloudflare.com).":"هر بستهٔ UDP با کلیدی که از توکن ساخته می‌شود ماسک می‌شود: بدون امضای QUIC و با اندازه‌های تصادفی. بسته‌ای که ماسک درست نداشته باشد هیچ پاسخی نمی‌گیرد. هلوی QUIC یک نام سایت دارد (پیش‌فرض www.cloudflare.com).",
+ "Every name of a ticked part and all its subdomains go through your server.":"همه‌ی نام‌های بخش تیک‌خورده و همه‌ی زیردامنه‌هایشان از سرور تو رد می‌شوند.",
+ "Every name your subscribers asked, and whether it went through your server (routed) or straight to the site (direct). Kept in the panel's memory; a restart clears it.":"همه‌ی دامنه‌هایی که مشتری‌ها پرسیده‌اند و اینکه از سرور شما رد شده (مسیردهی‌شده) یا مستقیم به سایت رفته (مستقیم). در حافظه‌ی پنل نگه داشته می‌شود و با ری‌استارت پاک می‌شود.",
+ "Every night at":"هر شب ساعت",
+ "Every night at 03:30 Tehran time, if GitHub has a new version: the panel, the nodes, the tunnel servers and the emergency chat are updated by themselves.":"هر شب ساعت ۳:۳۰ به وقت تهران، اگر نسخه‌ی جدیدی در گیت‌هاب باشد: پنل، نودها، سرورهای تانل و چت اضطراری خودکار آپدیت می‌شوند.",
+ "Every night the database is cleaned and an encrypted backup is sent to Telegram":"هر شب دیتابیس تمیز می‌شود و بکاپ رمزنگاری‌شده به تلگرام فرستاده می‌شود",
+ "Every server and what runs on it":"همه‌ی سرورها و سرویس‌هایی که رویشان است",
+ "Every server is connected":"همه‌ی سرورها وصل‌اند",
+ "Every server of the panel: Kanki VPN, Xray and Kanki DNS":"همه‌ی سرورهای پنل: VPN کانکی، Xray و DNS کانکی",
+ "Every server uses it unless it has its own port below.":"همه‌ی سرورها همین را دارند، مگر سروری که پایین پورت خودش را دارد.",
+ "Every … hours":"هر چند ساعت",
+ "Everything":"همه",
+ "Everything about how the panel looks and works, in one place":"همه‌ی تنظیمات ظاهر و کارکرد پنل، یک‌جا",
+ "Everything is already up to date":"همه‌چیز آپدیت است",
+ "Everything is installed on the server (VPN, tunnels, Xray, Kanki DNS) with one command. Off = installed, but no user is sent there (an Iran relay).":"همه‌چیز با یک دستور روی سرور نصب می‌شود (VPN، تانل، Xray، DNS کانکی). خاموش = نصب می‌شود ولی هیچ کاربری به آن فرستاده نمی‌شود (رله‌ی ایران).",
+ "Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.":"همه‌چیز منتقل می‌شود: کاربرها، سرورها، تانل‌ها، DNS، Xray، ربات و پلن‌ها، تنظیمات پنل، کلیدهای WireGuard / AmneziaWG / Hysteria2 همین سرور (کانفیگ کاربرها کار می‌کند)، گواهی و فایل‌های اپ.",
+ "Exit":"خروجی",
+ "Exit (abroad)":"خروجی (خارج)",
+ "Exit (traffic leaves here)":"خروجی (ترافیک از اینجا بیرون می‌رود)",
+ "Exit server (abroad)":"سرور خروجی (خارج)",
+ "Exit through the tunnel":"سرور خارج از تانل",
+ "Exit → entry (reverse, recommended)":"خروجی ← به ورودی وصل شود (معکوس، پیشنهادی)",
+ "Exits abroad and relays in Iran":"خروجی‌های خارج و ریلی‌های ایران",
+ "Expired":"منقضی",
+ "Expired / out of data":"منقضی / اتمام حجم",
+ "Expires":"انقضا",
+ "Expiry":"انقضا",
+ "Expiry date":"تاریخ انقضا",
+ "Expiry warnings":"هشدار اتمام",
+ "Export":"خروجی",
+ "Export & import":"خروجی و ورودی",
+ "Extend":"تمدید",
+ "Extra bytes that rebuild lost packets without asking again. Games do not use it (they have gaming mode).":"بایت اضافه که بسته‌ی گم‌شده را بدون درخواست دوباره می‌سازد. بازی‌ها از آن استفاده نمی‌کنند (حالت گیمینگ دارند).",
+ "Extra disguise (optional)":"پوشش اضافه (اختیاری)",
+ "Extra domains":"دامنه‌های اضافه",
+ "Extra ports (port range)":"پورت‌های اضافه (بازه)",
+ "Extra text for the buyer (optional)":"متن اضافه برای خریدار (اختیاری)",
+ "FEC data:parity":"FEC داده:تکمیلی",
+ "FEC for websites (TCP)":"FEC برای سایت‌ها (TCP)",
+ "FEC of the stream (websites, game lobby)":"FEC جریان (سایت‌ها، لابی بازی)",
+ "FEC sends extra repair packets so a lost packet is rebuilt at the other end instead of being waited for (about 40–100 ms saved per loss). 8:3 means 3 repair packets per 8 data packets (~37% more traffic). Duplication sends every packet twice: best ping, double the traffic. For WireGuard on top of this tunnel, FEC 8:3 is the sweet spot.":"FEC بسته‌های ترمیمی اضافه می‌فرستد تا بستهٔ گمشده به‌جای انتظار، در مقصد بازسازی شود (هر لاست حدود ۴۰ تا ۱۰۰ میلی‌ثانیه صرفه‌جویی). 8:3 یعنی به ازای هر ۸ بستهٔ داده ۳ بستهٔ ترمیمی (حدود ۳۷٪ ترافیک بیشتر). ارسال دوباره هر بسته را دو بار می‌فرستد: بهترین پینگ، دو برابر ترافیک. برای وایرگارد روی این تانل، FEC 8:3 نقطهٔ مطلوب است.",
+ "Failed":"ناموفق",
+ "Fallback when REALITY is not possible (old clients) and you have a clean domain.":"جایگزین وقتی REALITY ممکن نیست (کلاینت قدیمی) و دامنهٔ تمیز داری.",
+ "Fallbacks":"فال‌بک",
+ "Fast and steady, several links at once":"سریع و پایدار، چند اتصال هم‌زمان",
+ "Fast and steady, several links at once (recommended)":"سریع و پایدار، چند اتصال هم‌زمان (پیشنهادی)",
+ "Fast, for games and calls":"سریع، برای بازی و تماس",
+ "Files on the server":"فایل روی سرور",
+ "Filled in: check the Security tab":"پر شد: تب امنیت را چک کن",
+ "Find the best transport":"پیدا کردن بهترین ترنسپورت",
+ "Fingerprint":"اثرانگشت (fp)",
+ "Finished":"تمام‌شده",
+ "Firewall":"فایروال",
+ "Firewall (ufw)":"فایروال (ufw)",
+ "First add your entry server in the “Tunnel servers” menu.":"اول سرور ورودی را از منوی «سرورهای تانل» اضافه کن.",
+ "First set the DNS provider and its API token in Xray › Settings.":"اول سرویس DNS و توکن API را در Xray › تنظیمات بگذار.",
+ "Fix ports":"رفع تداخل پورت",
+ "Flow":"Flow",
+ "Fold the menu":"جمع کردن منو",
+ "For":"برای",
+ "For ISPs that block the panel domain: a tunnel server inside Iran serves the subscription pages with its own SSL and carries them to the panel through a hidden tunnel. Subscription links use it once it works.":"برای اینترنت‌هایی که دامنه‌ی پنل را بسته‌اند: یک سرور تانل داخل ایران صفحه‌های ساب را با SSL خودش می‌دهد و از راه یک تانل مخفی به پنل می‌رساند. وقتی کار کرد، لینک‌های ساب از آن ساخته می‌شوند.",
+ "For SSL by itself, first set the DNS provider and API token (Xray › Settings or Kanki DNS › Settings and SSL).":"برای SSL خودکار، اول سرویس DNS و توکن API را بگذار (Xray › تنظیمات یا DNS کانکی › تنظیمات و SSL).",
+ "For SSL by itself, set the DNS provider and API token in Settings and SSL.":"برای SSL خودکار، سرویس DNS و توکن API را در «تنظیمات و SSL» بگذار.",
+ "For TLS inbounds with \"Automatic\": the panel sets the domain's A record and gets a Let's Encrypt certificate with a DNS challenge through this API. Empty = the same provider as Kanki DNS.":"برای اینباندهای TLS با حالت «خودکار»: پنل با این API رکورد A دامنه را می‌سازد و با چالش DNS از Let's Encrypt گواهی می‌گیرد. خالی = همان سرویس DNS کانکی.",
+ "For example the subnet of the VPN users of the entry: their internet then leaves from the exit. SSH of the entry itself is never touched.":"مثلاً ساب‌نت کاربران VPN سرور ورودی: اینترنتشان از خروجی بیرون می‌رود. به SSH خود سرور ورودی دست زده نمی‌شود.",
+ "For example the subnet of the WireGuard users of the entry: their whole internet goes through Hysteria2 and leaves from the exit. SSH and the entry itself are not touched. The ports below are another way: users connect to a port of the entry and land on the same port of the exit.":"مثلاً شبکهٔ کاربران وایرگارد سرور ورودی (10.8.0.0/24): کل اینترنتشان از داخل هیستریا رد می‌شود و از سرور خارج بیرون می‌رود. SSH و خود سرور ورودی دست نمی‌خورد. پورت‌های پایین راه دیگری است: کاربر به پورت سرور ورودی وصل می‌شود و به همان پورت روی سرور خروجی می‌رسد.",
+ "For example your Iran server. Only the tunnel agent is installed on it.":"مثلاً سرور ایران. فقط عامل تانل روی آن نصب می‌شود.",
+ "For games (PUBG…): KCP at its fastest with FEC, a lost packet is rebuilt without waiting. Game and websites ride one stream, like the tunnels; «Game optimization» below sends game packets apart. Nothing on the wire looks like a protocol.":"برای بازی (پابجی و …): KCP سریع با FEC؛ بسته‌ی گم‌شده بدون انتظار ساخته می‌شود. بازی و سایت‌ها مثل تانل‌ها در یک جریان می‌روند؛ «بهینه‌سازی بازی» پایین بسته‌های بازی را جدا می‌فرستد. روی سیم شبیه هیچ پروتکلی نیست.",
+ "For repairs: the server keeps running but is not offered":"برای تعمیر: سرور روشن می‌ماند ولی به مشتری پیشنهاد نمی‌شود",
+ "For servers whose IPv6 does not work well":"برای سرورهایی که IPv6 آن‌ها خوب کار نمی‌کند",
+ "For strong filtering":"برای فیلترینگ شدید",
+ "For the app: games and sanctioned sites":"برای اپ: بازی و سایت‌های تحریمی",
+ "For when only domestic addresses open. Put your domain on a CDN that stays reachable (for example ArvanCloud) pointing at the exit server, turn WebSocket on, and set the origin to HTTP on the tunnel port below. The entry (inside) connects to the CDN, never to the exit directly.":"برای وقتی که فقط آدرس‌های داخلی باز می‌شوند. دامنه‌ات را روی یک CDN که در دسترس می‌ماند (مثلاً آروان‌کلود) بگذار و به سرور خروجی وصلش کن، WebSocket را روشن کن و مبدأ را روی HTTP و پورت تانل پایین بگذار. سرور ورودی (داخل ایران) همیشه به CDN وصل می‌شود، نه مستقیم به خروجی.",
+ "Forget addresses":"پاک کردن IPها",
+ "Forward to (empty = the exit inside the link)":"مقصد (خالی = خروجی داخل لینک)",
+ "Free the ports":"آزاد کردن پورت‌ها",
+ "Free trial":"تست رایگان",
+ "Freeze user":"فریز کاربر",
+ "From cache":"از کش",
+ "From the file name (arm64 / armeabi-v7a …)":"از روی اسم فایل (arm64 / armeabi-v7a …)",
+ "From the query log: a direct name that the game needs can be added here.":"از گزارش پرس‌وجوها: اگر نامی که بازی لازم دارد مستقیم رفته، از همین‌جا اضافه‌اش کن.",
+ "Full backup of users, credentials, certificates, VPN settings, nodes and panel state":"بکاپ کامل کاربران، اعتبارنامه‌ها، گواهی‌ها، تنظیمات VPN، نودها و وضعیت پنل",
+ "Fully random-looking encrypted traffic with no handshake at all (2022-blake3 methods). Nothing for DPI to fingerprint; carries UDP natively, so it is also a light cover for game/WireGuard UDP.":"ترافیک رمزنگاری‌شدهٔ کاملاً تصادفی به‌نظر بدون هیچ دست‌دادنی (متدهای 2022-blake3). چیزی برای اثرانگشت DPI ندارد؛ UDP را ذاتی حمل می‌کند، پس پوشش سبکی برای UDP گیم/وایرگارد هم هست.",
+ "GB to add":"گیگ اضافه",
+ "GRE link":"لینک GRE",
+ "GRE link: the panel already built its side. The first lines of the command build the other side on the server, then the agent connects to the panel through the link.":"لینک GRE: پنل سمت خودش را ساخته است. خط‌های اول دستور سمت دیگر را روی سرور می‌سازند و بعد ایجنت از راه لینک به پنل وصل می‌شود.",
+ "Game (KCP + FEC)":"گیم (KCP + FEC)",
+ "Game adds Reed-Solomon FEC and optional duplication on masked KCP — loss is repaired in flight. FakeTCP wraps UDP inside hand-made TCP packets (udp2raw style) so UDP throttling does not apply.":"گیم روی KCP ماسک‌شده FEC رید-سولومون و ارسال دوبارهٔ اختیاری می‌افزاید — لاست در راه ترمیم می‌شود. FakeTCP بسته‌های UDP را داخل TCP دست‌ساز (سبک udp2raw) می‌پیچد تا محدودیت UDP اعمال نشود.",
+ "Game optimization":"بهینه‌سازی بازی",
+ "Games · low ping":"گیم · پینگ پایین",
+ "Gaming":"گیمینگ",
+ "Gaming (low ping)":"گیم (پینگ کم)",
+ "Gaming / UDP:":"گیمینگ / UDP:",
+ "Gaming and WireGuard-over-tunnel: lowest visible loss, and UDP that looks like TCP.":"گیمینگ و وایرگارد روی تانل: کمترین لاست قابل‌مشاهده، و UDP که شبیه TCP است.",
+ "Gaming mode on in the app by default":"حالت گیمینگ در اپ پیش‌فرض روشن",
+ "Gaming options":"تنظیمات گیمینگ",
+ "Gemini (Google AI Studio, key AQ.… / AIza…)":"Gemini (گوگل AI Studio، کلید AQ.… یا AIza…) · رایگان",
+ "General":"عمومی",
+ "General settings":"تنظیمات کلی",
+ "Get SSL for this domain by itself":"گرفتن خودکار SSL برای این دامنه",
+ "Get again":"گرفتن دوباره",
+ "Get your numeric Telegram ID from @userinfobot.":"آیدی عددی تلگرامت را از ‎@userinfobot بگیر.",
+ "Getting the SSL certificate… this can take up to one minute":"در حال گرفتن SSL… تا یک دقیقه طول می‌کشد",
+ "Give a free trial":"تست رایگان بده",
+ "Give the rule at least one condition":"حداقل یک شرط برای قانون بگذار",
+ "Goes direct (not routed)":"مستقیم می‌رود (مسیردهی نمی‌شود)",
+ "Goes through Kanki DNS":"از DNS کانکی رد می‌شود",
+ "Gold":"طلایی",
+ "Gold · day":"طلایی · روز",
+ "Gold · night":"طلایی · شب",
+ "Grok (x.ai, key xai-…)":"Grok (x.ai، کلید xai-…)",
+ "Grok works":"هوش مصنوعی کار می‌کند",
+ "Groq (groq.com, key gsk_…)":"Groq (groq.com، کلید gsk_…)",
+ "Grouped by name":"گروه‌بندی بر اساس دامنه",
+ "Groups marked \"only on request\" stay off until you turn them on. Some names cannot be routed (they check the address).":"گروه‌های «فقط با درخواست» تا روشنشان نکنی خاموش می‌مانند. بعضی اسم‌ها قابل مسیردهی نیستند (آدرس را چک می‌کنند).",
+ "HTTP (CDN SSL or no SSL): 8080, 8880, 2052, 2082, 2086, 2095 · HTTPS (own SSL): 2053, 2083, 2087, 2096, 8443. Keep 80 and 443 free when Kanki DNS runs on this server.":"پورت HTTP (SSL از CDN یا بدون SSL): 8080، 8880، 2052، 2082، 2086، 2095 · پورت HTTPS (SSL خودت): 2053، 2083، 2087، 2096، 8443. اگر DNS کانکی روی همین سرور است، 80 و 443 را آزاد بگذار.",
+ "HTTP header camouflage":"استتار با هدر HTTP",
+ "HTTP/2 does not get through (or the server is older than 2.9): WSS passes but H2 does not":"HTTP/2 رد نمی‌شود (یا نسخهٔ سرور قدیمی‌تر از 2.9 است): WSS رد می‌شود ولی H2 نه",
+ "Hardest to block":"سخت‌ترین برای مسدودسازی",
+ "Health":"سلامت",
+ "Healthy":"سالم",
+ "Heartbeat (seconds, 0 = off)":"ضربان (ثانیه، ۰ = خاموش)",
+ "Heavy (more junk, bigger padding)":"سنگین (بسته‌ی زائد بیشتر، پدینگ بزرگ‌تر)",
+ "Heavy filtering / burned IPs:":"فیلترینگ شدید / آی‌پی سوخته:",
+ "Hidden":"مخفی",
+ "Hidden from subscribers":"مخفی از مشتری‌ها",
+ "Hide":"بستن",
+ "Hide details":"بستن جزئیات",
+ "Hide it inside a transport":"پنهان کردن داخل یک ترنسپورت",
+ "Hides the SNI from filters that do not reassemble packets.":"اسم SNI را از فیلترهایی که بسته‌ها را سرهم نمی‌کنند پنهان می‌کند.",
+ "Hides the SNI from filters that do not reassemble packets. Turn it off if the CDN refuses.":"SNI را از فیلترهایی که بسته‌ها را سرهم نمی‌کنند پنهان می‌کند. اگر CDN قبول نکرد خاموشش کن.",
+ "Home":"خانه",
+ "Hop":"مرحله",
+ "Hops":"مرحله‌ها",
+ "Host":"هاست",
+ "Host / path":"Host / مسیر",
+ "Host header (HTTP)":"هدر Host (HTTP)",
+ "Host: your domain on the CDN":"Host: دامنه‌ات روی CDN",
+ "Hours":"ساعت",
+ "Hours (0 = no end)":"ساعت (۰ = بی‌پایان)",
+ "How it works":"چطور کار می‌کند",
+ "How often lists and the dashboard refresh themselves.":"فاصله‌ی تازه‌سازی خودکار فهرست‌ها و داشبورد.",
+ "How the bot sells: trials, payments, referrals and messages.":"نحوه فروش ربات: تست رایگان، پرداخت، دعوت دوستان و پیام‌ها.",
+ "How the panel looks and works":"ظاهر و کارکرد پنل",
+ "How to connect":"آموزش اتصال",
+ "Hysteria2":"Hysteria2",
+ "Hysteria2 UDP port (on the exit)":"پورت UDP هیستریا ۲ (روی سرور خروجی)",
+ "IP / CIDR allowed, one per line":"IP / CIDR مجاز، هر خط یک مورد",
+ "IP / CIDR blocked, one per line":"IP / CIDR مسدود، هر خط یک مورد",
+ "IP addresses and ranges (one per line)":"IPها و رنج‌ها (هر خط یکی)",
+ "IP of the panel server (empty = automatic)":"آی‌پی سرور پنل (خالی = خودکار)",
+ "IP restriction":"محدودیت IP",
+ "IPv4 only":"فقط IPv4",
+ "If a port is closed, run this on that server as root:":"اگر پورتی بسته است، این را روی همان سرور با root اجرا کن:",
+ "If it stays down, it switches by itself: KCP → TCP Mux → QUIC → WS → WSS → TCP (balanced, reverse)":"اگر قطع بماند، خودکار روش بعدی را امتحان می‌کند: KCP ← TCP Mux ← QUIC ← WS ← WSS ← TCP (متعادل، معکوس)",
+ "If one direction is closed it says so and suggests the other":"اگر یک جهت بسته باشد، همین را می‌گوید و جهت دیگر را پیشنهاد می‌دهد",
+ "If this server has a tunnel, or will have one, write your Iran server's domain here. Every protocol then also gets a second config through it, made by itself.":"اگر برای این سرور تانل زده‌اید یا می‌خواهید بزنید، دامنه‌ی سرور ایرانتان را همین‌جا بنویسید. از همه‌ی پروتکل‌ها (KANKI MIX، امنزیا، وایرگارد، هیستریا، Xray) خودش یک کانفیگ دوم با این دامنه می‌سازد و به برنامه می‌فرستد.",
+ "Image is too complex, use a simpler logo":"تصویر خیلی پیچیده است؛ لوگوی ساده‌تری انتخاب کن",
+ "Import":"ورودی",
+ "In Telegram open @BotFather, send /newbot and copy the token it gives.":"در تلگرام ‎@BotFather را باز کن، ‎/newbot را بفرست و توکنی که می‌دهد را کپی کن.",
+ "In line…":"در صف…",
+ "In your DNS (Cloudflare / ArvanCloud): the A record of":"در DNS دامنه (کلادفلر / ابرآروان): رکورد A دامنه‌ی",
+ "Inactive":"غیرفعال",
+ "Inbound":"دروازه",
+ "Inbounds":"دروازه‌ها",
+ "Include the app files (APK)":"فایل‌های اپ (APK) هم داخل بکاپ باشد",
+ "Insecure: plain HTTP. Reinstall the node with the new installer to get TLS.":"ناامن: HTTP ساده. نود را با نصاب جدید دوباره نصب کن تا TLS بگیرد.",
+ "Inside Iran":"داخل ایران",
+ "Inside Iran (relay / tunnel entry)":"داخل ایران (رله / ورودی تانل)",
+ "Install":"نصب",
+ "Install Kanki DNS on this server":"نصب DNS کانکی روی این سرور",
+ "Install VPN":"نصب VPN",
+ "Install Xray on this server":"نصب Xray روی این سرور",
+ "Install the VPN part on this server? It runs by itself on the server and takes a few minutes.":"بخش VPN روی این سرور نصب شود؟ خودِ سرور نصبش می‌کند و چند دقیقه طول می‌کشد.",
+ "Install the node with the installer (option 2), then paste the API address and token it prints.":"نود را با نصاب (گزینه ۲) نصب کن، بعد آدرس API و توکنی که چاپ می‌کند را اینجا بزن.",
+ "Install tunnels, Xray and DNS (the server agent) on this server? It starts next to its VPN within seconds.":"تانل، Xray و DNS (ایجنت سرور) روی این سرور نصب شود؟ چند ثانیه‌ای کنار VPN آن راه می‌افتد.",
+ "Install update":"نصب آپدیت",
+ "Installing the VPN part…":"در حال نصب بخش VPN…",
+ "Internet":"اینترنت",
+ "Internet of these networks leaves from the exit":"اینترنت این شبکه‌ها از سرور خروجی خارج شود",
+ "Invalid date":"تاریخ نامعتبر",
+ "Invite friends":"دعوت دوستان",
+ "Iran":"ایران",
+ "Iran address":"آدرس ایران",
+ "Iran address (domain or IP)":"آدرس ایران (دامنه یا IP)",
+ "Iran and abroad servers of the tunnels":"سرورهای ایران و خارج تانل‌ها",
+ "Iran server in front of a DNS exit":"سرور ایران جلوی DNS خروجی",
+ "Iran servers":"سرورهای ایران",
+ "Iran time":"به وقت ایران",
+ "Iran · entry":"ایران · ورودی",
+ "Is off in the panel":"در پنل خاموش است",
+ "It downloads everything straight from this server, puts it back with the same keys and starts the panel there. Then this panel stops by itself.":"همه‌چیز را مستقیم از همین سرور می‌گیرد، با همان کلیدها برمی‌گرداند و پنل را آن‌جا روشن می‌کند. بعد این پنل خودش خاموش می‌شود.",
+ "It holds the password: do not share it.":"رمز تانل داخلش است؛ جایی منتشرش نکن.",
+ "It installs only the tunnel agent: no VPN, no web panel. The server appears here as Connected within a few seconds.":"فقط عامل تانل نصب می‌شود؛ نه VPN و نه پنل وب. چند ثانیه بعد سرور اینجا «وصل» نشان داده می‌شود.",
+ "It is in Services › Games › Other games.":"در «سرویس‌ها › بازی‌ها › بازی‌های دیگر» است.",
+ "It serves":"این‌ها را سرو می‌کند",
+ "Its exit":"خروجی آن",
+ "KANKI MIX for every user?":"KANKI MIX برای همه‌ی کاربران روشن شود؟",
+ "KANKI MIX is off: it runs on no server and is in no subscription.":"KANKI MIX خاموش است: روی هیچ سروری اجرا نمی‌شود و در هیچ اشتراکی نیست.",
+ "KANKI MIX on":"KANKI MIX روشن",
+ "KANKI MIX on this server":"KANKI MIX روی این سرور",
+ "KANKI MIX settings (all servers)":"تنظیمات KANKI MIX (همه‌ی سرورها)",
+ "KANKI_REPO in /etc/kanki/kanki.env is set; it wins over this field.":"مقدار KANKI_REPO در فایل /etc/kanki/kanki.env تنظیم شده و بر این فیلد مقدم است.",
+ "KCP + Reed-Solomon FEC and optional packet duplication: recovers lost packets without waiting, the lowest ping under loss":"KCP به‌همراه FEC (رید-سولومون) و ارسال دوبارهٔ اختیاری بسته‌ها: بستهٔ گمشده بدون انتظار بازسازی می‌شود؛ کمترین پینگ در شبکهٔ پرلاست",
+ "KCP is fully encrypted UDP (its header is hidden too); there is no site name to disguise.":"KCP یک UDP کاملاً رمزنگاری‌شده است (حتی هدرش)؛ اسم سایتی برای پوشاندن ندارد.",
+ "Kanki DNS":"DNS کانکی",
+ "Kanki DNS (sanctions)":"دی‌ان‌اس کانکی (رفع تحریم)",
+ "Kanki DNS has no provider yet either":"DNS کانکی هم هنوز سرویس DNS ندارد",
+ "Kanki DNS is not on this server yet.":"DNS کانکی هنوز روی این سرور نیست.",
+ "Kanki DNS uses":"DNS کانکی از این استفاده می‌کند:",
+ "Kanki VPN":"کانکی VPN",
+ "Kanki VPN and Xray side by side":"کانکی VPN و Xray کنار هم",
+ "Kanki VPN only":"فقط کانکی VPN",
+ "Kanki tunnel":"تانل کانکی",
+ "Keepalive (seconds)":"Keepalive (ثانیه)",
+ "Key file":"فایل کلید",
+ "Label":"برچسب",
+ "Language":"زبان",
+ "Largest clock difference (ms, 0 = off)":"بیشترین اختلاف ساعت (میلی‌ثانیه، ۰ = خاموش)",
+ "Last":"آخرین",
+ "Last answer":"آخرین جواب",
+ "Last cleaned":"آخرین تمیزکاری",
+ "Last contact":"آخرین ارتباط",
+ "Last error":"آخرین خطا",
+ "Last logins to the panel":"آخرین ورودها به پنل",
+ "Last report":"آخرین گزارش",
+ "Last run":"آخرین اجرا",
+ "Last seen":"آخرین اتصال",
+ "Last switch":"آخرین تغییر",
+ "Latest version":"آخرین نسخه",
+ "Legacy API key":"کلید API قدیمی",
+ "Let's Encrypt checks from outside Iran: port 80/TCP of the server must be open from abroad. Open it in the data center's firewall panel too; when international traffic is cut, SSL cannot be taken until it is back.":"Let's Encrypt از خارج ایران چک می‌کند: پورت 80/TCP سرور باید از خارج باز باشد. در پنل فایروال دیتاسنتر هم بازش کن؛ وقتی اینترنت بین‌الملل قطع است، تا وصل نشود SSL گرفته نمی‌شود.",
+ "Light":"روشن",
+ "Light / dark":"روشن / تیره",
+ "Like 4001-4010. They all lead to the main port; the app picks one at random on every connect, so blocking one port is not enough. Empty = off.":"مثلاً 4001-4010. همه به پورت اصلی می‌رسند؛ اپ هر بار یکی را تصادفی انتخاب می‌کند تا بستن یک پورت کافی نباشد. خالی = خاموش.",
+ "Limited":"اتمام حجم",
+ "Limits and users":"محدودیت و کاربرها",
+ "Link":"لینک",
+ "Link SNI":"SNI لینک",
+ "Link address":"آدرس لینک",
+ "Link and CDN":"لینک و CDN",
+ "Link for your channel":"لینک برای کانال",
+ "Link of the other server (vless, vmess, trojan or ss)":"لینک سرور دیگر (vless، vmess، trojan یا ss)",
+ "Link port":"پورت تانل",
+ "Links":"لینک‌ها",
+ "Links between your servers":"اتصال بین سرورهایت",
+ "Links of every Xray inbound go into the subscription":"لینک همه‌ی اینباندهای Xray در ساب می‌آید",
+ "Listen address":"آدرس listen",
+ "Live":"زنده",
+ "Live log":"لاگ زنده",
+ "Live network traffic":"ترافیک لحظه‌ای شبکه",
+ "Live speed":"سرعت لحظه‌ای",
+ "Load":"لود",
+ "Loading…":"در حال بارگذاری…",
+ "Local":"محلی",
+ "Location":"موقعیت",
+ "Location guessed: confirm it in Edit":"موقعیت حدس زده شده: در «ویرایش» تأییدش کن",
+ "Location not set: choose it in Edit":"موقعیت مشخص نیست: در «ویرایش» انتخابش کن",
+ "Log level":"سطح لاگ",
+ "Log out others":"خروج بقیه",
+ "Login":"ورود",
+ "Login and lobby (recommended)":"ورود و لابی (پیشنهادی)",
+ "Login history":"تاریخچه ورود",
+ "Login, 2FA, sessions and IP access":"ورود، دومرحله‌ای، نشست‌ها و دسترسی IP",
+ "Login, account, lobby and the UC store go through your server; the match stays direct.":"ورود، حساب، لابی و فروشگاه UC از سرور تو رد می‌شوند؛ خود مسابقه مستقیم می‌ماند.",
+ "Login, sessions, 2FA, IP policy and API":"ورود، نشست‌ها، احراز هویت دومرحله‌ای، سیاست IP و API",
+ "Logo":"لوگو",
+ "Logout":"خروج",
+ "Logs are not available":"لاگ در دسترس نیست",
+ "Look at":"بررسی",
+ "Look like QUIC / HTTP3 on the wire":"شبیه QUIC / HTTP3 روی سیم",
+ "Looks like a WebSocket, works behind a CDN":"شبیه وب‌سوکت، پشت CDN هم کار می‌کند",
+ "Looks like an HTTPS site, hardest to spot":"شبیه یک سایت HTTPS، سخت‌تر از همه شناسایی می‌شود",
+ "Looks like web traffic":"شبیه ترافیک وب",
+ "Lower it (1280) if some sites do not open on mobile data.":"اگر بعضی سایت‌ها روی اینترنت موبایل باز نمی‌شوند، کمش کن (1280).",
+ "Lowest TLS version":"کمترین نسخه‌ی TLS",
+ "MTU":"MTU",
+ "MTU (0 = automatic)":"MTU (۰ = خودکار)",
+ "MTU must be between 1200 and 1500":"MTU باید بین 1200 تا 1500 باشد",
+ "Main":"اصلی",
+ "Main panel server · local management":"سرور اصلی پنل · مدیریت محلی",
+ "Main server":"سرور اصلی",
+ "Main server and extra nodes":"سرور اصلی و نودهای اضافه",
+ "Maintenance":"تعمیرات",
+ "Make each direct name an A record pointing at the server's IP (Cloudflare: DNS only, grey cloud). Until it points right, the app gets the server's own address.":"هر اسم مستقیم را یک رکورد A بساز که به آی‌پی سرور اشاره کند (کلادفلر: فقط DNS، ابر خاکستری). تا وقتی درست نشده، برنامه آدرس خود سرور را می‌گیرد.",
+ "Make the first one":"اولی را بساز",
+ "Make the first tunnel":"اولین تانل را بساز",
+ "Make the move command":"ساخت دستور انتقال",
+ "Make the route":"ساخت مسیر",
+ "Make the tunnel":"ساخت تانل",
+ "Make this inbound":"ساخت این دروازه",
+ "Makes a new code that ends by itself and announces it in the channel.":"یک کد جدید که خودش منقضی می‌شود می‌سازد و در کانال اعلام می‌کند.",
+ "Manage":"مدیریت",
+ "Manage Xray":"مدیریت Xray",
+ "Manage nodes":"مدیریت نودها",
+ "Manual (paste a certificate)":"دستی (گواهی را خودت بگذار)",
+ "Memory":"حافظه",
+ "Merchant ID":"مرچنت",
+ "Message":"متن پیام",
+ "Metadata only":"فقط متادیتا",
+ "Method":"روش",
+ "Mimic QUIC (adds I1, needs AmneziaWG tools 1.5+)":"تقلید QUIC (I1 اضافه می‌شود، نیاز به AmneziaWG نسخه ۱.۵ به بالا)",
+ "Mode":"حالت",
+ "Model":"مدل",
+ "More":"بیشتر",
+ "Most speed":"بیشترین سرعت",
+ "Most used":"بیشترین مصرف",
+ "Move all settings to another panel or keep a copy":"انتقال همه‌ی تنظیمات به پنل دیگر یا نگه‌داشتن یک نسخه",
+ "Move the panel to a new server":"انتقال کامل پنل به سرور جدید",
+ "Move to category":"انتقال به دسته‌بندی",
+ "Moved on the entry because they were taken":"روی ورودی عوض شد چون پر بود",
+ "Moved: the panel runs on the new server. This one is stopping.":"انتقال تمام شد: پنل روی سرور جدید اجرا می‌شود و این یکی خاموش می‌شود.",
+ "Multi mode (in the link)":"حالت Multi (در لینک)",
+ "Multi-location":"چندمرحله‌ای",
+ "Multi-location tunnel":"تانل چندمرحله‌ای",
+ "My own certificate":"گواهی خودم",
+ "NOWPayments (crypto)":"NOWPayments (ارز دیجیتال)",
+ "NOWPayments API key":"کلید API در NOWPayments",
+ "Name":"نام",
+ "Name in the app":"اسم در برنامه",
+ "Name of these configs in the app (optional)":"اسم این کانفیگ‌ها در برنامه (اختیاری)",
+ "Name, logo, language, theme and colour of the panel":"نام، لوگو، زبان، پوسته و رنگ پنل",
+ "Names your users asked":"نام‌هایی که کاربرها پرسیده‌اند",
+ "Nearest expiry":"نزدیک‌ترین انقضا",
+ "Needed so what enters the link can reach the internet from the exit.":"لازم است تا ترافیکی که وارد لینک می‌شود از خروجی به اینترنت برسد.",
+ "Network":"شبکه",
+ "Network policy":"سیاست شبکه",
+ "Network speed":"سرعت شبکه",
+ "New":"جدید",
+ "New backup passphrase (min 6). Old backups still need the old one.":"رمز جدید بکاپ (حداقل ۶). بکاپ‌های قبلی هنوز با رمز قبلی باز می‌شوند.",
+ "New inbound":"اینباند جدید",
+ "New keys":"کلیدهای جدید",
+ "New link":"لینک جدید",
+ "New link (the old one stops working)":"لینک جدید (لینک قبلی از کار می‌افتد)",
+ "New obfuscation numbers":"اعداد مبهم‌سازی جدید",
+ "New password (min 8)":"رمز جدید (حداقل ۸)",
+ "New password and certificate":"رمز و گواهی جدید",
+ "New server (install command)":"سرور جدید (دستور نصب)",
+ "New signing key":"کلید امضای جدید",
+ "New tunnel":"تانل جدید",
+ "New user":"کاربر جدید",
+ "New username (optional)":"نام کاربری جدید (اختیاری)",
+ "New users":"کاربر جدید",
+ "Newest":"جدیدترین",
+ "Next":"بعدی",
+ "Next hop":"مرحله‌ی بعد",
+ "Next run":"اجرای بعدی",
+ "Night":"شب",
+ "Nightly backup to the bot":"بکاپ شبانه به ربات",
+ "No DNS domain yet: encrypted DNS (DoT / DoH) needs one.":"هنوز دامنه‌ی DNS نداری: DNS رمزدار (DoT / DoH) به آن نیاز دارد.",
+ "No DNS server yet":"هنوز سرور DNS نیست",
+ "No Kanki tunnel carries this port to the server. Make a tunnel (or a multi-location route) that carries it, or forward it on that address some other way.":"هیچ تانل کانکی این پورت را به این سرور نمی‌برد. یک تانل (یا مسیر چندمرحله‌ای) بساز که آن را ببرد، یا روی آن آدرس به روش دیگری فورواردش کن.",
+ "No PUBG query in the log yet: open the game on a phone that uses your DNS, then press Refresh.":"هنوز پرس‌وجوی پابجی در گزارش نیست: بازی را روی گوشی‌ای که DNS تو را دارد باز کن، بعد «تازه‌سازی» را بزن.",
+ "No QUIC / HTTP/3 signature on the wire. Turn it off only if you want it to look like HTTP/3.":"هیچ امضای QUIC / HTTP/3 روی سیم نیست. فقط وقتی خاموشش کن که بخواهی شبیه HTTP/3 دیده شود.",
+ "No SSL (HTTP)":"بدون SSL (HTTP)",
+ "No VPN server yet":"هنوز سرور VPN نیست",
+ "No Xray inbound yet":"هنوز اینباند Xray نیست",
+ "No Xray server yet: add one in Servers":"هنوز سرور Xray نیست: در «سرورها» اضافه کن",
+ "No address":"آدرس ندارد",
+ "No answer":"جوابی نیامد",
+ "No certificate yet: DoT / DoH and registering by link do not work without it.":"هنوز گواهی نیست: DoT / DoH و ثبت با لینک بدون آن کار نمی‌کند.",
+ "No clash":"تداخلی نیست",
+ "No codes yet":"هنوز کدی نیست",
+ "No configs: user has no nodes or protocols":"کانفیگی نیست: کاربر نود یا پروتکلی ندارد",
+ "No connection":"وصل نشد",
+ "No contact for more than 3 minutes":"بیش از ۳ دقیقه ارتباطی نبوده",
+ "No debug lines":"خط دیباگی نیست",
+ "No errors":"خطایی نیست",
+ "No extra nodes yet. Add one with a single command.":"هنوز نود اضافه‌ای نیست. با یک دستور اضافه کن.",
+ "No fallbacks":"فال‌بکی نیست",
+ "No file chosen":"فایلی انتخاب نشده",
+ "No file yet: the bot and the subscription page show the app download link of Sales settings.":"هنوز فایلی نیست: ربات و صفحه‌ی اشتراک همان لینک دانلود اپ تنظیمات فروش را نشان می‌دهند.",
+ "No inbound on this server yet":"هنوز دروازه‌ای روی این سرور نیست",
+ "No inbound yet.":"هنوز دروازه‌ای نیست.",
+ "No log lines yet":"هنوز لاگی نیست",
+ "No match":"موردی پیدا نشد",
+ "No message is showing in the app right now.":"الان هیچ پیامی در اپ نمایش داده نمی‌شود.",
+ "No node found for this server: type the ports by hand":"نودی برای این سرور پیدا نشد: پورت‌ها را دستی بنویس",
+ "No plans yet":"هنوز پلنی ساخته نشده",
+ "No port changed":"پورتی عوض نشده",
+ "No port information yet. Press Check now.":"هنوز اطلاعات پورت نیامده. «بررسی الان» را بزن.",
+ "No posts between 1 and 8 in the morning.":"بین ۱ تا ۸ صبح پستی ارسال نمی‌شود.",
+ "No rules yet: everything goes to the default outbound.":"هنوز قانونی نیست: همه چیز به خروجی پیش‌فرض می‌رود.",
+ "No sales bot yet":"هنوز ربات فروش ساخته نشده",
+ "No server here":"سروری اینجا نیست",
+ "No server yet":"هنوز سروری نیست",
+ "No service on this server yet":"هنوز سرویسی روی این سرور نیست",
+ "No swap":"بدون Swap",
+ "No transport could connect in either direction. Open the test ports in the cloud firewall of both servers and try again.":"در هیچ جهتی ترنسپورتی وصل نشد. پورت‌های تست را در فایروال هر دو سرور باز کن و دوباره امتحان کن.",
+ "No transport could connect in either direction. Open the test ports in the cloud firewall of both servers and try again. If only GRE passes between the two servers, add or edit the server with the “Only GRE passes” option.":"هیچ ترنسپورتی در هیچ جهتی وصل نشد. پورت‌های تست را در فایروال ابری هر دو سرور باز کن و دوباره امتحان کن. اگر بین دو سرور فقط GRE رد می‌شود، سرور را با گزینهٔ «فقط GRE» اضافه یا ویرایش کن.",
+ "No transport could connect. Open the test ports in the cloud firewall of the listening server and try again.":"هیچ روشی وصل نشد. پورت‌های تست را در فایروال کلاد سرورِ شنونده باز کن و دوباره تست کن.",
+ "No transport passed on this hop":"هیچ روشی روی این مرحله رد نشد",
+ "No tunnel carries this port: users connect to the server directly":"هیچ تانلی این پورت را نمی‌برد: کاربرها مستقیم به سرور وصل می‌شوند",
+ "No tunnel is made and nothing changes on the servers":"هیچ تانلی ساخته نمی‌شود و چیزی روی سرورها عوض نمی‌شود",
+ "No tunnel uses this server.":"هیچ تانلی از این سرور استفاده نمی‌کند.",
+ "No tunnels yet":"هنوز تانلی ساخته نشده",
+ "No user has DNS yet: tick DNS in a user's form":"هنوز کاربری DNS ندارد: در فرم کاربر تیک DNS را بزن",
+ "No users with Xray yet: tick Xray in a user's form":"هنوز کاربری Xray ندارد: در فرم کاربر تیک Xray را بزن",
+ "No users yet":"هنوز کاربری نیست",
+ "Nobody is connected right now":"الان کسی وصل نیست",
+ "Nobody is online right now":"الان کسی آنلاین نیست",
+ "Node":"نود",
+ "Node API (HTTPS)":"API نود (HTTPS)",
+ "Node access & note":"دسترسی نود و یادداشت",
+ "Node domain (optional, for a real SSL certificate)":"دامنه نود (اختیاری، برای گواهی SSL واقعی)",
+ "Node name":"نام نود",
+ "Node token":"توکن نود",
+ "Node type":"نوع نود",
+ "Nodes":"نودها",
+ "Nodes and tunnel servers are updated together with":"نودها و سرورهای تانل با این دکمه با هم آپدیت می‌شوند:",
+ "Nodes online":"نودهای آنلاین",
+ "Nodes that have their own address switch back to this one when you save.":"نودهایی که آدرس اختصاصی دارند، با ذخیره به همین آدرس برمی‌گردند.",
+ "None":"هیچ",
+ "Normal filtering:":"فیلترینگ عادی:",
+ "Not connected":"وصل نیست",
+ "Not connected right now":"الان وصل نیست",
+ "Not connected yet":"هنوز وصل نیست",
+ "Not connected yet: run its command on the server":"هنوز وصل نشده: دستورش را روی سرور اجرا کن",
+ "Not in a tunnel":"بدون تانل",
+ "Not needed":"لازم نیست",
+ "Not reachable":"در دسترس نیست",
+ "Not reachable: check the server, its agent and the firewall":"در دسترس نیست: سرور، Agent و فایروال را چک کن",
+ "Not running":"اجرا نمی‌شود",
+ "Not set yet":"هنوز تنظیم نشده",
+ "Not tested, an agent is too old (update it first)":"تست نشد، ایجنت قدیمی است (اول آپدیتش کن)",
+ "Note":"یادداشت",
+ "Note for subscribers":"یادداشت برای مشتری‌ها",
+ "Nothing found":"چیزی پیدا نشد",
+ "Nothing of PUBG passes your servers. Fine where the game opens without help.":"هیچ چیز پابجی از سرورهای تو رد نمی‌شود. برای جاهایی که بازی بدون کمک باز می‌شود.",
+ "Nothing passes in this direction":"در این جهت هیچ چیز رد نمی‌شود",
+ "Nothing to set: write each server's domain (or label + DNS domain) and point it to the server. Kanki DNS answers Let's Encrypt itself on port 80, so DNS does not stop. The SSL state of every server is on its card.":"تنظیمی لازم نیست: دامنه‌ی هر سرور را بنویس (یا برچسب + دامنه‌ی DNS) و به همان سرور وصل کن. خود سرویس DNS روی پورت ۸۰ جواب Let's Encrypt را می‌دهد، پس DNS قطع نمی‌شود. وضعیت SSL هر سرور روی کارت خودش است.",
+ "Nothing yet":"هنوز چیزی نیست",
+ "Nothing yet: queries show up here a few seconds after a subscriber uses DNS (DNS servers must run v3.5.8 or newer).":"هنوز چیزی نیست: چند ثانیه بعد از اینکه مشتری از DNS استفاده کند اینجا می‌آید (سرورهای DNS باید نسخه‌ی ۳.۵.۸ یا جدیدتر باشند).",
+ "Notifications":"اعلان‌ها",
+ "Now":"الان",
+ "OK":"تأیید",
+ "Obfuscated WireGuard":"WireGuard مبهم",
+ "Obfuscation":"مبهم‌سازی",
+ "Obfuscation (Salamander)":"مبهم‌سازی (Salamander)",
+ "Obfuscation password":"رمز مبهم‌سازی",
+ "Obfuscation profile":"پروفایل مبهم‌سازی",
+ "Occasion greeting":"تبریک مناسبت",
+ "Off":"خاموش",
+ "Off = only for routing (recommended)":"خاموش = فقط برای مسیریابی (پیشنهادی)",
+ "Off for all users":"خاموش برای همه‌ی کاربران",
+ "Off on this server":"روی این سرور خاموش",
+ "Off when you manage the A record yourself (for example behind a CDN)":"اگر رکورد A را خودت مدیریت می‌کنی (مثلاً پشت CDN) خاموش کن",
+ "Off: DNS stops on every server and leaves the subscriptions":"خاموش: DNS روی همه‌ی سرورها می‌ایستد و از ساب‌ها حذف می‌شود",
+ "Off: Xray stops on every server and the links leave the subscriptions":"خاموش: Xray روی همه‌ی سرورها می‌ایستد و لینک‌ها از ساب‌ها حذف می‌شوند",
+ "Off: exactly like the tunnels (game UDP inside the stream). On: game packets as datagrams of their own, small ones sent several times.":"خاموش: دقیقاً مثل تانل‌ها (UDP بازی داخل همان جریان). روشن: بسته‌های بازی دیتاگرام جدا و بسته‌های کوچک چند بار.",
+ "Offline":"آفلاین",
+ "Oldest":"قدیمی‌ترین",
+ "On":"روشن",
+ "On filtered networks WSS and WS usually pass; plain TCP, TCP Mux, QUIC and KCP are often cut. Use “Find the best transport” to test them between these two servers.":"در شبکه‌های فیلترشده معمولاً WSS و WS رد می‌شوند و TCP، TCP Mux، QUIC و KCP اغلب قطع‌اند. با «پیدا کردن بهترین روش» همه را بین همین دو سرور تست کن.",
+ "On for all users":"روشن برای همه‌ی کاربران",
+ "On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور ایران (ورودی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور ایران باز کن.",
+ "On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور خارج (خروجی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور خروجی باز کن.",
+ "One click applies it in making or editing a tunnel":"با یک کلیک در ساخت یا ویرایش تانل اعمال می‌شود",
+ "One per line; their subdomains are routed too":"هر خط یکی؛ زیردامنه‌هایشان هم مسیردهی می‌شوند",
+ "One plain link":"یک اتصال ساده",
+ "One tunnel entry cannot carry the same port to two servers. Fix moves the later server to a free port; tunnels that carry the old port follow.":"یک سرور ورودی (ایران) نمی‌تواند یک پورت را به دو سرور تانل کند. «رفع» سرور بعدی را به پورت آزاد می‌برد و تانل‌هایی که پورت قبلی را می‌برند هم خودکار درست می‌شوند.",
+ "One-click inbounds with the methods that resist DPI: REALITY, WS/gRPC behind a CDN, Shadowsocks 2022 — plus the server-link transports":"اینباند یک‌کلیکی با روش‌های مقاوم در برابر DPI: REALITY، WS/gRPC پشت CDN، Shadowsocks 2022 — به‌همراه انتقال‌های سرور‌به‌سرور",
+ "Online":"آنلاین",
+ "Online clients":"کلاینت‌های آنلاین",
+ "Online now":"آنلاین الان",
+ "Online payments":"درگاه‌های پرداخت آنلاین",
+ "Only GRE passes to this server":"فقط GRE به این سرور رد می‌شود",
+ "Only Jc/Jmin/Jmax/S1/S2/H1-H4, for old AmneziaWG apps.":"فقط Jc/Jmin/Jmax/S1/S2/H1-H4؛ برای اپ‌های قدیمی AmneziaWG.",
+ "Only connections for the name above are answered":"فقط به اتصال‌های همین اسم جواب داده می‌شود",
+ "Only for KANKI MIX (optional)":"فقط برای KANKI MIX (اختیاری)",
+ "Only for these users":"فقط برای این کاربرها",
+ "Only for these users (empty = everyone)":"فقط برای این کاربرها (خالی = همه)",
+ "Only from these inbounds":"فقط از این اینباندها",
+ "Only packets up to 400 bytes (PUBG: 40-300 bytes) are copied; downloads are sent once. Through 15% loss each way: 1 copy 72%, 2 copies 96%, 3 copies 99.8% of round trips arrive.":"فقط بسته‌های تا ۴۰۰ بایت (پابجی: ۴۰ تا ۳۰۰ بایت) چندتایی می‌روند؛ دانلودها یک بار. با ۱۵٪ لاس در هر طرف: ۱ نسخه ۷۲٪، ۲ نسخه ۹۶٪، ۳ نسخه ۹۹٫۸٪ رفت‌وبرگشت‌ها می‌رسند.",
+ "Only restart is allowed for this service":"این سرویس فقط ری‌استارت می‌شود",
+ "Only the transport can reach it; scanners cannot probe the port.":"فقط ترنسپورت به آن می‌رسد؛ اسکنرها نمی‌توانند پورت را کاوش کنند.",
+ "Only these users (empty = everyone with Xray)":"فقط این کاربرها (خالی = همه‌ی دارندگان Xray)",
+ "Only when nginx / HAProxy in front sends it":"فقط وقتی nginx / HAProxy جلوی سرور آن را می‌فرستد",
+ "Open":"باز کردن",
+ "Open page":"باز کردن صفحه",
+ "Open ports that nothing uses":"پورت‌های بازی که هیچ‌چیز از آن‌ها استفاده نمی‌کند",
+ "Open the tunnels":"باز کردن تانل‌ها",
+ "Open this port on":"این پورت را باز کن روی",
+ "Opened earlier for something that was deleted, or by hand. SSH is never closed.":"قبلاً برای چیزی که حذف شده یا دستی باز شده‌اند. پورت SSH هیچ‌وقت بسته نمی‌شود.",
+ "Optional, created if empty":"خالی بماند: خودکار USER1، USER2 و…",
+ "Other":"بدون دسته",
+ "Other sites answered by":"جواب سایت‌های دیگر از",
+ "Our own protocol on every VPN server: game packets go straight (no queue, sent twice in gaming mode), websites over KCP + FEC.":"پروتکل خودمان روی همه‌ی سرورهای VPN: بسته‌های بازی مستقیم می‌روند (بدون صف، در حالت گیمینگ دوتایی)، سایت‌ها روی KCP + FEC.",
+ "Our own protocol: games, low ping":"پروتکل خودمان: بازی، پینگ کم",
+ "Our own protocols on the nodes":"پروتکل‌های خودمان روی نودها",
+ "Outbounds":"خروجی‌ها (اوت‌باند)",
+ "Over KCP (UDP), good on weak/lossy internet":"روی KCP (UDP)، مناسب اینترنت ضعیف و پرافت",
+ "Over QUIC (UDP), fast and encrypted":"روی QUIC (UDP)، سریع و رمزنگاری‌شده",
+ "Over TCP (steady)":"روی TCP (پایدار)",
+ "Over UDP":"روی UDP",
+ "Over UDP (fast, games)":"روی UDP (سریع، بازی)",
+ "Overview":"نمای کلی",
+ "PUBG Mobile through Kanki DNS":"پابجی موبایل با DNS کانکی",
+ "PUBG and games":"پابجی و بازی‌ها",
+ "PUBG names your users asked":"نام‌های پابجی که کاربرهایت پرسیده‌اند",
+ "PUBG on PC (Krafton)":"پابجی کامپیوتر (Krafton)",
+ "Padding (bytes)":"پدینگ (بایت)",
+ "Page":"صفحه",
+ "Panel":"پنل",
+ "Panel (HTTPS)":"پنل (HTTPS)",
+ "Panel (internal)":"پنل (داخلی)",
+ "Panel / API":"پنل / API",
+ "Panel address":"آدرس پنل",
+ "Panel address, the public VPN address and subscription links":"آدرس پنل، آدرس عمومی VPN و لینک‌های اشتراک",
+ "Panel and VPN services on this server":"پنل و سرویس‌های VPN همین سرور",
+ "Panel backup passphrase (needed to restore)":"رمز بکاپ پنل (برای ریستور لازم است)",
+ "Panel color":"رنگ پنل",
+ "Panel is restarting…":"پنل در حال ری‌استارت…",
+ "Panel name":"نام پنل",
+ "Panel server":"سرور پنل",
+ "Parts of PUBG Mobile":"بخش‌های پابجی موبایل",
+ "Passes through":"از این رد می‌شود",
+ "Passphrase (min 6)":"Passphrase (حداقل ۶)",
+ "Password":"رمز",
+ "Password, 2FA, sessions":"رمز، تأیید دومرحله‌ای، نشست‌ها",
+ "Paste (PEM)":"چسباندن (PEM)",
+ "Paste a certificate instead (optional)":"به‌جایش گواهی دستی بگذار (اختیاری)",
+ "Paste a certificate you already have.":"گواهی‌ای که داری را بچسبان.",
+ "Paste a new key to replace it":"برای عوض کردن، کلید جدید را بچسبان",
+ "Paste the certificate first":"اول گواهی را بچسبان",
+ "Path":"مسیر (path)",
+ "Path of the traffic":"مسیر ترافیک",
+ "Pause":"توقف",
+ "Paused":"متوقف",
+ "Peak":"پیک",
+ "Phone type":"نوع گوشی",
+ "Pick a backup file; if encrypted, enter its passphrase.":"فایل بکاپ را انتخاب کن؛ اگر رمز دارد وارد کن.",
+ "Pick a method: the inbound editor opens with the right settings filled in. Then press Save — the panel makes keys, certificates and user links by itself.":"یک روش را انتخاب کن: ویرایشگر اینباند با تنظیمات درست باز می‌شود. بعد ذخیره را بزن — پنل خودش کلیدها، گواهی‌ها و لینک کاربران را می‌سازد.",
+ "Pick a settings file exported from a Kanki panel. Only known settings are taken; users, nodes and keys are not touched.":"فایل تنظیماتی که از یک پنل کانکی گرفته‌ای را انتخاب کن. فقط تنظیمات شناخته‌شده خوانده می‌شوند؛ به کاربرها، نودها و کلیدها دست نمی‌خورد.",
+ "Pick at least one method":"حداقل یک روش را انتخاب کن",
+ "Pick at least three servers: the first, one in the middle and the last":"حداقل سه سرور انتخاب کن: اولی، یکی وسط و آخری",
+ "Pick every server":"همه‌ی سرورها را انتخاب کن",
+ "Pick one: it changes only the PUBG Mobile names below.":"یکی را انتخاب کن: فقط نام‌های پابجی موبایل پایین عوض می‌شوند.",
+ "Ping":"پینگ",
+ "Plain HTTP looks filtered: WSS passes but WebSocket does not":"HTTP ساده احتمالاً فیلتر شده: WSS رد می‌شود ولی WebSocket نه",
+ "Plain WireGuard on every VPN server. Inside Iran it works only through a tunnel.":"WireGuard ساده روی همه‌ی سرورهای VPN. داخل ایران فقط از راه تانل کار می‌کند.",
+ "Plain and fast":"ساده و سریع",
+ "Plan name":"نام پلن",
+ "Planned ports":"پورت‌های رزرو شده",
+ "Plans":"پلن‌ها",
+ "Plans, payments, Telegram":"پلن‌ها، پرداخت، تلگرام",
+ "Plans, prices and payments can also be managed inside the bot (Admin panel button).":"پلن‌ها، قیمت‌ها و پرداخت‌ها را داخل خود ربات هم می‌شود مدیریت کرد (دکمه پنل ادمین).",
+ "Point it at":"به این آی‌پی اشاره کند",
+ "Point the domain at the server":"وصل کردن دامنه به سرور",
+ "Point the panel's domain to the new server's IP":"دامنه‌ی پنل را روی آی‌پی سرور جدید بگذار",
+ "Points at this server":"درست است",
+ "Points elsewhere":"به سرور دیگری اشاره می‌کند",
+ "Port":"پورت",
+ "Port 80 busy: the error names the program. A Kanki tunnel that forwards port 80 holds it: take 80 out of that tunnel. Caddy / nginx are set aside by themselves for a few seconds.":"پورت ۸۰ پر: اسم برنامه در خطا هست. اگر یک تانل کانکی پورت ۸۰ را عبور می‌دهد، پورت دست خود اوست: ۸۰ را از آن تانل بردار. Caddy / nginx خودشان چند ثانیه کنار می‌روند.",
+ "Port clash":"تداخل پورت",
+ "Port conflict: another service on this server uses the same port":"تداخل پورت: سرویس دیگری روی همین سرور همین پورت را دارد",
+ "Port hopping during the connection (a new port every few minutes)":"پورت‌هاپینگ وسط اتصال (هر چند دقیقه پورت تازه)",
+ "Port management":"مدیریت پورت‌ها",
+ "Port of this server":"پورت این سرور",
+ "Ports":"پورت‌ها",
+ "Ports 53, 80, 443 and 853 must be free on this server: give DNS its own server.":"پورت‌های ۵۳، ۸۰، ۴۴۳ و ۸۵۳ روی این سرور باید آزاد باشند: برای DNS سرور جدا بگذار.",
+ "Ports and protocols of this server are in VPN services.":"پورت‌ها و پروتکل‌های این سرور در «سرویس‌های VPN» است.",
+ "Ports given to this server (no other server uses them)":"پورت‌هایی که به این سرور داده شد (هیچ سرور دیگری از آن‌ها استفاده نمی‌کند)",
+ "Ports moved":"پورت‌ها جابه‌جا شدند",
+ "Ports of":"پورت‌های",
+ "Ports of the exit server":"پورت‌های سرور خروجی",
+ "Ports of the panel server were filled in":"پورت‌های سرور پنل وارد شد",
+ "Ports taken by another program":"پورت‌هایی که برنامه‌ی دیگری گرفته",
+ "Ports through the tunnel":"پورت‌ها از راه تانل",
+ "Ports to carry":"پورت‌هایی که از مسیر رد می‌شوند",
+ "Ports used on the main server and on every node":"پورت‌های سرور اصلی و همه نودها",
+ "Post every (hours)":"هر چند ساعت یک پست",
+ "Post preview":"پیش‌نمایش پست",
+ "Post types":"نوع پست‌ها",
+ "Posting times (Iran time)":"ساعت‌های انتشار (به وقت ایران)",
+ "Posts are written by Grok from your real plans, prices and codes, in the tone you describe. When Grok does not answer (it is tried again, and another model is tried), the built-in writer posts instead.":"پست‌ها را هوش مصنوعی (Groq یا Grok) از روی پلن‌ها، قیمت‌ها و کدهای واقعی‌ات با لحنی که می‌نویسی می‌نویسد. اگر جواب ندهد (چند بار دوباره امتحان می‌شود و مدل دیگری هم امتحان می‌شود)، نویسنده‌ی داخلی پست را می‌گذارد.",
+ "Posts are written by the AI from your real plans, prices and codes, in the tone you describe. When it does not answer (it is tried again, and another model is tried), the built-in writer posts instead.":"پست‌ها را هوش مصنوعی از روی پلن‌ها، قیمت‌ها و کدهای واقعی و با لحنی که می‌گویی می‌نویسد. اگر جواب ندهد (دوباره تلاش می‌شود و مدل دیگری امتحان می‌شود)، نویسنده‌ی داخلی پنل پست می‌گذارد.",
+ "Posts sent":"پست‌های ارسال‌شده",
+ "Press Create bot and paste both.":"«ساخت ربات» را بزن و هر دو را وارد کن.",
+ "Press Save routing to apply":"برای اعمال، «ذخیره‌ی روتینگ» را بزن",
+ "Press Update agent to see CPU, RAM and disk of this node":"برای دیدن CPU، رم و دیسک این نود «آپدیت Agent» را بزن",
+ "Press a service to open its settings":"روی هر سرویس بزن تا تنظیمات و تعمیرش باز شود",
+ "Prev":"قبلی",
+ "Price (Toman)":"قیمت (تومان)",
+ "Price (USD)":"قیمت (دلار)",
+ "Price list":"لیست قیمت",
+ "Price per GB (Toman)":"قیمت هر گیگ (تومان)",
+ "Private DNS for sanctioned sites":"DNS اختصاصی برای سایت‌های تحریمی",
+ "Private key":"کلید خصوصی",
+ "Private key (PKCS#8 PEM)":"کلید خصوصی (PEM)",
+ "Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct":"DNS هوشمند اختصاصی مشتری‌ها: سرویس‌های تحریمی از سرورهای شما رد می‌شوند و بقیه مستقیم",
+ "Problem":"مشکل دارد",
+ "Profile":"پروفایل",
+ "Protocol":"پروتکل",
+ "Protocol access":"دسترسی پروتکل‌ها",
+ "Protocols":"پروتکل‌ها",
+ "Provider":"سرویس DNS دامنه",
+ "Public IP of this server":"آی‌پی عمومی این سرور",
+ "Public VPN host or IP":"هاست یا IP عمومی VPN",
+ "Public endpoint":"Endpoint عمومی",
+ "Public host used inside user configs.":"Public Host داخل کانفیگ‌های کاربر استفاده می‌شود.",
+ "Public key":"کلید عمومی",
+ "Publish now":"انتشار الان",
+ "Published":"منتشر شد",
+ "Purple · day":"بنفش · روز",
+ "Purple · night":"بنفش · شب",
+ "Put it on a “Download the app” button: the bot opens straight on the download menu.":"این لینک را روی دکمه‌ی «دانلود اپ» کانال بگذار: ربات مستقیم روی منوی دانلود باز می‌شود.",
+ "Q&A":"پرسش و پاسخ",
+ "QUIC under a random mask: no QUIC signature, packet sizes hidden":"QUIC زیر یک ماسک تصادفی: بدون امضای QUIC و با اندازهٔ بستهٔ پنهان",
+ "QUIC · lossy internet":"QUIC · اینترنت پرافت",
+ "QUIC-based with Salamander obfuscation: brutal congestion control keeps speed even with loss. In the tunnel wizard pick “Hysteria2” — the panel makes password, certificate and fingerprint pinning itself.":"مبتنی بر QUIC با مبهم‌سازی Salamander: کنترل ازدحام brutal سرعت را حتی با لاست نگه می‌دارد. در ویزارد تانل «Hysteria2» را انتخاب کن — پنل خودش رمز، گواهی و پین اثرانگشت را می‌سازد.",
+ "QUIC-based, fast on lossy internet, with Salamander obfuscation.":"بر پایه‌ی QUIC، سریع روی اینترنت پرافت، با مبهم‌سازی Salamander.",
+ "Queries":"درخواست‌ها",
+ "Query log":"لاگ درخواست‌ها",
+ "Question for the audience":"سؤال از مخاطب",
+ "Quick actions":"کارهای سریع",
+ "Quick add days":"افزودن روز سریع",
+ "Quick add volume":"افزودن حجم سریع",
+ "Quick setup":"ساخت سریع",
+ "Quota of limited users":"مجموع سهمیه کاربران محدود",
+ "RAM":"RAM",
+ "RAM is almost full":"رم تقریباً پر است",
+ "RAM is getting full":"رم دارد پر می‌شود",
+ "REALITY with the XHTTP transport: requests are split and padded, so traffic volume and timing look like ordinary web downloads. Survives traffic-shape analysis better than raw TCP.":"REALITY با انتقال XHTTP: درخواست‌ها تکه‌تکه و پد می‌شوند تا حجم و زمان‌بندی ترافیک شبیه دانلودهای معمولی وب به نظر برسد. در برابر تحلیل شکل ترافیک بهتر از TCP خام دوام می‌آورد.",
+ "Random free port":"پورت آزاد تصادفی",
+ "Raw ping":"پینگ خام",
+ "Raw ping (no tunnel)":"پینگ خام (بدون تانل)",
+ "Reaches this server through":"از این مسیر به این سرور می‌رسد",
+ "Read the site name from the traffic (needed for domain rules)":"اسم سایت را از ترافیک بخوان (برای قانون‌های دامنه لازم است)",
+ "Ready values for the “New user” form":"مقدارهای آماده‌ی فرم «کاربر جدید»",
+ "Ready-made rules":"قانون‌های آماده",
+ "Recommended":"پیشنهادی",
+ "Reconnect":"اتصال دوباره",
+ "Reconnect all":"اتصال دوباره‌ی همه",
+ "Reconnecting…":"در حال اتصال مجدد…",
+ "Referral gift GB":"هدیه دعوت (GB)",
+ "Referral gift days":"هدیه دعوت (روز)",
+ "Referral reward":"هدیه دعوت دوستان",
+ "Refresh":"بروزرسانی",
+ "Refuse unknown SNI":"رد SNI ناشناس",
+ "Refused (not a subscriber)":"رد شده (غیر مشتری)",
+ "Regenerate":"ساخت دوباره",
+ "Registered addresses and use":"IPهای ثبت‌شده و مصرف",
+ "Relay (Iran)":"ریلی (ایران)",
+ "Relay (inside Iran)":"ریلی (داخل ایران)",
+ "Releases of this repository are used for updates, for “Update all” and for new tunnel servers.":"Releaseهای همین مخزن برای آپدیت پنل، «آپدیت همه» و نصب سرورهای تانل استفاده می‌شود.",
+ "Remark":"نام",
+ "Remove":"حذف",
+ "Remove KANKI MIX from every user?":"KANKI MIX از همه‌ی کاربران برداشته شود؟",
+ "Remove Xray from this server":"حذف Xray از این سرور",
+ "Remove from DNS":"حذف از DNS",
+ "Remove from all users":"حذف از همه‌ی کاربران",
+ "Remove from every user?":"از همه‌ی کاربران برداشته شود؟",
+ "Remove from this server":"حذف از این سرور",
+ "Remove it (back to certbot)":"حذفش کن (برگشت به certbot)",
+ "Remove it from this server? The server stops it and frees its ports.":"از این سرور حذف شود؟ سرور آن را متوقف می‌کند و پورت‌هایش آزاد می‌شود.",
+ "Remove now":"همین الان پاک کن",
+ "Remove the certificate (use HTTP)":"حذف گواهی (استفاده از HTTP)",
+ "Remove the key":"حذف کلید",
+ "Remove this node from ALL users?":"این نود از همه کاربران حذف شود؟",
+ "Remove this server from all users":"حذف این سرور از همه‌ی کاربران",
+ "Remove this server from the panel? Within a few seconds it removes everything Kanki installed there (tunnels, Kanki DNS, Xray, emergency chat, subscription link), closes the ports Kanki opened and uninstalls its agent.":"این سرور از پنل حذف شود؟ تا چند ثانیه‌ی دیگر هر چه کانکی رویش نصب کرده (تانل‌ها، DNS کانکی، Xray، چت اضطراری، لینک اشتراک) پاک می‌شود، پورت‌هایی که کانکی باز کرده بسته می‌شود و ایجنتش حذف می‌شود.",
+ "Remove this stop":"حذف این ایستگاه",
+ "Removed":"حذف شد",
+ "Removes old logs, expired sessions and abandoned unpaid orders, then compacts the file. Users and plans are not touched.":"لاگ‌های قدیمی، نشست‌های منقضی و سفارش‌های پرداخت‌نشده‌ی رهاشده را پاک و فایل را فشرده می‌کند. به کاربران و پلن‌ها دست نمی‌زند.",
+ "Removing…":"در حال حذف…",
+ "Rename category":"تغییر نام دسته",
+ "Repair":"تعمیر",
+ "Repair agent":"تعمیر Agent",
+ "Repair sent: the server has not reported for a while, it is repaired as soon as it is back":"تعمیر فرستاده شد: سرور مدتی است گزارش نداده؛ به محض برگشتن تعمیر می‌شود",
+ "Repair sent: the server restarts it within a few seconds":"تعمیر فرستاده شد: سرور تا چند ثانیه‌ی دیگر سرویس را دوباره راه می‌اندازد",
+ "Replace all plans":"جایگزینی همه‌ی پلن‌ها",
+ "Replace the current settings with the file?":"تنظیمات فعلی با فایل جایگزین شود؟",
+ "Replace the message":"جایگزین کردن پیام",
+ "Replaces TUIC for users: same family (QUIC, UDP, 0-RTT). For a user-facing Hysteria2 service use the Kanki VPN page.":"جایگزین TUIC برای کاربران: همان خانواده (QUIC، UDP، ‏0-RTT). برای سرویس Hysteria2 روبه‌کاربر از صفحهٔ Kanki VPN استفاده کن.",
+ "Reports":"گزارش",
+ "Required channel":"کانال اجباری",
+ "Required channel (empty = none)":"کانال اجباری (خالی = ندارد)",
+ "Reset":"صفر کردن",
+ "Reset the traffic of this inbound to zero?":"ترافیک این اینباند صفر شود؟",
+ "Reset traffic":"ریست ترافیک",
+ "Restart":"ری‌استارت",
+ "Restart VPN services":"ری‌استارت سرویس‌های VPN",
+ "Restore":"ریستور",
+ "Restore backup":"ریستور بکاپ",
+ "Restore done, panel is restarting…":"ریستور انجام شد، پنل در حال ری‌استارت است…",
+ "Restored":"بازگردانی شد",
+ "Restricted":"محدود",
+ "Resume":"ادامه",
+ "Revoke":"باطل کردن",
+ "Reward days":"روزهای هدیه",
+ "Reward volume (GB)":"حجم هدیه (گیگ)",
+ "Rose":"صورتی",
+ "Rotating":"چرخشی",
+ "Rotating tunnel":"تانل چرخشی",
+ "Round to":"گرد کردن به",
+ "Route":"مسیر",
+ "Route name":"اسم مسیر",
+ "Route saved":"مسیر ذخیره شد",
+ "Routed names asked for most since the DNS services started":"دامنه‌هایی که از شروع سرویس DNS بیشتر از همه پرسیده شده‌اند",
+ "Routed only":"فقط مسیردهی‌شده",
+ "Routing and outbounds":"روتینگ و خروجی‌ها",
+ "Routing rules":"قانون‌های مسیریابی",
+ "Routing through the link":"مسیریابی از داخل لینک",
+ "Rule":"قانون",
+ "Run one command on the new server (Ubuntu / Debian, as root). It installs only what a node needs and joins this panel by itself.":"روی سرور جدید (اوبونتو / دبیان، با کاربر root) فقط یک دستور بزن. فقط چیزهایی که نود لازم دارد نصب می‌شود و خودش به این پنل وصل می‌شود.",
+ "Run this on the new server":"این را روی سرور جدید اجرا کن",
+ "Run this on the new server (Ubuntu / Debian, as root)":"این را روی سرور جدید اجرا کن (اوبونتو / دبیان، با root)",
+ "Run this on the new server, as root (Ubuntu / Debian)":"این را روی سرور جدید اجرا کن، با root (اوبونتو / دبیان)",
+ "Run this on the server, as root (Ubuntu / Debian)":"این را روی سرور با کاربر root اجرا کن (اوبونتو / دبیان)",
+ "Running":"در حال اجرا",
+ "Running servers":"سرورهای فعال",
+ "Runs inside the panel":"داخل خود پنل اجرا می‌شود",
+ "SNI":"SNI",
+ "SNI (TLS name)":"SNI (اسم TLS)",
+ "SNI (name)":"SNI (اسم)",
+ "SNI names (TLS hello)":"اسم‌های SNI (داخل دست‌دادن TLS)",
+ "SNI names (comma separated, empty = same as Host)":"نام‌های SNI (با ویرگول؛ خالی = همان Host)",
+ "SNI spoof":"SNI اسپوف",
+ "SNI spoof / Host (wss, quic, ws)":"جعل SNI / Host (wss، quic، ws)",
+ "SNI spoof: the TLS hello shows another site name. It only helps when the filter decides by name; it does nothing if the IP is blocked.":"SNI اسپوف: در دست‌دادن TLS اسم یک سایت دیگر نشان داده می‌شود. فقط وقتی کمک می‌کند که فیلتر بر اساس اسم تصمیم بگیرد؛ اگر خود آی‌پی بسته باشد اثری ندارد.",
+ "SSL (port 80)":"SSL (پورت ۸۰)",
+ "SSL certificate (optional, recommended)":"گواهی SSL (اختیاری، پیشنهادی)",
+ "SSL from the CDN (ArvanCloud)":"SSL از CDN (ابرآروان)",
+ "Sales & support":"فروش و پشتیبانی",
+ "Sales bot":"ربات فروش",
+ "Sales enabled":"فروش فعال باشد",
+ "Sales on":"فروش فعال",
+ "Sales panels are added from inside Telegram":"پنل‌های فروش از داخل تلگرام اضافه می‌شوند",
+ "Sales settings":"تنظیمات فروش",
+ "Same as Kanki DNS":"همان DNS کانکی",
+ "Same fronting idea over HTTP/2 gRPC: many streams inside long-lived HTTP/2 connections, which matches API traffic patterns. Needs a CDN that passes gRPC to the origin over HTTPS (ArvanCloud and Cloudflare do); the server uses its own certificate.":"همان ایدهٔ فرانتینگ روی gRPC با HTTP/2: استریم‌های زیاد داخل اتصال‌های HTTP/2 طولانی، شبیه الگوی ترافیک API. به CDN‌ای نیاز دارد که gRPC را با HTTPS به مبدأ برساند (ابرآروان و Cloudflare می‌رسانند)؛ سرور از گواهی خودش استفاده می‌کند.",
+ "Save":"ذخیره",
+ "Save & apply":"ذخیره و اعمال",
+ "Save and restore everything":"ذخیره و بازگردانی همه چیز",
+ "Save changes":"ذخیره تغییرات",
+ "Save it as the file below in /etc/amnezia/amneziawg/ and run awg-quick up. It holds a private key: do not share it.":"با همین نام فایل در /etc/amnezia/amneziawg/ ذخیره کن و awg-quick up بزن. کلید خصوصی دارد؛ جایی منتشرش نکن.",
+ "Save port":"ذخیره‌ی پورت",
+ "Save routing":"ذخیره‌ی روتینگ",
+ "Save sales settings":"ذخیره تنظیمات فروش",
+ "Save security policy":"ذخیره سیاست امنیت",
+ "Save services":"ذخیره سرویس‌ها",
+ "Save settings":"ذخیره تنظیمات",
+ "Save the route":"ذخیره‌ی مسیر",
+ "Saved":"ذخیره شد",
+ "Saved at once. Shown in the header, the menu, the login page and the subscription page.":"همان لحظه ذخیره می‌شود. در بالای پنل، منو، صفحه‌ی ورود و صفحه‌ی اشتراک دیده می‌شود.",
+ "Saved: getting SSL (about a minute)":"ذخیره شد: در حال گرفتن SSL (حدود یک دقیقه)",
+ "Saved: the DNS servers use it within a few seconds":"ذخیره شد: سرورهای DNS تا چند ثانیه‌ی دیگر از آن استفاده می‌کنند",
+ "Saved: the server sets it up in a few seconds":"ذخیره شد: سرور تا چند ثانیه‌ی دیگر راه‌اندازی‌اش می‌کند",
+ "Saved: the service restarts on the new port":"ذخیره شد: سرویس روی پورت جدید ری‌استارت می‌شود",
+ "Saved: the tunnel restarts with the new settings":"ذخیره شد: تانل با تنظیمات جدید دوباره وصل می‌شود",
+ "Saving…":"در حال ذخیره…",
+ "Scan with your authenticator app, then enter the 6-digit code":"با برنامه احراز هویت اسکن کن و کد ۶ رقمی را وارد کن",
+ "Scopes":"دسترسی‌ها",
+ "Score":"امتیاز",
+ "Scores follow your profile (gaming, balanced, ultra speed)":"نمره‌ها بر اساس پروفایل شما (گیمینگ، متعادل، اولترا اسپید) حساب می‌شوند",
+ "Search":"جستجو",
+ "Search by name or note…":"جستجو بر اساس نام یا یادداشت…",
+ "Search services or domains":"جستجوی سرویس یا دامنه",
+ "Second config through the tunnel":"کانفیگ دوم از راه تانل",
+ "Security":"امنیت",
+ "Select":"انتخاب",
+ "Select all":"انتخاب همه",
+ "Self-signed certificate (no domain on node)":"گواهی خودامضا (نود بدون دامنه)",
+ "Self-signed certificate (no domain on the server)":"گواهی خودامضا (بدون دامنه روی سرور)",
+ "Send backup now":"ارسال بکاپ الان",
+ "Send every packet twice":"هر بسته دو بار فرستاده شود",
+ "Send to":"بفرست به",
+ "Send to the app":"ارسال به اپ",
+ "Sent":"ارسال شد",
+ "Sent: the server closes them on its next report (a few seconds)":"فرستاده شد: سرور در گزارش بعدی (چند ثانیه) آن‌ها را می‌بندد",
+ "Sent: the server frees the ports on its next report (a few seconds)":"فرستاده شد: سرور در گزارش بعدی (چند ثانیه) پورت‌ها را آزاد می‌کند",
+ "Sent: the server tries SSL again within a minute":"فرستاده شد: سرور تا یک دقیقه‌ی دیگر دوباره SSL می‌گیرد",
+ "Separate backup bot (optional)":"ربات جدا برای بکاپ (اختیاری)",
+ "Separate subscription domain":"دامنه‌ی جدا برای لینک ساب",
+ "Serve VPN users on this server":"به کاربران VPN از این سرور سرویس بده",
+ "Serve the subscription from an Iran server":"لینک ساب روی سرور ایران",
+ "Serve users once installed":"بعد از نصب به کاربران سرویس بده",
+ "Server":"سرور",
+ "Server agent connected":"ایجنت سرور وصل شد",
+ "Server alerts":"هشدار سرورها",
+ "Server inside Iran":"سرور داخل ایران",
+ "Server name":"نام سرور",
+ "Server names":"نام‌های سرور",
+ "Server resources":"منابع سرور",
+ "Server settings":"تنظیمات سرور",
+ "Server-to-server transports":"انتقال‌های سرور‌به‌سرور",
+ "Servers":"سرورها",
+ "Servers & network":"سرورها و شبکه",
+ "Servers online":"سرورهای آنلاین",
+ "Servers that only carry tunnels get a small agent: no VPN is installed on them":"روی سرورهایی که فقط تانل دارند یک عامل کوچک نصب می‌شود؛ هیچ VPN نصب نمی‌شود",
+ "Service":"سرویس",
+ "Service name":"نام سرویس",
+ "Service stopped":"سرویس خاموش است",
+ "Services":"سرویس‌ها",
+ "Services of this user":"سرویس‌های این کاربر",
+ "Session lifetime (hours)":"عمر Session (ساعت)",
+ "Set records and get the certificate now":"الان رکوردها را بساز و گواهی بگیر",
+ "Set the price rules once; every plan gets a fair price automatically.":"قوانین قیمت را یک‌بار تعیین کن؛ هر پلن خودکار قیمت منصفانه می‌گیرد.",
+ "Set the update source (GitHub repo) in Settings first, or replace USER/REPO in the command.":"اول منبع آپدیت (مخزن گیت‌هاب) را در تنظیمات بگذار، یا USER/REPO را در دستور عوض کن.",
+ "Set up SSL and use it":"گرفتن SSL و استفاده",
+ "Settings":"تنظیمات",
+ "Settings and SSL":"تنظیمات و SSL",
+ "Settings are filled in: check the port and press Save":"تنظیمات پر شد: پورت را چک کن و ذخیره را بزن",
+ "Several names, comma separated: every link uses another one and a link that fails moves to the next. Empty = the server address.":"چند اسم با کاما: هر اتصال یکی را برمی‌دارد و اتصالی که قطع شود سراغ بعدی می‌رود. خالی = آدرس خود سرور.",
+ "Several servers in one link, automatic switch when one is blocked":"چند سرور در یک لینک، تعویض خودکار وقتی یکی بسته شد",
+ "Shadowsocks has no TLS or REALITY: its own encryption is enough.":"Shadowsocks نیازی به TLS یا REALITY ندارد: رمزنگاری خودش کافی است.",
+ "Short IDs":"Short ID ها",
+ "Short punch":"جمله‌ی کوتاه و جذاب",
+ "Show":"نمایش",
+ "Show all":"نمایش همه",
+ "Show command":"نمایش دستور",
+ "Show for":"مدت نمایش",
+ "Show the config of the entry":"نمایش کانفیگ ورودی",
+ "Show the config of the exit":"نمایش کانفیگ خروجی",
+ "Show the last result":"نمایش نتیجه‌ی قبلی",
+ "Showing in the app":"در حال نمایش در اپ",
+ "Shown in the bot":"در ربات نمایش داده می‌شود",
+ "Shown in the header, the side menu, the login page and the subscription page.":"در هدر، منو، صفحه ورود و صفحه اشتراک نمایش داده می‌شود.",
+ "Shown in the menu, the browser tab and the login page.":"در منو، تب مرورگر و صفحه‌ی ورود نشان داده می‌شود.",
+ "Side menu":"منوی کنار",
+ "Sign in to continue":"برای ادامه وارد شو",
+ "Signature (empty = bot link)":"امضا (خالی = لینک ربات)",
+ "Signing key":"کلید امضا",
+ "Site shown to strangers (without obfuscation)":"سایتی که به غریبه‌ها نشان داده می‌شود (بدون مبهم‌سازی)",
+ "Smart DNS abroad":"DNS هوشمند در خارج",
+ "Smart channel":"کانال هوشمند",
+ "Smart choice":"انتخاب هوشمند",
+ "Smart plan builder":"سازنده‌ی پلن هوشمند",
+ "Smart tunnel":"تانل هوشمند",
+ "Sniffed protocol":"پروتکل تشخیص‌داده‌شده",
+ "Sniffing":"Sniffing",
+ "Soft light":"روشن ملایم",
+ "Some users are not on this server yet (config mismatch): press Sync":"بعضی کاربرها هنوز روی این سرور نیستند (اختلاف کانفیگ): همگام‌سازی را بزن",
+ "Sort":"مرتب‌سازی",
+ "Speed limit per user":"محدودیت سرعت برای هر کاربر",
+ "Split the TLS hello into tiny pieces":"تکه‌تکه کردن TLS hello",
+ "Start":"روشن",
+ "Start the campaign":"شروع کمپین",
+ "Start the test":"شروع تست",
+ "Start, stop or restart the VPN services":"سرویس‌های VPN را روشن، خاموش یا ری‌استارت کن",
+ "Starting…":"در حال شروع…",
+ "Status":"وضعیت",
+ "Status of the DNS servers":"وضعیت سرورهای DNS",
+ "Steady, works almost everywhere":"پایدار، تقریباً همه‌جا",
+ "Stop":"ایستگاه",
+ "Stop and turn off __U__ on this server? Then __S__ takes its ports.":"__U__ روی این سرور خاموش و غیرفعال شود؟ بعد __S__ پورت‌هایش را می‌گیرد.",
+ "Stop the test":"توقف تست",
+ "Stopped":"متوقف",
+ "Stops on (empty = never)":"تاریخ توقف (خالی = هرگز)",
+ "Storage":"فضای ذخیره",
+ "Story":"داستان کوتاه",
+ "Straight to the internet from this server":"مستقیم از همین سرور به اینترنت",
+ "Subscription":"لینک ساب",
+ "Subscription base URL":"آدرس پایه اشتراک",
+ "Subscription link":"لینک اشتراک",
+ "Successful / failed logins (secrets never stored)":"ورود موفق/ناموفق بدون ثبت رمز یا Secret",
+ "Suggestions":"پیشنهادها",
+ "Support ID":"آیدی پشتیبانی",
+ "Swap":"Swap",
+ "Switch the VPN off on this server? Its users are taken off; it keeps carrying tunnels.":"VPN این سرور خاموش شود؟ کاربرانش برداشته می‌شوند؛ تانل‌ها کار می‌کنند.",
+ "Switch the VPN on: users that accept all servers are sent here.":"VPN روشن شود: کاربرانی که همه‌ی سرورها را دارند به این سرور هم فرستاده می‌شوند.",
+ "Sync":"همگام‌سازی",
+ "Sync users without a specific node to this node":"کاربران بدون نود مشخص را روی این نود همگام کن",
+ "Synced":"همگام",
+ "System":"سیستم",
+ "TCP / UDP connections":"اتصال‌های TCP / UDP",
+ "TCP Mux has no site name: it is encrypted from the first byte, so there is nothing to disguise.":"TCP Mux اسم سایت ندارد: از اولین بایت رمزنگاری‌شده است، پس چیزی برای پوشاندن ندارد.",
+ "TCP has no site name: it is encrypted from the first byte, so there is nothing to disguise.":"TCP اسم سایت ندارد: از اولین بایت رمزنگاری‌شده است، پس چیزی برای پوشاندن ندارد.",
+ "TCP listening":"TCP در حال گوش‌دادن",
+ "TCP works but UDP does not pass well: WireGuard / Hysteria2 may suffer":"TCP کار می‌کند ولی UDP خوب رد نمی‌شود: وایرگارد و هیستریا۲ ممکن است ضعیف شوند",
+ "TLS 1.3 with the ALPN, ciphers and HTTP/2 settings of a browser; a stranger who opens the site gets an ordinary web page. Use port 443.":"TLS 1.3 با ALPN، رمزها و تنظیمات HTTP/2 شبیه مرورگر؛ کسی که سایت را باز کند یک صفحهٔ وب معمولی می‌بیند. از پورت 443 استفاده کن.",
+ "TLS at the CDN":"TLS در CDN",
+ "TLS looks filtered: plain WebSocket passes but WSS does not":"TLS احتمالاً فیلتر شده: WebSocket ساده رد می‌شود ولی WSS نه",
+ "TLS name":"نام TLS",
+ "TON wallet address (Tonkeeper…)":"آدرس کیف پول TON (تون‌کیپر…)",
+ "TOTP with apps like Google Authenticator / 2FAS":"TOTP با برنامه‌هایی مثل Google Authenticator / 2FAS",
+ "TTI (ms)":"TTI (میلی‌ثانیه)",
+ "TUIC and ShadowTLS are not in Xray-core; Hysteria2 (QUIC + obfs) and the hq transport cover the same ground.":"TUIC و ShadowTLS در هستهٔ Xray نیستند؛ Hysteria2 (QUIC + obfs) و انتقال hq همان کار را می‌کنند.",
+ "Tag (name)":"تگ (اسم)",
+ "Take from all users":"غیرفعال برای همه‌ی کاربران",
+ "Taken with certbot on the server":"با certbot روی خود سرور گرفته می‌شود",
+ "Takes about 2 minutes. Ports":"حدود ۲ دقیقه طول می‌کشد. پورت‌های",
+ "Takes about a minute. Ports":"حدود یک دقیقه طول می‌کشد. پورت‌های",
+ "Talk to users when the internet is cut":"گفتگو با کاربرها وقتی اینترنت قطع است",
+ "Talk to your customers and send them configs when the international internet is cut":"وقتی اینترنت بین‌الملل قطع است با مشتری‌ها حرف بزن و کانفیگ بفرست",
+ "Target (dest)":"مقصد (dest)",
+ "Target on the exit":"مقصد روی سرور خروجی",
+ "Telegram alert when a node or tunnel goes offline":"هشدار تلگرام وقتی نود یا تانل آفلاین شد",
+ "Telegram auto backup":"بکاپ خودکار تلگرام",
+ "Telegram message to the bot admins when a node, tunnel server or tunnel goes offline, and when it is back.":"وقتی نود، سرور تانل یا تانلی قطع و دوباره وصل شود، به ادمین‌های ربات پیام می‌رود.",
+ "Telegram messages for you and for your buyers":"پیام‌های تلگرامی برای خودت و خریدارها",
+ "Telegram sales bot":"ربات فروش تلگرام",
+ "Tells which ones did not pass and probably why":"می‌گوید کدام‌ها رد نشدند و احتمالاً چرا",
+ "Test":"تست",
+ "Test again":"تست دوباره",
+ "Test connection":"تست اتصال",
+ "Test every hop":"تست همه‌ی مرحله‌ها",
+ "Test ports (first of six)":"پورت تست (اولینِ شش پورت)",
+ "Test ports (first of sixteen)":"پورت‌های تست (اولی از شانزده)",
+ "Test ports (first of the range)":"پورت‌های تست (اول محدوده)",
+ "Test ports (first of twelve)":"پورت‌های تست (اولی از دوازده)",
+ "Test the key":"تست کلید",
+ "Test the sites":"تست سایت‌ها",
+ "Tested from the panel server: TLS 1.3, a valid certificate and HTTP/2. Tap one to use it.":"از سرور پنل تست شد: TLS 1.3، گواهی معتبر و HTTP/2. روی یکی بزن تا انتخاب شود.",
+ "Testing…":"در حال تست…",
+ "Tests all six transports between two servers (ping, TCP download / upload, UDP loss) and tells you which one is best for this route.":"هر شش روش تانل را بین دو سرور تست می‌کند (پینگ، دانلود و آپلود TCP، افت UDP) و می‌گوید کدام برای این مسیر بهترین است.",
+ "Tests every transport (TCP, KCP, WS, WSS, QUIC) in both directions between two servers, scores each one from 0 to 100 for your profile and tells you which is best and why. No tunnel is created and nothing changes on the servers.":"همه‌ی ترنسپورت‌ها (TCP، KCP، WS، WSS، QUIC) در هر دو جهت بین دو سرور امتحان می‌شوند، برای پروفایل تو از ۰ تا ۱۰۰ نمره می‌گیرند و بهترین با دلیلش پیشنهاد می‌شود. تانلی ساخته نمی‌شود و چیزی روی سرورها عوض نمی‌شود.",
+ "Text shown to the buyer":"متنی که به خریدار نشان داده می‌شود",
+ "The AI works":"هوش مصنوعی کار می‌کند",
+ "The AmneziaWG packets travel inside the transport chosen below (WebSocket, WSS, CDN, QUIC, KCP, TCP Mux), so the network only sees that transport. Best for strong filtering.":"بسته‌های AmneziaWG داخل ترنسپورتی که پایین انتخاب می‌کنی (وب‌سوکت، WSS، CDN، QUIC، KCP، TCP Mux) رد می‌شوند و شبکه فقط همان ترنسپورت را می‌بیند. برای فیلترینگ سنگین بهترین است.",
+ "The CDN has the certificate; the server itself speaks plain WS / gRPC / XHTTP":"گواهی دست CDN است؛ خود سرور WS / gRPC / XHTTP ساده دارد",
+ "The QUIC hello carries a site name too (default www.cloudflare.com).":"دست‌دادن QUIC هم اسم سایت دارد (پیش‌فرض www.cloudflare.com).",
+ "The TCP stream starts like a plain HTTP request (path and Host above)":"اتصال TCP مثل یک درخواست HTTP ساده شروع می‌شود (path و Host بالا)",
+ "The agent of this server is old: press “Update all” in Tunnel servers first.":"ایجنت این سرور قدیمی است: اول در «سرورهای تانل» دکمه‌ی «آپدیت همه» را بزن.",
+ "The app picks the message up when it is opened, then every 30 seconds while connected (every 5 minutes when not). A user who closes the message will not see it again; a new message is shown again.":"اپ پیام را موقع باز شدن می‌گیرد؛ بعد وقتی وصل است هر ۳۰ ثانیه و وقتی وصل نیست هر ۵ دقیقه. کاربری که پیام را ببندد دیگر آن را نمی‌بیند؛ پیام جدید دوباره نشان داده می‌شود.",
+ "The app's «Amnezia Direct» config of a server behind the tunnel goes straight to the server through its own name. Make each name below an A record pointing at the IP next to it (in Cloudflare: DNS only, grey cloud). Until a name points at the right server, the app is given the server's own address, so a direct config never reaches the wrong server.":"کانفیگ «Amnezia مستقیم» هر سروری که پشت تانل است، با اسم خودش مستقیم به همان سرور وصل می‌شود. برای هر اسم زیر یک رکورد A بساز که به آی‌پی کنارش اشاره کند (در کلادفلر: فقط DNS، ابر خاکستری). تا وقتی اسمی درست تنظیم نشده، آدرس خود سرور به برنامه داده می‌شود؛ پس کانفیگ مستقیم هیچ‌وقت به سرور اشتباه نمی‌رود.",
+ "The backup above is complete too: it can also be restored by hand on a new server (Restore with «Also restore server keys»).":"بکاپ بالا هم کامل است: می‌شود آن را دستی هم روی سرور جدید برگرداند (بازگردانی با تیک «کلیدها و تنظیمات سرور»).",
+ "The bot writes and publishes posts in your channel by itself: prices, offers, tips, guides, trials and occasion greetings. Make the bot an admin of the channel.":"ربات خودش در کانالت پست می‌نویسد و منتشر می‌کند: قیمت‌ها، تخفیف‌ها، نکته‌ها، آموزش، تست رایگان و تبریک مناسبت‌ها. ربات را ادمین کانال کن.",
+ "The buyer gets a message before his time or data runs out.":"قبل از تمام شدن زمان یا حجم، به خریدار پیام می‌رود.",
+ "The buyer sees the amount in dollars and in TON (at today's price), your addresses to copy and a Tonkeeper button, then sends the receipt or TXID for you to approve. Plans without a dollar price get it from the toman price at this rate; with no rate and no dollar price, crypto is not offered for that plan.":"خریدار مبلغ را به دلار و به TON (با قیمت امروز)، آدرس‌هایت را برای کپی و دکمه‌ی تون‌کیپر می‌بیند و بعد رسید یا TXID را می‌فرستد تا تأیید کنی. پلنی که قیمت دلاری ندارد، قیمتش از روی تومان با همین نرخ حساب می‌شود؛ بدون نرخ و بدون قیمت دلاری، پرداخت ارزی برای آن پلن نشان داده نمی‌شود.",
+ "The command expired. Create a new one.":"دستور منقضی شد. یکی جدید بساز.",
+ "The direct direction (entry → exit) is closed: the entry cannot dial the exit. Use the reverse direction.":"جهت مستقیم (ورودی ← خروجی) بسته است: ورودی نمی‌تواند به خروجی وصل شود. از جهت معکوس استفاده کن.",
+ "The domain fronts through a CDN (ArvanCloud, Cloudflare, …). The filter only sees HTTPS to the CDN edge — the real server IP never appears. Works in whitelist mode if the CDN edge is reachable.":"دامنه از پشت CDN (ابرآروان، کلادفلر و…) عبور می‌کند. فیلتر فقط HTTPS به لبهٔ CDN را می‌بیند — آی‌پی واقعی سرور هرگز دیده نمی‌شود. اگر لبهٔ CDN در دسترس باشد، در حالت لیست سفید هم کار می‌کند.",
+ "The domain's A record must point to this Iran server's IP (not to a CDN while the certificate is taken: in ArvanCloud / Cloudflare set it to DNS only).":"رکورد A دامنه باید به آی‌پی همین سرور ایران اشاره کند (موقع گرفتن گواهی پشت CDN نباشد: در ابرآروان / کلادفلر روی «فقط DNS» بگذار).",
+ "The domain's A record must point to this server's IP":"رکورد A دامنه باید به IP این سرور اشاره کند",
+ "The entry and the exit must be different":"ورودی و خروجی باید دو سرور متفاوت باشند",
+ "The exit does NAT (masquerade)":"خروجی NAT می‌کند (masquerade)",
+ "The exit runs a Hysteria2 server, the entry connects to it (QUIC over UDP, fast on lossy internet). The panel makes the password and a certificate and the entry checks its fingerprint. The agents install Hysteria2 by themselves; your VPN Hysteria2 is not touched.":"سرور خروجی یک سرور هیستریا ۲ اجرا می‌کند و سرور ورودی به آن وصل می‌شود (QUIC روی UDP، روی اینترنت پرافت هم سریع). پنل رمز و گواهی را می‌سازد و ورودی اثر انگشت گواهی را چک می‌کند. ایجنت‌ها هیستریا را خودشان نصب می‌کنند؛ به هیستریای کاربران VPN دست نمی‌زند.",
+ "The first copy that arrives wins; near-zero visible loss, double traffic":"اولین نسخه‌ای که برسد برنده است؛ لاست تقریباً صفر، ترافیک دو برابر",
+ "The full token is shown only once.":"توکن کامل فقط یک بار نمایش داده می‌شود.",
+ "The lightweight stealth UDP cover: no TLS overhead, no handshake, minimal per-packet cost.":"پوشش سبک و مخفی UDP: بدون سربار TLS، بدون دست‌دادن، کمترین هزینهٔ هر بسته.",
+ "The new server downloaded the backup":"سرور جدید بکاپ را گرفت",
+ "The node's certificate changed (reinstalled?): run its join command again, or remove and add the node":"گواهی نود عوض شده (دوباره نصب شده؟): دستور اتصال نود را دوباره اجرا کن، یا نود را حذف و دوباره اضافه کن",
+ "The panel IP could not be found from its address. Type it in the GRE box (Edit server) and make the command again.":"آی‌پی پنل از روی آدرسش پیدا نشد. آن را در کادر GRE (ویرایش سرور) بنویس و دوباره دستور بساز.",
+ "The panel address is an IP, so the agent keeps using it. To send the agent through the link make a new command (Command button of the server).":"آدرس پنل آی‌پی است و ایجنت همان را نگه می‌دارد. برای عبور ایجنت از لینک، دستور تازه بساز (دکمهٔ دستور سرور).",
+ "The panel installs the emergency chat on that server by itself and keeps the list of your customers there while the internet works.":"پنل خودش چت اضطراری را روی همان سرور نصب می‌کند و تا وقتی اینترنت وصل است، لیست مشتری‌ها را آن‌جا به‌روز نگه می‌دارد.",
+ "The panel makes the A records of every server (and *.) with this API token, then gets a wildcard certificate from Let's Encrypt with a DNS challenge and renews it every 60 days. Works for servers inside Iran too.":"پنل با این توکن API رکورد A هر سرور (و *.) را می‌سازد، بعد با چالش DNS از Let's Encrypt گواهی Wildcard می‌گیرد و هر ۶۰ روز تمدید می‌کند. برای سرورهای داخل ایران هم کار می‌کند.",
+ "The panel on the old server still runs the same Telegram bot: both answer customers and both post to the channel. Stop it there: systemctl disable --now kanki-panel":"پنل روی سرور قبلی هنوز همین ربات تلگرام را اجرا می‌کند: هر دو به مشتری‌ها جواب می‌دهند و هر دو در کانال پست می‌گذارند. آن‌جا خاموشش کن: systemctl disable --now kanki-panel",
+ "The panel points the domain at this server and gets a Let's Encrypt certificate; every TLS inbound of this server uses it. Renewed every 60 days.":"پنل دامنه را به همین سرور وصل می‌کند و از Let's Encrypt گواهی می‌گیرد؛ همه‌ی اینباندهای TLS این سرور از آن استفاده می‌کنند. هر ۶۰ روز تمدید می‌شود.",
+ "The panel restarts for a few seconds after saving.":"بعد از ذخیره، پنل چند ثانیه ری‌استارت می‌شود.",
+ "The panel runs on one server. Every other server is a node: add it with one command, then switch on here what it runs.":"پنل روی یک سرور نصب است. هر سرور دیگر یک نود است: با یک دستور اضافه‌اش کن و بعد همین‌جا روشن کن که چه چیزی رویش اجرا شود.",
+ "The port is closed or this direction is blocked: check the cloud firewall":"پورت بسته است یا این جهت مسدود است: فایروال سرویس‌دهنده را چک کن",
+ "The ports are free on the servers":"پورت‌ها روی سرورها آزادند",
+ "The reverse direction (exit → entry) is closed: the entry cannot be reached from the exit. Use the direct direction.":"جهت معکوس (خروجی ← ورودی) بسته است: خروجی نمی‌تواند به ورودی برسد. از جهت مستقیم استفاده کن.",
+ "The route is made: it connects in a few seconds":"مسیر ساخته شد: تا چند ثانیه‌ی دیگر وصل می‌شود",
+ "The same ports on every hop: users reach them on the first server and land on the same ports of the last one.":"روی همه‌ی مرحله‌ها همین پورت‌ها: کاربر به این پورت‌ها روی سرور اول وصل می‌شود و به همان پورت‌ها روی سرور آخر می‌رسد.",
+ "The server agent, VPN and their health in one place: press a service to open its page.":"ایجنت، VPN و سلامت هر سرور یک‌جا؛ روی هر سرویس بزن تا صفحه‌اش باز شود.",
+ "The server gets and renews a free certificate by itself. Do it before the internet is cut. Port 80 of the server must be free and the domain must point to it (ArvanCloud: DNS or CDN both work).":"سرور خودش گواهی رایگان می‌گیرد و تمدید می‌کند. قبل از قطعی اینترنت انجامش بده. پورت ۸۰ سرور باید آزاد باشد و دامنه به آن اشاره کند (ابرآروان: هم DNS هم CDN کار می‌کند).",
+ "The server has not said which ports are free yet (update it to 3.7)":"سرور هنوز نگفته کدام پورت‌ها آزادند (آن را به ۳.۷ آپدیت کن)",
+ "The server is not connected right now":"این سرور الان وصل نیست",
+ "The server is not reporting: check that it is on and that its agent runs, then press Repair":"سرور گزارش نمی‌دهد: روشن بودن سرور و اجرای Agent آن را چک کن، بعد «تعمیر» را بزن",
+ "The strongest known anti-DPI method. The server borrows the TLS certificate of a real site (Microsoft, Apple, …) in real time: to the filter the connection IS a TLS session to that site. No domain, no certificate of your own, nothing to block by name.":"قوی‌ترین روش شناخته‌شده ضد DPI. سرور گواهی TLS یک سایت واقعی (مایکروسافت، اپل و…) را لحظه‌ای قرض می‌گیرد: برای فیلتر، اتصال همان نشست TLS به آن سایت است. نه دامنه لازم است، نه گواهی خودت؛ چیزی برای مسدودکردن با اسم نیست.",
+ "The tunnel is made: it connects in a few seconds":"تانل ساخته شد: تا چند ثانیه‌ی دیگر وصل می‌شود",
+ "The tunnel reconnects in a few seconds":"تانل تا چند ثانیه‌ی دیگر دوباره وصل می‌شود",
+ "The user's phone registers again by itself; someone else using the address loses access. Continue?":"گوشی کاربر خودش دوباره ثبت می‌کند؛ اگر کس دیگری از این IP استفاده می‌کند دسترسی‌اش قطع می‌شود. ادامه بدهم؟",
+ "The whole outbound (JSON object)":"کل اوت‌باند (آبجکت JSON)",
+ "Theme":"پوسته",
+ "These agents are too old to update remotely. Run the command kanki on them and choose 3 (Update) once:":"این ایجنت‌ها برای آپدیت از راه دور قدیمی‌اند. روی آن‌ها دستور kanki را بزن و گزینهٔ 3 (Update) را انتخاب کن (فقط یک‌بار):",
+ "These live in the tunnel wizard; they carry whole VPNs between your Iran and foreign servers.":"این‌ها در ویزارد تانل هستند؛ VPN کامل را بین سرور ایران و خارج حمل می‌کنند.",
+ "These messages are sent by the sales bot; set it up first in":"این پیام‌ها را ربات فروش می‌فرستد؛ اول آن را راه بینداز در",
+ "These ports are already taken on the server":"این پورت‌ها روی سرور گرفته شده‌اند",
+ "These sites go down with it":"این سایت‌ها هم از دسترس خارج می‌شوند",
+ "These tunnels use this server:":"این تانل‌ها از این سرور استفاده می‌کنند:",
+ "This is not a settings file":"این فایل تنظیمات نیست",
+ "This is the base ping of the route; a good tunnel stays close to it.":"این پینگ پایه‌ی مسیر است؛ تانل خوب نزدیک به همین می‌ماند.",
+ "This port is already used by another tunnel":"این پورت را تانل دیگری دارد",
+ "This server has no domain: write one in SNI, or give the server a domain (Edit server).":"این سرور دامنه ندارد: یا در SNI دامنه بنویس، یا برای سرور دامنه بگذار (ویرایش سرور).",
+ "This server's IP (empty = found by itself)":"آی‌پی همین سرور (خالی = خودکار)",
+ "This server's own address":"آدرس خود این سرور",
+ "This tag is already used":"این تگ قبلاً استفاده شده",
+ "This transport is filtered on the route while others pass":"این ترنسپورت روی مسیر فیلتر شده در حالی که بقیه رد می‌شوند",
+ "Through":"از راه",
+ "Through a tunnel":"از راه تانل",
+ "Through the tunnel (Iran server)":"از تانل (سرور ایران)",
+ "Through the tunnels":"عبوری از تانل‌ها",
+ "Tick it for a user (user form, or Enable for all users). Every server runs it by itself within a minute; the Kanki app gets the link from the subscription. Each user has their own key: a new link is a new key, an expired or disabled user is cut off at once. Open the port at the data center's firewall too.":"برای کاربر تیکش را بزن (فرم کاربر، یا «روشن برای همه‌ی کاربران»). هر سرور ظرف یک دقیقه خودش اجرایش می‌کند؛ اپ کانکی لینک را از اشتراک می‌گیرد. هر کاربر کلید خودش را دارد: لینک تازه یعنی کلید تازه، کاربر منقضی یا غیرفعال فوراً قطع می‌شود. پورت را در فایروال دیتاسنتر هم باز کن.",
+ "Tip":"نکته",
+ "To bring it back":"برای برگرداندن",
+ "Token":"توکن",
+ "Token is required":"توکن لازم است",
+ "Token name":"نام توکن",
+ "Toman":"تومان",
+ "Toman per dollar (for plans without a dollar price)":"نرخ دلار به تومان (برای پلن‌های بدون قیمت دلاری)",
+ "Too big for the bot (over 50 MB): only on the subscription page":"برای ربات بزرگ است (بیش از ۵۰ مگ): فقط در صفحه‌ی اشتراک",
+ "Top menu":"منوی بالا",
+ "Torrent traffic gets abuse reports to your servers":"تورنت برای سرورهایت گزارش تخلف می‌آورد",
+ "Total ping":"پینگ کل",
+ "Total recorded usage":"مصرف کل ثبت‌شده",
+ "Total since boot":"مجموع از بوت",
+ "Total traffic":"ترافیک کل",
+ "Total traffic of the inbound (GB, 0 = unlimited)":"حجم کل اینباند (گیگ، ۰ = نامحدود)",
+ "Total users":"کل کاربران",
+ "Total volume (0 = unlimited)":"حجم کل (صفر = نامحدود)",
+ "Traffic":"ترافیک",
+ "Traffic & stats":"ترافیک و آمار",
+ "Traffic leaves here":"ترافیک از اینجا بیرون می‌رود",
+ "Traffic used up":"حجم تمام شد",
+ "Transport":"ترنسپورت",
+ "Transport to the exit":"ترنسپورت تا خروجی",
+ "Trial GB":"حجم تست (GB)",
+ "Trial days":"روز تست",
+ "Trial volume (GB)":"حجم تست (گیگ)",
+ "Tries masked QUIC first and switches to HTTP/2 over TLS by itself when UDP does not pass. Open the port on UDP and TCP; port 443 is best.":"اول QUIC ماسک‌شده را امتحان می‌کند و اگر UDP رد نشد خودکار به HTTP/2 روی TLS می‌رود. پورت را هم روی UDP و هم روی TCP باز کن؛ پورت 443 بهترین است.",
+ "Try SSL again":"دوباره گرفتن SSL",
+ "Try again":"دوباره",
+ "Try now":"الان امتحان کن",
+ "Tunnel":"تانل",
+ "Tunnel agent settings":"تنظیمات ایجنت (آدرس، GRE)",
+ "Tunnel domain":"دامنه‌ی تانل",
+ "Tunnel domain (optional)":"دامنه‌ی تانل (اختیاری)",
+ "Tunnel port":"پورت تانل",
+ "Tunnel port on the relay":"پورت تانل روی ریلی",
+ "Tunnel server":"سرور تانل",
+ "Tunnel servers":"سرورهای تانل",
+ "Tunnel servers (updating by themselves)":"سرورها (خودشان آپدیت می‌شوند)",
+ "Tunnel to the panel":"تانل به پنل",
+ "Tunnel type":"نوع تانل",
+ "Tunnels":"تانل‌ها",
+ "Tunnels connected":"تانل‌های وصل",
+ "Tunnels count":"تانل",
+ "Tunnels page":"صفحه‌ی تانل‌ها",
+ "Tunnels up":"تانل‌های وصل",
+ "Tunnels, Xray and DNS are not installed on this server":"تانل، Xray و DNS روی این سرور نصب نیست",
+ "Turn it on":"روشنش کن",
+ "Turn off __P__ for ALL users? It leaves every subscription.":"__P__ برای همه‌ی کاربران خاموش شود؟ از اشتراک همه برداشته می‌شود.",
+ "Turn on __P__ for ALL users? Every user gets it in the subscription.":"__P__ برای همه‌ی کاربران روشن شود؟ در اشتراک همه اضافه می‌شود.",
+ "Turn this group on":"روشن کردن این گروه",
+ "Turn this off for every user?":"برای همه‌ی کاربران خاموش شود؟",
+ "Turn this on for every user?":"برای همه‌ی کاربران روشن شود؟",
+ "Turquoise":"فیروزه‌ای",
+ "Two-step login":"ورود دومرحله‌ای",
+ "Type":"نوع",
+ "Type the public IP of the server":"آی‌پی عمومی سرور را بنویس",
+ "Typical use: this server is in Iran and the link is of a server abroad, so users connect inside Iran and leave from abroad.":"کاربرد معمول: این سرور در ایران است و لینک مال سرور خارج؛ کاربر داخل ایران وصل می‌شود و از خارج بیرون می‌رود.",
+ "UDP first (masked QUIC); if UDP is cut, HTTP/2 over TLS on the same port number":"اول UDP (QUIC ماسک‌شده)؛ اگر UDP قطع بود، HTTP/2 روی TLS با همان شمارهٔ پورت",
+ "UDP is probably blocked on this route: the TCP transports pass":"احتمالاً UDP روی این مسیر بسته است: ترنسپورت‌های TCP رد می‌شوند",
+ "UDP loss":"افت UDP",
+ "UDP port":"پورت UDP",
+ "UDP traffic inside fake TCP packets (udp2raw style): passes where UDP is cut or slowed; needs root on both servers":"ترافیک UDP داخل بسته‌های TCP ساختگی (سبک udp2raw): جایی که UDP قطع یا محدود است رد می‌شود؛ روی هر دو سرور root لازم است",
+ "UDP travels inside hand-crafted TCP packets with a fake handshake: to DPI it is an ordinary TCP session, but with the speed of UDP. Both servers need root and the port on TCP.":"UDP داخل بسته‌های TCP دست‌ساز با دست‌دادن ساختگی حرکت می‌کند: برای DPI یک نشست TCP معمولی است، اما با سرعت UDP. هر دو سرور به root و پورت روی TCP نیاز دارند.",
+ "USDT address (TRC20)":"آدرس USDT (شبکه‌ی TRC20)",
+ "Under maintenance":"در تعمیر",
+ "Under maintenance: new users are not sent here":"در تعمیر: کاربر جدید به اینجا فرستاده نمی‌شود",
+ "Under pressure":"تحت فشار",
+ "Undo":"برگرداندن",
+ "Unfreeze user":"رفع فریز",
+ "Unknown":"نامشخص",
+ "Unlimited":"نامحدود",
+ "Unlimited data":"حجم نامحدود",
+ "Unread messages":"پیام‌های خوانده‌نشده",
+ "Unsaved changes":"تغییرات ذخیره‌نشده",
+ "Until I remove it":"تا وقتی خودم پاکش کنم",
+ "Update":"آپدیت",
+ "Update & version":"آپدیت و نسخه",
+ "Update agent":"آپدیت ایجنت",
+ "Update all":"آپدیت همه",
+ "Update every node, every tunnel server and the panel itself to the latest version?":"همهٔ نودها، سرورهای تانل و خود پنل به آخرین نسخه آپدیت شوند؟",
+ "Update source (GitHub repo)":"منبع آپدیت (مخزن گیت‌هاب)",
+ "Update source (GitHub repo) is not set: replace USER/REPO in the command.":"منبع آپدیت (مخزن گیت‌هاب) تنظیم نشده: USER/REPO را در دستور عوض کن.",
+ "Update source not set":"منبع آپدیت تنظیم نشده",
+ "Update the agent of this server (Servers › Update agent) to run KANKI MIX":"عامل این سرور را به‌روز کن (سرورها › به‌روزرسانی عامل) تا KANKI MIX اجرا شود",
+ "Update the agent of this server to run it":"عامل این سرور را به‌روز کن تا اجرا شود",
+ "Updates come from the GitHub releases of your repo.":"آپدیت از Releases مخزن گیت‌هاب شما دریافت می‌شود.",
+ "Updating…":"در حال آپدیت…",
+ "Uplink (MB/s)":"آپلود (مگابایت/ثانیه)",
+ "Upload":"آپلود",
+ "Upload failed":"آپلود ناموفق بود",
+ "Upload files":"آپلود فایل",
+ "Upload speed of the entry, Mbit/s (0 = automatic)":"سرعت آپلود ورودی، مگابیت (۰ = خودکار)",
+ "Upload the Kanki app (.apk) here, one file per phone type. The bot sends the file itself (📱 Download app) and the subscription page shows a download button for each. A new file of the same type replaces the old one.":"فایل نصبی اپ کانکی (.apk) را اینجا آپلود کن، برای هر نوع گوشی یک فایل. ربات خودش فایل را می‌فرستد (📱 دانلود اپ) و صفحه‌ی اشتراک برای هرکدام دکمه‌ی دانلود نشان می‌دهد. فایل جدیدِ همان نوع جای قبلی را می‌گیرد.",
+ "Upstream resolvers":"DNSهای بالادست",
+ "Uptime":"آپتایم",
+ "Use":"استفاده از",
+ "Use 3 times a day":"سه بار در روز",
+ "Use for all users":"فعال برای همه‌ی کاربران",
+ "Use it for the destination too":"برای مقصد هم استفاده شود",
+ "Use the panel endpoint":"استفاده از Endpoint پنل",
+ "Use this address on every node too":"همین آدرس روی همه‌ی نودها هم استفاده شود",
+ "Used":"مصرف",
+ "Used volume, limit and percent":"حجم مصرفی، سقف و درصد مصرف",
+ "User inbounds (Xray)":"دروازه‌های کاربران (Xray)",
+ "User link":"لینک کاربر",
+ "Username":"نام کاربری",
+ "Username (optional)":"نام کاربری (اختیاری)",
+ "Users":"کاربران",
+ "Users & sales":"کاربران و فروش",
+ "Users also get":"کاربرها این را هم می‌گیرند",
+ "Users and links":"کاربرها و لینک‌ها",
+ "Users by protocol":"کاربران هر پروتکل",
+ "Users cannot reach the server's own network (10.x, 192.168.x …)":"کاربرها به شبکه‌ی داخلی سرور (10.x، 192.168.x …) دسترسی ندارند",
+ "Users connect here":"کاربرها به این وصل می‌شوند",
+ "Users connect to":"کاربرها به این آدرس وصل می‌شوند",
+ "Users connect to the Iran address already, so the main configs go through the tunnel too. For direct configs set it to this server's own address.":"«کاربرها به این آدرس وصل می‌شوند» الان آدرس ایران است، پس کانفیگ‌های اصلی هم از تانل می‌روند. برای کانفیگ مستقیم آن را آدرس خود این سرور بگذار.",
+ "Users connect to the first server; the traffic goes through each next server and leaves from the last. Every hop is a tunnel of its own with its own transport.":"کاربر به سرور اول وصل می‌شود؛ ترافیک از سرورهای بعدی رد می‌شود و از آخری بیرون می‌رود. هر مرحله یک تانل جدا با روش انتقال خودش است.",
+ "Users connect to these ports on the entry; they reach the same ports on the exit. Use 8443:443 to change the port, 1000-1010 for a range.":"کاربرها به این پورت‌ها روی سرور ورودی وصل می‌شوند و به همان پورت‌ها روی خروجی می‌رسند. برای تغییر پورت 8443:443 و برای بازه 1000-1010 بنویس.",
+ "Users connect to this address; empty = the IP the server reports from":"کاربرها به این آدرس وصل می‌شوند؛ خالی = IPی که سرور از آن گزارش می‌دهد",
+ "Users connection endpoint":"Endpoint اتصال کاربران",
+ "Users of the last server connect through the first one":"کاربرهای سرور آخر از راه سرور اول وصل شوند",
+ "Users online":"کاربران آنلاین",
+ "Users usage":"مصرف کاربران",
+ "Users usage and live network traffic":"مصرف کاربران و ترافیک زنده شبکه",
+ "Users whose Xray traffic moved in the last few seconds":"کاربرهایی که در چند ثانیه‌ی اخیر ترافیک Xray داشته‌اند",
+ "Users with DNS":"کاربران دارای DNS",
+ "Users with KANKI MIX":"کاربران KANKI MIX",
+ "Users with Xray":"کاربران دارای Xray",
+ "Users with it":"کاربران این پروتکل",
+ "Users without their own server list get this server":"کاربرانی که فهرست سرور جدا ندارند این سرور را هم بگیرند",
+ "Users' WireGuard / AmneziaWG files of the moved server must be downloaded again (subscription links and the app update by themselves). Continue?":"فایل‌های WireGuard / AmneziaWG کاربرانِ سروری که پورتش عوض می‌شود باید دوباره دانلود شوند (لینک ساب و اپ خودشان به‌روز می‌شوند). ادامه می‌دهی؟",
+ "Users' WireGuard / AmneziaWG files of this server must be downloaded again after a port change; subscription links and the app update by themselves.":"بعد از عوض شدن پورت، فایل‌های WireGuard / AmneziaWG کاربرانِ این سرور باید دوباره دانلود شوند؛ لینک ساب و اپ خودشان به‌روز می‌شوند.",
+ "Uses":"تعداد استفاده",
+ "Using a lot of swap: the server needs more RAM":"از Swap زیاد استفاده می‌کند: سرور رم بیشتری لازم دارد",
+ "VLESS / Trojan over TCP with TLS: traffic that is not ours goes to these destinations (a website, another service).":"VLESS / Trojan روی TCP با TLS: ترافیکی که مال ما نیست به این مقصدها می‌رود (یک سایت، سرویس دیگر).",
+ "VLESS · VMess · Trojan · Shadowsocks":"VLESS · VMess · Trojan · Shadowsocks",
+ "VPN":"VPN",
+ "VPN & protocols":"VPN و پروتکل‌ها",
+ "VPN for users":"VPN برای کاربران",
+ "VPN install failed":"نصب VPN نشد",
+ "VPN is installed but serves nobody (a relay)":"VPN نصب است ولی به هیچ کاربری سرویس نمی‌دهد (رله)",
+ "VPN is not installed on this server":"VPN روی این سرور نصب نیست",
+ "VPN management":"مدیریت وی‌پی‌ان",
+ "VPN management panel":"پنل مدیریت VPN",
+ "VPN node":"نود VPN",
+ "VPN part installed":"بخش VPN نصب شد",
+ "VPN ports (UDP)":"پورت‌های VPN (UDP)",
+ "VPN ports of the panel server":"پورت‌های VPN سرور پنل",
+ "VPN server":"سرور VPN",
+ "VPN serves users":"VPN به کاربران سرویس می‌دهد",
+ "VPN services":"سرویس‌های VPN",
+ "Valid for 3 hours, one time. It holds the key of the backup: do not share it.":"۳ ساعت و یک‌بار اعتبار دارد. کلید بکاپ داخلش است: به کسی نده.",
+ "Valid for 6 hours. Run it once; it can be run again on the same server.":"تا ۶ ساعت معتبر است. یک بار اجرا کن؛ روی همان سرور می‌شود دوباره هم اجرا کرد.",
+ "Valid for one hour and one node. Create a new command for the next node.":"یک ساعت و فقط برای یک نود اعتبار دارد. برای نود بعدی دستور جدید بساز.",
+ "Version":"نسخه",
+ "Version, update source and installing updates":"نسخه، منبع آپدیت و نصب آپدیت",
+ "Violet":"بنفش",
+ "Volume (GB)":"حجم (گیگ)",
+ "Volume, time, connections, nodes and configs":"حجم، زمان، اتصال، نود و کانفیگ‌ها",
+ "Volumes (GB, 0 = unlimited)":"حجم‌ها (گیگ، ۰ = نامحدود)",
+ "WS has no TLS, so there is no SNI: only the Host header and the path of the WebSocket request can be changed.":"WS رمزنگاری TLS ندارد، پس SNI هم ندارد؛ فقط هدر Host و مسیر درخواست WebSocket قابل تغییرند.",
+ "Waiting":"در صف",
+ "Waiting for the certificate":"در انتظار گواهی",
+ "Waiting for the new server…":"منتظر سرور جدید…",
+ "Waiting for the node to connect…":"منتظر اتصال نود…",
+ "Waiting for the server to connect…":"منتظر وصل شدن سرور…",
+ "Waiting for the server: getting SSL and starting the listener…":"در انتظار سرور: گرفتن SSL و راه‌اندازی…",
+ "Waiting for the server…":"منتظر سرور…",
+ "Waiting for this server: run its command":"منتظر این سرور: دستورش را اجرا کن",
+ "Wallet / manual payment":"کیف پول / پرداخت دستی",
+ "Warn buyers":"هشدار به خریدارها",
+ "Warn buyers before expiry / end of data":"هشدار به خریدار قبل از پایان زمان یا حجم",
+ "Web (Caddy)":"وب (Caddy)",
+ "Web bind":"Web Bind",
+ "Web panel":"وب پنل",
+ "Web port":"پورت وب",
+ "WebSocket over HTTP/2, TLS 1.3 like a browser, many links in one connection":"وب‌سوکت روی HTTP/2 با TLS 1.3 مثل مرورگر؛ چند لینک در یک اتصال",
+ "Welcome message":"پیام خوش‌آمد",
+ "Welcome text":"متن خوش‌آمد",
+ "What buyers can choose in the bot":"پلن‌هایی که خریدار در ربات می‌بیند",
+ "What goes through the DNS":"چه چیزهایی از DNS رد می‌شود",
+ "What the users' links say. Leave empty unless a CDN or another address is in front of the server.":"چیزی که در لینک کاربرها نوشته می‌شود. خالی بگذار مگر CDN یا آدرس دیگری جلوی سرور باشد.",
+ "When":"زمان",
+ "When TCP to the panel is blocked but GRE passes, the panel builds a GRE link to the server and the agent connects through it. Needs root on both servers.":"وقتی TCP به پنل بسته است ولی GRE رد می‌شود، پنل خودش لینک GRE را تا سرور می‌سازد و ایجنت از روی آن وصل می‌شود. روی هر دو سرور باید root باشی.",
+ "When plain REALITY works but you also want padding against shape analysis.":"وقتی REALITY ساده کار می‌کند اما پدینگ ضد تحلیل شکل ترافیک هم می‌خواهی.",
+ "When the internet is cut, customers tap the emergency button in the Kanki app and write to you; you answer and send configs from the address below, from inside Iran.":"وقتی اینترنت قطع شد، مشتری در اپ کانکی دکمه‌ی اضطراری را می‌زند و به تو پیام می‌دهد؛ تو از داخل ایران با آدرس پایین جواب می‌دهی و کانفیگ می‌فرستی.",
+ "When the server IP is burned, or in whitelist mode with a reachable CDN edge. Set “Link and CDN” in the editor: link address = your CDN domain, TLS at the CDN = on.":"وقتی آی‌پی سرور سوخته، یا در حالت لیست سفید با لبهٔ CDN در دسترس. در ویرایشگر «لینک و CDN» را تنظیم کن: آدرس لینک = دامنهٔ CDN، «TLS روی CDN» = روشن.",
+ "When the traffic is used up or the date passes, the inbound stops by itself; users keep their own limits as well.":"وقتی حجم تمام شود یا تاریخ برسد، اینباند خودش می‌ایستد؛ محدودیت‌های خود کاربرها هم سر جایش است.",
+ "When you need a real VPN interface (TUN) between servers or for users.":"وقتی رابط VPN واقعی (TUN) بین سرورها یا برای کاربران لازم است.",
+ "Where traffic leaves the server: directly, or on to another server (chain)":"ترافیک از کجا خارج شود: مستقیم، یا ادامه به یک سرور دیگر (زنجیره)",
+ "Which methods to test":"کدام روش‌ها تست شوند",
+ "Which one, when?":"کدام، چه موقع؟",
+ "Which part of the game goes through":"کدام بخش بازی از سرور رد شود",
+ "Which port each service uses":"هر سرویس کدام پورت را دارد",
+ "Whitelist":"لیست سفید",
+ "Whitelist mode (CDN)":"حالت لیست سفید (CDN)",
+ "Whitelist mode (only domestic sites open):":"حالت لیست سفید (فقط سایت‌های داخلی باز است):",
+ "Whitelist mode: through a CDN (ArvanCloud), for when only domestic sites open":"حالت لیست سفید: از طریق CDN (آروان‌کلود)، وقتی فقط سایت‌های داخلی باز است",
+ "Who connects":"چه کسی وصل شود",
+ "Who may use it is also set per user (Users › edit).":"اینکه چه کسی از آن استفاده کند، برای هر کاربر هم قابل تنظیم است (کاربران › ویرایش).",
+ "Who you are, what to stress, the tone, words to avoid…":"چه کسی هستید، روی چه چیزی تأکید شود، لحن، کلماتی که نباید بیاید…",
+ "Why SSL is not taken":"چرا SSL گرفته نمی‌شود",
+ "Why us":"چرا ما",
+ "WireGuard":"WireGuard",
+ "WireGuard comes only this way.":"وایرگارد فقط همین کانفیگ را دارد.",
+ "WireGuard reaches users only through a tunnel: write the tunnel domain of this server in Servers.":"وایرگارد فقط از راه تانل به کاربر می‌رسد: در «سرورها» دامنه‌ی تانل این سرور را بنویس.",
+ "WireGuard with junk packets and scrambled headers (Jc/S1/S2/H1-H4): the WG handshake no longer matches the DPI signature. Can itself ride inside WSS / CDN / QUIC / KCP / Game / FakeTCP.":"وایرگارد با بسته‌های جانبی و هدرهای به‌هم‌ریخته (Jc/S1/S2/H1-H4): دست‌دادن WG دیگر با امضای DPI نمی‌خواند. خودش هم می‌تواند داخل WSS / CDN / QUIC / KCP / Game / FakeTCP سوار شود.",
+ "WireGuard with obfuscated packets (Jc, S1, S2, H1-H4): passes most filters directly.":"WireGuard با بسته‌های مبهم (Jc، S1، S2، H1-H4): مستقیم از بیشتر فیلترها رد می‌شود.",
+ "WireGuard · AmneziaWG · Hysteria2":"WireGuard · AmneziaWG · Hysteria2",
+ "WireGuard, AmneziaWG and Hysteria2 configs of the last server get the address of the first server; KANKI MIX gets its second config through the route by itself.":"کانفیگ‌های WireGuard، AmneziaWG و Hysteria2 سرور آخر آدرس سرور اول را می‌گیرند؛ کانفیگ دوم KANKI MIX خودش از همین مسیر ساخته می‌شود.",
+ "With ArvanCloud CDN use a port it forwards (80, 8080, 443, 2053, 8443 …). Open the port on the server.":"با CDN ابرآروان پورتی بگذار که ابرآروان رد می‌کند (80، 8080، 443، 2053، 8443 …). پورت را روی سرور باز کن.",
+ "With WSS the handshake looks like an HTTPS connection to this domain. QUIC and KCP are fully encrypted (KCP’s header is hidden too), so they look like plain UDP.":"با WSS، دست‌دادن اتصال شبیه یک اتصال HTTPS به این دامنه دیده می‌شود. QUIC و KCP کاملاً رمزند (هدر KCP هم مخفی است) و شبیه UDP ساده‌اند.",
+ "Without a certificate (HTTP) the chat works, but messages and your password are not encrypted on the way. Get an SSL certificate before the internet is cut and paste it below. Your configs stay safe: they are signed.":"بدون گواهی (HTTP) چت کار می‌کند، ولی پیام‌ها و رمز تو در مسیر رمزنگاری نمی‌شوند. قبل از قطعی اینترنت گواهی SSL بگیر و پایین بگذار. کانفیگ‌هایت امن می‌مانند چون امضا می‌شوند.",
+ "Working inbounds":"دروازه‌های فعال",
+ "Working…":"در حال انجام…",
+ "Working… about a minute":"در حال انجام… حدود یک دقیقه",
+ "Works, but messages and your password travel unencrypted. Configs stay safe: they are signed.":"کار می‌کند، ولی پیام‌ها و رمزت رمزنگاری‌نشده می‌روند. کانفیگ‌ها امن می‌مانند چون امضا می‌شوند.",
+ "Write a message; the robot on the first screen of the Kanki app shows it to users, and it disappears by itself when the time is over.":"یک پیام بنویس؛ ربات صفحه‌ی اول اپ کانکی آن را به کاربرها نشان می‌دهد و وقتی زمانش تمام شد خودش پاک می‌شود.",
+ "Write it as owner/repo":"به شکل owner/repo بنویس",
+ "Write the Iran address whose tunnel forwards this UDP port":"آدرس سرور ایرانی را بنویس که تانلش این پورت UDP را عبور می‌دهد",
+ "Write the domain in SNI":"دامنه را در SNI بنویس",
+ "Write the domain in SNI above. The panel points the domain at this server and gets a Let's Encrypt certificate with a DNS challenge (works for servers inside Iran too, nothing has to be open on the server), and renews it every 60 days. The links use the domain.":"دامنه را در SNI بالا بنویس. پنل دامنه را به همین سرور وصل می‌کند و با چالش DNS از Let's Encrypt گواهی می‌گیرد (برای سرورهای داخل ایران هم کار می‌کند و لازم نیست چیزی روی سرور باز باشد) و هر ۶۰ روز تمدید می‌کند. لینک‌ها با همین دامنه ساخته می‌شوند.",
+ "Write the message first":"اول متن پیام را بنویس",
+ "Write the tunnel domain of this server in Servers: the second config is made by itself.":"دامنه‌ی تانل این سرور را در «سرورها» بنویس: کانفیگ دوم خودش ساخته می‌شود.",
+ "Written by Grok":"نوشته‌ی Grok",
+ "Written by the built-in writer":"نوشته‌ی نویسنده‌ی داخلی",
+ "Written inside every user config. Empty = the panel domain.":"داخل کانفیگ همه‌ی کاربرها نوشته می‌شود. خالی = دامنه‌ی پنل.",
+ "Xray":"Xray",
+ "Xray DNS servers (comma separated, empty = the server's own)":"DNSهای Xray (با کاما، خالی = DNS خود سرور)",
+ "Xray can run on the panel server or on any tunnel server. A new server gets a one-line install command.":"Xray روی سرور پنل یا هر سرور تانل اجرا می‌شود. سرور جدید یک دستور نصب یک‌خطی می‌گیرد.",
+ "Xray inbounds for your users: every user with Xray ticked is a client of every inbound":"اینباندهای Xray برای کاربرهای خودت: هر کاربری که تیک Xray دارد کلاینت همه‌ی اینباندهاست",
+ "Xray is not on this server yet.":"Xray هنوز روی این سرور نیست.",
+ "Xray is off":"Xray خاموش است",
+ "Xray is off: nothing runs on the servers and no links go to the users.":"Xray خاموش است: روی سرورها چیزی اجرا نمی‌شود و لینکی به کاربرها نمی‌رسد.",
+ "Xray is on":"Xray روشن است",
+ "Xray node":"نود Xray",
+ "Xray only":"فقط Xray",
+ "Xray page is not loaded yet":"صفحه Xray هنوز بارگذاری نشده",
+ "Xray servers":"سرورهای Xray",
+ "Xray-core version":"نسخه‌ی Xray-core",
+ "You are on the latest version.":"نسخه فعلی بروز است.",
+ "Your IP":"IP شما",
+ "Your messages are signed: the app only trusts messages that really come from you, even over plain HTTP.":"پیام‌های تو امضا می‌شوند: اپ فقط پیامی را قبول می‌کند که واقعاً از طرف تو باشد، حتی روی HTTP.",
+ "ZarinPal":"زرین‌پال",
+ "ZarinPal callback URL":"آدرس بازگشت زرین‌پال",
+ "ZarinPal merchant ID":"مرچنت زرین‌پال",
+ "a Docker container: stop it by hand":"کانتینر داکر است: دستی متوقفش کن",
+ "a system service":"سرویس سیستمی است",
+ "add at least one TCP or UDP port to forward":"حداقل یک پورت TCP یا UDP اضافه کن",
+ "address unknown yet":"آدرس هنوز معلوم نیست",
+ "address: a domain or an IP, like de.example.com":"آدرس: یک دامنه یا IP، مثل de.example.com",
+ "addresses":"IP",
+ "agent":"ایجنت",
+ "all running":"همه روشن",
+ "always resolve for IP rules":"برای قانون‌های IP همیشه IP بگیر",
+ "an outbound tag is English letters, digits, - and _":"تگ خروجی فقط حروف انگلیسی، عدد، - و _",
+ "and":"و",
+ "another Kanki service":"یک سرویس دیگر کانکی",
+ "at least 10 characters":"حداقل ۱۰ کاراکتر",
+ "automatic":"خودکار",
+ "between the servers":"بین سرورها",
+ "built in":"پیش‌ساخته",
+ "by name (fastest)":"با اسم (سریع‌ترین)",
+ "cannot be routed":"قابل مسیردهی نیست",
+ "certbot on the server gets a Let's Encrypt certificate for this domain by itself (no e-mail needed) and renews it. The domain must point to the server; whatever uses port 80 is set aside for a few seconds and comes back by itself. The links use the domain.":"certbot روی سرور خودش برای این دامنه از Let's Encrypt گواهی می‌گیرد (ایمیل لازم نیست) و تمدید می‌کند. دامنه باید به سرور وصل باشد؛ هر چه روی پورت ۸۰ باشد چند ثانیه کنار می‌رود و خودش برمی‌گردد. لینک‌ها با همین دامنه ساخته می‌شوند.",
+ "certbot on this server gets a Let's Encrypt certificate for the domain (no e-mail needed) and renews it by itself; every TLS inbound of this server uses it. The domain must point to this server. Whatever uses port 80 (Caddy, nginx, an inbound …) is set aside for a few seconds and comes back by itself.":"certbot روی همین سرور برای دامنه از Let's Encrypt گواهی می‌گیرد (ایمیل لازم نیست) و خودش تمدید می‌کند؛ همه‌ی اینباندهای TLS این سرور از آن استفاده می‌کنند. دامنه باید به همین سرور وصل باشد. هر چه روی پورت ۸۰ باشد (Caddy، nginx، یک اینباند …) چند ثانیه کنار می‌رود و خودش برمی‌گردد.",
+ "change in Servers":"تغییر در صفحه‌ی سرورها",
+ "choose the entry and the exit server":"سرور ورودی و خروجی را انتخاب کن",
+ "choose the phone type of this file (arm64, armv7 or universal)":"نوع گوشیِ این فایل را انتخاب کن (arm64، armv7 یا universal)",
+ "connected":"وصل",
+ "connections":"اتصال",
+ "cores":"هسته",
+ "countries":"کشور",
+ "current":"فعلی",
+ "days":"روز",
+ "days left":"روز مانده",
+ "default":"پیش‌فرض",
+ "direct":"مستقیم",
+ "domain":"دامنه",
+ "down":"قطع",
+ "e.g. The Germany server is under maintenance for one hour.":"مثلاً: سرور آلمان تا یک ساعت در حال تعمیر است.",
+ "empty = keep it":"خالی = همان قبلی",
+ "empty = latest":"خالی = آخرین نسخه",
+ "empty = same as the SNI":"خالی = همان SNI",
+ "empty = use the domain":"خالی = از خود دامنه استفاده شود",
+ "enter the domain you put on the CDN":"دامنه‌ای که روی CDN گذاشتی را بنویس",
+ "error":"خطا",
+ "every phone":"همه‌ی گوشی‌ها",
+ "exit":"خروجی",
+ "fastest, nothing to maintain":"سریع‌ترین، بدون نیاز به نگهداری",
+ "for UDP":"برای UDP",
+ "for every user?":"برای همه‌ی کاربران روشن شود؟",
+ "for users":"برای کاربران",
+ "from":"از",
+ "from the file name, e.g. 1.15.1":"از روی اسم فایل، مثلاً 1.15.1",
+ "from the toman price at the dollar rate":"از روی قیمت تومان با نرخ دلار",
+ "hours":"ساعت",
+ "hours ago":"ساعت پیش",
+ "inbounds":"اینباند",
+ "is off: it runs on no server and is in no subscription.":"خاموش است: روی هیچ سروری اجرا نمی‌شود و در هیچ اشتراکی نیست.",
+ "is used by":"استفاده شده توسط",
+ "issued":"صادر شده",
+ "joined the panel":"به پنل پیوست",
+ "kept":"نگه‌داشته",
+ "last used":"آخرین استفاده",
+ "left":"مانده",
+ "less than a day":"کمتر از یک روز",
+ "light":"سبک",
+ "like: AI sites through Germany":"مثلاً: سایت‌های هوش مصنوعی از آلمان",
+ "like: best on Irancell":"مثلاً: روی ایرانسل بهتر است",
+ "link between the two servers":"لینک بین دو سرور",
+ "local only (127.0.0.1)":"فقط داخلی (127.0.0.1)",
+ "loss":"افت",
+ "match":"نتیجه",
+ "min":"دقیقه",
+ "minutes ago":"دقیقه پیش",
+ "more inbounds":"اینباند دیگر",
+ "must be open in the cloud firewall":"باید در فایروال سرویس‌دهنده باز باشند",
+ "must be open in the cloud firewall of":"باید در فایروال کلاد این سرور باز باشند:",
+ "name: English letters and digits only, 3-12 characters, starting with a letter (like mahtab87)":"نام فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف و اولش حرف باشد (مثل mahtab87)",
+ "never":"هرگز",
+ "new phones (64-bit)":"گوشی‌های جدید (۶۴ بیتی)",
+ "no answer: update it once with the kanki command":"جواب نداد: یک‌بار با دستور kanki آپدیتش کن",
+ "no name":"بدون اسم",
+ "no tunnels":"بدون تانل",
+ "none":"ندارد",
+ "none yet":"هنوز ندارد",
+ "normal":"معمولی",
+ "not a service: stop it by hand":"سرویس نیست: دستی متوقفش کن",
+ "not installed":"نصب نیست",
+ "not running":"KANKI MIX روی این سرور اجرا نمی‌شود: «ری‌استارت سرویس‌های VPN» را بزن",
+ "of it used":"از آن مصرف شده",
+ "off":"خاموش",
+ "older phones (32-bit)":"گوشی‌های قدیمی (۳۲ بیتی)",
+ "on":"روشن",
+ "on the entry":"روی ورودی",
+ "on the exit":"روی خروجی",
+ "only on request":"فقط با درخواست",
+ "panel":"پنل",
+ "passed":"رد شد",
+ "per page":"در هر صفحه",
+ "pick another port":"پورت دیگری انتخاب کن",
+ "plans":"پلن",
+ "port":"پورت",
+ "press Update agent":"آپدیت Agent را بزن",
+ "queries":"درخواست",
+ "random if empty":"خالی = تصادفی",
+ "relay":"رله",
+ "renewed by itself":"خودش تمدید می‌شود",
+ "renewed by itself every 60 days":"هر ۶۰ روز خودش تمدید می‌شود",
+ "resolve when no name rule matched":"اگر قانون اسمی نخورد، IP بگیر",
+ "reverse":"معکوس",
+ "rotating tunnel, address to dial, target":"تانل چرخشی، آدرس اتصال، مقصد",
+ "routed":"مسیردهی‌شده",
+ "routed names now":"دامنه‌ی مسیردهی‌شده",
+ "running":"روشن",
+ "saved":"ذخیره شده",
+ "seconds":"ثانیه",
+ "seconds ago":"ثانیه پیش",
+ "see the whitelist guide in the tunnel wizard":"راهنمای لیست سفید را در ویزارد تانل ببین",
+ "selected":"انتخاب‌شده",
+ "self-signed":"خودامضا",
+ "server(s) disconnected":"سرور قطع است",
+ "set":"گذاشته شده",
+ "stopped":"متوقف",
+ "strong":"قوی",
+ "taken by":"گرفته شده توسط",
+ "the CDN transport of the tunnels + an ArvanCloud domain":"انتقال CDN تانل‌ها + یک دامنهٔ ابرآروان",
+ "the entry and the exit must be two different servers":"ورودی و خروجی باید دو سرور متفاوت باشند",
+ "the hops made so far were taken back":"مرحله‌هایی که ساخته شده بودند برداشته شدند",
+ "the panel server cannot be removed":"سرور پنل حذف نمی‌شود",
+ "the plain ping between the two servers, as a reference":"پینگ ساده‌ی بین دو سرور، به‌عنوان مرجع",
+ "the port is required":"پورت لازم است",
+ "the port must be 1-65535":"پورت باید ۱ تا ۶۵۵۳۵ باشد",
+ "the same as Kanki DNS":"همان DNS کانکی",
+ "the server IP hides behind the edge":"آی‌پی سرور پشت لبه پنهان می‌شود",
+ "the tunnel domain of the server":"دامنه‌ی تانل سرور",
+ "the tunnel port is also in the forwarded TCP ports":"پورت تانل نباید جزو پورت‌های عبوری TCP باشد",
+ "the tunnel port is also in the forwarded UDP ports":"پورت تانل نباید جزو پورت‌های عبوری UDP باشد",
+ "the tunnel port is required":"پورت تانل لازم است",
+ "this group is off":"این گروه خاموش است",
+ "this is not an Android app (.apk)":"این فایل اپ اندروید (.apk) نیست",
+ "this name is already used by another user":"این نام را کاربر دیگری دارد",
+ "this server":"همین سرور",
+ "times":"بار",
+ "tunnel":"تانل",
+ "tunnel address: a domain or IP only (like ir.example.com)":"آدرس تانل: فقط دامنه یا IP (مثل ir.example.com)",
+ "tunnel name: up to 40 letters, no < > \"":"اسم تانل: حداکثر ۴۰ حرف، بدون < > \"",
+ "tunnel(s) not connected":"تانل وصل نیست",
+ "unchanged":"بدون تغییر",
+ "unknown phone type":"نوع گوشی نامعتبر است",
+ "until":"تا",
+ "users":"کاربر",
+ "users changed":"کاربر تغییر کرد",
+ "users only":"کاربر خاص",
+ "users total":"کاربر",
+ "uses left":"بار مانده",
+ "version":"نسخه",
+ "very strong":"خیلی قوی",
+ "waiting":"در انتظار",
+ "were filled in":"وارد شد",
+ "your extra domains":"دامنه‌های اضافه‌ی خودت"
+};
 var S={lang:localStorage.getItem('kk_lang')||'fa',theme:localStorage.getItem('kk_theme')||'dark',color:localStorage.getItem('kk_color')||'gold',token:localStorage.getItem('kk_tok')||'',me:null,page:'dash',users:[],nodes:[],ov:null,sel:{},q:'',filter:'all',pf:'all',sort:'new',size:12,pg:1,timer:null,timer2:null};
-function t(k){return S.lang=='fa'&&FA[k]?FA[k]:k}
+// a server is one word everywhere: nodes and tunnel servers are the same servers
+var WFA=[[/سرورهای تانل/g,'سرورها'],[/سرور تانل/g,'سرور'],[/Nodeها/g,'سرورها'],[/نودهای/g,'سرورهای'],[/نودها/g,'سرورها'],[/نودی/g,'سروری'],[/نود/g,'سرور']],
+ WEN=[[/\bTunnel servers\b/g,'Servers'],[/\btunnel servers\b/g,'servers'],[/\bTunnel server\b/g,'Server'],[/\btunnel server\b/g,'server'],[/\bNodes\b/g,'Servers'],[/\bnodes\b/g,'servers'],[/\bNode\b/g,'Server'],[/\bnode\b/g,'server']];
+function t(k){var s=S.lang=='fa'&&FA[k]?FA[k]:k;if(typeof s!='string')return s;(S.lang=='fa'?WFA:WEN).forEach(function(r){s=s.replace(r[0],r[1])});return s}
 function $(s,r){return (r||document).querySelector(s)}
 // ---------------------------------------------------------------- calm refreshes
 // The pages redraw their lists every few seconds. Swapping in new HTML rebuilt every element: an open
@@ -1155,12 +2695,19 @@ Object.defineProperty(Element.prototype,'innerHTML',{configurable:true,enumerabl
 function $$(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function toast(m,e){var x=$('#toast');x.textContent=m;x.className=e?'e':'';x.style.display='block';clearTimeout(x._t);x._t=setTimeout(function(){x.style.display='none'},2600)}
-function api(m,p,b,raw){var o={method:m,headers:{}};if(S.token)o.headers.Authorization='Bearer '+S.token;
+// a delete that leaves work on servers shows its progress (kdFollowRemoval)
+var DELRX=/^\/api\/(tunnels\/servers\/[^/?]+|tunnels\/(?!servers|probe|cdntest)[^/?]+|servers\/[^/?]+|nodes\/[^/?]+|xray\/servers\/[^/?]+|dns\/servers\/[^/?]+)(\?.*)?$/;
+function api(m,p,b,raw){var u=p;
+ // a tunnel server is made in Servers
+ if(m=='POST'&&p=='/api/tunnels/servers'&&b&&!b.gre_ip&&!b.addr){p='/api/servers';b={name:b.name,loc:b.loc||'abroad',vpn:b.loc!='iran'};raw=undefined}
+ var o={method:m,headers:{}};if(S.token)o.headers.Authorization='Bearer '+S.token;
  if(b!==undefined&&!(b instanceof Blob)&&!(b instanceof ArrayBuffer)){o.headers['Content-Type']='application/json';o.body=JSON.stringify(b)}else if(b!==undefined)o.body=b;
  if(raw&&raw.headers)for(var k in raw.headers)o.headers[k]=raw.headers[k];
- return fetch(p,o).then(function(r){if(r.status==401&&p!='/api/login'){logout(true);throw new Error('unauthorized')}
+ var pr=fetch(p,o).then(function(r){if(r.status==401&&p!='/api/login'){logout(true);throw new Error('unauthorized')}
   if(raw&&raw.blob)return r.ok?r.blob().then(function(bl){return{blob:bl,name:((r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/)||[])[1]}}):r.json().then(function(j){throw new Error(j.error||r.status)});
-  return r.text().then(function(x){var j;try{j=x?JSON.parse(x):{}}catch(e){j={error:x}}if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})})}
+  return r.text().then(function(x){var j;try{j=x?JSON.parse(x):{}}catch(e){j={error:x}}if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})});
+ if(m=='DELETE'&&DELRX.test(u||''))pr.then(function(r){if(r&&r.removal)kdFollowRemoval(r.removal)},function(){});
+ return pr}
 function fail(e){if(!e||e.message=='unauthorized')return;
  // a page drawn after the admin already left it: nothing to tell
  if(e instanceof TypeError&&/of (null|undefined)/.test(e.message)){console.warn(e);return}
@@ -1192,16 +2739,15 @@ function ago(ts){if(!ts)return t('never');var s=Math.max(0,Math.floor(Date.now()
 function leftTxt(ts){if(!ts)return t('Unlimited');var sec=ts-Date.now()/1000;if(sec<=0)return t('Expired');var d=Math.ceil(sec/86400);return sec<86400?t('less than a day'):N(d)+' '+t('days left')}
 
 // ---------------------------------------------------------------- icons (stroke = currentColor)
-var ICO={edit:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/>',
+var ICO={
+ edit:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/>',
  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
  qr:'<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.2"/><path d="M14 14h3v3M20.5 14v.01M14 20.5h3.5M20.5 17.5v3"/>',
  reset:'<path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 4v4.5h4.5"/>',
  trash:'<path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/>',
  dl:'<path d="M12 4v10M8 10.5l4 4 4-4M5 19h14"/>',
  ext:'<path d="M14 5h5v5M19 5l-8 8M17 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1h4"/>',
- refresh:'<path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.5h-4.5"/>'};
-function ic(n,sz){sz=sz||18;return '<svg viewBox="0 0 24 24" width="'+sz+'" height="'+sz+'" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICO[n]+'</svg>'}
-Object.assign(ICO,{
+ refresh:'<path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.5h-4.5"/>',
  dash:'<rect x="3.5" y="3.5" width="7" height="8.5" rx="2"/><rect x="13.5" y="3.5" width="7" height="5.5" rx="2"/><rect x="13.5" y="12" width="7" height="8.5" rx="2"/><rect x="3.5" y="15.5" width="7" height="5" rx="2"/>',
  users:'<circle cx="9" cy="8.2" r="3.3"/><path d="M3.2 19.5c.4-3.3 2.7-5.2 5.8-5.2s5.4 1.9 5.8 5.2"/><path d="M15.6 5.2a3.2 3.2 0 0 1 0 6"/><path d="M17.4 14.6c2 .5 3.2 2.2 3.4 4.4"/>',
  nodes:'<rect x="3.5" y="4" width="17" height="6.5" rx="2.2"/><rect x="3.5" y="13.5" width="17" height="6.5" rx="2.2"/><path d="M7.2 7.25h.01M7.2 16.75h.01M11 7.25h6M11 16.75h6"/>',
@@ -1218,7 +2764,41 @@ Object.assign(ICO,{
  ram:'<rect x="3" y="7.5" width="18" height="8.5" rx="2"/><path d="M7 7.5v8.5M11 7.5v8.5M15 7.5v8.5M6.5 16v2.5M17.5 16v2.5"/>',
  disk:'<rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M3.5 12h17"/><path d="M8 15.5h.01M11.5 15.5h5"/>',
  swap:'<path d="M6 8h12l-3.2-3.2M18 16H6l3.2 3.2"/>',
- image:'<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4"/>'});
+ image:'<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4"/>',
+ chev:'<path d="M6 9l6 6 6-6"/>',
+ sos:'<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/><path d="M6 6l3.5 3.5M18 6l-3.5 3.5M6 18l3.5-3.5M18 18l-3.5-3.5"/>',
+ bell:'<path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2H4.5z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+ globe:'<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.6 3.8 5.4 3.8 8.5S14.6 17.9 12 20.5C9.4 17.9 8.2 15.1 8.2 12S9.4 6.1 12 3.5z"/>',
+ shield2:'<path d="M12 3.4l7 2.8v5.3c0 4.4-2.9 7.7-7 9-4.1-1.3-7-4.6-7-9V6.2l7-2.8z"/><path d="M9 12h6M12 9v6"/>',
+ brush:'<path d="M14.5 4.5l5 5-8.2 8.2a3 3 0 0 1-4.3 0l-.7-.7a3 3 0 0 1 0-4.3z"/><path d="M6.3 13l4.7 4.7M3.5 20.5c1.8 0 3-1 3-2.5"/>',
+ box:'<path d="M4 7.5l8-4 8 4v9l-8 4-8-4z"/><path d="M4 7.5l8 4 8-4M12 11.5v9"/>',
+ copy:'<rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/>',
+ play:'<path d="M8 5.5v13l10.5-6.5z"/>',
+ pause:'<path d="M8.5 5.5v13M15.5 5.5v13"/>',
+ bot:'<rect x="4.5" y="8" width="15" height="11" rx="3.5"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1.2"/><circle cx="9.3" cy="13.2" r="1.2"/><circle cx="14.7" cy="13.2" r="1.2"/><path d="M9.5 16.5h5M2.5 12.5v3M21.5 12.5v3"/>',
+ traffic:'<path d="M4 19.5h16"/><path d="M7 16v-5M11 16V7M15 16v-7.5M19 16V4.5"/>',
+ ports:'<path d="M9 3.5v4.5M15 3.5v4.5"/><path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0z"/><path d="M12 17v3.5"/>',
+ send:'<path d="M20.5 3.5L3.5 10.5l7 2.5 2.5 7z"/><path d="M10.5 13l5-5"/>',
+ term:'<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M7.5 9.5l3 2.5-3 2.5M12.5 15h4"/>',
+ gift:'<rect x="4" y="9" width="16" height="11" rx="2"/><path d="M4 13h16M12 9v11"/><path d="M12 9c-2.5 0-4.5-1-4.5-2.7S9.6 3.8 12 9zM12 9c2.5 0 4.5-1 4.5-2.7S14.4 3.8 12 9z"/>',
+ card:'<rect x="3" y="6" width="18" height="12.5" rx="2.5"/><path d="M3 10.5h18M7 15h3.5"/>',
+ move:'<path d="M4 8h13.5l-3.5-3.5M20 16H6.5l3.5 3.5"/>',
+ tunnel:'<path d="M3 19v-7a9 9 0 0 1 18 0v7"/><path d="M7.5 19v-6.5a4.5 4.5 0 0 1 9 0V19"/><path d="M1.5 19h21"/>',
+ srv:'<rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M12 6.5h5M12 17.5h5"/>',
+ dns:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+ xray:'<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+ game:'<path d="M6 11h4M8 9v4"/><circle cx="15.5" cy="12.5" r=".6"/><circle cx="17.5" cy="10.5" r=".6"/><path d="M7.5 6h9a5 5 0 0 1 4.8 6.3l-1 3.6a2.6 2.6 0 0 1-4.6.9L14.5 15h-5l-1.2 1.8a2.6 2.6 0 0 1-4.6-.9l-1-3.6A5 5 0 0 1 7.5 6z"/>',
+ more38:'<circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/>',
+ sun38:'<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>',
+ k310sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>',
+ k310online:'<path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 15.8a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1.2"/>',
+ k310ok:'<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-4.9"/>',
+ k310warn:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.2l3 1.8"/>',
+ k310off:'<circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/>',
+ k310traffic:'<path d="M7 4v14M3.5 14.5L7 18l3.5-3.5"/><path d="M17 20V6M13.5 9.5L17 6l3.5 3.5"/>',
+ cores:'<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>'
+};
+function ic(n,sz){sz=sz||18;return '<svg viewBox="0 0 24 24" width="'+sz+'" height="'+sz+'" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+ICO[n]+'</svg>'}
 // logo: the uploaded image (Settings > Logo) or the first letter; cached so the login page can show it too
 function logoOk(s){return /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+\/=]+$/.test(s||'')}
 function curLogo(){var l=(S.me&&S.me.logo)||(S.me?'':localStorage.getItem('kk_logo'))||'';return logoOk(l)?l:''}
@@ -1242,8 +2822,10 @@ function areaChart(series,o){var W=300,H=o.h||100,cap=o.cap||60,mx=o.max||0,i,j,
  return out+'</svg>'}
 
 function applyLook(){document.documentElement.lang=S.lang;document.documentElement.dir=S.lang=='fa'?'rtl':'ltr';
- document.body.className=(S.theme=='light'?'light ':'')+(S.color&&S.color!='gold'?'c-'+S.color:'')}
-var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e']];
+ var b=document.body.classList;b.toggle('light',S.theme=='light');
+ Array.prototype.slice.call(b).forEach(function(c){if(c.indexOf('c-')==0)b.remove(c)});if(S.color&&S.color!='gold')b.add('c-'+S.color);
+ b.add('k38');if($('#side'))b.add('v37');V37.drawLooks()}
+var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['kgame','MIX+\u200e'],['xray','Xray'],['dns','DNS']];
 function pname(p){for(var i=0;i<PROTOS.length;i++)if(PROTOS[i][0]==p)return PROTOS[i][1];return p}
 function modal(html,cls){var b=$('#mbox');b.className='mbox'+(cls?' '+cls:'');b.innerHTML=html;b.scrollTop=0;$('#modal').classList.add('on');document.body.style.overflow='hidden'}
 function closeModal(){$('#modal').classList.remove('on');document.body.style.overflow=''}
@@ -1255,74 +2837,28 @@ function confirmDo(fn){if(confirm(t('Are you sure?')))fn()}
 function dl(blobRes){var a=document.createElement('a');a.href=URL.createObjectURL(blobRes.blob);a.download=blobRes.name||'download';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},2000)}
 
 // ---------------------------------------------------------------- login
-function loginView(otp){applyLook();clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);
- $('#app').innerHTML='<div class="login"><div class="'+logoCls()+'">'+logoInner('K')+'</div><div class="card"><h3 style="text-align:center;margin-bottom:12px">'+esc(document.title)+'</h3>'+
+function loginView(otp){$('#app').innerHTML='';document.body.className='';applyLook();clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);
+ var sun=function(){return ic(document.body.classList.contains('light')?'moon':'k310sun',17)};
+ $('#app').innerHTML='<div class="login k310login"><i class="k310orb a"></i><i class="k310orb b"></i><div class="'+logoCls()+'">'+logoInner('K')+'</div><div class="k310brand">'+t('VPN management panel')+'</div>'+
+ '<div class="card"><h3>'+esc(document.title)+'</h3><p class="k310sub">'+t('Sign in to continue')+'</p>'+
  '<label class="f">'+t('Username')+'</label><input id="lu" autocomplete="username" class="ltr">'+
  '<label class="f">'+t('Password')+'</label><input id="lp" type="password" autocomplete="current-password" class="ltr">'+
  '<div id="otpw" class="'+(otp?'':'hide')+'"><label class="f">'+t('2FA code')+'</label><input id="lo" inputmode="numeric" maxlength="6" class="ltr" autocomplete="one-time-code"></div>'+
  '<button class="btn" style="width:100%;margin-top:14px" id="lb">'+t('Login')+'</button>'+
- '<div class="row" style="justify-content:center;margin-top:10px"><button class="ib" id="ll">'+(S.lang=='fa'?'EN':'FA')+'</button><button class="ib" id="lt">◐</button></div></div></div>';
+ '<div class="row" style="justify-content:center;margin-top:10px"><button class="ib" id="ll" title="'+t('Language')+'" aria-label="'+t('Language')+'">'+(S.lang=='fa'?'EN':'FA')+'</button><button class="ib" id="lt" title="'+t('Light / dark')+'" aria-label="'+t('Light / dark')+'">'+sun()+'</button></div></div></div>';
  function go(){api('POST','/api/login',{username:$('#lu').value,password:$('#lp').value,otp:$('#lo').value}).then(function(r){S.token=r.token;localStorage.setItem('kk_tok',r.token);boot()}).catch(function(e){if(e.data&&e.data.need_otp){$('#otpw').classList.remove('hide');$('#lo').focus()}fail(e)})}
  $('#lb').onclick=go;$$('#lu,#lp,#lo').forEach(function(i){i.onkeydown=function(e){if(e.key=='Enter')go()}});
  $('#ll').onclick=function(){S.lang=S.lang=='fa'?'en':'fa';localStorage.setItem('kk_lang',S.lang);loginView(!$('#otpw').classList.contains('hide'))};
- $('#lt').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook()};
+ $('#lt').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook();this.innerHTML=sun()};
 }
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
 // ---------------------------------------------------------------- shell
-ICO.chev='<path d="M6 9l6 6 6-6"/>';
 var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['kgame','MIX+\u200e','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
-// sidebar groups (v2.8.4): [label, page keys]
-// menu (v3.5): single pages and groups that open in place. An item is [page, sub page, label, note].
-var NAV=[{p:'dash'},{p:'users'},{p:'nodes'},
- {g:'vpn',l:'VPN services',i:'shield2',items:[['vpn','','All VPN services','Kanki VPN and Xray side by side'],['kmix','','KANKI MIX','Our own protocol: games, low ping'],['kgame','','MIX+\u200e','KCP + FEC for games, low lag'],['xray','','Xray','VLESS · VMess · Trojan · Shadowsocks'],['antidpi','','Anti-DPI tunnels','REALITY · WS/gRPC behind CDN · Hysteria2']]},
- {g:'net',l:'Tunnels',i:'tunnel',items:[['tunnels','','Tunnels','Links between your servers'],['servers','','Tunnel servers','Iran and abroad servers of the tunnels'],['ports','','Port management','Which port each service uses']]},
- {g:'dnsg',l:'Kanki DNS',i:'dns',items:[['dns','overview','Overview','Status of the DNS servers'],['dns','servers','DNS servers','Exits abroad and relays in Iran'],['dns','pubg','PUBG and games','Which part of the game goes through'],['dns','services','Services','What goes through the DNS'],['dns','users','DNS users','Registered addresses and use'],['dns','log','Query log','Names your users asked'],['dns','settings','Settings and SSL','Domain, certificate, upstreams']]},
- {g:'sales',l:'Sales & support',i:'bot',items:[['bot','','Sales bot','Plans, payments, Telegram'],['emergency','','Emergency chat','Talk to users when the internet is cut']]},
- {p:'traffic'},
- {g:'sys',l:'System',i:'settings',items:[['settings','','Settings','How the panel looks and works'],['backup','','Backup','Save and restore everything'],['security','','Security','Password, 2FA, sessions']]}];
-Object.assign(FA,{"rotating tunnel, address to dial, target":"تانل چرخشی، آدرس اتصال، مقصد","Links between your servers":"اتصال بین سرورهایت","Iran and abroad servers of the tunnels":"سرورهای ایران و خارج تانل‌ها","Which port each service uses":"هر سرویس کدام پورت را دارد",
- "Which part of the game goes through":"کدام بخش بازی از سرور رد شود","Names your users asked":"نام‌هایی که کاربرها پرسیده‌اند","Plans, payments, Telegram":"پلن‌ها، پرداخت، تلگرام","Talk to users when the internet is cut":"گفتگو با کاربرها وقتی اینترنت قطع است",
- "How the panel looks and works":"ظاهر و کارکرد پنل","Save and restore everything":"ذخیره و بازگردانی همه چیز","Password, 2FA, sessions":"رمز، تأیید دومرحله‌ای، نشست‌ها","PUBG and games":"پابجی و بازی‌ها","Query log":"گزارش پرس‌وجوها"});
-var NAVG=[];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
-function navGroupOf(k){for(var i=0;i<NAV.length;i++){var g=NAV[i];if(g.items&&g.items.some(function(x){return x[0]==k}))return g.g}return ''}
-var NAVOPEN={};try{NAVOPEN=JSON.parse(localStorage.getItem('kk_nav')||'{}')||{}}catch(e){}
-function navHref(x){return '#'+x[0]+(x[1]?'/'+x[1]:'')}
-function shell(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.charAt(0);
- $('#app').innerHTML='<header class="top"><div class="'+logoCls()+'" id="mlogo">'+logoInner(L)+'</div>'+
- '<div class="tb-title"><small><span>'+esc(nm)+'</span><span>›</span><span id="tbsec"></span></small><b id="tbt"></b></div><div class="sp"></div>'+
- '<div class="tb-act"><div class="segl"><button data-l="fa" class="'+(S.lang=='fa'?'on':'')+'">FA</button><button data-l="en" class="'+(S.lang=='en'?'on':'')+'">EN</button></div>'+
- '<button class="ib" id="thm" title="'+t('Theme')+'" aria-label="theme">'+ic('moon',17)+'</button>'+
- '<button class="ib" id="upd" title="'+t('Update')+'"><span class="dot" id="updot"></span><span class="uv ltr">v'+esc(me.version||'')+'</span></button>'+
- '<div class="uchip2" title="'+esc(me.user||'')+'"><i>'+esc((me.user||'A').charAt(0).toUpperCase())+'</i><span>'+esc(me.user||'')+'</span></div>'+
- '<button class="ib" id="lo" title="'+t('Logout')+'" aria-label="logout">'+ic('logout',17)+'</button></div></header>'+
- '<nav class="side" id="side"><div class="sbrand"><div class="'+logoCls()+'">'+logoInner(L)+'</div><div style="min-width:0"><b>'+esc(nm)+'</b><small>'+t('VPN management')+'</small></div></div>'+
- '<div class="snav">'+navSide()+'</div>'+
- '<div class="sfoot"><button class="sver" id="upd2"><span class="dot" id="updot2"></span><span><b class="ltr">v'+esc(me.version||'')+'</b><small id="updt">'+t('Check for update')+'</small></span></button>'+
- '<a href="#" id="lo2" class="lo2"><span class="ni">'+ic('logout',18)+'</span>'+t('Logout')+'</a></div></nav><div class="shade" id="shade"></div>'+navBar()+'<main id="pg"></main>';
- $('#shade').onclick=function(){$('#side').classList.remove('on');$('#shade').classList.remove('on')};
- $$('#side .ngh').forEach(function(b){b.onclick=function(){var d=b.parentNode,o=!d.classList.contains('open');d.classList.toggle('open',o);NAVOPEN[b.dataset.g]=o;try{localStorage.setItem('kk_nav',JSON.stringify(NAVOPEN))}catch(e){}}});
- $$('#mbar [data-g]').forEach(function(b){b.onclick=function(e){e.stopPropagation();navSheet(b.dataset.g)}});
- $('#msheet').onclick=function(e){if(e.target.closest('a'))navMark(S.page,S.sub)};
- if(!window._navDoc){window._navDoc=1;document.addEventListener('click',function(e){var sh=$('#msheet');if(sh&&sh.classList.contains('on')&&!e.target.closest('#msheet,#mbar'))navMark(S.page,S.sub)})}
- $$('[data-l]').forEach(function(b){b.onclick=function(){S.lang=b.dataset.l;localStorage.setItem('kk_lang',S.lang);applyLook();shell();route()}});
- $('#thm').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook()};
- $('#lo').onclick=function(){logout()};$('#lo2').onclick=function(e){e.preventDefault();logout()};
- $('#upd').onclick=updateModal;$('#upd2').onclick=function(){$('#shade').click();location.hash='#settings';S.stsec='upd';if(S.page=='settings')route()};
- // page headers get the page icon, whenever a page draws (or redraws) its header
- if(window.MutationObserver)new MutationObserver(decoratePh).observe($('#pg'),{childList:true,subtree:true});
- api('GET','/api/update/check').then(function(r){var c='dot '+(r.available?'y':(r.error?'':'g'));
-  ['#updot','#updot2'].forEach(function(x){var d=$(x);if(d)d.className=c});
-  var u=$('#updt');if(u)u.textContent=r.available?t('A new version is available.'):(r.error?t('Update source not set'):t('You are on the latest version.'))}).catch(function(){});
-}
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);
  var i=document.createElement('span');i.className='phi';i.innerHTML=ic(pgOf(S.page)[2],22);d.appendChild(i);d.appendChild(inner)}
-function route(){var h=(location.hash||'#dash').slice(1).split('/'),p=h[0];S.sub=h[1]||'';if(!PAGES.some(function(x){return x[0]==p})){p='dash';S.sub=''}S.page=p;
- var tb=$('#tbt');if(tb){tb.textContent=t(pgOf(p)[1]);$('#tbsec').textContent=t(grpOf(p))}
- navMark(p,S.sub);clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);window.scrollTo(0,0);
- (({dash:pDash,users:pUsers,nodes:pNodes,servers:pServers,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,emergency:pEmergency,backup:pBackup,security:pSecurity,settings:pSettings})[p]||window['p_'+p])()}
 window.addEventListener('hashchange',function(){if(!S.token||!S.me)return;var h=(location.hash||'#dash').slice(1).split('/');
  // moving between the tabs of the page already open: only the tab changes
  if(h[0]==S.page&&window['tab_'+S.page]&&$('#pg .ptabs')){S.sub=h[1]||'';navMark(S.page,S.sub);window['tab_'+S.page](S.sub);return}route()});
@@ -1345,27 +2881,6 @@ function gcard(id,title,icon){return '<div class="gc" id="gc_'+id+'"><div class=
 function setRing(id,p,val,sub){var f=$('#rf_'+id);if(!f)return;f.setAttribute('stroke-dasharray',(p*2.136).toFixed(1)+' 213.6');
  $('#gc_'+id).className='gc'+(p>=90?' hot':p>=70?' warm':'');$('#rt_'+id).textContent=N(Math.round(p))+'%';
  $('#gv_'+id).innerHTML=/^[\d۰-۹]/.test(val)?'<bdi class="ltr">'+esc(val)+'</bdi>':esc(val);$('#gs_'+id).textContent=sub||''}
-function pDash(){dbReset();
- $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Dashboard')+'</h2><p class="ltr" id="d_sub" style="text-align:start">…</p></div>'+
- '<div class="row" style="gap:6px;flex-wrap:nowrap"><span class="live" id="d_live"><i></i><span id="d_lt">'+t('Live')+'</span></span>'+
- '<select id="d_iv" style="width:auto;padding:6px 9px;font-size:12px">'+[1,2,5,10].map(function(n){return '<option value="'+n+'"'+(n==DB.iv?' selected':'')+'>'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select>'+
- '<button class="ib" id="d_pause" title="'+t('Pause')+'">❚❚</button></div></div>'+
- '<div class="kpis" id="kpis"></div>'+
- '<div class="gg">'+gcard('cpu','CPU',ic('cpu',16))+gcard('ram','RAM',ic('ram',16))+gcard('disk','Storage',ic('disk',16))+gcard('swap','Swap',ic('swap',16))+'</div>'+
- '<div class="card" id="nc" style="margin-bottom:12px"></div>'+
- '<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('Network speed')+'</h3><small class="muted ltr" id="n_if"></small></div>'+
-  '<div class="nbig"><div class="dn"><small>↓ '+t('Download')+'</small><b id="n_rx" class="ltr">—</b></div><div class="upl"><small>↑ '+t('Upload')+'</small><b id="n_tx" class="ltr">—</b></div></div></div>'+
-  '<div class="ch tall" id="ch_net"></div>'+
-  '<div class="nf ltr"><span>'+t('Peak')+' ↓ <b id="n_prx">—</b></span><span>'+t('Peak')+' ↑ <b id="n_ptx">—</b></span><span>'+t('Total since boot')+' ↓ <b id="n_trx">—</b></span><span>↑ <b id="n_ttx">—</b></span></div></div>'+
- '<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('TCP / UDP connections')+'</h3><small class="muted" id="c_sub"></small></div>'+
-  '<div class="nbig"><div class="dn"><small>TCP</small><b id="c_tcp" class="ltr">—</b></div><div class="upl"><small>UDP</small><b id="c_udp" class="ltr">—</b></div></div></div>'+
-  '<div class="ch tall" id="ch_con"></div></div>'+
- '<div class="card"><h3>'+t('Services')+'</h3><p class="sub">'+t('Start, stop or restart the VPN services')+'</p><div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></div>'+tunDashCard()+logCard();
- $('#d_iv').onchange=function(){DB.iv=+this.value;localStorage.setItem('kk_div',DB.iv);dashTimers()};
- $('#d_pause').onclick=function(){DB.paused=!DB.paused;if(!DB.paused)DB.last=null;this.textContent=DB.paused?'▶':'❚❚';this.title=DB.paused?t('Resume'):t('Pause');dashLive(DB.paused?'off':'')};
- $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};logWire();tunDashWire();
- $('#kpis').onclick=function(e){var b=e.target.closest('[data-go]');if(b)goUsers(b.dataset.go)};
- dashTick();dashSys();dashTimers()}
 function dashTimers(){clearInterval(S.timer);clearInterval(S.timer2);S.timer=setInterval(dashTick,DB.iv*1000);S.timer2=setInterval(dashSys,10000)}
 function dashLive(state){var l=$('#d_live');if(!l)return;l.className='live'+(state?' '+state:'');$('#d_lt').textContent=state=='bad'?t('Reconnecting…'):state=='off'?t('Paused'):t('Live')}
 function goUsers(f){S.filter=f;S.q='';S.pg=1;S.pf='all';location.hash='#users'}
@@ -1402,9 +2917,6 @@ function dashSys(){if(S.page!='dash'||document.visibilityState!='visible')return
 
 function goNodes(add){S.openAdd=!!add;if(location.hash=='#nodes')route();else location.hash='#nodes'}
 
-function drawKpis(o){var el=$('#kpis');if(!el||!o)return;
- var it=[['a','Total users',o.users,'all'],['g','Online',o.online,'online'],['g','Active',o.active,'active'],['y','Expired / out of data',o.expired,'finished'],['r','Disabled',o.disabled,'disabled'],['a','Total traffic',N(o.traffic_gb)+' GB','']];
- el.innerHTML=it.map(function(x){return '<button class="kpi '+x[0]+'" '+(x[3]?'data-go="'+x[3]+'"':'')+'><small>'+t(x[1])+'</small><b class="ltr">'+(typeof x[2]=='number'?N(x[2]):x[2])+'</b></button>'}).join('')}
 function drawSvcs(list){var el=$('#svcs');if(!el)return;list=(list||[]);
  if(!list.length){el.innerHTML='<span class="muted">—</span>';return}
  el.innerHTML=list.map(function(x){var fixed=['web','panel','node'].indexOf(x.key)>=0,k=esc(x.key);
@@ -1417,7 +2929,7 @@ function svc(k,a){var go=function(){toast(t('Checking…'));api('POST','/api/ser
  if(a=='start')go();else confirmDo(go)}
 
 // ---------------------------------------------------------------- users
-var PCOL={wg:'#1fa36b',awg:'#7c5cf0',hy2:'#d1497a',kmix:'#ff7a1a',kgame:'#e0b04a'};
+var PCOL={wg:'#1fa36b',awg:'#7c5cf0',hy2:'#d1497a',kmix:'#ff7a1a',kgame:'#e0b04a',xray:'#e0a020',dns:'#2a9df4'};
 var SORTS={new:function(a,b){return b.id-a.id},old:function(a,b){return a.id-b.id},name:function(a,b){return a.username.toLowerCase()<b.username.toLowerCase()?-1:1},
  usage:function(a,b){return usageVal(b)-usageVal(a)},expiry:function(a,b){return expVal(a)-expVal(b)},seen:function(a,b){return (b.last_seen_ts||0)-(a.last_seen_ts||0)}};
 function usageVal(u){return u.traffic_limit_gb>0?u.traffic_used_gb/u.traffic_limit_gb:-1}
@@ -1477,9 +2989,8 @@ function liveShort(p){return {wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',kgame:'MIX+
 // Iran flag when that config goes through an Iran tunnel
 function liveBadges(lv){var by={},order=[];lv.forEach(function(c){if(!by[c.p]){by[c.p]=[];order.push(c.p)}by[c.p].push(c)});
  return order.slice(0,3).map(function(p){var fl='',seen={};by[p].forEach(function(c){var k=(c.cc||'')+(c.t?'+':'');if(seen[k])return;seen[k]=1;
-   if(c.cc&&window.flagOf)fl+='<span class="lvf">'+flagOf(c.cc)+'</span>';if(c.t&&window.flagOf)fl+='<span class="lvf lvir">'+flagOf('IR')+'</span>'});
+   if(c.cc)fl+='<span class="lvf">'+flagOf(c.cc)+'</span>';if(c.t)fl+='<span class="lvf lvir">'+flagOf('IR')+'</span>'});
   return '<i dir="ltr" style="--pc:'+(PCOL[p]||'#888')+'">'+liveShort(p)+(fl?' '+fl:'')+'</i>'}).join('')}
-(function(){var st=document.createElement('style');st.textContent='.uchip.kd-u .kd-un{flex-wrap:wrap}.uchip.kd-u .kd-un .lvs{order:9;flex-basis:100%;display:flex;gap:4px;flex-wrap:wrap;margin-top:4px}.uchip.kd-u .kd-un .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lvs i{display:inline-flex;align-items:center;gap:2px;white-space:nowrap}.lvf{font-size:11px;line-height:1;font-style:normal}.lvf.lvir{font-size:9px;opacity:.9}';document.head.appendChild(st)})();
 function filtered(){var q=S.q.trim().toLowerCase(),f=S.filter;
  var out=S.users.filter(function(u){
   if(q&&(u.username+' '+u.notes+' '+(u.tg_id||'')).toLowerCase().indexOf(q)<0)return false;
@@ -1506,10 +3017,8 @@ function drawPager(pages){var el=$('#pager');if(!el)return;var h='',i,nums=[];
  h+='<select id="psz" aria-label="'+t('per page')+'">'+[24,48,96,200].map(function(n){return '<option value="'+n+'"'+(n==S.size?' selected':'')+'>'+N(n)+' '+t('per page')+'</option>'}).join('')+'</select>';
  el.innerHTML=h}
 // ---- single-user actions
-function toggleU(id,cb){cb.disabled=true;api('POST','/api/users/'+id+'/toggle').then(function(){toast(t('Done'));loadUsers()}).catch(function(e){cb.checked=!cb.checked;cb.disabled=false;fail(e)})}
 function resetU(id){confirmDo(function(){api('POST','/api/users/'+id+'/reset').then(function(){toast(t('Done'));loadUsers()}).catch(fail)})}
 function delU(id){confirmDo(function(){api('DELETE','/api/users/'+id).then(function(){closeModal();toast(t('Done'));loadUsers()}).catch(fail)})}
-function uAct(id,a){api('POST','/api/users/'+id+'/'+a).then(function(){toast(t('Done'));loadUsers()}).catch(fail)}
 
 // ---- bulk actions
 function bulkDo(a){var ids=Object.keys(S.sel).map(Number);if(a=='clear'){S.sel={};drawUsers();return}if(!ids.length)return;if(a=='extend')return bulkExtend(ids);
@@ -1522,9 +3031,6 @@ function bulkExtend(ids){modal(mhead(t('Extend'),N(ids.length)+' '+t('selected')
 
 // ---- QR / configs
 function qrInto(el,text){el.innerHTML='<div class="qr" style="margin:8px 0"></div>';api('GET','/api/qr?text='+encodeURIComponent(text),undefined,{blob:1}).then(function(r){var i=new Image();i.alt='QR';i.src=URL.createObjectURL(r.blob);el.querySelector('.qr').appendChild(i)}).catch(fail)}
-function qrModal(id){var u=findU(id);if(!u)return;
- modal(mhead(u.username,'QR')+'<div id="qrx"></div><div class="lk">'+esc(u.link)+'</div><div class="g2" style="gap:8px"><button class="b2" id="q_cp">'+ic('link',16)+' '+t('Copy link')+'</button><a class="b2" style="text-align:center;text-decoration:none" target="_blank" rel="noopener" href="'+esc(u.link)+'">'+ic('ext',16)+' '+t('Open page')+'</a></div>');
- qrInto($('#qrx'),u.link);$('#q_cp').onclick=function(){copy(u.link)}}
 function sheetCfg(id){var u=findU(id);if(!u)return;var un=u.nodes.split(',').filter(Boolean),pr=u.protocols.split(','),map={wg:'wireguard',awg:'amneziawg',hy2:'hysteria2',kmix:'kankimix'},rows='';
  S.nodes.forEach(function(n){if(un.length&&un.indexOf(n.id)<0)return;if(!un.length&&!n.accept_all)return;var inf=n.info||{},b='';
   pr.forEach(function(p){if(!map[p])return;var base='/api/config/'+u.id+'/'+map[p]+'?sub='+encodeURIComponent(u.code)+'&node='+encodeURIComponent(n.id);
@@ -1550,9 +3056,6 @@ function qGB(n,u){var cur=+$('#f_gb').value||0,used=u?u.traffic_used_gb:0,base=c
 // user / config names: English letters and digits, 3-12, starting with a letter (WireGuard apps refuse other names)
 var NAME_ERR='name: English letters and digits only, 3-12 characters, starting with a letter (like mahtab87)';
 function nameOk(v){return /^[A-Za-z][A-Za-z0-9]{2,11}$/.test(v)}
-Object.assign(FA,{"English letters and digits, 3-12, starting with a letter (like mahtab87). No spaces, emoji or symbols.":"فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف و اولش حرف (مثل mahtab87). فاصله، ایموجی و علامت ننویس.",
- "name: English letters and digits only, 3-12 characters, starting with a letter (like mahtab87)":"نام فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف و اولش حرف باشد (مثل mahtab87)",
- "this name is already used by another user":"این نام را کاربر دیگری دارد"});
 function ufForm(u){var protos=u?u.protocols.split(','):((S.me&&S.me.default_protocols)||'wg,awg,hy2').split(','),un=u?u.nodes.split(',').filter(Boolean):[],
   me0=S.me||{},dd=Math.max(1,+me0.def_days||30),exp=u?u.expires_ts:Math.floor(Date.now()/1000)+dd*86400,h='<div class="g2f">';
  h+='<div class="full"><label class="f">'+t('Username')+'</label><input id="f_name" class="ltr" autocomplete="off" value="'+esc(u?u.username:'')+'" placeholder="'+(u?'':t('Optional, created if empty'))+'" maxlength="12"><small class="muted">'+t('English letters and digits, 3-12, starting with a letter (like mahtab87). No spaces, emoji or symbols.')+'</small></div>';
@@ -1576,22 +3079,10 @@ function newUser(){modal(mhead(t('New user'))+ufForm(null)+'<button class="btn" 
   api('POST','/api/users',b).then(function(r){toast(t('Saved'));return loadUsers().then(function(){var u=r&&r.length==1&&findU(r[0].id);if(u)editUser(u.id,'link');else closeModal()})}).catch(function(e){me.disabled=false;fail(e)})}}
 
 // ---------------------------------------------------------------- nodes
-function pNodes(){var sec=function(id,icon,title,sub,btns,body){return '<section class="srvsec" id="'+id+'"><div class="srvh"><span class="phi">'+ic(icon,20)+'</span><div><b>'+t(title)+'</b><small>'+t(sub)+'</small></div><span class="sp"></span>'+btns+'</div>'+body+'</section>'};
- var add=function(fn,label,cls){return '<button class="'+(cls||'btn')+' sm" onclick="'+fn+'">'+ic('plus',14)+' '+t(label)+'</button>'};
- $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Servers')+'</h2><p>'+t('Every server of the panel: Kanki VPN, Xray and Kanki DNS')+'</p></div><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button></div>'+
-  sec('sv_k','nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX',add('(window._nodeAdd||nodeAdd)()','Add server'),'<div class="ncards" id="nl">'+t('Loading…')+'</div>')+
-  (window.xrServers?sec('sv_x','xray','Xray','VLESS · VMess · Trojan · Shadowsocks',add('xrAddNode()','Add server'),'<div class="card" id="nl_x">'+t('Loading…')+'</div>'):'')+
-  (window.dnsServers?sec('sv_d','dns','Kanki DNS','For the app: games and sanctioned sites',add("dnsAdd('exit')",'Exit server (abroad)')+add("dnsAdd('relay')",'Relay (Iran)','b2'),'<div id="nl_d">'+t('Loading…')+'</div>'):'');
- loadNodes();autoRefresh(loadNodes);if(S.openAdd){S.openAdd=false;setTimeout(nodeAdd,150)}}
-function loadNodes(){api('GET','/api/nodes').then(function(n){S.nodes=n;drawNodes()}).catch(fail);
- if(window.xrServers)api('GET','/api/xray').then(function(d){XR.d=d;var el=$('#nl_x');if(el&&S.page=='nodes')el.innerHTML=xrServers(d)}).catch(function(){});
- if(window.dnsServers)api('GET','/api/dns').then(function(d){DN.d=d;var el=$('#nl_d');if(el&&S.page=='nodes')el.innerHTML=dnsServers(d)}).catch(function(){})}
 // ---- node health: judged from the last sync and the CPU / RAM / disk the node reports
 // the version the panel really runs (an older saved one of its own server made every up-to-date agent look old)
 function panelVer(){if(S.me&&S.me.version)return S.me.version;var l=(S.nodes||[]).filter(function(x){return x.id=='local'})[0];return l&&l.info&&l.info.version||''}
-// a < b as versions (3.9.10 is newer than 3.9.9)
-function verLt(a,b){var x=String(a).split('.').map(function(v){return parseInt(v,10)||0}),y=String(b).split('.').map(function(v){return parseInt(v,10)||0});
- for(var i=0;i<Math.max(x.length,y.length);i++){if((x[i]||0)!=(y[i]||0))return (x[i]||0)<(y[i]||0)}return false}
+
 function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bump=function(l,m){r.push([l,m]);if(l>lv)lv=l};
  if(!loc&&n.sync_state=='pin mismatch')return{lv:2,c:'r',l:'Problem',r:[[2,'The node\'s certificate changed (reinstalled?): run its join command again, or remove and add the node']]};
  if(!loc&&!n.online)return{lv:2,c:'r',l:'Problem',r:[[2,'Not reachable: check the server, its agent and the firewall']]};
@@ -1607,83 +3098,16 @@ function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bu
  var pv=panelVer();if(!loc&&pv&&i.version&&verLt(i.version,pv))bump(1,t('Agent is on an older version')+' (v'+i.version+'): '+t('press Update agent'));
  if(n.maint)bump(1,'Under maintenance: new users are not sent here');
  return lv==2?{lv:2,c:'r',l:'Problem',r:r}:lv==1?{lv:1,c:'y',l:'Under pressure',r:r}:{lv:0,c:'g',l:'Healthy',r:r}}
-function upTime(s){s=+s||0;var d=Math.floor(s/86400),h=Math.floor(s%86400/3600);return d?N(d)+' '+t('days')+' '+N(h)+' '+t('hours'):N(h)+' '+t('hours')+' '+N(Math.floor(s%3600/60))+' '+t('min')}
 function nMeter(lbl,p,txt){var c=p>=90?'var(--bad)':p>=70?'var(--warn)':'var(--ok)';
  return '<div class="nm"><div class="nmh"><small>'+t(lbl)+'</small><b class="ltr">'+txt+'</b></div><i><s style="width:'+Math.round(p)+'%;background:'+c+'"></s></i></div>'}
 S.nopen=S.nopen||{};
-function drawNodes(){var el=$('#nl');if(!el)return;el.innerHTML=S.nodes.map(function(n){var loc=n.id=='local',h=nHealthOf(n),st=(n.info||{}).stats,op=!!S.nopen[n.id],id=esc(n.id);
- var sy=n.sync_state=='synced'?'<span class="okt">'+t('Synced')+'</span>':n.sync_state=='mismatch'?'<span style="color:var(--warn)">'+t('Config mismatch')+'</span>':n.sync_state=='pin mismatch'?'<span class="bad2">'+t('Certificate changed')+'</span>':'<span class="bad2">'+(n.online?'—':t('Offline'))+'</span>';
- var acc=n.maint?t('Under maintenance'):n.drain?t('Draining'):t('Accepting');
- var meters=st?nMeter('CPU',+st.cpu||0,N(Math.round(+st.cpu||0))+'%')+nMeter('RAM',pc(st.mem_used,st.mem_total),N(Math.round(pc(st.mem_used,st.mem_total)))+'%')+nMeter('Disk',pc(st.disk_used,st.disk_total),N(Math.round(pc(st.disk_used,st.disk_total)))+'%')
-  :'<p class="muted nmx">'+t(loc||n.online?'Press Update agent to see CPU, RAM and disk of this node':'Not reachable')+'</p>';
- var det=st?'<div class="nkv">'+
-   '<span><small>'+t('CPU')+'</small><b class="ltr">'+N(st.cores)+' '+t('cores')+' · load '+N((st.load||[]).map(function(x){return (+x).toFixed(2)}).join(' '))+'</b></span>'+
-   '<span><small>'+t('RAM')+'</small><b class="ltr">'+N(bytes(st.mem_used))+' / '+N(bytes(st.mem_total))+'</b></span>'+
-   (st.swap_total>0?'<span><small>'+t('Swap')+'</small><b class="ltr">'+N(bytes(st.swap_used))+' / '+N(bytes(st.swap_total))+'</b></span>':'')+
-   '<span><small>'+t('Disk')+'</small><b class="ltr">'+N(bytes(st.disk_used))+' / '+N(bytes(st.disk_total))+'</b></span>'+
-   '<span><small>'+t('Connections')+'</small><b class="ltr">TCP '+N(st.tcp)+' · UDP '+N(st.udp)+'</b></span>'+
-   '<span><small>'+t('Uptime')+'</small><b>'+upTime(st.uptime)+'</b></span></div>':'';
- return '<div class="card nodec h'+h.c+'"><div class="nhd"><div class="logo" style="width:34px;height:34px;font-size:14px">'+(loc?'B':'N')+'</div>'+
-  '<div class="nnm"><b>'+esc(n.name)+'</b><div class="muted ltr">'+esc(loc?'local':n.address.replace(/^https?:\/\//,''))+'</div></div>'+
-  '<span class="badge '+h.c+'"><span class="dot '+h.c+'"></span> '+t(h.l)+'</span></div>'+
-  (n.plain_http?'<div class="warnbox">'+t('Insecure: plain HTTP. Reinstall the node with the new installer to get TLS.')+'</div>':'')+
-  '<div class="nsum"><span><small>'+t('Users')+'</small><b>'+N(n.users)+'</b></span><span><small>'+t('Last contact')+'</small><b>'+(loc?t('this server'):ago(n.last_sync))+'</b></span><span><small>'+t('Sync')+'</small><b>'+sy+'</b></span></div>'+
-  '<div class="nms">'+meters+'</div>'+
-  (h.r.length?'<ul class="nwhy">'+h.r.map(function(x){return '<li class="l'+x[0]+'">'+t(x[1])+'</li>'}).join('')+'</ul>':'')+
-  '<button class="nmore" data-nopen="'+id+'" aria-expanded="'+op+'">'+t(op?'Hide details':'Details & settings')+' <span class="arr">'+(op?'▴':'▾')+'</span></button>'+
-  '<div class="ndet'+(op?'':' hide')+'">'+det+
-   '<p class="muted" style="margin:8px 0">'+acc+' · '+esc(n.effective_endpoint||'')+((n.info||{}).version?' · v'+esc(n.info.version):'')+(n.note?' · '+esc(n.note):'')+'</p>'+
-   '<div class="g2"><button class="b2 '+(n.drain?'on':'')+'" onclick="nAct(\''+id+'\',\'drain\')">'+t('Drain')+'</button><button class="b2 '+(n.maint?'on':'')+'" onclick="nAct(\''+id+'\',\'maint\')">'+t('Maintenance')+'</button>'+
-   '<button class="b2" onclick="nAct(\''+id+'\',\'sync\')">↻ '+t('Sync')+'</button><button class="b2" onclick="nHealth(\''+id+'\')">♡ '+t('Health')+'</button><button class="b2" onclick="nodeEdit(\''+id+'\')">✎ '+t('Edit')+'</button><button class="b2" onclick="nAct(\''+id+'\',\'repair\')">↻ '+t('Repair agent')+'</button>'+
-   (loc?'':'<button class="b2" onclick="nAct(\''+id+'\',\'update\')">⇪ '+t('Update agent')+'</button><button class="b2 bd" onclick="nDel(\''+id+'\')">⌫ '+t('Delete node')+'</button>')+
-   '<button class="b2 okb" onclick="nAssign(\''+id+'\',1)">'+ic('plus',15)+' '+t('Add to all users')+'</button>'+(loc?'':'<button class="b2 bd" onclick="nAssign(\''+id+'\',0)">'+ic('trash',15)+' '+t('Remove from all users')+'</button>')+'</div>'+
-   (loc?'<p class="muted" style="margin:8px 0 0">'+t('Main panel server · local management')+'</p>':'')+'</div></div>'}).join('');
- el.onclick=function(e){var b=e.target.closest('[data-nopen]');if(!b)return;var k=b.dataset.nopen;S.nopen[k]=!S.nopen[k];drawNodes()}}
 function findN(id){for(var i=0;i<S.nodes.length;i++)if(S.nodes[i].id==id)return S.nodes[i]}
 function nAct(id,a){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+a).then(function(r){toast(r.ok===false?(r.result&&r.result.error||'failed'):t('Done'),r.ok===false);loadNodes()}).catch(fail)}
-function nDel(id){if(!confirm(t('Delete this server? Its users are cut off and the server itself removes WireGuard, AmneziaWG, Hysteria2 and KANKI MIX, closes their ports and uninstalls the node agent.')))return;toast(t('Removing…'));
- api('DELETE','/api/nodes/'+encodeURIComponent(id)).then(function(){loadNodes()}).catch(fail)}
 function nHealth(id){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/health').then(function(r){var n=findN(id);
  modal(mhead(t('Health'),n?n.name:'')+'<p>'+(r.ok?'<span class="badge g">OK</span>':'<span class="badge r">'+t('Offline')+'</span>')+' <span class="ltr">'+r.ms+' ms</span> '+(r.version?'· v'+esc(r.version):'')+(r.load?' · load '+esc(r.load):'')+'</p>'+
  '<div class="list">'+((r.services||[]).map(function(s){return '<div class="li"><span>'+esc(s.key)+' <small class="ltr">'+esc(s.unit)+'</small></span><span class="badge '+(s.active?'g':'r')+'">'+esc(s.state)+'</span></div>'}).join(''))+'</div>')}).catch(fail)}
 function nAssign(id,add){var n=findN(id);if(!confirm(t(add?'Add this node to ALL users?':'Remove this node from ALL users?')+(n?' ('+n.name+')':'')))return;
  toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+(add?'assign-all':'unassign-all')).then(function(){toast(t('Done'));loadNodes()}).catch(fail)}
-function nodeAdd(){
- var manual='<label class="f">'+t('Node name')+'</label><input id="n_name" placeholder="Node 1"><label class="f">'+t('API address')+'</label><input id="n_addr" class="ltr" placeholder="https://node1.example.com:2096">'+
-  '<label class="f">'+t('Node token')+'</label><input id="n_tok" class="ltr"><label class="f">'+t('Connection endpoint (empty = panel endpoint)')+'</label><input id="n_ep" class="ltr" placeholder="node1.example.com">'+
-  '<label class="chk" style="margin-top:10px"><input type="checkbox" id="n_ins">'+t('Self-signed certificate (no domain on node)')+'</label><label class="f">'+t('Note')+'</label><input id="n_note">'+
-  '<div class="g2" style="margin-top:12px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="n_go">'+t('Save')+'</button></div>';
- modal(mhead(t('Add node'))+
-  '<p class="muted" style="margin:0 0 8px">'+t('Run one command on the new server (Ubuntu / Debian, as root). It installs only what a node needs and joins this panel by itself.')+'</p>'+
-  '<div id="j_in"><label class="f">'+t('Node domain (optional, for a real SSL certificate)')+'</label><input id="j_dom" class="ltr" placeholder="node1.example.com" autocomplete="off" autocapitalize="off"><button class="btn" style="width:100%;margin-top:10px" id="j_go">'+t('Create join command')+'</button></div>'+
-  '<div id="j_out"></div>'+
-  '<details class="box" style="margin-top:12px"><summary><b>'+t('Add by hand (advanced)')+'</b></summary><p class="muted">'+t('Install the node with the installer (option 2), then paste the API address and token it prints.')+'</p>'+manual+'</details>','wide');
- $('#j_go').onclick=function(){joinStart(this)};
- $('#n_go').onclick=function(){this.disabled=true;var me=this;api('POST','/api/nodes',{name:$('#n_name').value,address:$('#n_addr').value,token:$('#n_tok').value,endpoint:$('#n_ep').value,insecure:$('#n_ins').checked,note:$('#n_note').value}).then(function(){closeModal();toast(t('Done'));loadNodes()}).catch(function(e){me.disabled=false;fail(e)})}}
-function joinStart(btn){btn.disabled=true;
- Promise.all([api('GET','/api/nodes'),api('POST','/api/node-join')]).then(function(r){
-  var before=r[0].map(function(n){return n.id}),j=r[1],dom=($('#j_dom').value||'').trim().replace(/[^A-Za-z0-9.\-]/g,''),repo=j.repo||'',
-   cmd=(repo?'KANKI_REPO='+repo+' ':'')+(dom?'KANKI_DOMAIN='+dom+' ':'')+'KANKI_JOIN='+j.token+' KANKI_PANEL='+(j.panel||location.origin)+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'kankiturk8770/kanki-panel')+'/main/install.sh)';
-  $('#j_in').classList.add('hide');
-  $('#j_out').innerHTML='<label class="f">'+t('Run this on the new server')+'</label><pre class="cmd" id="j_cmd">'+esc(cmd)+'</pre>'+
-   '<button class="btn" style="width:100%" id="j_cp">'+ic('link',16)+' '+t('Copy command')+'</button>'+
-   (repo?'':'<div class="warnbox">'+t('Update source (GitHub repo) is not set: replace USER/REPO in the command.')+'</div>')+
-   '<div class="jw" id="j_wait"><span class="spin"></span><span>'+t('Waiting for the node to connect…')+'</span><b class="ltr" id="j_left"></b></div>'+
-   '<p class="muted" style="margin:6px 0 0">'+t('Valid for one hour and one node. Create a new command for the next node.')+'</p>';
-  $('#j_cp').onclick=function(){copy(cmd)};
-  joinWatch(before,j.expires)}).catch(function(e){btn.disabled=false;fail(e)})}
-function joinWatch(before,exp){clearInterval(S.joinT);
- var tick=function(){var w=$('#j_wait');if(!w||!$('#modal').classList.contains('on')){clearInterval(S.joinT);return}
-  var s=Math.max(0,exp-Math.floor(Date.now()/1000)),l=$('#j_left');if(l)l.textContent=N(p2(Math.floor(s/60)))+':'+N(p2(s%60));
-  if(s<=0){clearInterval(S.joinT);w.innerHTML='<span class="bad2">'+t('The command expired. Create a new one.')+'</span>';return}
-  api('GET','/api/nodes').then(function(list){var nn=list.filter(function(n){return before.indexOf(n.id)<0});if(nn.length){clearInterval(S.joinT);S.nodes=list;joinDone(nn[0])}}).catch(function(){})};
- tick();S.joinT=setInterval(tick,3000)}
-function joinDone(n){var o=$('#j_out');if(!o)return;
- o.innerHTML='<div class="jok"><span class="okc">'+ic('check',22)+'</span><div><b>'+esc(n.name)+'</b><small class="ltr">'+esc(String(n.address||'').replace(/^https?:\/\//,''))+'</small><div>'+t('joined the panel')+'</div></div></div>'+
-  '<div class="g2" style="margin-top:12px"><button class="btn" id="j_all">'+ic('plus',15)+' '+t('Add to all users')+'</button><button class="b2" id="j_ok">'+t('Done')+'</button></div>';
- loadNodes();
- $('#j_ok').onclick=function(){closeModal();if(S.page=='nodes')loadNodes()};
- $('#j_all').onclick=function(){var b=this;b.disabled=true;api('POST','/api/nodes/'+encodeURIComponent(n.id)+'/assign-all').then(function(){toast(t('Done'));closeModal();loadNodes()}).catch(function(e){b.disabled=false;fail(e)})}}
 function updateAll(){if(!confirm(t('Update every node, every tunnel server and the panel itself to the latest version?')))return;toast(t('Updating…'));
  api('POST','/api/update-all').then(function(r){var h='';
   h+='<p><b>'+t('Panel')+':</b> '+esc(String(r.panel))+(r.latest?' · '+esc(r.latest):'')+'</p>';
@@ -1693,39 +3117,12 @@ function updateAll(){if(!confirm(t('Update every node, every tunnel server and t
   if((r.manual||[]).length)h+='<div class="warnbox">'+t('These agents are too old to update remotely. Run the command kanki on them and choose 3 (Update) once:')+' <b>'+esc(r.manual.join(', '))+'</b></div>';
   if(!(r.nodes||[]).length&&!(r.agents||[]).length&&!(r.manual||[]).length&&String(r.panel)=='current')h+='<p>'+t('Everything is already up to date')+'</p>';
   modal(mhead(t('Update all'),'')+h);setTimeout(function(){if(S.page=='nodes')loadNodes()},8000)}).catch(fail)}
-function nodePorts(id){var n=findN(id);if(!n)return;var inf=n.info||{},b={},ch=0;
- [['wg','e_pwg','wg_port'],['awg','e_paw','awg_port'],['hy2','e_phy','hy2_port']].forEach(function(z){var el=$('#'+z[1]);if(!el||el.disabled)return;var v=unN(el.value).trim();if(v&&v!=String(inf[z[2]]||'')){b[z[0]]=v;ch++}});
- var km=$('#e_pkm'),kv=km?unN(km.value).trim():'';
- if(kv&&kv!=String(inf.kmix_port||'')){if(!ch){kmSetNodePort(id,kv,function(){closeModal();loadNodes()});return}kmSetNodePort(id,kv)}
- if(!ch){toast(t('No port changed'));return}
- toast(t('Applying…'));
- api('POST','/api/node-ports/'+encodeURIComponent(id),b).then(function(r){
-  if(r.ok===false){toast((r.errors&&r.errors.join(' · '))||r.error||'failed',1);return}
-  toast(t('Done')+' · '+(r.changed||[]).join(', '));closeModal();setTimeout(loadNodes,6000);loadNodes()}).catch(fail)}
-function nodeTun(id){var n=findN(id);if(!n)return;var host=String(n.address||'').replace(/^https?:\/\//,'').replace(/[:\/].*$/,'');
- api('POST','/api/tunnels/servers',{name:n.name,addr:host,loc:'abroad'}).then(function(r){modal(mhead(t('Also use this node as a tunnel server'),n.name)+tunCmdBox(r,r));$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}).catch(fail)}
-function nodeEdit(id){var n=findN(id);if(!n)return;var loc=n.id=='local',panel=n.endpoint_mode=='panel'||!n.endpoint;
- modal(mhead(t('Edit node'),loc?'local':n.address)+'<label class="f">'+t('Node name')+'</label><input id="e_name" value="'+esc(n.name)+'"><label class="f">'+t('Note')+'</label><input id="e_note" value="'+esc(n.note)+'">'+
- '<label class="chk" style="margin-top:10px"><input type="checkbox" id="e_acc" '+(n.accept_all?'checked':'')+'>'+t('Sync users without a specific node to this node')+'</label>'+'<div class="box" style="margin-top:10px"><b>'+t('VPN ports (UDP)')+'</b><small class="muted" style="display:block;margin:4px 0 6px">'+t('Applied on the server at once: config, service and firewall. Old WireGuard/AmneziaWG files stop working; subscription links update by themselves.')+'</small><div class="g3">'+
-  '<div><small class="muted">WireGuard</small><input id="e_pwg" class="ltr" inputmode="numeric" value="'+esc(String((n.info||{}).wg_port||''))+'"'+((n.info||{}).wg_port?'':' disabled')+'></div>'+
-  '<div><small class="muted">AmneziaWG</small><input id="e_paw" class="ltr" inputmode="numeric" value="'+esc(String((n.info||{}).awg_port||''))+'"'+((n.info||{}).awg_port?'':' disabled')+'></div>'+
-  '<div><small class="muted">Hysteria2</small><input id="e_phy" class="ltr" inputmode="numeric" value="'+esc(String((n.info||{}).hy2_port||''))+'"'+((n.info||{}).hy2_port?'':' disabled')+'></div>'+
-  '<div><small class="muted">KANKI MIX</small><input id="e_pkm" class="ltr" inputmode="numeric" value="'+esc(String((n.info||{}).kmix_port||''))+'" placeholder="4000"></div></div>'+
-  '<button type="button" class="b2" style="width:100%;margin-top:8px" onclick="nodePorts(\''+n.id+'\')">'+t('Apply ports')+'</button></div>'+
- (loc?'':'<button type="button" class="btn" style="width:100%;margin-top:10px" onclick="nodeTun(\''+n.id+'\')">'+t('Also use this node as a tunnel server')+'</button>')+
- '<div class="box"><b>'+t('Users connection endpoint')+'</b><label class="chk"><input type="radio" name="e_m" value="panel" '+(panel?'checked':'')+'>'+t('Use the panel endpoint')+'</label><label class="chk"><input type="radio" name="e_m" value="custom" '+(panel?'':'checked')+'>'+t('Custom IP / domain for this node')+'</label><input id="e_ep" class="ltr" value="'+esc(n.endpoint)+'" style="margin-top:6px"></div>'+
- (loc?'':'<details class="box"><summary>'+t('Advanced')+'</summary><label class="f">'+t('API address')+'</label><input id="e_addr" class="ltr" value="'+esc(n.address)+'"><label class="f">'+t('Node token')+'</label><input id="e_tok" class="ltr" placeholder="••••••"><label class="chk" style="margin-top:8px"><input type="checkbox" id="e_ins" '+(n.insecure?'checked':'')+'>'+t('Self-signed certificate (no domain on node)')+'</label></details>')+
- '<div class="g2" style="margin-top:12px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="e_go">'+t('Save')+'</button></div>');
- $('#e_go').onclick=function(){var m=($$('input[name=e_m]').filter(function(x){return x.checked})[0]||{}).value;
-  var b={name:$('#e_name').value,note:$('#e_note').value,accept_all:$('#e_acc').checked,endpoint_mode:m,endpoint:$('#e_ep').value};
-  if(!loc){b.address=$('#e_addr').value;if($('#e_tok').value)b.token=$('#e_tok').value;b.insecure=$('#e_ins').checked}
-  api('PUT','/api/nodes/'+encodeURIComponent(id),b).then(function(){closeModal();toast(t('Saved'));loadNodes()}).catch(fail)}}
 
 // ---------------------------------------------------------------- backup
 function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'</h2><p>'+t('Full backup of users, credentials, certificates, VPN settings, nodes and panel state')+'</p></div></div>'+
  '<div class="g2"><div class="card" style="margin:0"><h3>'+t('Backup file')+'</h3><p class="sub">'+t('Encrypted archive. File name includes date and time.')+'</p><div class="row" style="flex-wrap:nowrap"><input id="bk_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"><button class="btn" id="bk_go">'+t('Download backup')+'</button></div></div>'+
  '<div class="card" style="margin:0"><h3>'+t('Restore')+'</h3><p class="sub">'+t('Pick a backup file; if encrypted, enter its passphrase.')+'</p><div class="row" style="flex-wrap:nowrap"><label class="b2" style="white-space:nowrap">'+t('Choose file')+'<input type="file" id="rs_f" class="hide"></label><input id="rs_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"></div><small class="muted" id="rs_n">'+t('No file chosen')+'</small>'+
- '<label class="chk" style="margin-top:8px"><input type="checkbox" id="rs_full">'+t('Also restore server keys & configs (same/new server migration)')+'</label><div style="text-align:center;margin-top:8px"><button class="btn" id="rs_go">'+t('Restore backup')+'</button></div></div></div>'+
+ '<label class="chk" style="margin-top:8px"><input type="checkbox" id="rs_full">'+t('Also restore server keys & configs (same/new server migration)')+'</label><div style="text-align:center;margin-top:8px"><button class="btn" id="rs_go">'+t('Restore backup')+'</button></div></div></div>'+moveCard()+
  '<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><div><h3>🌙 '+t('Nightly backup to the bot')+'</h3><p class="sub">'+t('Every night the database is cleaned and an encrypted backup is sent to Telegram')+'</p></div><label class="sw"><input type="checkbox" id="tg_on"><span></span></label></div>'+
  '<div class="g2"><div><label class="f">'+t('When')+'</label><div class="row" style="flex-wrap:nowrap;gap:6px"><select id="tg_m" style="width:auto"><option value="nightly">'+t('Every night at')+'</option><option value="hours">'+t('Every … hours')+'</option></select><input id="tg_at" class="ltr" style="max-width:90px" placeholder="03:00"><input id="tg_h" type="number" min="1" style="max-width:90px"></div><small class="muted">'+t('Iran time')+'</small></div>'+
  '<div><label class="f">'+t('Chat ID')+'</label><input id="tg_chat" class="ltr" placeholder="'+t('Auto after /start (or first bot admin)')+'"></div></div>'+
@@ -1754,7 +3151,32 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
  $('#tg_test').onclick=function(){api('PUT','/api/tgbackup',tgBody()).then(function(){return api('POST','/api/tgbackup/test')}).then(function(r){toast(r.ok?'✓ @'+r.bot+' → '+r.chat:'failed',!r.ok);tgLoad()}).catch(fail)};
  $('#tg_send').onclick=function(){toast(t('Checking…'));api('POST','/api/tgbackup/send').then(function(){toast(t('Done'));tgLoad()}).catch(function(e){fail(e);tgLoad()})};
  $('#db_cl').onclick=function(){var me=this;me.disabled=true;api('POST','/api/db/clean').then(function(r){me.disabled=false;var x=r.result||{};toast(t('Done')+' · '+kb(x.before||0)+' → '+kb(x.after||0));tgLoad()}).catch(function(e){me.disabled=false;fail(e)})};
- tgLoad()}
+ tgLoad();restoreBox();
+ moveLoad();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page=='backup'&&$('#v37move')&&!$('#modal').classList.contains('on'))moveLoad()},5000)}
+// move the whole panel to a new server
+function moveCard(){return '<div class="card" id="v37move"><h3>🚚 '+t('Move the panel to a new server')+'</h3><p class="sub">'+t("Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.")+'</p><div id="mv_in">'+t('Loading…')+'</div></div>'}
+function moveDraw(m){var el=$('#mv_in');if(!el)return;
+ var steps='<ol class="steps" style="margin:6px 0 10px;line-height:2"><li><b>'+t("Point the panel's domain to the new server's IP")+'</b><br><small class="muted">'+t('In your DNS (Cloudflare / ArvanCloud): the A record of')+' <span class="ltr">'+esc(m.domain||'')+'</span> '+t('= the IP of the new server, without CDN (DNS only). The old panel keeps working by its IP until the move is done.')+'</small></li>'+
+  '<li><b>'+t('Run this on the new server (Ubuntu / Debian, as root)')+'</b><br><small class="muted">'+t('It downloads everything straight from this server, puts it back with the same keys and starts the panel there. Then this panel stops by itself.')+'</small></li></ol>';
+ if(m.done>0){el.innerHTML='<div class="okbox" style="padding:10px;border-radius:12px;border:1px solid var(--ok)">✓ '+t('Moved: the panel runs on the new server. This one is stopping.')+'</div>';return}
+ if(!m.active){el.innerHTML=steps+'<label class="f">'+t("This server's IP (empty = found by itself)")+'</label><div class="inl"><input id="mv_ip" class="ltr" value="'+esc(m.ip||'')+'" placeholder="1.2.3.4"><button class="btn" id="mv_go" style="flex:none">'+t('Make the move command')+'</button></div>'+
+   '<p class="hint">'+t('The backup above is complete too: it can also be restored by hand on a new server (Restore with «Also restore server keys»).')+'</p>';
+  $('#mv_go').onclick=function(){var b=this;b.disabled=true;api('POST','/api/migrate/start',{ip:$('#mv_ip').value.trim()}).then(moveLoad).catch(function(e){b.disabled=false;fail(e)})};return}
+ el.innerHTML=steps+'<pre class="ltr" id="mv_cmd" style="white-space:pre-wrap;word-break:break-all;font-size:11.5px;padding:10px;border-radius:12px;background:var(--in);border:1px solid var(--gb2);margin:0">'+esc(m.command)+'</pre>'+
+  '<p class="hint">'+t('Valid for 3 hours, one time. It holds the key of the backup: do not share it.')+'</p>'+
+  '<p style="margin:6px 0">'+(m.fetched>0?'<span class="okt">✓ '+t('The new server downloaded the backup')+(m.new_ip?' (<span class="ltr">'+esc(m.new_ip)+'</span>)':'')+'</span>':'<span class="muted">⏳ '+t('Waiting for the new server…')+'</span>')+'</p>'+
+  '<div class="g2"><button class="btn" id="mv_cp">'+t('Copy the command')+'</button><button class="b2 bd" id="mv_x">'+t('Cancel the command')+'</button></div>';
+ $('#mv_cp').onclick=function(){copy(m.command)};$('#mv_x').onclick=function(){api('DELETE','/api/migrate').then(moveLoad).catch(fail)}}
+function moveLoad(){return api('GET','/api/migrate').then(moveDraw).catch(function(e){var el=$('#mv_in');if(el)el.textContent=e.message||''})}
+// after a restore: which servers are back
+function restoreBox(){var pg=$('#pg');if(!pg||S.page!='backup'||$('#svp_rs'))return;
+ api('GET','/api/restore/check').then(function(r){if((!r.restored_at||Date.now()/1000-r.restored_at>3*86400)&&!r.bot_conflict||$('#svp_rs')||S.page!='backup')return;
+  var sv=r.servers||[],bad=sv.filter(function(x){return (x.agent===false)||(x.vpn===false&&x.vpn_on)});
+  var c=document.createElement('div');c.className='card';c.id='svp_rs';
+  c.innerHTML='<h3>'+t('After restore')+'</h3><p class="sub">'+t('Restored')+' '+ago(r.restored_at)+(r.moved_from?' · '+t('from')+' <span class="ltr">'+esc(r.moved_from)+'</span>':'')+'</p>'+
+   (r.bot_conflict?'<div class="warnbox">'+t('The panel on the old server still runs the same Telegram bot: both answer customers and both post to the channel. Stop it there: systemctl disable --now kanki-panel')+'</div>':'')+
+   (bad.length?'<div class="list">'+sv.map(function(x){var ok=x.agent!==false&&!(x.vpn===false&&x.vpn_on);return '<div class="li"><span>'+esc(x.name)+'</span><span>'+(ok?'✅':'⏳ '+t('Not connected yet'))+'</span></div>'}).join('')+'</div>':'<p>✅ '+t('Every server is connected')+'</p>');
+  var ph=$('#pg .ph');if(ph)ph.parentNode.insertBefore(c,ph.nextSibling)}).catch(function(){})}
 
 // ---------------------------------------------------------------- security
 function pSecurity(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Security')+'</h2><p>'+t('Login, 2FA, sessions and IP access')+'</p></div></div><div id="sec">'+t('Loading…')+'</div>';loadSec()}
@@ -1772,13 +3194,6 @@ function loadSec(){api('GET','/api/security').then(function(s){S.sec=s;var el=$(
  '<div class="g2"><div><label class="f">Allow</label><textarea id="ip_a" class="ltr" rows="3" placeholder="'+t('IP / CIDR allowed, one per line')+'">'+esc(s.ip_allow)+'</textarea></div><div><label class="f">Deny</label><textarea id="ip_d" class="ltr" rows="3" placeholder="'+t('IP / CIDR blocked, one per line')+'">'+esc(s.ip_deny)+'</textarea></div></div></details>'+
  '<div style="text-align:center;margin:4px 0 12px"><button class="btn" onclick="savePolicy()">'+t('Save security policy')+'</button></div>'+
  '<div class="card"><h3>'+t('Login history')+'</h3><p class="sub">'+t('Last logins to the panel')+'</p><div class="list">'+(lg.map(function(l){return '<div class="li"><span><b>'+esc(l.username||'—')+'</b><small class="ltr">'+esc(l.ip)+' · '+fmtDate(l.ts,1)+'</small></span><span class="badge '+(l.ok?'g':'r')+'">'+(l.ok?'OK':'FAIL')+'</span></div>'}).join('')||'<span class="muted">—</span>')+'</div></div>'}).catch(fail)}
-function tokModal(){var sc=(S.sec&&S.sec.scopes)||['users:read','users:write','nodes','settings','backup','admin'];
- modal(mhead(t('Create API token'))+'<label class="f">'+t('Token name')+'</label><input id="tk_n"><label class="f">'+t('Scopes')+'</label>'+sc.map(function(x){return '<label class="chk"><input type="checkbox" class="tk_s" value="'+x+'" '+(x.indexOf('users')==0?'checked':'')+'>'+x+'</label>'}).join('')+
- '<div style="text-align:center;margin-top:12px"><button class="btn" id="tk_go">'+t('Create')+'</button></div>');
- $('#tk_go').onclick=function(){api('POST','/api/security/tokens',{name:$('#tk_n').value,scopes:$$('.tk_s').filter(function(x){return x.checked}).map(function(x){return x.value})}).then(function(r){
-  modal(mhead(t('API tokens'))+'<p class="warnbox">'+t("Copy it now, it won't be shown again")+'</p><pre>'+esc(r.token)+'</pre><button class="btn" style="width:100%" onclick="copy(\''+r.token+'\')">'+t('Copy')+'</button>');loadSec()}).catch(fail)}}
-function tokDel(id){confirmDo(function(){api('DELETE','/api/security/tokens/'+id).then(loadSec).catch(fail)})}
-function regenKey(){confirmDo(function(){api('POST','/api/security/apikey').then(function(r){modal(mhead(t('Legacy API key'))+'<pre>'+esc(r.api_key)+'</pre><button class="btn" style="width:100%" onclick="copy(\''+r.api_key+'\')">'+t('Copy')+'</button>');loadSec()}).catch(fail)})}
 function totpSetup(){api('POST','/api/security/2fa/setup').then(function(r){modal(mhead(t('Enable 2FA'))+'<p class="muted">'+t('Scan with your authenticator app, then enter the 6-digit code')+'</p><div class="qr">'+r.qr+'</div><pre>'+esc(r.secret)+'</pre><input id="tf_c" inputmode="numeric" maxlength="6" class="ltr" placeholder="123456"><button class="btn" style="width:100%;margin-top:10px" id="tf_go">'+t('Confirm')+'</button>');
  $('#tf_go').onclick=function(){api('POST','/api/security/2fa/enable',{code:$('#tf_c').value}).then(function(){closeModal();toast(t('Done'));loadSec()}).catch(fail)}}).catch(fail)}
 function totpOff(){var c=prompt(t('2FA code'));if(!c)return;api('POST','/api/security/2fa/disable',{code:c}).then(function(){toast(t('Done'));loadSec()}).catch(fail)}
@@ -1788,10 +3203,6 @@ function chPass(){api('POST','/api/security/password',{current:$('#cp_cur').valu
 function savePolicy(){api('POST','/api/security/policy',{ip_allow:$('#ip_a').value,ip_deny:$('#ip_d').value,session_hours:+$('#ip_h').value||24,force_2fa:$('#ip_f').checked}).then(function(){toast(t('Saved'));loadSec()}).catch(fail)}
 
 // ---------------------------------------------------------------- settings
-function logoCard(){var l=curLogo();return '<div class="card"><h3>'+t('Logo')+'</h3><p class="sub">'+t('Shown in the header, the side menu, the login page and the subscription page.')+'</p>'+
- '<div class="row" style="gap:10px"><div class="'+logoCls()+'" id="lg_prev" style="width:56px;height:56px;border-radius:16px;font-size:24px">'+logoInner(((S.me&&S.me.panel_name)||'K').charAt(0))+'</div>'+
- '<label class="btn" for="lg_file" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">'+ic('image',16)+' '+t('Choose image')+'</label><input type="file" id="lg_file" accept="image/*" class="hide">'+
- '<button class="b2'+(l?'':' hide')+'" id="lg_rm">'+t('Remove')+'</button></div></div>'}
 function setLogo(data){return api('PUT','/api/settings',{logo:data}).then(function(){S.me.logo=data;try{localStorage.setItem('kk_logo',data)}catch(e){}toast(t('Saved'));shell();route()})}
 function wireLogo(){var f=$('#lg_file');if(!f)return;
  f.onchange=function(){var file=f.files&&f.files[0];if(!file)return;var rd=new FileReader();
@@ -1802,13 +3213,7 @@ function wireLogo(){var f=$('#lg_file');if(!f)return;
    im.onerror=function(){toast(t('Cannot read this image'),1)};im.src=rd.result};
   rd.readAsDataURL(file)};
  var rm=$('#lg_rm');if(rm)rm.onclick=function(){confirmDo(function(){setLogo('').catch(fail)})}}
-// ---------------------------------------------------------------- settings (v2.8.4: sections, each saved on its own)
-ICO.sos='<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/><path d="M6 6l3.5 3.5M18 6l-3.5 3.5M6 18l3.5-3.5M18 18l-3.5-3.5"/>';
-ICO.bell='<path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2H4.5z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>';
-ICO.globe='<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.4 2.6 3.5 5.4 3.5 8.5s-1.1 5.9-3.5 8.5c-2.4-2.6-3.5-5.4-3.5-8.5S9.6 6.1 12 3.5z"/>';
-ICO.shield2='<path d="M12 3.4l7 2.8v5.3c0 4.4-2.9 7.7-7 9-4.1-1.3-7-4.6-7-9V6.2l7-2.8z"/><path d="M9 12h6M12 9v6"/>';
-ICO.brush='<path d="M14.5 4.5l5 5-8.2 8.2a3 3 0 0 1-4.3 0l-.7-.7a3 3 0 0 1 0-4.3z"/><path d="M6.3 13l4.7 4.7M3.5 20.5c1.8 0 3-1 3-2.5"/>';
-ICO.box='<path d="M4 7.5l8-4 8 4v9l-8 4-8-4z"/><path d="M4 7.5l8 4 8-4M12 11.5v9"/>';
+// ---------------------------------------------------------------- settings: sections, each saved on its own
 var STSEC=[
  ['look','Appearance','brush','Name, logo, language, theme and colour of the panel',['panel_name','lang','theme','color','refresh']],
  ['net','Addresses','globe','Panel address, the public VPN address and subscription links',['endpoint','sub_base']],
@@ -1843,7 +3248,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   '<div><label class="f">MTU</label><input data-k="mtu" class="ltr" inputmode="numeric" placeholder="1380"><div class="chipset" data-fill="mtu">'+['1280','1380','1420'].map(function(m){return '<button type="button" data-v="'+m+'">'+m+'</button>'}).join('')+'</div><div class="hint">'+t('Lower it (1280) if some sites do not open on mobile data.')+'</div></div>'+
   '<div class="full" style="margin-top:6px">'+stSw('awg_compat','AmneziaWG compatibility mode','Only Jc/Jmin/Jmax/S1/S2/H1-H4, for old AmneziaWG apps.')+stSw('conn_limit_on','Enforce connection limit (Hysteria2)','A user cannot connect from more devices than his limit.')+'</div></div>';
  case 'newu':return '<label class="f" style="margin-top:0">'+t('Default protocols for new users')+'</label><input type="hidden" data-k="default_protocols"><div class="pgs" data-multi="default_protocols">'+
-  PROTOS.map(function(x){return '<label style="--pc:'+(window.PCOL?PCOL[x[0]]:'var(--a)')+'"><input type="checkbox" value="'+x[0]+'" class="hide"><i></i>'+x[1]+'</label>'}).join('')+'</div><div class="hint">'+t('Also used by the sales bot when it makes an account.')+'</div>'+
+  PROTOS.map(function(x){return '<label style="--pc:'+((PCOL[x[0]]))+'"><input type="checkbox" value="'+x[0]+'" class="hide"><i></i>'+x[1]+'</label>'}).join('')+'</div><div class="hint">'+t('Also used by the sales bot when it makes an account.')+'</div>'+
   '<div class="g3" style="margin-top:6px">'+stIn('def_gb','Volume (GB)','30','0 = unlimited','', 'number')+stIn('def_days','Days','30','','', 'number')+stIn('def_conns','Connections','1','','', 'number')+'</div>';
  case 'ntf':return stSw('tg_alerts','Server alerts','Telegram message to the bot admins when a node, tunnel server or tunnel goes offline, and when it is back.')+
   stSw('warn_on','Warn buyers','The buyer gets a message before his time or data runs out.')+stSw('backup_on','Daily backup to bot admins','An encrypted full backup is sent to the bot admins once a day.')+
@@ -1918,11 +3323,6 @@ function stIran(){var box=$('#si_in');if(!box)return;api('GET','/api/sub-iran').
  $('#si_go').onclick=function(){var b=this;b.disabled=true;api('PUT','/api/sub-iran',{server:$('#si_srv').value,domain:$('#si_dom').value.trim(),port:+$('#si_port').value||2053}).then(function(){toast(t('Saved'));stIran()}).catch(function(e){b.disabled=false;fail(e)})};
  var rm=$('#si_rm');if(rm)rm.onclick=function(){confirmDo(function(){api('PUT','/api/sub-iran',{server:'',domain:''}).then(function(){toast(t('Done'));stIran()}).catch(fail)})};
  var re=$('#si_re');if(re)re.onclick=function(){re.disabled=true;api('POST','/api/tunnels/servers/'+encodeURIComponent(r.server)+'/ssl-retry').then(function(){toast(t('Sent: the server tries SSL again within a minute'));setTimeout(stIran,8000)}).catch(function(e){re.disabled=false;fail(e)})}}).catch(function(e){box.textContent=e.message||''})}
-Object.assign(FA,{"Try SSL again":"دوباره گرفتن SSL","Why SSL is not taken":"چرا SSL گرفته نمی‌شود","Sent: the server tries SSL again within a minute":"فرستاده شد: سرور تا یک دقیقه‌ی دیگر دوباره SSL می‌گیرد",
- "The domain's A record must point to this Iran server's IP (not to a CDN while the certificate is taken: in ArvanCloud / Cloudflare set it to DNS only).":"رکورد A دامنه باید به آی‌پی همین سرور ایران اشاره کند (موقع گرفتن گواهی پشت CDN نباشد: در ابرآروان / کلادفلر روی «فقط DNS» بگذار).",
- "Let's Encrypt checks from outside Iran: port 80/TCP of the server must be open from abroad. Open it in the data center's firewall panel too; when international traffic is cut, SSL cannot be taken until it is back.":"Let's Encrypt از خارج ایران چک می‌کند: پورت 80/TCP سرور باید از خارج باز باشد. در پنل فایروال دیتاسنتر هم بازش کن؛ وقتی اینترنت بین‌الملل قطع است، تا وصل نشود SSL گرفته نمی‌شود.",
- "Port 80 busy: the error names the program. A Kanki tunnel that forwards port 80 holds it: take 80 out of that tunnel. Caddy / nginx are set aside by themselves for a few seconds.":"پورت ۸۰ پر: اسم برنامه در خطا هست. اگر یک تانل کانکی پورت ۸۰ را عبور می‌دهد، پورت دست خود اوست: ۸۰ را از آن تانل بردار. Caddy / nginx خودشان چند ثانیه کنار می‌روند.",
- "After a failure the server waits (10 minutes, then longer) before it tries again; after fixing the cause press «Try SSL again».":"بعد از هر خطا سرور صبر می‌کند (۱۰ دقیقه، بعد بیشتر) و بعد دوباره امتحان می‌کند؛ بعد از رفع مشکل «دوباره گرفتن SSL» را بزن."});
 function stSub(d){var g=$('#sd_go'),m=$('#sd_msg');g.disabled=true;m.textContent=d?t('Getting the SSL certificate… this can take up to one minute'):'…';
  api('POST','/api/sub-domain',{domain:d}).then(function(r){S.st.sub_domain=r.domain||'';toast(t('Done'));pSettings()}).catch(function(e){g.disabled=false;m.textContent=e.message||'';fail(e)})}
 function stUpdate(force){autoUpdWire();var m=$('#st_um');if(!m||(!force&&m._done))return;m._done=1;m.className='vmsg';m.textContent=t('Checking…');
@@ -1939,17 +3339,6 @@ function stImport(inp){var f=inp.files&&inp.files[0];if(!f)return;var rd=new Fil
   if(!confirm(t('Replace the current settings with the file?')+' ('+N(n)+')')){inp.value='';return}
   api('PUT','/api/settings',o).then(function(){toast(t('Saved'));S.stsec='io';boot()}).catch(fail)};
  rd.readAsText(f)}
-Object.assign(FA,{"Overview":"نمای کلی","Users & sales":"کاربران و فروش","Network":"شبکه","System":"سیستم","VPN management":"مدیریت وی‌پی‌ان","Update source not set":"منبع آپدیت تنظیم نشده",
- "Everything about how the panel looks and works, in one place":"همه‌ی تنظیمات ظاهر و کارکرد پنل، یک‌جا","Appearance":"ظاهر و برند","Addresses":"آدرس‌ها","VPN & protocols":"VPN و پروتکل‌ها","New users":"کاربر جدید","Notifications":"اعلان‌ها","Update & version":"آپدیت و نسخه","Export & import":"خروجی و ورودی",
- "Name, logo, language, theme and colour of the panel":"نام، لوگو، زبان، پوسته و رنگ پنل","Panel address, the public VPN address and subscription links":"آدرس پنل، آدرس عمومی VPN و لینک‌های اشتراک","DNS, MTU and protocol behaviour on every server":"DNS، MTU و رفتار پروتکل‌ها روی همه‌ی سرورها","Ready values for the “New user” form":"مقدارهای آماده‌ی فرم «کاربر جدید»","Telegram messages for you and for your buyers":"پیام‌های تلگرامی برای خودت و خریدارها","Version, update source and installing updates":"نسخه، منبع آپدیت و نصب آپدیت","Move all settings to another panel or keep a copy":"انتقال همه‌ی تنظیمات به پنل دیگر یا نگه‌داشتن یک نسخه",
- "Shown in the menu, the browser tab and the login page.":"در منو، تب مرورگر و صفحه‌ی ورود نشان داده می‌شود.","How often lists and the dashboard refresh themselves.":"فاصله‌ی تازه‌سازی خودکار فهرست‌ها و داشبورد.","Logo":"لوگو","Choose image":"انتخاب تصویر","Remove":"حذف","Saved at once. Shown in the header, the menu, the login page and the subscription page.":"همان لحظه ذخیره می‌شود. در بالای پنل، منو، صفحه‌ی ورود و صفحه‌ی اشتراک دیده می‌شود.",
- "Written inside every user config. Empty = the panel domain.":"داخل کانفیگ همه‌ی کاربرها نوشته می‌شود. خالی = دامنه‌ی پنل.","Base of the subscription links (for example a CDN domain). Empty = the panel address.":"ابتدای لینک‌های اشتراک (مثلاً دامنه‌ی CDN). خالی = آدرس پنل.","Use this address on every node too":"همین آدرس روی همه‌ی نودها هم استفاده شود","Nodes that have their own address switch back to this one when you save.":"نودهایی که آدرس اختصاصی دارند، با ذخیره به همین آدرس برمی‌گردند.",
- "DNS servers given to every user config, comma separated.":"DNSهایی که داخل کانفیگ کاربرها قرار می‌گیرند؛ با کاما جدا کن.","Lower it (1280) if some sites do not open on mobile data.":"اگر بعضی سایت‌ها روی اینترنت موبایل باز نمی‌شوند، کمش کن (1280).","AmneziaWG compatibility mode":"حالت سازگاری AmneziaWG","Only Jc/Jmin/Jmax/S1/S2/H1-H4, for old AmneziaWG apps.":"فقط Jc/Jmin/Jmax/S1/S2/H1-H4؛ برای اپ‌های قدیمی AmneziaWG.","A user cannot connect from more devices than his limit.":"کاربر نمی‌تواند با دستگاه‌های بیشتر از سقفش وصل شود.",
- "Also used by the sales bot when it makes an account.":"ربات فروش هم هنگام ساخت اکانت از همین‌ها استفاده می‌کند.","Volume (GB)":"حجم (گیگ)","0 = unlimited":"0 = نامحدود","Choose at least one protocol":"حداقل یک پروتکل انتخاب کن",
- "Server alerts":"هشدار سرورها","Telegram message to the bot admins when a node, tunnel server or tunnel goes offline, and when it is back.":"وقتی نود، سرور تانل یا تانلی قطع و دوباره وصل شود، به ادمین‌های ربات پیام می‌رود.","Warn buyers":"هشدار به خریدارها","The buyer gets a message before his time or data runs out.":"قبل از تمام شدن زمان یا حجم، به خریدار پیام می‌رود.","An encrypted full backup is sent to the bot admins once a day.":"روزی یک بار بکاپ کامل رمزدار برای ادمین‌های ربات فرستاده می‌شود.","These messages are sent by the sales bot; set it up first in":"این پیام‌ها را ربات فروش می‌فرستد؛ اول آن را راه بینداز در",
- "Update source (GitHub repo)":"منبع آپدیت (مخزن گیت‌هاب)","Releases of this repository are used for updates, for “Update all” and for new tunnel servers.":"Releaseهای همین مخزن برای آپدیت پنل، «آپدیت همه» و نصب سرورهای تانل استفاده می‌شود.","KANKI_REPO in /etc/kanki/kanki.env is set; it wins over this field.":"مقدار KANKI_REPO در فایل /etc/kanki/kanki.env تنظیم شده و بر این فیلد مقدم است.","Nodes and tunnel servers are updated together with":"نودها و سرورهای تانل با این دکمه با هم آپدیت می‌شوند:","Update all":"آپدیت همه","Write it as owner/repo":"به شکل owner/repo بنویس","MTU must be between 1200 and 1500":"MTU باید بین 1200 تا 1500 باشد",
- "Export":"خروجی","Import":"ورودی","A JSON file with every panel and sales setting. It holds payment keys too, keep it private. Users are not in it; use Backup for that.":"یک فایل JSON از همه‌ی تنظیمات پنل و فروش. کلیدهای پرداخت هم داخلش هست؛ جایی منتشرش نکن. کاربرها داخلش نیستند؛ برای آن از بکاپ استفاده کن.","Download settings":"دانلود تنظیمات","Pick a settings file exported from a Kanki panel. Only known settings are taken; users, nodes and keys are not touched.":"فایل تنظیماتی که از یک پنل کانکی گرفته‌ای را انتخاب کن. فقط تنظیمات شناخته‌شده خوانده می‌شوند؛ به کاربرها، نودها و کلیدها دست نمی‌خورد.","This is not a settings file":"این فایل تنظیمات نیست","Replace the current settings with the file?":"تنظیمات فعلی با فایل جایگزین شود؟",
- "Unsaved changes":"تغییرات ذخیره‌نشده","Undo":"برگرداندن","Image is too complex, use a simpler logo":"تصویر خیلی پیچیده است؛ لوگوی ساده‌تری انتخاب کن","Cannot read this image":"این تصویر خوانده نمی‌شود","Telegram alert when a node or tunnel goes offline":"هشدار تلگرام وقتی نود یا تانل قطع شود","Dashboard":"داشبورد"});
 
 // ---------------------------------------------------------------- update
 // automatic update every night at 03:30 Tehran time (the same as “Update all”)
@@ -1961,26 +3350,12 @@ function auTxt(r){var el=$('#au_txt');if(!el||!r)return;var f=function(ts,o){ret
 function autoUpdWire(){var c=$('#au_on');if(!c||c._w)return;c._w=1;
  api('GET','/api/auto-update').then(function(r){c.checked=r.on;auTxt(r)}).catch(function(){c.closest('label').style.display='none'});
  c.onchange=function(){var on=c.checked;api('PUT','/api/auto-update',{on:on}).then(function(){toast(on?t('Automatic update is on'):t('Automatic update is off'));return api('GET','/api/auto-update').then(auTxt)}).catch(function(e){c.checked=!on;fail(e)})}}
-Object.assign(FA,{"Automatic update":"آپدیت خودکار","Every night at 03:30 Tehran time, if GitHub has a new version: the panel, the nodes, the tunnel servers and the emergency chat are updated by themselves.":"هر شب ساعت ۳:۳۰ به وقت تهران، اگر نسخه‌ی جدیدی در گیت‌هاب باشد: پنل، نودها، سرورهای تانل و چت اضطراری خودکار آپدیت می‌شوند.","Next run":"اجرای بعدی","Last run":"آخرین اجرا","Automatic update is on":"آپدیت خودکار روشن شد","Automatic update is off":"آپدیت خودکار خاموش شد"});
 function updateModal(){modal(mhead(t('Update')+' '+((S.me&&S.me.panel_name)||''))+'<div class="g2"><div class="pc" style="flex-direction:column"><small class="muted">'+t('Current version')+'</small><b class="ltr" id="u_c">v'+esc(S.me.version)+'</b></div><div class="pc" style="flex-direction:column"><small class="muted">'+t('Latest version')+'</small><b class="ltr" id="u_l">…</b></div></div><p id="u_m" class="muted"></p>'+autoUpdBox()+
  '<div class="row" style="justify-content:center"><button class="btn" id="u_chk">'+t('Check for update')+'</button><button class="btn hide" id="u_go">'+t('Install update')+'</button></div><p class="muted">'+t('Updates come from the GitHub releases of your repo.')+'</p>');
  function chk(){$('#u_m').textContent=t('Checking…');api('GET','/api/update/check').then(function(r){$('#u_l').textContent=r.latest?'v'+r.latest:'—';$('#u_m').textContent=r.error?r.error:(r.available?t('A new version is available.'):t('You are on the latest version.'));$('#u_go').classList.toggle('hide',!r.available)}).catch(fail)}
  autoUpdWire();$('#u_chk').onclick=chk;$('#u_go').onclick=function(){this.disabled=true;api('POST','/api/update/apply').then(function(r){toast('v'+r.version+' ✓');setTimeout(function(){location.reload()},5000)}).catch(fail)};chk()}
 
-// ================================================================ v2.3: Kanki Panel
-Object.assign(ICO,{
- copy:'<rect x="8.5" y="8.5" width="11.5" height="11.5" rx="2.5"/><path d="M15.5 8.5V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7.5a2 2 0 0 0 2 2h2.5"/>',
- play:'<path d="M8 5.5v13l10.5-6.5z"/>',
- pause:'<path d="M8.5 5.5v13M15.5 5.5v13"/>',
- bot:'<rect x="4.5" y="8" width="15" height="11" rx="3.5"/><path d="M12 8V5"/><circle cx="12" cy="4" r="1.2"/><circle cx="9.3" cy="13.2" r="1.2"/><circle cx="14.7" cy="13.2" r="1.2"/><path d="M9.5 16.5h5M2.5 12.5v3M21.5 12.5v3"/>',
- traffic:'<path d="M4 19.5h16"/><path d="M7 16v-5M11 16V7M15 16v-7.5M19 16V4.5"/>',
- ports:'<path d="M9 3.5v4.5M15 3.5v4.5"/><path d="M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0z"/><path d="M12 17v3.5"/>',
- send:'<path d="M20.5 3.5L3.5 10.5l7 2.5 2.5 7z"/><path d="M10.5 13l5-5"/>',
- term:'<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M7.5 9.5l3 2.5-3 2.5M12.5 15h4"/>',
- gift:'<rect x="4" y="9" width="16" height="11" rx="2"/><path d="M4 13h16M12 9v11"/><path d="M12 9c-2.5 0-4.5-1-4.5-2.7S9.6 3.8 12 9zM12 9c2.5 0 4.5-1 4.5-2.7S14.4 3.8 12 9z"/>',
- card:'<rect x="3" y="6" width="18" height="12.5" rx="2.5"/><path d="M3 10.5h18M7 15h3.5"/>',
- globe:'<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.6 3.8 5.4 3.8 8.5S14.6 17.9 12 20.5C9.4 17.9 8.2 15.1 8.2 12S9.4 6.1 12 3.5z"/>',
- move:'<path d="M4 8h13.5l-3.5-3.5M20 16H6.5l3.5 3.5"/>'});
+// ==================================================================== dashboard, users, bot, chat, traffic, ports, tunnels
 
 // ---- built-in logo: a K made of one stem and two links that end in nodes
 function kLogo(){return '<svg class="klogo" viewBox="0 0 64 64" aria-hidden="true"><rect x="2.5" y="2.5" width="59" height="59" rx="17" fill="url(#gLbg)" stroke="url(#gGold)" stroke-width="2.2"/>'+
@@ -2062,7 +3437,6 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
  if(tab)show(tab)}
 
 // ---- Telegram sales bot page
-var BS_KEYS=['sales_on','warn_on','welcome','support','app_link','channel','trial_on','trial_gb','trial_days','ref_gb','ref_days','card_on','card_number','card_holder','np_on','np_key','np_coins','zp_on','zp_merchant','zp_callback','wallet_on','wallet_text','ton_address','usdt_address','usd_rate'];
 // ---- the Kanki app's install files: uploaded here, sent by the bot and offered on the subscription page
 function botApk(){var el=$('#bt_apk');if(!el)return;
  api('GET','/api/apps').then(function(r){var f=r.files||[];
@@ -2103,12 +3477,6 @@ function botApk(){var el=$('#bt_apk');if(!el)return;
   $$('[data-apv]').forEach(function(b){b.onclick=function(){var v=prompt(t('Version'),b.dataset.v);if(v===null)return;
    api('PUT','/api/apps/'+b.dataset.apv,{version:v}).then(function(){toast(t('Saved'));botApk()}).catch(fail)}});
  }).catch(fail)}
-Object.assign(FA,{"App files":"فایل‌های اپ","Link for your channel":"لینک برای کانال","Put it on a “Download the app” button: the bot opens straight on the download menu.":"این لینک را روی دکمه‌ی «دانلود اپ» کانال بگذار: ربات مستقیم روی منوی دانلود باز می‌شود.","Recommended":"پیشنهادی","Too big for the bot (over 50 MB): only on the subscription page":"برای ربات بزرگ است (بیش از ۵۰ مگ): فقط در صفحه‌ی اشتراک",
- "Upload the Kanki app (.apk) here, one file per phone type. The bot sends the file itself (📱 Download app) and the subscription page shows a download button for each. A new file of the same type replaces the old one.":"فایل نصبی اپ کانکی (.apk) را اینجا آپلود کن، برای هر نوع گوشی یک فایل. ربات خودش فایل را می‌فرستد (📱 دانلود اپ) و صفحه‌ی اشتراک برای هرکدام دکمه‌ی دانلود نشان می‌دهد. فایل جدیدِ همان نوع جای قبلی را می‌گیرد.",
- "No file yet: the bot and the subscription page show the app download link of Sales settings.":"هنوز فایلی نیست: ربات و صفحه‌ی اشتراک همان لینک دانلود اپ تنظیمات فروش را نشان می‌دهند.",
- "Upload files":"آپلود فایل","Phone type":"نوع گوشی","From the file name (arm64 / armeabi-v7a …)":"از روی اسم فایل (arm64 / armeabi-v7a …)","new phones (64-bit)":"گوشی‌های جدید (۶۴ بیتی)","older phones (32-bit)":"گوشی‌های قدیمی (۳۲ بیتی)","every phone":"همه‌ی گوشی‌ها",
- "Version":"نسخه","from the file name, e.g. 1.15.1":"از روی اسم فایل، مثلاً 1.15.1","Upload":"آپلود","Choose the .apk file(s) first":"اول فایل(های) .apk را انتخاب کن","Upload failed":"آپلود ناموفق بود",
- "this is not an Android app (.apk)":"این فایل اپ اندروید (.apk) نیست","choose the phone type of this file (arm64, armv7 or universal)":"نوع گوشیِ این فایل را انتخاب کن (arm64، armv7 یا universal)","unknown phone type":"نوع گوشی نامعتبر است"});
 function pBot(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Telegram sales bot')+'</h2><p>'+t('Create and manage the sales bot')+'</p></div><div id="bt_top"></div></div><div id="bt">'+t('Loading…')+'</div>';botLoad()}
 function botLoad(){return Promise.all([api('GET','/api/bot'),api('GET','/api/settings'),api('GET','/api/plans').catch(function(){return []})]).then(function(r){S.bot=r[0];S.bset=r[1];S.plans=r[2]||[];botDraw()}).catch(fail)}
 function bsChk(k,label){return '<label class="chk"><input type="checkbox" data-bs="'+k+'" '+((S.bset||{})[k]=='1'?'checked':'')+'>'+t(label)+'</label>'}
@@ -2239,25 +3607,6 @@ function emLoad(){Promise.all([api('GET','/api/emergency'),api('GET','/api/tunne
  clearTimeout(S.emT);S.emT=setTimeout(function(){if($('#em')&&!$('#modal').classList.contains('on')&&document.activeElement.tagName!='INPUT'&&document.activeElement.tagName!='TEXTAREA')emLoad()},8000)
 }).catch(fail)}
 function verLt(a,b){var p=function(v){return String(v).replace(/^v/,'').split('.').map(function(x){return +x||0})},x=p(a),y=p(b);for(var i=0;i<3;i++){if((x[i]||0)!=(y[i]||0))return (x[i]||0)<(y[i]||0)}return false}
-Object.assign(FA,{"HTTP (CDN SSL or no SSL): 8080, 8880, 2052, 2082, 2086, 2095 · HTTPS (own SSL): 2053, 2083, 2087, 2096, 8443. Keep 80 and 443 free when Kanki DNS runs on this server.":"پورت HTTP (SSL از CDN یا بدون SSL): 8080، 8880، 2052، 2082، 2086، 2095 · پورت HTTPS (SSL خودت): 2053، 2083، 2087، 2096، 8443. اگر DNS کانکی روی همین سرور است، 80 و 443 را آزاد بگذار."});
-Object.assign(FA,{"Emergency chat":"چت اضطراری","Talk to your customers and send them configs when the international internet is cut":"وقتی اینترنت بین‌الملل قطع است با مشتری‌ها حرف بزن و کانفیگ بفرست","How it works":"چطور کار می‌کند",
- "Choose a server inside Iran (one of your tunnel servers) and a domain that points to it (ArvanCloud CDN or plain DNS).":"یک سرور داخل ایران (یکی از سرورهای تانل) و دامنه‌ای که به آن اشاره می‌کند (CDN ابرآروان یا DNS معمولی) را انتخاب کن.",
- "The panel installs the emergency chat on that server by itself and keeps the list of your customers there while the internet works.":"پنل خودش چت اضطراری را روی همان سرور نصب می‌کند و تا وقتی اینترنت وصل است، لیست مشتری‌ها را آن‌جا به‌روز نگه می‌دارد.",
- "When the internet is cut, customers tap the emergency button in the Kanki app and write to you; you answer and send configs from the address below, from inside Iran.":"وقتی اینترنت قطع شد، مشتری در اپ کانکی دکمه‌ی اضطراری را می‌زند و به تو پیام می‌دهد؛ تو از داخل ایران با آدرس پایین جواب می‌دهی و کانفیگ می‌فرستی.",
- "Your messages are signed: the app only trusts messages that really come from you, even over plain HTTP.":"پیام‌های تو امضا می‌شوند: اپ فقط پیامی را قبول می‌کند که واقعاً از طرف تو باشد، حتی روی HTTP.",
- "Status":"وضعیت","Waiting for the server…":"در انتظار سرور…","Running":"در حال اجرا","Not running":"اجرا نمی‌شود","Admin chat address (open it from inside Iran)":"آدرس چت ادمین (از داخل ایران باز کن)",
- "Unread messages":"پیام‌های خوانده‌نشده","The agent of this server is old: press “Update all” in Tunnel servers first.":"ایجنت این سرور قدیمی است: اول در «سرورهای تانل» دکمه‌ی «آپدیت همه» را بزن.",
- "Without a certificate (HTTP) the chat works, but messages and your password are not encrypted on the way. Get an SSL certificate before the internet is cut and paste it below. Your configs stay safe: they are signed.":"بدون گواهی (HTTP) چت کار می‌کند، ولی پیام‌ها و رمز تو در مسیر رمزنگاری نمی‌شوند. قبل از قطعی اینترنت گواهی SSL بگیر و پایین بگذار. کانفیگ‌هایت امن می‌مانند چون امضا می‌شوند.",
- "Customers known to the chat":"مشتری‌های شناخته‌شده در چت","Signing key":"کلید امضا","Emergency chat is on":"چت اضطراری روشن است","Server inside Iran":"سرور داخل ایران","Port":"پورت",
- "With ArvanCloud CDN use a port it forwards (80, 8080, 443, 2053, 8443 …). Open the port on the server.":"با CDN ابرآروان پورتی بگذار که ابرآروان رد می‌کند (80، 8080، 443، 2053، 8443 …). پورت را روی سرور باز کن.",
- "Admin password of the chat":"رمز ادمین چت","unchanged":"بدون تغییر","at least 10 characters":"حداقل ۱۰ کاراکتر","SSL certificate (optional, recommended)":"گواهی SSL (اختیاری، پیشنهادی)","set":"گذاشته شده",
- "Certificate (PEM, full chain)":"گواهی (PEM، زنجیره‌ی کامل)","Private key (PKCS#8 PEM)":"کلید خصوصی (PKCS#8 PEM)","Remove the certificate (use HTTP)":"حذف گواهی (استفاده از HTTP)",
- "New signing key":"کلید امضای جدید","A new signing key is only needed if the server was compromised. Apps learn the new key when they refresh their subscription, so do it while the internet still works.":"کلید امضای جدید فقط وقتی لازم است که سرور لو رفته باشد. اپ‌ها کلید جدید را با به‌روز شدن اشتراک می‌گیرند، پس این کار را تا وقتی اینترنت وصل است انجام بده.",
- "Domain":"دامنه","Automatic SSL (Let’s Encrypt, recommended)":"SSL خودکار (Let’s Encrypt، پیشنهادی)","SSL from the CDN (ArvanCloud)":"SSL از CDN (ابرآروان)","My own certificate":"گواهی خودم","No SSL (HTTP)":"بدون SSL (HTTP)",
- "The server gets and renews a free certificate by itself. Do it before the internet is cut. Port 80 of the server must be free and the domain must point to it (ArvanCloud: DNS or CDN both work).":"سرور خودش گواهی رایگان می‌گیرد و تمدید می‌کند. قبل از قطعی اینترنت انجامش بده. پورت ۸۰ سرور باید آزاد باشد و دامنه به آن اشاره کند (ابرآروان: هم DNS هم CDN کار می‌کند).",
- "ArvanCloud shows HTTPS to the users with its own certificate and talks to the server on the port above with HTTP. In ArvanCloud set the origin port to this port.":"ابرآروان با گواهی خودش HTTPS را به کاربر نشان می‌دهد و با HTTP روی پورت بالا با سرور حرف می‌زند. در ابرآروان پورت مبدأ را همین پورت بگذار.",
- "Paste a certificate you already have.":"گواهی‌ای که داری را بچسبان.","Works, but messages and your password travel unencrypted. Configs stay safe: they are signed.":"کار می‌کند، ولی پیام‌ها و رمزت رمزنگاری‌نشده می‌روند. کانفیگ‌ها امن می‌مانند چون امضا می‌شوند.",
- "Saved: the server sets it up in a few seconds":"ذخیره شد: سرور تا چند ثانیه‌ی دیگر راه‌اندازی‌اش می‌کند","Off":"خاموش"});
 
 // ---- message shown by the robot inside the Kanki app (read from the subscription page, so no extra address is needed)
 var AM_DUR=[[30,'30 min'],[60,'1 hour'],[180,'3 hours'],[360,'6 hours'],[720,'12 hours'],[1440,'1 day'],[4320,'3 days'],[10080,'7 days'],[0,'Until I remove it']];
@@ -2281,18 +3630,6 @@ function botAppMsg(){var el=$('#bt_am');if(!el)return;S.amDur=S.amDur==null?60:S
    api('PUT','/api/app-msg',{text:tx,minutes:S.amDur,users:$('#am_u').value}).then(function(){toast(t('Sent'));botAppMsg()}).catch(fail)};
   var d=$('#am_del');if(d)d.onclick=function(){confirmDo(function(){api('DELETE','/api/app-msg').then(function(){toast(t('Done'));botAppMsg()}).catch(fail)})}
  }).catch(fail)}
-Object.assign(FA,{"Which methods to test":"کدام روش‌ها تست شوند","Raw ping (no tunnel)":"پینگ خام (بدون تانل)","the plain ping between the two servers, as a reference":"پینگ ساده‌ی بین دو سرور، به‌عنوان مرجع","Raw ping":"پینگ خام","Pick at least one method":"حداقل یک روش را انتخاب کن","No answer":"جوابی نیامد","loss":"افت","This is the base ping of the route; a good tunnel stays close to it.":"این پینگ پایه‌ی مسیر است؛ تانل خوب نزدیک به همین می‌ماند.","App message":"پیام اپ","30 min":"۳۰ دقیقه","1 hour":"۱ ساعت","3 hours":"۳ ساعت","6 hours":"۶ ساعت","12 hours":"۱۲ ساعت","1 day":"۱ روز","3 days":"۳ روز","7 days":"۷ روز","Until I remove it":"تا وقتی خودم پاکش کنم",
- "min":"دقیقه","left":"مانده","Showing in the app":"در حال نمایش در اپ","For":"برای","All users":"همه کاربران","Remove now":"همین الان پاک کن","No message is showing in the app right now.":"الان هیچ پیامی در اپ نمایش داده نمی‌شود.",
- "Write a message; the robot on the first screen of the Kanki app shows it to users, and it disappears by itself when the time is over.":"یک پیام بنویس؛ ربات صفحه‌ی اول اپ کانکی آن را به کاربرها نشان می‌دهد و وقتی زمانش تمام شد خودش پاک می‌شود.",
- "Message":"متن پیام","e.g. The Germany server is under maintenance for one hour.":"مثلاً: سرور آلمان تا یک ساعت در حال تعمیر است.","Show for":"مدت نمایش","Only for these users (empty = everyone)":"فقط برای این کاربرها (خالی = همه)",
- "Replace the message":"جایگزین کردن پیام","Send to the app":"ارسال به اپ","Write the message first":"اول متن پیام را بنویس","Sent":"ارسال شد",
- "The app picks the message up when it is opened, then every 30 seconds while connected (every 5 minutes when not). A user who closes the message will not see it again; a new message is shown again.":"اپ پیام را موقع باز شدن می‌گیرد؛ بعد وقتی وصل است هر ۳۰ ثانیه و وقتی وصل نیست هر ۵ دقیقه. کاربری که پیام را ببندد دیگر آن را نمی‌بیند؛ پیام جدید دوباره نشان داده می‌شود.",
- "Healthy":"سالم","Under pressure":"تحت فشار","Problem":"مشکل دارد","Details & settings":"جزئیات و تنظیمات","Hide details":"بستن جزئیات","cores":"هسته","hours":"ساعت","Not reachable":"در دسترس نیست",
- "Not reachable: check the server, its agent and the firewall":"در دسترس نیست: سرور، Agent و فایروال را چک کن","No contact for more than 3 minutes":"بیش از ۳ دقیقه ارتباطی نبوده",
- "Some users are not on this server yet (config mismatch): press Sync":"بعضی کاربرها هنوز روی این سرور نیستند (اختلاف کانفیگ): همگام‌سازی را بزن","Service stopped":"سرویس خاموش است",
- "CPU is full":"CPU پر است","CPU is busy":"CPU شلوغ است","RAM is almost full":"رم تقریباً پر است","RAM is getting full":"رم دارد پر می‌شود","Disk is almost full":"دیسک تقریباً پر است","Disk is getting full":"دیسک دارد پر می‌شود",
- "Using a lot of swap: the server needs more RAM":"از Swap زیاد استفاده می‌کند: سرور رم بیشتری لازم دارد","Press Update agent to see CPU, RAM and disk of this node":"برای دیدن CPU، رم و دیسک این نود «آپدیت Agent» را بزن",
- "Agent is on an older version":"Agent نسخه‌ی قدیمی‌تری دارد","press Update agent":"آپدیت Agent را بزن","Under maintenance: new users are not sent here":"در تعمیر: کاربر جدید به اینجا فرستاده نمی‌شود"});
 
 // ---- discount codes
 function botDisc(){var el=$('#bt_disc');if(!el)return;api('GET','/api/discounts').then(function(l){
@@ -2312,7 +3649,7 @@ function botChan(){var el=$('#bt_chan');if(!el)return;api('GET','/api/channel').
   '<label class="f">'+t('Post types')+'</label><div class="chips">'+(c.all_kinds||[]).map(function(k){return '<label class="chk"><input type="checkbox" class="ch_k" value="'+k.id+'" '+(ks.indexOf(k.id)>=0?'checked':'')+'>'+t(k.name)+'</label>'}).join('')+'</div>'+
   '<div class="chips">'+'<label class="chk"><input type="checkbox" id="ch_ao" '+(c.auto_offer?'checked':'')+'>'+t('Automatic discount on occasions (Nowruz, Yalda…)')+'</label></div>'+
   '<p class="muted" style="font-size:12px">'+t('No posts between 1 and 8 in the morning.')+' · '+t('Posts sent')+': '+N(c.count)+(c.last?' · '+t('Last')+': '+ago(c.last):'')+(c.occasion?' · 🎉 '+esc(c.occasion):'')+(String(c.status||'').indexOf('error')==0?'<br><span class="r">'+esc(c.status)+'</span>':'')+'</p>'+
-  '<button class="btn" style="width:100%" id="ch_save">'+t('Save')+'</button></div>'+
+  '<button class="btn" style="width:100%" id="ch_save">'+t('Save')+'</button></div>'+aiCard(c)+
   '<div class="card"><div class="nh"><h3>👁 '+t('Post preview')+'</h3><select id="ch_kind" style="width:auto"><option value="auto">'+t('Smart choice')+'</option>'+(c.all_kinds||[]).map(function(k){return '<option value="'+k.id+'">'+t(k.name)+'</option>'}).join('')+'</select></div>'+
   '<div class="chpv" id="ch_pv"><span class="muted">…</span></div><div class="row" style="gap:8px;margin-top:8px"><button class="b2" id="ch_new" style="flex:1">🔄 '+t('Another one')+'</button><button class="btn" id="ch_pub" style="flex:1">📤 '+t('Publish now')+'</button></div></div>'+
   '<div class="card"><h3>🔥 '+t('Discount campaign')+'</h3><p class="sub">'+t('Makes a new code that ends by itself and announces it in the channel.')+'</p><div class="g3f"><div><label class="f">%</label><input id="cc_p" type="number" min="1" max="90" value="20"></div><div><label class="f">'+t('Hours')+'</label><input id="cc_h" type="number" min="1" value="48"></div><div><label class="f">'+t('Uses')+'</label><input id="cc_u" type="number" min="1" value="200"></div></div>'+
@@ -2324,7 +3661,31 @@ function botChan(){var el=$('#bt_chan');if(!el)return;api('GET','/api/channel').
   kinds:$$('.ch_k').filter(function(x){return x.checked}).map(function(x){return x.value}).join(',')}).then(function(){toast(t('Saved'));botChan()}).catch(fail)};
  $('#ch_on').onchange=function(){api('PUT','/api/channel',{on:this.checked}).then(function(){toast(t('Saved'))}).catch(fail)};
  $('#cc_go').onclick=function(){var me=this;me.disabled=true;api('POST','/api/channel/campaign',{percent:+$('#cc_p').value||20,hours:+$('#cc_h').value||48,uses:+$('#cc_u').value||200}).then(function(r){me.disabled=false;
-  toast(r.posted?t('Published')+' · '+r.code:r.code+' · '+(r.error||''),!r.posted);botChan()}).catch(function(e){me.disabled=false;fail(e)})}}).catch(fail)}
+  toast(r.posted?t('Published')+' · '+r.code:r.code+' · '+(r.error||''),!r.posted);botChan()}).catch(function(e){me.disabled=false;fail(e)})};
+ aiWire()}).catch(fail)}
+// the smart channel's AI writer
+function aiCard(c){var st=String(c.ai_status||''),ok=st.indexOf('ok:')==0;
+ return '<div class="card" id="v37ai"><div class="nh"><div><h3>🤖 '+t('AI writer')+'</h3><p class="sub">'+t('Posts are written by the AI from your real plans, prices and codes, in the tone you describe. When it does not answer (it is tried again, and another model is tried), the built-in writer posts instead.')+'</p></div>'+
+  '<label class="sw"><input type="checkbox" id="ai_on" '+(c.ai_on?'checked':'')+'><span></span></label></div>'+
+  '<div class="g2f"><div><label class="f">'+t('API key')+(c.ai_has_key?' · <span class="okt">'+t('saved')+' <span class="ltr">'+esc(c.ai_key_hint||'')+'</span></span>':'')+'</label><input id="ai_key" class="ltr aikey" type="text" name="kk-grok-api" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="'+esc(c.ai_has_key?t('Paste a new key to replace it'):'AQ.… / gsk_… / xai-…')+'"></div>'+
+  '<div><label class="f">'+t('Model')+'</label><input id="ai_model" class="ltr" value="'+esc(c.ai_model||'')+'" placeholder="'+esc(c.ai_provider_used=='gemini'?'gemini-flash-latest':c.ai_provider_used=='xai'?'grok-4':'openai/gpt-oss-120b')+'"></div></div>'+
+  '<label class="f">'+t('AI service')+'</label><select id="ai_pv">'+[['','Automatic (from the key)'],['gemini','Gemini (Google AI Studio, key AQ.… / AIza…)'],['groq','Groq (groq.com, key gsk_…)'],['xai','Grok (x.ai, key xai-…)']].map(function(o){return '<option value="'+o[0]+'"'+((c.ai_provider||'')==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select>'+
+  '<small class="muted">'+t('Now')+': <b class="ltr">'+esc(c.ai_provider_used=='xai'?'Grok · api.x.ai/v1':c.ai_provider_used=='gemini'?'Gemini · generativelanguage.googleapis.com':'Groq · api.groq.com/openai/v1')+'</b> · '+t('Empty model = the best one of that service; a refused model is replaced by another one of your account.')+'</small>'+
+  '<label class="f">'+t('About us and how to write')+'</label><textarea id="ai_brief" rows="4" placeholder="'+esc(t('Who you are, what to stress, the tone, words to avoid…'))+'">'+esc(c.ai_brief||'')+'</textarea>'+
+  '<label class="f">'+t('Posting times (Iran time)')+'</label><div class="inl"><input id="ch_times" class="ltr" value="'+esc(c.times||'')+'" placeholder="10:00, 16:00, 21:30"><button type="button" class="b2" id="ai_3x" style="flex:none">'+t('Use 3 times a day')+'</button></div><small class="muted">'+t('Empty = every N hours as above. Three times a day: 10:00, 16:00, 21:30')+'</small>'+
+  (st?'<p class="'+(ok?'okt':'r')+'" style="font-size:12px;margin:8px 0 0">'+t('Last answer')+': <span class="ltr">'+esc(ok?st.slice(3):st)+'</span></p>':'')+
+  '<div class="g3" style="margin-top:12px"><button class="btn" id="ai_save">'+t('Save')+'</button><button class="b2" id="ai_test">⚡ '+t('Test the key')+'</button>'+(c.ai_has_key?'<button class="b2 bd" id="ai_rm">'+t('Remove the key')+'</button>':'<span></span>')+'</div>'+
+  '<div id="ai_out" class="chpv" style="display:none;margin-top:10px"></div></div>'}
+function aiWire(){var g=function(id){return $('#'+id)};
+ g('ai_3x').onclick=function(){g('ch_times').value='10:00, 16:00, 21:30'};
+ var keyOk=function(){var k=g('ai_key').value.trim();if(k&&!/^(gsk_|xai-|AQ\.|AIza)/.test(k)&&!confirm(t('A Gemini key starts with AQ. or AIza (aistudio.google.com/apikey), a Groq key with gsk_, a Grok key with xai-. Save this one anyway?')))return false;return true};
+ g('ai_save').onclick=function(){if(!keyOk())return;var b=this;b.disabled=true;api('PUT','/api/channel',{ai_on:g('ai_on').checked,ai_key:g('ai_key').value.trim(),ai_provider:g('ai_pv').value,ai_model:g('ai_model').value.trim(),ai_brief:g('ai_brief').value,times:g('ch_times').value.trim()})
+  .then(function(){toast(t('Saved'));botChan()}).catch(function(e){b.disabled=false;fail(e)})};
+ g('ai_test').onclick=function(){if(!keyOk())return;var b=this,o=g('ai_out');b.disabled=true;o.style.display='';o.innerHTML='<span class="muted">…</span>';
+  var save=api('PUT','/api/channel',{ai_key:g('ai_key').value.trim(),ai_provider:g('ai_pv').value,ai_model:g('ai_model').value.trim()});
+  save.then(function(){return api('POST','/api/channel/ai-test')}).then(function(r){o.innerHTML='<b class="okt">✓ '+t('The AI works')+' · <span class="ltr">'+esc(r.model)+'</span></b><br><br>'+String(r.text||'').replace(/\n/g,'<br>');b.disabled=false})
+   .catch(function(e){o.innerHTML='<span class="r">'+esc(e.message||'')+'</span>';b.disabled=false})};
+ var rm=g('ai_rm');if(rm)rm.onclick=function(){if(!confirm(t('Remove the key')+'?'))return;api('PUT','/api/channel',{ai_key:'-',ai_on:false}).then(function(){toast(t('Done'));botChan()}).catch(fail)}}
 function botModal(edit){var b=S.bot||{};modal(mhead(t(edit?'Edit bot':'Create bot'))+
  '<label class="f">'+t('Bot token (from @BotFather)')+'</label><input id="bm_t" class="ltr" autocomplete="off" placeholder="'+(edit?t('Empty = keep the current token'):'123456789:AA…')+'">'+
  '<label class="f">'+t('Admin numeric ID(s), comma separated')+'</label><input id="bm_a" class="ltr" value="'+esc(b.admins||'')+'" placeholder="123456789">'+
@@ -2391,12 +3752,8 @@ function ptDraw(){var el=$('#pt');if(!el)return;var ns=S.nodes||[];if(!ns.some(f
 function ptCheck(n){toast(t('Checking…'));if(n.id=='local'){api('GET','/api/system').then(function(s){S.psys=s;ptDraw();toast(t('Done'))}).catch(fail);return}
  api('POST','/api/nodes/'+encodeURIComponent(n.id)+'/health').then(function(r){if(r.services){n.info=n.info||{};n.info.services=r.services}toast(r.ok?t('Done'):t('Offline'),!r.ok);ptDraw()}).catch(fail)}
 
-Object.assign(FA,{"Dollar price (crypto)":"قیمت دلاری (پرداخت ارزی)","from the toman price at the dollar rate":"از روی قیمت تومان با نرخ دلار","Crypto payment (TON / USDT)":"پرداخت ارزی (TON / USDT)","Accept crypto to my wallet":"دریافت ارز به کیف پول خودم","TON wallet address (Tonkeeper…)":"آدرس کیف پول TON (تون‌کیپر…)","USDT address (TRC20)":"آدرس USDT (شبکه‌ی TRC20)","Toman per dollar (for plans without a dollar price)":"نرخ دلار به تومان (برای پلن‌های بدون قیمت دلاری)","Extra text for the buyer (optional)":"متن اضافه برای خریدار (اختیاری)","An address is written but «Accept crypto to my wallet» is off: buyers will not see it.":"آدرس نوشته شده ولی «دریافت ارز به کیف پول خودم» خاموش است: خریدارها آن را نمی‌بینند.","The buyer sees the amount in dollars and in TON (at today\'s price), your addresses to copy and a Tonkeeper button, then sends the receipt or TXID for you to approve. Plans without a dollar price get it from the toman price at this rate; with no rate and no dollar price, crypto is not offered for that plan.":"خریدار مبلغ را به دلار و به TON (با قیمت امروز)، آدرس‌هایت را برای کپی و دکمه‌ی تون‌کیپر می‌بیند و بعد رسید یا TXID را می‌فرستد تا تأیید کنی. پلنی که قیمت دلاری ندارد، قیمتش از روی تومان با همین نرخ حساب می‌شود؛ بدون نرخ و بدون قیمت دلاری، پرداخت ارزی برای آن پلن نشان داده نمی‌شود."});
-Object.assign(FA,{"Admin numeric ID(s), comma separated": "آیدی عددی ادمین(ها)، با کاما جدا کن", "All servers": "همه سرورها", "All servers connected": "همه سرورها وصل‌اند", "All services": "همه سرویس‌ها", "Bot admins": "ادمین‌های ربات", "Bot token (from @BotFather)": "توکن ربات (از ‎@BotFather)", "Plans, prices and payments can also be managed inside the bot (Admin panel button).": "پلن‌ها، قیمت‌ها و پرداخت‌ها را داخل خود ربات هم می‌شود مدیریت کرد (دکمه پنل ادمین).", "By node": "بر اساس نود", "By protocol": "بر اساس پروتکل", "Check now": "بررسی الان", "Create and manage the sales bot": "ساخت و مدیریت ربات فروش", "Download and upload, every 2 seconds": "دانلود و آپلود، هر ۲ ثانیه", "Edit bot": "ویرایش ربات", "Empty = keep the current token": "خالی = همان توکن فعلی بماند", "Enforce connection limit (Hysteria2)": "اعمال محدودیت اتصال (Hysteria2)", "Firewall": "فایروال", "Get your numeric Telegram ID from @userinfobot.": "آیدی عددی تلگرامت را از ‎@userinfobot بگیر.", "How the bot sells: trials, payments, referrals and messages.": "نحوه فروش ربات: تست رایگان، پرداخت، دعوت دوستان و پیام‌ها.", "If a port is closed, run this on that server as root:": "اگر پورتی بسته است، این را روی همان سرور با root اجرا کن:", "In Telegram open @BotFather, send /newbot and copy the token it gives.": "در تلگرام ‎@BotFather را باز کن، ‎/newbot را بفرست و توکنی که می‌دهد را کپی کن.", "Live log": "لاگ زنده", "Live network traffic": "ترافیک لحظه‌ای شبکه", "Live speed": "سرعت لحظه‌ای", "Logs are not available": "لاگ در دسترس نیست", "Main": "اصلی", "New link (the old one stops working)": "لینک جدید (لینک قبلی از کار می‌افتد)", "No debug lines": "خط دیباگی نیست", "No errors": "خطایی نیست", "No log lines yet": "هنوز لاگی نیست", "No plans yet": "هنوز پلنی ساخته نشده", "No port information yet. Press Check now.": "هنوز اطلاعات پورت نیامده. «بررسی الان» را بزن.", "No sales bot yet": "هنوز ربات فروش ساخته نشده", "Node API (HTTPS)": "API نود (HTTPS)", "Online payments": "درگاه‌های پرداخت آنلاین", "Panel (HTTPS)": "پنل (HTTPS)", "Panel (internal)": "پنل (داخلی)", "Panel / API": "پنل / API", "Panel and VPN services on this server": "پنل و سرویس‌های VPN همین سرور", "Panel is restarting…": "پنل در حال ری‌استارت…", "Plan name": "نام پلن", "Port conflict: another service on this server uses the same port": "تداخل پورت: سرویس دیگری روی همین سرور همین پورت را دارد", "Port management": "مدیریت پورت‌ها", "Ports used on the main server and on every node": "پورت‌های سرور اصلی و همه نودها", "Press Create bot and paste both.": "«ساخت ربات» را بزن و هر دو را وارد کن.", "Quota of limited users": "مجموع سهمیه کاربران محدود", "Referral reward": "هدیه دعوت دوستان", "Save sales settings": "ذخیره تنظیمات فروش", "Search": "جستجو", "Server": "سرور", "Show all": "نمایش همه", "Soft light": "روشن ملایم", "Telegram sales bot": "ربات فروش تلگرام", "Text shown to the buyer": "متنی که به خریدار نشان داده می‌شود", "The panel restarts for a few seconds after saving.": "بعد از ذخیره، پنل چند ثانیه ری‌استارت می‌شود.", "Token": "توکن", "Token is required": "توکن لازم است", "Total recorded usage": "مصرف کل ثبت‌شده", "Traffic & stats": "ترافیک و آمار", "Used volume, limit and percent": "حجم مصرفی، سقف و درصد مصرف", "Users usage": "مصرف کاربران", "Users usage and live network traffic": "مصرف کاربران و ترافیک زنده شبکه", "Web (Caddy)": "وب (Caddy)", "Welcome message": "پیام خوش‌آمد", "What buyers can choose in the bot": "پلن‌هایی که خریدار در ربات می‌بیند", "connections": "اتصال", "local only (127.0.0.1)": "فقط داخلی (127.0.0.1)", "of it used": "از آن مصرف شده", "server(s) disconnected": "سرور قطع است", "users": "کاربر", "Sales enabled": "فروش فعال باشد", "Warn buyers before expiry / end of data": "هشدار به خریدار قبل از پایان زمان یا حجم", "App download link": "لینک دانلود اپ", "Required channel (empty = none)": "کانال اجباری (خالی = ندارد)", "Give a free trial": "تست رایگان بده", "Trial volume (GB)": "حجم تست (گیگ)", "Reward volume (GB)": "حجم هدیه (گیگ)", "Reward days": "روزهای هدیه", "Accept card to card": "پرداخت کارت به کارت فعال باشد", "Card holder name": "نام صاحب کارت", "NOWPayments (crypto)": "NOWPayments (ارز دیجیتال)", "NOWPayments API key": "کلید API در NOWPayments", "ZarinPal merchant ID": "مرچنت زرین‌پال", "ZarinPal callback URL": "آدرس بازگشت زرین‌پال", "Wallet / manual payment": "کیف پول / پرداخت دستی", "Connected": "وصل", "Disconnected": "قطع", "Errors": "خطا", "Debug": "دیباگ", "Unknown": "نامشخص"});
-// ---------------------------------------------------------------- Kanki Tunnel (v2.4)
-ICO.tunnel='<path d="M3 19v-7a9 9 0 0 1 18 0v7"/><path d="M7.5 19v-6.5a4.5 4.5 0 0 1 9 0V19"/><path d="M1.5 19h21"/>';
+// ---------------------------------------------------------------- tunnels
 var TN={d:null};
-ICO.srv='<rect x="3" y="3" width="18" height="7" rx="2"/><rect x="3" y="14" width="18" height="7" rx="2"/><path d="M7 6.5h.01M7 17.5h.01M12 6.5h5M12 17.5h5"/>';
 function tunLoad(){return api('GET','/api/tunnels').then(function(d){TN.d=d;return d})}
 // servers in two groups, inside Iran and abroad (a server without a location counts as abroad)
 var SRV_GROUPS=[['iran','Iran servers'],['abroad','Abroad servers']];
@@ -2421,7 +3778,7 @@ function tunCmd(s,d){var repo=(d&&d.repo)||'',panel=(d&&d.panel)||location.origi
  if(g&&g.panel_ip){pre=tunGreScript(g)+'\n';if(g.is_ip)panel='https://10.77.'+g.n+'.1'+(g.port?':'+g.port:'')}
  return pre+(repo?'KANKI_REPO='+repo+' ':'')+'KANKI_TUNNEL='+s.id+':'+s.token+' KANKI_PANEL='+panel+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'kankiturk8770/kanki-panel')+'/main/install.sh)'}
 
-// ---- the live map (v2.8.5, canvas): entries on one side, exits on the other.
+// ---- the live map (canvas): entries on one side, exits on the other.
 // Each connected tunnel is a glowing fibre: packets leave the entry plain, pass the lock in the middle
 // and arrive encrypted (tunnel colour); smaller return packets flow back. More traffic = more packets,
 // higher ping = slower packets. The animation keeps running between data refreshes.
@@ -2443,7 +3800,7 @@ function tmRound(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+
 
 // ---- the page
 function pTunnels(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnels')+'</h2><p>'+t('Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit')+'</p></div>'+
- '<div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="b2 smartb" onclick="tunSmart()">⚡ '+t('Smart tunnel')+'</button><button class="btn" onclick="tunEdit()">+ '+t('Tunnel')+'</button></div></div>'+
+ '<div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="b2 smartb" onclick="tunSmart()">⚡ '+t('Smart tunnel')+'</button><button class="b2" id="rt_new" onclick="routeEdit()">⛓ '+t('Multi-location tunnel')+'</button><button class="btn" onclick="tunEdit()">+ '+t('Tunnel')+'</button></div></div>'+
  '<div class="card tmapc"><div id="tn_map"><span class="muted">'+t('Loading…')+'</span></div><div class="tkpi" id="tn_kpi"></div></div>'+
  '<div class="nh" style="margin-top:4px"><h3>'+t('Tunnels')+'</h3></div><div id="tn_list"></div>'+
  '';
@@ -2460,7 +3817,7 @@ function tunDraw(d){var m=$('#tn_map'),sl=$('#tn_srv');if(!m&&!sl)return;var sv=
   sl.innerHTML=SRV_GROUPS.map(function(g){var l=sv.filter(function(s){return srvLoc(s)==g[0]});return l.length?'<h3 style="grid-column:1/-1;margin:6px 0 0">'+t(g[1])+' <small class="muted">'+N(l.length)+'</small></h3>'+l.map(tunSrvCard).join(''):''}).join('')}}
 function pServers(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnel servers')+'</h2><p>'+t('Servers that only carry tunnels get a small agent: no VPN is installed on them')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="tunServerAdd()">+ '+t('Server')+'</button></div></div><div class="card" style="padding:10px"><div class="tkpi" id="tn_skpi" style="margin:0"></div></div><div class="ncards" id="tn_srv">'+t('Loading…')+'</div>';
  tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
-function tunCard(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},col=tunCol(x.state),err=es.error?e.name+': '+es.error:xx.error?xs.name+': '+xx.error:'',aw=x.kind=='awg'?(x.awg||{}):null,hy=x.kind=='hy2'?(x.hy2||{}):null;
+function tunCard(x){if(x.chain)return routeCardOf(x);var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},col=tunCol(x.state),err=es.error?e.name+': '+es.error:xx.error?xs.name+': '+xx.error:'',aw=x.kind=='awg'?(x.awg||{}):null,hy=x.kind=='hy2'?(x.hy2||{}):null;
  if(aw)err=err||(x.wrap_entry||{}).error||(x.wrap_exit||{}).error||'';
  var ports=[];if(x.tcp&&x.tcp.length)ports.push('TCP '+x.tcp.join(', '));if(x.udp&&x.udp.length)ports.push('UDP '+x.udp.join(', '));
  return '<div class="card tcard" style="border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">'+
@@ -2472,7 +3829,7 @@ function tunCard(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{
   (err&&x.state!='up'?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(err)+'</div>':'')+
   '<div class="g3" style="margin-top:10px"><button class="b2" onclick="tunEdit(\''+x.id+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2" onclick="tunAct(\''+x.id+'\',\'restart\')">'+ic('refresh',15)+' '+t('Reconnect')+'</button><button class="b2 bd" onclick="tunDel(\''+x.id+'\')">'+ic('trash',15)+' '+t('Delete')+'</button></div></div>'}
 function tunSrvCard(s){var nt=((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.entry==s.id||x.exit==s.id}).length,col=s.online?'var(--ok)':'var(--bad)';
- return '<div class="card" style="margin:0;border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start"><div class="row"><div class="logo" style="width:34px;height:34px;font-size:14px">'+esc(s.local?'★':s.name.charAt(0).toUpperCase())+'</div><div><b>'+esc(s.name)+'</b><div class="muted ltr">'+esc(s.host||t('address unknown yet'))+'</div></div></div>'+
+ return '<div class="card" style="margin:0;border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start"><div class="row"><div class="logo" style="width:34px;height:34px;font-size:14px">'+esc(s.local?'★':s.name.charAt(0).toUpperCase())+'</div><div><b>'+flag(s.cc)+' '+esc(s.name)+'</b><div class="muted ltr">'+esc(s.host||t('address unknown yet'))+'</div></div></div>'+
   '<span class="badge '+(s.online?'g':'r')+'">'+(s.local?t('Panel server'):s.online?t('Connected'):t('Disconnected'))+'</span></div>'+
   '<p class="muted" style="margin:8px 0">'+(s.local?t('Runs inside the panel'):(s.last_seen?t('Last contact')+': '+ago(s.last_seen):t('Not connected yet: run its command on the server')))+(s.version?' · v'+esc(s.version):'')+' · '+t('Tunnels')+' '+N(nt)+'</p>'+
   (s.local?'':!s.loc?'<p class="hint">'+t('Location not set: choose it in Edit')+'</p>':s.loc_guess?'<p class="hint">'+t('Location guessed: confirm it in Edit')+'</p>':'')+
@@ -2480,14 +3837,12 @@ function tunSrvCard(s){var nt=((TN.d&&TN.d.tunnels)||[]).filter(function(x){retu
 function tunAct(id,a){api('POST','/api/tunnels/'+id+'/'+a).then(function(){toast(a=='restart'?t('The tunnel reconnects in a few seconds'):t('Done'));tunRefresh()}).catch(fail)}
 function tunDel(id){if(!confirm(t('Delete this tunnel? It stops on both servers and its ports are closed in their firewalls.')))return;api('DELETE','/api/tunnels/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)}
 function tunSrvDel(id){if(!confirm(t('Remove this server from the panel? Within a few seconds it removes everything Kanki installed there (tunnels, Kanki DNS, Xray, emergency chat, subscription link), closes the ports Kanki opened and uninstalls its agent.')))return;api('DELETE','/api/tunnels/servers/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)}
-Object.assign(FA,{"Delete this server? Its users are cut off and the server itself removes WireGuard, AmneziaWG, Hysteria2 and KANKI MIX, closes their ports and uninstalls the node agent.":"این سرور حذف شود؟ کاربرهایش قطع می‌شوند و خود سرور WireGuard، AmneziaWG، Hysteria2 و KANKI MIX را برمی‌دارد، پورت‌هایشان را می‌بندد و ایجنت نود را پاک می‌کند.",
- "Removing…":"در حال حذف…","Done: everything was removed from the server too":"انجام شد: همه چیز از روی خود سرور هم پاک شد",
- "Deleted from the panel. The server did not answer (or runs an old version): its VPN services stay until you uninstall them there.":"از پنل حذف شد. سرور جواب نداد (یا نسخه‌اش قدیمی است): سرویس‌های VPN رویش می‌مانند تا خودت آن‌جا پاکشان کنی.",
- "Delete this tunnel? It stops on both servers and its ports are closed in their firewalls.":"این تانل حذف شود؟ روی هر دو سرور خاموش می‌شود و پورت‌هایش در فایروال هر دو بسته می‌شود.",
- "Remove this server from the panel? Within a few seconds it removes everything Kanki installed there (tunnels, Kanki DNS, Xray, emergency chat, subscription link), closes the ports Kanki opened and uninstalls its agent.":"این سرور از پنل حذف شود؟ تا چند ثانیه‌ی دیگر هر چه کانکی رویش نصب کرده (تانل‌ها، DNS کانکی، Xray، چت اضطراری، لینک اشتراک) پاک می‌شود، پورت‌هایی که کانکی باز کرده بسته می‌شود و ایجنتش حذف می‌شود."});
 
 // ---- servers
-function tunCmdBox(s,d){var cmd=tunCmd(s,d);
+function tunCmdBox(s,d){
+ // a server made in Servers has its own command that installs everything
+ if(s&&s.command)return '<label class="f">'+t('Run this on the new server, as root (Ubuntu / Debian)')+'</label><pre class="cmd" id="tn_cmd">'+esc(s.command)+'</pre><button class="btn" style="width:100%" id="tn_cp">'+ic('link',16)+' '+t('Copy command')+'</button>';
+ var cmd=tunCmd(s,d);
  return '<label class="f">'+t('Run this on the server, as root (Ubuntu / Debian)')+'</label><pre class="cmd" id="tn_cmd">'+esc(cmd)+'</pre><button class="btn" style="width:100%" id="tn_cp">'+ic('link',16)+' '+t('Copy command')+'</button>'+
   '<p class="muted" style="margin:10px 0 0">'+t('It installs only the tunnel agent: no VPN, no web panel. The server appears here as Connected within a few seconds.')+'</p>'+
   tunGreNote(d&&d.gre)+((d&&d.repo)?'':'<div class="warnbox">'+t('Set the update source (GitHub repo) in Settings first, or replace USER/REPO in the command.')+'</div>')}
@@ -2704,7 +4059,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  $('#tw_smart').onclick=function(){if($('#tw_en').value==$('#tw_ex').value){toast(t('The entry and the exit must be different'),1);return}
   var L=function(v){return String(v||'').split(/[\s,]+/).filter(Boolean)},g=function(k){var e=$(k);return e?e.value:''};
   tunSmart({entry:$('#tw_en').value,exit:$('#tw_ex').value,prof:$('#tw_pf').value,apply:{id:id,snap:{name:$('#tw_nm').value,mode:st.mode,transport:st.tr,port:+$('#tw_pt').value||0,conns:TNP[$('#tw_pf').value]||4,tcp:L($('#tw_tcp').value),udp:L($('#tw_udp').value),dial:g('#tw_dl'),target:g('#tw_tg'),sni:g('#tw_sni'),host:g('#tw_host'),frag:!!($('#tw_frag2')&&$('#tw_frag2').checked),path:g('#tw_pa'),auto:!!($('#tw_au')&&$('#tw_au').checked),fec:st.tr=='game'?g('#tw_fec'):'',dup:st.tr=='game'&&!!($('#tw_dup')&&$('#tw_dup').checked)}}})};
- hint();kindUi();if(!id&&!(x.tcp||[]).length&&!(x.udp||[]).length&&st.kind!='awg')fillPorts(false);
+ hint();kindUi();if(!id&&!(x.tcp||[]).length&&!(x.udp||[]).length&&st.kind!='awg')fillPorts(false);livePorts(id);
  var ct=$('#tw_ctest');if(ct)ct.onclick=cdnTest;var cn=$('#tw_cscan');if(cn)cn.onclick=cdnScan;
  var sp=$('#tw_spoof');if(sp)sp.onclick=function(e){var b=e.target.closest('[data-sp]');if(!b)return;var i=$('#tw_sni'),v=i.value.trim();i.value=v?(v.split(/[\s,]+/).indexOf(b.dataset.sp)<0?v+', '+b.dataset.sp:v):b.dataset.sp};
  var cs=$('#tw_cspoof');if(cs)cs.onclick=function(e){var b=e.target.closest('[data-sp]');if(!b)return;var i=$('#tw_csni'),v=i.value.trim();i.value=v?(v.split(/[\s,]+/).indexOf(b.dataset.sp)<0?v+', '+b.dataset.sp:v):b.dataset.sp};
@@ -2715,34 +4070,32 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   me.disabled=true;api('POST','/api/tunnels',b).then(function(){closeModal();toast(id?t('Saved: the tunnel restarts with the new settings'):t('The tunnel is made: it connects in a few seconds'));tunRefresh()}).catch(function(e){me.disabled=false;fail(e)})}}
 
 
-Object.assign(FA,{"Advanced settings":"تنظیمات پیشرفته","Profile":"پروفایل","Route":"مسیر","Tunnel type":"نوع تانل","Transport":"روش انتقال","Disguise":"پوشش","Ports":"پورت‌ها","More":"بیشتر",
- "Looks like web traffic":"شبیه ترافیک وب","Encrypted TCP":"TCP رمزنگاری‌شده","Over UDP":"روی UDP","Whitelist":"لیست سفید","Fast and steady, several links at once":"سریع و پایدار، چند اتصال هم‌زمان",
- "On filtered networks WSS and WS usually pass; plain TCP, TCP Mux, QUIC and KCP are often cut. Use “Find the best transport” to test them between these two servers.":"در شبکه‌های فیلترشده معمولاً WSS و WS رد می‌شوند و TCP، TCP Mux، QUIC و KCP اغلب قطع‌اند. با «پیدا کردن بهترین روش» همه را بین همین دو سرور تست کن.",
- "SNI names (TLS hello)":"اسم‌های SNI (داخل دست‌دادن TLS)","Several names, comma separated: every link uses another one and a link that fails moves to the next. Empty = the server address.":"چند اسم با کاما: هر اتصال یکی را برمی‌دارد و اتصالی که قطع شود سراغ بعدی می‌رود. خالی = آدرس خود سرور.",
- "Hides the SNI from filters that do not reassemble packets.":"اسم SNI را از فیلترهایی که بسته‌ها را سرهم نمی‌کنند پنهان می‌کند.","Host header (HTTP)":"هدر Host (HTTP)","empty = same as the SNI":"خالی = همان SNI",
- "TCP Mux has no site name: it is encrypted from the first byte, so there is nothing to disguise.":"TCP Mux اسم سایت ندارد: از اولین بایت رمزنگاری‌شده است، پس چیزی برای پوشاندن ندارد.","TCP has no site name: it is encrypted from the first byte, so there is nothing to disguise.":"TCP اسم سایت ندارد: از اولین بایت رمزنگاری‌شده است، پس چیزی برای پوشاندن ندارد.",
- "KCP is fully encrypted UDP (its header is hidden too); there is no site name to disguise.":"KCP یک UDP کاملاً رمزنگاری‌شده است (حتی هدرش)؛ اسم سایتی برای پوشاندن ندارد.","WS has no TLS, so there is no SNI: only the Host header and the path of the WebSocket request can be changed.":"WS رمزنگاری TLS ندارد، پس SNI هم ندارد؛ فقط هدر Host و مسیر درخواست WebSocket قابل تغییرند.",
- "SNI spoof: the TLS hello shows another site name. It only helps when the filter decides by name; it does nothing if the IP is blocked.":"SNI اسپوف: در دست‌دادن TLS اسم یک سایت دیگر نشان داده می‌شود. فقط وقتی کمک می‌کند که فیلتر بر اساس اسم تصمیم بگیرد؛ اگر خود آی‌پی بسته باشد اثری ندارد.",
- "The QUIC hello carries a site name too (default www.cloudflare.com).":"دست‌دادن QUIC هم اسم سایت دارد (پیش‌فرض www.cloudflare.com).","SNI spoof":"SNI اسپوف","Host / path":"Host / مسیر","Not needed":"لازم نیست"});
-Object.assign(FA,{"Game (KCP + FEC)":"گیم (KCP + FEC)","Gaming":"گیمینگ","Gaming options":"تنظیمات گیمینگ","FEC data:parity":"FEC داده:تکمیلی",
- "KCP + Reed-Solomon FEC and optional packet duplication: recovers lost packets without waiting, the lowest ping under loss":"KCP به‌همراه FEC (رید-سولومون) و ارسال دوبارهٔ اختیاری بسته‌ها: بستهٔ گمشده بدون انتظار بازسازی می‌شود؛ کمترین پینگ در شبکهٔ پرلاست",
- "UDP traffic inside fake TCP packets (udp2raw style): passes where UDP is cut or slowed; needs root on both servers":"ترافیک UDP داخل بسته‌های TCP ساختگی (سبک udp2raw): جایی که UDP قطع یا محدود است رد می‌شود؛ روی هر دو سرور root لازم است",
- "FEC sends extra repair packets so a lost packet is rebuilt at the other end instead of being waited for (about 40–100 ms saved per loss). 8:3 means 3 repair packets per 8 data packets (~37% more traffic). Duplication sends every packet twice: best ping, double the traffic. For WireGuard on top of this tunnel, FEC 8:3 is the sweet spot.":"FEC بسته‌های ترمیمی اضافه می‌فرستد تا بستهٔ گمشده به‌جای انتظار، در مقصد بازسازی شود (هر لاست حدود ۴۰ تا ۱۰۰ میلی‌ثانیه صرفه‌جویی). 8:3 یعنی به ازای هر ۸ بستهٔ داده ۳ بستهٔ ترمیمی (حدود ۳۷٪ ترافیک بیشتر). ارسال دوباره هر بسته را دو بار می‌فرستد: بهترین پینگ، دو برابر ترافیک. برای وایرگارد روی این تانل، FEC 8:3 نقطهٔ مطلوب است.",
- "Send every packet twice":"هر بسته دو بار فرستاده شود","The first copy that arrives wins; near-zero visible loss, double traffic":"اولین نسخه‌ای که برسد برنده است؛ لاست تقریباً صفر، ترافیک دو برابر",
- "Every UDP packet is masked with a key made from the token, so no KCP signature shows; sizes and timing look random. FEC repairs losses without a retransmit.":"هر بستهٔ UDP با کلید ساخته‌شده از توکن ماسک می‌شود؛ امضای KCP دیده نمی‌شود و اندازه‌ها و زمان‌بندی تصادفی به نظر می‌رسد. FEC لاست‌ها را بدون ارسال مجدد ترمیم می‌کند.",
- "UDP travels inside hand-crafted TCP packets with a fake handshake: to DPI it is an ordinary TCP session, but with the speed of UDP. Both servers need root and the port on TCP.":"UDP داخل بسته‌های TCP دست‌ساز با دست‌دادن ساختگی حرکت می‌کند: برای DPI یک نشست TCP معمولی است، اما با سرعت UDP. هر دو سرور به root و پورت روی TCP نیاز دارند.",
- "Test ports (first of the range)":"پورت‌های تست (اول محدوده)"});
+// ---- the tunnel form: live port check
+// what the servers themselves say is listening, shown while the ports are typed
+var PC={};
+function portsOf(sid){var c=PC[sid];if(c&&Date.now()-c.at<8000)return Promise.resolve(c.v);
+ return api('GET','/api/tunnels/servers/'+encodeURIComponent(sid)+'/ports').then(function(v){PC[sid]={at:Date.now(),v:v};return v}).catch(function(){return {known:false,used:[]}})}
+function portNums(v){var o=[];String(v||'').split(/[\s,]+/).forEach(function(x){var a=x.split(':')[0];var r=a.split('-');if(r.length==2){for(var i=+r[0];i<=+r[1]&&i-+r[0]<2000;i++)o.push(i)}else if(+a>0)o.push(+a)});return o}
+function liveCheck(id){var en=$('#tw_en'),ex=$('#tw_ex');if(!en||!ex)return;var box=$('#v37pc');if(!box){box=document.createElement('div');box.id='v37pc';var ph=$('#tw_ph');if(!ph)return;ph.parentNode.insertBefore(box,ph.nextSibling)}
+ var mode=($('#tw_md button.on')||{dataset:{v:'reverse'}}).dataset.v,trb=$('#tw_tr button.on'),tr=trb?trb.dataset.v:'tcpmux',listener=mode=='direct'?ex.value:en.value;
+ var udp=['quic','kcp','hq','game'].indexOf(tr)>=0,both=tr=='dual',port=+(($('#tw_pt')||{}).value||0);
+ var old=id?((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.id==id})[0]:null;
+ var mine=function(sid,p,u){if(!old||!old.enabled)return false;var ol=old.mode=='direct'?old.exit:old.entry;var ou=['quic','kcp','hq','game','dual'].indexOf(old.transport)>=0,ot=['quic','kcp','hq','game'].indexOf(old.transport)<0;
+  return (sid==ol&&p==old.port&&(u?ou:ot))||(sid==old.entry&&portNums((u?old.udp:old.tcp)||[]).indexOf(p)>=0)};
+ var need=[];if(port){if(!udp||both)need.push([listener,port,false]);if(udp||both)need.push([listener,port,true])}
+ portNums(($('#tw_tcp')||{}).value).forEach(function(p){need.push([en.value,p,false])});portNums(($('#tw_udp')||{}).value).forEach(function(p){need.push([en.value,p,true])});
+ var sids=need.map(function(x){return x[0]}).filter(function(v,i,a){return v&&a.indexOf(v)==i});
+ Promise.all(sids.map(function(sid){return portsOf(sid).then(function(v){return [sid,v]})})).then(function(rs){var msg=[],unknown=[];
+  rs.forEach(function(r){var sid=r[0],v=r[1];if(!v.known){unknown.push(sid);return}
+   need.filter(function(n){return n[0]==sid}).forEach(function(n){var hit=(v.used||[]).filter(function(u){return u.port==n[1]&&(u.proto=='udp')==n[2]})[0];
+    if(hit&&!(hit.kanki&&mine(sid,n[1],n[2])))msg.push((n[2]?'UDP ':'TCP ')+n[1]+' · '+(tunSrv(sid).name||sid)+': '+t('taken by')+' '+hit.by)})});
+  box.className=msg.length?'warnbox':'';box.innerHTML=msg.length?'<b>⚠ '+t('These ports are already taken on the server')+'</b><br>'+msg.map(esc).join('<br>'):(unknown.length?'<small class="muted">'+t('The server has not said which ports are free yet (update it to 3.7)')+'</small>':(need.length?'<small class="okt">✓ '+t('The ports are free on the servers')+'</small>':''))})}
+function livePorts(id){var tm,go=function(){clearTimeout(tm);tm=setTimeout(function(){liveCheck(id)},350)};
+ ['#tw_pt','#tw_tcp','#tw_udp'].forEach(function(s){var e=$(s);if(e)e.addEventListener('input',go)});['#tw_en','#tw_ex'].forEach(function(s){var e=$(s);if(e)e.addEventListener('change',go)});
+ ['#tw_tr','#tw_md'].forEach(function(s){var e=$(s);if(e)e.addEventListener('click',go)});setTimeout(go,600)}
 
 // ---- Hysteria2: show the config of one side
 function hy2Conf(id,side){api('GET','/api/tunnels/'+id+'/hy2conf/'+side).then(function(r){modal(mhead(t('Config')+' · '+(side=='exit'?t('Exit'):t('Entry')))+'<p class="muted">'+'hysteria '+(side=='exit'?'server':'client')+' -c … · '+t('It holds the password: do not share it.')+' <span class="ltr">'+esc(r.file)+'</span></p><pre class="ltr" style="white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:50vh;overflow:auto">'+esc(r.conf)+'</pre><button class="btn" id="hy_cp" style="width:100%;margin-top:8px">'+t('Copy')+'</button>');$('#hy_cp').onclick=function(){copy(r.conf)}}).catch(fail)}
-Object.assign(FA,{"Hysteria2 UDP port (on the exit)":"پورت UDP هیستریا ۲ (روی سرور خروجی)","SNI (TLS name)":"SNI (اسم TLS)",
- "The exit runs a Hysteria2 server, the entry connects to it (QUIC over UDP, fast on lossy internet). The panel makes the password and a certificate and the entry checks its fingerprint. The agents install Hysteria2 by themselves; your VPN Hysteria2 is not touched.":"سرور خروجی یک سرور هیستریا ۲ اجرا می‌کند و سرور ورودی به آن وصل می‌شود (QUIC روی UDP، روی اینترنت پرافت هم سریع). پنل رمز و گواهی را می‌سازد و ورودی اثر انگشت گواهی را چک می‌کند. ایجنت‌ها هیستریا را خودشان نصب می‌کنند؛ به هیستریای کاربران VPN دست نمی‌زند.",
- "Obfuscation (Salamander)":"مبهم‌سازی (Salamander)","No QUIC / HTTP/3 signature on the wire. Turn it off only if you want it to look like HTTP/3.":"هیچ امضای QUIC / HTTP/3 روی سیم نیست. فقط وقتی خاموشش کن که بخواهی شبیه HTTP/3 دیده شود.",
- "Upload speed of the entry, Mbit/s (0 = automatic)":"سرعت آپلود ورودی، مگابیت (۰ = خودکار)","Download speed of the entry, Mbit/s (0 = automatic)":"سرعت دانلود ورودی، مگابیت (۰ = خودکار)",
- "0 = BBR (adapts by itself). A number turns on Brutal: it keeps that speed even with packet loss. Do not write more than the real speed of the servers.":"۰ = BBR (خودش تنظیم می‌شود). اگر عدد بدهی Brutal روشن می‌شود و حتی با افت بسته همان سرعت را نگه می‌دارد. بیشتر از سرعت واقعی سرورها ننویس.",
- "Internet of these networks leaves from the exit":"اینترنت این شبکه‌ها از سرور خروجی خارج شود",
- "For example the subnet of the WireGuard users of the entry: their whole internet goes through Hysteria2 and leaves from the exit. SSH and the entry itself are not touched. The ports below are another way: users connect to a port of the entry and land on the same port of the exit.":"مثلاً شبکهٔ کاربران وایرگارد سرور ورودی (10.8.0.0/24): کل اینترنتشان از داخل هیستریا رد می‌شود و از سرور خارج بیرون می‌رود. SSH و خود سرور ورودی دست نمی‌خورد. پورت‌های پایین راه دیگری است: کاربر به پورت سرور ورودی وصل می‌شود و به همان پورت روی سرور خروجی می‌رسد.",
- "Advanced":"پیشرفته","Site shown to strangers (without obfuscation)":"سایتی که به غریبه‌ها نشان داده می‌شود (بدون مبهم‌سازی)","New password and certificate":"رمز و گواهی جدید","It holds the password: do not share it.":"رمز تانل داخلش است؛ جایی منتشرش نکن."});
 
 // ---- AmneziaWG: show the config of one side (for a server that does not run the agent)
 function awgConf(id,side){api('GET','/api/tunnels/'+id+'/awgconf/'+side).then(function(r){modal(mhead(t('Config')+' · '+(side=='exit'?t('Exit'):t('Entry')))+'<p class="muted">'+t('Save it as the file below in /etc/amnezia/amneziawg/ and run awg-quick up. It holds a private key: do not share it.')+' <span class="ltr">'+esc(r.file)+'</span></p><pre class="ltr" id="aw_cf" style="white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:50vh;overflow:auto">'+esc(r.conf)+'</pre><button class="btn" id="aw_cp" style="width:100%;margin-top:8px">'+t('Copy')+'</button>');$('#aw_cp').onclick=function(){copy(r.conf)}}).catch(fail)}
@@ -2872,82 +4225,29 @@ function tunDashWire(){if(!$('#tdc'))return;var go=function(){tunLoad().then(fun
   $('#tdc_s').textContent=tl.length?(up==tl.length?t('All tunnels connected'):N(tl.length-up)+' '+t('tunnel(s) not connected'))+' · '+N(up)+' / '+N(tl.length):t('No tunnels yet');
   var mh=tunMap(d,true),mb=$('#tdc_m');if(mb&&(!mb.querySelector('canvas')||mh.indexOf('<canvas')<0))mb.innerHTML=mh}).catch(function(){})};go();clearInterval(S.timer4);S.timer4=setInterval(function(){if(document.visibilityState=='visible')go()},5000)}
 
-Object.assign(FA,{"A new command makes the old one stop working. Continue?": "با ساختن دستور جدید، دستور قبلی دیگر کار نمی‌کند. ادامه بدهم؟", "Add a tunnel server": "افزودن سرور تانل", "Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.": "اول سرور ورودی (مثلاً سرور ایران) را اضافه کن، بعد یک تانل به سرور پنل یا سرور دیگری بساز.", "Address other servers use to reach it": "آدرسی که سرورهای دیگر با آن وصل می‌شوند", "Address other servers use to reach it (optional)": "آدرسی که سرورهای دیگر با آن وصل می‌شوند (اختیاری)", "Address to dial (empty = the server’s address)": "آدرس اتصال (خالی = آدرس خود سرور)", "All tunnels connected": "همه‌ی تانل‌ها وصل‌اند", "Balanced": "متعادل", "Command": "دستور", "Command for": "دستور برای", "Connecting…": "در حال اتصال…", "Create command": "ساخت دستور", "Edit server": "ویرایش سرور", "Edit tunnel": "ویرایش تانل", "Empty = automatic": "خالی = خودکار", "Empty = the IP it connects from": "خالی = همان آی‌پی که از آن وصل می‌شود", "Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit": "تانل رمزنگاری‌شده بین سرورها: کاربر به سرور ورودی وصل می‌شود و ترافیک از سرور خروجی بیرون می‌رود", "Entry": "ورودی", "Entry (users connect here)": "ورودی (کاربرها به این وصل می‌شوند)", "Entry → exit (direct)": "ورودی ← به خروجی وصل شود (مستقیم)", "Exit": "خروجی", "Exit (traffic leaves here)": "خروجی (ترافیک از اینجا بیرون می‌رود)", "Exit → entry (reverse, recommended)": "خروجی ← به ورودی وصل شود (معکوس، پیشنهادی)", "Fast and steady, several links at once (recommended)": "سریع و پایدار، چند اتصال هم‌زمان (پیشنهادی)", "First add your entry server in the “Tunnel servers” menu.": "اول سرور ورودی را از منوی «سرورهای تانل» اضافه کن.", "For example your Iran server. Only the tunnel agent is installed on it.": "مثلاً سرور ایران. فقط عامل تانل روی آن نصب می‌شود.", "Gaming (low ping)": "گیم (پینگ کم)", "It installs only the tunnel agent: no VPN, no web panel. The server appears here as Connected within a few seconds.": "فقط عامل تانل نصب می‌شود؛ نه VPN و نه پنل وب. چند ثانیه بعد سرور اینجا «وصل» نشان داده می‌شود.", "Links": "اتصال‌ها", "Looks like a WebSocket, works behind a CDN": "شبیه وب‌سوکت، پشت CDN هم کار می‌کند", "Looks like an HTTPS site, hardest to spot": "شبیه یک سایت HTTPS، سخت‌تر از همه شناسایی می‌شود", "Make the first tunnel": "اولین تانل را بساز", "Make the tunnel": "ساخت تانل", "Most speed": "بیشترین سرعت", "New tunnel": "تانل جدید", "No tunnels yet": "هنوز تانلی ساخته نشده", "Not connected yet: run its command on the server": "هنوز وصل نشده: دستورش را روی سرور اجرا کن", "One plain link": "یک اتصال ساده", "Open this port on": "این پورت را باز کن روی", "Panel server": "سرور پنل", "Path": "مسیر", "Ping": "پینگ", "Ports of the panel server were filled in": "پورت‌های سرور پنل وارد شد", "Ports to carry": "پورت‌هایی که از تانل رد می‌شوند", "Profile": "پروفایل", "Reconnect": "اتصال دوباره", "Run this on the server, as root (Ubuntu / Debian)": "این را روی سرور با کاربر root اجرا کن (اوبونتو / دبیان)", "Runs inside the panel": "داخل خود پنل اجرا می‌شود", "Saved: the tunnel restarts with the new settings": "ذخیره شد: تانل با تنظیمات جدید دوباره وصل می‌شود", "Server name": "نام سرور", "Servers": "سرورها", "Servers online": "سرورهای وصل", "Servers that only carry tunnels get a small agent: no VPN is installed on them": "روی سرورهایی که فقط تانل دارند یک عامل کوچک نصب می‌شود؛ هیچ VPN نصب نمی‌شود", "Set the update source (GitHub repo) in Settings first, or replace USER/REPO in the command.": "اول منبع آپدیت (مخزن گیت‌هاب) را در تنظیمات بگذار، یا USER/REPO را در دستور عوض کن.", "Target on the exit": "مقصد روی سرور خروجی", "The entry and the exit must be different": "ورودی و خروجی باید دو سرور متفاوت باشند", "The tunnel is made: it connects in a few seconds": "تانل ساخته شد: تا چند ثانیه‌ی دیگر وصل می‌شود", "The tunnel reconnects in a few seconds": "تانل تا چند ثانیه‌ی دیگر دوباره وصل می‌شود", "Through the tunnels": "عبوری از تانل‌ها", "Traffic": "ترافیک", "Transport": "روش انتقال", "Tunnel": "تانل", "Tunnel port": "پورت تانل", "Tunnels": "تانل‌ها", "Tunnels connected": "تانل‌های وصل", "Users connect to these ports on the entry; they reach the same ports on the exit. Use 8443:443 to change the port, 1000-1010 for a range.": "کاربرها به این پورت‌ها روی سرور ورودی وصل می‌شوند و به همان پورت‌ها روی خروجی می‌رسند. برای تغییر پورت 8443:443 و برای بازه 1000-1010 بنویس.", "Who connects": "چه کسی وصل شود", "address unknown yet": "آدرس هنوز معلوم نیست", "direct": "مستقیم", "panel": "پنل", "port": "پورت", "reverse": "معکوس", "tunnel(s) not connected": "تانل وصل نیست", "Server": "سرور", "Off": "خاموش", "Manage": "مدیریت", "Advanced": "پیشرفته", "choose the entry and the exit server": "سرور ورودی و خروجی را انتخاب کن", "the entry and the exit must be two different servers": "ورودی و خروجی باید دو سرور متفاوت باشند", "the tunnel port is required": "پورت تانل لازم است", "add at least one TCP or UDP port to forward": "حداقل یک پورت TCP یا UDP اضافه کن", "the tunnel port is also in the forwarded TCP ports": "پورت تانل نباید جزو پورت‌های عبوری TCP باشد", "the panel server cannot be removed": "سرور پنل حذف نمی‌شود", "VPN ports of the panel server": "پورت‌های VPN سرور پنل", "Over QUIC (UDP), fast and encrypted": "روی QUIC (UDP)، سریع و رمزنگاری‌شده", "Over KCP (UDP), good on weak/lossy internet": "روی KCP (UDP)، مناسب اینترنت ضعیف و پرافت"});
-Object.assign(FA,{"Whitelist mode: through a CDN (ArvanCloud), for when only domestic sites open":"حالت لیست سفید: از طریق CDN (آروان‌کلود)، وقتی فقط سایت‌های داخلی باز است","Whitelist mode (CDN)":"حالت لیست سفید (CDN)","For when only domestic addresses open. Put your domain on a CDN that stays reachable (for example ArvanCloud) pointing at the exit server, turn WebSocket on, and set the origin to HTTP on the tunnel port below. The entry (inside) connects to the CDN, never to the exit directly.":"برای وقتی که فقط آدرس‌های داخلی باز می‌شوند. دامنه‌ات را روی یک CDN که در دسترس می‌ماند (مثلاً آروان‌کلود) بگذار و به سرور خروجی وصلش کن، WebSocket را روشن کن و مبدأ را روی HTTP و پورت تانل پایین بگذار. سرور ورودی (داخل ایران) همیشه به CDN وصل می‌شود، نه مستقیم به خروجی.","CDN edge addresses (IPs, comma separated)":"آدرس‌های لبه CDN (آی‌پی‌ها، با ویرگول جدا کن)","Host: your domain on the CDN":"Host: دامنه‌ات روی CDN","SNI names (comma separated, empty = same as Host)":"نام‌های SNI (با ویرگول؛ خالی = همان Host)","Split the TLS hello into tiny pieces":"تکه‌تکه کردن TLS hello","Hides the SNI from filters that do not reassemble packets. Turn it off if the CDN refuses.":"SNI را از فیلترهایی که بسته‌ها را سرهم نمی‌کنند پنهان می‌کند. اگر CDN قبول نکرد خاموشش کن."});
-if(window.KEXT){KEXT();_nodeAdd=nodeAdd;nodeAdd=nodeAddTyped}
-// start once every script below has run too (v37, look, skin, hub …): starting here raced them, and a
-// fast /api/me drew the panel before they loaded, so a refresh sometimes showed the old look
-function kankiStart(){applyLook();if(S.token)boot();else loginView()}
-if(document.readyState=='loading')document.addEventListener("DOMContentLoaded",kankiStart);else kankiStart();
-
-Object.assign(FA,{"Login, 2FA, sessions and IP access": "ورود، دومرحله‌ای، نشست‌ها و دسترسی IP", "Last logins to the panel": "آخرین ورودها به پنل", "Smart tunnel": "تانل هوشمند", "Tests all six transports between two servers (ping, TCP download / upload, UDP loss) and tells you which one is best for this route.": "هر شش روش تانل را بین دو سرور تست می‌کند (پینگ، دانلود و آپلود TCP، افت UDP) و می‌گوید کدام برای این مسیر بهترین است.", "Test ports (first of six)": "پورت تست (اولینِ شش پورت)", "Show the last result": "نمایش نتیجه‌ی قبلی", "Start the test": "شروع تست", "Takes about 2 minutes. Ports": "حدود ۲ دقیقه طول می‌کشد. پورت‌های", "must be open in the cloud firewall of": "باید در فایروال کلاد این سرور باز باشند:", "Starting…": "در حال شروع…", "In line…": "در صف…", "Testing…": "در حال تست…", "No connection": "وصل نشد", "Ping": "پینگ", "UDP loss": "افت UDP", "Score": "امتیاز", "direct": "مستقیم", "reverse": "معکوس", "Best for this route": "بهترین برای این مسیر", "Best for UDP (WireGuard / Hysteria2)": "بهترین برای UDP (وایرگارد / هیستریا)", "Build the tunnel with": "ساخت تانل با", "Build with": "ساخت با", "for UDP": "برای UDP", "No transport could connect. Open the test ports in the cloud firewall of the listening server and try again.": "هیچ روشی وصل نشد. پورت‌های تست را در فایروال کلاد سرورِ شنونده باز کن و دوباره تست کن.", "Test again": "تست دوباره", "Stop the test": "توقف تست", "Discount codes": "کدهای تخفیف", "Smart channel": "کانال هوشمند", "countries": "کشور", "Hidden": "مخفی", "Shown in the bot": "در ربات نمایش داده می‌شود", "Smart plan builder": "سازنده‌ی پلن هوشمند", "Set the price rules once; every plan gets a fair price automatically.": "قوانین قیمت را یک‌بار تعیین کن؛ هر پلن خودکار قیمت منصفانه می‌گیرد.", "Price per GB (Toman)": "قیمت هر گیگ (تومان)", "Base price per month": "قیمت پایه هر ماه", "Each extra country / month": "هر کشور اضافه / ماه", "Each extra connection / month": "هر اتصال اضافه / ماه", "Round to": "گرد کردن به", "Big plan discount %": "تخفیف پلن بزرگ ٪", "Volumes (GB, 0 = unlimited)": "حجم‌ها (گیگ، ۰ = نامحدود)", "Durations (days)": "مدت‌ها (روز)", "Countries (0 = all)": "کشورها (۰ = همه)", "Add these plans": "افزودن این پلن‌ها", "Replace all plans": "جایگزینی همه‌ی پلن‌ها", "plans": "پلن", "Buyers type the code in the bot. Used-up and expired codes are removed by themselves.": "خریدار کد را در ربات وارد می‌کند. کدهای تمام‌شده و منقضی خودکار پاک می‌شوند.", "uses left": "بار مانده", "until": "تا", "No codes yet": "هنوز کدی نیست", "Code": "کد", "Uses": "تعداد استفاده", "Hours (0 = no end)": "ساعت (۰ = بی‌پایان)", "Add code": "افزودن کد", "The bot writes and publishes posts in your channel by itself: prices, offers, tips, guides, trials and occasion greetings. Make the bot an admin of the channel.": "ربات خودش در کانالت پست می‌نویسد و منتشر می‌کند: قیمت‌ها، تخفیف‌ها، نکته‌ها، آموزش، تست رایگان و تبریک مناسبت‌ها. ربات را ادمین کانال کن.", "Channel": "کانال", "Post every (hours)": "هر چند ساعت یک پست", "Signature (empty = bot link)": "امضا (خالی = لینک ربات)", "Discount code prefix": "پیشوند کد تخفیف", "Post types": "نوع پست‌ها", "Price list": "لیست قیمت", "Discount campaign": "کمپین تخفیف", "Tip": "نکته", "How to connect": "آموزش اتصال", "Invite friends": "دعوت دوستان", "Why us": "چرا ما", "Occasion greeting": "تبریک مناسبت", "Automatic discount on occasions (Nowruz, Yalda…)": "تخفیف خودکار در مناسبت‌ها (نوروز، یلدا…)", "No posts between 1 and 8 in the morning.": "بین ۱ تا ۸ صبح پستی ارسال نمی‌شود.", "Posts sent": "پست‌های ارسال‌شده", "Post preview": "پیش‌نمایش پست", "Smart choice": "انتخاب هوشمند", "Another one": "یکی دیگر", "Publish now": "انتشار الان", "Published": "منتشر شد", "Makes a new code that ends by itself and announces it in the channel.": "یک کد جدید که خودش منقضی می‌شود می‌سازد و در کانال اعلام می‌کند.", "Hours": "ساعت", "Start the campaign": "شروع کمپین", "Nightly backup to the bot": "بکاپ شبانه به ربات", "Every night the database is cleaned and an encrypted backup is sent to Telegram": "هر شب دیتابیس تمیز می‌شود و بکاپ رمزنگاری‌شده به تلگرام فرستاده می‌شود", "When": "زمان", "Every night at": "هر شب ساعت", "Every … hours": "هر چند ساعت", "Iran time": "به وقت ایران", "Panel backup passphrase (needed to restore)": "رمز بکاپ پنل (برای ریستور لازم است)", "Show": "نمایش", "Change": "تغییر", "Separate backup bot (optional)": "ربات جدا برای بکاپ (اختیاری)", "Clean database": "تمیز کردن دیتابیس", "Removes old logs, expired sessions and abandoned unpaid orders, then compacts the file. Users and plans are not touched.": "لاگ‌های قدیمی، نشست‌های منقضی و سفارش‌های پرداخت‌نشده‌ی رهاشده را پاک و فایل را فشرده می‌کند. به کاربران و پلن‌ها دست نمی‌زند.", "Clean now": "تمیز کن", "Database size": "حجم دیتابیس", "Last cleaned": "آخرین تمیزکاری", "New backup passphrase (min 6). Old backups still need the old one.": "رمز جدید بکاپ (حداقل ۶). بکاپ‌های قبلی هنوز با رمز قبلی باز می‌شوند.", "Empty = panel backup passphrase": "خالی = رمز بکاپ پنل"});
-
-Object.assign(FA,{"Rotating tunnel": "تانل چرخشی", "Rotating": "چرخشی", "Last switch": "آخرین تغییر", "If it stays down, it switches by itself: KCP → TCP Mux → QUIC → WS → WSS → TCP (balanced, reverse)": "اگر قطع بماند، خودکار روش بعدی را امتحان می‌کند: KCP ← TCP Mux ← QUIC ← WS ← WSS ← TCP (متعادل، معکوس)"});
-
-Object.assign(FA,{"SNI spoof / Host (wss, quic, ws)": "جعل SNI / Host (wss، quic، ws)", "With WSS the handshake looks like an HTTPS connection to this domain. QUIC and KCP are fully encrypted (KCP’s header is hidden too), so they look like plain UDP.": "با WSS، دست‌دادن اتصال شبیه یک اتصال HTTPS به این دامنه دیده می‌شود. QUIC و KCP کاملاً رمزند (هدر KCP هم مخفی است) و شبیه UDP ساده‌اند."});
-
-Object.assign(FA,{"Add at least one CDN edge address":"حداقل یک آی‌پی لبه CDN بنویس","Testing…":"در حال تست…"});
-
-Object.assign(FA,{"Ports of the exit server":"پورت‌های سرور خروجی","Ports of":"پورت‌های","were filled in":"وارد شد","Moved on the entry because they were taken":"روی ورودی عوض شد چون پر بود","No node found for this server: type the ports by hand":"نودی برای این سرور پیدا نشد: پورت‌ها را دستی بنویس","This port is already used by another tunnel":"این پورت را تانل دیگری دارد","the tunnel port is also in the forwarded UDP ports":"پورت تانل نباید جزو پورت‌های عبوری UDP باشد"});
-Object.assign(FA,{"Tests every transport (TCP, KCP, WS, WSS, QUIC) in both directions between two servers, scores each one from 0 to 100 for your profile and tells you which is best and why. No tunnel is created and nothing changes on the servers.":"همه‌ی ترنسپورت‌ها (TCP، KCP، WS، WSS، QUIC) در هر دو جهت بین دو سرور امتحان می‌شوند، برای پروفایل تو از ۰ تا ۱۰۰ نمره می‌گیرند و بهترین با دلیلش پیشنهاد می‌شود. تانلی ساخته نمی‌شود و چیزی روی سرورها عوض نمی‌شود.","Test ports (first of twelve)":"پورت‌های تست (اولی از دوازده)","Takes about a minute. Ports":"حدود یک دقیقه طول می‌کشد. پورت‌های","on the entry":"روی ورودی","on the exit":"روی خروجی","must be open in the cloud firewall":"باید در فایروال سرویس‌دهنده باز باشند","passed":"رد شد","Find the best transport":"پیدا کردن بهترین ترنسپورت","Apply to the tunnel":"اعمال روی تانل","Use":"استفاده از","reverse":"معکوس","direct":"مستقیم","UDP is probably blocked on this route: the TCP transports pass":"احتمالاً UDP روی این مسیر بسته است: ترنسپورت‌های TCP رد می‌شوند","Nothing passes in this direction":"در این جهت هیچ چیز رد نمی‌شود","TLS looks filtered: plain WebSocket passes but WSS does not":"TLS احتمالاً فیلتر شده: WebSocket ساده رد می‌شود ولی WSS نه","Plain HTTP looks filtered: WSS passes but WebSocket does not":"HTTP ساده احتمالاً فیلتر شده: WSS رد می‌شود ولی WebSocket نه","The port is closed or this direction is blocked: check the cloud firewall":"پورت بسته است یا این جهت مسدود است: فایروال سرویس‌دهنده را چک کن","This transport is filtered on the route while others pass":"این ترنسپورت روی مسیر فیلتر شده در حالی که بقیه رد می‌شوند","TCP works but UDP does not pass well: WireGuard / Hysteria2 may suffer":"TCP کار می‌کند ولی UDP خوب رد نمی‌شود: وایرگارد و هیستریا۲ ممکن است ضعیف شوند","No transport could connect in either direction. Open the test ports in the cloud firewall of both servers and try again.":"در هیچ جهتی ترنسپورتی وصل نشد. پورت‌های تست را در فایروال هر دو سرور باز کن و دوباره امتحان کن.","The reverse direction (exit → entry) is closed: the entry cannot be reached from the exit. Use the direct direction.":"جهت معکوس (خروجی ← ورودی) بسته است: خروجی نمی‌تواند به ورودی برسد. از جهت مستقیم استفاده کن.","The direct direction (entry → exit) is closed: the entry cannot dial the exit. Use the reverse direction.":"جهت مستقیم (ورودی ← خروجی) بسته است: ورودی نمی‌تواند به خروجی وصل شود. از جهت معکوس استفاده کن."});
-Object.assign(FA,{"Only GRE passes to this server":"فقط GRE به این سرور رد می‌شود","When TCP to the panel is blocked but GRE passes, the panel builds a GRE link to the server and the agent connects through it. Needs root on both servers.":"وقتی TCP به پنل بسته است ولی GRE رد می‌شود، پنل خودش لینک GRE را تا سرور می‌سازد و ایجنت از روی آن وصل می‌شود. روی هر دو سرور باید root باشی.","Public IP of this server":"آی‌پی عمومی این سرور","IP of the panel server (empty = automatic)":"آی‌پی سرور پنل (خالی = خودکار)","Type the public IP of the server":"آی‌پی عمومی سرور را بنویس","GRE link":"لینک GRE","GRE link: the panel already built its side. The first lines of the command build the other side on the server, then the agent connects to the panel through the link.":"لینک GRE: پنل سمت خودش را ساخته است. خط‌های اول دستور سمت دیگر را روی سرور می‌سازند و بعد ایجنت از راه لینک به پنل وصل می‌شود.","The panel IP could not be found from its address. Type it in the GRE box (Edit server) and make the command again.":"آی‌پی پنل از روی آدرسش پیدا نشد. آن را در کادر GRE (ویرایش سرور) بنویس و دوباره دستور بساز.","The panel address is an IP, so the agent keeps using it. To send the agent through the link make a new command (Command button of the server).":"آدرس پنل آی‌پی است و ایجنت همان را نگه می‌دارد. برای عبور ایجنت از لینک، دستور تازه بساز (دکمهٔ دستور سرور).","Before making the tunnel, every transport (TCP, KCP, WS, WSS, QUIC) is tried in both directions between your two servers. It takes about one to two minutes. Each gets a score from 0 to 100 and the best one is suggested with its reason.":"قبل از ساختن تانل، همهٔ ترنسپورت‌ها (TCP، KCP، WS، WSS، QUIC) در هر دو جهت بین دو سرور امتحان می‌شوند. حدود یک تا دو دقیقه طول می‌کشد. به هر کدام نمرهٔ ۰ تا ۱۰۰ داده می‌شود و بهترین با دلیلش پیشنهاد می‌شود.","Scores follow your profile (gaming, balanced, ultra speed)":"نمره‌ها بر اساس پروفایل شما (گیمینگ، متعادل، اولترا اسپید) حساب می‌شوند","Tells which ones did not pass and probably why":"می‌گوید کدام‌ها رد نشدند و احتمالاً چرا","If one direction is closed it says so and suggests the other":"اگر یک جهت بسته باشد، همین را می‌گوید و جهت دیگر را پیشنهاد می‌دهد","One click applies it in making or editing a tunnel":"با یک کلیک در ساخت یا ویرایش تانل اعمال می‌شود","No tunnel is made and nothing changes on the servers":"هیچ تانلی ساخته نمی‌شود و چیزی روی سرورها عوض نمی‌شود","No transport could connect in either direction. Open the test ports in the cloud firewall of both servers and try again. If only GRE passes between the two servers, add or edit the server with the “Only GRE passes” option.":"هیچ ترنسپورتی در هیچ جهتی وصل نشد. پورت‌های تست را در فایروال ابری هر دو سرور باز کن و دوباره امتحان کن. اگر بین دو سرور فقط GRE رد می‌شود، سرور را با گزینهٔ «فقط GRE» اضافه یا ویرایش کن."});
-Object.assign(FA,{"Tunnel type": "نوع تانل", "Kanki tunnel": "تانل کانکی", "link between the two servers": "لینک بین دو سرور", "A WireGuard-like link with obfuscated packets. The panel makes the keys and the obfuscation numbers and gives both ends the same ones; the agents install AmneziaWG by themselves when it is missing. Inside the link the entry is 10.88.N.1 and the exit 10.88.N.2.": "لینک شبیه وایرگارد با بسته‌های مبهم‌سازی‌شده. پنل کلیدها و اعداد مبهم‌سازی (Jc، S1، H1…) را می‌سازد و دقیقاً یکسان به هر دو سمت می‌دهد؛ اگر AmneziaWG روی سرور نباشد، ایجنت خودش نصبش می‌کند. داخل لینک، ورودی 10.88.N.1 و خروجی 10.88.N.2 است.", "Hide it inside a transport": "پنهان کردن داخل یک ترنسپورت", "The AmneziaWG packets travel inside the transport chosen below (WebSocket, WSS, CDN, QUIC, KCP, TCP Mux), so the network only sees that transport. Best for strong filtering.": "بسته‌های AmneziaWG داخل ترنسپورتی که پایین انتخاب می‌کنی (وب‌سوکت، WSS، CDN، QUIC، KCP، TCP Mux) رد می‌شوند و شبکه فقط همان ترنسپورت را می‌بیند. برای فیلترینگ سنگین بهترین است.", "AmneziaWG UDP port": "پورت UDP آمنزیا", "Obfuscation profile": "پروفایل مبهم‌سازی", "Classic (Jc, S1, S2, H1-H4)": "کلاسیک (Jc، S1، S2، H1-H4)", "Heavy (more junk, bigger padding)": "سنگین (بسته‌ی زائد بیشتر، پدینگ بزرگ‌تر)", "Mimic QUIC (adds I1, needs AmneziaWG tools 1.5+)": "تقلید QUIC (I1 اضافه می‌شود، نیاز به AmneziaWG نسخه ۱.۵ به بالا)", "MTU (0 = automatic)": "MTU (۰ = خودکار)", "Keepalive (seconds)": "Keepalive (ثانیه)", "New obfuscation numbers": "اعداد مبهم‌سازی جدید", "New keys": "کلیدهای جدید", "Close the AmneziaWG port to the outside": "بستن پورت AmneziaWG به روی بیرون", "Only the transport can reach it; scanners cannot probe the port.": "فقط ترنسپورت به آن می‌رسد؛ اسکنرها نمی‌توانند پورت را کاوش کنند.", "Routing through the link": "مسیریابی از داخل لینک", "The exit does NAT (masquerade)": "خروجی NAT می‌کند (masquerade)", "Needed so what enters the link can reach the internet from the exit.": "لازم است تا ترافیکی که وارد لینک می‌شود از خروجی به اینترنت برسد.", "Destination networks sent through the link": "شبکه‌های مقصدی که از لینک می‌روند", "All traffic from these networks goes through the link": "کل ترافیکِ این شبکه‌ها (مبدأ) از لینک می‌رود", "For example the subnet of the VPN users of the entry: their internet then leaves from the exit. SSH of the entry itself is never touched.": "مثلاً ساب‌نت کاربران VPN سرور ورودی: اینترنتشان از خروجی بیرون می‌رود. به SSH خود سرور ورودی دست زده نمی‌شود.", "Entry public TCP ports sent into the link": "پورت‌های TCP عمومی ورودی که به لینک می‌روند", "Entry public UDP ports sent into the link": "پورت‌های UDP عمومی ورودی که به لینک می‌روند", "Forward to (empty = the exit inside the link)": "مقصد (خالی = خروجی داخل لینک)", "Show the config of the entry": "نمایش کانفیگ ورودی", "Show the config of the exit": "نمایش کانفیگ خروجی", "Config": "کانفیگ", "Save it as the file below in /etc/amnezia/amneziawg/ and run awg-quick up. It holds a private key: do not share it.": "با همین نام فایل در /etc/amnezia/amneziawg/ ذخیره کن و awg-quick up بزن. کلید خصوصی دارد؛ جایی منتشرش نکن."});
-Object.assign(FA,{"Tunnel servers":"سرورهای تانل","Story":"داستان کوتاه","A day with us":"یک روز با ما","Question for the audience":"سؤال از مخاطب","Q&A":"پرسش و پاسخ","Short punch":"جمله‌ی کوتاه و جذاب","Before and after":"قبل و بعد","Category":"دسته‌بندی","Category name":"نام دسته‌بندی","Rename category":"تغییر نام دسته","Move to category":"انتقال به دسته‌بندی","Other":"بدون دسته"});
-Object.assign(FA,{"Update all":"آپدیت همه","Update every node, every tunnel server and the panel itself to the latest version?":"همهٔ نودها، سرورهای تانل و خود پنل به آخرین نسخه آپدیت شوند؟","Updating…":"در حال آپدیت…","Panel":"پنل","Nodes":"نودها","no answer: update it once with the kanki command":"جواب نداد: یک‌بار با دستور kanki آپدیتش کن","Tunnel servers (updating by themselves)":"سرورهای تانل (خودشان آپدیت می‌شوند)","Both a node and a tunnel server (updated once, through the node)":"هم نود هم سرور تانل (یک‌بار، از طریق نود)","These agents are too old to update remotely. Run the command kanki on them and choose 3 (Update) once:":"این ایجنت‌ها برای آپدیت از راه دور قدیمی‌اند. روی آن‌ها دستور kanki را بزن و گزینهٔ 3 (Update) را انتخاب کن (فقط یک‌بار):","Everything is already up to date":"همه‌چیز آپدیت است","VPN ports (UDP)":"پورت‌های VPN (UDP)","Applied on the server at once: config, service and firewall. Old WireGuard/AmneziaWG files stop working; subscription links update by themselves.":"روی خود سرور همان لحظه اعمال می‌شود: کانفیگ، سرویس و فایروال. فایل‌های قدیمی وایرگارد/آمنزیا کار نمی‌کنند؛ لینک اشتراک خودش به‌روز می‌شود.","Apply ports":"اعمال پورت‌ها","No port changed":"پورتی عوض نشده","Applying…":"در حال اعمال…","Not in a tunnel":"بدون تانل","Also use this node as a tunnel server":"این نود را سرور تانل هم بکن","Telegram alert when a node or tunnel goes offline":"هشدار تلگرام وقتی نود یا تانل آفلاین شد","Easy setup: choose above which server the CDN points to, type your domain here and the tunnel port below. The panel does the rest.":"راه‌اندازی ساده: بالا انتخاب کن CDN به کدام سرور اشاره دارد، دامنه را همین‌جا و پورت تانل را پایین بنویس. بقیه را پنل انجام می‌دهد.","Extra disguise (optional)":"پوشش اضافه (اختیاری)","empty = use the domain":"خالی = از خود دامنه استفاده شود","CDN points to the Iran server: the foreign server connects in (recommended)":"CDN به سرور ایران اشاره می‌کند: سرور خارج وصل می‌شود (پیشنهادی)","CDN points to the foreign server: the Iran server connects out":"CDN به سرور خارج اشاره می‌کند: سرور ایران وصل می‌شود","On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور ایران (ورودی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور ایران باز کن.","On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.":"در پنل CDN: دامنه را اضافه کن، به آی‌پی سرور خارج (خروجی) بده، WebSocket را روشن کن، مبدأ = HTTP روی پورت تانل پایین. آن پورت را روی سرور خروجی باز کن.","enter the domain you put on the CDN":"دامنه‌ای که روی CDN گذاشتی را بنویس"});
-Object.assign(FA,{"Hardest to block": "سخت‌ترین برای مسدودسازی", "UDP first (masked QUIC); if UDP is cut, HTTP/2 over TLS on the same port number": "اول UDP (QUIC ماسک‌شده)؛ اگر UDP قطع بود، HTTP/2 روی TLS با همان شمارهٔ پورت", "WebSocket over HTTP/2, TLS 1.3 like a browser, many links in one connection": "وب‌سوکت روی HTTP/2 با TLS 1.3 مثل مرورگر؛ چند لینک در یک اتصال", "QUIC under a random mask: no QUIC signature, packet sizes hidden": "QUIC زیر یک ماسک تصادفی: بدون امضای QUIC و با اندازهٔ بستهٔ پنهان", "Every UDP packet is masked with a key made from the token: no QUIC signature, random sizes. Unmasked packets get no answer. The QUIC hello carries a site name (default www.cloudflare.com).": "هر بستهٔ UDP با کلیدی که از توکن ساخته می‌شود ماسک می‌شود: بدون امضای QUIC و با اندازه‌های تصادفی. بسته‌ای که ماسک درست نداشته باشد هیچ پاسخی نمی‌گیرد. هلوی QUIC یک نام سایت دارد (پیش‌فرض www.cloudflare.com).", "TLS 1.3 with the ALPN, ciphers and HTTP/2 settings of a browser; a stranger who opens the site gets an ordinary web page. Use port 443.": "TLS 1.3 با ALPN، رمزها و تنظیمات HTTP/2 شبیه مرورگر؛ کسی که سایت را باز کند یک صفحهٔ وب معمولی می‌بیند. از پورت 443 استفاده کن.", "Tries masked QUIC first and switches to HTTP/2 over TLS by itself when UDP does not pass. Open the port on UDP and TCP; port 443 is best.": "اول QUIC ماسک‌شده را امتحان می‌کند و اگر UDP رد نشد خودکار به HTTP/2 روی TLS می‌رود. پورت را هم روی UDP و هم روی TCP باز کن؛ پورت 443 بهترین است.", "HTTP/2 does not get through (or the server is older than 2.9): WSS passes but H2 does not": "HTTP/2 رد نمی‌شود (یا نسخهٔ سرور قدیمی‌تر از 2.9 است): WSS رد می‌شود ولی H2 نه", "Test ports (first of sixteen)": "پورت‌های تست (اولی از شانزده)"});
 
 // ==================================================================== menu and sections
-// Kanki Panel 3.7: the new shell. Loaded after every other script, it changes the menu, the look and a
-// few pages without touching how they work:
-//  - a short, flat menu of sections; a section with several pages shows them as tabs at the top
-//    (VPN services: overview, KANKI MIX, Xray, Kanki DNS, Anti-DPI · Tunnels: tunnels, servers, ports ·
-//    Sales: bot, emergency chat · System: settings, backup, security)
-//  - the glass look (cards, buttons, menu, tabs) in dark and light
-//  - Servers: a grid of every server and the services it runs, with country flags
-//  - Tunnel servers: Iran and abroad apart, with flags
-//  - Smart channel: the Grok AI writer and the posting times
+// the shell: a short menu of sections; a section with several pages shows them as tabs at the top.
+// Also here: country flags, the AI writer of the smart channel, moving the panel to a new server.
 (function(){
 'use strict';
-var V37FA={
- "VPN services":"سرویس‌های VPN","Tunnels":"تانل‌ها","Sales & support":"فروش و پشتیبانی","System":"سیستم","Overview":"نمای کلی",
- "Kanki DNS":"DNS کانکی","Anti-DPI":"ضد DPI","Tunnel servers":"سرورهای تانل","Ports":"پورت‌ها","Sales bot":"ربات فروش","Emergency chat":"چت اضطراری",
- "Settings":"تنظیمات","Backup":"بکاپ","Security":"امنیت","Servers":"سرورها","Every server and what runs on it":"همه‌ی سرورها و سرویس‌هایی که رویشان است",
- "Server":"سرور","Tunnels count":"تانل","Repair":"تعمیر","Health":"سلامت","on":"روشن","off":"خاموش","not installed":"نصب نیست","inbounds":"اینباند",
- "exit":"خروجی","relay":"رله","Iran servers":"سرورهای ایران","Abroad servers":"سرورهای خارج","Press a service to open its settings":"روی هر سرویس بزن تا تنظیمات و تعمیرش باز شود",
- "AI writer (Grok)":"نویسنده‌ی هوش مصنوعی (Groq / Grok)","AI service":"سرویس هوش مصنوعی","Automatic (from the key)":"خودکار (از روی کلید)","Groq (groq.com, key gsk_…)":"Groq (groq.com، کلید gsk_…)","Grok (x.ai, key xai-…)":"Grok (x.ai، کلید xai-…)","Now":"الان","Empty model = the best one of that service; a refused model is replaced by another one of your account.":"مدل خالی = بهترین مدل همان سرویس؛ اگر مدلی قبول نشود، مدل دیگری از حساب خودت امتحان می‌شود.",
- "Posts are written by Grok from your real plans, prices and codes, in the tone you describe. When Grok does not answer (it is tried again, and another model is tried), the built-in writer posts instead.":"پست‌ها را هوش مصنوعی (Groq یا Grok) از روی پلن‌ها، قیمت‌ها و کدهای واقعی‌ات با لحنی که می‌نویسی می‌نویسد. اگر جواب ندهد (چند بار دوباره امتحان می‌شود و مدل دیگری هم امتحان می‌شود)، نویسنده‌ی داخلی پست را می‌گذارد.",
- "API key":"کلید API","saved":"ذخیره شده","Paste a new key to replace it":"برای عوض کردن، کلید جدید را بچسبان","Model":"مدل",
- "About us and how to write":"درباره‌ی ما و لحن نوشتن","Who you are, what to stress, the tone, words to avoid…":"چه کسی هستید، روی چه چیزی تأکید شود، لحن، کلماتی که نباید بیاید…",
- "Posting times (Iran time)":"ساعت‌های انتشار (به وقت ایران)","Empty = every N hours as above. Three times a day: 10:00, 16:00, 21:30":"خالی = هر چند ساعت یک‌بار (بالا). سه بار در روز: ۱۰:۰۰، ۱۶:۰۰، ۲۱:۳۰",
- "Test the key":"تست کلید","Remove the key":"حذف کلید","Grok works":"هوش مصنوعی کار می‌کند","Last answer":"آخرین جواب","Use 3 times a day":"سه بار در روز",
- "Written by Grok":"نوشته‌ی Grok","Written by the built-in writer":"نوشته‌ی نویسنده‌ی داخلی",
- "Fast, for games and calls":"سریع، برای بازی و تماس","Steady, works almost everywhere":"پایدار، تقریباً همه‌جا","For strong filtering":"برای فیلترینگ شدید",
- "Over UDP (fast, games)":"روی UDP (سریع، بازی)","Over TCP (steady)":"روی TCP (پایدار)","Advanced (hardest to block)":"پیشرفته (سخت‌ترین برای بستن)"
-};
-function fa(){if(typeof FA!='undefined')Object.assign(FA,V37FA)}
-fa();
 
 // ---------------------------------------------------------------- sections and menu
-// [section key, label, icon, [[page, sub page, tab label], ...]]
+// [section key, label, icon, [[page, sub page, tab label], ...], menu group]
 var SECS=[
- ['dash','Dashboard','dash',[['dash','','Dashboard']]],
- ['users','Users','users',[['users','','Users']]],
- ['nodes','Servers','nodes',[['nodes','','Servers']]],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','','Xray'],['dns','','Kanki DNS'],['antidpi','','Anti-DPI']]],
- ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels'],['servers','','Tunnel servers'],['ports','','Ports']]],
- ['salesec','Sales & support','bot',[['bot','','Sales bot'],['emergency','','Emergency chat']]],
- ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']]],
- ['syssec','System','settings',[['settings','','Settings'],['backup','','Backup'],['security','','Security']]]];
+ ['dash','Dashboard','dash',[['dash','','Dashboard']],'Home'],
+ ['users','Users','users',[['users','','Users']],'Customers'],
+ ['bot','Sales bot','bot',[['bot','','Sales bot']],'Customers'],
+ ['emergency','Emergency chat','sos',[['emergency','','Emergency chat']],'Customers'],
+ ['nodes','Servers','nodes',[['nodes','','Servers']],'Servers & network'],
+ ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
+ ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
+ ['vpnsec','Cores','cores',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
+ ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
+ ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
 function secOf(p){for(var i=0;i<SECS.length;i++)if(SECS[i][3].some(function(x){return x[0]==p}))return SECS[i];return SECS[0]}
-window.V37={secOf:secOf,SECS:SECS};
+window.V37={secOf:secOf,SECS:SECS,watchPg:watchPg,drawSecTabs:drawSecTabs};
 
-// the old menu groups become plain links to the first page of each section
-window.NAV=SECS.map(function(s){return {p:s[3][0][0],sec:s[0]}});
-window.navMark=function(p,sub){var sk=secOf(p)[0];
- $$('#side a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
- $$('#mbar a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
- var cur=$('#mbar .on'),bar=$('#mbar');if(cur&&bar&&bar.scrollWidth>bar.clientWidth)try{cur.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}
- drawSecTabs(p)};
 
 // the tabs of the section, always the first thing of the page
 function secTabsHtml(p){var s=secOf(p);if(s[3].length<2)return '';
@@ -2962,272 +4262,29 @@ var mo=null;
 function watchPg(){var pg=$('#pg');if(!pg||pg._v37)return;pg._v37=1;if(mo)mo.disconnect();
  mo=new MutationObserver(function(){if(S&&S.page&&secOf(S.page)[3].length>1&&(!$('#sectabs')||pg.firstChild!=$('#sectabs')))drawSecTabs(S.page)});
  mo.observe(pg,{childList:true})}
-var _shell=window.shell;
-window.shell=function(){_shell.apply(this,arguments);document.body.classList.add('v37');watchPg()};
-var _route=window.route;
-window.route=function(){_route.apply(this,arguments);watchPg();drawSecTabs(S.page);fa()};
 
 // ---------------------------------------------------------------- flags
 function flag(cc){cc=String(cc||'').toUpperCase();if(!/^[A-Z]{2}$/.test(cc))return '<span class="flg nf" title="?">🌐</span>';
  return '<span class="flg" title="'+cc+'">'+String.fromCodePoint(0x1F1E6+cc.charCodeAt(0)-65,0x1F1E6+cc.charCodeAt(1)-65)+'</span>'}
 window.flagOf=flag;
 
-// tunnel servers: the flag of each one (Iran and abroad are already apart)
-if(window.tunSrvCard){var _tsc=window.tunSrvCard;window.tunSrvCard=function(s){var h=_tsc(s);return h.replace('<div><b>','<div><b>'+flag(s.cc)+' ')}}
-
-// ---------------------------------------------------------------- Servers: the grid of every server
-function svcCell(on,label,sub,act,cls){return '<button type="button" class="svcell '+(cls||(on?'ok':'no'))+'" '+(act?'onclick="'+act+'"':'disabled')+'><b>'+label+'</b><small>'+sub+'</small></button>'}
-function nodeGrid(){var el=$('#v37grid');if(!el)return;var ns=S.nodes||[],xr=(window.XR&&XR.d)||null,dn=(window.DN&&DN.d)||null,tn=(window.TN&&TN.d)||null;
- var rows=[];
- ns.forEach(function(n){var i=n.info||{},sv={};(i.services||[]).forEach(function(s){sv[s.key]=s});
-  var st=function(key,port){var s=sv[key];if(!port&&!s)return null;return {on:!!(s?s.active:port),port:port}};
-  rows.push({id:n.id,name:n.name,cc:n.cc,kind:'node',online:n.id=='local'||n.online,
-   wg:st('wireguard',i.wg_port),awg:st('amneziawg',i.awg_port),hy2:st('hysteria2',i.hy2_port),kmix:i.kmix_port?{on:i.kmix_active!==false,port:i.kmix_port}:null})});
- // agent servers (Iran / abroad) that run Xray, Kanki DNS or tunnels
- var tsv=(tn&&tn.servers)||[];
- tsv.forEach(function(s){var r=rows.filter(function(x){return x.id==s.id})[0];if(!r){r={id:s.id,name:s.name,cc:s.cc,kind:'agent',online:s.online,loc:s.loc};rows.push(r)}else{r.cc=r.cc||s.cc;r.loc=s.loc}
-  r.tun=((tn&&tn.tunnels)||[]).filter(function(x){return x.entry==s.id||x.exit==s.id}).length});
- if(xr)(xr.servers||[]).forEach(function(x){var r=rows.filter(function(y){return y.id==x.server})[0];if(!r)return;var ib=(xr.inbounds||[]).filter(function(i){return i.server==x.server});r.xray={n:ib.length,on:!!(x.status&&x.status.active)}});
- if(dn)(dn.servers||[]).forEach(function(x){var r=rows.filter(function(y){return y.id==x.server})[0];if(!r)return;r.dns={role:x.role,on:!!(x.status&&x.status.active)}});
- var vpnRow=function(r,k,label){var v=r[k];var act=r.kind=='node'?(k=='kmix'?"location.hash='#kmix'":"v37NodeMenu('"+esc(r.id)+"')"):'';
-  return v?svcCell(v.on,label,v.port?'UDP '+N(v.port):t(v.on?'on':'off'),act,v.on?'ok':'bad'):svcCell(false,label,r.kind=='node'?t('not installed'):'—','', 'no')};
- // 3.8: one card per server with everything that runs on it, and filters (all, abroad, Iran, DNS)
- var isIr=function(r){return r.loc=='iran'||String(r.cc||'').toUpperCase()=='IR'};
- var fl={all:function(){return true},abroad:function(r){return !isIr(r)},iran:isIr,dns:function(r){return !!r.dns}};
- if(!fl[GF])GF='all';
- var chips='<div class="sgf">'+[['all','All'],['abroad','Abroad'],['iran','Iran'],['dns','DNS']].map(function(f){
-  return '<button type="button" class="'+(GF==f[0]?'on':'')+'" onclick="v37GF(\''+f[0]+'\')">'+t(f[1])+' <b>'+N(rows.filter(fl[f[0]]).length)+'</b></button>'}).join('')+'</div>';
- var cards=rows.filter(fl[GF]).map(function(r){
-  var roles=[];if(r.id=='local')roles.push(t('Main'));if(r.kind=='node')roles.push(t('VPN server'));if(r.tun)roles.push(t('Tunnels')+' · '+N(r.tun));
-  if(r.dns)roles.push(t(r.dns.role=='relay'?'DNS relay':'DNS exit'));if(r.xray)roles.push('Xray');
-  var cells=(r.kind=='node'?vpnRow(r,'wg','WireGuard')+vpnRow(r,'awg','AmneziaWG')+vpnRow(r,'hy2','Hysteria2')+vpnRow(r,'kmix','KANKI MIX'):['wg','awg','hy2','kmix'].filter(function(k){return r[k]}).map(function(k){return vpnRow(r,k,({wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',kmix:'KANKI MIX'})[k])}).join(''))+
-   (r.xray?svcCell(r.xray.on,'Xray',N(r.xray.n)+' '+t('inbounds'),"location.hash='#xray'",r.xray.on?'ok':'bad'):'')+
-   (r.dns?svcCell(r.dns.on,'DNS',t(r.dns.role=='relay'?'relay':'exit'),"location.hash='#dns/servers'",r.dns.on?'ok':'bad'):'')+
-   (r.tun!=null?svcCell(r.tun>0,t('Tunnels'),N(r.tun),"location.hash='#tunnels'",r.tun>0?'ok':'no'):'');
-  return '<div class="sgc"><div class="sgn"><span class="dot '+(r.online?'g':'r')+'"></span>'+flag(r.cc)+'<b>'+esc(r.name)+'</b><small>'+(isIr(r)?t('Iran'):t('Abroad'))+'</small></div>'+
-   '<div class="sgr2">'+roles.map(function(x){return '<span>'+esc(x)+'</span>'}).join('')+'</div>'+
-   (cells?'<div class="sgcells">'+cells+'</div>':'<p class="sub" style="margin:0">'+t('No service on this server yet')+'</p>')+'</div>'}).join('');
- el.innerHTML='<div class="nh"><div><h3>'+ic('nodes',16)+' '+t('Every server and what runs on it')+'</h3><p class="sub" style="margin:0">'+t('Press a service to open its settings')+'</p></div></div>'+chips+
-  '<div class="sgcards">'+(cards||'<p class="sub">'+t('No server here')+'</p>')+'</div>'}
-var GF='all';
-window.v37GF=function(f){GF=f;nodeGrid()};
-// the actions of one VPN server, from the grid
-window.v37NodeMenu=function(id){var n=(S.nodes||[]).filter(function(x){return x.id==id})[0];if(!n)return;var i=n.info||{},e=esc(id);
- modal(mhead(n.name,flag(n.cc))+
-  '<div class="list">'+[['WireGuard',i.wg_port],['AmneziaWG',i.awg_port],['Hysteria2',i.hy2_port],['KANKI MIX',i.kmix_port]].map(function(x){return '<div class="li"><span>'+x[0]+'</span><span class="ltr">'+(x[1]?'UDP '+esc(String(x[1])):'—')+'</span></div>'}).join('')+'</div>'+
-  '<div class="g2" style="margin-top:12px"><button class="btn" onclick="closeModal();nAct(\''+e+'\',\'repair\')">↻ '+t('Repair')+'</button><button class="b2" onclick="closeModal();nHealth(\''+e+'\')">♡ '+t('Health')+'</button>'+
-  '<button class="b2" onclick="closeModal();nAct(\''+e+'\',\'sync\')">⇄ '+t('Sync')+'</button>'+(window.nodePorts?'<button class="b2" onclick="closeModal();nodePorts(\''+e+'\')">'+ic('ports',15)+' '+t('Ports')+'</button>':'<a class="b2" href="#ports" onclick="closeModal()">'+ic('ports',15)+' '+t('Ports')+'</a>')+'</div>')};
-if(window.pNodes){var _pn=window.pNodes;window.pNodes=function(){_pn.apply(this,arguments);var ph=$('#pg .ph');if(ph&&!$('#v37grid')){var c=document.createElement('div');c.className='card v37grid';c.id='v37grid';c.innerHTML=t('Loading…');ph.parentNode.insertBefore(c,ph.nextSibling)}}}
-if(window.loadNodes){var _ln=window.loadNodes;window.loadNodes=function(){_ln.apply(this,arguments);
- api('GET','/api/tunnels').then(function(d){if(window.TN)TN.d=d;else window.TN={d:d};nodeGrid()}).catch(function(){nodeGrid()});setTimeout(nodeGrid,900)}}
-if(window.drawNodes){var _dn=window.drawNodes;window.drawNodes=function(){_dn.apply(this,arguments);
- // a flag in front of each server's name
- var cards=$$('#nl .nodec');(S.nodes||[]).forEach(function(n,i){var b=cards[i]&&cards[i].querySelector('.nnm b');if(b&&!b.querySelector('.flg'))b.insertAdjacentHTML('afterbegin',flag(n.cc)+' ')});nodeGrid()}}
-
-// ---------------------------------------------------------------- tunnel form: live port check
-// what the servers themselves say is listening, shown while the ports are typed
-var PC={};
-function portsOf(sid){var c=PC[sid];if(c&&Date.now()-c.at<8000)return Promise.resolve(c.v);
- return api('GET','/api/tunnels/servers/'+encodeURIComponent(sid)+'/ports').then(function(v){PC[sid]={at:Date.now(),v:v};return v}).catch(function(){return {known:false,used:[]}})}
-function nums(v){var o=[];String(v||'').split(/[\s,]+/).forEach(function(x){var a=x.split(':')[0];var r=a.split('-');if(r.length==2){for(var i=+r[0];i<=+r[1]&&i-+r[0]<2000;i++)o.push(i)}else if(+a>0)o.push(+a)});return o}
-function liveCheck(id){var en=$('#tw_en'),ex=$('#tw_ex');if(!en||!ex)return;var box=$('#v37pc');if(!box){box=document.createElement('div');box.id='v37pc';var ph=$('#tw_ph');if(!ph)return;ph.parentNode.insertBefore(box,ph.nextSibling)}
- var mode=($('#tw_md button.on')||{dataset:{v:'reverse'}}).dataset.v,trb=$('#tw_tr button.on'),tr=trb?trb.dataset.v:'tcpmux',listener=mode=='direct'?ex.value:en.value;
- var udp=['quic','kcp','hq','game'].indexOf(tr)>=0,both=tr=='dual',port=+(($('#tw_pt')||{}).value||0);
- var old=id?((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.id==id})[0]:null;
- var mine=function(sid,p,u){if(!old||!old.enabled)return false;var ol=old.mode=='direct'?old.exit:old.entry;var ou=['quic','kcp','hq','game','dual'].indexOf(old.transport)>=0,ot=['quic','kcp','hq','game'].indexOf(old.transport)<0;
-  return (sid==ol&&p==old.port&&(u?ou:ot))||(sid==old.entry&&nums((u?old.udp:old.tcp)||[]).indexOf(p)>=0)};
- var need=[];if(port){if(!udp||both)need.push([listener,port,false]);if(udp||both)need.push([listener,port,true])}
- nums(($('#tw_tcp')||{}).value).forEach(function(p){need.push([en.value,p,false])});nums(($('#tw_udp')||{}).value).forEach(function(p){need.push([en.value,p,true])});
- var sids=need.map(function(x){return x[0]}).filter(function(v,i,a){return v&&a.indexOf(v)==i});
- Promise.all(sids.map(function(sid){return portsOf(sid).then(function(v){return [sid,v]})})).then(function(rs){var msg=[],unknown=[];
-  rs.forEach(function(r){var sid=r[0],v=r[1];if(!v.known){unknown.push(sid);return}
-   need.filter(function(n){return n[0]==sid}).forEach(function(n){var hit=(v.used||[]).filter(function(u){return u.port==n[1]&&(u.proto=='udp')==n[2]})[0];
-    if(hit&&!(hit.kanki&&mine(sid,n[1],n[2])))msg.push((n[2]?'UDP ':'TCP ')+n[1]+' · '+(tunSrv(sid).name||sid)+': '+t('taken by')+' '+hit.by)})});
-  box.className=msg.length?'warnbox':'';box.innerHTML=msg.length?'<b>⚠ '+t('These ports are already taken on the server')+'</b><br>'+msg.map(esc).join('<br>'):(unknown.length?'<small class="muted">'+t('The server has not said which ports are free yet (update it to 3.7)')+'</small>':(need.length?'<small class="okt">✓ '+t('The ports are free on the servers')+'</small>':''))})}
-if(window.tunEdit){var _te=window.tunEdit;window.tunEdit=function(id,pre){var r=_te.apply(this,arguments);
- setTimeout(function(){if(!$('#tw_pt'))return;var tm;var go=function(){clearTimeout(tm);tm=setTimeout(function(){liveCheck(id)},350)};
-  ['#tw_pt','#tw_tcp','#tw_udp'].forEach(function(s){var e=$(s);if(e)e.addEventListener('input',go)});['#tw_en','#tw_ex'].forEach(function(s){var e=$(s);if(e)e.addEventListener('change',go)});
-  ['#tw_tr','#tw_md'].forEach(function(s){var e=$(s);if(e)e.addEventListener('click',go)});setTimeout(go,600)},300);return r}}
-Object.assign(V37FA,{"AI writer":"نویسنده‌ی هوش مصنوعی","The AI works":"هوش مصنوعی کار می‌کند","Gemini (Google AI Studio, key AQ.… / AIza…)":"Gemini (گوگل AI Studio، کلید AQ.… یا AIza…) · رایگان","A Gemini key starts with AQ. or AIza (aistudio.google.com/apikey), a Groq key with gsk_, a Grok key with xai-. Save this one anyway?":"کلید Gemini با AQ. یا AIza شروع می‌شود (aistudio.google.com/apikey)، کلید Groq با gsk_ و کلید Grok با xai-. با این حال ذخیره شود؟","Posts are written by the AI from your real plans, prices and codes, in the tone you describe. When it does not answer (it is tried again, and another model is tried), the built-in writer posts instead.":"پست‌ها را هوش مصنوعی از روی پلن‌ها، قیمت‌ها و کدهای واقعی و با لحنی که می‌گویی می‌نویسد. اگر جواب ندهد (دوباره تلاش می‌شود و مدل دیگری امتحان می‌شود)، نویسنده‌ی داخلی پنل پست می‌گذارد.","A Groq key starts with gsk_ (console.groq.com/keys), a Grok key with xai- (console.x.ai). Save this one anyway?":"کلید Groq با gsk_ شروع می‌شود (console.groq.com/keys) و کلید Grok با xai- (console.x.ai). همین را ذخیره کنم؟","taken by":"گرفته شده توسط","These ports are already taken on the server":"این پورت‌ها روی سرور گرفته شده‌اند","The server has not said which ports are free yet (update it to 3.7)":"سرور هنوز نگفته کدام پورت‌ها آزادند (آن را به ۳.۷ آپدیت کن)","The ports are free on the servers":"پورت‌ها روی سرورها آزادند"});fa();
-
-// ---------------------------------------------------------------- smart channel: the Grok writer
-function aiCard(c){var st=String(c.ai_status||''),ok=st.indexOf('ok:')==0;
- return '<div class="card" id="v37ai"><div class="nh"><div><h3>🤖 '+t('AI writer')+'</h3><p class="sub">'+t('Posts are written by the AI from your real plans, prices and codes, in the tone you describe. When it does not answer (it is tried again, and another model is tried), the built-in writer posts instead.')+'</p></div>'+
-  '<label class="sw"><input type="checkbox" id="ai_on" '+(c.ai_on?'checked':'')+'><span></span></label></div>'+
-  '<div class="g2f"><div><label class="f">'+t('API key')+(c.ai_has_key?' · <span class="okt">'+t('saved')+' <span class="ltr">'+esc(c.ai_key_hint||'')+'</span></span>':'')+'</label><input id="ai_key" class="ltr aikey" type="text" name="kk-grok-api" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore placeholder="'+esc(c.ai_has_key?t('Paste a new key to replace it'):'AQ.… / gsk_… / xai-…')+'"></div>'+
-  '<div><label class="f">'+t('Model')+'</label><input id="ai_model" class="ltr" value="'+esc(c.ai_model||'')+'" placeholder="'+esc(c.ai_provider_used=='gemini'?'gemini-flash-latest':c.ai_provider_used=='xai'?'grok-4':'openai/gpt-oss-120b')+'"></div></div>'+
-  '<label class="f">'+t('AI service')+'</label><select id="ai_pv">'+[['','Automatic (from the key)'],['gemini','Gemini (Google AI Studio, key AQ.… / AIza…)'],['groq','Groq (groq.com, key gsk_…)'],['xai','Grok (x.ai, key xai-…)']].map(function(o){return '<option value="'+o[0]+'"'+((c.ai_provider||'')==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select>'+
-  '<small class="muted">'+t('Now')+': <b class="ltr">'+esc(c.ai_provider_used=='xai'?'Grok · api.x.ai/v1':c.ai_provider_used=='gemini'?'Gemini · generativelanguage.googleapis.com':'Groq · api.groq.com/openai/v1')+'</b> · '+t('Empty model = the best one of that service; a refused model is replaced by another one of your account.')+'</small>'+
-  '<label class="f">'+t('About us and how to write')+'</label><textarea id="ai_brief" rows="4" placeholder="'+esc(t('Who you are, what to stress, the tone, words to avoid…'))+'">'+esc(c.ai_brief||'')+'</textarea>'+
-  '<label class="f">'+t('Posting times (Iran time)')+'</label><div class="inl"><input id="ch_times" class="ltr" value="'+esc(c.times||'')+'" placeholder="10:00, 16:00, 21:30"><button type="button" class="b2" id="ai_3x" style="flex:none">'+t('Use 3 times a day')+'</button></div><small class="muted">'+t('Empty = every N hours as above. Three times a day: 10:00, 16:00, 21:30')+'</small>'+
-  (st?'<p class="'+(ok?'okt':'r')+'" style="font-size:12px;margin:8px 0 0">'+t('Last answer')+': <span class="ltr">'+esc(ok?st.slice(3):st)+'</span></p>':'')+
-  '<div class="g3" style="margin-top:12px"><button class="btn" id="ai_save">'+t('Save')+'</button><button class="b2" id="ai_test">⚡ '+t('Test the key')+'</button>'+(c.ai_has_key?'<button class="b2 bd" id="ai_rm">'+t('Remove the key')+'</button>':'<span></span>')+'</div>'+
-  '<div id="ai_out" class="chpv" style="display:none;margin-top:10px"></div></div>'}
-function aiWire(){var g=function(id){return $('#'+id)};
- g('ai_3x').onclick=function(){g('ch_times').value='10:00, 16:00, 21:30'};
- var keyOk=function(){var k=g('ai_key').value.trim();if(k&&!/^(gsk_|xai-|AQ\.|AIza)/.test(k)&&!confirm(t('A Gemini key starts with AQ. or AIza (aistudio.google.com/apikey), a Groq key with gsk_, a Grok key with xai-. Save this one anyway?')))return false;return true};
- g('ai_save').onclick=function(){if(!keyOk())return;var b=this;b.disabled=true;api('PUT','/api/channel',{ai_on:g('ai_on').checked,ai_key:g('ai_key').value.trim(),ai_provider:g('ai_pv').value,ai_model:g('ai_model').value.trim(),ai_brief:g('ai_brief').value,times:g('ch_times').value.trim()})
-  .then(function(){toast(t('Saved'));botChan()}).catch(function(e){b.disabled=false;fail(e)})};
- g('ai_test').onclick=function(){if(!keyOk())return;var b=this,o=g('ai_out');b.disabled=true;o.style.display='';o.innerHTML='<span class="muted">…</span>';
-  var save=api('PUT','/api/channel',{ai_key:g('ai_key').value.trim(),ai_provider:g('ai_pv').value,ai_model:g('ai_model').value.trim()});
-  save.then(function(){return api('POST','/api/channel/ai-test')}).then(function(r){o.innerHTML='<b class="okt">✓ '+t('The AI works')+' · <span class="ltr">'+esc(r.model)+'</span></b><br><br>'+String(r.text||'').replace(/\n/g,'<br>');b.disabled=false})
-   .catch(function(e){o.innerHTML='<span class="r">'+esc(e.message||'')+'</span>';b.disabled=false})};
- var rm=g('ai_rm');if(rm)rm.onclick=function(){if(!confirm(t('Remove the key')+'?'))return;api('PUT','/api/channel',{ai_key:'-',ai_on:false}).then(function(){toast(t('Done'));botChan()}).catch(fail)}}
-if(window.botChan){var _bc=window.botChan;window.botChan=function(){_bc.apply(this,arguments);var tries=0;
- var wait=setInterval(function(){tries++;var el=$('#bt_chan');if(!el||tries>40){clearInterval(wait);return}
-  if($('#ch_save')&&!$('#v37ai')){clearInterval(wait);api('GET','/api/channel').then(function(c){if($('#v37ai'))return;var first=el.querySelector('.card');var d=document.createElement('div');d.innerHTML=aiCard(c);
-   if(first&&first.nextSibling)el.insertBefore(d.firstChild,first.nextSibling);else el.appendChild(d.firstChild);aiWire()}).catch(function(){})}},150)}}
-
-// ---------------------------------------------------------------- Backup: move the whole panel to a new server
-Object.assign(V37FA,{"Move the panel to a new server":"انتقال کامل پنل به سرور جدید",
- "Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.":"همه‌چیز منتقل می‌شود: کاربرها، سرورها، تانل‌ها، DNS، Xray، ربات و پلن‌ها، تنظیمات پنل، کلیدهای WireGuard / AmneziaWG / Hysteria2 همین سرور (کانفیگ کاربرها کار می‌کند)، گواهی و فایل‌های اپ.",
- "Point the panel's domain to the new server's IP":"دامنه‌ی پنل را روی آی‌پی سرور جدید بگذار","In your DNS (Cloudflare / ArvanCloud): the A record of":"در DNS دامنه (کلادفلر / ابرآروان): رکورد A دامنه‌ی",
- "= the IP of the new server, without CDN (DNS only). The old panel keeps working by its IP until the move is done.":"= آی‌پی سرور جدید، بدون CDN (فقط DNS). پنل قدیمی تا پایان انتقال با آی‌پی خودش کار می‌کند.",
- "Make the move command":"ساخت دستور انتقال","Run this on the new server (Ubuntu / Debian, as root)":"این را روی سرور جدید اجرا کن (اوبونتو / دبیان، با root)",
- "It downloads everything straight from this server, puts it back with the same keys and starts the panel there. Then this panel stops by itself.":"همه‌چیز را مستقیم از همین سرور می‌گیرد، با همان کلیدها برمی‌گرداند و پنل را آن‌جا روشن می‌کند. بعد این پنل خودش خاموش می‌شود.",
- "This server's IP (empty = found by itself)":"آی‌پی همین سرور (خالی = خودکار)","Valid for 3 hours, one time. It holds the key of the backup: do not share it.":"۳ ساعت و یک‌بار اعتبار دارد. کلید بکاپ داخلش است: به کسی نده.",
- "Waiting for the new server…":"منتظر سرور جدید…","The new server downloaded the backup":"سرور جدید بکاپ را گرفت","Moved: the panel runs on the new server. This one is stopping.":"انتقال تمام شد: پنل روی سرور جدید اجرا می‌شود و این یکی خاموش می‌شود.",
- "Cancel the command":"لغو دستور","Copy the command":"کپی دستور","The backup above is complete too: it can also be restored by hand on a new server (Restore with «Also restore server keys»).":"بکاپ بالا هم کامل است: می‌شود آن را دستی هم روی سرور جدید برگرداند (بازگردانی با تیک «کلیدها و تنظیمات سرور»)."});fa();
-function moveCard(){return '<div class="card" id="v37move"><h3>🚚 '+t('Move the panel to a new server')+'</h3><p class="sub">'+t("Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.")+'</p><div id="mv_in">'+t('Loading…')+'</div></div>'}
-function moveDraw(m){var el=$('#mv_in');if(!el)return;
- var steps='<ol class="steps" style="margin:6px 0 10px;line-height:2"><li><b>'+t("Point the panel's domain to the new server's IP")+'</b><br><small class="muted">'+t('In your DNS (Cloudflare / ArvanCloud): the A record of')+' <span class="ltr">'+esc(m.domain||'')+'</span> '+t('= the IP of the new server, without CDN (DNS only). The old panel keeps working by its IP until the move is done.')+'</small></li>'+
-  '<li><b>'+t('Run this on the new server (Ubuntu / Debian, as root)')+'</b><br><small class="muted">'+t('It downloads everything straight from this server, puts it back with the same keys and starts the panel there. Then this panel stops by itself.')+'</small></li></ol>';
- if(m.done>0){el.innerHTML='<div class="okbox" style="padding:10px;border-radius:12px;border:1px solid var(--ok)">✓ '+t('Moved: the panel runs on the new server. This one is stopping.')+'</div>';return}
- if(!m.active){el.innerHTML=steps+'<label class="f">'+t("This server's IP (empty = found by itself)")+'</label><div class="inl"><input id="mv_ip" class="ltr" value="'+esc(m.ip||'')+'" placeholder="1.2.3.4"><button class="btn" id="mv_go" style="flex:none">'+t('Make the move command')+'</button></div>'+
-   '<p class="hint">'+t('The backup above is complete too: it can also be restored by hand on a new server (Restore with «Also restore server keys»).')+'</p>';
-  $('#mv_go').onclick=function(){var b=this;b.disabled=true;api('POST','/api/migrate/start',{ip:$('#mv_ip').value.trim()}).then(moveLoad).catch(function(e){b.disabled=false;fail(e)})};return}
- el.innerHTML=steps+'<pre class="ltr" id="mv_cmd" style="white-space:pre-wrap;word-break:break-all;font-size:11.5px;padding:10px;border-radius:12px;background:var(--in);border:1px solid var(--gb2);margin:0">'+esc(m.command)+'</pre>'+
-  '<p class="hint">'+t('Valid for 3 hours, one time. It holds the key of the backup: do not share it.')+'</p>'+
-  '<p style="margin:6px 0">'+(m.fetched>0?'<span class="okt">✓ '+t('The new server downloaded the backup')+(m.new_ip?' (<span class="ltr">'+esc(m.new_ip)+'</span>)':'')+'</span>':'<span class="muted">⏳ '+t('Waiting for the new server…')+'</span>')+'</p>'+
-  '<div class="g2"><button class="btn" id="mv_cp">'+t('Copy the command')+'</button><button class="b2 bd" id="mv_x">'+t('Cancel the command')+'</button></div>';
- $('#mv_cp').onclick=function(){copy(m.command)};$('#mv_x').onclick=function(){api('DELETE','/api/migrate').then(moveLoad).catch(fail)}}
-function moveLoad(){return api('GET','/api/migrate').then(moveDraw).catch(function(e){var el=$('#mv_in');if(el)el.textContent=e.message||''})}
-if(window.pBackup){var _pb=window.pBackup;window.pBackup=function(){_pb.apply(this,arguments);var g=$('#pg .g2');if(g&&!$('#v37move')){var d=document.createElement('div');d.innerHTML=moveCard();g.parentNode.insertBefore(d.firstChild,g.nextSibling)}
- moveLoad();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page=='backup'&&$('#v37move')&&!$('#modal').classList.contains('on'))moveLoad()},5000)}}
 
 // ---------------------------------------------------------------- the look
-var css=`
-body.v37{--g1:rgba(255,255,255,.055);--g2:rgba(255,255,255,.018);--gb:rgba(255,255,255,.085);--gb2:rgba(255,255,255,.14);--gl:inset 0 1px 0 rgba(255,255,255,.07);--blur:saturate(150%) blur(18px)}
-body.v37.light{--g1:rgba(255,255,255,.82);--g2:rgba(255,255,255,.55);--gb:rgba(120,90,30,.14);--gb2:rgba(120,90,30,.24);--gl:inset 0 1px 0 rgba(255,255,255,.9)}
-body.v37:before{background:radial-gradient(1100px 620px at 105% -10%,color-mix(in srgb,var(--a) 16%,transparent),transparent 65%),radial-gradient(900px 600px at -10% 110%,color-mix(in srgb,var(--info) 9%,transparent),transparent 65%),radial-gradient(700px 500px at 50% 120%,color-mix(in srgb,var(--a) 7%,transparent),transparent 70%)!important}
-/* glass surfaces */
-body.v37 .card,body.v37 .kv>div,body.v37 .ibc,body.v37 .secc{background:linear-gradient(160deg,var(--g1),var(--g2)),color-mix(in srgb,var(--c2) 70%,transparent)!important;border:1px solid var(--gb)!important;box-shadow:var(--gl),0 18px 44px -26px rgba(0,0,0,.8)!important;border-radius:20px}
-body.v37.light .card,body.v37.light .kv>div,body.v37.light .ibc,body.v37.light .secc{box-shadow:var(--gl),0 14px 34px -22px rgba(90,60,10,.35)!important}
-body.v37 header.top{background:color-mix(in srgb,var(--bg1) 62%,transparent)!important;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border-bottom:1px solid var(--gb)!important}
-body.v37 nav.side{background:linear-gradient(180deg,color-mix(in srgb,var(--c1) 82%,transparent),color-mix(in srgb,var(--c2) 88%,transparent))!important;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border-inline-end:1px solid var(--gb)!important}
-body.v37 .mbox{background:linear-gradient(160deg,var(--g1),var(--g2)),color-mix(in srgb,var(--c2) 92%,transparent)!important;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);border:1px solid var(--gb2)!important;border-radius:22px!important}
-/* buttons: gold glass and frosted glass */
-body.v37 .btn{position:relative;overflow:hidden;border-radius:14px!important;background:linear-gradient(135deg,var(--al) 0%,var(--a) 42%,var(--ad) 100%)!important;color:#1a1206!important;border:1px solid color-mix(in srgb,var(--al) 60%,transparent)!important;
- box-shadow:inset 0 1px 0 rgba(255,255,255,.6),inset 0 -2px 6px rgba(120,80,10,.35),0 10px 24px -10px color-mix(in srgb,var(--a) 85%,transparent)!important;transition:transform .12s,box-shadow .2s,filter .2s}
-body.v37 .btn:before{content:"";position:absolute;inset:0 0 50% 0;background:linear-gradient(180deg,rgba(255,255,255,.45),rgba(255,255,255,0));pointer-events:none;border-radius:inherit}
-body.v37 .btn:after{content:"";position:absolute;top:-50%;bottom:-50%;width:40%;left:-60%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.55),transparent);transform:skewX(-20deg);transition:left .6s;pointer-events:none}
-body.v37 .btn:hover:not(:disabled):after{left:130%}
-body.v37 .btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.05)}
-body.v37 .btn:active:not(:disabled){transform:translateY(0) scale(.98)}
-body.v37 .b2,body.v37 .ib,body.v37 .sb{background:linear-gradient(180deg,rgba(255,255,255,.10),rgba(255,255,255,.025))!important;border:1px solid var(--gb2)!important;border-radius:13px!important;
- box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 6px 16px -10px rgba(0,0,0,.7)!important;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);transition:transform .12s,border-color .15s,background .15s}
-body.v37.light .b2,body.v37.light .ib,body.v37.light .sb{background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(255,255,255,.6))!important;box-shadow:inset 0 1px 0 #fff,0 4px 12px -8px rgba(90,60,10,.4)!important}
-body.v37 .b2:hover:not(:disabled),body.v37 .ib:hover{border-color:color-mix(in srgb,var(--a) 65%,transparent)!important;transform:translateY(-1px)}
-body.v37 .b2.bd{color:var(--bad)}body.v37 .b2.bd:hover{border-color:color-mix(in srgb,var(--bad) 60%,transparent)!important;background:color-mix(in srgb,var(--bad) 10%,transparent)!important}
-body.v37 input,body.v37 select,body.v37 textarea{background:color-mix(in srgb,var(--bg1) 45%,transparent)!important;border:1px solid var(--gb2)!important;border-radius:13px!important}
-body.v37.light input,body.v37.light select,body.v37.light textarea{background:rgba(255,255,255,.75)!important}
-/* menu */
-body.v37 nav.side a{border-radius:13px}
-body.v37 nav.side a .nsc{margin-inline-start:auto;font-style:normal;font-size:10.5px;font-weight:800;padding:1px 7px;border-radius:9px;background:var(--in);color:var(--s)}
-body.v37 nav.side a.on .nsc{background:color-mix(in srgb,var(--a) 22%,transparent);color:var(--t)}
-body.v37 .snav{display:flex;flex-direction:column;gap:3px}
-/* section tabs */
-.sectabs{position:sticky;top:64px;z-index:5;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px;padding:8px 10px;border-radius:18px;border:1px solid var(--gb2);
- background:linear-gradient(160deg,var(--g1),var(--g2)),color-mix(in srgb,var(--bg1) 70%,transparent);backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur);box-shadow:var(--gl),0 14px 30px -20px rgba(0,0,0,.8)}
-.sectabs .sth2{display:flex;align-items:center;gap:8px;padding-inline:4px}
-.sectabs .sth2 b{font-size:14px}
-.sectabs .sti{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;color:#1a1206;background:linear-gradient(145deg,var(--al),var(--a),var(--ad))}
-.sectabs .stl{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;flex:1;padding:3px;border-radius:14px;background:color-mix(in srgb,var(--bg1) 40%,transparent);border:1px solid var(--gb)}
-.sectabs .stl a{flex:none;padding:8px 15px;border-radius:11px;color:var(--s);font-weight:800;font-size:13px;text-decoration:none;white-space:nowrap;transition:background .15s,color .15s}
-.sectabs .stl a:hover{color:var(--t);background:var(--in)}
-.sectabs .stl a.on{color:#1a1206;background:linear-gradient(135deg,var(--al),var(--a) 50%,var(--ad));box-shadow:inset 0 1px 0 rgba(255,255,255,.55),0 6px 16px -8px color-mix(in srgb,var(--a) 80%,transparent)}
-@media(max-width:899px){.sectabs{top:110px}}
-@media(max-width:620px){.sectabs .sth2{display:none}.sectabs{padding:6px}}
-body.v37 .ptabs a.on,body.v37 .seg button.on,body.v37 .segl button.on{background:linear-gradient(135deg,var(--al),var(--a) 50%,var(--ad))!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.55)}
-/* phones: a wide strip (tabs, settings sections, tables) scrolls inside itself and never makes the
-   whole page wider than the screen (that pulled the hidden menu into view) */
-@media(max-width:900px){.stw{grid-template-columns:minmax(0,1fr)!important}.stw>*,.g2>*,.g3>*,.g4>*,.kv>*{min-width:0}}
-html,body{overflow-x:clip;max-width:100%}
-@media(max-width:480px){.vrow .nm b{white-space:normal;overflow:visible}}
-body.v37 main{min-width:0;max-width:100vw}
-@media(max-width:899px){body.v37 main{overflow-x:clip}}
-/* flags */
-.flg{font-size:1.05em;line-height:1;display:inline-block;vertical-align:-1px;font-family:"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif}.flg.nf{opacity:.55}
-/* servers grid */
-.v37grid .sgw{overflow-x:auto;margin-top:12px}
-.svgrid{display:grid;grid-template-columns:minmax(170px,1.4fr) repeat(7,minmax(92px,1fr));gap:6px;min-width:860px}
-.sgh,.sgr{display:contents}
-.sgh span{font-size:11px;font-weight:800;color:var(--s);padding:2px 6px;text-align:center}
-.sgh span:first-child{text-align:start}
-.sgn{display:flex;align-items:center;gap:7px;padding:8px 10px;border-radius:13px;background:var(--in);border:1px solid var(--gb);min-width:0}
-.sgn b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sgn small{color:var(--s);font-size:10.5px;margin-inline-start:auto}
-.svcell{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:7px 4px;border-radius:13px;border:1px solid var(--gb);background:var(--in);color:var(--t);font:inherit;cursor:pointer;transition:transform .12s,border-color .15s}
-.svcell b{font-size:11.5px}.svcell small{font-size:10.5px;color:var(--s)}
-.svcell.ok{border-color:color-mix(in srgb,var(--ok) 45%,transparent);background:color-mix(in srgb,var(--ok) 9%,transparent)}
-.svcell.bad{border-color:color-mix(in srgb,var(--bad) 50%,transparent);background:color-mix(in srgb,var(--bad) 9%,transparent)}
-.svcell.no{opacity:.45;cursor:default}
-.svcell:not(:disabled):hover{transform:translateY(-1px);border-color:var(--a)}
-/* tunnel transports in three columns */
-.trcols{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.trcol{border:1px solid var(--gb);border-radius:16px;padding:8px;background:var(--in)}
-.trcol .trgl{margin:2px 4px 8px!important}
-.trcol .tropt{display:flex!important;flex-direction:column;gap:6px}
-.trc0 .trgl{color:var(--info)!important}.trc1 .trgl{color:var(--ok)!important}.trc2 .trgl{color:var(--a)!important}
-@media(max-width:820px){.trcols{grid-template-columns:1fr}}
-/* KANKI MIX second config */
-.km2 .chk span small{display:block;margin-top:2px}
-.aikey{-webkit-text-security:disc}.aikey:focus{-webkit-text-security:none}
-.km2{display:flex;gap:8px;align-items:center;justify-content:space-between;flex-wrap:wrap;width:100%;margin-top:6px;padding:8px 10px;border-radius:12px;border:1px dashed var(--gb2)}
-`;
-var st=document.createElement('style');st.id='v37css';st.textContent=css;document.head.appendChild(st);
 
-// the panel may already have drawn itself before this script ran
-if(window.S&&S.me&&$('#app header.top')){shell();route()}
 })();
 
 // ==================================================================== phone bar, night/day
-// Kanki Panel 3.8: the AMOLED look. Loaded after kanki-v37.js, it changes how the panel looks and how
-// the menu is grouped, never how a page works:
-//  - pure black (night) and pure white (day) from one button in the top bar; the colors in Settings
-//  - 3D glass buttons with a soft moving shine
-//  - the menu in groups of things that belong together (customers, servers and network, services,
-//    reports, system); Servers and Tunnel servers are tabs of one section
-//  - phones: a tab bar at the bottom (home, users, servers, services, more) and a sheet with the rest
-//  - the dashboard gets a row of quick actions
+// the look: night (pure black) and day (pure white) from one button in the top bar, the menu in
+// groups, and on phones a bar of every section at the bottom.
 (function(){
 'use strict';
-var V=window.V37;if(!V)return;
-var FA38={"Home":"خانه","Customers":"مشتری‌ها","Servers & network":"سرورها و شبکه","Services":"سرویس‌ها","Reports":"گزارش","More":"بیشتر",
- "Abroad":"خارج","Iran":"ایران","All":"همه","VPN server":"سرور VPN","DNS exit":"خروجی DNS","DNS relay":"واسط DNS","No service on this server yet":"هنوز سرویسی روی این سرور نیست",
- "No server here":"سروری در این دسته نیست","Quick actions":"کارهای سریع","New user":"کاربر جدید","Add server":"افزودن سرور","Sales bot":"ربات فروش","Backup":"بکاپ",
- "Gold · night":"طلایی · شب","Gold · day":"طلایی · روز","Purple · night":"بنفش · شب","Purple · day":"بنفش · روز","Panel color":"رنگ پنل","Day":"روز","Night":"شب"};
-function fa(){if(typeof FA!='undefined')Object.assign(FA,FA38)}
-fa();
+var V=V37;
 
 // ---------------------------------------------------------------- menu: groups of what belongs together
 // [section key, label, icon, [[page, sub page, tab label], ...], group]
-var SECS=[
- ['dash','Dashboard','dash',[['dash','','Dashboard']],'Home'],
- ['users','Users','users',[['users','','Users']],'Customers'],
- ['bot','Sales bot','bot',[['bot','','Sales bot']],'Customers'],
- ['emergency','Emergency chat','sos',[['emergency','','Emergency chat']],'Customers'],
- ['nodes','Servers','nodes',[['nodes','','Servers'],['servers','','Tunnel servers']],'Servers & network'],
- ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
- ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','','Xray'],['antidpi','','Anti-DPI']],'Services'],
- ['dnssec','Kanki DNS','dns',[['dns','','Kanki DNS']],'Services'],
- ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
- ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
-V.SECS.length=0;SECS.forEach(function(s){V.SECS.push(s)});
-window.NAV=SECS.map(function(s){return {p:s[3][0][0],sec:s[0]}});
-function secBy(k){for(var i=0;i<SECS.length;i++)if(SECS[i][0]==k)return SECS[i];return SECS[0]}
+var DNSSEC=['dnssec','Kanki DNS','dns',[['dns','','Kanki DNS']],'Services'];
+function secBy(k){if(k=='dnssec')return DNSSEC;for(var i=0;i<V.SECS.length;i++)if(V.SECS[i][0]==k)return V.SECS[i];return V.SECS[0]}
 window.grpOf=function(p){return V.secOf(p)[4]||''};
-ICO.more38='<circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/>';
 
 
 // phones: every section in the bottom bar, swiped sideways, in this order from the right
@@ -3236,305 +4293,32 @@ window.navBar=function(){
  return '<div class="mbar k38bar k39bar" id="mbar">'+BAR.map(function(b){var s=secBy(b[0]),f=s[3][0];
   return '<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'">'+ic(s[2],21)+'<span>'+t(b[1])+'</span></a>'}).join('')+'</div>'+
   '<div class="k38scrim" id="k38scrim" onclick="k38More(0)"></div><div class="msheet k38sheet" id="msheet"></div>'};
-function sheetHtml(){var g='',h='<i class="k38grab"></i>',open=false;
- SECS.forEach(function(s){if(s[4]!=g){if(open)h+='</div>';g=s[4];h+='<div class="k38g">'+t(g)+'</div><div class="k38tiles">';open=true}var f=s[3][0];
-  h+='<a class="k38tile'+(V.secOf(S.page)[0]==s[0]?' on':'')+'" href="#'+f[0]+'">'+ic(s[2],22)+'<span>'+t(s[1])+'</span></a>'});
- return h+(open?'</div>':'')}
-window.navSheet=function(){};
-var _nm=window.navMark;
-window.navMark=function(p){_nm.apply(this,arguments);k38More(0);
- // the open section stays in sight in the scrolling bar
- var a=document.querySelector('#mbar a[data-sec="'+V.secOf(p)[0]+'"]');if(a&&a.scrollIntoView)try{a.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}};
 
 
 // ---------------------------------------------------------------- night / day in the top bar
-// (3.9.3) The top bar has only one button: night or day. The panel's colors are chosen in Settings ›
+// The top bar has only one button: night or day. The panel's colors are chosen in Settings ›
 // Look, not in the bar.
-ICO.sun38='<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>';
 function drawLooks(){var b=$('#thm');if(!b)return;var night=(S.theme||'dark')!='light';
  b.innerHTML=ic(night?'sun38':'moon',17)+'<span>'+t(night?'Day':'Night')+'</span>';b.title=t(night?'Day':'Night');b.setAttribute('aria-label',b.title);b.classList.add('k38dn')}
-var _al=window.applyLook;
-window.applyLook=function(){_al.apply(this,arguments);document.body.classList.add('k38');if($('#side'))document.body.classList.add('v37');drawLooks()};
-var _sh=window.shell;
-window.shell=function(){_sh.apply(this,arguments);document.body.classList.add('k38');drawLooks()};
+V.drawLooks=drawLooks;
 
-// ---------------------------------------------------------------- dashboard: quick actions
-if(window.pDash){var _pd=window.pDash;window.pDash=function(){_pd.apply(this,arguments);var ph=$('#pg .ph');if(!ph||$('#k38qa'))return;
- var d=document.createElement('div');d.className='k38qa';d.id='k38qa';
- d.innerHTML='<b>'+t('Quick actions')+'</b><div class="k38qb"><button class="btn" onclick="newUser()">'+ic('plus',16)+' '+t('New user')+'</button>'+
-  '<button class="b2" onclick="(window.nodeAddTyped||nodeAdd)()">'+ic('nodes',16)+' '+t('Add server')+'</button>'+
-  '<a class="b2" href="#bot">'+ic('bot',16)+' '+t('Sales bot')+'</a><a class="b2" href="#backup">'+ic('backup',16)+' '+t('Backup')+'</a></div>';
- ph.parentNode.insertBefore(d,ph.nextSibling)}}
 
 // ---------------------------------------------------------------- the look
-var css=`
-html:has(body.k38){background:#000}html:has(body.k38.light){background:#fff}
-body.k38{--bg1:#000;--bg2:#000;--c1:#0b0b0b;--c2:#090909;--in:rgba(255,255,255,.045);--ln:rgba(255,255,255,.09);--ln2:rgba(255,255,255,.07);--t:#f5f5f2;--s:#a3a39b;
- --g1:rgba(255,255,255,.035);--g2:rgba(255,255,255,.012);--gb:rgba(255,255,255,.085);--gb2:rgba(255,255,255,.15);--gl:inset 0 1px 0 rgba(255,255,255,.06);--on:#140f00;background:#000!important}
-body.k38.light{--bg1:#fff;--bg2:#fff;--c1:#fff;--c2:#f7f7f5;--in:rgba(10,10,10,.035);--ln:rgba(10,10,10,.1);--ln2:rgba(10,10,10,.07);--t:#0a0a0a;--s:#5c5c56;
- --g1:#fff;--g2:#fbfbfa;--gb:rgba(10,10,10,.09);--gb2:rgba(10,10,10,.16);--gl:inset 0 1px 0 #fff;background:#fff!important}
-body.k38:not([class*="c-"]){--a:#f5c518;--al:#ffe066;--ad:#d19a00}
-body.k38.light:not([class*="c-"]){--a:#f2b705;--al:#ffd84d;--ad:#8f6800}
-body.k38.c-violet{--a:#9d63ff;--al:#c7a3ff;--ad:#7236f0;--on:#fff}
-body.k38.light.c-violet{--a:#8b4dff;--al:#b48bff;--ad:#5b21d6}
-body.k38:before{background:radial-gradient(900px 420px at 100% -8%,color-mix(in srgb,var(--a) 7%,transparent),transparent 70%)!important}
-body.k38:after{display:none!important}
-/* surfaces: flat AMOLED cards with a thin edge */
-body.k38 .card,body.k38 .kv>div,body.k38 .ibc,body.k38 .secc{background:var(--c1)!important;border:1px solid var(--gb)!important;box-shadow:var(--gl)!important;border-radius:18px}
-body.k38.light .card,body.k38.light .kv>div,body.k38.light .ibc,body.k38.light .secc{box-shadow:0 1px 2px rgba(0,0,0,.04),0 10px 26px -18px rgba(0,0,0,.18)!important}
-body.k38 nav.side{background:var(--c1)!important;border-inline-end:1px solid var(--gb)!important}
-body.k38 header.top{background:color-mix(in srgb,var(--bg1) 80%,transparent)!important}
-body.k38 .mbox{background:var(--c1)!important}
-/* 3D glass buttons */
-body.k38 .btn{color:var(--on)!important;border:1px solid var(--ad)!important;background:linear-gradient(180deg,var(--al) 0%,var(--a) 48%,var(--ad) 100%)!important;
- box-shadow:inset 0 1px 0 rgba(255,255,255,.6),inset 0 -3px 0 rgba(0,0,0,.16),0 8px 22px -8px color-mix(in srgb,var(--a) 70%,transparent),0 2px 0 var(--ad)!important}
-body.k38 .btn:before{inset:1px 1px 50% 1px;border-radius:13px 13px 40% 40%/13px 13px 10px 10px;background:linear-gradient(180deg,rgba(255,255,255,.5),rgba(255,255,255,.04))}
-body.k38 .btn:after{left:auto;right:-60%;transition:none;animation:k38sheen 4.2s ease-in-out infinite}
-body.k38 .btn:hover:not(:disabled):after{left:auto}
-body.k38 .btn:active:not(:disabled){transform:translateY(2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.4),inset 0 -1px 0 rgba(0,0,0,.2),0 3px 10px -4px color-mix(in srgb,var(--a) 60%,transparent)!important}
-@keyframes k38sheen{0%,62%{right:-60%}100%{right:130%}}
-body.k38 .b2,body.k38 .ib,body.k38 .sb{position:relative;overflow:hidden;background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.03) 55%)!important;
- box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -2px 0 rgba(0,0,0,.5),0 6px 16px -10px rgba(0,0,0,.8)!important}
-body.k38.light .b2,body.k38.light .ib,body.k38.light .sb{background:linear-gradient(180deg,#fff,#f3f3f1)!important;box-shadow:inset 0 1px 0 #fff,inset 0 -2px 0 rgba(0,0,0,.06),0 4px 12px -8px rgba(0,0,0,.25)!important}
-body.k38 .b2:active:not(:disabled),body.k38 .ib:active{transform:translateY(1px)}
-body.k38 .sectabs .sti,body.k38 .sectabs .stl a.on,body.k38 .ptabs a.on,body.k38 .seg button.on,body.k38 .segl button.on{color:var(--on)!important}
-body.k38 .sectabs{background:color-mix(in srgb,var(--bg1) 82%,transparent)}
-body.k38 input:focus,body.k38 select:focus,body.k38 textarea:focus{border-color:var(--a)!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--a) 18%,transparent)!important}
-@media(prefers-reduced-motion:reduce){body.k38 .btn:after{animation:none;display:none}}
-/* menu groups */
-body.k38 nav.side .ngt{font-size:11px;font-weight:800;color:var(--s);padding:12px 12px 4px;letter-spacing:.2px}
-body.k38 nav.side .ngt:first-child{padding-top:2px}
-body.k38 nav.side a.on{background:linear-gradient(180deg,color-mix(in srgb,var(--a) 16%,transparent),color-mix(in srgb,var(--a) 4%,transparent))!important;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--a) 22%,transparent)}
-/* the four looks in the top bar */
-body.k38 #thm.k38dn{display:inline-flex;align-items:center;gap:6px;width:auto;padding:0 12px;font:inherit;font-size:12px;font-weight:700}
-@media(max-width:620px){body.k38 #thm.k38dn span{display:none}body.k38 #thm.k38dn{padding:0;width:38px;justify-content:center}}
-/* dashboard quick actions */
-.k38qa{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px;padding:12px 14px;border-radius:18px;border:1px solid var(--gb);background:var(--c1)}
-.k38qa>b{font-size:13.5px}.k38qb{display:flex;gap:8px;flex-wrap:wrap;flex:1;justify-content:flex-end}
-.k38qb .btn,.k38qb .b2{display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:var(--t)}
-/* servers: one card per server */
-.sgf{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
-.sgf button{display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 14px;border-radius:11px;border:1px solid var(--gb);background:var(--in);color:var(--t);font:inherit;font-weight:700;font-size:12.5px;cursor:pointer}
-.sgf button b{font-size:11px;color:var(--s)}
-.sgf button.on{color:var(--on);border-color:var(--ad);background:linear-gradient(180deg,var(--al),var(--a));box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 4px 12px -6px color-mix(in srgb,var(--a) 70%,transparent)}
-.sgf button.on b{color:var(--on);opacity:.7}
-.sgcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));align-items:start;gap:12px;margin-top:12px}
-.sgc{display:flex;flex-direction:column;gap:10px;padding:12px;border-radius:16px;border:1px solid var(--gb);background:var(--in);min-width:0}
-.sgc .sgn{background:transparent;border:0;padding:0}
-.sgr2{display:flex;gap:5px;flex-wrap:wrap}
-.sgr2 span{font-size:11px;font-weight:700;padding:2px 8px;border-radius:7px;background:var(--c1);border:1px solid var(--gb);color:var(--s)}
-.sgcells{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:6px}
-/* phones: bottom tab bar and a sheet with the rest */
-@media(max-width:899px){
- body.k38 .mbar.k38bar{position:fixed;top:auto;bottom:0;left:0;right:0;z-index:40;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scroll-snap-type:x proximity;touch-action:pan-x;gap:2px;padding:6px max(10px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px));
-  background:color-mix(in srgb,var(--c1) 90%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--gb);border-bottom:0}
- body.k38 .mbar.k38bar a,body.k38 .mbar.k38bar button{flex:0 0 auto;min-width:72px;scroll-snap-align:start;white-space:nowrap;flex-direction:column;gap:2px;justify-content:center;padding:6px 8px;border:0;background:transparent;color:var(--s);font-size:10.5px;border-radius:12px}
- body.k38 .mbar.k38bar svg{color:inherit}
- body.k38 .mbar.k38bar .on{color:var(--a);background:transparent}
- body.k38.light .mbar.k38bar .on{color:var(--ad)}
- body.k38 .mbar.k38bar .on svg{color:inherit;filter:drop-shadow(0 2px 6px color-mix(in srgb,var(--a) 60%,transparent))}
- body.k38 main{padding-bottom:calc(90px + env(safe-area-inset-bottom,0px))!important}
- body.k38 .sectabs{top:64px}
- .k38scrim.on{display:block;position:fixed;inset:0;z-index:44;background:rgba(0,0,0,.5)}
- body.k38 .msheet.k38sheet{top:auto;bottom:0;left:0;right:0;inset-inline:0;z-index:45;max-height:80vh;border:1px solid var(--gb2);border-bottom:0;border-radius:22px 22px 0 0;background:var(--c1);
-  padding:12px max(16px,env(safe-area-inset-right,0px)) calc(18px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
-}
-@media(max-width:560px){body.k38 .sectabs{top:56px}}
-.k38scrim{display:none}
-.k38grab{display:block;width:44px;height:5px;border-radius:5px;background:var(--gb2);margin:0 auto 10px}
-.k38g{font-size:11px;font-weight:800;color:var(--s);margin:10px 2px 6px}
-.k38tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-.k38tile{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px;border-radius:14px;background:var(--in);border:1px solid var(--gb);color:var(--t);text-decoration:none;font-size:11.5px;font-weight:700;text-align:center}
-.k38tile svg{color:var(--a)}body.k38.light .k38tile svg{color:var(--ad)}
-.k38tile.on{border-color:var(--a);box-shadow:inset 0 0 0 1px var(--a)}
-@media(max-width:620px){body.k38 header.top .segl{display:none}.k38qb{justify-content:flex-start}}
-`;
-var st=document.createElement('style');st.id='k38css';st.textContent=css;document.head.appendChild(st);
 })();
 
 // ==================================================================== Servers
-// Kanki Panel 3.9: Servers — one list, one kind of server.
-// 3.9.3: two boxes (abroad, Iran) of compact rows; a row's arrow opens it (one open at a time) with all
-// of the server's own settings. Its VPN ports and protocols are in VPN services (svc.js).
-// The panel runs on one server; every other server is a node of it, added with ONE command that
-// installs everything (VPN, tunnels, Xray, Kanki DNS). What a server runs is switched on here.
-// Loaded after every other script: it replaces the old Servers page (VPN nodes, tunnel servers, Xray
-// and DNS servers in separate lists) and the separate "Tunnel servers" page.
+// Servers: two boxes (abroad, Iran) of compact rows; a row's arrow opens all of that server's settings
+// (one at a time). The panel runs on one server; every other server is added with ONE command that
+// installs everything (VPN, tunnels, Xray, Kanki DNS), and what it runs is switched on here.
 (function(){
 'use strict';
-var SFA={
- "Servers":"سرورها","Add server":"افزودن سرور","Update all":"آپدیت همه",
- "The panel runs on one server. Every other server is a node: add it with one command, then switch on here what it runs.":"پنل روی یک سرور نصب است. هر سرور دیگر یک نود است: با یک دستور اضافه‌اش کن و بعد همین‌جا روشن کن که چه چیزی رویش اجرا شود.",
- "Panel server":"سرور پنل","Node":"نود","Iran":"ایران","Abroad":"خارج","All":"همه","Connected":"وصل","Not connected":"قطع",
- "VPN for users":"VPN برای کاربران","Tunnels":"تانل‌ها","Xray":"Xray","Kanki DNS":"DNS کانکی","inbounds":"اینباند","exit":"خروجی","relay":"رله",
- "VPN is installed but serves nobody (a relay)":"VPN نصب است ولی به هیچ کاربری سرویس نمی‌دهد (رله)","VPN serves users":"VPN به کاربران سرویس می‌دهد",
- "VPN is not installed on this server":"VPN روی این سرور نصب نیست","Install VPN":"نصب VPN",
- "Tunnels, Xray and DNS are not installed on this server":"تانل، Xray و DNS روی این سرور نصب نیست","Install":"نصب",
- "Waiting for this server: run its command":"منتظر این سرور: دستورش را اجرا کن","Show command":"نمایش دستور",
- "Installing the VPN part…":"در حال نصب بخش VPN…","VPN install failed":"نصب VPN نشد","Try again":"دوباره",
- "Port clash":"تداخل پورت","is used by":"استفاده شده توسط","One tunnel entry cannot carry the same port to two servers. Fix moves the later server to a free port; tunnels that carry the old port follow.":"یک سرور ورودی (ایران) نمی‌تواند یک پورت را به دو سرور تانل کند. «رفع» سرور بعدی را به پورت آزاد می‌برد و تانل‌هایی که پورت قبلی را می‌برند هم خودکار درست می‌شوند.",
- "Fix ports":"رفع تداخل پورت","Ports moved":"پورت‌ها جابه‌جا شدند","No clash":"تداخلی نیست",
- "Users' WireGuard / AmneziaWG files of the moved server must be downloaded again (subscription links and the app update by themselves). Continue?":"فایل‌های WireGuard / AmneziaWG کاربرانِ سروری که پورتش عوض می‌شود باید دوباره دانلود شوند (لینک ساب و اپ خودشان به‌روز می‌شوند). ادامه می‌دهی؟",
- "Server name":"نام سرور","Location":"موقعیت","Inside Iran (relay / tunnel entry)":"داخل ایران (رله / ورودی تانل)","Abroad":"خارج",
- "Domain (optional, for a real SSL certificate)":"دامنه (اختیاری، برای SSL واقعی)",
- "Serve VPN users on this server":"به کاربران VPN از این سرور سرویس بده",
- "Everything is installed on the server (VPN, tunnels, Xray, Kanki DNS) with one command. Off = installed, but no user is sent there (an Iran relay).":"همه‌چیز با یک دستور روی سرور نصب می‌شود (VPN، تانل، Xray، DNS کانکی). خاموش = نصب می‌شود ولی هیچ کاربری به آن فرستاده نمی‌شود (رله‌ی ایران).",
- "Create command":"ساخت دستور","Run this on the new server, as root (Ubuntu / Debian)":"این را روی سرور جدید اجرا کن، با root (اوبونتو / دبیان)","Copy command":"کپی دستور",
- "Ports given to this server (no other server uses them)":"پورت‌هایی که به این سرور داده شد (هیچ سرور دیگری از آن‌ها استفاده نمی‌کند)",
- "Waiting for the server to connect…":"منتظر وصل شدن سرور…","Server agent connected":"ایجنت سرور وصل شد","VPN part installed":"بخش VPN نصب شد",
- "Valid for 6 hours. Run it once; it can be run again on the same server.":"تا ۶ ساعت معتبر است. یک بار اجرا کن؛ روی همان سرور می‌شود دوباره هم اجرا کرد.",
- "Done":"انجام شد","Settings":"تنظیمات","Health":"سلامت","Sync":"همگام‌سازی","Repair":"تعمیر","Update agent":"آپدیت ایجنت","Delete server":"حذف سرور",
- "Add to all users":"افزودن به همه‌ی کاربران","Remove from all users":"حذف از همه‌ی کاربران","Tunnel agent settings":"تنظیمات ایجنت (آدرس، GRE)",
- "Ports":"پورت‌ها","Name":"نام","Address other servers use to reach it (optional)":"آدرسی که سرورهای دیگر با آن به این سرور وصل می‌شوند (اختیاری)",
- "Save":"ذخیره","Cancel":"انصراف","Delete this whole server? Its tunnels must be deleted first. The server removes everything Kanki installed on it (VPN, tunnels, Xray, DNS) and uninstalls itself.":"کل این سرور حذف شود؟ اول تانل‌هایش را حذف کن. سرور هرچه کانکی رویش نصب کرده (VPN، تانل، Xray، DNS) را پاک می‌کند و خودش را حذف می‌کند.",
- "Removed":"حذف شد","users":"کاربر","Last contact":"آخرین ارتباط","this server":"همین سرور","agent":"ایجنت","Details":"جزئیات","Hide":"بستن",
- "Install the VPN part on this server? It runs by itself on the server and takes a few minutes.":"بخش VPN روی این سرور نصب شود؟ خودِ سرور نصبش می‌کند و چند دقیقه طول می‌کشد.",
- "Serve users once installed":"بعد از نصب به کاربران سرویس بده",
- "Install tunnels, Xray and DNS (the server agent) on this server? It starts next to its VPN within seconds.":"تانل، Xray و DNS (ایجنت سرور) روی این سرور نصب شود؟ چند ثانیه‌ای کنار VPN آن راه می‌افتد.",
- "Switch the VPN off on this server? Its users are taken off; it keeps carrying tunnels.":"VPN این سرور خاموش شود؟ کاربرانش برداشته می‌شوند؛ تانل‌ها کار می‌کنند.",
- "Switch the VPN on: users that accept all servers are sent here.":"VPN روشن شود: کاربرانی که همه‌ی سرورها را دارند به این سرور هم فرستاده می‌شوند.",
- "No server here":"سروری اینجا نیست","not installed":"نصب نیست","Add Xray":"افزودن Xray","Add DNS":"افزودن DNS","Emergency chat":"چت اضطراری","Subscription":"لینک ساب",
- "The server is not connected right now":"این سرور الان وصل نیست","CPU":"CPU","RAM":"RAM","Disk":"دیسک","version":"نسخه",
- "Problem":"مشکل دارد","Healthy":"سالم","Under pressure":"تحت فشار","Off":"خاموش","On":"روشن","Planned ports":"پورت‌های رزرو شده",
- "After restore":"بعد از بازگردانی","Restored":"بازگردانی شد","from":"از","Every server is connected":"همه‌ی سرورها وصل‌اند","Not connected yet":"هنوز وصل نیست",
- "The panel on the old server still runs the same Telegram bot: both answer customers and both post to the channel. Stop it there: systemctl disable --now kanki-panel":"پنل روی سرور قبلی هنوز همین ربات تلگرام را اجرا می‌کند: هر دو به مشتری‌ها جواب می‌دهند و هر دو در کانال پست می‌گذارند. آن‌جا خاموشش کن: systemctl disable --now kanki-panel",
- "Include the app files (APK)":"فایل‌های اپ (APK) هم داخل بکاپ باشد",
- "The server agent, VPN and their health in one place: press a service to open its page.":"ایجنت، VPN و سلامت هر سرور یک‌جا؛ روی هر سرویس بزن تا صفحه‌اش باز شود.",
- "Direct domains":"دامنه‌های مستقیم","Domain":"دامنه","Point it at":"آی‌پی که باید روی آن بگذاری","Status":"وضعیت","Through":"مسیر کانفیگ",
- "Tunnel":"تانل","Direct":"مستقیم","Points at this server":"درست است","Not set yet":"هنوز تنظیم نشده","Points elsewhere":"به سرور دیگری اشاره می‌کند",
- "Country not known yet":"کشور هنوز معلوم نیست","Change the base domain":"تغییر دامنه‌ی اصلی",
- "The app's «Amnezia Direct» config of a server behind the tunnel goes straight to the server through its own name. Make each name below an A record pointing at the IP next to it (in Cloudflare: DNS only, grey cloud). Until a name points at the right server, the app is given the server's own address, so a direct config never reaches the wrong server.":"کانفیگ «Amnezia مستقیم» هر سروری که پشت تانل است، با اسم خودش مستقیم به همان سرور وصل می‌شود. برای هر اسم زیر یک رکورد A بساز که به آی‌پی کنارش اشاره کند (در کلادفلر: فقط DNS، ابر خاکستری). تا وقتی اسمی درست تنظیم نشده، آدرس خود سرور به برنامه داده می‌شود؛ پس کانفیگ مستقیم هیچ‌وقت به سرور اشتباه نمی‌رود.",
- "Base domain for the direct names (like example.com); empty = the panel domain without its first part":"دامنه‌ی اصلی اسم‌های مستقیم (مثل example.com)؛ خالی = دامنه‌ی پنل بدون بخش اولش"
-};
-if(typeof FA!='undefined')Object.assign(FA,SFA);
 
-if(typeof FA!='undefined')Object.assign(FA,{
- "Abroad servers":"سرورهای خارج",
- "Iran servers":"سرورهای ایران",
- "running":"روشن",
- "stopped":"متوقف",
- "off":"خاموش",
- "none":"ندارد",
- "connected":"وصل",
- "Restart VPN services":"ری‌استارت سرویس‌های VPN",
- "UDP port":"پورت UDP",
- "Save port":"ذخیره‌ی پورت",
- "A port is 1-65535":"پورت باید بین ۱ تا ۶۵۵۳۵ باشد",
- "Already used by":"قبلاً استفاده شده توسط",
- "pick another port":"پورت دیگری انتخاب کن",
- "Saving…":"در حال ذخیره…",
- "Saved: the service restarts on the new port":"ذخیره شد: سرویس روی پورت جدید ری‌استارت می‌شود",
- "Users' WireGuard / AmneziaWG files of this server must be downloaded again after a port change; subscription links and the app update by themselves.":"بعد از عوض شدن پورت، فایل‌های WireGuard / AmneziaWG کاربرانِ این سرور باید دوباره دانلود شوند؛ لینک ساب و اپ خودشان به‌روز می‌شوند.",
- "Add this server to all users":"افزودن این سرور به همه‌ی کاربران",
- "Remove this server from all users":"حذف این سرور از همه‌ی کاربران",
- "KANKI MIX on this server":"KANKI MIX روی این سرور",
- "KANKI MIX settings (all servers)":"تنظیمات KANKI MIX (همه‌ی سرورها)",
- "Xray is not on this server yet.":"Xray هنوز روی این سرور نیست.",
- "Kanki DNS is not on this server yet.":"DNS کانکی هنوز روی این سرور نیست.",
- "Install Xray on this server":"نصب Xray روی این سرور",
- "Install Kanki DNS on this server":"نصب DNS کانکی روی این سرور",
- "Inbounds":"اینباندها",
- "Edit":"ویرایش",
- "Restart":"ری‌استارت",
- "Use for all users":"فعال برای همه‌ی کاربران",
- "Take from all users":"غیرفعال برای همه‌ی کاربران",
- "Remove from this server":"حذف از این سرور",
- "Who may use it is also set per user (Users › edit).":"اینکه چه کسی از آن استفاده کند، برای هر کاربر هم قابل تنظیم است (کاربران › ویرایش).",
- "No tunnel uses this server.":"هیچ تانلی از این سرور استفاده نمی‌کند.",
- "Tunnels page":"صفحه‌ی تانل‌ها",
- "New tunnel":"تانل جدید",
- "Turn this on for every user?":"برای همه‌ی کاربران روشن شود؟",
- "Turn this off for every user?":"برای همه‌ی کاربران خاموش شود؟",
- "Remove it from this server? The server stops it and frees its ports.":"از این سرور حذف شود؟ سرور آن را متوقف می‌کند و پورت‌هایش آزاد می‌شود.",
- "Delete this whole server? Everything Kanki installed on it (VPN, tunnels, Xray, DNS) is removed from the server and from the panel, and the server uninstalls itself.":"کل این سرور حذف شود؟ هرچه کانکی رویش نصب کرده (VPN، تانل، Xray، DNS) از روی سرور و از پنل پاک می‌شود و سرور خودش را حذف می‌کند.",
- "These tunnels use this server:":"این تانل‌ها از این سرور استفاده می‌کنند:",
- "Delete them too? The other server drops them and closes their ports.":"آن‌ها هم حذف شوند؟ سرور طرف دیگر هم آن‌ها را برمی‌دارد و پورت‌هایشان را می‌بندد.",
- "Another program uses this bot token (an old panel still running?). Stop it, or make a new token in @BotFather.":"یک برنامه‌ی دیگر هم از توکن این ربات استفاده می‌کند (پنل قبلی هنوز روشن است؟). آن را خاموش کن یا در @BotFather توکن جدید بساز.",
- "Panel server":"سرور پنل",
- "agent":"ایجنت",
- "Removing…":"در حال حذف…",
- "Removed":"حذف شد",
- "Saved":"ذخیره شد"
-});
-if(typeof FA!='undefined')Object.assign(FA,{
- "Server settings":"تنظیمات سرور","Note":"یادداشت","Users connect to":"کاربرها به این آدرس وصل می‌شوند",
- "This server's own address":"آدرس خود این سرور","Another address":"آدرس دیگر","Through":"از راه",
- "Users without their own server list get this server":"کاربرانی که فهرست سرور جدا ندارند این سرور را هم بگیرند",
- "API address":"آدرس API","Node token":"توکن نود","Self-signed certificate (no domain on the server)":"گواهی خودامضا (بدون دامنه روی سرور)",
- "empty = keep it":"خالی = همان قبلی","Show command":"نمایش دستور","Ports and protocols of this server are in VPN services.":"پورت‌ها و پروتکل‌های این سرور در «سرویس‌های VPN» است.",
- "VPN services":"سرویس‌های VPN","No server yet":"هنوز سروری نیست","Add an Iran server":"افزودن سرور ایران","Add an abroad server":"افزودن سرور خارج",
- "relay":"رله","Not connected":"وصل نیست","Saved":"ذخیره شد","Closed":"بسته شد",
- "tunnel":"تانل","Tunnel domain":"دامنه‌ی تانل","Tunnel domain (optional)":"دامنه‌ی تانل (اختیاری)",
- "If this server has a tunnel, or will have one, write your Iran server's domain here. Every protocol then also gets a second config through it, made by itself.":"اگر برای این سرور تانل زده‌اید یا می‌خواهید بزنید، دامنه‌ی سرور ایرانتان را همین‌جا بنویسید. از همه‌ی پروتکل‌ها (KANKI MIX، امنزیا، وایرگارد، هیستریا، Xray) خودش یک کانفیگ دوم با این دامنه می‌سازد و به برنامه می‌فرستد.",
- "WireGuard comes only this way.":"وایرگارد فقط همین کانفیگ را دارد.",
- "Name of these configs in the app (optional)":"اسم این کانفیگ‌ها در برنامه (اختیاری)",
-  "Iran address (domain or IP)":"آدرس ایران (دامنه یا IP)","Name in the app":"اسم کانفیگ‌ها در برنامه",
- "tunnel address: a domain or IP only (like ir.example.com)":"آدرس تانل: فقط دامنه یا IP (مثل ir.example.com)",
- "tunnel name: up to 40 letters, no < > \"":"اسم تانل: حداکثر ۴۰ حرف، بدون < > \"",
-"Ports through the tunnel":"پورت‌ها از راه تانل",
- "Users connect to the Iran address already, so the main configs go through the tunnel too. For direct configs set it to this server's own address.":"«کاربرها به این آدرس وصل می‌شوند» الان آدرس ایران است، پس کانفیگ‌های اصلی هم از تانل می‌روند. برای کانفیگ مستقیم آن را آدرس خود این سرور بگذار."
-});
 var SV={d:null,wait:null};
 window.SV=SV;
 
 // ---------------------------------------------------------------- look
-(function(){var st=document.createElement('style');st.textContent=
- '.kxp-top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.kxp-top .sp{flex:1}'+
- '.kxtun{margin-top:8px;border:1px solid var(--ln);border-radius:12px;padding:8px 10px}'+
- '.kxtun-p{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;font-size:12px;padding:4px 0;border-bottom:1px dashed color-mix(in srgb,var(--ln) 60%,transparent)}.kxtun-p:last-child{border:0}'+
- '.kxtun-p b{font-weight:700}.kxtun-m{margin-inline-start:auto;color:var(--s);overflow-wrap:anywhere;text-align:left}'+
- '.kxtun-w{font-size:12px;color:var(--warn);margin:8px 2px 0}'+
- '.kxc-tag{font-size:11px;border:1px solid var(--ln);border-radius:8px;padding:1px 7px;color:var(--s);white-space:nowrap;font-weight:600}'+
- '.kxc-tag.main{color:var(--a);border-color:color-mix(in srgb,var(--a) 55%,transparent)}'+
- '.kxc-tag.tun{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}'+
- '.kxc-miss{border:1px dashed color-mix(in srgb,var(--warn) 60%,transparent);border-radius:12px;padding:8px 10px;margin:8px 0 0;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}'+
- '.kxc-miss span{flex:1;min-width:150px}.kxc-miss pre{width:100%;margin:6px 0 0;white-space:pre-wrap;font-size:11px;max-height:140px;overflow:auto;direction:ltr;text-align:left;background:var(--in);border-radius:8px;padding:6px}'+
- '.kxp-clash{border:1px solid color-mix(in srgb,var(--warn) 55%,transparent);border-radius:16px;padding:12px;margin:0 0 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}'+
- '.kxp-clash div{flex:1;min-width:220px;font-size:12px}.kxp-clash b{color:var(--warn)}'+
- '.kxp-steps{display:grid;gap:6px;margin-top:10px}.kxp-steps div{display:flex;gap:8px;align-items:center;font-size:13px}'+
- '.kxp-ports{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.kxp-ports span{border:1px solid var(--ln);border-radius:8px;padding:2px 8px;font-size:12px;direction:ltr}'+
- '.kxseg{display:grid;grid-template-columns:1fr 1fr;gap:6px}'+
- '.modal{z-index:60!important}#toast{z-index:70!important}'+
- // boxes (abroad, Iran) of compact rows; one row open at a time
- '.kxbox{border:1px solid var(--ln);border-radius:18px;background:color-mix(in srgb,var(--c1) 55%,transparent);padding:10px;margin:0 0 12px;max-width:980px}'+
- '.kxbox-h{display:flex;align-items:center;gap:8px;padding:2px 4px 8px}.kxbox-h b{font-size:14px}.kxbox-h small{color:var(--s);font-size:12px;border:1px solid var(--ln);border-radius:999px;padding:0 8px}.kxbox-h .sp{flex:1}'+
- '.kxbox-i{display:inline-flex;width:26px;height:26px;border-radius:9px;align-items:center;justify-content:center;background:color-mix(in srgb,var(--a) 12%,transparent);font-size:15px}'+
- '.kxbox-e{margin:4px 6px 6px;font-size:12px}'+
- '.kxl{display:flex;flex-direction:column;gap:6px}'+
- '.kxr{border:1px solid var(--ln);border-radius:14px;background:var(--c1);min-width:0;transition:border-color .2s,box-shadow .2s}'+
- '.kxr:hover{border-color:color-mix(in srgb,var(--a) 30%,var(--ln))}'+
- '.kxr.open{border-color:color-mix(in srgb,var(--a) 55%,var(--ln));box-shadow:0 6px 22px -14px color-mix(in srgb,var(--a) 70%,transparent)}'+
- // a row head wraps: the name stays whole and the badges go to a second line when the screen is narrow
- '.kxr-h{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;width:100%;padding:9px 11px;background:transparent;border:0;color:var(--t);font:inherit;cursor:pointer;text-align:start;min-width:0;border-radius:14px}'+
- '.kxr-h b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;max-width:100%}.kxr-h .sp{flex:1;min-width:6px}'+
- '.kxr-h small{color:var(--s);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kxr-h .flg{font-size:16px}'+
- '.kxr-arr{flex:none;display:inline-flex;color:var(--s);transition:transform .2s ease,color .2s}.kxr-arr svg{display:block}'+
- '.kxr-arr{transform:rotate(-90deg)}[dir=rtl] .kxr-arr{transform:rotate(90deg)}.kxr.open .kxr-arr{transform:none;color:var(--a)}'+
- '.kxr-st{font-size:11px;border:1px solid var(--ln);border-radius:8px;padding:1px 7px;white-space:nowrap;color:var(--s)}'+
- '.kxr-st.g{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent)}.kxr-st.r{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,transparent)}.kxr-st.y{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}'+
- '.kxr-b{overflow:hidden;transition:height .2s ease,opacity .2s ease}.kxr-b.shut{opacity:0}'+
- '.kxr-in{padding:2px 12px 12px;border-top:1px solid color-mix(in srgb,var(--ln) 70%,transparent)}'+
- '.kxr-line{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--s);font-size:12px;margin:10px 0 4px}.kxr-line b{color:var(--t);font-weight:600}'+
- '.kxr-sec{font-size:11px;font-weight:700;color:var(--s);margin:12px 0 4px;letter-spacing:.2px}'+
- '.kxf{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px}.kxf>div{min-width:0}.kxf label.f{margin:4px 0 3px;font-size:12px}'+
- '.kxf input,.kxf select{height:36px;padding:0 10px;font-size:13px;border-radius:10px}.kxf .wide{grid-column:1/-1}'+
- '.kxf .seg button{padding:6px 8px;font-size:12px}'+
- '.kxsw{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--ln);border-radius:12px;padding:7px 10px;font-size:13px;margin-top:6px}'+
- '.kxsw span{min-width:0}.kxsw small{display:block;color:var(--s);font-size:11px}'+
- '.kxchips{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}.kxchips button{border:1px solid var(--ln);background:transparent;color:var(--t);border-radius:999px;padding:3px 9px;font:inherit;font-size:11px;cursor:pointer}'+
- '.kxchips button:hover,.kxchips button.on{border-color:var(--a);color:var(--a)}'+
- '.kxm3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:14px}'+
- '.kxacts{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}.kxacts button,.kxacts a{flex:0 0 auto}'+
- '.kxsave{display:flex;gap:6px;justify-content:flex-end;margin-top:10px}'+
- '.kxm-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.kxm-row>div{flex:0 1 180px;min-width:120px}.kxm-row input{height:36px;font-size:13px}.kxm-row .btn{height:36px;padding:0 14px;font-size:13px}'+
- '.kxm-warn{color:var(--warn);font-size:12px;margin-top:4px;min-height:14px}'+
- '.kxm-btns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:12px}.kxm-btns button,.kxm-btns a{width:100%;text-align:center}'+
- '.kxr-in details.box{margin-top:8px;padding:8px 10px}.kxr-in details.box summary{font-size:12px;font-weight:700;cursor:pointer}'+
- '@media(min-width:900px){.side{overflow-y:auto;overscroll-behavior:contain}}'+
- '@media(max-width:600px){.kxf{grid-template-columns:1fr}.kxbox{padding:8px;border-radius:16px}.kxr-h small.kxr-ip{display:none}}';
- document.head.appendChild(st)})();
 
-function fl(cc){return window.flagOf?flagOf(cc):''}
+function fl(cc){return flagOf(cc)}
 function isIr(s){return s.loc=='iran'||String(s.cc||'').toUpperCase()=='IR'}
 function q(id){return encodeURIComponent(id)}
 
@@ -3564,7 +4348,7 @@ document.addEventListener('keydown',function(e){if(e.key!='Escape'||($('#modal')
 // ---------------------------------------------------------------- data
 function load(quiet){
  return Promise.all([api('GET','/api/servers'),api('GET','/api/nodes').catch(function(){return null}),api('GET','/api/tunnels').catch(function(){return null})]).then(function(r){
-  SV.d=r[0];if(r[1])S.nodes=r[1];if(r[2]){if(window.TN)TN.d=r[2];else window.TN={d:r[2]}}
+  SV.d=r[0];if(r[1])S.nodes=r[1];if(r[2])TN.d=r[2];
   if(S.page=='nodes')draw(!quiet);waitTick();return SV.d}).catch(function(e){if(!quiet)fail(e)})}
 window.srvLoad=load;
 
@@ -3595,7 +4379,7 @@ function protoName(p){return ({wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',km
 function online(s){var a=s.agent,n=s.node;return !!(s.local||(a&&a.online)||(n&&n.online))}
 function srvIp(s){var a=s.agent||{},n=s.node||{};return a.addr||a.ip||(n.effective_endpoint&&n.effective_endpoint!=n.endpoint?'':n.endpoint)||''}
 
-function row(s){var n=s.node,a=s.agent,on=online(s),h=n&&window.nHealthOf?nHealthOf(n):null,col=!on?'r':h&&h.c=='r'?'y':h?h.c:'g';
+function row(s){var n=s.node,a=s.agent,on=online(s),h=n?nHealthOf(n):null,col=!on?'r':h&&h.c=='r'?'y':h?h.c:'g';
  var tn=s.tunnel||{},tags=(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+(n&&!n.enabled&&!s.local?'<span class="kxc-tag">'+t('relay')+'</span>':'')+
   // tunnel: its configs point at the Iran entry; + tunnel: a second config of every protocol through its tunnel domain
   (tn.main_via=='tunnel'?'<span class="kxc-tag tun">'+t('tunnel')+'</span>':tn.on&&tn.uses?'<span class="kxc-tag tun">+ '+t('tunnel')+'</span>':'');
@@ -3605,7 +4389,7 @@ function row(s){var n=s.node,a=s.agent,on=online(s),h=n&&window.nHealthOf?nHealt
 
 // the first entries (and their addresses) of the tunnels that bring this server's ports: where its
 // users can connect instead of its own address (Iran → Turkey → here: Iran)
-function entriesOf(s){var sid=s.agent?s.agent.id:(s.local?'local':''),tl=((window.TN&&TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false&&x.kind!='awg'}),out=[];
+function entriesOf(s){var sid=s.agent?s.agent.id:(s.local?'local':''),tl=((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false&&x.kind!='awg'}),out=[];
  if(!sid)return out;
  var back=function(id,seen){var prev=tl.filter(function(x){return x.exit==id&&seen.indexOf(x.entry)<0});if(!prev.length)return [id];
   var r=[];prev.forEach(function(x){back(x.entry,seen.concat([x.entry])).forEach(function(e){if(r.indexOf(e)<0)r.push(e)})});return r};
@@ -3649,8 +4433,8 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  h+='<div class="kxsave"><button class="b2 sm" onclick="accClose(\'srv\')">'+t('Cancel')+'</button><button class="btn sm" onclick="srvSave(\''+k+'\')">'+t('Save')+'</button></div>';
  // health and what can be done
  var stt=n&&n.info&&n.info.stats;
- if(stt&&window.nMeter)h+='<div class="kxm3">'+nMeter('CPU',+stt.cpu||0,N(Math.round(+stt.cpu||0))+'%')+nMeter('RAM',pc(stt.mem_used,stt.mem_total),N(Math.round(pc(stt.mem_used,stt.mem_total)))+'%')+nMeter('Disk',pc(stt.disk_used,stt.disk_total),N(Math.round(pc(stt.disk_used,stt.disk_total)))+'%')+'</div>';
- var hh=n&&window.nHealthOf?nHealthOf(n):null;
+ if(stt)h+='<div class="kxm3">'+nMeter('CPU',+stt.cpu||0,N(Math.round(+stt.cpu||0))+'%')+nMeter('RAM',pc(stt.mem_used,stt.mem_total),N(Math.round(pc(stt.mem_used,stt.mem_total)))+'%')+nMeter('Disk',pc(stt.disk_used,stt.disk_total),N(Math.round(pc(stt.disk_used,stt.disk_total)))+'%')+'</div>';
+ var hh=n?nHealthOf(n):null;
  if(hh&&hh.r&&hh.r.length&&n.enabled)h+='<ul class="nwhy">'+hh.r.map(function(x){return '<li class="l'+x[0]+'">'+t(x[1])+'</li>'}).join('')+'</ul>';
  var acts=[];
  if(n){acts.push('<button class="b2 sm" onclick="nHealth(\''+ni+'\')">♡ '+t('Health')+'</button>');
@@ -3659,7 +4443,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAct(\''+ni+'\',\'update\')">⇪ '+t('Update agent')+'</button>');
   acts.push('<button class="b2 sm okb" onclick="nAssign(\''+ni+'\',1)">'+ic('plus',13)+' '+t('Add to all users')+'</button>');
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAssign(\''+ni+'\',0)">'+t('Remove from all users')+'</button>')}
- if(a&&!s.local&&window.tunSrvEdit)acts.push('<button class="b2 sm" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',13)+' '+t('Tunnel agent settings')+'</button>');
+ if(a&&!s.local)acts.push('<button class="b2 sm" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',13)+' '+t('Tunnel agent settings')+'</button>');
  if(!s.local)acts.push('<button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+ic('link',13)+' '+t('Show command')+'</button>');
  if(!s.local)acts.push('<button class="b2 sm bd" onclick="srvDel(\''+k+'\')">'+ic('trash',13)+' '+t('Delete server')+'</button>');
  h+='<div class="kxacts">'+acts.join('')+'</div>';
@@ -3755,7 +4539,7 @@ window.srvDel=function(key,withTun){var s=find(key)||{};
 window.srvFixPorts=function(){if(!confirm(t("Users' WireGuard / AmneziaWG files of the moved server must be downloaded again (subscription links and the app update by themselves). Continue?")))return;
  toast(t('Checking…'));api('POST','/api/servers/fix-ports').then(function(r){var m=r.moved||[];
   modal(mhead(t(m.length?'Ports moved':'No clash'))+(m.length?'<div class="list">'+m.map(function(x){return '<div class="li"><span><b>'+esc(x.server)+'</b> '+protoName(x.proto)+(x.error?'<small class="bad2">'+esc(x.error)+'</small>':'')+'</span><span class="ltr">'+N(x.old)+' → '+N(x.new)+' '+(x.ok?'✅':'❌')+'</span></div>'}).join('')+'</div>':''));
-  load(true);if(window.svcReload)svcReload()}).catch(fail)};
+  load(true);svcReload()}).catch(fail)};
 
 // ---------------------------------------------------------------- a VPN port of one server (used by VPN services)
 // another server (or another protocol here) already using the port the admin types
@@ -3764,115 +4548,48 @@ window.srvPortClash=function(key,proto,v){var p=+unN(String(v));if(!(p>0&&p<6553
  return hit?t('Already used by')+' '+hit+': '+t('pick another port'):''};
 window.srvSavePort=function(key,proto,v,done){var b={};b[proto]=+unN(String(v));toast(t('Saving…'));
  return api('POST','/api/servers/'+q(key)+'/ports',b).then(function(r){toast(t('Saved: the service restarts on the new port'));load(true);if(done)done(r);return r}).catch(fail)};
-window.srvKmix=function(key,on){return api('POST','/api/servers/'+q(key)+'/kmix',{on:on}).then(function(){toast(t('Saved'));load(true)}).catch(fail)};
 window.srvProtoAll=function(pa,add){if(!confirm(t(add?'Turn this on for every user?':'Turn this off for every user?')))return;
  api('POST','/api/protocols/'+pa+'/'+(add?'assign-all':'unassign-all')).then(function(r){toast(t('Done')+' ('+N(r.changed||0)+')')}).catch(fail)};
-window.srvSvcOff=function(kind,sid){if(!confirm(t('Remove it from this server? The server stops it and frees its ports.')))return;
- api('DELETE','/api/'+kind+'/servers/'+q(sid)).then(function(){closeModal();toast(t('Removed'));load(true);if(window.svcReload)svcReload()}).catch(fail)};
 
-// Xray / DNS on one server
-window.srvAddXray=function(key){if(!window.xrAddNode)return;xrAddNode();var tries=0,iv=setInterval(function(){var sel=$('#xa_sv');if(sel||++tries>40){clearInterval(iv);if(sel){sel.value=key;sel.dispatchEvent(new Event('change'))}}},100)};
-window.srvAddDns=function(key,iran){if(!window.dnsAdd)return;dnsAdd(iran?'relay':'exit');var tries=0,iv=setInterval(function(){var sel=$('#dx_sv');if(sel||++tries>40){clearInterval(iv);if(sel){sel.value=key;sel.dispatchEvent(new Event('change'))}}},100)};
 
-// ---------------------------------------------------------------- the old ways in lead here
+// ---------------------------------------------------------------- adding a server
 // Add node (dashboard) and + Server (tunnels) open the one Add server
-window.nodeAdd=function(){srvAdd('abroad')};window._nodeAdd=window.nodeAdd;
+window.nodeAdd=function(){srvAdd('abroad')};
 window.tunServerAdd=function(){srvAdd('iran')};
-// "New server" in the Xray / DNS forms makes a whole server too: its command installs everything
-if(window.tunCmdBox){var _tcb=window.tunCmdBox;window.tunCmdBox=function(s,d){if(s&&s.command)return '<label class="f">'+t('Run this on the new server, as root (Ubuntu / Debian)')+'</label><pre class="cmd" id="tn_cmd">'+esc(s.command)+'</pre><button class="btn" style="width:100%" id="tn_cp">'+ic('link',16)+' '+t('Copy command')+'</button>';return _tcb(s,d)}}
-var _api=window.api;
-window.api=function(m,u,b){if(m=='POST'&&u=='/api/tunnels/servers'&&b&&!b.gre_ip&&!b.addr)return _api('POST','/api/servers',{name:b.name,loc:b.loc||'abroad',vpn:b.loc!='iran'});return _api.apply(this,arguments)};
-// actions of the node cards refresh this page
-if(window.loadNodes){var _ln=window.loadNodes;window.loadNodes=function(){if(S.page=='nodes'&&$('#svp_g'))return load(true);return _ln.apply(this,arguments)}}
+// the servers again (after an action): this page redraws; elsewhere only the data is fetched
+window.loadNodes=function(){if(S.page=='nodes'&&$('#svp_g'))return load(true);
+ api('GET','/api/nodes').then(function(n){S.nodes=n}).catch(fail);
+ api('GET','/api/xray').then(function(d){XR.d=d}).catch(function(){});
+ api('GET','/api/dns').then(function(d){DN.d=d}).catch(function(){});
+ api('GET','/api/tunnels').then(function(d){TN.d=d}).catch(function(){})};
 
-// the menu: one Servers page (the separate Tunnel servers page is gone)
-if(window.V37&&V37.SECS){V37.SECS.forEach(function(s){s[3]=s[3].filter(function(x){return x[0]!='servers'})})}
-var _route=window.route;
-if(_route)window.route=function(){var h=(location.hash||'').slice(1).split('/')[0];if(h=='servers'){location.replace('#nodes');return}return _route.apply(this,arguments)};
 
-// ---------------------------------------------------------------- Backup: after a restore, and app files
-function restoreBox(){var pg=$('#pg');if(!pg||S.page!='backup'||$('#svp_rs'))return;
- api('GET','/api/restore/check').then(function(r){if((!r.restored_at||Date.now()/1000-r.restored_at>3*86400)&&!r.bot_conflict||$('#svp_rs')||S.page!='backup')return;
-  var sv=r.servers||[],bad=sv.filter(function(x){return (x.agent===false)||(x.vpn===false&&x.vpn_on)});
-  var c=document.createElement('div');c.className='card';c.id='svp_rs';
-  c.innerHTML='<h3>'+t('After restore')+'</h3><p class="sub">'+t('Restored')+' '+ago(r.restored_at)+(r.moved_from?' · '+t('from')+' <span class="ltr">'+esc(r.moved_from)+'</span>':'')+'</p>'+
-   (r.bot_conflict?'<div class="warnbox">'+t('The panel on the old server still runs the same Telegram bot: both answer customers and both post to the channel. Stop it there: systemctl disable --now kanki-panel')+'</div>':'')+
-   (bad.length?'<div class="list">'+sv.map(function(x){var ok=x.agent!==false&&!(x.vpn===false&&x.vpn_on);return '<div class="li"><span>'+esc(x.name)+'</span><span>'+(ok?'✅':'⏳ '+t('Not connected yet'))+'</span></div>'}).join('')+'</div>':'<p>✅ '+t('Every server is connected')+'</p>');
-  var ph=$('#pg .ph');if(ph)ph.parentNode.insertBefore(c,ph.nextSibling)}).catch(function(){})}
-if(window.pBackup){var _pb=window.pBackup;window.pBackup=function(){_pb.apply(this,arguments);setTimeout(restoreBox,400)}}
 })();
 
 // ==================================================================== multi-location routes
-// Kanki Panel 3.9.3: multi-location tunnels. A route is several servers in a row (Iran → Turkey →
-// Germany): users connect to the first one, the traffic goes through each next one and leaves from the
-// last. Every hop is a tunnel of its own with its own transport (KCP from Iran to Turkey, TCP Mux from
-// Turkey to Germany…), made, tested, changed and deleted together. The ports carried are the same on
-// every hop, so the configs of the last server work through the first one.
-// Also: "Ports of the exit server" now fills in the KANKI MIX port too.
+// multi-location tunnels: a route is several servers in a row (Iran → Turkey → Germany). Users connect
+// to the first one, the traffic goes through each next one and leaves from the last. Every hop is a
+// tunnel of its own with its own transport, made, tested, changed and deleted together; the ports
+// carried are the same on every hop, so the configs of the last server work through the first one.
 (function(){
 'use strict';
-if(typeof FA!='undefined')Object.assign(FA,{
- "Multi-location tunnel":"تانل چندمرحله‌ای","Multi-location":"چندمرحله‌ای",
- "Users connect to the first server; the traffic goes through each next server and leaves from the last. Every hop is a tunnel of its own with its own transport.":"کاربر به سرور اول وصل می‌شود؛ ترافیک از سرورهای بعدی رد می‌شود و از آخری بیرون می‌رود. هر مرحله یک تانل جدا با روش انتقال خودش است.",
- "Route name":"اسم مسیر","Stop":"ایستگاه","Users connect here":"کاربرها به این وصل می‌شوند","Traffic leaves here":"ترافیک از اینجا بیرون می‌رود","Passes through":"از این رد می‌شود",
- "Add a stop":"افزودن ایستگاه","Remove this stop":"حذف این ایستگاه","Hop":"مرحله","Link port":"پورت تانل","Test":"تست","Test every hop":"تست همه‌ی مرحله‌ها",
- "Testing…":"در حال تست…","Best":"بهترین","No transport passed on this hop":"هیچ روشی روی این مرحله رد نشد","Waiting":"در صف",
- "Ports to carry":"پورت‌هایی که از مسیر رد می‌شوند","Ports of":"پورت‌های","The same ports on every hop: users reach them on the first server and land on the same ports of the last one.":"روی همه‌ی مرحله‌ها همین پورت‌ها: کاربر به این پورت‌ها روی سرور اول وصل می‌شود و به همان پورت‌ها روی سرور آخر می‌رسد.",
- "Users of the last server connect through the first one":"کاربرهای سرور آخر از راه سرور اول وصل شوند",
- "WireGuard, AmneziaWG and Hysteria2 configs of the last server get the address of the first server; KANKI MIX gets its second config through the route by itself.":"کانفیگ‌های WireGuard، AmneziaWG و Hysteria2 سرور آخر آدرس سرور اول را می‌گیرند؛ کانفیگ دوم KANKI MIX خودش از همین مسیر ساخته می‌شود.",
- "Make the route":"ساخت مسیر","Save the route":"ذخیره‌ی مسیر","Pick at least three servers: the first, one in the middle and the last":"حداقل سه سرور انتخاب کن: اولی، یکی وسط و آخری",
- "A server cannot come twice on the route":"یک سرور نمی‌تواند دو بار در مسیر باشد","Pick every server":"همه‌ی سرورها را انتخاب کن","Add at least one port to carry":"حداقل یک پورت برای عبور اضافه کن",
- "The route is made: it connects in a few seconds":"مسیر ساخته شد: تا چند ثانیه‌ی دیگر وصل می‌شود","Route saved":"مسیر ذخیره شد",
- "Delete the whole route? Every hop stops and its ports are closed.":"کل مسیر حذف شود؟ همه‌ی مرحله‌ها خاموش می‌شوند و پورت‌هایشان بسته می‌شود.",
- "Total ping":"پینگ کل","Hops":"مرحله‌ها","Edit hop":"ویرایش مرحله","Reconnect all":"اتصال دوباره‌ی همه","Pause":"توقف","Resume":"ادامه",
- "Could not make hop":"مرحله ساخته نشد","the hops made so far were taken back":"مرحله‌هایی که ساخته شده بودند برداشته شدند",
- "Another test is running; it starts when that one ends":"یک تست دیگر در جریان است؛ بعد از تمام شدن آن شروع می‌شود",
- "Direction":"جهت","reverse":"معکوس","direct":"مستقیم","Profile":"پروفایل"
-});
 
-(function(){var st=document.createElement('style');st.textContent=
- '.rt-path{display:flex;flex-direction:column;gap:0;margin:10px 0 4px}'+
- '.rt-stop{display:flex;align-items:center;gap:8px;border:1px solid var(--ln);border-radius:14px;padding:7px 9px;background:var(--c1)}'+
- '.rt-stop>i{flex:none;width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-weight:800;font-size:12px;background:color-mix(in srgb,var(--a) 18%,transparent);color:var(--a)}'+
- '.rt-stop select{flex:1;min-width:0;height:34px;padding:0 8px;font-size:13px}.rt-stop small{color:var(--s);font-size:11px;white-space:nowrap}'+
- '.rt-stop .ib{width:30px;height:30px}'+
- '.rt-hop{position:relative;margin:0 22px;padding:8px 0 8px 14px;border-inline-start:2px dashed color-mix(in srgb,var(--a) 45%,var(--ln))}'+
- '[dir=rtl] .rt-hop{padding:8px 14px 8px 0}'+
- '.rt-hop .rt-hg{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) 84px minmax(0,1fr) auto;gap:6px;align-items:end}'+
- '.rt-hop label{font-size:11px;color:var(--s);display:block;margin:0 0 2px}.rt-hop select,.rt-hop input{height:32px;padding:0 8px;font-size:12px;width:100%}'+
- '.rt-hop .b2{height:32px;padding:0 10px;font-size:12px;white-space:nowrap}'+
- '.rt-res{font-size:11px;color:var(--s);margin-top:4px;min-height:14px}.rt-res b{color:var(--ok)}.rt-res .r{color:var(--bad)}'+
- '.rt-add{border:1px dashed var(--ln);background:transparent;color:var(--s);border-radius:12px;padding:6px;font:inherit;font-size:12px;cursor:pointer;margin:8px 0 0;width:100%}'+
- '.rt-add:hover{border-color:var(--a);color:var(--a)}'+
- '.rtc .rt-line{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:8px 0 2px}'+
- '.rtc .rt-n{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--ln);border-radius:999px;padding:3px 10px;font-weight:700;font-size:13px}'+
- '.rtc .rt-l{display:inline-flex;flex-direction:column;align-items:center;min-width:86px;font-size:10px;color:var(--s);line-height:1.3}'+
- '.rtc .rt-l i{display:block;width:100%;height:3px;border-radius:3px;background:var(--c);position:relative;overflow:hidden;margin:2px 0}'+
- '.rtc .rt-l i:after{content:"";position:absolute;inset:0;width:30%;background:linear-gradient(90deg,transparent,#fff8,transparent);animation:rtflow 1.6s linear infinite}'+
- '[dir=rtl] .rtc .rt-l i:after{animation-name:rtflowr}'+
- '@keyframes rtflow{from{transform:translateX(-100%)}to{transform:translateX(340%)}}@keyframes rtflowr{from{transform:translateX(100%)}to{transform:translateX(-340%)}}'+
- '.rtc .rt-badge{font-size:11px;border:1px solid color-mix(in srgb,var(--a) 55%,transparent);color:var(--a);border-radius:8px;padding:1px 7px;margin-inline-start:6px}'+
- '.rtc .rt-hops{display:flex;flex-direction:column;gap:4px;margin-top:8px}.rtc .rt-h{display:flex;align-items:center;gap:8px;font-size:12px;border:1px solid var(--ln);border-radius:10px;padding:5px 8px}'+
- '.rtc .rt-h b{min-width:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.rtc .rt-h .ib{width:28px;height:28px}'+
- '@media(max-width:620px){.rt-hop .rt-hg{grid-template-columns:1fr 1fr}.rt-hop{margin:0 10px}}';
- document.head.appendChild(st)})();
 
 // ---------------------------------------------------------------- ports of a server, KANKI MIX too
 window.tunNodePorts=function(n){var i=(n&&n.info)||{},tcp=[],udp=[],add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
  [i.wg_port,i.awg_port,i.hy2_port,i.kmix_port,(i.kc_ports||{}).game].forEach(function(v){add(udp,v)});return {tcp:tcp,udp:udp}};
 
 // ---------------------------------------------------------------- data
-function tl(){return (window.TN&&TN.d&&TN.d.tunnels)||[]}
+function tl(){return (TN.d&&TN.d.tunnels)||[]}
 function hopsOf(chain){return tl().filter(function(x){return x.chain==chain}).sort(function(a,b){return (a.hop||0)-(b.hop||0)})}
-function sname(id){return (window.tunSrv?tunSrv(id):{name:id}).name}
+function sname(id){return tunSrv(id).name}
 function uid(){var s='abcdefghijkmnpqrstuvwxyz23456789',r='';for(var i=0;i<8;i++)r+=s.charAt(Math.floor(Math.random()*s.length));return r}
 var TRS=[['Over UDP (fast, games)',['game','kcp','quic','hq']],['Over TCP (steady)',['tcpmux','wss','ws','tcp']],['Advanced (hardest to block)',['dual','h2','faketcp']]];
 function trOpts(sel){return TRS.map(function(g){return '<optgroup label="'+esc(t(g[0]))+'">'+g[1].map(function(k){return '<option value="'+k+'"'+(k==sel?' selected':'')+'>'+esc(tunTr(k))+'</option>'}).join('')+'</optgroup>'}).join('')+
  (TRS.some(function(g){return g[1].indexOf(sel)>=0})||!sel?'':'<option value="'+esc(sel)+'" selected>'+esc(tunTr(sel))+'</option>')}
 
 // ---------------------------------------------------------------- the list: the hops of a route are one card
-var _card=window.tunCard;
-window.tunCard=function(x){if(!x.chain)return _card(x);var hs=hopsOf(x.chain);if(hs.length&&hs[0].id!=x.id)return '';return routeCard(hs)};
+window.routeCardOf=function(x){var hs=hopsOf(x.chain);if(hs.length&&hs[0].id!=x.id)return '';return routeCard(hs)};
 function routeCard(hs){var first=hs[0],name=first.chain_name||first.name,states=hs.map(function(x){return x.state}),
  all=states.every(function(s){return s=='up'}),any=states.some(function(s){return s=='up'}),st=all?'up':!hs.some(function(x){return x.enabled})?'off':any?'partial':'down',col=tunCol(st),
  ping=hs.reduce(function(a,x){var r=(x.entry_status||{}).rtt_ms;return a==null||!r?null:a+r},0),ch=esc(first.chain);
@@ -3894,14 +4611,11 @@ function routeCard(hs){var first=hs[0],name=first.chain_name||first.name,states=
   '<button class="b2" onclick="routeAct(\''+ch+'\',\'restart\')">'+ic('refresh',15)+' '+t('Reconnect all')+'</button>'+
   '<button class="b2" onclick="routeAct(\''+ch+'\',\''+(hs.some(function(x){return x.enabled})?'disable':'enable')+'\')">'+t(hs.some(function(x){return x.enabled})?'Pause':'Resume')+'</button>'+
   '<button class="b2 bd" onclick="routeDel(\''+ch+'\')">'+ic('trash',15)+' '+t('Delete')+'</button></div></div>'}
-function fl(sid){var s=window.tunSrv?tunSrv(sid):null;return s&&s.cc&&window.flagOf?flagOf(s.cc):''}
+function fl(sid){var s=tunSrv(sid);return s&&s.cc?flagOf(s.cc):''}
 window.routeAct=function(ch,a){var hs=hopsOf(ch);Promise.all(hs.map(function(x){return api('POST','/api/tunnels/'+x.id+'/'+a)})).then(function(){toast(a=='restart'?t('The tunnel reconnects in a few seconds'):t('Done'));tunRefresh()}).catch(fail)};
 window.routeDel=function(ch){if(!confirm(t('Delete the whole route? Every hop stops and its ports are closed.')))return;var hs=hopsOf(ch);
  Promise.all(hs.map(function(x){return api('DELETE','/api/tunnels/'+x.id)})).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)};
 
-// a button next to "+ Tunnel"
-var _pt=window.pTunnels;
-window.pTunnels=function(){_pt.apply(this,arguments);var r=$('#pg .ph .row');if(r&&!$('#rt_new')){var b=document.createElement('button');b.className='b2';b.id='rt_new';b.innerHTML='⛓ '+t('Multi-location tunnel');b.onclick=function(){routeEdit()};r.insertBefore(b,r.lastElementChild)}};
 
 // ---------------------------------------------------------------- make / edit a route
 var R=null;
@@ -3932,7 +4646,7 @@ function routeOpen(ch,srvs,xr){var sv=TN.d.servers||[],remote=sv.filter(function
  $('#rt_test').onclick=function(){readForm();testAll()};
  $('#rt_go').onclick=function(){save(this)};
  if(!ch)fillPorts(false)}
-function srvLocOf(s){return window.srvLoc?srvLoc(s):(s.loc||'')}
+function srvLocOf(s){return srvLoc(s)}
 function srvOpts(sel){var sv=TN.d.servers||[];return '<option value="">—</option>'+srvOptGroups(sv,function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'})}
 function drawPath(){var el=$('#rt_path');if(!el)return;var n=R.stops.length,h='';
  R.stops.forEach(function(sid,i){
@@ -3971,7 +4685,7 @@ function fillPorts(manual){readForm();var last=R.stops[R.stops.length-1];if(!las
  var s=((R.srvs&&R.srvs.servers)||[]).filter(function(x){return (x.agent&&x.agent.id==last)||(last=='local'&&x.local)})[0],n=s&&s.node,i=(n&&n.info)||{},udp=[],tcp=[];
  var add=function(l,v){v=parseInt(v,10);if(v>0&&v<65536&&l.indexOf(v)<0)l.push(v)};
  [i.wg_port,i.awg_port,i.hy2_port,i.kmix_port].forEach(function(v){add(udp,v)});
- (window.tunSvcPorts?tunSvcPorts(last):Promise.resolve({tcp:[],udp:[]})).then(function(o){
+ tunSvcPorts(last).then(function(o){
   o.tcp.forEach(function(v){add(tcp,v)});o.udp.forEach(function(v){add(udp,v)});
   if(!udp.length&&!tcp.length){if(manual)toast(t('No node found for this server: type the ports by hand'),1);return}
   if(!manual&&(R.tcp||R.udp))return;
@@ -4017,59 +4731,27 @@ function save(btn){readForm();var st=R.stops,n=st.length;
   var last=st[n-1],first=st[0],s=((R.srvs&&R.srvs.servers)||[]).filter(function(x){return (x.agent&&x.agent.id==last)||(last=='local'&&x.local)})[0],f=tunSrv(first);
   if(!s||!s.node||!(f.addr||f.host))return;
   return api('PUT','/api/nodes/'+encodeURIComponent(s.node.id),{endpoint_mode:'custom',endpoint:f.addr||f.host})}).then(function(){
-  closeModal();toast(t(R.chain?'Route saved':'The route is made: it connects in a few seconds'));tunRefresh();if(window.srvLoad)srvLoad(true)}).catch(function(e){
+  closeModal();toast(t(R.chain?'Route saved':'The route is made: it connects in a few seconds'));tunRefresh();srvLoad(true)}).catch(function(e){
   btn.disabled=false;
   if(made.length)Promise.all(made.map(function(id){return api('DELETE','/api/tunnels/'+id)})).then(function(){tunRefresh()});
   toast((e.message||String(e))+(made.length?' · '+t('the hops made so far were taken back'):''),1)})}
 })();
 
 // ==================================================================== VPN services tabs
-// Kanki Panel 3.9.3: VPN services, one tab per service (KANKI MIX, Xray, WireGuard, AmneziaWG,
-// Hysteria2). Each tab lists the servers that run it (abroad and Iran apart), one row per server; a
-// row's arrow opens that service's settings on that server (one row open at a time, closed again on
-// leaving the page or after saving). The Servers page keeps only the servers themselves.
+// VPN services: one tab per service (KANKI MIX, Xray, WireGuard, AmneziaWG, Hysteria2). Each tab
+// lists the servers that run it (abroad and Iran apart); a row's arrow opens that service's settings
+// on that server (one row at a time, closed on leaving the page or after saving).
 (function(){
 'use strict';
-var ACC=window.KAcc;if(!ACC)return;
-if(typeof FA!='undefined')Object.assign(FA,{
- "WireGuard":"WireGuard","AmneziaWG":"AmneziaWG","Hysteria2":"Hysteria2",
- "Plain WireGuard on every VPN server. Inside Iran it works only through a tunnel.":"WireGuard ساده روی همه‌ی سرورهای VPN. داخل ایران فقط از راه تانل کار می‌کند.",
- "WireGuard with obfuscated packets (Jc, S1, S2, H1-H4): passes most filters directly.":"WireGuard با بسته‌های مبهم (Jc، S1، S2، H1-H4): مستقیم از بیشتر فیلترها رد می‌شود.",
- "QUIC-based, fast on lossy internet, with Salamander obfuscation.":"بر پایه‌ی QUIC، سریع روی اینترنت پرافت، با مبهم‌سازی Salamander.",
- "On for all users":"روشن برای همه‌ی کاربران","Off for all users":"خاموش برای همه‌ی کاربران",
- "WireGuard reaches users only through a tunnel: write the tunnel domain of this server in Servers.":"وایرگارد فقط از راه تانل به کاربر می‌رسد: در «سرورها» دامنه‌ی تانل این سرور را بنویس.",
- "Write the tunnel domain of this server in Servers: the second config is made by itself.":"دامنه‌ی تانل این سرور را در «سرورها» بنویس: کانفیگ دوم خودش ساخته می‌شود.",
- "Only for KANKI MIX (optional)":"فقط برای KANKI MIX (اختیاری)","not running":"KANKI MIX روی این سرور اجرا نمی‌شود: «ری‌استارت سرویس‌های VPN» را بزن","the tunnel domain of the server":"دامنه‌ی تانل سرور",
- "Running servers":"سرورهای فعال","Users with it":"کاربرانی که دارند","Through a tunnel":"از راه تانل","Direct":"مستقیم",
- "running":"روشن","stopped":"متوقف","not installed":"نصب نیست","relay":"رله","off":"خاموش",
- "UDP port":"پورت UDP","Save port":"ذخیره‌ی پورت","Users connect to":"کاربرها به این آدرس وصل می‌شوند","change in Servers":"تغییر در صفحه‌ی سرورها",
- "Reaches this server through":"از این مسیر به این سرور می‌رسد","No tunnel carries this port: users connect to the server directly":"هیچ تانلی این پورت را نمی‌برد: کاربرها مستقیم به سرور وصل می‌شوند",
- "Obfuscation":"مبهم‌سازی","Obfuscation password":"رمز مبهم‌سازی","Certificate":"گواهی","self-signed":"خودامضا","domain":"دامنه",
- "Direct name":"اسم مستقیم","Points at this server":"درست است","Not set yet":"هنوز تنظیم نشده","Points elsewhere":"به سرور دیگری اشاره می‌کند",
- "Point it at":"به این آی‌پی اشاره کند","Change the base domain":"تغییر دامنه‌ی اصلی",
- "Make each direct name an A record pointing at the server's IP (Cloudflare: DNS only, grey cloud). Until it points right, the app gets the server's own address.":"هر اسم مستقیم را یک رکورد A بساز که به آی‌پی سرور اشاره کند (کلادفلر: فقط DNS، ابر خاکستری). تا وقتی درست نشده، برنامه آدرس خود سرور را می‌گیرد.",
- "No VPN server yet":"هنوز سرور VPN نیست","Add server":"افزودن سرور","Restart VPN services":"ری‌استارت سرویس‌های VPN","Health":"سلامت",
- "Add this server to all users":"افزودن این سرور به همه‌ی کاربران","Remove this server from all users":"حذف این سرور از همه‌ی کاربران",
- "General settings":"تنظیمات کلی","KANKI MIX on this server":"KANKI MIX روی این سرور","Port of this server":"پورت این سرور",
- "Route":"مسیر","Address":"آدرس","automatic":"خودکار","Second config through the tunnel":"کانفیگ دوم از راه تانل","Iran address":"آدرس ایران",
- "Name in the app":"اسم در برنامه","tunnel":"تانل","Users also get":"کاربرها این را هم می‌گیرند",
- "No Kanki tunnel carries this port to the server. Make a tunnel (or a multi-location route) that carries it, or forward it on that address some other way.":"هیچ تانل کانکی این پورت را به این سرور نمی‌برد. یک تانل (یا مسیر چندمرحله‌ای) بساز که آن را ببرد، یا روی آن آدرس به روش دیگری فورواردش کن.",
- "Inbounds":"اینباندها","Inbound":"اینباند","Config":"کانفیگ","Repair":"تعمیر","Edit server":"ویرایش سرور","Remove Xray from this server":"حذف Xray از این سرور",
- "No inbound on this server yet":"هنوز اینباندی روی این سرور نیست","inbounds":"اینباند","Running":"در حال اجرا","Not running":"اجرا نمی‌شود","Waiting for the server…":"منتظر سرور…",
- "Saved":"ذخیره شد","Cancel":"انصراف","Save":"ذخیره","Tunnels page":"صفحه‌ی تانل‌ها","users":"کاربر","Sync":"همگام‌سازی"
-});
+var ACC=KAcc;
 
 // ---------------------------------------------------------------- the tabs of VPN services
-var P=window.PAGES||[];
+var P=PAGES;
 [['wg','WireGuard','shield2'],['awg','AmneziaWG','shield2'],['hy2','Hysteria2','shield2']].forEach(function(x){if(!P.some(function(y){return y[0]==x[0]}))P.push(x)});
-if(window.V37&&V37.SECS)V37.SECS.forEach(function(s){if(s[0]!='vpnsec')return;
- s[3]=[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI']]});
 
 // leaving a page closes its open row
-var _route=window.route;
-window.route=function(){Object.keys(ACC.open).forEach(function(k){ACC.open[k]=''});return _route.apply(this,arguments)};
 
-function fl(cc){return window.flagOf?flagOf(cc):''}
+function fl(cc){return flagOf(cc)}
 function isIr(s){return s.loc=='iran'||String(s.cc||'').toUpperCase()=='IR'}
 function q(id){return encodeURIComponent(id)}
 function boxes(g,list,row){var ab=list.filter(function(x){return !isIr(x)}),ir=list.filter(isIr);
@@ -4079,12 +4761,12 @@ function srvByNode(nid){return ((SV.d&&SV.d.servers)||[]).filter(function(s){ret
 function agentOf(s){return s.local?'local':(s.agent?s.agent.id:'')}
 
 // the servers a UDP port of a server comes in through (Iran → Turkey), from the tunnels the panel has
-function routeVia(sid,port){var tl=((window.TN&&TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false&&x.kind!='awg'}),names=[],cur=sid,p=+port,seen=[sid];
+function routeVia(sid,port){var tl=((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false&&x.kind!='awg'}),names=[],cur=sid,p=+port,seen=[sid];
  if(!sid||!p)return null;
  for(var k=0;k<8;k++){var hit=null;tl.forEach(function(x){if(hit||x.exit!=cur||seen.indexOf(x.entry)>=0)return;
    (Array.isArray(x.udp)?x.udp:String(x.udp||'').split(',')).join(',').split(',').forEach(function(it){it=String(it).trim();if(!it||hit)return;var a=it,b=it;if(it.indexOf(':')>0){a=it.split(':')[0];b=it.split(':')[1]}
     if(+b==p&&/^\d+$/.test(a))hit={e:x.entry,p:+a}})});
-  if(!hit)break;seen.push(hit.e);names.unshift((window.tunSrv?tunSrv(hit.e):{name:hit.e}).name);cur=hit.e;p=hit.p}
+  if(!hit)break;seen.push(hit.e);names.unshift(tunSrv(hit.e).name);cur=hit.e;p=hit.p}
  return names.length?{via:names,port:p}:null}
 function viaLine(r,me){return r?'<span class="kxr-st g">'+t('Through a tunnel')+'</span> <span>'+r.via.map(esc).join(' → ')+' → '+esc(me)+'</span>'+(r.port?' · <span class="ltr">UDP '+N(r.port)+'</span>':''):''}
 
@@ -4151,7 +4833,6 @@ window.svcDirBase=function(){var v=prompt(t('Base domain for the direct names (l
 window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')};window.p_hy2=function(){protoPage('hy2')};
 
 // ---------------------------------------------------------------- KANKI MIX: a row per server
-if(window.kmDraw){
  window.kmServers=function(d){var list=(d.servers||[]).map(function(x){var s=srvByNode(x.id)||{key:'node:'+x.id,name:x.name,cc:'',loc:''};return {k:x,s:s,key:s.key||x.id,name:x.name,cc:s.cc,loc:s.loc,local:x.main}});
   if(!list.length)return '<p class="muted">—</p>';
   return boxes('km',list,function(r){return kmRow(d,r)})};
@@ -4177,26 +4858,17 @@ if(window.kmDraw){
    '<div class="kxsave"><button class="b2 sm" onclick="accClose(\'km\')">'+t('Cancel')+'</button><button class="btn sm" onclick="kmSaveOne(\''+id+'\')">'+t('Save')+'</button></div>'+
    '<div class="kxacts"><button class="b2 sm" onclick="nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button><a class="b2 sm" href="#tunnels">'+t('Tunnels page')+'</a></div>';
   setTimeout(function(){var el=$('#km_p1'),w=$('#km_pw'),b=$('#km_ps');if(!el)return;var f=function(){var m=srvPortClash(r.key,'kmix',el.value);w.textContent=m;b.disabled=!!m};el.oninput=f;f();
-   b.onclick=function(){if(String(r.key).indexOf('node:')==0&&window.kmSetNodePort)return kmSetNodePort(x.id,+unN(el.value),function(){accClose('km')});srvSavePort(r.key,'kmix',el.value,function(){accClose('km');kmLoad(true)})}},0);
+   b.onclick=function(){if(String(r.key).indexOf('node:')==0)return kmSetNodePort(x.id,+unN(el.value),function(){accClose('km')});srvSavePort(r.key,'kmix',el.value,function(){accClose('km');kmLoad(true)})}},0);
   return h}
  window.kmSaveOne=function(id){var d=KM.d,m={};Object.keys((d&&d.settings.nodes)||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});var o=m[id]||{};
   o.route=$('#km_rt1').value;o.host=$('#km_ho1').value.trim();o.tun_off=!$('#km_t21').checked;o.tun_host=$('#km_th1').value.trim();
   var tp=unN($('#km_tp1').value).trim();o.tun_port=tp?+tp:0;o.tun_name=$('#km_tn1').value.trim();m[id]=o;
   api('PUT','/api/kmix',{nodes:m}).then(function(){toast(t('Saved'));accClose('km');kmLoad(true)}).catch(fail)};
  // the settings of every server, in the list; the page keeps its numbers and the general settings
- var _kd=window.kmDraw;
- window.kmDraw=function(d){_kd(d);var c=$('#km_srv');if(!c)return;var card=c.closest('.card'),g=card&&card.parentNode;
-  if(g&&g.classList.contains('g2'))g.classList.add('kmg2')};
- (function(){var st=document.createElement('style');st.textContent='.kmg2{align-items:start}@media(min-width:900px){.kmg2{grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)!important}}';document.head.appendChild(st)})();
- var _kl=window.kmLoad;
- window.kmLoad=function(quiet){return srvLoad(true).then(function(){return api('GET','/api/kmix')}).then(function(d){KM.d=d;if(S.page!='kmix')return d;
-  if($('#km_srv')){$('#km_kv').innerHTML=kmKpis(d);if(!quiet||!accBusy('km'))$('#km_srv').innerHTML=kmServers(d);return d}kmDraw(d);return d}).catch(fail)};
- ACC.draw.km=function(){var c=$('#km_srv');if(c&&KM.d)c.innerHTML=kmServers(KM.d)};
- var _pk=window.p_kmix;window.p_kmix=function(){ACC.open.km='';_pk.apply(this,arguments)};
-}
+  ACC.draw.km=function(){var c=$('#km_srv');if(c&&KM.d)c.innerHTML=kmServers(KM.d)};
+ 
 
 // ---------------------------------------------------------------- Xray: a row per server with its inbounds
-if(window.xrServers){
  window.xrServers=function(d){if(!d.servers.length)return '<p class="muted">'+t('No Xray server yet: add one in Servers')+'</p>';
   var list=d.servers.map(function(x){var s=((SV.d&&SV.d.servers)||[]).filter(function(z){return agentOf(z)==x.server})[0]||{};return {x:x,key:x.server,name:x.name||x.server,cc:s.cc,loc:s.loc}});
   return boxes('xr',list,function(r){return xrRow(d,r)})};
@@ -4205,181 +4877,44 @@ if(window.xrServers){
    '<span class="kxr-st '+(on?'g':'r')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span><small>'+N(n)+' '+t('inbounds')+'</small>';
   return accRow('xr',x.server,head,function(){return xrBody(d,r)})}
  function xrBody(d,r){var x=r.x,st=x.status||{},sid=esc(x.server),errs=[st.deploy_error,st.error].filter(Boolean),ibs=d.inbounds.filter(function(i){return i.server==x.server});
-  return '<div class="kxr-line"><span class="ltr">'+esc(x.effective||'?')+'</span>'+(st.core?'<span>·</span><span>Xray '+esc(st.core)+'</span>':'')+'<span>'+(window.xrCertChip?xrCertChip(x):'')+'</span></div>'+
+  return '<div class="kxr-line"><span class="ltr">'+esc(x.effective||'?')+'</span>'+(st.core?'<span>·</span><span>Xray '+esc(st.core)+'</span>':'')+'<span>'+xrCertChip(x)+'</span></div>'+
    (errs.length?'<div class="warnbox ltr" style="margin:6px 0 0">'+errs.map(esc).join('<br>')+'</div>':'')+
-   (window.xrCertErr&&xrCertErr(x)?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(xrCertErr(x))+'</div>':'')+
+   (xrCertErr(x)?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(xrCertErr(x))+'</div>':'')+
    '<div class="kxr-sec">'+t('Inbounds')+'</div>'+(ibs.length?ibs.map(function(ib){return '<div style="cursor:pointer" onclick="xrInbound(\''+esc(ib.id)+'\')">'+xrMiniRow(ib)+'</div>'}).join(''):'<p class="muted" style="margin:4px">'+t('No inbound on this server yet')+'</p>')+
    '<div class="kxacts"><button class="btn sm" onclick="xrInbound()">+ '+t('Inbound')+'</button><button class="b2 sm" onclick="xrSrvEdit(\''+sid+'\')">'+ic('edit',13)+' '+t('Edit server')+'</button>'+
    '<button class="b2 sm" onclick="xrPreview(\''+sid+'\')">{ } '+t('Config')+'</button><button class="b2 sm" onclick="srvRepair(\'xray\',\''+sid+'\')">↻ '+t('Repair')+'</button><button class="b2 sm" onclick="srvHealth(\'xray\',\''+sid+'\')">♡ '+t('Health')+'</button>'+
    '<button class="b2 sm bd" onclick="xrSrvDel(\''+sid+'\')">'+ic('trash',13)+' '+t('Remove Xray from this server')+'</button></div>'}
  ACC.draw.xr=function(){var c=$('#xr_srv');if(c&&XR.d)c.innerHTML=xrServers(XR.d)};
- var _px=window.p_xray;window.p_xray=function(){ACC.open.xr='';_px.apply(this,arguments);srvLoad(true);
-  var r=$('#pg .ph .row');if(r&&!$('#xr_all1')){var a=document.createElement('button');a.className='b2';a.id='xr_all1';a.textContent=t('Off for all users');a.onclick=function(){srvProtoAll('xray',0)};
-   var b=document.createElement('button');b.className='b2';b.textContent=t('On for all users');b.onclick=function(){srvProtoAll('xray',1)};r.insertBefore(b,r.firstChild);r.insertBefore(a,r.firstChild)}};
-}
-})();
+ })();
 
 // ==================================================================== colors and cards
-// Kanki Panel 3.10: the polished look. Loaded last (after kanki-look.js), it changes how the panel looks,
-// never how a page works:
-//  - a new sign-in screen: glow behind a glass card, the panel name and a short line under the logo
-//  - dashboard numbers: a colored edge and an icon per number, bigger digits
-//  - every user tile shows how much data is used (a bar) and the days left, not only the name
-//  - softer cards with a light top edge, a lift on hover, a clear focus ring for the keyboard
-//  - no motion for those who ask their system for less motion
+// cards and colors: the sign-in screen, an icon per dashboard number, data used and days left on
+// every user tile, a clear focus ring, and no motion for those who ask their system for less.
 (function(){
 'use strict';
-if(typeof FA!='undefined')Object.assign(FA,{"VPN management panel":"پنل مدیریت VPN","Sign in to continue":"برای ادامه وارد شو",
- "Light / dark":"روشن / تیره","Language":"زبان","left":"مانده","Unlimited data":"حجم نامحدود","Disabled":"غیرفعال"});
 
-Object.assign(ICO,{
- k310sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>',
- k310online:'<path d="M5 12.5a10 10 0 0 1 14 0"/><path d="M8.5 15.8a5 5 0 0 1 7 0"/><circle cx="12" cy="19" r="1.2"/>',
- k310ok:'<circle cx="12" cy="12" r="8.5"/><path d="M8.5 12.3l2.4 2.4 4.6-4.9"/>',
- k310warn:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5.2l3 1.8"/>',
- k310off:'<circle cx="12" cy="12" r="8.5"/><path d="M6 6l12 12"/>',
- k310traffic:'<path d="M7 4v14M3.5 14.5L7 18l3.5-3.5"/><path d="M17 20V6M13.5 9.5L17 6l3.5 3.5"/>'});
-
-// ---------------------------------------------------------------- sign-in screen
-var _lv=window.loginView;
-window.loginView=function(){_lv.apply(this,arguments);
- var l=$('.login');if(!l)return;l.classList.add('k310login');
- var c=l.querySelector('.card'),h=c&&c.querySelector('h3');
- if(h){h.removeAttribute('style');h.insertAdjacentHTML('afterend','<p class="k310sub">'+t('Sign in to continue')+'</p>')}
- var lt=$('#lt');if(lt){lt.innerHTML=ic(document.body.classList.contains('light')?'moon':'k310sun',17);lt.title=t('Light / dark');lt.setAttribute('aria-label',t('Light / dark'));
-  var o=lt.onclick;lt.onclick=function(){o.apply(this,arguments);lt.innerHTML=ic(document.body.classList.contains('light')?'moon':'k310sun',17)}}
- var ll=$('#ll');if(ll){ll.title=t('Language');ll.setAttribute('aria-label',t('Language'))}
- l.insertAdjacentHTML('afterbegin','<i class="k310orb a"></i><i class="k310orb b"></i>');
- var lg=l.querySelector('.logo');if(lg)lg.insertAdjacentHTML('afterend','<div class="k310brand">'+t('VPN management panel')+'</div>')};
-
-// ---------------------------------------------------------------- user tiles: data used and days left
-function daysLeft(u){var d=Math.ceil((u.expires_ts-Date.now()/1000)/86400);return d<=0?t('Expired'):N(d)+' '+t('days left')}
-window.uchip=function(u){var st=ustate(u),lv=liveOf(u),on=u.online_connections>0||lv.length>0,dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':''),ps=[];
- lv.forEach(function(c){if(ps.indexOf(c.p)<0)ps.push(c.p)});
- var tip=u.username+(lv.length?'\n'+lv.map(function(c){return pname(c.p)+' · '+c.s}).join('\n'):''),pc=usage(u),
-  bar=pc<0?'<span class="k310bar inf"><i></i></span>':'<span class="k310bar'+(pc>=90?' hot':pc>=70?' warm':'')+'"><i style="width:'+Math.max(3,pc)+'%"></i></span>',
-  data=pc<0?N((+u.traffic_used_gb||0).toFixed(1))+' GB · '+t('Unlimited data'):N((+u.traffic_used_gb||0).toFixed(1))+' / '+N(u.traffic_limit_gb)+' GB',
-  days=st=='disabled'?t('Disabled'):u.expires_ts?daysLeft(u):'∞';
- return '<button class="uchip k310u st-'+st+(on?' on':'')+(S.sel[u.id]?' sel':'')+'" data-id="'+u.id+'" title="'+esc(tip)+'">'+
-  '<span class="k310top"><span class="dot '+dot+'"></span><span class="nm">'+esc(u.username)+'</span>'+
-  (ps.length?'<span class="lvs">'+ps.slice(0,3).map(function(p){return '<i style="--pc:'+(PCOL[p]||'#888')+'">'+liveShort(p)+'</i>'}).join('')+'</span>':'')+
-  '<span class="tick">'+ic('check',13)+'</span></span>'+bar+
-  '<span class="k310meta"><span class="ltr">'+data+'</span><span>'+days+'</span></span></button>'};
 
 // ---------------------------------------------------------------- dashboard numbers: an icon per number
 var KICO={all:'users',online:'k310online',active:'k310ok',finished:'k310warn',disabled:'k310off'};
 function kpiIcons(){$$('#kpis .kpi').forEach(function(k){if(k.querySelector('.k310ki'))return;
  k.insertAdjacentHTML('afterbegin','<span class="k310ki">'+ic(KICO[k.dataset.go]||'k310traffic',18)+'</span>')})}
-new MutationObserver(function(){if($('#kpis'))kpiIcons()}).observe(document.body,{childList:true,subtree:true});
+V37.kpiIcons=kpiIcons;
 
-var css=`
-/* sign-in */
-.k310login{position:relative;max-width:400px;margin:0 auto;min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;justify-content:center;padding:32px 16px}
-.k310login .logo{position:relative;z-index:1;width:72px;height:72px;margin:0 auto 10px;border-radius:22px;box-shadow:0 18px 50px -12px color-mix(in srgb,var(--a) 65%,transparent)}
-.k310brand{position:relative;z-index:1;text-align:center;font-size:12.5px;font-weight:700;color:var(--s);margin-bottom:18px;letter-spacing:.2px}
-.k310login .card{position:relative;z-index:1;padding:26px 24px 20px;border-radius:24px;border:1px solid var(--gb2,var(--ln));
- background:linear-gradient(180deg,color-mix(in srgb,var(--c1) 82%,transparent),color-mix(in srgb,var(--c2) 92%,transparent))!important;
- backdrop-filter:blur(20px) saturate(140%);-webkit-backdrop-filter:blur(20px) saturate(140%);
- box-shadow:inset 0 1px 0 rgba(255,255,255,.08),0 30px 80px -30px rgba(0,0,0,.9),0 0 0 1px color-mix(in srgb,var(--a) 10%,transparent)!important}
-body.light .k310login .card{box-shadow:inset 0 1px 0 #fff,0 30px 70px -34px rgba(60,40,0,.35)!important}
-.k310login .card h3{justify-content:center;font-size:20px;margin:0}
-.k310sub{text-align:center;margin:6px 0 10px;font-size:12.5px;color:var(--s)}
-.k310login input{height:46px;font-size:14px}
-.k310login .btn{height:48px;font-size:15px;font-weight:800;margin-top:20px!important;border-radius:14px}
-.k310login .ib{width:40px;height:40px;display:inline-grid;place-items:center}
-.k310orb{position:fixed;z-index:0;pointer-events:none;border-radius:50%;filter:blur(70px);opacity:.55}
-.k310orb.a{width:420px;height:420px;top:-120px;inset-inline-end:-80px;background:radial-gradient(circle,color-mix(in srgb,var(--a) 55%,transparent),transparent 65%)}
-.k310orb.b{width:360px;height:360px;bottom:-140px;inset-inline-start:-100px;background:radial-gradient(circle,color-mix(in srgb,var(--ad) 45%,transparent),transparent 65%);opacity:.4}
-body.light .k310orb{opacity:.35}
-
-/* cards: a light top edge and a soft depth */
-body.k38 .card{border-radius:20px;background:linear-gradient(180deg,color-mix(in srgb,var(--t) 3.5%,var(--c1)),var(--c2))!important;
- box-shadow:inset 0 1px 0 color-mix(in srgb,var(--t) 7%,transparent),0 20px 44px -30px rgba(0,0,0,.9)!important}
-body.k38.light .card{box-shadow:inset 0 1px 0 #fff,0 16px 36px -28px rgba(0,0,0,.28)!important}
-
-/* dashboard numbers */
-body.k38 .kpis{gap:12px;grid-template-columns:repeat(2,minmax(0,1fr))}
-@media(min-width:600px){body.k38 .kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(min-width:1280px){body.k38 .kpis{grid-template-columns:repeat(6,minmax(0,1fr))}}
-body.k38 .kpi{position:relative;overflow:hidden;display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:12px;row-gap:2px;align-items:center;
- text-align:start;padding:16px 16px 15px;border-radius:18px;cursor:pointer;--kc:var(--a);
- transition:transform .18s ease,border-color .18s,box-shadow .18s}
-body.k38 .kpi.g{--kc:var(--ok)}body.k38 .kpi.y{--kc:var(--warn)}body.k38 .kpi.r{--kc:var(--bad)}
-body.k38 .kpi:before{content:"";position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,transparent,var(--kc),transparent);opacity:.8}
-body.k38 .kpi:after{content:"";position:absolute;width:140px;height:140px;top:-70px;inset-inline-start:-40px;border-radius:50%;pointer-events:none;
- background:radial-gradient(circle,color-mix(in srgb,var(--kc) 22%,transparent),transparent 70%)}
-body.k38 .kpi .k310ki{grid-row:1/3;width:40px;height:40px;border-radius:13px;display:grid;place-items:center;color:var(--kc);
- background:color-mix(in srgb,var(--kc) 13%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--kc) 26%,transparent)}
-body.k38 .kpi small{grid-column:2;font-size:12px;font-weight:700;color:var(--s);margin:0;white-space:normal;overflow:visible;line-height:1.5}
-body.k38 .kpi b{grid-column:2;white-space:nowrap;font-size:clamp(18px,1.7vw,24px);font-weight:900;line-height:1.15;color:var(--kc);font-variant-numeric:tabular-nums;text-align:start}
-body.k38 .kpi:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--kc) 45%,transparent)!important;box-shadow:0 16px 34px -20px color-mix(in srgb,var(--kc) 55%,transparent)!important}
-
-/* user tiles */
-body.k38 .uchips{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
-body.k38 .uchip.k310u{flex-direction:column;align-items:stretch;gap:9px;padding:13px 14px 12px;border-radius:16px;transition:transform .18s ease,border-color .18s,box-shadow .18s}
-body.k38 .uchip.k310u:hover{transform:translateY(-2px)}
-body.k38 .uchip.k310u.on{border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
-.k310top{display:flex;align-items:center;gap:8px;min-width:0}
-.k310top .nm{font-weight:800;font-size:13.5px}
-.k310bar{display:block;height:6px;border-radius:6px;background:color-mix(in srgb,var(--t) 8%,transparent);overflow:hidden}
-.k310bar i{display:block;height:100%;border-radius:inherit;background:linear-gradient(to left,var(--a),var(--ad))}
-html[dir=ltr] .k310bar i{background:linear-gradient(to right,var(--a),var(--ad))}
-.k310bar.inf i{width:100%;opacity:.28;background:repeating-linear-gradient(135deg,var(--a) 0 6px,transparent 6px 12px)}
-.k310bar.warm i{background:var(--warn)}.k310bar.hot i{background:var(--bad)}
-.k310meta{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;font-weight:600;color:var(--s);white-space:nowrap}
-.k310meta span{overflow:hidden;text-overflow:ellipsis}
-.uchip.st-finished .k310meta span:last-child{color:var(--warn)}
-body.light .uchip.st-finished .k310meta span:last-child{color:#a35f00}
-@media(max-width:430px){body.k38 .uchips{grid-template-columns:1fr 1fr}.k310meta{flex-direction:column;gap:2px}}
-
-/* keyboard focus, everywhere */
-body.k38 :is(button,a,.kpi,.uchip,select,input,textarea):focus-visible{outline:2px solid var(--a);outline-offset:2px}
-
-@media(prefers-reduced-motion:reduce){body.k38 .kpi,body.k38 .uchip.k310u{transition:none}body.k38 .kpi:hover,body.k38 .uchip.k310u:hover{transform:none}}
-`;
-var st=document.createElement('style');st.id='k310css';st.textContent=css;document.head.appendChild(st);
 // the sign-in screen may already be drawn before this file ran
 if($('.login')&&!$('.k310login'))loginView(!($('#otpw')||{classList:{contains:function(){return true}}}).classList.contains('hide'));
 })();
 
 // ==================================================================== tunnel map, drawers
-// Kanki Panel 3.10: where things live. Loaded last (after kanki-skin.js), it changes how pages are
-// grouped and laid out, never what a button does:
-//  - the menu: KANKI MIX and Xray are their own sections next to VPN services and Kanki DNS
-//  - Xray in two parts: "Servers & network" (servers, routing, settings) and "Inbounds" (inbounds,
-//    online clients)
-//  - KANKI MIX and Xray servers are cards; a tap opens that server's settings in a side drawer
-//  - the dashboard: a status line on top, then numbers, live traffic beside server health, servers
-//    beside tunnels, services beside connections; the activity log last
-//  - the tunnel map: Iran entries in one column, exits abroad in the next, each tunnel on its own
-//    curve that never shares a line with another, its short protocol name and live ping in the middle
+// where things live: KANKI MIX and Xray servers as cards with a side drawer; the dashboard (a status
+// line, the numbers, then live traffic beside server resources, servers beside tunnels, services beside
+// connections, the log last); the tunnel map (Iran entries in one column, exits in the next, each
+// tunnel on its own curve with its protocol and live ping).
 (function(){
 'use strict';
-var V=window.V37;if(!V)return;
-if(window.KM_ICO&&!ICO.game)ICO.game=KM_ICO;
-if(typeof FA!='undefined')Object.assign(FA,{"Servers & network":"سرورها و شبکه","Inbounds":"اینباندها","Online clients":"کلاینت‌های آنلاین",
- "Routing and outbounds":"روتینگ و خروجی‌ها","Overview":"نمای کلی","Settings":"تنظیمات","Xray servers":"سرورهای Xray",
- "Servers online":"سرورهای آنلاین","Tunnels up":"تانل‌های وصل","Services":"سرویس‌ها","Users online":"کاربران آنلاین","all running":"همه روشن",
- "stopped":"متوقف","Server resources":"منابع سرور","Iran · entry":"ایران · ورودی","Abroad · exit":"خارج · خروجی","Next hop":"مرحله‌ی بعد",
- "down":"قطع","Close":"بستن","New user":"کاربر جدید","Add server":"افزودن سرور","no tunnels":"بدون تانل"});
+var V=V37;
 
 // ---------------------------------------------------------------- the menu
 // [section key, label, icon, [[page, sub page, tab label], ...], group]
-var SECS=[
- ['dash','Dashboard','dash',[['dash','','Dashboard']],'Home'],
- ['users','Users','users',[['users','','Users']],'Customers'],
- ['bot','Sales bot','bot',[['bot','','Sales bot']],'Customers'],
- ['emergency','Emergency chat','sos',[['emergency','','Emergency chat']],'Customers'],
- ['nodes','Servers','nodes',[['nodes','','Servers']],'Servers & network'],
- ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
- ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+\u200e'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
- ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
- ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
-// the sections other layers already know keep their objects (some code holds on to them)
-var old={};V.SECS.forEach(function(s){old[s[0]]=s});
-V.SECS.length=0;SECS.forEach(function(s){var o=old[s[0]];if(o){o.length=0;s.forEach(function(x){o.push(x)});V.SECS.push(o)}else V.SECS.push(s)});
-window.NAV=V.SECS.map(function(s){return {p:s[3][0][0],sec:s[0]}});
 function secBy(k){for(var i=0;i<V.SECS.length;i++)if(V.SECS[i][0]==k)return V.SECS[i];return V.SECS[0]}
 function href(f){return '#'+f[0]+(f[1]?'/'+f[1]:'')}
 function sheetHtml(){var g='',h='<i class="k38grab"></i>',open=false,cur=V.secOf(S.page)[0];
@@ -4392,28 +4927,9 @@ window.k38More=function(on){var sh=$('#msheet'),sc=$('#k38scrim');if(!sh)return;
 function markTabs(){var el=$('#sectabs');if(!el)return;var as=$$('.stl a',el),h=location.hash||'',hit=as.filter(function(a){return a.getAttribute('href')==h});
  if(!hit.length){var p='#'+S.page;hit=as.filter(function(a){return a.getAttribute('href').split('/')[0]==p}).slice(0,1)}
  as.forEach(function(a){a.classList.toggle('on',hit.indexOf(a)>=0)})}
-var _nm=window.navMark;
-window.navMark=function(){_nm.apply(this,arguments);markTabs()};
-new MutationObserver(function(){if($('#sectabs'))markTabs()}).observe(document.body,{childList:true,subtree:true});
-// the Xray menu item opens its first part
-var _route=window.route;
-window.route=function(){if((location.hash||'')=='#xray'){location.replace('#xray/overview');return}return _route.apply(this,arguments)};
+V.markTabs=markTabs;
 
-// ---------------------------------------------------------------- Xray: servers first, inbounds their own tab
-// the servers tab shows the servers across the page; the inbounds are on the next tab
-if(window.XTABS){XTABS.length=0;[['overview','Servers','srv'],['inbounds','Inbounds','xray'],['clients','Online clients','users'],['routing','Routing and outbounds','tunnel'],['settings','Settings','settings']].forEach(function(x){XTABS.push(x)})}
-var _xo=window.xrOverview;
-if(_xo)window.xrOverview=function(d,el){_xo.apply(this,arguments);var s=$('#xr_srv',el),c=s&&s.closest('.card'),g=c&&c.parentNode;
- if(g&&g.classList.contains('g2')){$$(':scope>.card',g).forEach(function(x){if(x!=c)x.remove()});g.classList.add('k310one')}};
 
-// ---------------------------------------------------------------- one word for a server
-// a server is added once, in Servers; nodes and tunnel servers are the same servers
-var WFA=[[/سرورهای تانل/g,'سرورها'],[/سرور تانل/g,'سرور'],[/Nodeها/g,'سرورها'],[/نودهای/g,'سرورهای'],[/نودها/g,'سرورها'],[/نودی/g,'سروری'],[/نود/g,'سرور']],
- WEN=[[/\bTunnel servers\b/g,'Servers'],[/\btunnel servers\b/g,'servers'],[/\bTunnel server\b/g,'Server'],[/\btunnel server\b/g,'server'],[/\bNodes\b/g,'Servers'],[/\bnodes\b/g,'servers'],[/\bNode\b/g,'Server'],[/\bnode\b/g,'server']];
-if(typeof FA!='undefined')Object.assign(FA,{"Both a node and a tunnel server (updated once, through the node)":"سرور (یک‌بار آپدیت می‌شود)",
- "Also use this node as a tunnel server":"تانل هم روی این سرور ساخته شود","Tunnel servers (updating by themselves)":"سرورها (خودشان آپدیت می‌شوند)"});
-var _t=window.t;
-window.t=function(k){var s=_t.apply(this,arguments);if(typeof s!='string')return s;(S.lang=='fa'?WFA:WEN).forEach(function(r){s=s.replace(r[0],r[1])});return s};
 
 // ---------------------------------------------------------------- server cards with a side drawer
 // KANKI MIX (km) and Xray (xr) rows become cards; the open one shows its settings in a drawer
@@ -4425,36 +4941,51 @@ function drawerDress(){Object.keys(DRW).forEach(function(g){var box=$(DRW[g]);if
  var g=open.dataset.acc;sc.onclick=function(){accClose(g)};sc.classList.add('on');document.body.classList.add('k310drw');
  var b=$('.kxr-b',open);if(b&&!$('.k310dh',b)){var h=$('.kxr-h',open),nm=h&&$('b',h);
   b.insertAdjacentHTML('afterbegin','<div class="k310dh"><b>'+(nm?esc(nm.textContent):'')+'</b><button type="button" class="ib" aria-label="'+esc(t('Close'))+'" onclick="accClose(\''+g+'\')">✕</button></div>')}}
-new MutationObserver(function(){if($('.k310cards')||$(DRW.km)||$(DRW.xr)||$('#k310scrim.on'))drawerDress()}).observe(document.body,{childList:true,subtree:true});
+V.drawerDress=function(){if($('.k310cards')||$(DRW.km)||$(DRW.xr)||$('#k310scrim.on'))drawerDress()};
 window.addEventListener('hashchange',function(){var sc=$('#k310scrim');if(sc)sc.classList.remove('on');document.body.classList.remove('k310drw')});
 
 // ---------------------------------------------------------------- dashboard
 function chip(c,label,val){return '<span class="k310st '+c+'"><i></i>'+t(label)+'<b class="ltr">'+val+'</b></span>'}
+// the dashboard: a status line, the numbers, then live traffic beside server resources, servers beside tunnels,
+// services beside connections, the activity log last
+window.pDash=function(){dbReset();
+$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Dashboard')+'</h2><p class="ltr" id="d_sub" style="text-align:start">…</p></div>'+
+ '<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" onclick="newUser()">'+ic('plus',15)+' '+t('New user')+'</button><button class="b2 sm" onclick="nodeAddTyped()">'+ic('nodes',15)+' '+t('Add server')+'</button><span class="live" id="d_live"><i></i><span id="d_lt">'+t('Live')+'</span></span>'+
+ '<select id="d_iv" style="width:auto;padding:6px 9px;font-size:12px">'+[1,2,5,10].map(function(n){return '<option value="'+n+'"'+(n==DB.iv?' selected':'')+'>'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select>'+
+ '<button class="ib" id="d_pause" title="'+t('Pause')+'">❚❚</button></div></div>'+
+ '<div class="k310strip" id="k310strip"></div><div class="kpis" id="kpis"></div>'+
+ '<div class="k310dash" id="k310dash">'+
+  '<div class="k310c w8">'+'<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('Network speed')+'</h3><small class="muted ltr" id="n_if"></small></div>'+
+  '<div class="nbig"><div class="dn"><small>↓ '+t('Download')+'</small><b id="n_rx" class="ltr">—</b></div><div class="upl"><small>↑ '+t('Upload')+'</small><b id="n_tx" class="ltr">—</b></div></div></div>'+
+  '<div class="ch tall" id="ch_net"></div>'+
+  '<div class="nf ltr"><span>'+t('Peak')+' ↓ <b id="n_prx">—</b></span><span>'+t('Peak')+' ↑ <b id="n_ptx">—</b></span><span>'+t('Total since boot')+' ↓ <b id="n_trx">—</b></span><span>↑ <b id="n_ttx">—</b></span></div></div>'+'</div>'+
+  '<div class="k310c w4"><div class="card k310res"><h3>'+ic('cpu',16)+' '+t('Server resources')+'</h3>'+'<div class="gg">'+gcard('cpu','CPU',ic('cpu',16))+gcard('ram','RAM',ic('ram',16))+gcard('disk','Storage',ic('disk',16))+gcard('swap','Swap',ic('swap',16))+'</div>'+'</div></div>'+
+  '<div class="k310c w6">'+'<div class="card" id="nc" style="margin-bottom:12px"></div>'+'</div>'+
+  '<div class="k310c w6">'+tunDashCard()+'</div>'+
+  '<div class="k310c w6">'+'<div class="card"><h3>'+t('Services')+'</h3><p class="sub">'+t('Start, stop or restart the VPN services')+'</p><div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></div>'+'</div>'+
+  '<div class="k310c w6">'+'<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('TCP / UDP connections')+'</h3><small class="muted" id="c_sub"></small></div>'+
+  '<div class="nbig"><div class="dn"><small>TCP</small><b id="c_tcp" class="ltr">—</b></div><div class="upl"><small>UDP</small><b id="c_udp" class="ltr">—</b></div></div></div>'+
+  '<div class="ch tall" id="ch_con"></div></div>'+'</div>'+
+ '</div>'+logCard();
+ $('#d_iv').onchange=function(){DB.iv=+this.value;localStorage.setItem('kk_div',DB.iv);dashTimers()};
+ $('#d_pause').onclick=function(){DB.paused=!DB.paused;if(!DB.paused)DB.last=null;this.textContent=DB.paused?'▶':'❚❚';this.title=DB.paused?t('Resume'):t('Pause');dashLive(DB.paused?'off':'')};
+ $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};logWire();tunDashWire();
+ $('#kpis').onclick=function(e){var b=e.target.closest('[data-go]');if(b)goUsers(b.dataset.go)};
+ dashTick();dashSys();dashTimers();
+ strip();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page!='dash'){clearInterval(S.timer4);return}strip()},3000)};
+window.drawKpis=function(o){var el=$('#kpis');if(el&&o){
+ var it=[['a','Total users',o.users,'all'],['g','Online',o.online,'online'],['g','Active',o.active,'active'],['y','Expired / out of data',o.expired,'finished'],['r','Disabled',o.disabled,'disabled'],['a','Total traffic',N(o.traffic_gb)+' GB','']];
+ el.innerHTML=it.map(function(x){return '<button class="kpi '+x[0]+'" '+(x[3]?'data-go="'+x[3]+'"':'')+'><small>'+t(x[1])+'</small><b class="ltr">'+(typeof x[2]=='number'?N(x[2]):x[2])+'</b></button>'}).join('')}
+ strip()};
 function strip(){var el=$('#k310strip');if(!el)return;var h='';
  var ns=S.nodes||[];if(ns.length){var on=ns.filter(function(n){return n.online}).length;h+=chip(on==ns.length?'g':on?'y':'r','Servers online',N(on)+' / '+N(ns.length))}
- var tl=(window.TN&&TN.d&&TN.d.tunnels)||[];if(tl.length){var up=tl.filter(function(x){return x.state=='up'}).length;h+=chip(up==tl.length?'g':up?'y':'r','Tunnels up',N(up)+' / '+N(tl.length))}
+ var tl=(TN.d&&TN.d.tunnels)||[];if(tl.length){var up=tl.filter(function(x){return x.state=='up'}).length;h+=chip(up==tl.length?'g':up?'y':'r','Tunnels up',N(up)+' / '+N(tl.length))}
  var sv=((DB.sys||{}).services||[]);if(sv.length){var bad=sv.filter(function(x){return !x.active}).length;h+=chip(bad?'y':'g','Services',bad?N(bad)+' '+t('stopped'):t('all running'))}
  if(DB.ov)h+=chip(DB.ov.online?'g':'','Users online',N(DB.ov.online));
  h=h||'<span class="muted">…</span>';if(el._h!==h){el._h=h;el.innerHTML=h}}  // unchanged: leave it, so its turning edges keep turning
-var _dk=window.drawKpis;if(_dk)window.drawKpis=function(){_dk.apply(this,arguments);strip()};
-var _pd=window.pDash;
-window.pDash=function(){_pd.apply(this,arguments);var pg=$('#pg'),ph=$('#pg .ph');if(!pg||!ph||$('#k310dash'))return;
- // the two actions that matter go up next to the live switch; the quick-actions bar goes
- var qa=$('#k38qa'),row=$('.row',ph);
- if(qa){if(row)row.insertAdjacentHTML('afterbegin','<button class="btn sm" onclick="newUser()">'+ic('plus',15)+' '+t('New user')+'</button><button class="b2 sm" onclick="(window.nodeAddTyped||nodeAdd)()">'+ic('nodes',15)+' '+t('Add server')+'</button>');qa.remove()}
- var st=document.createElement('div');st.className='k310strip';st.id='k310strip';ph.parentNode.insertBefore(st,ph.nextSibling);
- var k=$('#kpis'),gg=$('#pg .gg'),nc=$('#nc'),net=$('#ch_net'),con=$('#ch_con'),sv=$('#svcs'),td=$('#tdc'),lg=$('#lgc');
- var card=function(x){return x&&x.closest('.card')};net=card(net);con=card(con);sv=card(sv);
- var d=document.createElement('div');d.className='k310dash';d.id='k310dash';
- var cell=function(cls,els){var c=document.createElement('div');c.className='k310c '+cls;els.forEach(function(e){if(e)c.appendChild(e)});d.appendChild(c)};
- if(k)k.parentNode.insertBefore(d,k.nextSibling);
- var res=document.createElement('div');res.className='card k310res';res.innerHTML='<h3>'+ic('cpu',16)+' '+t('Server resources')+'</h3>';if(gg)res.appendChild(gg);
- cell('w8',[net]);cell('w4',[res]);cell('w6',[nc]);cell('w6',[td]);cell('w6',[sv]);cell('w6',[con]);
- if(lg)pg.appendChild(lg);
- strip();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page!='dash'){clearInterval(S.timer4);return}strip()},3000)};
 
 // ---------------------------------------------------------------- tunnel map
-// The old neon map (glowing fibres, packets that turn into the tunnel colour at the lock, cyan packets
+// The neon map (glowing fibres, packets that turn into the tunnel colour at the lock, cyan packets
 // coming back, servers with a turning ring and a little satellite), laid out so nothing overlaps:
 // Iran entries in one column, exits abroad in the next (a third for second hops; rows on phones),
 // the columns ordered to cut crossings, every tunnel leaving and reaching its server at its own point,
@@ -4521,7 +5052,7 @@ window.tunMap=function(d,small){var sv=d.servers||[],tl=d.tunnels||[];
   if(l&&now-l.t>500){var r=(by-l.b)/((now-l.t)/1000);if(r>=0)st.rate[x.id]=r}if(!l||now-l.t>500)st.last[x.id]={b:by,t:now}});
  st.m=tmLayout(d,small);tmStart();
  return '<canvas class="tmapcv" data-tm="'+key+'" style="aspect-ratio:'+st.m.W+'/'+st.m.H+'" role="img" aria-label="'+esc(t('Tunnels'))+'"></canvas>'};
-// the drawing is the old one; only where things sit comes from tmLayout
+// the drawing; where things sit comes from tmLayout
 window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;var m=st.m,w=cv.clientWidth;if(!w)return;
  var dpr=Math.min(2,window.devicePixelRatio||1),pw=Math.round(w*dpr),ph=Math.round(w*m.H/m.W*dpr);if(cv.width!=pw||cv.height!=ph){cv.width=pw;cv.height=ph}
  var c=cv.getContext('2d'),k=pw/m.W,th=(T%1<.02||!st.th)?(st.th=tmTheme()):st.th,W=m.W,H=m.H,TAU=Math.PI*2;
@@ -4591,95 +5122,17 @@ window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;v
   var mx=m.mx||(m.n>9?10:14),nm0=(m.ab&&m.ab[s.id])||s.name,nm=nm0.length>mx?nm0.slice(0,mx-1)+'…':nm0;c.font='700 12.5px Vazirmatn,sans-serif';var nw=c.measureText(nm).width+12,ny=s.id!=m.hub&&P.y<m.cy-20?P.y-24*Z-14:P.y+24*Z+19; // the name on the outer side, away from the lines
   c.fillStyle=tmA(tmRgb(th.disc),.72);tmRound(c,P.x-nw/2,ny-13,nw,18,9);c.fill();c.fillStyle=th.t;c.textAlign='center';c.direction=/[\u0600-\u06FF]/.test(nm)?'rtl':'ltr';c.fillText(nm,P.x,ny)})};
 
-var css=`
-/* Xray part one: servers across the page */
-.g2.k310one{grid-template-columns:1fr!important}
-
-/* server cards with a side drawer (KANKI MIX, Xray) */
-.k310cards .kxl{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr));gap:10px}
-.k310cards .kxr{border-radius:16px;border:1px solid var(--gb,var(--ln));background:linear-gradient(180deg,color-mix(in srgb,var(--t) 3%,var(--c1)),var(--c2));transition:border-color .18s,transform .18s,box-shadow .18s;margin:0!important}
-.k310cards .kxr:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--a) 40%,transparent)}
-/* the open card must not move: a transform would trap the fixed drawer inside the card */
-.k310cards .kxr.open,.k310cards .kxr.open:hover{transform:none!important}
-.k310cards .kxr.open{border-color:var(--a);box-shadow:0 0 0 1px var(--a),0 12px 30px -16px color-mix(in srgb,var(--a) 60%,transparent)}
-.k310cards .kxr-h{flex-wrap:wrap;row-gap:8px;padding:14px!important;min-height:86px;align-content:center}
-.k310cards .kxr-h .sp{flex-basis:100%;height:0}
-.k310cards .kxr-h b{font-size:14px}
-.k310cards .kxr-arr{order:9;margin-inline-start:auto;transform:none!important;opacity:.6}
-html[dir=rtl] .k310cards .kxr-arr svg{transform:scaleX(-1)}
-.k310cards .kxr.open>.kxr-b{position:fixed;z-index:60;top:0;bottom:0;inset-inline-end:0;width:min(460px,100vw);height:auto!important;overflow:auto;overscroll-behavior:contain;
- background:var(--c1);border-inline-start:1px solid var(--gb2,var(--ln));box-shadow:-40px 0 80px -30px rgba(0,0,0,.85);
- padding:0 18px calc(24px + env(safe-area-inset-bottom,0px));animation:k310in .22s cubic-bezier(.2,.8,.2,1)}
-body.light .k310cards .kxr.open>.kxr-b{box-shadow:-30px 0 70px -30px rgba(0,0,0,.3)}
-.k310cards .kxr.open>.kxr-b.shut{animation:k310out .18s ease-in forwards}
-@keyframes k310in{from{transform:translateX(var(--k310dx,100%))}to{transform:none}}
-@keyframes k310out{to{transform:translateX(var(--k310dx,100%))}}
-html[dir=rtl] .k310cards{--k310dx:-100%}
-.k310dh{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:10px;margin:0 -18px 12px;padding:calc(14px + env(safe-area-inset-top,0px)) 18px 12px;background:color-mix(in srgb,var(--c1) 92%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--gb,var(--ln))}
-.k310dh b{flex:1;font-size:16px;font-weight:900}
-.k310scrim{display:none;position:fixed;inset:0;z-index:59;background:rgba(0,0,0,.55);backdrop-filter:blur(2px)}
-.k310scrim.on{display:block}
-@media(max-width:700px){.k310cards .kxr.open>.kxr-b{top:auto;width:100vw;max-height:86vh;border-radius:22px 22px 0 0;border:1px solid var(--gb2,var(--ln));border-bottom:0;--k310dx:0;animation-name:k310up}
- .k310dh{padding-top:14px}}
-@keyframes k310up{from{transform:translateY(100%)}to{transform:none}}
-
-/* dashboard */
-.k310strip{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
-.k310st{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 14px;border-radius:12px;border:1px solid var(--gb,var(--ln));background:var(--c1);font-size:12.5px;font-weight:700;color:var(--s)}
-.k310st b{color:var(--t);font-weight:900}
-.k310st i{width:8px;height:8px;border-radius:50%;background:var(--s)}
-.k310st.g i{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 22%,transparent)}
-.k310st.y i{background:var(--warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--warn) 22%,transparent)}
-.k310st.r i{background:var(--bad);box-shadow:0 0 0 3px color-mix(in srgb,var(--bad) 22%,transparent)}
-.k310st.y{border-color:color-mix(in srgb,var(--warn) 35%,transparent)}.k310st.r{border-color:color-mix(in srgb,var(--bad) 35%,transparent)}
-.k310dash{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px;margin:12px 0}
-.k310c{min-width:0;display:grid}.k310c>.card{margin:0!important;min-width:0}
-.k310c.w8{grid-column:span 8}.k310c.w4{grid-column:span 4}.k310c.w6{grid-column:span 6}
-.k310res{display:grid;gap:10px;align-content:start}
-.k310res .gg{display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important;margin:0!important}
-.k310res .gc{padding:10px!important;border-radius:14px!important}
-.k310res .gc .ch,.k310res .gc [id^=ch_]{display:none}
-@media(max-width:1100px){.k310c.w8,.k310c.w4,.k310c.w6{grid-column:span 12}}
-#pg .ph .row .btn.sm,#pg .ph .row .b2.sm{display:inline-flex;align-items:center;gap:6px}
-@media(max-width:620px){#pg .ph .row:has(#d_live){flex-wrap:wrap!important}}
-
-@media(prefers-reduced-motion:reduce){.k310cards .kxr.open>.kxr-b{animation:none}.k310cards .kxr{transition:none}}
-
-/* settings: the section list stays in view, the save bar sticks to the bottom of the section */
-@media(min-width:900px){#st .stn{position:sticky;top:84px;align-self:start}}
-#st .sts .sbar{position:sticky;bottom:12px;z-index:3;border-radius:14px;padding:10px 12px;margin-top:14px;background:color-mix(in srgb,var(--c1) 88%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--gb,var(--ln))}
-#st .sts .sbar:has(button[data-save]:not(:disabled)){border-color:color-mix(in srgb,var(--a) 55%,transparent);box-shadow:0 10px 30px -16px color-mix(in srgb,var(--a) 70%,transparent)}
-#st .stn button.dirty em{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--a);margin-inline-start:auto}
-#st .sts .srow{padding:12px 0;border-bottom:1px solid var(--gb,var(--ln))}
-`;
-var st=document.createElement('style');st.id='k310hub';st.textContent=css;document.head.appendChild(st);
 })();
 
 // ==================================================================== the look: menu, rails, cards
-// Kanki Panel 3.11: the look of the new design. Loaded last (after kanki-hub.js); it changes how the
-// panel looks and moves, never what a button does:
-//  - the side menu: groups that open and close smoothly (items slide in one after another), the open
-//    section lit gold with a turning gold edge; a button folds it to icons only
-//  - "Side menu / Top menu": the whole menu can sit in one row across the top, dragged or scrolled sideways
-//  - Cores (VPN services): the tabs are a rail of cards (drag it, tap one); under a core its servers are
-//    country chips, and the picked one opens its settings right below them
-//  - users in two columns of slim cards: the whole name, data used and the expiry date
-//  - every page comes in with its cards rising one after another
+// the menu and motion: side menu groups that open and close (or the whole menu in one row across the
+// top), the Cores rail of cards with a server's settings right below its chip, users in two columns
+// of slim cards, and pages that come in card by card.
 (function(){
 'use strict';
-var V=window.V37;if(!V)return;
-if(typeof FA!='undefined')Object.assign(FA,{"Cores":"هسته‌ها","Inbounds":"دروازه‌ها","Inbound":"دروازه","+ Inbound":"+ دروازه",
- "Working inbounds":"دروازه‌های فعال","inbounds":"دروازه","No inbound yet.":"هنوز دروازه‌ای نیست.","No inbound on this server yet":"هنوز دروازه‌ای روی این سرور نیست","Make the first one":"اولی را بساز",
- "Side menu":"منوی کنار","Top menu":"منوی بالا","Fold the menu":"جمع کردن منو","Expires":"انقضا","Make this inbound":"ساخت این دروازه","User inbounds (Xray)":"دروازه‌های کاربران (Xray)","Test the sites":"تست سایت‌ها","Testing…":"در حال تست…","Test again":"تست دوباره","Tested from the panel server: TLS 1.3, a valid certificate and HTTP/2. Tap one to use it.":"از سرور پنل تست شد: TLS 1.3، گواهی معتبر و HTTP/2. روی یکی بزن تا انتخاب شود.","Data":"حجم","Expired":"منقضی",
- "All cores at a glance":"همه‌ی هسته‌ها در یک نگاه","Games · low ping":"گیم · پینگ پایین","Plain and fast":"ساده و سریع","Obfuscated WireGuard":"WireGuard مبهم",
- "QUIC · lossy internet":"QUIC · اینترنت پرافت","Blocked sites only":"فقط سایت‌های تحریم‌شده"});
-if(window.REALITY_TARGETS){REALITY_TARGETS.length=0;['www.microsoft.com:443','www.apple.com:443','dl.google.com:443','www.speedtest.net:443','www.cloudflare.com:443','www.yahoo.com:443','www.amazon.com:443','addons.mozilla.org:443','www.samsung.com:443','www.nvidia.com:443',
- 'www.cisco.com:443','www.mozilla.org:443','www.intel.com:443','www.ebay.com:443','www.bing.com:443','www.asus.com:443','www.digikala.com:443','www.aparat.com:443','divar.ir:443','snapp.ir:443','www.filimo.com:443','www.namava.ir:443'].forEach(function(x){REALITY_TARGETS.push(x)})}
-ICO.cores='<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/>';
+var V=V37;
 var CHEV='<svg class="kd-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>';
 function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){}return null}
-// the services section is called Cores
-V.SECS.forEach(function(s){if(s[0]=='vpnsec'){s[1]='Cores';s[2]='cores'}});
 
 // ---------------------------------------------------------------- side menu: groups that open and close
 var GOPEN={};try{GOPEN=JSON.parse(store('kk_navg')||'{}')||{}}catch(e){}
@@ -4707,21 +5160,58 @@ function look(){document.body.classList.add('kd');document.body.classList.toggle
  $$('.kd-lay button').forEach(function(b){b.classList.toggle('on',(b.dataset.m=='top')==(store('kk_menu')=='top'))})}
 window.kdMenu=function(m){store('kk_menu',m);look();markAll()};
 window.kdMini=function(){store('kk_mini',store('kk_mini')=='1'?'0':'1');look()};
-var _sh=window.shell;
-window.shell=function(){_sh.apply(this,arguments);
- var br=$('#side .sbrand');if(br&&!$('.kd-fold',br))br.insertAdjacentHTML('beforeend','<button type="button" class="kd-fold" onclick="kdMini()" aria-label="'+esc(t('Fold the menu'))+'" title="'+esc(t('Fold the menu'))+'">'+CHEV+'</button>');
- var ta=$('header.top .tb-act');if(ta&&!$('.kd-lay',ta))ta.insertAdjacentHTML('afterbegin','<div class="kd-lay" role="group" aria-label="'+esc(t('Top menu'))+'"><button type="button" data-m="side" onclick="kdMenu(\'side\')">'+t('Side menu')+'</button><button type="button" data-m="top" onclick="kdMenu(\'top\')">'+t('Top menu')+'</button></div>');
- var hd=$('header.top');if(hd&&!$('#kdtop'))hd.insertAdjacentHTML('afterend',topNav());dragRow($('#kdtop'));look()};
+window.shell=function(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.charAt(0);
+ $('#app').innerHTML='<header class="top"><div class="'+logoCls()+'" id="mlogo">'+logoInner(L)+'</div>'+
+ '<div class="tb-title"><small><span>'+esc(nm)+'</span><span>›</span><span id="tbsec"></span></small><b id="tbt"></b></div><div class="sp"></div>'+
+ '<div class="tb-act"><div class="kd-lay" role="group" aria-label="'+esc(t('Top menu'))+'"><button type="button" data-m="side" onclick="kdMenu(\'side\')">'+t('Side menu')+'</button><button type="button" data-m="top" onclick="kdMenu(\'top\')">'+t('Top menu')+'</button></div><div class="segl"><button data-l="fa" class="'+(S.lang=='fa'?'on':'')+'">FA</button><button data-l="en" class="'+(S.lang=='en'?'on':'')+'">EN</button></div>'+
+ '<button class="ib" id="thm" title="'+t('Theme')+'" aria-label="theme">'+ic('moon',17)+'</button>'+
+ '<button class="ib" id="upd" title="'+t('Update')+'"><span class="dot" id="updot"></span><span class="uv ltr">v'+esc(me.version||'')+'</span></button>'+
+ '<div class="uchip2" title="'+esc(me.user||'')+'"><i>'+esc((me.user||'A').charAt(0).toUpperCase())+'</i><span>'+esc(me.user||'')+'</span></div>'+
+ '<button class="ib" id="lo" title="'+t('Logout')+'" aria-label="logout">'+ic('logout',17)+'</button></div></header>'+topNav()+
+ '<nav class="side" id="side"><div class="sbrand"><div class="'+logoCls()+'">'+logoInner(L)+'</div><div style="min-width:0"><b>'+esc(nm)+'</b><small>'+t('VPN management')+'</small></div>'+
+  '<button type="button" class="kd-fold" onclick="kdMini()" aria-label="'+esc(t('Fold the menu'))+'" title="'+esc(t('Fold the menu'))+'">'+CHEV+'</button></div>'+
+ '<div class="snav">'+navSide()+'</div>'+
+ '<div class="sfoot"><button class="sver" id="upd2"><span class="dot" id="updot2"></span><span><b class="ltr">v'+esc(me.version||'')+'</b><small id="updt">'+t('Check for update')+'</small></span></button>'+
+ '<a href="#" id="lo2" class="lo2"><span class="ni">'+ic('logout',18)+'</span>'+t('Logout')+'</a></div></nav><div class="shade" id="shade"></div>'+navBar()+'<main id="pg"></main>';
+ $('#shade').onclick=function(){$('#side').classList.remove('on');$('#shade').classList.remove('on')};
+ $('#msheet').onclick=function(e){if(e.target.closest('a'))navMark(S.page,S.sub)};
+ if(!window._navDoc){window._navDoc=1;document.addEventListener('click',function(e){var sh=$('#msheet');if(sh&&sh.classList.contains('on')&&!e.target.closest('#msheet,#mbar'))navMark(S.page,S.sub)})}
+ $$('[data-l]').forEach(function(b){b.onclick=function(){S.lang=b.dataset.l;localStorage.setItem('kk_lang',S.lang);applyLook();shell();route()}});
+ $('#thm').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook()};
+ $('#lo').onclick=function(){logout()};$('#lo2').onclick=function(e){e.preventDefault();logout()};
+ $('#upd').onclick=updateModal;$('#upd2').onclick=function(){$('#shade').click();location.hash='#settings';S.stsec='upd';if(S.page=='settings')route()};
+ // page headers get the page icon, whenever a page draws (or redraws) its header
+ new MutationObserver(decoratePh).observe($('#pg'),{childList:true,subtree:true});
+ api('GET','/api/update/check').then(function(r){var c='dot '+(r.available?'y':(r.error?'':'g'));
+  ['#updot','#updot2'].forEach(function(x){var d=$(x);if(d)d.className=c});
+  var u=$('#updt');if(u)u.textContent=r.available?t('A new version is available.'):(r.error?t('Update source not set'):t('You are on the latest version.'))}).catch(function(){});
+ document.body.classList.add('v37','k38');V.watchPg();V.drawLooks();dragRow($('#kdtop'));look()};
 function markAll(){var sk=V.secOf(S.page)[0];
  $$('#kdtop a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
  var on=$('#kdtop a.on');if(on&&document.body.classList.contains('kd-topm'))try{on.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}
  var a=$('#side a.on'),g=a&&a.closest('.kd-g');if(g&&!g.classList.contains('open')){g.classList.add('open');var b=$('.kd-gh',g);if(b)b.setAttribute('aria-expanded','true')}}
-var _nm=window.navMark;window.navMark=function(){_nm.apply(this,arguments);markAll()};
+// the open section lit in every menu, its tabs on top of the page
+window.navMark=function(p){var sk=V.secOf(p)[0];
+ $$('#side a[data-sec],#mbar a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
+ V.drawSecTabs(p);k38More(0);
+ // the open section stays in sight in the scrolling bar
+ var a=document.querySelector('#mbar a[data-sec="'+sk+'"]');if(a&&a.scrollIntoView)try{a.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}
+ V.markTabs();markAll()};
 
-// ---------------------------------------------------------------- every page comes in card by card
-var _rt=window.route;
-window.route=function(){var r=_rt.apply(this,arguments),pg=$('#pg');if(pg){pg.classList.remove('kd-enter');void pg.offsetWidth;pg.classList.add('kd-enter');clearTimeout(pg._kd);pg._kd=setTimeout(function(){pg.classList.remove('kd-enter')},1400)}
- document.body.classList.toggle('kd-vpn',V.secOf(S.page)[0]=='vpnsec');return r};
+// ---------------------------------------------------------------- pages
+window.route=function(){var hs=location.hash||'';
+ // old addresses
+ if(hs=='#xray'){location.replace('#xray/overview');return}
+ if(hs.slice(1).split('/')[0]=='servers'){location.replace('#nodes');return}
+ Object.keys(KAcc.open).forEach(function(k){KAcc.open[k]=''});
+ var h=(hs||'#dash').slice(1).split('/'),p=h[0];S.sub=h[1]||'';if(!PAGES.some(function(x){return x[0]==p})){p='dash';S.sub=''}S.page=p;
+ var tb=$('#tbt');if(tb){tb.textContent=t(pgOf(p)[1]);$('#tbsec').textContent=t(grpOf(p))}
+ navMark(p,S.sub);clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);window.scrollTo(0,0);
+ (({dash:pDash,users:pUsers,nodes:pNodes,servers:pServers,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,emergency:pEmergency,backup:pBackup,security:pSecurity,settings:pSettings})[p]||window['p_'+p])();
+ V.watchPg();V.drawSecTabs(S.page);
+ // every page comes in card by card
+ var pg=$('#pg');if(pg){pg.classList.remove('kd-enter');void pg.offsetWidth;pg.classList.add('kd-enter');clearTimeout(pg._kd);pg._kd=setTimeout(function(){pg.classList.remove('kd-enter')},1400)}
+ document.body.classList.toggle('kd-vpn',V.secOf(S.page)[0]=='vpnsec')};
 
 // ---------------------------------------------------------------- Cores: a rail of cards
 var CORE={vpn:['dash','All cores at a glance','#F5C451'],kmix:['game','Games · low ping','#ff8a2a'],xray:['xray','VLESS · VMess · Trojan','#6fb6ff'],wg:['shield2','Plain and fast','#3ddc97'],
@@ -4780,10 +5270,10 @@ function kpiEdges(){$$('#kpis .kpi').forEach(function(k){if(!$('.kd-edge',k))k.i
 // every turning edge turns in step with the others, and a redraw does not send it back to the start
 var EDGE='.kd-it.on,.kd-tn.on,.kd-rail .stl a.on,.kd-chip.on,.uchip.kd-u,#st .stn button.on,.k310st,.kd-edge,.kxr[data-acc="srv"]>.kxr-h';
 function phase(){var ph=-((Date.now()/1000)%3.2);$$(EDGE).forEach(function(e){if(!e._kdph){e._kdph=1;e.style.setProperty('--kdph',ph.toFixed(2)+'s')}})}
-new MutationObserver(function(){if($('#sectabs'))dressRail();if(document.body.classList.contains('kd-vpn'))chips();servers();antidpi();xrTabsRow();reality();kpiEdges();phase()}).observe(document.body,{childList:true,subtree:true});
+// whatever a page draws is dressed right away: number icons, tab marks, drawers, rails and chips
+new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();V.drawerDress();if($('#sectabs'))dressRail();if(document.body.classList.contains('kd-vpn'))chips();servers();antidpi();xrTabsRow();reality();kpiEdges();phase()}).observe(document.body,{childList:true,subtree:true});
 
 // ---------------------------------------------------------------- users: two columns, data and expiry date
-if(window.uchip){
  window.uchip=function(u){var st=ustate(u),lv=liveOf(u),on=u.online_connections>0||lv.length>0,dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':''),ps=[];
   lv.forEach(function(c){if(ps.indexOf(c.p)<0)ps.push(c.p)});
   var pc=usage(u),used=(+u.traffic_used_gb||0).toFixed(1),exp=st=='disabled'?t('Disabled'):!u.expires_ts?'∞':u.expires_ts<Date.now()/1000?t('Expired'):jdate(u.expires_ts);
@@ -4793,187 +5283,7 @@ if(window.uchip){
    '<span class="tick">'+ic('check',13)+'</span></span>'+
    '<span class="k310bar'+(pc<0?' inf':pc>=90?' hot':pc>=70?' warm':'')+'"><i style="width:'+(pc<0?100:Math.max(3,pc))+'%"></i></span>'+
    '<span class="kd-meta"><span>'+t('Data')+' <b class="ltr">'+N(used)+(pc<0?' GB / ∞':' / '+N(u.traffic_limit_gb)+' GB')+'</b></span><span>'+t('Expires')+' <b>'+exp+'</b></span></span></button>'};
-}
 
-var css=`
-/* ---- the moving gold edge (needs @property; without it the edge stays still) ---- */
-@property --kda{syntax:"<angle>";initial-value:0deg;inherits:false}
-@keyframes kdang{to{--kda:360deg}}
-body.kd .kd-it.on::after,body.kd .kd-tn.on::after,body.kd .kd-rail .stl a.on::after,body.kd.kd-vpn .kxl>.kxr.open>.kxr-h::after,body.kd .uchip.kd-u:hover::after,body.kd #st .stn button.on::after,body.kd .k310st::after,body.kd .kd-chip.on::after,body.kd #svp_g.kd-srv .kxr>.kxr-h:hover::after{
- content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;
- background:conic-gradient(from var(--kda),transparent 0 55%,var(--cc,var(--a)) 70%,#fff 74%,var(--cc,var(--a)) 78%,transparent 92%);
- -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);animation:kdang 3.2s linear infinite;animation-delay:var(--kdph,0s)}
-body.kd .k310st{position:relative}body.kd .k310st::after{opacity:.7}
-/* ---- side menu ---- */
-body.kd nav.side .snav{display:flex;flex-direction:column;gap:2px}
-.kd-g{display:flex;flex-direction:column}
-.kd-gh{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;padding:12px 10px 6px;color:var(--s);font:inherit;font-size:11.5px;font-weight:800;letter-spacing:.3px;cursor:pointer;text-align:start;border-radius:10px}
-.kd-gh:hover{color:var(--t)}
-.kd-chev{margin-inline-start:auto;transition:transform .4s cubic-bezier(.2,.8,.2,1)}
-.kd-g.open>.kd-gh .kd-chev{transform:rotate(-90deg)}
-html[dir=ltr] .kd-chev{transform:scaleX(-1)}html[dir=ltr] .kd-g.open>.kd-gh .kd-chev{transform:scaleX(-1) rotate(-90deg)}
-.kd-gb{display:grid;grid-template-rows:0fr;transition:grid-template-rows .45s cubic-bezier(.2,.8,.2,1)}
-.kd-g.open>.kd-gb{grid-template-rows:1fr}
-.kd-gbi{overflow:hidden;display:flex;flex-direction:column;gap:3px;min-height:0}
-body.kd nav.side a.kd-it{position:relative;display:flex;align-items:center;gap:12px;padding:6px 8px!important;margin:0!important;border-radius:14px!important;font-weight:700;opacity:0;transform:translateX(calc(14px * var(--kdd,1)));
- transition:opacity .35s,transform .45s cubic-bezier(.2,.8,.2,1),background .2s,color .2s}
-html[dir=ltr] body.kd nav.side a.kd-it{--kdd:-1}
-.kd-g.open a.kd-it{opacity:1!important;transform:none!important}
-.kd-g.open a.kd-it.d2{transition-delay:.05s,.05s,0s,0s}.kd-g.open a.kd-it.d3{transition-delay:.1s,.1s,0s,0s}.kd-g.open a.kd-it.d4{transition-delay:.15s,.15s,0s,0s}.kd-g.open a.kd-it.d5{transition-delay:.2s,.2s,0s,0s}
-body.kd nav.side a.kd-it .ni{width:38px;height:38px;flex:none;border-radius:12px;display:grid;place-items:center;background:var(--in);border:1px solid var(--gb,var(--ln));color:var(--a);transition:all .3s}
-body.kd nav.side a.kd-it:hover{background:color-mix(in srgb,var(--a) 7%,transparent)!important;color:var(--t)}
-body.kd nav.side a.kd-it.on{background:linear-gradient(90deg,color-mix(in srgb,var(--a) 3%,transparent),color-mix(in srgb,var(--a) 15%,transparent))!important;color:var(--t)!important;box-shadow:none!important}
-html[dir=ltr] body.kd nav.side a.kd-it.on{background:linear-gradient(270deg,color-mix(in srgb,var(--a) 3%,transparent),color-mix(in srgb,var(--a) 15%,transparent))!important}
-body.kd nav.side a.kd-it.on .ni{background:radial-gradient(circle at 30% 25%,#fff3c4,var(--a) 50%,var(--ad));color:#160f00;border-color:transparent;box-shadow:0 0 22px -4px color-mix(in srgb,var(--a) 85%,transparent)}
-body.kd nav.side a.kd-it.on::before{content:"";position:absolute;inset-inline-start:-12px;top:9px;bottom:9px;width:4px;border-radius:4px;background:var(--a);box-shadow:0 0 14px var(--a);animation:kdbar .45s cubic-bezier(.2,.8,.2,1)}
-@keyframes kdbar{from{transform:scaleY(0)}to{transform:scaleY(1)}}
-.kd-fold{margin-inline-start:auto;width:32px;height:32px;flex:none;border-radius:10px;border:1px solid var(--gb2,var(--ln));background:var(--in);color:var(--t);display:grid;place-items:center;cursor:pointer;transition:transform .45s cubic-bezier(.2,.8,.2,1)}
-html[dir=ltr] .kd-fold svg{transform:scaleX(-1)}
-@media(min-width:900px){
- body.kd nav.side{transition:width .45s cubic-bezier(.2,.8,.2,1)}
- body.kd header.top,body.kd main{transition:margin .45s cubic-bezier(.2,.8,.2,1)}
- body.kd.kd-mini{--sbw:88px}
- body.kd.kd-mini .kd-fold{transform:rotate(180deg)}
- body.kd.kd-mini nav.side .sbrand>div:not(:first-child),body.kd.kd-mini .kd-gh span,body.kd.kd-mini .kd-gh .kd-chev,body.kd.kd-mini a.kd-it .kd-l,body.kd.kd-mini nav.side .sfoot small,body.kd.kd-mini nav.side .sfoot b,body.kd.kd-mini nav.side .lo2{opacity:0;width:0;overflow:hidden;white-space:nowrap}
- body.kd.kd-mini .kd-gh{justify-content:center;padding:8px 0 2px;min-height:10px}body.kd.kd-mini .kd-gh::before{content:"";width:18px;height:2px;border-radius:2px;background:var(--gb2,var(--ln))}
- body.kd.kd-mini nav.side .sbrand{flex-direction:column;gap:8px}body.kd.kd-mini .kd-fold{margin:0}
- body.kd.kd-mini .kd-g>.kd-gb{grid-template-rows:1fr}body.kd.kd-mini a.kd-it{opacity:1!important;transform:none!important;justify-content:center}
- /* the menu across the top */
- body.kd.kd-topm{--sbw:0px}
- body.kd.kd-topm nav.side{display:none}
-}
-.kd-top{display:none}
-body.kd.kd-topm .kd-top{display:flex;position:sticky;top:59px;z-index:6;gap:8px;align-items:center;overflow-x:auto;scrollbar-width:none;padding:8px 18px 10px;cursor:grab;
- background:color-mix(in srgb,var(--bg1) 86%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--gb,var(--ln));
- -webkit-mask-image:linear-gradient(90deg,transparent,#000 24px,#000 calc(100% - 24px),transparent);mask-image:linear-gradient(90deg,transparent,#000 24px,#000 calc(100% - 24px),transparent)}
-.kd-top::-webkit-scrollbar{display:none}
-.kd-top.kd-drag,.kd-rail .stl.kd-drag{cursor:grabbing;scroll-snap-type:none!important}
-.kd-sep{flex:none;font-size:11px;font-weight:800;color:var(--s);padding:0 8px 0 4px}
-.kd-tn{position:relative;flex:none;display:flex;align-items:center;gap:9px;padding:5px 14px 5px 6px;border-radius:15px;border:1px solid var(--gb2,var(--ln));background:var(--c1);color:var(--t);text-decoration:none;font-weight:800;font-size:13px;min-height:46px;transition:all .3s cubic-bezier(.2,.8,.2,1)}
-html[dir=rtl] .kd-tn{padding:5px 6px 5px 14px}
-.kd-tn .ni{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;background:var(--in);color:var(--a)}
-.kd-tn:hover{border-color:color-mix(in srgb,var(--a) 45%,transparent)}
-.kd-tn.on{background:linear-gradient(180deg,color-mix(in srgb,var(--a) 16%,transparent),color-mix(in srgb,var(--a) 4%,transparent));transform:translateY(-2px)}
-.kd-tn.on .ni{background:radial-gradient(circle at 30% 25%,#fff3c4,var(--a) 50%,var(--ad));color:#160f00;box-shadow:0 0 20px -4px var(--a)}
-body.kd.kd-topm .sectabs{top:124px}
-.kd-lay{display:inline-flex;border:1px solid var(--gb2,var(--ln));border-radius:12px;padding:3px;background:var(--in)}
-.kd-lay button{border:0;background:none;border-radius:9px;padding:5px 10px;font:inherit;font-size:11.5px;font-weight:800;color:var(--s);cursor:pointer}
-.kd-lay button.on{background:var(--a);color:#160f00}
-@media(max-width:899px){.kd-lay{display:none}body.kd.kd-topm .kd-top{display:none}}
-/* ---- pages come in card by card ---- */
-@keyframes kdrise{from{opacity:0;transform:translateY(20px) scale(.985)}to{opacity:1;transform:none}}
-#pg.kd-enter>*:not(#sectabs),#pg.kd-enter .k310c,#pg.kd-enter .kpi{animation:kdrise .65s cubic-bezier(.2,.8,.2,1) both}
-#pg.kd-enter>*:nth-child(2){animation-delay:.05s}#pg.kd-enter>*:nth-child(3){animation-delay:.1s}#pg.kd-enter>*:nth-child(4){animation-delay:.15s}#pg.kd-enter>*:nth-child(5){animation-delay:.2s}#pg.kd-enter>*:nth-child(n+6){animation-delay:.25s}
-#pg.kd-enter .kpi:nth-child(2){animation-delay:.08s}#pg.kd-enter .kpi:nth-child(3){animation-delay:.12s}#pg.kd-enter .kpi:nth-child(4){animation-delay:.16s}#pg.kd-enter .kpi:nth-child(5){animation-delay:.2s}#pg.kd-enter .kpi:nth-child(6){animation-delay:.24s}
-#pg.kd-enter .k310c:nth-child(2){animation-delay:.18s}#pg.kd-enter .k310c:nth-child(3){animation-delay:.26s}#pg.kd-enter .k310c:nth-child(4){animation-delay:.32s}#pg.kd-enter .k310c:nth-child(n+5){animation-delay:.38s}
-/* ---- phones: the More sheet slides up, its tiles follow ---- */
-@keyframes kdup{from{transform:translateY(100%)}to{transform:none}}
-body.kd .msheet.k38sheet.on{animation:kdup .42s cubic-bezier(.2,.8,.2,1)}
-body.kd .msheet.k38sheet.on .k38tile{animation:kdrise .5s cubic-bezier(.2,.8,.2,1) both}
-body.kd .msheet.k38sheet.on .k38tiles:nth-of-type(2) .k38tile{animation-delay:.05s}body.kd .msheet.k38sheet.on .k38tiles:nth-of-type(3) .k38tile{animation-delay:.1s}body.kd .msheet.k38sheet.on .k38tiles:nth-of-type(n+4) .k38tile{animation-delay:.15s}
-/* ---- Cores: the rail of cards ---- */
-body.kd .sectabs.kd-rail{position:relative;top:auto;display:block;padding:0;border:0;background:none;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none;margin-bottom:10px}
-body.kd .sectabs.kd-rail .sth2{display:none}
-body.kd .sectabs.kd-rail .stl{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:8px 6px 12px;border:0;background:none;border-radius:0;cursor:grab;
- -webkit-mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent)}
-body.kd .sectabs.kd-rail .stl a{position:relative;flex:0 0 136px;scroll-snap-align:center;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:7px;row-gap:3px;padding:9px 10px!important;border-radius:15px!important;
- border:1px solid var(--gb2,var(--ln));background:linear-gradient(180deg,color-mix(in srgb,var(--t) 4%,var(--c1)),var(--c2))!important;color:var(--t)!important;white-space:normal;
- transition:transform .45s cubic-bezier(.2,.8,.2,1),box-shadow .45s,border-color .3s!important}
-body.kd .sectabs.kd-rail .stl a:hover{border-color:color-mix(in srgb,var(--cc) 45%,transparent)}
-body.kd .sectabs.kd-rail .stl a b{font-size:12.5px;font-weight:900}
-body.kd .sectabs.kd-rail .stl a b{grid-column:2;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-body.kd .sectabs.kd-rail .stl a small{grid-column:1/-1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;font-weight:600;color:var(--s);line-height:1.4}
-.kd-ci{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--cc) 16%,transparent);color:var(--cc);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--cc) 35%,transparent);transition:all .35s}
-body.kd .sectabs.kd-rail .stl a.on{transform:translateY(-3px) scale(1.03);border-color:transparent;box-shadow:0 20px 44px -22px var(--cc)}
-body.kd .sectabs.kd-rail .stl a.on .kd-ci{background:var(--cc);color:#0b0b0a;box-shadow:0 0 24px -2px var(--cc)}
-/* ---- Cores: servers as a row of country chips (swipe sideways); the picked one's settings below ---- */
-.kd-crail{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:6px 4px 12px;margin:0 -4px;cursor:grab;scroll-snap-type:x proximity;
- -webkit-mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent);mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent)}
-.kd-crail::-webkit-scrollbar{display:none}
-.kd-chip{position:relative;flex:none;scroll-snap-align:start;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:3px 9px;border-radius:12px;border:1px solid var(--gb2,var(--ln));
- background:var(--c1);color:var(--t);font:inherit;cursor:pointer;transition:all .3s cubic-bezier(.2,.8,.2,1)}
-.kd-cf{display:inline-flex;align-items:flex-start;line-height:1}.kd-cf .flg{font-size:20px}.kd-cf sup{font-size:10px;font-weight:900;margin-inline-start:1px;color:var(--a)}
-.kd-cl{display:flex;flex-direction:column;align-items:flex-start;gap:0;line-height:1.05;font-family:ui-monospace,Menlo,Consolas,monospace;direction:ltr}
-.kd-cl i{font-style:normal;font-size:8.5px;font-weight:800;color:var(--s);opacity:.7;letter-spacing:.3px}
-.kd-cl i.g{color:var(--ok);opacity:1}
-.kd-chip.on .kd-cl i{color:rgba(22,15,0,.45)!important}.kd-chip.on .kd-cl i.g{color:#0b4d2c!important}.kd-chip.on .kd-cf sup{color:#160f00!important}
- background:var(--c1);color:var(--t);font:inherit;font-size:12.5px;font-weight:700;white-space:nowrap;cursor:pointer;transition:all .3s cubic-bezier(.2,.8,.2,1)}
-.kd-chip:hover{border-color:color-mix(in srgb,var(--a) 45%,transparent)}
-.kd-chip.on{background:linear-gradient(180deg,#FFE9A6,var(--a) 55%,var(--ad));color:#160f00;border-color:transparent;box-shadow:0 10px 24px -12px color-mix(in srgb,var(--a) 90%,transparent);--cc:#fff}
-body.kd.kd-vpn .kxl.kd-rows{display:block!important}
-body.kd.kd-vpn .kxl.kd-rows>.kxr:not(.open){display:none!important}
-body.kd.kd-vpn .kxl.kd-rows>.kxr>.kxr-h{display:none!important}
-body.kd.kd-vpn .kxl.kd-rows>.kxr.open{border:0!important;background:none!important;box-shadow:none!important;transform:none!important}
-body.kd.kd-vpn .kxl.kd-rows>.kxr.open>.kxr-b{position:static!important;width:auto!important;height:auto!important;max-height:none!important;overflow:visible!important;inset:auto!important;box-shadow:none!important;
- border:1px solid var(--gb,var(--ln))!important;border-radius:16px!important;background:linear-gradient(180deg,color-mix(in srgb,var(--t) 3%,var(--c1)),var(--c2))!important;padding:4px 14px 12px!important;animation:none!important}
-/* opening one plays the entrance once; the page's own refresh redraws it without moving (no blinking) */
-body.kd.kd-vpn .kxl.kd-rows>.kxr.open>.kxr-b.anim{animation:kdrise .45s cubic-bezier(.2,.8,.2,1)!important}
-body.kd .k310cards .kxr.open>.kxr-b:not(.anim){animation:none!important}
-body.kd.kd-vpn .k310dh,body.kd.kd-vpn #k310scrim{display:none!important}
-body.kd.kd-vpn.k310drw{overflow:visible!important}
-/* the top of a core page: a smaller title, two small buttons, the numbers as one slim row */
-body.kd.kd-vpn #pg>.ph{gap:8px!important;margin-bottom:8px!important;padding-bottom:10px!important}
-body.kd.kd-vpn #pg>.ph h2{font-size:18px!important}body.kd.kd-vpn #pg>.ph p{font-size:12px!important;line-height:1.6;margin-top:2px!important}
-body.kd.kd-vpn #pg>.ph .phi{width:38px!important;height:38px!important}
-body.kd.kd-vpn #pg>.ph .btn,body.kd.kd-vpn #pg>.ph .b2{min-height:32px!important;padding-inline:11px!important;font-size:12px!important;border-radius:10px!important}
-body.kd .kv>div{display:flex!important;align-items:baseline;justify-content:space-between;gap:8px}
-body.kd .kv>div small{white-space:nowrap}
-/* the numbers at the top of a core: slimmer */
-body.kd .kv{gap:6px!important;margin:6px 0 10px!important;grid-template-columns:repeat(auto-fit,minmax(150px,1fr))!important}
-body.kd .kv>div{padding:6px 11px!important;border-radius:11px!important}
-body.kd .kv small{font-size:11px!important}body.kd .kv b{font-size:14px!important;line-height:1.4}
-/* Xray's own tabs: one row you swipe sideways */
-#xr_tabs.kd-xtabs{flex-wrap:nowrap!important;overflow-x:auto;cursor:grab;gap:6px;padding:2px 2px 8px}
-#xr_tabs.kd-xtabs a{flex:none;padding:6px 11px!important;font-size:12px!important;min-height:36px;border-radius:11px!important}
-/* ---- Servers page: two columns of slim cards, a pencil, the settings in the side drawer ---- */
-body.kd #svp_g.kd-srv .kxl{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
-body.kd #svp_g.kd-srv .kxr{border-radius:14px!important}
-body.kd #svp_g.kd-srv .kxr>.kxr-h{position:relative;min-height:52px!important;padding:8px 10px!important;gap:4px 7px!important;row-gap:4px!important;align-content:center}
-body.kd #svp_g.kd-srv .kxr>.kxr-h b{font-size:13px!important;overflow-wrap:anywhere}
-body.kd #svp_g.kd-srv .kxr>.kxr-h .kxr-arr,body.kd #svp_g.kd-srv .kxr>.kxr-h .sp{display:none!important}
-body.kd #svp_g.kd-srv .kxr>.kxr-h .kxc-tag,body.kd #svp_g.kd-srv .kxr>.kxr-h .kxr-st{font-size:10px!important;padding:0 6px!important}
-.kd-pen{order:20;margin-inline-start:auto;width:30px;height:30px;flex:none;border-radius:10px;display:grid;place-items:center;border:1px solid var(--gb2,var(--ln));background:var(--in);color:var(--a)}
-body.kd #svp_g.kd-srv .kxr>.kxr-h:hover .kd-pen{background:var(--a);color:#160f00}
-@media(max-width:380px){body.kd #svp_g.kd-srv .kxl{grid-template-columns:1fr!important}}
-/* ---- Anti-DPI: one line per method; a tap opens what it is for ---- */
-body.kd .g2>.box.kd-tpl{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px 10px;padding:10px 12px!important;cursor:pointer;transition:border-color .2s}
-body.kd .g2>.box.kd-tpl:hover{border-color:color-mix(in srgb,var(--a) 40%,transparent)}
-body.kd .g2>.box.kd-tpl>b{font-size:13.5px}
-body.kd .g2>.box.kd-tpl>span{grid-column:1}
-body.kd .g2>.box.kd-tpl>small{grid-column:1/-1;display:none!important}
-body.kd .g2>.box.kd-tpl.open>small{display:block!important}
-body.kd .g2>.box.kd-tpl>button{grid-column:2;grid-row:1/3;width:auto!important;min-height:36px!important;padding:0 12px!important;font-size:12px!important}
-/* ---- REALITY targets: tested, marked ---- */
-.kd-rtl{margin:6px 0 4px}.kd-rtl>small{display:block;margin-bottom:6px}
-.kd-rtg{display:flex;flex-wrap:wrap;gap:6px}
-.kd-rt{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:10px;border:1px solid var(--gb2,var(--ln));background:var(--in);color:var(--t);font:inherit;font-size:12px;cursor:pointer}
-.kd-rt i{font-style:normal;font-weight:900}.kd-rt.ok i{color:var(--ok)}.kd-rt.mid i{color:var(--warn)}.kd-rt.bad{opacity:.55}.kd-rt.bad i{color:var(--bad)}
-.kd-rt small{color:var(--s);font-size:10.5px}.kd-rt em{font-style:normal;font-size:9.5px;font-weight:800;padding:0 5px;border-radius:5px;background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
-.kd-rt.pick{border-color:var(--a);box-shadow:0 0 0 1px var(--a)}
-/* ---- every button that holds a word or two: one height, one size ---- */
-body.kd #pg .btn,body.kd #pg .b2,body.kd .modal .btn,body.kd .modal .b2{min-height:36px;padding-top:0!important;padding-bottom:0!important;padding-inline:15px!important;font-size:13px!important;border-radius:12px!important;display:inline-flex;align-items:center;justify-content:center;gap:6px}
-body.kd #pg .btn.sm,body.kd #pg .b2.sm,body.kd .modal .btn.sm,body.kd .modal .b2.sm{min-height:34px;padding-inline:11px!important;font-size:12px!important;border-radius:10px!important}
-body.kd #pg .ph .row{flex-wrap:wrap;gap:8px!important}
-/* the dashboard numbers: a turning edge in their own colour */
-.kd-edge{position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;
- background:conic-gradient(from var(--kda),transparent 0 55%,var(--kc,var(--a)) 70%,#fff 74%,var(--kc,var(--a)) 78%,transparent 92%);
- -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);animation:kdang 3.2s linear infinite;animation-delay:var(--kdph,0s);opacity:.85}
-body.k38 .kpi.g{--kc:var(--ok)}body.k38 .kpi.y{--kc:var(--warn)}body.k38 .kpi.r{--kc:var(--bad)}
-/* ---- users: two columns of slim cards ---- */
-body.kd .uchips{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important}
-body.kd .uchip.kd-u{position:relative;display:flex;flex-direction:column;align-items:stretch;gap:7px;padding:10px 12px!important;border-radius:15px;text-align:start;transition:transform .3s,border-color .3s}
-body.kd .uchip.kd-u:hover{transform:translateY(-2px)}
-body.kd .uchip.kd-u.on{border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
-.kd-un{display:flex;align-items:center;gap:8px;min-width:0}
-body.kd .uchip.kd-u .nm{flex:1;min-width:0;white-space:normal!important;overflow:visible!important;text-overflow:clip!important;overflow-wrap:anywhere;font-weight:800;font-size:13.5px;line-height:1.35}
-.kd-meta{display:flex;justify-content:space-between;gap:4px 10px;flex-wrap:wrap;font-size:11.5px;font-weight:600;color:var(--s)}
-.kd-meta b{color:var(--t);font-weight:800}
-.uchip.st-finished .kd-meta span:last-child b,.uchip.st-disabled .kd-meta span:last-child b{color:var(--bad)}
-.k310bar.hot~.kd-meta span:first-child b{color:var(--bad)}.k310bar.warm~.kd-meta span:first-child b{color:var(--warn)}
-@media(prefers-reduced-motion:reduce){#pg.kd-enter *,body.kd .msheet.k38sheet.on,body.kd .msheet.k38sheet.on .k38tile{animation:none!important}
- body.kd nav.side a.kd-it,.kd-gb,.kd-chev{transition:none!important}body.kd .kd-it.on::after,body.kd .kd-tn.on::after,body.kd .kd-rail .stl a.on::after,body.kd.kd-vpn .kxl>.kxr.open>.kxr-h::after,body.kd .k310st::after{animation:none}}
-`;
-var st=document.createElement('style');st.id='kdcss';st.textContent=css;document.head.appendChild(st);
 look();
 })();
 
@@ -5018,31 +5328,7 @@ function poll(){timer=0;var ids=Object.keys(RM);if(!ids.length)return;
   if(!fin)timer=setTimeout(poll,2000)})}
 function follow(rid){if(!rid)return;if(!Object.keys(RM).length)started=Date.now();RM[rid]={r:null};clearTimeout(timer);timer=setTimeout(poll,600)}
 window.kdFollowRemoval=follow;
-var RX=/^\/api\/(tunnels\/servers\/[^/?]+|tunnels\/(?!servers|probe|cdntest)[^/?]+|servers\/[^/?]+|nodes\/[^/?]+|xray\/servers\/[^/?]+|dns\/servers\/[^/?]+)(\?.*)?$/;
-var _api=window.api;
-window.api=function(m,u){var p=_api.apply(this,arguments);
- if(m=='DELETE'&&RX.test(u||'')&&p&&p.then)p.then(function(r){if(r&&r.removal)follow(r.removal)},function(){});
- return p};
-var css=`
-#kdrm{position:fixed;z-index:9998;inset-inline-start:50%;bottom:16px;transform:translate(50%,140%);width:min(380px,calc(100vw - 32px));max-height:min(60vh,420px);overflow:auto;
- background:#0b0b0b;color:var(--t,#fff);border:1px solid color-mix(in srgb,var(--a,#f5b301) 45%,transparent);border-radius:16px;padding:10px 12px 12px;
- box-shadow:0 0 0 1px #000,0 10px 40px #000c,0 0 24px color-mix(in srgb,var(--a,#f5b301) 18%,transparent);font-size:12.5px;transition:transform .35s cubic-bezier(.2,.8,.2,1),opacity .35s;opacity:0}
-[dir=ltr] #kdrm{transform:translate(-50%,140%)}
-#kdrm.on{transform:translate(50%,0);opacity:1}[dir=ltr] #kdrm.on{transform:translate(-50%,0)}
-#kdrm.all{border-color:color-mix(in srgb,var(--ok,#22c55e) 55%,transparent)}
-.kdrm-h{display:flex;align-items:center;gap:8px;margin-bottom:6px}.kdrm-h b{flex:1;font-weight:800;font-size:13px}
-.kdrm-sp,.kdrm-r i{width:14px;height:14px;flex:none;border-radius:50%;border:2px solid color-mix(in srgb,var(--a,#f5b301) 30%,transparent);border-top-color:var(--a,#f5b301);animation:kdrmspin .8s linear infinite}
-#kdrm.all .kdrm-sp{animation:none;border-color:var(--ok,#22c55e);background:var(--ok,#22c55e)}
-.kdrm-x{background:none;border:0;color:var(--s,#aaa);font-size:13px;cursor:pointer;min-width:28px;min-height:28px;border-radius:8px}.kdrm-x:hover{color:var(--t,#fff);background:#ffffff12}
-.kdrm-g{padding:6px 0;border-top:1px solid #ffffff12}.kdrm-n{color:var(--s,#aaa);font-size:11.5px;margin-bottom:4px}.kdrm-n b{color:var(--a,#f5b301)}
-.kdrm-r{display:flex;align-items:flex-start;gap:8px;padding:3px 0;line-height:1.5}.kdrm-r i{margin-top:2px;position:relative}
-.kdrm-r span{flex:1;min-width:0}.kdrm-r em{display:block;font-style:normal;font-size:11px;color:var(--s,#aaa)}
-.kdrm-r.done i{animation:none;border-color:var(--ok,#22c55e);background:var(--ok,#22c55e)}
-.kdrm-r.done i::after{content:'';position:absolute;inset-inline-start:3px;top:0;width:4px;height:7px;border:solid #000;border-width:0 2px 2px 0;transform:rotate(45deg)}
-.kdrm-r.done em{color:var(--ok,#22c55e)}
-.kdrm-r.off i{animation:none;border-color:var(--warn,#f59e0b);border-style:dashed}.kdrm-r.off em{color:var(--warn,#f59e0b)}
-@keyframes kdrmspin{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){#kdrm{transition:none}.kdrm-sp,.kdrm-r i{animation:none}}
-`;
-var st=document.createElement('style');st.id='kdrmcss';st.textContent=css;document.head.appendChild(st);
 })();
+
+// ==================================================================== start
+applyLook();if(S.token)boot();else loginView();
