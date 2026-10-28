@@ -11,8 +11,7 @@
 //! The session key comes fresh from the server inside the encrypted stream, so a datagram can only
 //! be made or read by the one session. The nonce is the direction and the counter; a copy of a
 //! datagram (small packets are sent two or three times) has the same counter, and the receiver's
-//! window keeps only the first one. On `game` the datagram rides inside the mask next to the KCP
-//! datagrams; on `hq` it is a QUIC datagram.
+//! window keeps only the first one. The datagram rides inside the mask next to the KCP datagrams.
 
 use super::super::salamander::Mask;
 use chacha20poly1305::aead::Aead;
@@ -49,8 +48,6 @@ pub enum Wire {
     /// `game`: a masked UDP datagram; `to` = None on a connected socket (the app), else the app's
     /// latest address (the server; it follows the app when its address changes)
     Udp { sock: Arc<UdpSocket>, mask: Arc<Mask>, to: Mutex<Option<SocketAddr>> },
-    /// `hq`: a QUIC datagram
-    Quic(quinn::Connection),
 }
 
 impl Wire {
@@ -68,11 +65,6 @@ impl Wire {
                         None => sock.try_send(&out),
                     };
                 }
-            }
-            // QUIC puts datagrams in its own packets and would pack two copies into one; it is
-            // sent once and QUIC's pacing keeps it on time
-            Wire::Quic(c) => {
-                let _ = c.send_datagram(bytes::Bytes::copy_from_slice(d));
             }
         }
     }

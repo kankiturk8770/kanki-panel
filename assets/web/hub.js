@@ -28,7 +28,7 @@ var SECS=[
  ['nodes','Servers','nodes',[['nodes','','Servers']],'Servers & network'],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
  ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','Game-FEC'],['khq','','HQ-QUIC'],['kftcp','','FakeTCP'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
+ ['vpnsec','VPN services','shield2',[['vpn','','Overview'],['kmix','','KANKI MIX'],['kgame','','MIX+'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
  ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
 // the sections other layers already know keep their objects (some code holds on to them)

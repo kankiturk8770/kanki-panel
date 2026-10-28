@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.15 — MIX+, a tidier panel on phones
+- **Game-FEC is now MIX+**, our gaming protocol next to KANKI MIX. **HQ-QUIC and FakeTCP are gone** from the panel, the agent and the app (the tunnels keep their own HQ-QUIC and FakeTCP transports).
+- **Phones:** every section sits in the bottom bar (Home on the right), swiped sideways; no «More» sheet.
+- **VPN services › Overview:** the Kanki VPN card is smaller, without its extra buttons; the users per protocol are a grid and the servers two columns.
+
 ## New in 3.14.2 — Game-FEC, HQ-QUIC and FakeTCP through the tunnel
 - A server with a tunnel (Servers › tunnel domain) now gives these three a second config through it too, like Hysteria2 and KANKI MIX: the Iran address and the port the tunnel carries to the server. Add the protocol's port to the tunnel (UDP 4100 / 4101, TCP 4102 by default). The app shows them in the «tunnel» column as it is.
 

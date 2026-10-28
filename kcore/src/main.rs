@@ -1,4 +1,4 @@
-//! kanki-core: the Kanki Cores (Game-FEC, HQ-QUIC, FakeTCP) in one small binary.
+//! kanki-core: MIX+ (the Game-FEC transport as a VPN protocol), server and app client in one binary.
 //!
 //! ```text
 //! kanki-core client --url 'kcore://…' [--socks 127.0.0.1:10808] [--status]
@@ -44,7 +44,7 @@ fn args() -> (String, HashMap<String, String>) {
 
 fn usage() -> ! {
     eprintln!(
-        "kanki-core {}\n  client --url kcore://… [--socks 127.0.0.1:10808] [--status]\n  ping --url kcore://…\n  server -c config.json [--stats file]\n  url --kind game|hq|faketcp --server host:port --door … --user … --key … [--name …]",
+        "kanki-core {}\n  client --url kcore://… [--socks 127.0.0.1:10808] [--status]\n  ping --url kcore://…\n  server -c config.json [--stats file]\n  url --kind game --server host:port --door … --user … --key … [--name …]",
         env!("CARGO_PKG_VERSION")
     );
     std::process::exit(2)
@@ -65,7 +65,6 @@ fn main() {
                     door: a.get("door").cloned().unwrap_or_default(),
                     user: a.get("user").cloned().unwrap_or_default(),
                     key: a.get("key").cloned().unwrap_or_default(),
-                    sni: a.get("sni").cloned().unwrap_or_default(),
                     fec: a.get("fec").cloned().unwrap_or_default(),
                     copies: a.get("copies").and_then(|c| c.parse().ok()).unwrap_or(2),
                     datagrams: true,
