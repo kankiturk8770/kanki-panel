@@ -169,6 +169,18 @@ fn host_of(app: &App, s: &Settings, n: &Node) -> String {
 
 /// The user's link of protocol `proto` on one server (None = not for this user / not running there)
 pub fn link(app: &App, u: &User, n: &Node, proto: &str) -> Option<String> {
+    link_via(app, u, n, proto, None)
+}
+
+/// The same link through the server's tunnel: the Iran address and the port the tunnel carries to
+/// this server (Servers › tunnel domain; the tunnel must forward the protocol's port: UDP for
+/// Game-FEC and HQ-QUIC, TCP for FakeTCP)
+pub fn link_tunnel(app: &App, u: &User, n: &Node, proto: &str) -> Option<String> {
+    let t = crate::twin::of_node(app, n)?;
+    link_via(app, u, n, proto, Some(&t))
+}
+
+fn link_via(app: &App, u: &User, n: &Node, proto: &str, tw: Option<&crate::twin::Twin>) -> Option<String> {
     let (core, name) = PROTOS.iter().find(|p| p.0 == proto).map(|p| (p.1, p.3))?;
     if !u.has_proto(proto) || !u.active() {
         return None;
@@ -179,15 +191,21 @@ pub fn link(app: &App, u: &User, n: &Node, proto: &str) -> Option<String> {
     }
     // only what the server says it runs (an older agent reports nothing)
     let info = crate::api::node_info(n);
-    let port = info["kc_ports"][core].as_u64().filter(|p| *p > 0)?;
-    let host = host_of(app, &s, n);
-    if host.is_empty() {
-        return None;
-    }
-    let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
+    let port = info["kc_ports"][core].as_u64().filter(|p| *p > 0)? as u16;
+    let (server, label) = match tw {
+        Some(t) => (t.addr(t.port(app, port, core == "faketcp")), format!("{} · {}", t.name, name)),
+        None => {
+            let host = host_of(app, &s, n);
+            if host.is_empty() {
+                return None;
+            }
+            let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
+            (format!("{}:{}", host, port), format!("{} · {}", n.name, name))
+        }
+    };
     let c = ClientCfg {
         kind: core.to_string(),
-        server: format!("{}:{}", host, port),
+        server,
         door: door(app),
         user: u.username.clone(),
         key: user_key(app, u),
@@ -196,7 +214,7 @@ pub fn link(app: &App, u: &User, n: &Node, proto: &str) -> Option<String> {
         copies: s.copies,
         datagrams: true,
     };
-    Some(c.to_url(&format!("{} · {}", n.name, name)))
+    Some(c.to_url(&label))
 }
 
 /// All the user's links on one server: [{proto, kind, title, url}]
@@ -204,6 +222,14 @@ pub fn links(app: &App, u: &User, n: &Node) -> Vec<Value> {
     PROTOS
         .iter()
         .filter_map(|p| link(app, u, n, p.0).map(|url| json!({ "proto": p.0, "kind": p.1, "title": p.3, "url": url })))
+        .collect()
+}
+
+/// The user's links through the server's tunnel (its second entry in the subscription)
+pub fn links_tunnel(app: &App, u: &User, n: &Node) -> Vec<Value> {
+    PROTOS
+        .iter()
+        .filter_map(|p| link_tunnel(app, u, n, p.0).map(|url| json!({ "proto": p.0, "kind": p.1, "title": p.3, "url": url })))
         .collect()
 }
 

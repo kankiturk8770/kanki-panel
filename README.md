@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.14.2 — Game-FEC, HQ-QUIC and FakeTCP through the tunnel
+- A server with a tunnel (Servers › tunnel domain) now gives these three a second config through it too, like Hysteria2 and KANKI MIX: the Iran address and the port the tunnel carries to the server. Add the protocol's port to the tunnel (UDP 4100 / 4101, TCP 4102 by default). The app shows them in the «tunnel» column as it is.
+
 ## New in 3.14.1 — the new protocols like the tunnels, a 500 MB warning
 - **Game-FEC / HQ-QUIC:** «Game optimization» is a switch on each page and is **off** by default: game UDP rides inside the stream exactly like the tunnels. On = the datagram path with copies of small packets (as in 3.14). Only the server changes; the app stays as it is.
 - **Sales bot:** when 500 MB are left, the customer gets their account card (name, MB left, a usage bar, the code and the subscription link) with the config buttons and «Renew». Checked every 5 minutes; `warn_mb` in the database changes the amount.
