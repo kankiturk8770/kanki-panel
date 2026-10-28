@@ -1851,7 +1851,6 @@ var FA={
  "All ports of the exit server":"همهٔ پورت‌های سرور خروجی",
  "All ports of":"همهٔ پورت‌های",
  "Not on this server":"روی این سرور نیست",
- "not on this server":"روی این سرور نیست",
  "its ports were added":"پورت‌هایش اضافه شد",
  "its ports were taken out":"پورت‌هایش برداشته شد",
  "Empty = Iran server-abroad server":"خالی = اسم سرور ایران-اسم سرور خارج",
@@ -4623,12 +4622,11 @@ function pEntry(x){var m=String(x).match(/^(\d+)(?::\d+)?$/);return m?+m[1]:0}
 // Promise of tunCoreGroups, used() -> {tcp:{port:1}, udp:{…}} (optional), note (optional), change}
 window.coreChips=function(o){var G=[],seq=0,fld=function(l){return $(l=='tcp'?o.tcp:o.udp)};
  var lit=function(g){var n=0,all=true;['tcp','udp'].forEach(function(l){var f=fld(l),tg=f?pItems(f.value).map(pTarget):[];g[l].forEach(function(p){n++;if(tg.indexOf(p)<0)all=false})});return n>0&&all};
- var short=function(a){return a.length>3?a.slice(0,3).join(', ')+' …':a.join(', ')};
+ // a button shows only the core's name; its ports go into the TCP / UDP box they belong to
  var paint=function(){var box=$(o.box);if(!box)return;
-  box.innerHTML=G.length?G.map(function(g,ix){var none=!g.tcp.length&&!g.udp.length,on=!none&&lit(g),
-   ps=[g.udp.length?'UDP '+short(g.udp):'',g.tcp.length?'TCP '+short(g.tcp):''].filter(Boolean).join(' · ');
+  box.innerHTML=G.length?G.map(function(g,ix){var none=!g.tcp.length&&!g.udp.length,on=!none&&lit(g);
    return '<button type="button" class="cchip'+(on?' on':'')+'" data-ck="'+ix+'" style="--pc:'+(PCOL[g.k]||'var(--a)')+'"'+(none?' disabled title="'+esc(t('Not on this server'))+'"':'')+'>'+
-    '<i></i><b>'+esc(g.name)+'</b><small class="ltr">'+esc(none?t('not on this server'):ps)+'</small></button>'}).join(''):''};
+    '<i></i><b>'+esc(g.name)+'</b></button>'}).join(''):''};
  var toggle=function(g){var moved=[];
   if(lit(g)){var keep={tcp:{},udp:{}};G.forEach(function(h){if(h!==g&&lit(h))['tcp','udp'].forEach(function(l){h[l].forEach(function(p){keep[l][p]=1})})});
    ['tcp','udp'].forEach(function(l){var f=fld(l);if(f)f.value=pItems(f.value).filter(function(x){var p=pTarget(x);return g[l].indexOf(p)<0||keep[l][p]}).join(', ')})}
