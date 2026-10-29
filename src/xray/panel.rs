@@ -936,9 +936,10 @@ fn unique_remarks(list: &[&Inbound]) -> HashMap<String, String> {
     };
     let key = |r: &str| r.trim().to_lowercase();
     let mut out = HashMap::new();
-    for ib in list {
-        let base = if ib.remark.trim().is_empty() { ib.protocol.clone() } else { ib.remark.trim().to_string() };
-        let same: Vec<&&Inbound> = list.iter().filter(|x| key(if x.remark.trim().is_empty() { &x.protocol } else { &x.remark }) == key(&base)).collect();
+    // an inbound with no name keeps its links as they were (the protocol and the user)
+    for ib in list.iter().filter(|ib| !ib.remark.trim().is_empty()) {
+        let base = ib.remark.trim().to_string();
+        let same: Vec<&&Inbound> = list.iter().filter(|x| key(&x.remark) == key(&base)).collect();
         let name = if same.len() < 2 {
             base
         } else if same.iter().filter(|x| kind(x) == kind(ib)).count() < 2 {

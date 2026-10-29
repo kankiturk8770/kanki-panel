@@ -9,6 +9,10 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** pan
 - Servers: each server lists its cores; tap one to open it.
 - Tunnel map: «All» or one Iran server at a time, each Iran server in its own colour; one server shows each of its tunnels on its own line with its ping. The dashboard no longer carries the tunnel map.
 - Tunnels list: a filter by server (tap Turkey: only Turkey's tunnels), grouped by Iran server, one short row per tunnel that opens for the details. Red on the map now always means «down».
+- Iran servers that still run unused VPN services: one button removes them (tunnels stay).
+- WireGuard, AmneziaWG and Hysteria2 can each be switched on or off per server; a new server starts with them off.
+- A deleted server leaves nothing behind, a daily sweep cleans what older versions left, and a server offline for 24 hours is removed by itself (with a warning and a backup; Iran servers only if you allow it).
+- Clearer names in the app («ENGLAND · تانل», «KANKI-XRAY gRPC»), an SSL tick when adding a server, and a security status card.
 - Safer updates: a new version replaces the old one only after it has started once on that server; the other Kanki service of the machine moves to it at once.
 
 ## New in 3.20.1 — fixes from the 3.20.0 check
