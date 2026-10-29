@@ -192,7 +192,7 @@ pub fn link(app: &App, u: &User, n: &Node, tunnel: bool) -> Option<String> {
     // only what the server says it runs (an older agent reports nothing)
     let port = crate::api::node_info(n)["mt_port"].as_u64().filter(|p| *p > 0)? as u16;
     let (server, label) = if tunnel {
-        let t = crate::twin::of_node(app, n)?;
+        let t = crate::twin::of_node_core(app, n, "mtun")?;
         (t.addr(t.port(app, port, false)), format!("{} · {}", t.name, NAME))
     } else {
         let host = host_of(app, &s, n);

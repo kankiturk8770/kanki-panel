@@ -765,8 +765,9 @@ function kcPage(p){var m=KC.meta[p];
   '<div class="row" style="gap:6px"><button class="b2" onclick="kcAll(\''+p+'\',false)">'+t('Disable for all users')+'</button><button class="btn" onclick="kcAll(\''+p+'\',true)">'+ic('users',15)+' '+t('Enable for all users')+'</button></div></div><div id="kc">'+t('Loading…')+'</div>';
  kcLoad(p);clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))kcLoad(p,true)},8000)}
 function p_mtun(){kcPage('mtun')}
-function kcLoad(p,quiet){return api('GET',kcApi(p)).then(function(d){KC.d[p]=d;if(S.page!=p)return d;
-  if(quiet&&$('#kc_srv')){$('#kc_kv').innerHTML=kcKpis(d);$('#kc_srv').innerHTML=kcServers(d);return d}kcDraw(d);return d}).catch(fail)}
+function kcLoad(p,quiet){return srvLoad(true).then(function(){return api('GET',kcApi(p))}).then(function(d){KC.d[p]=d;if(S.page!=p)return d;
+  // an open tunnel box stays as it is until it is closed (a redraw would fold it)
+  if(quiet&&$('#kc_srv')){$('#kc_kv').innerHTML=kcKpis(d);if(!$('#kc_srv details[open]'))$('#kc_srv').innerHTML=kcServers(d);return d}kcDraw(d);return d}).catch(fail)}
 function kcKpis(d){var s=d.settings,run=d.servers.filter(function(x){return x.port}).length,on=d.servers.filter(function(x){return x.on}).length;
  return '<div><small>'+t('Status')+'</small><b style="color:'+(s.on?'var(--ok)':'var(--bad)')+'">'+(s.on?t('On'):t('Off'))+'</b></div>'+
   '<div><small>'+t('Users with it')+'</small><b>'+N(d.users)+' / '+N(d.users_total)+'</b></div>'+
@@ -784,7 +785,8 @@ function kcServers(d){if(!d.servers.length)return '<p class="muted">—</p>';var
    '<small class="muted">'+t('Address the app dials')+'</small><input class="ltr kc_host" data-id="'+id+'" style="width:160px" placeholder="'+esc(t('automatic'))+'" value="'+esc(o.host||'')+'" onchange="kcSaveNodes(\''+p+'\')">'+
    sw('',x.on,"kcNodeOn('"+p+"','"+id+"',this.checked)")+'</div>'+
    (x.on&&x.online&&!x.reports&&d.settings.on?'<div class="warnbox" style="margin:6px 0 0;width:100%">'+t('Update the agent of this server to run it')+'</div>':'')+
-   (x.on&&x.error?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+esc(x.error)+'</div>':'')+'</div>'}).join('')}
+   (x.on&&x.error?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+esc(x.error)+'</div>':'')+
+   (window.coreTun&&window.srvByNode?coreTun('mtun',srvByNode(x.id),true):'')+'</div>'}).join('')}
 function kcDraw(d){var el=$('#kc');if(!el)return;var s=d.settings,p=d.proto,m=KC.meta[p];
  el.innerHTML=(s.on?'':'<div class="warnbox">'+esc(m.name)+' '+t('is off: it runs on no server and is in no subscription.')+'</div>')+
   '<div class="kv k5" id="kc_kv">'+kcKpis(d)+'</div>'+
@@ -2078,6 +2080,11 @@ var FA={
  "Search by name or note…":"جستجو بر اساس نام یا یادداشت…",
  "Search services or domains":"جستجوی سرویس یا دامنه",
  "Second config through the tunnel":"کانفیگ دوم از راه تانل",
+ "Same as the server":"مثل خود سرور",
+ "No second config: choose an Iran server below.":"کانفیگ دوم ندارد: پایین یک سرور ایران انتخاب کن.",
+ "WireGuard reaches users only through a tunnel: choose its Iran server below.":"وایرگارد فقط از راه تانل به کاربر می‌رسد: پایین سرور ایرانش را انتخاب کن.",
+ "Add your Iran servers in Servers to pick them here with one tap.":"سرورهای ایرانت را در «سرورها» اضافه کن تا اینجا با یک ضربه انتخابشان کنی.",
+ "Only for this core. Empty = the tunnel domain of the server (Servers page).":"فقط برای همین هسته. خالی = دامنه‌ی تانل خود سرور (صفحه‌ی سرورها).",
  "Security":"امنیت",
  "Select":"انتخاب",
  "Select all":"انتخاب همه",
@@ -4491,6 +4498,13 @@ function entriesOf(s){var sid=s.agent?s.agent.id:(s.local?'local':''),tl=((TN.d&
   var r=[];prev.forEach(function(x){back(x.entry,seen.concat([x.entry])).forEach(function(e){if(r.indexOf(e)<0)r.push(e)})});return r};
  back(sid,[sid]).forEach(function(e){if(e==sid)return;var sv=((TN.d&&TN.d.servers)||[]).filter(function(z){return z.id==e})[0];if(sv&&(sv.host||sv.addr))out.push({id:e,name:sv.name,host:sv.addr||sv.host})});
  return out}
+// every Iran server a second config can go through, for one-tap chips: the first servers of the
+// tunnels that end at server s first (marked), then the other Iran servers by their domain or address
+function irHosts(s){var out=[],seen={},add=function(name,host,mine){host=String(host||'').trim();if(!host||seen[host])return;seen[host]=1;out.push({name:name,host:host,mine:!!mine})};
+ if(s)entriesOf(s).forEach(function(e){add(e.name,e.host,1)});
+ ((SV.d&&SV.d.servers)||[]).forEach(function(x){if(!isIr(x)||(s&&x.key==s.key))return;var a=x.agent||{};add(x.name,x.domain||a.addr||a.ip||(x.node&&x.node.endpoint))});
+ return out}
+window.srvIrHosts=irHosts;
 
 function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  var st=[];
@@ -4548,13 +4562,13 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
 
 // The tunnel of a server: on/off, the Iran address (chips: the first server of each tunnel that ends here)
 // and the name; below, each port with the one it gets on that address
-function tunBox(s){var tn=s.tunnel||{},n=s.node,ents=entriesOf(s),host=tn.on?(tn.host||tn.uses||''):'';
+function tunBox(s){var tn=s.tunnel||{},n=s.node,ents=entriesOf(s),irs=irHosts(s),host=tn.on?(tn.host||tn.uses||''):'';
  var ep=n&&n.endpoint_mode!='panel'?(n.endpoint||''):'',viaIr=ep&&ents.some(function(e){return e.host==ep});
- var rows=tn.on&&tn.uses?(tn.ports||[]).map(function(p){return '<div class="kxtun-p"><b>'+esc(p.proto)+'</b><span class="kxtun-m ltr">'+esc(tn.uses)+':'+p.via+' → '+(p.tcp?'TCP':'UDP')+' '+p.port+'</span></div>'}).join(''):'';
+ var rows=(tn.ports||[]).map(function(p){return '<div class="kxtun-p"><b>'+esc(p.proto)+'</b><span class="kxtun-m ltr">'+esc(p.host||tn.uses)+':'+p.via+' → '+(p.tcp?'TCP':'UDP')+' '+p.port+'</span></div>'}).join('');
  return '<div class="kxr-sec">'+t('Tunnel domain')+'</div>'+
   '<p class="muted" style="font-size:11.5px;margin:0 2px 6px">'+t('If this server has a tunnel, or will have one, write your Iran server\'s domain here. Every protocol then also gets a second config through it, made by itself.')+' '+t('WireGuard comes only this way.')+'</p>'+
   '<div class="kxf"><div class="wide"><input id="sx_th" class="ltr" value="'+esc(host)+'" placeholder="ir.example.com">'+
-   (ents.length?'<div class="kxchips">'+ents.map(function(e){return '<button type="button" class="'+(host==e.host?'on':'')+'" onclick="$(\'#sx_th\').value=\''+esc(e.host)+'\';$(\'#sx_th\').dispatchEvent(new Event(\'input\',{bubbles:true}))">'+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+'</div>':'')+'</div>'+
+   (irs.length?'<div class="kxchips">'+irs.map(function(e){return '<button type="button" class="'+(host==e.host?'on':'')+'" onclick="$(\'#sx_th\').value=\''+esc(e.host)+'\';$(\'#sx_th\').dispatchEvent(new Event(\'input\',{bubbles:true}))">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+'</div>':'')+'</div>'+
   '<div class="wide"><label class="f">'+t('Name of these configs in the app (optional)')+'</label><input id="sx_tn" value="'+esc(tn.name||'')+'" maxlength="40" placeholder="'+esc(s.name+' (تانل)')+'"></div></div>'+
   (viaIr?'<p class="kxtun-w">'+t('Users connect to the Iran address already, so the main configs go through the tunnel too. For direct configs set it to this server\'s own address.')+'</p>':'')+
   (rows?'<div class="kxtun"><div class="muted" style="font-size:11px;margin-bottom:4px">'+t('Ports through the tunnel')+'</div>'+rows+'</div>':'')}
@@ -4927,23 +4941,40 @@ function protoPage(p){var g='pv_'+p;ACC.open[g]='';
  go(false);autoRefresh(function(){go(true)})}
 function drawPv(p,force){var g='pv_'+p,el=$('#pv_list');if(!el||!SV.d)return;
  var list=(SV.d.servers||[]).filter(function(s){return !!s.node}),run=list.filter(function(s){return pvState(p,s)[0]=='g'}).length,
-  viaT=list.filter(function(s){return routeVia(agentOf(s),pvState(p,s)[2])||(s.tunnel&&s.tunnel.on&&s.tunnel.uses)}).length,ov=PD.ov||{},users=((ov.protocols||{})[p]);
+  viaT=list.filter(function(s){return routeVia(agentOf(s),pvState(p,s)[2])||((s.tunnel||{}).ports||[]).some(function(z){return z.core==p})}).length,ov=PD.ov||{},users=((ov.protocols||{})[p]);
  $('#pv_kv').innerHTML='<div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(list.length)+'</b></div><div><small>'+t('Users with it')+'</small><b>'+(users==null?'—':N(users))+'</b></div><div><small>'+t('Through a tunnel')+'</small><b>'+N(viaT)+'</b></div>';
  if(!force&&accBusy(g))return;
  el.innerHTML=list.length?boxes(g,list,function(s){return pvRow(p,s)}):'<div class="card muted" style="text-align:center">'+t('No VPN server yet')+' · <a href="#nodes">'+t('Add server')+'</a></div>';
  if(p=='awg')dirDraw()}
-// the copy of this protocol through the server's tunnel (Servers page › Tunnel), or why there is none
-function tunCopy(p,s,r){var tn=s.tunnel||{},name={wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',kmix:'KANKI MIX'}[p],x=(tn.ports||[]).filter(function(z){return z.proto==name})[0];
- if(tn.on&&tn.uses&&x)return '<div class="kxr-line"><span class="kxr-st g">+ '+t('tunnel')+'</span><span>'+t('Users also get')+' <b class="ltr">'+esc(tn.uses)+':'+x.via+'</b></span> <a href="#nodes" style="font-size:11px">'+t('change in Servers')+'</a></div>';
- if(p=='wg'&&!r)return '<div class="kxr-line"><span class="warnbox" style="margin:0;width:100%">'+t('WireGuard reaches users only through a tunnel: write the tunnel domain of this server in Servers.')+'</span></div>';
- return ''}
+// the copy of this protocol through the tunnel (its own Iran server, else the server's tunnel domain),
+// or why there is none
+function tunCopy(p,s,r){var tn=s.tunnel||{},has=(tn.cores||{})[p]||(tn.on&&tn.uses);
+ return (p=='wg'&&!r&&!has?'<div class="kxr-line"><span class="warnbox" style="margin:0;width:100%">'+t('WireGuard reaches users only through a tunnel: choose its Iran server below.')+'</span></div>':'')+coreTun(p,s)}
+
+// A core's second config through the tunnel, set on the core's own page: its own Iran address (one tap on
+// an Iran server), else the server's tunnel domain (Servers page). `fold`: closed until opened.
+var CNAME={wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',mtun:'microtun',xray:'Xray'};
+window.coreTun=function(core,s,fold){if(!s)return '';var tn=s.tunnel||{},own=(tn.cores||{})[core]||'',srv=tn.on?(tn.host||tn.uses||''):'',use=own||srv,k=esc(s.key),id='ct_'+core+'_'+String(s.key).replace(/[^a-z0-9]/gi,'');
+ var x=(tn.ports||[]).filter(function(z){return z.core==core})[0];
+ var line=use?t('Users also get')+' <b class="ltr">'+esc(use)+(x?':'+x.via:'')+'</b>'+(own?'':' <small class="muted">('+t('the tunnel domain of the server')+')</small>'):t('No second config: choose an Iran server below.');
+ var chips=srvIrHosts(s).map(function(e){return '<button type="button" class="'+(own==e.host?'on':'')+'" onclick="coreTunSet(\''+core+'\',\''+k+'\',\''+esc(e.host)+'\')">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('');
+ var st='<div class="kxr-line"><span class="kxr-st '+(use?'g':'')+'">'+(use?'+ '+t('tunnel'):t('Off'))+'</span><span>'+line+'</span></div>';
+ var body='<div class="kxm-row"><div><input id="'+id+'" class="ltr" placeholder="'+esc(srv||'ir.example.com')+'" value="'+esc(own)+'"></div><button class="btn sm" onclick="coreTunSet(\''+core+'\',\''+k+'\',$(\'#'+id+'\').value)">'+t('Save')+'</button>'+
+   (own?'<button class="b2 sm" onclick="coreTunSet(\''+core+'\',\''+k+'\',\'\')">'+t('Same as the server')+'</button>':'')+'</div>'+
+  (chips?'<div class="kxchips">'+chips+'</div>':'<p class="muted" style="font-size:11px;margin:4px 2px">'+t('Add your Iran servers in Servers to pick them here with one tap.')+'</p>')+
+  '<p class="muted" style="font-size:11px;margin:4px 2px 0">'+t('Only for this core. Empty = the tunnel domain of the server (Servers page).')+'</p>';
+ var head=t('Second config through the tunnel')+' · '+CNAME[core];
+ return fold?'<details class="box" style="margin-top:6px;width:100%"><summary>'+head+(use?' · <span class="ltr">'+esc(use)+'</span>':'')+'</summary>'+st+body+'</details>':'<div class="kxr-sec">'+head+'</div>'+st+body};
+window.coreTunSet=function(core,key,host){api('PUT','/api/servers/'+encodeURIComponent(key),{tunnel_core:{core:core,host:String(host||'').trim()}}).then(function(){toast(t('Saved'));
+  return srvLoad(true).then(function(){if(S.page=='mtun')kcLoad('mtun',true);else if(S.page=='xray'){if(ACC.draw.xr)ACC.draw.xr(true)}else svcReload()})}).catch(fail)};
+window.srvByNode=function(nid){return srvByNode(nid)};
 function pvRow(p,s){var st=pvState(p,s),port=st[2];
  var head='<span class="dot '+(st[0]=='n'?'':st[0])+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+'<span class="sp"></span>'+
   '<span class="kxr-st '+st[0]+'">'+esc(st[1])+'</span>'+tunTag(p,s)+(port?'<small class="ltr">UDP '+N(port)+'</small>':'');
  return accRow('pv_'+p,s.key,head,function(){return pvBody(p,s)})}
 // the row's tunnel badge: its configs point at an Iran entry, or it also has a copy through its tunnel domain
-function tunTag(p,s){var tn=s.tunnel||{},has=(tn.ports||[]).some(function(z){return z.proto=={wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2'}[p]});
- return tn.main_via=='tunnel'?'<span class="kxr-st g">'+t('tunnel')+'</span>':tn.on&&tn.uses&&has?'<span class="kxr-st g">+ '+t('tunnel')+'</span>':''}
+function tunTag(p,s){var tn=s.tunnel||{},has=(tn.ports||[]).some(function(z){return z.core==p});
+ return tn.main_via=='tunnel'?'<span class="kxr-st g">'+t('tunnel')+'</span>':has?'<span class="kxr-st g">+ '+t('tunnel')+'</span>':''}
 function pvBody(p,s){var n=s.node,i=n.info||{},st=pvState(p,s),port=st[2],k=esc(s.key),ni=esc(n.id),r=routeVia(agentOf(s),port);
  var h='<div class="kxr-line"><span><b>'+esc(st[1])+'</b></span>'+(n.enabled?'<span>·</span><span>'+N(n.users||0)+' '+t('users')+'</span>':'')+
   '<span>·</span><span>'+t('Users connect to')+': <b class="ltr">'+esc(n.effective_endpoint||'—')+'</b> <a href="#nodes" style="font-size:11px">'+t('change in Servers')+'</a></span></div>'+
@@ -4987,8 +5018,9 @@ window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')
    '<div class="kxr-sec">'+t('Second config through the tunnel')+'</div>'+
    // the server's tunnel domain (Servers page) gives it by itself; the fields below only change it for KANKI MIX
    '<label class="kxsw" style="cursor:pointer"><span>'+(x.second?t('Users also get')+' <b class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</b>':t('Write the tunnel domain of this server in Servers: the second config is made by itself.'))+'</span><input type="checkbox" id="km_t21" style="width:auto"'+(o.tun_off?'':' checked')+'></label>'+
-   '<details class="box" style="margin-top:6px"'+(o.tun_host||o.tun_port||o.tun_name?' open':'')+'><summary>'+t('Only for KANKI MIX (optional)')+'</summary>'+
-   '<div class="kxf"><div><label class="f">'+t('Iran address')+'</label><input id="km_th1" class="ltr" placeholder="'+esc(t('the tunnel domain of the server'))+'" value="'+esc(o.tun_host||'')+'"></div>'+
+   '<details class="box" style="margin-top:6px" open><summary>'+t('Only for KANKI MIX (optional)')+'</summary>'+
+   '<div class="kxf"><div class="wide"><label class="f">'+t('Iran address')+'</label><input id="km_th1" class="ltr" placeholder="'+esc(t('the tunnel domain of the server'))+'" value="'+esc(o.tun_host||'')+'">'+
+    (function(){var irs=srvIrHosts(r.s&&r.s.key?r.s:null);return irs.length?'<div class="kxchips">'+irs.map(function(e){return '<button type="button" class="'+(o.tun_host==e.host?'on':'')+'" onclick="$(\'#km_th1\').value=\''+esc(e.host)+'\';$$(\'.kxchips button\',this.parentNode.parentNode).forEach(function(b){b.classList.remove(\'on\')});this.classList.add(\'on\');this.closest(\'.kxr-b\').dataset.dirty=\'1\'">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+'</div>':''})()+'</div>'+
    '<div><label class="f">'+t('Port')+'</label><input id="km_tp1" class="ltr" inputmode="numeric" placeholder="'+esc(String((via&&via.port)||port||''))+'" value="'+esc(o.tun_port?String(o.tun_port):'')+'"></div>'+
    '<div class="wide"><label class="f">'+t('Name in the app')+'</label><input id="km_tn1" maxlength="40" placeholder="'+esc(x.name+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'"></div></div></details>'+
    '<div class="kxr-line">'+(via?viaLine(via,x.name):(o.tun_host&&!o.tun_off?'<span class="warnbox" style="margin:0;width:100%">'+t('No Kanki tunnel carries this port to the server. Make a tunnel (or a multi-location route) that carries it, or forward it on that address some other way.')+'</span>':''))+'</div>'+
@@ -5018,6 +5050,7 @@ window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')
   return '<div class="kxr-line"><span class="ltr">'+esc(x.effective||'?')+'</span>'+(st.core?'<span>·</span><span>Xray '+esc(st.core)+'</span>':'')+'<span>'+xrCertChip(x)+'</span></div>'+
    (errs.length?'<div class="warnbox ltr" style="margin:6px 0 0">'+errs.map(esc).join('<br>')+'</div>':'')+
    (xrCertErr(x)?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(xrCertErr(x))+'</div>':'')+
+   coreTun('xray',((SV.d&&SV.d.servers)||[]).filter(function(z){return agentOf(z)==x.server})[0])+
    '<div class="kxr-sec">'+t('Inbounds')+'</div>'+(ibs.length?ibs.map(function(ib){return '<div style="cursor:pointer" onclick="xrInbound(\''+esc(ib.id)+'\')">'+xrMiniRow(ib)+'</div>'}).join(''):'<p class="muted" style="margin:4px">'+t('No inbound on this server yet')+'</p>')+
    '<div class="kxacts"><button class="btn sm" onclick="xrInbound()">+ '+t('Inbound')+'</button><button class="b2 sm" onclick="xrSrvEdit(\''+sid+'\')">'+ic('edit',13)+' '+t('Edit server')+'</button>'+
    '<button class="b2 sm" onclick="xrPreview(\''+sid+'\')">{ } '+t('Config')+'</button><button class="b2 sm" onclick="srvRepair(\'xray\',\''+sid+'\')">↻ '+t('Repair')+'</button><button class="b2 sm" onclick="srvHealth(\'xray\',\''+sid+'\')">♡ '+t('Health')+'</button>'+

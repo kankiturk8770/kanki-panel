@@ -1165,20 +1165,20 @@ pub fn node_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     v
 }
 
-/// What a server's second entry (its configs through the tunnel) offers this user: every protocol when
-/// the server has a tunnel (Servers page), else only KANKI MIX's own second config (KANKI MIX page).
+/// What a server's second entry (its configs through the tunnel) offers this user: each protocol whose
+/// core has an Iran address (its own, or the server's tunnel on the Servers page), and KANKI MIX's own
+/// second config (KANKI MIX page).
 /// WireGuard is here even when the main entry has none: through the tunnel it passes.
 pub fn twin_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     let kmix = crate::kmix::link_tunnel(app, u, n).is_some();
-    if crate::twin::of_node(app, n).is_none() {
-        return if kmix { vec!["kankimix"] } else { vec![] };
-    }
     let info = node_info(n);
     let has = |k: &str| info[k].as_str().map(|s| !s.is_empty()).unwrap_or(false);
+    // each core through its own Iran address, else the server's
+    let tun = |c: &str| crate::twin::of_node_core(app, n, c).is_some();
     let mut v = vec![];
-    if u.has_proto("wg") && has("wg_pub") { v.push("wireguard"); }
-    if u.has_proto("awg") && has("awg_pub") { v.push("amneziawg"); }
-    if u.has_proto("hy2") && has("hy2_port") { v.push("hysteria2"); }
+    if u.has_proto("wg") && has("wg_pub") && tun("wg") { v.push("wireguard"); }
+    if u.has_proto("awg") && has("awg_pub") && tun("awg") { v.push("amneziawg"); }
+    if u.has_proto("hy2") && has("hy2_port") && tun("hy2") { v.push("hysteria2"); }
     if kmix { v.push("kankimix"); }
     v
 }
@@ -1194,7 +1194,7 @@ fn via_proto(app: &App, n: &Node, protos: &[&str], twin: bool) -> Value {
 
 /// The name of a server's second entry in the app
 pub fn twin_name(app: &App, n: &Node) -> String {
-    crate::twin::of_node(app, n).map(|t| t.name).unwrap_or_else(|| crate::kmix::tunnel_name(app, n))
+    crate::twin::name_of_node(app, n).unwrap_or_else(|| crate::kmix::tunnel_name(app, n))
 }
 
 /// id of the second (through the tunnel) entry of a server in the subscription data
@@ -1237,7 +1237,7 @@ fn sub_data(app: &App, u: &User) -> Value {
         // a user with only microtun gets the tunnel entry too
         let mt_tun = crate::microtun::link(app, u, n, true);
         if !tp.is_empty() || mt_tun.is_some() {
-            let tw = crate::twin::of_node(app, n);
+            let tw = crate::twin::of_node_core(app, n, "hy2");
             let mut e = v.clone();
             e["id"] = json!(format!("{}{}", n.id, TUNNEL_SUFFIX));
             e["name"] = json!(twin_name(app, n));
@@ -1309,7 +1309,7 @@ fn proto_row(app: &App, u: &User, n: &Node, p: &str, tunnel: bool) -> String {
             }
         }
         "hysteria2" => {
-            let tw = if tunnel { crate::twin::of_node(app, n) } else { None };
+            let tw = if tunnel { crate::twin::of_node_core(app, n, "hy2") } else { None };
             if let Some(hu) = hy2_link(app, u, n, tw.as_ref()) {
                 btns.push_str(&format!("<code class=\"uri\">{}</code>", esc(&hu)));
                 btns.push_str(&format!("<button class=\"b2\" data-act=\"copy\" data-text=\"{}\" data-i18n=\"copy_uri\">Copy URI</button>", esc(&hu)));
@@ -1421,7 +1421,7 @@ async fn sub_v2(State(app): St, Path(code): Path<String>) -> Response {
     let Some(u) = app.db.user_by_code(id, &c) else { return (StatusCode::NOT_FOUND, "").into_response() };
     let mut lines: Vec<String> = vec![];
     for n in user_nodes(&app, &u) {
-        let tw = crate::twin::of_node(&app, &n);
+        let tw = crate::twin::of_node_core(&app, &n, "hy2");
         let hy = if twin_protos(&app, &u, &n).contains(&"hysteria2") { hy2_link(&app, &u, &n, tw.as_ref()) } else { None };
         lines.extend(hy.or_else(|| hy2_uri(&app, &u, &n)));
     }
@@ -1460,12 +1460,11 @@ async fn sub_raw(State(app): St, Path(code): Path<String>) -> Response {
         }
         // the copies through the server's tunnel
         let tp = twin_protos(&app, &u, &n);
-        let tw = crate::twin::of_node(&app, &n);
         if tp.contains(&"hysteria2") {
-            lines.extend(hy2_link(&app, &u, &n, tw.as_ref()));
+            lines.extend(hy2_link(&app, &u, &n, crate::twin::of_node_core(&app, &n, "hy2").as_ref()));
         }
         if tp.contains(&"wireguard") {
-            lines.extend(wg_uri(&app, &u, &n, tw.as_ref()));
+            lines.extend(wg_uri(&app, &u, &n, crate::twin::of_node_core(&app, &n, "wg").as_ref()));
         }
     }
     lines.extend(crate::xray::panel::user_links(&app, &u).into_iter().map(|x| x.1));
@@ -1542,8 +1541,9 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
         }
     };
     // the copy through the server's tunnel: its Iran address and the port that address carries here
+    let core = match proto.as_str() { "wireguard" => "wg", "amneziawg" => "awg", _ => "hy2" };
     let tw = if via_tunnel && proto != "kankimix" {
-        match crate::twin::of_node(&app, &n) {
+        match crate::twin::of_node_core(&app, &n, core) {
             Some(t) => Some(t),
             None => return (StatusCode::NOT_FOUND, "this server has no tunnel").into_response(),
         }

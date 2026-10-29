@@ -659,7 +659,7 @@ async fn command_again(State(app): St, h: HeaderMap, Path(id): Path<String>) -> 
     Json(json!({ "ok": true, "command": command(&app, &c), "expires": s.join_exp })).into_response()
 }
 
-/// { name?, loc?, addr? }
+/// { name?, loc?, addr?, tunnel?, tunnel_core? }
 async fn edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
     // { tunnel: { on, host, name } }: the copy of every config through this server's tunnel
@@ -669,6 +669,16 @@ async fn edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Jso
             return err(StatusCode::NOT_FOUND, "unknown server");
         }
         if let Err(e) = crate::twin::save(&app, &id, t) {
+            return err(StatusCode::BAD_REQUEST, &e);
+        }
+    }
+    // { tunnel_core: { core, host } }: one core's own Iran address for its second config (VPN services)
+    if let Some(t) = b.get("tunnel_core").filter(|t| t.is_object()) {
+        let known = id == "local" || id.starts_with("node:") || tp::servers(&app).iter().any(|s| s.id == id);
+        if !known {
+            return err(StatusCode::NOT_FOUND, "unknown server");
+        }
+        if let Err(e) = crate::twin::save_core(&app, &id, t) {
             return err(StatusCode::BAD_REQUEST, &e);
         }
     }

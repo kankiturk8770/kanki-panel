@@ -1495,6 +1495,25 @@ pub fn port_entry(app: &App, sid: &str, port: u16, tcp: bool) -> Option<(String,
     (back.len() > 1).then(|| back.last().cloned()).flatten()
 }
 
+/// `port_entry`, preferring the tunnels whose first entry is `host` (an Iran server's address): when
+/// Iran-1 and Iran-2 both carry the port here, each may give it another port.
+pub fn port_entry_at(app: &App, sid: &str, port: u16, tcp: bool, host: &str) -> Option<(String, u16)> {
+    let list: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
+    let srv = servers(app);
+    let is_host = |e: &str| {
+        !host.is_empty() && (host_of(app, e) == host || seen_ip(e).as_deref() == Some(host) || srv.iter().any(|s| s.id == e && s.domain.eq_ignore_ascii_case(host)))
+    };
+    for t in list.iter().filter(|t| t.exit == sid) {
+        let ports = if tcp { &t.tcp } else { &t.udp };
+        let Some((a, _)) = crate::tunnel::engine::parse_ports(ports).into_iter().find(|(_, b)| *b == port) else { continue };
+        let first = walk_back_by(&list, &t.entry, a, tcp).pop().unwrap_or_else(|| (t.entry.clone(), a));
+        if is_host(&first.0) {
+            return Some(first);
+        }
+    }
+    port_entry(app, sid, port, tcp)
+}
+
 /// The address of the first server of the tunnels (or the route) that end at server `sid`: the Iran
 /// entry users would connect to. "" = no tunnel ends there.
 pub fn entry_host(app: &App, sid: &str) -> String {
