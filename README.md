@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.19.1 — tunnel guide
+- **«? Tunnel guide»** on the Tunnels page: which tunnel suits which protocol (best, also good, when UDP is blocked, better not), one row per protocol; on a phone each row is a card. Tap a best tunnel and the tunnel form opens with it picked; then tap the cores whose ports it carries.
+
 ## New in 3.19 — MIX+ removed, one button per core in the tunnel forms, microtun on several devices
 - **MIX+ is gone from the panel**: its page, the user tick, its port on every server, its subscription links and the `kanki-core` build. Users who had it lose only that tick; its settings and secrets are deleted on the first start. A server still on the old agent stops MIX+ and closes its port at the next sync. The tunnels keep their own **Game-FEC** transport, untouched.
 - **Tunnels: one button per core.** Under «Ports to carry» each core of the exit server has a button of its own with just its name (WireGuard, AmneziaWG, Hysteria2, KANKI MIX, microtun, Xray, Kanki DNS). Tap one and its ports go into the TCP or UDP box they belong to, tap again to take them out; a lit button means all its ports are carried. A port the entry already uses is moved (`51821:51820`), as before. «All ports of the exit server» is still there. The same buttons are in the AmneziaWG form (its forward fields) and in the multi-location form (for the last server). «All ports» now carries microtun too.

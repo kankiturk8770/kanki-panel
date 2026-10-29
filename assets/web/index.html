@@ -532,6 +532,15 @@ button.sc{font:inherit;font-size:11px;color:var(--t);cursor:pointer}
 .pchk{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--ln);border-radius:11px;padding:7px 10px;margin:3px;cursor:pointer;font-size:13px}
 
 .pchk i{width:8px;height:8px;border-radius:50%;background:var(--pc)}
+/* «Which tunnel?»: one row per protocol; on a phone each row is a small card */
+.tguide{display:grid;gap:6px}
+.tgr{display:grid;grid-template-columns:1.2fr 1.3fr 1.2fr 1.2fr .9fr;gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--ln);border-radius:12px;background:var(--in);font-size:12.5px}
+.tgr.tgh{background:none;border:0;padding:0 10px;color:var(--s);font-size:11.5px}
+.tgr .tgp{font-size:13px}
+.tgr .tgx{color:var(--bad)}
+.tgr .tgb button{white-space:nowrap}
+.tgr .tgw{grid-column:1/-1;color:var(--s);font-size:11.5px}
+@media (max-width:620px){.tgr{grid-template-columns:1fr}.tgr.tgh{display:none}.tgr [data-l]::before{content:attr(data-l) ": ";color:var(--s);font-size:11px}}
 /* the tunnel forms: one button per core of the exit server (its ports in or out of the port boxes) */
 .corechips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 6px}
 .cchip{display:inline-flex;align-items:center;gap:7px;background:var(--in);color:var(--t);border:1px solid var(--ln);border-radius:999px;padding:7px 14px;font:inherit;font-size:13px;cursor:pointer}
