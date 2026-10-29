@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.19.2 — API tokens on the Security page
+- **System › Security › API tokens** is back: make a token with only some rights (for example «Servers and tunnels» = `nodes`), copy it (shown once), see when each was last used, delete it when the work is done. The server side was there; the page had lost its card.
+
 ## New in 3.19.1 — tunnel guide
 - **«? Tunnel guide»** on the Tunnels page: which tunnel suits which protocol (best, also good, when UDP is blocked, better not), one row per protocol; on a phone each row is a card. Tap a best tunnel and the tunnel form opens with it picked; then tap the cores whose ports it carries.
 

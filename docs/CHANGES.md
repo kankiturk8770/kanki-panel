@@ -1,3 +1,6 @@
+# v3.19.2 — API tokens on the Security page
+- `tokNew()` / `tokDel()` in `panel.js`: the Security page lists the scoped API tokens (`/api/security` already returned them) and makes (`POST /api/security/tokens`, the token shown once) or deletes them. «Servers and tunnels» (`nodes`) is ticked by default.
+
 # v3.19.1 — tunnel guide
 - `tunGuide()` / `TGUIDE` in `panel.js`: a «? Tunnel guide» button on the Tunnels page opens a table of which tunnel suits which protocol (WireGuard · AmneziaWG: AmneziaWG link; microtun · KANKI MIX: Game; Hysteria2: Hysteria2 link; Xray and Kanki DNS: TCP Mux; with the alternatives, what to use when UDP is blocked and what to avoid). Each best tunnel opens the tunnel form with it picked (`tunEdit(null, {kind}|{transport})`).
 
