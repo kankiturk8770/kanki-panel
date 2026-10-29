@@ -192,7 +192,7 @@ function xrOnline(d){var on=d.online||[];if(!on.length)return '<p class="muted k
 // ---- servers tab: Xray on each server; a tap shows Xray on that server
 function xrSrvTab(d,el){el.innerHTML=kuGroup(t('Servers with Xray'),d.servers.length,'<button class="btn sm" onclick="xrAddNode()">'+ic('plus',14)+' '+t('Add Xray to a server')+'</button>','<div id="xr_srv">'+xrServers(d)+'</div>')}
 // ---- tunnel tab: the second config of each Xray server, through an Iran server
-function xrTunTab(d,el){var list=d.servers.map(function(x){return xrSv(x.server)}).filter(function(s){return s&&s.key});
+function xrTunTab(d,el){if(!SV.d){el.innerHTML=t('Loading…');srvLoad(true).then(function(){if(S.page=='xray'&&XR.tab=='tunnel'&&XR.d)xrDraw(XR.d)});return}var list=d.servers.map(function(x){return xrSv(x.server)}).filter(function(s){return s&&s.key});
  el.innerHTML=kuGroup(t('Second config through the tunnel'),list.length,'','<p class="muted ku-note">'+t('Users get a second copy of every Xray inbound through the Iran server chosen here. Empty = the tunnel domain of the server (Servers page).')+'</p>'+
   '<div id="xr_tun">'+coreTunRows('xray','xrt',list)+'</div>');
  KAcc.draw.xrt=function(){var c=$('#xr_tun');if(c)c.innerHTML=coreTunRows('xray','xrt',d.servers.map(function(x){return xrSv(x.server)}).filter(function(s){return s&&s.key}))}}
@@ -867,6 +867,7 @@ function kcAll(p,on){var n=KC.meta[p].name;if(!confirm(on?n+' '+t('for every use
 "use strict";
 // Persian text of the whole panel
 var FA={
+ "tunnels":"تانل",
  "Cores on this server":"هسته‌های این سرور",
  "Each core is set on its own page: tap one to open it.":"تنظیم هر هسته در صفحه‌ی خودش است: رویش بزن تا باز شود.",
  "This protocol has no settings of its own: the port of each server is in the Servers tab, the second config in the Tunnel tab.":"این پروتکل تنظیم جداگانه ندارد: پورت هر سرور در تب «سرورها» است و کانفیگ دوم در تب «تانل».",
@@ -3909,6 +3910,10 @@ function tunCmd(s,d){var repo=(d&&d.repo)||'',panel=(d&&d.panel)||location.origi
 // Each connected tunnel is a glowing fibre: packets leave the entry plain, pass the lock in the middle
 // and arrive encrypted (tunnel colour); smaller return packets flow back. More traffic = more packets,
 // higher ping = slower packets. The animation keeps running between data refreshes.
+// every Iran server has its own colour on the map (green, red, blue, violet; a fifth starts again)
+var TMIR=['#3ddc97','#ff6b6b','#6fb6ff','#c084fc'];
+function tmIran(sv){return sv.filter(function(s){return srvLoc(s)=='iran'}).sort(function(a,b){return String(a.name).localeCompare(String(b.name))})}
+function tmIrCol(sv){var o={};tmIran(sv).forEach(function(s,i){o[s.id]=TMIR[i%TMIR.length]});return o}
 var TM={reg:{},raf:0,t0:(window.performance?performance.now():Date.now())};
 function tmStart(){if(TM.raf)return;
  var loop=function(){var cs=document.querySelectorAll('canvas.tmapcv');if(!cs.length){TM.raf=0;return}TM.raf=requestAnimationFrame(loop);
@@ -3928,17 +3933,24 @@ function tmRound(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+
 // ---- the page
 function pTunnels(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnels')+'</h2><p>'+t('Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit')+'</p></div>'+
  '<div class="row" style="gap:6px"><button class="b2" onclick="tunGuide()" title="'+esc(t('Which tunnel for which protocol'))+'">? '+t('Tunnel guide')+'</button><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="b2 smartb" onclick="tunSmart()">⚡ '+t('Smart tunnel')+'</button><button class="b2" id="rt_new" onclick="routeEdit()">⛓ '+t('Multi-location tunnel')+'</button><button class="btn" onclick="tunEdit()">+ '+t('Tunnel')+'</button></div></div>'+
- '<div class="card tmapc"><div id="tn_map"><span class="muted">'+t('Loading…')+'</span></div><div class="tkpi" id="tn_kpi"></div></div>'+
+ '<div class="card tmapc"><nav class="tmtabs" id="tn_mt" role="tablist"></nav><div id="tn_map"><span class="muted">'+t('Loading…')+'</span></div><div class="tkpi" id="tn_kpi"></div></div>'+
  '<div class="nh" style="margin-top:4px"><h3>'+t('Tunnels')+'</h3></div><div id="tn_list"></div>'+
  '';
  tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
 function tunRefresh(quiet){return tunLoad().then(tunDraw).catch(function(e){if(!quiet)fail(e)})}
+// the map shows every Iran server, or one of them (its tunnels side by side); remembered on this browser
+var TNV={v:(function(){try{return localStorage.getItem('kk_tmview')||'all'}catch(e){return 'all'}})()};
+function tunView(v){TNV.v=v;try{localStorage.setItem('kk_tmview',v)}catch(e){}var m=$('#tn_map');if(m)m.dataset.sig='';if(TN.d)tunDraw(TN.d)}
 function tunDraw(d){var m=$('#tn_map'),sl=$('#tn_srv');if(!m&&!sl)return;var sv=d.servers||[],tl=d.tunnels||[];
- var up=tl.filter(function(x){return x.state=='up'}).length,on=sv.filter(function(s){return s.online}).length,rx=0,tx=0;
- tl.forEach(function(x){var s=x.entry_status;if(s){rx+=s.rx_bytes||0;tx+=s.tx_bytes||0}});
- if(m){var sig=JSON.stringify([sv.map(function(s){return [s.id,s.name,s.online,s.local]}),tl.map(function(x){return [x.id,x.entry,x.exit,x.state,x.transport,Math.round(((x.entry_status||{}).rtt_ms||0)/10)]})]);
-  var mh=tunMap(d);if(m.dataset.sig!==sig||!m.querySelector('canvas')){m.dataset.sig=sig;m.innerHTML=mh}
-  $('#tn_kpi').innerHTML='<div><small>'+t('Tunnels connected')+'</small><b style="color:'+(up==tl.length&&tl.length?'var(--ok)':'inherit')+'">'+N(up)+' / '+N(tl.length)+'</b></div><div><small>'+t('Servers online')+'</small><b>'+N(on)+' / '+N(sv.length)+'</b></div><div><small>'+t('Through the tunnels')+'</small><b class="ltr">↑ '+bytes(tx)+' · ↓ '+bytes(rx)+'</b></div>';
+ var irs=tmIran(sv),col=tmIrCol(sv);if(TNV.v!='all'&&!col[TNV.v])TNV.v='all';
+ var vt=TNV.v=='all'?tl:tl.filter(function(x){return x.entry==TNV.v||x.exit==TNV.v});
+ var up=vt.filter(function(x){return x.state=='up'}).length,on=sv.filter(function(s){return s.online}).length,rx=0,tx=0;
+ vt.forEach(function(x){var s=x.entry_status;if(s){rx+=s.rx_bytes||0;tx+=s.tx_bytes||0}});
+ if(m){var mt=$('#tn_mt');if(mt)mt.innerHTML=irs.length?[['all',t('All')]].concat(irs.map(function(s){return [s.id,esc(s.name)]})).map(function(x){
+    return '<button type="button" role="tab" aria-selected="'+(TNV.v==x[0])+'" class="'+(TNV.v==x[0]?'on':'')+'" onclick="tunView(\''+esc(x[0])+'\')">'+(col[x[0]]?'<i style="background:'+col[x[0]]+'"></i>':'')+x[1]+'</button>'}).join(''):'';
+  var sig=TNV.v+JSON.stringify([sv.map(function(s){return [s.id,s.name,s.online,s.local,s.loc]}),tl.map(function(x){return [x.id,x.entry,x.exit,x.state,x.transport,Math.round(((x.entry_status||{}).rtt_ms||0)/10)]})]);
+  var mh=tunMap(d,TNV.v);if(m.dataset.sig!==sig||!m.querySelector('canvas')){m.dataset.sig=sig;m.innerHTML=mh}
+  $('#tn_kpi').innerHTML='<div><small>'+t('Tunnels connected')+'</small><b style="color:'+(up==vt.length&&vt.length?'var(--ok)':'inherit')+'">'+N(up)+' / '+N(vt.length)+'</b></div><div><small>'+t('Servers online')+'</small><b>'+N(on)+' / '+N(sv.length)+'</b></div><div><small>'+t('Through the tunnels')+'</small><b class="ltr">↑ '+bytes(tx)+' · ↓ '+bytes(rx)+'</b></div>';
   $('#tn_list').innerHTML=tl.length?tl.map(tunCard).join(''):'<div class="card muted" style="text-align:center">'+t('No tunnels yet')+' · <a href="javascript:tunEdit()">'+t('Make the first tunnel')+'</a></div>'}
  if(sl){var k=$('#tn_skpi');if(k)k.innerHTML='<div><small>'+t('Servers online')+'</small><b style="color:'+(on==sv.length&&sv.length?'var(--ok)':'inherit')+'">'+N(on)+' / '+N(sv.length)+'</b></div><div><small>'+t('Tunnels connected')+'</small><b>'+N(up)+' / '+N(tl.length)+'</b></div><div><small>'+t('Through the tunnels')+'</small><b class="ltr">↑ '+bytes(tx)+' · ↓ '+bytes(rx)+'</b></div>';
   sl.innerHTML=SRV_GROUPS.map(function(g){var l=sv.filter(function(s){return srvLoc(s)==g[0]});return l.length?'<h3 style="grid-column:1/-1;margin:6px 0 0">'+t(g[1])+' <small class="muted">'+N(l.length)+'</small></h3>'+l.map(tunSrvCard).join(''):''}).join('')}}
@@ -4385,12 +4397,6 @@ function tunSmartDraw(j){var P=TS.prof||'balanced',stg={starting:t('Starting…'
 function tunSmartUse(mode,tr){api('GET','/api/tunnels/probe').then(function(r){var j=r.job||{},c=TS.ctx||{};closeModal();
  if(c.apply)tunEdit(c.apply.id,Object.assign({},c.apply.snap,{entry:j.entry,exit:j.exit,mode:mode,transport:tr}));
  else tunEdit(null,{entry:j.entry,exit:j.exit,mode:mode,transport:tr});TS.ctx={}}).catch(fail)}
-
-// ---- dashboard card
-function tunDashCard(){return '<div class="card" id="tdc"><div class="nh"><div><h3>'+ic('tunnel',16)+' '+t('Tunnels')+'</h3><p class="sub" id="tdc_s">…</p></div><a class="b2 sm" href="#tunnels">'+t('Manage')+'</a></div><div id="tdc_m"></div></div>'}
-function tunDashWire(){if(!$('#tdc'))return;var go=function(){tunLoad().then(function(d){if(!$('#tdc'))return;var tl=d.tunnels||[],up=tl.filter(function(x){return x.state=='up'}).length;
-  $('#tdc_s').textContent=tl.length?(up==tl.length?t('All tunnels connected'):N(tl.length-up)+' '+t('tunnel(s) not connected'))+' · '+N(up)+' / '+N(tl.length):t('No tunnels yet');
-  var mh=tunMap(d,true),mb=$('#tdc_m');if(mb&&(!mb.querySelector('canvas')||mh.indexOf('<canvas')<0))mb.innerHTML=mh}).catch(function(){})};go();clearInterval(S.timer4);S.timer4=setInterval(function(){if(document.visibilityState=='visible')go()},5000)}
 
 
 // ==================================================================== menu and sections
@@ -5020,7 +5026,7 @@ function drawPv(p,force){var g='pv_'+p,el=$('#pv'),tab=PVT[p]||'status';if(!el||
  var stats=kuStats([[t('Running servers'),N(run)+' / '+N(list.length),run<list.length?'y':''],[t('Users with it'),users==null?'—':N(users)],[t('Through a tunnel'),N(viaT)],[t('Servers'),N(list.length)]]);
  if(tab=='status'){if(!force&&$('#pv_st')){$('#pv_st').innerHTML=stats;return}
   el.innerHTML='<div id="pv_st">'+stats+'</div>'+kuGroup(PV[p].name,null,'',kuLine(t('Every user'),'<button class="b2 sm" onclick="srvProtoAll(\''+p+'\',0)">'+t('Off for all users')+'</button><button class="b2 sm" onclick="srvProtoAll(\''+p+'\',1)">'+t('On for all users')+'</button>'))+
-   '<details class="ku-help"><summary>'+t('How it works')+'</summary><p>'+t(PV[p].desc)+' '+t('Ports and protocols of this server are in VPN services.')+'</p></details>';return}
+   '<details class="ku-help"><summary>'+t('How it works')+'</summary><p>'+t(PV[p].desc)+' '+t('This protocol has no settings of its own: the port of each server is in the Servers tab, the second config in the Tunnel tab.')+'</p></details>';return}
  if(tab=='tunnel'){if(!force&&accBusy('tn_'+p))return;
   el.innerHTML=(p=='wg'?'<div class="warnbox">'+t('WireGuard reaches users only through a tunnel: choose its Iran server below.')+'</div>':'')+
    kuGroup(t('Second config through the tunnel'),list.length,'','<p class="muted ku-note">'+t('Only for this core. Empty = the tunnel domain of the server (Servers page).')+'</p><div id="pv_tun">'+pvTunRows(p)+'</div>');return}
@@ -5102,8 +5108,7 @@ window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')
    b.onclick=function(){if(String(r.key).indexOf('node:')==0)return kmSetNodePort(x.id,+unN(el.value),function(){accClose('km')});srvSavePort(r.key,'kmix',el.value,function(){accClose('km');kmLoad(true)})}},0);
   return h}
  window.kmSaveOne=function(id){var d=KM.d,m={};Object.keys((d&&d.settings.nodes)||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});var o=m[id]||{};
-  o.route=$('#km_rt1').value;o.host=$('#km_ho1').value.trim();o.tun_off=!$('#km_t21').checked;o.tun_host=$('#km_th1').value.trim();
-  var tp=unN($('#km_tp1').value).trim();o.tun_port=tp?+tp:0;o.tun_name=$('#km_tn1').value.trim();m[id]=o;
+  o.route=$('#km_rt1').value;o.host=$('#km_ho1').value.trim();m[id]=o;
   api('PUT','/api/kmix',{nodes:m}).then(function(){toast(t('Saved'));accClose('km');kmLoad(true)}).catch(fail)};
  // the settings of every server, in the list; the page keeps its numbers and the general settings
   ACC.draw.km=function(){var c=$('#km_srv');if(c&&KM.d)c.innerHTML=kmServers(KM.d)};
@@ -5115,7 +5120,8 @@ window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')
      (x.route_via?'<small>'+t('Through a tunnel')+'</small>':'');
     return accRow('kmt',x.id,head,function(){return kmTunBody(d,r)})}).join('')};
   function kmTunBody(d,r){var x=r.k,o=(d.settings.nodes||{})[x.id]||{},id=esc(x.id),port=x.port||x.want_port,via=x.route_via;
-   return    // the server's tunnel domain (Servers page) gives it by itself; the fields below only change it for KANKI MIX
+   // the server's tunnel domain (Servers page) gives it by itself; the fields below only change it for KANKI MIX
+   return ''+
    '<label class="kxsw" style="cursor:pointer"><span>'+(x.second?t('Users also get')+' <b class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</b>':t('Write the tunnel domain of this server in Servers: the second config is made by itself.'))+'</span><input type="checkbox" id="km_t21" style="width:auto"'+(o.tun_off?'':' checked')+'></label>'+
    '<details class="box" style="margin-top:6px" open><summary>'+t('Only for KANKI MIX (optional)')+'</summary>'+
    '<div class="kxf"><div class="wide"><label class="f">'+t('Iran address')+'</label><input id="km_th1" class="ltr" placeholder="'+esc(t('the tunnel domain of the server'))+'" value="'+esc(o.tun_host||'')+'">'+
@@ -5210,8 +5216,7 @@ $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Dashboard')+'</h2><p class="lt
   '<div class="ch tall" id="ch_net"></div>'+
   '<div class="nf ltr"><span>'+t('Peak')+' ↓ <b id="n_prx">—</b></span><span>'+t('Peak')+' ↑ <b id="n_ptx">—</b></span><span>'+t('Total since boot')+' ↓ <b id="n_trx">—</b></span><span>↑ <b id="n_ttx">—</b></span></div></div>'+'</div>'+
   '<div class="k310c w4"><div class="card k310res"><h3>'+ic('cpu',16)+' '+t('Server resources')+'</h3>'+'<div class="gg">'+gcard('cpu','CPU',ic('cpu',16))+gcard('ram','RAM',ic('ram',16))+gcard('disk','Storage',ic('disk',16))+gcard('swap','Swap',ic('swap',16))+'</div>'+'</div></div>'+
-  '<div class="k310c w6">'+'<div class="card" id="nc" style="margin-bottom:12px"></div>'+'</div>'+
-  '<div class="k310c w6">'+tunDashCard()+'</div>'+
+  '<div class="k310c w12">'+'<div class="card" id="nc" style="margin-bottom:12px"></div>'+'</div>'+
   '<div class="k310c w6">'+'<div class="card"><h3>'+t('Services')+'</h3><p class="sub">'+t('Start, stop or restart the VPN services')+'</p><div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></div>'+'</div>'+
   '<div class="k310c w6">'+'<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('TCP / UDP connections')+'</h3><small class="muted" id="c_sub"></small></div>'+
   '<div class="nbig"><div class="dn"><small>TCP</small><b id="c_tcp" class="ltr">—</b></div><div class="upl"><small>UDP</small><b id="c_udp" class="ltr">—</b></div></div></div>'+
@@ -5219,7 +5224,7 @@ $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Dashboard')+'</h2><p class="lt
  '</div>'+logCard();
  $('#d_iv').onchange=function(){DB.iv=+this.value;localStorage.setItem('kk_div',DB.iv);dashTimers()};
  $('#d_pause').onclick=function(){DB.paused=!DB.paused;if(!DB.paused)DB.last=null;this.textContent=DB.paused?'▶':'❚❚';this.title=DB.paused?t('Resume'):t('Pause');dashLive(DB.paused?'off':'')};
- $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};logWire();tunDashWire();
+ $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};logWire();
  $('#kpis').onclick=function(e){var b=e.target.closest('[data-go]');if(b)goUsers(b.dataset.go)};
  dashTick();dashSys();dashTimers();
  strip();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page!='dash'){clearInterval(S.timer4);return}strip()},3000)};
@@ -5256,7 +5261,7 @@ function tmAbbr(sv){var out={},by={};
  Object.keys(by).forEach(function(c){var l=by[c],own=l.every(function(y){return y.num})&&new Set(l.map(function(y){return y.num})).size==l.length;
   l.forEach(function(x,i){out[x.s.id]=c+(l.length>1?(own?x.num:String(i+1)):x.num)})});
  return out}
-function tmLayout(d,small){var sv=d.servers||[],byId={};sv.forEach(function(s){byId[s.id]=s});
+function tmLayout(d){var sv=d.servers||[],byId={};sv.forEach(function(s){byId[s.id]=s});
  var tl=(d.tunnels||[]).filter(function(x){return x.entry!=x.exit&&byId[x.entry]&&byId[x.exit]});
  var lay={};sv.forEach(function(s){lay[s.id]=srvLoc(s)=='iran'?0:1});
  for(var it=0;it<3;it++)tl.forEach(function(x){if(lay[x.entry]>=1&&lay[x.exit]>=1&&lay[x.exit]<=lay[x.entry]&&!tl.some(function(z){return z.exit==x.exit&&lay[z.entry]==0}))lay[x.exit]=Math.min(2,lay[x.entry]+1)});
@@ -5272,8 +5277,8 @@ function tmLayout(d,small){var sv=d.servers||[],byId={};sv.forEach(function(s){b
  // always across: Iran on the left, the servers abroad on the right (phones too, a little narrower)
  var phone=window.innerWidth<640,nc=cols.length,maxN=Math.max.apply(null,cols.map(function(c){return c.length}).concat([1]));
  var W,H,P={},R=26,mg=78;
- {W=phone?Math.max(460,250*(nc-1)+140):small?680:820;if(phone)mg=62;var step=Math.max(118,Math.max.apply(null,sv.map(function(s){return tl.filter(function(x){return x.entry==s.id||x.exit==s.id}).length*14+40}).concat([0])));
-  H=Math.max(small?330:380,maxN*step+70);
+ {W=phone?Math.max(460,250*(nc-1)+140):820;if(phone)mg=62;var step=Math.max(118,Math.max.apply(null,sv.map(function(s){return tl.filter(function(x){return x.exit==s.id}).length*36+50}).concat([0])));
+  H=Math.max(380,maxN*step+70);
   cols.forEach(function(c,ci){var x=mg+ci*((W-2*mg)/Math.max(1,nc-1));c.forEach(function(s,i){P[s.id]={x:x,y:40+(H-70)/c.length*(i+.5),c:ci}})})}
  // a trunk from each entry: a short stem, one line across, then a straight branch down (or across) to every
  // server it reaches. Branches into one server sit side by side; entries of one column get their own trunk
@@ -5281,27 +5286,42 @@ function tmLayout(d,small){var sv=d.servers||[],byId={};sv.forEach(function(s){b
  var E={},lvl={},arr={},has={};tl.forEach(function(x){has[x.entry]=1;(arr[x.exit]=arr[x.exit]||[]).push(x)});
  cols.forEach(function(c){var k=0;c.forEach(function(s){if(has[s.id])lvl[s.id]=k++})});
  Object.keys(arr).forEach(function(id){arr[id].sort(function(a,b){return P[a.entry].y-P[b.entry].y})});
- tl.forEach(function(x){var a=P[x.entry],b=P[x.exit],l=arr[x.exit],j=l.indexOf(x),off=l.length>1?(j/(l.length-1)-.5)*2*(R-5):0,stem=R+20+(lvl[x.entry]||0)*14,r2=Math.sqrt(Math.max(0,R*R-off*off)),pts;
-  var d2=b.x>=a.x?1:-1,tx=a.x+d2*stem;pts=[{x:a.x+d2*R,y:a.y},{x:tx,y:a.y},{x:tx,y:b.y+off},{x:b.x-d2*r2,y:b.y+off}];
+ // lines into one server run 36 apart (room for a label each) and bend into the server's circle at its edge
+ tl.forEach(function(x){var a=P[x.entry],b=P[x.exit],l=arr[x.exit],j=l.indexOf(x),off=l.length>1?(j-(l.length-1)/2)*36:0,offc=Math.max(-(R-5),Math.min(R-5,off)),stem=R+20+(lvl[x.entry]||0)*14,r2=Math.sqrt(Math.max(0,R*R-offc*offc)),pts;
+  var d2=b.x>=a.x?1:-1,tx=a.x+d2*stem;pts=[{x:a.x+d2*R,y:a.y},{x:tx,y:a.y},{x:tx,y:b.y+off},{x:b.x-d2*(R+16),y:b.y+off},{x:b.x-d2*r2,y:b.y+offc}];
   E[x.id]={pts:pts}});
  // labels (short name, ping under it) on each branch, moved along it until they cover no server, name or
  // other label: neighbouring branches end up with their labels at different heights
  var boxes=[],L={};
  sv.forEach(function(s){var p=P[s.id];boxes.push({x:p.x-44,y:p.y-44,w:88,h:110})});
- tl.forEach(function(x){var pts=E[x.id].pts,p0=pts[pts.length-2],p1=pts[pts.length-1],rt=(x.entry_status||{}).rtt_ms||0,
-  w=Math.max(tmShort(x).length,(rt+'ms').length)*6.8+18,h=32,spot=null;
+ tl.forEach(function(x){var pts=E[x.id].pts,p0=pts[pts.length-3],p1=pts[pts.length-2],rt=(x.entry_status||{}).rtt_ms||0,
+  w=Math.max((x._lab||tmShort(x)).length,(rt+'ms').length)*6.8+18,h=32,spot=null;
   var at=function(f){return {x:p0.x+(p1.x-p0.x)*f,y:p0.y+(p1.y-p0.y)*f}};
   [.5,.3,.7,.18,.82,.4,.6,.1,.9].some(function(f){var q=at(f),r={x:q.x-w/2,y:q.y-h/2,w:w,h:h};
    if(!boxes.some(function(o){return r.x<o.x+o.w+3&&o.x<r.x+r.w+3&&r.y<o.y+o.h+3&&o.y<r.y+r.h+3})){spot=q;boxes.push(r);return true}});
   L[x.id]=spot||at(.5);if(!spot)boxes.push({x:L[x.id].x-w/2,y:L[x.id].y-h/2,w:w,h:h})});
- return {ab:tmAbbr(sv),W:W,H:H,small:!!small,pos:P,sv:sv,tl:tl,hub:'',cx:W/2,cy:H/2,R:0,n:sv.length,cols:true,E:E,L:L,mx:16}}
-window.tunMap=function(d,small){var sv=d.servers||[],tl=d.tunnels||[];
+ return {ab:tmAbbr(sv),W:W,H:H,pos:P,sv:sv,tl:tl,hub:'',cx:W/2,cy:H/2,R:0,n:sv.length,cols:true,E:E,L:L,mx:16}}
+// what one view shows: 'all', or the id of one Iran server
+function tmView(d,view){var sv=d.servers||[],tl=d.tunnels||[],col=tmIrCol(sv),ir=function(id){return col[id]};
+ if(view&&view!='all'&&col[view]){var mine=tl.filter(function(x){return x.entry==view||x.exit==view}),ids={};ids[view]=1;
+  mine.forEach(function(x){ids[x.entry]=1;ids[x.exit]=1});
+  return {servers:sv.filter(function(s){return ids[s.id]}).map(function(s){return s.id==view?Object.assign({},s,{_col:col[view]}):s}),
+   tunnels:mine.map(function(x){return Object.assign({},x,{_col:col[view]})})}}
+ // all: the tunnels between the same two servers are one line, labelled with how many there are
+ var by={},order=[];tl.forEach(function(x){var k=x.entry+'>'+x.exit;if(!by[k]){by[k]=[];order.push(k)}by[k].push(x)});
+ var lines=order.map(function(k){var l=by[k],x=l[0],up=l.filter(function(z){return z.state=='up'}).length,rt=l.map(function(z){return (z.entry_status||{}).rtt_ms||0}).filter(Boolean);
+  if(l.length==1)return Object.assign({},x,{_col:ir(x.entry)||ir(x.exit)});
+  return {id:'g:'+k,entry:x.entry,exit:x.exit,kind:x.kind,transport:x.transport,state:up==l.length?'up':up?'partial':l.some(function(z){return z.state=='off'})&&!up?'off':'down',
+   entry_status:{rtt_ms:rt.length?Math.min.apply(null,rt):0,rx_bytes:l.reduce(function(a,z){return a+((z.entry_status||{}).rx_bytes||0)},0),tx_bytes:l.reduce(function(a,z){return a+((z.entry_status||{}).tx_bytes||0)},0)},
+   _col:ir(x.entry)||ir(x.exit),_lab:N(l.length)+' '+t('tunnels')}});
+ return {servers:sv.map(function(s){return col[s.id]?Object.assign({},s,{_col:col[s.id]}):s}),tunnels:lines}}
+window.tunMap=function(d,view){var v=tmView(d,view),sv=v.servers,tl=v.tunnels;
  if(!tl.length&&sv.length<2)return '<div class="tempty">'+ic('tunnel',34)+'<b>'+t('No tunnels yet')+'</b><span class="muted">'+t('Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.')+'</span></div>';
- var key=small?'s':'m',st=TM.reg[key]||(TM.reg[key]={rate:{},last:{}}),now=Date.now();
+ var st=TM.reg.m||(TM.reg.m={rate:{},last:{}}),now=Date.now();
  tl.forEach(function(x){var es=x.entry_status||{},by=(es.rx_bytes||0)+(es.tx_bytes||0),l=st.last[x.id];
   if(l&&now-l.t>500){var r=(by-l.b)/((now-l.t)/1000);if(r>=0)st.rate[x.id]=r}if(!l||now-l.t>500)st.last[x.id]={b:by,t:now}});
- st.m=tmLayout(d,small);tmStart();
- return '<canvas class="tmapcv" data-tm="'+key+'" style="aspect-ratio:'+st.m.W+'/'+st.m.H+'" role="img" aria-label="'+esc(t('Tunnels'))+'"></canvas>'};
+ st.m=tmLayout(v);tmStart();
+ return '<canvas class="tmapcv" data-tm="m" style="aspect-ratio:'+st.m.W+'/'+st.m.H+'" role="img" aria-label="'+esc(t('Tunnels'))+'"></canvas>'};
 // the drawing; where things sit comes from tmLayout
 window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;var m=st.m,w=cv.clientWidth;if(!w)return;
  var dpr=Math.min(2,window.devicePixelRatio||1),pw=Math.round(w*dpr),ph=Math.round(w*m.H/m.W*dpr);if(cv.width!=pw||cv.height!=ph){cv.width=pw;cv.height=ph}
@@ -5317,11 +5337,11 @@ window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;v
   c.strokeStyle=tmA(th.a,.12);c.setLineDash([2,9]);c.lineDashOffset=T*4;c.beginPath();c.arc(m.cx,m.cy,m.R*.55,0,TAU);c.stroke();c.setLineDash([])}
  // ---- tunnels (their labels are drawn after all of them, on top)
  var labs=[];
- m.tl.forEach(function(x,i){var G=m.E[x.id];if(!G)return;var pts=G.pts,A=pts[0],B=pts[pts.length-1],col=tmRgb(tunCol(x.state)),es=x.entry_status||{},k=0,same=[x];
+ m.tl.forEach(function(x,i){var G=m.E[x.id];if(!G)return;var pts=G.pts,A=pts[0],B=pts[pts.length-1],col=tmRgb(x._col||tunCol(x.state)),es=x.entry_status||{},k=0,same=[x];
   var segs=[],tot=0;for(var q=0;q+1<pts.length;q++){var sl=Math.hypot(pts[q+1].x-pts[q].x,pts[q+1].y-pts[q].y);segs.push(sl);tot+=sl}
   var bz=function(u){var d=Math.max(0,Math.min(1,u))*tot;for(var q=0;q<segs.length;q++){if(d<=segs[q]||q==segs.length-1){var f=segs[q]?Math.min(1,d/segs[q]):0;return {x:pts[q].x+(pts[q+1].x-pts[q].x)*f,y:pts[q].y+(pts[q+1].y-pts[q].y)*f}}d-=segs[q]}return B};
   var path=function(){c.beginPath();c.moveTo(A.x,A.y);for(var q=1;q+1<pts.length;q++)c.arcTo(pts[q].x,pts[q].y,pts[q+1].x,pts[q+1].y,10);c.lineTo(B.x,B.y)};
-  var ls=tot?(tot-segs[segs.length-1])/tot:0,lt=ls+(1-ls)*.22,up=x.state=='up',part=x.state=='partial',down=!up&&!part,flick=part?(.65+.35*Math.sin(T*7+i)):1;
+  var tail=segs[segs.length-1]+(segs.length>3?segs[segs.length-2]:0),ls=tot?(tot-tail)/tot:0,lt=ls+(1-ls)*.22,up=x.state=='up',part=x.state=='partial',down=!up&&!part,flick=part?(.65+.35*Math.sin(T*7+i)):1;
   c.lineCap='round';
   // fibre: wide halo, body, bright core
   path();c.strokeStyle=tmA(col,(.07*flick).toFixed(3));c.lineWidth=18;c.stroke();
@@ -5352,13 +5372,13 @@ window.tmDraw=function(cv,T){var st=TM.reg[cv.dataset.tm];if(!st||!st.m)return;v
   // label: short name • ping in the middle of the line; tunnels between the same two servers share one
   // stacked label (drawn once, by the first of them) so their texts never cover each other
   if(m.L[x.id]){var bp=m.L[x.id];
-   labs.push(function(){var zr=es.rtt_ms||0,zc=tmRgb(tunCol(x.state)),l1=tmShort(x),l2=x.state=='down'||x.state=='off'?t('down'):zr?zr+'ms':'…';
+   labs.push(function(){var zr=es.rtt_ms||0,zc=tmRgb(x._col||tunCol(x.state)),l1=x._lab||tmShort(x),l2=x.state=='down'||x.state=='off'?t('down'):zr?zr+'ms':'…';
     c.direction='ltr';c.textAlign='center';c.font='800 10.5px Vazirmatn,sans-serif';var lw=Math.max(c.measureText(l1).width,c.measureText(l2).width)+16,lh=31;
     c.fillStyle=th.disc;tmRound(c,bp.x-lw/2,bp.y-lh/2,lw,lh,9);c.fill();c.strokeStyle=tmA(zc,.7);c.lineWidth=1;c.stroke();
     c.fillStyle=th.t;c.fillText(l1,bp.x,bp.y-2);c.font='700 10px Vazirmatn,sans-serif';c.fillStyle=tmA(zc,1);c.fillText(l2,bp.x,bp.y+11)})}});
  labs.forEach(function(f){f()});
  // ---- servers
- m.sv.forEach(function(s,i){var P=m.pos[s.id];if(!P)return;var col=tmRgb(s.online?'#3ddc97':'#ff6b6b'),br=.5+.5*Math.sin(T*2.1+i),Z=s.id==m.hub?1.25:1;c.save();c.translate(P.x,P.y);c.scale(Z,Z);c.translate(-P.x,-P.y);
+ m.sv.forEach(function(s,i){var P=m.pos[s.id];if(!P)return;var col=tmRgb(s._col?(s.online?s._col:'#8a8f98'):s.online?'#3ddc97':'#ff6b6b'),br=.5+.5*Math.sin(T*2.1+i),Z=s.id==m.hub?1.25:1;c.save();c.translate(P.x,P.y);c.scale(Z,Z);c.translate(-P.x,-P.y);
   if(s.online){var hg=c.createRadialGradient(P.x,P.y,10,P.x,P.y,46);hg.addColorStop(0,tmA(col,(.16+.08*br).toFixed(3)));hg.addColorStop(1,tmA(col,0));c.fillStyle=hg;c.beginPath();c.arc(P.x,P.y,46,0,TAU);c.fill();
    c.setLineDash([3,9]);c.lineDashOffset=-T*9;c.strokeStyle=tmA(col,.5);c.lineWidth=1.4;c.beginPath();c.arc(P.x,P.y,33,0,TAU);c.stroke();c.setLineDash([]);
    c.save();c.translate(P.x,P.y);c.rotate(-.35);c.strokeStyle=tmA(th.a,.35);c.lineWidth=1;c.beginPath();c.ellipse(0,0,39,13,0,0,TAU);c.stroke();

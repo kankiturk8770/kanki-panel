@@ -1723,11 +1723,8 @@ async fn agent_update(State(app): St, h: HeaderMap) -> Response {
         return err(StatusCode::UNAUTHORIZED, "bad token");
     }
     match crate::admin::self_update(&app).await {
-        Ok(v) => {
-            // the tunnel agent of this machine (when there is one) runs the same file: restart it onto the new one
-            let _ = std::process::Command::new("systemctl").args(["restart", "kanki-tunnel"]).spawn();
-            Json(json!({"ok": true, "version": v})).into_response()
-        }
+        // (the tunnel agent of this machine, which runs the same file, was restarted by self_update)
+        Ok(v) => Json(json!({"ok": true, "version": v})).into_response(),
         Err(e) => Json(json!({"ok": false, "error": e})).into_response(),
     }
 }
