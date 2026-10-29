@@ -51,6 +51,8 @@ pub struct TServer {
     pub domain: String,
     /// when the panel asked the agent to install the VPN part (0 = not asked)
     pub setup_at: i64,
+    /// «without SSL» when it was added: the installer takes a self-signed certificate (KANKI_SSL=0)
+    pub no_ssl: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]

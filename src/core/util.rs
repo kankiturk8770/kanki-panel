@@ -273,17 +273,92 @@ pub fn exe_path() -> std::io::Result<std::path::PathBuf> {
 
 /// Puts `bytes` in place of the program file `path` (mode 755). Written to a temporary file of this
 /// process first and renamed over it: a crash never leaves half a program, and two updates of the same
-/// file at once (the node and the agent of one server) never write into one temporary file.
+/// file at once (the node and the agent of one server) never write into one temporary file. The new
+/// program must start on this server (`version`) before it replaces the old one, so a broken download
+/// or a build for another machine leaves the server running as it was. Nothing else is touched: the
+/// settings (`/etc/kanki/*.env`, the saved tunnels) stay as they are.
 pub fn swap_program(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "kanki-panel".into());
+    clean_stale_updates(path, &name);
     let tmp = path.with_file_name(format!(".{}.{}.new", name, std::process::id()));
     std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
     let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755));
+    if let Err(e) = check_program(&tmp, std::time::Duration::from_secs(20)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("the new program does not start on this server, kept the old one: {}", e));
+    }
     std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         e.to_string()
     })
+}
+
+/// Runs `<path> version` and expects "kanki-panel <version>" within `limit`
+pub fn check_program(path: &std::path::Path, limit: std::time::Duration) -> Result<(), String> {
+    use std::io::Read;
+    let mut child = std::process::Command::new(path)
+        .arg("version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let end = std::time::Instant::now() + limit;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) if std::time::Instant::now() < end => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("it did not answer in time".into());
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    };
+    let mut out = String::new();
+    if let Some(mut o) = child.stdout.take() {
+        let _ = o.read_to_string(&mut out);
+    }
+    if status.success() && out.trim_start().starts_with("kanki-panel ") {
+        Ok(())
+    } else {
+        Err(format!("it answered {:?}", out.trim().chars().take(80).collect::<String>()))
+    }
+}
+
+/// Temporary files of updates that were cut off (a crash, a full disk) are removed; one younger than
+/// ten minutes may belong to an update running right now (the other service of this machine) and stays
+fn clean_stale_updates(path: &std::path::Path, name: &str) {
+    let Some(dir) = path.parent() else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let prefix = format!(".{}.", name);
+    for e in rd.flatten() {
+        let f = e.file_name().to_string_lossy().to_string();
+        if !f.starts_with(&prefix) || !f.ends_with(".new") {
+            continue;
+        }
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|a| a.as_secs() > 600).unwrap_or(false);
+        if old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
+/// After the program file was replaced: the other Kanki services of this machine that run the same
+/// file (the node and the tunnel agent) restart onto the new one, so no old copy keeps running (and
+/// keeps its disk space) and both parts of the server run one version. Only running ones restart.
+pub fn restart_siblings() {
+    let me = match std::env::args().nth(1).as_deref() {
+        Some("node") => "kanki-node",
+        Some("tunnel-agent") => "kanki-tunnel",
+        _ => "kanki-panel",
+    };
+    let others: Vec<&str> = ["kanki-node", "kanki-tunnel"].into_iter().filter(|u| *u != me).collect();
+    let mut args = vec!["--no-block", "try-restart"];
+    args.extend(others);
+    let _ = std::process::Command::new("systemctl").args(&args).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
 }
 
 pub fn esc(s: &str) -> String {
@@ -372,8 +447,10 @@ mod exe_tests {
         std::fs::create_dir_all(&d).unwrap();
         let f = d.join("kanki-panel");
         std::fs::write(&f, b"old").unwrap();
-        super::swap_program(&f, b"new program").unwrap();
-        assert_eq!(std::fs::read(&f).unwrap(), b"new program");
+        // the new file must answer `version` before it is put in place
+        let new = b"#!/bin/sh\necho kanki-panel 9.9.9\n";
+        super::swap_program(&f, new).unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), new);
         // nothing else is left next to it
         assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1);
         let _ = std::fs::remove_dir_all(&d);
@@ -412,5 +489,36 @@ mod env_tests {
         let _ = std::fs::remove_file(&p);
         assert_eq!(m.get("PANEL_PORT").map(|s| s.as_str()), Some("20973"));
         assert_eq!(m.get("DOMAIN").map(|s| s.as_str()), Some("a.b"));
+    }
+}
+
+#[cfg(test)]
+mod update_tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    fn script(dir: &std::path::Path, name: &str, body: &str) -> std::path::PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, format!("#!/bin/sh\n{}\n", body)).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    #[test]
+    fn only_a_program_that_starts_replaces_the_old_one() {
+        let dir = std::env::temp_dir().join(format!("kanki-upd-{}", super::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let t = std::time::Duration::from_secs(5);
+        assert!(super::check_program(&script(&dir, "good", "echo kanki-panel 9.9.9"), t).is_ok());
+        assert!(super::check_program(&script(&dir, "bad", "echo Exec format error; exit 1"), t).is_err());
+        assert!(super::check_program(&script(&dir, "slow", "sleep 5; echo kanki-panel 1"), std::time::Duration::from_millis(300)).is_err());
+        // a download that is not a program at all: the old file stays as it was
+        let prog = script(&dir, "kanki-panel", "echo kanki-panel 1.0.0");
+        assert!(super::swap_program(&prog, b"not a program").is_err());
+        assert_eq!(std::fs::read_to_string(&prog).unwrap(), "#!/bin/sh\necho kanki-panel 1.0.0\n");
+        // a good one takes its place, and no temporary file is left
+        assert!(super::swap_program(&prog, b"#!/bin/sh\necho kanki-panel 2.0.0\n").is_ok());
+        assert!(std::fs::read_to_string(&prog).unwrap().contains("2.0.0"));
+        assert!(!std::fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().ends_with(".new")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

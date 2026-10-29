@@ -3,6 +3,24 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.21 — a tidy panel: every core in its own place
+- Every core (KANKI MIX, microtun, Xray, WireGuard, AmneziaWG, Hysteria2) has the same tabs: **Status, Servers, Tunnel, Settings** (Xray also Inbounds and Routing). Whatever belongs to a core is only there.
+- Xray: one place to add an inbound, the address users really connect to, and the rare actions behind «⋯».
+- Servers: each server lists its cores; tap one to open it.
+- Tunnel map: «All» or one Iran server at a time, each Iran server in its own colour; one server shows each of its tunnels on its own line with its ping. The dashboard no longer carries the tunnel map.
+- Tunnels list: a filter by server (tap Turkey: only Turkey's tunnels), grouped by Iran server, one short row per tunnel that opens for the details. Red on the map now always means «down».
+- Iran servers that still run unused VPN services: one button removes them (tunnels stay).
+- WireGuard, AmneziaWG and Hysteria2 can each be switched on or off per server; a new server starts with them off.
+- A deleted server leaves nothing behind, a daily sweep cleans what older versions left, and a server offline for 24 hours is removed by itself (with a warning and a backup; Iran servers only if you allow it).
+- Clearer names in the app («ENGLAND · تانل», «KANKI-XRAY gRPC»), an SSL tick when adding a server, and a security status card.
+- Safer updates: a new version replaces the old one only after it has started once on that server; the other Kanki service of the machine moves to it at once.
+
+## New in 3.20.1 — fixes from the 3.20.0 check
+- **The nightly Telegram backup works again** on panels without a self-signed server (it stopped with «nodepins: Cannot stat»), and a failed backup now sends you a Telegram message.
+- **A new Iran server installs only the tunnel agent**: no WireGuard, AmneziaWG, Hysteria2 or KANKI MIX on it and no VPN ports held, unless you tick «Serve VPN users». «Install VPN» on it still works.
+- **The panel opens faster**: about 250 KB instead of 850 KB, the script stays in the phone's cache until the next update, and a spinner shows instead of a black page.
+- **The Kanki DNS button** in the phone bar lights up, and the bar no longer jumps when you change page.
+
 ## New in 3.19.2 — API tokens on the Security page
 - **System › Security › API tokens** is back: make a token with only some rights (for example «Servers and tunnels» = `nodes`), copy it (shown once), see when each was last used, delete it when the work is done. The server side was there; the page had lost its card.
 

@@ -118,11 +118,15 @@ pub fn make_archive_with(app: &App, pass: &str, with_apps: bool) -> Result<(Vec<
         let data = app.data_dir();
         // the certificates of nodes with a self-signed one, as first seen: the new server keeps
         // trusting exactly those
-        copy_flat(&format!("{}/nodepins", data), &format!("{}/nodepins", dir));
+        let pins = copy_flat(&format!("{}/nodepins", data), &format!("{}/nodepins", dir));
         let apps = if with_apps { copy_flat(&format!("{}/apps", data), &format!("{}/apps", dir)) } else { 0 };
         std::fs::write(format!("{}/meta.json", dir), meta(app, apps).to_string()).map_err(|e| e.to_string())?;
         let tgz = format!("{}/out.tar.gz", dir);
-        let mut items = vec!["kanki.db", "files", "meta.json", "nodepins"];
+        // a panel without a self-signed node has no nodepins folder, and tar fails on a missing item
+        let mut items = vec!["kanki.db", "files", "meta.json"];
+        if pins > 0 {
+            items.push("nodepins");
+        }
         if apps > 0 {
             items.push("apps");
         }
@@ -588,6 +592,15 @@ async fn tgb_test(State(app): St, h: HeaderMap) -> Response {
     Json(json!({"ok": sent.is_some(), "bot": me["username"], "chat": chat})).into_response()
 }
 
+/// A text to the admin on the backup bot's chat (nothing when no bot or chat is set)
+pub async fn tell_admin(app: &App, text: &str) {
+    let token = tgb_token(app);
+    let chat = app.db.get("tgb_chat");
+    if !token.is_empty() && !chat.is_empty() {
+        let _ = tg_call(app, &token, "sendMessage", json!({"chat_id": chat, "text": text})).await;
+    }
+}
+
 pub async fn send_backup(app: &App) -> Result<(), String> {
     let token = tgb_token(app);
     let chat = app.db.get("tgb_chat");
@@ -665,6 +678,39 @@ pub async fn telegram_loop(app: Arc<App>) {
         }
         let r = send_backup(&app).await;
         record(&app, &r);
+        if let Err(e) = &r {
+            // a failed nightly backup was only written on the Backup page; tell the admin too
+            tell_admin(&app, &format!("⚠️ {} · بکاپ پنل ساخته نشد\n{}", app.db.get("panel_name"), e)).await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use crate::App;
+    use std::collections::HashMap;
+    use std::sync::{atomic::AtomicI64, Arc, Mutex};
+
+    #[test]
+    fn a_panel_without_nodepins_still_backs_up() {
+        let dir = std::env::temp_dir().join(format!("kanki-bk-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
+        let app = Arc::new(App {
+            db,
+            env: HashMap::from([("DATA_DIR".to_string(), dir.to_string_lossy().to_string())]),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        });
+        assert!(!dir.join("nodepins").exists());
+        let (bytes, name) = super::make_archive(&app, "").expect("backup without nodepins");
+        assert!(name.ends_with(".tar.gz") && !bytes.is_empty());
+        // with a pin it is taken along
+        std::fs::create_dir_all(dir.join("nodepins")).unwrap();
+        std::fs::write(dir.join("nodepins/a.pin"), "x").unwrap();
+        assert!(super::make_archive(&app, "").is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

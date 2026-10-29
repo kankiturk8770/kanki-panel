@@ -34,6 +34,8 @@ mod exitgeo;
 mod migrate;
 #[path = "http/servers.rs"]
 mod servers;
+#[path = "http/cleanup.rs"]
+mod cleanup;
 #[path = "http/direct.rs"]
 mod direct;
 #[path = "http/twin.rs"]
@@ -42,6 +44,8 @@ mod twin;
 // vpn: protocol engines + node sync
 mod dns;
 mod emergency;
+#[path = "vpn/cores.rs"]
+mod cores;
 #[path = "vpn/hy2.rs"]
 mod hy2;
 #[path = "vpn/kmix.rs"]
@@ -311,6 +315,8 @@ async fn main() {
     // certificates of this server (Xray, emergency chat) that are close to their end
     certbot::renew_loop();
     tokio::spawn(backup::telegram_loop(app.clone()));
+    tokio::spawn(cleanup::sweep_loop(app.clone()));
+    tokio::spawn(cleanup::offline_loop(app.clone()));
     tokio::spawn(channel::channel_loop(app.clone()));
     if let Some(b) = bot::Bot::new(app.clone()) {
         tokio::spawn(b.run());

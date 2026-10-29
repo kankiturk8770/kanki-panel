@@ -228,6 +228,7 @@ async fn update_from_panel(http: &reqwest::Client, panel: &str, id: &str, token:
     }
     let path = crate::util::exe_path().map_err(|e| e.to_string())?;
     crate::util::swap_program(&path, &bytes)?;
+    crate::util::restart_siblings();
     eprintln!("updated from the panel: restarting");
     std::process::exit(0);
 }

@@ -116,6 +116,11 @@ pub fn set_node_off(app: &App, node_id: &str, off: bool) {
     app.db.set("kmix_nodes", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
 }
 
+/// The node ids KANKI MIX keeps settings for
+pub fn node_ids(app: &App) -> Vec<String> {
+    serde_json::from_str::<HashMap<String, NodeOpt>>(&app.db.get("kmix_nodes")).map(|m| m.into_keys().collect()).unwrap_or_default()
+}
+
 /// A removed server's KANKI MIX settings go with it
 pub fn forget_node(app: &App, node_id: &str) {
     let mut m: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();
@@ -325,7 +330,7 @@ pub fn link(app: &App, u: &User, n: &Node) -> Option<String> {
 pub fn tunnel_name(app: &App, n: &Node) -> String {
     let s = settings(app);
     let name = s.nodes.get(&n.id).map(|o| o.tun_name.trim().to_string()).unwrap_or_default();
-    if name.is_empty() { crate::twin::default_name(&n.name) } else { name }
+    crate::twin::named(&n.name, &name)
 }
 
 /// The user's second link for one server, through the tunnel (the Iran address): the same key and

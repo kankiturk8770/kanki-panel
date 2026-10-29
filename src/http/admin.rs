@@ -702,6 +702,7 @@ pub async fn self_update(app: &App) -> Result<String, String> {
     }
     let path = crate::util::exe_path().map_err(|e| e.to_string())?;
     crate::util::swap_program(&path, &bytes)?;
+    crate::util::restart_siblings();
     let v = latest_version(app).await.unwrap_or_default();
     restart_self();
     Ok(v)

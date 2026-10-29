@@ -158,6 +158,31 @@ pub fn valid_username(s: &str) -> bool {
 /// The panel page with the version on every script it loads (`/assets/kanki-panel.js?v=3.17.1`): a cache in
 /// front of the panel (Cloudflare caches .js by itself) then never hands out an old copy of one of them next
 /// to new ones, which drew the old look after an update.
+fn gzip(b: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    let _ = e.write_all(b);
+    e.finish().unwrap_or_default()
+}
+
+/// The gzipped copy when the browser takes gzip, else the plain one
+fn maybe_gzip(h: &HeaderMap, plain: &'static [u8], gz: &'static [u8], ctype: &'static str, cache: &'static str, deny_frame: bool) -> Response {
+    let takes = h.get(header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok()).map(|v| v.contains("gzip")).unwrap_or(false);
+    let mut r = if takes && !gz.is_empty() {
+        ([(header::CONTENT_ENCODING, "gzip")], gz).into_response()
+    } else {
+        plain.into_response()
+    };
+    let hs = r.headers_mut();
+    hs.insert(header::CONTENT_TYPE, header::HeaderValue::from_static(ctype));
+    hs.insert(header::CACHE_CONTROL, header::HeaderValue::from_static(cache));
+    hs.insert(header::VARY, header::HeaderValue::from_static("Accept-Encoding"));
+    if deny_frame {
+        hs.insert(header::X_FRAME_OPTIONS, header::HeaderValue::from_static("DENY"));
+    }
+    r
+}
+
 fn admin_page() -> &'static str {
     static PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     PAGE.get_or_init(|| versioned(include_str!("../../assets/web/index.html"), crate::VERSION))
@@ -212,8 +237,10 @@ pub fn user_json(app: &App, u: &User) -> Value {
 pub fn master_router(app: Arc<App>) -> Router {
     Router::new()
         .route("/", get(|| async { Redirect::to("/admin") }))
-        .route("/admin", get(|| async {
-            ([(header::CACHE_CONTROL, "no-store"), (header::X_FRAME_OPTIONS, "DENY")], Html(admin_page()))
+        .route("/admin", get(|h: HeaderMap| async move {
+            static GZ: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+            let gz = GZ.get_or_init(|| gzip(admin_page().as_bytes()));
+            maybe_gzip(&h, admin_page().as_bytes(), gz, "text/html; charset=utf-8", "no-store", true)
         }))
         // Vazirmatn (SIL Open Font License), shared by the panel and the subscription page
         .route("/assets/vazirmatn.woff", get(|| async {
@@ -222,8 +249,11 @@ pub fn master_router(app: Arc<App>) -> Router {
         }))
         // the panel's extension script (DNS, Xray and node types): no secrets in it
         // the whole panel script, one file
-        .route("/assets/kanki-panel.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/panel.js"))
+        // the page asks for it with ?v=<version>, so a phone keeps it until the next update
+        .route("/assets/kanki-panel.js", get(|h: HeaderMap| async move {
+            static GZ: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+            let js = include_str!("../../assets/web/panel.js").as_bytes();
+            maybe_gzip(&h, js, GZ.get_or_init(|| gzip(js)), "application/javascript; charset=utf-8", "public, max-age=31536000, immutable", false)
         }))
         .route("/api/overview", get(overview))
         .route("/api/users", get(users_list).post(users_create))
@@ -658,6 +688,9 @@ pub(crate) fn delete_node(app: &Arc<App>, id: &str) -> Option<Node> {
         let _ = app.db.exec("UPDATE users SET nodes=?1 WHERE id=?2", &[&list, &u.id]);
     }
     crate::kmix::forget_node(app, id);
+    crate::microtun::forget_node(app, id);
+    crate::twin::forget(app, &format!("node:{}", id));
+    crate::cores::forget(app, id);
     crate::direct::forget(app, id);
     crate::exitgeo::forget(app, &[id.to_string()]);
     crate::live::forget(id);
@@ -891,6 +924,8 @@ pub const SETTING_KEYS: &[&str] = &[
     "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "conn_limit_on", "tg_alerts", "logo", "price_rules",
     // v2.8.4: ready values of the "New user" form
     "def_gb", "def_days", "def_conns",
+    // 3.21: servers offline for too long are removed (cleanup.rs)
+    "autodel_on", "autodel_hours", "autodel_iran",
 ];
 
 /// "owner/repo" with only the characters GitHub allows
@@ -906,6 +941,10 @@ async fn settings_get(State(app): St, h: HeaderMap) -> Response {
     for k in SETTING_KEYS {
         m.insert(k.to_string(), json!(app.db.get(k)));
     }
+    // removing servers that stay offline is on by default, after 24 hours
+    let (on, hours, _) = crate::cleanup::auto_settings(&app);
+    m.insert("autodel_on".into(), json!(if on { "1" } else { "0" }));
+    m.insert("autodel_hours".into(), json!(hours.to_string()));
     m.insert("sub_domain".into(), json!(app.db.get("sub_domain")));
     m.insert("web_bind".into(), json!(app.env.get("PANEL_BIND").cloned().unwrap_or_else(|| "127.0.0.1".into())));
     m.insert("web_port".into(), json!(app.env.get("PANEL_PORT").cloned().unwrap_or_default()));
@@ -1158,9 +1197,10 @@ pub fn node_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     let info = node_info(n);
     let mut v = vec![];
     let has = |k: &str| info[k].as_str().map(|s| !s.is_empty()).unwrap_or(false);
-    if u.has_proto("wg") && has("wg_pub") && crate::direct::through_tunnel(app, n) { v.push("wireguard"); }
-    if u.has_proto("awg") && has("awg_pub") { v.push("amneziawg"); }
-    if u.has_proto("hy2") && has("hy2_port") { v.push("hysteria2"); }
+    let on = |c: &str| !crate::cores::is_off(app, &n.id, c);
+    if u.has_proto("wg") && has("wg_pub") && on("wg") && crate::direct::through_tunnel(app, n) { v.push("wireguard"); }
+    if u.has_proto("awg") && has("awg_pub") && on("awg") { v.push("amneziawg"); }
+    if u.has_proto("hy2") && has("hy2_port") && on("hy2") { v.push("hysteria2"); }
     if u.has_proto("kmix") && info["kmix_port"].as_u64().is_some() { v.push("kankimix"); }
     v
 }
@@ -1176,9 +1216,10 @@ pub fn twin_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     // each core through its own Iran address, else the server's
     let tun = |c: &str| crate::twin::of_node_core(app, n, c).is_some();
     let mut v = vec![];
-    if u.has_proto("wg") && has("wg_pub") && tun("wg") { v.push("wireguard"); }
-    if u.has_proto("awg") && has("awg_pub") && tun("awg") { v.push("amneziawg"); }
-    if u.has_proto("hy2") && has("hy2_port") && tun("hy2") { v.push("hysteria2"); }
+    let on = |c: &str| !crate::cores::is_off(app, &n.id, c);
+    if u.has_proto("wg") && has("wg_pub") && on("wg") && tun("wg") { v.push("wireguard"); }
+    if u.has_proto("awg") && has("awg_pub") && on("awg") && tun("awg") { v.push("amneziawg"); }
+    if u.has_proto("hy2") && has("hy2_port") && on("hy2") && tun("hy2") { v.push("hysteria2"); }
     if kmix { v.push("kankimix"); }
     v
 }
@@ -1693,11 +1734,8 @@ async fn agent_update(State(app): St, h: HeaderMap) -> Response {
         return err(StatusCode::UNAUTHORIZED, "bad token");
     }
     match crate::admin::self_update(&app).await {
-        Ok(v) => {
-            // the tunnel agent of this machine (when there is one) runs the same file: restart it onto the new one
-            let _ = std::process::Command::new("systemctl").args(["restart", "kanki-tunnel"]).spawn();
-            Json(json!({"ok": true, "version": v})).into_response()
-        }
+        // (the tunnel agent of this machine, which runs the same file, was restarted by self_update)
+        Ok(v) => Json(json!({"ok": true, "version": v})).into_response(),
         Err(e) => Json(json!({"ok": false, "error": e})).into_response(),
     }
 }

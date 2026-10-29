@@ -84,6 +84,19 @@ fn save(app: &App, s: &Settings) {
     app.db.set("mtun_cfg", &serde_json::to_string(s).unwrap_or_default());
 }
 
+/// A removed server's microtun settings go with it
+pub fn forget_node(app: &App, node_id: &str) {
+    let mut s = settings(app);
+    if s.nodes.remove(node_id).is_some() {
+        save(app, &s);
+    }
+}
+
+/// The node ids microtun keeps settings for
+pub fn node_ids(app: &App) -> Vec<String> {
+    settings(app).nodes.keys().cloned().collect()
+}
+
 /// Gives server `node_id` its own port (it moves there on its next sync).
 pub fn set_node_port(app: &App, node_id: &str, port: u16) {
     let mut s = settings(app);
