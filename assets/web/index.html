@@ -2443,60 +2443,6 @@ body.k38 :is(button,a,.kpi,.uchip,select,input,textarea):focus-visible{outline:2
 
 @media(prefers-reduced-motion:reduce){body.k38 .kpi{transition:none}body.k38 .kpi:hover{transform:none}}
 
-/* Xray part one: servers across the page */
-
-.g2.k310one{grid-template-columns:1fr!important}
-
-/* server cards with a side drawer (KANKI MIX, Xray) */
-
-.k310cards .kxl{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr));gap:10px}
-
-.k310cards .kxr{border-radius:16px;border:1px solid var(--gb,var(--ln));background:linear-gradient(180deg,color-mix(in srgb,var(--t) 3%,var(--c1)),var(--c2));transition:border-color .18s,transform .18s,box-shadow .18s;margin:0!important}
-
-.k310cards .kxr:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--a) 40%,transparent)}
-
-/* the open card must not move: a transform would trap the fixed drawer inside the card */
-
-.k310cards .kxr.open,.k310cards .kxr.open:hover{transform:none!important}
-
-.k310cards .kxr.open{border-color:var(--a);box-shadow:0 0 0 1px var(--a),0 12px 30px -16px color-mix(in srgb,var(--a) 60%,transparent)}
-
-.k310cards .kxr-h{flex-wrap:wrap;row-gap:8px;padding:14px!important;min-height:86px;align-content:center}
-
-.k310cards .kxr-h .sp{flex-basis:100%;height:0}
-
-.k310cards .kxr-h b{font-size:14px}
-
-.k310cards .kxr-arr{order:9;margin-inline-start:auto;transform:none!important;opacity:.6}
-
-html[dir=rtl] .k310cards .kxr-arr svg{transform:scaleX(-1)}
-
-.k310cards .kxr.open>.kxr-b{position:fixed;z-index:60;top:0;bottom:0;inset-inline-end:0;width:min(460px,100vw);height:auto!important;overflow:auto;overscroll-behavior:contain;
- background:var(--c1);border-inline-start:1px solid var(--gb2,var(--ln));box-shadow:-40px 0 80px -30px rgba(0,0,0,.85);
- padding:0 18px calc(24px + env(safe-area-inset-bottom,0px));animation:k310in .22s cubic-bezier(.2,.8,.2,1)}
-
-body.light .k310cards .kxr.open>.kxr-b{box-shadow:-30px 0 70px -30px rgba(0,0,0,.3)}
-
-.k310cards .kxr.open>.kxr-b.shut{animation:k310out .18s ease-in forwards}
-
-@keyframes k310in{from{transform:translateX(var(--k310dx,100%))}to{transform:none}}
-
-@keyframes k310out{to{transform:translateX(var(--k310dx,100%))}}
-
-html[dir=rtl] .k310cards{--k310dx:-100%}
-
-.k310dh{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:10px;margin:0 -18px 12px;padding:calc(14px + env(safe-area-inset-top,0px)) 18px 12px;background:color-mix(in srgb,var(--c1) 92%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--gb,var(--ln))}
-
-.k310dh b{flex:1;font-size:16px;font-weight:900}
-
-.k310scrim{display:none;position:fixed;inset:0;z-index:59;background:rgba(0,0,0,.55);backdrop-filter:blur(2px)}
-
-.k310scrim.on{display:block}
-
-@media(max-width:700px){.k310cards .kxr.open>.kxr-b{top:auto;width:100vw;max-height:86vh;border-radius:22px 22px 0 0;border:1px solid var(--gb2,var(--ln));border-bottom:0;--k310dx:0;animation-name:k310up}
- .k310dh{padding-top:14px}}
-
-@keyframes k310up{from{transform:translateY(100%)}to{transform:none}}
 
 /* dashboard */
 
@@ -2544,7 +2490,6 @@ html[dir=rtl] .k310cards{--k310dx:-100%}
 
 @media(max-width:620px){#pg .ph .row:has(#d_live){flex-wrap:wrap!important}}
 
-@media(prefers-reduced-motion:reduce){.k310cards .kxr.open>.kxr-b{animation:none}.k310cards .kxr{transition:none}}
 
 /* settings: the section list stays in view, the save bar sticks to the bottom of the section */
 
@@ -2564,7 +2509,7 @@ html[dir=rtl] .k310cards{--k310dx:-100%}
 
 @keyframes kdang{to{--kda:360deg}}
 
-body.kd .kd-it.on::after,body.kd .kd-tn.on::after,body.kd .kd-rail .stl a.on::after,body.kd.kd-vpn .kxl>.kxr.open>.kxr-h::after,body.kd .uchip.kd-u:hover::after,body.kd #st .stn button.on::after,body.kd .k310st::after,body.kd .kd-chip.on::after,body.kd #svp_g.kd-srv .kxr>.kxr-h:hover::after{
+body.kd .kd-it.on::after,body.kd .kd-tn.on::after,body.kd .uchip.kd-u:hover::after,body.kd #st .stn button.on::after,body.kd .k310st::after{
  content:"";position:absolute;inset:0;border-radius:inherit;padding:1.5px;pointer-events:none;z-index:2;
  background:conic-gradient(from var(--kda),transparent 0 55%,var(--cc,var(--a)) 70%,#fff 74%,var(--cc,var(--a)) 78%,transparent 92%);
  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);animation:kdang 3.2s linear infinite;animation-delay:var(--kdph,0s)}
@@ -2652,7 +2597,7 @@ body.kd.kd-topm .kd-top{display:flex;position:sticky;top:59px;z-index:6;gap:8px;
 
 .kd-top::-webkit-scrollbar{display:none}
 
-.kd-top.kd-drag,.kd-rail .stl.kd-drag{cursor:grabbing;scroll-snap-type:none!important}
+.kd-top.kd-drag{cursor:grabbing;scroll-snap-type:none!important}
 
 .kd-sep{flex:none;font-size:11px;font-weight:800;color:var(--s);padding:0 8px 0 4px}
 
@@ -2726,97 +2671,6 @@ body.kd .msheet.k38sheet.on .k38tiles:nth-of-type(3) .k38tile{animation-delay:.1
 
 body.kd .msheet.k38sheet.on .k38tiles:nth-of-type(n+4) .k38tile{animation-delay:.15s}
 
-/* ---- Cores: the rail of cards ---- */
-
-body.kd .sectabs.kd-rail{position:relative;top:auto;display:block;padding:0;border:0;background:none;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none;margin-bottom:10px}
-
-body.kd .sectabs.kd-rail .sth2{display:none}
-
-body.kd .sectabs.kd-rail .stl{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:8px 6px 12px;border:0;background:none;border-radius:0;cursor:grab;
- -webkit-mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent)}
-
-body.kd .sectabs.kd-rail .stl a{position:relative;flex:0 0 136px;scroll-snap-align:center;display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:7px;row-gap:3px;padding:9px 10px!important;border-radius:15px!important;
- border:1px solid var(--gb2,var(--ln));background:linear-gradient(180deg,color-mix(in srgb,var(--t) 4%,var(--c1)),var(--c2))!important;color:var(--t)!important;white-space:normal;
- transition:transform .45s cubic-bezier(.2,.8,.2,1),box-shadow .45s,border-color .3s!important}
-
-body.kd .sectabs.kd-rail .stl a:hover{border-color:color-mix(in srgb,var(--cc) 45%,transparent)}
-
-body.kd .sectabs.kd-rail .stl a b{font-size:12.5px;font-weight:900}
-
-body.kd .sectabs.kd-rail .stl a b{grid-column:2;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-body.kd .sectabs.kd-rail .stl a small{grid-column:1/-1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;font-weight:600;color:var(--s);line-height:1.4}
-
-.kd-ci{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:color-mix(in srgb,var(--cc) 16%,transparent);color:var(--cc);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--cc) 35%,transparent);transition:all .35s}
-
-body.kd .sectabs.kd-rail .stl a.on{transform:translateY(-3px) scale(1.03);border-color:transparent;box-shadow:0 20px 44px -22px var(--cc)}
-
-body.kd .sectabs.kd-rail .stl a.on .kd-ci{background:var(--cc);color:#0b0b0a;box-shadow:0 0 24px -2px var(--cc)}
-
-/* ---- Cores: servers as a row of country chips (swipe sideways); the picked one's settings below ---- */
-
-.kd-crail{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding:6px 4px 12px;margin:0 -4px;cursor:grab;scroll-snap-type:x proximity;
- -webkit-mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent);mask-image:linear-gradient(90deg,transparent,#000 20px,#000 calc(100% - 20px),transparent)}
-
-.kd-crail::-webkit-scrollbar{display:none}
-
-.kd-chip{position:relative;flex:none;scroll-snap-align:start;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:3px 9px;border-radius:12px;border:1px solid var(--gb2,var(--ln));
- background:var(--c1);color:var(--t);font:inherit;cursor:pointer;transition:all .3s cubic-bezier(.2,.8,.2,1)}
-
-.kd-cf{display:inline-flex;align-items:flex-start;line-height:1}
-
-.kd-cf .flg{font-size:20px}
-
-.kd-cf sup{font-size:10px;font-weight:900;margin-inline-start:1px;color:var(--a)}
-
-.kd-cl{display:flex;flex-direction:column;align-items:flex-start;gap:0;line-height:1.05;font-family:ui-monospace,Menlo,Consolas,monospace;direction:ltr}
-
-.kd-cl i{font-style:normal;font-size:8.5px;font-weight:800;color:var(--s);opacity:.7;letter-spacing:.3px}
-
-.kd-cl i.g{color:var(--ok);opacity:1}
-
-.kd-chip.on .kd-cl i{color:rgba(22,15,0,.45)!important}
-
-.kd-chip.on .kd-cl i.g{color:#0b4d2c!important}
-
-.kd-chip.on .kd-cf sup{color:#160f00!important}
-
-.kd-chip:hover{border-color:color-mix(in srgb,var(--a) 45%,transparent)}
-
-.kd-chip.on{background:linear-gradient(180deg,#FFE9A6,var(--a) 55%,var(--ad));color:#160f00;border-color:transparent;box-shadow:0 10px 24px -12px color-mix(in srgb,var(--a) 90%,transparent);--cc:#fff}
-
-body.kd.kd-vpn .kxl.kd-rows{display:block!important}
-
-body.kd.kd-vpn .kxl.kd-rows>.kxr:not(.open){display:none!important}
-
-body.kd.kd-vpn .kxl.kd-rows>.kxr>.kxr-h{display:none!important}
-
-body.kd.kd-vpn .kxl.kd-rows>.kxr.open{border:0!important;background:none!important;box-shadow:none!important;transform:none!important}
-
-body.kd.kd-vpn .kxl.kd-rows>.kxr.open>.kxr-b{position:static!important;width:auto!important;height:auto!important;max-height:none!important;overflow:visible!important;inset:auto!important;box-shadow:none!important;
- border:1px solid var(--gb,var(--ln))!important;border-radius:16px!important;background:linear-gradient(180deg,color-mix(in srgb,var(--t) 3%,var(--c1)),var(--c2))!important;padding:4px 14px 12px!important;animation:none!important}
-
-/* opening one plays the entrance once; the page's own refresh redraws it without moving (no blinking) */
-
-body.kd.kd-vpn .kxl.kd-rows>.kxr.open>.kxr-b.anim{animation:kdrise .45s cubic-bezier(.2,.8,.2,1)!important}
-
-body.kd .k310cards .kxr.open>.kxr-b:not(.anim){animation:none!important}
-
-body.kd.kd-vpn .k310dh,body.kd.kd-vpn #k310scrim{display:none!important}
-
-body.kd.kd-vpn.k310drw{overflow:visible!important}
-
-/* the top of a core page: a smaller title, two small buttons, the numbers as one slim row */
-
-body.kd.kd-vpn #pg>.ph{gap:8px!important;margin-bottom:8px!important;padding-bottom:10px!important}
-
-body.kd.kd-vpn #pg>.ph h2{font-size:18px!important}
-
-body.kd.kd-vpn #pg>.ph p{font-size:12px!important;line-height:1.6;margin-top:2px!important}
-
-body.kd.kd-vpn #pg>.ph .phi{width:38px!important;height:38px!important}
-
-body.kd.kd-vpn #pg>.ph .btn,body.kd.kd-vpn #pg>.ph .b2{min-height:32px!important;padding-inline:11px!important;font-size:12px!important;border-radius:10px!important}
 
 body.kd .kv>div{display:flex!important;align-items:baseline;justify-content:space-between;gap:8px}
 
@@ -2832,31 +2686,6 @@ body.kd .kv small{font-size:11px!important}
 
 body.kd .kv b{font-size:14px!important;line-height:1.4}
 
-/* Xray's own tabs: one row you swipe sideways */
-
-#xr_tabs.kd-xtabs{flex-wrap:nowrap!important;overflow-x:auto;cursor:grab;gap:6px;padding:2px 2px 8px}
-
-#xr_tabs.kd-xtabs a{flex:none;padding:6px 11px!important;font-size:12px!important;min-height:36px;border-radius:11px!important}
-
-/* ---- Servers page: two columns of slim cards, a pencil, the settings in the side drawer ---- */
-
-body.kd #svp_g.kd-srv .kxl{display:grid!important;grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}
-
-body.kd #svp_g.kd-srv .kxr{border-radius:14px!important}
-
-body.kd #svp_g.kd-srv .kxr>.kxr-h{position:relative;min-height:52px!important;padding:8px 10px!important;gap:4px 7px!important;row-gap:4px!important;align-content:center}
-
-body.kd #svp_g.kd-srv .kxr>.kxr-h b{font-size:13px!important;overflow-wrap:anywhere}
-
-body.kd #svp_g.kd-srv .kxr>.kxr-h .kxr-arr,body.kd #svp_g.kd-srv .kxr>.kxr-h .sp{display:none!important}
-
-body.kd #svp_g.kd-srv .kxr>.kxr-h .kxc-tag,body.kd #svp_g.kd-srv .kxr>.kxr-h .kxr-st{font-size:10px!important;padding:0 6px!important}
-
-.kd-pen{order:20;margin-inline-start:auto;width:30px;height:30px;flex:none;border-radius:10px;display:grid;place-items:center;border:1px solid var(--gb2,var(--ln));background:var(--in);color:var(--a)}
-
-body.kd #svp_g.kd-srv .kxr>.kxr-h:hover .kd-pen{background:var(--a);color:#160f00}
-
-@media(max-width:380px){body.kd #svp_g.kd-srv .kxl{grid-template-columns:1fr!important}}
 
 /* ---- Anti-DPI: one line per method; a tap opens what it is for ---- */
 
@@ -2945,7 +2774,7 @@ body.kd .uchip.kd-u .nm{flex:1;min-width:0;white-space:normal!important;overflow
 .k310bar.warm~.kd-meta span:first-child b{color:var(--warn)}
 
 @media(prefers-reduced-motion:reduce){#pg.kd-enter *,body.kd .msheet.k38sheet.on,body.kd .msheet.k38sheet.on .k38tile{animation:none!important}
- body.kd nav.side a.kd-it,.kd-gb,.kd-chev{transition:none!important}body.kd .kd-it.on::after,body.kd .kd-tn.on::after,body.kd .kd-rail .stl a.on::after,body.kd.kd-vpn .kxl>.kxr.open>.kxr-h::after,body.kd .k310st::after{animation:none}}
+ body.kd nav.side a.kd-it,.kd-gb,.kd-chev{transition:none!important}body.kd .kd-it.on::after,body.kd .kd-tn.on::after,body.kd .k310st::after{animation:none}}
 
 #kdrm{position:fixed;z-index:9998;inset-inline-start:50%;bottom:16px;transform:translate(50%,140%);width:min(380px,calc(100vw - 32px));max-height:min(60vh,420px);overflow:auto;
  background:#0b0b0b;color:var(--t,#fff);border:1px solid color-mix(in srgb,var(--a,#f5b301) 45%,transparent);border-radius:16px;padding:10px 12px 12px;
@@ -2998,6 +2827,121 @@ body.kd .uchip.kd-u .nm{flex:1;min-width:0;white-space:normal!important;overflow
 @keyframes kdrmspin{to{transform:rotate(360deg)}}
 
 @media(prefers-reduced-motion:reduce){#kdrm{transition:none}.kdrm-sp,.kdrm-r i{animation:none}}
+/* ==== the parts every page is built from (CLAUDE.md, design rules) ====
+   three widths only: phone < 620, tablet 620-899, desktop >= 900. Spaces 4/8/12/16/24/32, type 12/13/14/16/20.
+   A page is: a head, one row of tabs, then groups. A group is one card; its rows are split by hairlines,
+   never a card inside a card. */
+.ku{max-width:980px}
+.ku-head{display:flex;align-items:flex-start;gap:12px;margin:0 0 16px}
+.ku-hi{flex:none;width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:#1a1206;background:linear-gradient(145deg,var(--al),var(--a),var(--ad))}
+.ku-ht{flex:1;min-width:0}
+.ku-ht h2{margin:0;font-size:20px;font-weight:800;line-height:1.3}
+.ku-ht p{margin:4px 0 0;font-size:13px;line-height:1.7;color:var(--s);max-width:64ch}
+.ku-ha{display:flex;gap:8px;flex-wrap:wrap;flex:none}
+/* tabs: words with a line under the open one; on a phone the row scrolls, no tab is cut in half */
+body.k38 .ku .ku-tabs{display:flex;gap:4px;margin:0 0 16px;padding:0 0 0;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--ln);scroll-padding-inline:16px}
+body.k38 .ku .ku-tabs a{flex:none;display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 12px!important;border:0!important;border-radius:0!important;background:none!important;box-shadow:none!important;
+ color:var(--s)!important;font-size:14px;font-weight:700;text-decoration:none;position:relative;white-space:nowrap}
+body.k38 .ku .ku-tabs a:hover{color:var(--t)!important}
+body.k38 .ku .ku-tabs a.on{color:var(--t)!important}
+body.k38 .ku .ku-tabs a.on:after{content:"";position:absolute;inset-inline:8px;bottom:-1px;height:2px;border-radius:2px;background:var(--a)}
+body.k38 .ku .ku-tabs a em{font-style:normal;font-size:12px;font-weight:700;padding:0 6px;border-radius:8px;background:var(--in);color:var(--s)}
+/* numbers: 2 columns on a phone, 4 from a tablet up */
+.ku-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:0 0 16px}
+.ku-stats>div{min-width:0;padding:12px;border:1px solid var(--ln);border-radius:12px;background:var(--c1)}
+.ku-stats small{display:block;font-size:12px;color:var(--s);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ku-stats b{display:block;margin-top:4px;font-size:16px;font-weight:800}
+.ku-stats b.c-g{color:var(--ok)}.ku-stats b.c-y{color:var(--warn)}.ku-stats b.c-r{color:var(--bad)}
+@media(min-width:620px){.ku-stats{grid-template-columns:repeat(4,minmax(0,1fr))}}
+/* a group: title, count, one add button; the rows below it */
+.ku-group{border:1px solid var(--ln);border-radius:16px;background:var(--c1);margin:0 0 16px;overflow:hidden}
+.ku-gh{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:12px 16px;min-height:56px;border-bottom:1px solid var(--ln)}
+.ku-gh>b{font-size:16px;font-weight:800}
+.ku-n{font-size:12px;font-weight:700;color:var(--s);padding:0 8px;border-radius:999px;border:1px solid var(--ln)}
+.ku-gh .sp{flex:1}
+.ku-gb>*:first-child{border-top:0!important}
+.ku-note{font-size:13px;line-height:1.7;margin:0;padding:12px 16px;border-bottom:1px solid var(--ln)}
+.ku-empty{margin:0;padding:16px;font-size:13px}
+/* a line with words and buttons, and a switch with its words (the whole line is the switch) */
+.ku-line,.ku-sw{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;padding:12px 16px;min-height:56px;border-top:1px solid var(--ln)}
+.ku-lt{flex:1 1 auto;min-width:120px;font-size:14px;font-weight:700}
+.ku-lb{display:flex;gap:8px;flex-wrap:wrap}
+.ku-sw{cursor:pointer;flex-wrap:nowrap}
+.ku-swt{flex:1;min-width:0}
+.ku-swt b{display:block;font-size:14px}
+.ku-swt small{display:block;margin-top:2px;font-size:12px;line-height:1.6;color:var(--s)}
+/* an item row: status, flag, name, the main action; tags on the second line; the address last */
+.ku-item{padding:12px 16px;border-top:1px solid var(--ln);min-width:0}
+.ku-item[role=button]{cursor:pointer}
+.ku-item.off .ku-i1,.ku-item.off .ku-i2{opacity:.6}
+.ku-i1{display:flex;align-items:center;gap:8px;min-height:40px;min-width:0}
+.ku-i1 .dot{flex:none}
+.ku-i1 .flg{font-size:18px;flex:none}
+.ku-nm{font-size:14px;font-weight:800;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ku-i1 .sp{flex:1}
+.ku-more{flex:none;min-width:40px!important;height:40px!important;font-size:18px!important;line-height:1}
+.ku-i2{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.ku-tag{font-size:12px;line-height:20px;padding:0 8px;border-radius:8px;border:1px solid var(--ln);color:var(--s);white-space:nowrap}
+.ku-tag.a{color:var(--a);border-color:color-mix(in srgb,var(--a) 40%,transparent)}
+.ku-tag.g{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 40%,transparent)}
+.ku-tag.y{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+.ku-tag.r{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 40%,transparent)}
+.ku-tag.b{color:var(--info);border-color:color-mix(in srgb,var(--info) 40%,transparent)}
+.ku-i3{margin-top:4px;font-size:13px;color:var(--s);overflow-wrap:anywhere;text-align:start}
+.ku-i4{display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;margin-top:8px;font-size:12px;color:var(--s)}
+.ku-i4 b{color:var(--t);font-weight:700}
+.ku-i4 .sp{flex:1}
+.ku-i4 .ku-sw{padding:0;min-height:40px;border:0;gap:8px}
+.ku-i4 .ku-swt b{font-size:13px;font-weight:700}
+/* search and filter above a list */
+.ku-tools{display:flex;gap:8px;margin:0 0 12px}
+.ku-tools input{flex:1;min-width:0}
+.ku-tools select{width:auto;max-width:45%}
+/* help that most people need once: closed */
+.ku-form{padding:12px 16px 4px}
+.ku-form .f:first-child{margin-top:0}
+.ku-form small.muted{display:block;margin-top:4px;font-size:12px;line-height:1.6}
+.ku-save{display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid var(--ln)}
+.ku-save .btn{min-width:120px;min-height:40px}
+/* older cards listed inside a group lose their own frame (no card inside a card) */
+body.k38 .ku .ku-gb .ibl{display:block!important;gap:0!important}
+body.k38 .ku .ku-gb .ibc{border:0!important;border-top:1px solid var(--ln)!important;border-radius:0!important;background:none!important;box-shadow:none!important;margin:0!important;padding:12px 16px!important}
+body.k38 .ku .ku-gb .ibc:first-child{border-top:0!important}
+/* the cores of a server (Servers page): read only, each one opens that core */
+.ku-cores{display:flex;flex-wrap:wrap;gap:8px}
+.ku-cores a{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 12px;border:1px solid var(--ln);border-radius:12px;color:var(--t);text-decoration:none;font-size:13px;font-weight:700}
+.ku-cores a:hover{border-color:var(--a)}
+.ku-cores small{color:var(--s);font-weight:600}
+.ku-help{margin:0 0 16px;border:1px solid var(--ln);border-radius:16px;padding:0 16px}
+.ku-help summary{cursor:pointer;min-height:48px;display:flex;align-items:center;font-size:14px;font-weight:700;color:var(--s)}
+.ku-help p{margin:0 0 16px;font-size:13px;line-height:1.8;color:var(--s)}
+/* the rarer actions of one thing (⋯): a sheet of full-width buttons, deleting last */
+.ku-menu{display:flex;flex-direction:column;gap:4px}
+.ku-mi{display:flex;align-items:center;gap:12px;min-height:48px;padding:0 12px;border:0;border-radius:12px;background:none;color:var(--t);font:inherit;font-size:14px;font-weight:700;cursor:pointer;text-align:start}
+.ku-mi:hover{background:var(--in)}
+.ku-mi.danger{color:var(--bad)}
+.ku-msep{height:1px;background:var(--ln);margin:8px 0}
+.ku-danger{margin-top:12px;padding-top:12px;border-top:1px dashed var(--ln)}
+/* the rows of a server list inside a group: flat, split by hairlines */
+.ku .kxbox{border:0;border-radius:0;background:none;padding:0;margin:0;max-width:none}
+.ku .kxbox+.kxbox{border-top:1px solid var(--ln)}
+.ku .kxbox-h{padding:12px 16px 4px;min-height:40px}
+.ku .kxbox-h b{font-size:13px;color:var(--s)}
+.ku .kxbox-i{width:24px;height:24px;font-size:14px}
+.ku .kxl{gap:0}
+.ku .kxr{border:0;border-top:1px solid var(--ln);border-radius:0;background:none;box-shadow:none}
+.ku .kxbox-h+.kxl>.kxr:first-child{border-top:0}
+.ku .kxr.open{background:color-mix(in srgb,var(--a) 4%,transparent);box-shadow:none}
+.ku .kxr-h{padding:8px 16px;min-height:56px;border-radius:0;gap:4px 8px}
+.ku .kxr-in{padding:4px 16px 16px;border-top:0}
+.ku .kxr-st{font-size:12px;line-height:20px}
+.ku .kxr-h small{font-size:12px}
+.ku .warnbox{margin:0 0 16px}
+.ku .card{margin:0 0 16px}
+/* the section switch (which core, which part of System): every button in sight, none cut at the edge */
+@media(max-width:619px){body.k38 .sectabs{position:static;margin-bottom:12px}body.k38 .sectabs .stl{flex-wrap:wrap;overflow:visible}body.k38 .sectabs .stl a{padding:8px 12px;min-height:40px}}
+@media(max-width:619px){.ku-head{flex-wrap:wrap}.ku-ha{width:100%;padding-inline-start:52px}body.k38 .ku .ku-tabs{flex-wrap:wrap;overflow:visible}body.k38 .ku .ku-tabs a{padding:0 10px!important}
+ .ku-head{margin-bottom:12px}.ku-ht h2{font-size:16px}.ku-gh,.ku-line,.ku-sw,.ku-item,.ku .kxr-h,.ku .kxr-in{padding-inline:12px}.ku-ha .b2,.ku-ha .btn{min-height:40px}}
 .kboot{min-height:100vh;display:grid;place-items:center}
 .kboot i{width:32px;height:32px;border-radius:50%;border:3px solid rgba(128,128,128,.25);border-top-color:var(--a,#d4a24c);animation:kbspin .8s linear infinite}
 @keyframes kbspin{to{transform:rotate(360deg)}}

@@ -62,7 +62,7 @@ function protoAll(p,add){var nm=p=='xray'?'Xray':'DNS';
   srvReload(p);if(S.page=='users')loadUsers()}).catch(fail)}
 
 // ---------------------------------------------------------------- the VPN services page: Kanki VPN | Xray
-function p_vpn(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('VPN services')+'</h2><p>'+t('Both kinds of VPN your users get, side by side')+'</p></div></div><div class="vhub"><div class="vside" id="vh_k">'+t('Loading…')+'</div><div class="vside" id="vh_x">'+t('Loading…')+'</div></div>'+
+function p_vpn(){$('#pg').innerHTML='<div class="ku">'+kuHead('cores',t('VPN services'),t('Both kinds of VPN your users get, side by side'))+'</div><div class="vhub"><div class="vside" id="vh_k">'+t('Loading…')+'</div><div class="vside" id="vh_x">'+t('Loading…')+'</div></div>'+
   '<div class="vside" id="vh_d" style="margin-top:14px"></div>';
  var go=function(){Promise.all([api('GET','/api/nodes').catch(function(){return []}),api('GET','/api/overview').catch(function(){return {}}),api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null})]).then(function(r){if(S.page!='vpn')return;S.nodes=r[0]||[];if(r[2])XR.d=r[2];if(r[3])DN.d=r[3];vhKanki(r[0]||[],r[1]||{});vhXray(r[2]);vhDns(r[3])})};
  go();clearInterval(S.timer);S.timer=setInterval(function(){if(document.visibilityState=='visible'&&!$('#modal').classList.contains('on'))go()},8000)}
@@ -77,8 +77,8 @@ function vhKanki(nodes,o){var up=nodes.filter(function(n){return n.id=='local'||
 function vhXray(d){var el=$('#vh_x');if(!d){el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks')+'<p class="muted">—</p>';return}
  var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length,tot=d.inbounds.reduce(function(a,b){return a+(+b.traffic||0)},0);
  var more=d.inbounds.length-5;
- el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks','<span class="chipx '+(d.on?'g':'r')+'">'+(d.on?t('On'):t('Off'))+'</span>'+vhBtn('#',ic('plus',13)+' '+t('New inbound'),'xrInbound()')+vhBtn('#xray/inbounds',t('Open')))+
-  (d.on?'':'<div class="warnbox">'+t('Xray is off')+' · <a href="#xray/settings">'+t('Turn it on')+'</a></div>')+
+ el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks','<span class="chipx '+(d.on?'g':'r')+'">'+(d.on?t('On'):t('Off'))+'</span>'+vhBtn('#xray/status',t('Open')))+
+  (d.on?'':'<div class="warnbox">'+t('Xray is off')+' · <a href="#xray/status">'+t('Turn it on')+'</a></div>')+
   '<div class="kv"><div><small>'+t('Working inbounds')+'</small><b>'+N(act)+' / '+N(d.inbounds.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N((d.online||[]).length)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(bytes(tot))+'</b></div></div>'+
   (d.inbounds.length?d.inbounds.slice(0,5).map(function(ib){return xrMiniRow(ib)}).join(''):'<p class="muted">'+t('No inbound yet.')+'</p>')+
   (more>0?'<a class="vmore" href="#xray/inbounds">'+t('and')+' '+N(more)+' '+t('more inbounds')+' ›</a>':'')}
@@ -104,7 +104,7 @@ function ufWire(){if(!$('#uf_pre'))return;
  $$('.ufsvc .f_pr').forEach(function(x){x.addEventListener('change',sync)});
  $$('#uf_pre [data-pre]').forEach(function(b){b.onclick=function(){var k=b.dataset.pre;$$('.ufsvc').forEach(function(c){var on=k=='all'||c.dataset.svc==k;$$('.f_pr',c).forEach(function(x){x.checked=on})});sync()}});
  var xr=function(d){var el=$('#uf_xr');if(!el)return;if(!d){el.textContent='—';return}var l=d.inbounds.filter(function(x){return x.enabled});
-  el.innerHTML=(d.on?'':'<span style="color:var(--warn)">'+t('Is off in the panel')+'</span> · ')+(l.length?l.map(function(ib){return '<span class="chipx a" style="margin:2px">'+esc(ib.remark||ib.protocol)+' · '+esc(ib.server_name||ib.server)+'</span>'}).join(''):t('No Xray inbound yet')+' · <a href="#xray/inbounds" onclick="closeModal()">'+t('New inbound')+'</a>')};
+  el.innerHTML=(d.on?'':'<span style="color:var(--warn)">'+t('Is off in the panel')+'</span> · ')+(l.length?l.map(function(ib){return '<span class="chipx a" style="margin:2px">'+esc(ib.remark||ib.protocol)+' · '+esc(ib.server_name||ib.server)+'</span>'}).join(''):t('No Xray inbound yet')+' · <a href="#xray/inbounds" onclick="closeModal()">'+t('Inbounds')+'</a>')};
  var dn=function(d){var el=$('#uf_dn');if(!el)return;if(!d){el.textContent='—';return}var l=d.servers.filter(function(x){return !x.hidden});
   el.innerHTML=(d.on?'':'<span style="color:var(--warn)">'+t('Is off in the panel')+'</span> · ')+(l.length?l.map(function(x){return '<span class="chipx b" style="margin:2px">'+(x.role=='relay'?'🇮🇷 ':'🌍 ')+esc(x.name||x.server)+'</span>'}).join(''):t('No DNS server yet')+' · <a href="#dns/servers" onclick="closeModal()">'+t('Add DNS server')+'</a>')};
  if(XR.d)xr(XR.d);api('GET','/api/xray').then(function(d){XR.d=d;xr(d)}).catch(function(){xr(null)});
@@ -116,68 +116,113 @@ function nodeAddTyped(){var tile=function(k,ico,title,sub){return '<button class
  $$('[data-nt]').forEach(function(b){b.onclick=function(){var k=b.dataset.nt;if(k=='vpn')return nodeAdd();if(k=='xray'){closeModal();xrAddNode();return}
   dnsLoad().then(function(){dnsAdd(k=='relay'?'relay':'exit')})}})}
 
+// ==================================================================== the parts every page is built from
+// (CLAUDE.md, design rules): a page head, one row of tabs, a row of numbers, a group with one add button,
+// an item row (status, flag, name, main action; tags under it; the address last), a switch with its words,
+// and a sheet of the rarer actions behind "⋯" (deleting is last, apart from the rest).
+function kuHead(icon,title,desc,acts){return '<header class="ku-head"><span class="ku-hi">'+ic(icon,22)+'</span><div class="ku-ht"><h2>'+title+'</h2>'+(desc?'<p>'+desc+'</p>':'')+'</div>'+(acts?'<div class="ku-ha">'+acts+'</div>':'')+'</header>'}
+// tabs: [[key, label]]; cnt: {key: number}
+function kuTabs(page,tabs,cur,cnt){cnt=cnt||{};return tabs.map(function(x){return '<a href="#'+page+'/'+x[0]+'" class="'+(cur==x[0]?'on':'')+'">'+t(x[1])+(cnt[x[0]]?'<em>'+N(cnt[x[0]])+'</em>':'')+'</a>'}).join('')}
+// numbers: [[label, value, colour class g|y|r|'']]
+function kuStats(items){return '<div class="ku-stats">'+items.map(function(x){return '<div><small>'+x[0]+'</small><b class="'+(x[2]?'c-'+x[2]:'')+'">'+x[1]+'</b></div>'}).join('')+'</div>'}
+function kuGroup(title,count,add,body,id){return '<section class="ku-group"'+(id?' id="'+id+'"':'')+'><div class="ku-gh"><b>'+title+'</b>'+(count!=null?'<span class="ku-n">'+N(count)+'</span>':'')+'<span class="sp"></span>'+(add||'')+'</div><div class="ku-gb">'+body+'</div></section>'}
+// a switch always has its words; the whole line is the switch
+function kuSwitch(label,on,cb,sub){return '<label class="ku-sw"><span class="ku-swt"><b>'+label+'</b>'+(sub?'<small>'+sub+'</small>':'')+'</span><span class="sw"><input type="checkbox" '+(on?'checked':'')+' onchange="'+cb+'"><span></span></span></label>'}
+// a line inside a group: words on one side, buttons on the other
+function kuLine(words,btns){return '<div class="ku-line"><span class="ku-lt">'+words+'</span><span class="ku-lb">'+btns+'</span></div>'}
+// an item row that does not open: dot, flag, name, tags (line 2), address (line 3), main action and ⋯
+function kuItem(o){return '<div class="ku-item'+(o.off?' off':'')+'"'+(o.click?' role="button" tabindex="0" onclick="'+o.click+'"':'')+'>'+
+  '<div class="ku-i1"><span class="dot '+(o.dot||'')+'"></span>'+(o.flag||'')+'<b class="ku-nm">'+o.name+'</b><span class="sp"></span>'+(o.act||'')+
+  (o.menu?'<button type="button" class="ib ku-more" aria-label="'+esc(t('More'))+'" onclick="event.stopPropagation();'+o.menu+'">⋯</button>':'')+'</div>'+
+  (o.tags?'<div class="ku-i2">'+o.tags+'</div>':'')+(o.addr?'<div class="ku-i3 ltr">'+o.addr+'</div>':'')+(o.extra||'')+'</div>'}
+function kuTag(text,c){return '<span class="ku-tag'+(c?' '+c:'')+'">'+text+'</span>'}
+// the rarer actions of one thing: [[label, js, 'danger']]; the dangerous ones come last, apart
+function kuMenu(title,sub,items){var safe=items.filter(function(x){return x[2]!='danger'}),bad=items.filter(function(x){return x[2]=='danger'});
+ var b=function(x){return '<button type="button" class="ku-mi'+(x[2]=='danger'?' danger':'')+'" onclick="closeModal();'+x[1]+'">'+x[0]+'</button>'};
+ modal(mhead(title,sub)+'<div class="ku-menu">'+safe.map(b).join('')+(bad.length?'<div class="ku-msep"></div>'+bad.map(b).join(''):'')+'</div>')}
+// the Tunnel tab of a core: one row per server with the Iran address its second config goes through;
+// a tap opens the address picker of that core on that server (coreTun)
+function coreTunRows(core,g,list){if(!list.length)return '<p class="muted ku-empty">'+t('No server yet')+'</p>';
+ return list.map(function(s){var tn=s.tunnel||{},own=(tn.cores||{})[core]||'',srv=tn.on?(tn.host||tn.uses||''):'',use=own||srv,x=(tn.ports||[]).filter(function(z){return z.core==core})[0];
+  var head='<span class="dot '+(use?'g':'')+'"></span>'+flagOf(s.cc)+'<b>'+esc(s.name)+'</b><span class="sp"></span>'+
+   (use?'<span class="kxr-st g ltr">'+esc(use)+(x?':'+x.via:'')+'</span>'+(own?'':'<small>'+t('the tunnel domain of the server')+'</small>'):'<span class="kxr-st">'+t('No second config')+'</span>');
+  return accRow(g,s.key,head,function(){return coreTun(core,s)})}).join('')}
+
 // ==================================================================== Xray
-// the Xray page. Tabs: servers, inbounds, online clients, routing, settings.
-// Every user with Xray ticked is a client of every inbound (or of the inbounds that list them).
-var XR={d:null,q:'',srv:'',tab:'overview'};
-var XTABS=[['overview','Servers','srv'],['inbounds','Inbounds','xray'],['clients','Online clients','users'],['routing','Routing and outbounds','tunnel'],['settings','Settings','settings']];
+// the Xray page. Tabs: status, servers (Xray on each server), tunnel (the second config of each server),
+// inbounds, routing, settings. Every user with Xray ticked is a client of every inbound (or of the
+// inbounds that list them).
+var XR={d:null,q:'',srv:'',tab:'status'};
+var XTABS=[['status','Status'],['servers','Servers'],['tunnel','Tunnel'],['inbounds','Inbounds'],['routing','Routing'],['settings','Settings']];
 var REALITY_TARGETS=['www.microsoft.com:443','www.apple.com:443','dl.google.com:443','www.speedtest.net:443','www.cloudflare.com:443','www.yahoo.com:443','www.amazon.com:443','addons.mozilla.org:443','www.samsung.com:443','www.nvidia.com:443',
  'www.cisco.com:443','www.mozilla.org:443','www.intel.com:443','www.ebay.com:443','www.bing.com:443','www.asus.com:443','www.digikala.com:443','www.aparat.com:443','divar.ir:443','snapp.ir:443','www.filimo.com:443','www.namava.ir:443'];
-function p_xray(){KAcc.open.xr='';XR.tab=S.sub||'overview';
- $('#pg').innerHTML='<div class="ph"><div><h2>Xray</h2><p>'+t('Xray inbounds for your users: every user with Xray ticked is a client of every inbound')+'</p></div><div class="row" style="gap:6px"><button class="b2" id="xr_all1" onclick="srvProtoAll(\'xray\',0)">'+t('Off for all users')+'</button><button class="b2" onclick="srvProtoAll(\'xray\',1)">'+t('On for all users')+'</button><button class="b2" onclick="xrAddNode()">'+ic('plus',15)+' '+t('Add server')+'</button><button class="btn" onclick="xrInbound()">+ '+t('Inbound')+'</button></div></div>'+
-  '<div class="ptabs" id="xr_tabs"></div><div id="xr">'+t('Loading…')+'</div>';
- xrLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))&&(XR.tab=='overview'||XR.tab=='inbounds'||XR.tab=='clients'))xrLoad(true)},5000);srvLoad(true)}
-function tab_xray(sub){XR.tab=sub||'overview';if(XR.d)xrDraw(XR.d);else xrLoad()}
-function xrTabs(d){var el=$('#xr_tabs');if(!el)return;var cnt={inbounds:d.inbounds.length,clients:(d.online||[]).length,routing:(d.rule_list||[]).length+(d.outs||[]).length};
- el.innerHTML=XTABS.map(function(x){return '<a href="#xray/'+x[0]+'" class="'+(XR.tab==x[0]?'on':'')+'">'+ic(x[2],15)+t(x[1])+(cnt[x[0]]?' <em>'+N(cnt[x[0]])+'</em>':'')+'</a>'}).join('')}
+function p_xray(){KAcc.open.xr='';KAcc.open.xrt='';XR.tab=xrTabOf(S.sub);
+ if(XR.tab!=(S.sub||'')){location.replace('#xray/'+XR.tab);return}
+ $('#pg').innerHTML='<div class="ku">'+kuHead('xray','Xray',t('VLESS, VMess, Trojan and Shadowsocks inbounds. Every user with Xray ticked gets the link of every inbound.'))+
+  '<nav class="ptabs ku-tabs" id="xr_tabs"></nav><div id="xr">'+t('Loading…')+'</div></div>';
+ xrLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))&&['status','servers','inbounds'].indexOf(XR.tab)>=0)xrLoad(true)},5000);srvLoad(true)}
+// the tabs of 3.20 and before: overview was the servers, online clients are on the status tab now
+function xrTabOf(sub){sub=sub||'status';if(sub=='overview')return 'servers';if(sub=='clients')return 'status';return XTABS.some(function(x){return x[0]==sub})?sub:'status'}
+function tab_xray(sub){var k=xrTabOf(sub);if(k!=sub){location.replace('#xray/'+k);return}XR.tab=k;if(XR.d)xrDraw(XR.d);else xrLoad()}
+function xrTabs(d){var el=$('#xr_tabs');if(!el)return;el.innerHTML=kuTabs('xray',XTABS,XR.tab,{servers:d.servers.length,inbounds:d.inbounds.length,routing:(d.rule_list||[]).length+(d.outs||[]).length})}
 function xrLoad(quiet){return api('GET','/api/xray').then(function(d){XR.d=d;if(S.page=='nodes'&&$('#nl_x'))$('#nl_x').innerHTML=xrServers(d);if(S.page!='xray')return d;if(quiet){xrTabs(d);
-   if(XR.tab=='overview'&&$('#xr_srv')){$('#xr_srv').innerHTML=xrServers(d);$('#xr_kv').innerHTML=xrKpis(d);return d}
+   if(XR.tab=='status'&&$('#xr_st')){$('#xr_st').innerHTML=xrStats(d);$('#xr_on').innerHTML=xrOnline(d);return d}
+   if(XR.tab=='servers'&&$('#xr_srv')){if(!accBusy('xr'))$('#xr_srv').innerHTML=xrServers(d);return d}
    if(XR.tab=='inbounds'&&$('#xr_ib')){$('#xr_ib').innerHTML=xrInbounds(d);return d}
-   if(XR.tab=='clients'&&$('#xr_on')){$('#xr_on').innerHTML=xrOnline(d);return d}
    return d}
   xrDraw(d);return d}).catch(fail)}
 function xrName(id){var a=(XR.d&&XR.d.agents)||[];for(var i=0;i<a.length;i++)if(a[i].id==id)return a[i].name;return id}
 function xrDraw(d){var el=$('#xr');if(!el)return;xrTabs(d);
- ({overview:xrOverview,inbounds:xrIbTab,clients:xrClientsTab,routing:xrRouting,settings:xrSettings}[XR.tab]||xrOverview)(d,el)}
+ ({status:xrStatus,servers:xrSrvTab,tunnel:xrTunTab,inbounds:xrIbTab,routing:xrRouting,settings:xrSettings}[XR.tab]||xrStatus)(d,el)}
 function xrTot(d){return d.inbounds.reduce(function(a,b){return a+(+b.traffic||0)},0)}
-function xrKpis(d){var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length;
- return '<div><small>'+t('Status')+'</small><b style="color:'+(d.on?'var(--ok)':'var(--bad)')+'">'+(d.on?t('On'):t('Off'))+'</b></div><div><small>'+t('Users with Xray')+'</small><b>'+N(d.users)+'</b></div>'+
-  '<div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N((d.online||[]).length)+'</b></div><div><small>'+t('Working inbounds')+'</small><b>'+N(act)+' / '+N(d.inbounds.length)+'</b></div>'+
-  '<div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(bytes(xrTot(d)))+'</b></div>'}
-function xrOverview(d,el){
- el.innerHTML=(d.on?'':'<div class="warnbox">'+t('Xray is off: nothing runs on the servers and no links go to the users.')+' <a href="#xray/settings">'+t('Turn it on')+'</a></div>')+
-  '<div class="kv k5" id="xr_kv">'+xrKpis(d)+'</div>'+
-  '<div class="g2 k310one"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Xray servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="xr_srv" style="margin-top:10px">'+xrServers(d)+'</div></div>'+
-  '</div>'+
-  '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0">'+t('1) Add a server (the panel server or any tunnel server). 2) Make inbounds on it. 3) Tick Xray for a user: the links of every inbound go into the user\'s subscription, and the traffic counts toward the user\'s volume.')+'</p></div>'}
+function xrStats(d){var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length,run=d.servers.filter(function(x){return x.status&&x.status.active}).length;
+ return kuStats([[t('Running servers'),N(run)+' / '+N(d.servers.length),run<d.servers.length?'y':''],[t('Working inbounds'),N(act)+' / '+N(d.inbounds.length)],
+  [t('Users with Xray'),N(d.users)],[t('Total traffic'),'<span class="ltr">'+N(bytes(xrTot(d)))+'</span>']])}
+// ---- status tab: Xray on or off, for every user, the numbers and who is online
+function xrStatus(d,el){
+ el.innerHTML=(d.on?'':'<div class="warnbox">'+t('Xray is off: nothing runs on the servers and no links go to the users.')+'</div>')+
+  '<div id="xr_st">'+xrStats(d)+'</div>'+
+  kuGroup('Xray',null,'',kuSwitch(t('Xray is on'),d.on,'xrOn(this.checked)',t('Off: Xray stops on every server and the links leave the subscriptions'))+
+   kuLine(t('Every user'),'<button class="b2 sm" onclick="srvProtoAll(\'xray\',0)">'+t('Off for all users')+'</button><button class="b2 sm" onclick="srvProtoAll(\'xray\',1)">'+t('On for all users')+'</button>'))+
+  kuGroup(t('Online now'),(d.online||[]).length,'','<div id="xr_on">'+xrOnline(d)+'</div>')+
+  '<details class="ku-help"><summary>'+t('How it works')+'</summary><p>'+t('1) Add a server (the panel server or any tunnel server). 2) Make inbounds on it. 3) Tick Xray for a user: the links of every inbound go into the user\'s subscription, and the traffic counts toward the user\'s volume.')+'</p></details>'}
+function xrOn(on){api('PUT','/api/xray',{on:on}).then(function(){toast(t('Saved'));xrLoad()}).catch(fail)}
+function xrOnline(d){var on=d.online||[];if(!on.length)return '<p class="muted ku-empty">'+t('Nobody is online right now')+'</p>';
+ return on.map(function(u){return kuItem({dot:'g',name:'<bdi>'+esc(u.name)+'</bdi>',tags:kuTag(esc(u.server))})}).join('')}
+// ---- servers tab: Xray on each server; a tap shows Xray on that server
+function xrSrvTab(d,el){el.innerHTML=kuGroup(t('Servers with Xray'),d.servers.length,'<button class="btn sm" onclick="xrAddNode()">'+ic('plus',14)+' '+t('Add Xray to a server')+'</button>','<div id="xr_srv">'+xrServers(d)+'</div>')}
+// ---- tunnel tab: the second config of each Xray server, through an Iran server
+function xrTunTab(d,el){var list=d.servers.map(function(x){return xrSv(x.server)}).filter(function(s){return s&&s.key});
+ el.innerHTML=kuGroup(t('Second config through the tunnel'),list.length,'','<p class="muted ku-note">'+t('Users get a second copy of every Xray inbound through the Iran server chosen here. Empty = the tunnel domain of the server (Servers page).')+'</p>'+
+  '<div id="xr_tun">'+coreTunRows('xray','xrt',list)+'</div>');
+ KAcc.draw.xrt=function(){var c=$('#xr_tun');if(c)c.innerHTML=coreTunRows('xray','xrt',d.servers.map(function(x){return xrSv(x.server)}).filter(function(s){return s&&s.key}))}}
+function xrSv(id){return ((SV.d&&SV.d.servers)||[]).filter(function(z){return (z.local?'local':(z.agent?z.agent.id:''))==id})[0]}
 function xrProtoShort(p){return {vless:'VL',vmess:'VM',trojan:'TR',shadowsocks:'SS'}[p]||p}
 function xrMiniRow(ib){var st=xrState(ib);return '<div class="vrow"><span class="dot '+st[0]+'"></span><div class="nm"><b>'+esc(ib.remark||ib.protocol)+'</b><small class="ltr">'+esc(ib.protocol.toUpperCase())+' · '+esc(ib.network)+(ib.security!='none'?' · '+esc(ib.security.toUpperCase()):'')+' · :'+ib.port+'</small></div><span class="chipx '+st[0]+'">'+t(st[1])+'</span><b class="ltr" style="font-size:12px">'+N(bytes(ib.traffic))+'</b></div>'}
 function xrState(ib){if(!ib.enabled)return ['r','Off'];if(ib.state=='depleted')return ['y','Traffic used up'];if(ib.state=='expired')return ['y','Expired'];if(ib.state=='nocert')return [ib.cert_err?'r':'y',ib.cert_err?'Certificate error':'Waiting for the certificate'];var s=(XR.d&&XR.d.servers||[]).filter(function(x){return x.server==ib.server})[0];
  if(s&&s.status&&s.status.active)return ['g','Running'];return ['y','Waiting for the server…']}
-
 // ---- inbounds tab
 function xrIbTab(d,el){
- el.innerHTML='<div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:nowrap"><input id="xr_q" placeholder="'+t('Search')+'…" value="'+esc(XR.q)+'" style="flex:1;min-width:0">'+
-  '<select id="xr_sf" style="width:auto"><option value="">'+t('All servers')+'</option>'+d.servers.map(function(x){return '<option value="'+esc(x.server)+'"'+(XR.srv==x.server?' selected':'')+'>'+esc(x.name||x.server)+'</option>'}).join('')+'</select>'+
-  '<button class="btn" onclick="xrInbound()" style="white-space:nowrap">+ '+t('Inbound')+'</button></div><div id="xr_ib">'+xrInbounds(d)+'</div>';
+ el.innerHTML='<div class="ku-tools"><input id="xr_q" placeholder="'+t('Search')+'…" value="'+esc(XR.q)+'">'+
+  '<select id="xr_sf"><option value="">'+t('All servers')+'</option>'+d.servers.map(function(x){return '<option value="'+esc(x.server)+'"'+(XR.srv==x.server?' selected':'')+'>'+esc(x.name||x.server)+'</option>'}).join('')+'</select></div>'+
+  kuGroup(t('Inbounds'),d.inbounds.length,'<button class="btn sm" onclick="xrInbound()">'+ic('plus',14)+' '+t('New inbound')+'</button>','<div id="xr_ib">'+xrInbounds(d)+'</div>');
  $('#xr_q').oninput=function(){XR.q=this.value;$('#xr_ib').innerHTML=xrInbounds(XR.d)};$('#xr_sf').onchange=function(){XR.srv=this.value;$('#xr_ib').innerHTML=xrInbounds(XR.d)}}
+// the address users connect to: the inbound's own link address, else its server's public address
+function xrPublic(d,ib){var s=d.servers.filter(function(x){return x.server==ib.server})[0]||{};return (ib.link_host||s.effective||s.address||'?')+':'+(ib.link_port||ib.port)}
 function xrInbounds(d){var q=(XR.q||'').toLowerCase(),list=d.inbounds.filter(function(ib){return (!XR.srv||ib.server==XR.srv)&&(!q||[ib.remark,ib.protocol,ib.network,ib.security,String(ib.port),ib.server_name].join(' ').toLowerCase().indexOf(q)>=0)});
- if(!d.inbounds.length)return '<div class="card" style="text-align:center;padding:30px"><p class="muted">'+t('No inbound yet.')+'</p><button class="btn" onclick="xrInbound()">+ '+t('Inbound')+'</button></div>';
- if(!list.length)return '<p class="muted">'+t('Nothing found')+'</p>';
- return '<div class="ibl">'+list.map(function(ib){var st=xrState(ib),lim=+ib.total_gb||0,used=+ib.traffic||0,p=lim>0?Math.min(100,100*used/(lim*1073741824)):0,id=esc(ib.id);
-  return '<div class="ibc'+(ib.enabled?'':' off')+'"><div class="hd"><span class="pi">'+xrProtoShort(ib.protocol)+'</span><div class="nm"><b>'+esc(ib.remark||ib.protocol)+'</b><small class="ltr">'+esc(ib.server_name||ib.server)+' · '+esc(ib.listen||'0.0.0.0')+':'+ib.port+'</small></div>'+sw('',ib.enabled,"xrToggle('"+id+"')")+'</div>'+
-   '<div class="chs"><span class="chipx a">'+esc(ib.protocol.toUpperCase())+'</span><span class="chipx b">'+esc(ib.network.toUpperCase())+'</span>'+(ib.security!='none'?'<span class="chipx g">'+esc(ib.security.toUpperCase())+'</span>':'')+(ib.flow?'<span class="chipx">Vision</span>':'')+(ib.link_tls||ib.link_host?'<span class="chipx">CDN</span>':'')+((ib.fallbacks||[]).length?'<span class="chipx">'+t('Fallbacks')+'</span>':'')+((ib.only||[]).length?'<span class="chipx y">'+N(ib.only.length)+' '+t('users only')+'</span>':'')+'<span class="chipx '+st[0]+'">'+t(st[1])+'</span></div>'+
-   '<div><div class="use"><span>'+t('Traffic')+': <b class="ltr">'+N(bytes(used))+'</b>'+(lim>0?' / <b class="ltr">'+N(lim)+' GB</b>':'')+'</span><span>'+t('Clients')+': <b>'+N(ib.clients)+'</b></span></div>'+(lim>0?'<div class="trk"><div class="fil'+(p>=90?' hot':'')+'" style="width:'+p.toFixed(1)+'%"></div></div>':'')+
-   (ib.expire?'<div class="use" style="margin-top:4px"><span>'+t('Expires')+': '+xrDate(ib.expire)+'</span></div>':'')+'</div>'+
-   '<div class="acts2"><button onclick="xrInbound(\''+id+'\')">'+ic('edit',15)+'<span>'+t('Edit')+'</span></button><button onclick="xrClients(\''+id+'\')">'+ic('users',15)+'<span>'+t('Links')+'</span></button>'+
-   '<button onclick="xrClone(\''+id+'\')">'+ic('copy',15)+'<span>'+t('Copy')+'</span></button><button onclick="xrReset(\''+id+'\')">'+ic('reset',15)+'<span>'+t('Reset')+'</span></button>'+
-   '<button onclick="xrIbJson(\''+id+'\')"><b style="font-size:12px">{ }</b><span>JSON</span></button><button class="x" onclick="xrIbDel(\''+id+'\')">'+ic('trash',15)+'<span>'+t('Delete')+'</span></button></div></div>'}).join('')+'</div>'}
+ if(!d.inbounds.length)return '<p class="muted ku-empty">'+t('No inbound yet.')+'</p>';
+ if(!list.length)return '<p class="muted ku-empty">'+t('Nothing found')+'</p>';
+ return list.map(function(ib){var st=xrState(ib),lim=+ib.total_gb||0,used=+ib.traffic||0,id=esc(ib.id);
+  var tags=kuTag(esc(ib.protocol.toUpperCase()),'a')+kuTag(esc(ib.network.toUpperCase()))+(ib.security!='none'?kuTag(esc(ib.security.toUpperCase()),'g'):'')+(ib.flow?kuTag('Vision'):'')+(ib.link_tls||ib.link_host?kuTag('CDN'):'')+
+   ((ib.only||[]).length?kuTag(N(ib.only.length)+' '+t('users only'),'y'):'')+kuTag(esc(ib.server_name||ib.server))+kuTag(t(st[1]),st[0]);
+  return kuItem({dot:st[0],off:!ib.enabled,name:esc(ib.remark||ib.protocol),tags:tags,addr:esc(xrPublic(d,ib)),
+   act:'<button class="b2 sm" onclick="xrClients(\''+id+'\')">'+ic('link',14)+' '+t('Links')+'</button>',menu:'xrIbMenu(\''+id+'\')',
+   extra:'<div class="ku-i4"><span>'+t('Traffic')+': <b class="ltr">'+N(bytes(used))+(lim>0?' / '+N(lim)+' GB':'')+'</b></span><span>'+t('Clients')+': <b>'+N(ib.clients)+'</b></span>'+(ib.expire?'<span>'+t('Expires')+': '+xrDate(ib.expire)+'</span>':'')+
+    '<span class="sp"></span>'+kuSwitch(t('On'),ib.enabled,'xrToggle(\''+id+'\')')+'</div>'})}).join('')}
+function xrIbMenu(id){var ib=XR.d.inbounds.filter(function(x){return x.id==id})[0];if(!ib)return;var q="'"+id+"'";
+ kuMenu(ib.remark||ib.protocol,ib.server_name,[[ic('edit',15)+' '+t('Edit'),'xrInbound('+q+')'],[ic('copy',15)+' '+t('Make a copy'),'xrClone('+q+')'],['{ } JSON','xrIbJson('+q+')'],
+  [ic('reset',15)+' '+t('Reset traffic'),'xrReset('+q+')'],[ic('trash',15)+' '+t('Delete inbound'),'xrIbDel('+q+')','danger']])}
 function xrDate(ts){var d=new Date(ts*1000),left=Math.ceil((ts*1000-Date.now())/86400000);return '<span class="ltr">'+N(d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate()))+'</span> ('+(left>0?N(left)+' '+t('days'):t('Expired'))+')'}
-
-// ---- online clients tab
-function xrClientsTab(d,el){el.innerHTML='<div class="card"><div class="nh"><div><h3>'+t('Online clients')+'</h3><p class="sub" style="margin:0">'+t('Users whose Xray traffic moved in the last few seconds')+'</p></div><a class="b2" href="#users">'+t('All users')+'</a></div><div id="xr_on" style="margin-top:8px">'+xrOnline(d)+'</div></div>'}
-function xrOnline(d){var on=d.online||[];if(!on.length)return '<p class="muted">'+t('Nobody is online right now')+'</p>';
- return '<div class="mtiles">'+on.map(function(u){return '<div class="vrow" style="margin:0"><span class="dot g"></span><div class="nm"><b><bdi>'+esc(u.name)+'</bdi></b><small>'+esc(u.server)+'</small></div></div>'}).join('')+'</div>'}
 
 // ---- routing tab
 function xrRouting(d,el){XR.rules=JSON.parse(JSON.stringify(d.rule_list||[]));XR.outs=JSON.parse(JSON.stringify(d.outs||[]));
@@ -250,13 +295,12 @@ function xrRuleEdit(i){var d=XR.d,r=i>=0?Object.assign({},XR.rules[i]):{name:'',
 // ---- settings tab
 function xrSettings(d,el){
  el.innerHTML='<div class="card"><h3>'+ic('settings',16)+' '+t('Settings')+'</h3>'+
-  '<div class="srow"><div class="tx"><b>'+t('Xray is on')+'</b><small>'+t('Off: Xray stops on every server and the links leave the subscriptions')+'</small></div><label class="sw"><input type="checkbox" id="xs_on" '+(d.on?'checked':'')+'><span></span></label></div>'+
   '<div class="srow"><div class="tx"><b>'+t('IPv4 only')+'</b><small>'+t('For servers whose IPv6 does not work well')+'</small></div><label class="sw"><input type="checkbox" id="xs_v4" '+(d.ipv4?'checked':'')+'><span></span></label></div>'+
   '<div class="sgrid"><div><label class="f">'+t('Xray-core version')+'</label><input id="xs_v" class="ltr" placeholder="'+t('empty = latest')+'" value="'+esc(d.version)+'"><p class="hint">'+t('A release tag like v26.3.27')+'</p></div>'+
   '<div><label class="f">'+t('Log level')+'</label><select id="xs_ll">'+['none','error','warning','info','debug'].map(function(x){return '<option'+((d.log_level||'warning')==x?' selected':'')+'>'+x+'</option>'}).join('')+'</select></div>'+
   '</div>'+
   '<div class="sbar"><button class="btn" id="xs_go">'+t('Save')+'</button></div></div>';
- $('#xs_go').onclick=function(){api('PUT','/api/xray',{on:$('#xs_on').checked,ipv4:$('#xs_v4').checked,version:$('#xs_v').value,log_level:$('#xs_ll').value}).then(function(){toast(t('Saved'));xrLoad()}).catch(fail)}}
+ $('#xs_go').onclick=function(){api('PUT','/api/xray',{ipv4:$('#xs_v4').checked,version:$('#xs_v').value,log_level:$('#xs_ll').value}).then(function(){toast(t('Saved'));xrLoad()}).catch(fail)}}
 
 // ---- servers
 function xrAddNode(){var go=function(){var d=XR.d,used=d.servers.map(function(x){return x.server}),ag=d.agents.filter(function(a){return used.indexOf(a.id)<0});
@@ -474,15 +518,15 @@ function adNew(pre){if(typeof xrInbound!='function')return toast(t('Xray page is
 // ==================================================================== Kanki DNS
 // the Kanki DNS page. Tabs: overview, servers, services, users, settings and SSL.
 var DN={d:null,tab:'overview',q:'',users:null};
-var DTABS=[['overview','Overview','dash'],['servers','DNS servers','srv'],['pubg','PUBG and games','globe'],['services','Services','globe'],['users','DNS users','users'],['log','Query log','traffic'],['settings','Settings and SSL','settings']];
+var DTABS=[['overview','Status','dash'],['servers','Servers','srv'],['pubg','PUBG and games','globe'],['services','Services','globe'],['users','DNS users','users'],['log','Query log','traffic'],['settings','Settings and SSL','settings']];
 var UPSTREAMS=[['Cloudflare','1.1.1.1, 1.0.0.1'],['Google','8.8.8.8, 8.8.4.4'],['Quad9','9.9.9.9, 149.112.112.112'],['AdGuard (no ads)','94.140.14.14, 94.140.15.15'],['OpenDNS','208.67.222.222, 208.67.220.220']];
 function p_dns(){DN.tab=S.sub||'overview';
- $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Kanki DNS')+'</h2><p>'+t('Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="dnsAdd(\'relay\')">+ '+t('Add relay')+'</button><button class="btn" onclick="dnsAdd(\'exit\')">+ '+t('Add DNS server')+'</button></div></div>'+
-  '<div class="ptabs" id="dn_tabs"></div><div id="dn">'+t('Loading…')+'</div>';
+ $('#pg').innerHTML='<div class="ku">'+kuHead('dns',t('Kanki DNS'),t('Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct'))+
+  '<nav class="ptabs ku-tabs" id="dn_tabs"></nav><div id="dn">'+t('Loading…')+'</div></div>';
  dnsLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))&&['overview','servers','users'].indexOf(DN.tab)>=0)dnsLoad(true)},5000)}
 function tab_dns(sub){DN.tab=sub||'overview';if(DN.d)dnsDraw(DN.d);else dnsLoad()}
 function dnsTabs(d){var el=$('#dn_tabs');if(!el)return;var cnt={servers:d.servers.length,users:d.users};
- el.innerHTML=DTABS.map(function(x){return '<a href="#dns/'+x[0]+'" class="'+(DN.tab==x[0]?'on':'')+'">'+ic(x[2],15)+t(x[1])+(cnt[x[0]]?' <em>'+N(cnt[x[0]])+'</em>':'')+'</a>'}).join('')}
+ el.innerHTML=kuTabs('dns',DTABS,DN.tab,cnt)}
 function dnsLoad(quiet){return api('GET','/api/dns').then(function(d){DN.d=d;if(S.page=='nodes'&&$('#nl_d'))$('#nl_d').innerHTML=dnsServers(d);if(S.page!='dns')return d;
   if(quiet){dnsTabs(d);if(DN.tab=='overview'&&$('#dn_kv')){$('#dn_kv').innerHTML=dnsKpis(d);$('#dn_top').innerHTML=dnsTop(d);$('#dn_topo').innerHTML=dnsTopo(d);return d}
    if(DN.tab=='servers'&&$('#dn_srv')){$('#dn_srv').innerHTML=dnsServers(d);return d}
@@ -526,13 +570,15 @@ function dnsCheckWire(){var go=function(){var v=$('#dn_ck').value.trim();if(!v)r
  $('#dn_ckb').onclick=go;$('#dn_ck').onkeydown=function(e){if(e.key=='Enter')go()}}
 
 // ---- servers tab
-function dnsServersTab(d,el){el.innerHTML=dnsWarn(d)+'<div class="row" style="gap:8px;margin-bottom:12px"><a class="b2" href="#nodes">'+t('Add or remove DNS servers in Servers')+'</a></div><div id="dn_srv">'+dnsServers(d)+'</div>'}
+function dnsServersTab(d,el){el.innerHTML=dnsWarn(d)+kuGroup(t('Servers'),d.servers.length,'<button class="btn sm" onclick="dnsAddPick()">'+ic('plus',14)+' '+t('Add DNS server')+'</button>','<div id="dn_srv">'+dnsServers(d)+'</div>')}
+// the two kinds of DNS server: an exit abroad that answers, or a relay in Iran in front of it
+function dnsAddPick(){kuMenu(t('Add DNS server'),'',[[ic('globe',15)+' '+t('DNS exit node')+' · '+t('Smart DNS abroad'),"dnsAdd('exit')"],[ic('dns',15)+' '+t('DNS relay node')+' · '+t('Iran server in front of a DNS exit'),"dnsAdd('relay')"]])}
 function dnsCertChip(x){var st=x.status||{};if(!x.host)return '<span class="chipx">SSL · '+t('no name')+'</span>';
  return st.ssl?'<span class="chipx g">SSL ✓</span>':st.ssl_error?'<span class="chipx r" title="'+esc(st.ssl_error)+'">SSL · '+t('error')+'</span>':'<span class="chipx y">SSL · '+t('waiting')+'</span>'}
 function dnsCertState(d){var c=d.cert||{};
  return c.present?'<div class="vrow"><span class="dot g"></span><div class="nm"><b>'+t('A pasted certificate is used on every DNS server')+'</b></div><button class="b2 bd" id="dn_crm">'+t('Remove it (back to certbot)')+'</button></div>'
   :'<div class="vrow"><span class="dot g"></span><div class="nm"><b>'+t('Automatic: certbot on each DNS server')+'</b><small>'+t('Each server gets a Let\'s Encrypt certificate for its own name and renews it by itself')+'</small></div></div>'}
-function dnsServers(d){if(!d.servers.length)return '<div class="card" style="text-align:center;padding:30px"><p class="muted">'+t('Add an exit DNS server first')+'</p><a class="btn" href="#nodes">'+t('Servers')+'</a></div>';
+function dnsServers(d){if(!d.servers.length)return '<p class="muted ku-empty">'+t('Add an exit DNS server first')+'</p>';
  return '<div class="ibl">'+d.servers.map(function(x){var st=x.status||{},on=st.active,q=st.q||{},errs=(st.errors||[]).concat(st.deploy_error?[st.deploy_error]:[]).concat(st.error?[st.error]:[]),relay=x.role=='relay';
   var hit=q.total?Math.round(100*(q.cache||0)/q.total):0;
   return '<div class="ibc"><div class="hd"><span class="pi">'+(relay?'IR':'EX')+'</span><div class="nm"><b>'+esc(x.name||x.server)+'</b><small>'+(relay?t('Relay (inside Iran)')+' → '+esc(dnsName(x.exit)):t('Exit (abroad)'))+'</small></div><span class="chipx '+(on?'g':x.status_at?'r':'y')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span></div>'+
@@ -698,54 +744,51 @@ function dnsPubgLog(d){var el=$('#pg_log');if(!el)return;var keys=['pubg','igame
 // the KANKI MIX page: our own UDP protocol on every VPN server, next to WireGuard, AmneziaWG and
 // Hysteria2: game UDP on a raw datagram path (sent twice in gaming mode), TCP on KCP + FEC.
 // The agent writes the built-in server to each server by itself; every user has their own key.
-var KM={d:null};
+var KM={d:null,tab:'status'};
+// the tabs every core has (CLAUDE.md, design rules); a core with more adds its own
+var CTABS=[['status','Status'],['servers','Servers'],['tunnel','Tunnel'],['settings','Settings']];
+function ctabOf(sub,tabs){return (tabs||CTABS).some(function(x){return x[0]==sub})?sub:'status'}
+// a core page: the head, its tabs and the body (#<id>); old addresses (#kmix) open the status tab
+function corePage(page,id,icon,title,desc){var k=ctabOf(S.sub);if(S.sub&&k!=S.sub){location.replace('#'+page+'/'+k);return ''}
+ $('#pg').innerHTML='<div class="ku">'+kuHead(icon,title,desc)+'<nav class="ptabs ku-tabs" id="'+id+'_tabs">'+kuTabs(page,CTABS,k)+'</nav><div id="'+id+'">'+t('Loading…')+'</div></div>';return k}
+function coreTabsMark(page,id,k){var el=$('#'+id+'_tabs');if(el)el.innerHTML=kuTabs(page,CTABS,k)}
+function busyTyping(){return document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)}
 
-function p_kmix(){KAcc.open.km='';
- $('#pg').innerHTML='<div class="ph"><div><h2>KANKI MIX</h2><p>'+t('Our own protocol on every VPN server: game packets go straight (no queue, sent twice in gaming mode), websites over KCP + FEC.')+'</p></div>'+
-  '<div class="row" style="gap:6px"><button class="b2" onclick="kmAll(false)">'+t('Disable for all users')+'</button><button class="btn" onclick="kmAll(true)">'+ic('users',15)+' '+t('Enable for all users')+'</button></div></div><div id="km">'+t('Loading…')+'</div>';
- kmLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))kmLoad(true)},8000)}
+function p_kmix(){KAcc.open.km='';KAcc.open.kmt='';var k=corePage('kmix','km','game','KANKI MIX',t('Our own protocol on every VPN server: game packets go straight (no queue, sent twice in gaming mode), websites over KCP + FEC.'));if(!k)return;KM.tab=k;
+ kmLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!busyTyping())kmLoad(true)},8000)}
+function tab_kmix(sub){var k=ctabOf(sub);if(k!=sub){location.replace('#kmix/'+k);return}KM.tab=k;coreTabsMark('kmix','km',k);if(KM.d)kmDraw(KM.d);else kmLoad()}
 function kmLoad(quiet){return srvLoad(true).then(function(){return api('GET','/api/kmix')}).then(function(d){KM.d=d;if(S.page!='kmix')return d;
-  if($('#km_srv')){$('#km_kv').innerHTML=kmKpis(d);if(!quiet||!accBusy('km'))$('#km_srv').innerHTML=kmServers(d);return d}kmDraw(d);return d}).catch(fail)}
+  if(quiet){if(KM.tab=='status'&&$('#km_st')){$('#km_st').innerHTML=kmStats(d);return d}
+   if(KM.tab=='servers'&&$('#km_srv')){if(!accBusy('km'))$('#km_srv').innerHTML=kmServers(d);return d}
+   if(KM.tab=='tunnel'&&$('#km_tun')){if(!accBusy('kmt'))$('#km_tun').innerHTML=kmTunRows(d);return d}
+   return d}
+  kmDraw(d);return d}).catch(fail)}
 function kmRun(x){return x.active===true}
-function kmKpis(d){var s=d.settings,run=d.servers.filter(kmRun).length,on=d.servers.filter(function(x){return x.on}).length;
- return '<div><small>'+t('Status')+'</small><b style="color:'+(s.on?'var(--ok)':'var(--bad)')+'">'+(s.on?t('On'):t('Off'))+'</b></div>'+
-  '<div><small>'+t('Users with KANKI MIX')+'</small><b>'+N(d.users)+' / '+N(d.users_total)+'</b></div>'+
-  '<div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N(d.online)+'</b></div>'+
-  '<div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(on)+'</b></div>'+
-  '<div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(d.traffic_gb)+' GB</b></div>'}
+function kmStats(d){var run=d.servers.filter(kmRun).length,on=d.servers.filter(function(x){return x.on}).length;
+ return kuStats([[t('Running servers'),N(run)+' / '+N(on),run<on?'y':''],[t('Users with KANKI MIX'),N(d.users)+' / '+N(d.users_total)],[t('Online now'),N(d.online),d.online?'g':''],[t('Total traffic'),'<span class="ltr">'+N(d.traffic_gb)+' GB</span>']])}
 function kmState(x){if(!x.on)return ['','Off on this server'];if(kmRun(x))return ['g','Running'];if(x.error)return ['r','Not running'];return ['y','Waiting for the server…']}
-// direct (the foreign server's own address) or through the Iran tunnel, and an optional address of its own
 function kmDraw(d){var el=$('#km');if(!el)return;var s=d.settings;
- var par=[[0,'none'],[2,'light'],[3,'normal'],[5,'strong'],[8,'very strong']];
- el.innerHTML=(s.on?'':'<div class="warnbox">'+t('KANKI MIX is off: it runs on no server and is in no subscription.')+'</div>')+
-  '<div class="kv k5" id="km_kv">'+kmKpis(d)+'</div>'+
-  '<div class="g2 kmg2"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="km_srv" style="margin-top:10px">'+kmServers(d)+'</div></div>'+
-  '<div class="card"><h3>'+ic('settings',16)+' '+t('Settings')+'</h3>'+
-   '<div class="srow"><div class="tx"><b>'+t('KANKI MIX on')+'</b></div><label class="sw"><input type="checkbox" id="km_on" '+(s.on?'checked':'')+'><span></span></label></div>'+
+ if(KM.tab=='servers'){el.innerHTML=kuGroup(t('Servers'),d.servers.length,'','<div id="km_srv">'+kmServers(d)+'</div>');return}
+ if(KM.tab=='tunnel'){el.innerHTML=kuGroup(t('Second config through the tunnel'),d.servers.length,'','<p class="muted ku-note">'+t('Direct: the app connects straight to the foreign server, lowest ping. Tunnel: the app connects to the Iran server; the tunnel to this server must forward this UDP port.')+'</p><div id="km_tun">'+kmTunRows(d)+'</div>');return}
+ if(KM.tab=='settings'){var par=[[0,'none'],[2,'light'],[3,'normal'],[5,'strong'],[8,'very strong']];
+  el.innerHTML=kuGroup(t('Settings'),null,'','<div class="ku-form">'+
    '<label class="f">'+t('Default UDP port')+'</label><input id="km_port" class="ltr" inputmode="numeric" value="'+esc(String(s.port))+'"><small class="muted">'+t('Every server uses it unless it has its own port below.')+'</small>'+
    '<label class="f">'+t('FEC for websites (TCP)')+'</label><select id="km_par">'+par.map(function(p){return '<option value="'+p[0]+'"'+(s.parity==p[0]?' selected':'')+'>'+t(p[1])+' · 10+'+p[0]+'</option>'}).join('')+
     (par.some(function(p){return p[0]==s.parity})?'':'<option value="'+s.parity+'" selected>10+'+s.parity+'</option>')+'</select><small class="muted">'+t('Extra bytes that rebuild lost packets without asking again. Games do not use it (they have gaming mode).')+'</small>'+
-   '<div class="srow" style="margin-top:8px"><div class="tx"><b>'+t('Gaming mode on in the app by default')+'</b><small>'+t('Each game packet is sent twice: at 20% loss 92% arrive instead of 64%. Users can switch it off in the app.')+'</small></div><label class="sw"><input type="checkbox" id="km_gm" '+(s.gaming?'checked':'')+'><span></span></label></div>'+
-   '<label class="f">'+t('Extra ports (port range)')+'</label><input id="km_hop" class="ltr" placeholder="4001-4010" value="'+esc(s.hop||'')+'"><small class="muted">'+t('Like 4001-4010. They all lead to the main port; the app picks one at random on every connect, so blocking one port is not enough. Empty = off.')+'</small>'+
-   '<button class="btn" style="width:100%;margin-top:12px" id="km_save">'+t('Save')+'</button></div></div>'+
-  '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0 0 6px">'+t('1) Keep it on and pick the port (4000 is fine). 2) Tick KANKI MIX for users (or Enable for all users). 3) Every server installs it by itself within a minute; the Kanki app gets the kanki:// link from the subscription, users see no IP or key.')+'</p>'+
-   '<p class="sub" style="margin:0">'+t('Each user has their own key (made from the subscription code): resetting the link gives a new key, disabling or expiring cuts the user off at once. Traffic and devices count like the other protocols.')+'</p>'+
-   '<p class="sub" style="margin:6px 0 0">'+t('Direct: the app connects straight to the foreign server, lowest ping. Tunnel: the app connects to the Iran server; the tunnel to this server must forward this UDP port.')+'</p>'+
-   '<label class="f">'+t('Coming next')+'</label><div class="chs" style="display:flex;gap:6px;flex-wrap:wrap">'+['Port hopping during the connection (a new port every few minutes)','Look like QUIC / HTTP3 on the wire','Several servers in one link, automatic switch when one is blocked','Speed limit per user'].map(function(x){return '<span class="chipx" style="opacity:.7">'+t(x)+'</span>'}).join('')+'</div></div>';
- $('#km_save').onclick=kmSave}
-function kmNodes(){var d=KM.d,m={};Object.keys((d&&d.settings.nodes)||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});
- $$('.km_np').forEach(function(i){var v=unN(i.value).trim(),o=m[i.dataset.id]||{};o.port=v?+v:0;m[i.dataset.id]=o});
- $$('.km_rt').forEach(function(i){var o=m[i.dataset.id]||{};o.route=i.value;m[i.dataset.id]=o});
- $$('.km_host').forEach(function(i){var o=m[i.dataset.id]||{};o.host=i.value.trim();m[i.dataset.id]=o});
- $$('.km_t2').forEach(function(i){var o=m[i.dataset.id]||{};o.tun_off=!i.checked;m[i.dataset.id]=o});
- $$('.km_th').forEach(function(i){var o=m[i.dataset.id]||{};o.tun_host=i.value.trim();m[i.dataset.id]=o});
- $$('.km_tn').forEach(function(i){var o=m[i.dataset.id]||{};o.tun_name=i.value.trim();m[i.dataset.id]=o});
- $$('.km_tp').forEach(function(i){var v=unN(i.value).trim(),o=m[i.dataset.id]||{};o.tun_port=v?+v:0;m[i.dataset.id]=o});return m}
+   '<label class="f">'+t('Extra ports (port range)')+'</label><input id="km_hop" class="ltr" placeholder="4001-4010" value="'+esc(s.hop||'')+'"><small class="muted">'+t('Like 4001-4010. They all lead to the main port; the app picks one at random on every connect, so blocking one port is not enough. Empty = off.')+'</small></div>'+
+   kuSwitch(t('Gaming mode on in the app by default'),s.gaming,'',t('Each game packet is sent twice: at 20% loss 92% arrive instead of 64%. Users can switch it off in the app.')).replace('<input type="checkbox"','<input type="checkbox" id="km_gm"')+
+   '<div class="ku-save"><button class="btn" id="km_save">'+t('Save')+'</button></div>');
+  $('#km_save').onclick=kmSave;return}
+ el.innerHTML=(s.on?'':'<div class="warnbox">'+t('KANKI MIX is off: it runs on no server and is in no subscription.')+'</div>')+'<div id="km_st">'+kmStats(d)+'</div>'+
+  kuGroup('KANKI MIX',null,'',kuSwitch(t('KANKI MIX on'),s.on,'kmPut({on:this.checked})')+
+   kuLine(t('Every user'),'<button class="b2 sm" onclick="kmAll(false)">'+t('Disable for all users')+'</button><button class="b2 sm" onclick="kmAll(true)">'+t('Enable for all users')+'</button>'))+
+  '<details class="ku-help"><summary>'+t('How it works')+'</summary><p>'+t('1) Keep it on and pick the port (4000 is fine). 2) Tick KANKI MIX for users (or Enable for all users). 3) Every server installs it by itself within a minute; the Kanki app gets the kanki:// link from the subscription, users see no IP or key.')+'</p>'+
+   '<p>'+t('Each user has their own key (made from the subscription code): resetting the link gives a new key, disabling or expiring cuts the user off at once. Traffic and devices count like the other protocols.')+'</p></details>'}
+function kmNodeOn(id,on){var m=kmNodes(),o=m[id]||{};o.off=!on;m[id]=o;kmPut({nodes:m})}
+function kmNodes(){var d=KM.d,m={};Object.keys((d&&d.settings.nodes)||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});return m}
 function kmPut(b,done){return api('PUT','/api/kmix',b).then(function(r){toast(t('Saved'));if(done)done(r);return kmLoad()}).catch(fail)}
 function kmSave(){var p=unN($('#km_port').value).trim();if(!/^\d+$/.test(p)||+p<1||+p>65535)return toast(t('the port must be 1-65535'),1);
- kmPut({on:$('#km_on').checked,port:+p,parity:+$('#km_par').value,gaming:$('#km_gm').checked,hop:unN($('#km_hop').value).trim(),nodes:kmNodes()})}
-function kmNodeOn(id,on){var m=kmNodes(),o=m[id]||{};o.off=!on;m[id]=o;kmPut({nodes:m})}
-// from the node edit window: this server's own KANKI MIX port
+ kmPut({port:+p,parity:+$('#km_par').value,gaming:$('#km_gm').checked,hop:unN($('#km_hop').value).trim()})}
 function kmSetNodePort(id,port,done){var go=function(d){var m={};Object.keys(d.settings.nodes||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});var o=m[id]||{};o.port=+port||0;m[id]=o;kmPut({nodes:m},done)};
  if(!/^\d+$/.test(String(port))||+port<1||+port>65535)return toast(t('the port must be 1-65535'),1);
  api('GET','/api/kmix').then(function(d){KM.d=d;go(d)}).catch(fail)}
@@ -754,62 +797,66 @@ function kmAll(on){if(!confirm(t(on?'KANKI MIX for every user?':'Remove KANKI MI
 
 // ==================================================================== microtun
 // the microtun page: the light game VPN, ticked per user like KANKI MIX. It runs on every VPN server
-// on a port of its own.
-var KC={d:{},meta:{
+// on a port of its own. Same tabs as every core.
+var KC={d:{},tab:{},meta:{
  mtun:{name:'microtun',net:'UDP',desc:'A light game VPN: 28 bytes per packet (WireGuard 32), keys renewed every 2 minutes, small packets sent twice so one lost packet does not lag. Nothing on the wire looks like a protocol.'}}};
 // the API of a protocol page
 function kcApi(p){return '/api/mt'}
 
-function kcPage(p){var m=KC.meta[p];
- $('#pg').innerHTML='<div class="ph"><div><h2>'+esc(m.name)+'</h2><p>'+t(m.desc)+'</p></div>'+
-  '<div class="row" style="gap:6px"><button class="b2" onclick="kcAll(\''+p+'\',false)">'+t('Disable for all users')+'</button><button class="btn" onclick="kcAll(\''+p+'\',true)">'+ic('users',15)+' '+t('Enable for all users')+'</button></div></div><div id="kc">'+t('Loading…')+'</div>';
- kcLoad(p);clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))kcLoad(p,true)},8000)}
+function kcPage(p){var m=KC.meta[p];KAcc.open['kc_'+p]='';KAcc.open['tn_'+p]='';var k=corePage(p,'kc','game',esc(m.name),t(m.desc));if(!k)return;KC.tab[p]=k;
+ kcLoad(p);clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!busyTyping())kcLoad(p,true)},8000)}
 function p_mtun(){kcPage('mtun')}
-function kcLoad(p,quiet){return srvLoad(true).then(function(){return api('GET',kcApi(p))}).then(function(d){KC.d[p]=d;if(S.page!=p)return d;
-  // an open tunnel box stays as it is until it is closed (a redraw would fold it)
-  if(quiet&&$('#kc_srv')){$('#kc_kv').innerHTML=kcKpis(d);if(!$('#kc_srv details[open]'))$('#kc_srv').innerHTML=kcServers(d);return d}kcDraw(d);return d}).catch(fail)}
-function kcKpis(d){var s=d.settings,run=d.servers.filter(function(x){return x.port}).length,on=d.servers.filter(function(x){return x.on}).length;
- return '<div><small>'+t('Status')+'</small><b style="color:'+(s.on?'var(--ok)':'var(--bad)')+'">'+(s.on?t('On'):t('Off'))+'</b></div>'+
-  '<div><small>'+t('Users with it')+'</small><b>'+N(d.users)+' / '+N(d.users_total)+'</b></div>'+
-  '<div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N(d.online)+'</b></div>'+
-  '<div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(on)+'</b></div>'+
-  '<div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(d.traffic_gb)+' GB</b></div>'}
+function tab_mtun(sub){var k=ctabOf(sub);if(k!=sub){location.replace('#mtun/'+k);return}KC.tab.mtun=k;coreTabsMark('mtun','kc',k);if(KC.d.mtun)kcDraw(KC.d.mtun);else kcLoad('mtun')}
+function kcLoad(p,quiet){return srvLoad(true).then(function(){return api('GET',kcApi(p))}).then(function(d){KC.d[p]=d;if(S.page!=p)return d;var tab=KC.tab[p];
+  if(quiet){if(tab=='status'&&$('#kc_st')){$('#kc_st').innerHTML=kcStats(d);return d}
+   if(tab=='servers'&&$('#kc_srv')){if(!accBusy('kc_'+p))$('#kc_srv').innerHTML=kcServers(d);return d}
+   if(tab=='tunnel'&&$('#kc_tun')){if(!accBusy('tn_'+p))$('#kc_tun').innerHTML=kcTunRows(d);return d}
+   return d}
+  kcDraw(d);return d}).catch(fail)}
+function kcStats(d){var run=d.servers.filter(function(x){return x.port}).length,on=d.servers.filter(function(x){return x.on}).length;
+ return kuStats([[t('Running servers'),N(run)+' / '+N(on),run<on?'y':''],[t('Users with it'),N(d.users)+' / '+N(d.users_total)],[t('Online now'),N(d.online),d.online?'g':''],[t('Total traffic'),'<span class="ltr">'+N(d.traffic_gb)+' GB</span>']])}
 function kcState(x){if(!x.on)return ['','Off on this server'];if(x.port)return ['g','Running'];if(x.error)return ['r','Not running'];return ['y','Waiting for the server…']}
-function kcServers(d){if(!d.servers.length)return '<p class="muted">—</p>';var p=d.proto,net=KC.meta[p].net;
- return d.servers.map(function(x){var st=kcState(x),id=esc(x.id),o=(d.settings.nodes||{})[x.id]||{};
-  return '<div class="vrow" style="flex-wrap:wrap;align-items:flex-start"><span class="dot '+(st[0]||'')+'" style="margin-top:6px"></span>'+
-   '<div class="nm"><b>'+esc(x.name)+(x.main?' <span class="rotb">'+t('Main server')+'</span>':'')+'</b><small class="ltr">'+esc(x.host||'?')+':'+esc(String(x.port||x.want_port))+' · '+net+'</small></div>'+
-   '<span class="chipx">'+N(x.users)+' '+t('users')+'</span>'+(x.v6?'<span class="chipx b">IPv6</span>':'')+'<span class="chipx '+(st[0]||'')+'">'+t(st[1])+'</span>'+
-   '<div class="row" style="gap:6px;width:100%;justify-content:flex-end;align-items:center;flex-wrap:wrap"><small class="muted">'+t('Port of this server')+'</small>'+
-   '<input class="ltr kc_np" data-id="'+id+'" inputmode="numeric" style="width:90px" placeholder="'+esc(t('default'))+' '+N(d.settings.port)+'" value="'+esc(o.port||'')+'" onchange="kcSaveNodes(\''+p+'\')">'+
-   '<small class="muted">'+t('Address the app dials')+'</small><input class="ltr kc_host" data-id="'+id+'" style="width:160px" placeholder="'+esc(t('automatic'))+'" value="'+esc(o.host||'')+'" onchange="kcSaveNodes(\''+p+'\')">'+
-   sw('',x.on,"kcNodeOn('"+p+"','"+id+"',this.checked)")+'</div>'+
-   (x.on&&x.online&&!x.reports&&d.settings.on?'<div class="warnbox" style="margin:6px 0 0;width:100%">'+t('Update the agent of this server to run it')+'</div>':'')+
-   (x.on&&x.error?'<div class="warnbox ltr" style="margin:6px 0 0;width:100%">'+esc(x.error)+'</div>':'')+
-   (window.coreTun&&window.srvByNode?coreTun('mtun',srvByNode(x.id),true):'')+'</div>'}).join('')}
-function kcDraw(d){var el=$('#kc');if(!el)return;var s=d.settings,p=d.proto,m=KC.meta[p];
- el.innerHTML=(s.on?'':'<div class="warnbox">'+esc(m.name)+' '+t('is off: it runs on no server and is in no subscription.')+'</div>')+
-  '<div class="kv k5" id="kc_kv">'+kcKpis(d)+'</div>'+
-  '<div class="g2"><div class="card"><div class="nh"><h3>'+ic('srv',16)+' '+t('Servers')+'</h3><a class="b2" href="#nodes">'+t('Servers')+'</a></div><div id="kc_srv" style="margin-top:10px">'+kcServers(d)+'</div></div>'+
-  '<div class="card"><h3>'+ic('settings',16)+' '+t('Settings')+'</h3>'+
-   '<div class="srow"><div class="tx"><b>'+esc(m.name)+'</b></div><label class="sw"><input type="checkbox" id="kc_on" '+(s.on?'checked':'')+'><span></span></label></div>'+
+// servers tab: one row per server; a tap shows microtun on that server (its port, address, switch)
+function kcServers(d){if(!d.servers.length)return '<p class="muted ku-empty">'+t('No VPN server yet')+'</p>';var p=d.proto,net=KC.meta[p].net;
+ return d.servers.map(function(x){var st=kcState(x),s=window.srvByNode?srvByNode(x.id):null;
+  var head='<span class="dot '+(st[0]||'')+'"></span>'+flagOf(s&&s.cc)+'<b>'+esc(x.name)+'</b>'+(x.main?'<span class="kxc-tag main">'+t('Main server')+'</span>':'')+'<span class="sp"></span>'+
+   '<span class="kxr-st '+(st[0]||'')+'">'+t(st[1])+'</span>'+(x.v6?'<span class="kxr-st">IPv6</span>':'')+'<small class="ltr">'+net+' '+N(x.port||x.want_port)+'</small>';
+  return accRow('kc_'+p,x.id,head,function(){return kcBody(d,x)})}).join('')}
+function kcBody(d,x){var p=d.proto,id=esc(x.id),o=(d.settings.nodes||{})[x.id]||{};
+ return '<div class="kxr-line"><span><b>'+t(kcState(x)[1])+'</b></span><span>·</span><span>'+N(x.users)+' '+t('users')+'</span><span>·</span><span class="ltr">'+esc(x.host||'?')+':'+esc(String(x.port||x.want_port))+'</span></div>'+
+  kuSwitch(esc(KC.meta[p].name)+' '+t('on this server'),x.on,"kcNodeOn('"+p+"','"+id+"',this.checked)")+
+  '<div class="kxf"><div><label class="f">'+t('Port of this server')+'</label><input class="ltr" id="kc_np1" inputmode="numeric" placeholder="'+esc(t('default'))+' '+N(d.settings.port)+'" value="'+esc(o.port||'')+'"></div>'+
+  '<div><label class="f">'+t('Address the app dials')+'</label><input class="ltr" id="kc_ho1" placeholder="'+esc(t('automatic'))+'" value="'+esc(o.host||'')+'"></div></div>'+
+  (x.on&&x.online&&!x.reports&&d.settings.on?'<div class="warnbox" style="margin:8px 0 0">'+t('Update the agent of this server to run it')+'</div>':'')+
+  (x.on&&x.error?'<div class="warnbox ltr" style="margin:8px 0 0">'+esc(x.error)+'</div>':'')+
+  '<div class="kxsave"><button class="b2 sm" onclick="accClose(\'kc_'+p+'\')">'+t('Cancel')+'</button><button class="btn sm" onclick="kcSaveOne(\''+p+'\',\''+id+'\')">'+t('Save')+'</button></div>'+
+  '<div class="kxacts"><button class="b2 sm" onclick="nAct(\''+id+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button></div>'}
+function kcSaveOne(p,id){var m=kcNodes(p),o=m[id]||{},v=unN($('#kc_np1').value).trim();if(v&&(!/^\d+$/.test(v)||+v<1||+v>65535))return toast(t('the port must be 1-65535'),1);
+ o.port=v?+v:0;o.host=$('#kc_ho1').value.trim();m[id]=o;KAcc.open['kc_'+p]='';kcPut(p,{nodes:m})}
+// tunnel tab: the second config of microtun on each server
+function kcTunRows(d){var list=d.servers.map(function(x){return window.srvByNode?srvByNode(x.id):null}).filter(function(s){return s&&s.key});return coreTunRows(d.proto,'tn_'+d.proto,list)}
+function kcDraw(d){var el=$('#kc');if(!el)return;var s=d.settings,p=d.proto,m=KC.meta[p],tab=KC.tab[p]||'status';
+ if(tab=='servers'){el.innerHTML=kuGroup(t('Servers'),d.servers.length,'','<div id="kc_srv">'+kcServers(d)+'</div>');return}
+ if(tab=='tunnel'){el.innerHTML=kuGroup(t('Second config through the tunnel'),d.servers.length,'','<p class="muted ku-note">'+t('Only for this core. Empty = the tunnel domain of the server (Servers page).')+'</p><div id="kc_tun">'+kcTunRows(d)+'</div>');
+  KAcc.draw['tn_'+p]=function(){var c=$('#kc_tun');if(c&&KC.d[p])c.innerHTML=kcTunRows(KC.d[p])};return}
+ if(tab=='settings'){el.innerHTML=kuGroup(t('Settings'),null,'','<div class="ku-form">'+
    '<label class="f">'+t('Default port')+' · '+m.net+'</label><input id="kc_port" class="ltr" inputmode="numeric" value="'+esc(String(s.port))+'"><small class="muted">'+t('Every server uses it unless it has its own port below.')+'</small>'+
    (p=='mtun'?'<label class="f">'+t('Send small packets twice: up to (bytes)')+'</label><input id="kc_bm" class="ltr" inputmode="numeric" value="'+esc(String(s.burst_max))+'"><small class="muted">'+t('0 = off. Game packets are 50-300 bytes; downloads are sent once.')+'</small>'+
     '<label class="f">'+t('Delay of the second copy (ms)')+'</label><input id="kc_bd" class="ltr" inputmode="numeric" value="'+esc(String(s.burst_delay_ms))+'">'+
-    '<label class="f">MTU</label><input id="kc_mtu" class="ltr" inputmode="numeric" value="'+esc(String(s.mtu))+'">':'')+
-   '<button class="btn" style="width:100%;margin-top:12px" id="kc_save">'+t('Save')+'</button></div></div>'+
-  (p=='mtun'?'<div class="card"><h3>'+t('Test link')+'</h3><p class="sub" style="margin:0 0 8px">'+t('A user\'s mtun:// link per server, for the Linux client:')+'</p><code class="ltr" style="display:block;margin-bottom:8px">sudo microtun client -url \'LINK\'</code>'+
-   '<select id="mt_u" onchange="mtLinks()"><option value="">'+t('Choose a user')+'</option>'+(d.user_list||[]).map(function(u){return '<option value="'+u.id+'">'+esc(u.name)+(u.has?'':' ('+t('not ticked')+')')+'</option>'}).join('')+'</select><div id="mt_l" style="margin-top:8px"></div></div>':'')+
-  '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0">'+t('Tick it for a user (user form, or Enable for all users). Every server runs it by itself within a minute; the Kanki app gets the link from the subscription. Each user has their own key: a new link is a new key, an expired or disabled user is cut off at once. Open the port at the data center\'s firewall too.')+'</p></div>';
- $('#kc_save').onclick=function(){kcSave(p)}}
-function kcNodes(p){var d=KC.d[p],m={};Object.keys((d&&d.settings.nodes)||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});
- $$('.kc_np').forEach(function(i){var v=unN(i.value).trim(),o=m[i.dataset.id]||{};o.port=v?+v:0;m[i.dataset.id]=o});
- $$('.kc_host').forEach(function(i){var o=m[i.dataset.id]||{};o.host=i.value.trim();m[i.dataset.id]=o});return m}
+    '<label class="f">MTU</label><input id="kc_mtu" class="ltr" inputmode="numeric" value="'+esc(String(s.mtu))+'">':'')+'</div>'+
+   '<div class="ku-save"><button class="btn" id="kc_save">'+t('Save')+'</button></div>')+
+  (p=='mtun'?kuGroup(t('Test link'),null,'','<div class="ku-form"><p class="muted" style="margin:0 0 8px">'+t('A user\'s mtun:// link per server, for the Linux client:')+'</p><code class="ltr" style="display:block;margin-bottom:8px">sudo microtun client -url \'LINK\'</code>'+
+   '<select id="mt_u" onchange="mtLinks()"><option value="">'+t('Choose a user')+'</option>'+(d.user_list||[]).map(function(u){return '<option value="'+u.id+'">'+esc(u.name)+(u.has?'':' ('+t('not ticked')+')')+'</option>'}).join('')+'</select><div id="mt_l" style="margin-top:8px"></div></div>'):'');
+  $('#kc_save').onclick=function(){kcSave(p)};return}
+ el.innerHTML=(s.on?'':'<div class="warnbox">'+esc(m.name)+' '+t('is off: it runs on no server and is in no subscription.')+'</div>')+'<div id="kc_st">'+kcStats(d)+'</div>'+
+  kuGroup(esc(m.name),null,'',kuSwitch(esc(m.name)+' '+t('is on'),s.on,"kcPut('"+p+"',{on:this.checked})")+
+   kuLine(t('Every user'),'<button class="b2 sm" onclick="kcAll(\''+p+'\',false)">'+t('Disable for all users')+'</button><button class="b2 sm" onclick="kcAll(\''+p+'\',true)">'+t('Enable for all users')+'</button>'))+
+  '<details class="ku-help"><summary>'+t('How it works')+'</summary><p>'+t('Tick it for a user (user form, or Enable for all users). Every server runs it by itself within a minute; the Kanki app gets the link from the subscription. Each user has their own key: a new link is a new key, an expired or disabled user is cut off at once. Open the port at the data center\'s firewall too.')+'</p></details>'}
+function kcNodes(p){var d=KC.d[p],m={};Object.keys((d&&d.settings.nodes)||{}).forEach(function(k){m[k]=Object.assign({},d.settings.nodes[k])});return m}
 function kcPut(p,b){return api('PUT',kcApi(p),b).then(function(){toast(t('Saved'));return kcLoad(p)}).catch(fail)}
-function kcSaveNodes(p){kcPut(p,{nodes:kcNodes(p)})}
 function kcNodeOn(p,id,on){var m=kcNodes(p),o=m[id]||{};o.off=!on;m[id]=o;kcPut(p,{nodes:m})}
 function kcSave(p){var v=unN($('#kc_port').value).trim();if(!/^\d+$/.test(v)||+v<1||+v>65535)return toast(t('the port must be 1-65535'),1);
- var b={on:$('#kc_on').checked,port:+v,nodes:kcNodes(p)};
+ var b={port:+v};
  if($('#kc_bm'))b.burst_max=+unN($('#kc_bm').value)||0;if($('#kc_bd'))b.burst_delay_ms=+unN($('#kc_bd').value)||0;if($('#kc_mtu'))b.mtu=+unN($('#kc_mtu').value)||1420;kcPut(p,b)}
 function mtLinks(){var id=$('#mt_u').value,el=$('#mt_l');if(!id){el.innerHTML='';return}
  api('GET','/api/mt/links/'+id).then(function(r){el.innerHTML=r.links.length?r.links.map(function(l){return '<label class="f">'+esc(l.server)+(l.tunnel?' · '+t('through the tunnel'):'')+'</label><textarea class="ltr" readonly rows="3" style="width:100%" onclick="this.select()">'+esc(l.url)+'</textarea>'}).join(''):'<div class="warnbox">'+t(r.why)+'</div>'}).catch(fail)}
@@ -820,6 +867,23 @@ function kcAll(p,on){var n=KC.meta[p].name;if(!confirm(on?n+' '+t('for every use
 "use strict";
 // Persian text of the whole panel
 var FA={
+ "Cores on this server":"هسته‌های این سرور",
+ "Each core is set on its own page: tap one to open it.":"تنظیم هر هسته در صفحه‌ی خودش است: رویش بزن تا باز شود.",
+ "This protocol has no settings of its own: the port of each server is in the Servers tab, the second config in the Tunnel tab.":"این پروتکل تنظیم جداگانه ندارد: پورت هر سرور در تب «سرورها» است و کانفیگ دوم در تب «تانل».",
+ "is on":"روشن است",
+ "on this server":"روی این سرور",
+ "Routing":"روتینگ",
+ "Add Xray to a server":"افزودن Xray به یک سرور",
+ "CDN":"CDN",
+ "Delete inbound":"حذف اینباند",
+ "Domain and SSL":"دامنه و SSL",
+ "Every user":"همه‌ی کاربران",
+ "Groups marked \"only on request\" stay off until you turn them on. Some names cannot be routed (they check the address).":"گروه‌هایی که «فقط با درخواست» دارند خاموش می‌مانند تا روشنشان کنی. بعضی اسم‌ها از راه DNS رد نمی‌شوند (آدرس را چک می‌کنند).",
+ "Make a copy":"ساخت کپی",
+ "No second config":"بدون کانفیگ دوم",
+ "Servers with Xray":"سرورهای دارای Xray",
+ "Users get a second copy of every Xray inbound through the Iran server chosen here. Empty = the tunnel domain of the server (Servers page).":"کاربرها از هر اینباند Xray یک کپی دوم هم می‌گیرند که از سرور ایرانی انتخاب‌شده در اینجا رد می‌شود. خالی = دامنه‌ی تانل خود سرور (صفحه‌ی سرورها).",
+ "VLESS, VMess, Trojan and Shadowsocks inbounds. Every user with Xray ticked gets the link of every inbound.":"اینباندهای VLESS، VMess، Trojan و Shadowsocks. هر کاربری که تیک Xray دارد لینک همه‌ی اینباندها را می‌گیرد.",
  "A light game VPN: 28 bytes per packet (WireGuard 32), keys renewed every 2 minutes, small packets sent twice so one lost packet does not lag. Nothing on the wire looks like a protocol.":"VPN سبک برای بازی: ۲۸ بایت سربار برای هر بسته (وایرگارد ۳۲)، کلید هر ۲ دقیقه عوض می‌شود و بسته‌های کوچک دو بار فرستاده می‌شوند تا با گم شدن یک بسته لگ نشود. روی سیم شبیه هیچ پروتکلی نیست.",
  "Send small packets twice: up to (bytes)":"ارسال دوباره‌ی بسته‌های کوچک: تا (بایت)",
  "0 = off. Game packets are 50-300 bytes; downloads are sent once.":"۰ = خاموش. بسته‌های بازی ۵۰ تا ۳۰۰ بایت‌اند؛ دانلودها یک بار فرستاده می‌شوند.",
@@ -832,7 +896,7 @@ var FA={
  "microtun is not ticked for this user":"microtun برای این کاربر تیک نخورده است",
  "this user is not active":"این کاربر فعال نیست",
  "no server runs microtun for this user yet (update the agents, wait a minute)":"هنوز هیچ سروری microtun را برای این کاربر اجرا نمی‌کند (agentها را آپدیت کن و یک دقیقه صبر کن)",
- "+ Inbound":"+ دروازه",
+ "+ Inbound":"+ اینباند",
  ".ir domains and Iranian addresses do not go through the server: they should be opened directly":"دامنه‌های .ir و IPهای ایران از سرور رد نمی‌شوند: باید مستقیم باز شوند",
  "0 = BBR (adapts by itself). A number turns on Brutal: it keeps that speed even with packet loss. Do not write more than the real speed of the servers.":"۰ = BBR (خودش تنظیم می‌شود). اگر عدد بدهی Brutal روشن می‌شود و حتی با افت بسته همان سرعت را نگه می‌دارد. بیشتر از سرعت واقعی سرورها ننویس.",
  "0 = unlimited":"0 = نامحدود",
@@ -1457,8 +1521,8 @@ var FA={
  "In line…":"در صف…",
  "In your DNS (Cloudflare / ArvanCloud): the A record of":"در DNS دامنه (کلادفلر / ابرآروان): رکورد A دامنه‌ی",
  "Inactive":"غیرفعال",
- "Inbound":"دروازه",
- "Inbounds":"دروازه‌ها",
+ "Inbound":"اینباند",
+ "Inbounds":"اینباندها",
  "Include the app files (APK)":"فایل‌های اپ (APK) هم داخل بکاپ باشد",
  "Insecure: plain HTTP. Reinstall the node with the new installer to get TLS.":"ناامن: HTTP ساده. نود را با نصاب جدید دوباره نصب کن تا TLS بگیرد.",
  "Inside Iran":"داخل ایران",
@@ -1584,7 +1648,7 @@ var FA={
  "Make the move command":"ساخت دستور انتقال",
  "Make the route":"ساخت مسیر",
  "Make the tunnel":"ساخت تانل",
- "Make this inbound":"ساخت این دروازه",
+ "Make this inbound":"ساخت این اینباند",
  "Makes a new code that ends by itself and announces it in the channel.":"یک کد جدید که خودش منقضی می‌شود می‌سازد و در کانال اعلام می‌کند.",
  "Manage":"مدیریت",
  "Manage Xray":"مدیریت Xray",
@@ -1666,8 +1730,8 @@ var FA={
  "No fallbacks":"فال‌بکی نیست",
  "No file chosen":"فایلی انتخاب نشده",
  "No file yet: the bot and the subscription page show the app download link of Sales settings.":"هنوز فایلی نیست: ربات و صفحه‌ی اشتراک همان لینک دانلود اپ تنظیمات فروش را نشان می‌دهند.",
- "No inbound on this server yet":"هنوز دروازه‌ای روی این سرور نیست",
- "No inbound yet.":"هنوز دروازه‌ای نیست.",
+ "No inbound on this server yet":"هنوز اینباندی روی این سرور نیست",
+ "No inbound yet.":"هنوز اینباندی نیست.",
  "No log lines yet":"هنوز لاگی نیست",
  "No match":"موردی پیدا نشد",
  "No message is showing in the app right now.":"الان هیچ پیامی در اپ نمایش داده نمی‌شود.",
@@ -2406,7 +2470,7 @@ var FA={
  "Use this address on every node too":"همین آدرس روی همه‌ی نودها هم استفاده شود",
  "Used":"مصرف",
  "Used volume, limit and percent":"حجم مصرفی، سقف و درصد مصرف",
- "User inbounds (Xray)":"دروازه‌های کاربران (Xray)",
+ "User inbounds (Xray)":"اینباندهای کاربران (Xray)",
  "User link":"لینک کاربر",
  "Username":"نام کاربری",
  "Username (optional)":"نام کاربری (اختیاری)",
@@ -2516,7 +2580,7 @@ var FA={
  "With ArvanCloud CDN use a port it forwards (80, 8080, 443, 2053, 8443 …). Open the port on the server.":"با CDN ابرآروان پورتی بگذار که ابرآروان رد می‌کند (80، 8080، 443، 2053، 8443 …). پورت را روی سرور باز کن.",
  "With WSS the handshake looks like an HTTPS connection to this domain. QUIC and KCP are fully encrypted (KCP’s header is hidden too), so they look like plain UDP.":"با WSS، دست‌دادن اتصال شبیه یک اتصال HTTPS به این دامنه دیده می‌شود. QUIC و KCP کاملاً رمزند (هدر KCP هم مخفی است) و شبیه UDP ساده‌اند.",
  "Without a certificate (HTTP) the chat works, but messages and your password are not encrypted on the way. Get an SSL certificate before the internet is cut and paste it below. Your configs stay safe: they are signed.":"بدون گواهی (HTTP) چت کار می‌کند، ولی پیام‌ها و رمز تو در مسیر رمزنگاری نمی‌شوند. قبل از قطعی اینترنت گواهی SSL بگیر و پایین بگذار. کانفیگ‌هایت امن می‌مانند چون امضا می‌شوند.",
- "Working inbounds":"دروازه‌های فعال",
+ "Working inbounds":"اینباندهای فعال",
  "Working…":"در حال انجام…",
  "Working… about a minute":"در حال انجام… حدود یک دقیقه",
  "Works, but messages and your password travel unencrypted. Configs stay safe: they are signed.":"کار می‌کند، ولی پیام‌ها و رمزت رمزنگاری‌نشده می‌روند. کانفیگ‌ها امن می‌مانند چون امضا می‌شوند.",
@@ -4345,7 +4409,7 @@ var SECS=[
  ['nodes','Servers','nodes',[['nodes','','Servers']],'Servers & network'],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
  ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','Cores','cores',[['vpn','','Overview'],['kmix','','KANKI MIX'],['mtun','','microtun'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI']],'Services'],
+ ['vpnsec','Cores','cores',[['vpn','','Overview'],['kmix','','KANKI MIX'],['mtun','','microtun'],['xray','status','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI']],'Services'],
  ['dnssec','Kanki DNS','dns',[['dns','','Kanki DNS']],'Services'],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
  ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
@@ -4457,9 +4521,8 @@ window.srvLoad=load;
 
 // ---------------------------------------------------------------- page
 window.pNodes=function(){ACC.open.srv='';
- $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Servers')+'</h2><p>'+t('The panel runs on one server. Every other server is a node: add it with one command, then switch on here what it runs.')+'</p></div>'+
-  '<div class="kxp-top"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="srvAdd()">'+ic('plus',15)+' '+t('Add server')+'</button></div></div>'+
-  '<div id="svp_clash"></div><div id="svp_g">'+t('Loading…')+'</div>';
+ $('#pg').innerHTML='<div class="ku">'+kuHead('nodes',t('Servers'),t('The panel runs on one server. Every other server is a node: add it with one command, then switch on here what it runs.'),'<button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button>')+
+  '<div id="svp_clash"></div><div id="svp_g">'+t('Loading…')+'</div></div>';
  load();autoRefresh(function(){load(true)});
  if(S.openAdd){S.openAdd=false;setTimeout(srvAdd,150)}};
 ACC.draw.srv=function(){draw(true)};
@@ -4474,9 +4537,8 @@ function draw(force){var g=$('#svp_g');if(!g||!SV.d)return;
  g.innerHTML=srvBox('abroad','Abroad servers','🌍',ab)+srvBox('iran','Iran servers',fl('IR'),ir)}
 window.srvDraw=draw;
 function srvBox(kind,title,icon,rows){
- return '<section class="kxbox '+kind+'"><div class="kxbox-h"><span class="kxbox-i">'+icon+'</span><b>'+t(title)+'</b><small>'+N(rows.length)+'</small><span class="sp"></span>'+
-  '<button class="b2 sm" onclick="srvAdd(\''+kind+'\')">'+ic('plus',13)+' '+t(kind=='iran'?'Add an Iran server':'Add an abroad server')+'</button></div>'+
-  (rows.length?'<div class="kxl">'+rows.map(row).join('')+'</div>':'<p class="muted kxbox-e">'+t('No server yet')+'</p>')+'</section>'}
+ return kuGroup(icon+' '+t(title),rows.length,'<button class="btn sm" onclick="srvAdd(\''+kind+'\')">'+ic('plus',14)+' '+t(kind=='iran'?'Add an Iran server':'Add an abroad server')+'</button>',
+  rows.length?'<div class="kxl">'+rows.map(row).join('')+'</div>':'<p class="muted ku-empty">'+t('No server yet')+'</p>')}
 
 function protoName(p){return ({wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',kmix:'KANKI MIX'})[p]||p}
 function online(s){var a=s.agent,n=s.node;return !!(s.local||(a&&a.online)||(n&&n.online))}
@@ -4506,6 +4568,17 @@ function irHosts(s){var out=[],seen={},add=function(name,host,mine){host=String(
  return out}
 window.srvIrHosts=irHosts;
 
+function srvCores(s){var n=s.node,i=(n&&n.info)||{},j=s.jobs||{},pt=s.ports||{},out=[];
+ var svc=function(k){return ((i.services||[]).filter(function(x){return x.key==k})[0])};
+ var vpn=function(p,name,key,port){if(!n)return;var sv=svc(key);if(!port&&!sv)return;out.push([p,name,!n.enabled?'':sv&&!sv.active?'r':'g',port])};
+ vpn('wg','WireGuard','wireguard',pt.wg||i.wg_port);vpn('awg','AmneziaWG','amneziawg',i.awg_port);vpn('hy2','Hysteria2','hysteria2',pt.hy2||i.hy2_port);
+ if(n&&(pt.kmix||i.kmix_port))out.push(['kmix','KANKI MIX',n.enabled?'g':'',pt.kmix||i.kmix_port]);
+ if(n&&(pt.mtun||i.mt_port))out.push(['mtun','microtun',n.enabled?'g':'',pt.mtun||i.mt_port]);
+ if(j.xray_on)out.push(['xray','Xray','g',j.xray?N(j.xray)+' '+t('inbounds'):'']);
+ if(j.dns)out.push(['dns','Kanki DNS','g','']);
+ if(!out.length)return '';
+ return '<div class="kxr-sec">'+t('Cores on this server')+'</div><div class="ku-cores">'+out.map(function(c){return '<a href="#'+c[0]+'/servers"><span class="dot '+c[2]+'"></span>'+c[1]+(c[3]?'<small class="ltr">'+esc(String(c[3]))+'</small>':'')+'</a>'}).join('')+'</div>'+
+  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('Each core is set on its own page: tap one to open it.')+'</p>'}
 function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  var st=[];
  if(!s.local)st.push(t('agent')+': <b>'+(a?(a.online?t('Connected'):t('Not connected')):'—')+'</b>');
@@ -4520,7 +4593,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
   else miss='<div class="kxc-miss"><span>'+(su&&su.state=='failed'?'<b class="bad2">'+t('VPN install failed')+'</b>':t('VPN is not installed on this server'))+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\','+(isIr(s)?0:1)+')">'+t(su&&su.state=='failed'?'Try again':'Install VPN')+'</button>'+(su&&su.state=='failed'&&su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>'}
  if(n&&!a&&!s.local)miss='<div class="kxc-miss"><span>'+t('Tunnels, Xray and DNS are not installed on this server')+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\',1)">'+t('Install')+'</button></div>';
  // the server itself
- var h='<div class="kxr-line">'+st.join('<span>·</span>')+'</div>'+miss+
+ var h='<div class="kxr-line">'+st.join('<span>·</span>')+'</div>'+miss+srvCores(s)+
   '<div class="kxr-sec">'+t('Server settings')+'</div><div class="kxf">'+
   '<div><label class="f">'+t('Name')+'</label><input id="sx_nm" value="'+esc(s.name)+'" maxlength="40"></div>'+
   '<div><label class="f">'+t('Location')+'</label><div class="seg kxseg" id="sx_loc"><button type="button" data-l="abroad" class="'+(isIr(s)?'':'on')+'">'+t('Abroad')+'</button><button type="button" data-l="iran" class="'+(isIr(s)?'on':'')+'">'+t('Iran')+'</button></div></div>'+
@@ -4537,7 +4610,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
    (s.local?'':'<details class="box"><summary>'+t('Advanced')+'</summary><div class="kxf"><div class="wide"><label class="f">'+t('API address')+'</label><input id="sx_api" class="ltr" value="'+esc(n.address||'')+'"></div>'+
     '<div><label class="f">'+t('Node token')+'</label><input id="sx_tok" class="ltr" placeholder="'+t('empty = keep it')+'"></div>'+
     '<div style="align-self:end"><label class="chk" style="margin:0"><input type="checkbox" id="sx_ins"'+(n.insecure?' checked':'')+'>'+t('Self-signed certificate (no domain on the server)')+'</label></div></div></details>')+
-   '<p class="muted" style="font-size:11px;margin:6px 2px 0">'+t('Ports and protocols of this server are in VPN services.')+' <a href="#vpn">'+t('VPN services')+'</a></p>'}
+   ''}
  // its tunnel: a second copy of every config through the Iran address
  if(!isIr(s)&&(n||(s.jobs&&s.jobs.xray))&&s.tunnel)h+=tunBox(s);
  h+='<div class="kxsave"><button class="b2 sm" onclick="accClose(\'srv\')">'+t('Cancel')+'</button><button class="btn sm" onclick="srvSave(\''+k+'\')">'+t('Save')+'</button></div>';
@@ -4555,8 +4628,8 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAssign(\''+ni+'\',0)">'+t('Remove from all users')+'</button>')}
  if(a&&!s.local)acts.push('<button class="b2 sm" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',13)+' '+t('Tunnel agent settings')+'</button>');
  if(!s.local)acts.push('<button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+ic('link',13)+' '+t('Show command')+'</button>');
- if(!s.local)acts.push('<button class="b2 sm bd" onclick="srvDel(\''+k+'\')">'+ic('trash',13)+' '+t('Delete server')+'</button>');
  h+='<div class="kxacts">'+acts.join('')+'</div>';
+ if(!s.local)h+='<div class="ku-danger"><button class="b2 sm bd" onclick="srvDel(\''+k+'\')">'+ic('trash',13)+' '+t('Delete server')+'</button></div>';
  setTimeout(function(){$$('#sx_loc button').forEach(function(b){b.onclick=function(){$$('#sx_loc button').forEach(function(z){z.classList.toggle('on',z==b)});var bb=b.closest('.kxr-b');if(bb)bb.dataset.dirty='1'}})},0);
  return h}
 
@@ -4932,24 +5005,30 @@ var PD={dir:null,ov:null};
 function pvState(p,s){var n=s.node,i=(n&&n.info)||{},sv=(i.services||[]).filter(function(x){return x.key==PV[p].svc})[0],port=(s.ports||{})[p]||i[p+'_port'];
  if(!port&&!sv)return ['n',t('not installed'),port];if(!n.enabled)return ['n',t(s.local?'off':'relay'),port];
  if(sv&&!sv.active)return ['r',t('stopped'),port];return ['g',t('running'),port]}
-function protoPage(p){var g='pv_'+p;ACC.open[g]='';
- $('#pg').innerHTML='<div class="ph"><div><h2>'+PV[p].name+'</h2><p>'+t(PV[p].desc)+'</p></div>'+
-  '<div class="row" style="gap:6px"><button class="b2" onclick="srvProtoAll(\''+p+'\',0)">'+t('Off for all users')+'</button><button class="btn" onclick="srvProtoAll(\''+p+'\',1)">'+ic('users',15)+' '+t('On for all users')+'</button></div></div>'+
-  '<div class="kv k3" id="pv_kv"></div><div id="pv_list">'+t('Loading…')+'</div>'+(p=='awg'?'<div id="pv_dir"></div>':'');
+var PVT={};
+function protoPage(p){var g='pv_'+p;ACC.open[g]='';ACC.open['tn_'+p]='';
+ var k=corePage(p,'pv','shield2',PV[p].name,t(PV[p].desc));if(!k)return;PVT[p]=k;
  var go=function(quiet){return Promise.all([srvLoad(true),api('GET','/api/overview').catch(function(){return null}),p=='awg'?api('GET','/api/servers/direct').catch(function(){return null}):null]).then(function(r){PD.ov=r[1]||PD.ov;if(r[2])PD.dir=r[2];if(S.page==p)drawPv(p,!quiet)})};
- ACC.draw[g]=function(){drawPv(p,true)};
+ ACC.draw[g]=function(){drawPv(p,true)};ACC.draw['tn_'+p]=function(){var c=$('#pv_tun');if(c)c.innerHTML=pvTunRows(p)};
  go(false);autoRefresh(function(){go(true)})}
-function drawPv(p,force){var g='pv_'+p,el=$('#pv_list');if(!el||!SV.d)return;
- var list=(SV.d.servers||[]).filter(function(s){return !!s.node}),run=list.filter(function(s){return pvState(p,s)[0]=='g'}).length,
+['wg','awg','hy2'].forEach(function(p){window['tab_'+p]=function(sub){var k=ctabOf(sub);if(k!=sub){location.replace('#'+p+'/'+k);return}PVT[p]=k;coreTabsMark(p,'pv',k);drawPv(p,true)}});
+function pvList(){return ((SV.d&&SV.d.servers)||[]).filter(function(s){return !!s.node})}
+function pvTunRows(p){return coreTunRows(p,'tn_'+p,pvList())}
+function drawPv(p,force){var g='pv_'+p,el=$('#pv'),tab=PVT[p]||'status';if(!el||!SV.d)return;
+ var list=pvList(),run=list.filter(function(s){return pvState(p,s)[0]=='g'}).length,
   viaT=list.filter(function(s){return routeVia(agentOf(s),pvState(p,s)[2])||((s.tunnel||{}).ports||[]).some(function(z){return z.core==p})}).length,ov=PD.ov||{},users=((ov.protocols||{})[p]);
- $('#pv_kv').innerHTML='<div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(list.length)+'</b></div><div><small>'+t('Users with it')+'</small><b>'+(users==null?'—':N(users))+'</b></div><div><small>'+t('Through a tunnel')+'</small><b>'+N(viaT)+'</b></div>';
+ var stats=kuStats([[t('Running servers'),N(run)+' / '+N(list.length),run<list.length?'y':''],[t('Users with it'),users==null?'—':N(users)],[t('Through a tunnel'),N(viaT)],[t('Servers'),N(list.length)]]);
+ if(tab=='status'){if(!force&&$('#pv_st')){$('#pv_st').innerHTML=stats;return}
+  el.innerHTML='<div id="pv_st">'+stats+'</div>'+kuGroup(PV[p].name,null,'',kuLine(t('Every user'),'<button class="b2 sm" onclick="srvProtoAll(\''+p+'\',0)">'+t('Off for all users')+'</button><button class="b2 sm" onclick="srvProtoAll(\''+p+'\',1)">'+t('On for all users')+'</button>'))+
+   '<details class="ku-help"><summary>'+t('How it works')+'</summary><p>'+t(PV[p].desc)+' '+t('Ports and protocols of this server are in VPN services.')+'</p></details>';return}
+ if(tab=='tunnel'){if(!force&&accBusy('tn_'+p))return;
+  el.innerHTML=(p=='wg'?'<div class="warnbox">'+t('WireGuard reaches users only through a tunnel: choose its Iran server below.')+'</div>':'')+
+   kuGroup(t('Second config through the tunnel'),list.length,'','<p class="muted ku-note">'+t('Only for this core. Empty = the tunnel domain of the server (Servers page).')+'</p><div id="pv_tun">'+pvTunRows(p)+'</div>');return}
+ if(tab=='settings'){if(!force)return;
+  el.innerHTML=(p=='awg'?'<div id="pv_dir">'+t('Loading…')+'</div>':kuGroup(t('Settings'),null,'','<p class="muted ku-note">'+t('This protocol has no settings of its own: the port of each server is in the Servers tab, the second config in the Tunnel tab.')+'</p>'));
+  if(p=='awg')dirDraw();return}
  if(!force&&accBusy(g))return;
- el.innerHTML=list.length?boxes(g,list,function(s){return pvRow(p,s)}):'<div class="card muted" style="text-align:center">'+t('No VPN server yet')+' · <a href="#nodes">'+t('Add server')+'</a></div>';
- if(p=='awg')dirDraw()}
-// the copy of this protocol through the tunnel (its own Iran server, else the server's tunnel domain),
-// or why there is none
-function tunCopy(p,s,r){var tn=s.tunnel||{},has=(tn.cores||{})[p]||(tn.on&&tn.uses);
- return (p=='wg'&&!r&&!has?'<div class="kxr-line"><span class="warnbox" style="margin:0;width:100%">'+t('WireGuard reaches users only through a tunnel: choose its Iran server below.')+'</span></div>':'')+coreTun(p,s)}
+ el.innerHTML=kuGroup(t('Servers'),list.length,'',list.length?boxes(g,list,function(s){return pvRow(p,s)}):'<p class="muted ku-empty">'+t('No VPN server yet')+' · <a href="#nodes">'+t('Add server')+'</a></p>')}
 
 // A core's second config through the tunnel, set on the core's own page: its own Iran address (one tap on
 // an Iran server), else the server's tunnel domain (Servers page). `fold`: closed until opened.
@@ -4965,8 +5044,9 @@ window.coreTun=function(core,s,fold){if(!s)return '';var tn=s.tunnel||{},own=(tn
   '<p class="muted" style="font-size:11px;margin:4px 2px 0">'+t('Only for this core. Empty = the tunnel domain of the server (Servers page).')+'</p>';
  var head=t('Second config through the tunnel')+' · '+CNAME[core];
  return fold?'<details class="box" style="margin-top:6px;width:100%"><summary>'+head+(use?' · <span class="ltr">'+esc(use)+'</span>':'')+'</summary>'+st+body+'</details>':'<div class="kxr-sec">'+head+'</div>'+st+body};
-window.coreTunSet=function(core,key,host){api('PUT','/api/servers/'+encodeURIComponent(key),{tunnel_core:{core:core,host:String(host||'').trim()}}).then(function(){toast(t('Saved'));
-  return srvLoad(true).then(function(){if(S.page=='mtun')kcLoad('mtun',true);else if(S.page=='xray'){if(ACC.draw.xr)ACC.draw.xr(true)}else svcReload()})}).catch(fail)};
+window.coreTunSet=function(core,key,host){var r=document.querySelector('.kxr.open[data-acc]'),g=r&&r.dataset.acc;
+ api('PUT','/api/servers/'+encodeURIComponent(key),{tunnel_core:{core:core,host:String(host||'').trim()}}).then(function(){toast(t('Saved'));
+  return srvLoad(true).then(function(){if(g&&/^tn_|^xrt$/.test(g)){if(ACC.draw[g])ACC.draw[g](true);return}if(S.page=='mtun')kcLoad('mtun',true);else if(S.page=='xray'){if(ACC.draw.xr)ACC.draw.xr(true)}else svcReload()})}).catch(fail)};
 window.srvByNode=function(nid){return srvByNode(nid)};
 function pvRow(p,s){var st=pvState(p,s),port=st[2];
  var head='<span class="dot '+(st[0]=='n'?'':st[0])+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+'<span class="sp"></span>'+
@@ -4978,7 +5058,7 @@ function tunTag(p,s){var tn=s.tunnel||{},has=(tn.ports||[]).some(function(z){ret
 function pvBody(p,s){var n=s.node,i=n.info||{},st=pvState(p,s),port=st[2],k=esc(s.key),ni=esc(n.id),r=routeVia(agentOf(s),port);
  var h='<div class="kxr-line"><span><b>'+esc(st[1])+'</b></span>'+(n.enabled?'<span>·</span><span>'+N(n.users||0)+' '+t('users')+'</span>':'')+
   '<span>·</span><span>'+t('Users connect to')+': <b class="ltr">'+esc(n.effective_endpoint||'—')+'</b> <a href="#nodes" style="font-size:11px">'+t('change in Servers')+'</a></span></div>'+
-  '<div class="kxr-line">'+(r?viaLine(r,s.name):'<span>'+t('No tunnel carries this port: users connect to the server directly')+'</span>')+'</div>'+tunCopy(p,s,r);
+  '<div class="kxr-line">'+(r?viaLine(r,s.name):'<span>'+t('No tunnel carries this port: users connect to the server directly')+'</span>')+'</div>';
  if(port||st[0]!='n')h+='<div class="kxr-sec">'+t('UDP port')+'</div><div class="kxm-row"><div><input id="pv_p" class="ltr" inputmode="numeric" value="'+esc(String(port||''))+'"></div><button class="btn sm" id="pv_ps">'+t('Save port')+'</button></div><div class="kxm-warn" id="pv_pw"></div>'+
   (p!='hy2'?'<p class="muted" style="font-size:11px;margin:2px">'+t("Users' WireGuard / AmneziaWG files of this server must be downloaded again after a port change; subscription links and the app update by themselves.")+'</p>':'');
  if(p=='awg'&&(i.awg||[]).length)h+='<div class="kxr-sec">'+t('Obfuscation')+'</div><div class="kxp-ports">'+(i.awg||[]).map(function(x){return '<span>'+esc(x[0])+' '+esc(x[1])+'</span>'}).join('')+'</div>';
@@ -4993,10 +5073,10 @@ function pvBody(p,s){var n=s.node,i=n.info||{},st=pvState(p,s),port=st[2],k=esc(
  return h}
 function dirSt(r){return !r.host?'<span class="muted">'+t('Country not known yet')+'</span>':r.ok?'✅ '+t('Points at this server'):((r.points_to||[]).length?'⚠️ '+t('Points elsewhere')+' <span class="ltr muted">'+esc(r.points_to.join(', '))+'</span>':'⚪ '+t('Not set yet'))}
 function dirDraw(){var el=$('#pv_dir'),d=PD.dir;if(!el||!d)return;
- el.innerHTML='<div class="card" style="max-width:980px"><h3>'+t('Direct domains')+'</h3><p class="sub">'+t("Make each direct name an A record pointing at the server's IP (Cloudflare: DNS only, grey cloud). Until it points right, the app gets the server's own address.")+'</p>'+
-  '<div class="ptab"><table><thead><tr><th>'+t('Name')+'</th><th>'+t('Domain')+'</th><th>'+t('Point it at')+'</th><th>'+t('Status')+'</th><th>'+t('Through')+'</th></tr></thead><tbody>'+
-  (d.servers||[]).map(function(r){return '<tr><td>'+fl(r.cc)+' '+esc(r.name)+'</td><td class="ltr"><b>'+esc(r.host||'—')+'</b></td><td class="ltr">'+esc(r.ip||'—')+'</td><td>'+dirSt(r)+'</td><td>'+t(r.via=='direct'?'Direct':'Tunnel')+'</td></tr>'}).join('')+
-  '</tbody></table></div><p class="muted" style="margin:8px 0 0">*.<span class="ltr">'+esc(d.base||'—')+'</span> · <a href="javascript:void 0" onclick="svcDirBase()">'+t('Change the base domain')+'</a></p></div>'}
+ el.innerHTML=kuGroup(t('Direct domains'),(d.servers||[]).length,'<button class="b2 sm" onclick="svcDirBase()">'+t('Change the base domain')+'</button>',
+  '<p class="muted ku-note">'+t("Make each direct name an A record pointing at the server's IP (Cloudflare: DNS only, grey cloud). Until it points right, the app gets the server's own address.")+' *.<span class="ltr">'+esc(d.base||'—')+'</span></p>'+
+  (d.servers||[]).map(function(r){return kuItem({dot:r.ok?'g':r.host?'y':'',flag:fl(r.cc),name:esc(r.name),tags:'<span class="ku-tag">'+dirSt(r)+'</span>'+kuTag(t(r.via=='direct'?'Direct':'Tunnel')),
+   addr:'<b>'+esc(r.host||'—')+'</b> → '+esc(r.ip||'—')})}).join(''))}
 window.svcDirBase=function(){var v=prompt(t('Base domain for the direct names (like example.com); empty = the panel domain without its first part'),(PD.dir&&PD.dir.base)||'');if(v===null)return;
  api('PUT','/api/servers/direct',{base:v.trim()}).then(function(d){PD.dir=d;dirDraw();drawPv('awg',true)}).catch(fail)};
 window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')};window.p_hy2=function(){protoPage('hy2')};
@@ -5015,18 +5095,9 @@ window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')
    '<div class="kxr-sec">'+t('Port of this server')+'</div><div class="kxm-row"><div><input id="km_p1" class="ltr" inputmode="numeric" value="'+esc(String(port||''))+'"></div><button class="btn sm" id="km_ps">'+t('Save port')+'</button></div><div class="kxm-warn" id="km_pw"></div>'+
    '<div class="kxr-sec">'+t('Route')+'</div><div class="kxf"><div><select id="km_rt1"><option value=""'+(tun?'':' selected')+'>'+t("Direct (the server's own address)")+' · '+esc(x.direct_host||'?')+'</option><option value="tunnel"'+(tun?' selected':'')+'>'+t('Through the tunnel (Iran server)')+' · '+esc(x.tunnel_host||'?')+'</option></select></div>'+
    '<div><input id="km_ho1" class="ltr" placeholder="'+esc(t('Address'))+': '+esc(t('automatic'))+'" value="'+esc(o.host||'')+'"></div></div>'+
-   '<div class="kxr-sec">'+t('Second config through the tunnel')+'</div>'+
-   // the server's tunnel domain (Servers page) gives it by itself; the fields below only change it for KANKI MIX
-   '<label class="kxsw" style="cursor:pointer"><span>'+(x.second?t('Users also get')+' <b class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</b>':t('Write the tunnel domain of this server in Servers: the second config is made by itself.'))+'</span><input type="checkbox" id="km_t21" style="width:auto"'+(o.tun_off?'':' checked')+'></label>'+
-   '<details class="box" style="margin-top:6px" open><summary>'+t('Only for KANKI MIX (optional)')+'</summary>'+
-   '<div class="kxf"><div class="wide"><label class="f">'+t('Iran address')+'</label><input id="km_th1" class="ltr" placeholder="'+esc(t('the tunnel domain of the server'))+'" value="'+esc(o.tun_host||'')+'">'+
-    (function(){var irs=srvIrHosts(r.s&&r.s.key?r.s:null);return irs.length?'<div class="kxchips">'+irs.map(function(e){return '<button type="button" class="'+(o.tun_host==e.host?'on':'')+'" onclick="$(\'#km_th1\').value=\''+esc(e.host)+'\';$$(\'.kxchips button\',this.parentNode.parentNode).forEach(function(b){b.classList.remove(\'on\')});this.classList.add(\'on\');this.closest(\'.kxr-b\').dataset.dirty=\'1\'">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+'</div>':''})()+'</div>'+
-   '<div><label class="f">'+t('Port')+'</label><input id="km_tp1" class="ltr" inputmode="numeric" placeholder="'+esc(String((via&&via.port)||port||''))+'" value="'+esc(o.tun_port?String(o.tun_port):'')+'"></div>'+
-   '<div class="wide"><label class="f">'+t('Name in the app')+'</label><input id="km_tn1" maxlength="40" placeholder="'+esc(x.name+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'"></div></div></details>'+
-   '<div class="kxr-line">'+(via?viaLine(via,x.name):(o.tun_host&&!o.tun_off?'<span class="warnbox" style="margin:0;width:100%">'+t('No Kanki tunnel carries this port to the server. Make a tunnel (or a multi-location route) that carries it, or forward it on that address some other way.')+'</span>':''))+'</div>'+
    (x.on&&x.error?'<div class="warnbox'+(x.error=='not running'?'':' ltr')+'" style="margin:6px 0 0">'+esc(t(x.error))+'</div>':'')+
    '<div class="kxsave"><button class="b2 sm" onclick="accClose(\'km\')">'+t('Cancel')+'</button><button class="btn sm" onclick="kmSaveOne(\''+id+'\')">'+t('Save')+'</button></div>'+
-   '<div class="kxacts"><button class="b2 sm" onclick="nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button><a class="b2 sm" href="#tunnels">'+t('Tunnels page')+'</a></div>';
+   '<div class="kxacts"><button class="b2 sm" onclick="nAct(\''+ni+'\',\'repair\')">↻ '+t('Restart VPN services')+'</button></div>';
   setTimeout(function(){var el=$('#km_p1'),w=$('#km_pw'),b=$('#km_ps');if(!el)return;var f=function(){var m=srvPortClash(r.key,'kmix',el.value);w.textContent=m;b.disabled=!!m};el.oninput=f;f();
    b.onclick=function(){if(String(r.key).indexOf('node:')==0)return kmSetNodePort(x.id,+unN(el.value),function(){accClose('km')});srvSavePort(r.key,'kmix',el.value,function(){accClose('km');kmLoad(true)})}},0);
   return h}
@@ -5036,6 +5107,27 @@ window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')
   api('PUT','/api/kmix',{nodes:m}).then(function(){toast(t('Saved'));accClose('km');kmLoad(true)}).catch(fail)};
  // the settings of every server, in the list; the page keeps its numbers and the general settings
   ACC.draw.km=function(){var c=$('#km_srv');if(c&&KM.d)c.innerHTML=kmServers(KM.d)};
+  // the Tunnel tab: the second config of each server through an Iran server
+  window.kmTunRows=function(d){var list=(d.servers||[]).map(function(x){var s=srvByNode(x.id)||{key:'node:'+x.id,name:x.name,cc:'',loc:''};return {k:x,s:s,key:s.key||x.id,name:x.name,cc:s.cc,loc:s.loc}});
+   if(!list.length)return '<p class="muted ku-empty">'+t('No VPN server yet')+'</p>';
+   return list.map(function(r){var x=r.k,o=(d.settings.nodes||{})[x.id]||{},sc=x.second;
+    var head='<span class="dot '+(sc?'g':'')+'"></span>'+fl(r.cc)+'<b>'+esc(x.name)+'</b><span class="sp"></span>'+(sc?'<span class="kxr-st g ltr">'+esc(sc.host)+':'+esc(String(sc.port))+'</span>':'<span class="kxr-st">'+t('No second config')+'</span>')+
+     (x.route_via?'<small>'+t('Through a tunnel')+'</small>':'');
+    return accRow('kmt',x.id,head,function(){return kmTunBody(d,r)})}).join('')};
+  function kmTunBody(d,r){var x=r.k,o=(d.settings.nodes||{})[x.id]||{},id=esc(x.id),port=x.port||x.want_port,via=x.route_via;
+   return    // the server's tunnel domain (Servers page) gives it by itself; the fields below only change it for KANKI MIX
+   '<label class="kxsw" style="cursor:pointer"><span>'+(x.second?t('Users also get')+' <b class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</b>':t('Write the tunnel domain of this server in Servers: the second config is made by itself.'))+'</span><input type="checkbox" id="km_t21" style="width:auto"'+(o.tun_off?'':' checked')+'></label>'+
+   '<details class="box" style="margin-top:6px" open><summary>'+t('Only for KANKI MIX (optional)')+'</summary>'+
+   '<div class="kxf"><div class="wide"><label class="f">'+t('Iran address')+'</label><input id="km_th1" class="ltr" placeholder="'+esc(t('the tunnel domain of the server'))+'" value="'+esc(o.tun_host||'')+'">'+
+    (function(){var irs=srvIrHosts(r.s&&r.s.key?r.s:null);return irs.length?'<div class="kxchips">'+irs.map(function(e){return '<button type="button" class="'+(o.tun_host==e.host?'on':'')+'" onclick="$(\'#km_th1\').value=\''+esc(e.host)+'\';$$(\'.kxchips button\',this.parentNode.parentNode).forEach(function(b){b.classList.remove(\'on\')});this.classList.add(\'on\');this.closest(\'.kxr-b\').dataset.dirty=\'1\'">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+'</div>':''})()+'</div>'+
+   '<div><label class="f">'+t('Port')+'</label><input id="km_tp1" class="ltr" inputmode="numeric" placeholder="'+esc(String((via&&via.port)||port||''))+'" value="'+esc(o.tun_port?String(o.tun_port):'')+'"></div>'+
+   '<div class="wide"><label class="f">'+t('Name in the app')+'</label><input id="km_tn1" maxlength="40" placeholder="'+esc(x.name+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'"></div></div></details>'+
+   '<div class="kxr-line">'+(via?viaLine(via,x.name):(o.tun_host&&!o.tun_off?'<span class="warnbox" style="margin:0;width:100%">'+t('No Kanki tunnel carries this port to the server. Make a tunnel (or a multi-location route) that carries it, or forward it on that address some other way.')+'</span>':''))+'</div>'+
+    '<div class="kxsave"><button class="b2 sm" onclick="accClose(\'kmt\')">'+t('Cancel')+'</button><button class="btn sm" onclick="kmSaveTun(\''+id+'\')">'+t('Save')+'</button></div>'}
+  window.kmSaveTun=function(id){var m=kmNodes(),o=m[id]||{};o.tun_off=!$('#km_t21').checked;o.tun_host=$('#km_th1').value.trim();
+   var tp=unN($('#km_tp1').value).trim();o.tun_port=tp?+tp:0;o.tun_name=$('#km_tn1').value.trim();m[id]=o;
+   api('PUT','/api/kmix',{nodes:m}).then(function(){toast(t('Saved'));accClose('kmt');kmLoad(true)}).catch(fail)};
+  ACC.draw.kmt=function(){var c=$('#km_tun');if(c&&KM.d)c.innerHTML=kmTunRows(KM.d)};
  
 
 // ---------------------------------------------------------------- Xray: a row per server with its inbounds
@@ -5050,11 +5142,10 @@ window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')
   return '<div class="kxr-line"><span class="ltr">'+esc(x.effective||'?')+'</span>'+(st.core?'<span>·</span><span>Xray '+esc(st.core)+'</span>':'')+'<span>'+xrCertChip(x)+'</span></div>'+
    (errs.length?'<div class="warnbox ltr" style="margin:6px 0 0">'+errs.map(esc).join('<br>')+'</div>':'')+
    (xrCertErr(x)?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(xrCertErr(x))+'</div>':'')+
-   coreTun('xray',((SV.d&&SV.d.servers)||[]).filter(function(z){return agentOf(z)==x.server})[0])+
    '<div class="kxr-sec">'+t('Inbounds')+'</div>'+(ibs.length?ibs.map(function(ib){return '<div style="cursor:pointer" onclick="xrInbound(\''+esc(ib.id)+'\')">'+xrMiniRow(ib)+'</div>'}).join(''):'<p class="muted" style="margin:4px">'+t('No inbound on this server yet')+'</p>')+
-   '<div class="kxacts"><button class="btn sm" onclick="xrInbound()">+ '+t('Inbound')+'</button><button class="b2 sm" onclick="xrSrvEdit(\''+sid+'\')">'+ic('edit',13)+' '+t('Edit server')+'</button>'+
+   '<div class="kxacts"><button class="b2 sm" onclick="xrSrvEdit(\''+sid+'\')">'+ic('edit',13)+' '+t('Domain and SSL')+'</button>'+
    '<button class="b2 sm" onclick="xrPreview(\''+sid+'\')">{ } '+t('Config')+'</button><button class="b2 sm" onclick="srvRepair(\'xray\',\''+sid+'\')">↻ '+t('Repair')+'</button><button class="b2 sm" onclick="srvHealth(\'xray\',\''+sid+'\')">♡ '+t('Health')+'</button>'+
-   '<button class="b2 sm bd" onclick="xrSrvDel(\''+sid+'\')">'+ic('trash',13)+' '+t('Remove Xray from this server')+'</button></div>'}
+   '</div><div class="ku-danger"><button class="b2 sm bd" onclick="xrSrvDel(\''+sid+'\')">'+ic('trash',13)+' '+t('Remove Xray from this server')+'</button></div>'}
  ACC.draw.xr=function(){var c=$('#xr_srv');if(c&&XR.d)c.innerHTML=xrServers(XR.d)};
  })();
 
@@ -5102,18 +5193,6 @@ V.markTabs=markTabs;
 
 
 
-// ---------------------------------------------------------------- server cards with a side drawer
-// KANKI MIX (km) and Xray (xr) rows become cards; the open one shows its settings in a drawer
-var DRW={km:'#km_srv',xr:'#xr_srv'};
-function drawerDress(){Object.keys(DRW).forEach(function(g){var box=$(DRW[g]);if(box)box.classList.add('k310cards')});
- var open=$('.k310cards .kxr.open'),sc=$('#k310scrim');
- if(!open){if(sc)sc.classList.remove('on');document.body.classList.remove('k310drw');return}
- if(!sc){sc=document.createElement('div');sc.id='k310scrim';sc.className='k310scrim';document.body.appendChild(sc)}
- var g=open.dataset.acc;sc.onclick=function(){accClose(g)};sc.classList.add('on');document.body.classList.add('k310drw');
- var b=$('.kxr-b',open);if(b&&!$('.k310dh',b)){var h=$('.kxr-h',open),nm=h&&$('b',h);
-  b.insertAdjacentHTML('afterbegin','<div class="k310dh"><b>'+(nm?esc(nm.textContent):'')+'</b><button type="button" class="ib" aria-label="'+esc(t('Close'))+'" onclick="accClose(\''+g+'\')">✕</button></div>')}}
-V.drawerDress=function(){if($('.k310cards')||$(DRW.km)||$(DRW.xr)||$('#k310scrim.on'))drawerDress()};
-window.addEventListener('hashchange',function(){var sc=$('#k310scrim');if(sc)sc.classList.remove('on');document.body.classList.remove('k310drw')});
 
 // ---------------------------------------------------------------- dashboard
 function chip(c,label,val){return '<span class="k310st '+c+'"><i></i>'+t(label)+'<b class="ltr">'+val+'</b></span>'}
@@ -5377,7 +5456,7 @@ window.navMark=function(p){var sk=V.secOf(p)[0];
 // ---------------------------------------------------------------- pages
 window.route=function(){var hs=location.hash||'';
  // old addresses
- if(hs=='#xray'){location.replace('#xray/overview');return}
+ if(hs=='#xray'){location.replace('#xray/status');return}
  if(hs.slice(1).split('/')[0]=='servers'){location.replace('#nodes');return}
  Object.keys(KAcc.open).forEach(function(k){KAcc.open[k]=''});
  var h=(hs||'#dash').slice(1).split('/'),p=h[0];S.sub=h[1]||'';if(!PAGES.some(function(x){return x[0]==p})){p='dash';S.sub=''}S.page=p;
@@ -5387,50 +5466,11 @@ window.route=function(){var hs=location.hash||'';
  V.watchPg();V.drawSecTabs(S.page);
  // every page comes in card by card
  var pg=$('#pg');if(pg){pg.classList.remove('kd-enter');void pg.offsetWidth;pg.classList.add('kd-enter');clearTimeout(pg._kd);pg._kd=setTimeout(function(){pg.classList.remove('kd-enter')},1400)}
- document.body.classList.toggle('kd-vpn',V.secOf(S.page)[0]=='vpnsec')};
+};
 
-// ---------------------------------------------------------------- Cores: a rail of cards
-var CORE={vpn:['dash','All cores at a glance','#F5C451'],kmix:['game','Games · low ping','#ff8a2a'],xray:['xray','VLESS · VMess · Trojan','#6fb6ff'],wg:['shield2','Plain and fast','#3ddc97'],
- awg:['shield2','Obfuscated WireGuard','#a78bfa'],hy2:['shield2','QUIC · lossy internet','#f472b6'],antidpi:['security','REALITY · CDN','#2fd6d6'],dns:['dns','Blocked sites only','#F5C451']};
-function dressRail(){var st=$('#sectabs');if(!st||V.secOf(S.page)[0]!='vpnsec')return;
- if(!st.classList.contains('kd-rail')){st.classList.add('kd-rail');
-  $$('.stl a',st).forEach(function(a){var p=(a.getAttribute('href')||'').slice(1).split('/')[0],m=CORE[p]||['cores','',''],name=a.textContent;
-   a.style.setProperty('--cc',m[2]||'#F5C451');a.innerHTML='<span class="kd-ci">'+ic(m[0],20)+'</span><b>'+esc(name)+'</b><small>'+esc(t(m[1]))+'</small>'});
-  dragRow($('.stl',st))}
- var on=$('.stl a.on',st);if(on&&on!==st._on){st._on=on;try{on.scrollIntoView({block:'nearest',inline:'center',behavior:st._seen?'smooth':'auto'})}catch(e){}st._seen=1}}
-// under a core: its servers are a row of country chips you swipe sideways; the picked one's settings
-// show below the row (the list itself keeps only the open server, without its header)
-var AUTO={};
-function railSig(rows){return rows.map(function(r){return r.dataset.key+(r.classList.contains('open')?'*':'')+$('.kxr-h',r).textContent}).join('|')}
-// a chip: the flag (with 1, 2 … when one country has more servers), and three small letters: P the panel
-// server (green), VPN this core runs there (green) or not (grey), T it has a tunnel (green) or not (grey)
-function chipsHtml(rows){var cnt={},seen={};
- var info=rows.map(function(r){var h=$('.kxr-h',r),f=$('.flg',h),cc=f?(f.getAttribute('title')||''):'',st=$$('.kxr-st',h),tw=t('tunnel');
-  cnt[cc]=(cnt[cc]||0)+1;return {r:r,f:f?f.outerHTML:'',cc:cc,name:(($('b',h)||{}).textContent||'').trim(),main:!!$('.kxc-tag.main',h),
-   run:!!(st[0]&&st[0].classList.contains('g')&&st[0].textContent.indexOf(tw)<0),tun:st.some(function(x){return x.textContent.indexOf(tw)>=0})}});
- return info.map(function(x){var n='';if(cnt[x.cc]>1){seen[x.cc]=(seen[x.cc]||0)+1;n='<sup>'+N(seen[x.cc])+'</sup>'}
-  return '<button type="button" class="kd-chip'+(x.r.classList.contains('open')?' on':'')+'" data-key="'+esc(x.r.dataset.key)+'" title="'+esc(x.name)+'" aria-label="'+esc(x.name)+'">'+
-   '<span class="kd-cf">'+x.f+n+'</span><span class="kd-cl">'+(x.main?'<i class="g">P</i>':'')+'<i class="'+(x.run?'g':'')+'">VPN</i><i class="'+(x.tun?'g':'')+'">T</i></span></button>'}).join('')}
-function chips(){if(!document.body.classList.contains('kd-vpn'))return;
- $$('#pg .kxl').forEach(function(l){var rows=$$(':scope>.kxr',l);if(!rows.length||!rows[0].dataset.acc)return;var g=rows[0].dataset.acc;
-  l.classList.add('kd-rows');var rail=l.previousElementSibling;
-  if(!rail||!rail.classList.contains('kd-crail')){rail=document.createElement('div');rail.className='kd-crail';l.parentNode.insertBefore(rail,l);dragRow(rail);
-   rail.addEventListener('click',function(e){var b=e.target.closest('[data-key]');if(!b)return;var r=$$(':scope>.kxr',l).filter(function(x){return x.dataset.key==b.dataset.key})[0],h=r&&$('.kxr-h',r);if(h)h.click()})}
-  var sig=railSig(rows);if(rail._sig!==sig){rail._sig=sig;
-   rail.innerHTML=chipsHtml(rows);
-   var on=$('.kd-chip.on',rail);if(on)try{on.scrollIntoView({block:'nearest',inline:'center',behavior:rail._seen?'smooth':'auto'})}catch(e){}rail._seen=1}
-  // (no server is opened by itself: a server's settings open only when its chip is tapped)
-  })}
-window.addEventListener('hashchange',function(){AUTO={}});
-// Servers page: two columns of slim cards with a pencil; a tap opens the server's settings in the side drawer
-var PEN='<span class="kd-pen" aria-hidden="true"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg></span>';
-function servers(){var g=$('#svp_g');if(!g||S.page!='nodes')return;g.classList.add('k310cards','kd-srv');
- $$('.kxr[data-acc] > .kxr-h',g).forEach(function(h){if(!$('.kd-pen',h))h.insertAdjacentHTML('beforeend',PEN)})}
 // Anti-DPI: the methods fold to one line (name, tags, make); a tap shows what each one is for
 function antidpi(){if(S.page!='antidpi')return;$$('#pg .g2>.box').forEach(function(b){if(b.classList.contains('kd-tpl'))return;b.classList.add('kd-tpl');
  b.addEventListener('click',function(e){if(e.target.closest('button'))return;b.classList.toggle('open')})})}
-// Xray's own tabs: one row you swipe sideways
-function xrTabsRow(){var x=$('#xr_tabs');if(x&&!x._kd){x.classList.add('kd-xtabs');dragRow(x)}}
 // REALITY: test the suggested targets from the panel server and mark the ones that work
 function reality(){var sel=$('#xi_dp');if(!sel||$('#kd_rt'))return;
  sel.insertAdjacentHTML('afterend','<button type="button" class="b2 sm" id="kd_rt">'+t('Test the sites')+'</button>');
@@ -5444,10 +5484,10 @@ function reality(){var sel=$('#xi_dp');if(!sel||$('#kd_rt'))return;
 // the dashboard numbers get a turning edge in their own colour
 function kpiEdges(){$$('#kpis .kpi').forEach(function(k){if(!$('.kd-edge',k))k.insertAdjacentHTML('beforeend','<i class="kd-edge" aria-hidden="true"></i>')})}
 // every turning edge turns in step with the others, and a redraw does not send it back to the start
-var EDGE='.kd-it.on,.kd-tn.on,.kd-rail .stl a.on,.kd-chip.on,.uchip.kd-u,#st .stn button.on,.k310st,.kd-edge,.kxr[data-acc="srv"]>.kxr-h';
+var EDGE='.kd-it.on,.kd-tn.on,.uchip.kd-u,#st .stn button.on,.k310st,.kd-edge,.kxr[data-acc="srv"]>.kxr-h';
 function phase(){var ph=-((Date.now()/1000)%3.2);$$(EDGE).forEach(function(e){if(!e._kdph){e._kdph=1;e.style.setProperty('--kdph',ph.toFixed(2)+'s')}})}
 // whatever a page draws is dressed right away: number icons, tab marks, drawers, rails and chips
-new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();V.drawerDress();if($('#sectabs'))dressRail();if(document.body.classList.contains('kd-vpn'))chips();servers();antidpi();xrTabsRow();reality();kpiEdges();phase()}).observe(document.body,{childList:true,subtree:true});
+new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();antidpi();reality();kpiEdges();phase()}).observe(document.body,{childList:true,subtree:true});
 
 // ---------------------------------------------------------------- users: two columns, data and expiry date
  window.uchip=function(u){var st=ustate(u),lv=liveOf(u),on=u.online_connections>0||lv.length>0,dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':''),ps=[];

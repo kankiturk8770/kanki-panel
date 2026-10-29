@@ -1,6 +1,6 @@
 [package]
 name = "kanki-panel"
-version = "3.20.1"
+version = "3.21.0"
 edition = "2021"
 
 [dependencies]
