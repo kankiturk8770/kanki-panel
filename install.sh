@@ -15,7 +15,7 @@ if [ "$(id -u)" != "0" ]; then
   command -v sudo >/dev/null || die "Please run as root (this server has no sudo)"
   say "Not root: running again with sudo ..."
   keep=()
-  for v in KANKI_REPO KANKI_JOIN KANKI_PANEL KANKI_TUNNEL KANKI_DOMAIN KANKI_EMAIL KANKI_MOVE KANKI_PORTS KANKI_LOCAL_BIN; do
+  for v in KANKI_REPO KANKI_JOIN KANKI_PANEL KANKI_TUNNEL KANKI_DOMAIN KANKI_EMAIL KANKI_SSL KANKI_MOVE KANKI_PORTS KANKI_LOCAL_BIN; do
     if [ -n "${!v:-}" ]; then keep+=("$v=${!v}"); fi
   done
   # started as a file (the "kanki" command): run that file. Started as `bash <(curl ...)` or
@@ -202,13 +202,14 @@ tls_perms(){
   chgrp kankitls "$TLS" $TLS/*.pem; chmod 750 "$TLS"; chmod 640 $TLS/*.pem
 }
 
-get_cert(){ # $1=domain $2=email
+get_cert(){ # $1=domain $2=email; CERT_SOFT=1: a failure warns and returns 1 instead of stopping the install
   say "Getting an SSL certificate for $1 ..."
   apt-get install -y -qq certbot >/dev/null
   port_busy 80 && warn "Port 80 is busy; certbot needs it free for a moment" || true
   certbot certonly --standalone -n --agree-tos -m "$2" -d "$1" \
     --pre-hook "systemctl stop caddy 2>/dev/null || true" --post-hook "systemctl start caddy 2>/dev/null || true" \
-    || die "SSL failed. The domain must point DIRECTLY (no Cloudflare proxy) to this server and port 80 must be open."
+    || { [ -n "${CERT_SOFT:-}" ] && { warn "SSL failed: a self-signed certificate is used. The domain must point DIRECTLY (no Cloudflare proxy) to this server and port 80 must be open; then press «Try SSL again» in the panel."; return 1; }
+         die "SSL failed. The domain must point DIRECTLY (no Cloudflare proxy) to this server and port 80 must be open."; }
   mkdir -p /etc/letsencrypt/renewal-hooks/deploy "$TLS"
   cat > /etc/letsencrypt/renewal-hooks/deploy/kanki.sh <<EOF
 #!/bin/sh
@@ -426,7 +427,10 @@ install_node(){
   fi
   HY2_STATS_PORT=$(rnum 30000 39999); HY2_OBFS=$(rand 20); HY2_SECRET=$(rand 24); NODE_TOKEN=$(rand 48); INSECURE=""
   base_packages; download_bin
-  if [ -n "$DOMAIN" ]; then get_cert "$DOMAIN" "$EMAIL"; else self_signed; INSECURE=1; fi
+  # KANKI_SSL=0 (the panel's «without SSL»): no certbot; a joining server never stops on a failed SSL
+  if [ -n "$DOMAIN" ] && [ "${KANKI_SSL:-1}" != 0 ]; then
+    if [ -n "$KANKI_JOIN" ]; then CERT_SOFT=1 get_cert "$DOMAIN" "$EMAIL" || { self_signed; INSECURE=1; }; else get_cert "$DOMAIN" "$EMAIL"; fi
+  else self_signed; INSECURE=1; fi
   setup_wireguard; setup_amneziawg
   [ -n "$HY2_PORT" ] && setup_hysteria "http://127.0.0.1:$NODE_PORT/hy2/auth"
   umask 077

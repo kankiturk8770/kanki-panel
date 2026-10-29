@@ -49,6 +49,9 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/servers/:id", delete(remove).put(edit))
         .route("/api/servers/:id/complete", post(complete))
         .route("/api/servers/:id/vpn", post(vpn_switch))
+        .route("/api/servers/:id/drop-vpn", post(drop_vpn))
+        .route("/api/servers/:id/core", post(core_switch))
+        .route("/api/servers/drop-iran-vpn", post(drop_iran_vpn))
         .route("/api/servers/:id/ports", post(set_ports))
         .route("/api/servers/:id/kmix", post(kmix_switch))
         .route("/api/servers/:id/command", get(command_again))
@@ -89,7 +92,7 @@ fn command(app: &App, s: &TServer) -> String {
         env.push_str(&format!(" KANKI_JOIN='{}' KANKI_PORTS='{}'", s.join, ports));
     }
     if !s.domain.is_empty() {
-        env.push_str(&format!(" KANKI_DOMAIN='{}'", s.domain));
+        env.push_str(&format!(" KANKI_DOMAIN='{}' KANKI_SSL={}", s.domain, if s.no_ssl { 0 } else { 1 }));
     }
     // the installer from the panel first (works where GitHub is filtered), GitHub second
     format!(
@@ -381,6 +384,8 @@ pub fn joined(app: &App, sid: &str, nid: &str) {
     s.node = nid.to_string();
     s.join.clear();
     s.setup_at = 0;
+    // installed, off until switched on (Servers > the core's page)
+    crate::cores::all_off(app, nid);
     let km = s.ports.get(3).copied().unwrap_or(0);
     tp::save_servers(app, &list);
     if km > 0 {
@@ -401,6 +406,8 @@ pub fn node_gone(app: &App, nid: &str) {
     let mut any = false;
     for s in list.iter_mut().filter(|s| s.node == nid) {
         s.node.clear();
+        s.ports.clear();
+        s.vpn = false;
         any = true;
     }
     if any {
@@ -554,7 +561,7 @@ pub fn list_json(app: &App) -> Value {
             "agent": { "id": s.id, "online": at > 0 && t - at < 20, "last_seen": at, "version": ver, "ip": ip, "addr": s.addr,
                        "can_setup": !ver.is_empty() && !ver_lt(&ver, SETUP_FROM) },
             "node": node, "ports": if s.node.is_empty() { json!({}) } else { ports_json(&uses, &s.node) },
-            "planned": s.ports, "pending": pending, "vpn_wanted": s.vpn, "domain": s.domain,
+            "planned": s.ports, "pending": pending, "vpn_wanted": s.vpn, "domain": s.domain, "ssl": !s.no_ssl,
             "setup": setup, "setup_asked": s.setup_at,
             "jobs": jobs(&s.id), "created": s.created,
             "tunnel": crate::twin::info(app, &s.id, Some(s.node.as_str()).filter(|n| !n.is_empty())),
@@ -573,7 +580,7 @@ pub fn list_json(app: &App) -> Value {
         .iter()
         .map(|(p, v)| json!({ "port": p, "users": v.iter().map(|(n, pr)| json!({ "node": n, "name": names.get(n).cloned().unwrap_or(n.clone()), "proto": pr })).collect::<Vec<_>>() }))
         .collect();
-    json!({ "servers": out, "clashes": clash, "panel": panel_url(app), "repo": repo(), "version": crate::VERSION })
+    json!({ "servers": out, "clashes": clash, "panel": panel_url(app), "repo": repo(), "version": crate::VERSION, "iran_relays": iran_relays(app).len(), "core_off": crate::cores::load(app) })
 }
 
 // ------------------------------------------------------------------ add / complete / switch / remove
@@ -625,7 +632,9 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     // its tunnel domain (the Iran server's): every config gets its copy through it once the server joins
     let tun = b["tunnel_host"].as_str().unwrap_or("").trim().to_string();
     let name = if name.is_empty() { format!("server-{}", list.len() + 1) } else { name };
-    let s = new_server(&app, name, loc, domain, b["vpn"].as_bool());
+    let mut s = new_server(&app, name, loc, domain, b["vpn"].as_bool());
+    // «SSL»: on by default abroad, off in Iran (port 80 is often closed there)
+    s.no_ssl = !b["ssl"].as_bool().unwrap_or(s.loc != "iran");
     if !tun.is_empty() {
         if let Err(e) = crate::twin::save(&app, &s.id, &json!({ "on": true, "host": tun })) {
             return err(StatusCode::BAD_REQUEST, &e);
@@ -725,6 +734,9 @@ async fn edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Jso
     }
     if let Some(a) = b["addr"].as_str() {
         s.addr = a.trim().to_string();
+    }
+    if let Some(v) = b["ssl"].as_bool() {
+        s.no_ssl = !v;
     }
     tp::save_servers(&app, &list);
     Json(json!({ "ok": true })).into_response()
@@ -889,6 +901,20 @@ async fn kmix_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
     Json(json!({ "ok": true })).into_response()
 }
 
+/// { core: wg|awg|hy2, on: bool } — one core of this server on or off (stopped, port closed, no links)
+async fn core_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let nid = match node_of_key(&app, &id) {
+        Ok(n) => n,
+        Err(r) => return r,
+    };
+    if let Err(e) = crate::cores::set(&app, &nid, b["core"].as_str().unwrap_or(""), !b["on"].as_bool().unwrap_or(true)) {
+        return err(StatusCode::BAD_REQUEST, &e);
+    }
+    crate::api::spawn_sync(&app);
+    Json(json!({ "ok": true, "off": crate::cores::off_list(&app, &nid) })).into_response()
+}
+
 /// { on: bool } — the VPN of this server serves users, or nobody (it stays installed)
 async fn vpn_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
@@ -908,6 +934,54 @@ async fn vpn_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b
     }
     crate::api::spawn_sync(&app);
     Json(json!({ "ok": true })).into_response()
+}
+
+/// The Iran servers that still run a VPN part that serves nobody (a relay made before 3.20.1): the
+/// keys of their VPN nodes
+fn iran_relays(app: &App) -> Vec<String> {
+    let nodes = app.db.nodes();
+    tp::servers(app)
+        .into_iter()
+        .filter(|s| !s.node.is_empty() && (s.loc == "iran" || crate::exitgeo::cc(app, &s.node) == "IR"))
+        .filter(|s| nodes.iter().any(|n| n.id == s.node && !n.enabled))
+        .map(|s| s.node)
+        .collect()
+}
+
+/// Takes the VPN part off one server and keeps the rest (tunnels, Xray, Kanki DNS): its node leaves the
+/// panel and the server stops and removes WireGuard, AmneziaWG, Hysteria2 and KANKI MIX, closes their
+/// ports and frees them (the same as deleting a node; the server agent stays)
+fn drop_node(app: &Arc<App>, nid: &str) -> Option<String> {
+    let n = crate::api::delete_node(app, nid)?;
+    let rid = tp::track("node", &n.name, vec![tp::node_step(&n.id, &n.name)]);
+    crate::api::spawn_node_removal(app, n);
+    Some(rid)
+}
+
+async fn drop_vpn(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    if id == "local" {
+        return err(StatusCode::BAD_REQUEST, "the panel server keeps its VPN");
+    }
+    let nid = match node_of_key(&app, &id) {
+        Ok(n) => n,
+        Err(r) => return r,
+    };
+    // the server agent must stay: a node with no agent next to it would be deleted whole
+    if !tp::servers(&app).iter().any(|s| s.node == nid) {
+        return err(StatusCode::BAD_REQUEST, "this server has no server agent: delete it instead");
+    }
+    match drop_node(&app, &nid) {
+        Some(rid) => Json(json!({ "ok": true, "removal": rid })).into_response(),
+        None => err(StatusCode::NOT_FOUND, "unknown server"),
+    }
+}
+
+/// Every Iran relay at once (see `iran_relays`)
+async fn drop_iran_vpn(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let ids: Vec<String> = iran_relays(&app).into_iter().filter_map(|nid| drop_node(&app, &nid)).collect();
+    Json(json!({ "ok": true, "count": ids.len(), "removals": ids })).into_response()
 }
 
 /// Removes the whole server: its agent (tunnels must be deleted first) and its VPN node.
@@ -937,25 +1011,48 @@ async fn remove(State(app): St, h: HeaderMap, Path(id): Path<String>, Query(q): 
     if !used.is_empty() && !with_tunnels {
         return (StatusCode::CONFLICT, Json(json!({ "error": "tunnels use this server", "tunnels": used }))).into_response();
     }
-    let node = tp::servers(&app).into_iter().find(|s| s.id == id).map(|s| s.node).unwrap_or_default();
-    // what each server has to do: this one removes everything and itself, the other ends stop the tunnels
-    let mut steps = vec![tp::step(&app, &id, "server", "")];
-    let tl: Vec<tp::Tunnel> = tp::tunnels(&app).into_iter().filter(|t| t.entry == id || t.exit == id).collect();
-    steps.extend(tp::tunnel_steps(&app, &tl, &id));
-    let name = steps[0].name.clone();
-    if let Err((code, e)) = tp::delete_server(&app, &id, with_tunnels) {
-        return err(code, &e);
+    match purge_server(&app, &id, with_tunnels) {
+        Ok(rid) => Json(json!({ "ok": true, "removal": rid })).into_response(),
+        Err((code, e)) => err(code, &e),
     }
-    let n = if node.is_empty() { None } else { crate::api::delete_node(&app, &node) };
+}
+
+/// Removes a server from the root: its agent part (tunnels through it, Xray, Kanki DNS, the
+/// subscription link, the emergency chat), its VPN node (users' server lists, KANKI MIX, microtun,
+/// core switches, the second config, direct name, exit country, live sessions, pins) and its reserved
+/// ports; the server itself is told to remove everything. Every way of deleting a server ends here.
+/// Gives the id of the removal to follow.
+pub fn purge_server(app: &Arc<App>, id: &str, with_tunnels: bool) -> Result<String, (StatusCode, String)> {
+    if id == "local" {
+        return Err((StatusCode::BAD_REQUEST, "the panel server cannot be removed".into()));
+    }
+    if let Some(nid) = id.strip_prefix("node:") {
+        let n = crate::api::delete_node(app, nid);
+        crate::twin::forget(app, id);
+        let name = n.as_ref().map(|n| n.name.clone()).unwrap_or_default();
+        let rid = tp::track("node", &name, n.iter().map(|n| tp::node_step(&n.id, &n.name)).collect());
+        if let Some(n) = n {
+            crate::api::spawn_node_removal(app, n);
+        }
+        return Ok(rid);
+    }
+    let node = tp::servers(app).into_iter().find(|s| s.id == id).map(|s| s.node).unwrap_or_default();
+    // what each server has to do: this one removes everything and itself, the other ends stop the tunnels
+    let mut steps = vec![tp::step(app, id, "server", "")];
+    let tl: Vec<tp::Tunnel> = tp::tunnels(app).into_iter().filter(|t| t.entry == id || t.exit == id).collect();
+    steps.extend(tp::tunnel_steps(app, &tl, id));
+    let name = steps[0].name.clone();
+    tp::delete_server(app, id, with_tunnels)?;
+    let n = if node.is_empty() { None } else { crate::api::delete_node(app, &node) };
     if let Some(n) = &n {
         steps.push(tp::node_step(&n.id, &n.name));
     }
     let rid = tp::track("server", &name, steps);
     if let Some(n) = n {
-        crate::api::spawn_node_removal(&app, n);
+        crate::api::spawn_node_removal(app, n);
     }
-    crate::twin::forget(&app, &id);
-    Json(json!({ "ok": true, "removal": rid })).into_response()
+    crate::twin::forget(app, id);
+    Ok(rid)
 }
 
 // ------------------------------------------------------------------ downloads for a new server

@@ -31,6 +31,10 @@ pub struct SyncReq {
     /// microtun on this server (None = a panel that does not manage it)
     #[serde(default)]
     pub mtun: Option<crate::mtun::MtCfg>,
+    /// WireGuard / AmneziaWG / Hysteria2 switched off on this server ("wg", "awg", "hy2"): stopped and
+    /// their ports closed (see `cores::apply`); an older agent ignores it but gets no users for them
+    #[serde(default)]
+    pub off: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -90,6 +94,8 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     *app.hy2_allowed.lock().unwrap() = req.hy2.clone();
     *app.limits.lock().unwrap() = req.limits.clone();
     let hy2_names: HashSet<String> = req.hy2.values().cloned().collect();
+    let off = req.off.clone();
+    let _ = tokio::task::spawn_blocking(move || crate::cores::apply(&off)).await;
     let (wgv, awgv) = (req.wg, req.awg);
     let (w, a) = tokio::task::spawn_blocking(move || (wg::apply("wg", &wgv), wg::apply("awg", &awgv)))
         .await
@@ -167,7 +173,9 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
     // (user_id, proto, pubkey)
     let info = crate::api::node_info(n);
     let has = |k: &str| info[k].as_str().map(|s| !s.is_empty()).unwrap_or(false);
-    let (wg_on, awg_on) = (has("wg_pub"), has("awg_pub"));
+    let off = crate::cores::off_list(app, &n.id);
+    let is_off = |c: &str| off.iter().any(|x| x == c);
+    let (wg_on, awg_on) = (has("wg_pub") && !is_off("wg"), has("awg_pub") && !is_off("awg"));
     let limit_on = app.db.get("conn_limit_on") != "0";
     let mut req = SyncReq::default();
     let mut map = vec![];
@@ -175,6 +183,7 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
     req.kmix = Some(crate::kmix::cfg_for(app, &crate::kmix::settings(app), n, &here));
     req.kcore = Some(serde_json::json!({}));
     req.mtun = Some(crate::microtun::cfg_for(app, n, &here));
+    req.off = off.clone();
     for u in users.iter().filter(|u| u.active() && u.on(n)) {
         // drain: no new users here unless explicitly assigned or already present
         if n.drain && !u.explicit_nodes() {
@@ -193,7 +202,7 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
                 map.push((u.id, proto.to_string(), p.pubkey));
             }
         }
-        if u.has_proto("hy2") {
+        if u.has_proto("hy2") && !is_off("hy2") {
             req.hy2.insert(u.code.clone(), u.username.clone());
         }
         req.limits.insert(u.username.clone(), (if limit_on { u.max_conn } else { 0 }, u.online));

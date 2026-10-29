@@ -592,6 +592,15 @@ async fn tgb_test(State(app): St, h: HeaderMap) -> Response {
     Json(json!({"ok": sent.is_some(), "bot": me["username"], "chat": chat})).into_response()
 }
 
+/// A text to the admin on the backup bot's chat (nothing when no bot or chat is set)
+pub async fn tell_admin(app: &App, text: &str) {
+    let token = tgb_token(app);
+    let chat = app.db.get("tgb_chat");
+    if !token.is_empty() && !chat.is_empty() {
+        let _ = tg_call(app, &token, "sendMessage", json!({"chat_id": chat, "text": text})).await;
+    }
+}
+
 pub async fn send_backup(app: &App) -> Result<(), String> {
     let token = tgb_token(app);
     let chat = app.db.get("tgb_chat");
@@ -671,12 +680,7 @@ pub async fn telegram_loop(app: Arc<App>) {
         record(&app, &r);
         if let Err(e) = &r {
             // a failed nightly backup was only written on the Backup page; tell the admin too
-            let token = tgb_token(&app);
-            let chat = app.db.get("tgb_chat");
-            if !token.is_empty() && !chat.is_empty() {
-                let text = format!("⚠️ {} · بکاپ پنل ساخته نشد\n{}", app.db.get("panel_name"), e);
-                let _ = tg_call(&app, &token, "sendMessage", json!({"chat_id": chat, "text": text})).await;
-            }
+            tell_admin(&app, &format!("⚠️ {} · بکاپ پنل ساخته نشد\n{}", app.db.get("panel_name"), e)).await;
         }
     }
 }

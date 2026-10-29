@@ -688,6 +688,9 @@ pub(crate) fn delete_node(app: &Arc<App>, id: &str) -> Option<Node> {
         let _ = app.db.exec("UPDATE users SET nodes=?1 WHERE id=?2", &[&list, &u.id]);
     }
     crate::kmix::forget_node(app, id);
+    crate::microtun::forget_node(app, id);
+    crate::twin::forget(app, &format!("node:{}", id));
+    crate::cores::forget(app, id);
     crate::direct::forget(app, id);
     crate::exitgeo::forget(app, &[id.to_string()]);
     crate::live::forget(id);
@@ -921,6 +924,8 @@ pub const SETTING_KEYS: &[&str] = &[
     "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "conn_limit_on", "tg_alerts", "logo", "price_rules",
     // v2.8.4: ready values of the "New user" form
     "def_gb", "def_days", "def_conns",
+    // 3.21: servers offline for too long are removed (cleanup.rs)
+    "autodel_on", "autodel_hours", "autodel_iran",
 ];
 
 /// "owner/repo" with only the characters GitHub allows
@@ -936,6 +941,10 @@ async fn settings_get(State(app): St, h: HeaderMap) -> Response {
     for k in SETTING_KEYS {
         m.insert(k.to_string(), json!(app.db.get(k)));
     }
+    // removing servers that stay offline is on by default, after 24 hours
+    let (on, hours, _) = crate::cleanup::auto_settings(&app);
+    m.insert("autodel_on".into(), json!(if on { "1" } else { "0" }));
+    m.insert("autodel_hours".into(), json!(hours.to_string()));
     m.insert("sub_domain".into(), json!(app.db.get("sub_domain")));
     m.insert("web_bind".into(), json!(app.env.get("PANEL_BIND").cloned().unwrap_or_else(|| "127.0.0.1".into())));
     m.insert("web_port".into(), json!(app.env.get("PANEL_PORT").cloned().unwrap_or_default()));
@@ -1188,9 +1197,10 @@ pub fn node_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     let info = node_info(n);
     let mut v = vec![];
     let has = |k: &str| info[k].as_str().map(|s| !s.is_empty()).unwrap_or(false);
-    if u.has_proto("wg") && has("wg_pub") && crate::direct::through_tunnel(app, n) { v.push("wireguard"); }
-    if u.has_proto("awg") && has("awg_pub") { v.push("amneziawg"); }
-    if u.has_proto("hy2") && has("hy2_port") { v.push("hysteria2"); }
+    let on = |c: &str| !crate::cores::is_off(app, &n.id, c);
+    if u.has_proto("wg") && has("wg_pub") && on("wg") && crate::direct::through_tunnel(app, n) { v.push("wireguard"); }
+    if u.has_proto("awg") && has("awg_pub") && on("awg") { v.push("amneziawg"); }
+    if u.has_proto("hy2") && has("hy2_port") && on("hy2") { v.push("hysteria2"); }
     if u.has_proto("kmix") && info["kmix_port"].as_u64().is_some() { v.push("kankimix"); }
     v
 }
@@ -1206,9 +1216,10 @@ pub fn twin_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     // each core through its own Iran address, else the server's
     let tun = |c: &str| crate::twin::of_node_core(app, n, c).is_some();
     let mut v = vec![];
-    if u.has_proto("wg") && has("wg_pub") && tun("wg") { v.push("wireguard"); }
-    if u.has_proto("awg") && has("awg_pub") && tun("awg") { v.push("amneziawg"); }
-    if u.has_proto("hy2") && has("hy2_port") && tun("hy2") { v.push("hysteria2"); }
+    let on = |c: &str| !crate::cores::is_off(app, &n.id, c);
+    if u.has_proto("wg") && has("wg_pub") && on("wg") && tun("wg") { v.push("wireguard"); }
+    if u.has_proto("awg") && has("awg_pub") && on("awg") && tun("awg") { v.push("amneziawg"); }
+    if u.has_proto("hy2") && has("hy2_port") && on("hy2") && tun("hy2") { v.push("hysteria2"); }
     if kmix { v.push("kankimix"); }
     v
 }

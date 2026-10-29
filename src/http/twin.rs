@@ -156,12 +156,27 @@ fn make(app: &App, key: &str, sid: &str, server_name: &str, core: Option<&str>) 
     if host.is_empty() {
         return None;
     }
-    let name = if o.name.trim().is_empty() { default_name(server_name) } else { o.name.trim().to_string() };
+    let name = named(server_name, &o.name);
     Some(Twin { host, name, sid: sid.to_string() })
 }
 
 pub fn default_name(server_name: &str) -> String {
     format!("{} (تانل)", server_name)
+}
+
+/// The name a second entry shows in the app: the one set, with the server's name in front when it
+/// does not say which server it is (four servers all named «تانل» looked the same in the app)
+pub fn named(server_name: &str, set: &str) -> String {
+    let set = set.trim();
+    if set.is_empty() {
+        return default_name(server_name);
+    }
+    let server = server_name.trim();
+    if server.is_empty() || set.to_lowercase().contains(&server.to_lowercase()) {
+        set.to_string()
+    } else {
+        format!("{} · {}", server, set)
+    }
 }
 
 /// The tunnel of a VPN server (None = none)
@@ -184,7 +199,7 @@ pub fn of_server(app: &App, sid: &str) -> Option<Twin> {
 /// The name of a server's second entry in the app (its tunnel name, set even when only a core has one)
 pub fn name_of_node(app: &App, n: &Node) -> Option<String> {
     let o = all(app).remove(&key_of_node(app, &n.id))?;
-    (o.on || !o.cores.is_empty()).then(|| if o.name.trim().is_empty() { default_name(&n.name) } else { o.name.trim().to_string() })
+    (o.on || !o.cores.is_empty()).then(|| named(&n.name, &o.name))
 }
 
 /// For the Servers page: the setting of server `key`, the address its configs would really use and
@@ -230,6 +245,14 @@ pub fn info(app: &App, key: &str, nid: Option<&str>) -> Value {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tunnel_name_says_which_server() {
+        assert_eq!(super::named("ENGLAND", "تانل"), "ENGLAND · تانل");
+        assert_eq!(super::named("Sweden", "Sweden (تانل)"), "Sweden (تانل)");
+        assert_eq!(super::named("Sweden", ""), "Sweden (تانل)");
+        assert_eq!(super::named("TURKEY", "turkey fast"), "turkey fast");
+    }
+
     use super::*;
 
     #[test]

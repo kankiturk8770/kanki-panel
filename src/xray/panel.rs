@@ -904,12 +904,49 @@ fn user_links_at(app: &App, u: &User) -> Vec<(String, String, String)> {
         return vec![];
     }
     let mut out = vec![];
-    for ib in s.inbounds.iter().filter(|ib| ib.enabled && (ib.only.is_empty() || ib.only.contains(&u.id)) && s.servers.iter().any(|x| x.server == ib.server)) {
+    let mine: Vec<&Inbound> = s.inbounds.iter().filter(|ib| ib.enabled && (ib.only.is_empty() || ib.only.contains(&u.id)) && s.servers.iter().any(|x| x.server == ib.server)).collect();
+    let names = unique_remarks(&mine);
+    for ib in mine {
+        let named;
+        let ib = match names.get(&ib.id) {
+            Some(n) if *n != ib.remark => {
+                named = Inbound { remark: n.clone(), ..ib.clone() };
+                &named
+            }
+            _ => ib,
+        };
         let Some(l) = link(app, &s, ib, u) else { continue };
         out.push((ib.remark.clone(), l, ib.server.clone()));
         if let Some(t) = link_tunnel(app, &s, ib, u) {
             out.push((t.0, t.1, ib.server.clone()));
         }
+    }
+    out
+}
+
+/// The name of each inbound in the app: inbounds that share a name get their kind after it
+/// («KANKI-XRAY gRPC», «KANKI-XRAY XHTTP», «KANKI-XRAY SS»), and the port when that is not enough
+fn unique_remarks(list: &[&Inbound]) -> HashMap<String, String> {
+    let kind = |ib: &Inbound| -> String {
+        if ib.protocol == "shadowsocks" {
+            return "SS".into();
+        }
+        let net = match ib.network.as_str() { "grpc" => "gRPC", "xhttp" => "XHTTP", "ws" => "WS", "httpupgrade" => "HTTPUpgrade", "kcp" => "mKCP", _ => "TCP" };
+        if ib.security == "reality" { format!("{} REALITY", net) } else { net.to_string() }
+    };
+    let key = |r: &str| r.trim().to_lowercase();
+    let mut out = HashMap::new();
+    for ib in list {
+        let base = if ib.remark.trim().is_empty() { ib.protocol.clone() } else { ib.remark.trim().to_string() };
+        let same: Vec<&&Inbound> = list.iter().filter(|x| key(if x.remark.trim().is_empty() { &x.protocol } else { &x.remark }) == key(&base)).collect();
+        let name = if same.len() < 2 {
+            base
+        } else if same.iter().filter(|x| kind(x) == kind(ib)).count() < 2 {
+            format!("{} {}", base, kind(ib))
+        } else {
+            format!("{} {} {}", base, kind(ib), ib.port)
+        };
+        out.insert(ib.id.clone(), name);
     }
     out
 }
@@ -1840,6 +1877,18 @@ mod tests {
 /// with `xray run -test` by hand) and their share links.
 #[cfg(test)]
 mod emit {
+    #[test]
+    fn inbounds_with_one_name_get_their_kind() {
+        let ib = |id: &str, remark: &str, proto: &str, net: &str, port: u16| super::Inbound { id: id.into(), remark: remark.into(), protocol: proto.into(), network: net.into(), port, security: "none".into(), ..Default::default() };
+        let l = [ib("a", "KANKI-XRAY", "vless", "grpc", 8443), ib("b", "KANKI-XRAY", "vless", "xhttp", 2083), ib("c", "KANKI-XRAY", "shadowsocks", "tcp", 8388), ib("d", "VLESS-REALITY", "vless", "tcp", 443)];
+        let r: Vec<&super::Inbound> = l.iter().collect();
+        let n = super::unique_remarks(&r);
+        assert_eq!(n["a"], "KANKI-XRAY gRPC");
+        assert_eq!(n["b"], "KANKI-XRAY XHTTP");
+        assert_eq!(n["c"], "KANKI-XRAY SS");
+        assert_eq!(n["d"], "VLESS-REALITY");
+    }
+
     use super::*;
 
     #[test]
