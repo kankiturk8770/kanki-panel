@@ -863,7 +863,7 @@ function kcAll(p,on){var n=KC.meta[p].name;if(!confirm(on?n+' '+t('for every use
 // ==================================================================== the panel: login, shell, pages
 "use strict";
 // Persian text of the whole panel
-var FA={
+var FA={"Weak connection to the panel: showing the last data, trying again…":"اتصال به پنل ضعیف است: آخرین داده نشان داده می‌شود، دوباره تلاش می‌کنیم…",
  "Iran servers that still run VPN services nobody uses":"سرورهای ایرانی که هنوز سرویس VPN بی‌استفاده اجرا می‌کنند",
  "Off: stopped on this server, its port closed, no links for it":"خاموش: روی این سرور متوقف، پورتش بسته و لینکی برایش ساخته نمی‌شود",
  "Remove WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from every Iran server that serves no VPN user? Their tunnels, Xray and Kanki DNS stay.":"وایرگارد، AmneziaWG، Hysteria2 و KANKI MIX از همه‌ی سرورهای ایرانی که به هیچ کاربری VPN نمی‌دهند پاک شود؟ تانل‌ها، Xray و DNS کانکی آن‌ها می‌مانند.",
@@ -2827,8 +2827,16 @@ function api(m,p,b,raw){var u=p;
   if(raw&&raw.blob)return r.ok?r.blob().then(function(bl){return{blob:bl,name:((r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/)||[])[1]}}):r.json().then(function(j){throw new Error(j.error||r.status)});
   return r.text().then(function(x){var j;try{j=x?JSON.parse(x):{}}catch(e){j={error:x}}if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})});
  if(m=='DELETE'&&DELRX.test(u||''))pr.then(function(r){if(r&&r.removal)kdFollowRemoval(r.removal)},function(){});
+ pr.then(function(){netNote(false)},function(e){if(isNetErr(e))netNote(true)});
  return pr}
+// «weak connection»: a request did not reach the panel; the page keeps what it shows and the note goes
+// with the next answer
+function isNetErr(e){return e instanceof TypeError&&/fetch|network|load failed/i.test(e.message)}
+function netNote(on){var el=document.getElementById('netnote');if(!on){if(el)el.remove();return}
+ if(el)return;el=document.createElement('div');el.id='netnote';el.setAttribute('role','status');el.textContent=t('Weak connection to the panel: showing the last data, trying again…');document.body.appendChild(el)}
 function fail(e){if(!e||e.message=='unauthorized')return;
+ // a request that did not reach the panel: the «weak connection» note says it once, not a toast per request
+ if(isNetErr(e)){netNote(true);return}
  // a page drawn after the admin already left it: nothing to tell
  if(e instanceof TypeError&&/of (null|undefined)/.test(e.message)){console.warn(e);return}
  toast(t(e.message||String(e)),1)}
@@ -2982,6 +2990,8 @@ function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))retur
 window.addEventListener('hashchange',function(){if(!S.token||!S.me)return;var h=(location.hash||'#dash').slice(1).split('/');
  // moving between the tabs of the page already open: only the tab changes
  if(h[0]==S.page&&window['tab_'+S.page]&&$('#pg .ptabs')){S.sub=h[1]||'';navMark(S.page,S.sub);window['tab_'+S.page](S.sub);return}route()});
+// every refresh timer of a page; route() stops them all when another page opens
+function clearPageTimers(){clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);if(window.TS&&TS.timer){clearInterval(TS.timer);TS.timer=0}}
 function autoRefresh(fn){clearInterval(S.timer);var sec=Math.max(5,(S.me&&S.me.refresh)||10);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')fn()},sec*1000)}
 function boot(){api('GET','/api/me').then(function(me){S.me=me;try{localStorage.setItem('kk_logo',me.logo||'')}catch(e){}if(me.panel_name)document.title=me.panel_name;
   if(!localStorage.getItem('kk_color')&&me.color)S.color=me.color;if(!localStorage.getItem('kk_lang')&&me.lang)S.lang=me.lang;if(!localStorage.getItem('kk_theme')&&me.theme)S.theme=me.theme;
@@ -5547,7 +5557,7 @@ window.route=function(){var hs=location.hash||'';
  Object.keys(KAcc.open).forEach(function(k){KAcc.open[k]=''});
  var h=(hs||'#dash').slice(1).split('/'),p=h[0];S.sub=h[1]||'';if(!PAGES.some(function(x){return x[0]==p})){p='dash';S.sub=''}S.page=p;
  var tb=$('#tbt');if(tb){tb.textContent=t(pgOf(p)[1]);$('#tbsec').textContent=t(grpOf(p))}
- navMark(p,S.sub);clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);window.scrollTo(0,0);
+ navMark(p,S.sub);clearPageTimers();window.scrollTo(0,0);
  (({dash:pDash,users:pUsers,nodes:pNodes,servers:pServers,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,emergency:pEmergency,backup:pBackup,security:pSecurity,settings:pSettings})[p]||window['p_'+p])();
  V.watchPg();V.drawSecTabs(S.page);
  // every page comes in card by card

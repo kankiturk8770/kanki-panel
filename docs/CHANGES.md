@@ -1,3 +1,10 @@
+# v3.21.1 — lighter, steadier pages
+- **CSS in its own file** (`assets/web/panel.css`, served as `/assets/kanki-panel.css` with gzip and a one-year cache per version; `versioned()` now also versions `href="/assets/…"`). `/admin` is a small HTML page; only a tiny loader style stays inline.
+- **Old CSS removed**: 25 rules no page used any more (`acts2`, `kmg2`, `kxbox-e`, `kxp-top`, `mtiles`, `rotb`, `smartb`, `tdc`, `tflow`, `tpath`). The k37/k38/k39/kd rules are still used and stay.
+- **One set of widths**: the last `max-width:900px` rules are now `899px`, so 900px is desktop everywhere.
+- **Timers**: `clearPageTimers()` stops every page timer (also the traffic page's) when you change page.
+- **Weak connection**: when the panel can't be reached the page keeps the last data and shows one small note at the top instead of a red error on every refresh; it goes away by itself.
+
 # v3.21.0 — every core in its own place
 - **One home per core, same tabs everywhere** (`panel.js` `corePage`, `CTABS`): KANKI MIX, microtun, WireGuard, AmneziaWG and Hysteria2 have Status · Servers · Tunnel · Settings; Xray has Status · Servers · Tunnel · Inbounds · Routing · Settings; Kanki DNS keeps its own tabs (Overview renamed Status). Status = the core on or off, every user on or off, the numbers, who is online. Servers = one row per server; a tap shows that core on that server. Tunnel = the second config of each server (`coreTunRows`, KANKI MIX `kmTunRows` / `kmSaveTun`). Settings = the protocol's own settings (AmneziaWG: the direct domains, as rows).
 - **Xray**: one «New inbound» (Inbounds tab) and one «Add Xray to a server» (Servers tab) instead of four add buttons; one name, «اینباند», instead of «دروازه» too; an inbound row shows the address users connect to (`xrPublic`: link address or the server's address, never `0.0.0.0`), a labelled switch, «Links» as its action and the rest behind «⋯» (`kuMenu`, delete last and apart). The on switch moved from Settings to Status. Old addresses (`#xray`, `#xray/overview`, `#xray/clients`) are sent to the new tabs.
