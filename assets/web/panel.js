@@ -1123,6 +1123,14 @@ var FA={
  "Country not known yet":"کشور هنوز معلوم نیست",
  "Create":"ساخت",
  "Create API token":"ساخت توکن API",
+ "A key with only some rights, for a script or for someone helping you. Delete it when the work is done.":"کلیدی با دسترسی محدود، برای یک اسکریپت یا کسی که کمکت می‌کند. وقتی کار تمام شد پاکش کن.",
+ "never used":"هنوز استفاده نشده",
+ "Servers and tunnels":"سرورها و تانل‌ها",
+ "Read users":"دیدن کاربرها",
+ "Users (read and change)":"کاربرها (دیدن و تغییر)",
+ "Everything (like the admin)":"همه‌چیز (مثل ادمین)",
+ "Rights":"دسترسی‌ها",
+ "Copy it now: it is shown only this once.":"همین الان کپی‌اش کن: فقط همین یک بار نشان داده می‌شود.",
  "Create and manage the sales bot":"ساخت و مدیریت ربات فروش",
  "Create bot":"ساخت ربات",
  "Create command":"ساخت دستور",
@@ -3224,6 +3232,9 @@ function loadSec(){api('GET','/api/security').then(function(s){S.sec=s;var el=$(
  '<label class="f">'+t('Session lifetime (hours)')+'</label><input type="number" id="ip_h" min="1" value="'+esc(s.session_hours)+'"></div></div>'+
  '<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><div><h3>'+t('Active sessions')+'</h3><p class="sub">'+t('Devices and IPs logged in to the panel')+'</p></div><button class="b2 bd" onclick="revokeOthers()">'+t('Log out others')+'</button></div><div class="list">'+
  s.sessions.map(function(x){var cur=x.id==s.current_session;return '<div class="li"><span><b class="ltr">'+esc(x.ip)+'</b> '+(cur?'<span class="badge g">'+t('current')+'</span>':'')+'<small class="ltr">'+esc(x.ua.slice(0,60))+' · '+ago(x.last_seen)+'</small></span>'+(cur?'':'<button class="b2 bd" onclick="sessDel(\''+x.id+'\')">✕</button>')+'</div>'}).join('')+'</div></div>'+
+ // API tokens: a key for a script or a helper with only some rights (shown once when made)
+ '<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><div><h3>'+t('API tokens')+'</h3><p class="sub">'+t('A key with only some rights, for a script or for someone helping you. Delete it when the work is done.')+'</p></div><button class="b2" onclick="tokNew()">＋ '+t('Create API token')+'</button></div><div class="list">'+
+ ((s.tokens||[]).map(function(k){return '<div class="li"><span><b>'+esc(k.name)+'</b> <span class="ltr muted">'+esc(k.prefix)+'…</span><small class="ltr">'+esc(k.scopes)+' · '+(k.last_used?ago(k.last_used):t('never used'))+'</small></span><button class="b2 bd" onclick="tokDel('+(+k.id)+')">✕</button></div>'}).join('')||'<span class="muted">—</span>')+'</div></div>'+
  '<details class="card secx"'+(open?'':' open')+'><summary><b>'+t('IP restriction')+'</b> <small class="muted">'+t('Your IP')+': <span class="ltr">'+esc(s.my_ip)+'</span></small></summary><p class="sub" style="margin-top:8px">'+t('Allow/Deny for the admin panel, one IP or CIDR per line')+'</p>'+
  '<div class="g2"><div><label class="f">Allow</label><textarea id="ip_a" class="ltr" rows="3" placeholder="'+t('IP / CIDR allowed, one per line')+'">'+esc(s.ip_allow)+'</textarea></div><div><label class="f">Deny</label><textarea id="ip_d" class="ltr" rows="3" placeholder="'+t('IP / CIDR blocked, one per line')+'">'+esc(s.ip_deny)+'</textarea></div></div></details>'+
  '<div style="text-align:center;margin:4px 0 12px"><button class="btn" onclick="savePolicy()">'+t('Save security policy')+'</button></div>'+
@@ -3232,6 +3243,17 @@ function totpSetup(){api('POST','/api/security/2fa/setup').then(function(r){moda
  $('#tf_go').onclick=function(){api('POST','/api/security/2fa/enable',{code:$('#tf_c').value}).then(function(){closeModal();toast(t('Done'));loadSec()}).catch(fail)}}).catch(fail)}
 function totpOff(){var c=prompt(t('2FA code'));if(!c)return;api('POST','/api/security/2fa/disable',{code:c}).then(function(){toast(t('Done'));loadSec()}).catch(fail)}
 function revokeOthers(){confirmDo(function(){api('POST','/api/security/revoke-others').then(loadSec).catch(fail)})}
+// rights a token can have (the panel's scopes); «nodes» is servers and tunnels
+var TOKSC=[['nodes','Servers and tunnels'],['users:read','Read users'],['users:write','Users (read and change)'],['settings','Settings'],['backup','Backup'],['admin','Everything (like the admin)']];
+function tokNew(){modal(mhead(t('Create API token'))+'<label class="f">'+t('Name')+'</label><input id="tk_n" maxlength="40" placeholder="tunnels">'+
+  '<label class="f">'+t('Rights')+'</label>'+TOKSC.map(function(x){return '<label class="chk"><input type="checkbox" class="tk_s" value="'+x[0]+'"'+(x[0]=='nodes'?' checked':'')+'><span><b>'+t(x[1])+'</b> <small class="ltr muted">'+x[0]+'</small></span></label>'}).join('')+
+  '<button class="btn" style="width:100%;margin-top:12px" id="tk_go">'+t('Create API token')+'</button>');
+ $('#tk_go').onclick=function(){var sc=$$('.tk_s').filter(function(c){return c.checked}).map(function(c){return c.value});
+  api('POST','/api/security/tokens',{name:$('#tk_n').value.trim()||'token',scopes:sc}).then(function(r){
+   modal(mhead(t('API token'))+'<p class="sub">'+t('Copy it now: it is shown only this once.')+'</p><textarea class="ltr" readonly rows="2" style="width:100%" onclick="this.select()">'+esc(r.token)+'</textarea>'+
+    '<button class="btn" style="width:100%;margin-top:10px" id="tk_cp">'+t('Copy')+'</button>');
+   $('#tk_cp').onclick=function(){try{navigator.clipboard.writeText(r.token);toast(t('Copied'))}catch(e){}};loadSec()}).catch(fail)}}
+function tokDel(id){confirmDo(function(){api('DELETE','/api/security/tokens/'+id).then(loadSec).catch(fail)})}
 function sessDel(id){api('DELETE','/api/security/sessions/'+id).then(loadSec).catch(fail)}
 function chPass(){api('POST','/api/security/password',{current:$('#cp_cur').value,username:$('#cp_u').value,password:$('#cp_p').value}).then(function(){toast(t('Saved'));loadSec()}).catch(fail)}
 function savePolicy(){api('POST','/api/security/policy',{ip_allow:$('#ip_a').value,ip_deny:$('#ip_d').value,session_hours:+$('#ip_h').value||24,force_2fa:$('#ip_f').checked}).then(function(){toast(t('Saved'));loadSec()}).catch(fail)}
