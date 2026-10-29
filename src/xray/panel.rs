@@ -1811,6 +1811,22 @@ mod tests {
         // tunnel off: only the server's own links
         app.db.set("srv_tunnel", "{}");
         assert_eq!(user_links_at(&app, &u).len(), 3);
+        // the server's tunnel off, Xray's own Iran address on: Xray still gets its copies through it, on
+        // the port that Iran server's tunnel carries
+        let t2 = crate::tunnel::panel::Tunnel { id: "b".into(), entry: "ir2".into(), exit: "de".into(), tcp: vec!["9443:2083".into()], enabled: true, ..Default::default() };
+        let ir2 = crate::tunnel::panel::TServer { id: "ir2".into(), name: "Iran-2".into(), addr: "ir2.example.com".into(), ..Default::default() };
+        crate::tunnel::panel::save_servers(&app, &[ir2]);
+        let t1 = crate::tunnel::panel::Tunnel { id: "a".into(), entry: "ir".into(), exit: "de".into(), tcp: vec!["443:2083".into()], enabled: true, ..Default::default() };
+        app.db.set("tun_list", &serde_json::to_string(&vec![t1, t2]).unwrap());
+        crate::twin::save_core(&app, "de", &json!({ "core": "xray", "host": "ir2.example.com" })).unwrap();
+        let l = user_links_at(&app, &u);
+        assert_eq!(l.len(), 5, "{:?}", l);
+        assert!(l[1].1.contains("@ir2.example.com:9443?"), "{}", l[1].1);
+        // the server's tunnel switched on keeps Xray's own address
+        crate::twin::save(&app, "de", &json!({ "on": true, "host": "ir.example.com" })).unwrap();
+        assert!(user_links_at(&app, &u)[1].1.contains("@ir2.example.com:9443?"));
+        crate::twin::save_core(&app, "de", &json!({ "core": "xray", "host": "" })).unwrap();
+        assert!(user_links_at(&app, &u)[1].1.contains("@ir.example.com:443?"));
     }
 
     #[test]

@@ -1,3 +1,9 @@
+# v3.20.0 — tunnel domain per core
+- Each core's page (WireGuard, AmneziaWG, Hysteria2, microtun, Xray) has «Second config through the tunnel» per server: one tap on an Iran server (chips of every Iran server's domain, the ones whose tunnel ends at this server first with ✓) sends only that core's second config through it. Empty = the server's own tunnel domain (Servers page). KANKI MIX keeps its own Iran address, now with the same chips; the Servers page tunnel box lists every Iran server too.
+- `twin.rs`: `Opt.cores` (core -> Iran address, kept when the server's tunnel is saved), `save_core()`, `of_node_core()`, `name_of_node()`; `of_server()` is Xray's. `PUT /api/servers/<key>` takes `{ "tunnel_core": { "core": "wg|awg|hy2|mtun|xray", "host": "" } }`. `info()` gives each port its `core` and `host`, and `cores`.
+- `tunnel/panel.rs` `port_entry_at()`: when Iran-1 and Iran-2 both carry a port to the server, the port of the chosen Iran server is used.
+- The subscription's tunnel entry, `/sub/.../raw`, `/v2` and the config downloads take each protocol's own address; a core with its own address gets its second config even when the server's tunnel is off.
+
 # v3.19.2 — API tokens on the Security page
 - `tokNew()` / `tokDel()` in `panel.js`: the Security page lists the scoped API tokens (`/api/security` already returned them) and makes (`POST /api/security/tokens`, the token shown once) or deletes them. «Servers and tunnels» (`nodes`) is ticked by default.
 
