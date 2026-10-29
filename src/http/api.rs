@@ -158,6 +158,31 @@ pub fn valid_username(s: &str) -> bool {
 /// The panel page with the version on every script it loads (`/assets/kanki-panel.js?v=3.17.1`): a cache in
 /// front of the panel (Cloudflare caches .js by itself) then never hands out an old copy of one of them next
 /// to new ones, which drew the old look after an update.
+fn gzip(b: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    let _ = e.write_all(b);
+    e.finish().unwrap_or_default()
+}
+
+/// The gzipped copy when the browser takes gzip, else the plain one
+fn maybe_gzip(h: &HeaderMap, plain: &'static [u8], gz: &'static [u8], ctype: &'static str, cache: &'static str, deny_frame: bool) -> Response {
+    let takes = h.get(header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok()).map(|v| v.contains("gzip")).unwrap_or(false);
+    let mut r = if takes && !gz.is_empty() {
+        ([(header::CONTENT_ENCODING, "gzip")], gz).into_response()
+    } else {
+        plain.into_response()
+    };
+    let hs = r.headers_mut();
+    hs.insert(header::CONTENT_TYPE, header::HeaderValue::from_static(ctype));
+    hs.insert(header::CACHE_CONTROL, header::HeaderValue::from_static(cache));
+    hs.insert(header::VARY, header::HeaderValue::from_static("Accept-Encoding"));
+    if deny_frame {
+        hs.insert(header::X_FRAME_OPTIONS, header::HeaderValue::from_static("DENY"));
+    }
+    r
+}
+
 fn admin_page() -> &'static str {
     static PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     PAGE.get_or_init(|| versioned(include_str!("../../assets/web/index.html"), crate::VERSION))
@@ -212,8 +237,10 @@ pub fn user_json(app: &App, u: &User) -> Value {
 pub fn master_router(app: Arc<App>) -> Router {
     Router::new()
         .route("/", get(|| async { Redirect::to("/admin") }))
-        .route("/admin", get(|| async {
-            ([(header::CACHE_CONTROL, "no-store"), (header::X_FRAME_OPTIONS, "DENY")], Html(admin_page()))
+        .route("/admin", get(|h: HeaderMap| async move {
+            static GZ: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+            let gz = GZ.get_or_init(|| gzip(admin_page().as_bytes()));
+            maybe_gzip(&h, admin_page().as_bytes(), gz, "text/html; charset=utf-8", "no-store", true)
         }))
         // Vazirmatn (SIL Open Font License), shared by the panel and the subscription page
         .route("/assets/vazirmatn.woff", get(|| async {
@@ -222,8 +249,11 @@ pub fn master_router(app: Arc<App>) -> Router {
         }))
         // the panel's extension script (DNS, Xray and node types): no secrets in it
         // the whole panel script, one file
-        .route("/assets/kanki-panel.js", get(|| async {
-            ([(header::CONTENT_TYPE, "application/javascript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], include_str!("../../assets/web/panel.js"))
+        // the page asks for it with ?v=<version>, so a phone keeps it until the next update
+        .route("/assets/kanki-panel.js", get(|h: HeaderMap| async move {
+            static GZ: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+            let js = include_str!("../../assets/web/panel.js").as_bytes();
+            maybe_gzip(&h, js, GZ.get_or_init(|| gzip(js)), "application/javascript; charset=utf-8", "public, max-age=31536000, immutable", false)
         }))
         .route("/api/overview", get(overview))
         .route("/api/users", get(users_list).post(users_create))

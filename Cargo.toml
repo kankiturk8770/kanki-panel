@@ -1,6 +1,6 @@
 [package]
 name = "kanki-panel"
-version = "3.20.0"
+version = "3.20.1"
 edition = "2021"
 
 [dependencies]
@@ -44,6 +44,8 @@ bytes = "1"
 # emergency chat server (signing + serving axum over TLS)
 ring = "0.17"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
+# the panel page and script are sent gzipped once compressed (850 KB → ~250 KB on a phone)
+flate2 = "1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

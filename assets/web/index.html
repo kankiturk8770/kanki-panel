@@ -2093,9 +2093,9 @@ body.k38 #thm.k38dn{display:inline-flex;align-items:center;gap:6px;width:auto;pa
 /* phones: bottom tab bar and a sheet with the rest */
 
 @media(max-width:899px){
- body.k38 .mbar.k38bar{position:fixed;top:auto;bottom:0;left:0;right:0;z-index:40;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;scroll-snap-type:x proximity;touch-action:pan-x;gap:2px;padding:6px max(10px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px));
+ body.k38 .mbar.k38bar{position:fixed;top:auto;bottom:0;left:0;right:0;z-index:40;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain;touch-action:pan-x;gap:2px;padding:6px max(10px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px));
   background:color-mix(in srgb,var(--c1) 90%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--gb);border-bottom:0}
- body.k38 .mbar.k38bar a,body.k38 .mbar.k38bar button{flex:0 0 auto;min-width:72px;scroll-snap-align:start;white-space:nowrap;flex-direction:column;gap:2px;justify-content:center;padding:6px 8px;border:0;background:transparent;color:var(--s);font-size:10.5px;border-radius:12px}
+ body.k38 .mbar.k38bar a,body.k38 .mbar.k38bar button{flex:0 0 auto;min-width:72px;white-space:nowrap;flex-direction:column;gap:2px;justify-content:center;padding:6px 8px;border:0;background:transparent;color:var(--s);font-size:10.5px;border-radius:12px}
  body.k38 .mbar.k38bar svg{color:inherit}
  body.k38 .mbar.k38bar .on{color:var(--a);background:transparent}
  body.k38.light .mbar.k38bar .on{color:var(--ad)}
@@ -2998,6 +2998,10 @@ body.kd .uchip.kd-u .nm{flex:1;min-width:0;white-space:normal!important;overflow
 @keyframes kdrmspin{to{transform:rotate(360deg)}}
 
 @media(prefers-reduced-motion:reduce){#kdrm{transition:none}.kdrm-sp,.kdrm-r i{animation:none}}
+.kboot{min-height:100vh;display:grid;place-items:center}
+.kboot i{width:32px;height:32px;border-radius:50%;border:3px solid rgba(128,128,128,.25);border-top-color:var(--a,#d4a24c);animation:kbspin .8s linear infinite}
+@keyframes kbspin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.kboot i{animation-duration:2.4s}}
 </style>
 </head>
 <body>
@@ -3007,7 +3011,9 @@ body.kd .uchip.kd-u .nm{flex:1;min-width:0;white-space:normal!important;overflow
 <linearGradient id="gFa" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--a);stop-opacity:.42"/><stop offset="1" style="stop-color:var(--a);stop-opacity:0"/></linearGradient>
 <linearGradient id="gFb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--info);stop-opacity:.34"/><stop offset="1" style="stop-color:var(--info);stop-opacity:0"/></linearGradient>
 </defs></svg>
-<div id="app"></div>
+<script>try{if(localStorage.getItem('kk_theme')=='light')document.body.classList.add('light')}catch(e){}</script>
+<!-- shown until the script and /api/me are in, so a slow phone never sees an empty black page -->
+<div id="app"><div class="kboot" role="status" aria-label="Loading"><i></i></div></div>
 <div class="modal" id="modal"><div class="mbox" id="mbox"></div></div>
 <div id="toast"></div>
 <script type="text/plain" id="scanTpl">

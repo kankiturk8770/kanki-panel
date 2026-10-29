@@ -588,6 +588,30 @@ fn clean_domain(d: &str) -> String {
     if ok { d } else { String::new() }
 }
 
+/// A new server. A relay in Iran carries tunnels only: no VPN part is installed and no VPN port is
+/// held for it, unless `vpn` is asked for (Install VPN on it later does the same).
+fn new_server(app: &App, name: String, loc: String, domain: String, vpn: Option<bool>) -> TServer {
+    let with_vpn = loc != "iran" || vpn == Some(true);
+    TServer {
+        id: format!("t{}", rand_token(7).to_lowercase()),
+        name,
+        token: rand_token(40),
+        created: now(),
+        join: if with_vpn { rand_token(40) } else { String::new() },
+        join_exp: if with_vpn { now() + JOIN_VALID } else { 0 },
+        vpn: vpn.unwrap_or(loc != "iran"),
+        ports: if with_vpn { allocate(app) } else { vec![] },
+        loc,
+        domain,
+        ..Default::default()
+    }
+}
+
+/// An Iran relay made without the VPN part: its command installs only the server agent
+fn agent_only(s: &TServer) -> bool {
+    s.node.is_empty() && s.loc == "iran" && s.join.is_empty()
+}
+
 /// { name, loc: iran|abroad, domain?, vpn? } -> a new server and the one command for it
 async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
@@ -598,23 +622,10 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if !b["domain"].as_str().unwrap_or("").trim().is_empty() && domain.is_empty() {
         return err(StatusCode::BAD_REQUEST, "the domain is not valid (like node1.example.com, not an IP)");
     }
-    // a relay in Iran carries tunnels; its VPN is installed but serves nobody until switched on
-    let vpn = b["vpn"].as_bool().unwrap_or(loc != "iran");
     // its tunnel domain (the Iran server's): every config gets its copy through it once the server joins
     let tun = b["tunnel_host"].as_str().unwrap_or("").trim().to_string();
-    let s = TServer {
-        id: format!("t{}", rand_token(7).to_lowercase()),
-        name: if name.is_empty() { format!("server-{}", list.len() + 1) } else { name },
-        token: rand_token(40),
-        loc,
-        created: now(),
-        join: rand_token(40),
-        join_exp: now() + JOIN_VALID,
-        vpn,
-        ports: allocate(&app),
-        domain,
-        ..Default::default()
-    };
+    let name = if name.is_empty() { format!("server-{}", list.len() + 1) } else { name };
+    let s = new_server(&app, name, loc, domain, b["vpn"].as_bool());
     if !tun.is_empty() {
         if let Err(e) = crate::twin::save(&app, &s.id, &json!({ "on": true, "host": tun })) {
             return err(StatusCode::BAD_REQUEST, &e);
@@ -630,14 +641,15 @@ async fn command_again(State(app): St, h: HeaderMap, Path(id): Path<String>) -> 
     let _ = guard!(app, h, "nodes");
     let mut list = tp::servers(&app);
     let Some(s) = list.iter_mut().find(|s| s.id == id) else { return err(StatusCode::NOT_FOUND, "unknown server") };
-    if s.node.is_empty() && (s.join.is_empty() || s.join_exp <= now()) {
+    let relay = agent_only(s);
+    if !relay && s.node.is_empty() && (s.join.is_empty() || s.join_exp <= now()) {
         s.join = rand_token(40);
         s.join_exp = now() + JOIN_VALID;
         if s.ports.len() != 4 {
             s.ports = vec![];
         }
     }
-    let need_ports = s.node.is_empty() && s.ports.is_empty();
+    let need_ports = !relay && s.node.is_empty() && s.ports.is_empty();
     let s2 = s.clone();
     tp::save_servers(&app, &list);
     let s = if need_ports {
@@ -1011,6 +1023,36 @@ mod tests {
 
     fn u(n: &str, p: &'static str, port: u16) -> Use {
         Use { node: n.into(), proto: p, port }
+    }
+
+    fn test_app() -> std::sync::Arc<App> {
+        use std::collections::HashMap;
+        use std::sync::{atomic::AtomicI64, Mutex};
+        let dir = std::env::temp_dir().join(format!("kanki-servers-test-{}", rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
+        std::sync::Arc::new(App {
+            db,
+            env: HashMap::from([("DOMAIN".to_string(), "fi.example.com".to_string())]),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        })
+    }
+
+    #[test]
+    fn an_iran_relay_gets_only_the_tunnel_agent() {
+        let app = test_app();
+        let ir = new_server(&app, "IRAN1".into(), "iran".into(), String::new(), None);
+        assert!(ir.ports.is_empty() && ir.join.is_empty() && !ir.vpn && agent_only(&ir));
+        let cmd = command(&app, &ir);
+        assert!(cmd.contains("KANKI_TUNNEL=") && !cmd.contains("KANKI_JOIN") && !cmd.contains("KANKI_PORTS"));
+        // asked for: the VPN part is installed there too
+        let ir2 = new_server(&app, "IRAN2".into(), "iran".into(), String::new(), Some(true));
+        assert!(ir2.ports.len() == 4 && !ir2.join.is_empty() && !agent_only(&ir2));
+        // abroad: as before
+        let de = new_server(&app, "GERMANY".into(), "abroad".into(), String::new(), None);
+        assert!(de.ports.len() == 4 && de.vpn && command(&app, &de).contains("KANKI_JOIN="));
     }
 
     #[test]

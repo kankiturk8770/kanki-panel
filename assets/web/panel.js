@@ -4345,7 +4345,8 @@ var SECS=[
  ['nodes','Servers','nodes',[['nodes','','Servers']],'Servers & network'],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Servers & network'],
  ['ports','Ports','ports',[['ports','','Ports']],'Servers & network'],
- ['vpnsec','Cores','cores',[['vpn','','Overview'],['kmix','','KANKI MIX'],['mtun','','microtun'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI'],['dns','','Kanki DNS']],'Services'],
+ ['vpnsec','Cores','cores',[['vpn','','Overview'],['kmix','','KANKI MIX'],['mtun','','microtun'],['xray','overview','Xray'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['antidpi','','Anti-DPI']],'Services'],
+ ['dnssec','Kanki DNS','dns',[['dns','','Kanki DNS']],'Services'],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Reports'],
  ['syssec','System','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup']],'System']];
 function secOf(p){for(var i=0;i<SECS.length;i++)if(SECS[i][3].some(function(x){return x[0]==p}))return SECS[i];return SECS[0]}
@@ -4385,8 +4386,7 @@ var V=V37;
 
 // ---------------------------------------------------------------- menu: groups of what belongs together
 // [section key, label, icon, [[page, sub page, tab label], ...], group]
-var DNSSEC=['dnssec','Kanki DNS','dns',[['dns','','Kanki DNS']],'Services'];
-function secBy(k){if(k=='dnssec')return DNSSEC;for(var i=0;i<V.SECS.length;i++)if(V.SECS[i][0]==k)return V.SECS[i];return V.SECS[0]}
+function secBy(k){for(var i=0;i<V.SECS.length;i++)if(V.SECS[i][0]==k)return V.SECS[i];return V.SECS[0]}
 window.grpOf=function(p){return V.secOf(p)[4]||''};
 
 
@@ -5346,6 +5346,8 @@ window.shell=function(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.cha
  '<a href="#" id="lo2" class="lo2"><span class="ni">'+ic('logout',18)+'</span>'+t('Logout')+'</a></div></nav><div class="shade" id="shade"></div>'+navBar()+'<main id="pg"></main>';
  $('#shade').onclick=function(){$('#side').classList.remove('on');$('#shade').classList.remove('on')};
  $('#msheet').onclick=function(e){if(e.target.closest('a'))navMark(S.page,S.sub)};
+ var mb=$('#mbar');if(mb){mb.addEventListener('touchstart',function(){mb._touch=1},{passive:true});
+  mb.addEventListener('touchend',function(){setTimeout(function(){mb._touch=0},400)},{passive:true})}
  if(!window._navDoc){window._navDoc=1;document.addEventListener('click',function(e){var sh=$('#msheet');if(sh&&sh.classList.contains('on')&&!e.target.closest('#msheet,#mbar'))navMark(S.page,S.sub)})}
  $$('[data-l]').forEach(function(b){b.onclick=function(){S.lang=b.dataset.l;localStorage.setItem('kk_lang',S.lang);applyLook();shell();route()}});
  $('#thm').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook()};
@@ -5366,7 +5368,10 @@ window.navMark=function(p){var sk=V.secOf(p)[0];
  $$('#side a[data-sec],#mbar a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
  V.drawSecTabs(p);k38More(0);
  // the open section stays in sight in the scrolling bar
- var a=document.querySelector('#mbar a[data-sec="'+sk+'"]');if(a&&a.scrollIntoView)try{a.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}
+ // only when it is out of sight and the bar is not being swiped, and never the page itself
+ var bar=$('#mbar'),a=bar&&bar.querySelector('a[data-sec="'+sk+'"]');
+ if(a&&!bar._touch&&bar.clientWidth){var br=bar.getBoundingClientRect(),r=a.getBoundingClientRect();
+  if(r.left<br.left||r.right>br.right)bar.scrollBy({left:(r.left+r.width/2)-(br.left+br.width/2),behavior:'smooth'})}
  V.markTabs();markAll()};
 
 // ---------------------------------------------------------------- pages
