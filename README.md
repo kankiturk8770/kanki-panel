@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.21.1 — lighter, steadier pages
+- The panel's CSS is its own cached file, unused old styles are gone and 900px is desktop on every page.
+- A weak connection shows one small note and keeps the last data instead of repeated errors.
+
 ## New in 3.21 — a tidy panel: every core in its own place
 - Every core (KANKI MIX, microtun, Xray, WireGuard, AmneziaWG, Hysteria2) has the same tabs: **Status, Servers, Tunnel, Settings** (Xray also Inbounds and Routing). Whatever belongs to a core is only there.
 - Xray: one place to add an inbound, the address users really connect to, and the rare actions behind «⋯».

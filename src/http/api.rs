@@ -191,10 +191,12 @@ fn admin_page() -> &'static str {
 fn versioned(html: &str, v: &str) -> String {
     let mut out = String::with_capacity(html.len() + 512);
     let mut rest = html;
-    while let Some(i) = rest.find("src=\"/assets/") {
+    // the next src="/assets/… or href="/assets/…
+    let next = |r: &str| [r.find("src=\"/assets/").map(|i| (i, 5)), r.find("href=\"/assets/").map(|i| (i, 6))].into_iter().flatten().min();
+    while let Some((i, skip)) = next(rest) {
         let (head, tail) = rest.split_at(i);
         out.push_str(head);
-        let end = tail[5..].find('"').map(|e| e + 5).unwrap_or(tail.len());
+        let end = tail[skip..].find('"').map(|e| e + skip).unwrap_or(tail.len());
         out.push_str(&tail[..end]);
         if !tail[..end].contains('?') {
             out.push_str("?v=");
@@ -215,6 +217,9 @@ mod versioned_tests {
         let page = super::admin_page();
         assert!(page.contains("/assets/kanki-panel.js?v="));
         assert!(!page.contains("/assets/kanki-panel.js\""));
+        assert!(page.contains("/assets/kanki-panel.css?v="));
+        let c = super::versioned("<link rel=\"stylesheet\" href=\"/assets/x.css\"><a href=\"/y\">", "1.0.0");
+        assert_eq!(c, "<link rel=\"stylesheet\" href=\"/assets/x.css?v=1.0.0\"><a href=\"/y\">");
     }
 }
 
@@ -249,6 +254,12 @@ pub fn master_router(app: Arc<App>) -> Router {
         }))
         // the panel's extension script (DNS, Xray and node types): no secrets in it
         // the whole panel script, one file
+        // the look of the panel, out of the page so a phone keeps it until the next update (?v=<version>)
+        .route("/assets/kanki-panel.css", get(|h: HeaderMap| async move {
+            static GZ: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+            let css = include_str!("../../assets/web/panel.css").as_bytes();
+            maybe_gzip(&h, css, GZ.get_or_init(|| gzip(css)), "text/css; charset=utf-8", "public, max-age=31536000, immutable", false)
+        }))
         // the page asks for it with ?v=<version>, so a phone keeps it until the next update
         .route("/assets/kanki-panel.js", get(|h: HeaderMap| async move {
             static GZ: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
