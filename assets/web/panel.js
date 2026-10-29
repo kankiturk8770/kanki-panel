@@ -1848,6 +1848,28 @@ var FA={
  "Ports moved":"پورت‌ها جابه‌جا شدند",
  "Ports of":"پورت‌های",
  "Ports of the exit server":"پورت‌های سرور خروجی",
+ "Tunnel guide":"راهنمای تانل",
+ "Which tunnel for which protocol":"کدام تانل برای کدام پروتکل",
+ "Rule: UDP protocols through a UDP tunnel, Xray (TCP) through a TCP tunnel. A game packet inside a TCP tunnel waits for every lost packet before it, so the ping jumps.":"قاعده: پروتکل‌های UDP از تانل UDP، و Xray (که TCP است) از تانل TCP. بستهٔ بازی داخل تانل TCP منتظر هر بستهٔ گم‌شدهٔ قبلی می‌ماند و پینگ بالا و پایین می‌رود.",
+ "Best tunnel":"بهترین تانل",
+ "Also good":"جایگزین خوب",
+ "When UDP is blocked":"وقتی UDP بسته است",
+ "Better not":"بهتر است نزنی",
+ "AmneziaWG link":"لینک AmneziaWG",
+ "Hysteria2 link":"لینک Hysteria2",
+ "AmneziaWG link, KCP":"لینک AmneziaWG، KCP",
+ "Game, KCP":"Game، KCP",
+ "HQ-QUIC, KCP":"HQ-QUIC، KCP",
+ "WSS, H2":"WSS، H2",
+ "FakeTCP, Dual":"FakeTCP، Dual",
+ "CDN (when the abroad IP is blocked)":"CDN (وقتی آی‌پی سرور خارج بسته شد)",
+ "A network card between the two servers: packets go through as they are, with the least overhead.":"یک کارت شبکه بین دو سرور: بسته‌ها همان‌طور که هستند و با کمترین سربار رد می‌شوند.",
+ "For games: a lost packet is rebuilt without waiting. Costs about 37% more traffic between the servers, not the user's data.":"برای بازی: بستهٔ گم‌شده بدون انتظار دوباره ساخته می‌شود. حدود ۳۷٪ ترافیک بیشتر بین دو سرور می‌برد، نه از حجم کاربر.",
+ "QUIC stays QUIC end to end; HQ-QUIC hides it under a mask.":"QUIC تا آخر QUIC می‌ماند؛ HQ-QUIC آن را زیر ماسک پنهان می‌کند.",
+ "Xray is TCP: a steady TCP tunnel fits it; WSS and H2 look like an ordinary site.":"Xray روی TCP است: تانل TCP پایدار برایش بهتر است؛ WSS و H2 شبیه یک سایت معمولی‌اند.",
+ "DoT and DoH are TCP; plain DNS (53) is UDP and also passes KCP.":"DoT و DoH روی TCP هستند؛ DNS معمولی (۵۳) روی UDP است و از KCP هم رد می‌شود.",
+ "A tunnel per kind of traffic: an AmneziaWG link for WireGuard and AmneziaWG, a Game tunnel for microtun and KANKI MIX, TCP Mux for Xray. Tap a best tunnel to open the form with it, then tap the cores whose ports it should carry.":"برای هر نوع ترافیک یک تانل: لینک AmneziaWG برای WireGuard و AmneziaWG، تانل Game برای microtun و KANKI MIX، و TCP Mux برای Xray. روی بهترین تانل بزن تا فرم تانل با همان باز شود، بعد دکمهٔ هسته‌هایی را بزن که پورتشان باید از آن رد شود.",
+ "Networks in Iran differ: before choosing, «Smart tunnel» tests every transport between your two servers and shows the best one.":"اینترنت اپراتورهای ایران با هم فرق دارد: قبل از انتخاب نهایی، «تانل هوشمند» همهٔ ترانسپورت‌ها را بین دو سرور خودت تست می‌کند و بهترین را نشان می‌دهد.",
  "All ports of the exit server":"همهٔ پورت‌های سرور خروجی",
  "All ports of":"همهٔ پورت‌های",
  "Not on this server":"روی این سرور نیست",
@@ -3812,7 +3834,7 @@ function tmRound(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+
 
 // ---- the page
 function pTunnels(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnels')+'</h2><p>'+t('Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit')+'</p></div>'+
- '<div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="b2 smartb" onclick="tunSmart()">⚡ '+t('Smart tunnel')+'</button><button class="b2" id="rt_new" onclick="routeEdit()">⛓ '+t('Multi-location tunnel')+'</button><button class="btn" onclick="tunEdit()">+ '+t('Tunnel')+'</button></div></div>'+
+ '<div class="row" style="gap:6px"><button class="b2" onclick="tunGuide()" title="'+esc(t('Which tunnel for which protocol'))+'">? '+t('Tunnel guide')+'</button><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="b2 smartb" onclick="tunSmart()">⚡ '+t('Smart tunnel')+'</button><button class="b2" id="rt_new" onclick="routeEdit()">⛓ '+t('Multi-location tunnel')+'</button><button class="btn" onclick="tunEdit()">+ '+t('Tunnel')+'</button></div></div>'+
  '<div class="card tmapc"><div id="tn_map"><span class="muted">'+t('Loading…')+'</span></div><div class="tkpi" id="tn_kpi"></div></div>'+
  '<div class="nh" style="margin-top:4px"><h3>'+t('Tunnels')+'</h3></div><div id="tn_list"></div>'+
  '';
@@ -3911,6 +3933,32 @@ function tunSvcGroups(sid){var o={xray:{tcp:[],udp:[]},dns:{tcp:[],udp:[]}},add=
   return o})}
 function tunSvcPorts(sid){return tunSvcGroups(sid).then(function(g){return tunMerge(tunMerge({tcp:[],udp:[]},g.xray),g.dns)})}
 function tunMerge(a,b){[['tcp'],['udp']].forEach(function(k){k=k[0];(b[k]||[]).forEach(function(p){if(a[k].indexOf(p)<0)a[k].push(p)})});return a}
+// ---- «Which tunnel?»: which tunnel suits which protocol. UDP protocols through a UDP tunnel, Xray
+// (TCP) through a TCP one: a lost packet inside a TCP tunnel holds up every packet after it. Each row
+// can open the tunnel form with its best choice already picked.
+var TGUIDE=[
+ {p:'WireGuard · AmneziaWG',best:['awg','AmneziaWG link'],also:'Game, KCP',blocked:'FakeTCP, Dual',avoid:'TCP, WS',
+  why:'A network card between the two servers: packets go through as they are, with the least overhead.'},
+ {p:'microtun · KANKI MIX',best:['game','Game (FEC)'],also:'AmneziaWG link, KCP',blocked:'FakeTCP',avoid:'TCP, WSS, CDN',
+  why:"For games: a lost packet is rebuilt without waiting. Costs about 37% more traffic between the servers, not the user's data."},
+ {p:'Hysteria2',best:['hy2','Hysteria2 link'],also:'HQ-QUIC, KCP',blocked:'Dual',avoid:'TCP, WS',
+  why:'QUIC stays QUIC end to end; HQ-QUIC hides it under a mask.'},
+ {p:'Xray',best:['tcpmux','TCP Mux'],also:'WSS, H2',blocked:'CDN (when the abroad IP is blocked)',avoid:'—',
+  why:'Xray is TCP: a steady TCP tunnel fits it; WSS and H2 look like an ordinary site.'},
+ {p:'Kanki DNS',best:['tcpmux','TCP Mux'],also:'KCP',blocked:'—',avoid:'—',
+  why:'DoT and DoH are TCP; plain DNS (53) is UDP and also passes KCP.'}];
+function tunGuidePre(k){return k=='awg'||k=='hy2'?{kind:k}:{transport:k}}
+function tunGuideHtml(){
+ return '<p class="sub" style="margin:0 0 10px">'+t('Rule: UDP protocols through a UDP tunnel, Xray (TCP) through a TCP tunnel. A game packet inside a TCP tunnel waits for every lost packet before it, so the ping jumps.')+'</p>'+
+  '<div class="tguide"><div class="tgr tgh"><b>'+t('Protocol')+'</b><b>'+t('Best tunnel')+'</b><b>'+t('Also good')+'</b><b>'+t('When UDP is blocked')+'</b><b>'+t('Better not')+'</b></div>'+
+  TGUIDE.map(function(r,i){return '<div class="tgr"><b class="tgp">'+esc(r.p)+'</b>'+
+   '<span class="tgb" data-l="'+esc(t('Best tunnel'))+'"><button type="button" class="b2 sm" data-tg="'+i+'">'+esc(t(r.best[1]))+' ＋</button></span>'+
+   '<span data-l="'+esc(t('Also good'))+'">'+esc(t(r.also))+'</span><span data-l="'+esc(t('When UDP is blocked'))+'">'+esc(t(r.blocked))+'</span><span class="tgx" data-l="'+esc(t('Better not'))+'">'+esc(r.avoid)+'</span>'+
+   '<small class="tgw">'+esc(t(r.why))+'</small></div>'}).join('')+'</div>'+
+  '<p class="sub" style="margin:10px 0 0">'+t('A tunnel per kind of traffic: an AmneziaWG link for WireGuard and AmneziaWG, a Game tunnel for microtun and KANKI MIX, TCP Mux for Xray. Tap a best tunnel to open the form with it, then tap the cores whose ports it should carry.')+'</p>'+
+  '<p class="sub" style="margin:6px 0 0">'+t('Networks in Iran differ: before choosing, «Smart tunnel» tests every transport between your two servers and shows the best one.')+'</p>'}
+function tunGuide(){modal(mhead(t('Which tunnel for which protocol'))+tunGuideHtml(),'wide');
+ $$('#mbox [data-tg]').forEach(function(b){b.onclick=function(){var r=TGUIDE[+b.dataset.tg];closeModal();tunEdit(null,tunGuidePre(r.best[0]))}})}
 function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pre)});
  var x=id?Object.assign({},(TN.d.tunnels||[]).filter(function(z){return z.id==id})[0]||{},pre||{}):(pre||{}),sv=TN.d.servers||[];
  var remote=sv.filter(function(s){return !s.local});
