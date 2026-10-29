@@ -8,6 +8,7 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** pan
 - Xray: one place to add an inbound, the address users really connect to, and the rare actions behind «⋯».
 - Servers: each server lists its cores; tap one to open it.
 - Tunnel map: «All» or one Iran server at a time, each Iran server in its own colour; one server shows each of its tunnels on its own line with its ping. The dashboard no longer carries the tunnel map.
+- Tunnels list: a filter by server (tap Turkey: only Turkey's tunnels), grouped by Iran server, one short row per tunnel that opens for the details. Red on the map now always means «down».
 - Safer updates: a new version replaces the old one only after it has started once on that server; the other Kanki service of the machine moves to it at once.
 
 ## New in 3.20.1 — fixes from the 3.20.0 check

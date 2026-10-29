@@ -1502,6 +1502,26 @@ html[dir=rtl] .uchip2{padding:4px 4px 4px 10px}
 .tmtabs button{flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:40px;padding:0 12px;border:0;border-radius:9px;background:none;color:var(--s);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
 .tmtabs button.on{background:var(--c1);color:var(--t);box-shadow:0 1px 2px rgba(0,0,0,.2)}
 .tmtabs i{width:10px;height:10px;border-radius:50%;flex:none}
+/* tunnels under the map: a filter by server, then one group per Iran server and one row per tunnel */
+.tnf{display:block;margin:16px 0 12px}
+.tnf-l{display:flex;flex-wrap:wrap;gap:8px}
+.tnf-l button{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 12px;border:1px solid var(--ln);border-radius:999px;background:var(--c1);color:var(--s);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.tnf-l button.on{border-color:var(--a);color:var(--t);background:color-mix(in srgb,var(--a) 12%,var(--c1))}
+.tnf-l button em{font-style:normal;font-size:12px;color:var(--s);padding:0 6px;border-radius:8px;background:var(--in)}
+.tn-dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-inline-end:8px;vertical-align:middle}
+.ku .kxr .tn-l2{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding-inline-start:24px;font-size:12px;color:var(--s)}
+.ku .kxr .tn-l2 small{overflow-wrap:anywhere;white-space:normal}
+.ku .kxr.off>.kxr-h{opacity:.6}
+.tn-info{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
+.tn-info>div{min-width:0;padding:8px 12px;border:1px solid var(--ln);border-radius:12px}
+.tn-info small{display:block;font-size:12px;color:var(--s)}
+.tn-info b{display:block;margin-top:2px;font-size:13px;overflow-wrap:anywhere}
+.tn-route{padding:12px 16px;border-top:1px solid var(--ln)}
+.tn-route:first-child{border-top:0}
+.tn-route .card{margin:0}
+.ku-danger+*{margin-top:0}
+.kxr-in .ku-sw{border-top:0;padding-inline:0}
+@media(min-width:900px){.tn-info{grid-template-columns:repeat(3,minmax(0,1fr))}}
 
 .tws{border:1px solid var(--ln2);background:var(--in);border-radius:16px;padding:12px 14px 14px;margin-top:12px}
 
@@ -2919,6 +2939,13 @@ body.k38 .ku .ku-gb .ibc:first-child{border-top:0!important}
 .ku-cores a{display:inline-flex;align-items:center;gap:8px;min-height:40px;padding:0 12px;border:1px solid var(--ln);border-radius:12px;color:var(--t);text-decoration:none;font-size:13px;font-weight:700}
 .ku-cores a:hover{border-color:var(--a)}
 .ku-cores small{color:var(--s);font-weight:600}
+/* older pages, same rules: rows inside a card are split by hairlines, not boxed again */
+body.k38 #nc .nds{gap:0!important;margin-top:8px}
+body.k38 #nc .nd{border:0!important;border-top:1px solid var(--ln)!important;border-radius:0!important;background:none!important;box-shadow:none!important;padding:12px 4px!important}
+body.k38 .card .urow{border:0!important;border-top:1px solid var(--ln)!important;border-radius:0!important;background:none!important;box-shadow:none!important;margin:0!important}
+.ku-sw.ku-sw-in{border:0;padding:0;min-height:40px;flex:none}
+/* Settings: its sections wrap on a phone instead of running off the edge */
+@media(max-width:619px){body.k38 .stn{position:static!important;flex-wrap:wrap!important;overflow:visible!important}body.k38 .stn button{min-height:40px}}
 .ku-help{margin:0 0 16px;border:1px solid var(--ln);border-radius:16px;padding:0 16px}
 .ku-help summary{cursor:pointer;min-height:48px;display:flex;align-items:center;font-size:14px;font-weight:700;color:var(--s)}
 .ku-help p{margin:0 0 16px;font-size:13px;line-height:1.8;color:var(--s)}

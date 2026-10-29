@@ -110,12 +110,6 @@ function ufWire(){if(!$('#uf_pre'))return;
  if(XR.d)xr(XR.d);api('GET','/api/xray').then(function(d){XR.d=d;xr(d)}).catch(function(){xr(null)});
  if(DN.d)dn(DN.d);api('GET','/api/dns').then(function(d){DN.d=d;dn(d)}).catch(function(){dn(null)})}
 
-// ---- node types: the "Add node" button first asks which kind of node
-function nodeAddTyped(){var tile=function(k,ico,title,sub){return '<button class="b2" data-nt="'+k+'" style="display:flex;gap:10px;align-items:center;text-align:start;padding:12px;width:100%;margin-bottom:8px"><span class="ni">'+ic(ico,20)+'</span><span><b>'+t(title)+'</b><br><small class="muted">'+t(sub)+'</small></span></button>'};
- modal(mhead(t('Node type'))+tile('vpn','nodes','VPN node','WireGuard · AmneziaWG · Hysteria2')+tile('xray','xray','Xray node','VLESS · VMess · Trojan · Shadowsocks')+tile('dns','dns','DNS exit node','Smart DNS abroad')+tile('relay','dns','DNS relay node','Iran server in front of a DNS exit'));
- $$('[data-nt]').forEach(function(b){b.onclick=function(){var k=b.dataset.nt;if(k=='vpn')return nodeAdd();if(k=='xray'){closeModal();xrAddNode();return}
-  dnsLoad().then(function(){dnsAdd(k=='relay'?'relay':'exit')})}})}
-
 // ==================================================================== the parts every page is built from
 // (CLAUDE.md, design rules): a page head, one row of tabs, a row of numbers, a group with one add button,
 // an item row (status, flag, name, main action; tags under it; the address last), a switch with its words,
@@ -867,6 +861,9 @@ function kcAll(p,on){var n=KC.meta[p].name;if(!confirm(on?n+' '+t('for every use
 "use strict";
 // Persian text of the whole panel
 var FA={
+ "Multi-location tunnels":"تانل‌های چندمرحله‌ای",
+ "Other tunnels":"تانل‌های دیگر",
+ "Tunnel on":"تانل روشن است",
  "tunnels":"تانل",
  "Cores on this server":"هسته‌های این سرور",
  "Each core is set on its own page: tap one to open it.":"تنظیم هر هسته در صفحه‌ی خودش است: رویش بزن تا باز شود.",
@@ -3237,7 +3234,7 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
  '<div class="g2"><div class="card" style="margin:0"><h3>'+t('Backup file')+'</h3><p class="sub">'+t('Encrypted archive. File name includes date and time.')+'</p><div class="row" style="flex-wrap:nowrap"><input id="bk_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"><button class="btn" id="bk_go">'+t('Download backup')+'</button></div></div>'+
  '<div class="card" style="margin:0"><h3>'+t('Restore')+'</h3><p class="sub">'+t('Pick a backup file; if encrypted, enter its passphrase.')+'</p><div class="row" style="flex-wrap:nowrap"><label class="b2" style="white-space:nowrap">'+t('Choose file')+'<input type="file" id="rs_f" class="hide"></label><input id="rs_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"></div><small class="muted" id="rs_n">'+t('No file chosen')+'</small>'+
  '<label class="chk" style="margin-top:8px"><input type="checkbox" id="rs_full">'+t('Also restore server keys & configs (same/new server migration)')+'</label><div style="text-align:center;margin-top:8px"><button class="btn" id="rs_go">'+t('Restore backup')+'</button></div></div></div>'+moveCard()+
- '<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><div><h3>🌙 '+t('Nightly backup to the bot')+'</h3><p class="sub">'+t('Every night the database is cleaned and an encrypted backup is sent to Telegram')+'</p></div><label class="sw"><input type="checkbox" id="tg_on"><span></span></label></div>'+
+ '<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><div><h3>🌙 '+t('Nightly backup to the bot')+'</h3><p class="sub">'+t('Every night the database is cleaned and an encrypted backup is sent to Telegram')+'</p></div><label class="ku-sw ku-sw-in"><span class="ku-swt"><b>'+t('On')+'</b></span><span class="sw"><input type="checkbox" id="tg_on"><span></span></span></label></div>'+
  '<div class="g2"><div><label class="f">'+t('When')+'</label><div class="row" style="flex-wrap:nowrap;gap:6px"><select id="tg_m" style="width:auto"><option value="nightly">'+t('Every night at')+'</option><option value="hours">'+t('Every … hours')+'</option></select><input id="tg_at" class="ltr" style="max-width:90px" placeholder="03:00"><input id="tg_h" type="number" min="1" style="max-width:90px"></div><small class="muted">'+t('Iran time')+'</small></div>'+
  '<div><label class="f">'+t('Chat ID')+'</label><input id="tg_chat" class="ltr" placeholder="'+t('Auto after /start (or first bot admin)')+'"></div></div>'+
  '<div class="bkpass"><div><small class="muted">'+t('Panel backup passphrase (needed to restore)')+'</small><b class="ltr" id="tg_pw">••••••••</b></div><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ib" id="tg_eye" title="'+t('Show')+'">👁</button><button class="ib" id="tg_cp">'+ic('link',14)+'</button><button class="b2" id="tg_pch">'+t('Change')+'</button></div></div>'+
@@ -3495,7 +3492,7 @@ function nState(n){if(n.id=='local')return{c:'g',l:'Connected'};if(!n.online)ret
 function drawNodesCard(list){var el=$('#nc');if(!el)return;
  var up=list.filter(function(n){return n.id=='local'||n.online}).length,all=up==list.length;
  el.innerHTML='<div class="nh"><div><h3>'+t('Nodes')+'</h3><small class="'+(all?'okt':'bad2')+'">'+(all?'✓ '+t('All servers connected'):N(list.length-up)+' '+t('server(s) disconnected'))+' · '+N(up)+' / '+N(list.length)+'</small></div>'+
-  '<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="b2" data-nd="add">'+ic('plus',15)+' '+t('Add node')+'</button><button class="b2" data-nd="all">'+t('Manage')+'</button></div></div>'+
+  '<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="b2" data-nd="all">'+t('Manage')+'</button></div></div>'+
   '<div class="nds">'+list.map(function(n){var s=nState(n),loc=n.id=='local',sy=loc?null:n.sync_state=='synced'?['g','Synced']:n.sync_state=='mismatch'?['y','Config mismatch']:n.sync_state=='pin mismatch'?['r','Certificate changed']:null;
    var hh=nHealthOf(n),stt=(n.info||{}).stats;if(s.c=='g'&&hh.c!='g')s={c:hh.c,l:hh.l};
    return '<button class="nd" data-nd="all"><span class="dot '+s.c+'"></span><span class="nn"><b>'+esc(n.name)+'</b><small class="ltr">'+esc(loc?'local':String(n.address||'').replace(/^https?:\/\//,''))+'</small></span>'+
@@ -3910,8 +3907,9 @@ function tunCmd(s,d){var repo=(d&&d.repo)||'',panel=(d&&d.panel)||location.origi
 // Each connected tunnel is a glowing fibre: packets leave the entry plain, pass the lock in the middle
 // and arrive encrypted (tunnel colour); smaller return packets flow back. More traffic = more packets,
 // higher ping = slower packets. The animation keeps running between data refreshes.
-// every Iran server has its own colour on the map (green, red, blue, violet; a fifth starts again)
-var TMIR=['#3ddc97','#ff6b6b','#6fb6ff','#c084fc'];
+// every Iran server has its own colour on the map (green, blue, violet, pink; a fifth starts again);
+// red is kept for a tunnel that is down
+var TMIR=['#3ddc97','#6fb6ff','#c084fc','#f472b6'];
 function tmIran(sv){return sv.filter(function(s){return srvLoc(s)=='iran'}).sort(function(a,b){return String(a.name).localeCompare(String(b.name))})}
 function tmIrCol(sv){var o={};tmIran(sv).forEach(function(s,i){o[s.id]=TMIR[i%TMIR.length]});return o}
 var TM={reg:{},raf:0,t0:(window.performance?performance.now():Date.now())};
@@ -3931,11 +3929,11 @@ function tunShort(x){var S={tcpmux:'TCP-Mux',tcp:'TCP',ws:'WS',wss:'WSS',quic:'Q
 function tmRound(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
 
 // ---- the page
-function pTunnels(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnels')+'</h2><p>'+t('Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit')+'</p></div>'+
- '<div class="row" style="gap:6px"><button class="b2" onclick="tunGuide()" title="'+esc(t('Which tunnel for which protocol'))+'">? '+t('Tunnel guide')+'</button><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="b2 smartb" onclick="tunSmart()">⚡ '+t('Smart tunnel')+'</button><button class="b2" id="rt_new" onclick="routeEdit()">⛓ '+t('Multi-location tunnel')+'</button><button class="btn" onclick="tunEdit()">+ '+t('Tunnel')+'</button></div></div>'+
+function pTunnels(){KAcc.open.tn='';KAcc.draw.tn=function(){var l=$('#tn_list');if(l&&TN.d)l.innerHTML=tunList(TN.d)};
+ $('#pg').innerHTML='<div class="ku">'+kuHead('tunnel',t('Tunnels'),t('Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit'),
+  '<button class="btn" onclick="tunEdit()">'+ic('plus',15)+' '+t('Tunnel')+'</button><button class="b2" onclick="tunMore()" aria-label="'+esc(t('More'))+'">⋯ '+t('More')+'</button>')+
  '<div class="card tmapc"><nav class="tmtabs" id="tn_mt" role="tablist"></nav><div id="tn_map"><span class="muted">'+t('Loading…')+'</span></div><div class="tkpi" id="tn_kpi"></div></div>'+
- '<div class="nh" style="margin-top:4px"><h3>'+t('Tunnels')+'</h3></div><div id="tn_list"></div>'+
- '';
+ '<div class="ku-tools tnf" id="tn_f"></div><div id="tn_list"></div></div>';
  tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
 function tunRefresh(quiet){return tunLoad().then(tunDraw).catch(function(e){if(!quiet)fail(e)})}
 // the map shows every Iran server, or one of them (its tunnels side by side); remembered on this browser
@@ -3951,24 +3949,57 @@ function tunDraw(d){var m=$('#tn_map'),sl=$('#tn_srv');if(!m&&!sl)return;var sv=
   var sig=TNV.v+JSON.stringify([sv.map(function(s){return [s.id,s.name,s.online,s.local,s.loc]}),tl.map(function(x){return [x.id,x.entry,x.exit,x.state,x.transport,Math.round(((x.entry_status||{}).rtt_ms||0)/10)]})]);
   var mh=tunMap(d,TNV.v);if(m.dataset.sig!==sig||!m.querySelector('canvas')){m.dataset.sig=sig;m.innerHTML=mh}
   $('#tn_kpi').innerHTML='<div><small>'+t('Tunnels connected')+'</small><b style="color:'+(up==vt.length&&vt.length?'var(--ok)':'inherit')+'">'+N(up)+' / '+N(vt.length)+'</b></div><div><small>'+t('Servers online')+'</small><b>'+N(on)+' / '+N(sv.length)+'</b></div><div><small>'+t('Through the tunnels')+'</small><b class="ltr">↑ '+bytes(tx)+' · ↓ '+bytes(rx)+'</b></div>';
-  $('#tn_list').innerHTML=tl.length?tl.map(tunCard).join(''):'<div class="card muted" style="text-align:center">'+t('No tunnels yet')+' · <a href="javascript:tunEdit()">'+t('Make the first tunnel')+'</a></div>'}
+  tunFilterBar(d);if(!accBusy('tn'))$('#tn_list').innerHTML=tunList(d)}
  if(sl){var k=$('#tn_skpi');if(k)k.innerHTML='<div><small>'+t('Servers online')+'</small><b style="color:'+(on==sv.length&&sv.length?'var(--ok)':'inherit')+'">'+N(on)+' / '+N(sv.length)+'</b></div><div><small>'+t('Tunnels connected')+'</small><b>'+N(up)+' / '+N(tl.length)+'</b></div><div><small>'+t('Through the tunnels')+'</small><b class="ltr">↑ '+bytes(tx)+' · ↓ '+bytes(rx)+'</b></div>';
   sl.innerHTML=SRV_GROUPS.map(function(g){var l=sv.filter(function(s){return srvLoc(s)==g[0]});return l.length?'<h3 style="grid-column:1/-1;margin:6px 0 0">'+t(g[1])+' <small class="muted">'+N(l.length)+'</small></h3>'+l.map(tunSrvCard).join(''):''}).join('')}}
 function pServers(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnel servers')+'</h2><p>'+t('Servers that only carry tunnels get a small agent: no VPN is installed on them')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="tunServerAdd()">+ '+t('Server')+'</button></div></div><div class="card" style="padding:10px"><div class="tkpi" id="tn_skpi" style="margin:0"></div></div><div class="ncards" id="tn_srv">'+t('Loading…')+'</div>';
  tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
-function tunCard(x){if(x.chain)return routeCardOf(x);var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},col=tunCol(x.state),err=es.error?e.name+': '+es.error:xx.error?xs.name+': '+xx.error:'',aw=x.kind=='awg'?(x.awg||{}):null,hy=x.kind=='hy2'?(x.hy2||{}):null;
+// the rarer tools of the page
+// a server's flag on this page, only when its country is known (the tunnel list has no country for most)
+function tnFlag(s){return s&&s.cc?flagOf(s.cc)+' ':''}
+function tunMore(){kuMenu(t('Tunnels'),'',[['? '+t('Tunnel guide'),'tunGuide()'],['⚡ '+t('Smart tunnel'),'tunSmart()'],['⛓ '+t('Multi-location tunnel'),'routeEdit()'],['⇪ '+t('Update all'),'updateAll()']])}
+// the list under the map: only the tunnels of one server when one is picked ("" = all)
+var TNF={f:(function(){try{return localStorage.getItem('kk_tnf')||''}catch(e){return ''}})()};
+function tunFilter(v){TNF.f=v;try{localStorage.setItem('kk_tnf',v)}catch(e){}KAcc.open.tn='';if(TN.d){tunFilterBar(TN.d);$('#tn_list').innerHTML=tunList(TN.d)}}
+function tunFilterBar(d){var el=$('#tn_f');if(!el)return;var tl=d.tunnels||[],sv=(d.servers||[]).filter(function(s){return tl.some(function(x){return x.entry==s.id||x.exit==s.id})});
+ if(TNF.f&&!sv.some(function(s){return s.id==TNF.f}))TNF.f='';
+ var b=function(id,label,n){return '<button type="button" class="'+(TNF.f==id?'on':'')+'" onclick="tunFilter(\''+esc(id)+'\')">'+label+(n!=null?'<em>'+N(n)+'</em>':'')+'</button>'};
+ var cnt=function(id){return tl.filter(function(x){return x.entry==id||x.exit==id}).length};
+ var ir=sv.filter(function(s){return srvLoc(s)=='iran'}),ab=sv.filter(function(s){return srvLoc(s)!='iran'});
+ el.innerHTML=sv.length<2?'':'<div class="tnf-l">'+b('',t('All servers'),tl.length)+ab.concat(ir).map(function(s){return b(s.id,tnFlag(s)+esc(s.name),cnt(s.id))}).join('')+'</div>'}
+function tunList(d){var tl=(d.tunnels||[]).filter(function(x){return !TNF.f||x.entry==TNF.f||x.exit==TNF.f});
+ if(!(d.tunnels||[]).length)return kuGroup(t('Tunnels'),0,'','<p class="muted ku-empty">'+t('No tunnels yet')+' · <a href="javascript:tunEdit()">'+t('Make the first tunnel')+'</a></p>');
+ if(!tl.length)return kuGroup(t('Tunnels'),0,'','<p class="muted ku-empty">'+t('Nothing found')+'</p>');
+ var sv=d.servers||[],col=tmIrCol(sv),groups=[],by={},chains=[];
+ tl.forEach(function(x){if(x.chain){if(chains.indexOf(x.chain)<0)chains.push(x.chain);return}var k=col[x.entry]?x.entry:col[x.exit]?x.exit:'';if(!by[k]){by[k]=[];groups.push(k)}by[k].push(x)});
+ groups.sort(function(a,b){return (a?0:1)-(b?0:1)||String(tunSrv(a).name).localeCompare(String(tunSrv(b).name))});
+ return groups.map(function(k){var l=by[k].sort(function(a,b){return String(tunSrv(a.exit).name).localeCompare(String(tunSrv(b.exit).name))||String(a.name).localeCompare(String(b.name))}),up=l.filter(function(x){return x.state=='up'}).length;
+   var title=k?'<i class="tn-dot" style="background:'+col[k]+'"></i>'+esc(tunSrv(k).name):t('Other tunnels');
+   return kuGroup(title,null,'<span class="ku-n">'+N(up)+' / '+N(l.length)+' '+t('connected')+'</span>','<div class="kxl">'+l.map(tunRow).join('')+'</div>')}).join('')+
+  (chains.length?kuGroup(t('Multi-location tunnels'),chains.length,'',chains.map(function(c){var x=tl.filter(function(z){return z.chain==c})[0];return '<div class="tn-route">'+routeCardOf(x)+'</div>'}).join('')):'')}
+// one tunnel: state, route and name on the first line; transport, ping and ports under it; a tap opens the rest
+function tunRow(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},aw=x.kind=='awg'?(x.awg||{}):null,st=x.state=='up'?'g':x.state=='partial'?'y':x.state=='off'?'':'r';
+ var ports=[];if(x.tcp&&x.tcp.length)ports.push('TCP '+x.tcp.join(','));if(x.udp&&x.udp.length)ports.push('UDP '+x.udp.join(','));
+ if(aw){if(aw.fwd_tcp&&aw.fwd_tcp.length)ports.push('TCP '+aw.fwd_tcp.join(','));if(aw.fwd_udp&&aw.fwd_udp.length)ports.push('UDP '+aw.fwd_udp.join(','))}
+ var head='<span class="dot '+st+'"></span><b>'+esc(x.name||(e.name+' → '+xs.name))+'</b><span class="sp"></span>'+
+  '<span class="kxr-st '+st+'">'+(x.state=='up'&&es.rtt_ms?es.rtt_ms+' ms':tunStateTxt(x.state))+'</span>'+
+  '<span class="tn-l2"><span class="kxr-st">'+esc(tunShort(x))+'</span><span class="tn-path">'+esc(e.name)+' → '+tnFlag(xs)+esc(xs.name)+'</span>'+(ports.length?'<small class="ltr">'+esc(ports.join(' · '))+'</small>':'')+'</span>';
+ return accRow('tn',x.id,head,function(){return tunBody(x)},x.enabled?'':'off')}
+function tunBody(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},err=es.error?e.name+': '+es.error:xx.error?xs.name+': '+xx.error:'',aw=x.kind=='awg'?(x.awg||{}):null,hy=x.kind=='hy2'?(x.hy2||{}):null;
  if(aw)err=err||(x.wrap_entry||{}).error||(x.wrap_exit||{}).error||'';
- var ports=[];if(x.tcp&&x.tcp.length)ports.push('TCP '+x.tcp.join(', '));if(x.udp&&x.udp.length)ports.push('UDP '+x.udp.join(', '));
- return '<div class="card tcard" style="border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">'+
-  '<div style="min-width:0"><b>'+esc(x.name)+'</b>'+(aw?' <span class="rotb">🛡 AmneziaWG'+(aw.wrap?' + '+esc(tunTr(x.transport)):'')+'</span>':'')+(hy?' <span class="rotb">⚡ Hysteria2'+(hy.obfs_on?' + Salamander':'')+'</span>':'')+(x.auto?' <span class="rotb" title="'+esc(x.switch_note?t('Last switch')+': '+x.switch_note+' · '+ago(x.switched):t('Rotating tunnel'))+'">🔁 '+t('Rotating')+(x.switch_note?' · '+esc(x.switch_note):'')+'</span>':'')+'<div class="tpath"><span>'+esc(e.name)+'</span><i class="tflow" style="--c:'+col+'"><em></em></i><span>'+esc(xs.name)+'</span></div></div>'+
-  '<div class="row" style="gap:8px;flex-wrap:nowrap"><span class="tst" style="color:'+col+';border-color:'+col+'"><i style="background:'+col+'"></i>'+tunStateTxt(x.state)+'</span>'+sw('',x.enabled,"tunAct('"+x.id+"','"+(x.enabled?'disable':'enable')+"')")+'</div></div>'+
-  '<div class="tgrid"><div><small>'+t('Transport')+'</small><b>'+esc(aw?('AWG'+(aw.wrap?' ⟶ '+tunTr(x.transport):'')):tunTr(x.transport))+'</b></div><div><small>'+t('Ping')+'</small><b class="ltr">'+(es.rtt_ms?es.rtt_ms+' ms':'—')+'</b></div>'+
-  '<div><small>'+t('Links')+'</small><b class="ltr">'+N(es.links||0)+' / '+N(es.want||x.conns||1)+'</b></div></div>'+
-  '<p class="muted ltr tmeta">↑'+bytes(es.tx_bytes||0)+' ↓'+bytes(es.rx_bytes||0)+' · '+esc((x.mode=='direct'?t('direct'):t('reverse'))+' · '+t('port')+' '+(aw?aw.port:x.port)+' · '+(x.dial_host||'?')+' · '+(aw?('🔗 '+aw.entry_ip+' ⇄ '+aw.exit_ip+(aw.routes&&aw.routes.length?' · → '+aw.routes.join(' '):'')+(aw.src_routes&&aw.src_routes.length?' · ⇠ '+aw.src_routes.join(' '):'')+(aw.fwd_tcp&&aw.fwd_tcp.length?' · TCP '+aw.fwd_tcp.join(','):'')+(aw.fwd_udp&&aw.fwd_udp.length?' · UDP '+aw.fwd_udp.join(','):'')):ports.concat(hy&&hy.src_routes&&hy.src_routes.length?['⇠ '+hy.src_routes.join(' ')]:[]).join(' · ')))+'</p>'+
-  (err&&x.state!='up'?'<div class="warnbox ltr" style="margin:6px 0 0">'+esc(err)+'</div>':'')+
-  '<div class="g3" style="margin-top:10px"><button class="b2" onclick="tunEdit(\''+x.id+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2" onclick="tunAct(\''+x.id+'\',\'restart\')">'+ic('refresh',15)+' '+t('Reconnect')+'</button><button class="b2 bd" onclick="tunDel(\''+x.id+'\')">'+ic('trash',15)+' '+t('Delete')+'</button></div></div>'}
+ var info=[[t('Transport'),esc(aw?('AWG'+(aw.wrap?' ⟶ '+tunTr(x.transport):'')):hy?'Hysteria2'+(hy.obfs_on?' + Salamander':''):tunTr(x.transport))],[t('Ping'),es.rtt_ms?'<span class="ltr">'+es.rtt_ms+' ms</span>':'—'],
+  [t('Links'),'<span class="ltr">'+N(es.links||0)+' / '+N(es.want||x.conns||1)+'</span>'],[t('Traffic'),'<span class="ltr">↑'+bytes(es.tx_bytes||0)+' ↓'+bytes(es.rx_bytes||0)+'</span>'],
+  [t('Mode'),x.mode=='direct'?t('direct'):t('reverse')],[t('Port'),'<span class="ltr">'+esc(String(aw?aw.port:x.port))+' · '+esc(x.dial_host||'?')+'</span>']];
+ if(aw)info.push(['AWG','<span class="ltr">'+esc(aw.entry_ip+' ⇄ '+aw.exit_ip+(aw.routes&&aw.routes.length?' · → '+aw.routes.join(' '):'')+(aw.src_routes&&aw.src_routes.length?' · ⇠ '+aw.src_routes.join(' '):''))+'</span>']);
+ if(hy&&hy.src_routes&&hy.src_routes.length)info.push(['⇠','<span class="ltr">'+esc(hy.src_routes.join(' '))+'</span>']);
+ if(x.auto)info.push([t('Rotating'),esc(x.switch_note?x.switch_note+' · '+ago(x.switched):t('Rotating tunnel'))]);
+ return '<div class="tn-info">'+info.map(function(r){return '<div><small>'+r[0]+'</small><b>'+r[1]+'</b></div>'}).join('')+'</div>'+
+  (err&&x.state!='up'?'<div class="warnbox ltr" style="margin:8px 0 0">'+esc(err)+'</div>':'')+
+  kuSwitch(t('Tunnel on'),x.enabled,"tunAct('"+x.id+"','"+(x.enabled?'disable':'enable')+"')")+
+  '<div class="kxacts"><button class="btn sm" onclick="tunEdit(\''+x.id+'\')">'+ic('edit',13)+' '+t('Edit')+'</button><button class="b2 sm" onclick="tunAct(\''+x.id+'\',\'restart\')">'+ic('refresh',13)+' '+t('Reconnect')+'</button></div>'+
+  '<div class="ku-danger"><button class="b2 sm bd" onclick="tunDel(\''+x.id+'\')">'+ic('trash',13)+' '+t('Delete')+'</button></div>'}
 function tunSrvCard(s){var nt=((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.entry==s.id||x.exit==s.id}).length,col=s.online?'var(--ok)':'var(--bad)';
- return '<div class="card" style="margin:0;border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start"><div class="row"><div class="logo" style="width:34px;height:34px;font-size:14px">'+esc(s.local?'★':s.name.charAt(0).toUpperCase())+'</div><div><b>'+flag(s.cc)+' '+esc(s.name)+'</b><div class="muted ltr">'+esc(s.host||t('address unknown yet'))+'</div></div></div>'+
+ return '<div class="card" style="margin:0;border-inline-start:3px solid '+col+'"><div class="row" style="justify-content:space-between;align-items:flex-start"><div class="row"><div class="logo" style="width:34px;height:34px;font-size:14px">'+esc(s.local?'★':s.name.charAt(0).toUpperCase())+'</div><div><b>'+flagOf(s.cc)+' '+esc(s.name)+'</b><div class="muted ltr">'+esc(s.host||t('address unknown yet'))+'</div></div></div>'+
   '<span class="badge '+(s.online?'g':'r')+'">'+(s.local?t('Panel server'):s.online?t('Connected'):t('Disconnected'))+'</span></div>'+
   '<p class="muted" style="margin:8px 0">'+(s.local?t('Runs inside the panel'):(s.last_seen?t('Last contact')+': '+ago(s.last_seen):t('Not connected yet: run its command on the server')))+(s.version?' · v'+esc(s.version):'')+' · '+t('Tunnels')+' '+N(nt)+'</p>'+
   (s.local?'':!s.loc?'<p class="hint">'+t('Location not set: choose it in Edit')+'</p>':s.loc_guess?'<p class="hint">'+t('Location guessed: confirm it in Edit')+'</p>':'')+
@@ -5206,7 +5237,7 @@ function chip(c,label,val){return '<span class="k310st '+c+'"><i></i>'+t(label)+
 // services beside connections, the activity log last
 window.pDash=function(){dbReset();
 $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Dashboard')+'</h2><p class="ltr" id="d_sub" style="text-align:start">…</p></div>'+
- '<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" onclick="newUser()">'+ic('plus',15)+' '+t('New user')+'</button><button class="b2 sm" onclick="nodeAddTyped()">'+ic('nodes',15)+' '+t('Add server')+'</button><span class="live" id="d_live"><i></i><span id="d_lt">'+t('Live')+'</span></span>'+
+ '<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" onclick="newUser()">'+ic('plus',15)+' '+t('New user')+'</button><span class="live" id="d_live"><i></i><span id="d_lt">'+t('Live')+'</span></span>'+
  '<select id="d_iv" style="width:auto;padding:6px 9px;font-size:12px">'+[1,2,5,10].map(function(n){return '<option value="'+n+'"'+(n==DB.iv?' selected':'')+'>'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select>'+
  '<button class="ib" id="d_pause" title="'+t('Pause')+'">❚❚</button></div></div>'+
  '<div class="k310strip" id="k310strip"></div><div class="kpis" id="kpis"></div>'+
@@ -5314,9 +5345,10 @@ function tmView(d,view){var sv=d.servers||[],tl=d.tunnels||[],col=tmIrCol(sv),ir
   return {id:'g:'+k,entry:x.entry,exit:x.exit,kind:x.kind,transport:x.transport,state:up==l.length?'up':up?'partial':l.some(function(z){return z.state=='off'})&&!up?'off':'down',
    entry_status:{rtt_ms:rt.length?Math.min.apply(null,rt):0,rx_bytes:l.reduce(function(a,z){return a+((z.entry_status||{}).rx_bytes||0)},0),tx_bytes:l.reduce(function(a,z){return a+((z.entry_status||{}).tx_bytes||0)},0)},
    _col:ir(x.entry)||ir(x.exit),_lab:N(l.length)+' '+t('tunnels')}});
- return {servers:sv.map(function(s){return col[s.id]?Object.assign({},s,{_col:col[s.id]}):s}),tunnels:lines}}
+ var used={};lines.forEach(function(x){used[x.entry]=1;used[x.exit]=1});
+ return {servers:sv.filter(function(s){return used[s.id]}).map(function(s){return col[s.id]?Object.assign({},s,{_col:col[s.id]}):s}),tunnels:lines}}
 window.tunMap=function(d,view){var v=tmView(d,view),sv=v.servers,tl=v.tunnels;
- if(!tl.length&&sv.length<2)return '<div class="tempty">'+ic('tunnel',34)+'<b>'+t('No tunnels yet')+'</b><span class="muted">'+t('Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.')+'</span></div>';
+ if(!tl.length)return '<div class="tempty">'+ic('tunnel',34)+'<b>'+t('No tunnels yet')+'</b><span class="muted">'+t('Add your entry server (for example in Iran), then make a tunnel to the panel server or another server.')+'</span></div>';
  var st=TM.reg.m||(TM.reg.m={rate:{},last:{}}),now=Date.now();
  tl.forEach(function(x){var es=x.entry_status||{},by=(es.rx_bytes||0)+(es.tx_bytes||0),l=st.last[x.id];
   if(l&&now-l.t>500){var r=(by-l.b)/((now-l.t)/1000);if(r>=0)st.rate[x.id]=r}if(!l||now-l.t>500)st.last[x.id]={b:by,t:now}});
