@@ -234,6 +234,8 @@ pub fn user_json(app: &App, u: &User) -> Value {
         "tg_id": u.tg_id, "created_at": iso(u.created_at), "last_seen_at": iso(u.last_seen), "last_seen_ts": u.last_seen,
         // connected right now: [{ "p": protocol, "s": server }]
         "live": crate::live::of(app, u.id),
+        // devices and apps that read the subscription: [{ id, kanki, kind: pc | mobile, app, ip, first, last }]
+        "devices": crate::devices::of(app, u.id),
     })
 }
 
@@ -480,6 +482,8 @@ pub fn user_action(app: &App, id: i64, action: &str, b: &Value) -> Result<(), St
         "disable" => app.db.exec("UPDATE users SET enabled=0 WHERE id=?1", &[&id]).map(|_| ()),
         "regen" => {
             let _ = app.db.exec("DELETE FROM peers WHERE user_id=?1", &[&id]);
+            // a new link: the device list starts again
+            crate::devices::clear(app, id);
             app.db.exec("UPDATE users SET code=?1 WHERE id=?2", &[&util::rand_digits(19), &id]).map(|_| ())
         }
         "delete" => {
@@ -1383,9 +1387,19 @@ fn proto_row(app: &App, u: &User, n: &Node, p: &str, tunnel: bool) -> String {
     )
 }
 
-async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
-    let Some((id, c)) = parse_code(&code) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
-    let Some(u) = app.db.user_by_code(id, &c) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
+/// The user of a subscription code, or the "unknown code" answer
+fn sub_user(app: &App, code: &str) -> Result<User, Response> {
+    parse_code(code).and_then(|(id, c)| app.db.user_by_code(id, &c)).ok_or_else(crate::devices::miss)
+}
+
+async fn sub_page(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
+    let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
+    crate::devices::note(&app, &u, &h);
+    let r = sub_page_of(&app, &u);
+    crate::devices::reply(&h, &code, r).await
+}
+
+fn sub_page_of(app: &App, u: &User) -> Response {
     let sub = u.sub_code();
     // server-rendered config links keep the exact URL format the Kanki Android app reads
     let mut nodes_html = String::new();
@@ -1451,8 +1465,7 @@ async fn sub_page(State(app): St, Path(code): Path<String>) -> Response {
 
 /// QR code of the user's i-th Xray link
 async fn sub_xray_qr(State(app): St, Path((code, i)): Path<(String, usize)>) -> Response {
-    let Some((id, c)) = parse_code(&code) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
-    let Some(u) = app.db.user_by_code(id, &c) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
+    let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
     let Some((_, l)) = crate::xray::panel::user_links(&app, &u).into_iter().nth(i) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
     match util::qr_svg(&l) {
         Some(svg) => ([(header::CONTENT_TYPE, "image/svg+xml".to_string()), (header::CACHE_CONTROL, "no-store".to_string())], svg).into_response(),
@@ -1460,17 +1473,23 @@ async fn sub_xray_qr(State(app): St, Path((code, i)): Path<(String, usize)>) -> 
     }
 }
 
-async fn sub_json(State(app): St, Path(code): Path<String>) -> Response {
-    let Some((id, c)) = parse_code(&code) else { return err(StatusCode::NOT_FOUND, "not found") };
-    let Some(u) = app.db.user_by_code(id, &c) else { return err(StatusCode::NOT_FOUND, "not found") };
-    Json(sub_data(&app, &u)).into_response()
+async fn sub_json(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
+    let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
+    crate::devices::note(&app, &u, &h);
+    crate::devices::reply(&h, &code, Json(sub_data(&app, &u)).into_response()).await
+}
+
+/// The user of a base64 subscription for other apps; the app is remembered among the user's devices
+fn other_app(app: &App, code: &str, h: &HeaderMap) -> Result<User, Response> {
+    let u = sub_user(app, code)?;
+    crate::devices::note(app, &u, h);
+    Ok(u)
 }
 
 /// The combined subscription the page offers for v2rayNG / V2Box: one Hysteria2 link per server (through
 /// its tunnel when it has one, like the page shows) and every Xray link (base64)
-async fn sub_v2(State(app): St, Path(code): Path<String>) -> Response {
-    let Some((id, c)) = parse_code(&code) else { return (StatusCode::NOT_FOUND, "").into_response() };
-    let Some(u) = app.db.user_by_code(id, &c) else { return (StatusCode::NOT_FOUND, "").into_response() };
+async fn sub_v2(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
+    let u = match other_app(&app, &code, &h) { Ok(u) => u, Err(r) => return r };
     let mut lines: Vec<String> = vec![];
     for n in user_nodes(&app, &u) {
         let tw = crate::twin::of_node_core(&app, &n, "hy2");
@@ -1485,9 +1504,8 @@ async fn sub_v2(State(app): St, Path(code): Path<String>) -> Response {
 }
 
 /// Subscription of only the user's Xray links (base64, for v2rayNG / V2Box)
-async fn sub_xray(State(app): St, Path(code): Path<String>) -> Response {
-    let Some((id, c)) = parse_code(&code) else { return (StatusCode::NOT_FOUND, "").into_response() };
-    let Some(u) = app.db.user_by_code(id, &c) else { return (StatusCode::NOT_FOUND, "").into_response() };
+async fn sub_xray(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
+    let u = match other_app(&app, &code, &h) { Ok(u) => u, Err(r) => return r };
     let lines: Vec<String> = crate::xray::panel::user_links(&app, &u).into_iter().map(|x| x.1).collect();
     let total = (u.limit_gb * 1_073_741_824.0) as i64;
     let info = format!("upload=0; download={}; total={}; expire={}", u.used_bytes.max(0), total, u.expires_at);
@@ -1495,31 +1513,36 @@ async fn sub_xray(State(app): St, Path(code): Path<String>) -> Response {
      util::b64(lines.join("\n").as_bytes())).into_response()
 }
 
-/// Raw subscription for v2rayNG / Hiddify (Hysteria2 + WireGuard URIs, base64)
-async fn sub_raw(State(app): St, Path(code): Path<String>) -> Response {
-    let Some((id, c)) = parse_code(&code) else { return (StatusCode::NOT_FOUND, "").into_response() };
-    let Some(u) = app.db.user_by_code(id, &c) else { return (StatusCode::NOT_FOUND, "").into_response() };
+/// Every standard link of a user for other apps (Hysteria2 and WireGuard URIs, then Xray)
+pub(crate) fn other_app_links(app: &App, u: &User) -> Vec<String> {
     let mut lines: Vec<String> = vec![];
-    for n in user_nodes(&app, &u) {
-        if let Some(h) = hy2_uri(&app, &u, &n) {
+    for n in user_nodes(app, u) {
+        if let Some(h) = hy2_uri(app, u, &n) {
             lines.push(h);
         }
         // WireGuard only through a tunnel (see node_protos)
-        if node_protos(&app, &u, &n).contains(&"wireguard") {
-            if let Some(w) = wg_uri(&app, &u, &n, None) {
+        if node_protos(app, u, &n).contains(&"wireguard") {
+            if let Some(w) = wg_uri(app, u, &n, None) {
                 lines.push(w);
             }
         }
         // the copies through the server's tunnel
-        let tp = twin_protos(&app, &u, &n);
+        let tp = twin_protos(app, u, &n);
         if tp.contains(&"hysteria2") {
-            lines.extend(hy2_link(&app, &u, &n, crate::twin::of_node_core(&app, &n, "hy2").as_ref()));
+            lines.extend(hy2_link(app, u, &n, crate::twin::of_node_core(app, &n, "hy2").as_ref()));
         }
         if tp.contains(&"wireguard") {
-            lines.extend(wg_uri(&app, &u, &n, crate::twin::of_node_core(&app, &n, "wg").as_ref()));
+            lines.extend(wg_uri(app, u, &n, crate::twin::of_node_core(app, &n, "wg").as_ref()));
         }
     }
-    lines.extend(crate::xray::panel::user_links(&app, &u).into_iter().map(|x| x.1));
+    lines.extend(crate::xray::panel::user_links(app, u).into_iter().map(|x| x.1));
+    lines
+}
+
+/// Raw subscription for v2rayNG / Hiddify (Hysteria2 + WireGuard URIs, base64)
+async fn sub_raw(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
+    let u = match other_app(&app, &code, &h) { Ok(u) => u, Err(r) => return r };
+    let lines = other_app_links(&app, &u);
     let used = u.used_bytes.max(0);
     let total = (u.limit_gb * 1_073_741_824.0) as i64;
     let info = format!("upload=0; download={}; total={}; expire={}", used, total, u.expires_at);
@@ -1544,12 +1567,16 @@ fn wg_uri(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Opti
     ))
 }
 
-async fn config_file_extra(st: St, Path((id, proto, extra)): Path<(i64, String, String)>, q: Query<HashMap<String, String>>) -> Response {
-    build_config(st, id, proto, q.0, &extra).await
+async fn config_file_extra(st: St, Path((id, proto, extra)): Path<(i64, String, String)>, q: Query<HashMap<String, String>>, h: HeaderMap) -> Response {
+    let code = q.0.get("sub").cloned().unwrap_or_default();
+    let r = build_config(st, id, proto, q.0, &extra, Some(&h)).await;
+    crate::devices::reply(&h, &code, r).await
 }
 
-async fn config_file(st: St, Path((id, proto)): Path<(i64, String)>, q: Query<HashMap<String, String>>) -> Response {
-    build_config(st, id, proto, q.0, "").await
+async fn config_file(st: St, Path((id, proto)): Path<(i64, String)>, q: Query<HashMap<String, String>>, h: HeaderMap) -> Response {
+    let code = q.0.get("sub").cloned().unwrap_or_default();
+    let r = build_config(st, id, proto, q.0, "", Some(&h)).await;
+    crate::devices::reply(&h, &code, r).await
 }
 
 fn text_conf(s: String) -> Response {
@@ -1562,7 +1589,7 @@ pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str, tunnel:
     let mut q: HashMap<String, String> = HashMap::new();
     q.insert("sub".to_string(), u.sub_code().to_string());
     q.insert("node".to_string(), if tunnel { format!("{}{}", n.id, TUNNEL_SUFFIX) } else { n.id.clone() });
-    let resp = build_config(State(app.clone()), u.id, proto.to_string(), q, "").await;
+    let resp = build_config(State(app.clone()), u.id, proto.to_string(), q, "", None).await;
     if resp.status() != StatusCode::OK {
         return None;
     }
@@ -1571,10 +1598,14 @@ pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str, tunnel:
     Some((conf_file_name_via(app, u, n, proto, tunnel), text))
 }
 
-async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String, String>, extra: &str) -> Response {
+/// `h`: the request of an app (its device is remembered); None = the panel's own bots
+async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String, String>, extra: &str, h: Option<&HeaderMap>) -> Response {
     let sub = q.get("sub").cloned().unwrap_or_default();
     let code = parse_code(&sub).map(|x| x.1).unwrap_or(sub);
-    let Some(u) = app.db.user_by_code(id, &code) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
+    let Some(u) = app.db.user_by_code(id, &code) else { return crate::devices::miss() };
+    if let Some(h) = h {
+        crate::devices::note(&app, &u, h);
+    }
     let node_id = q.get("node").cloned().unwrap_or_else(|| "local".into());
     // the second KANKI MIX entry of a server: the same server, the link through the tunnel
     let (node_id, via_tunnel) = match node_id.strip_suffix(TUNNEL_SUFFIX) {

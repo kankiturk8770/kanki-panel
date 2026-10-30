@@ -18,6 +18,8 @@ fn live_ids(app: &App) -> (HashSet<String>, HashSet<String>) {
 pub fn sweep(app: &App) -> Vec<String> {
     let (nodes, agents) = live_ids(app);
     let mut gone: Vec<String> = vec![];
+    // apps of users that stopped using them (a bound device stays, see devices.rs)
+    crate::devices::prune(app);
     // per node settings
     for id in crate::kmix::node_ids(app).into_iter().filter(|id| !nodes.contains(id)) {
         crate::kmix::forget_node(app, &id);

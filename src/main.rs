@@ -36,6 +36,10 @@ mod migrate;
 mod servers;
 #[path = "http/cleanup.rs"]
 mod cleanup;
+#[path = "http/devices.rs"]
+mod devices;
+#[path = "http/limit.rs"]
+mod limit;
 #[path = "http/direct.rs"]
 mod direct;
 #[path = "http/twin.rs"]

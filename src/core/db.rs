@@ -193,7 +193,9 @@ impl Db {
                 scopes TEXT, created INTEGER, last_used INTEGER DEFAULT 0);
             CREATE TABLE IF NOT EXISTS login_log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, username TEXT, ip TEXT, method TEXT, ok INTEGER);
             CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, actor TEXT, method TEXT, path TEXT, status INTEGER, ip TEXT);
-            CREATE TABLE IF NOT EXISTS claims(id TEXT PRIMARY KEY, tg_id INTEGER, user_id INTEGER DEFAULT 0, created INTEGER);",
+            CREATE TABLE IF NOT EXISTS claims(id TEXT PRIMARY KEY, tg_id INTEGER, user_id INTEGER DEFAULT 0, created INTEGER);
+            CREATE TABLE IF NOT EXISTS devices(user_id INTEGER, id TEXT, bound INTEGER DEFAULT 0, kind TEXT DEFAULT '', app TEXT DEFAULT '',
+                ip TEXT DEFAULT '', first_seen INTEGER, last_seen INTEGER, PRIMARY KEY(user_id, id));",
         )
         .expect("schema");
         // forward-only migrations (errors = column already exists)
@@ -448,6 +450,7 @@ impl Db {
     pub fn delete_user(&self, id: i64) {
         let _ = self.exec("DELETE FROM users WHERE id=?1", &[&id]);
         let _ = self.exec("DELETE FROM peers WHERE user_id=?1", &[&id]);
+        let _ = self.exec("DELETE FROM devices WHERE user_id=?1", &[&id]);
         let _ = self.exec("DELETE FROM orders WHERE target=?1 AND status NOT IN ('done','approved')", &[&id]);
         let _ = self.exec("UPDATE orders SET target=0 WHERE target=?1", &[&id]);
     }

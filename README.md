@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.22 — sealed configs, who uses which device, rate limits
+- The Kanki apps get their configs sealed with AES-256 (only that device can open them).
+- Each user shows the phones and PCs (and apps) that use the subscription. Nothing is limited by it.
+- 5 wrong logins lock that address for an hour; subscription requests are rate limited, and only over HTTPS.
+
 ## New in 3.21.1 — lighter, steadier pages
 - The panel's CSS is its own cached file, unused old styles are gone and 900px is desktop on every page.
 - A weak connection shows one small note and keeps the last data instead of repeated errors.
