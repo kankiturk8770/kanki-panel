@@ -330,6 +330,18 @@ nav.side a.on .ni{border-color:transparent;box-shadow:0 4px 14px color-mix(in sr
 .lvlist{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
 .lvlist span{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;padding:5px 10px;border-radius:99px;border:1px solid color-mix(in srgb,var(--pc,#888) 55%,transparent);background:color-mix(in srgb,var(--pc,#888) 14%,transparent)}
 .lvlist span b{color:var(--pc,#888);direction:ltr}
+/* devices of a user (user window) and the phone / PC icons on a user's row */
+.udev{display:inline-flex;align-items:center;gap:2px;color:var(--s);flex:none}
+.udev small{font-size:11px;font-weight:700;margin-inline-end:4px}
+.udevs{display:flex;flex-direction:column;margin:8px 0 4px}
+.udh{display:flex;align-items:center;gap:8px}
+.udh .lnk{width:auto;margin:0;min-height:40px}
+.udr{display:flex;align-items:center;gap:8px;padding:4px 0;border-top:1px solid var(--ln)}
+.udi{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;flex:none;color:var(--s);background:color-mix(in srgb,var(--t) 7%,transparent)}
+.udi.pc{color:#60a5fa}.udi.mobile{color:#34d399}
+.udt{display:flex;flex-direction:column;min-width:0;flex:1}
+.udt b{font-size:13px}.udt small{font-size:12px;color:var(--s);overflow-wrap:anywhere}
+.udr .ib{min-width:40px;height:40px;border:0;background:none;color:var(--s)}
 @media(max-width:430px){.uchips{grid-template-columns:repeat(2,1fr)}}
 .uchip{display:flex;align-items:center;gap:8px;min-width:0;padding:11px 12px;border-radius:14px;border:1px solid var(--ln);background:linear-gradient(165deg,var(--c1),var(--c2));color:var(--t);font:inherit;font-weight:700;font-size:13px;cursor:pointer;text-align:start;transition:border-color .15s}
 .uchip:hover{border-color:var(--a)}

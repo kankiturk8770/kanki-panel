@@ -146,9 +146,27 @@ pub async fn middleware(State(app): St, req: Request, next: Next) -> Response {
             return deny();
         }
     }
+    // HTTPS only: Caddy says when a request came to it over plain http
+    let sub = crate::limit::is_sub_path(&path);
+    let plain = req.headers().get("x-forwarded-proto").and_then(|v| v.to_str().ok()).map(|v| v.eq_ignore_ascii_case("http")).unwrap_or(false);
+    if plain && (sub || path == "/api/login") {
+        return (StatusCode::FORBIDDEN, "HTTPS only").into_response();
+    }
+    // spam and guessing: the login, and the subscription paths (an address that keeps asking for unknown codes waits)
+    use crate::limit::{hit, over, LOGIN, SUB, SUB_MISS};
+    if path == "/api/login" && !hit("login", &ip, LOGIN.0, LOGIN.1) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "too many requests, wait a minute"}))).into_response();
+    }
+    let limited = sub && !crate::limit::exempt(&ip);
+    if limited && (over("sub_miss", &ip, SUB_MISS.0, SUB_MISS.1) || !hit("sub", &ip, SUB.0, SUB.1)) {
+        return (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, "60")], "too many requests").into_response();
+    }
     let audited = path.starts_with("/api/") && method != Method::GET && path != "/api/login" && !path.starts_with("/api/config/");
     let actor = if audited { identify(&app, req.headers()).map(|a| a.0).unwrap_or_else(|| "anonymous".into()) } else { String::new() };
     let res = next.run(req).await;
+    if limited && res.headers().get("x-kanki-reason").is_some_and(|v| v == "unknown") {
+        hit("sub_miss", &ip, SUB_MISS.0, SUB_MISS.1);
+    }
     if audited {
         let st = res.status().as_u16() as i64;
         let _ = app.db.exec(
@@ -320,6 +338,9 @@ async fn security_get(State(app): St, h: HeaderMap) -> Response {
         "my_ip": client_ip(&h), "current_session": cur,
         "sessions": sessions, "tokens": tokens, "logins": logins, "audit": audit,
         "legacy_key": masked, "scopes": SCOPES,
+        // the panel listens only on this machine, behind Caddy's HTTPS (old installs listened on every address)
+        "https_only": app.env.get("PANEL_BIND").map(|b| b == "127.0.0.1" || b == "::1" || b == "localhost").unwrap_or(true),
+        "app_only": crate::devices::app_only(&app), "links_bot": app.db.get("links_bot_user"),
     }))
     .into_response()
 }
