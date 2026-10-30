@@ -1781,14 +1781,9 @@ var FA={"Weak connection to the panel: showing the last data, trying again…":"
  "Normal filtering:":"فیلترینگ عادی:",
  "Not connected":"وصل نیست",
  "Not connected right now":"الان وصل نیست",
- "Devices":"دستگاه‌ها","Free all":"آزاد کردن همه","No app has read this subscription yet":"هنوز هیچ برنامه‌ای این اشتراک را باز نکرده",
- "Holds a place":"یک جا گرفته","Not counted":"حساب نمی‌شود","Other app":"برنامه‌ی دیگر","Browser":"مرورگر","Kanki Windows":"کانکی ویندوز","Kanki Android":"کانکی اندروید",
- "Apps & devices":"برنامه‌ها و دستگاه‌ها","Sealed configs for the Kanki apps and devices per user":"کانفیگ رمزشده برای برنامه‌های کانکی و دستگاه‌های هر کاربر",
- "Device limit":"محدودیت دستگاه","A subscription works on at most as many devices as its connection count. A new device past that is refused until you free one in the user's window.":"هر اشتراک حداکثر روی به اندازه‌ی تعداد اتصالش دستگاه کار می‌کند. دستگاه تازه بیشتر از آن رد می‌شود تا یکی را در پنجره‌ی کاربر آزاد کنید.",
- "Free a device after this many unused days":"آزاد شدن دستگاه بعد از چند روز استفاده نکردن","0 = never":"۰ = هرگز",
- "Configs only in the Kanki apps":"کانفیگ فقط در برنامه‌های کانکی","Browsers and other apps (v2rayNG…) get no links from the web; the Kanki apps get sealed (AES-256) configs and the sales bot still sends config files. Turn it on only when every user has the new Android app.":"مرورگر و برنامه‌های دیگر (v2rayNG و …) از وب لینکی نمی‌گیرند؛ برنامه‌های کانکی کانفیگ رمزشده (AES-256) می‌گیرند و ربات فروش مثل قبل فایل کانفیگ می‌دهد. فقط وقتی روشن کنید که همه‌ی کاربران اپ اندروید تازه را دارند.",
+ "Devices":"دستگاه‌ها","No app has read this subscription yet":"هنوز هیچ برنامه‌ای این اشتراک را باز نکرده","Other app":"برنامه‌ی دیگر","Browser":"مرورگر","Kanki Windows":"کانکی ویندوز","Kanki Android":"کانکی اندروید",
  "HTTPS only":"فقط HTTPS","On: the panel listens only behind HTTPS":"روشن: پنل فقط پشت HTTPS است","The panel also listens without HTTPS (PANEL_BIND)":"پنل بدون HTTPS هم در دسترس است (PANEL_BIND)",
- "Login and subscription rate limit":"محدودیت تعداد درخواست ورود و اشتراک","Off (optional)":"خاموش (اختیاری)","Off (Settings › Apps & devices)":"خاموش (تنظیمات › برنامه‌ها و دستگاه‌ها)",
+ "Login and subscription rate limit":"محدودیت تعداد درخواست ورود و اشتراک","Off (optional)":"خاموش (اختیاری)",
  "Not connected yet":"هنوز وصل نیست",
  "Not connected yet: run its command on the server":"هنوز وصل نشده: دستورش را روی سرور اجرا کن",
  "Not in a tunnel":"بدون تانل",
@@ -3325,8 +3320,7 @@ function secStatus(s){var r=[[s.totp_on?'g':'r',t('Two-step login (2FA)'),s.totp
   [s.legacy_key?'y':'g',t('Old API key'),s.legacy_key?t('Still there, with full access: delete it below if nothing uses it'):t('None')],
   [s.ip_allow?'g':'',t('Login only from your IPs'),s.ip_allow?t('On'):t('Off (optional)')],
   [s.https_only?'g':'y',t('HTTPS only'),s.https_only?t('On: the panel listens only behind HTTPS'):t('The panel also listens without HTTPS (PANEL_BIND)')],
-  ['g',t('Login and subscription rate limit'),t('On')],
-  [s.app_only?'g':'',t('Configs only in the Kanki apps'),s.app_only?t('On'):t('Off (Settings › Apps & devices)')]];
+  ['g',t('Login and subscription rate limit'),t('On')]];
  var bad=r.filter(function(x){return x[0]=='r'}).length,warn=r.filter(function(x){return x[0]=='y'}).length;
  return kuGroup(t('Security status'),null,'<span class="ku-tag '+(bad?'r':warn?'y':'g')+'">'+(bad?t('Needs attention'):warn?t('Almost'):t('Good'))+'</span>',
   r.map(function(x){return kuItem({dot:x[0],name:x[1],tags:'<span class="ku-tag '+x[0]+'">'+x[2]+'</span>'})}).join(''))}
@@ -3385,7 +3379,6 @@ var STSEC=[
  ['newu','New users','users','Ready values for the “New user” form',['default_protocols','def_gb','def_days','def_conns']],
  ['ntf','Notifications','bell','Telegram messages for you and for your buyers',['tg_alerts','warn_on','backup_on']],
  ['srv','Servers','nodes','What happens to a server that stays offline',['autodel_on','autodel_hours','autodel_iran']],
- ['apps','Apps & devices','security','Sealed configs for the Kanki apps and devices per user',['app_only','device_limit_on','device_idle_days']],
  ['upd','Update & version','refresh','Version, update source and installing updates',['update_repo']],
  ['io','Export & import','box','Move all settings to another panel or keep a copy',[]]];
 var ST_SKIP=['web_bind','web_port','domain','https_port','repo_env'];
@@ -3398,9 +3391,6 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
    stIn('autodel_hours','After how many hours','24','',' ','number')+
    stSw('autodel_iran','Iran servers too','Off by default: when Iran\'s internet is cut, its servers can be away for days, and removing them takes every tunnel with them.')+
    '<p class="muted" style="font-size:12px">'+t('Only when other servers are online: if every server is away at once, it is the panel\'s own network and nothing is removed. The panel server is never removed.')+'</p>';
- case 'apps':return stSw('device_limit_on','Device limit','A subscription works on at most as many devices as its connection count. A new device past that is refused until you free one in the user\'s window.')+
-   stIn('device_idle_days','Free a device after this many unused days','30','0 = never','','number')+
-   stSw('app_only','Configs only in the Kanki apps','Browsers and other apps (v2rayNG…) get no links from the web; the Kanki apps get sealed (AES-256) configs and the sales bot still sends config files. Turn it on only when every user has the new Android app.');
  case 'look':return '<div class="sgrid">'+stIn('panel_name','Panel name','Kanki Panel','Shown in the menu, the browser tab and the login page.')+
   '<div><label class="f">'+t('Auto refresh')+'</label><select data-k="refresh">'+[5,10,30,60].map(function(n){return '<option value="'+n+'">'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select><div class="hint">'+t('How often lists and the dashboard refresh themselves.')+'</div></div>'+
   '<div class="full"><label class="f">'+t('Logo')+'</label><div class="row" style="gap:10px"><div class="'+logoCls()+'" id="lg_prev" style="width:52px;height:52px;border-radius:15px">'+logoInner(((S.me&&S.me.panel_name)||'K').charAt(0))+'</div>'+
@@ -3444,7 +3434,7 @@ function pSettings(){var cur=S.stsec||'look';
 function stVal(el){return el.type=='checkbox'?(el.checked?'1':'0'):el.value}
 function stFill(s){$$('#st [data-k]').forEach(function(el){var k=el.dataset.k,v=s[k]==null?'':String(s[k]);
   if(k=='refresh'&&!v)v='10';if(k=='lang'&&!v)v='fa';if(k=='theme'&&!v)v='dark';if(k=='color'&&!v)v='gold';
-  if(k=='conn_limit_on'||k=='tg_alerts'||k=='device_limit_on')v=v=='0'?'0':'1';
+  if(k=='conn_limit_on'||k=='tg_alerts')v=v=='0'?'0':'1';
   if(el.type=='checkbox')el.checked=v=='1';else el.value=v;el._orig=stVal(el)});
  stSync($('#st'))}
 // pickers and protocol chips follow their hidden input
@@ -3578,20 +3568,17 @@ function logDraw(){var tb=$('#lg_tabs'),bx=$('#lg_box');if(!tb||!bx)return;
   '<span class="muted">'+t(LG.lv=='e'?'No errors':LG.lv=='d'?'No debug lines':'No log lines yet')+'</span>';
  if(stick)bx.scrollTop=bx.scrollHeight}
 
-// ---- devices of a user: a Kanki app (Android / Windows) holds one of the user's places (his connection
-// count); other apps (v2rayNG, a browser) are only listed. Icons: phone or PC.
+// ---- devices of a user: every app that read the subscription (Kanki Android / Windows, v2rayNG, a browser…),
+// only to see who uses what; nothing is limited. Icons: phone or PC.
 function devIcon(k){return ic(k=='pc'?'pc':k=='mobile'?'phone':'globe',15)}
 function devSum(u){var now=Date.now()/1000,pc=0,mb=0;(u.devices||[]).forEach(function(x){if(now-x.last>30*86400)return;if(x.kind=='pc')pc++;else if(x.kind=='mobile')mb++});
  if(!pc&&!mb)return '';var c=function(n){return n>1?'<small>'+N(n)+'</small>':''};
  return '<span class="udev" title="'+esc(t('Devices'))+'">'+(mb?ic('phone',13)+c(mb):'')+(pc?ic('pc',13)+c(pc):'')+'</span>'}
-function devBox(u){var d=u.devices||[],b=d.filter(function(x){return x.bound}).length;
- var head='<div class="udh"><small class="muted">'+t('Devices')+' · <b class="ltr">'+N(b)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b></small><span class="sp"></span>'+
-  (d.length?'<button type="button" class="lnk" onclick="forgetDev('+u.id+',\'\')">'+t('Free all')+'</button>':'')+'</div>';
+function devBox(u){var d=u.devices||[];
+ var head='<div class="udh"><small class="muted">'+t('Devices')+' · <b class="ltr">'+N(d.length)+'</b></small></div>';
  if(!d.length)return '<div class="udevs">'+head+'<small class="muted">'+t('No app has read this subscription yet')+'</small></div>';
  return '<div class="udevs">'+head+d.map(function(x){return '<div class="udr"><span class="udi '+(x.kind||'')+'">'+devIcon(x.kind)+'</span><span class="udt"><b>'+esc(t(x.app||'Other app'))+'</b>'+
-   '<small>'+(x.bound?t('Holds a place'):t('Not counted'))+' · '+ago(x.last)+(x.ip?' · <bdi dir="ltr">'+esc(x.ip)+'</bdi>':'')+'</small></span>'+
-   '<button type="button" class="ib" aria-label="'+esc(t('Remove'))+'" onclick="forgetDev('+u.id+',\''+esc(x.id)+'\')">✕</button></div>'}).join('')+'</div>'}
-function forgetDev(uid,id){confirmDo(function(){api('POST','/api/users/'+uid+'/forget-device',{id:id}).then(function(){toast(t('Done'));return loadUsers()}).then(function(){editUser(uid)}).catch(fail)})}
+   '<small>'+ago(x.last)+(x.ip?' · <bdi dir="ltr">'+esc(x.ip)+'</bdi>':'')+'</small></span></div>'}).join('')+'</div>'}
 
 // ---- user sheet: small, one panel at a time (edit / link / QR), five quick buttons
 function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(u),

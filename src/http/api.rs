@@ -234,7 +234,7 @@ pub fn user_json(app: &App, u: &User) -> Value {
         "tg_id": u.tg_id, "created_at": iso(u.created_at), "last_seen_at": iso(u.last_seen), "last_seen_ts": u.last_seen,
         // connected right now: [{ "p": protocol, "s": server }]
         "live": crate::live::of(app, u.id),
-        // devices and apps that read the subscription: [{ id, bound, kind: pc | mobile, app, ip, first, last }]
+        // devices and apps that read the subscription: [{ id, kanki, kind: pc | mobile, app, ip, first, last }]
         "devices": crate::devices::of(app, u.id),
     })
 }
@@ -480,15 +480,10 @@ pub fn user_action(app: &App, id: i64, action: &str, b: &Value) -> Result<(), St
         "toggle" | "freeze" => app.db.exec("UPDATE users SET enabled=1-enabled WHERE id=?1", &[&id]).map(|_| ()),
         "enable" => app.db.exec("UPDATE users SET enabled=1 WHERE id=?1", &[&id]).map(|_| ()),
         "disable" => app.db.exec("UPDATE users SET enabled=0 WHERE id=?1", &[&id]).map(|_| ()),
-        // frees a device's place ({"id": ""} = every device)
-        "forget-device" => {
-            crate::devices::remove(app, id, b["id"].as_str().unwrap_or(""));
-            Ok(())
-        }
         "regen" => {
             let _ = app.db.exec("DELETE FROM peers WHERE user_id=?1", &[&id]);
-            // a new link: the devices sign in again with it
-            crate::devices::remove(app, id, "");
+            // a new link: the device list starts again
+            crate::devices::clear(app, id);
             app.db.exec("UPDATE users SET code=?1 WHERE id=?2", &[&util::rand_digits(19), &id]).map(|_| ())
         }
         "delete" => {
@@ -946,8 +941,6 @@ pub const SETTING_KEYS: &[&str] = &[
     "def_gb", "def_days", "def_conns",
     // 3.21: servers offline for too long are removed (cleanup.rs)
     "autodel_on", "autodel_hours", "autodel_iran",
-    // 3.22: devices and Kanki-apps-only configs (devices.rs)
-    "app_only", "device_limit_on", "device_idle_days",
 ];
 
 /// "owner/repo" with only the characters GitHub allows
@@ -1401,13 +1394,7 @@ fn sub_user(app: &App, code: &str) -> Result<User, Response> {
 
 async fn sub_page(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
     let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
-    // a browser or another app while only the Kanki apps get configs: the account, no links
-    if crate::devices::app_only(&app) && !crate::devices::wants_seal(&h) {
-        return crate::devices::app_only_page(&app, &u);
-    }
-    if let Err(r) = crate::devices::admit(&app, &u, &h) {
-        return r;
-    }
+    crate::devices::note(&app, &u, &h);
     let r = sub_page_of(&app, &u);
     crate::devices::reply(&h, &code, r).await
 }
@@ -1479,9 +1466,6 @@ fn sub_page_of(app: &App, u: &User) -> Response {
 /// QR code of the user's i-th Xray link
 async fn sub_xray_qr(State(app): St, Path((code, i)): Path<(String, usize)>) -> Response {
     let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
-    if crate::devices::app_only(&app) {
-        return crate::devices::links_off();
-    }
     let Some((_, l)) = crate::xray::panel::user_links(&app, &u).into_iter().nth(i) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
     match util::qr_svg(&l) {
         Some(svg) => ([(header::CONTENT_TYPE, "image/svg+xml".to_string()), (header::CACHE_CONTROL, "no-store".to_string())], svg).into_response(),
@@ -1491,20 +1475,14 @@ async fn sub_xray_qr(State(app): St, Path((code, i)): Path<(String, usize)>) -> 
 
 async fn sub_json(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
     let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
-    if let Err(r) = crate::devices::admit(&app, &u, &h) {
-        return r;
-    }
+    crate::devices::note(&app, &u, &h);
     crate::devices::reply(&h, &code, Json(sub_data(&app, &u)).into_response()).await
 }
 
-/// The base64 subscriptions for other apps: off while only the Kanki apps get configs (the sales bot still
-/// sends the config files); otherwise the app is remembered among the user's devices
+/// The user of a base64 subscription for other apps; the app is remembered among the user's devices
 fn other_app(app: &App, code: &str, h: &HeaderMap) -> Result<User, Response> {
     let u = sub_user(app, code)?;
-    if crate::devices::app_only(app) {
-        return Err(crate::devices::links_off());
-    }
-    crate::devices::admit(app, &u, h)?;
+    crate::devices::note(app, &u, h);
     Ok(u)
 }
 
@@ -1620,15 +1598,13 @@ pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str, tunnel:
     Some((conf_file_name_via(app, u, n, proto, tunnel), text))
 }
 
-/// `h`: the request of an app (its device is checked); None = the panel's own bots
+/// `h`: the request of an app (its device is remembered); None = the panel's own bots
 async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String, String>, extra: &str, h: Option<&HeaderMap>) -> Response {
     let sub = q.get("sub").cloned().unwrap_or_default();
     let code = parse_code(&sub).map(|x| x.1).unwrap_or(sub);
     let Some(u) = app.db.user_by_code(id, &code) else { return crate::devices::miss() };
     if let Some(h) = h {
-        if let Err(r) = crate::devices::admit(&app, &u, h) {
-            return r;
-        }
+        crate::devices::note(&app, &u, h);
     }
     let node_id = q.get("node").cloned().unwrap_or_else(|| "local".into());
     // the second KANKI MIX entry of a server: the same server, the link through the tunnel

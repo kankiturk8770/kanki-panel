@@ -34,12 +34,12 @@ pub fn over(name: &'static str, key: &str, max: u32, window: i64) -> bool {
     matches!(m.get(key), Some((n, t)) if *n >= max && now() - *t < window)
 }
 
-/// Login: at most 20 tries a minute from one address (wrong passwords also lock it for 15 minutes, auth.rs)
+/// Login: at most 20 tries a minute from one address (5 wrong passwords also lock it for an hour, auth.rs)
 pub const LOGIN: (u32, i64) = (20, 60);
 /// Subscription and config paths: 240 requests a minute per address (many phones can share one address)
 pub const SUB: (u32, i64) = (240, 60);
-/// Unknown subscription codes: after 40 in 10 minutes the address waits
-pub const SUB_MISS: (u32, i64) = (40, 600);
+/// Unknown subscription codes: after 40 in an hour the address waits (bots guessing codes)
+pub const SUB_MISS: (u32, i64) = (40, 3600);
 
 /// The paths anyone can open without signing in that give a user's data
 pub fn is_sub_path(path: &str) -> bool {

@@ -203,8 +203,9 @@ fn log_login(app: &App, user: &str, ip: &str, method: &str, ok: bool) {
     );
 }
 
-const MAX_FAILS: u32 = 6;
-const FAIL_WINDOW: i64 = 15 * 60;
+/// 5 wrong logins from one address in an hour lock it for an hour from the 5th
+const MAX_FAILS: u32 = 5;
+const FAIL_WINDOW: i64 = 60 * 60;
 
 fn locked(app: &App, ip: &str) -> bool {
     let m = app.login_fails.lock().unwrap();
@@ -222,12 +223,16 @@ fn fail(app: &App, ip: &str) {
         *e = (0, now());
     }
     e.0 += 1;
+    // the lock hour starts at the last wrong try
+    if e.0 >= MAX_FAILS {
+        e.1 = now();
+    }
 }
 
 async fn login(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let ip = client_ip(&h);
     if locked(&app, &ip) {
-        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "too many attempts, try again in 15 minutes"}))).into_response();
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "too many attempts, try again in an hour"}))).into_response();
     }
     let u = b["username"].as_str().unwrap_or("").trim().to_string();
     let p = b["password"].as_str().unwrap_or("");
@@ -340,7 +345,6 @@ async fn security_get(State(app): St, h: HeaderMap) -> Response {
         "legacy_key": masked, "scopes": SCOPES,
         // the panel listens only on this machine, behind Caddy's HTTPS (old installs listened on every address)
         "https_only": app.env.get("PANEL_BIND").map(|b| b == "127.0.0.1" || b == "::1" || b == "localhost").unwrap_or(true),
-        "app_only": crate::devices::app_only(&app),
     }))
     .into_response()
 }

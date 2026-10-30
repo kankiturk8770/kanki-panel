@@ -2,23 +2,19 @@
 //!
 //! The Kanki apps (Windows, and Android once updated) send two headers with every subscription request:
 //! `X-Kanki-Device` (an id that stays the same on that device) and `X-Kanki-Seal: kseal1`. The panel then
+//! answers sealed: `kseal1.<base64url(nonce(12) | AES-256-GCM ciphertext+tag)>`, key =
+//! HKDF-SHA256(secret = subscription code, salt = device id, info = "kanki sealed config v1"), aad = "kseal1"
+//! (the same as `windows/service/internal/sub/seal.go` in kanki-app), so a config cached or logged on the
+//! way (CDN, proxy) cannot be read.
 //!
-//! - binds the device to the user, up to the user's limit (`max_conn`; 0 = no limit). A new device past the
-//!   limit is refused until the admin removes one, or one stays unused for `device_idle_days` (default 30);
-//! - answers sealed: `kseal1.<base64url(nonce(12) | AES-256-GCM ciphertext+tag)>`, key =
-//!   HKDF-SHA256(secret = subscription code, salt = device id, info = "kanki sealed config v1"), aad = "kseal1"
-//!   (the same as `windows/service/internal/sub/seal.go` in kanki-app), so a config cached or logged on the
-//!   way (CDN, proxy) cannot be read.
-//!
-//! Other apps (v2rayNG, a browser) send neither. They are listed too (not counted against the limit) so
-//! the admin sees what each user connects with. With "Kanki apps only" (`app_only`) they get no configs
-//! from the web (vless://, hy2://, base64); the sales bot still sends the config files.
+//! Every app that reads a subscription (the Kanki apps, v2rayNG, a browser…) is also listed, with phone or
+//! PC, so the admin sees what each user connects with. Only listed: no app and no device is ever refused.
 use crate::db::User;
 use crate::util::{self, client_ip, now, sha256_hex, user_agent};
 use crate::App;
 use axum::{
     http::{header, HeaderMap, StatusCode},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
 };
 use serde_json::{json, Value};
 
@@ -71,75 +67,24 @@ fn key_of(raw: &str) -> String {
     sha256_hex(raw)[..24].to_string()
 }
 
-pub fn app_only(app: &App) -> bool {
-    app.db.on("app_only")
-}
-
-fn limit_on(app: &App) -> bool {
-    app.db.get("device_limit_on") != "0"
-}
-
-fn idle_days(app: &App) -> i64 {
-    app.db.get("device_idle_days").trim().parse().unwrap_or(30).max(0)
-}
-
-/// Lets the request in (and remembers the device) or answers it: the device limit is full, or only the
-/// Kanki apps may read configs and this is another app.
-pub fn admit(app: &App, u: &User, h: &HeaderMap) -> Result<(), Response> {
-    let ua = user_agent(h);
-    let (kind, name) = kind_of(&ua);
-    let ip = client_ip(h);
-    let t = now();
-    if app_only(app) && !wants_seal(h) {
-        return Err(refuse(StatusCode::FORBIDDEN, "app_only", "Configs are only in the Kanki app"));
-    }
-    let Some(raw) = device_id(h) else {
-        if app_only(app) {
-            return Err(refuse(StatusCode::FORBIDDEN, "app_only", "Configs are only in the Kanki app"));
-        }
-        // other apps: one row per app (not per phone, they send no id) and never counted
-        let id = format!("ua-{}", &sha256_hex(&format!("{}|{}", kind, name))[..16]);
-        remember(app, u.id, &id, false, kind, name, &ip, t);
-        return Ok(());
+/// Remembers which device and app read the subscription (never refuses anything)
+pub fn note(app: &App, u: &User, h: &HeaderMap) {
+    let (kind, name) = kind_of(&user_agent(h));
+    // a Kanki app: one row per device; other apps send no id: one row per app
+    let (id, kanki) = match device_id(h) {
+        Some(raw) => (key_of(&raw), true),
+        None => (format!("ua-{}", &sha256_hex(&format!("{}|{}", kind, name))[..16]), false),
     };
-    let id = key_of(&raw);
-    let known = app.db.with(|c| c.query_row("SELECT 1 FROM devices WHERE user_id=?1 AND id=?2", rusqlite::params![u.id, id], |_| Ok(())).is_ok());
-    if !known && limit_on(app) && u.max_conn > 0 {
-        let days = idle_days(app);
-        if days > 0 {
-            let _ = app.db.exec("DELETE FROM devices WHERE user_id=?1 AND bound=1 AND last_seen<?2", &[&u.id, &(t - days * 86400)]);
-        }
-        let used: i64 = app.db.with(|c| c.query_row("SELECT COUNT(*) FROM devices WHERE user_id=?1 AND bound=1", [u.id], |r| r.get(0)).unwrap_or(0));
-        if used >= u.max_conn {
-            return Err(refuse(StatusCode::FORBIDDEN, "device_limit", "This subscription is already in use on its maximum number of devices"));
-        }
-    }
-    remember(app, u.id, &id, true, kind, name, &ip, t);
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn remember(app: &App, uid: i64, id: &str, bound: bool, kind: &str, name: &str, ip: &str, t: i64) {
     let _ = app.db.exec(
         "INSERT INTO devices(user_id,id,bound,kind,app,ip,first_seen,last_seen) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)
          ON CONFLICT(user_id,id) DO UPDATE SET kind=?4, app=?5, ip=?6, last_seen=?7",
-        &[&uid, &id, &(bound as i64), &kind, &name, &ip, &t],
+        &[&u.id, &id, &(kanki as i64), &kind, &name, &client_ip(h), &now()],
     );
 }
 
-/// An unknown subscription code (the limiter counts these per address)
+/// An unknown subscription code (marked, so the limiter counts these per address)
 pub fn miss() -> Response {
-    refuse(StatusCode::NOT_FOUND, "unknown", "not found")
-}
-
-/// The standard links for other apps are not on the web while only the Kanki apps get configs
-pub fn links_off() -> Response {
-    refuse(StatusCode::NOT_FOUND, "app_only", "Configs are only in the Kanki app and the Telegram bot")
-}
-
-/// A refusal the apps can show: text for a person, and a reason code for the app
-fn refuse(st: StatusCode, reason: &str, text: &str) -> Response {
-    (st, [(header::CACHE_CONTROL, "no-store"), (header::HeaderName::from_static("x-kanki-reason"), reason)], text.to_string()).into_response()
+    (StatusCode::NOT_FOUND, [(header::CACHE_CONTROL, "no-store"), (header::HeaderName::from_static("x-kanki-reason"), "unknown")], "not found").into_response()
 }
 
 /// `kseal1.<base64url(nonce | ciphertext+tag)>` (see the top of this file)
@@ -175,28 +120,10 @@ pub async fn reply(h: &HeaderMap, code: &str, r: Response) -> Response {
     ([(header::CONTENT_TYPE, "text/plain; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], seal(&body, code, &device, &nonce)).into_response()
 }
 
-/// The subscription page for a browser or another app when only the Kanki apps get configs: the account
-/// and the app's address
-pub fn app_only_page(app: &App, u: &User) -> Response {
-    let link = app.db.get("app_link");
-    let left = if u.limit_gb > 0.0 { format!("{:.2} / {:.0} GB", u.used_gb(), u.limit_gb) } else { format!("{:.2} GB / ∞", u.used_gb()) };
-    let app_line = if link.is_empty() { String::new() } else { format!("<p dir=\"ltr\"><a href=\"{0}\">{0}</a></p>", util::esc(&link)) };
-    let page = format!(
-        "<!doctype html><html lang=\"fa\" dir=\"rtl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{name}</title>\
-<style>body{{margin:0;font:15px/1.7 system-ui,sans-serif;background:#0d0b07;color:#f3ead7;display:grid;place-items:center;min-height:100vh}}\
-main{{max-width:420px;margin:16px;padding:24px;border-radius:16px;background:#1a160e;border:1px solid #3a3020}}h1{{font-size:20px;margin:0 0 4px}}\
-.s{{color:#bfb39a;font-size:13px}}a{{color:#f5c451}}b{{direction:ltr;unicode-bidi:isolate}}</style></head><body><main>\
-<h1 dir=\"ltr\">{name}</h1><p class=\"s\">{st} · <b>{left}</b></p>\
-<p>کانفیگ‌ها فقط داخل برنامه‌ی کانکی است. با همین لینک وارد برنامه شوید.</p><p dir=\"ltr\" class=\"s\">Configs are only in the Kanki app: sign in there with this link.</p>{app_line}</main></body></html>",
-        name = util::esc(&u.username), st = u.status(), left = left, app_line = app_line
-    );
-    ([(header::CACHE_CONTROL, "no-store")], Html(page)).into_response()
-}
-
 fn row(r: &rusqlite::Row) -> rusqlite::Result<(i64, Value)> {
     let id: String = r.get(1)?;
     Ok((r.get(0)?, json!({
-        "id": id, "bound": r.get::<_, i64>(2)? == 1, "kind": r.get::<_, String>(3)?, "app": r.get::<_, String>(4)?,
+        "id": id, "kanki": r.get::<_, i64>(2)? == 1, "kind": r.get::<_, String>(3)?, "app": r.get::<_, String>(4)?,
         "ip": r.get::<_, String>(5)?, "first": r.get::<_, i64>(6)?, "last": r.get::<_, i64>(7)?,
     })))
 }
@@ -211,18 +138,14 @@ pub fn of(app: &App, uid: i64) -> Vec<Value> {
     })
 }
 
-/// Frees one device's place (`id` = "" frees all of them)
-pub fn remove(app: &App, uid: i64, id: &str) {
-    if id.is_empty() {
-        let _ = app.db.exec("DELETE FROM devices WHERE user_id=?1", &[&uid]);
-    } else {
-        let _ = app.db.exec("DELETE FROM devices WHERE user_id=?1 AND id=?2", &[&uid, &id]);
-    }
+/// Forgets every device of a user (a new subscription link)
+pub fn clear(app: &App, uid: i64) {
+    let _ = app.db.exec("DELETE FROM devices WHERE user_id=?1", &[&uid]);
 }
 
-/// Rows of other apps not seen for 60 days go (a bound device stays until the admin or the idle rule frees it)
+/// Devices and apps not seen for 60 days leave the list
 pub fn prune(app: &App) {
-    let _ = app.db.exec("DELETE FROM devices WHERE bound=0 AND last_seen<?1", &[&(now() - 60 * 86400)]);
+    let _ = app.db.exec("DELETE FROM devices WHERE last_seen<?1", &[&(now() - 60 * 86400)]);
 }
 
 #[cfg(test)]
@@ -303,47 +226,54 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn binds_devices_seals_configs_and_hides_links() {
+    async fn seals_for_kanki_apps_and_lists_every_device() {
         let app = test_app();
         let u = app.db.create_user("ALI", 10.0, 30, 1, "wg,hy2", "", "", 0).unwrap();
         let code = u.sub_code();
         let page = format!("/sub/{}", code);
         let win = |d: &'static str| [("x-kanki-device", d), ("x-kanki-seal", "kseal1"), ("user-agent", "KankiVPN-Windows")];
-        // the first Kanki device gets the page, sealed for it
+        // a Kanki app gets the page sealed for its device
         let (st, body, _) = get(&app, &page, &win("pc-aaaaaaaa")).await;
         assert_eq!(st, StatusCode::OK);
         assert!(body.starts_with("kseal1.") && !body.contains("ALI"));
         assert!(open(&body, &code, "pc-aaaaaaaa").contains("ALI"));
-        // one place: a second device is refused, the first one still works
-        let (st, _, why) = get(&app, &page, &win("pc-bbbbbbbb")).await;
-        assert_eq!((st, why.as_str()), (StatusCode::FORBIDDEN, "device_limit"));
-        assert_eq!(get(&app, &page, &win("pc-aaaaaaaa")).await.0, StatusCode::OK);
-        // other apps still read the plain subscription, are listed and take no place
-        let (st, body, _) = get(&app, &format!("{}/raw", page), &[("user-agent", "v2rayNG/1.9")]).await;
-        assert_eq!(st, StatusCode::OK);
-        assert!(!body.starts_with("kseal1."));
-        let d = of(&app, u.id);
-        assert_eq!(d.len(), 2);
-        assert!(d.iter().any(|x| x["app"] == "Kanki Windows" && x["kind"] == "pc" && x["bound"] == true));
-        assert!(d.iter().any(|x| x["app"] == "v2rayNG" && x["kind"] == "mobile" && x["bound"] == false));
-        // the admin frees the place: the new device gets in
-        let id = d.iter().find(|x| x["bound"] == true).unwrap()["id"].as_str().unwrap().to_string();
-        crate::api::user_action(&app, u.id, "forget-device", &json!({"id": id})).unwrap();
-        assert_eq!(get(&app, &page, &win("pc-bbbbbbbb")).await.0, StatusCode::OK);
-        // Kanki apps only: no links on the web, a page without configs for a browser, sealed for the apps
-        app.db.set("app_only", "1");
-        let (st, _, why) = get(&app, &format!("{}/raw", page), &[("user-agent", "v2rayNG/1.9")]).await;
-        assert_eq!((st, why.as_str()), (StatusCode::NOT_FOUND, "app_only"));
-        assert_eq!(get(&app, &format!("{}/v2", page), &[]).await.0, StatusCode::NOT_FOUND);
-        let (st, body, _) = get(&app, &page, &[("user-agent", "Mozilla/5.0 (Linux; Android 14) Mobile")]).await;
-        assert!(st == StatusCode::OK && body.contains("Kanki app") && !body.contains("/api/config/"));
-        let (st, _, why) = get(&app, &format!("/api/config/{}/wireguard?sub={}&node=local", u.id, code), &[]).await;
-        assert_eq!((st, why.as_str()), (StatusCode::FORBIDDEN, "app_only"));
+        // no device limit: more devices than the connection count all get in
         let (st, body, _) = get(&app, &page, &win("pc-bbbbbbbb")).await;
         assert!(st == StatusCode::OK && open(&body, &code, "pc-bbbbbbbb").contains("ALI"));
+        // a browser sees the normal page with its configs, other apps the plain subscription
+        let (st, body, _) = get(&app, &page, &[("user-agent", "Mozilla/5.0 (Linux; Android 14) Mobile")]).await;
+        assert!(st == StatusCode::OK && body.contains("ALI") && !body.starts_with("kseal1."));
+        let (st, body, _) = get(&app, &format!("{}/raw", page), &[("user-agent", "v2rayNG/1.9")]).await;
+        assert!(st == StatusCode::OK && !body.starts_with("kseal1."));
+        // every one of them is listed, with phone or PC
+        let d = of(&app, u.id);
+        assert_eq!(d.len(), 4);
+        assert_eq!(d.iter().filter(|x| x["app"] == "Kanki Windows" && x["kind"] == "pc" && x["kanki"] == true).count(), 2);
+        assert!(d.iter().any(|x| x["app"] == "v2rayNG" && x["kind"] == "mobile" && x["kanki"] == false));
+        assert!(d.iter().any(|x| x["app"] == "Browser" && x["kind"] == "mobile"));
+        // a new link starts the list again
+        crate::api::user_action(&app, u.id, "regen", &json!({})).unwrap();
+        assert!(of(&app, u.id).is_empty());
         // an unknown code is marked, so the limiter can count it
         let (st, _, why) = get(&app, "/sub/kanki-999-00000000", &[]).await;
         assert_eq!((st, why.as_str()), (StatusCode::NOT_FOUND, "unknown"));
+    }
+
+    // (the panel's request limits, through the same router)
+    #[tokio::test]
+    async fn five_wrong_logins_lock_the_address() {
+        use tower::ServiceExt;
+        let app = test_app();
+        let login = |pw: &str| {
+            axum::http::Request::post("/api/login").header("content-type", "application/json").header("x-forwarded-for", "9.9.9.9")
+                .body(axum::body::Body::from(format!(r#"{{"username":"admin","password":"{}"}}"#, pw))).unwrap()
+        };
+        for _ in 0..5 {
+            let r = crate::api::master_router(app.clone()).oneshot(login("wrong-pass")).await.unwrap();
+            assert_ne!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+        }
+        let r = crate::api::master_router(app.clone()).oneshot(login("wrong-pass")).await.unwrap();
+        assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[test]
