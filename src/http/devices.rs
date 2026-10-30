@@ -11,8 +11,8 @@
 //!   way (CDN, proxy) cannot be read.
 //!
 //! Other apps (v2rayNG, a browser) send neither. They are listed too (not counted against the limit) so
-//! the admin sees what each user connects with. With "Kanki apps only" (`app_only`) they get no configs:
-//! the standard links (vless://, hy2://, base64) come only from the links bot (`telegram/links.rs`).
+//! the admin sees what each user connects with. With "Kanki apps only" (`app_only`) they get no configs
+//! from the web (vless://, hy2://, base64); the sales bot still sends the config files.
 use crate::db::User;
 use crate::util::{self, client_ip, now, sha256_hex, user_agent};
 use crate::App;
@@ -134,7 +134,7 @@ pub fn miss() -> Response {
 
 /// The standard links for other apps are not on the web while only the Kanki apps get configs
 pub fn links_off() -> Response {
-    refuse(StatusCode::NOT_FOUND, "app_only", "Links for other apps come from the Telegram bot")
+    refuse(StatusCode::NOT_FOUND, "app_only", "Configs are only in the Kanki app and the Telegram bot")
 }
 
 /// A refusal the apps can show: text for a person, and a reason code for the app
@@ -175,17 +175,11 @@ pub async fn reply(h: &HeaderMap, code: &str, r: Response) -> Response {
     ([(header::CONTENT_TYPE, "text/plain; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], seal(&body, code, &device, &nonce)).into_response()
 }
 
-/// The subscription page for a browser or another app when only the Kanki apps get configs: the account,
-/// and where to get links for other apps
+/// The subscription page for a browser or another app when only the Kanki apps get configs: the account
+/// and the app's address
 pub fn app_only_page(app: &App, u: &User) -> Response {
-    let bot = app.db.get("links_bot_user");
     let link = app.db.get("app_link");
     let left = if u.limit_gb > 0.0 { format!("{:.2} / {:.0} GB", u.used_gb(), u.limit_gb) } else { format!("{:.2} GB / ∞", u.used_gb()) };
-    let bot_line = if bot.is_empty() {
-        String::new()
-    } else {
-        format!("<p>برای برنامه‌های دیگر (v2rayNG و …) لینک‌ها را از ربات بگیرید:</p><p dir=\"ltr\" class=\"s\">For other apps, get your links from the bot:</p><p dir=\"ltr\"><a href=\"https://t.me/{b}?start={c}\">@{b}</a></p>", b = util::esc(&bot), c = util::esc(&u.sub_code()))
-    };
     let app_line = if link.is_empty() { String::new() } else { format!("<p dir=\"ltr\"><a href=\"{0}\">{0}</a></p>", util::esc(&link)) };
     let page = format!(
         "<!doctype html><html lang=\"fa\" dir=\"rtl\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{name}</title>\
@@ -193,8 +187,8 @@ pub fn app_only_page(app: &App, u: &User) -> Response {
 main{{max-width:420px;margin:16px;padding:24px;border-radius:16px;background:#1a160e;border:1px solid #3a3020}}h1{{font-size:20px;margin:0 0 4px}}\
 .s{{color:#bfb39a;font-size:13px}}a{{color:#f5c451}}b{{direction:ltr;unicode-bidi:isolate}}</style></head><body><main>\
 <h1 dir=\"ltr\">{name}</h1><p class=\"s\">{st} · <b>{left}</b></p>\
-<p>کانفیگ‌ها فقط داخل برنامه‌ی کانکی است. با همین لینک وارد برنامه شوید.</p><p dir=\"ltr\" class=\"s\">Configs are only in the Kanki app: sign in there with this link.</p>{app_line}{bot_line}</main></body></html>",
-        name = util::esc(&u.username), st = u.status(), left = left, app_line = app_line, bot_line = bot_line
+<p>کانفیگ‌ها فقط داخل برنامه‌ی کانکی است. با همین لینک وارد برنامه شوید.</p><p dir=\"ltr\" class=\"s\">Configs are only in the Kanki app: sign in there with this link.</p>{app_line}</main></body></html>",
+        name = util::esc(&u.username), st = u.status(), left = left, app_line = app_line
     );
     ([(header::CACHE_CONTROL, "no-store")], Html(page)).into_response()
 }

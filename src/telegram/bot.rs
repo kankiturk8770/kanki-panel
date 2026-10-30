@@ -569,14 +569,12 @@ impl Bot {
             format!("1️⃣ برنامه رو از لینک زیر نصب کنید:\n{}\n\n", esc(&link))
         };
         let step2 = if step1.is_empty() { "با این کد وارد برنامه‌ی کانکی بشید:" } else { "2️⃣ با این کد وارد برنامه بشید:" };
-        // other apps: the web link, or only the links bot when the configs are only in the Kanki apps
-        let other = if !crate::devices::app_only(&self.app) {
-            format!("\n\n🔗 لینک اشتراک (برای برنامه‌های دیگه):\n<code>{}/sub/{}</code>", sub_origin(&self.app), u.sub_code())
+        // the web link for other apps does not work while only the Kanki apps get configs (the config
+        // buttons under this message still do)
+        let other = if crate::devices::app_only(&self.app) {
+            String::new()
         } else {
-            match self.db().get("links_bot_user") {
-                b if b.is_empty() => String::new(),
-                b => format!("\n\n🔗 لینک برای برنامه‌های دیگه (v2rayNG و …): @{}", esc(&b)),
-            }
+            format!("\n\n🔗 لینک اشتراک (برای برنامه‌های دیگه):\n<code>{}/sub/{}</code>", sub_origin(&self.app), u.sub_code())
         };
         format!(
             "👤 <b>{}</b>  ·  {}\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n📱 <b>بهترین راه (پیشنهاد ما): برنامه‌ی کانکی</b>\n{}{}\n<code>{}</code>{}",
@@ -602,16 +600,9 @@ impl Bot {
         if let Some(r) = self.guide_row() {
             rows.push(r);
         }
-        // the configs for other apps: one button to the links bot when it is set and the configs are only in
-        // the Kanki apps (the separate bot is then the only place for them), else the file buttons
-        let lb = self.db().get("links_bot_user");
-        if crate::devices::app_only(&self.app) && !lb.is_empty() {
-            rows.push(vec![b("🔗 لینک برای برنامه‌های دیگه", &format!("url:https://t.me/{}?start={}", lb, u.sub_code()))]);
-        } else {
-            for (p, code) in [("wireguard", "w"), ("amneziawg", "a"), ("hysteria2", "h")] {
-                if have.contains(&p) {
-                    rows.push(vec![b(&self.bt(&format!("cfg_{}", code)), &format!("cfg:{}:{}", u.id, code))]);
-                }
+        for (p, code) in [("wireguard", "w"), ("amneziawg", "a"), ("hysteria2", "h")] {
+            if have.contains(&p) {
+                rows.push(vec![b(&self.bt(&format!("cfg_{}", code)), &format!("cfg:{}:{}", u.id, code))]);
             }
         }
         rows.push(vec![b(&self.bt("rename"), &format!("ren:{}", u.id))]);

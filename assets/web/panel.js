@@ -1783,12 +1783,10 @@ var FA={"Weak connection to the panel: showing the last data, trying again…":"
  "Not connected right now":"الان وصل نیست",
  "Devices":"دستگاه‌ها","Free all":"آزاد کردن همه","No app has read this subscription yet":"هنوز هیچ برنامه‌ای این اشتراک را باز نکرده",
  "Holds a place":"یک جا گرفته","Not counted":"حساب نمی‌شود","Other app":"برنامه‌ی دیگر","Browser":"مرورگر","Kanki Windows":"کانکی ویندوز","Kanki Android":"کانکی اندروید",
- "Apps & devices":"برنامه‌ها و دستگاه‌ها","Sealed configs for the Kanki apps, devices per user and the links bot":"کانفیگ رمزشده برای برنامه‌های کانکی، دستگاه‌های هر کاربر و ربات لینک",
+ "Apps & devices":"برنامه‌ها و دستگاه‌ها","Sealed configs for the Kanki apps and devices per user":"کانفیگ رمزشده برای برنامه‌های کانکی و دستگاه‌های هر کاربر",
  "Device limit":"محدودیت دستگاه","A subscription works on at most as many devices as its connection count. A new device past that is refused until you free one in the user's window.":"هر اشتراک حداکثر روی به اندازه‌ی تعداد اتصالش دستگاه کار می‌کند. دستگاه تازه بیشتر از آن رد می‌شود تا یکی را در پنجره‌ی کاربر آزاد کنید.",
  "Free a device after this many unused days":"آزاد شدن دستگاه بعد از چند روز استفاده نکردن","0 = never":"۰ = هرگز",
- "Configs only in the Kanki apps":"کانفیگ فقط در برنامه‌های کانکی","Browsers and other apps (v2rayNG…) get no links from the web; the Kanki apps get sealed (AES-256) configs. Turn it on only when every user has the new Android app.":"مرورگر و برنامه‌های دیگر (v2rayNG و …) از وب لینکی نمی‌گیرند؛ برنامه‌های کانکی کانفیگ رمزشده (AES-256) می‌گیرند. فقط وقتی روشن کنید که همه‌ی کاربران اپ اندروید تازه را دارند.",
- "Links bot token":"توکن ربات لینک","A separate bot from @BotFather, not the sales bot. Customers send it their code and get the links for other apps.":"یک ربات جدا از @BotFather، نه ربات فروش. مشتری کدش را می‌فرستد و لینک‌های برنامه‌های دیگر را می‌گیرد.",
- "Links bot running":"ربات لینک روشن است","Links bot is off":"ربات لینک خاموش است",
+ "Configs only in the Kanki apps":"کانفیگ فقط در برنامه‌های کانکی","Browsers and other apps (v2rayNG…) get no links from the web; the Kanki apps get sealed (AES-256) configs and the sales bot still sends config files. Turn it on only when every user has the new Android app.":"مرورگر و برنامه‌های دیگر (v2rayNG و …) از وب لینکی نمی‌گیرند؛ برنامه‌های کانکی کانفیگ رمزشده (AES-256) می‌گیرند و ربات فروش مثل قبل فایل کانفیگ می‌دهد. فقط وقتی روشن کنید که همه‌ی کاربران اپ اندروید تازه را دارند.",
  "HTTPS only":"فقط HTTPS","On: the panel listens only behind HTTPS":"روشن: پنل فقط پشت HTTPS است","The panel also listens without HTTPS (PANEL_BIND)":"پنل بدون HTTPS هم در دسترس است (PANEL_BIND)",
  "Login and subscription rate limit":"محدودیت تعداد درخواست ورود و اشتراک","Off (optional)":"خاموش (اختیاری)","Off (Settings › Apps & devices)":"خاموش (تنظیمات › برنامه‌ها و دستگاه‌ها)",
  "Not connected yet":"هنوز وصل نیست",
@@ -3387,7 +3385,7 @@ var STSEC=[
  ['newu','New users','users','Ready values for the “New user” form',['default_protocols','def_gb','def_days','def_conns']],
  ['ntf','Notifications','bell','Telegram messages for you and for your buyers',['tg_alerts','warn_on','backup_on']],
  ['srv','Servers','nodes','What happens to a server that stays offline',['autodel_on','autodel_hours','autodel_iran']],
- ['apps','Apps & devices','security','Sealed configs for the Kanki apps, devices per user and the links bot',['app_only','device_limit_on','device_idle_days','links_bot_token']],
+ ['apps','Apps & devices','security','Sealed configs for the Kanki apps and devices per user',['app_only','device_limit_on','device_idle_days']],
  ['upd','Update & version','refresh','Version, update source and installing updates',['update_repo']],
  ['io','Export & import','box','Move all settings to another panel or keep a copy',[]]];
 var ST_SKIP=['web_bind','web_port','domain','https_port','repo_env'];
@@ -3402,9 +3400,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
    '<p class="muted" style="font-size:12px">'+t('Only when other servers are online: if every server is away at once, it is the panel\'s own network and nothing is removed. The panel server is never removed.')+'</p>';
  case 'apps':return stSw('device_limit_on','Device limit','A subscription works on at most as many devices as its connection count. A new device past that is refused until you free one in the user\'s window.')+
    stIn('device_idle_days','Free a device after this many unused days','30','0 = never','','number')+
-   stSw('app_only','Configs only in the Kanki apps','Browsers and other apps (v2rayNG…) get no links from the web; the Kanki apps get sealed (AES-256) configs. Turn it on only when every user has the new Android app.')+
-   '<div class="sgrid" style="margin-top:6px">'+stIn('links_bot_token','Links bot token','123456:ABC…','A separate bot from @BotFather, not the sales bot. Customers send it their code and get the links for other apps.','full')+'</div>'+
-   '<p class="muted" style="font-size:12px">'+(s.links_bot_user?'✓ '+t('Links bot running')+': <bdi dir="ltr">@'+esc(s.links_bot_user)+'</bdi>':t('Links bot is off'))+'</p>';
+   stSw('app_only','Configs only in the Kanki apps','Browsers and other apps (v2rayNG…) get no links from the web; the Kanki apps get sealed (AES-256) configs and the sales bot still sends config files. Turn it on only when every user has the new Android app.');
  case 'look':return '<div class="sgrid">'+stIn('panel_name','Panel name','Kanki Panel','Shown in the menu, the browser tab and the login page.')+
   '<div><label class="f">'+t('Auto refresh')+'</label><select data-k="refresh">'+[5,10,30,60].map(function(n){return '<option value="'+n+'">'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select><div class="hint">'+t('How often lists and the dashboard refresh themselves.')+'</div></div>'+
   '<div class="full"><label class="f">'+t('Logo')+'</label><div class="row" style="gap:10px"><div class="'+logoCls()+'" id="lg_prev" style="width:52px;height:52px;border-radius:15px">'+logoInner(((S.me&&S.me.panel_name)||'K').charAt(0))+'</div>'+

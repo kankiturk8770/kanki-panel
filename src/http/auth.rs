@@ -340,7 +340,7 @@ async fn security_get(State(app): St, h: HeaderMap) -> Response {
         "legacy_key": masked, "scopes": SCOPES,
         // the panel listens only on this machine, behind Caddy's HTTPS (old installs listened on every address)
         "https_only": app.env.get("PANEL_BIND").map(|b| b == "127.0.0.1" || b == "::1" || b == "localhost").unwrap_or(true),
-        "app_only": crate::devices::app_only(&app), "links_bot": app.db.get("links_bot_user"),
+        "app_only": crate::devices::app_only(&app),
     }))
     .into_response()
 }

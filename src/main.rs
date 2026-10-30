@@ -66,8 +66,6 @@ mod wg;
 // telegram: built-in sales bot
 #[path = "telegram/bot.rs"]
 mod bot;
-#[path = "telegram/links.rs"]
-mod links;
 #[path = "telegram/channel.rs"]
 mod channel;
 #[path = "telegram/ai.rs"]
@@ -324,8 +322,6 @@ async fn main() {
     tokio::spawn(cleanup::sweep_loop(app.clone()));
     tokio::spawn(cleanup::offline_loop(app.clone()));
     tokio::spawn(channel::channel_loop(app.clone()));
-    // the separate bot for other apps' links (Settings › Apps & devices)
-    tokio::spawn(links::run(app.clone()));
     if let Some(b) = bot::Bot::new(app.clone()) {
         tokio::spawn(b.run());
         eprintln!("telegram bot started");

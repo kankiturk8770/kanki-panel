@@ -946,8 +946,8 @@ pub const SETTING_KEYS: &[&str] = &[
     "def_gb", "def_days", "def_conns",
     // 3.21: servers offline for too long are removed (cleanup.rs)
     "autodel_on", "autodel_hours", "autodel_iran",
-    // 3.22: devices and Kanki-apps-only configs (devices.rs), the links bot for other apps (telegram/links.rs)
-    "app_only", "device_limit_on", "device_idle_days", "links_bot_token",
+    // 3.22: devices and Kanki-apps-only configs (devices.rs)
+    "app_only", "device_limit_on", "device_idle_days",
 ];
 
 /// "owner/repo" with only the characters GitHub allows
@@ -968,7 +968,6 @@ async fn settings_get(State(app): St, h: HeaderMap) -> Response {
     m.insert("autodel_on".into(), json!(if on { "1" } else { "0" }));
     m.insert("autodel_hours".into(), json!(hours.to_string()));
     m.insert("sub_domain".into(), json!(app.db.get("sub_domain")));
-    m.insert("links_bot_user".into(), json!(app.db.get("links_bot_user")));
     m.insert("web_bind".into(), json!(app.env.get("PANEL_BIND").cloned().unwrap_or_else(|| "127.0.0.1".into())));
     m.insert("web_port".into(), json!(app.env.get("PANEL_PORT").cloned().unwrap_or_default()));
     m.insert("domain".into(), json!(app.env.get("DOMAIN").cloned().unwrap_or_default()));
@@ -1498,8 +1497,8 @@ async fn sub_json(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Res
     crate::devices::reply(&h, &code, Json(sub_data(&app, &u)).into_response()).await
 }
 
-/// The base64 subscriptions for other apps: off while only the Kanki apps get configs (then the links come
-/// from the Telegram links bot); otherwise the app is remembered among the user's devices
+/// The base64 subscriptions for other apps: off while only the Kanki apps get configs (the sales bot still
+/// sends the config files); otherwise the app is remembered among the user's devices
 fn other_app(app: &App, code: &str, h: &HeaderMap) -> Result<User, Response> {
     let u = sub_user(app, code)?;
     if crate::devices::app_only(app) {
@@ -1536,8 +1535,7 @@ async fn sub_xray(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Res
      util::b64(lines.join("\n").as_bytes())).into_response()
 }
 
-/// Every standard link of a user for other apps (Hysteria2 and WireGuard URIs, then Xray): the raw
-/// subscription below and the Telegram links bot
+/// Every standard link of a user for other apps (Hysteria2 and WireGuard URIs, then Xray)
 pub(crate) fn other_app_links(app: &App, u: &User) -> Vec<String> {
     let mut lines: Vec<String> = vec![];
     for n in user_nodes(app, u) {
