@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.22.1 — devices told apart, fairer limits
+- Phone or PC is now found for almost every app (Android apps, iPhone apps, sing-box, Clash…); unknown ones still show.
+- Subscription limits fit mobile networks where many phones share one address.
+
 ## New in 3.22 — sealed configs, who uses which device, rate limits
 - The Kanki apps get their configs sealed with AES-256 (only that device can open them).
 - Each user shows the phones and PCs (and apps) that use the subscription. Nothing is limited by it.

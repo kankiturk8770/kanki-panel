@@ -36,10 +36,14 @@ pub fn over(name: &'static str, key: &str, max: u32, window: i64) -> bool {
 
 /// Login: at most 20 tries a minute from one address (5 wrong passwords also lock it for an hour, auth.rs)
 pub const LOGIN: (u32, i64) = (20, 60);
-/// Subscription and config paths: 240 requests a minute per address (many phones can share one address)
-pub const SUB: (u32, i64) = (240, 60);
-/// Unknown subscription codes: after 40 in an hour the address waits (bots guessing codes)
-pub const SUB_MISS: (u32, i64) = (40, 3600);
+/// Subscription and config paths: 1200 requests a minute per address. Iranian mobile networks put many
+/// phones behind one address, and a Kanki app asks every subscription host at once for the page and each
+/// config (a refresh of one user with 20 configs is ~60 requests), so 240 locked whole neighbourhoods out.
+pub const SUB: (u32, i64) = (1200, 60);
+/// Unknown subscription codes: after 200 in an hour the address waits (bots guessing codes; a code has a
+/// long random part, so guessing needs millions). An old link after "new link" is also unknown, and its
+/// apps keep asking every few hours on every host: 40 blocked everyone behind the same address.
+pub const SUB_MISS: (u32, i64) = (200, 3600);
 
 /// The paths anyone can open without signing in that give a user's data
 pub fn is_sub_path(path: &str) -> bool {
