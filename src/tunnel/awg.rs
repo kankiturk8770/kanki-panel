@@ -233,7 +233,7 @@ pub fn gen_params(profile: &str) -> BTreeMap<String, String> {
 
 // ------------------------------------------------------------------ config text
 
-fn cidr_ok(s: &str) -> bool {
+pub(crate) fn cidr_ok(s: &str) -> bool {
     let (a, b) = match s.split_once('/') {
         Some((a, b)) => (a, b.parse::<u8>().ok()),
         None => (s, Some(32)),
@@ -276,8 +276,34 @@ fn target_of(s: &AwgSpec) -> String {
     if t.is_empty() { s.peer_ip.clone() } else { t.to_string() }
 }
 
+/// The values of a spec as they may go into the file: no line breaks anywhere (a line break in any value
+/// would start a new line of the file, for example a PostUp of its own that runs as root), and the
+/// addresses that go into the PostUp commands only when they are addresses (the panel cleans them too:
+/// this is the agent's own check).
+fn safe(s: &AwgSpec) -> AwgSpec {
+    let one = |v: &str| v.chars().filter(|c| *c != '\n' && *c != '\r').collect::<String>();
+    let mut x = s.clone();
+    for f in [&mut x.tid, &mut x.iface, &mut x.role, &mut x.private, &mut x.peer_pub, &mut x.psk, &mut x.address, &mut x.peer_ip, &mut x.endpoint, &mut x.fwd_target] {
+        *f = one(f);
+    }
+    x.params = s.params.iter().filter(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric())).map(|(k, v)| (k.clone(), one(v))).collect();
+    x.routes.retain(|r| cidr_ok(r.trim()));
+    x.src_routes.retain(|r| cidr_ok(r.trim()));
+    if !x.peer_ip.is_empty() && x.peer_ip.parse::<std::net::IpAddr>().is_err() {
+        x.peer_ip.clear();
+    }
+    if !x.fwd_target.trim().is_empty() && x.fwd_target.trim().parse::<std::net::IpAddr>().is_err() {
+        x.fwd_target.clear();
+    }
+    if !x.address.is_empty() && !cidr_ok(&x.address) {
+        x.address.clear();
+    }
+    x
+}
+
 /// the text of the .conf file (also what the panel offers for download)
 pub fn render(s: &AwgSpec) -> String {
+    let s = &safe(s);
     let mut c = String::new();
     c.push_str("# written by kanki-panel: changes are overwritten\n[Interface]\n");
     c.push_str(&format!("PrivateKey = {}\nAddress = {}\nListenPort = {}\nMTU = {}\nTable = off\n", s.private, s.address, s.listen, s.mtu));
@@ -525,6 +551,17 @@ fn reconcile() {
 /// Called every few seconds with the interfaces this server should have. Work runs on a background
 /// thread (the first run may install packages), so the agent keeps reporting meanwhile.
 pub fn set_desired(want: Vec<AwgSpec>) {
+    // the interface name and the peer address go into shell commands: only names this panel makes
+    let want: Vec<AwgSpec> = want
+        .into_iter()
+        .filter(|w| w.iface.starts_with(PREFIX) && w.iface.len() <= 15 && w.iface.chars().all(|c| c.is_ascii_alphanumeric()))
+        .map(|mut w| {
+            if !w.peer_ip.is_empty() && w.peer_ip.parse::<std::net::IpAddr>().is_err() {
+                w.peer_ip.clear();
+            }
+            w
+        })
+        .collect();
     let run = {
         let mut s = guard();
         let changed = s.want != want;
@@ -610,6 +647,27 @@ pub fn statuses() -> Vec<super::engine::Status> {
 mod tests {
     use super::*;
 
+    /// Values that end up in the root PostUp commands cannot carry a second command
+    #[test]
+    fn only_real_networks_reach_the_shell() {
+        let mut params = BTreeMap::new();
+        params.insert("Jc".to_string(), "4".to_string());
+        params.insert("PostUp = rm".to_string(), "x".to_string());
+        let s = AwgSpec {
+            iface: "kawg1".into(),
+            role: "entry".into(),
+            address: "10.88.1.1/30\nPostUp = touch /tmp/x".into(),
+            peer_ip: "10.88.1.2; reboot".into(),
+            src_routes: vec!["10.0.0.0/8".into(), "1.2.3.4/32; rm -rf /".into()],
+            params,
+            ..Default::default()
+        };
+        let c = render(&s);
+        assert!(c.contains("Jc = 4"));
+        assert!(c.contains("10.0.0.0/8"));
+        assert!(!c.contains("rm -rf") && !c.contains("reboot") && !c.contains("touch") && !c.contains("PostUp = rm"));
+    }
+
     /// The core of the port-leak fix: a panic that poisons the shared lock must not wedge the
     /// AmneziaWG worker. `guard()` has to keep handing back the data so reconcile can run again and
     /// bring down removed interfaces (otherwise their UDP ports stay held forever).
@@ -617,7 +675,7 @@ mod tests {
     fn a_poisoned_lock_does_not_wedge_the_worker() {
         // poison the lock on purpose, the way a real panic inside a held guard would
         let _ = std::panic::catch_unwind(|| {
-            let _g = shared().lock().unwrap();
+            let _g = shared().lock().unwrap_or_else(|e| e.into_inner());
             panic!("boom while holding the lock");
         });
         assert!(shared().lock().is_err(), "the lock must now be poisoned for the test to mean anything");

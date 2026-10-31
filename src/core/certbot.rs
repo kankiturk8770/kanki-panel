@@ -703,7 +703,7 @@ pub fn listeners() -> Vec<(u16, bool, String, String)> {
     type C = Option<(std::time::Instant, Vec<(u16, bool, String, String)>)>;
     static CACHE: OnceLock<Mutex<C>> = OnceLock::new();
     let c = CACHE.get_or_init(|| Mutex::new(None));
-    if let Some((at, v)) = c.lock().unwrap().as_ref() {
+    if let Some((at, v)) = c.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         if at.elapsed().as_secs() < 20 {
             return v.clone();
         }
@@ -729,7 +729,7 @@ pub fn listeners() -> Vec<(u16, bool, String, String)> {
         }
     }
     out.sort();
-    *c.lock().unwrap() = Some((std::time::Instant::now(), out.clone()));
+    *c.lock().unwrap_or_else(|e| e.into_inner()) = Some((std::time::Instant::now(), out.clone()));
     out
 }
 
@@ -768,13 +768,13 @@ pub fn taken_cached(need: &[(u16, bool)], own: &str) -> Vec<Taken> {
     type Cache = std::collections::HashMap<String, (std::time::Instant, Vec<(u16, bool)>, Vec<Taken>)>;
     static C: OnceLock<Mutex<Cache>> = OnceLock::new();
     let c = C.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-    if let Some((at, n, v)) = c.lock().unwrap().get(own) {
+    if let Some((at, n, v)) = c.lock().unwrap_or_else(|e| e.into_inner()).get(own) {
         if at.elapsed().as_secs() < 30 && n.as_slice() == need {
             return v.clone();
         }
     }
     let v = taken(need, own);
-    c.lock().unwrap().insert(own.to_string(), (std::time::Instant::now(), need.to_vec(), v.clone()));
+    c.lock().unwrap_or_else(|e| e.into_inner()).insert(own.to_string(), (std::time::Instant::now(), need.to_vec(), v.clone()));
     v
 }
 

@@ -167,7 +167,7 @@ pub fn clean_url(s: &str) -> String {
 
 fn q(s: &str) -> String {
     // every value we write is made of safe characters, but quote it anyway
-    format!("\"{}\"", s.replace(['\\', '"'], ""))
+    format!("\"{}\"", s.replace(['\\', '"', '\r', '\n'], ""))
 }
 
 fn conf_path(s: &Hy2Spec) -> String {
@@ -286,7 +286,7 @@ fn unit_text(s: &Hy2Spec, bin: &str) -> String {
     let mode = if s.role == "exit" { "server" } else { "client" };
     let mut c = format!(
         "# written by kanki-panel: changes are overwritten\n[Unit]\nDescription=Kanki Hysteria2 tunnel {} ({})\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nEnvironment=HYSTERIA_DISABLE_UPDATE_CHECK=1\nExecStart={} {} -c {}\n",
-        s.name.replace('\n', " "),
+        s.name.replace(['\r', '\n'], " "),
         s.role,
         bin,
         mode,
@@ -608,6 +608,10 @@ fn active(unit: &str) -> bool {
 }
 
 fn apply_one(s: &Hy2Spec, bin: &str) -> Result<(), String> {
+    // the source networks go into a root shell script: only real IPv4 networks
+    let mut clean = s.clone();
+    clean.src_routes.retain(|r| super::awg::cidr_ok(r));
+    let s = &clean;
     let _ = std::fs::create_dir_all(CONF_DIR);
     let u = s.unit();
     let mut changed = false;

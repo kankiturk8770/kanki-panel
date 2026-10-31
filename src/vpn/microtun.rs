@@ -110,7 +110,7 @@ static SECRET_LOCK: Mutex<()> = Mutex::new(());
 
 /// 32 random bytes as hex, made once and kept in the database (and so in its backups)
 fn kept_hex(app: &App, key: &str) -> String {
-    let _g = SECRET_LOCK.lock().unwrap();
+    let _g = SECRET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let s = app.db.get(key);
     if s.len() == 64 {
         return s;
@@ -242,13 +242,13 @@ pub type Applied = (HashMap<String, (i64, i64)>, Vec<String>, String);
 
 /// Brings this server to `cfg` (blocking: it may set up the interface and NAT).
 pub fn apply(cfg: MtCfg) -> Applied {
-    let mut g = running().lock().unwrap();
+    let mut g = running().lock().unwrap_or_else(|e| e.into_inner());
     let traffic = g.as_mut().map(deltas).unwrap_or_default();
     if !cfg.on() {
         if g.take().is_some() {
             crate::fw::close(PROTO);
         }
-        last_error().lock().unwrap().clear();
+        last_error().lock().unwrap_or_else(|e| e.into_inner()).clear();
         return (traffic, vec![], String::new());
     }
     let restart = g.as_ref().map(|r| r.srv.needs_restart(&cfg)).unwrap_or(true);
@@ -258,10 +258,10 @@ pub fn apply(cfg: MtCfg) -> Applied {
             Ok(srv) => {
                 crate::fw::sync(PROTO, vec![crate::fw::rule(cfg.port, true)]);
                 *g = Some(Running { srv, told: HashMap::new() });
-                last_error().lock().unwrap().clear();
+                last_error().lock().unwrap_or_else(|e| e.into_inner()).clear();
             }
             Err(e) => {
-                let mut le = last_error().lock().unwrap();
+                let mut le = last_error().lock().unwrap_or_else(|e| e.into_inner());
                 if *le != e {
                     eprintln!("microtun: did not start: {}", e);
                 }

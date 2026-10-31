@@ -118,7 +118,7 @@ pub async fn run() {
         let ld = |a: &std::sync::atomic::AtomicU64| a.load(std::sync::atomic::Ordering::Relaxed);
         let st = json!({
             "run": run_id, "ts": crate::util::now(), "users": users, "allowed": eng.allowed_count(),
-            "conns": eng.conns.load(std::sync::atomic::Ordering::Relaxed), "errors": eng.errors.lock().unwrap().clone(),
+            "conns": eng.conns.load(std::sync::atomic::Ordering::Relaxed), "errors": eng.errors.lock().unwrap_or_else(|e| e.into_inner()).clone(),
             "q": { "total": ld(&eng.q_total), "routed": ld(&eng.q_routed), "cache": ld(&eng.q_cache), "refused": ld(&eng.q_refused),
                    "exit": ld(&eng.q_exit), "direct": ld(&eng.q_direct), "local": ld(&eng.q_local) },
             "top": eng.top(15), "ips": eng.ips_snapshot(), "version": crate::VERSION,
@@ -150,7 +150,7 @@ fn qlog_pending() -> Value {
     let Some(v) = std::fs::read_to_string(QLOG_FILE).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { return Value::Null };
     let run = v["run"].as_str().unwrap_or("").to_string();
     let after = {
-        let a = qlog_acked().lock().unwrap();
+        let a = qlog_acked().lock().unwrap_or_else(|e| e.into_inner());
         if a.0 == run { a.1 } else { 0 }
     };
     let mut items: Vec<Value> = v["items"].as_array().into_iter().flatten().filter(|x| x[0].as_u64().unwrap_or(0) > after).cloned().collect();
@@ -167,7 +167,7 @@ fn qlog_pending() -> Value {
 pub fn qlog_ack(st: &Value) {
     let run = st["qlog"]["run"].as_str().unwrap_or("");
     let Some(last) = st["qlog"]["items"].as_array().and_then(|l| l.last()).and_then(|x| x[0].as_u64()) else { return };
-    *qlog_acked().lock().unwrap() = (run.to_string(), last);
+    *qlog_acked().lock().unwrap_or_else(|e| e.into_inner()) = (run.to_string(), last);
 }
 
 // ------------------------------------------------------------------ deploy (run by the agent)

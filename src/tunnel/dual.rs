@@ -39,7 +39,7 @@ fn bad() -> &'static Mutex<HashMap<String, Instant>> {
 }
 
 pub(super) fn udp_is_bad(remote: &str) -> bool {
-    let mut g = bad().lock().unwrap();
+    let mut g = bad().lock().unwrap_or_else(|e| e.into_inner());
     match g.get(remote) {
         Some(t) if t.elapsed() < UDP_BAD_FOR => true,
         Some(_) => {
@@ -51,7 +51,7 @@ pub(super) fn udp_is_bad(remote: &str) -> bool {
 }
 
 fn mark_bad(remote: &str) {
-    let mut g = bad().lock().unwrap();
+    let mut g = bad().lock().unwrap_or_else(|e| e.into_inner());
     // never let the table grow without bound (a remote is a configured address, so this is tiny)
     if g.len() > 256 {
         g.retain(|_, t| t.elapsed() < UDP_BAD_FOR);
@@ -60,7 +60,7 @@ fn mark_bad(remote: &str) {
 }
 
 fn mark_good(remote: &str) {
-    bad().lock().unwrap().remove(remote);
+    bad().lock().unwrap_or_else(|e| e.into_inner()).remove(remote);
 }
 
 /// A spawned task that is stopped when this guard goes away, so the loser of the race (or a dial
@@ -186,8 +186,8 @@ mod tests {
     #[test]
     fn bad_flag_expires() {
         let r = "203.0.113.11:443";
-        bad().lock().unwrap().insert(r.to_string(), Instant::now() - UDP_BAD_FOR - Duration::from_secs(1));
+        bad().lock().unwrap_or_else(|e| e.into_inner()).insert(r.to_string(), Instant::now() - UDP_BAD_FOR - Duration::from_secs(1));
         assert!(!udp_is_bad(r), "an old mark must not count");
-        assert!(bad().lock().unwrap().get(r).is_none(), "an old mark is removed");
+        assert!(bad().lock().unwrap_or_else(|e| e.into_inner()).get(r).is_none(), "an old mark is removed");
     }
 }

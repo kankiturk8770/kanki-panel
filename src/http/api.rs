@@ -1727,7 +1727,7 @@ async fn hy2_auth(State(app): St, peer: axum::extract::ConnectInfo<std::net::Soc
         return Json(json!({ "ok": false })).into_response();
     }
     let auth = b["auth"].as_str().unwrap_or("").to_string();
-    let name = app.hy2_allowed.lock().unwrap().get(&auth).cloned();
+    let name = app.hy2_allowed.lock().unwrap_or_else(|e| e.into_inner()).get(&auth).cloned();
     if let Some(n) = name {
         if sync::conn_allowed(&app, &n).await {
             return Json(json!({ "ok": true, "id": n })).into_response();

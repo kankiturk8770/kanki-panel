@@ -16,7 +16,7 @@
 | موتور و ترنسپورت‌های تانل (KCP, QUIC, hq, h2, game, faketcp, awg, hy2) | `src/tunnel/*.rs` |
 | KANKI MIX | `src/vpn/kmix.rs` |
 | microtun (پنل / سرور) | `src/vpn/microtun.rs` / `src/vpn/mtun.rs` |
-| WireGuard و AmneziaWG، Hysteria2، OpenVPN، همگام‌سازی کاربران | `src/vpn/wg.rs`, `hy2.rs`, `ovpn.rs`, `sync.rs` |
+| WireGuard و AmneziaWG، Hysteria2، همگام‌سازی کاربران (OpenVPN کامل حذف شده) | `src/vpn/wg.rs`, `hy2.rs`, `sync.rs` |
 | Xray (کانفیگ روی سرور / بخش پنل و لینک‌ها) | `src/xray/mod.rs` / `src/xray/panel.rs` |
 | DNS کانکی | `src/dns/` |
 | ربات فروش تلگرام، کانال، نویسنده‌ی هوش مصنوعی | `src/telegram/` |
@@ -116,11 +116,24 @@ salamander، faketcp، probe، agent، و awg/hy2t)، `src/dns/*` (wire، sni، 
 12. **ربات**: کلاینت HTTP بدون مهلت بود (یک اتصال گیرکرده = ربات مرده). ۷۵ ثانیه، آپلود ۱۰ دقیقه.
 13. نصب‌کنندهٔ Hysteria ایجنت در `/var/lib/kanki` به‌جای نام ثابت در `/tmp` (اجرا با root).
 
-تست: `cargo test` (۲۰۳ قبول)، `node --check`، `bash -n install.sh`.
-مانده: ۲۸۲ `lock().unwrap()` غیر دیتابیس (panic دیده نشده)؛ در Xray با «AsIs»، دامنه‌ای که به 127.0.0.1 resolve شود از قانون IP رد
-می‌شود (فقط با «IPIfNonMatch» بسته می‌شود)؛ مقدارهای تنظیم تانل که ادمین وارد می‌کند در دستورهای PostUp ایجنت می‌روند (فقط ادمین).
-قدیمی: بخش‌های پروتکل تانل (`kcp`، `faketcp`، `game`، `hy2t`) و `mtun` فقط از نظر قفل و سقف‌ها خوانده شد، نه خط به خط رمزنگاری؛
-۲۸۲ `lock().unwrap()` دیگر (به‌جز دیتابیس) هنوز با panic مسموم می‌شوند (panic در عمل دیده نشده).
+دور سوم (خواستهٔ صاحب پنل: «باقی‌مانده‌ها را ببند، OpenVPN را از ریشه حذف کن، هیچ مشکل امنیتی نماند، بدون خطر برای کاربران»):
+خوانده شد: `core/fw.rs`، `core/certbot.rs`، `telegram/channel.rs`، `telegram/ai.rs`، بخش ادمین ربات (`admin_cb`، `admin_input`)، باقی
+`tunnel/awg.rs` و `tunnel/hy2t.rs`، و هر جای کد که دستور شل می‌سازد (همه با عدد یا مقدار چک‌شده؛ بقیه ثابت).
+14. **OpenVPN از ریشه** (`src/vpn/ovpn.rs` حذف؛ `admin::drop_legacy_openvpn` در شروع هر نقش): فقط سروری که در `kanki.env` خط `OVPN_` دارد
+    یک بار سرویس‌های `openvpn-server@…` را خاموش، پورت‌هایشان را بسته و `/etc/openvpn/server` و آن خط‌ها را پاک می‌کند. خط‌های مهاجرت
+    دیتابیس که «ovpn» را از لیست پروتکل‌ها برمی‌دارند ماندند (همین حذف را انجام می‌دهند).
+15. **هیچ قفلی بعد از panic مسموم نمی‌ماند**: ۳۱۸ `lock()/read()/write().unwrap()` ← `unwrap_or_else(|e| e.into_inner())`.
+16. **Xray و loopback از راه دامنه** (`xray::loopback_guard`، `heal_loopback_guard`، زنجیرهٔ `KANKI-XRAY-LO`): کرنل اتصال تازهٔ سرویس
+    `kanki-xray` به 127.0.0.0/8 و ::1 را رد می‌کند، به‌جز پورت‌هایی که کانفیگ خودش لازم دارد (fallback، outbound محلی، DNS محلی، redirect،
+    پورت 53). IP عمومی خود سرور دست نخورده. بعد از ری‌استارت Xray (PID تازه) قانون دوباره بسته می‌شود. بدون ماژول cgroup = یک هشدار و
+    همان رفتار قبلی. روی iptables واقعی همین محیط امتحان شد (رد شد، پورت مجاز باز ماند). تست `the_ports_the_config_needs_stay_open`.
+17. **ایجنت تانل فقط مقدار تمیز در اسکریپت root می‌نویسد**: AWG (`safe`، `set_desired`: اسم کارت شبکه فقط `kawg…`، IP، CIDR، کلید پارامتر)
+    و Hysteria تانل (`apply_one`: فقط شبکهٔ IPv4 واقعی؛ `q` خط تازه را برمی‌دارد). تست `only_real_networks_reach_the_shell`.
+18. کانال: ساعت پست اشتباه قبل از ذخیره رد می‌شود (قبلاً ذخیره می‌شد و بعد خطا می‌داد).
+
+تست: `cargo test` (۲۰۵ قبول)، `node --check`، `bash -n install.sh`.
+مانده: ادمین ربات می‌تواند با دکمه‌های «تنظیم» هر کلید تنظیمات را عوض کند (فقط ادمین‌های ربات، دکمه‌ها را تلگرام چک می‌کند)؛ خواندن
+خط به خط رمزنگاری پروتکل‌های تانل (`kcp`، `faketcp`، `game`) و `mtun` (از نظر قفل، سقف و ورودی خوانده شد).
 
 ### 2026-10-31 — نسخهٔ 3.22.1: بررسی کامل پنل (دو دور)
 خواستهٔ صاحب پنل: کل کد پنل زیر و رو شود و فقط خطا پیدا شود؛ مخصوصاً تشخیص گوشی/کامپیوتر کاربر که درست کار نمی‌کرد؛

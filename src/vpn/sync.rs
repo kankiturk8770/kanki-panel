@@ -102,8 +102,8 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     if !ACL.is_completed() {
         let _ = tokio::task::spawn_blocking(|| ACL.call_once(crate::hy2::ensure_acl)).await;
     }
-    *app.hy2_allowed.lock().unwrap() = req.hy2.clone();
-    *app.limits.lock().unwrap() = req.limits.clone();
+    *app.hy2_allowed.lock().unwrap_or_else(|e| e.into_inner()) = req.hy2.clone();
+    *app.limits.lock().unwrap_or_else(|e| e.into_inner()) = req.limits.clone();
     let hy2_names: HashSet<String> = req.hy2.values().cloned().collect();
     let off = req.off.clone();
     let _ = tokio::task::spawn_blocking(move || crate::cores::apply(&off)).await;
@@ -122,19 +122,19 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     for (k, v) in hy2_online.iter() {
         *rep.entry(k.clone()).or_default() += v;
     }
-    *app.reported.lock().unwrap() = rep;
+    *app.reported.lock().unwrap_or_else(|e| e.into_inner()) = rep;
     let (mut kmix, mut kmix_online, mut kmix_error) = (HashMap::new(), HashMap::new(), String::new());
     if let Some(cfg) = req.kmix {
         // traffic first: a restart below would lose what was not read yet
         kmix = crate::kmix::traffic().await;
         let r = tokio::task::spawn_blocking(move || crate::kmix::apply(&cfg)).await.unwrap_or_else(|_| Err("kanki-mix apply crashed".into()));
         if let Err(e) = r {
-            if last_kmix_err().lock().unwrap().as_deref() != Some(e.as_str()) {
+            if last_kmix_err().lock().unwrap_or_else(|e| e.into_inner()).as_deref() != Some(e.as_str()) {
                 eprintln!("kanki-mix: {}", e);
             }
             kmix_error = e;
         }
-        *last_kmix_err().lock().unwrap() = Some(kmix_error.clone()).filter(|e| !e.is_empty());
+        *last_kmix_err().lock().unwrap_or_else(|e| e.into_inner()) = Some(kmix_error.clone()).filter(|e| !e.is_empty());
         kmix_online = crate::kmix::online().await;
     }
     // the firewall rule an older version opened for MIX+ is closed once
@@ -171,11 +171,11 @@ pub async fn live_sessions(app: &App, username: &str) -> i64 {
 
 /// Connection-limit check used by Hysteria2 auth
 pub async fn conn_allowed(app: &App, username: &str) -> bool {
-    let (max, total) = app.limits.lock().unwrap().get(username).copied().unwrap_or((0, 0));
+    let (max, total) = app.limits.lock().unwrap_or_else(|e| e.into_inner()).get(username).copied().unwrap_or((0, 0));
     if max <= 0 {
         return true;
     }
-    let reported = app.reported.lock().unwrap().get(username).copied().unwrap_or(0);
+    let reported = app.reported.lock().unwrap_or_else(|e| e.into_inner()).get(username).copied().unwrap_or(0);
     let elsewhere = (total - reported).max(0);
     elsewhere + live_sessions(app, username).await < max
 }
@@ -239,7 +239,7 @@ pub async fn sync_all(app: &Arc<App>) {
         }
         // once it is empty, checked again every 5 minutes (an unreachable one must not slow every round)
         {
-            let mut g = off_checked().lock().unwrap();
+            let mut g = off_checked().lock().unwrap_or_else(|e| e.into_inner());
             let last = g.get(&n.id).copied().unwrap_or(0);
             if n.sync_state == "off" && now() - last < 300 {
                 continue;

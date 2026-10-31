@@ -163,7 +163,7 @@ fn last_status() -> &'static Mutex<HashMap<String, Value>> {
 
 /// What the agent of server `sid` reported about the listener.
 pub fn ingest(app: &App, sid: &str, st: &Value) {
-    last_status().lock().unwrap().insert(sid.to_string(), st.clone());
+    last_status().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), st.clone());
     let s = settings(app);
     if on(&s) && !s.ready && s.server == sid && st["active"].as_bool() == Some(true) && st["domain"].as_str() == Some(s.domain.as_str()) && st["port"].as_u64() == Some(s.port as u64) {
         save(app, &SubIran { ready: true, ..s });
@@ -208,7 +208,7 @@ async fn get_cfg(State(app): St, h: HeaderMap) -> Response {
         .map(|(k, v)| json!({ "id": k, "name": v, "ip": crate::tunnel::panel::seen_ip(k).unwrap_or_default(), "loc": locs.get(k).map(|x| x.0.clone()).unwrap_or_default() }))
         .collect();
     agents.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-    let status = last_status().lock().unwrap().get(&s.server).cloned().unwrap_or(Value::Null);
+    let status = last_status().lock().unwrap_or_else(|e| e.into_inner()).get(&s.server).cloned().unwrap_or(Value::Null);
     let reused = on(&s) && upstream_port(&app, &s) != LOCAL_PORT;
     let links = |sid: &str| crate::tunnel::panel::links_of(sid, TUNNEL_ID);
     let tunnel = if !on(&s) { "" } else if reused { "reused" } else if links(&s.server) > 0 && links("local") > 0 { "up" } else { "down" };
@@ -300,7 +300,7 @@ impl Runner {
         if let Some(t) = self.task.take() {
             t.abort();
         }
-        *self.status.lock().unwrap() = Value::Null;
+        *self.status.lock().unwrap_or_else(|e| e.into_inner()) = Value::Null;
         match &want {
             Some(c) => {
                 eprintln!("subscription: https://{}:{}", c.domain, c.port);
@@ -330,7 +330,7 @@ impl Runner {
 
     /// Null when there is no listener here
     pub fn status(&self) -> Value {
-        self.status.lock().unwrap().clone()
+        self.status.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
@@ -359,7 +359,7 @@ fn cert_stamp(domain: &str) -> Option<std::time::SystemTime> {
 
 async fn serve(c: SubCfg, status: Arc<Mutex<Value>>) {
     let set = |active: bool, ssl: bool, error: &str| {
-        *status.lock().unwrap() = json!({ "active": active, "ssl": ssl, "domain": c.domain, "port": c.port, "error": error });
+        *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({ "active": active, "ssl": ssl, "domain": c.domain, "port": c.port, "error": error });
     };
     loop {
         // SSL first: certbot frees port 80 by itself, and waits after a failure before it tries again

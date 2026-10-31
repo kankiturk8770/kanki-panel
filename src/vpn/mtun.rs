@@ -319,7 +319,7 @@ impl Session {
         let (hdr, rest) = pkt.split_at_mut(HDR);
         let (body, tag) = rest.split_at_mut(n);
         self.recv.decrypt_in_place_detached(Nonce::from_slice(hdr), hdr, body, Tag::from_slice(tag)).ok()?;
-        self.rw.lock().unwrap().accept(c).then_some(n)
+        self.rw.lock().unwrap_or_else(|e| e.into_inner()).accept(c).then_some(n)
     }
 }
 
@@ -355,8 +355,8 @@ impl Device {
     }
     /// every session of the device (to take them out of the index)
     fn sessions(&self) -> Vec<u32> {
-        let st = self.st.lock().unwrap();
-        let cur = self.current.read().unwrap();
+        let st = self.st.lock().unwrap_or_else(|e| e.into_inner());
+        let cur = self.current.read().unwrap_or_else(|e| e.into_inner());
         [st.prev.as_ref(), st.pending.as_ref(), cur.as_ref()].into_iter().flatten().map(|s| s.local).collect()
     }
 }
@@ -454,7 +454,7 @@ impl Shared {
             }
         }
         let gone = d.sessions();
-        let mut s = self.sessions.write().unwrap();
+        let mut s = self.sessions.write().unwrap_or_else(|e| e.into_inner());
         for i in gone {
             s.remove(&i);
         }
@@ -626,7 +626,7 @@ impl Server {
         let sh = &self.sh;
         sh.burst_max.store(cfg.burst_max as usize, Ordering::Relaxed);
         sh.burst_delay.store(cfg.burst_delay_ms as u64, Ordering::Relaxed);
-        let mut peers = sh.peers.write().unwrap();
+        let mut peers = sh.peers.write().unwrap_or_else(|e| e.into_inner());
         let old: HashMap<(String, String, Ipv4Addr), Arc<Peer>> = peers.list.iter().map(|p| ((p.name.clone(), p.key_hex.clone(), p.ip), p.clone())).collect();
         let mut list = vec![];
         let mut own: HashSet<Ipv4Addr> = HashSet::new();
@@ -661,7 +661,7 @@ impl Server {
         let mut next = Peers { list: vec![], by_ip: HashMap::new() };
         let mut moved: Vec<Arc<Device>> = vec![];
         for p in &list {
-            let mut devs = p.devices.lock().unwrap();
+            let mut devs = p.devices.lock().unwrap_or_else(|e| e.into_inner());
             let mut keep = vec![];
             for d in devs.drain(..) {
                 if d.ip != p.ip && own.contains(&d.ip) {
@@ -681,7 +681,7 @@ impl Server {
         next.list = list;
         // sessions of devices and users that left are dropped at once
         let live: HashSet<*const Device> = next.by_ip.values().map(Arc::as_ptr).collect();
-        sh.sessions.write().unwrap().retain(|_, s| s.dev.upgrade().is_some_and(|d| live.contains(&Arc::as_ptr(&d))));
+        sh.sessions.write().unwrap_or_else(|e| e.into_inner()).retain(|_, s| s.dev.upgrade().is_some_and(|d| live.contains(&Arc::as_ptr(&d))));
         drop(moved);
         *peers = next;
         self.cfg = cfg.clone();
@@ -690,7 +690,7 @@ impl Server {
     /// (rx, tx) bytes per user name since the start
     pub fn traffic(&self) -> HashMap<String, (i64, i64)> {
         let mut m = HashMap::new();
-        for p in &self.sh.peers.read().unwrap().list {
+        for p in &self.sh.peers.read().unwrap_or_else(|e| e.into_inner()).list {
             let e = m.entry(p.name.clone()).or_insert((0, 0));
             e.0 += p.rx.load(Ordering::Relaxed) as i64;
             e.1 += p.tx.load(Ordering::Relaxed) as i64;
@@ -703,8 +703,8 @@ impl Server {
     pub fn online(&self) -> Vec<String> {
         let t = now_secs();
         let mut out = vec![];
-        for p in &self.sh.peers.read().unwrap().list {
-            for d in p.devices.lock().unwrap().iter() {
+        for p in &self.sh.peers.read().unwrap_or_else(|e| e.into_inner()).list {
+            for d in p.devices.lock().unwrap_or_else(|e| e.into_inner()).iter() {
                 if d.confirmed.load(Ordering::Relaxed) && t - d.last_rx.load(Ordering::Relaxed) < 60 {
                     out.push(p.name.clone());
                 }
@@ -752,7 +752,7 @@ fn send_burst(sh: &Shared, pkt: &[u8], ip_len: usize, to: SocketAddr) {
     if delay == 0 {
         let _ = sh.sock.send_to(pkt, to);
     } else {
-        let _ = sh.dup.lock().unwrap().send((Instant::now() + Duration::from_millis(delay), pkt.to_vec(), to));
+        let _ = sh.dup.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(delay), pkt.to_vec(), to));
     }
 }
 
@@ -783,8 +783,8 @@ fn tun_loop(sh: &Shared) {
             _ => continue,
         };
         let Some(dst) = ip_dst(&buf[HDR..HDR + n]) else { continue };
-        let Some(d) = sh.peers.read().unwrap().by_ip.get(&dst).cloned() else { continue };
-        let (Some(sess), Some(ep)) = (d.current.read().unwrap().clone(), *d.endpoint.lock().unwrap()) else { continue };
+        let Some(d) = sh.peers.read().unwrap_or_else(|e| e.into_inner()).by_ip.get(&dst).cloned() else { continue };
+        let (Some(sess), Some(ep)) = (d.current.read().unwrap_or_else(|e| e.into_inner()).clone(), *d.endpoint.lock().unwrap_or_else(|e| e.into_inner())) else { continue };
         if let Some(pkt) = sess.seal(&sh.obfs, &mut buf, n) {
             if let Some(u) = d.user.upgrade() {
                 u.tx.fetch_add(n as u64, Ordering::Relaxed);
@@ -812,15 +812,15 @@ fn udp_loop(sh: &Shared) {
             handle_init(sh, pkt, from);
             continue;
         }
-        let Some(sess) = sh.sessions.read().unwrap().get(&idx).cloned() else { continue };
+        let Some(sess) = sh.sessions.read().unwrap_or_else(|e| e.into_inner()).get(&idx).cloned() else { continue };
         let Some(len) = sess.open(pkt) else { continue };
         let Some(d) = sess.dev.upgrade() else { continue };
-        let is_current = d.current.read().unwrap().as_ref().map(|c| Arc::ptr_eq(c, &sess)).unwrap_or(false);
+        let is_current = d.current.read().unwrap_or_else(|e| e.into_inner()).as_ref().map(|c| Arc::ptr_eq(c, &sess)).unwrap_or(false);
         if !is_current {
             confirm(sh, &d, &sess);
         }
         {
-            let mut ep = d.endpoint.lock().unwrap();
+            let mut ep = d.endpoint.lock().unwrap_or_else(|e| e.into_inner());
             if *ep != Some(from) {
                 *ep = Some(from);
             }
@@ -842,7 +842,7 @@ fn udp_loop(sh: &Shared) {
 }
 
 fn keepalive(sh: &Shared, d: &Device) {
-    let (Some(sess), Some(ep)) = (d.current.read().unwrap().clone(), *d.endpoint.lock().unwrap()) else { return };
+    let (Some(sess), Some(ep)) = (d.current.read().unwrap_or_else(|e| e.into_inner()).clone(), *d.endpoint.lock().unwrap_or_else(|e| e.into_inner())) else { return };
     let mut buf = [0u8; OVERHEAD];
     if let Some(pkt) = sess.seal(&sh.obfs, &mut buf, 0) {
         let _ = sh.sock.send_to(pkt, ep);
@@ -852,11 +852,11 @@ fn keepalive(sh: &Shared, d: &Device) {
 /// The device an init is for: the one with its id, else a new one (its own address: the user's own
 /// address when no other device has it, else a free one of the devices subnet). None = no room.
 fn device_for(sh: &Shared, p: &Arc<Peer>, id: u64) -> Option<Arc<Device>> {
-    if let Some(d) = p.devices.lock().unwrap().iter().find(|d| d.id == id) {
+    if let Some(d) = p.devices.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|d| d.id == id) {
         return Some(d.clone());
     }
-    let mut peers = sh.peers.write().unwrap();
-    let mut devs = p.devices.lock().unwrap();
+    let mut peers = sh.peers.write().unwrap_or_else(|e| e.into_inner());
+    let mut devs = p.devices.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(d) = devs.iter().find(|d| d.id == id) {
         return Some(d.clone());
     }
@@ -898,19 +898,19 @@ fn device_for(sh: &Shared, p: &Arc<Peer>, id: u64) -> Option<Arc<Device>> {
 
 fn handle_init(sh: &Shared, pkt: &[u8], from: SocketAddr) {
     let found = {
-        let peers = sh.peers.read().unwrap();
+        let peers = sh.peers.read().unwrap_or_else(|e| e.into_inner());
         peers.list.iter().find_map(|p| parse_init(&p.keys, pkt).map(|m| (p.clone(), m)))
     };
     let Some((p, m)) = found else { return };
     // an init is taken once: a newer timestamp than the device's last, or one near our clock whose
     // ephemeral key is new (a client whose clock went back)
     let now = now_nanos();
-    let last = p.devices.lock().unwrap().iter().find(|d| d.id == m.dev).map(|d| d.st.lock().unwrap().last_ts).unwrap_or(0);
+    let last = p.devices.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|d| d.id == m.dev).map(|d| d.st.lock().unwrap_or_else(|e| e.into_inner()).last_ts).unwrap_or(0);
     if !ts_ok(m.ts, last, now) {
         return;
     }
     {
-        let mut seen = p.seen.lock().unwrap();
+        let mut seen = p.seen.lock().unwrap_or_else(|e| e.into_inner());
         while seen.front().is_some_and(|(_, t)| t.elapsed() > SEEN_FOR) || seen.len() > 256 {
             seen.pop_front();
         }
@@ -926,9 +926,9 @@ fn handle_init(sh: &Shared, pkt: &[u8], from: SocketAddr) {
     if !shared.was_contributory() {
         return;
     }
-    let mut st = d.st.lock().unwrap();
+    let mut st = d.st.lock().unwrap_or_else(|e| e.into_inner());
     st.last_ts = st.last_ts.max(m.ts);
-    let mut sessions = sh.sessions.write().unwrap();
+    let mut sessions = sh.sessions.write().unwrap_or_else(|e| e.into_inner());
     let mut idx = rand_idx();
     while sessions.contains_key(&idx) {
         idx = rand_idx();
@@ -962,14 +962,14 @@ fn handle_init(sh: &Shared, pkt: &[u8], from: SocketAddr) {
 /// device heard from least recently goes (a quiet one: `device_for` lets no new device in otherwise).
 fn confirm(sh: &Shared, d: &Arc<Device>, sess: &Arc<Session>) {
     {
-        let mut st = d.st.lock().unwrap();
+        let mut st = d.st.lock().unwrap_or_else(|e| e.into_inner());
         if !st.pending.as_ref().map(|x| Arc::ptr_eq(x, sess)).unwrap_or(false) {
             return; // data on the previous session
         }
         if let Some(prev) = st.prev.take() {
-            sh.sessions.write().unwrap().remove(&prev.local);
+            sh.sessions.write().unwrap_or_else(|e| e.into_inner()).remove(&prev.local);
         }
-        let mut cur = d.current.write().unwrap();
+        let mut cur = d.current.write().unwrap_or_else(|e| e.into_inner());
         st.prev = cur.take();
         *cur = st.pending.take();
     }
@@ -978,8 +978,8 @@ fn confirm(sh: &Shared, d: &Arc<Device>, sess: &Arc<Session>) {
         return;
     }
     let Some(p) = d.user.upgrade() else { return };
-    let mut peers = sh.peers.write().unwrap();
-    let mut devs = p.devices.lock().unwrap();
+    let mut peers = sh.peers.write().unwrap_or_else(|e| e.into_inner());
+    let mut devs = p.devices.lock().unwrap_or_else(|e| e.into_inner());
     loop {
         let live: Vec<&Arc<Device>> = devs.iter().filter(|x| x.confirmed.load(Ordering::Relaxed)).collect();
         if live.len() <= p.max.load(Ordering::Relaxed) {
@@ -999,12 +999,12 @@ fn janitor(sh: &Shared) {
             continue;
         }
         last = Instant::now();
-        let peers = sh.peers.read().unwrap().list.clone();
+        let peers = sh.peers.read().unwrap_or_else(|e| e.into_inner()).list.clone();
         for p in peers {
-            let devs = p.devices.lock().unwrap().clone();
+            let devs = p.devices.lock().unwrap_or_else(|e| e.into_inner()).clone();
             let mut empty = vec![];
             for d in devs {
-                let mut st = d.st.lock().unwrap();
+                let mut st = d.st.lock().unwrap_or_else(|e| e.into_inner());
                 let mut gone = vec![];
                 if st.prev.as_ref().map(|s| s.expired()).unwrap_or(false) {
                     gone.extend(st.prev.take().map(|s| s.local));
@@ -1012,7 +1012,7 @@ fn janitor(sh: &Shared) {
                 if st.pending.as_ref().map(|s| s.born.elapsed() > PENDING_FOR).unwrap_or(false) {
                     gone.extend(st.pending.take().map(|s| s.local));
                 }
-                let mut cur = d.current.write().unwrap();
+                let mut cur = d.current.write().unwrap_or_else(|e| e.into_inner());
                 if cur.as_ref().map(|s| s.expired()).unwrap_or(false) {
                     gone.extend(cur.take().map(|s| s.local));
                 }
@@ -1023,14 +1023,14 @@ fn janitor(sh: &Shared) {
                 }
                 drop(cur);
                 drop(st);
-                let mut sessions = sh.sessions.write().unwrap();
+                let mut sessions = sh.sessions.write().unwrap_or_else(|e| e.into_inner());
                 for i in gone {
                     sessions.remove(&i);
                 }
             }
             if !empty.is_empty() {
-                let mut peers = sh.peers.write().unwrap();
-                let mut devs = p.devices.lock().unwrap();
+                let mut peers = sh.peers.write().unwrap_or_else(|e| e.into_inner());
+                let mut devs = p.devices.lock().unwrap_or_else(|e| e.into_inner());
                 for d in empty {
                     sh.drop_device(&mut peers, &d);
                     devs.retain(|x| !Arc::ptr_eq(x, &d));

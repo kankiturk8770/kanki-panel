@@ -1062,10 +1062,10 @@ pub fn online_now(fresh: i64) -> Vec<(i64, String)> {
 
 pub fn ingest(app: &App, sid: &str, st: &Value) {
     if st.is_null() {
-        last_status().lock().unwrap().remove(sid);
+        last_status().lock().unwrap_or_else(|e| e.into_inner()).remove(sid);
         return;
     }
-    last_status().lock().unwrap().insert(sid.to_string(), (now(), st.clone()));
+    last_status().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), (now(), st.clone()));
     crate::dns::panel::count_usage(app, &format!("xray_prev_{}", sid), st);
     count_inbounds(app, sid, st);
     // online now: the users whose traffic moved since the previous read
@@ -1127,12 +1127,12 @@ fn repairs() -> &'static Mutex<std::collections::HashSet<String>> {
 
 /// Was a repair asked for this server? (asked once: reading it clears it)
 pub fn take_repair(sid: &str) -> bool {
-    repairs().lock().unwrap().remove(sid)
+    repairs().lock().unwrap_or_else(|e| e.into_inner()).remove(sid)
 }
 
 /// Seconds since the server last reported (None = never since the panel started)
 fn report_age(sid: &str) -> Option<i64> {
-    last_status().lock().unwrap().get(sid).map(|(at, _)| now() - *at)
+    last_status().lock().unwrap_or_else(|e| e.into_inner()).get(sid).map(|(at, _)| now() - *at)
 }
 
 async fn repair_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
@@ -1144,7 +1144,7 @@ async fn repair_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> 
     if cfg_for(&app, &id).is_none() {
         return err(StatusCode::BAD_REQUEST, "nothing runs on this server: Xray is off, or the server has no inbound that is on");
     }
-    repairs().lock().unwrap().insert(id.clone());
+    repairs().lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone());
     let age = report_age(&id);
     Json(json!({ "ok": true, "waiting": age.map(|a| a > 60).unwrap_or(true), "age": age })).into_response()
 }
@@ -1245,7 +1245,7 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
     let mut names = crate::tunnel::panel::server_names(&app);
     names.insert("local".into(), app.env.get("LOCAL_NAME").cloned().filter(|x| !x.is_empty()).unwrap_or_else(|| "Main".into()));
     let locs = crate::tunnel::panel::server_locs(&app);
-    let st = last_status().lock().unwrap().clone();
+    let st = last_status().lock().unwrap_or_else(|e| e.into_inner()).clone();
     let servers: Vec<Value> = s
         .servers
         .iter()
@@ -1640,7 +1640,7 @@ async fn inbound_clients(State(app): St, h: HeaderMap, Path(id): Path<String>) -
     let _ = guard!(app, h, "nodes");
     let s = settings(&app);
     let Some(ib) = s.inbounds.iter().find(|x| x.id == id) else { return err(StatusCode::NOT_FOUND, "no such inbound") };
-    let online: Vec<i64> = last_status().lock().unwrap().values().flat_map(|(_, v)| v["online"].as_array().cloned().unwrap_or_default()).filter_map(|x| x.as_i64()).collect();
+    let online: Vec<i64> = last_status().lock().unwrap_or_else(|e| e.into_inner()).values().flat_map(|(_, v)| v["online"].as_array().cloned().unwrap_or_default()).filter_map(|x| x.as_i64()).collect();
     let list: Vec<Value> = app
         .db
         .users()

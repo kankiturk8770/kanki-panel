@@ -8,13 +8,13 @@ type Table = Mutex<HashMap<String, (u32, i64)>>;
 
 fn table(name: &'static str) -> &'static Table {
     static T: OnceLock<Mutex<HashMap<&'static str, &'static Table>>> = OnceLock::new();
-    let mut m = T.get_or_init(Default::default).lock().unwrap();
+    let mut m = T.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
     m.entry(name).or_insert_with(|| Box::leak(Box::default()))
 }
 
 /// Counts one request of `key`; false when it is past `max` in the last `window` seconds
 pub fn hit(name: &'static str, key: &str, max: u32, window: i64) -> bool {
-    let mut m = table(name).lock().unwrap();
+    let mut m = table(name).lock().unwrap_or_else(|e| e.into_inner());
     let t = now();
     // old entries go, so many addresses cannot grow the table without limit
     if m.len() > 20000 {
@@ -30,7 +30,7 @@ pub fn hit(name: &'static str, key: &str, max: u32, window: i64) -> bool {
 
 /// Whether `key` is already past `max` (without counting this request)
 pub fn over(name: &'static str, key: &str, max: u32, window: i64) -> bool {
-    let m = table(name).lock().unwrap();
+    let m = table(name).lock().unwrap_or_else(|e| e.into_inner());
     matches!(m.get(key), Some((n, t)) if *n >= max && now() - *t < window)
 }
 

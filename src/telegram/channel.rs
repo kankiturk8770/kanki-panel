@@ -976,10 +976,11 @@ async fn ch_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response 
         db.set("ch_code", &c);
     }
     if let Some(v) = b["times"].as_str() {
-        db.set("ch_times", v.trim());
-        if !v.trim().is_empty() && slots(&app).is_empty() {
+        // checked before it is saved: a wrong value must not replace the working times
+        if !v.trim().is_empty() && parse_slots(v).is_empty() {
             return err(StatusCode::BAD_REQUEST, "write the posting times like 10:00, 16:00, 21:30");
         }
+        db.set("ch_times", v.trim());
     }
     if let Some(v) = b["ai_on"].as_bool() {
         db.set("ai_on", if v { "1" } else { "0" });
