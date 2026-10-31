@@ -473,11 +473,20 @@ async fn exit_udp_back(s: Arc<Session>, id: u32, sock: Arc<UdpSocket>) {
 }
 
 /// Copies one TCP connection both ways through the mux, with flow control.
+/// TCP keepalive on a user's (or a target's) connection: a phone that vanished without closing (a
+/// mobile network that dropped it, a NAT that forgot it) is found within a few minutes, so its stream,
+/// task and socket go instead of waiting forever on a read that never comes
+fn keepalive_on(tcp: &TcpStream) {
+    let ka = socket2::TcpKeepalive::new().with_time(Duration::from_secs(120)).with_interval(Duration::from_secs(20)).with_retries(4);
+    let _ = socket2::SockRef::from(tcp).set_tcp_keepalive(&ka);
+}
+
 async fn pipe(s: Arc<Session>, id: u32, tcp: TcpStream, mut rx: mpsc::UnboundedReceiver<Vec<u8>>, credit: Arc<Semaphore>) {
     if !s.is_alive() {
         s.remove(id);
         return;
     }
+    keepalive_on(&tcp);
     s.shared.streams.fetch_add(1, Ordering::Relaxed);
     let (mut r, mut w) = tcp.into_split();
     let s1 = s.clone();

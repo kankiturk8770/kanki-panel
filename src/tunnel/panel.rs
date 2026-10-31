@@ -2320,6 +2320,7 @@ pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(
     }
     list.retain(|s| s.id != id);
     save_servers(app, &list);
+    mark_removed(app, id);
     crate::dns::panel::forget_server(app, id);
     crate::xray::panel::forget_server(app, id);
     crate::subiran::forget_server(app, id);
@@ -2553,9 +2554,13 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     let id = b["id"].as_str().unwrap_or("").to_string();
     let token = b["token"].as_str().unwrap_or("").to_string();
     let Some(s) = servers(&app).into_iter().find(|s| s.id == id) else {
-        // unknown or removed: the agent stops its tunnels
-        note_gone(&id);
-        return (StatusCode::GONE, "this server is not in the panel any more").into_response();
+        // removed here: the agent stops its tunnels and uninstalls. Unknown (never added here): it is
+        // told nothing that makes it remove anything
+        if was_removed(&app, &id) {
+            note_gone(&id);
+            return (StatusCode::GONE, "this server is not in the panel any more").into_response();
+        }
+        return (StatusCode::NOT_FOUND, "this panel does not know this server").into_response();
     };
     if token.is_empty() || !util::ct_eq(&token, &s.token) {
         return err(StatusCode::FORBIDDEN, "wrong token");
@@ -2969,6 +2974,24 @@ fn note_report(server: &str, status: &[Status], xray_on: bool, dns_on: bool) {
             }
         }
     }
+}
+
+/// The servers deleted in this panel (id -> when), kept 60 days. Only these are told "gone" (and so
+/// uninstall themselves): a server this panel simply does not know (a fresh install in the middle of a
+/// move, a restore of an older backup, another panel) is left running.
+fn removed_ids(app: &App) -> std::collections::HashMap<String, i64> {
+    serde_json::from_str(&app.db.get("tun_removed")).unwrap_or_default()
+}
+
+fn mark_removed(app: &App, id: &str) {
+    let mut m = removed_ids(app);
+    m.retain(|_, t| now() - *t < 60 * 86400);
+    m.insert(id.to_string(), now());
+    app.db.set("tun_removed", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+}
+
+pub(crate) fn was_removed(app: &App, id: &str) -> bool {
+    removed_ids(app).contains_key(id)
 }
 
 /// A removed server asked again: after three answers its agent removes everything and uninstalls

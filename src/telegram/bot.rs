@@ -291,7 +291,11 @@ impl Bot {
         let admins = bot_admins_raw(&app)
             .split(',').filter_map(|x| x.trim().parse().ok()).collect();
         Some(Arc::new(Bot {
-            app, token, admins, http: reqwest::Client::new(), api: "https://api.telegram.org".into(),
+            // a timeout on every call: one hung connection to Telegram (common on filtered networks) froze
+            // the bot until a restart. Above the 30 s long poll; uploads set their own, longer one.
+            app, token, admins,
+            http: reqwest::Client::builder().timeout(std::time::Duration::from_secs(75)).connect_timeout(std::time::Duration::from_secs(15)).build().unwrap_or_default(),
+            api: "https://api.telegram.org".into(),
             waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), gifts: Mutex::new(HashMap::new()),
         }))
     }
@@ -533,7 +537,7 @@ impl Bot {
         let part = reqwest::multipart::Part::bytes(bytes).file_name(name.to_string());
         let form = reqwest::multipart::Form::new()
             .text("chat_id", chat.to_string()).text("caption", caption.to_string()).part("document", part);
-        let _ = self.http.post(format!("{}/bot{}/sendDocument", self.api, self.token)).multipart(form).send().await;
+        let _ = self.http.post(format!("{}/bot{}/sendDocument", self.api, self.token)).multipart(form).timeout(std::time::Duration::from_secs(600)).send().await;
     }
 
     // ============================================================ کمکی‌های داده
