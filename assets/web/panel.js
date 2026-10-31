@@ -3574,27 +3574,13 @@ function logDraw(){var tb=$('#lg_tabs'),bx=$('#lg_box');if(!tb||!bx)return;
   '<span class="muted">'+t(LG.lv=='e'?'No errors':LG.lv=='d'?'No debug lines':'No log lines yet')+'</span>';
  if(stick)bx.scrollTop=bx.scrollHeight}
 
-// ---- devices of a user: every app that read the subscription (Kanki Android / Windows, v2rayNG, a browser…),
-// only to see who uses what; nothing is limited. Icons: phone or PC.
-function devIcon(k){return ic(k=='pc'?'pc':k=='mobile'?'phone':'globe',15)}
-function devSum(u){var now=Date.now()/1000,pc=0,mb=0,un=0;(u.devices||[]).forEach(function(x){if(now-x.last>30*86400)return;if(x.kind=='pc')pc++;else if(x.kind=='mobile')mb++;else un++});
- if(!pc&&!mb&&!un)return '';var c=function(n){return n>1?'<small>'+N(n)+'</small>':''};
- // an app that does not say its system still shows (globe), so no device is hidden
- return '<span class="udev" title="'+esc(t('Devices'))+'">'+(mb?ic('phone',13)+c(mb):'')+(pc?ic('pc',13)+c(pc):'')+(un?ic('globe',13)+c(un):'')+'</span>'}
-function devBox(u){var d=u.devices||[];
- var head='<div class="udh"><small class="muted">'+t('Devices')+' · <b class="ltr">'+N(d.length)+'</b></small></div>';
- if(!d.length)return '<div class="udevs">'+head+'<small class="muted">'+t('No app has read this subscription yet')+'</small></div>';
- return '<div class="udevs">'+head+d.map(function(x){return '<div class="udr"><span class="udi '+(x.kind||'')+'">'+devIcon(x.kind)+'</span><span class="udt"><b>'+esc(t(x.app||'Other app'))+'</b>'+
-   '<small>'+ago(x.last)+(x.ip?' · <bdi dir="ltr">'+esc(x.ip)+'</bdi>':'')+'</small></span></div>'}).join('')+'</div>'}
-
-// ---- user sheet: small, one panel at a time (edit / link / QR), five quick buttons
 function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(u),
   tg=(u.protocols||'').split(',').filter(function(x){return x}).map(function(x){return '<span class="ptag" style="--pc:'+(PCOL[x]||'#999')+'">'+esc(pname(x))+'</span>'}).join(''),
   cls=st=='active'?'g':st=='finished'?'y':'r',lbl=t(st=='active'?'Active':st=='finished'?(u.status=='Limited'?'Limited':'Expired'):'Disabled'),cur='';
  modal('<div class="us-h"><span class="dot '+((u.online_connections>0||liveOf(u).length)?'g':'')+'"></span><b class="ltr nm">'+esc(u.username)+'</b><span class="u-st '+cls+'" id="e_badge">'+lbl+'</span><span class="sp"></span>'+
   '<label class="sw"><input type="checkbox" id="e_sw" '+(u.enabled?'checked':'')+' aria-label="'+t('Enable')+'"><span></span></label><button class="ib" onclick="closeModal()" aria-label="close">✕</button></div>'+
   '<div class="us-tags">'+(tg||'<span class="ptag none">—</span>')+'</div>'+
-  (liveOf(u).length?'<div class="lvlist"><small class="muted" style="width:100%">'+t('Connected now')+'</small>'+liveOf(u).map(function(c){return '<span style="--pc:'+(PCOL[c.p]||'#888')+'"><b>'+esc(pname(c.p))+'</b>'+esc(c.s)+'</span>'}).join('')+'</div>':'<div class="lvlist"><small class="muted">'+t('Not connected right now')+'</small></div>')+devBox(u)+
+  (liveOf(u).length?'<div class="lvlist"><small class="muted" style="width:100%">'+t('Connected now')+'</small>'+liveOf(u).map(function(c){return '<span style="--pc:'+(PCOL[c.p]||'#888')+'"><b>'+esc(pname(c.p))+'</b>'+esc(c.s)+'</span>'}).join('')+'</div>':'<div class="lvlist"><small class="muted">'+t('Not connected right now')+'</small></div>')+
   '<div class="us-st"><div><small>'+t('Used')+'</small><b class="ltr">'+N(gbtxt(u.traffic_used_gb))+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</b><div class="trk"><div class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?100:Math.max(2,p))+'%"></div></div></div>'+
   '<div><small>'+t('Expiry')+'</small><b>'+jdate(u.expires_ts)+'</b><small>'+leftTxt(u.expires_ts)+'</small></div>'+
   '<div><small>'+t('Connections')+'</small><b class="ltr">'+N(u.online_connections)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b><small>'+(u.last_seen_ts?ago(u.last_seen_ts):t('never'))+'</small></div></div>'+
@@ -5616,7 +5602,7 @@ new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.ma
   lv.forEach(function(c){if(ps.indexOf(c.p)<0)ps.push(c.p)});
   var pc=usage(u),used=(+u.traffic_used_gb||0).toFixed(1),exp=st=='disabled'?t('Disabled'):!u.expires_ts?'∞':u.expires_ts<Date.now()/1000?t('Expired'):jdate(u.expires_ts);
   return '<button class="uchip kd-u st-'+st+(on?' on':'')+(S.sel[u.id]?' sel':'')+'" data-id="'+u.id+'" title="'+esc(u.username)+'">'+
-   '<span class="kd-un"><span class="dot '+dot+'"></span><span class="nm">'+esc(u.username)+'</span>'+devSum(u)+
+   '<span class="kd-un"><span class="dot '+dot+'"></span><span class="nm">'+esc(u.username)+'</span>'+
    (ps.length?'<span class="lvs">'+liveBadges(lv)+'</span>':'')+
    '<span class="tick">'+ic('check',13)+'</span></span>'+
    '<span class="k310bar'+(pc<0?' inf':pc>=90?' hot':pc>=70?' warm':'')+'"><i style="width:'+(pc<0?100:Math.max(3,pc))+'%"></i></span>'+

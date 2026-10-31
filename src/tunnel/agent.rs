@@ -416,6 +416,17 @@ pub async fn run(version: &str) {
                         }
                         _ => {}
                     }
+                    // the connection limit: users whose Xray is shut here for now (an older panel sends none)
+                    if let Some(b) = v["xray_block"].as_array() {
+                        let ids: Vec<i64> = b.iter().filter_map(|x| x.as_i64()).collect();
+                        // extra devices on one config: (user, address)
+                        let drop: Vec<(i64, String)> = v["xray_drop"].as_array().into_iter().flatten().filter_map(|x| Some((x[0].as_i64()?, x[1].as_str()?.to_string()))).collect();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            crate::xray::set_blocked(&ids);
+                            crate::xray::set_ip_blocks(&drop);
+                        })
+                        .await;
+                    }
                     // the VPN part of this server, when the admin pressed "Install VPN" in the panel
                     if v["setup"].is_object() {
                         let c = v["setup"].clone();
