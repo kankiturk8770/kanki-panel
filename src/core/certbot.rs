@@ -211,6 +211,51 @@ fn expiring(domain: &str) -> bool {
     out.contains("will expire") && !out.contains("not expire")
 }
 
+/// "notAfter=Jan  5 12:00:00 2027 GMT" (openssl) -> unix time
+fn parse_end(out: &str) -> Option<i64> {
+    let v = out.lines().find_map(|l| l.trim().strip_prefix("notAfter="))?;
+    let v = v.split_whitespace().collect::<Vec<_>>().join(" ");
+    chrono::NaiveDateTime::parse_from_str(&v, "%b %d %H:%M:%S %Y GMT").ok().map(|t| t.and_utc().timestamp())
+}
+
+/// When the certificate of `domain` ends (unix time), read from the file on disk
+pub fn not_after(domain: &str) -> Option<i64> {
+    if !valid_domain(domain) || !have(domain) {
+        return None;
+    }
+    parse_end(&sh(&format!("openssl x509 -enddate -noout -in {} 2>&1", files(domain).0)).1)
+}
+
+/// The reason of the last failed certbot run for `domain` (empty when the last one worked)
+pub fn last_error(domain: &str) -> String {
+    if !valid_domain(domain) {
+        return String::new();
+    }
+    std::fs::read_to_string(format!("{}/{}.fail", STATE_DIR, domain)).map(|t| t.lines().skip(1).collect::<Vec<_>>().join(" ")).unwrap_or_default()
+}
+
+/// The certificate is close to its end: get a new one now (certbot's own renewal may have failed; the
+/// waits after a failure still apply). Blocking.
+pub fn renew_if_due(domain: &str) {
+    if valid_domain(domain) && have(domain) && expiring(domain) {
+        if let Err(e) = obtain(domain) {
+            eprintln!("certbot: renewing {}: {}", domain, e);
+        }
+    }
+}
+
+/// For the panel: when the certificate ends and why it could not be renewed
+pub fn health(domain: &str) -> serde_json::Value {
+    let end = not_after(domain);
+    let now = crate::util::now();
+    serde_json::json!({
+        "cert_end": end.unwrap_or(0),
+        "cert_expired": end.map(|e| e <= now).unwrap_or(false),
+        "cert_days": end.map(|e| (e - now).div_euclid(86400)),
+        "renew_error": last_error(domain),
+    })
+}
+
 /// Get the certificate of `domain` if it is not there yet; `restart` = services that use it (restarted when
 /// it is taken or renewed). Blocking.
 pub fn ensure(domain: &str, restart: &[&str]) -> Result<(), String> {
@@ -838,6 +883,13 @@ mod tests {
         assert!(!judge("docker.service", &[(80, false)], &need).0);
         assert!(!judge("session-3.scope", &[(80, false)], &need).0);
         assert!(!judge("", &[(80, false)], &need).0);
+    }
+
+    #[test]
+    fn reads_the_end_date_openssl_prints() {
+        assert_eq!(parse_end("notAfter=Jan  5 12:00:00 2027 GMT\n"), Some(1799150400));
+        assert_eq!(parse_end("notAfter=Oct 31 06:37:22 2026 GMT"), Some(1793428642));
+        assert_eq!(parse_end("Could not open file"), None);
     }
 
     #[test]

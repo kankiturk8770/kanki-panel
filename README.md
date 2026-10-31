@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.22.3 — SSL of the Iran subscription link
+- The certificate of the Iran subscription link is checked every 30 minutes and renewed early; the panel shows its end date and a Telegram note warns before it ends.
+
 ## New in 3.22.2 — full code review
 - Security fixes: the Iran subscription relay, the Hysteria login check, plans switched off in the bot, VPN users kept off the server's loopback.
 - A tunnel server is only told to uninstall itself when it was deleted in this panel (a move or an old backup no longer wipes servers).

@@ -1,3 +1,8 @@
+# v3.22.3 — an expired SSL certificate of the Iran subscription link is seen and renewed
+- **The Iran subscription relay checks its certificate every 30 minutes** (`subiran::serve`, `certbot::renew_if_due`): close to its end it is renewed right away (certbot's own timer cannot answer Let's Encrypt while nothing listens on port 80; before, only the 12-hour loop tried). Before, the relay only checked that the certificate file existed, so an expired one looked healthy and the apps could not read their subscription ("certificate has expired").
+- **The panel shows it**: Settings › subscription link in Iran shows when the certificate ends; an expired or soon ending one (under 7 days) is shown as an error with the reason of the last failed renewal and the «Try SSL again» button (`certbot::health`, `not_after`, `last_error`).
+- **Telegram note to the admin** (backup bot chat) when that certificate has under 7 days or has ended, at most every 12 hours (`subiran::cert_warning`, test `the_admin_hears_about_an_ending_certificate_twice_a_day_at_most`).
+
 # v3.22.2 — full code review: security and speed
 - **Iran subscription relay: no header smuggling** (`subiran.rs` `proxy_head`): a request with a bare line feed inside a header line could carry its own `X-Forwarded-For` past the filter, pose as the panel itself (127.0.0.1) and skip every request limit. Such requests are refused (test in `proxy_head` tests).
 - **Hysteria login check (`/hy2/auth`) only from this machine**, by the real TCP peer (not a header): old node installs listen on every address, where anyone could test subscription codes without a limit.
