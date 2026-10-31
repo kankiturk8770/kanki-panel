@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.22.5 — easier to read and tap
+- Every text of the panel is in Persian, nothing under 12px, buttons at least 40px on phones, the same screen sizes across the panel.
+
 ## New in 3.22.4 — connection limit of the account
 - A one-connection account works on one device, two on two; another device connects only after one disconnects. Any app, any protocol. Pings and opening the subscription link never count.
 

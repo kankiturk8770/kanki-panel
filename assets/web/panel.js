@@ -124,7 +124,8 @@ function kuGroup(title,count,add,body,id){return '<section class="ku-group"'+(id
 function kuSwitch(label,on,cb,sub){return '<label class="ku-sw"><span class="ku-swt"><b>'+label+'</b>'+(sub?'<small>'+sub+'</small>':'')+'</span><span class="sw"><input type="checkbox" '+(on?'checked':'')+' onchange="'+cb+'"><span></span></span></label>'}
 // a line inside a group: words on one side, buttons on the other
 function kuLine(words,btns){return '<div class="ku-line"><span class="ku-lt">'+words+'</span><span class="ku-lb">'+btns+'</span></div>'}
-// an item row that does not open: dot, flag, name, tags (line 2), address (line 3), main action and ⋯
+// an item row that does not open: dot, flag, name, tags (line 2), address (line 3), main action and ⋯.
+// name, tags and addr are HTML: every caller passes user, server or inbound names through esc()
 function kuItem(o){return '<div class="ku-item'+(o.off?' off':'')+'"'+(o.click?' role="button" tabindex="0" onclick="'+o.click+'"':'')+'>'+
   '<div class="ku-i1"><span class="dot '+(o.dot||'')+'"></span>'+(o.flag||'')+'<b class="ku-nm">'+o.name+'</b><span class="sp"></span>'+(o.act||'')+
   (o.menu?'<button type="button" class="ib ku-more" aria-label="'+esc(t('More'))+'" onclick="event.stopPropagation();'+o.menu+'">⋯</button>':'')+'</div>'+
@@ -492,7 +493,7 @@ var AD_TUNNELS=[
   when:'Gaming and WireGuard-over-tunnel: lowest visible loss, and UDP that looks like TCP.'}];
 function p_antidpi(){$('#pg').innerHTML='<div class="ph"><div><h2>'+ic('security',22)+' '+t('Advanced anti-DPI tunnels')+'</h2><p>'+t('One-click inbounds with the methods that resist DPI: REALITY, WS/gRPC behind a CDN, Shadowsocks 2022 — plus the server-link transports')+'</p></div><button class="btn" onclick="xrInbound()">+ '+t('Custom inbound')+'</button></div>'+
  '<div class="card"><h3>'+t('User inbounds (Xray)')+'</h3><p class="sub" style="margin:0 0 12px">'+t('Pick a method: the inbound editor opens with the right settings filled in. Then press Save — the panel makes keys, certificates and user links by itself.')+'</p>'+
- '<div class="g2">'+AD_METHODS.map(function(m,i){return '<div class="box" style="margin:0"><b>'+esc(m.name)+'</b> <span class="muted ltr" style="font-size:11px">'+m.tags.map(function(x){return '<em class="ttg">'+x+'</em>'}).join(' ')+'</span>'+
+ '<div class="g2">'+AD_METHODS.map(function(m,i){return '<div class="box" style="margin:0"><b>'+esc(m.name)+'</b> <span class="muted ltr" style="font-size:12px">'+m.tags.map(function(x){return '<em class="ttg">'+x+'</em>'}).join(' ')+'</span>'+
   '<small class="muted" style="display:block;margin:6px 0">'+t(m.what)+'</small>'+
   '<small style="display:block;margin:0 0 8px;color:var(--info)">'+t('When')+': '+t(m.when)+'</small>'+
   '<button class="b2 sm" style="width:100%" onclick="adNew(\''+m.pre+'\')">'+ic('plus',14)+' '+t('Make this inbound')+'</button></div>'}).join('')+'</div></div>'+
@@ -885,7 +886,19 @@ var FA={"Weak connection to the panel: showing the last data, trying again…":"
  "Delete inbound":"حذف اینباند",
  "Domain and SSL":"دامنه و SSL",
  "Every user":"همه‌ی کاربران",
- "Groups marked \"only on request\" stay off until you turn them on. Some names cannot be routed (they check the address).":"گروه‌هایی که «فقط با درخواست» دارند خاموش می‌مانند تا روشنشان کنی. بعضی اسم‌ها از راه DNS رد نمی‌شوند (آدرس را چک می‌کنند).",
+ "Two-step login (2FA)":"ورود دومرحله‌ای (2FA)",
+ "Off: turn it on below, the panel is open on the internet":"خاموش: پایین روشنش کن، پنل روی اینترنت باز است",
+ "Old API key":"کلید API قدیمی",
+ "Still there, with full access: delete it below if nothing uses it":"هنوز هست، با دسترسی کامل: اگر چیزی از آن استفاده نمی‌کند پایین پاکش کن",
+ "Login only from your IPs":"ورود فقط از IPهای خودت",
+ "Security status":"وضعیت امنیت",
+ "Needs attention":"نیاز به رسیدگی",
+ "Almost":"تقریباً",
+ "Good":"خوب",
+ "Only when other servers are online: if every server is away at once, it is the panel's own network and nothing is removed. The panel server is never removed.":"فقط وقتی سرورهای دیگر آنلاین‌اند: اگر همهٔ سرورها با هم آفلاین شوند، مشکل از شبکهٔ خود پنل است و چیزی حذف نمی‌شود. سرور پنل هیچ‌وقت حذف نمی‌شود.",
+ "Get SSL by itself (Let's Encrypt)":"گرفتن خودکار SSL (Let's Encrypt)",
+ "Used by its install command (Show command).":"در دستور نصب همین سرور استفاده می‌شود («نمایش دستور»).",
+ "The domain must point straight at this server (no Cloudflare proxy) and port 80 must be open. Off, or when it fails: a self-signed certificate, the install goes on.":"دامنه باید مستقیم به همین سرور اشاره کند (بدون پروکسی Cloudflare) و پورت 80 باز باشد. خاموش، یا اگر نشد: گواهی self-signed و نصب ادامه پیدا می‌کند.",
  "Make a copy":"ساخت کپی",
  "No second config":"بدون کانفیگ دوم",
  "Servers with Xray":"سرورهای دارای Xray",
@@ -3258,8 +3271,8 @@ function updateAll(){if(!confirm(t('Update every node, every tunnel server and t
 
 // ---------------------------------------------------------------- backup
 function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'</h2><p>'+t('Full backup of users, credentials, certificates, VPN settings, nodes and panel state')+'</p></div></div>'+
- '<div class="g2"><div class="card" style="margin:0"><h3>'+t('Backup file')+'</h3><p class="sub">'+t('Encrypted archive. File name includes date and time.')+'</p><div class="row" style="flex-wrap:nowrap"><input id="bk_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"><button class="btn" id="bk_go">'+t('Download backup')+'</button></div></div>'+
- '<div class="card" style="margin:0"><h3>'+t('Restore')+'</h3><p class="sub">'+t('Pick a backup file; if encrypted, enter its passphrase.')+'</p><div class="row" style="flex-wrap:nowrap"><label class="b2" style="white-space:nowrap">'+t('Choose file')+'<input type="file" id="rs_f" class="hide"></label><input id="rs_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"></div><small class="muted" id="rs_n">'+t('No file chosen')+'</small>'+
+ '<div class="g2"><div class="card" style="margin:0"><h3>'+t('Backup file')+'</h3><p class="sub">'+t('Encrypted archive. File name includes date and time.')+'</p><div class="row" style="flex-wrap:nowrap"><input id="bk_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"><button class="btn" id="bk_go" style="flex:none">'+t('Download backup')+'</button></div></div>'+
+ '<div class="card" style="margin:0"><h3>'+t('Restore')+'</h3><p class="sub">'+t('Pick a backup file; if encrypted, enter its passphrase.')+'</p><div class="row" style="flex-wrap:nowrap"><label class="b2" style="white-space:nowrap;flex:none">'+t('Choose file')+'<input type="file" id="rs_f" class="hide"></label><input id="rs_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"></div><small class="muted" id="rs_n">'+t('No file chosen')+'</small>'+
  '<label class="chk" style="margin-top:8px"><input type="checkbox" id="rs_full">'+t('Also restore server keys & configs (same/new server migration)')+'</label><div style="text-align:center;margin-top:8px"><button class="btn" id="rs_go">'+t('Restore backup')+'</button></div></div></div>'+moveCard()+
  '<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><div><h3>🌙 '+t('Nightly backup to the bot')+'</h3><p class="sub">'+t('Every night the database is cleaned and an encrypted backup is sent to Telegram')+'</p></div><label class="ku-sw ku-sw-in"><span class="ku-swt"><b>'+t('On')+'</b></span><span class="sw"><input type="checkbox" id="tg_on"><span></span></span></label></div>'+
  '<div class="g2"><div><label class="f">'+t('When')+'</label><div class="row" style="flex-wrap:nowrap;gap:6px"><select id="tg_m" style="width:auto"><option value="nightly">'+t('Every night at')+'</option><option value="hours">'+t('Every … hours')+'</option></select><input id="tg_at" class="ltr" style="max-width:90px" placeholder="03:00"><input id="tg_h" type="number" min="1" style="max-width:90px"></div><small class="muted">'+t('Iran time')+'</small></div>'+
@@ -3300,7 +3313,7 @@ function moveDraw(m){var el=$('#mv_in');if(!el)return;
  if(!m.active){el.innerHTML=steps+'<label class="f">'+t("This server's IP (empty = found by itself)")+'</label><div class="inl"><input id="mv_ip" class="ltr" value="'+esc(m.ip||'')+'" placeholder="1.2.3.4"><button class="btn" id="mv_go" style="flex:none">'+t('Make the move command')+'</button></div>'+
    '<p class="hint">'+t('The backup above is complete too: it can also be restored by hand on a new server (Restore with «Also restore server keys»).')+'</p>';
   $('#mv_go').onclick=function(){var b=this;b.disabled=true;api('POST','/api/migrate/start',{ip:$('#mv_ip').value.trim()}).then(moveLoad).catch(function(e){b.disabled=false;fail(e)})};return}
- el.innerHTML=steps+'<pre class="ltr" id="mv_cmd" style="white-space:pre-wrap;word-break:break-all;font-size:11.5px;padding:10px;border-radius:12px;background:var(--in);border:1px solid var(--gb2);margin:0">'+esc(m.command)+'</pre>'+
+ el.innerHTML=steps+'<pre class="ltr" id="mv_cmd" style="white-space:pre-wrap;word-break:break-all;font-size:12px;padding:10px;border-radius:12px;background:var(--in);border:1px solid var(--gb2);margin:0">'+esc(m.command)+'</pre>'+
   '<p class="hint">'+t('Valid for 3 hours, one time. It holds the key of the backup: do not share it.')+'</p>'+
   '<p style="margin:6px 0">'+(m.fetched>0?'<span class="okt">✓ '+t('The new server downloaded the backup')+(m.new_ip?' (<span class="ltr">'+esc(m.new_ip)+'</span>)':'')+'</span>':'<span class="muted">⏳ '+t('Waiting for the new server…')+'</span>')+'</p>'+
   '<div class="g2"><button class="btn" id="mv_cp">'+t('Copy the command')+'</button><button class="b2 bd" id="mv_x">'+t('Cancel the command')+'</button></div>';
@@ -4184,7 +4197,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<label class="f">'+t('Destination networks sent through the link')+'</label><input id="tw_aw_rt" class="ltr" value="'+esc((A.routes||[]).join(', '))+'" placeholder="1.1.1.1, 8.8.0.0/16">'+
   '<label class="f">'+t('All traffic from these networks goes through the link')+'</label><input id="tw_aw_sr" class="ltr" value="'+esc((A.src_routes||[]).join(', '))+'" placeholder="10.8.0.0/24">'+
   '<small class="muted" style="display:block">'+t('For example the subnet of the VPN users of the entry: their internet then leaves from the exit. SSH of the entry itself is never touched.')+'</small>'+
-  '<div class="nh" style="margin-top:8px"><span></span><button type="button" class="b2 sm" id="tw_aw_vpn">'+ic('ports',14)+' '+t('All ports of the exit server')+'</button></div><div class="corechips" id="tw_aw_cc"></div><p class="muted" id="tw_aw_pn" style="font-size:11.5px;margin:2px 0 0"></p>'+
+  '<div class="nh" style="margin-top:8px"><span></span><button type="button" class="b2 sm" id="tw_aw_vpn">'+ic('ports',14)+' '+t('All ports of the exit server')+'</button></div><div class="corechips" id="tw_aw_cc"></div><p class="muted" id="tw_aw_pn" style="font-size:12px;margin:2px 0 0"></p>'+
   '<div class="g2"><div><label class="f">'+t('Entry public TCP ports sent into the link')+'</label><input id="tw_aw_ft" class="ltr" value="'+esc((A.fwd_tcp||[]).join(', '))+'" placeholder="443, 8443:443"></div><div><label class="f">'+t('Entry public UDP ports sent into the link')+'</label><input id="tw_aw_fu" class="ltr" value="'+esc((A.fwd_udp||[]).join(', '))+'" placeholder="51820"></div></div>'+
   '<label class="f">'+t('Forward to (empty = the exit inside the link)')+'</label><input id="tw_aw_tg" class="ltr" value="'+esc(A.fwd_target||'')+'" placeholder="10.88.N.2"></details>'+
   (id?'<div class="g2" style="margin-top:10px"><button type="button" class="b2 sm" id="tw_aw_c1">'+t('Show the config of the entry')+'</button><button type="button" class="b2 sm" id="tw_aw_c2">'+t('Show the config of the exit')+'</button></div>':'')+
@@ -4348,10 +4361,10 @@ function livePorts(id){var tm,go=function(){clearTimeout(tm);tm=setTimeout(funct
  ['#tw_tr','#tw_md'].forEach(function(s){var e=$(s);if(e)e.addEventListener('click',go)});setTimeout(go,600)}
 
 // ---- Hysteria2: show the config of one side
-function hy2Conf(id,side){api('GET','/api/tunnels/'+id+'/hy2conf/'+side).then(function(r){modal(mhead(t('Config')+' · '+(side=='exit'?t('Exit'):t('Entry')))+'<p class="muted">'+'hysteria '+(side=='exit'?'server':'client')+' -c … · '+t('It holds the password: do not share it.')+' <span class="ltr">'+esc(r.file)+'</span></p><pre class="ltr" style="white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:50vh;overflow:auto">'+esc(r.conf)+'</pre><button class="btn" id="hy_cp" style="width:100%;margin-top:8px">'+t('Copy')+'</button>');$('#hy_cp').onclick=function(){copy(r.conf)}}).catch(fail)}
+function hy2Conf(id,side){api('GET','/api/tunnels/'+id+'/hy2conf/'+side).then(function(r){modal(mhead(t('Config')+' · '+(side=='exit'?t('Exit'):t('Entry')))+'<p class="muted">'+'hysteria '+(side=='exit'?'server':'client')+' -c … · '+t('It holds the password: do not share it.')+' <span class="ltr">'+esc(r.file)+'</span></p><pre class="ltr" style="white-space:pre-wrap;word-break:break-all;font-size:12px;max-height:50vh;overflow:auto">'+esc(r.conf)+'</pre><button class="btn" id="hy_cp" style="width:100%;margin-top:8px">'+t('Copy')+'</button>');$('#hy_cp').onclick=function(){copy(r.conf)}}).catch(fail)}
 
 // ---- AmneziaWG: show the config of one side (for a server that does not run the agent)
-function awgConf(id,side){api('GET','/api/tunnels/'+id+'/awgconf/'+side).then(function(r){modal(mhead(t('Config')+' · '+(side=='exit'?t('Exit'):t('Entry')))+'<p class="muted">'+t('Save it as the file below in /etc/amnezia/amneziawg/ and run awg-quick up. It holds a private key: do not share it.')+' <span class="ltr">'+esc(r.file)+'</span></p><pre class="ltr" id="aw_cf" style="white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:50vh;overflow:auto">'+esc(r.conf)+'</pre><button class="btn" id="aw_cp" style="width:100%;margin-top:8px">'+t('Copy')+'</button>');$('#aw_cp').onclick=function(){copy(r.conf)}}).catch(fail)}
+function awgConf(id,side){api('GET','/api/tunnels/'+id+'/awgconf/'+side).then(function(r){modal(mhead(t('Config')+' · '+(side=='exit'?t('Exit'):t('Entry')))+'<p class="muted">'+t('Save it as the file below in /etc/amnezia/amneziawg/ and run awg-quick up. It holds a private key: do not share it.')+' <span class="ltr">'+esc(r.file)+'</span></p><pre class="ltr" id="aw_cf" style="white-space:pre-wrap;word-break:break-all;font-size:12px;max-height:50vh;overflow:auto">'+esc(r.conf)+'</pre><button class="btn" id="aw_cp" style="width:100%;margin-top:8px">'+t('Copy')+'</button>');$('#aw_cp').onclick=function(){copy(r.conf)}}).catch(fail)}
 
 // ---- SNI spoof / CDN guide, panel-side CDN test and an edge scanner script for the entry server
 function spGuide(){var fa=S.lang=='fa';
@@ -4386,7 +4399,7 @@ function cdnScan(){var fa=S.lang=='fa',tp=document.getElementById('scanTpl');if(
  var host=$('#tw_chost').value.trim(),sni=$('#tw_csni').value.trim().split(/[\s,]+/).filter(Boolean).join(' ')||host||'www.aparat.com',
   edges=$('#tw_cdl').value.trim().split(/[\s,]+/).filter(Boolean).map(function(e){return e.split(':')[0]}).join(' ')||'185.143.232.0/24',path=$('#tw_pa').value||'/';
  var sc=tp.textContent.replace(/^\n/,'').split('@@HOST@@').join(host||'tun.example.com').split('@@SNIS@@').join(sni).split('@@EDGES@@').join(edges).split('@@PATH@@').join(path);
- $('#tw_scres').innerHTML='<small class="muted" style="display:block;margin-top:6px">'+(fa?'این را روی سرور ایران (ورودی) اجرا کن: bash scan.sh   یا با رنج دیگر: bash scan.sh 185.143.233.0/24. خروجی OK-WS یعنی آن آی‌پی WebSocket تو را رد کرد؛ REACH یعنی لبهٔ CDN باز است ولی مسیر/Host درست نیست.':'Run this on the Iran (entry) server: bash scan.sh   or with another range: bash scan.sh 185.143.233.0/24. OK-WS means that IP passed your WebSocket; REACH means the CDN edge is open but the path/Host is not right.')+'</small><textarea id="tw_scta" class="ltr" rows="9" style="width:100%;font-size:11px" readonly></textarea><button type="button" class="b2 sm" id="tw_sccp">'+t('Copy')+'</button>';
+ $('#tw_scres').innerHTML='<small class="muted" style="display:block;margin-top:6px">'+(fa?'این را روی سرور ایران (ورودی) اجرا کن: bash scan.sh   یا با رنج دیگر: bash scan.sh 185.143.233.0/24. خروجی OK-WS یعنی آن آی‌پی WebSocket تو را رد کرد؛ REACH یعنی لبهٔ CDN باز است ولی مسیر/Host درست نیست.':'Run this on the Iran (entry) server: bash scan.sh   or with another range: bash scan.sh 185.143.233.0/24. OK-WS means that IP passed your WebSocket; REACH means the CDN edge is open but the path/Host is not right.')+'</small><textarea id="tw_scta" class="ltr" rows="9" style="width:100%;font-size:12px" readonly></textarea><button type="button" class="b2 sm" id="tw_sccp">'+t('Copy')+'</button>';
  $('#tw_scta').value=sc;$('#tw_sccp').onclick=function(){copy($('#tw_scta').value)}}
 
 // ---- smart tunnel: test every transport in BOTH directions between two servers, score them for the
@@ -4722,12 +4735,12 @@ function tunBox(s){var tn=s.tunnel||{},n=s.node,ents=entriesOf(s),irs=irHosts(s)
  var ep=n&&n.endpoint_mode!='panel'?(n.endpoint||''):'',viaIr=ep&&ents.some(function(e){return e.host==ep});
  var rows=(tn.ports||[]).map(function(p){return '<div class="kxtun-p"><b>'+esc(p.proto)+'</b><span class="kxtun-m ltr">'+esc(p.host||tn.uses)+':'+p.via+' → '+(p.tcp?'TCP':'UDP')+' '+p.port+'</span></div>'}).join('');
  return '<div class="kxr-sec">'+t('Tunnel domain')+'</div>'+
-  '<p class="muted" style="font-size:11.5px;margin:0 2px 6px">'+t('If this server has a tunnel, or will have one, write your Iran server\'s domain here. Every protocol then also gets a second config through it, made by itself.')+' '+t('WireGuard comes only this way.')+'</p>'+
+  '<p class="muted" style="font-size:12px;margin:0 2px 6px">'+t('If this server has a tunnel, or will have one, write your Iran server\'s domain here. Every protocol then also gets a second config through it, made by itself.')+' '+t('WireGuard comes only this way.')+'</p>'+
   '<div class="kxf"><div class="wide"><input id="sx_th" class="ltr" value="'+esc(host)+'" placeholder="ir.example.com">'+
    (irs.length?'<div class="kxchips">'+irs.map(function(e){return '<button type="button" class="'+(host==e.host?'on':'')+'" onclick="$(\'#sx_th\').value=\''+esc(e.host)+'\';$(\'#sx_th\').dispatchEvent(new Event(\'input\',{bubbles:true}))">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+'</div>':'')+'</div>'+
   '<div class="wide"><label class="f">'+t('Name of these configs in the app (optional)')+'</label><input id="sx_tn" value="'+esc(tn.name||'')+'" maxlength="40" placeholder="'+esc(s.name+' (تانل)')+'"></div></div>'+
   (viaIr?'<p class="kxtun-w">'+t('Users connect to the Iran address already, so the main configs go through the tunnel too. For direct configs set it to this server\'s own address.')+'</p>':'')+
-  (rows?'<div class="kxtun"><div class="muted" style="font-size:11px;margin-bottom:4px">'+t('Ports through the tunnel')+'</div>'+rows+'</div>':'')}
+  (rows?'<div class="kxtun"><div class="muted" style="font-size:12px;margin-bottom:4px">'+t('Ports through the tunnel')+'</div>'+rows+'</div>':'')}
 
 // Save of the open server: its name, place and address (the server), who gets it and where users connect (its VPN)
 // the VPN part off an Iran server (or all of them): tunnels, Xray and Kanki DNS stay
@@ -4757,8 +4770,8 @@ window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
   '<label class="f">'+t('Location')+'</label><div class="seg kxseg" id="sa_loc"><button type="button" data-l="abroad">'+t('Abroad')+'</button><button type="button" data-l="iran">'+t('Inside Iran (relay / tunnel entry)')+'</button></div>'+
   '<label class="f">'+t('Domain (optional, for a real SSL certificate)')+'</label><input id="sa_dm" class="ltr" placeholder="de1.example.com" autocomplete="off" autocapitalize="off">'+
   '<div id="sa_tunw"><label class="f">'+t('Tunnel domain (optional)')+'</label><input id="sa_tun" class="ltr" placeholder="ir.example.com" autocomplete="off" autocapitalize="off">'+
-  '<p class="muted" style="font-size:11px;margin:4px 2px 0">'+t('If this server has a tunnel, or will have one, write your Iran server\'s domain here. Every protocol then also gets a second config through it, made by itself.')+'</p></div>'+
-  '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_ssl">'+t('Get SSL by itself (Let\'s Encrypt)')+'</label><p class="muted" style="font-size:11px;margin:2px 2px 0">'+t('The domain must point straight at this server (no Cloudflare proxy) and port 80 must be open. Off, or when it fails: a self-signed certificate, the install goes on.')+'</p>'+
+  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('If this server has a tunnel, or will have one, write your Iran server\'s domain here. Every protocol then also gets a second config through it, made by itself.')+'</p></div>'+
+  '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_ssl">'+t('Get SSL by itself (Let\'s Encrypt)')+'</label><p class="muted" style="font-size:12px;margin:2px 2px 0">'+t('The domain must point straight at this server (no Cloudflare proxy) and port 80 must be open. Off, or when it fails: a self-signed certificate, the install goes on.')+'</p>'+
   '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_vpn">'+t('Serve VPN users on this server')+'</label>'+
   '<button class="btn" style="width:100%;margin-top:12px" id="sa_go">'+t('Create command')+'</button></div><div id="sa_out"></div>','wide');
  var setLoc=function(l){loc=l;$$('#sa_loc button').forEach(function(b){b.classList.toggle('on',b.dataset.l==l)});$('#sa_vpn').checked=l!='iran';$('#sa_ssl').checked=l!='iran';$('#sa_tunw').style.display=l=='iran'?'none':''};
@@ -5132,8 +5145,8 @@ window.coreTun=function(core,s,fold){if(!s)return '';var tn=s.tunnel||{},own=(tn
  var st='<div class="kxr-line"><span class="kxr-st '+(use?'g':'')+'">'+(use?'+ '+t('tunnel'):t('Off'))+'</span><span>'+line+'</span></div>';
  var body='<div class="kxm-row"><div><input id="'+id+'" class="ltr" placeholder="'+esc(srv||'ir.example.com')+'" value="'+esc(own)+'"></div><button class="btn sm" onclick="coreTunSet(\''+core+'\',\''+k+'\',$(\'#'+id+'\').value)">'+t('Save')+'</button>'+
    (own?'<button class="b2 sm" onclick="coreTunSet(\''+core+'\',\''+k+'\',\'\')">'+t('Same as the server')+'</button>':'')+'</div>'+
-  (chips?'<div class="kxchips">'+chips+'</div>':'<p class="muted" style="font-size:11px;margin:4px 2px">'+t('Add your Iran servers in Servers to pick them here with one tap.')+'</p>')+
-  '<p class="muted" style="font-size:11px;margin:4px 2px 0">'+t('Only for this core. Empty = the tunnel domain of the server (Servers page).')+'</p>';
+  (chips?'<div class="kxchips">'+chips+'</div>':'<p class="muted" style="font-size:12px;margin:4px 2px">'+t('Add your Iran servers in Servers to pick them here with one tap.')+'</p>')+
+  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('Only for this core. Empty = the tunnel domain of the server (Servers page).')+'</p>';
  var head=t('Second config through the tunnel')+' · '+CNAME[core];
  return fold?'<details class="box" style="margin-top:6px;width:100%"><summary>'+head+(use?' · <span class="ltr">'+esc(use)+'</span>':'')+'</summary>'+st+body+'</details>':'<div class="kxr-sec">'+head+'</div>'+st+body};
 window.coreTunSet=function(core,key,host){var r=document.querySelector('.kxr.open[data-acc]'),g=r&&r.dataset.acc;
@@ -5150,10 +5163,10 @@ function tunTag(p,s){var tn=s.tunnel||{},has=(tn.ports||[]).some(function(z){ret
 function pvBody(p,s){var n=s.node,i=n.info||{},st=pvState(p,s),port=st[2],k=esc(s.key),ni=esc(n.id),r=routeVia(agentOf(s),port);
  var h=kuSwitch(PV[p].name+' '+t('on this server'),!pvOff(p,s),"pvCore('"+p+"','"+k+"',this.checked)",t('Off: stopped on this server, its port closed, no links for it'))+
   '<div class="kxr-line"><span><b>'+esc(st[1])+'</b></span>'+(n.enabled?'<span>·</span><span>'+N(n.users||0)+' '+t('users')+'</span>':'')+
-  '<span>·</span><span>'+t('Users connect to')+': <b class="ltr">'+esc(n.effective_endpoint||'—')+'</b> <a href="#nodes" style="font-size:11px">'+t('change in Servers')+'</a></span></div>'+
+  '<span>·</span><span>'+t('Users connect to')+': <b class="ltr">'+esc(n.effective_endpoint||'—')+'</b> <a href="#nodes" style="font-size:12px">'+t('change in Servers')+'</a></span></div>'+
   '<div class="kxr-line">'+(r?viaLine(r,s.name):'<span>'+t('No tunnel carries this port: users connect to the server directly')+'</span>')+'</div>';
  if(port||st[0]!='n')h+='<div class="kxr-sec">'+t('UDP port')+'</div><div class="kxm-row"><div><input id="pv_p" class="ltr" inputmode="numeric" value="'+esc(String(port||''))+'"></div><button class="btn sm" id="pv_ps">'+t('Save port')+'</button></div><div class="kxm-warn" id="pv_pw"></div>'+
-  (p!='hy2'?'<p class="muted" style="font-size:11px;margin:2px">'+t("Users' WireGuard / AmneziaWG files of this server must be downloaded again after a port change; subscription links and the app update by themselves.")+'</p>':'');
+  (p!='hy2'?'<p class="muted" style="font-size:12px;margin:2px">'+t("Users' WireGuard / AmneziaWG files of this server must be downloaded again after a port change; subscription links and the app update by themselves.")+'</p>':'');
  if(p=='awg'&&(i.awg||[]).length)h+='<div class="kxr-sec">'+t('Obfuscation')+'</div><div class="kxp-ports">'+(i.awg||[]).map(function(x){return '<span>'+esc(x[0])+' '+esc(x[1])+'</span>'}).join('')+'</div>';
  if(p=='awg'){var d=((PD.dir&&PD.dir.servers)||[]).filter(function(x){return x.node==n.id})[0];
   if(d)h+='<div class="kxr-sec">'+t('Direct name')+'</div><div class="kxr-line"><b class="ltr">'+esc(d.host||'—')+'</b><span>·</span><span>'+t('Point it at')+' <b class="ltr">'+esc(d.ip||'—')+'</b></span><span>·</span><span>'+dirSt(d)+'</span></div>'}
