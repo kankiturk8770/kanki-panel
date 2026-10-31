@@ -161,6 +161,24 @@ fn last_kmix_err() -> &'static std::sync::Mutex<Option<String>> {
     E.get_or_init(|| std::sync::Mutex::new(None))
 }
 
+/// Is a WireGuard / AmneziaWG key with a recent handshake really in use? The Kanki apps "ping" every
+/// server with a real handshake of the user's key (about 240 bytes, then nothing); counting that as a
+/// connection for 3 minutes filled the connection limit and refused the user's real second device.
+/// A key counts once it moved real data in a round (1 KB), and keeps counting while anything moves
+/// (keepalives every 25 s).
+fn live_peer(uid: i64, node: &str, proto: &str, moved: i64) -> bool {
+    static LIVE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<(i64, String, String)>>> = std::sync::OnceLock::new();
+    let mut live = LIVE.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    let key = (uid, node.to_string(), proto.to_string());
+    let on = moved >= 1024 || (moved > 0 && live.contains(&key));
+    if on {
+        live.insert(key);
+    } else {
+        live.remove(&key);
+    }
+    on
+}
+
 /// Live Hysteria2 sessions of a user on this server
 pub async fn live_sessions(app: &App, username: &str) -> i64 {
     let port = app.env.get("HY2_STATS_PORT").cloned().unwrap_or_default();
@@ -304,17 +322,19 @@ pub async fn sync_all(app: &Arc<App>) {
         for (uid, proto, pubk) in map {
             let stats = if proto == "wg" { &resp.wg } else { &resp.awg };
             let Some(st) = stats.get(&pubk) else { continue };
+            let mut moved = 0;
             if let Some(p) = app.db.peer(uid, &n.id, &proto) {
                 let total = st.rx + st.tx;
                 let prev = p.rx + p.tx;
                 let delta = if total >= prev { total - prev } else { total };
+                moved = delta;
                 *add_bytes.entry(uid).or_default() += delta;
                 let _ = app.db.exec(
                     "UPDATE peers SET rx=?1, tx=?2 WHERE user_id=?3 AND node_id=?4 AND proto=?5",
                     &[&st.rx, &st.tx, &uid, &n.id, &proto],
                 );
             }
-            if st.handshake > 0 && now() - st.handshake < 180 {
+            if st.handshake > 0 && now() - st.handshake < 180 && live_peer(uid, &n.id, &proto, moved) {
                 here.push((uid, proto.clone()));
                 *online.entry(uid).or_default() += 1;
                 let e = seen.entry(uid).or_default();
@@ -444,5 +464,23 @@ pub async fn run(app: Arc<App>) {
     loop {
         sync_all(&app).await;
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::live_peer;
+
+    #[test]
+    fn a_ping_handshake_is_not_a_connection() {
+        // the apps' ping: one handshake (~240 bytes), then nothing
+        assert!(!live_peer(-7, "n", "wg", 240));
+        assert!(!live_peer(-7, "n", "wg", 0));
+        // a real connection: data, then only keepalives while idle
+        assert!(live_peer(-8, "n", "wg", 50_000));
+        assert!(live_peer(-8, "n", "wg", 64));
+        // disconnected: nothing moves any more
+        assert!(!live_peer(-8, "n", "wg", 0));
+        assert!(!live_peer(-8, "n", "wg", 64));
     }
 }

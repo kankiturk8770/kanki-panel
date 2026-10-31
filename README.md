@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.22.4 — a ping is not a connection
+- The apps' server pings no longer count as connections, so the connection limit no longer refuses a user's second device.
+
 ## New in 3.22.3 — SSL of the Iran subscription link
 - The certificate of the Iran subscription link is checked every 30 minutes and renewed early; the panel shows its end date and a Telegram note warns before it ends.
 
