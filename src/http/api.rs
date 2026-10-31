@@ -410,7 +410,13 @@ async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
                 }
                 out.push(user_json(&app, &app.db.user(u.id).unwrap_or(u)))
             }
-            Err(e) => return err(StatusCode::BAD_REQUEST, &e),
+            Err(e) => {
+                // the users made before the error stay: they still go to the servers
+                if !out.is_empty() {
+                    spawn_sync(&app);
+                }
+                return err(StatusCode::BAD_REQUEST, &e);
+            }
         }
     }
     spawn_sync(&app);
@@ -466,9 +472,16 @@ async fn users_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
     Json(user_json(&app, &app.db.user(id).unwrap_or(u))).into_response()
 }
 
+/// Removes a user everywhere: the database rows and the Xray inbounds limited to it (its number is
+/// given to the next new user)
+pub fn delete_user(app: &App, id: i64) {
+    app.db.delete_user(id);
+    crate::xray::panel::forget_user(app, id);
+}
+
 async fn users_delete(State(app): St, h: HeaderMap, Path(id): Path<i64>) -> Response {
     let _ = guard!(app, h, "users:write");
-    app.db.delete_user(id);
+    delete_user(&app, id);
     spawn_sync(&app);
     Json(json!({ "ok": true })).into_response()
 }
@@ -487,7 +500,7 @@ pub fn user_action(app: &App, id: i64, action: &str, b: &Value) -> Result<(), St
             app.db.exec("UPDATE users SET code=?1 WHERE id=?2", &[&util::rand_digits(19), &id]).map(|_| ())
         }
         "delete" => {
-            app.db.delete_user(id);
+            delete_user(app, id);
             Ok(())
         }
         _ => Err("unknown action".into()),
@@ -1694,7 +1707,12 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
 
 // ============================================================ Hysteria2 auth (local only, blocked at Caddy)
 
-async fn hy2_auth(State(app): St, Json(b): Json<Value>) -> Response {
+async fn hy2_auth(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    // only the Hysteria server on this machine asks (http://127.0.0.1/…); through Caddy (with an
+    // X-Forwarded-For) it would let anyone test subscription codes without a limit
+    if !crate::limit::exempt(&util::client_ip(&h)) {
+        return Json(json!({ "ok": false })).into_response();
+    }
     let auth = b["auth"].as_str().unwrap_or("").to_string();
     let name = app.hy2_allowed.lock().unwrap().get(&auth).cloned();
     if let Some(n) = name {

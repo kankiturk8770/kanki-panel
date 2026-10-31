@@ -2083,9 +2083,10 @@ impl Bot {
                     "ext" => { set_wait(Wait::Extend(id)); return self.edit(chat, mid, "بفرستید: <code>روز گیگ</code> (مثلاً <code>30 50</code>)", back).await; }
                     "rst" => db.exec("UPDATE users SET used_bytes=0, warned=0 WHERE id=?1", &[&id]).map(|_| ()),
                     "tgl" => db.exec("UPDATE users SET enabled=1-enabled WHERE id=?1", &[&id]).map(|_| ()),
-                    "rgn" => db.exec("UPDATE users SET code=?1 WHERE id=?2", &[&crate::util::rand_digits(19), &id]).map(|_| ()),
+                    // the same as the panel's «new link»: new keys too, so the old configs stop working
+                    "rgn" => crate::api::user_action(&self.app, id, "regen", &serde_json::Value::Null),
                     "del" => return self.edit(chat, mid, "⚠️ کاربر کامل حذف شود؟", Some(ik(vec![vec![b("🗑 بله", &format!("u:dly:{}", id))], vec![b("⬅️ پنل مدیریت", "adm")]]))).await,
-                    "dly" => { db.delete_user(id); let a = self.app.clone(); tokio::spawn(async move { sync::sync_all(&a).await }); return self.edit(chat, mid, "🗑 حذف شد.", back).await; }
+                    "dly" => { crate::api::delete_user(&self.app, id); let a = self.app.clone(); tokio::spawn(async move { sync::sync_all(&a).await }); return self.edit(chat, mid, "🗑 حذف شد.", back).await; }
                     _ => Ok(()),
                 };
                 let a = self.app.clone();
@@ -2419,7 +2420,7 @@ impl Bot {
     async fn clean_trials(&self) {
         let done = self.db().finished_trials();
         for u in &done {
-            self.db().delete_user(u.id);
+            crate::api::delete_user(&self.app, u.id);
             if u.tg_id != 0 {
                 self.send(u.tg_id, &format!("🎁 تست رایگان شما (<b>{}</b>) تموم شد.\n\nامیدواریم راضی بوده باشید 🙏 برای ادامه، یک اشتراک بخرید 👇", esc(&u.username)),
                     Some(ik(vec![vec![b(&self.bt("buy"), "buy")]]))).await;

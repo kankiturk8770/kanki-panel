@@ -229,6 +229,24 @@ fn save(app: &App, s: &XraySettings) {
     app.db.set("xray_cfg", &serde_json::to_string(s).unwrap_or_default());
 }
 
+/// A deleted user leaves the "only these users" lists of the inbounds. Its number goes to the next new
+/// user, who must not get inbounds that were limited to the old one. A list that becomes empty would mean
+/// "every user", so it keeps 0 (no user has that number): still nobody.
+pub fn forget_user(app: &App, id: i64) {
+    let mut s = settings(app);
+    let mut changed = false;
+    for ib in s.inbounds.iter_mut().filter(|ib| ib.only.contains(&id)) {
+        ib.only.retain(|x| *x != id);
+        if ib.only.is_empty() {
+            ib.only.push(0);
+        }
+        changed = true;
+    }
+    if changed {
+        save(app, &s);
+    }
+}
+
 // ------------------------------------------------------------------ per-user credentials
 
 /// A stable UUID for a subscription code (changes when the user's link is renewed).
@@ -1803,6 +1821,37 @@ mod tests {
         assert_eq!(v["user"], json!(["u4"]));
         assert!(rule_json(&XRule { outbound: "nope".into(), ..r.clone() }, &tags).is_none());
         assert!(rule_json(&XRule { outbound: "de".into(), ..Default::default() }, &tags).is_none());
+    }
+
+    #[test]
+    fn a_deleted_user_leaves_the_inbounds_limited_to_it() {
+        use std::sync::atomic::AtomicI64;
+        use std::sync::{Arc, Mutex};
+        let dir = std::env::temp_dir().join(format!("kanki-xforget-test-{}", rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let app = Arc::new(App {
+            db: crate::db::Db::open(dir.join("kanki.db").to_str().unwrap()),
+            env: HashMap::new(),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        });
+        let a = app.db.create_user("AAA", 0.0, 30, 1, "xray", "", "", 0).unwrap();
+        let b = app.db.create_user("BBB", 0.0, 30, 1, "xray", "", "", 0).unwrap();
+        save(&app, &XraySettings {
+            inbounds: vec![
+                Inbound { id: "only-a".into(), only: vec![a.id], ..Default::default() },
+                Inbound { id: "a-and-b".into(), only: vec![a.id, b.id], ..Default::default() },
+            ],
+            ..Default::default()
+        });
+        crate::api::delete_user(&app, a.id);
+        // the next new user gets the same number, and must not get A's inbound
+        let c = app.db.create_user("CCC", 0.0, 30, 1, "xray", "", "", 0).unwrap();
+        assert_eq!(c.id, a.id);
+        let s = settings(&app);
+        assert_eq!(s.inbounds[0].only, vec![0]); // still nobody, not "everyone"
+        assert_eq!(s.inbounds[1].only, vec![b.id]);
     }
 
     #[test]
