@@ -167,7 +167,7 @@ pub fn clean_url(s: &str) -> String {
 
 fn q(s: &str) -> String {
     // every value we write is made of safe characters, but quote it anyway
-    format!("\"{}\"", s.replace(['\\', '"'], ""))
+    format!("\"{}\"", s.replace(['\\', '"', '\r', '\n'], ""))
 }
 
 fn conf_path(s: &Hy2Spec) -> String {
@@ -286,7 +286,7 @@ fn unit_text(s: &Hy2Spec, bin: &str) -> String {
     let mode = if s.role == "exit" { "server" } else { "client" };
     let mut c = format!(
         "# written by kanki-panel: changes are overwritten\n[Unit]\nDescription=Kanki Hysteria2 tunnel {} ({})\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nEnvironment=HYSTERIA_DISABLE_UPDATE_CHECK=1\nExecStart={} {} -c {}\n",
-        s.name.replace('\n', " "),
+        s.name.replace(['\r', '\n'], " "),
         s.role,
         bin,
         mode,
@@ -452,7 +452,11 @@ fn from_panel(tmp: &str) -> Result<(), String> {
 /// the official installer (the same `get.hy2.sh` the panel's install.sh uses), saved to a file;
 /// GitHub's copy of the same script when get.hy2.sh cannot be reached
 fn fetch_installer() -> Option<String> {
-    let path = "/tmp/kanki-hy2-install.sh";
+    // not a fixed name in /tmp: another local user could put a link or a script of their own there,
+    // and this one runs as root
+    let _ = std::fs::create_dir_all("/var/lib/kanki");
+    let path = "/var/lib/kanki/hy2-install.sh";
+    let _ = std::fs::remove_file(path);
     for url in ["https://get.hy2.sh/", "https://raw.githubusercontent.com/apernet/hysteria/master/scripts/install_server.sh"] {
         if sh(&format!("curl -fsSL --connect-timeout 10 --max-time 60 -o {} '{}' 2>&1", path, url)).0
             && std::fs::read_to_string(path).map(|t| t.starts_with("#!") && t.contains("hysteria")).unwrap_or(false)
@@ -604,6 +608,10 @@ fn active(unit: &str) -> bool {
 }
 
 fn apply_one(s: &Hy2Spec, bin: &str) -> Result<(), String> {
+    // the source networks go into a root shell script: only real IPv4 networks
+    let mut clean = s.clone();
+    clean.src_routes.retain(|r| super::awg::cidr_ok(r));
+    let s = &clean;
     let _ = std::fs::create_dir_all(CONF_DIR);
     let u = s.unit();
     let mut changed = false;

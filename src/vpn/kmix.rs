@@ -245,7 +245,7 @@ static SECRET_LOCK: Mutex<()> = Mutex::new(());
 
 /// The panel's secret: made once, kept in the database (and so in its backups)
 fn secret(app: &App) -> String {
-    let _g = SECRET_LOCK.lock().unwrap();
+    let _g = SECRET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let s = app.db.get("kmix_secret");
     if !s.is_empty() {
         return s;
@@ -287,7 +287,7 @@ fn errors() -> &'static Mutex<HashMap<String, String>> {
 }
 
 pub fn note_error(node_id: &str, e: &str) {
-    let mut g = errors().lock().unwrap();
+    let mut g = errors().lock().unwrap_or_else(|e| e.into_inner());
     if e.is_empty() {
         g.remove(node_id);
     } else {
@@ -296,7 +296,7 @@ pub fn note_error(node_id: &str, e: &str) {
 }
 
 pub fn error_of(node_id: &str) -> String {
-    errors().lock().unwrap().get(node_id).cloned().unwrap_or_default()
+    errors().lock().unwrap_or_else(|e| e.into_inner()).get(node_id).cloned().unwrap_or_default()
 }
 
 // ------------------------------------------------------------------ links

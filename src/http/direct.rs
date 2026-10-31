@@ -118,7 +118,7 @@ fn addrs_of(host: &str) -> Option<Vec<String>> {
     if host.parse::<IpAddr>().is_ok() {
         return Some(vec![host.to_string()]);
     }
-    resolved().lock().unwrap().get(host).map(|x| x.0.clone())
+    resolved().lock().unwrap_or_else(|e| e.into_inner()).get(host).map(|x| x.0.clone())
 }
 
 /// The server's own public address: the panel domain for the panel server, the agent address for others
@@ -207,7 +207,7 @@ pub async fn run(app: Arc<App>) {
                 Ok(Ok(it)) => it.map(|a| a.ip().to_string()).collect(),
                 _ => vec![],
             };
-            resolved().lock().unwrap().insert(h, (ips, crate::util::now()));
+            resolved().lock().unwrap_or_else(|e| e.into_inner()).insert(h, (ips, crate::util::now()));
         }
         tokio::time::sleep(Duration::from_secs(300)).await;
     }
@@ -264,11 +264,11 @@ mod tests {
         assert_eq!(awg(&a, &n1), ("tunnel", "5.5.5.1".to_string()));
         // its name points at the right server: that name
         let fr1 = host("n-fr1");
-        resolved().lock().unwrap().insert(fr1.clone(), (vec!["5.5.5.1".into()], 0));
+        resolved().lock().unwrap_or_else(|e| e.into_inner()).insert(fr1.clone(), (vec!["5.5.5.1".into()], 0));
         assert_eq!(awg(&a, &n1), ("tunnel", fr1.clone()));
         // a name that points at another server is never given
         let n2 = a.db.node("n-fr2").unwrap();
-        resolved().lock().unwrap().insert(host("n-fr2"), (vec!["5.5.5.1".into()], 0));
+        resolved().lock().unwrap_or_else(|e| e.into_inner()).insert(host("n-fr2"), (vec!["5.5.5.1".into()], 0));
         assert_eq!(awg(&a, &n2), ("tunnel", "5.5.5.2".to_string()));
         // a server whose endpoint is the server itself has no second, direct config
         let de = a.db.node("n-de").unwrap();

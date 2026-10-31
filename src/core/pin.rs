@@ -83,14 +83,14 @@ impl rustls::client::danger::ServerCertVerifier for Pinned {
         // (new key) never locks the agent out
         if let Some(ca) = &self.ca {
             if ca.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now).is_ok() {
-                let mut expected = self.expected.lock().unwrap();
+                let mut expected = self.expected.lock().unwrap_or_else(|e| e.into_inner());
                 if expected.as_deref() != Some(fp.as_str()) && self.write_pin(&fp) {
                     *expected = Some(fp);
                 }
                 return Ok(rustls::client::danger::ServerCertVerified::assertion());
             }
         }
-        let mut expected = self.expected.lock().unwrap();
+        let mut expected = self.expected.lock().unwrap_or_else(|e| e.into_inner());
         if expected.as_deref() == Some(fp.as_str()) {
             return Ok(rustls::client::danger::ServerCertVerified::assertion());
         }

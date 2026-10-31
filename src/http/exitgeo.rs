@@ -99,7 +99,8 @@ async fn resolve_v4(host: &str) -> Option<String> {
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         return Some(ip.to_string());
     }
-    let it = tokio::net::lookup_host((host, 443)).await.ok()?;
+    // a name server that does not answer must not hold the loop (and every server after this one)
+    let it = tokio::time::timeout(Duration::from_secs(8), tokio::net::lookup_host((host, 443))).await.ok()?.ok()?;
     let all: Vec<std::net::SocketAddr> = it.collect();
     all.iter().find(|a| a.is_ipv4()).or(all.first()).map(|a| a.ip().to_string())
 }

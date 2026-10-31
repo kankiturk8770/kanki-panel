@@ -56,7 +56,7 @@ pub struct Shared {
 
 impl Shared {
     fn may_dial(&self, target: &str) -> bool {
-        let a = self.allowed.lock().unwrap();
+        let a = self.allowed.lock().unwrap_or_else(|e| e.into_inner());
         a.is_empty() || a.contains(target)
     }
 }
@@ -128,11 +128,11 @@ impl Session {
     pub fn kill(&self) {
         if self.alive.swap(false, Ordering::Relaxed) {
             self.dead_tx.send_replace(true);
-            let mut slots = self.slots.lock().unwrap();
+            let mut slots = self.slots.lock().unwrap_or_else(|e| e.into_inner());
             for (_, s) in slots.drain() {
                 s.credit.close();
             }
-            self.udp_out.lock().unwrap().clear();
+            self.udp_out.lock().unwrap_or_else(|e| e.into_inner()).clear();
         }
     }
 
@@ -168,12 +168,12 @@ impl Session {
     fn add_slot(&self, id: u32) -> (mpsc::UnboundedReceiver<Vec<u8>>, Arc<Semaphore>) {
         let (tx, rx) = mpsc::unbounded_channel();
         let credit = Arc::new(Semaphore::new(WINDOW));
-        self.slots.lock().unwrap().insert(id, Slot { data: Some(tx), credit: credit.clone() });
+        self.slots.lock().unwrap_or_else(|e| e.into_inner()).insert(id, Slot { data: Some(tx), credit: credit.clone() });
         (rx, credit)
     }
 
     fn remove(&self, id: u32) {
-        if let Some(s) = self.slots.lock().unwrap().remove(&id) {
+        if let Some(s) = self.slots.lock().unwrap_or_else(|e| e.into_inner()).remove(&id) {
             s.credit.close();
         }
     }
@@ -201,27 +201,27 @@ impl Session {
     }
 
     fn deliver(&self, id: u32, data: Vec<u8>) {
-        let slots = self.slots.lock().unwrap();
+        let slots = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(Some(tx)) = slots.get(&id).map(|s| s.data.as_ref()) {
             let _ = tx.send(data);
         }
     }
 
     fn fin(&self, id: u32) {
-        if let Some(s) = self.slots.lock().unwrap().get_mut(&id) {
+        if let Some(s) = self.slots.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&id) {
             s.data = None;
         }
     }
 
     fn rst(&self, id: u32) {
-        if let Some(s) = self.slots.lock().unwrap().get_mut(&id) {
+        if let Some(s) = self.slots.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&id) {
             s.data = None;
             s.credit.close();
         }
     }
 
     fn window(&self, id: u32, n: usize) {
-        if let Some(s) = self.slots.lock().unwrap().get(&id) {
+        if let Some(s) = self.slots.lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
             s.credit.add_permits(n);
         }
     }
@@ -285,7 +285,7 @@ async fn reader(s: Arc<Session>, mut rx: Rx) {
                 if s.entry {
                     // a reply from the target: back to the user
                     s.shared.rx_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
-                    let back = s.shared.udp_back.lock().unwrap().get(&id).map(|(sock, addr, _)| (sock.clone(), *addr));
+                    let back = s.shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).get(&id).map(|(sock, addr, _)| (sock.clone(), *addr));
                     if let Some((sock, addr)) = back {
                         let _ = sock.try_send_to(data, addr);
                     }
@@ -391,7 +391,7 @@ pub(super) fn oldest_eighth<K: Copy>(entries: impl Iterator<Item = (K, u64)>) ->
 
 /// exit: sends a UDP packet to its target, opening a socket for a new flow
 async fn exit_udp(s: &Arc<Session>, id: u32, target: &str, data: &[u8]) {
-    let existing = s.udp_out.lock().unwrap().get_mut(&id).map(|f| {
+    let existing = s.udp_out.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&id).map(|f| {
         f.last = now_ms();
         f.sock.clone()
     });
@@ -404,7 +404,7 @@ async fn exit_udp(s: &Arc<Session>, id: u32, target: &str, data: &[u8]) {
             // one socket per flow: past the cap the least recently used flows are closed, so a
             // UDP flood can neither exhaust fds nor lock real flows out
             {
-                let mut out = s.udp_out.lock().unwrap();
+                let mut out = s.udp_out.lock().unwrap_or_else(|e| e.into_inner());
                 if out.len() >= MAX_EXIT_UDP {
                     for old in oldest_eighth(out.iter().map(|(k, f)| (*k, f.last))) {
                         if let Some(f) = out.remove(&old) {
@@ -420,7 +420,7 @@ async fn exit_udp(s: &Arc<Session>, id: u32, target: &str, data: &[u8]) {
             }
             let sock = Arc::new(sock);
             let task = tokio::spawn(exit_udp_back(s.clone(), id, sock.clone())).abort_handle();
-            if let Some(f) = s.udp_out.lock().unwrap().insert(id, ExitFlow { sock: sock.clone(), last: now_ms(), task }) {
+            if let Some(f) = s.udp_out.lock().unwrap_or_else(|e| e.into_inner()).insert(id, ExitFlow { sock: sock.clone(), last: now_ms(), task }) {
                 f.task.abort();
             }
             sock
@@ -442,7 +442,7 @@ async fn exit_udp_back(s: Arc<Session>, id: u32, sock: Arc<UdpSocket>) {
         match r {
             Ok(Ok(n)) => {
                 replied = true;
-                if let Some(f) = s.udp_out.lock().unwrap().get_mut(&id) {
+                if let Some(f) = s.udp_out.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&id) {
                     f.last = now_ms();
                 }
                 let mut p = Vec::with_capacity(1 + n);
@@ -457,7 +457,7 @@ async fn exit_udp_back(s: Arc<Session>, id: u32, sock: Arc<UdpSocket>) {
             // quiet for a while: close the flow once it has been idle too long (sooner if the
             // target never answered, as flood flows do)
             Err(_) => {
-                let last = s.udp_out.lock().unwrap().get(&id).map(|f| f.last).unwrap_or(0);
+                let last = s.udp_out.lock().unwrap_or_else(|e| e.into_inner()).get(&id).map(|f| f.last).unwrap_or(0);
                 let limit = if replied { EXIT_UDP_IDLE } else { EXIT_UDP_IDLE_NEW };
                 if now_ms().saturating_sub(last) > limit {
                     break;
@@ -466,18 +466,27 @@ async fn exit_udp_back(s: Arc<Session>, id: u32, sock: Arc<UdpSocket>) {
         }
     }
     // only our own entry: the flow may have been evicted and opened again since
-    let mut out = s.udp_out.lock().unwrap();
+    let mut out = s.udp_out.lock().unwrap_or_else(|e| e.into_inner());
     if out.get(&id).is_some_and(|f| Arc::ptr_eq(&f.sock, &sock)) {
         out.remove(&id);
     }
 }
 
 /// Copies one TCP connection both ways through the mux, with flow control.
+/// TCP keepalive on a user's (or a target's) connection: a phone that vanished without closing (a
+/// mobile network that dropped it, a NAT that forgot it) is found within a few minutes, so its stream,
+/// task and socket go instead of waiting forever on a read that never comes
+fn keepalive_on(tcp: &TcpStream) {
+    let ka = socket2::TcpKeepalive::new().with_time(Duration::from_secs(120)).with_interval(Duration::from_secs(20)).with_retries(4);
+    let _ = socket2::SockRef::from(tcp).set_tcp_keepalive(&ka);
+}
+
 async fn pipe(s: Arc<Session>, id: u32, tcp: TcpStream, mut rx: mpsc::UnboundedReceiver<Vec<u8>>, credit: Arc<Semaphore>) {
     if !s.is_alive() {
         s.remove(id);
         return;
     }
+    keepalive_on(&tcp);
     s.shared.streams.fetch_add(1, Ordering::Relaxed);
     let (mut r, mut w) = tcp.into_split();
     let s1 = s.clone();

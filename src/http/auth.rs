@@ -208,12 +208,12 @@ const MAX_FAILS: u32 = 5;
 const FAIL_WINDOW: i64 = 60 * 60;
 
 fn locked(app: &App, ip: &str) -> bool {
-    let m = app.login_fails.lock().unwrap();
+    let m = app.login_fails.lock().unwrap_or_else(|e| e.into_inner());
     matches!(m.get(ip), Some((n, t)) if *n >= MAX_FAILS && now() - *t < FAIL_WINDOW)
 }
 
 fn fail(app: &App, ip: &str) {
-    let mut m = app.login_fails.lock().unwrap();
+    let mut m = app.login_fails.lock().unwrap_or_else(|e| e.into_inner());
     // forget old entries so the table cannot grow without limit (many source addresses)
     if m.len() > 5000 {
         m.retain(|_, (_, t)| now() - *t < FAIL_WINDOW);
@@ -265,7 +265,7 @@ async fn login(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if util::is_legacy_hash(&stored) {
         app.db.set("admin_pass", &util::hash_password(p));
     }
-    app.login_fails.lock().unwrap().remove(&ip);
+    app.login_fails.lock().unwrap_or_else(|e| e.into_inner()).remove(&ip);
     let t = rand_token(48);
     let hours: i64 = app.db.get("session_hours").parse::<i64>().unwrap_or(24).clamp(1, 24 * 90);
     let id = rand_token(8).to_lowercase();

@@ -364,6 +364,14 @@ pub fn node_stats() -> Value {
 
 async fn system(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "admin");
+    // systemctl for every service, df and ip: off the async workers (the dashboard asks often)
+    match tokio::task::spawn_blocking(system_info).await {
+        Ok(v) => Json(v).into_response(),
+        Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "system info failed"),
+    }
+}
+
+fn system_info() -> Value {
     let load: Vec<f64> = read("/proc/loadavg").split_whitespace().take(3).filter_map(|x| x.parse().ok()).collect();
     let cpus = read("/proc/cpuinfo").lines().filter(|l| l.starts_with("processor")).count().max(1);
     let mut mt = 0f64;
@@ -387,14 +395,14 @@ async fn system(State(app): St, h: HeaderMap) -> Response {
             }
         }
     }
-    Json(json!({
+    json!({
         "cpu": ((load.first().copied().unwrap_or(0.0) / cpus as f64) * 100.0).min(100.0).round(),
         "load": load, "cores": cpus,
         "mem_total": mt * 1024.0, "mem_used": (mt - ma) * 1024.0,
         "disk_total": dt, "disk_used": du, "uptime": up,
         "net_rx": rx, "net_tx": tx, "iface": iface,
         "services": service_states(), "version": crate::VERSION,
-    })).into_response()
+    })
 }
 
 async fn service_action(State(app): St, h: HeaderMap, Path((name, action)): Path<(String, String)>) -> Response {
@@ -701,7 +709,8 @@ pub async fn self_update(app: &App) -> Result<String, String> {
         return Err("checksum mismatch, update aborted".into());
     }
     let path = crate::util::exe_path().map_err(|e| e.to_string())?;
-    crate::util::swap_program(&path, &bytes)?;
+    // writing the file and test-running it (up to 20 s) must not hold an async worker
+    tokio::task::spawn_blocking(move || crate::util::swap_program(&path, &bytes)).await.map_err(|e| e.to_string())??;
     crate::util::restart_siblings();
     let v = latest_version(app).await.unwrap_or_default();
     restart_self();
@@ -716,4 +725,44 @@ async fn update_apply(State(app): St, h: HeaderMap) -> Response {
         Ok(v) => Json(json!({"ok": true, "version": v})).into_response(),
         Err(e) => err(StatusCode::BAD_GATEWAY, &e),
     }
+}
+
+/// OpenVPN is not part of Kanki any more. A server installed by a very old version (its settings file
+/// still has OVPN_ lines) may still run it: its services stop and go, its configs in
+/// /etc/openvpn/server and its firewall ports are removed, and the OVPN_ lines leave the settings file.
+/// Only when those lines are there (Kanki put OpenVPN on this server), so an OpenVPN of the owner's own
+/// is never touched. Blocking; cheap when there is nothing to do.
+pub fn drop_legacy_openvpn() {
+    const ENVF: &str = "/etc/kanki/kanki.env";
+    let Ok(t) = std::fs::read_to_string(ENVF) else { return };
+    let ours: Vec<&str> = t.lines().filter(|l| l.trim_start().starts_with("OVPN_")).collect();
+    if ours.is_empty() {
+        return;
+    }
+    // the ports Kanki opened for it (OVPN_UDP_PORT=1194 …)
+    let ports: Vec<(u16, bool)> = ours
+        .iter()
+        .filter_map(|l| l.split_once('='))
+        .filter(|(k, _)| k.trim().ends_with("_PORT"))
+        .filter_map(|(k, v)| v.trim().trim_matches('"').parse::<u16>().ok().map(|p| (p, k.contains("UDP"))))
+        .collect();
+    let dir = "/etc/openvpn/server";
+    let units: Vec<String> = std::fs::read_dir(dir)
+        .map(|rd| rd.flatten().filter_map(|e| e.file_name().to_string_lossy().strip_suffix(".conf").map(|n| n.to_string())).collect())
+        .unwrap_or_default();
+    for u in &units {
+        if u.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            let _ = Command::new("systemctl").args(["disable", "--now", "-q", &format!("openvpn-server@{}", u)]).status();
+        }
+    }
+    for (p, udp) in &ports {
+        let r = crate::fw::rule(*p, *udp);
+        if crate::fw::valid_rule(&r) {
+            let _ = Command::new("sh").arg("-c").arg(format!("command -v ufw >/dev/null 2>&1 && ufw --force delete allow {} >/dev/null 2>&1", r)).status();
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+    let kept: Vec<&str> = t.lines().filter(|l| !l.trim_start().starts_with("OVPN_")).collect();
+    let _ = std::fs::write(ENVF, kept.join("\n") + "\n");
+    eprintln!("OpenVPN of an old Kanki version removed from this server ({} service(s), {} port(s))", units.len(), ports.len());
 }

@@ -307,7 +307,7 @@ fn last_status() -> &'static Mutex<HashMap<String, (i64, Value)>> {
 /// The DNS status an agent reported: counts the bytes used since its last report.
 pub fn ingest(app: &App, sid: &str, st: &Value) {
     if st.is_null() {
-        last_status().lock().unwrap().remove(sid);
+        last_status().lock().unwrap_or_else(|e| e.into_inner()).remove(sid);
         return;
     }
     let mut kept = st.clone();
@@ -316,7 +316,7 @@ pub fn ingest(app: &App, sid: &str, st: &Value) {
             qlog_ingest(sid, &q);
         }
     }
-    last_status().lock().unwrap().insert(sid.to_string(), (now(), kept));
+    last_status().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), (now(), kept));
     count_usage(app, &format!("dns_prev_{}", sid), st);
 }
 
@@ -347,7 +347,7 @@ pub fn active_users(secs: i64) -> Vec<(i64, String)> {
     let mut v: Vec<(i64, String)> = vec![];
     // newest first; reports of different servers interleave, so look at a window instead of
     // stopping at the first old entry
-    for e in qstore().lock().unwrap().items.iter().rev().take(20_000) {
+    for e in qstore().lock().unwrap_or_else(|e| e.into_inner()).items.iter().rev().take(20_000) {
         if e.ts < from {
             continue;
         }
@@ -366,7 +366,7 @@ fn qstore() -> &'static Mutex<QStore> {
 /// Queries a server reported: { "run": ..., "items": [[seq, ts, uid, name, qtype, routed], ...] }
 fn qlog_ingest(sid: &str, q: &Value) {
     let run = q["run"].as_str().unwrap_or("").to_string();
-    let mut st = qstore().lock().unwrap();
+    let mut st = qstore().lock().unwrap_or_else(|e| e.into_inner());
     let after = st.seen.get(sid).filter(|x| x.0 == run).map(|x| x.1).unwrap_or(0);
     let mut last = after;
     for x in q["items"].as_array().into_iter().flatten() {
@@ -446,7 +446,7 @@ async fn get_log(State(app): St, h: HeaderMap, axum::extract::Query(f): axum::ex
     let labels = service_labels();
     let q = f.q.trim().to_ascii_lowercase();
     let limit = if f.limit == 0 { 500 } else { f.limit.min(5000) };
-    let st = qstore().lock().unwrap();
+    let st = qstore().lock().unwrap_or_else(|e| e.into_inner());
     let total = st.items.len();
     let keep = |e: &&QEntry| {
         (f.user == 0 || e.uid == f.user)
@@ -500,7 +500,7 @@ async fn get_log(State(app): St, h: HeaderMap, axum::extract::Query(f): axum::ex
 
 async fn clear_log(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "nodes");
-    qstore().lock().unwrap().items.clear();
+    qstore().lock().unwrap_or_else(|e| e.into_inner()).items.clear();
     Json(json!({ "ok": true })).into_response()
 }
 
@@ -552,7 +552,7 @@ pub fn sub_info(app: &App, u: &User) -> Value {
             // a pasted certificate covers *.name (the DoT name carries the user's token); a certbot one
             // is for the name itself: DoT on it knows the user by the address the app registered
             let manual = !s.cert.trim().is_empty();
-            let ssl_ok = manual || last_status().lock().unwrap().get(&x.server).map(|v| v.1["ssl"].as_bool() == Some(true)).unwrap_or(false);
+            let ssl_ok = manual || last_status().lock().unwrap_or_else(|e| e.into_inner()).get(&x.server).map(|v| v.1["ssl"].as_bool() == Some(true)).unwrap_or(false);
             let tls = !host.is_empty() && ssl_ok;
             json!({
                 "id": x.server, "name": names.get(&x.server).cloned().unwrap_or_default(), "note": x.note, "role": x.role,
@@ -581,12 +581,12 @@ fn repairs() -> &'static Mutex<std::collections::HashSet<String>> {
 
 /// Was a repair asked for this server? (asked once: reading it clears it)
 pub fn take_repair(sid: &str) -> bool {
-    repairs().lock().unwrap().remove(sid)
+    repairs().lock().unwrap_or_else(|e| e.into_inner()).remove(sid)
 }
 
 /// Seconds since the server last reported (None = never since the panel started)
 fn report_age(sid: &str) -> Option<i64> {
-    last_status().lock().unwrap().get(sid).map(|(at, _)| now() - *at)
+    last_status().lock().unwrap_or_else(|e| e.into_inner()).get(sid).map(|(at, _)| now() - *at)
 }
 
 async fn repair_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
@@ -598,7 +598,7 @@ async fn repair_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> 
     if cfg_for(&app, &id).is_none() {
         return err(StatusCode::BAD_REQUEST, "nothing runs on this server: Kanki DNS is off, or this relay has no exit server");
     }
-    repairs().lock().unwrap().insert(id.clone());
+    repairs().lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone());
     let age = report_age(&id);
     Json(json!({ "ok": true, "waiting": age.map(|a| a > 60).unwrap_or(true), "age": age })).into_response()
 }
@@ -629,7 +629,7 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "nodes");
     let s = settings(&app);
     let names = crate::tunnel::panel::server_names(&app);
-    let st = last_status().lock().unwrap().clone();
+    let st = last_status().lock().unwrap_or_else(|e| e.into_inner()).clone();
     let servers: Vec<Value> = s
         .servers
         .iter()
@@ -824,7 +824,7 @@ pub(crate) fn forget_server(app: &App, id: &str) {
 async fn get_users(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "nodes");
     let names = crate::tunnel::panel::server_names(&app);
-    let st = last_status().lock().unwrap().clone();
+    let st = last_status().lock().unwrap_or_else(|e| e.into_inner()).clone();
     let users: Vec<Value> = app
         .db
         .users()
@@ -887,7 +887,7 @@ mod qlog_tests {
         let q = json!({ "run": "r1", "items": [[1, 100, 7, "a.example", 1, ""], [2, 101, 7, "igamecj.com", 1, "igamecj.com"]] });
         qlog_ingest("test-srv", &q);
         qlog_ingest("test-srv", &q);
-        let st = qstore().lock().unwrap();
+        let st = qstore().lock().unwrap_or_else(|e| e.into_inner());
         let mine: Vec<&QEntry> = st.items.iter().filter(|e| e.sid == "test-srv").collect();
         assert_eq!(mine.len(), 2);
         assert_eq!(mine[1].routed, "igamecj.com");

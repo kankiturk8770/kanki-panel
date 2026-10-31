@@ -24,12 +24,12 @@ const DNS_FRESH: i64 = 180;
 
 /// A VPN server's connections from this sync round (replaces its previous list).
 pub fn set_vpn(node_id: &str, node_name: &str, conns: Vec<(i64, String)>) {
-    vpn().lock().unwrap().insert(node_id.to_string(), (now(), node_name.to_string(), conns));
+    vpn().lock().unwrap_or_else(|e| e.into_inner()).insert(node_id.to_string(), (now(), node_name.to_string(), conns));
 }
 
 /// A removed server must not keep showing users as connected.
 pub fn forget(node_id: &str) {
-    vpn().lock().unwrap().remove(node_id);
+    vpn().lock().unwrap_or_else(|e| e.into_inner()).remove(node_id);
 }
 
 /// user id -> [(protocol, server)]
@@ -53,7 +53,7 @@ fn build(app: &App) -> UserServers {
         }
     };
     let kmix = crate::kmix::settings(app);
-    for (nid, (at, name, conns)) in vpn().lock().unwrap().iter() {
+    for (nid, (at, name, conns)) in vpn().lock().unwrap_or_else(|e| e.into_inner()).iter() {
         if t - at <= VPN_FRESH {
             // the real exit of the server, and whether its configs of a protocol go through an Iran
             // tunnel (from how the server is set up: the panel does not see which address a phone used)
@@ -93,7 +93,7 @@ fn build(app: &App) -> UserServers {
 /// The connections of one user right now: [{ "p": protocol, "s": server }]
 pub fn of(app: &App, uid: i64) -> Value {
     let t = now();
-    let mut c = cache().lock().unwrap();
+    let mut c = cache().lock().unwrap_or_else(|e| e.into_inner());
     if t - c.0 >= 3 {
         *c = (t, build(app));
     }
@@ -108,7 +108,7 @@ mod tests {
     fn a_server_report_replaces_the_previous_one() {
         set_vpn("live-test-node", "Germany", vec![(1, "kmix".into()), (2, "wg".into())]);
         set_vpn("live-test-node", "Germany", vec![(2, "awg".into())]);
-        let g = vpn().lock().unwrap();
+        let g = vpn().lock().unwrap_or_else(|e| e.into_inner());
         let (_, name, conns) = g.get("live-test-node").unwrap();
         assert_eq!(name, "Germany");
         assert_eq!(conns, &vec![(2, "awg".to_string())]);
@@ -118,6 +118,6 @@ mod tests {
     fn a_removed_server_is_forgotten() {
         set_vpn("live-test-gone", "Finland", vec![(5, "hy2".into())]);
         forget("live-test-gone");
-        assert!(vpn().lock().unwrap().get("live-test-gone").is_none());
+        assert!(vpn().lock().unwrap_or_else(|e| e.into_inner()).get("live-test-gone").is_none());
     }
 }

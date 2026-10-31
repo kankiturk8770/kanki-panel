@@ -120,7 +120,7 @@ impl App {
             return Arc::new(self.http.clone());
         }
         let key = pin_key(key);
-        let mut g = self.pin_clients.lock().unwrap();
+        let mut g = self.pin_clients.lock().unwrap_or_else(|e| e.into_inner());
         g.entry(key.clone())
             .or_insert_with(|| Arc::new(crate::pin::pinned_client(&self.node_pin_file(&key), std::time::Duration::from_secs(125))))
             .clone()
@@ -133,7 +133,7 @@ impl App {
     /// on delete, on a new address / certificate setting, and when a reinstalled node joins again
     /// (its self-signed certificate is new). The next contact pins again.
     pub fn forget_node_pins(&self, id: &str, addr: &str) {
-        let mut g = self.pin_clients.lock().unwrap();
+        let mut g = self.pin_clients.lock().unwrap_or_else(|e| e.into_inner());
         for key in [id, addr] {
             let _ = std::fs::remove_file(self.node_pin_file(key));
             g.remove(&pin_key(key));
@@ -143,7 +143,7 @@ impl App {
     /// so the certificate the admin added is the one later syncs expect.
     pub fn adopt_node_pin(&self, addr: &str, id: &str) {
         let _ = std::fs::copy(self.node_pin_file(addr), self.node_pin_file(id));
-        self.pin_clients.lock().unwrap().remove(&pin_key(id));
+        self.pin_clients.lock().unwrap_or_else(|e| e.into_inner()).remove(&pin_key(id));
     }
     pub fn data_dir(&self) -> String {
         self.env.get("DATA_DIR").cloned().unwrap_or_else(|| "/var/lib/kanki".into())
@@ -273,6 +273,9 @@ async fn main() {
         pin_clients: Mutex::new(HashMap::new()),
     });
 
+    // OpenVPN left by a very old version (servers installed before it was dropped)
+    let _ = tokio::task::spawn_blocking(admin::drop_legacy_openvpn).await;
+
     if cmd == "node" {
         let port = app.env.get("NODE_PORT").cloned().unwrap_or_else(|| "2096".into());
         // new installs put Caddy (TLS) in front and bind locally; old installs listened publicly
@@ -280,7 +283,7 @@ async fn main() {
         let addr = format!("{}:{}", bind, port);
         eprintln!("kanki node agent {} on {}", VERSION, addr);
         let l = tokio::net::TcpListener::bind(&addr).await.expect("bind");
-        axum::serve(l, api::node_router(app)).await.expect("serve");
+        axum::serve(l, api::node_router(app).into_make_service_with_connect_info::<std::net::SocketAddr>()).await.expect("serve");
         return;
     }
 
@@ -332,5 +335,5 @@ async fn main() {
     let addr = format!("{}:{}", bind, port);
     eprintln!("kanki panel {} on {}", VERSION, addr);
     let l = tokio::net::TcpListener::bind(&addr).await.expect("bind");
-    axum::serve(l, api::master_router(app)).await.expect("serve");
+    axum::serve(l, api::master_router(app).into_make_service_with_connect_info::<std::net::SocketAddr>()).await.expect("serve");
 }

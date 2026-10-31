@@ -71,13 +71,13 @@ fn install(version: &str, panel: Option<(&str, &str, &str)>) -> Result<(), Strin
         return Ok(());
     }
     // a failed install is tried again after a pause, not on every round (every 15 s it filled the log)
-    if let Some((at, ver, e)) = last_fail().lock().unwrap().clone() {
+    if let Some((at, ver, e)) = last_fail().lock().unwrap_or_else(|e| e.into_inner()).clone() {
         if ver == want && at.elapsed() < std::time::Duration::from_secs(300) {
             return Err(e);
         }
     }
     let r = install_now(version, want, panel);
-    *last_fail().lock().unwrap() = match &r {
+    *last_fail().lock().unwrap_or_else(|e| e.into_inner()) = match &r {
         Err(e) => Some((std::time::Instant::now(), want.to_string(), e.clone())),
         Ok(()) => None,
     };
@@ -137,7 +137,7 @@ pub fn applied_ver() -> String {
 pub fn repair_prep() {
     let _ = std::fs::create_dir_all("/var/lib/kanki");
     let _ = std::fs::write(FORCE_FILE, "1");
-    *last_fail().lock().unwrap() = None;
+    *last_fail().lock().unwrap_or_else(|e| e.into_inner()) = None;
     if !sh(&format!("{} version >/dev/null 2>&1", BIN)).0 {
         let _ = std::fs::remove_file(BIN_VER_FILE);
     }
@@ -157,6 +157,7 @@ pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) 
         let _ = std::fs::remove_file(EXTRA_CERTS);
         // removed from this server: its ports are closed and its certificates are no longer renewed
         crate::fw::close("xray");
+        loopback_guard(None);
         for d in old_domains {
             crate::certbot::forget(&d, "kanki-xray.service");
         }
@@ -229,12 +230,143 @@ pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) 
         }
     }
     crate::fw::sync("xray", rules);
+    loopback_guard(Some(&c.config));
     // missing certificates: deploy again on the next round (certbot waits 10 minutes after a failure)
     let _ = std::fs::write(VER_FILE, if partial { format!("{}-nocert", ver) } else { ver.to_string() });
     Ok(())
 }
 
 /// The certbot domains of the config this server runs now (before a new one is written)
+const LO_CHAIN: &str = "KANKI-XRAY-LO";
+
+/// The loopback ports the config itself needs: fallback targets ("80", "127.0.0.1:2002"), outbounds to a
+/// local proxy, and DNS (53)
+fn loopback_ports(config: &Value) -> Vec<u16> {
+    let local = |h: &str| matches!(h.trim_matches(|c| c == '[' || c == ']'), "127.0.0.1" | "localhost" | "::1" | "");
+    let mut v = vec![53u16];
+    for ib in config["inbounds"].as_array().into_iter().flatten() {
+        for f in ib["settings"]["fallbacks"].as_array().into_iter().flatten() {
+            match &f["dest"] {
+                Value::Number(n) => v.extend(n.as_u64().and_then(|p| u16::try_from(p).ok())),
+                Value::String(d) => {
+                    if let Some((h, p)) = d.rsplit_once(':') {
+                        if local(h) {
+                            v.extend(p.parse::<u16>().ok());
+                        }
+                    } else {
+                        v.extend(d.parse::<u16>().ok());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    for o in config["outbounds"].as_array().into_iter().flatten() {
+        for srv in o["settings"]["servers"].as_array().into_iter().chain(o["settings"]["vnext"].as_array()).flatten() {
+            if srv["address"].as_str().map(local).unwrap_or(false) {
+                v.extend(srv["port"].as_u64().and_then(|p| u16::try_from(p).ok()));
+            }
+        }
+    }
+    // a local DNS server ("127.0.0.1:5353", "https://localhost:8053/dns-query", {address, port}) and a
+    // freedom outbound that redirects to a local port
+    let host_port = |a: &str| -> Option<u16> {
+        let rest = a.split_once("://").map(|x| x.1).unwrap_or(a);
+        let hp = rest.split('/').next().unwrap_or("");
+        let (h, p) = hp.rsplit_once(':')?;
+        if !local(h) {
+            return None;
+        }
+        p.parse::<u16>().ok()
+    };
+    for d in config["dns"]["servers"].as_array().into_iter().flatten() {
+        match d {
+            Value::String(a) => v.extend(host_port(a)),
+            Value::Object(_) => {
+                let a = d["address"].as_str().unwrap_or("");
+                if let Some(p) = d["port"].as_u64().and_then(|p| u16::try_from(p).ok()) {
+                    if local(a.split_once("://").map(|x| x.1).unwrap_or(a).split('/').next().unwrap_or("")) {
+                        v.push(p);
+                    }
+                }
+                v.extend(host_port(a));
+            }
+            _ => {}
+        }
+    }
+    for o in config["outbounds"].as_array().into_iter().flatten() {
+        v.extend(o["settings"]["redirect"].as_str().and_then(host_port));
+    }
+    v.retain(|p| *p > 0 && *p != API_PORT);
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// Xray must not open connections to this server's own loopback (its control API has no password; the
+/// panel and the other local services listen there) except to the ports its own config needs. A domain
+/// that resolves to 127.0.0.1 gets past routing rules, so this is done by the kernel for the Xray service
+/// only (its cgroup). Without iptables' cgroup match it stays with the routing rules. Blocking.
+fn loopback_guard(config: Option<&Value>) {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    // only the loopback addresses: the server's public address also goes out on `lo` and stays as it was
+    for (t, lo) in [("iptables", "127.0.0.0/8"), ("ip6tables", "::1/128")] {
+        let unit_match = format!("-o lo -d {} -m cgroup --path system.slice/kanki-xray.service -m conntrack --ctstate NEW", lo);
+        if !sh(&format!("command -v {} >/dev/null 2>&1", t)).0 {
+            continue;
+        }
+        let jump = format!("{} -w -C OUTPUT {} -j {} 2>/dev/null", t, unit_match, LO_CHAIN);
+        let Some(cfg) = config else {
+            while sh(&jump).0 {
+                let _ = sh(&format!("{} -w -D OUTPUT {} -j {}", t, unit_match, LO_CHAIN));
+            }
+            let _ = sh(&format!("{t} -w -F {c} 2>/dev/null; {t} -w -X {c} 2>/dev/null", t = t, c = LO_CHAIN));
+            continue;
+        };
+        let _ = sh(&format!("{} -w -N {} 2>/dev/null", t, LO_CHAIN));
+        let _ = sh(&format!("{} -w -F {}", t, LO_CHAIN));
+        for p in loopback_ports(cfg) {
+            let _ = sh(&format!("{t} -w -A {c} -p tcp --dport {p} -j RETURN; {t} -w -A {c} -p udp --dport {p} -j RETURN", t = t, c = LO_CHAIN, p = p));
+        }
+        let _ = sh(&format!("{} -w -A {} -j REJECT", t, LO_CHAIN));
+        // the kernel ties the rule to the service's cgroup of that moment, and a restart makes a new one:
+        // the jump is always put in again
+        while sh(&jump).0 {
+            let _ = sh(&format!("{} -w -D OUTPUT {} -j {}", t, unit_match, LO_CHAIN));
+        }
+        let (ok, out) = sh(&format!("{} -w -I OUTPUT {} -j {} 2>&1", t, unit_match, LO_CHAIN));
+        if !ok {
+            // no cgroup match here (or Xray is not running): nothing is blocked by the kernel, the
+            // routing rules stay
+            let _ = sh(&format!("{t} -w -F {c} 2>/dev/null; {t} -w -X {c} 2>/dev/null", t = t, c = LO_CHAIN));
+            WARNED.call_once(|| eprintln!("xray: the kernel loopback guard is not available ({}); the routing rules still block 127.0.0.1", out.lines().last().unwrap_or("")));
+        }
+    }
+    *guard_pid().lock().unwrap_or_else(|e| e.into_inner()) = if config.is_some() { xray_pid() } else { String::new() };
+}
+
+/// the Xray process the loopback guard was last set for
+fn guard_pid() -> &'static Mutex<String> {
+    static P: std::sync::OnceLock<Mutex<String>> = std::sync::OnceLock::new();
+    P.get_or_init(|| Mutex::new(String::new()))
+}
+
+fn xray_pid() -> String {
+    sh("systemctl show -p MainPID --value kanki-xray.service 2>/dev/null").1.trim().to_string()
+}
+
+/// Xray was restarted by systemd (a crash) since the guard was set: set it again for the new process
+fn heal_loopback_guard(conf: &Value) {
+    let pid = xray_pid();
+    if pid.is_empty() || pid == "0" || conf.is_null() {
+        return;
+    }
+    let last = guard_pid().lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if pid != last {
+        loopback_guard(Some(conf));
+    }
+}
+
 fn cert_domains_on_disk() -> Vec<String> {
     let conf: Value = std::fs::read_to_string(CONF_FILE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
     let mut v = acme_domains(&conf);
@@ -275,7 +407,7 @@ fn certs_for(config: &mut Value, extra: &[String]) -> bool {
         }
     }
     if domains.is_empty() {
-        cert_errors().lock().unwrap().clear();
+        cert_errors().lock().unwrap_or_else(|e| e.into_inner()).clear();
         return false;
     }
     // whatever holds port 80 (an Xray inbound too) is set aside for certbot and given back right after
@@ -286,7 +418,7 @@ fn certs_for(config: &mut Value, extra: &[String]) -> bool {
         }
     }
     let missing: Vec<String> = domains.into_iter().filter(|d| !crate::certbot::have(d)).collect();
-    *cert_errors().lock().unwrap() = errs;
+    *cert_errors().lock().unwrap_or_else(|e| e.into_inner()) = errs;
     if missing.is_empty() {
         return false;
     }
@@ -324,7 +456,7 @@ fn collect() {
         return;
     }
     let v: Value = serde_json::from_str(&out).unwrap_or(Value::Null);
-    let mut c = counters().lock().unwrap();
+    let mut c = counters().lock().unwrap_or_else(|e| e.into_inner());
     let mut online = vec![];
     for s in v["stat"].as_array().into_iter().flatten() {
         let name = s["name"].as_str().unwrap_or("");
@@ -382,18 +514,21 @@ pub fn status() -> Value {
     if active {
         collect();
     }
-    let c = counters().lock().unwrap();
+    let c = counters().lock().unwrap_or_else(|e| e.into_inner());
     let users: serde_json::Map<String, Value> = c.users.iter().map(|(k, v)| (k.to_string(), json!([v]))).collect();
     let conf: Value = std::fs::read_to_string(CONF_FILE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    if active {
+        heal_loopback_guard(&conf);
+    }
     let mut certs: Vec<String> = acme_domains(&conf).into_iter().filter(|d| crate::certbot::have(d)).collect();
     certs.extend(std::fs::read_to_string(EXTRA_CERTS).unwrap_or_default().lines().map(|l| l.trim().to_string()).filter(|d| !d.is_empty() && crate::certbot::have(d)));
-    certs.extend(cert_errors().lock().unwrap().keys().filter(|d| crate::certbot::have(d)).cloned());
+    certs.extend(cert_errors().lock().unwrap_or_else(|e| e.into_inner()).keys().filter(|d| crate::certbot::have(d)).cloned());
     certs.sort();
     certs.dedup();
     let mut st = json!({
         "active": active, "run": c.run, "users": users, "inbounds": c.inbounds, "online": c.online,
         "ver": applied_ver(), "core": std::fs::read_to_string(BIN_VER_FILE).unwrap_or_default().trim(),
-        "certs": certs, "cert_errors": cert_errors().lock().unwrap().clone(),
+        "certs": certs, "cert_errors": cert_errors().lock().unwrap_or_else(|e| e.into_inner()).clone(),
         // inbound ports that another program holds
         "taken": crate::certbot::taken_json(&crate::certbot::taken_cached(&needed_ports(), "kanki-xray.service")),
     });
@@ -401,4 +536,18 @@ pub fn status() -> Value {
         st["error"] = json!(sh("journalctl -u kanki-xray.service -n 5 --no-pager -o cat 2>/dev/null").1.lines().last().unwrap_or("not running").to_string());
     }
     st
+}
+
+#[cfg(test)]
+mod loopback_tests {
+    #[test]
+    fn the_ports_the_config_needs_stay_open() {
+        let c = serde_json::json!({
+            "inbounds": [{ "settings": { "fallbacks": [{ "dest": 8080 }, { "dest": "127.0.0.1:2002" }, { "dest": "80" }, { "dest": "1.2.3.4:443" }, { "dest": 10085 }] } }],
+            "outbounds": [{ "settings": { "servers": [{ "address": "127.0.0.1", "port": 1080 }, { "address": "8.8.8.8", "port": 9 }] } }, { "settings": { "redirect": "127.0.0.1:7000" } }],
+            "dns": { "servers": ["1.1.1.1", "127.0.0.1:5353", "https://localhost:8053/dns-query", { "address": "127.0.0.1", "port": 5300 }, "https://dns.google/dns-query"] }
+        });
+        // the API port never, an outside address never
+        assert_eq!(super::loopback_ports(&c), vec![53, 80, 1080, 2002, 5300, 5353, 7000, 8053, 8080]);
+    }
 }

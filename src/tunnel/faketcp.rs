@@ -432,19 +432,19 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<FtClient> {
         let mut w: Vec<u8> = Vec::with_capacity(2048);
         loop {
             let Ok((n, from)) = inner1.recv_from(&mut a).await else { break };
-            *ka1.lock().unwrap() = Some(from);
+            *ka1.lock().unwrap_or_else(|e| e.into_inner()) = Some(from);
             let mut off = 0;
             while off < n {
                 let take = (n - off).min(MAX_SEG);
                 w.clear();
                 mask1.seal(&a[off..off + take], &mut w);
-                let mut c = *st1.lock().unwrap();
+                let mut c = *st1.lock().unwrap_or_else(|e| e.into_inner());
                 let pkt = build_packet(c.me, c.server, c.seq, c.ack, FLAG_PSH | FLAG_ACK, &w);
                 if raw1.send(c.server, &pkt).await.is_err() {
                     break;
                 }
                 c.seq = c.seq.wrapping_add(w.len() as u32);
-                *st1.lock().unwrap() = c;
+                *st1.lock().unwrap_or_else(|e| e.into_inner()) = c;
                 off += take;
             }
         }
@@ -470,8 +470,8 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<FtClient> {
             let mut p = pl.to_vec();
             let Some((s, e)) = mask.open(&mut p) else { continue };
             // acknowledge only segments that really are ours
-            state.lock().unwrap().ack = seq.wrapping_add(pl.len() as u32);
-            let dst = *kcp_addr.lock().unwrap();
+            state.lock().unwrap_or_else(|e| e.into_inner()).ack = seq.wrapping_add(pl.len() as u32);
+            let dst = *kcp_addr.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(dst) = dst {
                 let _ = inner.send_to(&p[s..e], dst).await;
             }
@@ -505,7 +505,7 @@ impl Drop for ServerFt {
         for t in &self.tasks {
             t.abort();
         }
-        for (_, p) in self.peers.lock().unwrap().drain() {
+        for (_, p) in self.peers.lock().unwrap_or_else(|e| e.into_inner()).drain() {
             p.pump.abort();
         }
     }
@@ -526,12 +526,12 @@ async fn ft_pump(sock: Arc<UdpSocket>, raw: Arc<Raw>, mask: Arc<Mask>, cli: Sock
             w.clear();
             mask.seal(&b[off..off + take], &mut w);
             let sq = {
-                let mut g = seq.lock().unwrap();
+                let mut g = seq.lock().unwrap_or_else(|e| e.into_inner());
                 let s = *g;
                 *g = g.wrapping_add(w.len() as u32);
                 s
             };
-            let ak = *ack.lock().unwrap();
+            let ak = *ack.lock().unwrap_or_else(|e| e.into_inner());
             let pkt = build_packet(srv, cli, sq, ak, FLAG_PSH | FLAG_ACK, &w);
             if raw.send(cli, &pkt).await.is_err() {
                 break;
@@ -585,10 +585,10 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
             let mut plv = pl.to_vec();
             let Some((s, e)) = mask1.open(&mut plv) else { continue };
             let next_ack = seq.wrapping_add(pl.len() as u32);
-            let known = match peers1.lock().unwrap().get_mut(&src) {
+            let known = match peers1.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&src) {
                 Some(p) => {
                     p.last = Instant::now();
-                    *p.ack.lock().unwrap() = next_ack;
+                    *p.ack.lock().unwrap_or_else(|e| e.into_inner()) = next_ack;
                     Some(p.sock.clone())
                 }
                 None => None,
@@ -596,7 +596,7 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
             let sock = match known {
                 Some(sock) => sock,
                 None => {
-                    if peers1.lock().unwrap().len() >= MAX_PEERS {
+                    if peers1.lock().unwrap_or_else(|e| e.into_inner()).len() >= MAX_PEERS {
                         continue;
                     }
                     let Ok(sock) = UdpSocket::bind("127.0.0.1:0").await else { continue };
@@ -608,7 +608,7 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
                     let sq = Arc::new(Mutex::new(ack));
                     let ak = Arc::new(Mutex::new(next_ack));
                     let pump = tokio::spawn(ft_pump(sock.clone(), raw1.clone(), mask1.clone(), src, SocketAddrV4::new(*dst.ip(), port), sq, ak.clone()));
-                    peers1.lock().unwrap().insert(src, FtPeer { sock: sock.clone(), last: Instant::now(), pump, ack: ak });
+                    peers1.lock().unwrap_or_else(|e| e.into_inner()).insert(src, FtPeer { sock: sock.clone(), last: Instant::now(), pump, ack: ak });
                     sock
                 }
             };
@@ -621,7 +621,7 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
     let reaper = tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(15)).await;
-            let mut g = peers2.lock().unwrap();
+            let mut g = peers2.lock().unwrap_or_else(|e| e.into_inner());
             g.retain(|_, p| {
                 let keep = !p.pump.is_finished() && p.last.elapsed() < PEER_IDLE;
                 if !keep {

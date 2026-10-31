@@ -64,7 +64,7 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<ClientObfs> {
         let mut w: Vec<u8> = Vec::with_capacity(2048);
         loop {
             let Ok((n, from)) = inner1.recv_from(&mut a).await else { break };
-            *ka1.lock().unwrap() = Some(from);
+            *ka1.lock().unwrap_or_else(|e| e.into_inner()) = Some(from);
             w.clear();
             mask1.seal(&a[..n], &mut w);
             let _ = outer1.send(&w).await;
@@ -80,7 +80,7 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<ClientObfs> {
                 Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => continue,
                 Err(_) => break,
             };
-            let dst = *kcp_addr.lock().unwrap();
+            let dst = *kcp_addr.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(dst) = dst {
                 if let Some((s, e)) = mask.open(&mut b[..n]) {
                     let _ = inner.send_to(&b[s..e], dst).await;
@@ -112,7 +112,7 @@ impl Drop for ServerObfs {
         for t in &self.tasks {
             t.abort();
         }
-        for (_, p) in self.peers.lock().unwrap().drain() {
+        for (_, p) in self.peers.lock().unwrap_or_else(|e| e.into_inner()).drain() {
             p.pump.abort();
         }
     }
@@ -154,7 +154,7 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
             // not ours (a scanner, a probe, noise): no peer, no socket, no answer
             let Some((s, e)) = mask1.open(&mut buf[..n]) else { continue };
             let known = {
-                let mut g = peers1.lock().unwrap();
+                let mut g = peers1.lock().unwrap_or_else(|e| e.into_inner());
                 let r = g.get_mut(&from).map(|p| {
                     p.last = Instant::now();
                     p.sock.clone()
@@ -164,7 +164,7 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
             let sock = match known {
                 Some(sock) => sock,
                 None => {
-                    let full = peers1.lock().unwrap().len() >= MAX_PEERS;
+                    let full = peers1.lock().unwrap_or_else(|e| e.into_inner()).len() >= MAX_PEERS;
                     if full {
                         continue;
                     }
@@ -174,7 +174,7 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
                     }
                     let sock = Arc::new(sock);
                     let pump = tokio::spawn(pump(sock.clone(), public1.clone(), mask1.clone(), from));
-                    peers1.lock().unwrap().insert(from, Peer { sock: sock.clone(), last: Instant::now(), pump });
+                    peers1.lock().unwrap_or_else(|e| e.into_inner()).insert(from, Peer { sock: sock.clone(), last: Instant::now(), pump });
                     sock
                 }
             };
@@ -187,7 +187,7 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
     let reaper = tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(15)).await;
-            let mut g = peers2.lock().unwrap();
+            let mut g = peers2.lock().unwrap_or_else(|e| e.into_inner());
             g.retain(|_, p| {
                 let keep = !p.pump.is_finished() && p.last.elapsed() < PEER_IDLE;
                 if !keep {

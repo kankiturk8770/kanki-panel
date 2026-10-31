@@ -163,7 +163,7 @@ fn last_status() -> &'static Mutex<HashMap<String, Value>> {
 
 /// What the agent of server `sid` reported about the listener.
 pub fn ingest(app: &App, sid: &str, st: &Value) {
-    last_status().lock().unwrap().insert(sid.to_string(), st.clone());
+    last_status().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), st.clone());
     let s = settings(app);
     if on(&s) && !s.ready && s.server == sid && st["active"].as_bool() == Some(true) && st["domain"].as_str() == Some(s.domain.as_str()) && st["port"].as_u64() == Some(s.port as u64) {
         save(app, &SubIran { ready: true, ..s });
@@ -208,7 +208,7 @@ async fn get_cfg(State(app): St, h: HeaderMap) -> Response {
         .map(|(k, v)| json!({ "id": k, "name": v, "ip": crate::tunnel::panel::seen_ip(k).unwrap_or_default(), "loc": locs.get(k).map(|x| x.0.clone()).unwrap_or_default() }))
         .collect();
     agents.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-    let status = last_status().lock().unwrap().get(&s.server).cloned().unwrap_or(Value::Null);
+    let status = last_status().lock().unwrap_or_else(|e| e.into_inner()).get(&s.server).cloned().unwrap_or(Value::Null);
     let reused = on(&s) && upstream_port(&app, &s) != LOCAL_PORT;
     let links = |sid: &str| crate::tunnel::panel::links_of(sid, TUNNEL_ID);
     let tunnel = if !on(&s) { "" } else if reused { "reused" } else if links(&s.server) > 0 && links("local") > 0 { "up" } else { "down" };
@@ -300,7 +300,7 @@ impl Runner {
         if let Some(t) = self.task.take() {
             t.abort();
         }
-        *self.status.lock().unwrap() = Value::Null;
+        *self.status.lock().unwrap_or_else(|e| e.into_inner()) = Value::Null;
         match &want {
             Some(c) => {
                 eprintln!("subscription: https://{}:{}", c.domain, c.port);
@@ -330,7 +330,7 @@ impl Runner {
 
     /// Null when there is no listener here
     pub fn status(&self) -> Value {
-        self.status.lock().unwrap().clone()
+        self.status.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
@@ -359,7 +359,7 @@ fn cert_stamp(domain: &str) -> Option<std::time::SystemTime> {
 
 async fn serve(c: SubCfg, status: Arc<Mutex<Value>>) {
     let set = |active: bool, ssl: bool, error: &str| {
-        *status.lock().unwrap() = json!({ "active": active, "ssl": ssl, "domain": c.domain, "port": c.port, "error": error });
+        *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({ "active": active, "ssl": ssl, "domain": c.domain, "port": c.port, "error": error });
     };
     loop {
         // SSL first: certbot frees port 80 by itself, and waits after a failure before it tries again
@@ -435,7 +435,9 @@ pub fn proxy_head(head: &str, client: &str) -> Option<String> {
     }
     let mut out = format!("{} {} {}\r\n", method, target, ver);
     for l in lines.filter(|l| !l.is_empty()) {
-        if l.starts_with(' ') || l.starts_with('\t') {
+        // a bare CR or LF inside a line is a line break to the panel's HTTP parser: it would carry a header
+        // past the filter below (an X-Forwarded-For of the sender's choosing skips the request limits)
+        if l.starts_with(' ') || l.starts_with('\t') || l.contains('\n') || l.contains('\r') {
             return None;
         }
         let name = l.split(':').next().unwrap_or("").trim().to_ascii_lowercase();
@@ -509,6 +511,9 @@ mod tests {
 
     #[test]
     fn head_is_rewritten_for_the_panel() {
+        // a header hidden behind a bare line feed is refused (it would get past the filter)
+        assert!(proxy_head("GET /sub/abc HTTP/1.1\r\nUser-Agent: x\nX-Forwarded-For: 127.0.0.1\r\n\r\n", "5.6.7.8").is_none());
+        assert!(proxy_head("GET /sub/abc HTTP/1.1\r\nUser-Agent: x\rX-Forwarded-For: 127.0.0.1\r\n\r\n", "5.6.7.8").is_none());
         let h = "GET /sub/abc HTTP/1.1\r\nHost: sub.example.com:2053\r\nConnection: keep-alive\r\nX-Forwarded-For: 6.6.6.6\r\nUser-Agent: v2rayNG\r\n\r\n";
         let out = proxy_head(h, "5.6.7.8").unwrap();
         assert_eq!(out, "GET /sub/abc HTTP/1.1\r\nHost: sub.example.com:2053\r\nUser-Agent: v2rayNG\r\nX-Forwarded-For: 5.6.7.8\r\nX-Forwarded-Proto: https\r\nConnection: close\r\n\r\n");

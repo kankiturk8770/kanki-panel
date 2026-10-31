@@ -227,7 +227,7 @@ fn host_of(app: &App, sid: &str) -> String {
             return s.addr.trim().to_string();
         }
     }
-    seen().lock().unwrap().get(sid).map(|x| x.ip.clone()).unwrap_or_default()
+    seen().lock().unwrap_or_else(|e| e.into_inner()).get(sid).map(|x| x.ip.clone()).unwrap_or_default()
 }
 
 fn hostport(host: &str, port: u16) -> String {
@@ -332,7 +332,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
     // a running smart-tunnel test adds one short-lived test tunnel per transport and per direction:
     // reverse (the exit dials the entry) on the first six ports, direct (the entry dials the exit)
     // on the next six
-    if let Some(p) = probe_job().lock().unwrap().clone() {
+    if let Some(p) = probe_job().lock().unwrap_or_else(|e| e.into_inner()).clone() {
         if !p.finished && now() - p.started < PROBE_MAX && (p.entry == sid || p.exit == sid) {
             let role = if p.entry == sid { "entry" } else { "exit" };
             // the raw ping has no tunnel: only the entry acts, pinging the exit host directly
@@ -408,7 +408,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
 
 /// What the panel last heard from agent `sid`: (when, version, address, VPN install state).
 pub(crate) fn agent_state(sid: &str) -> Option<(i64, String, String, Value)> {
-    seen().lock().unwrap().get(sid).map(|x| (x.at, x.version.clone(), x.ip.clone(), x.setup.clone()))
+    seen().lock().unwrap_or_else(|e| e.into_inner()).get(sid).map(|x| (x.at, x.version.clone(), x.ip.clone(), x.setup.clone()))
 }
 
 /// The tunnels server `sid` runs (for the port checks of other features).
@@ -423,12 +423,12 @@ pub(crate) fn kanki_tunnels(app: &App) -> Vec<Tunnel> {
 
 /// Open links of tunnel `id` on server `sid` at its last report.
 pub(crate) fn links_of(sid: &str, id: &str) -> usize {
-    seen().lock().unwrap().get(sid).and_then(|x| x.status.iter().find(|s| s.id == id).map(|s| s.links)).unwrap_or(0)
+    seen().lock().unwrap_or_else(|e| e.into_inner()).get(sid).and_then(|x| x.status.iter().find(|s| s.id == id).map(|s| s.links)).unwrap_or(0)
 }
 
 /// The address an agent server last reported from (DNS answers it for routed names).
 pub(crate) fn seen_ip(sid: &str) -> Option<String> {
-    seen().lock().unwrap().get(sid).map(|x| x.ip.clone()).filter(|x| !x.is_empty())
+    seen().lock().unwrap_or_else(|e| e.into_inner()).get(sid).map(|x| x.ip.clone()).filter(|x| !x.is_empty())
 }
 
 /// "host:port" other servers dial server `sid` on.
@@ -669,7 +669,7 @@ fn transport_checks(app: &App, t: &Tunnel) -> Result<(), String> {
         return Ok(());
     }
     let names: HashMap<String, String> = servers(app).into_iter().map(|s| (s.id, s.name)).collect();
-    let sn = seen().lock().unwrap();
+    let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
     for tr in std::iter::once(&t.transport).chain(t.order.iter()) {
         for sid in [&t.entry, &t.exit] {
             if let Some(x) = sn.get(sid.as_str()) {
@@ -692,7 +692,7 @@ fn transport_checks(app: &App, t: &Tunnel) -> Result<(), String> {
 fn awg_checks(app: &App, list: &[Tunnel], t: &Tunnel) -> Result<(), String> {
     let names: HashMap<String, String> = servers(app).into_iter().map(|s| (s.id, s.name)).collect();
     if t.enabled {
-        let sn = seen().lock().unwrap();
+        let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
         for sid in [&t.entry, &t.exit] {
             if sid == "local" {
                 continue;
@@ -869,7 +869,7 @@ fn hy2_checks(app: &App, t: &Tunnel) -> Result<(), String> {
         return Ok(());
     }
     let names: HashMap<String, String> = servers(app).into_iter().map(|s| (s.id, s.name)).collect();
-    let sn = seen().lock().unwrap();
+    let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
     for sid in [&t.entry, &t.exit] {
         if sid == "local" {
             continue;
@@ -1083,7 +1083,7 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
     // an agent too old for a transport would run it as plain TCP and report plain-TCP numbers
     // under its name: such transports are left out of the test
     let (transports, skipped): (Vec<String>, Vec<String>) = {
-        let sn = seen().lock().unwrap();
+        let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
         let ver = |sid: &str| sn.get(sid).map(|x| x.version.clone()).unwrap_or_default();
         let (ve, vx) = (ver(&entry), ver(&exit));
         transports.into_iter().partition(|tr| agent_knows(&ve, tr) && agent_knows(&vx, tr))
@@ -1114,7 +1114,7 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         baseline,
     };
     let id = job.id.clone();
-    *probe_job().lock().unwrap() = Some(job);
+    *probe_job().lock().unwrap_or_else(|e| e.into_inner()) = Some(job);
     let note = if skipped.is_empty() {
         String::new()
     } else {
@@ -1125,11 +1125,11 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
 
 async fn probe_get(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "nodes");
-    let mut g = probe_job().lock().unwrap();
+    let mut g = probe_job().lock().unwrap_or_else(|e| e.into_inner());
     let Some(p) = g.as_mut() else { return Json(json!({"job": null})).into_response() };
     let t = now();
     if !p.finished {
-        let seen = seen().lock().unwrap().clone();
+        let seen = seen().lock().unwrap_or_else(|e| e.into_inner()).clone();
         let entry_st = seen.get(&p.entry).map(|x| x.status.clone()).unwrap_or_default();
         let exit_st = seen.get(&p.exit).map(|x| x.status.clone()).unwrap_or_default();
         let mut all_done = true;
@@ -1185,7 +1185,7 @@ async fn probe_get(State(app): St, h: HeaderMap) -> Response {
 
 async fn probe_stop(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "nodes");
-    if let Some(p) = probe_job().lock().unwrap().as_mut() {
+    if let Some(p) = probe_job().lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
         p.finished = true;
     }
     Json(json!({"ok": true})).into_response()
@@ -1203,11 +1203,11 @@ fn down_since() -> &'static Mutex<HashMap<String, i64>> {
 /// whose server is offline is left alone: the other tunnels keep carrying the users meanwhile.
 fn rotate_tick(app: &App) {
     let t = now();
-    let seen = seen().lock().unwrap().clone();
+    let seen = seen().lock().unwrap_or_else(|e| e.into_inner()).clone();
     let fresh = |sid: &str| seen.get(sid).map(|x| t - x.at < 20).unwrap_or(false);
     let mut list = tunnels(app);
     let mut changed = false;
-    let mut ds = down_since().lock().unwrap();
+    let mut ds = down_since().lock().unwrap_or_else(|e| e.into_inner());
     for tu in list.iter_mut() {
         if !tu.enabled || !tu.auto || tu.transport == "cdn" || !tu.kind.is_empty() {
             ds.remove(&tu.id);
@@ -1263,7 +1263,7 @@ pub async fn local_loop(app: Arc<App>) {
         let _ = tokio::task::spawn_blocking(move || super::agent::open_ports(&ps)).await;
         let st = mgr.statuses().await;
         note_report("local", &st, false, false);
-        seen().lock().unwrap().insert(
+        seen().lock().unwrap_or_else(|e| e.into_inner()).insert(
             "local".into(),
             Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, emergency: Value::Null, fw: Value::Null, listen: Value::Null, setup: Value::Null },
         );
@@ -1284,7 +1284,7 @@ pub async fn local_loop(app: Arc<App>) {
         })
         .await
         .unwrap_or(Value::Null);
-        if let Some(x) = seen().lock().unwrap().get_mut("local") {
+        if let Some(x) = seen().lock().unwrap_or_else(|e| e.into_inner()).get_mut("local") {
             x.emergency = st;
         }
         rotate_tick(&app);
@@ -1302,7 +1302,7 @@ pub async fn local_loop(app: Arc<App>) {
 /// (key, display name, ok) for every tunnel server and every tunnel that can be judged right now.
 /// Used by the Telegram alerts. A tunnel is only judged when both of its servers are reporting.
 pub fn health(app: &App) -> Vec<(String, String, bool)> {
-    let seen = seen().lock().unwrap().clone();
+    let seen = seen().lock().unwrap_or_else(|e| e.into_inner()).clone();
     let t = now();
     let fresh = |sid: &str| sid == "local" || seen.get(sid).map(|x| t - x.at < 20).unwrap_or(false);
     let mut out = vec![];
@@ -1554,7 +1554,7 @@ pub fn server_hosts(app: &App) -> Vec<(String, String)> {
 
 async fn list(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "nodes");
-    let seen = seen().lock().unwrap().clone();
+    let seen = seen().lock().unwrap_or_else(|e| e.into_inner()).clone();
     let t = now();
     let locs = server_locs(&app);
     let ccs = crate::exitgeo::all_cc(&app);
@@ -1630,7 +1630,7 @@ pub(crate) fn listening_on(sid: &str) -> Option<Vec<(u16, bool, String, String)>
     if sid == "local" {
         return Some(crate::certbot::listeners());
     }
-    let sn = seen().lock().unwrap();
+    let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
     let x = sn.get(sid)?;
     if now() - x.at > 60 {
         return None;
@@ -2039,7 +2039,7 @@ fn gre_ensure(want: &[(u8, String)]) {
     if existing.is_empty() && want.is_empty() {
         return;
     }
-    let mut ap = gre_applied().lock().unwrap();
+    let mut ap = gre_applied().lock().unwrap_or_else(|e| e.into_inner());
     for name in &existing {
         if !want.iter().any(|(n, _)| format!("kgre{}", n) == *name) {
             run(&["link", "del", name.as_str()]);
@@ -2221,7 +2221,7 @@ fn fw_closes() -> &'static Mutex<HashMap<String, Vec<String>>> {
 
 /// "Try SSL again": the server forgets the waits after earlier certbot failures (every SSL of that server)
 pub(crate) fn ask_ssl_retry(id: &str) {
-    ssl_retries().lock().unwrap().insert(id.to_string());
+    ssl_retries().lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string());
 }
 
 async fn server_ssl_retry(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
@@ -2240,7 +2240,7 @@ async fn server_ssl_retry(State(app): St, h: HeaderMap, Path(id): Path<String>) 
 /// The firewall of a server: { owners: { tunnels: [...], dns: [...] }, unused: ["8443/tcp"] }
 async fn server_fw(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
     let _ = guard!(app, h, "nodes");
-    let v = if id == "local" { tokio::task::spawn_blocking(crate::fw::report).await.unwrap_or_default() } else { seen().lock().unwrap().get(&id).map(|x| x.fw.clone()).unwrap_or(Value::Null) };
+    let v = if id == "local" { tokio::task::spawn_blocking(crate::fw::report).await.unwrap_or_default() } else { seen().lock().unwrap_or_else(|e| e.into_inner()).get(&id).map(|x| x.fw.clone()).unwrap_or(Value::Null) };
     Json(v).into_response()
 }
 
@@ -2258,7 +2258,7 @@ async fn server_fw_close(State(app): St, h: HeaderMap, Path(id): Path<String>, J
     if !servers(&app).iter().any(|s| s.id == id) {
         return err(StatusCode::NOT_FOUND, "unknown server");
     }
-    fw_closes().lock().unwrap().insert(id, rules);
+    fw_closes().lock().unwrap_or_else(|e| e.into_inner()).insert(id, rules);
     Json(json!({ "ok": true })).into_response()
 }
 
@@ -2283,7 +2283,7 @@ async fn server_free_ports(State(app): St, h: HeaderMap, Path(id): Path<String>,
     if units.is_empty() {
         return err(StatusCode::BAD_REQUEST, "no service to stop");
     }
-    frees().lock().unwrap().insert(id, units);
+    frees().lock().unwrap_or_else(|e| e.into_inner()).insert(id, units);
     Json(json!({ "ok": true })).into_response()
 }
 
@@ -2320,6 +2320,7 @@ pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(
     }
     list.retain(|s| s.id != id);
     save_servers(app, &list);
+    mark_removed(app, id);
     crate::dns::panel::forget_server(app, id);
     crate::xray::panel::forget_server(app, id);
     crate::subiran::forget_server(app, id);
@@ -2327,7 +2328,7 @@ pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(
         app.db.set("emer_server", "");
     }
     crate::exitgeo::forget(app, &[crate::exitgeo::srv_key(id), crate::exitgeo::xray_key(id)]);
-    seen().lock().unwrap().remove(id);
+    seen().lock().unwrap_or_else(|e| e.into_inner()).remove(id);
     Ok(())
 }
 
@@ -2410,7 +2411,7 @@ pub(crate) fn emer_pub(app: &App) -> String {
 async fn emer_get(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "settings");
     let sid = app.db.get("emer_server");
-    let st = seen().lock().unwrap().get(&sid).map(|x| x.emergency.clone()).unwrap_or(Value::Null);
+    let st = seen().lock().unwrap_or_else(|e| e.into_inner()).get(&sid).map(|x| x.emergency.clone()).unwrap_or(Value::Null);
     let users = app.db.users().len();
     Json(json!({
         "on": app.db.get("emer_on") == "1", "server": sid, "domain": app.db.get("emer_domain"),
@@ -2553,9 +2554,13 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     let id = b["id"].as_str().unwrap_or("").to_string();
     let token = b["token"].as_str().unwrap_or("").to_string();
     let Some(s) = servers(&app).into_iter().find(|s| s.id == id) else {
-        // unknown or removed: the agent stops its tunnels
-        note_gone(&id);
-        return (StatusCode::GONE, "this server is not in the panel any more").into_response();
+        // removed here: the agent stops its tunnels and uninstalls. Unknown (never added here): it is
+        // told nothing that makes it remove anything
+        if was_removed(&app, &id) {
+            note_gone(&id);
+            return (StatusCode::GONE, "this server is not in the panel any more").into_response();
+        }
+        return (StatusCode::NOT_FOUND, "this panel does not know this server").into_response();
     };
     if token.is_empty() || !util::ct_eq(&token, &s.token) {
         return err(StatusCode::FORBIDDEN, "wrong token");
@@ -2564,7 +2569,7 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     note_report(&id, &status, b["xray"]["active"].as_bool() == Some(true), b["dns"]["active"].as_bool() == Some(true));
     let fresh_ip = util::client_ip(&h);
     {
-        let mut sn = seen().lock().unwrap();
+        let mut sn = seen().lock().unwrap_or_else(|e| e.into_inner());
         let prev = sn.get(&id).map(|x| x.ip.clone()).unwrap_or_default();
         let ip = sticky_ip(&prev, &fresh_ip);
         sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status, emergency: b["emergency"].clone(), fw: b["fw"].clone(), listen: b["listen"].clone(), setup: b["setup"].clone() });
@@ -2598,9 +2603,9 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     };
     let subsrv = crate::subiran::cfg_for(&app, &id);
     // services to stop for our ports (asked in Health)
-    let free = frees().lock().unwrap().remove(&id).unwrap_or_default();
-    let ssl_retry = ssl_retries().lock().unwrap().remove(&id);
-    let fw_close = fw_closes().lock().unwrap().remove(&id).unwrap_or_default();
+    let free = frees().lock().unwrap_or_else(|e| e.into_inner()).remove(&id).unwrap_or_default();
+    let ssl_retry = ssl_retries().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+    let fw_close = fw_closes().lock().unwrap_or_else(|e| e.into_inner()).remove(&id).unwrap_or_default();
     // the VPN part of this machine, when the admin asked for it (sent until the agent says it started)
     let setup = crate::servers::setup_for(&app, &s, &b["setup"]);
     Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "setup": setup, "panel": crate::servers::panel_url(&app) })).into_response()
@@ -2647,7 +2652,7 @@ pub(crate) async fn run_update_all(app: &Arc<App>) -> Value {
     let latest = crate::admin::latest_version(&app).await.unwrap_or_default();
     let target = if latest.is_empty() { crate::VERSION.to_string() } else { latest.clone() };
     let panel_old = !latest.is_empty() && crate::admin::newer(&latest, crate::VERSION);
-    let seen_now = seen().lock().unwrap().clone();
+    let seen_now = seen().lock().unwrap_or_else(|e| e.into_inner()).clone();
     let srv = servers(&app);
     let mut covered: HashSet<String> = HashSet::new();
     let mut jobs = vec![];
@@ -2917,7 +2922,7 @@ fn removals() -> &'static Mutex<HashMap<String, Removal>> {
 /// A server's name and when it was last heard from, for a step
 pub(crate) fn step(app: &App, server: &str, what: &str, tunnel: &str) -> Step {
     let name = if server == "local" { local_name(app) } else { servers(app).into_iter().find(|s| s.id == server).map(|s| s.name).unwrap_or_else(|| server.to_string()) };
-    let ping = seen().lock().unwrap().get(server).map(|x| x.at).unwrap_or(0);
+    let ping = seen().lock().unwrap_or_else(|e| e.into_inner()).get(server).map(|x| x.at).unwrap_or(0);
     // the panel server stops its own Xray / DNS right away
     let state = if server == "local" && (what == "xray" || what == "dns") { "done" } else { "wait" };
     Step { server: server.into(), name, what: what.into(), tunnel: tunnel.into(), state: state.into(), ping, gone: 0 }
@@ -2931,7 +2936,7 @@ pub(crate) fn node_step(id: &str, name: &str) -> Step {
 /// Starts following a removal; the id is given to the admin page, which asks how far it got
 pub(crate) fn track(kind: &str, name: &str, steps: Vec<Step>) -> String {
     let id = rand_token(12);
-    let mut r = removals().lock().unwrap();
+    let mut r = removals().lock().unwrap_or_else(|e| e.into_inner());
     // an hour is long enough to look at it
     r.retain(|_, x| now() - x.at < 3600);
     r.insert(id.clone(), Removal { id: id.clone(), kind: kind.into(), name: name.into(), at: now(), steps });
@@ -2954,7 +2959,7 @@ pub(crate) fn tunnel_steps(app: &App, list: &[Tunnel], except: &str) -> Vec<Step
 /// A server reported what it runs: the tunnels it no longer runs, and Xray / Kanki DNS when they
 /// stopped, are done
 fn note_report(server: &str, status: &[Status], xray_on: bool, dns_on: bool) {
-    let mut r = removals().lock().unwrap();
+    let mut r = removals().lock().unwrap_or_else(|e| e.into_inner());
     for x in r.values_mut() {
         for s in x.steps.iter_mut().filter(|s| s.server == server) {
             let left = match s.what.as_str() {
@@ -2971,9 +2976,27 @@ fn note_report(server: &str, status: &[Status], xray_on: bool, dns_on: bool) {
     }
 }
 
+/// The servers deleted in this panel (id -> when), kept 60 days. Only these are told "gone" (and so
+/// uninstall themselves): a server this panel simply does not know (a fresh install in the middle of a
+/// move, a restore of an older backup, another panel) is left running.
+fn removed_ids(app: &App) -> std::collections::HashMap<String, i64> {
+    serde_json::from_str(&app.db.get("tun_removed")).unwrap_or_default()
+}
+
+fn mark_removed(app: &App, id: &str) {
+    let mut m = removed_ids(app);
+    m.retain(|_, t| now() - *t < 60 * 86400);
+    m.insert(id.to_string(), now());
+    app.db.set("tun_removed", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+}
+
+pub(crate) fn was_removed(app: &App, id: &str) -> bool {
+    removed_ids(app).contains_key(id)
+}
+
 /// A removed server asked again: after three answers its agent removes everything and uninstalls
 fn note_gone(server: &str) {
-    let mut r = removals().lock().unwrap();
+    let mut r = removals().lock().unwrap_or_else(|e| e.into_inner());
     for x in r.values_mut() {
         for s in x.steps.iter_mut().filter(|s| s.server == server && s.what == "server") {
             s.ping = now();
@@ -2988,7 +3011,7 @@ fn note_gone(server: &str) {
 /// Sets the state of a node's step in every removal that waits on it
 pub(crate) fn note_node(id: &str, state: &str) {
     let key = format!("node:{}", id);
-    let mut r = removals().lock().unwrap();
+    let mut r = removals().lock().unwrap_or_else(|e| e.into_inner());
     for x in r.values_mut() {
         for s in x.steps.iter_mut().filter(|s| s.server == key && s.state != "done") {
             s.state = state.into();
@@ -3000,7 +3023,7 @@ pub(crate) fn note_node(id: &str, state: &str) {
 /// How far a removal got; a step whose server was not heard from for 30 seconds is "off" (it is done
 /// when the server comes back: the tunnel is not in its list any more, a removed server is told so)
 pub(crate) fn removal(id: &str) -> Option<Removal> {
-    let mut x = removals().lock().unwrap().get(id).cloned()?;
+    let mut x = removals().lock().unwrap_or_else(|e| e.into_inner()).get(id).cloned()?;
     for s in x.steps.iter_mut() {
         if s.state != "done" && s.what != "node" && now() - s.ping > 30 {
             s.state = "off".into();

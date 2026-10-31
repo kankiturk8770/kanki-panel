@@ -252,7 +252,8 @@ impl Db {
     }
 
     pub fn with<T>(&self, f: impl FnOnce(&Connection) -> T) -> T {
-        let c = self.0.lock().unwrap();
+        // a panic inside one query must not leave the database locked out for the rest of the run
+        let c = self.0.lock().unwrap_or_else(|e| e.into_inner());
         f(&c)
     }
 

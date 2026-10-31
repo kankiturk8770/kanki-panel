@@ -237,7 +237,7 @@ pub async fn client(remote: SocketAddr, token: &str, g: GameOpts) -> Res<ClientG
             };
             match got {
                 Some(Ok((n, from))) => {
-                    *ka1.lock().unwrap() = Some(from);
+                    *ka1.lock().unwrap_or_else(|e| e.into_inner()) = Some(from);
                     out.push(&outer1, None, &mask1, &a[..n], g.dup).await;
                 }
                 Some(Err(_)) => break,
@@ -255,7 +255,7 @@ pub async fn client(remote: SocketAddr, token: &str, g: GameOpts) -> Res<ClientG
                 Err(e) if e.kind() == std::io::ErrorKind::ConnectionRefused => continue,
                 Err(_) => break,
             };
-            let dst = *kcp_addr.lock().unwrap();
+            let dst = *kcp_addr.lock().unwrap_or_else(|e| e.into_inner());
             let Some(dst) = dst else { continue };
             let Some((s, e)) = mask.open(&mut b[..n]) else { continue };
             let payload = b[s..e].to_vec();
@@ -291,7 +291,7 @@ impl Drop for ServerGame {
         for t in &self.tasks {
             t.abort();
         }
-        for (_, p) in self.peers.lock().unwrap().drain() {
+        for (_, p) in self.peers.lock().unwrap_or_else(|e| e.into_inner()).drain() {
             p.pump.abort();
         }
     }
@@ -336,26 +336,26 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr, g: GameOpts) 
             // first look under the lock; a new peer's socket is bound outside it (await points
             // must not hold the MutexGuard)
             let mut entry = {
-                let mut gmap = peers1.lock().unwrap();
+                let mut gmap = peers1.lock().unwrap_or_else(|e| e.into_inner());
                 gmap.get_mut(&from).map(|p| {
                     p.last = StdInstant::now();
                     (p.sock.clone(), p.dec.clone())
                 })
             };
-            if entry.is_none() && peers1.lock().unwrap().len() < MAX_PEERS {
+            if entry.is_none() && peers1.lock().unwrap_or_else(|e| e.into_inner()).len() < MAX_PEERS {
                 if let Ok(sock) = UdpSocket::bind("127.0.0.1:0").await {
                     if sock.connect(kcp_local).await.is_ok() {
                         let sock = Arc::new(sock);
                         let dec = Arc::new(Mutex::new(FecDecoder::default()));
                         let pump = tokio::spawn(pump(sock.clone(), public1.clone(), mask1.clone(), from, g));
-                        peers1.lock().unwrap().insert(from, Peer { sock: sock.clone(), last: StdInstant::now(), pump, dec: dec.clone() });
+                        peers1.lock().unwrap_or_else(|e| e.into_inner()).insert(from, Peer { sock: sock.clone(), last: StdInstant::now(), pump, dec: dec.clone() });
                         entry = Some((sock, dec));
                     }
                 }
             }
             let Some((sock, dec)) = entry else { continue };
             let packets = {
-                let mut d = dec.lock().unwrap();
+                let mut d = dec.lock().unwrap_or_else(|e| e.into_inner());
                 // FEC state lives per peer; without FEC payloads pass through
                 decode_in(if g.fec_on() { Some(&mut *d) } else { None }, &payload)
             };
@@ -370,7 +370,7 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr, g: GameOpts) 
     let reaper = tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(15)).await;
-            let mut g = peers2.lock().unwrap();
+            let mut g = peers2.lock().unwrap_or_else(|e| e.into_inner());
             g.retain(|_, p| {
                 let keep = !p.pump.is_finished() && p.last.elapsed() < PEER_IDLE;
                 if !keep {

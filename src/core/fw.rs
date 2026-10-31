@@ -111,7 +111,7 @@ fn to_close(st: &State, owner: &str, old: &BTreeSet<String>, want: &BTreeSet<Str
 pub fn sync<I: IntoIterator<Item = String>>(owner: &str, want: I) {
     let ssh = ssh_ports();
     let want: BTreeSet<String> = want.into_iter().filter(|r| valid_rule(r) && !protected(r, &ssh)).collect();
-    let mut seen = lock().lock().unwrap();
+    let mut seen = lock().lock().unwrap_or_else(|e| e.into_inner());
     let mut st = load();
     let old = st.owners.get(owner).cloned().unwrap_or_default();
     let recheck = seen.get(owner).map(|t| t.elapsed().as_secs() >= RECHECK_SECS).unwrap_or(true);
@@ -234,7 +234,7 @@ fn report_cache() -> &'static Mutex<Option<(Instant, serde_json::Value)>> {
 /// most once a minute. Blocking.
 pub fn report() -> serde_json::Value {
     let c = report_cache();
-    if let Some((at, v)) = c.lock().unwrap().as_ref() {
+    if let Some((at, v)) = c.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         if at.elapsed().as_secs() < 60 {
             return v.clone();
         }
@@ -258,7 +258,7 @@ pub fn report() -> serde_json::Value {
         }
     }
     let v = serde_json::json!({ "owners": st.owners, "unused": unused });
-    *c.lock().unwrap() = Some((Instant::now(), v.clone()));
+    *c.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), v.clone()));
     v
 }
 
@@ -281,7 +281,7 @@ pub fn close_unused(rules: &[String]) {
         }
     }
     // the next report shows the new state
-    *report_cache().lock().unwrap() = None;
+    *report_cache().lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
 #[cfg(test)]

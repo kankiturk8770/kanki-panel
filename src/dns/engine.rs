@@ -177,7 +177,7 @@ impl Engine {
 
     fn log_query(&self, uid: i64, name: &str, qtype: u16, routed: Option<&str>) {
         let seq = self.qseq.fetch_add(1, Ordering::Relaxed) + 1;
-        let mut l = self.qlog.lock().unwrap();
+        let mut l = self.qlog.lock().unwrap_or_else(|e| e.into_inner());
         if l.len() >= QLOG_KEEP {
             l.pop_front();
         }
@@ -186,7 +186,7 @@ impl Engine {
 
     /// The logged queries after `seq` (oldest first).
     pub fn qlog_after(&self, seq: u64) -> Vec<QLog> {
-        self.qlog.lock().unwrap().iter().filter(|q| q.seq > seq).cloned().collect()
+        self.qlog.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|q| q.seq > seq).cloned().collect()
     }
 
     pub fn qlog_last(&self) -> u64 {
@@ -194,16 +194,16 @@ impl Engine {
     }
 
     pub fn live(&self) -> Arc<Live> {
-        self.live.read().unwrap().clone()
+        self.live.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn reload(&self, cfg: DnsCfg) {
         let old = self.live();
         // a user whose addresses the admin cleared (a new epoch) must register again
         let kicked: Vec<i64> = cfg.users.iter().filter(|u| old.by_id.get(&u.id).map(|o| o.epoch != u.epoch).unwrap_or(false)).map(|u| u.id).collect();
-        *self.live.write().unwrap() = Arc::new(Live::new(cfg));
+        *self.live.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(Live::new(cfg));
         if !kicked.is_empty() {
-            let mut g = self.gate.lock().unwrap();
+            let mut g = self.gate.lock().unwrap_or_else(|e| e.into_inner());
             g.ips.retain(|_, v| !kicked.contains(&v.0));
             for id in kicked {
                 g.order.remove(&id);
@@ -214,7 +214,7 @@ impl Engine {
     /// The addresses allowed right now, per user.
     pub fn ips_snapshot(&self) -> HashMap<i64, Vec<String>> {
         let now = Instant::now();
-        let g = self.gate.lock().unwrap();
+        let g = self.gate.lock().unwrap_or_else(|e| e.into_inner());
         let mut out: HashMap<i64, Vec<String>> = HashMap::new();
         for (ip, (uid, until)) in g.ips.iter() {
             if *until > now {
@@ -226,29 +226,33 @@ impl Engine {
 
     /// The busiest routed names (at most `n`).
     pub fn top(&self, n: usize) -> Vec<(String, u64)> {
-        let mut v: Vec<(String, u64)> = self.top.lock().unwrap().iter().map(|(k, v)| (k.clone(), *v)).collect();
+        let mut v: Vec<(String, u64)> = self.top.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|(k, v)| (k.clone(), *v)).collect();
         v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         v.truncate(n);
         v
     }
 
     pub fn stat(&self, uid: i64) -> Arc<UserStat> {
-        self.stats.lock().unwrap().entry(uid).or_default().clone()
+        self.stats.lock().unwrap_or_else(|e| e.into_inner()).entry(uid).or_default().clone()
     }
 
     pub fn stats_snapshot(&self) -> HashMap<i64, (u64, u64)> {
-        self.stats.lock().unwrap().iter().map(|(k, v)| (*k, (v.bytes.load(Ordering::Relaxed), v.queries.load(Ordering::Relaxed)))).collect()
+        self.stats.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|(k, v)| (*k, (v.bytes.load(Ordering::Relaxed), v.queries.load(Ordering::Relaxed)))).collect()
     }
 
     pub fn allowed_count(&self) -> usize {
         let now = Instant::now();
-        self.gate.lock().unwrap().ips.values().filter(|x| x.1 > now).count()
+        self.gate.lock().unwrap_or_else(|e| e.into_inner()).ips.values().filter(|x| x.1 > now).count()
     }
 
     fn note_err(&self, e: String) {
         eprintln!("{}", e);
-        let mut v = self.errors.lock().unwrap();
+        let mut v = self.errors.lock().unwrap_or_else(|e| e.into_inner());
         if !v.contains(&e) {
+            // errors that name an address differ each time: keep the newest few, not all of them
+            if v.len() >= 50 {
+                v.remove(0);
+            }
             v.push(e);
         }
     }
@@ -258,7 +262,7 @@ impl Engine {
     /// The user an address belongs to right now.
     pub fn who(&self, ip: IpAddr) -> Option<i64> {
         let live = self.live();
-        let g = self.gate.lock().unwrap();
+        let g = self.gate.lock().unwrap_or_else(|e| e.into_inner());
         let (uid, until) = g.ips.get(&canon(ip))?;
         (*until > Instant::now() && live.by_id.contains_key(uid)).then_some(*uid)
     }
@@ -270,7 +274,7 @@ impl Engine {
         let Some(u) = live.by_id.get(&uid) else { return };
         let hours = if live.cfg.ip_hours == 0 { 12 } else { live.cfg.ip_hours.min(24 * 30) };
         let until = Instant::now() + Duration::from_secs(hours * 3600);
-        let mut g = self.gate.lock().unwrap();
+        let mut g = self.gate.lock().unwrap_or_else(|e| e.into_inner());
         // the address may have belonged to someone else (shared mobile address): it moves
         if let Some((old, _)) = g.ips.insert(ip, (uid, until)) {
             if old != uid {
@@ -299,7 +303,7 @@ impl Engine {
     fn sweep(&self) {
         let now = Instant::now();
         {
-            let mut g = self.gate.lock().unwrap();
+            let mut g = self.gate.lock().unwrap_or_else(|e| e.into_inner());
             g.ips.retain(|_, v| v.1 > now);
             let Gate { ips, order } = &mut *g;
             for q in order.values_mut() {
@@ -307,15 +311,15 @@ impl Engine {
             }
             order.retain(|_, q| !q.is_empty());
         }
-        self.rate.lock().unwrap().retain(|_, v| now.duration_since(v.1) < Duration::from_secs(60));
-        let mut c = self.cache.lock().unwrap();
+        self.rate.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, v| now.duration_since(v.1) < Duration::from_secs(60));
+        let mut c = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         c.retain(|_, e| now.duration_since(e.at).as_secs() < e.ttl as u64);
     }
 
     /// Plain DNS from one address: at most ~100 queries a second (a burst of 300).
     fn rate_ok(&self, ip: IpAddr) -> bool {
         let now = Instant::now();
-        let mut r = self.rate.lock().unwrap();
+        let mut r = self.rate.lock().unwrap_or_else(|e| e.into_inner());
         let e = r.entry(ip).or_insert((300.0, now));
         let add = now.duration_since(e.1).as_secs_f64() * 100.0;
         e.0 = (e.0 + add).min(300.0);
@@ -352,7 +356,7 @@ impl Engine {
         if let Some(by) = by {
             if q.qtype == wire::A {
                 self.q_routed.fetch_add(1, Ordering::Relaxed);
-                let mut t = self.top.lock().unwrap();
+                let mut t = self.top.lock().unwrap_or_else(|e| e.into_inner());
                 if t.len() < 5000 || t.contains_key(by) {
                     *t.entry(by.to_string()).or_default() += 1;
                 }
@@ -374,7 +378,7 @@ impl Engine {
     async fn forward(&self, req: &[u8], q: &Question, live: &Live) -> Option<Vec<u8>> {
         let key = (q.name.clone(), q.qtype, q.qclass);
         let hit = {
-            let c = self.cache.lock().unwrap();
+            let c = self.cache.lock().unwrap_or_else(|e| e.into_inner());
             c.get(&key).and_then(|e| {
                 let age = e.at.elapsed().as_secs();
                 (age < e.ttl as u64).then(|| {
@@ -395,7 +399,7 @@ impl Engine {
                 if rc == wire::NOERROR || rc == 3 {
                     if let Some(ttl) = wire::min_ttl(&r, 60) {
                         let ttl = ttl.clamp(10, 3600);
-                        let mut c = self.cache.lock().unwrap();
+                        let mut c = self.cache.lock().unwrap_or_else(|e| e.into_inner());
                         if c.len() >= CACHE_MAX {
                             let now = Instant::now();
                             c.retain(|_, e| now.duration_since(e.at).as_secs() < e.ttl as u64);
@@ -450,11 +454,11 @@ impl Engine {
 
     /// Is this way worth trying (it has not failed in the last few seconds)?
     fn up(&self, way: &'static str) -> bool {
-        self.down.lock().unwrap().get(way).map(|t| t.elapsed() >= WAY_PAUSE).unwrap_or(true)
+        self.down.lock().unwrap_or_else(|e| e.into_inner()).get(way).map(|t| t.elapsed() >= WAY_PAUSE).unwrap_or(true)
     }
 
     fn mark_down(&self, way: &'static str) {
-        self.down.lock().unwrap().insert(way, Instant::now());
+        self.down.lock().unwrap_or_else(|e| e.into_inner()).insert(way, Instant::now());
     }
 
     /// The IPv4 addresses of a routed name, from the upstream resolvers (never our own answer).
@@ -1327,7 +1331,7 @@ mod tests {
         let relay3 = Engine::new(cut.clone());
         let mut live = Live::new(cut);
         live.system = vec![fake_resolver(Ipv4Addr::new(192, 0, 2, 3)).await];
-        *relay3.live.write().unwrap() = Arc::new(live);
+        *relay3.live.write().unwrap_or_else(|e| e.into_inner()) = Arc::new(live);
         let r = relay3.answer(&wire::build_query(3, "www.irani.ir", wire::A), Some(1)).await.unwrap();
         assert_eq!(wire::a_records(&r), vec![Ipv4Addr::new(192, 0, 2, 3)]);
         // the dead ways are skipped for a while: the next name does not wait for them

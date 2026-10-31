@@ -366,7 +366,7 @@ pub async fn dial(remote: &str, sni: &str, host: &str, path: &str, frag: bool) -
     let key = format!("{}|{}|{}", remote, sni, host);
     // a remote that has no WebSocket over HTTP/2 goes straight to HTTP/1.1 (re-checked every 10 minutes)
     let skip_h2 = {
-        let mut g = no_h2().lock().unwrap();
+        let mut g = no_h2().lock().unwrap_or_else(|e| e.into_inner());
         match g.get(&key) {
             Some(t) if t.elapsed() < Duration::from_secs(600) => true,
             Some(_) => {
@@ -381,13 +381,13 @@ pub async fn dial(remote: &str, sni: &str, host: &str, path: &str, frag: bool) -
     }
 
     let gate = {
-        let mut g = pools().lock().unwrap();
+        let mut g = pools().lock().unwrap_or_else(|e| e.into_inner());
         g.entry(key.clone()).or_insert_with(|| Pool { gate: Arc::new(tokio::sync::Mutex::new(())), conns: vec![] }).gate.clone()
     };
     let (conn, guard) = {
         let _turn = gate.lock().await;
         let reuse = {
-            let mut g = pools().lock().unwrap();
+            let mut g = pools().lock().unwrap_or_else(|e| e.into_inner());
             match g.get_mut(&key) {
                 Some(p) => {
                     p.conns.retain(|c| !c.dead.load(Ordering::Relaxed));
@@ -406,13 +406,13 @@ pub async fn dial(remote: &str, sni: &str, host: &str, path: &str, frag: bool) -
                 }
                 match h2_connect(io).await? {
                     Connected::H2(c) => {
-                        if let Some(p) = pools().lock().unwrap().get_mut(&key) {
+                        if let Some(p) = pools().lock().unwrap_or_else(|e| e.into_inner()).get_mut(&key) {
                             p.conns.push(c.clone());
                         }
                         c
                     }
                     Connected::NoConnectProtocol => {
-                        no_h2().lock().unwrap().insert(key.clone(), Instant::now());
+                        no_h2().lock().unwrap_or_else(|e| e.into_inner()).insert(key.clone(), Instant::now());
                         return dial_http1(remote, sni, host, path, frag).await;
                     }
                 }

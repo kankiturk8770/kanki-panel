@@ -9,7 +9,7 @@
 //! (at least one), so FEC never holds recovery back by more than that. A receiver that has any
 //! `k` of a group's `k + m` shards rebuilds the missing data.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{HashMap, VecDeque};
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -116,7 +116,10 @@ struct Group {
 /// Receiving side.
 #[derive(Default)]
 pub struct FecDecoder {
-    groups: BTreeMap<u32, Group>,
+    groups: HashMap<u32, Group>,
+    /// the kept groups, oldest first (group numbers wrap around after 2^32: order is by arrival, and
+    /// "older" is decided with wrapping arithmetic, so recovery keeps working after the wrap)
+    order: VecDeque<u32>,
 }
 
 impl FecDecoder {
@@ -150,13 +153,16 @@ impl FecDecoder {
     fn group(&mut self, id: u32) -> Option<&mut Group> {
         if !self.groups.contains_key(&id) {
             if self.groups.len() >= KEEP_GROUPS {
-                let oldest = *self.groups.keys().next().expect("not empty");
-                if id < oldest {
+                let oldest = *self.order.front().expect("not empty");
+                // a late shard of a group older than every kept one (wrapping: id is "behind" oldest)
+                if (oldest.wrapping_sub(id) as i32) > 0 {
                     return None;
                 }
+                self.order.pop_front();
                 self.groups.remove(&oldest);
             }
             self.groups.insert(id, Group::default());
+            self.order.push_back(id);
         }
         self.groups.get_mut(&id)
     }
@@ -203,6 +209,32 @@ impl FecDecoder {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn recovery_keeps_working_after_the_group_number_wraps() {
+        let mut enc = FecEncoder::new(2, 1, std::time::Duration::from_secs(1));
+        enc.group = u32::MAX - 40;
+        let mut dec = FecDecoder::default();
+        let now = tokio::time::Instant::now();
+        let mut lost_and_back = 0;
+        for i in 0..100u32 {
+            let mut shards: Vec<(bool, u32, u8, u8, u8, Vec<u8>)> = vec![];
+            for p in [format!("a{}", i), format!("b{}", i)] {
+                enc.push(p.as_bytes(), now, &mut |s| match s {
+                    Shard::Data { group, index, shard } => shards.push((true, group, index, 0, 0, shard.to_vec())),
+                    Shard::Parity { group, index, data_count, parity_count, shard } => shards.push((false, group, index, data_count, parity_count, shard.to_vec())),
+                });
+            }
+            // the first data shard of every group is lost: parity must bring it back
+            for (data, g, idx, k, m, sh) in shards.into_iter().skip(1) {
+                let out = if data { dec.data(g, idx, &sh) } else { dec.parity(g, idx, k, m, &sh) };
+                if out.iter().any(|x| x == format!("a{}", i).as_bytes()) {
+                    lost_and_back += 1;
+                }
+            }
+        }
+        assert_eq!(lost_and_back, 100);
+    }
+
     use super::*;
 
     /// What an encoder sends, owned.

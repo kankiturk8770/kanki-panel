@@ -227,7 +227,8 @@ async fn update_from_panel(http: &reqwest::Client, panel: &str, id: &str, token:
         return Err("checksum mismatch, update aborted".into());
     }
     let path = crate::util::exe_path().map_err(|e| e.to_string())?;
-    crate::util::swap_program(&path, &bytes)?;
+    // off the async workers: they carry the tunnels while the new file is written and test-run
+    tokio::task::spawn_blocking(move || crate::util::swap_program(&path, &bytes)).await.map_err(|e| e.to_string())??;
     crate::util::restart_siblings();
     eprintln!("updated from the panel: restarting");
     std::process::exit(0);
@@ -282,7 +283,7 @@ pub async fn run(version: &str) {
         let (emer_ver, mut emer_st) = tokio::task::spawn_blocking(|| (crate::emergency::applied_ver(), crate::emergency::status()))
             .await
             .unwrap_or_default();
-        if let Some(e) = emer_err.lock().unwrap().clone() {
+        if let Some(e) = emer_err.lock().unwrap_or_else(|e| e.into_inner()).clone() {
             if emer_st.is_object() {
                 emer_st["error"] = json!(e);
             } else {
@@ -290,7 +291,7 @@ pub async fn run(version: &str) {
             }
         }
         let (dns_ver, mut dns_st) = tokio::task::spawn_blocking(|| (crate::dns::applied_ver(), crate::dns::status())).await.unwrap_or_default();
-        if let Some(e) = dns_err.lock().unwrap().clone() {
+        if let Some(e) = dns_err.lock().unwrap_or_else(|e| e.into_inner()).clone() {
             if dns_st.is_object() {
                 dns_st["deploy_error"] = json!(e);
             } else {
@@ -298,7 +299,7 @@ pub async fn run(version: &str) {
             }
         }
         let (xray_ver, mut xray_st) = tokio::task::spawn_blocking(|| (crate::xray::applied_ver(), crate::xray::status())).await.unwrap_or_default();
-        if let Some(e) = xray_err.lock().unwrap().clone() {
+        if let Some(e) = xray_err.lock().unwrap_or_else(|e| e.into_inner()).clone() {
             if xray_st.is_object() {
                 xray_st["deploy_error"] = json!(e);
             } else {
@@ -338,12 +339,12 @@ pub async fn run(version: &str) {
                         Some("set") => {
                             if let (Ok(c), Some(ver)) = (serde_json::from_value::<crate::emergency::EmerCfg>(v["emergency"]["cfg"].clone()), v["emergency"]["ver"].as_str().map(|s| s.to_string())) {
                                 let r = tokio::task::spawn_blocking(move || crate::emergency::deploy(Some((&c, &ver)))).await.unwrap_or(Err("deploy crashed".into()));
-                                *emer_err.lock().unwrap() = r.err();
+                                *emer_err.lock().unwrap_or_else(|e| e.into_inner()) = r.err();
                             }
                         }
                         Some("off") => {
                             let r = tokio::task::spawn_blocking(|| crate::emergency::deploy(None)).await.unwrap_or(Ok(()));
-                            *emer_err.lock().unwrap() = r.err();
+                            *emer_err.lock().unwrap_or_else(|e| e.into_inner()) = r.err();
                         }
                         _ => {}
                     }
@@ -383,12 +384,12 @@ pub async fn run(version: &str) {
                                 })
                                 .await
                                 .unwrap_or(Err("deploy crashed".into()));
-                                *dns_err.lock().unwrap() = r.err();
+                                *dns_err.lock().unwrap_or_else(|e| e.into_inner()) = r.err();
                             }
                         }
                         Some("off") => {
                             let r = tokio::task::spawn_blocking(|| crate::dns::deploy(None)).await.unwrap_or(Ok(()));
-                            *dns_err.lock().unwrap() = r.err();
+                            *dns_err.lock().unwrap_or_else(|e| e.into_inner()) = r.err();
                         }
                         _ => {}
                     }
@@ -406,12 +407,12 @@ pub async fn run(version: &str) {
                                 })
                                 .await
                                 .unwrap_or(Err("deploy crashed".into()));
-                                *xray_err.lock().unwrap() = r.err();
+                                *xray_err.lock().unwrap_or_else(|e| e.into_inner()) = r.err();
                             }
                         }
                         Some("off") => {
                             let r = tokio::task::spawn_blocking(|| crate::xray::deploy(None, None)).await.unwrap_or(Ok(()));
-                            *xray_err.lock().unwrap() = r.err();
+                            *xray_err.lock().unwrap_or_else(|e| e.into_inner()) = r.err();
                         }
                         _ => {}
                     }

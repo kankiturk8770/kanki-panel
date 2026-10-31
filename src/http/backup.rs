@@ -390,7 +390,10 @@ fn db_path(app: &App) -> String {
 
 async fn db_clean(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "backup");
-    Json(json!({"ok": true, "result": clean_db(&app)})).into_response()
+    // VACUUM can take seconds on a big database: not on an async worker
+    let a = app.clone();
+    let r = tokio::task::spawn_blocking(move || clean_db(&a)).await.unwrap_or_else(|_| json!({}));
+    Json(json!({"ok": true, "result": r})).into_response()
 }
 
 /// The panel's own backup passphrase; made once (random) so nightly backups are never plain.
@@ -415,7 +418,8 @@ fn file_response(bytes: Vec<u8>, name: &str) -> Response {
 /// Old API: plain SQLite file
 async fn backup_legacy(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "backup");
-    match db_snapshot(&app) {
+    let a = app.clone();
+    match tokio::task::spawn_blocking(move || db_snapshot(&a)).await.ok().flatten() {
         Some(b) => file_response(b, &format!("kanki-backup-{}.db", stamp(now()))),
         None => err(StatusCode::INTERNAL_SERVER_ERROR, "backup failed"),
     }
@@ -608,9 +612,10 @@ pub async fn send_backup(app: &App) -> Result<(), String> {
         return Err("token / chat id missing".into());
     }
     // tidy first so every nightly backup is a clean database
-    let c = clean_db(app);
     let pass = backup_pass(app);
-    let (bytes, name) = make_archive(app, &pass)?;
+    // VACUUM, tar and openssl take seconds: the worker thread steps aside so other requests go on meanwhile
+    let (c, archive) = tokio::task::block_in_place(|| (clean_db(app), make_archive(app, &pass)));
+    let (bytes, name) = archive?;
     let users = app.db.count("SELECT COUNT(*) FROM users");
     let caption = format!(
         "💾 {} · بکاپ پنل\n🕒 {}\n👤 {} کاربر · 🗄 {} KB\n🔐 رمزنگاری‌شده (رمز بکاپ در پنل > بکاپ)",

@@ -174,17 +174,17 @@ struct State {
 
 impl State {
     fn set_err(&self, e: impl ToString) {
-        *self.error.lock().unwrap() = e.to_string();
+        *self.error.lock().unwrap_or_else(|e| e.into_inner()) = e.to_string();
     }
     fn add(&self, s: Arc<Session>) {
-        self.sessions.lock().unwrap().push(s);
-        self.error.lock().unwrap().clear();
+        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).push(s);
+        self.error.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
     fn drop_dead(&self) {
-        self.sessions.lock().unwrap().retain(|s| s.is_alive());
+        self.sessions.lock().unwrap_or_else(|e| e.into_inner()).retain(|s| s.is_alive());
     }
     fn pick(&self, key: usize) -> Option<Arc<Session>> {
-        let v = self.sessions.lock().unwrap();
+        let v = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let alive: Vec<&Arc<Session>> = v.iter().filter(|s| s.is_alive()).collect();
         if alive.is_empty() {
             return None;
@@ -218,7 +218,7 @@ impl Running {
             for (_, b) in parse_ports(&spec.tcp).into_iter().chain(parse_ports(&spec.udp)) {
                 allow.insert(format!("{}:{}", host, b));
             }
-            *shared.allowed.lock().unwrap() = allow;
+            *shared.allowed.lock().unwrap_or_else(|e| e.into_inner()) = allow;
         }
         let state = Arc::new(State {
             sessions: Mutex::new(vec![]),
@@ -263,14 +263,14 @@ impl Running {
         for t in &self.tasks {
             t.abort();
         }
-        for s in self.state.sessions.lock().unwrap().drain(..) {
+        for s in self.state.sessions.lock().unwrap_or_else(|e| e.into_inner()).drain(..) {
             s.kill();
         }
-        self.state.shared.udp_back.lock().unwrap().clear();
+        self.state.shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).clear();
     }
 
     pub fn status(&self) -> Status {
-        let v = self.state.sessions.lock().unwrap();
+        let v = self.state.sessions.lock().unwrap_or_else(|e| e.into_inner());
         let alive: Vec<&Arc<Session>> = v.iter().filter(|s| s.is_alive()).collect();
         let rtts: Vec<u64> = alive.iter().map(|s| s.rtt_ms.load(Ordering::Relaxed)).filter(|r| *r > 0).collect();
         let sh = &self.state.shared;
@@ -283,12 +283,12 @@ impl Running {
             rx_bytes: sh.rx_bytes.load(Ordering::Relaxed),
             tx_bytes: sh.tx_bytes.load(Ordering::Relaxed),
             streams: sh.streams.load(Ordering::Relaxed),
-            udp_flows: sh.udp_back.lock().unwrap().len(),
-            error: self.state.error.lock().unwrap().clone(),
+            udp_flows: sh.udp_back.lock().unwrap_or_else(|e| e.into_inner()).len(),
+            error: self.state.error.lock().unwrap_or_else(|e| e.into_inner()).clone(),
             since: alive.iter().map(|s| s.since).min().unwrap_or(0) / 1000,
             transport: self.spec.transport.clone(),
             listening: self.spec.listens(),
-            probe: self.state.probe.lock().unwrap().clone(),
+            probe: self.state.probe.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         }
     }
 }
@@ -317,7 +317,7 @@ async fn listen_loop(spec: Spec, state: Arc<State>) {
         }
     };
     {
-        let mut e = state.error.lock().unwrap();
+        let mut e = state.error.lock().unwrap_or_else(|e| e.into_inner());
         if e.starts_with("cannot listen") {
             e.clear();
         }
@@ -455,7 +455,7 @@ async fn user_udp(bind: String, port: u16, target: String, state: Arc<State>) {
                 // evict the idlest eighth when it is full (in a batch, so a flood does not cost
                 // a scan of the whole table per packet)
                 if flows.len() >= MAX_UDP_FLOWS {
-                    let mut back = state.shared.udp_back.lock().unwrap();
+                    let mut back = state.shared.udp_back.lock().unwrap_or_else(|e| e.into_inner());
                     for a in super::mux::oldest_eighth(flows.iter().map(|(a, f)| (*a, f.1))) {
                         if let Some((fid, _)) = flows.remove(&a) {
                             back.remove(&fid);
@@ -467,7 +467,7 @@ async fn user_udp(bind: String, port: u16, target: String, state: Arc<State>) {
                 id
             }
         };
-        state.shared.udp_back.lock().unwrap().insert(id, (sock.clone(), from, now));
+        state.shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).insert(id, (sock.clone(), from, now));
         // one flow stays on one link, so its packets keep their order
         if let Some(s) = state.pick(id as usize) {
             s.send_udp(id, &target, &buf[..n]).await;
@@ -475,7 +475,7 @@ async fn user_udp(bind: String, port: u16, target: String, state: Arc<State>) {
         if now.saturating_sub(last_clean) > 60_000 {
             last_clean = now;
             let old: Vec<(SocketAddr, u32)> = flows.iter().filter(|(_, f)| now.saturating_sub(f.1) > 180_000).map(|(a, f)| (*a, f.0)).collect();
-            let mut back = state.shared.udp_back.lock().unwrap();
+            let mut back = state.shared.udp_back.lock().unwrap_or_else(|e| e.into_inner());
             for (a, id) in old {
                 flows.remove(&a);
                 back.remove(&id);
@@ -491,11 +491,11 @@ static PROBE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// Raw base ping between the two servers: no tunnel at all, the entry ICMP-pings the exit host.
 /// Shows the network's own latency so one can see how much each tunnel adds on top.
 async fn baseline_task(remote: String, state: Arc<State>) {
-    *state.probe.lock().unwrap() = Some(serde_json::json!({"done": false, "stage": "testing"}));
+    *state.probe.lock().unwrap_or_else(|e| e.into_inner()) = Some(serde_json::json!({"done": false, "stage": "testing"}));
     let host = remote.trim().trim_start_matches('[').trim_end_matches(']').to_string();
     let r = tokio::task::spawn_blocking(move || baseline_ping(&host)).await
         .unwrap_or_else(|_| serde_json::json!({"done": true, "failed": true, "baseline": true, "error": "baseline test failed"}));
-    *state.probe.lock().unwrap() = Some(r);
+    *state.probe.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
 }
 
 fn baseline_ping(host: &str) -> serde_json::Value {
@@ -533,7 +533,7 @@ fn parse_ping(text: &str) -> Option<(f64, f64)> {
 }
 
 async fn probe_task(state: Arc<State>) {
-    *state.probe.lock().unwrap() = Some(serde_json::json!({"done": false, "stage": "connecting"}));
+    *state.probe.lock().unwrap_or_else(|e| e.into_inner()) = Some(serde_json::json!({"done": false, "stage": "connecting"}));
     // wait up to 20 s for the first link (the agents fetch their list every 5 s)
     let mut sess = None;
     for _ in 0..100 {
@@ -544,16 +544,16 @@ async fn probe_task(state: Arc<State>) {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     let Some(s) = sess else {
-        let e = state.error.lock().unwrap().clone();
-        *state.probe.lock().unwrap() = Some(serde_json::json!({"done": true, "failed": true,
+        let e = state.error.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        *state.probe.lock().unwrap_or_else(|e| e.into_inner()) = Some(serde_json::json!({"done": true, "failed": true,
             "error": if e.is_empty() { "no connection (is the test port open in the firewall?)".to_string() } else { e }}));
         return;
     };
-    *state.probe.lock().unwrap() = Some(serde_json::json!({"done": false, "stage": "waiting"}));
+    *state.probe.lock().unwrap_or_else(|e| e.into_inner()) = Some(serde_json::json!({"done": false, "stage": "waiting"}));
     let _g = PROBE_LOCK.lock().await;
-    *state.probe.lock().unwrap() = Some(serde_json::json!({"done": false, "stage": "testing"}));
+    *state.probe.lock().unwrap_or_else(|e| e.into_inner()) = Some(serde_json::json!({"done": false, "stage": "testing"}));
     let r = super::probe::measure(s, state.shared.clone()).await;
-    *state.probe.lock().unwrap() = Some(r);
+    *state.probe.lock().unwrap_or_else(|e| e.into_inner()) = Some(r);
 }
 
 /// Keeps the running tunnels equal to the wanted list.

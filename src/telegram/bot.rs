@@ -291,7 +291,11 @@ impl Bot {
         let admins = bot_admins_raw(&app)
             .split(',').filter_map(|x| x.trim().parse().ok()).collect();
         Some(Arc::new(Bot {
-            app, token, admins, http: reqwest::Client::new(), api: "https://api.telegram.org".into(),
+            // a timeout on every call: one hung connection to Telegram (common on filtered networks) froze
+            // the bot until a restart. Above the 30 s long poll; uploads set their own, longer one.
+            app, token, admins,
+            http: reqwest::Client::builder().timeout(std::time::Duration::from_secs(75)).connect_timeout(std::time::Duration::from_secs(15)).build().unwrap_or_default(),
+            api: "https://api.telegram.org".into(),
             waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), gifts: Mutex::new(HashMap::new()),
         }))
     }
@@ -533,7 +537,7 @@ impl Bot {
         let part = reqwest::multipart::Part::bytes(bytes).file_name(name.to_string());
         let form = reqwest::multipart::Form::new()
             .text("chat_id", chat.to_string()).text("caption", caption.to_string()).part("document", part);
-        let _ = self.http.post(format!("{}/bot{}/sendDocument", self.api, self.token)).multipart(form).send().await;
+        let _ = self.http.post(format!("{}/bot{}/sendDocument", self.api, self.token)).multipart(form).timeout(std::time::Duration::from_secs(600)).send().await;
     }
 
     // ============================================================ کمکی‌های داده
@@ -554,6 +558,13 @@ impl Bot {
 
     fn plan(&self, id: i64) -> Option<Plan> {
         self.plans(false).into_iter().map(|x| x.0).find(|p| p.id == id)
+    }
+
+    /// A plan that is on sale now. A button can carry any plan id (an old message, or a client that
+    /// makes its own buttons): a plan the admin switched off must not be bought. `plan` stays for orders
+    /// already placed.
+    fn plan_on_sale(&self, id: i64) -> Option<Plan> {
+        self.plans(true).into_iter().map(|x| x.0).find(|p| p.id == id)
     }
 
     fn account_text(&self, u: &User) -> String {
@@ -813,7 +824,7 @@ impl Bot {
         match next {
             "trial" => self.trial(uid, chat, 0).await,
             _ => {
-                self.pend.lock().unwrap().insert(uid, Pending { kind: "new".into(), ..Default::default() });
+                self.pend.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Pending { kind: "new".into(), ..Default::default() });
                 self.plans_menu(chat, 0, "pl").await
             }
         }
@@ -841,7 +852,7 @@ impl Bot {
             let ref_by = text.split_whitespace().nth(1).and_then(|s| s.strip_prefix("ref_")).and_then(|s| s.parse::<i64>().ok())
                 .filter(|r| *r != uid).unwrap_or(0);
             self.touch(uid, &m["from"], ref_by);
-            self.waits.lock().unwrap().remove(&uid);
+            self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid);
             if !self.joined(uid).await {
                 return self.ask_join(chat).await;
             }
@@ -874,7 +885,7 @@ impl Bot {
             return;
         }
         self.touch(uid, &m["from"], 0);
-        let wait = self.waits.lock().unwrap().remove(&uid);
+        let wait = self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid);
         let Some(w) = wait else {
             self.send(chat, &self.tx("txt_menu"), Some(self.home_kb(uid))).await;
             return;
@@ -888,7 +899,7 @@ impl Bot {
                     self.after_name(uid, chat, &next).await;
                 }
                 Err(e) => {
-                    self.waits.lock().unwrap().insert(uid, Wait::CfgName(next));
+                    self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::CfgName(next));
                     self.send(chat, &e, Some(ik(vec![vec![b(&self.bt("back"), "home")]]))).await;
                 }
             },
@@ -907,7 +918,7 @@ impl Bot {
                             Some(self.acct_kb(&u2, vec![vec![b(&self.bt("home"), "home")]]))).await;
                     }
                     Err(e) => {
-                        self.waits.lock().unwrap().insert(uid, Wait::Rename(id));
+                        self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::Rename(id));
                         self.send(chat, &e, Some(ik(vec![vec![b(&self.bt("back"), &format!("acc:{}", id))]]))).await;
                     }
                 }
@@ -920,7 +931,7 @@ impl Bot {
                 match pct {
                     Some(p) => {
                         let plan_id = {
-                            let mut g = self.pend.lock().unwrap();
+                            let mut g = self.pend.lock().unwrap_or_else(|e| e.into_inner());
                             let pe = g.entry(uid).or_default();
                             pe.discount = code.clone();
                             pe.percent = p;
@@ -945,9 +956,9 @@ impl Bot {
     }
 
     async fn got_receipt(&self, uid: i64, chat: i64, name: &str, method: &str, m: &Value) {
-        let pe = self.pend.lock().unwrap().get(&uid).cloned();
+        let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned();
         let Some(pe) = pe else { return };
-        let Some(p) = self.plan(pe.plan) else { return };
+        let Some(p) = self.plan_on_sale(pe.plan) else { return };
         let photo = m["photo"].as_array().and_then(|a| a.last()).and_then(|x| x["file_id"].as_str()).map(|s| s.to_string());
         let reference = photo.clone().unwrap_or_else(|| m["text"].as_str().unwrap_or("").to_string());
         let (t, u) = self.price(&p, &pe);
@@ -997,7 +1008,7 @@ impl Bot {
 
         match d.as_str() {
             "home" => {
-                self.waits.lock().unwrap().remove(&uid);
+                self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid);
                 return self.edit(chat, mid, &self.tx("welcome"), Some(self.home_kb(uid))).await;
             }
             "buy" => {
@@ -1005,15 +1016,15 @@ impl Bot {
                     return self.edit(chat, mid, "⛔ فروش موقتاً بسته است.", Some(ik(vec![back("home")]))).await;
                 }
                 if self.cfg_name_for(uid).is_none() {
-                    self.waits.lock().unwrap().insert(uid, Wait::CfgName("buy".into()));
+                    self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::CfgName("buy".into()));
                     return self.edit(chat, mid, &self.name_prompt(""), Some(ik(vec![back("home")]))).await;
                 }
-                self.pend.lock().unwrap().insert(uid, Pending { kind: "new".into(), ..Default::default() });
+                self.pend.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Pending { kind: "new".into(), ..Default::default() });
                 return self.plans_menu(chat, mid, "pl").await;
             }
             "trial" => {
                 if self.db().on("trial_on") && !self.trial_taken(uid) && self.cfg_name_for(uid).is_none() {
-                    self.waits.lock().unwrap().insert(uid, Wait::CfgName("trial".into()));
+                    self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::CfgName("trial".into()));
                     return self.edit(chat, mid, &self.name_prompt(""), Some(ik(vec![back("home")]))).await;
                 }
                 return self.trial(uid, chat, mid).await;
@@ -1074,7 +1085,7 @@ impl Bot {
                     if sup.is_empty() { "—".to_string() } else { esc(&sup) }), Some(ik(rows))).await;
             }
             "disc" => {
-                self.waits.lock().unwrap().insert(uid, Wait::DiscountUse);
+                self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::DiscountUse);
                 return self.edit(chat, mid, "🎟 کد تخفیف را بفرستید:", Some(ik(vec![back("home")]))).await;
             }
             _ => {}
@@ -1107,7 +1118,7 @@ impl Bot {
                 let mut parts = rest.split(':');
                 let pid: i64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
                 {
-                    let mut g = self.pend.lock().unwrap();
+                    let mut g = self.pend.lock().unwrap_or_else(|e| e.into_inner());
                     let pe = g.entry(uid).or_default();
                     pe.plan = pid;
                     if head == "rpl" {
@@ -1148,7 +1159,7 @@ impl Bot {
             "ren" => {
                 let id: i64 = rest.parse().unwrap_or(0);
                 if let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) {
-                    self.waits.lock().unwrap().insert(uid, Wait::Rename(id));
+                    self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::Rename(id));
                     let head = format!("نام فعلی: <b>{}</b>\n\n", esc(&u.username));
                     return self.edit(chat, mid, &self.name_prompt(&head), Some(ik(vec![back(&format!("acc:{}", id))]))).await;
                 }
@@ -1160,7 +1171,7 @@ impl Bot {
                 if self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)).is_none() {
                     return;
                 }
-                self.pend.lock().unwrap().insert(uid, Pending { kind: "renew".into(), target: id, ..Default::default() });
+                self.pend.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Pending { kind: "renew".into(), target: id, ..Default::default() });
                 return self.plans_menu(chat, mid, &format!("rpl:{{}}:{}", id)).await;
             }
             "ap" | "rj" if self.admin(uid) => return self.review(chat, mid, q, head == "ap", rest.parse().unwrap_or(0)).await,
@@ -1228,8 +1239,8 @@ impl Bot {
     }
 
     async fn show_plan(&self, chat: i64, mid: Option<i64>, uid: i64, pid: i64) {
-        let Some(p) = self.plan(pid) else { return };
-        let pe = self.pend.lock().unwrap().get(&uid).cloned().unwrap_or_default();
+        let Some(p) = self.plan_on_sale(pid) else { return };
+        let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned().unwrap_or_default();
         let (t, u) = self.price(&p, &pe);
         let mut rows: Kb = vec![];
         for (m, k) in [("card", "pay_card"), ("zp", "pay_zp"), ("np", "pay_np"), ("wallet", "pay_wallet")] {
@@ -1253,9 +1264,9 @@ impl Bot {
     }
 
     async fn pay(&self, uid: i64, chat: i64, mid: i64, method: &str) {
-        let pe = self.pend.lock().unwrap().get(&uid).cloned();
+        let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned();
         let Some(pe) = pe else { return };
-        let Some(p) = self.plan(pe.plan) else { return };
+        let Some(p) = self.plan_on_sale(pe.plan) else { return };
         let (t, u) = self.price(&p, &pe);
         let db = self.db();
         let home = Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]));
@@ -1265,13 +1276,13 @@ impl Bot {
         }
         match method {
             "card" => {
-                self.waits.lock().unwrap().insert(uid, Wait::Receipt("card".into()));
+                self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::Receipt("card".into()));
                 self.edit(chat, mid, &format!(
                     "💳 <b>کارت به کارت</b>\n\nمبلغ: <b>{}</b>\nشماره کارت:\n<code>{}</code>\nبه نام: {}\n\n📸 بعد از واریز، <b>عکس رسید</b> را همین‌جا بفرستید.",
                     toman(t), esc(&db.get("card_number")), esc(&db.get("card_holder"))), home).await;
             }
             "wallet" => {
-                self.waits.lock().unwrap().insert(uid, Wait::Receipt("wallet".into()));
+                self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::Receipt("wallet".into()));
                 let ton = db.get("ton_address").trim().to_string();
                 let usdt = db.get("usdt_address").trim().to_string();
                 let mut txt = format!("💰 <b>پرداخت ارزی</b>\n\nمبلغ: <b>{}$</b>", u);
@@ -1323,9 +1334,9 @@ impl Bot {
     }
 
     async fn np_start(&self, uid: i64, chat: i64, mid: i64, coin: &str) {
-        let pe = self.pend.lock().unwrap().get(&uid).cloned();
+        let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned();
         let Some(pe) = pe else { return };
-        let Some(p) = self.plan(pe.plan) else { return };
+        let Some(p) = self.plan_on_sale(pe.plan) else { return };
         let (_, usd) = self.price(&p, &pe);
         let oid = self.new_order(uid, &p, &pe, "np", &usd.to_string(), "waiting", "");
         let r = self.http.post("https://api.nowpayments.io/v1/payment").header("x-api-key", self.db().get("np_key")).json(&json!({
@@ -1580,7 +1591,7 @@ impl Bot {
     async fn admin_view(&self, uid: i64, chat: i64, mid: i64, d: &str) -> bool {
         let db = self.db();
         let back = Some(ik(vec![vec![b("⬅️ پنل مدیریت", "adm")]]));
-        let set_wait = |w: Wait| { self.waits.lock().unwrap().insert(uid, w); };
+        let set_wait = |w: Wait| { self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, w); };
         match d {
             "adm" => { self.edit(chat, mid, "👑 <b>پنل مدیریت</b>", Some(self.adm_kb())).await; true }
             "a:stats" => {
@@ -1751,7 +1762,7 @@ impl Bot {
             }
             "a:backup" => {
                 let pass = crate::backup::backup_pass(&self.app);
-                if let Ok((bytes, name)) = make_archive(&self.app, &pass) {
+                if let Ok((bytes, name)) = tokio::task::block_in_place(|| make_archive(&self.app, &pass)) {
                     self.send_doc(chat, bytes, &name, "💾 بکاپ کامل پنل (رمزدار — رمز در پنل > بکاپ)").await;
                 }
                 true
@@ -1935,7 +1946,7 @@ impl Bot {
         }
         let db = self.db();
         let back = Some(ik(vec![vec![b("⬅️ پنل مدیریت", "adm")]]));
-        let set_wait = |w: Wait| { self.waits.lock().unwrap().insert(uid, w); };
+        let set_wait = |w: Wait| { self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, w); };
         let (head, rest) = d.split_once(':').unwrap_or((d, ""));
         match head {
             "tg" => {
@@ -2058,7 +2069,7 @@ impl Bot {
             }
             "gfy" => {
                 // taken once: a second tap on "yes" gives nothing more
-                let Some((days, gb, why)) = self.gifts.lock().unwrap().remove(&uid) else {
+                let Some((days, gb, why)) = self.gifts.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid) else {
                     return self.edit(chat, mid, "این هدیه قبلاً داده شده یا لغو شده است.", Some(ik(vec![vec![b("⬅️ هدیه", "a:gift")]]))).await;
                 };
                 self.edit(chat, mid, "⏳ در حال اضافه کردن هدیه و فرستادن پیام‌ها…", None).await;
@@ -2264,7 +2275,7 @@ impl Bot {
                 let (days, gb, why) = match parse_gift(text) {
                     Ok(g) => g,
                     Err(e) => {
-                        self.waits.lock().unwrap().insert(uid, Wait::Gift(target));
+                        self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::Gift(target));
                         let to = if target == 0 { "a:gift".to_string() } else { format!("u:inf:{}", target) };
                         self.send(chat, &e, Some(ik(vec![vec![b("⬅️ انصراف", &to)]]))).await;
                         return;
@@ -2279,7 +2290,7 @@ impl Bot {
                     let mut tgs: Vec<i64> = targets.iter().map(|u| u.tg_id).filter(|t| *t > 0).collect();
                     tgs.sort_unstable();
                     tgs.dedup();
-                    self.gifts.lock().unwrap().insert(uid, (days, gb, why.clone()));
+                    self.gifts.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, (days, gb, why.clone()));
                     let note = if why.is_empty() { String::new() } else { format!("\n📝 {}", esc(&why)) };
                     self.send(chat, &format!("🎁 <b>هدیه به همه</b>\n\n{}{}\n\n👥 سرویس‌ها: <b>{}</b>\n✉️ پیام در تلگرام: <b>{}</b> نفر\n\nداده شود؟", gift_line(days, gb), note, targets.len(), tgs.len()),
                         Some(ik(vec![vec![b("✅ بله، هدیه بده", "gfy")], vec![b("⬅️ انصراف", "a:gift")]]))).await;
@@ -2503,7 +2514,8 @@ impl Bot {
             }
             // بکاپ روزانه برای ادمین‌ها
             if tick.is_multiple_of(24 * 60) && self.db().on("backup_on") {
-                if let Ok((bytes, name)) = make_archive(&self.app, &self.db().get("tgb_pass")) {
+                let pass = self.db().get("tgb_pass");
+                if let Ok((bytes, name)) = tokio::task::block_in_place(|| make_archive(&self.app, &pass)) {
                     for a in self.admins.clone() {
                         self.send_doc(a, bytes.clone(), &name, "💾 بکاپ خودکار روزانه").await;
                     }
@@ -2624,7 +2636,7 @@ mod flow_tests {
                 async move {
                     let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
                     let bad_edit = m == "editMessageText" && v["message_id"].as_i64() == Some(0);
-                    l.lock().unwrap().push((m, v));
+                    l.lock().unwrap_or_else(|e| e.into_inner()).push((m, v));
                     // like Telegram: a message that does not exist cannot be edited
                     axum::Json(if bad_edit { json!({"ok": false}) } else { json!({"ok": true, "result": {"message_id": 7}}) })
                 }
@@ -2672,7 +2684,7 @@ mod flow_tests {
 
     /// The last text sent to / edited for this chat
     fn last(log: &Log, chat: i64) -> String {
-        log.lock().unwrap().iter().rev()
+        log.lock().unwrap_or_else(|e| e.into_inner()).iter().rev()
             .find(|(m, v)| (m == "sendMessage" || m == "editMessageText") && v["chat_id"].as_i64() == Some(chat))
             .map(|(_, v)| v["text"].as_str().unwrap_or("").to_string()).unwrap_or_default()
     }
@@ -2770,15 +2782,15 @@ mod flow_tests {
         tap(&bot, u.clone(), "app").await;
         let text = last(&log, 500);
         assert!(text.contains("Kanki VPN") && text.contains("1.15.1"), "{}", text);
-        let kb = log.lock().unwrap().iter().rev().find(|(m, _)| m == "editMessageText").map(|(_, v)| v["reply_markup"].to_string()).unwrap();
+        let kb = log.lock().unwrap_or_else(|e| e.into_inner()).iter().rev().find(|(m, _)| m == "editMessageText").map(|(_, v)| v["reply_markup"].to_string()).unwrap();
         assert!(kb.contains("apk:arm64-v8a") && kb.contains("38.2 MB"), "{}", kb);
         tap(&bot, u.clone(), "apk:arm64-v8a").await;
-        let sent = log.lock().unwrap().iter().rev().find(|(m, _)| m == "sendDocument").map(|(_, v)| v.clone()).unwrap();
+        let sent = log.lock().unwrap_or_else(|e| e.into_inner()).iter().rev().find(|(m, _)| m == "sendDocument").map(|(_, v)| v.clone()).unwrap();
         assert_eq!(sent["document"], "FILE1");
         assert!(sent["caption"].as_str().unwrap().contains("Kanki VPN 1.15.1 · arm64"));
         // the channel's "download the app" link opens the same menu right away
         say(&bot, from(501, "رضا", ""), "/start app").await;
-        let m = log.lock().unwrap().iter().rev().find(|(m, v)| m == "sendMessage" && v["chat_id"] == 501).map(|(_, v)| v.clone()).unwrap();
+        let m = log.lock().unwrap_or_else(|e| e.into_inner()).iter().rev().find(|(m, v)| m == "sendMessage" && v["chat_id"] == 501).map(|(_, v)| v.clone()).unwrap();
         assert!(m["text"].as_str().unwrap().contains("دانلود اپ Kanki VPN"));
         assert!(m["reply_markup"].to_string().contains("apk:arm64-v8a"));
     }

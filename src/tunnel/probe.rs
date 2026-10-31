@@ -165,7 +165,7 @@ async fn udp_test(s: &Arc<Session>, shared: &Arc<Shared>, flow: u32) -> Result<(
     let a = Arc::new(UdpSocket::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?);
     let b = UdpSocket::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
     let b_addr = b.local_addr().map_err(|e| e.to_string())?;
-    shared.udp_back.lock().unwrap().insert(flow, (a.clone(), b_addr, now_ms()));
+    shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).insert(flow, (a.clone(), b_addr, now_ms()));
     const N: u64 = 20;
     let start = now_ms();
     let sender = {
@@ -200,7 +200,7 @@ async fn udp_test(s: &Arc<Session>, shared: &Arc<Shared>, flow: u32) -> Result<(
         }
     }
     let _ = sender.await;
-    shared.udp_back.lock().unwrap().remove(&flow);
+    shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).remove(&flow);
     rtts.sort();
     let loss = ((N - seen.len() as u64) as f64 * 100.0 / N as f64 * 10.0).round() / 10.0;
     let ping = if rtts.is_empty() { 0 } else { rtts[rtts.len() / 2] };
