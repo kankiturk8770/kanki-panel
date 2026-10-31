@@ -575,10 +575,10 @@ pub fn build_config(s: &XraySettings, sid: &str, users: &[User]) -> Value {
     let strategy = if s.domain_strategy.is_empty() { "AsIs" } else { s.domain_strategy.as_str() };
     let mut cfg = json!({
         "log": { "loglevel": level, "access": "none" },
-        "api": { "tag": "api", "listen": format!("127.0.0.1:{}", super::API_PORT), "services": ["HandlerService", "StatsService"] },
+        "api": { "tag": "api", "listen": format!("127.0.0.1:{}", super::API_PORT), "services": ["HandlerService", "StatsService", "RoutingService"] },
         "stats": {},
         "policy": {
-            "levels": { "0": { "statsUserUplink": true, "statsUserDownlink": true } },
+            "levels": { "0": { "statsUserUplink": true, "statsUserDownlink": true, "statsUserOnline": true } },
             "system": { "statsInboundUplink": true, "statsInboundDownlink": true },
         },
         "inbounds": inbounds,
@@ -1067,6 +1067,7 @@ pub fn ingest(app: &App, sid: &str, st: &Value) {
     }
     last_status().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), (now(), st.clone()));
     note_traffic(sid, st, now());
+    note_ips(sid, st, now());
     crate::dns::panel::count_usage(app, &format!("xray_prev_{}", sid), st);
     count_inbounds(app, sid, st);
     // online now: the users whose traffic moved since the previous read
@@ -1106,25 +1107,78 @@ fn note_traffic(sid: &str, st: &Value, now: i64) {
     }
 }
 
-/// Live Xray connections for the connection limit, and the servers that reported lately. A user counts
-/// on a server while its traffic keeps moving (within a minute), once it moved in reports at least 10 s
-/// apart: an app's ping through Xray is one short burst.
-pub fn live_units(now: i64) -> (Vec<(i64, String, String, i64)>, std::collections::HashSet<String>) {
-    let fresh: std::collections::HashSet<String> =
-        last_status().lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|(_, (t, _))| now - t < 30).map(|(k, _)| k.clone()).collect();
+/// Per (server, user, address): when Xray first and last listed it as an open connection
+type IpSeen = HashMap<(String, i64, String), (i64, i64)>;
+
+fn ip_seen() -> &'static Mutex<IpSeen> {
+    static S: OnceLock<Mutex<IpSeen>> = OnceLock::new();
+    S.get_or_init(Default::default)
+}
+
+/// A server's report of the addresses each user has open connections from (newer Xray builds)
+fn note_ips(sid: &str, st: &Value, now: i64) {
+    let Some(o) = st["online_ips"].as_object() else { return };
+    let mut s = ip_seen().lock().unwrap_or_else(|e| e.into_inner());
+    for (id, ips) in o {
+        let Ok(id) = id.parse::<i64>() else { continue };
+        for ip in ips.as_array().into_iter().flatten().filter_map(|x| x.as_str()) {
+            let e = s.entry((sid.to_string(), id, ip.to_string())).or_insert((now, now));
+            // gone for a minute: a new connection starts again
+            if now - e.1 >= 60 {
+                e.0 = now;
+            }
+            e.1 = now;
+        }
+    }
+    s.retain(|_, e| now - e.1 < 600);
+}
+
+/// Live Xray connections for the connection limit (user, "x:<server>", "xray", devices), the addresses
+/// of each user's devices oldest first, and the servers that reported lately. A device is an address
+/// with open connections listed in reports at least 10 s apart (an app's ping is one short connection);
+/// devices dropped by the limit are not counted. With an older Xray (no online stats) a user counts as
+/// one device while its traffic keeps moving.
+#[allow(clippy::type_complexity)]
+pub fn live_units(now: i64) -> (Vec<(i64, String, String, i64)>, HashMap<(i64, String, String), Vec<String>>, std::collections::HashSet<String>) {
+    let (fresh, by_ip): (std::collections::HashSet<String>, std::collections::HashSet<String>) = {
+        let st = last_status().lock().unwrap_or_else(|e| e.into_inner());
+        let fresh: std::collections::HashSet<String> = st.iter().filter(|(_, (t, _))| now - t < 30).map(|(k, _)| k.clone()).collect();
+        let by_ip = st.iter().filter(|(k, (_, v))| fresh.contains(*k) && v["online_ips"].is_object()).map(|(k, _)| k.clone()).collect();
+        (fresh, by_ip)
+    };
+    let lim = crate::sync::limits().lock().unwrap_or_else(|e| e.into_inner());
+    let mut devs: HashMap<(i64, String), Vec<(i64, String)>> = HashMap::new();
+    for ((sid, id, ip), (first, last)) in ip_seen().lock().unwrap_or_else(|e| e.into_inner()).iter() {
+        let node = format!("x:{}", sid);
+        if by_ip.contains(sid) && now - last < 15 && last - first >= 10 && !lim.is_dropped(*id, &node, "xray", ip) {
+            devs.entry((*id, node)).or_default().push((*first, ip.clone()));
+        }
+    }
+    let mut units = vec![];
+    let mut eps = HashMap::new();
+    for ((id, node), mut v) in devs {
+        v.sort();
+        units.push((id, node.clone(), "xray".to_string(), v.len() as i64));
+        eps.insert((id, node, "xray".to_string()), v.into_iter().map(|x| x.1).collect());
+    }
     let mut s = seen().lock().unwrap_or_else(|e| e.into_inner());
     s.retain(|(sid, _), e| now - e.2 < 600 || fresh.contains(sid));
-    let units = s
-        .iter()
-        .filter(|((sid, _), e)| fresh.contains(sid) && e.2 > 0 && now - e.2 < 60 && e.2 - e.1 >= 10)
-        .map(|((sid, id), _)| (*id, format!("x:{}", sid), "xray".to_string(), 1))
-        .collect();
-    (units, fresh.into_iter().map(|k| format!("x:{}", k)).collect())
+    units.extend(
+        s.iter()
+            .filter(|((sid, _), e)| fresh.contains(sid) && !by_ip.contains(sid) && e.2 > 0 && now - e.2 < 60 && e.2 - e.1 >= 10)
+            .map(|((sid, id), _)| (*id, format!("x:{}", sid), "xray".to_string(), 1)),
+    );
+    (units, eps, fresh.into_iter().map(|k| format!("x:{}", k)).collect())
 }
 
 /// The users whose Xray is shut on server `sid` by the connection limit
 pub fn shut_on(sid: &str) -> Vec<i64> {
     crate::sync::limits().lock().unwrap_or_else(|e| e.into_inner()).shut_on(&format!("x:{}", sid), "xray")
+}
+
+/// Extra devices dropped on server `sid`: (user, address)
+pub fn ip_blocks(sid: &str) -> Vec<(i64, String)> {
+    crate::sync::limits().lock().unwrap_or_else(|e| e.into_inner()).dropped_on(&format!("x:{}", sid), "xray")
 }
 
 /// The panel server itself can run Xray too: deploy and count here every 15 seconds.
@@ -1150,8 +1204,12 @@ pub async fn local_loop(app: Arc<App>) {
             (res, super::status())
         })
         .await;
-        let block = shut_on("local");
-        let _ = tokio::task::spawn_blocking(move || super::set_blocked(&block)).await;
+        let (block, ips) = (shut_on("local"), ip_blocks("local"));
+        let _ = tokio::task::spawn_blocking(move || {
+            super::set_blocked(&block);
+            super::set_ip_blocks(&ips);
+        })
+        .await;
         if let Ok((res, mut st)) = r {
             match res {
                 Err(e) => {

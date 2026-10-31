@@ -96,7 +96,8 @@
 - [ ] شاید: خواندن خط به خط رمزنگاری پروتکل‌های تانل (`kcp`، `faketcp`، `game`) و `mtun` (از نظر قفل، سقف و ورودی خوانده شده).
 - [ ] بعد از ریلیز 3.22.2 روی سرورها: در لاگ node/ایجنت دیده شود که `xray: the kernel loopback guard is not available` نیامده
       (اگر آمد، فقط محافظ کرنلی نیست؛ قانون روتینگ Xray هنوز 127.0.0.1 را می‌بندد).
-- [ ] بعد از ریلیز 3.22.4: در لاگ ایجنت‌ها `xray: the connection limit cannot take users out` نیامده باشد (یعنی `api rmu` کار می‌کند).
+- [ ] بعد از ریلیز 3.22.4: در لاگ ایجنت‌ها `xray: the connection limit cannot take users out` یا `cannot drop extra devices` نیامده باشد
+      (یعنی `api rmu` و `api adrules` کار می‌کنند)؛ با یک حساب تک‌کاربره و دو گوشی روی هر پروتکل امتحان شود.
 - کار دستی صاحب پنل: روشن کردن 2FA، پاک کردن کلید API قدیمی اگر لازم نیست، یک بار «ارسال بکاپ الان».
 
 ### فهرست نسخه‌ها
@@ -131,6 +132,13 @@
    دارد (گوشی‌ای که شبکه عوض می‌کند فقط یک بار). بیشتر از حد: تازه‌ترین دستگاه‌ها با آدرسشان در فایروال همان سرور (زنجیرهٔ `KANKI-LIMIT`،
    `wg::set_blocked`، `SyncReq.block`، `Limits::blocks_on`) بسته می‌مانند تا یکی از دستگاه‌های کاربر قطع شود. KMIX/microtun روی هر سرور
    فقط جای باقی‌مانده را می‌گیرند (`Limits::allowed`). تست `one_config_on_two_phones_is_two_connections`. قانون iptables روی همین محیط امتحان شد.
+8. **Xray: دستگاه‌ها با IP** (`xray::online_ips`، `online_users`، `set_ip_blocks`، `with_ip_blocks`؛ `xray::panel::note_ips`، `live_units`،
+   `ip_blocks`؛ `Limits::dropped_on`/`is_dropped`): آمار آنلاین Xray (`statsUserOnline`، `api statsgetallonlineusers` و `statsonlineiplist`
+   = IPهایی که کاربر از آن‌ها اتصال باز دارد). هر IP که در گزارش‌هایی با ۱۰ ثانیه فاصله دیده شود یک دستگاه است. دستگاه اضافه با قانون
+   روتینگ (کاربر + IP ← block) جلوی قانون‌های کانفیگ، زنده (`api adrules` بدون `-append` کل لیست را جایگزین می‌کند، پس قانون‌های کانفیگ
+   هم دوباره فرستاده می‌شوند) بسته می‌شود؛ هیچ‌کس قطع نمی‌شود. اتصال از خود سرور (تانل Xray، 127.0.0.1) را Xray نمی‌شمارد؛ صاحب پنل
+   تانل‌های Xray را می‌بندد. کانفیگ `RoutingService` و `statsUserOnline` گرفت (یک ری‌استارت Xray با آپدیت). اجرای Xray این‌جا مجاز
+   نشد؛ دستورها، فیلدهای JSON و فرمت IPv6 از کد منبع Xray v26.3.27 چک شد.
 5. **Xray** (`xray::panel::note_traffic`، `live_units`، `shut_on`؛ `xray::set_blocked`، `user_inbounds`): کاربری که ترافیک Xray‌اش روی یک
    سرور جابه‌جا می‌شود (در گزارش‌هایی با حداقل ۱۰ ثانیه فاصله؛ پینگ یک انفجار کوتاه است) اتصال زنده است. وقتی محدودیت Xray را برای او
    روی آن سرور می‌بندد، ایجنت (`xray_block` در جواب گزارش) کاربر را با API خود Xray (`api rmu`، برگشت با `api adu`) از Xray در حال
@@ -144,7 +152,7 @@
 تست‌ها: `a_ping_handshake_is_not_a_connection`، `a_session_that_moved_no_data_is_a_ping`، `a_one_connection_account_works_on_one_device_at_a_time`،
 `if_two_got_in_at_once_the_newest_is_shut`، `two_connections_allow_two_devices_and_no_third`، `a_node_that_does_not_answer_keeps_its_connection`؛
 `cargo test` (۲۱۳ قبول)، `node --check`.
-نشد: چند دستگاه با یک کانفیگ **Xray روی یک سرور** (Xray فقط ترافیک هر کاربر را می‌دهد؛ IP دستگاه‌ها لازم است، و از راه تانل همه یک IP دارند).
+نشد: دستگاه‌هایی که پشت یک IP هستند (یک مودم) در Xray یک دستگاه دیده می‌شوند؛ اتصال Xray از راه تانل (127.0.0.1) شمرده نمی‌شود.
 وضعیت در حافظه است (ری‌استارت پنل = از نو).
 
 ### 2026-10-31 — نسخهٔ 3.22.3: گواهی منقضی لینک اشتراک ایران

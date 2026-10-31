@@ -317,9 +317,21 @@ impl Limits {
 
     /// The addresses to drop on a node: "wg 1.2.3.4:5678"
     pub fn blocks_on(&self, node: &str) -> Vec<String> {
-        let mut v: Vec<String> = self.blocked.iter().filter(|(k, _)| k.1 == node).flat_map(|(k, a)| a.iter().map(move |x| format!("{} {}", k.2, x))).collect();
+        let mut v: Vec<String> = self.blocked.iter().filter(|(k, _)| k.1 == node && k.2 != "xray").flat_map(|(k, a)| a.iter().map(move |x| format!("{} {}", k.2, x))).collect();
         v.sort();
         v
+    }
+
+    /// The devices dropped on a node for a protocol: (user, address)
+    pub fn dropped_on(&self, node: &str, proto: &str) -> Vec<(i64, String)> {
+        let mut v: Vec<(i64, String)> = self.blocked.iter().filter(|(k, _)| k.1 == node && k.2 == proto).flat_map(|(k, a)| a.iter().map(move |x| (k.0, x.clone()))).collect();
+        v.sort();
+        v
+    }
+
+    /// Is this device of the user dropped there now?
+    pub fn is_dropped(&self, user: i64, node: &str, proto: &str, addr: &str) -> bool {
+        self.blocked.get(&(user, node.to_string(), proto.to_string())).is_some_and(|v| v.iter().any(|x| x == addr))
     }
 }
 
@@ -559,8 +571,9 @@ pub async fn sync_all(app: &Arc<App>) {
     let limit_on = app.db.get("conn_limit_on") != "0";
     let max: HashMap<i64, i64> = users.iter().map(|u| (u.id, if limit_on && u.active() { u.max_conn } else { 0 })).collect();
     // Xray counts like the others (its servers report every 5 seconds)
-    let (xu, xa) = crate::xray::panel::live_units(now());
+    let (xu, xe, xa) = crate::xray::panel::live_units(now());
     units.extend(xu);
+    eps.extend(xe);
     answered.extend(xa);
     let changed = limits().lock().unwrap_or_else(|e| e.into_inner()).round(&units, &eps, &answered, &max, now());
     if changed {
@@ -707,6 +720,20 @@ mod live_tests {
         // the first phone disconnects: the other may connect
         l.round(&[two(2)], &eps, &nodes(), &max, 1060);
         assert!(l.blocks_on("de").is_empty());
+    }
+
+    #[test]
+    fn one_xray_config_on_two_phones_is_two_connections() {
+        let mut l = Limits::default();
+        let max: HashMap<i64, i64> = [(1, 1)].into_iter().collect();
+        let key = (1, "x:ir".to_string(), "xray".to_string());
+        let eps: HashMap<(i64, String, String), Vec<String>> = [(key.clone(), vec!["5.5.5.5".to_string(), "6.6.6.6".to_string()])].into_iter().collect();
+        let nodes: HashSet<String> = ["x:ir".to_string()].into_iter().collect();
+        l.round(&[(1, "x:ir".to_string(), "xray".to_string(), 2)], &eps, &nodes, &max, 1000);
+        assert_eq!(l.dropped_on("x:ir", "xray"), vec![(1, "6.6.6.6".to_string())]);
+        assert!(l.is_dropped(1, "x:ir", "xray", "6.6.6.6") && !l.is_dropped(1, "x:ir", "xray", "5.5.5.5"));
+        // Xray drops are not firewall rules
+        assert!(l.blocks_on("x:ir").is_empty());
     }
 
     fn nodes() -> HashSet<String> {

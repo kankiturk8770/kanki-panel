@@ -545,6 +545,91 @@ pub fn set_blocked(want: &[i64]) {
     }
 }
 
+/// The addresses each user has open connections from now (Xray's online stats; connections from this
+/// server itself, such as a tunnel, are not listed). None when this Xray cannot tell (older build).
+fn online_ips() -> Option<HashMap<i64, Vec<String>>> {
+    let server = format!("--server=127.0.0.1:{}", API_PORT);
+    let (ok, out) = sh(&format!("{} api statsgetallonlineusers {} 2>/dev/null", BIN, server));
+    if !ok {
+        return None;
+    }
+    let mut m = HashMap::new();
+    for id in online_users(&out) {
+        let (_, out) = sh(&format!("{} api statsonlineiplist {} -email u{} 2>/dev/null", BIN, server, id));
+        let v: Value = serde_json::from_str(&out).unwrap_or(Value::Null);
+        // IPv6 comes as "[2001:db8::1]"
+        let ips: Vec<String> = v["ips"]
+            .as_object()
+            .map(|o| o.keys().map(|k| k.trim_matches(|c| c == '[' || c == ']').to_string()).filter(|k| k.parse::<std::net::IpAddr>().is_ok()).collect())
+            .unwrap_or_default();
+        if !ips.is_empty() {
+            m.insert(id, ips);
+        }
+    }
+    Some(m)
+}
+
+/// user ids in `statsgetallonlineusers` ("user>>>u7>>>online")
+fn online_users(out: &str) -> Vec<i64> {
+    let v: Value = serde_json::from_str(out).unwrap_or(Value::Null);
+    let mut ids: Vec<i64> = v["users"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|x| x.as_str())
+        .filter_map(|n| n.strip_prefix("user>>>u")?.strip_suffix(">>>online")?.parse().ok())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// Connection limit: extra devices of a user on this server, dropped by address (user, source IP) with a
+/// routing rule put in front of the config's own rules, live (Xray's routing API; nobody is disconnected).
+/// A restart of Xray loads the config's rules alone, so they are put in again. Blocking.
+pub fn set_ip_blocks(list: &[(i64, String)]) {
+    if !std::path::Path::new(UNIT).exists() || !running() {
+        return;
+    }
+    static LAST: Mutex<(Vec<(i64, String)>, String)> = Mutex::new((Vec::new(), String::new()));
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    let mut want: Vec<(i64, String)> = list.iter().filter(|(_, ip)| ip.parse::<std::net::IpAddr>().is_ok()).cloned().collect();
+    want.sort();
+    let pid = sh("systemctl show -p MainPID --value kanki-xray.service 2>/dev/null").1.trim().to_string();
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    // after a restart the config's rules are loaded without ours
+    let fresh = last.1 != pid;
+    if (last.0 == want && !fresh) || (want.is_empty() && fresh) {
+        last.1 = pid;
+        return;
+    }
+    let conf: Value = std::fs::read_to_string(CONF_FILE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let routing = with_ip_blocks(&conf["routing"], &want);
+    let tmp = format!("{}/rules.json", CONF_DIR);
+    let ok = std::fs::write(&tmp, json!({ "routing": routing }).to_string()).is_ok()
+        && {
+            let (r, out) = sh(&format!("{} api adrules --server=127.0.0.1:{} {} 2>&1", BIN, API_PORT, q(&tmp)));
+            if !r {
+                WARNED.call_once(|| eprintln!("xray: the connection limit cannot drop extra devices ({})", out.lines().last().unwrap_or("")));
+            }
+            r
+        };
+    let _ = std::fs::remove_file(&tmp);
+    if ok {
+        *last = (want, pid);
+    }
+}
+
+/// The config's routing with a rule for each dropped (user, address) in front (all of them are loaded
+/// again at once: Xray replaces the whole list)
+fn with_ip_blocks(routing: &Value, list: &[(i64, String)]) -> Value {
+    let mut r = if routing.is_object() { routing.clone() } else { json!({}) };
+    let mut rules: Vec<Value> = list.iter().map(|(id, ip)| json!({ "type": "field", "ruleTag": format!("klimit-{}-{}", id, ip), "user": [format!("u{}", id)], "source": [ip], "outboundTag": "block" })).collect();
+    rules.extend(routing["rules"].as_array().cloned().unwrap_or_default());
+    r["rules"] = json!(rules);
+    r
+}
+
 /// Restart Xray (if this server runs it), e.g. after the ports it needs were freed.
 pub fn restart_if_installed() {
     if std::path::Path::new(UNIT).exists() {
@@ -594,6 +679,13 @@ pub fn status() -> Value {
         // inbound ports that another program holds
         "taken": crate::certbot::taken_json(&crate::certbot::taken_cached(&needed_ports(), "kanki-xray.service")),
     });
+    // devices of each user by address (a config copied to several devices is several connections)
+    if active {
+        drop(c);
+        if let Some(ips) = online_ips() {
+            st["online_ips"] = json!(ips.into_iter().map(|(k, v)| (k.to_string(), v)).collect::<HashMap<String, Vec<String>>>());
+        }
+    }
     if !active {
         st["error"] = json!(sh("journalctl -u kanki-xray.service -n 5 --no-pager -o cat 2>/dev/null").1.lines().last().unwrap_or("not running").to_string());
     }
@@ -602,6 +694,20 @@ pub fn status() -> Value {
 
 #[cfg(test)]
 mod loopback_tests {
+    #[test]
+    fn reads_who_is_online_and_puts_blocks_first() {
+        let out = r#"{ "users": ["user>>>u7>>>online", "user>>>u12>>>online", "user>>>x>>>online", "user>>>u7>>>online"] }"#;
+        assert_eq!(super::online_users(out), vec![7, 12]);
+        let routing = serde_json::json!({ "domainStrategy": "AsIs", "rules": [{ "type": "field", "ip": ["127.0.0.0/8"], "outboundTag": "block" }] });
+        let r = super::with_ip_blocks(&routing, &[(7, "5.6.7.8".to_string())]);
+        let rules = r["rules"].as_array().unwrap();
+        assert_eq!(rules.len(), 2);
+        assert_eq!(rules[0]["user"][0], "u7");
+        assert_eq!(rules[0]["source"][0], "5.6.7.8");
+        assert_eq!(rules[1]["ip"][0], "127.0.0.0/8");
+        assert_eq!(r["domainStrategy"], "AsIs");
+    }
+
     #[test]
     fn finds_the_inbounds_of_a_user() {
         let c = serde_json::json!({ "inbounds": [
