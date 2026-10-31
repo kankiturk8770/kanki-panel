@@ -556,6 +556,13 @@ impl Bot {
         self.plans(false).into_iter().map(|x| x.0).find(|p| p.id == id)
     }
 
+    /// A plan that is on sale now. A button can carry any plan id (an old message, or a client that
+    /// makes its own buttons): a plan the admin switched off must not be bought. `plan` stays for orders
+    /// already placed.
+    fn plan_on_sale(&self, id: i64) -> Option<Plan> {
+        self.plans(true).into_iter().map(|x| x.0).find(|p| p.id == id)
+    }
+
     fn account_text(&self, u: &User) -> String {
         let left = if u.limit_gb > 0.0 { format!("{:.2} GB", (u.limit_gb - u.used_gb()).max(0.0)) } else { "نامحدود".into() };
         let st = if u.active() { "🟢 فعال" } else { "🔴 غیرفعال" };
@@ -947,7 +954,7 @@ impl Bot {
     async fn got_receipt(&self, uid: i64, chat: i64, name: &str, method: &str, m: &Value) {
         let pe = self.pend.lock().unwrap().get(&uid).cloned();
         let Some(pe) = pe else { return };
-        let Some(p) = self.plan(pe.plan) else { return };
+        let Some(p) = self.plan_on_sale(pe.plan) else { return };
         let photo = m["photo"].as_array().and_then(|a| a.last()).and_then(|x| x["file_id"].as_str()).map(|s| s.to_string());
         let reference = photo.clone().unwrap_or_else(|| m["text"].as_str().unwrap_or("").to_string());
         let (t, u) = self.price(&p, &pe);
@@ -1228,7 +1235,7 @@ impl Bot {
     }
 
     async fn show_plan(&self, chat: i64, mid: Option<i64>, uid: i64, pid: i64) {
-        let Some(p) = self.plan(pid) else { return };
+        let Some(p) = self.plan_on_sale(pid) else { return };
         let pe = self.pend.lock().unwrap().get(&uid).cloned().unwrap_or_default();
         let (t, u) = self.price(&p, &pe);
         let mut rows: Kb = vec![];
@@ -1255,7 +1262,7 @@ impl Bot {
     async fn pay(&self, uid: i64, chat: i64, mid: i64, method: &str) {
         let pe = self.pend.lock().unwrap().get(&uid).cloned();
         let Some(pe) = pe else { return };
-        let Some(p) = self.plan(pe.plan) else { return };
+        let Some(p) = self.plan_on_sale(pe.plan) else { return };
         let (t, u) = self.price(&p, &pe);
         let db = self.db();
         let home = Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]));
@@ -1325,7 +1332,7 @@ impl Bot {
     async fn np_start(&self, uid: i64, chat: i64, mid: i64, coin: &str) {
         let pe = self.pend.lock().unwrap().get(&uid).cloned();
         let Some(pe) = pe else { return };
-        let Some(p) = self.plan(pe.plan) else { return };
+        let Some(p) = self.plan_on_sale(pe.plan) else { return };
         let (_, usd) = self.price(&p, &pe);
         let oid = self.new_order(uid, &p, &pe, "np", &usd.to_string(), "waiting", "");
         let r = self.http.post("https://api.nowpayments.io/v1/payment").header("x-api-key", self.db().get("np_key")).json(&json!({

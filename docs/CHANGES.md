@@ -1,3 +1,12 @@
+# v3.22.2 — full code review: security and speed
+- **Iran subscription relay: no header smuggling** (`subiran.rs` `proxy_head`): a request with a bare line feed inside a header line could carry its own `X-Forwarded-For` past the filter, pose as the panel itself (127.0.0.1) and skip every request limit. Such requests are refused (test in `proxy_head` tests).
+- **Hysteria login check (`/hy2/auth`) only from this machine**, by the real TCP peer (not a header): old node installs listen on every address, where anyone could test subscription codes without a limit.
+- **Bot: a plan the admin switched off cannot be bought** (`plan_on_sale`): a button can carry any plan id (an old message or a modified client).
+- **Nothing slow runs on the async workers any more**: `systemctl` / `df` of the dashboard and of each sync round, the self-update (write + test run of the new program, also on tunnel agents), backups, VACUUM, port changes, repairs and the 200 MB APK hash now run on blocking threads, so the panel answers other requests meanwhile.
+- **Sync rounds are merged**: many changes in a row (bulk edits, an API script) queue one more round instead of one each.
+- **Timeouts** on the local Hysteria / KANKI MIX stats API (5 s; a hung Hysteria held the whole sync round) and on name lookups of the exit-country loop.
+- **The database stays usable after a panic** inside a query (the lock is no longer poisoned for the rest of the run); Kanki DNS keeps only the newest 50 distinct errors.
+
 # v3.22.1 — full review: devices, limits, deleted users, sync, Hysteria check
 - **Phone or PC for every app** (`devices.rs` `system_of`, `kind_of`): Android apps that send only `okhttp/…` or `Dalvik/… Android …`, iPhone apps (`CFNetwork/… Darwin/…`), sing-box (SFA/SFI), Clash Meta for Android, Clash Verge, ClashX and FlClash are now told apart; before, most of them had no kind and were missing from the phone / PC icons. An app that still does not say its system shows with a globe icon on the user's card, so no device is hidden.
 - **Two phones with the same app are two devices**: apps without a Kanki device id are listed per User-Agent (it carries the version and often the phone model), not one row per app name.

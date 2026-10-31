@@ -1,6 +1,13 @@
 //! Hysteria2: traffic stats API (auth is handled over HTTP in api.rs)
 use std::collections::HashMap;
 
+/// The local Hysteria2 stats API: one shared client with a short timeout, so a Hysteria that hangs
+/// cannot hold the sync round (traffic, limits and the online list of every server)
+fn client() -> &'static reqwest::Client {
+    static C: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    C.get_or_init(|| reqwest::Client::builder().timeout(std::time::Duration::from_secs(5)).build().unwrap_or_default())
+}
+
 /// Per-user traffic since last call (clear=1)
 pub async fn traffic(port: &str, secret: &str) -> HashMap<String, (i64, i64)> {
     let mut m = HashMap::new();
@@ -8,7 +15,7 @@ pub async fn traffic(port: &str, secret: &str) -> HashMap<String, (i64, i64)> {
         return m;
     }
     let url = format!("http://127.0.0.1:{}/traffic?clear=1", port);
-    if let Ok(r) = reqwest::Client::new().get(&url).header("Authorization", secret).send().await {
+    if let Ok(r) = client().get(&url).header("Authorization", secret).send().await {
         if let Ok(v) = r.json::<serde_json::Value>().await {
             if let Some(o) = v.as_object() {
                 for (k, x) in o {
@@ -29,7 +36,7 @@ pub async fn online(port: &str, secret: &str) -> HashMap<String, i64> {
         return m;
     }
     let url = format!("http://127.0.0.1:{}/online", port);
-    if let Ok(r) = reqwest::Client::new().get(&url).header("Authorization", secret).send().await {
+    if let Ok(r) = client().get(&url).header("Authorization", secret).send().await {
         if let Ok(v) = r.json::<HashMap<String, i64>>().await {
             m = v;
         }
@@ -43,5 +50,5 @@ pub async fn kick(port: &str, secret: &str, ids: &[String]) {
         return;
     }
     let url = format!("http://127.0.0.1:{}/kick", port);
-    let _ = reqwest::Client::new().post(&url).header("Authorization", secret).json(&ids).send().await;
+    let _ = client().post(&url).header("Authorization", secret).json(&ids).send().await;
 }

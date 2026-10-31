@@ -249,6 +249,10 @@ impl Engine {
         eprintln!("{}", e);
         let mut v = self.errors.lock().unwrap();
         if !v.contains(&e) {
+            // errors that name an address differ each time: keep the newest few, not all of them
+            if v.len() >= 50 {
+                v.remove(0);
+            }
             v.push(e);
         }
     }
