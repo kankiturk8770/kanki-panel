@@ -1751,7 +1751,7 @@ impl Bot {
             }
             "a:backup" => {
                 let pass = crate::backup::backup_pass(&self.app);
-                if let Ok((bytes, name)) = make_archive(&self.app, &pass) {
+                if let Ok((bytes, name)) = tokio::task::block_in_place(|| make_archive(&self.app, &pass)) {
                     self.send_doc(chat, bytes, &name, "💾 بکاپ کامل پنل (رمزدار — رمز در پنل > بکاپ)").await;
                 }
                 true
@@ -2503,7 +2503,8 @@ impl Bot {
             }
             // بکاپ روزانه برای ادمین‌ها
             if tick.is_multiple_of(24 * 60) && self.db().on("backup_on") {
-                if let Ok((bytes, name)) = make_archive(&self.app, &self.db().get("tgb_pass")) {
+                let pass = self.db().get("tgb_pass");
+                if let Ok((bytes, name)) = tokio::task::block_in_place(|| make_archive(&self.app, &pass)) {
                     for a in self.admins.clone() {
                         self.send_doc(a, bytes.clone(), &name, "💾 بکاپ خودکار روزانه").await;
                     }

@@ -155,7 +155,7 @@ async fn offline_round(app: &Arc<App>) {
     if let Err(e) = crate::backup::send_backup(app).await {
         // no Telegram backup: one kept on the panel server instead ({data}/before-autoremove.*)
         let pass = crate::backup::backup_pass(app);
-        match crate::backup::make_archive(app, &pass) {
+        match tokio::task::block_in_place(|| crate::backup::make_archive(app, &pass)) {
             Ok((bytes, name)) => {
                 let ext = if name.ends_with(".kbk") { "kbk" } else { "tar.gz" };
                 let _ = std::fs::write(format!("{}/before-autoremove.{}", app.data_dir(), ext), bytes);

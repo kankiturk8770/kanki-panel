@@ -280,7 +280,7 @@ async fn main() {
         let addr = format!("{}:{}", bind, port);
         eprintln!("kanki node agent {} on {}", VERSION, addr);
         let l = tokio::net::TcpListener::bind(&addr).await.expect("bind");
-        axum::serve(l, api::node_router(app)).await.expect("serve");
+        axum::serve(l, api::node_router(app).into_make_service_with_connect_info::<std::net::SocketAddr>()).await.expect("serve");
         return;
     }
 
@@ -332,5 +332,5 @@ async fn main() {
     let addr = format!("{}:{}", bind, port);
     eprintln!("kanki panel {} on {}", VERSION, addr);
     let l = tokio::net::TcpListener::bind(&addr).await.expect("bind");
-    axum::serve(l, api::master_router(app)).await.expect("serve");
+    axum::serve(l, api::master_router(app).into_make_service_with_connect_info::<std::net::SocketAddr>()).await.expect("serve");
 }

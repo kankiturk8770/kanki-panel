@@ -435,7 +435,9 @@ pub fn proxy_head(head: &str, client: &str) -> Option<String> {
     }
     let mut out = format!("{} {} {}\r\n", method, target, ver);
     for l in lines.filter(|l| !l.is_empty()) {
-        if l.starts_with(' ') || l.starts_with('\t') {
+        // a bare CR or LF inside a line is a line break to the panel's HTTP parser: it would carry a header
+        // past the filter below (an X-Forwarded-For of the sender's choosing skips the request limits)
+        if l.starts_with(' ') || l.starts_with('\t') || l.contains('\n') || l.contains('\r') {
             return None;
         }
         let name = l.split(':').next().unwrap_or("").trim().to_ascii_lowercase();
@@ -509,6 +511,9 @@ mod tests {
 
     #[test]
     fn head_is_rewritten_for_the_panel() {
+        // a header hidden behind a bare line feed is refused (it would get past the filter)
+        assert!(proxy_head("GET /sub/abc HTTP/1.1\r\nUser-Agent: x\nX-Forwarded-For: 127.0.0.1\r\n\r\n", "5.6.7.8").is_none());
+        assert!(proxy_head("GET /sub/abc HTTP/1.1\r\nUser-Agent: x\rX-Forwarded-For: 127.0.0.1\r\n\r\n", "5.6.7.8").is_none());
         let h = "GET /sub/abc HTTP/1.1\r\nHost: sub.example.com:2053\r\nConnection: keep-alive\r\nX-Forwarded-For: 6.6.6.6\r\nUser-Agent: v2rayNG\r\n\r\n";
         let out = proxy_head(h, "5.6.7.8").unwrap();
         assert_eq!(out, "GET /sub/abc HTTP/1.1\r\nHost: sub.example.com:2053\r\nUser-Agent: v2rayNG\r\nX-Forwarded-For: 5.6.7.8\r\nX-Forwarded-Proto: https\r\nConnection: close\r\n\r\n");

@@ -227,7 +227,8 @@ async fn update_from_panel(http: &reqwest::Client, panel: &str, id: &str, token:
         return Err("checksum mismatch, update aborted".into());
     }
     let path = crate::util::exe_path().map_err(|e| e.to_string())?;
-    crate::util::swap_program(&path, &bytes)?;
+    // off the async workers: they carry the tunnels while the new file is written and test-run
+    tokio::task::spawn_blocking(move || crate::util::swap_program(&path, &bytes)).await.map_err(|e| e.to_string())??;
     crate::util::restart_siblings();
     eprintln!("updated from the panel: restarting");
     std::process::exit(0);

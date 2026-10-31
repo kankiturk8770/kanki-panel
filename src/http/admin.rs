@@ -364,6 +364,14 @@ pub fn node_stats() -> Value {
 
 async fn system(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "admin");
+    // systemctl for every service, df and ip: off the async workers (the dashboard asks often)
+    match tokio::task::spawn_blocking(system_info).await {
+        Ok(v) => Json(v).into_response(),
+        Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "system info failed"),
+    }
+}
+
+fn system_info() -> Value {
     let load: Vec<f64> = read("/proc/loadavg").split_whitespace().take(3).filter_map(|x| x.parse().ok()).collect();
     let cpus = read("/proc/cpuinfo").lines().filter(|l| l.starts_with("processor")).count().max(1);
     let mut mt = 0f64;
@@ -387,14 +395,14 @@ async fn system(State(app): St, h: HeaderMap) -> Response {
             }
         }
     }
-    Json(json!({
+    json!({
         "cpu": ((load.first().copied().unwrap_or(0.0) / cpus as f64) * 100.0).min(100.0).round(),
         "load": load, "cores": cpus,
         "mem_total": mt * 1024.0, "mem_used": (mt - ma) * 1024.0,
         "disk_total": dt, "disk_used": du, "uptime": up,
         "net_rx": rx, "net_tx": tx, "iface": iface,
         "services": service_states(), "version": crate::VERSION,
-    })).into_response()
+    })
 }
 
 async fn service_action(State(app): St, h: HeaderMap, Path((name, action)): Path<(String, String)>) -> Response {
@@ -701,7 +709,8 @@ pub async fn self_update(app: &App) -> Result<String, String> {
         return Err("checksum mismatch, update aborted".into());
     }
     let path = crate::util::exe_path().map_err(|e| e.to_string())?;
-    crate::util::swap_program(&path, &bytes)?;
+    // writing the file and test-running it (up to 20 s) must not hold an async worker
+    tokio::task::spawn_blocking(move || crate::util::swap_program(&path, &bytes)).await.map_err(|e| e.to_string())??;
     crate::util::restart_siblings();
     let v = latest_version(app).await.unwrap_or_default();
     restart_self();

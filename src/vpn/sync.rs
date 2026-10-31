@@ -89,6 +89,13 @@ pub fn local_info(app: &App) -> Value {
     v
 }
 
+/// `local_info` off the async workers: it runs `systemctl` for every service and reads /proc, which
+/// would hold a worker thread (and every request waiting on it) for a moment on each round
+pub async fn local_info_async(app: &Arc<App>) -> Value {
+    let a = app.clone();
+    tokio::task::spawn_blocking(move || local_info(&a)).await.unwrap_or_else(|_| json!({}))
+}
+
 /// Apply on this server
 pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     *app.hy2_allowed.lock().unwrap() = req.hy2.clone();
@@ -224,7 +231,7 @@ pub async fn sync_all(app: &Arc<App>) {
     for n in app.db.nodes().into_iter().filter(|n| !n.enabled) {
         // the panel server's own info (version, services, load) stays fresh while its VPN is off too
         if n.id == "local" {
-            let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id='local'", &[&local_info(app).to_string()]);
+            let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id='local'", &[&local_info_async(app).await.to_string()]);
         }
         // once it is empty, checked again every 5 minutes (an unreachable one must not slow every round)
         {
@@ -251,7 +258,7 @@ pub async fn sync_all(app: &Arc<App>) {
     for mut n in app.db.nodes().into_iter().filter(|n| n.enabled) {
         let local = n.id == "local";
         if local {
-            let info = local_info(app).to_string();
+            let info = local_info_async(app).await.to_string();
             let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id='local'", &[&info]);
             n.info = info;
         }

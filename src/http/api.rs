@@ -21,8 +21,19 @@ pub fn err(code: StatusCode, msg: &str) -> Response {
 }
 
 pub(crate) fn spawn_sync(app: &Arc<App>) {
+    // many changes in a row (bulk edits, a script on the API) need one more round, not one each: a round
+    // already waiting reads the database when it starts, so it carries every change made before that
+    static WAITING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if WAITING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
     let a = app.clone();
-    tokio::spawn(async move { sync::sync_all(&a).await });
+    tokio::spawn(async move {
+        // wait for a running round to end, then take the changes from here on
+        drop(a.sync_lock.lock().await);
+        WAITING.store(false, std::sync::atomic::Ordering::SeqCst);
+        sync::sync_all(&a).await
+    });
 }
 
 /// Public panel origin used in subscription links
@@ -730,7 +741,8 @@ pub(crate) fn delete_node(app: &Arc<App>, id: &str) -> Option<Node> {
 async fn node_ports(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
     let Some(n) = app.db.node(&id) else { return err(StatusCode::NOT_FOUND, "not found") };
-    let r = if n.id == "local" { Some(crate::admin::set_ports(&b)) } else { sync::remote_post_json(&app, &n, "/agent/ports", &b).await };
+    // the panel server's own ports: config edits and service restarts, off the async workers
+    let r = if n.id == "local" { tokio::task::spawn_blocking(move || crate::admin::set_ports(&b)).await.ok() } else { sync::remote_post_json(&app, &n, "/agent/ports", &b).await };
     spawn_sync(&app);
     match r {
         Some(v) => Json(v).into_response(),
@@ -742,7 +754,7 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
     let _ = guard!(app, h, "nodes");
     let Some(n) = app.db.node(&id) else { return err(StatusCode::NOT_FOUND, "not found") };
     match action.as_str() {
-        "toggle" => { let _ = app.db.exec("UPDATE nodes SET enabled=1-enabled WHERE id=?1", &[&id]); }
+        "toggle" => { let _ = app.db.exec("UPDATE nodes SET enabled=1-enabled WHERE id=?1", &[&id]); spawn_sync(&app); }
         "drain" => { let _ = app.db.exec("UPDATE nodes SET drain=1-drain WHERE id=?1", &[&id]); spawn_sync(&app); }
         "maint" | "maintenance" => { let _ = app.db.exec("UPDATE nodes SET maint=1-maint WHERE id=?1", &[&id]); spawn_sync(&app); }
         "sync" => { sync::sync_all(&app).await; }
@@ -773,7 +785,7 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
         }
         "health" => {
             let t0 = std::time::Instant::now();
-            let info = if n.id == "local" { Ok(sync::local_info(&app)) } else { sync::remote_info_res(&app, &n.address, &n.token, n.insecure).await };
+            let info = if n.id == "local" { Ok(sync::local_info_async(&app).await) } else { sync::remote_info_res(&app, &n.address, &n.token, n.insecure).await };
             let ms = t0.elapsed().as_millis() as i64;
             return match info {
                 Ok(i) => Json(json!({"ok": true, "ms": ms, "services": i["services"], "version": i["version"], "load": i["load"]})).into_response(),
@@ -781,7 +793,7 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
             };
         }
         "repair" => {
-            let r = if n.id == "local" { Some(crate::admin::repair_services()) } else { sync::remote_post(&app, &n, "/agent/repair").await };
+            let r = if n.id == "local" { tokio::task::spawn_blocking(crate::admin::repair_services).await.ok() } else { sync::remote_post(&app, &n, "/agent/repair").await };
             spawn_sync(&app);
             return Json(json!({"ok": r.is_some(), "result": r})).into_response();
         }
@@ -1707,10 +1719,11 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
 
 // ============================================================ Hysteria2 auth (local only, blocked at Caddy)
 
-async fn hy2_auth(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
-    // only the Hysteria server on this machine asks (http://127.0.0.1/…); through Caddy (with an
-    // X-Forwarded-For) it would let anyone test subscription codes without a limit
-    if !crate::limit::exempt(&util::client_ip(&h)) {
+async fn hy2_auth(State(app): St, peer: axum::extract::ConnectInfo<std::net::SocketAddr>, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    // only the Hysteria server on this machine asks (http://127.0.0.1/…): not through Caddy (it adds an
+    // X-Forwarded-For) and not from outside (old node installs listen on every address); otherwise
+    // anyone could test subscription codes without a limit
+    if !peer.0.ip().is_loopback() || h.contains_key("x-forwarded-for") {
         return Json(json!({ "ok": false })).into_response();
     }
     let auth = b["auth"].as_str().unwrap_or("").to_string();
@@ -1737,7 +1750,7 @@ async fn agent_info(State(app): St, h: HeaderMap) -> Response {
     if !node_authed(&app, &h) {
         return err(StatusCode::UNAUTHORIZED, "bad token");
     }
-    Json(sync::local_info(&app)).into_response()
+    Json(sync::local_info_async(&app).await).into_response()
 }
 
 async fn agent_sync(State(app): St, h: HeaderMap, Json(req): Json<SyncReq>) -> Response {
@@ -1751,14 +1764,14 @@ async fn agent_repair(State(app): St, h: HeaderMap) -> Response {
     if !node_authed(&app, &h) {
         return err(StatusCode::UNAUTHORIZED, "bad token");
     }
-    Json(crate::admin::repair_services()).into_response()
+    Json(tokio::task::spawn_blocking(crate::admin::repair_services).await.unwrap_or_else(|_| json!({"ok": false}))).into_response()
 }
 
 async fn agent_ports(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if !node_authed(&app, &h) {
         return err(StatusCode::UNAUTHORIZED, "bad token");
     }
-    Json(crate::admin::set_ports(&b)).into_response()
+    Json(tokio::task::spawn_blocking(move || crate::admin::set_ports(&b)).await.unwrap_or_else(|_| json!({"ok": false}))).into_response()
 }
 
 /// The panel deleted this node: everything the node runs is removed (just after this answer)

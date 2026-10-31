@@ -204,9 +204,15 @@ async fn upload(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, St
         return err(StatusCode::BAD_REQUEST, "this is not an Android app (.apk)");
     }
     let version = clean_version(q.get("version").map(|s| s.as_str()).filter(|s| !s.trim().is_empty()).unwrap_or(&version_of(&name)));
+    // hashing up to 200 MB takes a moment: not on an async worker
     let sum = {
-        use sha2::{Digest, Sha256};
-        hex::encode(Sha256::digest(&body))
+        let b = body.clone();
+        tokio::task::spawn_blocking(move || {
+            use sha2::{Digest, Sha256};
+            hex::encode(Sha256::digest(&b))
+        })
+        .await
+        .unwrap_or_default()
     };
     let _ = tokio::fs::create_dir_all(dir(&app)).await;
     let dst = path(&app, abi);
