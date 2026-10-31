@@ -98,6 +98,10 @@ pub async fn local_info_async(app: &Arc<App>) -> Value {
 
 /// Apply on this server
 pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
+    static ACL: std::sync::Once = std::sync::Once::new();
+    if !ACL.is_completed() {
+        let _ = tokio::task::spawn_blocking(|| ACL.call_once(crate::hy2::ensure_acl)).await;
+    }
     *app.hy2_allowed.lock().unwrap() = req.hy2.clone();
     *app.limits.lock().unwrap() = req.limits.clone();
     let hy2_names: HashSet<String> = req.hy2.values().cloned().collect();

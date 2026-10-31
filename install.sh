@@ -269,6 +269,11 @@ auth:
 trafficStats:
   listen: 127.0.0.1:$HY2_STATS_PORT
   secret: $HY2_SECRET
+acl:
+  inline:
+    - reject(127.0.0.0/8)
+    - reject(::1)
+    - reject(localhost)
 EOF
   systemctl enable -q hysteria-server.service 2>/dev/null || true
   systemctl restart hysteria-server.service && ok "Hysteria2 is running" || warn "Hysteria2 failed to start"

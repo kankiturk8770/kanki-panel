@@ -4,7 +4,8 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** pan
 
 
 ## New in 3.22.2 — full code review
-- Security fixes: the Iran subscription relay, the Hysteria login check, plans switched off in the bot.
+- Security fixes: the Iran subscription relay, the Hysteria login check, plans switched off in the bot, VPN users kept off the server's loopback.
+- A tunnel server is only told to uninstall itself when it was deleted in this panel (a move or an old backup no longer wipes servers).
 - Slow work (backups, updates, system checks) no longer holds up the panel; sync rounds are merged.
 
 ## New in 3.22.1 — devices told apart, fairer limits

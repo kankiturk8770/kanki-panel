@@ -52,3 +52,31 @@ pub async fn kick(port: &str, secret: &str, ids: &[String]) {
     let url = format!("http://127.0.0.1:{}/kick", port);
     let _ = client().post(&url).header("Authorization", secret).json(&ids).send().await;
 }
+
+/// Hysteria2 must not let its users reach this server's own loopback (the panel, the stats API and
+/// the other local services listen there). Configs written before 3.22.2 have no ACL: it is added
+/// once and Hysteria restarted. Blocking.
+pub fn ensure_acl() {
+    const CONF: &str = "/etc/hysteria/config.yaml";
+    let Ok(t) = std::fs::read_to_string(CONF) else { return };
+    if t.lines().any(|l| l.trim_start().starts_with("acl:")) {
+        return;
+    }
+    let add = "acl:\n  inline:\n    - reject(127.0.0.0/8)\n    - reject(::1)\n    - reject(localhost)\n";
+    let new = if t.ends_with('\n') { format!("{}{}", t, add) } else { format!("{}\n{}", t, add) };
+    let was_active = std::process::Command::new("systemctl").args(["is-active", "--quiet", "hysteria-server.service"]).status().map(|s| s.success()).unwrap_or(false);
+    if std::fs::write(CONF, new).is_err() {
+        return;
+    }
+    let _ = std::process::Command::new("systemctl").args(["try-restart", "hysteria-server.service"]).status();
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    let active = std::process::Command::new("systemctl").args(["is-active", "--quiet", "hysteria-server.service"]).status().map(|s| s.success()).unwrap_or(false);
+    if was_active && !active {
+        // an older Hysteria that does not take this ACL: the users come first, the old config goes back
+        let _ = std::fs::write(CONF, &t);
+        let _ = std::process::Command::new("systemctl").args(["restart", "hysteria-server.service"]).status();
+        eprintln!("hysteria2: it did not start with the loopback ACL, the previous config is back");
+        return;
+    }
+    eprintln!("hysteria2: its users can no longer reach this server's loopback (acl added)");
+}

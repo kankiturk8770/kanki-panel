@@ -5,6 +5,12 @@
 - **Nothing slow runs on the async workers any more**: `systemctl` / `df` of the dashboard and of each sync round, the self-update (write + test run of the new program, also on tunnel agents), backups, VACUUM, port changes, repairs and the 200 MB APK hash now run on blocking threads, so the panel answers other requests meanwhile.
 - **Sync rounds are merged**: many changes in a row (bulk edits, an API script) queue one more round instead of one each.
 - **Timeouts** on the local Hysteria / KANKI MIX stats API (5 s; a hung Hysteria held the whole sync round) and on name lookups of the exit-country loop.
+- **Tunnel servers are told to uninstall only when they were deleted in this panel** (`tun_removed`, `was_removed`): any server the panel did not know (a fresh install in the middle of a move, a restore of an older backup) was answered "gone" and removed all its tunnels and itself within 15 seconds. Now it is left running.
+- **VPN users cannot reach the server's own loopback**: Xray always blocks 127.0.0.0/8, ::1 and localhost (its control API on 127.0.0.1:10085 has no password); Hysteria2 gets a loopback ACL (new installs, and existing servers add it once; the old config comes back if Hysteria does not start with it).
+- **FEC of the gaming tunnel keeps recovering losses after the group counter wraps** (2^32 groups; before, recovery stopped until a restart). Test `recovery_keeps_working_after_the_group_number_wraps`.
+- **TCP keepalive on tunnel streams**: a phone that vanished without closing is found within a few minutes, so its stream, task and socket are freed.
+- **Telegram bot calls have a timeout** (75 s, uploads 10 min): one hung connection to Telegram froze the bot until a restart.
+- The Hysteria installer of the tunnel agent is saved in /var/lib/kanki, not under a fixed name in /tmp (it runs as root).
 - **The database stays usable after a panic** inside a query (the lock is no longer poisoned for the rest of the run); Kanki DNS keeps only the newest 50 distinct errors.
 
 # v3.22.1 — full review: devices, limits, deleted users, sync, Hysteria check

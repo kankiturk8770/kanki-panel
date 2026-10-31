@@ -550,6 +550,10 @@ pub fn build_config(s: &XraySettings, sid: &str, users: &[User]) -> Value {
     }
     let tags: Vec<String> = outbounds.iter().filter_map(|o| o["tag"].as_str().map(|t| t.to_string())).collect();
     let mut rules = vec![json!({ "type": "field", "inboundTag": ["api"], "outboundTag": "api" })];
+    // the server's own loopback, always (also with «block private networks» off): Xray's control API
+    // (127.0.0.1:10085, no password), the panel and the other local services listen there
+    rules.push(json!({ "type": "field", "ip": ["127.0.0.0/8", "::1/128"], "outboundTag": "block" }));
+    rules.push(json!({ "type": "field", "domain": ["full:localhost", "domain:localhost"], "outboundTag": "block" }));
     if s.block_private {
         rules.push(json!({ "type": "field", "ip": PRIVATE_NETS, "outboundTag": "block" }));
     }
