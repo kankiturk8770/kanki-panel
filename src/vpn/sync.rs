@@ -35,6 +35,10 @@ pub struct SyncReq {
     /// their ports closed (see `cores::apply`); an older agent ignores it but gets no users for them
     #[serde(default)]
     pub off: Vec<String>,
+    /// connection limit: addresses of extra devices on one WireGuard / AmneziaWG config, dropped by the
+    /// firewall here ("wg 1.2.3.4:5678")
+    #[serde(default)]
+    pub block: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -105,6 +109,8 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     *app.hy2_allowed.lock().unwrap_or_else(|e| e.into_inner()) = req.hy2.clone();
     *app.limits.lock().unwrap_or_else(|e| e.into_inner()) = req.limits.clone();
     let hy2_names: HashSet<String> = req.hy2.values().cloned().collect();
+    let block = req.block.clone();
+    let _ = tokio::task::spawn_blocking(move || crate::wg::set_blocked(&block)).await;
     let off = req.off.clone();
     let _ = tokio::task::spawn_blocking(move || crate::cores::apply(&off)).await;
     let (wgv, awgv) = (req.wg, req.awg);
@@ -208,25 +214,31 @@ fn forget_sessions(node: &str, open: impl Fn(i64, &str) -> bool) {
 /// How long a WireGuard / AmneziaWG key counts as connected after the last data it moved
 const LIVE_FOR: i64 = 30;
 
-/// The connection limit of an account over every server, protocol and app: once a user has as many live
-/// connections as allowed, every other server and protocol is shut for that user (the WireGuard /
-/// AmneziaWG key, the Hysteria2, KANKI MIX or microtun user is taken off there), so another device
-/// cannot connect until one of them ends. If more got in at the same moment, the newest are shut too.
-/// Pings and subscription views never count (only connections that move data are live).
+/// The connection limit of an account counts devices, over every server, protocol and app: a config
+/// copied to several devices is several connections. Once a user has as many live devices as allowed,
+/// every other server and protocol is shut for that user (the WireGuard / AmneziaWG key, the Hysteria2,
+/// KANKI MIX or microtun user is taken off there) and an extra device on a config already in use is
+/// dropped by its address (WireGuard / AmneziaWG) or by that server's own device limit (KANKI MIX,
+/// microtun: the places left; Hysteria2: refused at login). The devices that came first keep working;
+/// once one of them ends, another may connect. Pings and subscription views never count.
 #[derive(Default)]
 pub struct Limits {
     /// when each live connection (user, node, protocol) was first seen
     since: HashMap<(i64, String, String), i64>,
     /// the live connections of the last round (kept for a node that does not answer)
     last: Vec<(i64, String, String, i64)>,
-    /// users at their limit: the only connections open for them, (node, protocol)
-    open: HashMap<i64, HashSet<(String, String)>>,
+    /// users at their limit: the devices allowed on each (node, protocol); anything else is shut
+    open: HashMap<i64, HashMap<(String, String), i64>>,
+    /// addresses of extra devices dropped on a WireGuard / AmneziaWG config, until a device of that
+    /// user ends (they stay out of sight while dropped, so they are kept here)
+    blocked: HashMap<(i64, String, String), Vec<String>>,
 }
 
 impl Limits {
     /// One sync round: `units` are the live connections (user, node, protocol, devices) of the nodes in
-    /// `answered`. True when what is open changed.
-    pub fn round(&mut self, units: &[(i64, String, String, i64)], answered: &HashSet<String>, max: &HashMap<i64, i64>, now: i64) -> bool {
+    /// `answered`; `eps` the addresses of the devices on one WireGuard / AmneziaWG key, oldest first.
+    /// True when something was shut, dropped or let in.
+    pub fn round(&mut self, units: &[(i64, String, String, i64)], eps: &HashMap<(i64, String, String), Vec<String>>, answered: &HashSet<String>, max: &HashMap<i64, i64>, now: i64) -> bool {
         // a node that did not answer keeps what it had
         let mut all: Vec<(i64, String, String, i64)> = units.to_vec();
         all.extend(self.last.iter().filter(|x| !answered.contains(&x.1)).cloned());
@@ -236,39 +248,54 @@ impl Limits {
         for k in &live {
             self.since.entry(k.clone()).or_insert(now);
         }
+        let (open_before, blocked_before) = (self.open.clone(), self.blocked.clone());
+        // a config that ended frees its dropped devices
+        self.blocked.retain(|k, _| live.contains(k));
         let mut per: HashMap<i64, Vec<(i64, String, String, i64)>> = HashMap::new();
         for (u, n, p, c) in all {
             let t = self.since.get(&(u, n.clone(), p.clone())).copied().unwrap_or(now);
             per.entry(u).or_default().push((t, n, p, c));
         }
-        let mut open: HashMap<i64, HashSet<(String, String)>> = HashMap::new();
+        self.open.clear();
         for (u, mut list) in per {
             let m = max.get(&u).copied().unwrap_or(0);
             let total: i64 = list.iter().map(|x| x.3).sum();
             if m <= 0 || total < m {
+                // a place is free: dropped devices may come back
+                self.blocked.retain(|k, _| k.0 != u);
                 continue;
             }
-            // oldest first (ties by node and protocol, so every round decides the same way); a server
-            // with several devices of the user is kept whole (its own limit refuses the newest there)
+            // oldest first (ties by node and protocol, so every round decides the same way)
             list.sort_by(|a, b| (a.0, &a.1, &a.2).cmp(&(b.0, &b.1, &b.2)));
-            let mut kept = 0;
-            let set = open.entry(u).or_default();
+            let mut left = m;
+            let open = self.open.entry(u).or_default();
             for (_, n, p, c) in list {
-                if kept < m {
-                    kept += c;
-                    set.insert((n, p));
+                let take = c.min(left);
+                left -= take;
+                if take > 0 {
+                    open.insert((n.clone(), p.clone()), take);
+                }
+                let key = (u, n, p);
+                if take < c {
+                    if let Some(addrs) = eps.get(&key) {
+                        let b = self.blocked.entry(key).or_default();
+                        for a in addrs.iter().skip(take as usize) {
+                            if !b.contains(a) {
+                                b.push(a.clone());
+                            }
+                        }
+                    }
                 }
             }
         }
-        let changed = open != self.open;
-        self.open = open;
-        changed
+        self.blocked.retain(|_, v| !v.is_empty());
+        self.open != open_before || self.blocked != blocked_before
     }
 
     /// The users this server and protocol is shut for now
     pub fn shut_on(&self, node: &str, proto: &str) -> Vec<i64> {
         let k = (node.to_string(), proto.to_string());
-        let mut v: Vec<i64> = self.open.iter().filter(|(_, s)| !s.contains(&k)).map(|(u, _)| *u).collect();
+        let mut v: Vec<i64> = self.open.iter().filter(|(_, s)| !s.contains_key(&k)).map(|(u, _)| *u).collect();
         v.sort();
         v
     }
@@ -280,7 +307,19 @@ impl Limits {
 
     /// Is this server and protocol shut for the user now?
     pub fn is_shut(&self, user: i64, node: &str, proto: &str) -> bool {
-        self.open.get(&user).is_some_and(|s| !s.contains(&(node.to_string(), proto.to_string())))
+        self.open.get(&user).is_some_and(|s| !s.contains_key(&(node.to_string(), proto.to_string())))
+    }
+
+    /// How many devices the user may have on this server and protocol now (None = no limit reached)
+    pub fn allowed(&self, user: i64, node: &str, proto: &str) -> Option<i64> {
+        self.open.get(&user).map(|s| s.get(&(node.to_string(), proto.to_string())).copied().unwrap_or(0))
+    }
+
+    /// The addresses to drop on a node: "wg 1.2.3.4:5678"
+    pub fn blocks_on(&self, node: &str) -> Vec<String> {
+        let mut v: Vec<String> = self.blocked.iter().filter(|(k, _)| k.1 == node).flat_map(|(k, a)| a.iter().map(move |x| format!("{} {}", k.2, x))).collect();
+        v.sort();
+        v
     }
 }
 
@@ -321,11 +360,26 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
     let lim = limits().lock().unwrap_or_else(|e| e.into_inner());
     let shut = |u: &User, p: &str| lim.is_shut(u.id, &n.id, p);
     let here: Vec<&User> = users.iter().filter(|u| u.active() && u.on(n)).collect();
-    let kmix_here: Vec<&User> = here.iter().copied().filter(|u| !shut(u, "kmix")).collect();
-    let mtun_here: Vec<&User> = here.iter().copied().filter(|u| !shut(u, "mtun")).collect();
+    // at the limit, KANKI MIX / microtun on this server take only the devices still allowed here
+    let room = |proto: &str| -> Vec<User> {
+        here.iter()
+            .filter(|u| !shut(u, proto))
+            .map(|u| {
+                let mut u = (*u).clone();
+                if let Some(a) = lim.allowed(u.id, &n.id, proto) {
+                    u.max_conn = a.max(1);
+                }
+                u
+            })
+            .collect()
+    };
+    let (kmix_users, mtun_users) = (room("kmix"), room("mtun"));
+    let kmix_here: Vec<&User> = kmix_users.iter().collect();
+    let mtun_here: Vec<&User> = mtun_users.iter().collect();
     req.kmix = Some(crate::kmix::cfg_for(app, &crate::kmix::settings(app), n, &kmix_here));
     req.kcore = Some(serde_json::json!({}));
     req.mtun = Some(crate::microtun::cfg_for(app, n, &mtun_here));
+    req.block = lim.blocks_on(&n.id);
     req.off = off.clone();
     for u in users.iter().filter(|u| u.active() && u.on(n)) {
         // drain: no new users here unless explicitly assigned or already present
@@ -364,6 +418,7 @@ pub async fn sync_all(app: &Arc<App>) {
     // every live connection of this round: (user, node, protocol, devices)
     let mut units: Vec<(i64, String, String, i64)> = vec![];
     let mut answered: HashSet<String> = HashSet::new();
+    let mut eps: HashMap<(i64, String, String), Vec<String>> = HashMap::new();
 
     // a node whose VPN is switched off serves nobody: its users are taken off (an empty sync), so a
     // relay server keeps its ports free and an old peer cannot keep using it
@@ -453,8 +508,16 @@ pub async fn sync_all(app: &Arc<App>) {
             }
             if st.handshake > 0 && now() - st.handshake < 180 && live_peer(uid, &n.id, &proto, moved, now()) {
                 here.push((uid, proto.clone()));
-                units.push((uid, n.id.clone(), proto.clone(), 1));
-                *online.entry(uid).or_default() += 1;
+                // one config on several devices: its address keeps changing between them (a phone that
+                // changes network changes it once)
+                let t = now();
+                let active: Vec<String> = st.eps.iter().filter(|e| t - e.last < 30).map(|e| e.at.clone()).collect();
+                let devices = if st.flips >= 3 && active.len() >= 2 { active.len() as i64 } else { 1 };
+                if devices > 1 {
+                    eps.insert((uid, n.id.clone(), proto.clone()), active);
+                }
+                units.push((uid, n.id.clone(), proto.clone(), devices));
+                *online.entry(uid).or_default() += devices;
                 let e = seen.entry(uid).or_default();
                 *e = (*e).max(st.handshake);
             }
@@ -499,7 +562,7 @@ pub async fn sync_all(app: &Arc<App>) {
     let (xu, xa) = crate::xray::panel::live_units(now());
     units.extend(xu);
     answered.extend(xa);
-    let changed = limits().lock().unwrap_or_else(|e| e.into_inner()).round(&units, &answered, &max, now());
+    let changed = limits().lock().unwrap_or_else(|e| e.into_inner()).round(&units, &eps, &answered, &max, now());
     if changed {
         // a connection was shut or let in again: the servers get it now, not in 30 seconds
         crate::api::spawn_sync(app);
@@ -618,6 +681,34 @@ mod live_tests {
         (user, node.to_string(), proto.to_string(), 1)
     }
 
+    impl Limits {
+        fn round_t(&mut self, units: &[(i64, String, String, i64)], answered: &HashSet<String>, max: &HashMap<i64, i64>, now: i64) -> bool {
+            self.round(units, &HashMap::new(), answered, max, now)
+        }
+    }
+
+    #[test]
+    fn one_config_on_two_phones_is_two_connections() {
+        let mut l = Limits::default();
+        let max: HashMap<i64, i64> = [(1, 1), (2, 2)].into_iter().collect();
+        let eps: HashMap<(i64, String, String), Vec<String>> = [
+            ((1, "de".to_string(), "wg".to_string()), vec!["1.1.1.1:1000".to_string(), "2.2.2.2:2000".to_string()]),
+            ((2, "de".to_string(), "wg".to_string()), vec!["3.3.3.3:1".to_string(), "4.4.4.4:2".to_string()]),
+        ].into_iter().collect();
+        let two = |u: i64| (u, "de".to_string(), "wg".to_string(), 2);
+        assert!(l.round(&[two(1), two(2)], &eps, &nodes(), &max, 1000));
+        // one-connection account: the newer phone is dropped by its address, the first keeps working
+        assert_eq!(l.blocks_on("de"), vec!["wg 2.2.2.2:2000".to_string()]);
+        // two-connection account: both phones work
+        assert!(!l.blocks_on("de").iter().any(|x| x.contains("3.3.3.3") || x.contains("4.4.4.4")));
+        // the dropped phone is out of sight now: it stays dropped while the first is connected
+        l.round(&[u(1, "de", "wg"), two(2)], &eps, &nodes(), &max, 1030);
+        assert_eq!(l.blocks_on("de"), vec!["wg 2.2.2.2:2000".to_string()]);
+        // the first phone disconnects: the other may connect
+        l.round(&[two(2)], &eps, &nodes(), &max, 1060);
+        assert!(l.blocks_on("de").is_empty());
+    }
+
     fn nodes() -> HashSet<String> {
         ["de", "tr"].iter().map(|s| s.to_string()).collect()
     }
@@ -653,17 +744,17 @@ mod live_tests {
         let mut l = Limits::default();
         let max: HashMap<i64, i64> = [(1, 1)].into_iter().collect();
         // not connected: everything open
-        l.round(&[], &nodes(), &max, 1000);
+        l.round_t(&[], &nodes(), &max, 1000);
         assert!(!l.is_shut(1, "de", "wg") && !l.is_shut(1, "tr", "hy2"));
         // connected on Germany WireGuard: every other server and protocol is shut for this account
-        assert!(l.round(&[u(1, "de", "wg")], &nodes(), &max, 1010));
+        assert!(l.round_t(&[u(1, "de", "wg")], &nodes(), &max, 1010));
         assert!(!l.is_shut(1, "de", "wg"));
         assert!(l.is_shut(1, "tr", "hy2") && l.is_shut(1, "tr", "wg") && l.is_shut(1, "de", "kmix"));
         // the first device disconnects: everything opens, another device may connect
-        assert!(l.round(&[], &nodes(), &max, 1060));
+        assert!(l.round_t(&[], &nodes(), &max, 1060));
         assert!(!l.is_shut(1, "tr", "hy2"));
         // the other device connects: now the first one cannot come back elsewhere
-        l.round(&[u(1, "tr", "hy2")], &nodes(), &max, 1090);
+        l.round_t(&[u(1, "tr", "hy2")], &nodes(), &max, 1090);
         assert!(l.is_shut(1, "de", "wg") && !l.is_shut(1, "tr", "hy2"));
     }
 
@@ -671,8 +762,8 @@ mod live_tests {
     fn if_two_got_in_at_once_the_newest_is_shut() {
         let mut l = Limits::default();
         let max: HashMap<i64, i64> = [(1, 1)].into_iter().collect();
-        l.round(&[u(1, "de", "wg")], &nodes(), &max, 1000);
-        l.round(&[u(1, "de", "wg"), u(1, "tr", "kmix")], &nodes(), &max, 1030);
+        l.round_t(&[u(1, "de", "wg")], &nodes(), &max, 1000);
+        l.round_t(&[u(1, "de", "wg"), u(1, "tr", "kmix")], &nodes(), &max, 1030);
         assert!(!l.is_shut(1, "de", "wg") && l.is_shut(1, "tr", "kmix"));
     }
 
@@ -680,9 +771,9 @@ mod live_tests {
     fn two_connections_allow_two_devices_and_no_third() {
         let mut l = Limits::default();
         let max: HashMap<i64, i64> = [(1, 2), (2, 0)].into_iter().collect();
-        l.round(&[u(1, "de", "wg")], &nodes(), &max, 1000);
+        l.round_t(&[u(1, "de", "wg")], &nodes(), &max, 1000);
         assert!(!l.is_shut(1, "tr", "hy2"));
-        l.round(&[u(1, "de", "wg"), u(1, "tr", "hy2"), u(2, "de", "wg"), u(2, "tr", "wg")], &nodes(), &max, 1030);
+        l.round_t(&[u(1, "de", "wg"), u(1, "tr", "hy2"), u(2, "de", "wg"), u(2, "tr", "wg")], &nodes(), &max, 1030);
         assert!(!l.is_shut(1, "de", "wg") && !l.is_shut(1, "tr", "hy2"));
         assert!(l.is_shut(1, "tr", "wg") && l.is_shut(1, "de", "mtun"));
         // no limit (0): never shut
@@ -693,9 +784,9 @@ mod live_tests {
     fn a_node_that_does_not_answer_keeps_its_connection() {
         let mut l = Limits::default();
         let max: HashMap<i64, i64> = [(1, 1)].into_iter().collect();
-        l.round(&[u(1, "de", "wg")], &nodes(), &max, 1000);
+        l.round_t(&[u(1, "de", "wg")], &nodes(), &max, 1000);
         let only_tr: HashSet<String> = ["tr".to_string()].into_iter().collect();
-        l.round(&[], &only_tr, &max, 1030);
+        l.round_t(&[], &only_tr, &max, 1030);
         assert!(l.is_shut(1, "tr", "wg") && !l.is_shut(1, "de", "wg"));
     }
 }

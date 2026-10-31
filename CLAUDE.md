@@ -126,6 +126,11 @@
    است (`desired_for`: کلید WG/AWG برداشته، کاربر Hysteria2 از لیست، که `apply_local` کیکش می‌کند و ورودش رد می‌شود، کاربر KMIX/microtun
    از لیست همان سرور). اگر دو تا هم‌زمان رسیدند، تازه‌تر بسته می‌شود. سروری که جواب نداده اتصالش را نگه می‌دارد. با هر تغییر یک sync
    فوری. کلید در دیتابیس می‌ماند (کانفیگ کاربر عوض نمی‌شود).
+7. **یک کانفیگ روی چند دستگاه = چند اتصال** (WG/AWG): هر سرور هر ۲ ثانیه آدرس فرستندهٔ هر کلید را می‌گیرد (`wg::start_sampler`،
+   `note_endpoints`، `PeerStat.eps`/`flips`)؛ کلیدی که آدرسش در یک دقیقه ۳+ بار بین ۲+ آدرس فعال عوض شود، به تعداد آن آدرس‌ها دستگاه
+   دارد (گوشی‌ای که شبکه عوض می‌کند فقط یک بار). بیشتر از حد: تازه‌ترین دستگاه‌ها با آدرسشان در فایروال همان سرور (زنجیرهٔ `KANKI-LIMIT`،
+   `wg::set_blocked`، `SyncReq.block`، `Limits::blocks_on`) بسته می‌مانند تا یکی از دستگاه‌های کاربر قطع شود. KMIX/microtun روی هر سرور
+   فقط جای باقی‌مانده را می‌گیرند (`Limits::allowed`). تست `one_config_on_two_phones_is_two_connections`. قانون iptables روی همین محیط امتحان شد.
 5. **Xray** (`xray::panel::note_traffic`، `live_units`، `shut_on`؛ `xray::set_blocked`، `user_inbounds`): کاربری که ترافیک Xray‌اش روی یک
    سرور جابه‌جا می‌شود (در گزارش‌هایی با حداقل ۱۰ ثانیه فاصله؛ پینگ یک انفجار کوتاه است) اتصال زنده است. وقتی محدودیت Xray را برای او
    روی آن سرور می‌بندد، ایجنت (`xray_block` در جواب گزارش) کاربر را با API خود Xray (`api rmu`، برگشت با `api adu`) از Xray در حال
@@ -139,7 +144,7 @@
 تست‌ها: `a_ping_handshake_is_not_a_connection`، `a_session_that_moved_no_data_is_a_ping`، `a_one_connection_account_works_on_one_device_at_a_time`،
 `if_two_got_in_at_once_the_newest_is_shut`، `two_connections_allow_two_devices_and_no_third`، `a_node_that_does_not_answer_keeps_its_connection`؛
 `cargo test` (۲۱۳ قبول)، `node --check`.
-نشد: دو دستگاه با **یک کانفیگ WireGuard روی یک سرور** یک کلیدند (WireGuard فرقشان را نمی‌بیند).
+نشد: چند دستگاه با یک کانفیگ **Xray روی یک سرور** (Xray فقط ترافیک هر کاربر را می‌دهد؛ IP دستگاه‌ها لازم است، و از راه تانل همه یک IP دارند).
 وضعیت در حافظه است (ری‌استارت پنل = از نو).
 
 ### 2026-10-31 — نسخهٔ 3.22.3: گواهی منقضی لینک اشتراک ایران
