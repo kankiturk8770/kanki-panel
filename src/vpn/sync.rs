@@ -206,7 +206,7 @@ fn forget_sessions(node: &str, open: impl Fn(i64, &str) -> bool) {
 }
 
 /// How long a WireGuard / AmneziaWG key counts as connected after the last data it moved
-const LIVE_FOR: i64 = 40;
+const LIVE_FOR: i64 = 30;
 
 /// The connection limit of an account over every server, protocol and app: once a user has as many live
 /// connections as allowed, every other server and protocol is shut for that user (the WireGuard /
@@ -263,6 +263,19 @@ impl Limits {
         let changed = open != self.open;
         self.open = open;
         changed
+    }
+
+    /// The users this server and protocol is shut for now
+    pub fn shut_on(&self, node: &str, proto: &str) -> Vec<i64> {
+        let k = (node.to_string(), proto.to_string());
+        let mut v: Vec<i64> = self.open.iter().filter(|(_, s)| !s.contains(&k)).map(|(u, _)| *u).collect();
+        v.sort();
+        v
+    }
+
+    /// Someone is at the limit: rounds come quicker, so a place that frees up opens soon
+    pub fn busy(&self) -> bool {
+        !self.open.is_empty()
     }
 
     /// Is this server and protocol shut for the user now?
@@ -482,6 +495,10 @@ pub async fn sync_all(app: &Arc<App>) {
     }
     let limit_on = app.db.get("conn_limit_on") != "0";
     let max: HashMap<i64, i64> = users.iter().map(|u| (u.id, if limit_on && u.active() { u.max_conn } else { 0 })).collect();
+    // Xray counts like the others (its servers report every 5 seconds)
+    let (xu, xa) = crate::xray::panel::live_units(now());
+    units.extend(xu);
+    answered.extend(xa);
     let changed = limits().lock().unwrap_or_else(|e| e.into_inner()).round(&units, &answered, &max, now());
     if changed {
         // a connection was shut or let in again: the servers get it now, not in 30 seconds
@@ -587,7 +604,8 @@ pub async fn remote_post_json(app: &App, n: &Node, path: &str, body: &Value) -> 
 pub async fn run(app: Arc<App>) {
     loop {
         sync_all(&app).await;
-        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        let busy = limits().lock().unwrap_or_else(|e| e.into_inner()).busy();
+        tokio::time::sleep(std::time::Duration::from_secs(if busy { 10 } else { 30 })).await;
     }
 }
 
@@ -615,8 +633,8 @@ mod live_tests {
         assert!(live_peer(-8, "n", "wg", 0, 1001));
         assert!(live_peer(-8, "n", "wg", 64, 1030));
         // disconnected: nothing moves for longer than LIVE_FOR
-        assert!(live_peer(-8, "n", "wg", 0, 1060));
-        assert!(!live_peer(-8, "n", "wg", 0, 1075));
+        assert!(live_peer(-8, "n", "wg", 0, 1055));
+        assert!(!live_peer(-8, "n", "wg", 0, 1061));
     }
 
     #[test]

@@ -1066,6 +1066,7 @@ pub fn ingest(app: &App, sid: &str, st: &Value) {
         return;
     }
     last_status().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), (now(), st.clone()));
+    note_traffic(sid, st, now());
     crate::dns::panel::count_usage(app, &format!("xray_prev_{}", sid), st);
     count_inbounds(app, sid, st);
     // online now: the users whose traffic moved since the previous read
@@ -1074,6 +1075,56 @@ pub fn ingest(app: &App, sid: &str, st: &Value) {
             let _ = app.db.exec("UPDATE users SET last_seen=?1 WHERE id=?2", &[&now(), &id]);
         }
     }
+}
+
+/// Per (server, user): Xray's traffic counter, when it first and last moved, and the counter's run
+type Seen = HashMap<(String, i64), (u64, i64, i64, String)>;
+
+fn seen() -> &'static Mutex<Seen> {
+    static S: OnceLock<Mutex<Seen>> = OnceLock::new();
+    S.get_or_init(Default::default)
+}
+
+/// A server's report: whose Xray traffic moved since the previous one
+fn note_traffic(sid: &str, st: &Value, now: i64) {
+    let run = st["run"].as_str().unwrap_or("").to_string();
+    let mut s = seen().lock().unwrap_or_else(|e| e.into_inner());
+    for (id, v) in st["users"].as_object().into_iter().flatten() {
+        let Ok(id) = id.parse::<i64>() else { continue };
+        let total = v.as_array().and_then(|a| a.first()).and_then(|x| x.as_u64()).unwrap_or(0);
+        let e = s.entry((sid.to_string(), id)).or_insert((total, 0, 0, run.clone()));
+        let moved = if e.3 != run || total < e.0 { total } else { total - e.0 };
+        if moved > 0 {
+            // a new stretch of traffic after a quiet minute starts again
+            if now - e.2 >= 60 {
+                e.1 = now;
+            }
+            e.2 = now;
+        }
+        e.0 = total;
+        e.3 = run.clone();
+    }
+}
+
+/// Live Xray connections for the connection limit, and the servers that reported lately. A user counts
+/// on a server while its traffic keeps moving (within a minute), once it moved in reports at least 10 s
+/// apart: an app's ping through Xray is one short burst.
+pub fn live_units(now: i64) -> (Vec<(i64, String, String, i64)>, std::collections::HashSet<String>) {
+    let fresh: std::collections::HashSet<String> =
+        last_status().lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|(_, (t, _))| now - t < 30).map(|(k, _)| k.clone()).collect();
+    let mut s = seen().lock().unwrap_or_else(|e| e.into_inner());
+    s.retain(|(sid, _), e| now - e.2 < 600 || fresh.contains(sid));
+    let units = s
+        .iter()
+        .filter(|((sid, _), e)| fresh.contains(sid) && e.2 > 0 && now - e.2 < 60 && e.2 - e.1 >= 10)
+        .map(|((sid, id), _)| (*id, format!("x:{}", sid), "xray".to_string(), 1))
+        .collect();
+    (units, fresh.into_iter().map(|k| format!("x:{}", k)).collect())
+}
+
+/// The users whose Xray is shut on server `sid` by the connection limit
+pub fn shut_on(sid: &str) -> Vec<i64> {
+    crate::sync::limits().lock().unwrap_or_else(|e| e.into_inner()).shut_on(&format!("x:{}", sid), "xray")
 }
 
 /// The panel server itself can run Xray too: deploy and count here every 15 seconds.
@@ -1099,6 +1150,8 @@ pub async fn local_loop(app: Arc<App>) {
             (res, super::status())
         })
         .await;
+        let block = shut_on("local");
+        let _ = tokio::task::spawn_blocking(move || super::set_blocked(&block)).await;
         if let Ok((res, mut st)) = r {
             match res {
                 Err(e) => {

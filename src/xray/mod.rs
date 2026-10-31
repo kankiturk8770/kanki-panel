@@ -483,6 +483,68 @@ fn collect() {
     c.online = online;
 }
 
+/// The users taken out of the running Xray (connection limit), and the Xray process that was for
+fn blocked() -> &'static Mutex<(std::collections::HashSet<i64>, String)> {
+    static B: std::sync::OnceLock<Mutex<(std::collections::HashSet<i64>, String)>> = std::sync::OnceLock::new();
+    B.get_or_init(Default::default)
+}
+
+/// The inbounds of the running config that have user `id` (email "u<id>"): (tag, protocol, client)
+fn user_inbounds(conf: &Value, id: i64) -> Vec<(String, String, Value)> {
+    let email = format!("u{}", id);
+    let mut v = vec![];
+    for ib in conf["inbounds"].as_array().into_iter().flatten() {
+        let tag = ib["tag"].as_str().unwrap_or("");
+        for c in ib["settings"]["clients"].as_array().into_iter().flatten() {
+            if !tag.is_empty() && c["email"].as_str() == Some(email.as_str()) {
+                v.push((tag.to_string(), ib["protocol"].as_str().unwrap_or("").to_string(), c.clone()));
+            }
+        }
+    }
+    v
+}
+
+/// Connection limit: exactly these users are out of the running Xray (no new connection gets in), taken
+/// out and put back with Xray's own API, so nobody else is disconnected. A restart of Xray brings every
+/// user back from the config, so they are taken out again. Blocking.
+pub fn set_blocked(want: &[i64]) {
+    if !std::path::Path::new(UNIT).exists() || !running() {
+        return;
+    }
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    let conf: Value = std::fs::read_to_string(CONF_FILE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let pid = sh("systemctl show -p MainPID --value kanki-xray.service 2>/dev/null").1.trim().to_string();
+    let mut b = blocked().lock().unwrap_or_else(|e| e.into_inner());
+    if b.1 != pid {
+        b.0.clear();
+        b.1 = pid;
+    }
+    let want: std::collections::HashSet<i64> = want.iter().copied().collect();
+    let server = format!("--server=127.0.0.1:{}", API_PORT);
+    for id in want.difference(&b.0.clone()).copied().collect::<Vec<_>>() {
+        let mut ok = true;
+        for (tag, _, _) in user_inbounds(&conf, id) {
+            let (r, out) = sh(&format!("{} api rmu {} -tag={} u{} 2>&1", BIN, server, q(&tag), id));
+            if !r {
+                ok = false;
+                WARNED.call_once(|| eprintln!("xray: the connection limit cannot take users out ({})", out.lines().last().unwrap_or("")));
+            }
+        }
+        if ok {
+            b.0.insert(id);
+        }
+    }
+    for id in b.0.difference(&want).copied().collect::<Vec<_>>() {
+        let ibs = user_inbounds(&conf, id);
+        let add = json!({ "inbounds": ibs.iter().map(|(tag, proto, c)| json!({ "tag": tag, "protocol": proto, "settings": { "clients": [c] } })).collect::<Vec<_>>() });
+        let tmp = format!("{}/adu.json", CONF_DIR);
+        if std::fs::write(&tmp, add.to_string()).is_ok() && (ibs.is_empty() || sh(&format!("{} api adu {} {} 2>&1", BIN, server, q(&tmp))).0) {
+            b.0.remove(&id);
+        }
+        let _ = std::fs::remove_file(&tmp);
+    }
+}
+
 /// Restart Xray (if this server runs it), e.g. after the ports it needs were freed.
 pub fn restart_if_installed() {
     if std::path::Path::new(UNIT).exists() {
@@ -540,6 +602,19 @@ pub fn status() -> Value {
 
 #[cfg(test)]
 mod loopback_tests {
+    #[test]
+    fn finds_the_inbounds_of_a_user() {
+        let c = serde_json::json!({ "inbounds": [
+            { "tag": "vless-1", "protocol": "vless", "settings": { "clients": [{ "id": "a", "email": "u7" }, { "id": "b", "email": "u71" }] } },
+            { "tag": "ss-1", "protocol": "shadowsocks", "settings": { "clients": [{ "password": "p", "email": "u7" }] } },
+            { "tag": "api", "protocol": "dokodemo-door", "settings": {} }
+        ] });
+        let v = super::user_inbounds(&c, 7);
+        assert_eq!(v.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), vec!["vless-1", "ss-1"]);
+        assert_eq!(v[0].2["id"], "a");
+        assert!(super::user_inbounds(&c, 8).is_empty());
+    }
+
     #[test]
     fn the_ports_the_config_needs_stay_open() {
         let c = serde_json::json!({
