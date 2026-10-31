@@ -162,11 +162,58 @@ fn last_status() -> &'static Mutex<HashMap<String, Value>> {
 }
 
 /// What the agent of server `sid` reported about the listener.
-pub fn ingest(app: &App, sid: &str, st: &Value) {
+pub fn ingest(app: &Arc<App>, sid: &str, st: &Value) {
     last_status().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), st.clone());
     let s = settings(app);
+    if on(&s) && s.server == sid {
+        if let Some(text) = cert_warning(st, crate::util::now(), &app.db.get("subiran_cert_warned")) {
+            app.db.set("subiran_cert_warned", &crate::util::now().to_string());
+            let a = app.clone();
+            tokio::spawn(async move { crate::backup::tell_admin(&a, &text).await });
+        }
+    }
     if on(&s) && !s.ready && s.server == sid && st["active"].as_bool() == Some(true) && st["domain"].as_str() == Some(s.domain.as_str()) && st["port"].as_u64() == Some(s.port as u64) {
         save(app, &SubIran { ready: true, ..s });
+    }
+}
+
+/// A Telegram note for the admin when the certificate of the Iran subscription link is about to end or
+/// has ended (the apps cannot read the subscription with an expired one); at most every 12 hours.
+fn cert_warning(st: &Value, now: i64, last: &str) -> Option<String> {
+    let end = st["cert_end"].as_i64().filter(|e| *e > 0)?;
+    let days = (end - now).div_euclid(86400);
+    if days >= 7 || now - last.parse::<i64>().unwrap_or(0) < 12 * 3600 {
+        return None;
+    }
+    let domain = st["domain"].as_str().unwrap_or("");
+    let why = st["renew_error"].as_str().unwrap_or("");
+    let head = if end <= now {
+        format!("⚠️ گواهی SSL لینک اشتراک ایران ({}) منقضی شده: اپ‌ها نمی‌توانند اشتراک را از آن بخوانند.", domain)
+    } else {
+        format!("⚠️ گواهی SSL لینک اشتراک ایران ({}) {} روز دیگر تمام می‌شود و هنوز تمدید نشده.", domain, days)
+    };
+    Some(format!(
+        "{}\n{}Let's Encrypt باید از بیرون ایران به پورت 80 آن سرور برسد. بعد از رفع مشکل: پنل › تنظیمات › لینک اشتراک ایران › «دوباره گرفتن SSL».",
+        head,
+        if why.is_empty() { String::new() } else { format!("علت: {}\n", why) }
+    ))
+}
+
+#[cfg(test)]
+mod cert_tests {
+    use serde_json::json;
+
+    #[test]
+    fn the_admin_hears_about_an_ending_certificate_twice_a_day_at_most() {
+        let now = 1_800_000_000;
+        let st = |days: i64| json!({ "domain": "s.example.com", "cert_end": now + days * 86400 + 60, "renew_error": "port 80 closed" });
+        assert!(super::cert_warning(&st(30), now, "").is_none());
+        let t = super::cert_warning(&st(3), now, "").unwrap();
+        assert!(t.contains("3 روز") && t.contains("port 80 closed"));
+        assert!(super::cert_warning(&st(-1), now, "").unwrap().contains("منقضی"));
+        // told an hour ago: not again yet
+        assert!(super::cert_warning(&st(-1), now, &(now - 3600).to_string()).is_none());
+        assert!(super::cert_warning(&json!({ "cert_end": 0 }), now, "").is_none());
     }
 }
 
@@ -359,7 +406,12 @@ fn cert_stamp(domain: &str) -> Option<std::time::SystemTime> {
 
 async fn serve(c: SubCfg, status: Arc<Mutex<Value>>) {
     let set = |active: bool, ssl: bool, error: &str| {
-        *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({ "active": active, "ssl": ssl, "domain": c.domain, "port": c.port, "error": error });
+        let mut v = json!({ "active": active, "ssl": ssl, "domain": c.domain, "port": c.port, "error": error });
+        // when the certificate ends and why it was not renewed: an expired one looked healthy before
+        if let (Some(o), Value::Object(h)) = (v.as_object_mut(), crate::certbot::health(&c.domain)) {
+            o.extend(h);
+        }
+        *status.lock().unwrap_or_else(|e| e.into_inner()) = v;
     };
     loop {
         // SSL first: certbot frees port 80 by itself, and waits after a failure before it tries again
@@ -387,6 +439,7 @@ async fn serve(c: SubCfg, status: Arc<Mutex<Value>>) {
         let mut acc = acc;
         let mut stamp = cert_stamp(&c.domain);
         let mut tick = tokio::time::interval(Duration::from_secs(60));
+        let mut ticks: u64 = 0;
         let busy = Arc::new(tokio::sync::Semaphore::new(1024));
         loop {
             tokio::select! {
@@ -400,6 +453,18 @@ async fn serve(c: SubCfg, status: Arc<Mutex<Value>>) {
                     });
                 }
                 _ = tick.tick() => {
+                    ticks += 1;
+                    if ticks % 30 == 0 {
+                        // close to its end: renew now (certbot's own timer cannot answer Let's Encrypt
+                        // while nothing listens on port 80), then show the new date or the reason
+                        let d = c.domain.clone();
+                        let _ = tokio::task::spawn_blocking(move || crate::certbot::renew_if_due(&d)).await;
+                        let d = c.domain.clone();
+                        let h = tokio::task::spawn_blocking(move || crate::certbot::health(&d)).await.unwrap_or(Value::Null);
+                        if let (Value::Object(o), Value::Object(h)) = (&mut *status.lock().unwrap_or_else(|e| e.into_inner()), h) {
+                            o.extend(h);
+                        }
+                    }
                     // a renewed certificate: new connections get it
                     let now = cert_stamp(&c.domain);
                     if now != stamp {
