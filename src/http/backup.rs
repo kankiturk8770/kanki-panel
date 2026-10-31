@@ -373,7 +373,7 @@ pub fn clean_db(app: &App) -> Value {
     // free trials that are over (the bot removes them within a minute; this also covers a paused bot)
     let trials = app.db.finished_trials();
     for u in &trials {
-        app.db.delete_user(u.id);
+        crate::api::delete_user(app, u.id);
     }
     // peers of users that no longer exist
     let peers = app.db.exec("DELETE FROM peers WHERE user_id NOT IN (SELECT id FROM users)", &[]).unwrap_or(0) as i64;

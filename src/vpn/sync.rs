@@ -245,6 +245,9 @@ pub async fn sync_all(app: &Arc<App>) {
         }
         crate::live::set_vpn(&n.id, &n.name, vec![]);
     }
+    // every server is asked at the same time: one that does not answer must not hold the round (traffic,
+    // limits and who is online) for everyone else
+    let mut jobs = vec![];
     for mut n in app.db.nodes().into_iter().filter(|n| n.enabled) {
         let local = n.id == "local";
         if local {
@@ -253,8 +256,15 @@ pub async fn sync_all(app: &Arc<App>) {
             n.info = info;
         }
         let (req, map) = desired_for(app, &users, &n);
-        let want = req.wg.len() + req.awg.len();
-        let resp: Result<SyncResp, String> = if local { Ok(apply_local(app, req).await) } else { remote_sync(app, &n, &req).await };
+        jobs.push(async move {
+            let want = req.wg.len() + req.awg.len();
+            let resp: Result<SyncResp, String> = if local { Ok(apply_local(app, req).await) } else { remote_sync(app, &n, &req).await };
+            let info = if !local && resp.is_ok() { remote_info(app, &n.address, &n.token, n.insecure).await } else { None };
+            (n, map, want, resp, info)
+        });
+    }
+    for (n, map, want, resp, info) in futures_util::future::join_all(jobs).await {
+        let local = n.id == "local";
         let ok = resp.is_ok();
         let state = match &resp {
             // a pin mismatch is not just "offline": it is logged and kept apart
@@ -270,10 +280,8 @@ pub async fn sync_all(app: &Arc<App>) {
         } else {
             let _ = app.db.exec("UPDATE nodes SET online=0, sync_state=?1 WHERE id=?2", &[&state, &n.id]);
         }
-        if !local && ok {
-            if let Some(info) = remote_info(app, &n.address, &n.token, n.insecure).await {
-                let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id=?2", &[&info.to_string(), &n.id]);
-            }
+        if let (false, Some(info)) = (local, info) {
+            let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id=?2", &[&info.to_string(), &n.id]);
         }
         let Ok(resp) = resp else {
             crate::live::set_vpn(&n.id, &n.name, vec![]);
@@ -350,9 +358,13 @@ pub fn node_err(addr: &str, e: &reqwest::Error) -> String {
     }
 }
 
+/// How long a sync or info request to a server may take
+const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
 async fn remote_sync(app: &App, n: &Node, req: &SyncReq) -> Result<SyncResp, String> {
+    // a sync answers within seconds; the self-signed client's long timeout is for updates
     let r = app.node_client(&n.id, n.insecure).post(format!("{}/agent/sync", n.address.trim_end_matches('/')))
-        .header("X-Node-Token", &n.token).json(req).send().await.map_err(|e| node_err(&n.address, &e))?;
+        .header("X-Node-Token", &n.token).json(req).timeout(SYNC_TIMEOUT).send().await.map_err(|e| node_err(&n.address, &e))?;
     if !r.status().is_success() {
         return Err(format!("the node answered {}", r.status()));
     }
@@ -397,7 +409,7 @@ pub async fn remote_info(app: &App, addr: &str, token: &str, insecure: bool) -> 
 pub async fn remote_info_res(app: &App, addr: &str, token: &str, insecure: bool) -> Result<Value, String> {
     // keyed by address: for a node being added this is also the TOFU first contact
     let r = app.node_client(addr, insecure).get(format!("{}/agent/info", addr.trim_end_matches('/')))
-        .header("X-Node-Token", token).send().await.map_err(|e| node_err(addr, &e))?;
+        .header("X-Node-Token", token).timeout(SYNC_TIMEOUT).send().await.map_err(|e| node_err(addr, &e))?;
     if !r.status().is_success() {
         return Err(format!("the node answered {}", r.status()));
     }

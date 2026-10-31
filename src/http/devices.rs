@@ -32,6 +32,23 @@ pub fn wants_seal(h: &HeaderMap) -> bool {
     device_id(h).is_some() && h.get("x-kanki-seal").and_then(|v| v.to_str().ok()).map(|v| v.trim() == SEAL).unwrap_or(false)
 }
 
+/// Phone or PC from the system part of a user agent ("" when it does not say)
+fn system_of(l: &str) -> &'static str {
+    let has = |s: &str| l.contains(s);
+    // Android (also "Dalvik/… Android 13" and okhttp, the HTTP library of most Android apps), iPhone / iPad
+    // (CFNetwork/Darwin without "macintosh" is iOS), then the desktop systems
+    if has("android") || has("dalvik") || has("okhttp") || has("iphone") || has("ipad") || has("ipod") || has("ios") || has("mobile") {
+        return "mobile";
+    }
+    if has("cfnetwork") || has("darwin") {
+        return if has("macintosh") || has("mac os") || has("macos") { "pc" } else { "mobile" };
+    }
+    if has("windows") || has("macintosh") || has("mac os") || has("macos") || has("linux") || has("x11") {
+        return "pc";
+    }
+    ""
+}
+
 /// What kind of device and app a request comes from: ("pc" | "mobile" | "", app name)
 pub fn kind_of(ua: &str) -> (&'static str, &'static str) {
     let l = ua.to_ascii_lowercase();
@@ -46,20 +63,22 @@ pub fn kind_of(ua: &str) -> (&'static str, &'static str) {
     for (k, kind, name) in [
         ("v2rayng", "mobile", "v2rayNG"), ("v2box", "mobile", "V2Box"), ("streisand", "mobile", "Streisand"),
         ("shadowrocket", "mobile", "Shadowrocket"), ("foxray", "mobile", "FoXray"), ("npvtunnel", "mobile", "NPV Tunnel"),
+        ("clashmetaforandroid", "mobile", "Clash"), ("sfa/", "mobile", "sing-box"), ("sfi/", "mobile", "sing-box"),
         ("nekobox", "", "NekoBox"), ("hiddify", "", "Hiddify"), ("v2rayn", "pc", "v2rayN"), ("nekoray", "pc", "NekoRay"),
-        ("clash", "", "Clash"), ("sing-box", "", "sing-box"), ("singbox", "", "sing-box"), ("wireguard", "", "WireGuard"),
+        ("clash-verge", "pc", "Clash"), ("clashx", "pc", "Clash"), ("flclash", "", "Clash"), ("clash", "", "Clash"),
+        ("sing-box", "", "sing-box"), ("singbox", "", "sing-box"), ("wireguard", "", "WireGuard"),
         ("amnezia", "", "AmneziaVPN"), ("happ", "", "Happ"), ("karing", "", "Karing"),
     ] {
         if has(k) {
-            let kind = if !kind.is_empty() { kind } else if has("android") || has("iphone") || has("ios") { "mobile" } else if has("windows") || has("mac") || has("linux") { "pc" } else { "" };
+            let kind = if !kind.is_empty() { kind } else { system_of(&l) };
             return (kind, name);
         }
     }
     if has("mozilla") {
-        let kind = if has("android") || has("iphone") || has("ipad") || has("mobile") { "mobile" } else { "pc" };
+        let kind = if system_of(&l) == "mobile" { "mobile" } else { "pc" };
         return (kind, "Browser");
     }
-    ("", "Other app")
+    (system_of(&l), "Other app")
 }
 
 /// The id the panel keeps: a hash, so the device's own id is not stored
@@ -71,9 +90,12 @@ fn key_of(raw: &str) -> String {
 pub fn note(app: &App, u: &User, h: &HeaderMap) {
     let (kind, name) = kind_of(&user_agent(h));
     // a Kanki app: one row per device; other apps send no id: one row per app
+    // other apps send no id: one row per user agent (the version and often the phone model are in it, so two
+    // phones with the same app are two rows; the same app updated is a new row, and the old one ages out)
+    let ua = user_agent(h);
     let (id, kanki) = match device_id(h) {
         Some(raw) => (key_of(&raw), true),
-        None => (format!("ua-{}", &sha256_hex(&format!("{}|{}", kind, name))[..16]), false),
+        None => (format!("ua-{}", &sha256_hex(&format!("{}|{}|{}", kind, name, ua))[..16]), false),
     };
     let _ = app.db.exec(
         "INSERT INTO devices(user_id,id,bound,kind,app,ip,first_seen,last_seen) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)
@@ -167,6 +189,33 @@ mod tests {
     }
 
     #[test]
+    fn tells_phone_from_pc() {
+        for (ua, kind, app) in [
+            ("KankiVPN-Android", "mobile", "Kanki Android"),
+            ("KankiVPN-Windows", "pc", "Kanki Windows"),
+            ("v2rayNG/1.9.30", "mobile", "v2rayNG"),
+            ("HiddifyNext/2.5.7 (android) like ClashMeta v2ray sing-box", "mobile", "Hiddify"),
+            ("HiddifyNext/2.5.7 (windows) like ClashMeta", "pc", "Hiddify"),
+            ("NekoBox/Android/1.3.4 (Prefer ClashMeta Format)", "mobile", "NekoBox"),
+            ("ClashMetaForAndroid/2.10.1.Meta", "mobile", "Clash"),
+            ("clash-verge/v1.7.7", "pc", "Clash"),
+            ("SFA/1.10.1 (sing-box 1.10.1; android)", "mobile", "sing-box"),
+            ("Streisand/1.6 CFNetwork/1494 Darwin/23.4.0", "mobile", "Streisand"),
+            ("Happ/1.6.2/ios", "mobile", "Happ"),
+            ("okhttp/4.12.0", "mobile", "Other app"),
+            ("Dalvik/2.1.0 (Linux; U; Android 13; SM-A515F Build/TP1A)", "mobile", "Other app"),
+            ("SomeApp/2 CFNetwork/1494 Darwin/23.4.0", "mobile", "Other app"),
+            ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) Safari", "mobile", "Browser"),
+            ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126", "pc", "Browser"),
+            ("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) Safari", "pc", "Browser"),
+            ("curl/8.5.0", "", "Other app"),
+            ("Go-http-client/1.1", "", "Other app"),
+        ] {
+            assert_eq!(kind_of(ua), (kind, app), "{}", ua);
+        }
+    }
+
+    #[test]
     fn seals_like_the_windows_app() {
         // the same inputs as TestSealedConfig in kanki-app (windows/service/internal/sub/sub_test.go)
         let s = seal(b"[Interface]\nPrivateKey = x\n", "kanki-12-abcd1234", "dev-1", &[0u8; 12]);
@@ -235,7 +284,8 @@ mod tests {
         // a Kanki app gets the page sealed for its device
         let (st, body, _) = get(&app, &page, &win("pc-aaaaaaaa")).await;
         assert_eq!(st, StatusCode::OK);
-        assert!(body.starts_with("kseal1.") && !body.contains("ALI"));
+        // (base64 can hold "ALI" by chance: check the page itself is not readable)
+        assert!(body.starts_with("kseal1.") && !body.contains("<") && !body.contains(' '));
         assert!(open(&body, &code, "pc-aaaaaaaa").contains("ALI"));
         // no device limit: more devices than the connection count all get in
         let (st, body, _) = get(&app, &page, &win("pc-bbbbbbbb")).await;

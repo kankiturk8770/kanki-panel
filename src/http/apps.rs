@@ -253,9 +253,10 @@ async fn remove(State(app): St, h: HeaderMap, Path(abi): Path<String>) -> Respon
 
 /// GET /sub/:code/app/:abi — the file, read from disk in pieces (never whole in memory)
 async fn download(State(app): St, Path((code, abi)): Path<(String, String)>) -> Response {
-    let Some((id, c)) = crate::api::parse_code(&code) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
+    // an unknown code is marked like on the other subscription paths, so the limiter counts it
+    let Some((id, c)) = crate::api::parse_code(&code) else { return crate::devices::miss() };
     if app.db.user_by_code(id, &c).is_none() {
-        return (StatusCode::NOT_FOUND, "not found").into_response();
+        return crate::devices::miss();
     }
     let Some(f) = get_file(&app, &abi) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
     let Ok(file) = tokio::fs::File::open(path(&app, &abi)).await else { return (StatusCode::NOT_FOUND, "not found").into_response() };

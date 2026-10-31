@@ -3571,9 +3571,10 @@ function logDraw(){var tb=$('#lg_tabs'),bx=$('#lg_box');if(!tb||!bx)return;
 // ---- devices of a user: every app that read the subscription (Kanki Android / Windows, v2rayNG, a browser…),
 // only to see who uses what; nothing is limited. Icons: phone or PC.
 function devIcon(k){return ic(k=='pc'?'pc':k=='mobile'?'phone':'globe',15)}
-function devSum(u){var now=Date.now()/1000,pc=0,mb=0;(u.devices||[]).forEach(function(x){if(now-x.last>30*86400)return;if(x.kind=='pc')pc++;else if(x.kind=='mobile')mb++});
- if(!pc&&!mb)return '';var c=function(n){return n>1?'<small>'+N(n)+'</small>':''};
- return '<span class="udev" title="'+esc(t('Devices'))+'">'+(mb?ic('phone',13)+c(mb):'')+(pc?ic('pc',13)+c(pc):'')+'</span>'}
+function devSum(u){var now=Date.now()/1000,pc=0,mb=0,un=0;(u.devices||[]).forEach(function(x){if(now-x.last>30*86400)return;if(x.kind=='pc')pc++;else if(x.kind=='mobile')mb++;else un++});
+ if(!pc&&!mb&&!un)return '';var c=function(n){return n>1?'<small>'+N(n)+'</small>':''};
+ // an app that does not say its system still shows (globe), so no device is hidden
+ return '<span class="udev" title="'+esc(t('Devices'))+'">'+(mb?ic('phone',13)+c(mb):'')+(pc?ic('pc',13)+c(pc):'')+(un?ic('globe',13)+c(un):'')+'</span>'}
 function devBox(u){var d=u.devices||[];
  var head='<div class="udh"><small class="muted">'+t('Devices')+' · <b class="ltr">'+N(d.length)+'</b></small></div>';
  if(!d.length)return '<div class="udevs">'+head+'<small class="muted">'+t('No app has read this subscription yet')+'</small></div>';
