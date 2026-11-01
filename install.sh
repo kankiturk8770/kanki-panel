@@ -39,7 +39,10 @@ mkdir -p "$ENV_DIR"; chmod 711 "$ENV_DIR"
 
 rand(){ tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-24}"; }
 rnum(){ shuf -i "$1"-"$2" -n 1; }
-pubip(){ curl -s4 --max-time 8 https://api.ipify.org || hostname -I | awk '{print $1}'; }
+pubip(){ # the public IPv4; an error page from the lookup service is never taken for an address
+  local ip; ip=$(curl -fs4 --max-time 8 https://api.ipify.org 2>/dev/null | tr -d '[:space:]')
+  echo "$ip" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$' || ip=$(hostname -I | awk '{print $1}')
+  echo "$ip"; }
 port_busy(){ ss -Htuln | awk '{print $5}' | grep -Eq "[:.]$1\$"; }
 ask(){ # $1=var $2=prompt $3=default
   local v; read -rp "$2${3:+ [$3]}: " v; printf -v "$1" '%s' "${v:-$3}"; }
@@ -85,10 +88,12 @@ download_from_panel(){
   [ -n "$t" ] || return 1
   q="id=$id&t=$t&arch=$(uname -m)"
   say "Downloading Kanki from the panel ($base) ..."
-  curl -fsL --retry 2 --max-time 300 -o /tmp/kanki-panel "$base/dl/kanki-panel?$q" 2>/dev/null || return 1
-  curl -fsL --max-time 30 -o /tmp/kanki-panel.sha256 "$base/dl/kanki-panel.sha256?$q" 2>/dev/null || return 1
-  (cd /tmp && sha256sum -c kanki-panel.sha256 >/dev/null 2>&1) || { warn "The panel's copy did not check out; trying GitHub"; return 1; }
-  install -m 755 /tmp/kanki-panel "$BIN"
+  local d; d=$(mktemp -d) || return 1
+  curl -fsL --retry 2 --max-time 300 -o "$d/kanki-panel" "$base/dl/kanki-panel?$q" 2>/dev/null || { rm -rf "$d"; return 1; }
+  curl -fsL --max-time 30 -o "$d/kanki-panel.sha256" "$base/dl/kanki-panel.sha256?$q" 2>/dev/null || { rm -rf "$d"; return 1; }
+  (cd "$d" && sha256sum -c kanki-panel.sha256 >/dev/null 2>&1) || { warn "The panel's copy did not check out; trying GitHub"; rm -rf "$d"; return 1; }
+  install -m 755 "$d/kanki-panel" "$BIN"
+  rm -rf "$d"
 }
 
 # the `kanki` menu command: this installer itself
@@ -114,13 +119,16 @@ download_bin(){
   say "Downloading Kanki Panel from $REPO ..."
   local base="https://github.com/$REPO/releases/download/latest"
   say "URL: $base/kanki-panel"
-  curl -fL --retry 3 -o /tmp/kanki-panel "$base/kanki-panel" \
+  # a private folder of our own (a fixed /tmp name could be a link someone else made)
+  local d; d=$(mktemp -d) || die "mktemp failed"
+  curl -fL --retry 3 --max-time 600 -o "$d/kanki-panel" "$base/kanki-panel" \
     || die "Download failed. The repo must be public and the GitHub Actions build must have succeeded."
   # no checksum file = no installation (a missing file must not silently skip the check)
-  curl -fsL --retry 3 "$base/kanki-panel.sha256" -o /tmp/kanki-panel.sha256 \
+  curl -fsL --retry 3 --max-time 60 "$base/kanki-panel.sha256" -o "$d/kanki-panel.sha256" \
     || die "Could not download kanki-panel.sha256, aborting (the binary was not verified)"
-  (cd /tmp && sha256sum -c kanki-panel.sha256 >/dev/null) || die "Checksum mismatch, aborting"
-  install -m 755 /tmp/kanki-panel "$BIN"
+  (cd "$d" && sha256sum -c kanki-panel.sha256 >/dev/null) || die "Checksum mismatch, aborting"
+  install -m 755 "$d/kanki-panel" "$BIN"
+  rm -rf "$d"
   install_menu
   ok "$($BIN version)"
 }
@@ -161,6 +169,11 @@ PrivateKey = $(wg genkey)
 $(iface_rules 10.66.0.0/16)
 EOF
     chmod 600 /etc/wireguard/wg0.conf
+  else
+    local cur; cur=$(conf_port /etc/wireguard/wg0.conf)
+    if [ -n "$cur" ] && [ "$cur" != "$WG_PORT" ]; then
+      warn "WireGuard keeps its port $cur (users' files use it); to move it run 'kanki', option 8"; WG_PORT=$cur
+    fi
   fi
   systemctl enable -q --now wg-quick@wg0 && ok "WireGuard is running" || warn "WireGuard failed to start"
 }
@@ -194,6 +207,11 @@ H4 = $H4
 $(iface_rules 10.67.0.0/16)
 EOF
     chmod 600 /etc/amnezia/amneziawg/awg0.conf
+  else
+    local cur; cur=$(conf_port /etc/amnezia/amneziawg/awg0.conf)
+    if [ -n "$cur" ] && [ "$cur" != "$AWG_PORT" ]; then
+      warn "AmneziaWG keeps its port $cur (users' files use it); to move it run 'kanki', option 8"; AWG_PORT=$cur
+    fi
   fi
   systemctl enable -q --now awg-quick@awg0 && ok "AmneziaWG is running" || warn "AmneziaWG failed to start (the server may need a reboot)"
 }
@@ -242,15 +260,43 @@ hy2_install(){
   curl -fsSL --max-time 60 -o $s https://get.hy2.sh/ 2>/dev/null || curl -fsSL --max-time 60 -o $s https://raw.githubusercontent.com/apernet/hysteria/master/scripts/install_server.sh 2>/dev/null || s=""
   for u in "https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-$a" "https://download.hysteria.network/app/latest/hysteria-linux-$a"; do
     if curl -fsSL --connect-timeout 10 --max-time 180 -o $f "$u" 2>/dev/null && [ "$(head -c4 $f | tail -c3)" = "ELF" ]; then
-      if [ -n "$s" ]; then bash $s --local $f >/dev/null 2>&1; else install -Dm755 $f /usr/local/bin/hysteria; fi
+      if [ -n "$s" ]; then bash $s --local $f >/dev/null 2>&1; else install -Dm755 $f /usr/local/bin/hysteria && hy2_unit; fi
     fi
     rm -f $f; command -v hysteria >/dev/null && { rm -f $s; return 0; }
   done
   rm -f $s; return 1
 }
+# The service the official installer makes (user "hysteria", the same unit), for when only the
+# program itself could be downloaded
+hy2_unit(){
+  id hysteria >/dev/null 2>&1 || useradd --system --home-dir /var/lib/hysteria --create-home --shell /usr/sbin/nologin hysteria
+  cat > /etc/systemd/system/hysteria-server.service <<'EOF'
+[Unit]
+Description=Hysteria Server Service (config.yaml)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hysteria server --config /etc/hysteria/config.yaml
+WorkingDirectory=~
+User=hysteria
+Group=hysteria
+Environment=HYSTERIA_LOG_LEVEL=info
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+}
 setup_hysteria(){ # $1=auth url
   say "Installing Hysteria2 on UDP $HY2_PORT ..."
   hy2_install || { warn "Hysteria2 could not be installed"; HY2_PORT=""; return; }
+  # the program without its service would look installed but never run
+  systemctl cat hysteria-server.service >/dev/null 2>&1 || hy2_unit
+  systemctl cat hysteria-server.service >/dev/null 2>&1 || { warn "Hysteria2 has no service on this server; it is not used"; HY2_PORT=""; return; }
   id hysteria >/dev/null 2>&1 && usermod -aG kankitls hysteria
   mkdir -p /etc/hysteria
   cat > /etc/hysteria/config.yaml <<EOF
@@ -284,7 +330,15 @@ install_caddy(){
     apt-get update -qq; apt-get install -y -qq caddy >/dev/null 2>&1 || true
   fi
   if ! command -v caddy >/dev/null; then
-    curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=amd64" -o /usr/bin/caddy && chmod +x /usr/bin/caddy
+    local ca cf
+    case "$(uname -m)" in x86_64|amd64) ca=amd64;; aarch64|arm64) ca=arm64;; *) die "Caddy could not be installed (no package and no download for $(uname -m))";; esac
+    cf=$(mktemp) || die "mktemp failed"
+    # the downloaded program must really run here before it takes the place of /usr/bin/caddy
+    if curl -fsSL --max-time 300 "https://caddyserver.com/api/download?os=linux&arch=$ca" -o "$cf" && chmod 755 "$cf" && "$cf" version >/dev/null 2>&1; then
+      mv -f "$cf" /usr/bin/caddy
+    else
+      rm -f "$cf"; die "Caddy could not be downloaded"
+    fi
     id caddy >/dev/null 2>&1 || useradd --system --home /var/lib/caddy --create-home --shell /usr/sbin/nologin caddy
     mkdir -p /etc/caddy
     printf '[Unit]\nDescription=Caddy\nAfter=network-online.target\n[Service]\nUser=caddy\nGroup=caddy\nExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile\nExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force\nAmbientCapabilities=CAP_NET_BIND_SERVICE\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target\n' > /etc/systemd/system/caddy.service
@@ -346,9 +400,27 @@ EOF
 }
 
 ask_protocols(){
-  ask_port WG_PORT "WireGuard UDP port" 51820
-  ask_port AWG_PORT "AmneziaWG UDP port" 51821
-  if yes_no "Install Hysteria2?" Y; then ask_port HY2_PORT "Hysteria2 UDP port" 8443; else HY2_PORT=""; fi
+  # a reinstall offers the ports this server already uses (users' files point at them)
+  local dw da dh
+  dw=$(conf_port /etc/wireguard/wg0.conf); da=$(conf_port /etc/amnezia/amneziawg/awg0.conf); dh=$(envget HY2_PORT)
+  ask_port WG_PORT "WireGuard UDP port" "${dw:-51820}"
+  ask_port AWG_PORT "AmneziaWG UDP port" "${da:-51821}"
+  if yes_no "Install Hysteria2?" Y; then ask_port HY2_PORT "Hysteria2 UDP port" "${dh:-8443}"; else HY2_PORT=""; fi
+}
+
+conf_port(){ awk -F' *= *' '/^ListenPort/{gsub(/[^0-9]/,"",$2); print $2; exit}' "$1" 2>/dev/null || true; }
+
+# A reinstall keeps the Hysteria2 password and secret and the node token: the users' Hysteria2 links
+# and the panel's access to this node keep working. New ones only on a first install.
+keep_secrets(){
+  local v hy=/etc/hysteria/config.yaml
+  v=$(envget HY2_OBFS); [ -n "$v" ] || v=$(awk '/salamander:/{f=1;next} f&&/password:/{print $2; exit}' $hy 2>/dev/null || true)
+  [ -n "$v" ] && HY2_OBFS=$v
+  v=$(envget HY2_SECRET); [ -n "$v" ] || v=$(awk '/trafficStats:/{f=1;next} f&&/secret:/{print $2; exit}' $hy 2>/dev/null || true)
+  [ -n "$v" ] && HY2_SECRET=$v
+  v=$(envget HY2_STATS_PORT); [[ "$v" =~ ^[0-9]+$ ]] && HY2_STATS_PORT=$v
+  if [ "$(envget MODE)" = node ]; then v=$(envget NODE_TOKEN); [ -n "$v" ] && NODE_TOKEN=$v; fi
+  return 0
 }
 
 # =====================================================================
@@ -371,7 +443,7 @@ install_panel(){
   read -rsp "Telegram sales bot token (empty = no bot): " BOT_TOKEN; echo
   BOT_ADMINS=""; [ -n "$BOT_TOKEN" ] && ask BOT_ADMINS "Bot admin numeric ID(s), comma separated"
 
-  HY2_STATS_PORT=$(rnum 30000 39999); HY2_OBFS=$(rand 20); HY2_SECRET=$(rand 24)
+  HY2_STATS_PORT=$(rnum 30000 39999); HY2_OBFS=$(rand 20); HY2_SECRET=$(rand 24); keep_secrets
   echo; say "Summary"
   echo "  Domain: $DOMAIN  HTTPS: $HTTPS_PORT  Endpoint: $ENDPOINT  Server: $LOCAL_NAME"
   echo "  WireGuard: $WG_PORT  AmneziaWG: $AWG_PORT  Hysteria2: ${HY2_PORT:-off}"
@@ -430,7 +502,7 @@ install_node(){
     ask_port NODE_PORT "Internal agent port (local only)" "$(rnum 20000 29999)"
     ask_protocols
   fi
-  HY2_STATS_PORT=$(rnum 30000 39999); HY2_OBFS=$(rand 20); HY2_SECRET=$(rand 24); NODE_TOKEN=$(rand 48); INSECURE=""
+  HY2_STATS_PORT=$(rnum 30000 39999); HY2_OBFS=$(rand 20); HY2_SECRET=$(rand 24); NODE_TOKEN=$(rand 48); INSECURE=""; keep_secrets
   base_packages; download_bin
   # KANKI_SSL=0 (the panel's «without SSL»): no certbot; a joining server never stops on a failed SSL
   if [ -n "$DOMAIN" ] && [ "${KANKI_SSL:-1}" != 0 ]; then
@@ -474,8 +546,12 @@ register_node(){ # tells the panel about this node; needs DOMAIN NODE_PUBLIC_POR
   ins=false; [ -n "$INSECURE" ] && ins=true
   body="{\"token\":\"$KANKI_JOIN\",\"name\":\"$name\",\"address\":\"https://$host:$NODE_PUBLIC_PORT\",\"endpoint\":\"$host\",\"node_token\":\"$NODE_TOKEN\",\"insecure\":$ins}"
   say "Telling the panel about this node ..."
-  res=$(curl -sS -m 90 -X POST -H 'Content-Type: application/json' -d "$body" "$KANKI_PANEL/join/register" 2>&1) \
-    || res=$(curl -sSk -m 90 -X POST -H 'Content-Type: application/json' -d "$body" "$KANKI_PANEL/join/register" 2>&1) || true
+  # the tokens go only over a checked certificate (or the plain http:// address the panel gave)
+  res=$(curl -sS -m 90 -X POST -H 'Content-Type: application/json' -d "$body" "$KANKI_PANEL/join/register" 2>&1) || {
+    # only to say why: the panel answers when its certificate is not checked (nothing is sent)
+    if curl -sk -m 15 -o /dev/null "$KANKI_PANEL/" 2>/dev/null; then
+      res="the panel's certificate cannot be checked from this server, so the tokens were not sent ($res)"
+    fi; }
   if echo "$res" | grep -q '"ok":true'; then
     echo; ok "Done! This server is now a node of $KANKI_PANEL (open Nodes in the panel)."
   else
@@ -595,6 +671,8 @@ reset_admin(){
   systemctl restart kanki-panel && ok "Admin login reset (2FA disabled, all sessions logged out)"
 }
 
+valid_port(){ [[ "$1" =~ ^[0-9]{1,5}$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
+
 change_ports(){
   [ -f "$ENV" ] || die "Kanki is not installed on this server"
   local WGC=/etc/wireguard/wg0.conf AWGC=/etc/amnezia/amneziawg/awg0.conf HYC=/etc/hysteria/config.yaml
@@ -606,17 +684,20 @@ change_ports(){
   echo "Leave a question empty to keep the port. Users' old WireGuard/AmneziaWG files stop working after a change; subscription links update by themselves."
   ask np "New WireGuard port" "$cw"
   if [ -n "$cw" ] && [ "$np" != "$cw" ]; then
-    if port_busy "$np"; then warn "Port $np is in use, WireGuard left as it was"; else
+    if ! valid_port "$np"; then warn "$np is not a port (1-65535), WireGuard left as it was"
+    elif port_busy "$np"; then warn "Port $np is in use, WireGuard left as it was"; else
       sed -i "s/^ListenPort *=.*/ListenPort = $np/" $WGC && systemctl restart wg-quick@wg0 && ok "WireGuard -> $np"; open_ports "$np/udp"; fi
   fi
   ask np "New AmneziaWG port" "$ca"
   if [ -n "$ca" ] && [ "$np" != "$ca" ]; then
-    if port_busy "$np"; then warn "Port $np is in use, AmneziaWG left as it was"; else
+    if ! valid_port "$np"; then warn "$np is not a port (1-65535), AmneziaWG left as it was"
+    elif port_busy "$np"; then warn "Port $np is in use, AmneziaWG left as it was"; else
       sed -i "s/^ListenPort *=.*/ListenPort = $np/" $AWGC && systemctl restart awg-quick@awg0 && ok "AmneziaWG -> $np"; open_ports "$np/udp"; fi
   fi
   ask np "New Hysteria2 port" "$ch"
   if [ -n "$ch" ] && [ "$np" != "$ch" ]; then
-    if port_busy "$np"; then warn "Port $np is in use, Hysteria2 left as it was"; else
+    if ! valid_port "$np"; then warn "$np is not a port (1-65535), Hysteria2 left as it was"
+    elif port_busy "$np"; then warn "Port $np is in use, Hysteria2 left as it was"; else
       sed -i "s/^listen: .*/listen: :$np/" $HYC && sed -i "s/^HY2_PORT=.*/HY2_PORT=$np/" $ENV && systemctl restart hysteria-server && ok "Hysteria2 -> $np"; open_ports "$np/udp"; fi
   fi
   systemctl restart kanki-panel 2>/dev/null || true
@@ -636,15 +717,22 @@ status(){
 
 uninstall(){
   yes_no "Remove the panel, database and settings?" N || exit 0
-  systemctl disable --now kanki-panel kanki-node kanki-tunnel 2>/dev/null || true
+  # every Kanki service (they restart by themselves, so a deleted program would keep failing)
+  local k
+  for k in kanki-panel kanki-node kanki-tunnel kanki-emergency kanki-dns kanki-mix kanki-xray; do
+    systemctl disable --now "$k" 2>/dev/null || true
+    rm -f "/etc/systemd/system/$k.service"
+  done
   # Hysteria2 tunnels made by the agent: stop them so their ports are free
   for u in /etc/systemd/system/kanki-hy2-*.service; do [ -e "$u" ] || continue; n=$(basename "$u" .service)
     systemctl disable --now "$n" 2>/dev/null || true; [ -f "/etc/kanki/hy2tun/$n-down.sh" ] && sh "/etc/kanki/hy2tun/$n-down.sh" 2>/dev/null; rm -f "$u"; done
   rm -rf /etc/kanki/hy2tun; systemctl daemon-reload 2>/dev/null || true
   rm -f /etc/systemd/system/kanki-panel.service /etc/systemd/system/kanki-node.service /etc/systemd/system/kanki-tunnel.service /etc/sysctl.d/90-kanki-tunnel.conf "$ENV_DIR/tunnel.env" "$BIN" /usr/local/bin/kanki
-  rm -rf /var/lib/kanki "$ENV_DIR"
+  rm -rf /var/lib/kanki
+  # the certificate stays: Caddy and Hysteria2 (left untouched) still read it, and certbot renews it there
+  find "$ENV_DIR" -mindepth 1 -maxdepth 1 ! -name tls -exec rm -rf {} + 2>/dev/null || true
   systemctl daemon-reload
-  ok "Removed (WireGuard / AmneziaWG / Hysteria2 / Caddy were left untouched)"
+  ok "Removed (WireGuard / AmneziaWG / Hysteria2 / Caddy were left untouched; the certificate in $TLS was kept for them)"
 }
 
 # =====================================================================
@@ -660,7 +748,16 @@ restore_bundle(){
   # the server files, exactly as they were (keys, configs, certificate)
   local f
   for f in $ENV $ENV_DIR/repo /etc/wireguard/wg0.conf /etc/amnezia/amneziawg/awg0.conf /etc/hysteria/config.yaml $TLS/fullchain.pem $TLS/privkey.pem; do
-    if [ -f "$W/x/files$f" ] && [ ! -L "$W/x/files$f" ]; then mkdir -p "$(dirname "$f")"; install -m 600 "$W/x/files$f" "$f"; fi
+    if [ -f "$W/x/files$f" ] && [ ! -L "$W/x/files$f" ]; then
+      mkdir -p "$(dirname "$f")"
+      # Hysteria2 runs as its own user: its config and the certificate must stay readable for it
+      # (the same modes a normal install and the renewal hook give them)
+      case "$f" in
+        /etc/hysteria/config.yaml) install -m 644 "$W/x/files$f" "$f";;
+        $TLS/*.pem) getent group kankitls >/dev/null || groupadd kankitls; install -m 640 -g kankitls "$W/x/files$f" "$f";;
+        *) install -m 600 "$W/x/files$f" "$f";;
+      esac
+    fi
   done
   need_repo
   # an address that named the old server becomes the domain
@@ -734,9 +831,17 @@ move_panel(){
   say "Downloading the full backup from the old server ..."
   # by the old server's IP: the domain may already point here
   local URL="https://$D:$P/move/bundle?t=$T"
-  curl -fsS --retry 3 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL" \
-    || curl -fsSk --retry 2 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL" \
-    || die "Could not download the backup from $OLD:$P. Is the old panel still running? Is the command older than 3 hours (make a new one)?"
+  local K=""
+  if ! curl -fsS --retry 3 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL"; then
+    # the token is sent without a checked certificate only when the admin says so here
+    curl -sk --max-time 20 --resolve "$D:$P:$OLD" -o /dev/null "https://$D:$P/" 2>/dev/null \
+      || die "Could not download the backup from $OLD:$P. Is the old panel still running? Is the command older than 3 hours (make a new one)?"
+    warn "The old server answers, but its certificate for $D cannot be checked from here."
+    yes_no "Download the backup anyway without checking the certificate?" N || die "Stopped: nothing was moved"
+    K=k
+    curl -fsSk --retry 2 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL" \
+      || die "Could not download the backup from $OLD:$P. Is the command older than 3 hours (make a new one)?"
+  fi
   KANKI_BK_PASS="$PASS" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "$W/b.kbk" -out "$W/b.tgz" -pass env:KANKI_BK_PASS \
     || die "The backup could not be opened (wrong or damaged): make a new command in the old panel"
   mkdir -p "$W/x"; tar -xzf "$W/b.tgz" -C "$W/x" || die "The backup is damaged"
@@ -745,7 +850,7 @@ move_panel(){
   restore_bundle "$W" "$OLD"
   # the old panel stops (no two panels for the same nodes and bot)
   if curl -fsS -X POST --max-time 20 --resolve "$D:$P:$OLD" "https://$D:$P/move/done?t=$T" >/dev/null 2>&1 \
-     || curl -fsSk -X POST --max-time 20 --resolve "$D:$P:$OLD" "https://$D:$P/move/done?t=$T" >/dev/null 2>&1; then
+     || { [ "$K" = k ] && curl -fsSk -X POST --max-time 20 --resolve "$D:$P:$OLD" "https://$D:$P/move/done?t=$T" >/dev/null 2>&1; }; then
     ok "The old panel ($OLD) was told to stop"
   else
     warn "The old panel could not be told: stop it there with: systemctl disable --now kanki-panel"

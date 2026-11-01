@@ -135,6 +135,8 @@ pub fn tg_html(raw: &str) -> String {
         t = t.trim_end_matches('`').to_string();
     }
     let t = t.trim().trim_matches('"').trim();
+    // cut to length first: cutting after the tags are balanced could leave one open
+    let t: String = t.chars().take(3500).collect();
     let mut s = t.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
     for tag in ["b", "i", "u", "s", "code"] {
         s = s.replace(&format!("&lt;{}&gt;", tag), &format!("<{}>", tag)).replace(&format!("&lt;/{}&gt;", tag), &format!("</{}>", tag));
@@ -160,7 +162,6 @@ pub fn tg_html(raw: &str) -> String {
             out = out.replace(&format!("<{}>", tag), "").replace(&format!("</{}>", tag), "");
         }
     }
-    let out: String = out.chars().take(3500).collect();
     out.trim().to_string()
 }
 
@@ -205,7 +206,7 @@ async fn call(app: &App, pv: &Provider, key: &str, model: &str, system: &str, us
         .timeout(Duration::from_secs(90))
         .send()
         .await
-        .map_err(|e| Fail::Again(format!("cannot reach {}: {}", pv.name, e)))?;
+        .map_err(|e| Fail::Again(format!("cannot reach {}: {}", pv.name, e.without_url())))?;
     let code = r.status().as_u16();
     let v: Value = r.json().await.unwrap_or(Value::Null);
     let msg = v["error"]["message"].as_str().or(v["error"].as_str()).or(v["message"].as_str()).unwrap_or("").to_string();
@@ -242,12 +243,18 @@ const EDITOR: &str = "تو ویراستار حرفه‌ای زبان فارسی 
 /// first text is kept when the editor fails or changes the post too much (numbers lost, length).
 async fn proofread(app: &App, pv: &Provider, key: &str, model: &str, post: &str) -> String {
     let Ok(t) = call(app, pv, key, model, EDITOR, post, 0.2).await else { return post.to_string() };
-    let fixed = tg_html(&t);
+    // the editor got the post already escaped (&amp; &lt;): undo that before escaping it again
+    let fixed = tg_html(&unescape(&t));
     let (a, b) = (strip_tags(post).chars().count(), strip_tags(&fixed).chars().count());
     if b * 10 < a * 6 || b * 10 > a * 15 || !keeps_numbers(post, &fixed) {
         return post.to_string();
     }
     fixed
+}
+
+/// The three escapes of `tg_html` undone (the tags stay as they are)
+fn unescape(s: &str) -> String {
+    s.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&")
 }
 
 /// every number of the post (prices, percentages, codes) is still in the edited text
@@ -275,7 +282,7 @@ async fn call_gemini(app: &App, pv: &Provider, key: &str, model: &str, system: &
         .timeout(Duration::from_secs(120))
         .send()
         .await
-        .map_err(|e| Fail::Again(format!("cannot reach Gemini: {}", e)))?;
+        .map_err(|e| Fail::Again(format!("cannot reach Gemini: {}", e.without_url())))?;
     let code = r.status().as_u16();
     let v: Value = r.json().await.unwrap_or(Value::Null);
     let msg = v["error"]["message"].as_str().unwrap_or("").to_string();
@@ -354,6 +361,17 @@ async fn listed_models(app: &App, pv: &Provider, key: &str) -> Vec<String> {
 /// One post from Grok: (the model that wrote it, the post in Telegram HTML). Tries again on passing
 /// errors and moves to another model when the chosen one is refused.
 pub async fn write(app: &App, system: &str, user: &str) -> Result<(String, String), String> {
+    // all tries together are bounded, so a preview or a test never hangs for half an hour
+    match tokio::time::timeout(WRITE_LIMIT, write_tries(app, system, user)).await {
+        Ok(r) => r,
+        Err(_) => Err("the AI took too long to answer".into()),
+    }
+}
+
+/// the longest one post may take, every try and model together
+const WRITE_LIMIT: Duration = Duration::from_secs(180);
+
+async fn write_tries(app: &App, system: &str, user: &str) -> Result<(String, String), String> {
     let c = cfg(app);
     if c.key.trim().is_empty() {
         return Err("no AI API key".into());
@@ -413,6 +431,20 @@ mod tests {
         // an unclosed tag would make Telegram refuse the message
         assert_eq!(tg_html("<b>باز <i>کج</i>"), "باز <i>کج</i>");
         assert_eq!(strip_tags("<b>a</b> &lt;3 &amp; <i>b</i>"), "a <3 & b");
+    }
+
+    #[test]
+    fn an_edited_post_is_escaped_once() {
+        let post = tg_html("<b>Tom & Jerry</b> 5 < 6");
+        assert_eq!(tg_html(&unescape(&post)), post);
+    }
+
+    #[test]
+    fn a_long_post_keeps_its_tags_balanced() {
+        let raw = format!("{}<b>{}</b>", "a".repeat(3490), "b".repeat(100));
+        let out = tg_html(&raw);
+        assert_eq!(out.matches("<b>").count(), out.matches("</b>").count());
+        assert!(out.chars().count() <= 3500);
     }
 
     #[test]
