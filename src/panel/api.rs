@@ -176,6 +176,29 @@ fn gzip(b: &[u8]) -> Vec<u8> {
     e.finish().unwrap_or_default()
 }
 
+/// The panel's script: the parts in assets/panel/js, joined in the order of their numbers into one file
+/// (each part is a slice of the one script, so a function of a later part may use one of an earlier part)
+pub const PANEL_JS: &str = concat!(
+    include_str!("../../assets/panel/js/01-vpn-and-user-form.js"),
+    include_str!("../../assets/panel/js/02-components.js"),
+    include_str!("../../assets/panel/js/03-xray.js"),
+    include_str!("../../assets/panel/js/04-antidpi.js"),
+    include_str!("../../assets/panel/js/05-dns.js"),
+    include_str!("../../assets/panel/js/06-kmix.js"),
+    include_str!("../../assets/panel/js/07-microtun.js"),
+    include_str!("../../assets/panel/js/08-translations.js"),
+    include_str!("../../assets/panel/js/09-base-login-shell.js"),
+    include_str!("../../assets/panel/js/10-dashboard-users-servers-settings.js"),
+    include_str!("../../assets/panel/js/11-bot-chat-traffic-ports.js"),
+    include_str!("../../assets/panel/js/12-tunnels.js"),
+    include_str!("../../assets/panel/js/13-menu.js"),
+    include_str!("../../assets/panel/js/14-servers.js"),
+    include_str!("../../assets/panel/js/15-routes.js"),
+    include_str!("../../assets/panel/js/16-vpn-services.js"),
+    include_str!("../../assets/panel/js/17-look-map-menu.js"),
+    include_str!("../../assets/panel/js/18-start.js")
+);
+
 /// The gzipped copy when the browser takes gzip, else the plain one
 fn maybe_gzip(h: &HeaderMap, plain: &'static [u8], gz: &'static [u8], ctype: &'static str, cache: &'static str, deny_frame: bool) -> Response {
     let takes = h.get(header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok()).map(|v| v.contains("gzip")).unwrap_or(false);
@@ -196,7 +219,7 @@ fn maybe_gzip(h: &HeaderMap, plain: &'static [u8], gz: &'static [u8], ctype: &'s
 
 fn admin_page() -> &'static str {
     static PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    PAGE.get_or_init(|| versioned(include_str!("../../assets/web/index.html"), crate::VERSION))
+    PAGE.get_or_init(|| versioned(include_str!("../../assets/panel/index.html"), crate::VERSION))
 }
 
 fn versioned(html: &str, v: &str) -> String {
@@ -263,20 +286,18 @@ pub fn master_router(app: Arc<App>) -> Router {
         // Vazirmatn (SIL Open Font License), shared by the panel and the subscription page
         .route("/assets/vazirmatn.woff", get(|| async {
             ([(header::CONTENT_TYPE, "font/woff"), (header::CACHE_CONTROL, "public, max-age=2592000, immutable")],
-             &include_bytes!("../../assets/web/vazirmatn.woff")[..])
+             &include_bytes!("../../assets/fonts/vazirmatn.woff")[..])
         }))
-        // the panel's extension script (DNS, Xray and node types): no secrets in it
-        // the whole panel script, one file
         // the look of the panel, out of the page so a phone keeps it until the next update (?v=<version>)
         .route("/assets/kanki-panel.css", get(|h: HeaderMap| async move {
             static GZ: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-            let css = include_str!("../../assets/web/panel.css").as_bytes();
+            let css = include_str!("../../assets/panel/panel.css").as_bytes();
             maybe_gzip(&h, css, GZ.get_or_init(|| gzip(css)), "text/css; charset=utf-8", "public, max-age=31536000, immutable", false)
         }))
         // the page asks for it with ?v=<version>, so a phone keeps it until the next update
         .route("/assets/kanki-panel.js", get(|h: HeaderMap| async move {
             static GZ: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
-            let js = include_str!("../../assets/web/panel.js").as_bytes();
+            let js = PANEL_JS.as_bytes();
             maybe_gzip(&h, js, GZ.get_or_init(|| gzip(js)), "application/javascript; charset=utf-8", "public, max-age=31536000, immutable", false)
         }))
         .route("/api/overview", get(overview))
@@ -1522,7 +1543,7 @@ fn sub_page_of(app: &App, u: &User) -> Response {
         nodes_html.push_str(&format!("<section class=\"node\" data-node=\"dns\"><h3>Kanki DNS</h3>{}</section>", rows));
     }
     let data = serde_json::to_string(&sub_data(&app, &u)).unwrap_or_default().replace("</", "<\\/");
-    let page = include_str!("../../assets/web/sub.html")
+    let page = include_str!("../../assets/sub/sub.html")
         .replace("{{TITLE}}", &esc(&u.username))
         .replace("{{SUB}}", &sub)
         .replace("{{STATUS}}", u.status())
@@ -1916,5 +1937,24 @@ async fn agent_update(State(app): St, h: HeaderMap) -> Response {
         // (the tunnel agent of this machine, which runs the same file, was restarted by self_update)
         Ok(v) => Json(json!({"ok": true, "version": v})).into_response(),
         Err(e) => Json(json!({"ok": false, "error": e})).into_response(),
+    }
+}
+
+#[cfg(test)]
+mod panel_js_tests {
+    #[test]
+    fn the_panel_script_is_its_parts_in_order() {
+        let js = super::PANEL_JS;
+        assert!(js.starts_with("// Kanki Panel: the whole panel script."));
+        // every page and the start code are in, in the order they depend on each other
+        let at = |s: &str| js.find(s).unwrap_or_else(|| panic!("missing {}", s));
+        assert!(at("function kuHead") < at("var FA={") && at("var FA={") < at("function t(k)") && at("function t(k)") < at("function pBot()"));
+        assert!(at("function pBot()") < at("// ==================================================================== start"));
+        // a part that does not end with a new line would glue its last line to the next part's first one
+        for p in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/panel/js")).unwrap() {
+            let p = p.unwrap().path();
+            let text = std::fs::read_to_string(&p).unwrap();
+            assert!(text.ends_with('\n') || p.file_name().unwrap().to_string_lossy().starts_with("18-"), "{:?}", p);
+        }
     }
 }

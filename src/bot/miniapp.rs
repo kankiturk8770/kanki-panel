@@ -98,7 +98,7 @@ fn account(app: &App, tg: i64, q: &HashMap<String, String>) -> Result<User, Resp
 }
 
 async fn page() -> Response {
-    let html = include_str!("../../assets/web/tgapp.html").replace("{{V}}", crate::VERSION);
+    let html = include_str!("../../assets/bot/miniapp.html").replace("{{V}}", crate::VERSION);
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], html).into_response()
 }
 

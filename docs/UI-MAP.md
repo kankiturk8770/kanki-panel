@@ -1,6 +1,6 @@
 # نقشهٔ رابط کاربری: هر چیز کجا رفت (نسخهٔ 3.21.0)
 
-قانون‌ها در `CLAUDE.md` (دستور طراحی) هستند. اجزای مشترک در اول `assets/web/panel.js`: `kuHead`، `kuTabs`،
+قانون‌ها در `CLAUDE.md` (دستور طراحی) هستند. اجزای مشترک در اول `assets/panel/js/02-components.js`: `kuHead`، `kuTabs`،
 `kuStats`، `kuGroup`، `kuSwitch`، `kuLine`، `kuItem`، `kuTag`، `kuMenu` (منوی «⋯»)، `coreTunRows` (تب تانل هر هسته)،
 `corePage` / `CTABS` (صفحهٔ هر هسته). CSS آن‌ها بخش «the parts every page is built from» در `index.html`.
 

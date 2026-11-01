@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.25.2 — the source in order
+- Every part of the panel has its own folder (panel, servers, subscription, VPN cores, bot, tunnels and their protocols, Xray, DNS, emergency chat) and its own web files; the panel script is in 18 parts. Nothing changes in how anything works.
 ## New in 3.25.1 — the Iran subscription link works again
 - Its tunnel to the panel now uses the subscription domain itself, not the address set on the Iran server for other tunnels; the card also tells why the tunnel is down when it is.
 ## New in 3.25 — all links in one text
@@ -95,7 +97,7 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** pan
 - 30 functions and 4 tables that nothing used any more are removed. Every page was compared on a phone and a desktop screen before and after (screenshots and text), clicked through (menus, theme, language, sign-out/in, tunnel form), with no script errors.
 
 ## New in 3.16 — one panel script
-- The panel's script is **one file** now (`assets/web/panel.js`, served as `/assets/kanki-panel.js`) instead of fifteen pieces from different versions (the page's own script and kanki-ext, -xray, -antidpi, -dns, -kmix, -kcore, -v37, -look, -servers, -route, -svc, -skin, -hub, -deck). Seventeen old definitions that a later version replaced before they were ever used (old menus, the old user card, the old tunnel map …) are gone.
+- The panel's script is **one file** now (served as `/assets/kanki-panel.js`; since 3.25.2 kept as ordered parts in `assets/panel/js/`) instead of fifteen pieces from different versions (the page's own script and kanki-ext, -xray, -antidpi, -dns, -kmix, -kcore, -v37, -look, -servers, -route, -svc, -skin, -hub, -deck). Seventeen old definitions that a later version replaced before they were ever used (old menus, the old user card, the old tunnel map …) are gone.
 - Nothing looks or works differently: every page was compared on a phone and a desktop screen before and after (screenshots and text), with no script errors.
 
 ## New in 3.15.3 — a calm panel on phones
@@ -281,19 +283,30 @@ kanki-panel/
 ├── install.sh              installer + `kanki` menu (stays at root for the curl one-liner)
 ├── Cargo.toml
 ├── src/
-│   ├── main.rs             startup, CLI commands, shared state
-│   ├── core/               db.rs (SQLite), util.rs (crypto, TOTP, QR, helpers)
-│   ├── http/               api.rs (users, nodes, configs, sub page), auth.rs (security center),
-│   │                       admin.rs (system, update, bulk), backup.rs (encrypted backup, Telegram)
-│   ├── vpn/                wg.rs, hy2.rs, sync.rs (node sync + traffic + limits)
-│   ├── tunnel/             Kanki Tunnel: link.rs (transports + crypto), quic.rs (quic/kcp),
-│   │                       hq.rs + salamander.rs (masked QUIC), h2ws.rs (WebSocket over HTTP/2),
-│   │                       dual.rs (hq with h2 fallback), obfs.rs (KCP mask relay),
-│   │                       mux.rs (many streams per link), engine.rs (run tunnels), agent.rs
-│   │                       (tunnel-only server, standalone `tunnel-run`), panel.rs (API + in-panel
-│   │                       engine), tests.rs
-│   └── telegram/           bot.rs (sales bot: plans, payments, trials, referrals, admin panel)
-├── assets/web/             index.html (admin panel), sub.html (subscription page)
+│   ├── main.rs             startup, CLI commands, shared state, the module list by folder
+│   ├── core/               db.rs (SQLite, settings), util.rs (crypto, TOTP, QR, helpers), certbot.rs, pin.rs, fw.rs, live.rs
+│   ├── panel/              the admin panel's server: api.rs (users, settings, plans, configs, subscription pages),
+│   │                       auth.rs (login, API tokens, 2FA), limit.rs, admin.rs (system, update, bot settings,
+│   │                       daily report), backup.rs, migrate.rs, cleanup.rs
+│   ├── servers/            VPN servers: servers.rs (add / edit / remove, install command), cores.rs (WG/AWG/Hy2 on/off),
+│   │                       twin.rs (config through a tunnel), direct.rs, exitgeo.rs (exit country)
+│   ├── subscription/       subiran.rs (subscription on an Iran server), subdomain.rs, devices.rs, apps.rs (app files)
+│   ├── vpn/                wg.rs, hy2.rs, kmix.rs, microtun.rs, mtun.rs, sync.rs (users to servers, traffic, limits),
+│   │                       amnezia.rs (AmneziaVPN backup)
+│   ├── bot/                bot.rs (sales bot), shop.rs (custom purchase), miniapp.rs, channel.rs, ai.rs
+│   ├── tunnel/             Kanki Tunnel: engine.rs, link.rs, agent.rs (tunnel server agent, `tunnel-run`), panel.rs
+│   │   │                   (tunnels and tunnel servers in the panel), probe.rs, tests.rs
+│   │   └── transport/      the wire protocols: quic, hq, salamander, h2ws, dual, obfs, mux, fec, game, faketcp, awg, hy2t
+│   ├── xray/               mod.rs (Xray on a server), panel.rs (Xray in the panel, links)
+│   ├── dns/                Kanki DNS (engine, DoH, SNI, panel)
+│   └── emergency/          the emergency chat
+├── assets/
+│   ├── panel/              index.html, panel.css, js/01…18-*.js (the panel script in parts, joined in order)
+│   ├── bot/                miniapp.html (the bot's mini app)
+│   ├── sub/                sub.html (the user's subscription page)
+│   ├── emergency/          admin.html (emergency chat admin)
+│   ├── fonts/              Vazirmatn (shared)
+│   ├── dns/, bin/          DNS service lists, the KANKI MIX server binary
 ├── docs/                   INSTALL.md, API.md, CHANGES.md, HQ-TUNNEL.md, STANDALONE-FA.md, examples/, systemd/
 ├── scripts/                install-standalone.sh (standalone tunnel as a systemd service)
 └── .github/workflows/      release.yml (builds the binary into Releases "latest")

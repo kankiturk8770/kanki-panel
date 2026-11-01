@@ -590,7 +590,7 @@ async fn admin_page(State(s): St) -> Response {
 
 /// the panel's font, so the admin page looks like the panel without reaching the internet
 async fn font() -> Response {
-    ([(header::CONTENT_TYPE, "font/woff"), (header::CACHE_CONTROL, "public, max-age=604800")], &include_bytes!("../assets/web/vazirmatn.woff")[..]).into_response()
+    ([(header::CONTENT_TYPE, "font/woff"), (header::CACHE_CONTROL, "public, max-age=604800")], &include_bytes!("../../assets/fonts/vazirmatn.woff")[..]).into_response()
 }
 
 async fn home() -> Response {
@@ -849,7 +849,7 @@ pub fn status() -> Value {
 
 // ------------------------------------------------------------------ admin page
 
-const ADMIN_HTML: &str = include_str!("../assets/web/emergency-admin.html");
+const ADMIN_HTML: &str = include_str!("../../assets/emergency/admin.html");
 
 #[cfg(test)]
 mod tests {
