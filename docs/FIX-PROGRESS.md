@@ -5,7 +5,7 @@
 
 | گروه | شناسه‌ها | برنچ روی گیت‌هاب | وضعیت |
 |---|---|---|---|
-| G1 هسته، ورود، دیتابیس | M15, L1–L10, سمت db: M2, M3, L17, L45 | `wip/fix-core-auth` | در جریان |
+| G1 هسته، ورود، دیتابیس | M15, L1–L10, سمت db: M2, M3, L17, L45 | `fix/fix-core-auth` (6f635f5) | تمام (۲۴۸ قبول) |
 | G2 پنل | H2, M14, L11–L16, سمت API: L17 | `fix/worktree-agent-a638d271253e77a08` (c3978dd) | تمام (تست‌ها سبز جز تست‌های تانل هم‌زمان) |
 | G3 سرورها و اشتراک | M16, L19–L28 | `fix/fix-servers-subscription` (14c60c2) | تمام (۲۴۱ تست قبول) |
 | G4 هسته‌های VPN | H1, M8–M13, M26, L18, L29–L36 | `wip/fix-vpn` | در جریان |
@@ -16,3 +16,7 @@
 `claude/panel-work-n233zr`، `cargo test` کامل، نسخه 3.25.3 + CHANGES/README، گزارش «رفع شد» در `CLAUDE.md` و `docs/SCAN-HALF1.md`، PR، سبز، مرج.
 نکته‌های گروه‌ها: G2 در `auth.rs` تابع `identify_quiet` اضافه کرد (G1 هم `auth.rs` را عوض می‌کند: مرج با دقت). G3: همان ذخیرهٔ بی‌اعتبارسنجی
 آدرس در `src/tunnel/panel.rs:2173,2188` هم هست (نیمهٔ دوم). G2: توکن join مخصوص هر سرور (`servers.rs`) در L13 پوشش داده نشد.
+
+کارهای اتصال بعد از مرج (یادداشت G1): در `bot.rs` تابع `fulfill` برای تمدید پلن `self.db().renew_plan(o.4, p.days, p.gb)` صدا شود به‌جای `extend`
+(بدون این M2 کامل نیست)؛ سه متن تازه به `08-translations.js`: "2FA is already on; turn it off with its code first"، "this username is
+reserved, pick another"، "could not save the password, try again".
