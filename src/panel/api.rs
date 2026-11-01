@@ -412,6 +412,18 @@ fn num(v: &Value) -> Option<f64> {
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
 }
 
+/// Days and GB typed in are kept to sane sizes (100 years, 1 PB), so `days * 86400` never overflows
+const MAX_DAYS: f64 = 36500.0;
+const MAX_GB: f64 = 1_000_000.0;
+
+fn days_of(d: f64) -> i64 {
+    d.clamp(-MAX_DAYS, MAX_DAYS) as i64
+}
+
+fn gb_of(g: f64) -> f64 {
+    if g.is_nan() { 0.0 } else { g.clamp(-MAX_GB, MAX_GB) }
+}
+
 async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "users:write");
     let count = num(&b["count"]).unwrap_or(1.0).clamp(1.0, 200.0) as i64;
@@ -419,8 +431,8 @@ async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     if !base.is_empty() && !valid_cfg_name(&base) {
         return err(StatusCode::BAD_REQUEST, NAME_ERR);
     }
-    let gb = num(&b["traffic_limit_gb"]).or_else(|| num(&b["traffic_limit"])).unwrap_or(0.0).max(0.0);
-    let days = num(&b["days"]).unwrap_or(30.0) as i64;
+    let gb = gb_of(num(&b["traffic_limit_gb"]).or_else(|| num(&b["traffic_limit"])).unwrap_or(0.0)).max(0.0);
+    let days = days_of(num(&b["days"]).unwrap_or(30.0));
     let conns = num(&b["max_connections"]).unwrap_or(1.0).max(0.0) as i64;
     let protos = list_or(&b["protocols"], &app.db.get("default_protocols"));
     let nodes = list_or(&b["nodes"], "");
@@ -460,11 +472,11 @@ async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
 async fn users_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "users:write");
     let Some(u) = app.db.user(id) else { return err(StatusCode::NOT_FOUND, "not found") };
-    let gb = num(&b["traffic_limit_gb"]).unwrap_or(u.limit_gb).max(0.0);
+    let gb = gb_of(num(&b["traffic_limit_gb"]).unwrap_or(u.limit_gb)).max(0.0);
     let exp = match b["expires_ts"].as_i64() {
-        Some(t) => t.max(0),
+        Some(t) => t.clamp(0, now() + days_of(MAX_DAYS) * 86400),
         None => match num(&b["days"]) {
-            Some(d) if d > 0.0 => now() + (d as i64) * 86400,
+            Some(d) if d > 0.0 => now() + days_of(d) * 86400,
             Some(_) => 0,
             None => u.expires_at,
         },
@@ -494,8 +506,8 @@ async fn users_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
         return err(StatusCode::BAD_REQUEST, &e);
     }
     // quick add (days / GB) on top of the saved values
-    let add_days = num(&b["add_days"]).unwrap_or(0.0) as i64;
-    let add_gb = num(&b["add_gb"]).unwrap_or(0.0);
+    let add_days = days_of(num(&b["add_days"]).unwrap_or(0.0));
+    let add_gb = gb_of(num(&b["add_gb"]).unwrap_or(0.0));
     if add_days > 0 || add_gb > 0.0 {
         let _ = app.db.extend(id, add_days, add_gb);
     }
@@ -522,7 +534,7 @@ async fn users_delete(State(app): St, h: HeaderMap, Path(id): Path<i64>) -> Resp
 
 pub fn user_action(app: &App, id: i64, action: &str, b: &Value) -> Result<(), String> {
     match action {
-        "extend" => app.db.extend(id, num(&b["days"]).unwrap_or(0.0) as i64, num(&b["gb"]).unwrap_or(0.0)).map(|_| app.db.promote_trial(id)),
+        "extend" => app.db.extend(id, days_of(num(&b["days"]).unwrap_or(0.0)), gb_of(num(&b["gb"]).unwrap_or(0.0))).map(|_| app.db.promote_trial(id)),
         "reset" | "reset-traffic" => app.db.exec("UPDATE users SET used_bytes=0, warned=0 WHERE id=?1", &[&id]).map(|_| ()),
         "toggle" | "freeze" => app.db.exec("UPDATE users SET enabled=1-enabled WHERE id=?1", &[&id]).map(|_| ()),
         "enable" => app.db.exec("UPDATE users SET enabled=1 WHERE id=?1", &[&id]).map(|_| ()),
@@ -669,6 +681,9 @@ struct Leftover {
     at: i64,
 }
 
+/// Held around every read-change-write of `nodes_leftover` (a node deleted while the loop saves is not lost)
+static LEFTOVER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn leftovers(app: &App) -> Vec<Leftover> {
     serde_json::from_str(&app.db.get("nodes_leftover")).unwrap_or_default()
 }
@@ -696,6 +711,7 @@ pub(crate) fn spawn_node_removal(app: &Arc<App>, n: Node) {
             return;
         }
         crate::tunnel::panel::note_node(&n.id, "off");
+        let _g = LEFTOVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut l = leftovers(&app);
         l.retain(|x| x.id != n.id);
         l.push(Leftover { id: n.id.clone(), name: n.name.clone(), address: n.address.clone(), token: n.token.clone(), insecure: n.insecure, at: now() });
@@ -729,6 +745,7 @@ pub async fn leftover_loop(app: Arc<App>) {
             }
         }
         // a node deleted while this ran is not lost
+        let _g = LEFTOVER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut now_list = leftovers(&app);
         now_list.retain(|x| keep.iter().any(|k| k.id == x.id) || !tried.contains(&x.id));
         save_leftovers(&app, &now_list);
@@ -895,6 +912,90 @@ mod plan_tests {
 }
 
 #[cfg(test)]
+mod token_rights_tests {
+    use axum::extract::State;
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::Json;
+    use serde_json::json;
+    use std::collections::HashMap;
+    use std::sync::{atomic::AtomicI64, Arc, Mutex};
+
+    fn app() -> Arc<crate::App> {
+        let dir = std::env::temp_dir().join(format!("kanki-rights-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
+        Arc::new(crate::App {
+            db,
+            env: HashMap::new(),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn token_headers(app: &crate::App, scopes: &str) -> HeaderMap {
+        let t = "test-token-0123456789";
+        app.db.exec("INSERT INTO api_tokens(name,hash,prefix,scopes,created,last_used) VALUES('t',?1,'test',?2,0,0)", &[&crate::util::sha256_hex(t), &scopes]).unwrap();
+        let mut h = HeaderMap::new();
+        h.insert(axum::http::header::AUTHORIZATION, format!("Bearer {}", t).parse().unwrap());
+        h
+    }
+
+    #[tokio::test]
+    async fn an_api_token_cannot_change_the_update_source_or_the_bot_admins() {
+        let app = app();
+        let h = token_headers(&app, "settings");
+        // an invalid repo: even if the check were missing nothing would be written to /etc/kanki/repo
+        let r = super::settings_put(State(app.clone()), h.clone(), Json(json!({"update_repo": "not a repo"}))).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        let r = crate::admin::bot_put_for_test(app.clone(), h.clone(), json!({"admins": "123"})).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        assert_eq!(app.db.get("bot_admins"), "");
+        // looking at a token quietly does not mark it as used
+        app.db.exec("UPDATE api_tokens SET last_used=0", &[]).unwrap();
+        assert!(crate::auth::identify_quiet(&app, &h).is_some());
+        let used: i64 = app.db.with(|c| c.query_row("SELECT last_used FROM api_tokens", [], |r| r.get(0)).unwrap());
+        assert_eq!(used, 0);
+        assert!(crate::auth::identify(&app, &h).is_some());
+        let used: i64 = app.db.with(|c| c.query_row("SELECT last_used FROM api_tokens", [], |r| r.get(0)).unwrap());
+        assert!(used > 0);
+    }
+
+    #[test]
+    fn the_join_token_is_taken_once_and_given_back_on_failure() {
+        let app = app();
+        app.db.set("join_token", "abc");
+        app.db.set("join_expires", &(crate::util::now() + 3600).to_string());
+        let c = super::JoinClaim::take(&app, "abc").unwrap();
+        // a second registration at the same time is refused
+        assert!(super::JoinClaim::take(&app, "abc").is_none());
+        drop(c);
+        // failed (not used): the installer can run the same command again
+        let mut c = super::JoinClaim::take(&app, "abc").unwrap();
+        c.used = true;
+        drop(c);
+        assert!(super::JoinClaim::take(&app, "abc").is_none());
+        assert_eq!(app.db.get("join_token"), "");
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    #[test]
+    fn huge_days_and_gb_are_capped() {
+        assert_eq!(super::days_of(1e300), 36500);
+        assert_eq!(super::days_of(-1e300), -36500);
+        assert_eq!(super::days_of(30.0), 30);
+        assert_eq!(super::days_of(f64::NAN), 0);
+        assert_eq!(super::gb_of(f64::INFINITY), 1_000_000.0);
+        assert_eq!(super::gb_of(f64::NAN), 0.0);
+        assert_eq!(super::gb_of(10.5), 10.5);
+        // the biggest expiry still fits
+        assert!(crate::util::now().checked_add(super::days_of(1e300) * 86400).is_some());
+    }
+}
+
+#[cfg(test)]
 mod proto_all_tests {
     use super::toggle_proto;
 
@@ -927,16 +1028,54 @@ async fn node_join_token(State(app): St, h: HeaderMap) -> Response {
     Json(json!({ "token": token, "expires": exp, "panel": crate::servers::panel_url(&app), "repo": crate::admin::repo() })).into_response()
 }
 
+/// The panel-wide join token, taken out of the settings while one registration runs. Dropped
+/// without `used` (the registration failed), it is put back unless a new token was made meanwhile.
+struct JoinClaim {
+    app: Arc<App>,
+    token: String,
+    expires: String,
+    used: bool,
+}
+
+static JOIN_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+impl JoinClaim {
+    fn take(app: &Arc<App>, given: &str) -> Option<JoinClaim> {
+        let _g = JOIN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let want = app.db.get("join_token");
+        let exp: i64 = app.db.get("join_expires").parse().unwrap_or(0);
+        if want.is_empty() || given.is_empty() || !util::ct_eq(given, &want) || exp < now() {
+            return None;
+        }
+        app.db.set("join_token", "");
+        Some(JoinClaim { app: app.clone(), token: want, expires: exp.to_string(), used: false })
+    }
+}
+
+impl Drop for JoinClaim {
+    fn drop(&mut self) {
+        if self.used {
+            return;
+        }
+        let _g = JOIN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        if self.app.db.get("join_token").is_empty() && self.app.db.get("join_expires") == self.expires {
+            self.app.db.set("join_token", &self.token);
+        }
+    }
+}
+
 /// Public: called by the installer on the new server once its agent runs. The one-time token is the only credential.
 async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
     let given = b["token"].as_str().unwrap_or("").trim().to_string();
     // the token of one server added in Servers (its VPN part), or the panel-wide one of Add node
     let server = crate::servers::join_server(&app, &given);
+    // the panel-wide token is taken here, before any wait, so two registrations at once cannot
+    // both use it; it is given back if this one fails (the installer says "run the same command again")
+    let mut claim = None;
     if server.is_none() {
-        let want = app.db.get("join_token");
-        let exp: i64 = app.db.get("join_expires").parse().unwrap_or(0);
-        if want.is_empty() || given.is_empty() || !util::ct_eq(&given, &want) || exp < now() {
-            return err(StatusCode::FORBIDDEN, "the join token is wrong, already used or expired");
+        match JoinClaim::take(&app, &given) {
+            Some(c) => claim = Some(c),
+            None => return err(StatusCode::FORBIDDEN, "the join token is wrong, already used or expired"),
         }
     }
     let name = server.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| b["name"].as_str().unwrap_or("").trim().to_string());
@@ -986,7 +1125,11 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
     // one use only
     match &server {
         Some(s) => crate::servers::joined(&app, &s.id, &id),
-        None => app.db.set("join_token", ""),
+        None => {
+            if let Some(c) = claim.as_mut() {
+                c.used = true;
+            }
+        }
     }
     // a new server never shares a VPN port with another one (a tunnel entry could not carry both)
     let a = app.clone();
@@ -1045,6 +1188,12 @@ async fn settings_get(State(app): St, h: HeaderMap) -> Response {
 
 async fn settings_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "settings");
+    // the update source decides which program runs as root: only a login session may change it
+    if b.get("update_repo").is_some() {
+        if let Err(r) = crate::auth::check_session(&app, &h) {
+            return r;
+        }
+    }
     if let Some(o) = b.as_object() {
         if let Some(r) = o.get("update_repo").and_then(|v| v.as_str()) {
             let r = r.trim().trim_start_matches("https://github.com/").trim_end_matches('/').trim_end_matches(".git");
@@ -1170,7 +1319,7 @@ fn insert_plan(app: &App, b: &Value) -> Result<usize, String> {
     let cat = b["category"].as_str().map(|s| s.trim().to_string()).unwrap_or_default();
     app.db.exec(
         "INSERT INTO plans(name,days,gb,toman,usd,conns,countries,active,category,style) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9)",
-        &[&name, &(num(&b["days"]).unwrap_or(30.0) as i64), &num(&b["gb"]).unwrap_or(0.0).max(0.0),
+        &[&name, &days_of(num(&b["days"]).unwrap_or(30.0)), &gb_of(num(&b["gb"]).unwrap_or(0.0)).max(0.0),
           &(num(&b["toman"]).unwrap_or(0.0).max(0.0) as i64), &num(&b["usd"]).unwrap_or(0.0).max(0.0),
           &(num(&b["conns"]).unwrap_or(1.0).max(1.0) as i64), &(num(&b["countries"]).unwrap_or(0.0).max(0.0) as i64), &cat,
           &plan_style(b["style"].as_str().unwrap_or(""))],
