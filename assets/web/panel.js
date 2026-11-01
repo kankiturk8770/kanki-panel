@@ -863,7 +863,36 @@ function kcAll(p,on){var n=KC.meta[p].name;if(!confirm(on?n+' '+t('for every use
 // ==================================================================== the panel: login, shell, pages
 "use strict";
 // Persian text of the whole panel
-var FA={"Weak connection to the panel: showing the last data, trying again…":"اتصال به پنل ضعیف است: آخرین داده نشان داده می‌شود، دوباره تلاش می‌کنیم…",
+var FA={"Button colour in the bot":"رنگ دکمه در ربات",
+"Auto (by users)":"خودکار (بر اساس کاربر)",
+"🟢 Green":"🟢 سبز",
+"🔵 Blue":"🔵 آبی",
+"🔴 Red":"🔴 قرمز",
+"⚪ Plain":"⚪ ساده",
+"Custom purchase (mini app)":"خرید دلخواه (مینی‌اپ)",
+"Buyers can choose their own volume, days and users":"خریدار حجم، روز و تعداد کاربر را خودش انتخاب کند",
+"The chat menu button opens the mini app":"دکمهٔ منوی چت مینی‌اپ را باز کند",
+"Smallest volume (GB)":"کمترین حجم (گیگ)",
+"Largest volume (GB)":"بیشترین حجم (گیگ)",
+"Most users":"بیشترین تعداد کاربر",
+"The price comes from the price rules of the Smart plan builder (Plans tab): the same size costs the same as a listed plan.":"قیمت از قانون‌های قیمت «سازندهٔ هوشمند پلن» (تب پلن‌ها) می‌آید: هم‌اندازه با یک پلن، هم‌قیمت آن است.",
+"Button colours in the bot":"رنگ دکمه‌های ربات",
+"Telegram shows coloured buttons from February 2026; older apps show them plain. Plan buttons take the colour set on each plan.":"تلگرام از فوریهٔ ۲۰۲۶ دکمهٔ رنگی نشان می‌دهد؛ نسخه‌های قدیمی ساده. دکمهٔ هر پلن رنگی را می‌گیرد که روی همان پلن انتخاب شده.",
+"Buy":"خرید",
+"Renew":"تمدید",
+"Renew this service":"تمدید همین سرویس",
+"Payment methods":"روش‌های پرداخت",
+"Custom volume and days":"حجم و روز دلخواه",
+"Mini app":"مینی‌اپ",
+"AmneziaVPN backup":"بکاپ AmneziaVPN",
+"Config buttons":"دکمه‌های کانفیگ",
+"Download app":"دانلود اپ",
+"Support":"پشتیبانی",
+"Tutorial":"آموزش",
+"Discount code":"کد تخفیف",
+"My services":"سرویس‌های من",
+"AmneziaVPN backup: every WireGuard and AmneziaWG server in one file (Restore from backup)":"بکاپ AmneziaVPN: همهٔ سرورهای WireGuard و AmneziaWG در یک فایل (Restore from backup)",
+"Weak connection to the panel: showing the last data, trying again…":"اتصال به پنل ضعیف است: آخرین داده نشان داده می‌شود، دوباره تلاش می‌کنیم…",
  "Iran servers that still run VPN services nobody uses":"سرورهای ایرانی که هنوز سرویس VPN بی‌استفاده اجرا می‌کنند",
  "Off: stopped on this server, its port closed, no links for it":"خاموش: روی این سرور متوقف، پورتش بسته و لینکی برایش ساخته نمی‌شود",
  "Remove WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from every Iran server that serves no VPN user? Their tunnels, Xray and Kanki DNS stay.":"وایرگارد، AmneziaWG، Hysteria2 و KANKI MIX از همه‌ی سرورهای ایرانی که به هیچ کاربری VPN نمی‌دهند پاک شود؟ تانل‌ها، Xray و DNS کانکی آن‌ها می‌مانند.",
@@ -3595,8 +3624,12 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
    $('#s_rg').onclick=function(){confirmDo(function(){api('POST','/api/users/'+u.id+'/regen').then(function(){toast(t('Done'));return loadUsers()}).then(function(){editUser(id,'link')}).catch(fail)})};return}
   if(k=='link'){el.innerHTML='<small class="muted">'+t('Subscription link')+' · '+t('Created')+' '+(u.created_at?jdate(Date.parse(u.created_at)/1000):'—')+'</small><div class="lk">'+esc(u.link)+'</div>'+
     '<div class="g2" style="gap:8px"><button class="btn" id="s_cp">'+ic('copy',16)+' '+t('Copy link')+'</button><a class="b2" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="'+esc(u.link)+'">'+ic('ext',16)+' '+t('Open page')+'</a></div>'+
-    '<div class="us-cfg"><small class="muted">'+t('Configs')+'</small><div id="sx"></div></div>';
-   $('#s_cp').onclick=function(){copy(u.link)};sheetCfg(u.id);return}
+    '<div class="us-cfg"><small class="muted">'+t('Configs')+'</small><div id="sx"></div></div>'+
+    '<div class="us-cfg"><small class="muted">'+t('AmneziaVPN backup: every WireGuard and AmneziaWG server in one file (Restore from backup)')+'</small>'+
+    '<div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px">'+[['i','iPhone'],['a','Android'],['w','Windows']].map(function(x){return '<button class="b2 sm" data-amz="'+x[0]+'">'+ic('dl',15)+' '+x[1]+'</button>'}).join('')+'</div></div>';
+   $('#s_cp').onclick=function(){copy(u.link)};sheetCfg(u.id);
+   $$('[data-amz]',el).forEach(function(b){b.onclick=function(){var me=this;me.disabled=true;
+    api('GET','/api/users/'+u.id+'/amnezia/'+me.dataset.amz,undefined,{blob:1}).then(function(r){dl(r);me.disabled=false}).catch(function(e){me.disabled=false;fail(e)})}});return}
   if(k=='qr')qrInto(el,u.link)}
  $('#us_q').onclick=function(e){var b=e.target.closest('[data-t]');if(!b)return;var k=b.dataset.t;
   if(k=='reset')return resetU(u.id);if(k=='del')return delU(u.id);show(cur==k?'':k)};
@@ -3647,6 +3680,8 @@ function botApk(){var el=$('#bt_apk');if(!el)return;
  }).catch(fail)}
 function pBot(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Telegram sales bot')+'</h2><p>'+t('Create and manage the sales bot')+'</p></div><div id="bt_top"></div></div><div id="bt">'+t('Loading…')+'</div>';botLoad()}
 function botLoad(){return Promise.all([api('GET','/api/bot'),api('GET','/api/settings'),api('GET','/api/plans').catch(function(){return []})]).then(function(r){S.bot=r[0];S.bset=r[1];S.plans=r[2]||[];botDraw()}).catch(fail)}
+// the bot's customer buttons whose colour can be set (bot.rs STYLE_KEYS)
+var BSTY=[['buy','Buy','g'],['trial','Free trial','b'],['renew','Renew','g'],['my','My services'],['renew_this','Renew this service','g'],['pay','Payment methods','g'],['shop','Custom volume and days','b'],['miniapp','Mini app','b'],['amz','AmneziaVPN backup','b'],['cfg','Config buttons'],['app','Download app'],['support','Support'],['guide','Tutorial'],['ref','Invite friends'],['disc','Discount code']];
 function bsChk(k,label){return '<label class="chk"><input type="checkbox" data-bs="'+k+'" '+((S.bset||{})[k]=='1'?'checked':'')+'>'+t(label)+'</label>'}
 function bsIn(k,label,ph,typ,ltr){return '<div><label class="f">'+t(label)+'</label><input data-bs="'+k+'"'+(typ?' type="'+typ+'"':'')+(ltr?' class="ltr"':'')+' value="'+esc((S.bset||{})[k]||'')+'" placeholder="'+esc(ph||'')+'"></div>'}
 function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_set;
@@ -3678,6 +3713,11 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
     '<div class="chips">'+bsChk('np_on','NOWPayments (crypto)')+'</div><div class="g2f">'+bsIn('np_key','NOWPayments API key','',0,1)+bsIn('np_coins','Coins','usdttrc20,trx,ton',0,1)+'</div>'+
     '<div class="chips">'+bsChk('zp_on','ZarinPal')+'</div><div class="g2f">'+bsIn('zp_merchant','ZarinPal merchant ID','',0,1)+bsIn('zp_callback','ZarinPal callback URL','https://…',0,1)+'</div>'+
     '</details>'+
+   '<div class="box"><b>🧮 '+t('Custom purchase (mini app)')+'</b><div class="chips">'+bsChk('cp_on','Buyers can choose their own volume, days and users')+bsChk('mini_menu','The chat menu button opens the mini app')+'</div>'+
+    '<div class="g2f">'+bsIn('cp_min_gb','Smallest volume (GB)','10','number')+bsIn('cp_max_gb','Largest volume (GB)','200','number')+bsIn('cp_days','Durations (days)','30,60,90',0,1)+bsIn('cp_users','Most users','3','number')+'</div>'+
+    '<p class="hint">'+t('The price comes from the price rules of the Smart plan builder (Plans tab): the same size costs the same as a listed plan.')+'</p></div>'+
+   '<div class="box"><b>🎨 '+t('Button colours in the bot')+'</b><p class="hint" style="margin-top:4px">'+t('Telegram shows coloured buttons from February 2026; older apps show them plain. Plan buttons take the colour set on each plan.')+'</p>'+
+    '<div class="g2f">'+BSTY.map(function(k){var v=(S.bset||{})['bst_'+k[0]]||'';return '<div><label class="f">'+t(k[1])+'</label><select data-bs="bst_'+k[0]+'">'+[['',t('Default')+' · '+({g:'🟢',b:'🔵'}[k[2]]||'⚪')],['success','🟢 Green'],['primary','🔵 Blue'],['danger','🔴 Red'],['none','⚪ Plain']].map(function(o){return '<option value="'+o[0]+'"'+(v==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select></div>'}).join('')+'</div></div>'+
    '<button class="btn" style="width:100%;margin-top:10px" id="bs_save">'+t('Save sales settings')+'</button></div></div>'+
   '<div data-btp="plans">'+botSmart()+botPlans()+'</div><div data-btp="apk"><div id="bt_apk"></div></div><div data-btp="disc"><div id="bt_disc"></div></div><div data-btp="chan"><div id="bt_chan"></div></div><div data-btp="appmsg"><div id="bt_am"></div></div>';
  var showTab=function(k){S.btab=k;$$('#bt_tabs [data-bt]').forEach(function(b){b.classList.toggle('on',b.dataset.bt==k)});$$('[data-btp]').forEach(function(d){d.style.display=d.dataset.btp==k?'':'none'});
@@ -3696,12 +3736,16 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
   api('PUT','/api/settings',body).then(function(){toast(t('Saved'));botLoad()}).catch(fail)});
  w('#pl_add',function(){var n=$('#pl_n').value.trim();if(!n)return toast(t('Plan name'),1);
   api('POST','/api/plans',{name:n,days:+$('#pl_d').value||30,gb:+$('#pl_g').value||0,toman:+$('#pl_t').value||0,usd:+$('#pl_u').value||0,conns:+$('#pl_c').value||1,category:($('#pl_cat').value||'').trim()}).then(function(){toast(t('Saved'));botLoad()}).catch(fail)});
+ var pl=$('#pl_list');if(pl)pl.onchange=function(e){var se=e.target.closest('[data-pst]');if(se)api('PUT','/api/plans/'+se.dataset.pst,{style:se.value}).then(function(){toast(t('Saved'))}).catch(fail)};
  var pl=$('#pl_list');if(pl)pl.onclick=function(e){var a=e.target.closest('[data-pact]');if(a){api('PUT','/api/plans/'+a.dataset.pact,{active:a.dataset.a=='1'}).then(botLoad).catch(fail);return}var pu=e.target.closest('[data-pusd]');if(pu){var x1=(S.plans||[]).filter(function(z){return z.id==pu.dataset.pusd})[0]||{},v1=prompt(t('Dollar price (crypto)')+' · 0 = '+t('from the toman price at the dollar rate'),x1.usd||0);if(v1!==null)api('PUT','/api/plans/'+pu.dataset.pusd,{usd:+unN(v1)||0}).then(botLoad).catch(fail);return}var m=e.target.closest('[data-pcat]');if(m){var x0=(S.plans||[]).filter(function(z){return z.id==m.dataset.pcat})[0]||{},v=prompt(t('Category name'),x0.category||'');if(v!==null)api('PUT','/api/plans/'+m.dataset.pcat,{category:v.trim()}).then(botLoad).catch(fail);return}
  var rn=e.target.closest('[data-crn]');if(rn){var v2=prompt(t('Category name'),rn.dataset.crn);if(v2!==null)api('PUT','/api/plans/category',{from:rn.dataset.crn,to:v2.trim()}).then(botLoad).catch(fail);return}
  var b=e.target.closest('[data-pdel]');if(b)confirmDo(function(){api('DELETE','/api/plans/'+b.dataset.pdel).then(function(){toast(t('Done'));botLoad()}).catch(fail)})}}
 function plCats(p){var o=[];(p||[]).forEach(function(x){if(x.category&&o.indexOf(x.category)<0)o.push(x.category)});return o.sort()}
+// the colour of a plan's button in the bot ('' = by users: one blue, two or more green)
+var PSTY=[['','Auto (by users)'],['success','🟢 Green'],['primary','🔵 Blue'],['danger','🔴 Red'],['none','⚪ Plain']];
+function plStyle(x){return '<select class="pst" data-pst="'+x.id+'" aria-label="'+esc(t('Button colour in the bot'))+'" title="'+esc(t('Button colour in the bot'))+'">'+PSTY.map(function(o){return '<option value="'+o[0]+'"'+((x.style||'')==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select>'}
 function plRow(x){return '<div class="li"><span><b>'+esc(x.name)+'</b><small>'+N(x.days)+' '+t('days')+' · '+(x.gb>0?N(x.gb)+' GB':'∞')+' · '+N(x.conns)+' '+t('connections')+(x.countries>0?' · '+N(x.countries)+' '+t('countries'):'')+(x.active?'':' · '+t('Hidden'))+'</small></span>'+
-  '<span class="row" style="gap:8px;flex-wrap:nowrap"><span class="pprice"><b>'+N(Number(x.toman||0).toLocaleString('en-US'))+' '+t('Toman')+'</b>'+(x.usd?'<small class="ltr">$'+x.usd+'</small>':'')+'</span><button class="ib" data-pusd="'+x.id+'" title="'+t('Dollar price (crypto)')+'">$</button><button class="ib" data-pcat="'+x.id+'" title="'+t('Move to category')+'">📂</button><button class="ib'+(x.active?' on':'')+'" data-pact="'+x.id+'" data-a="'+(x.active?0:1)+'" title="'+t(x.active?'Shown in the bot':'Hidden')+'">'+(x.active?'👁':'—')+'</button><button class="ib" data-pdel="'+x.id+'" aria-label="'+t('Delete')+'">'+ic('trash',14)+'</button></span></div>'}
+  '<span class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-end"><span class="pprice"><b>'+N(Number(x.toman||0).toLocaleString('en-US'))+' '+t('Toman')+'</b>'+(x.usd?'<small class="ltr">$'+x.usd+'</small>':'')+'</span>'+plStyle(x)+'<button class="ib" data-pusd="'+x.id+'" title="'+t('Dollar price (crypto)')+'">$</button><button class="ib" data-pcat="'+x.id+'" title="'+t('Move to category')+'">📂</button><button class="ib'+(x.active?' on':'')+'" data-pact="'+x.id+'" data-a="'+(x.active?0:1)+'" title="'+t(x.active?'Shown in the bot':'Hidden')+'">'+(x.active?'👁':'—')+'</button><button class="ib" data-pdel="'+x.id+'" aria-label="'+t('Delete')+'">'+ic('trash',14)+'</button></span></div>'}
 function plGroups(p){if(!p.length)return '<span class="muted">'+t('No plans yet')+'</span>';var g={},ord=[];p.forEach(function(x){var k=x.category||'';if(!g[k]){g[k]=[];ord.push(k)}g[k].push(x)});
  if(ord.length==1&&ord[0]==='')return '<div class="list">'+p.map(plRow).join('')+'</div>';
  ord.sort(function(a,b){return a===''?1:b===''?-1:a.localeCompare(b)});

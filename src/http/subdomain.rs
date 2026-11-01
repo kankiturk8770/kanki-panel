@@ -44,7 +44,7 @@ fn valid_domain(d: &str) -> bool {
 
 fn block(domain: &str, port: &str) -> String {
     format!(
-        "{b}\n{d} {{\n  @pub path /sub/* /api/config/* /assets/* /tunnel/* /join/* /dl/*\n  handle @pub {{\n    reverse_proxy 127.0.0.1:{p}\n  }}\n  handle {{\n    respond 404\n  }}\n  header {{\n    Strict-Transport-Security \"max-age=31536000\"\n    X-Content-Type-Options nosniff\n    Referrer-Policy no-referrer\n    -Server\n  }}\n}}\n{e}\n",
+        "{b}\n{d} {{\n  @pub path /sub/* /api/config/* /assets/* /tg/* /tunnel/* /join/* /dl/*\n  handle @pub {{\n    reverse_proxy 127.0.0.1:{p}\n  }}\n  handle {{\n    respond 404\n  }}\n  header {{\n    Strict-Transport-Security \"max-age=31536000\"\n    X-Content-Type-Options nosniff\n    Referrer-Policy no-referrer\n    -Server\n  }}\n}}\n{e}\n",
         b = BEGIN, d = domain, p = port, e = END
     )
 }
