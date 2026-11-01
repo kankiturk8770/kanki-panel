@@ -210,6 +210,8 @@ impl Db {
             // v2.5: plans carry how many countries (servers) they give; discount codes can expire
             "ALTER TABLE plans ADD COLUMN countries INTEGER DEFAULT 0",
             "ALTER TABLE plans ADD COLUMN category TEXT DEFAULT ''",
+            // 3.23: the colour of a plan's button in the bot (success / primary / danger, '' = by users)
+            "ALTER TABLE plans ADD COLUMN style TEXT DEFAULT ''",
             "ALTER TABLE discounts ADD COLUMN expires INTEGER DEFAULT 0",
             // v2.9.4: the config name a customer chose, and the Telegram @username / last name (to suggest one)
             "ALTER TABLE bot_users ADD COLUMN cfg_name TEXT DEFAULT ''",
@@ -530,6 +532,8 @@ pub fn default_setting(k: &str) -> &'static str {
         "awg_compat" => "0",
         "tgb_hours" => "24",
         "sales_on" => "1",
+        "cp_on" => "1",
+        "mini_menu" => "1",
         "trial_on" => "1",
         "trial_gb" => "1",
         "trial_days" => "1",

@@ -283,6 +283,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/users", get(users_list).post(users_create))
         .route("/api/users/:id", axum::routing::put(users_update).delete(users_delete))
         .route("/api/users/:id/:action", post(users_action))
+        .route("/api/users/:id/amnezia/:platform", get(users_amnezia))
         .route("/api/nodes", get(nodes_list).post(nodes_add))
         .route("/api/nodes/:id", axum::routing::put(nodes_edit).delete(nodes_delete))
         .route("/api/nodes/:id/:action", post(nodes_action))
@@ -308,6 +309,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/config/:id/:proto/:extra", get(config_file_extra))
         .route("/hy2/auth", post(hy2_auth))
         .merge(crate::auth::router())
+        .merge(crate::miniapp::router())
         .merge(crate::admin::router())
         .merge(crate::backup::router())
         .merge(crate::apps::router())
@@ -852,6 +854,26 @@ fn toggle_proto(list: &str, p: &str, add: bool) -> Option<String> {
 }
 
 #[cfg(test)]
+mod plan_tests {
+    #[test]
+    fn a_plan_with_an_order_is_hidden_not_deleted() {
+        let dir = std::env::temp_dir().join(format!("kanki-plans-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
+        for (n, a) in [("sold", 1), ("free", 1), ("custom", 2)] {
+            db.exec("INSERT INTO plans(name,days,gb,toman,usd,conns,active) VALUES(?1,30,10,100000,0,1,?2)", &[&n, &a]).unwrap();
+        }
+        db.exec("INSERT INTO orders(tg_id,plan_id,kind,target,method,amount,status,ref,discount,created) VALUES(1,1,'new',0,'card','1','wait','','',0)", &[]).unwrap();
+        let state = || -> Vec<(String, i64)> { db.with(|c| { let mut s = c.prepare("SELECT name,active FROM plans ORDER BY id").unwrap(); let v = s.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().filter_map(|x| x.ok()).collect(); v }) };
+        // «replace all plans»: the sold one is hidden (its order still finds it), the free one goes, the custom one stays
+        super::remove_plans(&db, None);
+        assert_eq!(state(), vec![("sold".to_string(), 0), ("custom".to_string(), 2)]);
+        super::remove_plans(&db, Some(1));
+        assert_eq!(state().len(), 2);
+    }
+}
+
+#[cfg(test)]
 mod proto_all_tests {
     use super::toggle_proto;
 
@@ -966,6 +988,10 @@ pub const SETTING_KEYS: &[&str] = &[
     "def_gb", "def_days", "def_conns",
     // 3.21: servers offline for too long are removed (cleanup.rs)
     "autodel_on", "autodel_hours", "autodel_iran",
+    // 3.23: custom purchase in the mini app (shop.rs), the chat menu button, button colours of the bot
+    "cp_on", "cp_min_gb", "cp_max_gb", "cp_days", "cp_users", "mini_menu",
+    "bst_buy", "bst_trial", "bst_my", "bst_renew", "bst_guide", "bst_ref", "bst_app", "bst_support", "bst_renew_this", "bst_pay",
+    "bst_disc", "bst_shop", "bst_miniapp", "bst_amz", "bst_cfg",
 ];
 
 /// "owner/repo" with only the characters GitHub allows
@@ -1091,25 +1117,42 @@ async fn app_msg_delete(State(app): St, h: HeaderMap) -> Response {
 async fn plans_list(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "settings");
     let v: Vec<Value> = app.db.with(|c| {
-        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,'') FROM plans ORDER BY toman").unwrap();
+        // custom purchases (active = 2) are not plans the admin manages
+        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,'') FROM plans WHERE COALESCE(active,1)<>2 ORDER BY toman").unwrap();
         let rows: Vec<Value> = s.query_map([], |r| {
             Ok(json!({ "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "days": r.get::<_, i64>(2)?,
                 "gb": r.get::<_, f64>(3)?, "toman": r.get::<_, i64>(4)?, "usd": r.get::<_, f64>(5)?,
-                "conns": r.get::<_, i64>(6)?, "active": r.get::<_, i64>(7)? == 1, "countries": r.get::<_, i64>(8)?, "category": r.get::<_, String>(9)? }))
+                "conns": r.get::<_, i64>(6)?, "active": r.get::<_, i64>(7)? == 1, "countries": r.get::<_, i64>(8)?, "category": r.get::<_, String>(9)?,
+                "style": r.get::<_, String>(10)? }))
         }).unwrap().filter_map(|x| x.ok()).collect();
         rows
     });
     Json(json!(v)).into_response()
 }
 
+/// A plan button colour the bot knows ('' = by users)
+fn plan_style(s: &str) -> String {
+    let s = s.trim();
+    if ["success", "primary", "danger", "none"].contains(&s) { s.to_string() } else { String::new() }
+}
+
+/// Removes plans; one an order points at is only hidden, so a payment approved later still finds its plan
+/// (a deleted plan left that order without an account). Custom purchases (active = 2) stay.
+fn remove_plans(db: &crate::db::Db, only: Option<i64>) {
+    let (cond, id) = match only { Some(id) => ("id=?1", id), None => ("COALESCE(active,1)<>2 AND ?1=?1", 0) };
+    let _ = db.exec(&format!("UPDATE plans SET active=0 WHERE {} AND id IN (SELECT plan_id FROM orders)", cond), &[&id]);
+    let _ = db.exec(&format!("DELETE FROM plans WHERE {} AND id NOT IN (SELECT plan_id FROM orders)", cond), &[&id]);
+}
+
 fn insert_plan(app: &App, b: &Value) -> Result<usize, String> {
     let name = b["name"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty()).unwrap_or("Plan").to_string();
     let cat = b["category"].as_str().map(|s| s.trim().to_string()).unwrap_or_default();
     app.db.exec(
-        "INSERT INTO plans(name,days,gb,toman,usd,conns,countries,active,category) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8)",
+        "INSERT INTO plans(name,days,gb,toman,usd,conns,countries,active,category,style) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9)",
         &[&name, &(num(&b["days"]).unwrap_or(30.0) as i64), &num(&b["gb"]).unwrap_or(0.0).max(0.0),
           &(num(&b["toman"]).unwrap_or(0.0).max(0.0) as i64), &num(&b["usd"]).unwrap_or(0.0).max(0.0),
-          &(num(&b["conns"]).unwrap_or(1.0).max(1.0) as i64), &(num(&b["countries"]).unwrap_or(0.0).max(0.0) as i64), &cat],
+          &(num(&b["conns"]).unwrap_or(1.0).max(1.0) as i64), &(num(&b["countries"]).unwrap_or(0.0).max(0.0) as i64), &cat,
+          &plan_style(b["style"].as_str().unwrap_or(""))],
     )
 }
 
@@ -1125,7 +1168,7 @@ async fn plans_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respon
 async fn plans_bulk(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "settings");
     if b["replace"].as_bool() == Some(true) {
-        let _ = app.db.exec("DELETE FROM plans", &[]);
+        remove_plans(&app.db, None);
     }
     let mut n = 0;
     for p in b["plans"].as_array().cloned().unwrap_or_default() {
@@ -1153,6 +1196,9 @@ async fn plans_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
     if let Some(cat) = b["category"].as_str() {
         let _ = app.db.exec("UPDATE plans SET category=?1 WHERE id=?2", &[&cat.trim().to_string(), &id]);
     }
+    if let Some(st) = b["style"].as_str() {
+        let _ = app.db.exec("UPDATE plans SET style=?1 WHERE id=?2", &[&plan_style(st), &id]);
+    }
     if let Some(nm) = b["name"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         let _ = app.db.exec("UPDATE plans SET name=?1 WHERE id=?2", &[&nm.to_string(), &id]);
     }
@@ -1170,7 +1216,7 @@ async fn plans_cat_rename(State(app): St, h: HeaderMap, Json(b): Json<Value>) ->
 
 async fn plans_delete(State(app): St, h: HeaderMap, Path(id): Path<i64>) -> Response {
     let _ = guard!(app, h, "settings");
-    let _ = app.db.exec("DELETE FROM plans WHERE id=?1", &[&id]);
+    remove_plans(&app.db, Some(id));
     Json(json!({ "ok": true })).into_response()
 }
 
@@ -1621,6 +1667,44 @@ pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str, tunnel:
     let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.ok()?;
     let text = String::from_utf8(bytes.to_vec()).ok()?;
     Some((conf_file_name_via(app, u, n, proto, tunnel), text))
+}
+
+/// Every WireGuard / AmneziaWG config of a user as (name in the app, .conf text), for an AmneziaVPN backup:
+/// AmneziaWG first, each server's direct config, then its copy through the tunnel. The name shows the
+/// route with flags: "🇮🇷→🇹🇷 AmneziaWG · TURKEY" through Iran, "🇹🇷 WireGuard · TURKEY" straight.
+pub async fn amnezia_configs(app: &Arc<App>, u: &User) -> Vec<(String, String)> {
+    let mut out = vec![];
+    for (proto, title) in [("amneziawg", "AmneziaWG"), ("wireguard", "WireGuard")] {
+        for n in user_nodes(app, u) {
+            let to = crate::amnezia::flag(&crate::exitgeo::cc(app, &n.id));
+            for tunnel in [false, true] {
+                let has = if tunnel { twin_protos(app, u, &n) } else { node_protos(app, u, &n) };
+                if !has.contains(&proto) {
+                    continue;
+                }
+                if let Some((_, text)) = bot_config(app, u, &n, proto, tunnel).await {
+                    let via_iran = tunnel || crate::direct::through_tunnel(app, &n);
+                    let route = if via_iran { format!("{}→{}", crate::amnezia::flag("IR"), to) } else { to.clone() };
+                    let name = format!("{} {} · {}", route.trim(), title, n.name).trim().to_string();
+                    out.push((name, text));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// GET /api/users/:id/amnezia/:platform (i, a, w): the AmneziaVPN backup file of a user
+async fn users_amnezia(State(app): St, h: HeaderMap, Path((id, platform)): Path<(i64, String)>) -> Response {
+    let _ = guard!(app, h, "users:read");
+    let Some(plat) = crate::amnezia::platform(&platform) else { return err(StatusCode::BAD_REQUEST, "platform: i, a or w") };
+    let Some(u) = app.db.user(id) else { return err(StatusCode::NOT_FOUND, "user") };
+    let Some(body) = crate::amnezia::backup(&amnezia_configs(&app, &u).await, plat) else {
+        return err(StatusCode::NOT_FOUND, "this user has no WireGuard or AmneziaWG config");
+    };
+    let name = crate::amnezia::file_name(&u.username);
+    ([(header::CONTENT_TYPE, "application/json; charset=utf-8".to_string()),
+      (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", name))], body).into_response()
 }
 
 /// `h`: the request of an app (its device is remembered); None = the panel's own bots

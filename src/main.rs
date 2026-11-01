@@ -48,6 +48,8 @@ mod twin;
 // vpn: protocol engines + node sync
 mod dns;
 mod emergency;
+#[path = "vpn/amnezia.rs"]
+mod amnezia;
 #[path = "vpn/cores.rs"]
 mod cores;
 #[path = "vpn/hy2.rs"]
@@ -70,6 +72,10 @@ mod bot;
 mod channel;
 #[path = "telegram/ai.rs"]
 mod ai;
+#[path = "telegram/miniapp.rs"]
+mod miniapp;
+#[path = "telegram/shop.rs"]
+mod shop;
 
 // tunnel: encrypted tunnels between servers (Kanki Tunnel)
 mod tunnel;

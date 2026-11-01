@@ -34,7 +34,7 @@ const DEFAULT_PORT: u16 = 2053;
 /// the hidden tunnel's port on the Iran server (the next free one is taken)
 const TUNNEL_PORT: u16 = 8447;
 /// paths that are served (the same as on the separate subscription domain)
-const PUBLIC: &[&str] = &["/sub/", "/api/config/", "/assets/"];
+const PUBLIC: &[&str] = &["/sub/", "/api/config/", "/assets/", "/tg/"];
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(default)]
