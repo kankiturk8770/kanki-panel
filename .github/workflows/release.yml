@@ -22,6 +22,10 @@ jobs:
       # The tests must be able to stop a release: the binary updates every server by itself, so a
       # broken tunnel would spread. Compile them first (a compile error is never "flaky"), then run
       # them; a failed run gets one more try on a single thread because the tests use real sockets.
+      # the panel script is its parts in assets/panel/js joined in order: it must still be valid JavaScript
+      - name: Panel script syntax
+        run: cat assets/panel/js/*.js > /tmp/kanki-panel.js && node --check /tmp/kanki-panel.js
+
       - name: Compile the tests
         run: cargo test --no-run
 

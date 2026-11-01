@@ -1,5 +1,5 @@
 //! Kanki Panel: WireGuard / AmneziaWG / Hysteria2 panel with a built-in Telegram sales bot
-// core: storage + shared helpers
+// core: database, shared helpers, SSL, pinned certificates, firewall, live numbers (src/core)
 #[path = "core/db.rs"]
 mod db;
 #[path = "core/util.rs"]
@@ -13,45 +13,47 @@ mod fw;
 #[path = "core/live.rs"]
 mod live;
 
-// http: web panel, REST API, security, backups
-#[path = "http/admin.rs"]
-mod admin;
-#[path = "http/api.rs"]
+// panel: the admin panel's web server and API, login and tokens, request limits, system and updates, backups (src/panel)
+#[path = "panel/api.rs"]
 mod api;
-#[path = "http/auth.rs"]
+#[path = "panel/auth.rs"]
 mod auth;
-#[path = "http/apps.rs"]
-mod apps;
-#[path = "http/backup.rs"]
-mod backup;
-#[path = "http/subdomain.rs"]
-mod subdomain;
-#[path = "http/subiran.rs"]
-mod subiran;
-#[path = "http/exitgeo.rs"]
-mod exitgeo;
-#[path = "http/migrate.rs"]
-mod migrate;
-#[path = "http/servers.rs"]
-mod servers;
-#[path = "http/cleanup.rs"]
-mod cleanup;
-#[path = "http/devices.rs"]
-mod devices;
-#[path = "http/limit.rs"]
+#[path = "panel/limit.rs"]
 mod limit;
-#[path = "http/direct.rs"]
-mod direct;
-#[path = "http/twin.rs"]
-mod twin;
+#[path = "panel/admin.rs"]
+mod admin;
+#[path = "panel/backup.rs"]
+mod backup;
+#[path = "panel/migrate.rs"]
+mod migrate;
+#[path = "panel/cleanup.rs"]
+mod cleanup;
 
-// vpn: protocol engines + node sync
-mod dns;
-mod emergency;
-#[path = "vpn/amnezia.rs"]
-mod amnezia;
-#[path = "vpn/cores.rs"]
+// servers: VPN servers (add, edit, remove), cores on/off per server, the second config through a tunnel, exit country (src/servers)
+#[path = "servers/servers.rs"]
+mod servers;
+#[path = "servers/cores.rs"]
 mod cores;
+#[path = "servers/twin.rs"]
+mod twin;
+#[path = "servers/direct.rs"]
+mod direct;
+#[path = "servers/exitgeo.rs"]
+mod exitgeo;
+
+// subscription: the subscription on an Iran server or its own domain, users' devices, app files (src/subscription)
+#[path = "subscription/subiran.rs"]
+mod subiran;
+#[path = "subscription/subdomain.rs"]
+mod subdomain;
+#[path = "subscription/devices.rs"]
+mod devices;
+#[path = "subscription/apps.rs"]
+mod apps;
+
+// vpn: the VPN cores and syncing users to the servers (src/vpn)
+#[path = "vpn/wg.rs"]
+mod wg;
 #[path = "vpn/hy2.rs"]
 mod hy2;
 #[path = "vpn/kmix.rs"]
@@ -62,26 +64,32 @@ mod microtun;
 mod mtun;
 #[path = "vpn/sync.rs"]
 mod sync;
-#[path = "vpn/wg.rs"]
-mod wg;
+#[path = "vpn/amnezia.rs"]
+mod amnezia;
 
-// telegram: built-in sales bot
-#[path = "telegram/bot.rs"]
+// bot: the Telegram sales bot, its shop and mini app, the smart channel, the AI writer (src/bot)
+#[path = "bot/bot.rs"]
 mod bot;
-#[path = "telegram/channel.rs"]
-mod channel;
-#[path = "telegram/ai.rs"]
-mod ai;
-#[path = "telegram/miniapp.rs"]
-mod miniapp;
-#[path = "telegram/shop.rs"]
+#[path = "bot/shop.rs"]
 mod shop;
+#[path = "bot/miniapp.rs"]
+mod miniapp;
+#[path = "bot/channel.rs"]
+mod channel;
+#[path = "bot/ai.rs"]
+mod ai;
 
-// tunnel: encrypted tunnels between servers (Kanki Tunnel)
+// tunnel: tunnels between servers and tunnel servers; the wire protocols in src/tunnel/transport
 mod tunnel;
 
-// xray: Xray-core inbounds for the panel's users
+// xray: Xray-core on the servers and its part of the panel
 mod xray;
+
+// dns: Kanki DNS
+mod dns;
+
+// emergency: the emergency chat on a server inside Iran
+mod emergency;
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicI64;
