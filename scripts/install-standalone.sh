@@ -88,10 +88,10 @@ else
   command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null; } || die "curl is required"
   base="https://github.com/$REPO/releases/download/latest"
   say "Downloading the program from $base"
-  curl -fL --retry 3 -o "$TMP/kanki-panel" "$base/kanki-panel" \
+  curl -fL --retry 3 --max-time 600 -o "$TMP/kanki-panel" "$base/kanki-panel" \
     || die "Download failed. If this server cannot reach GitHub, copy the binary here (scp) and run: KANKI_BIN=/path/to/kanki-panel bash $0 $FILE"
   # no checksum file = no installation: a missing file must not silently skip the check
-  curl -fsL --retry 3 -o "$TMP/kanki-panel.sha256" "$base/kanki-panel.sha256" || die "Could not download kanki-panel.sha256, aborting (the binary was not verified)"
+  curl -fsL --retry 3 --max-time 60 -o "$TMP/kanki-panel.sha256" "$base/kanki-panel.sha256" || die "Could not download kanki-panel.sha256, aborting (the binary was not verified)"
   (cd "$TMP" && sha256sum -c kanki-panel.sha256 >/dev/null) || die "Checksum mismatch, aborting"
 fi
 chmod 755 "$TMP/kanki-panel"
