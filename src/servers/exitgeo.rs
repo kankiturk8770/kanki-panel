@@ -105,42 +105,46 @@ async fn resolve_v4(host: &str) -> Option<String> {
     all.iter().find(|a| a.is_ipv4()).or(all.first()).map(|a| a.ip().to_string())
 }
 
-/// (country code, city, lat, lon) of an IP: ipinfo.io, or ip-api.com when that does not answer
+/// (country code, city, lat, lon) of an IP, from ipinfo.io over HTTPS (no plain-HTTP fallback: an answer
+/// changed on the way would give a server a wrong country and flag; an IP not found now is tried again later)
 async fn lookup(app: &App, ip: &str) -> Option<(String, String, Option<f64>, Option<f64>)> {
-    let get = |url: String| async move {
-        let r = app.http.get(url).timeout(Duration::from_secs(8)).send().await.ok()?;
-        if !r.status().is_success() {
-            return None;
-        }
-        r.json::<Value>().await.ok()
-    };
-    if let Some(j) = get(format!("https://ipinfo.io/{}/json", ip)).await {
-        let cc = j["country"].as_str().unwrap_or("").to_uppercase();
-        if cc.len() == 2 {
-            let loc: Vec<f64> = j["loc"].as_str().unwrap_or("").split(',').filter_map(|x| x.trim().parse().ok()).collect();
-            let (lat, lon) = if loc.len() == 2 { (Some(loc[0]), Some(loc[1])) } else { (None, None) };
-            return Some((cc, j["city"].as_str().unwrap_or("").to_string(), lat, lon));
-        }
-    }
-    let j = get(format!("http://ip-api.com/json/{}?fields=status,countryCode,city,lat,lon", ip)).await?;
-    if j["status"].as_str() != Some("success") {
+    let r = app.http.get(format!("https://ipinfo.io/{}/json", ip)).timeout(Duration::from_secs(8)).send().await.ok()?;
+    if !r.status().is_success() {
         return None;
     }
-    let cc = j["countryCode"].as_str().unwrap_or("").to_uppercase();
+    let j = r.json::<Value>().await.ok()?;
+    let cc = j["country"].as_str().unwrap_or("").to_uppercase();
     if cc.len() != 2 {
         return None;
     }
-    Some((cc, j["city"].as_str().unwrap_or("").to_string(), j["lat"].as_f64(), j["lon"].as_f64()))
+    let loc: Vec<f64> = j["loc"].as_str().unwrap_or("").split(',').filter_map(|x| x.trim().parse().ok()).collect();
+    let (lat, lon) = if loc.len() == 2 { (Some(loc[0]), Some(loc[1])) } else { (None, None) };
+    Some((cc, j["city"].as_str().unwrap_or("").to_string(), lat, lon))
 }
 
-/// Looks up the exit of every node and Xray server whose address is new or whose answer is old.
-pub async fn refresh(app: &App) {
-    let mut c = cache(app);
+/// Every server the panel has now, by cache key, with its address
+fn current_hosts(app: &App) -> Vec<(String, String)> {
     let mut hosts: Vec<(String, String)> = app.db.nodes().iter().map(|n| (n.id.clone(), exit_host(app, n))).collect();
     hosts.extend(crate::xray::panel::exit_hosts(app).into_iter().map(|(sid, h)| (xray_key(&sid), h)));
     // tunnel servers (Iran and abroad), for their flags in the panel
     hosts.extend(crate::tunnel::panel::server_hosts(app).into_iter().map(|(sid, h)| (srv_key(&sid), h)));
-    let mut changed = false;
+    hosts
+}
+
+/// The cache as it is now with the new answers put in; only keys of servers that still exist stay
+fn merge(mut cur: serde_json::Map<String, Value>, found: serde_json::Map<String, Value>, keys: &[String]) -> serde_json::Map<String, Value> {
+    for (k, v) in found {
+        cur.insert(k, v);
+    }
+    cur.retain(|k, _| keys.iter().any(|x| x == k));
+    cur
+}
+
+/// Looks up the exit of every node and Xray server whose address is new or whose answer is old.
+pub async fn refresh(app: &App) {
+    let c = cache(app);
+    let hosts = current_hosts(app);
+    let mut found = serde_json::Map::new();
     for (key, host) in &hosts {
         let Some(ip) = resolve_v4(host).await else { continue };
         let prev = c.get(key).cloned().unwrap_or(Value::Null);
@@ -149,15 +153,16 @@ pub async fn refresh(app: &App) {
             continue;
         }
         if let Some((cc, city, lat, lon)) = lookup(app, &ip).await {
-            c.insert(key.clone(), json!({ "ip": ip, "cc": cc, "city": city, "lat": lat, "lon": lon, "ts": crate::util::now() }));
-            changed = true;
+            found.insert(key.clone(), json!({ "ip": ip, "cc": cc, "city": city, "lat": lat, "lon": lon, "ts": crate::util::now() }));
         }
     }
-    // servers that were removed from the panel are forgotten
-    let before = c.len();
-    c.retain(|k, _| hosts.iter().any(|(h, _)| h == k));
-    if changed || c.len() != before {
-        app.db.set(KEY, &Value::Object(c).to_string());
+    // the lookups take a while: read the cache and the servers again, so a server removed meanwhile (and
+    // what `forget` dropped) does not come back, and servers that were removed are forgotten
+    let keys: Vec<String> = current_hosts(app).into_iter().map(|(k, _)| k).collect();
+    let cur = cache(app);
+    let next = merge(cur.clone(), found, &keys);
+    if next != cur {
+        app.db.set(KEY, &Value::Object(next).to_string());
     }
 }
 
@@ -175,6 +180,17 @@ pub async fn run(app: Arc<App>) {
 #[cfg(test)]
 mod tests {
     use super::host_of_url;
+    use serde_json::json;
+
+    #[test]
+    fn a_server_removed_during_the_lookups_is_not_written_back() {
+        let m = |v: serde_json::Value| v.as_object().cloned().unwrap();
+        // "gone" was forgotten while looking up; "n1" got a new answer; "n2" stays as it is
+        let cur = m(json!({ "n1": {"cc": "DE"}, "n2": {"cc": "FI"} }));
+        let found = m(json!({ "n1": {"cc": "NL"}, "gone": {"cc": "TR"} }));
+        let out = super::merge(cur, found, &["n1".to_string(), "n2".to_string()]);
+        assert_eq!(serde_json::Value::Object(out), json!({ "n1": {"cc": "NL"}, "n2": {"cc": "FI"} }));
+    }
 
     #[test]
     fn host_from_agent_address() {

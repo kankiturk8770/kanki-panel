@@ -225,6 +225,17 @@ pub fn allocate(app: &App) -> Vec<u16> {
     PROTOS.iter().map(|p| pick(&mut t, p)).collect()
 }
 
+/// The errors in a server's answer to a port change, and whether the whole change was refused
+/// (`{"ok":false,"error":..}`: then no port moved)
+fn port_errors(v: &Value) -> (Vec<String>, bool) {
+    let mut out: Vec<String> = v["errors"].as_array().into_iter().flatten().filter_map(|e| e.as_str().map(|s| s.to_string())).collect();
+    let all = v["ok"] == json!(false) || v.get("error").map(|e| !e.is_null()).unwrap_or(false);
+    if all {
+        out.push(v["error"].as_str().filter(|e| !e.is_empty()).unwrap_or("the server refused the change").to_string());
+    }
+    (out, all)
+}
+
 /// A tunnel's port list with the target port `old` sent to `new` (a symmetric "old" or "old:old"
 /// moves on both sides). Ranges are left as they are. Returns None when nothing changed.
 pub fn remap(list: &[String], old: u16, new: u16) -> Option<Vec<String>> {
@@ -305,7 +316,14 @@ pub async fn fix_ports_of(app: &Arc<App>, only: Option<&str>) -> Value {
                 crate::sync::remote_post_json(app, &n, "/agent/ports", &body).await
             };
             match r {
-                Some(v) => errs.extend(v["errors"].as_array().into_iter().flatten().filter_map(|e| e.as_str().map(|s| s.to_string()))),
+                Some(v) => {
+                    let (list, all) = port_errors(&v);
+                    errs.extend(list);
+                    if all {
+                        // the whole change was refused: no port moved
+                        errs.push("the server did not answer with a change (nothing moved)".into());
+                    }
+                }
                 None => errs.push("the server did not answer (update its agent, then try again)".into()),
             }
         }
@@ -680,6 +698,8 @@ async fn command_again(State(app): St, h: HeaderMap, Path(id): Path<String>) -> 
     Json(json!({ "ok": true, "command": command(&app, &c), "expires": s.join_exp })).into_response()
 }
 
+const BAD_ADDR: &str = "server address: a domain or IP only, without port, space or / (like ir.example.com)";
+
 /// { name?, loc?, addr?, tunnel?, tunnel_core? }
 async fn edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
@@ -711,7 +731,11 @@ async fn edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Jso
             app.db.set("tun_local_loc", &clean_loc(l));
         }
         if let Some(a) = b["addr"].as_str() {
-            app.db.set("tun_local_addr", a.trim());
+            let a = a.trim();
+            if !a.is_empty() && !crate::twin::valid_host(a) {
+                return err(StatusCode::BAD_REQUEST, BAD_ADDR);
+            }
+            app.db.set("tun_local_addr", a);
         }
         return Json(json!({ "ok": true })).into_response();
     }
@@ -733,7 +757,11 @@ async fn edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Jso
         s.loc = clean_loc(l);
     }
     if let Some(a) = b["addr"].as_str() {
-        s.addr = a.trim().to_string();
+        let a = a.trim();
+        if !a.is_empty() && !crate::twin::valid_host(a) {
+            return err(StatusCode::BAD_REQUEST, BAD_ADDR);
+        }
+        s.addr = a.to_string();
     }
     if let Some(v) = b["ssl"].as_bool() {
         s.no_ssl = !v;
@@ -749,6 +777,10 @@ async fn complete(State(app): St, h: HeaderMap, Path(id): Path<String>, body: Op
     let b = body.map(|j| j.0).unwrap_or(Value::Null);
     if let Some(nid) = id.strip_prefix("node:") {
         let Some(n) = app.db.node(nid) else { return err(StatusCode::NOT_FOUND, "unknown server") };
+        // already has its agent (a second click): keep that one, so its key is not replaced
+        if let Some(s) = tp::servers(&app).into_iter().find(|s| s.node == n.id) {
+            return Json(json!({ "ok": true, "id": s.id })).into_response();
+        }
         let cc = crate::exitgeo::cc(&app, &n.id);
         let s = TServer {
             id: format!("t{}", rand_token(7).to_lowercase()),
@@ -869,7 +901,7 @@ async fn set_ports(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b)
             crate::sync::remote_post_json(&app, &n, "/agent/ports", &body).await
         };
         match r {
-            Some(v) => errors.extend(v["errors"].as_array().into_iter().flatten().filter_map(|e| e.as_str().map(|s| s.to_string()))),
+            Some(v) => errors.extend(port_errors(&v).0),
             None => errors.push("the server did not answer: press Update agent on it, then try again".into()),
         }
     }
@@ -1078,17 +1110,6 @@ async fn dl_script() -> Response {
     ([(header::CONTENT_TYPE, "text/x-shellscript; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], INSTALL_SH).into_response()
 }
 
-fn own_binary() -> Option<Vec<u8>> {
-    crate::util::exe_path().ok().and_then(|p| std::fs::read(p).ok())
-}
-
-fn sha_hex(b: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(b);
-    hex::encode(h.finalize())
-}
-
 /// The panel's own program for a server being installed (GitHub may be filtered there).
 /// ?id=&t=&arch= (the agent token, or a join token)
 async fn dl_bin(State(app): St, Query(q): Query<HashMap<String, String>>) -> Response {
@@ -1098,17 +1119,53 @@ async fn dl_bin(State(app): St, Query(q): Query<HashMap<String, String>>) -> Res
     if q.get("arch").map(|a| a.as_str()) != Some(std::env::consts::ARCH) {
         return (StatusCode::CONFLICT, "another CPU type: download from GitHub").into_response();
     }
-    match tokio::task::spawn_blocking(own_binary).await.ok().flatten() {
-        Some(b) => ([(header::CONTENT_TYPE, "application/octet-stream")], b).into_response(),
-        None => (StatusCode::INTERNAL_SERVER_ERROR, "no binary").into_response(),
+    // sent from the file in pieces, not read whole for every download
+    let file = match crate::util::exe_path() {
+        Ok(p) => tokio::fs::File::open(p).await.ok(),
+        Err(_) => None,
+    };
+    let Some(file) = file else { return (StatusCode::INTERNAL_SERVER_ERROR, "no binary").into_response() };
+    let Ok(size) = file.metadata().await.map(|m| m.len()) else { return (StatusCode::INTERNAL_SERVER_ERROR, "no binary").into_response() };
+    (
+        [(header::CONTENT_TYPE, "application/octet-stream".to_string()), (header::CONTENT_LENGTH, size.to_string())],
+        crate::apps::file_body(file),
+    )
+        .into_response()
+}
+
+/// The SHA-256 of the panel's own program, kept while the file stays the same (size and change time)
+fn own_sum() -> Option<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    static CACHE: std::sync::Mutex<Option<((u64, std::time::SystemTime), String)>> = std::sync::Mutex::new(None);
+    let p = crate::util::exe_path().ok()?;
+    let mut f = std::fs::File::open(p).ok()?;
+    let m = f.metadata().ok()?;
+    let stamp = (m.len(), m.modified().ok()?);
+    if let Some((s, sum)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if *s == stamp {
+            return Some(sum.clone());
+        }
     }
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    loop {
+        let n = f.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        h.update(&buf[..n]);
+    }
+    let sum = hex::encode(h.finalize());
+    *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((stamp, sum.clone()));
+    Some(sum)
 }
 
 async fn dl_sum(State(app): St, Query(q): Query<HashMap<String, String>>) -> Response {
     if !dl_ok(&app, &q) {
         return (StatusCode::FORBIDDEN, "not allowed").into_response();
     }
-    match tokio::task::spawn_blocking(|| own_binary().map(|b| sha_hex(&b))).await.ok().flatten() {
+    match tokio::task::spawn_blocking(own_sum).await.ok().flatten() {
         Some(s) => format!("{}  kanki-panel\n", s).into_response(),
         None => (StatusCode::INTERNAL_SERVER_ERROR, "no binary").into_response(),
     }
@@ -1171,6 +1228,16 @@ mod tests {
         assert_eq!(pick(&mut t, "hy2"), 8444);
         assert_eq!(pick(&mut t, "kmix"), 4001);
         assert_eq!(pick(&mut t, "kmix"), 4002);
+    }
+
+    #[test]
+    fn a_refused_port_change_is_a_failure() {
+        assert_eq!(port_errors(&json!({"ok": true})), (vec![], false));
+        assert_eq!(port_errors(&json!({"ok": true, "errors": ["hy2: busy"]})), (vec!["hy2: busy".to_string()], false));
+        let (e, all) = port_errors(&json!({"ok": false, "error": "ports must all be different"}));
+        assert!(all && e == vec!["ports must all be different".to_string()]);
+        assert!(port_errors(&json!({"error": "x"})).1);
+        assert!(port_errors(&json!({"ok": false})).1);
     }
 
     #[test]
