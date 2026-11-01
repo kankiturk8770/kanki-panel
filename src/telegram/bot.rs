@@ -83,6 +83,7 @@ const BTNS: &[(&str, &str, &str)] = &[
     ("cfg_h", "📥 کانفیگ Hysteria2", "زیر پیام اشتراک"),
     ("amz", "📦 بکاپ Amnezia (همه‌ی سرورها یک‌جا)", "زیر پیام اشتراک"),
     ("miniapp", "📱 حساب من (مینی‌اپ)", "زیر پیام اشتراک"),
+    ("shop", "🧮 حجم و روز دلخواه", "فهرست پلن‌ها (خرید از مینی‌اپ)"),
     ("renew_this", "🔁 تمدید همین سرویس", "زیر پیام اشتراک"),
     ("rename", "✏️ تغییر نام کانفیگ", "زیر پیام اشتراک"),
     ("other_plans", "📦 سایر پلن‌ها", "فهرست دسته‌بندی پلن‌ها"),
@@ -179,8 +180,10 @@ fn ik(rows: Kb) -> Value {
         .map(|row| row.into_iter().map(|(t, d)| {
             if let Some(u) = d.strip_prefix("url:") {
                 json!({"text": t, "url": u})
-            } else if let Some(u) = d.strip_prefix("webapp:") {
-                json!({"text": t, "web_app": {"url": u}})
+            } else if let Some(r) = d.strip_prefix("webapp:") {
+                // "webapp:<colour key>:<url>": the key is read by paint() and not sent
+                let (k, u) = r.split_once(':').unwrap_or(("miniapp", r));
+                json!({"text": t, "web_app": {"url": u}, "_k": k})
             } else {
                 json!({"text": t, "callback_data": d})
             }
@@ -225,6 +228,41 @@ struct Plan {
     /// how many countries (servers) the plan gives; 0 = all
     countries: i64,
     category: String,
+    /// colour of its button: "success", "primary", "danger", "none", or '' (by users: 1 blue, 2+ green)
+    style: String,
+    /// made for one custom purchase (any volume and days, from the mini app): never listed, still payable
+    custom: bool,
+}
+
+/// The bot that is running (polling Telegram), for the mini app: a purchase must go to its pending list
+fn running_slot() -> &'static Mutex<Option<Arc<Bot>>> {
+    static R: std::sync::OnceLock<Mutex<Option<Arc<Bot>>>> = std::sync::OnceLock::new();
+    R.get_or_init(|| Mutex::new(None))
+}
+
+pub fn running() -> Option<Arc<Bot>> {
+    running_slot().lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+/// The keys a button colour can be set for (setting `bst_<key>`), and the colour each has by default
+pub const STYLE_KEYS: &[(&str, &str)] = &[
+    ("buy", "success"), ("trial", "primary"), ("my", ""), ("renew", "success"), ("guide", ""), ("ref", ""), ("app", ""), ("support", ""),
+    ("renew_this", "success"), ("pay", "success"), ("disc", ""), ("shop", "primary"), ("miniapp", "primary"), ("amz", "primary"), ("cfg", ""),
+];
+
+/// Every plan with whether it is on sale (active = 1; custom ones are active = 2)
+fn all_plans(db: &crate::db::Db) -> Vec<(Plan, bool)> {
+    db.with(|c| {
+        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,'') FROM plans ORDER BY toman").unwrap();
+        let v: Vec<(Plan, bool)> = s.query_map([], |r| {
+            let active: i64 = r.get(7)?;
+            Ok((Plan {
+                id: r.get(0)?, name: r.get(1)?, days: r.get(2)?, gb: r.get(3)?, toman: r.get(4)?, usd: r.get(5)?, conns: r.get(6)?,
+                countries: r.get(8)?, category: r.get(9)?, style: r.get(10)?, custom: active == 2,
+            }, active == 1))
+        }).unwrap().filter_map(|x| x.ok()).collect();
+        v
+    })
 }
 
 /// Bot token: panel setting first, then install-time env
@@ -306,6 +344,95 @@ impl Bot {
             api: "https://api.telegram.org".into(),
             waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), gifts: Mutex::new(HashMap::new()),
         }))
+    }
+
+    /// Button colours (Telegram 9.4+, older apps show plain buttons): each customer button gets the colour
+    /// the admin chose (`bst_<key>`) or its default; a plan button its plan's colour (by users when unset:
+    /// one blue, two or more green); the admin's approve green and reject red.
+    fn paint(&self, body: &mut Value) {
+        let Some(rows) = body["reply_markup"]["inline_keyboard"].as_array_mut() else { return };
+        for row in rows.iter_mut() {
+            let Some(row) = row.as_array_mut() else { continue };
+            for btn in row.iter_mut() {
+                if btn.get("style").is_some() {
+                    if let Some(o) = btn.as_object_mut() {
+                        o.remove("_k");
+                    }
+                    continue;
+                }
+                let data = btn["callback_data"].as_str().unwrap_or("").to_string();
+                let key = btn.as_object_mut().and_then(|o| o.remove("_k")).and_then(|k| k.as_str().map(|s| s.to_string()));
+                let style = if let Some(k) = key {
+                    self.style_of(&k)
+                } else {
+                    self.style_for(&data)
+                };
+                if !style.is_empty() {
+                    btn["style"] = json!(style);
+                }
+            }
+        }
+    }
+
+    /// The colour of a customer button key: the admin's, else the default ("" = none)
+    fn style_of(&self, key: &str) -> String {
+        let v = self.db().get(&format!("bst_{}", key));
+        let v = v.trim();
+        if ["success", "primary", "danger"].contains(&v) {
+            return v.to_string();
+        }
+        if v == "none" {
+            return String::new();
+        }
+        STYLE_KEYS.iter().find(|x| x.0 == key).map(|x| x.1.to_string()).unwrap_or_default()
+    }
+
+    fn style_for(&self, data: &str) -> String {
+        let (head, rest) = data.split_once(':').unwrap_or((data, ""));
+        match head {
+            "ap" => "success".into(),
+            "rj" => "danger".into(),
+            "pl" | "rpl" => {
+                let id: i64 = rest.split(':').next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                match all_plans(self.db()).into_iter().find(|x| x.0.id == id) {
+                    Some((p, _)) => match p.style.as_str() {
+                        "success" | "primary" | "danger" => p.style,
+                        "none" => String::new(),
+                        _ => if p.conns >= 2 { "success".into() } else { "primary".into() },
+                    },
+                    None => String::new(),
+                }
+            }
+            "pay" => self.style_of("pay"),
+            "rnw" => self.style_of("renew_this"),
+            "amz" | "amp" => self.style_of("amz"),
+            "cfg" => self.style_of("cfg"),
+            "app2" => self.style_of("app"),
+            k if rest.is_empty() && STYLE_KEYS.iter().any(|x| x.0 == k) => self.style_of(k),
+            _ => String::new(),
+        }
+    }
+
+    /// The «custom volume and days» row that opens the mini app's shop (on renewing account `renew` when
+    /// > 0); none when the mini app cannot open (no https address) or custom purchase is off
+    fn shop_row(&self, renew: i64) -> Option<Vec<(String, String)>> {
+        let mini = crate::miniapp::url(&self.app);
+        if !mini.starts_with("https://") || !crate::shop::limits(self.db()).on || !self.db().on("sales_on") {
+            return None;
+        }
+        let r = if renew > 0 { format!("&renew={}", renew) } else { String::new() };
+        Some(vec![b(&self.bt("shop"), &format!("webapp:shop:{}?buy=1{}", mini, r))])
+    }
+
+    /// From the mini app: buy plan `pid` (a new account, or more for the buyer's account `renew`); the bot
+    /// shows the plan and the payment methods in the chat, exactly as after tapping the plan in the bot.
+    pub(crate) async fn start_purchase(&self, uid: i64, pid: i64, renew: i64) {
+        {
+            let mut g = self.pend.lock().unwrap_or_else(|e| e.into_inner());
+            let mine = renew > 0 && self.app.db.user(renew).map(|u| u.tg_id == uid).unwrap_or(false);
+            g.insert(uid, Pending { plan: pid, kind: if mine { "renew".into() } else { "new".into() }, target: if mine { renew } else { 0 }, ..Default::default() });
+        }
+        self.show_plan(uid, None, uid, pid).await;
     }
 
     fn admin(&self, id: i64) -> bool {
@@ -432,7 +559,8 @@ impl Bot {
     }
 
     /// A Bot API call with Telegram's reason when it fails
-    async fn call_res(&self, m: &str, body: Value) -> Result<Value, String> {
+    async fn call_res(&self, m: &str, mut body: Value) -> Result<Value, String> {
+        self.paint(&mut body);
         let r = self.http.post(format!("{}/bot{}/{}", self.api, self.token, m))
             .json(&body).send().await.map_err(|e| e.to_string())?;
         let v: Value = r.json().await.map_err(|e| e.to_string())?;
@@ -554,14 +682,7 @@ impl Bot {
     }
 
     fn plans(&self, only_active: bool) -> Vec<(Plan, bool)> {
-        self.db().with(|c| {
-            let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,'') FROM plans ORDER BY toman").unwrap();
-            let v: Vec<(Plan, bool)> = s.query_map([], |r| Ok((Plan {
-                id: r.get(0)?, name: r.get(1)?, days: r.get(2)?, gb: r.get(3)?, toman: r.get(4)?, usd: r.get(5)?, conns: r.get(6)?,
-                countries: r.get(8)?, category: r.get(9)?,
-            }, r.get::<_, i64>(7)? == 1))).unwrap().filter_map(|x| x.ok()).filter(|(_, a)| *a || !only_active).collect();
-            v
-        })
+        all_plans(self.db()).into_iter().filter(|(p, a)| (*a && !p.custom) || !only_active).collect()
     }
 
     fn plan(&self, id: i64) -> Option<Plan> {
@@ -572,7 +693,7 @@ impl Bot {
     /// makes its own buttons): a plan the admin switched off must not be bought. `plan` stays for orders
     /// already placed.
     fn plan_on_sale(&self, id: i64) -> Option<Plan> {
-        self.plans(true).into_iter().map(|x| x.0).find(|p| p.id == id)
+        all_plans(self.db()).into_iter().find(|(p, a)| p.id == id && (*a || p.custom)).map(|x| x.0)
     }
 
     fn account_text(&self, u: &User) -> String {
@@ -615,7 +736,7 @@ impl Bot {
         // the mini app: the account, the AmneziaVPN backup and the configs in one page (Telegram opens only https)
         let mini = crate::miniapp::url(&self.app);
         if mini.starts_with("https://") {
-            rows.push(vec![b(&self.bt("miniapp"), &format!("webapp:{}", mini))]);
+            rows.push(vec![b(&self.bt("miniapp"), &format!("webapp:miniapp:{}", mini))]);
         }
         for (p, code) in [("wireguard", "w"), ("amneziawg", "a"), ("hysteria2", "h")] {
             if have.contains(&p) {
@@ -788,6 +909,12 @@ impl Bot {
 
     // ============================================================ حلقه‌ی اصلی
     pub async fn run(self: Arc<Self>) {
+        *running_slot().lock().unwrap_or_else(|e| e.into_inner()) = Some(self.clone());
+        // the chat's menu button opens the mini app (an admin can switch it off: mini_menu = 0)
+        let mini = crate::miniapp::url(&self.app);
+        if mini.starts_with("https://") && self.db().get("mini_menu") != "0" {
+            let _ = self.call("setChatMenuButton", json!({"menu_button": {"type": "web_app", "text": "حساب من", "web_app": {"url": mini}}})).await;
+        }
         if self.db().get("api_key").is_empty() {
             self.db().set("api_key", &rand_token(40));
         }
@@ -1279,6 +1406,12 @@ impl Bot {
             let data = if pattern.contains("{}") { pattern.replace("{}", &p.id.to_string()) } else { format!("{}:{}", pattern, p.id) };
             rows.push(vec![b(&format!("📅 {} · 👤 {} · {} · {}", dur, p.conns, vol, price), &data)]);
         }
+        // any volume and days, chosen in the mini app (same price rules as the plans)
+        let renew: i64 = if pattern == "pl" { 0 } else { pattern.rsplit(':').next().and_then(|x| x.parse().ok()).unwrap_or(0) };
+        if let Some(r) = self.shop_row(renew) {
+            rows.push(r);
+            title.push_str("\n\n🧮 حجم، روز و تعداد کاربر دلخواه می‌خواید؟ دکمه‌ی «حجم و روز دلخواه» رو بزنید؛ قیمت همون‌جا حساب می‌شه.");
+        }
         if rows.is_empty() {
             return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b(&back_lbl, &back_to)]]))).await;
         }
@@ -1448,6 +1581,8 @@ impl Bot {
         let trial = self.db().users_of_tg(o.1).into_iter().find(|u| u.notes == "trial" || u.username.to_uppercase().ends_with("-TEST"));
         let res: Result<User, String> = if o.3 == "renew" && o.4 > 0 {
             self.db().extend(o.4, p.days, p.gb).and_then(|_| {
+                // a plan for more users raises the account to it (a renewal never lowers it)
+                let _ = self.db().exec("UPDATE users SET max_conn=?1 WHERE id=?2 AND max_conn>0 AND max_conn<?1", &[&p.conns, &o.4]);
                 self.db().promote_trial(o.4);
                 self.db().user(o.4).ok_or("not found".into())
             })
@@ -2546,9 +2681,10 @@ impl Bot {
 <code>{}</code>
 
 {}", esc(&u.username), left_mb, bar, self.account_text(&u));
-                        let renew = vec![b("🔁 تمدید", &format!("rnw:{}", u.id))];
+                        let mut renew = vec![vec![b("🔁 تمدید", &format!("rnw:{}", u.id))]];
+                        renew.extend(self.shop_row(u.id));
                         let _ = self.db().exec("UPDATE users SET warned=?1 WHERE id=?2", &[&flag, &u.id]);
-                        self.send(u.tg_id, &t, Some(self.acct_kb(&u, vec![renew]))).await;
+                        self.send(u.tg_id, &t, Some(self.acct_kb(&u, renew))).await;
                         continue;
                     } else if u.expires_at > 0 && u.expires_at - now() < 86400 && flag & 2 == 0 && u.active() {
                         flag |= 2;
@@ -2556,7 +2692,9 @@ impl Bot {
                     }
                     if let Some(t) = msg {
                         let _ = self.db().exec("UPDATE users SET warned=?1 WHERE id=?2", &[&flag, &u.id]);
-                        self.send(u.tg_id, &t, Some(ik(vec![vec![b("🔁 تمدید", &format!("rnw:{}", u.id))]]))).await;
+                        let mut rows = vec![vec![b("🔁 تمدید", &format!("rnw:{}", u.id))]];
+                        rows.extend(self.shop_row(u.id));
+                        self.send(u.tg_id, &t, Some(ik(rows))).await;
                     }
                 }
             }
@@ -2715,6 +2853,69 @@ mod flow_tests {
     }
 
     const ADMIN: i64 = 9000;
+
+    /// The buttons of the last message to a chat: (text, callback data or web app url, colour)
+    fn buttons(log: &Log, chat: i64) -> Vec<(String, String, String)> {
+        let l = log.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((_, v)) = l.iter().rev().find(|(m, v)| (m == "sendMessage" || m == "editMessageText") && v["chat_id"].as_i64() == Some(chat)) else { return vec![] };
+        v["reply_markup"]["inline_keyboard"].as_array().cloned().unwrap_or_default().iter().flat_map(|r| r.as_array().cloned().unwrap_or_default()).map(|b| (
+            b["text"].as_str().unwrap_or("").to_string(),
+            b["callback_data"].as_str().or(b["web_app"]["url"].as_str()).unwrap_or("").to_string(),
+            b["style"].as_str().unwrap_or("").to_string(),
+        )).collect()
+    }
+
+    #[tokio::test]
+    async fn a_custom_purchase_from_the_mini_app_is_paid_in_the_chat_and_delivered() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        db.set("card_on", "1");
+        db.set("card_number", "6037000011112222");
+        db.set("price_rules", r#"{"gb":4000,"base":10000,"round":1000}"#);
+        db.set("sub_base", "https://sub.example.com");
+        db.exec("INSERT INTO plans(name,days,gb,toman,usd,conns,active,style) VALUES('Duo',30,50,300000,0,2,1,''),('Red',30,10,90000,0,1,1,'danger')", &[]).unwrap();
+        let buyer = 7001;
+        bot.touch(buyer, &from(buyer, "Sara", "sara"), 0);
+        // the mini app's «continue and pay»: 25 GB, 30 days, one user = 25 * 4000 + 10000
+        let pid = crate::shop::custom_plan(db, 25, 30, 1).unwrap();
+        bot.start_purchase(buyer, pid, 0).await;
+        let t = last(&log, buyer);
+        assert!(t.contains("دلخواه · 25 گیگ · 30 روزه") && t.contains("110,000"), "{}", t);
+        let bs = buttons(&log, buyer);
+        assert!(bs.iter().any(|b| b.1 == "pay:card" && b.2 == "success"), "{:?}", bs);
+        // the custom plan is not listed in the bot; the listed ones have their colours, and the custom-volume button opens the mini app
+        tap(&bot, from(buyer, "Sara", "sara"), "buy").await;
+        let bs = buttons(&log, buyer);
+        assert!(!bs.iter().any(|b| b.0.contains("دلخواه ·")), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0.contains("👤 2") && b.2 == "success"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0.contains("👤 1") && b.2 == "danger"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1" && b.2 == "primary"), "{:?}", bs);
+        assert!(!log.lock().unwrap().iter().any(|(_, v)| v.to_string().contains("\"_k\"")), "the colour key is not sent to Telegram");
+        // paid by card: the receipt, the admin approves (green / red buttons), the account has the custom volume and days
+        bot.start_purchase(buyer, pid, 0).await;
+        tap(&bot, from(buyer, "Sara", "sara"), "pay:card").await;
+        say(&bot, from(buyer, "Sara", "sara"), "رسید").await;
+        let adm = buttons(&log, ADMIN);
+        assert!(adm.iter().any(|b| b.1.starts_with("ap:") && b.2 == "success") && adm.iter().any(|b| b.1.starts_with("rj:") && b.2 == "danger"), "{:?}", adm);
+        let oid: i64 = adm.iter().find(|b| b.1.starts_with("ap:")).unwrap().1[3..].parse().unwrap();
+        tap(&bot, from(ADMIN, "Admin", "admin"), &format!("ap:{}", oid)).await;
+        let acc = db.users_of_tg(buyer);
+        assert_eq!(acc.len(), 1);
+        assert_eq!((acc[0].limit_gb, acc[0].max_conn), (25.0, 1));
+        assert!(acc[0].expires_at - now() > 29 * 86400);
+        // renewing that account with the two-user plan (from the mini app): more volume and two users
+        let duo: i64 = db.with(|c| c.query_row("SELECT id FROM plans WHERE name='Duo'", [], |r| r.get(0)).unwrap());
+        bot.start_purchase(buyer, duo, acc[0].id).await;
+        tap(&bot, from(buyer, "Sara", "sara"), "pay:card").await;
+        say(&bot, from(buyer, "Sara", "sara"), "رسید").await;
+        let oid: i64 = buttons(&log, ADMIN).iter().find(|b| b.1.starts_with("ap:")).unwrap().1[3..].parse().unwrap();
+        tap(&bot, from(ADMIN, "Admin", "admin"), &format!("ap:{}", oid)).await;
+        let u = db.user(acc[0].id).unwrap();
+        assert_eq!((u.limit_gb, u.max_conn, db.users_of_tg(buyer).len()), (75.0, 2, 1));
+        // someone else's account cannot be the target: it becomes a new account
+        bot.start_purchase(4242, duo, acc[0].id).await;
+        assert_eq!(bot.pend.lock().unwrap().get(&4242).map(|p| (p.kind.clone(), p.target)), Some(("new".to_string(), 0)));
+    }
 
     fn from(id: i64, first: &str, uname: &str) -> Value {
         json!({"id": id, "first_name": first, "username": uname})

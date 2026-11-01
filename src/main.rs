@@ -74,6 +74,8 @@ mod channel;
 mod ai;
 #[path = "telegram/miniapp.rs"]
 mod miniapp;
+#[path = "telegram/shop.rs"]
+mod shop;
 
 // tunnel: encrypted tunnels between servers (Kanki Tunnel)
 mod tunnel;

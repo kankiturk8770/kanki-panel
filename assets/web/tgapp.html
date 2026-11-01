@@ -78,6 +78,39 @@ h2{font-size:16px;font-weight:900;margin:24px 2px 4px}
 .tags span{font-size:12px;padding:0 8px;line-height:20px;border-radius:8px;border:1px solid var(--sep);color:var(--hint)}
 .row .b{flex:none;min-height:40px}
 
+/* the two views */
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;border-radius:14px;background:var(--bg2);margin:0 0 12px}
+.tabs button{min-height:40px;border:0;border-radius:10px;background:transparent;font-weight:800;cursor:pointer;color:var(--hint)}
+.tabs button.on{background:var(--bg);color:var(--tx);box-shadow:0 0 0 1px var(--sep)}
+
+/* custom purchase */
+.vol{display:flex;align-items:center;gap:12px;justify-content:center;margin:4px 0 8px}
+.vol .n{min-width:132px;text-align:center}
+.vol .n strong{display:block;font-size:20px;font-weight:900;line-height:1.2}
+.vol .n strong span{font-size:32px}
+.vol .n small{font-size:12px;color:var(--hint)}
+.step{width:44px;height:44px;border-radius:14px;border:1px solid var(--sep);background:var(--bg);font-size:20px;font-weight:900;cursor:pointer}
+input[type=range]{width:100%;accent-color:var(--gold2);height:32px;margin:0}
+.lbl{display:block;font-size:13px;font-weight:800;margin:12px 2px 6px}
+.chips2{display:flex;gap:6px;flex-wrap:wrap}
+.chips2 button{flex:1 0 auto;min-height:40px;min-width:64px;padding:0 12px;border-radius:12px;border:1px solid var(--sep);background:var(--bg);font-weight:700;cursor:pointer}
+.chips2 button.on{border-color:var(--gold2);background:color-mix(in srgb,var(--gold2) 16%,var(--bg));color:var(--tx)}
+.total{display:flex;align-items:center;gap:12px;margin-top:16px;padding-top:12px;border-top:1px dashed var(--sep)}
+.total .p{flex:1}
+.total .p small{display:block;font-size:12px;color:var(--hint)}
+.total .p strong{font-size:20px;font-weight:900}
+.b.go{border:0;background:var(--ok);color:#fff;min-width:150px}
+
+/* listed plans: the stripe is the colour of the plan's button in the bot */
+.plan{display:flex;align-items:center;gap:10px;min-height:60px;padding:8px 12px 8px 8px;border-radius:14px;background:var(--bg2);margin-bottom:8px;border-inline-start:4px solid var(--sep)}
+.plan.success{border-inline-start-color:var(--ok)}.plan.primary{border-inline-start-color:#3b8be0}.plan.danger{border-inline-start-color:var(--bad)}
+.plan .nm{flex:1;min-width:0}
+.plan .nm b{display:block;font-weight:800}
+.plan .nm small{display:block;font-size:12px;color:var(--hint)}
+.plan .pr{text-align:left;font-weight:900;white-space:nowrap}
+.plan .b{min-height:40px;flex:none}
+.cat{font-size:13px;font-weight:800;color:var(--hint);margin:16px 2px 8px}
+
 /* states */
 .empty{text-align:center;padding:48px 8px}
 .empty .mk{width:64px;height:64px;margin:0 auto 12px;border-radius:18px;display:grid;place-items:center;font-size:30px;font-weight:900;color:var(--ink);background:linear-gradient(160deg,var(--gold1),var(--gold2))}
@@ -95,7 +128,8 @@ h2{font-size:16px;font-weight:900;margin:24px 2px 4px}
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 (function(){
-var A={list:[],cur:0,plat:'i'};
+var Q=new URLSearchParams(location.search);
+var A={list:[],cur:0,plat:'i',view:Q.get('buy')?'buy':'acc',shop:null,renew:+(Q.get('renew')||0),cb:null};
 function tg(){return window.Telegram&&Telegram.WebApp}
 // the signed init data: from Telegram's script, else from the page address (the script may not load in Iran)
 function initData(){var w=tg();if(w&&w.initData)return w.initData;
@@ -111,12 +145,55 @@ function api(path){return fetch(path,{headers:{'X-Tg-Init':initData()},cache:'no
 var PN={i:'آیفون',a:'اندروید',w:'ویندوز'};
 var ST={Active:['فعال','var(--ok)'],Limited:['حجم تمام شده','var(--warn)'],Expired:['زمان تمام شده','var(--warn)'],Disabled:['غیرفعال','var(--bad)']};
 
+function toman(n){return fa(Math.round(n).toLocaleString('en-US')).replace(/,/g,'٬')+' تومان'}
+// the price of a custom purchase: the same as panel.js smartPrice and shop.rs price()
+function price(r,g,days,conns){var m=Math.max(1,days/30),p=(+r.base||0)*m+g*(+r.gb||0)+Math.max(0,conns-1)*(+r.conn||0)*m;
+ if(g>=50&&+r.bulk>0)p=p*(1-Math.min(40,+r.bulk*(g>=100?2:1))/100);var rd=+r.round||1000;return Math.max(rd,Math.round(p/rd)*rd)}
+function dur(d){return d%30?fa(d)+' روز':(d==30?'یک ماه':fa(d/30)+' ماه')}
 function empty(icon,title,text,btn){document.getElementById('app').innerHTML='<div class="empty"><div class="mk">'+icon+'</div><b>'+title+'</b><p class="muted">'+text+'</p>'+(btn||'')+'</div>'}
+
+function tabs(){if(!A.shop||(!A.shop.custom.on&&!A.shop.plans.length)||!A.shop.sales)return '';
+ return '<div class="tabs" role="tablist"><button role="tab" data-v="acc" class="'+(A.view=='acc'?'on':'')+'">حساب من</button><button role="tab" data-v="buy" class="'+(A.view=='buy'?'on':'')+'">خرید و تمدید</button></div>'}
+function render(){if(A.view=='buy'&&A.shop&&A.shop.sales)return drawBuy();if(!A.list.length)return A.shop&&A.shop.sales?(A.view='buy',drawBuy()):noAccount();draw()}
+function noAccount(){empty('K','هنوز اشتراکی ندارید','بعد از خرید اشتراک، اطلاعات حساب و کانفیگ‌ها اینجا دیده می‌شن.','<button class="b main" style="min-width:180px" onclick="window.Telegram&&Telegram.WebApp&&Telegram.WebApp.close()">برگشت به ربات</button>')}
+function wireTabs(){Array.prototype.slice.call(document.querySelectorAll('[data-v]')).forEach(function(b){b.onclick=function(){A.view=b.dataset.v;render()}})}
+
+function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){return x.id==A.renew})[0],h=(A.list.length?tabs():'');
+ if(mine)h+='<p class="lead" style="margin:0 2px 12px">تمدید حساب <b class="ltr">'+esc(mine.name)+'</b>: حجم و روز به همین حساب اضافه می‌شه. <button class="b" id="nr" style="min-height:40px;margin-inline-start:6px">خرید حساب تازه</button></p>';
+ if(c.on){var cb=A.cb||(A.cb={g:Math.min(c.max_gb,Math.max(c.min_gb,30)),d:c.days[0],u:1});
+  // renewing: never fewer users than the account has (a renewal raises it, never lowers it)
+  var from=mine?Math.max(1,Math.min(c.users,mine.connections||1)):1;if(cb.u<from)cb.u=from;
+  var users=[];for(var i=from;i<=c.users;i++)users.push(i);
+  h+='<h2 style="margin-top:4px">حجم و روز دلخواه</h2><p class="lead">هر چقدر لازم دارید انتخاب کنید؛ قیمت همین‌جا حساب می‌شه.</p><div class="card">'+
+   '<div class="vol"><button class="step" id="gm" aria-label="کمتر">−</button><div class="n"><strong><span id="gv">'+fa(cb.g)+'</span> گیگ</strong><small>از '+fa(c.min_gb)+' تا '+fa(c.max_gb)+' گیگ</small></div><button class="step" id="gp" aria-label="بیشتر">+</button></div>'+
+   '<input type="range" id="gr" min="'+c.min_gb+'" max="'+c.max_gb+'" step="1" value="'+cb.g+'" aria-label="حجم">'+
+   '<span class="lbl">مدت</span><div class="chips2" id="dd">'+c.days.map(function(d){return '<button data-d="'+d+'" class="'+(cb.d==d?'on':'')+'">'+dur(d)+'</button>'}).join('')+'</div>'+
+   (users.length>1?'<span class="lbl">تعداد کاربر (دستگاه هم‌زمان)</span><div class="chips2" id="uu">'+users.map(function(n){return '<button data-u="'+n+'" class="'+(cb.u==n?'on':'')+'">'+fa(n)+' کاربره</button>'}).join('')+'</div>':'')+
+   '<div class="total"><div class="p"><small>قیمت</small><strong id="tp">'+toman(price(c.rules,cb.g,cb.d,cb.u))+'</strong></div><button class="b go" id="cbuy">ادامه و پرداخت</button></div></div>'}
+ if(sh.plans.length){h+='<h2>پلن‌ها</h2>';var cats=[];sh.plans.forEach(function(p){if(cats.indexOf(p.category)<0)cats.push(p.category)});
+  cats.forEach(function(k){if(cats.length>1)h+='<div class="cat">'+esc(k||'سایر پلن‌ها')+'</div>';
+   sh.plans.filter(function(p){return p.category==k}).forEach(function(p){var st=p.style&&p.style!='none'?p.style:(p.style=='none'?'':(p.conns>=2?'success':'primary'));
+    h+='<div class="plan '+st+'"><div class="nm"><b>'+esc(p.name)+'</b><small>'+(p.gb>0?fa(p.gb)+' گیگ':'نامحدود')+'، '+dur(p.days)+'، '+fa(p.conns)+' کاربره</small></div><span class="pr">'+toman(p.toman)+'</span><button class="b" data-pid="'+p.id+'">خرید</button></div>'})})}
+ if(!c.on&&!sh.plans.length)h+='<div class="empty"><b>فعلاً پلنی برای فروش نیست</b><p class="muted">کمی بعد دوباره سر بزنید یا به پشتیبانی پیام بدید.</p></div>';
+ document.getElementById('app').innerHTML=h;wireTabs();wireBuy()}
+
+function wireBuy(){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))},c=A.shop.custom,cb=A.cb;
+ var nr=$('#nr');if(nr)nr.onclick=function(){A.renew=0;drawBuy()};
+ function upd(){if(!cb)return;var g=$('#gv'),r=$('#gr'),p=$('#tp');if(g)g.textContent=fa(cb.g);if(r&&+r.value!=cb.g)r.value=cb.g;if(p)p.textContent=toman(price(c.rules,cb.g,cb.d,cb.u))}
+ var step=function(k){var s=cb.g<50?5:cb.g<100?10:25;cb.g=Math.min(c.max_gb,Math.max(c.min_gb,cb.g+k*s));upd()};
+ if($('#gm')){$('#gm').onclick=function(){step(-1)};$('#gp').onclick=function(){step(1)};$('#gr').oninput=function(){cb.g=+this.value;upd()}}
+ all('[data-d]').forEach(function(b){b.onclick=function(){cb.d=+b.dataset.d;all('[data-d]').forEach(function(x){x.classList.toggle('on',x==b)});upd()}});
+ all('[data-u]').forEach(function(b){b.onclick=function(){cb.u=+b.dataset.u;all('[data-u]').forEach(function(x){x.classList.toggle('on',x==b)});upd()}});
+ function go(q,b){b.disabled=true;api('/tg/api/buy?'+q+(A.renew?'&renew='+A.renew:'')).then(function(){buzz('success');toast('صفحه‌ی پرداخت توی چت ربات اومد');
+   setTimeout(function(){var w=tg();if(w&&w.close)w.close()},1400)}).catch(function(e){buzz('error');b.disabled=false;
+   toast(e.message=='the bot is off'?'ربات الان در دسترس نیست؛ کمی بعد امتحان کنید':e.message=='sales are off'?'فروش فعلاً بسته است':'نشد، دوباره امتحان کنید')})}
+ var cbuy=$('#cbuy');if(cbuy)cbuy.onclick=function(){go('gb='+cb.g+'&days='+cb.d+'&users='+cb.u,cbuy)};
+ all('[data-pid]').forEach(function(b){b.onclick=function(){go('pid='+b.dataset.pid,b)}})}
 
 function draw(){var u=A.list[A.cur];if(!u)return;
  var st=ST[u.status]||ST.Active,lim=u.limit_gb>0,left=lim?Math.max(0,u.limit_gb-u.used_gb):0,pc=lim?Math.min(100,u.used_gb/u.limit_gb*100):0;
  var routes=[];u.servers.forEach(function(s){var r=route(s);if(routes.indexOf(r)<0)routes.push(r)});
- var h='';
+ var h=tabs();
  if(A.list.length>1)h+='<div class="accs">'+A.list.map(function(x,i){return '<button class="'+(i==A.cur?'on':'')+'" data-acc="'+i+'"><span class="ltr">'+esc(x.name)+'</span></button>'}).join('')+'</div>';
  h+='<section class="pass" aria-label="حساب">'+
   '<div class="top"><div class="who"><b class="ltr">'+esc(u.name)+'</b><span class="st"><i style="background:'+st[1]+'"></i>'+st[0]+'</span></div>'+
@@ -125,7 +202,8 @@ function draw(){var u=A.list[A.cur];if(!u)return;
   (lim?'<div class="bar"><span style="width:'+pc.toFixed(1)+'%"></span></div>':'')+'</div>'+
   '<div class="tear"></div>'+
   '<div class="stub"><div class="routes">'+(routes.length?routes.map(function(r){return '<span class="ltr">'+r+'</span>'}).join(''):'<span>—</span>')+'</div>'+
-  '<button class="copy" id="cp">کپی لینک حساب</button></div></section>';
+  '<button class="copy" id="cp">کپی لینک حساب</button></div></section>'+
+  (A.shop&&A.shop.sales&&(A.shop.custom.on||A.shop.plans.length)?'<div class="acts one"><button class="b go" id="rn" style="width:100%">تمدید یا افزایش حجم همین حساب</button></div>':'');
 
  if(u.wg||u.awg){
   h+='<h2>بکاپ AmneziaVPN</h2><p class="lead">همه‌ی سرورهای WireGuard و AmneziaWG در یک فایل؛ اسم هر سرور مسیرش رو با پرچم نشون می‌ده.</p>'+
@@ -140,12 +218,13 @@ function draw(){var u=A.list[A.cur];if(!u)return;
  if(u.servers.length){h+='<h2>سرورها</h2><div class="card">'+u.servers.map(function(s){return '<div class="row"><span class="fl ltr">'+route(s)+'</span><div class="nm"><b class="ltr sn">'+esc(s.name)+'</b><small>'+(s.iran?'از راه ایران':'مستقیم')+'</small>'+
    '<div class="tags">'+s.protocols.map(function(p){return '<span class="ltr">'+esc({wireguard:'WireGuard',amneziawg:'AmneziaWG',hysteria2:'Hysteria2',kankimix:'KANKI MIX'}[p]||p)+'</span>'}).join('')+'</div></div></div>'}).join('')+'</div>'}
  document.getElementById('app').innerHTML=h;
- wire(u)}
+ wireTabs();wire(u)}
 
 function canDownload(){var w=tg();return !!(w&&w.downloadFile&&w.isVersionAtLeast&&w.isVersionAtLeast('8.0'))}
 
 function wire(u){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
  all('[data-acc]').forEach(function(b){b.onclick=function(){A.cur=+b.dataset.acc;draw()}});
+ var rn=$('#rn');if(rn)rn.onclick=function(){A.renew=u.id;A.view='buy';drawBuy()};
  all('[data-p]').forEach(function(b){b.onclick=function(){A.plat=b.dataset.p;draw()}});
  $('#cp').onclick=function(){var done=function(){buzz('success');toast('لینک حساب کپی شد')};
   if(navigator.clipboard)navigator.clipboard.writeText(u.link).then(done,function(){prompt('لینک حساب',u.link)});else prompt('لینک حساب',u.link)};
@@ -158,9 +237,7 @@ function wire(u){var $=function(s){return document.querySelector(s)},all=functio
 function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}}
  var p=(w&&w.platform)||'';A.plat=/ios|macos/.test(p)?'i':/tdesktop|windows|weba|webk/.test(p)?'w':'a';
  if(!initData())return empty('K','این صفحه رو از ربات باز کنید','مینی‌اپ کانکی فقط از داخل ربات تلگرام باز می‌شه.');
- api('/tg/api/me').then(function(r){A.list=r.accounts||[];
-  if(!A.list.length)return empty('K','هنوز اشتراکی ندارید','بعد از خرید اشتراک، اطلاعات حساب و کانفیگ‌ها اینجا دیده می‌شن.','<button class="b main" style="min-width:180px" onclick="window.Telegram&&Telegram.WebApp&&Telegram.WebApp.close()">برگشت به ربات</button>');
-  draw()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
+ Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
 // wait a moment for Telegram's script, then go on without it
 var n=0;(function go(){if(tg()||n++>15)start();else setTimeout(go,100)})();
 })();

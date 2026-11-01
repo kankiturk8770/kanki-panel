@@ -38,6 +38,8 @@ pub fn router() -> Router<Arc<App>> {
         .route("/tg/api/me", get(me))
         .route("/tg/api/send", get(send))
         .route("/tg/api/file", get(file))
+        .route("/tg/api/shop", get(shop))
+        .route("/tg/api/buy", get(buy))
 }
 
 /// The Telegram user id of a signed init data, or None when the signature does not match, it is older than
@@ -173,6 +175,49 @@ async fn file(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
         body,
     )
         .into_response()
+}
+
+/// GET /tg/api/shop: the plans on sale (with their button colour) and the custom purchase rules
+async fn shop(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    if let Err(r) = who(&app, &h, &q) {
+        return r;
+    }
+    let plans: Vec<Value> = app.db.with(|c| {
+        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(conns,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,'') FROM plans WHERE active=1 ORDER BY days, conns, toman").unwrap();
+        let v: Vec<Value> = s.query_map([], |r| Ok(json!({
+            "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "days": r.get::<_, i64>(2)?, "gb": r.get::<_, f64>(3)?,
+            "toman": r.get::<_, i64>(4)?, "conns": r.get::<_, i64>(5)?, "countries": r.get::<_, i64>(6)?, "category": r.get::<_, String>(7)?,
+            "style": r.get::<_, String>(8)?,
+        }))).unwrap().filter_map(|x| x.ok()).collect();
+        v
+    });
+    let on = app.db.on("sales_on");
+    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "sales": on, "plans": plans, "custom": crate::shop::custom_json(&app.db) }))).into_response()
+}
+
+/// GET /tg/api/buy?pid=.. or ?gb=..&days=..&users=.. (&renew=<account>): the bot shows that plan and the
+/// payment methods in the customer's chat
+async fn buy(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+    if !app.db.on("sales_on") {
+        return fail(StatusCode::FORBIDDEN, "sales are off");
+    }
+    let n = |k: &str| q.get(k).and_then(|x| x.parse::<i64>().ok()).unwrap_or(0);
+    let pid = if n("pid") > 0 {
+        let on_sale: bool = app.db.with(|c| c.query_row("SELECT COUNT(*) FROM plans WHERE id=?1 AND active=1", [n("pid")], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0);
+        if !on_sale {
+            return fail(StatusCode::NOT_FOUND, "plan");
+        }
+        n("pid")
+    } else {
+        match crate::shop::custom_plan(&app.db, n("gb"), n("days"), n("users").max(1)) {
+            Ok(id) => id,
+            Err(e) => return fail(StatusCode::BAD_REQUEST, &e),
+        }
+    };
+    let Some(bot) = crate::bot::running() else { return fail(StatusCode::SERVICE_UNAVAILABLE, "the bot is off") };
+    bot.start_purchase(tg, pid, n("renew")).await;
+    Json(json!({ "ok": true })).into_response()
 }
 
 #[cfg(test)]
