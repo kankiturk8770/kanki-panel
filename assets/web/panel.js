@@ -2338,6 +2338,24 @@ var FA={"Button colour in the bot":"رنگ دکمه در ربات",
  "Test":"تست",
  "Test again":"تست دوباره",
  "Test connection":"تست اتصال",
+ "Daily report":"گزارش روزانه",
+ "Every 30 minutes the panel server checks the tunnels and servers and tells you on Telegram; every morning it sends a report. It needs an API token with the «Servers and tunnels» right.":"سرور پنل هر ۳۰ دقیقه تانل‌ها و سرورها را چک می‌کند و در تلگرام خبر می‌دهد؛ هر صبح هم یک گزارش می‌فرستد. برای این کار یک توکن API با دسترسی «سرورها و تانل‌ها» لازم دارد.",
+ "The report script is not on this server":"اسکریپت گزارش روی این سرور نیست",
+ "No token yet":"هنوز توکنی گذاشته نشده",
+ "The token works":"توکن کار می‌کند",
+ "Last check":"آخرین بررسی",
+ "System › Security › API tokens: make a token named kanki-watch with only «Servers and tunnels».":"سیستم › امنیت › توکن‌های API: یک توکن به اسم kanki-watch فقط با «سرورها و تانل‌ها» بساز.",
+ "Paste it here and press Save. Do not delete that token later.":"این‌جا بچسبان و ذخیره را بزن. آن توکن را بعداً پاک نکن.",
+ "API token for the report":"توکن API گزارش",
+ "Paste the token":"توکن را بچسبان",
+ "Send the report now":"ارسال گزارش الان",
+ "The report was sent to Telegram":"گزارش به تلگرام فرستاده شد",
+ "paste the whole API token":"کل توکن API را بچسبان",
+ "the panel does not know this token (deleted, or not copied whole)":"پنل این توکن را نمی‌شناسد (پاک شده، یا کامل کپی نشده)",
+ "this is a login session, not an API token: make one on System › Security › API tokens":"این توکن ورود است، نه توکن API: از سیستم › امنیت › توکن‌های API یکی بساز",
+ "this token has no «Servers and tunnels» (nodes) right":"این توکن دسترسی «سرورها و تانل‌ها» (nodes) ندارد",
+ "the report script is not on this server":"اسکریپت گزارش روی این سرور نیست",
+ "the report script took more than 2 minutes":"اسکریپت گزارش بیشتر از ۲ دقیقه طول کشید",
  "Test every hop":"تست همه‌ی مرحله‌ها",
  "Test ports (first of six)":"پورت تست (اولینِ شش پورت)",
  "Test ports (first of sixteen)":"پورت‌های تست (اولی از شانزده)",
@@ -3731,11 +3749,12 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
     '<p class="hint">'+t('The price comes from the price rules of the Smart plan builder (Plans tab): the same size costs the same as a listed plan.')+'</p></div>'+
    '<div class="box"><b>🎨 '+t('Button colours in the bot')+'</b><p class="hint" style="margin-top:4px">'+t('Telegram shows coloured buttons from February 2026; older apps show them plain. Plan buttons take the colour set on each plan.')+'</p>'+
     '<div class="g2f">'+BSTY.map(function(k){var v=(S.bset||{})['bst_'+k[0]]||'';return '<div><label class="f">'+t(k[1])+'</label><select data-bs="bst_'+k[0]+'">'+[['',t('Default')+' · '+({g:'🟢',b:'🔵'}[k[2]]||'⚪')],['success','🟢 Green'],['primary','🔵 Blue'],['danger','🔴 Red'],['none','⚪ Plain']].map(function(o){return '<option value="'+o[0]+'"'+(v==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select></div>'}).join('')+'</div></div>'+
-   '<button class="btn" style="width:100%;margin-top:10px" id="bs_save">'+t('Save sales settings')+'</button></div></div>'+
+   '<button class="btn" style="width:100%;margin-top:10px" id="bs_save">'+t('Save sales settings')+'</button></div>'+
+   '<div class="card" id="bt_watch"></div></div>'+
   '<div data-btp="plans">'+botSmart()+botPlans()+'</div><div data-btp="apk"><div id="bt_apk"></div></div><div data-btp="disc"><div id="bt_disc"></div></div><div data-btp="chan"><div id="bt_chan"></div></div><div data-btp="appmsg"><div id="bt_am"></div></div>';
  var showTab=function(k){S.btab=k;$$('#bt_tabs [data-bt]').forEach(function(b){b.classList.toggle('on',b.dataset.bt==k)});$$('[data-btp]').forEach(function(d){d.style.display=d.dataset.btp==k?'':'none'});
   if(k=='disc')botDisc();if(k=='chan')botChan();if(k=='appmsg')botAppMsg();if(k=='apk')botApk()};
- $('#bt_tabs').onclick=function(e){var b=e.target.closest('[data-bt]');if(b)showTab(b.dataset.bt)};showTab(S.btab);smartWire();
+ $('#bt_tabs').onclick=function(e){var b=e.target.closest('[data-bt]');if(b)showTab(b.dataset.bt)};showTab(S.btab);smartWire();botWatch();
  // crypto: typing an address switches «accept crypto» on; a written address with the switch off is warned about
  (function(){var on=$('[data-bs="wallet_on"]'),ww=$('#bs_wwarn');if(!on)return;var has=function(){return ['ton_address','usdt_address'].some(function(k){var x=$('[data-bs="'+k+'"]');return x&&x.value.trim()})};
   var chk=function(){if(ww)ww.style.display=has()&&!on.checked?'':'none'};
@@ -3753,6 +3772,21 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
  var pl=$('#pl_list');if(pl)pl.onclick=function(e){var a=e.target.closest('[data-pact]');if(a){api('PUT','/api/plans/'+a.dataset.pact,{active:a.dataset.a=='1'}).then(botLoad).catch(fail);return}var pu=e.target.closest('[data-pusd]');if(pu){var x1=(S.plans||[]).filter(function(z){return z.id==pu.dataset.pusd})[0]||{},v1=prompt(t('Dollar price (crypto)')+' · 0 = '+t('from the toman price at the dollar rate'),x1.usd||0);if(v1!==null)api('PUT','/api/plans/'+pu.dataset.pusd,{usd:+unN(v1)||0}).then(botLoad).catch(fail);return}var m=e.target.closest('[data-pcat]');if(m){var x0=(S.plans||[]).filter(function(z){return z.id==m.dataset.pcat})[0]||{},v=prompt(t('Category name'),x0.category||'');if(v!==null)api('PUT','/api/plans/'+m.dataset.pcat,{category:v.trim()}).then(botLoad).catch(fail);return}
  var rn=e.target.closest('[data-crn]');if(rn){var v2=prompt(t('Category name'),rn.dataset.crn);if(v2!==null)api('PUT','/api/plans/category',{from:rn.dataset.crn,to:v2.trim()}).then(botLoad).catch(fail);return}
  var b=e.target.closest('[data-pdel]');if(b)confirmDo(function(){api('DELETE','/api/plans/'+b.dataset.pdel).then(function(){toast(t('Done'));botLoad()}).catch(fail)})}}
+// the daily report (kanki-watch on the panel server): its API token is pasted here and the panel writes it for the script
+function botWatch(){var el=$('#bt_watch');if(!el)return;
+ api('GET','/api/bot/watch').then(function(d){if(!$('#bt_watch'))return;
+  var st=!d.installed?['y','The report script is not on this server']:!d.token_set?['y','No token yet']:d.problem?['r',d.problem]:['g','The token works'];
+  el.innerHTML='<h3>📋 '+t('Daily report')+'</h3><p class="sub">'+t('Every 30 minutes the panel server checks the tunnels and servers and tells you on Telegram; every morning it sends a report. It needs an API token with the «Servers and tunnels» right.')+'</p>'+
+   '<p><span class="badge '+st[0]+'"><span class="dot '+st[0]+'"></span> '+esc(t(st[1]))+'</span>'+(d.token_masked?' <b class="ltr">'+esc(d.token_masked)+'</b>':'')+'</p>'+
+   (d.last?'<label class="f">'+t('Last check')+'</label><div class="warnbox ltr" style="margin:4px 0 10px;white-space:pre-wrap;word-break:break-all">'+esc(d.last)+'</div>':'')+
+   '<ol class="steps"><li>'+t('System › Security › API tokens: make a token named kanki-watch with only «Servers and tunnels».')+'</li><li>'+t('Paste it here and press Save. Do not delete that token later.')+'</li></ol>'+
+   '<label class="f">'+t('API token for the report')+'</label><input id="bw_tok" class="ltr" autocomplete="off" placeholder="'+esc(t('Paste the token'))+'">'+
+   '<div class="g2f" style="margin-top:10px"><button class="btn" id="bw_save">'+t('Save')+'</button><button class="b2" id="bw_send"'+(d.installed?'':' disabled')+'>'+ic('send',15)+' '+t('Send the report now')+'</button></div>';
+  $('#bw_save').onclick=function(){var v=$('#bw_tok').value.trim();if(!v)return toast(t('Paste the token'),1);var me=this;me.disabled=true;
+   api('PUT','/api/bot/watch',{token:v}).then(function(){toast(t('Saved'));botWatch()}).catch(function(e){me.disabled=false;fail(e)})};
+  $('#bw_send').onclick=function(){var me=this;me.disabled=true;toast(t('Checking…'));
+   api('POST','/api/bot/watch/send').then(function(){toast(t('The report was sent to Telegram'));botWatch()}).catch(function(e){me.disabled=false;fail(e)})};
+ }).catch(function(e){el.innerHTML='';fail(e)})}
 function plCats(p){var o=[];(p||[]).forEach(function(x){if(x.category&&o.indexOf(x.category)<0)o.push(x.category)});return o.sort()}
 // the colour of a plan's button in the bot ('' = by users: one blue, two or more green)
 var PSTY=[['','Auto (by users)'],['success','🟢 Green'],['primary','🔵 Blue'],['danger','🔴 Red'],['none','⚪ Plain']];
