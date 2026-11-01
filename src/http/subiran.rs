@@ -259,10 +259,26 @@ async fn get_cfg(State(app): St, h: HeaderMap) -> Response {
     let reused = on(&s) && upstream_port(&app, &s) != LOCAL_PORT;
     let links = |sid: &str| crate::tunnel::panel::links_of(sid, TUNNEL_ID);
     let tunnel = if !on(&s) { "" } else if reused { "reused" } else if links(&s.server) > 0 && links("local") > 0 { "up" } else { "down" };
+    // why the hidden tunnel is down: each side as its own engine reports it
+    let side = |sid: &str| match crate::tunnel::panel::status_of(sid, TUNNEL_ID) {
+        Some(st) => json!({ "runs": true, "links": st.links, "listening": st.listening, "error": st.error }),
+        None => json!({ "runs": false }),
+    };
+    let seen_ago = crate::tunnel::panel::agent_state(&s.server).map(|x| crate::util::now() - x.0);
+    let detail = if tunnel == "down" {
+        json!({
+            "port": s.tunnel_port,
+            "dial": crate::tunnel::panel::dial_addr(&app, &s.server, s.tunnel_port),
+            "iran": side(&s.server), "panel": side("local"),
+            "iran_seen": seen_ago,
+        })
+    } else {
+        Value::Null
+    };
     Json(json!({
         "server": s.server, "domain": s.domain, "port": if s.port == 0 { DEFAULT_PORT } else { s.port }, "ready": s.ready,
         "link": if on(&s) { link_base(&s.domain, s.port) } else { String::new() },
-        "agents": agents, "status": status, "tunnel": tunnel,
+        "agents": agents, "status": status, "tunnel": tunnel, "tunnel_detail": detail,
     }))
     .into_response()
 }
