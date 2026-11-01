@@ -240,6 +240,10 @@ async fn main() {
             eprintln!("usage: kanki-panel reset-admin <user> <pass>");
             std::process::exit(1);
         };
+        if auth::reserved_admin_name(u.trim()) {
+            eprintln!("this username is reserved (api-key, token:…), pick another");
+            std::process::exit(1);
+        }
         db.set("admin_user", u);
         db.set("admin_pass", &util::hash_password(p));
         db.set("totp_on", "0");

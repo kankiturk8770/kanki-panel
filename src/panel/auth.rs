@@ -173,6 +173,7 @@ pub async fn middleware(State(app): St, req: Request, next: Next) -> Response {
             "INSERT INTO audit(ts,actor,method,path,status,ip) VALUES(?1,?2,?3,?4,?5,?6)",
             &[&now(), &actor, &method.as_str(), &path, &st, &ip],
         );
+        app.db.note_log_row();
     }
     res
 }
@@ -201,23 +202,21 @@ fn log_login(app: &App, user: &str, ip: &str, method: &str, ok: bool) {
         "INSERT INTO login_log(ts,username,ip,method,ok) VALUES(?1,?2,?3,?4,?5)",
         &[&now(), &user, &ip, &method, &(ok as i64)],
     );
+    app.db.note_log_row();
 }
 
 /// 5 wrong logins from one address in an hour lock it for an hour from the 5th
 const MAX_FAILS: u32 = 5;
 const FAIL_WINDOW: i64 = 60 * 60;
 
-fn locked(app: &App, ip: &str) -> bool {
-    let m = app.login_fails.lock().unwrap_or_else(|e| e.into_inner());
-    matches!(m.get(ip), Some((n, t)) if *n >= MAX_FAILS && now() - *t < FAIL_WINDOW)
-}
-
 fn fail(app: &App, ip: &str) {
     let mut m = app.login_fails.lock().unwrap_or_else(|e| e.into_inner());
+    count_fail(&mut m, ip);
+}
+
+fn count_fail(m: &mut std::collections::HashMap<String, (u32, i64)>, ip: &str) {
     // forget old entries so the table cannot grow without limit (many source addresses)
-    if m.len() > 5000 {
-        m.retain(|_, (_, t)| now() - *t < FAIL_WINDOW);
-    }
+    crate::limit::trim(m, 5000, FAIL_WINDOW, now());
     let e = m.entry(ip.to_string()).or_insert((0, now()));
     if now() - e.1 >= FAIL_WINDOW {
         *e = (0, now());
@@ -229,33 +228,81 @@ fn fail(app: &App, ip: &str) {
     }
 }
 
+/// Starts a password try from `ip`: false when the address is locked. The try is counted as wrong
+/// before the password is checked, so tries sent all at once cannot pass the lock while they wait for
+/// PBKDF2; `undo_fail` takes it back when the password was right.
+fn begin_try(app: &App, ip: &str) -> bool {
+    let mut m = app.login_fails.lock().unwrap_or_else(|e| e.into_inner());
+    if matches!(m.get(ip), Some((n, t)) if *n >= MAX_FAILS && now() - *t < FAIL_WINDOW) {
+        return false;
+    }
+    count_fail(&mut m, ip);
+    true
+}
+
+fn undo_fail(app: &App, ip: &str) {
+    let mut m = app.login_fails.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(e) = m.get_mut(ip) {
+        e.0 = e.0.saturating_sub(1);
+    }
+}
+
+/// A stored hash with the same work as a real one: checked when the username is wrong, so the answer
+/// takes as long as for a wrong password (the time does not tell whether the name exists).
+const DUMMY_HASH: &str = "pbkdf2$120000$kankidummysalt00$0000000000000000000000000000000000000000000000000000000000000000";
+
+/// Checks the admin password off the async worker threads (PBKDF2 takes about a tenth of a second of CPU)
+async fn password_ok(stored: &str, pass: &str) -> bool {
+    let (st, pw) = (stored.to_string(), pass.to_string());
+    tokio::task::spawn_blocking(move || util::check_password(&st, &pw)).await.unwrap_or(false)
+}
+
+/// Checks a 2FA code and remembers its 30s step: the same code (or an older one) is not accepted twice.
+fn totp_fresh(app: &App, secret: &str, code: &str) -> bool {
+    static L: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = L.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(step) = util::totp_step(secret, code, now()) else { return false };
+    let last: u64 = app.db.get("totp_last_step").parse().unwrap_or(0);
+    if !step_is_new(step, last) {
+        return false;
+    }
+    app.db.set("totp_last_step", &step.to_string());
+    true
+}
+
+fn step_is_new(step: u64, last: u64) -> bool {
+    step > last
+}
+
+/// Names the panel itself uses for API keys and tokens: an admin called like this could not do
+/// session-only actions (security, 2FA, password)
+pub fn reserved_admin_name(u: &str) -> bool {
+    u == "api-key" || u.starts_with("token:")
+}
+
 async fn login(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let ip = client_ip(&h);
-    if locked(&app, &ip) {
+    if !begin_try(&app, &ip) {
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "too many attempts, try again in an hour"}))).into_response();
     }
     let u = b["username"].as_str().unwrap_or("").trim().to_string();
     let p = b["password"].as_str().unwrap_or("");
     let stored = admin_pass_hash(&app);
-    // PBKDF2 takes about a tenth of a second of CPU: keep it off the async worker threads
-    let ok = if util::ct_eq(&u, &admin_user(&app)) && !stored.is_empty() {
-        let (st, pw) = (stored.clone(), p.to_string());
-        tokio::task::spawn_blocking(move || util::check_password(&st, &pw)).await.unwrap_or(false)
-    } else {
-        false
-    };
+    let name_ok = util::ct_eq(&u, &admin_user(&app)) && !stored.is_empty();
+    let ok = password_ok(if name_ok { &stored } else { DUMMY_HASH }, p).await && name_ok;
     if !ok {
-        fail(&app, &ip);
+        // already counted as wrong by begin_try
         log_login(&app, &u, &ip, "password", false);
         tokio::time::sleep(std::time::Duration::from_millis(900)).await;
         return (StatusCode::UNAUTHORIZED, Json(json!({"error": "invalid username or password"}))).into_response();
     }
+    undo_fail(&app, &ip);
     if app.db.on("totp_on") {
         let otp = b["otp"].as_str().unwrap_or("");
         if otp.is_empty() {
             return (StatusCode::UNAUTHORIZED, Json(json!({"error": "2FA code required", "need_otp": true}))).into_response();
         }
-        if !util::totp_check(&app.db.get("totp_secret"), otp) {
+        if !totp_fresh(&app, &app.db.get("totp_secret"), otp) {
             fail(&app, &ip);
             log_login(&app, &u, &ip, "totp", false);
             return (StatusCode::UNAUTHORIZED, Json(json!({"error": "wrong 2FA code", "need_otp": true}))).into_response();
@@ -351,19 +398,34 @@ async fn security_get(State(app): St, h: HeaderMap) -> Response {
 
 async fn change_password(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if let Err(r) = check_session(&app, &h) { return r; }
+    // the same lock as the login: a stolen session cannot guess the password here either
+    let ip = client_ip(&h);
+    if !begin_try(&app, &ip) {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "too many attempts, try again in an hour"}))).into_response();
+    }
     let cur = b["current"].as_str().unwrap_or("");
-    if !util::check_password(&admin_pass_hash(&app), cur) {
+    if !password_ok(&admin_pass_hash(&app), cur).await {
+        log_login(&app, &admin_user(&app), &ip, "password-change", false);
         return bad("current password is wrong");
     }
+    undo_fail(&app, &ip);
     let user = b["username"].as_str().unwrap_or("").trim();
     let pass = b["password"].as_str().unwrap_or("");
     if pass.len() < 8 {
         return bad("password must be at least 8 characters");
     }
+    if reserved_admin_name(user) {
+        return bad("this username is reserved, pick another");
+    }
     if !user.is_empty() {
         app.db.set("admin_user", user);
     }
-    app.db.set("admin_pass", &util::hash_password(pass));
+    let pw = pass.to_string();
+    let hash = tokio::task::spawn_blocking(move || util::hash_password(&pw)).await.unwrap_or_default();
+    if hash.is_empty() {
+        return bad("could not save the password, try again");
+    }
+    app.db.set("admin_pass", &hash);
     let cur_id = current_session_id(&app, &h);
     let _ = app.db.exec("DELETE FROM sessions WHERE id<>?1", &[&cur_id]);
     Json(json!({"ok": true})).into_response()
@@ -402,6 +464,10 @@ async fn regen_key(State(app): St, h: HeaderMap) -> Response {
 
 async fn totp_setup(State(app): St, h: HeaderMap) -> Response {
     if let Err(r) = check_session(&app, &h) { return r; }
+    // a new secret only after the current one is turned off with its own code
+    if app.db.on("totp_on") {
+        return bad("2FA is already on; turn it off with its code first");
+    }
     let secret = util::totp_secret();
     app.db.set("totp_pending", &secret);
     let label = format!("{}:{}", app.db.get("panel_name"), admin_user(&app));
@@ -411,6 +477,9 @@ async fn totp_setup(State(app): St, h: HeaderMap) -> Response {
 
 async fn totp_enable(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if let Err(r) = check_session(&app, &h) { return r; }
+    if app.db.on("totp_on") {
+        return bad("2FA is already on; turn it off with its code first");
+    }
     let pending = app.db.get("totp_pending");
     if pending.is_empty() {
         return bad("start setup first");
@@ -429,7 +498,7 @@ async fn totp_disable(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     if app.db.on("force_2fa") {
         return bad("2FA is enforced by policy; turn enforcement off first");
     }
-    if app.db.on("totp_on") && !util::totp_check(&app.db.get("totp_secret"), b["code"].as_str().unwrap_or("")) {
+    if app.db.on("totp_on") && !totp_fresh(&app, &app.db.get("totp_secret"), b["code"].as_str().unwrap_or("")) {
         return bad("wrong code");
     }
     app.db.set("totp_on", "0");
@@ -478,4 +547,36 @@ async fn token_delete(State(app): St, h: HeaderMap, Path(id): Path<i64>) -> Resp
     if let Err(r) = check_session(&app, &h) { return r; }
     let _ = app.db.exec("DELETE FROM api_tokens WHERE id=?1", &[&id]);
     Json(json!({"ok": true})).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_used_code_step_is_not_taken_again() {
+        assert!(step_is_new(101, 100));
+        assert!(!step_is_new(100, 100) && !step_is_new(99, 100));
+    }
+
+    #[test]
+    fn names_of_keys_and_tokens_are_reserved() {
+        assert!(reserved_admin_name("api-key") && reserved_admin_name("token:x"));
+        assert!(!reserved_admin_name("admin") && !reserved_admin_name(""));
+    }
+
+    #[test]
+    fn tries_at_once_still_stop_at_five() {
+        let mut m = std::collections::HashMap::new();
+        for _ in 0..MAX_FAILS {
+            count_fail(&mut m, "1.2.3.4");
+        }
+        assert!(matches!(m.get("1.2.3.4"), Some((n, _)) if *n >= MAX_FAILS));
+    }
+
+    #[test]
+    fn the_dummy_hash_has_the_real_work() {
+        assert!(DUMMY_HASH.starts_with("pbkdf2$120000$"));
+        assert!(!util::check_password(DUMMY_HASH, "anything"));
+    }
 }

@@ -153,21 +153,22 @@ fn hotp(key: &[u8], counter: u64) -> u32 {
 
 /// Accepts the current 30s step and one step either side
 pub fn totp_check(secret_b32: &str, code: &str) -> bool {
+    totp_step(secret_b32, code, now()).is_some()
+}
+
+/// The 30s step `code` belongs to (the step of `at`, or one either side), None when it is wrong.
+/// A caller that remembers the last step it accepted can refuse the same code a second time.
+pub fn totp_step(secret_b32: &str, code: &str, at: i64) -> Option<u64> {
     let code = code.trim();
     if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
-        return false;
+        return None;
     }
     let key = base32_decode(secret_b32);
     if key.is_empty() {
-        return false;
+        return None;
     }
-    let step = (now() / 30) as u64;
-    for s in [step.saturating_sub(1), step, step + 1] {
-        if ct_eq(&format!("{:06}", hotp(&key, s)), code) {
-            return true;
-        }
-    }
-    false
+    let step = (at.max(0) / 30) as u64;
+    [step.saturating_sub(1), step, step + 1].into_iter().find(|s| ct_eq(&format!("{:06}", hotp(&key, *s)), code))
 }
 
 // ---------------------------------------------------------------- network helpers
@@ -520,5 +521,22 @@ mod update_tests {
         assert!(std::fs::read_to_string(&prog).unwrap().contains("2.0.0"));
         assert!(!std::fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().ends_with(".new")));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod totp_tests {
+    use super::*;
+
+    #[test]
+    fn totp_step_names_the_step_of_the_code() {
+        let secret = totp_secret();
+        let key = base32_decode(&secret);
+        let at = 1_800_000_000;
+        let step = (at / 30) as u64;
+        assert_eq!(totp_step(&secret, &format!("{:06}", hotp(&key, step)), at), Some(step));
+        assert_eq!(totp_step(&secret, &format!("{:06}", hotp(&key, step - 1)), at), Some(step - 1));
+        assert_eq!(totp_step(&secret, &format!("{:06}", hotp(&key, step + 5)), at), None);
+        assert_eq!(totp_step(&secret, "12345", at), None);
     }
 }
