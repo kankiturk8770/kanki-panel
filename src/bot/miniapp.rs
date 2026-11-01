@@ -82,6 +82,11 @@ fn fail(code: StatusCode, msg: &str) -> Response {
     (code, [(header::CACHE_CONTROL, "no-store")], Json(json!({ "error": msg }))).into_response()
 }
 
+/// The bot could not message the customer (it was blocked, or Telegram did not answer): nothing was delivered
+fn undelivered() -> Response {
+    (StatusCode::BAD_GATEWAY, [(header::CACHE_CONTROL, "no-store")], Json(json!({ "ok": false, "error": "not delivered" }))).into_response()
+}
+
 /// The customer of a request (init data in the X-Tg-Init header, or `init` in the query for downloads)
 fn who(app: &App, h: &HeaderMap, q: &HashMap<String, String>) -> Result<i64, Response> {
     if !crate::limit::hit("tg", &crate::util::client_ip(h), 120, 60) {
@@ -189,7 +194,9 @@ async fn trial(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Str
     if let Err(r) = name_ok(&bot, tg, &q) {
         return r;
     }
-    bot.mini_trial(tg).await;
+    if !bot.mini_trial(tg).await {
+        return undelivered();
+    }
     Json(json!({ "ok": true })).into_response()
 }
 
@@ -204,9 +211,15 @@ async fn send(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
             if crate::amnezia::backup(&crate::api::amnezia_configs(&app, &u).await, "iOS").is_none() {
                 return fail(StatusCode::NOT_FOUND, "no WireGuard or AmneziaWG config");
             }
-            bot.send_amnezia(tg, "", &u, p).await;
+            if !bot.send_amnezia(tg, "", &u, p).await {
+                return undelivered();
+            }
         }
-        Some(("cfg", c)) if ["w", "a", "h", "l"].contains(&c) => bot.send_configs(tg, "", &u, c).await,
+        Some(("cfg", c)) if ["w", "a", "h", "l"].contains(&c) => {
+            if !bot.send_configs(tg, "", &u, c).await {
+                return undelivered();
+            }
+        }
         _ => return fail(StatusCode::BAD_REQUEST, "what"),
     }
     Json(json!({ "ok": true })).into_response()
@@ -280,7 +293,9 @@ async fn buy(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Strin
             return r;
         }
     }
-    bot.start_purchase(tg, pid, n("renew")).await;
+    if !bot.start_purchase(tg, pid, n("renew")).await {
+        return undelivered();
+    }
     Json(json!({ "ok": true })).into_response()
 }
 

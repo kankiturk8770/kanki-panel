@@ -369,7 +369,7 @@ pub fn clean_db(app: &App) -> Value {
     let logins = n("DELETE FROM login_log WHERE ts<?1", month);
     let audit = n("DELETE FROM audit WHERE ts<?1", month);
     let sessions = n("DELETE FROM sessions WHERE expires<?1", t);
-    let orders = n("DELETE FROM orders WHERE status IN ('pending','waiting','rejected','error') AND created<?1", week);
+    let orders = n("DELETE FROM orders WHERE status IN ('pending','waiting','rejected','error','expired') AND created<?1", week);
     // free trials that are over (the bot removes them within a minute; this also covers a paused bot)
     let trials = app.db.finished_trials();
     for u in &trials {
