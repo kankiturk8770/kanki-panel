@@ -321,6 +321,8 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/bot", get(bot_get).put(bot_put).delete(bot_delete))
         .route("/api/bot/test", post(bot_test))
         .route("/api/bot/pause", post(bot_pause))
+        .route("/api/bot/watch", get(watch_get).put(watch_put))
+        .route("/api/bot/watch/send", post(watch_send))
         .route("/api/bulk/users", post(bulk))
         .route("/api/update/check", get(update_check))
         .route("/api/update/apply", post(update_apply))
@@ -564,6 +566,96 @@ async fn logs(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
     Json(json!({ "src": src, "lines": lines })).into_response()
 }
 
+// ---------------------------------------------------------------- daily report (kanki-watch)
+// A small script on the panel server (`/usr/local/bin/kanki-watch.py`, cron `/etc/cron.d/kanki-watch`) checks the
+// tunnels and servers through this API and sends the admin a Telegram report. It reads its API token from
+// `/etc/kanki/watch.tok`; the bot page writes that file, so the token is changed without a shell on the server.
+const WATCH_SCRIPT: &str = "/usr/local/bin/kanki-watch.py";
+const WATCH_TOK: &str = "/etc/kanki/watch.tok";
+const WATCH_LOG: &str = "/var/log/kanki-watch.log";
+
+/// The script asks `/api/tunnels` and `/api/servers`: a token of the Security page (or the old API key) with
+/// the «nodes» right. A login session is refused (it ends).
+pub fn watch_token_problem(app: &App, tok: &str) -> Option<&'static str> {
+    let tok = tok.trim();
+    if tok.is_empty() || tok.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Some("paste the whole API token");
+    }
+    let mut h = HeaderMap::new();
+    match axum::http::HeaderValue::from_str(&format!("Bearer {}", tok)) {
+        Ok(v) => { h.insert(axum::http::header::AUTHORIZATION, v); }
+        Err(_) => return Some("paste the whole API token"),
+    }
+    match crate::auth::identify(app, &h) {
+        None => Some("the panel does not know this token (deleted, or not copied whole)"),
+        Some((actor, _)) if actor != "api-key" && !actor.starts_with("token:") => Some("this is a login session, not an API token: make one on System › Security › API tokens"),
+        Some((_, scopes)) if !crate::auth::has_scope(&scopes, "nodes") => Some("this token has no «Servers and tunnels» (nodes) right"),
+        Some(_) => None,
+    }
+}
+
+fn watch_state(app: &App) -> Value {
+    let tok = std::fs::read_to_string(WATCH_TOK).unwrap_or_default();
+    let log = std::fs::read_to_string(WATCH_LOG).unwrap_or_default();
+    let last = log.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(300).collect::<String>();
+    json!({
+        "installed": std::path::Path::new(WATCH_SCRIPT).exists(),
+        "token_set": !tok.trim().is_empty(),
+        "token_masked": mask(tok.trim()),
+        "problem": if tok.trim().is_empty() { Value::Null } else { json!(watch_token_problem(app, &tok)) },
+        "last": last,
+    })
+}
+
+async fn watch_get(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    Json(watch_state(&app)).into_response()
+}
+
+async fn watch_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    if let Err(r) = crate::auth::check_session(&app, &h) {
+        return r;
+    }
+    let tok = b["token"].as_str().unwrap_or("").trim().to_string();
+    if let Some(p) = watch_token_problem(&app, &tok) {
+        return err(StatusCode::BAD_REQUEST, p);
+    }
+    if let Err(e) = write_secret(WATCH_TOK, &tok) {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, &format!("cannot write {}: {}", WATCH_TOK, e));
+    }
+    Json(watch_state(&app)).into_response()
+}
+
+/// A file only root can read (written whole, then moved in place)
+fn write_secret(path: &str, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let p = std::path::Path::new(path);
+    if let Some(d) = p.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let tmp = format!("{}.new", path);
+    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
+    f.write_all(text.as_bytes())?;
+    f.sync_all()?;
+    std::fs::rename(&tmp, p)
+}
+
+/// Runs the script once with `--daily`: the report goes to Telegram now
+async fn watch_send(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    if !std::path::Path::new(WATCH_SCRIPT).exists() {
+        return err(StatusCode::NOT_FOUND, "the report script is not on this server");
+    }
+    let run = tokio::process::Command::new("python3").args(["-I", WATCH_SCRIPT, "--daily"]).kill_on_drop(true).output();
+    match tokio::time::timeout(std::time::Duration::from_secs(120), run).await {
+        Ok(Ok(o)) if o.status.success() => Json(json!({"ok": true, "out": String::from_utf8_lossy(&o.stdout).chars().take(500).collect::<String>()})).into_response(),
+        Ok(Ok(o)) => err(StatusCode::BAD_GATEWAY, &String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("the report script failed").chars().take(300).collect::<String>()),
+        Ok(Err(e)) => err(StatusCode::INTERNAL_SERVER_ERROR, &format!("cannot run python3: {}", e)),
+        Err(_) => err(StatusCode::GATEWAY_TIMEOUT, "the report script took more than 2 minutes"),
+    }
+}
+
 // ---------------------------------------------------------------- Telegram sales bot
 fn mask(t: &str) -> String {
     if t.len() > 10 { format!("{}…{}", &t[..6], &t[t.len() - 4..]) } else { String::new() }
@@ -765,4 +857,54 @@ pub fn drop_legacy_openvpn() {
     let kept: Vec<&str> = t.lines().filter(|l| !l.trim_start().starts_with("OVPN_")).collect();
     let _ = std::fs::write(ENVF, kept.join("\n") + "\n");
     eprintln!("OpenVPN of an old Kanki version removed from this server ({} service(s), {} port(s))", units.len(), ports.len());
+}
+
+#[cfg(test)]
+mod watch_tests {
+    use super::*;
+    use std::sync::{atomic::AtomicI64, Mutex};
+
+    fn app() -> App {
+        let dir = std::env::temp_dir().join(format!("kanki-watch-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        App {
+            db: crate::db::Db::open(dir.join("kanki.db").to_str().unwrap()),
+            env: HashMap::new(),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn token(app: &App, t: &str, scopes: &str) {
+        app.db.exec("INSERT INTO api_tokens(name,hash,prefix,scopes,created) VALUES(?1,?2,?3,?4,?5)",
+            &[&"t", &crate::util::sha256_hex(t), &"kk_", &scopes, &0i64]).unwrap();
+    }
+
+    #[test]
+    fn only_a_live_token_with_the_nodes_right_is_taken_for_the_report() {
+        let a = app();
+        token(&a, "kk_nodes", "nodes");
+        token(&a, "kk_users", "users:read");
+        token(&a, "kk_all", "admin");
+        assert_eq!(watch_token_problem(&a, "kk_nodes"), None);
+        assert_eq!(watch_token_problem(&a, " kk_all\n"), None);
+        assert!(watch_token_problem(&a, "kk_users").unwrap().contains("nodes"));
+        // a deleted token (the cause of «HTTP Error 401» in the report), a broken paste, nothing
+        assert!(watch_token_problem(&a, "kk_gone").unwrap().contains("does not know"));
+        assert!(watch_token_problem(&a, "kk_no des").is_some());
+        assert!(watch_token_problem(&a, "").is_some());
+        // a login session ends: not taken
+        a.db.exec("INSERT INTO sessions(id,hash,username,expires) VALUES(?1,?2,?3,?4)", &[&"s1", &crate::util::sha256_hex("sess"), &"admin", &(crate::util::now() + 3600)]).unwrap();
+        assert!(watch_token_problem(&a, "sess").unwrap().contains("login session"));
+    }
+
+    #[test]
+    fn the_token_file_is_only_for_root() {
+        use std::os::unix::fs::PermissionsExt;
+        let p = std::env::temp_dir().join(format!("kanki-watch-tok-{}", crate::util::rand_token(8)));
+        write_secret(p.to_str().unwrap(), "kk_abc").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "kk_abc");
+        assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
+    }
 }
