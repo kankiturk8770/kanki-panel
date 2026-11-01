@@ -111,6 +111,15 @@ input[type=range]{width:100%;accent-color:var(--gold2);height:32px;margin:0}
 .plan .b{min-height:40px;flex:none}
 .cat{font-size:13px;font-weight:800;color:var(--hint);margin:16px 2px 8px}
 
+/* config name, trial, orders */
+.in{width:100%;min-height:44px;border-radius:12px;border:1px solid var(--sep);background:var(--bg);color:var(--tx);font:inherit;padding:0 12px;direction:ltr;text-align:left}
+.in:focus{outline:2px solid var(--gold2);outline-offset:1px}
+.b.blue{border:0;background:#3b8be0;color:#fff}
+.ost{font-size:12px;font-weight:800;padding:2px 10px;border-radius:10px;white-space:nowrap}
+.ost.g{color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,transparent)}
+.ost.y{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
+.ost.r{color:var(--bad);background:color-mix(in srgb,var(--bad) 14%,transparent)}
+
 /* states */
 .empty{text-align:center;padding:48px 8px}
 .empty .mk{width:64px;height:64px;margin:0 auto 12px;border-radius:18px;display:grid;place-items:center;font-size:30px;font-weight:900;color:var(--ink);background:linear-gradient(160deg,var(--gold1),var(--gold2))}
@@ -141,7 +150,7 @@ function route(s){var to=flag(s.cc)||'🌐';return s.iran?flag('IR')+'→'+to:to
 function gb(x){return x>=100?fa(Math.round(x)):fa((Math.round(x*10)/10).toString())}
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(function(){e.classList.remove('on')},2600)}
 function buzz(k){var w=tg();try{w&&w.HapticFeedback&&w.HapticFeedback.notificationOccurred(k)}catch(e){}}
-function api(path){return fetch(path,{headers:{'X-Tg-Init':initData()},cache:'no-store'}).then(function(r){return r.json().catch(function(){return{}}).then(function(j){if(!r.ok)throw new Error(j.error||r.status);return j})})}
+function api(path){return fetch(path,{headers:{'X-Tg-Init':initData()},cache:'no-store'}).then(function(r){return r.json().catch(function(){return{}}).then(function(j){if(!r.ok){var e=new Error(j.error||r.status);e.why=j.why;throw e}return j})})}
 var PN={i:'آیفون',a:'اندروید',w:'ویندوز'};
 var ST={Active:['فعال','var(--ok)'],Limited:['حجم تمام شده','var(--warn)'],Expired:['زمان تمام شده','var(--warn)'],Disabled:['غیرفعال','var(--bad)']};
 
@@ -150,6 +159,17 @@ function toman(n){return fa(Math.round(n).toLocaleString('en-US')).replace(/,/g,
 function price(r,g,days,conns){var m=Math.max(1,days/30),p=(+r.base||0)*m+g*(+r.gb||0)+Math.max(0,conns-1)*(+r.conn||0)*m;
  if(g>=50&&+r.bulk>0)p=p*(1-Math.min(40,+r.bulk*(g>=100?2:1))/100);var rd=+r.round||1000;return Math.max(rd,Math.round(p/rd)*rd)}
 function dur(d){return d%30?fa(d)+' روز':(d==30?'یک ماه':fa(d/30)+' ماه')}
+var OST={pending:['در انتظار تأیید','y'],waiting:['در انتظار پرداخت','y'],approved:['تأیید شد','g'],done:['فعال شد','g'],rejected:['رد شد','r'],error:['خطا؛ پشتیبانی پیگیری می‌کنه','r']};
+function ordersHtml(){if(!A.orders||!A.orders.length)return '';
+ return '<h2>سفارش‌های من</h2><div class="card">'+A.orders.map(function(o){var st=OST[o.status]||[o.status||'—','y'],amt=+o.amount;
+  return '<div class="row"><div class="nm"><b>'+esc(o.plan||'سفارش')+'</b><small>'+(o.kind=='renew'?'تمدید':'خرید')+'، '+(amt>0&&o.method!='np'&&o.method!='wallet'?toman(amt):'')+(o.created?' '+new Date(o.created*1000).toLocaleDateString('fa-IR'):'')+'</small></div><span class="ost '+st[1]+'">'+st[0]+'</span></div>'}).join('')+'</div>'}
+function nameCard(){if(!A.needName||A.renew)return '';
+ return '<div class="card" style="margin-bottom:12px"><span class="lbl" style="margin-top:0">اسم کانفیگ شما</span><input class="in" id="cn" maxlength="12" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="mahtab87" value="'+esc(A.name||'')+'">'+
+  '<p class="lead" style="margin:6px 2px 0">فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف، اولش حرف. توی برنامه با همین اسم می‌بینیدش.</p></div>'}
+function nameQ(){if(!A.needName||A.renew)return '';var e=document.getElementById('cn'),v=e?e.value.trim():'';A.name=v;return '&name='+encodeURIComponent(v)}
+function why(e,j){var m=e.message;if(m=='name')return 'اول اسم کانفیگ رو بنویسید';if(m=='bad name')return (j||'اسم کانفیگ درست نیست').replace(/<[^>]+>/g,'').split('\n')[0];
+ if(m=='join the channel')return 'اول عضو کانال بشید؛ ربات لینکش رو توی چت فرستاد';if(m=='the bot is off')return 'ربات الان در دسترس نیست؛ کمی بعد امتحان کنید';
+ if(m=='sales are off')return 'فروش فعلاً بسته است';if(m=='no trial')return 'تست رایگان قبلاً گرفته شده';return 'نشد، دوباره امتحان کنید'}
 function empty(icon,title,text,btn){document.getElementById('app').innerHTML='<div class="empty"><div class="mk">'+icon+'</div><b>'+title+'</b><p class="muted">'+text+'</p>'+(btn||'')+'</div>'}
 
 function tabs(){if(!A.shop||(!A.shop.custom.on&&!A.shop.plans.length)||!A.shop.sales)return '';
@@ -159,6 +179,8 @@ function noAccount(){empty('K','هنوز اشتراکی ندارید','بعد ا
 function wireTabs(){Array.prototype.slice.call(document.querySelectorAll('[data-v]')).forEach(function(b){b.onclick=function(){A.view=b.dataset.v;render()}})}
 
 function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){return x.id==A.renew})[0],h=(A.list.length?tabs():'');
+ h+=nameCard();
+ if(A.trial&&!mine)h+='<div class="card" style="margin-bottom:12px;display:flex;align-items:center;gap:12px"><div style="flex:1"><b>🎁 تست رایگان</b><p class="lead" style="margin:2px 0 0">قبل از خرید امتحان کنید؛ یک بار برای هر نفر.</p></div><button class="b blue" id="tri">گرفتن تست</button></div>';
  if(mine)h+='<p class="lead" style="margin:0 2px 12px">تمدید حساب <b class="ltr">'+esc(mine.name)+'</b>: حجم و روز به همین حساب اضافه می‌شه. <button class="b" id="nr" style="min-height:40px;margin-inline-start:6px">خرید حساب تازه</button></p>';
  if(c.on){var cb=A.cb||(A.cb={g:Math.min(c.max_gb,Math.max(c.min_gb,30)),d:c.days[0],u:1});
   // renewing: never fewer users than the account has (a renewal raises it, never lowers it)
@@ -174,6 +196,7 @@ function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){retu
   cats.forEach(function(k){if(cats.length>1)h+='<div class="cat">'+esc(k||'سایر پلن‌ها')+'</div>';
    sh.plans.filter(function(p){return p.category==k}).forEach(function(p){var st=p.style&&p.style!='none'?p.style:(p.style=='none'?'':(p.conns>=2?'success':'primary'));
     h+='<div class="plan '+st+'"><div class="nm"><b>'+esc(p.name)+'</b><small>'+(p.gb>0?fa(p.gb)+' گیگ':'نامحدود')+'، '+dur(p.days)+'، '+fa(p.conns)+' کاربره</small></div><span class="pr">'+toman(p.toman)+'</span><button class="b" data-pid="'+p.id+'">خرید</button></div>'})})}
+ if(!A.list.length)h+=ordersHtml();
  if(!c.on&&!sh.plans.length)h+='<div class="empty"><b>فعلاً پلنی برای فروش نیست</b><p class="muted">کمی بعد دوباره سر بزنید یا به پشتیبانی پیام بدید.</p></div>';
  document.getElementById('app').innerHTML=h;wireTabs();wireBuy()}
 
@@ -184,9 +207,9 @@ function wireBuy(){var $=function(s){return document.querySelector(s)},all=funct
  if($('#gm')){$('#gm').onclick=function(){step(-1)};$('#gp').onclick=function(){step(1)};$('#gr').oninput=function(){cb.g=+this.value;upd()}}
  all('[data-d]').forEach(function(b){b.onclick=function(){cb.d=+b.dataset.d;all('[data-d]').forEach(function(x){x.classList.toggle('on',x==b)});upd()}});
  all('[data-u]').forEach(function(b){b.onclick=function(){cb.u=+b.dataset.u;all('[data-u]').forEach(function(x){x.classList.toggle('on',x==b)});upd()}});
- function go(q,b){b.disabled=true;api('/tg/api/buy?'+q+(A.renew?'&renew='+A.renew:'')).then(function(){buzz('success');toast('صفحه‌ی پرداخت توی چت ربات اومد');
-   setTimeout(function(){var w=tg();if(w&&w.close)w.close()},1400)}).catch(function(e){buzz('error');b.disabled=false;
-   toast(e.message=='the bot is off'?'ربات الان در دسترس نیست؛ کمی بعد امتحان کنید':e.message=='sales are off'?'فروش فعلاً بسته است':'نشد، دوباره امتحان کنید')})}
+ function closeSoon(t){buzz('success');toast(t);setTimeout(function(){var w=tg();if(w&&w.close)w.close()},1400)}
+ function go(q,b){b.disabled=true;api('/tg/api/buy?'+q+(A.renew?'&renew='+A.renew:'')+nameQ()).then(function(){closeSoon('صفحه‌ی پرداخت توی چت ربات اومد')}).catch(function(e){buzz('error');b.disabled=false;toast(why(e,e.why));var n=document.getElementById('cn');if(n&&/name/.test(e.message))n.focus()})}
+ var tri=$('#tri');if(tri)tri.onclick=function(){tri.disabled=true;api('/tg/api/trial?x=1'+nameQ()).then(function(){closeSoon('تست رایگان توی چت ربات اومد')}).catch(function(e){buzz('error');tri.disabled=false;toast(why(e,e.why))})};
  var cbuy=$('#cbuy');if(cbuy)cbuy.onclick=function(){go('gb='+cb.g+'&days='+cb.d+'&users='+cb.u,cbuy)};
  all('[data-pid]').forEach(function(b){b.onclick=function(){go('pid='+b.dataset.pid,b)}})}
 
@@ -217,6 +240,7 @@ function draw(){var u=A.list[A.cur];if(!u)return;
   cfg.map(function(c){return '<div class="row"><div class="nm"><b>'+c[2]+'</b><small>'+c[3]+'</small></div><button class="b" data-cfg="'+c[1]+'">ارسال</button></div>'}).join('')+'</div>'}
  if(u.servers.length){h+='<h2>سرورها</h2><div class="card">'+u.servers.map(function(s){return '<div class="row"><span class="fl ltr">'+route(s)+'</span><div class="nm"><b class="ltr sn">'+esc(s.name)+'</b><small>'+(s.iran?'از راه ایران':'مستقیم')+'</small>'+
    '<div class="tags">'+s.protocols.map(function(p){return '<span class="ltr">'+esc({wireguard:'WireGuard',amneziawg:'AmneziaWG',hysteria2:'Hysteria2',kankimix:'KANKI MIX'}[p]||p)+'</span>'}).join('')+'</div></div></div>'}).join('')+'</div>'}
+ h+=ordersHtml();
  document.getElementById('app').innerHTML=h;
  wireTabs();wire(u)}
 
@@ -237,7 +261,7 @@ function wire(u){var $=function(s){return document.querySelector(s)},all=functio
 function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}}
  var p=(w&&w.platform)||'';A.plat=/ios|macos/.test(p)?'i':/tdesktop|windows|weba|webk/.test(p)?'w':'a';
  if(!initData())return empty('K','این صفحه رو از ربات باز کنید','مینی‌اپ کانکی فقط از داخل ربات تلگرام باز می‌شه.');
- Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
+ Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
 // wait a moment for Telegram's script, then go on without it
 var n=0;(function go(){if(tg()||n++>15)start();else setTimeout(go,100)})();
 })();

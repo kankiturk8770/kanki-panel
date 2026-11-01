@@ -424,6 +424,40 @@ impl Bot {
         Some(vec![b(&self.bt("shop"), &format!("webapp:shop:{}?buy=1{}", mini, r))])
     }
 
+    /// For the mini app: false (and the "join the channel" message in the chat) when the required channel is
+    /// not joined, as every button of the bot does
+    pub(crate) async fn mini_gate(&self, uid: i64) -> bool {
+        if self.joined(uid).await {
+            return true;
+        }
+        self.ask_join(uid).await;
+        false
+    }
+
+    /// For the mini app: a config name is still needed before the first account (the bot asks it too)
+    pub(crate) fn needs_name(&self, uid: i64) -> bool {
+        self.cfg_name_for(uid).is_none()
+    }
+
+    /// For the mini app: the config name typed there, checked as the bot checks it (Err = why not)
+    pub(crate) fn set_name(&self, uid: i64, name: &str) -> Result<String, String> {
+        let n = self.check_name(name.trim(), 0)?;
+        // a customer who never wrote to the bot has no row yet (the names Telegram gave stay as they are)
+        let _ = self.db().exec("INSERT OR IGNORE INTO bot_users(tg_id,joined) VALUES(?1,?2)", &[&uid, &now()]);
+        let _ = self.db().exec("UPDATE bot_users SET cfg_name=?1 WHERE tg_id=?2", &[&n, &uid]);
+        Ok(n)
+    }
+
+    /// For the mini app: can this customer still get the free trial?
+    pub(crate) fn trial_open(&self, uid: i64) -> bool {
+        self.db().on("trial_on") && !self.trial_taken(uid)
+    }
+
+    /// For the mini app: the free trial, delivered in the chat exactly as from the bot's button
+    pub(crate) async fn mini_trial(&self, uid: i64) {
+        self.trial(uid, uid, 0).await;
+    }
+
     /// From the mini app: buy plan `pid` (a new account, or more for the buyer's account `renew`); the bot
     /// shows the plan and the payment methods in the chat, exactly as after tapping the plan in the bot.
     pub(crate) async fn start_purchase(&self, uid: i64, pid: i64, renew: i64) {
@@ -2863,6 +2897,25 @@ mod flow_tests {
             b["callback_data"].as_str().or(b["web_app"]["url"].as_str()).unwrap_or("").to_string(),
             b["style"].as_str().unwrap_or("").to_string(),
         )).collect()
+    }
+
+    #[tokio::test]
+    async fn the_mini_app_asks_a_config_name_and_gives_the_trial_once() {
+        let (bot, log) = bot().await;
+        let tg = 7101;
+        // a customer who never wrote to the bot, with no usable Telegram name
+        assert!(bot.needs_name(tg));
+        assert!(bot.set_name(tg, "1bad").is_err());
+        assert!(bot.set_name(tg, "a").is_err());
+        assert_eq!(bot.set_name(tg, "Mahtab87").map(|n| n.to_lowercase()), Ok("mahtab87".to_string()));
+        assert!(!bot.needs_name(tg));
+        // the trial: delivered in the chat with that name, then closed for that customer
+        assert!(bot.trial_open(tg));
+        bot.mini_trial(tg).await;
+        let acc = bot.db().users_of_tg(tg);
+        assert_eq!(acc.len(), 1, "{}", last(&log, tg));
+        assert!(acc[0].username.to_lowercase().starts_with("mahtab87"), "{}", acc[0].username);
+        assert!(!bot.trial_open(tg));
     }
 
     #[tokio::test]

@@ -40,6 +40,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/tg/api/file", get(file))
         .route("/tg/api/shop", get(shop))
         .route("/tg/api/buy", get(buy))
+        .route("/tg/api/trial", get(trial))
 }
 
 /// The Telegram user id of a signed init data, or None when the signature does not match, it is older than
@@ -132,11 +133,60 @@ fn account_json(app: &App, u: &User) -> Value {
     })
 }
 
-/// GET /tg/api/me: every account of the customer
+/// The running bot (it holds the pending purchases), else a fresh one for what needs only the database
+fn bot_of(app: &Arc<App>) -> Option<Arc<crate::bot::Bot>> {
+    crate::bot::running().or_else(|| crate::bot::Bot::new(app.clone()))
+}
+
+/// The customer's last orders: (id, plan, toman, status, method, created)
+fn orders(app: &App, tg: i64) -> Vec<Value> {
+    app.db.with(|c| {
+        let mut s = c.prepare("SELECT o.id, COALESCE(p.name,''), COALESCE(o.amount,''), COALESCE(o.status,''), COALESCE(o.method,''), COALESCE(o.created,0), COALESCE(o.kind,'') \
+            FROM orders o LEFT JOIN plans p ON p.id=o.plan_id WHERE o.tg_id=?1 ORDER BY o.id DESC LIMIT 10").unwrap();
+        let v: Vec<Value> = s.query_map([tg], |r| Ok(json!({
+            "id": r.get::<_, i64>(0)?, "plan": r.get::<_, String>(1)?, "amount": r.get::<_, String>(2)?, "status": r.get::<_, String>(3)?,
+            "method": r.get::<_, String>(4)?, "created": r.get::<_, i64>(5)?, "kind": r.get::<_, String>(6)?,
+        }))).unwrap().filter_map(|x| x.ok()).collect();
+        v
+    })
+}
+
+/// GET /tg/api/me: every account of the customer, their last orders, and what the shop still needs
 async fn me(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
     let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
     let list: Vec<Value> = app.db.users_of_tg(tg).iter().map(|u| account_json(&app, u)).collect();
-    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list }))).into_response()
+    let bot = bot_of(&app);
+    let need_name = bot.as_ref().map(|b| b.needs_name(tg)).unwrap_or(false);
+    let trial = bot.as_ref().map(|b| b.trial_open(tg)).unwrap_or(false);
+    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "orders": orders(&app, tg), "need_name": need_name, "trial": trial }))).into_response()
+}
+
+/// The config name a first purchase or trial needs (sent as `name`), saved as the bot saves it
+fn name_ok(bot: &crate::bot::Bot, tg: i64, q: &HashMap<String, String>) -> Result<(), Response> {
+    if !bot.needs_name(tg) {
+        return Ok(());
+    }
+    match q.get("name").map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        None => Err(fail(StatusCode::BAD_REQUEST, "name")),
+        Some(n) => bot.set_name(tg, n).map(|_| ()).map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": "bad name", "why": e }))).into_response()),
+    }
+}
+
+/// GET /tg/api/trial (&name=..): the free trial, delivered in the chat
+async fn trial(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+    let Some(bot) = bot_of(&app) else { return fail(StatusCode::SERVICE_UNAVAILABLE, "the bot is off") };
+    if !bot.trial_open(tg) {
+        return fail(StatusCode::FORBIDDEN, "no trial");
+    }
+    if !bot.mini_gate(tg).await {
+        return fail(StatusCode::FORBIDDEN, "join the channel");
+    }
+    if let Err(r) = name_ok(&bot, tg, &q) {
+        return r;
+    }
+    bot.mini_trial(tg).await;
+    Json(json!({ "ok": true })).into_response()
 }
 
 /// GET /tg/api/send?uid=..&what=amz:i|amz:a|amz:w|cfg:w|cfg:a|cfg:h: the bot sends it to the customer's chat
@@ -216,6 +266,16 @@ async fn buy(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Strin
         }
     };
     let Some(bot) = crate::bot::running() else { return fail(StatusCode::SERVICE_UNAVAILABLE, "the bot is off") };
+    // the same gates as the bot's buttons: the required channel, and a config name before a new account
+    if !bot.mini_gate(tg).await {
+        return fail(StatusCode::FORBIDDEN, "join the channel");
+    }
+    let renewing = n("renew") > 0 && app.db.user(n("renew")).map(|u| u.tg_id == tg).unwrap_or(false);
+    if !renewing {
+        if let Err(r) = name_ok(&bot, tg, &q) {
+            return r;
+        }
+    }
     bot.start_purchase(tg, pid, n("renew")).await;
     Json(json!({ "ok": true })).into_response()
 }
