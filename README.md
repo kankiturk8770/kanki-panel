@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.23 — AmneziaVPN backup and the bot's mini app
+- One `.backup` file for the AmneziaVPN app (iPhone, Android, Windows) with every WireGuard and AmneziaWG server of the account, each named by its route with flags (🇮🇷→🇹🇷 AmneziaWG · TURKEY): from the bot, the mini app or the user window.
+- The bot's mini app: a customer sees their account (data, days, link, servers) and gets the backup and the configs from one page.
+
 ## New in 3.22.4 — connection limit of the account
 - A one-connection account works on one device, two on two; another device connects only after one disconnects. Any app, any protocol. Pings and opening the subscription link never count.
 

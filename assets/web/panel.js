@@ -863,7 +863,8 @@ function kcAll(p,on){var n=KC.meta[p].name;if(!confirm(on?n+' '+t('for every use
 // ==================================================================== the panel: login, shell, pages
 "use strict";
 // Persian text of the whole panel
-var FA={"Weak connection to the panel: showing the last data, trying again…":"اتصال به پنل ضعیف است: آخرین داده نشان داده می‌شود، دوباره تلاش می‌کنیم…",
+var FA={"AmneziaVPN backup: every WireGuard and AmneziaWG server in one file (Restore from backup)":"بکاپ AmneziaVPN: همهٔ سرورهای WireGuard و AmneziaWG در یک فایل (Restore from backup)",
+"Weak connection to the panel: showing the last data, trying again…":"اتصال به پنل ضعیف است: آخرین داده نشان داده می‌شود، دوباره تلاش می‌کنیم…",
  "Iran servers that still run VPN services nobody uses":"سرورهای ایرانی که هنوز سرویس VPN بی‌استفاده اجرا می‌کنند",
  "Off: stopped on this server, its port closed, no links for it":"خاموش: روی این سرور متوقف، پورتش بسته و لینکی برایش ساخته نمی‌شود",
  "Remove WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from every Iran server that serves no VPN user? Their tunnels, Xray and Kanki DNS stay.":"وایرگارد، AmneziaWG، Hysteria2 و KANKI MIX از همه‌ی سرورهای ایرانی که به هیچ کاربری VPN نمی‌دهند پاک شود؟ تانل‌ها، Xray و DNS کانکی آن‌ها می‌مانند.",
@@ -3595,8 +3596,12 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
    $('#s_rg').onclick=function(){confirmDo(function(){api('POST','/api/users/'+u.id+'/regen').then(function(){toast(t('Done'));return loadUsers()}).then(function(){editUser(id,'link')}).catch(fail)})};return}
   if(k=='link'){el.innerHTML='<small class="muted">'+t('Subscription link')+' · '+t('Created')+' '+(u.created_at?jdate(Date.parse(u.created_at)/1000):'—')+'</small><div class="lk">'+esc(u.link)+'</div>'+
     '<div class="g2" style="gap:8px"><button class="btn" id="s_cp">'+ic('copy',16)+' '+t('Copy link')+'</button><a class="b2" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="'+esc(u.link)+'">'+ic('ext',16)+' '+t('Open page')+'</a></div>'+
-    '<div class="us-cfg"><small class="muted">'+t('Configs')+'</small><div id="sx"></div></div>';
-   $('#s_cp').onclick=function(){copy(u.link)};sheetCfg(u.id);return}
+    '<div class="us-cfg"><small class="muted">'+t('Configs')+'</small><div id="sx"></div></div>'+
+    '<div class="us-cfg"><small class="muted">'+t('AmneziaVPN backup: every WireGuard and AmneziaWG server in one file (Restore from backup)')+'</small>'+
+    '<div class="row" style="gap:8px;flex-wrap:wrap;margin-top:6px">'+[['i','iPhone'],['a','Android'],['w','Windows']].map(function(x){return '<button class="b2 sm" data-amz="'+x[0]+'">'+ic('dl',15)+' '+x[1]+'</button>'}).join('')+'</div></div>';
+   $('#s_cp').onclick=function(){copy(u.link)};sheetCfg(u.id);
+   $$('[data-amz]',el).forEach(function(b){b.onclick=function(){var me=this;me.disabled=true;
+    api('GET','/api/users/'+u.id+'/amnezia/'+me.dataset.amz,undefined,{blob:1}).then(function(r){dl(r);me.disabled=false}).catch(function(e){me.disabled=false;fail(e)})}});return}
   if(k=='qr')qrInto(el,u.link)}
  $('#us_q').onclick=function(e){var b=e.target.closest('[data-t]');if(!b)return;var k=b.dataset.t;
   if(k=='reset')return resetU(u.id);if(k=='del')return delU(u.id);show(cur==k?'':k)};

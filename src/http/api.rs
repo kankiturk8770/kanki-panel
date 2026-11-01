@@ -283,6 +283,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/users", get(users_list).post(users_create))
         .route("/api/users/:id", axum::routing::put(users_update).delete(users_delete))
         .route("/api/users/:id/:action", post(users_action))
+        .route("/api/users/:id/amnezia/:platform", get(users_amnezia))
         .route("/api/nodes", get(nodes_list).post(nodes_add))
         .route("/api/nodes/:id", axum::routing::put(nodes_edit).delete(nodes_delete))
         .route("/api/nodes/:id/:action", post(nodes_action))
@@ -308,6 +309,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/config/:id/:proto/:extra", get(config_file_extra))
         .route("/hy2/auth", post(hy2_auth))
         .merge(crate::auth::router())
+        .merge(crate::miniapp::router())
         .merge(crate::admin::router())
         .merge(crate::backup::router())
         .merge(crate::apps::router())
@@ -1621,6 +1623,44 @@ pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str, tunnel:
     let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20).await.ok()?;
     let text = String::from_utf8(bytes.to_vec()).ok()?;
     Some((conf_file_name_via(app, u, n, proto, tunnel), text))
+}
+
+/// Every WireGuard / AmneziaWG config of a user as (name in the app, .conf text), for an AmneziaVPN backup:
+/// AmneziaWG first, each server's direct config, then its copy through the tunnel. The name shows the
+/// route with flags: "🇮🇷→🇹🇷 AmneziaWG · TURKEY" through Iran, "🇹🇷 WireGuard · TURKEY" straight.
+pub async fn amnezia_configs(app: &Arc<App>, u: &User) -> Vec<(String, String)> {
+    let mut out = vec![];
+    for (proto, title) in [("amneziawg", "AmneziaWG"), ("wireguard", "WireGuard")] {
+        for n in user_nodes(app, u) {
+            let to = crate::amnezia::flag(&crate::exitgeo::cc(app, &n.id));
+            for tunnel in [false, true] {
+                let has = if tunnel { twin_protos(app, u, &n) } else { node_protos(app, u, &n) };
+                if !has.contains(&proto) {
+                    continue;
+                }
+                if let Some((_, text)) = bot_config(app, u, &n, proto, tunnel).await {
+                    let via_iran = tunnel || crate::direct::through_tunnel(app, &n);
+                    let route = if via_iran { format!("{}→{}", crate::amnezia::flag("IR"), to) } else { to.clone() };
+                    let name = format!("{} {} · {}", route.trim(), title, n.name).trim().to_string();
+                    out.push((name, text));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// GET /api/users/:id/amnezia/:platform (i, a, w): the AmneziaVPN backup file of a user
+async fn users_amnezia(State(app): St, h: HeaderMap, Path((id, platform)): Path<(i64, String)>) -> Response {
+    let _ = guard!(app, h, "users:read");
+    let Some(plat) = crate::amnezia::platform(&platform) else { return err(StatusCode::BAD_REQUEST, "platform: i, a or w") };
+    let Some(u) = app.db.user(id) else { return err(StatusCode::NOT_FOUND, "user") };
+    let Some(body) = crate::amnezia::backup(&amnezia_configs(&app, &u).await, plat) else {
+        return err(StatusCode::NOT_FOUND, "this user has no WireGuard or AmneziaWG config");
+    };
+    let name = crate::amnezia::file_name(&u.username);
+    ([(header::CONTENT_TYPE, "application/json; charset=utf-8".to_string()),
+      (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", name))], body).into_response()
 }
 
 /// `h`: the request of an app (its device is remembered); None = the panel's own bots

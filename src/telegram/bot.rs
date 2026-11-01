@@ -81,6 +81,8 @@ const BTNS: &[(&str, &str, &str)] = &[
     ("cfg_w", "📥 کانفیگ WireGuard", "زیر پیام اشتراک"),
     ("cfg_a", "📥 کانفیگ AmneziaWG", "زیر پیام اشتراک"),
     ("cfg_h", "📥 کانفیگ Hysteria2", "زیر پیام اشتراک"),
+    ("amz", "📦 بکاپ Amnezia (همه‌ی سرورها یک‌جا)", "زیر پیام اشتراک"),
+    ("miniapp", "📱 حساب من (مینی‌اپ)", "زیر پیام اشتراک"),
     ("renew_this", "🔁 تمدید همین سرویس", "زیر پیام اشتراک"),
     ("rename", "✏️ تغییر نام کانفیگ", "زیر پیام اشتراک"),
     ("other_plans", "📦 سایر پلن‌ها", "فهرست دسته‌بندی پلن‌ها"),
@@ -175,7 +177,13 @@ fn ik(rows: Kb) -> Value {
     let r: Vec<Vec<Value>> = rows
         .into_iter()
         .map(|row| row.into_iter().map(|(t, d)| {
-            if let Some(u) = d.strip_prefix("url:") { json!({"text": t, "url": u}) } else { json!({"text": t, "callback_data": d}) }
+            if let Some(u) = d.strip_prefix("url:") {
+                json!({"text": t, "url": u})
+            } else if let Some(u) = d.strip_prefix("webapp:") {
+                json!({"text": t, "web_app": {"url": u}})
+            } else {
+                json!({"text": t, "callback_data": d})
+            }
         }).collect())
         .collect();
     json!({ "inline_keyboard": r })
@@ -604,10 +612,19 @@ impl Bot {
         if let Some(r) = self.guide_row() {
             rows.push(r);
         }
+        // the mini app: the account, the AmneziaVPN backup and the configs in one page (Telegram opens only https)
+        let mini = crate::miniapp::url(&self.app);
+        if mini.starts_with("https://") {
+            rows.push(vec![b(&self.bt("miniapp"), &format!("webapp:{}", mini))]);
+        }
         for (p, code) in [("wireguard", "w"), ("amneziawg", "a"), ("hysteria2", "h")] {
             if have.contains(&p) {
                 rows.push(vec![b(&self.bt(&format!("cfg_{}", code)), &format!("cfg:{}:{}", u.id, code))]);
             }
+        }
+        // every WireGuard / AmneziaWG config in one AmneziaVPN restore file
+        if have.contains(&"wireguard") || have.contains(&"amneziawg") {
+            rows.push(vec![b(&self.bt("amz"), &format!("amz:{}", u.id))]);
         }
         rows.push(vec![b(&self.bt("rename"), &format!("ren:{}", u.id))]);
         // the app's install files (sent as a new message, so this account message stays)
@@ -620,7 +637,7 @@ impl Bot {
 
     /// Sends the config(s) of one protocol: first a short "which app and how" guide, then a file per server
     /// (Hysteria2 as a copyable link).
-    async fn send_configs(&self, chat: i64, qid: &str, u: &User, code: &str) {
+    pub(crate) async fn send_configs(&self, chat: i64, qid: &str, u: &User, code: &str) {
         let (proto, title) = match code { "w" => ("wireguard", "WireGuard"), "a" => ("amneziawg", "AmneziaWG"), _ => ("hysteria2", "Hysteria2") };
         // each server's direct config, then its copy through the tunnel (WireGuard only that one)
         let mut list: Vec<(crate::db::Node, bool)> = vec![];
@@ -647,6 +664,24 @@ impl Bot {
                 self.send_doc(chat, text.into_bytes(), &name, &cap).await;
             }
         }
+    }
+
+    /// The AmneziaVPN backup of an account for one platform (i, a, w), with how to restore it.
+    pub(crate) async fn send_amnezia(&self, chat: i64, qid: &str, u: &User, code: &str) {
+        let Some(plat) = crate::amnezia::platform(code) else { return };
+        let cfgs = crate::api::amnezia_configs(&self.app, u).await;
+        let Some(body) = crate::amnezia::backup(&cfgs, plat) else {
+            return self.answer(qid, "برای سرویس شما کانفیگ WireGuard یا AmneziaWG فعال نیست.", true).await;
+        };
+        let cap = format!(
+            "📦 بکاپ Amnezia · {} سرور\n\n\
+             1️⃣ برنامه‌ی AmneziaVPN رو نصب کنید.\n\
+             2️⃣ فایل رو ذخیره کنید.\n\
+             3️⃣ توی برنامه: تنظیمات ← پشتیبان‌گیری ← بازیابی از نسخه‌ی پشتیبان (Restore from backup) و همین فایل رو انتخاب کنید.\n\n\
+             ⚠️ بازیابی، سرورها و تنظیمات قبلی خود برنامه رو پاک می‌کنه.",
+            cfgs.len()
+        );
+        self.send_doc(chat, body.into_bytes(), &crate::amnezia::file_name(&u.username), &cap).await;
     }
 
     fn create_account(&self, tg: i64, gb: f64, days: i64, conns: i64, notes: &str) -> Result<User, String> {
@@ -1106,6 +1141,19 @@ impl Bot {
                 let code = parts.next().unwrap_or("");
                 if let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) {
                     self.send_configs(chat, &qid, &u, code).await;
+                }
+                return;
+            }
+            // the AmneziaVPN backup: first the platform, then the file
+            "amz" | "amp" => {
+                let mut parts = rest.split(':');
+                let id: i64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) else { return };
+                if head == "amz" {
+                    let row = crate::amnezia::PLATFORMS.iter().map(|p| b(p.2, &format!("amp:{}:{}", u.id, p.0))).collect();
+                    self.send(chat, "📦 <b>بکاپ Amnezia</b>\n\nهمه‌ی سرورهای WireGuard و AmneziaWG شما توی یک فایل، برای برنامه‌ی <b>AmneziaVPN</b>.\n\nگوشی یا کامپیوترتون کدومه؟", Some(ik(vec![row]))).await;
+                } else {
+                    self.send_amnezia(chat, &qid, &u, parts.next().unwrap_or("")).await;
                 }
                 return;
             }
