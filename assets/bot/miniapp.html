@@ -159,7 +159,7 @@ function toman(n){return fa(Math.round(n).toLocaleString('en-US')).replace(/,/g,
 function price(r,g,days,conns){var m=Math.max(1,days/30),p=(+r.base||0)*m+g*(+r.gb||0)+Math.max(0,conns-1)*(+r.conn||0)*m;
  if(g>=50&&+r.bulk>0)p=p*(1-Math.min(40,+r.bulk*(g>=100?2:1))/100);var rd=+r.round||1000;return Math.max(rd,Math.round(p/rd)*rd)}
 function dur(d){return d%30?fa(d)+' روز':(d==30?'یک ماه':fa(d/30)+' ماه')}
-var OST={pending:['در انتظار تأیید','y'],waiting:['در انتظار پرداخت','y'],approved:['تأیید شد','g'],done:['فعال شد','g'],rejected:['رد شد','r'],error:['خطا؛ پشتیبانی پیگیری می‌کنه','r']};
+var OST={pending:['در انتظار تأیید','y'],waiting:['در انتظار پرداخت','y'],approved:['تأیید شد','g'],done:['فعال شد','g'],rejected:['رد شد','r'],error:['خطا؛ پشتیبانی پیگیری می‌کنه','r'],expired:['پرداخت نشد؛ منقضی شد','r']};
 function ordersHtml(){if(!A.orders||!A.orders.length)return '';
  return '<h2>سفارش‌های من</h2><div class="card">'+A.orders.map(function(o){var st=OST[o.status]||[o.status||'—','y'],amt=+o.amount;
   return '<div class="row"><div class="nm"><b>'+esc(o.plan||'سفارش')+'</b><small>'+(o.kind=='renew'?'تمدید':'خرید')+'، '+(amt>0&&o.method!='np'&&o.method!='wallet'?toman(amt):'')+(o.created?' '+new Date(o.created*1000).toLocaleDateString('fa-IR'):'')+'</small></div><span class="ost '+st[1]+'">'+st[0]+'</span></div>'}).join('')+'</div>'}
@@ -167,9 +167,10 @@ function nameCard(){if(!A.needName||A.renew)return '';
  return '<div class="card" style="margin-bottom:12px"><span class="lbl" style="margin-top:0">اسم کانفیگ شما</span><input class="in" id="cn" maxlength="12" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="mahtab87" value="'+esc(A.name||'')+'">'+
   '<p class="lead" style="margin:6px 2px 0">فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف، اولش حرف. توی برنامه با همین اسم می‌بینیدش.</p></div>'}
 function nameQ(){if(!A.needName||A.renew)return '';var e=document.getElementById('cn'),v=e?e.value.trim():'';A.name=v;return '&name='+encodeURIComponent(v)}
+var NOSEND='ربات نتونست توی چت پیام بده؛ ربات رو توی تلگرام استارت کنید (اگه بلاکش کردید، آنبلاک) و دوباره امتحان کنید';
 function why(e,j){var m=e.message;if(m=='name')return 'اول اسم کانفیگ رو بنویسید';if(m=='bad name')return (j||'اسم کانفیگ درست نیست').replace(/<[^>]+>/g,'').split('\n')[0];
  if(m=='join the channel')return 'اول عضو کانال بشید؛ ربات لینکش رو توی چت فرستاد';if(m=='the bot is off')return 'ربات الان در دسترس نیست؛ کمی بعد امتحان کنید';
- if(m=='sales are off')return 'فروش فعلاً بسته است';if(m=='no trial')return 'تست رایگان قبلاً گرفته شده';return 'نشد، دوباره امتحان کنید'}
+ if(m=='sales are off')return 'فروش فعلاً بسته است';if(m=='not delivered')return NOSEND;if(m=='no trial')return 'تست رایگان قبلاً گرفته شده';return 'نشد، دوباره امتحان کنید'}
 function empty(icon,title,text,btn){document.getElementById('app').innerHTML='<div class="empty"><div class="mk">'+icon+'</div><b>'+title+'</b><p class="muted">'+text+'</p>'+(btn||'')+'</div>'}
 
 function tabs(){if(!A.shop||(!A.shop.custom.on&&!A.shop.plans.length)||!A.shop.sales)return '';
@@ -262,7 +263,7 @@ function wire(u){var $=function(s){return document.querySelector(s)},all=functio
  all('[data-p]').forEach(function(b){b.onclick=function(){A.plat=b.dataset.p;draw()}});
  $('#cp').onclick=function(){var done=function(){buzz('success');toast('لینک حساب کپی شد')};
   if(navigator.clipboard)navigator.clipboard.writeText(u.link).then(done,function(){prompt('لینک حساب',u.link)});else prompt('لینک حساب',u.link)};
- function send(what,b){b.disabled=true;api('/tg/api/send?uid='+u.id+'&what='+what).then(function(){buzz('success');toast('توی چت ربات فرستاده شد')}).catch(function(e){buzz('error');toast(e.message=='no WireGuard or AmneziaWG config'?'کانفیگ WireGuard یا AmneziaWG فعال نیست':'نشد، دوباره امتحان کنید')}).then(function(){b.disabled=false})}
+ function send(what,b){b.disabled=true;api('/tg/api/send?uid='+u.id+'&what='+what).then(function(){buzz('success');toast('توی چت ربات فرستاده شد')}).catch(function(e){buzz('error');toast(e.message=='no WireGuard or AmneziaWG config'?'کانفیگ WireGuard یا AmneziaWG فعال نیست':e.message=='not delivered'?NOSEND:'نشد، دوباره امتحان کنید')}).then(function(){b.disabled=false})}
  var c=$('#amz_chat');if(c)c.onclick=function(){send('amz:'+A.plat,c)};
  var d=$('#amz_dl');if(d)d.onclick=function(){var w=tg();
   w.downloadFile({url:location.origin+'/tg/api/file?uid='+u.id+'&p='+A.plat+'&init='+encodeURIComponent(initData()),file_name:u.name.replace(/[^A-Za-z0-9_-]/g,'')+'.backup'})};
@@ -274,7 +275,7 @@ function wire(u){var $=function(s){return document.querySelector(s)},all=functio
 function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}}
  var p=(w&&w.platform)||'';A.plat=/ios|macos/.test(p)?'i':/tdesktop|windows|weba|webk/.test(p)?'w':'a';
  if(!initData())return empty('K','این صفحه رو از ربات باز کنید','مینی‌اپ کانکی فقط از داخل ربات تلگرام باز می‌شه.');
- Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
+ Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
 // wait a moment for Telegram's script, then go on without it
 var n=0;(function go(){if(tg()||n++>15)start();else setTimeout(go,100)})();
 })();
