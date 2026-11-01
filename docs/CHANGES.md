@@ -1,6 +1,6 @@
 # v3.25.0 — every Xray and Hysteria2 link in one text, with the subscription link first
 - **Bot**: under the account message, «📄 همه‌ی لینک‌ها (Xray + Hysteria2)» (`cfg:<id>:l`, button text `cfg_l`, colour of the config buttons). The bot sends `<name>-links.txt` and, when it fits in one message, the same text to copy, plus the subscription link on its own.
-- **Mini app**: a «همه‌ی لینک‌ها» card above the configs: «کپی همه» copies the text, «بفرست توی چت» has the bot send it (`/tg/api/send?what=cfg:l`).
+- **Mini app**: a «همه‌ی لینک‌ها» card above the configs: «کپی همه» copies the text, «بفرست توی چت» has the bot send it (`/tg/api/send?what=cfg:l`). Under the buttons, iPhone / Android / Windows tabs with the steps: install the app (V2Box, v2rayNG, v2rayN), copy, import from the clipboard, add the first line as a subscription so it updates itself, connect.
 - **The text**: line 1 is the combined subscription link (`/sub/<code>/v2`, Hysteria2 + Xray), then the same links that subscription holds, one per line (`api::v2_links`, now shared with `sub_v2`; `api::links_text`). Pasted or imported in v2rayNG, Hiddify, NekoBox, V2Box or Streisand, the configs go in at once; the subscription line keeps them up to date when servers change in the panel.
 - Accounts with no Xray or Hysteria2 link get no button and no card. Test: `every_link_comes_after_the_subscription_link`.
 # v3.24.0 — the daily report's API token is set from the bot page

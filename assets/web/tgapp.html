@@ -235,9 +235,16 @@ function draw(){var u=A.list[A.cur];if(!u)return;
    '<ol class="steps"><li><span>برنامه‌ی AmneziaVPN رو نصب کنید.</span></li><li><span>توی برنامه: تنظیمات ← پشتیبان‌گیری ← بازیابی (<bdi class="ltr">Restore from backup</bdi>).</span></li><li><span>همین فایل رو انتخاب کنید؛ همه‌ی سرورها یک‌جا اضافه می‌شن.</span></li></ol>'+
    '<p class="lead" style="margin:8px 2px 0">بازیابی، سرورهای قبلی خود برنامه رو پاک می‌کنه.</p></div>';
  }
- if(u.links){var nl=u.links.trim().split('\n').length-1;
-  h+='<h2>همه‌ی لینک‌ها</h2><p class="lead">لینک اشتراک اول، بعد همه‌ی کانفیگ‌های Xray و Hysteria2 ('+fa(nl)+' کانفیگ). توی v2rayNG، Hiddify یا NekoBox از کلیپ‌بورد وارد کنید؛ لینک اشتراک هر تغییر سرورها رو خودش به‌روز می‌کنه.</p>'+
-   '<div class="card"><div class="acts"><button class="b main" id="lk_cp">کپی همه</button><button class="b" id="lk_chat">بفرست توی چت</button></div></div>'}
+ if(u.links){var nl=u.links.trim().split('\n').length-1,L=function(x){return '<bdi class="ltr">'+x+'</bdi>'};
+  var LS={i:[['V2Box','App Store'],['تب '+L('Configs')+' ← دکمه‌ی ➕ ← '+L('Import v2ray uri from clipboard')],['➕ ← '+L('Add subscription')+' و لینک خط اول رو بذارید'],['یه کانفیگ رو انتخاب کنید و دکمه‌ی اتصال رو بزنید.']],
+   a:[['v2rayNG','گوگل‌پلی'],['دکمه‌ی ➕ بالای صفحه ← '+L('Import config from Clipboard')],['منوی ☰ ← '+L('Subscription group setting')+' ← ➕، لینک خط اول رو توی '+L('URL')+' بذارید و ذخیره کنید؛ بعد منوی ⋮ ← '+L('Update subscription')],['یه کانفیگ رو انتخاب کنید و دکمه‌ی ▶ پایین صفحه رو بزنید.']],
+   w:[['v2rayN','GitHub'],['منوی '+L('Servers')+' ← '+L('Import bulk URL from clipboard')+' (یا '+L('Ctrl+V')+')'],['منوی '+L('Subscription group')+' ← '+L('Subscription group settings')+' ← '+L('Add')+'، لینک خط اول رو بذارید؛ بعد '+L('Update subscription')],['روی یه سرور دابل‌کلیک کنید و '+L('System proxy')+' رو روی '+L('Set system proxy')+' بذارید.']]}[A.plat]||[];
+  h+='<h2>همه‌ی لینک‌ها</h2><p class="lead">خط اول لینک اشتراکه، بعد همه‌ی کانفیگ‌های Xray و Hysteria2 ('+fa(nl)+' کانفیگ).</p>'+
+   '<div class="card"><div class="acts"><button class="b main" id="lk_cp">کپی همه</button><button class="b" id="lk_chat">بفرست توی چت</button></div>'+
+   '<div class="seg" role="tablist" style="margin-top:12px">'+['i','a','w'].map(function(p){return '<button role="tab" aria-selected="'+(A.plat==p)+'" class="'+(A.plat==p?'on':'')+'" data-p="'+p+'">'+PN[p]+'</button>'}).join('')+'</div>'+
+   (LS.length?'<ol class="steps"><li><span>برنامه‌ی '+L(LS[0][0])+' رو از '+LS[0][1]+' نصب کنید.</span></li><li><span>اینجا «کپی همه» رو بزنید.</span></li>'+
+    '<li><span>توی برنامه: '+LS[1][0]+'. همه‌ی کانفیگ‌ها یک‌جا اضافه می‌شن.</span></li>'+
+    '<li><span>برای به‌روز شدن خودکار (وقتی سرورها عوض می‌شن): '+LS[2][0]+'.</span></li><li><span>'+LS[3][0]+'</span></li></ol>':'')+'</div>'}
  var cfg=[['awg','a','AmneziaWG','فایل کانفیگ هر سرور'],['wg','w','WireGuard','فایل کانفیگ هر سرور'],['hy2','h','Hysteria2','لینک هر سرور']].filter(function(c){return u[c[0]]});
  if(cfg.length){h+='<h2>کانفیگ‌ها</h2><p class="lead">ربات کانفیگ‌ها رو توی همین چت براتون می‌فرسته.</p><div class="card">'+
   cfg.map(function(c){return '<div class="row"><div class="nm"><b>'+c[2]+'</b><small>'+c[3]+'</small></div><button class="b" data-cfg="'+c[1]+'">ارسال</button></div>'}).join('')+'</div>'}
