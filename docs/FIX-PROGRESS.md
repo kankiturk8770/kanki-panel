@@ -10,7 +10,7 @@
 | G3 سرورها و اشتراک | M16, L19–L28 | `fix/fix-servers-subscription` (14c60c2) | تمام (۲۴۱ تست قبول) |
 | G4 هسته‌های VPN | H1, M8–M13, M26, L18, L29–L36 | `wip/fix-vpn` | در جریان |
 | G5 ربات و مینی‌اپ | H3, M1, M4, M5, L37–L44, L46, L47، سمت ربات L45 | `fix/fix-bot-sales` (8377f4d) | تمام (۲۳۹ قبول؛ یک خط در backup.rs:372) |
-| G6 کانال، چت، نصب | M6, M7, M17–M25, L48–L59 | `wip/fix-m6-l59-bot-emergency-install` | در جریان |
+| G6 کانال، چت، نصب | M6, M7, M17–M25, L48–L59 | `fix/fix-g6` (e570928) | تمام (همهٔ تست‌ها؛ یک خط در tunnel/panel.rs emer_cfg) |
 
 برنچ‌های `wip/*` عکس لحظه‌ای کار نیمه‌تمام‌اند (ممکن است کامپایل نشوند). قدم‌های باقی‌مانده: تمام کردن G1/G4/G5/G6، مرج همهٔ برنچ‌ها روی
 `claude/panel-work-n233zr`، `cargo test` کامل، نسخه 3.25.3 + CHANGES/README، گزارش «رفع شد» در `CLAUDE.md` و `docs/SCAN-HALF1.md`، PR، سبز، مرج.
