@@ -40,6 +40,15 @@ pub fn admin_pass_hash(app: &App) -> String {
 
 /// Who is calling: Some((actor, scopes)) — sessions get every scope.
 pub fn identify(app: &App, h: &HeaderMap) -> Option<(String, Vec<String>)> {
+    identify_with(app, h, true)
+}
+
+/// Same as `identify`, but never writes last_seen / last_used (for checking a stored token)
+pub fn identify_quiet(app: &App, h: &HeaderMap) -> Option<(String, Vec<String>)> {
+    identify_with(app, h, false)
+}
+
+fn identify_with(app: &App, h: &HeaderMap, touch: bool) -> Option<(String, Vec<String>)> {
     let t = bearer(h);
     if t.is_empty() {
         return None;
@@ -56,7 +65,9 @@ pub fn identify(app: &App, h: &HeaderMap) -> Option<(String, Vec<String>)> {
         .ok()
     });
     if let Some((id, user)) = sess {
-        let _ = app.db.exec("UPDATE sessions SET last_seen=?1 WHERE id=?2", &[&now(), &id]);
+        if touch {
+            let _ = app.db.exec("UPDATE sessions SET last_seen=?1 WHERE id=?2", &[&now(), &id]);
+        }
         return Some((user, vec!["admin".into()]));
     }
     let tok: Option<(i64, String, String)> = app.db.with(|c| {
@@ -66,7 +77,9 @@ pub fn identify(app: &App, h: &HeaderMap) -> Option<(String, Vec<String>)> {
         .ok()
     });
     if let Some((id, name, scopes)) = tok {
-        let _ = app.db.exec("UPDATE api_tokens SET last_used=?1 WHERE id=?2", &[&now(), &id]);
+        if touch {
+            let _ = app.db.exec("UPDATE api_tokens SET last_used=?1 WHERE id=?2", &[&now(), &id]);
+        }
         return Some((format!("token:{}", name), scopes.split(',').map(|s| s.trim().to_string()).collect()));
     }
     None

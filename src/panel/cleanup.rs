@@ -110,6 +110,21 @@ fn candidates(app: &App) -> Vec<(String, String, bool, bool)> {
     out
 }
 
+/// A span for the admin in Persian: whole hours (rounded), or minutes when under an hour
+fn span_fa(secs: i64) -> String {
+    let secs = secs.max(0);
+    if secs < 3600 {
+        format!("{} دقیقه", ((secs + 30) / 60).max(1))
+    } else {
+        format!("{} ساعت", (secs + 1800) / 3600)
+    }
+}
+
+/// The warning sent at half the time: how long the server has been away and how long until removal
+fn warn_text(panel: &str, name: &str, away: i64, left: i64) -> String {
+    format!("⚠️ {} · سرور «{}» {} است که آفلاین است و اگر برنگردد {} دیگر خودکار حذف می‌شود.", panel, name, span_fa(away), span_fa(left))
+}
+
 pub async fn offline_loop(app: Arc<App>) {
     // after a start the agents need a few minutes to report again
     tokio::time::sleep(std::time::Duration::from_secs(600)).await;
@@ -141,7 +156,7 @@ async fn offline_round(app: &Arc<App>) {
         let away = now - e.0;
         if !e.1 && away >= hours * 1800 {
             e.1 = true;
-            crate::backup::tell_admin(app, &format!("⚠️ {} · سرور «{}» {} ساعت است آفلاین است و اگر برنگردد {} ساعت دیگر خودکار حذف می‌شود.", app.db.get("panel_name"), name, away / 3600, (hours * 3600 - away).max(0) / 3600)).await;
+            crate::backup::tell_admin(app, &warn_text(&app.db.get("panel_name"), name, away, hours * 3600 - away)).await;
         }
         if away >= hours * 3600 {
             remove.push((key.clone(), name.clone()));
@@ -181,6 +196,17 @@ async fn offline_round(app: &Arc<App>) {
 mod tests {
     use std::collections::HashMap;
     use std::sync::{atomic::AtomicI64, Arc, Mutex};
+
+    #[test]
+    fn the_offline_warning_says_the_right_time() {
+        // 24 hours: the warning comes at 12 hours away, 12 left
+        assert_eq!(super::warn_text("P", "X", 12 * 3600, 12 * 3600), "⚠️ P · سرور «X» 12 ساعت است که آفلاین است و اگر برنگردد 12 ساعت دیگر خودکار حذف می‌شود.");
+        // 1 hour: at 30 minutes (and 10 minutes late by the loop) it is minutes, not "0 hours"
+        assert_eq!(super::span_fa(1800), "30 دقیقه");
+        assert_eq!(super::span_fa(1200), "20 دقیقه");
+        assert_eq!(super::span_fa(0), "1 دقیقه");
+        assert_eq!(super::span_fa(3 * 3600 - 600), "3 ساعت");
+    }
 
     #[test]
     fn a_sweep_leaves_nothing_of_a_gone_server() {

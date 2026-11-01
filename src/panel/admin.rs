@@ -586,7 +586,8 @@ pub fn watch_token_problem(app: &App, tok: &str) -> Option<&'static str> {
         Ok(v) => { h.insert(axum::http::header::AUTHORIZATION, v); }
         Err(_) => return Some("paste the whole API token"),
     }
-    match crate::auth::identify(app, &h) {
+    // quiet: showing the bot page must not mark the token as used (that would hide a dead cron)
+    match crate::auth::identify_quiet(app, &h) {
         None => Some("the panel does not know this token (deleted, or not copied whole)"),
         Some((actor, _)) if actor != "api-key" && !actor.starts_with("token:") => Some("this is a login session, not an API token: make one on System › Security › API tokens"),
         Some((_, scopes)) if !crate::auth::has_scope(&scopes, "nodes") => Some("this token has no «Servers and tunnels» (nodes) right"),
@@ -678,6 +679,13 @@ async fn bot_get(State(app): St, h: HeaderMap) -> Response {
 
 async fn bot_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "settings");
+    // the bot token and the bot admins can make users: an API token cannot change them
+    let sensitive = b["token"].as_str().map(|s| !s.trim().is_empty()).unwrap_or(false) || b["admins"].is_string();
+    if sensitive {
+        if let Err(r) = crate::auth::check_session(&app, &h) {
+            return r;
+        }
+    }
     if let Some(t) = b["token"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         match tg_get_me(&app, t).await {
             Some(me) => {
@@ -693,6 +701,11 @@ async fn bot_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response
     }
     restart_self();
     Json(json!({"ok": true})).into_response()
+}
+
+#[cfg(test)]
+pub(crate) async fn bot_put_for_test(app: std::sync::Arc<App>, h: HeaderMap, b: Value) -> Response {
+    bot_put(State(app), h, Json(b)).await
 }
 
 async fn bot_delete(State(app): St, h: HeaderMap) -> Response {
