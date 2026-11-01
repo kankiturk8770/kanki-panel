@@ -426,6 +426,11 @@ pub(crate) fn links_of(sid: &str, id: &str) -> usize {
     seen().lock().unwrap_or_else(|e| e.into_inner()).get(sid).and_then(|x| x.status.iter().find(|s| s.id == id).map(|s| s.links)).unwrap_or(0)
 }
 
+/// What server `sid` last reported about its tunnel `id` (None = it does not run it, or never reported)
+pub(crate) fn status_of(sid: &str, id: &str) -> Option<super::engine::Status> {
+    seen().lock().unwrap_or_else(|e| e.into_inner()).get(sid).and_then(|x| x.status.iter().find(|s| s.id == id).cloned())
+}
+
 /// The address an agent server last reported from (DNS answers it for routed names).
 pub(crate) fn seen_ip(sid: &str) -> Option<String> {
     seen().lock().unwrap_or_else(|e| e.into_inner()).get(sid).map(|x| x.ip.clone()).filter(|x| !x.is_empty())

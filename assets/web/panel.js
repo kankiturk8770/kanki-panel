@@ -2338,6 +2338,11 @@ var FA={"Button colour in the bot":"رنگ دکمه در ربات",
  "Test":"تست",
  "Test again":"تست دوباره",
  "Test connection":"تست اتصال",
+ "The Iran server's tunnel agent is not talking to the panel (offline, or the Iran server cannot reach the panel).":"ایجنت تانل سرور ایران با پنل حرف نمی‌زند (آفلاین است، یا سرور ایران به پنل نمی‌رسد).",
+ "The Iran server does not run this tunnel yet: update the tunnel agent of that server.":"سرور ایران هنوز این تانل را اجرا نمی‌کند: ایجنت تانل همان سرور را آپدیت کن.",
+ "The Iran server does not listen on port {p}: another program holds it.":"سرور ایران روی پورت {p} گوش نمی‌دهد: برنامهٔ دیگری آن را گرفته.",
+ "The panel cannot reach {a}: open port {p}/TCP in the firewall of the Iran data center for connections from abroad.":"پنل به {a} وصل نمی‌شود: پورت {p}/TCP را در فایروال دیتاسنتر ایران برای اتصال از خارج باز کن.",
+ "Why":"علت",
  "Daily report":"گزارش روزانه",
  "Every 30 minutes the panel server checks the tunnels and servers and tells you on Telegram; every morning it sends a report. It needs an API token with the «Servers and tunnels» right.":"سرور پنل هر ۳۰ دقیقه تانل‌ها و سرورها را چک می‌کند و در تلگرام خبر می‌دهد؛ هر صبح هم یک گزارش می‌فرستد. برای این کار یک توکن API با دسترسی «سرورها و تانل‌ها» لازم دارد.",
  "The report script is not on this server":"اسکریپت گزارش روی این سرور نیست",
@@ -3537,7 +3542,13 @@ function stIran(){var box=$('#si_in');if(!box)return;api('GET','/api/sub-iran').
  var cdays=st.cert_end?Math.floor((st.cert_end*1000-Date.now())/864e5):null,cbad=cdays!==null&&cdays<7;
  if(cbad&&!st.error)st.error=(cdays<0?t('The SSL certificate has expired: the apps cannot read the subscription from this link.'):t('The SSL certificate ends in {n} days and was not renewed yet.').replace('{n}',cdays))+(st.renew_error?' '+st.renew_error:'');
  if(r.server){if(r.ready&&st.active!==false&&!cbad)msg='✓ '+esc(r.link)+'/sub/…'+(cdays!==null?' · '+t('SSL ends in {n} days').replace('{n}',cdays):'');else if(st.error)msg='<span style="color:var(--bad,#e5484d)">'+esc(st.error)+'</span>';else msg=t('Waiting for the server: getting SSL and starting the listener…');
-  if(r.tunnel=='down')msg+='<br>'+t('Tunnel to the panel')+': '+t('down');}
+  if(r.tunnel=='down'){msg+='<br>'+t('Tunnel to the panel')+': '+t('down');var td=r.tunnel_detail||{},ir=td.iran||{},pn=td.panel||{},why=[],er=function(x){return x?' <span class="ltr" style="word-break:break-all">('+esc(x)+')</span>':''};
+   if(td.iran_seen==null||td.iran_seen>180)why.push(t('The Iran server\'s tunnel agent is not talking to the panel (offline, or the Iran server cannot reach the panel).'));
+   else if(!ir.runs)why.push(t('The Iran server does not run this tunnel yet: update the tunnel agent of that server.'));
+   else if(!ir.listening)why.push(t('The Iran server does not listen on port {p}: another program holds it.').replace('{p}',td.port)+er(ir.error));
+   if(why.length==0&&pn.runs&&!pn.links)why.push(t('The panel cannot reach {a}: open port {p}/TCP in the firewall of the Iran data center for connections from abroad.').replace('{a}','<span class="ltr">'+esc(td.dial||'')+'</span>').replace('{p}',td.port)+er(pn.error));
+   if(why.length==0&&ir.error)why.push(esc(ir.error));
+   if(why.length)msg+='<br>'+t('Why')+': '+why.join('<br>')}}
  box.innerHTML='<div class="g3"><div><label class="f">'+t('Tunnel server')+'</label><select id="si_srv"><option value="">—</option>'+(r.agents||[]).filter(function(a){return a.loc=='iran'||a.id==r.server}).map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id==r.server?' selected':'')+'>'+esc(a.name)+(a.ip?' ('+esc(a.ip)+')':'')+'</option>'}).join('')+'</select></div>'+
   '<div><label class="f">'+t('Domain')+'</label><input class="ltr" id="si_dom" placeholder="sub.example.com" value="'+esc(r.domain||'')+'"></div>'+
   '<div><label class="f">'+t('Port')+'</label><input class="ltr" id="si_port" inputmode="numeric" value="'+esc(String(r.port||2053))+'"></div></div>'+

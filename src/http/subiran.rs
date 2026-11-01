@@ -116,6 +116,13 @@ fn upstream_port(app: &App, s: &SubIran) -> u16 {
     reuse_port(&crate::tunnel::panel::kanki_tunnels(app), &s.server, &host, port).unwrap_or(LOCAL_PORT)
 }
 
+/// Where the panel dials the hidden tunnel: the subscription domain itself. Its A record must point to the Iran
+/// server for the SSL certificate, while the address set on the server for other tunnels may be another name
+/// (a CDN, an old domain) the panel cannot reach the tunnel port on.
+fn dial(s: &SubIran) -> String {
+    format!("{}:{}", s.domain.trim(), s.tunnel_port)
+}
+
 /// The hidden tunnel from the Iran server to the panel, for server `sid` ("local" = the panel).
 pub fn specs(app: &App, sid: &str) -> Vec<Spec> {
     let s = settings(app);
@@ -128,7 +135,7 @@ pub fn specs(app: &App, sid: &str) -> Vec<Spec> {
     }
     let role = if sid == "local" { "exit" } else { "entry" };
     // reverse: the Iran server (entry) listens, the panel dials it
-    let remote = if role == "exit" { crate::tunnel::panel::dial_addr(app, &s.server, s.tunnel_port) } else { String::new() };
+    let remote = if role == "exit" { dial(&s) } else { String::new() };
     vec![Spec {
         id: TUNNEL_ID.into(),
         name: "Subscription on the Iran server".into(),
@@ -259,10 +266,26 @@ async fn get_cfg(State(app): St, h: HeaderMap) -> Response {
     let reused = on(&s) && upstream_port(&app, &s) != LOCAL_PORT;
     let links = |sid: &str| crate::tunnel::panel::links_of(sid, TUNNEL_ID);
     let tunnel = if !on(&s) { "" } else if reused { "reused" } else if links(&s.server) > 0 && links("local") > 0 { "up" } else { "down" };
+    // why the hidden tunnel is down: each side as its own engine reports it
+    let side = |sid: &str| match crate::tunnel::panel::status_of(sid, TUNNEL_ID) {
+        Some(st) => json!({ "runs": true, "links": st.links, "listening": st.listening, "error": st.error }),
+        None => json!({ "runs": false }),
+    };
+    let seen_ago = crate::tunnel::panel::agent_state(&s.server).map(|x| crate::util::now() - x.0);
+    let detail = if tunnel == "down" {
+        json!({
+            "port": s.tunnel_port,
+            "dial": dial(&s),
+            "iran": side(&s.server), "panel": side("local"),
+            "iran_seen": seen_ago,
+        })
+    } else {
+        Value::Null
+    };
     Json(json!({
         "server": s.server, "domain": s.domain, "port": if s.port == 0 { DEFAULT_PORT } else { s.port }, "ready": s.ready,
         "link": if on(&s) { link_base(&s.domain, s.port) } else { String::new() },
-        "agents": agents, "status": status, "tunnel": tunnel,
+        "agents": agents, "status": status, "tunnel": tunnel, "tunnel_detail": detail,
     }))
     .into_response()
 }
@@ -563,6 +586,29 @@ async fn handle(tcp: tokio::net::TcpStream, client: String, acc: tokio_rustls::T
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_panel_dials_the_subscription_domain_not_the_server_address() {
+        use std::sync::{atomic::AtomicI64, Mutex};
+        let dir = std::env::temp_dir().join(format!("kanki-subiran-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let app = App {
+            db: crate::db::Db::open(dir.join("kanki.db").to_str().unwrap()),
+            env: HashMap::new(),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        };
+        save(&app, &SubIran { server: "ir2".into(), domain: "s1s.example.shop".into(), port: 2053, tunnel_port: 8447, token: "t".into(), ready: true });
+        let local = specs(&app, "local");
+        assert_eq!(local.len(), 1);
+        assert_eq!(local[0].role, "exit");
+        assert_eq!(local[0].remote, "s1s.example.shop:8447");
+        // the Iran side listens and dials nothing
+        let iran = specs(&app, "ir2");
+        assert_eq!(iran[0].role, "entry");
+        assert!(iran[0].remote.is_empty());
+    }
 
     #[test]
     fn only_subscription_paths_pass() {
