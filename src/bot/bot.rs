@@ -1767,7 +1767,7 @@ impl Bot {
         // a buyer who still has a free-trial account gets that same account (USER<n>-TEST -> USER<n>)
         let trial = self.db().users_of_tg(o.1).into_iter().find(|u| u.notes == "trial" || u.username.to_uppercase().ends_with("-TEST"));
         let res: Result<User, String> = if o.3 == "renew" && o.4 > 0 {
-            self.db().extend(o.4, p.days, p.gb).and_then(|_| {
+            self.db().renew_plan(o.4, p.days, p.gb).and_then(|_| {
                 // a plan for more users raises the account to it (a renewal never lowers it)
                 let _ = self.db().exec("UPDATE users SET max_conn=?1 WHERE id=?2 AND max_conn>0 AND max_conn<?1", &[&p.conns, &o.4]);
                 self.db().promote_trial(o.4);
