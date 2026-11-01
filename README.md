@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.23.2 — the mini app on the panel's domain
+- The bot's mini app opens on the panel's own domain, never on the Iran subscription relay (it did not open there). Subscription links are unchanged.
 ## New in 3.23.1 — easier to read and tap
 - Every text of the panel is in Persian, nothing under 12px, buttons at least 40px on phones, the same screen sizes across the panel.
 ## New in 3.23 — AmneziaVPN backup and the bot's mini app

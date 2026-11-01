@@ -4,7 +4,7 @@
 //! Who is asking comes only from Telegram's signed init data (`Telegram.WebApp.initData`), checked with
 //! the bot token (core.telegram.org/bots/webapps, "Validating data received via the Mini App"); a customer
 //! sees only the accounts with their own Telegram id. Every call is a GET, so the page and its API also
-//! work through the Iran subscription relay and the subscription domain, which pass only GET and a few paths.
+//! work on the subscription domain, which passes only GET and a few paths.
 
 use crate::db::User;
 use crate::util::{now, pct_decode};
@@ -27,9 +27,11 @@ type St = State<Arc<App>>;
 /// How long a signed init data stays good (Telegram signs it when the mini app opens)
 const INIT_MAX_AGE: i64 = 24 * 3600;
 
-/// The address of the mini app: on the subscription address, which is the one that opens in Iran
+/// The address of the mini app: always on the panel's own address (its domain or subscription domain), never
+/// on the Iran subscription relay. Telegram itself is filtered in Iran, so whoever opens the bot already gets
+/// past the filter, and the relay's domain on the Iran server did not open in Telegram.
 pub fn url(app: &App) -> String {
-    format!("{}/tg/", crate::api::sub_origin(app))
+    format!("{}/tg/", crate::api::origin(app))
 }
 
 pub fn router() -> Router<Arc<App>> {
@@ -314,5 +316,26 @@ mod tests {
         assert_eq!(verify(tok, "", 1000100, INIT_MAX_AGE), None);
         assert_eq!(verify("", &init, 1000100, INIT_MAX_AGE), None);
         assert_eq!(verify(tok, &init.replace("&hash=", "&hash=00"), 1000100, INIT_MAX_AGE), None);
+    }
+
+    #[test]
+    fn the_mini_app_opens_on_the_panel_domain_even_with_the_iran_relay_on() {
+        let dir = std::env::temp_dir().join(format!("kanki-mini-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
+        let env: HashMap<String, String> = [("DOMAIN".to_string(), "panel.example.com".to_string())].into();
+        let app = App {
+            db,
+            env,
+            hy2_allowed: std::sync::Mutex::new(HashMap::new()), limits: std::sync::Mutex::new(HashMap::new()), reported: std::sync::Mutex::new(HashMap::new()),
+            login_fails: std::sync::Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: std::sync::atomic::AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: std::sync::Mutex::new(HashMap::new()),
+        };
+        app.db.set("sub_iran", r#"{"server":"ir1","domain":"sub.iran.example","port":2053,"ready":true}"#);
+        // the subscription links still go through the Iran relay, the mini app does not
+        assert_eq!(crate::api::sub_origin(&app), "https://sub.iran.example:2053");
+        assert_eq!(url(&app), "https://panel.example.com/tg/");
+        app.db.set("sub_domain", "sub.example.com");
+        assert_eq!(url(&app), "https://sub.example.com/tg/");
     }
 }
