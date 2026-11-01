@@ -131,6 +131,8 @@ fn account_json(app: &App, u: &User) -> Value {
         "link": format!("{}/sub/{}", crate::api::sub_origin(app), u.sub_code()),
         "code": u.sub_code(),
         "wg": protos.contains(&"wireguard"), "awg": protos.contains(&"amneziawg"), "hy2": protos.contains(&"hysteria2"),
+        // the subscription link, then every Hysteria2 and Xray link (to copy into v2rayNG / Hiddify at once)
+        "links": crate::api::links_text(app, u),
         "servers": servers,
     })
 }
@@ -191,7 +193,7 @@ async fn trial(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Str
     Json(json!({ "ok": true })).into_response()
 }
 
-/// GET /tg/api/send?uid=..&what=amz:i|amz:a|amz:w|cfg:w|cfg:a|cfg:h: the bot sends it to the customer's chat
+/// GET /tg/api/send?uid=..&what=amz:i|amz:a|amz:w|cfg:w|cfg:a|cfg:h|cfg:l (l = every link with the subscription): the bot sends it to the customer's chat
 async fn send(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
     let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
     let u = match account(&app, tg, &q) { Ok(u) => u, Err(r) => return r };
@@ -204,7 +206,7 @@ async fn send(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
             }
             bot.send_amnezia(tg, "", &u, p).await;
         }
-        Some(("cfg", c)) if ["w", "a", "h"].contains(&c) => bot.send_configs(tg, "", &u, c).await,
+        Some(("cfg", c)) if ["w", "a", "h", "l"].contains(&c) => bot.send_configs(tg, "", &u, c).await,
         _ => return fail(StatusCode::BAD_REQUEST, "what"),
     }
     Json(json!({ "ok": true })).into_response()
@@ -337,5 +339,31 @@ mod tests {
         assert_eq!(url(&app), "https://panel.example.com/tg/");
         app.db.set("sub_domain", "sub.example.com");
         assert_eq!(url(&app), "https://sub.example.com/tg/");
+    }
+
+    #[test]
+    fn every_link_comes_after_the_subscription_link() {
+        let dir = std::env::temp_dir().join(format!("kanki-links-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let env: HashMap<String, String> = [("DOMAIN".to_string(), "panel.example.com".to_string())].into();
+        let app = App {
+            db: crate::db::Db::open(dir.join("kanki.db").to_str().unwrap()),
+            env,
+            hy2_allowed: std::sync::Mutex::new(HashMap::new()), limits: std::sync::Mutex::new(HashMap::new()), reported: std::sync::Mutex::new(HashMap::new()),
+            login_fails: std::sync::Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: std::sync::atomic::AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: std::sync::Mutex::new(HashMap::new()),
+        };
+        let info = json!({"hy2_port": "8443"});
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,info,online) VALUES('local','GERMANY','de1.example.net','','',?1,1)", &[&info.to_string()]).unwrap();
+        let u = app.db.create_user("mahtab87", 10.0, 30, 1, "hy2", "", "", 0).unwrap();
+        let t = crate::api::links_text(&app, &u).expect("a Hysteria2 user has links");
+        let lines: Vec<&str> = t.lines().collect();
+        assert_eq!(lines[0], format!("https://panel.example.com/sub/{}/v2", u.sub_code()));
+        assert!(lines.len() >= 2 && lines[1..].iter().all(|l| l.starts_with("hysteria2://")), "{}", t);
+        // the same links the subscription itself holds, so the copied configs and the subscription agree
+        assert_eq!(lines[1..].to_vec(), crate::api::v2_links(&app, &u).iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        // a WireGuard-only account has no such link: no button, no file
+        let w = app.db.create_user("sara12", 10.0, 30, 1, "wg", "", "", 0).unwrap();
+        assert!(crate::api::links_text(&app, &w).is_none());
     }
 }

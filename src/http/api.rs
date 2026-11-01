@@ -1561,17 +1561,39 @@ fn other_app(app: &App, code: &str, h: &HeaderMap) -> Result<User, Response> {
 /// its tunnel when it has one, like the page shows) and every Xray link (base64)
 async fn sub_v2(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
     let u = match other_app(&app, &code, &h) { Ok(u) => u, Err(r) => return r };
-    let mut lines: Vec<String> = vec![];
-    for n in user_nodes(&app, &u) {
-        let tw = crate::twin::of_node_core(&app, &n, "hy2");
-        let hy = if twin_protos(&app, &u, &n).contains(&"hysteria2") { hy2_link(&app, &u, &n, tw.as_ref()) } else { None };
-        lines.extend(hy.or_else(|| hy2_uri(&app, &u, &n)));
-    }
-    lines.extend(crate::xray::panel::user_links(&app, &u).into_iter().map(|x| x.1));
+    let lines = v2_links(&app, &u);
     let total = (u.limit_gb * 1_073_741_824.0) as i64;
     let info = format!("upload=0; download={}; total={}; expire={}", u.used_bytes.max(0), total, u.expires_at);
     ([(header::HeaderName::from_static("subscription-userinfo"), info), (header::CONTENT_TYPE, "text/plain; charset=utf-8".to_string())],
      util::b64(lines.join("\n").as_bytes())).into_response()
+}
+
+/// The links of the combined subscription: one Hysteria2 link per server (through its tunnel when it has one)
+/// and every Xray link
+pub(crate) fn v2_links(app: &App, u: &User) -> Vec<String> {
+    let mut lines: Vec<String> = vec![];
+    for n in user_nodes(app, u) {
+        let tw = crate::twin::of_node_core(app, &n, "hy2");
+        let hy = if twin_protos(app, u, &n).contains(&"hysteria2") { hy2_link(app, u, &n, tw.as_ref()) } else { None };
+        lines.extend(hy.or_else(|| hy2_uri(app, u, &n)));
+    }
+    lines.extend(crate::xray::panel::user_links(app, u).into_iter().map(|x| x.1));
+    lines
+}
+
+/// The combined subscription link (Hysteria2 + Xray) that v2rayNG, Hiddify, NekoBox and V2Box keep up to date
+pub fn v2_sub_link(app: &App, u: &User) -> String {
+    format!("{}/sub/{}/v2", sub_origin(app), u.sub_code())
+}
+
+/// The subscription link first, then each Hysteria2 and Xray link, one per line: copied or saved as a file, it goes
+/// into those apps at once (the subscription line keeps them up to date). None when the account has no such link.
+pub fn links_text(app: &App, u: &User) -> Option<String> {
+    let links = v2_links(app, u);
+    if links.is_empty() {
+        return None;
+    }
+    Some(format!("{}\n{}\n", v2_sub_link(app, u), links.join("\n")))
 }
 
 /// Subscription of only the user's Xray links (base64, for v2rayNG / V2Box)
