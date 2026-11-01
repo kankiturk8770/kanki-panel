@@ -17,15 +17,30 @@ pub fn hit(name: &'static str, key: &str, max: u32, window: i64) -> bool {
     let mut m = table(name).lock().unwrap_or_else(|e| e.into_inner());
     let t = now();
     // old entries go, so many addresses cannot grow the table without limit
-    if m.len() > 20000 {
-        m.retain(|_, e| t - e.1 < window);
-    }
+    trim(&mut m, 20000, window, t);
     let e = m.entry(key.to_string()).or_insert((0, t));
     if t - e.1 >= window {
         *e = (0, t);
     }
     e.0 += 1;
     e.0 <= max
+}
+
+/// Keeps a table of (count, window start) per address below `cap`: entries older than `window` go, and
+/// when that is not enough the older half goes too, so the next full scan is `cap / 2` new addresses
+/// away (not one on every request).
+pub fn trim(m: &mut HashMap<String, (u32, i64)>, cap: usize, window: i64, t: i64) {
+    if m.len() <= cap {
+        return;
+    }
+    m.retain(|_, e| t - e.1 < window);
+    if m.len() > cap / 2 {
+        let mut starts: Vec<i64> = m.values().map(|e| e.1).collect();
+        let mid = starts.len() - cap / 2;
+        let (_, cut, _) = starts.select_nth_unstable(mid);
+        let cut = *cut;
+        m.retain(|_, e| e.1 > cut);
+    }
 }
 
 /// Whether `key` is already past `max` (without counting this request)
@@ -68,5 +83,18 @@ mod tests {
         assert!(over("test", "1.2.3.4", 3, 60));
         // another address is not affected
         assert!(hit("test", "5.6.7.8", 3, 60) && !over("test", "5.6.7.8", 3, 60));
+    }
+
+    #[test]
+    fn a_full_table_drops_its_older_half() {
+        let mut m: HashMap<String, (u32, i64)> = (0..101).map(|i| (format!("ip{}", i), (1, 1000 + i))).collect();
+        // all still inside the window: the older entries go, the newest stay
+        trim(&mut m, 100, 3600, 1200);
+        assert!(m.len() <= 50 && m.len() >= 40, "{}", m.len());
+        assert!(m.contains_key("ip100") && !m.contains_key("ip0"));
+        // below the cap nothing is touched
+        let n = m.len();
+        trim(&mut m, 100, 1, 99999);
+        assert_eq!(m.len(), n);
     }
 }

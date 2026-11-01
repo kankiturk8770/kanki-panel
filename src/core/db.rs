@@ -9,6 +9,39 @@ pub struct Db(pub Mutex<Connection>);
 /// Serialises picking a free user number + inserting it.
 static SLOT: Mutex<()> = Mutex::new(());
 
+/// The longest time one create / renew may add (100 years): bigger numbers would overflow `days * 86400`.
+pub const MAX_DAYS: i64 = 36500;
+
+/// days as given, kept within 0..=MAX_DAYS
+fn clamp_days(days: i64) -> i64 {
+    days.clamp(0, MAX_DAYS)
+}
+
+/// GB as given; not-a-number or negative is 0, and no more than a million GB
+fn clamp_gb(gb: f64) -> f64 {
+    if gb.is_finite() { gb.clamp(0.0, 1_000_000.0) } else { 0.0 }
+}
+
+/// log rows kept while running (the same bounds as at start)
+const AUDIT_KEEP: i64 = 5000;
+const LOGIN_LOG_KEEP: i64 = 2000;
+
+/// The WireGuard / AmneziaWG address of a user in the server's /16 (`base` is "10.66" or "10.67").
+/// Ids below 62500 keep the address they always had (third byte id/250, fourth id%250+2). Bigger ids
+/// take the part of the /16 the first form never uses (third byte 250..255, fourth 1..254), so they are
+/// still inside the server's network and its NAT. None when the /16 is full.
+pub fn peer_ip(base: &str, user_id: i64) -> Option<String> {
+    if user_id < 0 {
+        return None;
+    }
+    if user_id < 62500 {
+        return Some(format!("{}.{}.{}", base, (user_id / 250) % 250, user_id % 250 + 2));
+    }
+    let k = user_id - 62500;
+    let (third, fourth) = (250 + k / 254, k % 254 + 1);
+    (third <= 255).then(|| format!("{}.{}.{}", base, third, fourth))
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct User {
     pub id: i64,
@@ -248,9 +281,18 @@ impl Db {
             let _ = c.execute("INSERT OR REPLACE INTO settings(k,v) VALUES('mig_trial_notes','1')", []);
         }
         // keep logs bounded
-        let _ = c.execute("DELETE FROM audit WHERE id NOT IN (SELECT id FROM audit ORDER BY id DESC LIMIT 5000)", []);
-        let _ = c.execute("DELETE FROM login_log WHERE id NOT IN (SELECT id FROM login_log ORDER BY id DESC LIMIT 2000)", []);
+        trim_logs(&c);
         Db(Mutex::new(c))
+    }
+
+    /// Keeps the audit and login logs bounded while the panel runs: called after each insert, it trims
+    /// only every 200th row (one cheap delete, not one per request).
+    pub fn note_log_row(&self) {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static N: AtomicU32 = AtomicU32::new(0);
+        if N.fetch_add(1, Ordering::Relaxed) % 200 == 199 {
+            self.with(trim_logs);
+        }
     }
 
     pub fn with<T>(&self, f: impl FnOnce(&Connection) -> T) -> T {
@@ -370,6 +412,7 @@ impl Db {
     #[allow(clippy::too_many_arguments)]
     pub fn create_user(&self, username: &str, limit_gb: f64, days: i64, max_conn: i64, protocols: &str, nodes: &str, notes: &str, tg_id: i64) -> Result<User, String> {
         let code = crate::util::rand_digits(19);
+        let days = clamp_days(days);
         let exp = if days > 0 { now() + days * 86400 } else { 0 };
         let _g = SLOT.lock().unwrap_or_else(|e| e.into_inner());
         let n = self.next_slot();
@@ -418,13 +461,22 @@ impl Db {
     /// تمدید: روز به انقضا (یا از الان اگر گذشته) و حجم به سقف اضافه می‌شود
     pub fn extend(&self, id: i64, days: i64, add_gb: f64) -> Result<(), String> {
         let u = self.user(id).ok_or("user not found")?;
+        let (days, add_gb) = (clamp_days(days), clamp_gb(add_gb));
         let base = if u.expires_at > now() { u.expires_at } else { now() };
-        let exp = if days > 0 { base + days * 86400 } else { u.expires_at };
-        let lim = if add_gb > 0.0 {
-            if u.over_quota() { u.used_gb() + add_gb } else { u.limit_gb + add_gb }
-        } else {
-            u.limit_gb
-        };
+        let exp = if days > 0 { base.saturating_add(days * 86400) } else { u.expires_at };
+        let lim = if add_gb > 0.0 { added_limit(&u, add_gb) } else { u.limit_gb };
+        self.exec("UPDATE users SET expires_at=?1, limit_gb=?2, warned=0 WHERE id=?3", &[&exp, &lim, &id]).map(|_| ())
+    }
+
+    /// Renewal with a plan: like `extend`, but 0 means what it means in a plan (and in create_user):
+    /// days 0 = no end date, GB 0 = unlimited volume. An unlimited account renewed with a limited plan
+    /// gets the plan's GB on top of what it already used, so it is not cut off right after paying.
+    pub fn renew_plan(&self, id: i64, days: i64, gb: f64) -> Result<(), String> {
+        let u = self.user(id).ok_or("user not found")?;
+        let (days, gb) = (clamp_days(days), clamp_gb(gb));
+        let base = if u.expires_at > now() { u.expires_at } else { now() };
+        let exp = if days > 0 { base.saturating_add(days * 86400) } else { 0 };
+        let lim = if gb > 0.0 { added_limit(&u, gb) } else { 0.0 };
         self.exec("UPDATE users SET expires_at=?1, limit_gb=?2, warned=0 WHERE id=?3", &[&exp, &lim, &id]).map(|_| ())
     }
 
@@ -432,7 +484,8 @@ impl Db {
     /// نامحدود می‌ماند (برخلاف extend که از نامحدود، محدود می‌سازد). true = چیزی عوض شد.
     pub fn gift(&self, id: i64, days: i64, add_gb: f64) -> Result<bool, String> {
         let u = self.user(id).ok_or("user not found")?;
-        let exp = if days > 0 && u.expires_at > 0 { u.expires_at.max(now()) + days * 86400 } else { u.expires_at };
+        let (days, add_gb) = (clamp_days(days), clamp_gb(add_gb));
+        let exp = if days > 0 && u.expires_at > 0 { u.expires_at.max(now()).saturating_add(days * 86400) } else { u.expires_at };
         let lim = if add_gb > 0.0 && u.limit_gb > 0.0 {
             if u.over_quota() { u.used_gb() + add_gb } else { u.limit_gb + add_gb }
         } else {
@@ -448,13 +501,15 @@ impl Db {
         self.with(|c| c.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap_or(0))
     }
 
-    /// Removes a user completely: account, keys / peers and unpaid orders; paid orders keep their
-    /// amount for the sales total but no longer point at the (now free) user number.
+    /// Removes a user completely: account, keys / peers and rejected orders. Every other order stays but
+    /// no longer points at the (now free) user number: a paid one keeps its amount for the sales total,
+    /// and one still open (a receipt waiting for approval, a payment being checked, a failed delivery)
+    /// gives the buyer a new account when it is approved.
     pub fn delete_user(&self, id: i64) {
         let _ = self.exec("DELETE FROM users WHERE id=?1", &[&id]);
         let _ = self.exec("DELETE FROM peers WHERE user_id=?1", &[&id]);
         let _ = self.exec("DELETE FROM devices WHERE user_id=?1", &[&id]);
-        let _ = self.exec("DELETE FROM orders WHERE target=?1 AND status NOT IN ('done','approved')", &[&id]);
+        let _ = self.exec("DELETE FROM orders WHERE target=?1 AND status NOT IN ('done','approved','pending','waiting','error')", &[&id]);
         let _ = self.exec("UPDATE orders SET target=0 WHERE target=?1", &[&id]);
     }
 
@@ -505,13 +560,27 @@ impl Db {
         let (privk, pubk) = crate::wg::genkey()?;
         let psk = crate::wg::genpsk()?;
         let base = if proto == "awg" { "10.67" } else { "10.66" };
-        let ip = format!("{}.{}.{}", base, (user_id / 250) % 250, user_id % 250 + 2);
+        let Some(ip) = peer_ip(base, user_id) else {
+            eprintln!("{}: user {} has no free address left in {}.0.0/16 (user numbers up to 64023 fit)", proto, user_id, base);
+            return None;
+        };
         let _ = self.exec(
             "INSERT OR IGNORE INTO peers(user_id,node_id,proto,privkey,pubkey,psk,ip) VALUES(?1,?2,?3,?4,?5,?6,?7)",
             &[&user_id, &node, &proto, &privk, &pubk, &psk, &ip],
         );
         self.peer(user_id, node, proto)
     }
+}
+
+/// the new limit when `add` GB is added: on top of what was used when the account is unlimited or over its
+/// limit, else on top of the limit
+fn added_limit(u: &User, add: f64) -> f64 {
+    if u.limit_gb <= 0.0 || u.over_quota() { u.used_gb() + add } else { u.limit_gb + add }
+}
+
+fn trim_logs(c: &Connection) {
+    let _ = c.execute("DELETE FROM audit WHERE id <= (SELECT id FROM audit ORDER BY id DESC LIMIT 1 OFFSET ?1)", [AUDIT_KEEP]);
+    let _ = c.execute("DELETE FROM login_log WHERE id <= (SELECT id FROM login_log ORDER BY id DESC LIMIT 1 OFFSET ?1)", [LOGIN_LOG_KEEP]);
 }
 
 pub fn default_setting(k: &str) -> &'static str {
@@ -554,6 +623,92 @@ pub fn default_setting(k: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_db() -> (std::path::PathBuf, Db) {
+        let dir = std::env::temp_dir().join(format!("kanki-db-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("kanki.db").to_str().unwrap());
+        (dir, db)
+    }
+
+    #[test]
+    fn peer_addresses_stay_and_never_repeat() {
+        // the addresses existing users have today
+        assert_eq!(peer_ip("10.66", 1).unwrap(), "10.66.0.3");
+        assert_eq!(peer_ip("10.66", 251).unwrap(), "10.66.1.3");
+        assert_eq!(peer_ip("10.67", 62499).unwrap(), "10.67.249.251");
+        // bigger numbers: inside the same /16, never one of the old addresses
+        let mut seen = std::collections::HashSet::new();
+        for id in 0..64024 {
+            let ip = peer_ip("10.66", id).unwrap();
+            assert!(ip != "10.66.0.1" && !ip.ends_with(".255.255"), "{}", ip);
+            assert!(seen.insert(ip.clone()), "{} repeats", ip);
+        }
+        assert_eq!(peer_ip("10.66", 62500).unwrap(), "10.66.250.1");
+        assert!(peer_ip("10.66", 64024).is_none());
+    }
+
+    #[test]
+    fn renewal_with_a_plan() {
+        let (dir, db) = temp_db();
+        // unlimited volume, limited plan: the plan's GB on top of what was used
+        let u = db.create_user("a", 0.0, 30, 1, "wg", "", "", 0).unwrap();
+        db.exec("UPDATE users SET used_bytes=?1 WHERE id=?2", &[&(50i64 * 1024 * 1024 * 1024), &u.id]).unwrap();
+        db.renew_plan(u.id, 30, 20.0).unwrap();
+        let v = db.user(u.id).unwrap();
+        assert!((v.limit_gb - (v.used_gb() + 20.0)).abs() < 0.01 && !v.over_quota());
+        // a plan with 0 GB and 0 days: unlimited volume and no end date
+        db.renew_plan(u.id, 0, 0.0).unwrap();
+        let v = db.user(u.id).unwrap();
+        assert_eq!((v.limit_gb, v.expires_at), (0.0, 0));
+        // extend keeps 0 as "add nothing"
+        let w = db.create_user("b", 10.0, 30, 1, "wg", "", "", 0).unwrap();
+        db.extend(w.id, 0, 5.0).unwrap();
+        let x = db.user(w.id).unwrap();
+        assert_eq!((x.limit_gb, x.expires_at), (15.0, w.expires_at));
+        // huge numbers do not overflow into the past
+        db.extend(w.id, i64::MAX, f64::INFINITY).unwrap();
+        let x = db.user(w.id).unwrap();
+        assert!(x.expires_at > now() && x.limit_gb == 15.0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn deleting_a_user_keeps_open_orders() {
+        let (dir, db) = temp_db();
+        let u = db.create_user("a", 1.0, 30, 1, "wg", "", "", 0).unwrap();
+        for st in ["pending", "waiting", "error", "done", "rejected"] {
+            db.exec("INSERT INTO orders(tg_id,plan_id,kind,target,status,created) VALUES(1,1,'renew',?1,?2,0)", &[&u.id, &st]).unwrap();
+        }
+        db.delete_user(u.id);
+        let left: Vec<(String, i64)> = db.with(|c| {
+            let mut s = c.prepare("SELECT status, target FROM orders ORDER BY id").unwrap();
+            let v: Vec<(String, i64)> = s.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().flatten().collect();
+            v
+        });
+        let want: Vec<(String, i64)> = ["pending", "waiting", "error", "done"].iter().map(|s| (s.to_string(), 0)).collect();
+        assert_eq!(left, want);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn logs_are_trimmed_while_running() {
+        let (dir, db) = temp_db();
+        db.with(|c| {
+            for _ in 0..(AUDIT_KEEP + 10) {
+                c.execute("INSERT INTO audit(ts,actor,method,path,status,ip) VALUES(0,'a','POST','/x',200,'')", []).unwrap();
+            }
+        });
+        // the trim runs on every 200th row (the counter is shared with other tests running at once)
+        for _ in 0..100_000 {
+            db.note_log_row();
+            if db.count("SELECT COUNT(*) FROM audit") == AUDIT_KEEP {
+                break;
+            }
+        }
+        assert_eq!(db.count("SELECT COUNT(*) FROM audit"), AUDIT_KEEP);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn mixplus_is_cleaned_out() {
