@@ -81,6 +81,7 @@ const BTNS: &[(&str, &str, &str)] = &[
     ("cfg_w", "📥 کانفیگ WireGuard", "زیر پیام اشتراک"),
     ("cfg_a", "📥 کانفیگ AmneziaWG", "زیر پیام اشتراک"),
     ("cfg_h", "📥 کانفیگ Hysteria2", "زیر پیام اشتراک"),
+    ("cfg_l", "📄 همه‌ی لینک‌ها (Xray + Hysteria2)", "زیر پیام اشتراک"),
     ("amz", "📦 بکاپ Amnezia (همه‌ی سرورها یک‌جا)", "زیر پیام اشتراک"),
     ("miniapp", "📱 حساب من (مینی‌اپ)", "زیر پیام اشتراک"),
     ("shop", "🧮 حجم و روز دلخواه", "فهرست پلن‌ها (خرید از مینی‌اپ)"),
@@ -777,6 +778,10 @@ impl Bot {
                 rows.push(vec![b(&self.bt(&format!("cfg_{}", code)), &format!("cfg:{}:{}", u.id, code))]);
             }
         }
+        // the subscription link and every Hysteria2 and Xray link in one text, for v2rayNG / Hiddify / NekoBox
+        if crate::api::links_text(&self.app, u).is_some() {
+            rows.push(vec![b(&self.bt("cfg_l"), &format!("cfg:{}:l", u.id))]);
+        }
         // every WireGuard / AmneziaWG config in one AmneziaVPN restore file
         if have.contains(&"wireguard") || have.contains(&"amneziawg") {
             rows.push(vec![b(&self.bt("amz"), &format!("amz:{}", u.id))]);
@@ -793,6 +798,9 @@ impl Bot {
     /// Sends the config(s) of one protocol: first a short "which app and how" guide, then a file per server
     /// (Hysteria2 as a copyable link).
     pub(crate) async fn send_configs(&self, chat: i64, qid: &str, u: &User, code: &str) {
+        if code == "l" {
+            return self.send_links(chat, qid, u).await;
+        }
         let (proto, title) = match code { "w" => ("wireguard", "WireGuard"), "a" => ("amneziawg", "AmneziaWG"), _ => ("hysteria2", "Hysteria2") };
         // each server's direct config, then its copy through the tunnel (WireGuard only that one)
         let mut list: Vec<(crate::db::Node, bool)> = vec![];
@@ -818,6 +826,32 @@ impl Bot {
                 let cap = format!("📥 {} · {}\nاسم داخل برنامه: {}", title, server, name.trim_end_matches(".conf"));
                 self.send_doc(chat, text.into_bytes(), &name, &cap).await;
             }
+        }
+    }
+
+    /// The subscription link and every Hysteria2 and Xray link of an account: a .txt file, and the same text to copy
+    /// when it fits in one message. The first line is the subscription, so the app keeps the configs up to date.
+    pub(crate) async fn send_links(&self, chat: i64, qid: &str, u: &User) {
+        let Some(text) = crate::api::links_text(&self.app, u) else {
+            return self.answer(qid, "برای سرویس شما لینک Xray یا Hysteria2 فعال نیست.", true).await;
+        };
+        let n = text.lines().count().saturating_sub(1);
+        let cap = format!(
+            "📄 همه‌ی لینک‌ها · {} کانفیگ (Xray + Hysteria2)\n\n\
+             خط اول لینک اشتراکه: توی برنامه به‌عنوان اشتراک (Subscription) اضافه‌ش کنید تا هر تغییری روی سرورها خودش به‌روز بشه.\n\
+             بقیه‌ی خط‌ها کانفیگ‌ها هستن.\n\n\
+             برنامه‌ها: v2rayNG، Hiddify، NekoBox، V2Box، Streisand\n\
+             ➕ ← Import from clipboard (بعد از کپی) یا Import from file (همین فایل).",
+            n
+        );
+        self.send_doc(chat, text.clone().into_bytes(), &format!("{}-links.txt", u.username), &cap).await;
+        let msg = format!("🔗 <b>لینک اشتراک</b> (یک بار اضافه‌ش کنید، خودش به‌روز می‌شه):\n<code>{}</code>\n\n📋 <b>همه با هم</b> (روش بزنید تا کپی بشه):\n<code>{}</code>",
+            esc(&crate::api::v2_sub_link(&self.app, u)), esc(text.trim()));
+        // Telegram's limit is 4096 characters; a longer list goes only as the file
+        if msg.chars().count() <= 4000 {
+            self.send(chat, &msg, None).await;
+        } else {
+            self.send(chat, &format!("🔗 <b>لینک اشتراک</b> (یک بار اضافه‌ش کنید، خودش به‌روز می‌شه):\n<code>{}</code>\n\nبقیه‌ی لینک‌ها زیاد بودن و فقط توی فایل بالا هستن.", esc(&crate::api::v2_sub_link(&self.app, u))), None).await;
         }
     }
 

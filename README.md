@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.25 — all links in one text
+- Bot and mini app: «همه‌ی لینک‌ها»: the subscription link first, then every Xray and Hysteria2 config, one per line, to copy or as a .txt file for v2rayNG / Hiddify / NekoBox.
 ## New in 3.24 — the daily report's token from the panel
 - Sales bot › «📋 Daily report»: paste the report's API token there and it works; the card shows if the token still works and can send the report now. No shell on the server needed.
 ## New in 3.23.2 — the mini app on the panel's domain
