@@ -216,7 +216,8 @@ async fn upload(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, St
     };
     let _ = tokio::fs::create_dir_all(dir(&app)).await;
     let dst = path(&app, abi);
-    let tmp = format!("{}.part", dst);
+    // a name of its own, so two uploads of one phone type at once do not write into one file
+    let tmp = format!("{}.{}.part", dst, crate::util::rand_token(8).to_lowercase());
     if let Err(e) = tokio::fs::write(&tmp, &body).await {
         return err(StatusCode::INTERNAL_SERVER_ERROR, &format!("cannot save the file: {}", e));
     }
@@ -266,7 +267,23 @@ async fn download(State(app): St, Path((code, abi)): Path<(String, String)>) -> 
     }
     let Some(f) = get_file(&app, &abi) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
     let Ok(file) = tokio::fs::File::open(path(&app, &abi)).await else { return (StatusCode::NOT_FOUND, "not found").into_response() };
-    let stream = futures_util::stream::unfold(file, |mut file| async move {
+    // the length of the file really opened (a new upload may have replaced it since the list was saved)
+    let Ok(size) = file.metadata().await.map(|m| m.len()) else { return (StatusCode::NOT_FOUND, "not found").into_response() };
+    (
+        [
+            (header::CONTENT_TYPE, "application/vnd.android.package-archive".to_string()),
+            (header::CONTENT_LENGTH, size.to_string()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", f.file_name())),
+            (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
+        ],
+        file_body(file),
+    )
+        .into_response()
+}
+
+/// A body read from an open file in pieces (never whole in memory)
+pub fn file_body(file: tokio::fs::File) -> Body {
+    Body::from_stream(futures_util::stream::unfold(file, |mut file| async move {
         use tokio::io::AsyncReadExt;
         let mut buf = vec![0u8; 64 * 1024];
         match file.read(&mut buf).await {
@@ -277,17 +294,7 @@ async fn download(State(app): St, Path((code, abi)): Path<(String, String)>) -> 
             }
             Err(e) => Some((Err(e), file)),
         }
-    });
-    (
-        [
-            (header::CONTENT_TYPE, "application/vnd.android.package-archive".to_string()),
-            (header::CONTENT_LENGTH, f.size.to_string()),
-            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", f.file_name())),
-            (header::CACHE_CONTROL, "private, max-age=3600".to_string()),
-        ],
-        Body::from_stream(stream),
-    )
-        .into_response()
+    }))
 }
 
 pub fn router() -> Router<Arc<App>> {

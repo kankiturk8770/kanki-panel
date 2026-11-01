@@ -92,6 +92,9 @@ pub fn apply(off: &[String]) {
     if want == last {
         return;
     }
+    // what is really in place: a core skipped (not installed) or whose systemctl failed keeps its old state
+    // here, so the next sync tries it again
+    let mut applied = last.clone();
     for (core, unit, conf) in CORES {
         if !std::path::Path::new(conf).exists() {
             continue;
@@ -101,22 +104,42 @@ pub fn apply(off: &[String]) {
             continue;
         }
         let port = port_of(core, conf);
-        if now_off {
-            let _ = Command::new("systemctl").args(["disable", "--now", "-q", unit]).status();
+        let ok = if now_off {
+            let ok = Command::new("systemctl").args(["disable", "--now", "-q", unit]).status().map(|s| s.success()).unwrap_or(false);
             if let Some(p) = port {
                 ufw(&format!("--force delete allow {}/udp", p));
             }
-            eprintln!("{}: switched off in the panel (stopped, port closed)", core);
+            if ok {
+                eprintln!("{}: switched off in the panel (stopped, port closed)", core);
+            }
+            ok
         } else {
             if let Some(p) = port {
                 ufw(&format!("allow {}/udp", p));
             }
-            let _ = Command::new("systemctl").args(["enable", "--now", "-q", unit]).status();
-            eprintln!("{}: switched on in the panel (started, port open)", core);
+            let ok = Command::new("systemctl").args(["enable", "--now", "-q", unit]).status().map(|s| s.success()).unwrap_or(false);
+            if ok {
+                eprintln!("{}: switched on in the panel (started, port open)", core);
+            }
+            ok
+        };
+        if ok {
+            record(&mut applied, core, now_off);
+        } else {
+            eprintln!("{}: could not be switched {} (trying again on the next sync)", core, if now_off { "off" } else { "on" });
         }
     }
     let _ = std::fs::create_dir_all("/var/lib/kanki");
-    let _ = std::fs::write(LAST, serde_json::to_string(&want).unwrap_or_default());
+    let _ = std::fs::write(LAST, serde_json::to_string(&applied).unwrap_or_default());
+}
+
+/// Marks `core` off (or on) in the list of what is in place, kept sorted like the panel's list
+fn record(applied: &mut Vec<String>, core: &str, off: bool) {
+    applied.retain(|c| c != core);
+    if off {
+        applied.push(core.to_string());
+    }
+    applied.sort();
 }
 
 #[cfg(test)]
@@ -135,6 +158,17 @@ mod tests {
             login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
             http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
         })
+    }
+
+    #[test]
+    fn only_what_was_switched_is_recorded() {
+        let mut a = vec!["wg".to_string()];
+        super::record(&mut a, "hy2", true);
+        assert_eq!(a, vec!["hy2".to_string(), "wg".to_string()]);
+        super::record(&mut a, "wg", false);
+        assert_eq!(a, vec!["hy2".to_string()]);
+        super::record(&mut a, "hy2", true);
+        assert_eq!(a, vec!["hy2".to_string()]);
     }
 
     #[test]
