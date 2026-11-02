@@ -39,6 +39,10 @@ pub struct SyncReq {
     /// firewall here ("wg 1.2.3.4:5678")
     #[serde(default)]
     pub block: Vec<String>,
+    /// connection limit: Hysteria2 sessions each user at their limit may have on this server
+    /// (username -> sessions); more are dropped here and refused at login
+    #[serde(default)]
+    pub hy2_cap: HashMap<String, i64>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -65,6 +69,10 @@ pub struct SyncResp {
     pub mtun_online: Vec<String>,
     #[serde(default)]
     pub mtun_error: String,
+    /// this server's clock (unix seconds) when it answered: handshake times are compared with it,
+    /// not with the panel's clock (an older node sends 0)
+    #[serde(default)]
+    pub now: i64,
 }
 
 fn loadavg() -> String {
@@ -120,9 +128,24 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     let port = app.env.get("HY2_STATS_PORT").cloned().unwrap_or_default();
     let secret = app.env.get("HY2_SECRET").cloned().unwrap_or_default();
     let hy2 = crate::hy2::traffic(&port, &secret).await;
-    let hy2_online = crate::hy2::online(&port, &secret).await;
+    let mut hy2_online = crate::hy2::online(&port, &secret).await;
+    // a ping session next to a real one is no device: where Hysteria tells which of its connections
+    // moved data, a user counts as many devices as moved data (at least one, at most what is open)
+    if let Some(real) = crate::hy2::moving(&port, &secret, now()).await {
+        for (k, c) in hy2_online.iter_mut() {
+            *c = hy2_devices(*c, real.get(k).copied().unwrap_or(0));
+        }
+    }
+    *hy2_caps().lock().unwrap_or_else(|e| e.into_inner()) = req.hy2_cap.clone();
     // disconnect Hysteria2 users who are no longer allowed (expired / over quota / disabled)
-    let kick: Vec<String> = hy2_online.keys().filter(|k| !hy2_names.contains(*k)).cloned().collect();
+    let mut kick: Vec<String> = hy2_online.keys().filter(|k| !hy2_names.contains(*k)).cloned().collect();
+    // more sessions here than the limit leaves for this server: Hysteria can only drop all sessions of
+    // a user, and the login check then lets back in no more than allowed
+    for (k, c) in hy2_online.iter() {
+        if req.hy2_cap.get(k).is_some_and(|cap| c > cap) && !kick.contains(k) {
+            kick.push(k.clone());
+        }
+    }
     crate::hy2::kick(&port, &secret, &kick).await;
     let mut rep: HashMap<String, i64> = HashMap::new();
     for (k, v) in hy2_online.iter() {
@@ -152,7 +175,19 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     if let Some(cfg) = req.mtun {
         (mtun, mtun_online, mtun_error) = tokio::task::spawn_blocking(move || crate::microtun::apply(cfg)).await.unwrap_or_else(|_| (HashMap::new(), vec![], "microtun apply crashed".into()));
     }
-    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, mtun, mtun_online, mtun_error }
+    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, mtun, mtun_online, mtun_error, now: now() }
+}
+
+/// Hysteria2 devices of a user on this server: `open` sessions, `real` of them seen moving data (a
+/// session that only logged in is a ping; one that moves only UDP shows no streams, so at least one)
+fn hy2_devices(open: i64, real: i64) -> i64 {
+    open.min(real.max(1))
+}
+
+/// Hysteria2 sessions per user this server may have now (set on every sync; empty = no cap)
+fn hy2_caps() -> &'static Mutex<HashMap<String, i64>> {
+    static C: std::sync::OnceLock<Mutex<HashMap<String, i64>>> = std::sync::OnceLock::new();
+    C.get_or_init(Default::default)
 }
 
 /// when each switched-off node was last given its empty user list
@@ -176,7 +211,10 @@ fn live_peer(uid: i64, node: &str, proto: &str, moved: i64, now: i64) -> bool {
     let mut live = LIVE.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
     let key = (uid, node.to_string(), proto.to_string());
     let was = live.get(&key).copied();
-    if moved >= 1024 || (moved > 0 && was.is_some()) {
+    // a key that was last counted long ago (closed, then opened again) is new: one ping must not make
+    // it a device. Rounds of keepalives only come 30 s or more apart, so the gap is wider than LIVE_FOR.
+    let recent = was.is_some_and(|t| now - t < NEW_AFTER);
+    if moved >= 1024 || (moved > 0 && recent) {
         live.insert(key, now);
         return true;
     }
@@ -213,6 +251,8 @@ fn forget_sessions(node: &str, open: impl Fn(i64, &str) -> bool) {
 
 /// How long a WireGuard / AmneziaWG key counts as connected after the last data it moved
 const LIVE_FOR: i64 = 30;
+/// … and after how long without data it is a new key that has to move 1 KB again
+const NEW_AFTER: i64 = 120;
 
 /// The connection limit of an account counts devices, over every server, protocol and app: a config
 /// copied to several devices is several connections. Once a user has as many live devices as allowed,
@@ -232,16 +272,38 @@ pub struct Limits {
     /// addresses of extra devices dropped on a WireGuard / AmneziaWG config, until a device of that
     /// user ends (they stay out of sight while dropped, so they are kept here)
     blocked: HashMap<(i64, String, String), Vec<String>>,
+    /// when each node last answered (what a silent node had is kept only for `CARRY_FOR`)
+    heard: HashMap<String, i64>,
 }
+
+/// How long the connections of a node that stopped answering are still counted
+const CARRY_FOR: i64 = 120;
 
 impl Limits {
     /// One sync round: `units` are the live connections (user, node, protocol, devices) of the nodes in
     /// `answered`; `eps` the addresses of the devices on one WireGuard / AmneziaWG key, oldest first.
     /// True when something was shut, dropped or let in.
     pub fn round(&mut self, units: &[(i64, String, String, i64)], eps: &HashMap<(i64, String, String), Vec<String>>, answered: &HashSet<String>, max: &HashMap<i64, i64>, now: i64) -> bool {
-        // a node that did not answer keeps what it had
-        let mut all: Vec<(i64, String, String, i64)> = units.to_vec();
-        all.extend(self.last.iter().filter(|x| !answered.contains(&x.1)).cloned());
+        for n in answered {
+            self.heard.insert(n.clone(), now);
+        }
+        self.heard.retain(|_, t| now - *t < 86_400);
+        // a node that did not answer keeps what it had, for a while: a node that is gone for good must
+        // not keep its users out of every other server
+        let heard = &self.heard;
+        let mut all: Vec<(i64, String, String, i64)> = vec![];
+        let mut at: HashMap<(i64, String, String), usize> = HashMap::new();
+        let kept = self.last.iter().filter(|x| !answered.contains(&x.1) && heard.get(&x.1).is_some_and(|t| now - t < CARRY_FOR));
+        for x in units.iter().chain(kept) {
+            // the same user, node and protocol twice (two microtun devices) is that many devices
+            match at.get(&(x.0, x.1.clone(), x.2.clone())) {
+                Some(i) => all[*i].3 += x.3,
+                None => {
+                    at.insert((x.0, x.1.clone(), x.2.clone()), all.len());
+                    all.push(x.clone());
+                }
+            }
+        }
         self.last = all.clone();
         let live: HashSet<(i64, String, String)> = all.iter().map(|(u, n, p, _)| (*u, n.clone(), p.clone())).collect();
         self.since.retain(|k, _| live.contains(k));
@@ -273,7 +335,7 @@ impl Limits {
                 let take = c.min(left);
                 left -= take;
                 if take > 0 {
-                    open.insert((n.clone(), p.clone()), take);
+                    *open.entry((n.clone(), p.clone())).or_default() += take;
                 }
                 let key = (u, n, p);
                 if take < c {
@@ -290,6 +352,11 @@ impl Limits {
         }
         self.blocked.retain(|_, v| !v.is_empty());
         self.open != open_before || self.blocked != blocked_before
+    }
+
+    /// Servers that are switched off or removed serve nobody: what they had is not kept
+    pub fn keep_nodes(&mut self, keep: impl Fn(&str) -> bool) {
+        self.last.retain(|x| keep(&x.1));
     }
 
     /// The users this server and protocol is shut for now
@@ -340,12 +407,46 @@ pub fn limits() -> &'static Mutex<Limits> {
     L.get_or_init(Default::default)
 }
 
-/// Live Hysteria2 sessions of a user on this server
+/// Live Hysteria2 sessions of a user on this server (a ping session next to one that moved data is
+/// not counted, as in the sync rounds)
 pub async fn live_sessions(app: &App, username: &str) -> i64 {
     let port = app.env.get("HY2_STATS_PORT").cloned().unwrap_or_default();
     let secret = app.env.get("HY2_SECRET").cloned().unwrap_or_default();
     let h = crate::hy2::online(&port, &secret).await.get(username).copied().unwrap_or(0);
-    h
+    match crate::hy2::moving_known(username, now()) {
+        Some(real) if h > 0 => hy2_devices(h, real),
+        _ => h,
+    }
+}
+
+/// Logins let in during the last seconds: Hysteria lists a session only after its login, so two
+/// logins at the same moment must not both see the place free
+#[derive(Default)]
+struct Grants(HashMap<String, Vec<std::time::Instant>>);
+
+const GRANT_FOR: std::time::Duration = std::time::Duration::from_secs(3);
+
+impl Grants {
+    fn recent(&mut self, user: &str, at: std::time::Instant) -> i64 {
+        let v = self.0.entry(user.to_string()).or_default();
+        v.retain(|t| at.saturating_duration_since(*t) < GRANT_FOR);
+        v.len() as i64
+    }
+    fn note(&mut self, user: &str, at: std::time::Instant) {
+        self.0.entry(user.to_string()).or_default().push(at);
+        self.0.retain(|_, v| !v.is_empty());
+    }
+}
+
+fn grants() -> &'static Mutex<Grants> {
+    static G: std::sync::OnceLock<Mutex<Grants>> = std::sync::OnceLock::new();
+    G.get_or_init(Default::default)
+}
+
+/// One Hysteria2 login at a time per user (the count and the grant go together)
+fn login_lock(user: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static L: std::sync::OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = std::sync::OnceLock::new();
+    L.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner()).entry(user.to_string()).or_default().clone()
 }
 
 /// Connection-limit check used by Hysteria2 auth
@@ -354,9 +455,20 @@ pub async fn conn_allowed(app: &App, username: &str) -> bool {
     if max <= 0 {
         return true;
     }
+    let lock = login_lock(username);
+    let _one = lock.lock().await;
     let reported = app.reported.lock().unwrap_or_else(|e| e.into_inner()).get(username).copied().unwrap_or(0);
     let elsewhere = (total - reported).max(0);
-    elsewhere + live_sessions(app, username).await < max
+    let cap = hy2_caps().lock().unwrap_or_else(|e| e.into_inner()).get(username).copied();
+    let live = live_sessions(app, username).await;
+    let t = std::time::Instant::now();
+    let mut g = grants().lock().unwrap_or_else(|e| e.into_inner());
+    let here = live + g.recent(username, t);
+    let ok = elsewhere + here < max && cap.map_or(true, |c| here < c);
+    if ok {
+        g.note(username, t);
+    }
+    ok
 }
 
 fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, String, String)>) {
@@ -413,6 +525,9 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
         }
         if u.has_proto("hy2") && !is_off("hy2") && !shut(u, "hy2") {
             req.hy2.insert(u.code.clone(), u.username.clone());
+            if let Some(a) = lim.allowed(u.id, &n.id, "hy2") {
+                req.hy2_cap.insert(u.username.clone(), a);
+            }
         }
         req.limits.insert(u.username.clone(), (if limit_on { u.max_conn } else { 0 }, u.online));
     }
@@ -432,36 +547,43 @@ pub async fn sync_all(app: &Arc<App>) {
     let mut answered: HashSet<String> = HashSet::new();
     let mut eps: HashMap<(i64, String, String), Vec<String>> = HashMap::new();
 
+    let all_nodes = app.db.nodes();
+    let enabled: HashSet<String> = all_nodes.iter().filter(|n| n.enabled).map(|n| n.id.clone()).collect();
     // a node whose VPN is switched off serves nobody: its users are taken off (an empty sync), so a
-    // relay server keeps its ports free and an old peer cannot keep using it
-    for n in app.db.nodes().into_iter().filter(|n| !n.enabled) {
+    // relay server keeps its ports free and an old peer cannot keep using it. These run beside the
+    // enabled ones, with a short timeout: an unreachable one must not hold the round.
+    let mut off_jobs = vec![];
+    for n in all_nodes.iter().filter(|n| !n.enabled).cloned() {
         // the panel server's own info (version, services, load) stays fresh while its VPN is off too
         if n.id == "local" {
             let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id='local'", &[&local_info_async(app).await.to_string()]);
         }
-        // once it is empty, checked again every 5 minutes (an unreachable one must not slow every round)
+        // once it is empty (or did not answer), checked again every 5 minutes
         {
             let mut g = off_checked().lock().unwrap_or_else(|e| e.into_inner());
             let last = g.get(&n.id).copied().unwrap_or(0);
-            if n.sync_state == "off" && now() - last < 300 {
+            if (n.sync_state == "off" || !n.online) && last > 0 && now() - last < 300 {
                 continue;
             }
             g.insert(n.id.clone(), now());
         }
-        let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(serde_json::json!({})), mtun: Some(Default::default()), ..Default::default() };
-        let ok = if n.id == "local" { apply_local(app, empty).await; true } else { remote_sync(app, &n, &empty).await.is_ok() };
-        let _ = app.db.exec("UPDATE nodes SET online=?1, sync_state='off' WHERE id=?2", &[&(ok as i64), &n.id]);
-        if ok && n.id != "local" {
-            if let Some(info) = remote_info(app, &n.address, &n.token, n.insecure).await {
-                let _ = app.db.exec("UPDATE nodes SET info=?1, last_sync=?2 WHERE id=?3", &[&info.to_string(), &now(), &n.id]);
-            }
-        }
-        crate::live::set_vpn(&n.id, &n.name, vec![]);
+        off_jobs.push(async move {
+            let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(serde_json::json!({})), mtun: Some(Default::default()), ..Default::default() };
+            let local = n.id == "local";
+            let ok = if local {
+                apply_local(app, empty).await;
+                true
+            } else {
+                tokio::time::timeout(OFF_TIMEOUT, remote_sync(app, &n, &empty)).await.is_ok_and(|r| r.is_ok())
+            };
+            let info = if ok && !local { tokio::time::timeout(OFF_TIMEOUT, remote_info(app, &n.address, &n.token, n.insecure)).await.ok().flatten() } else { None };
+            (n, ok, info)
+        });
     }
     // every server is asked at the same time: one that does not answer must not hold the round (traffic,
     // limits and who is online) for everyone else
     let mut jobs = vec![];
-    for mut n in app.db.nodes().into_iter().filter(|n| n.enabled) {
+    for mut n in all_nodes.into_iter().filter(|n| n.enabled) {
         let local = n.id == "local";
         if local {
             let info = local_info_async(app).await.to_string();
@@ -476,7 +598,17 @@ pub async fn sync_all(app: &Arc<App>) {
             (n, map, want, resp, info)
         });
     }
-    for (n, map, want, resp, info) in futures_util::future::join_all(jobs).await {
+    let (offs, results) = futures_util::future::join(futures_util::future::join_all(off_jobs), futures_util::future::join_all(jobs)).await;
+    for (n, ok, info) in offs {
+        // "off" only once it really took the empty list
+        let state = if ok { "off" } else { "offline" };
+        let _ = app.db.exec("UPDATE nodes SET online=?1, sync_state=?2 WHERE id=?3", &[&(ok as i64), &state, &n.id]);
+        if let Some(info) = info {
+            let _ = app.db.exec("UPDATE nodes SET info=?1, last_sync=?2 WHERE id=?3", &[&info.to_string(), &now(), &n.id]);
+        }
+        crate::live::set_vpn(&n.id, &n.name, vec![]);
+    }
+    for (n, map, want, resp, info) in results {
         let local = n.id == "local";
         let ok = resp.is_ok();
         let state = match &resp {
@@ -502,6 +634,25 @@ pub async fn sync_all(app: &Arc<App>) {
         };
         // who is connected here right now, and with which protocol (for the panel)
         let mut here: Vec<(i64, String)> = vec![];
+        // the node's own clock: its handshake and address times are by it (an older node sends none)
+        let node_now = if resp.now > 0 { resp.now } else { now() };
+        let skew = now() - node_now;
+        // keys taken off this round: their last traffic still counts
+        let mine: HashSet<&str> = map.iter().map(|x| x.2.as_str()).collect();
+        for (proto, stats) in [("wg", &resp.wg), ("awg", &resp.awg)] {
+            for (pk, st) in stats.iter().filter(|(k, _)| !mine.contains(k.as_str())) {
+                let row: Option<(i64, i64, i64)> = app.db.with(|c| {
+                    c.query_row("SELECT user_id,rx,tx FROM peers WHERE node_id=?1 AND proto=?2 AND pubkey=?3", rusqlite::params![n.id, proto, pk], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok()
+                });
+                let Some((uid, prx, ptx)) = row else { continue };
+                let (total, prev) = (st.rx + st.tx, prx + ptx);
+                let delta = if total >= prev { total - prev } else { total };
+                if delta > 0 {
+                    *add_bytes.entry(uid).or_default() += delta;
+                    let _ = app.db.exec("UPDATE peers SET rx=?1, tx=?2 WHERE user_id=?3 AND node_id=?4 AND proto=?5", &[&st.rx, &st.tx, &uid, &n.id, &proto]);
+                }
+            }
+        }
 
         for (uid, proto, pubk) in map {
             let stats = if proto == "wg" { &resp.wg } else { &resp.awg };
@@ -518,11 +669,11 @@ pub async fn sync_all(app: &Arc<App>) {
                     &[&st.rx, &st.tx, &uid, &n.id, &proto],
                 );
             }
-            if st.handshake > 0 && now() - st.handshake < 180 && live_peer(uid, &n.id, &proto, moved, now()) {
+            if st.handshake > 0 && node_now - st.handshake < 180 && live_peer(uid, &n.id, &proto, moved, now()) {
                 here.push((uid, proto.clone()));
                 // one config on several devices: its address keeps changing between them (a phone that
                 // changes network changes it once)
-                let t = now();
+                let t = node_now;
                 let active: Vec<String> = st.eps.iter().filter(|e| t - e.last < 30).map(|e| e.at.clone()).collect();
                 let devices = if st.flips >= 3 && active.len() >= 2 { active.len() as i64 } else { 1 };
                 if devices > 1 {
@@ -531,7 +682,7 @@ pub async fn sync_all(app: &Arc<App>) {
                 units.push((uid, n.id.clone(), proto.clone(), devices));
                 *online.entry(uid).or_default() += devices;
                 let e = seen.entry(uid).or_default();
-                *e = (*e).max(st.handshake);
+                *e = (*e).max(st.handshake + skew);
             }
         }
         for (name, (rx, tx)) in resp.hy2.iter() {
@@ -575,7 +726,12 @@ pub async fn sync_all(app: &Arc<App>) {
     units.extend(xu);
     eps.extend(xe);
     answered.extend(xa);
-    let changed = limits().lock().unwrap_or_else(|e| e.into_inner()).round(&units, &eps, &answered, &max, now());
+    let changed = {
+        let mut l = limits().lock().unwrap_or_else(|e| e.into_inner());
+        // a server switched off or removed: what it had goes at once (Xray servers by their reports)
+        l.keep_nodes(|n| n.starts_with("x:") || enabled.contains(n));
+        l.round(&units, &eps, &answered, &max, now())
+    };
     if changed {
         // a connection was shut or let in again: the servers get it now, not in 30 seconds
         crate::api::spawn_sync(app);
@@ -608,6 +764,8 @@ pub fn node_err(addr: &str, e: &reqwest::Error) -> String {
 
 /// How long a sync or info request to a server may take
 const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+/// … and to a switched-off server (it only gets its empty user list)
+const OFF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 async fn remote_sync(app: &App, n: &Node, req: &SyncReq) -> Result<SyncResp, String> {
     // a sync answers within seconds; the self-signed client's long timeout is for updates
@@ -815,5 +973,62 @@ mod live_tests {
         let only_tr: HashSet<String> = ["tr".to_string()].into_iter().collect();
         l.round_t(&[], &only_tr, &max, 1030);
         assert!(l.is_shut(1, "tr", "wg") && !l.is_shut(1, "de", "wg"));
+    }
+
+    #[test]
+    fn a_node_gone_for_good_lets_its_users_go_elsewhere() {
+        let mut l = Limits::default();
+        let max: HashMap<i64, i64> = [(1, 1)].into_iter().collect();
+        let only_tr: HashSet<String> = ["tr".to_string()].into_iter().collect();
+        l.round_t(&[u(1, "de", "wg")], &nodes(), &max, 1000);
+        // silent for a while: still kept
+        l.round_t(&[], &only_tr, &max, 1100);
+        assert!(l.is_shut(1, "tr", "wg"));
+        // silent past CARRY_FOR: dropped, the user may connect elsewhere
+        l.round_t(&[], &only_tr, &max, 1130);
+        assert!(!l.is_shut(1, "tr", "wg"));
+        // a node switched off or removed goes at once
+        let mut l = Limits::default();
+        l.round_t(&[u(1, "de", "wg")], &nodes(), &max, 1000);
+        l.keep_nodes(|n| n == "tr");
+        l.round_t(&[], &only_tr, &max, 1010);
+        assert!(!l.is_shut(1, "tr", "wg"));
+    }
+
+    #[test]
+    fn two_microtun_devices_on_one_server_add_up() {
+        let mut l = Limits::default();
+        let max: HashMap<i64, i64> = [(1, 2), (2, 1)].into_iter().collect();
+        l.round_t(&[u(1, "de", "mtun"), u(1, "de", "mtun"), u(2, "de", "mtun"), u(2, "de", "mtun")], &nodes(), &max, 1000);
+        // a two-device account keeps both, and nothing else is open
+        assert_eq!(l.allowed(1, "de", "mtun"), Some(2));
+        assert!(l.is_shut(1, "tr", "wg"));
+        // a one-device account gets one place
+        assert_eq!(l.allowed(2, "de", "mtun"), Some(1));
+    }
+
+    #[test]
+    fn a_key_quiet_for_long_is_new_again() {
+        assert!(live_peer(-11, "n", "wg", 50_000, 1000));
+        // closed for minutes, then one ping handshake: not a device
+        assert!(!live_peer(-11, "n", "wg", 240, 1300));
+        assert!(!live_peer(-11, "n", "wg", 0, 1301));
+    }
+
+    #[test]
+    fn hysteria_pings_and_logins_at_once() {
+        use super::{hy2_devices, Grants, GRANT_FOR};
+        // two sessions open, one moved data: one device; nothing seen moving (UDP only): one
+        assert_eq!(hy2_devices(2, 1), 1);
+        assert_eq!(hy2_devices(2, 0), 1);
+        assert_eq!(hy2_devices(1, 3), 1);
+        // a login just let in counts until Hysteria lists it
+        let mut g = Grants::default();
+        let t = std::time::Instant::now();
+        assert_eq!(g.recent("a", t), 0);
+        g.note("a", t);
+        assert_eq!(g.recent("a", t), 1);
+        assert_eq!(g.recent("b", t), 0);
+        assert_eq!(g.recent("a", t + GRANT_FOR), 0);
     }
 }
