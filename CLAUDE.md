@@ -168,6 +168,11 @@ assets/
       - بکاپ Amnezia روی آیفون، اندروید و ویندوز Restore شود؛ مینی‌اپ روی آیفون باز شود (اندروید دیده شد)؛ «دانلود فایل» در تلگرام ۸+؛
         یک خرید دلخواه از مینی‌اپ تا تحویل؛ رنگ دکمه‌ها؛ `price_rules` با قیمت‌های واقعی (3.23.0).
       - «کپی همه» و فایل `links.txt` در v2rayNG، Hiddify، NekoBox؛ آیا خط اول (اشتراک) خودش اشتراک می‌شود (3.25.0).
+- [ ] کار دستی صاحب پنل در گیت‌هاب (Branches): پاک کردن ۱۲ برنچ موقتِ ذخیرهٔ کار 3.25.3 که همه مرج شده‌اند: `wip/fix-bot-sales`،
+      `wip/fix-core-auth`، `wip/fix-m6-l59-bot-emergency-install`، `wip/fix-servers-subscription`، `wip/fix-vpn`،
+      `wip/worktree-agent-a638d271253e77a08`، `fix/fix-bot-sales`، `fix/fix-core-auth`، `fix/fix-g6`، `fix/fix-servers-subscription`،
+      `fix/fix-vpn`، `fix/worktree-agent-a638d271253e77a08`. **`fix/awg-two-processes` مال این کار نیست؛ نگه دار.** (از محیط ابری پاک کردن برنچ
+      ممکن نیست: پروکسی جلسه نوشتن در API گیت‌هاب را می‌بندد، حتی با توکن صاحب پنل.)
 - کار دستی صاحب پنل: روشن کردن 2FA، پاک کردن کلید API قدیمی اگر لازم نیست، یک بار «ارسال بکاپ الان».
 
 ### دانستنی‌های ثابت (قانون‌ها و تصمیم‌های صاحب پنل)
