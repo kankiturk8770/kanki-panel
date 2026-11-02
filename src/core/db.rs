@@ -177,7 +177,8 @@ impl Node {
         })
     }
 
-    /// Node is hidden from users / not synced while in maintenance
+    /// Node takes new users and shows on the subscription page (not in maintenance). A node in maintenance is
+    /// still synced, so users already on it keep working ("Under maintenance: new users are not sent here").
     pub fn usable(&self) -> bool {
         self.enabled && !self.maint
     }
