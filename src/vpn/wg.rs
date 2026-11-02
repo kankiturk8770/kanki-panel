@@ -94,11 +94,13 @@ fn note_endpoints(proto: &str, out: &str, now: i64) {
 
 /// Addresses blocked by the connection limit (extra devices on one config): "proto address"
 pub fn set_blocked(list: &[String]) {
-    static LAST: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    // None until the first call: after a restart the chain is rebuilt once even when nothing is
+    // blocked, so a rule left from before does not stay forever
+    static LAST: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
     let mut want: Vec<String> = list.iter().filter(|x| block_rule(x).is_some()).cloned().collect();
     want.sort();
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    if *last == want {
+    if last.as_ref() == Some(&want) {
         return;
     }
     const CH: &str = "KANKI-LIMIT";
@@ -115,7 +117,7 @@ pub fn set_blocked(list: &[String]) {
             let _ = Command::new("sh").arg("-c").arg(format!("{} -w -A {} {} -j DROP 2>/dev/null", t, CH, rule)).status();
         }
     }
-    *last = want;
+    *last = Some(want);
 }
 
 /// "wg 1.2.3.4:5678" -> (iptables, "-p udp -s 1.2.3.4 --sport 5678 --dport <port of wg>")
@@ -219,6 +221,7 @@ pub fn dump(proto: &str) -> HashMap<String, PeerStat> {
 }
 
 /// پیرهای اینترفیس را دقیقاً برابر لیست خواسته‌شده می‌کند و آمار را برمی‌گرداند
+/// (a key taken off is in it too, with its last counters and no handshake, so its last traffic counts)
 pub fn apply(proto: &str, desired: &[PeerSpec]) -> HashMap<String, PeerStat> {
     if !available(proto) {
         return HashMap::new();
@@ -226,9 +229,11 @@ pub fn apply(proto: &str, desired: &[PeerSpec]) -> HashMap<String, PeerStat> {
     let (t, i) = tool(proto);
     let current = dump(proto);
     let want: HashMap<&str, &PeerSpec> = desired.iter().map(|p| (p.pubkey.as_str(), p)).collect();
-    for k in current.keys() {
+    let mut removed: HashMap<String, PeerStat> = HashMap::new();
+    for (k, st) in current.iter() {
         if !want.contains_key(k.as_str()) {
             let _ = run(t, &["set", i, "peer", k.as_str(), "remove"], None);
+            removed.insert(k.clone(), PeerStat { rx: st.rx, tx: st.tx, handshake: 0, eps: vec![], flips: 0 });
         }
     }
     for p in desired {
@@ -253,7 +258,15 @@ pub fn apply(proto: &str, desired: &[PeerSpec]) -> HashMap<String, PeerStat> {
             let _ = std::fs::remove_file(&path);
         }
     }
-    dump(proto)
+    with_removed(dump(proto), removed)
+}
+
+/// The stats after a sync plus the last counters of the keys it took off (a key still there wins)
+fn with_removed(mut now: HashMap<String, PeerStat>, removed: HashMap<String, PeerStat>) -> HashMap<String, PeerStat> {
+    for (k, st) in removed {
+        now.entry(k).or_insert(st);
+    }
+    now
 }
 
 /// پارامترهای مخفی‌سازی AmneziaWG از فایل کانفیگ سرور
@@ -287,6 +300,18 @@ mod ep_tests {
         let t = tr.get(&("wg".to_string(), k.to_string())).unwrap();
         assert_eq!(t.eps.len(), 2);
         assert_eq!(t.flips.len(), 3);
+    }
+
+    #[test]
+    fn a_removed_key_reports_its_last_counters() {
+        let cur: HashMap<String, PeerStat> = [("A".to_string(), PeerStat { rx: 5, tx: 6, handshake: 99, ..Default::default() })].into_iter().collect();
+        let gone: HashMap<String, PeerStat> = [
+            ("A".to_string(), PeerStat { rx: 1, ..Default::default() }),
+            ("B".to_string(), PeerStat { rx: 700, tx: 800, ..Default::default() }),
+        ].into_iter().collect();
+        let m = with_removed(cur, gone);
+        assert_eq!((m["A"].rx, m["A"].handshake), (5, 99));
+        assert_eq!((m["B"].rx, m["B"].tx, m["B"].handshake), (700, 800, 0));
     }
 
     #[test]

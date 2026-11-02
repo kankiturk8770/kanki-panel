@@ -44,6 +44,67 @@ pub async fn online(port: &str, secret: &str) -> HashMap<String, i64> {
     m
 }
 
+/// Connections of each user that moved real data (1 KB) lately, from Hysteria's stream list (None =
+/// this Hysteria has no stream list). A ping logs in and leaves without moving data, so a ping next to
+/// a real session is not a second device.
+pub async fn moving(port: &str, secret: &str, now: i64) -> Option<HashMap<String, i64>> {
+    if port.is_empty() {
+        return None;
+    }
+    let url = format!("http://127.0.0.1:{}/dump/streams", port);
+    let r = client().get(&url).header("Authorization", secret).send().await.ok()?;
+    if !r.status().is_success() {
+        return None;
+    }
+    let v: serde_json::Value = r.json().await.ok()?;
+    let mut bytes: HashMap<(String, u64), i64> = HashMap::new();
+    for s in v.get("streams")?.as_array()? {
+        let (Some(user), Some(conn)) = (s["auth"].as_str(), s["connection"].as_u64()) else { continue };
+        let b = s["tx"].as_i64().unwrap_or(0) + s["rx"].as_i64().unwrap_or(0);
+        *bytes.entry((user.to_string(), conn)).or_default() += b;
+    }
+    Some(note_moving(&bytes, now))
+}
+
+/// How long a connection that moved data counts as a real one without moving more (an idle device
+/// with no stream open)
+const MOVED_FOR: i64 = 600;
+
+/// (user, connection) -> when it was last seen moving data; None until a stream list was read
+fn moved() -> &'static std::sync::Mutex<Option<HashMap<(String, u64), i64>>> {
+    static M: std::sync::Mutex<Option<HashMap<(String, u64), i64>>> = std::sync::Mutex::new(None);
+    &M
+}
+
+fn note_moving(bytes: &HashMap<(String, u64), i64>, now: i64) -> HashMap<String, i64> {
+    let mut g = moved().lock().unwrap_or_else(|e| e.into_inner());
+    let m = g.get_or_insert_with(HashMap::new);
+    for (k, b) in bytes {
+        if *b >= 1024 || m.contains_key(k) {
+            m.insert(k.clone(), now);
+        }
+    }
+    m.retain(|_, t| now - *t < MOVED_FOR);
+    count_moving(m, None, now)
+}
+
+fn count_moving(m: &HashMap<(String, u64), i64>, user: Option<&str>, now: i64) -> HashMap<String, i64> {
+    let mut out: HashMap<String, i64> = HashMap::new();
+    for ((u, _), t) in m {
+        if now - *t < MOVED_FOR && user.is_none_or(|x| x == u) {
+            *out.entry(u.clone()).or_default() += 1;
+        }
+    }
+    out
+}
+
+/// What the last stream list said about one user (None = no stream list on this Hysteria)
+pub fn moving_known(user: &str, now: i64) -> Option<i64> {
+    let g = moved().lock().unwrap_or_else(|e| e.into_inner());
+    let m = g.as_ref()?;
+    Some(count_moving(m, Some(user), now).get(user).copied().unwrap_or(0))
+}
+
 /// Disconnect users right away
 pub async fn kick(port: &str, secret: &str, ids: &[String]) {
     if port.is_empty() || ids.is_empty() {
@@ -79,4 +140,21 @@ pub fn ensure_acl() {
         return;
     }
     eprintln!("hysteria2: its users can no longer reach this server's loopback (acl added)");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_connections_that_moved_data_are_devices() {
+        let mut b: HashMap<(String, u64), i64> = HashMap::new();
+        // a real session and a ping of the same user
+        b.insert(("hy2test-u".into(), 1), 50_000);
+        b.insert(("hy2test-u".into(), 2), 200);
+        assert_eq!(note_moving(&b, 1000).get("hy2test-u"), Some(&1));
+        // the real one stays counted while it is idle (no stream open)
+        assert_eq!(moving_known("hy2test-u", 1100), Some(1));
+        assert_eq!(moving_known("hy2test-nobody", 1100), Some(0));
+    }
 }
