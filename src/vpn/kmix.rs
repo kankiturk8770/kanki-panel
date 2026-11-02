@@ -147,6 +147,11 @@ pub fn hop_range(s: &str) -> Option<(u16, u16)> {
     (a > 0 && b > a && b - a < 1000).then_some((a, b))
 }
 
+/// Does the range a-b hold one of these ports?
+fn hop_holds(a: u16, b: u16, ports: &[u16]) -> bool {
+    ports.iter().any(|p| (a..=b).contains(p))
+}
+
 pub fn valid_hop(s: &str) -> Option<String> {
     hop_range(s).map(|(a, b)| format!("{}-{}", a, b))
 }
@@ -475,7 +480,9 @@ pub fn apply(c: &KmixCfg) -> Result<(), String> {
         let _ = sh("systemctl daemon-reload");
         let _ = sh(&format!("systemctl enable -q {}", UNIT_NAME));
     }
-    let hop = hop_range(&c.hop).filter(|(a, b)| !(*a..=*b).contains(&port));
+    // the extra ports never take this server's own port or the port of WireGuard / AmneziaWG / microtun
+    let taken: Vec<u16> = ["wg", "awg"].iter().filter_map(|p| crate::wg::listen_port(p).trim().parse().ok()).chain(crate::microtun::running_port()).chain([port]).collect();
+    let hop = hop_range(&c.hop).filter(|(a, b)| !hop_holds(*a, *b, &taken));
     sync_hop(hop.map(|(a, b)| (a, b, port)));
     let state = json!({ "port": port, "parity": parity, "hop": hop.map(|(a, b)| format!("{}-{}", a, b)).unwrap_or_default() });
     let _ = write_if_changed(STATE_FILE, &state.to_string(), 0o644);
@@ -657,6 +664,15 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
             if (a..=z).contains(&p) {
                 return crate::api::err(StatusCode::BAD_REQUEST, &format!("{}: the port {} is inside the extra ports", n.name, p));
             }
+            // the extra ports are taken by KANKI MIX: another protocol's port inside them stops working
+            let mt = crate::microtun::settings(&app);
+            let mt_port = if mt.node_on(&n.id) { Some(mt.node_port(&n.id)) } else { None };
+            let others = [("wg_port", "WireGuard"), ("awg_port", "AmneziaWG"), ("hy2_port", "Hysteria2")].into_iter().map(|(k, name)| (port_of(&info[k]), name)).chain([(mt_port, "microtun")]);
+            for (q, name) in others {
+                if let Some(q) = q.filter(|q| (a..=z).contains(q)) {
+                    return crate::api::err(StatusCode::BAD_REQUEST, &format!("{}: the extra ports {}-{} hold UDP port {} of {}", n.name, a, z, q, name));
+                }
+            }
         }
     }
     let db = &app.db;
@@ -702,6 +718,12 @@ mod tests {
         assert!(s.node_tunnel("de"));
         assert!(valid_host("de.example.com") && valid_host("1.2.3.4") && valid_host("[2001:db8::1]"));
         assert!(!valid_host("") && !valid_host("a b") && !valid_host("x/y"));
+    }
+
+    #[test]
+    fn hop_ranges_keep_off_other_ports() {
+        assert!(hop_holds(4001, 4010, &[51820, 4005]));
+        assert!(!hop_holds(4001, 4010, &[51820, 4000, 4011]));
     }
 
     #[test]

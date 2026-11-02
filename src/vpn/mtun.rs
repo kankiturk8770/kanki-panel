@@ -67,6 +67,16 @@ const MAX_DEVICES: usize = 8;
 /// (clients send a keepalive every 10 s): a device in use is never pushed out, so devices past the
 /// limit wait instead of throwing each other out in turn
 const IDLE_GIVES_WAY: i64 = 20;
+/// inits taken from one address per second (each one is tried with every user's key)
+const INITS_PER_IP: u32 = 16;
+/// key tries for inits per second on the whole server: a flood of inits must not stall the data
+/// packets on the same thread (an init from an address that just logged in costs one try and is
+/// always taken)
+const TRIES_PER_SEC: usize = 200_000;
+/// addresses remembered by the init gate
+const GATE_IPS: usize = 4096;
+/// device ids whose last init time a user keeps after the device is gone (old inits stay replays)
+const LAST_TS_KEPT: usize = 64;
 
 /// What one server runs (sent by the panel on every sync)
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -372,6 +382,9 @@ struct Peer {
     devices: Mutex<Vec<Arc<Device>>>,
     /// ephemeral keys of recent inits: an init with an older timestamp is taken only once
     seen: Mutex<VecDeque<([u8; 32], Instant)>>,
+    /// the last init time of each device id, kept after the device is gone: an old init of a dropped
+    /// device is still a replay
+    last_ts: Mutex<HashMap<u64, u64>>,
     rx: AtomicU64,
     tx: AtomicU64,
 }
@@ -650,6 +663,7 @@ impl Server {
                     keys: PskKeys::new(k),
                     devices: Mutex::new(vec![]),
                     seen: Mutex::new(VecDeque::new()),
+                    last_ts: Mutex::new(HashMap::new()),
                     rx: AtomicU64::new(0),
                     tx: AtomicU64::new(0),
                 }),
@@ -794,9 +808,59 @@ fn tun_loop(sh: &Shared) {
     }
 }
 
+/// What the UDP thread remembers about inits: how many came from each address this second, how many
+/// key tries were spent, and which user each address last logged in as (tried first)
+#[derive(Default)]
+struct Gate {
+    sec: i64,
+    tries: usize,
+    per_ip: HashMap<IpAddr, u32>,
+    hint: HashMap<IpAddr, Weak<Peer>>,
+}
+
+impl Gate {
+    /// may another init from `ip` be looked at now?
+    fn admit(&mut self, ip: IpAddr, now: i64) -> bool {
+        if self.sec != now {
+            self.sec = now;
+            self.tries = 0;
+            self.per_ip.clear();
+        }
+        if self.per_ip.len() >= GATE_IPS && !self.per_ip.contains_key(&ip) {
+            return false;
+        }
+        let n = self.per_ip.entry(ip).or_default();
+        *n += 1;
+        *n <= INITS_PER_IP
+    }
+    /// may `n` more key tries be spent this second?
+    fn spend(&mut self, n: usize) -> bool {
+        if self.tries + n > TRIES_PER_SEC {
+            return false;
+        }
+        self.tries += n;
+        true
+    }
+    fn note(&mut self, ip: IpAddr, p: &Arc<Peer>) {
+        if self.hint.len() >= GATE_IPS {
+            self.hint.retain(|_, w| w.strong_count() > 0);
+            if self.hint.len() >= GATE_IPS {
+                self.hint.clear();
+            }
+        }
+        self.hint.insert(ip, Arc::downgrade(p));
+    }
+}
+
+/// Does a client's packet go to another client of this server? (users are kept apart)
+fn to_other_client(peers: &Peers, d: &Device, ip: &[u8]) -> bool {
+    ip_dst(ip).and_then(|a| peers.by_ip.get(&a)).is_some_and(|x| !std::ptr::eq(Arc::as_ptr(x), d))
+}
+
 fn udp_loop(sh: &Shared) {
     let mut buf = vec![0u8; MAX_IP + OVERHEAD];
     let mut tun = &sh.tun;
+    let mut gate = Gate::default();
     while !sh.stop.load(Ordering::Relaxed) {
         let (n, from) = match sh.sock.recv_from(&mut buf) {
             Ok(x) => x,
@@ -809,7 +873,7 @@ fn udp_loop(sh: &Shared) {
         mask(&sh.obfs, pkt);
         let idx = u32::from_be_bytes([pkt[0], pkt[1], pkt[2], pkt[3]]);
         if idx == 0 {
-            handle_init(sh, pkt, from);
+            handle_init(sh, pkt, from, &mut gate);
             continue;
         }
         let Some(sess) = sh.sessions.read().unwrap_or_else(|e| e.into_inner()).get(&idx).cloned() else { continue };
@@ -834,6 +898,9 @@ fn udp_loop(sh: &Shared) {
         if !ip_src(ip).is_some_and(|a| d.owns(a)) {
             continue; // a device may only send from its own tunnel address
         }
+        if to_other_client(&sh.peers.read().unwrap_or_else(|e| e.into_inner()), &d, ip) {
+            continue; // nor to another user's or device's tunnel address
+        }
         if let Some(u) = d.user.upgrade() {
             u.rx.fetch_add(len as u64, Ordering::Relaxed);
         }
@@ -851,8 +918,13 @@ fn keepalive(sh: &Shared, d: &Device) {
 
 /// The device an init is for: the one with its id, else a new one (its own address: the user's own
 /// address when no other device has it, else a free one of the devices subnet). None = no room.
-fn device_for(sh: &Shared, p: &Arc<Peer>, id: u64) -> Option<Arc<Device>> {
+fn device_for(sh: &Shared, p: &Arc<Peer>, id: u64, from: SocketAddr) -> Option<Arc<Device>> {
     if let Some(d) = p.devices.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|d| d.id == id) {
+        // a client without a device id (v2) is always device 0: one from another address while
+        // device 0 is in use is another device, and waits until the first has gone quiet
+        if id == 0 && !v2_may_take(d, from, now_secs()) {
+            return None;
+        }
         return Some(d.clone());
     }
     let mut peers = sh.peers.write().unwrap_or_else(|e| e.into_inner());
@@ -896,16 +968,35 @@ fn device_for(sh: &Shared, p: &Arc<Peer>, id: u64) -> Option<Arc<Device>> {
     Some(d)
 }
 
-fn handle_init(sh: &Shared, pkt: &[u8], from: SocketAddr) {
-    let found = {
-        let peers = sh.peers.read().unwrap_or_else(|e| e.into_inner());
-        peers.list.iter().find_map(|p| parse_init(&p.keys, pkt).map(|m| (p.clone(), m)))
+/// May an init of a v2 client (no device id) from `from` take device 0? Yes from the address it
+/// already uses, or once it has been quiet for `IDLE_GIVES_WAY` (or never sent data).
+fn v2_may_take(d: &Device, from: SocketAddr, now: i64) -> bool {
+    let same = d.endpoint.lock().unwrap_or_else(|e| e.into_inner()).map_or(true, |e| e.ip() == from.ip());
+    same || !d.confirmed.load(Ordering::Relaxed) || now - d.last_rx.load(Ordering::Relaxed) >= IDLE_GIVES_WAY
+}
+
+fn handle_init(sh: &Shared, pkt: &[u8], from: SocketAddr, gate: &mut Gate) {
+    // too short to be an init: not worth a single key try
+    if pkt.len() < HDR + INIT_BODY + TAG || !gate.admit(from.ip(), now_secs()) {
+        return;
+    }
+    let hinted = gate.hint.get(&from.ip()).and_then(Weak::upgrade).and_then(|p| parse_init(&p.keys, pkt).map(|m| (p, m)));
+    let found = match hinted {
+        Some(x) => Some(x),
+        None => {
+            let peers = sh.peers.read().unwrap_or_else(|e| e.into_inner());
+            if !gate.spend(peers.list.len()) {
+                return;
+            }
+            peers.list.iter().find_map(|p| parse_init(&p.keys, pkt).map(|m| (p.clone(), m)))
+        }
     };
     let Some((p, m)) = found else { return };
     // an init is taken once: a newer timestamp than the device's last, or one near our clock whose
     // ephemeral key is new (a client whose clock went back)
     let now = now_nanos();
-    let last = p.devices.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|d| d.id == m.dev).map(|d| d.st.lock().unwrap_or_else(|e| e.into_inner()).last_ts).unwrap_or(0);
+    let dev_last = p.devices.lock().unwrap_or_else(|e| e.into_inner()).iter().find(|d| d.id == m.dev).map(|d| d.st.lock().unwrap_or_else(|e| e.into_inner()).last_ts).unwrap_or(0);
+    let last = dev_last.max(p.last_ts.lock().unwrap_or_else(|e| e.into_inner()).get(&m.dev).copied().unwrap_or(0));
     if !ts_ok(m.ts, last, now) {
         return;
     }
@@ -919,7 +1010,18 @@ fn handle_init(sh: &Shared, pkt: &[u8], from: SocketAddr) {
         }
         seen.push_back((m.eph, Instant::now()));
     }
-    let Some(d) = device_for(sh, &p, m.dev) else { return };
+    gate.note(from.ip(), &p);
+    {
+        let mut kept = p.last_ts.lock().unwrap_or_else(|e| e.into_inner());
+        if kept.len() >= LAST_TS_KEPT && !kept.contains_key(&m.dev) {
+            if let Some(k) = kept.iter().min_by_key(|x| *x.1).map(|x| *x.0) {
+                kept.remove(&k);
+            }
+        }
+        let e = kept.entry(m.dev).or_default();
+        *e = (*e).max(m.ts);
+    }
+    let Some(d) = device_for(sh, &p, m.dev, from) else { return };
     let eph = EphemeralSecret::random_from_rng(rand::rngs::OsRng);
     let eph_pub = PublicKey::from(&eph).to_bytes();
     let shared = eph.diffie_hellman(&PublicKey::from(m.eph));
@@ -980,15 +1082,31 @@ fn confirm(sh: &Shared, d: &Arc<Device>, sess: &Arc<Session>) {
     let Some(p) = d.user.upgrade() else { return };
     let mut peers = sh.peers.write().unwrap_or_else(|e| e.into_inner());
     let mut devs = p.devices.lock().unwrap_or_else(|e| e.into_inner());
+    let t = now_secs();
     loop {
         let live: Vec<&Arc<Device>> = devs.iter().filter(|x| x.confirmed.load(Ordering::Relaxed)).collect();
         if live.len() <= p.max.load(Ordering::Relaxed) {
             break;
         }
-        let Some(old) = live.into_iter().filter(|x| !Arc::ptr_eq(x, d)).min_by_key(|x| x.last_rx.load(Ordering::Relaxed)).cloned() else { break };
-        sh.drop_device(&mut peers, &old);
-        devs.retain(|x| !Arc::ptr_eq(x, &old));
+        // a device in use is never pushed out: a quiet one goes, else the newcomer itself
+        match extra_device(&live, d, t) {
+            Some(old) => {
+                sh.drop_device(&mut peers, &old);
+                devs.retain(|x| !Arc::ptr_eq(x, &old));
+            }
+            None => {
+                sh.drop_device(&mut peers, d);
+                devs.retain(|x| !Arc::ptr_eq(x, d));
+                break;
+            }
+        }
     }
+}
+
+/// Past the limit: the device to drop for the newcomer `d` (the one heard from least recently of
+/// those quiet for `IDLE_GIVES_WAY`), or None when every other one is in use
+fn extra_device(live: &[&Arc<Device>], d: &Arc<Device>, now: i64) -> Option<Arc<Device>> {
+    live.iter().filter(|x| !Arc::ptr_eq(x, d) && now - x.last_rx.load(Ordering::Relaxed) >= IDLE_GIVES_WAY).min_by_key(|x| x.last_rx.load(Ordering::Relaxed)).map(|x| (*x).clone())
 }
 
 fn janitor(sh: &Shared) {
@@ -1188,6 +1306,70 @@ mod tests {
         assert!(r.accept(5 + WINDOW - 1));
         assert!(!r.accept(5));
         assert!(r.accept(6) && !r.accept(6));
+    }
+
+    fn dev(id: u64, ip: [u8; 4], last_rx: i64, at: Option<&str>) -> Arc<Device> {
+        Arc::new(Device {
+            id,
+            ip: Ipv4Addr::from(ip),
+            ip6: None,
+            user: Weak::new(),
+            endpoint: Mutex::new(at.map(|a| a.parse().unwrap())),
+            current: RwLock::new(None),
+            st: Mutex::new(DevState::default()),
+            confirmed: AtomicBool::new(true),
+            last_rx: AtomicI64::new(last_rx),
+            made: Instant::now(),
+        })
+    }
+
+    #[test]
+    fn a_new_device_never_pushes_out_one_in_use() {
+        let (a, b, new) = (dev(1, [10, 79, 0, 2], 995, None), dev(2, [10, 80, 0, 5], 970, None), dev(3, [10, 80, 0, 6], 1000, None));
+        // both others in use: the newcomer is the one that goes
+        assert!(extra_device(&[&a, &new], &new, 1000).is_none());
+        // a quiet one gives way
+        assert!(extra_device(&[&a, &b, &new], &new, 1000).is_some_and(|x| Arc::ptr_eq(&x, &b)));
+    }
+
+    #[test]
+    fn two_v2_clients_are_two_devices() {
+        let d = dev(0, [10, 79, 0, 2], 1000, Some("1.1.1.1:5000"));
+        let from = |s: &str| s.parse::<SocketAddr>().unwrap();
+        // the same client again (a new port after NAT, a new key): taken
+        assert!(v2_may_take(&d, from("1.1.1.1:6000"), 1005));
+        // another client while the first is in use: waits
+        assert!(!v2_may_take(&d, from("2.2.2.2:5000"), 1005));
+        // once the first has gone quiet: taken
+        assert!(v2_may_take(&d, from("2.2.2.2:5000"), 1000 + IDLE_GIVES_WAY));
+    }
+
+    #[test]
+    fn clients_cannot_reach_each_other() {
+        let (a, b) = (dev(1, [10, 79, 0, 2], 0, None), dev(2, [10, 79, 0, 3], 0, None));
+        let mut peers = Peers::default();
+        peers.by_ip.insert(IpAddr::V4(a.ip), a.clone());
+        peers.by_ip.insert(IpAddr::V4(b.ip), b.clone());
+        let pkt = |dst: [u8; 4]| {
+            let mut v = vec![0x45u8; 20];
+            v[16..20].copy_from_slice(&dst);
+            v
+        };
+        assert!(to_other_client(&peers, &a, &pkt([10, 79, 0, 3])));
+        assert!(!to_other_client(&peers, &a, &pkt([1, 1, 1, 1])));
+        assert!(!to_other_client(&peers, &a, &pkt([10, 79, 0, 2])));
+    }
+
+    #[test]
+    fn an_init_flood_is_cut_short() {
+        let mut g = Gate::default();
+        let ip: IpAddr = "9.9.9.9".parse().unwrap();
+        for _ in 0..INITS_PER_IP {
+            assert!(g.admit(ip, 100));
+        }
+        assert!(!g.admit(ip, 100), "too many from one address this second");
+        assert!(g.admit(ip, 101), "the next second it may try again");
+        assert!(g.spend(TRIES_PER_SEC) && !g.spend(1));
     }
 
     #[test]
