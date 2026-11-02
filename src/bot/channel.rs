@@ -460,6 +460,7 @@ fn greeting(ts: i64) -> &'static str {
 struct Facts {
     plans: Vec<(String, i64, f64, i64, i64, i64)>, // name, days, gb, toman, conns, countries
     users: i64,
+    servers: i64,
     countries: i64,
     discount: Option<(String, i64, i64)>, // code, percent, expires
     trial: Option<(String, String)>,      // gb, days
@@ -477,20 +478,17 @@ fn facts(app: &App) -> Facts {
             .collect();
         v
     });
-    let t = now();
-    let discount = db.with(|c| {
-        c.query_row(
-            "SELECT code,percent,COALESCE(expires,0) FROM discounts WHERE uses_left>0 AND (COALESCE(expires,0)=0 OR expires>?1) ORDER BY percent DESC LIMIT 1",
-            [t],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
-        )
-        .ok()
-    });
-    let countries = db.nodes().iter().filter(|n| n.enabled).count() as i64;
+    let discount = public_discount(db, now());
+    let nodes: Vec<crate::db::Node> = db.nodes().into_iter().filter(|n| n.enabled).collect();
+    let ccs = crate::exitgeo::all_cc(app);
+    let mut cc: Vec<&str> = nodes.iter().filter_map(|n| ccs.get(&n.id).map(|c| c.as_str())).filter(|c| !c.is_empty()).collect();
+    cc.sort();
+    cc.dedup();
     Facts {
         plans,
         users: db.count("SELECT COUNT(*) FROM users WHERE enabled=1"),
-        countries,
+        servers: nodes.len() as i64,
+        countries: cc.len() as i64,
         discount,
         trial: if db.on("trial_on") { Some((db.get("trial_gb"), db.get("trial_days"))) } else { None },
         ref_gift: if db.get("ref_gb").parse::<f64>().unwrap_or(0.0) > 0.0 || db.get("ref_days").parse::<i64>().unwrap_or(0) > 0 {
@@ -499,6 +497,19 @@ fn facts(app: &App) -> Facts {
             None
         },
     }
+}
+
+/// The numbers of a "why us" post: "more than" only for a rounded-down figure that is really less,
+/// the server count as servers and the countries only when known.
+fn trust_lines(users: i64, servers: i64, countries: i64) -> String {
+    let users = users.max(1);
+    let u = if users > 10 { format!("👤 بیش از {} کاربر فعال", (users - 1) / 10 * 10) } else { format!("👤 {} کاربر فعال", users) };
+    let s = if countries > 1 {
+        format!("🌍 {} سرور در {} کشور", servers.max(1), countries)
+    } else {
+        format!("🌍 {} سرور", servers.max(1))
+    };
+    format!("{}\n{}", u, s)
 }
 
 fn plan_lines(f: &Facts, pct: i64) -> String {
@@ -580,8 +591,8 @@ pub fn make_post(app: &App, kind: &str) -> (String, String) {
             None => return make_post(app, "tip"),
         },
         "trust" => format!(
-            "✅ <b>چرا ما؟</b>\n<i>{}</i>\n\n👤 بیش از {} کاربر فعال\n🌍 {} سرور در کشورهای مختلف\n{}\n{}\n{}\n\n{}",
-            pick(&mut r, PUNCH), f.users.max(1), f.countries.max(1), pick(&mut r, BENEFIT), pick(&mut r, BENEFIT), pick(&mut r, BENEFIT), pick(&mut r, CTA)
+            "✅ <b>چرا ما؟</b>\n<i>{}</i>\n\n{}\n{}\n{}\n{}\n\n{}",
+            pick(&mut r, PUNCH), trust_lines(f.users, f.servers, f.countries), pick(&mut r, BENEFIT), pick(&mut r, BENEFIT), pick(&mut r, BENEFIT), pick(&mut r, CTA)
         ),
         "occasion" => match occasion(t) {
             Some((_, g, _)) => format!(
@@ -647,7 +658,10 @@ fn facts_text(app: &App, f: &Facts, kind: &str) -> String {
         v.push(format!("Referral gift: {} GB and {} days for each friend who buys with your link", g, d));
     }
     v.push(format!("Active customers: {}", f.users.max(1)));
-    v.push(format!("Servers in different countries: {}", f.countries.max(1)));
+    v.push(format!("Servers: {}", f.servers.max(1)));
+    if f.countries > 0 {
+        v.push(format!("Countries the servers are in: {}", f.countries));
+    }
     let bot = app.db.get("bot_username");
     if !bot.is_empty() {
         v.push(format!("Telegram bot to buy from: @{}", bot));
@@ -821,8 +835,8 @@ pub async fn send_to_channel(app: &App, text: &str) -> Result<(), String> {
         .timeout(std::time::Duration::from_secs(20))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
-    let mut v: Value = r.json().await.map_err(|e| e.to_string())?;
+        .map_err(|e| e.without_url().to_string())?;
+    let mut v: Value = r.json().await.map_err(|e| e.without_url().to_string())?;
     // Telegram refused the formatting: the same post as plain text
     if v["ok"].as_bool() != Some(true) && v["description"].as_str().map(|d| d.contains("parse entities")).unwrap_or(false) {
         body["text"] = json!(super::ai::strip_tags(text));
@@ -836,8 +850,8 @@ pub async fn send_to_channel(app: &App, text: &str) -> Result<(), String> {
             .timeout(std::time::Duration::from_secs(20))
             .send()
             .await
-            .map_err(|e| e.to_string())?;
-        v = r.json().await.map_err(|e| e.to_string())?;
+            .map_err(|e| e.without_url().to_string())?;
+        v = r.json().await.map_err(|e| e.without_url().to_string())?;
     }
     if v["ok"].as_bool() == Some(true) {
         app.db.set("ch_last", &now().to_string());
@@ -860,17 +874,43 @@ fn remember(app: &App, kind: &str) {
 
 /// Makes a fresh discount code (e.g. KANKI20-7Q4M) that expires after `hours`.
 pub fn new_campaign(app: &App, pct: i64, hours: i64, uses: i64) -> Result<String, String> {
+    campaign_code(&app.db, pct, hours, uses)
+}
+
+fn campaign_code(db: &crate::db::Db, pct: i64, hours: i64, uses: i64) -> Result<String, String> {
     let pct = pct.clamp(1, 90);
     let tag: String = crate::util::rand_token(4).to_uppercase();
-    let base = app.db.get("ch_code").trim().to_uppercase();
+    let base = db.get("ch_code").trim().to_uppercase();
     let base = if base.is_empty() { "KANKI".to_string() } else { base };
     let code = format!("{}{}-{}", base, pct, tag);
     let exp = if hours > 0 { now() + hours * 3600 } else { 0 };
-    app.db.exec(
+    db.exec(
         "INSERT OR REPLACE INTO discounts(code,percent,uses_left,expires) VALUES(?1,?2,?3,?4)",
         &[&code, &pct, &uses.max(1), &exp],
     )?;
+    // only codes made here are public: the channel never shows a code made for one customer
+    let old = db.get("ch_codes");
+    let mut v: Vec<&str> = old.split(',').filter(|c| !c.is_empty() && *c != code).collect();
+    v.insert(0, &code);
+    v.truncate(10);
+    db.set("ch_codes", &v.join(","));
     Ok(code)
+}
+
+/// The discount code posts may show: the newest live code a channel campaign made (never a code
+/// made by hand, which may be meant for one customer).
+fn public_discount(db: &crate::db::Db, t: i64) -> Option<(String, i64, i64)> {
+    let codes = db.get("ch_codes");
+    codes.split(',').filter(|c| !c.is_empty()).find_map(|code| {
+        db.with(|c| {
+            c.query_row(
+                "SELECT code,percent,COALESCE(expires,0) FROM discounts WHERE code=?1 AND uses_left>0 AND (COALESCE(expires,0)=0 OR expires>?2)",
+                rusqlite::params![code, t],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)),
+            )
+            .ok()
+        })
+    })
 }
 
 /// Publishes posts on schedule: at the posting times of the day, or every `ch_hours` outside the quiet
@@ -1118,6 +1158,39 @@ async fn disc_del(State(app): St, h: HeaderMap, Path(code): Path<String>) -> Res
     let _ = guard!(app, h, "settings");
     let _ = app.db.exec("DELETE FROM discounts WHERE code=?1", &[&code]);
     Json(json!({"ok": true})).into_response()
+}
+
+#[cfg(test)]
+mod post_tests {
+    fn db() -> crate::db::Db {
+        let dir = std::env::temp_dir().join(format!("kanki-channel-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::db::Db::open(dir.join("kanki.db").to_str().unwrap())
+    }
+
+    #[test]
+    fn only_campaign_codes_are_advertised() {
+        let d = db();
+        // a private code for one customer, bigger than any campaign: never shown
+        d.exec("INSERT INTO discounts(code,percent,uses_left,expires) VALUES('ALI50',50,1,0)", &[]).unwrap();
+        assert!(super::public_discount(&d, crate::util::now()).is_none());
+        let a = super::campaign_code(&d, 10, 48, 200).unwrap();
+        assert_eq!(super::public_discount(&d, crate::util::now()).unwrap().0, a);
+        // the post of a new campaign shows that new code, even with a lower percent
+        let b = super::campaign_code(&d, 5, 48, 200).unwrap();
+        assert_eq!(super::public_discount(&d, crate::util::now()).unwrap(), (b.clone(), 5, super::public_discount(&d, crate::util::now()).unwrap().2));
+        // used up: the older live campaign code is shown again
+        d.exec("UPDATE discounts SET uses_left=0 WHERE code=?1", &[&b]).unwrap();
+        assert_eq!(super::public_discount(&d, crate::util::now()).unwrap().0, a);
+    }
+
+    #[test]
+    fn trust_numbers_are_true() {
+        assert_eq!(super::trust_lines(1, 2, 1), "👤 1 کاربر فعال\n🌍 2 سرور");
+        assert_eq!(super::trust_lines(0, 0, 0), "👤 1 کاربر فعال\n🌍 1 سرور");
+        assert_eq!(super::trust_lines(20, 5, 3), "👤 بیش از 10 کاربر فعال\n🌍 5 سرور در 3 کشور");
+        assert_eq!(super::trust_lines(347, 5, 3), "👤 بیش از 340 کاربر فعال\n🌍 5 سرور در 3 کشور");
+    }
 }
 
 #[cfg(test)]

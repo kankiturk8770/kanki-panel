@@ -316,6 +316,10 @@ async fn put_cfg(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response
     if taken.contains(&port) || port == LOCAL_PORT {
         return err(StatusCode::BAD_REQUEST, &format!("port {} is already used on that server (another tunnel, Kanki DNS or the SSL check on port 80); pick another one", port));
     }
+    // the hidden tunnel to the panel already listens on that server's port (it stays while the server stays)
+    if s.server == server && s.tunnel_port != 0 && port == s.tunnel_port {
+        return err(StatusCode::BAD_REQUEST, &format!("port {} is used by this link's own hidden tunnel on that server; pick another one", port));
+    }
     let changed = s.server != server || s.domain != domain || s.port != port;
     // live: a program on that server already listens there (the subscription listener itself does not count)
     if s.server != server || s.port != port {

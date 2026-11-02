@@ -135,6 +135,11 @@ fn port80() -> Port80 {
             p.containers.push(id.chars().take(12).collect());
         } else if unit == "docker.service" || unit == "containerd.service" {
             // docker-proxy of a published port: that container is stopped below, not Docker
+        } else if unit.starts_with("kanki") {
+            // another Kanki service (a tunnel carrying port 80): never stopped for the certificate,
+            // like judge() says; it counts as Kanki itself
+            p.me = true;
+            p.other.push(unit);
         } else if unit.ends_with(".service") && safe(&unit) {
             p.units.push(unit);
         } else {

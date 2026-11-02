@@ -158,7 +158,7 @@ function row(u,last,ts,unread){return '<div class="u'+(u==cur?' on':'')+'" data-
 $('#q').oninput=drawList;
 $('#list').onclick=function(e){var t=e.target.closest('[data-u]');if(t)open(t.dataset.u)};
 function loadThreads(){return api('GET','/api/a/threads').then(function(r){threads=r.threads;var un=0;threads.forEach(function(t){un+=t.unread});
- $('#st_c').textContent=r.customers;$('#st_u').textContent=un;document.title=(un?'('+un+') ':'')+'{{NAME}} · چت اضطراری';drawList();
+ $('#st_c').textContent=r.customers;$('#st_u').textContent=un;document.title=(un?'('+un+') ':'')+{{NAME_JS}}+' · چت اضطراری';drawList();
  $('#sdot').className='dot';$('#sync').textContent='همگام · '+new Date().toLocaleTimeString('fa-IR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})}).catch(function(){$('#sdot').className='dot off';$('#sync').textContent='ارتباط قطع شد'})}
 // ---- one conversation
 $('#back').onclick=function(){cur='';$('#app').classList.remove('open');drawList()};

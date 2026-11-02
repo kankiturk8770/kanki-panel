@@ -38,14 +38,27 @@ enum Wait {
     Gift(i64),
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct Pending {
     plan: i64,
     kind: String,
     target: i64,
     discount: String,
     percent: i64,
+    /// when it was last changed: an entry left for a day is dropped
+    at: i64,
 }
+
+impl Default for Pending {
+    fn default() -> Self {
+        Pending { plan: 0, kind: String::new(), target: 0, discount: String::new(), percent: 0, at: now() }
+    }
+}
+
+/// How long a started purchase (`pend`) is kept without any change
+const PEND_TTL: i64 = 86400;
+/// The text of every purchase button while sales are closed
+const SALES_CLOSED: &str = "⛔ فروش موقتاً بسته است.";
 
 pub struct Bot {
     app: Arc<App>,
@@ -56,6 +69,8 @@ pub struct Bot {
     api: String,
     waits: Mutex<HashMap<i64, Wait>>,
     pend: Mutex<HashMap<i64, Pending>>,
+    /// callback queries already answered: Telegram takes only the first answer of each
+    answered: Mutex<std::collections::HashSet<String>>,
     /// a gift for everyone waiting for the admin's "yes": admin -> (days, GB, reason)
     gifts: Mutex<HashMap<i64, (i64, f64, String)>>,
 }
@@ -343,7 +358,7 @@ impl Bot {
             app, token, admins,
             http: reqwest::Client::builder().timeout(std::time::Duration::from_secs(75)).connect_timeout(std::time::Duration::from_secs(15)).build().unwrap_or_default(),
             api: "https://api.telegram.org".into(),
-            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), gifts: Mutex::new(HashMap::new()),
+            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -455,19 +470,21 @@ impl Bot {
     }
 
     /// For the mini app: the free trial, delivered in the chat exactly as from the bot's button
-    pub(crate) async fn mini_trial(&self, uid: i64) {
-        self.trial(uid, uid, 0).await;
+    /// (false = the bot could not message the customer; the trial is then not used up)
+    pub(crate) async fn mini_trial(&self, uid: i64) -> bool {
+        self.trial_ok(uid, uid, 0).await
     }
 
     /// From the mini app: buy plan `pid` (a new account, or more for the buyer's account `renew`); the bot
     /// shows the plan and the payment methods in the chat, exactly as after tapping the plan in the bot.
-    pub(crate) async fn start_purchase(&self, uid: i64, pid: i64, renew: i64) {
+    /// False when the bot could not message the customer.
+    pub(crate) async fn start_purchase(&self, uid: i64, pid: i64, renew: i64) -> bool {
         {
             let mut g = self.pend.lock().unwrap_or_else(|e| e.into_inner());
             let mine = renew > 0 && self.app.db.user(renew).map(|u| u.tg_id == uid).unwrap_or(false);
             g.insert(uid, Pending { plan: pid, kind: if mine { "renew".into() } else { "new".into() }, target: if mine { renew } else { 0 }, ..Default::default() });
         }
-        self.show_plan(uid, None, uid, pid).await;
+        self.show_plan(uid, None, uid, pid).await
     }
 
     fn admin(&self, id: i64) -> bool {
@@ -563,8 +580,8 @@ impl Bot {
         });
         let mut ok = 0;
         for t in ids {
-            match self.call("copyMessage", json!({"chat_id": t, "from_chat_id": from, "message_id": msg_id})).await {
-                Some(res) => {
+            match self.call_res("copyMessage", json!({"chat_id": t, "from_chat_id": from, "message_id": msg_id})).await {
+                Ok(res) => {
                     ok += 1;
                     if pin {
                         if let Some(nid) = res["message_id"].as_i64() {
@@ -572,9 +589,11 @@ impl Bot {
                         }
                     }
                 }
-                None => {
+                // only when Telegram says this chat is gone for the bot; a busy moment (429) or a cut connection is not
+                Err(e) if gone_chat(&e) => {
                     let _ = db.exec("UPDATE bot_users SET blocked=1 WHERE tg_id=?1", &[&t]);
                 }
+                Err(_) => {}
             }
             tokio::time::sleep(std::time::Duration::from_millis(60)).await;
         }
@@ -618,18 +637,28 @@ impl Bot {
     }
 
     async fn edit(&self, chat: i64, mid: i64, text: &str, kb: Option<Value>) {
+        self.edit_ok(chat, mid, text, kb).await;
+    }
+
+    /// `edit`, with whether the customer has the text now (edited, or sent as a new message)
+    async fn edit_ok(&self, chat: i64, mid: i64, text: &str, kb: Option<Value>) -> bool {
         let mut body = json!({"chat_id": chat, "message_id": mid, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true});
         if let Some(k) = kb.clone() { body["reply_markup"] = k; }
         // a message that cannot be edited any more gets a new one; the same text again (a button tapped
         // twice) is not a reason to send a second message
-        if let Err(e) = self.call_res("editMessageText", body).await {
-            if !e.contains("message is not modified") {
-                self.send(chat, text, kb).await;
-            }
+        match self.call_res("editMessageText", body).await {
+            Ok(_) => true,
+            Err(e) if e.contains("message is not modified") => true,
+            Err(_) => self.send(chat, text, kb).await.is_some(),
         }
     }
 
+    /// Answers a button tap. Telegram takes only the first answer, so a tap is answered once: the first
+    /// call wins and later ones do nothing (`on_callback` gives an empty answer at the end when none was given).
     async fn answer(&self, id: &str, text: &str, alert: bool) {
+        if !id.is_empty() && !self.answered.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string()) {
+            return;
+        }
         self.call("answerCallbackQuery", json!({"callback_query_id": id, "text": text, "show_alert": alert})).await;
     }
 
@@ -704,11 +733,15 @@ impl Bot {
         }
     }
 
-    async fn send_doc(&self, chat: i64, bytes: Vec<u8>, name: &str, caption: &str) {
+    /// Sends a file; true when Telegram took it
+    async fn send_doc(&self, chat: i64, bytes: Vec<u8>, name: &str, caption: &str) -> bool {
         let part = reqwest::multipart::Part::bytes(bytes).file_name(name.to_string());
         let form = reqwest::multipart::Form::new()
             .text("chat_id", chat.to_string()).text("caption", caption.to_string()).part("document", part);
-        let _ = self.http.post(format!("{}/bot{}/sendDocument", self.api, self.token)).multipart(form).timeout(std::time::Duration::from_secs(600)).send().await;
+        match self.http.post(format!("{}/bot{}/sendDocument", self.api, self.token)).multipart(form).timeout(std::time::Duration::from_secs(600)).send().await {
+            Ok(r) => r.json::<Value>().await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false),
+            Err(_) => false,
+        }
     }
 
     // ============================================================ کمکی‌های داده
@@ -796,8 +829,8 @@ impl Bot {
     }
 
     /// Sends the config(s) of one protocol: first a short "which app and how" guide, then a file per server
-    /// (Hysteria2 as a copyable link).
-    pub(crate) async fn send_configs(&self, chat: i64, qid: &str, u: &User, code: &str) {
+    /// (Hysteria2 as a copyable link). True when the customer got at least one config.
+    pub(crate) async fn send_configs(&self, chat: i64, qid: &str, u: &User, code: &str) -> bool {
         if code == "l" {
             return self.send_links(chat, qid, u).await;
         }
@@ -814,26 +847,30 @@ impl Bot {
         }
         list.truncate(8);
         if list.is_empty() {
-            return self.answer(qid, "این پروتکل برای سرویس شما فعال نیست.", true).await;
+            self.answer(qid, "این پروتکل برای سرویس شما فعال نیست.", true).await;
+            return false;
         }
         self.send(chat, &cfg_help(code), None).await;
+        let mut sent = false;
         for (n, tunnel) in list {
             let Some((name, text)) = crate::api::bot_config(&self.app, u, &n, proto, tunnel).await else { continue };
             let server = if tunnel { crate::api::twin_name(&self.app, &n) } else { n.name.clone() };
             if proto == "hysteria2" {
-                self.send(chat, &format!("📥 <b>{} · {}</b>\n\n<code>{}</code>\n\n☝️ روی لینک بزنید تا کپی بشه.", title, esc(&server), esc(text.trim())), None).await;
+                sent |= self.send(chat, &format!("📥 <b>{} · {}</b>\n\n<code>{}</code>\n\n☝️ روی لینک بزنید تا کپی بشه.", title, esc(&server), esc(text.trim())), None).await.is_some();
             } else {
                 let cap = format!("📥 {} · {}\nاسم داخل برنامه: {}", title, server, name.trim_end_matches(".conf"));
-                self.send_doc(chat, text.into_bytes(), &name, &cap).await;
+                sent |= self.send_doc(chat, text.into_bytes(), &name, &cap).await;
             }
         }
+        sent
     }
 
     /// The subscription link and every Hysteria2 and Xray link of an account: a .txt file, and the same text to copy
     /// when it fits in one message. The first line is the subscription, so the app keeps the configs up to date.
-    pub(crate) async fn send_links(&self, chat: i64, qid: &str, u: &User) {
+    pub(crate) async fn send_links(&self, chat: i64, qid: &str, u: &User) -> bool {
         let Some(text) = crate::api::links_text(&self.app, u) else {
-            return self.answer(qid, "برای سرویس شما لینک Xray یا Hysteria2 فعال نیست.", true).await;
+            self.answer(qid, "برای سرویس شما لینک Xray یا Hysteria2 فعال نیست.", true).await;
+            return false;
         };
         let n = text.lines().count().saturating_sub(1);
         let cap = format!(
@@ -844,23 +881,26 @@ impl Bot {
              ➕ ← Import from clipboard (بعد از کپی) یا Import from file (همین فایل).",
             n
         );
-        self.send_doc(chat, text.clone().into_bytes(), &format!("{}-links.txt", u.username), &cap).await;
+        let file = self.send_doc(chat, text.clone().into_bytes(), &format!("{}-links.txt", u.username), &cap).await;
         let msg = format!("🔗 <b>لینک اشتراک</b> (یک بار اضافه‌ش کنید، خودش به‌روز می‌شه):\n<code>{}</code>\n\n📋 <b>همه با هم</b> (روش بزنید تا کپی بشه):\n<code>{}</code>",
             esc(&crate::api::v2_sub_link(&self.app, u)), esc(text.trim()));
         // Telegram's limit is 4096 characters; a longer list goes only as the file
-        if msg.chars().count() <= 4000 {
-            self.send(chat, &msg, None).await;
+        let text_sent = if msg.chars().count() <= 4000 {
+            self.send(chat, &msg, None).await
         } else {
-            self.send(chat, &format!("🔗 <b>لینک اشتراک</b> (یک بار اضافه‌ش کنید، خودش به‌روز می‌شه):\n<code>{}</code>\n\nبقیه‌ی لینک‌ها زیاد بودن و فقط توی فایل بالا هستن.", esc(&crate::api::v2_sub_link(&self.app, u))), None).await;
-        }
+            self.send(chat, &format!("🔗 <b>لینک اشتراک</b> (یک بار اضافه‌ش کنید، خودش به‌روز می‌شه):\n<code>{}</code>\n\nبقیه‌ی لینک‌ها زیاد بودن و فقط توی فایل بالا هستن.", esc(&crate::api::v2_sub_link(&self.app, u))), None).await
+        };
+        file || text_sent.is_some()
     }
 
     /// The AmneziaVPN backup of an account for one platform (i, a, w), with how to restore it.
-    pub(crate) async fn send_amnezia(&self, chat: i64, qid: &str, u: &User, code: &str) {
-        let Some(plat) = crate::amnezia::platform(code) else { return };
+    /// True when the customer got the file.
+    pub(crate) async fn send_amnezia(&self, chat: i64, qid: &str, u: &User, code: &str) -> bool {
+        let Some(plat) = crate::amnezia::platform(code) else { return false };
         let cfgs = crate::api::amnezia_configs(&self.app, u).await;
         let Some(body) = crate::amnezia::backup(&cfgs, plat) else {
-            return self.answer(qid, "برای سرویس شما کانفیگ WireGuard یا AmneziaWG فعال نیست.", true).await;
+            self.answer(qid, "برای سرویس شما کانفیگ WireGuard یا AmneziaWG فعال نیست.", true).await;
+            return false;
         };
         let cap = format!(
             "📦 بکاپ Amnezia · {} سرور\n\n\
@@ -870,7 +910,7 @@ impl Bot {
              ⚠️ بازیابی، سرورها و تنظیمات قبلی خود برنامه رو پاک می‌کنه.",
             cfgs.len()
         );
-        self.send_doc(chat, body.into_bytes(), &crate::amnezia::file_name(&u.username), &cap).await;
+        self.send_doc(chat, body.into_bytes(), &crate::amnezia::file_name(&u.username), &cap).await
     }
 
     fn create_account(&self, tg: i64, gb: f64, days: i64, conns: i64, notes: &str) -> Result<User, String> {
@@ -1035,7 +1075,7 @@ impl Bot {
         let uname = from["username"].as_str().unwrap_or("");
         let _ = self.db().exec(
             "INSERT INTO bot_users(tg_id,name,joined,ref_by,lname,uname) VALUES(?1,?2,?3,?4,?5,?6) \
-             ON CONFLICT(tg_id) DO UPDATE SET name=excluded.name, lname=excluded.lname, uname=excluded.uname",
+             ON CONFLICT(tg_id) DO UPDATE SET name=excluded.name, lname=excluded.lname, uname=excluded.uname, blocked=0",
             &[&uid, &name, &now(), &ref_by, &lname, &uname],
         );
     }
@@ -1155,16 +1195,14 @@ impl Bot {
             }
             Wait::DiscountUse => {
                 let code = text.to_uppercase();
-                let pct: Option<i64> = self.db().with(|c| c.query_row(
-                    "SELECT percent FROM discounts WHERE code=?1 AND uses_left>0 AND (COALESCE(expires,0)=0 OR expires>?2)",
-                    rusqlite::params![&code, now()], |r| r.get(0)).ok());
-                match pct {
+                match self.discount_percent(&code) {
                     Some(p) => {
                         let plan_id = {
                             let mut g = self.pend.lock().unwrap_or_else(|e| e.into_inner());
                             let pe = g.entry(uid).or_default();
                             pe.discount = code.clone();
                             pe.percent = p;
+                            pe.at = now();
                             pe.plan
                         };
                         self.send(chat, &format!("✅ کد تخفیف {}٪ اعمال شد", p), None).await;
@@ -1176,6 +1214,32 @@ impl Bot {
             other if self.admin(uid) => self.admin_input(uid, chat, other, &text, m).await,
             _ => {}
         }
+    }
+
+    /// The percent of a discount code that can be used now (it exists, has uses left and is not expired)
+    fn discount_percent(&self, code: &str) -> Option<i64> {
+        self.db().with(|c| c.query_row(
+            "SELECT percent FROM discounts WHERE code=?1 AND uses_left>0 AND (COALESCE(expires,0)=0 OR expires>?2)",
+            rusqlite::params![code, now()], |r| r.get(0)).ok())
+    }
+
+    /// Is the discount of this purchase still good (the same code with the same percent)? When it is not, it is
+    /// taken off the purchase, so the price is shown again without it.
+    fn discount_still_ok(&self, uid: i64, pe: &Pending) -> bool {
+        if pe.discount.is_empty() || self.discount_percent(&pe.discount) == Some(pe.percent) {
+            return true;
+        }
+        if let Some(x) = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&uid) {
+            x.discount.clear();
+            x.percent = 0;
+        }
+        false
+    }
+
+    /// The discount was used up, deleted or expired since it was typed: the plan again, at its price now
+    async fn discount_gone(&self, uid: i64, chat: i64, pe: &Pending) {
+        self.send(chat, &format!("⚠️ کد تخفیف {} دیگر معتبر نیست؛ قیمت بدون آن حساب شد.", esc(&pe.discount)), None).await;
+        self.show_plan(chat, None, uid, pe.plan).await;
     }
 
     async fn ask_join(&self, chat: i64) {
@@ -1191,6 +1255,8 @@ impl Bot {
         let Some(p) = self.plan_on_sale(pe.plan) else { return };
         let photo = m["photo"].as_array().and_then(|a| a.last()).and_then(|x| x["file_id"].as_str()).map(|s| s.to_string());
         let reference = photo.clone().unwrap_or_else(|| m["text"].as_str().unwrap_or("").to_string());
+        // the customer has paid by now: the order is kept, and the admin sees when its code is no longer good
+        let code_ok = pe.discount.is_empty() || self.discount_percent(&pe.discount) == Some(pe.percent);
         let (t, u) = self.price(&p, &pe);
         let amount = if method == "card" { t.to_string() } else { u.to_string() };
         let oid = self.new_order(uid, &p, &pe, method, &amount, "pending", &reference);
@@ -1198,7 +1264,9 @@ impl Bot {
         let cap = format!(
             "🧾 <b>سفارش جدید #{}</b>\n👤 {} · <code>{}</code>\n📦 {} ({})\n💳 {} · {}{}",
             oid, esc(name), uid, esc(&p.name), if pe.kind == "renew" { "تمدید" } else { "جدید" }, method, amount,
-            if pe.discount.is_empty() { String::new() } else { format!("\n🎟 {} ({}٪)", pe.discount, pe.percent) }
+            if pe.discount.is_empty() { String::new() } else {
+                format!("\n🎟 {} ({}٪){}", esc(&pe.discount), pe.percent, if code_ok { "" } else { "\n⚠️ این کد تخفیف دیگر معتبر نیست (تمام، حذف یا منقضی شده)" })
+            }
         );
         let kb = ik(vec![vec![b("✅ تأیید", &format!("ap:{}", oid)), b("❌ رد", &format!("rj:{}", oid))]]);
         if photo.is_some() {
@@ -1211,6 +1279,13 @@ impl Bot {
     #[allow(clippy::too_many_arguments)]
     fn new_order(&self, uid: i64, p: &Plan, pe: &Pending, method: &str, amount: &str, status: &str, reference: &str) -> i64 {
         let kind = if pe.kind.is_empty() { "new".to_string() } else { pe.kind.clone() };
+        // the code belongs to this order now: an old button of the same purchase cannot use it again
+        if !pe.discount.is_empty() {
+            if let Some(x) = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&uid) {
+                x.discount.clear();
+                x.percent = 0;
+            }
+        }
         self.db().with(|c| {
             let _ = c.execute(
                 "INSERT INTO orders(tg_id,plan_id,kind,target,method,amount,status,ref,discount,created) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
@@ -1222,13 +1297,27 @@ impl Bot {
 
     // ============================================================ دکمه‌ها
     async fn on_callback(&self, q: &Value) {
+        let qid = q["id"].as_str().unwrap_or("").to_string();
+        self.on_callback_inner(q).await;
+        // every tap gets exactly one answer (so the button stops loading): the handler's alert, or an empty one
+        let done = self.answered.lock().unwrap_or_else(|e| e.into_inner()).remove(&qid);
+        if !done {
+            self.call("answerCallbackQuery", json!({"callback_query_id": qid, "text": "", "show_alert": false})).await;
+        }
+    }
+
+    /// Sales are closed (the "sales" switch is off) for this customer; admins can still buy
+    fn sales_closed(&self, uid: i64) -> bool {
+        !self.db().on("sales_on") && !self.admin(uid)
+    }
+
+    async fn on_callback_inner(&self, q: &Value) {
         let uid = q["from"]["id"].as_i64().unwrap_or(0);
         let chat = q["message"]["chat"]["id"].as_i64().unwrap_or(uid);
         let mid = q["message"]["message_id"].as_i64().unwrap_or(0);
         let qid = q["id"].as_str().unwrap_or("").to_string();
         let d = q["data"].as_str().unwrap_or("").to_string();
         self.touch(uid, &q["from"], 0);
-        self.answer(&qid, "", false).await;
         let back_lbl = self.bt("back");
         let back = |to: &str| vec![b(&back_lbl, to)];
 
@@ -1242,8 +1331,8 @@ impl Bot {
                 return self.edit(chat, mid, &self.tx("welcome"), Some(self.home_kb(uid))).await;
             }
             "buy" => {
-                if !self.db().on("sales_on") && !self.admin(uid) {
-                    return self.edit(chat, mid, "⛔ فروش موقتاً بسته است.", Some(ik(vec![back("home")]))).await;
+                if self.sales_closed(uid) {
+                    return self.edit(chat, mid, SALES_CLOSED, Some(ik(vec![back("home")]))).await;
                 }
                 if self.cfg_name_for(uid).is_none() {
                     self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::CfgName("buy".into()));
@@ -1322,6 +1411,10 @@ impl Bot {
         }
 
         let (head, rest) = d.split_once(':').unwrap_or((d.as_str(), ""));
+        // a button of an older message (a plan, a renewal, a payment method) must not sell while sales are closed
+        if matches!(head, "pcat" | "pl" | "rpl" | "pay" | "npc" | "rnw") && self.sales_closed(uid) {
+            return self.edit(chat, mid, SALES_CLOSED, Some(ik(vec![back("home")]))).await;
+        }
         match head {
             "apk" => return self.send_apk(chat, rest).await,
             "gd" => {
@@ -1364,6 +1457,7 @@ impl Bot {
                     let mut g = self.pend.lock().unwrap_or_else(|e| e.into_inner());
                     let pe = g.entry(uid).or_default();
                     pe.plan = pid;
+                    pe.at = now();
                     if head == "rpl" {
                         pe.kind = "renew".into();
                         let target: i64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
@@ -1374,7 +1468,8 @@ impl Bot {
                         pe.kind = "new".into();
                     }
                 }
-                return self.show_plan(chat, Some(mid), uid, pid).await;
+                self.show_plan(chat, Some(mid), uid, pid).await;
+                return;
             }
             "pay" => return self.pay(uid, chat, mid, rest).await,
             "npc" => return self.np_start(uid, chat, mid, rest).await,
@@ -1487,8 +1582,9 @@ impl Bot {
         self.edit(chat, mid, &title, Some(ik(rows))).await;
     }
 
-    async fn show_plan(&self, chat: i64, mid: Option<i64>, uid: i64, pid: i64) {
-        let Some(p) = self.plan_on_sale(pid) else { return };
+    /// The plan with its payment methods; true when the customer got it
+    async fn show_plan(&self, chat: i64, mid: Option<i64>, uid: i64, pid: i64) -> bool {
+        let Some(p) = self.plan_on_sale(pid) else { return false };
         let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned().unwrap_or_default();
         let (t, u) = self.price(&p, &pe);
         let mut rows: Kb = vec![];
@@ -1507,8 +1603,8 @@ impl Bot {
             if pe.percent > 0 { format!("\n🎟 تخفیف {}٪ اعمال شده", pe.percent) } else { String::new() }
         );
         match mid {
-            Some(m) => self.edit(chat, m, &txt, Some(ik(rows))).await,
-            None => { self.send(chat, &txt, Some(ik(rows))).await; }
+            Some(m) => self.edit_ok(chat, m, &txt, Some(ik(rows))).await,
+            None => self.send(chat, &txt, Some(ik(rows))).await.is_some(),
         }
     }
 
@@ -1516,6 +1612,9 @@ impl Bot {
         let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned();
         let Some(pe) = pe else { return };
         let Some(p) = self.plan_on_sale(pe.plan) else { return };
+        if !self.discount_still_ok(uid, &pe) {
+            return self.discount_gone(uid, chat, &pe).await;
+        }
         let (t, u) = self.price(&p, &pe);
         let db = self.db();
         let home = Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]));
@@ -1586,7 +1685,18 @@ impl Bot {
         let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned();
         let Some(pe) = pe else { return };
         let Some(p) = self.plan_on_sale(pe.plan) else { return };
-        let (_, usd) = self.price(&p, &pe);
+        if !self.discount_still_ok(uid, &pe) {
+            return self.discount_gone(uid, chat, &pe).await;
+        }
+        let (t, usd) = self.price(&p, &pe);
+        let home = Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]));
+        // an old button: the method switched off since, or a coin that is not offered (any text can come in a button)
+        if !self.method_ok("np", t, usd) {
+            return self.edit(chat, mid, "⚠️ این روش پرداخت الان فعال نیست؛ روش دیگری انتخاب کنید.", home).await;
+        }
+        if !self.db().get("np_coins").split(',').any(|c| !c.trim().is_empty() && c.trim() == coin) {
+            return self.edit(chat, mid, "⚠️ این ارز الان برای پرداخت فعال نیست؛ ارز دیگری انتخاب کنید.", home).await;
+        }
         let oid = self.new_order(uid, &p, &pe, "np", &usd.to_string(), "waiting", "");
         let r = self.http.post("https://api.nowpayments.io/v1/payment").header("x-api-key", self.db().get("np_key")).json(&json!({
             "price_amount": usd, "price_currency": "usd", "pay_currency": coin, "order_id": oid.to_string(), "order_description": format!("order {}", oid)
@@ -1599,7 +1709,7 @@ impl Bot {
         let _ = self.db().exec("UPDATE orders SET ref=?1 WHERE id=?2", &[&pid, &oid]);
         self.edit(chat, mid, &format!(
             "🪙 دقیقاً این مقدار را بفرستید:\n<b>{} {}</b>\n\nبه آدرس:\n<code>{}</code>\n\n✅ بعد از تأیید شبکه، اشتراک <b>خودکار</b> فعال می‌شود.",
-            v["pay_amount"], coin.to_uppercase(), v["pay_address"].as_str().unwrap_or("")),
+            v["pay_amount"], esc(&coin.to_uppercase()), esc(v["pay_address"].as_str().unwrap_or(""))),
             Some(ik(vec![vec![b("🔍 بررسی پرداخت", &format!("chk:{}", oid))]]))).await;
     }
 
@@ -1638,17 +1748,26 @@ impl Bot {
     async fn fulfill(&self, oid: i64) {
         let Some(o) = self.order(oid) else { return };
         if o.6 == "done" { return; }
+        // the plan was deleted after the order was placed: the paid order stays (as an error, in the admin's
+        // open orders) and both sides are told, instead of being closed with nothing delivered
+        let Some(p) = self.plan(o.2) else {
+            let marked = self.db().exec("UPDATE orders SET status='error' WHERE id=?1 AND status NOT IN ('done','error')", &[&oid]).unwrap_or(0);
+            if marked == 1 {
+                self.notify_admins(&format!("⚠️ سفارش #{} پرداخت شده ولی پلن آن (#{}) حذف شده و اشتراکی ساخته نشد.\nمشتری: <code>{}</code>\nلطفاً اشتراک را دستی بسازید یا تمدید کنید.", oid, o.2, o.1), None, None).await;
+            }
+            self.send(o.1, &format!("⚠️ پرداخت سفارش #{} ثبت شد ولی پلن آن دیگر وجود ندارد و اشتراک خودکار ساخته نشد.\nپشتیبانی آن را دستی پیگیری می‌کند؛ پرداخت شما محفوظ است.", oid), None).await;
+            return;
+        };
         // every update runs in its own task, so a double tap on "check payment" runs this twice at the
         // same time: only the call that really flips the status may deliver the service
         match self.db().exec("UPDATE orders SET status='done' WHERE id=?1 AND status<>'done'", &[&oid]) {
             Ok(1) => {}
             _ => return,
         }
-        let Some(p) = self.plan(o.2) else { return };
         // a buyer who still has a free-trial account gets that same account (USER<n>-TEST -> USER<n>)
         let trial = self.db().users_of_tg(o.1).into_iter().find(|u| u.notes == "trial" || u.username.to_uppercase().ends_with("-TEST"));
         let res: Result<User, String> = if o.3 == "renew" && o.4 > 0 {
-            self.db().extend(o.4, p.days, p.gb).and_then(|_| {
+            self.db().renew_plan(o.4, p.days, p.gb).and_then(|_| {
                 // a plan for more users raises the account to it (a renewal never lowers it)
                 let _ = self.db().exec("UPDATE users SET max_conn=?1 WHERE id=?2 AND max_conn>0 AND max_conn<?1", &[&p.conns, &o.4]);
                 self.db().promote_trial(o.4);
@@ -1669,10 +1788,18 @@ impl Bot {
         };
         match res {
             Ok(u) => {
-                let head = if o.3 == "renew" { self.tx("txt_renewed") } else { self.tx("txt_bought") };
+                // a renewal whose account was gone (target 0) made a new account: it says so
+                let head = if o.3 == "renew" && o.4 > 0 { self.tx("txt_renewed") } else { self.tx("txt_bought") };
                 self.send(o.1, &format!("{}\n\n{}", head, self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b(&self.bt("home"), "home")]]))).await;
+                // one use of the code for this paid order, taken only while the code is still good; the price was
+                // already paid, so the order is delivered either way and the admin is told when it was not
                 if !o.9.is_empty() {
-                    let _ = self.db().exec("UPDATE discounts SET uses_left=uses_left-1 WHERE code=?1 AND uses_left>0", &[&o.9]);
+                    let used = self.db().exec(
+                        "UPDATE discounts SET uses_left=uses_left-1 WHERE code=?1 AND uses_left>0 AND (COALESCE(expires,0)=0 OR expires>?2)",
+                        &[&o.9, &now()]).unwrap_or(0);
+                    if used == 0 {
+                        self.notify_admins(&format!("⚠️ سفارش #{} با کد تخفیف <code>{}</code> پرداخت و تحویل شد، ولی این کد موقع تحویل دیگر معتبر نبود (تمام، حذف یا منقضی شده).", oid, esc(&o.9)), None, None).await;
+                    }
                 }
                 self.reward_referrer(o.1).await;
                 let a = self.app.clone();
@@ -1691,21 +1818,26 @@ impl Bot {
             "SELECT ref_by, ref_rewarded FROM bot_users WHERE tg_id=?1", [tg], |r| Ok((r.get(0)?, r.get(1)?))).ok());
         let Some((by, done)) = r else { return };
         if by == 0 || done == 1 { return; }
+        // a referrer without an account yet: the reward stays open and is given on the friend's next purchase
+        let Some(u) = self.db().users_of_tg(by).into_iter().next() else { return };
         match self.db().exec("UPDATE bot_users SET ref_rewarded=1 WHERE tg_id=?1 AND ref_rewarded=0", &[&tg]) {
             Ok(1) => {}
             _ => return,
         }
         let gb: f64 = self.db().get("ref_gb").parse().unwrap_or(0.0);
         let days: i64 = self.db().get("ref_days").parse().unwrap_or(0);
-        if let Some(u) = self.db().users_of_tg(by).first() {
-            if self.db().extend(u.id, days, gb).is_ok() {
-                self.send(by, &format!("🎁 دوست شما خرید کرد! {} گیگ و {} روز به سرویس {} اضافه شد.", gb, days, esc(&u.username)), None).await;
-            }
+        if self.db().extend(u.id, days, gb).is_ok() {
+            self.send(by, &format!("🎁 دوست شما خرید کرد! {} گیگ و {} روز به سرویس {} اضافه شد.", gb, days, esc(&u.username)), None).await;
+        } else {
+            // not given: it can be given on a later purchase
+            let _ = self.db().exec("UPDATE bot_users SET ref_rewarded=0 WHERE tg_id=?1", &[&tg]);
         }
     }
 
     async fn review(&self, chat: i64, mid: i64, q: &Value, approve: bool, oid: i64) {
-        let Some(o) = self.order(oid) else { return };
+        let Some(o) = self.order(oid) else {
+            return self.answer(q["id"].as_str().unwrap_or(""), "این سفارش دیگر وجود ندارد (مثلاً حسابِ آن حذف شده).", true).await;
+        };
         // approve and reject tapped together (or twice): only the first decision counts
         let to = if approve { "approved" } else { "rejected" };
         if !matches!(self.db().exec("UPDATE orders SET status=?1 WHERE id=?2 AND status IN ('pending','error')", &[&to, &oid]), Ok(1)) {
@@ -1779,30 +1911,47 @@ impl Bot {
     }
 
     async fn trial(&self, uid: i64, chat: i64, mid: i64) {
+        self.trial_ok(uid, chat, mid).await;
+    }
+
+    /// The free trial; true when the customer got the new account in the chat
+    async fn trial_ok(&self, uid: i64, chat: i64, mid: i64) -> bool {
         let back = Some(ik(vec![vec![b(&self.bt("back"), "home")]]));
         if !self.db().on("trial_on") {
-            return self.edit(chat, mid, "تست رایگان فعلاً غیرفعال است.", back).await;
+            self.edit(chat, mid, "تست رایگان فعلاً غیرفعال است.", back).await;
+            return false;
         }
         let again = "شما قبلاً تست رایگان خودتون رو گرفتید 🙂\nبرای ادامه، از «خرید اشتراک» استفاده کنید 🛒";
         if self.trial_taken(uid) {
-            return self.edit(chat, mid, again, back).await;
+            self.edit(chat, mid, again, back).await;
+            return false;
         }
         // claim it first so a double tap cannot create two accounts
         let claimed = self.db().exec("UPDATE bot_users SET trial_used=1 WHERE tg_id=?1 AND COALESCE(trial_used,0)=0", &[&uid]).unwrap_or(0);
         if claimed == 0 {
-            return self.edit(chat, mid, again, back).await;
+            self.edit(chat, mid, again, back).await;
+            return false;
         }
         let gb: f64 = self.db().get("trial_gb").parse().unwrap_or(1.0);
         let days: i64 = self.db().get("trial_days").parse().unwrap_or(1);
         match self.create_account(uid, gb, days, 1, "trial") {
             Ok(u) => {
-                self.edit(chat, mid, &format!("{}\n\n{}", self.tx("txt_trial_ready"), self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b(&self.bt("back"), "home")]]))).await;
+                if self.edit_ok(chat, mid, &format!("{}\n\n{}", self.tx("txt_trial_ready"), self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b(&self.bt("back"), "home")]]))).await {
+                    return true;
+                }
+                // the customer never got it (the bot cannot message them): the account goes and the trial stays theirs
+                crate::api::delete_user(&self.app, u.id);
+                let _ = self.db().exec("UPDATE bot_users SET trial_used=0 WHERE tg_id=?1", &[&uid]);
+                let a = self.app.clone();
+                tokio::spawn(async move { sync::sync_all(&a).await });
+                false
             }
             Err(e) => {
                 // nothing was created: give the trial back
                 let _ = self.db().exec("UPDATE bot_users SET trial_used=0 WHERE tg_id=?1", &[&uid]);
                 self.notify_admins(&format!("⚠️ خطای ساخت تست: <code>{}</code>", esc(&e)), None, None).await;
                 self.edit(chat, mid, "⚠️ ساخت اکانت تست ناموفق بود.", back).await;
+                false
             }
         }
     }
@@ -1891,7 +2040,8 @@ impl Bot {
             }
             "a:mk" => { set_wait(Wait::Make); { self.edit(chat, mid, "➕ بفرستید: <code>حجم_گیگ روز تعداد_اتصال [نام]</code>\nمثلاً: <code>50 30 2 ali</code>", back).await; true } }
             "a:plans" => {
-                let mut kb: Kb = self.plans(false).into_iter().map(|(p, a)| vec![
+                // the plans of single custom purchases (mini app) are not the admin's plans and are never listed
+                let mut kb: Kb = self.plans(false).into_iter().filter(|(p, _)| !p.custom).map(|(p, a)| vec![
                     b(&format!("{} {} · {}G · {}d · {} · {}$", if a { "🟢" } else { "⚪️" }, p.name, p.gb, p.days, p.toman, p.usd), &format!("pv:{}", p.id)),
                 ]).collect();
                 kb.push(vec![b("➕ افزودن پلن", "pa"), b("📂 دسته‌بندی‌ها", "a:cats")]);
@@ -2099,7 +2249,7 @@ impl Bot {
     fn categories(&self) -> Vec<(String, usize)> {
         let mut out: Vec<(String, usize)> = vec![];
         for (p, _) in self.plans(false) {
-            if p.category.is_empty() { continue; }
+            if p.category.is_empty() || p.custom { continue; }
             if let Some(i) = out.iter().position(|c| c.0 == p.category) {
                 out[i].1 += 1;
             } else {
@@ -2127,7 +2277,8 @@ impl Bot {
             vec![e("gb", "✏️ حجم (گیگ)"), e("conns", "✏️ تعداد کاربر")],
             vec![e("toman", "✏️ قیمت تومان"), e("usd", "✏️ قیمت دلار")],
             vec![e("countries", "✏️ تعداد کشور"), e("category", "📂 دسته")],
-            vec![b(if active { "⏸ غیرفعال کن" } else { "▶️ فعال کن" }, &format!("pt:{}", id)), b("🗑 حذف", &format!("pd:{}", id))],
+            // a custom purchase's plan has no on/off (it is never on sale, only payable once)
+            if p.custom { vec![b("🗑 حذف", &format!("pd:{}", id))] } else { vec![b(if active { "⏸ غیرفعال کن" } else { "▶️ فعال کن" }, &format!("pt:{}", id)), b("🗑 حذف", &format!("pd:{}", id))] },
             vec![b("⬅️ پلن‌ها", "a:plans")],
         ]);
         self.edit(chat, mid, &txt, Some(kb)).await;
@@ -2138,7 +2289,7 @@ impl Bot {
         let Some((name, n)) = cats.get(i).cloned() else {
             return self.edit(chat, mid, "دسته پیدا نشد.", Some(ik(vec![vec![b("📂 دسته‌بندی‌ها", "a:cats")]]))).await;
         };
-        let plans: Vec<String> = self.plans(false).into_iter().filter(|x| x.0.category == name).map(|x| format!("• {}", esc(&x.0.name))).collect();
+        let plans: Vec<String> = self.plans(false).into_iter().filter(|x| x.0.category == name && !x.0.custom).map(|x| format!("• {}", esc(&x.0.name))).collect();
         let kb = ik(vec![
             vec![b("✏️ تغییر نام", &format!("cr:{}", i)), b("🗑 حذف دسته", &format!("cx:{}", i))],
             vec![b("⬅️ دسته‌بندی‌ها", "a:cats")],
@@ -2251,7 +2402,8 @@ impl Bot {
             }
             "pt" => {
                 let id: i64 = rest.parse().unwrap_or(0);
-                let _ = db.exec("UPDATE plans SET active=1-active WHERE id=?1", &[&id]);
+                // only on (1) and off (0): a custom purchase's plan (2) would become -1
+                let _ = db.exec("UPDATE plans SET active=1-active WHERE id=?1 AND active IN (0,1)", &[&id]);
                 self.plan_view(chat, mid, id).await;
             }
             "pd" => {
@@ -2678,6 +2830,18 @@ impl Bot {
         }
     }
 
+    /// Marks unpaid gateway orders that were left too long as expired; returns how many
+    fn expire_waiting(&self, t: i64) -> usize {
+        self.db().exec(
+            "UPDATE orders SET status='expired' WHERE status='waiting' AND ((method='np' AND created<?1) OR (method<>'np' AND created<?2))",
+            &[&(t - 2 * 86400), &(t - 86400)]).unwrap_or(0)
+    }
+
+    /// Drops started purchases nobody touched for a day
+    fn prune_pend(&self, t: i64) {
+        self.pend.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, p| t - p.at < PEND_TTL);
+    }
+
     /// Free trials that are over are deleted (their number goes to the next new customer) and the owner is told.
     async fn clean_trials(&self) {
         let done = self.db().finished_trials();
@@ -2724,6 +2888,10 @@ impl Bot {
                     self.fulfill(oid).await;
                 }
             }
+            // gateway orders never paid: ZarinPal after a day, NOWPayments after the two days it is checked for.
+            // A waiting order keeps a finished trial from being cleaned up.
+            self.expire_waiting(now());
+            self.prune_pend(now());
             self.clean_trials().await;
             // هشدار اتمام حجم/زمان
             // (every 5 minutes, so the 500 MB warning comes before the data is gone)
@@ -2856,6 +3024,13 @@ fn wallet_has_address(db: &crate::db::Db) -> bool {
 }
 
 /// Today's TON price in dollars (kept 10 minutes; None when it cannot be read)
+/// A send error that means the customer is gone for the bot (blocked it, deleted the account, chat unknown),
+/// not a busy moment (429) or a cut connection
+fn gone_chat(e: &str) -> bool {
+    let e = e.to_lowercase();
+    e.starts_with("forbidden") || e.contains("bot was blocked") || e.contains("chat not found") || e.contains("user is deactivated")
+}
+
 async fn ton_usd(app: &crate::App) -> Option<f64> {
     let db = &app.db;
     let at: i64 = db.get("ton_usd_at").parse().unwrap_or(0);
@@ -2915,7 +3090,7 @@ mod flow_tests {
         let (api, log) = fake_telegram().await;
         let bot = Arc::new(Bot {
             app, token: "TEST".into(), admins: vec![ADMIN], http: reqwest::Client::new(), api,
-            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), gifts: Mutex::new(HashMap::new()),
+            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()),
         });
         (bot, log)
     }
@@ -3002,6 +3177,157 @@ mod flow_tests {
         // someone else's account cannot be the target: it becomes a new account
         bot.start_purchase(4242, duo, acc[0].id).await;
         assert_eq!(bot.pend.lock().unwrap().get(&4242).map(|p| (p.kind.clone(), p.target)), Some(("new".to_string(), 0)));
+    }
+
+    /// The answers Telegram got for one button tap (callback id)
+    fn answers(log: &Log, qid: &str) -> Vec<String> {
+        log.lock().unwrap_or_else(|e| e.into_inner()).iter()
+            .filter(|(m, v)| m == "answerCallbackQuery" && v["callback_query_id"].as_str() == Some(qid))
+            .map(|(_, v)| v["text"].as_str().unwrap_or("").to_string()).collect()
+    }
+
+    async fn tap_id(bot: &Bot, f: Value, data: &str, qid: &str) {
+        let chat = f["id"].clone();
+        bot.on_callback(&json!({"id": qid, "from": f, "data": data, "message": {"message_id": 5, "chat": {"id": chat}}})).await;
+    }
+
+    #[tokio::test]
+    async fn sales_discounts_orders_and_button_answers() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        db.set("card_on", "1");
+        db.set("card_number", "6037000011112222");
+        let plan = db.with(|c| {
+            c.execute("INSERT INTO plans(name,days,gb,toman,usd,conns,active) VALUES('m',30,10,100000,1,1,1)", []).unwrap();
+            c.last_insert_rowid()
+        });
+        let buyer = 5001;
+        let f = || from(buyer, "Sara", "sara");
+        bot.touch(buyer, &f(), 0);
+        db.exec("UPDATE bot_users SET cfg_name='sara' WHERE tg_id=?1", &[&buyer]).unwrap();
+
+        // every tap is answered exactly once: empty, or with the handler's own alert
+        tap_id(&bot, f(), "home", "q1").await;
+        assert_eq!(answers(&log, "q1"), vec![String::new()]);
+        let done = order(&bot, buyer, plan, "new", 0, "done");
+        tap_id(&bot, f(), &format!("chk:{}", done), "q2").await;
+        assert_eq!(answers(&log, "q2"), vec!["این سفارش قبلاً فعال شده ✅".to_string()]);
+        // an order that is gone (its account was deleted): the admin's approve says so
+        tap_id(&bot, from(ADMIN, "Admin", "admin"), "ap:99999", "q3").await;
+        assert_eq!(answers(&log, "q3").len(), 1);
+        assert!(answers(&log, "q3")[0].contains("دیگر وجود ندارد"));
+
+        // a one-use code: typed, paid once, then gone from the purchase (an old «card» button pays full price)
+        db.exec("INSERT INTO discounts(code,percent,uses_left) VALUES('OFF50',50,1)", &[]).unwrap();
+        tap(&bot, f(), &format!("pl:{}", plan)).await;
+        tap(&bot, f(), "disc").await;
+        say(&bot, f(), "off50").await;
+        assert!(last(&log, buyer).contains("50,000"), "{}", last(&log, buyer));
+        tap(&bot, f(), "pay:card").await;
+        say(&bot, f(), "رسید").await;
+        assert!(bot.pend.lock().unwrap().get(&buyer).map(|p| p.discount.is_empty()).unwrap_or(false));
+        tap(&bot, f(), "pay:card").await;
+        assert!(last(&log, buyer).contains("100,000"), "{}", last(&log, buyer));
+        say(&bot, f(), "رسید ۲").await;
+        let codes: Vec<String> = db.with(|c| {
+            let mut s = c.prepare("SELECT discount FROM orders WHERE tg_id=?1 AND status='pending' ORDER BY id").unwrap();
+            let v: Vec<String> = s.query_map([buyer], |r| r.get(0)).unwrap().filter_map(|x| x.ok()).collect();
+            v
+        });
+        assert_eq!(codes, vec!["OFF50".to_string(), String::new()]);
+        // a code deleted after it was typed: the payment shows the price again without it
+        db.exec("INSERT INTO discounts(code,percent,uses_left) VALUES('GONE',20,5)", &[]).unwrap();
+        tap(&bot, f(), "disc").await;
+        say(&bot, f(), "gone").await;
+        db.exec("DELETE FROM discounts WHERE code='GONE'", &[]).unwrap();
+        tap(&bot, f(), "pay:card").await;
+        let l = log.lock().unwrap().iter().rev().filter(|(m, v)| m == "sendMessage" && v["chat_id"].as_i64() == Some(buyer)).take(2)
+            .map(|(_, v)| v["text"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>();
+        assert!(l.iter().any(|t| t.contains("دیگر معتبر نیست")) && l.iter().any(|t| t.contains("100,000")), "{:?}", l);
+
+        // closed sales: an old plan, renewal or payment button sells nothing
+        db.set("sales_on", "0");
+        bot.pend.lock().unwrap().clear();
+        for d in [format!("pl:{}", plan), "pay:card".to_string(), "rnw:1".to_string(), "npc:trx".to_string()] {
+            tap(&bot, f(), &d).await;
+            assert_eq!(last(&log, buyer), SALES_CLOSED, "{}", d);
+        }
+        assert!(bot.pend.lock().unwrap().get(&buyer).is_none());
+        db.set("sales_on", "1");
+
+        // NOWPayments: a coin that is not offered is refused
+        db.set("np_on", "1");
+        db.set("np_key", "k");
+        db.set("np_coins", "trx");
+        tap(&bot, f(), &format!("pl:{}", plan)).await;
+        tap(&bot, f(), "npc:<b>x</b>").await;
+        assert!(last(&log, buyer).contains("این ارز"), "{}", last(&log, buyer));
+
+        // a paid order whose plan was deleted: kept as an error, both sides told
+        let gone_plan = db.with(|c| {
+            c.execute("INSERT INTO plans(name,days,gb,toman,usd,conns,active) VALUES('old',30,10,1000,0,1,1)", []).unwrap();
+            c.last_insert_rowid()
+        });
+        let o = order(&bot, buyer, gone_plan, "new", 0, "approved");
+        db.exec("DELETE FROM plans WHERE id=?1", &[&gone_plan]).unwrap();
+        bot.fulfill(o).await;
+        assert_eq!(bot.order(o).unwrap().6, "error");
+        assert!(last(&log, buyer).contains("پلن آن دیگر وجود ندارد"));
+        assert!(last(&log, ADMIN).contains(&format!("#{}", o)));
+
+        // a renewal of an account that is gone makes a new account and says so
+        let o = order(&bot, buyer, plan, "renew", 0, "approved");
+        bot.fulfill(o).await;
+        assert!(last(&log, buyer).contains("اشتراک شما فعال شد"), "{}", last(&log, buyer));
+
+        // a referrer with no account yet keeps the reward for later
+        let friend = 5002;
+        bot.touch(friend, &from(friend, "Ali", "ali"), 5099);
+        bot.reward_referrer(friend).await;
+        let r: i64 = db.with(|c| c.query_row("SELECT ref_rewarded FROM bot_users WHERE tg_id=?1", [friend], |r| r.get(0)).unwrap());
+        assert_eq!(r, 0);
+
+        // custom purchase plans are not the admin's plans, and have no on/off
+        let custom = crate::shop::custom_plan(db, 25, 30, 1).unwrap_or_else(|_| {
+            db.with(|c| {
+                c.execute("INSERT INTO plans(name,days,gb,toman,usd,conns,active) VALUES('دلخواه',30,25,1,0,1,2)", []).unwrap();
+                c.last_insert_rowid()
+            })
+        });
+        tap(&bot, from(ADMIN, "Admin", "admin"), "a:plans").await;
+        assert!(!buttons(&log, ADMIN).iter().any(|b| b.1 == format!("pv:{}", custom)));
+        tap(&bot, from(ADMIN, "Admin", "admin"), &format!("pt:{}", custom)).await;
+        let a: i64 = db.with(|c| c.query_row("SELECT active FROM plans WHERE id=?1", [custom], |r| r.get(0)).unwrap());
+        assert_eq!(a, 2);
+
+        // a customer who writes again is not blocked any more
+        db.exec("UPDATE bot_users SET blocked=1 WHERE tg_id=?1", &[&buyer]).unwrap();
+        say(&bot, f(), "سلام").await;
+        let bl: i64 = db.with(|c| c.query_row("SELECT blocked FROM bot_users WHERE tg_id=?1", [buyer], |r| r.get(0)).unwrap());
+        assert_eq!(bl, 0);
+
+        // gateway orders left unpaid expire; old started purchases are dropped
+        let w = order(&bot, buyer, plan, "new", 0, "waiting");
+        db.exec("UPDATE orders SET method='zp', created=?1 WHERE id=?2", &[&(now() - 2 * 86400), &w]).unwrap();
+        let fresh = order(&bot, buyer, plan, "new", 0, "waiting");
+        db.exec("UPDATE orders SET method='np' WHERE id=?1", &[&fresh]).unwrap();
+        assert_eq!(bot.expire_waiting(now()), 1);
+        assert_eq!((bot.order(w).unwrap().6, bot.order(fresh).unwrap().6), ("expired".to_string(), "waiting".to_string()));
+        bot.pend.lock().unwrap().clear();
+        bot.pend.lock().unwrap().insert(1, Pending { at: now() - PEND_TTL - 1, ..Default::default() });
+        bot.pend.lock().unwrap().insert(2, Pending::default());
+        bot.prune_pend(now());
+        let keys: Vec<i64> = bot.pend.lock().unwrap().keys().copied().collect();
+        assert_eq!(keys, vec![2]);
+    }
+
+    #[test]
+    fn only_a_gone_chat_marks_a_customer_blocked() {
+        assert!(gone_chat("Forbidden: bot was blocked by the user"));
+        assert!(gone_chat("Bad Request: chat not found"));
+        assert!(gone_chat("Forbidden: user is deactivated"));
+        assert!(!gone_chat("Too Many Requests: retry after 5"));
+        assert!(!gone_chat("error sending request for url"));
     }
 
     fn from(id: i64, first: &str, uname: &str) -> Value {

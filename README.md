@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.25.3 — 88 fixes from the full code scan
+- Connection limits, security of tokens and logins, the sales bot, the emergency chat and the installer: every proven finding of the first-half scan is fixed (`docs/SCAN-HALF1.md`).
 ## New in 3.25.2 — the source in order
 - Every part of the panel has its own folder (panel, servers, subscription, VPN cores, bot, tunnels and their protocols, Xray, DNS, emergency chat) and its own web files; the panel script is in 18 parts. Nothing changes in how anything works.
 ## New in 3.25.1 — the Iran subscription link works again

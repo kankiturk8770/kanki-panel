@@ -39,6 +39,14 @@ const SIGN_PREFIX: &str = "kanki-emergency-v1";
 const MAX_TEXT: usize = 2000;
 const MAX_IMAGE: usize = 1_500_000;
 const KEEP_PER_USER: i64 = 500;
+/// pictures kept: at most this many bytes per conversation and for all of them together (the oldest go)
+const IMG_PER_USER: i64 = 30_000_000;
+const IMG_ALL: i64 = 500_000_000;
+/// the rate-limit table never holds more keys than this
+const MAX_KEYS: usize = 20_000;
+/// open connections at once, and the longest one connection may stay open
+const MAX_CONNS: usize = 1024;
+const CONN_LIFE: u64 = 600;
 
 // ------------------------------------------------------------------ config (written by the agent)
 
@@ -49,6 +57,9 @@ pub struct EUser {
     pub u: String,
     /// sha256(ID_PREFIX + subscription code), hex
     pub h: String,
+    /// when the account was made (0 = unknown): a username given again to a new account does not
+    /// get the old account's conversation
+    pub c: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -134,11 +145,15 @@ struct Srv {
 
 type St = State<Arc<Srv>>;
 
-/// the client address: the first X-Forwarded-For (behind a CDN) or the TCP peer
+/// the client address: the TCP peer. X-Forwarded-For is only believed from a proxy on this same
+/// machine; the chat listens on its own port, so anyone else could write any address there.
 #[derive(Clone, Copy)]
 struct Peer(SocketAddr);
 
 fn client_key(h: &HeaderMap, p: &Peer) -> String {
+    if !p.0.ip().is_loopback() {
+        return p.0.ip().to_string();
+    }
     h.get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(',').next())
@@ -150,18 +165,39 @@ fn client_key(h: &HeaderMap, p: &Peer) -> String {
 impl Srv {
     /// true when `key` has had fewer than `max` hits in the last `secs` (and counts this one)
     fn allow(&self, key: &str, max: usize, secs: i64) -> bool {
-        let t = now();
-        let mut m = self.hits.lock().unwrap_or_else(|e| e.into_inner());
-        if m.len() > 20_000 {
-            m.retain(|_, v| v.last().map(|x| t - x < 3600).unwrap_or(false));
-        }
-        let v = m.entry(key.to_string()).or_default();
-        v.retain(|x| t - x < secs);
-        if v.len() >= max {
+        if self.count(key, secs) >= max {
             return false;
         }
-        v.push(t);
+        self.hit(key);
         true
+    }
+    /// hits of `key` in the last `secs` (nothing counted)
+    fn count(&self, key: &str, secs: i64) -> usize {
+        let t = now();
+        let mut m = self.hits.lock().unwrap_or_else(|e| e.into_inner());
+        match m.get_mut(key) {
+            Some(v) => {
+                v.retain(|x| t - x < secs);
+                v.len()
+            }
+            None => 0,
+        }
+    }
+    /// one more hit of `key`; a full table drops its oldest keys first
+    fn hit(&self, key: &str) {
+        let t = now();
+        let mut m = self.hits.lock().unwrap_or_else(|e| e.into_inner());
+        if m.len() >= MAX_KEYS && !m.contains_key(key) {
+            m.retain(|_, v| v.last().map(|x| t - x < 3600).unwrap_or(false));
+            if m.len() >= MAX_KEYS {
+                // still full: the tenth least recently used go in one pass, so this is rare
+                let mut last: Vec<i64> = m.values().map(|v| v.last().copied().unwrap_or(0)).collect();
+                last.sort_unstable();
+                let cut = last[MAX_KEYS / 10];
+                m.retain(|_, v| v.last().copied().unwrap_or(0) > cut);
+            }
+        }
+        m.entry(key.to_string()).or_default().push(t);
     }
     fn user_of(&self, h: &HeaderMap) -> Option<String> {
         let id = h.get("x-kanki-id")?.to_str().ok()?.trim().to_lowercase();
@@ -219,7 +255,51 @@ fn open_db(path: &str) -> Connection {
     // not stored twice
     let _ = c.execute("ALTER TABLE msgs ADD COLUMN cid INTEGER NOT NULL DEFAULT 0", []);
     let _ = c.execute("CREATE INDEX IF NOT EXISTS msgs_cid ON msgs(user, cid)", []);
+    // the account each username's conversation belongs to (EUser.c)
+    let _ = c.execute("CREATE TABLE IF NOT EXISTS owners(user TEXT PRIMARY KEY, c INTEGER NOT NULL DEFAULT 0)", []);
     c
+}
+
+/// A username given to a new account: the old account's conversation is set aside as
+/// "<username>~<made at>" (the admin still reads it there; the new customer starts empty).
+/// Runs before the new customer list is used.
+fn claim(db: &Connection, users: &[EUser]) {
+    for u in users {
+        let old: Option<i64> = db.query_row("SELECT c FROM owners WHERE user=?1", params![u.u], |r| r.get(0)).ok();
+        match old {
+            None => {
+                let _ = db.execute("INSERT INTO owners(user,c) VALUES(?1,?2)", params![u.u, u.c]);
+            }
+            Some(o) if o == u.c => {}
+            // 0 = not known before (an older panel): now known, nothing moves
+            Some(0) => {
+                let _ = db.execute("UPDATE owners SET c=?2 WHERE user=?1", params![u.u, u.c]);
+            }
+            Some(_) if u.c == 0 => {}
+            Some(o) => {
+                let _ = db.execute("UPDATE msgs SET user=?2 WHERE user=?1", params![u.u, format!("{}~{}", u.u, o)]);
+                let _ = db.execute("UPDATE owners SET c=?2 WHERE user=?1", params![u.u, u.c]);
+            }
+        }
+    }
+}
+
+/// The oldest pictures go once a conversation, or all of them together, hold more than the limit.
+fn trim_images(db: &Connection, user: &str, per_user: i64, all: i64) {
+    let over = |sql: &str, p: &[&dyn rusqlite::ToSql], max: i64| -> Vec<i64> {
+        let Ok(mut st) = db.prepare(sql) else { return vec![] };
+        let rows: Vec<(i64, i64)> = st.query_map(p, |r| Ok((r.get(0)?, r.get(1)?))).map(|it| it.flatten().collect()).unwrap_or_default();
+        let mut sum = 0;
+        rows.into_iter().filter(|(_, n)| {
+            sum += n;
+            sum > max
+        }).map(|(id, _)| id).collect()
+    };
+    let mut gone = over("SELECT id, LENGTH(img) FROM msgs WHERE user=?1 AND img IS NOT NULL ORDER BY id DESC", &[&user], per_user);
+    gone.extend(over("SELECT id, LENGTH(img) FROM msgs WHERE img IS NOT NULL ORDER BY id DESC", &[], all));
+    for id in gone {
+        let _ = db.execute("DELETE FROM msgs WHERE id=?1", params![id]);
+    }
 }
 
 /// The id of the customer's message with this app number, if it is already stored
@@ -293,6 +373,9 @@ fn insert(srv: &Srv, user: &str, admin: bool, kind: &str, body: &str, img: Optio
         "DELETE FROM msgs WHERE user=?1 AND id NOT IN (SELECT id FROM msgs WHERE user=?1 ORDER BY id DESC LIMIT ?2)",
         params![user, KEEP_PER_USER],
     );
+    if img.is_some() {
+        trim_images(&db, user, IMG_PER_USER, IMG_ALL);
+    }
     Ok(id)
 }
 
@@ -466,12 +549,18 @@ struct Login {
 
 async fn a_login(State(s): St, Extension(p): Extension<Peer>, h: HeaderMap, Json(b): Json<Login>) -> Response {
     let ck = client_key(&h, &p);
-    // a few tries per address, and a ceiling for everyone together (the address can be spoofed)
-    if !s.allow(&format!("login:{}", ck), 8, 600) || !s.allow("login:all", 60, 600) {
+    // only wrong passwords count: a few per address, and fewer while many addresses are guessing
+    // together. The right password always works from an address that has not been guessing, so
+    // others cannot lock the admin out.
+    let (me, all) = (format!("login:{}", ck), "login:all");
+    let per = if s.count(all, 600) >= 60 { 2 } else { 8 };
+    if s.count(&me, 600) >= per {
         return err(StatusCode::TOO_MANY_REQUESTS, "too many tries, wait 10 minutes");
     }
     let stored = s.live.read().map(|l| l.admin_hash.clone()).unwrap_or_default();
     if stored.is_empty() || !util::check_password(&stored, &b.password) {
+        s.hit(&me);
+        s.hit(all);
         return err(StatusCode::FORBIDDEN, "wrong password");
     }
     let tok = rand_token(48);
@@ -585,7 +674,14 @@ async fn a_users(State(s): St, h: HeaderMap) -> Response {
 async fn admin_page(State(s): St) -> Response {
     let name = s.live.read().map(|l| l.name.clone()).unwrap_or_default();
     let page = ADMIN_HTML.replace("{{NAME}}", &util::esc(if name.is_empty() { "Kanki" } else { &name }));
+    // inside the script the name goes as a JSON string (a backslash or quote cannot break it)
+    let page = page.replace("{{NAME_JS}}", &js_string(if name.is_empty() { "Kanki" } else { &name }));
     ([(header::CACHE_CONTROL, "no-store"), (header::X_FRAME_OPTIONS, "DENY")], Html(page)).into_response()
+}
+
+/// A JSON string that is also safe inside a <script> block
+fn js_string(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| "\"\"".into()).replace('<', "\\u003c").replace('>', "\\u003e").replace('&', "\\u0026")
 }
 
 /// the panel's font, so the admin page looks like the panel without reaching the internet
@@ -627,6 +723,7 @@ fn router(srv: Arc<Srv>) -> Router {
 
 /// builds the server around an open database (used by `run` and by the tests)
 fn make(cfg: &EmerCfg, db: Connection) -> Arc<Srv> {
+    claim(&db, &cfg.users);
     Arc::new(Srv { db: Mutex::new(db), live: RwLock::new(live_of(cfg)), sessions: Mutex::new(HashMap::new()), hits: Mutex::new(HashMap::new()) })
 }
 
@@ -657,6 +754,7 @@ pub async fn run() {
                 if m != last {
                     last = m;
                     if let Ok(c) = load_cfg() {
+                        claim(&srv.db.lock().unwrap_or_else(|e| e.into_inner()), &c.users);
                         if let Ok(mut l) = srv.live.write() {
                             *l = live_of(&c);
                         }
@@ -681,9 +779,7 @@ pub async fn run() {
         } else {
             let (cf, kf) = (format!("{}/tls.crt", DATA_DIR), format!("{}/tls.key", DATA_DIR));
             let _ = std::fs::write(&cf, &cfg.cert);
-            let _ = std::fs::write(&kf, &cfg.key);
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&kf, std::fs::Permissions::from_mode(0o600));
+            let _ = write_private(&kf, cfg.key.as_bytes());
             (cf, kf)
         };
         match crate::tunnel::link::tls_acceptor_with(&cf, &kf, &[b"http/1.1"], false) {
@@ -699,20 +795,26 @@ pub async fn run() {
     eprintln!("kanki emergency chat on {} ({})", addr, if tls.is_some() { "https" } else { "http" });
     // the version this chat runs: after an update the agent / panel restarts it onto the new binary
     let _ = std::fs::write(RUNNING_VER, crate::VERSION);
+    // a client that opens many connections or sends its headers slowly cannot hold the server
+    let slots = Arc::new(tokio::sync::Semaphore::new(MAX_CONNS));
     loop {
         let Ok((sock, peer)) = l.accept().await else { continue };
+        let Ok(slot) = slots.clone().try_acquire_owned() else { continue };
         let app = app.clone().layer(Extension(Peer(peer)));
         let tls = tls.clone();
         tokio::spawn(async move {
+            let _slot = slot;
             let svc = hyper_util::service::TowerToHyperService::new(app);
-            let b = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+            let mut b = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+            b.http1().timer(hyper_util::rt::TokioTimer::new()).header_read_timeout(std::time::Duration::from_secs(15));
+            let life = std::time::Duration::from_secs(CONN_LIFE);
             match tls {
                 Some(acc) => {
                     let Ok(Ok(s)) = tokio::time::timeout(std::time::Duration::from_secs(10), acc.accept(sock)).await else { return };
-                    let _ = b.serve_connection(hyper_util::rt::TokioIo::new(s), svc).await;
+                    let _ = tokio::time::timeout(life, b.serve_connection(hyper_util::rt::TokioIo::new(s), svc)).await;
                 }
                 None => {
-                    let _ = b.serve_connection(hyper_util::rt::TokioIo::new(sock), svc).await;
+                    let _ = tokio::time::timeout(life, b.serve_connection(hyper_util::rt::TokioIo::new(sock), svc)).await;
                 }
             }
         });
@@ -768,11 +870,7 @@ pub fn deploy(cfg: Option<(&EmerCfg, &str)>) -> Result<(), String> {
     if std::fs::read_to_string(CONF_FILE).map(|t| t != text).unwrap_or(true) {
         // written beside and renamed, so the server never reads half a file
         let tmp = format!("{}.new", CONF_FILE);
-        std::fs::write(&tmp, &text).map_err(|e| format!("cannot write {}: {}", CONF_FILE, e))?;
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
-        }
+        write_private(&tmp, text.as_bytes()).map_err(|e| format!("cannot write {}: {}", CONF_FILE, e))?;
         std::fs::rename(&tmp, CONF_FILE).map_err(|e| e.to_string())?;
     }
     let exe = std::env::current_exe().map_err(|e| e.to_string())?.to_string_lossy().replace(" (deleted)", "");
@@ -810,6 +908,16 @@ pub fn deploy(cfg: Option<(&EmerCfg, &str)>) -> Result<(), String> {
     crate::fw::sync("emergency", vec![crate::fw::rule(c.port, false)]);
     let _ = std::fs::write(VER_FILE, ver);
     Ok(())
+}
+
+/// Writes a file only root can read, from its first byte (never readable for a moment)
+fn write_private(path: &str, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+    // a file that was already there keeps its old mode: make it private too
+    f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    f.write_all(data)
 }
 
 const RUNNING_VER: &str = "/var/lib/kanki/emergency/running.ver";
@@ -865,7 +973,7 @@ mod tests {
             admin_hash: util::hash_password("pass-1234"),
             sign_key: sk,
             name: "Test".into(),
-            users: vec![EUser { u: "ali".into(), h: user_hash("kanki-4-abcd1234") }],
+            users: vec![EUser { u: "ali".into(), h: user_hash("kanki-4-abcd1234"), c: 0 }],
             ..Default::default()
         };
         (make(&cfg, open_db(":memory:")), pk, user_hash("kanki-4-abcd1234"))
@@ -1006,6 +1114,79 @@ mod tests {
             last = call(&s, req("POST", "/api/a/login", &[], r#"{"password":"x"}"#)).await.0;
         }
         assert_eq!(last, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn others_guessing_do_not_lock_the_admin_out() {
+        let (s, _, _) = srv();
+        let at = |ip: &str, body: &str| {
+            let r = router(s.clone()).layer(Extension(Peer(format!("{}:5", ip).parse().unwrap())));
+            let rq = req("POST", "/api/a/login", &[("x-forwarded-for", "9.9.9.9")], body);
+            async move { r.oneshot(rq).await.unwrap().status() }
+        };
+        // many addresses guess; a spoofed X-Forwarded-For does not hide them
+        for i in 0..60 {
+            at(&format!("10.0.0.{}", i + 1), r#"{"password":"x"}"#).await;
+        }
+        // a new guesser gets only two tries now
+        assert_eq!(at("10.9.9.1", r#"{"password":"x"}"#).await, StatusCode::FORBIDDEN);
+        assert_eq!(at("10.9.9.1", r#"{"password":"x"}"#).await, StatusCode::FORBIDDEN);
+        assert_eq!(at("10.9.9.1", r#"{"password":"x"}"#).await, StatusCode::TOO_MANY_REQUESTS);
+        // the admin with the right password still gets in
+        assert_eq!(at("10.9.9.2", r#"{"password":"pass-1234"}"#).await, StatusCode::OK);
+        assert_eq!(at("10.9.9.2", r#"{"password":"pass-1234"}"#).await, StatusCode::OK);
+    }
+
+    #[test]
+    fn the_rate_table_stays_small() {
+        let (s, _, _) = srv();
+        for i in 0..(MAX_KEYS + 50) {
+            s.hit(&format!("bad:{}", i));
+        }
+        assert!(s.hits.lock().unwrap().len() <= MAX_KEYS);
+        assert!(s.allow("bad:new", 1, 600));
+        assert!(!s.allow("bad:new", 1, 600));
+    }
+
+    #[test]
+    fn a_username_given_again_does_not_get_the_old_chat() {
+        let db = open_db(":memory:");
+        let old = vec![EUser { u: "ali".into(), h: "a".repeat(64), c: 100 }];
+        claim(&db, &old);
+        db.execute("INSERT INTO msgs(user,admin,kind,body,ts) VALUES('ali',1,'config','vless://old',1)", []).unwrap();
+        // the same account again (or with a new link): the chat stays
+        claim(&db, &[EUser { u: "ali".into(), h: "b".repeat(64), c: 100 }]);
+        let n = |u: &str| db.query_row("SELECT COUNT(*) FROM msgs WHERE user=?1", params![u], |r| r.get::<_, i64>(0)).unwrap();
+        assert_eq!(n("ali"), 1);
+        // a new account with the same username: the old chat is set aside for the admin
+        claim(&db, &[EUser { u: "ali".into(), h: "c".repeat(64), c: 200 }]);
+        assert_eq!((n("ali"), n("ali~100")), (0, 1));
+        // a list from an older panel (no time) changes nothing
+        claim(&db, &[EUser { u: "ali".into(), h: "c".repeat(64), c: 0 }]);
+        assert_eq!(n("ali~100"), 1);
+    }
+
+    #[test]
+    fn old_pictures_go_beyond_the_limit() {
+        let db = open_db(":memory:");
+        for (u, i) in [("a", 1), ("a", 2), ("a", 3), ("b", 4)] {
+            db.execute("INSERT INTO msgs(id,user,admin,kind,img,ts) VALUES(?1,?2,0,'image',?3,1)", params![i, u, vec![0u8; 100]]).unwrap();
+        }
+        trim_images(&db, "a", 250, 10_000);
+        let ids = |db: &Connection| -> Vec<i64> {
+            let mut st = db.prepare("SELECT id FROM msgs ORDER BY id").unwrap();
+            let v: Vec<i64> = st.query_map([], |r| r.get(0)).unwrap().flatten().collect();
+            v
+        };
+        assert_eq!(ids(&db), vec![2, 3, 4]);
+        trim_images(&db, "b", 10_000, 150);
+        assert_eq!(ids(&db), vec![4]);
+    }
+
+    #[test]
+    fn the_name_is_safe_in_the_script() {
+        assert_eq!(js_string("a\\'b"), "\"a\\\\'b\"");
+        assert_eq!(js_string("</script>"), "\"\\u003c/script\\u003e\"");
     }
 
     #[test]

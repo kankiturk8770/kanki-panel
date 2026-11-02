@@ -97,12 +97,27 @@ pub fn note(app: &App, u: &User, h: &HeaderMap) {
         Some(raw) => (key_of(&raw), true),
         None => (format!("ua-{}", &sha256_hex(&format!("{}|{}|{}", kind, name, ua))[..16]), false),
     };
-    let _ = app.db.exec(
-        "INSERT INTO devices(user_id,id,bound,kind,app,ip,first_seen,last_seen) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)
-         ON CONFLICT(user_id,id) DO UPDATE SET kind=?4, app=?5, ip=?6, last_seen=?7",
-        &[&u.id, &id, &(kanki as i64), &kind, &name, &client_ip(h), &now()],
-    );
+    let (ip, t) = (client_ip(h), now());
+    app.db.with(|c| {
+        // a new row past the cap pushes out the ones seen longest ago, so a link cannot grow the list without end
+        let known = c.query_row("SELECT 1 FROM devices WHERE user_id=?1 AND id=?2", rusqlite::params![u.id, id], |_| Ok(())).is_ok();
+        if !known {
+            let _ = c.execute(
+                "DELETE FROM devices WHERE user_id=?1 AND id IN (SELECT id FROM devices WHERE user_id=?1
+                 ORDER BY last_seen DESC LIMIT -1 OFFSET ?2)",
+                rusqlite::params![u.id, MAX_DEVICES - 1],
+            );
+        }
+        let _ = c.execute(
+            "INSERT INTO devices(user_id,id,bound,kind,app,ip,first_seen,last_seen) VALUES(?1,?2,?3,?4,?5,?6,?7,?7)
+             ON CONFLICT(user_id,id) DO UPDATE SET kind=?4, app=?5, ip=?6, last_seen=?7",
+            rusqlite::params![u.id, id, kanki as i64, kind, name, ip, t],
+        );
+    });
 }
+
+/// The most devices kept (and shown) for one user
+const MAX_DEVICES: i64 = 50;
 
 /// An unknown subscription code (marked, so the limiter counts these per address)
 pub fn miss() -> Response {
@@ -155,8 +170,8 @@ const COLS: &str = "user_id,id,bound,kind,app,ip,first_seen,last_seen";
 /// The devices of one user, newest first
 pub fn of(app: &App, uid: i64) -> Vec<Value> {
     app.db.with(|c| {
-        let Ok(mut s) = c.prepare(&format!("SELECT {} FROM devices WHERE user_id=?1 ORDER BY last_seen DESC", COLS)) else { return vec![] };
-        s.query_map([uid], row).map(|r| r.flatten().map(|x| x.1).collect()).unwrap_or_default()
+        let Ok(mut s) = c.prepare(&format!("SELECT {} FROM devices WHERE user_id=?1 ORDER BY last_seen DESC LIMIT ?2", COLS)) else { return vec![] };
+        s.query_map(rusqlite::params![uid, MAX_DEVICES], row).map(|r| r.flatten().map(|x| x.1).collect()).unwrap_or_default()
     })
 }
 
@@ -307,6 +322,26 @@ mod tests {
         // an unknown code is marked, so the limiter can count it
         let (st, _, why) = get(&app, "/sub/kanki-999-00000000", &[]).await;
         assert_eq!((st, why.as_str()), (StatusCode::NOT_FOUND, "unknown"));
+    }
+
+    #[test]
+    fn the_device_list_has_a_cap() {
+        let app = test_app();
+        let u = app.db.create_user("CAP", 10.0, 30, 1, "wg", "", "", 0).unwrap();
+        for i in 0..(MAX_DEVICES + 10) {
+            let mut h = HeaderMap::new();
+            h.insert("user-agent", format!("v2rayNG/1.{}", i).parse().unwrap());
+            note(&app, &u, &h);
+        }
+        let n: i64 = app.db.with(|c| c.query_row("SELECT COUNT(*) FROM devices WHERE user_id=?1", [u.id], |r| r.get(0)).unwrap());
+        assert_eq!(n, MAX_DEVICES);
+        assert_eq!(of(&app, u.id).len() as i64, MAX_DEVICES);
+        // a known device is only updated
+        let mut h = HeaderMap::new();
+        h.insert("user-agent", format!("v2rayNG/1.{}", MAX_DEVICES + 9).parse().unwrap());
+        note(&app, &u, &h);
+        let n: i64 = app.db.with(|c| c.query_row("SELECT COUNT(*) FROM devices WHERE user_id=?1", [u.id], |r| r.get(0)).unwrap());
+        assert_eq!(n, MAX_DEVICES);
     }
 
     // (the panel's request limits, through the same router)

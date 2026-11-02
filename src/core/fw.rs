@@ -76,15 +76,85 @@ fn protected(r: &str, ssh: &BTreeSet<u16>) -> bool {
     r.split('/').next().and_then(|p| p.parse::<u16>().ok()).map(|p| ssh.contains(&p) && r.ends_with("/tcp")).unwrap_or(false)
 }
 
+/// the last state that was read back fine (kept so a broken fw.json does not forget every owner)
+fn backup() -> String {
+    format!("{}.bak", STATE)
+}
+
+/// Read a state file: Ok(None) when it does not exist, Err when it is there but cannot be read.
+fn read_state(path: &str) -> Result<Option<State>, ()> {
+    match std::fs::read_to_string(path) {
+        Ok(t) if t.trim().is_empty() => Err(()),
+        Ok(t) => serde_json::from_str(&t).map(Some).map_err(|_| ()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err(()),
+    }
+}
+
+/// The saved state. None when fw.json is broken and there is no good backup either: then nobody knows
+/// which owners still need which ports, so nothing may be closed on its account.
+fn load_checked() -> Option<State> {
+    match read_state(STATE) {
+        Ok(s) => Some(s.unwrap_or_default()),
+        Err(()) => match read_state(&backup()) {
+            Ok(Some(s)) => {
+                eprintln!("firewall: {} is broken, using the last good copy", STATE);
+                Some(s)
+            }
+            _ => {
+                eprintln!("firewall: {} is broken and has no good copy; no port is closed until the owners are known again", STATE);
+                None
+            }
+        },
+    }
+}
+
 fn load() -> State {
-    std::fs::read_to_string(STATE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+    load_checked().unwrap_or_default()
+}
+
+/// write `text` to `path` through a temp file of this process (the panel, node and agent share the file)
+fn write_atomic(path: &str, text: &str) -> bool {
+    let tmp = format!("{}.{}.new", path, std::process::id());
+    if std::fs::write(&tmp, text).is_ok() && std::fs::rename(&tmp, path).is_ok() {
+        return true;
+    }
+    let _ = std::fs::remove_file(&tmp);
+    false
 }
 
 fn save(s: &State) {
     let _ = std::fs::create_dir_all("/var/lib/kanki");
-    let tmp = format!("{}.new", STATE);
-    if std::fs::write(&tmp, serde_json::to_string(s).unwrap_or_default()).is_ok() {
-        let _ = std::fs::rename(&tmp, STATE);
+    let text = serde_json::to_string(s).unwrap_or_default();
+    if write_atomic(STATE, &text) {
+        let _ = write_atomic(&backup(), &text);
+    }
+}
+
+/// An exclusive lock on the state for every Kanki process on this server, held while the guard lives
+/// (load, change, save must not interleave between the panel, node and the tunnel agent).
+struct FileLock(Option<std::fs::File>);
+
+fn file_lock() -> FileLock {
+    use std::os::unix::io::AsRawFd;
+    let _ = std::fs::create_dir_all("/var/lib/kanki");
+    let f = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(format!("{}.lock", STATE));
+    match f {
+        Ok(f) => {
+            // blocking: the other holder only runs a few ufw commands
+            unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) };
+            FileLock(Some(f))
+        }
+        Err(_) => FileLock(None),
+    }
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        use std::os::unix::io::AsRawFd;
+        if let Some(f) = &self.0 {
+            unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_UN) };
+        }
     }
 }
 
@@ -112,7 +182,10 @@ pub fn sync<I: IntoIterator<Item = String>>(owner: &str, want: I) {
     let ssh = ssh_ports();
     let want: BTreeSet<String> = want.into_iter().filter(|r| valid_rule(r) && !protected(r, &ssh)).collect();
     let mut seen = lock().lock().unwrap_or_else(|e| e.into_inner());
-    let mut st = load();
+    let _file = file_lock();
+    let loaded = load_checked();
+    let known = loaded.is_some();
+    let mut st = loaded.unwrap_or_default();
     let old = st.owners.get(owner).cloned().unwrap_or_default();
     let recheck = seen.get(owner).map(|t| t.elapsed().as_secs() >= RECHECK_SECS).unwrap_or(true);
     if old == want && !recheck {
@@ -128,7 +201,8 @@ pub fn sync<I: IntoIterator<Item = String>>(owner: &str, want: I) {
         seen.insert(owner.to_string(), Instant::now());
         return;
     }
-    let close = to_close(&st, owner, &old, &want);
+    // a broken state forgot the other owners: open what is wanted, close nothing this time
+    let close = if known { to_close(&st, owner, &old, &want) } else { vec![] };
     if ufw_active() {
         // only the rules ufw does not have yet (one status read, not one command per port)
         let (_, status) = sh("ufw status 2>/dev/null");
@@ -265,7 +339,8 @@ pub fn report() -> serde_json::Value {
 /// The admin asked to close these ufw rules: each is closed only if it is still unused (no owner wants
 /// it, not SSH, nothing listens there). Blocking.
 pub fn close_unused(rules: &[String]) {
-    let st = load();
+    let _file = file_lock();
+    let Some(st) = load_checked() else { return };
     let ssh = ssh_ports();
     let hidden = hidden_users();
     for r in rules.iter().filter(|r| valid_rule(r) && !r.contains(':')) {
@@ -311,6 +386,24 @@ mod tests {
         assert_eq!(close, vec!["53/udp".to_string(), "80/tcp".to_string()]);
         // a smaller list closes only what was dropped
         assert_eq!(to_close(&st, "dns", &old, &set(&["53/udp", "443/tcp"])), vec!["80/tcp".to_string()]);
+    }
+
+    #[test]
+    fn a_broken_state_is_not_read_as_empty() {
+        let dir = std::env::temp_dir().join(format!("kanki-fw-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("fw.json");
+        let f = f.to_str().unwrap();
+        assert_eq!(read_state(f), Ok(None));
+        assert!(write_atomic(f, r#"{"owners":{"dns":["53/udp"]}}"#));
+        assert_eq!(read_state(f).unwrap().unwrap().owners["dns"].len(), 1);
+        std::fs::write(f, "{\"owners\":{\"dns\":[").unwrap();
+        assert_eq!(read_state(f), Err(()));
+        std::fs::write(f, "").unwrap();
+        assert_eq!(read_state(f), Err(()));
+        // no temp file is left behind
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

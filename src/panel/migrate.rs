@@ -183,7 +183,24 @@ fn drop_ip(v: &str, old: &str, new: &str) -> String {
     if new.is_empty() {
         return v;
     }
-    v.replace(&format!("//{}:", old), &format!("//{}:", new)).replace(&format!("//{}/", old), &format!("//{}/", new))
+    // `//old` is the URL host only when the host ends right there: at a port, a path, a query, a
+    // fragment, the end of a JSON string or the end of the text ("//1.2.3.45" is another address)
+    let pat = format!("//{}", old);
+    let mut out = String::with_capacity(v.len());
+    let mut rest = v.as_str();
+    while let Some(i) = rest.find(&pat) {
+        let after = &rest[i + pat.len()..];
+        out.push_str(&rest[..i]);
+        if after.is_empty() || after.starts_with([':', '/', '?', '#', '"']) {
+            out.push_str("//");
+            out.push_str(new);
+        } else {
+            out.push_str(&pat);
+        }
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// On the new server, the first start after a move or a restore from another server: addresses that
@@ -232,6 +249,12 @@ mod tests {
         let x = r#"{"servers":[{"server":"local","address":"1.2.3.4"}],"x":"1.2.3.45"}"#;
         assert_eq!(super::drop_ip(x, "1.2.3.4", "p.example.com"), r#"{"servers":[{"server":"local","address":""}],"x":"1.2.3.45"}"#);
         assert_eq!(super::drop_ip("https://1.2.3.4:2053/x", "1.2.3.4", "p.example.com"), "https://p.example.com:2053/x");
+        // no port: at the end, before a query or a fragment; never a longer address
+        assert_eq!(super::drop_ip("https://1.2.3.4", "1.2.3.4", "p.example.com"), "https://p.example.com");
+        assert_eq!(super::drop_ip("https://1.2.3.4?a=1", "1.2.3.4", "p.example.com"), "https://p.example.com?a=1");
+        assert_eq!(super::drop_ip("https://1.2.3.4#x", "1.2.3.4", "p.example.com"), "https://p.example.com#x");
+        assert_eq!(super::drop_ip("https://1.2.3.45", "1.2.3.4", "p.example.com"), "https://1.2.3.45");
+        assert_eq!(super::drop_ip(r#"{"u":"https://1.2.3.4"}"#, "1.2.3.4", "p.example.com"), r#"{"u":"https://p.example.com"}"#);
         // no domain: a URL keeps its host rather than losing it
         assert_eq!(super::drop_ip("https://1.2.3.4:2053/x", "1.2.3.4", ""), "https://1.2.3.4:2053/x");
     }

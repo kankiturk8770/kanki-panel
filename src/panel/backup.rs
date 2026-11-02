@@ -369,7 +369,7 @@ pub fn clean_db(app: &App) -> Value {
     let logins = n("DELETE FROM login_log WHERE ts<?1", month);
     let audit = n("DELETE FROM audit WHERE ts<?1", month);
     let sessions = n("DELETE FROM sessions WHERE expires<?1", t);
-    let orders = n("DELETE FROM orders WHERE status IN ('pending','waiting','rejected','error') AND created<?1", week);
+    let orders = n("DELETE FROM orders WHERE status IN ('pending','waiting','rejected','error','expired') AND created<?1", week);
     // free trials that are over (the bot removes them within a minute; this also covers a paused bot)
     let trials = app.db.finished_trials();
     for u in &trials {
@@ -565,6 +565,18 @@ async fn tg_call(app: &App, token: &str, method: &str, body: Value) -> Option<Va
     if v["ok"].as_bool() == Some(true) { Some(v["result"].clone()) } else { None }
 }
 
+/// The newest private chat with one of the bot admins among the bot's updates. Anyone can write to
+/// the bot, so a group or a stranger's chat is never taken (backups and alerts would go there).
+fn admin_chat(ups: &[Value], admins: &str) -> Option<String> {
+    let admins: Vec<&str> = admins.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()).collect();
+    ups.iter().rev().find_map(|u| {
+        let c = &u["message"]["chat"];
+        let id = c["id"].as_i64()?.to_string();
+        let from = u["message"]["from"]["id"].as_i64()?.to_string();
+        (c["type"].as_str() == Some("private") && from == id && admins.contains(&id.as_str())).then_some(id)
+    })
+}
+
 async fn tgb_test(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "backup");
     let token = tgb_token(&app);
@@ -579,8 +591,8 @@ async fn tgb_test(State(app): St, h: HeaderMap) -> Response {
         // the sales bot long-polls its own token, so only probe updates on a dedicated token
         if !app.db.get("tgb_token").is_empty() && app.db.get("tgb_token") != crate::bot::bot_token(&app) {
             if let Some(Value::Array(ups)) = tg_call(&app, &token, "getUpdates", json!({"limit": 50})).await {
-                if let Some(id) = ups.iter().rev().find_map(|u| u["message"]["chat"]["id"].as_i64()) {
-                    chat = id.to_string();
+                if let Some(id) = admin_chat(&ups, &crate::bot::bot_admins_raw(&app)) {
+                    chat = id;
                 }
             }
         }
@@ -588,7 +600,7 @@ async fn tgb_test(State(app): St, h: HeaderMap) -> Response {
             chat = crate::bot::bot_admins_raw(&app).split(',').next().unwrap_or("").trim().to_string();
         }
         if chat.is_empty() {
-            return err(StatusCode::BAD_REQUEST, "send /start to the bot first, or fill Chat ID");
+            return err(StatusCode::BAD_REQUEST, "send /start to the bot from a bot admin's account first, or fill Chat ID");
         }
         app.db.set("tgb_chat", &chat);
     }
@@ -736,5 +748,23 @@ mod restore_tests {
         assert_eq!(n.matches("-o eth0 -j MASQUERADE").count(), 2);
         // only the NAT rules: a FORWARD rule with -o is left as it was
         assert!(n.contains("-o ens18 -j ACCEPT"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    #[test]
+    fn test_takes_only_an_admin_private_chat() {
+        let ups = vec![
+            json!({"message": {"chat": {"id": 111, "type": "private"}, "from": {"id": 111}}}),
+            json!({"message": {"chat": {"id": -500, "type": "group"}, "from": {"id": 111}}}),
+            json!({"message": {"chat": {"id": 999, "type": "private"}, "from": {"id": 999}}}),
+        ];
+        // the newest chat is a stranger's, before it a group: the admin's own private chat is taken
+        assert_eq!(super::admin_chat(&ups, "111, 222").as_deref(), Some("111"));
+        assert_eq!(super::admin_chat(&ups, "222"), None);
+        assert_eq!(super::admin_chat(&ups, ""), None);
     }
 }

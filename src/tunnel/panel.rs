@@ -2348,7 +2348,7 @@ pub(crate) fn emer_cfg(app: &App) -> Option<(crate::emergency::EmerCfg, String)>
         .db
         .users()
         .into_iter()
-        .map(|u| crate::emergency::EUser { h: crate::emergency::user_hash(&u.sub_code()), u: u.username })
+        .map(|u| crate::emergency::EUser { h: crate::emergency::user_hash(&u.sub_code()), c: u.created_at, u: u.username })
         .collect();
     let c = crate::emergency::EmerCfg {
         port: app.db.get("emer_port").parse().unwrap_or(0),

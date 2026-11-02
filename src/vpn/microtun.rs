@@ -135,7 +135,11 @@ pub fn user_key(app: &App, u: &User) -> String {
 
 /// The user's tunnel address (None for ids that do not fit the /16)
 pub fn user_ip(u: &User) -> Option<Ipv4Addr> {
-    let id = u32::try_from(u.id).ok().filter(|i| (1..=65533).contains(i))?;
+    ip_of_id(u.id)
+}
+
+fn ip_of_id(id: i64) -> Option<Ipv4Addr> {
+    let id = u32::try_from(id).ok().filter(|i| (1..=65533).contains(i))?;
     Some(Ipv4Addr::from(BASE + id + 1))
 }
 
@@ -293,6 +297,11 @@ fn deltas(r: &mut Running) -> HashMap<String, (i64, i64)> {
     out
 }
 
+/// The UDP port microtun runs on here now (None = not running)
+pub fn running_port() -> Option<u16> {
+    running().lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|r| r.srv.cfg.port)
+}
+
 /// What this server reports (merged into its info): the port that really runs, or why not
 pub fn info() -> Value {
     let (port, v6) = running().try_lock().ok().and_then(|g| g.as_ref().map(|r| (r.srv.cfg.port, r.srv.has_v6()))).unwrap_or((0, false));
@@ -388,9 +397,14 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
     }
     // KANKI MIX is the other UDP protocol that sits beside it on every server
     let km = crate::kmix::settings(&app);
+    let hop = crate::kmix::hop_range(&km.hop);
     for n in app.db.nodes() {
         if s.node_on(&n.id) && km.node_on(&n.id) && s.node_port(&n.id) == km.node_port(&n.id) {
             return bad(&format!("KANKI MIX already uses port {} on {}", s.node_port(&n.id), n.name));
+        }
+        // the extra ports of KANKI MIX are sent to KANKI MIX: microtun cannot sit inside them
+        if let Some((a, z)) = hop.filter(|(a, z)| s.node_on(&n.id) && km.node_on(&n.id) && (*a..=*z).contains(&s.node_port(&n.id))) {
+            return bad(&format!("the port {} on {} is inside the KANKI MIX extra ports {}-{}", s.node_port(&n.id), n.name, a, z));
         }
     }
     save(&app, &s);
@@ -434,6 +448,9 @@ async fn user_links(axum::extract::State(app): St, h: axum::http::HeaderMap, axu
         "microtun is not ticked for this user"
     } else if !u.active() {
         "this user is not active"
+    } else if user_ip(&u).is_none() {
+        // the tunnel addresses (10.79.0.0/16) are by user id: existing users keep theirs
+        "microtun gives tunnel addresses to user numbers 1-65533 only; this user's number is higher"
     } else if out.is_empty() {
         "no server runs microtun for this user yet (update the agents, wait a minute)"
     } else {
@@ -452,6 +469,13 @@ mod tests {
         let u = to_url(&"ab".repeat(32), "de.example.com:4200", &"cd".repeat(32), Ipv4Addr::new(10, 79, 0, 2), &s, "Germany · microtun");
         assert!(u.starts_with(&format!("mtun://{}@de.example.com:4200?obfs=", "ab".repeat(32))));
         assert!(u.contains("&ip=10.79.0.2/16&mtu=1420&burst=300&delay=2#Germany%20%C2%B7%20microtun"));
+    }
+
+    #[test]
+    fn user_numbers_past_the_subnet_get_no_address() {
+        assert_eq!(ip_of_id(1), Some(Ipv4Addr::new(10, 79, 0, 2)));
+        assert_eq!(ip_of_id(65533), Some(Ipv4Addr::new(10, 79, 255, 254)));
+        assert!(ip_of_id(65534).is_none());
     }
 
     #[test]

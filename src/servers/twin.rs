@@ -102,8 +102,13 @@ pub fn forget(app: &App, key: &str) {
     }
 }
 
-fn valid_host(h: &str) -> bool {
-    h.len() <= 253 && h.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'))
+/// A domain or IP: ':' only inside a real IPv6 address (bare or in [ ]), so "host:port" is refused
+pub fn valid_host(h: &str) -> bool {
+    if h.contains(':') || h.contains('[') || h.contains(']') {
+        let ip = h.strip_prefix('[').and_then(|x| x.strip_suffix(']')).unwrap_or(h);
+        return ip.parse::<std::net::Ipv6Addr>().is_ok();
+    }
+    !h.is_empty() && h.len() <= 253 && h.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
 }
 
 /// The tunnel server id of a VPN node ("local" for the panel server; "" = it has no agent)
@@ -262,6 +267,10 @@ mod tests {
         assert!(valid_host("[2001:db8::1]"));
         assert!(!valid_host("ir.example.com/x"));
         assert!(!valid_host("a b"));
+        assert!(valid_host("2001:db8::1"));
+        assert!(!valid_host("ir.example.com:8443"));
+        assert!(!valid_host("5.5.5.5:443"));
+        assert!(!valid_host("[ir.example.com]"));
     }
 
     #[test]
