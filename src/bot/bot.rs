@@ -276,9 +276,10 @@ struct Plan {
     service: String,
 }
 
-/// The chat's menu button (it opens the mini app): for a customer with a working account, and for everyone else
-const MENU_MINE: &str = "👤 پنل من | مدیریت اشتراک";
-const MENU_NEW: &str = "🚀 ورود به اپلیکیشن | خرید و سرویس‌ها";
+/// The chat's menu button (it opens the mini app): for a customer with a working account, and for everyone else.
+/// Short on purpose: the button sits beside the message box and a long text left no room to type.
+const MENU_MINE: &str = "👤 کانکی من";
+const MENU_NEW: &str = "🚀 کانکی اپ";
 
 /// How to add a v2ray subscription link, under a v2ray account
 const V2RAY_HELP: &str = "📲 <b>اتصال با برنامه‌های V2Ray</b>\n• اندروید: v2rayNG (گوگل‌پلی)\n• آیفون: Streisand یا V2Box (اپ‌استور)\n• ویندوز: v2rayN یا Nekoray\n\n1️⃣ لینک بالا رو کپی کنید.\n2️⃣ توی برنامه: ➕ ← اضافه کردن اشتراک (Subscription) و لینک رو بذارید.\n3️⃣ اشتراک رو به‌روز (Update) کنید، یه سرور رو انتخاب کنید و وصل بشید.\n\nسرورها که عوض بشن، با به‌روز کردن اشتراک خودش درست می‌شه.";
