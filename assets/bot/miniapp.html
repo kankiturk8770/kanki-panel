@@ -78,8 +78,9 @@ h2{font-size:16px;font-weight:900;margin:24px 2px 4px}
 .tags span{font-size:12px;padding:0 8px;line-height:20px;border-radius:8px;border:1px solid var(--sep);color:var(--hint)}
 .row .b{flex:none;min-height:40px}
 
-/* the two views */
-.tabs{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;border-radius:14px;background:var(--bg2);margin:0 0 12px}
+/* the three tabs of an account (and buy) */
+.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px;border-radius:14px;background:var(--bg2);margin:0 0 12px;position:sticky;top:0;z-index:5}
+.tabs.two{grid-template-columns:1fr 1fr}
 .tabs button{min-height:40px;border:0;border-radius:10px;background:transparent;font-weight:800;cursor:pointer;color:var(--hint)}
 .tabs button.on{background:var(--bg);color:var(--tx);box-shadow:0 0 0 1px var(--sep)}
 
@@ -120,6 +121,30 @@ input[type=range]{width:100%;accent-color:var(--gold2);height:32px;margin:0}
 .ost.y{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
 .ost.r{color:var(--bad);background:color-mix(in srgb,var(--bad) 14%,transparent)}
 
+/* subscription tab */
+.cta{display:grid;gap:8px;margin-top:12px}
+.cta .b{min-height:52px;font-size:15px}
+.code{display:flex;align-items:center;gap:10px;margin-top:12px;padding:10px 12px;border-radius:14px;background:var(--bg2)}
+.code .nm{flex:1;min-width:0}
+.code .nm small{display:block;font-size:12px;color:var(--hint)}
+.code .nm b{display:block;font-size:17px;letter-spacing:.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.svc{display:inline-block;margin-top:8px;font-size:12px;font-weight:800;padding:2px 10px;border-radius:10px;background:rgba(26,18,6,.12)}
+/* servers tab: one block per country */
+.ctry{background:var(--bg2);border-radius:16px;padding:10px 12px;margin-bottom:8px}
+.ctry .h{display:flex;align-items:center;gap:10px}
+.ctry .h .f{font-size:26px;line-height:1}
+.ctry .h b{flex:1;font-size:15px;font-weight:900}
+.ctry .h small{color:var(--hint);font-size:12px}
+.way{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px solid var(--sep);font-size:13px}
+.way>span{font-weight:800;min-width:76px}
+/* apps tab */
+.appc{background:var(--bg2);border-radius:16px;padding:12px;margin-top:10px}
+.appc .t{display:flex;align-items:center;gap:10px}
+.appc .t b{flex:1;font-size:15px;font-weight:900}
+.appc .t .rec{font-size:11px;font-weight:800;padding:1px 8px;border-radius:8px;color:var(--ink);background:var(--gold2)}
+details.more{margin-top:10px}
+details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8px 2px;list-style-position:inside}
+
 /* states */
 .empty{text-align:center;padding:48px 8px}
 .empty .mk{width:64px;height:64px;margin:0 auto 12px;border-radius:18px;display:grid;place-items:center;font-size:30px;font-weight:900;color:var(--ink);background:linear-gradient(160deg,var(--gold1),var(--gold2))}
@@ -138,7 +163,7 @@ input[type=range]{width:100%;accent-color:var(--gold2);height:32px;margin:0}
 <script>
 (function(){
 var Q=new URLSearchParams(location.search);
-var A={list:[],cur:0,plat:'i',view:Q.get('buy')?'buy':'acc',shop:null,renew:+(Q.get('renew')||0),cb:null};
+var A={list:[],cur:0,plat:'i',view:Q.get('buy')?'buy':'acc',tab:'sub',svc:'',shop:null,renew:+(Q.get('renew')||0),cb:null};
 function tg(){return window.Telegram&&Telegram.WebApp}
 // the signed init data: from Telegram's script, else from the page address (the script may not load in Iran)
 function initData(){var w=tg();if(w&&w.initData)return w.initData;
@@ -173,17 +198,29 @@ function why(e,j){var m=e.message;if(m=='name')return 'اول اسم کانفی�
  if(m=='sales are off')return 'فروش فعلاً بسته است';if(m=='not delivered')return NOSEND;if(m=='no trial')return 'تست رایگان قبلاً گرفته شده';return 'نشد، دوباره امتحان کنید'}
 function empty(icon,title,text,btn){document.getElementById('app').innerHTML='<div class="empty"><div class="mk">'+icon+'</div><b>'+title+'</b><p class="muted">'+text+'</p>'+(btn||'')+'</div>'}
 
-function tabs(){if(!A.shop||(!A.shop.custom.on&&!A.shop.plans.length)||!A.shop.sales)return '';
- return '<div class="tabs" role="tablist"><button role="tab" data-v="acc" class="'+(A.view=='acc'?'on':'')+'">حساب من</button><button role="tab" data-v="buy" class="'+(A.view=='buy'?'on':'')+'">خرید و تمدید</button></div>'}
-function render(){if(A.view=='buy'&&A.shop&&A.shop.sales)return drawBuy();if(!A.list.length)return A.shop&&A.shop.sales?(A.view='buy',drawBuy()):noAccount();draw()}
+// the account's three tabs; buying is its own view (from the subscription tab, or the only view with no account)
+function sales(){return A.shop&&A.shop.sales&&(A.shop.custom.on||A.shop.plans.length)}
+function tabs(){return '<div class="tabs" role="tablist">'+[['sub','اشتراک من'],['srv','سرورها'],['app','برنامه و راهنما']].map(function(t){return '<button role="tab" aria-selected="'+(A.tab==t[0])+'" data-t="'+t[0]+'" class="'+(A.tab==t[0]?'on':'')+'">'+t[1]+'</button>'}).join('')+'</div>'}
+function render(){if(A.view=='buy'&&sales())return drawBuy();if(!A.list.length)return sales()?(A.view='buy',drawBuy()):noAccount();draw()}
 function noAccount(){empty('K','هنوز اشتراکی ندارید','بعد از خرید اشتراک، اطلاعات حساب و کانفیگ‌ها اینجا دیده می‌شن.','<button class="b main" style="min-width:180px" onclick="window.Telegram&&Telegram.WebApp&&Telegram.WebApp.close()">برگشت به ربات</button>')}
-function wireTabs(){Array.prototype.slice.call(document.querySelectorAll('[data-v]')).forEach(function(b){b.onclick=function(){A.view=b.dataset.v;render()}})}
+function wireTabs(){Array.prototype.slice.call(document.querySelectorAll('[data-t]')).forEach(function(b){b.onclick=function(){A.tab=b.dataset.t;A.view='acc';render();window.scrollTo(0,0)}})}
+var SV={v2ray:['🌐','سرویس استاندارد (V2Ray)','یک لینک اشتراک، برای v2rayNG، Streisand، V2Box و Nekoray؛ اقتصادی، برای کارهای روزمره و وب‌گردی.'],
+ vip:['🚀','سرویس VIP ضدتحریم','اپ اختصاصی کانکی، AmneziaWG و WireGuard، همه‌ی کشورها مستقیم و از راه تانل؛ مخصوص بازی و اینترنت پراختلال.']};
 
-function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){return x.id==A.renew})[0],h=(A.list.length?tabs():'');
+function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){return x.id==A.renew})[0],h='';
+ if(A.list.length)h+='<div class="acts one" style="margin:0 0 12px"><button class="b" id="bk">بازگشت به حساب</button></div>';
  h+=nameCard();
  if(A.trial&&!mine)h+='<div class="card" style="margin-bottom:12px;display:flex;align-items:center;gap:12px"><div style="flex:1"><b>🎁 تست رایگان</b><p class="lead" style="margin:2px 0 0">قبل از خرید امتحان کنید؛ یک بار برای هر نفر.</p></div><button class="b blue" id="tri">گرفتن تست</button></div>';
  if(mine)h+='<p class="lead" style="margin:0 2px 12px">تمدید حساب <b class="ltr">'+esc(mine.name)+'</b>: حجم و روز به همین حساب اضافه می‌شه. <button class="b" id="nr" style="min-height:40px;margin-inline-start:6px">خرید حساب تازه</button></p>';
- if(c.on){var cb=A.cb||(A.cb={g:Math.min(c.max_gb,Math.max(c.min_gb,30)),d:c.days[0],u:1});
+ // plans of both services on sale: the customer picks the service first and sees only its plans
+ var svcs=['v2ray','vip'].filter(function(k){return sh.plans.some(function(p){return (p.service||'vip')==k})});
+ if(svcs.length>1){if(!A.svc)A.svc=mine?(mine.service||'vip'):'vip';
+  h+='<div class="seg" role="tablist" style="grid-template-columns:1fr 1fr;margin-bottom:8px">'+svcs.map(function(k){return '<button role="tab" aria-selected="'+(A.svc==k)+'" data-svc="'+k+'" class="'+(A.svc==k?'on':'')+'">'+SV[k][0]+' '+(k=='vip'?'VIP':'استاندارد')+'</button>'}).join('')+'</div>'+
+   '<p class="lead"><b>'+SV[A.svc][1]+'</b>: '+SV[A.svc][2]+'</p>'}
+ else A.svc=svcs[0]||'vip';
+ var plans=sh.plans.filter(function(p){return (p.service||'vip')==A.svc});
+ // the custom purchase makes a full (VIP) account
+ if(c.on&&A.svc=='vip'){var cb=A.cb||(A.cb={g:Math.min(c.max_gb,Math.max(c.min_gb,30)),d:c.days[0],u:1});
   // renewing: never fewer users than the account has (a renewal raises it, never lowers it)
   var from=mine?Math.max(1,Math.min(c.users,mine.connections||1)):1;if(cb.u<from)cb.u=from;
   var users=[];for(var i=from;i<=c.users;i++)users.push(i);
@@ -193,16 +230,18 @@ function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){retu
    '<span class="lbl">مدت</span><div class="chips2" id="dd">'+c.days.map(function(d){return '<button data-d="'+d+'" class="'+(cb.d==d?'on':'')+'">'+dur(d)+'</button>'}).join('')+'</div>'+
    (users.length>1?'<span class="lbl">تعداد کاربر (دستگاه هم‌زمان)</span><div class="chips2" id="uu">'+users.map(function(n){return '<button data-u="'+n+'" class="'+(cb.u==n?'on':'')+'">'+fa(n)+' کاربره</button>'}).join('')+'</div>':'')+
    '<div class="total"><div class="p"><small>قیمت</small><strong id="tp">'+toman(price(c.rules,cb.g,cb.d,cb.u))+'</strong></div><button class="b go" id="cbuy">ادامه و پرداخت</button></div></div>'}
- if(sh.plans.length){h+='<h2>پلن‌ها</h2>';var cats=[];sh.plans.forEach(function(p){if(cats.indexOf(p.category)<0)cats.push(p.category)});
+ if(plans.length){h+='<h2>پلن‌ها</h2>';var cats=[];plans.forEach(function(p){if(cats.indexOf(p.category)<0)cats.push(p.category)});
   cats.forEach(function(k){if(cats.length>1)h+='<div class="cat">'+esc(k||'سایر پلن‌ها')+'</div>';
-   sh.plans.filter(function(p){return p.category==k}).forEach(function(p){var st=p.style&&p.style!='none'?p.style:(p.style=='none'?'':(p.conns>=2?'success':'primary'));
+   plans.filter(function(p){return p.category==k}).forEach(function(p){var st=p.style&&p.style!='none'?p.style:(p.style=='none'?'':(p.conns>=2?'success':'primary'));
     h+='<div class="plan '+st+'"><div class="nm"><b>'+esc(p.name)+'</b><small>'+(p.gb>0?fa(p.gb)+' گیگ':'نامحدود')+'، '+dur(p.days)+'، '+fa(p.conns)+' کاربره</small></div><span class="pr">'+toman(p.toman)+'</span><button class="b" data-pid="'+p.id+'">خرید</button></div>'})})}
  if(!A.list.length)h+=ordersHtml();
- if(!c.on&&!sh.plans.length)h+='<div class="empty"><b>فعلاً پلنی برای فروش نیست</b><p class="muted">کمی بعد دوباره سر بزنید یا به پشتیبانی پیام بدید.</p></div>';
- document.getElementById('app').innerHTML=h;wireTabs();wireBuy()}
+ if(!(c.on&&A.svc=='vip')&&!plans.length)h+='<div class="empty"><b>فعلاً پلنی برای فروش نیست</b><p class="muted">کمی بعد دوباره سر بزنید یا به پشتیبانی پیام بدید.</p></div>';
+ document.getElementById('app').innerHTML=h;wireBuy()}
 
 function wireBuy(){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))},c=A.shop.custom,cb=A.cb;
  var nr=$('#nr');if(nr)nr.onclick=function(){A.renew=0;drawBuy()};
+ var bk=$('#bk');if(bk)bk.onclick=function(){A.view='acc';A.renew=0;render();window.scrollTo(0,0)};
+ all('[data-svc]').forEach(function(b){b.onclick=function(){A.svc=b.dataset.svc;drawBuy()}});
  function upd(){if(!cb)return;var g=$('#gv'),r=$('#gr'),p=$('#tp');if(g)g.textContent=fa(cb.g);if(r&&+r.value!=cb.g)r.value=cb.g;if(p)p.textContent=toman(price(c.rules,cb.g,cb.d,cb.u))}
  var step=function(k){var s=cb.g<50?5:cb.g<100?10:25;cb.g=Math.min(c.max_gb,Math.max(c.min_gb,cb.g+k*s));upd()};
  if($('#gm')){$('#gm').onclick=function(){step(-1)};$('#gp').onclick=function(){step(1)};$('#gr').oninput=function(){cb.g=+this.value;upd()}}
@@ -214,68 +253,86 @@ function wireBuy(){var $=function(s){return document.querySelector(s)},all=funct
  var cbuy=$('#cbuy');if(cbuy)cbuy.onclick=function(){go('gb='+cb.g+'&days='+cb.d+'&users='+cb.u,cbuy)};
  all('[data-pid]').forEach(function(b){b.onclick=function(){go('pid='+b.dataset.pid,b)}})}
 
-function draw(){var u=A.list[A.cur];if(!u)return;
- var st=ST[u.status]||ST.Active,lim=u.limit_gb>0,left=lim?Math.max(0,u.limit_gb-u.used_gb):0,pc=lim?Math.min(100,u.used_gb/u.limit_gb*100):0;
- var routes=[];u.servers.forEach(function(s){var r=route(s);if(routes.indexOf(r)<0)routes.push(r)});
- var h=tabs();
+var CN={TR:'ترکیه',DE:'آلمان',NL:'هلند',SE:'سوئد',GB:'انگلیس',FI:'فنلاند',FR:'فرانسه',US:'آمریکا',CA:'کانادا',AE:'امارات',IR:'ایران',AM:'ارمنستان',RU:'روسیه',PL:'لهستان',AT:'اتریش',CH:'سوئیس',IT:'ایتالیا',ES:'اسپانیا',RO:'رومانی',BG:'بلغارستان',LV:'لتونی',LT:'لیتوانی',EE:'استونی',NO:'نروژ',DK:'دانمارک',CZ:'چک',HU:'مجارستان',GR:'یونان',CY:'قبرس',GE:'گرجستان',AZ:'آذربایجان',KZ:'قزاقستان',JP:'ژاپن',SG:'سنگاپور',HK:'هنگ‌کنگ',IN:'هند'};
+var PRN={wireguard:'WireGuard',amneziawg:'AmneziaWG',hysteria2:'Hysteria2',kankimix:'KANKI MIX',microtun:'microtun',xray:'Xray',vless:'Xray'};
+function copyText(t,ok,fallback){var done=function(){buzz('success');toast(ok)};if(navigator.clipboard)navigator.clipboard.writeText(t).then(done,function(){fallback?fallback():prompt(ok,t)});else fallback?fallback():prompt(ok,t)}
+
+function draw(){var u=A.list[A.cur];if(!u)return;var v2=u.service=='v2ray';
+ var h='';
  if(A.list.length>1)h+='<div class="accs">'+A.list.map(function(x,i){return '<button class="'+(i==A.cur?'on':'')+'" data-acc="'+i+'"><span class="ltr">'+esc(x.name)+'</span></button>'}).join('')+'</div>';
- h+='<section class="pass" aria-label="حساب">'+
+ h+=tabs();
+ if(A.tab=='srv')h+=srvTab(u);else if(A.tab=='app')h+=appTab(u,v2);else h+=subTab(u,v2);
+ document.getElementById('app').innerHTML=h;wireTabs();wire(u)}
+
+// tab 1: the account and connecting at once
+function subTab(u,v2){var st=ST[u.status]||ST.Active,lim=u.limit_gb>0,left=lim?Math.max(0,u.limit_gb-u.used_gb):0,pc=lim?Math.min(100,u.used_gb/u.limit_gb*100):0;
+ var routes=[];u.servers.forEach(function(s){var r=route(s);if(routes.indexOf(r)<0)routes.push(r)});
+ var h='<section class="pass" aria-label="حساب">'+
   '<div class="top"><div class="who"><b class="ltr">'+esc(u.name)+'</b><span class="st"><i style="background:'+st[1]+'"></i>'+st[0]+'</span></div>'+
+  '<span class="svc">'+SV[v2?'v2ray':'vip'][0]+' '+SV[v2?'v2ray':'vip'][1]+'</span>'+
   '<div class="big"><div><small>حجم باقی‌مانده</small><strong>'+(lim?gb(left)+' <em>گیگ</em>':'نامحدود')+'</strong><em>'+gb(u.used_gb)+(lim?' از '+gb(u.limit_gb):'')+' گیگ مصرف</em></div>'+
   '<div><small>زمان باقی‌مانده</small><strong>'+(u.days_left<0?'نامحدود':fa(u.days_left)+' <em>روز</em>')+'</strong><em>'+fa(u.connections||'∞')+' دستگاه هم‌زمان</em></div></div>'+
   (lim?'<div class="bar"><span style="width:'+pc.toFixed(1)+'%"></span></div>':'')+'</div>'+
   '<div class="tear"></div>'+
-  '<div class="stub"><div class="routes">'+(routes.length?routes.map(function(r){return '<span class="ltr">'+r+'</span>'}).join(''):'<span>—</span>')+'</div>'+
-  '<button class="copy" id="cp">کپی لینک حساب</button></div></section>'+
-  (A.shop&&A.shop.sales&&(A.shop.custom.on||A.shop.plans.length)?'<div class="acts one"><button class="b go" id="rn" style="width:100%">تمدید یا افزایش حجم همین حساب</button></div>':'');
+  '<div class="stub"><div class="routes">'+(routes.length?routes.map(function(r){return '<span class="ltr">'+r+'</span>'}).join(''):'<span>—</span>')+'</div></div></section>';
+ h+='<div class="cta"><button class="b main" id="cp">کپی لینک اتصال خودکار (Sub Link)</button>'+(u.links?'<button class="b" id="lk_chat">ارسال لینک‌ها به چت</button>':'')+'</div>';
+ h+='<p class="lead" style="margin:8px 2px 0">'+(v2?'این لینک رو توی v2rayNG، Streisand یا V2Box به‌عنوان اشتراک اضافه کنید؛ راهنما توی تب «برنامه و راهنما» است.':'برای برنامه‌های دیگه (v2rayNG، Hiddify…). با برنامه‌ی کانکی فقط کد ورود لازمه.')+'</p>';
+ if(!v2)h+='<div class="code"><div class="nm"><small>کد ورود برنامه‌ی کانکی</small><b class="ltr">'+esc(u.code)+'</b></div><button class="b" id="cc">کپی کد</button></div>';
+ if(sales())h+='<div class="acts one"><button class="b go" id="rn" style="width:100%">تمدید یا افزایش حجم همین حساب</button></div>';
+ return h+ordersHtml()}
 
- if(u.wg||u.awg){
-  h+='<h2>بکاپ AmneziaVPN</h2><p class="lead">همه‌ی سرورهای WireGuard و AmneziaWG در یک فایل؛ اسم هر سرور مسیرش رو با پرچم نشون می‌ده.</p>'+
-   '<div class="card"><div class="seg" role="tablist">'+['i','a','w'].map(function(p){return '<button role="tab" aria-selected="'+(A.plat==p)+'" class="'+(A.plat==p?'on':'')+'" data-p="'+p+'">'+PN[p]+'</button>'}).join('')+'</div>'+
-   '<div class="acts'+(canDownload()?'':' one')+'">'+(canDownload()?'<button class="b main" id="amz_dl">دانلود فایل</button>':'')+'<button class="b'+(canDownload()?'':' main')+'" id="amz_chat">بفرست توی چت</button></div>'+
-   '<ol class="steps"><li><span>برنامه‌ی AmneziaVPN رو نصب کنید.</span></li><li><span>توی برنامه: تنظیمات ← پشتیبان‌گیری ← بازیابی (<bdi class="ltr">Restore from backup</bdi>).</span></li><li><span>همین فایل رو انتخاب کنید؛ همه‌ی سرورها یک‌جا اضافه می‌شن.</span></li></ol>'+
-   '<p class="lead" style="margin:8px 2px 0">بازیابی، سرورهای قبلی خود برنامه رو پاک می‌کنه.</p></div>';
- }
- if(u.links){var nl=u.links.trim().split('\n').length-1,L=function(x){return '<bdi class="ltr">'+x+'</bdi>'};
-  var LS={i:[['V2Box','App Store'],['تب '+L('Configs')+' ← دکمه‌ی ➕ ← '+L('Import v2ray uri from clipboard')],['➕ ← '+L('Add subscription')+' و لینک خط اول رو بذارید'],['یه کانفیگ رو انتخاب کنید و دکمه‌ی اتصال رو بزنید.']],
-   a:[['v2rayNG','گوگل‌پلی'],['دکمه‌ی ➕ بالای صفحه ← '+L('Import config from Clipboard')],['منوی ☰ ← '+L('Subscription group setting')+' ← ➕، لینک خط اول رو توی '+L('URL')+' بذارید و ذخیره کنید؛ بعد منوی ⋮ ← '+L('Update subscription')],['یه کانفیگ رو انتخاب کنید و دکمه‌ی ▶ پایین صفحه رو بزنید.']],
-   w:[['v2rayN','GitHub'],['منوی '+L('Servers')+' ← '+L('Import bulk URL from clipboard')+' (یا '+L('Ctrl+V')+')'],['منوی '+L('Subscription group')+' ← '+L('Subscription group settings')+' ← '+L('Add')+'، لینک خط اول رو بذارید؛ بعد '+L('Update subscription')],['روی یه سرور دابل‌کلیک کنید و '+L('System proxy')+' رو روی '+L('Set system proxy')+' بذارید.']]}[A.plat]||[];
-  h+='<h2>همه‌ی لینک‌ها</h2><p class="lead">خط اول لینک اشتراکه، بعد همه‌ی کانفیگ‌های Xray و Hysteria2 ('+fa(nl)+' کانفیگ).</p>'+
-   '<div class="card"><div class="acts"><button class="b main" id="lk_cp">کپی همه</button><button class="b" id="lk_chat">بفرست توی چت</button></div>'+
-   '<div class="seg" role="tablist" style="margin-top:12px">'+['i','a','w'].map(function(p){return '<button role="tab" aria-selected="'+(A.plat==p)+'" class="'+(A.plat==p?'on':'')+'" data-p="'+p+'">'+PN[p]+'</button>'}).join('')+'</div>'+
-   (LS.length?'<ol class="steps"><li><span>برنامه‌ی '+L(LS[0][0])+' رو از '+LS[0][1]+' نصب کنید.</span></li><li><span>اینجا «کپی همه» رو بزنید.</span></li>'+
-    '<li><span>توی برنامه: '+LS[1][0]+'. همه‌ی کانفیگ‌ها یک‌جا اضافه می‌شن.</span></li>'+
-    '<li><span>برای به‌روز شدن خودکار (وقتی سرورها عوض می‌شن): '+LS[2][0]+'.</span></li><li><span>'+LS[3][0]+'</span></li></ol>':'')+'</div>'}
+// tab 2: the servers, one block per country
+function srvTab(u){if(!u.servers.length)return '<div class="empty"><b>هنوز سروری برای این حساب نیست</b><p class="muted">چند دقیقه بعد دوباره باز کنید.</p></div>';
+ var by={},ord=[];u.servers.forEach(function(s){var k=(s.cc||'').toUpperCase()||'?';if(!by[k]){by[k]=[];ord.push(k)}by[k].push(s)});
+ return '<p class="lead">کشورهایی که این حساب بهشون وصل می‌شه. «از راه ایران» یعنی از تانل داخل ایران، برای وقتی که مستقیم بسته است.</p>'+
+  ord.map(function(k){var list=by[k];return '<div class="ctry"><div class="h"><span class="f">'+(flag(k)||'🌐')+'</span><b>'+esc(CN[k]||k)+'</b><small>'+fa(list.length)+' مسیر</small></div>'+
+   list.map(function(s){return '<div class="way"><span>'+(s.iran?'از راه ایران':'مستقیم')+'</span><div class="tags">'+s.protocols.map(function(p){return '<span class="ltr">'+esc(PRN[p]||p)+'</span>'}).join('')+'</div></div>'}).join('')+'</div>'}).join('')}
+
+// tab 3: which app on which system, with short steps
+function appTab(u,v2){var L=function(x){return '<bdi class="ltr">'+x+'</bdi>'},p=A.plat;
+ var h='<div class="seg" role="tablist">'+['a','i','w'].map(function(k){return '<button role="tab" aria-selected="'+(p==k)+'" class="'+(p==k?'on':'')+'" data-p="'+k+'">'+PN[k]+'</button>'}).join('')+'</div>';
+ var V={i:['V2Box','App Store','تب '+L('Configs')+' ← ➕ ← '+L('Add subscription')+'، لینک رو بذارید و ذخیره کنید.','یه کانفیگ رو انتخاب کنید و دکمه‌ی اتصال رو بزنید.'],
+  a:['v2rayNG','گوگل‌پلی','منوی ☰ ← '+L('Subscription group setting')+' ← ➕، لینک رو توی '+L('URL')+' بذارید و ذخیره کنید؛ بعد منوی ⋮ ← '+L('Update subscription')+'.','یه کانفیگ رو انتخاب کنید و دکمه‌ی ▶ پایین صفحه رو بزنید.'],
+  w:['v2rayN یا Nekoray','GitHub','منوی '+L('Subscription group')+' ← '+L('Add')+'، لینک رو بذارید؛ بعد '+L('Update subscription')+'.','روی یه سرور دابل‌کلیک کنید و '+L('System proxy')+' رو روشن کنید.']}[p];
+ function v2card(rec){return '<div class="appc"><div class="t"><b>'+L(V[0])+'</b>'+(rec?'<span class="rec">پیشنهادی</span>':'')+'</div>'+
+  '<ol class="steps"><li><span>برنامه‌ی '+L(V[0])+' رو از '+V[1]+' نصب کنید.</span></li><li><span>اینجا لینک اشتراک رو کپی کنید.</span></li><li><span>'+V[2]+'</span></li><li><span>'+V[3]+'</span></li></ol>'+
+  '<div class="acts one"><button class="b main" data-cpv="1">کپی لینک اشتراک</button></div></div>'}
+ if(v2)return h+v2card(true);
+ // VIP: the Kanki app first (Android, Windows), AmneziaVPN, then any v2ray app
+ if(p!='i'){var dl=p=='a'&&A.androidApp?'<button class="b main" id="app_dl">دریافت فایل نصب توی چت</button>':(A.appLink?'<a class="b main" style="display:grid;place-items:center;text-decoration:none" href="'+esc(A.appLink)+'" target="_blank" rel="noopener">صفحه‌ی دانلود برنامه</a>':'<p class="lead" style="margin:0">لینک دانلود رو از پشتیبانی بگیرید'+(A.support?': '+L(esc(A.support)):'')+'.</p>');
+  h+='<div class="appc"><div class="t"><b>برنامه‌ی کانکی</b><span class="rec">پیشنهادی</span></div>'+
+   '<ol class="steps"><li><span>برنامه رو نصب کنید.</span></li><li><span>با کد ورود وارد بشید: '+L(esc(u.code))+'</span></li><li><span>حالت (هوشمند، گیمینگ یا ضد فیلتر) رو انتخاب کنید و دکمه‌ی اتصال رو بزنید.</span></li></ol>'+
+   '<div class="acts"><div style="display:grid">'+dl+'</div><button class="b" id="cc">کپی کد ورود</button></div></div>'}
+ if(u.wg||u.awg){h+='<div class="appc"><div class="t"><b>'+L('AmneziaVPN')+'</b>'+(p=='i'?'<span class="rec">پیشنهادی</span>':'')+'</div><p class="lead" style="margin:4px 0 0">همه‌ی سرورهای WireGuard و AmneziaWG در یک فایل بکاپ.</p>'+
+  '<ol class="steps"><li><span>برنامه‌ی AmneziaVPN رو نصب کنید.</span></li><li><span>توی برنامه: تنظیمات ← پشتیبان‌گیری ← بازیابی ('+L('Restore from backup')+').</span></li><li><span>همین فایل رو انتخاب کنید؛ همه‌ی سرورها یک‌جا اضافه می‌شن.</span></li></ol>'+
+  '<div class="acts'+(canDownload()?'':' one')+'">'+(canDownload()?'<button class="b main" id="amz_dl">دانلود فایل بکاپ</button>':'')+'<button class="b'+(canDownload()?'':' main')+'" id="amz_chat">بفرست توی چت</button></div></div>'}
+ if(u.links)h+='<details class="more"'+(p=='i'&&!(u.wg||u.awg)?' open':'')+'><summary>یا با '+L(V[0])+' و برنامه‌های V2Ray</summary>'+v2card(false)+'</details>';
  var cfg=[['awg','a','AmneziaWG','فایل کانفیگ هر سرور'],['wg','w','WireGuard','فایل کانفیگ هر سرور'],['hy2','h','Hysteria2','لینک هر سرور']].filter(function(c){return u[c[0]]});
- if(cfg.length){h+='<h2>کانفیگ‌ها</h2><p class="lead">ربات کانفیگ‌ها رو توی همین چت براتون می‌فرسته.</p><div class="card">'+
-  cfg.map(function(c){return '<div class="row"><div class="nm"><b>'+c[2]+'</b><small>'+c[3]+'</small></div><button class="b" data-cfg="'+c[1]+'">ارسال</button></div>'}).join('')+'</div>'}
- if(u.servers.length){h+='<h2>سرورها</h2><div class="card">'+u.servers.map(function(s){return '<div class="row"><span class="fl ltr">'+route(s)+'</span><div class="nm"><b class="ltr sn">'+esc(s.name)+'</b><small>'+(s.iran?'از راه ایران':'مستقیم')+'</small>'+
-   '<div class="tags">'+s.protocols.map(function(p){return '<span class="ltr">'+esc({wireguard:'WireGuard',amneziawg:'AmneziaWG',hysteria2:'Hysteria2',kankimix:'KANKI MIX'}[p]||p)+'</span>'}).join('')+'</div></div></div>'}).join('')+'</div>'}
- h+=ordersHtml();
- document.getElementById('app').innerHTML=h;
- wireTabs();wire(u)}
+ if(cfg.length)h+='<details class="more"><summary>کانفیگ دستی هر پروتکل</summary><div class="card">'+cfg.map(function(c){return '<div class="row"><div class="nm"><b>'+c[2]+'</b><small>'+c[3]+'</small></div><button class="b" data-cfg="'+c[1]+'">ارسال توی چت</button></div>'}).join('')+'</div></details>';
+ return h}
 
 function canDownload(){var w=tg();return !!(w&&w.downloadFile&&w.isVersionAtLeast&&w.isVersionAtLeast('8.0'))}
 
 function wire(u){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
+ var sub=u.service=='v2ray'?u.v2link:u.link;
  all('[data-acc]').forEach(function(b){b.onclick=function(){A.cur=+b.dataset.acc;draw()}});
- var rn=$('#rn');if(rn)rn.onclick=function(){A.renew=u.id;A.view='buy';drawBuy()};
+ var rn=$('#rn');if(rn)rn.onclick=function(){A.renew=u.id;A.svc='';A.view='buy';drawBuy();window.scrollTo(0,0)};
  all('[data-p]').forEach(function(b){b.onclick=function(){A.plat=b.dataset.p;draw()}});
- $('#cp').onclick=function(){var done=function(){buzz('success');toast('لینک حساب کپی شد')};
-  if(navigator.clipboard)navigator.clipboard.writeText(u.link).then(done,function(){prompt('لینک حساب',u.link)});else prompt('لینک حساب',u.link)};
+ var cp=$('#cp');if(cp)cp.onclick=function(){copyText(sub,'لینک اتصال کپی شد')};
+ all('[data-cpv]').forEach(function(b){b.onclick=function(){copyText(sub,'لینک اشتراک کپی شد')}});
+ all('#cc').forEach(function(b){b.onclick=function(){copyText(u.code,'کد ورود کپی شد')}});
  function send(what,b){b.disabled=true;api('/tg/api/send?uid='+u.id+'&what='+what).then(function(){buzz('success');toast('توی چت ربات فرستاده شد')}).catch(function(e){buzz('error');toast(e.message=='no WireGuard or AmneziaWG config'?'کانفیگ WireGuard یا AmneziaWG فعال نیست':e.message=='not delivered'?NOSEND:'نشد، دوباره امتحان کنید')}).then(function(){b.disabled=false})}
  var c=$('#amz_chat');if(c)c.onclick=function(){send('amz:'+A.plat,c)};
  var d=$('#amz_dl');if(d)d.onclick=function(){var w=tg();
   w.downloadFile({url:location.origin+'/tg/api/file?uid='+u.id+'&p='+A.plat+'&init='+encodeURIComponent(initData()),file_name:u.name.replace(/[^A-Za-z0-9_-]/g,'')+'.backup'})};
- var lc=$('#lk_cp');if(lc)lc.onclick=function(){var done=function(){buzz('success');toast('همه‌ی لینک‌ها کپی شد')};
-  if(navigator.clipboard)navigator.clipboard.writeText(u.links).then(done,function(){send('cfg:l',lc)});else send('cfg:l',lc)};
+ var ad=$('#app_dl');if(ad)ad.onclick=function(){send('app:a',ad)};
  var lh=$('#lk_chat');if(lh)lh.onclick=function(){send('cfg:l',lh)};
  all('[data-cfg]').forEach(function(b){b.onclick=function(){send('cfg:'+b.dataset.cfg,b)}})}
 
 function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}}
  var p=(w&&w.platform)||'';A.plat=/ios|macos/.test(p)?'i':/tdesktop|windows|weba|webk/.test(p)?'w':'a';
  if(!initData())return empty('K','این صفحه رو از ربات باز کنید','مینی‌اپ کانکی فقط از داخل ربات تلگرام باز می‌شه.');
- Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
+ Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.support=r[0].support||'';A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
 // wait a moment for Telegram's script, then go on without it
 var n=0;(function go(){if(tg()||n++>15)start();else setTimeout(go,100)})();
 })();

@@ -134,6 +134,9 @@ fn account_json(app: &App, u: &User) -> Value {
         "used_gb": (u.used_gb() * 100.0).round() / 100.0, "limit_gb": u.limit_gb,
         "expires_ts": u.expires_at, "days_left": left, "connections": u.max_conn,
         "link": format!("{}/sub/{}", crate::api::sub_origin(app), u.sub_code()),
+        // "v2ray": only the subscription for v2ray apps (the page then leaves out the AmneziaWG / WireGuard parts)
+        "service": u.service(),
+        "v2link": crate::api::v2_sub_link(app, u),
         "code": u.sub_code(),
         "wg": protos.contains(&"wireguard"), "awg": protos.contains(&"amneziawg"), "hy2": protos.contains(&"hysteria2"),
         // the subscription link, then every Hysteria2 and Xray link (to copy into v2rayNG / Hiddify at once)
@@ -167,7 +170,9 @@ async fn me(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String
     let bot = bot_of(&app);
     let need_name = bot.as_ref().map(|b| b.needs_name(tg)).unwrap_or(false);
     let trial = bot.as_ref().map(|b| b.trial_open(tg)).unwrap_or(false);
-    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "orders": orders(&app, tg), "need_name": need_name, "trial": trial }))).into_response()
+    let apps = !crate::apps::list(&app).is_empty();
+    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "orders": orders(&app, tg), "need_name": need_name, "trial": trial,
+        "android_app": apps, "app_link": app.db.get("app_link"), "support": app.db.get("support") }))).into_response()
 }
 
 /// The config name a first purchase or trial needs (sent as `name`), saved as the bot saves it
@@ -200,7 +205,7 @@ async fn trial(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Str
     Json(json!({ "ok": true })).into_response()
 }
 
-/// GET /tg/api/send?uid=..&what=amz:i|amz:a|amz:w|cfg:w|cfg:a|cfg:h|cfg:l (l = every link with the subscription): the bot sends it to the customer's chat
+/// GET /tg/api/send?uid=..&what=amz:i|amz:a|amz:w|cfg:w|cfg:a|cfg:h|cfg:l|app:a (l = every link with the subscription, app = the Kanki app files): the bot sends it to the customer's chat
 async fn send(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
     let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
     let u = match account(&app, tg, &q) { Ok(u) => u, Err(r) => return r };
@@ -217,6 +222,12 @@ async fn send(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
         }
         Some(("cfg", c)) if ["w", "a", "h", "l"].contains(&c) => {
             if !bot.send_configs(tg, "", &u, c).await {
+                return undelivered();
+            }
+        }
+        // the Kanki app's install files, as the bot's "download the app" message
+        Some(("app", _)) => {
+            if !bot.send_app_menu(tg).await {
                 return undelivered();
             }
         }
@@ -250,11 +261,11 @@ async fn shop(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
         return r;
     }
     let plans: Vec<Value> = app.db.with(|c| {
-        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(conns,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,'') FROM plans WHERE active=1 ORDER BY days, conns, toman").unwrap();
+        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(conns,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,''),COALESCE(service,'vip') FROM plans WHERE active=1 ORDER BY days, conns, toman").unwrap();
         let v: Vec<Value> = s.query_map([], |r| Ok(json!({
             "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "days": r.get::<_, i64>(2)?, "gb": r.get::<_, f64>(3)?,
             "toman": r.get::<_, i64>(4)?, "conns": r.get::<_, i64>(5)?, "countries": r.get::<_, i64>(6)?, "category": r.get::<_, String>(7)?,
-            "style": r.get::<_, String>(8)?,
+            "style": r.get::<_, String>(8)?, "service": r.get::<_, String>(9)?,
         }))).unwrap().filter_map(|x| x.ok()).collect();
         v
     });
