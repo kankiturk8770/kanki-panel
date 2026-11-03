@@ -23,11 +23,26 @@ function kuTag(text,c){return '<span class="ku-tag'+(c?' '+c:'')+'">'+text+'</sp
 function kuMenu(title,sub,items){var safe=items.filter(function(x){return x[2]!='danger'}),bad=items.filter(function(x){return x[2]=='danger'});
  var b=function(x){return '<button type="button" class="ku-mi'+(x[2]=='danger'?' danger':'')+'" onclick="closeModal();'+x[1]+'">'+x[0]+'</button>'};
  modal(mhead(title,sub)+'<div class="ku-menu">'+safe.map(b).join('')+(bad.length?'<div class="ku-msep"></div>'+bad.map(b).join(''):'')+'</div>')}
-// the Tunnel tab of a core: one row per server with the Iran address its second config goes through;
-// a tap opens the address picker of that core on that server (coreTun)
-function coreTunRows(core,g,list){if(!list.length)return '<p class="muted ku-empty">'+t('No server yet')+'</p>';
- return list.map(function(s){var tn=s.tunnel||{},own=(tn.cores||{})[core]||'',srv=tn.on?(tn.host||tn.uses||''):'',use=own||srv,x=(tn.ports||[]).filter(function(z){return z.core==core})[0];
-  var head='<span class="dot '+(use?'g':'')+'"></span>'+flagOf(s.cc)+'<b>'+esc(s.name)+'</b><span class="sp"></span>'+
-   (use?'<span class="kxr-st g ltr">'+esc(use)+(x?':'+x.via:'')+'</span>'+(own?'':'<small>'+t('the tunnel domain of the server')+'</small>'):'<span class="kxr-st">'+t('No second config')+'</span>');
-  return accRow(g,s.key,head,function(){return coreTun(core,s)})}).join('')}
+// The Tunnel tab of a core: one table of every server, its direct address and the Iran address of its second
+// config; «Edit» opens the same fields in a small window and saves them with the same call as before.
+// rows: [{cc, name, direct, tun, note, st:[class,text], edit:js}]; on a phone each row is a small card.
+function kuTunTable(rows){if(!rows.length)return '<p class="muted ku-empty">'+t('No server yet')+'</p>';
+ var th='<thead><tr><th>'+t('Server')+'</th><th>'+t('Direct address')+'</th><th>'+t('Tunnel address in Iran')+'</th><th>'+t('Status')+'</th><th></th></tr></thead>';
+ return '<div class="ku-tt-wrap"><table class="ku-tt">'+th+'<tbody>'+rows.map(function(r){
+  return '<tr><td class="nm">'+flagOf(r.cc)+'<b>'+esc(r.name)+'</b></td>'+
+   '<td data-l="'+esc(t('Direct address'))+'"><span class="ltr">'+(r.direct?esc(r.direct):'—')+'</span></td>'+
+   '<td data-l="'+esc(t('Tunnel address in Iran'))+'">'+(r.tun?'<span class="ltr">'+esc(r.tun)+'</span>':'<span class="muted">'+t('No second config')+'</span>')+(r.note?'<small class="muted">'+r.note+'</small>':'')+'</td>'+
+   '<td data-l="'+esc(t('Status'))+'"><span class="kxr-st '+(r.st[0]||'')+'">'+esc(r.st[1])+'</span></td>'+
+   '<td class="ed"><button type="button" class="b2 sm" onclick="'+r.edit+'">'+ic('edit',14)+' '+t('Edit')+'</button></td></tr>'}).join('')+'</tbody></table></div>'}
+// the address users reach a server on directly
+function srvDirect(s){var n=(s&&s.node)||{};return n.effective_endpoint||n.endpoint||(window.srvIp?srvIp(s):'')||''}
+window.CTS={};
+function coreTunRows(core,g,list){
+ return kuTunTable(list.map(function(s){var tn=s.tunnel||{},own=(tn.cores||{})[core]||'',srv=tn.on?(tn.host||tn.uses||''):'',use=own||srv,x=(tn.ports||[]).filter(function(z){return z.core==core})[0];
+  CTS[core+'|'+s.key]=s;
+  return {cc:s.cc,name:s.name,direct:srvDirect(s),tun:use?use+(x?':'+x.via:''):'',note:use&&!own?t('the tunnel domain of the server'):'',
+   st:use?['g',x?t('Through a tunnel'):t('On')]:['',t('Off')],edit:"coreTunEdit('"+core+"','"+esc(s.key)+"','"+g+"')"}}))}
+// the old fields of one server's second config, in a window
+window.coreTunEdit=function(core,key,g){var s=CTS[core+'|'+key];if(!s)return;window.CTG=g;
+ modal(mhead(t('Second config through the tunnel'),s.name)+coreTun(core,s))}
 
