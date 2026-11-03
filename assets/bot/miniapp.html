@@ -3,16 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>حساب کانکی</title>
+<title>⚡ Kanki VPN</title>
 <script src="https://telegram.org/js/telegram-web-app.js" async></script>
 <style>
 @font-face{font-family:Vazirmatn;src:url(/assets/vazirmatn.woff) format("woff");font-weight:100 900;font-display:swap}
 :root{
- --bg:var(--tg-theme-bg-color,#0f0d0a);--bg2:var(--tg-theme-secondary-bg-color,#1a1712);--tx:var(--tg-theme-text-color,#f3eee4);
- --hint:var(--tg-theme-hint-color,#9a9284);--link:var(--tg-theme-link-color,#e2b54e);--btn:var(--tg-theme-button-color,#d6a43c);
- --btx:var(--tg-theme-button-text-color,#1a1206);--sep:color-mix(in srgb,var(--hint) 28%,transparent);
- --gold1:#ffe9a6;--gold2:#d6a43c;--gold3:#8a5f17;--ink:#1a1206;
- --ok:#2fb36d;--warn:#d9a21b;--bad:#e0533d;
+ /* Kanki's own look, the same in every Telegram theme: AMOLED black with Kanki yellow */
+ --bg:#000;--bg2:#0e0d09;--tx:#f6f1e3;--hint:#9d977f;--link:#ffd60a;--btn:#ffd60a;--btx:#111;
+ --sep:rgba(255,214,10,.16);--gold1:#fff1a8;--gold2:#ffd60a;--gold3:#b38f00;--ink:#1a1206;
+ --ok:#2ee06f;--warn:#ffaa2b;--bad:#ff4d4d;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.6 Vazirmatn,system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
@@ -145,6 +144,34 @@ input[type=range]{width:100%;accent-color:var(--gold2);height:32px;margin:0}
 details.more{margin-top:10px}
 details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8px 2px;list-style-position:inside}
 
+/* brand bar */
+.brand{display:flex;align-items:center;gap:10px;margin:0 0 14px}
+.brand svg{width:30px;height:34px;flex:none;filter:drop-shadow(0 0 8px rgba(255,214,10,.45))}
+.brand b{font-size:18px;font-weight:900;letter-spacing:.5px;color:var(--gold2);direction:ltr}
+.brand small{margin-inline-start:auto;font-size:12px;color:var(--hint)}
+/* the shop: one tab per kind of plan, one card per plan */
+.ptabs{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px;margin:0 0 12px}
+.ptabs button{min-height:44px;padding:0 6px;border-radius:14px;border:1px solid var(--sep);background:var(--bg2);font-weight:800;font-size:13px;cursor:pointer;color:var(--hint);white-space:nowrap}
+.ptabs button.on{background:var(--gold2);border-color:var(--gold2);color:#111;box-shadow:0 0 18px rgba(255,214,10,.35)}
+.pc{position:relative;border-radius:20px;background:linear-gradient(160deg,#16140c,#0a0906);border:1px solid var(--sep);padding:14px;margin-bottom:12px;box-shadow:0 8px 24px -12px rgba(0,0,0,.9),0 0 0 1px rgba(255,255,255,.02) inset}
+.pc.feat{border:1.5px solid var(--gold2);box-shadow:0 0 0 1px rgba(255,214,10,.25),0 10px 30px -10px rgba(255,214,10,.35)}
+.pc .rib{position:absolute;top:-10px;inset-inline-start:14px;font-size:12px;font-weight:900;padding:3px 10px;border-radius:10px;background:var(--bg2);border:1px solid var(--gold2);color:var(--gold2)}
+.pc.feat .rib{background:var(--gold2);color:#111;animation:blink 1.6s ease-in-out infinite}
+@keyframes blink{50%{box-shadow:0 0 16px rgba(255,214,10,.8);transform:scale(1.04)}}
+.pc .pt{display:flex;align-items:center;gap:12px}
+.pc .em{width:48px;height:48px;flex:none;border-radius:14px;display:grid;place-items:center;font-size:26px;background:rgba(255,214,10,.08);border:1px solid var(--sep)}
+.pc .pt b{display:block;font-size:16px;font-weight:900}
+.pc .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.pc .meta span{font-size:12px;font-weight:700;padding:2px 8px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid var(--sep);color:#e8e2cc}
+.pc .pp{display:flex;align-items:center;gap:12px;margin-top:12px;padding-top:12px;border-top:1px dashed var(--sep)}
+.pc .pr2{flex:1;min-width:0}
+.pc .pr2 s{display:block;font-size:12px;color:var(--hint)}
+.pc .pr2 strong{font-size:20px;font-weight:900;color:var(--gold2)}
+.pc .pr2 strong small{font-size:12px;font-weight:700;color:var(--hint)}
+.pc .off{display:inline-block;margin-inline-start:6px;font-size:11px;font-weight:900;padding:1px 7px;border-radius:8px;background:rgba(46,224,111,.14);color:var(--ok);vertical-align:3px}
+.pc .buy{min-width:110px;min-height:46px;border:0;border-radius:14px;background:var(--gold2);color:#111;font-weight:900;cursor:pointer}
+.pc.feat .buy{box-shadow:0 0 18px rgba(255,214,10,.45)}
+
 /* states */
 .empty{text-align:center;padding:48px 8px}
 .empty .mk{width:64px;height:64px;margin:0 auto 12px;border-radius:18px;display:grid;place-items:center;font-size:30px;font-weight:900;color:var(--ink);background:linear-gradient(160deg,var(--gold1),var(--gold2))}
@@ -153,17 +180,18 @@ details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8p
 @keyframes p{50%{opacity:.55}}
 #toast{position:fixed;inset-inline:16px;bottom:calc(16px + env(safe-area-inset-bottom));padding:12px 14px;border-radius:12px;background:var(--tx);color:var(--bg);font-weight:700;text-align:center;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}
 #toast.on{opacity:1;transform:none}
-@media (prefers-reduced-motion:reduce){.skel{animation:none}#toast{transition:none}}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}#toast{transition:none}.pc.feat .rib{animation:none}}
 @media (min-width:620px){body{max-width:560px;margin:0 auto}}
 </style>
 </head>
 <body>
+<header class="brand"><svg viewBox="0 0 24 26" aria-hidden="true"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF4B8"/><stop offset=".5" stop-color="#FFD60A"/><stop offset="1" stop-color="#B38F00"/></linearGradient></defs><path d="M12 1 22 4.5v8c0 6-4.4 10.4-10 12.5C6.4 22.9 2 18.5 2 12.5v-8z" fill="url(#sg)"/><path d="M12 3.6 19.6 6.3v6.2c0 4.7-3.3 8.2-7.6 10C7.7 20.7 4.4 17.2 4.4 12.5V6.3z" fill="#0d0b05"/><path d="M8.6 7.5h2.4v4l3.4-4h3l-4 4.5 4.2 5.5h-3l-2.8-3.8-.8.9v2.9H8.6z" fill="url(#sg)"/></svg><b>⚡ Kanki VPN</b><small>امن · سریع · کم‌پینگ</small></header>
 <div id="app"><div class="skel"></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 (function(){
 var Q=new URLSearchParams(location.search);
-var A={list:[],cur:0,plat:'i',view:Q.get('buy')?'buy':'acc',tab:'sub',svc:'',shop:null,renew:+(Q.get('renew')||0),cb:null};
+var A={list:[],cur:0,plat:'i',view:Q.get('buy')?'buy':'acc',tab:['sub','srv','app'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sub',cat:'',svc:'',shop:null,renew:+(Q.get('renew')||0),cb:null};
 function tg(){return window.Telegram&&Telegram.WebApp}
 // the signed init data: from Telegram's script, else from the page address (the script may not load in Iran)
 function initData(){var w=tg();if(w&&w.initData)return w.initData;
@@ -219,8 +247,13 @@ function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){retu
    '<p class="lead"><b>'+SV[A.svc][1]+'</b>: '+SV[A.svc][2]+'</p>'}
  else A.svc=svcs[0]||'vip';
  var plans=sh.plans.filter(function(p){return (p.service||'vip')==A.svc});
- // the custom purchase makes a full (VIP) account
- if(c.on&&A.svc=='vip'){var cb=A.cb||(A.cb={g:Math.min(c.max_gb,Math.max(c.min_gb,30)),d:c.days[0],u:1});
+ // one tab per kind of plan (its category), and the custom purchase as the last tab (it makes a full VIP account)
+ var cats=[];plans.forEach(function(p){if(cats.indexOf(p.category)<0)cats.push(p.category)});
+ var custom=c.on&&A.svc=='vip';if(custom)cats.push('*custom*');
+ if(cats.indexOf(A.cat)<0)A.cat=cats[0]||'';
+ var CI=function(k){return k=='*custom*'?'🧮':/چند/.test(k)?'👥':/بلند|ماهه/.test(k)?'⏳':/تک/.test(k)?'👤':'📦'};
+ if(cats.length>1)h+='<nav class="ptabs" role="tablist">'+cats.map(function(k){return '<button role="tab" aria-selected="'+(A.cat==k)+'" data-cat="'+esc(k)+'" class="'+(A.cat==k?'on':'')+'">'+CI(k)+' '+esc(k=='*custom*'?'دلخواه':(k||'سایر'))+'</button>'}).join('')+'</nav>';
+ if(custom&&A.cat=='*custom*'){var cb=A.cb||(A.cb={g:Math.min(c.max_gb,Math.max(c.min_gb,30)),d:c.days[0],u:1});
   // renewing: never fewer users than the account has (a renewal raises it, never lowers it)
   var from=mine?Math.max(1,Math.min(c.users,mine.connections||1)):1;if(cb.u<from)cb.u=from;
   var users=[];for(var i=from;i<=c.users;i++)users.push(i);
@@ -230,18 +263,25 @@ function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){retu
    '<span class="lbl">مدت</span><div class="chips2" id="dd">'+c.days.map(function(d){return '<button data-d="'+d+'" class="'+(cb.d==d?'on':'')+'">'+dur(d)+'</button>'}).join('')+'</div>'+
    (users.length>1?'<span class="lbl">تعداد کاربر (دستگاه هم‌زمان)</span><div class="chips2" id="uu">'+users.map(function(n){return '<button data-u="'+n+'" class="'+(cb.u==n?'on':'')+'">'+fa(n)+' کاربره</button>'}).join('')+'</div>':'')+
    '<div class="total"><div class="p"><small>قیمت</small><strong id="tp">'+toman(price(c.rules,cb.g,cb.d,cb.u))+'</strong></div><button class="b go" id="cbuy">ادامه و پرداخت</button></div></div>'}
- if(plans.length){h+='<h2>پلن‌ها</h2>';var cats=[];plans.forEach(function(p){if(cats.indexOf(p.category)<0)cats.push(p.category)});
-  cats.forEach(function(k){if(cats.length>1)h+='<div class="cat">'+esc(k||'سایر پلن‌ها')+'</div>';
-   plans.filter(function(p){return p.category==k}).forEach(function(p){var st=p.style&&p.style!='none'?p.style:(p.style=='none'?'':(p.conns>=2?'success':'primary'));
-    h+='<div class="plan '+st+'"><div class="nm"><b>'+esc(p.name)+'</b><small>'+(p.gb>0?fa(p.gb)+' گیگ':'نامحدود')+'، '+dur(p.days)+'، '+fa(p.conns)+' کاربره</small></div><span class="pr">'+toman(p.toman)+'</span><button class="b" data-pid="'+p.id+'">خرید</button></div>'})})}
+ plans.filter(function(p){return p.category==A.cat}).forEach(function(p){h+=planCard(p)});
  if(!A.list.length)h+=ordersHtml();
  if(!(c.on&&A.svc=='vip')&&!plans.length)h+='<div class="empty"><b>فعلاً پلنی برای فروش نیست</b><p class="muted">کمی بعد دوباره سر بزنید یا به پشتیبانی پیام بدید.</p></div>';
  document.getElementById('app').innerHTML=h;wireBuy()}
 
+// a plan as a card: its emoji, volume / time / users, the price (with the struck higher price and the saving) and its label
+function planCard(p){var m=String(p.name).match(/^(\S+)\s+(.+)$/),em='📦',title=p.name;
+ if(m&&!/[\p{L}\p{N}]/u.test(m[1])){em=m[1];title=m[2]}
+ var feat=/🔥|پیشنهاد|محبوب/.test(p.badge||''),old=+p.old_toman||0,off=old>p.toman?Math.round((1-p.toman/old)*100):0;
+ return '<div class="pc'+(feat?' feat':'')+'">'+(p.badge?'<span class="rib">'+esc(p.badge)+'</span>':'')+
+  '<div class="pt"><span class="em" aria-hidden="true">'+esc(em)+'</span><div><b>'+esc(title)+'</b><div class="meta"><span>🔋 '+(p.gb>0?fa(p.gb)+' گیگ':'نامحدود')+'</span><span>📅 '+dur(p.days)+'</span><span>👥 '+fa(p.conns)+' کاربره</span></div></div></div>'+
+  '<div class="pp"><div class="pr2">'+(off?'<s>'+toman(old)+'</s>':'')+'<strong>'+toman(p.toman).replace(' تومان',' <small>تومان</small>')+'</strong>'+(off?'<span class="off">'+fa(off)+'٪ تخفیف</span>':'')+'</div>'+
+  '<button class="buy" data-pid="'+p.id+'">خرید</button></div></div>'}
+
 function wireBuy(){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))},c=A.shop.custom,cb=A.cb;
  var nr=$('#nr');if(nr)nr.onclick=function(){A.renew=0;drawBuy()};
  var bk=$('#bk');if(bk)bk.onclick=function(){A.view='acc';A.renew=0;render();window.scrollTo(0,0)};
- all('[data-svc]').forEach(function(b){b.onclick=function(){A.svc=b.dataset.svc;drawBuy()}});
+ all('[data-svc]').forEach(function(b){b.onclick=function(){A.svc=b.dataset.svc;A.cat='';drawBuy()}});
+ all('[data-cat]').forEach(function(b){b.onclick=function(){A.cat=b.dataset.cat;drawBuy()}});
  function upd(){if(!cb)return;var g=$('#gv'),r=$('#gr'),p=$('#tp');if(g)g.textContent=fa(cb.g);if(r&&+r.value!=cb.g)r.value=cb.g;if(p)p.textContent=toman(price(c.rules,cb.g,cb.d,cb.u))}
  var step=function(k){var s=cb.g<50?5:cb.g<100?10:25;cb.g=Math.min(c.max_gb,Math.max(c.min_gb,cb.g+k*s));upd()};
  if($('#gm')){$('#gm').onclick=function(){step(-1)};$('#gp').onclick=function(){step(1)};$('#gr').oninput=function(){cb.g=+this.value;upd()}}
@@ -329,7 +369,9 @@ function wire(u){var $=function(s){return document.querySelector(s)},all=functio
  var lh=$('#lk_chat');if(lh)lh.onclick=function(){send('cfg:l',lh)};
  all('[data-cfg]').forEach(function(b){b.onclick=function(){send('cfg:'+b.dataset.cfg,b)}})}
 
-function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}}
+function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}
+  // the same black as the page above and below it
+  try{w.setHeaderColor('#000000');w.setBackgroundColor('#000000');if(w.setBottomBarColor)w.setBottomBarColor('#000000')}catch(e){}}
  var p=(w&&w.platform)||'';A.plat=/ios|macos/.test(p)?'i':/tdesktop|windows|weba|webk/.test(p)?'w':'a';
  if(!initData())return empty('K','این صفحه رو از ربات باز کنید','مینی‌اپ کانکی فقط از داخل ربات تلگرام باز می‌شه.');
  Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.support=r[0].support||'';A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}

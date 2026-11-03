@@ -128,8 +128,8 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("txt_cats", "سلام 👋\nدسته‌بندی موردنظرتون رو از پایین انتخاب کنید 👇", "بالای دسته‌بندی پلن‌ها"),
     ("txt_plans", "سلام 👋\nپلن خودتون رو از پایین انتخاب کنید 👇", "بالای فهرست پلن‌ها"),
     ("txt_trial_ready", "🎁 <b>اکانت تست شما آماده است</b>", "بالای پیام اکانت تست"),
-    ("txt_bought", "✅ <b>اشتراک شما فعال شد</b>", "بالای پیام بعد از خرید"),
-    ("txt_renewed", "✅ <b>اشتراک شما تمدید شد</b>", "بالای پیام بعد از تمدید"),
+    ("txt_bought", "✅ <b>خرید شما با موفقیت انجام شد!</b>", "بالای پیام بعد از خرید"),
+    ("txt_renewed", "✅ <b>تمدید شما با موفقیت انجام شد!</b>", "بالای پیام بعد از تمدید"),
     ("txt_cfg", "⚙️ اگه با برنامه‌ی دیگه‌ای (WireGuard، AmneziaWG، Hiddify…) وصل می‌شید، کانفیگ مخصوصش رو از دکمه‌های زیر بگیرید. همراه هر کانفیگ نوشته شده با کدوم برنامه کار می‌کنه و چطور واردش کنید 👇", "پایین پیام اشتراک"),
     ("txt_app", "بعد از نصب، «کد ورود» سرویس را در اپ وارد کنید.", "زیر لینک دانلود اپ"),
     ("txt_guides", "🎬 آموزش موردنظرتون رو از پایین انتخاب کنید 👇", "بالای فهرست آموزش‌ها"),
@@ -274,6 +274,34 @@ struct Plan {
     custom: bool,
     /// what it sells: "vip" (every protocol and the Kanki app) or "v2ray" (only the v2ray subscription)
     service: String,
+    /// its label in the shop («🔥 پیشنهاد ویژه»), '' = none
+    badge: String,
+    /// a higher price shown struck through (0 = none)
+    old_toman: i64,
+}
+
+/// Kanki's own plans (the admin loads them with one button): (name, days, GB, users, toman, old toman, badge, category)
+const KANKI_PLANS: &[(&str, i64, f64, i64, i64, i64, &str, &str)] = &[
+    ("🥉 ۲۰ گیگ · ۱ ماهه", 30, 20.0, 1, 80000, 0, "", "تک‌کاربره"),
+    ("💎 ۵۰ گیگ · ۱ ماهه", 30, 50.0, 1, 110000, 0, "🔥 پیشنهاد ویژه", "تک‌کاربره"),
+    ("🥇 ۱۰۰ گیگ · ۱ ماهه", 30, 100.0, 1, 170000, 0, "🚀 پرمصرف", "تک‌کاربره"),
+    ("👥 ۵۰ گیگ · ۱ ماهه · ۲ کاربره", 30, 50.0, 2, 135000, 0, "", "چندکاربره"),
+    ("👨‍👩‍👧‍👦 ۱۰۰ گیگ · ۱ ماهه · ۲ کاربره", 30, 100.0, 2, 195000, 0, "", "چندکاربره"),
+    ("👑 ۱۰۰ گیگ · ۱ ماهه · ۳ کاربره", 30, 100.0, 3, 220000, 0, "", "چندکاربره"),
+    ("⏳ ۵۰ گیگ · ۲ ماهه", 60, 50.0, 1, 140000, 160000, "", "بلندمدت"),
+    ("🚀 ۱۰۰ گیگ · ۲ ماهه · ۲ کاربره", 60, 100.0, 2, 230000, 270000, "", "بلندمدت"),
+    ("🏆 ۱۰۰ گیگ · ۳ ماهه", 90, 100.0, 1, 260000, 330000, "", "بلندمدت"),
+];
+
+/// Hides every listed plan (kept for their orders) and adds Kanki's plans; how many were added
+fn load_kanki_plans(db: &crate::db::Db) -> usize {
+    let _ = db.exec("UPDATE plans SET active=0 WHERE active=1", &[]);
+    let mut n = 0;
+    for (name, days, gb, users, t, old, badge, cat) in KANKI_PLANS {
+        if db.exec("INSERT INTO plans(name,days,gb,toman,usd,conns,active,category,style,service,badge,old_toman) VALUES(?1,?2,?3,?4,0,?5,1,?6,'','vip',?7,?8)",
+            &[name, days, gb, t, users, cat, badge, old]).is_ok() { n += 1; }
+    }
+    n
 }
 
 /// The chat's menu button (it opens the mini app): for a customer with a working account, and for everyone else.
@@ -319,13 +347,14 @@ pub const STYLE_KEYS: &[(&str, &str)] = &[
 /// Every plan with whether it is on sale (active = 1; custom ones are active = 2)
 fn all_plans(db: &crate::db::Db) -> Vec<(Plan, bool)> {
     db.with(|c| {
-        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,''),COALESCE(service,'vip') FROM plans ORDER BY toman").unwrap();
+        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,''),COALESCE(service,'vip'),COALESCE(badge,''),COALESCE(old_toman,0) FROM plans ORDER BY toman").unwrap();
         let v: Vec<(Plan, bool)> = s.query_map([], |r| {
             let active: i64 = r.get(7)?;
             Ok((Plan {
                 id: r.get(0)?, name: r.get(1)?, days: r.get(2)?, gb: r.get(3)?, toman: r.get(4)?, usd: r.get(5)?, conns: r.get(6)?,
                 countries: r.get(8)?, category: r.get(9)?, style: r.get(10)?, custom: active == 2,
                 service: if r.get::<_, String>(11)? == "v2ray" { "v2ray".into() } else { "vip".into() },
+                badge: r.get(12)?, old_toman: r.get(13)?,
             }, active == 1))
         }).unwrap().filter_map(|x| x.ok()).collect();
         v
@@ -894,6 +923,29 @@ impl Bot {
             "👤 <b>{}</b>  ·  {}\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n📱 <b>بهترین راه (پیشنهاد ما): برنامه‌ی کانکی</b>\n{}{}\n<code>{}</code>\n\n🔗 لینک اشتراک (برای برنامه‌های دیگه):\n<code>{}/sub/{}</code>",
             esc(&u.username), st, left, u.used_gb(), left_text(u), u.online, u.max_conn, step1, step2, u.sub_code(), sub_origin(&self.app), u.sub_code()
         )
+    }
+
+    /// The message after a purchase, renewal or trial: short, one link to copy and three buttons (the apps, the
+    /// video tutorial, support). Everything else (configs, backups) is in the mini app and «📊 سرویس‌های من».
+    fn delivery(&self, head: &str, u: &User, plan: &str) -> (String, Value) {
+        let exp = if u.expires_at > 0 { crate::channel::fa_datetime(u.expires_at).0 } else { "نامحدود".into() };
+        let link = if u.service() == "v2ray" { crate::api::v2_sub_link(&self.app, u) } else { format!("{}/sub/{}", sub_origin(&self.app), u.sub_code()) };
+        let t = format!("{}\n\n📦 پلن: <b>{}</b>\n👤 حساب: <b>{}</b>\n⏳ انقضا: <b>{}</b>\n\n🔗 <b>لینک اتصال هوشمند شما:</b>\n<code>{}</code>\n\n💡 <i>کافیست لینک بالا را کپی کرده و وارد برنامه کنید.</i>",
+            head, esc(plan), esc(&u.username), exp, esc(&link));
+        let mut rows: Kb = vec![];
+        let mini = crate::miniapp::url(&self.app);
+        if mini.starts_with("https://") {
+            rows.push(vec![b("📱 دانلود برنامه (اندروید/آیفون/ویندوز)", &format!("webapp:miniapp:{}?tab=app", mini))]);
+        } else {
+            rows.push(vec![b("📱 دانلود برنامه (اندروید/آیفون/ویندوز)", "app")]);
+        }
+        if !self.guides().is_empty() {
+            rows.push(vec![b("آموزش ویدیویی اتصال 🎥", "guide1")]);
+        }
+        let sup = self.db().get("support").trim().to_string();
+        let sl = if let Some(id) = sup.strip_prefix('@') { Some(format!("https://t.me/{}", id)) } else if sup.starts_with("https://") { Some(sup) } else { None };
+        rows.push(vec![b("پشتیبانی 💬", &sl.map(|l| format!("url:{}", l)).unwrap_or_else(|| "support".into()))]);
+        (t, ik(rows))
     }
 
     /// What the customer gets after a purchase / trial / "my service": the account plus a hint about the config buttons.
@@ -1712,7 +1764,8 @@ impl Bot {
             let dur = if p.days > 0 && p.days % 30 == 0 { format!("{} ماهه", p.days / 30) } else { format!("{} روزه", p.days) };
             let vol = if p.gb > 0.0 { format!("{}GB", p.gb) } else { "نامحدود".to_string() };
             let data = if pattern.contains("{}") { pattern.replace("{}", &p.id.to_string()) } else { format!("{}:{}", pattern, p.id) };
-            rows.push(vec![b(&format!("📅 {} · 👤 {} · {} · {}", dur, p.conns, vol, price), &data)]);
+            let tag = p.badge.split_whitespace().next().map(|e| format!("{} ", e)).unwrap_or_default();
+            rows.push(vec![b(&format!("{}📅 {} · 👤 {} · {} · {}", tag, dur, p.conns, vol, price), &data)]);
         }
         // any volume and days, chosen in the mini app (same price rules as the plans)
         let renew: i64 = if pattern == "pl" { 0 } else { pattern.rsplit(':').next().and_then(|x| x.parse().ok()).unwrap_or(0) };
@@ -1744,7 +1797,8 @@ impl Bot {
         let txt = format!(
             "📦 <b>{}</b>\n{}\nحجم: {} · مدت: {} روز · {} کاربر{}\nقیمت: <b>{}</b>{}{}\n\nروش پرداخت را انتخاب کنید:",
             esc(&p.name), if p.service == "v2ray" { "🌐 سرویس استاندارد (V2Ray): لینک اشتراک برای v2rayNG، Streisand، V2Box" } else { "🚀 سرویس VIP: اپ کانکی، AmneziaWG، WireGuard و همه‌ی سرورها" }, if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, p.days, p.conns,
-            if p.countries > 0 { format!(" · {} کشور", p.countries) } else { String::new() }, toman(t),
+            if p.countries > 0 { format!(" · {} کشور", p.countries) } else { String::new() },
+            if p.old_toman > t && pe.percent == 0 { format!("<s>{}</s>  {}", toman(p.old_toman), toman(t)) } else { toman(t) },
             if u > 0.0 { format!("  ·  <b>{}$</b>", u) } else { String::new() },
             if pe.percent > 0 { format!("\n🎟 تخفیف {}٪ اعمال شده", pe.percent) } else { String::new() }
         );
@@ -1938,7 +1992,8 @@ impl Bot {
             Ok(u) => {
                 // a renewal whose account was gone (target 0) made a new account: it says so
                 let head = if o.3 == "renew" && o.4 > 0 { self.tx("txt_renewed") } else { self.tx("txt_bought") };
-                self.send(o.1, &format!("{}\n\n{}", head, self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b(&self.bt("home"), "home")]]))).await;
+                let (t, kb) = self.delivery(&head, &u, &p.name);
+                self.send(o.1, &t, Some(kb)).await;
                 // one use of the code for this paid order, taken only while the code is still good; the price was
                 // already paid, so the order is delivered either way and the admin is told when it was not
                 if !o.9.is_empty() {
@@ -2099,7 +2154,8 @@ impl Bot {
         let days: i64 = self.db().get("trial_days").parse().unwrap_or(1);
         match self.create_account(uid, gb, days, 1, "trial") {
             Ok(u) => {
-                if self.edit_ok(chat, mid, &format!("{}\n\n{}", self.tx("txt_trial_ready"), self.account_msg(&u)), Some(self.acct_kb(&u, vec![vec![b(&self.bt("back"), "home")]]))).await {
+                let (t, kb) = self.delivery(&self.tx("txt_trial_ready"), &u, "🎁 تست رایگان");
+                if self.edit_ok(chat, mid, &t, Some(kb)).await {
                     self.set_menu(uid).await;
                     return true;
                 }
@@ -2241,6 +2297,7 @@ impl Bot {
                     b(&plan_label(&p, a), &format!("pv:{}", p.id)),
                 ]).collect();
                 kb.push(vec![b("➕ افزودن پلن", "pa"), b("📂 دسته‌بندی‌ها", "a:cats")]);
+                kb.push(vec![b("⚡ جایگزینی با ۹ پلن کانکی", "pkp")]);
                 kb.push(vec![b("⬅️ پنل مدیریت", "adm")]);
                 { self.edit(chat, mid, "📦 <b>پلن‌ها</b>\n🟢 فعال · ⚪️ غیرفعال · 🚀 VIP · 🌐 V2Ray\nروی هر پلن بزنید تا همه‌چیزش (نام، نوع سرویس، مدت، حجم، قیمت، تعداد کاربر، کشورها، دسته) را عوض کنید، روشن/خاموش یا حذفش کنید.", Some(ik(kb))).await; true }
             }
@@ -2461,12 +2518,14 @@ impl Bot {
             return self.edit(chat, mid, "پلن پیدا نشد.", Some(ik(vec![vec![b("📦 پلن‌ها", "a:plans")]]))).await;
         };
         let txt = format!(
-            "📦 <b>{}</b>  {}\n\n🛍 نوع سرویس: <b>{}</b>\n📅 مدت: {} روز\n📊 حجم: {}\n💰 قیمت: {} · {}$\n👤 تعداد کاربر: {}\n🌍 کشورها: {}\n📂 دسته: {}",
+            "📦 <b>{}</b>  {}\n\n🛍 نوع سرویس: <b>{}</b>\n📅 مدت: {} روز\n📊 حجم: {}\n💰 قیمت: {} · {}$\n👤 تعداد کاربر: {}\n🌍 کشورها: {}\n📂 دسته: {}\n🏷 برچسب: {}\n💸 قیمت خط‌خورده: {}",
             esc(&p.name), if active { "🟢 فعال" } else { "⚪️ غیرفعال" },
             if p.service == "v2ray" { "🌐 استاندارد (V2Ray): فقط لینک اشتراک Xray" } else { "🚀 VIP: همه‌ی پروتکل‌ها و اپ کانکی" }, p.days,
             if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, toman(p.toman), p.usd, p.conns,
             if p.countries > 0 { p.countries.to_string() } else { "همه".into() },
-            if p.category.is_empty() { "بدون دسته".to_string() } else { esc(&p.category) }
+            if p.category.is_empty() { "بدون دسته".to_string() } else { esc(&p.category) },
+            if p.badge.is_empty() { "—".to_string() } else { esc(&p.badge) },
+            if p.old_toman > 0 { toman(p.old_toman) } else { "—".to_string() }
         );
         let e = |f: &str, t: &str| b(t, &format!("pe:{}:{}", id, f));
         let kb = ik(vec![
@@ -2474,6 +2533,7 @@ impl Bot {
             vec![e("gb", "✏️ حجم (گیگ)"), e("conns", "✏️ تعداد کاربر")],
             vec![e("toman", "✏️ قیمت تومان"), e("usd", "✏️ قیمت دلار")],
             vec![e("countries", "✏️ تعداد کشور"), e("category", "📂 دسته")],
+            vec![e("badge", "🏷 برچسب"), e("old_toman", "✏️ قیمت خط‌خورده")],
             vec![b(if p.service == "v2ray" { "🔁 تبدیل به 🚀 VIP" } else { "🔁 تبدیل به 🌐 V2Ray" }, &format!("psw:{}", id))],
             // a custom purchase's plan has no on/off (it is never on sale, only payable once)
             if p.custom { vec![b("🗑 حذف", &format!("pd:{}", id))] } else { vec![b(if active { "⏸ غیرفعال کن" } else { "▶️ فعال کن" }, &format!("pt:{}", id)), b("🗑 حذف", &format!("pd:{}", id))] },
@@ -2588,6 +2648,8 @@ impl Bot {
                     "usd" => "قیمت به دلار (مثلاً 2.5؛ 0 = بدون پرداخت ارزی)",
                     "countries" => "تعداد کشور (0 = همه‌ی سرورها)",
                     "category" => "اسم دسته (برای «بدون دسته» یک خط تیره - بفرستید)",
+                    "badge" => "برچسب پلن در فروشگاه (مثلاً 🔥 پیشنهاد ویژه؛ برای حذف یک خط تیره - بفرستید)",
+                    "old_toman" => "قیمت خط‌خورده به تومان (بالاتر از قیمت اصلی؛ 0 = بدون آن)",
                     _ => return,
                 };
                 let mut msg = format!("✏️ {} را بفرستید.", hint);
@@ -2597,6 +2659,15 @@ impl Bot {
                 }
                 set_wait(Wait::PlanField(id, f.to_string()));
                 self.edit(chat, mid, &msg, Some(ik(vec![vec![b("⬅️ انصراف", &format!("pv:{}", id))]]))).await;
+            }
+            "pkp" => {
+                let list: Vec<String> = KANKI_PLANS.iter().map(|p| format!("• {} · {}{}", p.0, toman(p.4), if p.6.is_empty() { String::new() } else { format!(" · {}", p.6) })).collect();
+                self.edit(chat, mid, &format!("⚡ <b>پلن‌های کانکی</b>\n\n{}\n\nهمهٔ پلن‌های فعلی <b>غیرفعال</b> می‌شوند (پاک نمی‌شوند؛ سفارش‌هایشان می‌ماند) و این ۹ پلن (VIP) اضافه می‌شوند. ادامه؟", list.join("\n")),
+                    Some(ik(vec![vec![b("✅ بله، جایگزین کن", "pkpy")], vec![b("⬅️ نه", "a:plans")]]))).await;
+            }
+            "pkpy" => {
+                let n = load_kanki_plans(db);
+                self.edit(chat, mid, &format!("✅ {} پلن کانکی اضافه شد و پلن‌های قبلی غیرفعال شدند.", n), Some(ik(vec![vec![b("📦 پلن‌ها", "a:plans")]]))).await;
             }
             "psw" => {
                 // the plan's service: vip <-> v2ray (accounts already sold keep what they have)
@@ -2771,7 +2842,11 @@ impl Bot {
                         let c = if v == "-" || v == "—" { "" } else { v };
                         db.exec("UPDATE plans SET category=?1 WHERE id=?2", &[&c, &id])
                     }
-                    "days" | "conns" | "toman" | "countries" => match v.parse::<i64>() {
+                    "badge" => {
+                        let c: String = if v == "-" || v == "—" { String::new() } else { v.chars().take(24).collect() };
+                        db.exec("UPDATE plans SET badge=?1 WHERE id=?2", &[&c, &id])
+                    }
+                    "days" | "conns" | "toman" | "countries" | "old_toman" => match v.parse::<i64>() {
                         Ok(n) if n >= 0 => db.exec(&format!("UPDATE plans SET {}=?1 WHERE id=?2", f), &[&n, &id]),
                         _ => Err("bad".into()),
                     },
@@ -3424,7 +3499,10 @@ mod flow_tests {
         assert_eq!(acc.len(), 1);
         assert_eq!((acc[0].protocols.as_str(), acc[0].service()), ("xray", "v2ray"));
         let t = last(&log, buyer);
-        assert!(t.contains("/sub/") && t.contains("/v2") && t.contains("v2rayNG") && !t.contains("برنامه‌ی کانکی"), "{}", t);
+        assert!(t.contains("خرید شما با موفقیت انجام شد") && t.contains("/v2") && t.contains("📦 پلن: <b>Std</b>"), "{}", t);
+        // the short delivery: only the apps, the tutorial (when there is one) and support; no config or backup buttons
+        let bs: Vec<String> = buttons(&log, buyer).into_iter().map(|b| b.0).collect();
+        assert!(bs.iter().any(|b| b.starts_with("📱 دانلود برنامه")) && bs.iter().any(|b| b.starts_with("پشتیبانی")) && bs.len() <= 3, "{:?}", bs);
         // a second tap on approve: already decided
         tap_id(&bot, from(ADMIN, "Admin", "admin"), &format!("ap:{}", oid), "qap2").await;
         assert_eq!(answers(&log, "qap2"), vec!["این سفارش قبلاً بررسی شده.".to_string()]);
@@ -3454,6 +3532,23 @@ mod flow_tests {
         tap(&bot, from(ADMIN, "Admin", "admin"), &format!("psw:{}", pro)).await;
         let sv: String = db.with(|c| c.query_row("SELECT service FROM plans WHERE id=?1", [pro], |r| r.get(0)).unwrap());
         assert_eq!(sv, "v2ray");
+    }
+
+    #[tokio::test]
+    async fn kanki_plans_replace_the_listed_ones() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        db.exec("INSERT INTO plans(name,days,gb,toman,usd,conns,active) VALUES('Old',30,10,50000,0,1,1)", &[]).unwrap();
+        tap(&bot, from(ADMIN, "Admin", "admin"), "pkp").await;
+        assert!(last(&log, ADMIN).contains("۹ پلن") || last(&log, ADMIN).contains("پلن‌های کانکی"));
+        tap(&bot, from(ADMIN, "Admin", "admin"), "pkpy").await;
+        let on: Vec<(String, i64, i64, String, String)> = db.with(|c| { let mut s = c.prepare("SELECT name,toman,old_toman,badge,category FROM plans WHERE active=1 ORDER BY id").unwrap();
+            let v = s.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).unwrap().filter_map(|x| x.ok()).collect(); v });
+        assert_eq!(on.len(), 9);
+        assert!(on.iter().any(|p| p.1 == 110000 && p.3 == "🔥 پیشنهاد ویژه" && p.4 == "تک‌کاربره"));
+        assert!(on.iter().any(|p| p.1 == 260000 && p.2 == 330000 && p.4 == "بلندمدت"));
+        let old: i64 = db.with(|c| c.query_row("SELECT active FROM plans WHERE name='Old'", [], |r| r.get(0)).unwrap());
+        assert_eq!(old, 0, "the old plan is hidden, not deleted");
     }
 
     /// The answers Telegram got for one button tap (callback id)
@@ -3555,7 +3650,7 @@ mod flow_tests {
         // a renewal of an account that is gone makes a new account and says so
         let o = order(&bot, buyer, plan, "renew", 0, "approved");
         bot.fulfill(o).await;
-        assert!(last(&log, buyer).contains("اشتراک شما فعال شد"), "{}", last(&log, buyer));
+        assert!(last(&log, buyer).contains("خرید شما با موفقیت انجام شد"), "{}", last(&log, buyer));
 
         // a referrer with no account yet keeps the reward for later
         let friend = 5002;
