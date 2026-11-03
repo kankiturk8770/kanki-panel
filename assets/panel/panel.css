@@ -1658,3 +1658,25 @@ body.kd .g2>.box.kd-tpl>button{min-height:40px!important}
 }
 /* small text never under 12px (the browser default for <small> is a fraction of the parent) */
 small{font-size:max(12px,.83em)}
+
+/* the Tunnel tab of a core: a table; on a phone every row is a small card (no sideways scroll) */
+.ku-tt-wrap{padding:8px 12px 12px}
+.ku-tt{width:100%;border-collapse:collapse;font-size:13px}
+.ku-tt th{font-size:12px;font-weight:600;color:var(--s);text-align:start;padding:8px;border-bottom:1px solid var(--ln);white-space:nowrap}
+.ku-tt td{padding:8px;border-bottom:1px solid var(--ln);vertical-align:middle}
+.ku-tt tr:last-child td{border-bottom:0}
+.ku-tt td.nm{white-space:nowrap}
+.ku-tt td.nm b{margin-inline-start:6px;font-weight:600}
+.ku-tt td small{display:block;font-size:12px;margin-top:2px}
+.ku-tt td.ed{text-align:end;white-space:nowrap}
+.ku-tt td.ed .b2{min-height:40px}
+.ku-tt .ltr{word-break:break-all}
+@media(max-width:619px){
+ .ku-tt thead{display:none}
+ .ku-tt,.ku-tt tbody,.ku-tt tr,.ku-tt td{display:block;width:100%}
+ .ku-tt tr{border:1px solid var(--ln);border-radius:12px;padding:8px 12px;margin-bottom:8px}
+ .ku-tt td{border:0;padding:4px 0;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+ .ku-tt td[data-l]:before{content:attr(data-l);font-size:12px;color:var(--s);min-width:96px}
+ .ku-tt td.ed{justify-content:flex-start;padding-top:8px}
+ .ku-tt td small{flex-basis:100%;margin:0}
+}

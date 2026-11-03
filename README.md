@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.27 — the Tunnel tab as one table
+- In every core, the Tunnel tab is one table (server, direct address, Iran tunnel address, status, Edit); Edit opens the same fields in a small window.
+## New in 3.26.1 — a short menu button
+- The chat's menu button is «🚀 کانکی اپ» («👤 کانکی من» with an account), so there is room to type again.
 ## New in 3.26 — V2Ray and VIP services, a tabbed mini app
 - Plans are «🌐 V2Ray» (only a subscription link for v2rayNG / Streisand / V2Box) or «🚀 VIP» (every protocol and the Kanki app); the bot asks which first. Approving an order answers at once and marks every admin's receipt with the date and time; bot messages without buttons work again. The mini app has three tabs (subscription, servers, apps and help) and the admin menu four groups.
 ## New in 3.25.3 — 88 fixes from the full code scan

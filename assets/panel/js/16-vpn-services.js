@@ -84,6 +84,8 @@ window.coreTun=function(core,s,fold){if(!s)return '';var tn=s.tunnel||{},own=(tn
  var head=t('Second config through the tunnel')+' · '+CNAME[core];
  return fold?'<details class="box" style="margin-top:6px;width:100%"><summary>'+head+(use?' · <span class="ltr">'+esc(use)+'</span>':'')+'</summary>'+st+body+'</details>':'<div class="kxr-sec">'+head+'</div>'+st+body};
 window.coreTunSet=function(core,key,host){var r=document.querySelector('.kxr.open[data-acc]'),g=r&&r.dataset.acc;
+ // opened from the Tunnel table (coreTunEdit): its window closes and the table is drawn again
+ if($('#modal').classList.contains('on')&&window.CTG){g=window.CTG;window.CTG='';closeModal()}
  api('PUT','/api/servers/'+encodeURIComponent(key),{tunnel_core:{core:core,host:String(host||'').trim()}}).then(function(){toast(t('Saved'));
   return srvLoad(true).then(function(){if(g&&/^tn_|^xrt$/.test(g)){if(ACC.draw[g])ACC.draw[g](true);return}if(S.page=='mtun')kcLoad('mtun',true);else if(S.page=='xray'){if(ACC.draw.xr)ACC.draw.xr(true)}else svcReload()})}).catch(fail)};
 window.srvByNode=function(nid){return srvByNode(nid)};
@@ -149,24 +151,26 @@ window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')
   // the Tunnel tab: the second config of each server through an Iran server
   window.kmTunRows=function(d){var list=(d.servers||[]).map(function(x){var s=srvByNode(x.id)||{key:'node:'+x.id,name:x.name,cc:'',loc:''};return {k:x,s:s,key:s.key||x.id,name:x.name,cc:s.cc,loc:s.loc}});
    if(!list.length)return '<p class="muted ku-empty">'+t('No VPN server yet')+'</p>';
-   return list.map(function(r){var x=r.k,o=(d.settings.nodes||{})[x.id]||{},sc=x.second;
-    var head='<span class="dot '+(sc?'g':'')+'"></span>'+fl(r.cc)+'<b>'+esc(x.name)+'</b><span class="sp"></span>'+(sc?'<span class="kxr-st g ltr">'+esc(sc.host)+':'+esc(String(sc.port))+'</span>':'<span class="kxr-st">'+t('No second config')+'</span>')+
-     (x.route_via?'<small>'+t('Through a tunnel')+'</small>':'');
-    return accRow('kmt',x.id,head,function(){return kmTunBody(d,r)})}).join('')};
+   window.KMT=list;
+   return kuTunTable(list.map(function(r){var x=r.k,sc=x.second;
+    return {cc:r.cc,name:x.name,direct:srvDirect(r.s)||x.host||'',tun:sc?sc.host+':'+sc.port:'',note:'',
+     st:sc?(x.route_via?['g',t('Through a tunnel')]:['y',t('No tunnel carries the port')]):['',t('Off')],edit:"kmTunEdit('"+esc(x.id)+"')"}}))};
+  window.kmTunEdit=function(id){var r=(window.KMT||[]).filter(function(z){return z.k.id==id})[0];if(!r||!KM.d)return;
+   modal(mhead(t('Second config through the tunnel'),r.k.name)+kmTunBody(KM.d,r))};
   function kmTunBody(d,r){var x=r.k,o=(d.settings.nodes||{})[x.id]||{},id=esc(x.id),port=x.port||x.want_port,via=x.route_via;
    // the server's tunnel domain (Servers page) gives it by itself; the fields below only change it for KANKI MIX
    return ''+
    '<label class="kxsw" style="cursor:pointer"><span>'+(x.second?t('Users also get')+' <b class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</b>':t('Write the tunnel domain of this server in Servers: the second config is made by itself.'))+'</span><input type="checkbox" id="km_t21" style="width:auto"'+(o.tun_off?'':' checked')+'></label>'+
    '<details class="box" style="margin-top:6px" open><summary>'+t('Only for KANKI MIX (optional)')+'</summary>'+
    '<div class="kxf"><div class="wide"><label class="f">'+t('Iran address')+'</label><input id="km_th1" class="ltr" placeholder="'+esc(t('the tunnel domain of the server'))+'" value="'+esc(o.tun_host||'')+'">'+
-    (function(){var irs=srvIrHosts(r.s&&r.s.key?r.s:null);return irs.length?'<div class="kxchips">'+irs.map(function(e){return '<button type="button" class="'+(o.tun_host==e.host?'on':'')+'" onclick="$(\'#km_th1\').value=\''+esc(e.host)+'\';$$(\'.kxchips button\',this.parentNode.parentNode).forEach(function(b){b.classList.remove(\'on\')});this.classList.add(\'on\');this.closest(\'.kxr-b\').dataset.dirty=\'1\'">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+'</div>':''})()+'</div>'+
+    (function(){var irs=srvIrHosts(r.s&&r.s.key?r.s:null);return irs.length?'<div class="kxchips">'+irs.map(function(e){return '<button type="button" class="'+(o.tun_host==e.host?'on':'')+'" onclick="$(\'#km_th1\').value=\''+esc(e.host)+'\';$$(\'.kxchips button\',this.parentNode.parentNode).forEach(function(b){b.classList.remove(\'on\')});this.classList.add(\'on\')">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+'</div>':''})()+'</div>'+
    '<div><label class="f">'+t('Port')+'</label><input id="km_tp1" class="ltr" inputmode="numeric" placeholder="'+esc(String((via&&via.port)||port||''))+'" value="'+esc(o.tun_port?String(o.tun_port):'')+'"></div>'+
    '<div class="wide"><label class="f">'+t('Name in the app')+'</label><input id="km_tn1" maxlength="40" placeholder="'+esc(x.name+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'"></div></div></details>'+
    '<div class="kxr-line">'+(via?viaLine(via,x.name):(o.tun_host&&!o.tun_off?'<span class="warnbox" style="margin:0;width:100%">'+t('No Kanki tunnel carries this port to the server. Make a tunnel (or a multi-location route) that carries it, or forward it on that address some other way.')+'</span>':''))+'</div>'+
-    '<div class="kxsave"><button class="b2 sm" onclick="accClose(\'kmt\')">'+t('Cancel')+'</button><button class="btn sm" onclick="kmSaveTun(\''+id+'\')">'+t('Save')+'</button></div>'}
+    '<div class="kxsave"><button class="b2 sm" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn sm" onclick="kmSaveTun(\''+id+'\')">'+t('Save')+'</button></div>'}
   window.kmSaveTun=function(id){var m=kmNodes(),o=m[id]||{};o.tun_off=!$('#km_t21').checked;o.tun_host=$('#km_th1').value.trim();
    var tp=unN($('#km_tp1').value).trim();o.tun_port=tp?+tp:0;o.tun_name=$('#km_tn1').value.trim();m[id]=o;
-   api('PUT','/api/kmix',{nodes:m}).then(function(){toast(t('Saved'));accClose('kmt');kmLoad(true)}).catch(fail)};
+   api('PUT','/api/kmix',{nodes:m}).then(function(){toast(t('Saved'));closeModal();kmLoad(true)}).catch(fail)};
   ACC.draw.kmt=function(){var c=$('#km_tun');if(c&&KM.d)c.innerHTML=kmTunRows(KM.d)};
  
 
