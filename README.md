@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.26 — V2Ray and VIP services, a tabbed mini app
+- Plans are «🌐 V2Ray» (only a subscription link for v2rayNG / Streisand / V2Box) or «🚀 VIP» (every protocol and the Kanki app); the bot asks which first. Approving an order answers at once and marks every admin's receipt with the date and time; bot messages without buttons work again. The mini app has three tabs (subscription, servers, apps and help) and the admin menu four groups.
 ## New in 3.25.3 — 88 fixes from the full code scan
 - Connection limits, security of tokens and logins, the sales bot, the emergency chat and the installer: every proven finding of the first-half scan is fixed (`docs/SCAN-HALF1.md`).
 ## New in 3.25.2 — the source in order

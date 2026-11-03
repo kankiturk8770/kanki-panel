@@ -1288,12 +1288,12 @@ async fn plans_list(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "settings");
     let v: Vec<Value> = app.db.with(|c| {
         // custom purchases (active = 2) are not plans the admin manages
-        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,'') FROM plans WHERE COALESCE(active,1)<>2 ORDER BY toman").unwrap();
+        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,''),COALESCE(service,'vip') FROM plans WHERE COALESCE(active,1)<>2 ORDER BY toman").unwrap();
         let rows: Vec<Value> = s.query_map([], |r| {
             Ok(json!({ "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "days": r.get::<_, i64>(2)?,
                 "gb": r.get::<_, f64>(3)?, "toman": r.get::<_, i64>(4)?, "usd": r.get::<_, f64>(5)?,
                 "conns": r.get::<_, i64>(6)?, "active": r.get::<_, i64>(7)? == 1, "countries": r.get::<_, i64>(8)?, "category": r.get::<_, String>(9)?,
-                "style": r.get::<_, String>(10)? }))
+                "style": r.get::<_, String>(10)?, "service": r.get::<_, String>(11)? }))
         }).unwrap().filter_map(|x| x.ok()).collect();
         rows
     });
@@ -1318,12 +1318,17 @@ fn insert_plan(app: &App, b: &Value) -> Result<usize, String> {
     let name = b["name"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty()).unwrap_or("Plan").to_string();
     let cat = b["category"].as_str().map(|s| s.trim().to_string()).unwrap_or_default();
     app.db.exec(
-        "INSERT INTO plans(name,days,gb,toman,usd,conns,countries,active,category,style) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9)",
+        "INSERT INTO plans(name,days,gb,toman,usd,conns,countries,active,category,style,service) VALUES(?1,?2,?3,?4,?5,?6,?7,1,?8,?9,?10)",
         &[&name, &days_of(num(&b["days"]).unwrap_or(30.0)), &gb_of(num(&b["gb"]).unwrap_or(0.0)).max(0.0),
           &(num(&b["toman"]).unwrap_or(0.0).max(0.0) as i64), &num(&b["usd"]).unwrap_or(0.0).max(0.0),
           &(num(&b["conns"]).unwrap_or(1.0).max(1.0) as i64), &(num(&b["countries"]).unwrap_or(0.0).max(0.0) as i64), &cat,
-          &plan_style(b["style"].as_str().unwrap_or(""))],
+          &plan_style(b["style"].as_str().unwrap_or("")), &plan_service(b["service"].as_str().unwrap_or(""))],
     )
+}
+
+/// What a plan sells: 'v2ray' (only the v2ray subscription) or 'vip' (everything, the default)
+fn plan_service(s: &str) -> String {
+    if s.trim() == "v2ray" { "v2ray".into() } else { "vip".into() }
 }
 
 async fn plans_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
@@ -1368,6 +1373,9 @@ async fn plans_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
     }
     if let Some(st) = b["style"].as_str() {
         let _ = app.db.exec("UPDATE plans SET style=?1 WHERE id=?2", &[&plan_style(st), &id]);
+    }
+    if let Some(sv) = b["service"].as_str() {
+        let _ = app.db.exec("UPDATE plans SET service=?1 WHERE id=?2", &[&plan_service(sv), &id]);
     }
     if let Some(nm) = b["name"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         let _ = app.db.exec("UPDATE plans SET name=?1 WHERE id=?2", &[&nm.to_string(), &id]);

@@ -121,6 +121,13 @@ impl User {
         self.protocols.split(',').any(|x| x.trim() == p)
     }
 
+    /// 'v2ray' when the account has only what a v2ray client reads (Xray, Hysteria2) and Xray is one of
+    /// them, else 'vip'
+    pub fn service(&self) -> &'static str {
+        let ps: Vec<&str> = self.protocols.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()).collect();
+        if ps.contains(&"xray") && ps.iter().all(|p| matches!(*p, "xray" | "hy2")) { "v2ray" } else { "vip" }
+    }
+
     pub fn explicit_nodes(&self) -> bool {
         !self.nodes.trim().is_empty()
     }
@@ -246,6 +253,9 @@ impl Db {
             "ALTER TABLE plans ADD COLUMN category TEXT DEFAULT ''",
             // 3.23: the colour of a plan's button in the bot (success / primary / danger, '' = by users)
             "ALTER TABLE plans ADD COLUMN style TEXT DEFAULT ''",
+            // 3.26: what a plan sells: 'vip' (every protocol, the Kanki app, AmneziaWG / WireGuard) or 'v2ray'
+            // (only the subscription link for v2rayNG / Streisand / V2Box). Plans made before stay 'vip'.
+            "ALTER TABLE plans ADD COLUMN service TEXT DEFAULT 'vip'",
             "ALTER TABLE discounts ADD COLUMN expires INTEGER DEFAULT 0",
             // v2.9.4: the config name a customer chose, and the Telegram @username / last name (to suggest one)
             "ALTER TABLE bot_users ADD COLUMN cfg_name TEXT DEFAULT ''",
@@ -303,6 +313,17 @@ impl Db {
     }
 
     // ---------------- تنظیمات
+    /// The protocols an account of a plan's service gets ('v2ray' or 'vip')
+    pub fn service_protocols(&self, service: &str) -> String {
+        if service == "v2ray" {
+            let v = self.get("v2ray_protocols");
+            let ok: Vec<&str> = v.split(',').map(|x| x.trim()).filter(|x| matches!(*x, "xray" | "hy2")).collect();
+            if ok.contains(&"xray") { ok.join(",") } else { "xray".into() }
+        } else {
+            self.get("default_protocols")
+        }
+    }
+
     pub fn get(&self, k: &str) -> String {
         self.with(|c| {
             c.query_row("SELECT v FROM settings WHERE k=?1", params![k], |r| r.get::<_, String>(0))
@@ -589,6 +610,8 @@ pub fn default_setting(k: &str) -> &'static str {
         "dns" => "1.1.1.1, 8.8.8.8",
         "mtu" => "1380",
         "default_protocols" => "wg,awg,hy2,kmix",
+        // what a 'v2ray' plan gives (the v2ray clients read only Xray, and Hysteria2 when added here)
+        "v2ray_protocols" => "xray",
         "kmix_on" => "1",
         "kmix_port" => "4000",
         "kmix_parity" => "3",
@@ -647,6 +670,30 @@ mod tests {
         }
         assert_eq!(peer_ip("10.66", 62500).unwrap(), "10.66.250.1");
         assert!(peer_ip("10.66", 64024).is_none());
+    }
+
+    #[test]
+    fn plan_services() {
+        let (dir, db) = temp_db();
+        // a plan made before 3.26 sells the full service
+        db.exec("INSERT INTO plans(name,days,gb,toman) VALUES('old',30,10,1000)", &[]).unwrap();
+        let s: String = db.with(|c| c.query_row("SELECT service FROM plans WHERE name='old'", [], |r| r.get(0)).unwrap());
+        assert_eq!(s, "vip");
+        assert_eq!(db.service_protocols("vip"), db.get("default_protocols"));
+        assert_eq!(db.service_protocols("v2ray"), "xray");
+        db.set("v2ray_protocols", "xray,hy2,wg");
+        assert_eq!(db.service_protocols("v2ray"), "xray,hy2");
+        db.set("v2ray_protocols", "wg");
+        assert_eq!(db.service_protocols("v2ray"), "xray");
+        let u = db.create_user("v2u", 10.0, 30, 1, "xray", "", "", 0).unwrap();
+        assert_eq!(u.service(), "v2ray");
+        let u = db.create_user("v2h", 10.0, 30, 1, "xray,hy2", "", "", 0).unwrap();
+        assert_eq!(u.service(), "v2ray");
+        let u = db.create_user("vipu", 10.0, 30, 1, "wg,awg,hy2,kmix,xray", "", "", 0).unwrap();
+        assert_eq!(u.service(), "vip");
+        let u = db.create_user("hy", 10.0, 30, 1, "hy2", "", "", 0).unwrap();
+        assert_eq!(u.service(), "vip");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

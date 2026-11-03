@@ -408,6 +408,16 @@ pub fn jalali(gy: i64, gm: i64, gd: i64) -> (i64, i64, i64) {
     (jy, jm, jd)
 }
 
+/// Unix time -> Tehran's Jalali date and time in Persian digits: ("۱۴۰۵/۰۸/۱۲", "۱۹:۴۵")
+pub fn fa_datetime(ts: i64) -> (String, String) {
+    let t = ts + TZ;
+    let (gy, gm, gd) = ymd(t);
+    let (jy, jm, jd) = jalali(gy, gm, gd);
+    let sec = t.rem_euclid(86400);
+    let fa = |s: String| s.chars().map(|c| match c.to_digit(10) { Some(d) => "۰۱۲۳۴۵۶۷۸۹".chars().nth(d as usize).unwrap_or(c), None => c }).collect::<String>();
+    (fa(format!("{}/{:02}/{:02}", jy, jm, jd)), fa(format!("{:02}:{:02}", sec / 3600, sec % 3600 / 60)))
+}
+
 /// Unix time -> Gregorian date (UTC)
 fn ymd(ts: i64) -> (i64, i64, i64) {
     let z = ts.div_euclid(86400) + 719468;
@@ -1195,6 +1205,12 @@ mod post_tests {
 
 #[cfg(test)]
 mod schedule_tests {
+    #[test]
+    fn fa_datetime_is_tehran_jalali() {
+        // 2026-11-03 16:15 UTC = 1405/08/12 19:45 in Tehran
+        assert_eq!(super::fa_datetime(1793722500), ("۱۴۰۵/۰۸/۱۲".to_string(), "۱۹:۴۵".to_string()));
+    }
+
     #[test]
     fn a_post_just_before_a_slot_counts_for_it() {
         // 10:00, 16:00, 21:30 Iran time on one day; times as UTC seconds
