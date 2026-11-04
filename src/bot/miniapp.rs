@@ -261,11 +261,11 @@ async fn shop(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
         return r;
     }
     let plans: Vec<Value> = app.db.with(|c| {
-        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(conns,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,''),COALESCE(service,'vip') FROM plans WHERE active=1 ORDER BY days, conns, toman").unwrap();
+        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(conns,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,''),COALESCE(service,'vip'),COALESCE(badge,''),COALESCE(old_toman,0) FROM plans WHERE active=1 ORDER BY days, conns, toman").unwrap();
         let v: Vec<Value> = s.query_map([], |r| Ok(json!({
             "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "days": r.get::<_, i64>(2)?, "gb": r.get::<_, f64>(3)?,
             "toman": r.get::<_, i64>(4)?, "conns": r.get::<_, i64>(5)?, "countries": r.get::<_, i64>(6)?, "category": r.get::<_, String>(7)?,
-            "style": r.get::<_, String>(8)?, "service": r.get::<_, String>(9)?,
+            "style": r.get::<_, String>(8)?, "service": r.get::<_, String>(9)?, "badge": r.get::<_, String>(10)?, "old_toman": r.get::<_, i64>(11)?,
         }))).unwrap().filter_map(|x| x.ok()).collect();
         v
     });

@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.28 — a black and yellow shop in the mini app
+- Plan cards under tabs (single user, multi user, long term, custom), labels and struck prices, Kanki's 9 plans with one button, and a short delivery message with only the link and three buttons.
 ## New in 3.27 — the Tunnel tab as one table
 - In every core, the Tunnel tab is one table (server, direct address, Iran tunnel address, status, Edit); Edit opens the same fields in a small window.
 ## New in 3.26.1 — a short menu button

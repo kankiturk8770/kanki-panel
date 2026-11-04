@@ -256,6 +256,9 @@ impl Db {
             // 3.26: what a plan sells: 'vip' (every protocol, the Kanki app, AmneziaWG / WireGuard) or 'v2ray'
             // (only the subscription link for v2rayNG / Streisand / V2Box). Plans made before stay 'vip'.
             "ALTER TABLE plans ADD COLUMN service TEXT DEFAULT 'vip'",
+            // 3.28: a plan's label in the shop («🔥 پیشنهاد ویژه») and a higher price shown struck through
+            "ALTER TABLE plans ADD COLUMN badge TEXT DEFAULT ''",
+            "ALTER TABLE plans ADD COLUMN old_toman INTEGER DEFAULT 0",
             "ALTER TABLE discounts ADD COLUMN expires INTEGER DEFAULT 0",
             // v2.9.4: the config name a customer chose, and the Telegram @username / last name (to suggest one)
             "ALTER TABLE bot_users ADD COLUMN cfg_name TEXT DEFAULT ''",
