@@ -1158,6 +1158,8 @@ pub const SETTING_KEYS: &[&str] = &[
     "bst_disc", "bst_shop", "bst_miniapp", "bst_amz", "bst_cfg",
     // 3.29: TON checked on the chain and Telegram Stars, both at today's price (pay.rs)
     "ton_on", "stars_on", "star_usd", "toncenter_key",
+    // 3.30: the Windows app in the connection guide
+    "win_link",
 ];
 
 /// "owner/repo" with only the characters GitHub allows
@@ -1871,8 +1873,8 @@ pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str, tunnel:
     Some((conf_file_name_via(app, u, n, proto, tunnel), text))
 }
 
-/// Every WireGuard / AmneziaWG config of a user as (name in the app, .conf text), for an AmneziaVPN backup:
-/// AmneziaWG first, each server's direct config, then its copy through the tunnel. The name shows the
+/// Every config of a user that AmneziaVPN can hold, as (name in the app, .conf text or Xray link), for its backup:
+/// AmneziaWG first, each server's direct config, then its copy through the tunnel; then the Xray links. The name shows the
 /// route with flags: "🇮🇷→🇹🇷 AmneziaWG · TURKEY" through Iran, "🇹🇷 WireGuard · TURKEY" straight.
 pub async fn amnezia_configs(app: &Arc<App>, u: &User) -> Vec<(String, String)> {
     let mut out = vec![];
@@ -1891,6 +1893,12 @@ pub async fn amnezia_configs(app: &Arc<App>, u: &User) -> Vec<(String, String)> 
                     out.push((name, text));
                 }
             }
+        }
+    }
+    // then every Xray link the app can read (VLESS with Reality or TLS, VMess, Trojan, Shadowsocks); Hysteria2 it cannot
+    for (name, link) in crate::xray::panel::user_links(app, u) {
+        if crate::amnezia::server(&link, &name).is_some() {
+            out.push((name, link));
         }
     }
     out

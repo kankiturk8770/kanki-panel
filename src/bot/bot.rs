@@ -150,7 +150,7 @@ fn back_view(k: &str) -> &'static str {
         "trial_gb" | "trial_days" => "a:trial",
         "card_number" | "card_holder" | "zp_merchant" | "zp_callback" | "np_key" | "np_coins" | "wallet_text" | "ton_address" | "star_usd" => "a:pay",
         "ref_gb" | "ref_days" => "a:ref",
-        "app_link" | "support" | "channel" => "a:links",
+        "app_link" | "win_link" | "support" | "channel" => "a:links",
         _ if k.starts_with("btn_") => "a:btns",
         _ if is_text_key(k) => "a:txts",
         _ => "a:gen",
@@ -170,6 +170,7 @@ fn key_title(k: &str) -> String {
     match k {
         "app_link" => "لینک دانلود اپ".into(),
         "support" => "پشتیبانی (آیدی یا لینک)".into(),
+        "win_link" => "لینک دانلود Kanki VPN ویندوز (https://…؛ خالی = در راهنمای اتصال ویندوز پیشنهاد نمی‌شود)".into(),
         "channel" => "کانال اجباری (مثل @mychannel)".into(),
         "trial_gb" => "حجم تست (گیگ)".into(),
         "trial_days" => "مدت تست (روز)".into(),
@@ -999,22 +1000,156 @@ impl Bot {
     fn delivery(&self, head: &str, u: &User, plan: &str) -> (String, Value) {
         let exp = if u.expires_at > 0 { crate::channel::fa_datetime(u.expires_at).0 } else { "نامحدود".into() };
         let link = if u.service() == "v2ray" { crate::api::v2_sub_link(&self.app, u) } else { format!("{}/sub/{}", sub_origin(&self.app), u.sub_code()) };
-        let t = format!("{}\n\n📦 پلن: <b>{}</b>\n👤 حساب: <b>{}</b>\n⏳ انقضا: <b>{}</b>\n\n🔗 <b>لینک اتصال هوشمند شما:</b>\n<code>{}</code>\n\n💡 <i>کافیست لینک بالا را کپی کرده و وارد برنامه کنید.</i>",
+        let t = format!("{}\n\n📦 پلن: <b>{}</b>\n👤 حساب: <b>{}</b>\n⏳ انقضا: <b>{}</b>\n\n🔗 <b>لینک اتصال هوشمند شما:</b>\n<code>{}</code>\n\n📲 <b>روی کدوم دستگاه وصل می‌شید؟</b>\nدکمه‌ی دستگاهتون رو بزنید؛ برنامه‌ی مناسب، فایل و آموزش قدم‌به‌قدم همین‌جا میاد 👇",
             head, esc(plan), esc(&u.username), exp, esc(&link));
-        let mut rows: Kb = vec![];
+        let mut rows: Kb = vec![self.how_devices_kb(u.id)];
         let mini = crate::miniapp::url(&self.app);
         if mini.starts_with("https://") {
-            rows.push(vec![b("📱 دانلود برنامه (اندروید/آیفون/ویندوز)", &format!("webapp:miniapp:{}?tab=app", mini))]);
-        } else {
-            rows.push(vec![b("📱 دانلود برنامه (اندروید/آیفون/ویندوز)", "app")]);
+            rows.push(vec![b("👤 مدیریت اشتراک (مینی‌اپ)", &format!("webapp:miniapp:{}", mini))]);
         }
-        if !self.guides().is_empty() {
+        // a tutorial not pinned to one app and device (a general one) stays here
+        if self.guides().iter().any(|g| g["for"].as_array().map(|a| a.is_empty()).unwrap_or(true)) {
             rows.push(vec![b("آموزش ویدیویی اتصال 🎥", "guide1")]);
         }
         let sup = self.db().get("support").trim().to_string();
         let sl = if let Some(id) = sup.strip_prefix('@') { Some(format!("https://t.me/{}", id)) } else if sup.starts_with("https://") { Some(sup) } else { None };
         rows.push(vec![b("پشتیبانی 💬", &sl.map(|l| format!("url:{}", l)).unwrap_or_else(|| "support".into()))]);
         (t, ik(rows))
+    }
+
+    // ============================================================ the connection guide: device, then app
+
+    /// The protocols an account really has on its servers (direct or through a tunnel)
+    fn protos_of(&self, u: &User) -> Vec<&'static str> {
+        let mut have: Vec<&'static str> = vec![];
+        for n in crate::api::user_nodes(&self.app, u) {
+            for p in crate::api::node_protos(&self.app, u, &n).into_iter().chain(crate::api::twin_protos(&self.app, u, &n)) {
+                if !have.contains(&p) { have.push(p); }
+            }
+        }
+        have
+    }
+
+    /// The apps offered on a device for this account, in the order shown (the first is the recommended one)
+    fn how_apps(&self, u: &User, os: &str) -> Vec<&'static str> {
+        let have = self.protos_of(u);
+        let wg = have.contains(&"wireguard") || have.contains(&"amneziawg");
+        let v2 = u.service() == "v2ray";
+        let links = v2 || crate::api::links_text(&self.app, u).is_some();
+        let kanki = !v2 && match os {
+            "a" => !crate::apps::list(&self.app).is_empty() || self.db().get("app_link").trim().starts_with("https://"),
+            "w" => self.db().get("win_link").trim().starts_with("https://"),
+            _ => false,
+        };
+        // AmneziaVPN holds WireGuard, AmneziaWG and the Xray links (not Hysteria2): one backup file
+        let amz = (wg && !v2) || crate::xray::panel::user_links(&self.app, u).iter().any(|(_, l)| crate::amnezia::server(l, "").is_some());
+        let mut v: Vec<&'static str> = vec![];
+        if kanki { v.push("k"); }
+        // on an iPhone AmneziaVPN comes first (the Kanki app is not there); a V2Ray account still gets its V2Ray app first elsewhere
+        if amz && (!v2 || os == "i") { v.push("z"); }
+        if links { v.push("v"); }
+        if amz && v2 && os != "i" { v.push("z"); }
+        if have.contains(&"wireguard") && !v2 { v.push("g"); }
+        v
+    }
+
+    /// The device menu: which app to connect with, each said in one line, the recommended one first
+    fn how_device(&self, u: &User, os: &str) -> (String, Kb) {
+        let apps = self.how_apps(u, os);
+        let dev = match os { "i" => "🍏 آیفون / آیپد", "w" => "💻 ویندوز", _ => "🤖 اندروید" };
+        let mut t = format!("{} · <b>اتصال حساب {}</b>\n\nبا کدوم برنامه وصل می‌شید؟ روی هر کدوم بزنید، فایل و آموزش قدم‌به‌قدم همین‌جا میاد 👇\n", dev, esc(&u.username));
+        let mut rows: Kb = vec![];
+        for (i, a) in apps.iter().enumerate() {
+            let star = if i == 0 { "⭐️ " } else { "" };
+            let (name, line) = how_app_line(a, os);
+            t.push_str(&format!("\n{}<b>{}</b>{}: {}", star, name, if i == 0 { " (پیشنهاد ما)" } else { "" }, line));
+            rows.push(vec![b(&format!("{}{}", star, name), &format!("@{}@hw:{}:{}:{}", if i == 0 { "success" } else { "primary" }, u.id, os, a))]);
+        }
+        if apps.is_empty() {
+            t.push_str("\nبرای این دستگاه هنوز راهی برای سرویس شما فعال نیست؛ به پشتیبانی پیام بدید.");
+        }
+        rows.push(vec![b("📲 دستگاه دیگه", &format!("hw:{}", u.id))]);
+        (t, rows)
+    }
+
+    /// The device chooser (under the delivery and the account)
+    fn how_devices_kb(&self, id: i64) -> Vec<(String, String)> {
+        vec![b("🤖 اندروید", &format!("hw:{}:a", id)), b("🍏 آیفون", &format!("hw:{}:i", id)), b("💻 ویندوز", &format!("hw:{}:w", id))]
+    }
+
+    /// One app on one device: where to get it, the steps, what to put in it (the file, the code or the link), and the
+    /// admin's video tutorials pinned to it
+    async fn how_app(&self, chat: i64, qid: &str, u: &User, os: &str, app: &str) {
+        if !self.how_apps(u, os).contains(&app) {
+            return self.answer(qid, "این راه برای سرویس شما فعال نیست.", true).await;
+        }
+        let (name, _) = how_app_line(app, os);
+        let back = vec![b("⬅️ برنامه‌ی دیگه", &format!("hw:{}:{}", u.id, os))];
+        let store = |label: &str, url: &str| vec![b(label, &format!("url:{}", url))];
+        match app {
+            "k" => {
+                let mut rows: Kb = vec![];
+                let get = if os == "w" {
+                    rows.push(store("⬇️ دانلود Kanki VPN برای ویندوز", self.db().get("win_link").trim()));
+                    "1️⃣ برنامه رو با دکمه‌ی پایین دانلود و نصب کنید."
+                } else {
+                    let files = crate::apps::list(&self.app);
+                    if files.is_empty() {
+                        rows.push(store("⬇️ دانلود Kanki VPN", self.db().get("app_link").trim()));
+                    }
+                    for f in &files {
+                        let (title, _) = crate::apps::title(&f.abi);
+                        rows.push(vec![b(&format!("⬇️ {} · {}", title, mb(f.size)), &format!("apk:{}", f.abi))]);
+                    }
+                    "1️⃣ فایل نصب رو از دکمه‌ی پایین بگیرید و نصب کنید (اگه مطمئن نیستید «۶۴ بیتی» رو بگیرید)."
+                };
+                rows.push(back);
+                self.send(chat, &format!("⭐️ <b>اپ اختصاصی Kanki VPN</b>\nهمه‌ی سرورها و همه‌ی پروتکل‌ها (حتی پروتکل‌های ضدفیلتر کانکی) با یک کد؛ سرور خوب رو خودش پیدا می‌کنه.\n\n{}\n2️⃣ برنامه رو باز کنید و این <b>کد ورود</b> رو بزنید (روش بزنید کپی می‌شه):\n<code>{}</code>\n3️⃣ دکمه‌ی بزرگ اتصال رو بزنید. تمام ✅", get, u.sub_code()), Some(ik(rows))).await;
+            }
+            "z" => {
+                let url = match os {
+                    "i" => "https://apps.apple.com/app/amneziavpn/id1600529900",
+                    "w" => "https://github.com/amnezia-vpn/amnezia-client/releases/latest",
+                    _ => "https://play.google.com/store/apps/details?id=org.amnezia.vpn",
+                };
+                let where_ = match os { "i" => "اپ‌استور", "w" => "سایت گیت‌هاب (فایل Windows)", _ => "گوگل‌پلی" };
+                self.send(chat, &format!("🛡 <b>AmneziaVPN</b>\nهمه‌ی سرورهای شما (WireGuard، AmneziaWG و VLESS / Xray، مستقیم و از راه تانل) با <b>یک فایل</b>.\n\n1️⃣ AmneziaVPN رو از {} نصب کنید (دکمه‌ی پایین).\n2️⃣ فایل بکاپی که الان میاد رو ذخیره کنید{}.\n3️⃣ توی برنامه: ⚙️ تنظیمات ← پشتیبان‌گیری (Backup) ← <b>بازیابی از نسخه‌ی پشتیبان</b> (Restore from backup) ← همین فایل.\n4️⃣ یک سرور رو انتخاب و دکمه‌ی اتصال رو بزنید ✅\n\n⚠️ بازیابی، سرورهای قبلی خود برنامه رو پاک می‌کنه.",
+                    where_, if os == "i" { " (روش بزنید ← اشتراک‌گذاری ← Save to Files)" } else { "" }),
+                    Some(ik(vec![store("⬇️ دانلود AmneziaVPN", url), back]))).await;
+                self.send_amnezia(chat, qid, u, os).await;
+            }
+            "v" => {
+                let link = crate::api::v2_sub_link(&self.app, u);
+                let (get, steps) = match os {
+                    "i" => ("https://apps.apple.com/app/v2box-v2ray-client/id6446814690",
+                        "1️⃣ V2Box رو از اپ‌استور نصب کنید (یا Streisand).\n2️⃣ لینک اشتراک پایین رو لمس کنید تا کپی بشه.\n3️⃣ V2Box رو باز کنید: تب <b>Configs</b> ← ➕ ← <b>Import v2ray uri from clipboard</b>. خودش می‌فهمه لینک اشتراکه، اضافه‌ش می‌کنه و کانفیگ‌ها رو میاره.\n4️⃣ یکی از کانفیگ‌ها رو انتخاب کنید و <b>Connect</b> ✅"),
+                    "w" => ("https://github.com/2dust/v2rayN/releases/latest",
+                        "1️⃣ v2rayN رو از گیت‌هاب بگیرید (فایل windows-64-With-Core) و باز کنید.\n2️⃣ لینک اشتراک پایین رو کپی کنید.\n3️⃣ منوی <b>Subscription group</b> ← <b>Subscription group settings</b> ← <b>Add</b>: لینک رو در Url بذارید و ذخیره کنید.\n4️⃣ <b>Subscription group</b> ← <b>Update subscription</b>؛ کانفیگ‌ها میان.\n5️⃣ یکی رو انتخاب، Enter، و پایین پنجره System proxy رو روی Set system proxy بذارید ✅"),
+                    _ => ("https://play.google.com/store/apps/details?id=com.v2ray.ang",
+                        "1️⃣ v2rayNG رو از گوگل‌پلی نصب کنید.\n2️⃣ لینک اشتراک پایین رو لمس کنید تا کپی بشه.\n3️⃣ v2rayNG رو باز کنید: ➕ ← <b>Import config from Clipboard</b>. خودش می‌فهمه لینک اشتراکه و توی اشتراک‌ها (Subscription) می‌ذاره.\n4️⃣ منوی ⋮ ← <b>Update subscription</b> تا کانفیگ‌ها بیان.\n5️⃣ یکی رو انتخاب و دکمه‌ی ▶️ پایین صفحه ✅"),
+                };
+                let note = if u.service() == "v2ray" { String::new() } else { "\n\nℹ️ این برنامه‌ها کانفیگ‌های VLESS (Xray) و Hysteria2 رو وصل می‌کنن. برای WireGuard / AmneziaWG، «AmneziaVPN» رو انتخاب کنید (اون VLESS رو هم داره).".to_string() };
+                self.send(chat, &format!("🚀 <b>{}</b>\n\n{}\n\n🔗 <b>لینک اشتراک شما</b> (یک بار اضافه کنید؛ سرورها عوض بشن با Update خودش درست می‌شه):\n<code>{}</code>{}", name, steps, esc(&link), note),
+                    Some(ik(vec![store(&format!("⬇️ دانلود {}", name), get), back]))).await;
+            }
+            "g" => {
+                let url = match os {
+                    "i" => "https://apps.apple.com/app/wireguard/id1441195209",
+                    "w" => "https://www.wireguard.com/install/",
+                    _ => "https://play.google.com/store/apps/details?id=com.wireguard.android",
+                };
+                let add = if os == "w" { "Import tunnel(s) from file" } else if os == "i" { "➕ ← Create from file or archive" } else { "➕ ← Import from file or archive" };
+                self.send(chat, &format!("🔐 <b>WireGuard</b>\nفقط کانفیگ‌های WireGuard، هر سرور یک فایل جدا.\n\n1️⃣ برنامه‌ی WireGuard رو نصب کنید (دکمه‌ی پایین).\n2️⃣ فایل‌هایی که الان میان رو ذخیره کنید.\n3️⃣ توی برنامه: <b>{}</b> ← فایل یک سرور.\n4️⃣ کلید کنار اسمش رو روشن کنید ✅\n\n💡 برای همه‌ی سرورها با هم، «AmneziaVPN» راحت‌تره.", add),
+                    Some(ik(vec![store("⬇️ دانلود WireGuard", url), back]))).await;
+                self.send_configs_n(chat, qid, u, "w", false).await;
+            }
+            _ => {}
+        }
+        // the admin's tutorials for this app on this device (Bot › tutorials › «📌 where it shows»)
+        let target = format!("{}:{}", app, os);
+        for g in self.guides().iter().filter(|g| g["for"].as_array().map(|a| a.iter().any(|x| x.as_str() == Some(target.as_str()))).unwrap_or(false)) {
+            self.send_guide(chat, g).await;
+        }
     }
 
     /// What the customer gets after a purchase / trial / "my service": the account plus a hint about the config buttons.
@@ -1027,13 +1162,9 @@ impl Bot {
 
     /// Buttons that send the config files, in a fixed order, followed by `extra` rows.
     fn acct_kb(&self, u: &User, mut extra: Kb) -> Value {
-        let mut have: Vec<&str> = vec![];
-        for n in crate::api::user_nodes(&self.app, u) {
-            for p in crate::api::node_protos(&self.app, u, &n).into_iter().chain(crate::api::twin_protos(&self.app, u, &n)) {
-                if !have.contains(&p) { have.push(p); }
-            }
-        }
-        let mut rows: Kb = vec![];
+        let have = self.protos_of(u);
+        // first: the connection guide by device (Android / iPhone / Windows)
+        let mut rows: Kb = vec![self.how_devices_kb(u.id)];
         // the connection tutorial first, so a new customer sees it before the manual configs
         if let Some(r) = self.guide_row() {
             rows.push(r);
@@ -1052,8 +1183,8 @@ impl Bot {
         if crate::api::links_text(&self.app, u).is_some() {
             rows.push(vec![b(&self.bt("cfg_l"), &format!("cfg:{}:l", u.id))]);
         }
-        // every WireGuard / AmneziaWG config in one AmneziaVPN restore file
-        if have.contains(&"wireguard") || have.contains(&"amneziawg") {
+        // every WireGuard / AmneziaWG config and Xray link in one AmneziaVPN restore file
+        if have.contains(&"wireguard") || have.contains(&"amneziawg") || crate::xray::panel::user_links(&self.app, u).iter().any(|(_, l)| crate::amnezia::server(l, "").is_some()) {
             rows.push(vec![b(&self.bt("amz"), &format!("amz:{}", u.id))]);
         }
         rows.push(vec![b(&self.bt("rename"), &format!("ren:{}", u.id))]);
@@ -1069,6 +1200,11 @@ impl Bot {
     /// Sends the config(s) of one protocol: first a short "which app and how" guide, then a file per server
     /// (Hysteria2 as a copyable link). True when the customer got at least one config.
     pub(crate) async fn send_configs(&self, chat: i64, qid: &str, u: &User, code: &str) -> bool {
+        self.send_configs_n(chat, qid, u, code, true).await
+    }
+
+    /// The same, with its "which app and how" text or without it (the connection guide says it itself)
+    async fn send_configs_n(&self, chat: i64, qid: &str, u: &User, code: &str, help: bool) -> bool {
         if code == "l" {
             return self.send_links(chat, qid, u).await;
         }
@@ -1088,7 +1224,9 @@ impl Bot {
             self.answer(qid, "این پروتکل برای سرویس شما فعال نیست.", true).await;
             return false;
         }
-        self.send(chat, &cfg_help(code), None).await;
+        if help {
+            self.send(chat, &cfg_help(code), None).await;
+        }
         let mut sent = false;
         for (n, tunnel) in list {
             let Some((name, text)) = crate::api::bot_config(&self.app, u, &n, proto, tunnel).await else { continue };
@@ -1137,7 +1275,7 @@ impl Bot {
         let Some(plat) = crate::amnezia::platform(code) else { return false };
         let cfgs = crate::api::amnezia_configs(&self.app, u).await;
         let Some(body) = crate::amnezia::backup(&cfgs, plat) else {
-            self.answer(qid, "برای سرویس شما کانفیگ WireGuard یا AmneziaWG فعال نیست.", true).await;
+            self.answer(qid, "برای سرویس شما کانفیگی که AmneziaVPN بخونه (WireGuard، AmneziaWG یا VLESS) فعال نیست.", true).await;
             return false;
         };
         let cap = format!(
@@ -1707,6 +1845,24 @@ impl Bot {
         }
         match head {
             "apk" => return self.send_apk(chat, rest).await,
+            // the connection guide: hw:<account> (devices), hw:<account>:<device> (apps), hw:<account>:<device>:<app>
+            "hw" => {
+                let mut parts = rest.split(':');
+                let id: i64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) else { return };
+                let os = parts.next().filter(|o| ["a", "i", "w"].contains(o));
+                match (os, parts.next()) {
+                    (None, _) => {
+                        self.send(chat, "📲 <b>روی کدوم دستگاه وصل می‌شید؟</b>", Some(ik(vec![self.how_devices_kb(u.id)]))).await;
+                    }
+                    (Some(os), None) => {
+                        let (t, rows) = self.how_device(&u, os);
+                        self.send(chat, &t, Some(ik(rows))).await;
+                    }
+                    (Some(os), Some(app)) => self.how_app(chat, &qid, &u, os, app).await,
+                }
+                return;
+            }
             "gd" => {
                 if let Some(g) = self.guide(rest.parse().unwrap_or(0)) {
                     self.send_guide(chat, &g).await;
@@ -1729,7 +1885,7 @@ impl Bot {
                 let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) else { return };
                 if head == "amz" {
                     let row = crate::amnezia::PLATFORMS.iter().map(|p| b(p.2, &format!("amp:{}:{}", u.id, p.0))).collect();
-                    self.send(chat, "📦 <b>بکاپ Amnezia</b>\n\nهمه‌ی سرورهای WireGuard و AmneziaWG شما توی یک فایل، برای برنامه‌ی <b>AmneziaVPN</b>.\n\nگوشی یا کامپیوترتون کدومه؟", Some(ik(vec![row]))).await;
+                    self.send(chat, "📦 <b>بکاپ Amnezia</b>\n\nهمه‌ی سرورهای WireGuard، AmneziaWG و VLESS (Xray) شما توی یک فایل، برای برنامه‌ی <b>AmneziaVPN</b>.\n\nگوشی یا کامپیوترتون کدومه؟", Some(ik(vec![row]))).await;
                 } else {
                     self.send_amnezia(chat, &qid, &u, parts.next().unwrap_or("")).await;
                 }
@@ -2718,9 +2874,9 @@ impl Bot {
             }
             "a:links" => {
                 let show = |k: &str| { let v = db.get(k); if v.is_empty() { "تنظیم نشده".to_string() } else { esc(&v) } };
-                let txt = format!("🔗 <b>لینک‌ها</b>\n\n📱 لینک دانلود اپ:\n{}\n\n💬 پشتیبانی:\n{}\n\n📢 کانال اجباری:\n{}", show("app_link"), show("support"), show("channel"));
+                let txt = format!("🔗 <b>لینک‌ها</b>\n\n📱 لینک دانلود اپ:\n{}\n\n💻 لینک دانلود اپ ویندوز:\n{}\n\n💬 پشتیبانی:\n{}\n\n📢 کانال اجباری:\n{}", show("app_link"), show("win_link"), show("support"), show("channel"));
                 let kb = ik(vec![
-                    vec![b("✏️ لینک دانلود اپ", "set:app_link")],
+                    vec![b("✏️ لینک دانلود اپ", "set:app_link"), b("✏️ لینک اپ ویندوز", "set:win_link")],
                     vec![b("✏️ پشتیبانی", "set:support"), b("✏️ کانال اجباری", "set:channel")],
                     vec![b("⬅️ دکمه‌ها و متن‌ها", "a:ui")],
                 ]);
@@ -2970,15 +3126,18 @@ impl Bot {
         };
         let x = &g[pos];
         let cap = x["caption"].as_str().unwrap_or("");
+        let pins: Vec<String> = x["for"].as_array().map(|a| a.iter().filter_map(|t| t.as_str()).filter_map(|t| t.split_once(':')).map(|(a, o)| how_target_title(a, o)).collect()).unwrap_or_default();
         let txt = format!(
-            "🎬 <b>{}</b>{}\nنوع: {}\nمتن زیر آموزش: {}",
+            "🎬 <b>{}</b>{}\nنوع: {}\nمتن زیر آموزش: {}\n📌 در راهنمای اتصال: {}",
             esc(x["title"].as_str().unwrap_or("")), if pos == 0 { "  ⭐️ (آموزش اتصال اصلی)" } else { "" },
-            kind_title(x["kind"].as_str().unwrap_or("")), if cap.trim().is_empty() { "— (عنوان نشان داده می‌شود)".to_string() } else { esc(cap) }
+            kind_title(x["kind"].as_str().unwrap_or("")), if cap.trim().is_empty() { "— (عنوان نشان داده می‌شود)".to_string() } else { esc(cap) },
+            if pins.is_empty() { "— (فقط در فهرست آموزش‌ها)".to_string() } else { pins.join("، ") }
         );
         let mut rows: Kb = vec![
             vec![b("▶️ پیش‌نمایش", &format!("gp:{}", id))],
             vec![b("✏️ عنوان", &format!("gt:{}", id)), b("✏️ متن زیر آموزش", &format!("gc:{}", id))],
             vec![b("🔄 جایگزینی ویدیو/فایل", &format!("gr:{}", id))],
+            vec![b("📌 کجای راهنمای اتصال نشان داده شود", &format!("gw:{}", id))],
         ];
         if pos > 0 { rows.push(vec![b("⭐️ آموزش اصلی کن (اول فهرست)", &format!("gu:{}", id))]); }
         rows.push(vec![b("🗑 حذف", &format!("gx:{}", id))]);
@@ -3105,6 +3264,27 @@ impl Bot {
                 };
                 set_wait(w);
                 self.edit(chat, mid, msg, Some(ik(vec![vec![b("⬅️ انصراف", &format!("gv:{}", id))]]))).await;
+            }
+            // where a tutorial shows in the connection guide: a switch per app and device
+            "gw" | "gwt" => {
+                let mut parts = rest.split(':');
+                let id: i64 = parts.next().and_then(|x| x.parse().ok()).unwrap_or(0);
+                if head == "gwt" {
+                    let t = format!("{}:{}", parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+                    if HOW_TARGETS.iter().any(|x| format!("{}:{}", x.0, x.1) == t) {
+                        let mut list: Vec<Value> = self.guide(id).and_then(|g| g["for"].as_array().cloned()).unwrap_or_default();
+                        if list.iter().any(|x| x.as_str() == Some(t.as_str())) { list.retain(|x| x.as_str() != Some(t.as_str())); } else { list.push(json!(t)); }
+                        self.guide_set(id, "for", Value::Array(list));
+                    }
+                }
+                let Some(g) = self.guide(id) else { return };
+                let on = |t: &str| g["for"].as_array().map(|a| a.iter().any(|x| x.as_str() == Some(t))).unwrap_or(false);
+                let mut rows: Kb = HOW_TARGETS.chunks(2).map(|c| c.iter().map(|(a, o)| {
+                    let t = format!("{}:{}", a, o);
+                    b(&format!("{} {}", if on(&t) { "✅" } else { "▫️" }, how_target_title(a, o)), &format!("gwt:{}:{}", id, t))
+                }).collect()).collect();
+                rows.push(vec![b("⬅️ همین آموزش", &format!("gv:{}", id))]);
+                self.edit(chat, mid, &format!("📌 <b>{}</b>\n\nوقتی مشتری در «راهنمای اتصال» این برنامه و دستگاه رو انتخاب کنه، این آموزش هم براش فرستاده می‌شه. هر چند تا رو می‌خواید روشن کنید:", esc(g["title"].as_str().unwrap_or(""))), Some(ik(rows))).await;
             }
             "gu" => {
                 let id: i64 = rest.parse().unwrap_or(0);
@@ -3655,6 +3835,24 @@ fn gift_line(days: i64, gb: f64) -> String {
     v.join("\n")
 }
 
+/// Every app of the connection guide on every device it is offered on: (app, device), for pinning a tutorial
+const HOW_TARGETS: &[(&str, &str)] = &[("k", "a"), ("k", "w"), ("z", "a"), ("z", "i"), ("z", "w"), ("v", "a"), ("v", "i"), ("v", "w"), ("g", "a"), ("g", "i"), ("g", "w")];
+
+/// An app of the connection guide: (its name on this device, one line about it)
+fn how_app_line(app: &str, os: &str) -> (&'static str, &'static str) {
+    match app {
+        "k" => ("اپ اختصاصی Kanki VPN", "همه‌ی سرورها و پروتکل‌ها با یک کد؛ ساده‌ترین راه"),
+        "z" => ("AmneziaVPN", "همه‌ی سرورها (WireGuard، AmneziaWG و VLESS / Xray) با یک فایل بکاپ"),
+        "v" => (match os { "i" => "V2Box", "w" => "v2rayN", _ => "v2rayNG" }, "با لینک اشتراک؛ کانفیگ‌های VLESS (Xray) و Hysteria2"),
+        _ => ("WireGuard", "فقط کانفیگ‌های WireGuard، هر سرور یک فایل"),
+    }
+}
+
+/// "AmneziaVPN · آیفون" for a pin target
+fn how_target_title(app: &str, os: &str) -> String {
+    format!("{} · {}", how_app_line(app, os).0, match os { "i" => "آیفون", "w" => "ویندوز", _ => "اندروید" })
+}
+
 fn cfg_help(code: &str) -> String {
     let easy = "\n\n💡 <b>راحت‌ترین راه:</b> برنامه‌ی کانکی؛ فقط «کد ورود» رو واردش کنید و دیگه به این فایل‌ها نیازی ندارید.";
     match code {
@@ -3896,7 +4094,19 @@ mod flow_tests {
         assert!(t.contains("خرید شما با موفقیت انجام شد") && t.contains("/v2") && t.contains("📦 پلن: <b>Std</b>"), "{}", t);
         // the short delivery: only the apps, the tutorial (when there is one) and support; no config or backup buttons
         let bs: Vec<String> = buttons(&log, buyer).into_iter().map(|b| b.0).collect();
-        assert!(bs.iter().any(|b| b.starts_with("📱 دانلود برنامه")) && bs.iter().any(|b| b.starts_with("پشتیبانی")) && bs.len() <= 3, "{:?}", bs);
+        assert!(t.contains("روی کدوم دستگاه وصل می‌شید"), "{}", t);
+        assert!(["🤖 اندروید", "🍏 آیفون", "💻 ویندوز"].iter().all(|d| bs.iter().any(|b| b == d)) && bs.iter().any(|b| b.starts_with("پشتیبانی")) && bs.len() <= 5, "{:?}", bs);
+        // the connection guide of a v2ray account on an iPhone: only V2Box, with its subscription link
+        tap(&bot, from(buyer, "Nima", "nima"), &format!("hw:{}:i", acc[0].id)).await;
+        let bs = buttons(&log, buyer);
+        assert_eq!(bs.iter().filter(|b| b.1.starts_with("hw:") && b.1.matches(':').count() == 3).map(|b| b.0.clone()).collect::<Vec<_>>(), vec!["⭐️ V2Box".to_string()], "{:?}", bs);
+        tap(&bot, from(buyer, "Nima", "nima"), &format!("hw:{}:i:v", acc[0].id)).await;
+        let t = last(&log, buyer);
+        assert!(t.contains("Import v2ray uri from clipboard") && t.contains("/v2") && !t.contains("AmneziaVPN"), "{}", t);
+        // another account's guide: nothing
+        let n = log.lock().unwrap().len();
+        tap(&bot, from(4242, "X", "x"), &format!("hw:{}:i:v", acc[0].id)).await;
+        assert!(!log.lock().unwrap()[n..].iter().any(|(m, v)| m == "sendMessage" && v["chat_id"] == 4242 && v["text"].as_str().unwrap_or("").contains("/v2")));
         // a second tap on approve: already decided
         tap_id(&bot, from(ADMIN, "Admin", "admin"), &format!("ap:{}", oid), "qap2").await;
         assert_eq!(answers(&log, "qap2"), vec!["این سفارش قبلاً بررسی شده.".to_string()]);
@@ -4125,6 +4335,37 @@ mod flow_tests {
         bot.on_stars_paid(&paid(buyer, 23, "ch2")).await;
         assert!(log.lock().unwrap().iter().any(|(m, v)| m == "refundStarPayment" && v["telegram_payment_charge_id"] == "ch2"));
         assert_eq!(db.users_of_tg(buyer).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_connection_guide_by_device_and_app() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        let tg = 7501;
+        bot.touch(tg, &from(tg, "Reza", "reza"), 0);
+        let u = bot.create_account(tg, 50.0, 30, 1, "test").unwrap();
+        db.set("app_link", "https://example.com/kanki.apk");
+        // Android: the Kanki app first (recommended), with the login code; Windows offers it only with a https link
+        assert_eq!(bot.how_apps(&u, "a").first(), Some(&"k"));
+        assert!(!bot.how_apps(&u, "w").contains(&"k") && !bot.how_apps(&u, "i").contains(&"k"));
+        db.set("win_link", "https://github.com/x/KankiVPN-Setup.exe");
+        assert_eq!(bot.how_apps(&u, "w").first(), Some(&"k"));
+        tap(&bot, from(tg, "Reza", "reza"), &format!("hw:{}:a", u.id)).await;
+        let bs = buttons(&log, tg);
+        assert_eq!((bs[0].0.as_str(), bs[0].2.as_str()), ("⭐️ اپ اختصاصی Kanki VPN", "success"), "{:?}", bs);
+        tap(&bot, from(tg, "Reza", "reza"), &format!("hw:{}:a:k", u.id)).await;
+        assert!(last(&log, tg).contains(&u.sub_code()), "{}", last(&log, tg));
+        // an app that is not offered for this account (no WireGuard server here): refused
+        tap_id(&bot, from(tg, "Reza", "reza"), &format!("hw:{}:i:g", u.id), "qg").await;
+        assert!(answers(&log, "qg")[0].contains("فعال نیست"));
+        // a tutorial pinned to «Kanki · Android» comes with it; the admin pins it with a switch
+        bot.save_guides(&[json!({"id": 1, "title": "Kanki", "kind": "text", "file": "", "caption": "ویدیوی کانکی"})]);
+        tap(&bot, from(ADMIN, "Admin", "admin"), "gwt:1:k:a").await;
+        assert_eq!(bot.guide(1).unwrap()["for"], json!(["k:a"]));
+        tap(&bot, from(tg, "Reza", "reza"), &format!("hw:{}:a:k", u.id)).await;
+        assert_eq!(last(&log, tg), "ویدیوی کانکی");
+        tap(&bot, from(ADMIN, "Admin", "admin"), "gwt:1:k:a").await;
+        assert_eq!(bot.guide(1).unwrap()["for"], json!([]));
     }
 
     #[tokio::test]

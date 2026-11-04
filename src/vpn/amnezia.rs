@@ -59,8 +59,43 @@ fn uuid4() -> String {
     format!("{}-{}-{}-{}-{}", &h[0..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
 }
 
+/// The link schemes AmneziaVPN reads as Xray (its import: vless, vmess, trojan, ss without a plugin; checked
+/// against the app's source, client/core/controllers/selfhosted/importController.cpp). Hysteria2 is not one.
+fn xray_link(conf: &str) -> bool {
+    let c = conf.trim();
+    ["vless://", "vmess://", "trojan://"].iter().any(|p| c.starts_with(p)) || (c.starts_with("ss://") && !c.contains("plugin="))
+}
+
+/// An Xray link as the app keeps it after importing one: the whole client config (a socks inbound on
+/// 127.0.0.1:10808, which the app moves to a free port of its own, and the link's outbound) as the last config
+/// of its Xray container ("amnezia-ssxray" for Shadowsocks)
+fn xray_server(link: &str, description: &str) -> Option<Value> {
+    let out = crate::xray::panel::link_outbound(link).ok()?;
+    let host = out["settings"]["vnext"][0]["address"].as_str().or(out["settings"]["servers"][0]["address"].as_str())?.to_string();
+    let config = json!({
+        "log": { "loglevel": "error" },
+        "inbounds": [{ "listen": "127.0.0.1", "port": 10808, "protocol": "socks", "settings": { "udp": true } }],
+        "outbounds": [out],
+    });
+    let ss = link.trim().starts_with("ss://");
+    let (container, key) = if ss { ("amnezia-ssxray", "ssxray") } else { ("amnezia-xray", "xray") };
+    Some(json!({
+        "containers": [{
+            "container": container,
+            key: { "last_config": serde_json::to_string_pretty(&config).ok()?, "isThirdPartyConfig": true },
+        }],
+        "defaultContainer": container,
+        "description": description,
+        "hostName": host,
+        "storageServerId": uuid4(),
+    }))
+}
+
 /// One server of the app from one WireGuard / AmneziaWG .conf; None when the config lacks a key part.
 pub fn server(conf: &str, description: &str) -> Option<Value> {
+    if conf.trim().contains("://") {
+        return if xray_link(conf) { xray_server(conf, description) } else { None };
+    }
     let m = conf_map(conf);
     let (priv_key, addr, pub_key) = (s(&m, "PrivateKey"), s(&m, "Address"), s(&m, "PublicKey"));
     if priv_key.is_empty() || addr.is_empty() || pub_key.is_empty() {
@@ -166,6 +201,37 @@ mod tests {
         let v: Value = serde_json::from_str(b).unwrap();
         let list: Vec<Value> = serde_json::from_str(v["Servers/serversList"].as_str().expect("the list is a string")).unwrap();
         (v, list)
+    }
+
+    #[test]
+    fn xray_links_go_in_the_xray_containers_and_hysteria2_is_left_out() {
+        let vless = "vless://11111111-2222-3333-4444-555555555555@tr.example.com:443?type=tcp&security=reality&sni=www.speedtest.net&fp=chrome&pbk=AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8&sid=6ba8&flow=xtls-rprx-vision#TR";
+        let ss = "ss://YWVzLTI1Ni1nY206cGFzcw@de.example.com:8388#DE";
+        let cfgs = vec![
+            ("🇹🇷 AmneziaWG · TR".to_string(), AWG.to_string()),
+            ("🇹🇷 VLESS · TR".to_string(), vless.to_string()),
+            ("🇩🇪 SS · DE".to_string(), ss.to_string()),
+            ("hy2".to_string(), "hysteria2://pass@nl.example.com:443?sni=x#NL".to_string()),
+            ("ss plugin".to_string(), "ss://YWVzLTI1Ni1nY206cGFzcw@de.example.com:8388?plugin=v2ray-plugin#X".to_string()),
+        ];
+        let (_, list) = servers_of(&backup(&cfgs, "iOS").unwrap());
+        assert_eq!(list.len(), 3, "Hysteria2 and Shadowsocks with a plugin are not in it");
+        let x = &list[1];
+        assert_eq!((x["defaultContainer"].as_str(), x["hostName"].as_str(), x["description"].as_str()), (Some("amnezia-xray"), Some("tr.example.com"), Some("🇹🇷 VLESS · TR")));
+        let c = &x["containers"][0];
+        assert_eq!(c["container"], "amnezia-xray");
+        assert_eq!(c["xray"]["isThirdPartyConfig"], true);
+        // the whole client config, as the app keeps an imported link: a socks inbound and the link's outbound
+        let cfg: Value = serde_json::from_str(c["xray"]["last_config"].as_str().unwrap()).unwrap();
+        assert_eq!(cfg["inbounds"][0]["protocol"], "socks");
+        let o = &cfg["outbounds"][0];
+        assert_eq!(o["protocol"], "vless");
+        assert_eq!(o["streamSettings"]["security"], "reality");
+        assert_eq!(o["streamSettings"]["realitySettings"]["publicKey"], "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8");
+        assert_eq!(o["settings"]["vnext"][0]["users"][0]["flow"], "xtls-rprx-vision");
+        assert_eq!(list[2]["defaultContainer"], "amnezia-ssxray");
+        assert_eq!(list[2]["containers"][0]["container"], "amnezia-ssxray");
+        assert!(list[2]["containers"][0]["ssxray"]["last_config"].is_string());
     }
 
     #[test]

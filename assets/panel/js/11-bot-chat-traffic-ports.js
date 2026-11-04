@@ -143,7 +143,7 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
  el.innerHTML=head+'<div class="seg btabs" id="bt_tabs">'+tabs.map(function(x){return '<button data-bt="'+x[0]+'" class="'+(S.btab==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
   '<div data-btp="sales"><div class="card"><h3>'+ic('settings',16)+' '+t('Sales settings')+'</h3><p class="sub">'+t('How the bot sells: trials, payments, referrals and messages.')+'</p>'+
    '<div class="chips">'+bsChk('sales_on','Sales enabled')+bsChk('warn_on','Warn buyers before expiry / end of data')+'</div>'+
-   '<div class="g2f">'+bsIn('support','Support ID','@support',0,1)+bsIn('app_link','App download link','https://…',0,1)+bsIn('channel','Required channel (empty = none)','@channel',0,1)+'<div></div></div>'+
+   '<div class="g2f">'+bsIn('support','Support ID','@support',0,1)+bsIn('app_link','App download link','https://…',0,1)+bsIn('channel','Required channel (empty = none)','@channel',0,1)+bsIn('win_link','Windows app download link','https://…',0,1)+'</div>'+
    '<label class="f">'+t('Welcome message')+'</label><textarea data-bs="welcome" rows="3">'+esc((S.bset||{}).welcome||'')+'</textarea>'+
    '<div class="box"><b>'+ic('gift',15)+' '+t('Free trial')+'</b><div class="chips">'+bsChk('trial_on','Give a free trial')+'</div><div class="g2f">'+bsIn('trial_gb','Trial volume (GB)','1','number')+bsIn('trial_days','Trial days','1','number')+'</div></div>'+
    '<div class="box"><b>'+ic('users',15)+' '+t('Referral reward')+'</b><div class="g2f">'+bsIn('ref_gb','Reward volume (GB)','5','number')+bsIn('ref_days','Reward days','3','number')+'</div></div>'+

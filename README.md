@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.30 — a connection guide by device
+- The AmneziaVPN backup also holds the VLESS / Xray links.
+- After a purchase: Android / iPhone / Windows, then the app (Kanki, AmneziaVPN, V2Box / v2rayNG, WireGuard) with its file, steps and the admin's video.
 ## New in 3.29 — TON and Telegram Stars, checked automatically
 - TON at today's price, found on the chain by the order's comment; Stars delivered only when Telegram says paid; clear plan buttons with English digits and a colour per kind.
 ## New in 3.28.1 — Kanki's plans by themselves
