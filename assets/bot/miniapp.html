@@ -264,7 +264,6 @@ function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){retu
    (users.length>1?'<span class="lbl">تعداد کاربر (دستگاه هم‌زمان)</span><div class="chips2" id="uu">'+users.map(function(n){return '<button data-u="'+n+'" class="'+(cb.u==n?'on':'')+'">'+fa(n)+' کاربره</button>'}).join('')+'</div>':'')+
    '<div class="total"><div class="p"><small>قیمت</small><strong id="tp">'+toman(price(c.rules,cb.g,cb.d,cb.u))+'</strong></div><button class="b go" id="cbuy">ادامه و پرداخت</button></div></div>'}
  plans.filter(function(p){return p.category==A.cat}).forEach(function(p){h+=planCard(p)});
- if(!A.list.length)h+=ordersHtml();
  if(!(c.on&&A.svc=='vip')&&!plans.length)h+='<div class="empty"><b>فعلاً پلنی برای فروش نیست</b><p class="muted">کمی بعد دوباره سر بزنید یا به پشتیبانی پیام بدید.</p></div>';
  document.getElementById('app').innerHTML=h;wireBuy()}
 

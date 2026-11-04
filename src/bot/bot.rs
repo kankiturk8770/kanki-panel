@@ -294,6 +294,16 @@ const KANKI_PLANS: &[(&str, i64, f64, i64, i64, i64, &str, &str)] = &[
 ];
 
 /// Hides every listed plan (kept for their orders) and adds Kanki's plans; how many were added
+/// Kanki's plans replace the old ones once, by themselves (the owner asked for them on the live bot); after that
+/// the admin's own changes stay
+fn kanki_plans_once(db: &crate::db::Db) -> bool {
+    if db.get("kanki_plans_v1") == "1" {
+        return false;
+    }
+    db.set("kanki_plans_v1", "1");
+    load_kanki_plans(db) > 0
+}
+
 fn load_kanki_plans(db: &crate::db::Db) -> usize {
     let _ = db.exec("UPDATE plans SET active=0 WHERE active=1", &[]);
     let mut n = 0;
@@ -306,8 +316,9 @@ fn load_kanki_plans(db: &crate::db::Db) -> usize {
 
 /// The chat's menu button (it opens the mini app): for a customer with a working account, and for everyone else.
 /// Short on purpose: the button sits beside the message box and a long text left no room to type.
-const MENU_MINE: &str = "👤 کانکی من";
-const MENU_NEW: &str = "🚀 کانکی اپ";
+/// In English: Telegram (Android) left a short Persian text on this button blank.
+const MENU_MINE: &str = "My Kanki 👤";
+const MENU_NEW: &str = "Kanki 🚀";
 
 /// How to add a v2ray subscription link, under a v2ray account
 const V2RAY_HELP: &str = "📲 <b>اتصال با برنامه‌های V2Ray</b>\n• اندروید: v2rayNG (گوگل‌پلی)\n• آیفون: Streisand یا V2Box (اپ‌استور)\n• ویندوز: v2rayN یا Nekoray\n\n1️⃣ لینک بالا رو کپی کنید.\n2️⃣ توی برنامه: ➕ ← اضافه کردن اشتراک (Subscription) و لینک رو بذارید.\n3️⃣ اشتراک رو به‌روز (Update) کنید، یه سرور رو انتخاب کنید و وصل بشید.\n\nسرورها که عوض بشن، با به‌روز کردن اشتراک خودش درست می‌شه.";
@@ -1192,6 +1203,7 @@ impl Bot {
 
     // ============================================================ حلقه‌ی اصلی
     pub async fn run(self: Arc<Self>) {
+        kanki_plans_once(self.db());
         *running_slot().lock().unwrap_or_else(|e| e.into_inner()) = Some(self.clone());
         // the chat's menu button opens the mini app (an admin can switch it off: mini_menu = 0)
         let mini = crate::miniapp::url(&self.app);
@@ -1200,6 +1212,19 @@ impl Bot {
         }
         if self.db().get("api_key").is_empty() {
             self.db().set("api_key", &rand_token(40));
+        }
+        // every chat that got an older menu button text gets the new one, once (a few per second, under Telegram's limit)
+        if self.db().get("menu_text_v") != "2" {
+            self.db().set("menu_text_v", "2");
+            let me = self.clone();
+            tokio::spawn(async move {
+                let ids: Vec<i64> = me.db().with(|c| { let mut s = c.prepare("SELECT tg_id FROM bot_users WHERE blocked=0").unwrap();
+                    let v = s.query_map([], |r| r.get(0)).unwrap().filter_map(|x| x.ok()).collect(); v });
+                for id in ids {
+                    me.set_menu(id).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                }
+            });
         }
         let me = self.clone();
         tokio::spawn(async move { me.background().await });
@@ -1765,7 +1790,14 @@ impl Bot {
             let vol = if p.gb > 0.0 { format!("{}GB", p.gb) } else { "نامحدود".to_string() };
             let data = if pattern.contains("{}") { pattern.replace("{}", &p.id.to_string()) } else { format!("{}:{}", pattern, p.id) };
             let tag = p.badge.split_whitespace().next().map(|e| format!("{} ", e)).unwrap_or_default();
-            rows.push(vec![b(&format!("{}📅 {} · 👤 {} · {} · {}", tag, dur, p.conns, vol, price), &data)]);
+            // a plan whose name starts with its emoji («💎 ۵۰ گیگ · ۱ ماهه») says everything itself
+            let named = p.name.chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(false);
+            let label = if named {
+                format!("{} · {}{}", p.name, price, tag.trim_end().chars().next().map(|_| format!(" {}", tag.trim_end())).unwrap_or_default())
+            } else {
+                format!("{}📅 {} · 👤 {} · {} · {}", tag, dur, p.conns, vol, price)
+            };
+            rows.push(vec![b(&label, &data)]);
         }
         // any volume and days, chosen in the mini app (same price rules as the plans)
         let renew: i64 = if pattern == "pl" { 0 } else { pattern.rsplit(':').next().and_then(|x| x.parse().ok()).unwrap_or(0) };
@@ -3532,6 +3564,21 @@ mod flow_tests {
         tap(&bot, from(ADMIN, "Admin", "admin"), &format!("psw:{}", pro)).await;
         let sv: String = db.with(|c| c.query_row("SELECT service FROM plans WHERE id=?1", [pro], |r| r.get(0)).unwrap());
         assert_eq!(sv, "v2ray");
+    }
+
+    #[tokio::test]
+    async fn kanki_plans_come_once_by_themselves() {
+        let (bot, _log) = bot().await;
+        let db = bot.db();
+        db.exec("INSERT INTO plans(name,days,gb,toman,usd,conns,active) VALUES('Old',30,20,100000,0,2,1)", &[]).unwrap();
+        assert!(kanki_plans_once(db));
+        let on: i64 = db.with(|c| c.query_row("SELECT COUNT(*) FROM plans WHERE active=1", [], |r| r.get(0)).unwrap());
+        assert_eq!(on, 9);
+        // the admin's later changes stay: it does not come again
+        db.exec("UPDATE plans SET toman=99000 WHERE name LIKE '%۲۰ گیگ%'", &[]).unwrap();
+        assert!(!kanki_plans_once(db));
+        let t: i64 = db.with(|c| c.query_row("SELECT toman FROM plans WHERE active=1 AND name LIKE '%۲۰ گیگ%'", [], |r| r.get(0)).unwrap());
+        assert_eq!(t, 99000);
     }
 
     #[tokio::test]

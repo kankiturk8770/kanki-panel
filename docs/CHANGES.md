@@ -1,3 +1,9 @@
+# v3.28.1 — Kanki's plans by themselves, an English menu button, no old orders in the shop
+- **Plans:** Kanki's 9 plans now replace the listed plans once by themselves when the bot starts after this update (`kanki_plans_once`, setting `kanki_plans_v1`); the old plans are hidden, not deleted, so their orders stay. After that the admin's own changes stay. The «⚡ جایگزینی با ۹ پلن کانکی» button is still there to do it again.
+- **Bot plan buttons:** a plan whose name starts with its emoji shows its name, price and label emoji: «💎 ۵۰ گیگ · ۱ ماهه · 110,000 تومان 🔥».
+- **Menu button:** «Kanki 🚀», and «My Kanki 👤» with a working account. Telegram on Android showed the short Persian text («🚀 کانکی اپ») as an empty button. Every chat that got an older text gets the new one once, a few per second, when the bot starts.
+- **Mini app shop:** the «سفارش‌های من» list is no longer under the plans for someone without an account (it showed their old orders); orders stay on the subscription tab of an account.
+- Test: `kanki_plans_come_once_by_themselves`.
 # v3.28.0 — the mini app shop in Kanki's black and yellow, Kanki's 9 plans, a short delivery message
 - **Mini app look:** AMOLED black with Kanki yellow in every Telegram theme (no longer the user's theme colours); Telegram's top and bottom bars are set to the same black (`setHeaderColor`, `setBackgroundColor`); a brand bar with the shield and «⚡ Kanki VPN» on every view; the page title is «⚡ Kanki VPN». (The name in Telegram's own top bar is the bot's name, set in BotFather.)
 - **Shop:** one tab per kind of plan (its category, e.g. 👤 تک‌کاربره · 👥 چندکاربره · ⏳ بلندمدت, and 🧮 دلخواه for the custom purchase), so nothing scrolls for long. Each plan is a card: its emoji, 🔋 volume, 📅 time, 👥 users, the price in yellow, a higher price struck through with the saving («۱۳٪ تخفیف»), and its label as a ribbon; a plan whose label has 🔥 / «پیشنهاد» / «محبوب» gets a yellow frame and a blinking ribbon.
