@@ -1158,6 +1158,8 @@ pub const SETTING_KEYS: &[&str] = &[
     "bst_disc", "bst_shop", "bst_miniapp", "bst_amz", "bst_cfg",
     // 3.29: TON checked on the chain and Telegram Stars, both at today's price (pay.rs)
     "ton_on", "stars_on", "star_usd", "toncenter_key",
+    // 3.30: the Windows app in the connection guide
+    "win_link",
 ];
 
 /// "owner/repo" with only the characters GitHub allows
