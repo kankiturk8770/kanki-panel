@@ -1041,10 +1041,14 @@ impl Bot {
             "w" => self.db().get("win_link").trim().starts_with("https://"),
             _ => false,
         };
+        // AmneziaVPN holds WireGuard, AmneziaWG and the Xray links (not Hysteria2): one backup file
+        let amz = (wg && !v2) || crate::xray::panel::user_links(&self.app, u).iter().any(|(_, l)| crate::amnezia::server(l, "").is_some());
         let mut v: Vec<&'static str> = vec![];
         if kanki { v.push("k"); }
-        if wg && !v2 { v.push("z"); }
+        // on an iPhone AmneziaVPN comes first (the Kanki app is not there); a V2Ray account still gets its V2Ray app first elsewhere
+        if amz && (!v2 || os == "i") { v.push("z"); }
         if links { v.push("v"); }
+        if amz && v2 && os != "i" { v.push("z"); }
         if have.contains(&"wireguard") && !v2 { v.push("g"); }
         v
     }
@@ -1109,7 +1113,7 @@ impl Bot {
                     _ => "https://play.google.com/store/apps/details?id=org.amnezia.vpn",
                 };
                 let where_ = match os { "i" => "اپ‌استور", "w" => "سایت گیت‌هاب (فایل Windows)", _ => "گوگل‌پلی" };
-                self.send(chat, &format!("🛡 <b>AmneziaVPN</b>\nهمه‌ی سرورهای شما (WireGuard و AmneziaWG، مستقیم و از راه تانل) با <b>یک فایل</b>.\n\n1️⃣ AmneziaVPN رو از {} نصب کنید (دکمه‌ی پایین).\n2️⃣ فایل بکاپی که الان میاد رو ذخیره کنید{}.\n3️⃣ توی برنامه: ⚙️ تنظیمات ← پشتیبان‌گیری (Backup) ← <b>بازیابی از نسخه‌ی پشتیبان</b> (Restore from backup) ← همین فایل.\n4️⃣ یک سرور رو انتخاب و دکمه‌ی اتصال رو بزنید ✅\n\n⚠️ بازیابی، سرورهای قبلی خود برنامه رو پاک می‌کنه.",
+                self.send(chat, &format!("🛡 <b>AmneziaVPN</b>\nهمه‌ی سرورهای شما (WireGuard، AmneziaWG و VLESS / Xray، مستقیم و از راه تانل) با <b>یک فایل</b>.\n\n1️⃣ AmneziaVPN رو از {} نصب کنید (دکمه‌ی پایین).\n2️⃣ فایل بکاپی که الان میاد رو ذخیره کنید{}.\n3️⃣ توی برنامه: ⚙️ تنظیمات ← پشتیبان‌گیری (Backup) ← <b>بازیابی از نسخه‌ی پشتیبان</b> (Restore from backup) ← همین فایل.\n4️⃣ یک سرور رو انتخاب و دکمه‌ی اتصال رو بزنید ✅\n\n⚠️ بازیابی، سرورهای قبلی خود برنامه رو پاک می‌کنه.",
                     where_, if os == "i" { " (روش بزنید ← اشتراک‌گذاری ← Save to Files)" } else { "" }),
                     Some(ik(vec![store("⬇️ دانلود AmneziaVPN", url), back]))).await;
                 self.send_amnezia(chat, qid, u, os).await;
@@ -1124,7 +1128,7 @@ impl Bot {
                     _ => ("https://play.google.com/store/apps/details?id=com.v2ray.ang",
                         "1️⃣ v2rayNG رو از گوگل‌پلی نصب کنید.\n2️⃣ لینک اشتراک پایین رو لمس کنید تا کپی بشه.\n3️⃣ v2rayNG رو باز کنید: ➕ ← <b>Import config from Clipboard</b>. خودش می‌فهمه لینک اشتراکه و توی اشتراک‌ها (Subscription) می‌ذاره.\n4️⃣ منوی ⋮ ← <b>Update subscription</b> تا کانفیگ‌ها بیان.\n5️⃣ یکی رو انتخاب و دکمه‌ی ▶️ پایین صفحه ✅"),
                 };
-                let note = if u.service() == "v2ray" { String::new() } else { "\n\nℹ️ این برنامه‌ها کانفیگ‌های VLESS (Xray) و Hysteria2 رو وصل می‌کنن. برای WireGuard / AmneziaWG، «AmneziaVPN» رو انتخاب کنید.".to_string() };
+                let note = if u.service() == "v2ray" { String::new() } else { "\n\nℹ️ این برنامه‌ها کانفیگ‌های VLESS (Xray) و Hysteria2 رو وصل می‌کنن. برای WireGuard / AmneziaWG، «AmneziaVPN» رو انتخاب کنید (اون VLESS رو هم داره).".to_string() };
                 self.send(chat, &format!("🚀 <b>{}</b>\n\n{}\n\n🔗 <b>لینک اشتراک شما</b> (یک بار اضافه کنید؛ سرورها عوض بشن با Update خودش درست می‌شه):\n<code>{}</code>{}", name, steps, esc(&link), note),
                     Some(ik(vec![store(&format!("⬇️ دانلود {}", name), get), back]))).await;
             }
@@ -1179,8 +1183,8 @@ impl Bot {
         if crate::api::links_text(&self.app, u).is_some() {
             rows.push(vec![b(&self.bt("cfg_l"), &format!("cfg:{}:l", u.id))]);
         }
-        // every WireGuard / AmneziaWG config in one AmneziaVPN restore file
-        if have.contains(&"wireguard") || have.contains(&"amneziawg") {
+        // every WireGuard / AmneziaWG config and Xray link in one AmneziaVPN restore file
+        if have.contains(&"wireguard") || have.contains(&"amneziawg") || crate::xray::panel::user_links(&self.app, u).iter().any(|(_, l)| crate::amnezia::server(l, "").is_some()) {
             rows.push(vec![b(&self.bt("amz"), &format!("amz:{}", u.id))]);
         }
         rows.push(vec![b(&self.bt("rename"), &format!("ren:{}", u.id))]);
@@ -1271,7 +1275,7 @@ impl Bot {
         let Some(plat) = crate::amnezia::platform(code) else { return false };
         let cfgs = crate::api::amnezia_configs(&self.app, u).await;
         let Some(body) = crate::amnezia::backup(&cfgs, plat) else {
-            self.answer(qid, "برای سرویس شما کانفیگ WireGuard یا AmneziaWG فعال نیست.", true).await;
+            self.answer(qid, "برای سرویس شما کانفیگی که AmneziaVPN بخونه (WireGuard، AmneziaWG یا VLESS) فعال نیست.", true).await;
             return false;
         };
         let cap = format!(
@@ -1881,7 +1885,7 @@ impl Bot {
                 let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) else { return };
                 if head == "amz" {
                     let row = crate::amnezia::PLATFORMS.iter().map(|p| b(p.2, &format!("amp:{}:{}", u.id, p.0))).collect();
-                    self.send(chat, "📦 <b>بکاپ Amnezia</b>\n\nهمه‌ی سرورهای WireGuard و AmneziaWG شما توی یک فایل، برای برنامه‌ی <b>AmneziaVPN</b>.\n\nگوشی یا کامپیوترتون کدومه؟", Some(ik(vec![row]))).await;
+                    self.send(chat, "📦 <b>بکاپ Amnezia</b>\n\nهمه‌ی سرورهای WireGuard، AmneziaWG و VLESS (Xray) شما توی یک فایل، برای برنامه‌ی <b>AmneziaVPN</b>.\n\nگوشی یا کامپیوترتون کدومه؟", Some(ik(vec![row]))).await;
                 } else {
                     self.send_amnezia(chat, &qid, &u, parts.next().unwrap_or("")).await;
                 }
@@ -3838,7 +3842,7 @@ const HOW_TARGETS: &[(&str, &str)] = &[("k", "a"), ("k", "w"), ("z", "a"), ("z",
 fn how_app_line(app: &str, os: &str) -> (&'static str, &'static str) {
     match app {
         "k" => ("اپ اختصاصی Kanki VPN", "همه‌ی سرورها و پروتکل‌ها با یک کد؛ ساده‌ترین راه"),
-        "z" => ("AmneziaVPN", "همه‌ی سرورهای WireGuard و AmneziaWG با یک فایل بکاپ"),
+        "z" => ("AmneziaVPN", "همه‌ی سرورها (WireGuard، AmneziaWG و VLESS / Xray) با یک فایل بکاپ"),
         "v" => (match os { "i" => "V2Box", "w" => "v2rayN", _ => "v2rayNG" }, "با لینک اشتراک؛ کانفیگ‌های VLESS (Xray) و Hysteria2"),
         _ => ("WireGuard", "فقط کانفیگ‌های WireGuard، هر سرور یک فایل"),
     }
