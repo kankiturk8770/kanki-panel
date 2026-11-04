@@ -636,8 +636,9 @@ pub async fn send_backup(app: &App) -> Result<(), String> {
     let part = reqwest::multipart::Part::bytes(bytes).file_name(name);
     let form = reqwest::multipart::Form::new().text("chat_id", chat).text("caption", caption).part("document", part);
     let r = app.http.post(format!("https://api.telegram.org/bot{}/sendDocument", token)).multipart(form)
-        .timeout(std::time::Duration::from_secs(180)).send().await.map_err(|e| e.to_string())?;
-    let v: Value = r.json().await.map_err(|e| e.to_string())?;
+        .timeout(std::time::Duration::from_secs(180)).send().await.map_err(|e| e.without_url().to_string())?;
+    // without the address: it holds the bot token
+    let v: Value = r.json().await.map_err(|e| e.without_url().to_string())?;
     if v["ok"].as_bool() == Some(true) {
         Ok(())
     } else {

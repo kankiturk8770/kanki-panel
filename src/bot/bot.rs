@@ -78,6 +78,10 @@ pub struct Bot {
     /// each admin's copy of an order's receipt: order -> (chat, message, is a photo, text), so a decision
     /// shows on every copy (lost on restart: then only the copy that was tapped changes)
     order_msgs: Mutex<HashMap<i64, Vec<ReceiptCopy>>>,
+    /// customers seen in the required channel, until when (asked again after 10 minutes)
+    members: Mutex<HashMap<i64, i64>>,
+    /// the bot's @username (asked from Telegram once)
+    me_name: Mutex<String>,
 }
 
 /// One admin's copy of an order receipt: (chat, message, is a photo, text)
@@ -504,7 +508,7 @@ impl Bot {
             app, token, admins,
             http: reqwest::Client::builder().timeout(std::time::Duration::from_secs(75)).connect_timeout(std::time::Duration::from_secs(15)).build().unwrap_or_default(),
             api: "https://api.telegram.org".into(),
-            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()), order_msgs: Mutex::new(HashMap::new()),
+            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()), order_msgs: Mutex::new(HashMap::new()), members: Mutex::new(HashMap::new()), me_name: Mutex::new(String::new()),
         }))
     }
 
@@ -663,6 +667,35 @@ impl Bot {
         self.admins.contains(&id)
     }
 
+    /// The bot's @username, asked from Telegram once
+    async fn my_username(&self) -> String {
+        let known = self.me_name.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if !known.is_empty() {
+            return known;
+        }
+        let me = self.call("getMe", json!({})).await.and_then(|v| v["username"].as_str().map(|s| s.to_string())).unwrap_or_default();
+        if !me.is_empty() {
+            *self.me_name.lock().unwrap_or_else(|e| e.into_inner()) = me.clone();
+        }
+        me
+    }
+
+    /// One customer's pace: at most 20 taps or messages in 10 seconds (a flood is dropped, so one person cannot
+    /// make the bot reach Telegram's own limit and leave everyone else waiting); admins and payments are never held
+    fn flood(&self, u: &Value) -> Option<(i64, String)> {
+        let (uid, qid) = if u["callback_query"].is_object() {
+            (u["callback_query"]["from"]["id"].as_i64().unwrap_or(0), u["callback_query"]["id"].as_str().unwrap_or("").to_string())
+        } else if u["message"].is_object() && !u["message"]["successful_payment"].is_object() {
+            (u["message"]["from"]["id"].as_i64().unwrap_or(0), String::new())
+        } else {
+            return None;
+        };
+        if uid == 0 || self.admin(uid) || crate::limit::hit("bot", &uid.to_string(), 20, 10) {
+            return None;
+        }
+        Some((uid, qid))
+    }
+
     // ============================================================ editable texts, buttons and tutorials
     /// Text of a customer button (the admin's own text, or the default).
     fn bt(&self, k: &str) -> String {
@@ -787,9 +820,34 @@ impl Bot {
     /// A Bot API call with Telegram's reason when it fails
     async fn call_res(&self, m: &str, mut body: Value) -> Result<Value, String> {
         self.paint(&mut body);
-        let r = self.http.post(format!("{}/bot{}/{}", self.api, self.token, m))
-            .json(&body).send().await.map_err(|e| e.to_string())?;
-        let v: Value = r.json().await.map_err(|e| e.to_string())?;
+        // a lost message is worse than a late one: Telegram's «too many requests» (429, it says how long to wait),
+        // its own errors (5xx) and a connection that never started are tried again, up to 3 more times. getUpdates is
+        // not: its loop asks again by itself. An error never carries the request's address (it holds the bot token).
+        let tries = if m == "getUpdates" { 1 } else { 4 };
+        let mut v = Value::Null;
+        for i in 0..tries {
+            let last = i + 1 == tries;
+            match self.http.post(format!("{}/bot{}/{}", self.api, self.token, m)).json(&body).send().await {
+                Err(e) if !last && e.is_connect() => {
+                    tokio::time::sleep(std::time::Duration::from_millis(700 * (i as u64 + 1))).await;
+                    continue;
+                }
+                Err(e) => return Err(e.without_url().to_string()),
+                Ok(r) => {
+                    let status = r.status().as_u16();
+                    v = r.json().await.map_err(|e| e.without_url().to_string())?;
+                    if v["ok"].as_bool() == Some(true) || last {
+                        break;
+                    }
+                    let wait = match v["error_code"].as_i64().unwrap_or(status as i64) {
+                        429 => v["parameters"]["retry_after"].as_u64().unwrap_or(1).clamp(1, 30) * 1000,
+                        500..=599 => 700 * (i as u64 + 1),
+                        _ => break,
+                    };
+                    tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                }
+            }
+        }
         if v["ok"].as_bool() == Some(true) {
             return Ok(v["result"].clone());
         }
@@ -960,13 +1018,32 @@ impl Bot {
 
     /// Sends a file; true when Telegram took it
     async fn send_doc(&self, chat: i64, bytes: Vec<u8>, name: &str, caption: &str) -> bool {
-        let part = reqwest::multipart::Part::bytes(bytes).file_name(name.to_string());
-        let form = reqwest::multipart::Form::new()
-            .text("chat_id", chat.to_string()).text("caption", caption.to_string()).part("document", part);
-        match self.http.post(format!("{}/bot{}/sendDocument", self.api, self.token)).multipart(form).timeout(std::time::Duration::from_secs(600)).send().await {
-            Ok(r) => r.json::<Value>().await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false),
-            Err(_) => false,
+        // tried again as call_res does: Telegram's «too many requests» and its 5xx, and a connection that never started
+        for i in 0..4u64 {
+            let part = reqwest::multipart::Part::bytes(bytes.clone()).file_name(name.to_string());
+            let form = reqwest::multipart::Form::new()
+                .text("chat_id", chat.to_string()).text("caption", caption.to_string()).part("document", part);
+            let wait = match self.http.post(format!("{}/bot{}/sendDocument", self.api, self.token)).multipart(form).timeout(std::time::Duration::from_secs(600)).send().await {
+                Ok(r) => {
+                    let status = r.status().as_u16() as i64;
+                    let v = r.json::<Value>().await.unwrap_or(Value::Null);
+                    if v["ok"].as_bool() == Some(true) {
+                        return true;
+                    }
+                    match v["error_code"].as_i64().unwrap_or(status) {
+                        429 => v["parameters"]["retry_after"].as_u64().unwrap_or(1).clamp(1, 30) * 1000,
+                        500..=599 => 700 * (i + 1),
+                        _ => return false,
+                    }
+                }
+                Err(e) if e.is_connect() => 700 * (i + 1),
+                Err(_) => return false,
+            };
+            if i < 3 {
+                tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+            }
         }
+        false
     }
 
     // ============================================================ کمکی‌های داده
@@ -1433,10 +1510,23 @@ impl Bot {
         if ch.is_empty() || self.admin(uid) {
             return true;
         }
-        match self.call("getChatMember", json!({"chat_id": ch, "user_id": uid})).await {
-            Some(v) => matches!(v["status"].as_str(), Some("member") | Some("administrator") | Some("creator")),
-            None => true,
+        // a member is not asked again for 10 minutes (every tap asked Telegram before); one who is not is asked each time
+        if self.members.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).map(|t| *t > now()).unwrap_or(false) {
+            return true;
         }
+        let ok = match self.call("getChatMember", json!({"chat_id": ch, "user_id": uid})).await {
+            Some(v) => matches!(v["status"].as_str(), Some("member") | Some("administrator") | Some("creator")),
+            None => return true,
+        };
+        if ok {
+            let mut m = self.members.lock().unwrap_or_else(|e| e.into_inner());
+            if m.len() > 50_000 {
+                let t = now();
+                m.retain(|_, until| *until > t);
+            }
+            m.insert(uid, now() + 600);
+        }
+        ok
     }
 
     // ============================================================ حلقه‌ی اصلی
@@ -1498,6 +1588,13 @@ impl Bot {
             for u in list {
                 offset = u["update_id"].as_i64().unwrap_or(offset) + 1;
                 let me = self.clone();
+                // too fast: a tap gets a short «slow down», a message is dropped
+                if let Some((_, qid)) = self.flood(&u) {
+                    if !qid.is_empty() {
+                        tokio::spawn(async move { me.answer(&qid, "⏳ لطفاً کمی آهسته‌تر؛ چند ثانیه صبر کنید.", false).await });
+                    }
+                    continue;
+                }
                 tokio::spawn(async move {
                     if u["callback_query"].is_object() {
                         me.on_callback(&u["callback_query"]).await;
@@ -1641,7 +1738,7 @@ impl Bot {
                 }
             },
             Wait::Rename(id) => {
-                let Some(u) = self.db().user(id).filter(|u| u.tg_id == uid || self.admin(uid)) else { return };
+                let Some(u) = self.db().user(id).filter(|_| self.admin(uid)) else { return };
                 match self.check_name(&text, id) {
                     Ok(n) => {
                         let _ = self.db().exec("UPDATE users SET username=?1 WHERE id=?2", &[&n, &id]);
@@ -1662,6 +1759,11 @@ impl Bot {
             }
             Wait::DiscountUse => {
                 let code = text.to_uppercase();
+                // 5 tries an hour: a code cannot be found by guessing
+                if !self.admin(uid) && !crate::limit::hit("disc", &uid.to_string(), 5, 3600) {
+                    self.send(chat, "⏳ چند بار کد اشتباه زده شد؛ یک ساعت بعد دوباره امتحان کنید.", Some(self.home_kb(uid))).await;
+                    return;
+                }
                 match self.discount_percent(&code) {
                     Some(p) => {
                         let plan_id = {
@@ -1719,6 +1821,11 @@ impl Bot {
     async fn got_receipt(&self, uid: i64, chat: i64, name: &str, method: &str, m: &Value) {
         let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned();
         let Some(pe) = pe else { return };
+        // at most 3 receipts an hour from one customer (the admins are not flooded with made-up ones)
+        if !self.admin(uid) && !crate::limit::hit("receipt", &uid.to_string(), 3, 3600) {
+            self.send(chat, "⏳ رسیدهای شما در صف بررسی‌اند؛ برای رسید بیشتر یک ساعت بعد بفرستید یا به پشتیبانی پیام بدید.", None).await;
+            return;
+        }
         let Some(p) = self.plan_on_sale(pe.plan) else { return };
         let photo = m["photo"].as_array().and_then(|a| a.last()).and_then(|x| x["file_id"].as_str()).map(|s| s.to_string());
         let reference = photo.clone().unwrap_or_else(|| m["text"].as_str().unwrap_or("").to_string());
@@ -1834,7 +1941,7 @@ impl Bot {
                 return self.edit(chat, mid, if d == "my" { "📊 سرویس خودتون رو از پایین انتخاب کنید 👇" } else { "🔁 سرویسی که می‌خواید تمدید کنید رو از پایین انتخاب کنید 👇" }, Some(ik(rows))).await;
             }
             "ref" => {
-                let me = self.call("getMe", json!({})).await.and_then(|v| v["username"].as_str().map(|s| s.to_string())).unwrap_or_default();
+                let me = self.my_username().await;
                 let cnt: i64 = self.db().with(|c| c.query_row("SELECT COUNT(*) FROM bot_users WHERE ref_by=?1", [uid], |r| r.get(0)).unwrap_or(0));
                 return self.edit(chat, mid, &format!(
                     "👥 <b>دعوت دوستان</b>\n\nبا اولین خرید هر دوستی که با لینک شما بیاید، <b>{} گیگ و {} روز</b> هدیه به سرویس شما اضافه می‌شود 🎁\n\n🔗 لینک شما:\n<code>https://t.me/{}?start=ref_{}</code>\n\n👤 تعداد دعوت‌ها: {}",
@@ -2004,9 +2111,13 @@ impl Bot {
                 }
                 return;
             }
+            // renaming is the admin's (an old «rename» button in a customer's chat does nothing)
             "ren" => {
                 let id: i64 = rest.parse().unwrap_or(0);
-                if let Some(u) = self.app.db.user(id).filter(|u| u.tg_id == uid || self.admin(uid)) {
+                if !self.admin(uid) {
+                    return self.answer(&qid, "تغییر نام فقط از طریق پشتیبانی انجام می‌شود.", true).await;
+                }
+                if let Some(u) = self.app.db.user(id) {
                     self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::Rename(id));
                     let head = format!("نام فعلی: <b>{}</b>\n\n", esc(&u.username));
                     return self.edit(chat, mid, &self.name_prompt(&head), Some(ik(vec![back(&format!("acc:{}", id))]))).await;
@@ -3611,8 +3722,10 @@ impl Bot {
             }
             Wait::DiscountAdd => {
                 if parts.len() < 3 { self.send(chat, "⚠️ فرمت نادرست است.", kb).await; return; }
+                let pct = parts[1].parse::<i64>().unwrap_or(0);
+                if !(1..=100).contains(&pct) { self.send(chat, "⚠️ درصد تخفیف باید بین ۱ و ۱۰۰ باشد.", kb).await; return; }
                 let r = db.exec("INSERT OR REPLACE INTO discounts(code,percent,uses_left) VALUES(?1,?2,?3)",
-                    &[&parts[0].to_uppercase(), &parts[1].parse::<i64>().unwrap_or(0), &parts[2].parse::<i64>().unwrap_or(0)]);
+                    &[&parts[0].to_uppercase(), &pct, &parts[2].parse::<i64>().unwrap_or(0)]);
                 self.send(chat, if r.is_ok() { "✅ کد تخفیف ساخته شد" } else { "⚠️ خطا" }, kb).await;
             }
             Wait::Broadcast => {
@@ -4008,7 +4121,7 @@ mod flow_tests {
         let (api, log) = fake_telegram().await;
         let bot = Arc::new(Bot {
             app, token: "TEST".into(), admins: vec![ADMIN], http: reqwest::Client::new(), api,
-            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()), order_msgs: Mutex::new(HashMap::new()),
+            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()), order_msgs: Mutex::new(HashMap::new()), members: Mutex::new(HashMap::new()), me_name: Mutex::new(String::new()),
         });
         (bot, log)
     }
@@ -4424,6 +4537,67 @@ mod flow_tests {
         assert!(t.contains("لینک اشتراک V2Ray") && t.contains("/v2") && t.contains("Import v2ray uri from clipboard"), "{}", t);
     }
 
+    /// A fake Telegram that says «too many requests» to the first `busy` calls, then takes them
+    async fn busy_telegram(busy: usize) -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+        let n = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let n2 = n.clone();
+        let router = axum::Router::new().route("/:bot/:method", axum::routing::post(move || {
+            let n = n2.clone();
+            async move {
+                let i = n.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                axum::Json(if i < busy { json!({"ok": false, "error_code": 429, "description": "Too Many Requests: retry after 1", "parameters": {"retry_after": 1}}) } else { json!({"ok": true, "result": {"message_id": 7}}) })
+            }
+        }));
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(l, router).await.unwrap() });
+        (format!("http://{}", addr), n)
+    }
+
+    fn bot_at(app: Arc<App>, api: &str, token: &str) -> Bot {
+        Bot { app, token: token.into(), admins: vec![ADMIN], http: reqwest::Client::new(), api: api.into(),
+            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()),
+            order_msgs: Mutex::new(HashMap::new()), members: Mutex::new(HashMap::new()), me_name: Mutex::new(String::new()) }
+    }
+
+    #[tokio::test]
+    async fn telegram_is_asked_again_and_the_token_never_shows() {
+        let (bot, log) = bot().await;
+        // «too many requests» twice: the message still goes, after the wait Telegram asked for
+        let (api, n) = busy_telegram(2).await;
+        let b2 = bot_at(bot.app.clone(), &api, "SECRET123TOKEN");
+        assert!(b2.send(7, "hi", None).await.is_some());
+        assert_eq!(n.load(std::sync::atomic::Ordering::SeqCst), 3);
+        // Telegram cannot be reached: the error says why without the address (it holds the token)
+        let b3 = bot_at(bot.app.clone(), "http://127.0.0.1:1", "SECRET123TOKEN");
+        let e = b3.call_res("sendMessage", json!({"chat_id": 7, "text": "x"})).await.unwrap_err();
+        assert!(!e.contains("SECRET123TOKEN") && !e.contains("/bot"), "{}", e);
+        // one customer tapping too fast is held after 20 taps in 10 seconds; an admin never
+        let tap_u = |id: i64| json!({"callback_query": {"id": "f", "from": {"id": id}, "data": "home"}});
+        assert!((0..20).all(|_| bot.flood(&tap_u(7601)).is_none()));
+        assert!(bot.flood(&tap_u(7601)).is_some());
+        assert!((0..30).all(|_| bot.flood(&tap_u(ADMIN)).is_none()));
+        // a payment is never held
+        assert!(bot.flood(&json!({"message": {"from": {"id": 7601}, "successful_payment": {}}})).is_none());
+        // renaming from an old button: only the admin
+        let tg = 7602;
+        bot.touch(tg, &from(tg, "Nima", "nima"), 0);
+        let u = bot.create_account(tg, 10.0, 30, 1, "x").unwrap();
+        tap_id(&bot, from(tg, "Nima", "nima"), &format!("ren:{}", u.id), "qr").await;
+        assert!(answers(&log, "qr")[0].contains("پشتیبانی"));
+        say(&bot, from(tg, "Nima", "nima"), "hacked1").await;
+        assert_ne!(bot.db().user(u.id).unwrap().username, "hacked1");
+        // discount codes: 5 tries an hour
+        for _ in 0..5 {
+            tap(&bot, from(tg, "Nima", "nima"), "disc").await;
+            say(&bot, from(tg, "Nima", "nima"), "GUESS").await;
+            assert!(last(&log, tg).contains("نامعتبر"), "{}", last(&log, tg));
+        }
+        tap(&bot, from(tg, "Nima", "nima"), "disc").await;
+        say(&bot, from(tg, "Nima", "nima"), "GUESS").await;
+        assert!(last(&log, tg).contains("یک ساعت بعد"), "{}", last(&log, tg));
+    }
+
     #[tokio::test]
     async fn kanki_plans_replace_the_listed_ones() {
         let (bot, log) = bot().await;
@@ -4833,14 +5007,18 @@ mod flow_tests {
         bot.clean_trials().await;
         assert_eq!(accounts(&bot, 200).len(), 1, "a bought account is never removed as a trial");
 
-        // B renames the account: rules and taken names are checked
+        // only the admin renames an account (the owner asked: customers do not): rules and taken names are checked
         tap(&bot, bb.clone(), "ren:2").await;
-        assert!(last(&log, 200).contains("نام فعلی"));
-        say(&bot, bb.clone(), "ERFAN").await;
-        assert!(last(&log, 200).contains("قبلاً گرفته شده"));
-        say(&bot, bb.clone(), "sara22").await;
+        say(&bot, bb.clone(), "sara99").await;
+        assert_eq!(accounts(&bot, 200)[0].1, "mahtab872");
+        let adm = from(ADMIN, "Admin", "admin");
+        tap(&bot, adm.clone(), "ren:2").await;
+        assert!(last(&log, ADMIN).contains("نام فعلی"));
+        say(&bot, adm.clone(), "ERFAN").await;
+        assert!(last(&log, ADMIN).contains("قبلاً گرفته شده"));
+        say(&bot, adm.clone(), "sara22").await;
         assert_eq!(accounts(&bot, 200)[0].1, "sara22");
-        // someone else cannot rename B's account
+        // nor anyone else
         tap(&bot, c.clone(), "ren:2").await;
         say(&bot, c.clone(), "hacked1").await;
         assert_eq!(accounts(&bot, 200)[0].1, "sara22");
