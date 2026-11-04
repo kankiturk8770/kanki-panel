@@ -32,6 +32,8 @@ enum Wait {
     CatRename(String),
     /// a customer types the name of their config, then this continues ("trial" or "buy")
     CfgName(String),
+    /// a TON order: the customer may send the transaction's link
+    TonTx(i64),
     /// a customer renames one of their accounts
     Rename(i64),
     /// the admin types "days GB [reason]" of a gift: for one account, or 0 = every active account
@@ -114,6 +116,8 @@ const BTNS: &[(&str, &str, &str)] = &[
     ("pay_zp", "🏦 درگاه بانکی (زرین‌پال)", "صفحه‌ی پرداخت"),
     ("pay_np", "🪙 درگاه ارزی (خودکار)", "صفحه‌ی پرداخت"),
     ("pay_wallet", "💰 ارز دیجیتال (کیف پول)", "صفحه‌ی پرداخت"),
+    ("pay_ton", "💎 پرداخت با TON (تأیید خودکار)", "صفحه‌ی پرداخت"),
+    ("pay_stars", "⭐️ پرداخت با استارز تلگرام", "صفحه‌ی پرداخت"),
     ("back", "⬅️ بازگشت", "همه‌ی صفحه‌ها"),
     ("home", "🏠 منوی اصلی", "بعد از خرید و زیر آموزش‌ها"),
 ];
@@ -125,7 +129,7 @@ const MAIN_BTNS: &[&str] = &["buy", "trial", "my", "renew", "guide", "ref", "app
 const TEXTS: &[(&str, &str, &str)] = &[
     ("welcome", "به ربات فروش خوش آمدید 🌟", "پیام خوش‌آمد (منوی اصلی)"),
     ("txt_menu", "از منوی زیر استفاده کنید 👇", "جواب پیام‌های بی‌ربط"),
-    ("txt_cats", "سلام 👋\nدسته‌بندی موردنظرتون رو از پایین انتخاب کنید 👇", "بالای دسته‌بندی پلن‌ها"),
+    ("txt_cats", "🛍 <b>پلن‌های Kanki VPN</b>\nنوع اشتراک رو از پایین انتخاب کنید 👇", "بالای دسته‌بندی پلن‌ها"),
     ("txt_plans", "سلام 👋\nپلن خودتون رو از پایین انتخاب کنید 👇", "بالای فهرست پلن‌ها"),
     ("txt_trial_ready", "🎁 <b>اکانت تست شما آماده است</b>", "بالای پیام اکانت تست"),
     ("txt_bought", "✅ <b>خرید شما با موفقیت انجام شد!</b>", "بالای پیام بعد از خرید"),
@@ -144,7 +148,7 @@ fn is_text_key(k: &str) -> bool {
 fn back_view(k: &str) -> &'static str {
     match k {
         "trial_gb" | "trial_days" => "a:trial",
-        "card_number" | "card_holder" | "zp_merchant" | "zp_callback" | "np_key" | "np_coins" | "wallet_text" => "a:pay",
+        "card_number" | "card_holder" | "zp_merchant" | "zp_callback" | "np_key" | "np_coins" | "wallet_text" | "ton_address" | "star_usd" => "a:pay",
         "ref_gb" | "ref_days" => "a:ref",
         "app_link" | "support" | "channel" => "a:links",
         _ if k.starts_with("btn_") => "a:btns",
@@ -171,6 +175,8 @@ fn key_title(k: &str) -> String {
         "trial_days" => "مدت تست (روز)".into(),
         "ref_gb" => "گیگ هدیه‌ی دعوت".into(),
         "ref_days" => "روز هدیه‌ی دعوت".into(),
+        "ton_address" => "آدرس کیف پول TON (مثل UQ… از Tonkeeper)".into(),
+        "star_usd" => "دلارِ هر استارز (پیش‌فرض 0.013: همان که تلگرام به صاحب ربات می‌دهد)".into(),
         _ => k.to_string(),
     }
 }
@@ -202,6 +208,9 @@ fn ik(rows: Kb) -> Value {
         .map(|row| row.into_iter().map(|(t, d)| {
             if let Some(u) = d.strip_prefix("url:") {
                 json!({"text": t, "url": u})
+            } else if let Some((st, data)) = d.strip_prefix('@').and_then(|r| r.split_once('@')) {
+                // "@<colour>@<data>": a button with its own colour (paint() leaves it)
+                json!({"text": t, "callback_data": data, "style": st})
             } else if let Some(r) = d.strip_prefix("webapp:") {
                 // "webapp:<colour key>:<url>": the key is read by paint() and not sent
                 let (k, u) = r.split_once(':').unwrap_or(("miniapp", r));
@@ -282,21 +291,66 @@ struct Plan {
 
 /// Kanki's own plans (the admin loads them with one button): (name, days, GB, users, toman, old toman, badge, category)
 const KANKI_PLANS: &[(&str, i64, f64, i64, i64, i64, &str, &str)] = &[
-    ("🥉 ۲۰ گیگ · ۱ ماهه", 30, 20.0, 1, 80000, 0, "", "تک‌کاربره"),
-    ("💎 ۵۰ گیگ · ۱ ماهه", 30, 50.0, 1, 110000, 0, "🔥 پیشنهاد ویژه", "تک‌کاربره"),
-    ("🥇 ۱۰۰ گیگ · ۱ ماهه", 30, 100.0, 1, 170000, 0, "🚀 پرمصرف", "تک‌کاربره"),
-    ("👥 ۵۰ گیگ · ۱ ماهه · ۲ کاربره", 30, 50.0, 2, 135000, 0, "", "چندکاربره"),
-    ("👨‍👩‍👧‍👦 ۱۰۰ گیگ · ۱ ماهه · ۲ کاربره", 30, 100.0, 2, 195000, 0, "", "چندکاربره"),
-    ("👑 ۱۰۰ گیگ · ۱ ماهه · ۳ کاربره", 30, 100.0, 3, 220000, 0, "", "چندکاربره"),
-    ("⏳ ۵۰ گیگ · ۲ ماهه", 60, 50.0, 1, 140000, 160000, "", "بلندمدت"),
-    ("🚀 ۱۰۰ گیگ · ۲ ماهه · ۲ کاربره", 60, 100.0, 2, 230000, 270000, "", "بلندمدت"),
-    ("🏆 ۱۰۰ گیگ · ۳ ماهه", 90, 100.0, 1, 260000, 330000, "", "بلندمدت"),
+    ("20 گیگ | 1 ماهه", 30, 20.0, 1, 80000, 0, "", "تک‌کاربره"),
+    ("50 گیگ | 1 ماهه", 30, 50.0, 1, 110000, 0, "🔥 پیشنهاد ویژه", "تک‌کاربره"),
+    ("100 گیگ | 1 ماهه", 30, 100.0, 1, 170000, 0, "🚀 پرمصرف", "تک‌کاربره"),
+    ("50 گیگ | 2 کاربره | 1 ماهه", 30, 50.0, 2, 135000, 0, "", "چندکاربره"),
+    ("100 گیگ | 2 کاربره | 1 ماهه", 30, 100.0, 2, 195000, 0, "", "چندکاربره"),
+    ("100 گیگ | 3 کاربره | 1 ماهه", 30, 100.0, 3, 220000, 0, "", "چندکاربره"),
+    ("50 گیگ | 2 ماهه", 60, 50.0, 1, 140000, 160000, "", "بلندمدت"),
+    ("100 گیگ | 2 کاربره | 2 ماهه", 60, 100.0, 2, 230000, 270000, "", "بلندمدت"),
+    ("100 گیگ | 3 ماهه", 90, 100.0, 1, 260000, 330000, "", "بلندمدت"),
 ];
+
+/// The names the 9 plans had in 3.28 (an emoji first, Persian digits): renamed once to the ones above
+const KANKI_NAMES_328: &[&str] = &[
+    "🥉 ۲۰ گیگ · ۱ ماهه", "💎 ۵۰ گیگ · ۱ ماهه", "🥇 ۱۰۰ گیگ · ۱ ماهه", "👥 ۵۰ گیگ · ۱ ماهه · ۲ کاربره",
+    "👨‍👩‍👧‍👦 ۱۰۰ گیگ · ۱ ماهه · ۲ کاربره", "👑 ۱۰۰ گیگ · ۱ ماهه · ۳ کاربره", "⏳ ۵۰ گیگ · ۲ ماهه",
+    "🚀 ۱۰۰ گیگ · ۲ ماهه · ۲ کاربره", "🏆 ۱۰۰ گیگ · ۳ ماهه",
+];
+
+/// How each kind of plan looks in the shop: (category, emoji, button colour, one line about it)
+const CAT_LOOK: &[(&str, &str, &str, &str)] = &[
+    ("تک‌کاربره", "👤", "primary", "برای یک گوشی یا یک کامپیوتر"),
+    ("چندکاربره", "👥", "success", "یک اشتراک برای چند دستگاه هم‌زمان (خانواده و دوستان)"),
+    ("بلندمدت", "⏳", "danger", "۲ و ۳ ماهه، با تخفیف"),
+];
+
+/// The emoji, colour and line of a category (one not in the table: a folder and a colour by its place)
+fn cat_look(name: &str, i: usize) -> (&'static str, &'static str, &'static str) {
+    match CAT_LOOK.iter().find(|c| c.0 == name) {
+        Some(c) => (c.1, c.2, c.3),
+        None => ("📂", ["primary", "success", "danger"][i % 3], ""),
+    }
+}
+
+/// A plan's button in the shop, with English digits and clear separators: «50 گیگ — 2 کاربره — 1 ماهه — 135,000 تومان 🔥»
+fn plan_button(p: &Plan, price: i64) -> String {
+    let mut parts = vec![if p.gb > 0.0 { format!("{} گیگ", p.gb) } else { "نامحدود".into() }];
+    if p.conns > 1 {
+        parts.push(format!("{} کاربره", p.conns));
+    }
+    parts.push(match p.days {
+        0 => "بی‌پایان".to_string(),
+        d if d % 30 == 0 => format!("{} ماهه", d / 30),
+        d => format!("{} روزه", d),
+    });
+    parts.push(if price > 0 { toman(price) } else { format!("{}$", p.usd) });
+    let mark = p.badge.split_whitespace().next().filter(|e| e.chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(false));
+    format!("{}{}", parts.join(" — "), mark.map(|e| format!(" {}", e)).unwrap_or_default())
+}
 
 /// Hides every listed plan (kept for their orders) and adds Kanki's plans; how many were added
 /// Kanki's plans replace the old ones once, by themselves (the owner asked for them on the live bot); after that
 /// the admin's own changes stay
 fn kanki_plans_once(db: &crate::db::Db) -> bool {
+    // 3.29: the 9 plans' names with English digits (only a plan that still has its 3.28 name)
+    if db.get("kanki_plans_v2") != "1" {
+        db.set("kanki_plans_v2", "1");
+        for (old, new) in KANKI_NAMES_328.iter().zip(KANKI_PLANS.iter()) {
+            let _ = db.exec("UPDATE plans SET name=?1 WHERE name=?2", &[&new.0, old]);
+        }
+    }
     if db.get("kanki_plans_v1") == "1" {
         return false;
     }
@@ -507,7 +561,11 @@ impl Bot {
                     Some((p, _)) => match p.style.as_str() {
                         "success" | "primary" | "danger" => p.style,
                         "none" => String::new(),
-                        _ => if p.conns >= 2 { "success".into() } else { "primary".into() },
+                        // its category's colour (as the category button), else by users
+                        _ => match CAT_LOOK.iter().find(|c| c.0 == p.category) {
+                            Some(c) => c.2.to_string(),
+                            None => if p.conns >= 2 { "success".into() } else { "primary".into() },
+                        },
                     },
                     None => String::new(),
                 }
@@ -1185,6 +1243,9 @@ impl Bot {
             "zp" => db.on("zp_on") && !db.get("zp_merchant").is_empty() && t > 0,
             "np" => db.on("np_on") && !db.get("np_key").is_empty() && u > 0.0,
             "wallet" => db.on("wallet_on") && wallet_has_address(db) && u > 0.0,
+            // priced from the toman price at today's rate; checked on the chain / by Telegram, never by hand
+            "ton" => db.on("ton_on") && crate::pay::raw_address(&db.get("ton_address")).is_some() && t > 0,
+            "stars" => db.on("stars_on") && t > 0,
             _ => false,
         }
     }
@@ -1204,6 +1265,8 @@ impl Bot {
     // ============================================================ حلقه‌ی اصلی
     pub async fn run(self: Arc<Self>) {
         kanki_plans_once(self.db());
+        let me3 = self.clone();
+        tokio::spawn(async move { me3.ton_watch().await });
         *running_slot().lock().unwrap_or_else(|e| e.into_inner()) = Some(self.clone());
         // the chat's menu button opens the mini app (an admin can switch it off: mini_menu = 0)
         let mini = crate::miniapp::url(&self.app);
@@ -1236,7 +1299,7 @@ impl Bot {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 continue;
             }
-            let res = self.call_res("getUpdates", json!({"offset": offset, "timeout": 30, "allowed_updates": ["message", "callback_query"]})).await;
+            let res = self.call_res("getUpdates", json!({"offset": offset, "timeout": 30, "allowed_updates": ["message", "callback_query", "pre_checkout_query"]})).await;
             match &res {
                 Ok(_) => {
                     self.app.bot_alive.store(now(), std::sync::atomic::Ordering::Relaxed);
@@ -1261,6 +1324,10 @@ impl Bot {
                 tokio::spawn(async move {
                     if u["callback_query"].is_object() {
                         me.on_callback(&u["callback_query"]).await;
+                    } else if u["pre_checkout_query"].is_object() {
+                        me.on_pre_checkout(&u["pre_checkout_query"]).await;
+                    } else if u["message"]["successful_payment"].is_object() {
+                        me.on_stars_paid(&u["message"]).await;
                     } else if u["message"].is_object() {
                         me.on_message(&u["message"]).await;
                     }
@@ -1363,6 +1430,28 @@ impl Bot {
         };
         match w {
             Wait::Receipt(method) => self.got_receipt(uid, chat, &name, &method, m).await,
+            Wait::TonTx(oid) => {
+                let again = |me: &Self| me.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::TonTx(oid));
+                let kb = Some(ik(vec![vec![b("🔍 بررسی پرداخت", &format!("tchk:{}", oid))], vec![b(&self.bt("home"), "home")]]));
+                let Some(h) = crate::pay::hash_in(&text) else {
+                    again(self);
+                    self.send(chat, "🔗 لینک تراکنش (از Tonviewer یا Tonscan یا تاریخچه‌ی Tonkeeper) یا هش تراکنش رو بفرستید. پرداخت با کامنت درست خودکار تأیید می‌شه.", kb).await;
+                    return;
+                };
+                match self.ton_check(oid, Some(&h)).await {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        if self.ton_order(oid).is_some() {
+                            again(self);
+                            self.send(chat, "⏳ هنوز روی شبکه پیدا نشد؛ چند ثانیه بعد «بررسی پرداخت» رو بزنید.", kb).await;
+                        }
+                    }
+                    Err(e) => {
+                        if self.ton_order(oid).is_some() { again(self); }
+                        self.send(chat, &format!("⚠️ {}", e), kb).await;
+                    }
+                }
+            }
             Wait::CfgName(next) => match self.check_name(&text, 0) {
                 Ok(n) => {
                     let _ = self.db().exec("UPDATE bot_users SET cfg_name=?1 WHERE tg_id=?2", &[&n, &uid]);
@@ -1678,6 +1767,19 @@ impl Bot {
             }
             "pay" => return self.pay(uid, chat, mid, rest).await,
             "npc" => return self.np_start(uid, chat, mid, rest).await,
+            "tchk" => {
+                let oid: i64 = rest.parse().unwrap_or(0);
+                let Some(o) = self.order(oid) else { return };
+                if o.1 != uid { return; }
+                if o.6 == "done" || o.6 == "paid" {
+                    return self.answer(&qid, "این سفارش قبلاً پرداخت و فعال شده ✅", true).await;
+                }
+                return match self.ton_check(oid, None).await {
+                    Ok(true) => {}
+                    Ok(false) => self.answer(&qid, "⏳ هنوز پرداختی با کامنت این سفارش روی شبکه نیست. اگه پرداخت کردید چند ثانیه صبر کنید؛ خودکار تأیید می‌شه.", true).await,
+                    Err(e) => self.answer(&qid, &e, true).await,
+                };
+            }
             "chk" => {
                 let oid: i64 = rest.parse().unwrap_or(0);
                 let o = self.order(oid);
@@ -1767,17 +1869,35 @@ impl Bot {
         let mut back_to = top.clone();
         if !cats.is_empty() {
             if sel == "m" {
-                let mut rows: Kb = cats.iter().enumerate().map(|(i, c)| vec![b(&format!("📂 {}", c.1), &format!("pcat:{}:{}:{}", mode, i, code))]).collect();
+                // each kind with its emoji, its colour and its cheapest price; the message says what each is for
+                let mut rows: Kb = vec![];
+                let mut about = vec![];
+                for (i, c) in cats.iter().enumerate() {
+                    let (em, st, line) = cat_look(&c.1, i);
+                    let of: Vec<&Plan> = list.iter().filter(|p| p.category == c.1).collect();
+                    let from = of.iter().map(|p| p.toman).filter(|t| *t > 0).min().unwrap_or(0);
+                    let off = of.iter().any(|p| p.old_toman > p.toman);
+                    let lbl = format!("{} {}{}{}", em, c.1, if from > 0 { format!(" — از {}", toman(from)) } else { String::new() }, if off { " 🏷" } else { "" });
+                    rows.push(vec![b(&lbl, &format!("@{}@pcat:{}:{}:{}", st, mode, i, code))]);
+                    if !line.is_empty() {
+                        about.push(format!("{} <b>{}</b>: {}", em, esc(&c.1), line));
+                    }
+                }
                 if has_other { rows.push(vec![b(&self.bt("other_plans"), &format!("pcat:{}:o:{}", mode, code))]); }
                 rows.push(vec![b(&back_lbl, &top)]);
-                return self.edit(chat, mid, &format!("{}{}", head, self.tx("txt_cats")), Some(ik(rows))).await;
+                let about = if about.is_empty() { String::new() } else { format!("\n\n{}", about.join("\n")) };
+                return self.edit(chat, mid, &format!("{}{}{}", head, self.tx("txt_cats"), about), Some(ik(rows))).await;
             }
             let want: String = if sel == "o" {
                 String::new()
             } else {
                 sel.parse::<usize>().ok().and_then(|i| cats.get(i)).map(|c| c.1.clone()).unwrap_or_default()
             };
-            title = if want.is_empty() { "📦 <b>سایر پلن‌ها</b>\nپلن خودتون رو از پایین انتخاب کنید 👇".to_string() } else { format!("📂 <b>{}</b>\nپلن خودتون رو از پایین انتخاب کنید 👇", esc(&want)) };
+            title = if want.is_empty() { "📦 <b>سایر پلن‌ها</b>\nپلن خودتون رو از پایین انتخاب کنید 👇".to_string() } else {
+                let i = cats.iter().position(|c| c.1 == want).unwrap_or(0);
+                let (em, _, line) = cat_look(&want, i);
+                format!("{} <b>{}</b>{}\n\nپلن خودتون رو از پایین انتخاب کنید 👇", em, esc(&want), if line.is_empty() { String::new() } else { format!("\n{}", line) })
+            };
             list.retain(|p| p.category == want);
             back_to = format!("pcat:{}:m:{}", mode, code);
         }
@@ -1785,26 +1905,15 @@ impl Bot {
         list.sort_by_key(|x| (x.days, x.conns, x.toman));
         let mut rows: Kb = vec![];
         for p in list.iter() {
-            let price = if p.toman > 0 { toman(p.toman) } else { format!("{}$", p.usd) };
-            let dur = if p.days > 0 && p.days % 30 == 0 { format!("{} ماهه", p.days / 30) } else { format!("{} روزه", p.days) };
-            let vol = if p.gb > 0.0 { format!("{}GB", p.gb) } else { "نامحدود".to_string() };
             let data = if pattern.contains("{}") { pattern.replace("{}", &p.id.to_string()) } else { format!("{}:{}", pattern, p.id) };
-            let tag = p.badge.split_whitespace().next().map(|e| format!("{} ", e)).unwrap_or_default();
-            // a plan whose name starts with its emoji («💎 ۵۰ گیگ · ۱ ماهه») says everything itself
-            let named = p.name.chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(false);
-            let label = if named {
-                format!("{} · {}{}", p.name, price, tag.trim_end().chars().next().map(|_| format!(" {}", tag.trim_end())).unwrap_or_default())
-            } else {
-                format!("{}📅 {} · 👤 {} · {} · {}", tag, dur, p.conns, vol, price)
-            };
-            rows.push(vec![b(&label, &data)]);
+            rows.push(vec![b(&plan_button(p, p.toman), &data)]);
         }
         // any volume and days, chosen in the mini app (same price rules as the plans)
         let renew: i64 = if pattern == "pl" { 0 } else { pattern.rsplit(':').next().and_then(|x| x.parse().ok()).unwrap_or(0) };
         // the custom purchase makes a full (vip) account
         if let Some(r) = self.shop_row(renew).filter(|_| svc != "v2ray") {
             rows.push(r);
-            title.push_str("\n\n🧮 حجم، روز و تعداد کاربر دلخواه می‌خواید؟ دکمه‌ی «حجم و روز دلخواه» رو بزنید؛ قیمت همون‌جا حساب می‌شه.");
+            title.push_str("\n\n🧮 حجم و روز دلخواه: قیمت همون‌جا حساب می‌شه.");
         }
         if rows.is_empty() {
             return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b(&back_lbl, &back_to)]]))).await;
@@ -1819,19 +1928,31 @@ impl Bot {
         let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned().unwrap_or_default();
         let (t, u) = self.price(&p, &pe);
         let mut rows: Kb = vec![];
-        for (m, k) in [("card", "pay_card"), ("zp", "pay_zp"), ("np", "pay_np"), ("wallet", "pay_wallet")] {
+        for (m, k) in [("card", "pay_card"), ("zp", "pay_zp"), ("ton", "pay_ton"), ("stars", "pay_stars"), ("np", "pay_np"), ("wallet", "pay_wallet")] {
             if self.method_ok(m, t, u) {
                 rows.push(vec![b(&self.bt(k), &format!("pay:{}", m))]);
             }
         }
         if pe.discount.is_empty() { rows.push(vec![b(&self.bt("disc"), "disc")]); }
         rows.push(vec![b(&self.bt("back"), "home")]);
+        // the same price in TON and in Stars, at today's rate (when those are offered)
+        let (ton_on, stars_on) = (self.method_ok("ton", t, u), self.method_ok("stars", t, u));
+        let mut crypto = String::new();
+        if ton_on || stars_on {
+            if let Some(r) = crate::pay::rates(&self.app).await {
+                let mut x = vec![];
+                if ton_on { x.push(format!("💎 {} TON", crate::pay::ton_text(crate::pay::ton_nano(t, &r)))); }
+                if stars_on { x.push(format!("⭐️ {} استارز", crate::pay::stars_for(t, &r, crate::pay::star_usd(self.db())))); }
+                crypto = format!("\n≈ {}", x.join("  ·  "));
+            }
+        }
         let txt = format!(
-            "📦 <b>{}</b>\n{}\nحجم: {} · مدت: {} روز · {} کاربر{}\nقیمت: <b>{}</b>{}{}\n\nروش پرداخت را انتخاب کنید:",
+            "📦 <b>{}</b>\n{}\nحجم: {} · مدت: {} روز · {} کاربر{}\nقیمت: <b>{}</b>{}{}{}\n\nروش پرداخت را انتخاب کنید:",
             esc(&p.name), if p.service == "v2ray" { "🌐 سرویس استاندارد (V2Ray): لینک اشتراک برای v2rayNG، Streisand، V2Box" } else { "🚀 سرویس VIP: اپ کانکی، AmneziaWG، WireGuard و همه‌ی سرورها" }, if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, p.days, p.conns,
             if p.countries > 0 { format!(" · {} کشور", p.countries) } else { String::new() },
             if p.old_toman > t && pe.percent == 0 { format!("<s>{}</s>  {}", toman(p.old_toman), toman(t)) } else { toman(t) },
             if u > 0.0 { format!("  ·  <b>{}$</b>", u) } else { String::new() },
+            crypto,
             if pe.percent > 0 { format!("\n🎟 تخفیف {}٪ اعمال شده", pe.percent) } else { String::new() }
         );
         match mid {
@@ -1863,7 +1984,8 @@ impl Bot {
             }
             "wallet" => {
                 self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::Receipt("wallet".into()));
-                let ton = db.get("ton_address").trim().to_string();
+                // with automatic TON on, TON is paid there (checked on the chain), not by a receipt here
+                let ton = if db.on("ton_on") { String::new() } else { db.get("ton_address").trim().to_string() };
                 let usdt = db.get("usdt_address").trim().to_string();
                 let mut txt = format!("💰 <b>پرداخت ارزی</b>\n\nمبلغ: <b>{}$</b>", u);
                 let mut rows: Kb = vec![];
@@ -1889,6 +2011,8 @@ impl Bot {
                 rows.push(vec![b("⬅️ بازگشت", "home")]);
                 self.edit(chat, mid, &txt, Some(ik(rows))).await;
             }
+            "ton" => self.ton_start(uid, chat, mid, &p, &pe, t).await,
+            "stars" => self.stars_start(uid, chat, mid, &p, &pe, t).await,
             "np" => {
                 let rows: Kb = db.get("np_coins").split(',').filter(|c| !c.trim().is_empty())
                     .map(|c| vec![b(&c.trim().to_uppercase(), &format!("npc:{}", c.trim()))]).collect();
@@ -1943,6 +2067,227 @@ impl Bot {
             "🪙 دقیقاً این مقدار را بفرستید:\n<b>{} {}</b>\n\nبه آدرس:\n<code>{}</code>\n\n✅ بعد از تأیید شبکه، اشتراک <b>خودکار</b> فعال می‌شود.",
             v["pay_amount"], esc(&coin.to_uppercase()), esc(v["pay_address"].as_str().unwrap_or(""))),
             Some(ik(vec![vec![b("🔍 بررسی پرداخت", &format!("chk:{}", oid))]]))).await;
+    }
+
+    // ============================================================ TON and Stars (checked, never by hand)
+
+    /// Today's rate in one line, for the buyer: why the amount is what it is
+    fn rate_line(r: &crate::pay::Rates) -> String {
+        // Tehran time (UTC+3:30, no daylight saving since 2022)
+        let hm = chrono::DateTime::from_timestamp(r.at + 12600, 0).map(|d| d.format("%H:%M").to_string()).unwrap_or_default();
+        format!("📊 قیمت لحظه‌ای: هر TON = <b>{} تومان</b> (TON {}$ × دلار {} تومان)\n🕒 به‌روز: ساعت {} · منبع: {}",
+            crate::pay::group(r.ton_toman()), (r.ton_usd * 1000.0).round() / 1000.0, crate::pay::group(r.usd_toman), hm, esc(&r.src))
+    }
+
+    /// An order paid in TON: a fixed amount at today's price and a comment of its own, so its payment is found
+    /// on the chain without a receipt; the bot then checks every 20 seconds (and when the customer asks)
+    async fn ton_start(&self, uid: i64, chat: i64, mid: i64, p: &Plan, pe: &Pending, t: i64) {
+        let home = Some(ik(vec![vec![b(&self.bt("back"), "home")]]));
+        let Some(r) = crate::pay::rates(&self.app).await else {
+            return self.edit(chat, mid, "⚠️ قیمت لحظه‌ای TON الان در دسترس نیست؛ چند دقیقه بعد دوباره امتحان کنید یا روش دیگری انتخاب کنید.", home).await;
+        };
+        let addr = self.db().get("ton_address").trim().to_string();
+        let nano = crate::pay::ton_nano(t, &r);
+        let oid = self.new_order(uid, p, pe, "ton", &t.to_string(), "waiting", "");
+        let memo = format!("KANKI-{}-{}", oid, crate::util::rand_digits(4));
+        let _ = self.db().exec("UPDATE orders SET ref=?1 WHERE id=?2", &[&format!("{} {}", memo, nano), &oid]);
+        self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::TonTx(oid));
+        let ton = crate::pay::ton_text(nano);
+        let txt = format!(
+            "💎 <b>پرداخت با TON</b> · سفارش #{}\n\n💰 مبلغ: <b>{} TON</b>  (= {})\n{}\n\n👛 آدرس کیف پول:\n<code>{}</code>\n\n📝 کامنت (Comment) — <b>حتماً بنویسید</b>:\n<code>{}</code>\n\n\
+             ✅ با دکمه‌ی Tonkeeper مبلغ و کامنت خودشون پر می‌شن.\n🤖 بعد از پرداخت تأیید <b>خودکار</b> است (معمولاً زیر یک دقیقه). می‌تونید «بررسی پرداخت» رو بزنید یا لینک تراکنش (Tonviewer / Tonscan) رو همین‌جا بفرستید.\n⏱ این قیمت تا ۲ ساعت معتبره.",
+            oid, ton, toman(t), Self::rate_line(&r), esc(&addr), memo);
+        let link = format!("url:https://app.tonkeeper.com/transfer/{}?amount={}&text={}", addr, nano, memo);
+        self.edit(chat, mid, &txt, Some(ik(vec![
+            vec![b("💎 پرداخت با Tonkeeper", &link)],
+            vec![b("🔍 بررسی پرداخت", &format!("tchk:{}", oid))],
+            vec![b(&self.bt("back"), "home")],
+        ]))).await;
+    }
+
+    /// A transaction hash already used for an order (one payment pays one order)
+    fn tx_used(&self, hash: &str) -> bool {
+        // the hash is the last word of a paid order's ref (instr: no LIKE wildcards in a payment id)
+        let word = format!(" {}", hash);
+        self.db().with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE method IN ('ton','stars') AND instr(ref || ' ', ?1 || ' ')>0", [word], |r| r.get::<_, i64>(0)).unwrap_or(0)) > 0
+    }
+
+    /// (memo, nanoTON, created) of a TON order that is still waiting for its payment
+    fn ton_order(&self, oid: i64) -> Option<(i64, String, u128, i64)> {
+        let (tg, method, status, rf, created): (i64, String, String, String, i64) = self.db().with(|c| c.query_row(
+            "SELECT tg_id,method,status,ref,COALESCE(created,0) FROM orders WHERE id=?1", [oid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).ok())?;
+        if method != "ton" || status != "waiting" {
+            return None;
+        }
+        let mut w = rf.split_whitespace();
+        let memo = w.next()?.to_string();
+        let nano: u128 = w.next()?.parse().ok()?;
+        Some((tg, memo, nano, created))
+    }
+
+    /// Settles a TON order with a payment found on the chain: delivered when it is its own (its comment), not
+    /// used before, at least the amount and within the 2 hours of its price; a late or short payment goes to the
+    /// admins to decide. Ok(true) = delivered.
+    async fn ton_settle(&self, oid: i64, tx: &crate::pay::TonIn, by_comment: bool) -> Result<bool, String> {
+        let Some((tg, memo, need, created)) = self.ton_order(oid) else { return Err("این سفارش دیگر منتظر پرداخت نیست.".into()) };
+        if self.tx_used(&tx.hash) {
+            return Err("این تراکنش قبلاً برای یک سفارش استفاده شده.".into());
+        }
+        let late = tx.at > created + 7200;
+        let short = tx.nano < need;
+        let early = tx.at < created - 120;
+        if by_comment && !late && !short && !early {
+            // one call only gets past this (the watcher and the button can find it at the same moment)
+            let claimed = self.db().exec("UPDATE orders SET status='paid', ref=?1 WHERE id=?2 AND status='waiting'",
+                &[&format!("{} {} {}", memo, need, tx.hash), &oid]).unwrap_or(0);
+            if claimed != 1 {
+                return Ok(false);
+            }
+            self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&tg);
+            self.send(tg, &format!("✅ پرداخت <b>{} TON</b> سفارش #{} روی شبکه‌ی TON تأیید شد؛ در حال ساخت اشتراک…", crate::pay::ton_text(tx.nano as u64), oid), None).await;
+            self.fulfill(oid).await;
+            return Ok(true);
+        }
+        if early {
+            return Err("این تراکنش قبل از ثبت این سفارش انجام شده.".into());
+        }
+        // a real payment into the wallet that does not fit this order by itself: the admins decide
+        let why = if !by_comment { "بدون کامنت سفارش" } else if short { "کمتر از مبلغ سفارش" } else { "بعد از ۲ ساعت (قیمت قدیمی)" };
+        let claimed = self.db().exec("UPDATE orders SET status='pending', ref=?1 WHERE id=?2 AND status='waiting'",
+            &[&format!("{} {} {}", memo, need, tx.hash), &oid]).unwrap_or(0);
+        if claimed != 1 {
+            return Ok(false);
+        }
+        self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&tg);
+        let hash_hex = crate::tunnel::link::b64decode(&tx.hash).map(hex::encode).unwrap_or_else(|| tx.hash.clone());
+        let cap = format!("🧾 <b>سفارش #{} · TON</b> ({})\n👤 <code>{}</code>\n💎 رسیده: <b>{} TON</b> · لازم: {} TON\n📝 کامنت: <code>{}</code> (باید: <code>{}</code>)\n🔗 https://tonviewer.com/transaction/{}",
+            oid, why, tg, crate::pay::ton_text(tx.nano as u64), crate::pay::ton_text(need as u64), esc(&tx.comment), memo, hash_hex);
+        self.notify_order(oid, &cap, ik(vec![vec![b("✅ تأیید", &format!("ap:{}", oid)), b("❌ رد", &format!("rj:{}", oid))]]), None).await;
+        self.send(tg, &format!("👀 پرداخت شما برای سفارش #{} روی شبکه دیده شد ({}). پشتیبانی بررسی و تأیید می‌کند.", oid, why), None).await;
+        Ok(false)
+    }
+
+    /// Looks for the payment of one TON order: by its comment among the wallet's last payments, then (when the
+    /// customer sent one) by the transaction's hash. Ok(true) delivered, Ok(false) not found yet.
+    async fn ton_check(&self, oid: i64, hash: Option<&str>) -> Result<bool, String> {
+        let Some((_, memo, _, created)) = self.ton_order(oid) else { return Err("این سفارش دیگر منتظر پرداخت نیست.".into()) };
+        let addr = self.db().get("ton_address");
+        let list = crate::pay::recent(&self.app, &addr, created - 120).await.map_err(|_| "الان به شبکه‌ی TON دسترسی نیست؛ چند ثانیه بعد دوباره امتحان کنید.".to_string())?;
+        if let Some(tx) = list.iter().find(|t| crate::pay::same_memo(&t.comment, &memo)) {
+            return self.ton_settle(oid, tx, true).await;
+        }
+        let Some(h) = hash else { return Ok(false) };
+        match crate::pay::by_hash(&self.app, &addr, h).await {
+            Ok(Some(tx)) if crate::pay::same_memo(&tx.comment, &memo) => self.ton_settle(oid, &tx, true).await,
+            // a payment with another order's comment belongs to that order
+            Ok(Some(tx)) if !tx.comment.trim().is_empty() && tx.comment.to_uppercase().starts_with("KANKI-") => Err("این تراکنش با کامنت سفارش دیگری است.".into()),
+            Ok(Some(tx)) => self.ton_settle(oid, &tx, false).await,
+            Ok(None) => Err("این تراکنش به کیف پول ما پیدا نشد (یا هنوز روی شبکه نهایی نشده). چند ثانیه بعد دوباره بفرستید.".into()),
+            Err(_) => Err("الان به شبکه‌ی TON دسترسی نیست؛ چند ثانیه بعد دوباره امتحان کنید.".into()),
+        }
+    }
+
+    /// Every 20 seconds while a TON order waits (up to 3 hours): one read of the wallet settles them all
+    async fn ton_watch(&self) {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+            let ids: Vec<(i64, i64)> = self.db().with(|c| {
+                let mut s = c.prepare("SELECT id,created FROM orders WHERE method='ton' AND status='waiting' AND created>?1").unwrap();
+                let v: Vec<(i64, i64)> = s.query_map([now() - 3 * 3600], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().filter_map(|x| x.ok()).collect();
+                v
+            });
+            let Some(since) = ids.iter().map(|x| x.1).min() else { continue };
+            let Ok(list) = crate::pay::recent(&self.app, &self.db().get("ton_address"), since - 120).await else { continue };
+            let ids: Vec<i64> = ids.into_iter().map(|x| x.0).collect();
+            for oid in ids {
+                let Some((_, memo, _, _)) = self.ton_order(oid) else { continue };
+                if let Some(tx) = list.iter().find(|t| crate::pay::same_memo(&t.comment, &memo)) {
+                    let _ = self.ton_settle(oid, tx, true).await;
+                }
+            }
+        }
+    }
+
+    /// An order paid in Telegram Stars: Telegram's own invoice; the account is made only when Telegram reports
+    /// the payment done (successful_payment), never when the button is tapped
+    async fn stars_start(&self, uid: i64, chat: i64, mid: i64, p: &Plan, pe: &Pending, t: i64) {
+        let home = Some(ik(vec![vec![b(&self.bt("back"), "home")]]));
+        let Some(r) = crate::pay::rates(&self.app).await else {
+            return self.edit(chat, mid, "⚠️ قیمت لحظه‌ای دلار الان در دسترس نیست؛ چند دقیقه بعد دوباره امتحان کنید یا روش دیگری انتخاب کنید.", home).await;
+        };
+        let su = crate::pay::star_usd(self.db());
+        let n = crate::pay::stars_for(t, &r, su);
+        let oid = self.new_order(uid, p, pe, "stars", &t.to_string(), "waiting", "");
+        let nonce = crate::util::rand_token(10);
+        let _ = self.db().exec("UPDATE orders SET ref=?1 WHERE id=?2", &[&format!("{} {}", nonce, n), &oid]);
+        let hm = chrono::DateTime::from_timestamp(r.at + 12600, 0).map(|d| d.format("%H:%M").to_string()).unwrap_or_default();
+        self.edit(chat, mid, &format!(
+            "⭐️ <b>پرداخت با استارز تلگرام</b> · سفارش #{}\n\n💰 مبلغ: <b>{} استارز</b>  (= {})\n📊 هر استارز ≈ {} تومان ({}$ × دلار {} تومان، ساعت {})\n\n👇 روی دکمه‌ی «Pay ⭐️» پیام بعدی بزنید. بعد از پرداخت، اشتراک <b>خودکار</b> همین‌جا تحویل می‌شه.",
+            oid, n, toman(t), crate::pay::group(su * r.usd_toman), su, crate::pay::group(r.usd_toman), hm), home).await;
+        let title: String = format!("Kanki VPN · #{}", oid);
+        let res = self.call_res("sendInvoice", json!({
+            "chat_id": chat, "title": title, "description": format!("{} · {}", p.name, if p.service == "v2ray" { "V2Ray" } else { "VIP" }).chars().take(250).collect::<String>(),
+            "payload": format!("kk:{}:{}", oid, nonce), "currency": "XTR", "prices": [{"label": p.name.chars().take(30).collect::<String>(), "amount": n}],
+        })).await;
+        if let Err(e) = res {
+            let _ = self.db().exec("UPDATE orders SET status='error' WHERE id=?1 AND status='waiting'", &[&oid]);
+            self.send(chat, &format!("⚠️ ساختن فاکتور استارز نشد: {}\nروش دیگری انتخاب کنید.", esc(&e)), None).await;
+        }
+    }
+
+    /// The Stars order a payment is for: its payload, its customer, its currency and its exact amount, still waiting
+    fn stars_order(&self, uid: i64, payload: &str, currency: &str, total: i64) -> Option<i64> {
+        let mut it = payload.strip_prefix("kk:")?.splitn(2, ':');
+        let oid: i64 = it.next()?.parse().ok()?;
+        let nonce = it.next()?;
+        let (tg, method, status, rf, created): (i64, String, String, String, i64) = self.db().with(|c| c.query_row(
+            "SELECT tg_id,method,status,ref,COALESCE(created,0) FROM orders WHERE id=?1", [oid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).ok())?;
+        let mut w = rf.split_whitespace();
+        let ok = tg == uid && method == "stars" && status == "waiting" && currency == "XTR"
+            && w.next() == Some(nonce) && w.next().and_then(|x| x.parse::<i64>().ok()) == Some(total)
+            && now() - created < 86400;
+        ok.then_some(oid)
+    }
+
+    /// Telegram asks before taking the Stars: yes only for a real, waiting order of this customer at its price
+    async fn on_pre_checkout(&self, q: &Value) {
+        let uid = q["from"]["id"].as_i64().unwrap_or(0);
+        let ok = self.stars_order(uid, q["invoice_payload"].as_str().unwrap_or(""), q["currency"].as_str().unwrap_or(""), q["total_amount"].as_i64().unwrap_or(-1)).is_some();
+        let mut body = json!({"pre_checkout_query_id": q["id"], "ok": ok});
+        if !ok {
+            body["error_message"] = json!("این فاکتور دیگر معتبر نیست؛ از ربات دوباره خرید کنید.");
+        }
+        let _ = self.call_res("answerPreCheckoutQuery", body).await;
+    }
+
+    /// The Stars were really paid (Telegram's own message): the order is delivered once; a payment that fits
+    /// no waiting order is given back
+    async fn on_stars_paid(&self, m: &Value) {
+        let sp = &m["successful_payment"];
+        let uid = m["from"]["id"].as_i64().unwrap_or(0);
+        let charge = sp["telegram_payment_charge_id"].as_str().unwrap_or("").to_string();
+        let total = sp["total_amount"].as_i64().unwrap_or(0);
+        let currency = sp["currency"].as_str().unwrap_or("");
+        if charge.is_empty() || currency != "XTR" || self.tx_used(&charge) {
+            return;
+        }
+        match self.stars_order(uid, sp["invoice_payload"].as_str().unwrap_or(""), currency, total) {
+            Some(oid) => {
+                let rf: String = self.db().with(|c| c.query_row("SELECT ref FROM orders WHERE id=?1", [oid], |r| r.get(0)).unwrap_or_default());
+                let claimed = self.db().exec("UPDATE orders SET status='paid', ref=?1 WHERE id=?2 AND status='waiting'", &[&format!("{} {}", rf, charge), &oid]).unwrap_or(0);
+                if claimed == 1 {
+                    self.send(uid, &format!("✅ پرداخت <b>{} استارز</b> سفارش #{} تأیید شد؛ در حال ساخت اشتراک…", total, oid), None).await;
+                    self.fulfill(oid).await;
+                }
+            }
+            None => {
+                let back = self.call_res("refundStarPayment", json!({"user_id": uid, "telegram_payment_charge_id": charge})).await.is_ok();
+                self.send(uid, if back { "↩️ این پرداخت به سفارش فعالی نمی‌خورد و استارزها برگردانده شد. لطفاً دوباره از ربات خرید کنید." } else { "⚠️ این پرداخت به سفارش فعالی نمی‌خورد؛ پشتیبانی بررسی می‌کند." }, None).await;
+                self.notify_admins(&format!("⚠️ پرداخت {} استارز از <code>{}</code> به سفارش فعالی نخورد{}.\nشناسه: <code>{}</code>", total, uid, if back { " و برگردانده شد" } else { " و برگرداندن نشد" }, esc(&charge)), None, None).await;
+            }
+        }
     }
 
     /// (id, tg_id, plan_id, kind, target, method, status, amount, ref, discount)
@@ -2406,12 +2751,21 @@ impl Bot {
             "a:trial" => { self.edit(chat, mid, &format!("🎁 <b>تست رایگان</b>\nحجم: {} GB · مدت: {} روز", db.get("trial_gb"), db.get("trial_days")),
                 Some(ik(vec![vec![b(&format!("{} روشن/خاموش", self.onoff("trial_on")), "tg:trial_on")],
                     vec![b("✏️ حجم", "set:trial_gb"), b("✏️ مدت", "set:trial_days")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
-            "a:pay" => { self.edit(chat, mid, &format!("💳 <b>روش‌های پرداخت</b>\nکارت: {}", esc(&db.get("card_number"))),
+            "a:pay" => {
+                let rate = match crate::pay::rates(&self.app).await {
+                    Some(r) => format!("\n\n{}\n⭐️ هر استارز ≈ {} تومان", Self::rate_line(&r), crate::pay::group(crate::pay::star_usd(db) * r.usd_toman)),
+                    None => "\n\n⚠️ قیمت لحظه‌ای الان خوانده نشد (TON و استارز تا خوانده نشود فروخته نمی‌شوند).".into(),
+                };
+                let ton = db.get("ton_address");
+                self.edit(chat, mid, &format!("💳 <b>روش‌های پرداخت</b>\nکارت: {}\nکیف پول TON: <code>{}</code>{}\n\n💎 TON خودکار: مبلغ با قیمت لحظه‌ای، پرداخت با کامنت سفارش، تأیید با خواندن خود شبکه‌ی TON (فقط آدرس عمومی؛ ربات کلید کیف پول ندارد).\n⭐️ استارز: فقط وقتی تلگرام پرداخت را تأیید کند تحویل می‌شود.",
+                    esc(&db.get("card_number")), if ton.trim().is_empty() { "—".into() } else { esc(&ton) }, rate),
                 Some(ik(vec![
                     vec![b(&format!("{} کارت", self.onoff("card_on")), "tg:card_on"), b("✏️ شماره", "set:card_number"), b("✏️ نام", "set:card_holder")],
                     vec![b(&format!("{} زرین‌پال", self.onoff("zp_on")), "tg:zp_on"), b("✏️ مرچنت", "set:zp_merchant"), b("✏️ بازگشت", "set:zp_callback")],
                     vec![b(&format!("{} ارزی خودکار", self.onoff("np_on")), "tg:np_on"), b("✏️ API Key", "set:np_key"), b("✏️ ارزها", "set:np_coins")],
                     vec![b(&format!("{} کیف پول", self.onoff("wallet_on")), "tg:wallet_on"), b("✏️ آدرس‌ها", "set:wallet_text")],
+                    vec![b(&format!("{} TON خودکار", self.onoff("ton_on")), "tg:ton_on"), b("✏️ آدرس TON", "set:ton_address")],
+                    vec![b(&format!("{} استارز", self.onoff("stars_on")), "tg:stars_on"), b("✏️ دلارِ هر استارز", "set:star_usd")],
                     vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
             "a:nodes" => {
                 let txt: Vec<String> = db.nodes().iter().map(|n| format!("{} <b>{}</b> · {}", if n.online { "🟢" } else { "🔴" }, esc(&n.name),
@@ -2843,6 +3197,14 @@ impl Bot {
                 // messages are sent as HTML: make sure Telegram accepts this one before saving it
                 if is_text_key(&k) && self.send(chat, &format!("👁 پیش‌نمایش:\n\n{}", v), None).await.is_none() {
                     self.send(chat, "⚠️ تلگرام این متن را قبول نکرد (احتمالاً علامت &lt; یا &gt; یا تگ ناقص دارد). ذخیره نشد.", retry(to)).await;
+                    return;
+                }
+                if k == "ton_address" && crate::pay::raw_address(v).is_none() {
+                    self.send(chat, "⚠️ این آدرس TON درست نیست. آدرس کیف پول رو از Tonkeeper کپی کنید (با UQ یا EQ شروع می‌شه، ۴۸ حرف).", retry(to)).await;
+                    return;
+                }
+                if k == "star_usd" && !v.parse::<f64>().map(|x| x > 0.0005 && x < 1.0).unwrap_or(false) {
+                    self.send(chat, "⚠️ یک عدد مثل 0.013 بفرستید.", retry(to)).await;
                     return;
                 }
                 db.set(&k, v);
@@ -3331,7 +3693,7 @@ fn plan_usd(db: &crate::db::Db, p: &Plan) -> f64 {
 
 /// A wallet address or a payment text the buyer can pay to
 fn wallet_has_address(db: &crate::db::Db) -> bool {
-    ["ton_address", "usdt_address", "wallet_text"].iter().any(|k| !db.get(k).trim().is_empty())
+    ["ton_address", "usdt_address", "wallet_text"].iter().any(|k| !(*k == "ton_address" && db.on("ton_on")) && !db.get(k).trim().is_empty())
 }
 
 /// Today's TON price in dollars (kept 10 minutes; None when it cannot be read)
@@ -3460,8 +3822,8 @@ mod flow_tests {
         tap(&bot, from(buyer, "Sara", "sara"), "buy").await;
         let bs = buttons(&log, buyer);
         assert!(!bs.iter().any(|b| b.0.contains("دلخواه ·")), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0.contains("👤 2") && b.2 == "success"), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0.contains("👤 1") && b.2 == "danger"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "50 گیگ — 2 کاربره — 1 ماهه — 300,000 تومان" && b.2 == "success"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "10 گیگ — 1 ماهه — 90,000 تومان" && b.2 == "danger"), "{:?}", bs);
         assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1" && b.2 == "primary"), "{:?}", bs);
         assert!(!log.lock().unwrap().iter().any(|(_, v)| v.to_string().contains("\"_k\"")), "the colour key is not sent to Telegram");
         // paid by card: the receipt, the admin approves (green / red buttons), the account has the custom volume and days
@@ -3575,10 +3937,194 @@ mod flow_tests {
         let on: i64 = db.with(|c| c.query_row("SELECT COUNT(*) FROM plans WHERE active=1", [], |r| r.get(0)).unwrap());
         assert_eq!(on, 9);
         // the admin's later changes stay: it does not come again
-        db.exec("UPDATE plans SET toman=99000 WHERE name LIKE '%۲۰ گیگ%'", &[]).unwrap();
+        db.exec("UPDATE plans SET toman=99000 WHERE name LIKE '20 گیگ%'", &[]).unwrap();
         assert!(!kanki_plans_once(db));
-        let t: i64 = db.with(|c| c.query_row("SELECT toman FROM plans WHERE active=1 AND name LIKE '%۲۰ گیگ%'", [], |r| r.get(0)).unwrap());
+        let t: i64 = db.with(|c| c.query_row("SELECT toman FROM plans WHERE active=1 AND name LIKE '20 گیگ%'", [], |r| r.get(0)).unwrap());
         assert_eq!(t, 99000);
+    }
+
+    #[tokio::test]
+    async fn plan_buttons_read_clearly_by_kind_and_colour() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        // a panel that had 3.28's names gets the new ones once
+        db.set("kanki_plans_v1", "1");
+        db.exec("INSERT INTO plans(name,days,gb,toman,usd,conns,active,category,badge) VALUES('🥉 ۲۰ گیگ · ۱ ماهه',30,20,80000,0,1,1,'تک‌کاربره',''),('💎 ۵۰ گیگ · ۱ ماهه',30,50,110000,0,1,1,'تک‌کاربره','🔥 پیشنهاد ویژه'),('👥 ۵۰ گیگ · ۱ ماهه · ۲ کاربره',30,50,135000,0,2,1,'چندکاربره',''),('⏳ ۵۰ گیگ · ۲ ماهه',60,50,140000,0,1,1,'بلندمدت','')", &[]).unwrap();
+        db.exec("UPDATE plans SET old_toman=160000 WHERE days=60", &[]).unwrap();
+        kanki_plans_once(db);
+        let names: Vec<String> = db.with(|c| { let mut s = c.prepare("SELECT name FROM plans ORDER BY id").unwrap(); let v = s.query_map([], |r| r.get(0)).unwrap().filter_map(|x| x.ok()).collect(); v });
+        assert_eq!(names[0], "20 گیگ | 1 ماهه");
+        assert_eq!(names[2], "50 گیگ | 2 کاربره | 1 ماهه");
+        let buyer = 7201;
+        bot.touch(buyer, &from(buyer, "Sara", "sara"), 0);
+        db.exec("UPDATE bot_users SET cfg_name='sara' WHERE tg_id=?1", &[&buyer]).unwrap();
+        tap(&bot, from(buyer, "Sara", "sara"), "buy").await;
+        // each kind: its emoji, its cheapest price and its own colour; the message says what each is for
+        let bs = buttons(&log, buyer);
+        let single = bs.iter().find(|b| b.1.starts_with("pcat:b:0")).unwrap();
+        assert_eq!((single.0.as_str(), single.2.as_str()), ("👤 تک‌کاربره — از 80,000 تومان", "primary"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "👥 چندکاربره — از 135,000 تومان" && b.2 == "success"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "⏳ بلندمدت — از 140,000 تومان 🏷" && b.2 == "danger"), "{:?}", bs);
+        assert!(last(&log, buyer).contains("👥 <b>چندکاربره</b>"), "{}", last(&log, buyer));
+        // a plan: English digits, dashes between, the label's emoji at the end, no medal in front
+        tap(&bot, from(buyer, "Sara", "sara"), &single.1).await;
+        let bs = buttons(&log, buyer);
+        assert!(bs.iter().any(|b| b.0 == "20 گیگ — 1 ماهه — 80,000 تومان" && b.2 == "primary"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "50 گیگ — 1 ماهه — 110,000 تومان 🔥"), "{:?}", bs);
+        assert!(!bs.iter().any(|b| b.0.contains('۰') || b.0.contains('·') || b.0.contains('🥉')), "{:?}", bs);
+        assert!(last(&log, buyer).starts_with("👤 <b>تک‌کاربره</b>"), "{}", last(&log, buyer));
+    }
+
+    /// A fake toncenter (v3): /transactions lists `txs`, or the one whose hash is asked for
+    async fn fake_toncenter(txs: Arc<Mutex<Vec<Value>>>) -> String {
+        let router = axum::Router::new().route("/transactions", axum::routing::get(
+            move |axum::extract::Query(q): axum::extract::Query<HashMap<String, String>>| {
+                let txs = txs.clone();
+                async move {
+                    let all = txs.lock().unwrap().clone();
+                    let list: Vec<Value> = match q.get("hash") {
+                        Some(h) => all.into_iter().filter(|t| crate::tunnel::link::b64decode(t["hash"].as_str().unwrap_or("")).map(hex::encode).as_deref() == Some(h.as_str())).collect(),
+                        None => all,
+                    };
+                    axum::Json(json!({"transactions": list}))
+                }
+            })).route("/transactionsByMessage", axum::routing::get(|| async { axum::Json(json!({"transactions": []})) }));
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(l, router).await.unwrap() });
+        format!("http://{}", addr)
+    }
+
+    const MY_TON: &str = "UQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqEBI";
+
+    fn ton_tx(hash_byte: u8, nano: u64, comment: &str, at: i64) -> Value {
+        let hash = crate::util::b64(&[hash_byte; 32]);
+        json!({"account": "0:83DFD552E63729B472FCBCC8C45EBCC6691702558B68EC7527E1BA403A0F31A8", "hash": hash, "now": at,
+            "description": {"aborted": false, "credit_ph": {"credit": nano.to_string()}},
+            "in_msg": {"source": "0:ABCD", "value": nano.to_string(), "bounced": false,
+                "message_content": {"decoded": {"type": "text_comment", "comment": comment}}},
+            "out_msgs": [], "finality": "finalized"})
+    }
+
+    /// A buyer with a name, a plan of 80,000 toman chosen, prices of today cached (271,500 toman a dollar, 1.17 $ a TON)
+    async fn paying(bot: &Bot, buyer: i64) -> i64 {
+        let db = bot.db();
+        db.set("rate_usd_toman", "271500");
+        db.set("rate_ton_usd", "1.17");
+        db.set("rate_at", &now().to_string());
+        db.set("rate_src", "Exir");
+        if all_plans(db).is_empty() {
+            load_kanki_plans(db);
+        }
+        bot.touch(buyer, &from(buyer, "Ali", "ali"), 0);
+        db.exec("UPDATE bot_users SET cfg_name=?1 WHERE tg_id=?2", &[&format!("ali{}", buyer), &buyer]).unwrap();
+        let pid: i64 = db.with(|c| c.query_row("SELECT id FROM plans WHERE toman=80000 AND active=1", [], |r| r.get(0)).unwrap());
+        tap(bot, from(buyer, "Ali", "ali"), &format!("pl:{}", pid)).await;
+        pid
+    }
+
+    fn last_order(bot: &Bot, buyer: i64) -> (i64, String, String, String) {
+        bot.db().with(|c| c.query_row("SELECT id,method,status,ref FROM orders WHERE tg_id=?1 ORDER BY id DESC LIMIT 1", [buyer],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap())
+    }
+
+    #[tokio::test]
+    async fn ton_is_delivered_only_for_its_own_payment_on_the_chain() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        let txs = Arc::new(Mutex::new(vec![]));
+        db.set("toncenter_url", &fake_toncenter(txs.clone()).await);
+        db.set("ton_on", "1");
+        db.set("ton_address", MY_TON);
+        let buyer = 7301;
+        paying(&bot, buyer).await;
+        // the plan page shows the TON button and the amount at today's price
+        assert!(buttons(&log, buyer).iter().any(|b| b.1 == "pay:ton"), "{:?}", buttons(&log, buyer));
+        assert!(last(&log, buyer).contains("0.252 TON"), "{}", last(&log, buyer));
+        tap(&bot, from(buyer, "Ali", "ali"), "pay:ton").await;
+        let (oid, m, st, rf) = last_order(&bot, buyer);
+        assert_eq!((m.as_str(), st.as_str()), ("ton", "waiting"));
+        let memo = rf.split_whitespace().next().unwrap().to_string();
+        assert!(memo.starts_with(&format!("KANKI-{}-", oid)) && rf.ends_with(" 252000000"), "{}", rf);
+        let t = last(&log, buyer);
+        assert!(t.contains("0.252 TON") && t.contains(&memo) && t.contains("317,655 تومان") && t.contains(MY_TON), "{}", t);
+        let kb = log.lock().unwrap().iter().rev().find(|(m, _)| m == "editMessageText").map(|x| x.1["reply_markup"].to_string()).unwrap();
+        assert!(kb.contains(&format!("https://app.tonkeeper.com/transfer/{}?amount=252000000&text={}", MY_TON, memo)), "{}", kb);
+        // nothing on the chain yet; a payment of someone else (no comment) is not this order's
+        txs.lock().unwrap().push(ton_tx(1, 252_000_000, "", now()));
+        tap_id(&bot, from(buyer, "Ali", "ali"), &format!("tchk:{}", oid), "q1").await;
+        assert!(answers(&log, "q1")[0].contains("هنوز"), "{:?}", answers(&log, "q1"));
+        assert!(db.users_of_tg(buyer).is_empty());
+        // its own comment and amount: delivered once
+        txs.lock().unwrap().push(ton_tx(2, 252_000_000, &memo.to_lowercase(), now()));
+        tap_id(&bot, from(buyer, "Ali", "ali"), &format!("tchk:{}", oid), "q2").await;
+        assert_eq!(last_order(&bot, buyer).2, "done");
+        assert_eq!(db.users_of_tg(buyer).len(), 1);
+        assert!(log.lock().unwrap().iter().any(|(m, v)| m == "sendMessage" && v["text"].as_str().unwrap_or("").contains("روی شبکه‌ی TON تأیید شد")));
+        // the same transaction cannot pay a second order (sent as a link)
+        tap(&bot, from(buyer, "Ali", "ali"), "buy").await;
+        paying(&bot, buyer).await;
+        tap(&bot, from(buyer, "Ali", "ali"), "pay:ton").await;
+        let (oid2, ..) = last_order(&bot, buyer);
+        assert!(oid2 > oid);
+        say(&bot, from(buyer, "Ali", "ali"), &format!("https://tonviewer.com/transaction/{}", hex::encode([2u8; 32]))).await;
+        assert!(last(&log, buyer).contains("⚠️"), "{}", last(&log, buyer));
+        assert_eq!(last_order(&bot, buyer).2, "waiting");
+        assert_eq!(db.users_of_tg(buyer).len(), 1);
+        // a payment short of the amount, with the right comment: not delivered, the admins decide
+        let memo2 = last_order(&bot, buyer).3.split_whitespace().next().unwrap().to_string();
+        txs.lock().unwrap().push(ton_tx(3, 200_000_000, &memo2, now()));
+        bot.ton_check(oid2, None).await.unwrap();
+        assert_eq!(last_order(&bot, buyer).2, "pending");
+        assert!(buttons(&log, ADMIN).iter().any(|b| b.1 == format!("ap:{}", oid2)), "{:?}", buttons(&log, ADMIN));
+        assert!(last(&log, ADMIN).contains("کمتر از مبلغ"), "{}", last(&log, ADMIN));
+        assert_eq!(db.users_of_tg(buyer).len(), 1);
+        // a TON address with a wrong checksum is not saved
+        tap(&bot, from(ADMIN, "Admin", "admin"), "set:ton_address").await;
+        say(&bot, from(ADMIN, "Admin", "admin"), "UQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqEBJ").await;
+        assert_eq!(db.get("ton_address"), MY_TON);
+    }
+
+    #[tokio::test]
+    async fn stars_are_delivered_only_when_telegram_says_paid() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        db.set("stars_on", "1");
+        let buyer = 7401;
+        paying(&bot, buyer).await;
+        assert!(last(&log, buyer).contains("⭐️ 23 استارز"), "{}", last(&log, buyer));
+        tap(&bot, from(buyer, "Ali", "ali"), "pay:stars").await;
+        let (oid, m, st, rf) = last_order(&bot, buyer);
+        assert_eq!((m.as_str(), st.as_str()), ("stars", "waiting"));
+        let inv = log.lock().unwrap().iter().rev().find(|(m, _)| m == "sendInvoice").map(|x| x.1.clone()).unwrap();
+        assert_eq!((inv["currency"].as_str(), inv["prices"][0]["amount"].as_i64()), (Some("XTR"), Some(23)));
+        let payload = inv["payload"].as_str().unwrap().to_string();
+        assert_eq!(payload, format!("kk:{}:{}", oid, rf.split_whitespace().next().unwrap()));
+        let pre = |id: &str, uid: i64, total: i64, payload: &str| json!({"id": id, "from": from(uid, "Ali", "ali"), "currency": "XTR", "total_amount": total, "invoice_payload": payload});
+        let pre_ok = |id: &str| log.lock().unwrap().iter().rev().find(|(m, v)| m == "answerPreCheckoutQuery" && v["pre_checkout_query_id"] == id).map(|x| x.1["ok"].as_bool().unwrap()).unwrap();
+        // Telegram asks first: a changed amount, another customer or a made-up order are refused
+        bot.on_pre_checkout(&pre("p1", buyer, 1, &payload)).await;
+        assert!(!pre_ok("p1"));
+        bot.on_pre_checkout(&pre("p2", 9999, 23, &payload)).await;
+        assert!(!pre_ok("p2"));
+        bot.on_pre_checkout(&pre("p3", buyer, 23, &format!("kk:{}:guess", oid))).await;
+        assert!(!pre_ok("p3"));
+        bot.on_pre_checkout(&pre("p4", buyer, 23, &payload)).await;
+        assert!(pre_ok("p4"));
+        // tapping pay is not paying: nothing until Telegram's own successful_payment
+        assert!(db.users_of_tg(buyer).is_empty());
+        let paid = |uid: i64, total: i64, charge: &str| json!({"from": from(uid, "Ali", "ali"), "chat": {"id": uid},
+            "successful_payment": {"currency": "XTR", "total_amount": total, "invoice_payload": payload, "telegram_payment_charge_id": charge}});
+        bot.on_stars_paid(&paid(buyer, 23, "ch1")).await;
+        assert_eq!(last_order(&bot, buyer).2, "done");
+        assert_eq!(db.users_of_tg(buyer).len(), 1);
+        // the same payment again: nothing more
+        bot.on_stars_paid(&paid(buyer, 23, "ch1")).await;
+        assert_eq!(db.users_of_tg(buyer).len(), 1);
+        // a payment for an order that is no longer waiting: given back
+        bot.on_stars_paid(&paid(buyer, 23, "ch2")).await;
+        assert!(log.lock().unwrap().iter().any(|(m, v)| m == "refundStarPayment" && v["telegram_payment_charge_id"] == "ch2"));
+        assert_eq!(db.users_of_tg(buyer).len(), 1);
     }
 
     #[tokio::test]

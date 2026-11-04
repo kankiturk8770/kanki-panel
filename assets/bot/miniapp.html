@@ -161,6 +161,7 @@ details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8p
 .pc .pt{display:flex;align-items:center;gap:12px}
 .pc .em{width:48px;height:48px;flex:none;border-radius:14px;display:grid;place-items:center;font-size:26px;background:rgba(255,214,10,.08);border:1px solid var(--sep)}
 .pc .pt b{display:block;font-size:16px;font-weight:900}
+.pc .pt b.vol{font-size:22px;letter-spacing:.2px;color:var(--gold2)}.pc .pt b.vol small{font-size:13px;color:#e8e2cc;font-weight:800}
 .pc .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
 .pc .meta span{font-size:12px;font-weight:700;padding:2px 8px;border-radius:9px;background:rgba(255,255,255,.04);border:1px solid var(--sep);color:#e8e2cc}
 .pc .pp{display:flex;align-items:center;gap:12px;margin-top:12px;padding-top:12px;border-top:1px dashed var(--sep)}
@@ -251,7 +252,6 @@ function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){retu
  var cats=[];plans.forEach(function(p){if(cats.indexOf(p.category)<0)cats.push(p.category)});
  var custom=c.on&&A.svc=='vip';if(custom)cats.push('*custom*');
  if(cats.indexOf(A.cat)<0)A.cat=cats[0]||'';
- var CI=function(k){return k=='*custom*'?'🧮':/چند/.test(k)?'👥':/بلند|ماهه/.test(k)?'⏳':/تک/.test(k)?'👤':'📦'};
  if(cats.length>1)h+='<nav class="ptabs" role="tablist">'+cats.map(function(k){return '<button role="tab" aria-selected="'+(A.cat==k)+'" data-cat="'+esc(k)+'" class="'+(A.cat==k?'on':'')+'">'+CI(k)+' '+esc(k=='*custom*'?'دلخواه':(k||'سایر'))+'</button>'}).join('')+'</nav>';
  if(custom&&A.cat=='*custom*'){var cb=A.cb||(A.cb={g:Math.min(c.max_gb,Math.max(c.min_gb,30)),d:c.days[0],u:1});
   // renewing: never fewer users than the account has (a renewal raises it, never lowers it)
@@ -268,12 +268,16 @@ function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){retu
  document.getElementById('app').innerHTML=h;wireBuy()}
 
 // a plan as a card: its emoji, volume / time / users, the price (with the struck higher price and the saving) and its label
-function planCard(p){var m=String(p.name).match(/^(\S+)\s+(.+)$/),em='📦',title=p.name;
- if(m&&!/[\p{L}\p{N}]/u.test(m[1])){em=m[1];title=m[2]}
- var feat=/🔥|پیشنهاد|محبوب/.test(p.badge||''),old=+p.old_toman||0,off=old>p.toman?Math.round((1-p.toman/old)*100):0;
+// the kind of a plan (its category): its emoji in the tabs and on its cards
+function CI(k){return k=='*custom*'?'🧮':/چند/.test(k)?'👥':/بلند|ماهه/.test(k)?'⏳':/تک/.test(k)?'👤':'📦'}
+// plans are written with English digits (a Persian zero is a dot and «۲۰ گیگ · ۱ ماهه» read as 20 GB, 10 months)
+function enT(n){return Math.round(n).toLocaleString('en-US')}
+function durEn(d){return !d?'بی‌پایان':d%30?d+' روزه':(d/30)+' ماهه'}
+function planCard(p){var feat=/🔥|پیشنهاد|محبوب/.test(p.badge||''),old=+p.old_toman||0,off=old>p.toman?Math.round((1-p.toman/old)*100):0;
+ var vol=p.gb>0?(Math.round(p.gb*10)/10)+' <small>گیگ</small>':'نامحدود';
  return '<div class="pc'+(feat?' feat':'')+'">'+(p.badge?'<span class="rib">'+esc(p.badge)+'</span>':'')+
-  '<div class="pt"><span class="em" aria-hidden="true">'+esc(em)+'</span><div><b>'+esc(title)+'</b><div class="meta"><span>🔋 '+(p.gb>0?fa(p.gb)+' گیگ':'نامحدود')+'</span><span>📅 '+dur(p.days)+'</span><span>👥 '+fa(p.conns)+' کاربره</span></div></div></div>'+
-  '<div class="pp"><div class="pr2">'+(off?'<s>'+toman(old)+'</s>':'')+'<strong>'+toman(p.toman).replace(' تومان',' <small>تومان</small>')+'</strong>'+(off?'<span class="off">'+fa(off)+'٪ تخفیف</span>':'')+'</div>'+
+  '<div class="pt"><span class="em" aria-hidden="true">'+CI(p.category||'')+'</span><div><b class="vol">'+vol+'</b><div class="meta"><span>📅 '+durEn(p.days)+'</span><span>'+(p.conns>1?'👥 ':'👤 ')+p.conns+' کاربره</span></div></div></div>'+
+  '<div class="pp"><div class="pr2">'+(off?'<s>'+enT(old)+'</s>':'')+'<strong>'+enT(p.toman)+' <small>تومان</small></strong>'+(off?'<span class="off"><bdi dir="ltr">'+off+'%</bdi> تخفیف</span>':'')+'</div>'+
   '<button class="buy" data-pid="'+p.id+'">خرید</button></div></div>'}
 
 function wireBuy(){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))},c=A.shop.custom,cb=A.cb;

@@ -78,6 +78,8 @@ mod miniapp;
 mod channel;
 #[path = "bot/ai.rs"]
 mod ai;
+#[path = "bot/pay.rs"]
+mod pay;
 
 // tunnel: tunnels between servers and tunnel servers; the wire protocols in src/tunnel/transport
 mod tunnel;

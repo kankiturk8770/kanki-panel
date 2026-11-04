@@ -1156,6 +1156,8 @@ pub const SETTING_KEYS: &[&str] = &[
     "cp_on", "cp_min_gb", "cp_max_gb", "cp_days", "cp_users", "mini_menu",
     "bst_buy", "bst_trial", "bst_my", "bst_renew", "bst_guide", "bst_ref", "bst_app", "bst_support", "bst_renew_this", "bst_pay",
     "bst_disc", "bst_shop", "bst_miniapp", "bst_amz", "bst_cfg",
+    // 3.29: TON checked on the chain and Telegram Stars, both at today's price (pay.rs)
+    "ton_on", "stars_on", "star_usd", "toncenter_key",
 ];
 
 /// "owner/repo" with only the characters GitHub allows
