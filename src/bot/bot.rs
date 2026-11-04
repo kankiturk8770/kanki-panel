@@ -98,14 +98,14 @@ const BTNS: &[(&str, &str, &str)] = &[
     ("renew", "🔁 تمدید", "منوی اصلی"),
     ("guide", "🎬 آموزش اتصال", "منوی اصلی (فقط وقتی آموزشی اضافه شده باشد)"),
     ("ref", "👥 دعوت دوستان", "منوی اصلی"),
-    ("app", "📱 دانلود اپ", "منوی اصلی"),
+    ("app", "📱 اپ اختصاصی اندروید", "منوی اصلی"),
     ("support", "💬 پشتیبانی", "منوی اصلی"),
     ("guide_acc", "🎬 آموزش اتصال و استفاده از اپ", "زیر پیام اشتراک و دانلود اپ"),
     ("cfg_w", "📥 کانفیگ WireGuard", "زیر پیام اشتراک"),
     ("cfg_a", "📥 کانفیگ AmneziaWG", "زیر پیام اشتراک"),
     ("cfg_h", "📥 کانفیگ Hysteria2", "زیر پیام اشتراک"),
     ("cfg_l", "📄 همه‌ی لینک‌ها (Xray + Hysteria2)", "زیر پیام اشتراک"),
-    ("amz", "📦 بکاپ Amnezia (همه‌ی سرورها یک‌جا)", "زیر پیام اشتراک"),
+    ("amz", "📦 بکاپ AmneziaVPN (همه‌ی سرورها یک‌جا)", "زیر پیام اشتراک"),
     ("miniapp", "👤 پنل من | مدیریت اشتراک", "زیر پیام اشتراک"),
     ("shop", "🧮 حجم و روز دلخواه", "فهرست پلن‌ها (خرید از مینی‌اپ)"),
     ("renew_this", "🔁 تمدید همین سرویس", "زیر پیام اشتراک"),
@@ -603,8 +603,28 @@ impl Bot {
     }
 
     /// For the mini app: a config name is still needed before the first account (the bot asks it too)
+    /// No config name chosen yet: the first purchase or trial asks for one (with the Telegram name as a one-tap answer)
     pub(crate) fn needs_name(&self, uid: i64) -> bool {
-        self.cfg_name_for(uid).is_none()
+        !valid_cfg_name(&self.db().with(|c| c.query_row("SELECT COALESCE(cfg_name,'') FROM bot_users WHERE tg_id=?1", [uid], |r| r.get::<_, String>(0)).unwrap_or_default()))
+    }
+
+    /// The name made from the customer's Telegram name (or @username), when it has English letters
+    pub(crate) fn name_hint(&self, uid: i64) -> Option<String> {
+        let (first, last, uname): (String, String, String) = self.db().with(|c| c.query_row(
+            "SELECT COALESCE(name,''), COALESCE(lname,''), COALESCE(uname,'') FROM bot_users WHERE tg_id=?1", [uid],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).ok())?;
+        cfg_name_from(&format!("{}{}", first, last)).or_else(|| cfg_name_from(&uname))
+    }
+
+    /// The "type a name" message and its buttons: «use my Telegram name» when there is one, and back
+    fn name_ask(&self, uid: i64, next: &str) -> (String, Value) {
+        self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::CfgName(next.to_string()));
+        let mut rows: Kb = vec![];
+        if let Some(h) = self.name_hint(uid) {
+            rows.push(vec![b(&format!("⏭ همون اسم تلگرامم: {}", h), &format!("cfgsk:{}", next))]);
+        }
+        rows.push(vec![b(&self.bt("back"), "home")]);
+        (self.name_prompt(""), ik(rows))
     }
 
     /// For the mini app: the config name typed there, checked as the bot checks it (Err = why not)
@@ -1174,24 +1194,24 @@ impl Bot {
         if mini.starts_with("https://") {
             rows.push(vec![b(&self.bt("miniapp"), &format!("webapp:miniapp:{}", mini))]);
         }
-        for (p, code) in [("wireguard", "w"), ("amneziawg", "a"), ("hysteria2", "h")] {
-            if have.contains(&p) {
-                rows.push(vec![b(&self.bt(&format!("cfg_{}", code)), &format!("cfg:{}:{}", u.id, code))]);
-            }
-        }
-        // the subscription link and every Hysteria2 and Xray link in one text, for v2rayNG / Hiddify / NekoBox
-        if crate::api::links_text(&self.app, u).is_some() {
-            rows.push(vec![b(&self.bt("cfg_l"), &format!("cfg:{}:l", u.id))]);
-        }
         // every WireGuard / AmneziaWG config and Xray link in one AmneziaVPN restore file
         if have.contains(&"wireguard") || have.contains(&"amneziawg") || crate::xray::panel::user_links(&self.app, u).iter().any(|(_, l)| crate::amnezia::server(l, "").is_some()) {
             rows.push(vec![b(&self.bt("amz"), &format!("amz:{}", u.id))]);
         }
-        rows.push(vec![b(&self.bt("rename"), &format!("ren:{}", u.id))]);
+        // one subscription link brings every Xray and Hysteria2 config into a V2Ray app (no separate configs)
+        if crate::api::links_text(&self.app, u).is_some() || u.service() == "v2ray" {
+            rows.push(vec![b("🚀 لینک اشتراک V2Ray (v2rayNG · V2Box)", &format!("cfg:{}:v", u.id))]);
+        }
+        // the WireGuard / AmneziaWG files of each server, side by side
+        let files: Vec<(String, String)> = [("wireguard", "w"), ("amneziawg", "a")].iter().filter(|(p, _)| have.contains(p))
+            .map(|(_, c)| b(&self.bt(&format!("cfg_{}", c)), &format!("cfg:{}:{}", u.id, c))).collect();
+        if !files.is_empty() {
+            rows.push(files);
+        }
         // the app's install files (sent as a new message, so this account message stays); a v2ray account
-        // connects with a v2ray app, not the Kanki app
+        // connects with a v2ray app, not the Kanki app. No rename here: the admin renames when it is needed.
         if !crate::apps::list(&self.app).is_empty() && u.service() != "v2ray" {
-            rows.push(vec![b(&self.bt("app"), "app2")]);
+            rows.push(vec![b("📱 دانلود اپ اختصاصی اندروید", "app2")]);
         }
         rows.append(&mut extra);
         ik(rows)
@@ -1205,13 +1225,21 @@ impl Bot {
 
     /// The same, with its "which app and how" text or without it (the connection guide says it itself)
     async fn send_configs_n(&self, chat: i64, qid: &str, u: &User, code: &str, help: bool) -> bool {
+        // "w:TR": only the servers of one country (the mini app's servers tab)
+        let (code, cc) = match code.split_once(':') { Some((c, k)) => (c, Some(k.trim().to_uppercase())), None => (code, None) };
         if code == "l" {
             return self.send_links(chat, qid, u).await;
+        }
+        if code == "v" {
+            return self.send_v2_sub(chat, u).await;
         }
         let (proto, title) = match code { "w" => ("wireguard", "WireGuard"), "a" => ("amneziawg", "AmneziaWG"), _ => ("hysteria2", "Hysteria2") };
         // each server's direct config, then its copy through the tunnel (WireGuard only that one)
         let mut list: Vec<(crate::db::Node, bool)> = vec![];
         for n in crate::api::user_nodes(&self.app, u) {
+            if cc.as_ref().map(|c| crate::exitgeo::cc(&self.app, &n.id).to_uppercase() != *c).unwrap_or(false) {
+                continue;
+            }
             if crate::api::node_protos(&self.app, u, &n).contains(&proto) {
                 list.push((n.clone(), false));
             }
@@ -1239,6 +1267,17 @@ impl Bot {
             }
         }
         sent
+    }
+
+    /// The V2Ray subscription link of an account with how to add it: one link brings every Xray and Hysteria2
+    /// config into v2rayNG / V2Box / Hiddify / v2rayN, and keeps them up to date
+    pub(crate) async fn send_v2_sub(&self, chat: i64, u: &User) -> bool {
+        let link = crate::api::v2_sub_link(&self.app, u);
+        let t = format!("🚀 <b>لینک اشتراک V2Ray</b> · {}\n\n<code>{}</code>\n☝️ روش بزنید تا کپی بشه.\n\n            همه‌ی کانفیگ‌های VLESS (Xray) و Hysteria2 شما با همین یک لینک میان و هر وقت سرورها عوض بشن، با «به‌روزرسانی» خودش درست می‌شه؛ کانفیگ جدا لازم نیست.\n\n            🤖 <b>اندروید · v2rayNG:</b> ➕ ← Import config from Clipboard ← منوی ⋮ ← Update subscription\n            🍏 <b>آیفون · V2Box:</b> تب Configs ← ➕ ← Import v2ray uri from clipboard\n            💻 <b>ویندوز · v2rayN:</b> Subscription group ← Subscription group settings ← Add ← Update subscription",
+            esc(&u.username), esc(&link));
+        self.send(chat, &t, Some(ik(vec![
+            vec![b("⬇️ v2rayNG (اندروید)", "url:https://github.com/2dust/v2rayNG/releases/latest"), b("⬇️ V2Box (آیفون)", "url:https://apps.apple.com/app/v2box-v2ray-client/id6446814690")],
+        ]))).await.is_some()
     }
 
     /// The subscription link and every Hysteria2 and Xray link of an account: a .txt file, and the same text to copy
@@ -1762,17 +1801,25 @@ impl Bot {
                 if self.sales_closed(uid) {
                     return self.edit(chat, mid, SALES_CLOSED, Some(ik(vec![back("home")]))).await;
                 }
-                if self.cfg_name_for(uid).is_none() {
-                    self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::CfgName("buy".into()));
-                    return self.edit(chat, mid, &self.name_prompt(""), Some(ik(vec![back("home")]))).await;
+                if self.needs_name(uid) {
+                    let (t, kb) = self.name_ask(uid, "buy");
+                    return self.edit(chat, mid, &t, Some(kb)).await;
                 }
                 self.pend.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Pending { kind: "new".into(), ..Default::default() });
                 return self.plans_menu(chat, mid, "pl").await;
             }
+            // «use my Telegram name»: the name made from it, then on with the purchase or the trial
+            "cfgsk:buy" | "cfgsk:trial" => {
+                let Some(h) = self.name_hint(uid) else { return };
+                let _ = self.db().exec("UPDATE bot_users SET cfg_name=?1 WHERE tg_id=?2", &[&h, &uid]);
+                self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid);
+                self.edit(chat, mid, &format!("✅ نام کانفیگ شما: <b>{}</b>", esc(&h)), None).await;
+                return self.after_name(uid, chat, if d.ends_with("trial") { "trial" } else { "buy" }).await;
+            }
             "trial" => {
-                if self.db().on("trial_on") && !self.trial_taken(uid) && self.cfg_name_for(uid).is_none() {
-                    self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::CfgName("trial".into()));
-                    return self.edit(chat, mid, &self.name_prompt(""), Some(ik(vec![back("home")]))).await;
+                if self.db().on("trial_on") && !self.trial_taken(uid) && self.needs_name(uid) {
+                    let (t, kb) = self.name_ask(uid, "trial");
+                    return self.edit(chat, mid, &t, Some(kb)).await;
                 }
                 return self.trial(uid, chat, mid).await;
             }
@@ -4017,7 +4064,10 @@ mod flow_tests {
         let bs = buttons(&log, buyer);
         assert!(bs.iter().any(|b| b.1 == "pay:card" && b.2 == "success"), "{:?}", bs);
         // the custom plan is not listed in the bot; the listed ones have their colours, and the custom-volume button opens the mini app
+        // (the first «buy» asks the config name: the Telegram name with one tap)
         tap(&bot, from(buyer, "Sara", "sara"), "buy").await;
+        tap(&bot, from(buyer, "Sara", "sara"), "cfgsk:buy").await;
+        assert!(bot.db().with(|c| c.query_row("SELECT cfg_name FROM bot_users WHERE tg_id=?1", [buyer], |r| r.get::<_, String>(0)).unwrap()) == "sara");
         let bs = buttons(&log, buyer);
         assert!(!bs.iter().any(|b| b.0.contains("دلخواه ·")), "{:?}", bs);
         assert!(bs.iter().any(|b| b.0 == "50 گیگ — 2 کاربره — 1 ماهه — 300,000 تومان" && b.2 == "success"), "{:?}", bs);
@@ -4366,6 +4416,12 @@ mod flow_tests {
         assert_eq!(last(&log, tg), "ویدیوی کانکی");
         tap(&bot, from(ADMIN, "Admin", "admin"), "gwt:1:k:a").await;
         assert_eq!(bot.guide(1).unwrap()["for"], json!([]));
+        // the account's buttons: the devices first, no rename; the V2Ray link comes as one message with how to add it
+        let kb = bot.acct_kb(&u, vec![]).to_string();
+        assert!(kb.contains(&format!("hw:{}:a", u.id)) && !kb.contains("ren:"), "{}", kb);
+        tap(&bot, from(tg, "Reza", "reza"), &format!("cfg:{}:v", u.id)).await;
+        let t = last(&log, tg);
+        assert!(t.contains("لینک اشتراک V2Ray") && t.contains("/v2") && t.contains("Import v2ray uri from clipboard"), "{}", t);
     }
 
     #[tokio::test]
@@ -4738,9 +4794,12 @@ mod flow_tests {
         assert_eq!(accounts(&bot, 100), vec![(1, "mahtab87".into(), "trial".into())]);
         assert!(last(&log, 100).contains("mahtab87"));
 
-        // B: the English letters of the Telegram name are used without asking; a taken name gets a number
+        // B: asked too, with the English letters of the Telegram name as a one-tap answer; a taken name gets a number
         let bb = from(200, "Mahtab87 ✨", "");
         tap(&bot, bb.clone(), "trial").await;
+        assert!(accounts(&bot, 200).is_empty());
+        assert!(buttons(&log, 200).iter().any(|b| b.0 == "⏭ همون اسم تلگرامم: mahtab87" && b.1 == "cfgsk:trial"), "{:?}", buttons(&log, 200));
+        tap(&bot, bb.clone(), "cfgsk:trial").await;
         assert_eq!(accounts(&bot, 200), vec![(2, "mahtab872".into(), "trial".into())]);
 
         // one trial per person
