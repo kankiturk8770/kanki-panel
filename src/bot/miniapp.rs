@@ -139,6 +139,8 @@ fn account_json(app: &App, u: &User) -> Value {
         "v2link": crate::api::v2_sub_link(app, u),
         "code": u.sub_code(),
         "wg": protos.contains(&"wireguard"), "awg": protos.contains(&"amneziawg"), "hy2": protos.contains(&"hysteria2"),
+        // an AmneziaVPN backup can be made (WireGuard, AmneziaWG or an Xray link the app reads)
+        "amz": protos.contains(&"wireguard") || protos.contains(&"amneziawg") || crate::xray::panel::user_links(app, u).iter().any(|(_, l)| crate::amnezia::server(l, "").is_some()),
         // the subscription link, then every Hysteria2 and Xray link (to copy into v2rayNG / Hiddify at once)
         "links": crate::api::links_text(app, u),
         "servers": servers,
@@ -171,8 +173,9 @@ async fn me(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String
     let need_name = bot.as_ref().map(|b| b.needs_name(tg)).unwrap_or(false);
     let trial = bot.as_ref().map(|b| b.trial_open(tg)).unwrap_or(false);
     let apps = !crate::apps::list(&app).is_empty();
-    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "orders": orders(&app, tg), "need_name": need_name, "trial": trial,
-        "android_app": apps, "app_link": app.db.get("app_link"), "support": app.db.get("support") }))).into_response()
+    let name_hint = bot.as_ref().and_then(|b| b.name_hint(tg)).unwrap_or_default();
+    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "orders": orders(&app, tg), "need_name": need_name, "name_hint": name_hint, "trial": trial,
+        "android_app": apps, "app_link": app.db.get("app_link"), "win_link": app.db.get("win_link"), "support": app.db.get("support") }))).into_response()
 }
 
 /// The config name a first purchase or trial needs (sent as `name`), saved as the bot saves it
@@ -180,7 +183,9 @@ fn name_ok(bot: &crate::bot::Bot, tg: i64, q: &HashMap<String, String>) -> Resul
     if !bot.needs_name(tg) {
         return Ok(());
     }
-    match q.get("name").map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    // left empty: the name made from the Telegram name, when there is one
+    let typed = q.get("name").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).or_else(|| bot.name_hint(tg));
+    match typed.as_deref() {
         None => Err(fail(StatusCode::BAD_REQUEST, "name")),
         Some(n) => bot.set_name(tg, n).map(|_| ()).map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": "bad name", "why": e }))).into_response()),
     }
@@ -205,7 +210,7 @@ async fn trial(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Str
     Json(json!({ "ok": true })).into_response()
 }
 
-/// GET /tg/api/send?uid=..&what=amz:i|amz:a|amz:w|cfg:w|cfg:a|cfg:h|cfg:l|app:a (l = every link with the subscription, app = the Kanki app files): the bot sends it to the customer's chat
+/// GET /tg/api/send?uid=..&what=amz:i|amz:a|amz:w|cfg:w[:CC]|cfg:a[:CC]|cfg:h|cfg:l|cfg:v|app:a (l = every link with the subscription, app = the Kanki app files): the bot sends it to the customer's chat
 async fn send(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
     let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
     let u = match account(&app, tg, &q) { Ok(u) => u, Err(r) => return r };
@@ -220,7 +225,8 @@ async fn send(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
                 return undelivered();
             }
         }
-        Some(("cfg", c)) if ["w", "a", "h", "l"].contains(&c) => {
+        // cfg:w:TR / cfg:a:TR = the files of one country; cfg:v = the V2Ray subscription link with how to add it
+        Some(("cfg", c)) if ["w", "a", "h", "l", "v"].contains(&c.split(':').next().unwrap_or("")) && c.len() <= 8 => {
             if !bot.send_configs(tg, "", &u, c).await {
                 return undelivered();
             }

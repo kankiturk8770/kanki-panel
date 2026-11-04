@@ -8,10 +8,12 @@
 <style>
 @font-face{font-family:Vazirmatn;src:url(/assets/vazirmatn.woff) format("woff");font-weight:100 900;font-display:swap}
 :root{
- /* Kanki's own look, the same in every Telegram theme: AMOLED black with Kanki yellow */
- --bg:#000;--bg2:#0e0d09;--tx:#f6f1e3;--hint:#9d977f;--link:#ffd60a;--btn:#ffd60a;--btx:#111;
- --sep:rgba(255,214,10,.16);--gold1:#fff1a8;--gold2:#ffd60a;--gold3:#b38f00;--ink:#1a1206;
- --ok:#2ee06f;--warn:#ffaa2b;--bad:#ff4d4d;
+ /* Kanki's own look (the app's yellow and crimson), the same in every Telegram theme: night wine with Kanki gold */
+ --bg:#170a10;--bg2:#2a1019;--bg3:#3d1624;--tx:#fff3e4;--hint:#bc9ea8;--link:#f7c948;--btn:#f7c948;--btx:#2a1206;
+ --sep:rgba(247,201,72,.14);--gold1:#ffe9a6;--gold2:#f7c948;--gold3:#b8862a;--ink:#2a1206;
+ --ok:#3ddc97;--warn:#ffb547;--bad:#ff5c6c;
+ /* one colour per app and per system, so each is told apart at a glance */
+ --k:#f7c948;--z:#ff8a3d;--v:#a78bfa;--g:#ff6b81;--sa:#3ddc84;--si:#8fb8ff;--sw:#4cc2ff;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.6 Vazirmatn,system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
@@ -27,27 +29,28 @@ button{font:inherit;color:inherit}
 .accs button.on{border-color:var(--gold2);color:var(--gold2)}
 
 /* the pass: the one bold thing on the page */
-.pass{position:relative;border-radius:20px;overflow:hidden;color:var(--ink);
- background:linear-gradient(160deg,var(--gold1) 0%,var(--gold2) 58%,#b98226 100%);
- box-shadow:0 10px 30px -14px color-mix(in srgb,var(--gold2) 70%,transparent)}
-.pass .top{padding:16px 16px 14px}
+.pass{position:relative;border-radius:18px;overflow:hidden;color:var(--tx);
+ background:radial-gradient(120% 140% at 100% 0%,#5a1a2f 0%,var(--bg2) 55%,#200c14 100%);
+ border:1px solid color-mix(in srgb,var(--gold2) 35%,transparent);box-shadow:0 12px 28px -18px rgba(247,201,72,.5)}
+.pass .top{padding:12px 14px 10px}
 .pass .who{display:flex;align-items:center;gap:8px}
-.pass .who b{font-size:20px;font-weight:900;letter-spacing:.2px}
-.pass .st{margin-inline-start:auto;font-size:12px;font-weight:800;padding:2px 10px;border-radius:10px;background:rgba(26,18,6,.14)}
+.pass .who b{font-size:18px;font-weight:900;letter-spacing:.2px;color:var(--gold1)}
+.pass .st{margin-inline-start:auto;font-size:12px;font-weight:800;padding:2px 10px;border-radius:10px;background:rgba(255,255,255,.07)}
 .pass .st i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-inline-end:6px;vertical-align:0}
-.pass .big{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
-.pass .big small{display:block;font-size:12px;font-weight:700;opacity:.72}
-.pass .big strong{display:block;font-size:24px;font-weight:900;line-height:1.25}
-.pass .big em{font-style:normal;font-size:13px;font-weight:700;opacity:.8}
-.pass .bar{height:6px;border-radius:3px;background:rgba(26,18,6,.16);margin-top:12px;overflow:hidden}
-.pass .bar span{display:block;height:100%;background:var(--ink);border-radius:3px}
+.pass .big{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+.pass .big small{display:block;font-size:12px;font-weight:700;color:var(--hint)}
+.pass .big strong{display:block;font-size:20px;font-weight:900;line-height:1.3;color:var(--gold2)}
+.pass .big em{font-style:normal;font-size:12px;font-weight:700;color:var(--hint)}
+.pass .big strong em{color:var(--tx)}
+.pass .bar{height:5px;border-radius:3px;background:rgba(255,255,255,.08);margin-top:10px;overflow:hidden}
+.pass .bar span{display:block;height:100%;background:linear-gradient(90deg,var(--gold2),var(--z));border-radius:3px}
 /* the tear line between the pass and its stub */
-.pass .tear{position:relative;height:0;border-top:2px dashed rgba(26,18,6,.32);margin:0 14px}
+.pass .tear{position:relative;height:0;border-top:2px dashed rgba(247,201,72,.25);margin:0 14px}
 .pass .tear:before,.pass .tear:after{content:"";position:absolute;top:-11px;width:20px;height:20px;border-radius:50%;background:var(--bg)}
 .pass .tear:before{right:-25px}.pass .tear:after{left:-25px}
-.pass .stub{padding:12px 16px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.pass .routes{display:flex;gap:6px;flex-wrap:wrap;font-size:16px}
-.pass .routes span{padding:2px 8px;border-radius:10px;background:rgba(26,18,6,.1)}
+.pass .stub{padding:10px 14px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pass .routes{display:flex;gap:6px;flex-wrap:wrap;font-size:20px;line-height:1}
+.pass .stub small{font-size:12px;color:var(--hint);margin-inline-start:auto}
 .pass .copy{margin-inline-start:auto;min-height:40px;padding:0 14px;border:0;border-radius:12px;background:var(--ink);color:var(--gold1);font-weight:800;cursor:pointer}
 
 /* sections */
@@ -127,7 +130,52 @@ input[type=range]{width:100%;accent-color:var(--gold2);height:32px;margin:0}
 .code .nm{flex:1;min-width:0}
 .code .nm small{display:block;font-size:12px;color:var(--hint)}
 .code .nm b{display:block;font-size:17px;letter-spacing:.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.svc{display:inline-block;margin-top:8px;font-size:12px;font-weight:800;padding:2px 10px;border-radius:10px;background:rgba(26,18,6,.12)}
+.svc{display:inline-block;margin-top:6px;font-size:12px;font-weight:800;padding:1px 10px;border-radius:10px;background:rgba(247,201,72,.12);color:var(--gold1)}
+/* the connect card: the link and the code, each a row with its copy button */
+.conn{margin-top:12px;background:var(--bg2);border-radius:16px;padding:4px 12px;border:1px solid var(--sep)}
+.conn .r{display:flex;align-items:center;gap:10px;min-height:60px;padding:8px 0}
+.conn .r+.r{border-top:1px solid var(--sep)}
+.conn .r .nm{flex:1;min-width:0}
+.conn .r .nm small{display:block;font-size:12px;color:var(--hint);font-weight:700}
+.conn .r .nm b{display:block;font-size:14px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conn .r .b{flex:none;min-height:40px;min-width:72px}
+.conn .dot{width:10px;height:10px;border-radius:50%;flex:none}
+/* servers: one tile per country, its files below */
+.cgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.ctile{min-height:84px;border-radius:16px;border:1px solid var(--sep);background:var(--bg2);cursor:pointer;display:grid;place-items:center;gap:2px;padding:8px 4px;color:var(--tx)}
+.ctile .f{font-size:30px;line-height:1}
+.ctile b{font-size:13px;font-weight:800}
+.ctile small{font-size:11px;color:var(--hint)}
+.ctile.on{border-color:var(--gold2);background:var(--bg3);box-shadow:0 0 0 1px var(--gold2) inset}
+.cpanel{margin-top:12px;background:var(--bg2);border-radius:16px;padding:6px 12px;border:1px solid var(--sep)}
+.cpanel h3{margin:8px 0 2px;font-size:15px;font-weight:900}
+.opt{display:flex;align-items:center;gap:10px;min-height:64px;padding:8px 0}
+.opt+.opt{border-top:1px solid var(--sep)}
+.opt .ic{width:36px;height:36px;border-radius:11px;flex:none;display:grid;place-items:center;font-weight:900;font-size:15px;color:#1c0a10}
+.opt .nm{flex:1;min-width:0}
+.opt .nm b{display:block;font-weight:800;direction:ltr;text-align:right;unicode-bidi:plaintext}
+.opt .nm small{display:block;font-size:12px;color:var(--hint)}
+.opt .b{flex:none;min-height:40px}
+/* apps: one folding card per app, in the app's colour */
+.plats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:0 0 12px}
+.plats button{min-height:44px;border-radius:14px;border:1px solid var(--sep);background:var(--bg2);font-weight:800;cursor:pointer;color:var(--hint);display:flex;align-items:center;justify-content:center;gap:6px}
+.plats button i{width:8px;height:8px;border-radius:50%;background:currentColor}
+.plats button.on{color:var(--tx);background:var(--bg3);border-color:var(--pc)}
+.plats button.on i{background:var(--pc)}
+details.app{margin-bottom:10px;background:var(--bg2);border-radius:16px;border:1px solid var(--sep);border-inline-start:4px solid var(--ac);overflow:hidden}
+details.app summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:64px;padding:10px 12px;cursor:pointer}
+details.app summary::-webkit-details-marker{display:none}
+details.app summary .ic{width:38px;height:38px;border-radius:12px;flex:none;display:grid;place-items:center;font-weight:900;font-size:16px;color:#1c0a10;background:var(--ac)}
+details.app summary .nm{flex:1;min-width:0}
+details.app summary .nm b{display:block;font-size:15px;font-weight:900;direction:ltr;text-align:right;unicode-bidi:plaintext}
+details.app summary .nm small{display:block;font-size:12px;color:var(--hint)}
+details.app summary .rec{font-size:11px;font-weight:800;padding:1px 8px;border-radius:8px;color:#1c0a10;background:var(--ac);flex:none}
+details.app summary .chev{width:10px;height:10px;border-right:2px solid var(--hint);border-bottom:2px solid var(--hint);transform:rotate(45deg);transition:transform .2s;flex:none;margin:0 4px 4px}
+details.app[open] summary .chev{transform:rotate(225deg);margin-bottom:-4px}
+details.app .body{padding:0 12px 12px}
+details.app .steps li:before{background:color-mix(in srgb,var(--ac) 22%,var(--bg));color:var(--tx)}
+details.app .b.main{background:var(--ac);color:#1c0a10}
+a.b{display:grid;place-items:center;text-decoration:none;color:inherit}
 /* servers tab: one block per country */
 .ctry{background:var(--bg2);border-radius:16px;padding:10px 12px;margin-bottom:8px}
 .ctry .h{display:flex;align-items:center;gap:10px}
@@ -141,25 +189,26 @@ input[type=range]{width:100%;accent-color:var(--gold2);height:32px;margin:0}
 .appc .t{display:flex;align-items:center;gap:10px}
 .appc .t b{flex:1;font-size:15px;font-weight:900}
 .appc .t .rec{font-size:11px;font-weight:800;padding:1px 8px;border-radius:8px;color:var(--ink);background:var(--gold2)}
+.b.go{border:0;background:var(--ok);color:#06210f}
 details.more{margin-top:10px}
 details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8px 2px;list-style-position:inside}
 
 /* brand bar */
 .brand{display:flex;align-items:center;gap:10px;margin:0 0 14px}
-.brand svg{width:30px;height:34px;flex:none;filter:drop-shadow(0 0 8px rgba(255,214,10,.45))}
+.brand svg{width:30px;height:34px;flex:none;filter:drop-shadow(0 0 8px rgba(247,201,72,.45))}
 .brand b{font-size:18px;font-weight:900;letter-spacing:.5px;color:var(--gold2);direction:ltr}
 .brand small{margin-inline-start:auto;font-size:12px;color:var(--hint)}
 /* the shop: one tab per kind of plan, one card per plan */
 .ptabs{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px;margin:0 0 12px}
 .ptabs button{min-height:44px;padding:0 6px;border-radius:14px;border:1px solid var(--sep);background:var(--bg2);font-weight:800;font-size:13px;cursor:pointer;color:var(--hint);white-space:nowrap}
-.ptabs button.on{background:var(--gold2);border-color:var(--gold2);color:#111;box-shadow:0 0 18px rgba(255,214,10,.35)}
-.pc{position:relative;border-radius:20px;background:linear-gradient(160deg,#16140c,#0a0906);border:1px solid var(--sep);padding:14px;margin-bottom:12px;box-shadow:0 8px 24px -12px rgba(0,0,0,.9),0 0 0 1px rgba(255,255,255,.02) inset}
-.pc.feat{border:1.5px solid var(--gold2);box-shadow:0 0 0 1px rgba(255,214,10,.25),0 10px 30px -10px rgba(255,214,10,.35)}
+.ptabs button.on{background:var(--gold2);border-color:var(--gold2);color:#111;box-shadow:0 0 18px rgba(247,201,72,.35)}
+.pc{position:relative;border-radius:20px;background:linear-gradient(160deg,#341320,#1f0b13);border:1px solid var(--sep);padding:14px;margin-bottom:12px;box-shadow:0 8px 24px -12px rgba(0,0,0,.9),0 0 0 1px rgba(255,255,255,.02) inset}
+.pc.feat{border:1.5px solid var(--gold2);box-shadow:0 0 0 1px rgba(247,201,72,.25),0 10px 30px -10px rgba(247,201,72,.35)}
 .pc .rib{position:absolute;top:-10px;inset-inline-start:14px;font-size:12px;font-weight:900;padding:3px 10px;border-radius:10px;background:var(--bg2);border:1px solid var(--gold2);color:var(--gold2)}
 .pc.feat .rib{background:var(--gold2);color:#111;animation:blink 1.6s ease-in-out infinite}
-@keyframes blink{50%{box-shadow:0 0 16px rgba(255,214,10,.8);transform:scale(1.04)}}
+@keyframes blink{50%{box-shadow:0 0 16px rgba(247,201,72,.8);transform:scale(1.04)}}
 .pc .pt{display:flex;align-items:center;gap:12px}
-.pc .em{width:48px;height:48px;flex:none;border-radius:14px;display:grid;place-items:center;font-size:26px;background:rgba(255,214,10,.08);border:1px solid var(--sep)}
+.pc .em{width:48px;height:48px;flex:none;border-radius:14px;display:grid;place-items:center;font-size:26px;background:rgba(247,201,72,.08);border:1px solid var(--sep)}
 .pc .pt b{display:block;font-size:16px;font-weight:900}
 .pc .pt b.vol{font-size:22px;letter-spacing:.2px;color:var(--gold2)}.pc .pt b.vol small{font-size:13px;color:#e8e2cc;font-weight:800}
 .pc .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
@@ -171,7 +220,7 @@ details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8p
 .pc .pr2 strong small{font-size:12px;font-weight:700;color:var(--hint)}
 .pc .off{display:inline-block;margin-inline-start:6px;font-size:11px;font-weight:900;padding:1px 7px;border-radius:8px;background:rgba(46,224,111,.14);color:var(--ok);vertical-align:3px}
 .pc .buy{min-width:110px;min-height:46px;border:0;border-radius:14px;background:var(--gold2);color:#111;font-weight:900;cursor:pointer}
-.pc.feat .buy{box-shadow:0 0 18px rgba(255,214,10,.45)}
+.pc.feat .buy{box-shadow:0 0 18px rgba(247,201,72,.45)}
 
 /* states */
 .empty{text-align:center;padding:48px 8px}
@@ -181,18 +230,18 @@ details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8p
 @keyframes p{50%{opacity:.55}}
 #toast{position:fixed;inset-inline:16px;bottom:calc(16px + env(safe-area-inset-bottom));padding:12px 14px;border-radius:12px;background:var(--tx);color:var(--bg);font-weight:700;text-align:center;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}
 #toast.on{opacity:1;transform:none}
-@media (prefers-reduced-motion:reduce){.skel{animation:none}#toast{transition:none}.pc.feat .rib{animation:none}}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}#toast{transition:none}.pc.feat .rib{animation:none}details.app summary .chev{transition:none}}
 @media (min-width:620px){body{max-width:560px;margin:0 auto}}
 </style>
 </head>
 <body>
-<header class="brand"><svg viewBox="0 0 24 26" aria-hidden="true"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF4B8"/><stop offset=".5" stop-color="#FFD60A"/><stop offset="1" stop-color="#B38F00"/></linearGradient></defs><path d="M12 1 22 4.5v8c0 6-4.4 10.4-10 12.5C6.4 22.9 2 18.5 2 12.5v-8z" fill="url(#sg)"/><path d="M12 3.6 19.6 6.3v6.2c0 4.7-3.3 8.2-7.6 10C7.7 20.7 4.4 17.2 4.4 12.5V6.3z" fill="#0d0b05"/><path d="M8.6 7.5h2.4v4l3.4-4h3l-4 4.5 4.2 5.5h-3l-2.8-3.8-.8.9v2.9H8.6z" fill="url(#sg)"/></svg><b>⚡ Kanki VPN</b><small>امن · سریع · کم‌پینگ</small></header>
+<header class="brand"><svg viewBox="0 0 24 26" aria-hidden="true"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF4B8"/><stop offset=".5" stop-color="#FFD60A"/><stop offset="1" stop-color="#B38F00"/></linearGradient></defs><path d="M12 1 22 4.5v8c0 6-4.4 10.4-10 12.5C6.4 22.9 2 18.5 2 12.5v-8z" fill="url(#sg)"/><path d="M12 3.6 19.6 6.3v6.2c0 4.7-3.3 8.2-7.6 10C7.7 20.7 4.4 17.2 4.4 12.5V6.3z" fill="#2a1019"/><path d="M8.6 7.5h2.4v4l3.4-4h3l-4 4.5 4.2 5.5h-3l-2.8-3.8-.8.9v2.9H8.6z" fill="url(#sg)"/></svg><b>⚡ Kanki VPN</b><small>امن · سریع · کم‌پینگ</small></header>
 <div id="app"><div class="skel"></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 (function(){
 var Q=new URLSearchParams(location.search);
-var A={list:[],cur:0,plat:'i',view:Q.get('buy')?'buy':'acc',tab:['sub','srv','app'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sub',cat:'',svc:'',shop:null,renew:+(Q.get('renew')||0),cb:null};
+var A={open:{},ctry:'',list:[],cur:0,plat:'i',view:Q.get('buy')?'buy':'acc',tab:['sub','srv','app'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sub',cat:'',svc:'',shop:null,renew:+(Q.get('renew')||0),cb:null};
 function tg(){return window.Telegram&&Telegram.WebApp}
 // the signed init data: from Telegram's script, else from the page address (the script may not load in Iran)
 function initData(){var w=tg();if(w&&w.initData)return w.initData;
@@ -218,8 +267,8 @@ function ordersHtml(){if(!A.orders||!A.orders.length)return '';
  return '<h2>سفارش‌های من</h2><div class="card">'+A.orders.map(function(o){var st=OST[o.status]||[o.status||'—','y'],amt=+o.amount;
   return '<div class="row"><div class="nm"><b>'+esc(o.plan||'سفارش')+'</b><small>'+(o.kind=='renew'?'تمدید':'خرید')+'، '+(amt>0&&o.method!='np'&&o.method!='wallet'?toman(amt):'')+(o.created?' '+new Date(o.created*1000).toLocaleDateString('fa-IR'):'')+'</small></div><span class="ost '+st[1]+'">'+st[0]+'</span></div>'}).join('')+'</div>'}
 function nameCard(){if(!A.needName||A.renew)return '';
- return '<div class="card" style="margin-bottom:12px"><span class="lbl" style="margin-top:0">اسم کانفیگ شما</span><input class="in" id="cn" maxlength="12" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="mahtab87" value="'+esc(A.name||'')+'">'+
-  '<p class="lead" style="margin:6px 2px 0">فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف، اولش حرف. توی برنامه با همین اسم می‌بینیدش.</p></div>'}
+ return '<div class="card" style="margin-bottom:12px"><span class="lbl" style="margin-top:0">اسم کانفیگ شما</span><input class="in" id="cn" maxlength="12" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="'+esc(A.nameHint||'mahtab87')+'" value="'+esc(A.name||'')+'">'+
+  '<p class="lead" style="margin:6px 2px 0">فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف، اولش حرف. توی برنامه با همین اسم می‌بینیدش.'+(A.nameHint?' خالی بذارید تا همون <b class="ltr">'+esc(A.nameHint)+'</b> (از اسم تلگرامتون) بشه.':'')+'</p></div>'}
 function nameQ(){if(!A.needName||A.renew)return '';var e=document.getElementById('cn'),v=e?e.value.trim():'';A.name=v;return '&name='+encodeURIComponent(v)}
 var NOSEND='ربات نتونست توی چت پیام بده؛ ربات رو توی تلگرام استارت کنید (اگه بلاکش کردید، آنبلاک) و دوباره امتحان کنید';
 function why(e,j){var m=e.message;if(m=='name')return 'اول اسم کانفیگ رو بنویسید';if(m=='bad name')return (j||'اسم کانفیگ درست نیست').replace(/<[^>]+>/g,'').split('\n')[0];
@@ -304,12 +353,18 @@ function draw(){var u=A.list[A.cur];if(!u)return;var v2=u.service=='v2ray';
  var h='';
  if(A.list.length>1)h+='<div class="accs">'+A.list.map(function(x,i){return '<button class="'+(i==A.cur?'on':'')+'" data-acc="'+i+'"><span class="ltr">'+esc(x.name)+'</span></button>'}).join('')+'</div>';
  h+=tabs();
- if(A.tab=='srv')h+=srvTab(u);else if(A.tab=='app')h+=appTab(u,v2);else h+=subTab(u,v2);
+ if(A.tab=='srv')h+=srvTab(u,v2);else if(A.tab=='app')h+=appTab(u,v2);else h+=subTab(u,v2);
  document.getElementById('app').innerHTML=h;wireTabs();wire(u)}
 
-// tab 1: the account and connecting at once
+// the countries of an account, each once: (code, its WireGuard / AmneziaWG files, a route through Iran too)
+function countries(u){var by={},ord=[];u.servers.forEach(function(s){var k=(s.cc||'').toUpperCase()||'?';
+  if(!by[k]){by[k]={cc:k,wg:false,awg:false,iran:false,direct:false};ord.push(k)}var c=by[k];
+  if(s.iran)c.iran=true;else c.direct=true;if(s.protocols.indexOf('wireguard')>=0)c.wg=true;if(s.protocols.indexOf('amneziawg')>=0)c.awg=true});
+ return ord.map(function(k){return by[k]})}
+
+// tab 1: the account (a small pass) and what connects it: the subscription link and the Kanki code
 function subTab(u,v2){var st=ST[u.status]||ST.Active,lim=u.limit_gb>0,left=lim?Math.max(0,u.limit_gb-u.used_gb):0,pc=lim?Math.min(100,u.used_gb/u.limit_gb*100):0;
- var routes=[];u.servers.forEach(function(s){var r=route(s);if(routes.indexOf(r)<0)routes.push(r)});
+ var cs=countries(u),tun=cs.some(function(c){return c.iran});
  var h='<section class="pass" aria-label="حساب">'+
   '<div class="top"><div class="who"><b class="ltr">'+esc(u.name)+'</b><span class="st"><i style="background:'+st[1]+'"></i>'+st[0]+'</span></div>'+
   '<span class="svc">'+SV[v2?'v2ray':'vip'][0]+' '+SV[v2?'v2ray':'vip'][1]+'</span>'+
@@ -317,43 +372,64 @@ function subTab(u,v2){var st=ST[u.status]||ST.Active,lim=u.limit_gb>0,left=lim?M
   '<div><small>زمان باقی‌مانده</small><strong>'+(u.days_left<0?'نامحدود':fa(u.days_left)+' <em>روز</em>')+'</strong><em>'+fa(u.connections||'∞')+' دستگاه هم‌زمان</em></div></div>'+
   (lim?'<div class="bar"><span style="width:'+pc.toFixed(1)+'%"></span></div>':'')+'</div>'+
   '<div class="tear"></div>'+
-  '<div class="stub"><div class="routes">'+(routes.length?routes.map(function(r){return '<span class="ltr">'+r+'</span>'}).join(''):'<span>—</span>')+'</div></div></section>';
- h+='<div class="cta"><button class="b main" id="cp">کپی لینک اتصال خودکار (Sub Link)</button>'+(u.links?'<button class="b" id="lk_chat">ارسال لینک‌ها به چت</button>':'')+'</div>';
- h+='<p class="lead" style="margin:8px 2px 0">'+(v2?'این لینک رو توی v2rayNG، Streisand یا V2Box به‌عنوان اشتراک اضافه کنید؛ راهنما توی تب «برنامه و راهنما» است.':'برای برنامه‌های دیگه (v2rayNG، Hiddify…). با برنامه‌ی کانکی فقط کد ورود لازمه.')+'</p>';
- if(!v2)h+='<div class="code"><div class="nm"><small>کد ورود برنامه‌ی کانکی</small><b class="ltr">'+esc(u.code)+'</b></div><button class="b" id="cc">کپی کد</button></div>';
- if(sales())h+='<div class="acts one"><button class="b go" id="rn" style="width:100%">تمدید یا افزایش حجم همین حساب</button></div>';
+  '<div class="stub"><div class="routes" aria-label="کشورها">'+(cs.length?cs.map(function(c){return '<span title="'+esc(CN[c.cc]||c.cc)+'">'+(flag(c.cc)||'🌐')+'</span>'}).join(''):'<span>—</span>')+'</div>'+
+  (tun?'<small>+ مسیر تانل ایران</small>':'')+'</div></section>';
+ h+='<div class="conn">'+
+  '<div class="r"><span class="dot" style="background:var(--v)"></span><div class="nm"><small>لینک اشتراک (v2rayNG، V2Box، Hiddify)</small><b class="ltr">'+esc(u.service=='v2ray'?u.v2link:u.link)+'</b></div><button class="b" id="cp">کپی</button></div>'+
+  (v2?'':'<div class="r"><span class="dot" style="background:var(--k)"></span><div class="nm"><small>کد ورود Kanki VPN</small><b class="ltr">'+esc(u.code)+'</b></div><button class="b" id="cc">کپی</button></div>')+
+  '</div>';
+ h+='<div class="acts"><button class="b" id="v2_chat">لینک V2Ray توی چت</button><button class="b" data-t="app">راهنمای اتصال</button></div>';
+ if(sales())h+='<div class="acts one"><button class="b go" id="rn">تمدید یا افزایش حجم همین حساب</button></div>';
  return h+ordersHtml()}
 
-// tab 2: the servers, one block per country
-function srvTab(u){if(!u.servers.length)return '<div class="empty"><b>هنوز سروری برای این حساب نیست</b><p class="muted">چند دقیقه بعد دوباره باز کنید.</p></div>';
- var by={},ord=[];u.servers.forEach(function(s){var k=(s.cc||'').toUpperCase()||'?';if(!by[k]){by[k]=[];ord.push(k)}by[k].push(s)});
- return '<p class="lead">کشورهایی که این حساب بهشون وصل می‌شه. «از راه ایران» یعنی از تانل داخل ایران، برای وقتی که مستقیم بسته است.</p>'+
-  ord.map(function(k){var list=by[k];return '<div class="ctry"><div class="h"><span class="f">'+(flag(k)||'🌐')+'</span><b>'+esc(CN[k]||k)+'</b><small>'+fa(list.length)+' مسیر</small></div>'+
-   list.map(function(s){return '<div class="way"><span>'+(s.iran?'از راه ایران':'مستقیم')+'</span><div class="tags">'+s.protocols.map(function(p){return '<span class="ltr">'+esc(PRN[p]||p)+'</span>'}).join('')+'</div></div>'}).join('')+'</div>'}).join('')}
+// tab 2: one tile per country; a tapped country shows what can be taken for it
+function srvTab(u,v2){var cs=countries(u);if(!cs.length)return '<div class="empty"><b>هنوز سروری برای این حساب نیست</b><p class="muted">چند دقیقه بعد دوباره باز کنید.</p></div>';
+ if(!cs.some(function(c){return c.cc==A.ctry}))A.ctry=cs[0].cc;var c=cs.filter(function(x){return x.cc==A.ctry})[0];
+ var h='<p class="lead">کشور رو انتخاب کنید؛ کانفیگ‌هاش همین‌جا میان و ربات توی چت می‌فرسته.</p><div class="cgrid">'+cs.map(function(x){
+  return '<button class="ctile'+(x.cc==A.ctry?' on':'')+'" data-cc="'+esc(x.cc)+'" aria-pressed="'+(x.cc==A.ctry)+'"><span class="f">'+(flag(x.cc)||'🌐')+'</span><b>'+esc(CN[x.cc]||x.cc)+'</b><small>'+(x.direct&&x.iran?'مستقیم و تانل':x.iran?'از راه ایران':'مستقیم')+'</small></button>'}).join('')+'</div>';
+ var o=function(ic,col,name,line,btn,attr){return '<div class="opt"><span class="ic" style="background:'+col+'">'+ic+'</span><div class="nm"><b>'+name+'</b><small>'+line+'</small></div><button class="b" '+attr+'>'+btn+'</button></div>'};
+ h+='<div class="cpanel"><h3>'+(flag(c.cc)||'🌐')+' '+esc(CN[c.cc]||c.cc)+'</h3>';
+ if(!v2&&c.wg)h+=o('W','var(--g)','WireGuard','فایل کانفیگ سرورهای '+esc(CN[c.cc]||c.cc)+'، برای برنامه‌ی WireGuard','بفرست','data-cfg="w:'+esc(c.cc)+'"');
+ if(!v2&&c.awg)h+=o('A','var(--z)','AmneziaWG','فایل کانفیگ سرورهای '+esc(CN[c.cc]||c.cc)+'، برای AmneziaVPN یا AmneziaWG','بفرست','data-cfg="a:'+esc(c.cc)+'"');
+ if(A.hasAmz(u))h+=o('Z','var(--z)','AmneziaVPN','یک فایل بکاپ با همه‌ی کشورها (WireGuard، AmneziaWG و VLESS)','بفرست','data-amz="1"');
+ if(u.links||v2)h+=o('V','var(--v)','V2Ray','یک لینک اشتراک برای همه‌ی کشورها (Xray و Hysteria2)، برای v2rayNG و V2Box','بفرست','data-cfg="v"');
+ return h+'</div>'}
 
-// tab 3: which app on which system, with short steps
-function appTab(u,v2){var L=function(x){return '<bdi class="ltr">'+x+'</bdi>'},p=A.plat;
- var h='<div class="seg" role="tablist">'+['a','i','w'].map(function(k){return '<button role="tab" aria-selected="'+(p==k)+'" class="'+(p==k?'on':'')+'" data-p="'+k+'">'+PN[k]+'</button>'}).join('')+'</div>';
- var V={i:['V2Box','App Store','تب '+L('Configs')+' ← ➕ ← '+L('Add subscription')+'، لینک رو بذارید و ذخیره کنید.','یه کانفیگ رو انتخاب کنید و دکمه‌ی اتصال رو بزنید.'],
-  a:['v2rayNG','گوگل‌پلی','منوی ☰ ← '+L('Subscription group setting')+' ← ➕، لینک رو توی '+L('URL')+' بذارید و ذخیره کنید؛ بعد منوی ⋮ ← '+L('Update subscription')+'.','یه کانفیگ رو انتخاب کنید و دکمه‌ی ▶ پایین صفحه رو بزنید.'],
-  w:['v2rayN یا Nekoray','GitHub','منوی '+L('Subscription group')+' ← '+L('Add')+'، لینک رو بذارید؛ بعد '+L('Update subscription')+'.','روی یه سرور دابل‌کلیک کنید و '+L('System proxy')+' رو روشن کنید.']}[p];
- function v2card(rec){return '<div class="appc"><div class="t"><b>'+L(V[0])+'</b>'+(rec?'<span class="rec">پیشنهادی</span>':'')+'</div>'+
-  '<ol class="steps"><li><span>برنامه‌ی '+L(V[0])+' رو از '+V[1]+' نصب کنید.</span></li><li><span>اینجا لینک اشتراک رو کپی کنید.</span></li><li><span>'+V[2]+'</span></li><li><span>'+V[3]+'</span></li></ol>'+
-  '<div class="acts one"><button class="b main" data-cpv="1">کپی لینک اشتراک</button></div></div>'}
- if(v2)return h+v2card(true);
- // VIP: the Kanki app first (Android, Windows), AmneziaVPN, then any v2ray app
- if(p!='i'){var dl=p=='a'&&A.androidApp?'<button class="b main" id="app_dl">دریافت فایل نصب توی چت</button>':(A.appLink?'<a class="b main" style="display:grid;place-items:center;text-decoration:none" href="'+esc(A.appLink)+'" target="_blank" rel="noopener">صفحه‌ی دانلود برنامه</a>':'<p class="lead" style="margin:0">لینک دانلود رو از پشتیبانی بگیرید'+(A.support?': '+L(esc(A.support)):'')+'.</p>');
-  h+='<div class="appc"><div class="t"><b>برنامه‌ی کانکی</b><span class="rec">پیشنهادی</span></div>'+
-   '<ol class="steps"><li><span>برنامه رو نصب کنید.</span></li><li><span>با کد ورود وارد بشید: '+L(esc(u.code))+'</span></li><li><span>حالت (هوشمند، گیمینگ یا ضد فیلتر) رو انتخاب کنید و دکمه‌ی اتصال رو بزنید.</span></li></ol>'+
-   '<div class="acts"><div style="display:grid">'+dl+'</div><button class="b" id="cc">کپی کد ورود</button></div></div>'}
- if(u.wg||u.awg){h+='<div class="appc"><div class="t"><b>'+L('AmneziaVPN')+'</b>'+(p=='i'?'<span class="rec">پیشنهادی</span>':'')+'</div><p class="lead" style="margin:4px 0 0">همه‌ی سرورهای WireGuard و AmneziaWG در یک فایل بکاپ.</p>'+
-  '<ol class="steps"><li><span>برنامه‌ی AmneziaVPN رو نصب کنید.</span></li><li><span>توی برنامه: تنظیمات ← پشتیبان‌گیری ← بازیابی ('+L('Restore from backup')+').</span></li><li><span>همین فایل رو انتخاب کنید؛ همه‌ی سرورها یک‌جا اضافه می‌شن.</span></li></ol>'+
-  '<div class="acts'+(canDownload()?'':' one')+'">'+(canDownload()?'<button class="b main" id="amz_dl">دانلود فایل بکاپ</button>':'')+'<button class="b'+(canDownload()?'':' main')+'" id="amz_chat">بفرست توی چت</button></div></div>'}
- if(u.links)h+='<details class="more"'+(p=='i'&&!(u.wg||u.awg)?' open':'')+'><summary>یا با '+L(V[0])+' و برنامه‌های V2Ray</summary>'+v2card(false)+'</details>';
- var cfg=[['awg','a','AmneziaWG','فایل کانفیگ هر سرور'],['wg','w','WireGuard','فایل کانفیگ هر سرور'],['hy2','h','Hysteria2','لینک هر سرور']].filter(function(c){return u[c[0]]});
- if(cfg.length)h+='<details class="more"><summary>کانفیگ دستی هر پروتکل</summary><div class="card">'+cfg.map(function(c){return '<div class="row"><div class="nm"><b>'+c[2]+'</b><small>'+c[3]+'</small></div><button class="b" data-cfg="'+c[1]+'">ارسال توی چت</button></div>'}).join('')+'</div></details>';
- return h}
+// tab 3: which app on which system: one folding card per app, the recommended one open
+var LINKS={
+ z:{a:'https://play.google.com/store/apps/details?id=org.amnezia.vpn',i:'https://apps.apple.com/app/amneziavpn/id1600529900',w:'https://github.com/amnezia-vpn/amnezia-client/releases/latest'},
+ v:{a:'https://github.com/2dust/v2rayNG/releases/latest',i:'https://apps.apple.com/app/v2box-v2ray-client/id6446814690',w:'https://github.com/2dust/v2rayN/releases/latest'},
+ g:{a:'https://play.google.com/store/apps/details?id=com.wireguard.android',i:'https://apps.apple.com/app/wireguard/id1441195209',w:'https://www.wireguard.com/install/'}};
+function appTab(u,v2){var L=function(x){return '<bdi class="ltr">'+x+'</bdi>'},p=A.plat,PC={a:'var(--sa)',i:'var(--si)',w:'var(--sw)'};
+ var h='<div class="plats" role="tablist">'+['a','i','w'].map(function(k){return '<button role="tab" aria-selected="'+(p==k)+'" class="'+(p==k?'on':'')+'" data-p="'+k+'" style="--pc:'+PC[k]+'"><i></i>'+PN[k]+'</button>'}).join('')+'</div>';
+ var cards=[],dl=function(app,label){return '<a class="b" href="'+LINKS[app][p]+'" data-ext="1" target="_blank" rel="noopener">'+label+'</a>'};
+ var card=function(key,col,ic,name,line,body){return {k:key,html:function(open,rec){return '<details class="app" data-k="'+key+'"'+(open?' open':'')+' style="--ac:'+col+'"><summary><span class="ic">'+ic+'</span><span class="nm"><b>'+name+'</b><small>'+line+'</small></span>'+(rec?'<span class="rec">پیشنهادی</span>':'')+'<span class="chev" aria-hidden="true"></span></summary><div class="body">'+body+'</div></details>'}}};
+ // Kanki VPN: Android (files in the bot) and Windows (its link); never on an iPhone
+ var kdl=p=='a'?(A.androidApp?'<button class="b main" id="app_dl">فایل نصب توی چت</button>':(A.appLink?'<a class="b main" href="'+esc(A.appLink)+'" data-ext="1" target="_blank" rel="noopener">دانلود برنامه</a>':'')):(p=='w'&&A.winLink?'<a class="b main" href="'+esc(A.winLink)+'" data-ext="1" target="_blank" rel="noopener">دانلود برای ویندوز</a>':'');
+ if(!v2&&kdl)cards.push(card('k','var(--k)','K','Kanki VPN','اپ اختصاصی کانکی؛ همه‌ی سرورها و پروتکل‌ها با یک کد',
+  '<ol class="steps"><li><span>برنامه رو نصب کنید.</span></li><li><span>کد ورود رو کپی و توی برنامه وارد کنید.</span></li><li><span>حالت (هوشمند، گیمینگ یا ضد فیلتر) رو انتخاب کنید و دکمه‌ی اتصال رو بزنید.</span></li></ol>'+
+  '<div class="acts">'+kdl+'<button class="b" id="cc">کپی کد ورود</button></div>'));
+ if(A.hasAmz(u))cards.push(card('z','var(--z)','A','AmneziaVPN','همه‌ی کشورها با یک فایل بکاپ؛ WireGuard، AmneziaWG و VLESS',
+  '<ol class="steps"><li><span>AmneziaVPN رو نصب کنید.</span></li><li><span>فایل بکاپ رو بگیرید'+(p=='i'?' و ذخیره کنید (اشتراک‌گذاری ← '+L('Save to Files')+')':'')+'.</span></li><li><span>توی برنامه: تنظیمات ← پشتیبان‌گیری ← بازیابی ('+L('Restore from backup')+') و همین فایل.</span></li><li><span>یک کشور رو انتخاب کنید و وصل بشید.</span></li></ol>'+
+  '<p class="lead" style="margin:8px 0 0">بازیابی، سرورهای قبلی خود برنامه رو پاک می‌کنه.</p>'+
+  '<div class="acts">'+dl('z','دانلود AmneziaVPN')+(canDownload()?'<button class="b main" id="amz_dl">دانلود فایل بکاپ</button>':'<button class="b main" id="amz_chat">فایل بکاپ توی چت</button>')+'</div>'+
+  (canDownload()?'<div class="acts one"><button class="b" id="amz_chat">یا بفرست توی چت</button></div>':'')));
+ var V={a:['v2rayNG','➕ ← '+L('Import config from Clipboard')+'؛ خودش می‌فهمه لینک اشتراکه و اضافه‌ش می‌کنه.','منوی ⋮ ← '+L('Update subscription')+'، بعد یه کانفیگ و دکمه‌ی ▶.'],
+  i:['V2Box','تب '+L('Configs')+' ← ➕ ← '+L('Import v2ray uri from clipboard')+'؛ اشتراک خودش اضافه و به‌روز می‌شه.','یه کانفیگ رو انتخاب کنید و '+L('Connect')+'.'],
+  w:['v2rayN',L('Subscription group')+' ← '+L('Subscription group settings')+' ← '+L('Add')+'، لینک رو در '+L('Url')+' بذارید.',L('Update subscription')+'، یه سرور، و '+L('Set system proxy')+'.']}[p];
+ if(u.links||v2)cards.push(card('v','var(--v)','V',V[0],'یک لینک اشتراک برای همه‌ی کانفیگ‌های Xray و Hysteria2',
+  '<ol class="steps"><li><span>'+L(V[0])+' رو نصب کنید.</span></li><li><span>لینک اشتراک رو کپی کنید.</span></li><li><span>'+V[1]+'</span></li><li><span>'+V[2]+'</span></li></ol>'+
+  '<div class="acts">'+dl('v','دانلود '+V[0])+'<button class="b main" data-cpv="1">کپی لینک اشتراک</button></div>'));
+ if(!v2&&(u.wg||u.awg))cards.push(card('g','var(--g)','W','WireGuard','فایل کانفیگ جدا برای هر سرور (دستی)',
+  '<ol class="steps"><li><span>برنامه‌ی WireGuard رو نصب کنید.</span></li><li><span>فایل‌های کانفیگ رو توی چت بگیرید.</span></li><li><span>توی برنامه ➕ ← '+L('Import from file')+' و یکی از فایل‌ها.</span></li></ol>'+
+  '<p class="lead" style="margin:8px 0 0">کانفیگ‌های AmneziaWG با برنامه‌ی WireGuard معمولی وصل نمی‌شن؛ برای اون‌ها AmneziaVPN.</p>'+
+  '<div class="acts">'+dl('g','دانلود WireGuard')+(u.wg?'<button class="b main" data-cfg="w">کانفیگ‌ها توی چت</button>':'<button class="b main" data-cfg="a">کانفیگ‌ها توی چت</button>')+'</div>'));
+ // on an iPhone AmneziaVPN is the one to use (the Kanki app is not there)
+ if(!cards.length)return h+'<div class="empty"><b>برای این دستگاه راهی فعال نیست</b><p class="muted">به پشتیبانی پیام بدید'+(A.support?': '+L(esc(A.support)):'')+'.</p></div>';
+ if(A.open[p]===undefined)A.open[p]=cards[0].k;
+ return h+cards.map(function(c,i){return c.html(A.open[p]==c.k,i==0)}).join('')}
 
+A.hasAmz=function(u){return !!u.amz};
 function canDownload(){var w=tg();return !!(w&&w.downloadFile&&w.isVersionAtLeast&&w.isVersionAtLeast('8.0'))}
 
 function wire(u){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
@@ -361,23 +437,27 @@ function wire(u){var $=function(s){return document.querySelector(s)},all=functio
  all('[data-acc]').forEach(function(b){b.onclick=function(){A.cur=+b.dataset.acc;draw()}});
  var rn=$('#rn');if(rn)rn.onclick=function(){A.renew=u.id;A.svc='';A.view='buy';drawBuy();window.scrollTo(0,0)};
  all('[data-p]').forEach(function(b){b.onclick=function(){A.plat=b.dataset.p;draw()}});
- var cp=$('#cp');if(cp)cp.onclick=function(){copyText(sub,'لینک اتصال کپی شد')};
+ all('[data-cc]').forEach(function(b){b.onclick=function(){A.ctry=b.dataset.cc;draw()}});
+ all('details.app').forEach(function(d,i){d.addEventListener('toggle',function(){if(d.open){A.open[A.plat]=d.dataset.k;all('details.app').forEach(function(x){if(x!=d)x.open=false})}})});
+ // links to stores open outside Telegram's page
+ all('[data-ext]').forEach(function(a){a.onclick=function(e){var w=tg();if(w&&w.openLink){e.preventDefault();w.openLink(a.href)}}});
+ var cp=$('#cp');if(cp)cp.onclick=function(){copyText(sub,'لینک اشتراک کپی شد')};
  all('[data-cpv]').forEach(function(b){b.onclick=function(){copyText(sub,'لینک اشتراک کپی شد')}});
  all('#cc').forEach(function(b){b.onclick=function(){copyText(u.code,'کد ورود کپی شد')}});
- function send(what,b){b.disabled=true;api('/tg/api/send?uid='+u.id+'&what='+what).then(function(){buzz('success');toast('توی چت ربات فرستاده شد')}).catch(function(e){buzz('error');toast(e.message=='no WireGuard or AmneziaWG config'?'کانفیگ WireGuard یا AmneziaWG فعال نیست':e.message=='not delivered'?NOSEND:'نشد، دوباره امتحان کنید')}).then(function(){b.disabled=false})}
- var c=$('#amz_chat');if(c)c.onclick=function(){send('amz:'+A.plat,c)};
+ function send(what,b){b.disabled=true;api('/tg/api/send?uid='+u.id+'&what='+what).then(function(){buzz('success');toast('توی چت ربات فرستاده شد')}).catch(function(e){buzz('error');toast(e.message=='not delivered'?NOSEND:/config/.test(e.message)?'برای این حساب فعال نیست':'نشد، دوباره امتحان کنید')}).then(function(){b.disabled=false})}
+ all('#amz_chat,[data-amz]').forEach(function(c){c.onclick=function(){send('amz:'+A.plat,c)}});
  var d=$('#amz_dl');if(d)d.onclick=function(){var w=tg();
   w.downloadFile({url:location.origin+'/tg/api/file?uid='+u.id+'&p='+A.plat+'&init='+encodeURIComponent(initData()),file_name:u.name.replace(/[^A-Za-z0-9_-]/g,'')+'.backup'})};
  var ad=$('#app_dl');if(ad)ad.onclick=function(){send('app:a',ad)};
- var lh=$('#lk_chat');if(lh)lh.onclick=function(){send('cfg:l',lh)};
+ var v2c=$('#v2_chat');if(v2c)v2c.onclick=function(){send('cfg:v',v2c)};
  all('[data-cfg]').forEach(function(b){b.onclick=function(){send('cfg:'+b.dataset.cfg,b)}})}
 
 function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}
   // the same black as the page above and below it
-  try{w.setHeaderColor('#000000');w.setBackgroundColor('#000000');if(w.setBottomBarColor)w.setBottomBarColor('#000000')}catch(e){}}
+  try{w.setHeaderColor('#170a10');w.setBackgroundColor('#170a10');if(w.setBottomBarColor)w.setBottomBarColor('#170a10')}catch(e){}}
  var p=(w&&w.platform)||'';A.plat=/ios|macos/.test(p)?'i':/tdesktop|windows|weba|webk/.test(p)?'w':'a';
  if(!initData())return empty('K','این صفحه رو از ربات باز کنید','مینی‌اپ کانکی فقط از داخل ربات تلگرام باز می‌شه.');
- Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.support=r[0].support||'';A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
+ Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.winLink=r[0].win_link||'';A.nameHint=r[0].name_hint||'';A.support=r[0].support||'';A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
 // wait a moment for Telegram's script, then go on without it
 var n=0;(function go(){if(tg()||n++>15)start();else setTimeout(go,100)})();
 })();
