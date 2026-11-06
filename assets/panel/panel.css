@@ -1680,3 +1680,20 @@ small{font-size:max(12px,.83em)}
  .ku-tt td.ed{justify-content:flex-start;padding-top:8px}
  .ku-tt td small{flex-basis:100%;margin:0}
 }
+
+/* tunnel form (3.33): tabs on a phone or tablet (one part at a time), a two-column grid on a desktop;
+   the save button always in sight */
+.twtabs{display:flex;flex-wrap:wrap;gap:6px;position:sticky;top:-16px;z-index:3;margin:8px -16px 0;padding:8px 16px;background:linear-gradient(var(--c1),var(--c1)),var(--bg1);border-bottom:1px solid var(--ln)}
+.twtabs button{flex:1 1 28%;min-height:40px;padding:0 8px;border-radius:12px;border:1px solid var(--ln);background:var(--in);color:var(--s);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.twtabs button.on{border-color:var(--a);color:var(--a);background:color-mix(in srgb,var(--a) 12%,transparent)}
+.twfoot{position:sticky;bottom:-16px;z-index:3;margin:12px -16px -16px;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:linear-gradient(var(--c2),var(--c2)),var(--bg1);border-top:1px solid var(--ln)}
+@media (max-width:899px){
+ .twf[data-tab]>[data-s]{display:none}
+ .twf[data-tab=route]>[data-s=route],.twf[data-tab=type]>[data-s=type],.twf[data-tab=tr]>[data-s=tr],.twf[data-tab=ports]>[data-s=ports],.twf[data-tab=more]>[data-s=more]{display:block}
+}
+@media (min-width:900px){
+ .mbox.wide.tunf{width:min(1000px,100%)}
+ .twtabs{display:none}
+ .twf{display:grid;grid-template-columns:1fr 1fr;gap:0 14px;align-items:start}
+ .twf>[data-s=tr],.twf>[data-s=ports],.twf>[data-s=more]{grid-column:1/-1}
+}

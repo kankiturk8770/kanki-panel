@@ -1306,23 +1306,38 @@ pub async fn local_loop(app: Arc<App>) {
 
 /// (key, display name, ok) for every tunnel server and every tunnel that can be judged right now.
 /// Used by the Telegram alerts. A tunnel is only judged when both of its servers are reporting.
-pub fn health(app: &App) -> Vec<(String, String, bool)> {
+pub fn health(app: &App, offline_nodes: &HashSet<String>) -> Vec<(String, String, bool, String)> {
     let seen = seen().lock().unwrap_or_else(|e| e.into_inner()).clone();
     let t = now();
     let fresh = |sid: &str| sid == "local" || seen.get(sid).map(|x| t - x.at < 20).unwrap_or(false);
     let mut out = vec![];
     for sv in servers(app) {
-        out.push((format!("ts:{}", sv.id), format!("سرور تانل {}", sv.name), fresh(&sv.id)));
+        // the tunnel agent of a VPN server that is down itself: the server's own alert says it once
+        if !sv.node.is_empty() && offline_nodes.contains(&sv.node) {
+            continue;
+        }
+        out.push((format!("ts:{}", sv.id), format!("سرور تانل {}", sv.name), fresh(&sv.id), sv.node.clone()));
     }
     for tu in tunnels(app) {
+        // a tunnel is only judged while both its servers are up (else their own alert says it)
         if !tu.enabled || !fresh(&tu.entry) || !fresh(&tu.exit) {
             continue;
         }
-        let links = |sid: &str| seen.get(sid).and_then(|x| x.status.iter().find(|q| q.id == tu.id).map(|q| q.links)).unwrap_or(0);
-        out.push((format!("tu:{}", tu.id), format!("تانل {}", tu.name), links(&tu.entry) > 0 && links(&tu.exit) > 0));
+        let st = |sid: &str| seen.get(sid).and_then(|x| x.status.iter().find(|q| q.id == tu.id).cloned());
+        let (en, ex) = (st(&tu.entry), st(&tu.exit));
+        let up = en.as_ref().is_some_and(|q| q.links > 0) && ex.as_ref().is_some_and(|q| q.links > 0);
+        out.push((format!("tu:{}", tu.id), format!("تانل {}", tu.name), up, String::new()));
+        // its round trip (measured by the entry): too high is an alert of its own
+        let rtt = [en, ex].iter().flatten().map(|q| q.rtt_ms).max().unwrap_or(0);
+        if up && rtt > 0 {
+            out.push((format!("tp:{}", tu.id), format!("تانل {}", tu.name), rtt < TUNNEL_SLOW_MS, rtt.to_string()));
+        }
     }
     out
 }
+
+/// A tunnel whose round trip stays at least this high is reported to the admins
+pub const TUNNEL_SLOW_MS: u64 = 800;
 
 /// Tries the CDN path from the panel: for every edge address (and SNI name) it connects, does the
 /// TLS hello with that SNI, sends the WebSocket request with the Host header and reports whether the

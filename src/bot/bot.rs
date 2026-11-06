@@ -3797,6 +3797,7 @@ impl Bot {
     }
 
     // ============================================================ کارهای زمان‌بندی‌شده
+
     /// Telegram alert to the admins when a node, tunnel server or tunnel stays down for about
     /// 90 seconds, and another one when it is back. Off when the setting `tg_alerts` is "0".
     async fn watch(self: Arc<Self>) {
@@ -3809,30 +3810,30 @@ impl Bot {
             if self.db().get("tg_alerts") == "0" {
                 continue;
             }
-            let mut items: Vec<(String, String, bool)> = self
-                .db()
-                .nodes()
-                .into_iter()
-                .filter(|n| n.enabled)
-                .map(|n| (format!("node:{}", n.id), format!("نود {}", n.name), n.online))
-                .collect();
-            items.extend(crate::tunnel::panel::health(&self.app));
+            let nodes: Vec<_> = self.db().nodes().into_iter().filter(|n| n.enabled).collect();
+            let offline: std::collections::HashSet<String> = nodes.iter().filter(|n| !n.online).map(|n| n.id.clone()).collect();
+            let mut items: Vec<(String, String, bool, String)> =
+                nodes.iter().map(|n| (format!("node:{}", n.id), format!("نود {}", n.name), n.online, String::new())).collect();
+            items.extend(crate::tunnel::panel::health(&self.app, &offline));
             let keys: Vec<String> = items.iter().map(|i| i.0.clone()).collect();
             st.retain(|k, _| keys.contains(k));
-            for (key, name, ok) in items {
+            for (key, name, ok, detail) in items {
+                // the tunnel agent of a VPN server waits longer: when the whole server is down, its own alert
+                // (the node's) comes first and this one is not sent at all
+                let need = if key.starts_with("ts:") && !detail.is_empty() { 5 } else { 3 };
                 let mut msg: Option<String> = None;
                 {
-                    let e = st.entry(key).or_insert((0, false));
+                    let e = st.entry(key.clone()).or_insert((0, false));
                     if ok {
                         if e.1 {
-                            msg = Some(format!("🟢 <b>{}</b> دوباره آنلاین شد", esc(&name)));
+                            msg = Some(alert_text(&key, &name, true, &detail));
                         }
                         *e = (0, false);
                     } else {
                         e.0 += 1;
-                        if e.0 >= 3 && !e.1 {
+                        if e.0 >= need && !e.1 {
                             e.1 = true;
-                            msg = Some(format!("🔴 <b>{}</b> آفلاین است", esc(&name)));
+                            msg = Some(alert_text(&key, &name, false, &detail));
                         }
                     }
                 }
@@ -4076,6 +4077,21 @@ async fn ton_usd(app: &crate::App) -> Option<f64> {
     db.set("ton_usd", &p.to_string());
     db.set("ton_usd_at", &crate::util::now().to_string());
     Some(p)
+}
+
+
+/// The admin alert of one watched thing: a server (node / tunnel server) down or back, a tunnel cut or
+/// back while both its servers are up, a tunnel's round trip too high or normal again
+fn alert_text(key: &str, name: &str, ok: bool, detail: &str) -> String {
+    let n = esc(name);
+    match (key.split(':').next().unwrap_or(""), ok) {
+        ("tu", false) => format!("🔴 <b>{}</b> قطع است (هر دو سرورش آنلاین‌اند)", n),
+        ("tu", true) => format!("🟢 <b>{}</b> دوباره وصل شد", n),
+        ("tp", false) => format!("🟠 پینگ <b>{}</b> بالاست: <b>{} ms</b>", n, detail),
+        ("tp", true) => format!("🟢 پینگ <b>{}</b> عادی شد: {} ms", n, detail),
+        (_, false) => format!("🔴 <b>{}</b> آفلاین است", n),
+        (_, true) => format!("🟢 <b>{}</b> دوباره آنلاین شد", n),
+    }
 }
 
 #[cfg(test)]
@@ -5031,5 +5047,19 @@ mod flow_tests {
         let o = order(&bot, 400, plan, "new", 0, "approved");
         bot.fulfill(o).await;
         assert_eq!(accounts(&bot, 400), vec![(3, "ali2".into(), format!("order #{}", o))]);
+    }
+}
+
+#[cfg(test)]
+mod alert_tests {
+    use super::alert_text;
+
+    #[test]
+    fn each_alert_says_what_happened() {
+        assert_eq!(alert_text("node:tr", "نود TURKEY", false, ""), "🔴 <b>نود TURKEY</b> آفلاین است");
+        assert_eq!(alert_text("ts:abc", "سرور تانل IRAN1", true, ""), "🟢 <b>سرور تانل IRAN1</b> دوباره آنلاین شد");
+        assert!(alert_text("tu:t1", "تانل IR1-TURKEY", false, "").contains("قطع است"));
+        assert_eq!(alert_text("tp:t1", "تانل IR1-TURKEY", false, "950"), "🟠 پینگ <b>تانل IR1-TURKEY</b> بالاست: <b>950 ms</b>");
+        assert!(alert_text("tp:t1", "تانل IR1-TURKEY", true, "120").contains("عادی شد"));
     }
 }
