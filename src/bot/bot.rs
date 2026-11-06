@@ -38,6 +38,8 @@ enum Wait {
     Rename(i64),
     /// the admin types "days GB [reason]" of a gift: for one account, or 0 = every active account
     Gift(i64),
+    /// the admin sends a premium emoji for a button (its key)
+    Icon(String),
 }
 
 #[derive(Clone)]
@@ -95,7 +97,7 @@ fn b(t: &str, d: &str) -> (String, String) {
 
 /// Every customer-facing button whose text the admin can change from the bot: (key, default text, where it shows).
 /// The text is kept in the setting `btn_<key>`; an empty setting means the default.
-const BTNS: &[(&str, &str, &str)] = &[
+pub(crate) const BTNS: &[(&str, &str, &str)] = &[
     ("buy", "🛒 خرید اشتراک", "منوی اصلی"),
     ("trial", "🎁 تست رایگان", "منوی اصلی"),
     ("my", "📊 سرویس‌های من", "منوی اصلی"),
@@ -127,7 +129,7 @@ const BTNS: &[(&str, &str, &str)] = &[
 ];
 
 /// Buttons of the main menu, in order; each one can also be hidden (`hide_<key>` = 1).
-const MAIN_BTNS: &[&str] = &["buy", "trial", "my", "renew", "guide", "ref", "app", "support"];
+pub(crate) const MAIN_BTNS: &[&str] = &["buy", "trial", "my", "renew", "guide", "ref", "app", "support"];
 
 /// Messages the admin can rewrite from the bot: (setting key, default, title). HTML (<b>, <i>, <code>) is allowed.
 const TEXTS: &[(&str, &str, &str)] = &[
@@ -515,13 +517,26 @@ impl Bot {
     /// Button colours (Telegram 9.4+, older apps show plain buttons): each customer button gets the colour
     /// the admin chose (`bst_<key>`) or its default; a plan button its plan's colour (by users when unset:
     /// one blue, two or more green); the admin's approve green and reject red.
-    fn paint(&self, body: &mut Value) {
+    /// With `icons`, a button whose text is one of the bot's own (`BTNS`) also gets the premium emoji the admin
+    /// set for it (`buttons::icons`) in place of its plain one.
+    fn paint(&self, body: &mut Value, icons: bool) {
         // looked up without `body["reply_markup"]`: indexing a JSON value for writing adds the key, and every
         // message without buttons went out with reply_markup {"inline_keyboard": null}, which is not a keyboard
         let Some(rows) = body.get_mut("reply_markup").and_then(|r| r.get_mut("inline_keyboard")).and_then(|k| k.as_array_mut()) else { return };
+        // text of the button → its premium emoji (one settings read per message, and only when any is set)
+        let by_text: HashMap<String, String> = if icons {
+            crate::buttons::icons(self.db()).into_iter().map(|(k, id)| (self.bt(&k), id)).collect()
+        } else {
+            HashMap::new()
+        };
         for row in rows.iter_mut() {
             let Some(row) = row.as_array_mut() else { continue };
             for btn in row.iter_mut() {
+                if let Some(id) = btn["text"].as_str().and_then(|t| by_text.get(t)) {
+                    let plain = crate::buttons::without_lead_emoji(btn["text"].as_str().unwrap_or(""));
+                    btn["icon_custom_emoji_id"] = json!(id);
+                    btn["text"] = json!(plain);
+                }
                 if btn.get("style").is_some() {
                     if let Some(o) = btn.as_object_mut() {
                         o.remove("_k");
@@ -818,8 +833,30 @@ impl Bot {
     }
 
     /// A Bot API call with Telegram's reason when it fails
-    async fn call_res(&self, m: &str, mut body: Value) -> Result<Value, String> {
-        self.paint(&mut body);
+    async fn call_res(&self, m: &str, body: Value) -> Result<Value, String> {
+        let plain = body.clone();
+        let mut painted = body;
+        self.paint(&mut painted, true);
+        let had_icons = painted.to_string().contains("icon_custom_emoji_id");
+        match self.call_raw(m, painted).await {
+            // a premium emoji Telegram does not take (the owner's Premium ended, the emoji was removed): the message
+            // still goes, with the buttons' plain emoji
+            Err(why) if had_icons && why.to_lowercase().contains("emoji") => {
+                let mut b = plain;
+                self.paint(&mut b, false);
+                self.call_raw(m, b).await
+            }
+            r => r,
+        }
+    }
+
+    /// `call_res` without the fallback: the preview of a premium emoji must fail when Telegram refuses it
+    async fn call_strict(&self, m: &str, mut body: Value) -> Result<Value, String> {
+        self.paint(&mut body, true);
+        self.call_raw(m, body).await
+    }
+
+    async fn call_raw(&self, m: &str, body: Value) -> Result<Value, String> {
         // a lost message is worse than a late one: Telegram's «too many requests» (429, it says how long to wait),
         // its own errors (5xx) and a connection that never started are tried again, up to 3 more times. getUpdates is
         // not: its loop asks again by itself. An error never carries the request's address (it holds the bot token).
@@ -1219,7 +1256,7 @@ impl Bot {
                 let link = crate::api::v2_sub_link(&self.app, u);
                 let (get, steps) = match os {
                     "i" => ("https://apps.apple.com/app/v2box-v2ray-client/id6446814690",
-                        "1️⃣ V2Box رو از اپ‌استور نصب کنید (یا Streisand).\n2️⃣ لینک اشتراک پایین رو لمس کنید تا کپی بشه.\n3️⃣ V2Box رو باز کنید: تب <b>Configs</b> ← ➕ ← <b>Import v2ray uri from clipboard</b>. خودش می‌فهمه لینک اشتراکه، اضافه‌ش می‌کنه و کانفیگ‌ها رو میاره.\n4️⃣ یکی از کانفیگ‌ها رو انتخاب کنید و <b>Connect</b> ✅"),
+                        "1️⃣ V2Box رو از اپ‌استور نصب کنید (یا Streisand).\n2️⃣ لینک اشتراک پایین رو لمس کنید تا کپی بشه.\n3️⃣ V2Box رو باز کنید: تب <b>Configs</b> ← ➕ بالای صفحه ← <b>Add subscription</b>.\n4️⃣ لینک رو توی <b>URL</b> بذارید (Paste)، یه اسم بدید و <b>Save</b> بزنید؛ صفحه رو پایین بکشید تا کانفیگ‌ها بیان.\n5️⃣ یکی رو انتخاب کنید و از تب <b>Home</b> وصل بشید (اجازه‌ی VPN رو Allow کنید) ✅"),
                     "w" => ("https://github.com/2dust/v2rayN/releases/latest",
                         "1️⃣ v2rayN رو از گیت‌هاب بگیرید (فایل windows-64-With-Core) و باز کنید.\n2️⃣ لینک اشتراک پایین رو کپی کنید.\n3️⃣ منوی <b>Subscription group</b> ← <b>Subscription group settings</b> ← <b>Add</b>: لینک رو در Url بذارید و ذخیره کنید.\n4️⃣ <b>Subscription group</b> ← <b>Update subscription</b>؛ کانفیگ‌ها میان.\n5️⃣ یکی رو انتخاب، Enter، و پایین پنجره System proxy رو روی Set system proxy بذارید ✅"),
                     _ => ("https://play.google.com/store/apps/details?id=com.v2ray.ang",
@@ -1350,7 +1387,15 @@ impl Bot {
     /// config into v2rayNG / V2Box / Hiddify / v2rayN, and keeps them up to date
     pub(crate) async fn send_v2_sub(&self, chat: i64, u: &User) -> bool {
         let link = crate::api::v2_sub_link(&self.app, u);
-        let t = format!("🚀 <b>لینک اشتراک V2Ray</b> · {}\n\n<code>{}</code>\n☝️ روش بزنید تا کپی بشه.\n\n            همه‌ی کانفیگ‌های VLESS (Xray) و Hysteria2 شما با همین یک لینک میان و هر وقت سرورها عوض بشن، با «به‌روزرسانی» خودش درست می‌شه؛ کانفیگ جدا لازم نیست.\n\n            🤖 <b>اندروید · v2rayNG:</b> ➕ ← Import config from Clipboard ← منوی ⋮ ← Update subscription\n            🍏 <b>آیفون · V2Box:</b> تب Configs ← ➕ ← Import v2ray uri from clipboard\n            💻 <b>ویندوز · v2rayN:</b> Subscription group ← Subscription group settings ← Add ← Update subscription",
+        let t = format!("🚀 <b>لینک اشتراک V2Ray</b> · {}\n\n<code>{}</code>\n☝️ روش بزنید تا کپی بشه.\n\n\
+            همه‌ی کانفیگ‌های VLESS (Xray) و Hysteria2 شما با همین یک لینک میان و هر وقت سرورها عوض بشن، با «به‌روزرسانی» خودش درست می‌شه.\n\n\
+            🍏 <b>آیفون · V2Box</b>\n\
+            1️⃣ لینک بالا رو کپی کنید.\n\
+            2️⃣ V2Box ← تب <b>Configs</b> ← ➕ بالای صفحه ← <b>Add subscription</b>\n\
+            3️⃣ لینک رو توی <b>URL</b> بذارید (Paste)، یه اسم بدید و <b>Save</b> بزنید.\n\
+            4️⃣ صفحه رو پایین بکشید تا کانفیگ‌ها بیان؛ یکی رو انتخاب و از تب <b>Home</b> وصل بشید (اجازه‌ی VPN رو Allow کنید).\n\n\
+            🤖 <b>اندروید · v2rayNG:</b> ➕ ← Import config from Clipboard ← منوی ⋮ ← Update subscription\n\
+            💻 <b>ویندوز · v2rayN:</b> Subscription group ← Subscription group settings ← Add ← Update subscription",
             esc(&u.username), esc(&link));
         self.send(chat, &t, Some(ik(vec![
             vec![b("⬇️ v2rayNG (اندروید)", "url:https://github.com/2dust/v2rayNG/releases/latest"), b("⬇️ V2Box (آیفون)", "url:https://apps.apple.com/app/v2box-v2ray-client/id6446814690")],
@@ -3255,14 +3300,81 @@ impl Bot {
         self.edit(chat, mid, &format!("📂 <b>{}</b> · {} پلن\n\n{}\n\nبا حذف دسته، پلن‌هایش پاک نمی‌شوند؛ فقط بدون دسته می‌شوند.", esc(&name), n, plans.join("\n")), Some(kb)).await;
     }
 
+    /// Every customer button, two in a row, as customers see them, to each admin of the bot (the panel's
+    /// «Send a preview»); Telegram's error when it refuses a premium emoji. How many admins got it.
+    pub async fn preview_buttons(&self) -> Result<usize, String> {
+        let btns: Vec<(String, String)> = BTNS.iter().map(|(k, _, _)| b(&self.bt(k), &format!("bv:{}", k))).collect();
+        let kb = ik(btns.chunks(2).map(|c| c.to_vec()).collect());
+        let mut sent = 0;
+        let mut last = String::from("the bot has no admin");
+        for a in &self.admins {
+            let body = json!({"chat_id": a, "text": "👁 <b>پیش‌نمایش دکمه‌های ربات</b>\nهمه‌ی دکمه‌ها با متن، ایموجی پریمیوم و رنگشان؛ روی هر کدام بزنید تا تنظیمش باز شود.", "parse_mode": "HTML", "reply_markup": kb});
+            match self.call_strict("sendMessage", body).await {
+                Ok(_) => sent += 1,
+                Err(e) => last = e,
+            }
+        }
+        if sent == 0 { Err(last) } else { Ok(sent) }
+    }
+
+    /// The panel's «Set from Telegram»: each admin's next message gives button `k` its premium emoji
+    pub async fn ask_icon(&self, k: &str) -> Result<usize, String> {
+        if !BTNS.iter().any(|x| x.0 == k) {
+            return Err("unknown button".into());
+        }
+        let mut sent = 0;
+        for a in &self.admins {
+            self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(*a, Wait::Icon(k.to_string()));
+            let t = format!("⭐️ <b>ایموجی پریمیوم برای «{}»</b> (از پنل)\n\nهمین حالا یک ایموجی پریمیوم بفرستید؛ نمونه‌ی دکمه برایتان می‌آید و پنل خودش به‌روز می‌شود.", esc(&self.bt(k)));
+            if self.send(*a, &t, Some(ik(vec![vec![b("⬅️ انصراف", &format!("bv:{}", k))]]))).await.is_some() {
+                sent += 1;
+            }
+        }
+        if sent == 0 { Err("the bot could not message its admins (start the bot from your Telegram first)".into()) } else { Ok(sent) }
+    }
+
+    /// Sends a sample of button `k` with premium emoji `id` and saves the emoji only when Telegram took it
+    async fn try_icon(&self, chat: i64, k: &str, id: &str) -> bool {
+        if !crate::buttons::valid_id(id) {
+            return false;
+        }
+        let btn = json!({"text": crate::buttons::without_lead_emoji(&self.bt(k)), "callback_data": format!("bv:{}", k), "icon_custom_emoji_id": id});
+        let body = json!({"chat_id": chat, "text": "👁 <b>نمونه‌ی دکمه</b> (مشتری همین را می‌بیند):", "parse_mode": "HTML", "reply_markup": {"inline_keyboard": [[btn]]}});
+        match self.call_strict("sendMessage", body).await {
+            Ok(_) => {
+                crate::buttons::set_icon(self.db(), k, Some(id));
+                self.send(chat, "✅ ایموجی پریمیوم ذخیره شد.", None).await;
+                true
+            }
+            Err(why) => {
+                self.send(chat, &format!("⚠️ تلگرام این ایموجی را روی دکمه قبول نکرد و ذخیره نشد.\nدلیل: <code>{}</code>\n\nسازنده‌ی ربات (حسابی که ربات را در BotFather ساخته) باید تلگرام پریمیوم داشته باشد.", esc(&why)), None).await;
+                false
+            }
+        }
+    }
+
     async fn btn_view(&self, chat: i64, mid: i64, k: &str) {
         let Some((_, def, place)) = BTNS.iter().find(|t| t.0 == k).cloned() else { return };
         let main = MAIN_BTNS.contains(&k);
         let hidden = main && self.db().on(&format!("hide_{}", k));
-        let mut txt = format!("🔘 <b>دکمه</b>\n\nمتن فعلی: <b>{}</b>\nپیش‌فرض: {}\nجای دکمه: {}", esc(&self.bt(k)), esc(def), place);
+        let icon = crate::buttons::icons(self.db()).get(k).cloned();
+        let sk = crate::buttons::style_key(k);
+        let colour = sk.map(|s| match self.style_of(s).as_str() { "success" => "🟢 سبز", "primary" => "🔵 آبی", "danger" => "🔴 قرمز", _ => "⚪️ ساده" });
+        let mut txt = format!("🔘 <b>دکمه</b>\n\nمتن فعلی: <b>{}</b>\nپیش‌فرض: {}\nجای دکمه: {}\n⭐️ ایموجی پریمیوم: {}{}",
+            esc(&self.bt(k)), esc(def), place,
+            if icon.is_some() { "دارد (نمونه‌اش همین دکمه‌ی پایین است)" } else { "ندارد" },
+            colour.map(|c| format!("\n🎨 رنگ: {}{}", c, if sk != Some(k) { " (مشترک با دکمه‌های هم‌گروه)" } else { "" })).unwrap_or_default());
         if main { txt.push_str(&format!("\nوضعیت: {}", if hidden { "🚫 پنهان" } else { "👁 نمایش" })); }
         if k == "guide" || k == "guide_acc" { txt.push_str("\n\nاین دکمه فقط وقتی دیده می‌شود که در «🎬 آموزش‌ها» حداقل یک آموزش باشد."); }
-        let mut rows: Kb = vec![vec![b("✏️ متن جدید", &format!("set:btn_{}", k)), b("↩️ پیش‌فرض", &format!("rs:btn_{}", k))]];
+        // the button itself first: with its premium emoji and colour, the same as customers see it
+        let mut rows: Kb = vec![vec![b(&self.bt(k), &format!("bv:{}", k))]];
+        rows.push(vec![b("✏️ متن جدید", &format!("set:btn_{}", k)), b("↩️ پیش‌فرض", &format!("rs:btn_{}", k))]);
+        let mut er = vec![b(if icon.is_some() { "⭐️ عوض کردن ایموجی پریمیوم" } else { "⭐️ ایموجی پریمیوم" }, &format!("bic:{}", k))];
+        if icon.is_some() { er.push(b("🗑 حذف ایموجی", &format!("bix:{}", k))); }
+        rows.push(er);
+        if sk.is_some() {
+            rows.push(vec![b("🟢", &format!("@success@bsc:{}:success", k)), b("🔵", &format!("@primary@bsc:{}:primary", k)), b("🔴", &format!("@danger@bsc:{}:danger", k)), b("⚪️", &format!("bsc:{}:none", k)), b("↩️", &format!("bsc:{}:", k))]);
+        }
         if main { rows.push(vec![b(if hidden { "👁 نمایش بده" } else { "🚫 پنهان کن" }, &format!("hd:{}", k))]); }
         rows.push(vec![b("⬅️ متن دکمه‌ها", "a:btns")]);
         self.edit(chat, mid, &txt, Some(ik(rows))).await;
@@ -3337,6 +3449,22 @@ impl Bot {
                 self.btn_view(chat, mid, rest).await;
             }
             "bv" => self.btn_view(chat, mid, rest).await,
+            "bic" if BTNS.iter().any(|x| x.0 == rest) => {
+                set_wait(Wait::Icon(rest.to_string()));
+                self.edit(chat, mid, &format!("⭐️ <b>ایموجی پریمیوم برای «{}»</b>\n\nیک ایموجی پریمیوم (از پک‌های ایموجی تلگرام پریمیوم) بفرستید؛ می‌تواند تنها باشد یا وسط یک متن.\n\nربات یک نمونه از دکمه با همان ایموجی برایتان می‌فرستد و فقط اگر تلگرام قبولش کرد ذخیره می‌کند. ایموجی ساده‌ی اول متن دکمه خودش برداشته می‌شود.\n\nℹ️ تلگرام ایموجی پریمیوم را روی دکمه‌ها فقط وقتی نشان می‌دهد که سازنده‌ی ربات (حسابی که ربات را در BotFather ساخته) پریمیوم باشد.", esc(&self.bt(rest))),
+                    Some(ik(vec![vec![b("⬅️ انصراف", &format!("bv:{}", rest))]]))).await;
+            }
+            "bix" => {
+                crate::buttons::set_icon(db, rest, None);
+                self.btn_view(chat, mid, rest).await;
+            }
+            "bsc" => {
+                let (k, st) = rest.split_once(':').unwrap_or((rest, ""));
+                if let (Some(sk), true) = (crate::buttons::style_key(k), ["", "success", "primary", "danger", "none"].contains(&st)) {
+                    db.set(&format!("bst_{}", sk), st);
+                }
+                self.btn_view(chat, mid, k).await;
+            }
             "tv" => self.txt_view(chat, mid, rest).await,
             "pv" => self.plan_view(chat, mid, rest.parse().unwrap_or(0)).await,
             "pe" => {
@@ -3521,7 +3649,20 @@ impl Bot {
         let parts: Vec<&str> = text.split_whitespace().collect();
         match w {
             Wait::Set(k) => {
-                let v = text.trim();
+                // premium emoji: kept in message texts (<tg-emoji>); on a button the first one becomes its emoji
+                let kept;
+                let v = if is_text_key(&k) { kept = crate::buttons::keep_custom_emoji(text, m); kept.trim() } else { text.trim() };
+                let mut btn_icon = None;
+                let cut;
+                let v = match (k.strip_prefix("btn_"), crate::buttons::first_custom(m)) {
+                    (Some(_), Some((id, off, len))) => {
+                        let u: Vec<u16> = text.encode_utf16().collect();
+                        cut = if off + len <= u.len() { format!("{}{}", String::from_utf16_lossy(&u[..off]), String::from_utf16_lossy(&u[off + len..])) } else { text.to_string() };
+                        btn_icon = Some(id);
+                        cut.trim()
+                    }
+                    _ => v,
+                };
                 let retry = |to: String| Some(ik(vec![vec![b("✏️ دوباره", &format!("set:{}", k))], vec![b("⬅️ بازگشت", &to)]]));
                 let to = match k.strip_prefix("btn_") { Some(x) => format!("bv:{}", x), None if is_text_key(&k) => format!("tv:{}", k), None => back_view(&k).to_string() };
                 if v.is_empty() {
@@ -3547,12 +3688,28 @@ impl Bot {
                 }
                 db.set(&k, v);
                 self.send(chat, "✅ ذخیره شد", None).await;
+                if let (Some(x), Some(id)) = (k.strip_prefix("btn_"), btn_icon) {
+                    self.try_icon(chat, x, &id).await;
+                }
                 if let Some(x) = k.strip_prefix("btn_") {
                     self.btn_view(chat, 0, x).await;
                 } else if is_text_key(&k) {
                     self.txt_view(chat, 0, &k).await;
                 } else {
                     self.admin_view(uid, chat, 0, back_view(&k)).await;
+                }
+            }
+            Wait::Icon(k) => {
+                match crate::buttons::first_custom(m) {
+                    Some((id, _, _)) => {
+                        self.try_icon(chat, &k, &id).await;
+                        self.btn_view(chat, 0, &k).await;
+                    }
+                    None => {
+                        self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::Icon(k.clone()));
+                        self.send(chat, "⚠️ این ایموجی پریمیوم نیست. از پنل ایموجی تلگرام یک ایموجی از پک‌های پریمیوم (با علامت ⭐️) بفرستید.",
+                            Some(ik(vec![vec![b("⬅️ انصراف", &format!("bv:{}", k))]]))).await;
+                    }
                 }
             }
             Wait::Plan => {
@@ -4629,6 +4786,65 @@ mod flow_tests {
         assert!(on.iter().any(|p| p.1 == 260000 && p.2 == 330000 && p.4 == "بلندمدت"));
         let old: i64 = db.with(|c| c.query_row("SELECT active FROM plans WHERE name='Old'", [], |r| r.get(0)).unwrap());
         assert_eq!(old, 0, "the old plan is hidden, not deleted");
+    }
+
+    /// Telegram that refuses every premium emoji on a button (the owner's Premium ended)
+    async fn no_premium_telegram() -> (String, Log) {
+        let log: Log = Arc::new(Mutex::new(vec![]));
+        let l2 = log.clone();
+        let router = axum::Router::new().route("/:bot/:method", axum::routing::post(move |axum::extract::Path((_b, m)): axum::extract::Path<(String, String)>, body: String| {
+            let l = l2.clone();
+            async move {
+                let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+                let refuse = body.contains("icon_custom_emoji_id");
+                l.lock().unwrap_or_else(|e| e.into_inner()).push((m, v));
+                axum::Json(if refuse { json!({"ok": false, "error_code": 400, "description": "Bad Request: custom emoji can't be used by the bot"}) } else { json!({"ok": true, "result": {"message_id": 7}}) })
+            }
+        }));
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = l.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(l, router).await.unwrap() });
+        (format!("http://{}", addr), log)
+    }
+
+    #[tokio::test]
+    async fn a_button_gets_its_premium_emoji() {
+        let (bot, log) = bot().await;
+        const ID: &str = "5368324170671202286";
+        // the admin opens the button and sends a message with a premium emoji in it
+        tap(&bot, from(ADMIN, "Admin", "admin"), "bic:buy").await;
+        bot.on_message(&json!({"from": from(ADMIN, "Admin", "admin"), "chat": {"id": ADMIN}, "text": "🔥",
+            "entities": [{"type": "custom_emoji", "offset": 0, "length": 2, "custom_emoji_id": ID}]})).await;
+        assert_eq!(crate::buttons::icons(bot.db()).get("buy").map(|s| s.as_str()), Some(ID));
+        // a customer's menu: the emoji on the button, the plain one of its text gone
+        let c = 7701;
+        say(&bot, from(c, "Sara", "sara"), "/start").await;
+        let l = log.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let (_, v) = l.iter().rev().find(|(m, v)| m == "sendMessage" && v["chat_id"] == c && v["reply_markup"]["inline_keyboard"].is_array()).expect("a menu");
+        let btn = v["reply_markup"]["inline_keyboard"].as_array().unwrap().iter().flat_map(|r| r.as_array().unwrap().clone())
+            .find(|b| b["icon_custom_emoji_id"] == ID).expect("the buy button has the emoji");
+        assert_eq!(btn["text"], "خرید اشتراک");
+        // a text that is not a premium emoji is refused and nothing changes
+        tap(&bot, from(ADMIN, "Admin", "admin"), "bic:trial").await;
+        say(&bot, from(ADMIN, "Admin", "admin"), "🔥").await;
+        assert!(last(&log, ADMIN).contains("پریمیوم نیست"), "{}", last(&log, ADMIN));
+        assert!(!crate::buttons::icons(bot.db()).contains_key("trial"));
+        // a message text keeps its premium emoji
+        tap(&bot, from(ADMIN, "Admin", "admin"), "set:welcome").await;
+        bot.on_message(&json!({"from": from(ADMIN, "Admin", "admin"), "chat": {"id": ADMIN}, "text": "سلام 🔥",
+            "entities": [{"type": "custom_emoji", "offset": 5, "length": 2, "custom_emoji_id": ID}]})).await;
+        assert_eq!(bot.db().get("welcome"), format!("سلام <tg-emoji emoji-id=\"{}\">🔥</tg-emoji>", ID));
+
+        // Telegram refuses premium emoji: the customer still gets the message, with the plain buttons
+        let (api, log2) = no_premium_telegram().await;
+        let b2 = bot_at(bot.app.clone(), &api, "T");
+        assert!(b2.send(c, "menu", Some(ik(vec![vec![b(&b2.bt("buy"), "buy")]]))).await.is_some());
+        let sent: Vec<Value> = log2.lock().unwrap_or_else(|e| e.into_inner()).iter().map(|x| x.1.clone()).collect();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[1]["reply_markup"]["inline_keyboard"][0][0]["text"], "🛒 خرید اشتراک");
+        // and a new emoji is not saved
+        assert!(!b2.try_icon(ADMIN, "trial", ID).await);
+        assert!(!crate::buttons::icons(bot.db()).contains_key("trial"));
     }
 
     /// The answers Telegram got for one button tap (callback id)

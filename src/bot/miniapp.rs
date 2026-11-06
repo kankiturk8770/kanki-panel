@@ -394,6 +394,8 @@ mod tests {
         assert!(lines.len() >= 2 && lines[1..].iter().all(|l| l.starts_with("hysteria2://")), "{}", t);
         // the same links the subscription itself holds, so the copied configs and the subscription agree
         assert_eq!(lines[1..].to_vec(), crate::api::v2_links(&app, &u).iter().map(|s| s.as_str()).collect::<Vec<_>>());
+        // a standard link every V2Box / v2rayNG reads: the password, host:port, a slash, no empty "?", the name
+        assert_eq!(lines[1], format!("hysteria2://{}@de1.example.net:8443/#GERMANY", u.code), "{}", t);
         // a WireGuard-only account has no such link: no button, no file
         let w = app.db.create_user("sara12", 10.0, 30, 1, "wg", "", "", 0).unwrap();
         assert!(crate::api::links_text(&app, &w).is_none());

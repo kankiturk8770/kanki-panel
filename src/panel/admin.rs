@@ -323,6 +323,10 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/bot/pause", post(bot_pause))
         .route("/api/bot/watch", get(watch_get).put(watch_put))
         .route("/api/bot/watch/send", post(watch_send))
+        .route("/api/bot/buttons", get(buttons_get).put(buttons_put))
+        .route("/api/bot/buttons/preview", post(buttons_preview))
+        .route("/api/bot/buttons/:key/ask", post(buttons_ask))
+        .route("/api/bot/emoji/:id", get(emoji_get))
         .route("/api/bulk/users", post(bulk))
         .route("/api/update/check", get(update_check))
         .route("/api/update/apply", post(update_apply))
@@ -732,6 +736,49 @@ async fn bot_test(State(app): St, h: HeaderMap) -> Response {
     match tg_get_me(&app, &t).await {
         Some(me) => Json(json!({"ok": true, "username": me["username"], "name": me["first_name"]})).into_response(),
         None => Json(json!({"ok": false, "error": "cannot reach Telegram or token invalid"})).into_response(),
+    }
+}
+
+// ---------------------------------------------------------------- button manager (3.34, bot/buttons.rs)
+async fn buttons_get(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    Json(crate::buttons::list(&app)).into_response()
+}
+
+async fn buttons_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "settings");
+    match crate::buttons::save(&app, &b) {
+        Ok(()) => Json(crate::buttons::list(&app)).into_response(),
+        Err(e) => err(StatusCode::BAD_REQUEST, &e),
+    }
+}
+
+/// Sends every button, as customers see them, to the bot's admins: Telegram's own preview of the premium emoji
+async fn buttons_preview(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    let Some(bot) = crate::bot::running() else { return err(StatusCode::BAD_REQUEST, "the bot is not running") };
+    match bot.preview_buttons().await {
+        Ok(n) => Json(json!({"ok": true, "sent": n})).into_response(),
+        Err(e) => Json(json!({"ok": false, "error": e})).into_response(),
+    }
+}
+
+/// «Set from Telegram»: the bot waits for the admin to send the premium emoji of this button
+async fn buttons_ask(State(app): St, h: HeaderMap, Path(key): Path<String>) -> Response {
+    let _ = guard!(app, h, "settings");
+    let Some(bot) = crate::bot::running() else { return err(StatusCode::BAD_REQUEST, "the bot is not running") };
+    match bot.ask_icon(&key).await {
+        Ok(n) => Json(json!({"ok": true, "sent": n})).into_response(),
+        Err(e) => Json(json!({"ok": false, "error": e})).into_response(),
+    }
+}
+
+/// The still picture of a premium emoji (for the panel's preview)
+async fn emoji_get(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let _ = guard!(app, h, "settings");
+    match crate::buttons::emoji_image(&app, &id).await {
+        Some((b, kind)) => ([(axum::http::header::CONTENT_TYPE, kind), (axum::http::header::CACHE_CONTROL, "private, max-age=86400")], b).into_response(),
+        None => err(StatusCode::NOT_FOUND, "no picture for this emoji"),
     }
 }
 

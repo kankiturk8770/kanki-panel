@@ -1459,9 +1459,12 @@ fn hy2_link(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Op
     }
     let (addr, name) = match tw {
         Some(t) => (t.addr(t.port(app, port.parse().unwrap_or(0), false)), format!("{} (Tunnel)", n.name)),
-        None => (format!("{}:{}", ep, port), n.name.clone()),
+        // an IPv6 address goes in brackets, or V2Box and v2rayNG read its last group as the port
+        None => (if ep.contains(':') && !ep.starts_with('[') { format!("[{}]:{}", ep, port) } else { format!("{}:{}", ep, port) }, n.name.clone()),
     };
-    Some(format!("hysteria2://{}@{}/?{}#{}", u.code, addr, q.join("&"), pct(&name)))
+    // no empty "?": some iPhone apps (V2Box, Streisand) refuse a link that ends its address with "/?#"
+    let query = if q.is_empty() { String::new() } else { format!("?{}", q.join("&")) };
+    Some(format!("hysteria2://{}@{}/{}#{}", pct(&u.code), addr, query, pct(&name)))
 }
 
 pub fn user_nodes(app: &App, u: &User) -> Vec<Node> {

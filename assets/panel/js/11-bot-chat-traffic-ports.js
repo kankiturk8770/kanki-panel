@@ -126,7 +126,6 @@ function botApk(){var el=$('#bt_apk');if(!el)return;
 function pBot(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Telegram sales bot')+'</h2><p>'+t('Create and manage the sales bot')+'</p></div><div id="bt_top"></div></div><div id="bt">'+t('Loading…')+'</div>';botLoad()}
 function botLoad(){return Promise.all([api('GET','/api/bot'),api('GET','/api/settings'),api('GET','/api/plans').catch(function(){return []})]).then(function(r){S.bot=r[0];S.bset=r[1];S.plans=r[2]||[];botDraw()}).catch(fail)}
 // the bot's customer buttons whose colour can be set (bot.rs STYLE_KEYS)
-var BSTY=[['buy','Buy','g'],['trial','Free trial','b'],['renew','Renew','g'],['my','My services'],['renew_this','Renew this service','g'],['pay','Payment methods','g'],['shop','Custom volume and days','b'],['miniapp','Mini app','b'],['amz','AmneziaVPN backup','b'],['cfg','Config buttons'],['app','Download app'],['support','Support'],['guide','Tutorial'],['ref','Invite friends'],['disc','Discount code']];
 function bsChk(k,label){return '<label class="chk"><input type="checkbox" data-bs="'+k+'" '+((S.bset||{})[k]=='1'?'checked':'')+'>'+t(label)+'</label>'}
 function bsIn(k,label,ph,typ,ltr){return '<div><label class="f">'+t(label)+'</label><input data-bs="'+k+'"'+(typ?' type="'+typ+'"':'')+(ltr?' class="ltr"':'')+' value="'+esc((S.bset||{})[k]||'')+'" placeholder="'+esc(ph||'')+'"></div>'}
 function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_set;
@@ -139,7 +138,7 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
    '<div class="g4b"><button class="b2" id="bt_test">'+ic('send',15)+' '+t('Test connection')+'</button><button class="b2" id="bt_pause">'+ic(b.paused?'play':'pause',15)+' '+t(b.paused?'Resume':'Pause')+'</button><button class="b2" id="bt_edit">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2 bd" id="bt_del">'+ic('trash',15)+' '+t('Delete bot')+'</button></div></div>'
   :'<div class="card bempty"><span class="bav big">'+ic('bot',30)+'</span><h3>'+t('No sales bot yet')+'</h3><ol class="steps"><li>'+t('In Telegram open @BotFather, send /newbot and copy the token it gives.')+'</li><li>'+t('Get your numeric Telegram ID from @userinfobot.')+'</li><li>'+t('Press Create bot and paste both.')+'</li></ol><button class="btn" id="bt_new2">+ '+t('Create bot')+'</button></div>';
  S.btab=S.btab||'sales';
- var tabs=[['sales','Sales settings'],['plans','Plans'],['apk','App files'],['disc','Discount codes'],['chan','Smart channel'],['appmsg','App message']];
+ var tabs=[['sales','Sales settings'],['btns','Buttons'],['plans','Plans'],['apk','App files'],['disc','Discount codes'],['chan','Smart channel'],['appmsg','App message']];
  el.innerHTML=head+'<div class="seg btabs" id="bt_tabs">'+tabs.map(function(x){return '<button data-bt="'+x[0]+'" class="'+(S.btab==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
   '<div data-btp="sales"><div class="card"><h3>'+ic('settings',16)+' '+t('Sales settings')+'</h3><p class="sub">'+t('How the bot sells: trials, payments, referrals and messages.')+'</p>'+
    '<div class="chips">'+bsChk('sales_on','Sales enabled')+bsChk('warn_on','Warn buyers before expiry / end of data')+'</div>'+
@@ -164,13 +163,12 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
    '<div class="box"><b>🧮 '+t('Custom purchase (mini app)')+'</b><div class="chips">'+bsChk('cp_on','Buyers can choose their own volume, days and users')+bsChk('mini_menu','The chat menu button opens the mini app')+'</div>'+
     '<div class="g2f">'+bsIn('cp_min_gb','Smallest volume (GB)','10','number')+bsIn('cp_max_gb','Largest volume (GB)','200','number')+bsIn('cp_days','Durations (days)','30,60,90',0,1)+bsIn('cp_users','Most users','3','number')+'</div>'+
     '<p class="hint">'+t('The price comes from the price rules of the Smart plan builder (Plans tab): the same size costs the same as a listed plan.')+'</p></div>'+
-   '<div class="box"><b>🎨 '+t('Button colours in the bot')+'</b><p class="hint" style="margin-top:4px">'+t('Telegram shows coloured buttons from February 2026; older apps show them plain. Plan buttons take the colour set on each plan.')+'</p>'+
-    '<div class="g2f">'+BSTY.map(function(k){var v=(S.bset||{})['bst_'+k[0]]||'';return '<div><label class="f">'+t(k[1])+'</label><select data-bs="bst_'+k[0]+'">'+[['',t('Default')+' · '+({g:'🟢',b:'🔵'}[k[2]]||'⚪')],['success','🟢 Green'],['primary','🔵 Blue'],['danger','🔴 Red'],['none','⚪ Plain']].map(function(o){return '<option value="'+o[0]+'"'+(v==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select></div>'}).join('')+'</div></div>'+
+   '<p class="hint">'+t('Button texts, premium emoji and colours are in the Buttons tab.')+'</p>'+
    '<button class="btn" style="width:100%;margin-top:10px" id="bs_save">'+t('Save sales settings')+'</button></div>'+
    '<div class="card" id="bt_watch"></div></div>'+
-  '<div data-btp="plans">'+botSmart()+botPlans()+'</div><div data-btp="apk"><div id="bt_apk"></div></div><div data-btp="disc"><div id="bt_disc"></div></div><div data-btp="chan"><div id="bt_chan"></div></div><div data-btp="appmsg"><div id="bt_am"></div></div>';
+  '<div data-btp="btns"><div id="bt_btns">'+t('Loading…')+'</div></div><div data-btp="plans">'+botSmart()+botPlans()+'</div><div data-btp="apk"><div id="bt_apk"></div></div><div data-btp="disc"><div id="bt_disc"></div></div><div data-btp="chan"><div id="bt_chan"></div></div><div data-btp="appmsg"><div id="bt_am"></div></div>';
  var showTab=function(k){S.btab=k;$$('#bt_tabs [data-bt]').forEach(function(b){b.classList.toggle('on',b.dataset.bt==k)});$$('[data-btp]').forEach(function(d){d.style.display=d.dataset.btp==k?'':'none'});
-  if(k=='disc')botDisc();if(k=='chan')botChan();if(k=='appmsg')botAppMsg();if(k=='apk')botApk()};
+  if(k=='btns')botButtons();if(k=='disc')botDisc();if(k=='chan')botChan();if(k=='appmsg')botAppMsg();if(k=='apk')botApk()};
  $('#bt_tabs').onclick=function(e){var b=e.target.closest('[data-bt]');if(b)showTab(b.dataset.bt)};showTab(S.btab);smartWire();botWatch();
  // crypto: typing an address switches «accept crypto» on; a written address with the switch off is warned about
  (function(){var on=$('[data-bs="wallet_on"]'),ww=$('#bs_wwarn');if(!on)return;var has=function(){return ['ton_address','usdt_address'].some(function(k){var x=$('[data-bs="'+k+'"]');return x&&x.value.trim()})};
@@ -428,3 +426,64 @@ function ptDraw(){var el=$('#pt');if(!el)return;var ns=S.nodes||[];if(!ns.some(f
 function ptCheck(n){toast(t('Checking…'));if(n.id=='local'){api('GET','/api/system').then(function(s){S.psys=s;ptDraw();toast(t('Done'))}).catch(fail);return}
  api('POST','/api/nodes/'+encodeURIComponent(n.id)+'/health').then(function(r){if(r.services){n.info=n.info||{};n.info.services=r.services}toast(r.ok?t('Done'):t('Offline'),!r.ok);ptDraw()}).catch(fail)}
 
+// ---------------------------------------------------------------- button manager (3.34)
+// Every customer button of the bot: its text, premium emoji and colour, with a Telegram-like preview. The same
+// settings as the bot's own «Button texts» menu (bot/buttons.rs).
+var BB={d:null,img:{},wait:null};
+var BB_GROUPS=[['main','Main menu'],['sub','Under the subscription message'],['pay','Payment page'],['other','Other places']];
+function bbGroup(x){return x.main?'main':/^(pay_|disc$)/.test(x.key)?'pay':/اشتراک/.test(x.place)?'sub':'other'}
+function bbText(x){return x.text||x.default}
+// with a premium emoji the plain one at the start goes, as in the bot (buttons::without_lead_emoji)
+function bbShown(x,txt,icon){txt=txt==null?bbText(x):txt;if(!(icon==null?x.icon:icon))return txt;var m=String(txt).trim().match(/^(\S+)\s+(.+)$/);return m&&!/[\p{L}\p{N}]/u.test(m[1])?m[2]:txt}
+function bbColour(x,st){st=st==null?x.style:st;return st==''?x.style_default||'':st=='none'?'':st}
+function bbEmoji(id){if(!id)return '';var u=BB.img[id];
+ if(u===undefined){BB.img[id]=null;fetch('/api/bot/emoji/'+id,{headers:{Authorization:'Bearer '+S.token}}).then(function(r){if(!r.ok)throw 0;return r.blob()}).then(function(b){BB.img[id]=URL.createObjectURL(b);$$('[data-em="'+id+'"]').forEach(function(e){e.innerHTML='<img alt="" src="'+BB.img[id]+'">'})}).catch(function(){BB.img[id]=''})}
+ return '<i class="tge" data-em="'+id+'">'+(u?'<img alt="" src="'+u+'">':'⭐')+'</i>'}
+// one inline button as Telegram draws it
+function bbBtn(x,o){o=o||{};var st=bbColour(x,o.style),icon=o.icon==null?x.icon:o.icon;
+ return '<span class="tgb '+(st||'plain')+'">'+(icon?bbEmoji(icon):'')+'<span>'+esc(bbShown(x,o.text,icon))+'</span></span>'}
+function botButtons(){var el=$('#bt_btns');if(!el)return;
+ api('GET','/api/bot/buttons').then(function(d){BB.d=d;bbDraw()}).catch(function(e){el.innerHTML='<p class="r">'+esc(e.message||e)+'</p>'})}
+function bbDraw(){var el=$('#bt_btns'),d=BB.d;if(!el||!d)return;var l=d.buttons;
+ var main=l.filter(function(x){return x.main&&!x.hidden});
+ var phone='<div class="tgchat"><div class="tgmsg">'+t('Welcome to the sales bot')+' 🌟<small class="ltr">12:00</small></div><div class="tgkb">'+main.map(function(x){return '<button type="button" onclick="bbEdit(\''+x.key+'\')">'+bbBtn(x)+'</button>'}).join('')+'</div></div>';
+ var groups=BB_GROUPS.map(function(g){var r=l.filter(function(x){return bbGroup(x)==g[0]});if(!r.length)return '';
+  return kuGroup(t(g[1]),r.length,'','<div class="bbl">'+r.map(function(x){var tags=[];
+   if(x.icon)tags.push(kuTag('⭐ '+t('Premium emoji'),'a'));if(x.text)tags.push(kuTag(t('Own text')));if(x.hidden)tags.push(kuTag(t('Hidden'),'y'));
+   return '<button type="button" class="bbr'+(x.hidden?' off':'')+'" onclick="bbEdit(\''+x.key+'\')">'+bbBtn(x)+'<span class="bbm">'+(S.lang=='fa'?'<small>'+esc(x.place)+'</small>':'')+(tags.length?'<span class="bbt">'+tags.join('')+'</span>':'')+'</span>'+ic('chev',16)+'</button>'}).join('')+'</div>')}).join('');
+ el.innerHTML='<div class="bbw"><aside class="bbp"><div class="bbph"><b>'+t('How customers see it')+'</b><small>'+t('The main menu, live. Tap a button to edit it.')+'</small></div>'+phone+
+   '<button class="b2" style="width:100%" id="bb_prev">'+ic('send',15)+' '+t('Send a preview to my Telegram')+'</button>'+
+   '<p class="hint">'+t('Premium emoji show on buttons when the account that made the bot in @BotFather has Telegram Premium. Older Telegram apps show the plain text.')+'</p></aside>'+
+  '<div class="bbg">'+groups+'</div></div>';
+ $('#bb_prev').onclick=function(){var b=this;b.disabled=true;api('POST','/api/bot/buttons/preview').then(function(r){b.disabled=false;toast(r.ok?t('Sent to the bot admins'):(r.error||t('Failed')),!r.ok)}).catch(function(e){b.disabled=false;fail(e)})}}
+function bbFind(k){return ((BB.d&&BB.d.buttons)||[]).filter(function(x){return x.key==k})[0]}
+// the edit sheet: a live preview on top, then text, premium emoji, colour, and (main menu) shown/hidden
+function bbEdit(k){var x=bbFind(k);if(!x)return;var f={text:x.text,icon:x.icon,style:x.style,hidden:x.hidden};BB.f=f;BB.k=k;
+ var cols=[['',t('Default')],['success',t('Green')],['primary',t('Blue')],['danger',t('Red')],['none',t('Plain')]];
+ modal('<h3>'+t('Edit button')+'</h3><div class="tgchat sm" id="bb_live"></div>'+
+  '<label class="f" for="bb_t">'+t('Text')+'</label><div class="bbin"><input id="bb_t" maxlength="60" value="'+esc(f.text)+'" placeholder="'+esc(x.default)+'"><button type="button" class="b2 sm" id="bb_tr">'+t('Default')+'</button></div>'+
+  '<small class="muted">'+t('Empty = the default text')+' · <span class="ltr" id="bb_tc"></span></small>'+
+  '<label class="f">'+t('Premium emoji')+'</label><div class="bbe" id="bb_e"></div>'+
+  (x.style_key?'<label class="f">'+t('Colour')+'</label><div class="bbc" id="bb_c">'+cols.map(function(c){return '<button type="button" data-c="'+c[0]+'" class="'+(f.style==c[0]?'on':'')+'"><i class="tgdot '+(c[0]==''?x.style_default||'plain':c[0]=='none'?'plain':c[0])+'"></i>'+c[1]+'</button>'}).join('')+'</div>'+
+   (x.style_key!=x.key?'<small class="muted">'+t('This colour is shared by the buttons of the same group.')+'</small>':''):'')+
+  (x.main?kuSwitch(t('Show in the main menu'),!f.hidden,'BB.f.hidden=!this.checked'):'')+
+  '<div class="g2 bbfoot"><button class="b2" onclick="bbClose()">'+t('Cancel')+'</button><button class="btn" id="bb_s">'+t('Save')+'</button></div>','bbmod');
+ var live=function(){$('#bb_live').innerHTML='<div class="tgkb">'+bbBtn(x,{text:f.text||x.default,icon:f.icon,style:f.style})+'</div>';$('#bb_tc').textContent=(f.text||'').length+' / 60'};
+ var em=function(){var w=BB.wait==k;$('#bb_e').innerHTML=(f.icon?'<span class="bbei">'+bbEmoji(f.icon)+'</span>':'<span class="muted">'+t('None')+'</span>')+
+   (w?'<span class="bbwait"><i class="spin"></i>'+t('Send the premium emoji to the bot now…')+'</span>':'<button type="button" class="b2 sm" id="bb_ask">⭐ '+t(f.icon?'Change from Telegram':'Set from Telegram')+'</button>')+
+   (f.icon&&!w?'<button type="button" class="b2 sm bd" id="bb_ex">'+ic('trash',14)+' '+t('Remove')+'</button>':'');
+  var a=$('#bb_ask');if(a)a.onclick=bbAsk;var r=$('#bb_ex');if(r)r.onclick=function(){f.icon='';em();live()}};
+ BB.em=em;BB.live=live;
+ $('#bb_t').oninput=function(){f.text=this.value;live()};
+ $('#bb_tr').onclick=function(){f.text='';$('#bb_t').value='';live()};
+ var c=$('#bb_c');if(c)c.onclick=function(e){var b=e.target.closest('[data-c]');if(!b)return;f.style=b.dataset.c;$$('#bb_c [data-c]').forEach(function(z){z.classList.toggle('on',z==b)});live()};
+ $('#bb_s').onclick=function(){var o={};o[k]={text:f.text.trim(),icon:f.icon,hidden:f.hidden};if(x.style_key)o[k].style=f.style;
+  api('PUT','/api/bot/buttons',{buttons:o}).then(function(d){BB.d=d;bbClose();toast(t('Saved'));bbDraw()}).catch(fail)};
+ live();em()}
+function bbClose(){BB.wait=null;clearInterval(BB.poll);closeModal()}
+// «Set from Telegram»: the bot asks each admin for the emoji; this waits until the bot has saved one (up to 2 minutes)
+function bbAsk(){var k=BB.k,x=bbFind(k),was=x.icon;
+ api('POST','/api/bot/buttons/'+k+'/ask').then(function(r){if(!r.ok){toast(r.error||t('Failed'),1);return}
+  BB.wait=k;BB.em();var n=0;clearInterval(BB.poll);
+  BB.poll=setInterval(function(){if(++n>60||BB.wait!=k||!$('#modal').classList.contains('on')){clearInterval(BB.poll);if(BB.wait==k){BB.wait=null;BB.em()}return}
+   api('GET','/api/bot/buttons').then(function(d){var y=d.buttons.filter(function(z){return z.key==k})[0];if(y&&y.icon&&y.icon!=was){clearInterval(BB.poll);BB.d=d;BB.wait=null;BB.f.icon=y.icon;BB.em();BB.live();bbDraw();toast(t('Premium emoji saved'))}}).catch(function(){})},2000)}).catch(fail)}
