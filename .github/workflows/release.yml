@@ -19,6 +19,20 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # KANKI MIX server (Go, src/vpn/kmix-server): tested, then built into assets/bin, so the panel
+      # always carries the server made from the source in this repository
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.7'
+          cache-dependency-path: src/vpn/kmix-server/go.sum
+
+      - name: KANKI MIX server
+        run: |
+          cd src/vpn/kmix-server
+          go vet ./...
+          go test ./...
+          ./build.sh
+
       # The tests must be able to stop a release: the binary updates every server by itself, so a
       # broken tunnel would spread. Compile them first (a compile error is never "flaky"), then run
       # them; a failed run gets one more try on a single thread because the tests use real sockets.

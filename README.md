@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.32.1 — KANKI MIX inside the panel
+- The KANKI MIX server's Go source now lives in the panel (`src/vpn/kmix-server`), built by CI into every release; it never sends a packet over 1380 bytes (even on IPv6).
 ## New in 3.32 — automatic MTU
 - Every WireGuard, AmneziaWG and microtun config gets the largest MTU whose whole packet stays under 1380 bytes on mobile data, counting the core and the tunnels on its way (Settings › VPN). Servers' `wg0` / `awg0` / `mtun0` follow, so nothing is fragmented either way.
 ## New in 3.31.1 — the bot checked
