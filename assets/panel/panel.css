@@ -1697,3 +1697,40 @@ small{font-size:max(12px,.83em)}
  .twf{display:grid;grid-template-columns:1fr 1fr;gap:0 14px;align-items:start}
  .twf>[data-s=tr],.twf>[data-s=ports],.twf>[data-s=more]{grid-column:1/-1}
 }
+
+/* VPN services (3.34): one card per core, 2 columns on a phone, 3 on a tablet, 4 on a desktop */
+.cgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (min-width:620px){.cgrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (min-width:900px){.cgrid{grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px}}
+.ccard{display:flex;flex-direction:column;gap:4px;min-width:0;padding:16px;border-radius:16px;border:1px solid var(--ln);background:linear-gradient(180deg,color-mix(in srgb,var(--pc) 9%,var(--c1)),var(--c1) 60%);box-shadow:var(--sh);color:var(--t);text-decoration:none;position:relative;overflow:hidden;transition:border-color .2s,transform .2s}
+.ccard::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--pc);opacity:.85}
+.ccard:hover{border-color:color-mix(in srgb,var(--pc) 60%,transparent);transform:translateY(-2px)}
+.ccard:focus-visible{outline:2px solid var(--pc);outline-offset:2px}
+.cc1{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.cci{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:var(--pc);background:color-mix(in srgb,var(--pc) 16%,transparent);border:1px solid color-mix(in srgb,var(--pc) 40%,transparent);flex:none}
+.ccs{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--s);min-width:0;text-align:end}
+.ccs i{width:8px;height:8px;border-radius:50%;background:var(--s)}
+.ccs.g{color:var(--ok)}.ccs.g i{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+.ccs.y{color:var(--warn)}.ccs.y i{background:var(--warn)}
+.ccs.r{color:var(--bad)}.ccs.r i{background:var(--bad)}
+.ccn{font-size:16px;font-weight:800;overflow-wrap:anywhere}
+.ccd{font-size:12px;color:var(--s);line-height:1.6;min-height:2.4em;overflow-wrap:anywhere}
+.ccst{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:auto;padding-top:12px;border-top:1px solid var(--ln)}
+.ccst>div{min-width:0}.ccst small{display:block;font-size:12px;color:var(--s)}.ccst b{font-size:14px}
+@media (max-width:619px){.ccard{padding:12px}.ccd{display:none}.cci{width:36px;height:36px}}
+
+/* servers page (3.34): each server a card with its cores and load */
+#svp_g .kxr-h{padding:12px 14px;row-gap:8px}
+#svp_g .kxr-h>b{font-size:15px}
+.sv-l2,.sv-l3{flex-basis:100%;display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-inline-start:24px;min-width:0}
+.sv-l2 .kxr-ip{margin-inline-start:auto;color:var(--s);font-size:12px;overflow-wrap:anywhere}
+.svc{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:99px;font-size:12px;font-weight:700;color:var(--pc);background:color-mix(in srgb,var(--pc) 12%,transparent);border:1px solid color-mix(in srgb,var(--pc) 35%,transparent)}
+.svc i{width:6px;height:6px;border-radius:50%;background:var(--s)}.svc i.g{background:var(--ok)}.svc i.r{background:var(--bad)}
+.sv-l3{gap:8px 14px}
+.svm{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--s)}
+.svm i{display:block;width:56px;height:6px;border-radius:99px;background:var(--in);overflow:hidden}
+.svm u{display:block;height:100%;border-radius:99px;background:var(--ok)}
+.svm.y u{background:var(--warn)}.svm.r u{background:var(--bad)}
+.svm b{font-size:12px;color:var(--t)}
+.svu{display:inline-flex;align-items:center;gap:4px;font-size:12px;color:var(--s)}.svu b{color:var(--t)}
+@media (max-width:619px){.kxr-h .sv-l2 small.kxr-ip{display:block;margin-inline-start:0;flex-basis:100%}.svm i{width:40px}}
