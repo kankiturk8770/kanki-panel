@@ -2,8 +2,9 @@
 //! Game UDP rides a raw datagram path (no queue, no retransmission, sent twice in gaming mode) and TCP
 //! rides KCP + FEC, all under a ChaCha20-Poly1305 mask that has no fixed bytes on the wire.
 //!
-//! The server is the Go `kanki-server` from the private kanki-mix repository. Its binary is built into
-//! the panel (assets/bin/kanki-mix-server) and each agent writes it to its own server, so nodes need no
+//! The server is the Go `kanki-server`, its source in this repository (`src/vpn/kmix-server`, built by
+//! its `build.sh` and by CI into assets/bin/kanki-mix-server). The binary is built into the panel
+//! and each agent writes it to its own server, so nodes need no
 //! reinstall: an agent update is enough. Every user has their own key, made from the panel's secret and
 //! the user's subscription code (a new code = a new key). The server tells users apart by which key opens
 //! their packets; nothing on the wire names the user.

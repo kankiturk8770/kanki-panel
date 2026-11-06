@@ -35,7 +35,8 @@
 //! refresh and every server on the next sync, by itself.
 //!
 //! Not set here: Hysteria2 (QUIC sets "don't fragment" and sizes its own packets; the panel only
-//! checks it fits), KANKI MIX (its packet size is fixed in the app and the Go server) and Xray (TCP,
+//! checks it fits), KANKI MIX (its Go server, `src/vpn/kmix-server`, never sends a UDP
+//! payload over 1332 = 1380 even on IPv6: `obfs.MaxWire`) and Xray (TCP,
 //! the kernel sizes it; an mKCP inbound never goes over 1352, see `xray::panel::stream`).
 //!
 //! Older configs (MTU 1380 or 1420) keep working: a server takes in packets bigger than its
@@ -59,6 +60,8 @@ pub const MIN: u16 = 1280;
 pub const DEFAULT_BUDGET: u16 = 1380;
 /// the largest datagram of the UDP tunnel transports on their own wire (`salamander::MAX_WIRE`)
 const UDP_WIRE: u16 = 1232;
+/// the largest UDP payload KANKI MIX sends (`kmix-server/internal/obfs` MaxWire): 1380 with IPv6
+pub const KMIX_WIRE: u16 = 1332;
 /// the largest payload of one faketcp segment (`faketcp::MAX_SEG`)
 const FAKETCP_SEG: u16 = 1300;
 
@@ -388,6 +391,7 @@ pub fn layers() -> Value {
         { "name": "WireGuard", "bytes": WG, "kind": "core" },
         { "name": "AmneziaWG", "bytes": WG, "plus": "S4", "kind": "core" },
         { "name": "microtun", "bytes": MTUN, "kind": "core" },
+        { "name": "KANKI MIX", "bytes": KMIX_WIRE + IPV4 + UDP, "kind": "core", "wire": true },
         { "name": "Hysteria2 (Salamander)", "bytes": SALAMANDER, "plus": "QUIC", "kind": "core" },
         { "name": "AmneziaWG link", "bytes": IPV4 + UDP + WG, "kind": "tunnel", "cuts": false },
         { "name": "KCP / QUIC / hq / game", "bytes": UDP_WIRE + IPV4 + UDP, "kind": "tunnel", "cuts": true, "wire": true },
@@ -542,6 +546,13 @@ mod tests {
         apply_ifaces(&HashMap::from([("wg0".to_string(), 0), ("mtun0".to_string(), 0)]));
         assert!(!rules().contains("kanki-mtu"), "{}", rules());
         assert_eq!(std::fs::read_to_string("/sys/class/net/wg0/mtu").unwrap().trim(), "1300");
+    }
+
+    #[test]
+    fn kmix_server_matches() {
+        let src = include_str!("kmix-server/internal/obfs/obfs.go");
+        assert!(src.contains(&format!("MaxWire    = {}", KMIX_WIRE)), "KMIX_WIRE must follow the Go server");
+        assert!(KMIX_WIRE + 40 + UDP <= DEFAULT_BUDGET);
     }
 
     #[test]
