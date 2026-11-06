@@ -209,6 +209,16 @@ fn mb(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / 1_000_000.0)
 }
 
+/// A message that must never be edited into a menu: a file, a picture or video, or a text with a config or a
+/// subscription link in it (what the customer bought)
+fn keeps(m: &Value) -> bool {
+    if ["document", "photo", "video", "animation"].iter().any(|k| m.get(*k).is_some()) {
+        return true;
+    }
+    let t = m["text"].as_str().or_else(|| m["caption"].as_str()).unwrap_or("");
+    ["/sub/", "://", "[Interface]"].iter().any(|x| t.contains(x))
+}
+
 fn ik(rows: Kb) -> Value {
     let r: Vec<Vec<Value>> = rows
         .into_iter()
@@ -909,6 +919,10 @@ impl Bot {
 
     /// `edit`, with whether the customer has the text now (edited, or sent as a new message)
     async fn edit_ok(&self, chat: i64, mid: i64, text: &str, kb: Option<Value>) -> bool {
+        // 0: no message to edit (or one that must stay, see `keeps`): a new one
+        if mid == 0 {
+            return self.send(chat, text, kb).await.is_some();
+        }
         let mut body = json!({"chat_id": chat, "message_id": mid, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true});
         if let Some(k) = kb.clone() { body["reply_markup"] = k; }
         // a message that cannot be edited any more gets a new one; the same text again (a button tapped
@@ -1439,13 +1453,27 @@ impl Bot {
             self.answer(qid, "برای سرویس شما کانفیگی که AmneziaVPN بخونه (WireGuard، AmneziaWG یا VLESS) فعال نیست.", true).await;
             return false;
         };
+        // the servers in the file, in its order (straight AmneziaWG, through Iran, WireGuard, Xray), with their flags
+        let mut list = String::new();
+        for (i, (name, _)) in cfgs.iter().enumerate() {
+            let line = format!("{}. {}\n", i + 1, name);
+            // Telegram's caption is at most 1024 characters: the steps below matter more than a long list
+            if list.chars().count() + line.chars().count() > 420 {
+                list.push_str(&format!("… و {} سرور دیگر\n", cfgs.len() - i));
+                break;
+            }
+            list.push_str(&line);
+        }
+        let app_name = match plat { "iOS" => "از اپ‌استور", "Android" => "از گوگل‌پلی", _ => "از amnezia.org" };
         let cap = format!(
-            "📦 بکاپ Amnezia · {} سرور\n\n\
-             1️⃣ برنامه‌ی AmneziaVPN رو نصب کنید.\n\
-             2️⃣ فایل رو ذخیره کنید.\n\
-             3️⃣ توی برنامه: تنظیمات ← پشتیبان‌گیری ← بازیابی از نسخه‌ی پشتیبان (Restore from backup) و همین فایل رو انتخاب کنید.\n\n\
+            "📦 بکاپ AmneziaVPN · {} سرور\n\n{}\n\
+             📲 نصب، قدم به قدم:\n\
+             1️⃣ AmneziaVPN رو {} نصب کنید.\n\
+             2️⃣ همین فایل رو ذخیره کنید (Save to Files / Download).\n\
+             3️⃣ AmneziaVPN ← Settings ← Backup ← Restore from backup و فایل رو انتخاب کنید.\n\
+             4️⃣ سرورها به همین ترتیب می‌آیند: اول AmneziaWG مستقیم، بعد از راه ایران (🇮🇷→)، بعد WireGuard و آخر Xray. یکی رو بزنید و Connect ✅\n\n\
              ⚠️ بازیابی، سرورها و تنظیمات قبلی خود برنامه رو پاک می‌کنه.",
-            cfgs.len()
+            cfgs.len(), list, app_name
         );
         self.send_doc(chat, body.into_bytes(), &crate::amnezia::file_name(&u.username), &cap).await
     }
@@ -1933,9 +1961,12 @@ impl Bot {
     async fn on_callback_inner(&self, q: &Value) {
         let uid = q["from"]["id"].as_i64().unwrap_or(0);
         let chat = q["message"]["chat"]["id"].as_i64().unwrap_or(uid);
-        let mid = q["message"]["message_id"].as_i64().unwrap_or(0);
         let qid = q["id"].as_str().unwrap_or("").to_string();
         let d = q["data"].as_str().unwrap_or("").to_string();
+        // a menu button under a message that delivered something (a config, a file, a subscription link) opens the
+        // menu as a new message: editing would wipe what the customer got. Other menus are edited in place.
+        let nav = d == "home" || MAIN_BTNS.contains(&d.as_str()) || d.starts_with("acc:");
+        let mid = if nav && keeps(&q["message"]) { 0 } else { q["message"]["message_id"].as_i64().unwrap_or(0) };
         self.touch(uid, &q["from"], 0);
         let back_lbl = self.bt("back");
         let back = |to: &str| vec![b(&back_lbl, to)];
@@ -4786,6 +4817,24 @@ mod flow_tests {
         assert!(on.iter().any(|p| p.1 == 260000 && p.2 == 330000 && p.4 == "بلندمدت"));
         let old: i64 = db.with(|c| c.query_row("SELECT active FROM plans WHERE name='Old'", [], |r| r.get(0)).unwrap());
         assert_eq!(old, 0, "the old plan is hidden, not deleted");
+    }
+
+    #[tokio::test]
+    async fn the_menu_never_wipes_a_delivered_config() {
+        let (bot, log) = bot().await;
+        let c = 7702;
+        let tap_on = |text: &str, data: &str| json!({"id": "q", "from": from(c, "Ali", "ali"), "data": data,
+            "message": {"message_id": 55, "chat": {"id": c}, "text": text}});
+        let count = |m: &str| log.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|(x, v)| x == m && v["chat_id"] == c).count();
+        // «main menu» under the subscription message: a new menu, the subscription stays
+        bot.on_callback(&tap_on("🔗 لینک اشتراک: https://panel.example.com/sub/abc/v2", "home")).await;
+        assert_eq!((count("editMessageText"), count("sendMessage")), (0, 1));
+        // under a plain menu: edited in place, no new message
+        bot.on_callback(&tap_on("از منوی زیر استفاده کنید", "home")).await;
+        assert_eq!((count("editMessageText"), count("sendMessage")), (1, 1));
+        // under a config file: a new message too
+        bot.on_callback(&json!({"id": "q2", "from": from(c, "Ali", "ali"), "data": "home", "message": {"message_id": 56, "chat": {"id": c}, "document": {"file_id": "x"}}})).await;
+        assert_eq!((count("editMessageText"), count("sendMessage")), (1, 2));
     }
 
     /// Telegram that refuses every premium emoji on a button (the owner's Premium ended)

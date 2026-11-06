@@ -1885,21 +1885,27 @@ pub async fn bot_config(app: &Arc<App>, u: &User, n: &Node, proto: &str, tunnel:
     Some((conf_file_name_via(app, u, n, proto, tunnel), text))
 }
 
-/// Every config of a user that AmneziaVPN can hold, as (name in the app, .conf text or Xray link), for its backup:
-/// AmneziaWG first, each server's direct config, then its copy through the tunnel; then the Xray links. The name shows the
-/// route with flags: "🇮🇷→🇹🇷 AmneziaWG · TURKEY" through Iran, "🇹🇷 WireGuard · TURKEY" straight.
+/// Every config of a user that AmneziaVPN can hold, as (name in the app, .conf text or Xray link), for its backup, in the
+/// order the owner chose (3.34): AmneziaWG straight to each server, then AmneziaWG through the Iran tunnel, then WireGuard,
+/// then the Xray links. The name shows the route with flags: "🇮🇷→🇹🇷 AmneziaWG · TURKEY" through Iran, "🇹🇷 AmneziaWG · TURKEY" straight.
 pub async fn amnezia_configs(app: &Arc<App>, u: &User) -> Vec<(String, String)> {
     let mut out = vec![];
-    for (proto, title) in [("amneziawg", "AmneziaWG"), ("wireguard", "WireGuard")] {
-        for n in user_nodes(app, u) {
+    let nodes = user_nodes(app, u);
+    // (protocol, its name, only the configs through Iran / only the straight ones / both)
+    for (proto, title, want) in [("amneziawg", "AmneziaWG", Some(false)), ("amneziawg", "AmneziaWG", Some(true)), ("wireguard", "WireGuard", None)] {
+        for n in &nodes {
             let to = crate::amnezia::flag(&crate::exitgeo::cc(app, &n.id));
             for tunnel in [false, true] {
-                let has = if tunnel { twin_protos(app, u, &n) } else { node_protos(app, u, &n) };
+                let has = if tunnel { twin_protos(app, u, n) } else { node_protos(app, u, n) };
                 if !has.contains(&proto) {
                     continue;
                 }
-                if let Some((_, text)) = bot_config(app, u, &n, proto, tunnel).await {
-                    let via_iran = tunnel || crate::direct::through_tunnel(app, &n);
+                // a server reached only through Iran has no straight config: its own config goes with the tunnelled ones
+                let via_iran = tunnel || crate::direct::through_tunnel(app, n);
+                if want.is_some_and(|w| w != via_iran) {
+                    continue;
+                }
+                if let Some((_, text)) = bot_config(app, u, n, proto, tunnel).await {
                     let route = if via_iran { format!("{}→{}", crate::amnezia::flag("IR"), to) } else { to.clone() };
                     let name = format!("{} {} · {}", route.trim(), title, n.name).trim().to_string();
                     out.push((name, text));
@@ -1907,11 +1913,15 @@ pub async fn amnezia_configs(app: &Arc<App>, u: &User) -> Vec<(String, String)> 
             }
         }
     }
-    // then every Xray link the app can read (VLESS with Reality or TLS, VMess, Trojan, Shadowsocks); Hysteria2 it cannot
-    for (name, link) in crate::xray::panel::user_links(app, u) {
-        if crate::amnezia::server(&link, &name).is_some() {
-            out.push((name, link));
+    // then every Xray link the app can read (VLESS with Reality or TLS, VMess, Trojan, Shadowsocks); Hysteria2 it cannot.
+    // Each gets its server's flag (through Iran for the tunnel's copy) like the configs above.
+    for (name, link, sid) in crate::xray::panel::user_links_on(app, u) {
+        if crate::amnezia::server(&link, &name).is_none() {
+            continue;
         }
+        let to = crate::amnezia::flag(&crate::exitgeo::cc(app, &sid));
+        let route = if name.contains("(تانل)") { format!("{}→{}", crate::amnezia::flag("IR"), to) } else { to };
+        out.push((format!("{} {}", route.trim(), name).trim().to_string(), link));
     }
     out
 }
