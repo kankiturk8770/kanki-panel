@@ -36,7 +36,10 @@
 //!
 //! Not set here: Hysteria2 (QUIC sets "don't fragment" and sizes its own packets; the panel only
 //! checks it fits), KANKI MIX (its packet size is fixed in the app and the Go server) and Xray (TCP,
-//! the kernel sizes it; mKCP inbounds are only checked).
+//! the kernel sizes it; an mKCP inbound never goes over 1352, see `xray::panel::stream`).
+//!
+//! Older configs (MTU 1380 or 1420) keep working: a server takes in packets bigger than its
+//! interface MTU, and TCP through `wg0` / `awg0` / `mtun0` is clamped to it both ways (`mss_rules`).
 use crate::db::Node;
 use crate::App;
 use serde_json::{json, Value};
@@ -280,32 +283,98 @@ pub fn server(app: &App, n: &Node, core: &str) -> Option<u16> {
     Some(via.map(|v| v.mtu.min(direct.mtu)).unwrap_or(direct.mtu))
 }
 
-/// interface -> MTU for the sync of server `n` (empty = leave the interfaces as they are)
+/// interface -> MTU for the sync of server `n`. Automatic MTU off: every interface with 0, which
+/// takes our TCP MSS rules away and leaves the MTU as it is.
 pub fn ifaces(app: &App, n: &Node) -> HashMap<String, u16> {
     let mut m = HashMap::new();
-    for (core, iface) in [("wg", "wg0"), ("awg", "awg0")] {
-        if let Some(v) = server(app, n, core) {
-            m.insert(iface.to_string(), v);
-        }
+    for (core, iface) in [("wg", "wg0"), ("awg", "awg0"), ("mtun", crate::mtun::IFACE)] {
+        m.insert(iface.to_string(), server(app, n, core).unwrap_or(0));
     }
     m
 }
 
+/// The interfaces `apply_ifaces` may touch; microtun sets the MTU of its own (`MtCfg.mtu`)
+const IFACES: [&str; 3] = ["wg0", "awg0", crate::mtun::IFACE];
+/// comment on our TCP MSS rules, so only ours are ever removed
+const MSS_TAG: &str = "kanki-mtu";
+
+/// The TCP MSS rules of an interface (`tool` = iptables / ip6tables): every TCP connection through it
+/// is made with segments that fit its MTU, both ways. So an older config with a bigger MTU (1380,
+/// 1420) still gets every download in whole packets, without waiting for "packet too big" answers that
+/// some sites never send.
+fn mss_rules(tool: &str, iface: &str, mtu: u16) -> Vec<Vec<String>> {
+    let mss = mtu.saturating_sub(if tool == "ip6tables" { 60 } else { 40 }).to_string();
+    let tag = format!("{}-{}", MSS_TAG, iface);
+    ["-i", "-o"]
+        .iter()
+        .map(|dir| {
+            [tool, "-t", "mangle", "-A", "FORWARD", dir, iface, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-m", "comment", "--comment", &tag, "-j", "TCPMSS", "--set-mss", &mss]
+                .iter()
+                .map(|x| x.to_string())
+                .collect()
+        })
+        .collect()
+}
+
+fn run_quiet(args: &[String]) -> bool {
+    std::process::Command::new(&args[0]).args(&args[1..]).output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+/// Removes every rule of ours for `iface` from the mangle FORWARD chain of `tool`
+fn mss_clear(tool: &str, iface: &str) {
+    let tag = format!("{}-{}", MSS_TAG, iface);
+    let Ok(out) = std::process::Command::new(tool).args(["-t", "mangle", "-S", "FORWARD"]).output() else { return };
+    for line in String::from_utf8_lossy(&out.stdout).lines() {
+        // only whole rules with our own comment: "-A FORWARD ... --comment kanki-mtu-wg0 ..."
+        if !line.starts_with("-A FORWARD ") || !line.split_whitespace().any(|w| w.trim_matches('"') == tag) {
+            continue;
+        }
+        let mut a: Vec<String> = vec![tool.into(), "-t".into(), "mangle".into(), "-D".into()];
+        a.extend(line.split_whitespace().skip(1).map(|w| w.trim_matches('"').to_string()));
+        let _ = run_quiet(&a);
+    }
+}
+
+/// What the agent did last (interface -> MTU): the rules are rewritten only when it changes
+fn applied() -> &'static std::sync::Mutex<HashMap<String, u16>> {
+    static M: std::sync::OnceLock<std::sync::Mutex<HashMap<String, u16>>> = std::sync::OnceLock::new();
+    M.get_or_init(Default::default)
+}
+
 /// On a server: give `wg0` / `awg0` the MTU the panel worked out (only when it differs, only
-/// interfaces that exist; a restart of wg-quick puts its own value back until the next sync)
+/// interfaces that exist; a restart of wg-quick puts its own value back until the next sync), and
+/// clamp TCP to it on `wg0`, `awg0` and `mtun0`. 0 = automatic MTU off: our rules go, the MTU stays.
 pub fn apply_ifaces(want: &HashMap<String, u16>) {
     for (iface, mtu) in want {
-        if !matches!(iface.as_str(), "wg0" | "awg0") || !(MIN..=1500).contains(mtu) {
+        let mtu = *mtu;
+        if !IFACES.contains(&iface.as_str()) || (mtu != 0 && !(MIN..=1500).contains(&mtu)) {
             continue;
         }
-        let Ok(cur) = std::fs::read_to_string(format!("/sys/class/net/{}/mtu", iface)) else { continue };
-        if cur.trim().parse::<u16>().ok() == Some(*mtu) {
+        if mtu != 0 && iface != crate::mtun::IFACE {
+            if let Ok(cur) = std::fs::read_to_string(format!("/sys/class/net/{}/mtu", iface)) {
+                if cur.trim().parse::<u16>().ok() != Some(mtu) {
+                    let ok = std::process::Command::new("ip").args(["link", "set", "dev", iface, "mtu", &mtu.to_string()]).status().map(|s| s.success()).unwrap_or(false);
+                    if !ok {
+                        eprintln!("mtu: could not set {} to {}", iface, mtu);
+                    }
+                }
+            }
+        }
+        let mut done = applied().lock().unwrap_or_else(|e| e.into_inner());
+        if done.get(iface) == Some(&mtu) {
             continue;
         }
-        let ok = std::process::Command::new("ip").args(["link", "set", "dev", iface, "mtu", &mtu.to_string()]).status().map(|s| s.success()).unwrap_or(false);
-        if !ok {
-            eprintln!("mtu: could not set {} to {}", iface, mtu);
+        for tool in ["iptables", "ip6tables"] {
+            mss_clear(tool, iface);
+            if mtu != 0 {
+                for r in mss_rules(tool, iface, mtu) {
+                    if !run_quiet(&r) && tool == "iptables" {
+                        eprintln!("mtu: could not add the TCP MSS rule of {}", iface);
+                    }
+                }
+            }
         }
+        done.insert(iface.clone(), mtu);
     }
 }
 
@@ -356,7 +425,11 @@ pub fn report(app: &App) -> Value {
         .inbounds
         .iter()
         .filter(|ib| ib.enabled && ib.network == "kcp")
-        .map(|ib| json!({ "id": ib.id, "mtu": ib.kcp_mtu, "wire": ib.kcp_mtu + (IPV4 + UDP) as u32, "fits": ib.kcp_mtu + ((IPV4 + UDP) as u32) <= b as u32 }))
+        .map(|ib| {
+            // the config of the inbound never goes over 1352 (`xray::panel::stream`); 0 = Xray's own 1350
+            let m = if ib.kcp_mtu == 0 { 1350 } else { ib.kcp_mtu.min(1352) };
+            json!({ "id": ib.id, "mtu": m, "wire": m + (IPV4 + UDP) as u32, "fits": m + ((IPV4 + UDP) as u32) <= b as u32 })
+        })
         .collect();
     json!({ "auto": auto(app), "budget": b, "manual": manual(app, "wg"), "manual_mtun": manual(app, "mtun"), "layers": layers(), "rows": rows, "xray_kcp": xray })
 }
@@ -365,6 +438,7 @@ pub fn report(app: &App) -> Value {
 mod tests {
     use super::*;
     use crate::tunnel::panel::Tunnel;
+    use serde_json::json;
 
     fn tun(id: &str, entry: &str, exit: &str, transport: &str, udp: &[&str]) -> Tunnel {
         Tunnel { id: id.into(), name: id.into(), entry: entry.into(), exit: exit.into(), transport: transport.into(), enabled: true, udp: udp.iter().map(|s| s.to_string()).collect(), ..Default::default() }
@@ -437,9 +511,125 @@ mod tests {
     }
 
     #[test]
+    fn tcp_is_clamped_to_the_mtu_both_ways() {
+        let r = mss_rules("iptables", "wg0", 1320);
+        assert_eq!(r.len(), 2);
+        assert!(r.iter().all(|x| x.ends_with(&["--set-mss".to_string(), "1280".to_string()]) && x.contains(&"kanki-mtu-wg0".to_string())));
+        assert!(r[0].contains(&"-i".to_string()) && r[1].contains(&"-o".to_string()));
+        assert!(mss_rules("ip6tables", "mtun0", 1324)[0].ends_with(&["--set-mss".to_string(), "1264".to_string()]));
+    }
+
+    /// On a real machine (root, in a network namespace of its own):
+    /// `unshare -n sh -c 'ip link add wg0 type dummy; cargo test mtu_live -- --ignored'`
+    #[test]
+    #[ignore]
+    fn mtu_live() {
+        let rules = || String::from_utf8_lossy(&std::process::Command::new("iptables").args(["-t", "mangle", "-S", "FORWARD"]).output().unwrap().stdout).to_string();
+        apply_ifaces(&HashMap::from([("wg0".to_string(), 1320), ("mtun0".to_string(), 1324), ("eth0".to_string(), 1300)]));
+        assert_eq!(std::fs::read_to_string("/sys/class/net/wg0/mtu").unwrap().trim(), "1320");
+        let r = rules();
+        assert_eq!(r.matches("kanki-mtu-wg0").count(), 2, "{}", r);
+        assert_eq!(r.matches("--set-mss 1280").count(), 2);
+        assert_eq!(r.matches("kanki-mtu-mtun0").count(), 2);
+        assert!(!r.contains("eth0"));
+        // a new value replaces the rules, no second copy
+        apply_ifaces(&HashMap::from([("wg0".to_string(), 1300)]));
+        let r = rules();
+        assert_eq!(r.matches("kanki-mtu-wg0").count(), 2, "{}", r);
+        assert!(r.contains("--set-mss 1260") && !r.contains("--set-mss 1280"));
+        assert_eq!(std::fs::read_to_string("/sys/class/net/wg0/mtu").unwrap().trim(), "1300");
+        // off: the rules go, the MTU stays
+        apply_ifaces(&HashMap::from([("wg0".to_string(), 0), ("mtun0".to_string(), 0)]));
+        assert!(!rules().contains("kanki-mtu"), "{}", rules());
+        assert_eq!(std::fs::read_to_string("/sys/class/net/wg0/mtu").unwrap().trim(), "1300");
+    }
+
+    #[test]
     fn fec_is_read() {
         assert_eq!(fec_of("8:3"), Some((8, 3)));
         assert_eq!(fec_of("off"), None);
         assert_eq!(fec_of("8:0"), None);
+    }
+
+    fn test_app() -> std::sync::Arc<crate::App> {
+        use std::sync::{atomic::AtomicI64, Mutex};
+        let dir = std::env::temp_dir().join(format!("kanki-mtu-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
+        std::sync::Arc::new(crate::App {
+            db,
+            env: HashMap::from([("DOMAIN".to_string(), "fi.example.com".to_string())]),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn mtu_line(text: &str) -> String {
+        text.lines().find(|l| l.starts_with("MTU = ")).unwrap_or("").to_string()
+    }
+
+    /// The whole way: a server, a user, its tunnel; the config files the panel hands out
+    #[tokio::test]
+    async fn configs_get_the_mtu_of_their_path_and_follow_the_tunnel() {
+        let app = test_app();
+        let info = json!({ "wg_pub": "d2dwdWI=", "wg_port": "51820", "awg_pub": "YXdncHVi", "awg_port": "51821", "mt_port": 4200,
+            "awg": [["Jc", "4"], ["S1", "20"], ["S2", "30"], ["S4", "16"], ["H1", "1"], ["H2", "2"], ["H3", "3"], ["H4", "4"]] });
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,info) VALUES('de','Germany','de.example.com','de.example.com','t',?1)", &[&info.to_string()]).unwrap();
+        let u = app.db.create_user("ali", 10.0, 30, 1, "wg,awg,mtun", "", "", 0).unwrap();
+        let n = app.db.node("de").unwrap();
+        let conf = |proto: &'static str, tunnel: bool| {
+            let (app, u, n) = (app.clone(), u.clone(), n.clone());
+            async move { crate::api::bot_config(&app, &u, &n, proto, tunnel).await.map(|x| x.1).unwrap_or_default() }
+        };
+        // straight to the server: 1380 - 60 (WireGuard), - 76 (AmneziaWG with S4 = 16)
+        // keys made here (the `wg` program is not needed for the test)
+        for (proto, ip) in [("wg", "10.66.0.2"), ("awg", "10.67.0.2")] {
+            app.db.exec("INSERT INTO peers(user_id,node_id,proto,privkey,pubkey,psk,ip) VALUES(?1,'de',?2,'cHJpdg==','cHVi','cHNr',?3)", &[&u.id, &proto, &ip]).unwrap();
+        }
+        // (plain WireGuard is given only through Iran: it does not pass straight to a server abroad)
+        assert_eq!(client(&app, &n, "wg", false), 1320);
+        assert_eq!(mtu_line(&conf("amneziawg", false).await), "MTU = 1304");
+        assert_eq!(client(&app, &n, "mtun", false), 1324);
+        // the server and an Iran server with a FakeTCP tunnel bringing every port: still 1380
+        let srv = json!([{ "id": "ir1", "name": "Iran", "token": "x", "addr": "ir.example.com" }, { "id": "s-de", "name": "Germany", "token": "y", "node": "de" }]);
+        app.db.set("tun_servers", &srv.to_string());
+        let ft = json!([{ "id": "t1", "name": "ft", "entry": "ir1", "exit": "s-de", "transport": "faketcp", "enabled": true, "udp": ["51820", "51821", "4200"] }]);
+        app.db.set("tun_list", &ft.to_string());
+        app.db.set("srv_tunnel", &json!({ "s-de": { "on": true, "host": "ir.example.com" } }).to_string());
+        assert!(crate::twin::of_node_core(&app, &n, "wg").is_some());
+        let wg_t = conf("wireguard", true).await;
+        assert!(wg_t.contains("Endpoint = ir.example.com:51820"), "{}", wg_t);
+        assert_eq!(mtu_line(&wg_t), "MTU = 1320");
+        // the tunnel becomes an AmneziaWG link of MTU 1340: the tunnel configs follow, by themselves
+        let awg = json!([{ "id": "t1", "name": "awg", "entry": "ir1", "exit": "s-de", "kind": "awg", "enabled": true,
+            "awg": { "n": 1, "mtu": 1340, "fwd_udp": ["51820", "51821", "4200"] } }]);
+        app.db.set("tun_list", &awg.to_string());
+        assert_eq!(mtu_line(&conf("wireguard", true).await), "MTU = 1280");
+        assert_eq!(mtu_line(&conf("amneziawg", true).await), "MTU = 1280");
+        assert_eq!(mtu_line(&conf("amneziawg", false).await), "MTU = 1304");
+        let p = plan(&app, &n, "mtun", true).unwrap();
+        assert_eq!((p.cap, p.mtu, p.fits), (1340, 1284, true));
+        let link = crate::microtun::link(&app, &u, &n, true).unwrap_or_default();
+        assert!(link.contains("@ir.example.com:4200?") && link.contains("&mtu=1284&"), "{}", link);
+        assert!(crate::microtun::link(&app, &u, &n, false).unwrap().contains("&mtu=1324&"));
+        // the server's own interfaces: the smallest of its configs
+        let f = ifaces(&app, &n);
+        assert_eq!((f["wg0"], f["awg0"], f["mtun0"]), (1280, 1280, 1284));
+        // the report says why
+        let r = report(&app);
+        assert!(r["rows"].as_array().unwrap().iter().any(|x| x["via"] == "tunnel" && x["hops"][0]["transport"] == "awg" && x["cap"] == 1340));
+        // automatic MTU off: the hand-set MTU everywhere, and our interface rules taken away
+        app.db.set("mtu_auto", "0");
+        app.db.set("mtu", "1400");
+        assert_eq!(mtu_line(&conf("wireguard", true).await), "MTU = 1400");
+        assert!(ifaces(&app, &n).values().all(|v| *v == 0));
+        // a smaller limit for the mobile network
+        app.db.set("mtu_auto", "1");
+        app.db.set("mtu_budget", "1360");
+        assert_eq!(mtu_line(&conf("amneziawg", false).await), "MTU = 1284");
+        // a limit out of range is not taken
+        app.db.set("mtu_budget", "900");
+        assert_eq!(budget(&app), DEFAULT_BUDGET);
     }
 }

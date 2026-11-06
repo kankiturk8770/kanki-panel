@@ -357,7 +357,8 @@ fn stream(ib: &Inbound) -> Value {
         // Xray 26 removed the mKCP seed and header (now "finalmask"): plain mKCP
         "kcp" => {
             let mut k = json!({});
-            for (name, v) in [("mtu", ib.kcp_mtu), ("tti", ib.kcp_tti), ("uplinkCapacity", ib.kcp_up), ("downlinkCapacity", ib.kcp_down)] {
+            // mtu: the whole datagram stays under the mobile network's 1380 (+ IPv4 20 + UDP 8)
+            for (name, v) in [("mtu", ib.kcp_mtu.min(1352)), ("tti", ib.kcp_tti), ("uplinkCapacity", ib.kcp_up), ("downlinkCapacity", ib.kcp_down)] {
                 if v > 0 {
                     k[name] = json!(v);
                 }
