@@ -1,11 +1,12 @@
 # v3.34.0 — premium emoji on the bot's buttons, core cards, server cards, cleaner deliveries
-- **Button manager (bot › Buttons tab, and inside the bot):** every customer button with its text, a **premium emoji** and its colour,
-  next to a Telegram-like preview of the main menu. «Set from Telegram» asks the bot for the emoji (send any premium emoji to the bot) and
-  the panel updates by itself; «Send a preview to my Telegram» sends every button as customers see them. In the bot each button's page
+- **Button manager, inside Telegram (the mini app, for the bot's admins; bot › Admin panel › Buttons and texts › 🎨 Manage buttons):**
+  every customer button with its text, a **premium emoji** and its colour, next to the main menu drawn as the chat shows it. «Set the
+  premium emoji» makes the bot ask for it in the chat (minimise the mini app, send any premium emoji, come back) and the page updates by
+  itself; «Sample in the chat» sends every button as customers see them. Not in the web panel (the owner wants it in Telegram). In the bot each button's page
   shows the button itself, a «⭐️ premium emoji» button and the colours. Telegram (Bot API 9.4) shows a premium emoji on a button when the
   bot's owner has Telegram Premium: it is saved only after Telegram accepts a sample, and if Telegram later refuses it (Premium ended)
   the message still goes with the plain buttons. Premium emoji in the bot's message texts are kept now (they turned plain before:
-  the text was saved without its emoji). `src/bot/buttons.rs`; the colour box of Sales settings moved here.
+  the text was saved without its emoji). `src/bot/buttons.rs`, `/tg/api/admin/*`; the colour box of the panel's Sales settings moved there.
 - **VPN services page:** one card per core (WireGuard, AmneziaWG, Hysteria2, KANKI MIX, microtun, Xray, Kanki DNS, Anti-DPI) with its state,
   servers running it and users; 2 columns on a phone, 3 on a tablet, 3–4 on a desktop. Each card opens its core.
 - **Servers page:** each server a card: status, flag, name, its cores as coloured chips, its address, and CPU / RAM / disk bars with users.

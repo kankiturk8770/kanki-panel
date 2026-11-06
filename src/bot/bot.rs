@@ -3084,11 +3084,16 @@ impl Bot {
                 true
             }
             "a:ui" => {
-                let kb = ik(vec![
+                let mini = crate::miniapp::url(&self.app);
+                let mut rows: Kb = vec![];
+                if mini.starts_with("https://") {
+                    rows.push(vec![b("🎨 مدیریت دکمه‌ها (ایموجی پریمیوم)", &format!("webapp:miniapp:{}?admin=btns", mini))]);
+                }
+                let kb = ik(rows.into_iter().chain([
                     vec![b("🔘 متن دکمه‌ها", "a:btns"), b("📝 متن پیام‌ها", "a:txts")],
                     vec![b("🔗 لینک‌ها", "a:links"), b("🎬 آموزش‌ها", "a:guides")],
                     vec![b("⬅️ پنل مدیریت", "adm")],
-                ]);
+                ]).collect());
                 self.edit(chat, mid, "🎨 <b>دکمه‌ها و متن‌ها</b>\n\nاز اینجا متن همه‌ی دکمه‌ها و پیام‌های ربات، لینک‌ها و آموزش‌ها را عوض کنید. دکمه‌های منوی اصلی را می‌شود پنهان هم کرد.", Some(kb)).await;
                 true
             }
@@ -3097,8 +3102,13 @@ impl Bot {
                     let hidden = MAIN_BTNS.contains(k) && db.on(&format!("hide_{}", k));
                     vec![b(&format!("{}{}", if hidden { "🚫 " } else { "" }, self.bt(k)), &format!("bv:{}", k))]
                 }).collect();
+                // the mini app's button manager first: every button with its premium emoji, colour and a live preview
+                let mini = crate::miniapp::url(&self.app);
+                if mini.starts_with("https://") {
+                    kb.insert(0, vec![b("🎨 مدیریت دکمه‌ها (ایموجی پریمیوم، رنگ، نمونه)", &format!("webapp:miniapp:{}?admin=btns", mini))]);
+                }
                 kb.push(vec![b("⬅️ دکمه‌ها و متن‌ها", "a:ui")]);
-                self.edit(chat, mid, "🔘 <b>متن دکمه‌ها</b>\n\nروی هر دکمه بزنید تا متنش را عوض کنید (🚫 = پنهان).", Some(ik(kb))).await;
+                self.edit(chat, mid, "🔘 <b>دکمه‌ها</b>\n\nبا «🎨 مدیریت دکمه‌ها» همه را یک‌جا با نمونه ببینید و متن، ایموجی پریمیوم و رنگ هر دکمه را عوض کنید؛ یا روی هر دکمه‌ی پایین بزنید (🚫 = پنهان).", Some(ik(kb))).await;
                 true
             }
             "a:txts" => {
@@ -3334,12 +3344,12 @@ impl Bot {
 
     /// Every customer button, two in a row, as customers see them, to each admin of the bot (the panel's
     /// «Send a preview»); Telegram's error when it refuses a premium emoji. How many admins got it.
-    pub async fn preview_buttons(&self) -> Result<usize, String> {
+    pub async fn preview_buttons(&self, only: Option<i64>) -> Result<usize, String> {
         let btns: Vec<(String, String)> = BTNS.iter().map(|(k, _, _)| b(&self.bt(k), &format!("bv:{}", k))).collect();
         let kb = ik(btns.chunks(2).map(|c| c.to_vec()).collect());
         let mut sent = 0;
         let mut last = String::from("the bot has no admin");
-        for a in &self.admins {
+        for a in self.admins.iter().filter(|a| only.is_none_or(|o| o == **a)) {
             let body = json!({"chat_id": a, "text": "👁 <b>پیش‌نمایش دکمه‌های ربات</b>\nهمه‌ی دکمه‌ها با متن، ایموجی پریمیوم و رنگشان؛ روی هر کدام بزنید تا تنظیمش باز شود.", "parse_mode": "HTML", "reply_markup": kb});
             match self.call_strict("sendMessage", body).await {
                 Ok(_) => sent += 1,
@@ -3350,14 +3360,14 @@ impl Bot {
     }
 
     /// The panel's «Set from Telegram»: each admin's next message gives button `k` its premium emoji
-    pub async fn ask_icon(&self, k: &str) -> Result<usize, String> {
+    pub async fn ask_icon(&self, k: &str, only: Option<i64>) -> Result<usize, String> {
         if !BTNS.iter().any(|x| x.0 == k) {
             return Err("unknown button".into());
         }
         let mut sent = 0;
-        for a in &self.admins {
+        for a in self.admins.iter().filter(|a| only.is_none_or(|o| o == **a)) {
             self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(*a, Wait::Icon(k.to_string()));
-            let t = format!("⭐️ <b>ایموجی پریمیوم برای «{}»</b> (از پنل)\n\nهمین حالا یک ایموجی پریمیوم بفرستید؛ نمونه‌ی دکمه برایتان می‌آید و پنل خودش به‌روز می‌شود.", esc(&self.bt(k)));
+            let t = format!("⭐️ <b>ایموجی پریمیوم برای «{}»</b> \n\nهمین حالا یک ایموجی پریمیوم این‌جا بفرستید؛ نمونه‌ی دکمه برایتان می‌آید و مینی‌اپ خودش به‌روز می‌شود.", esc(&self.bt(k)));
             if self.send(*a, &t, Some(ik(vec![vec![b("⬅️ انصراف", &format!("bv:{}", k))]]))).await.is_some() {
                 sent += 1;
             }

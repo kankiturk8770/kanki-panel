@@ -43,6 +43,60 @@ pub fn router() -> Router<Arc<App>> {
         .route("/tg/api/shop", get(shop))
         .route("/tg/api/buy", get(buy))
         .route("/tg/api/trial", get(trial))
+        // the bot's admins: button texts, premium emoji and colours (3.34, bot/buttons.rs)
+        .route("/tg/api/admin/buttons", get(admin_buttons).post(admin_buttons_save))
+        .route("/tg/api/admin/ask", get(admin_ask))
+        .route("/tg/api/admin/preview", get(admin_preview))
+        .route("/tg/api/admin/emoji/:id", get(admin_emoji))
+}
+
+/// The customer of a request, only when they are one of the bot's admins
+fn admin_of(app: &App, h: &HeaderMap, q: &HashMap<String, String>) -> Result<i64, Response> {
+    let tg = who(app, h, q)?;
+    let is = crate::bot::bot_admins_raw(app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg);
+    if is { Ok(tg) } else { Err(fail(StatusCode::FORBIDDEN, "admins only")) }
+}
+
+async fn admin_buttons(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    if let Err(r) = admin_of(&app, &h, &q) { return r }
+    ([(header::CACHE_CONTROL, "no-store")], Json(crate::buttons::list(&app))).into_response()
+}
+
+async fn admin_buttons_save(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>, Json(b): Json<Value>) -> Response {
+    if let Err(r) = admin_of(&app, &h, &q) { return r }
+    match crate::buttons::save(&app, &b) {
+        Ok(()) => Json(crate::buttons::list(&app)).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+/// «Set the emoji»: the bot asks this admin, in the chat, for the premium emoji of button `key`
+async fn admin_ask(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    let tg = match admin_of(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+    let Some(bot) = crate::bot::running() else { return fail(StatusCode::SERVICE_UNAVAILABLE, "the bot is off") };
+    match bot.ask_icon(q.get("key").map(|s| s.as_str()).unwrap_or(""), Some(tg)).await {
+        Ok(_) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+/// Every button, as customers see them, to this admin's chat
+async fn admin_preview(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    let tg = match admin_of(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+    let Some(bot) = crate::bot::running() else { return fail(StatusCode::SERVICE_UNAVAILABLE, "the bot is off") };
+    match bot.preview_buttons(Some(tg)).await {
+        Ok(_) => Json(json!({ "ok": true })).into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, Json(json!({ "error": e }))).into_response(),
+    }
+}
+
+/// The picture of a premium emoji (`init` in the query: an <img> sends no headers)
+async fn admin_emoji(State(app): St, h: HeaderMap, axum::extract::Path(id): axum::extract::Path<String>, Query(q): Query<HashMap<String, String>>) -> Response {
+    if let Err(r) = admin_of(&app, &h, &q) { return r }
+    match crate::buttons::emoji_image(&app, &id).await {
+        Some((b, kind)) => ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "private, max-age=86400")], b).into_response(),
+        None => fail(StatusCode::NOT_FOUND, "no picture"),
+    }
 }
 
 /// The Telegram user id of a signed init data, or None when the signature does not match, it is older than
@@ -175,7 +229,8 @@ async fn me(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String
     let apps = !crate::apps::list(&app).is_empty();
     let name_hint = bot.as_ref().and_then(|b| b.name_hint(tg)).unwrap_or_default();
     ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "orders": orders(&app, tg), "need_name": need_name, "name_hint": name_hint, "trial": trial,
-        "android_app": apps, "app_link": app.db.get("app_link"), "win_link": app.db.get("win_link"), "support": app.db.get("support") }))).into_response()
+        "android_app": apps, "app_link": app.db.get("app_link"), "win_link": app.db.get("win_link"), "support": app.db.get("support"),
+        "admin": crate::bot::bot_admins_raw(&app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) }))).into_response()
 }
 
 /// The config name a first purchase or trial needs (sent as `name`), saved as the bot saves it

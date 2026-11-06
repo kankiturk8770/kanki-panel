@@ -229,6 +229,49 @@ details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8p
 .empty b{display:block;font-size:16px;margin-bottom:4px}
 .skel{height:200px;border-radius:20px;background:var(--bg2);animation:p 1.2s ease-in-out infinite}
 @keyframes p{50%{opacity:.55}}
+/* the bot's admins: every button with its text, premium emoji and colour (3.34). The preview uses Telegram's own
+   chat and button colours, so it reads as the chat and not as this page */
+.adm{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border-radius:18px;border:1px solid var(--sep);background:var(--bg2);color:var(--gold2);font-weight:800;font-size:13px;cursor:pointer}
+.bh{display:flex;align-items:center;gap:8px;margin:4px 2px 12px}
+.bh h1{font-size:18px;font-weight:900;margin:0;flex:1}
+.bh .b{min-height:40px}
+.tgchat{display:flex;flex-direction:column;gap:6px;padding:14px 10px;border-radius:16px;color:#f5f5f5;
+ background:radial-gradient(circle at 18% 12%,rgba(80,140,200,.2),transparent 45%),radial-gradient(circle at 85% 85%,rgba(140,90,200,.18),transparent 50%),#0e1621}
+.tgmsg{align-self:flex-start;max-width:86%;padding:8px 12px 6px;border-radius:14px 14px 4px 14px;background:#182533;line-height:1.6}
+.tgmsg small{display:block;text-align:left;font-size:11px;opacity:.5}
+.tgkb{display:grid;gap:4px}
+.tgkb>button{padding:0;border:0;background:none;cursor:pointer;border-radius:10px}
+.tgb{display:flex;align-items:center;justify-content:center;gap:6px;min-height:42px;padding:6px 10px;border-radius:10px;color:#fff;font-weight:600;font-size:14px;line-height:1.35;text-align:center;background:rgba(255,255,255,.12)}
+.tgb>span{overflow-wrap:anywhere;min-width:0}
+.tgb.success{background:#3f9e5a}.tgb.primary{background:#3d84c6}.tgb.danger{background:#d04f4f}
+.tge{display:inline-grid;place-items:center;width:20px;height:20px;flex:none;font-style:normal;font-size:15px}
+.tge img{width:20px;height:20px;object-fit:contain}
+.bgr{margin-top:16px}
+.bgr h2{margin:0 2px 6px;font-size:14px;color:var(--hint)}
+.brow{display:flex;align-items:center;gap:10px;width:100%;min-height:60px;padding:8px 10px;border:0;border-top:1px solid var(--sep);background:none;text-align:start;cursor:pointer}
+.card>.brow:first-child{border-top:0}
+.brow .tgb{flex:0 1 58%;min-height:38px;font-size:13px;background:#2b3a4a}
+.brow .tgb.success{background:#3f9e5a}.brow .tgb.primary{background:#3d84c6}.brow .tgb.danger{background:#d04f4f}
+.brow.off .tgb{opacity:.45}
+.brow .bm{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--hint)}
+.brow .bm i{font-style:normal;color:var(--gold2);font-weight:800}
+.bed .lbl:first-of-type{margin-top:16px}
+.bin{display:flex;gap:8px}.bin .in{direction:rtl;text-align:right;flex:1;min-width:0}
+.bcnt{display:block;margin:4px 2px 0;font-size:12px;color:var(--hint)}
+.bemo{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.bemo .pic{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;background:var(--bg);border:1px solid var(--sep);font-size:22px}
+.bemo .pic img{width:36px;height:36px;object-fit:contain}
+.bemo .b{flex:1;min-width:130px}
+.bwait{margin-top:10px;padding:12px;border-radius:12px;border:1px dashed var(--gold3);color:var(--gold1);font-size:13px;line-height:1.8}
+.bwait b{display:block;color:var(--gold2)}
+.bcol{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.bcol button{min-height:52px;border-radius:12px;border:1px solid var(--sep);background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:12px;font-weight:700;cursor:pointer;color:var(--tx)}
+.bcol button.on{border-color:var(--gold2);box-shadow:0 0 0 1px var(--gold2) inset}
+.bcol i{width:16px;height:16px;border-radius:50%;background:rgba(200,200,200,.4)}
+.bcol i.success{background:#3f9e5a}.bcol i.primary{background:#3d84c6}.bcol i.danger{background:#d04f4f}
+.btog{display:flex;align-items:center;gap:10px;margin-top:14px;padding:12px;border-radius:12px;background:var(--bg2);cursor:pointer}
+.btog b{flex:1}.btog input{width:22px;height:22px;accent-color:var(--gold2)}
+.bsave{position:sticky;bottom:0;display:grid;grid-template-columns:1fr 2fr;gap:8px;margin:16px -16px 0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:var(--bg);border-top:1px solid var(--sep)}
 #toast{position:fixed;inset-inline:16px;bottom:calc(16px + env(safe-area-inset-bottom));padding:12px 14px;border-radius:12px;background:var(--tx);color:var(--bg);font-weight:700;text-align:center;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}
 #toast.on{opacity:1;transform:none}
 @media (prefers-reduced-motion:reduce){.skel{animation:none}#toast{transition:none}.pc.feat .rib{animation:none}details.app summary .chev{transition:none}}
@@ -242,7 +285,7 @@ details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8p
 <script>
 (function(){
 var Q=new URLSearchParams(location.search);
-var A={open:{},ctry:'',list:[],cur:0,plat:'i',view:Q.get('buy')?'buy':'acc',tab:['sub','srv','app'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sub',cat:'',svc:'',shop:null,renew:+(Q.get('renew')||0),cb:null};
+var A={open:{},ctry:'',list:[],cur:0,plat:'i',view:Q.get('admin')=='btns'?'btns':Q.get('buy')?'buy':'acc',tab:['sub','srv','app'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sub',cat:'',svc:'',shop:null,renew:+(Q.get('renew')||0),cb:null};
 function tg(){return window.Telegram&&Telegram.WebApp}
 // the signed init data: from Telegram's script, else from the page address (the script may not load in Iran)
 function initData(){var w=tg();if(w&&w.initData)return w.initData;
@@ -280,7 +323,8 @@ function empty(icon,title,text,btn){document.getElementById('app').innerHTML='<d
 // the account's three tabs; buying is its own view (from the subscription tab, or the only view with no account)
 function sales(){return A.shop&&A.shop.sales&&(A.shop.custom.on||A.shop.plans.length)}
 function tabs(){return '<div class="tabs" role="tablist">'+[['sub','اشتراک من'],['srv','سرورها'],['app','برنامه و راهنما']].map(function(t){return '<button role="tab" aria-selected="'+(A.tab==t[0])+'" data-t="'+t[0]+'" class="'+(A.tab==t[0]?'on':'')+'">'+t[1]+'</button>'}).join('')+'</div>'}
-function render(){if(A.view=='buy'&&sales())return drawBuy();if(!A.list.length)return sales()?(A.view='buy',drawBuy()):noAccount();draw()}
+function render(){if(A.admin&&(A.view=='btns'||A.view=='btn'))return A.view=='btn'?drawBtn():drawBtns();backBtn(null);
+ if(A.view=='buy'&&sales())return drawBuy();if(!A.list.length)return sales()?(A.view='buy',drawBuy()):noAccount();draw()}
 function noAccount(){empty('K','هنوز اشتراکی ندارید','بعد از خرید اشتراک، اطلاعات حساب و کانفیگ‌ها اینجا دیده می‌شن.','<button class="b main" style="min-width:180px" onclick="window.Telegram&&Telegram.WebApp&&Telegram.WebApp.close()">برگشت به ربات</button>')}
 function wireTabs(){Array.prototype.slice.call(document.querySelectorAll('[data-t]')).forEach(function(b){b.onclick=function(){A.tab=b.dataset.t;A.view='acc';render();window.scrollTo(0,0)}})}
 var SV={v2ray:['🌐','سرویس استاندارد (V2Ray)','یک لینک اشتراک، برای v2rayNG، Streisand، V2Box و Nekoray؛ اقتصادی، برای کارهای روزمره و وب‌گردی.'],
@@ -353,6 +397,7 @@ function copyText(t,ok,fallback){var done=function(){buzz('success');toast(ok)};
 function draw(){var u=A.list[A.cur];if(!u)return;var v2=u.service=='v2ray';
  var h='';
  if(A.list.length>1)h+='<div class="accs">'+A.list.map(function(x,i){return '<button class="'+(i==A.cur?'on':'')+'" data-acc="'+i+'"><span class="ltr">'+esc(x.name)+'</span></button>'}).join('')+'</div>';
+ if(A.admin)h+='<div style="margin:0 0 12px"><button class="adm" id="go_btns">🎨 مدیریت دکمه‌های ربات</button></div>';
  h+=tabs();
  if(A.tab=='srv')h+=srvTab(u,v2);else if(A.tab=='app')h+=appTab(u,v2);else h+=subTab(u,v2);
  document.getElementById('app').innerHTML=h;wireTabs();wire(u)}
@@ -438,6 +483,7 @@ function canDownload(){var w=tg();return !!(w&&w.downloadFile&&w.isVersionAtLeas
 
 function wire(u){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
  var sub=u.v2link;
+ var gb2=$('#go_btns');if(gb2)gb2.onclick=function(){A.view='btns';render();window.scrollTo(0,0)};
  all('[data-acc]').forEach(function(b){b.onclick=function(){A.cur=+b.dataset.acc;draw()}});
  var rn=$('#rn');if(rn)rn.onclick=function(){A.renew=u.id;A.svc='';A.view='buy';drawBuy();window.scrollTo(0,0)};
  all('[data-p]').forEach(function(b){b.onclick=function(){A.plat=b.dataset.p;draw()}});
@@ -456,12 +502,76 @@ function wire(u){var $=function(s){return document.querySelector(s)},all=functio
  var v2c=$('#v2_chat');if(v2c)v2c.onclick=function(){send('cfg:v',v2c)};
  all('[data-cfg]').forEach(function(b){b.onclick=function(){send('cfg:'+b.dataset.cfg,b)}})}
 
+// ---------------------------------------------------------------- the bot's buttons (admins only, 3.34)
+// Each customer button: its text, premium emoji and colour, with the main menu drawn as the chat shows it. The
+// premium emoji itself is sent to the bot in the chat (a web page cannot read one); this page follows by itself.
+var BB={d:null,f:null,poll:0};
+var BGR=[['main','منوی اصلی'],['sub','زیر پیام اشتراک'],['pay','صفحه‌ی پرداخت'],['other','بقیه']];
+function post(path,body){return fetch(path,{method:'POST',headers:{'X-Tg-Init':initData(),'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().catch(function(){return{}}).then(function(j){if(!r.ok)throw new Error(j.error||r.status);return j})})}
+function backBtn(fn){var w=tg();if(!w||!w.BackButton)return;try{if(BB.back)w.BackButton.offClick(BB.back);BB.back=fn;if(fn){w.BackButton.onClick(fn);w.BackButton.show()}else w.BackButton.hide()}catch(e){}}
+function bGroup(x){return x.main?'main':/^(pay_|disc$)/.test(x.key)?'pay':/اشتراک/.test(x.place)?'sub':'other'}
+function bColour(x,st){st=st==null?x.style:st;return st==''?x.style_default||'':st=='none'?'':st}
+// with a premium emoji the plain one at the start goes, as in the bot
+function bShown(txt,icon){if(!icon)return txt;var m=String(txt).trim().match(/^(\S+)\s+(.+)$/);return m&&!/[\p{L}\p{N}]/u.test(m[1])?m[2]:txt}
+function bEmo(id,big){return id?'<img alt="" src="/tg/api/admin/emoji/'+encodeURIComponent(id)+'?init='+encodeURIComponent(initData())+'" onerror="this.replaceWith(document.createTextNode(\'⭐\'))">':''}
+function bBtn(x,o){o=o||{};var icon=o.icon==null?x.icon:o.icon,txt=o.text==null?(x.text||x.default):(o.text||x.default);
+ return '<span class="tgb '+(bColour(x,o.style)||'')+'">'+(icon?'<i class="tge">'+bEmo(icon)+'</i>':'')+'<span>'+esc(bShown(txt,icon))+'</span></span>'}
+function bFind(k){return ((BB.d&&BB.d.buttons)||[]).filter(function(x){return x.key==k})[0]}
+function bLoad(){return api('/tg/api/admin/buttons').then(function(d){BB.d=d;return d})}
+function drawBtns(){var el=document.getElementById('app');
+ if(!BB.d){el.innerHTML='<div class="skel"></div>';bLoad().then(drawBtns).catch(function(){empty('!','باز نشد','دوباره امتحان کنید.')});return}
+ backBtn(A.list.length||sales()?function(){A.view='acc';render()}:null);
+ var l=BB.d.buttons,main=l.filter(function(x){return x.main&&!x.hidden});
+ var h='<div class="bh"><h1>مدیریت دکمه‌ها</h1><button class="b" id="bprev">نمونه توی چت</button></div>'+
+  '<p class="lead">منوی اصلی همین‌طور به مشتری نشان داده می‌شه. روی هر دکمه بزنید تا متن، ایموجی پریمیوم و رنگش رو عوض کنید.</p>'+
+  '<div class="tgchat"><div class="tgmsg">به ربات فروش خوش آمدید 🌟<small>12:00</small></div><div class="tgkb">'+main.map(function(x){return '<button data-bk="'+x.key+'">'+bBtn(x)+'</button>'}).join('')+'</div></div>';
+ BGR.forEach(function(g){var r=l.filter(function(x){return bGroup(x)==g[0]});if(!r.length)return;
+  h+='<div class="bgr"><h2>'+g[1]+'</h2><div class="card" style="padding:4px">'+r.map(function(x){var tags=[];
+   if(x.icon)tags.push('<i>⭐ ایموجی پریمیوم</i>');if(x.hidden)tags.push('🚫 پنهان');else if(x.text)tags.push('متن خودتان');
+   return '<button class="brow'+(x.hidden?' off':'')+'" data-bk="'+x.key+'">'+bBtn(x)+'<span class="bm"><span>'+esc(x.place)+'</span>'+(tags.length?'<span>'+tags.join(' · ')+'</span>':'')+'</span></button>'}).join('')+'</div></div>'});
+ h+='<p class="lead" style="margin-top:16px">ایموجی پریمیوم روی دکمه‌ها وقتی دیده می‌شه که حسابی که ربات رو توی BotFather ساخته، تلگرام پریمیوم داشته باشه.</p>';
+ el.innerHTML=h;
+ Array.prototype.slice.call(document.querySelectorAll('[data-bk]')).forEach(function(b){b.onclick=function(){BB.k=b.dataset.bk;BB.f=null;A.view='btn';render();window.scrollTo(0,0)}});
+ document.getElementById('bprev').onclick=function(){var b=this;b.disabled=true;api('/tg/api/admin/preview').then(function(){b.disabled=false;buzz('success');toast('همه‌ی دکمه‌ها توی چت فرستاده شد')}).catch(function(e){b.disabled=false;buzz('error');toast('تلگرام قبول نکرد: '+e.message)})}}
+function drawBtn(){var x=bFind(BB.k);if(!x){A.view='btns';return render()}
+ var f=BB.f||(BB.f={text:x.text,icon:x.icon,style:x.style,hidden:x.hidden});
+ backBtn(function(){bStop();A.view='btns';render()});
+ var cols=[['','پیش‌فرض',x.style_default||''],['success','سبز','success'],['primary','آبی','primary'],['danger','قرمز','danger'],['none','ساده','']];
+ var h='<div class="bed"><div class="bh"><h1>ویرایش دکمه</h1></div><p class="lead">'+esc(x.place)+'</p>'+
+  '<div class="tgchat"><div class="tgkb" id="blive"></div></div>'+
+  '<span class="lbl">متن دکمه</span><div class="bin"><input class="in" id="bt" maxlength="60" value="'+esc(f.text)+'" placeholder="'+esc(x.default)+'"><button class="b" id="bdef">پیش‌فرض</button></div><span class="bcnt" id="bc"></span>'+
+  '<span class="lbl">ایموجی پریمیوم</span><div class="bemo"><span class="pic">'+(f.icon?bEmo(f.icon):'—')+'</span>'+
+   (BB.poll?'':'<button class="b main" id="bask">'+(f.icon?'عوض کردن ایموجی':'گذاشتن ایموجی پریمیوم')+'</button>')+(f.icon&&!BB.poll?'<button class="b" id="brm" style="flex:0 0 auto">حذف</button>':'')+'</div>'+
+  (BB.poll?'<div class="bwait"><b>ربات توی چت منتظر ایموجیه</b>مینی‌اپ رو پایین بکشید (کوچیک کنید)، یک ایموجی پریمیوم توی چت ربات بفرستید و برگردید؛ این‌جا خودش عوض می‌شه. <button class="b" id="bstop" style="min-height:36px;margin-top:6px">انصراف</button></div>':'')+
+  (x.style_key?'<span class="lbl">رنگ</span><div class="bcol">'+cols.map(function(c){return '<button data-c="'+c[0]+'" class="'+(f.style==c[0]?'on':'')+'"><i class="'+c[2]+'"></i>'+c[1]+'</button>'}).join('')+'</div>'+
+   (x.style_key!=x.key?'<p class="lead" style="margin:6px 2px 0">این رنگ بین دکمه‌های هم‌گروه مشترکه.</p>':''):'')+
+  (x.main?'<label class="btog"><b>نمایش در منوی اصلی</b><input type="checkbox" id="bhid"'+(f.hidden?'':' checked')+'></label>':'')+
+  '<div class="bsave"><button class="b" id="bcan">انصراف</button><button class="b main" id="bok">ذخیره</button></div></div>';
+ document.getElementById('app').innerHTML=h;
+ var $=function(s){return document.querySelector(s)};
+ var live=function(){$('#blive').innerHTML=bBtn(x,{text:f.text,icon:f.icon,style:f.style});$('#bc').textContent=fa((f.text||'').length)+' از ۶۰ حرف · خالی = متن پیش‌فرض'};live();
+ $('#bt').oninput=function(){f.text=this.value;live()};
+ $('#bdef').onclick=function(){f.text='';$('#bt').value='';live()};
+ Array.prototype.slice.call(document.querySelectorAll('[data-c]')).forEach(function(b){b.onclick=function(){f.style=b.dataset.c;drawBtn()}});
+ var hd=$('#bhid');if(hd)hd.onchange=function(){f.hidden=!hd.checked};
+ var rm=$('#brm');if(rm)rm.onclick=function(){f.icon='';drawBtn()};
+ var st=$('#bstop');if(st)st.onclick=function(){bStop();drawBtn()};
+ var ask=$('#bask');if(ask)ask.onclick=function(){ask.disabled=true;var was=x.icon;
+  api('/tg/api/admin/ask?key='+encodeURIComponent(x.key)).then(function(){buzz('success');var n=0;
+   BB.poll=setInterval(function(){if(++n>60){bStop();drawBtn();return}
+    bLoad().then(function(){var y=bFind(x.key);if(y&&y.icon&&y.icon!=was){bStop();f.icon=y.icon;buzz('success');toast('ایموجی پریمیوم ذخیره شد');drawBtn()}}).catch(function(){})},2000);drawBtn()})
+  .catch(function(e){ask.disabled=false;buzz('error');toast(e.message=='the bot is off'?'ربات الان روشن نیست':'ربات نتونست توی چت پیام بده')})};
+ $('#bcan').onclick=function(){bStop();A.view='btns';render()};
+ $('#bok').onclick=function(){var b=this,o={};o[x.key]={text:(f.text||'').trim(),icon:f.icon||'',hidden:!!f.hidden};if(x.style_key)o[x.key].style=f.style;b.disabled=true;
+  post('/tg/api/admin/buttons',{buttons:o}).then(function(d){BB.d=d;bStop();buzz('success');toast('ذخیره شد');A.view='btns';render();window.scrollTo(0,0)}).catch(function(e){b.disabled=false;buzz('error');toast(e.message)})}}
+function bStop(){clearInterval(BB.poll);BB.poll=0}
+
 function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}
   // the same black as the page above and below it
   try{w.setHeaderColor('#170a10');w.setBackgroundColor('#170a10');if(w.setBottomBarColor)w.setBottomBarColor('#170a10')}catch(e){}}
  var p=(w&&w.platform)||'';A.plat=/ios|macos/.test(p)?'i':/tdesktop|windows|weba|webk/.test(p)?'w':'a';
  if(!initData())return empty('K','این صفحه رو از ربات باز کنید','مینی‌اپ کانکی فقط از داخل ربات تلگرام باز می‌شه.');
- Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.winLink=r[0].win_link||'';A.nameHint=r[0].name_hint||'';A.support=r[0].support||'';A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
+ Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.winLink=r[0].win_link||'';A.nameHint=r[0].name_hint||'';A.support=r[0].support||'';A.admin=!!r[0].admin;A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
 // wait a moment for Telegram's script, then go on without it
 var n=0;(function go(){if(tg()||n++>15)start();else setTimeout(go,100)})();
 })();
