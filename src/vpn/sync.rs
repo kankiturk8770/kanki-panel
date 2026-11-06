@@ -226,6 +226,24 @@ fn live_peer(uid: i64, node: &str, proto: &str, moved: i64, now: i64) -> bool {
         live.insert(key, now);
         return true;
     }
+    // a little data in two rounds in a row (an idle phone's keepalives every 25 s: it never moves 1 KB in
+    // one round, so after a panel restart it stayed «0 connections»); a ping moves data in one round only
+    static SMALL: std::sync::OnceLock<Mutex<HashMap<(i64, String, String), i64>>> = std::sync::OnceLock::new();
+    let mut small = SMALL.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    if moved > 0 {
+        match small.get(&key).copied() {
+            Some(t) if now - t >= 20 && now - t < NEW_AFTER => {
+                small.remove(&key);
+                live.insert(key, now);
+                return true;
+            }
+            Some(t) if now - t < 20 => {}
+            _ => {
+                small.insert(key.clone(), now);
+            }
+        }
+    }
+    small.retain(|_, t| now - *t < NEW_AFTER);
     match was {
         Some(t) if now - t < LIVE_FOR => true,
         _ => {
@@ -732,6 +750,11 @@ pub async fn sync_all(app: &Arc<App>) {
     let max: HashMap<i64, i64> = users.iter().map(|u| (u.id, if limit_on && u.active() { u.max_conn } else { 0 })).collect();
     // Xray counts like the others (its servers report every 5 seconds)
     let (xu, xe, xa) = crate::xray::panel::live_units(now());
+    // … and in the account's «connections» too (they were only used for the limit: an Xray user showed 0)
+    for (uid, _, _, devices) in &xu {
+        *online.entry(*uid).or_default() += devices;
+        seen.insert(*uid, now());
+    }
     units.extend(xu);
     eps.extend(xe);
     answered.extend(xa);
@@ -1014,6 +1037,20 @@ mod live_tests {
         assert!(l.is_shut(1, "tr", "wg"));
         // a one-device account gets one place
         assert_eq!(l.allowed(2, "de", "mtun"), Some(1));
+    }
+
+    #[test]
+    fn an_idle_device_with_keepalives_counts() {
+        // connected before the panel started, idle: only keepalives (about 100 bytes a round)
+        assert!(!live_peer(-12, "n", "wg", 96, 1000));
+        // an extra round a second later changes nothing
+        assert!(!live_peer(-12, "n", "wg", 32, 1001));
+        // the next round has keepalives again: a device
+        assert!(live_peer(-12, "n", "wg", 96, 1031));
+        assert!(live_peer(-12, "n", "wg", 96, 1062));
+        // a ping that comes back minutes later is still one round of data
+        assert!(!live_peer(-13, "n", "wg", 240, 1000));
+        assert!(!live_peer(-13, "n", "wg", 240, 1300));
     }
 
     #[test]

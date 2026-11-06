@@ -1,3 +1,18 @@
+# v3.33.0 — connections counted right, one alert per server, the tunnel form in parts
+- **«0 / 1 connections» while connected:** an account's connections were counted from WireGuard / AmneziaWG keys and the
+  Hysteria2, KANKI MIX and microtun sessions only; Xray's live devices went to the connection limit but never into the number,
+  so a V2Box (Xray) user always read 0. Now they count too (`sync.rs`). And a WireGuard key counted only after moving 1 KB in
+  one 30-second round: an idle phone that only sends its keepalives (about 100 bytes a round) stayed 0 after every panel
+  restart. Now a little data in two rounds in a row also counts; a ping (one handshake, then nothing) still does not.
+- **Alerts:** when a VPN server goes down, the bot says it once («نود TURKEY آفلاین است»), not again for the tunnel agent on
+  the same machine (its alert waits longer and is not sent while the server itself is down). While both servers of a tunnel are
+  up, a cut tunnel says «قطع است» and a round trip of 800 ms or more says «پینگ … بالاست» (and when it is normal again).
+- **Tunnel form:** on a phone or tablet a tab bar (Route, Tunnel type, Transport, Ports, More) shows one part at a time and
+  the save button always stays in sight; on a desktop Route and Tunnel type sit side by side, Transport and Ports below. A part
+  the form hides (no transport for a plain AmneziaWG link) hides its tab. Checked in Playwright: 360-1440, Persian and English,
+  dark and light, no JS error, no sideways scroll, every tab shows its part.
+- Tests: `an_idle_device_with_keepalives_counts`, `each_alert_says_what_happened`.
+
 # v3.32.1 — KANKI MIX: its server's source in the panel, no packet over 1380
 - **Source in the panel:** the KANKI MIX server (Go, `kanki-server`) was only a ready binary in `assets/bin`, built from a side branch of the private `kanki-mix` repository. Its source is now in `src/vpn/kmix-server` (`cmd/kanki-server`, `internal/obfs`, `internal/proto`); checked first: built from it, the function table (`.gopclntab`) is byte for byte the one of the binary the panel carried. `build.sh` builds it (reproducible: `-trimpath -buildvcs=false`); CI runs `go vet`, `go test` and `build.sh` before building the panel, so every release carries the server made from this source.
 - **Size:** `obfs.MaxWire` 1400 → 1332: a whole packet on the wire is at most 1360 bytes on IPv4 and 1380 on IPv6 (it was up to 1428). The random padding is only added up to that limit. A KCP packet (1200) and the largest game datagram of the app (TUN 1280: 1252 bytes, up and down) still fit one packet, so nothing is dropped for its size. Receivers read any size, so old apps and the new server (and the other way round) work together: the app's current KANKI MIX core passed its end-to-end tests (tunnel, 2 MB TCP download, gaming under loss, several users) against the new server.

@@ -230,13 +230,17 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  // three groups: over UDP (fast, games), over TCP (steady), advanced (hardest to block / whitelist)
  var trs=[['Over UDP (fast, games)',['game','kcp','quic','hq']],['Over TCP (steady)',['tcpmux','wss','ws','tcp']],['Advanced (hardest to block)',['dual','h2','faketcp','cdn']]].map(function(g){return [g[0],g[1].map(function(k){return [k,TRD[k][0],TRD[k][1]]})]});
  var advOpen=!!(id&&((x.transport!='cdn'&&(x.sni||x.host||x.path||x.frag||x.dial))||x.auto||x.target||prof!='balanced'));
- var sec=function(n,title,extra){return '<div class="tws"><h4>'+(n?'<i>'+N(n)+'</i>':'')+t(title)+(extra||'')+'</h4>'};
+ var sec=function(n,title,extra,key){return '<div class="tws"'+(key?' data-s="'+key+'"':'')+'><h4>'+(n?'<i>'+N(n)+'</i>':'')+t(title)+(extra||'')+'</h4>'};
+ // the form in parts: tabs on a phone or tablet (one part at a time, no long scroll), a grid on a desktop
+ var TWT=[['route','Route'],['type','Tunnel type'],['tr','Transport'],['ports','Ports'],['more','More']];
  modal(mhead(id?t('Edit tunnel'):t('New tunnel'))+
   (sv.length<2?'<div class="warnbox">'+t('First add your entry server in the “Tunnel servers” menu.')+'</div>':'')+
-  sec(1,'Route')+'<label class="f">'+t('Name')+'</label><input id="tw_nm" value="'+esc(x.name||'')+'" placeholder="'+esc(t('Empty = Iran server-abroad server'))+'">'+
+  '<div class="twtabs" id="tw_tabs" role="tablist">'+TWT.map(function(z){return '<button type="button" role="tab" data-t="'+z[0]+'" class="'+(z[0]=='route'?'on':'')+'">'+t(z[1])+'</button>'}).join('')+'</div>'+
+  '<div class="twf" id="tw_f" data-tab="route">'+
+  sec(1,'Route','','route')+'<label class="f">'+t('Name')+'</label><input id="tw_nm" value="'+esc(x.name||'')+'" placeholder="'+esc(t('Empty = Iran server-abroad server'))+'">'+
   '<div class="trte"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="tw_en">'+opt(dE)+'</select></div><span class="arr">'+ic('swap',18)+'</span><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="tw_ex">'+opt(dX)+'</select></div></div>'+
   '<label class="f">'+t('Who connects')+'</label><div class="seg" id="tw_md"><button data-v="reverse" class="'+(mode=='reverse'?'on':'')+'">'+t('Exit → entry (reverse, recommended)')+'</button><button data-v="direct" class="'+(mode=='direct'?'on':'')+'">'+t('Entry → exit (direct)')+'</button></div></div>'+
-  sec(2,'Tunnel type')+'<div class="seg" id="tw_kd"><button data-v="" class="'+(kind!='awg'?'on':'')+'">'+t('Kanki tunnel')+'</button><button data-v="awg" class="'+(kind=='awg'?'on':'')+'">🛡 AmneziaWG</button><button data-v="hy2" class="'+(kind=='hy2'?'on':'')+'">⚡ Hysteria2</button></div>'+
+  sec(2,'Tunnel type','','type')+'<div class="seg" id="tw_kd"><button data-v="" class="'+(kind!='awg'?'on':'')+'">'+t('Kanki tunnel')+'</button><button data-v="awg" class="'+(kind=='awg'?'on':'')+'">🛡 AmneziaWG</button><button data-v="hy2" class="'+(kind=='hy2'?'on':'')+'">⚡ Hysteria2</button></div>'+
   '<div id="tw_hy" class="box" style="display:none;margin-top:10px"><b>⚡ Hysteria2 '+t('link between the two servers')+'</b>'+
   '<small class="muted" style="display:block;margin:4px 0 8px">'+t('The exit runs a Hysteria2 server, the entry connects to it (QUIC over UDP, fast on lossy internet). The panel makes the password and a certificate and the entry checks its fingerprint. The agents install Hysteria2 by themselves; your VPN Hysteria2 is not touched.')+'</small>'+
   '<div class="g2"><div><label class="f">'+t('Hysteria2 UDP port (on the exit)')+'</label><input id="tw_hy_pt" type="number" class="ltr" value="'+(Y.port||'')+'"></div><div><label class="f">'+t('SNI (TLS name)')+'</label><input id="tw_hy_sni" class="ltr" value="'+esc(Y.sni||'www.bing.com')+'"></div></div>'+
@@ -268,7 +272,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   (id?'<div class="g2" style="margin-top:10px"><button type="button" class="b2 sm" id="tw_aw_c1">'+t('Show the config of the entry')+'</button><button type="button" class="b2 sm" id="tw_aw_c2">'+t('Show the config of the exit')+'</button></div>':'')+
   '</div>'+
   '</div>'+
-  '<div id="tw_trw">'+sec(3,'Transport','<button type="button" class="b2 sm" id="tw_smart">⚡ '+t('Find the best transport')+'</button>')+
+  '<div id="tw_trw" data-s="tr">'+sec(3,'Transport','<button type="button" class="b2 sm" id="tw_smart">⚡ '+t('Find the best transport')+'</button>')+
   '<div id="tw_tr" class="trcols">'+trs.map(function(g,gi){return '<div class="trcol trc'+gi+'"><div class="trgl">'+t(g[0])+'</div><div class="tropt">'+g[1].map(function(o){return '<button data-v="'+o[0]+'" class="'+(tr==o[0]?'on':'')+'"><b>'+tunTr(o[0])+o[2].map(function(z){return '<em class="ttg">'+z+'</em>'}).join('')+'</b><small>'+o[1]+'</small></button>'}).join('')+'</div></div>'}).join('')+'</div>'+
   '<small class="muted" style="display:block;margin-top:8px">'+t('On filtered networks WSS and WS usually pass; plain TCP, TCP Mux, QUIC and KCP are often cut. Use “Find the best transport” to test them between these two servers.')+'</small>'+
   '<div id="tw_gm" class="box" style="display:none;margin-top:10px"><b>🎮 '+t('Gaming options')+'</b>'+
@@ -285,7 +289,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<div class="spoofc" id="tw_cspoof">'+['www.aparat.com','www.telewebion.com','www.rubika.ir','www.digikala.com','divar.ir'].map(function(d){return '<button type="button" data-sp="'+d+'">'+d+'</button>'}).join('')+'</div>'+
   '<label class="chk"><input type="checkbox" id="tw_frag" '+(x.frag!==false?'checked':'')+'><span><b>'+t('Split the TLS hello into tiny pieces')+'</b><small>'+t('Hides the SNI from filters that do not reassemble packets. Turn it off if the CDN refuses.')+'</small></span></label></details>'+
   cdnTools()+'</div></div>'+
-  sec(4,'Ports')+'<div id="tw_ptrow"><label class="f">'+t('Tunnel port')+'</label><input id="tw_pt" type="number" class="ltr" value="'+(x.port||'')+'"></div>'+
+  sec(4,'Ports','','ports')+'<div id="tw_ptrow"><label class="f">'+t('Tunnel port')+'</label><input id="tw_pt" type="number" class="ltr" value="'+(x.port||'')+'"></div>'+
   '<small class="muted" id="tw_ph"></small>'+
   '<div id="tw_pc"><div class="nh" style="margin-top:12px"><b>'+t('Ports to carry')+'</b><button class="b2 sm" id="tw_vpn">'+ic('ports',14)+' '+t('All ports of the exit server')+'</button></div>'+
   '<div class="corechips" id="tw_cc"></div>'+
@@ -293,7 +297,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<div class="g2"><div><label class="f">TCP</label><input id="tw_tcp" class="ltr" value="'+esc((x.tcp||[]).join(', '))+'" placeholder="443, 2053"></div><div><label class="f">UDP</label><input id="tw_udp" class="ltr" value="'+esc((x.udp||[]).join(', '))+'" placeholder="51820, 51821, 8443"></div></div>'+
   '<small class="muted">'+t('Users connect to these ports on the entry; they reach the same ports on the exit. Use 8443:443 to change the port, 1000-1010 for a range.')+'</small></div></div>'+
   // everything that is not needed to run the tunnel: folded under «Advanced settings»
-  '<div class="adv'+(advOpen?' on':'')+'" id="tw_adv"><button type="button" class="advh" aria-expanded="'+advOpen+'">'+ic('settings',16)+'<span>'+t('Advanced settings')+'</span><i>▾</i></button><div class="advb"><div class="advi">'+
+  '<div class="adv'+(advOpen?' on':'')+'" id="tw_adv" data-s="more"><button type="button" class="advh" aria-expanded="'+advOpen+'">'+ic('settings',16)+'<span>'+t('Advanced settings')+'</span><i>▾</i></button><div class="advb"><div class="advi">'+
   '<div id="tw_dsg">'+sec(0,'Disguise','<small id="tw_camt"></small>')+
   '<div class="camn" id="tw_camn"></div>'+
   '<div id="tw_cam"><div id="tw_snw"><label class="f">'+t('SNI names (TLS hello)')+'</label><input id="tw_sni" class="ltr" value="'+esc(x.transport=='cdn'?'':(x.sni||''))+'" placeholder="www.google.com, www.bing.com">'+
@@ -308,7 +312,15 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<div class="g2"><div><label class="f">'+t('Address to dial (empty = the server’s address)')+'</label><input id="tw_dl" class="ltr" value="'+esc(x.transport=='cdn'?'':(x.dial||''))+'"></div>'+
   '<div><label class="f">'+t('Target on the exit')+'</label><input id="tw_tg" class="ltr" value="'+esc(x.target||'')+'" placeholder="127.0.0.1"></div></div></div>'+
   '</div></div></div>'+
-  '<div class="g2" style="margin-top:14px"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="tw_go">'+(id?t('Save'):t('Make the tunnel'))+'</button></div>','wide');
+  '</div>'+
+  '<div class="g2 twfoot"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="tw_go">'+(id?t('Save'):t('Make the tunnel'))+'</button></div>','wide tunf');
+ // tabs: a part the form hides (no transport for a plain AmneziaWG link, ...) hides its tab too
+ function twTab(k){var f=$('#tw_f');if(!f)return;f.dataset.tab=k;$$('#tw_tabs button').forEach(function(b){b.classList.toggle('on',b.dataset.t==k)});
+  if(k=='more'){var a=$('#tw_adv');a.classList.add('on');a.querySelector('.advh').setAttribute('aria-expanded','true')}$('#mbox').scrollTop=0}
+ function twTabs(){var f=$('#tw_f');if(!f)return;$$('#tw_tabs button').forEach(function(b){var p=f.querySelector('[data-s="'+b.dataset.t+'"]');b.style.display=p&&p.style.display=='none'?'none':''});
+  var cur=f.querySelector('[data-s="'+f.dataset.tab+'"]');if(cur&&cur.style.display=='none')twTab('route')}
+ $$('#tw_tabs button').forEach(function(b){b.onclick=function(){twTab(b.dataset.t)}});
+ new MutationObserver(twTabs).observe($('#tw_f'),{attributes:true,attributeFilter:['style'],subtree:true});
  var st={mode:mode,tr:tr,kind:kind,wrap:!!A.wrap};
  $('#tw_adv .advh').onclick=function(){var a=$('#tw_adv'),on=a.classList.toggle('on');this.setAttribute('aria-expanded',on)};
  function hint(){var en=$('#tw_en').value,ex=$('#tw_ex').value,l=st.mode=='direct'?ex:en,pt=$('#tw_pt');
