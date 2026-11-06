@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>⚡ Kanki VPN</title>
+<title>پنل کاربری · Kanki VPN</title>
 <script src="https://telegram.org/js/telegram-web-app.js" async></script>
 <style>
 @font-face{font-family:Vazirmatn;src:url(/assets/vazirmatn.woff) format("woff");font-weight:100 900;font-display:swap}
@@ -138,6 +138,7 @@ input[type=range]{width:100%;accent-color:var(--gold2);height:32px;margin:0}
 .conn .r .nm{flex:1;min-width:0}
 .conn .r .nm small{display:block;font-size:12px;color:var(--hint);font-weight:700}
 .conn .r .nm b{display:block;font-size:14px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conn .r .nm b.lk{white-space:normal;word-break:break-all;font-size:13px;font-weight:700;line-height:1.5;text-align:left}
 .conn .r .b{flex:none;min-height:40px;min-width:72px}
 .conn .dot{width:10px;height:10px;border-radius:50%;flex:none}
 /* servers: one tile per country, its files below */
@@ -197,7 +198,7 @@ details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8p
 .brand{display:flex;align-items:center;gap:10px;margin:0 0 14px}
 .brand svg{width:30px;height:34px;flex:none;filter:drop-shadow(0 0 8px rgba(247,201,72,.45))}
 .brand b{font-size:18px;font-weight:900;letter-spacing:.5px;color:var(--gold2);direction:ltr}
-.brand small{margin-inline-start:auto;font-size:12px;color:var(--hint)}
+.brand small{margin-inline-start:auto;font-size:13px;font-weight:800;color:var(--hint)}
 /* the shop: one tab per kind of plan, one card per plan */
 .ptabs{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px;margin:0 0 12px}
 .ptabs button{min-height:44px;padding:0 6px;border-radius:14px;border:1px solid var(--sep);background:var(--bg2);font-weight:800;font-size:13px;cursor:pointer;color:var(--hint);white-space:nowrap}
@@ -235,7 +236,7 @@ details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8p
 </style>
 </head>
 <body>
-<header class="brand"><svg viewBox="0 0 24 26" aria-hidden="true"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF4B8"/><stop offset=".5" stop-color="#FFD60A"/><stop offset="1" stop-color="#B38F00"/></linearGradient></defs><path d="M12 1 22 4.5v8c0 6-4.4 10.4-10 12.5C6.4 22.9 2 18.5 2 12.5v-8z" fill="url(#sg)"/><path d="M12 3.6 19.6 6.3v6.2c0 4.7-3.3 8.2-7.6 10C7.7 20.7 4.4 17.2 4.4 12.5V6.3z" fill="#2a1019"/><path d="M8.6 7.5h2.4v4l3.4-4h3l-4 4.5 4.2 5.5h-3l-2.8-3.8-.8.9v2.9H8.6z" fill="url(#sg)"/></svg><b>⚡ Kanki VPN</b><small>امن · سریع · کم‌پینگ</small></header>
+<header class="brand"><svg viewBox="0 0 24 26" aria-hidden="true"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF4B8"/><stop offset=".5" stop-color="#FFD60A"/><stop offset="1" stop-color="#B38F00"/></linearGradient></defs><path d="M12 1 22 4.5v8c0 6-4.4 10.4-10 12.5C6.4 22.9 2 18.5 2 12.5v-8z" fill="url(#sg)"/><path d="M12 3.6 19.6 6.3v6.2c0 4.7-3.3 8.2-7.6 10C7.7 20.7 4.4 17.2 4.4 12.5V6.3z" fill="#2a1019"/><path d="M8.6 7.5h2.4v4l3.4-4h3l-4 4.5 4.2 5.5h-3l-2.8-3.8-.8.9v2.9H8.6z" fill="url(#sg)"/></svg><b>⚡ Kanki VPN</b><small>پنل کاربری</small></header>
 <div id="app"><div class="skel"></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
@@ -357,8 +358,10 @@ function draw(){var u=A.list[A.cur];if(!u)return;var v2=u.service=='v2ray';
  document.getElementById('app').innerHTML=h;wireTabs();wire(u)}
 
 // the countries of an account, each once: (code, its WireGuard / AmneziaWG files, a route through Iran too)
+// a country's name; a server whose country is not known yet goes by its own name
+function cname(c){return CN[c.cc]||(c.cc=='?'?c.name:c.cc)}
 function countries(u){var by={},ord=[];u.servers.forEach(function(s){var k=(s.cc||'').toUpperCase()||'?';
-  if(!by[k]){by[k]={cc:k,wg:false,awg:false,iran:false,direct:false};ord.push(k)}var c=by[k];
+  if(!by[k]){by[k]={cc:k,wg:false,awg:false,iran:false,direct:false,name:s.name};ord.push(k)}var c=by[k];
   if(s.iran)c.iran=true;else c.direct=true;if(s.protocols.indexOf('wireguard')>=0)c.wg=true;if(s.protocols.indexOf('amneziawg')>=0)c.awg=true});
  return ord.map(function(k){return by[k]})}
 
@@ -372,10 +375,11 @@ function subTab(u,v2){var st=ST[u.status]||ST.Active,lim=u.limit_gb>0,left=lim?M
   '<div><small>زمان باقی‌مانده</small><strong>'+(u.days_left<0?'نامحدود':fa(u.days_left)+' <em>روز</em>')+'</strong><em>'+fa(u.connections||'∞')+' دستگاه هم‌زمان</em></div></div>'+
   (lim?'<div class="bar"><span style="width:'+pc.toFixed(1)+'%"></span></div>':'')+'</div>'+
   '<div class="tear"></div>'+
-  '<div class="stub"><div class="routes" aria-label="کشورها">'+(cs.length?cs.map(function(c){return '<span title="'+esc(CN[c.cc]||c.cc)+'">'+(flag(c.cc)||'🌐')+'</span>'}).join(''):'<span>—</span>')+'</div>'+
+  '<div class="stub"><div class="routes" aria-label="کشورها">'+(cs.length?cs.map(function(c){return '<span title="'+esc(cname(c))+'">'+(flag(c.cc)||'🌐')+'</span>'}).join(''):'<span>—</span>')+'</div>'+
   (tun?'<small>+ مسیر تانل ایران</small>':'')+'</div></section>';
  h+='<div class="conn">'+
-  '<div class="r"><span class="dot" style="background:var(--v)"></span><div class="nm"><small>لینک اشتراک (v2rayNG، V2Box، Hiddify)</small><b class="ltr">'+esc(u.service=='v2ray'?u.v2link:u.link)+'</b></div><button class="b" id="cp">کپی</button></div>'+
+  // the link v2rayNG / V2Box / Hiddify read is /v2 (the plain /sub/ address is the web page); shown whole, never cut
+  (u.links?'<div class="r"><span class="dot" style="background:var(--v)"></span><div class="nm"><small>لینک اشتراک، برای V2Box و v2rayNG</small><b class="ltr lk">'+esc(u.v2link)+'</b></div><button class="b" id="cp">کپی</button></div>':'')+
   (v2?'':'<div class="r"><span class="dot" style="background:var(--k)"></span><div class="nm"><small>کد ورود Kanki VPN</small><b class="ltr">'+esc(u.code)+'</b></div><button class="b" id="cc">کپی</button></div>')+
   '</div>';
  h+='<div class="acts"><button class="b" id="v2_chat">لینک V2Ray توی چت</button><button class="b" data-t="app">راهنمای اتصال</button></div>';
@@ -386,11 +390,11 @@ function subTab(u,v2){var st=ST[u.status]||ST.Active,lim=u.limit_gb>0,left=lim?M
 function srvTab(u,v2){var cs=countries(u);if(!cs.length)return '<div class="empty"><b>هنوز سروری برای این حساب نیست</b><p class="muted">چند دقیقه بعد دوباره باز کنید.</p></div>';
  if(!cs.some(function(c){return c.cc==A.ctry}))A.ctry=cs[0].cc;var c=cs.filter(function(x){return x.cc==A.ctry})[0];
  var h='<p class="lead">کشور رو انتخاب کنید؛ کانفیگ‌هاش همین‌جا میان و ربات توی چت می‌فرسته.</p><div class="cgrid">'+cs.map(function(x){
-  return '<button class="ctile'+(x.cc==A.ctry?' on':'')+'" data-cc="'+esc(x.cc)+'" aria-pressed="'+(x.cc==A.ctry)+'"><span class="f">'+(flag(x.cc)||'🌐')+'</span><b>'+esc(CN[x.cc]||x.cc)+'</b><small>'+(x.direct&&x.iran?'مستقیم و تانل':x.iran?'از راه ایران':'مستقیم')+'</small></button>'}).join('')+'</div>';
+  return '<button class="ctile'+(x.cc==A.ctry?' on':'')+'" data-cc="'+esc(x.cc)+'" aria-pressed="'+(x.cc==A.ctry)+'"><span class="f">'+(flag(x.cc)||'🌐')+'</span><b>'+esc(cname(x))+'</b><small>'+(x.direct&&x.iran?'مستقیم و تانل':x.iran?'از راه ایران':'مستقیم')+'</small></button>'}).join('')+'</div>';
  var o=function(ic,col,name,line,btn,attr){return '<div class="opt"><span class="ic" style="background:'+col+'">'+ic+'</span><div class="nm"><b>'+name+'</b><small>'+line+'</small></div><button class="b" '+attr+'>'+btn+'</button></div>'};
- h+='<div class="cpanel"><h3>'+(flag(c.cc)||'🌐')+' '+esc(CN[c.cc]||c.cc)+'</h3>';
- if(!v2&&c.wg)h+=o('W','var(--g)','WireGuard','فایل کانفیگ سرورهای '+esc(CN[c.cc]||c.cc)+'، برای برنامه‌ی WireGuard','بفرست','data-cfg="w:'+esc(c.cc)+'"');
- if(!v2&&c.awg)h+=o('A','var(--z)','AmneziaWG','فایل کانفیگ سرورهای '+esc(CN[c.cc]||c.cc)+'، برای AmneziaVPN یا AmneziaWG','بفرست','data-cfg="a:'+esc(c.cc)+'"');
+ h+='<div class="cpanel"><h3>'+(flag(c.cc)||'🌐')+' '+esc(cname(c))+'</h3>';
+ if(!v2&&c.wg)h+=o('W','var(--g)','WireGuard','فایل کانفیگ سرورهای '+esc(cname(c))+'، برای برنامه‌ی WireGuard','بفرست','data-cfg="w:'+esc(c.cc)+'"');
+ if(!v2&&c.awg)h+=o('A','var(--z)','AmneziaWG','فایل کانفیگ سرورهای '+esc(cname(c))+'، برای AmneziaVPN یا AmneziaWG','بفرست','data-cfg="a:'+esc(c.cc)+'"');
  if(A.hasAmz(u))h+=o('Z','var(--z)','AmneziaVPN','یک فایل بکاپ با همه‌ی کشورها (WireGuard، AmneziaWG و VLESS)','بفرست','data-amz="1"');
  if(u.links||v2)h+=o('V','var(--v)','V2Ray','یک لینک اشتراک برای همه‌ی کشورها (Xray و Hysteria2)، برای v2rayNG و V2Box','بفرست','data-cfg="v"');
  return h+'</div>'}
@@ -433,7 +437,7 @@ A.hasAmz=function(u){return !!u.amz};
 function canDownload(){var w=tg();return !!(w&&w.downloadFile&&w.isVersionAtLeast&&w.isVersionAtLeast('8.0'))}
 
 function wire(u){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
- var sub=u.service=='v2ray'?u.v2link:u.link;
+ var sub=u.v2link;
  all('[data-acc]').forEach(function(b){b.onclick=function(){A.cur=+b.dataset.acc;draw()}});
  var rn=$('#rn');if(rn)rn.onclick=function(){A.renew=u.id;A.svc='';A.view='buy';drawBuy();window.scrollTo(0,0)};
  all('[data-p]').forEach(function(b){b.onclick=function(){A.plat=b.dataset.p;draw()}});

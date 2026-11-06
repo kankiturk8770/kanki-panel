@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.34 — premium emoji on the bot's buttons, core and server cards
+- Bot › Buttons: each button's text, premium emoji and colour with a live Telegram preview; VPN services as a card per core; servers as cards with their cores and load; AmneziaVPN backup in a fixed order with flags; menus never edit away a delivered config; the mini app is «پنل کاربری» and gives V2Box the right link.
 ## New in 3.33 — honest connection counts, quieter alerts, a tunnel form without scrolling
 - Xray users and idle WireGuard phones are counted in «connections»; a server that goes down is reported once; a tunnel that is cut or slow (800 ms+) while its servers are up is reported; the tunnel form has tabs on a phone and a grid on a desktop.
 ## New in 3.32.1 — KANKI MIX inside the panel

@@ -112,7 +112,7 @@ pub(crate) const BTNS: &[(&str, &str, &str)] = &[
     ("cfg_h", "📥 کانفیگ Hysteria2", "زیر پیام اشتراک"),
     ("cfg_l", "📄 همه‌ی لینک‌ها (Xray + Hysteria2)", "زیر پیام اشتراک"),
     ("amz", "📦 بکاپ AmneziaVPN (همه‌ی سرورها یک‌جا)", "زیر پیام اشتراک"),
-    ("miniapp", "👤 پنل من | مدیریت اشتراک", "زیر پیام اشتراک"),
+    ("miniapp", "👤 پنل کاربری", "زیر پیام اشتراک"),
     ("shop", "🧮 حجم و روز دلخواه", "فهرست پلن‌ها (خرید از مینی‌اپ)"),
     ("renew_this", "🔁 تمدید همین سرویس", "زیر پیام اشتراک"),
     ("rename", "✏️ تغییر نام کانفیگ", "زیر پیام اشتراک"),
@@ -1354,7 +1354,8 @@ impl Bot {
     /// The same, with its "which app and how" text or without it (the connection guide says it itself)
     async fn send_configs_n(&self, chat: i64, qid: &str, u: &User, code: &str, help: bool) -> bool {
         // "w:TR": only the servers of one country (the mini app's servers tab)
-        let (code, cc) = match code.split_once(':') { Some((c, k)) => (c, Some(k.trim().to_uppercase())), None => (code, None) };
+        // "?" = the servers whose country is not known yet (the mini app shows them by name)
+        let (code, cc) = match code.split_once(':') { Some((c, k)) => (c, Some(k.trim().to_uppercase().replace('?', ""))), None => (code, None) };
         if code == "l" {
             return self.send_links(chat, qid, u).await;
         }
@@ -4469,7 +4470,7 @@ mod flow_tests {
         assert_eq!(bs.iter().filter(|b| b.1.starts_with("hw:") && b.1.matches(':').count() == 3).map(|b| b.0.clone()).collect::<Vec<_>>(), vec!["⭐️ V2Box".to_string()], "{:?}", bs);
         tap(&bot, from(buyer, "Nima", "nima"), &format!("hw:{}:i:v", acc[0].id)).await;
         let t = last(&log, buyer);
-        assert!(t.contains("Import v2ray uri from clipboard") && t.contains("/v2") && !t.contains("AmneziaVPN"), "{}", t);
+        assert!(t.contains("Add subscription") && t.contains("/v2") && !t.contains("AmneziaVPN"), "{}", t);
         // another account's guide: nothing
         let n = log.lock().unwrap().len();
         tap(&bot, from(4242, "X", "x"), &format!("hw:{}:i:v", acc[0].id)).await;
@@ -4738,7 +4739,7 @@ mod flow_tests {
         assert!(kb.contains(&format!("hw:{}:a", u.id)) && !kb.contains("ren:"), "{}", kb);
         tap(&bot, from(tg, "Reza", "reza"), &format!("cfg:{}:v", u.id)).await;
         let t = last(&log, tg);
-        assert!(t.contains("لینک اشتراک V2Ray") && t.contains("/v2") && t.contains("Import v2ray uri from clipboard"), "{}", t);
+        assert!(t.contains("لینک اشتراک V2Ray") && t.contains("/v2") && t.contains("Add subscription"), "{}", t);
     }
 
     /// A fake Telegram that says «too many requests» to the first `busy` calls, then takes them
