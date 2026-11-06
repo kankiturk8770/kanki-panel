@@ -612,6 +612,8 @@ pub fn default_setting(k: &str) -> &'static str {
     match k {
         "dns" => "1.1.1.1, 8.8.8.8",
         "mtu" => "1380",
+        "mtu_auto" => "1",
+        "mtu_budget" => "1380",
         "default_protocols" => "wg,awg,hy2,kmix",
         // what a 'v2ray' plan gives (the v2ray clients read only Xray, and Hysteria2 when added here)
         "v2ray_protocols" => "xray",

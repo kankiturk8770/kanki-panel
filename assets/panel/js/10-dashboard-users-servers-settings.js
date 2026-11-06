@@ -371,7 +371,7 @@ function wireLogo(){var f=$('#lg_file');if(!f)return;
 var STSEC=[
  ['look','Appearance','brush','Name, logo, language, theme and colour of the panel',['panel_name','lang','theme','color','refresh']],
  ['net','Addresses','globe','Panel address, the public VPN address and subscription links',['endpoint','sub_base']],
- ['vpn','VPN & protocols','shield2','DNS, MTU and protocol behaviour on every server',['dns','mtu','awg_compat','conn_limit_on']],
+ ['vpn','VPN & protocols','shield2','DNS, MTU and protocol behaviour on every server',['dns','mtu','mtu_auto','mtu_budget','awg_compat','conn_limit_on']],
  ['newu','New users','users','Ready values for the “New user” form',['default_protocols','def_gb','def_days','def_conns']],
  ['ntf','Notifications','bell','Telegram messages for you and for your buyers',['tg_alerts','warn_on','backup_on']],
  ['srv','Servers','nodes','What happens to a server that stays offline',['autodel_on','autodel_hours','autodel_iran']],
@@ -405,6 +405,9 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
  case 'vpn':return '<div class="sgrid"><div><label class="f">DNS</label><input data-k="dns" class="ltr" placeholder="1.1.1.1, 8.8.8.8"><div class="chipset" data-fill="dns">'+
   [['Cloudflare','1.1.1.1, 1.0.0.1'],['Google','8.8.8.8, 8.8.4.4'],['Quad9','9.9.9.9, 149.112.112.112'],['AdGuard','94.140.14.14, 94.140.15.15']].map(function(d){return '<button type="button" data-v="'+d[1]+'">'+d[0]+'</button>'}).join('')+'</div><div class="hint">'+t('DNS servers given to every user config, comma separated.')+'</div></div>'+
   '<div><label class="f">MTU</label><input data-k="mtu" class="ltr" inputmode="numeric" placeholder="1380"><div class="chipset" data-fill="mtu">'+['1280','1380','1420'].map(function(m){return '<button type="button" data-v="'+m+'">'+m+'</button>'}).join('')+'</div><div class="hint">'+t('Lower it (1280) if some sites do not open on mobile data.')+'</div></div>'+
+  '<div class="full" style="margin-top:6px">'+stSw('mtu_auto','Automatic MTU','Each config gets the largest MTU whose whole packet stays under the limit below, counting the core and the tunnels on its way. Off = the MTU above for every config.')+'</div>'+
+  '<div><label class="f">'+t('Largest packet on mobile data')+'</label><input data-k="mtu_budget" class="ltr" inputmode="numeric" placeholder="1380"><div class="chipset" data-fill="mtu_budget">'+['1340','1380','1420'].map(function(m){return '<button type="button" data-v="'+m+'">'+m+'</button>'}).join('')+'</div><div class="hint">'+t('Bytes of the whole packet (IPv4 + UDP + core). Iran mobile networks pass about 1420-1440; 1380 leaves a safe margin.')+'</div></div>'+
+  '<div class="full box"><b>'+t('MTU of every config')+'</b><div class="hint">'+t('Worked out again with every subscription refresh and server sync, so a tunnel that changes type changes the MTU by itself.')+'</div><div id="mtu_rep">'+t('Loading…')+'</div></div>'+
   '<div class="full" style="margin-top:6px">'+stSw('awg_compat','AmneziaWG compatibility mode','Only Jc/Jmin/Jmax/S1/S2/H1-H4, for old AmneziaWG apps.')+stSw('conn_limit_on','Enforce connection limit (Hysteria2)','A user cannot connect from more devices than his limit.')+'</div></div>';
  case 'newu':return '<label class="f" style="margin-top:0">'+t('Default protocols for new users')+'</label><input type="hidden" data-k="default_protocols"><div class="pgs" data-multi="default_protocols">'+
   PROTOS.map(function(x){return '<label style="--pc:'+((PCOL[x[0]]))+'"><input type="checkbox" value="'+x[0]+'" class="hide"><i></i>'+x[1]+'</label>'}).join('')+'</div><div class="hint">'+t('Also used by the sales bot when it makes an account.')+'</div>'+
@@ -426,11 +429,11 @@ function pSettings(){var cur=S.stsec||'look';
   $('#st').innerHTML='<div class="stw"><div class="stn" role="tablist">'+STSEC.map(function(x){return '<button type="button" data-sec="'+x[0]+'" class="'+(x[0]==cur?'on':'')+'"><span class="si">'+ic(x[2],17)+'</span>'+t(x[1])+'<em></em></button>'}).join('')+'</div><div>'+
   STSEC.map(function(x){return '<section class="sts card'+(x[0]==cur?' on':'')+'" data-sec="'+x[0]+'"><div class="sth"><span class="phi">'+ic(x[2],20)+'</span><div><b>'+t(x[1])+'</b><small>'+t(x[3])+'</small></div></div>'+stBody(x[0],s)+
    (x[4].length?'<div class="sbar"><span class="muted" data-msg></span><button class="b2" type="button" data-undo disabled>'+t('Undo')+'</button><button class="btn" type="button" data-save disabled>'+t('Save')+'</button></div>':'')+'</section>'}).join('')+'</div></div>';
-  stFill(s);stWire();wireLogo();stUpdate(false);stIran()}).catch(fail)}
+  stFill(s);stWire();wireLogo();stUpdate(false);stIran();stMtu()}).catch(fail)}
 function stVal(el){return el.type=='checkbox'?(el.checked?'1':'0'):el.value}
 function stFill(s){$$('#st [data-k]').forEach(function(el){var k=el.dataset.k,v=s[k]==null?'':String(s[k]);
   if(k=='refresh'&&!v)v='10';if(k=='lang'&&!v)v='fa';if(k=='theme'&&!v)v='dark';if(k=='color'&&!v)v='gold';
-  if(k=='conn_limit_on'||k=='tg_alerts')v=v=='0'?'0':'1';
+  if(k=='conn_limit_on'||k=='tg_alerts'||k=='mtu_auto')v=v=='0'?'0':'1';
   if(el.type=='checkbox')el.checked=v=='1';else el.value=v;el._orig=stVal(el)});
  stSync($('#st'))}
 // pickers and protocol chips follow their hidden input
@@ -457,12 +460,25 @@ function stSave(sec,btn){var id=sec.dataset.sec,body={};$$('[data-k]',sec).forEa
  if(id=='newu'&&!body.default_protocols)return toast(t('Choose at least one protocol'),1);
  if(id=='upd'&&body.update_repo&&!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(body.update_repo))return toast(t('Write it as owner/repo'),1);
  if(id=='vpn'&&body.mtu&&!(+body.mtu>=1200&&+body.mtu<=1500))return toast(t('MTU must be between 1200 and 1500'),1);
+ if(id=='vpn'&&body.mtu_budget&&!(+body.mtu_budget>=1300&&+body.mtu_budget<=1500))return toast(t('The largest packet must be between 1300 and 1500'),1);
  var all=id=='net'&&$('#st_all')&&$('#st_all').checked;btn.disabled=true;
  api('PUT','/api/settings',body).then(function(){return all?api('POST','/api/settings/apply-endpoint'):null}).then(function(){
   Object.assign(S.st,body);$$('[data-k]',sec).forEach(function(el){el._orig=stVal(el)});stDirty(sec);toast(t('Saved'));
   if(id=='newu'&&S.me){S.me.default_protocols=body.default_protocols;S.me.def_gb=body.def_gb;S.me.def_days=body.def_days;S.me.def_conns=body.def_conns}
   if(id=='look'){S.lang=body.lang;S.theme=body.theme;S.color=body.color;localStorage.setItem('kk_lang',S.lang);localStorage.setItem('kk_theme',S.theme);localStorage.setItem('kk_color',S.color);S.stsec='look';boot()}
-  if(id=='upd')stUpdate(true)}).catch(function(e){btn.disabled=false;fail(e)})}
+  if(id=='upd')stUpdate(true);if(id=='vpn')stMtu()}).catch(function(e){btn.disabled=false;fail(e)})}
+// automatic MTU: what every config gets (mtu.rs)
+var MTU_CORE={wg:'WireGuard',awg:'AmneziaWG',mtun:'microtun'};
+function stMtu(){var box=$('#mtu_rep');if(!box)return;api('GET','/api/mtu').then(function(r){if(!$('#mtu_rep'))return;
+ var rows=(r.rows||[]).map(function(x){var path=x.via=='tunnel'?(x.hops||[]).map(function(h){return h.transport||'?'}).join(' → '):'';
+  var fec=(x.hops||[]).filter(function(h){return h.fec}).map(function(h){return kuTag('FEC '+h.fec+' (+'+N(h.fec_pct)+'%)')}).join('');
+  return kuItem({dot:x.fits?'g':'r',name:esc(x.node)+' · '+MTU_CORE[x.core],act:'<b class="ltr">'+N(r.auto?x.mtu:(x.core=='mtun'?r.manual_mtun:r.manual))+'</b>',
+   tags:kuTag(x.via=='tunnel'?t('Through Iran tunnel'):t('Direct'),x.via=='tunnel'?'b':'')+(path?kuTag(esc(path)):'')+fec+(x.fits?'':kuTag(t('Tunnel too small'),'r')),
+   addr:N(x.mtu)+' + '+N(x.overhead)+' = '+N(x.wire)+' / '+N(x.cap)})});
+ var xr=(r.xray_kcp||[]).map(function(x){return kuItem({dot:x.fits?'g':'y',name:'Xray mKCP · '+esc(x.id),act:'<b class="ltr">'+N(x.mtu)+'</b>',tags:x.fits?'':kuTag(t('Bigger than the limit'),'y'),addr:N(x.wire)+' / '+N(r.budget)})});
+ box.innerHTML=(r.auto?'':'<div class="warnbox">'+t('Automatic MTU is off: every config gets the MTU set above.')+'</div>')+
+  (rows.length||xr.length?rows.concat(xr).join(''):'<p class="muted">'+t('No server runs WireGuard, AmneziaWG or microtun yet.')+'</p>')+
+  '<div class="hint">'+t('Hysteria2 sizes its own packets (QUIC, never fragmented); KANKI MIX packet size is set in the app.')+'</div>'}).catch(function(){var b=$('#mtu_rep');if(b)b.textContent=t('Could not load')})}
 // subscription served from a tunnel server inside Iran
 function stIran(){var box=$('#si_in');if(!box)return;api('GET','/api/sub-iran').then(function(r){if(!$('#si_in'))return;
  var st=r.status||{},msg='';

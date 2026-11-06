@@ -1,7 +1,21 @@
 // ==================================================================== the panel: login, shell, pages
 "use strict";
 // Persian text of the whole panel
-var FA={"Button colour in the bot":"رنگ دکمه در ربات",
+var FA={"Automatic MTU":"MTU خودکار",
+"Each config gets the largest MTU whose whole packet stays under the limit below, counting the core and the tunnels on its way. Off = the MTU above for every config.":"هر کانفیگ بزرگ‌ترین MTU را می‌گیرد که کل بسته‌اش با حساب هسته و تانل‌های سر راه زیر سقف پایین بماند. خاموش = همان MTU بالا برای همه.",
+"Largest packet on mobile data":"بزرگ‌ترین بسته روی اینترنت موبایل",
+"Bytes of the whole packet (IPv4 + UDP + core). Iran mobile networks pass about 1420-1440; 1380 leaves a safe margin.":"بایت کل بسته (IPv4 + UDP + هسته). اینترنت موبایل ایران حدود ۱۴۲۰ تا ۱۴۴۰ رد می‌کند؛ ۱۳۸۰ حاشیهٔ امن دارد.",
+"MTU of every config":"MTU هر کانفیگ",
+"Worked out again with every subscription refresh and server sync, so a tunnel that changes type changes the MTU by itself.":"با هر به‌روزرسانی اشتراک و همگام‌سازی سرور دوباره حساب می‌شود؛ پس عوض شدن نوع تانل MTU را خودش عوض می‌کند.",
+"The largest packet must be between 1300 and 1500":"بزرگ‌ترین بسته باید بین ۱۳۰۰ و ۱۵۰۰ باشد",
+"Through Iran tunnel":"از تانل ایران",
+"Tunnel too small":"تانل کوچک است",
+"Bigger than the limit":"بزرگ‌تر از سقف",
+"Automatic MTU is off: every config gets the MTU set above.":"MTU خودکار خاموش است: همهٔ کانفیگ‌ها همان MTU بالا را می‌گیرند.",
+"No server runs WireGuard, AmneziaWG or microtun yet.":"هنوز هیچ سروری WireGuard، AmneziaWG یا microtun ندارد.",
+"Hysteria2 sizes its own packets (QUIC, never fragmented); KANKI MIX packet size is set in the app.":"Hysteria2 اندازهٔ بسته را خودش تعیین می‌کند (QUIC، هیچ‌وقت تکه نمی‌شود)؛ اندازهٔ بستهٔ KANKI MIX در خود اپ است.",
+"Could not load":"بارگیری نشد",
+"Button colour in the bot":"رنگ دکمه در ربات",
 "Auto (by users)":"خودکار (بر اساس کاربر)",
 "🟢 Green":"🟢 سبز",
 "🔵 Blue":"🔵 آبی",

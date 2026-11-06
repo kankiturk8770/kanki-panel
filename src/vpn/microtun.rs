@@ -165,7 +165,8 @@ pub fn cfg_for(app: &App, n: &Node, users: &[&User]) -> MtCfg {
         address: SERVER_ADDR.into(),
         devices: DEVICES_ADDR.into(),
         address6: SERVER_ADDR6.into(),
-        mtu: s.mtu,
+        // automatic MTU: the smallest of this server's microtun configs (direct / through Iran)
+        mtu: crate::mtu::server(app, n, PROTO).unwrap_or(s.mtu),
         burst_max: s.burst_max,
         burst_delay_ms: s.burst_delay_ms,
         users,
@@ -219,6 +220,7 @@ pub fn link(app: &App, u: &User, n: &Node, tunnel: bool) -> Option<String> {
         let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
         (format!("{}:{}", host, port), format!("{} · {}", n.name, NAME))
     };
+    let s = Settings { mtu: crate::mtu::client(app, n, PROTO, tunnel), ..s };
     Some(to_url(&user_key(app, u), &server, &obfs(app), user_ip(u)?, &s, &label))
 }
 

@@ -306,6 +306,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/users/:id/:action", post(users_action))
         .route("/api/users/:id/amnezia/:platform", get(users_amnezia))
         .route("/api/nodes", get(nodes_list).post(nodes_add))
+        .route("/api/mtu", get(mtu_report))
         .route("/api/nodes/:id", axum::routing::put(nodes_edit).delete(nodes_delete))
         .route("/api/nodes/:id/:action", post(nodes_action))
         .route("/api/protocols/:proto/:action", post(proto_all))
@@ -1160,6 +1161,8 @@ pub const SETTING_KEYS: &[&str] = &[
     "ton_on", "stars_on", "star_usd", "toncenter_key",
     // 3.30: the Windows app in the connection guide
     "win_link",
+    // 3.32: automatic MTU (mtu.rs): on/off and the largest packet on the mobile network
+    "mtu_auto", "mtu_budget",
 ];
 
 /// "owner/repo" with only the characters GitHub allows
@@ -1221,6 +1224,12 @@ async fn settings_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     }
     spawn_sync(&app);
     Json(json!({ "ok": true })).into_response()
+}
+
+/// Automatic MTU: what every config and server gets, and why (`mtu.rs`)
+async fn mtu_report(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    Json(crate::mtu::report(&app)).into_response()
 }
 
 async fn apply_endpoint_all(State(app): St, h: HeaderMap) -> Response {
@@ -1838,7 +1847,7 @@ fn wg_uri(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Opti
     Some(format!(
         "wireguard://{}@{}?publickey={}&presharedkey={}&address={}&mtu={}#{}",
         pct(&peer.privkey), addr, pct(&spub), pct(&peer.psk), pct(&format!("{}/32", peer.ip)),
-        app.db.get("mtu"), pct(&name)
+        crate::mtu::client(app, n, "wg", tw.is_some()), pct(&name)
     ))
 }
 
@@ -1976,7 +1985,7 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
     let Some(peer) = app.db.ensure_peer(u.id, &n.id, p) else { return (StatusCode::INTERNAL_SERVER_ERROR, "keys").into_response() };
     let mut s = format!(
         "[Interface]\nPrivateKey = {}\nAddress = {}/32\nDNS = {}\nMTU = {}\n",
-        peer.privkey, peer.ip, app.db.get("dns"), app.db.get("mtu")
+        peer.privkey, peer.ip, app.db.get("dns"), crate::mtu::client(&app, &n, p, tw.is_some())
     );
     if p == "awg" {
         let compat = app.db.on("awg_compat");

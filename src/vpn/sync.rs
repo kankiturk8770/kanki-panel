@@ -43,6 +43,10 @@ pub struct SyncReq {
     /// (username -> sessions); more are dropped here and refused at login
     #[serde(default)]
     pub hy2_cap: HashMap<String, i64>,
+    /// automatic MTU: interface -> MTU ("wg0" -> 1320) worked out by the panel (`mtu.rs`); empty =
+    /// leave them; an older agent ignores it
+    #[serde(default)]
+    pub mtu: HashMap<String, u16>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -121,8 +125,12 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     let _ = tokio::task::spawn_blocking(move || crate::wg::set_blocked(&block)).await;
     let off = req.off.clone();
     let _ = tokio::task::spawn_blocking(move || crate::cores::apply(&off)).await;
-    let (wgv, awgv) = (req.wg, req.awg);
-    let (w, a) = tokio::task::spawn_blocking(move || (wg::apply("wg", &wgv), wg::apply("awg", &awgv)))
+    let (wgv, awgv, mtu) = (req.wg, req.awg, req.mtu);
+    let (w, a) = tokio::task::spawn_blocking(move || {
+        let r = (wg::apply("wg", &wgv), wg::apply("awg", &awgv));
+        crate::mtu::apply_ifaces(&mtu);
+        r
+    })
         .await
         .unwrap_or_default();
     let port = app.env.get("HY2_STATS_PORT").cloned().unwrap_or_default();
@@ -505,6 +513,7 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
     req.mtun = Some(crate::microtun::cfg_for(app, n, &mtun_here));
     req.block = lim.blocks_on(&n.id);
     req.off = off.clone();
+    req.mtu = crate::mtu::ifaces(app, n);
     for u in users.iter().filter(|u| u.active() && u.on(n)) {
         // drain: no new users here unless explicitly assigned or already present
         if n.drain && !u.explicit_nodes() {
