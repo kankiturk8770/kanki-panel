@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.32 — automatic MTU
+- Every WireGuard, AmneziaWG and microtun config gets the largest MTU whose whole packet stays under 1380 bytes on mobile data, counting the core and the tunnels on its way (Settings › VPN). Servers' `wg0` / `awg0` / `mtun0` follow, so nothing is fragmented either way.
 ## New in 3.31.1 — the bot checked
 - The bot token never shows in an error; Telegram's «too many requests» is waited out instead of losing the message; one customer cannot flood the bot.
 ## New in 3.31 — the mini app redone

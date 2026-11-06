@@ -66,6 +66,8 @@ mod mtun;
 mod sync;
 #[path = "vpn/amnezia.rs"]
 mod amnezia;
+#[path = "vpn/mtu.rs"]
+mod mtu;
 
 // bot: the Telegram sales bot, its shop and mini app, the smart channel, the AI writer (src/bot)
 #[path = "bot/bot.rs"]
