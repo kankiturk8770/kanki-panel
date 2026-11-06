@@ -74,8 +74,15 @@ function row(s){var n=s.node,a=s.agent,on=online(s),h=n?nHealthOf(n):null,col=!o
  var tn=s.tunnel||{},tags=(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+(n&&!n.enabled&&!s.local?'<span class="kxc-tag">'+t('relay')+'</span>':'')+
   // tunnel: its configs point at the Iran entry; + tunnel: a second config of every protocol through its tunnel domain
   (tn.main_via=='tunnel'?'<span class="kxc-tag tun">'+t('tunnel')+'</span>':tn.on&&tn.uses?'<span class="kxc-tag tun">+ '+t('tunnel')+'</span>':'');
- var head='<span class="dot '+col+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+tags+'<span class="sp"></span>'+
-  (on?'':'<span class="kxr-st r">'+t('Not connected')+'</span>')+'<small class="kxr-ip ltr">'+esc(srvIp(s))+'</small>';
+ // a card per server (3.34): line 1 status, flag, name, tags and state; line 2 its cores and address; line 3 CPU, RAM, disk and users
+ var st=(n&&n.info&&n.info.stats)||null,cores=coresOf(s),ip=srvIp(s);
+ var stl=!on?['r',t('Not connected')]:col=='y'?['y',t('Needs a look')]:['g',t('Online')];
+ var meter=function(l,v){v=Math.max(0,Math.min(100,Math.round(v||0)));return '<span class="svm '+(v>=90?'r':v>=75?'y':'g')+'"><small>'+l+'</small><i><u style="width:'+v+'%"></u></i><b class="ltr">'+N(v)+'%</b></span>'};
+ var head='<span class="dot '+col+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+tags+'<span class="sp"></span><span class="kxr-st '+stl[0]+'">'+stl[1]+'</span>'+
+  ((cores.length||ip)?'<span class="sv-l2">'+cores.map(function(c){return '<span class="svc" style="--pc:'+(PCOL[c[0]]||'var(--a)')+'"><i class="'+c[2]+'"></i>'+c[1]+'</span>'}).join('')+
+   (ip?'<small class="kxr-ip ltr">'+esc(ip)+'</small>':'')+'</span>':'')+
+  (on&&st?'<span class="sv-l3">'+meter('CPU',st.cpu)+meter('RAM',pc(st.mem_used,st.mem_total))+meter(t('Disk'),pc(st.disk_used,st.disk_total))+
+   (n&&n.users!=null?'<span class="svu">'+ic('users',14)+'<b>'+N(n.users)+'</b></span>':'')+'</span>':'');
  return accRow('srv',s.key,head,function(){return srvBody(s)})}
 
 // the first entries (and their addresses) of the tunnels that bring this server's ports: where its
@@ -94,7 +101,7 @@ function irHosts(s){var out=[],seen={},add=function(name,host,mine){host=String(
  return out}
 window.srvIrHosts=irHosts;
 
-function srvCores(s){var n=s.node,i=(n&&n.info)||{},j=s.jobs||{},pt=s.ports||{},out=[];
+function coresOf(s){var n=s.node,i=(n&&n.info)||{},j=s.jobs||{},pt=s.ports||{},out=[];
  var svc=function(k){return ((i.services||[]).filter(function(x){return x.key==k})[0])};
  var off=((SV.d&&SV.d.core_off)||{})[n?n.id:'']||[];
  var vpn=function(p,name,key,port){if(!n)return;var sv=svc(key);if(!port&&!sv)return;out.push([p,name,!n.enabled||off.indexOf(p)>=0?'':sv&&!sv.active?'r':'g',port])};
@@ -103,7 +110,8 @@ function srvCores(s){var n=s.node,i=(n&&n.info)||{},j=s.jobs||{},pt=s.ports||{},
  if(n&&(pt.mtun||i.mt_port))out.push(['mtun','microtun',n.enabled?'g':'',pt.mtun||i.mt_port]);
  if(j.xray_on)out.push(['xray','Xray','g',j.xray?N(j.xray)+' '+t('inbounds'):'']);
  if(j.dns)out.push(['dns','Kanki DNS','g','']);
- if(!out.length)return '';
+ return out}
+function srvCores(s){var out=coresOf(s);if(!out.length)return '';
  return '<div class="kxr-sec">'+t('Cores on this server')+'</div><div class="ku-cores">'+out.map(function(c){return '<a href="#'+c[0]+'/servers"><span class="dot '+c[2]+'"></span>'+c[1]+(c[3]?'<small class="ltr">'+esc(String(c[3]))+'</small>':'')+'</a>'}).join('')+'</div>'+
   '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('Each core is set on its own page: tap one to open it.')+'</p>'}
 function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';

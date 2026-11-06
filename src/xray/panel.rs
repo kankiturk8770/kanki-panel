@@ -919,6 +919,11 @@ pub fn user_links(app: &App, u: &User) -> Vec<(String, String)> {
     user_links_at(app, u).into_iter().map(|(n, l, _)| (n, l)).collect()
 }
 
+/// `user_links` with the server id of each link (for its flag)
+pub fn user_links_on(app: &App, u: &User) -> Vec<(String, String, String)> {
+    user_links_at(app, u)
+}
+
 /// (name, link, server id) of each Xray share link of a user; each link of a server that has a tunnel
 /// (Servers page) is followed by its copy through the tunnel's Iran address
 fn user_links_at(app: &App, u: &User) -> Vec<(String, String, String)> {

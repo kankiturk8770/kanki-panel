@@ -1,3 +1,25 @@
+# v3.34.0 — premium emoji on the bot's buttons, core cards, server cards, cleaner deliveries
+- **Button manager, inside Telegram (the mini app, for the bot's admins; bot › Admin panel › Buttons and texts › 🎨 Manage buttons):**
+  every customer button with its text, a **premium emoji** and its colour, next to the main menu drawn as the chat shows it. «Set the
+  premium emoji» makes the bot ask for it in the chat (minimise the mini app, send any premium emoji, come back) and the page updates by
+  itself; «Sample in the chat» sends every button as customers see them. Not in the web panel (the owner wants it in Telegram). In the bot each button's page
+  shows the button itself, a «⭐️ premium emoji» button and the colours. Telegram (Bot API 9.4) shows a premium emoji on a button when the
+  bot's owner has Telegram Premium: it is saved only after Telegram accepts a sample, and if Telegram later refuses it (Premium ended)
+  the message still goes with the plain buttons. Premium emoji in the bot's message texts are kept now (they turned plain before:
+  the text was saved without its emoji). `src/bot/buttons.rs`, `/tg/api/admin/*`; the colour box of the panel's Sales settings moved there.
+- **VPN services page:** one card per core (WireGuard, AmneziaWG, Hysteria2, KANKI MIX, microtun, Xray, Kanki DNS, Anti-DPI) with its state,
+  servers running it and users; 2 columns on a phone, 3 on a tablet, 3–4 on a desktop. Each card opens its core.
+- **Servers page:** each server a card: status, flag, name, its cores as coloured chips, its address, and CPU / RAM / disk bars with users.
+- **V2Box:** the Hysteria2 link has no empty «?» (some iPhone apps refused it) and IPv6 addresses go in brackets; the iPhone steps use
+  V2Box's «Add subscription» (Configs › ➕).
+- **AmneziaVPN backup in the owner's order:** AmneziaWG straight, AmneziaWG through Iran, WireGuard, then Xray, every one with its flags
+  (🇮🇷→🇩🇪 for the tunnel); Xray links get flags too. The file's caption lists the servers in that order with step-by-step install.
+- **Menus never wipe a delivery:** «main menu» or a main-menu button under a message that holds a config, a file or a subscription link
+  opens the menu as a new message (it edited the delivery away before); every other menu is still edited in place.
+- **Mini app:** named «پنل کاربری»; the subscription link it gives to V2Box / v2rayNG is the `/v2` one (it showed the web page, which those
+  apps cannot read) and is shown whole; a server whose country is not known yet shows its name instead of «?», and its «Send» works.
+  The chat menu button stays short English («My Kanki 👤»): Telegram for Android shows a short Persian one empty (3.28.1).
+
 # v3.33.0 — connections counted right, one alert per server, the tunnel form in parts
 - **«0 / 1 connections» while connected:** an account's connections were counted from WireGuard / AmneziaWG keys and the
   Hysteria2, KANKI MIX and microtun sessions only; Xray's live devices went to the connection limit but never into the number,

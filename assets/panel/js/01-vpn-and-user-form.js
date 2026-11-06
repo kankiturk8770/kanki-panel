@@ -62,29 +62,28 @@ function protoAll(p,add){var nm=p=='xray'?'Xray':'DNS';
   srvReload(p);if(S.page=='users')loadUsers()}).catch(fail)}
 
 // ---------------------------------------------------------------- the VPN services page: Kanki VPN | Xray
-function p_vpn(){$('#pg').innerHTML='<div class="ku">'+kuHead('cores',t('VPN services'),t('Both kinds of VPN your users get, side by side'))+'</div><div class="vhub"><div class="vside" id="vh_k">'+t('Loading…')+'</div><div class="vside" id="vh_x">'+t('Loading…')+'</div></div>'+
-  '<div class="vside" id="vh_d" style="margin-top:14px"></div>';
- var go=function(){Promise.all([api('GET','/api/nodes').catch(function(){return []}),api('GET','/api/overview').catch(function(){return {}}),api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null})]).then(function(r){if(S.page!='vpn')return;S.nodes=r[0]||[];if(r[2])XR.d=r[2];if(r[3])DN.d=r[3];vhKanki(r[0]||[],r[1]||{});vhXray(r[2]);vhDns(r[3])})};
+function p_vpn(){$('#pg').innerHTML='<div class="ku">'+kuHead('cores',t('VPN services'),t('Every core your users get, each on its own card'))+'<div id="vh_s"></div><div class="cgrid" id="vh_g">'+t('Loading…')+'</div></div>';
+ var go=function(){Promise.all([api('GET','/api/nodes').catch(function(){return []}),api('GET','/api/overview').catch(function(){return {}}),api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null})]).then(function(r){if(S.page!='vpn')return;S.nodes=r[0]||[];if(r[2])XR.d=r[2];if(r[3])DN.d=r[3];vhGrid(r[0]||[],r[1]||{},r[2],r[3])})};
  go();clearInterval(S.timer);S.timer=setInterval(function(){if(document.visibilityState=='visible'&&!$('#modal').classList.contains('on'))go()},8000)}
-function vhHead(icon,title,sub,btns){return '<div class="vh"><span class="phi">'+ic(icon,24)+'</span><div><b>'+t(title)+'</b><small>'+t(sub)+'</small></div><span class="sp"></span><div class="vhb">'+(btns||'')+'</div></div>'}
-function vhBtn(href,label,on){return '<a class="b2 sm" href="'+href+'"'+(on?' onclick="'+on+';return false"':'')+'>'+label+'</a>'}
-function vhKanki(nodes,o){var up=nodes.filter(function(n){return n.id=='local'||n.online}).length,pr=o.protocols||{};
- // compact: no extra buttons, the protocol counts as a grid, the servers in two columns
- $('#vh_k').innerHTML=vhHead('nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun','')+
-  '<div class="kv"><div><small>'+t('Nodes online')+'</small><b>'+N(up)+' / '+N(nodes.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N(o.online||0)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(o.traffic_gb||0)+' GB</b></div></div>'+
-  '<label class="f">'+t('Users by protocol')+'</label><div class="vhgrid">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['mtun','microtun']].map(function(p){return '<div class="vhcell"><small>'+p[1]+'</small><b>'+N(pr[p[0]]||0)+'</b></div>'}).join('')+'</div>'+
-  '<div class="vhsrv">'+nodes.map(function(n){var s=nState(n),loc=n.id=='local';return '<div class="vhs"><span class="dot '+s.c+'"></span><div class="nm"><b>'+esc(n.name)+'</b><small>'+N(n.users||0)+' '+t('users')+(loc?' · '+t('Main server'):'')+'</small></div></div>'}).join('')+'</div>'}
-function vhXray(d){var el=$('#vh_x');if(!d){el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks')+'<p class="muted">—</p>';return}
- var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length,tot=d.inbounds.reduce(function(a,b){return a+(+b.traffic||0)},0);
- var more=d.inbounds.length-5;
- el.innerHTML=vhHead('xray','Xray','VLESS · VMess · Trojan · Shadowsocks','<span class="chipx '+(d.on?'g':'r')+'">'+(d.on?t('On'):t('Off'))+'</span>'+vhBtn('#xray/status',t('Open')))+
-  (d.on?'':'<div class="warnbox">'+t('Xray is off')+' · <a href="#xray/status">'+t('Turn it on')+'</a></div>')+
-  '<div class="kv"><div><small>'+t('Working inbounds')+'</small><b>'+N(act)+' / '+N(d.inbounds.length)+'</b></div><div><small>'+t('Online now')+'</small><b style="color:var(--ok)">'+N((d.online||[]).length)+'</b></div><div><small>'+t('Total traffic')+'</small><b class="ltr">'+N(bytes(tot))+'</b></div></div>'+
-  (d.inbounds.length?d.inbounds.slice(0,5).map(function(ib){return xrMiniRow(ib)}).join(''):'<p class="muted">'+t('No inbound yet.')+'</p>')+
-  (more>0?'<a class="vmore" href="#xray/inbounds">'+t('and')+' '+N(more)+' '+t('more inbounds')+' ›</a>':'')}
-function vhDns(d){var el=$('#vh_d');if(!d){el.style.display='none';return}var run=d.servers.filter(function(x){return x.status&&x.status.active}).length;
- el.innerHTML=vhHead('dns','Kanki DNS (sanctions)','Private DNS for sanctioned sites','<span class="chipx '+(d.on?'g':'r')+'">'+(d.on?t('On'):t('Off'))+'</span>'+vhBtn('#dns/overview',t('Open')))+
-  '<div class="kv"><div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(d.servers.length)+'</b></div><div><small>'+t('Users with DNS')+'</small><b>'+N(d.users)+'</b></div><div><small>'+t('Allowed addresses')+'</small><b>'+N(d.servers.reduce(function(a,x){return a+(+(x.status||{}).allowed||0)},0))+'</b></div></div>'}
+// one card per core (3.34): status, servers running it and users; the whole card opens the core's own page
+function vhGrid(nodes,o,xr,dn){var el=$('#vh_g');if(!el)return;var pr=o.protocols||{};
+ var up=function(n){return n.id=='local'||n.online},num=function(v){return v!=null&&v!==''&&+v>0};
+ // servers that run a core (the agent reports its port) and how many of them are up
+ var on=function(k){var l=nodes.filter(function(n){return num((n.info||{})[k])});return [l.filter(up).length,l.length]};
+ var K=[['wg','WireGuard','shield2','Standard and fast; through Iran only',on('wg_port')],['awg','AmneziaWG','security','WireGuard with hidden packets; direct or through Iran',on('awg_port')],
+  ['hy2','Hysteria2','globe','QUIC, fast on weak internet',on('hy2_port')],['kmix','KANKI MIX','game','Kanki\'s own game protocol, low ping',on('kmix_port')],['mtun','microtun','game','A light game VPN, small packets sent twice',on('mt_port')]];
+ var card=function(href,col,icon,name,sub,st,stats){return '<a class="ccard" href="'+href+'" style="--pc:'+col+'"><div class="cc1"><span class="cci">'+ic(icon,20)+'</span><span class="ccs '+st[0]+'"><i></i>'+st[1]+'</span></div>'+
+  '<b class="ccn">'+name+'</b><small class="ccd">'+t(sub)+'</small><div class="ccst">'+stats.map(function(x){return '<div><small>'+x[0]+'</small><b class="ltr">'+x[1]+'</b></div>'}).join('')+'</div></a>'};
+ var state=function(u,all){return all==0?['n',t('Not installed')]:u==all?['g',t('Running')]:u==0?['r',t('Down')]:['y',t('Partly down')]};
+ var h=K.map(function(c){var u=c[4][0],all=c[4][1];return card('#'+c[0],PCOL[c[0]],c[2],c[1],c[3],state(u,all),[[t('Servers'),N(u)+' / '+N(all)],[t('Users'),N(pr[c[0]]||0)]])}).join('');
+ if(xr){var act=xr.inbounds.filter(function(x){return x.enabled&&!x.state}).length;
+  h+=card('#xray/status',PCOL.xray,'xray','Xray','VLESS · VMess · Trojan · Shadowsocks',xr.on?(act?['g',t('Running')]:['y',t('No inbound')]):['r',t('Off')],[[t('Inbounds'),N(act)+' / '+N(xr.inbounds.length)],[t('Online now'),N((xr.online||[]).length)]])}
+ if(dn){var run=dn.servers.filter(function(x){return x.status&&x.status.active}).length;
+  h+=card('#dns/overview',PCOL.dns,'dns','Kanki DNS','Private DNS for sanctioned sites',dn.on?(run?['g',t('Running')]:['y',t('No server')]):['r',t('Off')],[[t('Servers'),N(run)+' / '+N(dn.servers.length)],[t('Users'),N(dn.users||0)]])}
+ h+=card('#antidpi',PCOL.awg,'security','Anti-DPI','Tunnels between your servers that filters cannot see',['n',t('Tools')],[[t('Tunnels'),t('Open')]]);
+ el.innerHTML=h;
+ var ups=nodes.filter(up).length,s=$('#vh_s');
+ if(s)s.innerHTML=kuStats([[t('Servers online'),N(ups)+' / '+N(nodes.length),ups<nodes.length?'warn':'ok'],[t('Online now'),N(o.online||0),'ok'],[t('Total traffic'),'<span class="ltr">'+N(o.traffic_gb||0)+' GB</span>'],[t('Users'),N(o.users||0)]])}
 
 // ---------------------------------------------------------------- user form: what the user gets, service by service
 function ufServices(protos,un){var has=function(p){return protos.indexOf(p)>=0},vpnOn=has('wg')||has('awg')||has('hy2')||has('kmix')||has('mtun');

@@ -126,7 +126,6 @@ function botApk(){var el=$('#bt_apk');if(!el)return;
 function pBot(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Telegram sales bot')+'</h2><p>'+t('Create and manage the sales bot')+'</p></div><div id="bt_top"></div></div><div id="bt">'+t('Loading…')+'</div>';botLoad()}
 function botLoad(){return Promise.all([api('GET','/api/bot'),api('GET','/api/settings'),api('GET','/api/plans').catch(function(){return []})]).then(function(r){S.bot=r[0];S.bset=r[1];S.plans=r[2]||[];botDraw()}).catch(fail)}
 // the bot's customer buttons whose colour can be set (bot.rs STYLE_KEYS)
-var BSTY=[['buy','Buy','g'],['trial','Free trial','b'],['renew','Renew','g'],['my','My services'],['renew_this','Renew this service','g'],['pay','Payment methods','g'],['shop','Custom volume and days','b'],['miniapp','Mini app','b'],['amz','AmneziaVPN backup','b'],['cfg','Config buttons'],['app','Download app'],['support','Support'],['guide','Tutorial'],['ref','Invite friends'],['disc','Discount code']];
 function bsChk(k,label){return '<label class="chk"><input type="checkbox" data-bs="'+k+'" '+((S.bset||{})[k]=='1'?'checked':'')+'>'+t(label)+'</label>'}
 function bsIn(k,label,ph,typ,ltr){return '<div><label class="f">'+t(label)+'</label><input data-bs="'+k+'"'+(typ?' type="'+typ+'"':'')+(ltr?' class="ltr"':'')+' value="'+esc((S.bset||{})[k]||'')+'" placeholder="'+esc(ph||'')+'"></div>'}
 function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_set;
@@ -164,8 +163,7 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
    '<div class="box"><b>🧮 '+t('Custom purchase (mini app)')+'</b><div class="chips">'+bsChk('cp_on','Buyers can choose their own volume, days and users')+bsChk('mini_menu','The chat menu button opens the mini app')+'</div>'+
     '<div class="g2f">'+bsIn('cp_min_gb','Smallest volume (GB)','10','number')+bsIn('cp_max_gb','Largest volume (GB)','200','number')+bsIn('cp_days','Durations (days)','30,60,90',0,1)+bsIn('cp_users','Most users','3','number')+'</div>'+
     '<p class="hint">'+t('The price comes from the price rules of the Smart plan builder (Plans tab): the same size costs the same as a listed plan.')+'</p></div>'+
-   '<div class="box"><b>🎨 '+t('Button colours in the bot')+'</b><p class="hint" style="margin-top:4px">'+t('Telegram shows coloured buttons from February 2026; older apps show them plain. Plan buttons take the colour set on each plan.')+'</p>'+
-    '<div class="g2f">'+BSTY.map(function(k){var v=(S.bset||{})['bst_'+k[0]]||'';return '<div><label class="f">'+t(k[1])+'</label><select data-bs="bst_'+k[0]+'">'+[['',t('Default')+' · '+({g:'🟢',b:'🔵'}[k[2]]||'⚪')],['success','🟢 Green'],['primary','🔵 Blue'],['danger','🔴 Red'],['none','⚪ Plain']].map(function(o){return '<option value="'+o[0]+'"'+(v==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select></div>'}).join('')+'</div></div>'+
+   '<p class="hint">'+t('Button texts, premium emoji and colours are set in Telegram: the bot › Admin panel › Buttons and texts › Manage buttons.')+'</p>'+
    '<button class="btn" style="width:100%;margin-top:10px" id="bs_save">'+t('Save sales settings')+'</button></div>'+
    '<div class="card" id="bt_watch"></div></div>'+
   '<div data-btp="plans">'+botSmart()+botPlans()+'</div><div data-btp="apk"><div id="bt_apk"></div></div><div data-btp="disc"><div id="bt_disc"></div></div><div data-btp="chan"><div id="bt_chan"></div></div><div data-btp="appmsg"><div id="bt_am"></div></div>';

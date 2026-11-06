@@ -82,6 +82,8 @@ mod channel;
 mod ai;
 #[path = "bot/pay.rs"]
 mod pay;
+#[path = "bot/buttons.rs"]
+mod buttons;
 
 // tunnel: tunnels between servers and tunnel servers; the wire protocols in src/tunnel/transport
 mod tunnel;
