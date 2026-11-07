@@ -105,7 +105,7 @@ pub async fn dial(remote: &str, sni_raw: &str, sni_name: &str, req_host: &str, p
     }
 
     let (hq_remote, hq_sni, hq_token) = (remote.to_string(), sni_raw.to_string(), token.to_string());
-    let mut hq = Guard(tokio::spawn(async move { hq::dial(&hq_remote, &hq_sni, &hq_token).await.map(Raw::Stream) }));
+    let mut hq = Guard(tokio::spawn(async move { hq::dial(&hq_remote, &hq_sni, &hq_token).await }));
 
     // phase 1: hq alone
     // (a timeout means hq is still working on it)

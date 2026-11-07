@@ -604,44 +604,72 @@ fn udp_and_tcp_get_their_own_links() {
     assert_eq!(lane(1, 7, false, true), 0);
 }
 
-/// The `game` datagram lane (`dgram.rs`): both ends agree on it for every link, small UDP packets
-/// take it and big ones the ordered stream, and both come back intact and complete; TCP still works.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn game_udp_takes_the_datagram_lane() {
-    let base = 22800;
-    let (entry, exit) = pair("game", "reverse", base, "token-for-tests-0123456789");
+/// The datagram lane (`dgram.rs`) of a UDP transport: both ends agree on it for every link, small UDP
+/// packets take it and big ones the ordered stream, both come back intact and complete; TCP still works.
+async fn lane_check(transport: &str, base: u16) {
+    let (entry, exit) = pair(transport, "reverse", base, "token-for-tests-0123456789");
     tcp_echo(base + 2).await;
     udp_echo(base + 4).await;
     let e = Running::start(entry);
     let x = Running::start(exit);
-    assert!(wait_links(&e, 3).await, "no links: {:?}", e.status().error);
+    assert!(wait_links(&e, 3).await, "{}: no links: {:?}", transport, e.status().error);
     let mut on = false;
-    for _ in 0..50 {
-        if e.status().lanes == 3 && x.status().lanes == 3 {
+    for _ in 0..80 {
+        if e.status().lanes == e.status().links && x.status().lanes == x.status().links && e.status().links == 3 {
             on = true;
             break;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert!(on, "lanes: entry {} exit {}", e.status().lanes, x.status().lanes);
+    assert!(on, "{}: lanes: entry {} exit {}", transport, e.status().lanes, x.status().lanes);
     let u = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     u.connect(("127.0.0.1", base + 3)).await.unwrap();
     let mut b = vec![0u8; 4096];
     // a game-sized packet (lane) and a full-size one (stream), many times each
-    for size in [80usize, 1300] {
+    for size in [80usize, 1000, 1300] {
         let mut back = 0;
         for i in 0..40u32 {
             let mut p = vec![(i % 251) as u8; size];
             p[..4].copy_from_slice(&i.to_be_bytes());
             u.send(&p).await.unwrap();
             if let Ok(Ok(n)) = tokio::time::timeout(Duration::from_secs(2), u.recv(&mut b)).await {
-                assert_eq!(&b[..n], &p[..], "size {} packet {}", size, i);
+                assert_eq!(&b[..n], &p[..], "{} size {} packet {}", transport, size, i);
                 back += 1;
             }
         }
-        assert!(back >= 39, "size {}: {} of 40 came back", size, back);
+        assert!(back >= 39, "{} size {}: {} of 40 came back", transport, size, back);
     }
     check_tcp(base + 1, 200_000).await;
     e.stop();
     x.stop();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn game_udp_takes_the_datagram_lane() {
+    lane_check("game", 22800).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn kcp_udp_takes_the_datagram_lane() {
+    lane_check("kcp", 22810).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn quic_udp_takes_the_datagram_lane() {
+    lane_check("quic", 22820).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn hq_udp_takes_the_datagram_lane() {
+    lane_check("hq", 22830).await;
+}
+
+/// faketcp needs raw sockets (root); skipped without them, like on a developer machine
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn faketcp_udp_takes_the_datagram_lane() {
+    if unsafe { libc::geteuid() } != 0 {
+        eprintln!("faketcp lane test skipped: needs root");
+        return;
+    }
+    lane_check("faketcp", 22840).await;
 }

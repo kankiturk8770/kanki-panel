@@ -11,6 +11,11 @@
   behind it until it was sent again. Now, while a tunnel carries both kinds, UDP flows use the first half of its links and TCP the rest;
   a tunnel with one kind only (or one link) uses every link as before. The split stays 10 minutes after the last TCP connection or UDP
   packet, so flows do not hop between links. Only the entry chooses: no change on the wire, old exits work as they are.
+- **Every UDP tunnel transport has the datagram lane:** `game` (in its FEC relay), `kcp` (in its obfuscation relay), `faketcp` (one fake
+  segment per packet), and `quic` / `hq` / `dual` (QUIC's own unreliable datagrams, RFC 9221, sized to what the connection takes). So
+  WireGuard, AmneziaWG, microtun, KANKI MIX and Hysteria2 through an Iran server never wait behind a lost packet, whichever UDP transport
+  the admin picked. TCP transports (`tcp`, `tcpmux`, `ws`, `wss`, `h2`, `cdn`) cannot carry unordered packets; there UDP only gets its own
+  links. The `awg` and `hy2` tunnels carry packets unordered already.
 - **Game-FEC: a datagram lane for UDP (`transport/dgram.rs`):** a `game` link was one ordered KCP stream, so a game packet that came
   after a lost packet waited until that one was sent again (head-of-line blocking: the ping jumps), for every user and protocol on the
   link (WireGuard, AmneziaWG, microtun, KANKI MIX, Hysteria2 through Iran). Now every UDP packet of the mux that fits one datagram

@@ -334,6 +334,8 @@ impl Drop for RstGuard {
 /// server in fake TCP segments.
 pub struct FtClient {
     pub local: SocketAddr,
+    /// the datagram lane of this link (`dgram.rs`)
+    pub port: Arc<super::dgram::Port>,
     tasks: Vec<JoinHandle<()>>,
     _rst: RstGuard,
 }
@@ -427,12 +429,24 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<FtClient> {
 
     // KCP -> mask -> fake TCP segment
     let (inner1, raw1, mask1, ka1, st1) = (inner.clone(), raw.clone(), mask.clone(), kcp_addr.clone(), state.clone());
+    let (port, lane) = super::dgram::Port::pair();
+    let super::dgram::RelayEnd { out: mut lane_out, inbox: lane_in } = lane;
     let out_task = tokio::spawn(async move {
         let mut a = vec![0u8; 65535];
         let mut w: Vec<u8> = Vec::with_capacity(2048);
         loop {
-            let Ok((n, from)) = inner1.recv_from(&mut a).await else { break };
-            *ka1.lock().unwrap_or_else(|e| e.into_inner()) = Some(from);
+            // KCP, or a datagram-lane payload (always under MAX_SEG: one segment)
+            let n = tokio::select! {
+                r = inner1.recv_from(&mut a) => {
+                    let Ok((n, from)) = r else { break };
+                    *ka1.lock().unwrap_or_else(|e| e.into_inner()) = Some(from);
+                    n
+                }
+                Some(d) = lane_out.recv() => {
+                    a[..d.len()].copy_from_slice(&d);
+                    d.len()
+                }
+            };
             let mut off = 0;
             while off < n {
                 let take = (n - off).min(MAX_SEG);
@@ -471,13 +485,17 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<FtClient> {
             let Some((s, e)) = mask.open(&mut p) else { continue };
             // acknowledge only segments that really are ours
             state.lock().unwrap_or_else(|e| e.into_inner()).ack = seq.wrapping_add(pl.len() as u32);
+            if super::dgram::looks_like(&p[s..e]) {
+                let _ = lane_in.try_send(p[s..e].to_vec());
+                continue;
+            }
             let dst = *kcp_addr.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(dst) = dst {
                 let _ = inner.send_to(&p[s..e], dst).await;
             }
         }
     });
-    Ok(FtClient { local, tasks: vec![out_task, in_task], _rst: rst })
+    Ok(FtClient { local, port, tasks: vec![out_task, in_task], _rst: rst })
 }
 
 // ------------------------------------------------------------------ server
@@ -490,13 +508,19 @@ struct FtPeer {
     pump: JoinHandle<()>,
     /// the client's next sequence number (what we acknowledge)
     ack: Arc<Mutex<u32>>,
+    /// where this client's datagram-lane payloads go (its link's session)
+    lane_in: tokio::sync::mpsc::Sender<Vec<u8>>,
 }
+
+/// The datagram lane of each client, by the address the KCP listener sees it from
+type Ports = Arc<Mutex<HashMap<SocketAddr, Arc<super::dgram::Port>>>>;
 
 /// Server side of the fake-TCP channel: owns the raw sockets, unwraps segments and relays the
 /// payloads between the clients and the local KCP listener.
 pub struct ServerFt {
     tasks: Vec<JoinHandle<()>>,
     peers: Arc<Mutex<HashMap<SocketAddrV4, FtPeer>>>,
+    ports: Ports,
     _rst: RstGuard,
 }
 
@@ -512,13 +536,21 @@ impl Drop for ServerFt {
 }
 
 /// Client-bound pump: KCP -> mask -> fake TCP segment, for one client.
-async fn ft_pump(sock: Arc<UdpSocket>, raw: Arc<Raw>, mask: Arc<Mask>, cli: SocketAddrV4, srv: SocketAddrV4, seq: Arc<Mutex<u32>>, ack: Arc<Mutex<u32>>) {
+#[allow(clippy::too_many_arguments)] // one call site; a struct for it buys nothing
+async fn ft_pump(sock: Arc<UdpSocket>, raw: Arc<Raw>, mask: Arc<Mask>, cli: SocketAddrV4, srv: SocketAddrV4, seq: Arc<Mutex<u32>>, ack: Arc<Mutex<u32>>, mut lane_out: tokio::sync::mpsc::Receiver<Vec<u8>>) {
     let mut b = vec![0u8; 65535];
     let mut w: Vec<u8> = Vec::with_capacity(2048);
     loop {
-        let n = match sock.recv(&mut b).await {
-            Ok(n) => n,
-            Err(_) => break,
+        // KCP, or a datagram-lane payload (always under MAX_SEG: one segment)
+        let n = tokio::select! {
+            r = sock.recv(&mut b) => match r {
+                Ok(n) => n,
+                Err(_) => break,
+            },
+            Some(d) = lane_out.recv() => {
+                b[..d.len()].copy_from_slice(&d);
+                d.len()
+            }
         };
         let mut off = 0;
         while off < n {
@@ -555,8 +587,9 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
     let mask = Arc::new(Mask::new(token));
     let rst = RstGuard::add(port);
     let peers: Arc<Mutex<HashMap<SocketAddrV4, FtPeer>>> = Arc::new(Mutex::new(HashMap::new()));
+    let ports: Ports = Arc::new(Mutex::new(HashMap::new()));
 
-    let (raw1, mask1, peers1) = (raw.clone(), mask.clone(), peers.clone());
+    let (raw1, mask1, peers1, ports1) = (raw.clone(), mask.clone(), peers.clone(), ports.clone());
     let main = tokio::spawn(async move {
         let mut buf = vec![0u8; 65535];
         loop {
@@ -589,12 +622,12 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
                 Some(p) => {
                     p.last = Instant::now();
                     *p.ack.lock().unwrap_or_else(|e| e.into_inner()) = next_ack;
-                    Some(p.sock.clone())
+                    Some((p.sock.clone(), p.lane_in.clone()))
                 }
                 None => None,
             };
-            let sock = match known {
-                Some(sock) => sock,
+            let (sock, lane_in) = match known {
+                Some(x) => x,
                 None => {
                     if peers1.lock().unwrap_or_else(|e| e.into_inner()).len() >= MAX_PEERS {
                         continue;
@@ -607,32 +640,50 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
                     // our sequence numbers go on from what the client acknowledges (our iss + 1)
                     let sq = Arc::new(Mutex::new(ack));
                     let ak = Arc::new(Mutex::new(next_ack));
-                    let pump = tokio::spawn(ft_pump(sock.clone(), raw1.clone(), mask1.clone(), src, SocketAddrV4::new(*dst.ip(), port), sq, ak.clone()));
-                    peers1.lock().unwrap_or_else(|e| e.into_inner()).insert(src, FtPeer { sock: sock.clone(), last: Instant::now(), pump, ack: ak });
-                    sock
+                    let (lport, lane) = super::dgram::Port::pair();
+                    if let Ok(a) = sock.local_addr() {
+                        ports1.lock().unwrap_or_else(|e| e.into_inner()).insert(a, lport);
+                    }
+                    let pump = tokio::spawn(ft_pump(sock.clone(), raw1.clone(), mask1.clone(), src, SocketAddrV4::new(*dst.ip(), port), sq, ak.clone(), lane.out));
+                    peers1.lock().unwrap_or_else(|e| e.into_inner()).insert(src, FtPeer { sock: sock.clone(), last: Instant::now(), pump, ack: ak, lane_in: lane.inbox.clone() });
+                    (sock, lane.inbox)
                 }
             };
-            let _ = sock.send(&plv[s..e]).await;
+            if super::dgram::looks_like(&plv[s..e]) {
+                let _ = lane_in.try_send(plv[s..e].to_vec());
+            } else {
+                let _ = sock.send(&plv[s..e]).await;
+            }
         }
     });
 
     // forget clients that went quiet (and clients whose pump died)
-    let peers2 = peers.clone();
+    let (peers2, ports2) = (peers.clone(), ports.clone());
     let reaper = tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(15)).await;
-            let mut g = peers2.lock().unwrap_or_else(|e| e.into_inner());
-            g.retain(|_, p| {
-                let keep = !p.pump.is_finished() && p.last.elapsed() < PEER_IDLE;
-                if !keep {
-                    p.pump.abort();
-                }
-                keep
-            });
+            let mut gone = vec![];
+            {
+                let mut g = peers2.lock().unwrap_or_else(|e| e.into_inner());
+                g.retain(|_, p| {
+                    let keep = !p.pump.is_finished() && p.last.elapsed() < PEER_IDLE;
+                    if !keep {
+                        p.pump.abort();
+                        if let Ok(a) = p.sock.local_addr() {
+                            gone.push(a);
+                        }
+                    }
+                    keep
+                });
+            }
+            let mut pm = ports2.lock().unwrap_or_else(|e| e.into_inner());
+            for a in gone {
+                pm.remove(&a);
+            }
         }
     });
 
-    Ok(ServerFt { tasks: vec![main, reaper], peers, _rst: rst })
+    Ok(ServerFt { tasks: vec![main, reaper], peers, ports, _rst: rst })
 }
 
 // ------------------------------------------------------------------ engine glue
@@ -656,10 +707,11 @@ pub async fn serve_faketcp(port: u16, token: &str, out: Inbox, sem: Arc<tokio::s
     let local = inner.local_addr()?;
     let relay = server(port, token, local).await?;
     let task = tokio::spawn(async move {
+        let ports = relay.ports.clone();
         let _relay = relay;
         loop {
-            let stream = match inner.accept().await {
-                Ok((s, _)) => s,
+            let (stream, from) = match inner.accept().await {
+                Ok(x) => x,
                 Err(_) => {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
@@ -670,7 +722,11 @@ pub async fn serve_faketcp(port: u16, token: &str, out: Inbox, sem: Arc<tokio::s
                 continue;
             };
             let io: BoxIo = Box::new(super::quic::KcpHeld { stream, _permit: permit });
-            if out.send((super::link::Raw::Stream(io), "faketcp".to_string())).await.is_err() {
+            let raw = match ports.lock().unwrap_or_else(|e| e.into_inner()).remove(&from) {
+                Some(p) => super::link::Raw::Dg(io, p),
+                None => super::link::Raw::Stream(io),
+            };
+            if out.send((raw, "faketcp".to_string())).await.is_err() {
                 break;
             }
         }
@@ -678,14 +734,15 @@ pub async fn serve_faketcp(port: u16, token: &str, out: Inbox, sem: Arc<tokio::s
     Ok(Bag { tasks: vec![task], endpoints: vec![] })
 }
 
-/// Dials a `faketcp` server through the fake-TCP channel.
-pub async fn dial_faketcp(remote: &str, token: &str) -> Res<BoxIo> {
+/// Dials a `faketcp` server through the fake-TCP channel (with its datagram lane).
+pub async fn dial_faketcp(remote: &str, token: &str) -> Res<super::link::Raw> {
     let addr: SocketAddr = tokio::net::lookup_host(remote).await?.next().ok_or("cannot resolve the tunnel address")?;
     let relay = client(addr, token).await?;
     let stream = tokio::time::timeout(Duration::from_secs(12), tokio_kcp::KcpStream::connect(&ft_kcp_config(), relay.local))
         .await
         .map_err(|_| "faketcp connect timeout")??;
-    Ok(Box::new(FtIo { stream, _relay: relay }))
+    let port = relay.port.clone();
+    Ok(super::link::Raw::Dg(Box::new(FtIo { stream, _relay: relay }), port))
 }
 
 /// A KCP stream that also owns its fake-TCP relay.

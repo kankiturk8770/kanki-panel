@@ -13,6 +13,10 @@
 //! A KCP datagram starts with its conversation id; one that happens to start with MAGIC fails the
 //! AEAD check and goes to KCP as before.
 //!
+//! The same lane rides the other UDP transports: `kcp` (its obfuscation relay, like `game`) and
+//! `quic` / `hq` (QUIC's own unreliable datagrams, RFC 9221). TCP transports have no unordered
+//! path; there the UDP and TCP links are only kept apart (`engine::lane`).
+//!
 //! The lane is only used after both ends said so (`DGOK` mux frame, `mux.rs`): an old end ignores
 //! the frame and the link keeps sending everything through KCP.
 
@@ -49,13 +53,18 @@ pub struct RelayEnd {
 pub struct Port {
     out: mpsc::Sender<Vec<u8>>,
     inbox: Mutex<Option<mpsc::Receiver<Vec<u8>>>>,
+    /// biggest wire payload the carrier takes (QUIC datagrams may be smaller than MAX_WIRE)
+    max: usize,
 }
 
 impl Port {
     pub fn pair() -> (Arc<Port>, RelayEnd) {
+        Port::pair_max(MAX_WIRE)
+    }
+    pub fn pair_max(max: usize) -> (Arc<Port>, RelayEnd) {
         let (out_tx, out_rx) = mpsc::channel(QUEUE);
         let (in_tx, in_rx) = mpsc::channel(QUEUE);
-        (Arc::new(Port { out: out_tx, inbox: Mutex::new(Some(in_rx)) }), RelayEnd { out: out_rx, inbox: in_tx })
+        (Arc::new(Port { out: out_tx, inbox: Mutex::new(Some(in_rx)), max: max.min(MAX_WIRE) }), RelayEnd { out: out_rx, inbox: in_tx })
     }
     /// The received payloads (once: the session's reader takes them)
     pub fn take_inbox(&self) -> Option<mpsc::Receiver<Vec<u8>>> {
@@ -142,7 +151,7 @@ impl Lane {
     }
     /// frame -> wire payload
     pub fn seal(&self, frame: &[u8]) -> Option<Vec<u8>> {
-        if frame.len() > MAX_FRAME {
+        if frame.len() > MAX_FRAME || frame.len() + HEAD + TAG > self.port.max {
             return None;
         }
         let n = self.ctr.fetch_add(1, Ordering::Relaxed);
@@ -221,6 +230,15 @@ mod tests {
         assert!(x.send(b"frame"));
         let w = end.out.try_recv().unwrap();
         assert_eq!(x.open(&w).unwrap(), b"frame");
+    }
+
+    #[test]
+    fn a_small_carrier_sends_big_frames_on_the_stream() {
+        let (p, _end) = Port::pair_max(200);
+        let k = [3u8; 32];
+        let x = Lane::new(p, &Keys { tx: k, rx: k });
+        assert!(x.seal(&[0; 200 - HEAD - TAG]).is_some());
+        assert!(x.seal(&[0; 200 - HEAD - TAG + 1]).is_none());
     }
 
     #[test]

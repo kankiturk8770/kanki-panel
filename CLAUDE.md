@@ -66,7 +66,7 @@ assets/
 | «همه‌ی لینک‌ها»: لینک اشتراک `/sub/<code>/v2` اول، بعد هر لینک Xray و Hysteria2 | `api::links_text`، `api::v2_links` |
 | تانل‌های بین سرورها، سرورهای تانل، مسیر پورت‌ها (`port_entry_at`, `entry_host`)، موتور تانل پنل | `src/tunnel/panel.rs` |
 | لاین جدای UDP و TCP داخل هر تانل (`engine::lane`) | `src/tunnel/engine.rs` |
-| لاین بی‌ترتیب UDP داخل Game-FEC (بسته‌ی بازی پشت بسته‌ی گم‌شده نمی‌ماند؛ فریم `DGOK` در `mux.rs`) | `src/tunnel/transport/dgram.rs` (+ `game.rs`) |
+| لاین بی‌ترتیب UDP همهٔ تانل‌های UDP (بسته‌ی بازی پشت بسته‌ی گم‌شده نمی‌ماند؛ فریم `DGOK` در `mux.rs`) | `src/tunnel/transport/dgram.rs` (+ `game.rs`، `obfs.rs`، `faketcp.rs`، `quic::quic_lane` برای quic/hq/dual) |
 | موتور تانل، لینک رمزشده، ایجنت سرور تانل (`tunnel-agent`, `tunnel-run`)، تست تانل هوشمند | `src/tunnel/engine.rs`, `link.rs`, `agent.rs`, `probe.rs` |
 | پروتکل‌های تانل (QUIC/KCP، hq، h2، game+FEC، faketcp، awg، hy2، mux، obfs) | `src/tunnel/transport/*.rs` |
 | کیفیت مسیرها در ربات (سنجش UDP داخل هر تانل هر دقیقه، «📡 وضعیت مسیرها»، هشدار پر افت) | `src/tunnel/quality.rs` (+ `engine::quality_task`، `probe::udp_quality`، `panel::live_quality`) |
@@ -300,8 +300,8 @@ assets/
 گفت حالت گیمینگ را با آن بالا بیاور، اول پنل و سرورها، بعد اپ، بعد ویندوز، بی‌ایراد. **پیدا شد:** همهٔ کاربرهای یک تانل روی چند لینک مرتب (KCP stream) قاطی‌اند؛
 WG/AWG/microtun برای تانل یک جریان UDP‌اند، پس جدا کردن TCP و UDP خود بازی فقط در اپ شدنی است؛ سرورها فقط `fq`+BBR در `install.sh` داشتند (کارتی که قبلاً بالا
 بوده هنوز `pfifo_fast`). **چه شد:** `core/netq.rs` (کرنل و `fq` روی کارت، با شروع پنل، نود و ایجنت)، `engine::lane`/`pick_lane` (نصف لینک‌ها UDP، بقیه TCP، وقتی هر دو
-هست؛ ۱۰ دقیقه نگه‌داری)، `game::mark_ef`، و لاین بی‌ترتیب `dgram.rs` (UDP تا ۱۰۵۲ بایت جدا از KCP، با FEC و دوتایی، رمز جدا، فقط وقتی هر دو سر `DGOK` گفتند؛
-microtun خودش مثل WireGuard بی‌ترتیب است و گیر فقط داخل تانل بود). **تست:** `cargo test` ۳۲۶ قبول (لاین‌ها، `netq`، `dgram`، تانل Game-FEC واقعی با بستهٔ ۸۰ و ۱۳۰۰ بایتی و TCP)؛ روی سرور واقعی دیده نشده.
+هست؛ ۱۰ دقیقه نگه‌داری)، `game::mark_ef`، و لاین بی‌ترتیب `dgram.rs` روی همهٔ تانل‌های UDP (game، kcp، faketcp، quic، hq، dual؛ UDP تا ۱۰۵۲ بایت جدا از استریم، رمز جدا، فقط وقتی هر دو سر `DGOK` گفتند؛
+microtun خودش مثل WireGuard بی‌ترتیب است و گیر فقط داخل تانل بود). **تست:** `cargo test` ۳۳۱ قبول (لاین‌ها، `netq`، `dgram`، تانل واقعی هر پنج نوع UDP با بستهٔ ۸۰، ۱۰۰۰ و ۱۳۰۰ بایتی و TCP)؛ تانل‌های TCP (tcp، ws، wss، h2، cdn) نمی‌توانند بی‌ترتیب ببرند؛ روی سرور واقعی دیده نشده.
 **تصمیم:** «هر کاربر یک لوله» نه (پورت و دست دادن زیاد، شناسایی آسان‌تر)؛ «هر نوع ترافیک یک لاین». قول «۰٪ افت» نه.
 
 ### آخرین کارها — 3.35.0 (2026-11-07، برنچ `claude/new-session-s56fwo`)

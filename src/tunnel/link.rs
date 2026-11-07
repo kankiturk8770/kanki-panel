@@ -427,14 +427,14 @@ pub async fn dial(transport: &str, remote: &str, sni: &str, host_header: &str, p
     let (path, req_host, sni_name) = request_parts(remote, sni, host_header, path);
     match transport {
         // UDP-based transports do not start from a TCP connection
-        "quic" => return Ok(Raw::Stream(super::quic::dial(remote, sni).await?)),
-        "kcp" => return Ok(Raw::Stream(super::quic::kcp_dial(remote, token).await?)),
+        "quic" => return super::quic::dial(remote, sni).await,
+        "kcp" => return super::quic::kcp_dial(remote, token).await,
         "game" => {
             let (io, port) = super::game::dial_game(remote, token, gopt).await?;
             return Ok(Raw::Dg(io, port));
         }
-        "faketcp" => return Ok(Raw::Stream(super::faketcp::dial_faketcp(remote, token).await?)),
-        "hq" => return Ok(Raw::Stream(super::hq::dial(remote, sni, token).await?)),
+        "faketcp" => return super::faketcp::dial_faketcp(remote, token).await,
+        "hq" => return super::hq::dial(remote, sni, token).await,
         "h2" => return super::h2ws::dial(remote, &sni_name, &req_host, &path, frag).await,
         "dual" => return super::dual::dial(remote, sni, &sni_name, &req_host, &path, token, frag).await,
         _ => {}

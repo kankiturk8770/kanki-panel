@@ -4,7 +4,7 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** pan
 
 
 ## New in 3.36 — steadier ping for games
-- Every server keeps its network queues short and fair (`fq`, BBR, small TCP backlog), so a player's ping does not jump while others download; inside each tunnel game UDP and download TCP use separate links; in Game-FEC tunnels game packets travel unordered (never wait behind a lost packet), still with FEC; game tunnel packets are marked real-time (DSCP EF).
+- Every server keeps its network queues short and fair (`fq`, BBR, small TCP backlog), so a player's ping does not jump while others download; inside each tunnel game UDP and download TCP use separate links; in every UDP tunnel (Game-FEC, KCP, QUIC, HQ, FakeTCP) game packets travel unordered and never wait behind a lost packet (Game-FEC keeps its FEC); game tunnel packets are marked real-time (DSCP EF).
 ## New in 3.35 — path quality in the bot
 - Every tunnel measures itself once a minute (20 tiny UDP packets through it); the bot's admin menu has a read-only «📡 وضعیت مسیرها» with loss, ping and jitter per server pair and tunnel, and alerts when a path gets lossy or jittery for 10 minutes.
 ## New in 3.34 — premium emoji on the bot's buttons, core and server cards
