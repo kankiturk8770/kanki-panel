@@ -1358,6 +1358,18 @@ pub(crate) fn live_quality(app: &App) -> Vec<(Tunnel, bool, Option<Value>)> {
         .collect()
 }
 
+/// tunnel id -> (links on the datagram lane, live links), from the entry's last report
+pub(crate) fn live_lanes(app: &App) -> HashMap<String, (usize, usize)> {
+    let seen = seen().lock().unwrap_or_else(|e| e.into_inner()).clone();
+    tunnels(app)
+        .into_iter()
+        .filter_map(|tu| {
+            let st = seen.get(&tu.entry).and_then(|x| x.status.iter().find(|q| q.id == tu.id).cloned())?;
+            Some((tu.id, (st.lanes, st.links)))
+        })
+        .collect()
+}
+
 /// The names of a tunnel's two servers, the Iran one first
 pub(crate) fn pair_names(app: &App, entry: &str, exit: &str) -> (String, String) {
     let list = servers(app);
@@ -3200,6 +3212,23 @@ mod quality_tests {
             sn.get_mut("pq_de").unwrap().status[2].links = 0;
         }
         assert!(super::super::quality::report(&app).contains("🔴 IR1-GERMANY-HQ · HQ-QUIC: قطع"));
+        // the mini app's page: one card for the server abroad with its three tunnels, from IRAN1
+        let v = super::super::quality::view(&app);
+        let sv = v["servers"].as_array().unwrap();
+        assert_eq!(sv.len(), 1, "{}", v);
+        assert_eq!((sv[0]["name"].as_str(), sv[0]["id"].as_str(), sv[0]["state"].as_str()), (Some("GERMANY"), Some("pq_de"), Some("bad")));
+        let ts = sv[0]["tunnels"].as_array().unwrap();
+        assert_eq!(ts.len(), 3);
+        assert!(ts.iter().all(|t| t["from"] == "IRAN1"));
+        let hq = ts.iter().find(|t| t["name"] == "IR1-GERMANY-HQ").unwrap();
+        assert_eq!((hq["up"].as_bool(), hq["transport"].as_str()), (Some(false), Some("HQ-QUIC")));
+        let wg = ts.iter().find(|t| t["name"] == "IR1-GERMANY-WG").unwrap();
+        assert_eq!((wg["now"]["level"].as_str(), wg["now"]["ping"].as_u64()), (Some("bad"), Some(75)));
+        // path alerts: on by default, the switch turns them off (server alerts do not depend on it)
+        assert_eq!(v["alerts"], true);
+        app.db.set("path_alerts", "0");
+        assert!(!super::super::quality::alerts_on(&app));
+        assert_eq!(super::super::quality::view(&app)["alerts"], false);
     }
 
     #[test]

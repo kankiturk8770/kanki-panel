@@ -104,6 +104,32 @@ pub async fn serve_quic(port: u16, out: Inbox, sem: Arc<Semaphore>) -> Res<Bag> 
     Ok(accept_loop(endpoint, out, sem))
 }
 
+/// The datagram lane of a QUIC connection (`dgram.rs`), carried by QUIC's own unreliable datagrams.
+/// None when the other end does not take datagrams. The pumps end with the connection.
+pub(super) fn quic_lane(conn: &quinn::Connection) -> Option<Arc<super::dgram::Port>> {
+    let max = conn.max_datagram_size()?;
+    let (port, end) = super::dgram::Port::pair_max(max);
+    let super::dgram::RelayEnd { out: mut lane_out, inbox } = end;
+    let c1 = conn.clone();
+    tokio::spawn(async move {
+        while let Some(w) = lane_out.recv().await {
+            // too big for the path right now, or the connection is gone: a lost datagram, like on UDP
+            if let Err(quinn::SendDatagramError::ConnectionLost(_)) = c1.send_datagram(w.into()) {
+                break;
+            }
+        }
+    });
+    let c2 = conn.clone();
+    tokio::spawn(async move {
+        while let Ok(b) = c2.read_datagram().await {
+            if super::dgram::looks_like(&b) {
+                let _ = inbox.try_send(b.to_vec());
+            }
+        }
+    });
+    Some(port)
+}
+
 /// Accepts the connections of a QUIC endpoint (used by `quic` and by `hq`).
 pub(super) fn accept_loop(endpoint: Endpoint, out: Inbox, sem: Arc<Semaphore>) -> Bag {
     let ep = endpoint.clone();
@@ -129,6 +155,8 @@ async fn serve_conn(incoming: quinn::Incoming, out: Inbox, permit: OwnedSemaphor
         _ => return,
     };
     let mut permit = Some(permit);
+    // one link per connection: its first stream gets the connection's datagram lane
+    let mut lane = quic_lane(&conn);
     let mut first = true;
     loop {
         let st = if first {
@@ -144,7 +172,7 @@ async fn serve_conn(incoming: quinn::Incoming, out: Inbox, permit: OwnedSemaphor
             Ok(x) => x,
             Err(_) => break,
         };
-        let (out, conn2, p, peer2) = (out.clone(), conn.clone(), permit.take(), peer.clone());
+        let (out, conn2, p, peer2, lane2) = (out.clone(), conn.clone(), permit.take(), peer.clone(), lane.take());
         tokio::spawn(async move {
             let _p = p;
             // swallow the one priming byte the dialer sent to open the stream
@@ -154,13 +182,17 @@ async fn serve_conn(incoming: quinn::Incoming, out: Inbox, permit: OwnedSemaphor
                 _ => return,
             }
             let io: BoxIo = Box::new(QuicIo::new(send, recv, conn2));
-            let _ = out.send((Raw::Stream(io), peer2)).await;
+            let raw = match lane2 {
+                Some(p) => Raw::Dg(io, p),
+                None => Raw::Stream(io),
+            };
+            let _ = out.send((raw, peer2)).await;
         });
     }
 }
 
-/// Dials a QUIC server and opens one bidirectional stream.
-pub async fn dial(remote: &str, sni: &str) -> Res<BoxIo> {
+/// Dials a QUIC server and opens one bidirectional stream (with the connection's datagram lane).
+pub async fn dial(remote: &str, sni: &str) -> Res<Raw> {
     let addr: SocketAddr = tokio::net::lookup_host(remote).await?.next().ok_or("cannot resolve the tunnel address")?;
     let bind: SocketAddr = if addr.is_ipv6() { "[::]:0".parse()? } else { "0.0.0.0:0".parse()? };
     let mut endpoint = Endpoint::client(bind)?;
@@ -172,7 +204,12 @@ pub async fn dial(remote: &str, sni: &str) -> Res<BoxIo> {
     // the stream only truly exists on the peer once some bytes are sent
     AsyncWriteExt::write_all(&mut send, QUIC_PRIME).await?;
     AsyncWriteExt::flush(&mut send).await?;
-    Ok(Box::new(QuicIo { send, recv, _conn: conn }))
+    let lane = quic_lane(&conn);
+    let io: BoxIo = Box::new(QuicIo { send, recv, _conn: conn });
+    Ok(match lane {
+        Some(p) => Raw::Dg(io, p),
+        None => Raw::Stream(io),
+    })
 }
 
 // ------------------------------------------------------------------ KCP
@@ -200,10 +237,11 @@ pub async fn serve_kcp(port: u16, token: &str, out: Inbox, sem: Arc<Semaphore>) 
     let obfs = super::obfs::server(port, token, local).await?;
     let task = tokio::spawn(async move {
         // the relay lives as long as this loop; when the loop is stopped the relay stops with it
+        let ports = obfs.ports.clone();
         let _obfs = obfs;
         loop {
-            let stream = match inner.accept().await {
-                Ok((s, _)) => s,
+            let (stream, from) = match inner.accept().await {
+                Ok(x) => x,
                 Err(_) => {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
@@ -216,7 +254,12 @@ pub async fn serve_kcp(port: u16, token: &str, out: Inbox, sem: Arc<Semaphore>) 
                 continue;
             };
             let io: BoxIo = Box::new(KcpHeld { stream, _permit: permit });
-            if out.send((Raw::Stream(io), "kcp".to_string())).await.is_err() {
+            // the client's datagram lane comes with its stream (`dgram.rs`)
+            let raw = match ports.lock().unwrap_or_else(|e| e.into_inner()).remove(&from) {
+                Some(p) => Raw::Dg(io, p),
+                None => Raw::Stream(io),
+            };
+            if out.send((raw, "kcp".to_string())).await.is_err() {
                 break;
             }
         }
@@ -247,8 +290,8 @@ impl AsyncWrite for KcpHeld {
     }
 }
 
-/// Dials a KCP server through the obfuscation relay.
-pub async fn kcp_dial(remote: &str, token: &str) -> Res<BoxIo> {
+/// Dials a KCP server through the obfuscation relay (with its datagram lane).
+pub async fn kcp_dial(remote: &str, token: &str) -> Res<Raw> {
     let addr: SocketAddr = tokio::net::lookup_host(remote).await?.next().ok_or("cannot resolve the tunnel address")?;
     let obfs = super::obfs::client(addr, token).await?;
     let cfg = kcp_config();
@@ -256,7 +299,8 @@ pub async fn kcp_dial(remote: &str, token: &str) -> Res<BoxIo> {
         .await
         .map_err(|_| "kcp connect timeout")??;
     // keep the relay alive for the life of the stream
-    Ok(Box::new(KcpIo { stream, _obfs: obfs }))
+    let port = obfs.port.clone();
+    Ok(Raw::Dg(Box::new(KcpIo { stream, _obfs: obfs }), port))
 }
 
 /// A KCP stream that also owns its obfuscation relay.

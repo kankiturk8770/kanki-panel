@@ -126,12 +126,21 @@ fn derive(token: &str, shared: &[u8], hello_c: &[u8], hello_s: &[u8]) -> Res<([u
 pub enum Raw {
     Stream(BoxIo),
     Ws(WebSocketStream<BoxIo>),
+    /// a `game` stream with its datagram lane (`dgram.rs`)
+    Dg(BoxIo, Arc<super::dgram::Port>),
 }
 
 impl Raw {
+    /// The datagram lane that came with this connection, if any
+    pub fn port(&self) -> Option<Arc<super::dgram::Port>> {
+        match self {
+            Raw::Dg(_, p) => Some(p.clone()),
+            _ => None,
+        }
+    }
     async fn send_raw(&mut self, b: &[u8]) -> Res<()> {
         match self {
-            Raw::Stream(s) => {
+            Raw::Stream(s) | Raw::Dg(s, _) => {
                 s.write_all(b).await?;
                 s.flush().await?;
             }
@@ -141,7 +150,7 @@ impl Raw {
     }
     async fn recv_raw(&mut self, n: usize) -> Res<Vec<u8>> {
         match self {
-            Raw::Stream(s) => {
+            Raw::Stream(s) | Raw::Dg(s, _) => {
                 let mut b = vec![0u8; n];
                 s.read_exact(&mut b).await?;
                 Ok(b)
@@ -163,7 +172,7 @@ impl Raw {
     }
     pub(super) fn split(self, tx: Cipher, rx: Cipher) -> (Tx, Rx) {
         match self {
-            Raw::Stream(s) => {
+            Raw::Stream(s) | Raw::Dg(s, _) => {
                 let (r, w) = tokio::io::split(s);
                 (Tx::Stream(w, tx), Rx::Stream(r, rx))
             }
@@ -254,14 +263,14 @@ impl Rx {
 
 /// Runs the key exchange on a raw connection. `client` = the side that dialed. `pad` = padded
 /// records (both sides must agree: the engine turns it on for `hq`, `h2` and `dual`).
-pub async fn handshake(raw: Raw, token: &str, client: bool, pad: bool) -> Res<(Tx, Rx)> {
+pub async fn handshake(raw: Raw, token: &str, client: bool, pad: bool) -> Res<(Tx, Rx, super::dgram::Keys)> {
     match tokio::time::timeout(Duration::from_secs(12), handshake_inner(raw, token, client, pad)).await {
         Ok(r) => r,
         Err(_) => Err("handshake timeout".into()),
     }
 }
 
-async fn handshake_inner(mut raw: Raw, token: &str, client: bool, pad: bool) -> Res<(Tx, Rx)> {
+async fn handshake_inner(mut raw: Raw, token: &str, client: bool, pad: bool) -> Res<(Tx, Rx, super::dgram::Keys)> {
     let secret = x25519_dalek::EphemeralSecret::random_from_rng(rand::rngs::OsRng);
     let public = x25519_dalek::PublicKey::from(&secret);
     let mut mine = [0u8; 48];
@@ -281,6 +290,7 @@ async fn handshake_inner(mut raw: Raw, token: &str, client: bool, pad: bool) -> 
     let (hc, hs) = if client { (&mine[..], &theirs[..]) } else { (&theirs[..], &mine[..]) };
     let (c2s, s2c) = derive(token, shared.as_bytes(), hc, hs)?;
     let (txk, rxk) = if client { (c2s, s2c) } else { (s2c, c2s) };
+    let lane = super::dgram::Keys { tx: super::dgram::derive(&txk), rx: super::dgram::derive(&rxk) };
     let (mut tx, mut rx) = raw.split(Cipher::new(&txk, pad), Cipher::new(&rxk, pad));
     if client {
         tx.send(b"KT1").await?;
@@ -295,7 +305,7 @@ async fn handshake_inner(mut raw: Raw, token: &str, client: bool, pad: bool) -> 
         }
         tx.send(b"OK").await?;
     }
-    Ok((tx, rx))
+    Ok((tx, rx, lane))
 }
 
 // ------------------------------------------------------------------ transports
@@ -417,11 +427,14 @@ pub async fn dial(transport: &str, remote: &str, sni: &str, host_header: &str, p
     let (path, req_host, sni_name) = request_parts(remote, sni, host_header, path);
     match transport {
         // UDP-based transports do not start from a TCP connection
-        "quic" => return Ok(Raw::Stream(super::quic::dial(remote, sni).await?)),
-        "kcp" => return Ok(Raw::Stream(super::quic::kcp_dial(remote, token).await?)),
-        "game" => return Ok(Raw::Stream(super::game::dial_game(remote, token, gopt).await?)),
-        "faketcp" => return Ok(Raw::Stream(super::faketcp::dial_faketcp(remote, token).await?)),
-        "hq" => return Ok(Raw::Stream(super::hq::dial(remote, sni, token).await?)),
+        "quic" => return super::quic::dial(remote, sni).await,
+        "kcp" => return super::quic::kcp_dial(remote, token).await,
+        "game" => {
+            let (io, port) = super::game::dial_game(remote, token, gopt).await?;
+            return Ok(Raw::Dg(io, port));
+        }
+        "faketcp" => return super::faketcp::dial_faketcp(remote, token).await,
+        "hq" => return super::hq::dial(remote, sni, token).await,
         "h2" => return super::h2ws::dial(remote, &sni_name, &req_host, &path, frag).await,
         "dual" => return super::dual::dial(remote, sni, &sni_name, &req_host, &path, token, frag).await,
         _ => {}

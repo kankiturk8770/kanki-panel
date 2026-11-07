@@ -22,6 +22,9 @@ const RST: u8 = 5;
 const UDP: u8 = 6;
 const PING: u8 = 8;
 const PONG: u8 = 9;
+/// "I have the datagram lane" (`dgram.rs`): the entry says it, the exit answers it; an end that
+/// does not know the frame ignores it and the link stays stream-only
+const DGOK: u8 = 10;
 
 /// bytes one stream may have in flight before the other side says it has written them
 const WINDOW: usize = 512 * 1024;
@@ -81,11 +84,19 @@ pub struct Session {
     /// exit: UDP flow id -> socket that talks to the target
     udp_out: Mutex<HashMap<u32, ExitFlow>>,
     pub since: u64,
+    /// the `game` transport's datagram lane (`dgram.rs`), when this link has one
+    lane: Mutex<Option<Arc<super::dgram::Lane>>>,
 }
 
 impl Session {
-    /// Starts the reader, writer and keepalive tasks of a link and returns the session.
-    pub fn start(tx: Tx, rx: Rx, entry: bool, shared: Arc<Shared>) -> Arc<Session> {
+    /// Starts the reader, writer and keepalive tasks of a link and returns the session; with the
+    /// `game` transport's datagram lane (`dgram.rs`) when it has one. The lane is in place before
+    /// the reader runs, so the other end's `DGOK` can never arrive too early. The entry offers it;
+    /// UDP uses it once the exit answered (an old exit never does, and nothing changes for it).
+    pub fn start_with(tx: Tx, rx: Rx, entry: bool, shared: Arc<Shared>, lane: Option<super::dgram::Lane>) -> Arc<Session> {
+        let lane = lane.map(Arc::new);
+        let inbox = lane.as_ref().and_then(|l| l.port().take_inbox());
+        let lane = if inbox.is_some() { lane } else { None };
         let (out, out_rx) = mpsc::channel::<Vec<u8>>(1024);
         let (dead_tx, _) = watch::channel(false);
         let s = Arc::new(Session {
@@ -101,11 +112,39 @@ impl Session {
             last_tx: AtomicU64::new(now_ms()),
             udp_out: Mutex::new(HashMap::new()),
             since: now_ms(),
+            lane: Mutex::new(lane.clone()),
         });
         tokio::spawn(writer(s.clone(), tx, out_rx));
         tokio::spawn(reader(s.clone(), rx));
         tokio::spawn(keepalive(s.clone()));
+        if let (Some(l), Some(inbox)) = (lane, inbox) {
+            tokio::spawn(lane_reader(s.clone(), l, inbox));
+            if entry {
+                let s2 = s.clone();
+                tokio::spawn(async move {
+                    let _ = s2.send(frame(DGOK, 0, &[])).await;
+                });
+            }
+        }
         s
+    }
+
+    /// Whether UDP goes on the datagram lane right now
+    pub fn lane_on(&self) -> bool {
+        self.lane.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|l| l.on.load(Ordering::Relaxed)).unwrap_or(false)
+    }
+
+    /// A UDP frame: on the datagram lane when there is one (never waits behind the stream), else
+    /// (or when it is too big for one datagram) on the stream
+    async fn send_udp_frame(&self, f: Vec<u8>) -> bool {
+        let lane = self.lane.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(l) = lane {
+            // (last_tx is the stream writer's: the watchdog in `send` must still see a stuck stream)
+            if l.send(&f) {
+                return true;
+            }
+        }
+        self.send(f).await
     }
 
     pub fn is_alive(&self) -> bool {
@@ -197,7 +236,7 @@ impl Session {
         p.extend_from_slice(t);
         p.extend_from_slice(data);
         self.shared.tx_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
-        self.send(frame(UDP, id, &p)).await
+        self.send_udp_frame(frame(UDP, id, &p)).await
     }
 
     fn deliver(&self, id: u32, data: Vec<u8>) {
@@ -257,60 +296,93 @@ async fn reader(s: Arc<Session>, mut rx: Rx) {
             break;
         }
         s.last_rx.store(now_ms(), Ordering::Relaxed);
-        let t = f[0];
-        let id = u32::from_be_bytes([f[1], f[2], f[3], f[4]]);
-        let p = &f[5..];
-        match t {
-            DATA => {
-                s.shared.rx_bytes.fetch_add(p.len() as u64, Ordering::Relaxed);
-                s.deliver(id, p.to_vec());
-            }
-            WIN if p.len() == 4 => s.window(id, u32::from_be_bytes([p[0], p[1], p[2], p[3]]) as usize),
-            FIN => s.fin(id),
-            RST => s.rst(id),
-            OPEN if !s.entry => {
-                let target = String::from_utf8_lossy(p).to_string();
-                let (rx_d, credit) = s.add_slot(id);
-                tokio::spawn(exit_open(s.clone(), id, target, rx_d, credit));
-            }
-            UDP => {
-                if p.is_empty() {
-                    continue;
-                }
-                let tl = p[0] as usize;
-                if p.len() < 1 + tl {
-                    continue;
-                }
-                let data = &p[1 + tl..];
-                if s.entry {
-                    // a reply from the target: back to the user
-                    s.shared.rx_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
-                    let back = s.shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).get(&id).map(|(sock, addr, _)| (sock.clone(), *addr));
-                    if let Some((sock, addr)) = back {
-                        let _ = sock.try_send_to(data, addr);
-                    }
-                } else {
-                    let target = String::from_utf8_lossy(&p[1..1 + tl]).to_string();
-                    if target == super::probe::ECHO {
-                        // smart-tunnel test: echo straight back through the tunnel
-                        s.shared.rx_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
-                        let _ = s.send(frame(UDP, id, p)).await;
-                    } else {
-                        exit_udp(&s, id, &target, data).await;
-                    }
-                }
-            }
-            PING => {
-                let _ = s.send(frame(PONG, 0, p)).await;
-            }
-            PONG if p.len() == 8 => {
-                let t0 = u64::from_be_bytes([p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]]);
-                s.rtt_ms.store(now_ms().saturating_sub(t0), Ordering::Relaxed);
-            }
-            _ => {}
-        }
+        handle(&s, &f).await;
     }
     s.kill();
+}
+
+/// The datagram lane's reader: only UDP frames come this way (and the lane must be agreed)
+async fn lane_reader(s: Arc<Session>, lane: Arc<super::dgram::Lane>, mut inbox: mpsc::Receiver<Vec<u8>>) {
+    let mut dead = s.dead_tx.subscribe();
+    loop {
+        let w = tokio::select! {
+            w = inbox.recv() => w,
+            _ = dead.changed() => break,
+        };
+        let Some(w) = w else { break };
+        let Some(f) = lane.open(&w) else { continue };
+        if f.len() < 5 || f[0] != UDP {
+            continue;
+        }
+        s.last_rx.store(now_ms(), Ordering::Relaxed);
+        handle(&s, &f).await;
+    }
+}
+
+/// One frame from the other end (stream or datagram lane)
+async fn handle(s: &Arc<Session>, f: &[u8]) {
+    let t = f[0];
+    let id = u32::from_be_bytes([f[1], f[2], f[3], f[4]]);
+    let p = &f[5..];
+    match t {
+        DATA => {
+            s.shared.rx_bytes.fetch_add(p.len() as u64, Ordering::Relaxed);
+            s.deliver(id, p.to_vec());
+        }
+        WIN if p.len() == 4 => s.window(id, u32::from_be_bytes([p[0], p[1], p[2], p[3]]) as usize),
+        FIN => s.fin(id),
+        RST => s.rst(id),
+        OPEN if !s.entry => {
+            let target = String::from_utf8_lossy(p).to_string();
+            let (rx_d, credit) = s.add_slot(id);
+            tokio::spawn(exit_open(s.clone(), id, target, rx_d, credit));
+        }
+        UDP => {
+            if p.is_empty() {
+                return;
+            }
+            let tl = p[0] as usize;
+            if p.len() < 1 + tl {
+                return;
+            }
+            let data = &p[1 + tl..];
+            if s.entry {
+                // a reply from the target: back to the user
+                s.shared.rx_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
+                let back = s.shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).get(&id).map(|(sock, addr, _)| (sock.clone(), *addr));
+                if let Some((sock, addr)) = back {
+                    let _ = sock.try_send_to(data, addr);
+                }
+            } else {
+                let target = String::from_utf8_lossy(&p[1..1 + tl]).to_string();
+                if target == super::probe::ECHO {
+                    // smart-tunnel test: echo straight back through the tunnel (the same lane a
+                    // game packet would take)
+                    s.shared.rx_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
+                    let _ = s.send_udp_frame(frame(UDP, id, p)).await;
+                } else {
+                    exit_udp(s, id, &target, data).await;
+                }
+            }
+        }
+        // the other end has the datagram lane too: use it (the exit answers once)
+        DGOK => {
+            let lane = s.lane.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            if let Some(l) = lane {
+                if !l.on.swap(true, Ordering::Relaxed) && !s.entry {
+                    let _ = s.send(frame(DGOK, 0, &[])).await;
+                }
+            }
+        }
+        PING => {
+            let _ = s.send(frame(PONG, 0, p)).await;
+        }
+        PONG if p.len() == 8 => {
+            let t0 = u64::from_be_bytes([p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]]);
+            s.rtt_ms.store(now_ms().saturating_sub(t0), Ordering::Relaxed);
+        }
+        _ => {}
+    }
 }
 
 async fn keepalive(s: Arc<Session>) {
@@ -449,7 +521,7 @@ async fn exit_udp_back(s: Arc<Session>, id: u32, sock: Arc<UdpSocket>) {
                 p.push(0);
                 p.extend_from_slice(&buf[..n]);
                 s.shared.tx_bytes.fetch_add(n as u64, Ordering::Relaxed);
-                if !s.send(frame(UDP, id, &p)).await {
+                if !s.send_udp_frame(frame(UDP, id, &p)).await {
                     break;
                 }
             }

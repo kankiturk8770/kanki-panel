@@ -35,6 +35,8 @@ const PEER_IDLE: Duration = Duration::from_secs(90);
 /// guard is dropped.
 pub struct ClientObfs {
     pub local: SocketAddr,
+    /// the datagram lane of this link (`dgram.rs`)
+    pub port: Arc<super::dgram::Port>,
     tasks: Vec<JoinHandle<()>>,
 }
 
@@ -57,16 +59,26 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<ClientObfs> {
     let local = inner.local_addr()?;
     // KCP's loopback source address, learned from its first packet; shared with the inbound task
     let kcp_addr: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
-    // KCP -> mask -> peer
+    let (port, lane) = super::dgram::Port::pair();
+    let super::dgram::RelayEnd { out: mut lane_out, inbox: lane_in } = lane;
+    // KCP and the datagram lane -> mask -> peer
     let (inner1, outer1, ka1, mask1) = (inner.clone(), outer.clone(), kcp_addr.clone(), mask.clone());
     let out_task = tokio::spawn(async move {
         let mut a = vec![0u8; 65535];
         let mut w: Vec<u8> = Vec::with_capacity(2048);
         loop {
-            let Ok((n, from)) = inner1.recv_from(&mut a).await else { break };
-            *ka1.lock().unwrap_or_else(|e| e.into_inner()) = Some(from);
-            w.clear();
-            mask1.seal(&a[..n], &mut w);
+            tokio::select! {
+                r = inner1.recv_from(&mut a) => {
+                    let Ok((n, from)) = r else { break };
+                    *ka1.lock().unwrap_or_else(|e| e.into_inner()) = Some(from);
+                    w.clear();
+                    mask1.seal(&a[..n], &mut w);
+                }
+                Some(d) = lane_out.recv() => {
+                    w.clear();
+                    mask1.seal(&d, &mut w);
+                }
+            }
             let _ = outer1.send(&w).await;
         }
     });
@@ -83,12 +95,16 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<ClientObfs> {
             let dst = *kcp_addr.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(dst) = dst {
                 if let Some((s, e)) = mask.open(&mut b[..n]) {
-                    let _ = inner.send_to(&b[s..e], dst).await;
+                    if super::dgram::looks_like(&b[s..e]) {
+                        let _ = lane_in.try_send(b[s..e].to_vec());
+                    } else {
+                        let _ = inner.send_to(&b[s..e], dst).await;
+                    }
                 }
             }
         }
     });
-    Ok(ClientObfs { local, tasks: vec![out_task, in_task] })
+    Ok(ClientObfs { local, port, tasks: vec![out_task, in_task] })
 }
 
 /// One real client as the KCP listener sees it: its own loopback socket, and the task that carries
@@ -97,7 +113,12 @@ struct Peer {
     sock: Arc<UdpSocket>,
     last: Instant,
     pump: JoinHandle<()>,
+    /// where this client's datagram-lane payloads go (its link's session)
+    lane_in: tokio::sync::mpsc::Sender<Vec<u8>>,
 }
+
+/// The datagram lane of each client, by the address the KCP listener sees it from
+pub type Ports = Arc<Mutex<HashMap<SocketAddr, Arc<super::dgram::Port>>>>;
 
 /// Server side: owns the public UDP socket, unwraps incoming datagrams and forwards them (in the
 /// clear) to the local KCP listener, and wraps KCP's replies back out to the right peer. One relay
@@ -105,6 +126,7 @@ struct Peer {
 pub struct ServerObfs {
     tasks: Vec<JoinHandle<()>>,
     peers: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    pub ports: Ports,
 }
 
 impl Drop for ServerObfs {
@@ -118,17 +140,22 @@ impl Drop for ServerObfs {
     }
 }
 
-/// KCP -> mask -> client, for one client.
-async fn pump(sock: Arc<UdpSocket>, public: Arc<UdpSocket>, mask: Arc<Mask>, to: SocketAddr) {
+/// KCP and the datagram lane -> mask -> client, for one client.
+async fn pump(sock: Arc<UdpSocket>, public: Arc<UdpSocket>, mask: Arc<Mask>, to: SocketAddr, mut lane_out: tokio::sync::mpsc::Receiver<Vec<u8>>) {
     let mut b = vec![0u8; 65535];
     let mut w: Vec<u8> = Vec::with_capacity(2048);
     loop {
-        let n = match sock.recv(&mut b).await {
-            Ok(n) => n,
-            Err(_) => break,
-        };
-        w.clear();
-        mask.seal(&b[..n], &mut w);
+        tokio::select! {
+            r = sock.recv(&mut b) => {
+                let Ok(n) = r else { break };
+                w.clear();
+                mask.seal(&b[..n], &mut w);
+            }
+            Some(d) = lane_out.recv() => {
+                w.clear();
+                mask.seal(&d, &mut w);
+            }
+        }
         let _ = public.send_to(&w, to).await;
     }
 }
@@ -139,8 +166,9 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
     // For each real client we open a private loopback socket toward the KCP listener, so KCP sees
     // distinct peers.
     let peers: Arc<Mutex<HashMap<SocketAddr, Peer>>> = Arc::new(Mutex::new(HashMap::new()));
+    let ports: Ports = Arc::new(Mutex::new(HashMap::new()));
 
-    let (public1, mask1, peers1) = (public.clone(), mask.clone(), peers.clone());
+    let (public1, mask1, peers1, ports1) = (public.clone(), mask.clone(), peers.clone(), ports.clone());
     let main_task = tokio::spawn(async move {
         let mut buf = vec![0u8; 65535];
         loop {
@@ -157,12 +185,12 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
                 let mut g = peers1.lock().unwrap_or_else(|e| e.into_inner());
                 let r = g.get_mut(&from).map(|p| {
                     p.last = Instant::now();
-                    p.sock.clone()
+                    (p.sock.clone(), p.lane_in.clone())
                 });
                 r
             };
-            let sock = match known {
-                Some(sock) => sock,
+            let (sock, lane_in) = match known {
+                Some(x) => x,
                 None => {
                     let full = peers1.lock().unwrap_or_else(|e| e.into_inner()).len() >= MAX_PEERS;
                     if full {
@@ -173,30 +201,48 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
                         continue;
                     }
                     let sock = Arc::new(sock);
-                    let pump = tokio::spawn(pump(sock.clone(), public1.clone(), mask1.clone(), from));
-                    peers1.lock().unwrap_or_else(|e| e.into_inner()).insert(from, Peer { sock: sock.clone(), last: Instant::now(), pump });
-                    sock
+                    let (port, lane) = super::dgram::Port::pair();
+                    if let Ok(a) = sock.local_addr() {
+                        ports1.lock().unwrap_or_else(|e| e.into_inner()).insert(a, port);
+                    }
+                    let pump = tokio::spawn(pump(sock.clone(), public1.clone(), mask1.clone(), from, lane.out));
+                    peers1.lock().unwrap_or_else(|e| e.into_inner()).insert(from, Peer { sock: sock.clone(), last: Instant::now(), pump, lane_in: lane.inbox.clone() });
+                    (sock, lane.inbox)
                 }
             };
-            let _ = sock.send(&buf[s..e]).await;
+            if super::dgram::looks_like(&buf[s..e]) {
+                let _ = lane_in.try_send(buf[s..e].to_vec());
+            } else {
+                let _ = sock.send(&buf[s..e]).await;
+            }
         }
     });
 
     // forget clients that went quiet (and clients whose pump died)
-    let peers2 = peers.clone();
+    let (peers2, ports2) = (peers.clone(), ports.clone());
     let reaper = tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(15)).await;
-            let mut g = peers2.lock().unwrap_or_else(|e| e.into_inner());
-            g.retain(|_, p| {
-                let keep = !p.pump.is_finished() && p.last.elapsed() < PEER_IDLE;
-                if !keep {
-                    p.pump.abort();
-                }
-                keep
-            });
+            let mut gone = vec![];
+            {
+                let mut g = peers2.lock().unwrap_or_else(|e| e.into_inner());
+                g.retain(|_, p| {
+                    let keep = !p.pump.is_finished() && p.last.elapsed() < PEER_IDLE;
+                    if !keep {
+                        p.pump.abort();
+                        if let Ok(a) = p.sock.local_addr() {
+                            gone.push(a);
+                        }
+                    }
+                    keep
+                });
+            }
+            let mut pm = ports2.lock().unwrap_or_else(|e| e.into_inner());
+            for a in gone {
+                pm.remove(&a);
+            }
         }
     });
 
-    Ok(ServerObfs { tasks: vec![main_task, reaper], peers })
+    Ok(ServerObfs { tasks: vec![main_task, reaper], peers, ports })
 }

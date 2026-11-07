@@ -261,7 +261,7 @@ pub fn wipe_all_if_last() {
     if let Ok(exe) = crate::util::exe_path() {
         let _ = std::fs::remove_file(exe);
     }
-    for f in ["/usr/local/bin/kanki", "/usr/local/bin/kanki-panel", "/usr/local/bin/kanki-xray", "/usr/local/bin/kanki-mix-server", "/etc/sysctl.d/90-kanki-tunnel.conf"] {
+    for f in ["/usr/local/bin/kanki", "/usr/local/bin/kanki-panel", "/usr/local/bin/kanki-xray", "/usr/local/bin/kanki-mix-server", "/etc/sysctl.d/90-kanki-tunnel.conf", crate::netq::CONF] {
         let _ = std::fs::remove_file(f);
     }
     for d in ["/etc/kanki", "/var/lib/kanki", "/usr/local/share/kanki-xray"] {

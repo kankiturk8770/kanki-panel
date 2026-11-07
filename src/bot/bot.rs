@@ -2954,7 +2954,7 @@ impl Bot {
             vec![b("👥 کاربران و اتصالات", "ag:u")],
             vec![b("⚙️ تنظیمات و تعرفه پلن‌ها", "ag:s")],
             vec![b("📢 پیام همگانی و ابزارها", "ag:t")],
-            vec![b("📡 وضعیت مسیرها", "a:paths")],
+            vec![b("📡 وضعیت مسیرها", &format!("webapp:miniapp:{}?admin=paths", crate::miniapp::url(&self.app)))],
             vec![b("⬅️ بازگشت", "home")],
         ])
     }
@@ -4047,8 +4047,13 @@ impl Bot {
                     }
                 }
                 if let Some(m) = msg {
-                    // a path alert opens the read-only report
-                    let kb = key.starts_with("pq:").then(|| ik(vec![vec![b("📡 وضعیت مسیرها", "a:paths")]]));
+                    let path = key.starts_with("pq:");
+                    // path alerts can be turned off in the paths page; server alerts are always sent
+                    if path && !crate::tunnel::quality::alerts_on(&self.app) {
+                        continue;
+                    }
+                    // a path alert opens the paths page of the mini app
+                    let kb = path.then(|| ik(vec![vec![b("📡 وضعیت مسیرها", &format!("webapp:miniapp:{}?admin=paths", crate::miniapp::url(&self.app)))]]));
                     self.notify_admins(&m, kb, None).await;
                 }
             }
@@ -4530,8 +4535,12 @@ mod flow_tests {
         // the admin menu: four groups
         tap(&bot, from(ADMIN, "Admin", "admin"), "adm").await;
         let g: Vec<String> = buttons(&log, ADMIN).into_iter().map(|b| b.1).collect();
-        assert_eq!(g, vec!["ag:o", "ag:u", "ag:s", "ag:t", "a:paths", "home"]);
-        // the path report is read-only: it only refreshes or goes back
+        assert_eq!(g.len(), 6);
+        assert_eq!(&g[..4], &["ag:o", "ag:u", "ag:s", "ag:t"]);
+        assert_eq!(g[5], "home");
+        // «📡 وضعیت مسیرها» opens the paths page of the mini app
+        assert!(g[4].ends_with("/tg/?admin=paths"), "{}", g[4]);
+        // an old report message's button still works: read-only, it only refreshes or goes back
         tap(&bot, from(ADMIN, "Admin", "admin"), "a:paths").await;
         let pb: Vec<String> = buttons(&log, ADMIN).into_iter().map(|b| b.1).collect();
         assert_eq!(pb, vec!["a:paths", "adm"]);

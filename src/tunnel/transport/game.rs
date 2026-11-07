@@ -205,6 +205,8 @@ fn shard_payload(s: &Shard<'_>) -> Vec<u8> {
 /// mask, FEC and duplication. The relay lives until this guard is dropped.
 pub struct ClientGame {
     pub local: SocketAddr,
+    /// the datagram lane of this link (`dgram.rs`)
+    pub port: Arc<super::dgram::Port>,
     tasks: Vec<JoinHandle<()>>,
 }
 
@@ -216,32 +218,53 @@ impl Drop for ClientGame {
     }
 }
 
+/// Waits until `dl`, or forever without one (the FEC group timer in a `select!`)
+async fn sleep_until_opt(dl: Option<Instant>) {
+    match dl {
+        Some(d) => tokio::time::sleep_until(d).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Marks the game link's packets "Expedited Forwarding" (DSCP 46), the class for real-time traffic.
+/// Routers that honour it (our own `fq`/cake queues, some carriers) send them first; the ones that
+/// do not just ignore it. It costs nothing and hides nothing (the payload stays masked).
+fn mark_ef(sock: &UdpSocket) {
+    #[cfg(target_os = "linux")]
+    let _ = sock.set_tos_v4(0xb8);
+    #[cfg(not(target_os = "linux"))]
+    let _ = sock;
+}
+
 pub async fn client(remote: SocketAddr, token: &str, g: GameOpts) -> Res<ClientGame> {
     let mask = Arc::new(Mask::new(token));
     let bind: SocketAddr = if remote.is_ipv6() { "[::]:0".parse()? } else { "0.0.0.0:0".parse()? };
     let outer = Arc::new(UdpSocket::bind(bind).await?);
+    mark_ef(&outer);
     outer.connect(remote).await?;
     let inner = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
     let local = inner.local_addr()?;
     let kcp_addr: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
+    let (port, lane) = super::dgram::Port::pair();
+    let super::dgram::RelayEnd { out: mut lane_out, inbox: lane_in } = lane;
 
-    // KCP -> FEC/dup -> mask -> peer
+    // KCP and the datagram lane -> FEC/dup -> mask -> peer
     let (inner1, outer1, ka1, mask1) = (inner.clone(), outer.clone(), kcp_addr.clone(), mask.clone());
     let out_task = tokio::spawn(async move {
         let mut out = Out::new(g);
         let mut a = vec![0u8; 65535];
         loop {
-            let got = match out.deadline() {
-                Some(dl) => tokio::time::timeout_at(dl, inner1.recv_from(&mut a)).await.ok(),
-                None => Some(inner1.recv_from(&mut a).await),
-            };
-            match got {
-                Some(Ok((n, from))) => {
-                    *ka1.lock().unwrap_or_else(|e| e.into_inner()) = Some(from);
-                    out.push(&outer1, None, &mask1, &a[..n], g.dup).await;
-                }
-                Some(Err(_)) => break,
-                None => out.flush_due(&outer1, None, &mask1, g.dup).await,
+            let dl = out.deadline();
+            tokio::select! {
+                r = inner1.recv_from(&mut a) => match r {
+                    Ok((n, from)) => {
+                        *ka1.lock().unwrap_or_else(|e| e.into_inner()) = Some(from);
+                        out.push(&outer1, None, &mask1, &a[..n], g.dup).await;
+                    }
+                    Err(_) => break,
+                },
+                Some(w) = lane_out.recv() => out.push(&outer1, None, &mask1, &w, g.dup).await,
+                _ = sleep_until_opt(dl) => out.flush_due(&outer1, None, &mask1, g.dup).await,
             }
         }
     });
@@ -260,11 +283,16 @@ pub async fn client(remote: SocketAddr, token: &str, g: GameOpts) -> Res<ClientG
             let Some((s, e)) = mask.open(&mut b[..n]) else { continue };
             let payload = b[s..e].to_vec();
             for pkt in decode_in(dec.as_mut(), &payload) {
-                let _ = inner.send_to(&pkt, dst).await;
+                if super::dgram::looks_like(&pkt) {
+                    // the session checks it (a full queue drops it: too late for a game anyway)
+                    let _ = lane_in.try_send(pkt);
+                } else {
+                    let _ = inner.send_to(&pkt, dst).await;
+                }
             }
         }
     });
-    Ok(ClientGame { local, tasks: vec![out_task, in_task] })
+    Ok(ClientGame { local, port, tasks: vec![out_task, in_task] })
 }
 
 // ------------------------------------------------------------------ server relay
@@ -276,7 +304,13 @@ struct Peer {
     last: StdInstant,
     pump: JoinHandle<()>,
     dec: Arc<Mutex<FecDecoder>>,
+    /// where this client's datagram-lane payloads go (its link's session)
+    lane_in: tokio::sync::mpsc::Sender<Vec<u8>>,
 }
+
+/// The datagram lane of each client, by the address the KCP listener sees it from (its loopback
+/// socket): `serve_game` hands it over with the accepted stream
+type Ports = Arc<Mutex<HashMap<SocketAddr, Arc<super::dgram::Port>>>>;
 
 /// Server side: owns the public UDP socket, unwraps incoming datagrams and forwards them (in the
 /// clear) to the local KCP listener, and wraps KCP's replies back out. One relay serves every
@@ -284,6 +318,7 @@ struct Peer {
 pub struct ServerGame {
     tasks: Vec<JoinHandle<()>>,
     peers: Arc<Mutex<HashMap<SocketAddr, Peer>>>,
+    pub ports: Ports,
 }
 
 impl Drop for ServerGame {
@@ -297,19 +332,19 @@ impl Drop for ServerGame {
     }
 }
 
-/// KCP -> FEC/dup -> mask -> client, for one client.
-async fn pump(sock: Arc<UdpSocket>, public: Arc<UdpSocket>, mask: Arc<Mask>, to: SocketAddr, g: GameOpts) {
+/// KCP and the datagram lane -> FEC/dup -> mask -> client, for one client.
+async fn pump(sock: Arc<UdpSocket>, public: Arc<UdpSocket>, mask: Arc<Mask>, to: SocketAddr, g: GameOpts, mut lane_out: tokio::sync::mpsc::Receiver<Vec<u8>>) {
     let mut out = Out::new(g);
     let mut b = vec![0u8; 65535];
     loop {
-        let got = match out.deadline() {
-            Some(dl) => tokio::time::timeout_at(dl, sock.recv(&mut b)).await.ok(),
-            None => Some(sock.recv(&mut b).await),
-        };
-        match got {
-            Some(Ok(n)) => out.push(&public, Some(to), &mask, &b[..n], g.dup).await,
-            Some(Err(_)) => break,
-            None => out.flush_due(&public, Some(to), &mask, g.dup).await,
+        let dl = out.deadline();
+        tokio::select! {
+            r = sock.recv(&mut b) => match r {
+                Ok(n) => out.push(&public, Some(to), &mask, &b[..n], g.dup).await,
+                Err(_) => break,
+            },
+            Some(w) = lane_out.recv() => out.push(&public, Some(to), &mask, &w, g.dup).await,
+            _ = sleep_until_opt(dl) => out.flush_due(&public, Some(to), &mask, g.dup).await,
         }
     }
 }
@@ -317,9 +352,11 @@ async fn pump(sock: Arc<UdpSocket>, public: Arc<UdpSocket>, mask: Arc<Mask>, to:
 pub async fn server(port: u16, token: &str, kcp_local: SocketAddr, g: GameOpts) -> Res<ServerGame> {
     let mask = Arc::new(Mask::new(token));
     let public = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", port)).await?);
+    mark_ef(&public);
     let peers: Arc<Mutex<HashMap<SocketAddr, Peer>>> = Arc::new(Mutex::new(HashMap::new()));
+    let ports: Ports = Arc::new(Mutex::new(HashMap::new()));
 
-    let (public1, mask1, peers1) = (public.clone(), mask.clone(), peers.clone());
+    let (public1, mask1, peers1, ports1) = (public.clone(), mask.clone(), peers.clone(), ports.clone());
     let main_task = tokio::spawn(async move {
         let mut buf = vec![0u8; 65535];
         loop {
@@ -339,7 +376,7 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr, g: GameOpts) 
                 let mut gmap = peers1.lock().unwrap_or_else(|e| e.into_inner());
                 gmap.get_mut(&from).map(|p| {
                     p.last = StdInstant::now();
-                    (p.sock.clone(), p.dec.clone())
+                    (p.sock.clone(), p.dec.clone(), p.lane_in.clone())
                 })
             };
             if entry.is_none() && peers1.lock().unwrap_or_else(|e| e.into_inner()).len() < MAX_PEERS {
@@ -347,41 +384,59 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr, g: GameOpts) 
                     if sock.connect(kcp_local).await.is_ok() {
                         let sock = Arc::new(sock);
                         let dec = Arc::new(Mutex::new(FecDecoder::default()));
-                        let pump = tokio::spawn(pump(sock.clone(), public1.clone(), mask1.clone(), from, g));
-                        peers1.lock().unwrap_or_else(|e| e.into_inner()).insert(from, Peer { sock: sock.clone(), last: StdInstant::now(), pump, dec: dec.clone() });
-                        entry = Some((sock, dec));
+                        let (port, lane) = super::dgram::Port::pair();
+                        if let Ok(a) = sock.local_addr() {
+                            ports1.lock().unwrap_or_else(|e| e.into_inner()).insert(a, port);
+                        }
+                        let pump = tokio::spawn(pump(sock.clone(), public1.clone(), mask1.clone(), from, g, lane.out));
+                        peers1.lock().unwrap_or_else(|e| e.into_inner()).insert(from, Peer { sock: sock.clone(), last: StdInstant::now(), pump, dec: dec.clone(), lane_in: lane.inbox.clone() });
+                        entry = Some((sock, dec, lane.inbox));
                     }
                 }
             }
-            let Some((sock, dec)) = entry else { continue };
+            let Some((sock, dec, lane_in)) = entry else { continue };
             let packets = {
                 let mut d = dec.lock().unwrap_or_else(|e| e.into_inner());
                 // FEC state lives per peer; without FEC payloads pass through
                 decode_in(if g.fec_on() { Some(&mut *d) } else { None }, &payload)
             };
             for pkt in packets {
-                let _ = sock.send(&pkt).await;
+                if super::dgram::looks_like(&pkt) {
+                    let _ = lane_in.try_send(pkt);
+                } else {
+                    let _ = sock.send(&pkt).await;
+                }
             }
         }
     });
 
     // forget clients that went quiet (and clients whose pump died)
-    let peers2 = peers.clone();
+    let (peers2, ports2) = (peers.clone(), ports.clone());
     let reaper = tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(15)).await;
-            let mut g = peers2.lock().unwrap_or_else(|e| e.into_inner());
-            g.retain(|_, p| {
-                let keep = !p.pump.is_finished() && p.last.elapsed() < PEER_IDLE;
-                if !keep {
-                    p.pump.abort();
-                }
-                keep
-            });
+            let mut gone = vec![];
+            {
+                let mut g = peers2.lock().unwrap_or_else(|e| e.into_inner());
+                g.retain(|_, p| {
+                    let keep = !p.pump.is_finished() && p.last.elapsed() < PEER_IDLE;
+                    if !keep {
+                        p.pump.abort();
+                        if let Ok(a) = p.sock.local_addr() {
+                            gone.push(a);
+                        }
+                    }
+                    keep
+                });
+            }
+            let mut pm = ports2.lock().unwrap_or_else(|e| e.into_inner());
+            for a in gone {
+                pm.remove(&a);
+            }
         }
     });
 
-    Ok(ServerGame { tasks: vec![main_task, reaper], peers })
+    Ok(ServerGame { tasks: vec![main_task, reaper], peers, ports })
 }
 
 // ------------------------------------------------------------------ engine glue
@@ -408,10 +463,11 @@ pub async fn serve_game(port: u16, token: &str, g: GameOpts, out: Inbox, sem: Ar
     let local = inner.local_addr()?;
     let relay = server(port, token, local, g).await?;
     let task = tokio::spawn(async move {
+        let ports = relay.ports.clone();
         let _relay = relay;
         loop {
-            let stream = match inner.accept().await {
-                Ok((s, _)) => s,
+            let (stream, from) = match inner.accept().await {
+                Ok(x) => x,
                 Err(_) => {
                     tokio::time::sleep(Duration::from_millis(200)).await;
                     continue;
@@ -422,7 +478,12 @@ pub async fn serve_game(port: u16, token: &str, g: GameOpts, out: Inbox, sem: Ar
                 continue;
             };
             let io: BoxIo = Box::new(super::quic::KcpHeld { stream, _permit: permit });
-            if out.send((super::link::Raw::Stream(io), "game".to_string())).await.is_err() {
+            // the client's datagram lane comes with its stream (taken: one link per lane)
+            let raw = match ports.lock().unwrap_or_else(|e| e.into_inner()).remove(&from) {
+                Some(p) => super::link::Raw::Dg(io, p),
+                None => super::link::Raw::Stream(io),
+            };
+            if out.send((raw, "game".to_string())).await.is_err() {
                 break;
             }
         }
@@ -430,14 +491,15 @@ pub async fn serve_game(port: u16, token: &str, g: GameOpts, out: Inbox, sem: Ar
     Ok(Bag { tasks: vec![task], endpoints: vec![] })
 }
 
-/// Dials a `game` server through the FEC/mask relay.
-pub async fn dial_game(remote: &str, token: &str, g: GameOpts) -> Res<BoxIo> {
+/// Dials a `game` server through the FEC/mask relay; the stream and its datagram lane.
+pub async fn dial_game(remote: &str, token: &str, g: GameOpts) -> Res<(BoxIo, Arc<super::dgram::Port>)> {
     let addr: SocketAddr = tokio::net::lookup_host(remote).await?.next().ok_or("cannot resolve the tunnel address")?;
     let relay = client(addr, token, g).await?;
+    let port = relay.port.clone();
     let stream = tokio::time::timeout(Duration::from_secs(12), tokio_kcp::KcpStream::connect(&game_kcp_config(), relay.local))
         .await
         .map_err(|_| "game connect timeout")??;
-    Ok(Box::new(GameIo { stream, _relay: relay }))
+    Ok((Box::new(GameIo { stream, _relay: relay }), port))
 }
 
 /// A KCP stream that also owns its game relay.

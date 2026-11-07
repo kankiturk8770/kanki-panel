@@ -1,3 +1,39 @@
+# v3.36.0 — gaming: short, fair queues on every server, separate UDP and TCP lanes in the tunnels
+- **Every server keeps its queues short (`core/netq.rs`):** at start (so after the nightly update), the panel, every VPN node and every
+  tunnel agent put `fq` on the outgoing network card when it still had the old first-come-first-served queue (a multi-queue card keeps
+  `mq`, only its sub-queues change), BBR for TCP, a small unsent backlog for TCP (`tcp_notsent_lowat` 128 KB), 1 MB default UDP socket
+  buffers (a burst is not dropped before the tunnel reads it), a bigger input backlog, no slow start after idle and MTU probing. Written
+  to `/etc/sysctl.d/91-kanki-game.conf` so a reboot keeps them; removed with the rest when Kanki is uninstalled. With `fq` every flow has
+  its own queue and a flow that sends little (a game) goes ahead of one that sends a lot (a download), so a player's ping does not jump
+  when other people on the same server download. Forwarding, `rp_filter` and the firewall are not touched. `KANKI_NETQ=off` turns it off.
+- **UDP and TCP lanes inside every tunnel (`engine::lane`):** a tunnel has several links (each one ordered). Until now a game's UDP
+  (WireGuard, AmneziaWG, microtun) and a download's TCP (Xray) could share one link, and a lost download packet held the game packets
+  behind it until it was sent again. Now, while a tunnel carries both kinds, UDP flows use the first half of its links and TCP the rest;
+  a tunnel with one kind only (or one link) uses every link as before. The split stays 10 minutes after the last TCP connection or UDP
+  packet, so flows do not hop between links. Only the entry chooses: no change on the wire, old exits work as they are.
+- **Every UDP tunnel transport has the datagram lane:** `game` (in its FEC relay), `kcp` (in its obfuscation relay), `faketcp` (one fake
+  segment per packet), and `quic` / `hq` / `dual` (QUIC's own unreliable datagrams, RFC 9221, sized to what the connection takes). So
+  WireGuard, AmneziaWG, microtun, KANKI MIX and Hysteria2 through an Iran server never wait behind a lost packet, whichever UDP transport
+  the admin picked. TCP transports (`tcp`, `tcpmux`, `ws`, `wss`, `h2`, `cdn`) cannot carry unordered packets; there UDP only gets its own
+  links. The `awg` and `hy2` tunnels carry packets unordered already.
+- **Game-FEC: a datagram lane for UDP (`transport/dgram.rs`):** a `game` link was one ordered KCP stream, so a game packet that came
+  after a lost packet waited until that one was sent again (head-of-line blocking: the ping jumps), for every user and protocol on the
+  link (WireGuard, AmneziaWG, microtun, KANKI MIX, Hysteria2 through Iran). Now every UDP packet of the mux that fits one datagram
+  (frame up to 1052 bytes: game packets) travels on its own next to the KCP traffic, through the same relay: masked, FEC-coded and
+  duplicated like before, but never held for another one. Encrypted with ChaCha20-Poly1305 under a key of its own per link and direction
+  (derived from the link's key exchange), counter nonce, 128-packet replay window. Bigger packets (downloads) keep the stream. Used only
+  when both ends have it (`DGOK` frame): an end that is not updated yet keeps everything on the stream, so nothing breaks while servers
+  update one by one. The live quality check and the smart-tunnel echo use the same lane. Tunnel status shows `lanes`.
+- **«📡 وضعیت مسیرها» is a mini app page now** (bot › admin panel; admins only, `?admin=paths`, `/tg/api/admin/paths`,
+  `quality::view`): one card per server abroad (Germany's five tunnels together, Turkey's together; the worst first), its ping, loss and
+  jitter (the median tunnel, last 10 minutes) and its last hour, and every tunnel that reaches it hanging off one line with a coloured
+  stop: where it comes from (the Iran server), its transport, «بی‌ترتیب» when it has the datagram lane, and its own numbers or «قطع است».
+  It follows by itself every 30 s while open; «تازه کن» reloads at once. One switch: **path alerts** on or off (`path_alerts`); the
+  server offline / online alerts are always sent as before. A path alert's button opens the same page; an old report message's
+  «🔄 تازه کردن» still works.
+- **Game-FEC packets are marked Expedited Forwarding (DSCP 46),** the real-time class; queues that honour it send them first, the
+  others ignore it. The live quality check (3.35.0) now measures the UDP lane, the one games use.
+
 # v3.35.0 — path quality in the bot: loss, ping and jitter of every tunnel, with an alert
 - **Live measurement inside each tunnel:** the entry of every running tunnel sends 20 UDP packets of 64 bytes through it to the
   exit's echo and back once a minute, 50 ms apart (about 1.3 KB each way: nothing a user notices). It reports loss (a packet not back

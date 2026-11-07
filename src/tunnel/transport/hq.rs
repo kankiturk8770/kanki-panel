@@ -16,7 +16,7 @@
 //!
 //! The key of the mask is the tunnel token, which both ends already share.
 
-use super::link::{Bag, BoxIo, Inbox, Res};
+use super::link::{Bag, BoxIo, Inbox, Raw, Res};
 use super::quic::{accept_loop, client_config, server_config, QuicIo, QUIC_PRIME};
 use super::salamander::Mask;
 use quinn::udp::{RecvMeta, Transmit};
@@ -192,8 +192,8 @@ pub async fn serve(port: u16, token: &str, out: Inbox, sem: Arc<Semaphore>) -> R
     Ok(accept_loop(endpoint, out, sem))
 }
 
-/// Dials an `hq` server and opens one bidirectional stream.
-pub async fn dial(remote: &str, sni: &str, token: &str) -> Res<BoxIo> {
+/// Dials an `hq` server and opens one bidirectional stream (with the connection's datagram lane).
+pub async fn dial(remote: &str, sni: &str, token: &str) -> Res<Raw> {
     use tokio::io::AsyncWriteExt;
     let addr: SocketAddr = tokio::net::lookup_host(remote).await?.next().ok_or("cannot resolve the tunnel address")?;
     let bind: SocketAddr = if addr.is_ipv6() { "[::]:0".parse()? } else { "0.0.0.0:0".parse()? };
@@ -206,7 +206,12 @@ pub async fn dial(remote: &str, sni: &str, token: &str) -> Res<BoxIo> {
     // the stream only truly exists on the peer once some bytes are sent
     AsyncWriteExt::write_all(&mut send, QUIC_PRIME).await?;
     AsyncWriteExt::flush(&mut send).await?;
-    Ok(Box::new(QuicIo::new(send, recv, conn)))
+    let lane = super::quic::quic_lane(&conn);
+    let io: BoxIo = Box::new(QuicIo::new(send, recv, conn));
+    Ok(match lane {
+        Some(p) => Raw::Dg(io, p),
+        None => Raw::Stream(io),
+    })
 }
 
 #[cfg(test)]
