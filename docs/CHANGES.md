@@ -1,3 +1,12 @@
+# v3.36.1 — gaming lane: no loss on tunnels without FEC
+- **Found in a lab test** (`scripts/tunnel_lab.py`: old and new programs at both ends, a path that drops 3 % each way and adds
+  40 ± 10 ms, a fake game at 50 packets a second while a download fills the same tunnel): on `kcp`, `hq` and `quic` the datagram lane
+  of 3.36.0 took the ping spikes away (worst packet 250-430 ms → about 100 ms) but lost 6 % of the game's packets, since these have no
+  FEC and the lane does not resend. Now every lane payload goes **twice** on carriers without FEC (`dgram::Port::pair_twice`; the
+  replay window drops the second copy), and on QUIC the second copy leaves 3 ms later so it is not in the same packet as the first.
+  Result on the same path: loss 0-0.2 %, worst packet about 100-110 ms, on every UDP transport. `game` is unchanged (it has FEC).
+- Mixed versions checked in the same lab: a new end with an old one works on every transport (the old behaviour, no loss).
+
 # v3.36.0 — gaming: short, fair queues on every server, separate UDP and TCP lanes in the tunnels
 - **Every server keeps its queues short (`core/netq.rs`):** at start (so after the nightly update), the panel, every VPN node and every
   tunnel agent put `fq` on the outgoing network card when it still had the old first-come-first-served queue (a multi-queue card keeps
