@@ -104,15 +104,31 @@ pub async fn serve_quic(port: u16, out: Inbox, sem: Arc<Semaphore>) -> Res<Bag> 
     Ok(accept_loop(endpoint, out, sem))
 }
 
+/// How long the second copy of a lane payload waits on QUIC, so it travels in a packet of its own
+const DUP_GAP_MS: u64 = 3;
+
 /// The datagram lane of a QUIC connection (`dgram.rs`), carried by QUIC's own unreliable datagrams.
 /// None when the other end does not take datagrams. The pumps end with the connection.
 pub(super) fn quic_lane(conn: &quinn::Connection) -> Option<Arc<super::dgram::Port>> {
     let max = conn.max_datagram_size()?;
-    let (port, end) = super::dgram::Port::pair_max(max);
+    let (port, end) = super::dgram::Port::pair_twice(max);
     let super::dgram::RelayEnd { out: mut lane_out, inbox } = end;
     let c1 = conn.clone();
     tokio::spawn(async move {
+        let mut last: Vec<u8> = vec![];
         while let Some(w) = lane_out.recv().await {
+            // the second copy of a payload (`dgram::Port::pair_twice`): QUIC would put both in one
+            // packet and a lost packet would take both, so it leaves a few ms later in its own
+            if w == last {
+                let c = c1.clone();
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(DUP_GAP_MS)).await;
+                    let _ = c.send_datagram(w.into());
+                });
+                last.clear();
+                continue;
+            }
+            last.clone_from(&w);
             // too big for the path right now, or the connection is gone: a lost datagram, like on UDP
             if let Err(quinn::SendDatagramError::ConnectionLost(_)) = c1.send_datagram(w.into()) {
                 break;

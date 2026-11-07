@@ -429,7 +429,7 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<FtClient> {
 
     // KCP -> mask -> fake TCP segment
     let (inner1, raw1, mask1, ka1, st1) = (inner.clone(), raw.clone(), mask.clone(), kcp_addr.clone(), state.clone());
-    let (port, lane) = super::dgram::Port::pair();
+    let (port, lane) = super::dgram::Port::pair_twice(super::dgram::MAX_WIRE);
     let super::dgram::RelayEnd { out: mut lane_out, inbox: lane_in } = lane;
     let out_task = tokio::spawn(async move {
         let mut a = vec![0u8; 65535];
@@ -640,7 +640,7 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr) -> Res<Server
                     // our sequence numbers go on from what the client acknowledges (our iss + 1)
                     let sq = Arc::new(Mutex::new(ack));
                     let ak = Arc::new(Mutex::new(next_ack));
-                    let (lport, lane) = super::dgram::Port::pair();
+                    let (lport, lane) = super::dgram::Port::pair_twice(super::dgram::MAX_WIRE);
                     if let Ok(a) = sock.local_addr() {
                         ports1.lock().unwrap_or_else(|e| e.into_inner()).insert(a, lport);
                     }

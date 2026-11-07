@@ -55,16 +55,25 @@ pub struct Port {
     inbox: Mutex<Option<mpsc::Receiver<Vec<u8>>>>,
     /// biggest wire payload the carrier takes (QUIC datagrams may be smaller than MAX_WIRE)
     max: usize,
+    /// how many times each payload is sent: 2 on carriers without FEC (`kcp`, `faketcp`, `quic`,
+    /// `hq`), so a lost game packet is not gone (the replay window drops the second copy); 1 on
+    /// `game`, whose relay has FEC (and its own duplication switch)
+    copies: usize,
 }
 
 impl Port {
+    /// A lane on a carrier with FEC (`game`): every payload once
     pub fn pair() -> (Arc<Port>, RelayEnd) {
-        Port::pair_max(MAX_WIRE)
+        Port::pair_with(MAX_WIRE, 1)
     }
-    pub fn pair_max(max: usize) -> (Arc<Port>, RelayEnd) {
+    /// A lane on a carrier without FEC: every payload twice
+    pub fn pair_twice(max: usize) -> (Arc<Port>, RelayEnd) {
+        Port::pair_with(max, 2)
+    }
+    fn pair_with(max: usize, copies: usize) -> (Arc<Port>, RelayEnd) {
         let (out_tx, out_rx) = mpsc::channel(QUEUE);
         let (in_tx, in_rx) = mpsc::channel(QUEUE);
-        (Arc::new(Port { out: out_tx, inbox: Mutex::new(Some(in_rx)), max: max.min(MAX_WIRE) }), RelayEnd { out: out_rx, inbox: in_tx })
+        (Arc::new(Port { out: out_tx, inbox: Mutex::new(Some(in_rx)), max: max.min(MAX_WIRE), copies }), RelayEnd { out: out_rx, inbox: in_tx })
     }
     /// The received payloads (once: the session's reader takes them)
     pub fn take_inbox(&self) -> Option<mpsc::Receiver<Vec<u8>>> {
@@ -168,10 +177,12 @@ impl Lane {
         if !self.on.load(Ordering::Relaxed) {
             return false;
         }
-        match self.seal(frame) {
-            Some(w) => self.port.out.try_send(w).is_ok(),
-            None => false,
+        let Some(w) = self.seal(frame) else { return false };
+        if self.port.copies > 1 && self.port.out.try_send(w.clone()).is_err() {
+            return false;
         }
+        // the copy that counts: when it does not fit, the caller sends the frame on the stream
+        self.port.out.try_send(w).is_ok()
     }
     /// wire payload -> frame (None: not ours, damaged or replayed)
     pub fn open(&self, w: &[u8]) -> Option<Vec<u8>> {
@@ -234,11 +245,30 @@ mod tests {
 
     #[test]
     fn a_small_carrier_sends_big_frames_on_the_stream() {
-        let (p, _end) = Port::pair_max(200);
+        let (p, _end) = Port::pair_twice(200);
         let k = [3u8; 32];
         let x = Lane::new(p, &Keys { tx: k, rx: k });
         assert!(x.seal(&[0; 200 - HEAD - TAG]).is_some());
         assert!(x.seal(&[0; 200 - HEAD - TAG + 1]).is_none());
+    }
+
+    #[test]
+    fn without_fec_every_payload_goes_twice_and_arrives_once() {
+        let (p, mut end) = Port::pair_twice(MAX_WIRE);
+        let k = [5u8; 32];
+        let x = Lane::new(p, &Keys { tx: k, rx: k });
+        x.on.store(true, Ordering::Relaxed);
+        assert!(x.send(b"shot"));
+        let (a, b) = (end.out.try_recv().unwrap(), end.out.try_recv().unwrap());
+        assert!(end.out.try_recv().is_err());
+        assert_eq!(x.open(&a).unwrap(), b"shot");
+        assert!(x.open(&b).is_none(), "the second copy is a replay");
+        // with FEC (game): once
+        let (p1, mut e1) = Port::pair();
+        let y = Lane::new(p1, &Keys { tx: k, rx: k });
+        y.on.store(true, Ordering::Relaxed);
+        assert!(y.send(b"shot"));
+        assert!(e1.out.try_recv().is_ok() && e1.out.try_recv().is_err());
     }
 
     #[test]

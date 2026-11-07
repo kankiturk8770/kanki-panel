@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.36.1 — no packet loss on the gaming lane
+- On tunnels without FEC (KCP, QUIC, HQ, FakeTCP) small game packets go twice, so the unordered lane loses nothing (lab: 6 % → 0-0.2 %, worst packet about 100 ms instead of 250-430 ms).
 ## New in 3.36 — steadier ping for games
 - Every server keeps its network queues short and fair (`fq`, BBR, small TCP backlog), so a player's ping does not jump while others download; inside each tunnel game UDP and download TCP use separate links; in every UDP tunnel (Game-FEC, KCP, QUIC, HQ, FakeTCP) game packets travel unordered and never wait behind a lost packet (Game-FEC keeps its FEC); game tunnel packets are marked real-time (DSCP EF). «📡 وضعیت مسیرها» in the bot opens a mini app page: every server abroad with its tunnels on one line, their loss, ping and jitter, and a switch for path alerts.
 ## New in 3.35 — path quality in the bot
