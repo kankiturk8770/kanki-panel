@@ -161,6 +161,8 @@ pub struct Status {
     pub listening: bool,
     /// smart-tunnel test result (entry side of a probe)
     pub probe: Option<serde_json::Value>,
+    /// live quality of the tunnel (entry side, once a minute): {at, n, loss, ping, jit, max}
+    pub quality: Option<serde_json::Value>,
 }
 
 struct State {
@@ -170,6 +172,7 @@ struct State {
     rr: AtomicUsize,
     next_udp: AtomicU32,
     probe: Mutex<Option<serde_json::Value>>,
+    quality: Mutex<Option<serde_json::Value>>,
 }
 
 impl State {
@@ -227,6 +230,7 @@ impl Running {
             rr: AtomicUsize::new(0),
             next_udp: AtomicU32::new(1),
             probe: Mutex::new(None),
+            quality: Mutex::new(None),
         });
         let mut tasks = vec![];
         if spec.transport == "baseline" {
@@ -255,6 +259,8 @@ impl Running {
         }
         if spec.probe && spec.role == "entry" {
             tasks.push(tokio::spawn(probe_task(state.clone())));
+        } else if spec.role == "entry" {
+            tasks.push(tokio::spawn(quality_task(state.clone())));
         }
         Running { spec, state, tasks }
     }
@@ -267,6 +273,13 @@ impl Running {
             s.kill();
         }
         self.state.shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
+    /// One live quality measurement right now (the tests; the panel waits for `quality_task`)
+    #[cfg(test)]
+    pub async fn quality_now(&self) -> Option<serde_json::Value> {
+        let s = self.state.pick(0)?;
+        super::probe::udp_quality(&s, &self.state.shared, QUALITY_FLOW).await.ok()
     }
 
     pub fn status(&self) -> Status {
@@ -289,6 +302,7 @@ impl Running {
             transport: self.spec.transport.clone(),
             listening: self.spec.listens(),
             probe: self.state.probe.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            quality: self.state.quality.lock().unwrap_or_else(|e| e.into_inner()).clone(),
         }
     }
 }
@@ -530,6 +544,35 @@ fn parse_ping(text: &str) -> Option<(f64, f64)> {
         .and_then(|s| s.trim().parse::<f64>().ok())
         .unwrap_or(0.0);
     Some((avg, loss))
+}
+
+/// UDP flow id of the live quality check (the user flows count up from 1, the smart test uses 0x7FFF_FF00)
+const QUALITY_FLOW: u32 = 0x7FFF_FE00;
+/// how often the entry measures its tunnel
+pub const QUALITY_EVERY: Duration = Duration::from_secs(60);
+
+/// entry: once a minute, 20 small UDP packets through the tunnel to the exit's echo and back
+/// (`probe::udp_quality`), so the panel sees loss, ping and jitter as a game would. A minute with no
+/// link leaves no result (the tunnel's own up/down alert covers that).
+async fn quality_task(state: Arc<State>) {
+    // spread the tunnels of a server over the minute
+    let first = 15 + rand::random::<u64>() % 45;
+    tokio::time::sleep(Duration::from_secs(first)).await;
+    loop {
+        let r = match state.pick(0) {
+            Some(s) => tokio::time::timeout(Duration::from_secs(5), super::probe::udp_quality(&s, &state.shared, QUALITY_FLOW))
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .map(|mut v| {
+                    v["at"] = serde_json::json!(crate::util::now());
+                    v
+                }),
+            None => None,
+        };
+        *state.quality.lock().unwrap_or_else(|e| e.into_inner()) = r;
+        tokio::time::sleep(QUALITY_EVERY).await;
+    }
 }
 
 async fn probe_task(state: Arc<State>) {

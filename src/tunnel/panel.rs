@@ -1272,6 +1272,8 @@ pub async fn local_loop(app: Arc<App>) {
             "local".into(),
             Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, emergency: Value::Null, fw: Value::Null, listen: Value::Null, setup: Value::Null },
         );
+        // the newest live measurements of every tunnel, for the path-quality report
+        super::quality::ingest(&app);
         // the emergency chat may run on the panel server itself
         let want = if app.db.get("emer_server") == "local" { emer_cfg(&app) } else { None };
         let st = tokio::task::spawn_blocking(move || {
@@ -1334,6 +1336,44 @@ pub fn health(app: &App, offline_nodes: &HashSet<String>) -> Vec<(String, String
         }
     }
     out
+}
+
+/// For the path-quality report (`quality.rs`): every enabled tunnel, whether it is up (both servers
+/// reporting and both holding a link) and the entry's last live measurement (None when it is older than
+/// 3 minutes, or the entry runs an agent without the measurement).
+pub(crate) fn live_quality(app: &App) -> Vec<(Tunnel, bool, Option<Value>)> {
+    let seen = seen().lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let t = now();
+    let fresh = |sid: &str| sid == "local" || seen.get(sid).map(|x| t - x.at < 20).unwrap_or(false);
+    let st = |sid: &str, tid: &str| seen.get(sid).and_then(|x| x.status.iter().find(|q| q.id == tid).cloned());
+    tunnels(app)
+        .into_iter()
+        .filter(|tu| tu.enabled)
+        .map(|tu| {
+            let (en, ex) = (st(&tu.entry, &tu.id), st(&tu.exit, &tu.id));
+            let up = fresh(&tu.entry) && fresh(&tu.exit) && en.as_ref().is_some_and(|q| q.links > 0) && ex.as_ref().is_some_and(|q| q.links > 0);
+            let q = en.and_then(|q| q.quality).filter(|q| q["at"].as_i64().map(|a| t - a < 180).unwrap_or(false));
+            (tu, up, q)
+        })
+        .collect()
+}
+
+/// The names of a tunnel's two servers, the Iran one first
+pub(crate) fn pair_names(app: &App, entry: &str, exit: &str) -> (String, String) {
+    let list = servers(app);
+    let name = |id: &str| {
+        if id == "local" {
+            return local_name(app);
+        }
+        list.iter().find(|s| s.id == id).map(|s| s.name.trim().to_string()).filter(|n| !n.is_empty()).unwrap_or_else(|| id.to_string())
+    };
+    let locs = server_locs(app);
+    let iran = |id: &str| locs.get(id).map(|l| l.0 == "iran").unwrap_or(false);
+    if iran(exit) && !iran(entry) {
+        (name(exit), name(entry))
+    } else {
+        (name(entry), name(exit))
+    }
 }
 
 /// A tunnel whose round trip stays at least this high is reported to the admins
@@ -3092,5 +3132,82 @@ mod removal_tests {
         s.ping = now() - 120;
         let rid = track("tunnel", "t", vec![s]);
         assert_eq!(removal(&rid).unwrap().steps[0].state, "off");
+    }
+}
+
+#[cfg(test)]
+mod quality_tests {
+    //! «📡 وضعیت مسیرها»: the live measurements the entries report become one verdict per server pair
+    use super::*;
+    use std::sync::atomic::AtomicI64;
+
+    fn test_app() -> Arc<App> {
+        let dir = std::env::temp_dir().join(format!("kanki-pq-test-{}", rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
+        Arc::new(App {
+            db,
+            env: HashMap::from([("DOMAIN".to_string(), "fi.example.com".to_string())]),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// the two servers report: every tunnel up, the entry with one measurement of (loss, jitter) each
+    fn report(at: i64, q: &[(f64, f64)]) {
+        let tid = |i: usize| format!("pqt{}", i);
+        let entry: Vec<Status> = q.iter().enumerate().map(|(i, (loss, jit))| Status {
+            id: tid(i), role: "entry".into(), links: 2,
+            quality: Some(json!({"at": at, "n": 20, "loss": loss, "ping": 75, "jit": jit, "max": 90})), ..Default::default()
+        }).collect();
+        let exit: Vec<Status> = (0..q.len()).map(|i| Status { id: tid(i), role: "exit".into(), links: 2, ..Default::default() }).collect();
+        let mut sn = seen().lock().unwrap();
+        for (sid, status) in [("pq_ir", entry), ("pq_de", exit)] {
+            sn.insert(sid.into(), Seen { at: now(), status, ..Default::default() });
+        }
+    }
+
+    #[test]
+    fn a_lossy_path_is_one_alert_and_every_tunnel_shows() {
+        let app = test_app();
+        save_servers(&app, &[
+            TServer { id: "pq_de".into(), name: "GERMANY".into(), loc: "abroad".into(), ..Default::default() },
+            TServer { id: "pq_ir".into(), name: "IRAN1".into(), loc: "iran".into(), ..Default::default() },
+        ]);
+        let tu = |i: usize, name: &str, tr: &str| Tunnel { id: format!("pqt{}", i), name: name.into(), entry: "pq_ir".into(), exit: "pq_de".into(), transport: tr.into(), enabled: true, ..Default::default() };
+        save_tunnels(&app, &[tu(0, "IR1-GERMANY-WG", "game"), tu(1, "IR1-GERMANY-AWG", "game"), tu(2, "IR1-GERMANY-HQ", "hq")]);
+        // not enough minutes yet: nothing is judged
+        let t = now();
+        report(t - 170, &[(0.0, 2.0), (0.0, 2.0), (0.0, 2.0)]);
+        super::super::quality::ingest(&app);
+        assert!(super::super::quality::health(&app).is_empty());
+        assert!(super::super::quality::report(&app).contains("هنوز داده نیست"));
+        // six minutes where two of the three tunnels lose 10 %: one alert for the whole path
+        for k in 0..6 {
+            report(t - 160 + k * 30, &[(10.0, 40.0), (12.0, 35.0), (0.0, 2.0)]);
+            super::super::quality::ingest(&app);
+        }
+        let h = super::super::quality::health(&app);
+        assert_eq!(h.len(), 1, "{:?}", h);
+        assert_eq!((h[0].0.as_str(), h[0].1.as_str(), h[0].2), ("pq:pq_de|pq_ir", "IRAN1 ↔ GERMANY", false));
+        let r = super::super::quality::report(&app);
+        assert!(r.contains("🔴 <b>IRAN1 ↔ GERMANY</b>") && r.contains("IR1-GERMANY-HQ · HQ-QUIC") && r.contains("🟢 IR1-GERMANY-HQ"), "{}", r);
+        assert!(r.chars().count() < 4096);
+        // the exit stops reporting a link of one tunnel: it shows as cut
+        {
+            let mut sn = seen().lock().unwrap();
+            sn.get_mut("pq_de").unwrap().status[2].links = 0;
+        }
+        assert!(super::super::quality::report(&app).contains("🔴 IR1-GERMANY-HQ · HQ-QUIC: قطع"));
+    }
+
+    #[test]
+    fn the_verdict_needs_a_clear_improvement() {
+        use super::super::quality::{judge, pair_agg, Agg};
+        let a = |loss: f64| Agg { n: 6, loss, ping: 75, jit: 5.0, max: 90 };
+        // 2.5 % after a bad spell is not yet good
+        assert!(judge(true, &pair_agg(&[a(2.5)]).unwrap()));
+        assert!(!judge(true, &pair_agg(&[a(0.5)]).unwrap()));
     }
 }

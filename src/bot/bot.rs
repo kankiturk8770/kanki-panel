@@ -2954,6 +2954,7 @@ impl Bot {
             vec![b("👥 کاربران و اتصالات", "ag:u")],
             vec![b("⚙️ تنظیمات و تعرفه پلن‌ها", "ag:s")],
             vec![b("📢 پیام همگانی و ابزارها", "ag:t")],
+            vec![b("📡 وضعیت مسیرها", "a:paths")],
             vec![b("⬅️ بازگشت", "home")],
         ])
     }
@@ -3046,6 +3047,13 @@ impl Bot {
                 let mut kb: Kb = rows.iter().filter(|o| o.3 != "waiting").map(|o| vec![b(&format!("✅ تأیید #{}", o.0), &format!("ap:{}", o.0))]).collect();
                 kb.push(vec![b("⬅️ پنل مدیریت", "adm")]);
                 { self.edit(chat, mid, &format!("🧾 <b>سفارش‌های باز</b>\n\n{}", txt.join("\n")), Some(ik(kb))).await; true }
+            }
+            // read-only: how well each server pair carries a game now (tunnel/quality.rs)
+            "a:paths" => {
+                let txt = crate::tunnel::quality::report(&self.app);
+                let kb = ik(vec![vec![b("🔄 تازه کردن", "a:paths")], vec![b("⬅️ پنل مدیریت", "adm")]]);
+                self.edit(chat, mid, &txt, Some(kb)).await;
+                true
             }
             "a:search" => { set_wait(Wait::Search); { self.edit(chat, mid, "🔍 نام کاربری، شناسه یا آیدی تلگرام را بفرستید:", back).await; true } }
             "a:gift" => {
@@ -3998,7 +4006,8 @@ impl Bot {
     // ============================================================ کارهای زمان‌بندی‌شده
 
     /// Telegram alert to the admins when a node, tunnel server or tunnel stays down for about
-    /// 90 seconds, and another one when it is back. Off when the setting `tg_alerts` is "0".
+    /// 90 seconds, or a server pair gets lossy (`tunnel::quality`), and another one when it is back.
+    /// Off when the setting `tg_alerts` is "0".
     async fn watch(self: Arc<Self>) {
         // after a panel restart the agents need a moment to report again
         tokio::time::sleep(std::time::Duration::from_secs(120)).await;
@@ -4014,6 +4023,7 @@ impl Bot {
             let mut items: Vec<(String, String, bool, String)> =
                 nodes.iter().map(|n| (format!("node:{}", n.id), format!("نود {}", n.name), n.online, String::new())).collect();
             items.extend(crate::tunnel::panel::health(&self.app, &offline));
+            items.extend(crate::tunnel::quality::health(&self.app));
             let keys: Vec<String> = items.iter().map(|i| i.0.clone()).collect();
             st.retain(|k, _| keys.contains(k));
             for (key, name, ok, detail) in items {
@@ -4037,7 +4047,9 @@ impl Bot {
                     }
                 }
                 if let Some(m) = msg {
-                    self.notify_admins(&m, None, None).await;
+                    // a path alert opens the read-only report
+                    let kb = key.starts_with("pq:").then(|| ik(vec![vec![b("📡 وضعیت مسیرها", "a:paths")]]));
+                    self.notify_admins(&m, kb, None).await;
                 }
             }
         }
@@ -4288,8 +4300,22 @@ fn alert_text(key: &str, name: &str, ok: bool, detail: &str) -> String {
         ("tu", true) => format!("🟢 <b>{}</b> دوباره وصل شد", n),
         ("tp", false) => format!("🟠 پینگ <b>{}</b> بالاست: <b>{} ms</b>", n, detail),
         ("tp", true) => format!("🟢 پینگ <b>{}</b> عادی شد: {} ms", n, detail),
+        ("pq", false) => format!("🟠 مسیر <b>{}</b> پر افت شده\n{}\n\nبازی و تماس روی این مسیر لگ می‌زند. جزئیات هر تانل در «📡 وضعیت مسیرها».", n, esc(detail)),
+        ("pq", true) => format!("🟢 مسیر <b>{}</b> دوباره خوب شد\n{}", n, esc(detail)),
         (_, false) => format!("🔴 <b>{}</b> آفلاین است", n),
         (_, true) => format!("🟢 <b>{}</b> دوباره آنلاین شد", n),
+    }
+}
+
+#[cfg(test)]
+mod path_alert_tests {
+    use super::*;
+
+    #[test]
+    fn a_path_alert_names_the_path_and_its_numbers() {
+        let bad = alert_text("pq:a|b", "IRAN1 ↔ GERMANY", false, "پینگ 75ms · افت 6% · لرزش 40ms");
+        assert!(bad.starts_with("🟠 مسیر <b>IRAN1 ↔ GERMANY</b> پر افت شده") && bad.contains("افت 6%"), "{}", bad);
+        assert!(alert_text("pq:a|b", "IRAN1 ↔ GERMANY", true, "x").starts_with("🟢 مسیر"));
     }
 }
 
@@ -4504,7 +4530,14 @@ mod flow_tests {
         // the admin menu: four groups
         tap(&bot, from(ADMIN, "Admin", "admin"), "adm").await;
         let g: Vec<String> = buttons(&log, ADMIN).into_iter().map(|b| b.1).collect();
-        assert_eq!(g, vec!["ag:o", "ag:u", "ag:s", "ag:t", "home"]);
+        assert_eq!(g, vec!["ag:o", "ag:u", "ag:s", "ag:t", "a:paths", "home"]);
+        // the path report is read-only: it only refreshes or goes back
+        tap(&bot, from(ADMIN, "Admin", "admin"), "a:paths").await;
+        let pb: Vec<String> = buttons(&log, ADMIN).into_iter().map(|b| b.1).collect();
+        assert_eq!(pb, vec!["a:paths", "adm"]);
+        // and a customer cannot open it
+        tap(&bot, from(buyer, "Nima", "nima"), "a:paths").await;
+        assert!(!buttons(&log, buyer).iter().any(|b| b.1 == "a:paths"));
         tap(&bot, from(ADMIN, "Admin", "admin"), "ag:s").await;
         assert!(buttons(&log, ADMIN).iter().any(|b| b.1 == "a:plans"));
         tap(&bot, from(ADMIN, "Admin", "admin"), "a:plans").await;

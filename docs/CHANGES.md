@@ -1,3 +1,18 @@
+# v3.35.0 — path quality in the bot: loss, ping and jitter of every tunnel, with an alert
+- **Live measurement inside each tunnel:** the entry of every running tunnel sends 20 UDP packets of 64 bytes through it to the
+  exit's echo and back once a minute, 50 ms apart (about 1.3 KB each way: nothing a user notices). It reports loss (a packet not back
+  within 1 s counts as lost: too late for a game), the median ping, jitter (the mean change of the round trip from one packet to the
+  next) and the slowest packet with its status (`engine::quality_task`, `probe::udp_quality`). No new port, listener or token, and no
+  ICMP: a path where ping is blocked one way (Iran → a filtered IP, while a reverse tunnel works) is measured all the same, and it is
+  measured as users feel it, through the tunnel's own transport (FEC included). Agent servers measure after their next update.
+- **«📡 وضعیت مسیرها» in the bot's admin menu (read-only, admins only):** every server pair (Iran first) with 🟢 / 🟡 / 🔴, its ping,
+  loss and jitter over the last 10 minutes and the last hour, and every tunnel of it on its own line with its transport; a cut tunnel
+  shows as cut. Only «🔄 refresh» and «back»: nothing can be changed from it. Not in the web panel (the owner wants it in Telegram).
+- **Alert:** when a pair loses more than 3 % or jitters more than 30 ms over 10 minutes, the admins get one message for the pair
+  («🟠 مسیر IRAN1 ↔ GERMANY پر افت شده» with its numbers and a button to the report), and another when it is clean again (under 2 % and
+  20 ms; in between the last verdict stays, so a borderline path does not flap). The pair is judged by its median tunnel, so one tunnel
+  with a poor transport does not make the whole path red (it shows red on its own line). History is memory only (`tunnel/quality.rs`).
+
 # v3.34.0 — premium emoji on the bot's buttons, core cards, server cards, cleaner deliveries
 - **Button manager, inside Telegram (the mini app, for the bot's admins; bot › Admin panel › Buttons and texts › 🎨 Manage buttons):**
   every customer button with its text, a **premium emoji** and its colour, next to the main menu drawn as the chat shows it. «Set the
