@@ -639,6 +639,7 @@ pub fn statuses() -> Vec<super::engine::Status> {
             listening: w.endpoint.is_empty(),
             probe: None,
             quality: None,
+            lanes: 0,
         });
     }
     out

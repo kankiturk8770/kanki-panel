@@ -163,6 +163,8 @@ pub struct Status {
     pub probe: Option<serde_json::Value>,
     /// live quality of the tunnel (entry side, once a minute): {at, n, loss, ping, jit, max}
     pub quality: Option<serde_json::Value>,
+    /// links whose UDP takes the datagram lane (`game` transport, both ends updated)
+    pub lanes: usize,
 }
 
 struct State {
@@ -342,6 +344,7 @@ impl Running {
             listening: self.spec.listens(),
             probe: self.state.probe.lock().unwrap_or_else(|e| e.into_inner()).clone(),
             quality: self.state.quality.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            lanes: alive.iter().filter(|s| s.lane_on()).count(),
         }
     }
 }
@@ -349,10 +352,15 @@ impl Running {
 /// `hs_permit`: on the listening side, one of the limited places for handshakes in progress; it is
 /// given back as soon as the handshake is over (a link that lives on does not hold it).
 async fn run_link(spec: &Spec, state: &Arc<State>, raw: link::Raw, client: bool, hs_permit: Option<tokio::sync::OwnedSemaphorePermit>) -> Res<()> {
+    let port = raw.port();
     let hs = link::handshake(raw, &spec.token, client, spec.padded()).await;
     drop(hs_permit);
-    let (tx, rx) = hs?;
+    let (tx, rx, keys) = hs?;
     let s = Session::start(tx, rx, spec.role == "entry", state.shared.clone());
+    // the `game` transport's datagram lane: UDP that never waits behind the ordered stream
+    if let Some(p) = port {
+        s.attach_lane(super::dgram::Lane::new(p, &keys));
+    }
     state.add(s.clone());
     s.closed().await;
     state.drop_dead();

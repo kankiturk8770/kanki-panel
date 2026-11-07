@@ -824,6 +824,7 @@ pub fn statuses() -> Vec<super::engine::Status> {
             listening: w.role == "exit",
             probe: None,
             quality: None,
+            lanes: 0,
         });
     }
     out

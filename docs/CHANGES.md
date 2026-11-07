@@ -11,6 +11,14 @@
   behind it until it was sent again. Now, while a tunnel carries both kinds, UDP flows use the first half of its links and TCP the rest;
   a tunnel with one kind only (or one link) uses every link as before. The split stays 10 minutes after the last TCP connection or UDP
   packet, so flows do not hop between links. Only the entry chooses: no change on the wire, old exits work as they are.
+- **Game-FEC: a datagram lane for UDP (`transport/dgram.rs`):** a `game` link was one ordered KCP stream, so a game packet that came
+  after a lost packet waited until that one was sent again (head-of-line blocking: the ping jumps), for every user and protocol on the
+  link (WireGuard, AmneziaWG, microtun, KANKI MIX, Hysteria2 through Iran). Now every UDP packet of the mux that fits one datagram
+  (frame up to 1052 bytes: game packets) travels on its own next to the KCP traffic, through the same relay: masked, FEC-coded and
+  duplicated like before, but never held for another one. Encrypted with ChaCha20-Poly1305 under a key of its own per link and direction
+  (derived from the link's key exchange), counter nonce, 128-packet replay window. Bigger packets (downloads) keep the stream. Used only
+  when both ends have it (`DGOK` frame): an end that is not updated yet keeps everything on the stream, so nothing breaks while servers
+  update one by one. The live quality check and the smart-tunnel echo use the same lane. Tunnel status shows `lanes`.
 - **Game-FEC packets are marked Expedited Forwarding (DSCP 46),** the real-time class; queues that honour it send them first, the
   others ignore it. The live quality check (3.35.0) now measures the UDP lane, the one games use.
 

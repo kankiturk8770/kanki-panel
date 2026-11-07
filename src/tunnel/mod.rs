@@ -2,6 +2,8 @@
 pub mod agent;
 #[path = "transport/awg.rs"]
 pub mod awg;
+#[path = "transport/dgram.rs"]
+pub mod dgram;
 #[path = "transport/dual.rs"]
 pub mod dual;
 pub mod engine;
