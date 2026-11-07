@@ -24,6 +24,13 @@
   (derived from the link's key exchange), counter nonce, 128-packet replay window. Bigger packets (downloads) keep the stream. Used only
   when both ends have it (`DGOK` frame): an end that is not updated yet keeps everything on the stream, so nothing breaks while servers
   update one by one. The live quality check and the smart-tunnel echo use the same lane. Tunnel status shows `lanes`.
+- **«📡 وضعیت مسیرها» is a mini app page now** (bot › admin panel; admins only, `?admin=paths`, `/tg/api/admin/paths`,
+  `quality::view`): one card per server abroad (Germany's five tunnels together, Turkey's together; the worst first), its ping, loss and
+  jitter (the median tunnel, last 10 minutes) and its last hour, and every tunnel that reaches it hanging off one line with a coloured
+  stop: where it comes from (the Iran server), its transport, «بی‌ترتیب» when it has the datagram lane, and its own numbers or «قطع است».
+  It follows by itself every 30 s while open; «تازه کن» reloads at once. One switch: **path alerts** on or off (`path_alerts`); the
+  server offline / online alerts are always sent as before. A path alert's button opens the same page; an old report message's
+  «🔄 تازه کردن» still works.
 - **Game-FEC packets are marked Expedited Forwarding (DSCP 46),** the real-time class; queues that honour it send them first, the
   others ignore it. The live quality check (3.35.0) now measures the UDP lane, the one games use.
 

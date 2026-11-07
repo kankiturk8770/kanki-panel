@@ -48,6 +48,8 @@ pub fn router() -> Router<Arc<App>> {
         .route("/tg/api/admin/ask", get(admin_ask))
         .route("/tg/api/admin/preview", get(admin_preview))
         .route("/tg/api/admin/emoji/:id", get(admin_emoji))
+        // the bot's admins: path quality of every tunnel, and the path alerts switch (3.36)
+        .route("/tg/api/admin/paths", get(admin_paths).post(admin_paths_set))
 }
 
 /// The customer of a request, only when they are one of the bot's admins
@@ -68,6 +70,21 @@ async fn admin_buttons_save(State(app): St, h: HeaderMap, Query(q): Query<HashMa
         Ok(()) => Json(crate::buttons::list(&app)).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
     }
+}
+
+/// The paths page: every server abroad with its tunnels and their loss, ping and jitter (read-only)
+async fn admin_paths(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    if let Err(r) = admin_of(&app, &h, &q) { return r }
+    ([(header::CACHE_CONTROL, "no-store")], Json(crate::tunnel::quality::view(&app))).into_response()
+}
+
+/// The only thing the paths page changes: whether the bot sends path alerts (`{"alerts": bool}`).
+/// Server offline / online alerts are always sent.
+async fn admin_paths_set(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>, Json(b): Json<Value>) -> Response {
+    if let Err(r) = admin_of(&app, &h, &q) { return r }
+    let Some(on) = b["alerts"].as_bool() else { return fail(StatusCode::BAD_REQUEST, "alerts: true or false") };
+    app.db.set("path_alerts", if on { "1" } else { "0" });
+    Json(crate::tunnel::quality::view(&app)).into_response()
 }
 
 /// «Set the emoji»: the bot asks this admin, in the chat, for the premium emoji of button `key`

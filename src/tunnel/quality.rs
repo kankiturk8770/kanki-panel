@@ -241,6 +241,100 @@ pub fn health(app: &App) -> Vec<(String, String, bool, String)> {
     out
 }
 
+/// Path alerts («🟠 مسیر … پر افت شده») on or off (setting `path_alerts`, on unless "0"). The server
+/// offline / online alerts do not depend on it.
+pub fn alerts_on(app: &App) -> bool {
+    app.db.get("path_alerts") != "0"
+}
+
+fn agg_json(a: &Option<Agg>) -> Value {
+    match a {
+        Some(a) => serde_json::json!({ "ping": a.ping, "loss": round1(a.loss), "jit": round1(a.jit), "max": a.max, "level": level(a) }),
+        None => Value::Null,
+    }
+}
+
+/// good / fine / bad, the colours of the bot's report
+fn level(a: &Agg) -> &'static str {
+    if is_bad(a) {
+        "bad"
+    } else if a.loss <= FINE_LOSS && a.jit <= FINE_JIT {
+        "good"
+    } else {
+        "fine"
+    }
+}
+
+/// The paths page of the admins' mini app (`/tg/api/admin/paths`): one card per server abroad (the
+/// side that is not in Iran; for a tunnel between two servers abroad, its exit) with every tunnel
+/// that reaches it, where it comes from, its transport and its numbers over the last 10 minutes,
+/// and the card's own numbers (the median tunnel, like the alerts) and its last hour. Read-only.
+pub fn view(app: &App) -> Value {
+    use serde_json::json;
+    let live = live_quality(app);
+    let lanes = super::panel::live_lanes(app);
+    let locs = super::panel::server_locs(app);
+    let ccs = crate::exitgeo::all_cc(app);
+    let iran = |id: &str| locs.get(id).map(|l| l.0 == "iran").unwrap_or(false);
+    let h = hist().lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let t = now();
+    // (foreign server id, name, cc, tunnels: (json, up, window, hour))
+    let mut groups: Vec<(String, String, String, Vec<(Value, bool, Option<Agg>, Option<Agg>)>)> = vec![];
+    let mut last = 0i64;
+    for (tu, up, _) in live {
+        let v: Vec<Sample> = h.get(&tu.id).map(|d| d.iter().copied().collect()).unwrap_or_default();
+        if let Some(s) = v.last() {
+            last = last.max(s.at);
+        }
+        let (w, hour) = (agg(&v, t, WINDOW, MIN_SAMPLES), agg(&v, t, KEEP, MIN_SAMPLES));
+        let (near, far) = if iran(&tu.exit) && !iran(&tu.entry) { (tu.exit.clone(), tu.entry.clone()) } else { (tu.entry.clone(), tu.exit.clone()) };
+        let (near_name, far_name) = pair_names(app, &tu.entry, &tu.exit);
+        let cc = ccs.get(&crate::exitgeo::srv_key(&far)).cloned().unwrap_or_default();
+        let (ln, links) = lanes.get(&tu.id).copied().unwrap_or((0, 0));
+        let row = json!({
+            "name": tu.name, "from": near_name, "from_id": near, "transport": transport_name(&tu.transport),
+            "up": up, "now": agg_json(&w), "lanes": ln, "links": links,
+        });
+        match groups.iter_mut().find(|g| g.0 == far) {
+            Some(g) => g.3.push((row, up, w, hour)),
+            None => groups.push((far, far_name, cc, vec![(row, up, w, hour)])),
+        }
+    }
+    let mut out: Vec<Value> = groups
+        .into_iter()
+        .map(|(id, name, cc, mut ts)| {
+            ts.sort_by(|a, b| a.0["from"].as_str().cmp(&b.0["from"].as_str()).then(a.0["name"].as_str().cmp(&b.0["name"].as_str())));
+            let ws: Vec<Agg> = ts.iter().filter(|x| x.1).filter_map(|x| x.2).collect();
+            let hs: Vec<Agg> = ts.iter().filter(|x| x.1).filter_map(|x| x.3).collect();
+            let all_down = ts.iter().all(|x| !x.1);
+            let now_a = pair_agg(&ws);
+            let state = match &now_a {
+                Some(a) => level(a),
+                None if all_down => "down",
+                None => "wait",
+            };
+            json!({
+                "id": id, "name": name, "cc": cc, "flag": if cc.len() == 2 { crate::amnezia::flag(&cc) } else { String::new() },
+                "state": state, "now": agg_json(&now_a), "hour": agg_json(&pair_agg(&hs)),
+                "up": ts.iter().filter(|x| x.1).count(), "tunnels": ts.into_iter().map(|x| x.0).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    // the worst first, then by name: what needs a look is on top
+    let rank = |s: &str| match s {
+        "down" => 0,
+        "bad" => 1,
+        "fine" => 2,
+        "good" => 3,
+        _ => 4,
+    };
+    out.sort_by(|a, b| rank(a["state"].as_str().unwrap_or("")).cmp(&rank(b["state"].as_str().unwrap_or(""))).then(a["name"].as_str().cmp(&b["name"].as_str())));
+    json!({
+        "servers": out, "at": t, "last": last, "alerts": alerts_on(app),
+        "limits": { "bad_loss": BAD_LOSS, "bad_jit": BAD_JIT, "window_min": WINDOW / 60 },
+    })
+}
+
 /// Telegram's limit is 4096 characters; the report stops a little before it
 const MAX_TEXT: usize = 3800;
 
