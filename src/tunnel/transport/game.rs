@@ -216,10 +216,21 @@ impl Drop for ClientGame {
     }
 }
 
+/// Marks the game link's packets "Expedited Forwarding" (DSCP 46), the class for real-time traffic.
+/// Routers that honour it (our own `fq`/cake queues, some carriers) send them first; the ones that
+/// do not just ignore it. It costs nothing and hides nothing (the payload stays masked).
+fn mark_ef(sock: &UdpSocket) {
+    #[cfg(target_os = "linux")]
+    let _ = sock.set_tos_v4(0xb8);
+    #[cfg(not(target_os = "linux"))]
+    let _ = sock;
+}
+
 pub async fn client(remote: SocketAddr, token: &str, g: GameOpts) -> Res<ClientGame> {
     let mask = Arc::new(Mask::new(token));
     let bind: SocketAddr = if remote.is_ipv6() { "[::]:0".parse()? } else { "0.0.0.0:0".parse()? };
     let outer = Arc::new(UdpSocket::bind(bind).await?);
+    mark_ef(&outer);
     outer.connect(remote).await?;
     let inner = Arc::new(UdpSocket::bind("127.0.0.1:0").await?);
     let local = inner.local_addr()?;
@@ -317,6 +328,7 @@ async fn pump(sock: Arc<UdpSocket>, public: Arc<UdpSocket>, mask: Arc<Mask>, to:
 pub async fn server(port: u16, token: &str, kcp_local: SocketAddr, g: GameOpts) -> Res<ServerGame> {
     let mask = Arc::new(Mask::new(token));
     let public = Arc::new(UdpSocket::bind(format!("0.0.0.0:{}", port)).await?);
+    mark_ef(&public);
     let peers: Arc<Mutex<HashMap<SocketAddr, Peer>>> = Arc::new(Mutex::new(HashMap::new()));
 
     let (public1, mask1, peers1) = (public.clone(), mask.clone(), peers.clone());

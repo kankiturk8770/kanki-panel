@@ -10,7 +10,7 @@ use super::mux::{now_ms, Session, Shared};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::{TcpListener, UdpSocket};
@@ -173,6 +173,31 @@ struct State {
     next_udp: AtomicU32,
     probe: Mutex<Option<serde_json::Value>>,
     quality: Mutex<Option<serde_json::Value>>,
+    /// when the last user TCP connection / UDP packet came in (ms): the lanes below
+    last_tcp: AtomicU64,
+    last_udp: AtomicU64,
+}
+
+/// How long a lane split stays after the last TCP connection or UDP packet. Long, so the split does
+/// not flap: every change moves a UDP flow to another link once, and the exit then sends it from a
+/// new port (WireGuard, AmneziaWG and QUIC follow that by themselves, but once is enough).
+const LANE_HOLD_MS: u64 = 10 * 60_000;
+
+/// Which live link (index into `len` links) carries a connection. With two or more links and both
+/// kinds of traffic going, UDP (games, WireGuard, AmneziaWG, microtun) gets the first half of the
+/// links and TCP (Xray, downloads) the rest: a big TCP download then never sits in the same ordered
+/// link as game packets, so a game packet never waits for a lost download packet to be sent again.
+/// Otherwise each kind uses every link.
+pub(crate) fn lane(len: usize, key: usize, udp: bool, split: bool) -> usize {
+    if len < 2 || !split {
+        return key % len.max(1);
+    }
+    let u = len.div_ceil(2);
+    if udp {
+        key % u
+    } else {
+        u + key % (len - u)
+    }
 }
 
 impl State {
@@ -194,9 +219,21 @@ impl State {
         }
         Some(alive[key % alive.len()].clone())
     }
+    /// `pick` with the UDP / TCP lanes (see `lane`)
+    fn pick_lane(&self, key: usize, udp: bool) -> Option<Arc<Session>> {
+        let now = now_ms();
+        let recent = |t: &AtomicU64| now.saturating_sub(t.load(Ordering::Relaxed)) < LANE_HOLD_MS;
+        let split = if udp { self.shared.streams.load(Ordering::Relaxed) > 0 || recent(&self.last_tcp) } else { recent(&self.last_udp) };
+        let v = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        let alive: Vec<&Arc<Session>> = v.iter().filter(|s| s.is_alive()).collect();
+        if alive.is_empty() {
+            return None;
+        }
+        Some(alive[lane(alive.len(), key, udp, split)].clone())
+    }
     async fn wait_pick(&self, key: usize) -> Option<Arc<Session>> {
         for _ in 0..40 {
-            if let Some(s) = self.pick(key) {
+            if let Some(s) = self.pick_lane(key, false) {
                 return Some(s);
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -231,6 +268,8 @@ impl Running {
             next_udp: AtomicU32::new(1),
             probe: Mutex::new(None),
             quality: Mutex::new(None),
+            last_tcp: AtomicU64::new(0),
+            last_udp: AtomicU64::new(0),
         });
         let mut tasks = vec![];
         if spec.transport == "baseline" {
@@ -430,6 +469,7 @@ async fn user_tcp(bind: String, port: u16, target: String, state: Arc<State>) {
         let (state, target) = (state.clone(), target.clone());
         tokio::spawn(async move {
             let key = state.rr.fetch_add(1, Ordering::Relaxed);
+            state.last_tcp.store(now_ms(), Ordering::Relaxed);
             if let Some(s) = state.wait_pick(key).await {
                 s.open_tcp(user, &target).await;
             }
@@ -483,7 +523,8 @@ async fn user_udp(bind: String, port: u16, target: String, state: Arc<State>) {
         };
         state.shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).insert(id, (sock.clone(), from, now));
         // one flow stays on one link, so its packets keep their order
-        if let Some(s) = state.pick(id as usize) {
+        state.last_udp.store(now, Ordering::Relaxed);
+        if let Some(s) = state.pick_lane(id as usize, true) {
             s.send_udp(id, &target, &buf[..n]).await;
         }
         if now.saturating_sub(last_clean) > 60_000 {
@@ -559,7 +600,8 @@ async fn quality_task(state: Arc<State>) {
     let first = 15 + rand::random::<u64>() % 45;
     tokio::time::sleep(Duration::from_secs(first)).await;
     loop {
-        let r = match state.pick(0) {
+        // measured on the UDP lane: the link the games use
+        let r = match state.pick_lane(0, true) {
             Some(s) => tokio::time::timeout(Duration::from_secs(5), super::probe::udp_quality(&s, &state.shared, QUALITY_FLOW))
                 .await
                 .ok()

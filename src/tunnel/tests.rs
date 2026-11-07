@@ -581,3 +581,25 @@ fn quality_summary_counts_late_packets_as_lost() {
     // the median: 9 at 70 ms, 8 at 80 ms
     assert_eq!(r["ping"].as_u64(), Some(70));
 }
+
+/// UDP and TCP lanes (`engine::lane`): with both kinds going, UDP stays on the first half of the links
+/// and TCP on the rest; one kind alone, or one link, uses every link; a flow always gets the same link.
+#[test]
+fn udp_and_tcp_get_their_own_links() {
+    use super::engine::lane;
+    for len in 2..=16usize {
+        let u = len.div_ceil(2);
+        for key in 0..64usize {
+            assert!(lane(len, key, true, true) < u, "udp len {} key {}", len, key);
+            let t = lane(len, key, false, true);
+            assert!(t >= u && t < len, "tcp len {} key {}", len, key);
+            assert_eq!(lane(len, key, true, true), lane(len, key, true, true));
+            assert_eq!(lane(len, key, true, false), key % len);
+        }
+        // every link of a lane is used
+        let used: std::collections::HashSet<usize> = (0..64).map(|k| lane(len, k, true, true)).collect();
+        assert_eq!(used.len(), u);
+    }
+    assert_eq!(lane(1, 7, true, true), 0);
+    assert_eq!(lane(1, 7, false, true), 0);
+}

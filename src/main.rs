@@ -12,6 +12,8 @@ mod pin;
 mod fw;
 #[path = "core/live.rs"]
 mod live;
+#[path = "core/netq.rs"]
+mod netq;
 
 // panel: the admin panel's web server and API, login and tokens, request limits, system and updates, backups (src/panel)
 #[path = "panel/api.rs"]
@@ -216,6 +218,7 @@ async fn main() {
             return;
         }
         "tunnel-agent" => {
+            netq::spawn();
             tunnel::agent::run(VERSION).await;
             return;
         }
@@ -299,6 +302,8 @@ async fn main() {
 
     // OpenVPN left by a very old version (servers installed before it was dropped)
     let _ = tokio::task::spawn_blocking(admin::drop_legacy_openvpn).await;
+    // short, fair network queues (games): panel and VPN node alike
+    netq::spawn();
 
     if cmd == "node" {
         let port = app.env.get("NODE_PORT").cloned().unwrap_or_else(|| "2096".into());

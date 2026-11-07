@@ -1,3 +1,19 @@
+# v3.36.0 — gaming: short, fair queues on every server, separate UDP and TCP lanes in the tunnels
+- **Every server keeps its queues short (`core/netq.rs`):** at start (so after the nightly update), the panel, every VPN node and every
+  tunnel agent put `fq` on the outgoing network card when it still had the old first-come-first-served queue (a multi-queue card keeps
+  `mq`, only its sub-queues change), BBR for TCP, a small unsent backlog for TCP (`tcp_notsent_lowat` 128 KB), 1 MB default UDP socket
+  buffers (a burst is not dropped before the tunnel reads it), a bigger input backlog, no slow start after idle and MTU probing. Written
+  to `/etc/sysctl.d/91-kanki-game.conf` so a reboot keeps them; removed with the rest when Kanki is uninstalled. With `fq` every flow has
+  its own queue and a flow that sends little (a game) goes ahead of one that sends a lot (a download), so a player's ping does not jump
+  when other people on the same server download. Forwarding, `rp_filter` and the firewall are not touched. `KANKI_NETQ=off` turns it off.
+- **UDP and TCP lanes inside every tunnel (`engine::lane`):** a tunnel has several links (each one ordered). Until now a game's UDP
+  (WireGuard, AmneziaWG, microtun) and a download's TCP (Xray) could share one link, and a lost download packet held the game packets
+  behind it until it was sent again. Now, while a tunnel carries both kinds, UDP flows use the first half of its links and TCP the rest;
+  a tunnel with one kind only (or one link) uses every link as before. The split stays 10 minutes after the last TCP connection or UDP
+  packet, so flows do not hop between links. Only the entry chooses: no change on the wire, old exits work as they are.
+- **Game-FEC packets are marked Expedited Forwarding (DSCP 46),** the real-time class; queues that honour it send them first, the
+  others ignore it. The live quality check (3.35.0) now measures the UDP lane, the one games use.
+
 # v3.35.0 — path quality in the bot: loss, ping and jitter of every tunnel, with an alert
 - **Live measurement inside each tunnel:** the entry of every running tunnel sends 20 UDP packets of 64 bytes through it to the
   exit's echo and back once a minute, 50 ms apart (about 1.3 KB each way: nothing a user notices). It reports loss (a packet not back
