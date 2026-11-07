@@ -89,8 +89,14 @@ pub struct Session {
 }
 
 impl Session {
-    /// Starts the reader, writer and keepalive tasks of a link and returns the session.
-    pub fn start(tx: Tx, rx: Rx, entry: bool, shared: Arc<Shared>) -> Arc<Session> {
+    /// Starts the reader, writer and keepalive tasks of a link and returns the session; with the
+    /// `game` transport's datagram lane (`dgram.rs`) when it has one. The lane is in place before
+    /// the reader runs, so the other end's `DGOK` can never arrive too early. The entry offers it;
+    /// UDP uses it once the exit answered (an old exit never does, and nothing changes for it).
+    pub fn start_with(tx: Tx, rx: Rx, entry: bool, shared: Arc<Shared>, lane: Option<super::dgram::Lane>) -> Arc<Session> {
+        let lane = lane.map(Arc::new);
+        let inbox = lane.as_ref().and_then(|l| l.port().take_inbox());
+        let lane = if inbox.is_some() { lane } else { None };
         let (out, out_rx) = mpsc::channel::<Vec<u8>>(1024);
         let (dead_tx, _) = watch::channel(false);
         let s = Arc::new(Session {
@@ -106,27 +112,21 @@ impl Session {
             last_tx: AtomicU64::new(now_ms()),
             udp_out: Mutex::new(HashMap::new()),
             since: now_ms(),
-            lane: Mutex::new(None),
+            lane: Mutex::new(lane.clone()),
         });
         tokio::spawn(writer(s.clone(), tx, out_rx));
         tokio::spawn(reader(s.clone(), rx));
         tokio::spawn(keepalive(s.clone()));
-        s
-    }
-
-    /// Gives the link its datagram lane. The entry offers it to the exit; UDP uses it once the exit
-    /// answered (an old exit never does, and nothing changes for it).
-    pub fn attach_lane(self: &Arc<Self>, lane: super::dgram::Lane) {
-        let lane = Arc::new(lane);
-        let Some(inbox) = lane.port().take_inbox() else { return };
-        *self.lane.lock().unwrap_or_else(|e| e.into_inner()) = Some(lane.clone());
-        tokio::spawn(lane_reader(self.clone(), lane, inbox));
-        if self.entry {
-            let s = self.clone();
-            tokio::spawn(async move {
-                let _ = s.send(frame(DGOK, 0, &[])).await;
-            });
+        if let (Some(l), Some(inbox)) = (lane, inbox) {
+            tokio::spawn(lane_reader(s.clone(), l, inbox));
+            if entry {
+                let s2 = s.clone();
+                tokio::spawn(async move {
+                    let _ = s2.send(frame(DGOK, 0, &[])).await;
+                });
+            }
         }
+        s
     }
 
     /// Whether UDP goes on the datagram lane right now

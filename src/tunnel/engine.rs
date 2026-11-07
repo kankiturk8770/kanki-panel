@@ -356,11 +356,9 @@ async fn run_link(spec: &Spec, state: &Arc<State>, raw: link::Raw, client: bool,
     let hs = link::handshake(raw, &spec.token, client, spec.padded()).await;
     drop(hs_permit);
     let (tx, rx, keys) = hs?;
-    let s = Session::start(tx, rx, spec.role == "entry", state.shared.clone());
     // the `game` transport's datagram lane: UDP that never waits behind the ordered stream
-    if let Some(p) = port {
-        s.attach_lane(super::dgram::Lane::new(p, &keys));
-    }
+    let lane = port.map(|p| super::dgram::Lane::new(p, &keys));
+    let s = Session::start_with(tx, rx, spec.role == "entry", state.shared.clone(), lane);
     state.add(s.clone());
     s.closed().await;
     state.drop_dead();
