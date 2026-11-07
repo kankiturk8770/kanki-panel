@@ -159,40 +159,42 @@ async fn tcp_test(s: &Arc<Session>) -> Result<(u64, f64, f64), String> {
     Ok((ping, down, up))
 }
 
-/// UDP: 20 small packets through the tunnel and back; loss % and median ping.
-async fn udp_test(s: &Arc<Session>, shared: &Arc<Shared>, flow: u32) -> Result<(f64, u64), String> {
+/// Sends `n` small packets through the tunnel to the exit's echo, `gap` apart, and waits `wait`
+/// after the last one. Returns the round trip of every packet in the order they were sent (None =
+/// it did not come back).
+async fn udp_echo(s: &Arc<Session>, shared: &Arc<Shared>, flow: u32, n: u64, gap: Duration, wait: Duration) -> Result<Vec<Option<u64>>, String> {
     // the tunnel delivers replies to (a, b): a sends them, b receives them
     let a = Arc::new(UdpSocket::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?);
     let b = UdpSocket::bind("127.0.0.1:0").await.map_err(|e| e.to_string())?;
     let b_addr = b.local_addr().map_err(|e| e.to_string())?;
     shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).insert(flow, (a.clone(), b_addr, now_ms()));
-    const N: u64 = 20;
     let start = now_ms();
     let sender = {
         let s = s.clone();
         tokio::spawn(async move {
-            for i in 0..N {
+            for i in 0..n {
                 let mut p = Vec::with_capacity(64);
                 p.extend_from_slice(&i.to_be_bytes());
                 p.extend_from_slice(&now_ms().to_be_bytes());
                 p.resize(64, 0);
                 s.send_udp(flow, ECHO, &p).await;
-                tokio::time::sleep(Duration::from_millis(25)).await;
+                tokio::time::sleep(gap).await;
             }
         })
     };
-    let mut seen = std::collections::HashSet::new();
-    let mut rtts = vec![];
+    let mut got: Vec<Option<u64>> = vec![None; n as usize];
+    let mut back = 0u64;
     let mut buf = [0u8; 256];
-    let deadline = Instant::now() + Duration::from_millis(N * 25 + 2500);
-    while Instant::now() < deadline && (seen.len() as u64) < N {
+    let deadline = Instant::now() + gap * n as u32 + wait;
+    while Instant::now() < deadline && back < n {
         let left = deadline.saturating_duration_since(Instant::now());
         match tokio::time::timeout(left, b.recv_from(&mut buf)).await {
-            Ok(Ok((n, _))) if n >= 16 => {
+            Ok(Ok((k, _))) if k >= 16 => {
                 let i = u64::from_be_bytes(buf[0..8].try_into().unwrap());
                 let t0 = u64::from_be_bytes(buf[8..16].try_into().unwrap());
-                if t0 >= start && seen.insert(i) {
-                    rtts.push(now_ms().saturating_sub(t0));
+                if t0 >= start && i < n && got[i as usize].is_none() {
+                    got[i as usize] = Some(now_ms().saturating_sub(t0));
+                    back += 1;
                 }
             }
             Ok(_) => {}
@@ -201,10 +203,47 @@ async fn udp_test(s: &Arc<Session>, shared: &Arc<Shared>, flow: u32) -> Result<(
     }
     let _ = sender.await;
     shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).remove(&flow);
+    Ok(got)
+}
+
+/// UDP: 20 small packets through the tunnel and back; loss % and median ping.
+async fn udp_test(s: &Arc<Session>, shared: &Arc<Shared>, flow: u32) -> Result<(f64, u64), String> {
+    const N: u64 = 20;
+    let got = udp_echo(s, shared, flow, N, Duration::from_millis(25), Duration::from_millis(2500)).await?;
+    let mut rtts: Vec<u64> = got.iter().flatten().copied().collect();
     rtts.sort();
-    let loss = ((N - seen.len() as u64) as f64 * 100.0 / N as f64 * 10.0).round() / 10.0;
+    let loss = ((N - rtts.len() as u64) as f64 * 100.0 / N as f64 * 10.0).round() / 10.0;
     let ping = if rtts.is_empty() { 0 } else { rtts[rtts.len() / 2] };
     Ok((loss, ping))
+}
+
+/// A packet that takes longer than this is as good as lost for a game.
+pub const LATE_MS: u64 = 1000;
+
+/// The live quality of a running tunnel, as a game feels it: 20 packets of 64 bytes through the
+/// tunnel and back, 50 ms apart (about 1.3 KB each way, once a minute). Lost = not back within
+/// `LATE_MS`; jitter = the mean change of the round trip from one packet to the next.
+pub async fn udp_quality(s: &Arc<Session>, shared: &Arc<Shared>, flow: u32) -> Result<Value, String> {
+    const N: u64 = 20;
+    let got = udp_echo(s, shared, flow, N, Duration::from_millis(50), Duration::from_millis(LATE_MS)).await?;
+    Ok(summarize(&got))
+}
+
+/// {n, loss, ping, jit, max} of one echo run (round trips in the order the packets were sent)
+pub fn summarize(got: &[Option<u64>]) -> Value {
+    let ok: Vec<u64> = got.iter().map(|r| r.filter(|&ms| ms <= LATE_MS)).flatten().collect();
+    let n = got.len().max(1) as f64;
+    let loss = ((got.len() - ok.len()) as f64 * 100.0 / n * 10.0).round() / 10.0;
+    let mut sorted = ok.clone();
+    sorted.sort();
+    let ping = sorted.get(sorted.len() / 2).copied().unwrap_or(0);
+    let jit = if ok.len() < 2 {
+        0.0
+    } else {
+        let d: u64 = ok.windows(2).map(|w| w[0].abs_diff(w[1])).sum();
+        (d as f64 / (ok.len() - 1) as f64 * 10.0).round() / 10.0
+    };
+    json!({ "n": got.len(), "loss": loss, "ping": ping, "jit": jit, "max": sorted.last().copied().unwrap_or(0) })
 }
 
 /// Full measurement of one transport. Never fails: errors are reported in the result.

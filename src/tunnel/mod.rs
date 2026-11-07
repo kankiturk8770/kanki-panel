@@ -24,6 +24,7 @@ pub mod mux;
 pub mod obfs;
 pub mod panel;
 pub mod probe;
+pub mod quality;
 #[path = "transport/quic.rs"]
 pub mod quic;
 #[path = "transport/salamander.rs"]

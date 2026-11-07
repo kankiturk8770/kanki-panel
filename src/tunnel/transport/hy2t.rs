@@ -823,6 +823,7 @@ pub fn statuses() -> Vec<super::engine::Status> {
             transport: "hy2".into(),
             listening: w.role == "exit",
             probe: None,
+            quality: None,
         });
     }
     out

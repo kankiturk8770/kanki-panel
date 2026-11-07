@@ -638,6 +638,7 @@ pub fn statuses() -> Vec<super::engine::Status> {
             transport: "awg".into(),
             listening: w.endpoint.is_empty(),
             probe: None,
+            quality: None,
         });
     }
     out

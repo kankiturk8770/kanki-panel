@@ -550,3 +550,34 @@ fn awg_cidrs_and_config() {
     assert!(t.contains("--dport 51900 ! -i lo -j DROP"));
     assert!(!t.contains("Endpoint"));
 }
+
+/// The live quality check of a running tunnel (`engine::quality_task` → `probe::udp_quality`): on a clean
+/// path every packet comes back, quickly and evenly. Game-FEC, the transport the admins use for games.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn live_quality_through_a_game_tunnel() {
+    let (entry, exit) = pair("game", "reverse", 22700, "token-for-tests-0123456789");
+    let e = Running::start(entry);
+    let x = Running::start(exit);
+    assert!(wait_links(&e, 1).await, "no link: {:?}", e.status().error);
+    let r = e.quality_now().await.expect("measured");
+    println!("live quality: {}", r);
+    assert_eq!(r["n"].as_u64(), Some(20));
+    assert!(r["loss"].as_f64().unwrap() <= 5.0, "{}", r);
+    assert!(r["ping"].as_u64().unwrap() < 200 && r["jit"].as_f64().unwrap() < 50.0, "{}", r);
+    e.stop();
+    x.stop();
+}
+
+#[test]
+fn quality_summary_counts_late_packets_as_lost() {
+    use super::probe::{summarize, LATE_MS};
+    // 20 packets: 2 never came back, 1 came back too late for a game, the rest at 70-80 ms
+    let mut got: Vec<Option<u64>> = (0..17).map(|i| Some(if i % 2 == 0 { 70 } else { 80 })).collect();
+    got.extend([None, None, Some(LATE_MS + 1)]);
+    let r = summarize(&got);
+    assert_eq!(r["loss"].as_f64(), Some(15.0));
+    assert_eq!(r["jit"].as_f64(), Some(10.0));
+    assert_eq!(r["max"].as_u64(), Some(80));
+    // the median: 9 at 70 ms, 8 at 80 ms
+    assert_eq!(r["ping"].as_u64(), Some(70));
+}
