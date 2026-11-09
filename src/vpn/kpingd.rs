@@ -1179,7 +1179,8 @@ async fn kping_lab() {
     let key = "cd".repeat(32);
     let dir = std::env::var("LAB_DIR").unwrap_or("/tmp".into());
     let user = KUser { uid: 1, name: "gamer".into(), key: key.clone(), ip: "10.81.0.2".into() };
-    let relay = Relay::start(&obfs, &RelayCfg { port: 24300, to: 24302, dup_ms: 2, users: vec![user.clone()] }).expect("relay");
+    let dup: u16 = std::env::var("KP_DUP_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
+    let relay = Relay::start(&obfs, &RelayCfg { port: 24300, to: 24302, dup_ms: dup, users: vec![user.clone()] }).expect("relay");
     let fec: u8 = std::env::var("LAB_FEC").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
     let exit = Exit::start(&obfs, &ExitCfg { port: 4300, mtu: 1332, fec, users: vec![user] }).expect("exit");
     let mt = MtCfg {

@@ -4,7 +4,7 @@
 //
 //	kplab echo <addr>
 //	kplab kping <link file> <seconds> <local ip>[,<local ip>…] <relay ip[:port]>[,…] <game ip:port>
-//	kplab lossy <listen ip:port> <upstream ip:port> <delay ms> <jitter ms> <loss %> <mean burst length>
+//	kplab lossy <listen ip:port> <upstream ip:port> <delay ms> <jitter ms> <loss %> <mean outage ms>
 //	kplab mtun <link file> <seconds> <game ip:port>
 package main
 
@@ -26,6 +26,15 @@ import (
 )
 
 const pps, size = 60, 120
+
+// one path: the second copy goes this much later (KP_DUP_MS)
+var dupDelay = func() time.Duration {
+	ms, err := strconv.Atoi(os.Getenv("KP_DUP_MS"))
+	if err != nil {
+		ms = 2
+	}
+	return time.Duration(ms) * time.Millisecond
+}()
 
 func csum(b []byte) uint16 {
 	var s uint32
@@ -291,7 +300,7 @@ func kping(linkFile string, secs int, locals, relays []string, game string) {
 			c.Write(pkt)
 			if len(paths) == 1 {
 				// one path: the copy goes 2 ms later
-				go func(c *net.UDPConn, pkt []byte) { time.Sleep(2 * time.Millisecond); c.Write(pkt) }(c, pkt)
+				go func(c *net.UDPConn, pkt []byte) { time.Sleep(dupDelay); c.Write(pkt) }(c, pkt)
 			}
 		}
 	}
@@ -363,20 +372,24 @@ func mtunRun(linkFile string, secs int, game string) {
 
 // ------------------------------------------------------------------ a bad path (the kernel here has no netem)
 
-// lossy: a UDP proxy that loses packets in bursts (Gilbert-Elliott: mean loss and mean burst length)
-// and delays them (base + random jitter, order kept), each direction on its own
+// lossy: a UDP proxy whose path drops out now and then, in time as a real radio does (outages of `outage`
+// ms on average, `loss` % of the time; everything sent during one is lost), and delays packets (base +
+// random jitter, order kept), each direction on its own
 type lane struct {
 	bad        bool
-	p, r       float64
+	until      time.Time
+	good, out  float64
 	delay, jit time.Duration
 	last       time.Time
 	q          chan func()
 }
 
-func newLane(delay, jit, loss, burst float64) *lane {
-	r := 1 / burst
-	p := loss / 100 * r / (1 - loss/100)
-	l := &lane{p: p, r: r, delay: time.Duration(delay * 1e6), jit: time.Duration(jit * 1e6), q: make(chan func(), 4096)}
+func newLane(delay, jit, loss, outage float64) *lane {
+	good := 1e9
+	if loss > 0 {
+		good = outage * (100 - loss) / loss
+	}
+	l := &lane{good: good, out: outage, until: time.Now().Add(time.Duration(rand.ExpFloat64() * good * 1e6)), delay: time.Duration(delay * 1e6), jit: time.Duration(jit * 1e6), q: make(chan func(), 4096)}
 	go func() {
 		for f := range l.q {
 			f()
@@ -386,12 +399,14 @@ func newLane(delay, jit, loss, burst float64) *lane {
 }
 
 func (l *lane) pass(send func()) {
-	if l.bad {
-		if rand.Float64() < l.r {
-			l.bad = false
+	now := time.Now()
+	for now.After(l.until) {
+		l.bad = !l.bad
+		mean := l.good
+		if l.bad {
+			mean = l.out
 		}
-	} else if rand.Float64() < l.p {
-		l.bad = true
+		l.until = l.until.Add(time.Duration(rand.ExpFloat64() * mean * 1e6))
 	}
 	if l.bad {
 		return
