@@ -1,3 +1,30 @@
+# v3.38.0 — firewall from the panel, replacing a server's machine, agents updated where GitHub is filtered
+- **Firewall from the panel (`fw::guard_tick`, Servers › 🛡 Firewall):** one switch per server and one for all. On: the server's agent
+  allows SSH first (checked in ufw before anything else), then every port Kanki uses there: every owner (tunnels, Kanki DNS, Xray, KANKI
+  MIX, microtun, the emergency chat, the subscription relay, SSL), WireGuard and AmneziaWG (their configs), Hysteria2, the panel's and the
+  node's web ports (`kanki.env`), what Kanki's programs listen on from outside, and NAT redirects; then ufw goes on with incoming denied,
+  outgoing and routed allowed (VPN users and tunnels pass as before; Kanki's own forwarding and NAT rules stay). A new tunnel opens its
+  own port and a deleted one closes it, as before, now with ufw on. ufw is installed when missing.
+- **No lock-out:** the panel confirms only after it sees the server still working (its VPN part synced after the firewall went on,
+  every tunnel that was up before is up again); without that confirmation within 3 minutes the server turns ufw off again by itself,
+  and the panel gives up after 2 minutes and turns the switch off with the reason. A rolled-back server tries again only on a new press.
+  Turning the switch off turns ufw off again when Kanki turned it on. Session login only (not an API token).
+- **KPING listens on 127.0.0.1 only** (`MtCfg.local_only`): its tunnel delivers there, so the guard never opens its port.
+- **KPING reaches the app:** the Kanki app reads the subscription page (`/sub/<code>`, sealed for it) and its data block, not `/json`;
+  3.37.0 put KPING only in `/json`. Now the sealed page's data block has `kping` too (a browser's page still never does).
+- **Replace the machine (Servers › a server › Replace the machine):** for a server that died or whose IP was filtered. A fresh command
+  with the same identity: the agent comes back as this server (tunnels, Xray, Kanki DNS, emergency chat, subscription relay), its VPN
+  part re-registers as **the same node** (`TServer.replace`; the node's address is updated, its cores, ports, users, KANKI MIX and
+  microtun ports stay) and SSL is taken again for its domain. Before, a new address added a second node and every core was switched off.
+- **Agents updated where GitHub is filtered:** Update all (and the nightly update) asked the VPN part of a machine to update from
+  GitHub and skipped its agent; where GitHub cannot be reached (often inside Iran) the whole machine stayed on the old version. Now the
+  agent of that machine takes the panel's own program instead. A failed update is tried again after a minute, not on every report.
+- **Tested:** `cargo test` 338 passed (the panel confirms or gives up; a replaced machine comes back as the same server); live, with a
+  real ufw in a network namespace (`scripts/fw_guard_live.sh`): SSH and the tunnel port open, everything else closed, Kanki's NAT and
+  forwarding kept, a deleted tunnel's port closed and a new one opened, roll back without confirmation, off as before; KPING again
+  end to end (100 of 100). Playwright: Servers page with the firewall card and the replace window, 6 widths × fa/en × dark/light.
+  Not yet on real servers.
+
 # v3.37.0 — KPING: the hidden game core
 - **A new core, KPING (`src/vpn/kping.rs`, panel › Cores › KPING):** for a few testers the admin picks, only inside the Kanki app.
   The path: app → Iran server (a UDP port of its own) → its **own reverse Game-FEC 8:3 tunnel** → server abroad → the game. The app

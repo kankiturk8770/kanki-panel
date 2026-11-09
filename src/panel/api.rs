@@ -1094,7 +1094,15 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
     let name = if name.is_empty() { format!("node-{}", rand_token(4).to_lowercase()) } else { name };
     // the same server registering twice (re-run after a firewall fix, or a reinstall with a new
     // self-signed certificate) updates its row instead of adding a copy, with fresh pins
-    let existing = app.db.nodes().into_iter().find(|n| n.address == addr).map(|n| n.id);
+    // a replaced machine (Servers › ⋯ › Replace the machine) is the server's own node, whatever its new address
+    let replacing = server.as_ref().filter(|s| s.replace && !s.node.is_empty()).and_then(|s| app.db.node(&s.node));
+    let existing = match &replacing {
+        Some(n) => Some(n.id.clone()),
+        None => app.db.nodes().into_iter().find(|n| n.address == addr).map(|n| n.id),
+    };
+    if let Some(n) = &replacing {
+        app.forget_node_pins(&n.id, &n.address);
+    }
     if let Some(id) = &existing {
         app.forget_node_pins(id, &addr);
     }
@@ -1107,8 +1115,8 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
     let id = match existing {
         Some(id) => {
             let _ = app.db.exec(
-                "UPDATE nodes SET token=?1, endpoint=?2, endpoint_mode=?3, insecure=?4, info=?5, online=1 WHERE id=?6",
-                &[&token, &endpoint, &mode, &(insecure as i64), &info.to_string(), &id],
+                "UPDATE nodes SET token=?1, endpoint=?2, endpoint_mode=?3, insecure=?4, info=?5, online=1, address=?7 WHERE id=?6",
+                &[&token, &endpoint, &mode, &(insecure as i64), &info.to_string(), &id, &addr],
             );
             id
         }
@@ -1664,11 +1672,12 @@ fn sub_user(app: &App, code: &str) -> Result<User, Response> {
 async fn sub_page(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
     let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
     crate::devices::note(&app, &u, &h);
-    let r = sub_page_of(&app, &u);
+    // KPING only for the Kanki app, whose answer is sealed (the app reads the data block of this page)
+    let r = sub_page_of(&app, &u, crate::devices::wants_seal(&h));
     crate::devices::reply(&h, &code, r).await
 }
 
-fn sub_page_of(app: &App, u: &User) -> Response {
+fn sub_page_of(app: &App, u: &User, kping: bool) -> Response {
     let sub = u.sub_code();
     // server-rendered config links keep the exact URL format the Kanki Android app reads
     let mut nodes_html = String::new();
@@ -1719,7 +1728,11 @@ fn sub_page_of(app: &App, u: &User) -> Response {
         }
         nodes_html.push_str(&format!("<section class=\"node\" data-node=\"dns\"><h3>Kanki DNS</h3>{}</section>", rows));
     }
-    let data = serde_json::to_string(&sub_data(&app, &u)).unwrap_or_default().replace("</", "<\\/");
+    let mut data = sub_data(&app, &u);
+    if kping {
+        data["kping"] = crate::kping::sub_info(&app, &u);
+    }
+    let data = serde_json::to_string(&data).unwrap_or_default().replace("</", "<\\/");
     let page = include_str!("../../assets/sub/sub.html")
         .replace("{{TITLE}}", &esc(&u.username))
         .replace("{{SUB}}", &sub)

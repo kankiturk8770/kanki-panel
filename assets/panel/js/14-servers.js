@@ -41,13 +41,44 @@ document.addEventListener('keydown',function(e){if(e.key!='Escape'||($('#modal')
 function load(quiet){
  return Promise.all([api('GET','/api/servers'),api('GET','/api/nodes').catch(function(){return null}),api('GET','/api/tunnels').catch(function(){return null})]).then(function(r){
   SV.d=r[0];if(r[1])S.nodes=r[1];if(r[2])TN.d=r[2];
-  if(S.page=='nodes')draw(!quiet);waitTick();return SV.d}).catch(function(e){if(!quiet)fail(e)})}
+  if(S.page=='nodes')draw(!quiet);waitTick();if(S.page=='nodes')fwLoad();return SV.d}).catch(function(e){if(!quiet)fail(e)})}
+
+// ---------------------------------------------------------------- firewall guard (3.38.0)
+// One row per server: ufw on with only SSH and Kanki's ports open. The server turns it on, the panel checks
+// that the server still works (its VPN part answers, its tunnels come back) and confirms; without that the
+// server turns ufw off again by itself within 3 minutes.
+var FWD=null;
+var FW_NOTE={'rolled back: the panel did not see this server working with the firewall on':'Turned off again: the panel did not see this server working with the firewall on',
+ 'the panel could not reach this server\'s VPN part with the firewall on':'Turned off again: the panel could not reach this server\'s VPN part with the firewall on',
+ 'a tunnel of this server did not come back with the firewall on':'Turned off again: a tunnel of this server did not come back with the firewall on',
+ 'ufw was turned off on the server':'Turned off on the server itself (ufw disable)','ufw is not installed and could not be installed':'ufw could not be installed on this server'};
+function fwState(x){var g=x.guard||{};
+ if(!x.knows)return ['',t('Update the agent of this server first'),'y'];
+ if(x.want&&g.on&&g.confirmed)return ['g',t('On: only SSH and Kanki\'s ports are open'),'g'];
+ if(x.want&&g.on)return ['y',t('Checking that everything still works…'),'y'];
+ if(x.want)return ['y',t('Turning on…'),'y'];
+ if(x.note)return ['r',t(FW_NOTE[x.note]||x.note),'r'];
+ if(x.active)return ['',t('ufw is on, set by hand (not by Kanki)'),''];
+ return ['',t('Off: every port is reachable'),'']}
+function fwLoad(){api('GET','/api/firewall/guard').then(function(d){FWD=d;fwDraw()}).catch(function(){})}
+function fwDraw(){var el=$('#svp_fw');if(!el||!FWD)return;var ids=Object.keys(FWD).sort(function(a,b){return (a=='local'?-1:b=='local'?1:0)||String(FWD[a].name).localeCompare(String(FWD[b].name))});
+ var on=ids.filter(function(k){return FWD[k].want}).length;
+ var rows=ids.map(function(k){var x=FWD[k],st=fwState(x);
+  return kuItem({dot:st[0],name:esc(x.name||k)+(k=='local'?' · '+t('Panel server'):''),tags:kuTag(esc(st[1]),st[2]),
+   act:'<label class="sw"><input type="checkbox" '+(x.want?'checked ':'')+(x.knows?'':'disabled ')+'aria-label="'+esc(t('Firewall'))+'" onchange="fwSet(\''+esc(k)+'\',this.checked,this)"><span></span></label>'})}).join('');
+ el.innerHTML=kuGroup('🛡 '+t('Firewall'),on,'<button class="b2 sm" onclick="fwAll('+(on<ids.length)+')">'+t(on<ids.length?'On for every server':'Off for every server')+'</button>',
+  '<p class="muted ku-note">'+t('On: every port is closed except SSH and what Kanki uses on that server (cores, Kanki DNS, Xray, tunnels, the panel). A new tunnel opens its own port and a deleted one closes it, by themselves. The panel checks the server still works; if not, the server turns the firewall off again within 3 minutes.')+'</p>'+rows)}
+window.fwSet=function(id,on,box){var msg=on?t('Turn the firewall on for this server? Only SSH and Kanki\'s ports stay open; anything else (a website you run there by hand) is closed.'):t('Turn the firewall off for this server?');
+ if(!confirm(msg)){if(box)box.checked=!on;return}
+ api('POST','/api/tunnels/servers/'+q(id)+'/firewall-guard',{on:on}).then(function(){toast(t('Sent: the server does it on its next report (a few seconds)'));fwLoad()}).catch(function(e){if(box)box.checked=!on;fail(e)})};
+window.fwAll=function(on){if(!confirm(on?t('Turn the firewall on for EVERY server? On each one only SSH and Kanki\'s ports stay open.'):t('Turn the firewall off for every server?')))return;
+ api('POST','/api/firewall/guard',{on:on}).then(function(r){toast(t('Sent')+' · '+N(r.servers)+' '+t('servers'));fwLoad()}).catch(fail)};
 window.srvLoad=load;
 
 // ---------------------------------------------------------------- page
 window.pNodes=function(){ACC.open.srv='';
  $('#pg').innerHTML='<div class="ku">'+kuHead('nodes',t('Servers'),t('The panel runs on one server. Every other server is a node: add it with one command, then switch on here what it runs.'),'<button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button>')+
-  '<div id="svp_clash"></div><div id="svp_relay"></div><div id="svp_g">'+t('Loading…')+'</div></div>';
+  '<div id="svp_clash"></div><div id="svp_relay"></div><div id="svp_g">'+t('Loading…')+'</div><div id="svp_fw"></div></div>';
  load();autoRefresh(function(){load(true)});
  if(S.openAdd){S.openAdd=false;setTimeout(srvAdd,150)}};
 ACC.draw.srv=function(){draw(true)};
@@ -164,6 +195,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAssign(\''+ni+'\',0)">'+t('Remove from all users')+'</button>')}
  if(a&&!s.local)acts.push('<button class="b2 sm" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',13)+' '+t('Tunnel agent settings')+'</button>');
  if(!s.local)acts.push('<button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+ic('link',13)+' '+t('Show command')+'</button>');
+ if(a&&!s.local)acts.push('<button class="b2 sm" onclick="srvReplace(\''+esc(a.id)+'\')">'+ic('move',13)+' '+t('Replace the machine')+'</button>');
  h+='<div class="kxacts">'+acts.join('')+'</div>';
  if(!s.local)h+='<div class="ku-danger">'+(n&&a&&isIr(s)?'<button class="b2 sm bd" onclick="srvDropVpn(\''+k+'\')">'+t('Remove the VPN from this server')+'</button> ':'')+'<button class="b2 sm bd" onclick="srvDel(\''+k+'\')">'+ic('trash',13)+' '+t('Delete server')+'</button></div>';
  setTimeout(function(){$$('#sx_loc button').forEach(function(b){b.onclick=function(){$$('#sx_loc button').forEach(function(z){z.classList.toggle('on',z==b)});var bb=b.closest('.kxr-b');if(bb)bb.dataset.dirty='1'}})},0);
@@ -233,6 +265,16 @@ function waitTick(){var el=$('#sa_steps');if(!el||!SV.wait||!SV.d)return;var s=f
  var a=s.agent||{},n=s.node,ok=function(b,l){return '<div>'+(b?'<span class="okc">'+ic('check',16)+'</span>':'<span class="spin"></span>')+'<span>'+t(l)+'</span></div>'};
  el.innerHTML=ok(a.online||a.last_seen,a.online||a.last_seen?'Server agent connected':'Waiting for the server to connect…')+ok(!!n,'VPN part installed');
  clearTimeout(SV.wt);if(!n&&$('#modal').classList.contains('on'))SV.wt=setTimeout(function(){api('GET','/api/servers').then(function(d){SV.d=d;waitTick();if(S.page=='nodes')draw()}).catch(function(){})},4000)}
+
+// The machine of a server died or its IP was filtered: the same server on a new machine. Its settings stay;
+// the command makes the new machine this server again (tunnels, Xray, DNS, its VPN part and SSL come back).
+window.srvReplace=function(id){var s=find(id)||{},a=s.agent||{};
+ modal(mhead(t('Replace the machine'),s.name||id)+'<div id="sr_in"><p class="muted" style="margin:0 0 8px">'+t('For a server that is gone (switched off, or its IP filtered). Nothing is deleted: run the new command on the new machine and this server comes back there with its tunnels, Xray, Kanki DNS, its VPN cores and their ports, its users and SSL.')+'</p>'+
+  '<label class="f">'+t('New address (IP or domain) other servers dial')+'</label><input id="sr_addr" class="ltr" placeholder="'+esc(t('empty = the address it connects from'))+'" value="'+esc(a.addr||'')+'">'+
+  '<ul class="muted" style="margin:8px 0 0;padding-inline-start:18px;font-size:13px"><li>'+t('A domain on this server: point it to the new IP first, so SSL can be taken again.')+'</li><li>'+t('WireGuard and AmneziaWG get new server keys: the Kanki app takes the new files by itself; files imported by hand must be taken again.')+'</li><li>'+t('Make sure the old machine is off: two machines with one identity take turns.')+'</li></ul>'+
+  '<button class="btn" style="width:100%;margin-top:12px" id="sr_go">'+t('Make the new command')+'</button></div><div id="sa_out"></div>','wide');
+ $('#sr_go').onclick=function(){var me=this;me.disabled=true;
+  api('POST','/api/servers/'+q(id)+'/replace',{addr:$('#sr_addr').value.trim()}).then(function(r){$('#sr_in').classList.add('hide');showCmd(r.command,null,id);load(true)}).catch(function(e){me.disabled=false;fail(e)})}};
 
 window.srvCmd=function(key){api('GET','/api/servers/'+q(key)+'/command').then(function(r){var s=find(key)||{};
  modal(mhead(s.name||t('Server'))+'<div id="sa_out"></div>','wide');showCmd(r.command,s.planned,key)}).catch(fail)};

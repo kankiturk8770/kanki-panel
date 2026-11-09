@@ -268,6 +268,8 @@ pub async fn run(version: &str) {
     // certificates close to their end are renewed with what holds port 80 at that moment
     crate::certbot::renew_loop();
     let mut fails = 0u32;
+    // a failed update is tried again after a minute, not on every report (it downloads the whole program)
+    let mut update_tried: Option<std::time::Instant> = None;
     // answers in a row that say this server was removed from the panel
     let mut gone = 0u32;
     // the last error of setting up the emergency chat (reported to the panel)
@@ -352,6 +354,16 @@ pub async fn run(version: &str) {
                     if v["ssl_retry"].as_bool() == Some(true) {
                         let _ = tokio::task::spawn_blocking(crate::certbot::retry_now).await;
                     }
+                    // the firewall guard (a panel without it sends nothing: ufw is left as it is)
+                    let fw_want = v["fw_guard"].as_bool();
+                    let (fw_confirm, fw_fresh) = (v["fw_confirm"].as_bool() == Some(true), v["fw_fresh"].as_bool() == Some(true));
+                    let _ = tokio::task::spawn_blocking(move || {
+                        if fw_fresh {
+                            crate::fw::guard_reset_note();
+                        }
+                        crate::fw::guard_tick(fw_want, fw_confirm)
+                    })
+                    .await;
                     // firewall ports the admin asked to close (open in ufw, nothing listens there)
                     if let Some(rules) = v["fw_close"].as_array().filter(|a| !a.is_empty()) {
                         let rules: Vec<String> = rules.iter().filter_map(|u| u.as_str().map(|s| s.to_string())).collect();
@@ -436,9 +448,10 @@ pub async fn run(version: &str) {
                     }
                     // the subscription listener: its config, or Null (none here)
                     subsrv.apply(serde_json::from_value(v["subsrv"].clone()).ok());
-                    if v["update"].as_bool() == Some(true) {
+                    if v["update"].as_bool() == Some(true) && update_tried.map(|t| t.elapsed() >= Duration::from_secs(60)).unwrap_or(true) {
+                        update_tried = Some(std::time::Instant::now());
                         if let Err(e) = update_from_panel(&http, &panel, &id, &token).await {
-                            eprintln!("update from the panel failed: {}", e);
+                            eprintln!("update from the panel failed (tried again in a minute): {}", e);
                         }
                     }
                     if let Ok(specs) = serde_json::from_value::<Vec<Spec>>(v["tunnels"].clone()) {

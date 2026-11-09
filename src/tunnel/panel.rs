@@ -53,6 +53,11 @@ pub struct TServer {
     pub setup_at: i64,
     /// «without SSL» when it was added: the installer takes a self-signed certificate (KANKI_SSL=0)
     pub no_ssl: bool,
+    /// the firewall guard: ufw on with only Kanki's ports and SSH open (`fw::guard_tick`)
+    pub fw_guard: bool,
+    /// the machine is being replaced (a dead or filtered server moved to a new one): the next join with
+    /// `join` updates the existing node `node` instead of adding one, and keeps its cores and ports
+    pub replace: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -1294,6 +1299,17 @@ pub async fn local_loop(app: Arc<App>) {
         if let Some(x) = seen().lock().unwrap_or_else(|e| e.into_inner()).get_mut("local") {
             x.emergency = st;
         }
+        // the firewall guard of the panel's own server
+        let g = tokio::task::spawn_blocking(|| crate::fw::report()["guard"].clone()).await.unwrap_or(Value::Null);
+        let (fw_want, fw_confirm) = guard_answer(&app, "local", &g);
+        let fw_fresh = guard_fresh().lock().unwrap_or_else(|e| e.into_inner()).remove("local");
+        let _ = tokio::task::spawn_blocking(move || {
+            if fw_fresh {
+                crate::fw::guard_reset_note();
+            }
+            crate::fw::guard_tick(Some(fw_want), fw_confirm)
+        })
+        .await;
         rotate_tick(&app);
         let want: Vec<(u8, String)> = servers(&app)
             .iter()
@@ -1464,6 +1480,8 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/tunnels/servers/:id/ssl-retry", post(server_ssl_retry))
         .route("/api/tunnels/servers/:id/ports", get(server_ports))
         .route("/api/tunnels/servers/:id/firewall", get(server_fw).post(server_fw_close))
+        .route("/api/tunnels/servers/:id/firewall-guard", post(server_guard))
+        .route("/api/firewall/guard", get(guard_list).post(guard_all))
         .route("/api/tunnels/:id", delete(tunnel_del))
         .route("/api/removals/:id", get(removal_get))
         .route("/api/tunnels/:id/awgconf/:side", get(awg_conf))
@@ -2032,6 +2050,171 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     save_tunnels(&app, &list);
     Json(json!({ "ok": true, "id": t.id })).into_response()
+}
+
+// ------------------------------------------------------------------ the firewall guard
+
+/// What the panel saw just before it asked a server for the guard: the tunnels up then (they must stay
+/// up) and when; the server's node must sync after that too
+#[derive(Clone)]
+struct GuardWatch {
+    /// when the panel first saw the guard on and not confirmed yet (the panel's clock; 0 = not yet)
+    seen_on: i64,
+    tunnels_up: Vec<String>,
+}
+
+fn guard_watch() -> &'static Mutex<HashMap<String, GuardWatch>> {
+    static G: OnceLock<Mutex<HashMap<String, GuardWatch>>> = OnceLock::new();
+    G.get_or_init(Default::default)
+}
+
+/// servers that get `fw_fresh` once (a press of the switch: an earlier failure note is forgotten)
+fn guard_fresh() -> &'static Mutex<HashSet<String>> {
+    static G: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    G.get_or_init(Default::default)
+}
+
+/// the panel waits this long after the guard went on before it judges (the node syncs every few seconds)
+const GUARD_SETTLE: i64 = 25;
+/// … and gives up this long after it (well before the server's own `fw::GUARD_CONFIRM_SECS`)
+const GUARD_GIVE_UP: i64 = 120;
+
+/// whether the guard is asked for server `sid`
+pub fn guard_wanted(app: &App, sid: &str) -> bool {
+    if sid == "local" {
+        return app.db.get("fw_guard_local") == "1";
+    }
+    servers(app).iter().any(|s| s.id == sid && s.fw_guard)
+}
+
+fn set_guard(app: &App, sid: &str, on: bool) {
+    if sid == "local" {
+        app.db.set("fw_guard_local", if on { "1" } else { "0" });
+        return;
+    }
+    let mut list = servers(app);
+    if let Some(s) = list.iter_mut().find(|s| s.id == sid) {
+        s.fw_guard = on;
+    }
+    save_servers(app, &list);
+}
+
+/// the tunnels of `sid` that are up now (both servers reporting, both holding a link)
+fn tunnels_up_of(app: &App, sid: &str) -> Vec<String> {
+    live_quality(app).into_iter().filter(|(t, up, _)| *up && (t.entry == sid || t.exit == sid)).map(|(t, _, _)| t.id).collect()
+}
+
+/// The panel's answer about the guard to server `sid` that reported `g` (`fw::Guard`): (asked for it,
+/// confirm it works). It confirms once the server's node synced after the guard went on and every tunnel
+/// that was up before is up again; it gives up (and turns the switch off) when that does not happen.
+fn guard_answer(app: &App, sid: &str, g: &Value) -> (bool, bool) {
+    let want = guard_wanted(app, sid);
+    if !want {
+        guard_watch().lock().unwrap_or_else(|e| e.into_inner()).remove(sid);
+        return (false, false);
+    }
+    let (on, confirmed) = (g["on"].as_bool() == Some(true), g["confirmed"].as_bool() == Some(true));
+    let note = g["note"].as_str().unwrap_or("");
+    // the server could not, or rolled it back: the switch goes off and says why
+    if !on && !note.is_empty() {
+        set_guard(app, sid, false);
+        app.db.set(&format!("fw_guard_note_{}", sid), note);
+        guard_watch().lock().unwrap_or_else(|e| e.into_inner()).remove(sid);
+        return (false, false);
+    }
+    if !on || confirmed {
+        return (true, false);
+    }
+    let t = now();
+    // times on the panel's own clock (the server's may differ)
+    let watch = {
+        let mut gw = guard_watch().lock().unwrap_or_else(|e| e.into_inner());
+        // a panel restarted meanwhile knows no tunnels from before: only the VPN part is checked
+        let w = gw.entry(sid.to_string()).or_insert(GuardWatch { seen_on: 0, tunnels_up: vec![] });
+        if w.seen_on == 0 {
+            w.seen_on = t;
+        }
+        w.clone()
+    };
+    let since = watch.seen_on;
+    if t - since < GUARD_SETTLE {
+        return (true, false);
+    }
+    // the VPN part of the machine: the panel reached it after the firewall went on
+    let node_id = if sid == "local" { String::new() } else { servers(app).into_iter().find(|s| s.id == sid).map(|s| s.node).unwrap_or_default() };
+    let node_ok = node_id.is_empty() || app.db.node(&node_id).map(|n| !n.enabled || (n.online && n.last_sync >= since)).unwrap_or(true);
+    let up = tunnels_up_of(app, sid);
+    let tunnels_ok = watch.tunnels_up.iter().all(|id| up.contains(id));
+    if node_ok && tunnels_ok {
+        guard_watch().lock().unwrap_or_else(|e| e.into_inner()).remove(sid);
+        return (true, true);
+    }
+    if t - since > GUARD_GIVE_UP {
+        let why = if !node_ok { "the panel could not reach this server's VPN part with the firewall on" } else { "a tunnel of this server did not come back with the firewall on" };
+        set_guard(app, sid, false);
+        app.db.set(&format!("fw_guard_note_{}", sid), why);
+        guard_watch().lock().unwrap_or_else(|e| e.into_inner()).remove(sid);
+        // the switch is off: the server turns ufw off on this very answer
+        return (false, false);
+    }
+    (true, false)
+}
+
+/// { on }: the guard of one server ("local" = the panel's own)
+async fn server_guard(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
+    if let Err(r) = crate::auth::check_session(&app, &h) {
+        return r;
+    }
+    let on = b["on"].as_bool().unwrap_or(false);
+    if id != "local" && !servers(&app).iter().any(|s| s.id == id) {
+        return err(StatusCode::NOT_FOUND, "unknown server");
+    }
+    guard_switch(&app, &id, on);
+    Json(json!({ "ok": true })).into_response()
+}
+
+fn guard_switch(app: &App, id: &str, on: bool) {
+    set_guard(app, id, on);
+    app.db.set(&format!("fw_guard_note_{}", id), "");
+    if on {
+        guard_watch().lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), GuardWatch { seen_on: 0, tunnels_up: tunnels_up_of(app, id) });
+        guard_fresh().lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string());
+    }
+}
+
+/// { on }: the guard of every server at once (the panel's own included)
+async fn guard_all(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    if let Err(r) = crate::auth::check_session(&app, &h) {
+        return r;
+    }
+    let on = b["on"].as_bool().unwrap_or(false);
+    let ids: Vec<String> = std::iter::once("local".to_string()).chain(servers(&app).into_iter().map(|s| s.id)).collect();
+    for id in &ids {
+        guard_switch(&app, id, on);
+    }
+    Json(json!({ "ok": true, "servers": ids.len() })).into_response()
+}
+
+/// the guard of every server, for the panel page: {id: {want, note, guard, active, ufw}}
+async fn guard_list(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let sn = seen().lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let local_fw = tokio::task::spawn_blocking(crate::fw::report).await.unwrap_or_default();
+    let mut out = serde_json::Map::new();
+    let mut add = |id: &str, name: &str, fw: &Value, version: &str| {
+        out.insert(id.to_string(), json!({
+            "name": name, "want": guard_wanted(&app, id), "note": app.db.get(&format!("fw_guard_note_{}", id)),
+            "guard": fw["guard"], "active": fw["active"], "ufw": fw["ufw"], "version": version,
+            // an agent older than 3.38.0 reports no guard: it cannot do it yet
+            "knows": fw.get("guard").is_some(),
+        }));
+    };
+    add("local", &local_name(&app), &local_fw, crate::VERSION);
+    for s in servers(&app) {
+        let x = sn.get(&s.id);
+        add(&s.id, &s.name, x.map(|x| &x.fw).unwrap_or(&Value::Null), x.map(|x| x.version.as_str()).unwrap_or(""));
+    }
+    Json(Value::Object(out)).into_response()
 }
 
 /// Saves a tunnel from another part of the panel (KPING builds its own) with every check of the Tunnels page
@@ -2683,10 +2866,12 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     let free = frees().lock().unwrap_or_else(|e| e.into_inner()).remove(&id).unwrap_or_default();
     let ssl_retry = ssl_retries().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
     let fw_close = fw_closes().lock().unwrap_or_else(|e| e.into_inner()).remove(&id).unwrap_or_default();
+    let (fw_guard, fw_confirm) = guard_answer(&app, &id, &b["fw"]["guard"]);
+    let fw_fresh = guard_fresh().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
     // the VPN part of this machine, when the admin asked for it (sent until the agent says it started)
     let setup = crate::servers::setup_for(&app, &s, &b["setup"]);
     let (xray_block, xray_drop) = (crate::xray::panel::shut_on(&id), crate::xray::panel::ip_blocks(&id));
-    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "setup": setup, "panel": crate::servers::panel_url(&app) })).into_response()
+    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app) })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)
@@ -2733,6 +2918,8 @@ pub(crate) async fn run_update_all(app: &Arc<App>) -> Value {
     let seen_now = seen().lock().unwrap_or_else(|e| e.into_inner()).clone();
     let srv = servers(&app);
     let mut covered: HashSet<String> = HashSet::new();
+    // node id -> the tunnel servers of the same machine (when its own update fails, their agent takes over)
+    let mut machine: HashMap<String, Vec<String>> = HashMap::new();
     let mut jobs = vec![];
     // every node, a relay whose VPN serves nobody too (it runs the same program)
     for n in app.db.nodes().into_iter().filter(|n| n.id != "local") {
@@ -2752,6 +2939,7 @@ pub(crate) async fn run_update_all(app: &Arc<App>) -> Value {
             let ip = seen_now.get(&s.id).map(|x| x.ip.clone()).unwrap_or_default();
             if s.node == n.id || s.addr.trim().to_lowercase() == host || (!ip.is_empty() && ips.contains(&ip)) {
                 covered.insert(s.id.clone());
+                machine.entry(n.id.clone()).or_default().push(s.id.clone());
             }
         }
         let cur = serde_json::from_str::<Value>(&n.info).ok().and_then(|v| v["version"].as_str().map(|x| x.to_string())).unwrap_or_default();
@@ -2763,8 +2951,24 @@ pub(crate) async fn run_update_all(app: &Arc<App>) -> Value {
             let r = crate::sync::remote_post(&a, &n, "/agent/update").await;
             let ok = r.as_ref().map(|v| v["ok"].as_bool().unwrap_or(false)).unwrap_or(false);
             let e = r.as_ref().and_then(|v| v["error"].as_str().map(|x| x.to_string())).unwrap_or_default();
-            (ok.then(|| n.clone()), json!({ "name": n.name, "ok": ok, "error": e }))
+            (ok.then(|| n.clone()), n.id.clone(), json!({ "name": n.name, "ok": ok, "error": e }))
         }));
+    }
+    let mut nodes_out = vec![];
+    let mut restarting = vec![];
+    for j in jobs {
+        if let Ok((n, nid, v)) = j.await {
+            // the node takes its update from GitHub; where GitHub cannot be reached (often inside Iran) it
+            // fails, and the tunnel agent of the same machine takes the panel's own program instead
+            // (the node restarts onto it with the agent: they run the same file)
+            if n.is_none() {
+                for sid in machine.get(&nid).into_iter().flatten() {
+                    covered.remove(sid);
+                }
+            }
+            nodes_out.push(v);
+            restarting.extend(n);
+        }
     }
     // tunnel-only servers: agents from v2.7.0 on update themselves from the panel; older ones need the command once
     let mut flagged: Vec<String> = vec![];
@@ -2783,14 +2987,6 @@ pub(crate) async fn run_update_all(app: &Arc<App>) -> Value {
     }
     if !flagged.is_empty() {
         app.db.set("tun_update_until", &(now() + 900).to_string());
-    }
-    let mut nodes_out = vec![];
-    let mut restarting = vec![];
-    for j in jobs {
-        if let Ok((n, v)) = j.await {
-            nodes_out.push(v);
-            restarting.extend(n);
-        }
     }
     crate::sync::refresh_after_update(&app, restarting, &target);
     let mut panel_msg = json!("current");
@@ -3243,5 +3439,61 @@ mod quality_tests {
         // 2.5 % after a bad spell is not yet good
         assert!(judge(true, &pair_agg(&[a(2.5)]).unwrap()));
         assert!(!judge(true, &pair_agg(&[a(0.5)]).unwrap()));
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+
+    fn test_app() -> Arc<App> {
+        use std::sync::atomic::AtomicI64;
+        let dir = std::env::temp_dir().join(format!("kanki-guard-test-{}", rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        Arc::new(App {
+            db: crate::db::Db::open(dir.join("kanki.db").to_str().unwrap()),
+            env: HashMap::from([("DOMAIN".to_string(), "fi.example.com".to_string())]),
+            hy2_allowed: Mutex::new(Default::default()), limits: Mutex::new(Default::default()), reported: Mutex::new(Default::default()),
+            login_fails: Mutex::new(Default::default()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(Default::default()),
+        })
+    }
+
+    /// The panel confirms only once the server's VPN part synced after the firewall went on; a server
+    /// that stays unreachable gets the switch turned off (and the reason kept)
+    #[test]
+    fn the_panel_confirms_or_rolls_back() {
+        let app = test_app();
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,info,online,last_sync) VALUES('n1','DE','https://de:1','de','t','{}',1,0)", &[]).unwrap();
+        save_servers(&app, &[TServer { id: "g1".into(), name: "DE".into(), node: "n1".into(), ..Default::default() }]);
+        // not asked: nothing
+        assert_eq!(guard_answer(&app, "g1", &json!({})), (false, false));
+        guard_switch(&app, "g1", true);
+        assert!(guard_wanted(&app, "g1"));
+        // the server has not turned it on yet, then has: asked, not confirmed (too soon)
+        assert_eq!(guard_answer(&app, "g1", &json!({ "on": false })), (true, false));
+        let on = json!({ "on": true, "confirmed": false, "since": 1 });
+        assert_eq!(guard_answer(&app, "g1", &on), (true, false));
+        // settled, but the node did not sync since: still waiting
+        guard_watch().lock().unwrap().get_mut("g1").unwrap().seen_on = now() - GUARD_SETTLE - 1;
+        assert_eq!(guard_answer(&app, "g1", &on), (true, false));
+        // the panel reached the node afterwards: confirmed
+        app.db.exec("UPDATE nodes SET last_sync=?1 WHERE id='n1'", &[&now()]).unwrap();
+        assert_eq!(guard_answer(&app, "g1", &on), (true, true));
+        // a second run: the node never answers again → given up, the switch off, the reason kept
+        guard_switch(&app, "g1", true);
+        app.db.exec("UPDATE nodes SET online=0 WHERE id='n1'", &[]).unwrap();
+        assert_eq!(guard_answer(&app, "g1", &on), (true, false));
+        guard_watch().lock().unwrap().get_mut("g1").unwrap().seen_on = now() - GUARD_GIVE_UP - 1;
+        assert_eq!(guard_answer(&app, "g1", &on), (false, false));
+        assert!(!guard_wanted(&app, "g1"));
+        assert!(app.db.get("fw_guard_note_g1").contains("could not reach"));
+        // the server rolled back by itself: the switch goes off with its reason
+        guard_switch(&app, "g1", true);
+        assert_eq!(guard_answer(&app, "g1", &json!({ "on": false, "note": "rolled back: the panel did not see this server working with the firewall on" })), (false, false));
+        assert!(!guard_wanted(&app, "g1") && app.db.get("fw_guard_note_g1").starts_with("rolled back"));
+        // the panel's own server has its own switch
+        guard_switch(&app, "local", true);
+        assert!(guard_wanted(&app, "local"));
     }
 }

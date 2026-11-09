@@ -346,6 +346,7 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         let v: Value = serde_json::from_str(&open(&body, &code, "phone-aaaaaaaa")).unwrap();
         let url = v["kping"][0]["url"].as_str().unwrap_or_default().to_string();
+        assert_eq!(v["kping"][0]["node"], "de");
         assert!(url.starts_with("mtun://") && url.contains("@ir.example.com:24300?") && url.contains("&ip=10.81.0.2/16&"), "{}", url);
         assert!(url.contains(&format!("obfs={}", crate::kping::obfs(&app))) && !url.contains(&crate::microtun::obfs(&app)));
         // its own key, not the user's microtun key
@@ -355,8 +356,10 @@ mod tests {
         assert!(!plain.contains("kping") && !plain.contains("24300"), "{}", plain);
         let (_, page, _) = get(&app, &format!("/sub/{}", code), &[("user-agent", "Mozilla/5.0")]).await;
         assert!(!page.contains("24300") && !page.contains("10.81."));
+        // the page the Kanki app reads (sealed): its data block carries KPING
         let (_, page, _) = get(&app, &format!("/sub/{}", code), &app_hdr).await;
-        assert!(!open(&page, &code, "phone-aaaaaaaa").contains("24300"));
+        let page = open(&page, &code, "phone-aaaaaaaa");
+        assert!(page.contains("\"kping\":[") && page.contains("@ir.example.com:24300?"), "the app's page has no KPING");
         let (_, raw, _) = get(&app, &format!("/sub/{}/raw", code), &[("user-agent", "v2rayNG/1.9")]).await;
         assert!(!raw.contains("24300"));
         // a user who is not a tester gets nothing, even in the Kanki app
