@@ -74,14 +74,15 @@ pub struct Settings {
     pub mtu: u16,
     /// one path: the relay sends the second copy to the phone this many ms after the first (0 = none)
     pub dup_ms: u16,
-    /// parity: one repair packet per this many packets (0 = none)
+    /// parity: one repair packet per this many packets (0 = none). 2: a lost packet is rebuilt as soon as
+    /// the next one arrives, so it is late by one packet at most
     pub fec: u8,
     pub routes: Vec<Route>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { on: true, port: DEFAULT_PORT, mtu: 1332, dup_ms: 2, fec: 4, routes: vec![] }
+        Settings { on: true, port: DEFAULT_PORT, mtu: 1332, dup_ms: 2, fec: 2, routes: vec![] }
     }
 }
 

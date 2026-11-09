@@ -14,7 +14,7 @@
 //! - PING (aux = path id): payload = the phone's clock in ms (8 bytes). A new session is taken only
 //!   from a PING within 2 minutes of this server's clock, so old packets cannot start one again.
 //! - PARITY (aux = n): payload = [first seq 4 | xor of the lengths 2 | xor of the n payloads, padded]
-//!   over the n DATA packets first … first+n-1 (n ≤ 8; sent when the group is full or 30 ms idle)
+//!   over the n DATA packets first … first+n-1 (n ≤ 8; sent when the group is full or 8 ms idle)
 //!
 //! The payload is not encrypted (the game encrypts its own): the leg phone → Iran is domestic, and Iran
 //! → abroad goes inside the encrypted Game-FEC tunnel.
@@ -62,8 +62,8 @@ const PATH_IDLE: Duration = Duration::from_secs(30);
 const SESS_IDLE: Duration = Duration::from_secs(180);
 const MAX_PATHS: usize = 4;
 const MAX_SESS: usize = 4;
-/// a parity group that got no new packet this long is sent as it is
-const GROUP_IDLE: Duration = Duration::from_millis(30);
+/// a parity group that got no new packet this long is sent as it is (a game sends every 15-30 ms)
+const GROUP_IDLE: Duration = Duration::from_millis(8);
 const WIN: u32 = 1024;
 const MAX_PKT: usize = 2048;
 
@@ -1180,7 +1180,8 @@ async fn kping_lab() {
     let dir = std::env::var("LAB_DIR").unwrap_or("/tmp".into());
     let user = KUser { uid: 1, name: "gamer".into(), key: key.clone(), ip: "10.81.0.2".into() };
     let relay = Relay::start(&obfs, &RelayCfg { port: 24300, to: 24302, dup_ms: 2, users: vec![user.clone()] }).expect("relay");
-    let exit = Exit::start(&obfs, &ExitCfg { port: 4300, mtu: 1332, fec: 4, users: vec![user] }).expect("exit");
+    let fec: u8 = std::env::var("LAB_FEC").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
+    let exit = Exit::start(&obfs, &ExitCfg { port: 4300, mtu: 1332, fec, users: vec![user] }).expect("exit");
     let mt = MtCfg {
         port: 4200, obfs: obfs.clone(), address: "10.79.0.1/16".into(), mtu: 1324, burst_max: 1000, burst_delay_ms: 2,
         users: vec![MtUser { name: "gamer".into(), key: key.clone(), ip: "10.79.0.2".into(), max: 2 }], local_only: true, ..Default::default()
@@ -1203,7 +1204,7 @@ async fn kping_lab() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     assert!(run.iter().all(|r| r.status().links > 0), "a tunnel did not connect");
-    let kl = crate::kping::to_url(&key, "10.200.1.1:24300", 1, &obfs, Ipv4Addr::new(10, 81, 0, 2), 1332, 4, "lab");
+    let kl = crate::kping::to_url(&key, "10.200.1.1:24300", 1, &obfs, Ipv4Addr::new(10, 81, 0, 2), 1332, fec, "lab");
     let ms = crate::microtun::Settings { mtu: 1324, burst_max: 1000, burst_delay_ms: 2, ..Default::default() };
     let ml = crate::microtun::to_url(&key, &std::env::var("MT_DIAL").unwrap_or("127.0.0.1:25400".into()), &obfs, Ipv4Addr::new(10, 79, 0, 2), &ms, "lab");
     std::fs::write(format!("{}/kping.link", dir), kl).unwrap();

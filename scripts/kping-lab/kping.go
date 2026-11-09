@@ -148,7 +148,7 @@ func (w *window) has(seq uint32) bool {
 	return w.bits[i/64]&(1<<(i%64)) != 0
 }
 
-// fecTx: XOR parity of groups of up to k packets (sent when full, or after 30 ms)
+// fecTx: XOR parity of groups of up to k packets (sent when full, or after 8 ms)
 type fecTx struct {
 	mu    sync.Mutex
 	k     int
@@ -189,7 +189,7 @@ func (f *fecTx) add(seq uint32, p []byte) (byte, []byte) {
 func (f *fecTx) flush() (byte, []byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.n >= 1 && time.Since(f.last) >= 30*time.Millisecond {
+	if f.n >= 1 && time.Since(f.last) >= 8*time.Millisecond {
 		return f.take()
 	}
 	return 0, nil

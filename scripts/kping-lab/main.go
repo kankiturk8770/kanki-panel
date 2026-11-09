@@ -296,7 +296,7 @@ func kping(linkFile string, secs int, locals, relays []string, game string) {
 		}
 	}
 	go func() {
-		for range time.Tick(10 * time.Millisecond) {
+		for range time.Tick(2 * time.Millisecond) {
 			if n, par := tx.flush(); par != nil {
 				mu.Lock()
 				s := pseq
