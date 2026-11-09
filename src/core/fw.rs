@@ -4,6 +4,12 @@
 //!
 //! A port is closed only when no other owner still needs it, never for SSH, and never while a program
 //! that is not Kanki listens on it (an older rule of the admin for nginx on 443 stays open).
+//!
+//! The guard (3.38.0, a switch per server in the panel): ufw is turned on with every incoming port
+//! closed except SSH and what Kanki uses here (every owner above, WireGuard, AmneziaWG, Hysteria2, the
+//! panel's and the node's web ports, what Kanki's programs listen on, NAT redirects). Forwarding stays
+//! allowed (VPN users and tunnels pass as before). The panel must confirm the server still works within
+//! `GUARD_CONFIRM_SECS`; without that confirmation the server turns ufw off again by itself.
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Mutex, OnceLock};
@@ -18,7 +24,27 @@ const RECHECK_SECS: u64 = 600;
 struct State {
     /// owner -> the rules it needs ("443/tcp", "4000:4010/udp")
     owners: BTreeMap<String, BTreeSet<String>>,
+    guard: Guard,
 }
+
+/// The firewall guard of this server
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Clone)]
+#[serde(default)]
+pub struct Guard {
+    /// ufw is on with only Kanki's ports and SSH open
+    pub on: bool,
+    /// Kanki turned ufw on (it was off): turning the guard off turns ufw off again
+    pub by_kanki: bool,
+    /// when it was turned on (unix seconds)
+    pub since: i64,
+    /// the panel saw the server still working afterwards
+    pub confirmed: bool,
+    /// why it is off although the panel asked for it ("" = nothing to say)
+    pub note: String,
+}
+
+/// without the panel's confirmation this long after turning ufw on, the server turns it off again
+pub const GUARD_CONFIRM_SECS: i64 = 180;
 
 fn sh(cmd: &str) -> (bool, String) {
     match std::process::Command::new("sh").arg("-c").arg(cmd).stdin(std::process::Stdio::null()).output() {
@@ -298,6 +324,184 @@ fn hidden_users() -> BTreeSet<String> {
     v
 }
 
+// ------------------------------------------------------------------ the guard
+
+/// programs of Kanki (and the services it installs) whose listening ports the guard keeps open
+const OURS: &[&str] = &["kanki-panel", "caddy", "hysteria", "xray", "kanki-mix-serve", "kanki-mix-server", "sshd"];
+
+/// whether a public listener belongs to Kanki (or SSH)
+fn ours(prog: &str, unit: &str) -> bool {
+    OURS.contains(&prog) || unit.starts_with("kanki") || matches!(unit, "caddy.service" | "hysteria-server.service" | "ssh.service" | "sshd.service") || unit.starts_with("xray")
+}
+
+/// the `ListenPort` of a WireGuard / AmneziaWG config
+fn conf_port(path: &str) -> Option<u16> {
+    std::fs::read_to_string(path).ok()?.lines().find_map(|l| {
+        let (k, v) = l.split_once('=')?;
+        (k.trim() == "ListenPort").then(|| v.trim().parse().ok()).flatten()
+    })
+}
+
+/// Every port Kanki needs open here, whatever ufw says now: SSH, the cores' configs, the web ports in
+/// kanki.env, what Kanki's programs listen on from outside, NAT redirects and every owner's rules.
+fn needed(st: &State) -> BTreeSet<String> {
+    let mut v: BTreeSet<String> = ssh_ports().into_iter().map(|p| rule(p, false)).collect();
+    for f in ["/etc/wireguard/wg0.conf", "/etc/amnezia/amneziawg/awg0.conf"] {
+        if let Some(p) = conf_port(f) {
+            v.insert(rule(p, true));
+        }
+    }
+    let env = crate::util::load_env("/etc/kanki/kanki.env");
+    for (k, udp) in [("HY2_PORT", true), ("HTTPS_PORT", false), ("NODE_PUBLIC_PORT", false)] {
+        if let Some(p) = env.get(k).and_then(|p| p.trim().parse::<u16>().ok()).filter(|p| *p > 0) {
+            v.insert(rule(p, udp));
+        }
+    }
+    for (port, udp, prog, unit) in crate::certbot::public_listeners() {
+        // UDP: the kernel's (WireGuard / AmneziaWG) and Kanki's services outside the range the system
+        // gives to outgoing sockets (an unconnected client socket looks like a listener there); ports
+        // in that range come from the owners' lists
+        let take = if udp { prog == "kernel" || (ours(&prog, &unit) && !(32768..=60999).contains(&port)) } else { ours(&prog, &unit) };
+        if take {
+            v.insert(rule(port, udp));
+        }
+    }
+    v.extend(hidden_users());
+    for rs in st.owners.values() {
+        v.extend(rs.iter().cloned());
+    }
+    v.retain(|r| valid_rule(r));
+    v
+}
+
+/// the rules ufw has, on or off ("ufw show added" lists them either way)
+fn added_rules() -> BTreeSet<String> {
+    let (_, out) = sh("ufw show added 2>/dev/null");
+    out.lines().filter_map(|l| l.trim().strip_prefix("ufw allow ")).map(|r| r.trim().to_string()).filter(|r| valid_rule(r)).collect()
+}
+
+fn install_ufw() -> bool {
+    if ufw_here() {
+        return true;
+    }
+    let _ = sh("DEBIAN_FRONTEND=noninteractive timeout 240 apt-get install -y ufw >/dev/null 2>&1 || (timeout 240 apt-get update >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive timeout 240 apt-get install -y ufw >/dev/null 2>&1)");
+    ufw_here()
+}
+
+/// Turn ufw on with only `want` (and SSH) open. SSH must be in ufw before it is turned on. Blocking.
+fn enable(want: &BTreeSet<String>) -> Result<bool, String> {
+    if !install_ufw() {
+        return Err("ufw is not installed and could not be installed".into());
+    }
+    let was = ufw_active();
+    let have = added_rules();
+    for r in want.iter().filter(|r| !have.contains(*r)) {
+        let _ = sh(&format!("ufw allow {} >/dev/null 2>&1", r));
+    }
+    let have = added_rules();
+    let ssh: Vec<String> = ssh_ports().into_iter().map(|p| rule(p, false)).collect();
+    if let Some(r) = ssh.iter().find(|r| !have.contains(*r)) {
+        return Err(format!("SSH ({}) could not be allowed in ufw: not turned on", r));
+    }
+    // forwarding stays open: VPN users and tunnels pass through this server as before
+    for c in ["ufw default allow outgoing", "ufw default allow routed", "ufw default deny incoming"] {
+        if !sh(&format!("{} >/dev/null 2>&1", c)).0 {
+            return Err(format!("\"{}\" failed", c));
+        }
+    }
+    if !was && !sh("ufw --force enable >/dev/null 2>&1").0 {
+        return Err("ufw could not be turned on".into());
+    }
+    if !was {
+        // ufw keeps its rules in its own chains; ours (VPN NAT and forwarding) stay as they were
+        let _ = sh("ufw reload >/dev/null 2>&1");
+    }
+    if !ufw_active() {
+        return Err("ufw did not turn on".into());
+    }
+    Ok(!was)
+}
+
+/// One round of the guard (every report of the agent, and the panel's own loop): `want` is what the
+/// panel asks (None = a panel that knows nothing of it), `confirm` that the panel saw this server still
+/// working. Returns the guard's state. Blocking.
+pub fn guard_tick(want: Option<bool>, confirm: bool) -> Guard {
+    // installing ufw can take minutes: not while holding what the other Kanki programs here wait on
+    if want == Some(true) && !ufw_here() {
+        install_ufw();
+    }
+    let mut seen = lock().lock().unwrap_or_else(|e| e.into_inner());
+    let _file = file_lock();
+    let Some(mut st) = load_checked() else { return Guard { note: "the firewall state is broken".into(), ..Default::default() } };
+    let now = crate::util::now();
+    let before = st.guard.clone();
+    match want {
+        None => {}
+        Some(true) if !st.guard.on => {
+            // asked again after it was rolled back or turned off by hand: only when the panel asks anew
+            if st.guard.note.is_empty() {
+                let need = needed(&st);
+                match enable(&need) {
+                    Ok(by) => {
+                        st.guard = Guard { on: true, by_kanki: by, since: now, confirmed: false, note: String::new() };
+                        // every owner's rules are in ufw now: no early return in `sync` keeps one out
+                        seen.clear();
+                        eprintln!("firewall: on, {} rule(s) open, the rest closed; waiting for the panel to confirm", need.len());
+                    }
+                    Err(e) => {
+                        eprintln!("firewall: {}", e);
+                        st.guard.note = e;
+                    }
+                }
+            }
+        }
+        Some(true) => {
+            if !ufw_active() {
+                // turned off by hand on the server: not turned on again behind the admin's back
+                st.guard = Guard { note: "ufw was turned off on the server".into(), ..Default::default() };
+            } else if !st.guard.confirmed && confirm {
+                st.guard.confirmed = true;
+                eprintln!("firewall: confirmed by the panel");
+            } else if !st.guard.confirmed && now - st.guard.since > GUARD_CONFIRM_SECS {
+                if st.guard.by_kanki {
+                    let _ = sh("ufw --force disable >/dev/null 2>&1");
+                }
+                eprintln!("firewall: the panel did not confirm within {} s: turned off again", GUARD_CONFIRM_SECS);
+                st.guard = Guard { note: "rolled back: the panel did not see this server working with the firewall on".into(), ..Default::default() };
+            } else {
+                // something new listens or was added since: open it too
+                let have = added_rules();
+                for r in needed(&st).iter().filter(|r| !have.contains(*r)) {
+                    let _ = sh(&format!("ufw allow {} >/dev/null 2>&1", r));
+                }
+            }
+        }
+        Some(false) => {
+            if st.guard.on && st.guard.by_kanki {
+                let _ = sh("ufw --force disable >/dev/null 2>&1");
+                eprintln!("firewall: off (as before Kanki turned it on)");
+            }
+            st.guard = Guard::default();
+        }
+    }
+    if st.guard != before {
+        save(&st);
+        *report_cache().lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+    st.guard
+}
+
+/// The panel asked for the guard anew (a press of the switch): a note of an earlier failure is forgotten
+pub fn guard_reset_note() {
+    let _file = file_lock();
+    if let Some(mut st) = load_checked() {
+        if !st.guard.note.is_empty() {
+            st.guard.note.clear();
+            save(&st);
+        }
+    }
+}
+
 fn report_cache() -> &'static Mutex<Option<(Instant, serde_json::Value)>> {
     static C: OnceLock<Mutex<Option<(Instant, serde_json::Value)>>> = OnceLock::new();
     C.get_or_init(|| Mutex::new(None))
@@ -331,7 +535,8 @@ pub fn report() -> serde_json::Value {
             unused.push(r);
         }
     }
-    let v = serde_json::json!({ "owners": st.owners, "unused": unused });
+    let active = ufw_here() && ufw_active();
+    let v = serde_json::json!({ "owners": st.owners, "unused": unused, "guard": st.guard, "active": active, "ufw": ufw_here() });
     *c.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), v.clone()));
     v
 }
@@ -421,4 +626,80 @@ mod tests {
         let all: Vec<String> = status_rules(st).into_iter().collect();
         assert_eq!(all, vec!["22/tcp", "4000:4010/udp", "443/tcp", "9000/udp"]);
     }
+}
+
+/// The guard for real, with ufw and iptables, in a network namespace made for it (root; run by
+/// `scripts/fw_guard_live.sh`, which also checks from outside which ports answer).
+#[cfg(test)]
+#[test]
+#[ignore]
+fn guard_live() {
+    let run = |c: &str| sh(c);
+    let wait = |secs: u64| std::thread::sleep(std::time::Duration::from_secs(secs));
+    let _ = run("ufw --force disable; ufw --force reset");
+    let _ = std::fs::remove_file(STATE);
+    let _ = std::fs::remove_file(backup());
+    // a VPN server forwards; the VPN's own forwarding and NAT (like wg-quick or microtun) must survive ufw
+    let _ = std::fs::write("/proc/sys/net/ipv4/ip_forward", "1");
+    let _ = run("iptables -I FORWARD -i kt0 -j ACCEPT; iptables -t nat -A POSTROUTING -s 10.79.0.0/16 ! -o kt0 -j MASQUERADE");
+    // a tunnel's ports while ufw is still off: only remembered
+    sync("tunnels", vec!["8443/tcp".to_string(), "24300/udp".to_string()]);
+    let g = guard_tick(Some(true), false);
+    assert!(g.on && g.by_kanki && !g.confirmed, "{:?}", g);
+    assert!(ufw_active());
+    let added = added_rules();
+    for r in ["22/tcp", "8443/tcp", "24300/udp"] {
+        assert!(added.contains(r), "{} not open: {:?}", r, added);
+    }
+    assert!(!added.contains("9999/tcp"), "{:?}", added);
+    let (_, verbose) = run("ufw status verbose");
+    assert!(verbose.contains("deny (incoming)") && verbose.contains("allow (outgoing)") && verbose.contains("allow (routed)"), "{}", verbose);
+    let (_, fwd) = run("iptables -S FORWARD; iptables -t nat -S POSTROUTING");
+    assert!(fwd.contains("-i kt0 -j ACCEPT") && fwd.contains("10.79.0.0/16"), "our rules are gone: {}", fwd);
+    assert_eq!(std::fs::read_to_string("/proc/sys/net/ipv4/ip_forward").unwrap_or_default().trim(), "1", "forwarding was turned off");
+    println!("GUARD ON");
+    wait(std::env::var("FW_HOLD").ok().and_then(|s| s.parse().ok()).unwrap_or(8));
+    // a tunnel is deleted and another made: its port closes, the new one opens at once (the tunnel
+    // stops listening first, as Kanki does: the script stops the stand-in listener)
+    for _ in 0..40 {
+        if !crate::certbot::listening(8443, false) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    sync("tunnels", vec!["24300/udp".to_string(), "9443/tcp".to_string()]);
+    let added = added_rules();
+    assert!(!added.contains("8443/tcp") && added.contains("9443/tcp"), "{:?}", added);
+    println!("TUNNEL PORTS MOVED");
+    wait(std::env::var("FW_HOLD").ok().and_then(|s| s.parse().ok()).unwrap_or(8));
+    // the panel never confirms: rolled back by itself
+    {
+        let _l = file_lock();
+        let mut st = load();
+        st.guard.since -= GUARD_CONFIRM_SECS + 5;
+        save(&st);
+    }
+    let g = guard_tick(Some(true), false);
+    assert!(!g.on && g.note.starts_with("rolled back"), "{:?}", g);
+    assert!(!ufw_active(), "still on after the roll back");
+    // asked again without a new press: stays off; a new press turns it on, the panel confirms
+    assert!(!guard_tick(Some(true), false).on);
+    guard_reset_note();
+    assert!(guard_tick(Some(true), false).on);
+    let g = guard_tick(Some(true), true);
+    assert!(g.on && g.confirmed, "{:?}", g);
+    // confirmed: no roll back, however long
+    {
+        let _l = file_lock();
+        let mut st = load();
+        st.guard.since -= 10_000;
+        save(&st);
+    }
+    assert!(guard_tick(Some(true), false).on && ufw_active());
+    // turned off in the panel: ufw off again, as it was before Kanki
+    let g = guard_tick(Some(false), false);
+    assert!(!g.on && !ufw_active());
+    let (_, fwd) = run("iptables -S FORWARD");
+    assert!(fwd.contains("-i kt0 -j ACCEPT"), "{}", fwd);
+    println!("GUARD LIVE OK");
 }

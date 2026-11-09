@@ -167,6 +167,8 @@ pub fn cfg_for(app: &App, n: &Node, users: &[User], max: impl Fn(&User) -> Optio
         burst_delay_ms: s.burst_delay_ms,
         users,
         iface: IFACE.into(),
+        // only its tunnel delivers here (to 127.0.0.1): nothing from outside reaches the port
+        local_only: true,
     }
 }
 
@@ -587,7 +589,7 @@ async fn kping_live() {
     let user = |ip: &str| vec![MtUser { name: "gamer".into(), key: key.clone(), ip: ip.into(), max: 2 }];
     let base = MtCfg { obfs: obfs.clone(), mtu: 1324, burst_max: 1000, burst_delay_ms: 2, ..Default::default() };
     let mt = MtCfg { port: 23320, address: "10.79.0.1/16".into(), users: user("10.79.0.2"), ..base.clone() };
-    let kp = MtCfg { port: 23310, address: SERVER_ADDR.into(), devices: DEVICES_ADDR.into(), users: user("10.81.0.2"), iface: IFACE.into(), ..base };
+    let kp = MtCfg { port: 23310, address: SERVER_ADDR.into(), devices: DEVICES_ADDR.into(), users: user("10.81.0.2"), iface: IFACE.into(), local_only: true, ..base };
     let a = crate::microtun::apply(mt);
     let b = apply(kp);
     assert!(a.2.is_empty() && b.2.is_empty(), "microtun: {} KPING: {}", a.2, b.2);
@@ -611,7 +613,7 @@ async fn kping_live() {
     println!("READY {}", link);
     let secs: u64 = std::env::var("KPING_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(40);
     tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
-    let (tr, on, _) = apply(MtCfg { port: 23310, address: SERVER_ADDR.into(), devices: DEVICES_ADDR.into(), users: user("10.81.0.2"), iface: IFACE.into(), obfs: obfs.clone(), mtu: 1324, burst_max: 1000, burst_delay_ms: 2, ..Default::default() });
+    let (tr, on, _) = apply(MtCfg { port: 23310, address: SERVER_ADDR.into(), devices: DEVICES_ADDR.into(), users: user("10.81.0.2"), iface: IFACE.into(), local_only: true, obfs: obfs.clone(), mtu: 1324, burst_max: 1000, burst_delay_ms: 2, ..Default::default() });
     println!("KPING traffic {:?} online {:?}; tunnel entry {:?}", tr, on, entry.status());
     // nothing of it went to microtun
     let (mt_tr, _, _) = crate::microtun::apply(MtCfg { port: 23320, address: "10.79.0.1/16".into(), users: user("10.79.0.2"), obfs, mtu: 1324, burst_max: 1000, burst_delay_ms: 2, ..Default::default() });

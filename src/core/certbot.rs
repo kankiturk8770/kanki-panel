@@ -783,6 +783,30 @@ pub fn listeners() -> Vec<(u16, bool, String, String)> {
     out
 }
 
+/// Every port listened on from outside (not 127.0.0.1 only): (port, udp, program, systemd unit). Not cached.
+pub fn public_listeners() -> Vec<(u16, bool, String, String)> {
+    let socks: Vec<Sock> = sockets().into_iter().filter(|s| !s.3).collect();
+    let inodes = socks.iter().map(|s| s.0.clone()).collect();
+    let pid_of = owners(&inodes);
+    let mut out: Vec<(u16, bool, String, String)> = vec![];
+    for (inode, port, udp, _) in &socks {
+        let (prog, unit) = match pid_of.get(inode) {
+            Some(pid) => (
+                std::fs::read_to_string(format!("/proc/{}/comm", pid)).unwrap_or_default().trim().to_string(),
+                unit_of(&std::fs::read_to_string(format!("/proc/{}/cgroup", pid)).unwrap_or_default()),
+            ),
+            None if *udp => ("kernel".to_string(), String::new()),
+            None => ("?".to_string(), String::new()),
+        };
+        let e = (*port, *udp, prog, unit);
+        if !out.contains(&e) {
+            out.push(e);
+        }
+    }
+    out.sort();
+    out
+}
+
 /// `listeners` as the agent reports it: [[port, udp, program, unit], ...]
 pub fn listeners_json() -> serde_json::Value {
     serde_json::Value::Array(listeners().into_iter().map(|(p, u, prog, unit)| serde_json::json!([p, u, prog, unit])).collect())

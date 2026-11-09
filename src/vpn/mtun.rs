@@ -100,6 +100,8 @@ pub struct MtCfg {
     pub users: Vec<MtUser>,
     /// the tunnel interface ("" = `mtun0`); KPING runs a second server on `kping0`
     pub iface: String,
+    /// listen on 127.0.0.1 only (KPING: reached only through its tunnel, never from outside)
+    pub local_only: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -120,7 +122,7 @@ impl MtCfg {
     }
     /// settings that need a new socket / interface (users and burst change live)
     fn base_differs(&self, o: &MtCfg) -> bool {
-        self.port != o.port || self.obfs != o.obfs || self.address != o.address || self.mtu != o.mtu || self.devices != o.devices || self.address6 != o.address6 || self.iface() != o.iface()
+        self.port != o.port || self.obfs != o.obfs || self.address != o.address || self.mtu != o.mtu || self.devices != o.devices || self.address6 != o.address6 || self.iface() != o.iface() || self.local_only != o.local_only
     }
     /// the tunnel interface of this server
     pub fn iface(&self) -> &str {
@@ -566,7 +568,12 @@ impl Server {
             Some((n, own))
         };
         let v6 = if cfg.address6.is_empty() { None } else { Some(subnet6_of(&cfg.address6).ok_or("bad IPv6 tunnel address")?) }.filter(|_| host_has_v6());
-        let sock = UdpSocket::bind(("::", cfg.port)).or_else(|_| UdpSocket::bind(("0.0.0.0", cfg.port))).map_err(|e| format!("UDP {}: {}", cfg.port, e))?;
+        let sock = if cfg.local_only {
+            UdpSocket::bind(("127.0.0.1", cfg.port))
+        } else {
+            UdpSocket::bind(("::", cfg.port)).or_else(|_| UdpSocket::bind(("0.0.0.0", cfg.port)))
+        }
+        .map_err(|e| format!("UDP {}: {}", cfg.port, e))?;
         sock.set_read_timeout(Some(Duration::from_millis(500))).ok();
         let iface = cfg.iface();
         let tun = open_tun(iface)?;

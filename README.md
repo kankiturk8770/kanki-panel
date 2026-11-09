@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.38 — firewall from the panel, replacing a server's machine
+- Servers › 🛡 Firewall: one switch closes every port except SSH and what Kanki uses on that server; tunnels open and close their own ports; the server turns it off again by itself if the panel does not see it working. Servers › Replace the machine: a dead or filtered server comes back on a new machine with all its settings. Agents now update from the panel where GitHub is filtered.
 ## New in 3.37 — KPING, the hidden game core
 - A core only for testers you pick, only in the Kanki app: the app sends only PUBG to an Iran server, its own reverse Game-FEC tunnel takes it abroad. Light (28 bytes a packet, game packets sent twice), its own interface and keys on the server, never in the subscription page, links or the bot. Panel › Cores › KPING.
 ## New in 3.36.1 — no packet loss on the gaming lane

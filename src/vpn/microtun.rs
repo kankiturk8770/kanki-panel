@@ -171,6 +171,7 @@ pub fn cfg_for(app: &App, n: &Node, users: &[&User]) -> MtCfg {
         burst_delay_ms: s.burst_delay_ms,
         users,
         iface: String::new(),
+        local_only: false,
     }
 }
 

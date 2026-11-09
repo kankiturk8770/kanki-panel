@@ -46,7 +46,7 @@ function srvHealth(kind,id){var d=srvData(kind),x=d&&(d.servers||[]).filter(func
   api('POST','/api/tunnels/servers/'+encodeURIComponent(id)+'/free-ports',{units:fr}).then(function(){closeModal();toast(t('Sent: the server frees the ports on its next report (a few seconds)'))}).catch(fail)}}
 // the firewall of a server: ports Kanki opened (closed again when what needed them is removed), and open
 // ports nothing uses any more (opened by an older version for something deleted since, or by hand)
-var FW_NAMES={tunnels:'Tunnels',dns:'Kanki DNS',xray:'Xray',emergency:'Emergency chat',kmix:'KANKI MIX',subsrv:'Subscription link',acme:'SSL (port 80)'};
+var FW_NAMES={mtun:'microtun',tunnels:'Tunnels',dns:'Kanki DNS',xray:'Xray',emergency:'Emergency chat',kmix:'KANKI MIX',subsrv:'Subscription link',acme:'SSL (port 80)'};
 function srvFirewall(id,box){if(!box)return;api('GET','/api/tunnels/servers/'+encodeURIComponent(id)+'/firewall').then(function(f){if(!f||!box.isConnected)return;
  var own=f.owners||{},un=f.unused||[],keys=Object.keys(own);if(!keys.length&&!un.length)return;
  box.innerHTML='<div class="box" style="margin-top:10px;padding:10px 12px"><b>'+t('Firewall (ufw)')+'</b>'+

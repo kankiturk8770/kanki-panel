@@ -1094,7 +1094,15 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
     let name = if name.is_empty() { format!("node-{}", rand_token(4).to_lowercase()) } else { name };
     // the same server registering twice (re-run after a firewall fix, or a reinstall with a new
     // self-signed certificate) updates its row instead of adding a copy, with fresh pins
-    let existing = app.db.nodes().into_iter().find(|n| n.address == addr).map(|n| n.id);
+    // a replaced machine (Servers › ⋯ › Replace the machine) is the server's own node, whatever its new address
+    let replacing = server.as_ref().filter(|s| s.replace && !s.node.is_empty()).and_then(|s| app.db.node(&s.node));
+    let existing = match &replacing {
+        Some(n) => Some(n.id.clone()),
+        None => app.db.nodes().into_iter().find(|n| n.address == addr).map(|n| n.id),
+    };
+    if let Some(n) = &replacing {
+        app.forget_node_pins(&n.id, &n.address);
+    }
     if let Some(id) = &existing {
         app.forget_node_pins(id, &addr);
     }
@@ -1107,8 +1115,8 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
     let id = match existing {
         Some(id) => {
             let _ = app.db.exec(
-                "UPDATE nodes SET token=?1, endpoint=?2, endpoint_mode=?3, insecure=?4, info=?5, online=1 WHERE id=?6",
-                &[&token, &endpoint, &mode, &(insecure as i64), &info.to_string(), &id],
+                "UPDATE nodes SET token=?1, endpoint=?2, endpoint_mode=?3, insecure=?4, info=?5, online=1, address=?7 WHERE id=?6",
+                &[&token, &endpoint, &mode, &(insecure as i64), &info.to_string(), &id, &addr],
             );
             id
         }

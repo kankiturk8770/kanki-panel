@@ -55,6 +55,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/servers/:id/ports", post(set_ports))
         .route("/api/servers/:id/kmix", post(kmix_switch))
         .route("/api/servers/:id/command", get(command_again))
+        .route("/api/servers/:id/replace", post(replace_machine))
         // outside /api/: a new server fetches them with its one-time token (no admin session there)
         .route("/dl/install.sh", get(dl_script))
         .route("/dl/kanki-panel", get(dl_bin))
@@ -399,6 +400,15 @@ pub fn join_server(app: &App, token: &str) -> Option<TServer> {
 pub fn joined(app: &App, sid: &str, nid: &str) {
     let mut list = tp::servers(app);
     let Some(s) = list.iter_mut().find(|s| s.id == sid) else { return };
+    // a replaced machine came back as the same node: its cores, ports and users stay as they were
+    if s.replace && s.node == nid {
+        s.join.clear();
+        s.replace = false;
+        s.setup_at = 0;
+        tp::save_servers(app, &list);
+        eprintln!("server {}: the new machine joined as the same node {}", sid, nid);
+        return;
+    }
     s.node = nid.to_string();
     s.join.clear();
     s.setup_at = 0;
@@ -661,6 +671,58 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     list.push(s.clone());
     tp::save_servers(&app, &list);
     Json(json!({ "ok": true, "id": s.id, "command": command(&app, &s), "expires": s.join_exp, "ports": s.ports })).into_response()
+}
+
+/// { addr }: this server moves to a new machine (the old one died, or its IP was filtered). Gives the
+/// same command with a fresh join token: run on the new machine, the agent comes back as this server
+/// (its tunnels, Xray, Kanki DNS, the emergency chat and the subscription relay come back by themselves)
+/// and its VPN part re-registers as the same node (same cores, ports and users; SSL is taken again for
+/// its domain). `addr` is the new IP or domain other servers dial ("" = the address it reports from).
+async fn replace_machine(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
+    if let Err(r) = crate::auth::check_session(&app, &h) {
+        return r;
+    }
+    let addr = b["addr"].as_str().unwrap_or("").trim().to_string();
+    if !addr.is_empty() && !crate::twin::valid_host(&addr) {
+        return err(StatusCode::BAD_REQUEST, "the new address must be an IP or a domain");
+    }
+    let mut list = tp::servers(&app);
+    let Some(s) = list.iter_mut().find(|s| s.id == id) else { return err(StatusCode::NOT_FOUND, "unknown server") };
+    if b.get("addr").is_some() {
+        s.addr = addr;
+    }
+    // a server with a VPN part re-joins as that node; one without (an agent only) needs no join
+    let node_alive = !s.node.is_empty() && app.db.node(&s.node).is_some();
+    if node_alive {
+        s.join = rand_token(40);
+        s.join_exp = now() + JOIN_VALID;
+        s.replace = true;
+    } else {
+        s.replace = false;
+    }
+    let need_ports = node_alive && s.ports.len() != 4;
+    let mut c = s.clone();
+    tp::save_servers(&app, &list);
+    if need_ports {
+        // the ports the node uses now, so users' files keep their ports
+        c.ports = node_ports(&app, &c.node);
+        let mut list = tp::servers(&app);
+        if let Some(x) = list.iter_mut().find(|x| x.id == id) {
+            x.ports = c.ports.clone();
+        }
+        tp::save_servers(&app, &list);
+    }
+    if !node_alive {
+        c.join.clear();
+    }
+    Json(json!({ "ok": true, "command": command(&app, &c), "expires": c.join_exp, "node": node_alive })).into_response()
+}
+
+/// [WireGuard, AmneziaWG, Hysteria2, KANKI MIX] ports node `nid` uses now (0 = none known)
+fn node_ports(app: &App, nid: &str) -> Vec<u16> {
+    let info = app.db.node(nid).map(|n| crate::api::node_info(&n)).unwrap_or(Value::Null);
+    let p = |k: &str| info[k].as_str().and_then(|x| x.trim().parse().ok()).or_else(|| info[k].as_u64().map(|x| x as u16)).unwrap_or(0);
+    vec![p("wg_port"), p("awg_port"), p("hy2_port"), crate::kmix::settings(app).node_port(nid)]
 }
 
 /// The command of a server again (a new join token when the old one ran out)
@@ -1192,6 +1254,62 @@ mod tests {
             login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
             http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// A dead server moved to a new machine: the same command identity, a fresh join, the same ports;
+    /// joining again keeps the node, its cores and ports (no second node, nothing switched off)
+    #[tokio::test]
+    async fn a_replaced_machine_comes_back_as_the_same_server() {
+        use tower::ServiceExt;
+        let app = test_app();
+        app.db.set("api_key", "test-key");
+        // a session is needed to replace a machine: a login of the admin
+        let de = new_server(&app, "Germany".into(), "abroad".into(), "de.example.com".into(), Some(true));
+        let mut list = tp::servers(&app);
+        list.push(de.clone());
+        tp::save_servers(&app, &list);
+        let info = json!({ "wg_port": "51820", "awg_port": "51821", "hy2_port": "8443", "kmix_port": 4000 });
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,info,online) VALUES('node-de','Germany','https://de.example.com:2096','de.example.com','t',?1,1)", &[&info.to_string()]).unwrap();
+        joined(&app, &de.id, "node-de");
+        let _ = crate::cores::set(&app, "node-de", "hy2", false);
+        crate::kmix::set_node_port(&app, "node-de", 4000);
+        let before = tp::servers(&app).into_iter().find(|s| s.id == de.id).unwrap();
+        assert!(before.join.is_empty() && before.node == "node-de");
+        let hy2_on = !crate::cores::is_off(&app, "node-de", "hy2");
+        // an API token is not enough (the machine's whole identity is handed out)
+        let call = |auth: &'static str, body: Value| {
+            let app = app.clone();
+            let id = de.id.clone();
+            async move {
+                let r = axum::http::Request::post(format!("/api/servers/{}/replace", id)).header("authorization", auth).header("content-type", "application/json")
+                    .body(axum::body::Body::from(body.to_string())).unwrap();
+                let res = crate::api::master_router(app).oneshot(r).await.unwrap();
+                let st = res.status();
+                let b = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+                (st, serde_json::from_slice::<Value>(&b).unwrap_or(Value::Null))
+            }
+        };
+        let (st, _) = call("Bearer test-key", json!({ "addr": "5.6.7.8" })).await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        let tok = crate::util::rand_token(40);
+        app.db.exec("INSERT INTO sessions(id,username,hash,created,expires,last_seen) VALUES('s1','admin',?1,?2,?3,?2)", &[&crate::util::sha256_hex(&tok), &now(), &(now() + 3600)]).unwrap();
+        let auth: &'static str = Box::leak(format!("Bearer {}", tok).into_boxed_str());
+        let (st, v) = call(auth, json!({ "addr": "5.6.7.8" })).await;
+        assert_eq!(st, StatusCode::OK, "{}", v);
+        let cmd = v["command"].as_str().unwrap();
+        let s = tp::servers(&app).into_iter().find(|s| s.id == de.id).unwrap();
+        assert!(s.replace && !s.join.is_empty() && s.addr == "5.6.7.8");
+        assert!(cmd.contains(&format!("KANKI_TUNNEL='{}:{}'", s.id, s.token)) && cmd.contains(&format!("KANKI_JOIN='{}'", s.join)));
+        assert!(cmd.contains(&format!("KANKI_PORTS='{}'", before.ports.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(","))));
+        assert!(cmd.contains("KANKI_DOMAIN='de.example.com'"));
+        assert_eq!(join_server(&app, &s.join).map(|x| x.id), Some(de.id.clone()));
+        // the new machine joins: the same node, nothing switched off, the ports kept
+        joined(&app, &de.id, "node-de");
+        let after = tp::servers(&app).into_iter().find(|s| s.id == de.id).unwrap();
+        assert!(!after.replace && after.join.is_empty() && after.node == "node-de" && after.ports == before.ports);
+        assert_eq!(!crate::cores::is_off(&app, "node-de", "hy2"), hy2_on);
+        assert_eq!(crate::kmix::settings(&app).node_port("node-de"), 4000);
+        assert_eq!(app.db.nodes().len(), 1);
     }
 
     #[test]
