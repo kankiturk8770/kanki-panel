@@ -10,6 +10,8 @@
   and the panel gives up after 2 minutes and turns the switch off with the reason. A rolled-back server tries again only on a new press.
   Turning the switch off turns ufw off again when Kanki turned it on. Session login only (not an API token).
 - **KPING listens on 127.0.0.1 only** (`MtCfg.local_only`): its tunnel delivers there, so the guard never opens its port.
+- **KPING reaches the app:** the Kanki app reads the subscription page (`/sub/<code>`, sealed for it) and its data block, not `/json`;
+  3.37.0 put KPING only in `/json`. Now the sealed page's data block has `kping` too (a browser's page still never does).
 - **Replace the machine (Servers › a server › Replace the machine):** for a server that died or whose IP was filtered. A fresh command
   with the same identity: the agent comes back as this server (tunnels, Xray, Kanki DNS, emergency chat, subscription relay), its VPN
   part re-registers as **the same node** (`TServer.replace`; the node's address is updated, its cores, ports, users, KANKI MIX and

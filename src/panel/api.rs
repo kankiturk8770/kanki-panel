@@ -1672,11 +1672,12 @@ fn sub_user(app: &App, code: &str) -> Result<User, Response> {
 async fn sub_page(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
     let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
     crate::devices::note(&app, &u, &h);
-    let r = sub_page_of(&app, &u);
+    // KPING only for the Kanki app, whose answer is sealed (the app reads the data block of this page)
+    let r = sub_page_of(&app, &u, crate::devices::wants_seal(&h));
     crate::devices::reply(&h, &code, r).await
 }
 
-fn sub_page_of(app: &App, u: &User) -> Response {
+fn sub_page_of(app: &App, u: &User, kping: bool) -> Response {
     let sub = u.sub_code();
     // server-rendered config links keep the exact URL format the Kanki Android app reads
     let mut nodes_html = String::new();
@@ -1727,7 +1728,11 @@ fn sub_page_of(app: &App, u: &User) -> Response {
         }
         nodes_html.push_str(&format!("<section class=\"node\" data-node=\"dns\"><h3>Kanki DNS</h3>{}</section>", rows));
     }
-    let data = serde_json::to_string(&sub_data(&app, &u)).unwrap_or_default().replace("</", "<\\/");
+    let mut data = sub_data(&app, &u);
+    if kping {
+        data["kping"] = crate::kping::sub_info(&app, &u);
+    }
+    let data = serde_json::to_string(&data).unwrap_or_default().replace("</", "<\\/");
     let page = include_str!("../../assets/sub/sub.html")
         .replace("{{TITLE}}", &esc(&u.username))
         .replace("{{SUB}}", &sub)

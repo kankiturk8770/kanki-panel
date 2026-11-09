@@ -355,8 +355,10 @@ mod tests {
         assert!(!plain.contains("kping") && !plain.contains("24300"), "{}", plain);
         let (_, page, _) = get(&app, &format!("/sub/{}", code), &[("user-agent", "Mozilla/5.0")]).await;
         assert!(!page.contains("24300") && !page.contains("10.81."));
+        // the page the Kanki app reads (sealed): its data block carries KPING
         let (_, page, _) = get(&app, &format!("/sub/{}", code), &app_hdr).await;
-        assert!(!open(&page, &code, "phone-aaaaaaaa").contains("24300"));
+        let page = open(&page, &code, "phone-aaaaaaaa");
+        assert!(page.contains("\"kping\":[") && page.contains("@ir.example.com:24300?"), "the app's page has no KPING");
         let (_, raw, _) = get(&app, &format!("/sub/{}/raw", code), &[("user-agent", "v2rayNG/1.9")]).await;
         assert!(!raw.contains("24300"));
         // a user who is not a tester gets nothing, even in the Kanki app
