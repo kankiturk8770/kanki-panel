@@ -489,7 +489,7 @@ pub struct Server {
     pub cfg: MtCfg,
 }
 
-fn run(args: &[&str]) -> Result<(), String> {
+pub(crate) fn run(args: &[&str]) -> Result<(), String> {
     let out = Command::new(args[0]).args(&args[1..]).output().map_err(|e| format!("{}: {}", args[0], e))?;
     if out.status.success() {
         Ok(())
@@ -498,7 +498,7 @@ fn run(args: &[&str]) -> Result<(), String> {
     }
 }
 
-fn open_tun(name: &str) -> Result<File, String> {
+pub(crate) fn open_tun(name: &str) -> Result<File, String> {
     const TUNSETIFF: libc::c_ulong = 0x400454ca;
     let f = std::fs::OpenOptions::new().read(true).write(true).open("/dev/net/tun").map_err(|e| format!("/dev/net/tun: {}", e))?;
     let mut req = [0u8; 40];
@@ -513,7 +513,7 @@ fn open_tun(name: &str) -> Result<File, String> {
 }
 
 /// iptables (or ip6tables) rules for forwarding + NAT of a tunnel subnet: (tool, table, chain, spec)
-fn nat_rules(tool: &str, subnet: &str, iface: &str) -> Vec<Vec<String>> {
+pub(crate) fn nat_rules(tool: &str, subnet: &str, iface: &str) -> Vec<Vec<String>> {
     let s = |v: &[&str]| [&[tool], v].concat().iter().map(|x| x.to_string()).collect::<Vec<_>>();
     vec![
         s(&["-t", "nat", "POSTROUTING", "-s", subnet, "!", "-o", iface, "-j", "MASQUERADE"]),
@@ -523,14 +523,14 @@ fn nat_rules(tool: &str, subnet: &str, iface: &str) -> Vec<Vec<String>> {
     ]
 }
 
-fn ipt(op: &str, r: &[String]) -> Result<(), String> {
+pub(crate) fn ipt(op: &str, r: &[String]) -> Result<(), String> {
     let mut a: Vec<&str> = vec![&r[0], &r[1], &r[2], op, &r[3]];
     a.extend(r[4..].iter().map(|x| x.as_str()));
     run(&a)
 }
 
 /// "10.79.0.1/16" -> ("10.79.0.0/16")
-fn subnet_of(address: &str) -> Option<String> {
+pub(crate) fn subnet_of(address: &str) -> Option<String> {
     let (ip, bits) = address.split_once('/')?;
     let ip: Ipv4Addr = ip.parse().ok()?;
     let bits: u32 = bits.parse().ok().filter(|b| *b <= 30)?;

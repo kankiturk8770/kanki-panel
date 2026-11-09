@@ -327,7 +327,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             cert: String::new(),
             key: String::new(),
             probe: false,
-            bind: if t.kind == "awgwrap" { "127.0.0.1".into() } else { String::new() },
+            bind: if t.kind == "awgwrap" || crate::kping::is_tunnel(app, &t.id) { "127.0.0.1".into() } else { String::new() },
             awg: None,
             hy2: None,
             fec: t.fec.clone(),
@@ -1310,6 +1310,15 @@ pub async fn local_loop(app: Arc<App>) {
             crate::fw::guard_tick(Some(fw_want), fw_confirm)
         })
         .await;
+        // KPING on the panel's own server (an exit, or the relay of a route that starts here)
+        let kp = crate::kping::cfg_for(&app, "local");
+        let rep = tokio::task::spawn_blocking(move || {
+            crate::kpingd::apply(kp);
+            crate::kpingd::report()
+        })
+        .await
+        .unwrap_or(Value::Null);
+        crate::kping::ingest(&app, "local", &rep);
         rotate_tick(&app);
         let want: Vec<(u8, String)> = servers(&app)
             .iter()
@@ -2871,7 +2880,9 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     // the VPN part of this machine, when the admin asked for it (sent until the agent says it started)
     let setup = crate::servers::setup_for(&app, &s, &b["setup"]);
     let (xray_block, xray_drop) = (crate::xray::panel::shut_on(&id), crate::xray::panel::ip_blocks(&id));
-    Json(json!({ "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app) })).into_response()
+    crate::kping::ingest(&app, &id, &b["kping"]);
+    let kping = crate::kping::cfg_for(&app, &id);
+    Json(json!({ "kping": kping, "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app) })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)

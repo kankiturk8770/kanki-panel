@@ -1,5 +1,6 @@
 // ==================================================================== KPING
-// The hidden game core (kping.rs): app → Iran server → its own reverse Game-FEC tunnel → server abroad → the
+// The hidden game core (kping.rs, kpingd.rs): app (Wi-Fi + mobile data) → the relay on an Iran server → its
+// own reverse Game-FEC tunnel → the exit on a server abroad (only the tunnel agent: «Add server abroad») → the
 // game. Only the testers ticked here get it, only the Kanki app receives it (sealed), and the app sends only
 // PUBG through it. Tabs: Status (the path of every route), Servers (routes), Tunnel, Testers, Settings.
 var KP={d:null,tab:'status'};
@@ -18,24 +19,27 @@ function kpLoad(quiet){return srvLoad(true).then(function(){return api('GET','/a
 function kpState(x){if(!x.exit_online)return ['r',t('The server abroad is offline'),'exit'];
  if(!x.exit_knows)return ['y',t('Update the agent of the server abroad'),'exit'];
  if(x.exit_error)return ['r',t('Not running'),'exit'];
- if(!x.exit_port)return ['y',t('Starting on the server abroad…'),'exit'];
+ if(!x.exit_runs)return ['y',t('Starting on the server abroad…'),'exit'];
  if(!x.tunnel_built)return ['y',t('The tunnel is not built yet'),'tunnel'];
  if(!x.tunnel_up)return ['y',t('The tunnel is connecting…'),'tunnel'];
+ if(!x.iran_online)return ['r',t('The Iran server is offline'),'iran'];
+ if(x.relay&&x.relay.error)return ['r',t('Not running'),'iran'];
+ if(!x.relay)return ['y',t('Starting on the Iran server…'),'iran'];
  return ['g',t('Ready'),'']}
-function kpCC(nid){var s=window.srvByNode?srvByNode(nid):null;return s&&s.cc}
+function kpCC(sid){var s=window.srvFind?srvFind(sid):null;return s&&s.cc}
 function kpQ(x){var q=x.tunnel_q;return q&&q.n?{ping:q.ping,loss:q.loss,jit:q.jit}:null}
 
 // the path of one route, hop by hop: each part is lit up to the first one that does not work yet
 function kpPath(x){var st=kpState(x),r=x.route,q=kpQ(x),stop=st[2];
  var hop=function(cls,icon,name,sub){return '<div class="kp-hop '+cls+'"><span class="kp-hi">'+icon+'</span><b>'+name+'</b><small><bdi dir="ltr">'+sub+'</bdi></small></div>'};
- var exitOk=stop!='exit',tunOk=stop=='';
+ var exitOk=stop!='exit',tunOk=stop==''||stop=='iran',irOk=stop=='',rl=x.relay||{};
  var link=q&&tunOk?'<span class="ltr">'+N(q.ping)+' ms · '+N(q.loss)+'%</span>':t(tunOk?'Measuring…':(x.tunnel_built?'Connecting…':'Not built'));
  return '<div class="kp-path">'+
-  hop('ok',ic('phone',18),t('Kanki app'),t('only PUBG'))+
-  '<i class="kp-ln ok"></i>'+
-  hop(tunOk?'ok':'',flagOf('IR'),esc(x.iran_name||'?'),esc(x.dial))+
+  hop('ok',ic('phone',18),t('Kanki app'),t('only PUBG')+(rl.online?' · '+N(rl.online)+' '+t('online'):''))+
+  '<i class="kp-ln '+(irOk?'ok':'')+'"></i>'+
+  hop(irOk?'ok':stop=='iran'?'bad':'',flagOf('IR'),esc(x.iran_name||'?'),esc(x.dial)+(rl.paths?' · '+N(rl.paths)+' '+t('paths'):''))+
   '<div class="kp-tun '+(tunOk?'ok':x.tunnel_built?'wait':'')+'"><small>Game-FEC 8:3</small><b>'+link+'</b></div>'+
-  hop(exitOk?'ok':'bad',flagOf(kpCC(r.exit)),esc(x.exit_name||'?'),'UDP '+N(x.exit_port||KP.d.settings.port))+
+  hop(exitOk?'ok':'bad',flagOf(kpCC(r.exit)),esc(x.exit_name||'?'),'kping0'+(x.exit_stats&&x.exit_stats.fixed?' · '+N(x.exit_stats.fixed)+' '+t('rebuilt'):''))+
   '<i class="kp-ln '+(tunOk?'ok':'')+'"></i>'+
   hop(tunOk?'ok':'',ic('game',18),'PUBG',t('the match'))+'</div>'}
 
@@ -45,13 +49,16 @@ function kpStats(d){var ready=d.routes.filter(function(x){return kpState(x)[0]==
  return kuStats([[t('Ready routes'),N(ready)+' / '+N(d.routes.length),ready<d.routes.length?'y':(ready?'g':'')],[t('Testers'),N(d.users)],[t('Online now'),N(d.online),d.online?'g':''],
   [t('Tunnel ping'),best==null?'—':'<span class="ltr">'+N(best)+' ms</span>']])}
 function kpDraw(d){var el=$('#kp');if(!el)return;var s=d.settings,tab=KP.tab;
- if(tab=='servers'){el.innerHTML=kuGroup(t('Routes'),d.routes.length,'<button class="btn sm" onclick="kpEdit()">'+ic('plus',14)+' '+t('Add route')+'</button>',kpRoutes(d));return}
- if(tab=='tunnel'){el.innerHTML=kuGroup(t('Tunnel of each route'),d.routes.length,'','<p class="muted ku-note">'+t('Reverse (the server abroad dials Iran), Game-FEC 8:3, and only the users\' UDP port: nothing else of the servers goes through it.')+'</p>'+kpTunnels(d));return}
+ if(tab=='servers'){el.innerHTML=kuGroup(t('Routes'),d.routes.length,'<button class="btn sm" onclick="kpEdit()">'+ic('plus',14)+' '+t('Add route')+'</button>',kpRoutes(d))+
+  kuGroup(t('Servers abroad'),d.exits.length,'<button class="b2 sm" onclick="kpAddServer()">'+ic('plus',14)+' '+t('Add server abroad')+'</button>',
+   '<p class="muted ku-note">'+t('Any server with the Kanki agent can be the exit. A new one needs only the agent: no VPN is installed on it.')+'</p>'+
+   d.exits.map(function(o){return kuItem({dot:o.online?'g':'r',flag:flagOf(kpCC(o.id)),name:esc(o.name||o.id),tags:kuTag(t(o.online?'Online':'Offline'),o.online?'g':'r')+(o.agent_only?kuTag(t('Agent only')):'')})}).join(''));return}
+ if(tab=='tunnel'){el.innerHTML=kuGroup(t('Tunnel of each route'),d.routes.length,'','<p class="muted ku-note">'+t('Reverse (the server abroad dials Iran), Game-FEC 8:3, and only KPING: the relay on the Iran server puts one copy of each packet into it.')+'</p>'+kpTunnels(d));return}
  if(tab=='users'){el.innerHTML=kpUsers(d);return}
  if(tab=='settings'){el.innerHTML=kpSettings(d);$('#kp_save').onclick=kpSave;return}
  el.innerHTML=(s.on?'':'<div class="warnbox">'+t('KPING is off: no server runs it and no tester gets it.')+'</div>')+kpStats(d)+
   (d.routes.length?d.routes.map(function(x){return '<section class="ku-group kp-route"><div class="ku-gh"><b>'+esc(x.iran_name||'?')+' → '+esc(x.exit_name||'?')+'</b><span class="sp"></span><span class="kxr-st '+kpState(x)[0]+'">'+esc(kpState(x)[1])+'</span></div><div class="ku-gb">'+kpPath(x)+
-   (x.exit_error?'<div class="warnbox ltr" style="margin:0 16px 12px">'+esc(x.exit_error)+'</div>':'')+'</div></section>'}).join('')
+   (x.exit_error?'<div class="warnbox ltr" style="margin:0 16px 12px">'+esc(x.exit_error)+'</div>':'')+(x.relay&&x.relay.error?'<div class="warnbox ltr" style="margin:0 16px 12px">'+esc(x.relay.error)+'</div>':'')+'</div></section>'}).join('')
    :kuGroup(t('Routes'),0,'','<p class="muted ku-empty">'+t('No route yet. A route is one Iran server and one server abroad.')+'</p><div class="ku-save"><button class="btn" onclick="location.hash=\'#kping/servers\';setTimeout(kpEdit,50)">'+ic('plus',14)+' '+t('Add route')+'</button></div>'))+
   kuGroup('KPING',null,'',kuSwitch(t('KPING is on'),s.on,"kpPut({on:this.checked})",t('Off = it stops on every server and leaves every tester\'s app')))+
   '<details class="ku-help"><summary>'+t('How it works')+'</summary><p>'+t('1. Servers: add a route (an Iran server and a server abroad). 2. Tunnel: build its tunnel with one button. 3. Testers: choose who gets it. The Kanki app of a tester then shows KPING in gaming mode; it sends only PUBG (and the DNS and Google services the game logs in with) through it. KPING is never on the subscription page, in links or in the bot.')+'</p></details>'}
@@ -69,7 +76,7 @@ function kpTunnels(d){if(!d.routes.length)return '<p class="muted ku-empty">'+t(
    tags:(built?kuTag(t(x.tunnel_up?'Connected':'Connecting…'),x.tunnel_up?'g':'y'):kuTag(t('Not built'),'y'))+
     (q?kuTag('<span class="ltr">'+N(q.ping)+' ms</span>')+kuTag(t('loss')+' <span class="ltr">'+N(q.loss)+'%</span>',q.loss>3?'r':q.loss>1?'y':'g')+kuTag(t('jitter')+' <span class="ltr">'+N(q.jit)+' ms</span>'):'')+
     (st[2]=='exit'?kuTag(esc(st[1]),'r'):''),
-   addr:'UDP '+N(x.route.port)+' → '+esc(x.exit_name||'?')+' UDP '+N(x.exit_port||d.settings.port)})}).join('')}
+   addr:'UDP 127.0.0.1:'+N(x.route.tunnel_port+1)+' → '+esc(x.exit_name||'?')+' 127.0.0.1:'+N(d.settings.port)})}).join('')}
 function kpUsers(d){var on=d.user_list.filter(function(u){return u.has}),off=d.user_list.filter(function(u){return !u.has});
  var add='<div class="kp-add"><select id="kp_u"><option value="">'+t('Choose a user')+'</option>'+off.map(function(u){return '<option value="'+u.id+'">'+esc(u.name)+(u.active?'':' ('+t('not active')+')')+'</option>'}).join('')+'</select>'+
   '<button class="btn sm" onclick="kpUser(+$(\'#kp_u\').value,true)">'+ic('plus',14)+' '+t('Add tester')+'</button></div>';
@@ -79,8 +86,8 @@ function kpUsers(d){var on=d.user_list.filter(function(u){return u.has}),off=d.u
 function kpSettings(d){var s=d.settings;
  return kuGroup(t('Settings'),null,'','<div class="ku-form">'+
   '<label class="f">'+t('Port on the servers abroad')+' · UDP</label><input id="kp_port" class="ltr" inputmode="numeric" value="'+esc(String(s.port))+'"><small class="muted">'+t('Reached only through the tunnel: it stays closed in the firewall.')+'</small>'+
-  '<label class="f">'+t('Send packets twice: up to (bytes)')+'</label><input id="kp_bm" class="ltr" inputmode="numeric" value="'+esc(String(s.burst_max))+'"><small class="muted">'+t('Phone ↔ server abroad. 0 = off. Game packets are 50-300 bytes.')+'</small>'+
-  '<label class="f">'+t('Delay of the second copy (ms)')+'</label><input id="kp_bd" class="ltr" inputmode="numeric" value="'+esc(String(s.burst_delay_ms))+'">'+
+  '<label class="f">'+t('Second copy to the phone on one path (ms)')+'</label><input id="kp_bd" class="ltr" inputmode="numeric" value="'+esc(String(s.dup_ms))+'"><small class="muted">'+t('With Wi-Fi and mobile data both on, each path gets one copy. 0 = no second copy.')+'</small>'+
+  '<label class="f">'+t('Parity: one repair packet per')+'</label><input id="kp_fec" class="ltr" inputmode="numeric" value="'+esc(String(s.fec))+'"><small class="muted">'+t('Packets (2-8). It rebuilds one lost packet of the group. 0 = off.')+'</small>'+
   '<label class="f">MTU</label><input id="kp_mtu" class="ltr" inputmode="numeric" value="'+esc(String(s.mtu))+'"><small class="muted">'+t('Used when automatic MTU is off. Now')+' <span class="ltr">'+N(d.mtu_now)+'</span></small></div>'+
   '<div class="ku-save"><button class="btn" id="kp_save">'+t('Save')+'</button></div>')}
 
@@ -88,7 +95,21 @@ function kpSettings(d){var s=d.settings;
 function kpPut(b){return api('PUT','/api/kping',b).then(function(){toast(t('Saved'));return kpLoad()}).catch(fail)}
 function kpSave(){var v={};var n=function(id){return unN($(id).value).trim()};
  if(!/^\d+$/.test(n('#kp_port'))||+n('#kp_port')<1||+n('#kp_port')>65535)return toast(t('the port must be 1-65535'),1);
- v.port=+n('#kp_port');v.burst_max=+n('#kp_bm')||0;v.burst_delay_ms=+n('#kp_bd')||0;v.mtu=+n('#kp_mtu')||1324;kpPut(v)}
+ v.port=+n('#kp_port');v.dup_ms=+n('#kp_bd')||0;v.fec=+n('#kp_fec')||0;v.mtu=+n('#kp_mtu')||1332;kpPut(v)}
+// a new server abroad for KPING: only the tunnel agent (no VPN), with one command
+function kpAddServer(){modal(mhead(t('Add server abroad'),'KPING')+'<div id="ka_in" class="ku-form"><p class="muted" style="margin:0 0 8px">'+t('Only the Kanki agent is installed: it runs the KPING exit and its tunnel. Choose a server close to the game servers.')+'</p>'+
+  '<label class="f">'+t('Name')+'</label><input id="ka_nm" placeholder="'+esc(t('like Frankfurt'))+'">'+
+  '<button class="btn" style="width:100%;margin-top:12px" id="ka_go">'+t('Make the command')+'</button></div><div id="sa_out"></div>','wide');
+ $('#ka_go').onclick=function(){var me=this;me.disabled=true;
+  api('POST','/api/servers',{name:$('#ka_nm').value.trim(),loc:'abroad',agent_only:true}).then(function(r){$('#ka_in').classList.add('hide');
+   var o=$('#sa_out');o.innerHTML='<label class="f">'+t('Run this on the new server, as root (Ubuntu / Debian)')+'</label><pre class="cmd">'+esc(r.command)+'</pre>'+
+    '<button class="btn" style="width:100%" id="ka_cp">'+ic('link',16)+' '+t('Copy command')+'</button><div class="kxp-steps" id="ka_st"></div>'+
+    '<p class="muted" style="margin:8px 0 0">'+t('Then add a route to it (Servers › Add route). Its ports open by themselves.')+'</p>';
+   $('#ka_cp').onclick=function(){copy(r.command)};kpWait(r.id)}).catch(function(e){me.disabled=false;fail(e)})}}
+function kpWait(id){var el=$('#ka_st');if(!el||!$('#modal').classList.contains('on'))return;
+ api('GET','/api/kping').then(function(d){KP.d=d;var o=d.exits.filter(function(x){return x.id==id})[0],on=o&&o.online;
+  el.innerHTML='<div>'+(on?'<span class="okc">'+ic('check',16)+'</span>':'<span class="spin"></span>')+'<span>'+t(on?'Server agent connected':'Waiting for the server to connect…')+'</span></div>';
+  if(!on)setTimeout(function(){kpWait(id)},4000);else if(S.page=='kping')kpDraw(d)}).catch(function(){setTimeout(function(){kpWait(id)},6000)})}
 function kpUser(id,on){if(!id)return toast(t('Choose a user'),1);api('POST','/api/kping/users',{id:id,on:on}).then(function(){toast(t('Saved'));kpLoad()}).catch(fail)}
 // add / edit a route in a window
 function kpEdit(i){var d=KP.d;if(!d)return;var x=i!=null?d.routes[i]:null,r=x?x.route:{port:24300,tunnel_port:24301};

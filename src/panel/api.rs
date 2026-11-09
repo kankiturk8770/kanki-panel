@@ -699,7 +699,7 @@ fn save_leftovers(app: &App, v: &[Leftover]) {
 /// Asks the node to cut its users off, stop KANKI MIX, remove its VPN services, close their ports and
 /// uninstall its agent (3.6.8+). True when the node confirmed it.
 async fn remove_remote(app: &Arc<App>, n: &Node) -> bool {
-    let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(json!({})), mtun: Some(Default::default()), kping: Some(Default::default()), ..Default::default() };
+    let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(json!({})), mtun: Some(Default::default()), ..Default::default() };
     let synced = sync::remote_post_json(app, n, "/agent/sync", &json!(empty)).await.is_some();
     synced && sync::remote_post(app, n, "/agent/remove").await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false)
 }

@@ -644,7 +644,7 @@ fn new_server(app: &App, name: String, loc: String, domain: String, vpn: Option<
 
 /// An Iran relay made without the VPN part: its command installs only the server agent
 fn agent_only(s: &TServer) -> bool {
-    s.node.is_empty() && s.loc == "iran" && s.join.is_empty()
+    s.node.is_empty() && (s.loc == "iran" || !s.vpn) && s.join.is_empty()
 }
 
 /// { name, loc: iran|abroad, domain?, vpn? } -> a new server and the one command for it
@@ -661,6 +661,13 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let tun = b["tunnel_host"].as_str().unwrap_or("").trim().to_string();
     let name = if name.is_empty() { format!("server-{}", list.len() + 1) } else { name };
     let mut s = new_server(&app, name, loc, domain, b["vpn"].as_bool());
+    // only the tunnel agent, no VPN part (a KPING exit abroad: it needs nothing else)
+    if b["agent_only"].as_bool() == Some(true) {
+        s.join.clear();
+        s.join_exp = 0;
+        s.ports.clear();
+        s.vpn = false;
+    }
     // «SSL»: on by default abroad, off in Iran (port 80 is often closed there)
     s.no_ssl = !b["ssl"].as_bool().unwrap_or(s.loc != "iran");
     if !tun.is_empty() {
