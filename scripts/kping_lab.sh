@@ -4,7 +4,7 @@
 # exit and a "game server" in its own network namespace, all on this machine (root).
 # The same game-like stream (60 packets a second) goes through microtun (one path, as the app does it now)
 # and KPING (one path, then two), under each profile.
-#   sudo scripts/kping_lab.sh [seconds per run]
+#   sudo [KP_DUP_MS=2] scripts/kping_lab.sh [seconds per run]   (KP_DUP_MS: one path, the delay of the second copy)
 set -u
 SRV=; ECHO=; PX=
 SECS=${1:-30}
@@ -43,11 +43,12 @@ run() {
   "$LAB" kping "$DIR/kping.link" $SECS 127.0.0.1 127.0.0.1:25300 10.200.9.2:7777 | grep -E "RESULT|KPING"
   "$LAB" kping "$DIR/kping.link" $SECS 127.0.0.1,127.0.0.1 127.0.0.1:25300,127.0.0.1:25301 10.200.9.2:7777 | grep -E "RESULT|KPING"
 }
-profile 15 10 0 1   30 20 0 1
+# outages in time (ms on average), as a radio drops out: everything sent during one is lost
+profile 15 10 0 20   30 20 0 20
 run "clean: Wi-Fi 15-25 ms, data 30-50 ms, no loss"
-profile 15 10 2 1.5   30 20 2 1.5
-run "ordinary: Wi-Fi 15-25 ms 2% loss, data 30-50 ms 2% loss"
-profile 20 20 6 3   35 25 6 3
-run "bad: Wi-Fi 20-40 ms 6% loss in bursts of ~3, data 35-60 ms 6% loss in bursts of ~3"
-profile 20 10 15 8   35 15 3 2
-run "Wi-Fi breaking up: Wi-Fi 20-30 ms 15% loss in bursts of ~8, data 35-50 ms 3% loss"
+profile 15 10 2 20   30 20 2 20
+run "ordinary: Wi-Fi 15-25 ms, data 30-50 ms, each 2% of the time out (~20 ms outages)"
+profile 20 20 6 40   35 25 6 40
+run "bad: Wi-Fi 20-40 ms, data 35-60 ms, each 6% of the time out (~40 ms outages)"
+profile 20 10 15 150   35 15 3 30
+run "Wi-Fi breaking up: Wi-Fi 15% of the time out (~150 ms outages), data 3% (~30 ms)"
