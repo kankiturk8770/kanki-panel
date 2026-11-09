@@ -13,7 +13,7 @@ LAB=$DIR/kplab
 cd "$(dirname "$0")/.."
 (cd scripts/kping-lab && go build -o "$LAB" .) || exit 1
 cleanup() {
-  kill $SRV $ECHO $PX 2>/dev/null
+  kill $SRV $ECHO $PX 2>/dev/null; pkill -f "kping_lab --ignored" 2>/dev/null; pkill -f "$LAB" 2>/dev/null
   ip netns del kgame 2>/dev/null; ip link del game-h 2>/dev/null
 }
 trap cleanup EXIT
