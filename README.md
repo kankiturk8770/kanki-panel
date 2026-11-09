@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.37 — KPING, the hidden game core
+- A core only for testers you pick, only in the Kanki app: the app sends only PUBG to an Iran server, its own reverse Game-FEC tunnel takes it abroad. Light (28 bytes a packet, game packets sent twice), its own interface and keys on the server, never in the subscription page, links or the bot. Panel › Cores › KPING.
 ## New in 3.36.1 — no packet loss on the gaming lane
 - On tunnels without FEC (KCP, QUIC, HQ, FakeTCP) small game packets go twice, so the unordered lane loses nothing (lab: 6 % → 0-0.2 %, worst packet about 100 ms instead of 250-430 ms).
 ## New in 3.36 — steadier ping for games

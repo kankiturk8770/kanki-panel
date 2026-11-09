@@ -2790,7 +2790,12 @@ impl Bot {
     fn set_service(&self, id: i64, service: &str) {
         let Some(u) = self.db().user(id) else { return };
         if u.service() != service {
-            let _ = self.db().exec("UPDATE users SET protocols=?1 WHERE id=?2", &[&self.db().service_protocols(service), &id]);
+            // KPING is ticked by the admin for a few testers only: a purchase keeps it
+            let mut ps = self.db().service_protocols(service);
+            if u.has_proto(crate::kping::PROTO) {
+                ps = if ps.is_empty() { crate::kping::PROTO.to_string() } else { format!("{},{}", ps, crate::kping::PROTO) };
+            }
+            let _ = self.db().exec("UPDATE users SET protocols=?1 WHERE id=?2", &[&ps, &id]);
         }
     }
 

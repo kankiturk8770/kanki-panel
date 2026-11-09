@@ -60,7 +60,7 @@ function svc(k,a){var go=function(){toast(t('Checking…'));api('POST','/api/ser
  if(a=='start')go();else confirmDo(go)}
 
 // ---------------------------------------------------------------- users
-var PCOL={wg:'#1fa36b',awg:'#7c5cf0',hy2:'#d1497a',kmix:'#ff7a1a',mtun:'#3fb6c9',xray:'#e0a020',dns:'#2a9df4'};
+var PCOL={wg:'#1fa36b',awg:'#7c5cf0',hy2:'#d1497a',kmix:'#ff7a1a',mtun:'#3fb6c9',kping:'#8bc34a',xray:'#e0a020',dns:'#2a9df4'};
 var SORTS={new:function(a,b){return b.id-a.id},old:function(a,b){return a.id-b.id},name:function(a,b){return a.username.toLowerCase()<b.username.toLowerCase()?-1:1},
  usage:function(a,b){return usageVal(b)-usageVal(a)},expiry:function(a,b){return expVal(a)-expVal(b)},seen:function(a,b){return (b.last_seen_ts||0)-(a.last_seen_ts||0)}};
 function usageVal(u){return u.traffic_limit_gb>0?u.traffic_used_gb/u.traffic_limit_gb:-1}
@@ -115,7 +115,7 @@ function drawLive(){var el=$('#ulv');if(!el)return;var cnt={},any=0;
   '<button class="sc'+(S.lv?'':' act')+'" data-lv=""><span class="dot g"></span>'+t('All')+' <b>'+N(any)+'</b></button>'+
   PROTOS.filter(function(p){return cnt[p[0]]}).map(function(p){return '<button class="sc'+(S.lv==p[0]?' act':'')+'" data-lv="'+p[0]+'" style="--pc:'+(PCOL[p[0]]||'#999')+'"><i></i><bdi dir="ltr">'+p[1]+'</bdi> <b>'+N(cnt[p[0]])+'</b></button>'}).join('');
  el.onclick=function(e){var b=e.target.closest('[data-lv]');if(!b)return;S.lv=b.dataset.lv;S.pg=1;drawLive();drawUsers()}}
-function liveShort(p){return {wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',mtun:'MT',xray:'XR',dns:'DNS'}[p]||p.toUpperCase()}
+function liveShort(p){return {wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',mtun:'MT',kping:'KP',xray:'XR',dns:'DNS'}[p]||p.toUpperCase()}
 // what a user is connected with: one badge per protocol, the flag of the server's exit country and a small
 // Iran flag when that config goes through an Iran tunnel
 function liveBadges(lv){var by={},order=[];lv.forEach(function(c){if(!by[c.p]){by[c.p]=[];order.push(c.p)}by[c.p].push(c)});

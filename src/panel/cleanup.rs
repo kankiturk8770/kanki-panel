@@ -29,6 +29,11 @@ pub fn sweep(app: &App) -> Vec<String> {
         crate::microtun::forget_node(app, &id);
         gone.push(format!("microtun {}", id));
     }
+    let kp = crate::kping::settings(app);
+    for r in kp.routes.iter().filter(|r| !nodes.contains(&r.exit)) {
+        crate::kping::forget_node(app, &r.exit);
+        gone.push(format!("KPING {}", r.exit));
+    }
     for id in crate::cores::load(app).into_keys().filter(|id| !nodes.contains(id)) {
         crate::cores::forget(app, &id);
         gone.push(format!("core switches {}", id));

@@ -2034,6 +2034,11 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     Json(json!({ "ok": true, "id": t.id })).into_response()
 }
 
+/// Saves a tunnel from another part of the panel (KPING builds its own) with every check of the Tunnels page
+pub(crate) async fn save_json(app: Arc<App>, h: HeaderMap, b: Value) -> Response {
+    save(State(app), h, Json(b)).await
+}
+
 async fn tunnel_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
     let _ = guard!(app, h, "nodes");
     let mut list = tunnels(&app);
