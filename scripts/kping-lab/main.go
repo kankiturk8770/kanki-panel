@@ -31,7 +31,7 @@ const pps, size = 60, 120
 var dupDelay = func() time.Duration {
 	ms, err := strconv.Atoi(os.Getenv("KP_DUP_MS"))
 	if err != nil {
-		ms = 2
+		ms = 10
 	}
 	return time.Duration(ms) * time.Millisecond
 }()
