@@ -346,6 +346,7 @@ mod tests {
         assert_eq!(st, StatusCode::OK);
         let v: Value = serde_json::from_str(&open(&body, &code, "phone-aaaaaaaa")).unwrap();
         let url = v["kping"][0]["url"].as_str().unwrap_or_default().to_string();
+        assert_eq!(v["kping"][0]["node"], "de");
         assert!(url.starts_with("mtun://") && url.contains("@ir.example.com:24300?") && url.contains("&ip=10.81.0.2/16&"), "{}", url);
         assert!(url.contains(&format!("obfs={}", crate::kping::obfs(&app))) && !url.contains(&crate::microtun::obfs(&app)));
         // its own key, not the user's microtun key

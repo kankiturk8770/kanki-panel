@@ -205,7 +205,8 @@ pub fn sub_info(app: &App, u: &User) -> Value {
         let ms = crate::microtun::Settings { mtu: mtu(app, &s), burst_max: s.burst_max, burst_delay_ms: s.burst_delay_ms, ..Default::default() };
         let name = format!("{} · {}", n.name, NAME);
         let url = crate::microtun::to_url(&user_key(app, u), &dial(app, r), &obfs(app), ip, &ms, &name);
-        let mut v = json!({ "id": r.id, "name": n.name, "url": url });
+        // `node`: the server abroad, so the app lists KPING under that server
+        let mut v = json!({ "id": r.id, "node": n.id, "name": n.name, "url": url });
         if let (Some(o), Some(e)) = (v.as_object_mut(), crate::exitgeo::fields(app, &n.id).as_object()) {
             o.extend(e.clone());
         }
