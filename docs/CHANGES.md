@@ -1,3 +1,26 @@
+# v3.37.0 — KPING: the hidden game core
+- **A new core, KPING (`src/vpn/kping.rs`, panel › Cores › KPING):** for a few testers the admin picks, only inside the Kanki app.
+  The path: app → Iran server (a UDP port of its own) → its **own reverse Game-FEC 8:3 tunnel** → server abroad → the game. The app
+  sends only PUBG through it (and the DNS and Google services the game logs in with); everything else on the phone goes straight.
+- **Light:** the microtun packet format (28 bytes per packet, keys renewed every 2 minutes, a masked header: no fixed bytes on the wire,
+  nothing that looks like WireGuard), packets up to 1000 bytes sent twice phone ↔ server abroad, so the mobile leg loses less; the Iran
+  server only carries the encrypted packets on (no second encryption there).
+- **Its own pipe:** the exit runs a second microtun server on interface `kping0` (10.81.0.0/16, extra devices 10.82.0.0/16), with its own
+  header key and its own user keys (`kp_obfs`, `kp_secret`), its own NAT, and its port closed in the firewall (it is reached only through
+  its tunnel). Its tunnel carries only the users' UDP port. Nothing of WireGuard, AmneziaWG, microtun or their users goes through it.
+  `mtun.rs` takes the interface name from its config (`MtCfg.iface`, empty = `mtun0`); `microtun::Runner` runs both servers side by side.
+- **Hidden:** the config is only in the sealed answer of the Kanki app (`/sub/<code>/json` with `X-Kanki-Seal`, field `kping`: a list of
+  `{id, name, url}` with a `mtun://` link that dials the Iran server), only for users with `kping` in their protocols, only for routes whose
+  tunnel exists. Never on the subscription page, in the plain subscription, in links, in the bot or in the AmneziaVPN backup.
+- **Panel page** (tabs Status, Servers, Tunnel, Testers, Settings): every route as its path (app → Iran → tunnel with ping and loss → server
+  abroad → PUBG), lit up to the first part that does not work yet; a route = an Iran server + a server abroad + ports; its tunnel is built
+  with one button through the Tunnels page's own checks (`tunnel::panel::save_json`) and built again in place; testers one by one; a KPING
+  card on «VPN services» and in the user form (the «Everything» preset never ticks it). A purchase in the bot keeps KPING on the account.
+- **Tested:** `cargo test` (only the tester's Kanki app gets it; the page, the plain subscription, other users and the Iran server do not;
+  the one-button tunnel: reverse, `game`, FEC 8:3, only `24300:4300`); live on one machine (`kping_live`, root): microtun and KPING side by
+  side, a real reverse Game-FEC tunnel, the app's own Go client (`scripts/kping-client`): 100 of 100 pings back, microtun saw no traffic.
+  Not yet on real servers or phones; the app part comes next (kanki-app).
+
 # v3.36.1 — gaming lane: no loss on tunnels without FEC
 - **Found in a lab test** (`scripts/tunnel_lab.py`: old and new programs at both ends, a path that drops 3 % each way and adds
   40 ± 10 ms, a fake game at 50 packets a second while a download fills the same tunnel): on `kcp`, `hq` and `quic` the datagram lane

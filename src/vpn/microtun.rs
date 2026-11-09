@@ -109,7 +109,7 @@ pub fn set_node_port(app: &App, node_id: &str, port: u16) {
 static SECRET_LOCK: Mutex<()> = Mutex::new(());
 
 /// 32 random bytes as hex, made once and kept in the database (and so in its backups)
-fn kept_hex(app: &App, key: &str) -> String {
+pub(crate) fn kept_hex(app: &App, key: &str) -> String {
     let _g = SECRET_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let s = app.db.get(key);
     if s.len() == 64 {
@@ -170,6 +170,7 @@ pub fn cfg_for(app: &App, n: &Node, users: &[&User]) -> MtCfg {
         burst_max: s.burst_max,
         burst_delay_ms: s.burst_delay_ms,
         users,
+        iface: String::new(),
     }
 }
 
@@ -232,56 +233,85 @@ struct Running {
     told: HashMap<String, (i64, i64)>,
 }
 
-fn running() -> &'static Mutex<Option<Running>> {
-    static R: std::sync::OnceLock<Mutex<Option<Running>>> = std::sync::OnceLock::new();
-    R.get_or_init(|| Mutex::new(None))
-}
-
-/// the error of the last start ("" = none)
-fn last_error() -> &'static Mutex<String> {
-    static E: Mutex<String> = Mutex::new(String::new());
-    &E
+/// One server of this kind on this machine: microtun, and KPING (`kping.rs`) on an interface of its own
+pub struct Runner {
+    /// firewall group and log name ("mtun", "kping")
+    proto: &'static str,
+    /// open its port in the firewall (KPING is reached only through its own tunnel: kept closed)
+    open: bool,
+    run: Mutex<Option<Running>>,
+    /// the error of the last start ("" = none)
+    err: Mutex<String>,
 }
 
 /// What `apply` reports: traffic since the last call, users online, what failed
 pub type Applied = (HashMap<String, (i64, i64)>, Vec<String>, String);
 
-/// Brings this server to `cfg` (blocking: it may set up the interface and NAT).
-pub fn apply(cfg: MtCfg) -> Applied {
-    let mut g = running().lock().unwrap_or_else(|e| e.into_inner());
-    let traffic = g.as_mut().map(deltas).unwrap_or_default();
-    if !cfg.on() {
-        if g.take().is_some() {
-            crate::fw::close(PROTO);
-        }
-        last_error().lock().unwrap_or_else(|e| e.into_inner()).clear();
-        return (traffic, vec![], String::new());
+impl Runner {
+    pub const fn new(proto: &'static str, open: bool) -> Runner {
+        Runner { proto, open, run: Mutex::new(None), err: Mutex::new(String::new()) }
     }
-    let restart = g.as_ref().map(|r| r.srv.needs_restart(&cfg)).unwrap_or(true);
-    if restart {
-        *g = None; // the old one frees its port and interface first
-        match Server::start(&cfg) {
-            Ok(srv) => {
-                crate::fw::sync(PROTO, vec![crate::fw::rule(cfg.port, true)]);
-                *g = Some(Running { srv, told: HashMap::new() });
-                last_error().lock().unwrap_or_else(|e| e.into_inner()).clear();
+
+    fn set_err(&self, e: &str) {
+        *self.err.lock().unwrap_or_else(|e| e.into_inner()) = e.to_string();
+    }
+
+    /// Brings this server to `cfg` (blocking: it may set up the interface and NAT).
+    pub fn apply(&self, cfg: MtCfg) -> Applied {
+        let mut g = self.run.lock().unwrap_or_else(|e| e.into_inner());
+        let traffic = g.as_mut().map(deltas).unwrap_or_default();
+        if !cfg.on() {
+            if g.take().is_some() {
+                crate::fw::close(self.proto);
             }
-            Err(e) => {
-                let mut le = last_error().lock().unwrap_or_else(|e| e.into_inner());
-                if *le != e {
-                    eprintln!("microtun: did not start: {}", e);
+            self.set_err("");
+            return (traffic, vec![], String::new());
+        }
+        let restart = g.as_ref().map(|r| r.srv.needs_restart(&cfg)).unwrap_or(true);
+        if restart {
+            *g = None; // the old one frees its port and interface first
+            match Server::start(&cfg) {
+                Ok(srv) => {
+                    if self.open {
+                        crate::fw::sync(self.proto, vec![crate::fw::rule(cfg.port, true)]);
+                    }
+                    *g = Some(Running { srv, told: HashMap::new() });
+                    self.set_err("");
                 }
-                *le = e.clone();
-                return (traffic, vec![], e);
+                Err(e) => {
+                    if *self.err.lock().unwrap_or_else(|e| e.into_inner()) != e {
+                        eprintln!("{}: did not start: {}", self.proto, e);
+                    }
+                    self.set_err(&e);
+                    return (traffic, vec![], e);
+                }
+            }
+        } else if let Some(r) = g.as_mut() {
+            if r.srv.cfg != cfg {
+                r.srv.set(&cfg);
             }
         }
-    } else if let Some(r) = g.as_mut() {
-        if r.srv.cfg != cfg {
-            r.srv.set(&cfg);
-        }
+        let online = g.as_ref().map(|r| r.srv.online()).unwrap_or_default();
+        (traffic, online, String::new())
     }
-    let online = g.as_ref().map(|r| r.srv.online()).unwrap_or_default();
-    (traffic, online, String::new())
+
+    /// The UDP port this server runs on here now (None = not running)
+    pub fn port(&self) -> Option<u16> {
+        self.run.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|r| r.srv.cfg.port)
+    }
+
+    /// (port that really runs (0 = none), IPv6 in the tunnel, last error)
+    pub fn state(&self) -> (u16, bool, String) {
+        let (port, v6) = self.run.try_lock().ok().and_then(|g| g.as_ref().map(|r| (r.srv.cfg.port, r.srv.has_v6()))).unwrap_or((0, false));
+        (port, v6, self.err.lock().map(|e| e.clone()).unwrap_or_default())
+    }
+}
+
+static MT: Runner = Runner::new(PROTO, true);
+
+/// Brings microtun on this server to `cfg`
+pub fn apply(cfg: MtCfg) -> Applied {
+    MT.apply(cfg)
 }
 
 fn deltas(r: &mut Running) -> HashMap<String, (i64, i64)> {
@@ -301,13 +331,12 @@ fn deltas(r: &mut Running) -> HashMap<String, (i64, i64)> {
 
 /// The UDP port microtun runs on here now (None = not running)
 pub fn running_port() -> Option<u16> {
-    running().lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|r| r.srv.cfg.port)
+    MT.port()
 }
 
 /// What this server reports (merged into its info): the port that really runs, or why not
 pub fn info() -> Value {
-    let (port, v6) = running().try_lock().ok().and_then(|g| g.as_ref().map(|r| (r.srv.cfg.port, r.srv.has_v6()))).unwrap_or((0, false));
-    let err = last_error().lock().map(|e| e.clone()).unwrap_or_default();
+    let (port, v6, err) = MT.state();
     json!({ "mt_port": if port > 0 { json!(port) } else { Value::Null }, "mt_v6": v6, "mt_error": err, "mt": true })
 }
 

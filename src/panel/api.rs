@@ -196,6 +196,8 @@ pub const PANEL_JS: &str = concat!(
     include_str!("../../assets/panel/js/15-routes.js"),
     include_str!("../../assets/panel/js/16-vpn-services.js"),
     include_str!("../../assets/panel/js/17-look-map-menu.js"),
+    // KPING's page; the start code below stays last
+    include_str!("../../assets/panel/js/19-kping.js"),
     include_str!("../../assets/panel/js/18-start.js")
 );
 
@@ -345,6 +347,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::xray::panel::router())
         .merge(crate::kmix::router())
         .merge(crate::microtun::router())
+        .merge(crate::kping::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
         // 2 MiB for every route: login, join and hy2/auth are open to strangers and must not make the
         // server buffer more. Only the backup upload gets a bigger limit (see backup::router).
@@ -696,7 +699,7 @@ fn save_leftovers(app: &App, v: &[Leftover]) {
 /// Asks the node to cut its users off, stop KANKI MIX, remove its VPN services, close their ports and
 /// uninstall its agent (3.6.8+). True when the node confirmed it.
 async fn remove_remote(app: &Arc<App>, n: &Node) -> bool {
-    let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(json!({})), mtun: Some(Default::default()), ..Default::default() };
+    let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(json!({})), mtun: Some(Default::default()), kping: Some(Default::default()), ..Default::default() };
     let synced = sync::remote_post_json(app, n, "/agent/sync", &json!(empty)).await.is_some();
     synced && sync::remote_post(app, n, "/agent/remove").await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false)
 }
@@ -769,6 +772,7 @@ pub(crate) fn delete_node(app: &Arc<App>, id: &str) -> Option<Node> {
     }
     crate::kmix::forget_node(app, id);
     crate::microtun::forget_node(app, id);
+    crate::kping::forget_node(app, id);
     crate::twin::forget(app, &format!("node:{}", id));
     crate::cores::forget(app, id);
     crate::direct::forget(app, id);
@@ -1741,7 +1745,12 @@ async fn sub_xray_qr(State(app): St, Path((code, i)): Path<(String, usize)>) -> 
 async fn sub_json(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
     let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
     crate::devices::note(&app, &u, &h);
-    crate::devices::reply(&h, &code, Json(sub_data(&app, &u)).into_response()).await
+    let mut data = sub_data(&app, &u);
+    // KPING goes only to the Kanki app, sealed (never to the page, links, other apps or the bot)
+    if crate::devices::wants_seal(&h) {
+        data["kping"] = crate::kping::sub_info(&app, &u);
+    }
+    crate::devices::reply(&h, &code, Json(data).into_response()).await
 }
 
 /// The user of a base64 subscription for other apps; the app is remembered among the user's devices

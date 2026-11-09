@@ -98,6 +98,8 @@ pub struct MtCfg {
     pub burst_max: u16,
     pub burst_delay_ms: u16,
     pub users: Vec<MtUser>,
+    /// the tunnel interface ("" = `mtun0`); KPING runs a second server on `kping0`
+    pub iface: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -118,7 +120,11 @@ impl MtCfg {
     }
     /// settings that need a new socket / interface (users and burst change live)
     fn base_differs(&self, o: &MtCfg) -> bool {
-        self.port != o.port || self.obfs != o.obfs || self.address != o.address || self.mtu != o.mtu || self.devices != o.devices || self.address6 != o.address6
+        self.port != o.port || self.obfs != o.obfs || self.address != o.address || self.mtu != o.mtu || self.devices != o.devices || self.address6 != o.address6 || self.iface() != o.iface()
+    }
+    /// the tunnel interface of this server
+    pub fn iface(&self) -> &str {
+        if self.iface.is_empty() { IFACE } else { &self.iface }
     }
 }
 
@@ -505,13 +511,13 @@ fn open_tun(name: &str) -> Result<File, String> {
 }
 
 /// iptables (or ip6tables) rules for forwarding + NAT of a tunnel subnet: (tool, table, chain, spec)
-fn nat_rules(tool: &str, subnet: &str) -> Vec<Vec<String>> {
+fn nat_rules(tool: &str, subnet: &str, iface: &str) -> Vec<Vec<String>> {
     let s = |v: &[&str]| [&[tool], v].concat().iter().map(|x| x.to_string()).collect::<Vec<_>>();
     vec![
-        s(&["-t", "nat", "POSTROUTING", "-s", subnet, "!", "-o", IFACE, "-j", "MASQUERADE"]),
-        s(&["-t", "filter", "FORWARD", "-i", IFACE, "-j", "ACCEPT"]),
-        s(&["-t", "filter", "FORWARD", "-o", IFACE, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"]),
-        s(&["-t", "mangle", "FORWARD", "-o", IFACE, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu"]),
+        s(&["-t", "nat", "POSTROUTING", "-s", subnet, "!", "-o", iface, "-j", "MASQUERADE"]),
+        s(&["-t", "filter", "FORWARD", "-i", iface, "-j", "ACCEPT"]),
+        s(&["-t", "filter", "FORWARD", "-o", iface, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"]),
+        s(&["-t", "mangle", "FORWARD", "-o", iface, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu"]),
     ]
 }
 
@@ -562,18 +568,19 @@ impl Server {
         let v6 = if cfg.address6.is_empty() { None } else { Some(subnet6_of(&cfg.address6).ok_or("bad IPv6 tunnel address")?) }.filter(|_| host_has_v6());
         let sock = UdpSocket::bind(("::", cfg.port)).or_else(|_| UdpSocket::bind(("0.0.0.0", cfg.port))).map_err(|e| format!("UDP {}: {}", cfg.port, e))?;
         sock.set_read_timeout(Some(Duration::from_millis(500))).ok();
-        let tun = open_tun(IFACE)?;
-        run(&["ip", "addr", "replace", &cfg.address, "dev", IFACE])?;
+        let iface = cfg.iface();
+        let tun = open_tun(iface)?;
+        run(&["ip", "addr", "replace", &cfg.address, "dev", iface])?;
         if devnet.is_some() {
-            run(&["ip", "addr", "replace", &cfg.devices, "dev", IFACE])?;
+            run(&["ip", "addr", "replace", &cfg.devices, "dev", iface])?;
         }
-        run(&["ip", "link", "set", "dev", IFACE, "mtu", &cfg.mtu.clamp(576, 9000).to_string(), "up"])?;
+        run(&["ip", "link", "set", "dev", iface, "mtu", &cfg.mtu.clamp(576, 9000).to_string(), "up"])?;
         let mut undo = vec![];
         std::fs::write("/proc/sys/net/ipv4/ip_forward", "1").map_err(|e| format!("ip_forward: {}", e))?;
-        let mut rules = nat_rules("iptables", &subnet);
+        let mut rules = nat_rules("iptables", &subnet, iface);
         if devnet.is_some() {
             // the second subnet only needs its NAT: forwarding goes by the interface
-            rules.extend(nat_rules("iptables", &subnet_of(&cfg.devices).ok_or("bad devices address")?).into_iter().take(1));
+            rules.extend(nat_rules("iptables", &subnet_of(&cfg.devices).ok_or("bad devices address")?, iface).into_iter().take(1));
         }
         let add = |rules: Vec<Vec<String>>, undo: &mut Vec<Vec<String>>| -> Result<(), String> {
             for r in rules {
@@ -593,9 +600,9 @@ impl Server {
         }
         // IPv6 is a bonus: a server where it does not work still serves IPv4
         let v6 = v6.filter(|(_, net6)| {
-            run(&["ip", "-6", "addr", "replace", &cfg.address6, "dev", IFACE]).is_ok()
+            run(&["ip", "-6", "addr", "replace", &cfg.address6, "dev", iface]).is_ok()
                 && std::fs::write("/proc/sys/net/ipv6/conf/all/forwarding", "1").is_ok()
-                && add(nat_rules("ip6tables", net6), &mut undo).is_ok()
+                && add(nat_rules("ip6tables", net6, iface), &mut undo).is_ok()
         });
         let (dtx, drx) = mpsc::channel();
         let sh = Arc::new(Shared {
