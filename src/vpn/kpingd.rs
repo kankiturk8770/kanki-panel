@@ -1205,7 +1205,7 @@ async fn kping_lab() {
     assert!(run.iter().all(|r| r.status().links > 0), "a tunnel did not connect");
     let kl = crate::kping::to_url(&key, "10.200.1.1:24300", 1, &obfs, Ipv4Addr::new(10, 81, 0, 2), 1332, 4, "lab");
     let ms = crate::microtun::Settings { mtu: 1324, burst_max: 1000, burst_delay_ms: 2, ..Default::default() };
-    let ml = crate::microtun::to_url(&key, "10.200.1.1:24400", &obfs, Ipv4Addr::new(10, 79, 0, 2), &ms, "lab");
+    let ml = crate::microtun::to_url(&key, &std::env::var("MT_DIAL").unwrap_or("127.0.0.1:25400".into()), &obfs, Ipv4Addr::new(10, 79, 0, 2), &ms, "lab");
     std::fs::write(format!("{}/kping.link", dir), kl).unwrap();
     std::fs::write(format!("{}/mtun.link", dir), ml).unwrap();
     println!("READY");

@@ -3,7 +3,8 @@
 // scripts/kping_lab.sh. Prints loss and round-trip times.
 //
 //	kplab echo <addr>
-//	kplab kping <link file> <seconds> <local ip>[,<local ip>…] <relay ip>[,<relay ip>…] <game ip:port>
+//	kplab kping <link file> <seconds> <local ip>[,<local ip>…] <relay ip[:port]>[,…] <game ip:port>
+//	kplab lossy <listen ip:port> <upstream ip:port> <delay ms> <jitter ms> <loss %> <mean burst length>
 //	kplab mtun <link file> <seconds> <game ip:port>
 package main
 
@@ -190,7 +191,11 @@ func kping(linkFile string, secs int, locals, relays []string, game string) {
 	sess := uint16(rand.Intn(65535) + 1)
 	var paths []*net.UDPConn
 	for i, lip := range locals {
-		ra, _ := net.ResolveUDPAddr("udp", net.JoinHostPort(relays[i], l.port))
+		r := relays[i]
+		if _, _, err := net.SplitHostPort(r); err != nil {
+			r = net.JoinHostPort(r, l.port)
+		}
+		ra, _ := net.ResolveUDPAddr("udp", r)
 		c, err := net.DialUDP("udp", &net.UDPAddr{IP: net.ParseIP(lip)}, ra)
 		if err != nil {
 			panic(err)
@@ -356,6 +361,88 @@ func mtunRun(linkFile string, secs int, game string) {
 	c.Close()
 }
 
+// ------------------------------------------------------------------ a bad path (the kernel here has no netem)
+
+// lossy: a UDP proxy that loses packets in bursts (Gilbert-Elliott: mean loss and mean burst length)
+// and delays them (base + random jitter, order kept), each direction on its own
+type lane struct {
+	bad        bool
+	p, r       float64
+	delay, jit time.Duration
+	last       time.Time
+	q          chan func()
+}
+
+func newLane(delay, jit, loss, burst float64) *lane {
+	r := 1 / burst
+	p := loss / 100 * r / (1 - loss/100)
+	l := &lane{p: p, r: r, delay: time.Duration(delay * 1e6), jit: time.Duration(jit * 1e6), q: make(chan func(), 4096)}
+	go func() {
+		for f := range l.q {
+			f()
+		}
+	}()
+	return l
+}
+
+func (l *lane) pass(send func()) {
+	if l.bad {
+		if rand.Float64() < l.r {
+			l.bad = false
+		}
+	} else if rand.Float64() < l.p {
+		l.bad = true
+	}
+	if l.bad {
+		return
+	}
+	at := time.Now().Add(l.delay + time.Duration(rand.Float64()*float64(l.jit)))
+	if at.Before(l.last) {
+		at = l.last
+	}
+	l.last = at
+	l.q <- func() { time.Sleep(time.Until(at)); send() }
+}
+
+func lossy(listen, upstream string, delay, jit, loss, burst float64) {
+	la, _ := net.ResolveUDPAddr("udp", listen)
+	ua, _ := net.ResolveUDPAddr("udp", upstream)
+	in, err := net.ListenUDP("udp", la)
+	if err != nil {
+		panic(err)
+	}
+	up, down := newLane(delay, jit, loss, burst), newLane(delay, jit, loss, burst)
+	var mu sync.Mutex
+	conns := map[string]*net.UDPConn{}
+	b := make([]byte, 4096)
+	for {
+		n, from, err := in.ReadFromUDP(b)
+		if err != nil {
+			continue
+		}
+		pkt := append([]byte(nil), b[:n]...)
+		mu.Lock()
+		c := conns[from.String()]
+		if c == nil {
+			c, _ = net.DialUDP("udp", nil, ua)
+			conns[from.String()] = c
+			go func(c *net.UDPConn, to *net.UDPAddr) {
+				rb := make([]byte, 4096)
+				for {
+					n, err := c.Read(rb)
+					if err != nil {
+						return
+					}
+					p := append([]byte(nil), rb[:n]...)
+					down.pass(func() { in.WriteToUDP(p, to) })
+				}
+			}(c, from)
+		}
+		mu.Unlock()
+		up.pass(func() { c.Write(pkt) })
+	}
+}
+
 func main() {
 	switch os.Args[1] {
 	case "echo":
@@ -363,6 +450,9 @@ func main() {
 	case "kping":
 		secs, _ := strconv.Atoi(os.Args[3])
 		kping(os.Args[2], secs, strings.Split(os.Args[4], ","), strings.Split(os.Args[5], ","), os.Args[6])
+	case "lossy":
+		f := func(i int) float64 { v, _ := strconv.ParseFloat(os.Args[i], 64); return v }
+		lossy(os.Args[2], os.Args[3], f(4), f(5), f(6), f(7))
 	case "mtun":
 		secs, _ := strconv.Atoi(os.Args[3])
 		mtunRun(os.Args[2], secs, os.Args[4])
