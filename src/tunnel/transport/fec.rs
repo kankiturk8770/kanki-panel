@@ -86,8 +86,10 @@ impl FecEncoder {
         if k == 0 {
             return;
         }
-        // Full groups get `parity`; a group closed early gets as many in proportion.
-        let m = (self.parity * k).div_ceil(self.data).max(1);
+        // Full groups get `parity`; a group closed early gets as many in proportion, but a sparse one (a game:
+        // a packet every 15-30 ms, so one or two in a group) gets all of them: its one repair shard alone was
+        // lost together with the packet in any short outage, and a few small shards cost nothing.
+        let m = if k * 2 <= self.data { self.parity } else { (self.parity * k).div_ceil(self.data).max(1) };
         let size = self.shards.iter().map(Vec::len).max().unwrap_or(0).next_multiple_of(2);
         for shard in &mut self.shards {
             shard.resize(size, 0);
@@ -338,12 +340,12 @@ mod tests {
         e.close_if_due(start + Duration::from_millis(19), &mut collect(&mut sent));
         assert_eq!(sent.len(), 2, "not due yet");
         e.close_if_due(start + delay, &mut collect(&mut sent));
-        // 2 of 10 data shards: ceil(3 * 2 / 10) = 1 parity shard.
-        assert_eq!(sent.len(), 3);
-        assert!(matches!(sent[2], Sent::Parity(0, 0, 2, 1, _)));
+        // 2 of 10 data shards: a sparse group gets all 3 parity shards (any 2 of the 5 rebuild it)
+        assert_eq!(sent.len(), 5);
+        assert!(matches!(sent[2], Sent::Parity(0, 0, 2, 3, _)));
         assert_eq!(e.deadline(), None);
-        for lost in [0, 1] {
-            assert_eq!(receive(&sent, &[lost]), sorted(vec![packet(1), packet(2)]));
+        for lost in [vec![0], vec![1], vec![0, 1], vec![0, 2, 3]] {
+            assert_eq!(receive(&sent, &lost), sorted(vec![packet(1), packet(2)]));
         }
     }
 

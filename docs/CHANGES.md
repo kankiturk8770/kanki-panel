@@ -1,3 +1,14 @@
+# v3.39.1 — tunnels: a short outage between two servers no longer takes a game packet and all its repairs
+- **Game-FEC (`game.rs`, `fec.rs`):** a game sends one packet every 15-30 ms, so its FEC group closed with that one packet and got
+  **one** repair shard, sent right behind it: a short outage of the server-to-server link (tens of ms) took both. Now a sparse group
+  (half full or less) gets all its repair shards, 10 ms apart. The packet itself still goes at once; only a rebuilt one comes later.
+- **The game lane of the other UDP tunnels (`dgram.rs`: kcp, faketcp, quic, hq, dual) and Game-FEC's «send twice»:** the second copy
+  went right behind the first (3 ms on QUIC); now 20 ms later. TCP tunnels resend by themselves and are unchanged. The cores (KANKI MIX,
+  microtun, WireGuard, AmneziaWG, Hysteria2, Xray, KPING) are unchanged.
+- **Lab (`scripts/kping_lab.sh`, Iran ↔ abroad out 3% of the time, ~20 ms outages, phone clean; lost of 100):** microtun 5.7 → 2.1,
+  KPING one path 3.8 → 0.8. The price: the rebuilt packets come later (about 4% of them over 150 ms round trip, average 120 → 124 ms).
+- **Tested:** `cargo test` 343 (a lone packet's repairs leave apart; a sparse group's 3 repairs rebuild it; the lane's second copy waits).
+
 # v3.39.0 — KPING v2: a game core of its own (not microtun), exact last seen and data, short Xray names with flags
 - **KPING rebuilt from scratch (`src/vpn/kpingd.rs`):** plain UDP, no stream and no retransmission (a lost game packet is never
   waited for). Every packet goes more than once: the phone sends one copy on each path (Wi-Fi and mobile data at once) or two 10 ms

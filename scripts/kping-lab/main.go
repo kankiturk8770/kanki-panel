@@ -3,7 +3,7 @@
 // scripts/kping_lab.sh. Prints loss and round-trip times.
 //
 //	kplab echo <addr>
-//	kplab kping <link file> <seconds> <local ip>[,<local ip>…] <relay ip[:port]>[,…] <game ip:port>
+//	kplab kping <link file> <seconds> <local ip>[,<local ip>…] <relay ip:port>[,…] <game ip:port>
 //	kplab lossy <listen ip:port> <upstream ip:port> <delay ms> <jitter ms> <loss %> <mean outage ms>
 //	kplab mtun <link file> <seconds> <game ip:port>
 package main
@@ -14,7 +14,6 @@ import (
 	"io"
 	"math/rand"
 	"net"
-	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -22,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	kp "kpingcore/kping"
 	"mtuncore/mtun"
 )
 
@@ -169,170 +169,47 @@ func echo(addr string) {
 	}
 }
 
-// ------------------------------------------------------------------ KPING
+// ------------------------------------------------------------------ KPING (the app's own core, kanki-app/kping-core)
 
-type kpLink struct {
-	key, obfs string
-	uid       uint32
-	ip        net.IP
-	port      string
-	fec       int
-}
-
-func parseKping(s string) kpLink {
-	u, err := url.Parse(strings.TrimSpace(s))
-	if err != nil || u.Scheme != "kping" {
-		panic("bad link")
-	}
-	q := u.Query()
-	uid, _ := strconv.Atoi(q.Get("uid"))
-	fec, _ := strconv.Atoi(q.Get("fec"))
-	return kpLink{key: u.User.Username(), obfs: q.Get("obfs"), uid: uint32(uid), ip: net.ParseIP(q.Get("ip")), port: u.Port(), fec: fec}
-}
-
+// KP_AUTO=0 KP_DUP_MS= KP_FEC= KP_EVERY=1: fixed settings instead of the automatic choice
 func kping(linkFile string, secs int, locals, relays []string, game string) {
 	raw, _ := os.ReadFile(linkFile)
-	l := parseKping(string(raw))
-	w, err := newWire(l.obfs, l.key)
+	l, err := kp.ParseLink(string(raw))
 	if err != nil {
 		panic(err)
 	}
-	sess := uint16(rand.Intn(65535) + 1)
-	var paths []*net.UDPConn
+	c, err := kp.New(l)
+	if err != nil {
+		panic(err)
+	}
+	if os.Getenv("KP_AUTO") == "0" {
+		fec, _ := strconv.Atoi(os.Getenv("KP_FEC"))
+		c.Set(kp.Settings{DupMs: int(dupDelay / time.Millisecond), Fec: fec, Every: os.Getenv("KP_EVERY") == "1"})
+	}
+	names := []string{"wifi", "cell"}
 	for i, lip := range locals {
-		r := relays[i]
-		if _, _, err := net.SplitHostPort(r); err != nil {
-			r = net.JoinHostPort(r, l.port)
-		}
-		ra, _ := net.ResolveUDPAddr("udp", r)
-		c, err := net.DialUDP("udp", &net.UDPAddr{IP: net.ParseIP(lip)}, ra)
+		ra, _ := net.ResolveUDPAddr("udp", relays[i])
+		pc, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(lip)})
 		if err != nil {
 			panic(err)
 		}
-		paths = append(paths, c)
+		c.AddPathTo(names[i], pc, ra)
 	}
 	gh, gp, _ := net.SplitHostPort(game)
 	gport, _ := strconv.Atoi(gp)
 	m := &meter{got: map[uint32]time.Duration{}}
-	var mu sync.Mutex
-	var win window
-	rx := &fecRx{}
-	pongs := make([]int, len(paths))
-	dups, fixed := 0, 0
-	for i, c := range paths {
-		go func(i int, c *net.UDPConn) {
-			b := make([]byte, 2048)
-			for {
-				n, err := c.Read(b)
-				if err != nil {
-					return
-				}
-				h, p, ok := w.open(b[:n])
-				if !ok || h.kind&down == 0 || h.sess != sess {
-					continue
-				}
-				mu.Lock()
-				switch h.kind &^ down {
-				case kPong:
-					pongs[i]++
-				case kData:
-					if win.take(h.seq) {
-						m.back(p)
-						if s, rp, ok := rx.data(h.seq, p, &win); ok {
-							win.take(s)
-							fixed++
-							m.back(rp)
-						}
-					} else {
-						dups++
-					}
-				case kParity:
-					if s, rp, ok := rx.parity(h.aux, p, &win); ok {
-						win.take(s)
-						fixed++
-						m.back(rp)
-					}
-				}
-				mu.Unlock()
-			}
-		}(i, c)
+	t := &memTun{in: make(chan []byte, 256), closed: make(chan struct{}), m: m}
+	c.SetTUN(t)
+	time.Sleep(time.Second)
+	stream(m, secs, func(seq uint32) { t.in <- gamePkt(l.IP, net.ParseIP(gh), gport, seq) })
+	st := c.Stat()
+	fmt.Printf("KPING paths=%d settings=%+v fixed=%d rescued=%d", len(st.Paths), st.Settings, st.Fixed, st.Rescued)
+	for _, p := range st.Paths {
+		fmt.Printf(" [%s rtt=%.0f loss=%.0f%% up=%d/%d rescued=%d]", p.Name, p.RTT, p.Loss, p.UpFirst, p.UpTotal, p.Rescued)
 	}
-	var pingSeq uint32
-	ping := func() {
-		for i, c := range paths {
-			// [clock 8 | copy delay ms | flags]
-			ts := make([]byte, 10)
-			binary.BigEndian.PutUint64(ts, uint64(time.Now().UnixMilli()))
-			ts[8] = byte(dupDelay / time.Millisecond)
-			mu.Lock()
-			s := pingSeq
-			pingSeq++
-			mu.Unlock()
-			c.Write(w.seal(hdr{l.uid, sess, s, kPing, byte(i + 1)}, ts))
-		}
-	}
-	// the session first: a PING on every path until each answered
-	for t := 0; t < 50; t++ {
-		ping()
-		time.Sleep(100 * time.Millisecond)
-		mu.Lock()
-		all := true
-		for _, p := range pongs {
-			all = all && p > 0
-		}
-		mu.Unlock()
-		if all {
-			break
-		}
-	}
-	go func() {
-		for range time.Tick(time.Second) {
-			ping()
-		}
-	}()
-	tx := &fecTx{k: l.fec}
-	var pseq uint32
-	sendAll := func(kind, aux byte, seq uint32, p []byte) {
-		for i, c := range paths {
-			a := aux
-			if kind == kData {
-				// path id | the parity wanted back
-				a = byte(i+1) | byte(l.fec)<<4
-			}
-			pkt := w.seal(hdr{l.uid, sess, seq, kind, a}, p)
-			c.Write(pkt)
-			if len(paths) == 1 {
-				// one path: the copy goes 2 ms later
-				go func(c *net.UDPConn, pkt []byte) { time.Sleep(dupDelay); c.Write(pkt) }(c, pkt)
-			}
-		}
-	}
-	go func() {
-		for range time.Tick(2 * time.Millisecond) {
-			if n, par := tx.flush(); par != nil {
-				mu.Lock()
-				s := pseq
-				pseq++
-				mu.Unlock()
-				sendAll(kParity, n, s, par)
-			}
-		}
-	}()
-	stream(m, secs, func(seq uint32) {
-		p := gamePkt(l.ip, net.ParseIP(gh), gport, seq)
-		sendAll(kData, 0, seq, p)
-		if n, par := tx.add(seq, p); par != nil {
-			mu.Lock()
-			s := pseq
-			pseq++
-			mu.Unlock()
-			sendAll(kParity, n, s, par)
-		}
-	})
-	mu.Lock()
-	fmt.Printf("KPING paths=%d pongs=%v copies-dropped=%d rebuilt=%d\n", len(paths), pongs, dups, fixed)
-	mu.Unlock()
-	m.report(fmt.Sprintf("kping-%dpath", len(paths)))
+	fmt.Println()
+	m.report(fmt.Sprintf("kping-%dpath", len(locals)))
+	c.Close()
 }
 
 // ------------------------------------------------------------------ microtun (the app's own client)

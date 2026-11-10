@@ -71,6 +71,12 @@ const FEC_DATA: u8 = 0xF3;
 const FEC_PARITY: u8 = 0xF4;
 /// a group closes at the latest this long after its first packet (game traffic is latency-bound)
 const FEC_DELAY: Duration = Duration::from_millis(4);
+/// A group closed early (sparse traffic: a game sends one packet every 15-30 ms) has its repair shards spread
+/// out this far apart, and a duplicated datagram's second copy goes this long after the first: sent right
+/// behind the packet, one short outage of the link (tens of ms) took the packet and all its repairs at once.
+/// The packet itself still goes at once; only a rebuilt one comes a little later.
+const PARITY_GAP: Duration = Duration::from_millis(10);
+const DUP_GAP: Duration = Duration::from_millis(20);
 /// most clients one server relay serves at the same time
 const MAX_PEERS: usize = 1024;
 /// a client that sent nothing for this long is forgotten
@@ -139,40 +145,92 @@ fn decode_in(dec: Option<&mut FecDecoder>, payload: &[u8]) -> Vec<Vec<u8>> {
     }
 }
 
-/// An encoder plus the shard sender of one direction.
+/// An encoder plus the shard sender of one direction, with the payloads that wait for their time
+/// (spread repair shards, second copies).
 struct Out {
     enc: Option<FecEncoder>,
+    data: usize,
+    later: Vec<(Instant, Vec<u8>)>,
 }
 
 impl Out {
     fn new(g: GameOpts) -> Out {
-        Out { enc: if g.fec_on() { Some(FecEncoder::new(g.fec_data as usize, g.fec_parity as usize, FEC_DELAY)) } else { None } }
+        Out { enc: if g.fec_on() { Some(FecEncoder::new(g.fec_data as usize, g.fec_parity as usize, FEC_DELAY)) } else { None }, data: g.fec_data as usize, later: vec![] }
     }
     fn deadline(&self) -> Option<Instant> {
-        self.enc.as_ref().and_then(|e| e.deadline())
+        let a = self.enc.as_ref().and_then(|e| e.deadline());
+        let b = self.later.iter().map(|x| x.0).min();
+        match (a, b) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+    fn wait(&mut self, at: Instant, p: Vec<u8>) {
+        self.later.push((at, p));
+    }
+    /// One payload now (its second copy later when `dup`)
+    async fn send(&mut self, sock: &UdpSocket, to: Option<SocketAddr>, mask: &Mask, p: Vec<u8>, dup: bool, now: Instant) {
+        send_masked(sock, to, mask, &p, false).await;
+        if dup {
+            self.wait(now + DUP_GAP, p);
+        }
+    }
+    /// The shards of a group: data now; the repairs of a group closed early spread out in time
+    async fn shards(&mut self, sock: &UdpSocket, to: Option<SocketAddr>, mask: &Mask, jobs: Vec<(Option<u8>, Vec<u8>)>, dup: bool) {
+        // after the encoding (it takes a moment): the gaps count from when the shards really leave
+        let now = Instant::now();
+        let mut k = 0u32;
+        for (sparse, p) in jobs {
+            match sparse {
+                Some(n) if (n as usize) < self.data => {
+                    k += 1;
+                    let at = now + PARITY_GAP * k;
+                    self.wait(at, p.clone());
+                    if dup {
+                        self.wait(at + DUP_GAP, p);
+                    }
+                }
+                _ => self.send(sock, to, mask, p, dup, now).await,
+            }
+        }
     }
     /// Turns one KCP datagram into wire payloads and sends them.
     async fn push(&mut self, sock: &UdpSocket, to: Option<SocketAddr>, mask: &Mask, pkt: &[u8], dup: bool) {
+        let now = Instant::now();
         match &mut self.enc {
-            None => send_masked(sock, to, mask, pkt, dup).await,
+            None => self.send(sock, to, mask, pkt.to_vec(), dup, now).await,
             Some(enc) => {
-                let mut jobs: Vec<Vec<u8>> = vec![];
-                enc.push(pkt, Instant::now(), &mut |s: Shard<'_>| jobs.push(shard_payload(&s)));
-                for j in &jobs {
-                    send_masked(sock, to, mask, j, dup).await;
-                }
+                let mut jobs: Vec<(Option<u8>, Vec<u8>)> = vec![];
+                enc.push(pkt, now, &mut |s: Shard<'_>| jobs.push((parity_of(&s), shard_payload(&s))));
+                self.shards(sock, to, mask, jobs, dup).await;
             }
         }
     }
-    /// Closes a due FEC group (called when the timer fires).
+    /// Closes a due FEC group and sends what waited for its time (called when the timer fires).
     async fn flush_due(&mut self, sock: &UdpSocket, to: Option<SocketAddr>, mask: &Mask, dup: bool) {
+        let now = Instant::now();
         if let Some(enc) = &mut self.enc {
-            let mut jobs: Vec<Vec<u8>> = vec![];
-            enc.close_if_due(Instant::now(), &mut |s: Shard<'_>| jobs.push(shard_payload(&s)));
-            for j in &jobs {
-                send_masked(sock, to, mask, j, dup).await;
-            }
+            let mut jobs: Vec<(Option<u8>, Vec<u8>)> = vec![];
+            enc.close_if_due(now, &mut |s: Shard<'_>| jobs.push((parity_of(&s), shard_payload(&s))));
+            self.shards(sock, to, mask, jobs, dup).await;
         }
+        let now = Instant::now();
+        let due: Vec<Vec<u8>> = {
+            let (d, keep): (Vec<_>, Vec<_>) = std::mem::take(&mut self.later).into_iter().partition(|x| x.0 <= now);
+            self.later = keep;
+            d.into_iter().map(|x| x.1).collect()
+        };
+        for p in due {
+            send_masked(sock, to, mask, &p, false).await;
+        }
+    }
+}
+
+/// Some(data count of its group) for a repair shard
+fn parity_of(s: &Shard<'_>) -> Option<u8> {
+    match s {
+        Shard::Parity { data_count, .. } => Some(*data_count),
+        _ => None,
     }
 }
 
@@ -550,6 +608,34 @@ mod tests {
         }
         got.sort();
         got
+    }
+
+    /// A lone game packet: the packet goes at once, its repair shards later and apart (an outage of a few
+    /// tens of ms no longer takes them all), each of them still rebuilds it
+    #[tokio::test]
+    async fn the_repairs_of_a_lone_packet_are_spread_out() {
+        let rx = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let tx = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let to = rx.local_addr().unwrap();
+        let mask = Mask::new("token-for-tests-0123456789");
+        let mut out = Out::new(GameOpts { fec_data: 8, fec_parity: 3, dup: false });
+        let t0 = StdInstant::now();
+        out.push(&tx, Some(to), &mask, &packet(1), false).await;
+        // the group closes after FEC_DELAY with one packet: the timer as the relay runs it
+        let mut times = vec![];
+        let mut b = vec![0u8; 2048];
+        let end = tokio::time::sleep(Duration::from_secs(2));
+        tokio::pin!(end);
+        while times.len() < 4 {
+            tokio::select! {
+                r = rx.recv(&mut b) => { r.unwrap(); times.push(t0.elapsed()); }
+                _ = sleep_until_opt(out.deadline()) => out.flush_due(&tx, Some(to), &mask, false).await,
+                _ = &mut end => break,
+            }
+        }
+        assert_eq!(times.len(), 4, "the packet and its three repairs");
+        assert!(times[0] < Duration::from_millis(3), "the packet goes at once: {:?}", times);
+        assert!(times[3] - times[1] >= PARITY_GAP * 2 - Duration::from_millis(2), "repairs spread out: {:?}", times);
     }
 
     #[test]

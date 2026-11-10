@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.39.1 — tunnels keep game packets through short outages
+- A game packet's FEC repairs (and second copies) no longer leave right behind it, so a short outage between two servers loses far less (lab: 5.7 → 2.1 of 100).
 ## New in 3.39 — KPING v2, exact last seen and data, short Xray names
 - KPING is its own game core now: plain UDP, every packet on Wi-Fi and mobile data at once (or twice on one), first copy wins, a lost packet never waited for. Servers abroad need only the agent («Add server abroad» on the KPING page). Users show last seen to the minute and the exact data used; Xray links are named by their flag and country.
 ## New in 3.38 — firewall from the panel, replacing a server's machine
