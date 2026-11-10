@@ -31,9 +31,6 @@ pub struct SyncReq {
     /// microtun on this server (None = a panel that does not manage it)
     #[serde(default)]
     pub mtun: Option<crate::mtun::MtCfg>,
-    /// KPING on this server (None = a panel that does not manage it; an older agent ignores it)
-    #[serde(default)]
-    pub kping: Option<crate::mtun::MtCfg>,
     /// WireGuard / AmneziaWG / Hysteria2 switched off on this server ("wg", "awg", "hy2"): stopped and
     /// their ports closed (see `cores::apply`); an older agent ignores it but gets no users for them
     #[serde(default)]
@@ -76,13 +73,6 @@ pub struct SyncResp {
     pub mtun_online: Vec<String>,
     #[serde(default)]
     pub mtun_error: String,
-    /// KPING: the same as microtun
-    #[serde(default)]
-    pub kping: HashMap<String, (i64, i64)>,
-    #[serde(default)]
-    pub kping_online: Vec<String>,
-    #[serde(default)]
-    pub kping_error: String,
     /// this server's clock (unix seconds) when it answered: handshake times are compared with it,
     /// not with the panel's clock (an older node sends 0)
     #[serde(default)]
@@ -110,9 +100,6 @@ pub fn local_info(app: &App) -> Value {
         o.extend(k.clone());
     }
     if let (Some(o), Some(k)) = (v.as_object_mut(), crate::microtun::info().as_object()) {
-        o.extend(k.clone());
-    }
-    if let (Some(o), Some(k)) = (v.as_object_mut(), crate::kping::info().as_object()) {
         o.extend(k.clone());
     }
     v
@@ -196,11 +183,7 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     if let Some(cfg) = req.mtun {
         (mtun, mtun_online, mtun_error) = tokio::task::spawn_blocking(move || crate::microtun::apply(cfg)).await.unwrap_or_else(|_| (HashMap::new(), vec![], "microtun apply crashed".into()));
     }
-    let (mut kping, mut kping_online, mut kping_error) = (HashMap::new(), vec![], String::new());
-    if let Some(cfg) = req.kping {
-        (kping, kping_online, kping_error) = tokio::task::spawn_blocking(move || crate::kping::apply(cfg)).await.unwrap_or_else(|_| (HashMap::new(), vec![], "KPING apply crashed".into()));
-    }
-    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, mtun, mtun_online, mtun_error, kping, kping_online, kping_error, now: now() }
+    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, mtun, mtun_online, mtun_error, now: now() }
 }
 
 /// Hysteria2 devices of a user on this server: `open` sessions, `real` of them seen moving data (a
@@ -546,14 +529,6 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
     req.kmix = Some(crate::kmix::cfg_for(app, &crate::kmix::settings(app), n, &kmix_here));
     req.kcore = Some(serde_json::json!({}));
     req.mtun = Some(crate::microtun::cfg_for(app, n, &mtun_here));
-    // KPING: its testers on its exits, whichever servers their accounts list
-    req.kping = Some(crate::kping::cfg_for(app, n, users, |u| {
-        if shut(u, crate::kping::PROTO) {
-            return None;
-        }
-        let max = lim.allowed(u.id, &n.id, crate::kping::PROTO).map(|a| a.max(1)).unwrap_or(u.max_conn);
-        Some(if limit_on { max.max(0) as u32 } else { 0 })
-    }));
     req.block = lim.blocks_on(&n.id);
     req.off = off.clone();
     req.mtu = crate::mtu::ifaces(app, n);
@@ -620,7 +595,7 @@ pub async fn sync_all(app: &Arc<App>) {
             g.insert(n.id.clone(), now());
         }
         off_jobs.push(async move {
-            let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(serde_json::json!({})), mtun: Some(Default::default()), kping: Some(Default::default()), ..Default::default() };
+            let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(serde_json::json!({})), mtun: Some(Default::default()), ..Default::default() };
             let local = n.id == "local";
             let ok = if local {
                 apply_local(app, empty).await;
@@ -744,10 +719,10 @@ pub async fn sync_all(app: &Arc<App>) {
         }
         // data each user moved here this round, per protocol (a session that never moved data is a ping)
         let moved = |name: &String, proto: &str| -> i64 {
-            let m = match proto { "hy2" => &resp.hy2, "kmix" => &resp.kmix, "kping" => &resp.kping, _ => &resp.mtun };
+            let m = match proto { "hy2" => &resp.hy2, "kmix" => &resp.kmix, _ => &resp.mtun };
             m.get(name).map(|(rx, tx)| rx + tx).unwrap_or(0)
         };
-        for (name, c, proto) in resp.hy2_online.iter().map(|(n, c)| (n, c, "hy2")).chain(resp.kmix_online.iter().map(|(n, c)| (n, c, "kmix"))).chain(resp.mtun_online.iter().map(|n| (n, &1, "mtun"))).chain(resp.kping_online.iter().map(|n| (n, &1, "kping"))) {
+        for (name, c, proto) in resp.hy2_online.iter().map(|(n, c)| (n, c, "hy2")).chain(resp.kmix_online.iter().map(|(n, c)| (n, c, "kmix"))).chain(resp.mtun_online.iter().map(|n| (n, &1, "mtun"))) {
             if let Some(uid) = by_name.get(name) {
                 if *c > 0 && live_session(*uid, &n.id, proto, moved(name, proto)) {
                     here.push((*uid, proto.to_string()));
@@ -757,7 +732,7 @@ pub async fn sync_all(app: &Arc<App>) {
                 }
             }
         }
-        for (name, (rx, tx)) in resp.kmix.iter().chain(resp.mtun.iter()).chain(resp.kping.iter()) {
+        for (name, (rx, tx)) in resp.kmix.iter().chain(resp.mtun.iter()) {
             if let Some(uid) = by_name.get(name) {
                 *add_bytes.entry(*uid).or_default() += rx + tx;
             }
@@ -765,8 +740,7 @@ pub async fn sync_all(app: &Arc<App>) {
         // sessions that ended here are forgotten (a new one has to move data again to count)
         let open_now: HashSet<(String, &str)> = resp.hy2_online.iter().filter(|x| *x.1 > 0).map(|x| (x.0.clone(), "hy2"))
             .chain(resp.kmix_online.iter().filter(|x| *x.1 > 0).map(|x| (x.0.clone(), "kmix")))
-            .chain(resp.mtun_online.iter().map(|x| (x.clone(), "mtun")))
-            .chain(resp.kping_online.iter().map(|x| (x.clone(), "kping"))).collect();
+            .chain(resp.mtun_online.iter().map(|x| (x.clone(), "mtun"))).collect();
         forget_sessions(&n.id, |uid, proto| users.iter().find(|u| u.id == uid).is_some_and(|u| open_now.contains(&(u.username.clone(), proto))));
         crate::kmix::note_error(&n.id, &resp.kmix_error);
         crate::live::set_vpn(&n.id, &n.name, here);

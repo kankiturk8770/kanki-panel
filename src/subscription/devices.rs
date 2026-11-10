@@ -329,13 +329,13 @@ mod tests {
     #[tokio::test]
     async fn kping_only_reaches_the_kanki_app_of_its_testers() {
         let app = test_app();
-        let info = json!({ "kp_port": 4300, "kp_error": "", "mt_port": 4200 });
+        let info = json!({ "mt_port": 4200 });
         app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,info,online) VALUES('de','Germany','de.example.com','de.example.com','t',?1,1)", &[&info.to_string()]).unwrap();
         let srv = json!([{ "id": "ir1", "name": "Tehran", "token": "x", "addr": "ir.example.com", "loc": "iran" }, { "id": "s-de", "name": "Germany", "token": "y", "node": "de" }]);
         app.db.set("tun_servers", &srv.to_string());
         let kp = json!({ "on": true, "routes": [{ "id": "r1", "exit": "de", "iran": "ir1", "port": 24300, "tunnel_port": 24301, "tunnel": "t1" }] });
         app.db.set("kping_cfg", &kp.to_string());
-        let tun = json!([{ "id": "t1", "name": "KPING · Germany", "entry": "ir1", "exit": "s-de", "transport": "game", "mode": "reverse", "port": 24301, "enabled": true, "udp": ["24300:4300"] }]);
+        let tun = json!([{ "id": "t1", "name": "KPING · Germany", "entry": "ir1", "exit": "s-de", "transport": "game", "mode": "reverse", "port": 24301, "enabled": true, "udp": ["24302:4300"] }]);
         app.db.set("tun_list", &tun.to_string());
         let tester = app.db.create_user("GAMER", 10.0, 30, 1, "wg,kping", "", "", 0).unwrap();
         let other = app.db.create_user("PLAIN", 10.0, 30, 1, "wg", "", "", 0).unwrap();
@@ -347,7 +347,7 @@ mod tests {
         let v: Value = serde_json::from_str(&open(&body, &code, "phone-aaaaaaaa")).unwrap();
         let url = v["kping"][0]["url"].as_str().unwrap_or_default().to_string();
         assert_eq!(v["kping"][0]["node"], "de");
-        assert!(url.starts_with("mtun://") && url.contains("@ir.example.com:24300?") && url.contains("&ip=10.81.0.2/16&"), "{}", url);
+        assert!(url.starts_with("kping://") && url.contains("@ir.example.com:24300?") && url.contains("&ip=10.81.0.2&"), "{}", url);
         assert!(url.contains(&format!("obfs={}", crate::kping::obfs(&app))) && !url.contains(&crate::microtun::obfs(&app)));
         // its own key, not the user's microtun key
         assert!(!url.contains(&crate::microtun::user_key(&app, &tester)));
@@ -366,12 +366,10 @@ mod tests {
         let oc = other.sub_code();
         let (_, body, _) = get(&app, &format!("/sub/{}/json", oc), &app_hdr).await;
         assert!(serde_json::from_str::<Value>(&open(&body, &oc, "phone-aaaaaaaa")).unwrap()["kping"].is_null());
-        // the exit runs it on kping0 for the tester only; the Iran server does not run it
-        let users = app.db.users();
-        let de = app.db.node("de").unwrap();
-        let cfg = crate::kping::cfg_for(&app, &de, &users, |_| Some(1));
-        assert_eq!((cfg.port, cfg.iface(), cfg.users.len()), (4300, "kping0", 1));
-        assert_eq!(cfg.users[0].ip, "10.81.0.2");
+        // the exit (the tunnel agent of that machine) runs it for the tester only; the Iran server relays
+        let x = crate::kping::cfg_for(&app, "s-de").exit.unwrap();
+        assert_eq!((x.port, x.users.len(), x.users[0].ip.as_str()), (4300, 1, "10.81.0.2"));
+        assert_eq!(crate::kping::cfg_for(&app, "ir1").relays[0].port, 24300);
         // a route without its tunnel yet: no entry in the app
         app.db.set("tun_list", "[]");
         let (_, body, _) = get(&app, &format!("/sub/{}/json", code), &app_hdr).await;

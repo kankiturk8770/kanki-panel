@@ -64,6 +64,9 @@ function fail(e){if(!e||e.message=='unauthorized')return;
 function copy(s){if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(s).then(function(){toast(t('Copied'))});else{var a=document.createElement('textarea');a.value=s;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();toast(t('Copied'))}}
 function bytes(n){n=+n||0;var u=['B','KB','MB','GB','TB'],i=0;while(n>=1024&&i<4){n/=1024;i++}return n.toFixed(i>=3?2:0)+' '+u[i]}
 function gbtxt(g){g=+g||0;return g<1?Math.round(g*1024)+' MB':g.toFixed(2)+' GB'}
+// the exact amount, unit by unit: "56 GB 69 MB 412 KB" (kb=false: without the KB)
+function exactB(n,kb){n=Math.max(0,Math.floor(+n||0));var g=Math.floor(n/1073741824),m=Math.floor(n%1073741824/1048576),k=Math.floor(n%1048576/1024),b=n%1024,o=[];
+ if(g)o.push(g+' GB');if(m)o.push(m+' MB');if(k&&kb!==false)o.push(k+' KB');if(!o.length)o.push(n<1024?b+' B':k?k+' KB':'0 MB');return N(o.join(' '))}
 
 // ---------------------------------------------------------------- Persian digits + Jalali (Shamsi) calendar
 var PD='۰۱۲۳۴۵۶۷۸۹',AD='٠١٢٣٤٥٦٧٨٩';
@@ -84,7 +87,13 @@ function jdate(ts,time){if(!ts)return '∞';var d=new Date(ts*1000),s;
  if(S.lang=='fa'){var j=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());s=j[0]+'/'+p2(j[1])+'/'+p2(j[2])}else s=d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
  if(time)s+=' '+p2(d.getHours())+':'+p2(d.getMinutes());return N(s)}
 function fmtDate(ts,withTime){return jdate(ts,withTime)}
-function ago(ts){if(!ts)return t('never');var s=Math.max(0,Math.floor(Date.now()/1000-ts));if(s<60)return N(s)+' '+t('seconds ago');if(s<3600)return N(Math.floor(s/60))+' '+t('minutes ago');if(s<86400)return N(Math.floor(s/3600))+' '+t('hours ago');return jdate(ts,true)}
+// how long ago, to the minute ("1 hour and 45 minutes ago"); a week or more: the date and time
+function ago(ts){if(!ts)return t('never');var s=Math.max(0,Math.floor(Date.now()/1000-ts));if(s<60)return N(s)+' '+t('seconds ago');
+ var u=function(n,one,many){return N(n)+' '+t(n==1?one:many)},d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+ if(s<3600)return u(m,'minute','minutes')+' '+t('ago');
+ if(s<86400)return u(h,'hour','hours')+(m?' '+t('and')+' '+u(m,'minute','minutes'):'')+' '+t('ago');
+ if(d<7)return u(d,'day','days')+(h?' '+t('and')+' '+u(h,'hour','hours'):'')+' '+t('ago');
+ return jdate(ts,true)}
 function leftTxt(ts){if(!ts)return t('Unlimited');var sec=ts-Date.now()/1000;if(sec<=0)return t('Expired');var d=Math.ceil(sec/86400);return sec<86400?t('less than a day'):N(d)+' '+t('days left')}
 
 // ---------------------------------------------------------------- icons (stroke = currentColor)

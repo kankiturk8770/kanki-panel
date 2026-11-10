@@ -62,6 +62,8 @@ mod hy2;
 mod kmix;
 #[path = "vpn/microtun.rs"]
 mod microtun;
+#[path = "vpn/kpingd.rs"]
+mod kpingd;
 #[path = "vpn/kping.rs"]
 mod kping;
 #[path = "vpn/mtun.rs"]
