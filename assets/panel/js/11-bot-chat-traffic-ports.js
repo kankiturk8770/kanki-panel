@@ -55,9 +55,9 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
   '<label class="sw"><input type="checkbox" id="e_sw" '+(u.enabled?'checked':'')+' aria-label="'+t('Enable')+'"><span></span></label><button class="ib" onclick="closeModal()" aria-label="close">✕</button></div>'+
   '<div class="us-tags">'+(tg||'<span class="ptag none">—</span>')+'</div>'+
   (liveOf(u).length?'<div class="lvlist"><small class="muted" style="width:100%">'+t('Connected now')+'</small>'+liveOf(u).map(function(c){return '<span style="--pc:'+(PCOL[c.p]||'#888')+'"><b>'+esc(pname(c.p))+'</b>'+esc(c.s)+'</span>'}).join('')+'</div>':'<div class="lvlist"><small class="muted">'+t('Not connected right now')+'</small></div>')+
-  '<div class="us-st"><div><small>'+t('Used')+'</small><b class="ltr">'+N(gbtxt(u.traffic_used_gb))+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</b><div class="trk"><div class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?100:Math.max(2,p))+'%"></div></div></div>'+
+  '<div class="us-st"><div><small>'+t('Used')+'</small><b class="ltr">'+exactB(u.used_bytes)+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</b><div class="trk"><div class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?100:Math.max(2,p))+'%"></div></div></div>'+
   '<div><small>'+t('Expiry')+'</small><b>'+jdate(u.expires_ts)+'</b><small>'+leftTxt(u.expires_ts)+'</small></div>'+
-  '<div><small>'+t('Connections')+'</small><b class="ltr">'+N(u.online_connections)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b><small>'+(u.last_seen_ts?ago(u.last_seen_ts):t('never'))+'</small></div></div>'+
+  '<div><small>'+t('Connections')+'</small><b class="ltr">'+N(u.online_connections)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b><small>'+(u.last_seen_ts?ago(u.last_seen_ts)+'<br><span class="ltr">'+jdate(u.last_seen_ts,true)+'</span>':t('never'))+'</small></div></div>'+
   '<div class="qb5 us-q" id="us_q"><button data-t="edit">'+ic('edit',18)+'<span>'+t('Edit')+'</span></button><button data-t="link">'+ic('link',18)+'<span>'+t('Link')+'</span></button><button data-t="qr">'+ic('qr',18)+'<span>QR</span></button>'+
   '<button data-t="reset">'+ic('reset',18)+'<span>'+t('Reset')+'</span></button><button data-t="del" class="x">'+ic('trash',18)+'<span>'+t('Delete')+'</span></button></div>'+
   '<div id="us_p"></div>','usheet');

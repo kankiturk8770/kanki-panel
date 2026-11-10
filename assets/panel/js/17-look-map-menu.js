@@ -362,7 +362,7 @@ new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.ma
    (ps.length?'<span class="lvs">'+liveBadges(lv)+'</span>':'')+
    '<span class="tick">'+ic('check',13)+'</span></span>'+
    '<span class="k310bar'+(pc<0?' inf':pc>=90?' hot':pc>=70?' warm':'')+'"><i style="width:'+(pc<0?100:Math.max(3,pc))+'%"></i></span>'+
-   '<span class="kd-meta"><span>'+t('Data')+' <b class="ltr">'+N(used)+(pc<0?' GB / ∞':' / '+N(u.traffic_limit_gb)+' GB')+'</b></span><span>'+t('Expires')+' <b>'+exp+'</b></span></span></button>'};
+   '<span class="kd-meta"><span>'+t('Data')+' <b class="ltr" title="'+esc(exactB(u.used_bytes))+'">'+exactB(u.used_bytes,false)+(pc<0?' / ∞':' / '+N(u.traffic_limit_gb)+' GB')+'</b></span><span>'+t('Expires')+' <b>'+exp+'</b></span></span></button>'};
 
 look();
 })();

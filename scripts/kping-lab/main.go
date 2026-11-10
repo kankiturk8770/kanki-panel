@@ -260,8 +260,10 @@ func kping(linkFile string, secs int, locals, relays []string, game string) {
 	var pingSeq uint32
 	ping := func() {
 		for i, c := range paths {
-			ts := make([]byte, 8)
+			// [clock 8 | copy delay ms | flags]
+			ts := make([]byte, 10)
 			binary.BigEndian.PutUint64(ts, uint64(time.Now().UnixMilli()))
+			ts[8] = byte(dupDelay / time.Millisecond)
 			mu.Lock()
 			s := pingSeq
 			pingSeq++
@@ -294,7 +296,8 @@ func kping(linkFile string, secs int, locals, relays []string, game string) {
 		for i, c := range paths {
 			a := aux
 			if kind == kData {
-				a = byte(i + 1)
+				// path id | the parity wanted back
+				a = byte(i+1) | byte(l.fec)<<4
 			}
 			pkt := w.seal(hdr{l.uid, sess, seq, kind, a}, p)
 			c.Write(pkt)

@@ -87,6 +87,7 @@ function kpSettings(d){var s=d.settings;
  return kuGroup(t('Settings'),null,'','<div class="ku-form">'+
   '<label class="f">'+t('Port on the servers abroad')+' · UDP</label><input id="kp_port" class="ltr" inputmode="numeric" value="'+esc(String(s.port))+'"><small class="muted">'+t('Reached only through the tunnel: it stays closed in the firewall.')+'</small>'+
   '<label class="f">'+t('Second copy to the phone on one path (ms)')+'</label><input id="kp_bd" class="ltr" inputmode="numeric" value="'+esc(String(s.dup_ms))+'"><small class="muted">'+t('With Wi-Fi and mobile data both on, each path gets one copy. 0 = no second copy.')+'</small>'+
+  '<label class="f">'+t('Second copy between Iran and abroad (ms)')+'</label><input id="kp_td" class="ltr" inputmode="numeric" value="'+esc(String(s.tun_dup_ms))+'"><small class="muted">'+t('Every packet goes twice through the tunnel, this far apart, so a short outage between the servers loses nothing. 0 = once.')+'</small>'+
   '<label class="f">'+t('Parity: one repair packet per')+'</label><input id="kp_fec" class="ltr" inputmode="numeric" value="'+esc(String(s.fec))+'"><small class="muted">'+t('Packets (2-8). It rebuilds one lost packet of the group. 0 = off.')+'</small>'+
   '<label class="f">MTU</label><input id="kp_mtu" class="ltr" inputmode="numeric" value="'+esc(String(s.mtu))+'"><small class="muted">'+t('Used when automatic MTU is off. Now')+' <span class="ltr">'+N(d.mtu_now)+'</span></small></div>'+
   '<div class="ku-save"><button class="btn" id="kp_save">'+t('Save')+'</button></div>')}
@@ -95,7 +96,7 @@ function kpSettings(d){var s=d.settings;
 function kpPut(b){return api('PUT','/api/kping',b).then(function(){toast(t('Saved'));return kpLoad()}).catch(fail)}
 function kpSave(){var v={};var n=function(id){return unN($(id).value).trim()};
  if(!/^\d+$/.test(n('#kp_port'))||+n('#kp_port')<1||+n('#kp_port')>65535)return toast(t('the port must be 1-65535'),1);
- v.port=+n('#kp_port');v.dup_ms=+n('#kp_bd')||0;v.fec=+n('#kp_fec')||0;v.mtu=+n('#kp_mtu')||1332;kpPut(v)}
+ v.port=+n('#kp_port');v.dup_ms=+n('#kp_bd')||0;v.tun_dup_ms=+n('#kp_td')||0;v.fec=+n('#kp_fec')||0;v.mtu=+n('#kp_mtu')||1332;kpPut(v)}
 // a new server abroad for KPING: only the tunnel agent (no VPN), with one command
 function kpAddServer(){modal(mhead(t('Add server abroad'),'KPING')+'<div id="ka_in" class="ku-form"><p class="muted" style="margin:0 0 8px">'+t('Only the Kanki agent is installed: it runs the KPING exit and its tunnel. Choose a server close to the game servers.')+'</p>'+
   '<label class="f">'+t('Name')+'</label><input id="ka_nm" placeholder="'+esc(t('like Frankfurt'))+'">'+

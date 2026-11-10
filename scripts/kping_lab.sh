@@ -13,7 +13,7 @@ LAB=$DIR/kplab
 cd "$(dirname "$0")/.."
 (cd scripts/kping-lab && go build -o "$LAB" .) || exit 1
 cleanup() {
-  kill $SRV $ECHO $PX 2>/dev/null; pkill -f "kping_lab --ignored" 2>/dev/null; pkill -f "$LAB" 2>/dev/null
+  kill $SRV $ECHO $PX ${TUNPX:-} 2>/dev/null; pkill -f "kping_lab --ignored" 2>/dev/null; pkill -f "$LAB" 2>/dev/null
   ip netns del kgame 2>/dev/null; ip link del game-h 2>/dev/null
 }
 trap cleanup EXIT
@@ -24,6 +24,14 @@ ip link set game-p netns kgame
 ip addr add 10.200.9.1/24 dev game-h; ip link set game-h up
 ip -n kgame addr add 10.200.9.2/24 dev game-p; ip -n kgame link set game-p up; ip -n kgame link set lo up
 ip netns exec kgame "$LAB" echo 10.200.9.2:7777 & ECHO=$!
+# TUN_LOSS="<delay> <jitter> <loss%> <outage ms>": the leg Iran ↔ abroad (inside the Game-FEC tunnels) gets it too
+TUNPX=
+if [ -n "${TUN_LOSS:-}" ]; then
+  "$LAB" lossy 127.0.0.1:26301 127.0.0.1:24301 $TUN_LOSS & TUNPX="$TUNPX $!"
+  "$LAB" lossy 127.0.0.1:26401 127.0.0.1:24401 $TUN_LOSS & TUNPX="$TUNPX $!"
+  export LAB_TUN_kp=127.0.0.1:26301 LAB_TUN_mt=127.0.0.1:26401
+  sleep 0.5
+fi
 LAB_DIR=$DIR LAB_SECS=100000 MT_DIAL=127.0.0.1:25400 cargo test --quiet kping_lab -- --ignored --nocapture > "$DIR/srv.log" 2>&1 & SRV=$!
 for _ in $(seq 1 600); do grep -q READY "$DIR/srv.log" && break; sleep 1; done
 grep -q READY "$DIR/srv.log" || { cat "$DIR/srv.log"; exit 1; }
@@ -43,6 +51,7 @@ run() {
   "$LAB" kping "$DIR/kping.link" $SECS 127.0.0.1 127.0.0.1:25300 10.200.9.2:7777 | grep -E "RESULT|KPING"
   "$LAB" kping "$DIR/kping.link" $SECS 127.0.0.1,127.0.0.1 127.0.0.1:25300,127.0.0.1:25301 10.200.9.2:7777 | grep -E "RESULT|KPING"
 }
+[ -n "${ONLY:-}" ] && { eval "$ONLY"; exit 0; }
 # outages in time (ms on average), as a radio drops out: everything sent during one is lost
 profile 15 10 0 20   30 20 0 20
 run "clean: Wi-Fi 15-25 ms, data 30-50 ms, no loss"

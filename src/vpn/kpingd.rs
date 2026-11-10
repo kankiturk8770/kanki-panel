@@ -11,8 +11,14 @@
 //! - tag  = HMAC-SHA256(user key, plain header ‖ payload)[..8]: only the user's own key makes packets
 //! - mask = AES-256(obfs, tag ‖ "KPNG" ‖ 0000)[..12] XOR the header: no fixed bytes on the wire
 //! - kind: DATA 1, PARITY 2, PING 3, PONG 4; + 0x80 from the server to the phone
-//! - PING (aux = path id): payload = the phone's clock in ms (8 bytes). A new session is taken only
-//!   from a PING within 2 minutes of this server's clock, so old packets cannot start one again.
+//! - PING (aux = path id): payload = [the phone's clock in ms 8 | copy delay ms 1 | flags 1], the last two
+//!   optional (the phone tunes them to its line: 0xff = this server's own; flags bit 0 = a delayed copy on
+//!   every path, not only when there is one). A new session is taken only from a PING within 2 minutes of
+//!   this server's clock, so old packets cannot start one again.
+//! - PONG (aux = paths): payload = [the PING's clock 8 | n 1 | n × (path id 1 | its copies that came
+//!   first 4 | its copies 4)] since the session began: what each path saved
+//! - DATA from the phone: aux = path id (low 4 bits) | the parity group the phone wants back (high 4 bits:
+//!   0 = this server's own, 1 = none, 2-8 = a repair packet per that many)
 //! - PARITY (aux = n): payload = [first seq 4 | xor of the lengths 2 | xor of the n payloads, padded]
 //!   over the n DATA packets first … first+n-1 (n ≤ 8; sent when the group is full or 8 ms idle)
 //!
@@ -21,7 +27,9 @@
 //!
 //! Relay (Iran, public UDP port): checks every packet, drops the copies, sends one copy into the
 //! tunnel (127.0.0.1:`to`, the tunnel's entry); what comes back goes to every path of that session
-//! (one path: twice, `dup_ms` apart). Exit (abroad, 127.0.0.1 only: the tunnel delivers there): drops
+//! (one path: twice, `dup_ms` apart). Between Iran and abroad every packet goes twice too, `tun_dup_ms`
+//! apart (the tunnel's own FEC sends a lone game packet's repair shards right behind it, so one short
+//! outage of that link takes them all); the other side drops the second copy. Exit (abroad, 127.0.0.1 only: the tunnel delivers there): drops
 //! copies, rebuilds with parity, writes the IP packet to `kping0` (NAT out); packets for a user go back
 //! the way that user's last packet came, with parity of their own.
 //!
@@ -383,6 +391,8 @@ pub struct RelayCfg {
     pub to: u16,
     /// one path: the second copy to the phone goes this many ms after the first (0 = no second copy)
     pub dup_ms: u16,
+    /// into the tunnel: the second copy this many ms after the first (0 = one copy)
+    pub tun_dup_ms: u16,
     pub users: Vec<KUser>,
 }
 
@@ -394,6 +404,8 @@ pub struct ExitCfg {
     pub mtu: u16,
     /// parity group towards the phone (0 = none)
     pub fec: u8,
+    /// back into the tunnel: the second copy this many ms after the first (0 = one copy)
+    pub tun_dup_ms: u16,
     pub users: Vec<KUser>,
 }
 
@@ -419,38 +431,54 @@ fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> JoinHandle<()> {
 
 // ------------------------------------------------------------------ the relay (Iran)
 
+struct RPath {
+    addr: SocketAddr,
+    id: u8,
+    last: Instant,
+    /// its DATA copies that came first / all its DATA copies
+    first: u32,
+    total: u32,
+}
+
 struct RSess {
     win: [Window; 3],
-    /// (address, path id, last packet)
-    paths: Vec<(SocketAddr, u8, Instant)>,
+    /// what came back from the exit (DATA, PARITY): its second copy is dropped here
+    down: [Window; 2],
+    paths: Vec<RPath>,
     last: Instant,
+    /// the phone's own choice of the copy delay (None = the server's)
+    dup_ms: Option<u16>,
+    /// a delayed copy on every path, not only when there is one
+    every: bool,
 }
 
 impl RSess {
     fn new() -> RSess {
-        RSess { win: Default::default(), paths: vec![], last: Instant::now() }
+        RSess { win: Default::default(), down: Default::default(), paths: vec![], last: Instant::now(), dup_ms: None, every: false }
     }
-    fn note_path(&mut self, from: SocketAddr, id: u8, may_add: bool) {
+    fn note_path(&mut self, from: SocketAddr, id: u8, may_add: bool) -> Option<&mut RPath> {
         let now = Instant::now();
         self.last = now;
-        if let Some(p) = self.paths.iter_mut().find(|p| p.0 == from) {
-            p.1 = id;
-            p.2 = now;
-            return;
+        if let Some(i) = self.paths.iter().position(|p| p.addr == from) {
+            let p = &mut self.paths[i];
+            p.id = id;
+            p.last = now;
+            return Some(p);
         }
         if !may_add {
-            return;
+            return None;
         }
         // a path that moved (a new NAT port) takes the place of its old address
-        self.paths.retain(|p| p.1 != id || p.1 == 0);
+        self.paths.retain(|p| p.id != id || p.id == 0);
         if self.paths.len() >= MAX_PATHS {
-            self.paths.sort_by_key(|p| p.2);
+            self.paths.sort_by_key(|p| p.last);
             self.paths.remove(0);
         }
-        self.paths.push((from, id, now));
+        self.paths.push(RPath { addr: from, id, last: now, first: 0, total: 0 });
+        self.paths.last_mut()
     }
     fn live_paths(&self) -> Vec<SocketAddr> {
-        self.paths.iter().filter(|p| p.2.elapsed() < PATH_IDLE).map(|p| p.0).collect()
+        self.paths.iter().filter(|p| p.last.elapsed() < PATH_IDLE).map(|p| p.addr).collect()
     }
 }
 
@@ -470,6 +498,9 @@ struct RShared {
     dups: AtomicU64,
     bad: AtomicU64,
     dly: Mutex<mpsc::Sender<(Instant, Vec<u8>, SocketAddr)>>,
+    tun_dup: AtomicU64,
+    /// second copies into the tunnel
+    dly_up: Mutex<mpsc::Sender<(Instant, Vec<u8>, SocketAddr)>>,
 }
 
 pub struct Relay {
@@ -486,6 +517,7 @@ impl Relay {
         up.connect(("127.0.0.1", cfg.to)).map_err(|e| format!("tunnel {}: {}", cfg.to, e))?;
         up.set_read_timeout(Some(Duration::from_millis(300))).ok();
         let (tx, rx) = mpsc::channel();
+        let (utx, urx) = mpsc::channel();
         let sh = Arc::new(RShared {
             obfs: o,
             public,
@@ -497,6 +529,8 @@ impl Relay {
             dups: AtomicU64::new(0),
             bad: AtomicU64::new(0),
             dly: Mutex::new(tx),
+            tun_dup: AtomicU64::new(0),
+            dly_up: Mutex::new(utx),
         });
         let mut r = Relay { sh: sh.clone(), threads: vec![], cfg: cfg.clone() };
         r.set(cfg);
@@ -504,14 +538,21 @@ impl Relay {
         r.threads.push(spawn("kp-relay-in", move || relay_in(&s)));
         let s = sh.clone();
         r.threads.push(spawn("kp-relay-back", move || relay_back(&s)));
+        let s = sh.clone();
+        r.threads.push(spawn("kp-relay-dup", move || delayer(&s.stop, rx, |p, to| {
+            let _ = s.public.send_to(p, to);
+        })));
         let s = sh;
-        r.threads.push(spawn("kp-relay-dup", move || delayer(&s.public, &s.stop, rx)));
+        r.threads.push(spawn("kp-relay-tdup", move || delayer(&s.stop, urx, |p, _| {
+            let _ = s.up.send(p);
+        })));
         Ok(r)
     }
 
     /// users and the copy delay, live: a user whose key stays keeps their sessions
     pub fn set(&mut self, cfg: &RelayCfg) {
         self.sh.dup_ms.store(cfg.dup_ms.min(50) as u64, Ordering::Relaxed);
+        self.sh.tun_dup.store(cfg.tun_dup_ms.min(50) as u64, Ordering::Relaxed);
         let mut users = self.sh.users.lock().unwrap_or_else(|e| e.into_inner());
         let mut next = HashMap::new();
         for u in &cfg.users {
@@ -543,6 +584,7 @@ impl Drop for Relay {
         self.sh.stop.store(true, Ordering::Relaxed);
         // wakes the delay thread
         let _ = self.sh.dly.lock().map(|t| t.send((Instant::now(), vec![], "127.0.0.1:9".parse().expect("addr"))));
+        let _ = self.sh.dly_up.lock().map(|t| t.send((Instant::now(), vec![], "127.0.0.1:9".parse().expect("addr"))));
         for t in self.threads.drain(..) {
             let _ = t.join();
         }
@@ -596,22 +638,47 @@ fn relay_in(sh: &RShared) {
         let Some(s) = u.sess.get_mut(&h.sess) else { continue };
         let first = s.win[slot].take(h.seq);
         // a path is learned from a packet seen for the first time (a copy only keeps a known path alive)
-        let path_id = if h.kind == PING || h.kind == DATA { h.aux } else { 0 };
-        s.note_path(from, path_id, first);
+        let path_id = match h.kind {
+            PING => h.aux & 0x0f,
+            DATA => h.aux & 0x0f,
+            _ => 0,
+        };
+        if let Some(p) = s.note_path(from, path_id, first) {
+            if h.kind == DATA {
+                p.total += 1;
+                p.first += first as u32;
+            }
+        }
         if !first {
             sh.dups.fetch_add(1, Ordering::Relaxed);
             continue;
         }
         sh.pkts.fetch_add(1, Ordering::Relaxed);
         if h.kind == PING {
-            let paths = s.live_paths().len() as u8;
+            if payload.len() >= 10 {
+                s.dup_ms = (payload[8] != 0xff).then_some(payload[8].min(50) as u16);
+                s.every = payload[9] & 1 != 0;
+            }
+            let live = s.live_paths().len() as u8;
+            let mut body = payload[..8].to_vec();
+            let paths: Vec<&RPath> = s.paths.iter().filter(|p| p.last.elapsed() < PATH_IDLE).collect();
+            body.push(paths.len() as u8);
+            for p in paths {
+                body.push(p.id);
+                body.extend_from_slice(&p.first.to_be_bytes());
+                body.extend_from_slice(&p.total.to_be_bytes());
+            }
             drop(users);
-            let pong = Hdr { uid: h.uid, sess: h.sess, seq: h.seq, kind: PONG | DOWN, aux: paths };
-            let _ = sh.public.send_to(&seal(&sh.obfs, &key, &pong, &payload[..8]), from);
+            let pong = Hdr { uid: h.uid, sess: h.sess, seq: h.seq, kind: PONG | DOWN, aux: live };
+            let _ = sh.public.send_to(&seal(&sh.obfs, &key, &pong, &body), from);
             continue;
         }
         drop(users);
         let _ = sh.up.send(pkt);
+        let d = sh.tun_dup.load(Ordering::Relaxed);
+        if d > 0 {
+            let _ = sh.dly_up.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(d), pkt.to_vec(), from));
+        }
     }
 }
 
@@ -625,26 +692,36 @@ fn relay_back(sh: &RShared) {
         if h.kind & DOWN == 0 {
             continue;
         }
-        let paths = {
-            let users = sh.users.lock().unwrap_or_else(|e| e.into_inner());
-            let Some(u) = users.get(&h.uid) else { continue };
+        let (paths, dup, every) = {
+            let mut users = sh.users.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(u) = users.get_mut(&h.uid) else { continue };
             if open(&u.key, &h, pkt).is_none() {
                 continue;
             }
-            u.sess.get(&h.sess).map(|s| s.live_paths()).unwrap_or_default()
+            let Some(s) = u.sess.get_mut(&h.sess) else { continue };
+            // the exit's second copy of the same packet goes no further
+            let slot = if h.kind & !DOWN == PARITY { 1 } else { 0 };
+            if !s.down[slot].take(h.seq) {
+                continue;
+            }
+            (s.live_paths(), s.dup_ms, s.every)
         };
         for p in &paths {
             let _ = sh.public.send_to(pkt, p);
         }
-        let ms = sh.dup_ms.load(Ordering::Relaxed);
-        if paths.len() == 1 && ms > 0 {
-            let _ = sh.dly.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(ms), pkt.to_vec(), paths[0]));
+        let ms = dup.map(|d| d as u64).unwrap_or_else(|| sh.dup_ms.load(Ordering::Relaxed));
+        if ms > 0 && (paths.len() == 1 || every) {
+            let at = Instant::now() + Duration::from_millis(ms);
+            let tx = sh.dly.lock().unwrap_or_else(|e| e.into_inner());
+            for p in &paths {
+                let _ = tx.send((at, pkt.to_vec(), *p));
+            }
         }
     }
 }
 
 /// second copies, each at its time
-fn delayer(sock: &UdpSocket, stop: &AtomicBool, rx: mpsc::Receiver<(Instant, Vec<u8>, SocketAddr)>) {
+fn delayer(stop: &AtomicBool, rx: mpsc::Receiver<(Instant, Vec<u8>, SocketAddr)>, send: impl Fn(&[u8], SocketAddr)) {
     while let Ok((at, pkt, to)) = rx.recv() {
         if stop.load(Ordering::Relaxed) {
             return;
@@ -653,7 +730,7 @@ fn delayer(sock: &UdpSocket, stop: &AtomicBool, rx: mpsc::Receiver<(Instant, Vec
         if at > now {
             std::thread::sleep(at - now);
         }
-        let _ = sock.send_to(&pkt, to);
+        send(&pkt, to);
     }
 }
 
@@ -689,6 +766,19 @@ struct XShared {
     stop: AtomicBool,
     fixed: AtomicU64,
     pkts: AtomicU64,
+    tun_dup: AtomicU64,
+    dly: Mutex<mpsc::Sender<(Instant, Vec<u8>, SocketAddr)>>,
+}
+
+impl XShared {
+    /// back into the tunnel, and the second copy later
+    fn send(&self, pkt: Vec<u8>, to: SocketAddr) {
+        let _ = self.sock.send_to(&pkt, to);
+        let d = self.tun_dup.load(Ordering::Relaxed);
+        if d > 0 {
+            let _ = self.dly.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(d), pkt, to));
+        }
+    }
 }
 
 pub struct Exit {
@@ -720,6 +810,7 @@ impl Exit {
             }
             undo.push(r);
         }
+        let (tx, rx) = mpsc::channel();
         let sh = Arc::new(XShared {
             obfs: o,
             sock,
@@ -729,6 +820,8 @@ impl Exit {
             stop: AtomicBool::new(false),
             fixed: AtomicU64::new(0),
             pkts: AtomicU64::new(0),
+            tun_dup: AtomicU64::new(0),
+            dly: Mutex::new(tx),
         });
         let mut x = Exit { sh: sh.clone(), threads: vec![], undo, cfg: cfg.clone() };
         x.set(cfg);
@@ -736,8 +829,12 @@ impl Exit {
         x.threads.push(spawn("kp-exit-in", move || exit_in(&s)));
         let s = sh.clone();
         x.threads.push(spawn("kp-exit-tun", move || exit_tun(&s)));
-        let s = sh;
+        let s = sh.clone();
         x.threads.push(spawn("kp-exit-fec", move || exit_flush(&s)));
+        let s = sh;
+        x.threads.push(spawn("kp-exit-dup", move || delayer(&s.stop, rx, |p, to| {
+            let _ = s.sock.send_to(p, to);
+        })));
         Ok(x)
     }
 
@@ -747,6 +844,7 @@ impl Exit {
 
     pub fn set(&mut self, cfg: &ExitCfg) {
         self.sh.fec.store(cfg.fec.min(MAX_GROUP as u8) as u64, Ordering::Relaxed);
+        self.sh.tun_dup.store(cfg.tun_dup_ms.min(50) as u64, Ordering::Relaxed);
         let mut users = self.sh.users.lock().unwrap_or_else(|e| e.into_inner());
         let mut next = HashMap::new();
         let mut taken = std::collections::HashSet::new();
@@ -783,6 +881,7 @@ impl Exit {
 impl Drop for Exit {
     fn drop(&mut self) {
         self.sh.stop.store(true, Ordering::Relaxed);
+        let _ = self.sh.dly.lock().map(|t| t.send((Instant::now(), vec![], "127.0.0.1:9".parse().expect("addr"))));
         for t in self.threads.drain(..) {
             let _ = t.join();
         }
@@ -825,6 +924,15 @@ fn exit_in(sh: &XShared) {
         s.from = from;
         let mut out: Vec<Vec<u8>> = vec![];
         if h.kind == DATA {
+            // the parity the phone wants back (0 = this server's own)
+            let want = match h.aux >> 4 {
+                0 => sh.fec.load(Ordering::Relaxed) as usize,
+                1 => 0,
+                k => k as usize,
+            };
+            if s.tx_fec.k != want.min(MAX_GROUP) {
+                s.tx_fec = FecTx::new(want);
+            }
             if !s.win[0].take(h.seq) {
                 continue;
             }
@@ -878,13 +986,13 @@ fn exit_tun(sh: &XShared) {
         let seq = s.down_seq;
         s.down_seq = s.down_seq.wrapping_add(1);
         let pkt = seal(&sh.obfs, &u.key, &Hdr { uid: u.uid, sess: s.sess, seq, kind: DATA | DOWN, aux: 0 }, p);
-        let _ = sh.sock.send_to(&pkt, s.from);
+        sh.send(pkt, s.from);
         u.tx += p.len() as u64;
         if let Some((n, par)) = s.tx_fec.add(seq, p) {
             let pseq = s.down_pseq;
             s.down_pseq = s.down_pseq.wrapping_add(1);
             let pk = seal(&sh.obfs, &u.key, &Hdr { uid: u.uid, sess: s.sess, seq: pseq, kind: PARITY | DOWN, aux: n }, &par);
-            let _ = sh.sock.send_to(&pk, s.from);
+            sh.send(pk, s.from);
         }
     }
 }
@@ -892,7 +1000,7 @@ fn exit_tun(sh: &XShared) {
 /// parity of groups that waited too long
 fn exit_flush(sh: &XShared) {
     while !sh.stop.load(Ordering::Relaxed) {
-        std::thread::sleep(Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(2));
         let mut users = sh.users.lock().unwrap_or_else(|e| e.into_inner());
         for u in users.values_mut() {
             let (uid, key) = (u.uid, u.key.clone());
@@ -901,7 +1009,7 @@ fn exit_flush(sh: &XShared) {
                 let pseq = s.down_pseq;
                 s.down_pseq = s.down_pseq.wrapping_add(1);
                 let pk = seal(&sh.obfs, &key, &Hdr { uid, sess: s.sess, seq: pseq, kind: PARITY | DOWN, aux: n }, &par);
-                let _ = sh.sock.send_to(&pk, s.from);
+                sh.send(pk, s.from);
             }
         }
     }
@@ -1117,7 +1225,7 @@ mod tests {
         tunnel.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
         let to = tunnel.local_addr().unwrap().port();
         let port = 20000 + (rand::random::<u16>() % 20000);
-        let cfg = RelayCfg { port, to, dup_ms: 2, users: vec![KUser { uid: 7, name: "gamer".into(), key: "cd".repeat(32), ip: String::new() }] };
+        let cfg = RelayCfg { port, to, dup_ms: 2, tun_dup_ms: 0, users: vec![KUser { uid: 7, name: "gamer".into(), key: "cd".repeat(32), ip: String::new() }] };
         let relay = Relay::start(&"ab".repeat(32), &cfg).unwrap();
         let wifi = UdpSocket::bind("127.0.0.1:0").unwrap();
         let cell = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -1149,6 +1257,15 @@ mod tests {
         let (n, back) = tunnel.recv_from(&mut buf).expect("into the tunnel");
         assert_eq!(&buf[..n], &d[..]);
         assert!(tunnel.recv_from(&mut buf).is_err(), "a copy went into the tunnel twice");
+        // the next PING's answer says what each path brought: one copy came first, on one path
+        let ping = seal(&o, &k, &Hdr { uid: 7, sess: 9, seq: 5, kind: PING, aux: 1 }, &[&now_ms().to_be_bytes()[..], &[0xff, 0]].concat());
+        wifi.send_to(&ping, &dst).unwrap();
+        let (n, _) = wifi.recv_from(&mut buf).expect("pong");
+        let (_, body) = { let h = peek(&o, &buf[..n]).unwrap(); (h, open(&k, &h, &buf[..n]).unwrap().to_vec()) };
+        assert_eq!(body[8], 2);
+        let per = |i: usize| (body[9 + i * 9], u32::from_be_bytes(body[10 + i * 9..14 + i * 9].try_into().unwrap()), u32::from_be_bytes(body[14 + i * 9..18 + i * 9].try_into().unwrap()));
+        assert_eq!(per(0).1 + per(1).1, 1, "one copy came first");
+        assert_eq!((per(0).2, per(1).2), (1, 1));
         // a forged packet (wrong key): not into the tunnel
         let bad = seal(&o, &UKey::new(&"ef".repeat(32)).unwrap(), &Hdr { uid: 7, sess: 9, seq: 2, kind: DATA, aux: 1 }, b"x");
         wifi.send_to(&bad, &dst).unwrap();
@@ -1179,10 +1296,11 @@ async fn kping_lab() {
     let key = "cd".repeat(32);
     let dir = std::env::var("LAB_DIR").unwrap_or("/tmp".into());
     let user = KUser { uid: 1, name: "gamer".into(), key: key.clone(), ip: "10.81.0.2".into() };
+    let tdup: u16 = std::env::var("KP_TUN_DUP_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(10);
     let dup: u16 = std::env::var("KP_DUP_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
-    let relay = Relay::start(&obfs, &RelayCfg { port: 24300, to: 24302, dup_ms: dup, users: vec![user.clone()] }).expect("relay");
+    let relay = Relay::start(&obfs, &RelayCfg { port: 24300, to: 24302, dup_ms: dup, tun_dup_ms: tdup, users: vec![user.clone()] }).expect("relay");
     let fec: u8 = std::env::var("LAB_FEC").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
-    let exit = Exit::start(&obfs, &ExitCfg { port: 4300, mtu: 1332, fec, users: vec![user] }).expect("exit");
+    let exit = Exit::start(&obfs, &ExitCfg { port: 4300, mtu: 1332, fec, tun_dup_ms: tdup, users: vec![user] }).expect("exit");
     let mt = MtCfg {
         port: 4200, obfs: obfs.clone(), address: "10.79.0.1/16".into(), mtu: 1324, burst_max: 1000, burst_delay_ms: 2,
         users: vec![MtUser { name: "gamer".into(), key: key.clone(), ip: "10.79.0.2".into(), max: 2 }], local_only: true, ..Default::default()
@@ -1191,7 +1309,7 @@ async fn kping_lab() {
     assert!(e.is_empty(), "microtun: {}", e);
     let tun = |id: &str, port: u16, udp: &str, bind: &str| Spec {
         id: id.into(), name: id.into(), mode: "reverse".into(), transport: "game".into(), port, token: "token-for-tests-0123456789".into(), conns: 1,
-        udp: vec![udp.into()], target: "127.0.0.1".into(), fec: "8:3".into(), remote: format!("127.0.0.1:{}", port), bind: bind.into(), ..Default::default()
+        udp: vec![udp.into()], target: "127.0.0.1".into(), fec: "8:3".into(), remote: std::env::var(format!("LAB_TUN_{}", id)).unwrap_or(format!("127.0.0.1:{}", port)), bind: bind.into(), ..Default::default()
     };
     let mut run = vec![];
     for s in [tun("kp", 24301, "24302:4300", "127.0.0.1"), tun("mt", 24401, "24400:4200", "")] {

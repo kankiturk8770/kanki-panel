@@ -1,7 +1,14 @@
 // ==================================================================== the panel: login, shell, pages
 "use strict";
 // Persian text of the whole panel
-var FA={"Add server abroad":"افزودن سرور خارج",
+var FA={"Second copy between Iran and abroad (ms)":"نسخهٔ دوم بین ایران و خارج (میلی‌ثانیه)",
+"Every packet goes twice through the tunnel, this far apart, so a short outage between the servers loses nothing. 0 = once.":"هر بسته با این فاصله دو بار از تانل می‌رود تا قطعی کوتاه بین دو سرور چیزی را گم نکند. ۰ = یک بار.",
+"minute":"دقیقه",
+"minutes":"دقیقه",
+"hour":"ساعت",
+"day":"روز",
+"ago":"پیش",
+"Add server abroad":"افزودن سرور خارج",
 "Agent only":"فقط ایجنت",
 "Any server with the Kanki agent can be the exit. A new one needs only the agent: no VPN is installed on it.":"هر سروری که ایجنت کانکی دارد می‌تواند خروجی باشد. سرور تازه فقط ایجنت می‌خواهد: VPN روی آن نصب نمی‌شود.",
 "Make the command":"ساخت دستور",

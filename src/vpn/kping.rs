@@ -74,6 +74,8 @@ pub struct Settings {
     pub mtu: u16,
     /// one path: the relay sends the second copy to the phone this many ms after the first (0 = none)
     pub dup_ms: u16,
+    /// Iran ↔ abroad: the second copy of every packet this many ms after the first (0 = one copy)
+    pub tun_dup_ms: u16,
     /// parity: one repair packet per this many packets (0 = none). 2: a lost packet is rebuilt as soon as
     /// the next one arrives, so it is late by one packet at most
     pub fec: u8,
@@ -82,7 +84,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { on: true, port: DEFAULT_PORT, mtu: 1332, dup_ms: 10, fec: 2, routes: vec![] }
+        Settings { on: true, port: DEFAULT_PORT, mtu: 1332, dup_ms: 10, tun_dup_ms: 10, fec: 2, routes: vec![] }
     }
 }
 
@@ -93,6 +95,7 @@ pub fn settings(app: &App) -> Settings {
     }
     s.mtu = s.mtu.clamp(1200, 1500);
     s.dup_ms = s.dup_ms.min(20);
+    s.tun_dup_ms = s.tun_dup_ms.min(30);
     s.fec = s.fec.min(crate::kpingd::MAX_GROUP as u8);
     // 3.37-3.38 kept the exit as a VPN node id: now it is the tunnel server of that machine
     let tservers = crate::tunnel::panel::servers(app);
@@ -172,9 +175,9 @@ pub fn cfg_for(app: &App, sid: &str) -> KpCfg {
         .routes
         .iter()
         .filter(|r| r.iran == sid && !r.tunnel.is_empty())
-        .map(|r| RelayCfg { port: r.port, to: r.inner(), dup_ms: s.dup_ms, users: users.iter().map(|u| KUser { ip: String::new(), ..u.clone() }).collect() })
+        .map(|r| RelayCfg { port: r.port, to: r.inner(), dup_ms: s.dup_ms, tun_dup_ms: s.tun_dup_ms, users: users.iter().map(|u| KUser { ip: String::new(), ..u.clone() }).collect() })
         .collect();
-    let exit = s.routes.iter().any(|r| r.exit == sid).then(|| ExitCfg { port: s.port, mtu: mtu(app, &s), fec: s.fec, users: users.clone() });
+    let exit = s.routes.iter().any(|r| r.exit == sid).then(|| ExitCfg { port: s.port, mtu: mtu(app, &s), fec: s.fec, tun_dup_ms: s.tun_dup_ms, users: users.clone() });
     KpCfg { obfs: obfs(app), relays, exit }
 }
 
@@ -384,6 +387,9 @@ async fn put_settings(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     }
     if let Some(v) = b["dup_ms"].as_u64() {
         s.dup_ms = v.min(20) as u16;
+    }
+    if let Some(v) = b["tun_dup_ms"].as_u64() {
+        s.tun_dup_ms = v.min(30) as u16;
     }
     if let Some(v) = b["fec"].as_u64() {
         s.fec = v.min(crate::kpingd::MAX_GROUP as u64) as u8;
