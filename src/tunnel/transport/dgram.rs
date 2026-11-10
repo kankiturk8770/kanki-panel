@@ -37,6 +37,8 @@ pub const MAX_FRAME: usize = MAX_WIRE - HEAD - TAG;
 /// Packets waiting between the relay and the session; past it the newest are dropped (a game
 /// packet that would wait longer is useless anyway)
 const QUEUE: usize = 512;
+/// the second copy of a payload goes this long after the first (`Port::pair_twice`)
+const DUP_GAP: std::time::Duration = std::time::Duration::from_millis(20);
 const WINDOW: u64 = 128;
 
 pub fn looks_like(p: &[u8]) -> bool {
@@ -178,11 +180,20 @@ impl Lane {
             return false;
         }
         let Some(w) = self.seal(frame) else { return false };
-        if self.port.copies > 1 && self.port.out.try_send(w.clone()).is_err() {
+        // the copy that counts: when it does not fit, the caller sends the frame on the stream
+        let copy = (self.port.copies > 1).then(|| w.clone());
+        if self.port.out.try_send(w).is_err() {
             return false;
         }
-        // the copy that counts: when it does not fit, the caller sends the frame on the stream
-        self.port.out.try_send(w).is_ok()
+        // the second copy waits: right behind the first, one short outage of the link took both
+        if let (Some(c), Ok(rt)) = (copy, tokio::runtime::Handle::try_current()) {
+            let out = self.port.out.clone();
+            rt.spawn(async move {
+                tokio::time::sleep(DUP_GAP).await;
+                let _ = out.try_send(c);
+            });
+        }
+        true
     }
     /// wire payload -> frame (None: not ours, damaged or replayed)
     pub fn open(&self, w: &[u8]) -> Option<Vec<u8>> {
@@ -252,14 +263,19 @@ mod tests {
         assert!(x.seal(&[0; 200 - HEAD - TAG + 1]).is_none());
     }
 
-    #[test]
-    fn without_fec_every_payload_goes_twice_and_arrives_once() {
+    /// The second copy comes later (not right behind the first, so one short outage does not take both)
+    #[tokio::test]
+    async fn without_fec_every_payload_goes_twice_and_arrives_once() {
         let (p, mut end) = Port::pair_twice(MAX_WIRE);
         let k = [5u8; 32];
         let x = Lane::new(p, &Keys { tx: k, rx: k });
         x.on.store(true, Ordering::Relaxed);
         assert!(x.send(b"shot"));
-        let (a, b) = (end.out.try_recv().unwrap(), end.out.try_recv().unwrap());
+        let a = end.out.try_recv().unwrap();
+        assert!(end.out.try_recv().is_err(), "the copy waits");
+        tokio::time::sleep(DUP_GAP / 2).await;
+        assert!(end.out.try_recv().is_err(), "the copy waits");
+        let b = tokio::time::timeout(DUP_GAP * 3, end.out.recv()).await.unwrap().unwrap();
         assert!(end.out.try_recv().is_err());
         assert_eq!(x.open(&a).unwrap(), b"shot");
         assert!(x.open(&b).is_none(), "the second copy is a replay");
