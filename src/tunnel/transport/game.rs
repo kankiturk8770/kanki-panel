@@ -75,7 +75,7 @@ const FEC_DELAY: Duration = Duration::from_millis(4);
 /// out this far apart, and a duplicated datagram's second copy goes this long after the first: sent right
 /// behind the packet, one short outage of the link (tens of ms) took the packet and all its repairs at once.
 /// The packet itself still goes at once; only a rebuilt one comes a little later.
-const PARITY_GAP: Duration = Duration::from_millis(6);
+const PARITY_GAP: Duration = Duration::from_millis(10);
 const DUP_GAP: Duration = Duration::from_millis(20);
 /// most clients one server relay serves at the same time
 const MAX_PEERS: usize = 1024;
