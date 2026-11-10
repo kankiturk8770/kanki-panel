@@ -25,6 +25,9 @@ type St = State<Arc<App>>;
 pub struct Inbound {
     pub id: String,
     pub remark: String,
+    /// the link's name is `remark` as it is (the short name of the apps), not remark-username
+    #[serde(skip)]
+    pub plain_name: bool,
     pub enabled: bool,
     /// agent server id, or "local" (the panel server)
     pub server: String,
@@ -829,7 +832,13 @@ fn link_with(_s: &XraySettings, ib: &Inbound, u: &User, server_addr: &str) -> Op
         return None;
     }
     let port = if ib.link_port > 0 { ib.link_port } else { ib.port };
-    let name = if ib.remark.is_empty() { format!("{}-{}", ib.protocol, u.username) } else { format!("{}-{}", ib.remark, u.username) };
+    let name = if ib.plain_name {
+        ib.remark.clone()
+    } else if ib.remark.is_empty() {
+        format!("{}-{}", ib.protocol, u.username)
+    } else {
+        format!("{}-{}", ib.remark, u.username)
+    };
     let sec = if ib.link_tls { "tls" } else if ib.security.is_empty() { "none" } else { ib.security.as_str() };
     let sni = if !ib.link_sni.is_empty() {
         ib.link_sni.clone()
@@ -933,48 +942,68 @@ fn user_links_at(app: &App, u: &User) -> Vec<(String, String, String)> {
     }
     let mut out = vec![];
     let mine: Vec<&Inbound> = s.inbounds.iter().filter(|ib| ib.enabled && (ib.only.is_empty() || ib.only.contains(&u.id)) && s.servers.iter().any(|x| x.server == ib.server)).collect();
-    let names = unique_remarks(&mine);
+    let names = pretty_names(app, &s, &mine);
     for ib in mine {
-        let named;
-        let ib = match names.get(&ib.id) {
-            Some(n) if *n != ib.remark => {
-                named = Inbound { remark: n.clone(), ..ib.clone() };
-                &named
-            }
-            _ => ib,
-        };
-        let Some(l) = link(app, &s, ib, u) else { continue };
-        out.push((ib.remark.clone(), l, ib.server.clone()));
-        if let Some(t) = link_tunnel(app, &s, ib, u) {
+        let name = names.get(&ib.id).cloned().unwrap_or_else(|| ib.remark.clone());
+        let named = Inbound { remark: name.clone(), plain_name: true, ..ib.clone() };
+        let Some(l) = link(app, &s, &named, u) else { continue };
+        out.push((name.clone(), l, ib.server.clone()));
+        if let Some(t) = link_tunnel(app, &s, &named, u) {
             out.push((t.0, t.1, ib.server.clone()));
         }
     }
     out
 }
 
-/// The name of each inbound in the app: inbounds that share a name get their kind after it
-/// («KANKI-XRAY gRPC», «KANKI-XRAY XHTTP», «KANKI-XRAY SS»), and the port when that is not enough
-fn unique_remarks(list: &[&Inbound]) -> HashMap<String, String> {
-    let kind = |ib: &Inbound| -> String {
-        if ib.protocol == "shadowsocks" {
-            return "SS".into();
+/// English name of a country code ("" when it is not in the list)
+fn country(cc: &str) -> &'static str {
+    const C: &[(&str, &str)] = &[
+        ("DE", "Germany"), ("SE", "Sweden"), ("GB", "England"), ("NL", "Netherlands"), ("FI", "Finland"), ("FR", "France"), ("TR", "Turkey"),
+        ("US", "USA"), ("CA", "Canada"), ("AE", "UAE"), ("AM", "Armenia"), ("GE", "Georgia"), ("AZ", "Azerbaijan"), ("RU", "Russia"),
+        ("PL", "Poland"), ("AT", "Austria"), ("CH", "Switzerland"), ("IT", "Italy"), ("ES", "Spain"), ("PT", "Portugal"), ("NO", "Norway"),
+        ("DK", "Denmark"), ("BE", "Belgium"), ("IE", "Ireland"), ("CZ", "Czechia"), ("RO", "Romania"), ("BG", "Bulgaria"), ("HU", "Hungary"),
+        ("GR", "Greece"), ("CY", "Cyprus"), ("LT", "Lithuania"), ("LV", "Latvia"), ("EE", "Estonia"), ("UA", "Ukraine"), ("MD", "Moldova"),
+        ("RS", "Serbia"), ("KZ", "Kazakhstan"), ("QA", "Qatar"), ("SA", "Saudi Arabia"), ("BH", "Bahrain"), ("OM", "Oman"), ("IQ", "Iraq"),
+        ("IN", "India"), ("SG", "Singapore"), ("JP", "Japan"), ("HK", "Hong Kong"), ("KR", "Korea"), ("AU", "Australia"), ("IR", "Iran"),
+        ("LU", "Luxembourg"), ("IS", "Iceland"), ("SK", "Slovakia"), ("SI", "Slovenia"), ("HR", "Croatia"), ("AL", "Albania"), ("MK", "North Macedonia"),
+    ];
+    let c = cc.trim().to_ascii_uppercase();
+    C.iter().find(|x| x.0 == c).map(|x| x.1).unwrap_or("")
+}
+
+/// The name of each link in the apps, short: the flag and the country of where it leaves to the internet
+/// and the protocol («🇩🇪 Germany · Trojan»); two of one kind on one server get the transport («VLESS XHTTP»),
+/// and the port when that is not enough. Its tunnel copy is the same with the Iran flag first (`link_tunnel`).
+fn pretty_names(app: &App, _s: &XraySettings, list: &[&Inbound]) -> HashMap<String, String> {
+    let proto = |ib: &Inbound| -> String {
+        match ib.protocol.as_str() {
+            "vless" => "VLESS",
+            "vmess" => "VMess",
+            "trojan" => "Trojan",
+            "shadowsocks" => "SS",
+            p => return p.to_uppercase(),
         }
-        let net = match ib.network.as_str() { "grpc" => "gRPC", "xhttp" => "XHTTP", "ws" => "WS", "httpupgrade" => "HTTPUpgrade", "kcp" => "mKCP", _ => "TCP" };
-        if ib.security == "reality" { format!("{} REALITY", net) } else { net.to_string() }
+        .to_string()
     };
-    let key = |r: &str| r.trim().to_lowercase();
+    let net = |ib: &Inbound| match ib.network.as_str() { "grpc" => "gRPC", "xhttp" => "XHTTP", "ws" => "WS", "httpupgrade" => "HTTPUpgrade", "kcp" => "mKCP", _ => "TCP" };
     let mut out = HashMap::new();
-    // an inbound with no name keeps its links as they were (the protocol and the user)
-    for ib in list.iter().filter(|ib| !ib.remark.trim().is_empty()) {
-        let base = ib.remark.trim().to_string();
-        let same: Vec<&&Inbound> = list.iter().filter(|x| key(&x.remark) == key(&base)).collect();
-        let name = if same.len() < 2 {
-            base
-        } else if same.iter().filter(|x| kind(x) == kind(ib)).count() < 2 {
-            format!("{} {}", base, kind(ib))
-        } else {
-            format!("{} {} {}", base, kind(ib), ib.port)
+    for ib in list {
+        let geo = crate::exitgeo::fields(app, &crate::exitgeo::xray_key(&ib.server));
+        let cc = geo["exit_cc"].as_str().unwrap_or("").to_string();
+        let place = match country(&cc) {
+            "" => crate::tunnel::panel::server_names(app).get(&ib.server).cloned().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| if ib.server == "local" { "Main".into() } else { ib.server.clone() }),
+            c => c.to_string(),
         };
+        let flag = crate::amnezia::flag(&cc);
+        let same: Vec<&&Inbound> = list.iter().filter(|x| x.server == ib.server && proto(x) == proto(ib)).collect();
+        let kind = if same.len() < 2 {
+            proto(ib)
+        } else if same.iter().filter(|x| net(x) == net(ib)).count() < 2 {
+            format!("{} {}", proto(ib), net(ib))
+        } else {
+            format!("{} {} {}", proto(ib), net(ib), ib.port)
+        };
+        let name = if flag.is_empty() { format!("{} · {}", place, kind) } else { format!("{} {} · {}", flag, place, kind) };
         out.insert(ib.id.clone(), name);
     }
     out
@@ -998,9 +1027,11 @@ fn link_tunnel(app: &App, s: &XraySettings, ib: &Inbound, u: &User) -> Option<(S
         x.link_sni = own_name;
     }
     let base = if ib.remark.is_empty() { ib.protocol.clone() } else { ib.remark.clone() };
-    x.remark = format!("{}-tunnel", base);
+    // the tunnel copy: the Iran flag first, then the arrow to where it leaves
+    let name = format!("🇮🇷→{}", base);
+    x.remark = name.clone();
     let l = link_with(s, &x, u, "")?;
-    Some((format!("{} (تانل)", base), l))
+    Some((name, l))
 }
 
 /// Each link carries where its traffic leaves to the internet (exit_cc, exit_city, exit_lat,
@@ -2009,7 +2040,14 @@ mod tests {
         let u = User { id: 3, username: "ali".into(), code: "99887766".into(), enabled: true, protocols: "xray".into(), ..emit::test_user() };
         let l = user_links_at(&app, &u);
         let names: Vec<&str> = l.iter().map(|x| x.0.as_str()).collect();
-        assert_eq!(names, vec!["tr", "tr (تانل)", "", "vless (تانل)", ""], "{:?}", l);
+        // short names: where it leaves and the protocol (the server's name when its country is not known yet)
+        assert_eq!(names, vec!["de · Trojan", "🇮🇷→de · Trojan", "de · VLESS TCP", "🇮🇷→de · VLESS TCP", "de · VLESS WS"], "{:?}", l);
+        // with its country known: its flag and the country; the tunnel copy has the Iran flag and an arrow first
+        app.db.set("exit_geo", &json!({ "xray:de": { "ip": "1.2.3.4", "cc": "DE", "city": "Frankfurt", "ts": crate::util::now() } }).to_string());
+        let l2 = user_links_at(&app, &u);
+        assert_eq!(l2[0].0, "🇩🇪 Germany · Trojan");
+        assert_eq!(l2[1].0, "🇮🇷→🇩🇪 Germany · Trojan");
+        assert!(l2[0].1.ends_with(&format!("#{}", pct("🇩🇪 Germany · Trojan"))), "{}", l2[0].1);
         assert!(l[0].1.contains("@de.example.com:2083?"), "{}", l[0].1);
         // through Iran on the port the tunnel carries; TLS keeps the server's own name
         assert!(l[1].1.contains("@ir.example.com:443?"), "{}", l[1].1);
@@ -2048,18 +2086,6 @@ mod tests {
 /// with `xray run -test` by hand) and their share links.
 #[cfg(test)]
 mod emit {
-    #[test]
-    fn inbounds_with_one_name_get_their_kind() {
-        let ib = |id: &str, remark: &str, proto: &str, net: &str, port: u16| super::Inbound { id: id.into(), remark: remark.into(), protocol: proto.into(), network: net.into(), port, security: "none".into(), ..Default::default() };
-        let l = [ib("a", "KANKI-XRAY", "vless", "grpc", 8443), ib("b", "KANKI-XRAY", "vless", "xhttp", 2083), ib("c", "KANKI-XRAY", "shadowsocks", "tcp", 8388), ib("d", "VLESS-REALITY", "vless", "tcp", 443)];
-        let r: Vec<&super::Inbound> = l.iter().collect();
-        let n = super::unique_remarks(&r);
-        assert_eq!(n["a"], "KANKI-XRAY gRPC");
-        assert_eq!(n["b"], "KANKI-XRAY XHTTP");
-        assert_eq!(n["c"], "KANKI-XRAY SS");
-        assert_eq!(n["d"], "VLESS-REALITY");
-    }
-
     use super::*;
 
     #[test]

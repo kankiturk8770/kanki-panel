@@ -257,7 +257,8 @@ pub fn to_url(key: &str, dial: &str, uid: u32, obfs: &str, ip: Ipv4Addr, mtu: u1
 }
 
 fn exit_name(app: &App, sid: &str) -> String {
-    crate::tunnel::panel::server_names(app).get(sid).cloned().unwrap_or_else(|| sid.to_string())
+    let n = crate::tunnel::panel::server_names(app).get(sid).cloned().filter(|n| !n.is_empty());
+    n.unwrap_or_else(|| if sid == "local" { app.env.get("LOCAL_NAME").cloned().unwrap_or_else(|| "Main".into()) } else { sid.to_string() })
 }
 
 /// KPING for the Kanki app (only inside the sealed subscription). Null = not for this user.
@@ -321,7 +322,7 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
     let names = crate::tunnel::panel::server_names(&app);
     let tservers = crate::tunnel::panel::servers(&app);
     let live = crate::tunnel::panel::live_quality(&app);
-    let name_of = |id: &str| names.get(id).cloned().unwrap_or_default();
+    let name_of = |id: &str| names.get(id).cloned().filter(|n| !n.is_empty()).unwrap_or_else(|| if id == "local" { app.env.get("LOCAL_NAME").cloned().unwrap_or_else(|| "Main".into()) } else { String::new() });
     let routes: Vec<Value> = s
         .routes
         .iter()

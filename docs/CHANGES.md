@@ -1,3 +1,29 @@
+# v3.39.0 — KPING v2: a game core of its own (not microtun), exact last seen and data, short Xray names with flags
+- **KPING rebuilt from scratch (`src/vpn/kpingd.rs`):** plain UDP, no stream and no retransmission (a lost game packet is never
+  waited for). Every packet goes more than once: the phone sends one copy on each path (Wi-Fi and mobile data at once) or two 10 ms
+  apart on one path; the first copy that arrives wins, the rest are dropped; a light XOR parity (one repair packet per 2) rebuilds a
+  lost packet one packet later at most. 20 bytes a packet: a masked header (uid, session, seq, kind) and an 8-byte HMAC tag with the
+  user's own key; the game's own data is not encrypted (the game encrypts it; Iran → abroad goes inside the encrypted tunnel).
+- **Relay on the Iran server, exit abroad, both in the tunnel agent:** the relay checks every packet, drops the copies, puts one copy
+  into the route's reverse Game-FEC tunnel (its KPING port only on 127.0.0.1) and sends what comes back to every path of the phone.
+  The exit writes it to `kping0` (NAT out). The phone picks its copy delay and parity in its PING (it tunes them to its line); the
+  relay's PONG tells it what each path saved. **Iran ↔ abroad:** every packet goes twice through the tunnel 20 ms apart: the tunnel's
+  FEC sends a lone game packet's repair shards right behind it, so one short outage of that link took them all.
+- **Servers abroad from the KPING page:** «Add server abroad» gives one command that installs only the agent (no VPN part,
+  `agent_only`). Any server with the agent can be an exit; routes are tunnel servers now (old routes move by themselves). The relay's
+  port opens in the firewall by itself (owner `kping`); the exit only listens on 127.0.0.1. KPING left the VPN nodes' sync.
+- **Lab (`scripts/kping_lab.sh`, `scripts/kping-lab`):** the real relay, exit, Game-FEC tunnel and microtun server, a phone with two
+  paths whose outages come in time like a radio, and a game-like stream (60 packets a second). Lost of 100 packets (microtun / KPING
+  one path / KPING Wi-Fi + data): ordinary 4 / 2 / 0.06; bad 13 / 10 / 0.8; Wi-Fi breaking up 33 / 28 / 0.4. Iran ↔ abroad with
+  scattered 3% loss: 1.4 / 0 / 0; with 20 ms outages 3% of the time: 4.3 / 1.9 / 2.2 (half of before). The wire is the same in
+  Rust and Go (a fixed test packet, checked a third time in Python).
+- **Users:** last seen to the minute («1 hour and 45 minutes ago», with the date and time); data used exactly (`56 GB 69 MB 412 KB`).
+- **Xray link names:** short, the flag and the country where it leaves and the protocol («🇩🇪 Germany · Trojan»; two of one kind
+  get the transport, then the port); the tunnel copy has the Iran flag and an arrow first («🇮🇷→🇩🇪 Germany · Trojan»). Same names in
+  the AmneziaVPN backup.
+- **Tested:** `cargo test` 342 passed; Playwright: KPING (5 tabs), users and a user, 6 widths × fa/en × dark/light, 168 views, no
+  error. Not yet on real servers or phones; the app's part comes next.
+
 # v3.38.0 — firewall from the panel, replacing a server's machine, agents updated where GitHub is filtered
 - **Firewall from the panel (`fw::guard_tick`, Servers › 🛡 Firewall):** one switch per server and one for all. On: the server's agent
   allows SSH first (checked in ufw before anything else), then every port Kanki uses there: every owner (tunnels, Kanki DNS, Xray, KANKI

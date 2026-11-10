@@ -1936,14 +1936,12 @@ pub async fn amnezia_configs(app: &Arc<App>, u: &User) -> Vec<(String, String)> 
         }
     }
     // then every Xray link the app can read (VLESS with Reality or TLS, VMess, Trojan, Shadowsocks); Hysteria2 it cannot.
-    // Each gets its server's flag (through Iran for the tunnel's copy) like the configs above.
-    for (name, link, sid) in crate::xray::panel::user_links_on(app, u) {
+    // Their names already carry the server's flag (and the Iran flag first for the tunnel's copy).
+    for (name, link, _) in crate::xray::panel::user_links_on(app, u) {
         if crate::amnezia::server(&link, &name).is_none() {
             continue;
         }
-        let to = crate::amnezia::flag(&crate::exitgeo::cc(app, &sid));
-        let route = if name.contains("(تانل)") { format!("{}→{}", crate::amnezia::flag("IR"), to) } else { to };
-        out.push((format!("{} {}", route.trim(), name).trim().to_string(), link));
+        out.push((name, link));
     }
     out
 }
