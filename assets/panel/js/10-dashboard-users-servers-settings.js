@@ -371,7 +371,7 @@ function wireLogo(){var f=$('#lg_file');if(!f)return;
  var rm=$('#lg_rm');if(rm)rm.onclick=function(){confirmDo(function(){setLogo('').catch(fail)})}}
 // ---------------------------------------------------------------- settings: sections, each saved on its own
 var STSEC=[
- ['look','Appearance','brush','Name, logo, language, theme and colour of the panel',['panel_name','lang','theme','color','refresh']],
+ ['look','Appearance','brush','Name, logo, language and theme of the panel',['panel_name','lang','theme','color','refresh']],
  ['net','Addresses','globe','Panel address, the public VPN address and subscription links',['endpoint','sub_base']],
  ['vpn','VPN & protocols','shield2','DNS, MTU and protocol behaviour on every server',['dns','mtu','mtu_auto','mtu_budget','awg_compat','conn_limit_on']],
  ['newu','New users','users','Ready values for the “New user” form',['default_protocols','def_gb','def_days','def_conns']],
@@ -396,7 +396,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   '<button class="b2 bd'+(curLogo()?'':' hide')+'" id="lg_rm">'+t('Remove')+'</button></div><div class="hint">'+t('Saved at once. Shown in the header, the menu, the login page and the subscription page.')+'</div></div>'+
   '<div class="full"><label class="f">'+t('Language')+'</label>'+stPick('lang',['<button type="button" data-v="fa">فارسی<small class="muted" style="display:block;font-weight:500">راست به چپ</small></button>','<button type="button" data-v="en">English<small class="muted" style="display:block;font-weight:500">Left to right</small></button>'],'thc')+'</div>'+
   '<div class="full"><label class="f">'+t('Theme')+'</label>'+stPick('theme',['<button type="button" data-v="dark"><i style="background:linear-gradient(135deg,#1c160d,#070604)"></i>'+t('Dark')+'</button>','<button type="button" data-v="light"><i style="background:linear-gradient(135deg,#fffaf0,#e6dcc6)"></i>'+t('Soft light')+'</button>'],'thc')+'</div>'+
-  '<div class="full"><label class="f">'+t('Panel color')+'</label>'+stPick('color',[['gold','#F5C451'],['turquoise','#2fd6d6'],['violet','#a78bfa'],['emerald','#34d399'],['rose','#fb7185']].map(function(c){return '<button type="button" data-v="'+c[0]+'" style="--sc:'+c[1]+'" title="'+t(c[0].charAt(0).toUpperCase()+c[0].slice(1))+'"></button>'}),'swc')+'</div></div>';
+  '<input type="hidden" data-k="color" value="gold"></div>';
  case 'net':return '<div class="sgrid"><div class="full"><label class="f">'+t('Panel address')+'</label><div class="cpy"><input class="ltr" readonly value="'+esc(addr)+'"><button class="b2" type="button" onclick="copy(\''+esc(addr)+'\')">'+ic('copy',15)+'</button></div></div>'+
   stIn('endpoint','Public VPN host or IP',s.domain||'vpn.example.com','Written inside every user config. Empty = the panel domain.','full')+
   stIn('sub_base','Subscription base URL','https://sub.example.com','Base of the subscription links (for example a CDN domain). Empty = the panel address.','full')+

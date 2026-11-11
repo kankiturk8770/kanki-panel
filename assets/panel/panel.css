@@ -1,10 +1,6 @@
 /* Kanki Panel: the whole look in one stylesheet (served as /assets/kanki-panel.css, cached per version) */
 @font-face{font-family:Vazirmatn;src:url(/assets/vazirmatn.woff) format("woff");font-weight:100 900;font-style:normal;font-display:swap}
 :root{--a:#F5C451;--al:#FFE9A6;--ad:#B8862B;--ok:#3ddc97;--bad:#ff6b6b;--warn:#ffb547;--info:#6fb6ff;--t:#F7F1E3;--s:#A89C82}
-body.c-turquoise{--a:#2fd6d6;--al:#9ff3f3;--ad:#1590a8;--ln:rgba(47,214,214,.2)}
-body.c-violet{--a:#a78bfa;--al:#ddd3ff;--ad:#6d4fd8;--ln:rgba(167,139,250,.22)}
-body.c-emerald{--a:#34d399;--al:#b7f5dc;--ad:#119068;--ln:rgba(52,211,153,.2)}
-body.c-rose{--a:#fb7185;--al:#ffd0d7;--ad:#c23a55;--ln:rgba(251,113,133,.22)}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0}
 body{min-height:100vh;background-attachment:fixed;color:var(--t);font-family:Vazirmatn,"Segoe UI",Tahoma,sans-serif;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
@@ -1796,8 +1792,6 @@ small{font-size:max(12px,.83em)}
 .us-info>div.wide{grid-column:1/-1}
 .us-info small{color:var(--s);font-size:12px}
 .us-dev{display:flex;flex-direction:column;padding:6px 8px;border:1px solid var(--ln);border-radius:10px;margin-top:4px}
-#ul.uchips{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
-@media(max-width:619px){#ul.uchips{grid-template-columns:minmax(0,1fr)}}
 /* the details: a sheet from the side on a big screen, from the bottom on a phone */
 #modal:has(.mbox.usheet){align-items:stretch;justify-content:flex-end;padding:0}
 .mbox.usheet{width:min(460px,100%);max-height:none;height:100%;border-radius:0;border-inline-start:1px solid var(--ln);overflow-y:auto;animation:ushIn .22s ease-out}
@@ -1807,3 +1801,91 @@ small{font-size:max(12px,.83em)}
  .mbox.usheet{height:auto;max-height:92vh;border-radius:20px 20px 0 0;border-inline-start:0;border-top:1px solid var(--ln);animation-name:ushUp}
  @keyframes ushUp{from{transform:translateY(32px);opacity:.4}to{transform:none;opacity:1}}}
 @media(prefers-reduced-motion:reduce){.mbox.usheet{animation:none}}
+
+/* ======================================================================================
+   3.40 — Kanki Glass: the panel's own look. Two themes only (dark default, light), one gold.
+   Deep ink background, frosted steel-glass panels, a metallic edge; gold only where it
+   means something (the page you are on, the main action). No moving edges or sheens:
+   only transform/opacity move. Layout comes from the rules above; this layer is the look.
+   ====================================================================================== */
+body.kg{--a:#f5c451;--al:#ffe39a;--ad:#c8922b;--on:#1a1306;--t:#e9edf5;--s:#8b94a7;
+ --ok:#3ddc97;--bad:#ff6b6b;--warn:#ffb547;--info:#6fb6ff;
+ --bg1:#07090e;--bg2:#0a0d14;--c1:rgba(16,20,29,.72);--c2:rgba(13,17,25,.72);
+ --g1:rgba(255,255,255,.045);--g2:rgba(255,255,255,.012);
+ --gb:rgba(170,184,210,.14);--gb2:rgba(170,184,210,.22);--ln:rgba(170,184,210,.13);--ln2:rgba(170,184,210,.08);
+ --gl:inset 0 1px 0 rgba(255,255,255,.07);--sh:inset 0 1px 0 rgba(255,255,255,.06),0 18px 40px -26px rgba(0,0,0,.9);
+ --in:rgba(7,9,14,.55);--blur:saturate(140%) blur(18px);
+ --kg-glass:rgba(16,20,29,.72);--kg-rim:linear-gradient(180deg,rgba(255,255,255,.16),rgba(170,184,210,.06) 40%,rgba(170,184,210,.12));
+ --kg-glow:0 0 0 1px rgba(245,196,81,.55),0 0 18px -2px rgba(245,196,81,.45);
+ background:#07090e!important;color:var(--t);overflow-x:hidden}
+body.kg.light{--a:#94650a;--al:#f7d77d;--ad:#b98318;--on:#1a1306;--t:#0f1524;--s:#586274;
+ --ok:#12915b;--bad:#d23c3c;--warn:#b86e00;--info:#2f7fd6;
+ --bg1:#eef1f6;--bg2:#e6eaf1;--c1:rgba(255,255,255,.80);--c2:rgba(255,255,255,.72);
+ --g1:rgba(255,255,255,.9);--g2:rgba(255,255,255,.6);
+ --gb:rgba(20,28,45,.12);--gb2:rgba(20,28,45,.18);--ln:rgba(20,28,45,.12);--ln2:rgba(20,28,45,.07);
+ --gl:inset 0 1px 0 #fff;--sh:inset 0 1px 0 #fff,0 14px 30px -22px rgba(20,28,45,.35);
+ --in:rgba(255,255,255,.75);--kg-glass:rgba(255,255,255,.80);
+ --kg-glow:0 0 0 1px rgba(185,131,24,.6),0 0 16px -4px rgba(245,196,81,.55);
+ background:#eef1f6!important}
+html:has(body.kg){overflow-x:hidden}
+/* one quiet light behind everything: gold top corner, cold steel bottom (static) */
+body.kg:before{background:radial-gradient(900px 520px at 100% -10%,rgba(245,196,81,.09),transparent 65%),radial-gradient(800px 560px at -10% 110%,rgba(111,140,190,.10),transparent 65%)!important}
+body.kg.light:before{background:radial-gradient(900px 520px at 100% -10%,rgba(245,196,81,.16),transparent 65%),radial-gradient(800px 560px at -10% 110%,rgba(111,140,190,.14),transparent 65%)!important}
+
+/* the glass: every panel the same material (the backdrop blur only on what floats over the page,
+   so a long page scrolls smoothly on a weak phone; cards sit on a still background) */
+body.kg .card,body.kg .kv>div,body.kg .ibc,body.kg .secc,body.kg .gc,body.kg .kpi,body.kg .stat,body.kg .uchip,
+body.kg .box,body.kg .ku-group,body.kg .kxr,body.kg .ku-tt-wrap{
+ background:linear-gradient(165deg,var(--g1),var(--g2)),var(--kg-glass)!important;border:1px solid var(--gb)!important;
+ box-shadow:var(--sh)!important}
+body.kg .kpi,body.kg .uchip,body.kg .ku-group,body.kg .kxr{border-radius:18px}
+body.kg header.top,body.kg nav.side,body.kg .mbar,body.kg .mbox,body.kg #netnote{
+ background:color-mix(in srgb,var(--bg1) 70%,transparent)!important;backdrop-filter:var(--blur);-webkit-backdrop-filter:var(--blur)}
+body.kg header.top{border-bottom:1px solid var(--gb)!important}
+body.kg nav.side{border-inline-end:1px solid var(--gb)!important}
+body.kg .mbox{background:linear-gradient(165deg,var(--g1),var(--g2)),color-mix(in srgb,var(--bg2) 86%,transparent)!important;border:1px solid var(--gb2)!important}
+body.kg .modal{background:rgba(3,5,9,.62)!important}
+body.kg.light .modal{background:rgba(15,21,36,.35)!important}
+
+/* the page you are on: the one gold light of the panel */
+body.kg nav.side a.kd-it.on,html[dir=ltr] body.kg nav.side a.kd-it.on,body.kg .kd-tn.on{background:linear-gradient(90deg,rgba(245,196,81,.16),rgba(245,196,81,.04))!important;box-shadow:var(--kg-glow)!important;border-color:transparent!important}
+body.kg nav.side a.kd-it.on .ni{background:var(--a)!important;color:var(--on)!important}
+body.kg.light nav.side a.kd-it.on .ni{background:#f5c451!important}
+
+/* no moving edges, no sheens: still gold edges where there were turning ones */
+body.kg .kd-it.on::after,body.kg .kd-tn.on::after,body.kg .uchip.kd-u::after,body.kg .uchip.kd-u:hover::after,body.kg #st .stn button.on::after,body.kg .k310st::after{animation:none!important;background:none!important;content:none!important}
+body.kg .kd-edge{display:none!important}
+body.kg .btn:after{animation:none!important;display:none!important}
+body.kg .kpi{position:relative}
+body.kg .kpi::before{content:"";position:absolute;inset:0 18% auto;height:1px;background:linear-gradient(90deg,transparent,var(--kc,var(--a)),transparent);opacity:.55;pointer-events:none}
+
+/* buttons: gold for the main action, steel glass for the rest */
+body.kg .btn{background:linear-gradient(180deg,#ffe39a 0%,#f5c451 45%,#c8922b 100%)!important;color:#1a1306!important;border:1px solid rgba(255,227,154,.7)!important;box-shadow:0 8px 20px -12px rgba(245,196,81,.75),inset 0 1px 0 rgba(255,255,255,.55)!important}
+body.kg .btn:hover:not(:disabled){transform:translateY(-1px);filter:none}
+body.kg .btn:active:not(:disabled){transform:scale(.98)}
+body.kg .b2,body.kg .ib,body.kg .sb{background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.02))!important;border:1px solid var(--gb2)!important;color:var(--t)}
+body.kg.light .b2,body.kg.light .ib,body.kg.light .sb{background:linear-gradient(180deg,#fff,rgba(255,255,255,.7))!important;box-shadow:inset 0 1px 0 #fff,0 4px 12px -8px rgba(20,28,45,.35)!important}
+body.kg .b2:hover:not(:disabled),body.kg .ib:hover{border-color:rgba(245,196,81,.55)!important;box-shadow:0 0 12px -4px rgba(245,196,81,.5)!important}
+body.kg .b2.bd{color:var(--bad)}
+body.kg input,body.kg select,body.kg textarea{background:var(--in)!important;border:1px solid var(--gb2)!important;color:var(--t)}
+body.kg input:focus,body.kg select:focus,body.kg textarea:focus{border-color:rgba(245,196,81,.7)!important;box-shadow:0 0 0 3px rgba(245,196,81,.16)!important;outline:none}
+body.kg :focus-visible{outline:2px solid #f5c451;outline-offset:2px}
+
+/* the users toolbar and cards on glass */
+body.kg .ufilt .uf{background:linear-gradient(180deg,rgba(255,255,255,.05),transparent);border-color:var(--gb)}
+body.kg .ufilt .uf.act{border-color:transparent;box-shadow:var(--kg-glow);background:rgba(245,196,81,.12)}
+body.kg .uchip.uc:hover{border-color:rgba(245,196,81,.45)!important}
+body.kg .uchip.uc.sel{box-shadow:var(--kg-glow)!important}
+body.kg .mbox.usheet{border-radius:0!important}
+@media(max-width:619px){body.kg .mbox.usheet{border-radius:20px 20px 0 0!important}}
+
+/* nothing wider than the screen: long names and addresses are cut, not pushed out */
+body.kg #pg,body.kg #pg>*{min-width:0;max-width:100%}
+body.kg #pg .row>*,body.kg #pg .g2>*,body.kg #pg .g3>*{min-width:0}
+body.kg .ltr,body.kg .kxr-ip,body.kg .ku-i3{overflow-wrap:anywhere}
+body.kg .ku-nm,body.kg .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.kg pre{white-space:pre-wrap;overflow-wrap:anywhere}
+
+@media(prefers-reduced-motion:reduce){body.kg *{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+body.kg #ul.uchips{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))!important}
+@media(max-width:619px){body.kg #ul.uchips{grid-template-columns:minmax(0,1fr)!important}}
