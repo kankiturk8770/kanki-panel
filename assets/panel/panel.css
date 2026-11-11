@@ -1767,3 +1767,43 @@ small{font-size:max(12px,.83em)}
  .kp-tun.ok{border-top-color:var(--kp);background:linear-gradient(180deg,color-mix(in srgb,var(--kp) 14%,var(--c1)),var(--c1) 80%)}
  .kp-tun b{margin-inline-start:0}
 }
+
+/* ---- 3.40 users: one toolbar, clean cards, details in a side sheet ---- */
+.ubar{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-bottom:12px}
+.ubar .srch{position:relative;min-width:0}
+.ubar .srch input{width:100%;padding-inline-end:36px}
+.ubar .srch button{position:absolute;inset-inline-end:6px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:var(--s);width:28px;height:28px;border-radius:8px;cursor:pointer}
+.ufilt{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+.ufilt .uf{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:0 12px;border-radius:12px;border:1px solid var(--ln);background:transparent;color:var(--s);font:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.ufilt .uf b{font-size:12px;color:var(--t)}
+.ufilt .uf.act{color:var(--t);border-color:var(--a);background:color-mix(in srgb,var(--a) 14%,transparent)}
+.usel{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-width:0}
+.usel select{min-width:0;padding:9px 8px;font-size:13px;text-overflow:ellipsis}
+@media(min-width:900px){.ubar{grid-template-columns:minmax(200px,1fr) auto 300px;align-items:center}}
+.uchips .uc{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:12px;min-width:0;cursor:pointer}
+.uc .uc-h{display:flex;align-items:center;gap:8px;min-width:0}
+.uc .uc-h .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px}
+.uc .u-st{flex:none;font-size:12px}
+.uc .uc-m{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;font-size:12px;color:var(--s);min-width:0}
+.uc .uc-m b{color:var(--t)}
+.uc .uc-c{display:inline-flex;align-items:center;gap:4px;margin-inline-start:auto}
+.uc .uc-a{display:flex;gap:6px}
+.uc .uc-a .b2{min-height:40px;min-width:40px;display:inline-flex;align-items:center;justify-content:center;gap:4px;padding:0 10px}
+.uc .uc-a .b2:last-child{flex:1}
+.selmode .uc .uc-a{display:none}
+.us-info{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:8px 0}
+.us-info>div{display:flex;flex-direction:column;gap:2px;min-width:0;font-size:13px;overflow-wrap:anywhere}
+.us-info>div.wide{grid-column:1/-1}
+.us-info small{color:var(--s);font-size:12px}
+.us-dev{display:flex;flex-direction:column;padding:6px 8px;border:1px solid var(--ln);border-radius:10px;margin-top:4px}
+#ul.uchips{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+@media(max-width:619px){#ul.uchips{grid-template-columns:minmax(0,1fr)}}
+/* the details: a sheet from the side on a big screen, from the bottom on a phone */
+#modal:has(.mbox.usheet){align-items:stretch;justify-content:flex-end;padding:0}
+.mbox.usheet{width:min(460px,100%);max-height:none;height:100%;border-radius:0;border-inline-start:1px solid var(--ln);overflow-y:auto;animation:ushIn .22s ease-out}
+@keyframes ushIn{from{transform:translateX(var(--ush-x,24px));opacity:.4}to{transform:none;opacity:1}}
+[dir=rtl] .mbox.usheet{--ush-x:-24px}
+@media(max-width:619px){#modal:has(.mbox.usheet){align-items:flex-end}
+ .mbox.usheet{height:auto;max-height:92vh;border-radius:20px 20px 0 0;border-inline-start:0;border-top:1px solid var(--ln);animation-name:ushUp}
+ @keyframes ushUp{from{transform:translateY(32px);opacity:.4}to{transform:none;opacity:1}}}
+@media(prefers-reduced-motion:reduce){.mbox.usheet{animation:none}}

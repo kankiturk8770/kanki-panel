@@ -58,6 +58,12 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
   '<div class="us-st"><div><small>'+t('Used')+'</small><b class="ltr">'+exactB(u.used_bytes)+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</b><div class="trk"><div class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?100:Math.max(2,p))+'%"></div></div></div>'+
   '<div><small>'+t('Expiry')+'</small><b>'+jdate(u.expires_ts)+'</b><small>'+leftTxt(u.expires_ts)+'</small></div>'+
   '<div><small>'+t('Connections')+'</small><b class="ltr">'+N(u.online_connections)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b><small>'+(u.last_seen_ts?ago(u.last_seen_ts)+'<br><span class="ltr">'+jdate(u.last_seen_ts,true)+'</span>':t('never'))+'</small></div></div>'+
+  // (3.40) what is only in the details: note, Telegram ID and the devices that opened the link
+  (function(){var dv=u.devices||[],rows=[];
+   if(u.notes)rows.push('<div><small>'+t('Note')+'</small><span>'+esc(u.notes)+'</span></div>');
+   if(u.tg_id)rows.push('<div><small>'+t('Telegram ID')+'</small><span class="ltr">'+esc(String(u.tg_id))+'</span></div>');
+   if(dv.length)rows.push('<div class="wide"><small>'+t('Devices')+' ('+N(dv.length)+')</small>'+dv.map(function(x){return '<span class="us-dev">'+esc(x.app||x.kind||'—')+(x.kanki?' · Kanki':'')+'<small class="ltr">'+esc(x.ip||'')+(x.last?' · '+ago(x.last):'')+'</small></span>'}).join('')+'</div>');
+   return rows.length?'<div class="us-info">'+rows.join('')+'</div>':''})()+
   '<div class="qb5 us-q" id="us_q"><button data-t="edit">'+ic('edit',18)+'<span>'+t('Edit')+'</span></button><button data-t="link">'+ic('link',18)+'<span>'+t('Link')+'</span></button><button data-t="qr">'+ic('qr',18)+'<span>QR</span></button>'+
   '<button data-t="reset">'+ic('reset',18)+'<span>'+t('Reset')+'</span></button><button data-t="del" class="x">'+ic('trash',18)+'<span>'+t('Delete')+'</span></button></div>'+
   '<div id="us_p"></div>','usheet');

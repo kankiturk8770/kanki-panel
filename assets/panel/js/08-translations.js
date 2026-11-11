@@ -200,6 +200,7 @@ var FA={"Second copy between Iran and abroad (ms)":"نسخهٔ دوم بین ا�
  "Update this server":"آپدیت همین سرور",
  "The server takes the new version in a minute":"سرور تا یک دقیقه نسخه‌ی تازه را می‌گیرد",
  "Up":"روشن",
+ "Telegram ID":"آیدی تلگرام",
  "No second config":"بدون کانفیگ دوم",
  "Servers with Xray":"سرورهای دارای Xray",
  "Users get a second copy of every Xray inbound through the Iran server chosen here. Empty = the tunnel domain of the server (Servers page).":"کاربرها از هر اینباند Xray یک کپی دوم هم می‌گیرند که از سرور ایرانی انتخاب‌شده در اینجا رد می‌شود. خالی = دامنه‌ی تانل خود سرور (صفحه‌ی سرورها).",
