@@ -275,6 +275,7 @@ pub async fn run(version: &str) {
     let mut update_tried: Option<std::time::Instant> = None;
     // answers in a row that say this server was removed from the panel
     let mut gone = 0u32;
+    let (mut stats, mut stats_at) = (serde_json::Value::Null, std::time::Instant::now());
     // the last error of setting up the emergency chat (reported to the panel)
     let emer_err: Mutex<Option<String>> = Mutex::new(None);
     // the last error of setting up Kanki DNS
@@ -315,7 +316,13 @@ pub async fn run(version: &str) {
         let listen = tokio::task::spawn_blocking(crate::certbot::listeners_json).await.unwrap_or_default();
         let setup_st = tokio::task::spawn_blocking(setup_status).await.unwrap_or_default();
         let kping_st = tokio::task::spawn_blocking(crate::kpingd::report).await.unwrap_or_default();
-        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st, "kping": kping_st });
+        // the machine (CPU, memory, disk, uptime, sockets) every 30 seconds: Iran servers have no VPN part
+        // that reports it
+        if stats_at.elapsed() >= std::time::Duration::from_secs(30) || stats.is_null() {
+            stats = tokio::task::spawn_blocking(crate::admin::node_stats).await.unwrap_or_default();
+            stats_at = std::time::Instant::now();
+        }
+        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st, "kping": kping_st, "stats": stats });
         match http.post(format!("{}/tunnel/agent", panel)).json(&body).send().await {
             Ok(r) if r.status().as_u16() == 410 => {
                 // this server was removed in the panel: everything Kanki put here is removed (a few

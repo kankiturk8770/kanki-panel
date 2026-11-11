@@ -1148,6 +1148,10 @@ body.k38.light .k38tile svg{color:var(--ad)}
 .kxc-tag{font-size:12px;border:1px solid var(--ln);border-radius:8px;padding:1px 7px;color:var(--s);white-space:nowrap;font-weight:600}
 .kxc-tag.main{color:var(--a);border-color:color-mix(in srgb,var(--a) 55%,transparent)}
 .kxc-tag.tun{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}
+.kxc-tag.upd{color:var(--info);border-color:color-mix(in srgb,var(--info) 50%,transparent)}
+.sa-cores{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 12px}
+.sa-cores .chk{margin:0;min-height:40px}
+@media(min-width:620px){.sa-cores{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .kxc-miss{border:1px dashed color-mix(in srgb,var(--warn) 60%,transparent);border-radius:12px;padding:8px 10px;margin:8px 0 0;font-size:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .kxc-miss span{flex:1;min-width:150px}
 .kxc-miss pre{width:100%;margin:6px 0 0;white-space:pre-wrap;font-size:12px;max-height:140px;overflow:auto;direction:ltr;text-align:left;background:var(--in);border-radius:8px;padding:6px}

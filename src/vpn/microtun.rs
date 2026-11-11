@@ -104,6 +104,13 @@ pub fn set_node_port(app: &App, node_id: &str, port: u16) {
     save(app, &s);
 }
 
+/// microtun off (or on again) on server `node_id` only
+pub fn set_node_off(app: &App, node_id: &str, off: bool) {
+    let mut s = settings(app);
+    s.nodes.entry(node_id.to_string()).or_default().off = off;
+    save(app, &s);
+}
+
 // ------------------------------------------------------------------ keys and addresses
 
 static SECRET_LOCK: Mutex<()> = Mutex::new(());

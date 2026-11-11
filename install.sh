@@ -67,6 +67,9 @@ REPO="${KANKI_REPO:-$(cat $ENV_DIR/repo 2>/dev/null || true)}"
 echo "$REPO" | grep -Eq '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$' || REPO="$DEFAULT_REPO"
 # one-command node join: the panel (Nodes > Add node) prints a line that sets these two
 KANKI_JOIN="${KANKI_JOIN:-}"; KANKI_PANEL="${KANKI_PANEL:-}"
+# --cores=wg,awg,…: the cores chosen in the panel's «Add server» window (switched on when it joins)
+for a in "$@"; do case "$a" in --cores=*) KANKI_CORES="${a#--cores=}" ;; esac; done
+KANKI_CORES="${KANKI_CORES:-}"
 # one-command tunnel server (Tunnels > + Server): KANKI_TUNNEL=ID:TOKEN
 KANKI_TUNNEL="${KANKI_TUNNEL:-}"
 envget(){ grep -m1 "^$1=" "$ENV" 2>/dev/null | cut -d= -f2-; }
@@ -399,13 +402,39 @@ EOF
   systemctl restart "$1"
 }
 
+# The six cores, by number; $1 = the default ("" = none: the main server runs only the panel and its
+# agent). Sets CORES (wg,awg,…).
+pick_cores(){
+  local d="$1" v n
+  echo
+  echo "  Which VPN cores should this server run?"
+  echo "    0) None: only the panel / the server agent (monitoring)"
+  echo "    1) WireGuard     2) AmneziaWG     3) Hysteria2"
+  echo "    4) KANKI MIX     5) microtun      6) KPING (inside the server agent, nothing extra)"
+  read -rp "  Numbers, comma separated (like 1,2 or 1,2,6) [${d:-0}]: " v
+  v="${v:-${d:-0}}"; CORES=""
+  for n in $(echo "$v" | tr ', ' '  '); do
+    case "$n" in
+      1) CORES="$CORES,wg" ;; 2) CORES="$CORES,awg" ;; 3) CORES="$CORES,hy2" ;;
+      4) CORES="$CORES,kmix" ;; 5) CORES="$CORES,mtun" ;; 6) CORES="$CORES,kping" ;;
+      0) ;; *) warn "Unknown choice: $n (skipped)" ;;
+    esac
+  done
+  CORES="${CORES#,}"
+  echo "  Cores: ${CORES:-none}"
+}
+has_core(){ [[ ",$CORES," == *",$1,"* ]]; }
+
 ask_protocols(){
   # a reinstall offers the ports this server already uses (users' files point at them)
   local dw da dh
   dw=$(conf_port /etc/wireguard/wg0.conf); da=$(conf_port /etc/amnezia/amneziawg/awg0.conf); dh=$(envget HY2_PORT)
-  ask_port WG_PORT "WireGuard UDP port" "${dw:-51820}"
-  ask_port AWG_PORT "AmneziaWG UDP port" "${da:-51821}"
-  if yes_no "Install Hysteria2?" Y; then ask_port HY2_PORT "Hysteria2 UDP port" "${dh:-8443}"; else HY2_PORT=""; fi
+  pick_cores "$1"
+  WG_PORT=""; AWG_PORT=""; HY2_PORT=""
+  if has_core wg; then ask_port WG_PORT "WireGuard UDP port" "${dw:-51820}"; fi
+  if has_core awg; then ask_port AWG_PORT "AmneziaWG UDP port" "${da:-51821}"; fi
+  if has_core hy2; then ask_port HY2_PORT "Hysteria2 UDP port" "${dh:-8443}"; fi
+  return 0
 }
 
 conf_port(){ awk -F' *= *' '/^ListenPort/{gsub(/[^0-9]/,"",$2); print $2; exit}' "$1" 2>/dev/null || true; }
@@ -439,19 +468,20 @@ install_panel(){
   ask ENDPOINT "Public host/IP users connect to (empty = same as panel domain)" "$DOMAIN"
   ask LOCAL_NAME "Name of this server shown to users (e.g. Germany)" Main
   ask_port PANEL_PORT "Internal panel port (local only, behind HTTPS)" "$(rnum 20000 29999)"
-  ask_protocols
+  ask_protocols ""
   read -rsp "Telegram sales bot token (empty = no bot): " BOT_TOKEN; echo
   BOT_ADMINS=""; [ -n "$BOT_TOKEN" ] && ask BOT_ADMINS "Bot admin numeric ID(s), comma separated"
 
   HY2_STATS_PORT=$(rnum 30000 39999); HY2_OBFS=$(rand 20); HY2_SECRET=$(rand 24); keep_secrets
   echo; say "Summary"
   echo "  Domain: $DOMAIN  HTTPS: $HTTPS_PORT  Endpoint: $ENDPOINT  Server: $LOCAL_NAME"
-  echo "  WireGuard: $WG_PORT  AmneziaWG: $AWG_PORT  Hysteria2: ${HY2_PORT:-off}"
+  echo "  Cores: ${CORES:-none}  WireGuard: ${WG_PORT:-off}  AmneziaWG: ${AWG_PORT:-off}  Hysteria2: ${HY2_PORT:-off}"
   echo "  Bot: $([ -n "$BOT_TOKEN" ] && echo yes || echo no)"
   yes_no "Start installation?" Y || exit 0
   base_packages; download_bin
   get_cert "$DOMAIN" "$EMAIL"
-  setup_wireguard; setup_amneziawg
+  if [ -n "$WG_PORT" ]; then setup_wireguard; fi
+  if [ -n "$AWG_PORT" ]; then setup_amneziawg; fi
   [ -n "$HY2_PORT" ] && setup_hysteria "http://127.0.0.1:$PANEL_PORT/hy2/auth"
   umask 077
   cat > $ENV <<EOF
@@ -470,12 +500,13 @@ HY2_PORT=$HY2_PORT
 HY2_OBFS=$HY2_OBFS
 HY2_SECRET=$HY2_SECRET
 HY2_STATS_PORT=$HY2_STATS_PORT
+CORES=$CORES
 DATA_DIR=/var/lib/kanki
 EOF
   umask 022
   setup_caddy "https://$DOMAIN:$HTTPS_PORT" "$PANEL_PORT"
   service kanki-panel serve
-  open_ports 80/tcp "$HTTPS_PORT/tcp" "$WG_PORT/udp" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}"
+  open_ports 80/tcp "$HTTPS_PORT/tcp" "${WG_PORT:+$WG_PORT/udp}" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}"
   echo; ok "Installation complete!"
   echo -e "   Panel:  ${C}https://$DOMAIN:$HTTPS_PORT/admin${N}"
   echo -e "   Login:  ${C}$ADMIN_USER${N} / (the password you entered)"
@@ -495,12 +526,16 @@ install_node(){
     if [[ "${KANKI_PORTS:-}" =~ ^[0-9]+,[0-9]+,[0-9]+,[0-9]+$ ]]; then IFS=, read -r pw pa ph _ <<< "$KANKI_PORTS"; fi
     free_port NODE_PUBLIC_PORT 2096; free_port NODE_PORT "$(rnum 20000 29999)"
     free_port WG_PORT "$pw"; free_port AWG_PORT "$pa"; free_port HY2_PORT "$ph"
+    # every core is installed (any can be switched on later with one tap); the panel switches on the
+    # ones chosen in its «Add server» window (--cores) and keeps the rest off
+    CORES="${KANKI_CORES:-}"
+    if [ -n "$CORES" ]; then say "Cores the panel switches on: $CORES (the others are installed and off)"; fi
   else
     ask DOMAIN "Node domain (recommended for TLS; empty = self-signed certificate)"
     EMAIL=""; [ -n "$DOMAIN" ] && ask EMAIL "Email for SSL"
     ask_port NODE_PUBLIC_PORT "Node API port (HTTPS)" 2096
     ask_port NODE_PORT "Internal agent port (local only)" "$(rnum 20000 29999)"
-    ask_protocols
+    ask_protocols "1,2"
   fi
   HY2_STATS_PORT=$(rnum 30000 39999); HY2_OBFS=$(rand 20); HY2_SECRET=$(rand 24); NODE_TOKEN=$(rand 48); INSECURE=""; keep_secrets
   base_packages; download_bin
@@ -508,7 +543,8 @@ install_node(){
   if [ -n "$DOMAIN" ] && [ "${KANKI_SSL:-1}" != 0 ]; then
     if [ -n "$KANKI_JOIN" ]; then CERT_SOFT=1 get_cert "$DOMAIN" "$EMAIL" || { self_signed; INSECURE=1; }; else get_cert "$DOMAIN" "$EMAIL"; fi
   else self_signed; INSECURE=1; fi
-  setup_wireguard; setup_amneziawg
+  if [ -n "$WG_PORT" ]; then setup_wireguard; fi
+  if [ -n "$AWG_PORT" ]; then setup_amneziawg; fi
   [ -n "$HY2_PORT" ] && setup_hysteria "http://127.0.0.1:$NODE_PORT/hy2/auth"
   umask 077
   cat > $ENV <<EOF
@@ -523,12 +559,13 @@ HY2_OBFS=$HY2_OBFS
 HY2_SECRET=$HY2_SECRET
 HY2_STATS_PORT=$HY2_STATS_PORT
 HY2_INSECURE=$INSECURE
+CORES=$CORES
 DATA_DIR=/var/lib/kanki
 EOF
   umask 022
   setup_caddy "https://:$NODE_PUBLIC_PORT" "$NODE_PORT"
   service kanki-node node
-  open_ports "$NODE_PUBLIC_PORT/tcp" "$WG_PORT/udp" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}"
+  open_ports "$NODE_PUBLIC_PORT/tcp" "${WG_PORT:+$WG_PORT/udp}" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}"
   if [ -n "$KANKI_JOIN" ]; then register_node || return 1; return 0; fi
   IP=$(pubip)
   echo; ok "Node installed! In the panel go to Nodes > Add node and enter:"
