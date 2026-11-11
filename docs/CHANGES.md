@@ -21,6 +21,13 @@
 - **Kanki Glass:** deep ink background, frosted steel-glass panels with a metallic edge, one gold (the page you are on, the main
   action); dark (default) and light only — the colour variants are gone; no turning edges or sheens; nothing wider than the screen.
   Checked: 18 pages × 360/390/768/900/1024/1440 × fa/en × dark/light, no JS error, no horizontal scroll, no undefined/NaN.
+- **Second brief (same release):** 95 CSS rules that nothing can match removed (picture-identical before and after on every page and
+  window); thin gold-metal edges in the dark theme and a cream-and-sand light theme like the app; every field 10px 14px with 12px
+  corners and a gold edge when in use, forms wrap into as many 260px columns as fit; windows slide in, close button 40px; the menu in
+  two groups (Main: Dashboard, Users, Servers, Tunnels, VPN services; Advanced tools: Sales bot, Emergency chat, Ports, Traffic,
+  Kanki DNS, System) and on a phone a bar of those five and «More»; a live status dot on each core's tab; the sales bot page opens
+  with total sales, revenue, active users and open orders (`pending_orders` in `/api/overview`); microtun on the ports page;
+  monospace boxes for logs; the settings save bar stays above the phone bar.
 
 # v3.39.1 — tunnels: a short outage between two servers no longer takes a game packet and all its repairs
 - **Game-FEC (`game.rs`, `fec.rs`):** a game sends one packet every 15-30 ms, so its FEC group closed with that one packet and got
