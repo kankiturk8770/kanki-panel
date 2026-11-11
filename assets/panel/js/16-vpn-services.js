@@ -74,7 +74,8 @@ function drawPv(p,force){var g='pv_'+p,el=$('#pv'),tab=PVT[p]||'status';if(!el||
 var CNAME={wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',mtun:'microtun',xray:'Xray'};
 window.coreTun=function(core,s,fold){if(!s)return '';var tn=s.tunnel||{},own=(tn.cores||{})[core]||'',srv=tn.on?(tn.host||tn.uses||''):'',use=own||srv,k=esc(s.key),id='ct_'+core+'_'+String(s.key).replace(/[^a-z0-9]/gi,'');
  var x=(tn.ports||[]).filter(function(z){return z.core==core})[0];
- var line=use?t('Users also get')+' <b class="ltr">'+esc(use)+(x?':'+x.via:'')+'</b>'+(own?'':' <small class="muted">('+t('the tunnel domain of the server')+')</small>'):t('No second config: choose an Iran server below.');
+ var lost=use&&x&&x.carried===false;
+ var line=lost?t('No tunnel carries this port: users get only the direct config')+' <span class="ltr">('+(x.tcp?'TCP':'UDP')+' '+x.port+')</span>':use?t('Users also get')+' <b class="ltr">'+esc(use)+(x?':'+x.via:'')+'</b>'+(own?'':' <small class="muted">('+t('the tunnel domain of the server')+')</small>'):t('No second config: choose an Iran server below.');
  var chips=srvIrHosts(s).map(function(e){return '<button type="button" class="'+(own==e.host?'on':'')+'" onclick="coreTunSet(\''+core+'\',\''+k+'\',\''+esc(e.host)+'\')">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('');
  var st='<div class="kxr-line"><span class="kxr-st '+(use?'g':'')+'">'+(use?'+ '+t('tunnel'):t('Off'))+'</span><span>'+line+'</span></div>';
  var body='<div class="kxm-row"><div><input id="'+id+'" class="ltr" placeholder="'+esc(srv||'ir.example.com')+'" value="'+esc(own)+'"></div><button class="btn sm" onclick="coreTunSet(\''+core+'\',\''+k+'\',$(\'#'+id+'\').value)">'+t('Save')+'</button>'+

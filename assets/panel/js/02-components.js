@@ -40,8 +40,10 @@ window.CTS={};
 function coreTunRows(core,g,list){
  return kuTunTable(list.map(function(s){var tn=s.tunnel||{},own=(tn.cores||{})[core]||'',srv=tn.on?(tn.host||tn.uses||''):'',use=own||srv,x=(tn.ports||[]).filter(function(z){return z.core==core})[0];
   CTS[core+'|'+s.key]=s;
-  return {cc:s.cc,name:s.name,direct:srvDirect(s),tun:use?use+(x?':'+x.via:''):'',note:use&&!own?t('the tunnel domain of the server'):'',
-   st:use?['g',x?t('Through a tunnel'):t('On')]:['',t('Off')],edit:"coreTunEdit('"+core+"','"+esc(s.key)+"','"+g+"')"}}))}
+  // carried=false: tunnels end at this server but none brings this core's port, so users get no second config
+  var lost=use&&x&&x.carried===false;
+  return {cc:s.cc,name:s.name,direct:srvDirect(s),tun:use&&!lost?use+(x?':'+x.via:''):'',note:lost?t('No tunnel carries this port: users get only the direct config')+' (UDP '+x.port+')':(use&&!own?t('the tunnel domain of the server'):''),
+   st:lost?['r',t('Port not in a tunnel')]:use?['g',x?t('Through a tunnel'):t('On')]:['',t('Off')],edit:"coreTunEdit('"+core+"','"+esc(s.key)+"','"+g+"')"}}))}
 // the old fields of one server's second config, in a window
 window.coreTunEdit=function(core,key,g){var s=CTS[core+'|'+key];if(!s)return;window.CTG=g;
  modal(mhead(t('Second config through the tunnel'),s.name)+coreTun(core,s))}

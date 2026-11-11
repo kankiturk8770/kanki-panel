@@ -56,6 +56,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/servers/:id/kmix", post(kmix_switch))
         .route("/api/servers/:id/command", get(command_again))
         .route("/api/servers/:id/replace", post(replace_machine))
+        .route("/api/servers/:id/update", post(update_one))
         // outside /api/: a new server fetches them with its one-time token (no admin session there)
         .route("/dl/install.sh", get(dl_script))
         .route("/dl/kanki-panel", get(dl_bin))
@@ -95,12 +96,15 @@ fn command(app: &App, s: &TServer) -> String {
     if !s.domain.is_empty() {
         env.push_str(&format!(" KANKI_DOMAIN='{}' KANKI_SSL={}", s.domain, if s.no_ssl { 0 } else { 1 }));
     }
+    // the cores chosen when it was added (an installer from before ignores the extra argument)
+    let cores = if s.cores.is_empty() || s.join.is_empty() { String::new() } else { format!(" --cores={}", s.cores.join(",")) };
     // the installer from the panel first (works where GitHub is filtered), GitHub second
     format!(
-        "curl -fsSL '{p}/dl/install.sh' -o /tmp/kanki-install.sh || curl -fsSL 'https://raw.githubusercontent.com/{r}/main/install.sh' -o /tmp/kanki-install.sh; {e} bash /tmp/kanki-install.sh",
+        "curl -fsSL '{p}/dl/install.sh' -o /tmp/kanki-install.sh || curl -fsSL 'https://raw.githubusercontent.com/{r}/main/install.sh' -o /tmp/kanki-install.sh; {e} bash /tmp/kanki-install.sh{c}",
         p = panel,
         r = repo,
-        e = env
+        e = env,
+        c = cores
     )
 }
 
@@ -412,12 +416,20 @@ pub fn joined(app: &App, sid: &str, nid: &str) {
     s.node = nid.to_string();
     s.join.clear();
     s.setup_at = 0;
-    // installed, off until switched on (Servers > the core's page)
+    // installed, off until switched on (Servers > the core's page); the cores chosen when it was added
+    // are switched on now
     crate::cores::all_off(app, nid);
+    let chosen = s.cores.clone();
+    for c in chosen.iter().filter(|c| matches!(c.as_str(), "wg" | "awg" | "hy2")) {
+        let _ = crate::cores::set(app, nid, c, false);
+    }
     let km = s.ports.get(3).copied().unwrap_or(0);
     tp::save_servers(app, &list);
     if km > 0 {
         crate::kmix::set_node_port(app, nid, km);
+        if !chosen.is_empty() && !chosen.iter().any(|c| c == "kmix") {
+            crate::kmix::set_node_off(app, nid, true);
+        }
     }
     // microtun too: the next free port (4200, 4201 …), so a tunnel entry can carry every server
     let uses: Vec<Use> = all_uses(app).into_iter().filter(|u| !(u.node == nid && u.proto == "mtun")).collect();
@@ -425,7 +437,38 @@ pub fn joined(app: &App, sid: &str, nid: &str) {
     let p = pick(&mut t, "mtun");
     if p > 0 {
         crate::microtun::set_node_port(app, nid, p);
+        if !chosen.is_empty() && !chosen.iter().any(|c| c == "mtun") {
+            crate::microtun::set_node_off(app, nid, true);
+        }
     }
+}
+
+/// The cores picked in the installer's menu for the panel server itself (`CORES=` in kanki.env), put in
+/// place once: the ones not picked are switched off on the panel server ("local"). Later switches in the
+/// panel stay as the admin sets them; an install from before (no `CORES=` line) changes nothing.
+pub fn install_cores(app: &App) {
+    let Some(list) = app.env.get("CORES") else { return };
+    if app.db.get("install_cores_done") == "1" {
+        return;
+    }
+    let chosen = clean_cores(&json!(list.split(',').collect::<Vec<_>>()));
+    let has = |c: &str| chosen.iter().any(|x| x == c);
+    for c in ["wg", "awg", "hy2"] {
+        let _ = crate::cores::set(app, "local", c, !has(c));
+    }
+    crate::kmix::set_node_off(app, "local", !has("kmix"));
+    crate::microtun::set_node_off(app, "local", !has("mtun"));
+    app.db.set("install_cores_done", "1");
+    eprintln!("cores of this server from the installer: {}", if chosen.is_empty() { "none".to_string() } else { chosen.join(",") });
+}
+
+/// The six cores a server can run
+pub const ALL_CORES: [&str; 6] = ["wg", "awg", "hy2", "kmix", "mtun", "kping"];
+
+/// The known cores of a list, in their order, once each
+pub fn clean_cores(v: &Value) -> Vec<String> {
+    let got: Vec<String> = v.as_array().into_iter().flatten().filter_map(|x| x.as_str()).map(|x| x.trim().to_ascii_lowercase()).collect();
+    ALL_CORES.iter().filter(|c| got.iter().any(|g| g == *c)).map(|c| c.to_string()).collect()
 }
 
 /// A node was deleted: no server points to it any more
@@ -586,8 +629,11 @@ pub fn list_json(app: &App) -> Value {
         out.push(json!({
             "key": s.id, "name": s.name, "local": false,
             "loc": locs.get(&s.id).map(|x| x.0.clone()).unwrap_or_default(), "cc": cc,
-            "agent": { "id": s.id, "online": at > 0 && t - at < 20, "last_seen": at, "version": ver, "ip": ip, "addr": s.addr,
-                       "can_setup": !ver.is_empty() && !ver_lt(&ver, SETUP_FROM) },
+            "agent": { "id": s.id, "online": at > 0 && t - at < 20, "last_seen": at, "version": ver.clone(), "ip": ip, "addr": s.addr,
+                       "can_setup": !ver.is_empty() && !ver_lt(&ver, SETUP_FROM),
+                       // the machine itself (Iran servers too, with no VPN part) and one-tap update from the panel
+                       "stats": tp::agent_stats(&s.id),
+                       "can_update": at > 0 && t - at < 20 && !ver.is_empty() && ver != crate::VERSION },
             "node": node, "ports": if s.node.is_empty() { json!({}) } else { ports_json(&uses, &s.node) },
             "planned": s.ports, "pending": pending, "vpn_wanted": s.vpn, "domain": s.domain, "ssl": !s.no_ssl,
             "setup": setup, "setup_asked": s.setup_at,
@@ -668,6 +714,10 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         s.ports.clear();
         s.vpn = false;
     }
+    // the cores to switch on when it joins (the add window: WireGuard and AmneziaWG ticked abroad)
+    if s.vpn {
+        s.cores = clean_cores(&b["cores"]);
+    }
     // «SSL»: on by default abroad, off in Iran (port 80 is often closed there)
     s.no_ssl = !b["ssl"].as_bool().unwrap_or(s.loc != "iran");
     if !tun.is_empty() {
@@ -678,6 +728,17 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     list.push(s.clone());
     tp::save_servers(&app, &list);
     Json(json!({ "ok": true, "id": s.id, "command": command(&app, &s), "expires": s.join_exp, "ports": s.ports })).into_response()
+}
+
+/// One server takes the panel's program (an Iran server too: it never needs GitHub). Its VPN part, if
+/// any, runs the same file and restarts with it.
+async fn update_one(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let _ = guard!(app, h, "admin");
+    if !tp::servers(&app).iter().any(|s| s.id == id) {
+        return err(StatusCode::NOT_FOUND, "unknown server");
+    }
+    tp::ask_update_one(&app, &id);
+    Json(json!({ "ok": true, "version": crate::VERSION })).into_response()
 }
 
 /// { addr }: this server moves to a new machine (the old one died, or its IP was filtered). Gives the
@@ -1317,6 +1378,33 @@ mod tests {
         assert_eq!(!crate::cores::is_off(&app, "node-de", "hy2"), hy2_on);
         assert_eq!(crate::kmix::settings(&app).node_port("node-de"), 4000);
         assert_eq!(app.db.nodes().len(), 1);
+    }
+
+    /// The cores ticked in «Add server» go in its command and are the ones switched on when it joins
+    #[test]
+    fn the_chosen_cores_are_switched_on_when_the_server_joins() {
+        let app = test_app();
+        let mut de = new_server(&app, "Germany".into(), "abroad".into(), String::new(), Some(true));
+        de.cores = clean_cores(&json!(["awg", "wg", "nope", "kmix"]));
+        assert_eq!(de.cores, vec!["wg", "awg", "kmix"]);
+        let mut list = tp::servers(&app);
+        list.push(de.clone());
+        tp::save_servers(&app, &list);
+        assert!(command(&app, &de).ends_with("bash /tmp/kanki-install.sh --cores=wg,awg,kmix"), "{}", command(&app, &de));
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,info,online) VALUES('n1','Germany','https://de.example.com:2096','de.example.com','t','{}',1)", &[]).unwrap();
+        joined(&app, &de.id, "n1");
+        assert!(!crate::cores::is_off(&app, "n1", "wg") && !crate::cores::is_off(&app, "n1", "awg"));
+        assert!(crate::cores::is_off(&app, "n1", "hy2"));
+        assert!(crate::kmix::settings(&app).node_on("n1"));
+        assert!(!crate::microtun::settings(&app).node_on("n1"));
+        // a server from before (no cores chosen): everything off, as it always was; its command is the same
+        let old = new_server(&app, "Old".into(), "abroad".into(), String::new(), Some(true));
+        assert!(!command(&app, &old).contains("--cores"));
+        let mut list = tp::servers(&app);
+        list.push(old.clone());
+        tp::save_servers(&app, &list);
+        joined(&app, &old.id, "n2");
+        assert!(["wg", "awg", "hy2"].iter().all(|c| crate::cores::is_off(&app, "n2", c)));
     }
 
     #[test]

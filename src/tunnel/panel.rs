@@ -58,6 +58,9 @@ pub struct TServer {
     /// the machine is being replaced (a dead or filtered server moved to a new one): the next join with
     /// `join` updates the existing node `node` instead of adding one, and keeps its cores and ports
     pub replace: bool,
+    /// the cores chosen when the server was added (wg, awg, hy2, kmix, mtun, kping): switched on when it
+    /// joins, the rest stay off. Empty = a server from before: everything installed and off, as always.
+    pub cores: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -166,6 +169,8 @@ struct Seen {
     listen: Value,
     /// the VPN install the panel asked for: {state, code, tail} (Null = none)
     setup: Value,
+    /// CPU, memory, disk, uptime and sockets of the machine (`admin::node_stats`; Null = older agent)
+    stats: Value,
 }
 
 fn seen() -> &'static Mutex<HashMap<String, Seen>> {
@@ -412,6 +417,25 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
 }
 
 /// What the panel last heard from agent `sid`: (when, version, address, VPN install state).
+/// The machine stats a tunnel server last sent (Null = none yet, or an older agent)
+pub(crate) fn agent_stats(sid: &str) -> Value {
+    seen().lock().unwrap_or_else(|e| e.into_inner()).get(sid).map(|x| x.stats.clone()).unwrap_or(Value::Null)
+}
+
+/// One server asked to update (Servers > ⋯ > Update): until when it may take the panel's program
+fn update_one_until(app: &App, sid: &str) -> i64 {
+    serde_json::from_str::<HashMap<String, i64>>(&app.db.get("tun_update_one")).unwrap_or_default().get(sid).copied().unwrap_or(0)
+}
+
+/// Lets one tunnel server (an Iran server too) take the panel's program in the next 15 minutes
+pub(crate) fn ask_update_one(app: &App, sid: &str) {
+    let t = now();
+    let mut m: HashMap<String, i64> = serde_json::from_str(&app.db.get("tun_update_one")).unwrap_or_default();
+    m.retain(|_, until| *until > t);
+    m.insert(sid.to_string(), t + 900);
+    app.db.set("tun_update_one", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+}
+
 pub(crate) fn agent_state(sid: &str) -> Option<(i64, String, String, Value)> {
     seen().lock().unwrap_or_else(|e| e.into_inner()).get(sid).map(|x| (x.at, x.version.clone(), x.ip.clone(), x.setup.clone()))
 }
@@ -1275,7 +1299,7 @@ pub async fn local_loop(app: Arc<App>) {
         note_report("local", &st, false, false);
         seen().lock().unwrap_or_else(|e| e.into_inner()).insert(
             "local".into(),
-            Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, emergency: Value::Null, fw: Value::Null, listen: Value::Null, setup: Value::Null },
+            Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, emergency: Value::Null, fw: Value::Null, listen: Value::Null, setup: Value::Null, stats: Value::Null },
         );
         // the newest live measurements of every tunnel, for the path-quality report
         super::quality::ingest(&app);
@@ -1613,6 +1637,13 @@ pub fn port_entry_at(app: &App, sid: &str, port: u16, tcp: bool, host: &str) -> 
         }
     }
     port_entry(app, sid, port, tcp)
+}
+
+/// Some Kanki port tunnel (not a layer-3 AmneziaWG one, which carries every port) ends at server `sid`.
+/// A server with one carries only the ports its tunnels list: a second config on any other port would
+/// lead nowhere. A server with none has its tunnel set up elsewhere (or a layer-3 one): its ports stay.
+pub fn has_port_tunnels(app: &App, sid: &str) -> bool {
+    tunnels(app).iter().any(|t| t.enabled && t.exit == sid && t.kind != "awg" && t.kind != "awgwrap")
 }
 
 /// The address of the first server of the tunnels (or the route) that end at server `sid`: the Iran
@@ -2841,10 +2872,10 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         let mut sn = seen().lock().unwrap_or_else(|e| e.into_inner());
         let prev = sn.get(&id).map(|x| x.ip.clone()).unwrap_or_default();
         let ip = sticky_ip(&prev, &fresh_ip);
-        sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status, emergency: b["emergency"].clone(), fw: b["fw"].clone(), listen: b["listen"].clone(), setup: b["setup"].clone() });
+        sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status, emergency: b["emergency"].clone(), fw: b["fw"].clone(), listen: b["listen"].clone(), setup: b["setup"].clone(), stats: b["stats"].clone() });
     }
     let ver = b["version"].as_str().unwrap_or("");
-    let until = app.db.get("tun_update_until").parse::<i64>().unwrap_or(0);
+    let until = app.db.get("tun_update_until").parse::<i64>().unwrap_or(0).max(update_one_until(&app, &id));
     let update = now() < until && !ver.is_empty() && ver != crate::VERSION;
     // the emergency chat: only the chosen server runs it; the config is sent only when it changed
     let emergency = match (app.db.get("emer_server") == id).then(|| emer_cfg(&app)).flatten() {
@@ -2895,7 +2926,7 @@ async fn agent_binary(State(app): St, Json(b): Json<Value>) -> Response {
     if token.is_empty() || !util::ct_eq(&token, &s.token) {
         return err(StatusCode::FORBIDDEN, "wrong token");
     }
-    if now() >= app.db.get("tun_update_until").parse::<i64>().unwrap_or(0) {
+    if now() >= app.db.get("tun_update_until").parse::<i64>().unwrap_or(0).max(update_one_until(&app, &id)) {
         return err(StatusCode::CONFLICT, "no update was requested");
     }
     if b["arch"].as_str().unwrap_or("") != std::env::consts::ARCH {

@@ -355,6 +355,7 @@ async fn main() {
     // certificates of this server (Xray, emergency chat) that are close to their end
     certbot::renew_loop();
     tokio::spawn(backup::telegram_loop(app.clone()));
+    servers::install_cores(&app);
     tokio::spawn(cleanup::sweep_loop(app.clone()));
     tokio::spawn(cleanup::offline_loop(app.clone()));
     tokio::spawn(channel::channel_loop(app.clone()));

@@ -58,6 +58,12 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
   '<div class="us-st"><div><small>'+t('Used')+'</small><b class="ltr">'+exactB(u.used_bytes)+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</b><div class="trk"><div class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?100:Math.max(2,p))+'%"></div></div></div>'+
   '<div><small>'+t('Expiry')+'</small><b>'+jdate(u.expires_ts)+'</b><small>'+leftTxt(u.expires_ts)+'</small></div>'+
   '<div><small>'+t('Connections')+'</small><b class="ltr">'+N(u.online_connections)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b><small>'+(u.last_seen_ts?ago(u.last_seen_ts)+'<br><span class="ltr">'+jdate(u.last_seen_ts,true)+'</span>':t('never'))+'</small></div></div>'+
+  // (3.40) what is only in the details: note, Telegram ID and the devices that opened the link
+  (function(){var dv=u.devices||[],rows=[];
+   if(u.notes)rows.push('<div><small>'+t('Note')+'</small><span>'+esc(u.notes)+'</span></div>');
+   if(u.tg_id)rows.push('<div><small>'+t('Telegram ID')+'</small><span class="ltr">'+esc(String(u.tg_id))+'</span></div>');
+   if(dv.length)rows.push('<div class="wide"><small>'+t('Devices')+' ('+N(dv.length)+')</small>'+dv.map(function(x){return '<span class="us-dev">'+esc(x.app||x.kind||'—')+(x.kanki?' · Kanki':'')+'<small class="ltr">'+esc(x.ip||'')+(x.last?' · '+ago(x.last):'')+'</small></span>'}).join('')+'</div>');
+   return rows.length?'<div class="us-info">'+rows.join('')+'</div>':''})()+
   '<div class="qb5 us-q" id="us_q"><button data-t="edit">'+ic('edit',18)+'<span>'+t('Edit')+'</span></button><button data-t="link">'+ic('link',18)+'<span>'+t('Link')+'</span></button><button data-t="qr">'+ic('qr',18)+'<span>QR</span></button>'+
   '<button data-t="reset">'+ic('reset',18)+'<span>'+t('Reset')+'</span></button><button data-t="del" class="x">'+ic('trash',18)+'<span>'+t('Delete')+'</span></button></div>'+
   '<div id="us_p"></div>','usheet');
@@ -124,12 +130,14 @@ function botApk(){var el=$('#bt_apk');if(!el)return;
    api('PUT','/api/apps/'+b.dataset.apv,{version:v}).then(function(){toast(t('Saved'));botApk()}).catch(fail)}});
  }).catch(fail)}
 function pBot(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Telegram sales bot')+'</h2><p>'+t('Create and manage the sales bot')+'</p></div><div id="bt_top"></div></div><div id="bt">'+t('Loading…')+'</div>';botLoad()}
-function botLoad(){return Promise.all([api('GET','/api/bot'),api('GET','/api/settings'),api('GET','/api/plans').catch(function(){return []})]).then(function(r){S.bot=r[0];S.bset=r[1];S.plans=r[2]||[];botDraw()}).catch(fail)}
+function botLoad(){return Promise.all([api('GET','/api/bot'),api('GET','/api/settings'),api('GET','/api/plans').catch(function(){return []}),api('GET','/api/overview').catch(function(){return {}})]).then(function(r){S.bot=r[0];S.bset=r[1];S.plans=r[2]||[];S.bov=r[3]||{};botDraw()}).catch(fail)}
 // the bot's customer buttons whose colour can be set (bot.rs STYLE_KEYS)
 function bsChk(k,label){return '<label class="chk"><input type="checkbox" data-bs="'+k+'" '+((S.bset||{})[k]=='1'?'checked':'')+'>'+t(label)+'</label>'}
 function bsIn(k,label,ph,typ,ltr){return '<div><label class="f">'+t(label)+'</label><input data-bs="'+k+'"'+(typ?' type="'+typ+'"':'')+(ltr?' class="ltr"':'')+' value="'+esc((S.bset||{})[k]||'')+'" placeholder="'+esc(ph||'')+'"></div>'}
 function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_set;
  $('#bt_top').innerHTML=has?'':'<button class="btn" id="bt_new">+ '+t('Create bot')+'</button>';
+ // (3.40.1) the shop at a glance: sales, money in, active users, orders still open
+ var o=S.bov||{},bst=kuStats([[t('Total sales'),N(o.sales||0)],[t('Revenue'),N(o.revenue||0)+' '+t('Toman')],[t('Active users'),N(o.active||0),'ok'],[t('Pending orders'),N(o.pending_orders||0),(o.pending_orders?'warn':'')]]);
  var st=b.paused?['y','Paused']:b.online?['g','Online']:['r','Offline'];
  var head=has?'<div class="card bcard"><div class="bh"><span class="bav">'+ic('bot',24)+'</span><div class="bn2"><b>'+esc(b.name||t('Sales bot'))+'</b>'+(b.username?'<a class="ltr" target="_blank" rel="noopener" href="https://t.me/'+encodeURIComponent(b.username)+'">@'+esc(b.username)+'</a>':'')+'</div>'+
    '<span class="badge '+st[0]+'"><span class="dot '+st[0]+'"></span> '+t(st[1])+'</span></div>'+
@@ -139,7 +147,7 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
   :'<div class="card bempty"><span class="bav big">'+ic('bot',30)+'</span><h3>'+t('No sales bot yet')+'</h3><ol class="steps"><li>'+t('In Telegram open @BotFather, send /newbot and copy the token it gives.')+'</li><li>'+t('Get your numeric Telegram ID from @userinfobot.')+'</li><li>'+t('Press Create bot and paste both.')+'</li></ol><button class="btn" id="bt_new2">+ '+t('Create bot')+'</button></div>';
  S.btab=S.btab||'sales';
  var tabs=[['sales','Sales settings'],['plans','Plans'],['apk','App files'],['disc','Discount codes'],['chan','Smart channel'],['appmsg','App message']];
- el.innerHTML=head+'<div class="seg btabs" id="bt_tabs">'+tabs.map(function(x){return '<button data-bt="'+x[0]+'" class="'+(S.btab==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
+ el.innerHTML=(has?bst:'')+head+'<div class="seg btabs" id="bt_tabs">'+tabs.map(function(x){return '<button data-bt="'+x[0]+'" class="'+(S.btab==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
   '<div data-btp="sales"><div class="card"><h3>'+ic('settings',16)+' '+t('Sales settings')+'</h3><p class="sub">'+t('How the bot sells: trials, payments, referrals and messages.')+'</p>'+
    '<div class="chips">'+bsChk('sales_on','Sales enabled')+bsChk('warn_on','Warn buyers before expiry / end of data')+'</div>'+
    '<div class="g2f">'+bsIn('support','Support ID','@support',0,1)+bsIn('app_link','App download link','https://…',0,1)+bsIn('channel','Required channel (empty = none)','@channel',0,1)+bsIn('win_link','Windows app download link','https://…',0,1)+'</div>'+
@@ -402,7 +410,7 @@ function ptLoad(){Promise.all([api('GET','/api/nodes'),api('GET','/api/settings'
 function svcOf(list,k){for(var i=0;i<(list||[]).length;i++)if(list[i].key==k)return list[i];return null}
 function ptRows(n){var loc=n.id=='local',inf=n.info||{},sv=loc&&S.psys?S.psys.services:(inf.services||[]),rows=[],ps=S.pset||{};
  var add=function(k,name,proto,port,svk){if(!port)return;var s=svcOf(sv,svk);rows.push({k:k,name:name,proto:proto,port:String(port),st:s?(s.active?'run':'stop'):'none'})};
- add('wg','WireGuard','UDP',inf.wg_port,'wireguard');add('awg','AmneziaWG','UDP',inf.awg_port,'amneziawg');add('hy2','Hysteria2','UDP',inf.hy2_port,'hysteria2');add('kmix','KANKI MIX','UDP',inf.kmix_port,'kankimix');
+ add('wg','WireGuard','UDP',inf.wg_port,'wireguard');add('awg','AmneziaWG','UDP',inf.awg_port,'amneziawg');add('hy2','Hysteria2','UDP',inf.hy2_port,'hysteria2');add('kmix','KANKI MIX','UDP',inf.kmix_port,'kankimix');add('mtun','microtun','UDP',inf.mt_port,'microtun');
  if(loc){add('web',t('Panel (HTTPS)'),'TCP',ps.https_port||'443','web');add('panel',t('Panel (internal)'),'TCP',ps.web_port,'panel')}
  else{var m=String(n.address||'').match(/:(\d+)(\/|$)/);add('api',t('Node API (HTTPS)'),'TCP',m?m[1]:'443','web')}
  return rows}

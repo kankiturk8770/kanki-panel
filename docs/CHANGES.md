@@ -1,3 +1,34 @@
+# v3.40.0 — configs exactly where the app expects them, KPING kept, six cores at install, Kanki Glass
+- **Tunnel copies (`twin.rs`, `xray/panel.rs`, `kmix.rs`):** a second config through the Iran address is given only when a tunnel
+  really carries that core's port (`Twin::carried`). A server with Kanki tunnels that do not carry a port gets no copy for it (the
+  app showed ✕); a server with no Kanki port tunnel (one made elsewhere, or a layer-3 AmneziaWG one) keeps its port as before. The
+  per-core tunnel table says «Port not in a tunnel». Each Xray link in the subscription carries `via` (direct / tunnel) and `group`
+  (its direct link and tunnel copy share it), so the app puts each in its cell (app 1.34.3+, `docs/SUB-CONTRACT.md` of the app).
+- **KPING routes are no longer wiped:** the cleanup sweep (at start and daily) checked KPING routes against the VPN nodes, but a
+  route names tunnel servers, so a route whose exit had only the agent was removed. Now a route goes only when its Iran server or
+  its exit is really gone (`kping::forget_route`).
+- **One connection limit over all six cores:** KPING counts too (`kping::live_units`, `Limits::shut_proto`): a user at the limit
+  whose places are taken elsewhere is not let into KPING, and a KPING device keeps its place against a second phone elsewhere.
+- **Six cores at install:** the installer asks by number (0 = none, the default for the main server: only the panel and its agent;
+  1 WireGuard 2 AmneziaWG 3 Hysteria2 4 KANKI MIX 5 microtun 6 KPING) and installs only those; the panel switches off the rest on its
+  own server once (`servers::install_cores`, `CORES=` in kanki.env). «Add server» has the six cores as ticks (WireGuard and AmneziaWG
+  ticked abroad); its command ends in `--cores=…` and the ticked ones are switched on when the server joins (all are installed).
+- **Iran servers:** the agent reports its machine (CPU, memory, disk, uptime, sockets) every 30 seconds; the Servers card shows it
+  for a server with no VPN part, and «Update this server» lets one server (an Iran one too) take the panel's program.
+- **Users page:** one toolbar (search, status with counts, sort, protocol) instead of the counter rows; cards with name, status,
+  data bar, days left, connections now / allowed and three quick buttons (copy link, QR, details); the details open as a sheet
+  from the side (from the bottom on a phone) with note, Telegram ID and devices.
+- **Kanki Glass:** deep ink background, frosted steel-glass panels with a metallic edge, one gold (the page you are on, the main
+  action); dark (default) and light only — the colour variants are gone; no turning edges or sheens; nothing wider than the screen.
+  Checked: 18 pages × 360/390/768/900/1024/1440 × fa/en × dark/light, no JS error, no horizontal scroll, no undefined/NaN.
+- **Second brief (same release):** 95 CSS rules that nothing can match removed (picture-identical before and after on every page and
+  window); thin gold-metal edges in the dark theme and a cream-and-sand light theme like the app; every field 10px 14px with 12px
+  corners and a gold edge when in use, forms wrap into as many 260px columns as fit; windows slide in, close button 40px; the menu in
+  two groups (Main: Dashboard, Users, Servers, Tunnels, VPN services; Advanced tools: Sales bot, Emergency chat, Ports, Traffic,
+  Kanki DNS, System) and on a phone a bar of those five and «More»; a live status dot on each core's tab; the sales bot page opens
+  with total sales, revenue, active users and open orders (`pending_orders` in `/api/overview`); microtun on the ports page;
+  monospace boxes for logs; the settings save bar stays above the phone bar.
+
 # v3.39.1 — tunnels: a short outage between two servers no longer takes a game packet and all its repairs
 - **Game-FEC (`game.rs`, `fec.rs`):** a game sends one packet every 15-30 ms, so its FEC group closed with that one packet and got
   **one** repair shard, sent right behind it: a short outage of the server-to-server link (tens of ms) took both. Now a sparse group

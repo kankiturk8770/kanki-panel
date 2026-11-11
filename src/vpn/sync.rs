@@ -398,6 +398,12 @@ impl Limits {
         !self.open.is_empty()
     }
 
+    /// Is this protocol shut for the user on every server now? (KPING: its relay and exit let only
+    /// users in whose places are not all taken elsewhere)
+    pub fn shut_proto(&self, user: i64, proto: &str) -> bool {
+        self.open.get(&user).is_some_and(|s| !s.keys().any(|k| k.1 == proto))
+    }
+
     /// Is this server and protocol shut for the user now?
     pub fn is_shut(&self, user: i64, node: &str, proto: &str) -> bool {
         self.open.get(&user).is_some_and(|s| !s.contains_key(&(node.to_string(), proto.to_string())))
@@ -758,10 +764,18 @@ pub async fn sync_all(app: &Arc<App>) {
     units.extend(xu);
     eps.extend(xe);
     answered.extend(xa);
+    // KPING too: one account, one limit over all six cores
+    let (ku, ka) = crate::kping::live_units(now());
+    for (uid, _, _, devices) in &ku {
+        *online.entry(*uid).or_default() += devices;
+        seen.insert(*uid, now());
+    }
+    units.extend(ku);
+    answered.extend(ka);
     let changed = {
         let mut l = limits().lock().unwrap_or_else(|e| e.into_inner());
         // a server switched off or removed: what it had goes at once (Xray servers by their reports)
-        l.keep_nodes(|n| n.starts_with("x:") || enabled.contains(n));
+        l.keep_nodes(|n| n.starts_with("x:") || n.starts_with("kp:") || enabled.contains(n));
         l.round(&units, &eps, &answered, &max, now())
     };
     if changed {
@@ -924,6 +938,26 @@ mod live_tests {
         assert!(l.is_dropped(1, "x:ir", "xray", "6.6.6.6") && !l.is_dropped(1, "x:ir", "xray", "5.5.5.5"));
         // Xray drops are not firewall rules
         assert!(l.blocks_on("x:ir").is_empty());
+    }
+
+    #[test]
+    fn kping_counts_in_the_one_limit_of_the_account() {
+        let mut l = Limits::default();
+        let max: HashMap<i64, i64> = HashMap::from([(1, 1)]);
+        let mut nodes: HashSet<String> = HashSet::new();
+        nodes.insert("de".into());
+        nodes.insert("kp:x1".into());
+        // KPING first, then a second phone on WireGuard: KPING keeps its place, WireGuard is shut
+        l.round(&[(1, "kp:x1".to_string(), "kping".to_string(), 1)], &HashMap::new(), &nodes, &max, 1000);
+        l.round(&[(1, "kp:x1".to_string(), "kping".to_string(), 1), (1, "de".to_string(), "wg".to_string(), 1)], &HashMap::new(), &nodes, &max, 1030);
+        assert!(l.is_shut(1, "de", "wg"));
+        assert!(!l.shut_proto(1, "kping"));
+        // the other way round: WireGuard first, KPING is not let in
+        let mut l = Limits::default();
+        l.round(&[(1, "de".to_string(), "wg".to_string(), 1)], &HashMap::new(), &nodes, &max, 1000);
+        l.round(&[(1, "de".to_string(), "wg".to_string(), 1), (1, "kp:x1".to_string(), "kping".to_string(), 1)], &HashMap::new(), &nodes, &max, 1030);
+        assert!(l.shut_proto(1, "kping"));
+        assert!(!l.is_shut(1, "de", "wg"));
     }
 
     fn nodes() -> HashSet<String> {

@@ -379,6 +379,8 @@ async fn overview(State(app): St, h: HeaderMap) -> Response {
             Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
         }).unwrap_or((0, 0))
     });
+    // orders still waiting for the customer's payment or the admin's check
+    let pending: i64 = app.db.with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE status IN ('pending','waiting','paid')", [], |r| r.get(0)).unwrap_or(0));
     let mut protos: HashMap<&str, usize> = HashMap::new();
     for p in ["wg", "awg", "hy2", "kmix", "mtun", "xray", "dns"] {
         protos.insert(p, us.iter().filter(|u| u.has_proto(p)).count());
@@ -392,7 +394,7 @@ async fn overview(State(app): St, h: HeaderMap) -> Response {
         "expired": us.iter().filter(|u| u.enabled && (u.expired() || u.over_quota())).count(),
         "disabled": us.iter().filter(|u| !u.enabled).count(),
         "nodes": nodes.len(), "nodes_online": nodes.iter().filter(|n| n.online).count(),
-        "sales": sales.0, "revenue": sales.1, "protocols": protos,
+        "sales": sales.0, "revenue": sales.1, "pending_orders": pending, "protocols": protos,
     })).into_response()
 }
 

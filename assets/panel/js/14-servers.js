@@ -106,14 +106,16 @@ function row(s){var n=s.node,a=s.agent,on=online(s),h=n?nHealthOf(n):null,col=!o
   // tunnel: its configs point at the Iran entry; + tunnel: a second config of every protocol through its tunnel domain
   (tn.main_via=='tunnel'?'<span class="kxc-tag tun">'+t('tunnel')+'</span>':tn.on&&tn.uses?'<span class="kxc-tag tun">+ '+t('tunnel')+'</span>':'');
  // a card per server (3.34): line 1 status, flag, name, tags and state; line 2 its cores and address; line 3 CPU, RAM, disk and users
- var st=(n&&n.info&&n.info.stats)||null,cores=coresOf(s),ip=srvIp(s);
+ var st=(n&&n.info&&n.info.stats)||(a&&a.stats)||null,cores=coresOf(s),ip=srvIp(s);
  var stl=!on?['r',t('Not connected')]:col=='y'?['y',t('Needs a look')]:['g',t('Online')];
  var meter=function(l,v){v=Math.max(0,Math.min(100,Math.round(v||0)));return '<span class="svm '+(v>=90?'r':v>=75?'y':'g')+'"><small>'+l+'</small><i><u style="width:'+v+'%"></u></i><b class="ltr">'+N(v)+'%</b></span>'};
  var head='<span class="dot '+col+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+tags+'<span class="sp"></span><span class="kxr-st '+stl[0]+'">'+stl[1]+'</span>'+
   ((cores.length||ip)?'<span class="sv-l2">'+cores.map(function(c){return '<span class="svc" style="--pc:'+(PCOL[c[0]]||'var(--a)')+'"><i class="'+c[2]+'"></i>'+c[1]+'</span>'}).join('')+
    (ip?'<small class="kxr-ip ltr">'+esc(ip)+'</small>':'')+'</span>':'')+
   (on&&st?'<span class="sv-l3">'+meter('CPU',st.cpu)+meter('RAM',pc(st.mem_used,st.mem_total))+meter(t('Disk'),pc(st.disk_used,st.disk_total))+
-   (n&&n.users!=null?'<span class="svu">'+ic('users',14)+'<b>'+N(n.users)+'</b></span>':'')+'</span>':'');
+   (n&&n.users!=null?'<span class="svu">'+ic('users',14)+'<b>'+N(n.users)+'</b></span>':'')+'</span>':'')+
+  // a new version the panel can give it with one tap
+  (a&&a.can_update?'<span class="kxc-tag upd">'+t('Update ready')+'</span>':'');
  return accRow('srv',s.key,head,function(){return srvBody(s)})}
 
 // the first entries (and their addresses) of the tunnels that bring this server's ports: where its
@@ -151,6 +153,8 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  if(n)st.push('VPN: <b>'+(n.enabled?(s.local||n.online?t('On'):t('Not connected')):t('Off'))+'</b>');
  if(n&&n.enabled)st.push(N(n.users||0)+' '+t('users'));
  var ver=(n&&n.info&&n.info.version)||(a&&a.version)||'';if(ver)st.push('v'+esc(ver));
+ var mst=a&&a.stats;if(!n&&mst&&mst.uptime)st.push(t('Up')+' '+N(Math.floor(mst.uptime/86400))+' '+t('days'));
+ if(!n&&mst&&mst.tcp!=null)st.push('TCP '+N(mst.tcp)+' · UDP '+N(mst.udp||0));
  if(!s.local&&a&&a.last_seen&&!a.online)st.push(t('Last contact')+' '+ago(a.last_seen));
  var miss='';
  if(!n&&a){var su=s.setup||null;
@@ -182,7 +186,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  if(!isIr(s)&&(n||(s.jobs&&s.jobs.xray))&&s.tunnel)h+=tunBox(s);
  h+='<div class="kxsave"><button class="b2 sm" onclick="accClose(\'srv\')">'+t('Cancel')+'</button><button class="btn sm" onclick="srvSave(\''+k+'\')">'+t('Save')+'</button></div>';
  // health and what can be done
- var stt=n&&n.info&&n.info.stats;
+ var stt=(n&&n.info&&n.info.stats)||(a&&a.stats);
  if(stt)h+='<div class="kxm3">'+nMeter('CPU',+stt.cpu||0,N(Math.round(+stt.cpu||0))+'%')+nMeter('RAM',pc(stt.mem_used,stt.mem_total),N(Math.round(pc(stt.mem_used,stt.mem_total)))+'%')+nMeter('Disk',pc(stt.disk_used,stt.disk_total),N(Math.round(pc(stt.disk_used,stt.disk_total)))+'%')+'</div>';
  var hh=n?nHealthOf(n):null;
  if(hh&&hh.r&&hh.r.length&&n.enabled)h+='<ul class="nwhy">'+hh.r.map(function(x){return '<li class="l'+x[0]+'">'+t(x[1])+'</li>'}).join('')+'</ul>';
@@ -193,6 +197,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAct(\''+ni+'\',\'update\')">⇪ '+t('Update agent')+'</button>');
   acts.push('<button class="b2 sm okb" onclick="nAssign(\''+ni+'\',1)">'+ic('plus',13)+' '+t('Add to all users')+'</button>');
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAssign(\''+ni+'\',0)">'+t('Remove from all users')+'</button>')}
+ if(a&&!s.local&&a.can_update)acts.push('<button class="b2 sm okb" onclick="srvUpdate(\''+k+'\')">⇪ '+t('Update this server')+'</button>');
  if(a&&!s.local)acts.push('<button class="b2 sm" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',13)+' '+t('Tunnel agent settings')+'</button>');
  if(!s.local)acts.push('<button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+ic('link',13)+' '+t('Show command')+'</button>');
  if(a&&!s.local)acts.push('<button class="b2 sm" onclick="srvReplace(\''+esc(a.id)+'\')">'+ic('move',13)+' '+t('Replace the machine')+'</button>');
@@ -233,8 +238,11 @@ window.srvSave=function(key){var s=find(key);if(!s)return;var n=s.node,a=s.agent
 
 function find(key){var l=(SV.d&&SV.d.servers)||[];for(var i=0;i<l.length;i++)if(l[i].key==key)return l[i]}
 window.srvFind=find;
+// one server takes the panel's program (an Iran server too; it never needs GitHub)
+window.srvUpdate=function(k){api('POST','/api/servers/'+encodeURIComponent(k)+'/update').then(function(r){toast(t('The server takes the new version in a minute')+' (v'+r.version+')');setTimeout(function(){load(true)},60000)}).catch(fail)};
 
 // ---------------------------------------------------------------- add a server (one command)
+var SA_CORES=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['mtun','microtun'],['kping','KPING']];
 window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
  modal(mhead(t('Add server'))+
   '<p class="muted" style="margin:0 0 8px">'+t('Everything is installed on the server (VPN, tunnels, Xray, Kanki DNS) with one command. Off = installed, but no user is sent there (an Iran relay).')+'</p>'+
@@ -245,11 +253,19 @@ window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
   '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('If this server has a tunnel, or will have one, write your Iran server\'s domain here. Every protocol then also gets a second config through it, made by itself.')+'</p></div>'+
   '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_ssl">'+t('Get SSL by itself (Let\'s Encrypt)')+'</label><p class="muted" style="font-size:12px;margin:2px 2px 0">'+t('The domain must point straight at this server (no Cloudflare proxy) and port 80 must be open. Off, or when it fails: a self-signed certificate, the install goes on.')+'</p>'+
   '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_vpn">'+t('Serve VPN users on this server')+'</label>'+
+  // the six cores: every one is installed, the ticked ones are switched on when the server joins
+  '<div id="sa_cw"><label class="f">'+t('Cores switched on')+'</label><div class="sa-cores">'+SA_CORES.map(function(c){return '<label class="chk"><input type="checkbox" data-core="'+c[0]+'">'+c[1]+'</label>'}).join('')+'</div>'+
+  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('All are installed; the ticked ones start as soon as the server joins, the rest stay off until you switch them on.')+'</p></div>'+
   '<button class="btn" style="width:100%;margin-top:12px" id="sa_go">'+t('Create command')+'</button></div><div id="sa_out"></div>','wide');
- var setLoc=function(l){loc=l;$$('#sa_loc button').forEach(function(b){b.classList.toggle('on',b.dataset.l==l)});$('#sa_vpn').checked=l!='iran';$('#sa_ssl').checked=l!='iran';$('#sa_tunw').style.display=l=='iran'?'none':''};
+ var showCores=function(){$('#sa_cw').style.display=$('#sa_vpn').checked?'':'none'};
+ var setLoc=function(l){loc=l;$$('#sa_loc button').forEach(function(b){b.classList.toggle('on',b.dataset.l==l)});$('#sa_vpn').checked=l!='iran';$('#sa_ssl').checked=l!='iran';$('#sa_tunw').style.display=l=='iran'?'none':'';
+  // abroad: WireGuard and AmneziaWG ticked
+  $$('#sa_cw input').forEach(function(x){x.checked=l!='iran'&&(x.dataset.core=='wg'||x.dataset.core=='awg')});showCores()};
+ $('#sa_vpn').onchange=showCores;
  $$('#sa_loc button').forEach(function(b){b.onclick=function(){setLoc(b.dataset.l)}});setLoc(loc);
  $('#sa_go').onclick=function(){var me=this;me.disabled=true;
-  api('POST','/api/servers',{name:$('#sa_nm').value,loc:loc,domain:$('#sa_dm').value,vpn:$('#sa_vpn').checked,ssl:$('#sa_ssl').checked,tunnel_host:loc=='iran'?'':$('#sa_tun').value.trim()}).then(function(r){
+  api('POST','/api/servers',{name:$('#sa_nm').value,loc:loc,domain:$('#sa_dm').value,vpn:$('#sa_vpn').checked,ssl:$('#sa_ssl').checked,tunnel_host:loc=='iran'?'':$('#sa_tun').value.trim(),
+   cores:$$('#sa_cw input').filter(function(x){return x.checked}).map(function(x){return x.dataset.core})}).then(function(r){
    $('#sa_in').classList.add('hide');showCmd(r.command,r.ports,r.id);load(true)}).catch(function(e){me.disabled=false;fail(e)})}};
 
 function showCmd(cmd,ports,id){var o=$('#sa_out')||$('#mbox');if(!o)return;

@@ -71,27 +71,31 @@ function usage(u){var lim=u.traffic_limit_gb;return lim>0?Math.min(100,Math.roun
 function findU(id){for(var i=0;i<S.users.length;i++)if(S.users[i].id==id)return S.users[i]}
 function pUsers(){var pg=$('#pg');
  S.size=+localStorage.getItem('kk_size2')||48;S.sort=localStorage.getItem('kk_sort')||'new';S.pf=S.pf||'all';S.filter=S.filter||'all';S.q=S.q||'';S.pg=1;S.sel={};S.selMode=false;
- var fo=[['all','All'],['online','Online'],['offline','Offline'],['active','Active'],['finished','Expired / out of data'],['disabled','Disabled']],
+ var fo=[['all','All'],['online','Online'],['active','Active'],['finished','Expired'],['disabled','Disabled'],['offline','Offline']],
   so=[['new','Newest'],['old','Oldest'],['name','Name'],['usage','Most used'],['expiry','Nearest expiry'],['seen','Last seen']],
   po=[['all','All protocols']].concat(PROTOS);
  var opt=function(a,cur,tr){return a.map(function(x){return '<option value="'+x[0]+'"'+(x[0]==cur?' selected':'')+'>'+(tr===false?esc(x[1]):t(x[1]))+'</option>'}).join('')};
  pg.innerHTML='<div class="ph"><div><h2>'+t('Users')+'</h2><p id="ucount"></p></div><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ib" id="selm" title="'+t('Select')+'" aria-label="'+t('Select')+'">'+ic('sel',18)+'</button><button class="ib" id="rf" title="'+t('Refresh')+'">'+ic('refresh',17)+'</button><button class="btn" onclick="newUser()">+ '+t('New user')+'</button></div></div>'+
- '<div class="card strip" id="ust"></div><div class="lvbar" id="ulv"></div>'+
- '<div class="utools"><div class="srch"><input id="q" type="search" autocomplete="off" placeholder="'+t('Search by name or note…')+'" value="'+esc(S.q)+'"><button id="qx" class="'+(S.q?'':'hide')+'" aria-label="clear">✕</button></div>'+
-  '<select id="flt" aria-label="'+t('Status')+'">'+opt(fo,S.filter)+'</select><select id="pf" aria-label="'+t('Protocol')+'">'+opt(po,S.pf,false).replace('>All protocols<','>'+t('All protocols')+'<')+'</select><select id="srt" aria-label="'+t('Sort')+'">'+opt(so,S.sort)+'</select></div>'+
+  // (3.40) one toolbar instead of the rows of counters: search, status, sort and protocol
+ '<div class="ubar"><div class="srch"><input id="q" type="search" autocomplete="off" placeholder="'+t('Search by name or note…')+'" value="'+esc(S.q)+'"><button id="qx" class="'+(S.q?'':'hide')+'" aria-label="clear">✕</button></div>'+
+  '<div class="ufilt" id="ust" role="tablist" aria-label="'+t('Status')+'"></div>'+
+  '<div class="usel"><select id="srt" aria-label="'+t('Sort')+'">'+opt(so,S.sort)+'</select><select id="pf" aria-label="'+t('Protocol')+'">'+opt(po,S.pf,false).replace('>All protocols<','>'+t('All protocols')+'<')+'</select></div></div>'+
  '<div class="selbar hide" id="selbar"><label><span class="ck"><input type="checkbox" id="sall"><i></i></span><span>'+t('Select all')+' (<span id="sallc">0</span>)</span></label></div>'+
  '<div class="uchips" id="ul"><div class="empty2">'+t('Loading…')+'</div></div><div class="pager2" id="pager"></div>'+
  '<div class="bulk hide" id="bulk"><span class="cnt" id="bcnt"></span><button class="b2" data-b="enable">'+t('Enable')+'</button><button class="b2" data-b="disable">'+t('Disable')+'</button><button class="b2" data-b="reset">'+t('Reset traffic')+'</button><button class="b2" data-b="extend">'+t('Extend')+'</button><button class="b2 bd" data-b="delete">'+t('Delete')+'</button><button class="ib" data-b="clear" title="'+t('Clear selection')+'">✕</button></div>';
  $('#q').oninput=function(){S.q=this.value;$('#qx').classList.toggle('hide',!this.value);S.pg=1;pruneSel();drawUsers()};
  $('#qx').onclick=function(){$('#q').value='';S.q='';this.classList.add('hide');S.pg=1;pruneSel();drawUsers()};
- $('#flt').onchange=function(){S.filter=this.value;S.pg=1;pruneSel();drawUsers();drawStats()};
+ 
  $('#pf').onchange=function(){S.pf=this.value;S.pg=1;pruneSel();drawUsers()};
  $('#srt').onchange=function(){S.sort=this.value;localStorage.setItem('kk_sort',S.sort);S.pg=1;drawUsers()};
  $('#rf').onclick=function(){loadUsers()};
  $('#selm').onclick=function(){S.selMode=!S.selMode;if(!S.selMode)S.sel={};this.classList.toggle('on',S.selMode);drawUsers()};
  $('#sall').onchange=function(){var all=this.checked;filtered().forEach(function(u){if(all)S.sel[u.id]=1;else delete S.sel[u.id]});drawUsers()};
- $('#ust').onclick=function(e){var b=e.target.closest('[data-f]');if(!b)return;S.filter=b.dataset.f;S.pg=1;$('#flt').value=S.filter;pruneSel();drawUsers();drawStats()};
- $('#ul').onclick=function(e){var b=e.target.closest('[data-id]');if(b){var id=+b.dataset.id;
+ $('#ust').onclick=function(e){var b=e.target.closest('[data-f]');if(!b)return;S.filter=b.dataset.f;S.pg=1;pruneSel();drawUsers();drawStats()};
+ $('#ul').onkeydown=function(e){if((e.key=='Enter'||e.key==' ')&&e.target.classList&&e.target.classList.contains('uchip')){e.preventDefault();e.target.click()}};
+ $('#ul').onclick=function(e){var q=e.target.closest('[data-q]'),b=e.target.closest('[data-id]');
+  if(q&&b&&!S.selMode){var u=findU(+b.dataset.id);if(!u)return;if(q.dataset.q=='link')copy(u.link);else editUser(u.id,q.dataset.q=='qr'?'qr':'');return}
+  if(b){var id=+b.dataset.id;
    if(S.selMode){if(S.sel[id])delete S.sel[id];else S.sel[id]=1;b.classList.toggle('sel',!!S.sel[id]);drawSelBar(filtered());drawBulk()}else editUser(id);return}
   if(e.target.closest('[data-a=new]'))newUser()};
  $('#pager').onclick=function(e){var b=e.target.closest('[data-pg]');if(b&&!b.disabled){S.pg=+b.dataset.pg;drawUsers();window.scrollTo(0,0)}};
@@ -101,10 +105,8 @@ function pUsers(){var pg=$('#pg');
 function loadUsers(){return Promise.all([api('GET','/api/users'),api('GET','/api/overview')]).then(function(r){S.users=r[0];S.ov=r[1];
  var live={};S.users.forEach(function(u){live[u.id]=1});Object.keys(S.sel).forEach(function(k){if(!live[k])delete S.sel[k]});drawStats();drawUsers()}).catch(fail)}
 function drawStats(){var o=S.ov;if(!o||!$('#ust'))return;
- var c=[['g',o.online,'Online','online'],['',o.offline,'Offline','offline'],['g',o.active,'Active','active'],['y',o.expired,'Finished','finished'],['r',o.disabled,'Disabled','disabled']];
- $('#ust').innerHTML='<button class="sc tot'+(S.filter=='all'?' act':'')+'" data-f="all">'+ic('users',14)+' <b>'+N(o.users)+'</b></button>'+
-  c.map(function(x){return '<button class="sc'+(S.filter==x[3]?' act':'')+'" data-f="'+x[3]+'"><span class="dot '+x[0]+'"></span>'+t(x[2])+' <b>'+N(x[1])+'</b></button>'}).join('')+
-  '<span class="sc pr" style="border:0;padding:0 2px">|</span>'+PROTOS.map(function(p){return '<span class="sc pr">'+p[1]+' <b>'+N((o.protocols||{})[p[0]]||0)+'</b></span>'}).join('');
+ var c=[['',o.users,'All','all'],['g',o.online,'Online','online'],['g',o.active,'Active','active'],['y',o.expired,'Expired','finished'],['r',o.disabled,'Disabled','disabled']];
+ $('#ust').innerHTML=c.map(function(x){return '<button type="button" role="tab" aria-selected="'+(S.filter==x[3])+'" class="uf'+(S.filter==x[3]?' act':'')+'" data-f="'+x[3]+'">'+(x[0]?'<span class="dot '+x[0]+'"></span>':'')+'<span>'+t(x[2])+'</span><b>'+N(x[1]||0)+'</b></button>'}).join('');
  drawLive()}
 // connected right now, by protocol: a count per protocol, a tap filters the list to it
 function liveOf(u){return u.live||[]}
@@ -369,7 +371,7 @@ function wireLogo(){var f=$('#lg_file');if(!f)return;
  var rm=$('#lg_rm');if(rm)rm.onclick=function(){confirmDo(function(){setLogo('').catch(fail)})}}
 // ---------------------------------------------------------------- settings: sections, each saved on its own
 var STSEC=[
- ['look','Appearance','brush','Name, logo, language, theme and colour of the panel',['panel_name','lang','theme','color','refresh']],
+ ['look','Appearance','brush','Name, logo, language and theme of the panel',['panel_name','lang','theme','color','refresh']],
  ['net','Addresses','globe','Panel address, the public VPN address and subscription links',['endpoint','sub_base']],
  ['vpn','VPN & protocols','shield2','DNS, MTU and protocol behaviour on every server',['dns','mtu','mtu_auto','mtu_budget','awg_compat','conn_limit_on']],
  ['newu','New users','users','Ready values for the “New user” form',['default_protocols','def_gb','def_days','def_conns']],
@@ -394,7 +396,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   '<button class="b2 bd'+(curLogo()?'':' hide')+'" id="lg_rm">'+t('Remove')+'</button></div><div class="hint">'+t('Saved at once. Shown in the header, the menu, the login page and the subscription page.')+'</div></div>'+
   '<div class="full"><label class="f">'+t('Language')+'</label>'+stPick('lang',['<button type="button" data-v="fa">فارسی<small class="muted" style="display:block;font-weight:500">راست به چپ</small></button>','<button type="button" data-v="en">English<small class="muted" style="display:block;font-weight:500">Left to right</small></button>'],'thc')+'</div>'+
   '<div class="full"><label class="f">'+t('Theme')+'</label>'+stPick('theme',['<button type="button" data-v="dark"><i style="background:linear-gradient(135deg,#1c160d,#070604)"></i>'+t('Dark')+'</button>','<button type="button" data-v="light"><i style="background:linear-gradient(135deg,#fffaf0,#e6dcc6)"></i>'+t('Soft light')+'</button>'],'thc')+'</div>'+
-  '<div class="full"><label class="f">'+t('Panel color')+'</label>'+stPick('color',[['gold','#F5C451'],['turquoise','#2fd6d6'],['violet','#a78bfa'],['emerald','#34d399'],['rose','#fb7185']].map(function(c){return '<button type="button" data-v="'+c[0]+'" style="--sc:'+c[1]+'" title="'+t(c[0].charAt(0).toUpperCase()+c[0].slice(1))+'"></button>'}),'swc')+'</div></div>';
+  '<input type="hidden" data-k="color" value="gold"></div>';
  case 'net':return '<div class="sgrid"><div class="full"><label class="f">'+t('Panel address')+'</label><div class="cpy"><input class="ltr" readonly value="'+esc(addr)+'"><button class="b2" type="button" onclick="copy(\''+esc(addr)+'\')">'+ic('copy',15)+'</button></div></div>'+
   stIn('endpoint','Public VPN host or IP',s.domain||'vpn.example.com','Written inside every user config. Empty = the panel domain.','full')+
   stIn('sub_base','Subscription base URL','https://sub.example.com','Base of the subscription links (for example a CDN domain). Empty = the panel address.','full')+

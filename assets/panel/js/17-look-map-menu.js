@@ -309,6 +309,8 @@ function markAll(){var sk=V.secOf(S.page)[0];
 // the open section lit in every menu, its tabs on top of the page
 window.navMark=function(p){var sk=V.secOf(p)[0];
  $$('#side a[data-sec],#mbar a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
+ // an advanced tool open: «More» is lit in the bottom bar
+ var mm=$('#mbmore');if(mm)mm.classList.toggle('on',!$('#mbar a.on'));
  V.drawSecTabs(p);k38More(0);
  // the open section stays in sight in the scrolling bar
  // only when it is out of sight and the bar is not being swiped, and never the page itself
@@ -354,15 +356,20 @@ function phase(){var ph=-((Date.now()/1000)%3.2);$$(EDGE).forEach(function(e){if
 new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();antidpi();reality();kpiEdges();phase()}).observe(document.body,{childList:true,subtree:true});
 
 // ---------------------------------------------------------------- users: two columns, data and expiry date
- window.uchip=function(u){var st=ustate(u),lv=liveOf(u),on=u.online_connections>0||lv.length>0,dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':''),ps=[];
-  lv.forEach(function(c){if(ps.indexOf(c.p)<0)ps.push(c.p)});
-  var pc=usage(u),used=(+u.traffic_used_gb||0).toFixed(1),exp=st=='disabled'?t('Disabled'):!u.expires_ts?'∞':u.expires_ts<Date.now()/1000?t('Expired'):jdate(u.expires_ts);
-  return '<button class="uchip kd-u st-'+st+(on?' on':'')+(S.sel[u.id]?' sel':'')+'" data-id="'+u.id+'" title="'+esc(u.username)+'">'+
-   '<span class="kd-un"><span class="dot '+dot+'"></span><span class="nm">'+esc(u.username)+'</span>'+
-   (ps.length?'<span class="lvs">'+liveBadges(lv)+'</span>':'')+
-   '<span class="tick">'+ic('check',13)+'</span></span>'+
+ // (3.40) a clean card: name and status, the data bar, data · days left · connections now / allowed,
+ // and three quick buttons (copy link, QR, details); the protocols are in the details sheet
+ window.uchip=function(u){var st=ustate(u),lv=liveOf(u),conn=Math.max(+u.online_connections||0,lv.length?1:0),on=conn>0,
+   dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':''),pc=usage(u),now=Date.now()/1000,
+   left=st=='disabled'?'':!u.expires_ts?'∞':u.expires_ts<now?t('Expired'):N(Math.ceil((u.expires_ts-now)/86400))+' '+t('days'),
+   badge=st=='active'?['g',t('Active')]:st=='finished'?['y',t(u.status=='Limited'?'Limited':'Expired')]:['r',t('Disabled')];
+  return '<div class="uchip uc st-'+st+(on?' on':'')+(S.sel[u.id]?' sel':'')+'" role="button" tabindex="0" data-id="'+u.id+'" aria-label="'+esc(u.username)+'">'+
+   '<span class="uc-h"><span class="dot '+dot+'"></span><span class="nm">'+esc(u.username)+'</span><span class="u-st '+badge[0]+'">'+badge[1]+'</span><span class="tick">'+ic('check',13)+'</span></span>'+
    '<span class="k310bar'+(pc<0?' inf':pc>=90?' hot':pc>=70?' warm':'')+'"><i style="width:'+(pc<0?100:Math.max(3,pc))+'%"></i></span>'+
-   '<span class="kd-meta"><span>'+t('Data')+' <b class="ltr" title="'+esc(exactB(u.used_bytes))+'">'+exactB(u.used_bytes,false)+(pc<0?' / ∞':' / '+N(u.traffic_limit_gb)+' GB')+'</b></span><span>'+t('Expires')+' <b>'+exp+'</b></span></span></button>'};
+   '<span class="uc-m"><b class="ltr" title="'+esc(exactB(u.used_bytes))+'">'+exactB(u.used_bytes,false)+(pc<0?' / ∞':' / '+N(u.traffic_limit_gb)+' GB')+'</b>'+
+    (left?'<span>'+left+'</span>':'')+'<span class="uc-c" title="'+esc(t('Connections'))+'">'+ic('users',13)+'<b class="ltr">'+N(conn)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b></span></span>'+
+   '<span class="uc-a"><button type="button" class="b2 sm" data-q="link" title="'+esc(t('Copy link'))+'" aria-label="'+esc(t('Copy link'))+'">'+ic('link',15)+'</button>'+
+    '<button type="button" class="b2 sm" data-q="qr" title="QR" aria-label="QR">'+ic('qr',15)+'</button>'+
+    '<button type="button" class="b2 sm" data-q="det">'+t('Details')+'</button></span></div>'};
 
 look();
 })();
