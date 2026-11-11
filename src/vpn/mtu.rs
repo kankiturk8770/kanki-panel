@@ -609,6 +609,11 @@ mod tests {
         app.db.set("tun_list", &ft.to_string());
         app.db.set("srv_tunnel", &json!({ "s-de": { "on": true, "host": "ir.example.com" } }).to_string());
         assert!(crate::twin::of_node_core(&app, &n, "wg").is_some());
+        // a tunnel that does not carry a core's port: no second config for that core (it would never connect)
+        app.db.set("tun_list", &json!([{ "id": "t1", "name": "ft", "entry": "ir1", "exit": "s-de", "transport": "faketcp", "enabled": true, "udp": ["51820", "4200"] }]).to_string());
+        assert!(crate::twin::of_node_core(&app, &n, "wg").is_some());
+        assert!(crate::twin::of_node_core(&app, &n, "awg").is_none());
+        app.db.set("tun_list", &ft.to_string());
         let wg_t = conf("wireguard", true).await;
         assert!(wg_t.contains("Endpoint = ir.example.com:51820"), "{}", wg_t);
         assert_eq!(mtu_line(&wg_t), "MTU = 1320");

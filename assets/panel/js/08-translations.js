@@ -192,6 +192,8 @@ var FA={"Second copy between Iran and abroad (ms)":"نسخهٔ دوم بین ا�
  "Used by its install command (Show command).":"در دستور نصب همین سرور استفاده می‌شود («نمایش دستور»).",
  "The domain must point straight at this server (no Cloudflare proxy) and port 80 must be open. Off, or when it fails: a self-signed certificate, the install goes on.":"دامنه باید مستقیم به همین سرور اشاره کند (بدون پروکسی Cloudflare) و پورت 80 باز باشد. خاموش، یا اگر نشد: گواهی self-signed و نصب ادامه پیدا می‌کند.",
  "Make a copy":"ساخت کپی",
+ "No tunnel carries this port: users get only the direct config":"هیچ تانلی این پورت را نمی‌برد: کاربرها فقط کانفیگ مستقیم می‌گیرند",
+ "Port not in a tunnel":"پورت در تانل نیست",
  "No second config":"بدون کانفیگ دوم",
  "Servers with Xray":"سرورهای دارای Xray",
  "Users get a second copy of every Xray inbound through the Iran server chosen here. Empty = the tunnel domain of the server (Servers page).":"کاربرها از هر اینباند Xray یک کپی دوم هم می‌گیرند که از سرور ایرانی انتخاب‌شده در اینجا رد می‌شود. خالی = دامنه‌ی تانل خود سرور (صفحه‌ی سرورها).",

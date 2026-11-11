@@ -142,6 +142,21 @@ impl Twin {
         crate::tunnel::panel::port_entry_at(app, &self.sid, port, tcp, &self.host).map(|x| x.1).unwrap_or(port)
     }
 
+    /// The port on the Iran address for `port`, only when the tunnel really brings it here. None = this
+    /// server has Kanki tunnels but none carries `port`: a second config on it would never connect (the
+    /// app showed ✕), so it is not given at all. A server with no Kanki port tunnel (one set up
+    /// elsewhere, or a layer-3 AmneziaWG one) keeps the port as it is.
+    pub fn carried(&self, app: &App, port: u16, tcp: bool) -> Option<u16> {
+        if self.sid.is_empty() {
+            return Some(port);
+        }
+        match crate::tunnel::panel::port_entry_at(app, &self.sid, port, tcp, &self.host) {
+            Some(x) => Some(x.1),
+            None if crate::tunnel::panel::has_port_tunnels(app, &self.sid) => None,
+            None => Some(port),
+        }
+    }
+
     /// host:port, an IPv6 address in brackets
     pub fn addr(&self, port: u16) -> String {
         if self.host.contains(':') && !self.host.starts_with('[') { format!("[{}]:{}", self.host, port) } else { format!("{}:{}", self.host, port) }
@@ -189,9 +204,28 @@ pub fn of_node(app: &App, n: &Node) -> Option<Twin> {
     make(app, &key_of_node(app, &n.id), &sid_of_node(app, &n.id), &n.name, None)
 }
 
-/// The tunnel of one core of a VPN server: its own Iran address, else the server's (None = none)
+/// The tunnel of one core of a VPN server: its own Iran address, else the server's. None = none, or a
+/// tunnel that does not carry this core's port (no second config that would lead nowhere).
 pub fn of_node_core(app: &App, n: &Node, core: &str) -> Option<Twin> {
-    make(app, &key_of_node(app, &n.id), &sid_of_node(app, &n.id), &n.name, Some(core))
+    let t = make(app, &key_of_node(app, &n.id), &sid_of_node(app, &n.id), &n.name, Some(core))?;
+    match core_port(n, core) {
+        Some(p) => t.carried(app, p, false).map(|_| t),
+        None => Some(t),
+    }
+}
+
+/// The UDP port of a core on a VPN server (None = not known yet)
+pub fn core_port(n: &Node, core: &str) -> Option<u16> {
+    let k = match core {
+        "wg" => "wg_port",
+        "awg" => "awg_port",
+        "hy2" => "hy2_port",
+        "mtun" => "mt_port",
+        "kmix" => "kmix_port",
+        _ => return None,
+    };
+    let i = crate::api::node_info(n);
+    i[k].as_str().and_then(|s| s.trim().parse::<u16>().ok()).or_else(|| i[k].as_u64().map(|p| p as u16)).filter(|p| *p > 0)
 }
 
 /// The Xray tunnel of a server by its tunnel server id: Xray's own Iran address, else the server's
@@ -231,7 +265,8 @@ pub fn info(app: &App, key: &str, nid: Option<&str>) -> Value {
             let Some(port) = num(k) else { continue };
             let Some(h) = core_host(c) else { continue };
             let tw = Twin { host: h.clone(), name: String::new(), sid: sid.clone() };
-            ports.push(json!({ "proto": p, "core": c, "host": h, "port": port, "via": tw.port(app, port, false), "tcp": false }));
+            let via = tw.carried(app, port, false);
+            ports.push(json!({ "proto": p, "core": c, "host": h, "port": port, "via": via.unwrap_or(port), "tcp": false, "carried": via.is_some() }));
         }
     }
     if !sid.is_empty() {
@@ -242,7 +277,8 @@ pub fn info(app: &App, key: &str, nid: Option<&str>) -> Value {
             let tcp = ib.network != "kcp";
             let tw = Twin { host: h.clone(), name: String::new(), sid: sid.clone() };
             let name = if ib.remark.is_empty() { format!("Xray {}", ib.protocol) } else { format!("Xray {}", ib.remark) };
-            ports.push(json!({ "proto": name, "core": "xray", "host": h, "port": ib.port, "via": tw.port(app, ib.port, tcp), "tcp": tcp }));
+            let via = tw.carried(app, ib.port, tcp);
+            ports.push(json!({ "proto": name, "core": "xray", "host": h, "port": ib.port, "via": via.unwrap_or(ib.port), "tcp": tcp, "carried": via.is_some() }));
         }
     }
     json!({ "on": o.on, "host": o.host, "name": o.name, "auto": auto, "uses": host, "ports": ports, "main_via": main_via, "cores": o.cores })

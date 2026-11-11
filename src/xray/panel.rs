@@ -936,6 +936,21 @@ pub fn user_links_on(app: &App, u: &User) -> Vec<(String, String, String)> {
 /// (name, link, server id) of each Xray share link of a user; each link of a server that has a tunnel
 /// (Servers page) is followed by its copy through the tunnel's Iran address
 fn user_links_at(app: &App, u: &User) -> Vec<(String, String, String)> {
+    links_meta(app, u).into_iter().map(|x| (x.name, x.link, x.server)).collect()
+}
+
+/// One link of a user with what the app needs to place it: `via` ("direct" = the server's own
+/// address, "tunnel" = the copy through the Iran address) and `group` (the same for an inbound's
+/// direct link and its tunnel copy, so the app shows them side by side on one row).
+pub struct LinkMeta {
+    pub name: String,
+    pub link: String,
+    pub server: String,
+    pub via: &'static str,
+    pub group: String,
+}
+
+fn links_meta(app: &App, u: &User) -> Vec<LinkMeta> {
     let s = runnable(app);
     if !s.on || !u.has_proto("xray") || !u.active() {
         return vec![];
@@ -947,9 +962,10 @@ fn user_links_at(app: &App, u: &User) -> Vec<(String, String, String)> {
         let name = names.get(&ib.id).cloned().unwrap_or_else(|| ib.remark.clone());
         let named = Inbound { remark: name.clone(), plain_name: true, ..ib.clone() };
         let Some(l) = link(app, &s, &named, u) else { continue };
-        out.push((name.clone(), l, ib.server.clone()));
+        let group = format!("{}:{}", ib.server, ib.id);
+        out.push(LinkMeta { name: name.clone(), link: l, server: ib.server.clone(), via: "direct", group: group.clone() });
         if let Some(t) = link_tunnel(app, &s, &named, u) {
-            out.push((t.0, t.1, ib.server.clone()));
+            out.push(LinkMeta { name: t.0, link: t.1, server: ib.server.clone(), via: "tunnel", group });
         }
     }
     out
@@ -1020,7 +1036,8 @@ fn link_tunnel(app: &App, s: &XraySettings, ib: &Inbound, u: &User) -> Option<(S
     let own = server_address(app, s, &ib.server);
     let mut x = ib.clone();
     x.link_host = tw.host.clone();
-    x.link_port = tw.port(app, ib.port, ib.network != "kcp");
+    // only when a tunnel really brings this inbound's port to the server (else the copy never connects)
+    x.link_port = tw.carried(app, ib.port, ib.network != "kcp")?;
     let tls = ib.security == "tls" || ib.link_tls;
     let own_name = if ib.acme && !ib.sni.trim().is_empty() { ib.sni.trim().to_string() } else { own };
     if tls && x.link_sni.is_empty() && ib.sni.trim().is_empty() && own_name.parse::<std::net::IpAddr>().is_err() && !own_name.is_empty() {
@@ -1037,11 +1054,12 @@ fn link_tunnel(app: &App, s: &XraySettings, ib: &Inbound, u: &User) -> Option<(S
 /// Each link carries where its traffic leaves to the internet (exit_cc, exit_city, exit_lat,
 /// exit_lon), so the app can name it by its place and put it on the map before the first connect.
 pub fn sub_info(app: &App, u: &User) -> Value {
-    let v: Vec<Value> = user_links_at(app, u)
+    let v: Vec<Value> = links_meta(app, u)
         .into_iter()
-        .map(|(n, l, sid)| {
-            let mut x = json!({ "name": n, "link": l });
-            if let (Some(o), Some(e)) = (x.as_object_mut(), crate::exitgeo::fields(app, &crate::exitgeo::xray_key(&sid)).as_object()) {
+        .map(|m| {
+            // via and group: the app puts each link in its tunnel or direct cell, the two of one inbound on one row
+            let mut x = json!({ "name": m.name, "link": m.link, "via": m.via, "group": m.group });
+            if let (Some(o), Some(e)) = (x.as_object_mut(), crate::exitgeo::fields(app, &crate::exitgeo::xray_key(&m.server)).as_object()) {
                 o.extend(e.clone());
             }
             x
@@ -2066,8 +2084,16 @@ mod tests {
         app.db.set("tun_list", &serde_json::to_string(&vec![t1, t2]).unwrap());
         crate::twin::save_core(&app, "de", &json!({ "core": "xray", "host": "ir2.example.com" })).unwrap();
         let l = user_links_at(&app, &u);
-        assert_eq!(l.len(), 5, "{:?}", l);
+        // these tunnels carry only 2083: VLESS (443) gets no copy that would lead nowhere
+        assert_eq!(l.len(), 4, "{:?}", l);
         assert!(l[1].1.contains("@ir2.example.com:9443?"), "{}", l[1].1);
+        assert!(!l.iter().any(|x| x.0.starts_with("🇮🇷") && x.0.contains("VLESS")), "{:?}", l);
+        // the app reads where each link goes and which two are one row
+        let v = sub_info(&app, &u);
+        let a = v.as_array().unwrap();
+        assert_eq!(a.iter().map(|x| x["via"].as_str().unwrap()).collect::<Vec<_>>(), vec!["direct", "tunnel", "direct", "direct"]);
+        assert_eq!(a[0]["group"], a[1]["group"]);
+        assert_ne!(a[0]["group"], a[2]["group"]);
         // the server's tunnel switched on keeps Xray's own address
         crate::twin::save(&app, "de", &json!({ "on": true, "host": "ir.example.com" })).unwrap();
         assert!(user_links_at(&app, &u)[1].1.contains("@ir2.example.com:9443?"));

@@ -1615,6 +1615,13 @@ pub fn port_entry_at(app: &App, sid: &str, port: u16, tcp: bool, host: &str) -> 
     port_entry(app, sid, port, tcp)
 }
 
+/// Some Kanki port tunnel (not a layer-3 AmneziaWG one, which carries every port) ends at server `sid`.
+/// A server with one carries only the ports its tunnels list: a second config on any other port would
+/// lead nowhere. A server with none has its tunnel set up elsewhere (or a layer-3 one): its ports stay.
+pub fn has_port_tunnels(app: &App, sid: &str) -> bool {
+    tunnels(app).iter().any(|t| t.enabled && t.exit == sid && t.kind != "awg" && t.kind != "awgwrap")
+}
+
 /// The address of the first server of the tunnels (or the route) that end at server `sid`: the Iran
 /// entry users would connect to. "" = no tunnel ends there.
 pub fn entry_host(app: &App, sid: &str) -> String {

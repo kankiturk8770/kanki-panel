@@ -212,8 +212,11 @@ pub fn tunnel_target(app: &App, s: &Settings, n: &Node, port: u16) -> Option<(St
     }
     // the server's tunnel (Servers page) gives every protocol a copy through its Iran address
     if let Some(t) = crate::twin::of_node(app, n) {
-        let p = if opt.tun_port > 0 { opt.tun_port } else { t.port(app, port, false) };
-        return Some((t.host, p));
+        // a typed port is the admin's word; else only a port the tunnel really carries
+        let p = if opt.tun_port > 0 { Some(opt.tun_port) } else { t.carried(app, port, false) };
+        if let Some(p) = p {
+            return Some((t.host, p));
+        }
     }
     let ep = crate::api::endpoint(app, n);
     let ep_host = ep.trim().trim_start_matches('[').split(']').next().unwrap_or("").to_string();
