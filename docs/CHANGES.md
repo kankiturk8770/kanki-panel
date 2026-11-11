@@ -1,3 +1,19 @@
+# v3.42.0 — Xray and DNS on the new parts, KPING beside KANKI MIX, one CSS generation
+- **Core bar:** KPING sits right after KANKI MIX (the two game cores): WireGuard, AmneziaWG, Hysteria2, KANKI MIX, KPING, microtun,
+  Xray, DNS; the VPN & cores overview has the same order.
+- **The parts of every core page, written once (`panel.css` «3.42 — the parts»):** page head like every other page (44px icon on a
+  tint, 24px title), the page's tabs (on a phone one row that scrolls inside itself, the open one kept in sight, no half-empty
+  second row), groups on one glass sheet, item rows (name over two lines at most, its actions beside it or under it on a phone,
+  tags, address, facts), lines and switches, tags, tools, help that folds, accordion rows, warnings. Xray, DNS, KANKI MIX,
+  microtun, KPING, WireGuard, AmneziaWG, Hysteria2 and the tunnels page all use them.
+- **DNS:** the numbers are the same tiles as everywhere; status as a 2-column page (path of the traffic, busiest services), «Check a
+  domain», help folded; every DNS server is an item row (role, state, name, IP, transport, SSL, its numbers, «Edit»; repair, health,
+  all users and remove in «⋯», the removing ones last and red).
+- **Xray / DNS markup:** 63 inline spacing styles became token classes (`u-*`).
+- **CSS:** the old generation names are gone: `body.k38` → `body.kg`, `body.v37` / `body.kd` → `body.ks` (the signed-in shell);
+  122 more old part rules removed; `!important` 168 → 71 (each one dropped only after the browser showed it changes nothing:
+  computed styles of every element on 30 pages × 2 widths × 2 themes identical before and after).
+
 # v3.41.0 — Kanki Console: one shell, one core bar of eight, pages built from the same parts
 - **Shell:** one sidebar (256px) or, chosen in the account menu, one menu across the top — never both; a 64px header in three
   parts: where you are (group / page), what needs you (the update badge only when there is one) and language, day/night and the

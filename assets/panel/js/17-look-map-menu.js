@@ -334,7 +334,7 @@ window.shell=function(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.cha
   ['#updot2'].forEach(function(x){var d=$(x);if(d)d.className=c});var d1=$('#updot');if(d1)d1.className=r.available?'dot y':'dot hide';
   var ub=$('#upd');if(ub)ub.hidden=!r.available;
   var u=$('#updt');if(u)u.textContent=r.available?t('A new version is available.'):(r.error?t('Update source not set'):t('You are on the latest version.'))}).catch(function(){});
- document.body.classList.add('v37','k38','kd');V.watchPg();V.drawLooks();dragRow($('#kdtop'));look()};
+ document.body.classList.add('ks');V.watchPg();V.drawLooks();dragRow($('#kdtop'));look()};
 function markAll(){var sk=V.secOf(S.page)[0];
  $$('#kdtop a[data-sec]').forEach(function(a){var on=a.dataset.sec==sk;a.classList.toggle('on',on);if(on)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
  var on=$('#kdtop a.on');if(on&&document.body.classList.contains('ks-topm')){var r=$('#kdtop'),rr=r.getBoundingClientRect(),ar=on.getBoundingClientRect();if(ar.left<rr.left||ar.right>rr.right)r.scrollLeft+=(ar.left+ar.width/2)-(rr.left+rr.width/2)}}
@@ -374,7 +374,10 @@ function reality(){var sel=$('#xi_dp');if(!sel||$('#kd_rt'))return;
     return '<button type="button" class="kd-rt '+(x.ok?'ok':x.tls13?'mid':'bad')+'" data-t="'+esc(x.target)+'" title="'+esc(x.error||'')+'"><i>'+(x.ok?'✓':'✕')+'</i><span class="ltr">'+esc(h)+'</span>'+(x.ms?'<small class="ltr">'+N(x.ms)+'ms</small>':'')+(/\.ir$/.test(h)?'<em>IR</em>':'')+'</button>'}).join('')+'</div>';
    $$('.kd-rt',box).forEach(function(c){c.onclick=function(){$('#xi_de').value=c.dataset.t;$('#xi_na').value=c.dataset.t.split(':')[0];$$('.kd-rt',box).forEach(function(z){z.classList.toggle('pick',z==c)})}})}).catch(function(e){b.disabled=false;b.textContent=t('Test the sites');fail(e)})}}
 // whatever a page draws is dressed right away: number icons, tab marks, drawers, rails and chips
-new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();antidpi();reality()}).observe(document.body,{childList:true,subtree:true});
+// a page's own tabs on a phone are one row that scrolls inside itself: the open one is kept in sight
+function tabsShow(){$$('#pg .ku-tabs').forEach(function(r){var a=r.querySelector('.on');if(!a||r._on===a||r.scrollWidth<=r.clientWidth+1)return;r._on=a;
+ var rr=r.getBoundingClientRect(),ar=a.getBoundingClientRect();if(ar.left<rr.left+16||ar.right>rr.right-16)r.scrollLeft+=(ar.left+ar.width/2)-(rr.left+rr.width/2)})}
+new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();antidpi();reality();tabsShow()}).observe(document.body,{childList:true,subtree:true});
 
 // ---------------------------------------------------------------- users: two columns, data and expiry date
  // (3.40) a clean card: name and status, the data bar, data · days left · connections now / allowed,

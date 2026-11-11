@@ -49,7 +49,7 @@ function p_antidpi(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Anti-DPI'
   '<a class="b2 sm" style="width:100%;text-align:center" href="'+m.href+'">'+t('Open the tunnels')+'</a></div>'}).join('')+'</div></div>'+
  '<div class="card"><h3>'+t('Which one, when?')+'</h3><div class="sub" style="line-height:2">'+
   '🟢 '+t('Normal filtering:')+' <b>VLESS + REALITY</b> · '+t('fastest, nothing to maintain')+'<br>'+
-  '🟡 '+t('Heavy filtering / burned IPs:')+' <b>VLESS + WS or gRPC behind a CDN</b> · '+t('the server IP hides behind the edge')+'<br>'+
+  '🟡 '+t('Heavy filtering / burned IPs:')+' <b>'+t('VLESS + WS or gRPC behind a CDN')+'</b> · '+t('the server IP hides behind the edge')+'<br>'+
   '🔴 '+t('Whitelist mode (only domestic sites open):')+' <b>'+t('the CDN transport of the tunnels + an ArvanCloud domain')+'</b> · '+t('see the whitelist guide in the tunnel wizard')+'<br>'+
   '🎮 '+t('Gaming / UDP:')+' <b>Shadowsocks 2022</b> '+t('for users')+' · <b>Game / FakeTCP</b> '+t('between the servers')+'<br>'+
   'ℹ️ '+t('TUIC and ShadowTLS are not in Xray-core; Hysteria2 (QUIC + obfs) and the hq transport cover the same ground.')+'</div></div>'}
