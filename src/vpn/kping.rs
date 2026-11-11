@@ -115,6 +115,16 @@ fn save(app: &App, s: &Settings) {
 }
 
 /// A removed server (tunnel server or VPN node) takes its routes with it
+/// One route goes (its server is gone)
+pub fn forget_route(app: &App, id: &str) {
+    let mut s = settings(app);
+    let n = s.routes.len();
+    s.routes.retain(|r| r.id != id);
+    if s.routes.len() != n {
+        save(app, &s);
+    }
+}
+
 pub fn forget_node(app: &App, id: &str) {
     let mut s = settings(app);
     let n = s.routes.len();
@@ -158,8 +168,14 @@ fn users_of(users: &[User]) -> Vec<&User> {
 }
 
 fn kusers(app: &App, users: &[User]) -> Vec<KUser> {
+    // a user at the account's connection limit whose devices are elsewhere is not let in here
+    let shut: Vec<i64> = {
+        let l = crate::sync::limits().lock().unwrap_or_else(|e| e.into_inner());
+        users.iter().filter(|u| l.shut_proto(u.id, PROTO)).map(|u| u.id).collect()
+    };
     users_of(users)
         .into_iter()
+        .filter(|u| !shut.contains(&u.id))
         .filter_map(|u| Some(KUser { uid: u32::try_from(u.id).ok()?, name: u.username.clone(), key: user_key(app, u), ip: ip_of_id(u.id)?.to_string() }))
         .collect()
 }
@@ -207,6 +223,23 @@ pub fn ingest(app: &App, sid: &str, st: &Value) {
     for id in x["online"].as_array().into_iter().flatten().filter_map(|v| v.as_i64()) {
         let _ = app.db.exec("UPDATE users SET last_seen=?1 WHERE id=?2", &[&now, &id]);
     }
+}
+
+/// KPING in the account's connection limit (all cores and servers together): each user an exit saw in
+/// the last minute is one device on "kp:<server>". Also the servers that answered.
+pub fn live_units(now: i64) -> (Vec<(i64, String, String, i64)>, std::collections::HashSet<String>) {
+    let r = reports().lock().unwrap_or_else(|e| e.into_inner());
+    let mut units = vec![];
+    let mut answered = std::collections::HashSet::new();
+    for (sid, (t, v)) in r.iter().filter(|(_, (t, _))| now - t < 60) {
+        let _ = t;
+        let node = format!("kp:{}", sid);
+        answered.insert(node.clone());
+        for id in v["exit"]["online"].as_array().into_iter().flatten().filter_map(|x| x.as_i64()) {
+            units.push((id, node.clone(), PROTO.to_string(), 1));
+        }
+    }
+    (units, answered)
 }
 
 /// The last report of `sid` when fresh (a minute)
