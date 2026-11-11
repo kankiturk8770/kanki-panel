@@ -1840,3 +1840,24 @@ body.kg *{scrollbar-width:thin;scrollbar-color:rgba(245,196,81,.28) transparent}
 body.kg ::-webkit-scrollbar{width:8px;height:8px}
 body.kg ::-webkit-scrollbar-thumb{background:rgba(245,196,81,.28);border-radius:8px}
 body.kg ::-webkit-scrollbar-track{background:transparent}
+
+/* the phone bar: five sections and «More», all in sight (no sideways swipe) */
+@media(max-width:899px){
+ body.kg .mbar.kg-bar{display:grid!important;grid-template-columns:repeat(6,minmax(0,1fr));overflow:hidden!important;gap:2px;padding-inline:6px}
+ body.kg .mbar.kg-bar a,body.kg .mbar.kg-bar button{min-width:0!important;width:100%;min-height:48px;padding:6px 2px!important}
+ body.kg .mbar.kg-bar span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
+ body.kg .mbar.kg-bar a.on,body.kg .mbar.kg-bar button.on{color:var(--a)!important;background:rgba(245,196,81,.12)!important;box-shadow:var(--kg-glow)}
+}
+
+/* the core tabs: a live dot each, the open one in gold glass */
+body.kg .sectabs .stl a{display:inline-flex;align-items:center;gap:6px}
+body.kg .sectabs .stl a .tdot{width:7px;height:7px;border-radius:50%;background:var(--s);flex:none}
+body.kg .sectabs .stl a .tdot.g{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+body.kg .sectabs .stl a .tdot.y{background:var(--warn)}
+body.kg .sectabs .stl a .tdot.r{background:var(--bad)}
+body.kg .sectabs .stl a.on{background:rgba(245,196,81,.14)!important;box-shadow:var(--kg-glow)!important;color:var(--t)!important}
+/* logs and the emergency chat's server answers: monospace boxes with a metal edge, their own scroll */
+body.kg #em pre,body.kg #em .warnbox.ltr,body.kg #pg pre.cmd,body.kg #pg .lgbox,body.kg #pg .logs{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.6;
+ border:1px solid var(--gb2)!important;border-radius:12px;background:var(--in)!important;max-height:340px;overflow:auto;overscroll-behavior:contain}
+/* phones: the save bar of settings stays above the bottom bar */
+@media(max-width:899px){body.kg #st .sts .sbar{bottom:calc(76px + env(safe-area-inset-bottom,0px))}}

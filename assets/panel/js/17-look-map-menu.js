@@ -309,6 +309,8 @@ function markAll(){var sk=V.secOf(S.page)[0];
 // the open section lit in every menu, its tabs on top of the page
 window.navMark=function(p){var sk=V.secOf(p)[0];
  $$('#side a[data-sec],#mbar a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
+ // an advanced tool open: «More» is lit in the bottom bar
+ var mm=$('#mbmore');if(mm)mm.classList.toggle('on',!$('#mbar a.on'));
  V.drawSecTabs(p);k38More(0);
  // the open section stays in sight in the scrolling bar
  // only when it is out of sight and the bar is not being swiped, and never the page itself
