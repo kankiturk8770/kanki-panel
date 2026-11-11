@@ -5,7 +5,7 @@
 (function(){
 'use strict';
 
-var SV={d:null,wait:null};
+var SV={d:null,wait:null,reg:(function(){try{return localStorage.getItem('kk_reg')||'all'}catch(e){return 'all'}})(),fwOpen:false};
 window.SV=SV;
 
 // ---------------------------------------------------------------- look
@@ -78,7 +78,14 @@ window.srvLoad=load;
 // ---------------------------------------------------------------- page
 window.pNodes=function(){ACC.open.srv='';
  $('#pg').innerHTML='<div class="ku">'+kuHead('nodes',t('Servers'),t('The panel runs on one server. Every other server is a node: add it with one command, then switch on here what it runs.'),'<button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button>')+
-  '<div id="svp_clash"></div><div id="svp_relay"></div><div id="svp_g">'+t('Loading…')+'</div><div id="svp_fw"></div></div>';
+  '<div id="svp_sum">'+kuStats([[t('Servers'),'—'],[t('Healthy'),'—'],[t('Needs a look'),'—'],[t('Not connected'),'—'],[t('Update ready'),'—']])+'</div>'+
+  '<div class="kreg" role="group" aria-label="'+esc(t('Region'))+'">'+[['all','All'],['abroad','Abroad'],['iran','Iran']].map(function(x){return '<button type="button" data-reg="'+x[0]+'" aria-pressed="'+(SV.reg==x[0])+'" class="'+(SV.reg==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
+  '<div id="svp_clash"></div><div id="svp_relay"></div><div id="svp_g">'+t('Loading…')+'</div>'+
+  // the firewall is an advanced tool of every server: folded until you need it
+  '<details class="kadv" id="svp_adv"'+(SV.fwOpen?' open':'')+'><summary><span>'+ic('security',18)+'</span><b>'+t('Firewall')+'</b><small>'+t('Advanced')+'</small></summary><div id="svp_fw"></div></details></div>';
+ $('.kreg').onclick=function(e){var b=e.target.closest('[data-reg]');if(!b)return;SV.reg=b.dataset.reg;try{localStorage.setItem('kk_reg',SV.reg)}catch(_){}
+  $$('.kreg button').forEach(function(x){var on=x==b;x.classList.toggle('on',on);x.setAttribute('aria-pressed',on)});draw(true)};
+ $('#svp_adv').ontoggle=function(){SV.fwOpen=this.open};
  load();autoRefresh(function(){load(true)});
  if(S.openAdd){S.openAdd=false;setTimeout(srvAdd,150)}};
 ACC.draw.srv=function(){draw(true)};
@@ -91,7 +98,11 @@ function draw(force){var g=$('#svp_g');if(!g||!SV.d)return;
  if(!force&&accBusy('srv'))return;
  var list=(SV.d.servers||[]).slice(),by=function(x,y){return (y.local?1:0)-(x.local?1:0)||String(x.name).localeCompare(String(y.name))};
  var ab=list.filter(function(x){return !isIr(x)}).sort(by),ir=list.filter(isIr).sort(by);
- g.innerHTML=srvBox('abroad','Abroad servers','🌍',ab)+srvBox('iran','Iran servers',fl('IR'),ir)}
+ g.innerHTML=(SV.reg!='iran'?srvBox('abroad','Abroad servers','🌍',ab):'')+(SV.reg!='abroad'?srvBox('iran','Iran servers',fl('IR'),ir):'');
+ // the numbers on top: every server once
+ var cnt={all:list.length,ok:0,warn:0,off:0,upd:0};list.forEach(function(x){var n=x.node,on=online(x),h=n?nHealthOf(n):null;
+  if(!on)cnt.off++;else if(h&&h.c!='g')cnt.warn++;else cnt.ok++;if(x.agent&&x.agent.can_update)cnt.upd++});
+ var sm=$('#svp_sum');if(sm)sm.innerHTML=kuStats([[t('Servers'),N(cnt.all)],[t('Healthy'),N(cnt.ok),cnt.ok?'g':''],[t('Needs a look'),N(cnt.warn),cnt.warn?'y':''],[t('Not connected'),N(cnt.off),cnt.off?'r':''],[t('Update ready'),N(cnt.upd),cnt.upd?'y':'']])}
 window.srvDraw=draw;
 function srvBox(kind,title,icon,rows){
  return kuGroup(icon+' '+t(title),rows.length,'<button class="btn sm" onclick="srvAdd(\''+kind+'\')">'+ic('plus',14)+' '+t(kind=='iran'?'Add an Iran server':'Add an abroad server')+'</button>',

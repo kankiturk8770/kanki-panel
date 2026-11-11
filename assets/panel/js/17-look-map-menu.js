@@ -28,59 +28,87 @@ var V=V37;
 // [section key, label, icon, [[page, sub page, tab label], ...], group]
 function secBy(k){for(var i=0;i<V.SECS.length;i++)if(V.SECS[i][0]==k)return V.SECS[i];return V.SECS[0]}
 function href(f){return '#'+f[0]+(f[1]?'/'+f[1]:'')}
-function sheetHtml(){var g='',h='<i class="k38grab"></i>',open=false,cur=V.secOf(S.page)[0];
- V.SECS.forEach(function(s){if(s[4]!=g){if(open)h+='</div>';g=s[4];h+='<div class="k38g">'+t(g)+'</div><div class="k38tiles">';open=true}
-  h+='<a class="k38tile'+(cur==s[0]?' on':'')+'" href="'+href(s[3][0])+'">'+ic(s[2],22)+'<span>'+t(s[1])+'</span></a>'});
+function sheetHtml(){var g='',h='<div class="ksh-h"><i class="ksh-grab" aria-hidden="true"></i><b>'+t('All sections')+'</b><button type="button" class="kib" onclick="k38More(0)" aria-label="'+esc(t('Close'))+'">✕</button></div>',open=false,cur=V.secOf(S.page)[0];
+ V.SECS.forEach(function(s){if(s[4]!=g){if(open)h+='</div>';g=s[4];h+='<div class="ksh-g">'+t(g)+'</div><div class="ksh-tiles">';open=true}
+  h+='<a class="ksh-t'+(cur==s[0]?' on':'')+'" href="'+href(s[3][0])+'"'+(cur==s[0]?' aria-current="page"':'')+'>'+ic(s[2],20)+'<span>'+t(s[1])+'</span></a>'});
  return h+(open?'</div>':'')}
-window.k38More=function(on){var sh=$('#msheet'),sc=$('#k38scrim');if(!sh)return;if(on===undefined)on=!sh.classList.contains('on');
- if(on)sh.innerHTML=sheetHtml();sh.classList.toggle('on',!!on);if(sc)sc.classList.toggle('on',!!on)};
+window.k38More=function(on){var sh=$('#msheet'),sc=$('#k38scrim'),mb=$('#mbmore');if(!sh)return;var was=sh.classList.contains('on');if(on===undefined)on=!was;
+ if(on&&!was)sh.innerHTML=sheetHtml();sh.classList.toggle('on',!!on);if(sc)sc.classList.toggle('on',!!on);if(mb)mb.setAttribute('aria-expanded',!!on);
+ document.body.classList.toggle('ksh-open',!!on);
+ if(on&&!was)setTimeout(function(){sh.focus()},30);else if(!on&&was&&mb&&sh.contains(document.activeElement))mb.focus()};
+// the sheet keeps the keyboard inside it, and Esc closes it (and the account menu)
+document.addEventListener('keydown',function(e){var sh=$('#msheet');
+ if(e.key=='Escape'){if(sh&&sh.classList.contains('on'))k38More(0);if(window.kAcct)kAcct(0);return}
+ if(e.key=='Tab'&&sh&&sh.classList.contains('on')){var f=$$('a,button',sh);if(!f.length)return;var a=f[0],z=f[f.length-1];
+  if(e.shiftKey&&(document.activeElement==a||document.activeElement==sh)){e.preventDefault();z.focus()}else if(!e.shiftKey&&document.activeElement==z){e.preventDefault();a.focus()}}});
 // a section whose tabs are sub pages of one page (Xray): mark the tab of the sub page, not all of them
-function markTabs(){var el=$('#sectabs');if(!el)return;var as=$$('.stl a',el),h=location.hash||'',hit=as.filter(function(a){return a.getAttribute('href')==h});
+function markTabs(){var el=$('#sectabs');if(!el)return;var as=$$('a.kcb-t,a.kcb-ov',el),h=location.hash||'',hit=as.filter(function(a){return a.getAttribute('href')==h});
  if(!hit.length){var p='#'+S.page;hit=as.filter(function(a){return a.getAttribute('href').split('/')[0]==p}).slice(0,1)}
- as.forEach(function(a){a.classList.toggle('on',hit.indexOf(a)>=0)})}
+ as.forEach(function(a){var on=hit.indexOf(a)>=0;a.classList.toggle('on',on);if(a.classList.contains('kcb-t'))a.setAttribute('aria-selected',on);if(on)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')})}
 V.markTabs=markTabs;
 
 
 
 
 // ---------------------------------------------------------------- dashboard
-function chip(c,label,val){return '<span class="k310st '+c+'"><i></i>'+t(label)+'<b class="ltr">'+val+'</b></span>'}
-// the dashboard: a status line, the numbers, then live traffic beside server resources, servers beside tunnels,
-// services beside connections, the activity log last
+// (3.41) look, then decide: the server and its health at the top, six numbers, live traffic beside the
+// server's resources, then only what needs you (servers, tunnels and services in trouble, the latest
+// errors) and a summary of the connections. Starting and stopping services lives in VPN & cores, the
+// full log in the emergency page's Logs tab, every server in Servers.
 window.pDash=function(){dbReset();
-$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Dashboard')+'</h2><p class="ltr" id="d_sub" style="text-align:start">…</p></div>'+
- '<div class="row" style="gap:6px;flex-wrap:nowrap"><button class="btn sm" onclick="newUser()">'+ic('plus',15)+' '+t('New user')+'</button><span class="live" id="d_live"><i></i><span id="d_lt">'+t('Live')+'</span></span>'+
- '<select id="d_iv" style="width:auto;padding:6px 9px;font-size:12px">'+[1,2,5,10].map(function(n){return '<option value="'+n+'"'+(n==DB.iv?' selected':'')+'>'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select>'+
- '<button class="ib" id="d_pause" title="'+t('Pause')+'">❚❚</button></div></div>'+
- '<div class="k310strip" id="k310strip"></div><div class="kpis" id="kpis"></div>'+
- '<div class="k310dash" id="k310dash">'+
-  '<div class="k310c w8">'+'<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('Network speed')+'</h3><small class="muted ltr" id="n_if"></small></div>'+
-  '<div class="nbig"><div class="dn"><small>↓ '+t('Download')+'</small><b id="n_rx" class="ltr">—</b></div><div class="upl"><small>↑ '+t('Upload')+'</small><b id="n_tx" class="ltr">—</b></div></div></div>'+
-  '<div class="ch tall" id="ch_net"></div>'+
-  '<div class="nf ltr"><span>'+t('Peak')+' ↓ <b id="n_prx">—</b></span><span>'+t('Peak')+' ↑ <b id="n_ptx">—</b></span><span>'+t('Total since boot')+' ↓ <b id="n_trx">—</b></span><span>↑ <b id="n_ttx">—</b></span></div></div>'+'</div>'+
-  '<div class="k310c w4"><div class="card k310res"><h3>'+ic('cpu',16)+' '+t('Server resources')+'</h3>'+'<div class="gg">'+gcard('cpu','CPU',ic('cpu',16))+gcard('ram','RAM',ic('ram',16))+gcard('disk','Storage',ic('disk',16))+gcard('swap','Swap',ic('swap',16))+'</div>'+'</div></div>'+
-  '<div class="k310c w12">'+'<div class="card" id="nc" style="margin-bottom:12px"></div>'+'</div>'+
-  '<div class="k310c w6">'+'<div class="card"><h3>'+t('Services')+'</h3><p class="sub">'+t('Start, stop or restart the VPN services')+'</p><div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></div>'+'</div>'+
-  '<div class="k310c w6">'+'<div class="card" style="margin-bottom:12px"><div class="nh"><div><h3>'+t('TCP / UDP connections')+'</h3><small class="muted" id="c_sub"></small></div>'+
-  '<div class="nbig"><div class="dn"><small>TCP</small><b id="c_tcp" class="ltr">—</b></div><div class="upl"><small>UDP</small><b id="c_udp" class="ltr">—</b></div></div></div>'+
-  '<div class="ch tall" id="ch_con"></div></div>'+'</div>'+
- '</div>'+logCard();
+ var iv=[1,2,5,10].map(function(n){return '<option value="'+n+'"'+(n==DB.iv?' selected':'')+'>'+N(n)+' '+t('seconds')+'</option>'}).join('');
+ $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Dashboard')+'</h2><p class="ltr kd2-sub" id="d_sub">…</p></div>'+
+  '<div class="row kd2-acts"><span class="kpill" id="d_health"><i class="dot"></i><span>…</span></span>'+
+  '<span class="live" id="d_live"><i></i><span id="d_lt">'+t('Live')+'</span></span>'+
+  '<label class="kd2-iv"><span class="vh">'+t('Refresh every')+'</span><select id="d_iv">'+iv+'</select></label>'+
+  '<button type="button" class="kib" id="d_pause" aria-label="'+esc(t('Pause'))+'" title="'+esc(t('Pause'))+'">'+ic('pause',16)+'</button>'+
+  '<button type="button" class="btn" onclick="newUser()">'+ic('plus',16)+'<span>'+t('New user')+'</span></button></div></div>'+
+ '<section class="kd2-kpis" id="kpis" aria-label="'+esc(t('Users'))+'">'+kpiSkel()+'</section>'+
+ '<div class="kgrid">'+
+  '<section class="card kd2-net c8"><div class="kc-h"><div><h3>'+t('Network speed')+'</h3><small class="muted ltr" id="n_if">&nbsp;</small></div>'+
+   '<div class="kd2-big"><div class="dn"><small>↓ '+t('Download')+'</small><b id="n_rx" class="ltr">—</b></div><div class="upl"><small>↑ '+t('Upload')+'</small><b id="n_tx" class="ltr">—</b></div></div></div>'+
+   '<div class="ch kd2-ch" id="ch_net"></div>'+
+   '<dl class="kd2-foot ltr"><div><dt>'+t('Peak')+' ↓</dt><dd id="n_prx">—</dd></div><div><dt>'+t('Peak')+' ↑</dt><dd id="n_ptx">—</dd></div><div><dt>'+t('Total since boot')+' ↓</dt><dd id="n_trx">—</dd></div><div><dt>'+t('Total since boot')+' ↑</dt><dd id="n_ttx">—</dd></div></dl></section>'+
+  '<section class="card kd2-res c4"><div class="kc-h"><h3>'+t('Server resources')+'</h3></div><div class="kd2-gg">'+gcard('cpu','CPU',ic('cpu',14))+gcard('ram','RAM',ic('ram',14))+gcard('disk','Storage',ic('disk',14))+gcard('swap','Swap',ic('swap',14))+'</div></section>'+
+  '<section class="card kd2-att c8"><div class="kc-h"><div><h3>'+t('Needs attention')+'</h3><small class="muted" id="att_sub">&nbsp;</small></div><div class="kd2-chips" id="k310strip"></div></div><div id="att" class="kd2-attl"><div class="kskel"></div><div class="kskel"></div></div></section>'+
+  '<section class="card kd2-con c4"><div class="kc-h"><div><h3>'+t('TCP / UDP connections')+'</h3><small class="muted" id="c_sub">&nbsp;</small></div><a class="b2 sm" href="#ports">'+t('Ports')+'</a></div>'+
+   '<div class="kd2-big"><div class="dn"><small>TCP</small><b id="c_tcp" class="ltr">—</b></div><div class="upl"><small>UDP</small><b id="c_udp" class="ltr">—</b></div></div><div class="ch kd2-chs" id="ch_con"></div></section>'+
+ '</div>';
  $('#d_iv').onchange=function(){DB.iv=+this.value;localStorage.setItem('kk_div',DB.iv);dashTimers()};
- $('#d_pause').onclick=function(){DB.paused=!DB.paused;if(!DB.paused)DB.last=null;this.textContent=DB.paused?'▶':'❚❚';this.title=DB.paused?t('Resume'):t('Pause');dashLive(DB.paused?'off':'')};
- $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};logWire();
+ $('#d_pause').onclick=function(){DB.paused=!DB.paused;if(!DB.paused)DB.last=null;var l=t(DB.paused?'Resume':'Pause');this.innerHTML=ic(DB.paused?'play':'pause',16);this.title=l;this.setAttribute('aria-label',l);this.setAttribute('aria-pressed',DB.paused);dashLive(DB.paused?'off':'')};
  $('#kpis').onclick=function(e){var b=e.target.closest('[data-go]');if(b)goUsers(b.dataset.go)};
- dashTick();dashSys();dashTimers();
+ dashTick();dashSys();dashTimers();dashErrs();
  strip();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page!='dash'){clearInterval(S.timer4);return}strip()},3000)};
-window.drawKpis=function(o){var el=$('#kpis');if(el&&o){
- var it=[['a','Total users',o.users,'all'],['g','Online',o.online,'online'],['g','Active',o.active,'active'],['y','Expired / out of data',o.expired,'finished'],['r','Disabled',o.disabled,'disabled'],['a','Total traffic',N(o.traffic_gb)+' GB','']];
- el.innerHTML=it.map(function(x){return '<button class="kpi '+x[0]+'" '+(x[3]?'data-go="'+x[3]+'"':'')+'><small>'+t(x[1])+'</small><b class="ltr">'+(typeof x[2]=='number'?N(x[2]):x[2])+'</b></button>'}).join('')}
+var KPIS=[['a','Total users','users','all'],['g','Online','k310online','online'],['g','Active','k310ok','active'],['y','Expired / out of data','k310warn','finished'],['r','Disabled','k310off','disabled'],['a','Total traffic','k310traffic','']];
+function kpiOne(x,v,u){return '<button type="button" class="kstat tone-'+x[0]+'"'+(x[3]?' data-go="'+x[3]+'"':' disabled')+'><span class="kstat-l">'+t(x[1])+'</span><span class="kstat-v"><b class="ltr">'+v+'</b>'+(u?'<em>'+u+'</em>':'')+'</span><span class="kstat-i" aria-hidden="true">'+ic(x[2],18)+'</span></button>'}
+function kpiSkel(){return KPIS.map(function(x){return kpiOne(x,'—','')}).join('')}
+window.drawKpis=function(o){var el=$('#kpis');if(el&&o){var v=[o.users,o.online,o.active,o.expired,o.disabled];
+ el.innerHTML=KPIS.map(function(x,i){return i<5?kpiOne(x,N(v[i]||0),''):kpiOne(x,N(o.traffic_gb||0),'GB')}).join('')}
  strip()};
+function chip(c,label,val,href){return '<a class="kpill '+c+'" href="'+href+'"><i class="dot '+c+'"></i><span>'+t(label)+'</span><b class="ltr">'+val+'</b></a>'}
 function strip(){var el=$('#k310strip');if(!el)return;var h='';
- var ns=S.nodes||[];if(ns.length){var on=ns.filter(function(n){return n.online}).length;h+=chip(on==ns.length?'g':on?'y':'r','Servers online',N(on)+' / '+N(ns.length))}
- var tl=(TN.d&&TN.d.tunnels)||[];if(tl.length){var up=tl.filter(function(x){return x.state=='up'}).length;h+=chip(up==tl.length?'g':up?'y':'r','Tunnels up',N(up)+' / '+N(tl.length))}
- var sv=((DB.sys||{}).services||[]);if(sv.length){var bad=sv.filter(function(x){return !x.active}).length;h+=chip(bad?'y':'g','Services',bad?N(bad)+' '+t('stopped'):t('all running'))}
- if(DB.ov)h+=chip(DB.ov.online?'g':'','Users online',N(DB.ov.online));
- h=h||'<span class="muted">…</span>';if(el._h!==h){el._h=h;el.innerHTML=h}}  // unchanged: leave it, so its turning edges keep turning
+ var ns=S.nodes||[];if(ns.length){var on=ns.filter(function(n){return n.online||n.id=='local'}).length;h+=chip(on==ns.length?'g':on?'y':'r','Servers online',N(on)+' / '+N(ns.length),'#nodes')}
+ var tl=(TN.d&&TN.d.tunnels)||[];if(tl.length){var up=tl.filter(function(x){return x.state=='up'}).length;h+=chip(up==tl.length?'g':up?'y':'r','Tunnels up',N(up)+' / '+N(tl.length),'#tunnels')}
+ var sv=((DB.sys||{}).services||[]);if(sv.length){var bad=sv.filter(function(x){return !x.active}).length;h+=chip(bad?'y':'g','Services',bad?N(bad)+' '+t('stopped'):t('all running'),'#vpn')}
+ if(el._h!==h){el._h=h;el.innerHTML=h}
+ attention()}
+// what needs you now: each problem once, with where to fix it; the last errors of the log under them
+function attention(){var el=$('#att');if(!el)return;var it=[];
+ (S.nodes||[]).forEach(function(n){var h=nHealthOf(n),loc=n.id=='local';
+  if(!loc&&!n.online)it.push(['r','nodes',esc(n.name),t('Disconnected')+' · '+t('Last contact')+' '+ago(n.last_sync),'#nodes']);
+  else if(h.c!='g')it.push([h.c,'nodes',esc(n.name),esc(t(h.l))+((h.r&&h.r.length)?' · '+esc(t(h.r.slice().sort(function(a,b){return b[0]-a[0]})[0][1])):''),'#nodes'])});
+ ((TN.d&&TN.d.tunnels)||[]).forEach(function(x){if(x.enabled!==false&&x.state&&x.state!='up'&&x.state!='off')it.push([x.state=='partial'?'y':'r','tunnel',esc(x.name||x.id),t('Tunnel')+' · '+t(x.state=='partial'?'Partly down':'Down'),'#tunnels'])});
+ (((DB.sys||{}).services)||[]).forEach(function(x){if(!x.active)it.push(['y','cores',esc(SVN[x.key]||x.key),t('Stopped'),'#vpn'])});
+ var er=(DB.errs||[]).slice(-3).reverse(),h='';
+ h+=it.length?'<ul class="kd2-list">'+it.slice(0,8).map(function(x){return '<li><a href="'+x[4]+'"><i class="dot '+x[0]+'"></i><span class="ki">'+ic(x[1],16)+'</span><b>'+x[2]+'</b><small>'+x[3]+'</small></a></li>'}).join('')+'</ul>'+
+   (it.length>8?'<p class="muted">+'+N(it.length-8)+'</p>':''):
+  '<div class="kd2-ok"><span>'+ic('check',18)+'</span><div><b>'+t('Everything is working')+'</b><small>'+t('No server, tunnel or service needs you right now.')+'</small></div></div>';
+ h+='<div class="kd2-ev"><div class="kd2-evh"><b>'+t('Latest errors')+'</b><a href="#emergency/logs">'+t('All logs')+'</a></div>'+
+  (DB.errs==null?'<div class="kskel"></div>':er.length?er.map(function(x){return '<div class="kd2-evr"><time class="ltr">'+logTime(x.ts)+'</time><span class="ltr">'+esc(String(x.u||'').replace(/\.service$/,''))+'</span><code class="ltr">'+esc(x.m)+'</code></div>'}).join(''):'<p class="muted">'+t('No errors')+'</p>')+'</div>';
+ var sub=$('#att_sub');if(sub)sub.textContent=it.length?N(it.length)+' '+t('item(s)'):t('All clear');
+ var hp=$('#d_health');if(hp){var c=it.some(function(x){return x[0]=='r'})?'r':it.length?'y':'g';hp.className='kpill '+c;hp.innerHTML='<i class="dot '+c+'"></i><span>'+(c=='g'?t('Healthy'):N(it.length)+' '+t('issue(s)'))+'</span>'}
+ if(el._h!==h){el._h=h;el.innerHTML=h}}
+function dashErrs(){api('GET','/api/logs?src=all&n=200').then(function(r){DB.errs=(r.lines||[]).filter(function(x){return lgLevel(x)=='e'});attention()}).catch(function(){DB.errs=[];attention()})}
 
 // ---------------------------------------------------------------- tunnel map
 // The neon map (glowing fibres, packets that turn into the tunnel colour at the lock, cyan packets
@@ -248,90 +276,88 @@ var V=V37;
 var CHEV='<svg class="kd-chev" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>';
 function store(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){}return null}
 
-// ---------------------------------------------------------------- side menu: groups that open and close
-var GOPEN={};try{GOPEN=JSON.parse(store('kk_navg')||'{}')||{}}catch(e){}
+// ---------------------------------------------------------------- the shell (3.41)
+// One sidebar (or, if chosen, one menu across the top: never both), a 64px header in three parts
+// (where you are · what needs you · language, day/night, account) and the page. The panel's name
+// sits in the sidebar on a desktop and in the header on a phone; the version, the update and the
+// logout live in the account menu only.
 function groups(){var gs=[];V.SECS.forEach(function(s){var g=gs[gs.length-1];if(!g||g.l!=s[4])gs.push(g={l:s[4],s:[]});g.s.push(s)});return gs}
 function href(f){return '#'+f[0]+(f[1]?'/'+f[1]:'')}
-window.navSide=function(){var cur=V.secOf(S.page)[0];
- return groups().map(function(g){var open=GOPEN[g.l]!==false||g.s.some(function(x){return x[0]==cur});
-  return '<div class="kd-g'+(open?' open':'')+'" data-g="'+esc(g.l)+'"><button type="button" class="kd-gh" aria-expanded="'+open+'"><span>'+t(g.l)+'</span>'+CHEV+'</button>'+
-   '<div class="kd-gb"><div class="kd-gbi">'+g.s.map(function(s,i){var f=s[3][0];
-    return '<a href="'+href(f)+'" data-p="'+f[0]+'" data-sec="'+s[0]+'" class="kd-it d'+Math.min(5,i+1)+'" title="'+esc(t(s[1]))+'"><span class="ni">'+ic(s[2],18)+'</span><span class="kd-l">'+t(s[1])+'</span></a>'}).join('')+
-   '</div></div></div>'}).join('')};
-document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('.kd-gh');if(!b)return;
- var g=b.parentNode,o=!g.classList.contains('open');g.classList.toggle('open',o);b.setAttribute('aria-expanded',o);GOPEN[g.dataset.g]=o;store('kk_navg',JSON.stringify(GOPEN))});
-
-// ---------------------------------------------------------------- the menu across the top
-function topNav(){return '<nav class="kd-top" id="kdtop" aria-label="'+esc(t('Top menu'))+'">'+groups().map(function(g){
-  return '<span class="kd-sep">'+t(g.l)+'</span>'+g.s.map(function(s){var f=s[3][0];return '<a href="'+href(f)+'" data-sec="'+s[0]+'" class="kd-tn"><span class="ni">'+ic(s[2],17)+'</span>'+t(s[1])+'</a>'}).join('')}).join('')+'</nav>'}
+window.navSide=function(){
+ return groups().map(function(g){
+  return '<div class="ksn-g"><div class="ksn-gl">'+t(g.l)+'</div>'+g.s.map(function(s){var f=s[3][0];
+   return '<a href="'+href(f)+'" data-p="'+f[0]+'" data-sec="'+s[0]+'" class="ksn-it" title="'+esc(t(s[1]))+'"><span class="ksn-ic">'+ic(s[2],18)+'</span><span class="ksn-l">'+t(s[1])+'</span></a>'}).join('')+'</div>'}).join('')};
+function topNav(){return '<nav class="kst" id="kdtop" aria-label="'+esc(t('Top menu'))+'">'+groups().map(function(g){
+  return '<span class="kst-g">'+t(g.l)+'</span>'+g.s.map(function(s){var f=s[3][0];return '<a href="'+href(f)+'" data-sec="'+s[0]+'" class="kst-it">'+ic(s[2],16)+'<span>'+t(s[1])+'</span></a>'}).join('')}).join('')+'</nav>'}
 // drag a row sideways with the mouse (fingers scroll it by themselves); a drag is not a click
 function dragRow(el){if(!el||el._kd)return;el._kd=1;var d=null,moved=false;
  el.addEventListener('pointerdown',function(e){if(e.pointerType!='mouse')return;d={x:e.clientX,l:el.scrollLeft};moved=false});
- el.addEventListener('pointermove',function(e){if(!d)return;var dx=e.clientX-d.x;if(Math.abs(dx)>5)moved=true;if(moved){el.scrollLeft=d.l-dx;el.classList.add('kd-drag')}});
- var up=function(){d=null;setTimeout(function(){el.classList.remove('kd-drag')},0)};el.addEventListener('pointerup',up);el.addEventListener('pointerleave',up);
+ el.addEventListener('pointermove',function(e){if(!d)return;var dx=e.clientX-d.x;if(Math.abs(dx)>5)moved=true;if(moved)el.scrollLeft=d.l-dx});
+ var up=function(){d=null};el.addEventListener('pointerup',up);el.addEventListener('pointerleave',up);
  el.addEventListener('click',function(e){if(moved){e.preventDefault();e.stopPropagation();moved=false}},true)}
-function look(){document.body.classList.add('kd');document.body.classList.toggle('kd-mini',store('kk_mini')=='1');document.body.classList.toggle('kd-topm',store('kk_menu')=='top');
- $$('.kd-lay button').forEach(function(b){b.classList.toggle('on',(b.dataset.m=='top')==(store('kk_menu')=='top'))})}
-window.kdMenu=function(m){store('kk_menu',m);look();markAll()};
+function look(){var top=store('kk_menu')=='top',mini=store('kk_mini')=='1';
+ document.body.classList.toggle('ks-topm',top);document.body.classList.toggle('ks-mini',mini&&!top);
+ $$('#kmenu [data-m]').forEach(function(b){b.setAttribute('aria-checked',(b.dataset.m=='top')==top)});
+ var f=$('#kfold');if(f){f.setAttribute('aria-pressed',mini);f.title=t(mini?'Open the menu':'Fold the menu');f.setAttribute('aria-label',f.title)}}
+window.kdMenu=function(m){store('kk_menu',m);look();markAll();if(window.kAcct)kAcct(0)};
 window.kdMini=function(){store('kk_mini',store('kk_mini')=='1'?'0':'1');look()};
+// the account menu: who is signed in, the version and its update, where the menu sits, logout
+window.kAcct=function(on){var m=$('#kmenu'),b=$('#kacct');if(!m||!b)return;if(on===undefined)on=m.hidden;m.hidden=!on;b.setAttribute('aria-expanded',!!on);
+ if(on){var f=m.querySelector('button');if(f)f.focus()}};
+document.addEventListener('click',function(e){var m=$('#kmenu');if(m&&!m.hidden&&!e.target.closest('#kmenu,#kacct'))kAcct(0)});
+function acctMenu(me){return '<div class="kam" id="kmenu" role="menu" hidden>'+
+ '<div class="kam-who"><i>'+esc((me.user||'A').charAt(0).toUpperCase())+'</i><div><b class="ltr">'+esc(me.user||'')+'</b><small>'+t('Administrator')+'</small></div></div>'+
+ '<button type="button" role="menuitem" class="kam-it" id="upd2"><span class="dot" id="updot2"></span><span><b class="ltr">v'+esc(me.version||'')+'</b><small id="updt">'+t('Check for update')+'</small></span></button>'+
+ '<div class="kam-sep kam-lang" role="none"><span>'+t('Language')+'</span><div class="segl" role="group"><button type="button" data-l="fa" class="'+(S.lang=='fa'?'on':'')+'">FA</button><button type="button" data-l="en" class="'+(S.lang=='en'?'on':'')+'">EN</button></div></div>'+
+ '<div class="kam-sep kam-lay" role="group" aria-label="'+esc(t('Menu position'))+'"><span>'+t('Menu position')+'</span><div class="segl"><button type="button" role="menuitemradio" data-m="side" onclick="kdMenu(\'side\')">'+t('Side menu')+'</button><button type="button" role="menuitemradio" data-m="top" onclick="kdMenu(\'top\')">'+t('Top menu')+'</button></div></div>'+
+ '<button type="button" role="menuitem" class="kam-it kam-out" id="lo">'+ic('logout',17)+'<span>'+t('Logout')+'</span></button></div>'}
 window.shell=function(){var me=S.me||{},nm=me.panel_name||'Kanki Panel',L=nm.charAt(0);
- $('#app').innerHTML='<header class="top"><div class="'+logoCls()+'" id="mlogo">'+logoInner(L)+'</div>'+
- '<div class="tb-title"><small><span>'+esc(nm)+'</span><span>›</span><span id="tbsec"></span></small><b id="tbt"></b></div><div class="sp"></div>'+
- '<div class="tb-act"><div class="kd-lay" role="group" aria-label="'+esc(t('Top menu'))+'"><button type="button" data-m="side" onclick="kdMenu(\'side\')">'+t('Side menu')+'</button><button type="button" data-m="top" onclick="kdMenu(\'top\')">'+t('Top menu')+'</button></div><div class="segl"><button data-l="fa" class="'+(S.lang=='fa'?'on':'')+'">FA</button><button data-l="en" class="'+(S.lang=='en'?'on':'')+'">EN</button></div>'+
- '<button class="ib" id="thm" title="'+t('Theme')+'" aria-label="theme">'+ic('moon',17)+'</button>'+
- '<button class="ib" id="upd" title="'+t('Update')+'"><span class="dot" id="updot"></span><span class="uv ltr">v'+esc(me.version||'')+'</span></button>'+
- '<div class="uchip2" title="'+esc(me.user||'')+'"><i>'+esc((me.user||'A').charAt(0).toUpperCase())+'</i><span>'+esc(me.user||'')+'</span></div>'+
- '<button class="ib" id="lo" title="'+t('Logout')+'" aria-label="logout">'+ic('logout',17)+'</button></div></header>'+topNav()+
- '<nav class="side" id="side"><div class="sbrand"><div class="'+logoCls()+'">'+logoInner(L)+'</div><div style="min-width:0"><b>'+esc(nm)+'</b><small>'+t('VPN management')+'</small></div>'+
-  '<button type="button" class="kd-fold" onclick="kdMini()" aria-label="'+esc(t('Fold the menu'))+'" title="'+esc(t('Fold the menu'))+'">'+CHEV+'</button></div>'+
- '<div class="snav">'+navSide()+'</div>'+
- '<div class="sfoot"><button class="sver" id="upd2"><span class="dot" id="updot2"></span><span><b class="ltr">v'+esc(me.version||'')+'</b><small id="updt">'+t('Check for update')+'</small></span></button>'+
- '<a href="#" id="lo2" class="lo2"><span class="ni">'+ic('logout',18)+'</span>'+t('Logout')+'</a></div></nav><div class="shade" id="shade"></div>'+navBar()+'<main id="pg"></main>';
- $('#shade').onclick=function(){$('#side').classList.remove('on');$('#shade').classList.remove('on')};
- $('#msheet').onclick=function(e){if(e.target.closest('a'))navMark(S.page,S.sub)};
- var mb=$('#mbar');if(mb){mb.addEventListener('touchstart',function(){mb._touch=1},{passive:true});
-  mb.addEventListener('touchend',function(){setTimeout(function(){mb._touch=0},400)},{passive:true})}
- if(!window._navDoc){window._navDoc=1;document.addEventListener('click',function(e){var sh=$('#msheet');if(sh&&sh.classList.contains('on')&&!e.target.closest('#msheet,#mbar'))navMark(S.page,S.sub)})}
+ $('#app').innerHTML='<a class="kskip" href="#pg">'+t('Skip to content')+'</a>'+
+ '<aside class="kss" id="side" aria-label="'+esc(t('Main menu'))+'"><div class="kss-brand"><div class="'+logoCls()+'">'+logoInner(L)+'</div><div class="kss-bt"><b>'+esc(nm)+'</b><small>'+t('VPN management')+'</small></div></div>'+
+  '<nav class="kss-nav">'+navSide()+'</nav>'+
+  '<button type="button" class="kss-fold" id="kfold" onclick="kdMini()">'+ic('chev',16)+'<span>'+t('Fold the menu')+'</span></button></aside>'+
+ '<header class="ksh-top top" id="khead"><div class="ksh-brand"><div class="'+logoCls()+'" id="mlogo">'+logoInner(L)+'</div><b>'+esc(nm)+'</b></div>'+
+  '<nav class="ksh-id" aria-label="'+esc(t('You are here'))+'"><ol><li id="tbsec"></li><li id="tbt" aria-current="page"></li></ol></nav>'+
+  '<div class="ksh-glob" id="kglob"><button type="button" class="kupd" id="upd" hidden><span class="dot y"></span><span>'+t('Update available')+'</span></button></div>'+
+  '<div class="ksh-ctl"><div class="segl ksh-lang" role="group" aria-label="'+esc(t('Language'))+'"><button type="button" data-l="fa" class="'+(S.lang=='fa'?'on':'')+'">FA</button><button type="button" data-l="en" class="'+(S.lang=='en'?'on':'')+'">EN</button></div>'+
+  '<button type="button" class="kib" id="thm" aria-label="theme">'+ic('moon',18)+'</button>'+
+  '<div class="kacc"><button type="button" class="kacct" id="kacct" aria-haspopup="menu" aria-expanded="false" aria-controls="kmenu" onclick="kAcct()"><i>'+esc((me.user||'A').charAt(0).toUpperCase())+'</i><span class="ltr">'+esc(me.user||'')+'</span><span class="dot" id="updot"></span></button>'+acctMenu(me)+'</div></div></header>'+
+ topNav()+navBar()+'<main id="pg" tabindex="-1"></main>';
+ $('#msheet').onclick=function(e){if(e.target.closest('a'))k38More(0)};
  $$('[data-l]').forEach(function(b){b.onclick=function(){S.lang=b.dataset.l;localStorage.setItem('kk_lang',S.lang);applyLook();shell();route()}});
  $('#thm').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook()};
- $('#lo').onclick=function(){logout()};$('#lo2').onclick=function(e){e.preventDefault();logout()};
- $('#upd').onclick=updateModal;$('#upd2').onclick=function(){$('#shade').click();location.hash='#settings';S.stsec='upd';if(S.page=='settings')route()};
+ $('#lo').onclick=function(){logout()};
+ $('#upd').onclick=updateModal;$('#upd2').onclick=function(){kAcct(0);updateModal()};
  // page headers get the page icon, whenever a page draws (or redraws) its header
  new MutationObserver(decoratePh).observe($('#pg'),{childList:true,subtree:true});
  api('GET','/api/update/check').then(function(r){var c='dot '+(r.available?'y':(r.error?'':'g'));
-  ['#updot','#updot2'].forEach(function(x){var d=$(x);if(d)d.className=c});
+  ['#updot2'].forEach(function(x){var d=$(x);if(d)d.className=c});var d1=$('#updot');if(d1)d1.className=r.available?'dot y':'dot hide';
+  var ub=$('#upd');if(ub)ub.hidden=!r.available;
   var u=$('#updt');if(u)u.textContent=r.available?t('A new version is available.'):(r.error?t('Update source not set'):t('You are on the latest version.'))}).catch(function(){});
- document.body.classList.add('v37','k38');V.watchPg();V.drawLooks();dragRow($('#kdtop'));look()};
+ document.body.classList.add('v37','k38','kd');V.watchPg();V.drawLooks();dragRow($('#kdtop'));look()};
 function markAll(){var sk=V.secOf(S.page)[0];
- $$('#kdtop a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
- var on=$('#kdtop a.on');if(on&&document.body.classList.contains('kd-topm'))try{on.scrollIntoView({block:'nearest',inline:'center'})}catch(e){}
- var a=$('#side a.on'),g=a&&a.closest('.kd-g');if(g&&!g.classList.contains('open')){g.classList.add('open');var b=$('.kd-gh',g);if(b)b.setAttribute('aria-expanded','true')}}
-// the open section lit in every menu, its tabs on top of the page
+ $$('#kdtop a[data-sec]').forEach(function(a){var on=a.dataset.sec==sk;a.classList.toggle('on',on);if(on)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
+ var on=$('#kdtop a.on');if(on&&document.body.classList.contains('ks-topm')){var r=$('#kdtop'),rr=r.getBoundingClientRect(),ar=on.getBoundingClientRect();if(ar.left<rr.left||ar.right>rr.right)r.scrollLeft+=(ar.left+ar.width/2)-(rr.left+rr.width/2)}}
+// the open section lit in every menu, the core bar on top of a core's page
 window.navMark=function(p){var sk=V.secOf(p)[0];
- $$('#side a[data-sec],#mbar a[data-sec]').forEach(function(a){a.classList.toggle('on',a.dataset.sec==sk)});
- // an advanced tool open: «More» is lit in the bottom bar
+ $$('#side a[data-sec],#mbar a[data-sec]').forEach(function(a){var on=a.dataset.sec==sk;a.classList.toggle('on',on);if(on)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
+ // a section that is not in the bottom bar is open: «More» is lit
  var mm=$('#mbmore');if(mm)mm.classList.toggle('on',!$('#mbar a.on'));
- V.drawSecTabs(p);k38More(0);
- // the open section stays in sight in the scrolling bar
- // only when it is out of sight and the bar is not being swiped, and never the page itself
- var bar=$('#mbar'),a=bar&&bar.querySelector('a[data-sec="'+sk+'"]');
- if(a&&!bar._touch&&bar.clientWidth){var br=bar.getBoundingClientRect(),r=a.getBoundingClientRect();
-  if(r.left<br.left||r.right>br.right)bar.scrollBy({left:(r.left+r.width/2)-(br.left+br.width/2),behavior:'smooth'})}
- V.markTabs();markAll()};
+ V.drawSecTabs(p);k38More(0);V.markTabs();markAll()};
 
 // ---------------------------------------------------------------- pages
 window.route=function(){var hs=location.hash||'';
- // old addresses
+ // old addresses: one name and one place for each thing
  if(hs=='#xray'){location.replace('#xray/status');return}
  if(hs.slice(1).split('/')[0]=='servers'){location.replace('#nodes');return}
  Object.keys(KAcc.open).forEach(function(k){KAcc.open[k]=''});
  var h=(hs||'#dash').slice(1).split('/'),p=h[0];S.sub=h[1]||'';if(!PAGES.some(function(x){return x[0]==p})){p='dash';S.sub=''}S.page=p;
- var tb=$('#tbt');if(tb){tb.textContent=t(pgOf(p)[1]);$('#tbsec').textContent=t(grpOf(p))}
+ var sec=V.secOf(p),tb=$('#tbt');if(tb){var lbl=(sec[3].filter(function(x){return x[0]==p})[0]||[])[2]||pgOf(p)[1];
+  $('#tbsec').textContent=t(sec[4]);tb.textContent=sec[3].length>1?t(sec[1])+' › '+t(lbl):t(sec[1]);
+  document.title=t(sec[3].length>1?lbl:sec[1])+' · '+((S.me&&S.me.panel_name)||'Kanki Panel')}
  navMark(p,S.sub);clearPageTimers();window.scrollTo(0,0);
- (({dash:pDash,users:pUsers,nodes:pNodes,servers:pServers,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,emergency:pEmergency,backup:pBackup,security:pSecurity,settings:pSettings})[p]||window['p_'+p])();
+ (({dash:pDash,users:pUsers,nodes:pNodes,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,emergency:pEmergency,backup:pBackup,security:pSecurity,settings:pSettings})[p]||window['p_'+p])();
  V.watchPg();V.drawSecTabs(S.page);
- // every page comes in card by card
- var pg=$('#pg');if(pg){pg.classList.remove('kd-enter');void pg.offsetWidth;pg.classList.add('kd-enter');clearTimeout(pg._kd);pg._kd=setTimeout(function(){pg.classList.remove('kd-enter')},1400)}
 };
 
 // Anti-DPI: the methods fold to one line (name, tags, make); a tap shows what each one is for
@@ -347,13 +373,8 @@ function reality(){var sel=$('#xi_dp');if(!sel||$('#kd_rt'))return;
    box.innerHTML='<small class="muted">'+t('Tested from the panel server: TLS 1.3, a valid certificate and HTTP/2. Tap one to use it.')+'</small><div class="kd-rtg">'+res.map(function(x){var h=x.target.split(':')[0];
     return '<button type="button" class="kd-rt '+(x.ok?'ok':x.tls13?'mid':'bad')+'" data-t="'+esc(x.target)+'" title="'+esc(x.error||'')+'"><i>'+(x.ok?'✓':'✕')+'</i><span class="ltr">'+esc(h)+'</span>'+(x.ms?'<small class="ltr">'+N(x.ms)+'ms</small>':'')+(/\.ir$/.test(h)?'<em>IR</em>':'')+'</button>'}).join('')+'</div>';
    $$('.kd-rt',box).forEach(function(c){c.onclick=function(){$('#xi_de').value=c.dataset.t;$('#xi_na').value=c.dataset.t.split(':')[0];$$('.kd-rt',box).forEach(function(z){z.classList.toggle('pick',z==c)})}})}).catch(function(e){b.disabled=false;b.textContent=t('Test the sites');fail(e)})}}
-// the dashboard numbers get a turning edge in their own colour
-function kpiEdges(){$$('#kpis .kpi').forEach(function(k){if(!$('.kd-edge',k))k.insertAdjacentHTML('beforeend','<i class="kd-edge" aria-hidden="true"></i>')})}
-// every turning edge turns in step with the others, and a redraw does not send it back to the start
-var EDGE='.kd-it.on,.kd-tn.on,.uchip.kd-u,#st .stn button.on,.k310st,.kd-edge,.kxr[data-acc="srv"]>.kxr-h';
-function phase(){var ph=-((Date.now()/1000)%3.2);$$(EDGE).forEach(function(e){if(!e._kdph){e._kdph=1;e.style.setProperty('--kdph',ph.toFixed(2)+'s')}})}
 // whatever a page draws is dressed right away: number icons, tab marks, drawers, rails and chips
-new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();antidpi();reality();kpiEdges();phase()}).observe(document.body,{childList:true,subtree:true});
+new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();antidpi();reality()}).observe(document.body,{childList:true,subtree:true});
 
 // ---------------------------------------------------------------- users: two columns, data and expiry date
  // (3.40) a clean card: name and status, the data bar, data · days left · connections now / allowed,

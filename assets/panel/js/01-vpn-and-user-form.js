@@ -62,7 +62,9 @@ function protoAll(p,add){var nm=p=='xray'?'Xray':'DNS';
   srvReload(p);if(S.page=='users')loadUsers()}).catch(fail)}
 
 // ---------------------------------------------------------------- the VPN services page: Kanki VPN | Xray
-function p_vpn(){$('#pg').innerHTML='<div class="ku">'+kuHead('cores',t('VPN services'),t('Every core your users get, each on its own card'))+'<div id="vh_s"></div><div class="cgrid" id="vh_g">'+t('Loading…')+'</div></div>';
+function p_vpn(){$('#pg').innerHTML='<div class="ku">'+kuHead('cores',t('VPN & cores'),t('Every core your users get, each on its own card'))+'<div id="vh_s"></div><div class="cgrid" id="vh_g">'+t('Loading…')+'</div>'+
+  '<section class="card kv-svc"><div class="kc-h"><div><h3>'+t('Services')+'</h3><small class="muted">'+t('Start, stop or restart the VPN services')+'</small></div></div><div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></section></div>';
+ $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};sysSvcLoad();
  var go=function(){Promise.all([api('GET','/api/nodes').catch(function(){return []}),api('GET','/api/overview').catch(function(){return {}}),api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null}),api('GET','/api/kping').catch(function(){return null})]).then(function(r){if(S.page!='vpn')return;S.nodes=r[0]||[];if(r[2])XR.d=r[2];if(r[3])DN.d=r[3];vhGrid(r[0]||[],r[1]||{},r[2],r[3],r[4])})};
  go();clearInterval(S.timer);S.timer=setInterval(function(){if(document.visibilityState=='visible'&&!$('#modal').classList.contains('on'))go()},8000)}
 // one card per core (3.34): status, servers running it and users; the whole card opens the core's own page

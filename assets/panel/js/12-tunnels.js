@@ -232,7 +232,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  var advOpen=!!(id&&((x.transport!='cdn'&&(x.sni||x.host||x.path||x.frag||x.dial))||x.auto||x.target||prof!='balanced'));
  var sec=function(n,title,extra,key){return '<div class="tws"'+(key?' data-s="'+key+'"':'')+'><h4>'+(n?'<i>'+N(n)+'</i>':'')+t(title)+(extra||'')+'</h4>'};
  // the form in parts: tabs on a phone or tablet (one part at a time, no long scroll), a grid on a desktop
- var TWT=[['route','Route'],['type','Tunnel type'],['tr','Transport'],['ports','Ports'],['more','More']];
+ var TWT=[['route','Route'],['type','Tunnel type'],['tr','Transport'],['ports','Ports'],['more','More'],['review','Review']];
  modal(mhead(id?t('Edit tunnel'):t('New tunnel'))+
   (sv.length<2?'<div class="warnbox">'+t('First add your entry server in the “Tunnel servers” menu.')+'</div>':'')+
   '<div class="twtabs" id="tw_tabs" role="tablist">'+TWT.map(function(z){return '<button type="button" role="tab" data-t="'+z[0]+'" class="'+(z[0]=='route'?'on':'')+'">'+t(z[1])+'</button>'}).join('')+'</div>'+
@@ -312,15 +312,32 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<div class="g2"><div><label class="f">'+t('Address to dial (empty = the server’s address)')+'</label><input id="tw_dl" class="ltr" value="'+esc(x.transport=='cdn'?'':(x.dial||''))+'"></div>'+
   '<div><label class="f">'+t('Target on the exit')+'</label><input id="tw_tg" class="ltr" value="'+esc(x.target||'')+'" placeholder="127.0.0.1"></div></div></div>'+
   '</div></div></div>'+
+  // (3.41) a last look before saving: where it goes, how, which ports, and what is still wrong
+  '<div class="tws twrv" data-s="review" id="tw_rv"><h4>'+t('Review')+'</h4><div id="tw_rvb"></div></div>'+
   '</div>'+
   '<div class="g2 twfoot"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="tw_go">'+(id?t('Save'):t('Make the tunnel'))+'</button></div>','wide tunf');
  // tabs: a part the form hides (no transport for a plain AmneziaWG link, ...) hides its tab too
  function twTab(k){var f=$('#tw_f');if(!f)return;f.dataset.tab=k;$$('#tw_tabs button').forEach(function(b){b.classList.toggle('on',b.dataset.t==k)});
-  if(k=='more'){var a=$('#tw_adv');a.classList.add('on');a.querySelector('.advh').setAttribute('aria-expanded','true')}$('#mbox').scrollTop=0}
+  if(k=='more'){var a=$('#tw_adv');a.classList.add('on');a.querySelector('.advh').setAttribute('aria-expanded','true')}if(k=='review')twReview();$('#mbox').scrollTop=0}
+ function twReview(){var b=$('#tw_rvb');if(!b)return;var v=function(i){var e=$(i);return e?String(e.value||'').trim():''},tx=function(i){var e=$(i);return e&&e.selectedIndex>=0?e.options[e.selectedIndex].text:''};
+  var en=v('#tw_en'),ex=v('#tw_ex'),kd=st.kind=='awg'?'AmneziaWG':st.kind=='hy2'?'Hysteria2':t('Kanki tunnel'),pt=st.kind=='awg'?v('#tw_aw_pt'):st.kind=='hy2'?v('#tw_hy_pt'):v('#tw_pt');
+  var tcp=st.kind=='awg'?v('#tw_aw_ft'):v('#tw_tcp'),udp=st.kind=='awg'?v('#tw_aw_fu'):v('#tw_udp'),dom=st.tr=='cdn'?v('#tw_chost'):v('#tw_sni'),err=[];
+  if(en==ex)err.push(t('The entry and the exit must be different'));
+  if(!pt&&!(st.kind=='awg'&&!st.wrap))err.push(t('Tunnel port')+': '+t('empty'));
+  if(/⚠/.test(($('#tw_ph')||{}).textContent||''))err.push(t('This port is already used by another tunnel'));
+  if(st.tr=='cdn'&&!st.kind&&!v('#tw_chost'))err.push(t('Host: your domain on the CDN')+': '+t('empty'));
+  var row=function(l,x,ltr){return '<div><dt>'+l+'</dt><dd'+(ltr?' class="ltr"':'')+'>'+(x?esc(x):'<span class="muted">—</span>')+'</dd></div>'};
+  b.innerHTML=(err.length?'<div class="twrv-err" role="alert"><b>'+t('Fix before saving')+'</b><ul>'+err.map(function(e){return '<li>'+esc(e)+'</li>'}).join('')+'</ul></div>':'<div class="twrv-ok">'+ic('check',16)+'<span>'+t('Ready to save')+'</span></div>')+
+   '<dl class="twrv-l">'+row(t('Name'),v('#tw_nm')||t('Empty = Iran server-abroad server'))+row(t('Entry (users connect here)'),tx('#tw_en'))+row(t('Exit (traffic leaves here)'),tx('#tw_ex'))+
+   row(t('Who connects'),t(st.mode=='direct'?'Entry → exit (direct)':'Exit → entry (reverse, recommended)'))+row(t('Tunnel type'),kd)+(st.kind?'':row(t('Transport'),tunTr(st.tr).replace(/<[^>]+>/g,'')))+
+   row(t('Tunnel port'),pt,1)+row('TCP',tcp,1)+row('UDP',udp,1)+(dom?row(st.tr=='cdn'?t('Domain'):'SNI',dom,1):'')+'</dl>'}
+ $('#tw_f').addEventListener('input',function(){if($('#tw_f').dataset.tab=='review'||window.innerWidth>=900)twReview()});
+ $('#tw_f').addEventListener('click',function(){setTimeout(function(){if($('#tw_f')&&($('#tw_f').dataset.tab=='review'||window.innerWidth>=900))twReview()},0)});
  function twTabs(){var f=$('#tw_f');if(!f)return;$$('#tw_tabs button').forEach(function(b){var p=f.querySelector('[data-s="'+b.dataset.t+'"]');b.style.display=p&&p.style.display=='none'?'none':''});
   var cur=f.querySelector('[data-s="'+f.dataset.tab+'"]');if(cur&&cur.style.display=='none')twTab('route')}
  $$('#tw_tabs button').forEach(function(b){b.onclick=function(){twTab(b.dataset.t)}});
  new MutationObserver(twTabs).observe($('#tw_f'),{attributes:true,attributeFilter:['style'],subtree:true});
+ setTimeout(twReview,0);
  var st={mode:mode,tr:tr,kind:kind,wrap:!!A.wrap};
  $('#tw_adv .advh').onclick=function(){var a=$('#tw_adv'),on=a.classList.toggle('on');this.setAttribute('aria-expanded',on)};
  function hint(){var en=$('#tw_en').value,ex=$('#tw_ex').value,l=st.mode=='direct'?ex:en,pt=$('#tw_pt');

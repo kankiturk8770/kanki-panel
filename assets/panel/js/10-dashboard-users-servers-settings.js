@@ -6,13 +6,13 @@ function pushH(k,v){var a=DB.h[k];a.push(v);if(a.length>DB.max)a.shift()}
 function pc(u,tt){return tt>0?Math.max(0,Math.min(100,100*u/tt)):0}
 function rate(b){b=+b||0;var u=['B/s','KB/s','MB/s','GB/s'],i=0;while(b>=1024&&i<3){b/=1024;i++}return (i==0||b>=100?Math.round(b):b.toFixed(b>=10?1:2))+' '+u[i]}
 function upt(s){s=Math.floor(+s||0);var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?N(d)+' '+t('days')+' ':'')+N(p2(h))+':'+N(p2(m))}
-function gcard(id,title,icon){return '<div class="gc" id="gc_'+id+'"><div class="gh"><span>'+icon+'</span><b>'+t(title)+'</b></div><div class="gb">'+
- '<svg class="ring" viewBox="0 0 80 80" aria-hidden="true"><circle class="rb" cx="40" cy="40" r="34"/><circle class="rf" id="rf_'+id+'" cx="40" cy="40" r="34" transform="rotate(-90 40 40)" stroke-dasharray="0 213.6"/><text class="rt" id="rt_'+id+'" x="40" y="46" text-anchor="middle">—</text></svg>'+
- '<div class="gi"><b id="gv_'+id+'">—</b><small id="gs_'+id+'"></small></div></div><div class="ch" id="ch_'+id+'"></div></div>'}
+function gcard(id,title,icon){return '<div class="kg-gauge" id="gc_'+id+'">'+
+ '<svg class="kg-ring" viewBox="0 0 80 80" aria-hidden="true"><circle class="kg-rb" cx="40" cy="40" r="34"/><circle class="kg-rf" id="rf_'+id+'" cx="40" cy="40" r="34" transform="rotate(-90 40 40)" stroke-dasharray="0 213.6"/><text class="kg-rt" id="rt_'+id+'" x="40" y="46" text-anchor="middle">—</text></svg>'+
+ '<div class="kg-gi"><span class="kg-gl">'+icon+'<span>'+t(title)+'</span></span><b id="gv_'+id+'">—</b><small id="gs_'+id+'">&nbsp;</small></div><div class="ch kg-gch" id="ch_'+id+'"></div></div>'}
 function setRing(id,p,val,sub){var f=$('#rf_'+id);if(!f)return;f.setAttribute('stroke-dasharray',(p*2.136).toFixed(1)+' 213.6');
- $('#gc_'+id).className='gc'+(p>=90?' hot':p>=70?' warm':'');$('#rt_'+id).textContent=N(Math.round(p))+'%';
- $('#gv_'+id).innerHTML=/^[\d۰-۹]/.test(val)?'<bdi class="ltr">'+esc(val)+'</bdi>':esc(val);$('#gs_'+id).textContent=sub||''}
-function dashTimers(){clearInterval(S.timer);clearInterval(S.timer2);S.timer=setInterval(dashTick,DB.iv*1000);S.timer2=setInterval(dashSys,10000)}
+ $('#gc_'+id).className='kg-gauge'+(p>=90?' hot':p>=70?' warm':'');$('#rt_'+id).textContent=N(Math.round(p))+'%';
+ $('#gv_'+id).innerHTML=/^[\d۰-۹]/.test(val)?'<bdi class="ltr">'+esc(val)+'</bdi>':esc(val);$('#gs_'+id).textContent=sub||' '}
+function dashTimers(){clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);S.timer=setInterval(dashTick,DB.iv*1000);S.timer2=setInterval(dashSys,10000);S.timer3=setInterval(function(){if(S.page=='dash'&&document.visibilityState=='visible')dashErrs()},30000)}
 function dashLive(state){var l=$('#d_live');if(!l)return;l.className='live'+(state?' '+state:'');$('#d_lt').textContent=state=='bad'?t('Reconnecting…'):state=='off'?t('Paused'):t('Live')}
 function goUsers(f){S.filter=f;S.q='';S.pg=1;S.pf='all';location.hash='#users'}
 function dashTick(){if(S.page!='dash'||DB.paused||document.visibilityState!='visible')return;
@@ -41,10 +41,10 @@ function dashDraw(rxs,txs){var l=DB.last;if(!l||!$('#d_sub'))return;
  $('#c_tcp').textContent=N(l.tcp_est);$('#c_udp').textContent=N(l.udp);$('#c_sub').textContent=t('TCP listening')+': '+N(l.tcp_listen);
  $('#ch_con').innerHTML=areaChart([{v:DB.h.tcp,c:'a'},{v:DB.h.udp,c:'b'}],{h:132,cap:DB.max})}
 function dashSys(){if(S.page!='dash'||document.visibilityState!='visible')return;
- Promise.all([api('GET','/api/system'),api('GET','/api/overview'),api('GET','/api/nodes').catch(function(){return null})]).then(function(r){if(S.page!='dash')return;DB.sys=r[0];DB.ov=r[1];if(r[2]){S.nodes=r[2];drawNodesCard(r[2])}
+ Promise.all([api('GET','/api/system'),api('GET','/api/overview'),api('GET','/api/nodes').catch(function(){return null}),api('GET','/api/tunnels').catch(function(){return null})]).then(function(r){if(S.page!='dash')return;DB.sys=r[0];DB.ov=r[1];if(r[2])S.nodes=r[2];if(r[3])TN.d=r[3];
   var s=r[0],dp=pc(s.disk_used,s.disk_total);DB.dp=dp;if(!DB.h.disk.length)for(var i=0;i<DB.max;i++)DB.h.disk.push(dp);
   setRing('disk',dp,N(bytes(s.disk_used))+' / '+N(bytes(s.disk_total)),'');$('#ch_disk').innerHTML=areaChart([{v:DB.h.disk,c:'a'}],{h:54,max:100,cap:DB.max});
-  drawKpis(r[1]);drawSvcs(s.services||[])}).catch(function(){})}
+  drawKpis(r[1])}).catch(function(){})}
 
 function goNodes(add){S.openAdd=!!add;if(location.hash=='#nodes')route();else location.hash='#nodes'}
 
@@ -56,7 +56,8 @@ function drawSvcs(list){var el=$('#svcs');if(!el)return;list=(list||[]);
   '<div class="sbtn"><button class="sb on" data-svc="'+k+'" data-act="start" '+(x.active||fixed?'disabled':'')+'>▶ '+t('Start')+'</button>'+
   '<button class="sb off" data-svc="'+k+'" data-act="stop" '+(!x.active||fixed?'disabled':'')+' title="'+(fixed?t('Only restart is allowed for this service'):'')+'">■ '+t('Stop')+'</button>'+
   '<button class="sb" data-svc="'+k+'" data-act="restart">↻ '+t('Restart')+'</button></div></div>'}).join('')}
-function svc(k,a){var go=function(){toast(t('Checking…'));api('POST','/api/services/'+encodeURIComponent(k)+'/'+a).then(function(r){toast(r.ok===false?t('Failed'):t('Done'),r.ok===false);setTimeout(dashSys,1500)}).catch(fail)};
+function sysSvcLoad(){if(!$("#svcs"))return;api('GET','/api/system').then(function(s){drawSvcs(s.services||[])}).catch(function(){})}
+function svc(k,a){var go=function(){toast(t('Checking…'));api('POST','/api/services/'+encodeURIComponent(k)+'/'+a).then(function(r){toast(r.ok===false?t('Failed'):t('Done'),r.ok===false);setTimeout(sysSvcLoad,1500)}).catch(fail)};
  if(a=='start')go();else confirmDo(go)}
 
 // ---------------------------------------------------------------- users
@@ -75,21 +76,23 @@ function pUsers(){var pg=$('#pg');
   so=[['new','Newest'],['old','Oldest'],['name','Name'],['usage','Most used'],['expiry','Nearest expiry'],['seen','Last seen']],
   po=[['all','All protocols']].concat(PROTOS);
  var opt=function(a,cur,tr){return a.map(function(x){return '<option value="'+x[0]+'"'+(x[0]==cur?' selected':'')+'>'+(tr===false?esc(x[1]):t(x[1]))+'</option>'}).join('')};
- pg.innerHTML='<div class="ph"><div><h2>'+t('Users')+'</h2><p id="ucount"></p></div><div class="row" style="gap:6px;flex-wrap:nowrap"><button class="ib" id="selm" title="'+t('Select')+'" aria-label="'+t('Select')+'">'+ic('sel',18)+'</button><button class="ib" id="rf" title="'+t('Refresh')+'">'+ic('refresh',17)+'</button><button class="btn" onclick="newUser()">+ '+t('New user')+'</button></div></div>'+
-  // (3.40) one toolbar instead of the rows of counters: search, status, sort and protocol
- '<div class="ubar"><div class="srch"><input id="q" type="search" autocomplete="off" placeholder="'+t('Search by name or note…')+'" value="'+esc(S.q)+'"><button id="qx" class="'+(S.q?'':'hide')+'" aria-label="clear">✕</button></div>'+
-  '<div class="ufilt" id="ust" role="tablist" aria-label="'+t('Status')+'"></div>'+
-  '<div class="usel"><select id="srt" aria-label="'+t('Sort')+'">'+opt(so,S.sort)+'</select><select id="pf" aria-label="'+t('Protocol')+'">'+opt(po,S.pf,false).replace('>All protocols<','>'+t('All protocols')+'<')+'</select></div></div>'+
+ pg.innerHTML='<div class="ph"><div><h2>'+t('Users')+'</h2><p id="ucount"></p></div><div class="row"><button type="button" class="kib" id="selm" aria-pressed="false" title="'+t('Select')+'" aria-label="'+t('Select')+'">'+ic('sel',18)+'</button><button type="button" class="kib" id="rf" title="'+t('Refresh')+'" aria-label="'+t('Refresh')+'">'+ic('refresh',17)+'</button><button type="button" class="btn" onclick="newUser()">'+ic('plus',16)+'<span>'+t('New user')+'</span></button></div></div>'+
+  // (3.41) the search always in sight; status, sort and protocol beside it on a desktop, behind «Filters» on a phone
+ '<div class="ubar" id="ubar"><div class="ubar-q"><div class="srch"><label class="vh" for="q">'+t('Search')+'</label><input id="q" type="search" autocomplete="off" placeholder="'+t('Search by name or note…')+'" value="'+esc(S.q)+'"><button type="button" id="qx" class="'+(S.q?'':'hide')+'" aria-label="'+esc(t('Clear'))+'">✕</button></div>'+
+  '<button type="button" class="b2 ufbtn" id="ufbtn" aria-expanded="false" aria-controls="ufp">'+ic('settings',16)+'<span>'+t('Filters')+'</span><em id="ufn" hidden></em></button></div>'+
+  '<div class="ufp" id="ufp"><div class="ufilt" id="ust" role="group" aria-label="'+t('Status')+'"></div>'+
+  '<div class="usel"><select id="srt" aria-label="'+t('Sort')+'">'+opt(so,S.sort)+'</select><select id="pf" aria-label="'+t('Protocol')+'">'+opt(po,S.pf,false).replace('>All protocols<','>'+t('All protocols')+'<')+'</select></div></div></div>'+
  '<div class="selbar hide" id="selbar"><label><span class="ck"><input type="checkbox" id="sall"><i></i></span><span>'+t('Select all')+' (<span id="sallc">0</span>)</span></label></div>'+
  '<div class="uchips" id="ul"><div class="empty2">'+t('Loading…')+'</div></div><div class="pager2" id="pager"></div>'+
- '<div class="bulk hide" id="bulk"><span class="cnt" id="bcnt"></span><button class="b2" data-b="enable">'+t('Enable')+'</button><button class="b2" data-b="disable">'+t('Disable')+'</button><button class="b2" data-b="reset">'+t('Reset traffic')+'</button><button class="b2" data-b="extend">'+t('Extend')+'</button><button class="b2 bd" data-b="delete">'+t('Delete')+'</button><button class="ib" data-b="clear" title="'+t('Clear selection')+'">✕</button></div>';
+ '<div class="bulk hide" id="bulk" role="toolbar" aria-label="'+esc(t('Selected users'))+'"><span class="cnt" id="bcnt" aria-live="polite"></span><div class="bulk-a"><button type="button" class="b2" data-b="enable">'+t('Enable')+'</button><button type="button" class="b2" data-b="disable">'+t('Disable')+'</button><button type="button" class="b2" data-b="reset">'+t('Reset traffic')+'</button><button type="button" class="b2" data-b="extend">'+t('Extend')+'</button><button type="button" class="b2 bd" data-b="delete">'+t('Delete')+'</button></div><button type="button" class="kib" data-b="clear" title="'+t('Clear selection')+'" aria-label="'+t('Clear selection')+'">✕</button></div>';
  $('#q').oninput=function(){S.q=this.value;$('#qx').classList.toggle('hide',!this.value);S.pg=1;pruneSel();drawUsers()};
  $('#qx').onclick=function(){$('#q').value='';S.q='';this.classList.add('hide');S.pg=1;pruneSel();drawUsers()};
  
  $('#pf').onchange=function(){S.pf=this.value;S.pg=1;pruneSel();drawUsers()};
  $('#srt').onchange=function(){S.sort=this.value;localStorage.setItem('kk_sort',S.sort);S.pg=1;drawUsers()};
  $('#rf').onclick=function(){loadUsers()};
- $('#selm').onclick=function(){S.selMode=!S.selMode;if(!S.selMode)S.sel={};this.classList.toggle('on',S.selMode);drawUsers()};
+ $('#selm').onclick=function(){S.selMode=!S.selMode;if(!S.selMode)S.sel={};this.classList.toggle('on',S.selMode);this.setAttribute('aria-pressed',S.selMode);drawUsers()};
+ $('#ufbtn').onclick=function(){var o=!$('#ubar').classList.contains('open');$('#ubar').classList.toggle('open',o);this.setAttribute('aria-expanded',o)};
  $('#sall').onchange=function(){var all=this.checked;filtered().forEach(function(u){if(all)S.sel[u.id]=1;else delete S.sel[u.id]});drawUsers()};
  $('#ust').onclick=function(e){var b=e.target.closest('[data-f]');if(!b)return;S.filter=b.dataset.f;S.pg=1;pruneSel();drawUsers();drawStats()};
  $('#ul').onkeydown=function(e){if((e.key=='Enter'||e.key==' ')&&e.target.classList&&e.target.classList.contains('uchip')){e.preventDefault();e.target.click()}};
@@ -104,9 +107,10 @@ function pUsers(){var pg=$('#pg');
  loadUsers();api('GET','/api/nodes').then(function(n){S.nodes=n}).catch(function(){});autoRefresh(loadUsers)}
 function loadUsers(){return Promise.all([api('GET','/api/users'),api('GET','/api/overview')]).then(function(r){S.users=r[0];S.ov=r[1];
  var live={};S.users.forEach(function(u){live[u.id]=1});Object.keys(S.sel).forEach(function(k){if(!live[k])delete S.sel[k]});drawStats();drawUsers()}).catch(fail)}
+function ufCount(){var n=(S.filter&&S.filter!='all'?1:0)+(S.pf&&S.pf!='all'?1:0)+(S.sort&&S.sort!='new'?1:0),e=$('#ufn');if(!e)return;e.hidden=!n;e.textContent=N(n)}
 function drawStats(){var o=S.ov;if(!o||!$('#ust'))return;
  var c=[['',o.users,'All','all'],['g',o.online,'Online','online'],['g',o.active,'Active','active'],['y',o.expired,'Expired','finished'],['r',o.disabled,'Disabled','disabled']];
- $('#ust').innerHTML=c.map(function(x){return '<button type="button" role="tab" aria-selected="'+(S.filter==x[3])+'" class="uf'+(S.filter==x[3]?' act':'')+'" data-f="'+x[3]+'">'+(x[0]?'<span class="dot '+x[0]+'"></span>':'')+'<span>'+t(x[2])+'</span><b>'+N(x[1]||0)+'</b></button>'}).join('');
+ $('#ust').innerHTML=c.map(function(x){return '<button type="button" aria-pressed="'+(S.filter==x[3])+'" class="uf'+(S.filter==x[3]?' act':'')+'" data-f="'+x[3]+'">'+(x[0]?'<span class="dot '+x[0]+'"></span>':'')+'<span>'+t(x[2])+'</span><b>'+N(x[1]||0)+'</b></button>'}).join('');
  drawLive()}
 // connected right now, by protocol: a count per protocol, a tap filters the list to it
 function liveOf(u){return u.live||[]}
@@ -136,7 +140,7 @@ function drawUsers(){var el=$('#ul');if(!el)return;var list=filtered(),pages=Mat
  var part=list.slice((S.pg-1)*S.size,S.pg*S.size);
  el.className='uchips'+(S.selMode?' selmode':'');
  el.innerHTML=part.length?part.map(uchip).join(''):'<div class="empty2">'+(S.users.length?t('No match'):t('No users yet')+'<br><button class="btn" data-a="new">+ '+t('Create the first user')+'</button>')+'</div>';
- drawPager(pages);drawSelBar(list);drawBulk();
+ drawPager(pages);drawSelBar(list);drawBulk();ufCount();
  $('#ucount').textContent=N(S.users.length)+' '+t('users total')+(list.length!=S.users.length?' · '+N(list.length)+' '+t('match'):'')}
 function drawSelBar(list){var c=$('#sall');if(!c)return;var n=0;list.forEach(function(u){if(S.sel[u.id])n++});
  $('#selbar').classList.toggle('hide',!S.selMode);
@@ -253,9 +257,10 @@ function updateAll(){if(!confirm(t('Update every node, every tunnel server and t
 
 // ---------------------------------------------------------------- backup
 function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'</h2><p>'+t('Full backup of users, credentials, certificates, VPN settings, nodes and panel state')+'</p></div></div>'+
- '<div class="g2"><div class="card" style="margin:0"><h3>'+t('Backup file')+'</h3><p class="sub">'+t('Encrypted archive. File name includes date and time.')+'</p><div class="row" style="flex-wrap:nowrap"><input id="bk_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"><button class="btn" id="bk_go" style="flex:none">'+t('Download backup')+'</button></div></div>'+
- '<div class="card" style="margin:0"><h3>'+t('Restore')+'</h3><p class="sub">'+t('Pick a backup file; if encrypted, enter its passphrase.')+'</p><div class="row" style="flex-wrap:nowrap"><label class="b2" style="white-space:nowrap;flex:none">'+t('Choose file')+'<input type="file" id="rs_f" class="hide"></label><input id="rs_p" type="password" placeholder="'+t('Empty = panel backup passphrase')+'"></div><small class="muted" id="rs_n">'+t('No file chosen')+'</small>'+
- '<label class="chk" style="margin-top:8px"><input type="checkbox" id="rs_full">'+t('Also restore server keys & configs (same/new server migration)')+'</label><div style="text-align:center;margin-top:8px"><button class="btn" id="rs_go">'+t('Restore backup')+'</button></div></div></div>'+moveCard()+
+ '<div class="kgrid"><section class="card c6"><h3>'+t('Backup file')+'</h3><p class="sub">'+t('Encrypted archive. File name includes date and time.')+'</p><div class="kfr"><input id="bk_p" type="password" aria-label="'+esc(t('Passphrase'))+'" placeholder="'+t('Empty = panel backup passphrase')+'"><button class="btn" id="bk_go">'+ic('dl',16)+'<span>'+t('Download backup')+'</span></button></div></section>'+
+ '<section class="card c6 kdanger"><h3>'+t('Restore')+'</h3><p class="sub">'+t('Pick a backup file; if encrypted, enter its passphrase.')+'</p><div class="kfr"><label class="b2">'+ic('dl',16)+'<span>'+t('Choose file')+'</span><input type="file" id="rs_f" class="hide"></label><input id="rs_p" type="password" aria-label="'+esc(t('Passphrase'))+'" placeholder="'+t('Empty = panel backup passphrase')+'"></div><small class="muted ltr" id="rs_n">'+t('No file chosen')+'</small>'+
+ '<label class="chk"><input type="checkbox" id="rs_full">'+t('Also restore server keys & configs (same/new server migration)')+'</label><div class="kfoot"><span class="muted" id="rs_st" aria-live="polite"></span><button class="b2 bd" id="rs_go">'+t('Restore backup')+'</button></div></section></div>'+
+ '<div class="klink"><span>'+ic('settings',18)+'</span><div><b>'+t('Settings only')+'</b><small>'+t('Export or import just the panel settings, without users or keys.')+'</small></div><a class="b2 sm" href="#settings" onclick="S.stsec=\'io\'">'+t('Settings › Export & import')+'</a></div>'+moveCard()+
  '<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><div><h3>🌙 '+t('Nightly backup to the bot')+'</h3><p class="sub">'+t('Every night the database is cleaned and an encrypted backup is sent to Telegram')+'</p></div><label class="ku-sw ku-sw-in"><span class="ku-swt"><b>'+t('On')+'</b></span><span class="sw"><input type="checkbox" id="tg_on"><span></span></span></label></div>'+
  '<div class="g2"><div><label class="f">'+t('When')+'</label><div class="row" style="flex-wrap:nowrap;gap:6px"><select id="tg_m" style="width:auto"><option value="nightly">'+t('Every night at')+'</option><option value="hours">'+t('Every … hours')+'</option></select><input id="tg_at" class="ltr" style="max-width:90px" placeholder="03:00"><input id="tg_h" type="number" min="1" style="max-width:90px"></div><small class="muted">'+t('Iran time')+'</small></div>'+
  '<div><label class="f">'+t('Chat ID')+'</label><input id="tg_chat" class="ltr" placeholder="'+t('Auto after /start (or first bot admin)')+'"></div></div>'+
@@ -265,8 +270,10 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
  '<div class="card"><div class="row" style="justify-content:space-between"><div><h3>🧹 '+t('Clean database')+'</h3><p class="sub">'+t('Removes old logs, expired sessions and abandoned unpaid orders, then compacts the file. Users and plans are not touched.')+'</p></div><button class="b2" id="db_cl">'+t('Clean now')+'</button></div><small class="muted" id="db_inf"></small></div>';
  $('#bk_go').onclick=function(){var p=$('#bk_p').value,me=this;me.disabled=true;api('POST','/api/backup',{passphrase:p},{blob:1}).then(function(r){dl(r);me.disabled=false}).catch(function(e){me.disabled=false;fail(e)})};
  $('#rs_f').onchange=function(){$('#rs_n').textContent=this.files[0]?this.files[0].name:t('No file chosen')};
- $('#rs_go').onclick=function(){var f=$('#rs_f').files[0];if(!f)return toast(t('No file chosen'),1);confirmDo(function(){
-  api('POST','/api/restore',f,{headers:{'X-Passphrase':$('#rs_p').value,'X-Full':$('#rs_full').checked?'1':'0','Content-Type':'application/octet-stream'}}).then(function(){toast(t('Restore done, panel is restarting…'));setTimeout(function(){location.reload()},4000)}).catch(fail)})};
+ $('#rs_go').onclick=function(){var f=$('#rs_f').files[0],me=this,st=$('#rs_st');if(!f)return toast(t('No file chosen'),1);
+  if(!confirm(t('Restore this backup? Everything in the panel is replaced by what is in the file.')+'\n'+f.name))return;
+  me.disabled=true;st.textContent=t('Restoring…');
+  api('POST','/api/restore',f,{headers:{'X-Passphrase':$('#rs_p').value,'X-Full':$('#rs_full').checked?'1':'0','Content-Type':'application/octet-stream'}}).then(function(){st.textContent=t('Restore done, panel is restarting…');toast(t('Restore done, panel is restarting…'));setTimeout(function(){location.reload()},4000)}).catch(function(e){me.disabled=false;st.textContent=t('Failed')+': '+(e.message||'');fail(e)})};
  var tg={},showPw=false,kb=function(n){return n>1048576?N((n/1048576).toFixed(1))+' MB':N(Math.round(n/1024))+' KB'};
  function tgDraw(){if(!$('#tg_on'))return;$('#tg_on').checked=!!tg.on;$('#tg_chat').value=tg.chat||'';$('#tg_h').value=tg.hours||24;$('#tg_at').value=tg.at||'03:00';$('#tg_m').value=tg.mode||'nightly';
   var hrs=tg.mode=='hours';$('#tg_at').style.display=hrs?'none':'';$('#tg_h').style.display=hrs?'':'none';
@@ -322,23 +329,29 @@ function secStatus(s){var r=[[s.totp_on?'g':'r',t('Two-step login (2FA)'),s.totp
  var bad=r.filter(function(x){return x[0]=='r'}).length,warn=r.filter(function(x){return x[0]=='y'}).length;
  return kuGroup(t('Security status'),null,'<span class="ku-tag '+(bad?'r':warn?'y':'g')+'">'+(bad?t('Needs attention'):warn?t('Almost'):t('Good'))+'</span>',
   r.map(function(x){return kuItem({dot:x[0],name:x[1],tags:'<span class="ku-tag '+x[0]+'">'+x[2]+'</span>'})}).join(''))}
+// (3.41) four parts instead of one long page: the state (and recent logins), signing in (password, 2FA,
+// session length), who is signed in (sessions and API tokens), and where from (IP lists, the firewall)
+var SECV=[['ov','Overview'],['login','Login'],['sess','Sessions'],['acc','Access']];
 function loadSec(){api('GET','/api/security').then(function(s){S.sec=s;var el=$('#sec');if(!el)return;
- var open=!s.ip_allow&&!s.ip_deny,lg=(s.logins||[]).slice(0,8);
- el.innerHTML=secStatus(s)+'<div class="g4"><div class="stat"><div><small>'+t('Current account')+'</small><b style="font-size:15px">'+esc(s.admin_user)+'</b></div><i>◈</i></div><div class="stat"><div><small>2FA</small><b style="font-size:15px">'+(s.totp_on?'ON':'OFF')+'</b></div><i>◎</i></div><div class="stat"><div><small>'+t('Active sessions')+'</small><b style="font-size:15px">'+N(s.sessions.length)+'</b></div><i>⌁</i></div><div class="stat"><div><small>'+t('Network policy')+'</small><b style="font-size:15px">'+(open?t('Open'):t('Restricted'))+'</b></div><i>⬡</i></div></div>'+
- '<div class="g2" style="margin-top:12px"><div class="card" style="margin:0"><h3>'+t('Change login')+'</h3><label class="f">'+t('Current password')+'</label><input type="password" id="cp_cur"><label class="f">'+t('New username (optional)')+'</label><input id="cp_u" class="ltr" placeholder="'+esc(s.admin_user)+'"><label class="f">'+t('New password (min 8)')+'</label><input type="password" id="cp_p"><button class="btn" style="margin-top:10px;width:100%" onclick="chPass()">'+t('Save')+'</button></div>'+
- '<div class="card" style="margin:0"><div class="row" style="justify-content:space-between"><h3>'+t('Two-step login')+'</h3><span class="badge '+(s.totp_on?'g':'')+'">'+(s.totp_on?'ON':'OFF')+'</span></div><p class="sub">'+t('TOTP with apps like Google Authenticator / 2FAS')+'</p>'+
- '<div class="row"><button class="b2" onclick="totpSetup()" '+(s.totp_on?'disabled':'')+'>'+t('Enable 2FA')+'</button><button class="b2 bd" onclick="totpOff()" '+(s.totp_on?'':'disabled')+'>'+t('Disable 2FA')+'</button></div>'+
- '<label class="chk" style="margin-top:10px"><input type="checkbox" id="ip_f" '+(s.force_2fa?'checked':'')+'>'+t('Enforce 2FA for admin')+'</label>'+
- '<label class="f">'+t('Session lifetime (hours)')+'</label><input type="number" id="ip_h" min="1" value="'+esc(s.session_hours)+'"></div></div>'+
- '<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><div><h3>'+t('Active sessions')+'</h3><p class="sub">'+t('Devices and IPs logged in to the panel')+'</p></div><button class="b2 bd" onclick="revokeOthers()">'+t('Log out others')+'</button></div><div class="list">'+
- s.sessions.map(function(x){var cur=x.id==s.current_session;return '<div class="li"><span><b class="ltr">'+esc(x.ip)+'</b> '+(cur?'<span class="badge g">'+t('current')+'</span>':'')+'<small class="ltr">'+esc(x.ua.slice(0,60))+' · '+ago(x.last_seen)+'</small></span>'+(cur?'':'<button class="b2 bd" onclick="sessDel(\''+x.id+'\')">✕</button>')+'</div>'}).join('')+'</div></div>'+
- // API tokens: a key for a script or a helper with only some rights (shown once when made)
- '<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><div><h3>'+t('API tokens')+'</h3><p class="sub">'+t('A key with only some rights, for a script or for someone helping you. Delete it when the work is done.')+'</p></div><button class="b2" onclick="tokNew()">＋ '+t('Create API token')+'</button></div><div class="list">'+
- ((s.tokens||[]).map(function(k){return '<div class="li"><span><b>'+esc(k.name)+'</b> <span class="ltr muted">'+esc(k.prefix)+'…</span><small class="ltr">'+esc(k.scopes)+' · '+(k.last_used?ago(k.last_used):t('never used'))+'</small></span><button class="b2 bd" onclick="tokDel('+(+k.id)+')">✕</button></div>'}).join('')||'<span class="muted">—</span>')+'</div></div>'+
- '<details class="card secx"'+(open?'':' open')+'><summary><b>'+t('IP restriction')+'</b> <small class="muted">'+t('Your IP')+': <span class="ltr">'+esc(s.my_ip)+'</span></small></summary><p class="sub" style="margin-top:8px">'+t('Allow/Deny for the admin panel, one IP or CIDR per line')+'</p>'+
- '<div class="g2"><div><label class="f">Allow</label><textarea id="ip_a" class="ltr" rows="3" placeholder="'+t('IP / CIDR allowed, one per line')+'">'+esc(s.ip_allow)+'</textarea></div><div><label class="f">Deny</label><textarea id="ip_d" class="ltr" rows="3" placeholder="'+t('IP / CIDR blocked, one per line')+'">'+esc(s.ip_deny)+'</textarea></div></div></details>'+
- '<div style="text-align:center;margin:4px 0 12px"><button class="btn" onclick="savePolicy()">'+t('Save security policy')+'</button></div>'+
- '<div class="card"><h3>'+t('Login history')+'</h3><p class="sub">'+t('Last logins to the panel')+'</p><div class="list">'+(lg.map(function(l){return '<div class="li"><span><b>'+esc(l.username||'—')+'</b><small class="ltr">'+esc(l.ip)+' · '+fmtDate(l.ts,1)+'</small></span><span class="badge '+(l.ok?'g':'r')+'">'+(l.ok?'OK':'FAIL')+'</span></div>'}).join('')||'<span class="muted">—</span>')+'</div></div>'}).catch(fail)}
+ var open=!s.ip_allow&&!s.ip_deny,lg=(s.logins||[]).slice(0,8),v=S.secv||'ov',pol='<div class="kfoot"><span class="muted">'+t('Session length, enforced 2FA and the IP lists are saved together')+'</span><button class="btn" onclick="savePolicy()">'+t('Save security policy')+'</button></div>';
+ el.innerHTML='<div class="btabs ku-tabs" id="sec_tabs" role="tablist" aria-label="'+esc(t('Security'))+'">'+SECV.map(function(x){return '<button type="button" role="tab" data-sv="'+x[0]+'" aria-selected="'+(v==x[0])+'" class="'+(v==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
+ '<div data-sp="ov">'+secStatus(s)+kuStats([[t('Current account'),'<span class="ltr">'+esc(s.admin_user)+'</span>'],['2FA',s.totp_on?t('On'):t('Off'),s.totp_on?'g':'r'],[t('Active sessions'),N(s.sessions.length)],[t('Network policy'),open?t('Open'):t('Restricted')]])+
+  '<section class="card"><div class="kc-h"><div><h3>'+t('Login history')+'</h3><small class="muted">'+t('Last logins to the panel')+'</small></div></div><div class="list">'+(lg.map(function(l){return '<div class="li"><span><b>'+esc(l.username||'—')+'</b><small class="ltr">'+esc(l.ip)+' · '+fmtDate(l.ts,1)+'</small></span><span class="badge '+(l.ok?'g':'r')+'">'+(l.ok?'OK':'FAIL')+'</span></div>'}).join('')||'<span class="muted">—</span>')+'</div></section></div>'+
+ '<div data-sp="login"><div class="kgrid"><section class="card c6"><h3>'+t('Change login')+'</h3><label class="f" for="cp_cur">'+t('Current password')+'</label><input type="password" id="cp_cur" autocomplete="current-password"><label class="f" for="cp_u">'+t('New username (optional)')+'</label><input id="cp_u" class="ltr" placeholder="'+esc(s.admin_user)+'"><label class="f" for="cp_p">'+t('New password (min 8)')+'</label><input type="password" id="cp_p" autocomplete="new-password"><div class="kfoot"><span></span><button class="btn" onclick="chPass()">'+t('Save')+'</button></div></section>'+
+  '<section class="card c6"><div class="kc-h"><div><h3>'+t('Two-step login')+'</h3><small class="muted">'+t('TOTP with apps like Google Authenticator / 2FAS')+'</small></div><span class="kpill '+(s.totp_on?'g':'r')+'"><i class="dot '+(s.totp_on?'g':'r')+'"></i><span>'+(s.totp_on?t('On'):t('Off'))+'</span></span></div>'+
+  '<div class="row"><button class="b2" onclick="totpSetup()" '+(s.totp_on?'disabled':'')+'>'+t('Enable 2FA')+'</button><button class="b2 bd" onclick="totpOff()" '+(s.totp_on?'':'disabled')+'>'+t('Disable 2FA')+'</button></div>'+
+  '<label class="chk" style="margin-top:12px"><input type="checkbox" id="ip_f" '+(s.force_2fa?'checked':'')+'>'+t('Enforce 2FA for admin')+'</label>'+
+  '<label class="f" for="ip_h">'+t('Session lifetime (hours)')+'</label><input type="number" id="ip_h" min="1" value="'+esc(s.session_hours)+'">'+pol+'</section></div></div>'+
+ '<div data-sp="sess"><section class="card"><div class="kc-h"><div><h3>'+t('Active sessions')+'</h3><small class="muted">'+t('Devices and IPs logged in to the panel')+'</small></div><button class="b2 bd" onclick="revokeOthers()">'+t('Log out others')+'</button></div><div class="list">'+
+  s.sessions.map(function(x){var cur=x.id==s.current_session;return '<div class="li"><span><b class="ltr">'+esc(x.ip)+'</b> '+(cur?'<span class="badge g">'+t('current')+'</span>':'')+'<small class="ltr">'+esc(x.ua.slice(0,60))+' · '+ago(x.last_seen)+'</small></span>'+(cur?'':'<button class="b2 bd sm" onclick="sessDel(\''+x.id+'\')" aria-label="'+esc(t('Log out'))+'">✕</button>')+'</div>'}).join('')+'</div></section>'+
+  // API tokens: a key for a script or a helper with only some rights (shown once when made)
+  '<section class="card"><div class="kc-h"><div><h3>'+t('API tokens')+'</h3><small class="muted">'+t('A key with only some rights, for a script or for someone helping you. Delete it when the work is done.')+'</small></div><button class="b2" onclick="tokNew()">'+ic('plus',15)+'<span>'+t('Create API token')+'</span></button></div><div class="list">'+
+  ((s.tokens||[]).map(function(k){return '<div class="li"><span><b>'+esc(k.name)+'</b> <span class="ltr muted">'+esc(k.prefix)+'…</span><small class="ltr">'+esc(k.scopes)+' · '+(k.last_used?ago(k.last_used):t('never used'))+'</small></span><button class="b2 bd sm" onclick="tokDel('+(+k.id)+')" aria-label="'+esc(t('Delete'))+'">✕</button></div>'}).join('')||'<span class="muted">—</span>')+'</div></section></div>'+
+ '<div data-sp="acc"><section class="card"><div class="kc-h"><div><h3>'+t('IP restriction')+'</h3><small class="muted">'+t('Allow/Deny for the admin panel, one IP or CIDR per line')+' · '+t('Your IP')+': <span class="ltr">'+esc(s.my_ip)+'</span></small></div></div>'+
+  '<div class="kgrid"><div class="c6"><label class="f" for="ip_a">Allow</label><textarea id="ip_a" class="ltr" rows="4" placeholder="'+t('IP / CIDR allowed, one per line')+'">'+esc(s.ip_allow)+'</textarea></div><div class="c6"><label class="f" for="ip_d">Deny</label><textarea id="ip_d" class="ltr" rows="4" placeholder="'+t('IP / CIDR blocked, one per line')+'">'+esc(s.ip_deny)+'</textarea></div></div>'+pol+'</section>'+
+  '<div class="klink"><span>'+ic('security',18)+'</span><div><b>'+t('Firewall')+'</b><small>'+t('The firewall of every server is switched on in Servers, under Advanced.')+'</small></div><a class="b2 sm" href="#nodes">'+t('Servers')+'</a></div></div>';
+ var show=function(k){S.secv=k;$$('#sec_tabs [data-sv]').forEach(function(b){var on=b.dataset.sv==k;b.classList.toggle('on',on);b.setAttribute('aria-selected',on)});$$('#sec [data-sp]').forEach(function(d){d.hidden=d.dataset.sp!=k})};
+ $('#sec_tabs').onclick=function(e){var b=e.target.closest('[data-sv]');if(b)show(b.dataset.sv)};show(v)}).catch(fail)}
 function totpSetup(){api('POST','/api/security/2fa/setup').then(function(r){modal(mhead(t('Enable 2FA'))+'<p class="muted">'+t('Scan with your authenticator app, then enter the 6-digit code')+'</p><div class="qr">'+r.qr+'</div><pre>'+esc(r.secret)+'</pre><input id="tf_c" inputmode="numeric" maxlength="6" class="ltr" placeholder="123456"><button class="btn" style="width:100%;margin-top:10px" id="tf_go">'+t('Confirm')+'</button>');
  $('#tf_go').onclick=function(){api('POST','/api/security/2fa/enable',{code:$('#tf_c').value}).then(function(){closeModal();toast(t('Done'));loadSec()}).catch(fail)}}).catch(fail)}
 function totpOff(){var c=prompt(t('2FA code'));if(!c)return;api('POST','/api/security/2fa/disable',{code:c}).then(function(){toast(t('Done'));loadSec()}).catch(fail)}
@@ -423,14 +436,16 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   (s.repo_env?'<div class="warnbox">'+t('KANKI_REPO in /etc/kanki/kanki.env is set; it wins over this field.')+'</div>':'')+
   '<div class="hint">'+t('Nodes and tunnel servers are updated together with')+' <a href="#nodes">'+t('Nodes')+' › '+t('Update all')+'</a>.</div>';
  case 'io':return '<div class="ioc"><div><b>'+ic('dl',18)+' '+t('Export')+'</b><p>'+t('A JSON file with every panel and sales setting. It holds payment keys too, keep it private. Users are not in it; use Backup for that.')+'</p><button class="btn" type="button" id="st_exp">'+t('Download settings')+'</button></div>'+
-  '<div><b>'+ic('refresh',18)+' '+t('Import')+'</b><p>'+t('Pick a settings file exported from a Kanki panel. Only known settings are taken; users, nodes and keys are not touched.')+'</p><label class="b2" for="st_imf" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center">'+ic('dl',15)+' '+t('Choose file')+'</label><input type="file" id="st_imf" accept=".json,application/json" class="hide"></div></div>';
+  '<div><b>'+ic('refresh',18)+' '+t('Import')+'</b><p>'+t('Pick a settings file exported from a Kanki panel. Only known settings are taken; users, nodes and keys are not touched.')+'</p><label class="b2" for="st_imf" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center">'+ic('dl',15)+' '+t('Choose file')+'</label><input type="file" id="st_imf" accept=".json,application/json" class="hide"></div></div>'+
+  // the full backup (users, keys, certificates) and restoring it live in Backup: one place for that
+  '<div class="klink"><span>'+ic('backup',18)+'</span><div><b>'+t('Full backup and restore')+'</b><small>'+t('Users, keys, certificates and settings together, with history and automatic backups.')+'</small></div><a class="b2 sm" href="#backup">'+t('Open Backup')+'</a></div>';
  }return ''}
 function pSettings(){var cur=S.stsec||'look';
  $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Settings')+'</h2><p>'+t('Everything about how the panel looks and works, in one place')+'</p></div></div><div id="st">'+t('Loading…')+'</div>';
  api('GET','/api/settings').then(function(s){if(!$('#st'))return;S.st=s;if(!STSEC.some(function(x){return x[0]==cur}))cur='look';
   $('#st').innerHTML='<div class="stw"><div class="stn" role="tablist">'+STSEC.map(function(x){return '<button type="button" data-sec="'+x[0]+'" class="'+(x[0]==cur?'on':'')+'"><span class="si">'+ic(x[2],17)+'</span>'+t(x[1])+'<em></em></button>'}).join('')+'</div><div>'+
   STSEC.map(function(x){return '<section class="sts card'+(x[0]==cur?' on':'')+'" data-sec="'+x[0]+'"><div class="sth"><span class="phi">'+ic(x[2],20)+'</span><div><b>'+t(x[1])+'</b><small>'+t(x[3])+'</small></div></div>'+stBody(x[0],s)+
-   (x[4].length?'<div class="sbar"><span class="muted" data-msg></span><button class="b2" type="button" data-undo disabled>'+t('Undo')+'</button><button class="btn" type="button" data-save disabled>'+t('Save')+'</button></div>':'')+'</section>'}).join('')+'</div></div>';
+   (x[4].length?'<div class="sbar" data-st="clean"><span class="sbar-st" data-msg aria-live="polite">'+t('No changes')+'</span><button class="b2" type="button" data-undo disabled>'+t('Undo')+'</button><button class="btn" type="button" data-save disabled>'+t('Save')+'</button></div>':'')+'</section>'}).join('')+'</div></div>';
   stFill(s);stWire();wireLogo();stUpdate(false);stIran();stMtu()}).catch(fail)}
 function stVal(el){return el.type=='checkbox'?(el.checked?'1':'0'):el.value}
 function stFill(s){$$('#st [data-k]').forEach(function(el){var k=el.dataset.k,v=s[k]==null?'':String(s[k]);
@@ -441,11 +456,19 @@ function stFill(s){$$('#st [data-k]').forEach(function(el){var k=el.dataset.k,v=
 // pickers and protocol chips follow their hidden input
 function stSync(root){$$('[data-pick]',root).forEach(function(g){var h=$('#st [data-k="'+g.dataset.pick+'"]');$$('button',g).forEach(function(b){b.classList.toggle('on',b.dataset.v==h.value)})});
  $$('[data-multi]',root).forEach(function(g){var h=$('#st [data-k="'+g.dataset.multi+'"]'),on=h.value.split(',');$$('input',g).forEach(function(c){c.checked=on.indexOf(c.value)>=0})})}
-function stDirty(sec){var any=false;$$('[data-k]',sec).forEach(function(el){if(stVal(el)!==el._orig)any=true});
- $$('[data-save],[data-undo]',sec).forEach(function(b){b.disabled=!any});var m=$('[data-msg]',sec);if(m)m.textContent=any?t('Unsaved changes'):'';
+// the save bar of a section: no changes · unsaved changes · saving · saved · save failed
+function stState(sec,k){var b=$('.sbar',sec),m=$('[data-msg]',sec);if(!b)return;b.dataset.st=k;
+ if(m)m.textContent=t({clean:'No changes',dirty:'Unsaved changes',saving:'Saving…',saved:'Saved',fail:'Save failed'}[k]);
+ var sv=$('[data-save]',b),un=$('[data-undo]',b);if(sv)sv.disabled=k=='clean'||k=='saving'||k=='saved';if(un)un.disabled=k=='clean'||k=='saving'||k=='saved'}
+function stIsDirty(sec){return $$('[data-k]',sec).some(function(el){return el._orig!==undefined&&stVal(el)!==el._orig})}
+function stDirty(sec){var any=stIsDirty(sec);
+ stState(sec,any?'dirty':'clean');
  var nb=$('.stn button[data-sec="'+sec.dataset.sec+'"]');if(nb)nb.classList.toggle('dirty',any)}
 function stWire(){
- $$('.stn button').forEach(function(b){b.onclick=function(){S.stsec=b.dataset.sec;$$('.stn button').forEach(function(x){x.classList.toggle('on',x==b)});$$('.sts').forEach(function(x){x.classList.toggle('on',x.dataset.sec==b.dataset.sec)});if(b.dataset.sec=='upd')stUpdate(false)}});
+ $$('.stn button').forEach(function(b){b.onclick=function(){var cur=$('.sts.on');
+  // leaving a section with changes that are not saved: ask first
+  if(cur&&cur.dataset.sec!=b.dataset.sec&&stIsDirty(cur)&&!confirm(t('This section has unsaved changes. Leave it without saving?')))return;
+  S.stsec=b.dataset.sec;$$('.stn button').forEach(function(x){x.classList.toggle('on',x==b)});$$('.sts').forEach(function(x){x.classList.toggle('on',x.dataset.sec==b.dataset.sec)});if(b.dataset.sec=='upd')stUpdate(false)}});
  $$('.sts').forEach(function(sec){sec.addEventListener('input',function(){stDirty(sec)});sec.addEventListener('change',function(){stDirty(sec)})});
  $$('#st [data-pick] button').forEach(function(b){b.onclick=function(){var g=b.parentNode,h=$('#st [data-k="'+g.dataset.pick+'"]');h.value=b.dataset.v;$$('button',g).forEach(function(x){x.classList.toggle('on',x==b)});stDirty(g.closest('.sts'))}});
  $$('#st [data-multi] input').forEach(function(c){c.onchange=function(){var g=c.closest('[data-multi]'),h=$('#st [data-k="'+g.dataset.multi+'"]');h.value=$$('input',g).filter(function(x){return x.checked}).map(function(x){return x.value}).join(',');stDirty(g.closest('.sts'))}});
@@ -463,12 +486,14 @@ function stSave(sec,btn){var id=sec.dataset.sec,body={};$$('[data-k]',sec).forEa
  if(id=='upd'&&body.update_repo&&!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(body.update_repo))return toast(t('Write it as owner/repo'),1);
  if(id=='vpn'&&body.mtu&&!(+body.mtu>=1200&&+body.mtu<=1500))return toast(t('MTU must be between 1200 and 1500'),1);
  if(id=='vpn'&&body.mtu_budget&&!(+body.mtu_budget>=1300&&+body.mtu_budget<=1500))return toast(t('The largest packet must be between 1300 and 1500'),1);
- var all=id=='net'&&$('#st_all')&&$('#st_all').checked;btn.disabled=true;
+ var all=id=='net'&&$('#st_all')&&$('#st_all').checked;btn.disabled=true;stState(sec,'saving');
  api('PUT','/api/settings',body).then(function(){return all?api('POST','/api/settings/apply-endpoint'):null}).then(function(){
-  Object.assign(S.st,body);$$('[data-k]',sec).forEach(function(el){el._orig=stVal(el)});stDirty(sec);toast(t('Saved'));
+  Object.assign(S.st,body);$$('[data-k]',sec).forEach(function(el){el._orig=stVal(el)});stDirty(sec);stState(sec,'saved');toast(t('Saved'));
   if(id=='newu'&&S.me){S.me.default_protocols=body.default_protocols;S.me.def_gb=body.def_gb;S.me.def_days=body.def_days;S.me.def_conns=body.def_conns}
   if(id=='look'){S.lang=body.lang;S.theme=body.theme;S.color=body.color;localStorage.setItem('kk_lang',S.lang);localStorage.setItem('kk_theme',S.theme);localStorage.setItem('kk_color',S.color);S.stsec='look';boot()}
-  if(id=='upd')stUpdate(true);if(id=='vpn')stMtu()}).catch(function(e){btn.disabled=false;fail(e)})}
+  if(id=='upd')stUpdate(true);if(id=='vpn')stMtu()}).catch(function(e){stState(sec,'fail');btn.disabled=false;fail(e)})}
+// a page change or a closed tab with unsaved settings: the browser asks first
+window.addEventListener('beforeunload',function(e){if(S.page=='settings'&&$$('#st .sts').some(stIsDirty)){e.preventDefault();e.returnValue=''}});
 // automatic MTU: what every config gets (mtu.rs)
 var MTU_CORE={wg:'WireGuard',awg:'AmneziaWG',mtun:'microtun'};
 function stMtu(){var box=$('#mtu_rep');if(!box)return;api('GET','/api/mtu').then(function(r){if(!$('#mtu_rep'))return;

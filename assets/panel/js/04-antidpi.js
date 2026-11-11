@@ -37,7 +37,7 @@ var AD_TUNNELS=[
  {icn:'ports',name:'Game (KCP + FEC) / FakeTCP',href:'#tunnels',
   what:'Game adds Reed-Solomon FEC and optional duplication on masked KCP — loss is repaired in flight. FakeTCP wraps UDP inside hand-made TCP packets (udp2raw style) so UDP throttling does not apply.',
   when:'Gaming and WireGuard-over-tunnel: lowest visible loss, and UDP that looks like TCP.'}];
-function p_antidpi(){$('#pg').innerHTML='<div class="ph"><div><h2>'+ic('security',22)+' '+t('Advanced anti-DPI tunnels')+'</h2><p>'+t('One-click inbounds with the methods that resist DPI: REALITY, WS/gRPC behind a CDN, Shadowsocks 2022 — plus the server-link transports')+'</p></div><button class="btn" onclick="xrInbound()">+ '+t('Custom inbound')+'</button></div>'+
+function p_antidpi(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Anti-DPI')+'</h2><p>'+t('One-click inbounds with the methods that resist DPI: REALITY, WS/gRPC behind a CDN, Shadowsocks 2022 — plus the server-link transports')+'</p></div><button class="btn" onclick="xrInbound()">+ '+t('Custom inbound')+'</button></div>'+
  '<div class="card"><h3>'+t('User inbounds (Xray)')+'</h3><p class="sub" style="margin:0 0 12px">'+t('Pick a method: the inbound editor opens with the right settings filled in. Then press Save — the panel makes keys, certificates and user links by itself.')+'</p>'+
  '<div class="g2">'+AD_METHODS.map(function(m,i){return '<div class="box" style="margin:0"><b>'+esc(m.name)+'</b> <span class="muted ltr" style="font-size:12px">'+m.tags.map(function(x){return '<em class="ttg">'+x+'</em>'}).join(' ')+'</span>'+
   '<small class="muted" style="display:block;margin:6px 0">'+t(m.what)+'</small>'+
