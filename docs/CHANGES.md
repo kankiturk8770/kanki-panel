@@ -1,3 +1,47 @@
+# v3.41.0 — Kanki Console: one shell, one core bar of eight, pages built from the same parts
+- **Shell:** one sidebar (256px) or, chosen in the account menu, one menu across the top — never both; a 64px header in three
+  parts: where you are (group / page), what needs you (the update badge only when there is one) and language, day/night and the
+  account menu. The panel name sits in the sidebar on a desktop and in the header on a phone; the version, the update and Logout
+  are only in the account menu (no more twice in header and sidebar). Skip link, `aria-current` on the open place.
+- **Menu (`SECS` in `13-menu.js`):** six groups — Overview (Dashboard), Users, Connectivity (VPN & cores, Tunnels, Ports, Traffic),
+  Infrastructure (Servers), Sales (Sales bot), Operations & System (Anti-DPI, Emergency chat, Backup, Security, Settings). DNS left
+  the «advanced tools» list and is a core again. Phone: Home, Users, Servers, Tunnels, Cores and «More» (a sheet of every section,
+  focus kept inside, Esc closes and gives focus back).
+- **Core bar:** «Overview» then the eight cores with the same weight — WireGuard, AmneziaWG, Hysteria2, KANKI MIX, microtun, Xray,
+  DNS, KPING — each with a status dot and its word for screen readers; one row that scrolls inside itself (never the page) with a
+  fade at the edge that has more, the open core scrolled into sight, arrow keys / Home / End move along it (`role=tablist`,
+  `aria-selected`). Anti-DPI is its own page under Operations, not a ninth core.
+- **Dashboard:** server and health at the top (one pill: healthy or N issues), six number tiles (6 / 3 / 2 per row), live network
+  beside the server resources (8 + 4, fixed chart and ring sizes, nothing moves when numbers change), «Needs attention» (servers,
+  tunnels and services in trouble with where to fix each, the three latest log errors) and the TCP/UDP summary with a link to Ports.
+  Starting / stopping services moved to VPN & cores › Overview, the full log to Emergency chat › Logs, the server list stays in Servers.
+- **Users:** the search always in sight; status, sort and protocol beside it on a desktop and behind «Filters (n)» on a phone; the bar of
+  the selected users only while something is selected, above the phone bar.
+- **Servers:** numbers on top (servers, healthy, needs a look, not connected, update ready), All / Abroad / Iran, the firewall folded
+  under «Advanced».
+- **Tunnel form:** a «Review» part (its own tab on a phone, the last part on a desktop): route, type, transport, ports, domain and what
+  must be fixed before saving.
+- **Ports:** TCP / UDP / running / conflicts on top, one table per server (service, protocol, port to copy, address, status; a card per
+  port on a phone), microtun in «All servers».
+- **Traffic:** totals and live speed on top, the live chart with its legend, by protocol and by server as label · bar · value rows,
+  then every user.
+- **Bot:** Overview (the bot, sales numbers, daily report), then Sales settings, Plans, Discount codes, App files, Smart channel, App
+  message; the sales form has its own save bar (no changes / unsaved / saving / saved / failed).
+- **Emergency chat:** Chat and Logs as two views; the log has search, source, level, pause, copy, follows the newest line until you
+  scroll back and then offers «Return to latest»; time · level · source · message on one grid, only the box scrolls.
+- **Security:** Overview, Login, Sessions, Access instead of one long page; a link to the servers' firewall.
+- **Backup:** download and restore side by side, restore marked as dangerous with a confirmation, progress and result; a link to
+  Settings › Export & import (settings only). Settings › Export & import links to Backup.
+- **Settings:** the save bar says no changes / unsaved changes / saving / saved / save failed; leaving a section with changes asks
+  first (and the browser asks before closing).
+- **Windows:** keep the keyboard inside (Tab), Esc closes, focus goes back to what opened them; on a phone the keyboard is not popped.
+- **CSS:** about 600 old selectors of the shell, the dashboard, the log, ports, traffic and users toolbar removed and written once in
+  the new block «3.41 — Kanki Console» (tokens: 4/8 spacing, 16px cards, 12px controls, 40px / 44px controls, z-layers);
+  `!important` 244 → 212. 14 missing Persian texts (Settings › Servers and others) added.
+- **Checked:** 23 routes × 360 / 390 / 768 / 1024 / 1440 / 1920 × fa dark and en light: no JS error, no sideways scroll, no
+  `undefined` / `NaN`; 40 interaction checks (menus, sheet, core bar keys, users filters and selection, tunnel review, logs, settings
+  save bar, window focus).
+
 # v3.40.0 — configs exactly where the app expects them, KPING kept, six cores at install, Kanki Glass
 - **Tunnel copies (`twin.rs`, `xray/panel.rs`, `kmix.rs`):** a second config through the Iran address is given only when a tunnel
   really carries that core's port (`Twin::carried`). A server with Kanki tunnels that do not carry a port gets no copy for it (the

@@ -25,28 +25,36 @@ var LSRC=[['all','All services'],['panel','Kanki Panel'],['wireguard','WireGuard
 function lgLevel(x){var m=x.m||'';
  if(x.p<=3||/\b(error|err|fatal|panic|fail(ed|ure)?|critical|denied|refused)\b|"level":"(error|fatal)"/i.test(m))return 'e';
  if(x.p>=7||/\b(debug|dbg|trace)\b|"level":"debug"/i.test(m))return 'd';return 'i'}
-function logCard(){return '<div class="card" id="lgc"><div class="nh"><div><h3>'+ic('term',16)+' '+t('Live log')+'</h3><small class="muted">'+t('Panel and VPN services on this server')+'</small></div>'+
- '<div class="row" style="gap:6px;flex-wrap:nowrap"><select id="lg_src" style="width:auto;padding:6px 9px;font-size:12px">'+LSRC.map(function(s){return '<option value="'+s[0]+'"'+(s[0]==LG.src?' selected':'')+'>'+t(s[1])+'</option>'}).join('')+'</select>'+
- '<button class="ib" id="lg_pause" title="'+t(LG.paused?'Resume':'Pause')+'">'+ic(LG.paused?'play':'pause',15)+'</button><button class="ib" id="lg_copy" title="'+t('Copy')+'">'+ic('copy',15)+'</button><button class="ib" id="lg_rf" title="'+t('Refresh')+'">'+ic('refresh',15)+'</button></div></div>'+
- '<div class="lgt" id="lg_tabs"></div><div class="lgb" id="lg_box"><span class="muted">'+t('Loading…')+'</span></div></div>'}
+function logCard(){return '<section class="card klog" id="lgc"><div class="kc-h"><div><h3>'+t('Live log')+'</h3><small class="muted">'+t('Panel and VPN services on this server')+'</small></div>'+
+ '<div class="klog-tools"><label class="klog-q"><span class="vh">'+t('Search')+'</span><input id="lg_q" type="search" placeholder="'+esc(t('Search'))+'" value="'+esc(LG.q||'')+'"></label>'+
+ '<label><span class="vh">'+t('Source')+'</span><select id="lg_src">'+LSRC.map(function(s){return '<option value="'+s[0]+'"'+(s[0]==LG.src?' selected':'')+'>'+t(s[1])+'</option>'}).join('')+'</select></label>'+
+ '<button type="button" class="kib" id="lg_pause" aria-pressed="'+LG.paused+'" aria-label="'+esc(t(LG.paused?'Resume':'Pause'))+'" title="'+esc(t(LG.paused?'Resume':'Pause'))+'">'+ic(LG.paused?'play':'pause',16)+'</button>'+
+ '<button type="button" class="kib" id="lg_copy" aria-label="'+esc(t('Copy'))+'" title="'+esc(t('Copy'))+'">'+ic('copy',16)+'</button>'+
+ '<button type="button" class="kib" id="lg_rf" aria-label="'+esc(t('Refresh'))+'" title="'+esc(t('Refresh'))+'">'+ic('refresh',16)+'</button></div></div>'+
+ '<div class="lgt" id="lg_tabs" role="group" aria-label="'+esc(t('Level'))+'"></div><div class="klog-wrap"><div class="lgb" id="lg_box" role="log" aria-live="off" tabindex="0"><span class="muted">'+t('Loading…')+'</span></div>'+
+ '<button type="button" class="b2 sm klog-latest" id="lg_latest" hidden>'+t('Return to latest')+' ↓</button></div></section>'}
 function logWire(){if(!$('#lgc'))return;
  $('#lg_src').onchange=function(){LG.src=this.value;localStorage.setItem('kk_lsrc',LG.src);logLoad()};
- $('#lg_pause').onclick=function(){LG.paused=!LG.paused;this.innerHTML=ic(LG.paused?'play':'pause',15);this.title=t(LG.paused?'Resume':'Pause')};
+ $('#lg_pause').onclick=function(){LG.paused=!LG.paused;var l=t(LG.paused?'Resume':'Pause');this.innerHTML=ic(LG.paused?'play':'pause',16);this.title=l;this.setAttribute('aria-label',l);this.setAttribute('aria-pressed',LG.paused)};
  $('#lg_rf').onclick=logLoad;
  $('#lg_copy').onclick=function(){copy(logRows().map(function(x){return logTime(x.ts)+' '+x.u+' '+x.m}).join('\n'))};
+ $('#lg_q').oninput=function(){LG.q=this.value;logDraw()};
  $('#lg_tabs').onclick=function(e){var b=e.target.closest('[data-lv]');if(!b)return;LG.lv=b.dataset.lv;logDraw()};
- logLoad();clearInterval(S.timer3);S.timer3=setInterval(function(){if(S.page=='dash'&&!LG.paused&&document.visibilityState=='visible')logLoad()},5000)}
+ var bx=$('#lg_box');bx.onscroll=function(){LG.away=bx.scrollHeight-bx.scrollTop-bx.clientHeight>40;$('#lg_latest').hidden=!LG.away};
+ $('#lg_latest').onclick=function(){LG.away=false;bx.scrollTop=bx.scrollHeight;this.hidden=true};
+ LG.away=false;logLoad();clearInterval(S.timer3);S.timer3=setInterval(function(){if($('#lgc')&&!LG.paused&&document.visibilityState=='visible')logLoad()},5000)}
 function logLoad(){return api('GET','/api/logs?src='+encodeURIComponent(LG.src)+'&n=300').then(function(r){LG.lines=r.lines||[];LG.err='';logDraw()}).catch(function(e){LG.err=e.message||'error';logDraw()})}
-function logRows(){return LG.lines.filter(function(x){return LG.lv=='all'||lgLevel(x)==LG.lv})}
+function logRows(){var q=String(LG.q||'').trim().toLowerCase();return LG.lines.filter(function(x){return (LG.lv=='all'||lgLevel(x)==LG.lv)&&(!q||(String(x.m)+' '+String(x.u)).toLowerCase().indexOf(q)>=0)})}
 function logTime(ts){var d=new Date(ts*1000);return p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds())}
 function logDraw(){var tb=$('#lg_tabs'),bx=$('#lg_box');if(!tb||!bx)return;
  var c={all:LG.lines.length,e:0,d:0};LG.lines.forEach(function(x){var l=lgLevel(x);if(l!='i')c[l]++});
- tb.innerHTML=[['all','All'],['e','Errors'],['d','Debug']].map(function(x){return '<button data-lv="'+x[0]+'" class="lv-'+x[0]+(LG.lv==x[0]?' on':'')+'">'+t(x[1])+' <b>'+N(c[x[0]])+'</b></button>'}).join('');
+ tb.innerHTML=[['all','All'],['e','Errors'],['d','Debug']].map(function(x){return '<button type="button" data-lv="'+x[0]+'" aria-pressed="'+(LG.lv==x[0])+'" class="lv-'+x[0]+(LG.lv==x[0]?' on':'')+'">'+t(x[1])+' <b>'+N(c[x[0]])+'</b></button>'}).join('');
  if(LG.err){bx.innerHTML='<span class="bad2">'+t('Logs are not available')+' ('+esc(LG.err)+')</span>';return}
- var rows=logRows(),stick=bx.scrollHeight-bx.scrollTop-bx.clientHeight<40;
- bx.innerHTML=rows.length?rows.map(function(x){return '<div class="lr '+lgLevel(x)+'"><span class="lt">'+logTime(x.ts)+'</span><span class="lu">'+esc(String(x.u||'').replace(/\.service$/,''))+'</span><span class="lm">'+esc(x.m)+'</span></div>'}).join(''):
+ var rows=logRows(),top=bx.scrollTop;
+ bx.innerHTML=rows.length?rows.map(function(x){var l=lgLevel(x);return '<div class="lr '+l+'"><time class="lt">'+logTime(x.ts)+'</time><span class="lv" aria-label="'+esc(t(l=='e'?'Error':l=='d'?'Debug':'Info'))+'">'+(l=='e'?'ERR':l=='d'?'DBG':'INF')+'</span><span class="lu">'+esc(String(x.u||'').replace(/\.service$/,''))+'</span><span class="lm">'+esc(x.m)+'</span></div>'}).join(''):
   '<span class="muted">'+t(LG.lv=='e'?'No errors':LG.lv=='d'?'No debug lines':'No log lines yet')+'</span>';
- if(stick)bx.scrollTop=bx.scrollHeight}
+ // follow the newest line, unless you have scrolled back to read
+ if(LG.away)bx.scrollTop=top;else bx.scrollTop=bx.scrollHeight}
 
 function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(u),
   tg=(u.protocols||'').split(',').filter(function(x){return x}).map(function(x){return '<span class="ptag" style="--pc:'+(PCOL[x]||'#999')+'">'+esc(pname(x))+'</span>'}).join(''),
@@ -135,7 +143,7 @@ function botLoad(){return Promise.all([api('GET','/api/bot'),api('GET','/api/set
 function bsChk(k,label){return '<label class="chk"><input type="checkbox" data-bs="'+k+'" '+((S.bset||{})[k]=='1'?'checked':'')+'>'+t(label)+'</label>'}
 function bsIn(k,label,ph,typ,ltr){return '<div><label class="f">'+t(label)+'</label><input data-bs="'+k+'"'+(typ?' type="'+typ+'"':'')+(ltr?' class="ltr"':'')+' value="'+esc((S.bset||{})[k]||'')+'" placeholder="'+esc(ph||'')+'"></div>'}
 function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_set;
- $('#bt_top').innerHTML=has?'':'<button class="btn" id="bt_new">+ '+t('Create bot')+'</button>';
+ $('#bt_top').innerHTML='';
  // (3.40.1) the shop at a glance: sales, money in, active users, orders still open
  var o=S.bov||{},bst=kuStats([[t('Total sales'),N(o.sales||0)],[t('Revenue'),N(o.revenue||0)+' '+t('Toman')],[t('Active users'),N(o.active||0),'ok'],[t('Pending orders'),N(o.pending_orders||0),(o.pending_orders?'warn':'')]]);
  var st=b.paused?['y','Paused']:b.online?['g','Online']:['r','Offline'];
@@ -145,9 +153,11 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
    '<p class="muted" style="margin:10px 0">'+t('Plans, prices and payments can also be managed inside the bot (Admin panel button).')+'</p><div class="bmeta"><span>'+t('Bot admins')+': <b class="ltr">'+esc(b.admins||'—')+'</b></span><span>'+t('Token')+': <b class="ltr">'+esc(b.token_masked||'')+'</b></span></div>'+
    '<div class="g4b"><button class="b2" id="bt_test">'+ic('send',15)+' '+t('Test connection')+'</button><button class="b2" id="bt_pause">'+ic(b.paused?'play':'pause',15)+' '+t(b.paused?'Resume':'Pause')+'</button><button class="b2" id="bt_edit">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2 bd" id="bt_del">'+ic('trash',15)+' '+t('Delete bot')+'</button></div></div>'
   :'<div class="card bempty"><span class="bav big">'+ic('bot',30)+'</span><h3>'+t('No sales bot yet')+'</h3><ol class="steps"><li>'+t('In Telegram open @BotFather, send /newbot and copy the token it gives.')+'</li><li>'+t('Get your numeric Telegram ID from @userinfobot.')+'</li><li>'+t('Press Create bot and paste both.')+'</li></ol><button class="btn" id="bt_new2">+ '+t('Create bot')+'</button></div>';
- S.btab=S.btab||'sales';
- var tabs=[['sales','Sales settings'],['plans','Plans'],['apk','App files'],['disc','Discount codes'],['chan','Smart channel'],['appmsg','App message']];
- el.innerHTML=(has?bst:'')+head+'<div class="seg btabs" id="bt_tabs">'+tabs.map(function(x){return '<button data-bt="'+x[0]+'" class="'+(S.btab==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
+ // (3.41) the bot in parts: Overview (its health, the sales numbers, the daily report), then one part per job
+ S.btab=S.btab||'ov';
+ var tabs=[['ov','Overview'],['sales','Sales settings'],['plans','Plans'],['disc','Discount codes'],['apk','App files'],['chan','Smart channel'],['appmsg','App message']];
+ el.innerHTML='<div class="btabs ku-tabs" id="bt_tabs" role="tablist" aria-label="'+esc(t('Sales bot'))+'">'+tabs.map(function(x){return '<button type="button" role="tab" aria-selected="'+(S.btab==x[0])+'" data-bt="'+x[0]+'" class="'+(S.btab==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
+  '<div data-btp="ov">'+(has?bst:'')+head+'<div class="card" id="bt_watch"></div></div>'+
   '<div data-btp="sales"><div class="card"><h3>'+ic('settings',16)+' '+t('Sales settings')+'</h3><p class="sub">'+t('How the bot sells: trials, payments, referrals and messages.')+'</p>'+
    '<div class="chips">'+bsChk('sales_on','Sales enabled')+bsChk('warn_on','Warn buyers before expiry / end of data')+'</div>'+
    '<div class="g2f">'+bsIn('support','Support ID','@support',0,1)+bsIn('app_link','App download link','https://…',0,1)+bsIn('channel','Required channel (empty = none)','@channel',0,1)+bsIn('win_link','Windows app download link','https://…',0,1)+'</div>'+
@@ -172,10 +182,9 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
     '<div class="g2f">'+bsIn('cp_min_gb','Smallest volume (GB)','10','number')+bsIn('cp_max_gb','Largest volume (GB)','200','number')+bsIn('cp_days','Durations (days)','30,60,90',0,1)+bsIn('cp_users','Most users','3','number')+'</div>'+
     '<p class="hint">'+t('The price comes from the price rules of the Smart plan builder (Plans tab): the same size costs the same as a listed plan.')+'</p></div>'+
    '<p class="hint">'+t('Button texts, premium emoji and colours are set in Telegram: the bot › Admin panel › Buttons and texts › Manage buttons.')+'</p>'+
-   '<button class="btn" style="width:100%;margin-top:10px" id="bs_save">'+t('Save sales settings')+'</button></div>'+
-   '<div class="card" id="bt_watch"></div></div>'+
+   '<div class="ksave" id="bs_bar"><span class="ksave-st" id="bs_st" aria-live="polite">'+t('No changes')+'</span><button class="btn" id="bs_save" disabled>'+t('Save sales settings')+'</button></div></div></div>'+
   '<div data-btp="plans">'+botSmart()+botPlans()+'</div><div data-btp="apk"><div id="bt_apk"></div></div><div data-btp="disc"><div id="bt_disc"></div></div><div data-btp="chan"><div id="bt_chan"></div></div><div data-btp="appmsg"><div id="bt_am"></div></div>';
- var showTab=function(k){S.btab=k;$$('#bt_tabs [data-bt]').forEach(function(b){b.classList.toggle('on',b.dataset.bt==k)});$$('[data-btp]').forEach(function(d){d.style.display=d.dataset.btp==k?'':'none'});
+ var showTab=function(k){if(!tabs.some(function(x){return x[0]==k}))k='ov';S.btab=k;$$('#bt_tabs [data-bt]').forEach(function(b){var on=b.dataset.bt==k;b.classList.toggle('on',on);b.setAttribute('aria-selected',on)});$$('[data-btp]').forEach(function(d){d.style.display=d.dataset.btp==k?'':'none'});
   if(k=='disc')botDisc();if(k=='chan')botChan();if(k=='appmsg')botAppMsg();if(k=='apk')botApk()};
  $('#bt_tabs').onclick=function(e){var b=e.target.closest('[data-bt]');if(b)showTab(b.dataset.bt)};showTab(S.btab);smartWire();botWatch();
  // crypto: typing an address switches «accept crypto» on; a written address with the switch off is warned about
@@ -187,8 +196,13 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
  w('#bt_test',function(){toast(t('Checking…'));api('POST','/api/bot/test').then(function(r){toast(r.ok?'✓ @'+(r.username||''):(r.error||t('Failed')),!r.ok)}).catch(fail)});
  w('#bt_pause',function(){api('POST','/api/bot/pause').then(function(){toast(t('Done'));botLoad()}).catch(fail)});
  w('#bt_del',function(){confirmDo(function(){api('DELETE','/api/bot').then(waitRestart).catch(fail)})});
- w('#bs_save',function(){var body={};$$('[data-bs]').forEach(function(x){body[x.dataset.bs]=x.type=='checkbox'?(x.checked?'1':'0'):x.value});
-  api('PUT','/api/settings',body).then(function(){toast(t('Saved'));botLoad()}).catch(fail)});
+ // the sales form says when it has changes, while it saves, and whether the save worked
+ var bsv=function(x){return x.type=='checkbox'?(x.checked?'1':'0'):x.value},bsSt=function(k,txt){var b=$('#bs_bar'),st=$('#bs_st'),sv=$('#bs_save');if(!b)return;b.dataset.st=k;st.textContent=t(txt);sv.disabled=k=='clean'||k=='saving'};
+ $$('[data-bs]').forEach(function(x){x._o=bsv(x)});
+ var bsDirty=function(){var d=$$('[data-bs]').some(function(x){return bsv(x)!==x._o});bsSt(d?'dirty':'clean',d?'Unsaved changes':'No changes')};
+ var sp=$('[data-btp="sales"]');if(sp){sp.addEventListener('input',bsDirty);sp.addEventListener('change',bsDirty)}
+ w('#bs_save',function(){var body={};$$('[data-bs]').forEach(function(x){body[x.dataset.bs]=bsv(x)});bsSt('saving','Saving…');
+  api('PUT','/api/settings',body).then(function(){toast(t('Saved'));bsSt('saved','Saved');botLoad()}).catch(function(e){bsSt('fail','Save failed');$('#bs_save').disabled=false;fail(e)})});
  w('#pl_add',function(){var n=$('#pl_n').value.trim();if(!n)return toast(t('Plan name'),1);
   api('POST','/api/plans',{name:n,days:+$('#pl_d').value||30,gb:+$('#pl_g').value||0,toman:+$('#pl_t').value||0,usd:+$('#pl_u').value||0,conns:+$('#pl_c').value||1,category:($('#pl_cat').value||'').trim()}).then(function(){toast(t('Saved'));botLoad()}).catch(fail)});
  var pl=$('#pl_list');if(pl)pl.onchange=function(e){var se=e.target.closest('[data-pst]');if(se)api('PUT','/api/plans/'+se.dataset.pst,{style:se.value}).then(function(){toast(t('Saved'))}).catch(fail)};
@@ -248,7 +262,15 @@ function smartWire(){var pv=function(){var el=$('#sp_prev');if(!el)return;var l=
 
 
 // ---- Emergency chat: a small chat server on a server inside Iran, for when the international internet is cut
-function pEmergency(){$('#pg').innerHTML='<div class="ph"><div><h2>'+ic('sos',22)+' '+t('Emergency chat')+'</h2><p>'+t('Talk to your customers and send them configs when the international internet is cut')+'</p></div></div><div id="em">'+t('Loading…')+'</div>';emLoad()}
+function pEmergency(){var k=S.sub=='logs'?'logs':'chat';
+ $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Emergency chat')+'</h2><p>'+t('Talk to your customers and send them configs when the international internet is cut')+'</p></div></div>'+
+  '<nav class="ptabs ku-tabs" aria-label="'+esc(t('Emergency chat'))+'">'+kuTabs('emergency',[['chat','Chat'],['logs','Logs']],k)+'</nav><div id="emv"></div>';
+ tab_emergency(k)}
+// the chat is the page; the logs are a view of their own so a long log never pushes the chat away
+window.tab_emergency=function(k){k=k=='logs'?'logs':'chat';var v=$('#emv');if(!v)return;
+ $$('#pg .ptabs a').forEach(function(a){var on=a.getAttribute('href')=='#emergency/'+k;a.classList.toggle('on',on);if(on)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
+ clearInterval(S.timer3);
+ if(k=='logs'){v.innerHTML=logCard();logWire()}else{v.innerHTML='<div id="em">'+t('Loading…')+'</div>';emLoad()}};
 function emLoad(){Promise.all([api('GET','/api/emergency'),api('GET','/api/tunnels')]).then(function(r){var e=r[0],sv=(r[1].servers||[]),el=$('#em');if(!el)return;
  var srvOpt=srvOptGroups(sv,function(x){return '<option value="'+esc(x.id)+'"'+(x.id==e.server?' selected':'')+'>'+esc(x.name+(x.local?' ('+t('panel')+')':''))+(x.online?'':' · '+t('Disconnected'))+'</option>'});
  var cur=sv.filter(function(x){return x.id==e.server})[0],old=cur&&!cur.local&&cur.version&&verLt(cur.version,'3.3.0');
@@ -378,24 +400,26 @@ function waitRestart(){toast(t('Panel is restarting…'));var n=0;setTimeout(fun
 
 // ---- traffic & stats page
 var TR={h:{rx:[],tx:[]},last:null,max:40,q:'',all:false};
-function pTraffic(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Traffic & stats')+'</h2><p>'+t('Users usage and live network traffic')+'</p></div><button class="ib" id="tr_rf" title="'+t('Refresh')+'">'+ic('refresh',17)+'</button></div><div id="tr">'+t('Loading…')+'</div>';
+function pTraffic(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Traffic & stats')+'</h2><p>'+t('Users usage and live network traffic')+'</p></div><div class="row"><button type="button" class="kib" id="tr_rf" title="'+t('Refresh')+'" aria-label="'+t('Refresh')+'">'+ic('refresh',17)+'</button></div></div><div id="tr"><div class="kskel"></div><div class="kskel"></div></div>';
  TR={h:{rx:[],tx:[]},last:null,max:40,q:'',all:false};if(DB.h&&DB.h.rx&&DB.h.rx.length>1){TR.h.rx=DB.h.rx.slice(-TR.max);TR.h.tx=(DB.h.tx||[]).slice(-TR.max)}$('#tr_rf').onclick=trLoad;trLoad();trTick();setTimeout(trTick,900);
  clearInterval(S.timer3);S.timer3=setInterval(function(){if(S.page=='traffic'&&document.visibilityState=='visible')trTick()},2000)}
 function trLoad(){Promise.all([api('GET','/api/users'),api('GET','/api/nodes').catch(function(){return S.nodes||[]})]).then(function(r){S.users=r[0];S.nodes=r[1];trDraw()}).catch(fail)}
 function trTick(){api('GET','/api/live').then(function(l){var p=TR.last;TR.last=l;if(!p)return;var sec=Math.max(.5,(l.ts-p.ts)/1000),v={rx:Math.max(0,(l.net_rx-p.net_rx)/sec),tx:Math.max(0,(l.net_tx-p.net_tx)/sec)};
   ['rx','tx'].forEach(function(k){TR.h[k].push(v[k]);if(TR.h[k].length>TR.max)TR.h[k].shift()});
-  var a=$('#tr_rx'),b=$('#tr_tx'),c=$('#tr_ch');if(a)a.textContent=N(rate(v.rx));if(b)b.textContent=N(rate(v.tx));if(c)c.innerHTML=areaChart([{v:TR.h.rx,c:'a'},{v:TR.h.tx,c:'b'}],{h:132,cap:TR.max})}).catch(function(){})}
+  var a=$('#tr_rx'),b=$('#tr_tx'),c=$('#tr_ch');if(a)a.textContent=N(rate(v.rx));if(b)b.textContent=N(rate(v.tx));if(c)c.innerHTML=areaChart([{v:TR.h.rx,c:'a'},{v:TR.h.tx,c:'b'}],{h:160,cap:TR.max})}).catch(function(){})}
+// (3.41) the totals, the live chart with its legend, who uses what (protocol and server), then every user
 function trDraw(){var el=$('#tr');if(!el)return;var us=S.users||[],tot=0,lim=0,lu=0,pc={};
  us.forEach(function(u){var used=+u.traffic_used_gb||0;tot+=used;if(u.traffic_limit_gb>0){lim+=+u.traffic_limit_gb;lu+=Math.min(used,+u.traffic_limit_gb)}(u.protocols||'').split(',').forEach(function(p){pc[p]=(pc[p]||0)+1})});
- var pl=lim>0?Math.round(lu/lim*1000)/10:0,bar=function(lbl,v,col){var w=us.length?Math.round(v/us.length*100):0;return '<div class="brow">'+lbl+'<span class="trk"><span class="fil" style="width:'+w+'%'+(col?';background:'+col:'')+'"></span></span><b>'+N(v)+'</b></div>'};
- el.innerHTML='<div class="tr3"><div class="card tk"><small>'+t('Total recorded usage')+'</small><b class="ltr">'+N(gbtxt(tot))+'</b><span class="muted">'+N(us.length)+' '+t('users')+'</span></div>'+
-  '<div class="card tk"><small>'+t('Quota of limited users')+'</small><b class="ltr">'+N(gbtxt(lim))+'</b><span class="muted">'+N(pl)+'% '+t('of it used')+'</span><span class="trk"><span class="fil" style="width:'+Math.min(100,pl)+'%"></span></span></div>'+
-  '<div class="card tk"><small>'+t('Live speed')+' · '+t('this server')+'</small><div class="trs"><span>↓ <b id="tr_rx" class="ltr">—</b></span><span>↑ <b id="tr_tx" class="ltr">—</b></span></div></div></div>'+
-  '<div class="card"><h3>'+t('Live network traffic')+'</h3><small class="muted">'+t('Download and upload, every 2 seconds')+'</small><div class="ch tall" id="tr_ch"></div></div>'+
-  '<div class="g2 trg"><div class="card" style="margin:0"><h3>'+t('By protocol')+'</h3>'+PROTOS.map(function(p){return bar('<span class="ptag" style="--pc:'+PCOL[p[0]]+'">'+p[1]+'</span>',pc[p[0]]||0,PCOL[p[0]])}).join('')+'</div>'+
-  '<div class="card" style="margin:0"><h3>'+t('By node')+'</h3>'+((S.nodes||[]).map(function(n){return bar('<span class="nmn">'+esc(n.name)+'</span>',n.users||0)}).join('')||'<span class="muted">—</span>')+'</div></div>'+
-  '<div class="card" style="margin-top:12px"><div class="nh"><div><h3>'+t('Users usage')+'</h3><small class="muted">'+t('Used volume, limit and percent')+'</small></div><input id="tr_q" type="search" autocomplete="off" placeholder="'+t('Search')+'" style="max-width:190px"></div><div id="tr_ul" class="trul"></div></div>';
- $('#tr_q').value=TR.q;$('#tr_q').oninput=function(){TR.q=this.value.toLowerCase();trUsers()};trUsers();if(TR.h.rx.length>1)$('#tr_ch').innerHTML=areaChart([{v:TR.h.rx,c:'a'},{v:TR.h.tx,c:'b'}],{h:132,cap:TR.max})}
+ var pl=lim>0?Math.round(lu/lim*1000)/10:0,
+  bar=function(lbl,v,col){var w=us.length?Math.max(0,Math.min(100,Math.round(v/us.length*100))):0;return '<div class="kbr"><span class="kbr-l">'+lbl+'</span><span class="trk"><span class="fil" style="width:'+w+'%'+(col?';background:'+col:'')+'"></span></span><b class="kbr-v">'+N(v)+'</b></div>'};
+ el.innerHTML=kuStats([[t('Total recorded usage'),'<span class="ltr">'+N(gbtxt(tot))+'</span>'],[t('Quota of limited users')+' · '+N(pl)+'% '+t('of it used'),'<span class="ltr">'+N(gbtxt(lim))+'</span>'],
+   ['↓ '+t('Download')+' · '+t('this server'),'<span class="ltr" id="tr_rx">—</span>'],['↑ '+t('Upload')+' · '+t('this server'),'<span class="ltr" id="tr_tx">—</span>']])+
+  '<section class="card"><div class="kc-h"><div><h3>'+t('Live network traffic')+'</h3><small class="muted">'+t('Download and upload, every 2 seconds')+'</small></div>'+
+   '<div class="klegend"><span class="a"><i></i>'+t('Download')+'</span><span class="b"><i></i>'+t('Upload')+'</span></div></div><div class="ch ktr-ch" id="tr_ch"></div></section>'+
+  '<div class="kgrid"><section class="card c6"><div class="kc-h"><div><h3>'+t('By protocol')+'</h3><small class="muted">'+t('Users')+'</small></div></div>'+PROTOS.map(function(p){return bar('<span class="ptag" style="--pc:'+PCOL[p[0]]+'">'+p[1]+'</span>',pc[p[0]]||0,PCOL[p[0]])}).join('')+'</section>'+
+  '<section class="card c6"><div class="kc-h"><div><h3>'+t('By node')+'</h3><small class="muted">'+t('Users')+'</small></div></div>'+((S.nodes||[]).map(function(n){return bar('<span class="nmn">'+esc(n.name)+'</span>',n.users||0)}).join('')||'<span class="muted">—</span>')+'</section></div>'+
+  '<section class="card ktr-u"><div class="kc-h"><div><h3>'+t('Users usage')+'</h3><small class="muted">'+t('Used volume, limit and percent')+'</small></div><label class="ktr-q"><span class="vh">'+t('Search')+'</span><input id="tr_q" type="search" autocomplete="off" placeholder="'+t('Search')+'"></label></div><div id="tr_ul" class="trul"></div></section>';
+ $('#tr_q').value=TR.q;$('#tr_q').oninput=function(){TR.q=this.value.toLowerCase();trUsers()};trUsers();if(TR.h.rx.length>1)$('#tr_ch').innerHTML=areaChart([{v:TR.h.rx,c:'a'},{v:TR.h.tx,c:'b'}],{h:160,cap:TR.max})}
 function trUsers(){var el=$('#tr_ul');if(!el)return;var l=(S.users||[]).filter(function(u){return !TR.q||u.username.toLowerCase().indexOf(TR.q)>=0}).sort(function(a,b){return b.traffic_used_gb-a.traffic_used_gb}),max=TR.all?l.length:30;
  el.innerHTML=l.slice(0,max).map(function(u){var p=usage(u),st=ustate(u);return '<button class="urow" data-u="'+u.id+'"><span class="dot '+(st=='disabled'?'r':st=='finished'?'y':(u.online_connections>0||liveOf(u).length)?'g':'')+'"></span><b class="ltr nm">'+esc(u.username)+'</b>'+
   '<span class="uu ltr">'+N(gbtxt(u.traffic_used_gb))+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</span><span class="ub"><span class="trk"><span class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?0:Math.max(1,p))+'%"></span></span></span><span class="up ltr">'+(p<0?'∞':N(p)+'%')+'</span></button>'}).join('')+
@@ -404,7 +428,7 @@ function trUsers(){var el=$('#tr_ul');if(!el)return;var l=(S.users||[]).filter(f
 
 // ---- port management page
 var PSEL='local';
-function pPorts(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Port management')+'</h2><p>'+t('Ports used on the main server and on every node')+'</p></div><button class="ib" id="pt_rf" title="'+t('Refresh')+'">'+ic('refresh',17)+'</button></div><div id="pt">'+t('Loading…')+'</div>';
+function pPorts(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Port management')+'</h2><p>'+t('Ports used on the main server and on every node')+'</p></div><div class="row"><button type="button" class="kib" id="pt_rf" title="'+t('Refresh')+'" aria-label="'+t('Refresh')+'">'+ic('refresh',17)+'</button></div></div><div id="pt"><div class="kskel"></div><div class="kskel"></div></div>';
  $('#pt_rf').onclick=ptLoad;ptLoad()}
 function ptLoad(){Promise.all([api('GET','/api/nodes'),api('GET','/api/settings').catch(function(){return {}}),api('GET','/api/system').catch(function(){return null})]).then(function(r){S.nodes=r[0];S.pset=r[1]||{};S.psys=r[2];ptDraw()}).catch(fail)}
 function svcOf(list,k){for(var i=0;i<(list||[]).length;i++)if(list[i].key==k)return list[i];return null}
@@ -415,21 +439,28 @@ function ptRows(n){var loc=n.id=='local',inf=n.info||{},sv=loc&&S.psys?S.psys.se
  else{var m=String(n.address||'').match(/:(\d+)(\/|$)/);add('api',t('Node API (HTTPS)'),'TCP',m?m[1]:'443','web')}
  return rows}
 function fwCmd(rows){var p=rows.filter(function(r){return r.k!='panel'}).map(function(r){return 'ufw allow '+r.port+'/'+r.proto.toLowerCase()}).filter(function(x,i,a){return a.indexOf(x)==i});return p.length?p.join(' && '):'—'}
+// (3.41) the numbers first (TCP, UDP, running, clashes), then one table of the chosen server's ports
+// (a card per port on a phone), the firewall command, and every server side by side
 function ptDraw(){var el=$('#pt');if(!el)return;var ns=S.nodes||[];if(!ns.some(function(n){return n.id==PSEL}))PSEL=(ns[0]||{}).id||'local';
  var n=ns.filter(function(x){return x.id==PSEL})[0]||{id:'local',info:{}},rows=ptRows(n),loc=n.id=='local',ps=S.pset||{},host=loc?(ps.endpoint||ps.domain||''):(n.effective_endpoint||''),cnt={};
  rows.forEach(function(r){cnt[r.proto+r.port]=(cnt[r.proto+r.port]||0)+1});
- el.innerHTML='<div class="psel">'+ns.map(function(x){var on=x.id=='local'||x.online;return '<button class="'+(x.id==PSEL?'on':'')+'" data-ps="'+esc(x.id)+'"><span class="dot '+(on?'g':'r')+'"></span>'+esc(x.name)+(x.id=='local'?' <small>'+t('Main')+'</small>':'')+'</button>'}).join('')+'</div>'+
-  '<div class="pgrid">'+(rows.length?rows.map(function(r){var bad=cnt[r.proto+r.port]>1,sl=r.st=='run'?['g','Running']:r.st=='stop'?['r','Stopped']:['','Unknown'];
-   return '<div class="card pcard'+(bad?' pbad':'')+'"><div class="ph2"><b>'+esc(r.name)+'</b><span class="pp '+r.proto.toLowerCase()+'">'+r.proto+'</span><span class="sp"></span><span class="badge '+sl[0]+'">'+t(sl[1])+'</span></div>'+
-    '<button class="pnum ltr" data-cp="'+esc(r.port)+'" title="'+t('Copy')+'">'+esc(r.port)+'</button>'+
-    '<small class="muted ltr pub">'+(r.k=='panel'?t('local only (127.0.0.1)'):esc((host||'?')+':'+r.port))+'</small>'+
-    (bad?'<div class="warnbox">'+t('Port conflict: another service on this server uses the same port')+'</div>':'')+'</div>'}).join(''):'<p class="muted">'+t('No port information yet. Press Check now.')+'</p>')+'</div>'+
-  '<div class="row" style="gap:8px;margin:2px 0 12px"><button class="b2" id="pt_chk">'+ic('check',15)+' '+t('Check now')+'</button>'+(!loc&&n.last_sync?'<small class="muted">'+t('Last contact')+': '+ago(n.last_sync)+'</small>':'')+'</div>'+
-  '<div class="card"><h3>'+t('Firewall')+'</h3><p class="sub">'+t('If a port is closed, run this on that server as root:')+'</p><pre class="cmd ltr">'+esc(fwCmd(rows))+'</pre><button class="b2" id="pt_fwc">'+ic('copy',15)+' '+t('Copy command')+'</button></div>'+
-  '<div class="card"><h3>'+t('All servers')+'</h3><div class="ptab"><table><thead><tr><th>'+t('Server')+'</th><th>WireGuard</th><th>AmneziaWG</th><th>Hysteria2</th><th>KANKI MIX</th><th>'+t('Panel / API')+'</th></tr></thead><tbody>'+
-   ns.map(function(x){var rr=ptRows(x),g=function(k){var r=rr.filter(function(y){return y.k==k})[0];return r?'<span class="ltr">'+esc(r.port)+'</span> <span class="dot '+(r.st=='run'?'g':r.st=='stop'?'r':'')+'"></span>':'<span class="muted">—</span>'};
-    return '<tr><td><b>'+esc(x.name)+'</b></td><td>'+g('wg')+'</td><td>'+g('awg')+'</td><td>'+g('hy2')+'</td><td>'+g('kmix')+'</td><td>'+(x.id=='local'?g('web'):g('api'))+'</td></tr>'}).join('')+'</tbody></table></div></div>';
- el.onclick=function(e){var b=e.target.closest('[data-ps]');if(b){PSEL=b.dataset.ps;ptDraw();return}var c=e.target.closest('[data-cp]');if(c){copy(c.dataset.cp);return}
+ var nT=rows.filter(function(r){return r.proto=='TCP'}).length,nU=rows.length-nT,nR=rows.filter(function(r){return r.st=='run'}).length,nC=rows.filter(function(r){return cnt[r.proto+r.port]>1}).length;
+ el.innerHTML=kuStats([['TCP',N(nT)],['UDP',N(nU)],[t('Running'),N(nR)+' / '+N(rows.length),nR<rows.length?'y':'g'],[t('Conflicts'),N(nC),nC?'r':'']])+
+  '<div class="psel kreg" role="group" aria-label="'+esc(t('Server'))+'">'+ns.map(function(x){var on=x.id=='local'||x.online;return '<button type="button" class="'+(x.id==PSEL?'on':'')+'" aria-pressed="'+(x.id==PSEL)+'" data-ps="'+esc(x.id)+'"><span class="dot '+(on?'g':'r')+'"></span>'+esc(x.name)+(x.id=='local'?' <small>'+t('Main')+'</small>':'')+'</button>'}).join('')+'</div>'+
+  '<section class="card"><div class="kc-h"><div><h3>'+esc(n.name||'')+'</h3>'+(!loc&&n.last_sync?'<small class="muted">'+t('Last contact')+': '+ago(n.last_sync)+'</small>':'')+'</div><button type="button" class="b2 sm" id="pt_chk">'+ic('check',15)+' '+t('Check now')+'</button></div>'+
+  (rows.length?'<div class="ktbl-w"><table class="ktbl"><thead><tr><th>'+t('Service')+'</th><th>'+t('Protocol')+'</th><th>'+t('Port')+'</th><th>'+t('Address')+'</th><th>'+t('Status')+'</th></tr></thead><tbody>'+
+   rows.map(function(r){var bad=cnt[r.proto+r.port]>1,sl=r.st=='run'?['g','Running']:r.st=='stop'?['r','Stopped']:['n','Unknown'],adr=r.k=='panel'?t('local only (127.0.0.1)'):(host||'?')+':'+r.port;
+    return '<tr'+(bad?' class="bad"':'')+'><td class="ktbl-h"><b>'+esc(r.name)+'</b>'+(bad?'<small class="bad2">'+t('Port conflict: another service on this server uses the same port')+'</small>':'')+'</td>'+
+     '<td data-l="'+esc(t('Protocol'))+'"><span class="pp '+r.proto.toLowerCase()+'">'+r.proto+'</span></td>'+
+     '<td data-l="'+esc(t('Port'))+'"><button type="button" class="kcopy" data-cp="'+esc(r.port)+'" title="'+esc(t('Copy'))+'" aria-label="'+esc(t('Copy')+' '+r.port)+'"><b class="ltr">'+esc(r.port)+'</b>'+ic('copy',14)+'</button></td>'+
+     '<td data-l="'+esc(t('Address'))+'"><span class="ltr kclip" title="'+esc(adr)+'">'+esc(adr)+'</span></td>'+
+     '<td data-l="'+esc(t('Status'))+'"><span class="kpill '+sl[0]+'"><i class="dot '+sl[0]+'"></i><span>'+t(sl[1])+'</span></span></td></tr>'}).join('')+'</tbody></table></div>':
+   '<p class="muted">'+t('No port information yet. Press Check now.')+'</p>')+'</section>'+
+  '<section class="card"><div class="kc-h"><div><h3>'+t('Firewall')+'</h3><small class="muted">'+t('If a port is closed, run this on that server as root:')+'</small></div><button type="button" class="b2 sm" id="pt_fwc">'+ic('copy',15)+' '+t('Copy command')+'</button></div><pre class="cmd ltr">'+esc(fwCmd(rows))+'</pre></section>'+
+  '<section class="card"><div class="kc-h"><h3>'+t('All servers')+'</h3></div><div class="ktbl-w"><table class="ktbl"><thead><tr><th>'+t('Server')+'</th><th>WireGuard</th><th>AmneziaWG</th><th>Hysteria2</th><th>KANKI MIX</th><th>microtun</th><th>'+t('Panel / API')+'</th></tr></thead><tbody>'+
+   ns.map(function(x){var rr=ptRows(x),g=function(k,l){var r=rr.filter(function(y){return y.k==k})[0];return '<td data-l="'+esc(l)+'">'+(r?'<span class="kpp"><i class="dot '+(r.st=='run'?'g':r.st=='stop'?'r':'n')+'"></i><b class="ltr">'+esc(r.port)+'</b></span>':'<span class="muted">—</span>')+'</td>'};
+    return '<tr><td class="ktbl-h"><b>'+esc(x.name)+'</b></td>'+g('wg','WireGuard')+g('awg','AmneziaWG')+g('hy2','Hysteria2')+g('kmix','KANKI MIX')+g('mtun','microtun')+(x.id=='local'?g('web',t('Panel / API')):g('api',t('Panel / API')))+'</tr>'}).join('')+'</tbody></table></div></section>';
+ el.onclick=function(e){var b=e.target.closest('[data-ps]');if(b){PSEL=b.dataset.ps;ptDraw();return}var c=e.target.closest('[data-cp]');if(c){copy(c.dataset.cp);c.classList.add('done');setTimeout(function(){c.classList.remove('done')},1200);return}
   if(e.target.closest('#pt_fwc'))copy(fwCmd(rows));if(e.target.closest('#pt_chk'))ptCheck(n)}}
 function ptCheck(n){toast(t('Checking…'));if(n.id=='local'){api('GET','/api/system').then(function(s){S.psys=s;ptDraw();toast(t('Done'))}).catch(fail);return}
  api('POST','/api/nodes/'+encodeURIComponent(n.id)+'/health').then(function(r){if(r.services){n.info=n.info||{};n.info.services=r.services}toast(r.ok?t('Done'):t('Offline'),!r.ok);ptDraw()}).catch(fail)}

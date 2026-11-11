@@ -3,6 +3,8 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.41 — Kanki Console
+- One sidebar and a calm header (where you are, what needs you, your account); a core bar of all eight cores (DNS and KPING too) in one row; a dashboard that shows only what needs you; ports, traffic, the bot, security and the logs split into clear parts; save bars that say what they are doing.
 ## New in 3.40 — configs where the app expects them, six cores at install, Kanki Glass
 - Tunnel configs only where a tunnel really carries the port; Xray links say direct or tunnel. KPING routes are kept and KPING counts in the one connection limit. The installer and «Add server» pick the cores; Iran servers show their machine and update with one tap. A cleaner users page, the menu in two groups (main and advanced tools) and the new Kanki Glass look (dark and a cream light).
 ## New in 3.39.1 — tunnels keep game packets through short outages
