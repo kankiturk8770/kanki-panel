@@ -1737,25 +1737,25 @@ body.kg{--a:#f5c451;--al:#ffe39a;--ad:#c8922b;--on:#1a1306;--t:#e9edf5;--s:#8b94
  --ok:#3ddc97;--bad:#ff6b6b;--warn:#ffb547;--info:#6fb6ff;
  --bg1:#07090e;--bg2:#0a0d14;--c1:rgba(16,20,29,.72);--c2:rgba(13,17,25,.72);
  --g1:rgba(255,255,255,.045);--g2:rgba(255,255,255,.012);
- --gb:rgba(170,184,210,.14);--gb2:rgba(170,184,210,.22);--ln:rgba(170,184,210,.13);--ln2:rgba(170,184,210,.08);
+ --gb:rgba(245,196,81,.15);--gb2:rgba(245,196,81,.24);--ln:rgba(245,196,81,.13);--ln2:rgba(245,196,81,.08);
  --gl:inset 0 1px 0 rgba(255,255,255,.07);--sh:inset 0 1px 0 rgba(255,255,255,.06),0 18px 40px -26px rgba(0,0,0,.9);
  --in:rgba(7,9,14,.55);--blur:saturate(140%) blur(18px);
  --kg-glass:rgba(16,20,29,.72);--kg-rim:linear-gradient(180deg,rgba(255,255,255,.16),rgba(170,184,210,.06) 40%,rgba(170,184,210,.12));
  --kg-glow:0 0 0 1px rgba(245,196,81,.55),0 0 18px -2px rgba(245,196,81,.45);
  background:#07090e!important;color:var(--t);overflow-x:hidden}
-body.kg.light{--a:#94650a;--al:#f7d77d;--ad:#b98318;--on:#1a1306;--t:#0f1524;--s:#586274;
- --ok:#12915b;--bad:#d23c3c;--warn:#b86e00;--info:#2f7fd6;
- --bg1:#eef1f6;--bg2:#e6eaf1;--c1:rgba(255,255,255,.80);--c2:rgba(255,255,255,.72);
- --g1:rgba(255,255,255,.9);--g2:rgba(255,255,255,.6);
- --gb:rgba(20,28,45,.12);--gb2:rgba(20,28,45,.18);--ln:rgba(20,28,45,.12);--ln2:rgba(20,28,45,.07);
- --gl:inset 0 1px 0 #fff;--sh:inset 0 1px 0 #fff,0 14px 30px -22px rgba(20,28,45,.35);
- --in:rgba(255,255,255,.75);--kg-glass:rgba(255,255,255,.80);
+body.kg.light{--a:#8a5d07;--al:#f7d77d;--ad:#b98318;--on:#1a1306;--t:#1d1810;--s:#6c604b;
+ --ok:#12865a;--bad:#c93636;--warn:#a96400;--info:#2a72c4;
+ --bg1:#f6f1e7;--bg2:#efe7d8;--c1:rgba(255,252,245,.84);--c2:rgba(253,248,238,.78);
+ --g1:rgba(255,255,255,.85);--g2:rgba(255,250,240,.5);
+ --gb:rgba(138,93,7,.16);--gb2:rgba(138,93,7,.24);--ln:rgba(138,93,7,.15);--ln2:rgba(138,93,7,.08);
+ --gl:inset 0 1px 0 #fff;--sh:inset 0 1px 0 #fff,0 14px 30px -22px rgba(90,62,10,.35);
+ --in:rgba(255,253,248,.85);--kg-glass:rgba(255,252,245,.84);
  --kg-glow:0 0 0 1px rgba(185,131,24,.6),0 0 16px -4px rgba(245,196,81,.55);
- background:#eef1f6!important}
+ background:#f6f1e7!important}
 html:has(body.kg){overflow-x:hidden}
 /* one quiet light behind everything: gold top corner, cold steel bottom (static) */
 body.kg:before{background:radial-gradient(900px 520px at 100% -10%,rgba(245,196,81,.09),transparent 65%),radial-gradient(800px 560px at -10% 110%,rgba(111,140,190,.10),transparent 65%)!important}
-body.kg.light:before{background:radial-gradient(900px 520px at 100% -10%,rgba(245,196,81,.16),transparent 65%),radial-gradient(800px 560px at -10% 110%,rgba(111,140,190,.14),transparent 65%)!important}
+body.kg.light:before{background:radial-gradient(900px 520px at 100% -10%,rgba(245,196,81,.20),transparent 65%),radial-gradient(800px 560px at -10% 110%,rgba(214,186,130,.22),transparent 65%)!important}
 
 /* the glass: every panel the same material (the backdrop blur only on what floats over the page,
    so a long page scrolls smoothly on a weak phone; cards sit on a still background) */
@@ -1814,3 +1814,29 @@ body.kg pre{white-space:pre-wrap;overflow-wrap:anywhere}
 @media(prefers-reduced-motion:reduce){body.kg *{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 body.kg #ul.uchips{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))!important}
 @media(max-width:619px){body.kg #ul.uchips{grid-template-columns:minmax(0,1fr)!important}}
+
+/* ---- 3.40.1 forms, windows and the pages of the second brief ---- */
+/* every field the same: 10px 14px, 12px corners, gold edge when in use */
+body.kg #pg input:not([type=checkbox]):not([type=radio]):not([type=range]),body.kg #pg select,body.kg #pg textarea,
+body.kg .mbox input:not([type=checkbox]):not([type=radio]):not([type=range]),body.kg .mbox select,body.kg .mbox textarea{
+ padding:10px 14px!important;border-radius:12px!important;min-height:40px;font-size:13px}
+body.kg input:focus,body.kg select:focus,body.kg textarea:focus{border-color:var(--a)!important}
+/* forms wrap into as many columns as fit, never a squeezed field or a label over another */
+body.kg .kxf,body.kg .sgrid,body.kg .g2f{grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr))!important}
+body.kg .kxf>*,body.kg .sgrid>*,body.kg .g2f>*{min-width:0}
+body.kg .kxf .wide,body.kg .sgrid .full{grid-column:1/-1}
+/* windows: come in by transform and opacity, the close button big enough for a thumb */
+body.kg .modal.on .mbox{animation:kgIn .2s ease-out}
+@keyframes kgIn{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+body.kg .mbox .mh .ib,body.kg .mbox .us-h .ib{min-width:40px;min-height:40px;border-radius:12px}
+@media(max-width:619px){body.kg .mbox:not(.usheet){animation-name:kgUp}
+ @keyframes kgUp{from{opacity:.4;transform:translateY(28px)}to{opacity:1;transform:none}}
+ body.kg .mbox .mh{position:sticky;top:-16px;z-index:2;background:inherit;padding-top:4px}}
+@media(prefers-reduced-motion:reduce){body.kg .modal.on .mbox{animation:none}}
+/* numbers line up in tables and counters */
+body.kg #pg{font-variant-numeric:tabular-nums}
+/* scrollbars inside boxes: thin and quiet */
+body.kg *{scrollbar-width:thin;scrollbar-color:rgba(245,196,81,.28) transparent}
+body.kg ::-webkit-scrollbar{width:8px;height:8px}
+body.kg ::-webkit-scrollbar-thumb{background:rgba(245,196,81,.28);border-radius:8px}
+body.kg ::-webkit-scrollbar-track{background:transparent}
