@@ -20,30 +20,29 @@ function dnsName(id){var a=(DN.d&&DN.d.agents)||[];for(var i=0;i<a.length;i++)if
 function dnsDraw(d){var el=$('#dn');if(!el)return;dnsTabs(d);({overview:dnsOverview,servers:dnsServersTab,pubg:dnsPubgTab,services:dnsServicesTab,users:dnsUsersTab,log:dnsLogTab,settings:dnsSettingsTab}[DN.tab]||dnsOverview)(d,el)}
 function dnsSum(d,f){return d.servers.reduce(function(a,x){return a+(+f(x.status||{})||0)},0)}
 function dnsKpis(d){var run=d.servers.filter(function(x){return x.status&&x.status.active}).length,q=dnsSum(d,function(s){return s.q&&s.q.total}),r=dnsSum(d,function(s){return s.q&&s.q.routed});
- return '<div><small>'+t('Status')+'</small><b style="color:'+(d.on?'var(--ok)':'var(--bad)')+'">'+(d.on?t('On'):t('Off'))+'</b></div><div><small>'+t('Running servers')+'</small><b>'+N(run)+' / '+N(d.servers.length)+'</b></div>'+
-  '<div><small>'+t('Users with DNS')+'</small><b>'+N(d.users)+'</b></div><div><small>'+t('Allowed addresses')+'</small><b>'+N(dnsSum(d,function(s){return s.allowed}))+'</b></div>'+
-  '<div><small>'+t('Queries')+' / '+t('routed')+'</small><b class="ltr">'+N(q)+' / '+N(r)+'</b></div>'}
+ return kuStats([[t('Status'),d.on?t('On'):t('Off'),d.on?'g':'r'],[t('Running servers'),N(run)+' / '+N(d.servers.length),run<d.servers.length?'y':''],[t('Users with DNS'),N(d.users)],
+  [t('Allowed addresses'),N(dnsSum(d,function(s){return s.allowed}))],[t('Queries')+' / '+t('routed'),'<span class="ltr">'+N(q)+' / '+N(r)+'</span>']])}
 function dnsWarn(d){var w=[];if(!d.on)w.push(t('DNS is off: nothing runs on the servers.')+' <a href="#dns/settings">'+t('Turn it on')+'</a>');
  if(!d.base&&!d.servers.some(function(x){return x.host}))w.push(t('No DNS domain yet: encrypted DNS (DoT / DoH) needs one.')+' <a href="#dns/settings">'+t('Settings and SSL')+'</a>');
 
  if(!d.servers.some(function(x){return x.role=='exit'}))w.push(t('Add an exit DNS server first'));
  return w.map(function(x){return '<div class="warnbox">'+x+'</div>'}).join('')}
 function dnsOverview(d,el){
- el.innerHTML=dnsWarn(d)+'<div class="kv k5" id="dn_kv">'+dnsKpis(d)+'</div>'+
-  '<div class="g2"><div class="card"><div class="nh"><h3>'+ic('tunnel',16)+' '+t('Path of the traffic')+'</h3><a class="b2" href="#dns/servers">'+t('Manage')+'</a></div><div id="dn_topo" style="margin-top:10px">'+dnsTopo(d)+'</div></div>'+
-  '<div class="card"><h3>'+ic('traffic',16)+' '+t('Busiest services')+'</h3><p class="sub">'+t('Routed names asked for most since the DNS services started')+'</p><div id="dn_top">'+dnsTop(d)+'</div></div></div>'+
-  '<div class="card"><h3>'+ic('globe',16)+' '+t('Check a domain')+'</h3><p class="sub">'+t('Does this site go through Kanki DNS, and which service lists it?')+'</p>'+dnsCheckBox()+'</div>'+
-  '<div class="card"><h3>'+t('How it works')+'</h3><p class="sub" style="margin:0;line-height:2">'+t('1) The user taps «Unblock» in the Kanki app: the app registers the phone and uses your DNS. 2) Names of sanctioned services (games, AI, developer sites …) are answered with your server\'s IP and the server passes those connections on (SNI proxy), so games and sites open; everything else goes direct at full speed. 3) A relay inside Iran sends them to an exit abroad through a hidden Kanki tunnel.')+'</p></div>';
+ el.innerHTML=dnsWarn(d)+'<div id="dn_kv">'+dnsKpis(d)+'</div>'+
+  '<div class="kgrid"><div class="card c6"><div class="kc-h"><h3>'+t('Path of the traffic')+'</h3><a class="b2 sm" href="#dns/servers">'+t('Manage')+'</a></div><div class="u-mt3" id="dn_topo">'+dnsTopo(d)+'</div></div>'+
+  '<div class="card c6"><div class="kc-h"><div><h3>'+t('Busiest services')+'</h3><small class="muted">'+t('Routed names asked for most since the DNS services started')+'</small></div></div><div id="dn_top">'+dnsTop(d)+'</div></div></div>'+
+  '<div class="card"><div class="kc-h"><div><h3>'+t('Check a domain')+'</h3><small class="muted">'+t('Does this site go through Kanki DNS, and which service lists it?')+'</small></div></div>'+dnsCheckBox()+'</div>'+
+  '<details class="ku-help"><summary>'+t('How it works')+'</summary><p>'+t('1) The user taps «Unblock» in the Kanki app: the app registers the phone and uses your DNS. 2) Names of sanctioned services (games, AI, developer sites …) are answered with your server\'s IP and the server passes those connections on (SNI proxy), so games and sites open; everything else goes direct at full speed. 3) A relay inside Iran sends them to an exit abroad through a hidden Kanki tunnel.')+'</p></details>';
  dnsCheckWire()}
 function dnsTopo(d){if(!d.servers.length)return '<p class="muted">'+t('Add an exit DNS server first')+'</p>';
  var dot=function(x){var on=x.status&&x.status.active;return '<span class="dot '+(on?'g':x.status_at?'r':'y')+'"></span> '};
  return d.servers.filter(function(x){return x.role=='exit'}).map(function(e){var rl=d.servers.filter(function(x){return x.role=='relay'&&x.exit==e.server});
-  return '<div class="topo" style="margin-bottom:10px">'+(rl.length?rl.map(function(r){return '<span class="nd">'+dot(r)+'🇮🇷 '+esc(r.name||r.server)+'</span>'}).join(' ')+' <span class="ar">⟶</span> ':'')+'<span class="nd">'+dot(e)+'🌍 '+esc(e.name||e.server)+'</span> <span class="ar">⟶</span> <span class="nd">'+t('Internet')+'</span></div>'}).join('')}
+  return '<div class="topo u-mb3">'+(rl.length?rl.map(function(r){return '<span class="nd">'+dot(r)+'🇮🇷 '+esc(r.name||r.server)+'</span>'}).join(' ')+' <span class="ar">⟶</span> ':'')+'<span class="nd">'+dot(e)+'🌍 '+esc(e.name||e.server)+'</span> <span class="ar">⟶</span> <span class="nd">'+t('Internet')+'</span></div>'}).join('')}
 function dnsTop(d){var m={};d.servers.forEach(function(x){((x.status||{}).top||[]).forEach(function(p){m[p[0]]=(m[p[0]]||0)+(+p[1]||0)})});
  var l=Object.keys(m).map(function(k){return [k,m[k]]}).sort(function(a,b){return b[1]-a[1]}).slice(0,10);if(!l.length)return '<p class="muted">'+t('Nothing yet')+'</p>';var mx=l[0][1]||1;
  return '<div class="bars">'+l.map(function(p){return '<div class="br"><span class="ltr" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(p[0])+'</span><span class="tk"><i style="width:'+(100*p[1]/mx).toFixed(1)+'%"></i></span><b class="ltr">'+N(p[1])+'</b></div>'}).join('')+'</div>'}
 function dnsLocked(id){var p=id.split('/'),sv=((DN.d.catalog||{}).services||[]).filter(function(s){return s.key==p[0]})[0],g=sv&&sv.groups.filter(function(g){return g.key==p[1]})[0];return !!(g&&g.locked)}
-function dnsCheckBox(){return '<div class="inl"><input id="dn_ck" class="ltr" placeholder="chatgpt.com"><button class="btn" id="dn_ckb" style="flex:none">'+t('Check')+'</button></div><div id="dn_cko" style="margin-top:8px"></div>'}
+function dnsCheckBox(){return '<div class="inl"><input id="dn_ck" class="ltr" placeholder="chatgpt.com"><button class="btn u-fnone" id="dn_ckb">'+t('Check')+'</button></div><div class="u-mt2" id="dn_cko"></div>'}
 function dnsCheckWire(){var go=function(){var v=$('#dn_ck').value.trim();if(!v)return;api('POST','/api/dns/check',{name:v}).then(function(r){
   $('#dn_cko').innerHTML='<div class="vrow"><span class="dot '+(r.routed?'g':'')+'"></span><div class="nm"><b><bdi>'+esc(r.name)+'</bdi></b><small>'+(r.routed?t('Goes through Kanki DNS'):t('Goes direct (not routed)'))+
    (r.id&&r.id!='custom'?' · '+esc(r.service)+' › '+esc(r.group)+(r.group_on?'':' ('+t('this group is off')+')'):r.id=='custom'?' · '+t('your extra domains'):'')+'</small></div>'+
@@ -61,19 +60,22 @@ function dnsCertChip(x){var st=x.status||{};if(!x.host)return '<span class="chip
 function dnsCertState(d){var c=d.cert||{};
  return c.present?'<div class="vrow"><span class="dot g"></span><div class="nm"><b>'+t('A pasted certificate is used on every DNS server')+'</b></div><button class="b2 bd" id="dn_crm">'+t('Remove it (back to certbot)')+'</button></div>'
   :'<div class="vrow"><span class="dot g"></span><div class="nm"><b>'+t('Automatic: certbot on each DNS server')+'</b><small>'+t('Each server gets a Let\'s Encrypt certificate for its own name and renews it by itself')+'</small></div></div>'}
+// (3.42) every DNS server is one item row like the servers of the other cores: status, name and role, its
+// tags, its numbers, then «Edit»; the rarer actions (repair, health, all users, remove) are in «⋯»
 function dnsServers(d){if(!d.servers.length)return '<p class="muted ku-empty">'+t('Add an exit DNS server first')+'</p>';
- return '<div class="ibl">'+d.servers.map(function(x){var st=x.status||{},on=st.active,q=st.q||{},errs=(st.errors||[]).concat(st.deploy_error?[st.deploy_error]:[]).concat(st.error?[st.error]:[]),relay=x.role=='relay';
-  var hit=q.total?Math.round(100*(q.cache||0)/q.total):0;
-  return '<div class="ibc"><div class="hd"><span class="pi">'+(relay?'IR':'EX')+'</span><div class="nm"><b>'+esc(x.name||x.server)+'</b><small>'+(relay?t('Relay (inside Iran)')+' → '+esc(dnsName(x.exit)):t('Exit (abroad)'))+'</small></div><span class="chipx '+(on?'g':x.status_at?'r':'y')+'">'+(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'))+'</span></div>'+
-   '<div class="chs"><span class="chipx a ltr">'+esc(x.host||t('no name'))+'</span><span class="chipx ltr">IP '+esc(x.answer_ip||'?')+'</span>'+(relay?'<span class="chipx b">'+esc(x.transport||'tcpmux')+' :'+(x.tunnel_port||8446)+'</span>':'')+(x.hidden?'<span class="chipx y">'+t('Hidden from subscribers')+'</span>':'')+(st.version?'<span class="chipx">v'+esc(st.version)+'</span>':'')+'</div>'+
-   (x.note?'<p class="muted" style="margin:0">'+esc(x.note)+'</p>':'')+
-   '<div class="kv k4" style="margin:0"><div><small>'+t('Queries')+'</small><b>'+N(q.total||0)+'</b></div><div><small>'+t('routed')+'</small><b>'+N(q.routed||0)+'</b></div><div><small>'+t('From cache')+'</small><b>'+N(hit)+'%</b></div><div><small>'+t('Allowed addresses')+'</small><b>'+N(st.allowed||0)+'</b></div></div>'+
-   (q.refused?'<p class="muted" style="margin:0">'+t('Refused (not a subscriber)')+': '+N(q.refused)+' · '+t('Connections')+': '+N(st.conns||0)+'</p>':'')+
-   (errs.length?'<div class="warnbox ltr" style="margin:0">'+errs.map(esc).join('<br>')+'</div>':'')+
-   '<div class="row" style="gap:6px">'+dnsCertChip(x)+'</div>'+(st.ssl_error&&!st.ssl?'<div class="warnbox ltr" style="margin:0">'+esc(st.ssl_error)+'</div>':'')+
-   '<div class="g2"><button class="b2" onclick="srvRepair(\'dns\',\''+x.server+'\')">↻ '+t('Repair')+'</button><button class="b2" onclick="srvHealth(\'dns\',\''+x.server+'\')">♡ '+t('Health')+'</button>'+
-   '<button class="b2 okb" onclick="protoAll(\'dns\',1)">'+ic('plus',15)+' '+t('Add to all users')+'</button><button class="b2 bd" onclick="protoAll(\'dns\',0)">'+ic('trash',15)+' '+t('Remove from all users')+'</button>'+
-   '<button class="b2" onclick="dnsEdit(\''+x.server+'\')">'+ic('edit',15)+' '+t('Edit')+'</button><button class="b2 bd" onclick="dnsDel(\''+x.server+'\')">'+ic('trash',15)+' '+t('Remove from DNS')+'</button></div></div>'}).join('')+'</div>'}
+ return d.servers.map(function(x){var st=x.status||{},on=st.active,q=st.q||{},errs=(st.errors||[]).concat(st.deploy_error?[st.deploy_error]:[]).concat(st.error?[st.error]:[]),relay=x.role=='relay';
+  var hit=q.total?Math.round(100*(q.cache||0)/q.total):0,c=on?'g':x.status_at?'r':'y',id=esc(x.server);
+  var tags=kuTag(relay?t('Relay (inside Iran)')+' → '+esc(dnsName(x.exit)):t('Exit (abroad)'),relay?'b':'a')+kuTag(x.status_at?(on?t('Running'):t('Not running')):t('Waiting for the server…'),c)+
+   kuTag('<span class="ltr">'+esc(x.host||t('no name'))+'</span>')+kuTag('<span class="ltr">IP '+esc(x.answer_ip||'?')+'</span>')+(relay?kuTag('<span class="ltr">'+esc(x.transport||'tcpmux')+' :'+(x.tunnel_port||8446)+'</span>'):'')+
+   (x.hidden?kuTag(t('Hidden from subscribers'),'y'):'')+(st.version?kuTag('v'+esc(st.version)):'')+dnsCertChip(x);
+  return kuItem({dot:c,name:esc(x.name||x.server),tags:tags,act:'<button type="button" class="b2 sm" onclick="dnsEdit(\''+id+'\')">'+ic('edit',14)+'<span>'+t('Edit')+'</span></button>',menu:'dnsSrvMenu(\''+id+'\')',
+   extra:(x.note?'<p class="muted u-mt2 u-mb2">'+esc(x.note)+'</p>':'')+
+    '<div class="kmini"><div><small>'+t('Queries')+'</small><b>'+N(q.total||0)+'</b></div><div><small>'+t('routed')+'</small><b>'+N(q.routed||0)+'</b></div><div><small>'+t('From cache')+'</small><b>'+N(hit)+'%</b></div><div><small>'+t('Allowed addresses')+'</small><b>'+N(st.allowed||0)+'</b></div></div>'+
+    (q.refused?'<p class="muted u-m0">'+t('Refused (not a subscriber)')+': '+N(q.refused)+' · '+t('Connections')+': '+N(st.conns||0)+'</p>':'')+
+    (errs.length?'<div class="warnbox ltr u-mt2">'+errs.map(esc).join('<br>')+'</div>':'')+(st.ssl_error&&!st.ssl?'<div class="warnbox ltr u-mt2">'+esc(st.ssl_error)+'</div>':'')})}).join('')}
+window.dnsSrvMenu=function(id){var x=DN.d.servers.filter(function(s){return s.server==id})[0];if(!x)return;var q="'"+id.replace(/'/g,'')+"'";
+ kuMenu(x.name||x.server,'',[[ic('refresh',15)+' '+t('Repair'),"srvRepair('dns',"+q+")"],['♡ '+t('Health'),"srvHealth('dns',"+q+")"],[ic('plus',15)+' '+t('Add to all users'),"protoAll('dns',1)"],
+  [ic('trash',15)+' '+t('Remove from all users'),"protoAll('dns',0)",'danger'],[ic('trash',15)+' '+t('Remove from DNS'),"dnsDel("+q+")",'danger']])};
 
 // ---- services tab
 function dnsGroupOn(d,id,g){if(g.locked)return false;if(g.opt_in)return d.opt.indexOf(id)>=0;return d.off.indexOf(id)<0}
@@ -82,11 +84,11 @@ function dnsServicesTab(d,el){var cat=d.catalog||{},secs=cat.sections||[],svcs=c
  var items={};secs.forEach(function(s){items[s.key]=[]});
  svcs.forEach(function(s){s.groups.forEach(function(g){var sec=g.section||s.section;if(!items[sec])items[sec]=[];var e=items[sec].filter(function(x){return x.s.key==s.key})[0];if(!e){e={s:s,gs:[]};items[sec].push(e)}e.gs.push(g)})});
  var draw=function(icons){var q=(DN.q||'').toLowerCase();
-  el.innerHTML='<div class="card"><div class="inl"><input id="dn_sq" placeholder="'+t('Search services or domains')+'…" value="'+esc(DN.q)+'"><button class="btn" id="dn_svs" style="flex:none">'+t('Save services')+'</button></div><p class="hint">'+t('Groups marked "only on request" stay off until you turn them on. Some names cannot be routed (they check the address).')+'</p></div>'+
+  el.innerHTML='<div class="card"><div class="inl"><input id="dn_sq" placeholder="'+t('Search services or domains')+'…" value="'+esc(DN.q)+'"><button class="btn u-fnone" id="dn_svs">'+t('Save services')+'</button></div><p class="hint">'+t('Groups marked "only on request" stay off until you turn them on. Some names cannot be routed (they check the address).')+'</p></div>'+
    secs.map(function(sec){var list=(items[sec.key]||[]).filter(function(e){return !q||e.s.label.toLowerCase().indexOf(q)>=0||e.gs.some(function(g){return g.label.toLowerCase().indexOf(q)>=0||g.domains.some(function(x){return x.indexOf(q)>=0})})});if(!list.length)return '';
     var all=0,on=0;list.forEach(function(e){e.gs.forEach(function(g){if(g.locked)return;all++;if(dnsGroupOn(d,e.s.key+'/'+g.key,g))on++})});
     return '<details class="secc" data-sec="'+esc(sec.key)+'"'+(q?' open':'')+'><summary>'+esc(sec.label)+'<span class="cnt" data-cnt>'+N(on)+' / '+N(all)+' '+t('on')+'</span><span class="chev">'+ic('chev',14)+'</span></summary><div class="bd2">'+
-     '<div class="row" style="gap:6px;margin-bottom:8px"><button type="button" class="b2" data-all="1">'+t('All on')+'</button><button type="button" class="b2" data-all="0">'+t('All off')+'</button></div><div class="svcg">'+
+     '<div class="row u-g2 u-mb2"><button type="button" class="b2" data-all="1">'+t('All on')+'</button><button type="button" class="b2" data-all="0">'+t('All off')+'</button></div><div class="svcg">'+
      list.map(function(e){var s=e.s,icn=icons[s.key];return '<div class="svi"><div class="t">'+(icn?'<svg viewBox="0 0 24 24" width="20" height="20"><path fill="#'+esc(icn.hex=='000000'?'888888':icn.hex)+'" d="'+esc(icn.path)+'"/></svg>':ic('globe',18))+esc(s.label)+'</div>'+
       e.gs.map(function(g){var id=s.key+'/'+g.key;return '<label title="'+esc(g.domains.slice(0,12).join('\n'))+'"><input type="checkbox" class="dn_g" data-id="'+esc(id)+'" data-opt="'+(g.opt_in?1:0)+'" '+(dnsGroupOn(d,id,g)?'checked':'')+(g.locked?' disabled':'')+'><span>'+esc(g.label)+' <small>('+N(g.domains.length)+')'+(g.locked?' · '+t('cannot be routed'):g.opt_in?' · '+t('only on request'):'')+'</small>'+(g.note?'<br><small>'+esc(g.note)+'</small>':'')+'</span></label>'}).join('')+'</div>'}).join('')+'</div></div></details>'}).join('')+
    '<div class="card"><h3>'+t('Extra domains')+'</h3><p class="sub">'+t('One per line; their subdomains are routed too')+'</p><textarea id="dn_cu" rows="5" class="ltr" placeholder="example.com">'+esc((d.custom||[]).join('\n'))+'</textarea>'+
@@ -101,29 +103,29 @@ function dnsServicesTab(d,el){var cat=d.catalog||{},secs=cat.sections||[],svcs=c
  if(DN.icons)draw(DN.icons);else fetch('/assets/dns-icons.json').then(function(r){return r.json()}).then(function(j){DN.icons=j.icons||{};draw(DN.icons)}).catch(function(){DN.icons={};draw({})})}
 
 // ---- users tab
-function dnsUsersTab(d,el){el.innerHTML='<div class="card"><div class="nh"><div><h3>'+t('DNS users')+'</h3><p class="sub" style="margin:0">'+t('Addresses each user registered (allowed now) and their queries since the DNS services started')+'</p></div><input id="dn_uq" placeholder="'+t('Search')+'…" style="max-width:220px"></div><div id="dn_ul" style="margin-top:10px">'+t('Loading…')+'</div></div>';
+function dnsUsersTab(d,el){el.innerHTML='<div class="card"><div class="nh"><div><h3>'+t('DNS users')+'</h3><p class="sub u-m0">'+t('Addresses each user registered (allowed now) and their queries since the DNS services started')+'</p></div><input id="dn_uq" placeholder="'+t('Search')+'…" style="max-width:220px"></div><div class="u-mt3" id="dn_ul">'+t('Loading…')+'</div></div>';
  $('#dn_uq').oninput=function(){dnsUsersDraw()};dnsUsersLoad()}
 function dnsUsersLoad(){api('GET','/api/dns/users').then(function(r){DN.users=r.users||[];dnsUsersDraw()}).catch(fail)}
 function dnsUsersDraw(){var el=$('#dn_ul');if(!el)return;var q=($('#dn_uq')&&$('#dn_uq').value||'').toLowerCase(),l=(DN.users||[]).filter(function(u){return !q||u.name.toLowerCase().indexOf(q)>=0});
  if(!(DN.users||[]).length){el.innerHTML='<p class="muted">'+t('No user has DNS yet: tick DNS in a user\'s form')+'</p>';return}
  var host=((DN.d&&DN.d.servers)||[]).filter(function(x){return x.host&&!x.hidden})[0];
  el.innerHTML=l.map(function(u){var dot=host&&DN.d.cert&&DN.d.cert.present?u.token+'.'+host.host:'';
-  return '<div class="vrow" style="flex-wrap:wrap"><span class="dot '+(u.ips.length?'g':u.active?'':'r')+'"></span><div class="nm"><b><bdi>'+esc(u.name)+'</bdi></b><small>'+N(u.queries)+' '+t('queries')+' · '+N(bytes(u.bytes))+' · '+N(u.ips.length)+(u.max>0?' / '+N(u.max):'')+' '+t('addresses')+(u.active?'':' · '+t('Inactive'))+'</small></div>'+
+  return '<div class="vrow u-wrap"><span class="dot '+(u.ips.length?'g':u.active?'':'r')+'"></span><div class="nm"><b><bdi>'+esc(u.name)+'</bdi></b><small>'+N(u.queries)+' '+t('queries')+' · '+N(bytes(u.bytes))+' · '+N(u.ips.length)+(u.max>0?' / '+N(u.max):'')+' '+t('addresses')+(u.active?'':' · '+t('Inactive'))+'</small></div>'+
    (dot?'<button class="ib" title="'+t('Copy the Private DNS address')+'" data-dot="'+esc(dot)+'">'+ic('copy',15)+'</button>':'')+
    '<button class="b2" data-kick="'+u.id+'"'+(u.ips.length?'':' disabled')+'>'+t('Forget addresses')+'</button>'+
-   (u.ips.length?'<div class="chs" style="width:100%">'+u.ips.map(function(x){return '<span class="chipx ltr">'+esc(x.ip)+' · '+esc(x.server)+'</span>'}).join('')+'</div>':'')+'</div>'}).join('')||'<p class="muted">'+t('Nothing found')+'</p>';
+   (u.ips.length?'<div class="chs u-wfull">'+u.ips.map(function(x){return '<span class="chipx ltr">'+esc(x.ip)+' · '+esc(x.server)+'</span>'}).join('')+'</div>':'')+'</div>'}).join('')||'<p class="muted">'+t('Nothing found')+'</p>';
  $$('#dn_ul [data-dot]').forEach(function(b){b.onclick=function(){copy(b.dataset.dot)}});
  $$('#dn_ul [data-kick]').forEach(function(b){b.onclick=function(){if(!confirm(t('The user\'s phone registers again by itself; someone else using the address loses access. Continue?')))return;api('POST','/api/dns/users/'+b.dataset.kick+'/kick').then(function(){toast(t('Done: servers forget them within a few seconds'))}).catch(fail)}})}
 
 // ---- query log tab: every query of the subscribers (newest first, or grouped by name)
 DN.lg={user:0,q:'',kind:'',view:'names'};
 function dnsLogTab(d,el){var us=(DN.users||[]);
- el.innerHTML='<div class="card"><div class="nh"><div><h3>'+t('Query log')+'</h3><p class="sub" style="margin:0">'+t('Every name your subscribers asked, and whether it went through your server (routed) or straight to the site (direct). Kept in the panel\'s memory; a restart clears it.')+'</p></div><div class="row" style="gap:6px"><button class="b2" id="dl_re">'+t('Refresh')+'</button><button class="b2 bd" id="dl_clr">'+t('Clear')+'</button></div></div>'+
-  '<div class="row" style="gap:8px;flex-wrap:wrap;margin-top:10px"><select id="dl_u" style="max-width:200px"><option value="0">'+t('All users')+'</option></select>'+
-  '<select id="dl_k" style="max-width:170px"><option value="">'+t('All queries')+'</option><option value="routed">'+t('Routed only')+'</option><option value="direct">'+t('Direct only')+'</option></select>'+
-  '<input id="dl_q" class="ltr" placeholder="igamecj.com" style="max-width:220px">'+
-  '<select id="dl_v" style="max-width:170px"><option value="names">'+t('Grouped by name')+'</option><option value="items">'+t('Each query')+'</option></select></div>'+
-  '<div id="dl_o" style="margin-top:10px">'+t('Loading…')+'</div></div>';
+ el.innerHTML='<div class="card"><div class="nh"><div><h3>'+t('Query log')+'</h3><p class="sub u-m0">'+t('Every name your subscribers asked, and whether it went through your server (routed) or straight to the site (direct). Kept in the panel\'s memory; a restart clears it.')+'</p></div><div class="row u-g2"><button class="b2" id="dl_re">'+t('Refresh')+'</button><button class="b2 bd" id="dl_clr">'+t('Clear')+'</button></div></div>'+
+  '<div class="row u-g2 u-wrap u-mt3"><select class="u-mw" id="dl_u"><option value="0">'+t('All users')+'</option></select>'+
+  '<select class="u-mws" id="dl_k"><option value="">'+t('All queries')+'</option><option value="routed">'+t('Routed only')+'</option><option value="direct">'+t('Direct only')+'</option></select>'+
+  '<input id="dl_q" class="ltr u-mw" placeholder="igamecj.com">'+
+  '<select class="u-mws" id="dl_v"><option value="names">'+t('Grouped by name')+'</option><option value="items">'+t('Each query')+'</option></select></div>'+
+  '<div class="u-mt3" id="dl_o">'+t('Loading…')+'</div></div>';
  var f=DN.lg;$('#dl_k').value=f.kind;$('#dl_q').value=f.q;$('#dl_v').value=f.view;
  var fill=function(){var sel=$('#dl_u');if(!sel)return;sel.innerHTML='<option value="0">'+t('All users')+'</option>'+(DN.users||[]).map(function(u){return '<option value="'+u.id+'">'+esc(u.name)+'</option>'}).join('');sel.value=String(f.user)};
  if(us.length)fill();else api('GET','/api/dns/users').then(function(r){DN.users=r.users||[];fill()}).catch(function(){});
@@ -133,10 +135,10 @@ function dnsLogTab(d,el){var us=(DN.users||[]);
  dnsLogLoad()}
 function dnsLogLoad(){var f=DN.lg;api('GET','/api/dns/log?user='+f.user+'&kind='+encodeURIComponent(f.kind)+'&q='+encodeURIComponent(f.q)+'&limit=1000').then(function(r){var el=$('#dl_o');if(!el)return;
  var tag=function(x){return x.routed?'<span class="chipx" style="border-color:var(--gold)">'+t('routed')+(x.service?' · '+esc(x.service):'')+'</span>':'<span class="chipx">'+t('direct')+'</span>'};
- var head='<p class="muted" style="margin:0 0 8px">'+N(r.matched)+' '+t('queries')+' · '+t('kept')+' '+N(r.total)+' / '+N(r.max)+'</p>';
+ var head='<p class="muted u-mb2">'+N(r.matched)+' '+t('queries')+' · '+t('kept')+' '+N(r.total)+' / '+N(r.max)+'</p>';
  if(!r.matched){el.innerHTML=head+'<p class="muted">'+t('Nothing yet: queries show up here a few seconds after a subscriber uses DNS (DNS servers must run v3.5.8 or newer).')+'</p>';return}
- if(DN.lg.view=='names'){el.innerHTML=head+r.names.map(function(x){return '<div class="vrow" style="flex-wrap:wrap"><span class="dot '+(x.routed?'g':'')+'"></span><div class="nm"><b class="ltr"><bdi>'+esc(x.name)+'</bdi></b><small>'+N(x.count)+' '+t('times')+' · '+ago(x.last)+' · '+x.users.map(esc).join('، ')+'</small></div>'+tag(x)+'</div>'}).join('')}
- else{el.innerHTML=head+r.items.map(function(x){return '<div class="vrow" style="flex-wrap:wrap"><span class="dot '+(x.routed?'g':'')+'"></span><div class="nm"><b class="ltr"><bdi>'+esc(x.name)+'</bdi> <small>'+esc(x.type)+'</small></b><small>'+esc(x.user)+' · '+esc(x.server)+' · '+ago(x.ts)+'</small></div>'+tag(x)+'</div>'}).join('')}
+ if(DN.lg.view=='names'){el.innerHTML=head+r.names.map(function(x){return '<div class="vrow u-wrap"><span class="dot '+(x.routed?'g':'')+'"></span><div class="nm"><b class="ltr"><bdi>'+esc(x.name)+'</bdi></b><small>'+N(x.count)+' '+t('times')+' · '+ago(x.last)+' · '+x.users.map(esc).join('، ')+'</small></div>'+tag(x)+'</div>'}).join('')}
+ else{el.innerHTML=head+r.items.map(function(x){return '<div class="vrow u-wrap"><span class="dot '+(x.routed?'g':'')+'"></span><div class="nm"><b class="ltr"><bdi>'+esc(x.name)+'</bdi> <small>'+esc(x.type)+'</small></b><small>'+esc(x.user)+' · '+esc(x.server)+' · '+ago(x.ts)+'</small></div>'+tag(x)+'</div>'}).join('')}
 }).catch(fail)}
 
 // ---- settings tab
@@ -149,7 +151,7 @@ function dnsSettingsTab(d,el){
   '<div class="sbar"><button class="btn" id="dn_save">'+t('Save')+'</button></div></div>'+
   '<div class="card"><h3>'+ic('security',16)+' SSL</h3><div id="dn_cert">'+dnsCertState(d)+'</div>'+
   '<p class="hint">'+t('Nothing to set: write each server\'s domain (or label + DNS domain) and point it to the server. Kanki DNS answers Let\'s Encrypt itself on port 80, so DNS does not stop. The SSL state of every server is on its card.')+'</p>'+
-  '<details style="margin-top:8px"><summary class="muted">'+t('Paste a certificate instead (optional)')+'</summary><label class="f">'+t('Certificate (PEM, full chain)')+'</label><textarea id="dn_c" rows="3" class="ltr" placeholder="-----BEGIN CERTIFICATE-----"></textarea><label class="f">'+t('Private key (PKCS#8 PEM)')+'</label><textarea id="dn_k" rows="3" class="ltr" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>'+
+  '<details class="u-mt2"><summary class="muted">'+t('Paste a certificate instead (optional)')+'</summary><label class="f">'+t('Certificate (PEM, full chain)')+'</label><textarea id="dn_c" rows="3" class="ltr" placeholder="-----BEGIN CERTIFICATE-----"></textarea><label class="f">'+t('Private key (PKCS#8 PEM)')+'</label><textarea id="dn_k" rows="3" class="ltr" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>'+
   '<div class="sbar"><button class="btn" id="dn_csave">'+t('Save')+'</button></div></details></div></div>';
  var rm=$('#dn_crm');if(rm)rm.onclick=function(){api('PUT','/api/dns',{cert:'',key:''}).then(function(){toast(t('Saved'));dnsLoad()}).catch(fail)};
  $$('[data-up]').forEach(function(b){b.onclick=function(){$('#dn_up').value=b.dataset.up}});
@@ -160,7 +162,7 @@ function dnsSettingsTab(d,el){
 // ---- add / edit a DNS server
 function dnsForm(x,role){var d=DN.d,exits=d.servers.filter(function(s){return s.role=='exit'&&s.server!=(x&&x.server)}),agents=d.agents.filter(function(a){return !d.servers.some(function(s){return s.server==a.id&&(!x||s.server!=x.server)})});
  if(role=='relay'&&!exits.length){toast(t('Add an exit DNS server first'),1);return null}
- var h='<p class="muted" style="margin:0 0 6px">'+t('Ports 53, 80, 443 and 853 must be free on this server: give DNS its own server.')+'</p>';
+ var h='<p class="muted u-mb2">'+t('Ports 53, 80, 443 and 853 must be free on this server: give DNS its own server.')+'</p>';
  if(!x)h+='<label class="f">'+t('Agent server')+'</label><select id="dx_sv"><option value="__new">'+t('New server (install command)')+'</option>'+srvOptGroups(agents,function(a){return '<option value="'+esc(a.id)+'">'+esc(a.name)+'</option>'})+'</select><div id="dx_nw"><label class="f">'+t('Server name')+'</label><input id="dx_nm" placeholder="'+(role=='relay'?'Iran-DNS':'DNS-DE')+'"></div>';
  h+='<label class="f">'+t('Domain of this DNS server')+'</label><input id="dx_dm" class="ltr" placeholder="'+(d.base?(role=='relay'?'ir1.':'de.')+esc(d.base):'de.dns.example.com')+'" value="'+esc(x?x.domain||'':'')+'"><p class="hint">'+t('Empty = label + DNS domain. Point the domain to this server: its SSL is taken on the server with certbot by itself.')+'</p>'+
 
@@ -168,7 +170,7 @@ function dnsForm(x,role){var d=DN.d,exits=d.servers.filter(function(s){return s.
  if(role=='relay')h+='<label class="f">'+t('Its exit')+'</label><select id="dx_ex">'+exits.map(function(s){return '<option value="'+esc(s.server)+'"'+(x&&x.exit==s.server?' selected':'')+'>'+esc(s.name)+'</option>'}).join('')+'</select>'+
   '<div class="g2"><div><label class="f">'+t('Transport to the exit')+'</label><select id="dx_tr">'+['tcpmux','dual','h2','hq','wss','ws','kcp','quic','tcp'].map(function(v){return '<option'+((x&&x.transport||'tcpmux')==v?' selected':'')+'>'+v+'</option>'}).join('')+'</select></div><div><label class="f">'+t('Tunnel port on the relay')+'</label><input id="dx_tp" type="number" class="ltr" value="'+((x&&x.tunnel_port)||8446)+'"></div></div>';
  h+='<label class="f">'+t('Note for subscribers')+'</label><input id="dx_nt" value="'+esc(x?x.note:'')+'" placeholder="'+t('like: best on Irancell')+'"><div class="srow"><div class="tx"><b>'+t('Hidden from subscribers')+'</b><small>'+t('For repairs: the server keeps running but is not offered')+'</small></div><label class="sw"><input type="checkbox" id="dx_hd" '+(x&&x.hidden?'checked':'')+'><span></span></label></div>';
- return h+'<button class="btn" style="width:100%;margin-top:12px" id="dx_go">'+t('Save')+'</button><div id="dx_out"></div>'}
+ return h+'<button class="btn u-wfull u-mt3" id="dx_go">'+t('Save')+'</button><div id="dx_out"></div>'}
 function dnsLbHint(){var e=$('#dx_lbh');if(!e)return;var b=DN.d.base;e.textContent=b?(($('#dx_lb').value||'…')+'.'+b):''}
 function dnsBody(role,sid){var b={server:sid,role:role,domain:$('#dx_dm').value.trim(),label:$('#dx_lb').value,ip:$('#dx_ip').value,note:$('#dx_nt').value,hidden:$('#dx_hd').checked};
  if(role=='relay'){b.exit=$('#dx_ex').value;b.transport=$('#dx_tr').value;b.tunnel_port=+$('#dx_tp').value||8446}return b}
@@ -197,18 +199,18 @@ function dnsPubgSave(d,keys){var opt=(d.opt||[]).filter(function(x){return x.ind
  return api('PUT','/api/dns',{opt:opt,off:off}).then(function(){toast(t('Saved: the DNS servers use it within a few seconds'));return dnsLoad()})}
 function dnsPubgTab(d,el){var sv=dnsPubgSvc(d),mode=dnsPubgMode(d),fa=S.lang!='en';
  if(!sv){el.innerHTML='<div class="card"><p class="muted">PUBG Mobile</p></div>';return}
- var art=PUBG_ART.map(function(a,i){return '<details class="secc"'+(i<2?' open':'')+'><summary>'+esc(fa?a[1]:a[0])+'<span class="chev">'+ic('chev',14)+'</span></summary><div class="bd2" style="font-size:13px">'+a[2]+'</div></details>'}).join('');
+ var art=PUBG_ART.map(function(a,i){return '<details class="secc"'+(i<2?' open':'')+'><summary>'+esc(fa?a[1]:a[0])+'<span class="chev">'+ic('chev',14)+'</span></summary><div class="bd2 u-fs13">'+a[2]+'</div></details>'}).join('');
  el.innerHTML=dnsWarn(d)+
   '<div class="card"><h3>'+ic('globe',16)+' '+t('PUBG Mobile through Kanki DNS')+'</h3><p class="sub">'+t('Pick one: it changes only the PUBG Mobile names below.')+'</p>'+
-  '<div class="g3" id="pg_modes" style="margin-top:10px">'+PUBG_MODES.map(function(m){var on=m[0]==mode;return '<button type="button" class="b2" data-pm="'+m[0]+'" style="text-align:start;display:block;padding:12px;white-space:normal;'+(on?'border-color:var(--a);background:color-mix(in srgb,var(--a) 12%,transparent)':'')+'"><b style="display:flex;gap:6px;align-items:center">'+(on?'<span class="dot g"></span>':'')+esc(t(m[1]))+(on?' <small class="muted">· '+t('Now')+'</small>':'')+'</b><small class="muted" style="display:block;margin-top:4px;line-height:1.8">'+esc(t(m[0]=='direct'?'Nothing of PUBG passes your servers. Fine where the game opens without help.':m[0]=='lobby'?'Login, account, lobby and the UC store go through your server; the match stays direct.':'Also updates and anti-cheat. Use it when the game still stops at login or the update does not download.'))+'</small></button>'}).join('')+'</div>'+
+  '<div class="g3 u-mt3" id="pg_modes">'+PUBG_MODES.map(function(m){var on=m[0]==mode;return '<button type="button" class="b2" data-pm="'+m[0]+'" style="text-align:start;display:block;padding:12px;white-space:normal;'+(on?'border-color:var(--a);background:color-mix(in srgb,var(--a) 12%,transparent)':'')+'"><b style="display:flex;gap:6px;align-items:center">'+(on?'<span class="dot g"></span>':'')+esc(t(m[1]))+(on?' <small class="muted">· '+t('Now')+'</small>':'')+'</b><small class="muted" style="display:block;margin-top:4px;line-height:1.8">'+esc(t(m[0]=='direct'?'Nothing of PUBG passes your servers. Fine where the game opens without help.':m[0]=='lobby'?'Login, account, lobby and the UC store go through your server; the match stays direct.':'Also updates and anti-cheat. Use it when the game still stops at login or the update does not download.'))+'</small></button>'}).join('')+'</div>'+
   (mode=='custom'?'<p class="hint">'+t('Now')+': '+t('Custom')+'</p>':'')+'</div>'+
   art+
   '<div class="card"><h3>'+t('Parts of PUBG Mobile')+'</h3><p class="sub">'+t('Every name of a ticked part and all its subdomains go through your server.')+'</p>'+
   sv.groups.map(function(g){var id='pubgmobile/'+g.key,on=(d.opt||[]).indexOf(id)>=0;
-   return '<div class="vrow" style="flex-wrap:wrap;align-items:flex-start"><label class="sw" style="flex:none"><input type="checkbox" class="pg_g" data-k="'+esc(g.key)+'" '+(on?'checked':'')+'><span></span></label><div class="nm"><b>'+esc(g.label)+' <small class="muted">('+N(g.domains.length)+')</small></b>'+(g.note?'<small>'+esc(g.note)+'</small>':'')+
-    '<div class="chs" style="margin-top:6px">'+g.domains.map(function(x){return '<span class="chipx ltr">*.'+esc(x)+'</span>'}).join('')+'</div></div></div>'}).join('')+
+   return '<div class="vrow u-wrap u-ais"><label class="sw u-fnone"><input type="checkbox" class="pg_g" data-k="'+esc(g.key)+'" '+(on?'checked':'')+'><span></span></label><div class="nm"><b>'+esc(g.label)+' <small class="muted">('+N(g.domains.length)+')</small></b>'+(g.note?'<small>'+esc(g.note)+'</small>':'')+
+    '<div class="chs u-mt2">'+g.domains.map(function(x){return '<span class="chipx ltr">*.'+esc(x)+'</span>'}).join('')+'</div></div></div>'}).join('')+
   '<div class="sbar"><button class="btn" id="pg_save">'+t('Save')+'</button></div></div>'+
-  '<div class="card"><div class="nh"><div><h3>'+t('PUBG names your users asked')+'</h3><p class="sub" style="margin:0">'+t('From the query log: a direct name that the game needs can be added here.')+'</p></div><button class="b2" id="pg_re">'+t('Refresh')+'</button></div><div id="pg_log" style="margin-top:10px">'+t('Loading…')+'</div></div>'+
+  '<div class="card"><div class="nh"><div><h3>'+t('PUBG names your users asked')+'</h3><p class="sub u-m0">'+t('From the query log: a direct name that the game needs can be added here.')+'</p></div><button class="b2" id="pg_re">'+t('Refresh')+'</button></div><div class="u-mt3" id="pg_log">'+t('Loading…')+'</div></div>'+
   '<p class="hint">'+t('PUBG on PC (Krafton)')+': '+t('It is in Services › Games › Other games.')+'</p>';
  $$('#pg_modes [data-pm]').forEach(function(b){b.onclick=function(){var m=PUBG_MODES.filter(function(x){return x[0]==b.dataset.pm})[0];dnsPubgSave(d,m[2]).catch(fail)}});
  $('#pg_save').onclick=function(){dnsPubgSave(d,$$('.pg_g').filter(function(c){return c.checked}).map(function(c){return c.dataset.k})).catch(fail)};

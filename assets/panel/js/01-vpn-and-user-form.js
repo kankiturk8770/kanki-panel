@@ -77,13 +77,15 @@ function vhGrid(nodes,o,xr,dn,kp){var el=$('#vh_g');if(!el)return;var pr=o.proto
  var card=function(href,col,icon,name,sub,st,stats){return '<a class="ccard" href="'+href+'" style="--pc:'+col+'"><div class="cc1"><span class="cci">'+ic(icon,20)+'</span><span class="ccs '+st[0]+'"><i></i>'+st[1]+'</span></div>'+
   '<b class="ccn">'+name+'</b><small class="ccd">'+t(sub)+'</small><div class="ccst">'+stats.map(function(x){return '<div><small>'+x[0]+'</small><b class="ltr">'+x[1]+'</b></div>'}).join('')+'</div></a>'};
  var state=function(u,all){return all==0?['n',t('Not installed')]:u==all?['g',t('Running')]:u==0?['r',t('Down')]:['y',t('Partly down')]};
- var h=K.map(function(c){var u=c[4][0],all=c[4][1];return card('#'+c[0],PCOL[c[0]],c[2],c[1],c[3],state(u,all),[[t('Servers'),N(u)+' / '+N(all)],[t('Users'),N(pr[c[0]]||0)]])}).join('');
+ var hs=K.map(function(c){var u=c[4][0],all=c[4][1];return card('#'+c[0],PCOL[c[0]],c[2],c[1],c[3],state(u,all),[[t('Servers'),N(u)+' / '+N(all)],[t('Users'),N(pr[c[0]]||0)]])});
+ // (3.42) KPING sits beside KANKI MIX (the two game cores), as in the core bar
+ if(kp){var kr=kp.routes.filter(function(x){return x.exit_runs&&x.tunnel_up&&x.relay&&!x.relay.error}).length;
+  hs.splice(4,0,card('#kping/status',PCOL.kping,'game','KPING','Hidden game core: only PUBG, only for testers',!kp.settings.on?['r',t('Off')]:!kp.routes.length?['n',t('No route')]:kr==kp.routes.length?['g',t('Running')]:kr?['y',t('Partly down')]:['y',t('Not ready')],[[t('Routes'),N(kr)+' / '+N(kp.routes.length)],[t('Testers'),N(kp.users||0)]]))}
+ var h=hs.join('');
  if(xr){var act=xr.inbounds.filter(function(x){return x.enabled&&!x.state}).length;
   h+=card('#xray/status',PCOL.xray,'xray','Xray','VLESS · VMess · Trojan · Shadowsocks',xr.on?(act?['g',t('Running')]:['y',t('No inbound')]):['r',t('Off')],[[t('Inbounds'),N(act)+' / '+N(xr.inbounds.length)],[t('Online now'),N((xr.online||[]).length)]])}
  if(dn){var run=dn.servers.filter(function(x){return x.status&&x.status.active}).length;
   h+=card('#dns/overview',PCOL.dns,'dns','Kanki DNS','Private DNS for sanctioned sites',dn.on?(run?['g',t('Running')]:['y',t('No server')]):['r',t('Off')],[[t('Servers'),N(run)+' / '+N(dn.servers.length)],[t('Users'),N(dn.users||0)]])}
- if(kp){var kr=kp.routes.filter(function(x){return x.exit_runs&&x.tunnel_up&&x.relay&&!x.relay.error}).length;
-  h+=card('#kping/status',PCOL.kping,'game','KPING','Hidden game core: only PUBG, only for testers',!kp.settings.on?['r',t('Off')]:!kp.routes.length?['n',t('No route')]:kr==kp.routes.length?['g',t('Running')]:kr?['y',t('Partly down')]:['y',t('Not ready')],[[t('Routes'),N(kr)+' / '+N(kp.routes.length)],[t('Testers'),N(kp.users||0)]])}
  h+=card('#antidpi',PCOL.awg,'security','Anti-DPI','Tunnels between your servers that filters cannot see',['n',t('Tools')],[[t('Tunnels'),t('Open')]]);
  el.innerHTML=h;
  var ups=nodes.filter(up).length,s=$('#vh_s');

@@ -185,7 +185,7 @@ function applyLook(){document.documentElement.lang=S.lang;document.documentEleme
  var b=document.body.classList;b.toggle('light',S.theme=='light');
  // (3.40) Kanki Glass: one gold, dark or light; the old colour variants are gone
  Array.prototype.slice.call(b).forEach(function(c){if(c.indexOf('c-')==0)b.remove(c)});
- b.add('k38');b.add('kg');if($('#side'))b.add('v37');V37.drawLooks()}
+ b.add('kg');if($('#side'))b.add('ks');V37.drawLooks()}
 var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['mtun','microtun'],['xray','Xray'],['dns','DNS']];
 function pname(p){if(p=='kping')return 'KPING';for(var i=0;i<PROTOS.length;i++)if(PROTOS[i][0]==p)return PROTOS[i][1];return p}
 // a window: it takes the keyboard (Tab stays inside, Esc closes) and gives it back to what opened it

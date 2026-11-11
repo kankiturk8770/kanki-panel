@@ -12,7 +12,7 @@
 var SECS=[
  ['dash','Dashboard','dash',[['dash','','Dashboard']],'Overview'],
  ['users','Users','users',[['users','','Users']],'Users'],
- ['vpnsec','VPN & cores','cores',[['vpn','','Overview'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['kmix','','KANKI MIX'],['mtun','','microtun'],['xray','status','Xray'],['dns','','DNS'],['kping','','KPING']],'Connectivity'],
+ ['vpnsec','VPN & cores','cores',[['vpn','','Overview'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['kmix','','KANKI MIX'],['kping','','KPING'],['mtun','','microtun'],['xray','status','Xray'],['dns','','DNS']],'Connectivity'],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Connectivity'],
  ['ports','Ports','ports',[['ports','','Ports']],'Connectivity'],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Connectivity'],
