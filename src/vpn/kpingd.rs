@@ -49,6 +49,8 @@ use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::kprlc;
+
 pub const HDR: usize = 12;
 pub const TAG: usize = 8;
 /// bytes KPING adds to each IP packet
@@ -58,6 +60,14 @@ pub const DATA: u8 = 1;
 pub const PARITY: u8 = 2;
 pub const PING: u8 = 3;
 pub const PONG: u8 = 4;
+/// v3: a sliding-window repair (`kprlc`), the radio's keep-awake filler (dropped here), a tunnel probe
+pub const REPAIR: u8 = 5;
+pub const FILL: u8 = 6;
+pub const PROBE: u8 = 7;
+/// PING byte 10 / PONG's trailing caps: this end speaks v3
+pub const CAP_RLC: u8 = 1;
+/// DATA aux high bits 9-15: a v3 phone asks the exit for this many repairs per packet
+pub const DOWN_RATIOS: [f64; 7] = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0];
 pub const IFACE: &str = "kping0";
 pub const SERVER_ADDR: &str = "10.81.0.1/16";
 /// largest parity group
@@ -74,6 +84,9 @@ const MAX_SESS: usize = 4;
 const GROUP_IDLE: Duration = Duration::from_millis(8);
 const WIN: u32 = 1024;
 const MAX_PKT: usize = 2048;
+/// a tunnel that answered no probe for this long is left out (the other one carries everything)
+const TUN_DEAD: Duration = Duration::from_secs(3);
+const PROBE_EVERY: Duration = Duration::from_millis(250);
 
 type Mac8 = Hmac<Sha256>;
 
@@ -147,6 +160,14 @@ impl UKey {
         t.copy_from_slice(&full[..TAG]);
         t
     }
+}
+
+/// The key of the probes between the relay and the exit (uid 0): made from the obfs key, so only KPING's
+/// own servers make them
+pub fn probe_key(obfs: &str) -> UKey {
+    use sha2::Digest;
+    let h = Sha256::digest(format!("kping-probe|{}", obfs.trim()).as_bytes());
+    UKey::new(&hex::encode(h)).expect("32 bytes")
 }
 
 /// One packet on the wire
@@ -389,6 +410,9 @@ pub struct RelayCfg {
     pub port: u16,
     /// the tunnel's entry on 127.0.0.1
     pub to: u16,
+    /// more tunnels to the same exit (their entries on 127.0.0.1): every packet goes on each live one,
+    /// the exit keeps the first copy
+    pub more: Vec<u16>,
     /// one path: the second copy to the phone goes this many ms after the first (0 = no second copy)
     pub dup_ms: u16,
     /// into the tunnel: the second copy this many ms after the first (0 = one copy)
@@ -441,9 +465,10 @@ struct RPath {
 }
 
 struct RSess {
-    win: [Window; 3],
-    /// what came back from the exit (DATA, PARITY): its second copy is dropped here
-    down: [Window; 2],
+    /// DATA, PARITY, PING, REPAIR
+    win: [Window; 4],
+    /// what came back from the exit (DATA, PARITY, REPAIR): its second copy is dropped here
+    down: [Window; 3],
     paths: Vec<RPath>,
     last: Instant,
     /// the phone's own choice of the copy delay (None = the server's)
@@ -487,10 +512,35 @@ struct RUser {
     sess: HashMap<u16, RSess>,
 }
 
+/// One tunnel to the exit, as its probes find it
+#[derive(Default, Clone)]
+struct TunQ {
+    rtt_ms: f64,
+    /// the last probes: answered or not
+    ring: VecDeque<bool>,
+    last_ans: Option<Instant>,
+    sent: HashMap<u32, Instant>,
+}
+
+impl TunQ {
+    fn loss(&self) -> f64 {
+        if self.ring.is_empty() {
+            return 0.0;
+        }
+        100.0 * self.ring.iter().filter(|a| !**a).count() as f64 / self.ring.len() as f64
+    }
+    fn live(&self) -> bool {
+        self.last_ans.is_some_and(|t| t.elapsed() < TUN_DEAD)
+    }
+}
+
 struct RShared {
     obfs: Obfs,
+    probe: UKey,
     public: UdpSocket,
-    up: UdpSocket,
+    /// one socket per tunnel entry
+    ups: Vec<UdpSocket>,
+    tq: Mutex<Vec<TunQ>>,
     users: Mutex<HashMap<u32, RUser>>,
     dup_ms: AtomicU64,
     stop: AtomicBool,
@@ -499,8 +549,37 @@ struct RShared {
     bad: AtomicU64,
     dly: Mutex<mpsc::Sender<(Instant, Vec<u8>, SocketAddr)>>,
     tun_dup: AtomicU64,
-    /// second copies into the tunnel
+    /// second copies into the tunnels (the tunnel index rides in the address' port)
     dly_up: Mutex<mpsc::Sender<(Instant, Vec<u8>, SocketAddr)>>,
+}
+
+impl RShared {
+    /// the tunnels to use now: those that answer; when none does, all of them (one may still pass)
+    fn live_ups(&self) -> Vec<usize> {
+        let tq = self.tq.lock().unwrap_or_else(|e| e.into_inner());
+        let live: Vec<usize> = (0..self.ups.len()).filter(|i| tq.get(*i).is_some_and(|q| q.live())).collect();
+        if live.is_empty() { (0..self.ups.len()).collect() } else { live }
+    }
+    /// the best tunnel's round trip and loss (for the phone's PONG)
+    fn best_tun(&self) -> (u16, u16) {
+        let tq = self.tq.lock().unwrap_or_else(|e| e.into_inner());
+        tq.iter()
+            .filter(|q| q.live())
+            .map(|q| (q.rtt_ms.round() as u16, (q.loss() * 10.0).round() as u16))
+            .min_by_key(|x| x.0 as u32 + 3 * x.1 as u32)
+            .unwrap_or((0, 0))
+    }
+    fn send_up(&self, pkt: &[u8], from: SocketAddr) {
+        let d = self.tun_dup.load(Ordering::Relaxed);
+        for i in self.live_ups() {
+            let _ = self.ups[i].send(pkt);
+            if d > 0 {
+                let mut tag = from;
+                tag.set_port(i as u16);
+                let _ = self.dly_up.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(d), pkt.to_vec(), tag));
+            }
+        }
+    }
 }
 
 pub struct Relay {
@@ -513,15 +592,22 @@ impl Relay {
     pub fn start(obfs: &str, cfg: &RelayCfg) -> Result<Relay, String> {
         let o = Obfs::new(obfs).ok_or("bad obfs key")?;
         let public = bind_udp(true, cfg.port)?;
-        let up = UdpSocket::bind(("127.0.0.1", 0)).map_err(|e| format!("UDP: {}", e))?;
-        up.connect(("127.0.0.1", cfg.to)).map_err(|e| format!("tunnel {}: {}", cfg.to, e))?;
-        up.set_read_timeout(Some(Duration::from_millis(300))).ok();
+        let mut ups = vec![];
+        for to in std::iter::once(cfg.to).chain(cfg.more.iter().copied().filter(|p| *p != cfg.to)) {
+            let up = UdpSocket::bind(("127.0.0.1", 0)).map_err(|e| format!("UDP: {}", e))?;
+            up.connect(("127.0.0.1", to)).map_err(|e| format!("tunnel {}: {}", to, e))?;
+            up.set_read_timeout(Some(Duration::from_millis(300))).ok();
+            ups.push(up);
+        }
         let (tx, rx) = mpsc::channel();
         let (utx, urx) = mpsc::channel();
+        let n = ups.len();
         let sh = Arc::new(RShared {
             obfs: o,
+            probe: probe_key(obfs),
             public,
-            up,
+            ups,
+            tq: Mutex::new(vec![TunQ::default(); n]),
             users: Mutex::new(HashMap::new()),
             dup_ms: AtomicU64::new(0),
             stop: AtomicBool::new(false),
@@ -536,17 +622,28 @@ impl Relay {
         r.set(cfg);
         let s = sh.clone();
         r.threads.push(spawn("kp-relay-in", move || relay_in(&s)));
+        for i in 0..n {
+            let s = sh.clone();
+            r.threads.push(spawn("kp-relay-back", move || relay_back(&s, i)));
+        }
         let s = sh.clone();
-        r.threads.push(spawn("kp-relay-back", move || relay_back(&s)));
+        r.threads.push(spawn("kp-relay-probe", move || relay_probe(&s)));
         let s = sh.clone();
         r.threads.push(spawn("kp-relay-dup", move || delayer(&s.stop, rx, |p, to| {
             let _ = s.public.send_to(p, to);
         })));
         let s = sh;
-        r.threads.push(spawn("kp-relay-tdup", move || delayer(&s.stop, urx, |p, _| {
-            let _ = s.up.send(p);
+        r.threads.push(spawn("kp-relay-tdup", move || delayer(&s.stop, urx, |p, tag| {
+            if let Some(u) = s.ups.get(tag.port() as usize) {
+                let _ = u.send(p);
+            }
         })));
         Ok(r)
+    }
+
+    /// the tunnels of this relay changed: it starts again
+    pub fn needs_restart(&self, cfg: &RelayCfg) -> bool {
+        self.cfg.port != cfg.port || self.cfg.to != cfg.to || self.cfg.more != cfg.more
     }
 
     /// users and the copy delay, live: a user whose key stays keeps their sessions
@@ -570,8 +667,10 @@ impl Relay {
     pub fn status(&self) -> Value {
         let users = self.sh.users.lock().unwrap_or_else(|e| e.into_inner());
         let live: Vec<&RSess> = users.values().flat_map(|u| u.sess.values()).filter(|s| s.last.elapsed() < Duration::from_secs(60)).collect();
+        let tq = self.sh.tq.lock().unwrap_or_else(|e| e.into_inner());
+        let tunnels: Vec<Value> = tq.iter().map(|q| json!({ "rtt": (q.rtt_ms * 10.0).round() / 10.0, "loss": (q.loss() * 10.0).round() / 10.0, "up": q.live() })).collect();
         json!({
-            "port": self.cfg.port, "to": self.cfg.to,
+            "port": self.cfg.port, "to": self.cfg.to, "tunnels": tunnels,
             "online": users.values().filter(|u| u.sess.values().any(|s| s.last.elapsed() < Duration::from_secs(60))).count(),
             "paths": live.iter().map(|s| s.live_paths().len()).sum::<usize>(),
             "pkts": self.sh.pkts.load(Ordering::Relaxed), "dups": self.sh.dups.load(Ordering::Relaxed), "bad": self.sh.bad.load(Ordering::Relaxed),
@@ -591,7 +690,7 @@ impl Drop for Relay {
     }
 }
 
-/// phone → relay: check, drop copies, one copy into the tunnel; PING gets its PONG here
+/// phone → relay: check, drop copies, one copy into each tunnel; PING gets its PONG here
 fn relay_in(sh: &RShared) {
     let mut buf = vec![0u8; MAX_PKT];
     while !sh.stop.load(Ordering::Relaxed) {
@@ -614,6 +713,14 @@ fn relay_in(sh: &RShared) {
             DATA => 0,
             PARITY => 1,
             PING => 2,
+            REPAIR => 3,
+            FILL => {
+                // the radio's keep-awake: only keeps a known path alive
+                if let Some(s) = u.sess.get_mut(&h.sess) {
+                    s.note_path(from, h.aux & 0x0f, false);
+                }
+                continue;
+            }
             _ => continue,
         };
         if !u.sess.contains_key(&h.sess) {
@@ -639,8 +746,7 @@ fn relay_in(sh: &RShared) {
         let first = s.win[slot].take(h.seq);
         // a path is learned from a packet seen for the first time (a copy only keeps a known path alive)
         let path_id = match h.kind {
-            PING => h.aux & 0x0f,
-            DATA => h.aux & 0x0f,
+            PING | DATA | REPAIR => h.aux & 0x0f,
             _ => 0,
         };
         if let Some(p) = s.note_path(from, path_id, first) {
@@ -669,27 +775,45 @@ fn relay_in(sh: &RShared) {
                 body.extend_from_slice(&p.total.to_be_bytes());
             }
             drop(users);
+            // v3: caps, and the tunnel's round trip (ms) and loss (‰) — a v2 phone reads none of it
+            let (rtt, loss) = sh.best_tun();
+            body.push(CAP_RLC);
+            body.extend_from_slice(&rtt.to_be_bytes());
+            body.extend_from_slice(&loss.to_be_bytes());
             let pong = Hdr { uid: h.uid, sess: h.sess, seq: h.seq, kind: PONG | DOWN, aux: live };
             let _ = sh.public.send_to(&seal(&sh.obfs, &key, &pong, &body), from);
             continue;
         }
         drop(users);
-        let _ = sh.up.send(pkt);
-        let d = sh.tun_dup.load(Ordering::Relaxed);
-        if d > 0 {
-            let _ = sh.dly_up.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(d), pkt.to_vec(), from));
-        }
+        sh.send_up(pkt, from);
     }
 }
 
-/// exit → relay: to every path of the session (one path: twice)
-fn relay_back(sh: &RShared) {
+/// exit → relay through tunnel `i`: to every path of the session (one path: twice); probe answers
+fn relay_back(sh: &RShared, i: usize) {
     let mut buf = vec![0u8; MAX_PKT];
     while !sh.stop.load(Ordering::Relaxed) {
-        let Ok(n) = sh.up.recv(&mut buf) else { continue };
+        let Ok(n) = sh.ups[i].recv(&mut buf) else { continue };
         let pkt = &buf[..n];
         let Some(h) = peek(&sh.obfs, pkt) else { continue };
         if h.kind & DOWN == 0 {
+            continue;
+        }
+        if h.kind == PROBE | DOWN && h.uid == 0 {
+            if open(&sh.probe, &h, pkt).is_some() {
+                let mut tq = sh.tq.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(q) = tq.get_mut(i) {
+                    if let Some(at) = q.sent.remove(&h.seq) {
+                        let rtt = at.elapsed().as_secs_f64() * 1000.0;
+                        q.rtt_ms = if q.rtt_ms == 0.0 { rtt } else { q.rtt_ms + (rtt - q.rtt_ms) / 8.0 };
+                        q.last_ans = Some(Instant::now());
+                        q.ring.push_back(true);
+                        while q.ring.len() > 40 {
+                            q.ring.pop_front();
+                        }
+                    }
+                }
+            }
             continue;
         }
         let (paths, dup, every) = {
@@ -699,8 +823,12 @@ fn relay_back(sh: &RShared) {
                 continue;
             }
             let Some(s) = u.sess.get_mut(&h.sess) else { continue };
-            // the exit's second copy of the same packet goes no further
-            let slot = if h.kind & !DOWN == PARITY { 1 } else { 0 };
+            // the exit's second copy of the same packet (or its copy through the other tunnel) goes no further
+            let slot = match h.kind & !DOWN {
+                PARITY => 1,
+                REPAIR => 2,
+                _ => 0,
+            };
             if !s.down[slot].take(h.seq) {
                 continue;
             }
@@ -716,6 +844,34 @@ fn relay_back(sh: &RShared) {
             for p in &paths {
                 let _ = tx.send((at, pkt.to_vec(), *p));
             }
+        }
+    }
+}
+
+/// a probe into every tunnel four times a second: which tunnel is alive, its round trip and loss
+fn relay_probe(sh: &RShared) {
+    let mut seq: u32 = 0;
+    while !sh.stop.load(Ordering::Relaxed) {
+        std::thread::sleep(PROBE_EVERY);
+        for (i, up) in sh.ups.iter().enumerate() {
+            seq = seq.wrapping_add(1);
+            {
+                let mut tq = sh.tq.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(q) = tq.get_mut(i) {
+                    // unanswered for a second: lost
+                    let gone: Vec<u32> = q.sent.iter().filter(|(_, t)| t.elapsed() > Duration::from_secs(1)).map(|(s, _)| *s).collect();
+                    for s in gone {
+                        q.sent.remove(&s);
+                        q.ring.push_back(false);
+                    }
+                    while q.ring.len() > 40 {
+                        q.ring.pop_front();
+                    }
+                    q.sent.insert(seq, Instant::now());
+                }
+            }
+            let h = Hdr { uid: 0, sess: 0, seq, kind: PROBE, aux: i as u8 };
+            let _ = up.send(&seal(&sh.obfs, &sh.probe, &h, &[0u8; 8]));
         }
     }
 }
@@ -736,14 +892,95 @@ fn delayer(stop: &AtomicBool, rx: mpsc::Receiver<(Instant, Vec<u8>, SocketAddr)>
 
 // ------------------------------------------------------------------ the exit (abroad)
 
+/// how the exit protects a packet going down to the phone: (deadline, share of the repairs); None: as it is
+fn down_class(p: &[u8]) -> Option<(Duration, f64)> {
+    if p.len() < 20 || p[0] >> 4 != 4 {
+        return None;
+    }
+    let ihl = (p[0] & 0x0f) as usize * 4;
+    match p[9] {
+        // the game's UDP (and DNS): small datagrams; a big or bulk one goes as it is
+        17 if p.len() <= 1000 => Some((Duration::from_millis(150), 1.0)),
+        1 => Some((Duration::from_millis(500), 0.5)),
+        6 if p.len() >= ihl + 14 => {
+            let off = (p[ihl + 12] >> 4) as usize * 4;
+            let flags = p[ihl + 13];
+            // SYN, FIN, RST, bare ACKs: a lost one costs a whole retransmission timeout
+            (flags & 0x07 != 0 || p.len() <= ihl + off).then_some((Duration::from_millis(1500), 0.5))
+        }
+        _ => None,
+    }
+}
+
 struct XSess {
     sess: u16,
-    from: SocketAddr,
-    win: [Window; 2],
+    /// where the tunnels deliver this session's packets (one per tunnel): the downlink goes back on each
+    froms: Vec<(SocketAddr, Instant)>,
+    /// DATA, PARITY, REPAIR
+    win: [Window; 3],
     rx_fec: FecRx,
+    rx_rlc: kprlc::RlcRx,
     down_seq: u32,
     down_pseq: u32,
     tx_fec: FecTx,
+    // v3 down: repairs over the phone's protected packets
+    rlc: bool,
+    ratio: f64,
+    tx_rlc: kprlc::RlcTx,
+    credit: f64,
+    pending: u32,
+    last_data: Option<Instant>,
+    gap_ms: f64,
+    rseq: u32,
+}
+
+impl XSess {
+    fn new(sess: u16, from: SocketAddr, k: usize) -> XSess {
+        XSess {
+            sess,
+            froms: vec![(from, Instant::now())],
+            win: Default::default(),
+            rx_fec: FecRx::default(),
+            rx_rlc: kprlc::RlcRx::default(),
+            down_seq: 0,
+            down_pseq: 0,
+            tx_fec: FecTx::new(k),
+            rlc: false,
+            ratio: 0.0,
+            tx_rlc: kprlc::RlcTx::default(),
+            credit: 0.0,
+            pending: 0,
+            last_data: None,
+            gap_ms: 0.0,
+            rseq: 0,
+        }
+    }
+    fn note_from(&mut self, from: SocketAddr) {
+        let now = Instant::now();
+        match self.froms.iter_mut().find(|(a, _)| *a == from) {
+            Some(x) => x.1 = now,
+            None => self.froms.push((from, now)),
+        }
+        self.froms.retain(|(_, t)| t.elapsed() < TUN_DEAD * 2);
+        if self.froms.len() > 4 {
+            self.froms.sort_by_key(|x| std::cmp::Reverse(x.1));
+            self.froms.truncate(4);
+        }
+    }
+    fn tos(&self) -> Vec<SocketAddr> {
+        self.froms.iter().filter(|(_, t)| t.elapsed() < TUN_DEAD).map(|x| x.0).collect()
+    }
+    /// a v3 repair is due: spread between the game's packets, at once when two are owed, or now that the
+    /// stream paused (its tail)
+    fn repair_due(&self, now: Instant) -> bool {
+        let Some(last) = self.last_data else { return false };
+        if !self.rlc || self.credit <= 0.0 {
+            return false;
+        }
+        let since = now.duration_since(last).as_secs_f64() * 1000.0;
+        let spread = (self.gap_ms / 3.0).clamp(2.0, 8.0);
+        self.credit >= 2.0 || (self.credit >= 1.0 && since >= spread) || (self.pending > 0 && since >= (self.gap_ms * 0.75).max(8.0))
+    }
 }
 
 struct XUser {
@@ -759,6 +996,7 @@ struct XUser {
 
 struct XShared {
     obfs: Obfs,
+    probe: UKey,
     sock: UdpSocket,
     tun: File,
     users: Mutex<HashMap<u32, XUser>>,
@@ -766,17 +1004,20 @@ struct XShared {
     stop: AtomicBool,
     fixed: AtomicU64,
     pkts: AtomicU64,
+    repairs: AtomicU64,
     tun_dup: AtomicU64,
     dly: Mutex<mpsc::Sender<(Instant, Vec<u8>, SocketAddr)>>,
 }
 
 impl XShared {
-    /// back into the tunnel, and the second copy later
-    fn send(&self, pkt: Vec<u8>, to: SocketAddr) {
-        let _ = self.sock.send_to(&pkt, to);
+    /// back into every tunnel of the session, and the second copy later
+    fn send(&self, pkt: Vec<u8>, tos: &[SocketAddr]) {
         let d = self.tun_dup.load(Ordering::Relaxed);
-        if d > 0 {
-            let _ = self.dly.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(d), pkt, to));
+        for to in tos {
+            let _ = self.sock.send_to(&pkt, to);
+            if d > 0 {
+                let _ = self.dly.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(d), pkt.clone(), *to));
+            }
         }
     }
 }
@@ -813,6 +1054,7 @@ impl Exit {
         let (tx, rx) = mpsc::channel();
         let sh = Arc::new(XShared {
             obfs: o,
+            probe: probe_key(obfs),
             sock,
             tun,
             users: Mutex::new(HashMap::new()),
@@ -820,6 +1062,7 @@ impl Exit {
             stop: AtomicBool::new(false),
             fixed: AtomicU64::new(0),
             pkts: AtomicU64::new(0),
+            repairs: AtomicU64::new(0),
             tun_dup: AtomicU64::new(0),
             dly: Mutex::new(tx),
         });
@@ -861,7 +1104,7 @@ impl Exit {
         self.cfg = cfg.clone();
     }
 
-    /// {port, users: {uid: [bytes]}, online: [uid], fixed, pkts}
+    /// {port, users: {uid: [bytes]}, online: [uid], fixed, pkts, repairs}
     pub fn status(&self) -> Value {
         let users = self.sh.users.lock().unwrap_or_else(|e| e.into_inner());
         let mut by = serde_json::Map::new();
@@ -874,7 +1117,8 @@ impl Exit {
                 on.push(u.uid);
             }
         }
-        json!({ "port": self.cfg.port, "users": by, "names": names, "online": on, "fixed": self.sh.fixed.load(Ordering::Relaxed), "pkts": self.sh.pkts.load(Ordering::Relaxed) })
+        json!({ "port": self.cfg.port, "users": by, "names": names, "online": on, "fixed": self.sh.fixed.load(Ordering::Relaxed),
+            "pkts": self.sh.pkts.load(Ordering::Relaxed), "repairs": self.sh.repairs.load(Ordering::Relaxed) })
     }
 }
 
@@ -900,7 +1144,7 @@ fn v4_dst(p: &[u8]) -> Option<Ipv4Addr> {
     (p.len() >= 20 && p[0] >> 4 == 4).then(|| Ipv4Addr::new(p[16], p[17], p[18], p[19]))
 }
 
-/// relay → exit: drop copies, rebuild with parity, into `kping0`
+/// relay → exit: drop copies, rebuild with parity or repairs, into `kping0`; probes are answered
 fn exit_in(sh: &XShared) {
     let mut buf = vec![0u8; MAX_PKT];
     let mut tun = &sh.tun;
@@ -908,7 +1152,14 @@ fn exit_in(sh: &XShared) {
         let Ok((n, from)) = sh.sock.recv_from(&mut buf) else { continue };
         let pkt = &buf[..n];
         let Some(h) = peek(&sh.obfs, pkt) else { continue };
-        if h.kind & DOWN != 0 || !(h.kind == DATA || h.kind == PARITY) {
+        if h.kind == PROBE && h.uid == 0 {
+            if open(&sh.probe, &h, pkt).is_some() {
+                let back = Hdr { kind: PROBE | DOWN, ..h };
+                let _ = sh.sock.send_to(&seal(&sh.obfs, &sh.probe, &back, &[0u8; 8]), from);
+            }
+            continue;
+        }
+        if h.kind & DOWN != 0 || !(h.kind == DATA || h.kind == PARITY || h.kind == REPAIR) {
             continue;
         }
         let mut users = sh.users.lock().unwrap_or_else(|e| e.into_inner());
@@ -917,39 +1168,82 @@ fn exit_in(sh: &XShared) {
         // the newest session of the user takes over (the relay only lets fresh ones in)
         if u.cur.as_ref().map(|s| s.sess) != Some(h.sess) {
             let k = sh.fec.load(Ordering::Relaxed) as usize;
-            u.cur = Some(XSess { sess: h.sess, from, win: Default::default(), rx_fec: FecRx::default(), down_seq: 0, down_pseq: 0, tx_fec: FecTx::new(k) });
+            u.cur = Some(XSess::new(h.sess, from, k));
         }
         let ip = u.ip;
         let Some(s) = u.cur.as_mut() else { continue };
-        s.from = from;
+        s.note_from(from);
+        let now = Instant::now();
         let mut out: Vec<Vec<u8>> = vec![];
-        if h.kind == DATA {
-            // the parity the phone wants back (0 = this server's own)
-            let want = match h.aux >> 4 {
-                0 => sh.fec.load(Ordering::Relaxed) as usize,
-                1 => 0,
-                k => k as usize,
-            };
-            if s.tx_fec.k != want.min(MAX_GROUP) {
-                s.tx_fec = FecTx::new(want);
+        match h.kind {
+            DATA => {
+                // what the phone wants back: 0 = this server's parity, 1 = none, 2-8 a parity group (v2),
+                // 9-15 v3 repairs at that rate
+                match h.aux >> 4 {
+                    w @ 9..=15 => {
+                        s.rlc = true;
+                        s.ratio = DOWN_RATIOS[(w - 9) as usize];
+                        if s.tx_fec.k != 0 {
+                            s.tx_fec = FecTx::new(0);
+                        }
+                    }
+                    w => {
+                        s.rlc = false;
+                        let want = match w {
+                            0 => sh.fec.load(Ordering::Relaxed) as usize,
+                            1 => 0,
+                            k => k as usize,
+                        };
+                        if s.tx_fec.k != want.min(MAX_GROUP) {
+                            s.tx_fec = FecTx::new(want);
+                        }
+                    }
+                }
+                if !s.win[0].take(h.seq) {
+                    continue;
+                }
+                out.push(payload.to_vec());
+                let mut more = s.rx_rlc.data(h.seq, payload, now);
+                if let Some((seq, p)) = s.rx_fec.data(h.seq, payload, &s.win[0]) {
+                    if s.win[0].take(seq) {
+                        sh.fixed.fetch_add(1, Ordering::Relaxed);
+                        more.extend(s.rx_rlc.data(seq, &p, now));
+                        out.push(p);
+                    }
+                }
+                for (seq, p) in more {
+                    if s.win[0].take(seq) {
+                        sh.fixed.fetch_add(1, Ordering::Relaxed);
+                        out.push(p);
+                    }
+                }
             }
-            if !s.win[0].take(h.seq) {
-                continue;
+            PARITY => {
+                if !s.win[1].take(h.seq) {
+                    continue;
+                }
+                if let Some((seq, p)) = s.rx_fec.parity(h.aux, payload, &s.win[0]) {
+                    if s.win[0].take(seq) {
+                        sh.fixed.fetch_add(1, Ordering::Relaxed);
+                        for (q, x) in s.rx_rlc.data(seq, &p, now) {
+                            if s.win[0].take(q) {
+                                out.push(x);
+                            }
+                        }
+                        out.push(p);
+                    }
+                }
             }
-            out.push(payload.to_vec());
-            if let Some((seq, p)) = s.rx_fec.data(h.seq, payload, &s.win[0]) {
-                s.win[0].take(seq);
-                sh.fixed.fetch_add(1, Ordering::Relaxed);
-                out.push(p);
-            }
-        } else {
-            if !s.win[1].take(h.seq) {
-                continue;
-            }
-            if let Some((seq, p)) = s.rx_fec.parity(h.aux, payload, &s.win[0]) {
-                s.win[0].take(seq);
-                sh.fixed.fetch_add(1, Ordering::Relaxed);
-                out.push(p);
+            _ => {
+                if !s.win[2].take(h.seq) {
+                    continue;
+                }
+                for (seq, p) in s.rx_rlc.repair(payload, now) {
+                    if s.win[0].take(seq) {
+                        sh.fixed.fetch_add(1, Ordering::Relaxed);
+                        out.push(p);
+                    }
+                }
             }
         }
         for p in out {
@@ -965,7 +1259,7 @@ fn exit_in(sh: &XShared) {
     }
 }
 
-/// `kping0` → the user's session, with parity
+/// `kping0` → the user's session, with parity (v2) or repairs (v3)
 fn exit_tun(sh: &XShared) {
     let mut buf = vec![0u8; 65536];
     let mut tun = &sh.tun;
@@ -985,22 +1279,35 @@ fn exit_tun(sh: &XShared) {
         let Some(s) = u.cur.as_mut() else { continue };
         let seq = s.down_seq;
         s.down_seq = s.down_seq.wrapping_add(1);
+        let tos = s.tos();
         let pkt = seal(&sh.obfs, &u.key, &Hdr { uid: u.uid, sess: s.sess, seq, kind: DATA | DOWN, aux: 0 }, p);
-        sh.send(pkt, s.from);
+        sh.send(pkt, &tos);
         u.tx += p.len() as u64;
-        if let Some((n, par)) = s.tx_fec.add(seq, p) {
+        if s.rlc {
+            if let Some((ttl, w)) = down_class(p) {
+                let now = Instant::now();
+                s.tx_rlc.add(seq, p, now + ttl);
+                s.credit = (s.credit + s.ratio * w).min(6.0);
+                s.pending += 1;
+                if let Some(last) = s.last_data {
+                    s.gap_ms += (now.duration_since(last).as_secs_f64() * 1000.0 - s.gap_ms) / 8.0;
+                }
+                s.last_data = Some(now);
+            }
+        } else if let Some((n, par)) = s.tx_fec.add(seq, p) {
             let pseq = s.down_pseq;
             s.down_pseq = s.down_pseq.wrapping_add(1);
             let pk = seal(&sh.obfs, &u.key, &Hdr { uid: u.uid, sess: s.sess, seq: pseq, kind: PARITY | DOWN, aux: n }, &par);
-            sh.send(pk, s.from);
+            sh.send(pk, &tos);
         }
     }
 }
 
-/// parity of groups that waited too long
+/// parity of groups that waited too long (v2), and the paced repairs (v3)
 fn exit_flush(sh: &XShared) {
     while !sh.stop.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(2));
+        let now = Instant::now();
         let mut users = sh.users.lock().unwrap_or_else(|e| e.into_inner());
         for u in users.values_mut() {
             let (uid, key) = (u.uid, u.key.clone());
@@ -1009,7 +1316,22 @@ fn exit_flush(sh: &XShared) {
                 let pseq = s.down_pseq;
                 s.down_pseq = s.down_pseq.wrapping_add(1);
                 let pk = seal(&sh.obfs, &key, &Hdr { uid, sess: s.sess, seq: pseq, kind: PARITY | DOWN, aux: n }, &par);
-                sh.send(pk, s.from);
+                sh.send(pk, &s.tos());
+            }
+            if s.repair_due(now) {
+                match s.tx_rlc.repair(now, kprlc::MAX_WIN) {
+                    Some(rep) => {
+                        let rseq = s.rseq;
+                        s.rseq = s.rseq.wrapping_add(1);
+                        s.credit -= 1.0;
+                        s.pending = 0;
+                        sh.repairs.fetch_add(1, Ordering::Relaxed);
+                        let pk = seal(&sh.obfs, &key, &Hdr { uid, sess: s.sess, seq: rseq, kind: REPAIR | DOWN, aux: 0 }, &rep);
+                        sh.send(pk, &s.tos());
+                    }
+                    // every packet it would cover is dead: nothing owed
+                    None => s.credit = 0.0,
+                }
             }
         }
     }
@@ -1060,7 +1382,7 @@ pub fn apply(cfg: KpCfg) {
     let old = std::mem::take(&mut r.relays);
     let mut old: Vec<Option<(Relay, String)>> = old.into_iter().map(Some).collect();
     for c in &cfg.relays {
-        if let Some(slot) = old.iter_mut().find(|x| x.as_ref().is_some_and(|(x, _)| x.cfg.port == c.port && x.cfg.to == c.to)) {
+        if let Some(slot) = old.iter_mut().find(|x| x.as_ref().is_some_and(|(x, _)| !x.needs_restart(c))) {
             let (mut x, e) = slot.take().expect("found");
             x.set(c);
             keep.push((x, e));
@@ -1216,6 +1538,82 @@ mod tests {
         assert!(tx.add(3, b"c").is_none());
     }
 
+    /// a tunnel's next packet that is not one of the relay's probes
+    fn recv_np(t: &UdpSocket, buf: &mut [u8]) -> std::io::Result<(usize, SocketAddr)> {
+        let o = Obfs::new(&"ab".repeat(32)).unwrap();
+        let until = Instant::now() + Duration::from_millis(500);
+        loop {
+            if Instant::now() > until {
+                return Err(std::io::Error::new(std::io::ErrorKind::TimedOut, "nothing but probes"));
+            }
+            let (n, a) = t.recv_from(buf)?;
+            if peek(&o, &buf[..n]).is_some_and(|h| h.kind == PROBE && h.uid == 0) {
+                continue;
+            }
+            return Ok((n, a));
+        }
+    }
+
+    /// v3: every packet goes into both tunnels; the probes find the tunnel that answers, the PONG says
+    /// v3 and that tunnel's round trip; what comes back through either tunnel reaches the phone once
+    #[test]
+    fn two_tunnels_and_probes() {
+        let (o, k) = keys();
+        let t1 = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let t2 = UdpSocket::bind("127.0.0.1:0").unwrap();
+        for t in [&t1, &t2] {
+            t.set_read_timeout(Some(Duration::from_millis(600))).unwrap();
+        }
+        let port = 20000 + (rand::random::<u16>() % 20000);
+        let cfg = RelayCfg {
+            port, to: t1.local_addr().unwrap().port(), more: vec![t2.local_addr().unwrap().port()], dup_ms: 0, tun_dup_ms: 0,
+            users: vec![KUser { uid: 7, name: "gamer".into(), key: "cd".repeat(32), ip: String::new() }],
+        };
+        let relay = Relay::start(&"ab".repeat(32), &cfg).unwrap();
+        let probe = probe_key(&"ab".repeat(32));
+        // tunnel 2 answers the probes (an exit behind it), tunnel 1 stays silent
+        let mut buf = [0u8; 2048];
+        let mut answered = 0;
+        let mut back2 = None;
+        let until = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < until && answered < 3 {
+            if let Ok((n, from)) = t2.recv_from(&mut buf) {
+                let h = peek(&o, &buf[..n]).unwrap();
+                if h.kind == PROBE && h.uid == 0 && open(&probe, &h, &buf[..n]).is_some() {
+                    let a = seal(&o, &probe, &Hdr { kind: PROBE | DOWN, ..h }, &[0u8; 8]);
+                    t2.send_to(&a, from).unwrap();
+                    back2 = Some(from);
+                    answered += 1;
+                }
+            }
+        }
+        assert!(answered >= 3, "no probes into tunnel 2");
+        let phone = UdpSocket::bind("127.0.0.1:0").unwrap();
+        phone.set_read_timeout(Some(Duration::from_millis(600))).unwrap();
+        let dst = format!("127.0.0.1:{}", port);
+        let ping = seal(&o, &k, &Hdr { uid: 7, sess: 3, seq: 0, kind: PING, aux: 1 }, &[&now_ms().to_be_bytes()[..], &[0xff, 0, CAP_RLC]].concat());
+        phone.send_to(&ping, &dst).unwrap();
+        let (n, _) = phone.recv_from(&mut buf).unwrap();
+        let h = peek(&o, &buf[..n]).unwrap();
+        let body = open(&k, &h, &buf[..n]).unwrap().to_vec();
+        let rest = &body[9 + body[8] as usize * 9..];
+        assert_eq!(rest[0] & CAP_RLC, CAP_RLC, "the PONG says v3");
+        // only tunnel 2 answers: the data goes there (tunnel 1 counts as dead once it misses its probes)
+        let d = seal(&o, &k, &Hdr { uid: 7, sess: 3, seq: 1, kind: REPAIR, aux: 1 }, b"repair");
+        phone.send_to(&d, &dst).unwrap();
+        let (n, _) = recv_np(&t2, &mut buf).expect("a v3 repair into the tunnel");
+        assert_eq!(&buf[..n], &d[..]);
+        // the same downlink packet back through both tunnels: the phone gets it once
+        let down = seal(&o, &k, &Hdr { uid: 7, sess: 3, seq: 0, kind: DATA | DOWN, aux: 0 }, b"reply");
+        t2.send_to(&down, back2.unwrap()).unwrap();
+        let (n, _) = phone.recv_from(&mut buf).expect("the reply");
+        assert_eq!(&buf[..n], &down[..]);
+        let st = relay.status();
+        assert_eq!(st["tunnels"].as_array().unwrap().len(), 2);
+        assert_eq!(st["tunnels"][1]["up"], true);
+        drop(relay);
+    }
+
     /// The relay on this machine (no root needed): a fresh PING starts a session and is answered, an old
     /// one is not; copies go into the tunnel once; what comes back goes to both paths
     #[test]
@@ -1225,7 +1623,7 @@ mod tests {
         tunnel.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
         let to = tunnel.local_addr().unwrap().port();
         let port = 20000 + (rand::random::<u16>() % 20000);
-        let cfg = RelayCfg { port, to, dup_ms: 2, tun_dup_ms: 0, users: vec![KUser { uid: 7, name: "gamer".into(), key: "cd".repeat(32), ip: String::new() }] };
+        let cfg = RelayCfg { port, to, more: vec![], dup_ms: 2, tun_dup_ms: 0, users: vec![KUser { uid: 7, name: "gamer".into(), key: "cd".repeat(32), ip: String::new() }] };
         let relay = Relay::start(&"ab".repeat(32), &cfg).unwrap();
         let wifi = UdpSocket::bind("127.0.0.1:0").unwrap();
         let cell = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -1241,7 +1639,7 @@ mod tests {
         // data before a session: dropped
         let d0 = seal(&o, &k, &Hdr { uid: 7, sess: 9, seq: 0, kind: DATA, aux: 1 }, b"early");
         wifi.send_to(&d0, &dst).unwrap();
-        assert!(tunnel.recv_from(&mut buf).is_err());
+        assert!(recv_np(&tunnel, &mut buf).is_err());
         // a fresh PING on each path
         for (i, s) in [&wifi, &cell].iter().enumerate() {
             let ping = seal(&o, &k, &Hdr { uid: 7, sess: 9, seq: i as u32, kind: PING, aux: i as u8 + 1 }, &now_ms().to_be_bytes());
@@ -1254,9 +1652,9 @@ mod tests {
         let d = seal(&o, &k, &Hdr { uid: 7, sess: 9, seq: 1, kind: DATA, aux: 1 }, b"game");
         wifi.send_to(&d, &dst).unwrap();
         cell.send_to(&d, &dst).unwrap();
-        let (n, back) = tunnel.recv_from(&mut buf).expect("into the tunnel");
+        let (n, back) = recv_np(&tunnel, &mut buf).expect("into the tunnel");
         assert_eq!(&buf[..n], &d[..]);
-        assert!(tunnel.recv_from(&mut buf).is_err(), "a copy went into the tunnel twice");
+        assert!(recv_np(&tunnel, &mut buf).is_err(), "a copy went into the tunnel twice");
         // the next PING's answer says what each path brought: one copy came first, on one path
         let ping = seal(&o, &k, &Hdr { uid: 7, sess: 9, seq: 5, kind: PING, aux: 1 }, &[&now_ms().to_be_bytes()[..], &[0xff, 0]].concat());
         wifi.send_to(&ping, &dst).unwrap();
@@ -1269,7 +1667,7 @@ mod tests {
         // a forged packet (wrong key): not into the tunnel
         let bad = seal(&o, &UKey::new(&"ef".repeat(32)).unwrap(), &Hdr { uid: 7, sess: 9, seq: 2, kind: DATA, aux: 1 }, b"x");
         wifi.send_to(&bad, &dst).unwrap();
-        assert!(tunnel.recv_from(&mut buf).is_err());
+        assert!(recv_np(&tunnel, &mut buf).is_err());
         // the answer goes to both paths
         let down = seal(&o, &k, &Hdr { uid: 7, sess: 9, seq: 0, kind: DATA | DOWN, aux: 0 }, b"reply");
         tunnel.send_to(&down, back).unwrap();
@@ -1298,7 +1696,7 @@ async fn kping_lab() {
     let user = KUser { uid: 1, name: "gamer".into(), key: key.clone(), ip: "10.81.0.2".into() };
     let tdup: u16 = std::env::var("KP_TUN_DUP_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(20);
     let dup: u16 = std::env::var("KP_DUP_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
-    let relay = Relay::start(&obfs, &RelayCfg { port: 24300, to: 24302, dup_ms: dup, tun_dup_ms: tdup, users: vec![user.clone()] }).expect("relay");
+    let relay = Relay::start(&obfs, &RelayCfg { port: 24300, to: 24302, more: vec![], dup_ms: dup, tun_dup_ms: tdup, users: vec![user.clone()] }).expect("relay");
     let fec: u8 = std::env::var("LAB_FEC").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
     let exit = Exit::start(&obfs, &ExitCfg { port: 4300, mtu: 1332, fec, tun_dup_ms: tdup, users: vec![user] }).expect("exit");
     let mt = MtCfg {
