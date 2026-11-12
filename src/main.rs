@@ -338,6 +338,7 @@ async fn main() {
     }
     // upgrade legacy sha256 admin hash stored in the db is done at next successful login
 
+    kping::light_tunnels(&app);
     tokio::spawn(sync::run(app.clone()));
     // deleted nodes that were off at the time are asked again to remove themselves
     tokio::spawn(api::leftover_loop(app.clone()));
