@@ -1,4 +1,20 @@
-# v3.43.1 — KPING: three tunnel crossings instead of four, bare ACKs not protected
+# v3.43.1 — KPING: lighter tunnels (FEC 8:1, three crossings instead of four), bare ACKs not protected
+- **KPING's tunnels: Game-FEC 8:1 instead of 8:3.** A game packet travels alone (one every ~17 ms), so each Game-FEC group held one
+  packet and 8:3 sent it with three repair shards: four packets per tunnel for every game packet, on top of KPING's own copies. KPING
+  already repairs end to end, so the tunnel keeps one repair shard. Tunnels KPING built before are changed once at start
+  (`kping::light_tunnels`; only 8:3 ones: a choice made later on the Tunnels page stays); both ends take the new settings from the
+  panel together. **Lab** (two tunnels on bad lines, the app's 1.35.2 core; FEC `8:3` → `8:1`; `off` for comparison):
+
+  | between the servers | 8:3: loss · p95 · late · packets | **8:1** | off |
+  |---|---|---|---|
+  | 3% out, the same outages | 0% · 107 ms · 2 · 64k | **0% · 98 ms · 0 · 38k** | 0.19% · 97 ms · 2 · 24k |
+  | 3%, each its own | 0% · 109 ms · 11 · 66k | **0% · 98 ms · 0 · 37k** | 0% · 97 ms · 0 · 23k |
+  | 8% (~60 ms), the same | 0.11% · 123 ms · 35 · 68k | **0% · 105 ms · 17 · 44k** | 0.11% · 102 ms · 11 · 27k |
+  | 8%, each its own | 0% · 124 ms · 25 · 66k | **0% · 104 ms · 3 · 42k** | 0.41% · 102 ms · 29 · 29k |
+
+  The servers' CPU for the same game: 8:1 about three quarters of 8:3, off about half. 8:1 keeps every packet and brings the slowest
+  ones sooner; without FEC a few are lost on the worse lines. A third copy into the other tunnel while the probes saw loss was tried
+  and dropped (no gain).
 - **Two tunnels, smarter:** every packet still goes into each live tunnel at once (no packet ever waits for a copy, so a fault of one
   tunnel costs nothing), but the delayed copy (`tun_dup_ms`, for a short outage of the whole line) now goes only into the best tunnel
   (round trip + 3 × probe loss) instead of into each: three crossings with two tunnels, not four. The exit does the same on the way

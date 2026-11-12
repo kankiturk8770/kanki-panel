@@ -35,7 +35,11 @@ pub const DEFAULT_TUNNEL_PORT: u16 = 24301;
 /// users get 10.81.0.2 … by id (microtun is 10.79, its devices 10.80)
 const BASE: u32 = u32::from_be_bytes([10, 81, 0, 0]);
 /// FEC of the tunnel: 8 packets + 3 repair packets (any 3 of 11 may be lost)
-const FEC: &str = "8:3";
+/// KPING's tunnels: one repair shard per group, not three. A game packet travels alone (one every ~17 ms),
+/// so 8:3 sent it four times through each tunnel; KPING itself repairs end to end and copies across the
+/// tunnels. Lab (3.43.1, two tunnels on bad lines): no loss either way, ~40% fewer packets between the
+/// servers, ~25% less CPU, the slowest packets sooner; without any FEC, a little loss on the worse lines.
+const FEC: &str = "8:1";
 
 /// One way in: users dial `iran`, its tunnel brings them to `exit`
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
@@ -218,6 +222,26 @@ pub fn cfg_for(app: &App, sid: &str) -> KpCfg {
 }
 
 /// The tunnel of a KPING route takes its packets only on 127.0.0.1 (the relay sits in front of it)
+/// 3.43.1, once: the tunnels KPING built before with Game-FEC 8:3 get 8:1 too (a choice made on the
+/// Tunnels page stays). Both ends take the tunnel's settings from the panel, so they change together.
+pub fn light_tunnels(app: &App) {
+    if app.db.get("kping_tun_light") == "1" {
+        return;
+    }
+    let ids: Vec<String> = settings(app).routes.iter().flat_map(|r| [r.tunnel.clone(), r.tunnel2.clone()]).filter(|x| !x.is_empty()).collect();
+    let mut ts = crate::tunnel::panel::tunnels(app);
+    let mut changed = false;
+    for t in ts.iter_mut().filter(|t| ids.contains(&t.id) && t.transport == "game" && (t.fec == "8:3" || t.fec.is_empty())) {
+        t.fec = FEC.into();
+        t.dup = false;
+        changed = true;
+    }
+    if changed {
+        crate::tunnel::panel::save_tunnels(app, &ts);
+    }
+    app.db.set("kping_tun_light", "1");
+}
+
 pub fn is_tunnel(app: &App, tid: &str) -> bool {
     settings(app).routes.iter().any(|r| r.tunnel == tid || (!r.tunnel2.is_empty() && r.tunnel2 == tid))
 }
@@ -541,7 +565,7 @@ async fn route_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Resp
     Json(json!({ "ok": true, "tunnel": r.tunnel, "tunnel2": r.tunnel2 })).into_response()
 }
 
-/// The tunnel of a route: reverse (the exit dials Iran), Game-FEC 8:3, only KPING's UDP (Iran
+/// The tunnel of a route: reverse (the exit dials Iran), Game-FEC 8:1, only KPING's UDP (Iran
 /// 127.0.0.1:`inner` → exit 127.0.0.1:KPING port). Built again in place when it exists.
 fn tunnel_body(app: &App, s: &Settings, r: &Route) -> Value {
     json!({
@@ -709,12 +733,25 @@ mod tests {
         assert_eq!(st, StatusCode::OK, "{}", v);
         let tid = v["tunnel"].as_str().unwrap().to_string();
         let t = crate::tunnel::panel::tunnels(&app).into_iter().find(|t| t.id == tid).unwrap();
-        assert_eq!((t.entry.as_str(), t.exit.as_str(), t.mode.as_str(), t.transport.as_str(), t.fec.as_str(), t.port), ("ir1", de.as_str(), "reverse", "game", "8:3", DEFAULT_TUNNEL_PORT));
+        assert_eq!((t.entry.as_str(), t.exit.as_str(), t.mode.as_str(), t.transport.as_str(), t.fec.as_str(), t.port), ("ir1", de.as_str(), "reverse", "game", "8:1", DEFAULT_TUNNEL_PORT));
         assert_eq!(t.udp, vec![format!("{}:{}", DEFAULT_TUNNEL_PORT + 1, DEFAULT_PORT)]);
         assert!(t.tcp.is_empty());
         // the tunnel's KPING port listens on 127.0.0.1 only: the relay is the way in
         let spec = crate::tunnel::panel::specs_of(&app, "ir1").into_iter().find(|s| s.id == tid).unwrap();
         assert_eq!(spec.bind, "127.0.0.1");
+        // a tunnel built before (Game-FEC 8:3) gets 8:1 once, and only once
+        let mut ts = crate::tunnel::panel::tunnels(&app);
+        ts.iter_mut().for_each(|t| t.fec = "8:3".into());
+        crate::tunnel::panel::save_tunnels(&app, &ts);
+        light_tunnels(&app);
+        assert!(crate::tunnel::panel::tunnels(&app).iter().all(|t| t.fec == "8:1"));
+        let mut ts = crate::tunnel::panel::tunnels(&app);
+        ts.iter_mut().for_each(|t| t.fec = "8:3".into());
+        crate::tunnel::panel::save_tunnels(&app, &ts);
+        light_tunnels(&app);
+        assert!(crate::tunnel::panel::tunnels(&app).iter().all(|t| t.fec == "8:3"), "a choice made later on the Tunnels page stays");
+        ts.iter_mut().for_each(|t| t.fec = "8:1".into());
+        crate::tunnel::panel::save_tunnels(&app, &ts);
         // building again keeps the same tunnel
         let (_, v) = call(&app, "POST", &format!("/api/kping/routes/{}/tunnel", rid), Value::Null).await;
         assert_eq!(v["tunnel"], tid.as_str());

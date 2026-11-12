@@ -575,7 +575,7 @@ impl RShared {
     }
     /// into every live tunnel at once (no packet ever waits for a copy: a fault of one tunnel costs nothing),
     /// and the delayed copy (a short outage of the whole line) only into the best one: three crossings with
-    /// two tunnels, not four
+    /// two tunnels, not four. KPING's tunnels keep only one FEC repair per group (`kping::FEC`).
     fn send_up(&self, pkt: &[u8], from: SocketAddr) {
         let ups = self.ranked_ups();
         for &i in &ups {
@@ -1728,7 +1728,7 @@ async fn kping_lab() {
     assert!(e.is_empty(), "microtun: {}", e);
     let tun = |id: &str, port: u16, udp: &str, bind: &str| Spec {
         id: id.into(), name: id.into(), mode: "reverse".into(), transport: "game".into(), port, token: "token-for-tests-0123456789".into(), conns: 1,
-        udp: vec![udp.into()], target: "127.0.0.1".into(), fec: "8:3".into(), remote: std::env::var(format!("LAB_TUN_{}", id)).unwrap_or(format!("127.0.0.1:{}", port)), bind: bind.into(), ..Default::default()
+        udp: vec![udp.into()], target: "127.0.0.1".into(), fec: std::env::var("LAB_TUN_FEC").unwrap_or("8:3".into()), remote: std::env::var(format!("LAB_TUN_{}", id)).unwrap_or(format!("127.0.0.1:{}", port)), bind: bind.into(), ..Default::default()
     };
     let mut run = vec![];
     let mut specs = vec![tun("kp", 24301, "24302:4300", "127.0.0.1"), tun("mt", 24401, "24400:4200", "")];

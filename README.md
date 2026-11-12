@@ -4,8 +4,8 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** pan
 
 
 ## New in 3.43.1 — KPING: lighter between the servers
-With two tunnels each packet crosses three times instead of four (at once into both, the delayed copy only into the best), with the
-same loss and delay in the lab; bare TCP ACKs are no longer protected by repairs.
+KPING's tunnels use Game-FEC 8:1 instead of 8:3 (existing ones change by themselves), and with two tunnels each packet crosses three
+times instead of four: in the lab no loss, the slowest packets sooner, ~40% fewer packets and ~25% less CPU on the servers.
 
 ## New in 3.43 — KPING v3
 - KPING repairs whole bursts of lost packets (sliding-window repairs instead of one-per-group parity), never resends dead packets, and a route can run two tunnels to the same server abroad (the first copy wins); the Tunnel tab shows each tunnel's ping and loss. Old apps keep working as before.
