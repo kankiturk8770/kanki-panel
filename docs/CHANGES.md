@@ -12,6 +12,17 @@
   probes for 3 s is left out until it answers again. The relay's report has each tunnel's round trip and loss (shown on the Tunnel
   tab), and the PONG tells the phone the best tunnel's round trip and loss, so the app's KPING ping is the whole way to the exit.
 - **The radio's keep-awake filler** of v3 phones (kind 6) only keeps their path alive at the relay.
+- **Lab (`kping_lab` servers, the app's real v2 and v3 clients on the same emulated line — `LOSSY_SEED` — 45 s, 60 game packets/s;
+  on time = round trip ≤ 150 ms):**
+
+  | line | microtun | v2, 1 path | **v3, 1 path** | v2, 2 paths | **v3, 2 paths** |
+  |---|---|---|---|---|---|
+  | ordinary (2% of the time out, ~20 ms) | 97.6 % | 97.4 % | **99.8 %** | 99.9 % | **100 %** |
+  | bad (6%, ~40 ms) | 88.8 % | 90.9 % | **96.9 %** | 99.0 % | **99.85 %** |
+  | Wi-Fi breaking up (15%, ~150 ms) | 75.4 % | 77.3 % | 75.9 % | 99.2 % | **99.96 %** |
+  | heavy (15%, ~60 ms, jitter 25 ms) | — | 78.9 % | **85.2 %** | 95.9 % | **98.7 %** |
+
+  A v2 app on these servers behaves exactly as before. No method fills a 150 ms outage of the only line in time.
 
 # v3.42.0 — Xray and DNS on the new parts, KPING beside KANKI MIX, one CSS generation
 - **Core bar:** KPING sits right after KANKI MIX (the two game cores): WireGuard, AmneziaWG, Hysteria2, KANKI MIX, KPING, microtun,

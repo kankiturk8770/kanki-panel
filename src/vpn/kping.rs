@@ -734,7 +734,11 @@ mod tests {
         // removing it: the route goes back to one tunnel, its id comes back for the page
         let (_, v) = call(&app, "DELETE", &format!("/api/kping/routes/{}/tunnel2", rid), Value::Null).await;
         assert_eq!(v["tunnel2"], tid2.as_str());
-        let (_, v) = call(&app, "POST", &format!("/api/kping/routes/{}/tunnel2", rid), Value::Null).await;
+        // the page then removes the tunnel itself; built again, the route has its second tunnel back
+        let (st, _) = call(&app, "DELETE", &format!("/api/tunnels/{}", tid2), Value::Null).await;
+        assert_eq!(st, StatusCode::OK);
+        let (st, v) = call(&app, "POST", &format!("/api/kping/routes/{}/tunnel2", rid), Value::Null).await;
+        assert_eq!(st, StatusCode::OK, "{}", v);
         let tid2 = v["tunnel2"].as_str().unwrap().to_string();
         // testers: only by the admin, one by one
         let u = app.db.create_user("GAMER", 10.0, 30, 1, "wg", "", "", 0).unwrap();
