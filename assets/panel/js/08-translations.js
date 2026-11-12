@@ -1,7 +1,13 @@
 // ==================================================================== the panel: login, shell, pages
 "use strict";
 // Persian text of the whole panel
-var FA={"Second copy between Iran and abroad (ms)":"نسخهٔ دوم بین ایران و خارج (میلی‌ثانیه)",
+var FA={"Second tunnel":"تانل دوم",
+"Add second tunnel":"افزودن تانل دوم",
+"Tunnel 1":"تانل ۱",
+"Tunnel 2":"تانل ۲",
+"Every packet through two tunnels: a stall on one costs nothing":"هر بسته از دو تانل: گیر کردن یکی چیزی را گم نمی‌کند",
+"Remove the second tunnel? KPING goes on through the first one.":"تانل دوم حذف شود؟ KPING از تانل اول ادامه می‌دهد.",
+"Second copy between Iran and abroad (ms)":"نسخهٔ دوم بین ایران و خارج (میلی‌ثانیه)",
 "Every packet goes twice through the tunnel, this far apart, so a short outage between the servers loses nothing. 0 = once.":"هر بسته با این فاصله دو بار از تانل می‌رود تا قطعی کوتاه بین دو سرور چیزی را گم نکند. ۰ = یک بار.",
 "minute":"دقیقه",
 "minutes":"دقیقه",

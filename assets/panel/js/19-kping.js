@@ -76,7 +76,24 @@ function kpTunnels(d){if(!d.routes.length)return '<p class="muted ku-empty">'+t(
    tags:(built?kuTag(t(x.tunnel_up?'Connected':'Connecting…'),x.tunnel_up?'g':'y'):kuTag(t('Not built'),'y'))+
     (q?kuTag('<span class="ltr">'+N(q.ping)+' ms</span>')+kuTag(t('loss')+' <span class="ltr">'+N(q.loss)+'%</span>',q.loss>3?'r':q.loss>1?'y':'g')+kuTag(t('jitter')+' <span class="ltr">'+N(q.jit)+' ms</span>'):'')+
     (st[2]=='exit'?kuTag(esc(st[1]),'r'):''),
-   addr:'UDP 127.0.0.1:'+N(x.route.tunnel_port+1)+' → '+esc(x.exit_name||'?')+' 127.0.0.1:'+N(d.settings.port)})}).join('')}
+   addr:'UDP 127.0.0.1:'+N(x.route.tunnel_port+1)+' → '+esc(x.exit_name||'?')+' 127.0.0.1:'+N(d.settings.port)})+kpTunnel2Item(d,x,i)}).join('')}
+// the route's second tunnel (KPING v3): every packet goes through both, the first copy wins; the relay's probes
+// say how each one is doing
+function kpTq(x,n){var a=x.relay&&x.relay.tunnels;return a&&a[n]?a[n]:null}
+function kpTunnel2Item(d,x,i){if(!x.tunnel_built)return '';var b2=x.tunnel2_built,r=x.route,p2=r.tunnel2_port||r.tunnel_port+2;
+ var q1=kpTq(x,0),q2=kpTq(x,1);
+ var qt=function(q){return q?kuTag('<span class="ltr">'+N(q.rtt)+' ms</span>',q.up?'g':'r')+kuTag(t('loss')+' <span class="ltr">'+N(q.loss)+'%</span>',q.loss>3?'r':q.loss>1?'y':'g'):''};
+ return kuItem({dot:!b2?'':x.tunnel2_up?'g':'y',flag:flagOf('IR'),name:t('Second tunnel')+' · '+esc(x.iran_name||'?')+' → '+esc(x.exit_name||'?'),
+  act:b2?'<button class="b2 sm" onclick="kpTunnel2('+i+')">'+ic('refresh',14)+' '+t('Build again')+'</button> <button class="b2 sm" onclick="kpTunnel2Del('+i+')">'+t('Remove')+'</button>'
+   :'<button class="btn sm" onclick="kpTunnel2('+i+')">'+ic('tunnel',14)+' '+t('Add second tunnel')+'</button>',
+  tags:(b2?kuTag(t(x.tunnel2_up?'Connected':'Connecting…'),x.tunnel2_up?'g':'y')+kuTag(t('Tunnel 1'))+qt(q1)+kuTag(t('Tunnel 2'))+qt(q2)
+   :kuTag(t('Every packet through two tunnels: a stall on one costs nothing'))),
+  addr:'UDP 127.0.0.1:'+N(p2+1)+' → '+esc(x.exit_name||'?')+' 127.0.0.1:'+N(d.settings.port)})}
+function kpTunnel2(i){var x=KP.d&&KP.d.routes[i];if(!x)return;toast(t('Checking…'));
+ api('POST','/api/kping/routes/'+encodeURIComponent(x.route.id)+'/tunnel2').then(function(){toast(t('Tunnel built'));kpLoad()}).catch(fail)}
+function kpTunnel2Del(i){var x=KP.d&&KP.d.routes[i];if(!x||!confirm(t('Remove the second tunnel? KPING goes on through the first one.')))return;
+ api('DELETE','/api/kping/routes/'+encodeURIComponent(x.route.id)+'/tunnel2').then(function(res){
+  return res.tunnel2?api('DELETE','/api/tunnels/'+encodeURIComponent(res.tunnel2)).catch(function(){}):null}).then(function(){toast(t('Deleted'));kpLoad()}).catch(fail)}
 function kpUsers(d){var on=d.user_list.filter(function(u){return u.has}),off=d.user_list.filter(function(u){return !u.has});
  var add='<div class="kp-add"><select id="kp_u"><option value="">'+t('Choose a user')+'</option>'+off.map(function(u){return '<option value="'+u.id+'">'+esc(u.name)+(u.active?'':' ('+t('not active')+')')+'</option>'}).join('')+'</select>'+
   '<button class="btn sm" onclick="kpUser(+$(\'#kp_u\').value,true)">'+ic('plus',14)+' '+t('Add tester')+'</button></div>';
@@ -137,4 +154,6 @@ function kpMenu(i){var x=KP.d.routes[i];
  kuMenu(x.iran_name+' → '+x.exit_name,x.dial,[[t('Edit'),'kpEdit('+i+')'],[t(x.tunnel_built?'Build tunnel again':'Build tunnel'),'kpTunnel('+i+')'],[t('Delete route and its tunnel'),'kpDel('+i+')','danger']])}
 function kpDel(i){var x=KP.d.routes[i];if(!confirm(t('Delete this route and its tunnel? Its testers lose it at once.')))return;
  api('DELETE','/api/kping/routes/'+encodeURIComponent(x.route.id)).then(function(res){
-  return res.tunnel&&x.tunnel_built?api('DELETE','/api/tunnels/'+encodeURIComponent(res.tunnel)).catch(function(){}):null}).then(function(){toast(t('Deleted'));kpLoad()}).catch(fail)}
+  var all=[];if(res.tunnel&&x.tunnel_built)all.push(api('DELETE','/api/tunnels/'+encodeURIComponent(res.tunnel)).catch(function(){}));
+  if(res.tunnel2)all.push(api('DELETE','/api/tunnels/'+encodeURIComponent(res.tunnel2)).catch(function(){}));
+  return Promise.all(all)}).then(function(){toast(t('Deleted'));kpLoad()}).catch(fail)}

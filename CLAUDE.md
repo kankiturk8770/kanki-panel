@@ -16,7 +16,7 @@ src/
 ├── panel/             سرور وب پنل مدیریت: api.rs، auth.rs، limit.rs، admin.rs، backup.rs، migrate.rs، cleanup.rs
 ├── servers/           سرورهای VPN: servers.rs، cores.rs، twin.rs، direct.rs، exitgeo.rs
 ├── subscription/      اشتراک: subiran.rs، subdomain.rs، devices.rs، apps.rs
-├── vpn/               هسته‌های VPN: wg.rs، hy2.rs، kmix.rs، microtun.rs، mtun.rs، kping.rs، kpingd.rs، sync.rs، amnezia.rs، mtu.rs
+├── vpn/               هسته‌های VPN: wg.rs، hy2.rs، kmix.rs، microtun.rs، mtun.rs، kping.rs، kpingd.rs، kprlc.rs، sync.rs، amnezia.rs، mtu.rs
 │   └── kmix-server/   سورس Go سرور KANKI MIX (`build.sh` ← assets/bin/kanki-mix-server؛ CI می‌سازد)
 ├── bot/               ربات تلگرام: bot.rs، shop.rs، miniapp.rs، channel.rs، ai.rs، pay.rs، buttons.rs
 ├── tunnel/            تانل‌ها: mod.rs، engine.rs، link.rs، agent.rs، panel.rs (تانل‌ها و سرورهای تانل در پنل)، probe.rs، quality.rs، tests.rs
@@ -55,8 +55,8 @@ assets/
 | فایل‌های نصب اپ کانکی (`/dl/...`) | `src/subscription/apps.rs` |
 | WireGuard و AmneziaWG، Hysteria2، همگام‌سازی کاربران و محدودیت اتصال | `src/vpn/wg.rs`, `hy2.rs`, `sync.rs` |
 | KANKI MIX / microtun (پنل / سرور) | `src/vpn/kmix.rs` / `microtun.rs`, `mtun.rs` |
-| KPING v2 (پنل): مسیرها (سرور ایران + سرور خارج، هر سرور با ایجنت)، «افزودن سرور خارج» (`agent_only`)، تانل Game-FEC با یک دکمه، تسترها، `cfg_for(sid)` برای ایجنت، `ingest` گزارش، لینک `kping://` فقط در اشتراک رمزشده | `src/vpn/kping.rs` + `assets/panel/js/19-kping.js` |
-| KPING v2 (روی سرورها، داخل ایجنت تانل): قالب بسته، کپی و «اولی برنده»، پریتی XOR، رله (ایران) و خروجی (`kping0`)، کپی ۲۰ms روی تکهٔ ایران ↔ خارج | `src/vpn/kpingd.rs` (`Relay`، `Exit`، `apply`، `report`)؛ آزمایشگاه `scripts/kping_lab.sh` + کلاینت Go `scripts/kping-lab` (همان قالب، بردار تست مشترک) |
+| KPING v2/v3 (پنل): مسیرها (سرور ایران + سرور خارج، هر سرور با ایجنت)، «افزودن سرور خارج» (`agent_only`)، تانل Game-FEC با یک دکمه (۳.۴۳: تانل دوم `tunnel2`، `route_tunnel2`)، تسترها، `cfg_for(sid)` برای ایجنت، `ingest` گزارش، لینک `kping://` فقط در اشتراک رمزشده | `src/vpn/kping.rs` + `assets/panel/js/19-kping.js` |
+| KPING v2/v3 (روی سرورها، داخل ایجنت تانل): قالب بسته، کپی و «اولی برنده»، پریتی XOR (v2) و ترمیم پنجره‌ای RLC (v3، `kprlc.rs` = `rlc.go` اپ، بردار مشترک)، رله (ایران، چند تانل و پروب هر تانل) و خروجی (`kping0`)، کپی ۲۰ms روی تکهٔ ایران ↔ خارج | `src/vpn/kpingd.rs` (`Relay`، `Exit`، `apply`، `report`)، `src/vpn/kprlc.rs`؛ آزمایشگاه `scripts/kping_lab.sh` + کلاینت Go `scripts/kping-lab` (همان قالب، بردار تست مشترک) |
 | سرور KANKI MIX (Go؛ سورس اینجاست، نه ریپوی دیگر) | `src/vpn/kmix-server/` (`build.sh`، `go test ./...`) |
 | بکاپ اپ AmneziaVPN (یک فایل `.backup`، اسم با پرچم مسیر) | `src/vpn/amnezia.rs` (+ `api::amnezia_configs`) |
 | MTU خودکار هر کانفیگ (هسته + تانل‌های سر راه، `mtu_budget`/`mtu_auto`، رابط `wg0`/`awg0`/`mtun0` سرورها، `GET /api/mtu`) | `src/vpn/mtu.rs` |

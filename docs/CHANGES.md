@@ -1,3 +1,18 @@
+# v3.43.0 — KPING v3: window repairs, two tunnels, tunnel probes
+- **KPING v3 on the servers (`kpingd.rs`, new `kprlc.rs`), negotiated: a v2 phone keeps getting exactly v2.** The PING's byte 10 and
+  the PONG's trailing bytes say v3; a v3 phone asks the exit for repairs with DATA aux 9-15 (a rate, not a group).
+- **Sliding-window repairs (RLC over GF(256), kind 5)** both ways instead of XOR groups: two or three packets lost in a row come
+  back. The exit decodes the phone's repairs with an on-the-fly Gauss-Jordan decoder and makes its own for the downlink, paced
+  between the game's packets, only over packets still before their deadline (game UDP 150 ms), never for TCP data or big datagrams.
+  A packet rebuilt more than 300 ms late is not written to `kping0`.
+- **Two tunnels per route:** «Add second tunnel» on the Tunnel tab builds a second reverse Game-FEC tunnel to the same exit on its own
+  port. The relay sends every packet into each live tunnel, the exit sends every reply back through each one, and both ends keep the
+  first copy, so a stall or a throttled UDP flow on one tunnel costs nothing.
+- **Tunnel probes:** the relay probes each tunnel four times a second (uid 0, a key made from the obfs key); a tunnel that missed its
+  probes for 3 s is left out until it answers again. The relay's report has each tunnel's round trip and loss (shown on the Tunnel
+  tab), and the PONG tells the phone the best tunnel's round trip and loss, so the app's KPING ping is the whole way to the exit.
+- **The radio's keep-awake filler** of v3 phones (kind 6) only keeps their path alive at the relay.
+
 # v3.42.0 — Xray and DNS on the new parts, KPING beside KANKI MIX, one CSS generation
 - **Core bar:** KPING sits right after KANKI MIX (the two game cores): WireGuard, AmneziaWG, Hysteria2, KANKI MIX, KPING, microtun,
   Xray, DNS; the VPN & cores overview has the same order.
