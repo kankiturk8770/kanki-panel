@@ -1,3 +1,26 @@
+# v3.43.1 — KPING: three tunnel crossings instead of four, bare ACKs not protected
+- **Two tunnels, smarter:** every packet still goes into each live tunnel at once (no packet ever waits for a copy, so a fault of one
+  tunnel costs nothing), but the delayed copy (`tun_dup_ms`, for a short outage of the whole line) now goes only into the best tunnel
+  (round trip + 3 × probe loss) instead of into each: three crossings with two tunnels, not four. The exit does the same on the way
+  down, ranking the tunnels by how often each brought a packet first. With one tunnel nothing changes.
+- **Bare TCP ACKs are not protected by the exit's repairs any more** (the next ACK says the same); SYN, FIN and RST still are.
+- **Lab (two Game-FEC tunnels between the servers, each behind its own bad line — `LAB_TWO=1`, `LAB_TUN_kp`/`LAB_TUN_kp2` — the
+  app's new 1.35.1 core on a clean phone line, 45 s, 60 game packets/s):**
+
+  | between the servers | 3.43.0 (4 crossings): loss · p95 · late | 3.43.1 (3 crossings) |
+  |---|---|---|
+  | 3% of the time out, the same outages on both tunnels | 0.00% · 101 ms · 3 | 0.00% · 102 ms · 4 |
+  | 3%, each tunnel its own outages | 0.00% · 104 ms · 4 | 0.00% · 105 ms · 10 |
+  | 8% (~60 ms), the same outages | 0.00% · 122 ms · 26 | 0.19% · 123 ms · 28 |
+  | 8%, each its own | 0.15% · 129 ms · 53 | 0.00% · 123 ms · 30 |
+
+  The same within the lab's noise, with a quarter less traffic between the servers. Tried first and dropped: at once into the best
+  tunnel and the copy into the other (two crossings) put the slowest 5% of packets 10-14 ms later — a game feels that.
+- **Phone side (app 1.35.1, same lab, 1.35.0 → 1.35.1):** a clean line now carries each game packet once (relay counts 2700 for 2700
+  sent; 1.35.0: 5385), the app's uplink loss reads 0.0% there (1.35.0 showed 2-6% on the owner's phone: a counting fault, not loss), and
+  an idle core uses 0.5% of a core instead of 6%. Loss on the bad lines the same or lower (one path: bad 2.52 → 1.93%, Wi-Fi breaking
+  up 23.6 → 14.8%, heavy 9.9 → 9.3%; two paths 0-0.5% both).
+
 # v3.43.0 — KPING v3: window repairs, two tunnels, tunnel probes
 - **KPING v3 on the servers (`kpingd.rs`, new `kprlc.rs`), negotiated: a v2 phone keeps getting exactly v2.** The PING's byte 10 and
   the PONG's trailing bytes say v3; a v3 phone asks the exit for repairs with DATA aux 9-15 (a rate, not a group).

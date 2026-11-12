@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.43.1 — KPING: lighter between the servers
+With two tunnels each packet crosses three times instead of four (at once into both, the delayed copy only into the best), with the
+same loss and delay in the lab; bare TCP ACKs are no longer protected by repairs.
+
 ## New in 3.43 — KPING v3
 - KPING repairs whole bursts of lost packets (sliding-window repairs instead of one-per-group parity), never resends dead packets, and a route can run two tunnels to the same server abroad (the first copy wins); the Tunnel tab shows each tunnel's ping and loss. Old apps keep working as before.
 ## New in 3.42 — tidy Xray and DNS pages, KPING beside KANKI MIX

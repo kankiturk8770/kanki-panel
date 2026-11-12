@@ -554,12 +554,6 @@ struct RShared {
 }
 
 impl RShared {
-    /// the tunnels to use now: those that answer; when none does, all of them (one may still pass)
-    fn live_ups(&self) -> Vec<usize> {
-        let tq = self.tq.lock().unwrap_or_else(|e| e.into_inner());
-        let live: Vec<usize> = (0..self.ups.len()).filter(|i| tq.get(*i).is_some_and(|q| q.live())).collect();
-        if live.is_empty() { (0..self.ups.len()).collect() } else { live }
-    }
     /// the best tunnel's round trip and loss (for the phone's PONG)
     fn best_tun(&self) -> (u16, u16) {
         let tq = self.tq.lock().unwrap_or_else(|e| e.into_inner());
@@ -569,15 +563,29 @@ impl RShared {
             .min_by_key(|x| x.0 as u32 + 3 * x.1 as u32)
             .unwrap_or((0, 0))
     }
+    /// the live tunnels, best first (round trip + 3 × loss); none answers: all of them
+    fn ranked_ups(&self) -> Vec<usize> {
+        let tq = self.tq.lock().unwrap_or_else(|e| e.into_inner());
+        let mut live: Vec<(usize, f64)> = (0..self.ups.len()).filter_map(|i| tq.get(i).filter(|q| q.live()).map(|q| (i, q.rtt_ms + 3.0 * q.loss()))).collect();
+        if live.is_empty() {
+            return (0..self.ups.len()).collect();
+        }
+        live.sort_by(|a, b| a.1.total_cmp(&b.1));
+        live.into_iter().map(|x| x.0).collect()
+    }
+    /// into every live tunnel at once (no packet ever waits for a copy: a fault of one tunnel costs nothing),
+    /// and the delayed copy (a short outage of the whole line) only into the best one: three crossings with
+    /// two tunnels, not four
     fn send_up(&self, pkt: &[u8], from: SocketAddr) {
-        let d = self.tun_dup.load(Ordering::Relaxed);
-        for i in self.live_ups() {
+        let ups = self.ranked_ups();
+        for &i in &ups {
             let _ = self.ups[i].send(pkt);
-            if d > 0 {
-                let mut tag = from;
-                tag.set_port(i as u16);
-                let _ = self.dly_up.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(d), pkt.to_vec(), tag));
-            }
+        }
+        let d = self.tun_dup.load(Ordering::Relaxed);
+        if let (true, Some(&i)) = (d > 0, ups.first()) {
+            let mut tag = from;
+            tag.set_port(i as u16);
+            let _ = self.dly_up.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(d), pkt.to_vec(), tag));
         }
     }
 }
@@ -902,20 +910,18 @@ fn down_class(p: &[u8]) -> Option<(Duration, f64)> {
         // the game's UDP (and DNS): small datagrams; a big or bulk one goes as it is
         17 if p.len() <= 1000 => Some((Duration::from_millis(150), 1.0)),
         1 => Some((Duration::from_millis(500), 0.5)),
-        6 if p.len() >= ihl + 14 => {
-            let off = (p[ihl + 12] >> 4) as usize * 4;
-            let flags = p[ihl + 13];
-            // SYN, FIN, RST, bare ACKs: a lost one costs a whole retransmission timeout
-            (flags & 0x07 != 0 || p.len() <= ihl + off).then_some((Duration::from_millis(1500), 0.5))
-        }
+        // SYN, FIN, RST: a lost one costs a whole retransmission timeout. Data and bare ACKs go as they are:
+        // TCP resends data itself, and the next ACK says what a lost one said
+        6 if p.len() >= ihl + 14 => (p[ihl + 13] & 0x07 != 0).then_some((Duration::from_millis(1500), 0.5)),
         _ => None,
     }
 }
 
 struct XSess {
     sess: u16,
-    /// where the tunnels deliver this session's packets (one per tunnel): the downlink goes back on each
-    froms: Vec<(SocketAddr, Instant)>,
+    /// where the tunnels deliver this session's packets (one per tunnel), when one last came, and how often
+    /// that tunnel brought a packet first (0..1, a running share): the downlink goes back the best way first
+    froms: Vec<(SocketAddr, Instant, f64)>,
     /// DATA, PARITY, REPAIR
     win: [Window; 3],
     rx_fec: FecRx,
@@ -938,7 +944,7 @@ impl XSess {
     fn new(sess: u16, from: SocketAddr, k: usize) -> XSess {
         XSess {
             sess,
-            froms: vec![(from, Instant::now())],
+            froms: vec![(from, Instant::now(), 0.5)],
             win: Default::default(),
             rx_fec: FecRx::default(),
             rx_rlc: kprlc::RlcRx::default(),
@@ -957,18 +963,27 @@ impl XSess {
     }
     fn note_from(&mut self, from: SocketAddr) {
         let now = Instant::now();
-        match self.froms.iter_mut().find(|(a, _)| *a == from) {
+        match self.froms.iter_mut().find(|x| x.0 == from) {
             Some(x) => x.1 = now,
-            None => self.froms.push((from, now)),
+            None => self.froms.push((from, now, 0.5)),
         }
-        self.froms.retain(|(_, t)| t.elapsed() < TUN_DEAD * 2);
+        self.froms.retain(|x| x.1.elapsed() < TUN_DEAD * 2);
         if self.froms.len() > 4 {
             self.froms.sort_by_key(|x| std::cmp::Reverse(x.1));
             self.froms.truncate(4);
         }
     }
+    /// a DATA packet came through this tunnel: first or a copy (the share of firsts ranks the tunnels)
+    fn note_first(&mut self, from: SocketAddr, first: bool) {
+        if let Some(x) = self.froms.iter_mut().find(|x| x.0 == from) {
+            x.2 += (if first { 1.0 } else { 0.0 } - x.2) / 32.0;
+        }
+    }
+    /// the tunnels to answer through, best first
     fn tos(&self) -> Vec<SocketAddr> {
-        self.froms.iter().filter(|(_, t)| t.elapsed() < TUN_DEAD).map(|x| x.0).collect()
+        let mut l: Vec<&(SocketAddr, Instant, f64)> = self.froms.iter().filter(|x| x.1.elapsed() < TUN_DEAD).collect();
+        l.sort_by(|a, b| b.2.total_cmp(&a.2));
+        l.into_iter().map(|x| x.0).collect()
     }
     /// a v3 repair is due: spread between the game's packets, at once when two are owed, or now that the
     /// stream paused (its tail)
@@ -1010,14 +1025,15 @@ struct XShared {
 }
 
 impl XShared {
-    /// back into every tunnel of the session, and the second copy later
+    /// back through every tunnel of the session at once (`tos` best first), and the delayed copy only
+    /// through the best one
     fn send(&self, pkt: Vec<u8>, tos: &[SocketAddr]) {
-        let d = self.tun_dup.load(Ordering::Relaxed);
         for to in tos {
             let _ = self.sock.send_to(&pkt, to);
-            if d > 0 {
-                let _ = self.dly.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(d), pkt.clone(), *to));
-            }
+        }
+        let d = self.tun_dup.load(Ordering::Relaxed);
+        if let (true, Some(&to)) = (d > 0, tos.first()) {
+            let _ = self.dly.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(d), pkt, to));
         }
     }
 }
@@ -1199,7 +1215,9 @@ fn exit_in(sh: &XShared) {
                         }
                     }
                 }
-                if !s.win[0].take(h.seq) {
+                let first = s.win[0].take(h.seq);
+                s.note_first(from, first);
+                if !first {
                     continue;
                 }
                 out.push(payload.to_vec());
@@ -1696,7 +1714,10 @@ async fn kping_lab() {
     let user = KUser { uid: 1, name: "gamer".into(), key: key.clone(), ip: "10.81.0.2".into() };
     let tdup: u16 = std::env::var("KP_TUN_DUP_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(20);
     let dup: u16 = std::env::var("KP_DUP_MS").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
-    let relay = Relay::start(&obfs, &RelayCfg { port: 24300, to: 24302, more: vec![], dup_ms: dup, tun_dup_ms: tdup, users: vec![user.clone()] }).expect("relay");
+    // LAB_TWO=1: a second tunnel between the servers (each can be put behind its own bad line: LAB_TUN_kp, LAB_TUN_kp2)
+    let two = std::env::var("LAB_TWO").is_ok_and(|v| v == "1");
+    let more = if two { vec![24304] } else { vec![] };
+    let relay = Relay::start(&obfs, &RelayCfg { port: 24300, to: 24302, more, dup_ms: dup, tun_dup_ms: tdup, users: vec![user.clone()] }).expect("relay");
     let fec: u8 = std::env::var("LAB_FEC").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
     let exit = Exit::start(&obfs, &ExitCfg { port: 4300, mtu: 1332, fec, tun_dup_ms: tdup, users: vec![user] }).expect("exit");
     let mt = MtCfg {
@@ -1710,7 +1731,11 @@ async fn kping_lab() {
         udp: vec![udp.into()], target: "127.0.0.1".into(), fec: "8:3".into(), remote: std::env::var(format!("LAB_TUN_{}", id)).unwrap_or(format!("127.0.0.1:{}", port)), bind: bind.into(), ..Default::default()
     };
     let mut run = vec![];
-    for s in [tun("kp", 24301, "24302:4300", "127.0.0.1"), tun("mt", 24401, "24400:4200", "")] {
+    let mut specs = vec![tun("kp", 24301, "24302:4300", "127.0.0.1"), tun("mt", 24401, "24400:4200", "")];
+    if two {
+        specs.push(tun("kp2", 24303, "24304:4300", "127.0.0.1"));
+    }
+    for s in specs {
         run.push(Running::start(Spec { role: "entry".into(), ..s.clone() }));
         run.push(Running::start(Spec { role: "exit".into(), ..s }));
     }
