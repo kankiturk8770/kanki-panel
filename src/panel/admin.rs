@@ -361,7 +361,36 @@ pub fn node_stats() -> Value {
         "disk_total": dt, "disk_used": du, "uptime": up,
         "tcp": count_socks("/proc/net/tcp", "01") + count_socks("/proc/net/tcp6", "01"),
         "udp": count_socks("/proc/net/udp", "") + count_socks("/proc/net/udp6", ""),
+        // the byte counters of the network card, for the traffic table of the servers (3.45.0)
+        "net": nic_sample(),
     })
+}
+
+/// The real network card of this machine and its byte counters since boot: {if, rx, tx, boot}.
+/// Everything this server moves goes through it (VPN users, tunnels in and out, the panel), so the
+/// panel turns two of these into what the server really used (`srvtraffic`). `boot` tells a reboot
+/// (the counters start again from 0) from a counter that only went back by mistake.
+pub fn nic_sample() -> Value {
+    let (iface, rx, tx) = nic_bytes();
+    json!({ "if": iface, "rx": rx, "tx": tx, "boot": read("/proc/sys/kernel/random/boot_id").trim() })
+}
+
+/// (name, received bytes, sent bytes) of the card that carries the real traffic (`pick_iface`)
+pub fn nic_bytes() -> (String, u64, u64) {
+    let mut ifs: Vec<(String, f64, f64)> = vec![];
+    let mut exact: HashMap<String, (u64, u64)> = HashMap::new();
+    for l in read("/proc/net/dev").lines() {
+        if let Some((name, rest)) = l.split_once(':') {
+            let f: Vec<u64> = rest.split_whitespace().filter_map(|x| x.parse().ok()).collect();
+            if f.len() > 8 {
+                ifs.push((name.trim().to_string(), f[0] as f64, f[8] as f64));
+                exact.insert(name.trim().to_string(), (f[0], f[8]));
+            }
+        }
+    }
+    let (name, _, _) = pick_iface(&ifs);
+    let (rx, tx) = exact.get(&name).copied().unwrap_or((0, 0));
+    (name, rx, tx)
 }
 
 async fn system(State(app): St, h: HeaderMap) -> Response {

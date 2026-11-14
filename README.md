@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.45 — Traffic of each server
+Traffic & stats shows a table of every server: today, 7 and 30 days, total and the speed now, received and sent, read from the
+server's own network card (tunnels included), with every day of the last month.
+
 ## New in 3.44.1 — VIP tunnel checked through
 A flood of junk at its ports cannot stall it, off and on again works at once, and it keeps out of the way of the cores, Xray, the smart
 test and the sweep; the panel's port messages in Persian.

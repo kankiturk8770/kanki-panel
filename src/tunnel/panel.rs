@@ -2901,6 +2901,7 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     }
     let status: Vec<Status> = serde_json::from_value(b["status"].clone()).unwrap_or_default();
     note_report(&id, &status, b["xray"]["active"].as_bool() == Some(true), b["dns"]["active"].as_bool() == Some(true));
+    crate::srvtraffic::note(&app, &format!("a:{id}"), &b["stats"]["net"]);
     let fresh_ip = util::client_ip(&h);
     {
         let mut sn = seen().lock().unwrap_or_else(|e| e.into_inner());

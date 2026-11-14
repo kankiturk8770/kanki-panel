@@ -1,3 +1,21 @@
+# v3.45.0 — Traffic of each server
+- **Traffic & stats › «Traffic of each server»:** one row per server (the panel server, every foreign and Iran server) with today,
+  the last 7 and 30 days, everything since counting began (received ↓ and sent ↑ under each) and the speed now; a last row adds them
+  all up; «Days» opens the last 30 days of that server one by one. Refreshed every 30 seconds.
+- **Counted on the server's network card** (`admin::nic_sample`, the card of the default route), not from the users' counters: a user
+  behind a tunnel crosses the Iran server and the foreign one, so the same bytes are on both rows (both datacenters bill them); tunnels
+  in and out, Xray, DNS and the panel itself are all in it. Every server sends its card's counters since boot (the agent with each
+  report, a VPN node in its info, the panel server reads its own every 30 s); the panel adds the difference (`src/servers/traffic.rs`).
+- **Never counted twice or wrongly:** the first sample of a server is only a starting point (what came before is not known); a reboot
+  (new boot id) adds what came since boot; a counter that went back adds from 0; another card, or a jump no card can make
+  (> 25 Gbit/s), is only a new starting point. A machine that reports twice (VPN node and agent) is shown once. Days are Tehran days;
+  62 days are kept. Saved every minute; a panel restart loses nothing (the next sample covers the gap).
+- An older server shows «Update this server to see its traffic» until it runs this version.
+- **Checked:** `cargo test` (383; 6 new: difference, reboot, card back to 0, another card, impossible jump, Tehran day edge, speed, node +
+  agent once); the whole thing on this machine (panel + a real agent): 45.78 MB downloaded, the card said 45 778 729 bytes, the panel
+  counted 45 779 643 (panel server) and 45 778 461 (agent) — the few KB are the samples' 30 s window; totals the same after a panel
+  restart; the page at 360–1440, Persian dark and English light, no JS error, no sideways scroll, no `undefined`/`NaN`.
+
 # v3.44.1 — VIP tunnel: checked from 0 to 100 against the rest of the panel
 - **Junk at its ports cannot stall it.** Every reader now opens its own packets on its own thread and drops what does not open there;
   only real packets reach the session (before, a flood filled the session's queue and the game's packets were lost behind it). The

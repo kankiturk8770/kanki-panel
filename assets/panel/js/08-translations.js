@@ -2315,5 +2315,17 @@ var FA={"choose both servers":"هر دو سرور را انتخاب کن",
 "Restore this backup? Everything in the panel is replaced by what is in the file.":"این بکاپ بازگردانی شود؟ همه چیز پنل با محتوای فایل جایگزین می‌شود.",
 "Restoring…":"در حال بازگردانی…",
 "Passphrase":"رمز",
-"This section has unsaved changes. Leave it without saving?":"این بخش تغییر ذخیره‌نشده دارد. بدون ذخیره برویم؟"
+"This section has unsaved changes. Leave it without saving?":"این بخش تغییر ذخیره‌نشده دارد. بدون ذخیره برویم؟",
+"Today":"امروز",
+"Last 7 days":"۷ روز اخیر",
+"Last 30 days":"۳۰ روز اخیر",
+"Since counting began":"از شروع شمارش",
+"since":"از",
+"Received":"دریافت",
+"Traffic by day":"ترافیک روزبه‌روز",
+"Traffic of each server":"ترافیک هر سرور",
+"Received and sent by the server itself, tunnels included":"دریافت و ارسال خود سرور، با تانل‌ها",
+"Could not load the traffic of the servers":"ترافیک سرورها خوانده نشد",
+"Update this server to see its traffic":"برای دیدن ترافیک، این سرور را آپدیت کن",
+"Measured on each server's network card: users, tunnels and everything else. Traffic through a tunnel crosses two servers, so it is on both rows. Days are Tehran days.":"روی کارت شبکهٔ خود هر سرور شمرده می‌شود: کاربرها، تانل‌ها و همه چیز. ترافیکی که از تانل می‌گذرد از دو سرور رد می‌شود، پس در ردیف هر دو هست. روزها به وقت تهران."
 };

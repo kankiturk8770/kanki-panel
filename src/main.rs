@@ -42,6 +42,8 @@ mod twin;
 mod direct;
 #[path = "servers/exitgeo.rs"]
 mod exitgeo;
+#[path = "servers/traffic.rs"]
+mod srvtraffic;
 
 // subscription: the subscription on an Iran server or its own domain, users' devices, app files (src/subscription)
 #[path = "subscription/subiran.rs"]
@@ -347,6 +349,8 @@ async fn main() {
     tokio::spawn(api::leftover_loop(app.clone()));
     // where each VPN server's traffic leaves (country and city for the app's map)
     tokio::spawn(exitgeo::run(app.clone()));
+    // what every server's network card moved (the traffic table of the servers)
+    tokio::spawn(srvtraffic::run(app.clone()));
     tokio::spawn(tunnel::panel::local_loop(app.clone()));
     // a node and an agent of the same machine (added apart before 3.9) are shown as one server
     tokio::spawn(servers::link_loop(app.clone()));

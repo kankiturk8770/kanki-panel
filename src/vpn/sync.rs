@@ -637,6 +637,7 @@ pub async fn sync_all(app: &Arc<App>) {
         let state = if ok { "off" } else { "offline" };
         let _ = app.db.exec("UPDATE nodes SET online=?1, sync_state=?2 WHERE id=?3", &[&(ok as i64), &state, &n.id]);
         if let Some(info) = info {
+            crate::srvtraffic::note(app, &format!("n:{}", n.id), &info["stats"]["net"]);
             let _ = app.db.exec("UPDATE nodes SET info=?1, last_sync=?2 WHERE id=?3", &[&info.to_string(), &now(), &n.id]);
         }
         crate::live::set_vpn(&n.id, &n.name, vec![]);
@@ -659,6 +660,7 @@ pub async fn sync_all(app: &Arc<App>) {
             let _ = app.db.exec("UPDATE nodes SET online=0, sync_state=?1 WHERE id=?2", &[&state, &n.id]);
         }
         if let (false, Some(info)) = (local, info) {
+            crate::srvtraffic::note(app, &format!("n:{}", n.id), &info["stats"]["net"]);
             let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id=?2", &[&info.to_string(), &n.id]);
         }
         let Ok(resp) = resp else {

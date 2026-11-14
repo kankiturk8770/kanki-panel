@@ -341,6 +341,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::subdomain::router())
         .merge(crate::subiran::router())
         .merge(crate::migrate::router())
+        .merge(crate::srvtraffic::router())
         .merge(crate::servers::router())
         .merge(crate::channel::router())
         .merge(crate::tunnel::panel::router())
