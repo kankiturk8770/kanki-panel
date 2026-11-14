@@ -32,7 +32,7 @@ function vpLane(p,cnt){var name=(VPKIND[p.kind]||p.kind)+(p.kind=='udp'&&cnt>1?'
  var tag=p.rank==1?'<em class="vp-g">'+t('game')+'</em>':p.rank==2?'<em class="vp-c">'+t('copy')+'</em>':'';
  return '<div class="vp-lane '+cls+'"><span class="vp-k">'+esc(name)+tag+'</span>'+
   '<span class="vp-m ltr">'+(p.up?N(p.rtt)+' ms · '+N(p.loss)+'%':(p.err?'':'—'))+'</span>'+
-  (p.port?'<small>'+t('port')+' '+N(p.port)+'</small>':'')+(p.err&&!p.up?'<small class="vp-err">'+esc(p.err)+'</small>':'')+'</div>'}
+  (p.port?'<small>'+t('port')+' '+N(p.port)+'</small>':'')+(p.err&&!p.up?'<small class="vp-err">'+esc(t(p.err))+'</small>':'')+'</div>'}
 function vpLink(x){var t0=x.t,se=vpSrv(t0.entry),sx=vpSrv(t0.exit),ps=vpPathsOf(x),udpN=ps.filter(function(p){return p.kind=='udp'}).length;
  var end=function(s,role,on){return '<div class="vp-end '+(on?'ok':'')+'">'+flagOf(vpCC(s.id))+'<b>'+esc(s.name||s.id)+'</b><small>'+role+'</small></div>'};
  return '<div class="vp-link">'+end(se,t('entry · users connect here'),se.online)+
@@ -59,7 +59,7 @@ function vpDraw(d){var el=$('#vp');if(!el)return;
   return '<section class="ku-group vp-card'+(x.t.enabled?'':' off')+'"><div class="ku-gh"><span class="dot '+st[0]+'"></span><b>'+esc(x.t.name)+'</b><span class="sp"></span><span class="kxr-st '+st[0]+'">'+esc(st[1])+'</span>'+
    '<button class="b2 sm" onclick="vpEdit('+i+')">'+ic('edit',14)+' '+t('Edit')+'</button><button type="button" class="ib ku-more" aria-label="'+esc(t('More'))+'" onclick="vpMenu('+i+')">⋯</button></div>'+
    '<div class="ku-gb">'+vpLink(x)+'<div class="ku-i2 vp-tags">'+vpTags(x)+'</div>'+
-   err.map(function(e){return '<div class="warnbox ltr vp-warn">'+esc(e)+'</div>'}).join('')+'</div></section>'}).join('')+vpHelp()}
+   err.map(function(e){return '<div class="warnbox vp-warn">'+esc(t(e))+'</div>'}).join('')+'</div></section>'}).join('')+vpHelp()}
 function vpHelp(){return '<details class="ku-help"><summary>'+t('How it works')+'</summary><p>'+
  t('Paths: several ways between the two servers at the same time. UDP is the fastest; it moves to another port and another source port every few seconds, so no UDP flow lives long enough to be throttled. Fake TCP carries the same packets as a TCP session, for networks that cut UDP. The web path is a normal HTTPS or CDN connection, for networks where only the web passes.')+'</p><p>'+
  t('Game packets (small UDP) leave at once on the two best paths; the first copy wins, and a lost one is rebuilt from the repairs that follow it, never waited for. Downloads and every TCP connection take the best path; TCP travels as QUIC streams inside the tunnel, so a lost packet of one download never holds up another connection, and a short outage does not cut it.')+'</p><p>'+

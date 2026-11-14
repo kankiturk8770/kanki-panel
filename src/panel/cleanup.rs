@@ -37,6 +37,11 @@ pub fn sweep(app: &App) -> Vec<String> {
         crate::kping::forget_route(app, &r.id);
         gone.push(format!("KPING {}", r.id));
     }
+    // VIP tunnels name tunnel servers too
+    for t in crate::vip::panel::tunnels(app).iter().filter(|t| !live(&t.entry) || !live(&t.exit)) {
+        crate::vip::panel::forget_tunnel(app, &t.id);
+        gone.push(format!("VIP tunnel {}", t.name));
+    }
     for id in crate::cores::load(app).into_keys().filter(|id| !nodes.contains(id)) {
         crate::cores::forget(app, &id);
         gone.push(format!("core switches {}", id));

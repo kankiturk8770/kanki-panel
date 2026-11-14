@@ -1,7 +1,20 @@
 // ==================================================================== the panel: login, shell, pages
 "use strict";
 // Persian text of the whole panel
-var FA={"VIP tunnel":"تانل VIP",
+var FA={"choose both servers":"هر دو سرور را انتخاب کن",
+"the two servers must differ":"دو سرور باید فرق داشته باشند",
+"turn on at least one path":"دست کم یک مسیر را روشن کن",
+"forward at least one port":"دست کم یک پورت را منتقل کن",
+"the UDP ports go past 65535":"پورت‌های UDP از ۶۵۵۳۵ رد می‌شوند",
+"the CDN path needs the domain set up on the CDN":"مسیر CDN دامنه‌ای را می‌خواهد که روی CDN تنظیم شده",
+"unknown server":"سرور ناشناخته",
+"VIP tunnel not found":"تانل VIP پیدا نشد",
+"at most 255 UDP ports":"حداکثر ۲۵۵ پورت UDP",
+"the other side runs another version of the VIP tunnel: update both":"طرف دیگر نسخهٔ دیگری از تانل VIP دارد: هر دو را آپدیت کن",
+"no answer from the other server yet":"هنوز جوابی از سرور دیگر نیامده",
+"no answer through fake TCP: connecting again":"از Fake TCP جوابی نیامد: دوباره وصل می‌شود",
+"the CDN path has no address":"مسیر CDN آدرس ندارد",
+"VIP tunnel":"تانل VIP",
 "VIP tunnels":"تانل‌های VIP",
 "One tunnel over several paths at once: when one is cut or throttled, the others carry on without a break":"یک تانل روی چند مسیر هم‌زمان: اگر یکی قطع یا کند شود، بقیه بی‌وقفه ادامه می‌دهند",
 "A server is offline":"یکی از سرورها آفلاین است",

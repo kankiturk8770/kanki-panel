@@ -4,7 +4,7 @@
 
 use super::crypto::{self, HsAsm, Initiator, Keys, Replay};
 use super::flows::{self, Down, Up};
-use super::path::{self, In, Out, Slot, Slots};
+use super::path::{self, Got, In, Out, Ring, Screen, Slot, Slots};
 use super::wire::{self, Dedup, Frame, Inner, Reasm};
 use super::{PathKind, PathStatus, VipSpec, VipStatus};
 use crate::kprlc::{RlcRx, RlcTx};
@@ -29,6 +29,8 @@ const SILENCE: Duration = Duration::from_secs(5);
 const UP_FOR: Duration = Duration::from_secs(3);
 /// realtime traffic went this recently: pings are faster and game priority may hold the bulk class back
 const RT_ACTIVE: Duration = Duration::from_secs(3);
+/// small packets a second above which a flow is not a game (games send 20-130)
+const HEAVY: u32 = 300;
 
 pub struct Running {
     spec: VipSpec,
@@ -46,9 +48,10 @@ impl Running {
         let (up_tx, up_rx) = mpsc::channel::<Up>(8192);
         let (down_tx, down_rx) = mpsc::channel::<Down>(8192);
         let counters = Arc::new(flows::Counters::default());
-        let mut tasks = path::start(&spec, &psk, in_tx, slots.clone());
+        let screen = Arc::new(Screen::new(psk));
+        let mut tasks = path::start(&spec, &psk, in_tx, slots.clone(), screen.clone());
         tasks.extend(flows::start(&spec, up_tx, down_rx, counters.clone()));
-        let s = Session::new(spec.clone(), psk, slots, down_tx, status.clone(), counters);
+        let s = Session::new(spec.clone(), psk, slots, down_tx, status.clone(), counters, screen);
         tasks.push(tokio::spawn(s.run(in_rx, up_rx)));
         Running { spec, status, tasks }
     }
@@ -99,11 +102,12 @@ struct PathM {
 }
 
 impl PathM {
-    /// No answer to a ping for much longer than its round trip: treated as cut until it answers
+    /// No answer for much longer than the round trip: treated as cut until it answers. Two pings overdue, or
+    /// one overdue a long time: a single lost ping on a lossy line does not take the path out.
     fn stalled(&self, now: Instant) -> bool {
-        let Some((_, at)) = self.pings.front() else { return false };
         let limit = if self.srtt > 0.0 { (self.srtt * 3.0).max(self.srtt + 120.0).max(200.0) } else { 1500.0 };
-        now.duration_since(*at).as_secs_f64() * 1000.0 > limit
+        let age = |i: usize| self.pings.get(i).map(|(_, at)| now.duration_since(*at).as_secs_f64() * 1000.0).unwrap_or(0.0);
+        age(1) > limit || age(0) > limit.max(1000.0)
     }
     fn up(&self, now: Instant) -> bool {
         self.last_pong.is_some_and(|t| now.duration_since(t) < UP_FOR)
@@ -146,7 +150,7 @@ struct Hs {
 }
 
 struct Pending {
-    keys: Keys,
+    keys: Arc<Keys>,
     peer: [u8; 8],
     at: Instant,
 }
@@ -181,13 +185,14 @@ struct Session {
     down: mpsc::Sender<Down>,
     status: Arc<Mutex<VipStatus>>,
     counters: Arc<flows::Counters>,
+    screen: Arc<Screen>,
     t0: Instant,
     paths: Vec<PathM>,
     order: Vec<usize>,
     order_at: Option<Instant>,
     // keys
-    cur: Option<Keys>,
-    prev: Option<(Keys, Instant)>,
+    cur: Option<Arc<Keys>>,
+    prev: Option<(Arc<Keys>, Instant)>,
     pending: Vec<Pending>,
     keys_at: Option<Instant>,
     peer_inst: Option<[u8; 8]>,
@@ -227,6 +232,8 @@ struct Session {
     bulk_got: u64,
     guard: Guard,
     frag_id: u32,
+    /// small packets of each user flow in its current second: (start, count, heavy last second)
+    rates: HashMap<(u8, u32), (Instant, u32, bool)>,
     /// the last round of the slower timers
     tick_at: Option<Instant>,
     // counts
@@ -240,7 +247,7 @@ struct Session {
 }
 
 impl Session {
-    fn new(spec: VipSpec, psk: [u8; 32], slots: Slots, down: mpsc::Sender<Down>, status: Arc<Mutex<VipStatus>>, counters: Arc<flows::Counters>) -> Session {
+    fn new(spec: VipSpec, psk: [u8; 32], slots: Slots, down: mpsc::Sender<Down>, status: Arc<Mutex<VipStatus>>, counters: Arc<flows::Counters>, screen: Arc<Screen>) -> Session {
         let kinds = spec.paths();
         let n = kinds.len();
         let lanes = 1usize << spec.stride_bits();
@@ -254,6 +261,7 @@ impl Session {
             down,
             status,
             counters,
+            screen,
             t0: now,
             order: (0..n).collect(),
             order_at: None,
@@ -295,6 +303,7 @@ impl Session {
             bulk_got: 0,
             guard: Guard { on: false, rate: 0.0, tokens: 0.0, refill_at: now, tick_at: now, bytes: 0, measured: 0.0, clear_since: None },
             frag_id: rand::random(),
+            rates: HashMap::new(),
             tick_at: None,
             st: VipStatus { id: spec.id.clone(), role: spec.role.clone(), ..Default::default() },
             echo_id: 0,
@@ -622,7 +631,9 @@ impl Session {
         let now = Instant::now();
         match u {
             Up::Udp { pidx, flow, data } => {
-                let rt = data.len() <= self.spec.rt_limit();
+                // small, and from a flow that sends at a game's pace: a flow of hundreds of small packets a
+                // second is the acknowledgements of a download (inside WireGuard, say), not a game
+                let rt = data.len() <= self.spec.rt_limit() && !self.heavy(pidx, flow, now);
                 let inner = wire::inner_udp(pidx, flow, &data);
                 if rt { self.send_rt(inner, now, true) } else { self.send_bulk(inner, now) }
             }
@@ -630,6 +641,20 @@ impl Session {
             // realtime class's copies (and never make it look busy)
             Up::Quic(d) => self.send_bulk(wire::inner_quic(&d), now),
         }
+    }
+
+    /// Counts a small packet of a flow: true when the flow sent more than `HEAVY` of them in its last second
+    fn heavy(&mut self, pidx: u8, flow: u32, now: Instant) -> bool {
+        if self.rates.len() > 4096 {
+            self.rates.retain(|_, r| now.duration_since(r.0) < Duration::from_secs(10));
+        }
+        let r = self.rates.entry((pidx, flow)).or_insert((now, 0, false));
+        if now.duration_since(r.0) >= Duration::from_secs(1) {
+            r.2 = r.1 > HEAVY;
+            *r = (now, 0, r.2);
+        }
+        r.1 += 1;
+        r.2 || r.1 > HEAVY
     }
 
     fn deliver(&mut self, inner: &[u8], now: Instant) {
@@ -655,39 +680,25 @@ impl Session {
 
     fn on_packet(&mut self, m: In) {
         let now = Instant::now();
-        let In { mut data, reply } = m;
-        // the keys of now, the last ones, and (listener) new ones not confirmed yet
-        let mut opened: Option<(u8, u64, usize, Option<usize>)> = None;
-        if let Some(k) = &self.cur {
-            if let Some((p, pn, n)) = k.rx.open(&mut data) {
-                opened = Some((p, pn, n, None));
-            }
-        }
-        if opened.is_none() {
-            if let Some((k, _)) = &self.prev {
-                if let Some((p, pn, n)) = k.rx.open(&mut data) {
-                    opened = Some((p, pn, n, None));
+        let In { got, reply } = m;
+        let (keys, p, pn, payload) = match got {
+            Got::Hs(part) => {
+                if let Some((kind, id, body)) = self.asm.add(part) {
+                    self.on_hs(kind, id, body, reply, now);
                 }
+                return;
             }
-        }
-        if opened.is_none() {
-            for (i, pd) in self.pending.iter().enumerate() {
-                if let Some((p, pn, n)) = pd.keys.rx.open(&mut data) {
-                    opened = Some((p, pn, n, Some(i)));
-                    break;
-                }
+            Got::Data { keys, path, pn, payload } => (keys, path, pn, payload),
+        };
+        // which of our keys opened it (the reader saw them a moment ago: they may have moved on since)
+        let same = |k: &Option<Arc<Keys>>| k.as_ref().is_some_and(|k| Arc::ptr_eq(k, &keys));
+        let promote = if same(&self.cur) || self.prev.as_ref().is_some_and(|(k, _)| Arc::ptr_eq(k, &keys)) {
+            None
+        } else {
+            match self.pending.iter().position(|pd| Arc::ptr_eq(&pd.keys, &keys)) {
+                Some(i) => Some(i),
+                None => return,
             }
-        }
-        let Some((p, pn, n, promote)) = opened else {
-            match crypto::hs_open(&self.psk, &data) {
-                Some(part) => {
-                    if let Some((kind, id, body)) = self.asm.add(part) {
-                        self.on_hs(kind, id, body, reply, now);
-                    }
-                }
-                None => self.junk += 1,
-            }
-            return;
         };
         let p = p as usize;
         if p >= self.paths.len() {
@@ -708,12 +719,14 @@ impl Session {
             }
             // the confirmed keys replace every other offer
             self.pending.clear();
+            self.publish_ring();
         }
         if !self.replay[p].take(pn) {
             return;
         }
-        // the listener answers each path where its packets come from (a UDP path moves when it hops)
-        if !self.spec.dials {
+        // the listener answers each path where its newest packets come from (a UDP path moves when it hops;
+        // a late packet of the old socket does not move it back)
+        if !self.spec.dials && (pn >= self.paths[p].rx_hi || self.paths[p].rx_cnt == 0) {
             let mut s = self.slots.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(slot) = s.get_mut(p) {
                 if !slot.out.as_ref().is_some_and(|o| o.same(&reply)) {
@@ -726,7 +739,7 @@ impl Session {
             }
         }
         self.last_rx = Some(now);
-        self.st.rx_bytes += data.len() as u64;
+        self.st.rx_bytes += (payload.len() + crypto::OVERHEAD) as u64;
         {
             let pm = &mut self.paths[p];
             pm.last_rx = Some(now);
@@ -734,7 +747,6 @@ impl Session {
             pm.rx_cnt += 1;
             pm.rx_hi = pm.rx_hi.max(pn);
         }
-        let payload = data[crypto::HDR..crypto::HDR + n].to_vec();
         self.on_payload(p, &payload, now, true);
     }
 
@@ -873,6 +885,11 @@ impl Session {
 
     // ------------------------------------------------------------ handshakes
 
+    /// The readers open packets with exactly these keys from now on
+    fn publish_ring(&self) {
+        self.screen.set(Ring { cur: self.cur.clone(), prev: self.prev.as_ref().map(|x| x.0.clone()), pending: self.pending.iter().map(|p| p.keys.clone()).collect() });
+    }
+
     fn note_error(&mut self, e: String, now: Instant) {
         self.error = e;
         self.error_at = Some(now);
@@ -910,7 +927,8 @@ impl Session {
                     if self.pending.len() >= 4 {
                         self.pending.remove(0);
                     }
-                    self.pending.push(Pending { keys: acc.keys, peer: acc.peer, at: now });
+                    self.pending.push(Pending { keys: Arc::new(acc.keys), peer: acc.peer, at: now });
+                    self.publish_ring();
                 }
                 Err(crypto::HsErr::Skew(d)) => self.note_error(format!("the clocks of the two servers differ by {} s (more than {} s): set the time on both", d, crypto::MAX_SKEW), now),
                 Err(crypto::HsErr::Bad) => self.note_error("the other side runs another version of the VIP tunnel: update both".into(), now),
@@ -929,7 +947,8 @@ impl Session {
                 self.prev = Some((old, now));
             }
             self.st.pq = keys.pq;
-            self.cur = Some(keys);
+            self.cur = Some(Arc::new(keys));
+            self.publish_ring();
             self.keys_at = Some(now);
             self.peer_inst = Some(inst);
             self.rekeys += 1;
@@ -949,7 +968,11 @@ impl Session {
 
     fn hs_tick(&mut self, now: Instant) {
         if !self.spec.dials {
+            let n = self.pending.len();
             self.pending.retain(|p| now.duration_since(p.at) < Duration::from_secs(20));
+            if self.pending.len() != n {
+                self.publish_ring();
+            }
             return;
         }
         let rekey = Duration::from_secs(self.spec.rekey().max(5));
@@ -1006,6 +1029,7 @@ impl Session {
         self.hs_tick(now);
         if self.prev.as_ref().is_some_and(|(_, at)| now.duration_since(*at) > PREV_KEEP) {
             self.prev = None;
+            self.publish_ring();
         }
         if self.cur.is_some() {
             self.ping_tick(now);
@@ -1118,7 +1142,7 @@ impl Session {
         st.error = self.error.clone();
         st.paths = paths;
         st.rekeys = self.rekeys;
-        st.junk = self.junk;
+        st.junk = self.junk + self.screen.junk.load(std::sync::atomic::Ordering::Relaxed);
         st.rt_resid = (self.resid * 1000.0).round() / 10.0;
         st.streams = self.counters.streams.load(std::sync::atomic::Ordering::Relaxed);
         st.udp_flows = self.counters.udp_flows.load(std::sync::atomic::Ordering::Relaxed);
@@ -1150,5 +1174,31 @@ impl Session {
         let ping = if rtts.is_empty() { 0.0 } else { rtts[rtts.len() / 2] };
         let max = rtts.last().copied().unwrap_or(0.0);
         Some(serde_json::json!({ "n": n, "ping": (ping * 10.0).round() / 10.0, "jit": (jit * 10.0).round() / 10.0, "loss": (loss * 10.0).round() / 10.0, "max": (max * 10.0).round() / 10.0, "at": crate::util::now() }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A flow of hundreds of small packets a second (a download's acknowledgements) is bulk; a game's pace is not
+    #[test]
+    fn a_busy_small_flow_is_not_a_game() {
+        let (tx, _rx) = mpsc::channel(1);
+        let spec = VipSpec { id: "x".into(), role: "entry".into(), port: 1, udp_paths: 1, ..Default::default() };
+        let mut s = Session::new(spec, [0; 32], Arc::new(Mutex::new(vec![])), tx, Arc::new(Mutex::new(VipStatus::default())), Arc::new(flows::Counters::default()), Arc::new(Screen::new([0; 32])));
+        let t0 = Instant::now();
+        // a game: 60 a second for 3 seconds
+        for i in 0..180u64 {
+            assert!(!s.heavy(0, 1, t0 + Duration::from_millis(i * 16)));
+        }
+        // acknowledgements: 1000 a second
+        let mut heavy_seen = false;
+        for i in 0..2000u64 {
+            heavy_seen |= s.heavy(0, 2, t0 + Duration::from_micros(i * 1000));
+        }
+        assert!(heavy_seen && s.heavy(0, 2, t0 + Duration::from_millis(2001)));
+        // the game's own flow stays a game
+        assert!(!s.heavy(0, 1, t0 + Duration::from_millis(3000)));
     }
 }

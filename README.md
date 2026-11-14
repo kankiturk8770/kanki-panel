@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.44.1 — VIP tunnel checked through
+A flood of junk at its ports cannot stall it, off and on again works at once, and it keeps out of the way of the cores, Xray, the smart
+test and the sweep; the panel's port messages in Persian.
+
 ## New in 3.44 — VIP tunnel
 A tunnel with its own page and settings that runs over several paths at once (UDP on changing ports, fake TCP, HTTP/2 or a CDN):
 a cut or throttled path costs nothing. Game packets take the two best paths and are rebuilt on the spot, TCP rides QUIC inside the
