@@ -65,7 +65,7 @@ fn transport_config() -> Arc<TransportConfig> {
     Arc::new(t)
 }
 
-pub(super) fn server_config(transport: Arc<TransportConfig>) -> Res<ServerConfig> {
+pub(crate) fn server_config(transport: Arc<TransportConfig>) -> Res<ServerConfig> {
     // a throwaway self-signed certificate with a randomized name (a fixed name is a scanner
     // fingerprint); identity is proven by the token handshake inside
     let ck = rcgen::generate_simple_self_signed(vec![super::link::random_cert_name()])?;
@@ -82,7 +82,7 @@ pub(super) fn server_config(transport: Arc<TransportConfig>) -> Res<ServerConfig
     Ok(cfg)
 }
 
-pub(super) fn client_config(transport: Arc<TransportConfig>) -> Res<ClientConfig> {
+pub(crate) fn client_config(transport: Arc<TransportConfig>) -> Res<ClientConfig> {
     let p = super::link::provider();
     let mut tls = rustls::ClientConfig::builder_with_provider(p.clone())
         .with_protocol_versions(&[&rustls::version::TLS13])?

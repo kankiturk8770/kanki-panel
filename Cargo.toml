@@ -1,6 +1,6 @@
 [package]
 name = "kanki-panel"
-version = "3.43.1"
+version = "3.44.0"
 edition = "2021"
 
 [dependencies]
@@ -48,6 +48,8 @@ ring = "0.17"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
 # the panel page and script are sent gzipped once compressed (850 KB → ~250 KB on a phone)
 flate2 = "1"
+# VIP tunnel: ML-KEM-768 (FIPS 203) next to X25519 in its handshake
+ml-kem = "0.3"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

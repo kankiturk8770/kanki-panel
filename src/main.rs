@@ -96,6 +96,9 @@ mod buttons;
 // tunnel: tunnels between servers and tunnel servers; the wire protocols in src/tunnel/transport
 mod tunnel;
 
+// vip: the VIP tunnel (several paths at once, its own page and settings; src/vip)
+mod vip;
+
 // xray: Xray-core on the servers and its part of the panel
 mod xray;
 

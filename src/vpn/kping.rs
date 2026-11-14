@@ -669,7 +669,7 @@ async fn user_set(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respons
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]

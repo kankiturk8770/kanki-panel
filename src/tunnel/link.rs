@@ -757,7 +757,7 @@ pub(super) fn tls_connector_with(alpn: &[&[u8]], browser: bool) -> tokio_rustls:
 
 /// The certificate is not checked: the token handshake inside the TLS proves the other side.
 #[derive(Debug)]
-pub(super) struct NoVerify(pub(super) Arc<rustls::crypto::CryptoProvider>);
+pub(crate) struct NoVerify(pub(crate) Arc<rustls::crypto::CryptoProvider>);
 
 impl rustls::client::danger::ServerCertVerifier for NoVerify {
     fn verify_server_cert(

@@ -1,3 +1,51 @@
+# v3.44.0 — VIP tunnel: one tunnel over several paths at once
+A new kind of tunnel with **its own page** (menu › Connectivity › VIP tunnel, and a button on the Tunnels page) and its own settings;
+the other tunnels are not touched. Code: `src/vip/` (`crypto`, `wire`, `core`, `path`, `flows`, `panel`), page
+`assets/panel/js/20-vip.js`. The agent takes it from the panel's answer (`vip`) and keeps it on disk (`/var/lib/kanki/vip.json`, 0600).
+
+- **Several paths at the same time** between the two servers: up to four UDP paths on a port range that changes (the dialer moves each
+  path to another port *and* source port every `hop_secs`, so no UDP flow lives long enough to be throttled), UDP inside fake TCP
+  (`tunnel::faketcp`), and a web link of the Kanki engine (HTTP/2, WebSocket, TLS, a CDN). A cut or throttled path costs nothing:
+  there is nothing to reconnect.
+- **Two classes.** Small UDP (games, calls; `rt_max`, 512 B) is *realtime*: it leaves at once, takes the two best paths in Gaming mode
+  (the first copy wins; one path: a second copy 10 ms later), is protected by sliding-window repairs (`kprlc`, every 2 packets and 15 ms
+  after a lone one) and is never waited for. Everything else is *bulk*: the best path, repairs only when that path loses packets, over
+  interleaved lanes (`burst`, 4) so a short outage costs each lane little; fewer repairs while the queue grows (loss from a full line).
+  TCP travels as **QUIC streams inside the tunnel** (BBR, 60 s idle): a lost packet of one download never holds up another connection,
+  and a path change or a short outage does not cut it.
+- **Measured all the time:** each path is pinged (300 ms in Gaming or while a game plays, 1 s otherwise); ping, jitter and loss (from
+  the other side's packet counters) rank the paths by `ping + 3·jitter + 20·loss%`, with hysteresis. **Game priority:** while a game
+  plays and the best path's round trip grows past its empty-queue value, the bulk class is held to a little less than it was getting.
+  The entry echoes through the realtime class every second: the page shows the tunnel as a game sees it (ping, jitter, loss after repair).
+- **Keys:** X25519 **and ML-KEM-768** (FIPS 203, `ml-kem` crate) with the tunnel secret, HKDF-SHA256 over all three; a side without the
+  secret gets nothing, a leaked secret later opens no recorded session. New keys every 10 minutes (`rekey_secs`) without a break (the old
+  ones open packets for 30 s more). Every packet: ChaCha20-Poly1305, its path number and counter hidden under a mask made from the tag
+  (no byte on the wire repeats or counts up), a 2048-packet replay window per path, optional filler (`stealth`). A packet that does not
+  open gets no answer. The two clocks may differ by 15 minutes.
+- **Panel:** `/api/vip` (list, save, `/:id/on|off|secret`, delete); port checks both ways with the Kanki tunnels and live with the servers;
+  the second configs (`port_entry*`, `udp_forward`, `entry_host`) follow VIP tunnels too; the Telegram alerts say when one is cut and
+  connected again; a server with VIP tunnels is not removed alone. The secret never goes back to the page.
+- **Fixed in `kprlc` (KPING v3 too):** a late repair of an older window could make the receiver drop a column of its own window and then
+  panic for want of one (`alloc` → `expect`). Eviction now never takes a column of the repair's window, and a repair that does not fit is
+  dropped instead (test `heavy_bursty_loss_never_panics`: bursts, 10-50% loss, repairs late and out of order).
+
+**Lab** (`cargo test --release vip_lab -- --ignored --nocapture`; this machine, a relay that loses and delays on purpose, 1500 game packets
+of 100 B every 16 ms echoed back; on time = within one round trip of the line + 50 ms; two paths = each through its own line):
+
+| line (30 ms each way) | no tunnel: on time · p50 / p99 | VIP, one path | VIP, two paths |
+|---|---|---|---|
+| 2% random | 95.40% · 65 / 69 ms | **100%** · 65 / 78 ms | **100%** · 64 / 68 ms |
+| 5% random | 89.60% · 65 / 69 ms | **100%** · 65 / 79 ms | **100%** · 64 / 75 ms |
+| bursts (~4%, Gilbert-Elliott) | 91.60% · 65 / 69 ms | **99.47%** · 65 / 98 ms | **100%** · 64 / 69 ms |
+| cut 150 ms every 2 s | 89.93% · 65 / 69 ms | 91.20% · 65 / 372 ms | **100%** · 64 / 69 ms |
+
+A full cut of the only path cannot be repaired on time by any method; two paths that are not cut at the same moment lose nothing.
+TCP through the tunnel (`vip_speed`, release, one UDP path): clean line ~845 Mbit/s; 1% loss and 40 ms ~170-210 Mbit/s; 3% loss ~190
+Mbit/s. **Whole system** on this machine: a real tunnel agent (Iran side) and the panel (exit) took the tunnel from the panel, all four
+paths came up (2 × UDP, fake TCP, HTTP/2), 200/200 UDP echoes, 1400 and 6000-byte datagrams and 20 MB of TCP came back intact.
+**Tests:** `cargo test vip::` (22: keys, packets, frames, a wrong secret, 5% loss, a path cut mid-game, new keys and ports every 5 s,
+either side starting again, fake TCP, the panel from the page to both servers). **Not seen yet:** real servers.
+
 # v3.43.1 — KPING: lighter tunnels (FEC 8:1, three crossings instead of four), bare ACKs not protected
 - **KPING's tunnels: Game-FEC 8:1 instead of 8:3.** A game packet travels alone (one every ~17 ms), so each Game-FEC group held one
   packet and 8:3 sent it with three repair shards: four packets per tunnel for every game packet, on top of KPING's own copies. KPING

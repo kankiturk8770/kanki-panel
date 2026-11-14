@@ -223,7 +223,7 @@ fn local_name(app: &App) -> String {
 }
 
 /// The address other servers use to reach server `sid`.
-fn host_of(app: &App, sid: &str) -> String {
+pub(crate) fn host_of(app: &App, sid: &str) -> String {
     if sid == "local" {
         let a = app.db.get("tun_local_addr");
         if !a.trim().is_empty() {
@@ -1343,6 +1343,12 @@ pub async fn local_loop(app: Arc<App>) {
         .await
         .unwrap_or(Value::Null);
         crate::kping::ingest(&app, "local", &rep);
+        // the VIP tunnels of the panel's own server
+        let vs = crate::vip::panel::specs_for(&app, "local");
+        let vp = vs.clone();
+        crate::vip::apply(vs).await;
+        let _ = tokio::task::spawn_blocking(move || crate::vip::open_ports(&vp)).await;
+        crate::vip::panel::note_list("local", crate::vip::statuses().await);
         rotate_tick(&app);
         let want: Vec<(u8, String)> = servers(&app)
             .iter()
@@ -1383,6 +1389,10 @@ pub fn health(app: &App, offline_nodes: &HashSet<String>) -> Vec<(String, String
         if up && rtt > 0 {
             out.push((format!("tp:{}", tu.id), format!("تانل {}", tu.name), rtt < TUNNEL_SLOW_MS, rtt.to_string()));
         }
+    }
+    // the VIP tunnels: judged only while both servers report (the server alerts say the rest)
+    for (k, n, up) in crate::vip::panel::health(app) {
+        out.push((k, n, up, String::new()));
     }
     out
 }
@@ -1546,7 +1556,7 @@ fn status_json(st: Option<&Status>) -> Value {
 /// A multi-location route (Iran → Turkey → Germany: one tunnel per hop) is followed back to its first
 /// entry: the app dials Iran, whose port reaches Turkey, whose same port reaches Germany.
 pub fn udp_forward(app: &App, node_id: &str, node_host: &str, entry_host: &str, port: u16) -> Option<(String, u16)> {
-    let list: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
+    let list: Vec<Tunnel> = route_list(app);
     let addr = |sid: &str| seen_ip(sid).filter(|_| sid != "local").unwrap_or_else(|| host_of(app, sid));
     for t in &list {
         let exit_here = (t.exit == "local" && node_id == "local")
@@ -1606,7 +1616,7 @@ fn walk_back_by(list: &[Tunnel], sid: &str, port: u16, tcp: bool) -> Vec<(String
 /// The servers a UDP port of server `sid` comes in through, first entry first (["Iran", "Turkey"]),
 /// and the port on the first entry. None = no tunnel brings it there.
 pub fn udp_route(app: &App, sid: &str, port: u16) -> Option<(Vec<String>, u16)> {
-    let list: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
+    let list: Vec<Tunnel> = route_list(app);
     let back = walk_back(&list, sid, port);
     let first = back.last().map(|x| x.1).unwrap_or(port);
     (back.len() > 1).then(|| (back[1..].iter().rev().map(|(s, _)| server_name(app, s)).collect(), first))
@@ -1615,7 +1625,7 @@ pub fn udp_route(app: &App, sid: &str, port: u16) -> Option<(Vec<String>, u16)> 
 /// The first entry of the tunnels that bring TCP or UDP `port` to server `sid`, and the port there.
 /// None = no Kanki tunnel carries it.
 pub fn port_entry(app: &App, sid: &str, port: u16, tcp: bool) -> Option<(String, u16)> {
-    let list: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
+    let list: Vec<Tunnel> = route_list(app);
     let back = walk_back_by(&list, sid, port, tcp);
     (back.len() > 1).then(|| back.last().cloned()).flatten()
 }
@@ -1623,7 +1633,7 @@ pub fn port_entry(app: &App, sid: &str, port: u16, tcp: bool) -> Option<(String,
 /// `port_entry`, preferring the tunnels whose first entry is `host` (an Iran server's address): when
 /// Iran-1 and Iran-2 both carry the port here, each may give it another port.
 pub fn port_entry_at(app: &App, sid: &str, port: u16, tcp: bool, host: &str) -> Option<(String, u16)> {
-    let list: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
+    let list: Vec<Tunnel> = route_list(app);
     let srv = servers(app);
     let is_host = |e: &str| {
         !host.is_empty() && (host_of(app, e) == host || seen_ip(e).as_deref() == Some(host) || srv.iter().any(|s| s.id == e && s.domain.eq_ignore_ascii_case(host)))
@@ -1643,13 +1653,31 @@ pub fn port_entry_at(app: &App, sid: &str, port: u16, tcp: bool, host: &str) -> 
 /// A server with one carries only the ports its tunnels list: a second config on any other port would
 /// lead nowhere. A server with none has its tunnel set up elsewhere (or a layer-3 one): its ports stay.
 pub fn has_port_tunnels(app: &App, sid: &str) -> bool {
-    tunnels(app).iter().any(|t| t.enabled && t.exit == sid && t.kind != "awg" && t.kind != "awgwrap")
+    route_list(app).iter().any(|t| t.exit == sid)
+}
+
+/// The tunnels whose ports can be followed from one server to the next: the enabled Kanki port tunnels
+/// (not the layer-3 AmneziaWG links) and the VIP tunnels
+fn route_list(app: &App) -> Vec<Tunnel> {
+    let mut v: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
+    v.extend(crate::vip::panel::as_routes(app));
+    v
+}
+
+/// The ports the enabled Kanki tunnels hold on server `sid`: (port, udp, tunnel name), for the VIP
+/// tunnel's checks
+pub(crate) fn tunnel_ports_on(app: &App, sid: &str) -> Vec<(u16, bool, String)> {
+    tunnels(app)
+        .into_iter()
+        .filter(|t| t.enabled)
+        .flat_map(|t| tunnel_needs(&t).into_iter().filter(|x| x.0 == sid).map(|x| (x.1, x.2, t.name.clone())).collect::<Vec<_>>())
+        .collect()
 }
 
 /// The address of the first server of the tunnels (or the route) that end at server `sid`: the Iran
 /// entry users would connect to. "" = no tunnel ends there.
 pub fn entry_host(app: &App, sid: &str) -> String {
-    let list: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
+    let list: Vec<Tunnel> = route_list(app);
     let mut cur = sid.to_string();
     let mut seen_ids = vec![cur.clone()];
     for _ in 0..8 {
@@ -2073,6 +2101,14 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
             }
             if let Some(p) = mine_udp.iter().find(|p| o_udp.contains(p)) {
                 return err(StatusCode::CONFLICT, &format!("UDP port {} is already used by the tunnel \"{}\"", p, o.name));
+            }
+        }
+    }
+    // a port a VIP tunnel holds
+    if t.enabled {
+        for (sid, port, udp) in tunnel_needs(&t) {
+            if let Some(v) = crate::vip::panel::ports_on(&app, &sid, "").into_iter().find(|x| x.0 == port && x.1 == udp) {
+                return err(StatusCode::CONFLICT, &format!("{} port {} is already used by the VIP tunnel \"{}\"", if udp { "UDP" } else { "TCP" }, port, v.2));
             }
         }
     }
@@ -2603,7 +2639,8 @@ pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(
     if id == "local" {
         return Err((StatusCode::BAD_REQUEST, "the panel server cannot be removed".into()));
     }
-    let used: Vec<String> = tunnels(app).into_iter().filter(|t| t.entry == id || t.exit == id).map(|t| t.name).collect();
+    let mut used: Vec<String> = tunnels(app).into_iter().filter(|t| t.entry == id || t.exit == id).map(|t| t.name).collect();
+    used.extend(crate::vip::panel::using(app, id));
     if !used.is_empty() && !with_tunnels {
         return Err((StatusCode::CONFLICT, format!("delete its tunnels first: {}", used.join(", "))));
     }
@@ -2614,6 +2651,7 @@ pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(
         tl.retain(|t| t.entry != id && t.exit != id);
         save_tunnels(app, &tl);
     }
+    crate::vip::panel::forget_server(app, id);
     let mut list = servers(app);
     if !list.iter().any(|s| s.id == id) {
         return Err((StatusCode::NOT_FOUND, "unknown server".into()));
@@ -2913,7 +2951,8 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     let (xray_block, xray_drop) = (crate::xray::panel::shut_on(&id), crate::xray::panel::ip_blocks(&id));
     crate::kping::ingest(&app, &id, &b["kping"]);
     let kping = crate::kping::cfg_for(&app, &id);
-    Json(json!({ "kping": kping, "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app) })).into_response()
+    crate::vip::panel::note(&id, &b["vip"]);
+    Json(json!({ "kping": kping, "vip": crate::vip::panel::specs_for(&app, &id), "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app) })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)
