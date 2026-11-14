@@ -481,20 +481,38 @@ pub fn others_on(app: &App, sid: &str) -> Vec<(u16, bool, String)> {
     for ib in crate::xray::panel::settings(app).inbounds.iter().filter(|i| i.server == sid && i.port > 0) {
         v.push((ib.port, ib.network == "kcp", "Xray".into()));
     }
-    // the VPN part of the machine: WireGuard, AmneziaWG, Hysteria2, KANKI MIX
-    if let Some(ts) = crate::tunnel::panel::servers(app).into_iter().find(|x| x.id == sid) {
+    // the VPN part of the machine: the ports chosen for it, and those its cores use now (microtun too)
+    let ts = crate::tunnel::panel::servers(app).into_iter().find(|x| x.id == sid);
+    if let Some(ts) = &ts {
         for (p, who) in ts.ports.iter().zip(["WireGuard", "AmneziaWG", "Hysteria2", "KANKI MIX"]) {
             if *p > 0 {
                 v.push((*p, true, who.to_string()));
             }
         }
     }
+    let node = if sid == "local" { "local".to_string() } else { ts.map(|t| t.node).unwrap_or_default() };
+    if !node.is_empty() {
+        for (p, core) in crate::servers::node_udp_ports(app, &node) {
+            let who = match core {
+                "wg" => "WireGuard",
+                "awg" => "AmneziaWG",
+                "hy2" => "Hysteria2",
+                "kmix" => "KANKI MIX",
+                "mtun" => "microtun",
+                _ => "a VPN core",
+            };
+            v.push((p, true, who.to_string()));
+        }
+    }
     v
 }
 
-/// Is a port of `t` taken on its server: by another VIP tunnel, a Kanki tunnel, or (live) another program
+/// Is a port of `t` taken on its server: by another VIP tunnel, by anything else the panel set up there, or
+/// (live, from the server's own report) by another program. `old`: this tunnel as it was (edited, or turned
+/// on again): its own ports, still held by Kanki's agent a moment ago (the report is up to 20 s old), are
+/// not a clash.
 fn clash(app: &App, t: &VipTunnel, old: Option<&VipTunnel>) -> Option<String> {
-    let own: Vec<(String, u16, bool)> = old.filter(|o| o.enabled).map(|o| o.needs()).unwrap_or_default();
+    let own: Vec<(String, u16, bool)> = old.map(|o| o.needs()).unwrap_or_default();
     for (sid, port, udp) in t.needs() {
         let proto = if udp { "UDP" } else { "TCP" };
         if let Some(x) = ports_on(app, &sid, &t.id).into_iter().find(|x| x.0 == port && x.1 == udp) {
@@ -503,11 +521,18 @@ fn clash(app: &App, t: &VipTunnel, old: Option<&VipTunnel>) -> Option<String> {
         if let Some(n) = others_on(app, &sid).into_iter().find(|x| x.0 == port && x.1 == udp).map(|x| x.2) {
             return Some(format!("{} port {} is already used by {}", proto, port, n));
         }
-        if own.contains(&(sid.clone(), port, udp)) {
-            continue;
-        }
-        if let Some(e) = crate::tunnel::panel::port_busy(app, &sid, port, udp, &[]) {
-            return Some(e);
+        let Some(l) = crate::tunnel::panel::listening_on(&sid) else { continue };
+        for (p, u, prog, unit) in l {
+            if p != port || u != udp {
+                continue;
+            }
+            let kanki = unit == "kanki-tunnel.service" || unit == "kanki-panel.service" || (unit.is_empty() && prog == "kanki-panel");
+            if kanki && own.contains(&(sid.clone(), port, udp)) {
+                continue;
+            }
+            if let Some(e) = crate::tunnel::panel::port_busy(app, &sid, port, udp, &[]) {
+                return Some(e);
+            }
         }
     }
     None
@@ -570,7 +595,7 @@ async fn action(State(app): St, h: HeaderMap, Path((id, a)): Path<(String, Strin
         "on" => {
             let mut t = list[i].clone();
             t.enabled = true;
-            if let Some(e) = clash(&app, &t, None) {
+            if let Some(e) = clash(&app, &t, Some(&list[i])) {
                 return err(StatusCode::CONFLICT, &e);
             }
             list[i] = t;
@@ -592,6 +617,13 @@ pub fn forget_server(app: &App, sid: &str) {
         save_all(app, &list);
     }
     reports().lock().unwrap_or_else(|e| e.into_inner()).remove(sid);
+}
+
+/// One tunnel goes (the sweep: one of its servers is gone)
+pub fn forget_tunnel(app: &App, id: &str) {
+    let mut list = tunnels(app);
+    list.retain(|t| t.id != id);
+    save_all(app, &list);
 }
 
 /// The names of the VIP tunnels that use server `sid`

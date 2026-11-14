@@ -9,6 +9,7 @@
 //! A carrier only moves bytes; the session (`core`) opens them. On the listening side the session also
 //! learns where to answer each path from the packets that open.
 
+use super::crypto::{HsPart, Keys};
 use super::{PathKind, VipSpec};
 use crate::tunnel::link;
 use std::net::SocketAddr;
@@ -58,10 +59,86 @@ impl Out {
     }
 }
 
-/// A packet that came in, and how to answer on the carrier it came from
+/// A packet that opened, and how to answer on the carrier it came from
 pub struct In {
-    pub data: Vec<u8>,
+    pub got: Got,
     pub reply: Out,
+}
+
+pub enum Got {
+    /// a packet of the tunnel: the keys it opened with, its path and number, and its frames
+    Data { keys: Arc<Keys>, path: u8, pn: u64, payload: Vec<u8> },
+    /// a piece of a handshake made with the tunnel's secret
+    Hs(HsPart),
+}
+
+/// The keys the readers open packets with; the session keeps them current
+#[derive(Default)]
+pub struct Ring {
+    pub cur: Option<Arc<Keys>>,
+    pub prev: Option<Arc<Keys>>,
+    pub pending: Vec<Arc<Keys>>,
+}
+
+/// Every reader checks its packets itself, on its own thread: what does not open is dropped there, so a
+/// flood of junk at the tunnel's ports costs each socket a little and never reaches (or holds up) the session
+pub struct Screen {
+    psk: [u8; 32],
+    ring: std::sync::RwLock<Ring>,
+    pub junk: AtomicU64,
+}
+
+/// Handshake pieces a reader looks at per second at most (a real handshake is a few packets): the costlier
+/// check of a handshake is not spent on a flood
+const HS_PER_SEC: f64 = 100.0;
+
+struct Budget {
+    at: std::time::Instant,
+    tokens: f64,
+}
+
+impl Budget {
+    fn new() -> Budget {
+        Budget { at: std::time::Instant::now(), tokens: HS_PER_SEC }
+    }
+    fn take(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        self.tokens = (self.tokens + now.duration_since(self.at).as_secs_f64() * HS_PER_SEC).min(HS_PER_SEC);
+        self.at = now;
+        if self.tokens < 1.0 {
+            return false;
+        }
+        self.tokens -= 1.0;
+        true
+    }
+}
+
+impl Screen {
+    pub fn new(psk: [u8; 32]) -> Screen {
+        Screen { psk, ring: std::sync::RwLock::new(Ring::default()), junk: AtomicU64::new(0) }
+    }
+    pub fn set(&self, r: Ring) {
+        *self.ring.write().unwrap_or_else(|e| e.into_inner()) = r;
+    }
+    fn check(&self, mut data: Vec<u8>, hs: &mut Budget) -> Option<Got> {
+        {
+            let r = self.ring.read().unwrap_or_else(|e| e.into_inner());
+            for k in r.cur.iter().chain(r.prev.iter()).chain(r.pending.iter()) {
+                if let Some((path, pn, n)) = k.rx.open(&mut data) {
+                    data.truncate(super::crypto::HDR + n);
+                    data.drain(..super::crypto::HDR);
+                    return Some(Got::Data { keys: k.clone(), path, pn, payload: data });
+                }
+            }
+        }
+        if hs.take() {
+            if let Some(p) = super::crypto::hs_open(&self.psk, &data) {
+                return Some(Got::Hs(p));
+            }
+        }
+        self.junk.fetch_add(1, Ordering::Relaxed);
+        None
+    }
 }
 
 /// What the session knows of each path's carrier
@@ -86,17 +163,19 @@ fn now_ms() -> u64 {
 }
 
 /// Reads one UDP socket into the session until it is aborted (`tx`: its writing handle, for the answers)
-fn reader(sock: Arc<UdpSocket>, tx: Arc<std::net::UdpSocket>, inbound: mpsc::Sender<In>, seen: Option<Arc<AtomicU64>>) -> JoinHandle<()> {
+fn reader(sock: Arc<UdpSocket>, tx: Arc<std::net::UdpSocket>, inbound: mpsc::Sender<In>, screen: Arc<Screen>, seen: Option<Arc<AtomicU64>>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut buf = vec![0u8; 65535];
+        let mut hs = Budget::new();
         loop {
             match sock.recv_from(&mut buf).await {
                 Ok((n, from)) => {
+                    let Some(got) = screen.check(buf[..n].to_vec(), &mut hs) else { continue };
                     if let Some(s) = &seen {
                         s.store(now_ms(), Ordering::Relaxed);
                     }
                     // a full queue means the session is behind: this packet is lost like on the wire
-                    let _ = inbound.try_send(In { data: buf[..n].to_vec(), reply: Out::Udp(tx.clone(), from) });
+                    let _ = inbound.try_send(In { got, reply: Out::Udp(tx.clone(), from) });
                 }
                 // an ICMP error of an earlier send, or the like
                 Err(_) => tokio::time::sleep(Duration::from_millis(5)).await,
@@ -112,23 +191,23 @@ async fn resolve(host: &str, port: u16, v4_only: bool) -> Result<SocketAddr, Str
 }
 
 /// Starts every carrier of this side; the tasks live until aborted
-pub fn start(spec: &VipSpec, psk: &[u8; 32], inbound: mpsc::Sender<In>, slots: Slots) -> Vec<JoinHandle<()>> {
+pub fn start(spec: &VipSpec, psk: &[u8; 32], inbound: mpsc::Sender<In>, slots: Slots, screen: Arc<Screen>) -> Vec<JoinHandle<()>> {
     let kinds = spec.paths();
     let mut tasks = vec![];
     let udp: Vec<usize> = kinds.iter().enumerate().filter(|(_, k)| **k == PathKind::Udp).map(|(i, _)| i).collect();
     for (i, k) in kinds.iter().enumerate() {
-        let (spec, inbound, slots) = (spec.clone(), inbound.clone(), slots.clone());
+        let (spec, inbound, slots, sc) = (spec.clone(), inbound.clone(), slots.clone(), screen.clone());
         match k {
-            PathKind::Udp if spec.dials => tasks.push(tokio::spawn(udp_dialer(spec, i, inbound, slots))),
-            PathKind::Ftcp if spec.dials => tasks.push(tokio::spawn(ftcp_dialer(spec, super::crypto::sub_token(psk, "ftcp"), i, inbound, slots))),
-            PathKind::Ftcp => tasks.push(tokio::spawn(ftcp_listener(spec, super::crypto::sub_token(psk, "ftcp"), i, inbound, slots))),
-            PathKind::Stream if spec.dials => tasks.push(tokio::spawn(stream_dialer(spec, super::crypto::sub_token(psk, "stream"), i, inbound, slots))),
-            PathKind::Stream => tasks.push(tokio::spawn(stream_listener(spec, super::crypto::sub_token(psk, "stream"), i, inbound, slots))),
+            PathKind::Udp if spec.dials => tasks.push(tokio::spawn(udp_dialer(spec, i, inbound, slots, sc))),
+            PathKind::Ftcp if spec.dials => tasks.push(tokio::spawn(ftcp_dialer(spec, super::crypto::sub_token(psk, "ftcp"), i, inbound, slots, sc))),
+            PathKind::Ftcp => tasks.push(tokio::spawn(ftcp_listener(spec, super::crypto::sub_token(psk, "ftcp"), i, inbound, slots, sc))),
+            PathKind::Stream if spec.dials => tasks.push(tokio::spawn(stream_dialer(spec, super::crypto::sub_token(psk, "stream"), i, inbound, slots, sc))),
+            PathKind::Stream => tasks.push(tokio::spawn(stream_listener(spec, super::crypto::sub_token(psk, "stream"), i, inbound, slots, sc))),
             PathKind::Udp => {}
         }
     }
     if !spec.dials && !udp.is_empty() {
-        tasks.push(tokio::spawn(udp_listener(spec.clone(), udp, inbound, slots)));
+        tasks.push(tokio::spawn(udp_listener(spec.clone(), udp, inbound, slots, screen)));
     }
     tasks
 }
@@ -136,14 +215,14 @@ pub fn start(spec: &VipSpec, psk: &[u8; 32], inbound: mpsc::Sender<In>, slots: S
 // ------------------------------------------------------------------ udp
 
 /// The listener: every port of the hop range, all feeding the session
-async fn udp_listener(spec: VipSpec, ids: Vec<usize>, inbound: mpsc::Sender<In>, slots: Slots) {
+async fn udp_listener(spec: VipSpec, ids: Vec<usize>, inbound: mpsc::Sender<In>, slots: Slots, screen: Arc<Screen>) {
     let mut readers = Guard(vec![]);
     let mut missing: Vec<u16> = (0..spec.hops()).map(|i| spec.port.saturating_add(i)).collect();
     loop {
         let mut still = vec![];
         for p in missing {
             match udp_bind(SocketAddr::from(([0, 0, 0, 0], p))) {
-                Ok((s, tx)) => readers.0.push(reader(s, tx, inbound.clone(), None)),
+                Ok((s, tx)) => readers.0.push(reader(s, tx, inbound.clone(), screen.clone(), None)),
                 Err(_) => still.push(p),
             }
         }
@@ -173,7 +252,7 @@ impl Drop for Guard {
 }
 
 /// One UDP path of the dialer: a new socket and another port of the range every `hop_secs`
-async fn udp_dialer(spec: VipSpec, i: usize, inbound: mpsc::Sender<In>, slots: Slots) {
+async fn udp_dialer(spec: VipSpec, i: usize, inbound: mpsc::Sender<In>, slots: Slots, screen: Arc<Screen>) {
     let hops = spec.hops();
     // the reader of the socket in use (aborted with this task)
     let mut cur = Guard(vec![]);
@@ -184,11 +263,13 @@ async fn udp_dialer(spec: VipSpec, i: usize, inbound: mpsc::Sender<In>, slots: S
         // the address is looked up again every few minutes (a domain may move)
         let base = match resolved {
             Some((a, at)) if at.elapsed() < Duration::from_secs(300) => Ok(a),
-            _ => resolve(&spec.remote, spec.port, false).await,
+            // a failed lookup later keeps the address that worked (DNS may be what is filtered)
+            Some((a, _)) => Ok(resolve(&spec.remote, spec.port, false).await.unwrap_or(a)),
+            None => resolve(&spec.remote, spec.port, false).await,
         };
         let base = match base {
             Ok(a) => {
-                if resolved.map(|r| r.0) != Some(a) || resolved.is_none_or(|r| r.1.elapsed() >= Duration::from_secs(300)) {
+                if resolved.is_none_or(|r| r.0 != a || r.1.elapsed() >= Duration::from_secs(300)) {
                     resolved = Some((a, std::time::Instant::now()));
                 }
                 a
@@ -210,7 +291,7 @@ async fn udp_dialer(spec: VipSpec, i: usize, inbound: mpsc::Sender<In>, slots: S
         };
         let port = spec.port.saturating_add(idx);
         let to = SocketAddr::new(base.ip(), port);
-        let r = reader(sock, tx.clone(), inbound.clone(), None);
+        let r = reader(sock, tx.clone(), inbound.clone(), screen.clone(), None);
         set(&slots, i, |s| {
             s.out = Some(Out::Udp(tx, to));
             s.port = port;
@@ -240,7 +321,7 @@ async fn udp_dialer(spec: VipSpec, i: usize, inbound: mpsc::Sender<In>, slots: S
 // ------------------------------------------------------------------ fake TCP
 
 /// The listener: the fake-TCP relay of `tunnel::faketcp` delivers every client to one loopback socket
-async fn ftcp_listener(spec: VipSpec, token: String, i: usize, inbound: mpsc::Sender<In>, slots: Slots) {
+async fn ftcp_listener(spec: VipSpec, token: String, i: usize, inbound: mpsc::Sender<In>, slots: Slots, screen: Arc<Screen>) {
     loop {
         let (sock, tx) = match udp_bind("127.0.0.1:0".parse().expect("addr")) {
             Ok(x) => x,
@@ -260,7 +341,7 @@ async fn ftcp_listener(spec: VipSpec, token: String, i: usize, inbound: mpsc::Se
                     s.port = spec.ftcp_port;
                     s.error.clear();
                 });
-                let _r = Guard(vec![reader(sock, tx, inbound.clone(), None)]);
+                let _r = Guard(vec![reader(sock, tx, inbound.clone(), screen.clone(), None)]);
                 let _relay = relay;
                 std::future::pending::<()>().await;
             }
@@ -273,7 +354,7 @@ async fn ftcp_listener(spec: VipSpec, token: String, i: usize, inbound: mpsc::Se
 }
 
 /// The dialer: a fake TCP connection, made again when nothing came through it for a while
-async fn ftcp_dialer(spec: VipSpec, token: String, i: usize, inbound: mpsc::Sender<In>, slots: Slots) {
+async fn ftcp_dialer(spec: VipSpec, token: String, i: usize, inbound: mpsc::Sender<In>, slots: Slots, screen: Arc<Screen>) {
     loop {
         let addr = match resolve(&spec.remote, spec.ftcp_port, true).await {
             Ok(a) => a,
@@ -296,7 +377,7 @@ async fn ftcp_dialer(spec: VipSpec, token: String, i: usize, inbound: mpsc::Send
         };
         let Ok((sock, tx)) = udp_bind("127.0.0.1:0".parse().expect("addr")) else { continue };
         let seen = Arc::new(AtomicU64::new(now_ms()));
-        let r = Guard(vec![reader(sock, tx.clone(), inbound.clone(), Some(seen.clone()))]);
+        let r = Guard(vec![reader(sock, tx.clone(), inbound.clone(), screen.clone(), Some(seen.clone()))]);
         set(&slots, i, |s| {
             s.out = Some(Out::Udp(tx, relay.local));
             s.port = spec.ftcp_port;
@@ -326,7 +407,7 @@ fn padded(kind: &str) -> bool {
 }
 
 /// Carries one encrypted link: records out from the channel, records in to the session
-async fn carry(tx: link::Tx, mut rx: link::Rx, inbound: mpsc::Sender<In>) -> (mpsc::Sender<Vec<u8>>, JoinHandle<()>, JoinHandle<()>) {
+async fn carry(tx: link::Tx, mut rx: link::Rx, inbound: mpsc::Sender<In>, screen: Arc<Screen>) -> (mpsc::Sender<Vec<u8>>, JoinHandle<()>, JoinHandle<()>) {
     let (ch, mut q) = mpsc::channel::<Vec<u8>>(512);
     let mut tx = tx;
     let writer = tokio::spawn(async move {
@@ -339,14 +420,17 @@ async fn carry(tx: link::Tx, mut rx: link::Rx, inbound: mpsc::Sender<In>) -> (mp
     });
     let back = ch.clone();
     let reader = tokio::spawn(async move {
+        let mut hs = Budget::new();
         while let Ok(b) = rx.recv().await {
-            let _ = inbound.try_send(In { data: b, reply: Out::Stream(back.clone()) });
+            if let Some(got) = screen.check(b, &mut hs) {
+                let _ = inbound.try_send(In { got, reply: Out::Stream(back.clone()) });
+            }
         }
     });
     (ch, writer, reader)
 }
 
-async fn stream_listener(spec: VipSpec, token: String, i: usize, inbound: mpsc::Sender<In>, slots: Slots) {
+async fn stream_listener(spec: VipSpec, token: String, i: usize, inbound: mpsc::Sender<In>, slots: Slots, screen: Arc<Screen>) {
     let gopt = crate::tunnel::game::GameOpts::parse("", false);
     let mut l = loop {
         match link::Listener::bind(&spec.s_kind, spec.s_port, "", "", &token, gopt).await {
@@ -370,7 +454,7 @@ async fn stream_listener(spec: VipSpec, token: String, i: usize, inbound: mpsc::
         };
         // a wrong token or a scanner fails here and costs nothing more
         let Ok((tx, rx, _)) = link::handshake(raw, &token, false, pad).await else { continue };
-        let (_, w, r) = carry(tx, rx, inbound.clone()).await;
+        let (_, w, r) = carry(tx, rx, inbound.clone(), screen.clone()).await;
         live.retain(|g| !g.0.iter().any(|t| t.is_finished()));
         // the newest links stay; an old one the dialer gave up on goes
         while live.len() >= 4 {
@@ -380,7 +464,7 @@ async fn stream_listener(spec: VipSpec, token: String, i: usize, inbound: mpsc::
     }
 }
 
-async fn stream_dialer(spec: VipSpec, token: String, i: usize, inbound: mpsc::Sender<In>, slots: Slots) {
+async fn stream_dialer(spec: VipSpec, token: String, i: usize, inbound: mpsc::Sender<In>, slots: Slots, screen: Arc<Screen>) {
     let gopt = crate::tunnel::game::GameOpts::parse("", false);
     let pad = padded(&spec.s_kind);
     // a CDN is reached on its edges (port 443 unless written), anything else on the listener's port
@@ -409,7 +493,7 @@ async fn stream_dialer(spec: VipSpec, token: String, i: usize, inbound: mpsc::Se
         .await;
         match r {
             Ok((tx, rx, _)) => {
-                let (ch, w, rd) = carry(tx, rx, inbound.clone()).await;
+                let (ch, w, rd) = carry(tx, rx, inbound.clone(), screen.clone()).await;
                 set(&slots, i, |s| {
                     s.out = Some(Out::Stream(ch));
                     s.port = spec.s_port;

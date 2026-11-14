@@ -1,3 +1,24 @@
+# v3.44.1 — VIP tunnel: checked from 0 to 100 against the rest of the panel
+- **Junk at its ports cannot stall it.** Every reader now opens its own packets on its own thread and drops what does not open there;
+  only real packets reach the session (before, a flood filled the session's queue and the game's packets were lost behind it). The
+  costlier handshake check is spent on at most 100 packets a second per socket. Release build here: ~280 000 junk packets a second
+  dropped with a game through the tunnel untouched (300/300 on time); test `junk_does_not_hurt`.
+- **Turned off and on again, it came back refused:** the server's list of ports in use is up to 20 s old, so the tunnel's own just-freed
+  ports looked taken. Its own ports held by Kanki's agent never count as a clash now (also on an edit).
+- **Kept apart from more of the panel:** the VPN cores' ports of a new server, the smart tunnel test and Xray's port choice avoid VIP
+  ports; its ports are checked against the machine's microtun port too; the daily sweep removes VIP tunnels of servers that are gone.
+- **Smarter:** a flow of hundreds of small packets a second (a download's acknowledgements inside WireGuard, say) is bulk, not a game,
+  so it neither takes the game's copies nor wakes game priority; a single lost ping on a lossy line no longer takes a path out (two
+  overdue pings, or one overdue a second); the listener follows a path to where its newest packets come from (a late packet of the old
+  socket after a port change does not move it back); a later DNS failure keeps the dialer on the address that worked.
+- **Persian for the panel's answers that carry a port or a name** (a port taken by a tunnel, the VIP tunnel, WireGuard, the emergency
+  chat…; also on the Tunnels page) and for the VIP tunnel's own errors.
+- **Checked:** `cargo test` (377; new: every web path alone — tcp, ws, wss, h2 — both directions in every mode with each filler and with
+  and without ML-KEM, junk, busy small flows, the panel kept apart); the whole system on this machine (a real agent and the panel): the
+  VIP tunnel and a Kanki Game-FEC tunnel side by side (300/300 UDP and TCP intact on both at once, each its own firewall owner), then edit
+  (old ports freed, new bound), off (every port and fake-TCP rule gone, the Kanki tunnel untouched), on, new secret, delete; the page in
+  a browser (form, clash, edit, menu, the phone's «More»); the lab and the speed the same as 3.44.0.
+
 # v3.44.0 — VIP tunnel: one tunnel over several paths at once
 A new kind of tunnel with **its own page** (menu › Connectivity › VIP tunnel, and a button on the Tunnels page) and its own settings;
 the other tunnels are not touched. Code: `src/vip/` (`crypto`, `wire`, `core`, `path`, `flows`, `panel`), page

@@ -203,7 +203,19 @@ fn taken(app: &App, uses: &[Use]) -> HashSet<u16> {
     for s in tp::servers(app).iter().filter(|s| !s.join.is_empty()) {
         t.extend(s.ports.iter().copied().filter(|p| *p > 0));
     }
+    // the VIP tunnels: their path ports and both ends of what they forward
+    for v in crate::vip::panel::tunnels(app) {
+        t.extend(v.needs().into_iter().map(|x| x.1));
+        t.extend(crate::tunnel::engine::parse_ports(&v.tcp).into_iter().chain(crate::tunnel::engine::parse_ports(&v.udp)).map(|x| x.1));
+    }
     t
+}
+
+/// The UDP ports the VPN cores of node `nid` use: [(port, core)]
+pub(crate) fn node_udp_ports(app: &App, nid: &str) -> Vec<(u16, &'static str)> {
+    let km = crate::kmix::settings(app);
+    let mt = crate::microtun::settings(app);
+    app.db.nodes().iter().filter(|n| n.id == nid).flat_map(|n| node_uses(n, &km, Some(&mt))).map(|u| (u.port, u.proto)).collect()
 }
 
 /// The first free port of a protocol's range

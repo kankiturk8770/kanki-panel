@@ -527,3 +527,93 @@ async fn vip_speed() {
     let m = Model { loss: 0.03, delay: 20, jitter: 2, ..Default::default() };
     println!("  3% loss, 20 ms each way, speed: {:.0} Mbit/s", tcp_speed(37200, Some(m), 50, "speed").await);
 }
+
+/// Every kind of web path alone (no UDP at all), with UDP and TCP through it
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_web_path_carries_it_alone() {
+    let _e1 = udp_echo(35710).await;
+    let _e2 = tcp_echo(35710).await;
+    for (i, kind) in ["tcp", "ws", "wss", "h2"].into_iter().enumerate() {
+        let sp = 35720 + i as u16;
+        let (mut en, mut ex) = pair("web", "balanced", 0, 0, 1, 1, sp, 35711 + 2 * i as u16, 35712 + 2 * i as u16, 35710);
+        for s in [&mut en, &mut ex] {
+            s.s_kind = kind.into();
+            s.s_sni = "www.example.com".into();
+            s.s_path = "/ws".into();
+        }
+        let (a, b) = (Running::start(en), Running::start(ex));
+        assert!(wait_up(&a, &b, 15).await, "{}: {:?}", kind, b.status());
+        let (got, _, _) = game(35711 + 2 * i as u16, 100, 300, 5, 500.0).await;
+        assert!(got >= 99, "{}: {} of 100", kind, got);
+        let mut c = TcpStream::connect(("127.0.0.1", 35712 + 2 * i as u16)).await.unwrap();
+        let data: Vec<u8> = (0..300_000u32).map(|x| (x % 251) as u8).collect();
+        c.write_all(&data).await.unwrap();
+        let mut back = vec![0u8; data.len()];
+        tokio::time::timeout(Duration::from_secs(10), c.read_exact(&mut back)).await.expect(kind).unwrap();
+        assert!(back == data, "{}", kind);
+        a.stop();
+        b.stop();
+    }
+}
+
+/// The Iran server dials (the exit listens), in each mode, with each amount of filler, with and without ML-KEM
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_mode_and_direction() {
+    let _e = udp_echo(35810).await;
+    for (i, (mode, stealth, pq)) in [("speed", 0u8, false), ("balanced", 2, true), ("gaming", 1, false)].into_iter().enumerate() {
+        let base = 35820 + 10 * i as u16;
+        let (mut en, mut ex) = pair("dir", mode, base, base, 2, 2, 0, base + 5, base + 6, 35810);
+        // the other way round: the entry dials, the exit listens
+        en.dials = true;
+        en.remote = "127.0.0.1".into();
+        ex.dials = false;
+        ex.remote.clear();
+        for s in [&mut en, &mut ex] {
+            s.stealth = stealth;
+            s.pq = pq;
+        }
+        let (a, b) = (Running::start(en), Running::start(ex));
+        assert!(wait_up(&a, &b, 15).await, "{}: {:?}", mode, a.status());
+        assert_eq!(a.status().pq, pq);
+        let (got, _, _) = game(base + 5, 200, 120, 5, 500.0).await;
+        assert!(got >= 199, "{}: {} of 200", mode, got);
+        a.stop();
+        b.stop();
+    }
+}
+
+/// A flood of junk at the listener's ports while a game runs: dropped without an answer, the game goes on
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn junk_does_not_hurt() {
+    let _e = udp_echo(35910).await;
+    let (en, ex) = pair("junk", "gaming", 35900, 35900, 2, 1, 0, 35911, 35912, 35910);
+    let (a, b) = (Running::start(en), Running::start(ex));
+    assert!(wait_up(&a, &b, 10).await);
+    let flood = tokio::spawn(async {
+        let s = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut n = 0u64;
+        let mut x: u64 = 12345;
+        loop {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            let len = 20 + (x % 1300) as usize;
+            let pkt: Vec<u8> = (0..len).map(|i| (x >> (i % 56)) as u8).collect();
+            let _ = s.send_to(&pkt, ("127.0.0.1", 35900 + (n % 2) as u16)).await;
+            n += 1;
+            // ~10 000 junk packets a second (the debug build of the tests checks each slowly; a release build
+            // dropped ~280 000 a second here with the game untouched)
+            if n % 100 == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    });
+    let (got, ok, _) = game(35911, 300, 80, 10, 150.0).await;
+    flood.abort();
+    let st = a.status();
+    eprintln!("junk flood: {} dropped without answer; game {}/300 back, {} on time", st.junk, got, ok);
+    assert!(st.junk > 10_000, "{}", st.junk);
+    assert!(got >= 298 && st.up, "{} of 300", got);
+    a.stop();
+    b.stop();
+}

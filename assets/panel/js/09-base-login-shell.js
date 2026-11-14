@@ -1,6 +1,18 @@
 var S={lang:localStorage.getItem('kk_lang')||'fa',theme:localStorage.getItem('kk_theme')||'dark',color:localStorage.getItem('kk_color')||'gold',token:localStorage.getItem('kk_tok')||'',me:null,page:'dash',users:[],nodes:[],ov:null,sel:{},q:'',filter:'all',pf:'all',sort:'new',size:12,pg:1,timer:null,timer2:null};
 // a server is one word everywhere: nodes and tunnel servers are the same servers
-var WFA=[[/سرورهای تانل/g,'سرورها'],[/سرور تانل/g,'سرور'],[/Nodeها/g,'سرورها'],[/نودهای/g,'سرورهای'],[/نودها/g,'سرورها'],[/نودی/g,'سروری'],[/نود/g,'سرور']],
+var WFA=[
+ // the panel's answers with a port or a name in them (tunnels, the VIP tunnel, KPING, the smart test)
+ [/^(UDP|TCP) port (\d+) is already used by the VIP tunnel "([^"]*)"$/,'پورت $1 $2 را تانل VIP «$3» گرفته است'],
+ [/^(UDP|TCP) port (\d+) is already used by the tunnel "([^"]*)"$/,'پورت $1 $2 را تانل «$3» گرفته است'],
+ [/^(UDP|TCP) port (\d+) is already used by (Kanki DNS|Xray|KPING|WireGuard|AmneziaWG|Hysteria2|KANKI MIX|microtun)$/,'پورت $1 $2 را $3 گرفته است'],
+ [/^(UDP|TCP) port (\d+) is already used by the emergency chat$/,'پورت $1 $2 را چت اضطراری گرفته است'],
+ [/^(UDP|TCP) port (\d+) on (.+?) is already used by (.+?): pick another port$/,'پورت $1 $2 روی $3 را $4 گرفته است؛ پورت دیگری انتخاب کن'],
+ [/^(UDP|TCP) port (\d+) is used twice in this tunnel$/,'پورت $1 $2 در این تانل دو بار آمده'],
+ [/^port (\d+) is used by the VIP tunnel (.*); pick another test port$/,'پورت $1 را تانل VIP $2 گرفته؛ پورت تست دیگری انتخاب کن'],
+ [/^UDP port ([\d, ]+) is busy$/,'پورت UDP $1 اشغال است'],
+ [/^the clocks of the two servers differ by (\d+) s \(more than (\d+) s\): set the time on both$/,'ساعت دو سرور $1 ثانیه با هم فرق دارد (بیش از $2 ثانیه): ساعت هر دو را درست کن'],
+ [/^(.+): the link closed$/,'$1: اتصال بسته شد'],
+ [/سرورهای تانل/g,'سرورها'],[/سرور تانل/g,'سرور'],[/Nodeها/g,'سرورها'],[/نودهای/g,'سرورهای'],[/نودها/g,'سرورها'],[/نودی/g,'سروری'],[/نود/g,'سرور']],
  WEN=[[/\bTunnel servers\b/g,'Servers'],[/\btunnel servers\b/g,'servers'],[/\bTunnel server\b/g,'Server'],[/\btunnel server\b/g,'server'],[/\bNodes\b/g,'Servers'],[/\bnodes\b/g,'servers'],[/\bNode\b/g,'Server'],[/\bnode\b/g,'server']];
 function t(k){var s=S.lang=='fa'&&FA[k]?FA[k]:k;if(typeof s!='string')return s;(S.lang=='fa'?WFA:WEN).forEach(function(r){s=s.replace(r[0],r[1])});return s}
 function $(s,r){return (r||document).querySelector(s)}

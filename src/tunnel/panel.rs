@@ -1134,6 +1134,11 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
             return err(StatusCode::BAD_REQUEST, &format!("port {} is used by tunnel {}; pick another test port", t.port, t.name));
         }
     }
+    for sid in [&entry, &exit] {
+        if let Some(v) = crate::vip::panel::ports_on(&app, sid, "").into_iter().find(|v| v.0 >= port && v.0 < port + span) {
+            return err(StatusCode::BAD_REQUEST, &format!("port {} is used by the VIP tunnel {}; pick another test port", v.0, v.2));
+        }
+    }
     let job = ProbeJob {
         id: rand_token(6).to_lowercase(),
         entry,
