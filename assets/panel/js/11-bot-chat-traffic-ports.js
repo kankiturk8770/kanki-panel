@@ -402,8 +402,32 @@ function waitRestart(){toast(t('Panel is restarting…'));var n=0;setTimeout(fun
 var TR={h:{rx:[],tx:[]},last:null,max:40,q:'',all:false};
 function pTraffic(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Traffic & stats')+'</h2><p>'+t('Users usage and live network traffic')+'</p></div><div class="row"><button type="button" class="kib" id="tr_rf" title="'+t('Refresh')+'" aria-label="'+t('Refresh')+'">'+ic('refresh',17)+'</button></div></div><div id="tr"><div class="kskel"></div><div class="kskel"></div></div>';
  TR={h:{rx:[],tx:[]},last:null,max:40,q:'',all:false};if(DB.h&&DB.h.rx&&DB.h.rx.length>1){TR.h.rx=DB.h.rx.slice(-TR.max);TR.h.tx=(DB.h.tx||[]).slice(-TR.max)}$('#tr_rf').onclick=trLoad;trLoad();trTick();setTimeout(trTick,900);
- clearInterval(S.timer3);S.timer3=setInterval(function(){if(S.page=='traffic'&&document.visibilityState=='visible')trTick()},2000)}
-function trLoad(){Promise.all([api('GET','/api/users'),api('GET','/api/nodes').catch(function(){return S.nodes||[]})]).then(function(r){S.users=r[0];S.nodes=r[1];trDraw()}).catch(fail)}
+ var n=0;clearInterval(S.timer3);S.timer3=setInterval(function(){if(S.page=='traffic'&&document.visibilityState=='visible'){trTick();if(++n%15==0)trSrvLoad()}},2000)}
+function trLoad(){Promise.all([api('GET','/api/users'),api('GET','/api/nodes').catch(function(){return S.nodes||[]}),api('GET','/api/servers/traffic').catch(function(){return null})]).then(function(r){S.users=r[0];S.nodes=r[1];TR.srv=r[2];trDraw()}).catch(fail)}
+// (3.45) what every server's network card moved: VPN users, tunnels in and out, everything. A user behind a
+// tunnel crosses two servers, so their bytes are on both rows (both datacenters count them).
+function trSrvLoad(){api('GET','/api/servers/traffic').then(function(d){TR.srv=d;trSrv()}).catch(function(){})}
+function trPair(v){v=v||[0,0];return '<b class="ltr">'+N(bytes(v[0]+v[1]))+'</b><small class="muted ltr"><span>↓ '+N(bytes(v[0]))+'</span> <span>↑ '+N(bytes(v[1]))+'</span></small>'}
+function trSrv(){var el=$('#tr_srv');if(!el)return;var d=TR.srv;
+ if(!d){el.innerHTML='<p class="muted ku-empty">'+t('Could not load the traffic of the servers')+'</p>';return}
+ var l=(d.servers||[]).slice().sort(function(a,b){return (b.none?-1:(b.d30||[0,0])[0]+(b.d30||[0,0])[1])-(a.none?-1:(a.d30||[0,0])[0]+(a.d30||[0,0])[1])}),sum={today:[0,0],d7:[0,0],d30:[0,0],total:[0,0]};
+ if(!l.length){el.innerHTML='<p class="muted ku-empty">'+t('No server yet')+'</p>';return}
+ l.forEach(function(r){if(r.none)return;['today','d7','d30','total'].forEach(function(k){sum[k][0]+=(r[k]||[0,0])[0];sum[k][1]+=(r[k]||[0,0])[1]})});
+ var th='<thead><tr><th>'+t('Server')+'</th><th>'+t('Today')+'</th><th class="d7">'+t('Last 7 days')+'</th><th>'+t('Last 30 days')+'</th><th>'+t('Since counting began')+'</th><th>'+t('Now')+'</th></tr></thead>';
+ var tr=function(r){var nm='<td class="nm"><span class="dot '+(r.online?'g':'r')+'"></span>'+flagOf(r.cc)+'<b>'+esc(r.name)+'</b>'+(r.none?'':'<small class="muted"><span class="ltr">'+esc(r.nic||'')+'</span> <span>'+t('since')+' '+jdate(r.since)+'</span></small><button type="button" class="b2 sm" data-sd="'+esc(r.key)+'">'+ic('traffic',14)+' '+t('Days')+'</button>')+'</td>';
+  if(r.none)return '<tr>'+nm+'<td colspan="5" data-l="'+esc(t('Traffic'))+'"><span class="muted">'+t('Update this server to see its traffic')+'</span></td></tr>';
+  var lv=r.live||[0,0];
+  return '<tr>'+nm+'<td data-l="'+esc(t('Today'))+'">'+trPair(r.today)+'</td><td class="d7" data-l="'+esc(t('Last 7 days'))+'">'+trPair(r.d7)+'</td><td data-l="'+esc(t('Last 30 days'))+'">'+trPair(r.d30)+'</td>'+
+   '<td data-l="'+esc(t('Since counting began'))+'">'+trPair(r.total)+'</td><td data-l="'+esc(t('Now'))+'"><b class="ltr">↓ '+N(rate(lv[0]))+'</b><small class="muted ltr"><span>↑ '+N(rate(lv[1]))+'</span></small></td></tr>'};
+ el.innerHTML='<div class="ku-tt-wrap"><table class="ku-tt ktr-st">'+th+'<tbody>'+l.map(tr).join('')+
+  '<tr class="sum"><td class="nm"><b>'+t('All servers')+'</b></td><td data-l="'+esc(t('Today'))+'">'+trPair(sum.today)+'</td><td class="d7" data-l="'+esc(t('Last 7 days'))+'">'+trPair(sum.d7)+'</td><td data-l="'+esc(t('Last 30 days'))+'">'+trPair(sum.d30)+'</td><td data-l="'+esc(t('Since counting began'))+'">'+trPair(sum.total)+'</td><td></td></tr>'+
+  '</tbody></table></div><p class="muted ktr-note">'+t('Measured on each server\'s network card: users, tunnels and everything else. Traffic through a tunnel crosses two servers, so it is on both rows. Days are Tehran days.')+'</p>';
+ el.onclick=function(e){var b=e.target.closest('[data-sd]');if(b)trDays(b.dataset.sd)}}
+function trDays(key){var r=((TR.srv||{}).servers||[]).filter(function(x){return x.key==key})[0];if(!r||r.none)return;
+ var d0=Math.floor((r.since+12600)/86400),ds=(r.days||[]).filter(function(x){return x[0]>=d0}).reverse(),mx=1;ds.forEach(function(x){mx=Math.max(mx,x[1]+x[2])});
+ modal(mhead(t('Traffic by day'),r.name)+'<div class="ktr-days">'+ds.map(function(x){var w=Math.round((x[1]+x[2])/mx*100);
+  return '<div class="kbr"><span class="kbr-l ltr">'+jdate(x[0]*86400-12600+43200)+'</span><span class="trk"><span class="fil" style="width:'+(x[1]+x[2]>0?Math.max(1,w):0)+'%"></span></span><b class="kbr-v ltr" title="↓ '+N(bytes(x[1]))+' · ↑ '+N(bytes(x[2]))+'">'+N(bytes(x[1]+x[2]))+'</b></div>'}).join('')+'</div>'+
+  '<p class="muted">↓ '+t('Received')+' · ↑ '+t('Sent')+' — '+t('since')+' '+jdate(r.since,1)+'</p>')}
 function trTick(){api('GET','/api/live').then(function(l){var p=TR.last;TR.last=l;if(!p)return;var sec=Math.max(.5,(l.ts-p.ts)/1000),v={rx:Math.max(0,(l.net_rx-p.net_rx)/sec),tx:Math.max(0,(l.net_tx-p.net_tx)/sec)};
   ['rx','tx'].forEach(function(k){TR.h[k].push(v[k]);if(TR.h[k].length>TR.max)TR.h[k].shift()});
   var a=$('#tr_rx'),b=$('#tr_tx'),c=$('#tr_ch');if(a)a.textContent=N(rate(v.rx));if(b)b.textContent=N(rate(v.tx));if(c)c.innerHTML=areaChart([{v:TR.h.rx,c:'a'},{v:TR.h.tx,c:'b'}],{h:160,cap:TR.max})}).catch(function(){})}
@@ -416,10 +440,11 @@ function trDraw(){var el=$('#tr');if(!el)return;var us=S.users||[],tot=0,lim=0,l
    ['↓ '+t('Download')+' · '+t('this server'),'<span class="ltr" id="tr_rx">—</span>'],['↑ '+t('Upload')+' · '+t('this server'),'<span class="ltr" id="tr_tx">—</span>']])+
   '<section class="card"><div class="kc-h"><div><h3>'+t('Live network traffic')+'</h3><small class="muted">'+t('Download and upload, every 2 seconds')+'</small></div>'+
    '<div class="klegend"><span class="a"><i></i>'+t('Download')+'</span><span class="b"><i></i>'+t('Upload')+'</span></div></div><div class="ch ktr-ch" id="tr_ch"></div></section>'+
+  '<section class="card ktr-s"><div class="kc-h"><div><h3>'+t('Traffic of each server')+'</h3><small class="muted">'+t('Received and sent by the server itself, tunnels included')+'</small></div></div><div id="tr_srv"></div></section>'+
   '<div class="kgrid"><section class="card c6"><div class="kc-h"><div><h3>'+t('By protocol')+'</h3><small class="muted">'+t('Users')+'</small></div></div>'+PROTOS.map(function(p){return bar('<span class="ptag" style="--pc:'+PCOL[p[0]]+'">'+p[1]+'</span>',pc[p[0]]||0,PCOL[p[0]])}).join('')+'</section>'+
   '<section class="card c6"><div class="kc-h"><div><h3>'+t('By node')+'</h3><small class="muted">'+t('Users')+'</small></div></div>'+((S.nodes||[]).map(function(n){return bar('<span class="nmn">'+esc(n.name)+'</span>',n.users||0)}).join('')||'<span class="muted">—</span>')+'</section></div>'+
   '<section class="card ktr-u"><div class="kc-h"><div><h3>'+t('Users usage')+'</h3><small class="muted">'+t('Used volume, limit and percent')+'</small></div><label class="ktr-q"><span class="vh">'+t('Search')+'</span><input id="tr_q" type="search" autocomplete="off" placeholder="'+t('Search')+'"></label></div><div id="tr_ul" class="trul"></div></section>';
- $('#tr_q').value=TR.q;$('#tr_q').oninput=function(){TR.q=this.value.toLowerCase();trUsers()};trUsers();if(TR.h.rx.length>1)$('#tr_ch').innerHTML=areaChart([{v:TR.h.rx,c:'a'},{v:TR.h.tx,c:'b'}],{h:160,cap:TR.max})}
+ $('#tr_q').value=TR.q;$('#tr_q').oninput=function(){TR.q=this.value.toLowerCase();trUsers()};trUsers();trSrv();if(TR.h.rx.length>1)$('#tr_ch').innerHTML=areaChart([{v:TR.h.rx,c:'a'},{v:TR.h.tx,c:'b'}],{h:160,cap:TR.max})}
 function trUsers(){var el=$('#tr_ul');if(!el)return;var l=(S.users||[]).filter(function(u){return !TR.q||u.username.toLowerCase().indexOf(TR.q)>=0}).sort(function(a,b){return b.traffic_used_gb-a.traffic_used_gb}),max=TR.all?l.length:30;
  el.innerHTML=l.slice(0,max).map(function(u){var p=usage(u),st=ustate(u);return '<button class="urow" data-u="'+u.id+'"><span class="dot '+(st=='disabled'?'r':st=='finished'?'y':(u.online_connections>0||liveOf(u).length)?'g':'')+'"></span><b class="ltr nm">'+esc(u.username)+'</b>'+
   '<span class="uu ltr">'+N(gbtxt(u.traffic_used_gb))+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</span><span class="ub"><span class="trk"><span class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?0:Math.max(1,p))+'%"></span></span></span><span class="up ltr">'+(p<0?'∞':N(p)+'%')+'</span></button>'}).join('')+

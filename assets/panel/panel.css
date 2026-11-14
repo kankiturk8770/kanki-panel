@@ -2091,3 +2091,18 @@ body.kg .ksn-it:hover,body.kg .kst-it:hover,body.kg .kcb-t:hover,body.kg .kcb-ov
  .vp-lane::before{display:none}
  .vp-lane{border-inline-start-width:4px}
 }
+
+/* 3.45 — traffic of each server (traffic page) */
+.ktr-st td b.ltr{display:block;font-weight:600}
+.ktr-st td b,.ktr-st td small span{white-space:nowrap}
+.ktr-st td small span{display:inline-block}
+.ktr-st td small span+span{margin-inline-start:8px}
+.ktr-st td small{white-space:nowrap}
+.ktr-st tr.sum td{border-top:1px solid var(--ln);font-weight:600}
+.ktr-st td.nm .b2{margin-top:4px;min-height:40px}
+@media (min-width:620px) and (max-width:1199px){.ktr-st .d7{display:none}.ktr-st td small,.ktr-st td.nm{white-space:normal}.ktr-st td{padding:8px 6px}}
+.ktr-note{font-size:12px;padding:0 16px 12px;margin:0}
+.ktr-days{display:flex;flex-direction:column;gap:4px;margin:8px 0 12px}
+.ktr-days .kbr{grid-template-columns:auto minmax(0,1fr) auto}
+.ktr-days .kbr-v{white-space:nowrap}
+@media (max-width:619px){.ktr-st td small{white-space:normal}.ktr-st tr.sum td:empty{display:none}}
