@@ -268,6 +268,8 @@ pub async fn run(version: &str) {
     let _ = tokio::task::spawn_blocking(crate::dns::restart_if_outdated).await;
     // KPING as it was last time (the panel may not be reachable after a reboot)
     let _ = tokio::task::spawn_blocking(crate::kpingd::from_disk).await;
+    // the VIP tunnels as they were last time
+    let mut vip_last = crate::vip::from_disk().await;
     // certificates close to their end are renewed with what holds port 80 at that moment
     crate::certbot::renew_loop();
     let mut fails = 0u32;
@@ -316,13 +318,14 @@ pub async fn run(version: &str) {
         let listen = tokio::task::spawn_blocking(crate::certbot::listeners_json).await.unwrap_or_default();
         let setup_st = tokio::task::spawn_blocking(setup_status).await.unwrap_or_default();
         let kping_st = tokio::task::spawn_blocking(crate::kpingd::report).await.unwrap_or_default();
+        let vip_st = crate::vip::statuses().await;
         // the machine (CPU, memory, disk, uptime, sockets) every 30 seconds: Iran servers have no VPN part
         // that reports it
         if stats_at.elapsed() >= std::time::Duration::from_secs(30) || stats.is_null() {
             stats = tokio::task::spawn_blocking(crate::admin::node_stats).await.unwrap_or_default();
             stats_at = std::time::Instant::now();
         }
-        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st, "kping": kping_st, "stats": stats });
+        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st, "kping": kping_st, "vip": vip_st, "stats": stats });
         match http.post(format!("{}/tunnel/agent", panel)).json(&body).send().await {
             Ok(r) if r.status().as_u16() == 410 => {
                 // this server was removed in the panel: everything Kanki put here is removed (a few
@@ -336,6 +339,7 @@ pub async fn run(version: &str) {
                     let _ = tokio::task::spawn_blocking(|| crate::xray::deploy(None, None)).await;
                     subsrv.apply(None);
                     let _ = tokio::task::spawn_blocking(|| crate::kpingd::apply(Default::default())).await;
+                    crate::vip::from_panel(&json!([]), &mut vip_last).await;
                     let _ = std::fs::remove_file(CACHE);
                     last.clear();
                     // the Hysteria2 / AmneziaWG tunnel workers stop their units and routes by themselves
@@ -462,6 +466,10 @@ pub async fn run(version: &str) {
                     if let Some(k) = v.get("kping") {
                         let cfg: crate::kpingd::KpCfg = serde_json::from_value(k.clone()).unwrap_or_default();
                         let _ = tokio::task::spawn_blocking(move || crate::kpingd::apply(cfg)).await;
+                    }
+                    // the VIP tunnels (a panel without them sends nothing: left as they are)
+                    if let Some(x) = v.get("vip") {
+                        crate::vip::from_panel(x, &mut vip_last).await;
                     }
                     // the subscription listener: its config, or Null (none here)
                     subsrv.apply(serde_json::from_value(v["subsrv"].clone()).ok());

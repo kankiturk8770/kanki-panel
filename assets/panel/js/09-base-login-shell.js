@@ -98,6 +98,7 @@ function leftTxt(ts){if(!ts)return t('Unlimited');var sec=ts-Date.now()/1000;if(
 
 // ---------------------------------------------------------------- icons (stroke = currentColor)
 var ICO={
+ vip:'<path d="M6 4h12l3.5 5L12 20.5 2.5 9 6 4z"/><path d="M2.5 9h19M9 4l-1.5 5L12 20.5 16.5 9 15 4"/>',
  edit:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/>',
  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
  qr:'<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.2"/><path d="M14 14h3v3M20.5 14v.01M14 20.5h3.5M20.5 17.5v3"/>',
@@ -225,7 +226,7 @@ function loginView(otp){$('#app').innerHTML='';document.body.className='';applyL
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
 // ---------------------------------------------------------------- shell
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['mtun','microtun','game'],['kping','KPING','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['mtun','microtun','game'],['kping','KPING','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['vip','VIP tunnel','vip'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);

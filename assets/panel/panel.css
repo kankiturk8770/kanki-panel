@@ -2042,3 +2042,52 @@ body.kg .ksn-it:hover,body.kg .kst-it:hover,body.kg .kcb-t:hover,body.kg .kcb-ov
 .chipx.r{color:var(--bad);border-color:var(--line-bad)}
 .chipx.a{color:var(--a);border-color:color-mix(in srgb,var(--a) 40%,transparent)}
 .chipx.b{color:var(--info);border-color:color-mix(in srgb,var(--info) 40%,transparent)}
+/* ---- VIP tunnel (3.44.0): the two servers and, between them, every path side by side like strands of one
+   cable. A lit strand is up; the strand that carries the game is gold, its copy a softer gold. */
+.vp-card.off{opacity:.62}
+.vp-card .ku-gh .dot{flex:none}
+.vp-link{display:flex;flex-direction:column;gap:8px;padding:12px 16px}
+.vp-end{display:flex;align-items:center;gap:8px;min-height:40px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:var(--c1);min-width:0}
+.vp-end b{font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vp-end small{font-size:12px;color:var(--s);margin-inline-start:auto;white-space:nowrap}
+.vp-end.ok{border-color:color-mix(in srgb,var(--ok) 40%,var(--line))}
+.vp-lanes{display:flex;flex-direction:column;gap:4px;padding-inline-start:16px;border-inline-start:2px solid var(--line);margin-inline-start:20px}
+.vp-lane{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;min-height:40px;padding:6px 12px;border-radius:10px;background:var(--c1);border:1px solid var(--line)}
+.vp-lane::before{content:"";position:absolute;inset-inline-start:-18px;top:50%;width:16px;height:2px;background:var(--line)}
+.vp-lane.ok{border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.vp-lane.ok::before{background:var(--ok)}
+.vp-lane.wait{border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+.vp-lane .vp-k{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600}
+.vp-lane .vp-m{font-size:13px;margin-inline-start:auto;color:var(--t)}
+.vp-lane small{font-size:12px;color:var(--s)}
+.vp-lane small.vp-err{flex-basis:100%;color:var(--warn);overflow-wrap:anywhere}
+.vp-lane em{font-style:normal;font-size:12px;font-weight:700;padding:1px 8px;border-radius:999px}
+.vp-lane em.vp-g{color:#1b1406;background:var(--a)}
+.vp-lane em.vp-c{color:var(--a);border:1px solid color-mix(in srgb,var(--a) 55%,transparent)}
+.vp-lane:has(.vp-g){border-color:color-mix(in srgb,var(--a) 70%,var(--line));box-shadow:0 0 0 1px color-mix(in srgb,var(--a) 30%,transparent)}
+.vp-lane:has(.vp-g)::before{background:var(--a)}
+.vp-tags{padding:0 16px 12px}
+/* a flex tag drops the space before its number */
+.vp-tags .ku-tag .ltr{margin-inline-start:4px}
+.vp-warn{margin:0 16px 12px}
+.vp-btn{display:inline-flex;align-items:center;gap:6px;text-decoration:none}
+.vp-form .vp-h{display:flex;align-items:center;gap:8px;margin:16px 0 8px;font-size:14px}
+.vp-form .vp-h:first-child{margin-top:4px}
+.vp-form .vp-h i{display:grid;place-items:center;width:24px;height:24px;border-radius:8px;font-style:normal;font-size:12px;color:#1b1406;background:var(--a)}
+.vp-form .ku-sw{padding:8px 0;min-height:48px}
+.vp-form .vp-sub{margin:0 0 8px;padding:8px 12px;border-radius:12px;background:var(--c1);border:1px solid var(--line)}
+.vp-seg{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.vp-seg button{display:flex;flex-direction:column;gap:2px;min-height:44px}
+.vp-seg button b{font-size:13px}
+.vp-seg button small{font-size:12px;color:var(--s);font-weight:400}
+.vp-seg button.on small{color:inherit;opacity:.8}
+.vp-adv{margin-top:12px}
+.vp-adv summary{cursor:pointer;font-size:13px;color:var(--s);min-height:40px;display:flex;align-items:center}
+@media(min-width:900px){
+ .vp-link{flex-direction:row;align-items:stretch;gap:0}
+ .vp-end{flex:0 0 200px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px}
+ .vp-end small{margin-inline-start:0;white-space:normal}
+ .vp-lanes{flex:1 1 auto;min-width:0;margin:0 12px;padding:0;border:0;justify-content:center}
+ .vp-lane::before{display:none}
+ .vp-lane{border-inline-start-width:4px}
+}

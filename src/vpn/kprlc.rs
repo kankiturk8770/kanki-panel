@@ -297,7 +297,9 @@ impl RlcRx {
                 }
             }
         }
-        if unknown == 0 || (need > self.free() && !self.evict(need)) {
+        // room for the new unknowns, made only from equations of other packets: dropping a column of this
+        // very window would leave one of its packets without a column below
+        if unknown == 0 || (need > self.free() && !self.evict(need, base, n)) {
             return vec![];
         }
         let mut coefs = [0u8; COLS];
@@ -310,9 +312,13 @@ impl RlcRx {
                 mul_add(&mut v, &b, c);
                 continue;
             }
-            let col = match self.col(s) {
+            let col = match self.col(s).or_else(|| self.alloc(s)) {
                 Some(c) => c,
-                None => self.alloc(s),
+                None => {
+                    // cannot happen after `evict`; if it ever does, the repair is dropped, never the program
+                    self.gc();
+                    return vec![];
+                }
             };
             coefs[col] ^= c;
         }
@@ -331,17 +337,19 @@ impl RlcRx {
         self.col_used.iter().filter(|u| !**u).count()
     }
 
-    fn alloc(&mut self, seq: u32) -> usize {
-        let c = (0..COLS).find(|&c| !self.col_used[c]).expect("a free column was checked");
+    fn alloc(&mut self, seq: u32) -> Option<usize> {
+        let c = (0..COLS).find(|&c| !self.col_used[c])?;
         self.col_used[c] = true;
         self.col_seq[c] = seq;
         self.col_row[c] = None;
-        c
+        Some(c)
     }
 
-    fn evict(&mut self, n: usize) -> bool {
-        while self.free() < n {
-            let Some(oldest) = (0..COLS).filter(|&c| self.col_used[c]).min_by(|&a, &b| {
+    /// Frees columns, oldest first, until `need` are free, never one of the window `[base, base+n)`
+    fn evict(&mut self, need: usize, base: u32, n: u8) -> bool {
+        let mine = |s: u32| s.wrapping_sub(base) < n as u32;
+        while self.free() < need {
+            let Some(oldest) = (0..COLS).filter(|&c| self.col_used[c] && !mine(self.col_seq[c])).min_by(|&a, &b| {
                 if newer(self.col_seq[b], self.col_seq[a]) { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater }
             }) else {
                 return false;
@@ -591,6 +599,52 @@ mod tests {
                 assert_eq!(v, &pkt(*s));
             }
             assert!(got.len() >= 400 * 97 / 100, "only {}", got.len());
+        }
+    }
+
+    /// Heavy, bursty loss with many overlapping windows: the receiver runs out of columns and has to drop old
+    /// equations. It must never panic (it did: an old column of the repair's own window was dropped to make
+    /// room, then that packet needed a column too and none was left) and never rebuild a wrong packet.
+    #[test]
+    fn heavy_bursty_loss_never_panics() {
+        let mut seed: u64 = 99;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % 10_000) as f64 / 10_000.0
+        };
+        for round in 0..200 {
+            let (mut tx, mut rx) = (RlcTx::default(), RlcRx::default());
+            let now = Instant::now();
+            let (loss, rep_rate) = (0.1 + 0.4 * rnd(), 0.2 + rnd());
+            let mut bad = false;
+            let mut late: Vec<Vec<u8>> = vec![];
+            for s in 1..=600u32 {
+                tx.add(s, &pkt(s), now + Duration::from_secs(1));
+                bad = if bad { rnd() > 0.2 } else { rnd() < 0.05 };
+                if !(bad || rnd() < loss) {
+                    for (q, p) in rx.data(s, &pkt(s), now) {
+                        assert_eq!(p, pkt(q), "round {}", round);
+                    }
+                }
+                let mut r = rep_rate;
+                while rnd() < r {
+                    r -= 1.0;
+                    let rep = tx.repair(now, 4 + (rnd() * 13.0) as usize).unwrap();
+                    if !(bad || rnd() < loss) {
+                        late.push(rep);
+                    }
+                }
+                // repairs come late and out of order (another path, a jittery line)
+                while late.len() > (rnd() * 12.0) as usize {
+                    let i = (rnd() * late.len() as f64) as usize % late.len();
+                    let rep = late.swap_remove(i);
+                    for (q, p) in rx.repair(&rep, now) {
+                        assert_eq!(p, pkt(q), "round {}", round);
+                    }
+                }
+            }
         }
     }
 

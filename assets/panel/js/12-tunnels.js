@@ -52,7 +52,7 @@ function tmRound(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+
 // ---- the page
 function pTunnels(){KAcc.open.tn='';KAcc.draw.tn=function(){var l=$('#tn_list');if(l&&TN.d)l.innerHTML=tunList(TN.d)};
  $('#pg').innerHTML='<div class="ku">'+kuHead('tunnel',t('Tunnels'),t('Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit'),
-  '<button class="btn" onclick="tunEdit()">'+ic('plus',15)+' '+t('Tunnel')+'</button><button class="b2" onclick="tunMore()" aria-label="'+esc(t('More'))+'">⋯ '+t('More')+'</button>')+
+  '<button class="btn" onclick="tunEdit()">'+ic('plus',15)+' '+t('Tunnel')+'</button><a class="b2 vp-btn" href="#vip">'+ic('vip',15)+' '+t('VIP tunnel')+'</a><button class="b2" onclick="tunMore()" aria-label="'+esc(t('More'))+'">⋯ '+t('More')+'</button>')+
  '<div class="card tmapc"><nav class="tmtabs" id="tn_mt" role="tablist"></nav><div id="tn_map"><span class="muted">'+t('Loading…')+'</span></div><div class="tkpi" id="tn_kpi"></div></div>'+
  '<div class="ku-tools tnf" id="tn_f"></div><div id="tn_list"></div></div>';
  tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}

@@ -198,6 +198,7 @@ pub const PANEL_JS: &str = concat!(
     include_str!("../../assets/panel/js/17-look-map-menu.js"),
     // KPING's page; the start code below stays last
     include_str!("../../assets/panel/js/19-kping.js"),
+    include_str!("../../assets/panel/js/20-vip.js"),
     include_str!("../../assets/panel/js/18-start.js")
 );
 
@@ -348,6 +349,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::kmix::router())
         .merge(crate::microtun::router())
         .merge(crate::kping::router())
+        .merge(crate::vip::panel::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
         // 2 MiB for every route: login, join and hy2/auth are open to strangers and must not make the
         // server buffer more. Only the backup upload gets a bigger limit (see backup::router).

@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.44 — VIP tunnel
+A tunnel with its own page and settings that runs over several paths at once (UDP on changing ports, fake TCP, HTTP/2 or a CDN):
+a cut or throttled path costs nothing. Game packets take the two best paths and are rebuilt on the spot, TCP rides QUIC inside the
+tunnel, keys are X25519 + ML-KEM-768. Lab: 5% loss → 100% of game packets on time (89.6% without it); two paths with cuts → 100%.
+
 ## New in 3.43.1 — KPING: lighter between the servers
 KPING's tunnels use Game-FEC 8:1 instead of 8:3 (existing ones change by themselves), and with two tunnels each packet crosses three
 times instead of four: in the lab no loss, the slowest packets sooner, ~40% fewer packets and ~25% less CPU on the servers.
