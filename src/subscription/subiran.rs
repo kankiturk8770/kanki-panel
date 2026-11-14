@@ -243,6 +243,8 @@ fn taken_ports(app: &App, sid: &str) -> Vec<u16> {
             v.push(c.port);
         }
     }
+    // the TCP ports of the VIP tunnels there
+    v.extend(crate::vip::panel::ports_on(app, sid, "").into_iter().filter(|x| !x.1).map(|x| x.0));
     v
 }
 

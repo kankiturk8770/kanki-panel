@@ -423,6 +423,75 @@ fn defaults() -> VipTunnel {
     }
 }
 
+/// The ports the rest of the panel has set up on server `sid`, whether they listen yet or not: the Kanki
+/// tunnels (with Kanki DNS's relay tunnel and the Iran subscription's), Kanki DNS, the emergency chat, KPING,
+/// the Xray inbounds and the VPN cores of the machine. (port, udp, who)
+pub fn others_on(app: &App, sid: &str) -> Vec<(u16, bool, String)> {
+    let mut v: Vec<(u16, bool, String)> = vec![];
+    let names: HashMap<String, String> = crate::tunnel::panel::kanki_tunnels(app).into_iter().map(|t| (t.id, t.name)).collect();
+    for s in crate::tunnel::panel::specs_of(app, sid) {
+        let who = format!("the tunnel \"{}\"", names.get(&s.id).cloned().unwrap_or(s.name.clone()));
+        if let Some(a) = &s.awg {
+            if a.open_udp > 0 {
+                v.push((a.open_udp, true, who.clone()));
+            }
+        } else if let Some(y) = &s.hy2 {
+            if y.role == "exit" && y.listen > 0 {
+                v.push((y.listen, true, who.clone()));
+            }
+        } else if s.listens() && s.port > 0 {
+            let (tcp, udp) = match s.transport.as_str() {
+                "quic" | "kcp" | "hq" | "game" => (false, true),
+                "dual" => (true, true),
+                _ => (true, false),
+            };
+            if tcp {
+                v.push((s.port, false, who.clone()));
+            }
+            if udp {
+                v.push((s.port, true, who.clone()));
+            }
+        }
+        if s.role == "entry" {
+            v.extend(crate::tunnel::engine::parse_ports(&s.tcp).into_iter().map(|(a, _)| (a, false, who.clone())));
+            v.extend(crate::tunnel::engine::parse_ports(&s.udp).into_iter().map(|(a, _)| (a, true, who.clone())));
+        }
+    }
+    if let Some((c, _)) = crate::dns::panel::cfg_for(app, sid) {
+        for (p, udp) in [(c.dns_port, true), (c.dns_port, false), (c.dot_port, false), (c.https_port, false), (c.http_port, false)] {
+            if p > 0 {
+                v.push((p, udp, "Kanki DNS".into()));
+            }
+        }
+    }
+    if app.db.get("emer_server") == sid {
+        if let Some((c, _)) = crate::tunnel::panel::emer_cfg(app) {
+            v.push((c.port, false, "the emergency chat".into()));
+        }
+    }
+    let kp = crate::kping::settings(app);
+    if kp.on {
+        for r in kp.routes.iter().filter(|r| r.iran == sid) {
+            v.extend(r.ports().into_iter().map(|p| (p, true, "KPING".to_string())));
+        }
+        if kp.routes.iter().any(|r| r.exit == sid) {
+            v.push((kp.port, true, "KPING".into()));
+        }
+    }
+    for ib in crate::xray::panel::settings(app).inbounds.iter().filter(|i| i.server == sid && i.port > 0) {
+        v.push((ib.port, ib.network == "kcp", "Xray".into()));
+    }
+    // the VPN part of the machine: WireGuard, AmneziaWG, Hysteria2, KANKI MIX
+    if let Some(ts) = crate::tunnel::panel::servers(app).into_iter().find(|x| x.id == sid) {
+        for (p, who) in ts.ports.iter().zip(["WireGuard", "AmneziaWG", "Hysteria2", "KANKI MIX"]) {
+            if *p > 0 {
+                v.push((*p, true, who.to_string()));
+            }
+        }
+    }
+    v
+}
+
 /// Is a port of `t` taken on its server: by another VIP tunnel, a Kanki tunnel, or (live) another program
 fn clash(app: &App, t: &VipTunnel, old: Option<&VipTunnel>) -> Option<String> {
     let own: Vec<(String, u16, bool)> = old.filter(|o| o.enabled).map(|o| o.needs()).unwrap_or_default();
@@ -431,8 +500,8 @@ fn clash(app: &App, t: &VipTunnel, old: Option<&VipTunnel>) -> Option<String> {
         if let Some(x) = ports_on(app, &sid, &t.id).into_iter().find(|x| x.0 == port && x.1 == udp) {
             return Some(format!("{} port {} is already used by the VIP tunnel \"{}\"", proto, port, x.2));
         }
-        if let Some(n) = crate::tunnel::panel::tunnel_ports_on(app, &sid).into_iter().find(|x| x.0 == port && x.1 == udp).map(|x| x.2) {
-            return Some(format!("{} port {} is already used by the tunnel \"{}\"", proto, port, n));
+        if let Some(n) = others_on(app, &sid).into_iter().find(|x| x.0 == port && x.1 == udp).map(|x| x.2) {
+            return Some(format!("{} port {} is already used by {}", proto, port, n));
         }
         if own.contains(&(sid.clone(), port, udp)) {
             continue;
@@ -613,5 +682,57 @@ mod tests {
         assert!(crate::tunnel::panel::delete_server(&app, "ir1", false).is_err(), "a server with a VIP tunnel is not removed alone");
         crate::tunnel::panel::delete_server(&app, "ir1", true).unwrap();
         assert!(tunnels(&app).is_empty());
+    }
+
+    /// The VIP tunnel stays out of the way of everything else on a server, and everything else out of its way:
+    /// the VPN cores' ports, KPING, Xray and the Kanki tunnels are refused to it, KPING and Xray are refused
+    /// its ports, its firewall rules are its own, and the list the MTU is worked out from does not change
+    #[tokio::test]
+    async fn the_vip_tunnel_and_the_rest_of_the_panel_keep_apart() {
+        let app = test_app();
+        app.db.set("api_key", "test-key");
+        app.db.set("tun_servers", &json!([{ "id": "ir1", "name": "Tehran", "token": "x", "addr": "ir.example.com", "loc": "iran", "ports": [51820, 51821, 4433, 4434] }]).to_string());
+        app.db.set("kping_cfg", &json!({ "on": true, "routes": [{ "id": "r1", "exit": "local", "iran": "ir1", "port": 24300, "tunnel_port": 24301 }] }).to_string());
+        let mut xs = crate::xray::panel::settings(&app);
+        xs.inbounds = serde_json::from_value(json!([{ "id": "x1", "server": "ir1", "protocol": "vless", "port": 9443, "network": "tcp", "enabled": true }])).unwrap();
+        app.db.set("xray_cfg", &serde_json::to_string(&xs).unwrap());
+        let mtu_list = serde_json::to_string(&crate::tunnel::panel::tunnels(&app)).unwrap();
+        let base = |port: u16, udp: &str, tcp: &str| json!({ "entry": "ir1", "exit": "local", "port": port, "hop": 4, "udp": [udp], "tcp": [tcp] });
+        for (body, who) in [
+            (base(51818, "5000", "6000"), "WireGuard"),
+            (base(24298, "5000", "6000"), "KPING"),
+            (base(24400, "5000", "9443"), "Xray"),
+            (base(4430, "5000", "6000"), "Hysteria2"),
+        ] {
+            let (st, v) = call(&app, "POST", "/api/vip", body).await;
+            assert_eq!(st, StatusCode::CONFLICT, "{}", v);
+            assert!(v["error"].as_str().unwrap().contains(who), "{} / {}", v, who);
+        }
+        let (st, v) = call(&app, "POST", "/api/vip", base(24400, "5000", "6000")).await;
+        assert_eq!(st, StatusCode::OK, "{}", v);
+        // the others are refused its ports
+        let (st, v) = call(&app, "POST", "/api/kping/routes", json!({ "id": "r1", "exit": "local", "iran": "ir1", "port": 24402, "tunnel_port": 24410 })).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST, "{}", v);
+        assert!(v["error"].as_str().unwrap().contains("VIP"), "{}", v);
+        let (st, v) = call(&app, "POST", "/api/kping/routes", json!({ "id": "r1", "exit": "local", "iran": "ir1", "port": 25000, "tunnel_port": 25001 })).await;
+        assert_ne!(st, StatusCode::BAD_REQUEST, "{}", v);
+        let (st, v) = call(&app, "POST", "/api/tunnels", json!({ "entry": "ir1", "exit": "local", "transport": "game", "port": 24401, "udp": ["7000"] })).await;
+        assert_eq!(st, StatusCode::CONFLICT, "{}", v);
+        let (st, v) = call(&app, "POST", "/api/tunnels", json!({ "entry": "ir1", "exit": "local", "transport": "tcp", "port": 23000, "tcp": ["6000"] })).await;
+        assert_eq!(st, StatusCode::CONFLICT, "a forwarded port of the VIP tunnel: {}", v);
+        let (st, v) = call(&app, "POST", "/api/tunnels", json!({ "entry": "ir1", "exit": "local", "transport": "tcp", "port": 23000, "tcp": ["6001"] })).await;
+        assert_eq!(st, StatusCode::OK, "{}", v);
+        // the list the MTU is worked out from is the Kanki tunnels only: a VIP tunnel is not in it (it cuts its
+        // own packets to fit, so the cores' MTU stays what it was)
+        let now_list: Vec<crate::tunnel::panel::Tunnel> = crate::tunnel::panel::tunnels(&app);
+        assert!(now_list.iter().all(|t| t.kind != "vip"));
+        assert_eq!(serde_json::from_str::<Vec<Value>>(&mtu_list).unwrap().len() + 1, now_list.len());
+        // its firewall rules: only its own ports, under its own owner (the Kanki tunnels keep theirs)
+        let ir = specs_for(&app, "ir1");
+        let rules = ir[0].open_rules();
+        assert_eq!(rules.len(), 4 + 2, "{:?}", rules);
+        assert!(rules.iter().all(|r| ["24400/udp", "24401/udp", "24402/udp", "24403/udp", "5000/udp", "6000/tcp"].contains(&r.as_str())));
+        // the Kanki tunnel's spec for the same server is the same as without the VIP tunnel
+        assert!(crate::tunnel::panel::specs_of(&app, "ir1").iter().all(|s| s.port != 24400));
     }
 }

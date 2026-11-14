@@ -79,7 +79,7 @@ impl Route {
         self.port2().wrapping_add(1)
     }
     /// every port this route takes on its Iran server
-    fn ports(&self) -> Vec<u16> {
+    pub(crate) fn ports(&self) -> Vec<u16> {
         let mut v = vec![self.port, self.tunnel_port, self.inner()];
         if !self.tunnel2.is_empty() || self.tunnel2_port != 0 {
             v.extend([self.port2(), self.inner2()]);
@@ -546,6 +546,10 @@ async fn route_save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
     }
     if s.routes.iter().any(|x| x.id != r.id && x.exit == r.exit && x.iran == r.iran) {
         return bad("this Iran server already leads to this server");
+    }
+    // a VIP tunnel holds one of these UDP ports
+    if let Some(v) = crate::vip::panel::ports_on(&app, &r.iran, "").into_iter().find(|v| v.1 && mine.contains(&v.0)) {
+        return bad(&format!("UDP port {} is already used by the VIP tunnel \"{}\"", v.0, v.2));
     }
     match s.routes.iter_mut().find(|x| x.id == r.id) {
         Some(x) => *x = r.clone(),

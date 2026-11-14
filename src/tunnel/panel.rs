@@ -1664,15 +1664,6 @@ fn route_list(app: &App) -> Vec<Tunnel> {
     v
 }
 
-/// The ports the enabled Kanki tunnels hold on server `sid`: (port, udp, tunnel name), for the VIP
-/// tunnel's checks
-pub(crate) fn tunnel_ports_on(app: &App, sid: &str) -> Vec<(u16, bool, String)> {
-    tunnels(app)
-        .into_iter()
-        .filter(|t| t.enabled)
-        .flat_map(|t| tunnel_needs(&t).into_iter().filter(|x| x.0 == sid).map(|x| (x.1, x.2, t.name.clone())).collect::<Vec<_>>())
-        .collect()
-}
 
 /// The address of the first server of the tunnels (or the route) that end at server `sid`: the Iran
 /// entry users would connect to. "" = no tunnel ends there.

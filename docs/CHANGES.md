@@ -25,6 +25,12 @@ the other tunnels are not touched. Code: `src/vip/` (`crypto`, `wire`, `core`, `
 - **Panel:** `/api/vip` (list, save, `/:id/on|off|secret`, delete); port checks both ways with the Kanki tunnels and live with the servers;
   the second configs (`port_entry*`, `udp_forward`, `entry_host`) follow VIP tunnels too; the Telegram alerts say when one is cut and
   connected again; a server with VIP tunnels is not removed alone. The secret never goes back to the page.
+- **Apart from the rest of the panel:** its ports are checked against everything set up on that server whether it listens yet or not
+  (the Kanki tunnels with Kanki DNS's and the Iran subscription's, Kanki DNS, the emergency chat, KPING, the Xray inbounds and the VPN
+  cores of the machine) and live; the Kanki tunnels, KPING, Xray and the Iran subscription are refused its ports in turn. Its firewall
+  rules are its own (`fw` owner `vip`), it touches no interface, MTU, sysctl or queue (it cuts its own packets to fit, so the cores' MTU
+  stays what it was), the VPN nodes do not run it, and a tunnel that is stopped or edited frees every socket at once (test
+  `the_vip_tunnel_and_the_rest_of_the_panel_keep_apart`).
 - **Fixed in `kprlc` (KPING v3 too):** a late repair of an older window could make the receiver drop a column of its own window and then
   panic for want of one (`alloc` → `expect`). Eviction now never takes a column of the repair's window, and a repair that does not fit is
   dropped instead (test `heavy_bursty_loss_never_panics`: bursts, 10-50% loss, repairs late and out of order).
