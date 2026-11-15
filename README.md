@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.46.2 — Game recorder file fixed
+In the downloaded JSON of the game recorder every flow keeps its own label and domain.
+
 ## New in 3.46.1 — VIP tunnel: the game apart from TCP
 KANKI MIX's and microtun's servers mark their game packets; the VIP tunnel gives those copies and repairs whatever their size and
 never copies or repairs TCP. Its speed guard holds downloads back so the game goes first; nothing to set by hand.
