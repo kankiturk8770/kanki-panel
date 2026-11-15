@@ -145,6 +145,14 @@ func TestReportLabelsAMatch(t *testing.T) {
 	if n := len(raw["packets"].([][6]uint32)); n != rep.Events || n < 2600 {
 		t.Fatalf("raw %d", n)
 	}
+	// the raw flows keep their own label and domain (the report's list is sorted, the raw one is not)
+	for _, f := range raw["flows"].([]map[string]any) {
+		for _, r := range rep.Flows {
+			if r.Target == f["target"] && (r.Label != f["label"] || r.Domain != f["domain"]) {
+				t.Fatalf("raw flow %v has %v / %v, the report says %v / %v", f["target"], f["label"], f["domain"], r.Label, r.Domain)
+			}
+		}
+	}
 }
 
 // فقط کاربر خواسته‌شده ضبط می‌شود، و بعد از پایان زمان چیزی اضافه نمی‌شود

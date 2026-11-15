@@ -837,7 +837,8 @@ func (r *recorder) report(now time.Time) (report, map[string]any) {
 		}
 	}
 	out.Vip = v
-	out.Flows = reps
+	// a copy: reps stays in recording order, so the raw flows below keep their own label and domain
+	out.Flows = append([]flowRep(nil), reps...)
 	sort.SliceStable(out.Flows, func(i, j int) bool {
 		return out.Flows[i].Up.Pkts+out.Flows[i].Down.Pkts > out.Flows[j].Up.Pkts+out.Flows[j].Down.Pkts
 	})

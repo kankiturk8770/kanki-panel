@@ -1,3 +1,10 @@
+# v3.46.2 — Game recorder: the downloaded file's flows keep their own labels
+- In «Download everything (JSON)» the label and domain of each flow could belong to another flow: the report sorts its list of
+  flows by packets and the raw list took its labels from the sorted copy. The report sorts a copy now (`record.go`). The page's own
+  report was right all along.
+- Checked: `TestReportLabelsAMatch` now also compares every raw flow with the report (it fails on 3.46.1: DNS showed as «match»);
+  `go test`, `cargo test`.
+
 # v3.46.1 — VIP tunnel: the game apart from TCP, by what the servers know
 - **What was wrong (measured, not guessed):** the VIP tunnel sorted packets by size: up to 512 bytes «game» (two paths, copies,
   repairs), bigger «bulk» (one path, and its speed guard dropped them when the line was full). PUBG's own packets reach ~503 bytes
