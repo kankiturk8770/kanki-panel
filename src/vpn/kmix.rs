@@ -542,6 +542,34 @@ pub async fn online() -> HashMap<String, i64> {
     }
 }
 
+/// The game recorder of this server's KANKI MIX (`record.go` in the server): `action` start (with `user`
+/// and `secs`), stop, clear, get (the report) or raw (the report and every packet, for a download)
+pub async fn record_local(b: &Value) -> Value {
+    let Some((port, secret)) = api_here() else { return json!({"error": "KANKI MIX is not running on this server"}) };
+    static C: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let c = C.get_or_init(|| reqwest::Client::builder().timeout(std::time::Duration::from_secs(30)).build().unwrap_or_default());
+    let base = format!("http://127.0.0.1:{}", port);
+    let req = match b["action"].as_str().unwrap_or("get") {
+        "start" => c.post(format!("{}/record/start", base)).json(&json!({"user": b["user"], "secs": b["secs"]})),
+        "stop" => c.post(format!("{}/record/stop", base)),
+        "clear" => c.post(format!("{}/record/clear", base)),
+        "raw" => c.get(format!("{}/record?raw=1", base)),
+        _ => c.get(format!("{}/record", base)),
+    };
+    let r = match req.header("Authorization", secret).send().await {
+        Ok(r) => r,
+        Err(e) => return json!({"error": format!("KANKI MIX did not answer: {}", e.without_url())}),
+    };
+    // a server not updated yet has no recorder
+    if r.status() == reqwest::StatusCode::NOT_FOUND {
+        return json!({"error": "old"});
+    }
+    if !r.status().is_success() {
+        return json!({"error": format!("KANKI MIX: HTTP {}", r.status().as_u16())});
+    }
+    r.json::<Value>().await.unwrap_or_else(|_| json!({"error": "KANKI MIX sent no JSON"}))
+}
+
 /// What this server reports about KANKI MIX (for the links and the panel)
 pub fn info() -> Value {
     let st: Value = std::fs::read_to_string(STATE_FILE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
@@ -569,6 +597,64 @@ pub fn router() -> axum::Router<std::sync::Arc<App>> {
     axum::Router::new()
         .route("/api/kmix", get(get_all).put(put_settings))
         .route("/api/kmix/users", post(all_users))
+        .route("/api/kmix/record", post(record_api))
+}
+
+/// The game recorder (KANKI MIX › Game recorder): `{action, node, user, secs}`. start / stop / clear go to
+/// every server running KANKI MIX (the user may connect to any of them); get answers each server's
+/// report; raw is one server's packets for a download.
+async fn record_api(axum::extract::State(app): St, h: axum::http::HeaderMap, axum::Json(b): axum::Json<Value>) -> axum::response::Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    let _ = crate::guard!(app, h, "nodes");
+    let action = b["action"].as_str().unwrap_or("get").to_string();
+    if !matches!(action.as_str(), "start" | "stop" | "clear" | "get" | "raw") {
+        return crate::api::err(StatusCode::BAD_REQUEST, "unknown action");
+    }
+    let users = app.db.users();
+    let names: Vec<String> = users.iter().filter(|u| u.has_proto("kmix")).map(|u| u.username.clone()).collect();
+    let mut body = json!({"action": action});
+    if action == "start" {
+        let user = b["user"].as_str().unwrap_or("").trim().to_string();
+        if !names.contains(&user) {
+            return crate::api::err(StatusCode::BAD_REQUEST, "pick a user that has KANKI MIX");
+        }
+        let secs = b["secs"].as_u64().unwrap_or(600).clamp(60, 3600);
+        body = json!({"action": "start", "user": user, "secs": secs});
+    }
+    let want = b["node"].as_str().unwrap_or("").to_string();
+    let nodes: Vec<Node> = app.db.nodes().into_iter().filter(|n| {
+        let installed = n.id == "local" || crate::api::node_info(n)["kmix_port"].as_u64().is_some();
+        (want.is_empty() || n.id == want) && installed && (n.id == "local" || n.online)
+    }).collect();
+    if action == "raw" && (want.is_empty() || nodes.is_empty()) {
+        return crate::api::err(StatusCode::BAD_REQUEST, "pick a server");
+    }
+    let asks = nodes.iter().map(|n| {
+        let (app, body) = (app.clone(), body.clone());
+        async move {
+            let r = if n.id == "local" {
+                record_local(&body).await
+            } else {
+                crate::sync::remote_post_json(&app, n, "/agent/kmix/record", &body).await.unwrap_or_else(|| json!({"error": "the server did not answer"}))
+            };
+            (n.id.clone(), n.name.clone(), r)
+        }
+    });
+    let answers = futures_util::future::join_all(asks).await;
+    if action == "raw" {
+        return axum::Json(answers.into_iter().next().map(|x| x.2).unwrap_or(Value::Null)).into_response();
+    }
+    let servers: Vec<Value> = answers.into_iter().map(|(id, name, r)| {
+        let mut v = json!({"id": id, "name": name});
+        if let Some(e) = r["error"].as_str() {
+            v["error"] = json!(e);
+        } else {
+            v["report"] = r["report"].clone();
+        }
+        v
+    }).collect();
+    axum::Json(json!({"servers": servers, "users": names})).into_response()
 }
 
 fn settings_json(s: &Settings) -> Value {
@@ -713,6 +799,38 @@ async fn all_users(axum::extract::State(app): St, h: axum::http::HeaderMap, axum
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The game recorder API: only a user that has KANKI MIX can be recorded, a wrong action is refused
+    #[tokio::test]
+    async fn recorder_asks_only_for_kmix_users() {
+        use tower::ServiceExt;
+        let app = crate::kping::tests::test_app();
+        app.db.set("api_key", "test-key");
+        let call = |b: Value| {
+            let app = app.clone();
+            async move {
+                let r = axum::http::Request::builder().method("POST").uri("/api/kmix/record").header("authorization", "Bearer test-key")
+                    .header("content-type", "application/json").body(axum::body::Body::from(b.to_string())).unwrap();
+                let res = crate::api::master_router(app).oneshot(r).await.unwrap();
+                let st = res.status();
+                let b = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+                (st, serde_json::from_slice::<Value>(&b).unwrap_or(Value::Null))
+            }
+        };
+        let (st, _) = call(json!({"action": "rm -rf"})).await;
+        assert_eq!(st, axum::http::StatusCode::BAD_REQUEST);
+        let (st, v) = call(json!({"action": "start", "user": "nobody"})).await;
+        assert_eq!(st, axum::http::StatusCode::BAD_REQUEST, "{}", v);
+        let (st, _) = call(json!({"action": "raw"})).await;
+        assert_eq!(st, axum::http::StatusCode::BAD_REQUEST);
+        let (st, v) = call(json!({"action": "get"})).await;
+        assert_eq!(st, axum::http::StatusCode::OK);
+        assert!(v["users"].as_array().unwrap().is_empty() && v["servers"].is_array(), "{}", v);
+        // a server without KANKI MIX says so instead of failing the page
+        if !std::path::Path::new(UNIT).exists() {
+            assert!(record_local(&json!({"action": "get"})).await["error"].as_str().unwrap().contains("not running"));
+        }
+    }
 
     #[test]
     fn route_and_host_options() {

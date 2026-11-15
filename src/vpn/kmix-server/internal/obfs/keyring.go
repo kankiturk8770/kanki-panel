@@ -125,6 +125,18 @@ func (k *Keyring) Len() int {
 	return len(k.users)
 }
 
+// Has کاربری با این اسم هست؟
+func (k *Keyring) Has(name string) bool {
+	k.mu.RLock()
+	defer k.mu.RUnlock()
+	for _, u := range k.users {
+		if u.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func addrPort(a net.Addr) (netip.AddrPort, bool) {
 	ua, ok := a.(*net.UDPAddr)
 	if !ok {
