@@ -29,8 +29,12 @@ const SILENCE: Duration = Duration::from_secs(5);
 const UP_FOR: Duration = Duration::from_secs(3);
 /// realtime traffic went this recently: pings are faster and game priority may hold the bulk class back
 const RT_ACTIVE: Duration = Duration::from_secs(3);
-/// small packets a second above which a flow is not a game (games send 20-130)
-const HEAVY: u32 = 300;
+/// Every UDP packet is realtime: its first copy goes at once and is never held back or dropped. The copies on
+/// a second path and the repairs are spent on each user flow up to this many bytes a second (a game needs
+/// 5-30 KB/s, a burst when players appear ~20 KB in 50 ms); a flow sending more (a download inside the VPN)
+/// has the rest of its packets sent once, without copies, so it never multiplies the servers' traffic.
+const PROTECT_BPS: f64 = 256.0 * 1024.0;
+const PROTECT_BURST: f64 = 96.0 * 1024.0;
 
 pub struct Running {
     spec: VipSpec,
@@ -232,8 +236,8 @@ struct Session {
     bulk_got: u64,
     guard: Guard,
     frag_id: u32,
-    /// small packets of each user flow in its current second: (start, count, heavy last second)
-    rates: HashMap<(u8, u32), (Instant, u32, bool)>,
+    /// the copy and repair budget of each user flow: (last refill, bytes left)
+    budget: HashMap<(u8, u32), (Instant, f64)>,
     /// the last round of the slower timers
     tick_at: Option<Instant>,
     // counts
@@ -303,7 +307,7 @@ impl Session {
             bulk_got: 0,
             guard: Guard { on: false, rate: 0.0, tokens: 0.0, refill_at: now, tick_at: now, bytes: 0, measured: 0.0, clear_since: None },
             frag_id: rand::random(),
-            rates: HashMap::new(),
+            budget: HashMap::new(),
             tick_at: None,
             st: VipStatus { id: spec.id.clone(), role: spec.role.clone(), ..Default::default() },
             echo_id: 0,
@@ -477,8 +481,9 @@ impl Session {
         v
     }
 
-    /// `user`: the users' own traffic (an echo of the quality check does not make the class active)
-    fn send_rt(&mut self, inner: Vec<u8>, now: Instant, user: bool) {
+    /// `user`: the users' own traffic (an echo of the quality check does not make the class active);
+    /// `protect`: copies and repairs for it (false = sent once, still first and never dropped)
+    fn send_rt(&mut self, inner: Vec<u8>, now: Instant, user: bool, protect: bool) {
         if self.cur.is_none() {
             return;
         }
@@ -490,6 +495,14 @@ impl Session {
         wire::put(&mut f, &Frame::Data { bulk: false, lane: 0, seq, inner: &inner });
         self.send(first, &f);
         self.st.rt_tx += 1;
+        // the repairs cover it either way (they are made from the newest packets in a row)
+        self.rt_tx.add(seq, &inner, now + RT_LIFE);
+        if user {
+            self.rt_last = Some(now);
+        }
+        if !protect {
+            return;
+        }
         if let Some(&second) = ps.get(1) {
             if self.send(second, &f) {
                 self.st.rt_copies += 1;
@@ -499,10 +512,6 @@ impl Session {
             if self.late.len() < 512 {
                 self.late.push_back((now + LATE_COPY, first, f));
             }
-        }
-        self.rt_tx.add(seq, &inner, now + RT_LIFE);
-        if user {
-            self.rt_last = Some(now);
         }
         self.rt_since_fix += 1;
         let loss = self.paths[first].loss.max(self.resid);
@@ -630,12 +639,12 @@ impl Session {
     fn on_up(&mut self, u: Up) {
         let now = Instant::now();
         match u {
+            // every UDP packet (a game, KANKI MIX, microtun) is realtime, whatever its size; the TCP
+            // connections below are the bulk class
             Up::Udp { pidx, flow, data } => {
-                // small, and from a flow that sends at a game's pace: a flow of hundreds of small packets a
-                // second is the acknowledgements of a download (inside WireGuard, say), not a game
-                let rt = data.len() <= self.spec.rt_limit() && !self.heavy(pidx, flow, now);
+                let protect = self.protect(pidx, flow, data.len(), now);
                 let inner = wire::inner_udp(pidx, flow, &data);
-                if rt { self.send_rt(inner, now, true) } else { self.send_bulk(inner, now) }
+                self.send_rt(inner, now, true, protect)
             }
             // the TCP connections: QUIC sends its lost packets again by itself, so they never take the
             // realtime class's copies (and never make it look busy)
@@ -643,18 +652,20 @@ impl Session {
         }
     }
 
-    /// Counts a small packet of a flow: true when the flow sent more than `HEAVY` of them in its last second
-    fn heavy(&mut self, pidx: u8, flow: u32, now: Instant) -> bool {
-        if self.rates.len() > 4096 {
-            self.rates.retain(|_, r| now.duration_since(r.0) < Duration::from_secs(10));
+    /// Takes `len` bytes of the flow's copy and repair budget: false = the flow sends more than a game ever
+    /// does (`PROTECT_BPS`), so this packet goes once
+    fn protect(&mut self, pidx: u8, flow: u32, len: usize, now: Instant) -> bool {
+        if self.budget.len() > 4096 {
+            self.budget.retain(|_, b| now.duration_since(b.0) < Duration::from_secs(60));
         }
-        let r = self.rates.entry((pidx, flow)).or_insert((now, 0, false));
-        if now.duration_since(r.0) >= Duration::from_secs(1) {
-            r.2 = r.1 > HEAVY;
-            *r = (now, 0, r.2);
+        let b = self.budget.entry((pidx, flow)).or_insert((now, PROTECT_BURST));
+        b.1 = (b.1 + now.duration_since(b.0).as_secs_f64() * PROTECT_BPS).min(PROTECT_BURST);
+        b.0 = now;
+        if b.1 < len as f64 {
+            return false;
         }
-        r.1 += 1;
-        r.2 || r.1 > HEAVY
+        b.1 -= len as f64;
+        true
     }
 
     fn deliver(&mut self, inner: &[u8], now: Instant) {
@@ -665,7 +676,7 @@ impl Session {
             Some(Inner::Quic(d)) => {
                 let _ = self.down.try_send(Down::Quic(d.to_vec()));
             }
-            Some(Inner::Echo { back: false, id, t }) => self.send_rt(wire::inner_echo(true, id, t), now, false),
+            Some(Inner::Echo { back: false, id, t }) => self.send_rt(wire::inner_echo(true, id, t), now, false, true),
             Some(Inner::Echo { back: true, id, t }) => {
                 let rtt = self.ms(now).wrapping_sub(t) as f64;
                 if let Some(e) = self.echoes.iter_mut().find(|e| e.0 == id && e.2.is_none()) {
@@ -1050,7 +1061,7 @@ impl Session {
                 }
                 let t = self.ms(now);
                 // the echo itself is realtime, not counted as the users' traffic
-                self.send_rt(wire::inner_echo(false, id, t), now, false);
+                self.send_rt(wire::inner_echo(false, id, t), now, false, true);
             }
         }
         // game priority, every 200 ms
@@ -1181,24 +1192,34 @@ impl Session {
 mod tests {
     use super::*;
 
-    /// A flow of hundreds of small packets a second (a download's acknowledgements) is bulk; a game's pace is not
+    /// Every UDP packet is realtime whatever its size; a game's flow (60 a second, up to 500 bytes, and the
+    /// burst of 76 packets in 20 ms measured in PUBG when players appear) keeps its copies and repairs, a
+    /// download in another flow does not take them from it, and the download's own packets beyond the budget
+    /// go once (not dropped)
     #[test]
-    fn a_busy_small_flow_is_not_a_game() {
+    fn every_udp_packet_is_realtime_and_a_game_keeps_its_copies() {
         let (tx, _rx) = mpsc::channel(1);
         let spec = VipSpec { id: "x".into(), role: "entry".into(), port: 1, udp_paths: 1, ..Default::default() };
         let mut s = Session::new(spec, [0; 32], Arc::new(Mutex::new(vec![])), tx, Arc::new(Mutex::new(VipStatus::default())), Arc::new(flows::Counters::default()), Arc::new(Screen::new([0; 32])));
         let t0 = Instant::now();
-        // a game: 60 a second for 3 seconds
-        for i in 0..180u64 {
-            assert!(!s.heavy(0, 1, t0 + Duration::from_millis(i * 16)));
+        let mut download_once = 0;
+        for i in 0..10_000u64 {
+            let at = t0 + Duration::from_micros(i * 1000);
+            // a download in flow 2: 1 000 packets of 1 300 bytes a second
+            if !s.protect(0, 2, 1300, at) {
+                download_once += 1;
+            }
+            // the game in flow 1: one packet every 16 ms, 500 bytes, and a burst of 76 at second 5
+            if i % 16 == 0 {
+                assert!(s.protect(0, 1, 500, at), "game packet at {} ms", i);
+            }
+            if i == 5000 {
+                for _ in 0..76 {
+                    assert!(s.protect(0, 1, 500, at), "burst");
+                }
+            }
         }
-        // acknowledgements: 1000 a second
-        let mut heavy_seen = false;
-        for i in 0..2000u64 {
-            heavy_seen |= s.heavy(0, 2, t0 + Duration::from_micros(i * 1000));
-        }
-        assert!(heavy_seen && s.heavy(0, 2, t0 + Duration::from_millis(2001)));
-        // the game's own flow stays a game
-        assert!(!s.heavy(0, 1, t0 + Duration::from_millis(3000)));
+        // the download had its first 96 KB and then 256 KB a second protected, nothing more
+        assert!(download_once > 7_000, "{}", download_once);
     }
 }

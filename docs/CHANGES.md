@@ -1,3 +1,21 @@
+# v3.46.1 — VIP tunnel: every UDP packet is a game packet
+- **What was wrong (measured, not guessed):** the VIP tunnel sorted packets by size: up to 512 bytes «game» (two paths, copies,
+  repairs), bigger «bulk» (one path, no copies, and its speed guard could drop them). PUBG's own packets reach ~503 bytes (PCAPdroid,
+  a whole match: up 58 a second, median 18 B; down 31–37 a second, median 91 B, max 503) and KANKI MIX adds 39 bytes and up to 64 of
+  padding, so on the wire the biggest game packets — players, guns and vehicles appearing — were above 512: 13 % of the match's
+  packets down in the game recorder, arriving in bursts of up to 76 packets in 20 ms when a round starts. Those were the packets
+  that went without copies and could be dropped.
+- **Now the size plays no part:** every UDP packet a user sends through the tunnel (a game, KANKI MIX, microtun) is realtime: its
+  first copy goes at once and is never held back or dropped; the TCP connections are the bulk class (repairs only on a lossy line,
+  the speed guard). The «UDP packets up to this size are game packets» field is gone from the form (an old value is ignored).
+- **So a download inside the VPN does not multiply the servers' traffic,** the copies and repairs of each user flow are spent up to
+  96 KB at once and 256 KB a second (a game needs 5–30 KB/s, a burst ~20 KB); past that a packet still goes first and is never
+  dropped, just once. The old «more than 300 small packets a second = download» rule is gone with it.
+- Game recorder › «What the VIP tunnel sees» now shows the biggest burst in 50 ms and the most game packets a second.
+- **Checked:** new test `big_game_packets_survive_like_small_ones` (600-byte game packets, 5 % loss each way): before 373/400
+  back, 361 on time, p99 277 ms; now 400/400, all on time, p99 48 ms, nothing bulk; `every_udp_packet_is_realtime_and_a_game_keeps_its_copies`
+  (a 76-packet burst of 500 B keeps its copies next to a 1.3 MB/s download); `cargo test`.
+
 # v3.46.0 — Game recorder (KANKI MIX)
 - **KANKI MIX › Game recorder (new tab):** pick a user and a length (5–60 minutes), «Start recording», play one full match on that
   account, then read the report. It records on every server running KANKI MIX at once (the user may connect to any of them) and shows the

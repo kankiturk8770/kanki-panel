@@ -117,9 +117,11 @@ function krReport(d){var errs=(d.servers||[]).filter(function(x){return x.error}
   '<div class="kr-tm ltr"><span>0:00</span><span>'+krTime(tl.length)+'</span></div>');
  // what the VIP tunnel makes of it
  var v=r.vip||{},pc=function(x){return N(((+x||0)*100).toFixed(1))+'%'};
- h+=kuGroup(t('What the VIP tunnel sees'),null,'',kuLine(t('Match packets bigger than')+' '+N(v.rt_max)+' B '+t('on the wire (the VIP tunnel does not treat them as game)'),'<b class="ltr">↑'+pc(v.match_big_up)+' ↓'+pc(v.match_big_down)+'</b>')+
-  kuLine(t('Seconds with more than')+' '+N(v.heavy)+' '+t('small packets (the VIP tunnel takes the whole flow for a download)'),'<b class="ltr">↑'+N(v.heavy_up)+' ↓'+N(v.heavy_down)+'</b> <span class="muted">('+t('in the match')+' ↑'+N(v.heavy_up_match)+' ↓'+N(v.heavy_down_match)+')</span>')+
-  kuLine(t('Biggest burst of big game packets in 50 ms (the VIP speed guard lets about 6200 B through)'),'<b class="ltr">'+N(v.big_burst50_down)+' B</b>'));
+ // what the VIP tunnel makes of it (3.46.1: every UDP packet is realtime; copies and repairs per flow up to
+ // 96 KB at once and 256 KB a second)
+ var mf=match[0];
+ h+=kuGroup(t('What the VIP tunnel sees'),null,'',kuLine(t('Biggest burst of game packets in 50 ms (the VIP tunnel copies and repairs up to 96 KB at once)'),'<b class="ltr">'+N(mf?Math.max(mf.down.burst50_bytes,mf.up.burst50_bytes):0)+' B</b>')+
+  kuLine(t('Game packets a second at most (all of them go first, with copies and repairs)'),'<b class="ltr">↑'+N(mf?mf.up.max_pps:0)+' ↓'+N(mf?mf.down.max_pps:0)+'</b>'));
  // flows
  var hs=['≤64','≤128','≤256','≤512','≤800','≤1100','>1100'],hist=function(a){return a.map(function(x,i){return x?hs[i]+':'+N(x):''}).filter(Boolean).join(' ')};
  h+=kuGroup(t('UDP flows (game)'),r.flows.length,'',r.flows.length?r.flows.slice(0,40).map(function(f){var lb=f.label;

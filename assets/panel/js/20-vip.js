@@ -100,7 +100,6 @@ function vpEdit(i){var d=VP.d;if(!d)return;var x=i!=null?d.tunnels[i]:null,v=x?x
    '<label class="f">'+t('Hiding the packet sizes')+'</label>'+seg('vf_st',[[0,t('None'),t('fastest')],[1,t('A little'),t('small packets padded')],[2,t('More'),t('every size changes')]],v.stealth==null?1:v.stealth)+
   '<details class="vp-adv"><summary>'+t('Advanced')+'</summary><div class="kxf">'+
    num('vf_rk',t('New keys every (minutes)'),v.rekey_secs?Math.round(v.rekey_secs/60):'','10')+num('vf_mt',t('Largest UDP packet'),v.mtu||'','1420')+
-   num('vf_rm',t('UDP packets up to this size are game packets'),v.rt_max||'','512')+
    '<div><label class="f">'+t('Download repair lanes')+'</label><select id="vf_bu">'+[1,2,4,8].map(function(n){return '<option value="'+n+'"'+((v.burst||4)==n?' selected':'')+'>'+N(n)+'</option>'}).join('')+'</select></div>'+
    txt('vf_da',t('Address the dialer uses'),v.dial,t('automatic: the server\'s own'),true)+'</div></details></div>'+
   '<div class="kxsave"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="vf_go">'+t('Save')+'</button></div>','wide');
@@ -117,7 +116,7 @@ function vpEdit(i){var d=VP.d;if(!d)return;var x=i!=null?d.tunnels[i]:null,v=x?x
    port:on('vf_udp')?n('vf_po'):0,hop:n('vf_hp')||1,hop_secs:n('vf_hs'),udp_paths:n('vf_up')||1,ftcp_port:on('vf_ft')?n('vf_fp'):0,
    s_kind:$('#vf_sk').value,s_port:n('vf_sp'),s_sni:$('#vf_sn').value.trim(),s_host:$('#vf_sh').value.trim(),s_dial:$('#vf_sa').value.trim(),s_path:$('#vf_pt').value.trim(),s_frag:on('vf_fr'),
    tcp:list('vf_tcp'),udp:list('vf_udpp'),target:$('#vf_tg').value.trim(),pq:on('vf_pq'),stealth:+segv('vf_st')||0,
-   rekey_secs:n('vf_rk')*60,mtu:n('vf_mt'),rt_max:n('vf_rm'),burst:+$('#vf_bu').value,dial:$('#vf_da').value.trim()};
+   rekey_secs:n('vf_rk')*60,mtu:n('vf_mt'),rt_max:0,burst:+$('#vf_bu').value,dial:$('#vf_da').value.trim()};
   if(!b.entry||!b.exit)return toast(t('Choose both servers'),1);
   if(!b.port&&!b.ftcp_port&&!b.s_kind)return toast(t('Turn on at least one path'),1);
   if(!b.tcp.length&&!b.udp.length)return toast(t('Forward at least one port'),1);

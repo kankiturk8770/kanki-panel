@@ -306,6 +306,27 @@ async fn realtime_survives_a_lossy_line() {
     b.stop();
 }
 
+/// A game packet as KANKI MIX puts it on the wire (PUBG's biggest, ~500 bytes, + KANKI MIX's header and
+/// padding: ~600) is a game packet too: on the same lossy line it comes back like a small one (before 3.46.1
+/// everything above 512 bytes was bulk: no copies, and dropped by the speed guard)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn big_game_packets_survive_like_small_ones() {
+    let _e = udp_echo(35610).await;
+    let line = Line::new(Model { loss: 0.05, delay: 15, jitter: 3, ..Default::default() }, 7);
+    let _l = udp_line(35620, 35600, 2, line.clone()).await;
+    let (en, ex) = pair("big", "gaming", 35600, 35620, 2, 1, 0, 35611, 35612, 35610);
+    let (a, b) = (Running::start(en), Running::start(ex));
+    assert!(wait_up(&a, &b, 15).await);
+    let (got, ok, rtts) = game(35611, 400, 600, 10, 150.0).await;
+    let st = b.status();
+    eprintln!("600 B game packets, 5% loss each way: {}/400 back, {} on time, p50 {:.1} ms p99 {:.1} ms, rt sent {} bulk sent {} copies {}",
+        got, ok, pct(&rtts, 0.5), pct(&rtts, 0.99), st.rt_tx, st.bulk_tx, st.rt_copies);
+    assert!(got >= 394, "{} of 400", got);
+    assert_eq!(st.bulk_tx, 0, "a UDP packet went bulk");
+    a.stop();
+    b.stop();
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_dead_path_costs_nothing() {
     let _e = udp_echo(35310).await;
