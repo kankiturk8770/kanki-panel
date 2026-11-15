@@ -21,7 +21,8 @@ use tokio::task::JoinHandle;
 
 /// toward the other side
 pub enum Up {
-    Udp { pidx: u8, flow: u32, data: Vec<u8> },
+    /// `tos`: the mark the server's service sent it with (exit side; None = not known, the user side)
+    Udp { pidx: u8, flow: u32, data: Vec<u8>, tos: Option<u8> },
     Quic(Vec<u8>),
 }
 
@@ -136,7 +137,7 @@ async fn entry_udp(bind: String, port: u16, pidx: u8, up: mpsc::Sender<Up>, back
             }
         };
         back.lock().unwrap_or_else(|e| e.into_inner()).insert(id, (tx.clone(), from, now));
-        let _ = up.try_send(Up::Udp { pidx, flow: id, data: buf[..n].to_vec() });
+        let _ = up.try_send(Up::Udp { pidx, flow: id, data: buf[..n].to_vec(), tos: None });
         if now.duration_since(clean) > Duration::from_secs(60) {
             clean = now;
             let old: Vec<(SocketAddr, u32)> = flows.iter().filter(|(_, f)| now.duration_since(f.1) > FLOW_IDLE).map(|(a, f)| (*a, f.0)).collect();
@@ -220,12 +221,16 @@ async fn exit_down(mut down: mpsc::Receiver<Down>, target: String, ports: Vec<u1
                 }
                 let _ = sock.send(&data);
                 let up2 = up.clone();
+                // the answers with the mark each one came with: KANKI MIX and microtun on this server mark
+                // their game packets (`netq::send_to_marked`), so only those get copies and repairs
+                let fd = std::os::fd::AsRawFd::as_raw_fd(&*sock);
+                crate::netq::want_tos(fd);
                 let pump = tokio::spawn(async move {
                     let mut b = vec![0u8; 65535];
                     loop {
-                        match s2.recv(&mut b).await {
-                            Ok(n) => {
-                                let _ = up2.try_send(Up::Udp { pidx, flow, data: b[..n].to_vec() });
+                        match s2.async_io(tokio::io::Interest::READABLE, || crate::netq::recv_tos(fd, &mut b)).await {
+                            Ok((n, tos)) => {
+                                let _ = up2.try_send(Up::Udp { pidx, flow, data: b[..n].to_vec(), tos });
                             }
                             Err(_) => tokio::time::sleep(Duration::from_millis(20)).await,
                         }

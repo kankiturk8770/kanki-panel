@@ -14,9 +14,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-/// realtime packets are worth rebuilding this long, bulk ones this long
+/// realtime packets are worth rebuilding this long
 const RT_LIFE: Duration = Duration::from_millis(300);
-const BULK_LIFE: Duration = Duration::from_millis(400);
 /// a lone realtime packet gets its repair this soon when nothing follows it
 const TAIL: Duration = Duration::from_millis(15);
 /// one path: the second copy of a realtime packet this much later (a short outage loses only one)
@@ -29,12 +28,39 @@ const SILENCE: Duration = Duration::from_secs(5);
 const UP_FOR: Duration = Duration::from_secs(3);
 /// realtime traffic went this recently: pings are faster and game priority may hold the bulk class back
 const RT_ACTIVE: Duration = Duration::from_secs(3);
-/// Every UDP packet is realtime: its first copy goes at once and is never held back or dropped. The copies on
-/// a second path and the repairs are spent on each user flow up to this many bytes a second (a game needs
-/// 5-30 KB/s, a burst when players appear ~20 KB in 50 ms); a flow sending more (a download inside the VPN)
-/// has the rest of its packets sent once, without copies, so it never multiplies the servers' traffic.
-const PROTECT_BPS: f64 = 256.0 * 1024.0;
-const PROTECT_BURST: f64 = 96.0 * 1024.0;
+/// Which user packets are the game (realtime: first at once, copies and repairs) and which are TCP (bulk:
+/// sent once, never repaired):
+/// * a packet the server's own service marked as game (`netq::GAME_TOS`; KANKI MIX's datagrams, microtun's
+///   UDP) is realtime; an unmarked packet of a flow whose service marks is that service's TCP (KANKI MIX's
+///   KCP, microtun's TCP) and goes bulk. This is the side the big traffic comes from (downloads go down).
+/// * a packet nobody marked (the user side, or a service that does not mark) is realtime, but its copies
+///   and repairs are held to `PLAIN_BPS` a flow: a game needs 5-30 KB/s, so a download there is sent once
+///   past that and never doubles the line.
+/// A marked flow's copies are held to `MARKED_BPS` (microtun marks all UDP, a QUIC video too).
+const PLAIN_BPS: f64 = 64.0 * 1024.0;
+const PLAIN_BURST: f64 = 48.0 * 1024.0;
+/// what the users send (the entry side, never marked): a game sends little up (PUBG ~60 packets of ~20 B a
+/// second, ~12 KB/s even sent twice), a download sends its acknowledgements; held lower still
+const UP_BPS: f64 = 32.0 * 1024.0;
+const UP_BURST: f64 = 32.0 * 1024.0;
+const MARKED_BPS: f64 = 256.0 * 1024.0;
+const MARKED_BURST: f64 = 256.0 * 1024.0;
+/// a flow stays «marking» this long after its last marked packet
+const MARK_KEEP: Duration = Duration::from_secs(120);
+
+#[derive(Clone, Copy)]
+struct FlowB {
+    at: Instant,
+    left: f64,
+    marked: Option<Instant>,
+}
+
+/// What a user packet is: realtime with or without copies, or bulk
+#[derive(Debug, PartialEq)]
+enum Class {
+    Game { protect: bool },
+    Bulk,
+}
 
 pub struct Running {
     spec: VipSpec,
@@ -88,6 +114,8 @@ struct PathM {
     jit: f64,
     /// the smallest round trip lately: the path with empty queues
     min_rtt: f64,
+    /// the newest round trip (the queue now, for the speed guard)
+    last_rtt: f64,
     min_at: Option<Instant>,
     /// share of our packets the other side did not get (0..1, smoothed)
     loss: f64,
@@ -129,6 +157,7 @@ impl PathM {
         self.srtt + 3.0 * self.jit + 2000.0 * self.loss + s
     }
     fn rtt_sample(&mut self, ms: f64, now: Instant) {
+        self.last_rtt = ms;
         if self.srtt == 0.0 {
             self.srtt = ms;
             self.jit = ms / 4.0;
@@ -228,16 +257,14 @@ struct Session {
     // bulk class
     lanes: usize,
     bulk_seq: Vec<u32>,
-    bulk_tx: Vec<RlcTx>,
     bulk_rx: Vec<RlcRx>,
     bulk_dedup: Vec<Dedup>,
     bulk_rr: usize,
-    bulk_credit: f64,
     bulk_got: u64,
     guard: Guard,
     frag_id: u32,
-    /// the copy and repair budget of each user flow: (last refill, bytes left)
-    budget: HashMap<(u8, u32), (Instant, f64)>,
+    /// each user flow: its copy and repair budget (last refill, bytes left) and when it last came marked
+    budget: HashMap<(u8, u32), FlowB>,
     /// the last round of the slower timers
     tick_at: Option<Instant>,
     // counts
@@ -299,11 +326,9 @@ impl Session {
             resid: 0.0,
             lanes,
             bulk_seq: (0..lanes).map(|_| rand::random()).collect(),
-            bulk_tx: (0..lanes).map(|_| RlcTx::default()).collect(),
             bulk_rx: (0..lanes).map(|_| RlcRx::default()).collect(),
             bulk_dedup: (0..lanes).map(|_| Dedup::default()).collect(),
             bulk_rr: 0,
-            bulk_credit: 0.0,
             bulk_got: 0,
             guard: Guard { on: false, rate: 0.0, tokens: 0.0, refill_at: now, tick_at: now, bytes: 0, measured: 0.0, clear_since: None },
             frag_id: rand::random(),
@@ -560,34 +585,14 @@ impl Session {
         wire::put(&mut f, &Frame::Data { bulk: true, lane: lane as u8, seq, inner: &inner });
         self.send(p, &f);
         self.st.bulk_tx += 1;
-        self.bulk_tx[lane].add(seq, &inner, now + BULK_LIFE);
-        let pm = &self.paths[p];
-        let l = pm.loss;
-        let mut ratio = if l < 0.002 {
-            0.0
-        } else if self.mode() == "speed" {
-            (1.5 * l).min(0.2)
-        } else {
-            (2.0 * l + 0.01).min(0.25)
-        };
-        // a growing queue means the loss is the line being full: more repairs would only fill it more
-        if pm.min_rtt > 0.0 && pm.srtt > pm.min_rtt + (0.5 * pm.min_rtt).max(20.0) {
-            ratio /= 2.0;
-        }
-        self.bulk_credit += ratio;
-        if self.bulk_credit >= 1.0 {
-            self.bulk_credit -= 1.0;
-            if let Some(r) = self.bulk_tx[lane].repair(now, crate::kprlc::MAX_WIN) {
-                if self.frame(p, &Frame::Fix { bulk: true, lane: lane as u8, rlc: &r }) {
-                    self.st.bulk_fix_tx += 1;
-                }
-            }
-        }
+        // no repairs: TCP sends its lost packets again by itself (QUIC here, KCP inside KANKI MIX), and a
+        // repair would only add to the line it shares with the game
     }
 
     fn guard_allow(&mut self, len: usize, now: Instant) -> bool {
-        self.guard.bytes += len as u64;
+        // what really went: the rate is set from it (counting refused bytes would set it above the line)
         if !self.guard.on {
+            self.guard.bytes += len as u64;
             return true;
         }
         let dt = now.duration_since(self.guard.refill_at).as_secs_f64();
@@ -597,6 +602,7 @@ impl Session {
             return false;
         }
         self.guard.tokens -= len as f64;
+        self.guard.bytes += len as u64;
         true
     }
 
@@ -607,11 +613,13 @@ impl Session {
         self.guard.measured = 0.7 * self.guard.measured + 0.3 * measured;
         let rt_on = self.rt_last.is_some_and(|t| now.duration_since(t) < RT_ACTIVE);
         let best = self.order.first().copied();
+        // the queue now: the newest round trip over the empty-line one (pings go every 100 ms while a game
+        // plays, so a download filling the line is seen within one or two of them)
         let queue = best.map(|b| {
             let p = &self.paths[b];
-            if p.srtt > 0.0 && p.min_rtt > 0.0 { (p.srtt - p.min_rtt, p.min_rtt) } else { (0.0, 0.0) }
+            if p.last_rtt > 0.0 && p.min_rtt > 0.0 { (p.last_rtt - p.min_rtt, p.min_rtt) } else { (0.0, 0.0) }
         });
-        let crowded = matches!(queue, Some((q, m)) if m > 0.0 && q > (0.3 * m).max(12.0));
+        let crowded = matches!(queue, Some((q, m)) if m > 0.0 && q > (0.2 * m).max(10.0));
         if self.mode() == "speed" || !rt_on {
             self.guard.on = false;
             return;
@@ -626,7 +634,8 @@ impl Session {
             self.guard.on = true;
             self.guard.clear_since = None;
         } else if self.guard.on {
-            self.guard.rate *= 1.15;
+            // back up slowly: a quick climb fills the line again at once
+            self.guard.rate *= 1.05;
             let since = *self.guard.clear_since.get_or_insert(now);
             if now.duration_since(since) > Duration::from_secs(3) && self.guard.rate > self.guard.measured * 2.0 {
                 self.guard.on = false;
@@ -641,10 +650,13 @@ impl Session {
         match u {
             // every UDP packet (a game, KANKI MIX, microtun) is realtime, whatever its size; the TCP
             // connections below are the bulk class
-            Up::Udp { pidx, flow, data } => {
-                let protect = self.protect(pidx, flow, data.len(), now);
+            Up::Udp { pidx, flow, data, tos } => {
+                let class = self.class(pidx, flow, data.len(), tos, now);
                 let inner = wire::inner_udp(pidx, flow, &data);
-                self.send_rt(inner, now, true, protect)
+                match class {
+                    Class::Game { protect } => self.send_rt(inner, now, true, protect),
+                    Class::Bulk => self.send_bulk(inner, now),
+                }
             }
             // the TCP connections: QUIC sends its lost packets again by itself, so they never take the
             // realtime class's copies (and never make it look busy)
@@ -652,20 +664,33 @@ impl Session {
         }
     }
 
-    /// Takes `len` bytes of the flow's copy and repair budget: false = the flow sends more than a game ever
-    /// does (`PROTECT_BPS`), so this packet goes once
-    fn protect(&mut self, pidx: u8, flow: u32, len: usize, now: Instant) -> bool {
+    /// Sorts one user packet by the mark its service gave it (see `PLAIN_BPS`)
+    fn class(&mut self, pidx: u8, flow: u32, len: usize, tos: Option<u8>, now: Instant) -> Class {
         if self.budget.len() > 4096 {
-            self.budget.retain(|_, b| now.duration_since(b.0) < Duration::from_secs(60));
+            self.budget.retain(|_, b| now.duration_since(b.at) < Duration::from_secs(60));
         }
-        let b = self.budget.entry((pidx, flow)).or_insert((now, PROTECT_BURST));
-        b.1 = (b.1 + now.duration_since(b.0).as_secs_f64() * PROTECT_BPS).min(PROTECT_BURST);
-        b.0 = now;
-        if b.1 < len as f64 {
-            return false;
+        let b = self.budget.entry((pidx, flow)).or_insert(FlowB { at: now, left: if tos.is_none() { UP_BURST } else { PLAIN_BURST }, marked: None });
+        let game = tos.is_some_and(crate::netq::is_game_tos);
+        if game {
+            b.marked = Some(now);
+        } else if tos.is_some() && b.marked.is_some_and(|t| now.duration_since(t) < MARK_KEEP) {
+            // the service marks its game packets and this one is not: its TCP
+            return Class::Bulk;
         }
-        b.1 -= len as f64;
-        true
+        let (bps, cap) = if b.marked.is_some_and(|t| now.duration_since(t) < MARK_KEEP) {
+            (MARKED_BPS, MARKED_BURST)
+        } else if tos.is_none() {
+            (UP_BPS, UP_BURST)
+        } else {
+            (PLAIN_BPS, PLAIN_BURST)
+        };
+        b.left = (b.left + now.duration_since(b.at).as_secs_f64() * bps).min(cap);
+        b.at = now;
+        if b.left < len as f64 {
+            return Class::Game { protect: false };
+        }
+        b.left -= len as f64;
+        Class::Game { protect: true }
     }
 
     fn deliver(&mut self, inner: &[u8], now: Instant) {
@@ -1078,7 +1103,7 @@ impl Session {
 
     fn ping_tick(&mut self, now: Instant) {
         let rt_on = self.rt_last.is_some_and(|t| now.duration_since(t) < RT_ACTIVE);
-        let every = if self.mode() == "gaming" || rt_on { Duration::from_millis(300) } else { Duration::from_millis(1000) };
+        let every = if rt_on { Duration::from_millis(100) } else if self.mode() == "gaming" { Duration::from_millis(300) } else { Duration::from_millis(1000) };
         let have: Vec<bool> = {
             let s = self.slots.lock().unwrap_or_else(|e| e.into_inner());
             (0..self.paths.len()).map(|i| s.get(i).is_some_and(|x| x.out.is_some())).collect()
@@ -1192,34 +1217,56 @@ impl Session {
 mod tests {
     use super::*;
 
-    /// Every UDP packet is realtime whatever its size; a game's flow (60 a second, up to 500 bytes, and the
-    /// burst of 76 packets in 20 ms measured in PUBG when players appear) keeps its copies and repairs, a
-    /// download in another flow does not take them from it, and the download's own packets beyond the budget
-    /// go once (not dropped)
-    #[test]
-    fn every_udp_packet_is_realtime_and_a_game_keeps_its_copies() {
+    fn session() -> Session {
         let (tx, _rx) = mpsc::channel(1);
-        let spec = VipSpec { id: "x".into(), role: "entry".into(), port: 1, udp_paths: 1, ..Default::default() };
-        let mut s = Session::new(spec, [0; 32], Arc::new(Mutex::new(vec![])), tx, Arc::new(Mutex::new(VipStatus::default())), Arc::new(flows::Counters::default()), Arc::new(Screen::new([0; 32])));
+        let spec = VipSpec { id: "x".into(), role: "exit".into(), port: 1, udp_paths: 1, ..Default::default() };
+        Session::new(spec, [0; 32], Arc::new(Mutex::new(vec![])), tx, Arc::new(Mutex::new(VipStatus::default())), Arc::new(flows::Counters::default()), Arc::new(Screen::new([0; 32])))
+    }
+
+    /// KANKI MIX on the exit server: its game datagrams come marked and are realtime whatever their size (the
+    /// 76-packet burst of 500 B measured in PUBG when players appear keeps every copy); its KCP (the app's TCP)
+    /// comes unmarked and is bulk, never copied or repaired, even while the game plays
+    #[test]
+    fn marked_game_is_realtime_and_the_tcp_next_to_it_is_bulk() {
+        let mut s = session();
         let t0 = Instant::now();
-        let mut download_once = 0;
+        let ef = Some(crate::netq::GAME_TOS as u8);
         for i in 0..10_000u64 {
             let at = t0 + Duration::from_micros(i * 1000);
-            // a download in flow 2: 1 000 packets of 1 300 bytes a second
-            if !s.protect(0, 2, 1300, at) {
-                download_once += 1;
-            }
-            // the game in flow 1: one packet every 16 ms, 500 bytes, and a burst of 76 at second 5
             if i % 16 == 0 {
-                assert!(s.protect(0, 1, 500, at), "game packet at {} ms", i);
+                assert_eq!(s.class(0, 1, 600, ef, at), Class::Game { protect: true }, "game at {} ms", i);
             }
             if i == 5000 {
                 for _ in 0..76 {
-                    assert!(s.protect(0, 1, 500, at), "burst");
+                    assert_eq!(s.class(0, 1, 600, ef, at), Class::Game { protect: true }, "burst");
                 }
             }
+            // a download over KCP in the same flow, 1 000 packets of 1 300 B a second
+            assert_eq!(s.class(0, 1, 1300, Some(0), at), Class::Bulk);
+            // and its small acknowledgements: also TCP
+            assert_eq!(s.class(0, 1, 80, Some(0), at), Class::Bulk);
         }
-        // the download had its first 96 KB and then 256 KB a second protected, nothing more
-        assert!(download_once > 7_000, "{}", download_once);
+    }
+
+    /// A packet nobody marked (the user side, a service that does not mark): realtime, small or big, but its
+    /// copies are held to `PLAIN_BPS` per flow, so a download there never doubles the line; another flow's game
+    /// keeps all of its copies
+    #[test]
+    fn unmarked_packets_are_realtime_with_a_budget() {
+        let mut s = session();
+        let t0 = Instant::now();
+        let mut download_copied = 0usize;
+        for i in 0..10_000u64 {
+            let at = t0 + Duration::from_micros(i * 1000);
+            if s.class(0, 2, 1300, None, at) == (Class::Game { protect: true }) {
+                download_copied += 1300;
+            }
+            if i % 16 == 0 {
+                assert_eq!(s.class(0, 1, 600, None, at), Class::Game { protect: true });
+            }
+        }
+        // 10 s: at most the first 32 KB and 32 KB a second (the users' side)
+        assert!(download_copied <= 32 * 1024 + 10 * 32 * 1024 + 1300, "{}", download_copied);
+        assert_ne!(s.class(0, 2, 1300, None, t0 + Duration::from_secs(10)), Class::Bulk);
     }
 }

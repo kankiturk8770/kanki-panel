@@ -84,6 +84,8 @@ func main() {
 	}
 	// ضبط ترافیک یک کاربر وقتی پنل خواست (record.go)
 	oc.Tap = tapPacket
+	// بسته‌های بازی با علامت EF می‌روند: تانل VIP فقط به آن‌ها کپی و ترمیم می‌دهد (KCP نه)
+	oc.MarkGame = true
 	// ServeConn: بلاک‌رمز داخلی nil (رمزنگاری را خودمان در لایه obfs انجام می‌دهیم)
 	ln, err := kcp.ServeConn(nil, *data, *parity, oc)
 	if err != nil {

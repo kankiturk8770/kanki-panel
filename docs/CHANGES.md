@@ -1,20 +1,28 @@
-# v3.46.1 — VIP tunnel: every UDP packet is a game packet
+# v3.46.1 — VIP tunnel: the game apart from TCP, by what the servers know
 - **What was wrong (measured, not guessed):** the VIP tunnel sorted packets by size: up to 512 bytes «game» (two paths, copies,
-  repairs), bigger «bulk» (one path, no copies, and its speed guard could drop them). PUBG's own packets reach ~503 bytes (PCAPdroid,
-  a whole match: up 58 a second, median 18 B; down 31–37 a second, median 91 B, max 503) and KANKI MIX adds 39 bytes and up to 64 of
-  padding, so on the wire the biggest game packets — players, guns and vehicles appearing — were above 512: 13 % of the match's
-  packets down in the game recorder, arriving in bursts of up to 76 packets in 20 ms when a round starts. Those were the packets
-  that went without copies and could be dropped.
-- **Now the size plays no part:** every UDP packet a user sends through the tunnel (a game, KANKI MIX, microtun) is realtime: its
-  first copy goes at once and is never held back or dropped; the TCP connections are the bulk class (repairs only on a lossy line,
-  the speed guard). The «UDP packets up to this size are game packets» field is gone from the form (an old value is ignored).
-- **So a download inside the VPN does not multiply the servers' traffic,** the copies and repairs of each user flow are spent up to
-  96 KB at once and 256 KB a second (a game needs 5–30 KB/s, a burst ~20 KB); past that a packet still goes first and is never
-  dropped, just once. The old «more than 300 small packets a second = download» rule is gone with it.
-- Game recorder › «What the VIP tunnel sees» now shows the biggest burst in 50 ms and the most game packets a second.
-- **Checked:** new test `big_game_packets_survive_like_small_ones` (600-byte game packets, 5 % loss each way): before 373/400
-  back, 361 on time, p99 277 ms; now 400/400, all on time, p99 48 ms, nothing bulk; `every_udp_packet_is_realtime_and_a_game_keeps_its_copies`
-  (a 76-packet burst of 500 B keeps its copies next to a 1.3 MB/s download); `cargo test`.
+  repairs), bigger «bulk» (one path, and its speed guard dropped them when the line was full). PUBG's own packets reach ~503 bytes
+  (PCAPdroid, a whole match: up 58 a second, median 18 B; down 31–37 a second, median 91 B, max 503, bursts of up to 76 packets in
+  20 ms when a round starts) and KANKI MIX adds 39 bytes and up to 64 of padding, so the biggest game packets — players, guns and
+  vehicles appearing — were «bulk»: 13 % of a match's packets down in the game recorder. On a full line (a download next to the game)
+  the old code lost about half of those burst packets (lab below).
+- **No sizes any more; the servers say what is what.** KANKI MIX's server sends its game datagrams (and pings) with DSCP EF and KCP
+  (the app's TCP) without (`obfs.MarkGame`, `mark_linux.go`); microtun's server marks every user packet that carries UDP and not TCP
+  (`netq::send_to_marked`, `carries_udp`). The VIP exit reads the mark of every packet (`netq::want_tos`/`recv_tos`) and:
+  marked = realtime (first at once, copies on the second path, repairs, never dropped); unmarked in a flow that marks = that
+  service's TCP = bulk: sent once, **never copied and never repaired**, and held back by the speed guard so the game goes first.
+- A packet nobody can mark (the users' side; a service that does not mark) is realtime, with its copies and repairs held to a budget
+  per flow (users' side 32 KB/s, other services 64 KB/s; a marked game flow 256 KB/s), so a download there never doubles the line.
+- **Bulk (TCP) has no repairs at all any more** (TCP sends what it lost again by itself); the «Download repair lanes» and «UDP packets
+  up to this size are game packets» fields left the form (old values are ignored).
+- **The speed guard works now:** it reads the newest ping (pings every 100 ms while a game plays) instead of a smoothed one 2 s
+  late, counts only what it let through (it counted the refused bytes and set itself above the line) and climbs back by 5 % every
+  200 ms, not 15 %.
+- Game recorder › «What the VIP tunnel sees» shows the biggest burst in 50 ms and the most game packets a second.
+- **Lab:** `scripts/vip_kmix_lab.sh` — the real KANKI MIX server at the exit, the VIP tunnel on bad lines (now also a bottleneck: 8 Mbit/s
+  with a 150 ms queue), and `kmix-lab` (a KANKI MIX client like the app in gaming mode: 60 game packets a second, a burst of 76 every
+  2 s, an 8 MB download over KCP at the same time). NUMBERS
+- Tests: `marked_game_is_realtime_and_the_tcp_next_to_it_is_bulk`, `unmarked_packets_are_realtime_with_a_budget`,
+  `big_game_packets_survive_like_small_ones`, `the_game_mark_goes_through`, Go `TestGamePacketsAreMarked`.
 
 # v3.46.0 — Game recorder (KANKI MIX)
 - **KANKI MIX › Game recorder (new tab):** pick a user and a length (5–60 minutes), «Start recording», play one full match on that

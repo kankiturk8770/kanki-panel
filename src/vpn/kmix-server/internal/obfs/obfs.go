@@ -53,6 +53,9 @@ type PacketConn struct {
 	ring    *Keyring // حالت چندکاربره (nil = یک کلید مشترک)
 	handler Handler
 	bufPool sync.Pool
+	// MarkGame (سمت سرور): بسته‌های غیر KCP (بازی و پینگ) با علامت GameTOS می‌روند تا تانل VIP همین سرور
+	// فقط آن‌ها را بازی بداند؛ KCP بی علامت. اگر کرنل علامت را قبول نکرد، بسته ساده می‌رود.
+	MarkGame bool
 	// Tap (سمت سرور، اختیاری) هر بسته‌ی باز یا فرستاده‌شده را با اندازه‌ی روی سیم می‌بیند؛
 	// برای ضبط ترافیک یک کاربر. فقط قبل از شروع خواندن گذاشته می‌شود.
 	Tap Tap
@@ -118,7 +121,10 @@ func (c *PacketConn) WritePacket(kind byte, b []byte, addr net.Addr) error {
 	clear(plain[hdrSize+len(b):])
 	out = aead.Seal(out[:nonceSize], out[:nonceSize], plain, nil)
 
-	_, err := c.conn.WriteTo(out, addr)
+	var err error
+	if !(c.MarkGame && kind != KindKCP && writeMarked(c.conn, out, addr)) {
+		_, err = c.conn.WriteTo(out, addr)
+	}
 	if err == nil && ctr != nil {
 		ctr.tx.Add(int64(len(out)))
 	}

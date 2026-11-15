@@ -158,6 +158,125 @@ pub fn spawn() {
     tokio::task::spawn_blocking(apply);
 }
 
+// ------------------------------------------------------------------ the game mark
+// The VPN cores on a server know what they carry: KANKI MIX tells its game datagrams from KCP (the app's
+// TCP), microtun sees the protocol of every user packet. They send the game packets with DSCP EF; a VIP
+// tunnel on the same server reads the mark (`recv_tos`) and gives copies and repairs to those packets only,
+// so the users' TCP is never sent twice.
+
+/// DSCP EF, the game mark
+pub(crate) const GAME_TOS: i32 = 0xb8;
+/// the kernel refused the mark once: packets go plain from then on
+static MARK_BROKEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Does this IP packet carry UDP (IPv4 protocol / IPv6 next header 17)
+pub(crate) fn carries_udp(ip: &[u8]) -> bool {
+    match ip.first().map(|b| b >> 4) {
+        Some(4) => ip.get(9) == Some(&17),
+        Some(6) => ip.get(6) == Some(&17),
+        _ => false,
+    }
+}
+
+/// Sends one packet, with the game mark when `game`
+pub(crate) fn send_to_marked(sock: &std::net::UdpSocket, pkt: &[u8], to: std::net::SocketAddr, game: bool) {
+    if game && !MARK_BROKEN.load(std::sync::atomic::Ordering::Relaxed) {
+        match send_marked(sock, pkt, to) {
+            Ok(()) => return,
+            Err(e) if matches!(e.raw_os_error(), Some(libc::EINVAL) | Some(libc::EOPNOTSUPP) | Some(libc::EPERM)) => MARK_BROKEN.store(true, std::sync::atomic::Ordering::Relaxed),
+            Err(_) => {}
+        }
+    }
+    let _ = sock.send_to(pkt, to);
+}
+
+/// sendmsg with IP_TOS (an IPv4 destination, also on a dual-stack socket) or IPV6_TCLASS
+fn send_marked(sock: &std::net::UdpSocket, pkt: &[u8], to: std::net::SocketAddr) -> std::io::Result<()> {
+    use std::net::IpAddr;
+    use std::os::fd::AsRawFd;
+    let v4 = match to {
+        std::net::SocketAddr::V4(_) => true,
+        std::net::SocketAddr::V6(a) => a.ip().to_ipv4_mapped().is_some(),
+    };
+    let local_v6 = sock.local_addr().map(|a| a.is_ipv6()).unwrap_or(false);
+    // the destination as the socket's own family
+    let sa: socket2::SockAddr = match (to, local_v6) {
+        (std::net::SocketAddr::V4(a), true) => std::net::SocketAddr::new(IpAddr::V6(a.ip().to_ipv6_mapped()), a.port()).into(),
+        _ => to.into(),
+    };
+    let (level, typ) = if v4 { (libc::IPPROTO_IP, libc::IP_TOS) } else { (libc::IPPROTO_IPV6, libc::IPV6_TCLASS) };
+    // SAFETY: CMSG_SPACE of one int is a constant
+    let space = unsafe { libc::CMSG_SPACE(std::mem::size_of::<libc::c_int>() as u32) } as usize;
+    let mut ctl = vec![0u8; space];
+    let mut iov = libc::iovec { iov_base: pkt.as_ptr() as *mut libc::c_void, iov_len: pkt.len() };
+    // SAFETY: msghdr is plain data; every pointer below lives until sendmsg returns
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_name = sa.as_ptr() as *mut libc::c_void;
+    msg.msg_namelen = sa.len();
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = ctl.as_mut_ptr() as *mut libc::c_void;
+    msg.msg_controllen = space as _;
+    // SAFETY: the control buffer holds exactly one cmsg of one int (CMSG_SPACE above)
+    unsafe {
+        let c = libc::CMSG_FIRSTHDR(&msg);
+        (*c).cmsg_level = level;
+        (*c).cmsg_type = typ;
+        (*c).cmsg_len = libc::CMSG_LEN(std::mem::size_of::<libc::c_int>() as u32) as _;
+        std::ptr::write_unaligned(libc::CMSG_DATA(c) as *mut libc::c_int, GAME_TOS);
+    }
+    // SAFETY: a valid socket and a filled msghdr
+    let r = unsafe { libc::sendmsg(sock.as_raw_fd(), &msg, 0) };
+    if r < 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) }
+}
+
+/// Asks the kernel for the TOS / traffic class of every packet this socket receives
+pub(crate) fn want_tos(fd: std::os::fd::RawFd) {
+    let one: libc::c_int = 1;
+    for (level, opt) in [(libc::IPPROTO_IP, libc::IP_RECVTOS), (libc::IPPROTO_IPV6, libc::IPV6_RECVTCLASS)] {
+        // SAFETY: an int option on a socket the caller owns; a failure (the other family) is fine
+        unsafe { libc::setsockopt(fd, level, opt, &one as *const _ as *const libc::c_void, std::mem::size_of::<libc::c_int>() as u32) };
+    }
+}
+
+/// One datagram from a connected socket and its TOS (None = the kernel gave none). Non-blocking: WouldBlock
+/// when nothing is waiting.
+pub(crate) fn recv_tos(fd: std::os::fd::RawFd, buf: &mut [u8]) -> std::io::Result<(usize, Option<u8>)> {
+    let mut ctl = [0u64; 16];
+    let mut iov = libc::iovec { iov_base: buf.as_mut_ptr() as *mut libc::c_void, iov_len: buf.len() };
+    // SAFETY: plain data; the pointers live until recvmsg returns
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = ctl.as_mut_ptr() as *mut libc::c_void;
+    msg.msg_controllen = std::mem::size_of_val(&ctl) as _;
+    // SAFETY: a valid socket and a filled msghdr
+    let n = unsafe { libc::recvmsg(fd, &mut msg, libc::MSG_DONTWAIT) };
+    if n < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut tos = None;
+    // SAFETY: walking the control messages the kernel wrote into ctl
+    unsafe {
+        let mut c = libc::CMSG_FIRSTHDR(&msg);
+        while !c.is_null() {
+            let (l, t) = ((*c).cmsg_level, (*c).cmsg_type);
+            if (l == libc::IPPROTO_IP && t == libc::IP_TOS) || (l == libc::IPPROTO_IPV6 && t == libc::IPV6_TCLASS) {
+                let d = libc::CMSG_DATA(c);
+                // IP_TOS comes as one byte, IPV6_TCLASS as an int
+                tos = Some(if l == libc::IPPROTO_IP { *d } else { std::ptr::read_unaligned(d as *const libc::c_int) as u8 });
+            }
+            c = libc::CMSG_NXTHDR(&msg, c);
+        }
+    }
+    Ok((n as usize, tos))
+}
+
+/// The packet carries the game mark (the DSCP part of the TOS byte)
+pub(crate) fn is_game_tos(tos: u8) -> bool {
+    tos & 0xfc == GAME_TOS as u8
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,5 +304,41 @@ mod tests {
         assert!(!conf_text(false).contains("bbr"));
         // never touches forwarding or the firewall
         assert!(!c.contains("forward") && !c.contains("rp_filter"));
+    }
+
+    /// A game packet leaves marked, another one plain; the receiver reads the mark of each
+    #[test]
+    fn the_game_mark_goes_through() {
+        use std::os::fd::AsRawFd;
+        let rx = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        want_tos(rx.as_raw_fd());
+        let tx = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let to = rx.local_addr().unwrap();
+        send_to_marked(&tx, b"game", to, true);
+        send_to_marked(&tx, b"tcp", to, false);
+        rx.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+        let mut b = [0u8; 64];
+        let mut got = vec![];
+        while got.len() < 2 {
+            match recv_tos(rx.as_raw_fd(), &mut b) {
+                Ok((n, tos)) => got.push((b[..n].to_vec(), tos)),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(5)),
+                Err(e) => panic!("{}", e),
+            }
+        }
+        assert_eq!(got[0], (b"game".to_vec(), Some(0xb8)));
+        assert_eq!(got[1], (b"tcp".to_vec(), Some(0)));
+        assert!(is_game_tos(0xb8) && is_game_tos(0xb9) && !is_game_tos(0));
+        // IPv4 UDP / TCP and IPv6 UDP
+        let mut v4 = [0u8; 20];
+        v4[0] = 0x45;
+        v4[9] = 17;
+        assert!(carries_udp(&v4));
+        v4[9] = 6;
+        assert!(!carries_udp(&v4));
+        let mut v6 = [0u8; 40];
+        v6[0] = 0x60;
+        v6[6] = 17;
+        assert!(carries_udp(&v6) && !carries_udp(&[]));
     }
 }

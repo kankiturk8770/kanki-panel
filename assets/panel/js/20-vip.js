@@ -62,7 +62,7 @@ function vpDraw(d){var el=$('#vp');if(!el)return;
    err.map(function(e){return '<div class="warnbox vp-warn">'+esc(t(e))+'</div>'}).join('')+'</div></section>'}).join('')+vpHelp()}
 function vpHelp(){return '<details class="ku-help"><summary>'+t('How it works')+'</summary><p>'+
  t('Paths: several ways between the two servers at the same time. UDP is the fastest; it moves to another port and another source port every few seconds, so no UDP flow lives long enough to be throttled. Fake TCP carries the same packets as a TCP session, for networks that cut UDP. The web path is a normal HTTPS or CDN connection, for networks where only the web passes.')+'</p><p>'+
- t('Game packets (small UDP) leave at once on the two best paths; the first copy wins, and a lost one is rebuilt from the repairs that follow it, never waited for. Downloads and every TCP connection take the best path; TCP travels as QUIC streams inside the tunnel, so a lost packet of one download never holds up another connection, and a short outage does not cut it.')+'</p><p>'+
+ t('Every UDP packet of a game, small or big, leaves at once on the two best paths; the first copy wins, and a lost one is rebuilt from the repairs that follow it, never waited for. TCP is never copied or repaired: it takes the best path and sends what it lost again by itself (the TCP of the tunnel itself as QUIC streams; inside KANKI MIX and microtun their server marks which packets are the game, so their TCP stays apart too).')+'</p><p>'+
  t('Every path is measured all the time (ping, jitter, loss) and ranked by ping + 3×jitter + 20×loss%. Keys: X25519 and ML-KEM-768 (post-quantum) with the tunnel secret, made new every few minutes; every packet is sealed and its header hidden, so nothing on the wire repeats.')+'</p></details>'}
 
 // ---------------------------------------------------------------- the form
@@ -100,7 +100,6 @@ function vpEdit(i){var d=VP.d;if(!d)return;var x=i!=null?d.tunnels[i]:null,v=x?x
    '<label class="f">'+t('Hiding the packet sizes')+'</label>'+seg('vf_st',[[0,t('None'),t('fastest')],[1,t('A little'),t('small packets padded')],[2,t('More'),t('every size changes')]],v.stealth==null?1:v.stealth)+
   '<details class="vp-adv"><summary>'+t('Advanced')+'</summary><div class="kxf">'+
    num('vf_rk',t('New keys every (minutes)'),v.rekey_secs?Math.round(v.rekey_secs/60):'','10')+num('vf_mt',t('Largest UDP packet'),v.mtu||'','1420')+
-   '<div><label class="f">'+t('Download repair lanes')+'</label><select id="vf_bu">'+[1,2,4,8].map(function(n){return '<option value="'+n+'"'+((v.burst||4)==n?' selected':'')+'>'+N(n)+'</option>'}).join('')+'</select></div>'+
    txt('vf_da',t('Address the dialer uses'),v.dial,t('automatic: the server\'s own'),true)+'</div></details></div>'+
   '<div class="kxsave"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="vf_go">'+t('Save')+'</button></div>','wide');
  $$('.vp-seg').forEach(function(g){$$('button',g).forEach(function(b){b.onclick=function(){$$('button',g).forEach(function(z){z.classList.remove('on')});b.classList.add('on')}})});
@@ -116,7 +115,7 @@ function vpEdit(i){var d=VP.d;if(!d)return;var x=i!=null?d.tunnels[i]:null,v=x?x
    port:on('vf_udp')?n('vf_po'):0,hop:n('vf_hp')||1,hop_secs:n('vf_hs'),udp_paths:n('vf_up')||1,ftcp_port:on('vf_ft')?n('vf_fp'):0,
    s_kind:$('#vf_sk').value,s_port:n('vf_sp'),s_sni:$('#vf_sn').value.trim(),s_host:$('#vf_sh').value.trim(),s_dial:$('#vf_sa').value.trim(),s_path:$('#vf_pt').value.trim(),s_frag:on('vf_fr'),
    tcp:list('vf_tcp'),udp:list('vf_udpp'),target:$('#vf_tg').value.trim(),pq:on('vf_pq'),stealth:+segv('vf_st')||0,
-   rekey_secs:n('vf_rk')*60,mtu:n('vf_mt'),rt_max:0,burst:+$('#vf_bu').value,dial:$('#vf_da').value.trim()};
+   rekey_secs:n('vf_rk')*60,mtu:n('vf_mt'),rt_max:0,burst:v.burst||4,dial:$('#vf_da').value.trim()};
   if(!b.entry||!b.exit)return toast(t('Choose both servers'),1);
   if(!b.port&&!b.ftcp_port&&!b.s_kind)return toast(t('Turn on at least one path'),1);
   if(!b.tcp.length&&!b.udp.length)return toast(t('Forward at least one port'),1);
