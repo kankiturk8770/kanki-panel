@@ -31,6 +31,10 @@ struct Model {
     cut_ms: u64,
     /// where in the cut cycle this line starts (ms): two lines are not cut at the same moment
     phase: u64,
+    /// a bottleneck on the way down (exit → entry, where downloads go): this many kbit/s with a queue of
+    /// `queue_ms`; a packet that finds the queue full is dropped (0 = no limit)
+    rate_kbps: u64,
+    queue_ms: u64,
 }
 
 struct Line {
@@ -41,11 +45,13 @@ struct Line {
     seed: Mutex<u64>,
     passed: AtomicU64,
     dropped: AtomicU64,
+    /// when the bottleneck is free again (ms since t0)
+    busy: Mutex<f64>,
 }
 
 impl Line {
     fn new(m: Model, seed: u64) -> Arc<Line> {
-        Arc::new(Line { model: Mutex::new(m), dead: AtomicBool::new(false), bad: Mutex::new(false), t0: Instant::now(), seed: Mutex::new(seed | 1), passed: AtomicU64::new(0), dropped: AtomicU64::new(0) })
+        Arc::new(Line { model: Mutex::new(m), dead: AtomicBool::new(false), bad: Mutex::new(false), t0: Instant::now(), seed: Mutex::new(seed | 1), passed: AtomicU64::new(0), dropped: AtomicU64::new(0), busy: Mutex::new(0.0) })
     }
     fn rnd(&self) -> f64 {
         let mut s = self.seed.lock().unwrap();
@@ -56,6 +62,10 @@ impl Line {
     }
     /// None = lost; Some(delay ms)
     fn fate(&self) -> Option<u64> {
+        self.fate_len(0, false)
+    }
+    /// The same for a packet of `len` bytes; `down`: it crosses the bottleneck
+    fn fate_len(&self, len: usize, down: bool) -> Option<u64> {
         if self.dead.load(Ordering::Relaxed) {
             self.dropped.fetch_add(1, Ordering::Relaxed);
             return None;
@@ -79,8 +89,20 @@ impl Line {
             self.dropped.fetch_add(1, Ordering::Relaxed);
             return None;
         }
+        let mut queued = 0.0;
+        if down && m.rate_kbps > 0 {
+            let now = self.t0.elapsed().as_secs_f64() * 1000.0;
+            let mut busy = self.busy.lock().unwrap();
+            let start = busy.max(now);
+            if start - now > m.queue_ms as f64 {
+                self.dropped.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
+            *busy = start + (len as f64 * 8.0) / m.rate_kbps as f64;
+            queued = *busy - now;
+        }
         self.passed.fetch_add(1, Ordering::Relaxed);
-        Some(m.delay + if m.jitter > 0 { (self.rnd() * m.jitter as f64) as u64 } else { 0 })
+        Some(m.delay + queued as u64 + if m.jitter > 0 { (self.rnd() * m.jitter as f64) as u64 } else { 0 })
     }
 }
 
@@ -118,7 +140,7 @@ async fn udp_line(from: u16, to: u16, ports: u16, line: Arc<Line>) -> Vec<tokio:
                         s
                     }
                 };
-                if let Some(d) = line.fate() {
+                if let Some(d) = line.fate_len(n, true) {
                     let pkt = buf[..n].to_vec();
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_millis(d)).await;
@@ -302,6 +324,27 @@ async fn realtime_survives_a_lossy_line() {
     eprintln!("5% loss each way: {}/400 back, {} on time, p50 {:.1} ms p99 {:.1} ms, rebuilt {} copies {}", got, ok, pct(&rtts, 0.5), pct(&rtts, 0.99), a.status().rt_fixed + st.rt_fixed, st.rt_copies);
     // a round trip crosses the line twice: without the tunnel ~9.8% would be lost
     assert!(got >= 394, "{} of 400", got);
+    a.stop();
+    b.stop();
+}
+
+/// A game packet as KANKI MIX puts it on the wire (PUBG's biggest, ~500 bytes, + KANKI MIX's header and
+/// padding: ~600) is a game packet too: on the same lossy line it comes back like a small one (before 3.46.1
+/// everything above 512 bytes was bulk: no copies, and dropped by the speed guard)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn big_game_packets_survive_like_small_ones() {
+    let _e = udp_echo(35610).await;
+    let line = Line::new(Model { loss: 0.05, delay: 15, jitter: 3, ..Default::default() }, 7);
+    let _l = udp_line(35620, 35600, 2, line.clone()).await;
+    let (en, ex) = pair("big", "gaming", 35600, 35620, 2, 1, 0, 35611, 35612, 35610);
+    let (a, b) = (Running::start(en), Running::start(ex));
+    assert!(wait_up(&a, &b, 15).await);
+    let (got, ok, rtts) = game(35611, 400, 600, 10, 150.0).await;
+    let st = b.status();
+    eprintln!("600 B game packets, 5% loss each way: {}/400 back, {} on time, p50 {:.1} ms p99 {:.1} ms, rt sent {} bulk sent {} copies {}",
+        got, ok, pct(&rtts, 0.5), pct(&rtts, 0.99), st.rt_tx, st.bulk_tx, st.rt_copies);
+    assert!(got >= 394, "{} of 400", got);
+    assert_eq!(st.bulk_tx, 0, "a UDP packet went bulk");
     a.stop();
     b.stop();
 }
@@ -616,4 +659,90 @@ async fn junk_does_not_hurt() {
     assert!(got >= 298 && st.up, "{} of 300", got);
     a.stop();
     b.stop();
+}
+
+// ------------------------------------------------------------------ the real KANKI MIX through the tunnel
+
+/// One case of the KANKI MIX lab: the real KANKI MIX server at the exit, the VIP tunnel on a bad line, and
+/// `kmix-lab` (a KANKI MIX client like the app in gaming mode: a game of 60 packets a second with bursts of
+/// 76 × 500 B every 2 s, and a download over KCP at the same time) at the entry.
+async fn kmix_case(base: u16, m: Model, server: &str, client: &str, host: &str, burst: &str) -> String {
+    let key: String = (0..32).map(|_| format!("{:02x}", rand::random::<u8>())).collect();
+    let dir = std::env::temp_dir().join(format!("vip-kmix-{}", base));
+    std::fs::create_dir_all(&dir).unwrap();
+    let users = dir.join("users.json");
+    std::fs::write(&users, format!("{{\"users\":[{{\"name\":\"lab\",\"key\":\"{}\",\"max\":0}}]}}", key)).unwrap();
+    let kport = base + 30;
+    let mut srv = std::process::Command::new(server)
+        .args(["-listen", &format!("127.0.0.1:{}", kport), "-users", users.to_str().unwrap(), "-fec-data", "10", "-fec-parity", "3"])
+        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+    let mut keep = vec![];
+    for i in 0..2u16 {
+        let mut mi = m.clone();
+        mi.phase = i as u64 * m.cut_every / 2;
+        keep.extend(udp_line(base + 20 + i, base + i, 1, Line::new(mi, (base as u64 + i as u64) * 104729)).await);
+    }
+    let (en, ex) = pair("kmix-lab", "gaming", base, base + 20, 2, 2, 0, base + 11, base + 12, kport);
+    let (a, b) = (Running::start(en), Running::start(ex));
+    let out = if wait_up(&a, &b, 15).await {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let mut cmd = tokio::process::Command::new(client);
+        cmd.args(["-server", &format!("127.0.0.1:{}", base + 11), "-key", &key, "-host", host, "-secs", "30", "-dl", "8",
+            "-gport", &(base + 40).to_string(), "-tport", &(base + 41).to_string(), "-burst", burst]);
+        let child = tokio::spawn(async move { cmd.output().await.unwrap() });
+        // the exit's speed guard and paths each second (KMIX_LAB_TRACE=1)
+        let mut trace = vec![];
+        while !child.is_finished() {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let st = b.status();
+            trace.push(format!("{} kB/s {}", st.guard_bps / 1000, st.paths.iter().map(|p| format!("{:.0}", p.rtt_ms)).collect::<Vec<_>>().join("/")));
+        }
+        let o = child.await.unwrap();
+        if std::env::var("KMIX_LAB_TRACE").is_ok() {
+            println!("    guard / path rtt each second: {}", trace.join(" | "));
+        }
+        let (x, y) = (a.status(), b.status());
+        format!("{}    entry (phone → server): rt {} copies {} repairs {} bulk {} wire {} KB\n    exit (server → phone): rt {} copies {} repairs {} bulk {} bulk repairs {} wire {} KB",
+            String::from_utf8_lossy(&o.stdout), x.rt_tx, x.rt_copies, x.rt_fix_tx, x.bulk_tx, x.tx_bytes >> 10,
+            y.rt_tx, y.rt_copies, y.rt_fix_tx, y.bulk_tx, y.bulk_fix_tx, y.tx_bytes >> 10)
+    } else {
+        "the tunnel did not come up".into()
+    };
+    a.stop();
+    b.stop();
+    keep.iter().for_each(|t| t.abort());
+    let _ = srv.kill();
+    let _ = std::fs::remove_dir_all(&dir);
+    out
+}
+
+/// `KMIX_LAB_SERVER=<kanki-server> KMIX_LAB_CLIENT=<kmix-lab> KMIX_LAB_HOST=<an address of this machine, not
+/// loopback> cargo test --release vip_kmix_lab -- --ignored --nocapture` (`scripts/vip_kmix_lab.sh` builds
+/// both and runs it)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore]
+async fn vip_kmix_lab() {
+    let (Ok(server), Ok(client), Ok(host)) = (std::env::var("KMIX_LAB_SERVER"), std::env::var("KMIX_LAB_CLIENT"), std::env::var("KMIX_LAB_HOST")) else {
+        eprintln!("KMIX_LAB_SERVER, KMIX_LAB_CLIENT and KMIX_LAB_HOST are needed");
+        return;
+    };
+    let lines = [
+        ("8 Mbit/s down, 150 ms queue (a download fills it)", Model { delay: 30, jitter: 2, rate_kbps: 8000, queue_ms: 150, ..Default::default() }),
+        ("8 Mbit/s down, 150 ms queue, 3% random", Model { loss: 0.03, delay: 30, jitter: 4, rate_kbps: 8000, queue_ms: 150, ..Default::default() }),
+        ("clean, 30 ms", Model { delay: 30, jitter: 2, ..Default::default() }),
+        ("3% random, 30 ms", Model { loss: 0.03, delay: 30, jitter: 4, ..Default::default() }),
+        ("bursts (Gilbert-Elliott, ~4%)", Model { loss: 0.005, p_bad: 0.01, p_good: 0.25, bad_loss: 0.9, delay: 30, jitter: 4, ..Default::default() }),
+    ];
+    let only: Option<usize> = std::env::var("KMIX_LAB_ONLY").ok().and_then(|v| v.parse().ok());
+    let mut base = 39000u16;
+    for (i, (name, m)) in lines.into_iter().enumerate() {
+        if only.is_some_and(|o| o != i) {
+            base += 200;
+            continue;
+        }
+        for burst in ["real", "big"] {
+            println!("\n== {} — burst {}\n{}", name, if burst == "real" { "like PUBG (76 packets, ~9 KB)" } else { "worst case (76 × 500 B)" }, kmix_case(base, m.clone(), &server, &client, &host, burst).await);
+            base += 100;
+        }
+    }
 }

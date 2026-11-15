@@ -436,7 +436,7 @@ struct Shared {
     sessions: RwLock<HashMap<u32, Arc<Session>>>,
     burst_max: AtomicUsize,
     burst_delay: AtomicU64,
-    dup: Mutex<mpsc::Sender<(Instant, Vec<u8>, SocketAddr)>>,
+    dup: Mutex<mpsc::Sender<(Instant, Vec<u8>, SocketAddr, bool)>>,
     stop: AtomicBool,
     /// the subnet of second, third … devices, and the server's own address in it
     devnet: Option<(Net4, Ipv4Addr)>,
@@ -770,29 +770,29 @@ fn ip_src(p: &[u8]) -> Option<IpAddr> {
     }
 }
 
-fn send_burst(sh: &Shared, pkt: &[u8], ip_len: usize, to: SocketAddr) {
-    let _ = sh.sock.send_to(pkt, to);
+fn send_burst(sh: &Shared, pkt: &[u8], ip_len: usize, to: SocketAddr, game: bool) {
+    crate::netq::send_to_marked(&sh.sock, pkt, to, game);
     let max = sh.burst_max.load(Ordering::Relaxed);
     if max == 0 || ip_len > max {
         return;
     }
     let delay = sh.burst_delay.load(Ordering::Relaxed);
     if delay == 0 {
-        let _ = sh.sock.send_to(pkt, to);
+        crate::netq::send_to_marked(&sh.sock, pkt, to, game);
     } else {
-        let _ = sh.dup.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(delay), pkt.to_vec(), to));
+        let _ = sh.dup.lock().unwrap_or_else(|e| e.into_inner()).send((Instant::now() + Duration::from_millis(delay), pkt.to_vec(), to, game));
     }
 }
 
 /// the second copies, in order (every copy waits the same delay, so a queue is enough)
-fn dup_loop(sh: &Shared, rx: mpsc::Receiver<(Instant, Vec<u8>, SocketAddr)>) {
+fn dup_loop(sh: &Shared, rx: mpsc::Receiver<(Instant, Vec<u8>, SocketAddr, bool)>) {
     while !sh.stop.load(Ordering::Relaxed) {
-        let Ok((due, pkt, to)) = rx.recv_timeout(Duration::from_millis(500)) else { continue };
+        let Ok((due, pkt, to, game)) = rx.recv_timeout(Duration::from_millis(500)) else { continue };
         let now = Instant::now();
         if due > now {
             std::thread::sleep(due - now);
         }
-        let _ = sh.sock.send_to(&pkt, to);
+        crate::netq::send_to_marked(&sh.sock, &pkt, to, game);
     }
 }
 
@@ -811,13 +811,14 @@ fn tun_loop(sh: &Shared) {
             _ => continue,
         };
         let Some(dst) = ip_dst(&buf[HDR..HDR + n]) else { continue };
+        let game = crate::netq::carries_udp(&buf[HDR..HDR + n]);
         let Some(d) = sh.peers.read().unwrap_or_else(|e| e.into_inner()).by_ip.get(&dst).cloned() else { continue };
         let (Some(sess), Some(ep)) = (d.current.read().unwrap_or_else(|e| e.into_inner()).clone(), *d.endpoint.lock().unwrap_or_else(|e| e.into_inner())) else { continue };
         if let Some(pkt) = sess.seal(&sh.obfs, &mut buf, n) {
             if let Some(u) = d.user.upgrade() {
                 u.tx.fetch_add(n as u64, Ordering::Relaxed);
             }
-            send_burst(sh, pkt, n, ep);
+            send_burst(sh, pkt, n, ep, game);
         }
     }
 }

@@ -35,8 +35,6 @@ use std::sync::OnceLock;
 pub const DEFAULT_MTU: u16 = 1420;
 /// the largest VIP packet inside one fake TCP segment (`faketcp` cuts at 1300)
 pub const FTCP_MTU: usize = 1300;
-/// UDP packets up to this size are realtime when the tunnel says nothing
-pub const DEFAULT_RT_MAX: u16 = 512;
 /// the keys are made again this often when the tunnel says nothing (seconds)
 pub const DEFAULT_REKEY: u32 = 600;
 
@@ -91,7 +89,7 @@ pub struct VipSpec {
     pub mtu: u16,
     /// bulk repairs: interleaved lanes (1, 2, 4 or 8; 0 = 4)
     pub burst: u8,
-    /// UDP packets up to this size are realtime (0 = `DEFAULT_RT_MAX`)
+    /// no longer used (3.46.1: every UDP packet is realtime); kept so older panels and agents still agree
     pub rt_max: u16,
     /// new keys this often (seconds; 0 = `DEFAULT_REKEY`)
     pub rekey_secs: u32,
@@ -126,9 +124,6 @@ impl VipSpec {
     }
     pub fn udp_mtu(&self) -> usize {
         (if self.mtu == 0 { DEFAULT_MTU } else { self.mtu }).clamp(1200, 1472) as usize
-    }
-    pub fn rt_limit(&self) -> usize {
-        (if self.rt_max == 0 { DEFAULT_RT_MAX } else { self.rt_max }).min(1400) as usize
     }
     /// log2 of the bulk lanes
     pub fn stride_bits(&self) -> u32 {
