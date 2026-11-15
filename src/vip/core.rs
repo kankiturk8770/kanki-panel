@@ -1255,18 +1255,30 @@ mod tests {
     fn unmarked_packets_are_realtime_with_a_budget() {
         let mut s = session();
         let t0 = Instant::now();
-        let mut download_copied = 0usize;
+        let (mut up_dl, mut down_dl) = (0usize, 0usize);
         for i in 0..10_000u64 {
             let at = t0 + Duration::from_micros(i * 1000);
+            // the users' side: a download's packets in flow 2, the game up in flow 1 (PUBG through KANKI MIX
+            // sent twice: ~120 packets of ~130 B a second)
             if s.class(0, 2, 1300, None, at) == (Class::Game { protect: true }) {
-                download_copied += 1300;
+                up_dl += 1300;
+            }
+            if i % 8 == 0 {
+                assert_eq!(s.class(0, 1, 130, None, at), Class::Game { protect: true }, "game up at {} ms", i);
+            }
+            // a service that does not mark, down: a download in flow 4, a game of 600 B every 16 ms in flow 3
+            if s.class(0, 4, 1300, Some(0), at) == (Class::Game { protect: true }) {
+                down_dl += 1300;
             }
             if i % 16 == 0 {
-                assert_eq!(s.class(0, 1, 600, None, at), Class::Game { protect: true });
+                assert_eq!(s.class(0, 3, 600, Some(0), at), Class::Game { protect: true }, "game down at {} ms", i);
             }
         }
-        // 10 s: at most the first 32 KB and 32 KB a second (the users' side)
-        assert!(download_copied <= 32 * 1024 + 10 * 32 * 1024 + 1300, "{}", download_copied);
+        // 10 s: at most the first burst and the rate a second
+        assert!(up_dl <= 32 * 1024 + 10 * 32 * 1024 + 1300, "{}", up_dl);
+        assert!(down_dl <= 48 * 1024 + 10 * 64 * 1024 + 1300, "{}", down_dl);
+        // still realtime (sent once, never dropped), just without copies
         assert_ne!(s.class(0, 2, 1300, None, t0 + Duration::from_secs(10)), Class::Bulk);
+        assert_ne!(s.class(0, 4, 1300, Some(0), t0 + Duration::from_secs(10)), Class::Bulk);
     }
 }

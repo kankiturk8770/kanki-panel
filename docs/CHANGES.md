@@ -20,7 +20,23 @@
 - Game recorder › «What the VIP tunnel sees» shows the biggest burst in 50 ms and the most game packets a second.
 - **Lab:** `scripts/vip_kmix_lab.sh` — the real KANKI MIX server at the exit, the VIP tunnel on bad lines (now also a bottleneck: 8 Mbit/s
   with a 150 ms queue), and `kmix-lab` (a KANKI MIX client like the app in gaming mode: 60 game packets a second, a burst of 76 every
-  2 s, an 8 MB download over KCP at the same time). NUMBERS
+  2 s, an 8 MB download over KCP at the same time).
+  Same machine, same lines, 30 s each, old (3.46.0) → new:
+
+  | line | burst | game packets back | bursts whole (packets) | TCP repairs (down) |
+  |---|---|---|---|---|
+  | 8 Mbit/s, 150 ms queue, download running | PUBG-like (76, ~9 KB) | 1861 → **1875**/1875 | 11 → **15**/15 (1116 → **1140**) | 705 → **0** |
+  | same | worst (76 × 500 B) | 1845 → **1875** | 5 → **15**/15 (563 → **1140**) | 583 → **0** |
+  | same + 3 % loss | PUBG-like | 1832 → **1875** | 10 → **15** (1112 → **1140**) | 1621 → **0** |
+  | same + 3 % loss | worst | 1849 → **1875** | 2 → **15** (392 → **1140**) | 1377 → **0** |
+  | bursts of loss (~4 %) | PUBG-like | 1863 → **1874** | 12 → **15** | 2044 → **0** |
+  | bursts of loss (~4 %) | worst | 1870 → **1873** | 9 → **15** | 1880 → **0** |
+  | clean / 3 % random | both | same (all back) | 15/15 both | 340–1615 → **0** |
+
+  On the full line the game's p99 is 112–114 ms with a PUBG-like burst (old 154); with the worst-case burst it is higher than before
+  (146–172 vs 106–158) because the old code simply dropped half of those packets. Copies go only to game packets (~6 065 down);
+  KCP's 9 000–15 800 packets went once each. Up (phone → Iran → exit), where nothing is marked, the copies are held to 32 KB/s:
+  up traffic +0.3–1.9 MB per 30 s with an 8 MB download, none without one.
 - Tests: `marked_game_is_realtime_and_the_tcp_next_to_it_is_bulk`, `unmarked_packets_are_realtime_with_a_budget`,
   `big_game_packets_survive_like_small_ones`, `the_game_mark_goes_through`, Go `TestGamePacketsAreMarked`.
 
