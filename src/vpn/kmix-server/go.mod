@@ -8,6 +8,7 @@ require (
 	github.com/xtaci/kcp-go/v5 v5.6.21
 	github.com/xtaci/smux v1.5.24
 	golang.org/x/crypto v0.36.0
+	golang.org/x/net v0.38.0
 )
 
 require (
@@ -17,6 +18,5 @@ require (
 	github.com/templexxx/cpu v0.1.1 // indirect
 	github.com/templexxx/xorsimd v0.4.3 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
-	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
 )

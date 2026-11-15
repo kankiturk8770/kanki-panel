@@ -2106,3 +2106,18 @@ body.kg .ksn-it:hover,body.kg .kst-it:hover,body.kg .kcb-t:hover,body.kg .kcb-ov
 .ktr-days .kbr{grid-template-columns:auto minmax(0,1fr) auto}
 .ktr-days .kbr-v{white-space:nowrap}
 @media (max-width:619px){.ktr-st td small{white-space:normal}.ktr-st tr.sum td:empty{display:none}}
+
+/* 3.46 — KANKI MIX › Game recorder: the phase bar and the charts */
+.kr-st{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--sp2) var(--sp3);margin:0 0 var(--sp4);font-size:14px;line-height:1.7}
+.kr-st>span{min-width:0;overflow-wrap:anywhere}
+.kr-ph{direction:ltr;display:flex;height:14px;margin:var(--sp4) var(--sp5) var(--sp2);border-radius:7px;overflow:hidden;background:rgba(127,127,127,.15)}
+.kr-ph span{display:block;height:100%;min-width:1px}
+.p-lobby{--pc:color-mix(in srgb,var(--s) 55%,transparent)}.p-start{--pc:var(--warn)}.p-match{--pc:var(--ok)}.p-download{--pc:var(--info)}
+.kr-ph span{background:var(--pc)}
+.kr-lg{flex-wrap:wrap;padding:0 var(--sp5);gap:var(--sp3)}
+.kr-lg i{background:var(--pc)}
+.kr-cap{margin:var(--sp4) var(--sp5) var(--sp2);font-size:13px}
+.kr-cap+.klegend{padding:0 var(--sp5);margin-bottom:var(--sp2)}
+.kr-ch{height:120px;margin:0 var(--sp5)}
+.kr-tm{display:flex;justify-content:space-between;padding:var(--sp1) var(--sp5) var(--sp4);font-size:12px;color:var(--s)}
+@media(max-width:619px){.kr-ph,.kr-cap{margin-inline:var(--sp3)}.kr-ch{margin:0 var(--sp3);height:100px}.kr-lg,.kr-cap+.klegend,.kr-tm{padding-inline:var(--sp3)}}

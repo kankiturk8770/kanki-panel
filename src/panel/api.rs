@@ -367,6 +367,7 @@ pub fn node_router(app: Arc<App>) -> Router {
         .route("/agent/ports", post(agent_ports))
         .route("/agent/remove", post(agent_remove))
         .route("/agent/setup-tunnel", post(agent_setup_tunnel))
+        .route("/agent/kmix/record", post(agent_kmix_record))
         .route("/hy2/auth", post(hy2_auth))
         .with_state(app)
 }
@@ -2113,6 +2114,14 @@ async fn agent_ports(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         return err(StatusCode::UNAUTHORIZED, "bad token");
     }
     Json(tokio::task::spawn_blocking(move || crate::admin::set_ports(&b)).await.unwrap_or_else(|_| json!({"ok": false}))).into_response()
+}
+
+/// The panel asks this node's KANKI MIX about the game recorder (`kmix::record_local`)
+async fn agent_kmix_record(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    if !node_authed(&app, &h) {
+        return err(StatusCode::UNAUTHORIZED, "bad token");
+    }
+    Json(crate::kmix::record_local(&b).await).into_response()
 }
 
 /// The panel deleted this node: everything the node runs is removed (just after this answer)

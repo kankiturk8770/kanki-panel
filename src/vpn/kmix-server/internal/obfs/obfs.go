@@ -53,7 +53,13 @@ type PacketConn struct {
 	ring    *Keyring // حالت چندکاربره (nil = یک کلید مشترک)
 	handler Handler
 	bufPool sync.Pool
+	// Tap (سمت سرور، اختیاری) هر بسته‌ی باز یا فرستاده‌شده را با اندازه‌ی روی سیم می‌بیند؛
+	// برای ضبط ترافیک یک کاربر. فقط قبل از شروع خواندن گذاشته می‌شود.
+	Tap Tap
 }
+
+// Tap: in=true بسته‌ی رسیده، wire اندازه‌ی کامل روی سیم، p متن باز (فقط تا پایان فراخوانی معتبر).
+type Tap func(in bool, kind byte, wire int, p []byte, addr net.Addr)
 
 // New یک PacketConn مبهم‌سازی‌شده با کلید ۳۲ بایتی می‌سازد.
 // handler (می‌تواند nil باشد) بسته‌های غیر KCP را که در ReadFrom دیده می‌شوند می‌گیرد.
@@ -116,6 +122,9 @@ func (c *PacketConn) WritePacket(kind byte, b []byte, addr net.Addr) error {
 	if err == nil && ctr != nil {
 		ctr.tx.Add(int64(len(out)))
 	}
+	if err == nil && c.Tap != nil {
+		c.Tap(false, kind, len(out), b, addr)
+	}
 	return err
 }
 
@@ -132,6 +141,9 @@ func (c *PacketConn) ReadPacket(b []byte) (kind byte, n int, addr net.Addr, err 
 		k, p, ok := c.open(buf[:m], a)
 		if !ok || len(p) > len(b) {
 			continue
+		}
+		if c.Tap != nil {
+			c.Tap(true, k, m, p, a)
 		}
 		return k, copy(b, p), a, nil
 	}
@@ -191,6 +203,9 @@ func (c *PacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
 		kind, p, ok := c.open(buf[:m], addr)
 		if !ok {
 			continue
+		}
+		if c.Tap != nil {
+			c.Tap(true, kind, m, p, addr)
 		}
 		if kind != KindKCP {
 			if c.handler != nil {

@@ -1,3 +1,32 @@
+# v3.46.0 — Game recorder (KANKI MIX)
+- **KANKI MIX › Game recorder (new tab):** pick a user and a length (5–60 minutes), «Start recording», play one full match on that
+  account, then read the report. It records on every server running KANKI MIX at once (the user may connect to any of them) and shows the
+  server that saw the most.
+- **Recorded where the traffic is open, inside the KANKI MIX server** (`src/vpn/kmix-server/cmd/kanki-server/record.go`): every game
+  (UDP datagram) packet with its time, flow, direction, its own size, its size on the wire (what the Iran server and the VIP tunnel see)
+  and its number; KCP (the app's TCP) in 100 ms slots split into data, ACK-only, FEC parity, small and big; every TCP connection with
+  its destination (domain or IP) and bytes; the DNS questions and answers, so every IP has a name. Packet contents are not kept.
+  Only the chosen user is recorded; the rest pay one atomic read per packet. A small optional `Tap` on the obfs layer gives the
+  wire size (`internal/obfs`, server only).
+- **The report labels everything:** each UDP flow is a match (≥ 30 s at ≥ 10 packets a second), a game service, DNS, QUIC or the clock;
+  each TCP connection a download (≥ 2 MB) or lobby / web; the time is split into lobby, match start (first 20 s), match and download.
+  Per flow: packets and packets a second each way, a size table (≤64 … >1100), the biggest packet, the biggest burst in 20 ms and
+  bytes in 50 ms, copies (gaming mode), packets lost on the way up (from the numbers) and late ones. A timeline chart of game packets
+  and TCP downloads, a phase bar, and **what the VIP tunnel makes of it**: the share of match packets above 512 bytes on the wire
+  (the VIP tunnel does not treat them as game), the seconds with more than 300 small packets (it takes the whole flow for a
+  download), and the biggest burst of big match packets in 50 ms (its speed guard lets about 6200 B through).
+- **Download everything (JSON):** every packet (`[ms, flow, dir, size, wire size, seq]`), the KCP slots, the TCP slots and the names,
+  for a closer look.
+- API: `POST /api/kmix/record` (`start` / `stop` / `clear` / `get` / `raw`), on a node `POST /agent/kmix/record`, in the server
+  `/record/start`, `/record/stop`, `/record/clear`, `GET /record[?raw=1]`. A server not updated yet says «Update this server to use
+  the recorder».
+- **Checked:** `go test ./...` (labels, loss, bursts, DNS names, phases, only that user and only that long, `-race`); `cargo test`
+  (the API refuses a user without KANKI MIX and a wrong action); the whole thing on this machine: the panel set up KANKI MIX, the real
+  server ran, a test client played 40 s of «game» (30 packets a second, every 40th lost, a 10 × 1200 B burst every 3 s, sent twice),
+  asked DNS and downloaded 3 MB over KCP — the report named the match flow by its DNS name, 2.4 % lost up, burst 22 / 20 ms, 10 %
+  big packets down, the download; the tab at 360–1440, Persian dark and English light, no JS error, no sideways scroll, no
+  `undefined`/`NaN`.
+
 # v3.45.0 — Traffic of each server
 - **Traffic & stats › «Traffic of each server»:** one row per server (the panel server, every foreign and Iran server) with today,
   the last 7 and 30 days, everything since counting began (received ↓ and sent ↑ under each) and the speed now; a last row adds them

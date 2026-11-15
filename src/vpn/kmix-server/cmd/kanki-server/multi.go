@@ -17,6 +17,7 @@ package main
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -189,6 +190,61 @@ func serveAPI(addr, secret string, ring *obfs.Keyring, usersPath string) {
 			return
 		}
 		writeJSON(w, map[string]any{"ok": true, "users": ring.Len()})
+	})
+	// ضبط ترافیک یک کاربر (record.go): POST /record/start {"user","secs"}، POST /record/stop،
+	// GET /record (گزارش)، GET /record?raw=1 (گزارش و همه‌ی بسته‌ها)، POST /record/clear
+	mux.HandleFunc("/record/start", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(r) || r.Method != http.MethodPost {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var b struct {
+			User string `json:"user"`
+			Secs int    `json:"secs"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&b); err != nil || b.User == "" {
+			http.Error(w, "user is needed", http.StatusBadRequest)
+			return
+		}
+		rc := newRecorder(b.User, b.Secs, time.Now())
+		rec.Store(rc)
+		writeJSON(w, map[string]any{"ok": true, "user": rc.user, "secs": int(rc.until.Sub(rc.start) / time.Second), "known": ring.Has(b.User)})
+	})
+	mux.HandleFunc("/record/stop", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(r) || r.Method != http.MethodPost {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if rc := rec.Load(); rc != nil {
+			rc.stop()
+		}
+		writeJSON(w, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("/record/clear", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(r) || r.Method != http.MethodPost {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		rec.Store(nil)
+		writeJSON(w, map[string]any{"ok": true})
+	})
+	mux.HandleFunc("/record", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		rc := rec.Load()
+		if rc == nil {
+			writeJSON(w, map[string]any{"report": nil})
+			return
+		}
+		rep, raw := rc.report(time.Now())
+		if r.URL.Query().Get("raw") == "1" {
+			raw["report"] = rep
+			writeJSON(w, raw)
+			return
+		}
+		writeJSON(w, map[string]any{"report": rep})
 	})
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	log.Fatal(srv.ListenAndServe())

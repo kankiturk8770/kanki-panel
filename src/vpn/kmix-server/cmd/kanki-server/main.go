@@ -82,6 +82,8 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+	// ضبط ترافیک یک کاربر وقتی پنل خواست (record.go)
+	oc.Tap = tapPacket
 	// ServeConn: بلاک‌رمز داخلی nil (رمزنگاری را خودمان در لایه obfs انجام می‌دهیم)
 	ln, err := kcp.ServeConn(nil, *data, *parity, oc)
 	if err != nil {
@@ -128,14 +130,14 @@ func handleSession(sess *kcp.UDPSession) {
 		authStream.Close()
 		return
 	}
-	psk := currentPSK
+	psk, user := currentPSK, ""
 	if ring := relayRing; ring != nil {
 		u := ring.UserOf(sess.RemoteAddr())
 		if u == nil {
 			authStream.Close()
 			return
 		}
-		psk = u.Key
+		psk, user = u.Key, u.Name
 	}
 	if err := proto.VerifyAuth(psk, token); err != nil {
 		log.Printf("احراز هویت ناموفق از %s: %v", sess.RemoteAddr(), err)
@@ -151,11 +153,11 @@ func handleSession(sess *kcp.UDPSession) {
 		if err != nil {
 			return
 		}
-		go handleStream(st)
+		go handleStream(st, user)
 	}
 }
 
-func handleStream(st *smux.Stream) {
+func handleStream(st *smux.Stream, user string) {
 	defer st.Close()
 	var cmd [1]byte
 	if _, err := io.ReadFull(st, cmd[:]); err != nil {
@@ -166,11 +168,11 @@ func handleStream(st *smux.Stream) {
 		return
 	}
 	if cmd[0] == proto.CmdTCP {
-		relayTCP(st, proto.JoinAddr(host, port))
+		relayTCP(st, proto.JoinAddr(host, port), &tcpTap{user: user, host: host, port: port})
 	}
 }
 
-func relayTCP(st *smux.Stream, target string) {
+func relayTCP(st *smux.Stream, target string, tap *tcpTap) {
 	rc, err := net.DialTimeout("tcp", target, 10*time.Second)
 	if err != nil {
 		log.Printf("dial %s: %v", target, err)
@@ -181,13 +183,14 @@ func relayTCP(st *smux.Stream, target string) {
 		tc.SetNoDelay(true)
 	}
 	st.Write([]byte{0x01}) // متصل شد
+	defer tap.closed()
 	go func() {
-		io.Copy(rc, st)
+		io.Copy(countW{rc, tap, 0}, st)
 		if tc, ok := rc.(*net.TCPConn); ok {
 			tc.CloseWrite() // اپ دیگر چیزی نمی‌فرستد؛ مقصد هنوز می‌تواند جواب بدهد
 		}
 	}()
-	io.Copy(st, rc)
+	io.Copy(countW{st, tap, 1}, rc)
 	// مقصد اتصال را بست → استریم را ببند تا اپ فوراً بفهمد. smux نیم‌بسته ندارد؛ قبلاً اینجا
 	// منتظر اپ می‌ماندیم و اپ منتظر ما، و هر اتصال تا ۳۰ ثانیه آویزان می‌ماند.
 	st.Close()
