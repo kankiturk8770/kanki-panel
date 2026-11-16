@@ -2278,3 +2278,5 @@ body.light .kcb-t.on{background:linear-gradient(180deg,rgba(245,196,81,.32),rgba
 .warnbox a{display:inline-block;padding:10px 2px;margin:-10px 0}
 /* wide tables: cells wrap on a narrow desktop instead of scrolling sideways */
 @media(min-width:620px) and (max-width:1199px){.ktbl th{white-space:normal}.ktbl td{overflow-wrap:anywhere}.ktbl td,.ktbl th{padding-inline:8px}}
+/* a row of chips inside a name cell (the DNS game domains): they wrap, never run out of a cell that hides overflow */
+.chs{display:flex;flex-wrap:wrap;gap:4px;white-space:normal;min-width:0}
