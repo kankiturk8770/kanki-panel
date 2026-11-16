@@ -11,16 +11,16 @@
  /* 3.47: the Kanki app's own look («Kanki Glass», its default theme): near-black with one neon green and a teal
     second colour, dark crystal glass for every card and button, the same in every Telegram theme. The old names
     (gold…) stay as the accent's names, so every rule below takes the new colours */
- --bg:#121412;--bg2:rgba(255,255,255,.055);--bg3:rgba(255,255,255,.10);--tx:#f2f5f1;--hint:#a9b3ab;--link:#2bee34;--btn:#2bee34;--btx:#0a0d0b;
- --sep:rgba(255,255,255,.10);--gold1:#80f585;--gold2:#2bee34;--gold3:#18831d;--ink:#0a0d0b;--acc2:#19e6c1;
+ --bg:#090D16;--bg2:rgba(18,24,38,.78);--bg3:rgba(30,40,62,.85);--tx:#EEF3FF;--hint:#95A3BC;--link:#00E676;--btn:#00E676;--btx:#04120A;
+ --sep:rgba(140,170,255,.13);--gold1:#7CF5B4;--gold2:#00E676;--gold3:#0A8F4C;--ink:#04120A;--acc2:#00D2FF;
  --ok:#3be36b;--warn:#ffc24a;--bad:#ff6c65;
  /* one colour per app and per system, so each is told apart at a glance */
  --k:#2bee34;--z:#ff9f43;--v:#a78bfa;--g:#ff6b81;--sa:#3ddc84;--si:#8fb8ff;--sw:#4cc2ff;
- --glass:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.025) 45%,rgba(0,0,0,.28));
- --glass-edge:rgba(255,255,255,.16) rgba(255,255,255,.07) rgba(0,0,0,.4) rgba(255,255,255,.07);
- --glass-sh:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -14px 22px -16px rgba(0,0,0,.6),0 12px 26px -16px rgba(0,0,0,.9);
- --fill:linear-gradient(160deg,#9af79e 0%,#2bee34 42%,#19c9a8 100%);
- --fill-sh:inset 0 1px 0 rgba(255,255,255,.65),inset 0 -10px 16px -10px rgba(0,70,30,.55),0 8px 22px -8px rgba(43,238,52,.55);
+ --glass:linear-gradient(160deg,rgba(30,40,64,.9),rgba(18,24,38,.86) 55%,rgba(12,16,28,.92));
+ --glass-edge:rgba(140,180,255,.22) rgba(140,180,255,.09) rgba(0,0,0,.5) rgba(140,180,255,.09);
+ --glass-sh:inset 0 1px 0 rgba(160,200,255,.14),0 0 0 1px rgba(0,210,255,.03),0 14px 30px -18px rgba(0,0,0,.95);
+ --fill:linear-gradient(160deg,#7CF5B4 0%,#00E676 45%,#00C2D8 100%);
+ --fill-sh:inset 0 1px 0 rgba(255,255,255,.6),inset 0 -10px 16px -10px rgba(0,60,40,.5),0 8px 22px -8px rgba(0,230,118,.5);
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.6 Vazirmatn,system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
@@ -342,44 +342,44 @@ details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8p
    One recipe for every surface (dark crystal: light top edge, deep shadow under) and one for every main button
    (the green fill with its shine). No backdrop blur: the page behind is a still gradient, and a blur on every card
    made scrolling heavy on slow phones */
-html,body{background:#121412}
-.tabs{background:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.03) 45%,rgba(0,0,0,.3)),#151715}
-body{background:radial-gradient(130% 55% at 12% -8%,rgba(43,238,52,.13),transparent 60%),radial-gradient(90% 45% at 105% 32%,rgba(25,230,193,.07),transparent 62%),linear-gradient(180deg,#1b1d1b 0%,#121412 42%,#0a0b0a 100%);background-attachment:fixed;min-height:100vh}
+html,body{background:#090D16}
+.tabs{background:linear-gradient(160deg,rgba(30,40,64,.95),rgba(14,19,32,.96)),#0E1422}
+body{background:radial-gradient(120% 50% at 10% -10%,rgba(0,210,255,.14),transparent 60%),radial-gradient(90% 45% at 105% 30%,rgba(0,230,118,.07),transparent 62%),radial-gradient(80% 40% at 50% 110%,rgba(255,179,0,.05),transparent 70%),linear-gradient(180deg,#0E1422 0%,#090D16 45%,#070A12 100%);background-attachment:fixed;min-height:100vh}
 .card,.pass,.pc,.conn,.cpanel,.ctile,details.app,.ctry,.appc,.code,.plan,.pq-st,.pq-alert,.pq-sum div,.accs button,.tabs,.ptabs button,.plats button,.seg,.offer,.btog,.b,.adm,.step,.chips2 button,.bcol button{
  background:var(--glass);border:1px solid;border-color:var(--glass-edge);box-shadow:var(--glass-sh)}
 .tabs,.seg{padding:4px;border-radius:16px}
 .tabs button,.seg button{border-radius:12px;transition:background .15s,color .15s}
-.tabs button.on,.seg button.on{background:linear-gradient(160deg,rgba(43,238,52,.28),rgba(43,238,52,.08) 60%,rgba(0,0,0,.2));color:var(--tx);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 0 0 1px rgba(43,238,52,.55),0 0 18px -6px rgba(43,238,52,.6)}
+.tabs button.on,.seg button.on{background:linear-gradient(160deg,rgba(0,230,118,.28),rgba(0,230,118,.08) 60%,rgba(0,0,0,.2));color:var(--tx);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 0 0 1px rgba(0,230,118,.55),0 0 18px -6px rgba(0,230,118,.6)}
 .b{color:var(--gold1)}
 .b.main,.b.go,.pc .buy,.ptabs button.on,.empty .mk,.b.blue{background:var(--fill);color:var(--ink);border:1px solid rgba(255,255,255,.55);box-shadow:var(--fill-sh);font-weight:900}
 .b,.pc .buy,.step,.ctile,.accs button,.ptabs button,.plats button,.chips2 button,.adm,.tabs button,.seg button{transition:transform .12s ease,filter .12s ease}
 .b:active,.pc .buy:active,.step:active,.ctile:active,.accs button:active,.ptabs button:active,.plats button:active,.chips2 button:active,.adm:active{transform:scale(.97);filter:brightness(1.08)}
-.accs button.on,.ctile.on,.chips2 button.on,.bcol button.on,.plats button.on{border-color:rgba(43,238,52,.75);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 0 0 1px rgba(43,238,52,.45),0 0 18px -8px rgba(43,238,52,.7);color:var(--tx)}
-.ctile.on{background:linear-gradient(160deg,rgba(43,238,52,.2),rgba(43,238,52,.05) 60%,rgba(0,0,0,.25))}
+.accs button.on,.ctile.on,.chips2 button.on,.bcol button.on,.plats button.on{border-color:rgba(0,230,118,.75);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 0 0 1px rgba(0,230,118,.45),0 0 18px -8px rgba(0,230,118,.7);color:var(--tx)}
+.ctile.on{background:linear-gradient(160deg,rgba(0,230,118,.2),rgba(0,230,118,.05) 60%,rgba(0,0,0,.25))}
 /* the account pass: the one bright thing on the page */
-.pass{background:radial-gradient(120% 140% at 100% 0%,rgba(43,238,52,.20),transparent 55%),radial-gradient(90% 120% at 0% 100%,rgba(25,230,193,.10),transparent 60%),var(--glass);border-color:rgba(43,238,52,.45) rgba(255,255,255,.08) rgba(0,0,0,.45) rgba(255,255,255,.08);box-shadow:var(--glass-sh),0 18px 40px -24px rgba(43,238,52,.6)}
+.pass{background:radial-gradient(120% 140% at 100% 0%,rgba(0,230,118,.20),transparent 55%),radial-gradient(90% 120% at 0% 100%,rgba(0,210,255,.10),transparent 60%),var(--glass);border-color:rgba(0,230,118,.45) rgba(255,255,255,.08) rgba(0,0,0,.45) rgba(255,255,255,.08);box-shadow:var(--glass-sh),0 18px 40px -24px rgba(0,230,118,.6)}
 .pass .who b{color:var(--tx)}
-.pass .big strong{color:var(--gold2);text-shadow:0 0 18px rgba(43,238,52,.35)}
+.pass .big strong{color:var(--gold2);text-shadow:0 0 18px rgba(0,230,118,.35)}
 .pass .bar{background:rgba(255,255,255,.08)}
 .pass .bar span{background:linear-gradient(90deg,var(--gold2),var(--acc2))}
 .pass .tear{border-top-color:rgba(255,255,255,.14)}
-.pass .tear:before,.pass .tear:after{background:#141614}
+.pass .tear:before,.pass .tear:after{background:#0B1020}
 .pass .st{background:rgba(255,255,255,.07)}
 .pass .copy{background:var(--fill);color:var(--ink)}
-.svc{background:rgba(43,238,52,.12);color:var(--gold1);border:1px solid rgba(43,238,52,.3)}
+.svc{background:rgba(0,230,118,.12);color:var(--gold1);border:1px solid rgba(0,230,118,.3)}
 .conn .dot,.pq-tu:before{box-shadow:0 0 10px currentColor}
 /* the shop */
 .pc{border-radius:20px}
-.pc.feat{border-color:rgba(43,238,52,.8) rgba(43,238,52,.35) rgba(0,0,0,.4) rgba(43,238,52,.35);box-shadow:var(--glass-sh),0 0 0 1px rgba(43,238,52,.25),0 14px 34px -14px rgba(43,238,52,.5)}
+.pc.feat{border-color:rgba(0,230,118,.8) rgba(0,230,118,.35) rgba(0,0,0,.4) rgba(0,230,118,.35);box-shadow:var(--glass-sh),0 0 0 1px rgba(0,230,118,.25),0 14px 34px -14px rgba(0,230,118,.5)}
 .pc .rib{background:#151815;border:1px solid var(--gold2);color:var(--gold2)}
 .pc.feat .rib{background:var(--fill);color:var(--ink);border-color:rgba(255,255,255,.6)}
-@keyframes blink{50%{box-shadow:0 0 16px rgba(43,238,52,.8);transform:scale(1.04)}}
-.pc .em{background:rgba(43,238,52,.08);border:1px solid rgba(43,238,52,.2)}
+@keyframes blink{50%{box-shadow:0 0 16px rgba(0,230,118,.8);transform:scale(1.04)}}
+.pc .em{background:rgba(0,230,118,.08);border:1px solid rgba(0,230,118,.2)}
 .pc .pt b.vol{color:var(--gold2)}.pc .pt b.vol small,.pc .meta span{color:var(--tx)}
 .pc .meta span{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.1)}
 .pc .pr2 strong{color:var(--gold1)}
 .pc.feat .buy{box-shadow:var(--fill-sh)}
-.offer{display:flex;align-items:center;gap:12px;padding:12px;border-radius:16px;margin:0 0 12px;border-color:rgba(43,238,52,.6) rgba(43,238,52,.2) rgba(0,0,0,.4) rgba(43,238,52,.2)}
+.offer{display:flex;align-items:center;gap:12px;padding:12px;border-radius:16px;margin:0 0 12px;border-color:rgba(0,230,118,.6) rgba(0,230,118,.2) rgba(0,0,0,.4) rgba(0,230,118,.2)}
 .offer .ob{flex:none;min-width:56px;height:44px;padding:0 8px;border-radius:12px;display:grid;place-items:center;font-size:18px;font-weight:900;background:var(--fill);color:var(--ink);box-shadow:var(--fill-sh)}
 .offer b{display:block;font-weight:900}.offer small{display:block;font-size:12px;color:var(--hint)}
 /* app icons: dark ink on their own colour */
@@ -391,10 +391,10 @@ details.app{border-inline-start:3px solid var(--ac)}
 .in{background:rgba(0,0,0,.35);border-color:rgba(255,255,255,.12)}
 .in:focus{outline-color:var(--gold2)}
 .skel{background:var(--glass);border:1px solid rgba(255,255,255,.08)}
-.brand b{color:var(--tx);text-shadow:0 0 16px rgba(43,238,52,.35)}
-.brand svg{filter:drop-shadow(0 0 10px rgba(43,238,52,.5))}
+.brand b{color:var(--tx);text-shadow:0 0 16px rgba(0,230,118,.35)}
+.brand svg{filter:drop-shadow(0 0 10px rgba(0,230,118,.5))}
 .pq-re,.adm{color:var(--gold2)}
-#toast{background:rgba(242,245,241,.95);color:#0a0d0b;box-shadow:0 10px 30px -10px rgba(0,0,0,.8)}
+#toast{background:rgba(238,243,255,.96);color:#070A12;box-shadow:0 10px 30px -10px rgba(0,0,0,.8)}
 @media (prefers-reduced-motion:reduce){.b,.pc .buy,.step,.ctile,.tabs button,.seg button{transition:none}}
 
 /* 3.48 — the bot's management */
@@ -434,16 +434,92 @@ details.app{border-inline-start:3px solid var(--ac)}
 .merr{color:var(--bad)!important;font-size:12px;word-break:break-all}
 .merow{padding:8px 0;border-top:1px solid var(--sep)}.merow:first-child{border-top:0}
 .merow small{display:block;font-size:11px;color:var(--hint)}.merow code{display:block;font-size:12px;white-space:pre-wrap;word-break:break-all;color:var(--tx)}
+
+/* ===================================================== 3.49 — Kanki Night: the header and the shop
+   Deep night blue, glass cards with a thin glowing edge, one colour per service (V2Ray cyan, gaming green, VIP amber).
+   Transitions only on opacity and transform, so a slow phone stays smooth. */
+.brand{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:4px 10px;padding:12px 16px 10px;margin:-12px -16px 14px;
+ background:linear-gradient(180deg,rgba(11,16,32,.97),rgba(9,13,22,.9));border-bottom:1px solid rgba(140,180,255,.1)}
+.brand svg{width:28px;height:30px;filter:drop-shadow(0 0 10px rgba(0,210,255,.45))}
+.brand b{font-size:18px;font-weight:900;letter-spacing:.4px;direction:ltr;text-align:start;color:#EEF3FF;text-shadow:0 0 18px rgba(0,210,255,.35);white-space:nowrap}
+.hp{min-height:40px;padding:0 14px;border-radius:20px;border:1px solid rgba(0,210,255,.35);background:rgba(0,210,255,.08);color:#BFF3FF;font:inherit;font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap}
+.hp:disabled{opacity:.8;cursor:default}
+.live{grid-column:1/-1;justify-self:start;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#9CF7C6;padding:2px 10px;border-radius:12px;background:rgba(0,230,118,.08);border:1px solid rgba(0,230,118,.25)}
+.live i{width:8px;height:8px;border-radius:50%;background:#00E676;box-shadow:0 0 8px #00E676;animation:lv 2s ease-in-out infinite}
+.live.part{color:#FFD98A;background:rgba(255,179,0,.08);border-color:rgba(255,179,0,.28)}.live.part i{background:#FFB300;box-shadow:0 0 8px #FFB300}
+.live[hidden]{display:none}
+@keyframes lv{50%{opacity:.35}}
+.trial2{display:flex;align-items:center;gap:12px;margin-bottom:12px}.trial2>div{flex:1}.trial2 .lead{margin:2px 0 0}
+/* the three services */
+.tier{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:5px;border-radius:18px;margin:0 0 10px;background:rgba(10,14,26,.85);border:1px solid rgba(140,180,255,.12)}
+.tier button{--tc:#00E676;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:58px;padding:6px 4px;border:1px solid transparent;border-radius:14px;background:transparent;color:var(--hint);font:inherit;font-size:12px;font-weight:800;line-height:1.3;cursor:pointer;text-align:center;transition:background .2s,color .2s,box-shadow .2s,transform .12s}
+.tier button svg{width:22px;height:22px;color:var(--tc);opacity:.75}
+.tier button.on{color:#fff;background:linear-gradient(160deg,color-mix(in srgb,var(--tc) 26%,transparent),color-mix(in srgb,var(--tc) 6%,transparent));border-color:color-mix(in srgb,var(--tc) 60%,transparent);box-shadow:0 0 22px -8px var(--tc),inset 0 1px 0 rgba(255,255,255,.18)}
+.tier button.on svg{opacity:1;filter:drop-shadow(0 0 6px var(--tc))}
+.tier button:active{transform:scale(.97)}
+.shop{--tc:#00E676}
+.tdesc{padding:12px 14px;border-radius:16px;margin-bottom:10px;background:linear-gradient(160deg,color-mix(in srgb,var(--tc) 12%,rgba(18,24,38,.9)),rgba(18,24,38,.86));border:1px solid color-mix(in srgb,var(--tc) 30%,transparent)}
+.tdesc b{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:900;color:var(--tc)}.tdesc b svg{width:20px;height:20px}
+.tdesc p{margin:4px 0 0;font-size:13px;color:#C9D3E6;line-height:1.8}
+.kinds{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px;padding:4px;border-radius:14px;margin-bottom:12px;background:rgba(10,14,26,.85);border:1px solid rgba(140,180,255,.1)}
+.kinds button{min-height:40px;padding:0 4px;border:0;border-radius:10px;background:transparent;color:var(--hint);font:inherit;font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap;transition:background .2s,color .2s}
+.kinds button.on{color:#fff;background:color-mix(in srgb,var(--tc) 22%,rgba(18,24,38,.9));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--tc) 55%,transparent)}
+.sw{animation:sw .22s ease-out}
+@keyframes sw{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* a plan card */
+.pc2{position:relative;padding:14px;margin-bottom:12px;border-radius:20px;background:linear-gradient(160deg,rgba(30,40,64,.92),rgba(18,24,38,.9) 55%,rgba(12,16,28,.94));border:1px solid rgba(140,180,255,.14);box-shadow:inset 0 1px 0 rgba(160,200,255,.1),0 14px 30px -20px rgba(0,0,0,.95)}
+.pc2.feat{border-color:color-mix(in srgb,var(--tc) 65%,transparent);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 0 0 1px color-mix(in srgb,var(--tc) 25%,transparent),0 14px 36px -16px color-mix(in srgb,var(--tc) 60%,transparent)}
+.rib2{position:absolute;top:-10px;inset-inline-end:14px;font-size:12px;font-weight:900;padding:2px 12px;border-radius:10px;color:#06101C;background:linear-gradient(135deg,#fff 0%,var(--tc) 45%);box-shadow:0 0 16px -2px var(--tc)}
+.pch{display:flex;align-items:center;gap:12px}
+.pci{flex:none;width:46px;height:46px;border-radius:14px;display:grid;place-items:center;color:var(--tc);background:color-mix(in srgb,var(--tc) 12%,transparent);border:1px solid color-mix(in srgb,var(--tc) 35%,transparent)}
+.pci svg{width:24px;height:24px;filter:drop-shadow(0 0 6px color-mix(in srgb,var(--tc) 70%,transparent))}
+.pcn{flex:1;min-width:0}.pcn b{display:block;font-size:20px;font-weight:900;line-height:1.3}.pcn small{display:block;font-size:12px;color:var(--hint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pcp{text-align:end;flex:none}.pcp s{display:block;font-size:12px;color:var(--hint)}.pcp strong{display:block;font-size:20px;font-weight:900;color:var(--tc);line-height:1.2}.pcp small{font-size:12px;color:var(--hint)}
+.spec{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:12px}
+.spec div{padding:6px 8px;border-radius:12px;background:rgba(6,10,20,.55);border:1px solid rgba(140,180,255,.08);text-align:center}
+.spec small{display:block;font-size:11px;color:var(--hint)}.spec b{font-size:13px;font-weight:800;white-space:nowrap}
+.feats{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.feats span{font-size:12px;font-weight:700;padding:2px 10px;border-radius:10px;color:#D6E0F2;background:rgba(255,255,255,.04);border:1px solid rgba(140,180,255,.12)}
+.feats span:before{content:"✓ ";color:var(--tc);font-weight:900}
+.feats .off2{color:var(--ok);border-color:rgba(0,230,118,.35)}.feats .off2:before{content:""}
+.buy2{display:block;width:100%;min-height:46px;margin-top:12px;border:0;border-radius:14px;font:inherit;font-size:15px;font-weight:900;cursor:pointer;color:#06101C;
+ background:linear-gradient(135deg,color-mix(in srgb,var(--tc) 55%,#fff),var(--tc) 55%,color-mix(in srgb,var(--tc) 80%,#000));box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 8px 22px -8px var(--tc);transition:transform .12s,box-shadow .2s,filter .12s}
+.buy2:active{transform:scale(.98);filter:brightness(1.1);box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 0 26px -2px var(--tc)}
+.buy2:disabled,.cgo:disabled{opacity:.6}
+/* the custom plan */
+.cb2{padding:14px;border-color:color-mix(in srgb,var(--tc) 40%,transparent)}
+.cbh{display:flex;align-items:center;gap:10px;margin-bottom:6px}.cbh svg{flex:none;width:26px;height:26px;color:var(--tc)}
+.cbh b{display:block;font-size:15px;font-weight:900}.cbh small{display:block;font-size:12px;color:var(--hint)}
+.sl{margin-top:14px}
+.slh{display:flex;align-items:center;justify-content:space-between;font-size:13px;color:var(--hint);font-weight:700}.slh b{font-size:16px;font-weight:900;color:var(--tc)}
+.sle{display:flex;justify-content:space-between;font-size:11px;color:var(--hint)}
+.cb2 input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:36px;margin:2px 0;background:transparent;accent-color:var(--tc);--f:50%}
+.cb2 input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(to left,var(--tc) var(--f),rgba(140,180,255,.16) var(--f))}
+.cb2 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;margin-top:-9px;border-radius:50%;background:#fff;border:3px solid var(--tc);box-shadow:0 0 12px var(--tc)}
+.cb2 input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:rgba(140,180,255,.16)}
+.cb2 input[type=range]::-moz-range-progress{height:6px;border-radius:3px;background:var(--tc)}
+.cb2 input[type=range]::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#fff;border:3px solid var(--tc);box-shadow:0 0 12px var(--tc)}
+.lw{direction:ltr;unicode-bidi:isolate;white-space:nowrap}
+.useg{display:grid;gap:4px;padding:4px;border-radius:14px;background:rgba(6,10,20,.6);border:1px solid rgba(140,180,255,.1)}
+.useg button{min-height:40px;border:0;border-radius:10px;background:transparent;color:var(--hint);font:inherit;font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap;transition:background .2s,color .2s}
+.useg button.on{color:#06101C;background:var(--tc);box-shadow:0 0 14px -4px var(--tc)}
+.bd{margin-top:14px;padding:10px 12px;border-radius:14px;background:rgba(6,10,20,.6);border:1px dashed color-mix(in srgb,var(--tc) 35%,transparent)}
+.bd>div{display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-size:13px}.bd span{color:var(--hint)}.bd b{font-weight:800}
+.bd .tot{margin-top:6px;padding-top:8px;border-top:1px solid rgba(140,180,255,.12);align-items:baseline}
+.bd .tot strong{font-size:22px;font-weight:900;color:var(--tc);text-shadow:0 0 16px color-mix(in srgb,var(--tc) 50%,transparent)}.bd .tot strong small{font-size:12px;color:var(--hint)}
+.cgo{display:block;width:100%;min-height:50px;margin-top:12px;font-size:15px;background:linear-gradient(135deg,color-mix(in srgb,var(--tc) 55%,#fff),var(--tc) 55%,color-mix(in srgb,var(--tc) 80%,#000))!important;color:#06101C!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 10px 26px -8px var(--tc)!important}
+@media (max-width:380px){.tier button{font-size:11px}.kinds button{font-size:12px}.pcn b,.pcp strong{font-size:18px}}
+@media (prefers-reduced-motion:reduce){.sw,.live i{animation:none}.tier button,.kinds button,.buy2{transition:none}}
 </style>
 </head>
 <body>
-<header class="brand"><svg viewBox="0 0 24 26" aria-hidden="true"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C8FFCB"/><stop offset=".5" stop-color="#2BEE34"/><stop offset="1" stop-color="#14A88E"/></linearGradient></defs><path d="M12 1 22 4.5v8c0 6-4.4 10.4-10 12.5C6.4 22.9 2 18.5 2 12.5v-8z" fill="url(#sg)"/><path d="M12 3.6 19.6 6.3v6.2c0 4.7-3.3 8.2-7.6 10C7.7 20.7 4.4 17.2 4.4 12.5V6.3z" fill="#101310"/><path d="M8.6 7.5h2.4v4l3.4-4h3l-4 4.5 4.2 5.5h-3l-2.8-3.8-.8.9v2.9H8.6z" fill="url(#sg)"/></svg><b>⚡ Kanki VPN</b><small>پنل کاربری</small></header>
+<header class="brand"><svg viewBox="0 0 24 26" aria-hidden="true"><defs><linearGradient id="sg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7CF5FF"/><stop offset=".5" stop-color="#00D2FF"/><stop offset="1" stop-color="#00E676"/></linearGradient></defs><path d="M12 1 22 4.5v8c0 6-4.4 10.4-10 12.5C6.4 22.9 2 18.5 2 12.5v-8z" fill="url(#sg)"/><path d="M12 3.6 19.6 6.3v6.2c0 4.7-3.3 8.2-7.6 10C7.7 20.7 4.4 17.2 4.4 12.5V6.3z" fill="#0B1020"/><path d="M8.6 7.5h2.4v4l3.4-4h3l-4 4.5 4.2 5.5h-3l-2.8-3.8-.8.9v2.9H8.6z" fill="url(#sg)"/></svg><b>Kanki VPN</b><button class="hp" id="hp" type="button">پنل کاربری</button><span class="live" id="live" hidden><i></i><span></span></span></header>
 <div id="app"><div class="skel"></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
 (function(){
 var Q=new URLSearchParams(location.search);
-var A={open:{},ctry:'',list:[],cur:0,plat:'i',view:Q.get('admin')=='btns'?'btns':Q.get('admin')=='paths'?'paths':Q.get('admin')=='bot'?'adm':Q.get('buy')?'buy':'acc',tab:['sub','srv','app'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sub',cat:'',svc:'',shop:null,renew:+(Q.get('renew')||0),cb:null};
+var A={open:{},ctry:'',list:[],cur:0,plat:'i',view:Q.get('admin')=='btns'?'btns':Q.get('admin')=='paths'?'paths':Q.get('admin')=='bot'?'adm':Q.get('buy')?'buy':'acc',tab:['sub','srv','app'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sub',cat:Q.get('tab')=='custom'?'*custom*':'',svc:['v2ray','game','vip'].indexOf(Q.get('shop'))>=0?Q.get('shop'):'',shop:null,renew:+(Q.get('renew')||0),cb:null};
 function tg(){return window.Telegram&&Telegram.WebApp}
 // the signed init data: from Telegram's script, else from the page address (the script may not load in Iran)
 function initData(){var w=tg();if(w&&w.initData)return w.initData;
@@ -460,10 +536,6 @@ var PN={i:'آیفون',a:'اندروید',w:'ویندوز'};
 var ST={Active:['فعال','var(--ok)'],Limited:['حجم تمام شده','var(--warn)'],Expired:['زمان تمام شده','var(--warn)'],Disabled:['غیرفعال','var(--bad)']};
 
 function toman(n){return fa(Math.round(n).toLocaleString('en-US')).replace(/,/g,'٬')+' تومان'}
-// the price of a custom purchase: the same as panel.js smartPrice and shop.rs price()
-function price(r,g,days,conns){var m=Math.max(1,days/30),p=(+r.base||0)*m+g*(+r.gb||0)+Math.max(0,conns-1)*(+r.conn||0)*m;
- if(g>=50&&+r.bulk>0)p=p*(1-Math.min(40,+r.bulk*(g>=100?2:1))/100);var rd=+r.round||1000;return Math.max(rd,Math.round(p/rd)*rd)}
-function dur(d){return d%30?fa(d)+' روز':(d==30?'یک ماه':fa(d/30)+' ماه')}
 var OST={pending:['در انتظار تأیید','y'],waiting:['در انتظار پرداخت','y'],approved:['تأیید شد','g'],done:['فعال شد','g'],rejected:['رد شد','r'],error:['خطا؛ پشتیبانی پیگیری می‌کنه','r'],expired:['پرداخت نشد؛ منقضی شد','r']};
 function ordersHtml(){if(!A.orders||!A.orders.length)return '';
  return '<h2>سفارش‌های من</h2><div class="card">'+A.orders.map(function(o){var st=OST[o.status]||[o.status||'—','y'],amt=+o.amount;
@@ -485,70 +557,99 @@ function render(){if(A.mon)return A.view=='paths'?drawPaths():(A.view='mon',draw
  if(A.view=='buy'&&sales())return drawBuy();if(!A.list.length)return sales()?(A.view='buy',drawBuy()):noAccount();draw()}
 function noAccount(){empty('K','هنوز اشتراکی ندارید','بعد از خرید اشتراک، اطلاعات حساب و کانفیگ‌ها اینجا دیده می‌شن.','<button class="b main" style="min-width:180px" onclick="window.Telegram&&Telegram.WebApp&&Telegram.WebApp.close()">برگشت به ربات</button>')}
 function wireTabs(){Array.prototype.slice.call(document.querySelectorAll('[data-t]')).forEach(function(b){b.onclick=function(){A.tab=b.dataset.t;A.view='acc';render();window.scrollTo(0,0)}})}
-var SV={v2ray:['🌐','اقتصادی · V2Ray','یک لینک اشتراک برای v2rayNG، V2Box، Streisand و v2rayN؛ قیمت کمتر، برای وب‌گردی، اینستاگرام و یوتیوب.'],
- vip:['⚡️','VIP · V2Ray + WireGuard + Amnezia','همون لینک V2Ray به‌اضافه‌ی WireGuard، AmneziaWG و فایل یک‌جای AmneziaVPN؛ همه‌ی کشورها. اپ کانکی هم رایگان همراهشه.']};
-
-function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){return x.id==A.renew})[0],h='';
- if(A.list.length)h+='<div class="acts one" style="margin:0 0 12px"><button class="b" id="bk">بازگشت به حساب</button></div>';
- h+=nameCard();
- // a first-purchase discount (an invited friend, a finished trial): counted on the payment page in the chat
- if(A.offer>0&&!mine)h+='<div class="offer" role="note"><span class="ob">'+fa(A.offer)+'٪</span><div><b>تخفیف خرید اول شما</b><small>موقع پرداخت توی چت خودش از قیمت کم می‌شه.</small></div></div>';
- if(A.trial&&!mine)h+='<div class="card" style="margin-bottom:12px;display:flex;align-items:center;gap:12px"><div style="flex:1"><b>🎁 تست رایگان</b><p class="lead" style="margin:2px 0 0">قبل از خرید امتحان کنید؛ یک بار برای هر نفر.</p></div><button class="b blue" id="tri">گرفتن تست</button></div>';
- if(mine)h+='<p class="lead" style="margin:0 2px 12px">تمدید حساب <b class="ltr">'+esc(mine.name)+'</b>: حجم و روز به همین حساب اضافه می‌شه. <button class="b" id="nr" style="min-height:40px;margin-inline-start:6px">خرید حساب تازه</button></p>';
- // plans of both services on sale: the customer picks the service first and sees only its plans
- var svcs=['v2ray','vip'].filter(function(k){return sh.plans.some(function(p){return (p.service||'vip')==k})});
- if(svcs.length>1){if(!A.svc)A.svc=mine?(mine.service||'vip'):'vip';
-  h+='<div class="seg" role="tablist" style="grid-template-columns:1fr 1fr;margin-bottom:8px">'+svcs.map(function(k){return '<button role="tab" aria-selected="'+(A.svc==k)+'" data-svc="'+k+'" class="'+(A.svc==k?'on':'')+'">'+SV[k][0]+' '+(k=='vip'?'VIP':'اقتصادی')+'</button>'}).join('')+'</div>'+
-   '<p class="lead"><b>'+SV[A.svc][1]+'</b>: '+SV[A.svc][2]+'</p>'}
- else A.svc=svcs[0]||'vip';
- var plans=sh.plans.filter(function(p){return (p.service||'vip')==A.svc});
- // one tab per kind of plan (its category), and the custom purchase as the last tab (it makes a full VIP account)
- var cats=[];plans.forEach(function(p){if(cats.indexOf(p.category)<0)cats.push(p.category)});
- var custom=c.on&&A.svc=='vip';if(custom)cats.push('*custom*');
- if(cats.indexOf(A.cat)<0)A.cat=cats[0]||'';
- if(cats.length>1)h+='<nav class="ptabs" role="tablist">'+cats.map(function(k){return '<button role="tab" aria-selected="'+(A.cat==k)+'" data-cat="'+esc(k)+'" class="'+(A.cat==k?'on':'')+'">'+CI(k)+' '+esc(k=='*custom*'?'دلخواه':(k||'سایر'))+'</button>'}).join('')+'</nav>';
- if(custom&&A.cat=='*custom*'){var cb=A.cb||(A.cb={g:Math.min(c.max_gb,Math.max(c.min_gb,30)),d:c.days[0],u:1});
-  // renewing: never fewer users than the account has (a renewal raises it, never lowers it)
-  var from=mine?Math.max(1,Math.min(c.users,mine.connections||1)):1;if(cb.u<from)cb.u=from;
-  var users=[];for(var i=from;i<=c.users;i++)users.push(i);
-  h+='<h2 style="margin-top:4px">حجم و روز دلخواه</h2><p class="lead">هر چقدر لازم دارید انتخاب کنید؛ قیمت همین‌جا حساب می‌شه.</p><div class="card">'+
-   '<div class="vol"><button class="step" id="gm" aria-label="کمتر">−</button><div class="n"><strong><span id="gv">'+fa(cb.g)+'</span> گیگ</strong><small>از '+fa(c.min_gb)+' تا '+fa(c.max_gb)+' گیگ</small></div><button class="step" id="gp" aria-label="بیشتر">+</button></div>'+
-   '<input type="range" id="gr" min="'+c.min_gb+'" max="'+c.max_gb+'" step="1" value="'+cb.g+'" aria-label="حجم">'+
-   '<span class="lbl">مدت</span><div class="chips2" id="dd">'+c.days.map(function(d){return '<button data-d="'+d+'" class="'+(cb.d==d?'on':'')+'">'+dur(d)+'</button>'}).join('')+'</div>'+
-   (users.length>1?'<span class="lbl">تعداد کاربر (دستگاه هم‌زمان)</span><div class="chips2" id="uu">'+users.map(function(n){return '<button data-u="'+n+'" class="'+(cb.u==n?'on':'')+'">'+fa(n)+' کاربره</button>'}).join('')+'</div>':'')+
-   '<div class="total"><div class="p"><small>قیمت</small><strong id="tp">'+toman(price(c.rules,cb.g,cb.d,cb.u))+'</strong></div><button class="b go" id="cbuy">ادامه و پرداخت</button></div></div>'}
- plans.filter(function(p){return p.category==A.cat}).forEach(function(p){h+=planCard(p)});
- if(!(c.on&&A.svc=='vip')&&!plans.length)h+='<div class="empty"><b>فعلاً پلنی برای فروش نیست</b><p class="muted">کمی بعد دوباره سر بزنید یا به پشتیبانی پیام بدید.</p></div>';
- document.getElementById('app').innerHTML=h;wireBuy()}
-
-// a plan as a card: its emoji, volume / time / users, the price (with the struck higher price and the saving) and its label
-// the kind of a plan (its category): its emoji in the tabs and on its cards
-function CI(k){return k=='*custom*'?'🧮':/چند/.test(k)?'👥':/بلند|ماهه/.test(k)?'⏳':/تک/.test(k)?'👤':'📦'}
+// 3.49 — the shop: three services (a segmented control, each its own colour), the kinds of plan as tabs, cards with
+// their specs and features, and the custom plan with sliders. Every price comes from the panel's one price list
+// (shop.rs): the page shows the same number the bot will ask for.
+var SV={v2ray:['⚡','اقتصادی · V2Ray'],game:['🎮','گیمینگ · WireGuard + Amnezia'],vip:['👑','همه‌کاره VIP']};
+// a Latin run inside Persian text: kept in one piece and one direction (no «+ V2Ray» at the end of a line)
+function L(x){return '<bdi class="lw">'+x+'</bdi>'}
+var TIER={
+ v2ray:{seg:'V2Ray',short:'V2Ray',name:'اقتصادی · '+L('V2Ray'),c:'#00D2FF',ic:'bolt',d:'یک لینک اشتراک برای '+L('v2rayNG')+'، '+L('V2Box')+'، '+L('Streisand')+' و '+L('v2rayN')+'؛ وب‌گردی، دانلود، اینستاگرام و یوتیوب. ارزان‌ترین سرویس.',f:['یک لینک برای همه‌ی سرورها','اندروید، آیفون و ویندوز']},
+ game:{seg:'Amnezia · WireGuard',short:'گیمینگ',name:'گیمینگ · '+L('WireGuard + Amnezia'),c:'#00E676',ic:'pad',d:'کانفیگ '+L('WireGuard')+' و '+L('AmneziaWG')+' و فایل یک‌جای '+L('AmneziaVPN')+'؛ پینگ پایین و پایدار برای پابجی و کالاف.',f:['پینگ پایین و پایدار بازی','اتصال تک‌لمسی در اپ کانکی']},
+ vip:{seg:'همه‌کاره VIP',short:'VIP',name:'همه‌کاره '+L('VIP'),c:'#FFB300',ic:'crown',d:'هر سه با یک اشتراک: '+L('V2Ray + WireGuard + AmneziaWG')+'. اپ اختصاصی کانکی رایگان همراهشه؛ بهترین برای خانواده و چند دستگاه.',f:[L('V2Ray + WireGuard + Amnezia'),'اپ کانکی رایگان']}};
+var TORDER=['v2ray','game','vip'],KORDER=['تک‌کاربره','چندکاربره','بلندمدت'];
+var ICO={
+ bolt:'<path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"/>',
+ pad:'<path d="M7 7h10a5 5 0 0 1 4.9 6l-.8 3.6a2.6 2.6 0 0 1-4.6 1L15 15.5H9l-1.5 2.1a2.6 2.6 0 0 1-4.6-1L2.1 13A5 5 0 0 1 7 7z"/><path d="M7 10v4M5 12h4"/><circle cx="15.5" cy="11" r=".6"/><circle cx="17.5" cy="13" r=".6"/>',
+ crown:'<path d="M3 8.5 7.5 12 12 5l4.5 7L21 8.5 19 19H5z"/><path d="M5 19h14"/>',
+ dev:'<rect x="2" y="5" width="13" height="10" rx="1.6"/><path d="M1 18h15"/><rect x="17" y="8" width="6" height="11" rx="1.4"/>',
+ user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+ time:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+ calc:'<rect x="5" y="2.5" width="14" height="19" rx="2.4"/><path d="M8 7h8M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 16h.01M12 16h.01M15.5 16h.01"/>'};
+function ico(k){return '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+(ICO[k]||'')+'</svg>'}
+// the shop's price list, the same formula as shop.rs Pricing::price (same order of the sums, so the same number)
+function pvol(P,g){var prev=0,v=0;for(var i=0;i<P.tiers.length;i++){var up=+P.tiers[i][0],rate=+P.tiers[i][1],top=up<=0?Infinity:up,take=Math.min(g,top)-prev;if(take>0)v+=take*rate;if(g<=top)break;prev=top}return v}
+function cprice(P,svc,g,d,u,custom){var s=P.services[svc]||P.services.vip,p=s.base+s.factor*pvol(P,Math.max(0,g))+(Math.max(1,u)-1)*s.user+(d/30-1)*s.month;if(custom)p*=1+P.margin/100;var rd=P.round>0?P.round:1000;return Math.max(rd,Math.round(p/rd)*rd)}
+window.kankiPrice=function(svc,g,d,u){return A.shop?cprice(A.shop.custom,svc,g,d,u,true):0};
+function dur(d){return d%30?fa(d)+' روز':(d==30?'یک ماه':fa(d/30)+' ماه')}
 // plans are written with English digits (a Persian zero is a dot and «۲۰ گیگ · ۱ ماهه» read as 20 GB, 10 months)
 function enT(n){return Math.round(n).toLocaleString('en-US')}
 function durEn(d){return !d?'بی‌پایان':d%30?d+' روزه':(d/30)+' ماهه'}
-function planCard(p){var feat=/🔥|پیشنهاد|محبوب/.test(p.badge||''),old=+p.old_toman||0,off=old>p.toman?Math.round((1-p.toman/old)*100):0;
- var vol=p.gb>0?(Math.round(p.gb*10)/10)+' <small>گیگ</small>':'نامحدود';
- return '<div class="pc'+(feat?' feat':'')+'">'+(p.badge?'<span class="rib">'+esc(p.badge)+'</span>':'')+
-  '<div class="pt"><span class="em" aria-hidden="true">'+CI(p.category||'')+'</span><div><b class="vol">'+vol+'</b><div class="meta"><span>📅 '+durEn(p.days)+'</span><span>'+(p.conns>1?'👥 ':'👤 ')+p.conns+' کاربره</span></div></div></div>'+
-  '<div class="pp"><div class="pr2">'+(off?'<s>'+enT(old)+'</s>':'')+'<strong>'+enT(p.toman)+' <small>تومان</small></strong>'+(off?'<span class="off"><bdi dir="ltr">'+off+'%</bdi> تخفیف</span>':'')+'</div>'+
-  '<button class="buy" data-pid="'+p.id+'">خرید</button></div></div>'}
+function tiersOn(){var sh=A.shop,c=sh.custom;return TORDER.filter(function(k){return c.on||sh.plans.some(function(p){return (p.service||'vip')==k})})}
+function kindsOf(svc){var sh=A.shop,ks=[];sh.plans.forEach(function(p){if((p.service||'vip')==svc&&ks.indexOf(p.category)<0)ks.push(p.category)});
+ ks.sort(function(a,b){var x=KORDER.indexOf(a),y=KORDER.indexOf(b);return (x<0?9:x)-(y<0?9:y)});if(sh.custom.on)ks.push('*custom*');return ks}
+function KN(k){return k=='*custom*'?'دلخواه':(k||'سایر')}
+function KI(k){return k=='*custom*'?'calc':/چند/.test(k)?'dev':/بلند|ماهه/.test(k)?'time':'user'}
+
+function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){return x.id==A.renew})[0],h='';
+ if(A.list.length)backBtn(function(){A.view='acc';A.renew=0;render();window.scrollTo(0,0)});
+ var ts=tiersOn();if(ts.indexOf(A.svc)<0)A.svc=mine&&ts.indexOf(mine.service)>=0?mine.service:(ts.indexOf('vip')>=0?'vip':ts[0]||'vip');
+ var T=TIER[A.svc],ks=kindsOf(A.svc);if(ks.indexOf(A.cat)<0)A.cat=ks[0]||'';
+ h+=nameCard();
+ // a first-purchase discount (an invited friend, a finished trial): counted on the payment page in the chat
+ if(A.offer>0&&!mine)h+='<div class="offer" role="note"><span class="ob">'+fa(A.offer)+'٪</span><div><b>تخفیف خرید اول شما</b><small>موقع پرداخت توی چت خودش از قیمت کم می‌شه.</small></div></div>';
+ if(A.trial&&!mine)h+='<div class="card trial2"><div><b>🎁 تست رایگان</b><p class="lead">قبل از خرید امتحان کنید؛ یک بار برای هر نفر.</p></div><button class="b blue" id="tri">گرفتن تست</button></div>';
+ if(mine)h+='<p class="lead">تمدید حساب <b class="ltr">'+esc(mine.name)+'</b>: حجم و روز به همین حساب اضافه می‌شه. <button class="b" id="nr">خرید حساب تازه</button></p>';
+ h+='<div class="tier" role="tablist" aria-label="نوع سرویس">'+ts.map(function(k){var x=TIER[k];return '<button role="tab" aria-selected="'+(A.svc==k)+'" data-svc="'+k+'" class="'+(A.svc==k?'on':'')+'" style="--tc:'+x.c+'">'+ico(x.ic)+'<span>'+x.seg+'</span></button>'}).join('')+'</div>';
+ h+='<div class="shop" style="--tc:'+T.c+'"><div class="tdesc'+(A.anim=='t'?' sw':'')+'"><b>'+ico(T.ic)+T.name+'</b><p>'+T.d+'</p></div>';
+ if(ks.length)h+='<nav class="kinds" role="tablist">'+ks.map(function(k){return '<button role="tab" aria-selected="'+(A.cat==k)+'" data-cat="'+esc(k)+'" class="'+(A.cat==k?'on':'')+'">'+esc(KN(k))+'</button>'}).join('')+'</nav>';
+ h+='<div class="sbody'+(A.anim?' sw':'')+'">';
+ if(A.cat=='*custom*')h+=builder(mine);
+ else{var list=sh.plans.filter(function(p){return (p.service||'vip')==A.svc&&p.category==A.cat});list.forEach(function(p){h+=planCard(p)});
+  if(!list.length)h+='<div class="empty"><b>فعلاً پلنی برای فروش نیست</b><p class="muted">کمی بعد دوباره سر بزنید یا به پشتیبانی پیام بدید.</p></div>'}
+ h+='</div></div>';A.anim='';
+ document.getElementById('app').innerHTML=h;wireBuy()}
+
+// the custom plan: volume and days on sliders, users as a segmented control, and what it adds up to
+function builder(mine){var c=A.shop.custom,gmin=c.gb[0],gmax=c.gb[1],dmin=c.days[0],dmax=c.days[1],dst=c.days[2]||15;
+ var cb=A.cb||(A.cb={g:Math.min(gmax,Math.max(gmin,50)),d:Math.min(dmax,Math.max(dmin,30)),u:1});
+ // renewing: never fewer users than the account has (a renewal raises it, never lowers it)
+ var from=mine?Math.max(1,Math.min(c.users,mine.connections||1)):1;if(cb.u<from)cb.u=from;if(cb.u>c.users)cb.u=c.users;
+ var us=[];for(var i=from;i<=c.users;i++)us.push(i);
+ return '<div class="card cb2"><div class="cbh">'+ico('calc')+'<div><b>اشتراک دلخواه '+(A.svc=='game'?'گیمینگ':L(TIER[A.svc].short))+'</b><small>حجم، مدت و تعداد کاربر رو خودتون انتخاب کنید</small></div></div>'+
+  '<div class="sl"><div class="slh"><span>حجم</span><b id="cg"><bdi>'+cb.g+' GB</bdi></b></div><input type="range" id="gr" min="'+gmin+'" max="'+gmax+'" step="5" value="'+cb.g+'" aria-label="حجم"><div class="sle"><span>'+L(gmin+' GB')+'</span><span>'+L(gmax+' GB')+'</span></div></div>'+
+  '<div class="sl"><div class="slh"><span>مدت</span><b id="cd">'+durEn(cb.d)+'</b></div><input type="range" id="dr" min="'+dmin+'" max="'+dmax+'" step="'+dst+'" value="'+cb.d+'" aria-label="مدت"><div class="sle"><span>'+durEn(dmin)+'</span><span>'+durEn(dmax)+'</span></div></div>'+
+  '<span class="lbl">تعداد کاربر (دستگاه هم‌زمان)</span><div class="useg" style="grid-template-columns:repeat('+us.length+',1fr)">'+us.map(function(n){return '<button data-u="'+n+'" class="'+(cb.u==n?'on':'')+'">'+n+' کاربره</button>'}).join('')+'</div>'+
+  '<div class="bd"><div><span>سرویس</span><b>'+TIER[A.svc].name+'</b></div><div><span>حجم</span><b id="bg"><bdi>'+cb.g+' GB</bdi></b></div><div><span>مدت</span><b id="bdd">'+durEn(cb.d)+'</b></div><div><span>تعداد کاربر</span><b id="bu">'+cb.u+' کاربره</b></div>'+
+  '<div class="tot"><span>قیمت نهایی</span><strong id="tp">'+enT(cprice(c,A.svc,cb.g,cb.d,cb.u,true))+' <small>تومان</small></strong></div></div>'+
+  '<button class="b go cgo" id="cbuy">تایید و پرداخت اشتراک دلخواه</button></div>'}
+
+// a plan as a card: the service's icon (several devices for a multi-user plan), the specs, the features and its ribbon
+function planCard(p){var T=TIER[p.service||'vip']||TIER.vip,bd=p.badge||'',rib=/پیشنهاد/.test(bd)?'پیشنهاد ویژه':/پرفروش/.test(bd)?'پرفروش‌ترین':bd.replace(/^[^\p{L}\p{N}]+/u,''),old=+p.old_toman||0,off=old>p.toman?Math.round((1-p.toman/old)*100):0;
+ var vol=p.gb>0?(Math.round(p.gb*10)/10)+' GB':'نامحدود';
+ return '<div class="pc2'+(bd?' feat':'')+'">'+(rib?'<span class="rib2">'+esc(rib)+'</span>':'')+
+  '<div class="pch"><span class="pci">'+ico(p.conns>1?'dev':T.ic)+'</span><div class="pcn"><b><bdi>'+vol+'</bdi></b><small>'+T.name+'</small></div>'+
+  '<div class="pcp">'+(off?'<s>'+enT(old)+'</s>':'')+'<strong>'+enT(p.toman)+'</strong><small>تومان</small></div></div>'+
+  '<div class="spec"><div><small>حجم</small><b><bdi>'+vol+'</bdi></b></div><div><small>مدت</small><b>'+durEn(p.days)+'</b></div><div><small>کاربر</small><b>'+p.conns+' کاربره</b></div></div>'+
+  '<div class="feats">'+T.f.map(function(x){return '<span>'+x+'</span>'}).join('')+(off?'<span class="off2"><bdi dir="ltr">'+off+'%</bdi> تخفیف</span>':'')+'</div>'+
+  '<button class="buy2" data-pid="'+p.id+'">خرید</button></div>'}
 
 function wireBuy(){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))},c=A.shop.custom,cb=A.cb;
  var nr=$('#nr');if(nr)nr.onclick=function(){A.renew=0;drawBuy()};
- var bk=$('#bk');if(bk)bk.onclick=function(){A.view='acc';A.renew=0;render();window.scrollTo(0,0)};
- all('[data-svc]').forEach(function(b){b.onclick=function(){A.svc=b.dataset.svc;A.cat='';drawBuy()}});
- all('[data-cat]').forEach(function(b){b.onclick=function(){A.cat=b.dataset.cat;drawBuy()}});
- function upd(){if(!cb)return;var g=$('#gv'),r=$('#gr'),p=$('#tp');if(g)g.textContent=fa(cb.g);if(r&&+r.value!=cb.g)r.value=cb.g;if(p)p.textContent=toman(price(c.rules,cb.g,cb.d,cb.u))}
- var step=function(k){var s=cb.g<50?5:cb.g<100?10:25;cb.g=Math.min(c.max_gb,Math.max(c.min_gb,cb.g+k*s));upd()};
- if($('#gm')){$('#gm').onclick=function(){step(-1)};$('#gp').onclick=function(){step(1)};$('#gr').oninput=function(){cb.g=+this.value;upd()}}
- all('[data-d]').forEach(function(b){b.onclick=function(){cb.d=+b.dataset.d;all('[data-d]').forEach(function(x){x.classList.toggle('on',x==b)});upd()}});
+ all('[data-svc]').forEach(function(b){b.onclick=function(){if(A.svc==b.dataset.svc)return;var keep=A.cat=='*custom*';A.svc=b.dataset.svc;A.cat=keep?'*custom*':'';A.anim='t';buzz2();drawBuy()}});
+ all('[data-cat]').forEach(function(b){b.onclick=function(){if(A.cat==b.dataset.cat)return;A.cat=b.dataset.cat;A.anim='k';buzz2();drawBuy()}});
+ function upd(){if(!cb)return;var t=function(i,v){var e=$(i);if(e)e.innerHTML=v};
+  t('#cg','<bdi>'+cb.g+' GB</bdi>');t('#bg','<bdi>'+cb.g+' GB</bdi>');t('#cd',durEn(cb.d));t('#bdd',durEn(cb.d));t('#bu',cb.u+' کاربره');
+  t('#tp',enT(cprice(c,A.svc,cb.g,cb.d,cb.u,true))+' <small>تومان</small>');
+  [['#gr',c.gb[0],c.gb[1],cb.g],['#dr',c.days[0],c.days[1],cb.d]].forEach(function(x){var e=$(x[0]);if(e)e.style.setProperty('--f',((x[3]-x[1])/Math.max(1,x[2]-x[1])*100)+'%')})}
+ if($('#gr')){$('#gr').oninput=function(){cb.g=+this.value;upd()};$('#dr').oninput=function(){cb.d=+this.value;upd()};upd()}
  all('[data-u]').forEach(function(b){b.onclick=function(){cb.u=+b.dataset.u;all('[data-u]').forEach(function(x){x.classList.toggle('on',x==b)});upd()}});
  function closeSoon(t){buzz('success');toast(t);setTimeout(function(){var w=tg();if(w&&w.close)w.close()},1400)}
  function go(q,b){b.disabled=true;api('/tg/api/buy?'+q+(A.renew?'&renew='+A.renew:'')+nameQ()).then(function(){closeSoon('صفحه‌ی پرداخت توی چت ربات اومد')}).catch(function(e){buzz('error');b.disabled=false;toast(why(e,e.why));var n=document.getElementById('cn');if(n&&/name/.test(e.message))n.focus()})}
  var tri=$('#tri');if(tri)tri.onclick=function(){tri.disabled=true;api('/tg/api/trial?x=1'+nameQ()).then(function(){closeSoon('تست رایگان توی چت ربات اومد')}).catch(function(e){buzz('error');tri.disabled=false;toast(why(e,e.why))})};
- var cbuy=$('#cbuy');if(cbuy)cbuy.onclick=function(){go('gb='+cb.g+'&days='+cb.d+'&users='+cb.u,cbuy)};
+ var cbuy=$('#cbuy');if(cbuy)cbuy.onclick=function(){go('svc='+A.svc+'&gb='+cb.g+'&days='+cb.d+'&users='+cb.u,cbuy)};
  all('[data-pid]').forEach(function(b){b.onclick=function(){go('pid='+b.dataset.pid,b)}})}
+function buzz2(){var w=tg();try{w&&w.HapticFeedback&&w.HapticFeedback.selectionChanged()}catch(e){}}
 
 var CN={TR:'ترکیه',DE:'آلمان',NL:'هلند',SE:'سوئد',GB:'انگلیس',FI:'فنلاند',FR:'فرانسه',US:'آمریکا',CA:'کانادا',AE:'امارات',IR:'ایران',AM:'ارمنستان',RU:'روسیه',PL:'لهستان',AT:'اتریش',CH:'سوئیس',IT:'ایتالیا',ES:'اسپانیا',RO:'رومانی',BG:'بلغارستان',LV:'لتونی',LT:'لیتوانی',EE:'استونی',NO:'نروژ',DK:'دانمارک',CZ:'چک',HU:'مجارستان',GR:'یونان',CY:'قبرس',GE:'گرجستان',AZ:'آذربایجان',KZ:'قزاقستان',JP:'ژاپن',SG:'سنگاپور',HK:'هنگ‌کنگ',IN:'هند'};
 var PRN={wireguard:'WireGuard',amneziawg:'AmneziaWG',hysteria2:'Hysteria2',kankimix:'KANKI MIX',microtun:'microtun',xray:'Xray',vless:'Xray'};
@@ -575,7 +676,7 @@ function subTab(u,v2){var st=ST[u.status]||ST.Active,lim=u.limit_gb>0,left=lim?M
  var cs=countries(u),tun=cs.some(function(c){return c.iran});
  var h='<section class="pass" aria-label="حساب">'+
   '<div class="top"><div class="who"><b class="ltr">'+esc(u.name)+'</b><span class="st"><i style="background:'+st[1]+'"></i>'+st[0]+'</span></div>'+
-  '<span class="svc">'+SV[v2?'v2ray':'vip'][0]+' '+SV[v2?'v2ray':'vip'][1]+'</span>'+
+  '<span class="svc">'+(SV[u.service]||SV.vip).join(' ')+'</span>'+
   '<div class="big"><div><small>حجم باقی‌مانده</small><strong>'+(lim?gb(left)+' <em>گیگ</em>':'نامحدود')+'</strong><em>'+gb(u.used_gb)+(lim?' از '+gb(u.limit_gb):'')+' گیگ مصرف</em></div>'+
   '<div><small>زمان باقی‌مانده</small><strong>'+(u.days_left<0?'نامحدود':fa(u.days_left)+' <em>روز</em>')+'</strong><em>'+fa(u.connections||'∞')+' دستگاه هم‌زمان</em></div></div>'+
   (lim?'<div class="bar"><span style="width:'+pc.toFixed(1)+'%"></span></div>':'')+'</div>'+
@@ -587,7 +688,7 @@ function subTab(u,v2){var st=ST[u.status]||ST.Active,lim=u.limit_gb>0,left=lim?M
   (u.links?'<div class="r"><span class="dot" style="background:var(--v)"></span><div class="nm"><small>لینک اشتراک، برای V2Box و v2rayNG</small><b class="ltr lk">'+esc(u.v2link)+'</b></div><button class="b" id="cp">کپی</button></div>':'')+
   (v2?'':'<div class="r"><span class="dot" style="background:var(--k)"></span><div class="nm"><small>کد ورود Kanki VPN</small><b class="ltr">'+esc(u.code)+'</b></div><button class="b" id="cc">کپی</button></div>')+
   '</div>';
- h+='<div class="acts"><button class="b" id="v2_chat">لینک V2Ray توی چت</button><button class="b" data-t="app">راهنمای اتصال</button></div>';
+ h+=(u.links||v2)?'<div class="acts"><button class="b" id="v2_chat">لینک V2Ray توی چت</button><button class="b" data-t="app">راهنمای اتصال</button></div>':'<div class="acts one"><button class="b" data-t="app">راهنمای اتصال</button></div>';
  if(sales())h+='<div class="acts one"><button class="b go" id="rn">تمدید یا افزایش حجم همین حساب</button></div>';
  return h+ordersHtml()}
 
@@ -800,7 +901,7 @@ var _drawAdm=drawAdm;drawAdm=function(){if(AD.busy)return;var need=adNeed();if(n
  }else if(AD.tab=='sales'){
   h+=adCard('فروش',adForm([['sales_on','فروش روشن','sw','خاموش: دکمه‌های خرید «فروش بسته است» می‌گویند'],['warn_on','هشدار پایان حجم و زمان به خریدار','sw'],['mini_menu','دکمه‌ی مینی‌اپ کنار جای تایپ','sw'],
    ['support','پشتیبانی (@آیدی یا لینک)','ltr'],['channel','کانال اجباری (@کانال، خالی = ندارد)','ltr'],['welcome','پیام خوش‌آمد','area']],s))+
-   adCard('خرید دلخواه (مینی‌اپ)',adForm([['cp_on','خرید حجم و روز دلخواه','sw'],['cp_min_gb','کمترین گیگ','num'],['cp_max_gb','بیشترین گیگ','num'],['cp_days','مدت‌ها (روز، با ویرگول)','ltr','مثلاً 30,60,90'],['cp_users','بیشترین تعداد کاربر','num']],s))+
+   adCard('خرید دلخواه (مینی‌اپ)',adForm([['cp_on','خرید حجم، روز و کاربر دلخواه','sw','قیمت و بازه‌ها از «پلن‌ها › قیمت‌گذاری»']],s))+
    adCard('لینک برنامه‌ها',adForm([['app_link','لینک دانلود اپ اندروید (اگر فایل در ربات نیست)','ltr'],['win_link','لینک دانلود اپ ویندوز (اگر فایل در ربات نیست)','ltr']],s),'فایل‌های اپ را بهتر است در ربات بفرستید: پنل مدیریت › تنظیمات › فایل‌های اپ.')+adSaveBar('ad_save');
  }else if(AD.tab=='pay'){
   h+=adCard('💳 کارت به کارت',adForm([['card_on','روشن','sw'],['card_number','شماره کارت','ltr'],['card_holder','به نام','text']],s))+
@@ -813,8 +914,8 @@ var _drawAdm=drawAdm;drawAdm=function(){if(AD.busy)return;var need=adNeed();if(n
   h+=adCard('👥 دعوت دوستان',adForm([['ref_gb','گیگ هدیه‌ی اولین خرید دوست','num'],['ref_days','روز هدیه‌ی اولین خرید دوست','num'],['ref_pct','٪ حجم هر خرید و تمدید دوست','num','۰ = خاموش'],['ref_new_pct','٪ تخفیف خرید اول دوستِ دعوت‌شده (۷ روز)','num']],s))+
    adCard('🎁 تست رایگان',adForm([['trial_on','تست رایگان','sw','یک بار برای هر نفر'],['trial_gb','حجم (گیگ)','num'],['trial_days','مدت (روز)','num'],['trial_offer_pct','٪ تخفیف خرید اول بعد از تمام شدن تست (۴۸ ساعت)','num']],s))+adSaveBar('ad_save');
  }else if(AD.tab=='plans'){var ps=AD.d.plans||[];
-  h+='<div class="acts one" style="margin:0 0 12px"><button class="b main" id="pl_new">+ پلن تازه</button></div>';
-  h+=ps.length?ps.map(function(p){return '<div class="card ad-pl'+(p.active?'':' off')+'" data-pl="'+p.id+'"><div class="ad-row"><b><bdi>'+esc(p.name)+'</bdi></b><span class="svc">'+(p.service=='v2ray'?'🌐 V2Ray':'⚡️ VIP')+'</span></div>'+
+  h+='<div class="acts" style="margin:0 0 12px"><button class="b main" id="pl_new">+ پلن تازه</button><button class="b" id="pr_open">💰 قیمت‌گذاری</button></div>';
+  h+=ps.length?ps.map(function(p){return '<div class="card ad-pl'+(p.active?'':' off')+'" data-pl="'+p.id+'"><div class="ad-row"><b><bdi>'+esc(p.name)+'</bdi></b><span class="svc">'+(SV[p.service]||SV.vip)[0]+' '+(p.service=='v2ray'?'V2Ray':p.service=='game'?'گیمینگ':'VIP')+'</span></div>'+
    '<p class="lead">'+(p.gb>0?fa(p.gb)+' گیگ':'نامحدود')+' · '+(p.days?fa(p.days)+' روز':'بی‌پایان')+' · '+fa(p.conns)+' کاربره · <b>'+adNum(p.toman)+'</b> تومان'+(p.category?' · '+esc(p.category):'')+(p.badge?' · '+esc(p.badge):'')+'</p>'+
    '<div class="acts"><button class="b" data-pe="'+p.id+'">ویرایش</button><button class="b" data-pt="'+p.id+'">'+(p.active?'خاموش کردن':'روشن کردن')+'</button></div></div>'}).join(''):'<div class="empty"><b>هنوز پلنی نیست</b></div>';
  }else if(AD.tab=='disc'){var ds=AD.d.disc||[];
@@ -836,6 +937,7 @@ function wireAdm(){var $=function(q){return document.querySelector(q)},all=funct
  var sv=$('#ad_save');if(sv)sv.onclick=function(){adSettingsSave(sv,app)};
  // plans
  var pn=$('#pl_new');if(pn)pn.onclick=function(){planEdit(null)};
+ var po=$('#pr_open');if(po)po.onclick=function(){priceEdit()};
  all('[data-pe]').forEach(function(b){b.onclick=function(){planEdit((AD.d.plans||[]).filter(function(p){return p.id==b.dataset.pe})[0])}});
  all('[data-pt]').forEach(function(b){b.onclick=function(){var p=(AD.d.plans||[]).filter(function(x){return x.id==b.dataset.pt})[0];b.disabled=true;
   pa('PUT','/api/plans/'+p.id,{active:!p.active}).then(function(){AD.d.plans=null;drawAdm()}).catch(function(e){toast(e.message);b.disabled=false})}});
@@ -852,11 +954,31 @@ function wireAdm(){var $=function(q){return document.querySelector(q)},all=funct
  var as=$('#am_save');if(as)as.onclick=function(){var h=+toEn($('#am_h').value)||0;as.disabled=true;pa('PUT','/api/app-msg',{text:$('#am_t').value,minutes:h*60}).then(function(){buzz('success');toast('ذخیره شد');AD.d.msg=null;drawAdm()}).catch(function(e){toast(e.message);as.disabled=false})};
  var ad=$('#am_del');if(ad)ad.onclick=function(){pa('DELETE','/api/app-msg').then(function(){toast('برداشته شد');AD.d.msg=null;drawAdm()}).catch(function(e){toast(e.message)})}}
 function toEn(s){return String(s||'').replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)})}
+// the shop's one price list: every listed plan and every custom plan is priced by it (shop.rs)
+function priceEdit(){var el=document.getElementById('app'),P=(A.shop&&A.shop.custom)||null;
+ if(!P){api('/tg/api/shop').then(function(r){A.shop=r;priceEdit()}).catch(function(e){toast(e.message)});return}
+ var f=function(k,l,v){return '<div><span class="lbl">'+l+'</span><input class="in" data-pr="'+k+'" inputmode="decimal" value="'+esc(v)+'"></div>'},sv=P.services;
+ var h='<div class="bh"><h1>💰 قیمت‌گذاری</h1></div><p class="lead">قیمت = پایه + ضریب × حجم + (کاربر − ۱) × هر کاربر + (روز ÷ ۳۰ − ۱) × هر ماه؛ به هزار گرد می‌شه. پلن‌های دلخواه همین به‌اضافه‌ی سود دلخواه.</p>';
+ [['v2ray','⚡ اقتصادی · V2Ray'],['game','🎮 گیمینگ'],['vip','👑 همه‌کاره VIP']].forEach(function(x){var o=sv[x[0]];
+  h+=adCard(x[1],'<div class="ad-g2">'+f(x[0]+'.base','پایه (تومان)',o.base)+f(x[0]+'.factor','ضریب حجم',o.factor)+f(x[0]+'.user','هر کاربر بیشتر',o.user)+f(x[0]+'.month','هر ماه بیشتر',o.month)+'</div>')});
+ h+=adCard('حجم (پله‌ای)','<span class="lbl">تا چند گیگ : تومانِ هر گیگ (۰ = بقیه)</span><input class="in" data-pr="tiers" value="'+esc(P.tiers.map(function(t){return t[0]+':'+t[1]}).join(', '))+'">','مثلاً 20:1500, 50:1000, 100:1200, 0:800');
+ h+=adCard('خرید دلخواه','<div class="ad-g2">'+f('margin','٪ سود دلخواه',P.margin)+f('round','گرد کردن (تومان)',P.round)+f('gb0','کمترین گیگ',P.gb[0])+f('gb1','بیشترین گیگ',P.gb[1])+f('d0','کمترین روز',P.days[0])+f('d1','بیشترین روز',P.days[1])+f('d2','گام روز',P.days[2])+f('users','بیشترین کاربر',P.users)+'</div>');
+ h+=adCard('پلن‌ها از روی جدول','<p class="lead">۹ پلن برای هر سرویس (۲۷ پلن) با همین قیمت‌ها ساخته می‌شه و پلن‌های فعلی خاموش می‌شن (پاک نمی‌شن).</p><div class="acts one"><button class="b" id="pr_gen">⚡ ساخت دوباره‌ی پلن‌ها</button></div>');
+ h+='<div class="bsave"><button class="b" id="pr_back">برگشت</button><button class="b main" id="pr_save">ذخیره</button></div>';
+ el.innerHTML=h;backBtn(function(){drawAdm()});window.scrollTo(0,0);
+ var v=function(k){var e=el.querySelector('[data-pr="'+k+'"]');return e?+toEn(e.value):0};
+ document.getElementById('pr_back').onclick=function(){drawAdm()};
+ document.getElementById('pr_save').onclick=function(){var me=this,o={services:{},margin:v('margin'),round:v('round'),gb:[v('gb0'),v('gb1')],days:[v('d0'),v('d1'),v('d2')],users:v('users')};
+  ['v2ray','game','vip'].forEach(function(k){o.services[k]={base:v(k+'.base'),factor:v(k+'.factor'),user:v(k+'.user'),month:v(k+'.month')}});
+  o.tiers=toEn(el.querySelector('[data-pr="tiers"]').value).split(/[,،]/).map(function(x){var y=x.split(':');return [+y[0],+y[1]]}).filter(function(x){return x.length==2&&!isNaN(x[0])&&!isNaN(x[1])});
+  me.disabled=true;pa('PUT','/api/settings',{pricing:JSON.stringify(o)}).then(function(){return api('/tg/api/shop')}).then(function(r){A.shop=r;buzz('success');toast('ذخیره شد');priceEdit()}).catch(function(e){buzz('error');toast(e.message||'ذخیره نشد');me.disabled=false})};
+ document.getElementById('pr_gen').onclick=function(){if(!confirm('پلن‌های فعلی خاموش و ۲۷ پلن تازه از روی جدول ساخته شوند؟'))return;var me=this;me.disabled=true;
+  pa('POST','/api/plans/standard',{}).then(function(r){buzz('success');toast(fa(r.added||0)+' پلن ساخته شد');AD.d.plans=null;return api('/tg/api/shop')}).then(function(r){A.shop=r;me.disabled=false}).catch(function(e){toast(e.message);me.disabled=false})}}
 // a plan: new or edited, in a sheet over the list
 function planEdit(p){var n=!p;p=p||{name:'',gb:30,days:30,conns:1,toman:0,old_toman:0,badge:'',category:'',service:'vip',active:true};
  var el=document.getElementById('app'),f=function(k,l,v,m){return '<div><span class="lbl">'+l+'</span><input class="in" data-pk="'+k+'"'+(m?' inputmode="decimal"':'')+' value="'+esc(v)+'"></div>'};
  el.innerHTML='<div class="bh"><h1>'+(n?'پلن تازه':'ویرایش پلن')+'</h1></div><div class="card ad-card">'+f('name','اسم',p.name)+'<div class="ad-g2">'+f('gb','حجم (گیگ، ۰ = نامحدود)',p.gb,1)+f('days','مدت (روز)',p.days,1)+f('conns','تعداد کاربر',p.conns,1)+f('toman','قیمت (تومان)',p.toman,1)+f('old_toman','قیمت خط‌خورده (۰ = ندارد)',p.old_toman||0,1)+f('badge','برچسب (مثل 🔥 پیشنهاد ویژه)',p.badge||'')+f('category','دسته (مثل تک‌کاربره)',p.category||'')+
-  '<div><span class="lbl">سرویس</span><div class="chips2" id="pl_svc"><button data-sv="vip" class="'+(p.service!='v2ray'?'on':'')+'">⚡️ VIP</button><button data-sv="v2ray" class="'+(p.service=='v2ray'?'on':'')+'">🌐 V2Ray</button></div></div></div></div>'+
+  '<div><span class="lbl">سرویس</span><div class="chips2" id="pl_svc">'+[['v2ray','⚡ V2Ray'],['game','🎮 گیمینگ'],['vip','👑 VIP']].map(function(x){return '<button data-sv="'+x[0]+'" class="'+((p.service||'vip')==x[0]?'on':'')+'">'+x[1]+'</button>'}).join('')+'</div></div></div></div>'+
   '<div class="bsave">'+(n?'<button class="b" id="pl_back">انصراف</button>':'<button class="b" id="pl_del">حذف</button>')+'<button class="b main" id="pl_go">ذخیره</button></div>';
  backBtn(function(){drawAdm()});var svc=p.service||'vip';
  Array.prototype.slice.call(el.querySelectorAll('[data-sv]')).forEach(function(b){b.onclick=function(){svc=b.dataset.sv;Array.prototype.slice.call(el.querySelectorAll('[data-sv]')).forEach(function(x){x.classList.toggle('on',x==b)})}});
@@ -939,14 +1061,18 @@ function mTun(){var d=M.d,tl=(d.tunnels||[]).slice().sort(function(a,b){var o={d
 function mErr(){var er=M.d.errors||[];if(!er.length)return '<div class="empty"><b>خطایی در لاگ نیست</b></div>';
  return '<div class="card ad-card">'+er.map(function(x){return '<div class="merow"><small class="ltr">'+esc(String(x.ts||''))+' · '+esc(String(x.u||'').replace(/\.service$/,''))+'</small><code class="ltr">'+esc(x.m)+'</code></div>'}).join('')+'</div>'}
 
+// the header: the servers' state (only when the panel says so) and the way back to the account
+function head(){var l=A.shop&&A.shop.live,e=document.getElementById('live');
+ if(l&&l.total>0&&l.online>0){var all=l.online>=l.total;e.className='live'+(all?'':' part');e.lastChild.textContent=all?('سرورها آنلاین'+(l.gaming?' | پینگ گیمینگ فعال':'')):(enT(l.online)+' از '+enT(l.total)+' سرور آنلاین');e.hidden=false}
+ var hp=document.getElementById('hp');hp.onclick=function(){if(!A.list.length)return toast('هنوز اشتراکی ندارید؛ از همین فروشگاه بخرید');A.view='acc';A.renew=0;render();window.scrollTo(0,0)}}
 function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}
   // the same black as the page above and below it
-  try{w.setHeaderColor('#1a1c1a');w.setBackgroundColor('#121412');if(w.setBottomBarColor)w.setBottomBarColor('#0a0b0a')}catch(e){}}
+  try{w.setHeaderColor('#0B1020');w.setBackgroundColor('#090D16');if(w.setBottomBarColor)w.setBottomBarColor('#090D16')}catch(e){}}
  var p=(w&&w.platform)||'';A.plat=/ios|macos/.test(p)?'i':/tdesktop|windows|weba|webk/.test(p)?'w':'a';
  if(!initData())return empty('K','این صفحه رو از ربات باز کنید','مینی‌اپ کانکی فقط از داخل ربات تلگرام باز می‌شه.');
  // the report bot's page: the panel's state only, never the shop
- if(Q.get('mon')){A.mon=true;A.view='mon';M.tab=['sum','srv','tun','paths','err'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sum';document.querySelector('.brand small').textContent='گزارش پنل';return render()}
- Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.winLink=r[0].win_link||'';A.nameHint=r[0].name_hint||'';A.support=r[0].support||'';A.admin=!!r[0].admin;A.offer=+r[0].offer||0;A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
+ if(Q.get('mon')){A.mon=true;A.view='mon';M.tab=['sum','srv','tun','paths','err'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sum';var hp=document.getElementById('hp');hp.textContent='گزارش پنل';hp.disabled=true;return render()}
+ Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.winLink=r[0].win_link||'';A.nameHint=r[0].name_hint||'';A.support=r[0].support||'';A.admin=!!r[0].admin;A.offer=+r[0].offer||0;A.shop=r[1];head();render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
 // wait a moment for Telegram's script, then go on without it
 var n=0;(function go(){if(tg()||n++>15)start();else setTimeout(go,100)})();
 })();

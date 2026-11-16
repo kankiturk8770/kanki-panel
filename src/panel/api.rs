@@ -321,6 +321,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/api/app-msg", get(app_msg_get).put(app_msg_put).delete(app_msg_delete))
         .route("/api/plans", get(plans_list).post(plans_add))
         .route("/api/plans/bulk", post(plans_bulk))
+        .route("/api/plans/standard", post(plans_standard))
         .route("/api/plans/category", axum::routing::put(plans_cat_rename))
         .route("/api/plans/:id", axum::routing::delete(plans_delete).put(plans_update))
         .route("/api/sync", post(force_sync))
@@ -1181,6 +1182,8 @@ pub const SETTING_KEYS: &[&str] = &[
     "win_link",
     // 3.32: automatic MTU (mtu.rs): on/off and the largest packet on the mobile network
     "mtu_auto", "mtu_budget",
+    // 3.49: the shop's one price list (shop.rs) and what a gaming plan gives
+    "pricing", "game_protocols",
 ];
 
 /// "owner/repo" with only the characters GitHub allows
@@ -1233,9 +1236,23 @@ async fn settings_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
                 return err(StatusCode::BAD_REQUEST, "update source must look like owner/repo");
             }
         }
+        // the price list is checked first: a wrong one changes nothing
+        let mut pricing = None;
+        if let Some(v) = o.get("pricing") {
+            let v = match v { Value::String(s) if s.trim().is_empty() => json!({}), Value::String(s) => match serde_json::from_str::<Value>(s) { Ok(x) => x, Err(_) => return err(StatusCode::BAD_REQUEST, "pricing: not JSON") }, x => x.clone() };
+            match crate::shop::parse(&v) {
+                Ok(p) => pricing = Some(p.to_json().to_string()),
+                Err(e) => return err(StatusCode::BAD_REQUEST, &format!("pricing: {} is out of range", e)),
+            }
+        }
         for (k, v) in o {
             if SETTING_KEYS.contains(&k.as_str()) {
                 let s = match v { Value::String(s) => s.clone(), Value::Bool(x) => if *x { "1".into() } else { "0".into() }, other => other.to_string() };
+                let s = match k.as_str() {
+                    "pricing" => pricing.clone().unwrap_or_default(),
+                    "game_protocols" => s.split(',').map(|x| x.trim()).filter(|x| crate::db::GAME_PROTOS.contains(x)).collect::<Vec<_>>().join(","),
+                    _ => s,
+                };
                 app.db.set(k, s.trim());
             }
         }
@@ -1357,9 +1374,10 @@ fn insert_plan(app: &App, b: &Value) -> Result<usize, String> {
     )
 }
 
-/// What a plan sells: 'v2ray' (only the v2ray subscription) or 'vip' (everything, the default)
-fn plan_service(s: &str) -> String {
-    if s.trim() == "v2ray" { "v2ray".into() } else { "vip".into() }
+/// What a plan sells: 'v2ray' (only the v2ray subscription), 'game' (WireGuard and AmneziaWG) or 'vip'
+/// (everything, the default)
+pub fn plan_service(s: &str) -> String {
+    match s.trim() { "v2ray" => "v2ray".into(), "game" => "game".into(), _ => "vip".into() }
 }
 
 async fn plans_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
@@ -1371,6 +1389,13 @@ async fn plans_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respon
 }
 
 /// Smart plan builder: many plans at once (the panel computes the prices).
+/// The listed plans of the shop's price list (V2Ray, gaming and VIP) in place of every plan on sale now
+async fn plans_standard(State(app): St, h: HeaderMap) -> Response {
+    let _ = guard!(app, h, "settings");
+    let n = crate::shop::load_standard(&app.db);
+    Json(json!({ "ok": true, "added": n })).into_response()
+}
+
 async fn plans_bulk(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "settings");
     if b["replace"].as_bool() == Some(true) {

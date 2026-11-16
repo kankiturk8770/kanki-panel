@@ -129,7 +129,7 @@ pub const BOT_KEYS: &[&str] = &[
     "trial_on", "trial_gb", "trial_days", "ref_gb", "ref_days", "ref_pct", "ref_new_pct", "trial_offer_pct",
     "card_on", "card_number", "card_holder", "wallet_on", "wallet_text", "ton_address", "usdt_address", "usd_rate",
     "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "ton_on", "stars_on", "star_usd", "toncenter_key",
-    "cp_on", "cp_min_gb", "cp_max_gb", "cp_days", "cp_users", "price_rules",
+    "cp_on", "cp_min_gb", "cp_max_gb", "cp_days", "cp_users", "price_rules", "pricing", "game_protocols",
 ];
 
 /// The panel routes the admin mini app may use: (method, path start, exact or the start of a longer path)
@@ -140,7 +140,7 @@ fn bridge_ok(method: &str, path: &str) -> bool {
     match method {
         "GET" => exact("/api/settings") || exact("/api/plans") || exact("/api/discounts") || exact("/api/channel") || exact("/api/app-msg") || exact("/api/overview") || exact("/api/bot"),
         "PUT" => exact("/api/settings") || exact("/api/plans/category") || under("/api/plans/") || exact("/api/channel") || exact("/api/app-msg"),
-        "POST" => exact("/api/plans") || exact("/api/plans/bulk") || exact("/api/discounts") || exact("/api/channel/preview") || exact("/api/channel/post") || exact("/api/channel/ai-test") || exact("/api/channel/campaign"),
+        "POST" => exact("/api/plans") || exact("/api/plans/bulk") || exact("/api/plans/standard") || exact("/api/discounts") || exact("/api/channel/preview") || exact("/api/channel/post") || exact("/api/channel/ai-test") || exact("/api/channel/campaign"),
         "DELETE" => under("/api/plans/") || under("/api/discounts/") || exact("/api/app-msg"),
         _ => false,
     }
@@ -503,10 +503,14 @@ async fn shop(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
         v
     });
     let on = app.db.on("sales_on");
-    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "sales": on, "plans": plans, "custom": crate::shop::custom_json(&app.db) }))).into_response()
+    // the header's badge: how many servers answer now (only counts, never a name or an address)
+    let (up, all): (i64, i64) = app.db.with(|c| c.query_row(
+        "SELECT COALESCE(SUM(CASE WHEN online=1 THEN 1 ELSE 0 END),0), COUNT(*) FROM nodes WHERE COALESCE(enabled,1)=1", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap_or((0, 0)));
+    let live = json!({ "online": up, "total": all, "gaming": app.db.get("kmix_on") != "0" });
+    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "sales": on, "plans": plans, "custom": crate::shop::custom_json(&app.db), "live": live }))).into_response()
 }
 
-/// GET /tg/api/buy?pid=.. or ?gb=..&days=..&users=.. (&renew=<account>): the bot shows that plan and the
+/// GET /tg/api/buy?pid=.. or ?svc=..&gb=..&days=..&users=.. (&renew=<account>): the bot shows that plan and the
 /// payment methods in the customer's chat
 async fn buy(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
     let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
@@ -521,7 +525,7 @@ async fn buy(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Strin
         }
         n("pid")
     } else {
-        match crate::shop::custom_plan(&app.db, n("gb"), n("days"), n("users").max(1)) {
+        match crate::shop::custom_plan(&app.db, q.get("svc").map(|x| x.as_str()).unwrap_or("vip"), n("gb"), n("days"), n("users").max(1)) {
             Ok(id) => id,
             Err(e) => return fail(StatusCode::BAD_REQUEST, &e),
         }
@@ -607,6 +611,16 @@ mod tests {
         assert_eq!(call(500, json!({"method": "PUT", "path": format!("/api/plans/{}", id), "body": {"gb": 70, "conns": 2, "badge": "🔥", "old_toman": 130000}})).await.0, 200);
         let (_, l) = call(500, json!({"method": "GET", "path": "/api/plans"})).await;
         assert_eq!((l[0]["gb"].as_f64(), l[0]["conns"].as_i64(), l[0]["badge"].as_str(), l[0]["old_toman"].as_i64()), (Some(70.0), Some(2), Some("🔥"), Some(130000)));
+        // the shop's price list: a wrong one is refused and changes nothing; a good one is kept whole; the plans come from it
+        let (st, _) = call(500, json!({"method": "PUT", "path": "/api/settings", "body": {"pricing": r#"{"margin":500}"#, "trial_gb": "4"}})).await;
+        assert_eq!((st, app.db.get("trial_gb").as_str()), (400, "3"));
+        let (st, _) = call(500, json!({"method": "PUT", "path": "/api/settings", "body": {"pricing": r#"{"services":{"vip":{"base":60000}}}"#, "game_protocols": "awg,xray"}})).await;
+        assert_eq!(st, 200);
+        assert_eq!((crate::shop::pricing(&app.db).vip.base, crate::shop::pricing(&app.db).vip.user), (60000.0, 25000.0));
+        assert_eq!(app.db.get("game_protocols"), "awg");
+        let (st, v) = call(500, json!({"method": "POST", "path": "/api/plans/standard", "body": {}})).await;
+        assert_eq!((st, v["added"].as_i64()), (200, Some(27)));
+        assert_eq!(call(501, json!({"method": "POST", "path": "/api/plans/standard", "body": {}})).await.0, 403);
         // discount codes
         assert_eq!(call(500, json!({"method": "POST", "path": "/api/discounts", "body": {"code": "off20", "percent": 20, "uses": 5}})).await.0, 200);
         let (_, d) = call(500, json!({"method": "GET", "path": "/api/discounts"})).await;
