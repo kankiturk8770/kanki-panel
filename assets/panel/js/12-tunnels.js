@@ -104,7 +104,9 @@ function tunRow(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{}
  if(aw){if(aw.fwd_tcp&&aw.fwd_tcp.length)ports.push('TCP '+aw.fwd_tcp.join(','));if(aw.fwd_udp&&aw.fwd_udp.length)ports.push('UDP '+aw.fwd_udp.join(','))}
  var head='<span class="dot '+st+'"></span><b>'+esc(x.name||(e.name+' → '+xs.name))+'</b><span class="sp"></span>'+
   '<span class="kxr-st '+st+'">'+(x.state=='up'&&es.rtt_ms?es.rtt_ms+' ms':tunStateTxt(x.state))+'</span>'+
-  '<span class="tn-l2"><span class="kxr-st">'+esc(tunShort(x))+'</span><span class="tn-path">'+esc(e.name)+' → '+tnFlag(xs)+esc(xs.name)+'</span>'+(ports.length?'<small class="ltr">'+esc(ports.join(' · '))+'</small>':'')+'</span>';
+  // (3.50) the route reads the same everywhere: Iran entry ➔ protocol (and ping) ➔ exit abroad; the ports under it
+  '<span class="tn-l2"><span class="tn-flow"><span class="tn-e">'+esc(e.name)+'</span><i class="tn-ar" aria-hidden="true">➔</i><span class="kxr-st tn-p">'+esc(tunShort(x))+(x.state=='up'&&es.rtt_ms?' · <bdi class="ltr">'+es.rtt_ms+' ms</bdi>':'')+'</span>'+
+   '<i class="tn-ar" aria-hidden="true">➔</i><span class="tn-x">'+tnFlag(xs)+esc(xs.name)+'</span></span>'+(ports.length?'<small class="ltr tn-ports">'+esc(ports.join(' · '))+'</small>':'')+'</span>';
  return accRow('tn',x.id,head,function(){return tunBody(x)},x.enabled?'':'off')}
 function tunBody(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},err=es.error?e.name+': '+es.error:xx.error?xs.name+': '+xx.error:'',aw=x.kind=='awg'?(x.awg||{}):null,hy=x.kind=='hy2'?(x.hy2||{}):null;
  if(aw)err=err||(x.wrap_entry||{}).error||(x.wrap_exit||{}).error||'';

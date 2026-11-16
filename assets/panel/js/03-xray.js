@@ -33,7 +33,7 @@ function xrStatus(d,el){
  el.innerHTML=(d.on?'':'<div class="warnbox">'+t('Xray is off: nothing runs on the servers and no links go to the users.')+'</div>')+
   '<div id="xr_st">'+xrStats(d)+'</div>'+
   kuGroup('Xray',null,'',kuSwitch(t('Xray is on'),d.on,'xrOn(this.checked)',t('Off: Xray stops on every server and the links leave the subscriptions'))+
-   kuLine(t('Every user'),'<button class="b2 sm" onclick="srvProtoAll(\'xray\',0)">'+t('Off for all users')+'</button><button class="b2 sm" onclick="srvProtoAll(\'xray\',1)">'+t('On for all users')+'</button>'))+
+   kuLine(t('Every user'),'<button class="b2 sm" onclick="protoAll(\'xray\',0)">'+t('Off for all users')+'</button><button class="b2 sm" onclick="protoAll(\'xray\',1)">'+t('On for all users')+'</button>'))+
   kuGroup(t('Online now'),(d.online||[]).length,'','<div id="xr_on">'+xrOnline(d)+'</div>')+
   '<details class="ku-help"><summary>'+t('How it works')+'</summary><p>'+t('1) Add a server (the panel server or any tunnel server). 2) Make inbounds on it. 3) Tick Xray for a user: the links of every inbound go into the user\'s subscription, and the traffic counts toward the user\'s volume.')+'</p></details>'}
 function xrOn(on){api('PUT','/api/xray',{on:on}).then(function(){toast(t('Saved'));xrLoad()}).catch(fail)}

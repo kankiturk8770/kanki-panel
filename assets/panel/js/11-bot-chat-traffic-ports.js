@@ -132,7 +132,7 @@ function botApk(){var el=$('#bt_apk');if(!el)return;
      $('#ap_prog').textContent='✓ '+file.name;next()};
     x.onerror=function(){me.disabled=false;toast(t('Upload failed'),1)};x.send(file)};
    next()};
-  var cp=$('#ap_cp');if(cp)cp.onclick=function(){var i=$('#ap_dl');i.select();try{navigator.clipboard.writeText(i.value)}catch(e){document.execCommand('copy')}toast(t('Copied'))};
+  var cp=$('#ap_cp');if(cp)cp.onclick=function(){copy($('#ap_dl').value)};
   $$('[data-apd]').forEach(function(b){b.onclick=function(){confirmDo(function(){api('DELETE','/api/apps/'+b.dataset.apd).then(function(){toast(t('Done'));botApk()}).catch(fail)})}});
   $$('[data-apv]').forEach(function(b){b.onclick=function(){var v=prompt(t('Version'),b.dataset.v);if(v===null)return;
    api('PUT','/api/apps/'+b.dataset.apv,{version:v}).then(function(){toast(t('Saved'));botApk()}).catch(fail)}});

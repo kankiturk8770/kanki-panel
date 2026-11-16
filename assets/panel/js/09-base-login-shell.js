@@ -47,6 +47,9 @@ Object.defineProperty(Element.prototype,'innerHTML',{configurable:true,enumerabl
 })();
 function $$(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+// (3.50) a value inside a JS string inside an HTML attribute (onclick="f('…')"): the browser turns &#39; back into ',
+// so the quote and the backslash are escaped for JS first, then the whole for HTML
+function jsa(s){return esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n'))}
 function toast(m,e){var x=$('#toast');x.textContent=m;x.className=e?'e':'';x.style.display='block';clearTimeout(x._t);x._t=setTimeout(function(){x.style.display='none'},2600)}
 // a delete that leaves work on servers shows its progress (kdFollowRemoval)
 var DELRX=/^\/api\/(tunnels\/servers\/[^/?]+|tunnels\/(?!servers|probe|cdntest)[^/?]+|servers\/[^/?]+|nodes\/[^/?]+|xray\/servers\/[^/?]+|dns\/servers\/[^/?]+)(\?.*)?$/;
@@ -73,7 +76,9 @@ function fail(e){if(!e||e.message=='unauthorized')return;
  // a page drawn after the admin already left it: nothing to tell
  if(e instanceof TypeError&&/of (null|undefined)/.test(e.message)){console.warn(e);return}
  toast(t(e.message||String(e)),1)}
-function copy(s){if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(s).then(function(){toast(t('Copied'))});else{var a=document.createElement('textarea');a.value=s;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove();toast(t('Copied'))}}
+// the clipboard API when the browser allows it, else (plain http, permission refused) the old select-and-copy
+function copyOld(s){var a=document.createElement('textarea');a.value=s;a.setAttribute('readonly','');a.style.position='fixed';a.style.opacity='0';document.body.appendChild(a);a.select();var ok=false;try{ok=document.execCommand('copy')}catch(e){}a.remove();toast(ok?t('Copied'):t('Copy failed: select and copy it by hand'),!ok)}
+function copy(s){s=String(s==null?'':s);if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(s).then(function(){toast(t('Copied'))},function(){copyOld(s)});else copyOld(s)}
 function bytes(n){n=+n||0;var u=['B','KB','MB','GB','TB'],i=0;while(n>=1024&&i<4){n/=1024;i++}return n.toFixed(i>=3?2:0)+' '+u[i]}
 function gbtxt(g){g=+g||0;return g<1?Math.round(g*1024)+' MB':g.toFixed(2)+' GB'}
 // the exact amount, unit by unit: "56 GB 69 MB 412 KB" (kb=false: without the KB)
