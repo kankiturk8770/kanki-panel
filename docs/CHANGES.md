@@ -1,3 +1,38 @@
+# v3.50.0 — The whole panel checked: one design, no duplicates, centered windows
+- **Dashboard = the infrastructure only:** four tiles (online now, servers online, tunnels up, all traffic; each opens its page),
+  the live network chart, the panel server's CPU/RAM/disk/swap and the panel card. The users' counts and the sales card left it
+  (they live on Users and the sales bot). An offline **tunnel server** (agent) now shows in «Needs attention» too; before, only VPN
+  nodes did. Gauge values wrap to a second line instead of being cut («974 MB / 15.71 GB»); the 2- and 4-column tablet rules that
+  fought each other are one rule.
+- **Users: cards, two a row on a phone** (auto-fill from 240px wider): status dot, name and status; used / allowed GB with %, the bar
+  gold → amber from 80% → red when used up; days left, connections now / allowed, protocols (or what they are connected with now)
+  and when last seen; three equal 40px buttons: copy link, QR, edit. The owner had asked for thin two-line rows in 3.48; the new
+  prompt asked for cards, so cards.
+- **Windows always float in the middle** of the screen on phone, tablet and desktop (no bottom sheet, no side drawer); the head and
+  its 40px close button stay in sight while the body scrolls; `82dvh` keeps a window above an open phone keyboard.
+- **VPN & cores:** the eight cores in a 2-column grid on a phone and 4 from a tablet up; Anti-DPI left the grid for «Tools &
+  background services» with the service controls. The service rows' buttons were cut on phones: the row and the servers page's core
+  chip both used the class `svc` (the row is `svrow` now).
+- **Core bar:** one row that swipes and snaps to a core; the open one is gold glass and scrolls into sight smoothly; the edge fades
+  are gone. The pages' tab rows lost their mask fade as well (Persian labels were dimmed at the edge).
+- **Sticky bars work again:** `overflow-x:hidden` on `html`/`body` made `body` the scroller, so no `position:sticky` worked (the
+  save bars, the settings list). It is `overflow-x:clip` now. The settings sections are one swiping row on a phone or tablet and
+  the open one is scrolled into sight; save bars sit just above the bottom bar (`72px + safe area`).
+- **Tunnels:** each row reads Iran entry ➔ protocol · ping ➔ exit, ports under it; long names and addresses wrap (also on VIP cards).
+- **Xray:** «Off / On for all users» call `protoAll` (its own confirm text and refresh); the raw JSON of routing and outbounds was
+  already folded at the bottom.
+- **Security and behaviour:** a value placed inside an `onclick="…'…'"` was escaped for HTML only, and the browser turns `&#39;`
+  back into a quote; hosts, the recorder's user and the panel address now go through `jsa()` (JS, then HTML). `copy()` falls back to
+  select-and-copy when the browser refuses the clipboard (plain http, no permission) instead of an unhandled error; the API token and
+  app-file copy buttons use it too. Every inline handler resolves to a global function (checked in the browser).
+- **CSS:** 131 declarations that a later rule with the same selector set again, 23 selectors nothing produces and every old rule of
+  the parts rebuilt here were removed (168 KB → 164 KB, `!important` 56 → 47); computed styles of every element on 64 pages, before
+  and after the removals, were the same. `body.ks` stays: it is the signed-in state, not an old theme, and its rules are live.
+- Long tags and domain chips wrap; links inside notices have finger-sized targets; tables wrap on a narrow desktop.
+- **Checked:** `cargo test` (395); Playwright on a panel with 19 users, 5 servers and 3 tunnels: 64 pages × 6 widths × (Persian dark,
+  English light) — no JS error, no sideways page scroll, no `undefined`/`NaN`, nothing cut; every button of every page clicked (with
+  the windows they open) at 390 Persian and 1440 English — no error.
+
 # v3.49.0 — Three services in the shop and one price list
 - **Buying starts with the three services**, always, each said in a few lines with one button: «⚡ اقتصادی · V2Ray» (one
   subscription link for v2rayNG, V2Box, Streisand and v2rayN; the cheapest), «🎮 گیمینگ · WireGuard + Amnezia» (WireGuard and

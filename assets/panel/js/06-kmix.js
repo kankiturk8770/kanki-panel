@@ -105,7 +105,7 @@ function krReport(d){var errs=(d.servers||[]).filter(function(x){return x.error}
  var up=sum(match,function(f){return f.up.pkts}),down=sum(match,function(f){return f.down.pkts}),span=sum(match,function(f){return f.last-f.first}),
   lost=sum(match,function(f){return f.up_lost}),big=Math.max.apply(null,[0].concat(match.map(function(f){return Math.max(f.up.max_size,f.down.max_size)})));
  h+='<div class="kr-st"><span>'+(r.recording?'<span class="dot g"></span> '+t('Recording')+' · ':t('Recorded')+' · ')+'<b><bdi>'+esc(r.user)+'</bdi></b> · <span class="ltr">'+krTime(r.elapsed)+' / '+krTime(r.secs)+'</span> · <bdi>'+esc(cur.name)+'</bdi>'+
-  ' · <span class="muted"><bdi>'+N(r.events)+'</bdi> '+t('packets')+(r.full?' · '+t('full'):'')+'</span></span>'+(r.events?'<button class="b2 sm" onclick="krRaw(\''+esc(cur.id)+'\',\''+esc(r.user)+'\')">'+t('Download everything (JSON)')+'</button>':'')+'</div>';
+  ' · <span class="muted"><bdi>'+N(r.events)+'</bdi> '+t('packets')+(r.full?' · '+t('full'):'')+'</span></span>'+(r.events?'<button class="b2 sm" onclick="krRaw(\''+esc(cur.id)+'\',\''+jsa(r.user)+'\')">'+t('Download everything (JSON)')+'</button>':'')+'</div>';
  h+=kuStats([[t('Match time'),match.length?krTime(span):'—'],[t('Game packets a second'),match.length&&span>0?'<span class="ltr">↑'+N(Math.round(up/span))+' ↓'+N(Math.round(down/span))+'</span>':'—'],
   [t('Biggest game packet'),big?'<span class="ltr">'+N(big)+' B</span>':'—'],[t('Lost on the way here'),up?'<span class="ltr">'+N((lost/(up+lost)*100).toFixed(1))+'%</span>':'—',lost/(up+lost||1)>0.01?'y':'']]);
  // the phases and the chart

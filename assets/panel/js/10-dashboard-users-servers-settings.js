@@ -50,7 +50,7 @@ function goNodes(add){S.openAdd=!!add;if(location.hash=='#nodes')route();else lo
 function drawSvcs(list){var el=$('#svcs');if(!el)return;list=(list||[]);
  if(!list.length){el.innerHTML='<span class="muted">—</span>';return}
  el.innerHTML=list.map(function(x){var fixed=['web','panel','node'].indexOf(x.key)>=0,k=esc(x.key);
-  return '<div class="svc"><div class="sn"><span class="dot '+(x.active?'g':'r')+'"></span><div><b>'+esc(SVN[x.key]||x.key)+'</b><small class="ltr">'+esc(x.unit)+'</small></div></div>'+
+  return '<div class="svrow"><div class="sn"><span class="dot '+(x.active?'g':'r')+'"></span><div><b>'+esc(SVN[x.key]||x.key)+'</b><small class="ltr">'+esc(x.unit)+'</small></div></div>'+
   '<span class="badge '+(x.active?'g':'r')+'">'+(x.active?t('Running'):t('Stopped'))+'</span>'+
   '<div class="sbtn"><button class="sb on" data-svc="'+k+'" data-act="start" '+(x.active||fixed?'disabled':'')+'>▶ '+t('Start')+'</button>'+
   '<button class="sb off" data-svc="'+k+'" data-act="stop" '+(!x.active||fixed?'disabled':'')+' title="'+(fixed?t('Only restart is allowed for this service'):'')+'">■ '+t('Stop')+'</button>'+
@@ -365,7 +365,7 @@ function tokNew(){modal(mhead(t('Create API token'))+'<label class="f">'+t('Name
   api('POST','/api/security/tokens',{name:$('#tk_n').value.trim()||'token',scopes:sc}).then(function(r){
    modal(mhead(t('API token'))+'<p class="sub">'+t('Copy it now: it is shown only this once.')+'</p><textarea class="ltr" readonly rows="2" style="width:100%" onclick="this.select()">'+esc(r.token)+'</textarea>'+
     '<button class="btn" style="width:100%;margin-top:10px" id="tk_cp">'+t('Copy')+'</button>');
-   $('#tk_cp').onclick=function(){try{navigator.clipboard.writeText(r.token);toast(t('Copied'))}catch(e){}};loadSec()}).catch(fail)}}
+   $('#tk_cp').onclick=function(){copy(r.token)};loadSec()}).catch(fail)}}
 function tokDel(id){confirmDo(function(){api('DELETE','/api/security/tokens/'+id).then(loadSec).catch(fail)})}
 function sessDel(id){api('DELETE','/api/security/sessions/'+id).then(loadSec).catch(fail)}
 function chPass(){api('POST','/api/security/password',{current:$('#cp_cur').value,username:$('#cp_u').value,password:$('#cp_p').value}).then(function(){toast(t('Saved'));loadSec()}).catch(fail)}
@@ -410,7 +410,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   '<div class="full"><label class="f">'+t('Language')+'</label>'+stPick('lang',['<button type="button" data-v="fa">فارسی<small class="muted" style="display:block;font-weight:500">راست به چپ</small></button>','<button type="button" data-v="en">English<small class="muted" style="display:block;font-weight:500">Left to right</small></button>'],'thc')+'</div>'+
   '<div class="full"><label class="f">'+t('Theme')+'</label>'+stPick('theme',['<button type="button" data-v="dark"><i style="background:linear-gradient(135deg,#1c160d,#070604)"></i>'+t('Dark')+'</button>','<button type="button" data-v="light"><i style="background:linear-gradient(135deg,#fffaf0,#e6dcc6)"></i>'+t('Soft light')+'</button>'],'thc')+'</div>'+
   '<input type="hidden" data-k="color" value="gold"></div>';
- case 'net':return '<div class="sgrid"><div class="full"><label class="f">'+t('Panel address')+'</label><div class="cpy"><input class="ltr" readonly value="'+esc(addr)+'"><button class="b2" type="button" onclick="copy(\''+esc(addr)+'\')">'+ic('copy',15)+'</button></div></div>'+
+ case 'net':return '<div class="sgrid"><div class="full"><label class="f">'+t('Panel address')+'</label><div class="cpy"><input class="ltr" readonly value="'+esc(addr)+'"><button class="b2" type="button" onclick="copy(\''+jsa(addr)+'\')">'+ic('copy',15)+'</button></div></div>'+
   stIn('endpoint','Public VPN host or IP',s.domain||'vpn.example.com','Written inside every user config. Empty = the panel domain.','full')+
   stIn('sub_base','Subscription base URL','https://sub.example.com','Base of the subscription links (for example a CDN domain). Empty = the panel address.','full')+
   '<div class="full box"><b>'+t('Separate subscription domain')+'</b><div class="hint">'+t('A domain that points to this server. The panel gets its SSL by itself and serves only the subscription pages on it, so the panel address stays hidden.')+'</div><div class="cpy"><input class="ltr" id="sd_in" placeholder="sub.example.ir" value="'+esc(s.sub_domain||'')+'"><button class="btn" type="button" id="sd_go">'+t('Set up SSL and use it')+'</button>'+(s.sub_domain?'<button class="b2 bd" type="button" id="sd_rm">'+t('Remove')+'</button>':'')+'</div><div class="hint" id="sd_msg">'+(s.sub_domain?'✓ https://'+esc(s.sub_domain)+'/sub/…':'')+'</div></div>'+
@@ -468,7 +468,7 @@ function stWire(){
  $$('.stn button').forEach(function(b){b.onclick=function(){var cur=$('.sts.on');
   // leaving a section with changes that are not saved: ask first
   if(cur&&cur.dataset.sec!=b.dataset.sec&&stIsDirty(cur)&&!confirm(t('This section has unsaved changes. Leave it without saving?')))return;
-  S.stsec=b.dataset.sec;$$('.stn button').forEach(function(x){x.classList.toggle('on',x==b)});$$('.sts').forEach(function(x){x.classList.toggle('on',x.dataset.sec==b.dataset.sec)});if(b.dataset.sec=='upd')stUpdate(false)}});
+  S.stsec=b.dataset.sec;$$('.stn button').forEach(function(x){x.classList.toggle('on',x==b)});$$('.sts').forEach(function(x){x.classList.toggle('on',x.dataset.sec==b.dataset.sec)});if(window.tabsShow)tabsShow();if(b.dataset.sec=='upd')stUpdate(false)}});
  $$('.sts').forEach(function(sec){sec.addEventListener('input',function(){stDirty(sec)});sec.addEventListener('change',function(){stDirty(sec)})});
  $$('#st [data-pick] button').forEach(function(b){b.onclick=function(){var g=b.parentNode,h=$('#st [data-k="'+g.dataset.pick+'"]');h.value=b.dataset.v;$$('button',g).forEach(function(x){x.classList.toggle('on',x==b)});stDirty(g.closest('.sts'))}});
  $$('#st [data-multi] input').forEach(function(c){c.onchange=function(){var g=c.closest('[data-multi]'),h=$('#st [data-k="'+g.dataset.multi+'"]');h.value=$$('input',g).filter(function(x){return x.checked}).map(function(x){return x.value}).join(',');stDirty(g.closest('.sts'))}});

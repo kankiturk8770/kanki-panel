@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.50 — The whole panel checked
+A dashboard of the infrastructure only, users as cards (two a row on a phone), windows always in the middle of the screen,
+the eight cores in a 2×4 grid, sticky save bars that work again, tunnel routes as entry ➔ protocol ➔ exit, and old CSS removed.
+
 ## New in 3.49 — Three services and one price list
 Buying starts with V2Ray, gaming (WireGuard + Amnezia) and VIP; every plan and every custom plan is priced by one list the admin
 edits in the mini app; the mini app's shop has a new night-blue look with a colour for each service.

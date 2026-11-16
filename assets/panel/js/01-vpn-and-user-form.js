@@ -63,7 +63,9 @@ function protoAll(p,add){var nm=p=='xray'?'Xray':'DNS';
 
 // ---------------------------------------------------------------- the VPN services page: Kanki VPN | Xray
 function p_vpn(){$('#pg').innerHTML='<div class="ku">'+kuHead('cores',t('VPN & cores'),t('Every core your users get, each on its own card'))+'<div id="vh_s"></div><div class="cgrid" id="vh_g">'+t('Loading…')+'</div>'+
-  '<section class="card kv-svc"><div class="kc-h"><div><h3>'+t('Services')+'</h3><small class="muted">'+t('Start, stop or restart the VPN services')+'</small></div></div><div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></section></div>';
+  '<section class="card kv-svc"><div class="kc-h"><div><h3>'+t('Tools & background services')+'</h3><small class="muted">'+t('Start, stop or restart the VPN services')+'</small></div></div>'+
+  '<a class="kv-tool" href="#antidpi" style="--pc:'+PCOL.awg+'"><span class="cci">'+ic('security',18)+'</span><span><b>'+t('Anti-DPI')+'</b><small>'+t('Tunnels between your servers that filters cannot see')+'</small></span><span class="kv-go" aria-hidden="true">'+ic('chev',16)+'</span></a>'+
+  '<div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></section></div>';
  $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};sysSvcLoad();
  var go=function(){Promise.all([api('GET','/api/nodes').catch(function(){return []}),api('GET','/api/overview').catch(function(){return {}}),api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null}),api('GET','/api/kping').catch(function(){return null})]).then(function(r){if(S.page!='vpn')return;S.nodes=r[0]||[];if(r[2])XR.d=r[2];if(r[3])DN.d=r[3];vhGrid(r[0]||[],r[1]||{},r[2],r[3],r[4])})};
  go();clearInterval(S.timer);S.timer=setInterval(function(){if(document.visibilityState=='visible'&&!$('#modal').classList.contains('on'))go()},8000)}
@@ -86,7 +88,6 @@ function vhGrid(nodes,o,xr,dn,kp){var el=$('#vh_g');if(!el)return;var pr=o.proto
   h+=card('#xray/status',PCOL.xray,'xray','Xray','VLESS · VMess · Trojan · Shadowsocks',xr.on?(act?['g',t('Running')]:['y',t('No inbound')]):['r',t('Off')],[[t('Inbounds'),N(act)+' / '+N(xr.inbounds.length)],[t('Online now'),N((xr.online||[]).length)]])}
  if(dn){var run=dn.servers.filter(function(x){return x.status&&x.status.active}).length;
   h+=card('#dns/overview',PCOL.dns,'dns','Kanki DNS','Private DNS for sanctioned sites',dn.on?(run?['g',t('Running')]:['y',t('No server')]):['r',t('Off')],[[t('Servers'),N(run)+' / '+N(dn.servers.length)],[t('Users'),N(dn.users||0)]])}
- h+=card('#antidpi',PCOL.awg,'security','Anti-DPI','Tunnels between your servers that filters cannot see',['n',t('Tools')],[[t('Tunnels'),t('Open')]]);
  el.innerHTML=h;
  var ups=nodes.filter(up).length,s=$('#vh_s');
  if(s)s.innerHTML=kuStats([[t('Servers online'),N(ups)+' / '+N(nodes.length),ups<nodes.length?'warn':'ok'],[t('Online now'),N(o.online||0),'ok'],[t('Total traffic'),'<span class="ltr">'+N(o.traffic_gb||0)+' GB</span>'],[t('Users'),N(o.users||0)]])}

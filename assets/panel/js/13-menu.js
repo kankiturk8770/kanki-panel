@@ -41,7 +41,7 @@ function secTabsHtml(p){var s=secOf(p);if(s[3].length<2)return '';
 function railEdges(r){var w=r.parentNode,max=r.scrollWidth-r.clientWidth,x=Math.abs(r.scrollLeft);
  w.classList.toggle('more-s',x>2);w.classList.toggle('more-e',x<max-2)}
 function railShow(r){var a=r.querySelector('.on');if(!a)return;var rr=r.getBoundingClientRect(),ar=a.getBoundingClientRect();
- if(ar.left<rr.left+8||ar.right>rr.right-8)r.scrollLeft+=(ar.left+ar.width/2)-(rr.left+rr.width/2)}
+ if(ar.left<rr.left+8||ar.right>rr.right-8)try{r.scrollBy({left:(ar.left+ar.width/2)-(rr.left+rr.width/2),behavior:'smooth'})}catch(e){r.scrollLeft+=(ar.left+ar.width/2)-(rr.left+rr.width/2)}}
 function wireRail(el){var r=el.querySelector('.kcb-rail');if(!r)return;
  r.addEventListener('scroll',function(){railEdges(r)},{passive:true});
  r.addEventListener('keydown',function(e){var k=e.key,ts=$$('.kcb-t',r),i=ts.indexOf(document.activeElement);if(i<0)return;
