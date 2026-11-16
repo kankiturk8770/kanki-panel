@@ -217,6 +217,13 @@ pub struct XraySettings {
     pub outs: Vec<XOut>,
     /// the outbound everything else goes to ("" = direct)
     pub default_out: String,
+    /// write Xray's access log (who opened what): off by default, it grows fast
+    pub access_log: bool,
+    /// connection policy in seconds (0 = Xray's own default): handshake, idle, after the uplink / downlink closed
+    pub handshake: u32,
+    pub conn_idle: u32,
+    pub uplink_only: u32,
+    pub downlink_only: u32,
 }
 
 pub fn settings(app: &App) -> XraySettings {
@@ -578,7 +585,7 @@ pub fn build_config(s: &XraySettings, sid: &str, users: &[User]) -> Value {
     let level = if s.log_level.is_empty() { "warning" } else { s.log_level.as_str() };
     let strategy = if s.domain_strategy.is_empty() { "AsIs" } else { s.domain_strategy.as_str() };
     let mut cfg = json!({
-        "log": { "loglevel": level, "access": "none" },
+        "log": if s.access_log { json!({ "loglevel": level }) } else { json!({ "loglevel": level, "access": "none" }) },
         "api": { "tag": "api", "listen": format!("127.0.0.1:{}", super::API_PORT), "services": ["HandlerService", "StatsService", "RoutingService"] },
         "stats": {},
         "policy": {
@@ -589,6 +596,11 @@ pub fn build_config(s: &XraySettings, sid: &str, users: &[User]) -> Value {
         "outbounds": outbounds,
         "routing": { "domainStrategy": strategy, "rules": rules },
     });
+    for (k, v) in [("handshake", s.handshake), ("connIdle", s.conn_idle), ("uplinkOnly", s.uplink_only), ("downlinkOnly", s.downlink_only)] {
+        if v > 0 {
+            cfg["policy"]["levels"]["0"][k] = json!(v);
+        }
+    }
     let dns = csv(&s.dns);
     if !dns.is_empty() {
         cfg["dns"] = json!({ "servers": dns, "queryStrategy": if s.ipv4 { "UseIPv4" } else { "UseIP" } });
@@ -1463,6 +1475,7 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
         "log_level": s.log_level, "domain_strategy": s.domain_strategy, "dns": s.dns, "ipv4": s.ipv4, "block_ads": s.block_ads, "block_ir": s.block_ir,
         "rule_list": s.rule_list, "outs": s.outs.iter().map(|o| { let mut v = serde_json::to_value(o).unwrap_or(json!({})); v["error"] = json!(out_json(o, s.ipv4).err()); v }).collect::<Vec<_>>(),
         "default_out": s.default_out, "online": online,
+        "access_log": s.access_log, "handshake": s.handshake, "conn_idle": s.conn_idle, "uplink_only": s.uplink_only, "downlink_only": s.downlink_only,
         "servers": servers, "inbounds": inbounds, "users": users.len(),
         "agents": names.iter().map(|(k, v)| json!({ "id": k, "name": v, "loc": locs.get(k).map(|x| x.0.clone()).unwrap_or_default() })).collect::<Vec<_>>(),
         "user_list": all_users.iter().filter(|u| u.has_proto("xray")).map(|u| json!({ "id": u.id, "name": u.username })).collect::<Vec<_>>(),
@@ -1508,7 +1521,15 @@ async fn put_settings(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     if let Some(v) = b["dns"].as_str() {
         s.dns = csv(v).join(", ");
     }
-    for (k, field) in [("ipv4", &mut s.ipv4), ("block_ads", &mut s.block_ads), ("block_ir", &mut s.block_ir)] {
+    for (k, field) in [("handshake", &mut s.handshake), ("conn_idle", &mut s.conn_idle), ("uplink_only", &mut s.uplink_only), ("downlink_only", &mut s.downlink_only)] {
+        if let Some(v) = b[k].as_u64() {
+            if v > 3600 {
+                return err(StatusCode::BAD_REQUEST, "connection times are 0 to 3600 seconds");
+            }
+            *field = v as u32;
+        }
+    }
+    for (k, field) in [("ipv4", &mut s.ipv4), ("block_ads", &mut s.block_ads), ("block_ir", &mut s.block_ir), ("access_log", &mut s.access_log)] {
         if let Some(v) = b[k].as_bool() {
             *field = v;
         }

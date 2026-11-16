@@ -1,3 +1,30 @@
+# v3.48.0 — A tidier panel; the bot is managed inside Telegram
+- **Dashboard: the panel and only what needs you.** «Needs attention» first: the panel's own web server, the sales and report
+  bots, orders waiting for approval, a new version, a nearly full disk, and one line each for servers and tunnels that are down
+  (their details stay in Servers and Tunnels). Then the users, live traffic, the panel server's resources, a «Panel» card (version,
+  uptime, bots, servers, tunnels) and a «Sales» card. The TCP/UDP card is gone. A VPN core that is off or removed on the panel's own
+  server is no longer a problem anywhere (`nHealthOf`, dashboard).
+- **Users: one thin row of two lines** (as before 3.40, thinner): online dot, name, what they are connected with now (protocol and
+  exit flag), status, copy-link and QR; then data used with a thin bar, days left, connections now / allowed and when last seen.
+  Two columns on a desktop.
+- **Phones: every section in the bottom bar**, one row that scrolls sideways (no «More» sheet).
+- **Xray:** outbounds have their own tab (Status, Servers, Tunnel, Inbounds, Outbounds, Routing, Settings); Settings has the core
+  (version, log level, access log), DNS (Xray's own servers, IPv4 only) and the connection policy (handshake, idle, after upload /
+  download, `policy.levels.0`). The core rail no longer makes the page wider than the phone.
+- **The bot is managed in the bot.** Admin panel › «⚙️ Bot management» opens the admin mini app: overview (sales, revenue, open
+  orders, the bot's state), sales and the shop, every payment method, plans (add, edit whole, on/off, delete), discount codes,
+  invites and the free trial, the smart channel, the message in the app, and the buttons. It uses the panel's own routes through
+  `/tg/api/admin/panel`: only the sales bot's admins, only those routes, only the bot's settings (`BOT_KEYS`), with a key that never
+  leaves the process (`auth::internal_token`). The web panel's bot page keeps only the bot itself: token, admins, the report bot and
+  the daily report.
+- **App files through the bot.** Admin panel › Settings › «📱 App files»: send Android arm64, then armv7, then Windows (.exe /
+  .msi / .zip), each can be skipped; a new file takes the old one's place. They are kept only in Telegram (no copy on the server)
+  and customers get them by Telegram's id: Android from «Download the app», Windows from the Windows connection guide.
+- Plans can be edited whole from the panel API (volume, days, users, label, struck-through price).
+- Checked: `cargo test` (new: `an_admin_sends_the_app_files_to_the_bot`, `the_admin_mini_app_changes_only_the_bots_own_things`);
+  every panel page × 6 widths × (Persian dark, English light) with no JS error, no sideways scroll, no `undefined`/`NaN`; the admin
+  mini app's eight parts in Playwright.
+
 # v3.47.0 — Sales bot as one page, invites that pay every time, a report bot, the mini app in the app's look
 - **A purchase is one page.** Every menu of the bot is a «screen» (`Bot::screens`, `new_screen`): the next step takes the place of the
   last one (edited in place, or a new message and the old menu deleted). A typed name, discount code or TON link is removed once read

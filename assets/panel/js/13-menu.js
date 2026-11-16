@@ -97,13 +97,15 @@ function secBy(k){for(var i=0;i<V.SECS.length;i++)if(V.SECS[i][0]==k)return V.SE
 window.grpOf=function(p){return V.secOf(p)[4]||''};
 
 
-// phones: the five places used most in the bottom bar, everything else behind «More» (a sheet of every section)
-var BAR=[['dash','Home'],['users','Users'],['nodes','Servers'],['netsec','Tunnels'],['vpnsec','Cores']];
+// phones (3.48, as the owner liked it): every section in the bottom bar, one row that scrolls sideways inside itself;
+// no «More» sheet. The open section is kept in sight.
+var BARN={dash:'Home',vpnsec:'Cores',netsec:'Tunnels',vipsec:'VIP',traffic:'Traffic',nodes:'Servers',bot:'Bot',emergency:'Chat'};
 window.navBar=function(){
- return '<nav class="kmb" id="mbar" aria-label="'+esc(t('Main menu'))+'">'+BAR.map(function(b){var s=secBy(b[0]),f=s[3][0];
-  return '<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'">'+ic(s[2],20)+'<span>'+t(b[1])+'</span></a>'}).join('')+
-  '<button type="button" id="mbmore" aria-haspopup="dialog" aria-expanded="false" aria-controls="msheet" onclick="k38More()">'+ic('more38',20)+'<span>'+t('More')+'</span></button></nav>'+
+ return '<nav class="kmb kmb2" id="mbar" aria-label="'+esc(t('Main menu'))+'">'+V.SECS.map(function(s){var f=s[3][0];
+  return '<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'">'+ic(s[2],20)+'<span>'+t(BARN[s[0]]||s[1])+'</span></a>'}).join('')+'</nav>'+
   '<div class="ksh-scrim" id="k38scrim" onclick="k38More(0)"></div><div class="ksh" id="msheet" role="dialog" aria-modal="true" aria-label="'+esc(t('All sections'))+'" tabindex="-1"></div>'};
+window.mbarShow=function(){var r=$('#mbar'),a=r&&r.querySelector('a.on');if(!a||r.scrollWidth<=r.clientWidth+1)return;
+ var rr=r.getBoundingClientRect(),ar=a.getBoundingClientRect();if(ar.left<rr.left+24||ar.right>rr.right-24)r.scrollLeft+=(ar.left+ar.width/2)-(rr.left+rr.width/2)};
 
 
 // ---------------------------------------------------------------- night / day in the top bar

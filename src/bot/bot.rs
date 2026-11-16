@@ -40,6 +40,8 @@ enum Wait {
     Gift(i64),
     /// the admin sends a premium emoji for a button (its key)
     Icon(String),
+    /// the admin sends the app's files one by one: 0 Android arm64, 1 Android armv7, 2 Windows
+    AppFile(usize),
 }
 
 #[derive(Clone)]
@@ -58,6 +60,13 @@ impl Default for Pending {
         Pending { plan: 0, kind: String::new(), target: 0, discount: String::new(), percent: 0, at: now() }
     }
 }
+
+/// The app files an admin sends to the bot, in order: (type, what to send, file endings)
+const APP_STEPS: &[(&str, &str, &[&str])] = &[
+    ("arm64-v8a", "📱 اندروید <b>arm64</b> (گوشی‌های جدید، ۶۴ بیتی) · فایل <code>.apk</code>", &["apk"]),
+    ("armeabi-v7a", "📱 اندروید <b>armv7</b> (گوشی‌های قدیمی، ۳۲ بیتی) · فایل <code>.apk</code>", &["apk"]),
+    ("windows", "💻 <b>ویندوز</b> · فایل <code>.exe</code>، <code>.msi</code> یا <code>.zip</code>", &["exe", "msi", "zip"]),
+];
 
 /// How long a started purchase (`pend`) is kept without any change
 const PEND_TTL: i64 = 86400;
@@ -1115,7 +1124,10 @@ impl Bot {
             self.send(chat, &format!("⚠️ حجم این فایل برای تلگرام زیاده؛ از صفحه‌ی لینک اشتراک دانلودش کنید.{}", if l.is_empty() { String::new() } else { format!("\n{}", esc(&l)) }), None).await;
             return;
         }
-        let Some(bytes) = crate::apps::read(&self.app, abi).await else { return };
+        let Some(bytes) = crate::apps::read(&self.app, abi).await else {
+            self.send(chat, "⚠️ ارسال فایل ناموفق بود؛ چند دقیقه‌ی دیگه دوباره امتحان کنید یا به پشتیبانی پیام بدید.", None).await;
+            return;
+        };
         let _ = self.call("sendChatAction", json!({"chat_id": chat, "action": "upload_document"})).await;
         let part = reqwest::multipart::Part::bytes(bytes).file_name(f.file_name()).mime_str("application/vnd.android.package-archive").unwrap();
         let form = reqwest::multipart::Form::new().text("chat_id", chat.to_string()).text("caption", cap).text("parse_mode", "HTML").part("document", part);
@@ -1254,8 +1266,8 @@ impl Bot {
         let v2 = u.service() == "v2ray";
         let links = v2 || crate::api::links_text(&self.app, u).is_some();
         let kanki = !v2 && match os {
-            "a" => !crate::apps::list(&self.app).is_empty() || self.db().get("app_link").trim().starts_with("https://"),
-            "w" => self.db().get("win_link").trim().starts_with("https://"),
+            "a" => !crate::apps::phones(&self.app).is_empty() || self.db().get("app_link").trim().starts_with("https://"),
+            "w" => crate::apps::get_file(&self.app, "windows").is_some() || self.db().get("win_link").trim().starts_with("https://"),
             _ => false,
         };
         // AmneziaVPN holds WireGuard, AmneziaWG and the Xray links (not Hysteria2): one backup file
@@ -1306,10 +1318,14 @@ impl Bot {
             "k" => {
                 let mut rows: Kb = vec![];
                 let get = if os == "w" {
-                    rows.push(store("⬇️ دانلود Kanki VPN برای ویندوز", self.db().get("win_link").trim()));
-                    "1️⃣ برنامه رو با دکمه‌ی پایین دانلود و نصب کنید."
+                    // the Windows file sent to the bot, else the download link
+                    match crate::apps::get_file(&self.app, "windows") {
+                        Some(f) => rows.push(vec![b(&format!("⬇️ Kanki VPN ویندوز · {}", mb(f.size)), "apk:windows")]),
+                        None => rows.push(store("⬇️ دانلود Kanki VPN برای ویندوز", self.db().get("win_link").trim())),
+                    }
+                    "1️⃣ برنامه رو با دکمه‌ی پایین بگیرید و نصب کنید."
                 } else {
-                    let files = crate::apps::list(&self.app);
+                    let files = crate::apps::phones(&self.app);
                     if files.is_empty() {
                         rows.push(store("⬇️ دانلود Kanki VPN", self.db().get("app_link").trim()));
                     }
@@ -1406,7 +1422,7 @@ impl Bot {
         }
         // the app's install files (sent as a new message, so this account message stays); a v2ray account
         // connects with a v2ray app, not the Kanki app. No rename here: the admin renames when it is needed.
-        if !crate::apps::list(&self.app).is_empty() && u.service() != "v2ray" {
+        if !crate::apps::phones(&self.app).is_empty() && u.service() != "v2ray" {
             rows.push(vec![b("📱 دانلود اپ کانکی", "app2")]);
         }
         rows.append(&mut extra);
@@ -1647,6 +1663,25 @@ impl Bot {
             return (0, 0);
         }
         (pct.clamp(1, 90), until)
+    }
+
+    /// The admin's app files page: each file the bot gives (type, version, size, date), and the upload button
+    fn apps_view(&self) -> (String, Value) {
+        let files = crate::apps::list(&self.app);
+        let mut t = "📱 <b>فایل‌های اپ کانکی</b>\n\nفایل‌ها فقط در تلگرام نگه داشته می‌شوند و ربات با یک دکمه به کاربر می‌دهد (اندروید از «دانلود اپ»، ویندوز از راهنمای اتصال ویندوز). فایل تازه‌ی هر نوع جای قبلی را می‌گیرد.\n".to_string();
+        let mut rows: Kb = vec![vec![b("⬆️ فرستادن نسخه‌ی تازه (arm64 ← armv7 ← ویندوز)", "aup")]];
+        if files.is_empty() {
+            t.push_str("\nهنوز فایلی نیست.");
+        }
+        for f in &files {
+            let (title, _) = crate::apps::title(&f.abi);
+            let (d, _) = crate::channel::fa_datetime(f.at);
+            t.push_str(&format!("\n• <b>{}</b>: {}{} · {} · {}{}", title, esc(&f.file_name()), if f.version.is_empty() { String::new() } else { format!(" · v{}", esc(&f.version)) }, mb(f.size), d,
+                if f.tg_only { "" } else { " · روی سرور" }));
+            rows.push(vec![b(&format!("🗑 حذف {}", title), &format!("adel:{}", f.abi))]);
+        }
+        rows.push(vec![b("⬅️ تنظیمات", "ag:s")]);
+        (t, ik(rows))
     }
 
     /// For the mini app: the first-purchase discount this customer has now (0 = none)
@@ -3156,6 +3191,7 @@ impl Bot {
     fn adm_kb(&self) -> Value {
         let open: i64 = self.db().with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE status IN ('pending','error')", [], |r| r.get(0)).unwrap_or(0));
         let orders = if open > 0 { format!("📦 سفارش‌ها و مالی · {} باز", open) } else { "📦 سفارش‌ها و مالی".to_string() };
+        let mini = crate::miniapp::url(&self.app);
         let mut rows: Kb = vec![
             vec![b(&orders, "ag:o")],
             vec![b("👥 کاربران و اتصالات", "ag:u")],
@@ -3167,6 +3203,10 @@ impl Bot {
         // with the report bot the panel's own state lives there; the sales bot is for sales
         if crate::monitor::on() {
             rows.remove(4);
+        }
+        // the whole management in one place (3.48): the admin mini app
+        if mini.starts_with("https://") {
+            rows.insert(0, vec![b("⚙️ مدیریت ربات (فروش، پرداخت، پلن‌ها، کانال)", &format!("webapp:miniapp:{}?admin=bot", mini))]);
         }
         ik(rows)
     }
@@ -3190,6 +3230,7 @@ impl Bot {
                 vec![b("📦 پلن‌ها", "a:plans"), b("📂 دسته‌بندی‌ها", "a:cats")],
                 vec![b("🎨 دکمه‌ها و متن‌ها", "a:ui"), b("🎬 آموزش‌ها", "a:guides")],
                 vec![b("👥 دعوت و هدیه", "a:ref"), b("⚙️ تنظیمات عمومی", "a:gen")],
+                vec![b("📱 فایل‌های اپ (اندروید و ویندوز)", "a:apps")],
                 back,
             ]),
             "t" => ("📢 <b>پیام همگانی و ابزارها</b>", vec![
@@ -3335,6 +3376,36 @@ impl Bot {
                 let mut kb: Kb = TEXTS.iter().map(|(k, _, title)| vec![b(&format!("📝 {}", title), &format!("tv:{}", k))]).collect();
                 kb.push(vec![b("⬅️ دکمه‌ها و متن‌ها", "a:ui")]);
                 self.edit(chat, mid, "📝 <b>متن پیام‌ها</b>\n\nروی هر پیام بزنید تا متنش را ببینید و عوض کنید.", Some(ik(kb))).await;
+                true
+            }
+            "a:apps" => {
+                self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid);
+                let (t, kb) = self.apps_view();
+                self.edit(chat, mid, &t, Some(kb)).await;
+                true
+            }
+            // the admin sends the app's files: arm64, then armv7, then Windows (each can be skipped)
+            "aup" => {
+                set_wait(Wait::AppFile(0));
+                self.edit(chat, mid, &app_step_text(0), Some(app_step_kb())).await;
+                true
+            }
+            "askip" => {
+                let next = match self.waits.lock().unwrap_or_else(|e| e.into_inner()).get(&uid) { Some(Wait::AppFile(n)) => n + 1, _ => APP_STEPS.len() };
+                if next < APP_STEPS.len() {
+                    set_wait(Wait::AppFile(next));
+                    self.edit(chat, mid, &app_step_text(next), Some(app_step_kb())).await;
+                } else {
+                    self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid);
+                    let (t, kb) = self.apps_view();
+                    self.edit(chat, mid, &t, Some(kb)).await;
+                }
+                true
+            }
+            d if d.starts_with("adel:") => {
+                crate::apps::drop_type(&self.app, &d[5..]);
+                let (t, kb) = self.apps_view();
+                self.edit(chat, mid, &format!("🗑 حذف شد.\n\n{}", t), Some(kb)).await;
                 true
             }
             "a:links" => {
@@ -3977,6 +4048,34 @@ impl Bot {
                     self.admin_view(uid, chat, 0, back_view(&k)).await;
                 }
             }
+            Wait::AppFile(step) => {
+                let Some((abi, _, ends)) = APP_STEPS.get(step) else { return };
+                let doc = &m["document"];
+                let id = doc["file_id"].as_str().unwrap_or("");
+                let name = doc["file_name"].as_str().unwrap_or("").to_string();
+                let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+                if id.is_empty() || !ends.contains(&ext.as_str()) {
+                    self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::AppFile(step));
+                    self.edit_ok(chat, 0, &format!("⚠️ این فایل نیست. {}\n\n{}", ends.iter().map(|e| format!(".{}", e)).collect::<Vec<_>>().join(" / "), app_step_text(step)), Some(app_step_kb())).await;
+                    return;
+                }
+                // an Android file named for the other phone type is probably the wrong one: say so, keep it anyway
+                let other = *abi != "windows" && crate::apps::abi_of(&name).map(|a| a != *abi).unwrap_or(false);
+                match crate::apps::put_tg(&self.app, abi, id, &name, doc["file_size"].as_u64().unwrap_or(0)) {
+                    Ok(f) => {
+                        let note = format!("✅ <b>{}</b> ذخیره شد{}{}", esc(&f.label()), if f.version.is_empty() { String::new() } else { format!(" (نسخه‌ی {})", esc(&f.version)) },
+                            if other { "\n⚠️ اسم فایل نوع دیگری را نشان می‌دهد؛ اگر اشتباه است دوباره بفرستید." } else { "" });
+                        if step + 1 < APP_STEPS.len() {
+                            self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::AppFile(step + 1));
+                            self.edit_ok(chat, 0, &format!("{}\n\n{}", note, app_step_text(step + 1)), Some(app_step_kb())).await;
+                        } else {
+                            let (t, kb) = self.apps_view();
+                            self.edit_ok(chat, 0, &format!("{}\n\n{}", note, t), Some(kb)).await;
+                        }
+                    }
+                    Err(e) => { self.send(chat, &format!("⚠️ {}", esc(&e)), None).await; }
+                }
+            }
             Wait::Icon(k) => {
                 match crate::buttons::first_custom(m) {
                     Some((id, _, _)) => {
@@ -4355,6 +4454,16 @@ impl Bot {
     }
 }
 
+/// One step of sending the app's files: what to send now
+fn app_step_text(step: usize) -> String {
+    let (_, what, _) = APP_STEPS[step.min(APP_STEPS.len() - 1)];
+    format!("⬆️ <b>قدم {} از {}</b>\n\nفایل {} را همین‌جا بفرستید (به‌صورت فایل).\nاگر این نوع را ندارید «رد شدن» را بزنید؛ فایل قبلی‌اش می‌ماند.", step + 1, APP_STEPS.len(), what)
+}
+
+fn app_step_kb() -> Value {
+    ik(vec![vec![b("⏭ رد شدن", "askip")], vec![b("✖️ تمام / انصراف", "a:apps")]])
+}
+
 /// "Which app and how": sent before the config files of one protocol (w = WireGuard, a = AmneziaWG, h = Hysteria2)
 fn gift_prompt(who: &str) -> String {
     format!("🎁 هدیه برای <b>{}</b>\n\nبفرستید: <code>روز گیگ [دلیل]</code>\nمثلاً: <code>2 10 قطعی سرورها در شب گذشته</code>\n(فقط زمان: <code>1 0</code> · فقط حجم: <code>0 5</code>)\n\nدلیل اختیاری است و در پیام کاربر نوشته می‌شود.", who)
@@ -4713,11 +4822,13 @@ mod flow_tests {
         // the admin menu: four groups
         tap(&bot, from(ADMIN, "Admin", "admin"), "adm").await;
         let g: Vec<String> = buttons(&log, ADMIN).into_iter().map(|b| b.1).collect();
-        assert_eq!(g.len(), 6);
-        assert_eq!(&g[..4], &["ag:o", "ag:u", "ag:s", "ag:t"]);
-        assert_eq!(g[5], "home");
+        // first the whole management in the admin mini app (3.48), then the four groups
+        assert_eq!(g.len(), 7);
+        assert!(g[0].ends_with("/tg/?admin=bot"), "{}", g[0]);
+        assert_eq!(&g[1..5], &["ag:o", "ag:u", "ag:s", "ag:t"]);
+        assert_eq!(g[6], "home");
         // «📡 وضعیت مسیرها» opens the paths page of the mini app
-        assert!(g[4].ends_with("/tg/?admin=paths"), "{}", g[4]);
+        assert!(g[5].ends_with("/tg/?admin=paths"), "{}", g[5]);
         // an old report message's button still works: read-only, it only refreshes or goes back
         tap(&bot, from(ADMIN, "Admin", "admin"), "a:paths").await;
         let pb: Vec<String> = buttons(&log, ADMIN).into_iter().map(|b| b.1).collect();
@@ -5306,6 +5417,52 @@ mod flow_tests {
         let mut v: Vec<_> = bot.db().users_of_tg(tg).into_iter().map(|u| (u.id, u.username, u.notes)).collect();
         v.sort();
         v
+    }
+
+    /// The app's files come to the bot from an admin: arm64, armv7, Windows, each in its step; a file of the wrong
+    /// kind is refused; each is kept by Telegram's id only and given to customers from there
+    #[tokio::test]
+    async fn an_admin_sends_the_app_files_to_the_bot() {
+        let (bot, log) = bot().await;
+        let a = || from(ADMIN, "Admin", "admin");
+        tap(&bot, a(), "aup").await;
+        assert!(last(&log, ADMIN).contains("arm64"), "{}", last(&log, ADMIN));
+        let doc = |id: &str, name: &str| json!({"message_id": 50, "from": a(), "chat": {"id": ADMIN}, "document": {"file_id": id, "file_name": name, "file_size": 30_000_000}});
+        // a picture or a .txt is not the app
+        bot.on_message(&doc("X1", "notes.txt")).await;
+        assert!(last(&log, ADMIN).contains("این فایل نیست"));
+        bot.on_message(&doc("A64", "KankiVPN-1.36.0-arm64-v8a.apk")).await;
+        assert!(last(&log, ADMIN).contains("armv7"), "{}", last(&log, ADMIN));
+        tap(&bot, a(), "askip").await;
+        assert!(last(&log, ADMIN).contains("ویندوز"));
+        bot.on_message(&doc("WIN", "KankiVPN-Setup-1.36.0.exe")).await;
+        let files = crate::apps::list(&bot.app);
+        assert_eq!(files.iter().map(|f| (f.abi.as_str(), f.tg.as_str(), f.tg_only)).collect::<Vec<_>>(), vec![("arm64-v8a", "A64", true), ("windows", "WIN", true)]);
+        assert_eq!(files[0].version, "1.36.0");
+        // nothing on the server, so no download link on the subscription page
+        assert_eq!(crate::apps::sub_info(&bot.app, "x"), json!([]));
+        // a customer gets them by Telegram's id: Android from the download menu, Windows from the Windows guide
+        let tg = 8301;
+        bot.touch(tg, &from(tg, "C", "c"), 0);
+        tap(&bot, from(tg, "C", "c"), "apk:arm64-v8a").await;
+        let sent = |id: &str| log.lock().unwrap().iter().any(|(m, v)| m == "sendDocument" && v["chat_id"].as_i64() == Some(tg) && v["document"] == id);
+        assert!(sent("A64"));
+        let u = bot.create_account(tg, 10.0, 30, 1, "x").unwrap();
+        assert!(bot.how_apps(&u, "w").contains(&"k"));
+        tap(&bot, from(tg, "C", "c"), &format!("hw:{}:w:k", u.id)).await;
+        assert!(buttons(&log, tg).iter().any(|b| b.1 == "apk:windows"), "{:?}", buttons(&log, tg));
+        tap(&bot, from(tg, "C", "c"), "apk:windows").await;
+        assert!(sent("WIN"));
+        // a newer file of one type takes the old one's place; the admin can delete one
+        tap(&bot, a(), "aup").await;
+        bot.on_message(&doc("A64b", "KankiVPN-1.37.0-arm64.apk")).await;
+        assert_eq!(crate::apps::get_file(&bot.app, "arm64-v8a").unwrap().tg, "A64b");
+        tap(&bot, a(), "adel:windows").await;
+        assert!(crate::apps::get_file(&bot.app, "windows").is_none());
+        // a customer cannot start it
+        tap(&bot, from(tg, "C", "c"), "aup").await;
+        bot.on_message(&json!({"message_id": 51, "from": from(tg, "C", "c"), "chat": {"id": tg}, "document": {"file_id": "EVIL", "file_name": "a.apk"}})).await;
+        assert_eq!(crate::apps::get_file(&bot.app, "arm64-v8a").unwrap().tg, "A64b");
     }
 
     fn deleted(log: &Log, chat: i64) -> Vec<i64> {

@@ -38,8 +38,7 @@ function dashDraw(rxs,txs){var l=DB.last;if(!l||!$('#d_sub'))return;
  $('#n_if').textContent=l.iface||'';$('#n_rx').textContent=N(rate(rxs));$('#n_tx').textContent=N(rate(txs));
  $('#n_prx').textContent=N(rate(DB.peak.rx));$('#n_ptx').textContent=N(rate(DB.peak.tx));$('#n_trx').textContent=N(bytes(l.net_rx));$('#n_ttx').textContent=N(bytes(l.net_tx));
  $('#ch_net').innerHTML=areaChart([{v:DB.h.rx,c:'a'},{v:DB.h.tx,c:'b'}],{h:132,cap:DB.max});
- $('#c_tcp').textContent=N(l.tcp_est);$('#c_udp').textContent=N(l.udp);$('#c_sub').textContent=t('TCP listening')+': '+N(l.tcp_listen);
- $('#ch_con').innerHTML=areaChart([{v:DB.h.tcp,c:'a'},{v:DB.h.udp,c:'b'}],{h:132,cap:DB.max})}
+ if(window.dashSide)dashSide()}
 function dashSys(){if(S.page!='dash'||document.visibilityState!='visible')return;
  Promise.all([api('GET','/api/system'),api('GET','/api/overview'),api('GET','/api/nodes').catch(function(){return null}),api('GET','/api/tunnels').catch(function(){return null})]).then(function(r){if(S.page!='dash')return;DB.sys=r[0];DB.ov=r[1];if(r[2])S.nodes=r[2];if(r[3])TN.d=r[3];
   var s=r[0],dp=pc(s.disk_used,s.disk_total);DB.dp=dp;if(!DB.h.disk.length)for(var i=0;i<DB.max;i++)DB.h.disk.push(dp);
@@ -225,7 +224,8 @@ function nHealthOf(n){var loc=n.id=='local',i=n.info||{},st=i.stats,r=[],lv=0,bu
  if(!loc&&!n.online)return{lv:2,c:'r',l:'Problem',r:[[2,'Not reachable: check the server, its agent and the firewall']]};
  if(!loc&&n.last_sync&&Date.now()/1000-n.last_sync>180)bump(1,'No contact for more than 3 minutes');
  if(n.sync_state=='mismatch')bump(1,'Some users are not on this server yet (config mismatch): press Sync');
- (i.services||[]).forEach(function(s){if(!s.active)bump(2,t('Service stopped')+': '+s.key+' ('+s.state+')')});
+ // the panel's own server: a VPN core that is off (or was removed) there is not a problem, only the panel and its web server are
+ (i.services||[]).forEach(function(s){if(!s.active&&!(loc&&['panel','web'].indexOf(s.key)<0))bump(2,t('Service stopped')+': '+s.key+' ('+s.state+')')});
  if(st){var cpu=+st.cpu||0,mem=pc(st.mem_used,st.mem_total),dk=pc(st.disk_used,st.disk_total),sw=pc(st.swap_used,st.swap_total);
   if(cpu>=90)bump(2,t('CPU is full')+' ('+N(Math.round(cpu))+'%)');else if(cpu>=70)bump(1,t('CPU is busy')+' ('+N(Math.round(cpu))+'%)');
   if(mem>=92)bump(2,t('RAM is almost full')+' ('+N(Math.round(mem))+'%)');else if(mem>=80)bump(1,t('RAM is getting full')+' ('+N(Math.round(mem))+'%)');

@@ -396,6 +396,28 @@ details.app{border-inline-start:3px solid var(--ac)}
 .pq-re,.adm{color:var(--gold2)}
 #toast{background:rgba(242,245,241,.95);color:#0a0d0b;box-shadow:0 10px 30px -10px rgba(0,0,0,.8)}
 @media (prefers-reduced-motion:reduce){.b,.pc .buy,.step,.ctile,.tabs button,.seg button{transition:none}}
+
+/* 3.48 — the bot's management */
+.ad-top{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+.ad-tabs{display:flex!important;overflow-x:auto;scrollbar-width:none;grid-auto-flow:unset}
+.ad-tabs::-webkit-scrollbar{display:none}
+.ad-tabs button{flex:0 0 auto;padding:0 14px}
+.ad-card{margin-bottom:12px}
+.ad-card h3{margin:0 0 4px;font-size:15px;font-weight:900}
+.ad-card .in{direction:ltr;text-align:left}
+.ad-card .in.ad-rtl,.ad-card .ad-ta{direction:rtl;text-align:right;font:inherit}
+.ad-ta{width:100%;min-height:88px;padding:10px 12px;resize:vertical}
+.ad-h{display:block;font-size:12px;color:var(--hint);margin:4px 2px 0}
+.ad-sw{margin-top:10px}
+.ad-sw span{flex:1;display:flex;flex-direction:column}.ad-sw small{font-size:12px;color:var(--hint);font-weight:400}
+.ad-g2{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+.ad-nums{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.ad-nums>div{padding:12px;border-radius:16px;background:var(--glass);border:1px solid;border-color:var(--glass-edge);box-shadow:var(--glass-sh)}
+.ad-nums small{display:block;font-size:12px;color:var(--hint)}.ad-nums b{font-size:20px;font-weight:900;color:var(--gold1)}
+.ad-nums .warn b{color:var(--warn)}
+.ad-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.ad-row .dot{width:10px;height:10px;border-radius:50%}
+.ad-pl{margin-bottom:10px}.ad-pl.off{opacity:.55}.ad-pl .lead{margin:6px 0 0}
+@media(max-width:360px){.ad-g2{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -405,7 +427,7 @@ details.app{border-inline-start:3px solid var(--ac)}
 <script>
 (function(){
 var Q=new URLSearchParams(location.search);
-var A={open:{},ctry:'',list:[],cur:0,plat:'i',view:Q.get('admin')=='btns'?'btns':Q.get('admin')=='paths'?'paths':Q.get('buy')?'buy':'acc',tab:['sub','srv','app'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sub',cat:'',svc:'',shop:null,renew:+(Q.get('renew')||0),cb:null};
+var A={open:{},ctry:'',list:[],cur:0,plat:'i',view:Q.get('admin')=='btns'?'btns':Q.get('admin')=='paths'?'paths':Q.get('admin')=='bot'?'adm':Q.get('buy')?'buy':'acc',tab:['sub','srv','app'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sub',cat:'',svc:'',shop:null,renew:+(Q.get('renew')||0),cb:null};
 function tg(){return window.Telegram&&Telegram.WebApp}
 // the signed init data: from Telegram's script, else from the page address (the script may not load in Iran)
 function initData(){var w=tg();if(w&&w.initData)return w.initData;
@@ -443,7 +465,7 @@ function empty(icon,title,text,btn){document.getElementById('app').innerHTML='<d
 // the account's three tabs; buying is its own view (from the subscription tab, or the only view with no account)
 function sales(){return A.shop&&A.shop.sales&&(A.shop.custom.on||A.shop.plans.length)}
 function tabs(){return '<div class="tabs" role="tablist">'+[['sub','اشتراک من'],['srv','سرورها'],['app','برنامه و راهنما']].map(function(t){return '<button role="tab" aria-selected="'+(A.tab==t[0])+'" data-t="'+t[0]+'" class="'+(A.tab==t[0]?'on':'')+'">'+t[1]+'</button>'}).join('')+'</div>'}
-function render(){if(A.admin&&A.view=='paths')return drawPaths();if(A.admin&&(A.view=='btns'||A.view=='btn'))return A.view=='btn'?drawBtn():drawBtns();backBtn(null);
+function render(){if(A.admin&&A.view=='paths')return drawPaths();if(A.admin&&A.view=='adm')return drawAdm();if(A.admin&&(A.view=='btns'||A.view=='btn'))return A.view=='btn'?drawBtn():drawBtns();backBtn(null);
  if(A.view=='buy'&&sales())return drawBuy();if(!A.list.length)return sales()?(A.view='buy',drawBuy()):noAccount();draw()}
 function noAccount(){empty('K','هنوز اشتراکی ندارید','بعد از خرید اشتراک، اطلاعات حساب و کانفیگ‌ها اینجا دیده می‌شن.','<button class="b main" style="min-width:180px" onclick="window.Telegram&&Telegram.WebApp&&Telegram.WebApp.close()">برگشت به ربات</button>')}
 function wireTabs(){Array.prototype.slice.call(document.querySelectorAll('[data-t]')).forEach(function(b){b.onclick=function(){A.tab=b.dataset.t;A.view='acc';render();window.scrollTo(0,0)}})}
@@ -519,7 +541,7 @@ function copyText(t,ok,fallback){var done=function(){buzz('success');toast(ok)};
 function draw(){var u=A.list[A.cur];if(!u)return;var v2=u.service=='v2ray';
  var h='';
  if(A.list.length>1)h+='<div class="accs">'+A.list.map(function(x,i){return '<button class="'+(i==A.cur?'on':'')+'" data-acc="'+i+'"><span class="ltr">'+esc(x.name)+'</span></button>'}).join('')+'</div>';
- if(A.admin)h+='<div style="margin:0 0 12px"><button class="adm" id="go_btns">🎨 مدیریت دکمه‌های ربات</button></div>';
+ if(A.admin)h+='<div class="ad-top"><button class="adm" id="go_adm">⚙️ مدیریت ربات</button><button class="adm" id="go_btns">🎨 دکمه‌ها</button></div>';
  h+=tabs();
  if(A.tab=='srv')h+=srvTab(u,v2);else if(A.tab=='app')h+=appTab(u,v2);else h+=subTab(u,v2);
  document.getElementById('app').innerHTML=h;wireTabs();wire(u)}
@@ -607,6 +629,7 @@ function canDownload(){var w=tg();return !!(w&&w.downloadFile&&w.isVersionAtLeas
 function wire(u){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
  var sub=u.v2link;
  var gb2=$('#go_btns');if(gb2)gb2.onclick=function(){A.view='btns';render();window.scrollTo(0,0)};
+ var ga=$('#go_adm');if(ga)ga.onclick=function(){A.view='adm';AD.d={};render();window.scrollTo(0,0)};
  all('[data-acc]').forEach(function(b){b.onclick=function(){A.cur=+b.dataset.acc;draw()}});
  var rn=$('#rn');if(rn)rn.onclick=function(){A.renew=u.id;A.svc='';A.view='buy';drawBuy();window.scrollTo(0,0)};
  all('[data-p]').forEach(function(b){b.onclick=function(){A.plat=b.dataset.p;draw()}});
@@ -720,6 +743,113 @@ function drawPaths(){var el=document.getElementById('app');
  el.innerHTML=h;
  document.getElementById('pqre').onclick=function(){var b=this;b.disabled=true;pqLoad().then(function(){buzz('success');drawPaths()}).catch(function(){b.disabled=false;buzz('error');toast('نشد، دوباره امتحان کنید')})};
  document.getElementById('pqal').onclick=function(){var b=this;b.disabled=true;post('/tg/api/admin/paths',{alerts:!d.alerts}).then(function(n){PQ.d=n;buzz('success');toast(n.alerts?'هشدار مسیرها روشن شد':'هشدار مسیرها خاموش شد');drawPaths()}).catch(function(){b.disabled=false;buzz('error');toast('ذخیره نشد')})}}
+
+// ===================================================== 3.48 — the bot's management (admins only)
+// Everything the bot does is set here, part by part (the web panel keeps only the bot's token): sales and the shop,
+// payments, plans, discount codes, invites and the free trial, the smart channel, the message in the app. Each call
+// goes to the panel's own routes through /tg/api/admin/panel (only the bot's admins, only these routes).
+var AD={tab:'ov',d:{}};
+var ATABS=[['ov','نمای کلی'],['sales','فروش'],['pay','پرداخت'],['plans','پلن‌ها'],['disc','کد تخفیف'],['ref','دعوت و تست'],['chan','کانال'],['msg','پیام اپ']];
+function pa(method,path,body){return post('/tg/api/admin/panel',{method:method,path:path,body:body==null?null:body})}
+function adNum(n){return fa(Math.round(+n||0).toLocaleString('en-US')).replace(/,/g,'٬')}
+// a form from fields: [key, label, kind (sw | text | num | area | ltr), hint]
+function adForm(fields,v){return fields.map(function(f){var k=f[0],val=v[k]==null?'':v[k],on=String(val)=='1'||val===true;
+  if(f[2]=='sw')return '<label class="btog ad-sw"><span><b>'+esc(f[1])+'</b>'+(f[3]?'<small>'+esc(f[3])+'</small>':'')+'</span><input type="checkbox" data-ak="'+k+'"'+(on?' checked':'')+'></label>';
+  if(f[2]=='area')return '<span class="lbl">'+esc(f[1])+'</span><textarea class="in ad-ta" data-ak="'+k+'" rows="3">'+esc(val)+'</textarea>'+(f[3]?'<small class="ad-h">'+esc(f[3])+'</small>':'');
+  return '<span class="lbl">'+esc(f[1])+'</span><input class="in'+(f[2]=='text'?' ad-rtl':'')+'" data-ak="'+k+'"'+(f[2]=='num'?' inputmode="decimal"':'')+' value="'+esc(val)+'">'+(f[3]?'<small class="ad-h">'+esc(f[3])+'</small>':'')}).join('')}
+function adVals(root){var o={};Array.prototype.slice.call(root.querySelectorAll('[data-ak]')).forEach(function(e){o[e.dataset.ak]=e.type=='checkbox'?(e.checked?'1':'0'):e.value.trim()});return o}
+function adSaveBar(id){return '<div class="bsave"><button class="b" onclick="AD.d={};drawAdm()">بازخوانی</button><button class="b main" id="'+id+'">ذخیره</button></div>'}
+function adCard(title,body,sub){return '<div class="card ad-card"><h3>'+esc(title)+'</h3>'+(sub?'<p class="lead">'+esc(sub)+'</p>':'')+body+'</div>'}
+function adSettingsSave(btn,root){btn.disabled=true;pa('PUT','/api/settings',adVals(root)).then(function(){buzz('success');toast('ذخیره شد');AD.d.set=null;drawAdm()}).catch(function(e){buzz('error');toast(e.message||'ذخیره نشد');btn.disabled=false})}
+function adLoad(){var need=[];
+ if(!AD.d.set)need.push(pa('GET','/api/settings').then(function(v){AD.d.set=v}));
+ if(AD.tab=='ov'&&!AD.d.ov)need.push(Promise.all([pa('GET','/api/overview'),pa('GET','/api/bot')]).then(function(r){AD.d.ov=r[0];AD.d.bot=r[1]}));
+ if(AD.tab=='plans'&&!AD.d.plans)need.push(pa('GET','/api/plans').then(function(v){AD.d.plans=v}));
+ if(AD.tab=='disc'&&!AD.d.disc)need.push(pa('GET','/api/discounts').then(function(v){AD.d.disc=v}));
+ if(AD.tab=='chan'&&!AD.d.chan)need.push(pa('GET','/api/channel').then(function(v){AD.d.chan=v}));
+ if(AD.tab=='msg'&&!AD.d.msg)need.push(pa('GET','/api/app-msg').then(function(v){AD.d.msg=v}));
+ return Promise.all(need)}
+function drawAdm(){var el=document.getElementById('app');backBtn(function(){A.view='acc';render()});
+ if(!AD.busy){AD.busy=1;el.innerHTML=admHead()+'<div class="skel"></div>';adLoad().then(function(){AD.busy=0;drawAdm()}).catch(function(e){AD.busy=0;el.innerHTML=admHead()+'<div class="empty"><b>باز نشد</b><p class="muted">'+esc(e.message||'')+'</p></div>';wireAdmTabs()});return}
+}
+function admHead(){return '<div class="bh"><h1>⚙️ مدیریت ربات</h1></div><nav class="ptabs ad-tabs" role="tablist">'+ATABS.map(function(x){return '<button role="tab" data-at="'+x[0]+'" class="'+(AD.tab==x[0]?'on':'')+'">'+x[1]+'</button>'}).join('')+'</nav>'}
+function wireAdmTabs(){Array.prototype.slice.call(document.querySelectorAll('[data-at]')).forEach(function(b){b.onclick=function(){AD.tab=b.dataset.at;drawAdm();window.scrollTo(0,0)}})}
+// after the data is there: the part of the open tab
+var _drawAdm=drawAdm;drawAdm=function(){if(AD.busy)return;var need=adNeed();if(need)return _drawAdm();
+ var el=document.getElementById('app'),s=AD.d.set||{},h=admHead();
+ if(AD.tab=='ov'){var o=AD.d.ov||{},b=AD.d.bot||{};
+  h+='<div class="ad-nums"><div><small>کل فروش</small><b>'+adNum(o.sales)+'</b></div><div><small>درآمد (تومان)</small><b>'+adNum(o.revenue)+'</b></div><div class="'+(o.pending_orders?'warn':'')+'"><small>سفارش باز</small><b>'+adNum(o.pending_orders)+'</b></div><div><small>کاربر فعال</small><b>'+adNum(o.active)+'</b></div></div>';
+  h+=adCard('وضعیت ربات','<div class="ad-row"><span class="dot" style="background:'+(b.paused?'var(--warn)':b.online?'var(--ok)':'var(--bad)')+'"></span><b>'+(b.paused?'متوقف':b.online?'روشن':'قطع')+'</b><span class="muted ltr">@'+esc(b.username||'')+'</span></div>'+(b.error&&!b.online?'<p class="lead ltr">'+esc(b.error)+'</p>':'')+(b.conflict?'<p class="lead">⚠️ یک برنامه‌ی دیگر هم از همین توکن استفاده می‌کند.</p>':''));
+  h+=adCard('میان‌بُرها','<div class="acts"><button class="b" data-go="sales">فروش و فروشگاه</button><button class="b" data-go="pay">روش‌های پرداخت</button><button class="b" data-go="plans">پلن‌ها</button><button class="b" id="ad_btns">🎨 دکمه‌ها</button></div>','سفارش‌های باز و رسیدها توی چت ربات (پنل مدیریت › سفارش‌ها) تأیید می‌شن؛ فایل‌های اپ هم از همون‌جا.');
+ }else if(AD.tab=='sales'){
+  h+=adCard('فروش',adForm([['sales_on','فروش روشن','sw','خاموش: دکمه‌های خرید «فروش بسته است» می‌گویند'],['warn_on','هشدار پایان حجم و زمان به خریدار','sw'],['mini_menu','دکمه‌ی مینی‌اپ کنار جای تایپ','sw'],
+   ['support','پشتیبانی (@آیدی یا لینک)','ltr'],['channel','کانال اجباری (@کانال، خالی = ندارد)','ltr'],['welcome','پیام خوش‌آمد','area']],s))+
+   adCard('خرید دلخواه (مینی‌اپ)',adForm([['cp_on','خرید حجم و روز دلخواه','sw'],['cp_min_gb','کمترین گیگ','num'],['cp_max_gb','بیشترین گیگ','num'],['cp_days','مدت‌ها (روز، با ویرگول)','ltr','مثلاً 30,60,90'],['cp_users','بیشترین تعداد کاربر','num']],s))+
+   adCard('لینک برنامه‌ها',adForm([['app_link','لینک دانلود اپ اندروید (اگر فایل در ربات نیست)','ltr'],['win_link','لینک دانلود اپ ویندوز (اگر فایل در ربات نیست)','ltr']],s),'فایل‌های اپ را بهتر است در ربات بفرستید: پنل مدیریت › تنظیمات › فایل‌های اپ.')+adSaveBar('ad_save');
+ }else if(AD.tab=='pay'){
+  h+=adCard('💳 کارت به کارت',adForm([['card_on','روشن','sw'],['card_number','شماره کارت','ltr'],['card_holder','به نام','text']],s))+
+   adCard('💎 TON (تأیید خودکار روی شبکه)',adForm([['ton_on','روشن','sw'],['ton_address','آدرس کیف پول (UQ… از Tonkeeper)','ltr'],['toncenter_key','کلید toncenter (اختیاری)','ltr']],s))+
+   adCard('⭐️ استارز تلگرام',adForm([['stars_on','روشن','sw'],['star_usd','دلارِ هر استارز','num','پیش‌فرض 0.013']],s))+
+   adCard('💰 ارز دیجیتال با رسید',adForm([['wallet_on','روشن','sw'],['usdt_address','آدرس USDT (TRC20)','ltr'],['wallet_text','توضیح','area'],['usd_rate','تومانِ هر دلار (برای پلن بی‌قیمت دلاری)','num']],s))+
+   adCard('🏦 زرین‌پال',adForm([['zp_on','روشن','sw'],['zp_merchant','مرچنت','ltr'],['zp_callback','آدرس برگشت (اختیاری)','ltr']],s))+
+   adCard('🪙 NOWPayments',adForm([['np_on','روشن','sw'],['np_key','کلید API','ltr'],['np_coins','ارزها (با ویرگول)','ltr']],s))+adSaveBar('ad_save');
+ }else if(AD.tab=='ref'){
+  h+=adCard('👥 دعوت دوستان',adForm([['ref_gb','گیگ هدیه‌ی اولین خرید دوست','num'],['ref_days','روز هدیه‌ی اولین خرید دوست','num'],['ref_pct','٪ حجم هر خرید و تمدید دوست','num','۰ = خاموش'],['ref_new_pct','٪ تخفیف خرید اول دوستِ دعوت‌شده (۷ روز)','num']],s))+
+   adCard('🎁 تست رایگان',adForm([['trial_on','تست رایگان','sw','یک بار برای هر نفر'],['trial_gb','حجم (گیگ)','num'],['trial_days','مدت (روز)','num'],['trial_offer_pct','٪ تخفیف خرید اول بعد از تمام شدن تست (۴۸ ساعت)','num']],s))+adSaveBar('ad_save');
+ }else if(AD.tab=='plans'){var ps=AD.d.plans||[];
+  h+='<div class="acts one" style="margin:0 0 12px"><button class="b main" id="pl_new">+ پلن تازه</button></div>';
+  h+=ps.length?ps.map(function(p){return '<div class="card ad-pl'+(p.active?'':' off')+'" data-pl="'+p.id+'"><div class="ad-row"><b><bdi>'+esc(p.name)+'</bdi></b><span class="svc">'+(p.service=='v2ray'?'🌐 V2Ray':'⚡️ VIP')+'</span></div>'+
+   '<p class="lead">'+(p.gb>0?fa(p.gb)+' گیگ':'نامحدود')+' · '+(p.days?fa(p.days)+' روز':'بی‌پایان')+' · '+fa(p.conns)+' کاربره · <b>'+adNum(p.toman)+'</b> تومان'+(p.category?' · '+esc(p.category):'')+(p.badge?' · '+esc(p.badge):'')+'</p>'+
+   '<div class="acts"><button class="b" data-pe="'+p.id+'">ویرایش</button><button class="b" data-pt="'+p.id+'">'+(p.active?'خاموش کردن':'روشن کردن')+'</button></div></div>'}).join(''):'<div class="empty"><b>هنوز پلنی نیست</b></div>';
+ }else if(AD.tab=='disc'){var ds=AD.d.disc||[];
+  h+=adCard('کد تازه','<div class="ad-g2"><div><span class="lbl">کد</span><input class="in" id="dc_c" placeholder="OFF20"></div><div><span class="lbl">٪ تخفیف</span><input class="in" id="dc_p" inputmode="numeric" value="10"></div><div><span class="lbl">تعداد استفاده</span><input class="in" id="dc_u" inputmode="numeric" value="100"></div><div><span class="lbl">اعتبار (ساعت، ۰ = همیشه)</span><input class="in" id="dc_h" inputmode="numeric" value="0"></div></div><div class="acts one"><button class="b main" id="dc_add">ساختن کد</button></div>');
+  h+=ds.length?'<div class="card">'+ds.map(function(d){return '<div class="row"><div class="nm"><b class="ltr">'+esc(d.code)+'</b><small>'+fa(d.percent)+'٪ · '+fa(d.uses)+' استفاده مانده'+(d.expires?' · تا '+new Date(d.expires*1000).toLocaleDateString('fa-IR'):'')+'</small></div><button class="b" data-dd="'+esc(d.code)+'">حذف</button></div>'}).join('')+'</div>':'<p class="lead">کدی نیست.</p>';
+ }else if(AD.tab=='chan'){var c=AD.d.chan||{};
+  h+=adCard('📢 کانال هوشمند',adForm([['on','پست خودکار در کانال','sw'],['id','آیدی کانال (مثل @mychannel)','ltr'],['times','ساعت‌های پست (با ویرگول، مثل 10,18,22)','ltr'],['sign','امضای آخر پست','text'],['ai_on','نویسنده‌ی هوش مصنوعی','sw'],['ai_provider','سرویس هوش مصنوعی (gemini / groq / grok)','ltr'],['ai_model','مدل (خالی = پیش‌فرض)','ltr'],['ai_brief','لحن و موضوع پست‌ها','area']],c),c.ai_has_key?'کلید هوش مصنوعی گذاشته شده'+(c.ai_key_hint?' ('+c.ai_key_hint+')':'')+'.':'')+
+   '<div class="card ad-card"><span class="lbl">کلید هوش مصنوعی تازه (خالی = همان قبلی)</span><input class="in" id="ch_key" autocomplete="off"></div>'+
+   '<div class="acts"><button class="b" id="ch_prev">نمونه‌ی پست</button><button class="b" id="ch_post">پست الان در کانال</button></div>'+adSaveBar('ch_save');
+ }else if(AD.tab=='msg'){var m=AD.d.msg||{};
+  h+=adCard('📣 پیام داخل اپ کانکی','<span class="lbl">متن پیام (خالی = بدون پیام)</span><textarea class="in ad-ta" id="am_t" rows="4">'+esc(m.text||'')+'</textarea><span class="lbl">تا چند ساعت دیگر (۰ = تا وقتی برداشته شود)</span><input class="in" id="am_h" inputmode="numeric" value="0">','کاربرهای اپ کانکی موقع باز کردن اپ این پیام را می‌بینند.')+
+   '<div class="bsave"><button class="b" id="am_del">برداشتن پیام</button><button class="b main" id="am_save">ذخیره</button></div>';
+ }
+ el.innerHTML=h;wireAdmTabs();wireAdm()};
+function adNeed(){var s=AD.d;return !s.set||(AD.tab=='ov'&&!s.ov)||(AD.tab=='plans'&&!s.plans)||(AD.tab=='disc'&&!s.disc)||(AD.tab=='chan'&&!s.chan)||(AD.tab=='msg'&&!s.msg)}
+function wireAdm(){var $=function(q){return document.querySelector(q)},all=function(q){return Array.prototype.slice.call(document.querySelectorAll(q))},app=document.getElementById('app');
+ all('[data-go]').forEach(function(b){b.onclick=function(){AD.tab=b.dataset.go;drawAdm()}});
+ var bt=$('#ad_btns');if(bt)bt.onclick=function(){A.view='btns';render()};
+ var sv=$('#ad_save');if(sv)sv.onclick=function(){adSettingsSave(sv,app)};
+ // plans
+ var pn=$('#pl_new');if(pn)pn.onclick=function(){planEdit(null)};
+ all('[data-pe]').forEach(function(b){b.onclick=function(){planEdit((AD.d.plans||[]).filter(function(p){return p.id==b.dataset.pe})[0])}});
+ all('[data-pt]').forEach(function(b){b.onclick=function(){var p=(AD.d.plans||[]).filter(function(x){return x.id==b.dataset.pt})[0];b.disabled=true;
+  pa('PUT','/api/plans/'+p.id,{active:!p.active}).then(function(){AD.d.plans=null;drawAdm()}).catch(function(e){toast(e.message);b.disabled=false})}});
+ // discount codes
+ var da=$('#dc_add');if(da)da.onclick=function(){var c=$('#dc_c').value.trim();if(!c)return toast('کد رو بنویسید');da.disabled=true;
+  pa('POST','/api/discounts',{code:c,percent:+toEn($('#dc_p').value)||10,uses:+toEn($('#dc_u').value)||100,hours:+toEn($('#dc_h').value)||0}).then(function(){buzz('success');AD.d.disc=null;drawAdm()}).catch(function(e){toast(e.message);da.disabled=false})};
+ all('[data-dd]').forEach(function(b){b.onclick=function(){if(!confirm('کد '+b.dataset.dd+' حذف شود؟'))return;pa('DELETE','/api/discounts/'+encodeURIComponent(b.dataset.dd)).then(function(){AD.d.disc=null;drawAdm()}).catch(function(e){toast(e.message)})}});
+ // channel
+ var cs=$('#ch_save');if(cs)cs.onclick=function(){var v=adVals(app),k=$('#ch_key').value.trim(),b={on:v.on=='1',id:v.id,times:v.times,sign:v.sign,ai_on:v.ai_on=='1',ai_provider:v.ai_provider,ai_model:v.ai_model,ai_brief:v.ai_brief};if(k)b.ai_key=k;cs.disabled=true;
+  pa('PUT','/api/channel',b).then(function(){buzz('success');toast('ذخیره شد');AD.d.chan=null;drawAdm()}).catch(function(e){toast(e.message);cs.disabled=false})};
+ var cp=$('#ch_prev');if(cp)cp.onclick=function(){cp.disabled=true;pa('POST','/api/channel/preview',{}).then(function(r){cp.disabled=false;var b=document.getElementById('ch_pv');if(!b){b=document.createElement('div');b.id='ch_pv';b.className='card ad-card';cp.parentNode.after(b)}b.innerHTML='<h3>نمونه‌ی پست</h3><p class="lead" style="white-space:pre-wrap">'+esc(String(r.text||'').replace(/<[^>]+>/g,''))+'</p>'}).catch(function(e){cp.disabled=false;toast(e.message)})};
+ var cpo=$('#ch_post');if(cpo)cpo.onclick=function(){if(!confirm('همین الان در کانال پست شود؟'))return;cpo.disabled=true;pa('POST','/api/channel/post',{}).then(function(){cpo.disabled=false;toast('پست شد')}).catch(function(e){cpo.disabled=false;toast(e.message)})};
+ // the app message
+ var as=$('#am_save');if(as)as.onclick=function(){var h=+toEn($('#am_h').value)||0;as.disabled=true;pa('PUT','/api/app-msg',{text:$('#am_t').value,minutes:h*60}).then(function(){buzz('success');toast('ذخیره شد');AD.d.msg=null;drawAdm()}).catch(function(e){toast(e.message);as.disabled=false})};
+ var ad=$('#am_del');if(ad)ad.onclick=function(){pa('DELETE','/api/app-msg').then(function(){toast('برداشته شد');AD.d.msg=null;drawAdm()}).catch(function(e){toast(e.message)})}}
+function toEn(s){return String(s||'').replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)})}
+// a plan: new or edited, in a sheet over the list
+function planEdit(p){var n=!p;p=p||{name:'',gb:30,days:30,conns:1,toman:0,old_toman:0,badge:'',category:'',service:'vip',active:true};
+ var el=document.getElementById('app'),f=function(k,l,v,m){return '<div><span class="lbl">'+l+'</span><input class="in" data-pk="'+k+'"'+(m?' inputmode="decimal"':'')+' value="'+esc(v)+'"></div>'};
+ el.innerHTML='<div class="bh"><h1>'+(n?'پلن تازه':'ویرایش پلن')+'</h1></div><div class="card ad-card">'+f('name','اسم',p.name)+'<div class="ad-g2">'+f('gb','حجم (گیگ، ۰ = نامحدود)',p.gb,1)+f('days','مدت (روز)',p.days,1)+f('conns','تعداد کاربر',p.conns,1)+f('toman','قیمت (تومان)',p.toman,1)+f('old_toman','قیمت خط‌خورده (۰ = ندارد)',p.old_toman||0,1)+f('badge','برچسب (مثل 🔥 پیشنهاد ویژه)',p.badge||'')+f('category','دسته (مثل تک‌کاربره)',p.category||'')+
+  '<div><span class="lbl">سرویس</span><div class="chips2" id="pl_svc"><button data-sv="vip" class="'+(p.service!='v2ray'?'on':'')+'">⚡️ VIP</button><button data-sv="v2ray" class="'+(p.service=='v2ray'?'on':'')+'">🌐 V2Ray</button></div></div></div></div>'+
+  '<div class="bsave">'+(n?'<button class="b" id="pl_back">انصراف</button>':'<button class="b" id="pl_del">حذف</button>')+'<button class="b main" id="pl_go">ذخیره</button></div>';
+ backBtn(function(){drawAdm()});var svc=p.service||'vip';
+ Array.prototype.slice.call(el.querySelectorAll('[data-sv]')).forEach(function(b){b.onclick=function(){svc=b.dataset.sv;Array.prototype.slice.call(el.querySelectorAll('[data-sv]')).forEach(function(x){x.classList.toggle('on',x==b)})}});
+ var bk=document.getElementById('pl_back');if(bk)bk.onclick=function(){drawAdm()};
+ var dl=document.getElementById('pl_del');if(dl)dl.onclick=function(){if(!confirm('این پلن حذف شود؟ (اگر سفارشی دارد فقط پنهان می‌شود)'))return;pa('DELETE','/api/plans/'+p.id).then(function(){AD.d.plans=null;drawAdm()}).catch(function(e){toast(e.message)})};
+ document.getElementById('pl_go').onclick=function(){var b={service:svc},me=this;Array.prototype.slice.call(el.querySelectorAll('[data-pk]')).forEach(function(i){var k=i.dataset.pk,v=i.value.trim();b[k]=['name','badge','category'].indexOf(k)>=0?v:(+toEn(v)||0)});
+  if(!b.name)return toast('اسم پلن رو بنویسید');me.disabled=true;
+  var go=n?pa('POST','/api/plans',b).then(function(){return pa('GET','/api/plans')}).then(function(l){var x=l.filter(function(z){return z.name==b.name}).pop();return x?pa('PUT','/api/plans/'+x.id,{old_toman:b.old_toman,badge:b.badge}):null}):pa('PUT','/api/plans/'+p.id,b);
+  go.then(function(){buzz('success');toast('ذخیره شد');AD.d.plans=null;drawAdm()}).catch(function(e){me.disabled=false;toast(e.message)})}}
 
 function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}
   // the same black as the page above and below it
