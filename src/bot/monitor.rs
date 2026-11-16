@@ -70,10 +70,15 @@ pub fn start(app: Arc<App>) {
     tokio::spawn(watch(app));
 }
 
-/// A web app button (the paths page of the mini app), only when the panel has an https address
-fn paths_btn(app: &App) -> Option<Value> {
+/// A web app button into the report page of the mini app (`?mon=1`: the panel's state only, never the shop), only
+/// when the panel has an https address
+fn page_btn(app: &App, text: &str, tab: &str) -> Option<Value> {
     let mini = crate::miniapp::url(app);
-    mini.starts_with("https://").then(|| json!({"text": "📡 وضعیت مسیرها", "web_app": {"url": format!("{}?admin=paths", mini)}}))
+    mini.starts_with("https://").then(|| json!({"text": text, "web_app": {"url": format!("{}?mon=1&tab={}", mini, tab)}}))
+}
+
+fn paths_btn(app: &App) -> Option<Value> {
+    page_btn(app, "📡 وضعیت مسیرها", "paths")
 }
 
 /// Telegram alert to the owners when a node, tunnel server or tunnel stays down for about 90 seconds, or a server
@@ -83,25 +88,74 @@ async fn watch(app: Arc<App>) {
     tokio::time::sleep(std::time::Duration::from_secs(120)).await;
     // key -> (consecutive bad checks, alert already sent)
     let mut st: HashMap<String, (u32, bool)> = HashMap::new();
+    // one message per problem, edited while it lasts and when it is over (no new message for each change)
+    let mut live: HashMap<String, Incident> = HashMap::new();
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         if app.db.get("tg_alerts") == "0" {
             continue;
         }
-        for (key, msg) in check(&app, &mut st) {
-            let path = key.starts_with("pq:");
+        let evs = check(&app, &mut st);
+        let t = now();
+        for ev in evs {
+            let path = ev.key.starts_with("pq:");
             // path alerts can be turned off in the paths page; server alerts are always sent
             if path && !crate::tunnel::quality::alerts_on(&app) {
                 continue;
             }
-            let kb = if path { paths_btn(&app).map(|b| json!({"inline_keyboard": [[b]]})) } else { None };
-            notify(&msg, kb).await;
+            // every alert opens the report page where it is: paths, tunnels or servers
+            let tab = if path { "paths" } else if ev.key.starts_with("tu:") || ev.key.starts_with("tp:") { "tun" } else { "srv" };
+            let label = if path { "📡 وضعیت مسیرها" } else if tab == "tun" { "🔗 جزئیات تانل‌ها" } else { "🖥 جزئیات سرورها" };
+            let kb = page_btn(&app, label, tab).map(|b| json!({"inline_keyboard": [[b]]}));
+            let Some(m) = running() else {
+                // no report bot: the sales bot's admins get the change (it cannot edit what it did not send)
+                if ev.state != Ev::STILL {
+                    notify(&ev.text, kb).await;
+                }
+                continue;
+            };
+            m.incident(&mut live, &ev, kb, t).await;
         }
+        // a problem that is over and quiet for a day is forgotten
+        live.retain(|_, x| x.over == 0 || t - x.over < 86400);
     }
 }
 
-/// One round of the watcher: the alerts to send now, (key, text)
-fn check(app: &App, st: &mut HashMap<String, (u32, bool)>) -> Vec<(String, String)> {
+/// One change the watcher saw: a problem that started, one that is over, or the latest numbers of one that lasts
+pub(crate) struct Ev {
+    key: String,
+    text: String,
+    state: u8,
+}
+
+impl Ev {
+    const DOWN: u8 = 0;
+    const UP: u8 = 1;
+    const STILL: u8 = 2;
+}
+
+/// The message of one problem in each owner's chat: where it is, since when, when it was last edited, when it ended
+#[derive(Default)]
+pub(crate) struct Incident {
+    msgs: Vec<(i64, i64)>,
+    since: i64,
+    edited: i64,
+    over: i64,
+    shown: String,
+}
+
+/// "17:20"
+fn hm(ts: i64) -> String {
+    crate::channel::fa_datetime(ts).1
+}
+
+fn mins(s: i64) -> String {
+    let m = (s.max(0) + 30) / 60;
+    if m < 60 { format!("{} دقیقه", m.max(1)) } else { format!("{} ساعت و {} دقیقه", m / 60, m % 60) }
+}
+
+/// One round of the watcher: what started, what is over, and the latest numbers of what is still wrong
+fn check(app: &App, st: &mut HashMap<String, (u32, bool)>) -> Vec<Ev> {
     let nodes: Vec<_> = app.db.nodes().into_iter().filter(|n| n.enabled).collect();
     let offline: std::collections::HashSet<String> = nodes.iter().filter(|n| !n.online).map(|n| n.id.clone()).collect();
     let mut items: Vec<(String, String, bool, String)> =
@@ -110,6 +164,27 @@ fn check(app: &App, st: &mut HashMap<String, (u32, bool)>) -> Vec<(String, Strin
     items.extend(crate::tunnel::quality::health(app));
     let keys: Vec<String> = items.iter().map(|i| i.0.clone()).collect();
     st.retain(|k, _| keys.contains(k));
+    // a line more for each alert: where the server is and when it was last heard; which servers a tunnel joins
+    let tservers = crate::tunnel::panel::servers(app);
+    let sname = |id: &str| -> String {
+        if id == "local" { return "سرور پنل".into(); }
+        tservers.iter().find(|x| x.id == id).map(|x| x.name.clone()).unwrap_or_else(|| id.to_string())
+    };
+    let tunnels = crate::tunnel::panel::tunnels(app);
+    let more = |key: &str| -> String {
+        if let Some(id) = key.strip_prefix("node:") {
+            if let Some(n) = nodes.iter().find(|n| n.id == id) {
+                let ago = if n.last_sync > 0 { format!(" · آخرین ارتباط {} دقیقه پیش", ((now() - n.last_sync) / 60).max(0)) } else { String::new() };
+                return format!("\n🌐 <code>{}</code>{}", esc(&crate::api::endpoint(app, n)), ago);
+            }
+        }
+        if let Some(id) = key.strip_prefix("tu:").or_else(|| key.strip_prefix("tp:")) {
+            if let Some(t) = tunnels.iter().find(|t| t.id == id) {
+                return format!("\n🔗 {} ← {} · {}", esc(&sname(&t.entry)), esc(&sname(&t.exit)), esc(if t.kind.is_empty() { &t.transport } else { &t.kind }));
+            }
+        }
+        String::new()
+    };
     let mut out = vec![];
     for (key, name, ok, detail) in items {
         // the tunnel agent of a VPN server waits longer: when the whole server is down, its own alert (the node's)
@@ -118,14 +193,17 @@ fn check(app: &App, st: &mut HashMap<String, (u32, bool)>) -> Vec<(String, Strin
         let e = st.entry(key.clone()).or_insert((0, false));
         if ok {
             if e.1 {
-                out.push((key.clone(), crate::bot::alert_text(&key, &name, true, &detail)));
+                out.push(Ev { key: key.clone(), text: format!("{}{}", crate::bot::alert_text(&key, &name, true, &detail), more(&key)), state: Ev::UP });
             }
             *e = (0, false);
         } else {
             e.0 += 1;
+            let text = format!("{}{}", crate::bot::alert_text(&key, &name, false, &detail), more(&key));
             if e.0 >= need && !e.1 {
                 e.1 = true;
-                out.push((key.clone(), crate::bot::alert_text(&key, &name, false, &detail)));
+                out.push(Ev { key: key.clone(), text, state: Ev::DOWN });
+            } else if e.1 {
+                out.push(Ev { key: key.clone(), text, state: Ev::STILL });
             }
         }
     }
@@ -183,6 +261,51 @@ impl Mon {
         self.call("sendMessage", body).await.ok()
     }
 
+    /// One problem in the owners' chats: a new message when it starts (or the same one again when it came back within
+    /// 15 minutes), the latest numbers edited in while it lasts (at most once a minute), and «over, from … to …» edited
+    /// in when it ends. Nothing new is sent for a change of the same problem.
+    async fn incident(&self, live: &mut HashMap<String, Incident>, ev: &Ev, kb: Option<Value>, t: i64) {
+        let x = live.entry(ev.key.clone()).or_default();
+        let text = match ev.state {
+            Ev::UP => {
+                if x.msgs.is_empty() { return; }
+                x.over = t;
+                format!("{}\n\n✅ <b>حل شد</b> · از {} تا {} ({})", ev.text, hm(x.since), hm(t), mins(t - x.since))
+            }
+            Ev::DOWN => {
+                // back again soon after it was over: the same message, not a new one
+                if x.msgs.is_empty() || x.over == 0 || t - x.over > 900 {
+                    *x = Incident { since: t, ..Default::default() };
+                } else {
+                    x.over = 0;
+                }
+                format!("{}\n\n⏳ <b>هنوز برقرار</b> · از ساعت {}", ev.text, hm(x.since))
+            }
+            _ => {
+                if x.msgs.is_empty() || x.over > 0 || t - x.edited < 60 { return; }
+                format!("{}\n\n⏳ <b>هنوز برقرار</b> · از ساعت {} ({})", ev.text, hm(x.since), mins(t - x.since))
+            }
+        };
+        if text == x.shown {
+            return;
+        }
+        if x.msgs.is_empty() {
+            for a in &self.admins {
+                if let Some(m) = self.send(*a, &text, kb.clone()).await {
+                    x.msgs.push((*a, m["message_id"].as_i64().unwrap_or(0)));
+                }
+            }
+        } else {
+            for (chat, mid) in x.msgs.clone() {
+                let mut body = json!({"chat_id": chat, "message_id": mid, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true});
+                if let Some(k) = kb.clone() { body["reply_markup"] = k; }
+                let _ = self.call("editMessageText", body).await;
+            }
+        }
+        x.edited = t;
+        x.shown = text;
+    }
+
     async fn to_admins(&self, text: &str, kb: Option<Value>) {
         for a in &self.admins {
             self.send(*a, text, kb.clone()).await;
@@ -222,7 +345,11 @@ impl Mon {
         t.push_str(&format!("\n\n📡 مسیرها: {}", if paths.is_empty() { "هنوز سنجشی نرسیده".to_string() } else if pq.is_empty() { "🟢 همه خوب".to_string() } else { format!("🟠 پر افت: {}", pq.join("، ")) }));
         let alerts = app.db.get("tg_alerts") != "0";
         t.push_str(&format!("\n\n🔔 هشدارها: <b>{}</b>", if alerts { "روشن" } else { "خاموش" }));
-        let mut rows: Vec<Vec<Value>> = vec![vec![json!({"text": "🔄 به‌روز کردن", "callback_data": "m:home"})]];
+        let mut rows: Vec<Vec<Value>> = vec![];
+        if let Some(p) = page_btn(app, "📊 گزارش کامل (سرورها، تانل‌ها، مسیرها، خطاها)", "sum") {
+            rows.push(vec![p]);
+        }
+        rows.push(vec![json!({"text": "🔄 به‌روز کردن", "callback_data": "m:home"})]);
         if let Some(p) = paths_btn(app) {
             rows.push(vec![p]);
         }
@@ -249,12 +376,33 @@ impl Mon {
         ok
     }
 
-    /// The daily backup to the owners (the sales bot leaves it to this one)
+    /// Every morning (09:00 Tehran): the panel's report and the backup to the owners (the sales bot leaves both to this one)
     async fn backups(self: Arc<Self>) {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(24 * 3600)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            let t = now();
+            let day = (t + 12600) / 86400;
+            // 05:30 UTC = 09:00 Tehran, once a day
+            if (t % 86400) < 5 * 3600 + 1800 || self.app.db.get("mon_daily") == day.to_string() {
+                continue;
+            }
+            self.app.db.set("mon_daily", &day.to_string());
+            let (text, kb) = self.home();
+            self.to_admins(&format!("☀️ <b>گزارش روزانه</b>\n\n{}", text), Some(kb)).await;
             if self.app.db.on("backup_on") {
                 self.backup_to(&self.admins.clone(), "💾 بکاپ خودکار روزانه").await;
+            }
+        }
+    }
+
+    /// The old report script (`kanki-watch`, a cron job on the panel server) sent through the sales bot: with the report
+    /// bot it is not needed. Its cron file is set aside (a file with a dot in its name is not run by cron), not deleted.
+    fn old_script_off() {
+        let f = "/etc/cron.d/kanki-watch";
+        if std::path::Path::new(f).exists() {
+            match std::fs::rename(f, format!("{}.off", f)) {
+                Ok(()) => eprintln!("report bot: the old report script (kanki-watch) is off; its cron file is {}.off", f),
+                Err(e) => eprintln!("report bot: cannot set aside {}: {}", f, e),
             }
         }
     }
@@ -308,7 +456,13 @@ impl Mon {
     }
 
     async fn run(self: Arc<Self>) {
+        Self::old_script_off();
         let _ = self.call("deleteWebhook", json!({"drop_pending_updates": false})).await;
+        // the chat's menu button opens the report page
+        let mini = crate::miniapp::url(&self.app);
+        if mini.starts_with("https://") {
+            let _ = self.call("setChatMenuButton", json!({"menu_button": {"type": "web_app", "text": "Report 📊", "web_app": {"url": format!("{}?mon=1", mini)}}})).await;
+        }
         if let Ok(me) = self.call("getMe", json!({})).await {
             self.app.db.set("mon_username", me["username"].as_str().unwrap_or(""));
         }
@@ -389,6 +543,36 @@ mod tests {
         assert_eq!(app.db.get("tg_alerts"), "0");
     }
 
+    /// A problem is one message: sent when it starts, edited while it lasts and when it is over, and the same message
+    /// again when it comes back soon; never a new message for each change
+    #[tokio::test]
+    async fn one_message_per_problem_edited_until_it_is_over() {
+        let app = crate::kping::tests::test_app();
+        app.db.set("bot_token", "111:sales");
+        app.db.set("mon_token", "222:report");
+        app.db.set("mon_admins", "20,21");
+        let (api, log) = fake().await;
+        let m = Mon::with_api(app.clone(), &api).unwrap();
+        let mut live = HashMap::new();
+        let ev = |state: u8, text: &str| Ev { key: "pq:a|b".into(), text: text.into(), state };
+        let t = 1_800_000_000;
+        m.incident(&mut live, &ev(Ev::DOWN, "🟠 مسیر IRAN3 ↔ TURKEY پر افت شده · افت 20%"), None, t).await;
+        // the same numbers, then new numbers within a minute: nothing; after a minute: one edit of each message
+        m.incident(&mut live, &ev(Ev::STILL, "🟠 مسیر IRAN3 ↔ TURKEY پر افت شده · افت 20%"), None, t + 30).await;
+        m.incident(&mut live, &ev(Ev::STILL, "🟠 مسیر IRAN3 ↔ TURKEY پر افت شده · افت 12%"), None, t + 45).await;
+        m.incident(&mut live, &ev(Ev::STILL, "🟠 مسیر IRAN3 ↔ TURKEY پر افت شده · افت 12%"), None, t + 70).await;
+        m.incident(&mut live, &ev(Ev::UP, "🟢 مسیر IRAN3 ↔ TURKEY دوباره خوب شد"), None, t + 400).await;
+        // back within 15 minutes: the same message again
+        m.incident(&mut live, &ev(Ev::DOWN, "🟠 مسیر IRAN3 ↔ TURKEY پر افت شده · افت 9%"), None, t + 600).await;
+        let l = log.lock().unwrap().clone();
+        let sends = l.iter().filter(|(x, _)| x == "sendMessage").count();
+        let edits: Vec<&Value> = l.iter().filter(|(x, _)| x == "editMessageText").map(|(_, v)| v).collect();
+        assert_eq!(sends, 2, "one message for each of the two owners: {:?}", l);
+        assert_eq!(edits.len(), 6, "{:?}", l);
+        assert!(edits[2]["text"].as_str().unwrap().contains("حل شد") && edits[2]["text"].as_str().unwrap().contains("7 دقیقه"), "{}", edits[2]);
+        assert!(edits[4]["text"].as_str().unwrap().contains("هنوز برقرار"));
+    }
+
     #[test]
     fn a_server_alert_comes_once_after_three_bad_rounds_and_once_when_back() {
         let app = crate::kping::tests::test_app();
@@ -398,10 +582,13 @@ mod tests {
         assert!(check(&app, &mut st).is_empty());
         let a = check(&app, &mut st);
         assert_eq!(a.len(), 1);
-        assert!(a[0].1.contains("آفلاین"));
-        assert!(check(&app, &mut st).is_empty());
+        assert!(a[0].state == Ev::DOWN && a[0].text.contains("آفلاین"));
+        // while it lasts: the latest numbers, not a new alert
+        let a = check(&app, &mut st);
+        assert!(a.len() == 1 && a[0].state == Ev::STILL);
         app.db.exec("UPDATE nodes SET online=1", &[]).unwrap();
         let b = check(&app, &mut st);
-        assert!(b.len() == 1 && b[0].1.contains("دوباره آنلاین"), "{:?}", b);
+        assert!(b.len() == 1 && b[0].state == Ev::UP && b[0].text.contains("دوباره آنلاین"), "{}", b[0].text);
+        assert!(check(&app, &mut st).is_empty());
     }
 }

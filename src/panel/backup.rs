@@ -610,6 +610,10 @@ async fn tgb_test(State(app): St, h: HeaderMap) -> Response {
 
 /// A text to the admin on the backup bot's chat (nothing when no bot or chat is set)
 pub async fn tell_admin(app: &App, text: &str) {
+    // the report bot, when there is one, gets every report of the panel (never the sales bot)
+    if crate::monitor::on() {
+        return crate::monitor::notify(text, None).await;
+    }
     let token = tgb_token(app);
     let chat = app.db.get("tgb_chat");
     if !token.is_empty() && !chat.is_empty() {

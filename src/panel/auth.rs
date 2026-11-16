@@ -56,8 +56,15 @@ pub fn internal_token() -> &'static str {
     T.get_or_init(|| crate::util::rand_token(48))
 }
 
+/// The report bot's mini app reads the panel's state with this key (only GET of a fixed list, `miniapp::monitor`)
+pub fn internal_read_token() -> &'static str {
+    static T: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    T.get_or_init(|| crate::util::rand_token(48))
+}
+
 fn is_internal(h: &HeaderMap) -> bool {
-    util::ct_eq(&bearer(h), internal_token())
+    let t = bearer(h);
+    util::ct_eq(&t, internal_token()) || util::ct_eq(&t, internal_read_token())
 }
 
 fn identify_with(app: &App, h: &HeaderMap, touch: bool) -> Option<(String, Vec<String>)> {
@@ -65,8 +72,11 @@ fn identify_with(app: &App, h: &HeaderMap, touch: bool) -> Option<(String, Vec<S
     if t.is_empty() {
         return None;
     }
-    if is_internal(h) {
+    if util::ct_eq(&t, internal_token()) {
         return Some(("bot-admin".into(), vec!["settings".into()]));
+    }
+    if util::ct_eq(&t, internal_read_token()) {
+        return Some(("report-bot".into(), vec!["admin".into()]));
     }
     let legacy = app.db.get("api_key");
     if !legacy.is_empty() && util::ct_eq(&t, &legacy) {

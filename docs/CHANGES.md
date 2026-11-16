@@ -1,3 +1,23 @@
+# v3.48.1 — The report bot holds every report of the panel, one message per problem
+- **Nothing of the panel in the sales bot any more** (when the report bot is set): the warnings of a server about to be removed for
+  being offline, the removal, the Iran subscription certificate, a failed backup and «another program uses the sales bot» go to the
+  report bot (`backup::tell_admin`, `monitor::notify`); the sales bot's admin menu has no server list or paths page then. The old
+  report script (`kanki-watch`, a cron job that sent through the sales bot) is set aside (`/etc/cron.d/kanki-watch.off`): the report
+  bot sends the morning report itself, with the daily backup, at 09:00 Tehran.
+- **One message per problem:** a server, tunnel or path that goes wrong gets one message, edited with its latest numbers while it
+  lasts (at most once a minute) and with «✅ over, from 17:20 to 17:27 (7 minutes)» when it ends; when it comes back within 15
+  minutes the same message is edited again. No new message for each change (`Mon::incident`).
+- **Alerts say more:** a server's public address and when it was last heard; a tunnel's two servers and its transport.
+- **The report page** (the report bot's menu button and every alert's button open the mini app with `?mon=1`): only the panel's state,
+  never the shop, and «back» stays in it. Summary (every problem once, the panel server's CPU, RAM, disk and services, both bots,
+  servers and tunnels up, users online), servers (online, address, version, last heard, CPU / RAM / disk, each core's service), tunnels
+  (both ends with their state, transport, port, FEC, ping, loss, jitter, links, traffic, UDP flows, the error text, how long it has
+  been stable, an automatic switch), paths and the last errors of the log. It reads `/tg/api/admin/monitor`: only the report bot's or
+  the sales bot's admins, read only, nothing secret in it.
+- The plans list says what the service has even when only one kind is on sale, and shows a waiting first-purchase discount.
+- Checked: `cargo test` (new: `one_message_per_problem_edited_until_it_is_over`, the watcher's still-down state); the report page's five
+  tabs in Playwright (no call to the shop, no sideways scroll).
+
 # v3.48.0 — A tidier panel; the bot is managed inside Telegram
 - **Dashboard: the panel and only what needs you.** «Needs attention» first: the panel's own web server, the sales and report
   bots, orders waiting for approval, a new version, a nearly full disk, and one line each for servers and tunnels that are down

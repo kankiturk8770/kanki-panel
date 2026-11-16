@@ -53,6 +53,74 @@ pub fn router() -> Router<Arc<App>> {
         // 3.48: the bot's whole management (sales settings, plans, discount codes, the smart channel, the app
         // message) lives in the admin mini app, not in the web panel: the same routes, reached from here
         .route("/tg/api/admin/panel", axum::routing::post(admin_panel))
+        // 3.48.1: the report bot's mini app: the whole state of the panel, its servers and its tunnels (read only)
+        .route("/tg/api/admin/monitor", get(admin_monitor))
+}
+
+/// A GET of one of the panel's own routes, from inside, with the read key (`auth::internal_read_token`)
+async fn read_inside(app: &Arc<App>, path: &str) -> Value {
+    use tower::ServiceExt;
+    let Ok(req) = axum::http::Request::builder().method("GET").uri(path)
+        .header(header::AUTHORIZATION, format!("Bearer {}", crate::auth::internal_read_token())).body(axum::body::Body::empty()) else { return Value::Null };
+    let Ok(res) = crate::api::master_router(app.clone()).oneshot(req).await;
+    let bytes = axum::body::to_bytes(res.into_body(), 8 * 1024 * 1024).await.unwrap_or_default();
+    serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+}
+
+/// Only the named fields of a JSON object
+fn pick(v: &Value, keys: &[&str]) -> Value {
+    let mut o = serde_json::Map::new();
+    for k in keys {
+        if let Some(x) = v.get(*k) {
+            o.insert(k.to_string(), x.clone());
+        }
+    }
+    Value::Object(o)
+}
+
+/// The report bot's page: the panel server, both bots, every server (health, resources, cores) and every tunnel
+/// (state, both ends, ping, loss, transport), the last errors, and the paths. Only for the report bot's (or the sales
+/// bot's) admins; no token, key or password of anything is in it.
+async fn admin_monitor(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
+    if let Err(r) = admin_of(&app, &h, &q) { return r }
+    let (sys, nodes, tun, logs, ov) = tokio::join!(read_inside(&app, "/api/system"), read_inside(&app, "/api/nodes"),
+        read_inside(&app, "/api/tunnels"), read_inside(&app, "/api/logs?src=all&n=400"), read_inside(&app, "/api/overview"));
+    let nodes: Vec<Value> = nodes.as_array().cloned().unwrap_or_default().iter().map(|n| {
+        let mut x = pick(n, &["id", "name", "enabled", "online", "last_sync", "maint", "drain", "sync_state", "users", "cc"]);
+        // the address people connect to (never the API address with its port)
+        x["host"] = n["effective_endpoint"].clone();
+        x["info"] = pick(&n["info"], &["version", "stats", "services", "cores"]);
+        x
+    }).collect();
+    let servers: Vec<Value> = tun["servers"].as_array().cloned().unwrap_or_default().iter()
+        .map(|s| pick(s, &["id", "name", "local", "online", "last_seen", "version", "loc", "cc"])).collect();
+    let st = |v: &Value| pick(v, &["links", "want", "rtt_ms", "rx_bytes", "tx_bytes", "streams", "udp_flows", "error", "since", "transport", "listening", "quality", "lanes"]);
+    let tunnels: Vec<Value> = tun["tunnels"].as_array().cloned().unwrap_or_default().iter().map(|t| {
+        let mut x = pick(t, &["id", "name", "entry", "exit", "mode", "transport", "kind", "port", "enabled", "state", "fec", "dup", "auto", "switched", "switch_note", "route", "hop"]);
+        x["entry_status"] = st(&t["entry_status"]);
+        x["exit_status"] = st(&t["exit_status"]);
+        x
+    }).collect();
+    // the errors of the last log lines, newest first
+    let errs: Vec<Value> = logs["lines"].as_array().cloned().unwrap_or_default().into_iter().rev().filter(|l| {
+        let m = l["m"].as_str().unwrap_or("").to_lowercase();
+        l["p"].as_i64().map(|p| p <= 3).unwrap_or(false) || ["error", "fatal", "panic", "failed", "failure", "critical", "refused"].iter().any(|w| m.contains(w))
+    }).take(20).map(|l| pick(&l, &["ts", "u", "m"])).collect();
+    let bot = crate::bot::running().map(|_| ()).is_some();
+    let alive = |k: &str| now() - app.db.get(k).parse::<i64>().unwrap_or(0) < 120;
+    ([(header::CACHE_CONTROL, "no-store")], Json(json!({
+        "now": now(),
+        "panel": pick(&sys, &["host", "kernel", "version", "uptime", "cpu", "load", "cores", "mem_total", "mem_used", "disk_total", "disk_used", "swap_total", "swap_used", "services", "iface"]),
+        "users": pick(&ov, &["users", "active", "online", "expired", "disabled", "traffic_gb", "pending_orders"]),
+        "bots": {
+            "sales": { "set": !crate::bot::bot_token(&app).is_empty(), "running": bot, "online": now() - app.bot_alive.load(std::sync::atomic::Ordering::Relaxed) < 120,
+                "paused": app.db.on("bot_paused"), "error": app.db.get("bot_poll_error"), "username": app.db.get("bot_username") },
+            "report": { "set": !crate::monitor::mon_token(&app).is_empty(), "online": alive("mon_alive"), "error": app.db.get("mon_error"), "username": app.db.get("mon_username") },
+        },
+        "alerts_on": app.db.get("tg_alerts") != "0",
+        "nodes": nodes, "servers": servers, "tunnels": tunnels, "errors": errs,
+        "paths": crate::tunnel::quality::view(&app),
+    }))).into_response()
 }
 
 /// The settings the bot's admins change from the mini app (the web panel keeps only the bot's token)
