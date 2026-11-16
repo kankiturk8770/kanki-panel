@@ -1,3 +1,35 @@
+# v3.49.0 — Three services in the shop and one price list
+- **Buying starts with the three services**, always, each said in a few lines with one button: «⚡ اقتصادی · V2Ray» (one
+  subscription link for v2rayNG, V2Box, Streisand and v2rayN; the cheapest), «🎮 گیمینگ · WireGuard + Amnezia» (WireGuard and
+  AmneziaWG configs and the AmneziaVPN file; low, steady ping for PUBG and CoD; one tap in the Kanki app) and «👑 همه‌کاره VIP ·
+  هر سه با هم» (all three with one subscription, the Kanki app free). The buttons start with Persian and have no brackets, so a
+  phone shows them in one direction and in one line. Below them the whole shop in the mini app. Then the kinds of plan of that
+  service and «🧮 دلخواه» (the mini app on that service's custom tab). Renewing goes the same way.
+- **The gaming service** (`game`): an account with WireGuard, AmneziaWG and the app's KANKI MIX (setting `game_protocols`, default
+  `wg,awg,kmix`), no v2ray link. Its account text, guide (AmneziaVPN, WireGuard, the Kanki app), configs and mini app page know it;
+  a plan's service goes V2Ray → gaming → VIP from its page.
+- **One price list** (`shop.rs`, setting `pricing`): price = base + factor × volume (priced tier by tier: the first 20 GB at 1,500,
+  up to 50 at 1,000, up to 100 at 1,200, the rest at 800) + (users − 1) × per user + (days ÷ 30 − 1) × per month, to the nearest
+  thousand. VIP gives the shop's prices exactly (20 GB 80,000, 50 GB 110,000, 100 GB 170,000, 50 GB two users 135,000, 100 GB two
+  users 195,000, three users 220,000); gaming is always 12,000 more than V2Ray. A custom plan is the same plus 10 % (10–300 GB,
+  15–180 days in steps of 15, 1–4 users). The mini app has the same formula and shows the same number; the price paid is always
+  the panel's. The old `price_rules` and `cp_min_gb`… limits are no longer used by the bot.
+- **The plans come from the price list once by themselves** (`kanki_plans_v3`): nine for each service (one month: 20, 50, 100 GB
+  single, 50 and 100 GB two users, 100 GB three users; 50 GB two months, 100 GB two users two months, 100 GB three months),
+  «🔥 پیشنهاد ویژه» on 50 GB and «⭐ پرفروش‌ترین» on 100 GB. The plans on sale before are switched off, not deleted. Later changes of
+  the admin stay; «⚡ ساخت دوباره‌ی پلن‌ها» (bot and admin mini app) makes them again from the list.
+- **Admin mini app › plans › «💰 قیمت‌گذاری»:** every number of the price list, checked by the panel (a wrong one changes nothing).
+- **The mini app, «Kanki Night»:** deep night blue (#090D16), glass cards (#121826) with a thin glowing edge; a header with the
+  Kanki VPN logo, the servers' live state («سرورها آنلاین | پینگ گیمینگ فعال», only counts; «2 از 3 سرور آنلاین» when some are
+  down) and «پنل کاربری». The shop: the three services as a segmented control, each with its colour (V2Ray #00D2FF, gaming
+  #00E676, VIP #FFB300) and icon; the kinds as tabs (تک‌کاربره، چندکاربره، بلندمدت، دلخواه); cards with an icon, volume / time /
+  users, the service's features, a «پیشنهاد ویژه» / «پرفروش‌ترین» ribbon and a glowing buy button; the custom plan with sliders, the
+  users as a segmented control, a live breakdown and «تایید و پرداخت اشتراک دلخواه». Buying still goes through the signed
+  `/tg/api/buy` (now with `svc`), so payment stays in the chat. A gaming account no longer shows a V2Ray button.
+- Checked: `cargo test` (new: the price list's prices and checks, the 27 plans, a custom plan per service, the three-service menu and
+  its buttons, the price list through the admin bridge); the mini app in Playwright at 360, 390 and 768 (each service, each tab, the
+  builder's price against the same numbers the Rust test pins; no JS error, no sideways scroll, no cut text).
+
 # v3.48.1 — The report bot holds every report of the panel, one message per problem
 - **Nothing of the panel in the sales bot any more** (when the report bot is set): the warnings of a server about to be removed for
   being offline, the removal, the Iran subscription certificate, a failed backup and «another program uses the sales bot» go to the

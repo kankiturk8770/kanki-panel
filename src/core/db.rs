@@ -122,10 +122,17 @@ impl User {
     }
 
     /// 'v2ray' when the account has only what a v2ray client reads (Xray, Hysteria2) and Xray is one of
-    /// them, else 'vip'
+    /// them; 'game' when it has WireGuard or AmneziaWG and nothing a v2ray client reads (only the gaming
+    /// cores); else 'vip'
     pub fn service(&self) -> &'static str {
-        let ps: Vec<&str> = self.protocols.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()).collect();
-        if ps.contains(&"xray") && ps.iter().all(|p| matches!(*p, "xray" | "hy2")) { "v2ray" } else { "vip" }
+        let ps: Vec<&str> = self.protocols.split(',').map(|x| x.trim()).filter(|x| !x.is_empty() && *x != "kping").collect();
+        if ps.contains(&"xray") && ps.iter().all(|p| matches!(*p, "xray" | "hy2")) {
+            "v2ray"
+        } else if ps.iter().any(|p| matches!(*p, "wg" | "awg")) && ps.iter().all(|p| GAME_PROTOS.contains(p)) {
+            "game"
+        } else {
+            "vip"
+        }
     }
 
     pub fn explicit_nodes(&self) -> bool {
@@ -323,8 +330,13 @@ impl Db {
     }
 
     // ---------------- تنظیمات
-    /// The protocols an account of a plan's service gets ('v2ray' or 'vip')
+    /// The protocols an account of a plan's service gets ('v2ray', 'game' or 'vip')
     pub fn service_protocols(&self, service: &str) -> String {
+        if service == "game" {
+            let v = self.get("game_protocols");
+            let ok: Vec<&str> = v.split(',').map(|x| x.trim()).filter(|x| GAME_PROTOS.contains(x)).collect();
+            return if ok.iter().any(|p| matches!(*p, "wg" | "awg")) { ok.join(",") } else { "wg,awg,kmix".into() };
+        }
         if service == "v2ray" {
             let v = self.get("v2ray_protocols");
             let ok: Vec<&str> = v.split(',').map(|x| x.trim()).filter(|x| matches!(*x, "xray" | "hy2")).collect();
@@ -615,6 +627,9 @@ fn trim_logs(c: &Connection) {
     let _ = c.execute("DELETE FROM login_log WHERE id <= (SELECT id FROM login_log ORDER BY id DESC LIMIT 1 OFFSET ?1)", [LOGIN_LOG_KEEP]);
 }
 
+/// What a 'game' account may have: WireGuard, AmneziaWG and the Kanki app's gaming cores
+pub const GAME_PROTOS: &[&str] = &["wg", "awg", "kmix", "mtun"];
+
 pub fn default_setting(k: &str) -> &'static str {
     match k {
         "dns" => "1.1.1.1, 8.8.8.8",
@@ -624,6 +639,8 @@ pub fn default_setting(k: &str) -> &'static str {
         "default_protocols" => "wg,awg,hy2,kmix",
         // what a 'v2ray' plan gives (the v2ray clients read only Xray, and Hysteria2 when added here)
         "v2ray_protocols" => "xray",
+        // what a 'game' plan gives: WireGuard and AmneziaWG (and the Kanki app's KANKI MIX), no v2ray link
+        "game_protocols" => "wg,awg,kmix",
         "kmix_on" => "1",
         "kmix_port" => "4000",
         "kmix_parity" => "3",
@@ -707,6 +724,21 @@ mod tests {
         let u = db.create_user("vipu", 10.0, 30, 1, "wg,awg,hy2,kmix,xray", "", "", 0).unwrap();
         assert_eq!(u.service(), "vip");
         let u = db.create_user("hy", 10.0, 30, 1, "hy2", "", "", 0).unwrap();
+        assert_eq!(u.service(), "vip");
+        // the gaming service: WireGuard / AmneziaWG (and the app's KANKI MIX), never a v2ray link
+        assert_eq!(db.service_protocols("game"), "wg,awg,kmix");
+        db.set("game_protocols", "awg,xray,hy2");
+        assert_eq!(db.service_protocols("game"), "awg");
+        db.set("game_protocols", "kmix");
+        assert_eq!(db.service_protocols("game"), "wg,awg,kmix");
+        let u = db.create_user("gm", 10.0, 30, 1, "wg,awg,kmix", "", "", 0).unwrap();
+        assert_eq!(u.service(), "game");
+        let u = db.create_user("gm2", 10.0, 30, 1, "awg,kping", "", "", 0).unwrap();
+        assert_eq!(u.service(), "game");
+        // the default full list (with Hysteria2) stays VIP
+        let u = db.create_user("vip2", 10.0, 30, 1, "wg,awg,hy2,kmix", "", "", 0).unwrap();
+        assert_eq!(u.service(), "vip");
+        let u = db.create_user("km", 10.0, 30, 1, "kmix", "", "", 0).unwrap();
         assert_eq!(u.service(), "vip");
         let _ = std::fs::remove_dir_all(&dir);
     }
