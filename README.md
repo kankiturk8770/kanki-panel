@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.47 — Sales bot as one page, invites, report bot
+Buying in the bot is one page that changes step by step; services are named the way customers know them (V2Ray, WireGuard,
+Amnezia); an inviter gets a share of every purchase of their friends and the friend a first-purchase discount; alerts and backups go
+to a separate report bot; the mini app has the Kanki app's glass look.
+
 ## New in 3.46.2 — Game recorder file fixed
 In the downloaded JSON of the game recorder every flow keeps its own label and domain.
 

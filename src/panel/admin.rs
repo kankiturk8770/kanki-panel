@@ -703,13 +703,18 @@ async fn bot_get(State(app): St, h: HeaderMap) -> Response {
         "conflict": crate::util::now() - app.db.get("bot_conflict").parse::<i64>().unwrap_or(0) < 300,
         // why Telegram refuses the bot right now ("" = it works)
         "error": app.db.get("bot_poll_error"),
+        // the report bot (alerts and backups, its own token)
+        "mon_set": !crate::monitor::mon_token(&app).is_empty(), "mon_masked": mask(&crate::monitor::mon_token(&app)),
+        "mon_admins": app.db.get("mon_admins"), "mon_username": app.db.get("mon_username"),
+        "mon_online": crate::util::now() - app.db.get("mon_alive").parse::<i64>().unwrap_or(0) < 120, "mon_error": app.db.get("mon_error"),
     })).into_response()
 }
 
 async fn bot_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "settings");
     // the bot token and the bot admins can make users: an API token cannot change them
-    let sensitive = b["token"].as_str().map(|s| !s.trim().is_empty()).unwrap_or(false) || b["admins"].is_string();
+    let sensitive = b["token"].as_str().map(|s| !s.trim().is_empty()).unwrap_or(false) || b["admins"].is_string()
+        || b["mon_token"].is_string() || b["mon_admins"].is_string() || b["mon_clear"].as_bool() == Some(true);
     if sensitive {
         if let Err(r) = crate::auth::check_session(&app, &h) {
             return r;
@@ -727,6 +732,31 @@ async fn bot_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response
     }
     if let Some(a) = b["admins"].as_str() {
         app.db.set("bot_admins", a.trim());
+    }
+    // the report bot: a token of its own (never the sales bot's), its admins, or off
+    if let Some(t) = b["mon_token"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if t == crate::bot::bot_token(&app) {
+            return err(StatusCode::BAD_REQUEST, "The report bot needs a different bot from the sales bot");
+        }
+        match tg_get_me(&app, t).await {
+            Some(me) => {
+                app.db.set("mon_token", t);
+                app.db.set("mon_username", me["username"].as_str().unwrap_or(""));
+            }
+            None => return err(StatusCode::BAD_REQUEST, "Telegram rejected this token"),
+        }
+    }
+    if let Some(a) = b["mon_admins"].as_str() {
+        let ok = a.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()).all(|x| x.parse::<i64>().is_ok());
+        if !ok {
+            return err(StatusCode::BAD_REQUEST, "Admin IDs are numbers, comma separated");
+        }
+        app.db.set("mon_admins", a.trim());
+    }
+    if b["mon_clear"].as_bool() == Some(true) {
+        app.db.set("mon_token", "");
+        app.db.set("mon_username", "");
+        app.db.set("mon_alive", "");
     }
     restart_self();
     Json(json!({"ok": true})).into_response()

@@ -94,6 +94,8 @@ mod ai;
 mod pay;
 #[path = "bot/buttons.rs"]
 mod buttons;
+#[path = "bot/monitor.rs"]
+mod monitor;
 
 // tunnel: tunnels between servers and tunnel servers; the wire protocols in src/tunnel/transport
 mod tunnel;
@@ -373,6 +375,8 @@ async fn main() {
         tokio::spawn(b.run());
         eprintln!("telegram bot started");
     }
+    // the alerts (servers, tunnels, paths) and the report bot when it has its own token
+    monitor::start(app.clone());
 
     let port = app.env.get("PANEL_PORT").cloned().unwrap_or_else(|| "8080".into());
     let bind = app.env.get("PANEL_BIND").cloned().unwrap_or_else(|| "127.0.0.1".into());

@@ -8,12 +8,19 @@
 <style>
 @font-face{font-family:Vazirmatn;src:url(/assets/vazirmatn.woff) format("woff");font-weight:100 900;font-display:swap}
 :root{
- /* Kanki's own look (the app's yellow and crimson), the same in every Telegram theme: night wine with Kanki gold */
- --bg:#170a10;--bg2:#2a1019;--bg3:#3d1624;--tx:#fff3e4;--hint:#bc9ea8;--link:#f7c948;--btn:#f7c948;--btx:#2a1206;
- --sep:rgba(247,201,72,.14);--gold1:#ffe9a6;--gold2:#f7c948;--gold3:#b8862a;--ink:#2a1206;
- --ok:#3ddc97;--warn:#ffb547;--bad:#ff5c6c;
+ /* 3.47: the Kanki app's own look («Kanki Glass», its default theme): near-black with one neon green and a teal
+    second colour, dark crystal glass for every card and button, the same in every Telegram theme. The old names
+    (gold…) stay as the accent's names, so every rule below takes the new colours */
+ --bg:#121412;--bg2:rgba(255,255,255,.055);--bg3:rgba(255,255,255,.10);--tx:#f2f5f1;--hint:#a9b3ab;--link:#2bee34;--btn:#2bee34;--btx:#0a0d0b;
+ --sep:rgba(255,255,255,.10);--gold1:#80f585;--gold2:#2bee34;--gold3:#18831d;--ink:#0a0d0b;--acc2:#19e6c1;
+ --ok:#3be36b;--warn:#ffc24a;--bad:#ff6c65;
  /* one colour per app and per system, so each is told apart at a glance */
- --k:#f7c948;--z:#ff8a3d;--v:#a78bfa;--g:#ff6b81;--sa:#3ddc84;--si:#8fb8ff;--sw:#4cc2ff;
+ --k:#2bee34;--z:#ff9f43;--v:#a78bfa;--g:#ff6b81;--sa:#3ddc84;--si:#8fb8ff;--sw:#4cc2ff;
+ --glass:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.025) 45%,rgba(0,0,0,.28));
+ --glass-edge:rgba(255,255,255,.16) rgba(255,255,255,.07) rgba(0,0,0,.4) rgba(255,255,255,.07);
+ --glass-sh:inset 0 1px 0 rgba(255,255,255,.16),inset 0 -14px 22px -16px rgba(0,0,0,.6),0 12px 26px -16px rgba(0,0,0,.9);
+ --fill:linear-gradient(160deg,#9af79e 0%,#2bee34 42%,#19c9a8 100%);
+ --fill-sh:inset 0 1px 0 rgba(255,255,255,.65),inset 0 -10px 16px -10px rgba(0,70,30,.55),0 8px 22px -8px rgba(43,238,52,.55);
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.6 Vazirmatn,system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
@@ -330,10 +337,69 @@ details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8p
 .pq-r2 .cut{color:var(--bad);font-weight:800}
 .pq-foot{font-size:12px;color:var(--hint);margin:8px 2px 0;line-height:1.8}
 @media (prefers-reduced-motion:reduce){.pq-sw,.pq-sw:after{transition:none}}
+
+/* ===================================================== 3.47 — Kanki Glass (the app's look)
+   One recipe for every surface (dark crystal: light top edge, deep shadow under) and one for every main button
+   (the green fill with its shine). No backdrop blur: the page behind is a still gradient, and a blur on every card
+   made scrolling heavy on slow phones */
+html,body{background:#121412}
+.tabs{background:linear-gradient(135deg,rgba(255,255,255,.08),rgba(255,255,255,.03) 45%,rgba(0,0,0,.3)),#151715}
+body{background:radial-gradient(130% 55% at 12% -8%,rgba(43,238,52,.13),transparent 60%),radial-gradient(90% 45% at 105% 32%,rgba(25,230,193,.07),transparent 62%),linear-gradient(180deg,#1b1d1b 0%,#121412 42%,#0a0b0a 100%);background-attachment:fixed;min-height:100vh}
+.card,.pass,.pc,.conn,.cpanel,.ctile,details.app,.ctry,.appc,.code,.plan,.pq-st,.pq-alert,.pq-sum div,.accs button,.tabs,.ptabs button,.plats button,.seg,.offer,.btog,.b,.adm,.step,.chips2 button,.bcol button{
+ background:var(--glass);border:1px solid;border-color:var(--glass-edge);box-shadow:var(--glass-sh)}
+.tabs,.seg{padding:4px;border-radius:16px}
+.tabs button,.seg button{border-radius:12px;transition:background .15s,color .15s}
+.tabs button.on,.seg button.on{background:linear-gradient(160deg,rgba(43,238,52,.28),rgba(43,238,52,.08) 60%,rgba(0,0,0,.2));color:var(--tx);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 0 0 1px rgba(43,238,52,.55),0 0 18px -6px rgba(43,238,52,.6)}
+.b{color:var(--gold1)}
+.b.main,.b.go,.pc .buy,.ptabs button.on,.empty .mk,.b.blue{background:var(--fill);color:var(--ink);border:1px solid rgba(255,255,255,.55);box-shadow:var(--fill-sh);font-weight:900}
+.b,.pc .buy,.step,.ctile,.accs button,.ptabs button,.plats button,.chips2 button,.adm,.tabs button,.seg button{transition:transform .12s ease,filter .12s ease}
+.b:active,.pc .buy:active,.step:active,.ctile:active,.accs button:active,.ptabs button:active,.plats button:active,.chips2 button:active,.adm:active{transform:scale(.97);filter:brightness(1.08)}
+.accs button.on,.ctile.on,.chips2 button.on,.bcol button.on,.plats button.on{border-color:rgba(43,238,52,.75);box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 0 0 1px rgba(43,238,52,.45),0 0 18px -8px rgba(43,238,52,.7);color:var(--tx)}
+.ctile.on{background:linear-gradient(160deg,rgba(43,238,52,.2),rgba(43,238,52,.05) 60%,rgba(0,0,0,.25))}
+/* the account pass: the one bright thing on the page */
+.pass{background:radial-gradient(120% 140% at 100% 0%,rgba(43,238,52,.20),transparent 55%),radial-gradient(90% 120% at 0% 100%,rgba(25,230,193,.10),transparent 60%),var(--glass);border-color:rgba(43,238,52,.45) rgba(255,255,255,.08) rgba(0,0,0,.45) rgba(255,255,255,.08);box-shadow:var(--glass-sh),0 18px 40px -24px rgba(43,238,52,.6)}
+.pass .who b{color:var(--tx)}
+.pass .big strong{color:var(--gold2);text-shadow:0 0 18px rgba(43,238,52,.35)}
+.pass .bar{background:rgba(255,255,255,.08)}
+.pass .bar span{background:linear-gradient(90deg,var(--gold2),var(--acc2))}
+.pass .tear{border-top-color:rgba(255,255,255,.14)}
+.pass .tear:before,.pass .tear:after{background:#141614}
+.pass .st{background:rgba(255,255,255,.07)}
+.pass .copy{background:var(--fill);color:var(--ink)}
+.svc{background:rgba(43,238,52,.12);color:var(--gold1);border:1px solid rgba(43,238,52,.3)}
+.conn .dot,.pq-tu:before{box-shadow:0 0 10px currentColor}
+/* the shop */
+.pc{border-radius:20px}
+.pc.feat{border-color:rgba(43,238,52,.8) rgba(43,238,52,.35) rgba(0,0,0,.4) rgba(43,238,52,.35);box-shadow:var(--glass-sh),0 0 0 1px rgba(43,238,52,.25),0 14px 34px -14px rgba(43,238,52,.5)}
+.pc .rib{background:#151815;border:1px solid var(--gold2);color:var(--gold2)}
+.pc.feat .rib{background:var(--fill);color:var(--ink);border-color:rgba(255,255,255,.6)}
+@keyframes blink{50%{box-shadow:0 0 16px rgba(43,238,52,.8);transform:scale(1.04)}}
+.pc .em{background:rgba(43,238,52,.08);border:1px solid rgba(43,238,52,.2)}
+.pc .pt b.vol{color:var(--gold2)}.pc .pt b.vol small,.pc .meta span{color:var(--tx)}
+.pc .meta span{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.1)}
+.pc .pr2 strong{color:var(--gold1)}
+.pc.feat .buy{box-shadow:var(--fill-sh)}
+.offer{display:flex;align-items:center;gap:12px;padding:12px;border-radius:16px;margin:0 0 12px;border-color:rgba(43,238,52,.6) rgba(43,238,52,.2) rgba(0,0,0,.4) rgba(43,238,52,.2)}
+.offer .ob{flex:none;min-width:56px;height:44px;padding:0 8px;border-radius:12px;display:grid;place-items:center;font-size:18px;font-weight:900;background:var(--fill);color:var(--ink);box-shadow:var(--fill-sh)}
+.offer b{display:block;font-weight:900}.offer small{display:block;font-size:12px;color:var(--hint)}
+/* app icons: dark ink on their own colour */
+.opt .ic,details.app summary .ic,details.app summary .rec{color:#0a0d0b;box-shadow:inset 0 1px 0 rgba(255,255,255,.45)}
+details.app .b.main{background:var(--ac);color:#0a0d0b;border-color:rgba(255,255,255,.5)}
+details.app{border-inline-start:3px solid var(--ac)}
+.appc .t .rec{background:var(--fill);color:var(--ink)}
+/* states and bits */
+.in{background:rgba(0,0,0,.35);border-color:rgba(255,255,255,.12)}
+.in:focus{outline-color:var(--gold2)}
+.skel{background:var(--glass);border:1px solid rgba(255,255,255,.08)}
+.brand b{color:var(--tx);text-shadow:0 0 16px rgba(43,238,52,.35)}
+.brand svg{filter:drop-shadow(0 0 10px rgba(43,238,52,.5))}
+.pq-re,.adm{color:var(--gold2)}
+#toast{background:rgba(242,245,241,.95);color:#0a0d0b;box-shadow:0 10px 30px -10px rgba(0,0,0,.8)}
+@media (prefers-reduced-motion:reduce){.b,.pc .buy,.step,.ctile,.tabs button,.seg button{transition:none}}
 </style>
 </head>
 <body>
-<header class="brand"><svg viewBox="0 0 24 26" aria-hidden="true"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFF4B8"/><stop offset=".5" stop-color="#FFD60A"/><stop offset="1" stop-color="#B38F00"/></linearGradient></defs><path d="M12 1 22 4.5v8c0 6-4.4 10.4-10 12.5C6.4 22.9 2 18.5 2 12.5v-8z" fill="url(#sg)"/><path d="M12 3.6 19.6 6.3v6.2c0 4.7-3.3 8.2-7.6 10C7.7 20.7 4.4 17.2 4.4 12.5V6.3z" fill="#2a1019"/><path d="M8.6 7.5h2.4v4l3.4-4h3l-4 4.5 4.2 5.5h-3l-2.8-3.8-.8.9v2.9H8.6z" fill="url(#sg)"/></svg><b>⚡ Kanki VPN</b><small>پنل کاربری</small></header>
+<header class="brand"><svg viewBox="0 0 24 26" aria-hidden="true"><defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C8FFCB"/><stop offset=".5" stop-color="#2BEE34"/><stop offset="1" stop-color="#14A88E"/></linearGradient></defs><path d="M12 1 22 4.5v8c0 6-4.4 10.4-10 12.5C6.4 22.9 2 18.5 2 12.5v-8z" fill="url(#sg)"/><path d="M12 3.6 19.6 6.3v6.2c0 4.7-3.3 8.2-7.6 10C7.7 20.7 4.4 17.2 4.4 12.5V6.3z" fill="#101310"/><path d="M8.6 7.5h2.4v4l3.4-4h3l-4 4.5 4.2 5.5h-3l-2.8-3.8-.8.9v2.9H8.6z" fill="url(#sg)"/></svg><b>⚡ Kanki VPN</b><small>پنل کاربری</small></header>
 <div id="app"><div class="skel"></div></div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script>
@@ -381,18 +447,20 @@ function render(){if(A.admin&&A.view=='paths')return drawPaths();if(A.admin&&(A.
  if(A.view=='buy'&&sales())return drawBuy();if(!A.list.length)return sales()?(A.view='buy',drawBuy()):noAccount();draw()}
 function noAccount(){empty('K','هنوز اشتراکی ندارید','بعد از خرید اشتراک، اطلاعات حساب و کانفیگ‌ها اینجا دیده می‌شن.','<button class="b main" style="min-width:180px" onclick="window.Telegram&&Telegram.WebApp&&Telegram.WebApp.close()">برگشت به ربات</button>')}
 function wireTabs(){Array.prototype.slice.call(document.querySelectorAll('[data-t]')).forEach(function(b){b.onclick=function(){A.tab=b.dataset.t;A.view='acc';render();window.scrollTo(0,0)}})}
-var SV={v2ray:['🌐','سرویس استاندارد (V2Ray)','یک لینک اشتراک، برای v2rayNG، Streisand، V2Box و Nekoray؛ اقتصادی، برای کارهای روزمره و وب‌گردی.'],
- vip:['🚀','سرویس VIP ضدتحریم','اپ اختصاصی کانکی، AmneziaWG و WireGuard، همه‌ی کشورها مستقیم و از راه تانل؛ مخصوص بازی و اینترنت پراختلال.']};
+var SV={v2ray:['🌐','اقتصادی · V2Ray','یک لینک اشتراک برای v2rayNG، V2Box، Streisand و v2rayN؛ قیمت کمتر، برای وب‌گردی، اینستاگرام و یوتیوب.'],
+ vip:['⚡️','VIP · V2Ray + WireGuard + Amnezia','همون لینک V2Ray به‌اضافه‌ی WireGuard، AmneziaWG و فایل یک‌جای AmneziaVPN؛ همه‌ی کشورها. اپ کانکی هم رایگان همراهشه.']};
 
 function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){return x.id==A.renew})[0],h='';
  if(A.list.length)h+='<div class="acts one" style="margin:0 0 12px"><button class="b" id="bk">بازگشت به حساب</button></div>';
  h+=nameCard();
+ // a first-purchase discount (an invited friend, a finished trial): counted on the payment page in the chat
+ if(A.offer>0&&!mine)h+='<div class="offer" role="note"><span class="ob">'+fa(A.offer)+'٪</span><div><b>تخفیف خرید اول شما</b><small>موقع پرداخت توی چت خودش از قیمت کم می‌شه.</small></div></div>';
  if(A.trial&&!mine)h+='<div class="card" style="margin-bottom:12px;display:flex;align-items:center;gap:12px"><div style="flex:1"><b>🎁 تست رایگان</b><p class="lead" style="margin:2px 0 0">قبل از خرید امتحان کنید؛ یک بار برای هر نفر.</p></div><button class="b blue" id="tri">گرفتن تست</button></div>';
  if(mine)h+='<p class="lead" style="margin:0 2px 12px">تمدید حساب <b class="ltr">'+esc(mine.name)+'</b>: حجم و روز به همین حساب اضافه می‌شه. <button class="b" id="nr" style="min-height:40px;margin-inline-start:6px">خرید حساب تازه</button></p>';
  // plans of both services on sale: the customer picks the service first and sees only its plans
  var svcs=['v2ray','vip'].filter(function(k){return sh.plans.some(function(p){return (p.service||'vip')==k})});
  if(svcs.length>1){if(!A.svc)A.svc=mine?(mine.service||'vip'):'vip';
-  h+='<div class="seg" role="tablist" style="grid-template-columns:1fr 1fr;margin-bottom:8px">'+svcs.map(function(k){return '<button role="tab" aria-selected="'+(A.svc==k)+'" data-svc="'+k+'" class="'+(A.svc==k?'on':'')+'">'+SV[k][0]+' '+(k=='vip'?'VIP':'استاندارد')+'</button>'}).join('')+'</div>'+
+  h+='<div class="seg" role="tablist" style="grid-template-columns:1fr 1fr;margin-bottom:8px">'+svcs.map(function(k){return '<button role="tab" aria-selected="'+(A.svc==k)+'" data-svc="'+k+'" class="'+(A.svc==k?'on':'')+'">'+SV[k][0]+' '+(k=='vip'?'VIP':'اقتصادی')+'</button>'}).join('')+'</div>'+
    '<p class="lead"><b>'+SV[A.svc][1]+'</b>: '+SV[A.svc][2]+'</p>'}
  else A.svc=svcs[0]||'vip';
  var plans=sh.plans.filter(function(p){return (p.service||'vip')==A.svc});
@@ -492,10 +560,10 @@ function srvTab(u,v2){var cs=countries(u);if(!cs.length)return '<div class="empt
   return '<button class="ctile'+(x.cc==A.ctry?' on':'')+'" data-cc="'+esc(x.cc)+'" aria-pressed="'+(x.cc==A.ctry)+'"><span class="f">'+(flag(x.cc)||'🌐')+'</span><b>'+esc(cname(x))+'</b><small>'+(x.direct&&x.iran?'مستقیم و تانل':x.iran?'از راه ایران':'مستقیم')+'</small></button>'}).join('')+'</div>';
  var o=function(ic,col,name,line,btn,attr){return '<div class="opt"><span class="ic" style="background:'+col+'">'+ic+'</span><div class="nm"><b>'+name+'</b><small>'+line+'</small></div><button class="b" '+attr+'>'+btn+'</button></div>'};
  h+='<div class="cpanel"><h3>'+(flag(c.cc)||'🌐')+' '+esc(cname(c))+'</h3>';
+ if(u.links||v2)h+=o('V','var(--v)','V2Ray','یک لینک اشتراک برای همه‌ی کشورها (Xray و Hysteria2)، برای v2rayNG و V2Box','بفرست','data-cfg="v"');
+ if(A.hasAmz(u))h+=o('Z','var(--z)','AmneziaVPN','یک فایل بکاپ با همه‌ی کشورها (WireGuard، AmneziaWG و VLESS)','بفرست','data-amz="1"');
  if(!v2&&c.wg)h+=o('W','var(--g)','WireGuard','فایل کانفیگ سرورهای '+esc(cname(c))+'، برای برنامه‌ی WireGuard','بفرست','data-cfg="w:'+esc(c.cc)+'"');
  if(!v2&&c.awg)h+=o('A','var(--z)','AmneziaWG','فایل کانفیگ سرورهای '+esc(cname(c))+'، برای AmneziaVPN یا AmneziaWG','بفرست','data-cfg="a:'+esc(c.cc)+'"');
- if(A.hasAmz(u))h+=o('Z','var(--z)','AmneziaVPN','یک فایل بکاپ با همه‌ی کشورها (WireGuard، AmneziaWG و VLESS)','بفرست','data-amz="1"');
- if(u.links||v2)h+=o('V','var(--v)','V2Ray','یک لینک اشتراک برای همه‌ی کشورها (Xray و Hysteria2)، برای v2rayNG و V2Box','بفرست','data-cfg="v"');
  return h+'</div>'}
 
 // tab 3: which app on which system: one folding card per app, the recommended one open
@@ -509,7 +577,7 @@ function appTab(u,v2){var L=function(x){return '<bdi class="ltr">'+x+'</bdi>'},p
  var card=function(key,col,ic,name,line,body){return {k:key,html:function(open,rec){return '<details class="app" data-k="'+key+'"'+(open?' open':'')+' style="--ac:'+col+'"><summary><span class="ic">'+ic+'</span><span class="nm"><b>'+name+'</b><small>'+line+'</small></span>'+(rec?'<span class="rec">پیشنهادی</span>':'')+'<span class="chev" aria-hidden="true"></span></summary><div class="body">'+body+'</div></details>'}}};
  // Kanki VPN: Android (files in the bot) and Windows (its link); never on an iPhone
  var kdl=p=='a'?(A.androidApp?'<button class="b main" id="app_dl">فایل نصب توی چت</button>':(A.appLink?'<a class="b main" href="'+esc(A.appLink)+'" data-ext="1" target="_blank" rel="noopener">دانلود برنامه</a>':'')):(p=='w'&&A.winLink?'<a class="b main" href="'+esc(A.winLink)+'" data-ext="1" target="_blank" rel="noopener">دانلود برای ویندوز</a>':'');
- if(!v2&&kdl)cards.push(card('k','var(--k)','K','Kanki VPN','اپ اختصاصی کانکی؛ همه‌ی سرورها و پروتکل‌ها با یک کد',
+ if(!v2&&kdl)cards.push(card('k','var(--k)','K','Kanki VPN','اپ خود کانکی؛ همه‌ی سرورها با یک کد، سریع‌ترین رو خودش انتخاب می‌کنه',
   '<ol class="steps"><li><span>برنامه رو نصب کنید.</span></li><li><span>کد ورود رو کپی و توی برنامه وارد کنید.</span></li><li><span>حالت (هوشمند، گیمینگ یا ضد فیلتر) رو انتخاب کنید و دکمه‌ی اتصال رو بزنید.</span></li></ol>'+
   '<div class="acts">'+kdl+'<button class="b" id="cc">کپی کد ورود</button></div>'));
  if(A.hasAmz(u))cards.push(card('z','var(--z)','A','AmneziaVPN','همه‌ی کشورها با یک فایل بکاپ؛ WireGuard، AmneziaWG و VLESS',
@@ -527,7 +595,8 @@ function appTab(u,v2){var L=function(x){return '<bdi class="ltr">'+x+'</bdi>'},p
   '<ol class="steps"><li><span>برنامه‌ی WireGuard رو نصب کنید.</span></li><li><span>فایل‌های کانفیگ رو توی چت بگیرید.</span></li><li><span>توی برنامه ➕ ← '+L('Import from file')+' و یکی از فایل‌ها.</span></li></ol>'+
   '<p class="lead" style="margin:8px 0 0">کانفیگ‌های AmneziaWG با برنامه‌ی WireGuard معمولی وصل نمی‌شن؛ برای اون‌ها AmneziaVPN.</p>'+
   '<div class="acts">'+dl('g','دانلود WireGuard')+(u.wg?'<button class="b main" data-cfg="w">کانفیگ‌ها توی چت</button>':'<button class="b main" data-cfg="a">کانفیگ‌ها توی چت</button>')+'</div>'));
- // on an iPhone AmneziaVPN is the one to use (the Kanki app is not there)
+ // in the order most customers use: a V2Ray app, AmneziaVPN, the Kanki app, WireGuard
+ var ORD='vzkg';cards.sort(function(a,b){return ORD.indexOf(a.k)-ORD.indexOf(b.k)});
  if(!cards.length)return h+'<div class="empty"><b>برای این دستگاه راهی فعال نیست</b><p class="muted">به پشتیبانی پیام بدید'+(A.support?': '+L(esc(A.support)):'')+'.</p></div>';
  if(A.open[p]===undefined)A.open[p]=cards[0].k;
  return h+cards.map(function(c,i){return c.html(A.open[p]==c.k,i==0)}).join('')}
@@ -654,10 +723,10 @@ function drawPaths(){var el=document.getElementById('app');
 
 function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}
   // the same black as the page above and below it
-  try{w.setHeaderColor('#170a10');w.setBackgroundColor('#170a10');if(w.setBottomBarColor)w.setBottomBarColor('#170a10')}catch(e){}}
+  try{w.setHeaderColor('#1a1c1a');w.setBackgroundColor('#121412');if(w.setBottomBarColor)w.setBottomBarColor('#0a0b0a')}catch(e){}}
  var p=(w&&w.platform)||'';A.plat=/ios|macos/.test(p)?'i':/tdesktop|windows|weba|webk/.test(p)?'w':'a';
  if(!initData())return empty('K','این صفحه رو از ربات باز کنید','مینی‌اپ کانکی فقط از داخل ربات تلگرام باز می‌شه.');
- Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.winLink=r[0].win_link||'';A.nameHint=r[0].name_hint||'';A.support=r[0].support||'';A.admin=!!r[0].admin;A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
+ Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.winLink=r[0].win_link||'';A.nameHint=r[0].name_hint||'';A.support=r[0].support||'';A.admin=!!r[0].admin;A.offer=+r[0].offer||0;A.shop=r[1];render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
 // wait a moment for Telegram's script, then go on without it
 var n=0;(function go(){if(tg()||n++>15)start();else setTimeout(go,100)})();
 })();

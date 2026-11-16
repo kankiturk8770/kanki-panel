@@ -55,7 +55,7 @@ pub fn router() -> Router<Arc<App>> {
 /// The customer of a request, only when they are one of the bot's admins
 fn admin_of(app: &App, h: &HeaderMap, q: &HashMap<String, String>) -> Result<i64, Response> {
     let tg = who(app, h, q)?;
-    let is = crate::bot::bot_admins_raw(app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg);
+    let is = crate::bot::bot_admins_raw(app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) || crate::monitor::is_admin(app, tg);
     if is { Ok(tg) } else { Err(fail(StatusCode::FORBIDDEN, "admins only")) }
 }
 
@@ -164,7 +164,11 @@ fn who(app: &App, h: &HeaderMap, q: &HashMap<String, String>) -> Result<i64, Res
         return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too many requests, wait a minute"));
     }
     let init = h.get("x-tg-init").and_then(|v| v.to_str().ok()).map(|s| s.to_string()).or_else(|| q.get("init").cloned()).unwrap_or_default();
-    verify(&crate::bot::bot_token(app), &init, now(), INIT_MAX_AGE).ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "open this page from the bot"))
+    // the report bot opens the paths page too: its pages are signed with its own token
+    let mon = crate::monitor::mon_token(app);
+    verify(&crate::bot::bot_token(app), &init, now(), INIT_MAX_AGE)
+        .or_else(|| (!mon.is_empty()).then(|| verify(&mon, &init, now(), INIT_MAX_AGE)).flatten())
+        .ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "open this page from the bot"))
 }
 
 /// One of the customer's own accounts
@@ -245,9 +249,10 @@ async fn me(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String
     let trial = bot.as_ref().map(|b| b.trial_open(tg)).unwrap_or(false);
     let apps = !crate::apps::list(&app).is_empty();
     let name_hint = bot.as_ref().and_then(|b| b.name_hint(tg)).unwrap_or_default();
-    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "orders": orders(&app, tg), "need_name": need_name, "name_hint": name_hint, "trial": trial,
+    let offer = bot.as_ref().map(|b| b.offer_pct(tg)).unwrap_or(0);
+    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "orders": orders(&app, tg), "need_name": need_name, "name_hint": name_hint, "trial": trial, "offer": offer,
         "android_app": apps, "app_link": app.db.get("app_link"), "win_link": app.db.get("win_link"), "support": app.db.get("support"),
-        "admin": crate::bot::bot_admins_raw(&app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) }))).into_response()
+        "admin": crate::bot::bot_admins_raw(&app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) || crate::monitor::is_admin(&app, tg) }))).into_response()
 }
 
 /// The config name a first purchase or trial needs (sent as `name`), saved as the bot saves it
