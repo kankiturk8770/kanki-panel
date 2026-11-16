@@ -2400,7 +2400,17 @@ impl Bot {
         }
         cats.sort();
         let has_other = list.iter().any(|p| p.category.is_empty());
-        let head = SERVICES.iter().find(|s| s.0 == svc && !code.is_empty()).map(|s| format!("{}\n\n", s.2)).unwrap_or_default();
+        // what the customer gets, always said: the chosen service's name, or (only one on sale) what it has
+        let mut head = match SERVICES.iter().find(|s| s.0 == svc && !code.is_empty()) {
+            Some(s) => format!("{}\n\n", s.2),
+            None if on_sale.len() == 1 => format!("{}\n\n", on_sale[0].3),
+            None => String::new(),
+        };
+        // a first-purchase discount waiting for this customer (an invited friend, a finished trial)
+        let offer = if pattern == "pl" { self.offer(chat).0 } else { 0 };
+        if offer > 0 {
+            head.push_str(&format!("🎁 <b>{}٪ تخفیف خرید اول شما</b> موقع پرداخت خودش حساب می‌شه.\n\n", offer));
+        }
         let mut title = format!("{}{}", head, self.tx("txt_plans"));
         let back_lbl = self.bt("back");
         // back from the plans: to the service menu when there is one
@@ -3223,7 +3233,8 @@ impl Bot {
             "u" => ("👥 <b>کاربران و اتصالات</b>", vec![
                 vec![b("🔍 جستجوی کاربر", "a:search"), b("➕ ساخت کانفیگ", "a:mk")],
                 vec![b("🎁 هدیه حجم و زمان (جبران قطعی)", "a:gift")],
-                vec![b("🎁 تست رایگان", "a:trial"), b("🖥 نودها", "a:nodes")],
+                // the servers' state lives in the report bot when there is one
+                if crate::monitor::on() { vec![b("🎁 تست رایگان", "a:trial")] } else { vec![b("🎁 تست رایگان", "a:trial"), b("🖥 نودها", "a:nodes")] },
                 back,
             ]),
             "s" => ("⚙️ <b>تنظیمات و تعرفه پلن‌ها</b>", vec![
@@ -4382,7 +4393,7 @@ impl Bot {
             let told: i64 = self.db().get("bot_conflict_told").parse().unwrap_or(0);
             if now() - conflict < 300 && now() - told > 6 * 3600 {
                 self.db().set("bot_conflict_told", &now().to_string());
-                self.notify_admins("⚠️ <b>یک برنامه‌ی دیگر هم از همین ربات استفاده می‌کند</b> (مثلاً پنل روی سرور قبلی هنوز روشن است).\nهر دو به مشتری‌ها جواب می‌دهند و هر دو در کانال پست می‌گذارند. پنل قدیمی را خاموش کن: <code>systemctl disable --now kanki-panel</code>", None, None).await;
+                crate::monitor::notify("⚠️ <b>یک برنامه‌ی دیگر هم از همین ربات فروش استفاده می‌کند</b> (مثلاً پنل روی سرور قبلی هنوز روشن است).\nهر دو به مشتری‌ها جواب می‌دهند و هر دو در کانال پست می‌گذارند. پنل قدیمی را خاموش کن: <code>systemctl disable --now kanki-panel</code>", None).await;
             }
             // پرداخت‌های ارزی خودکار
             let waiting: Vec<i64> = self.db().with(|c| {

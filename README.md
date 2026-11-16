@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.48.1 — Every report in the report bot
+Server, tunnel and path problems are one message each, edited until they are over; the report bot's page shows the whole state of
+the panel, its servers and tunnels; nothing of the panel goes to the sales bot.
+
 ## New in 3.48 — A tidier panel, the bot managed in Telegram
 A dashboard of the panel and its problems only, thin two-line user rows, every section in the phone's bottom bar, Xray with its
 own Outbounds tab and full settings; sales, payments, plans and the channel are set in the bot's admin mini app, and the app's
