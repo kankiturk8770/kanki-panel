@@ -51,64 +51,79 @@ V.markTabs=markTabs;
 
 
 // ---------------------------------------------------------------- dashboard
-// (3.41) look, then decide: the server and its health at the top, six numbers, live traffic beside the
-// server's resources, then only what needs you (servers, tunnels and services in trouble, the latest
-// errors) and a summary of the connections. Starting and stopping services lives in VPN & cores, the
-// full log in the emergency page's Logs tab, every server in Servers.
-window.pDash=function(){dbReset();
- var iv=[1,2,5,10].map(function(n){return '<option value="'+n+'"'+(n==DB.iv?' selected':'')+'>'+N(n)+' '+t('seconds')+'</option>'}).join('');
+// (3.48) the panel at a glance and only what needs you. The panel server (version, uptime, resources, live
+// traffic), the users and the sales, then one list of problems: the panel's own services, the bot, a new version,
+// and one line each for servers and tunnels that are down (their details live in Servers and Tunnels). VPN cores
+// that are off on the panel's own server are not a problem: the panel's job there is the panel.
+window.pDash=function(){dbReset();DB.bot=null;
  $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Dashboard')+'</h2><p class="ltr kd2-sub" id="d_sub">…</p></div>'+
   '<div class="row kd2-acts"><span class="kpill" id="d_health"><i class="dot"></i><span>…</span></span>'+
   '<span class="live" id="d_live"><i></i><span id="d_lt">'+t('Live')+'</span></span>'+
-  '<label class="kd2-iv"><span class="vh">'+t('Refresh every')+'</span><select id="d_iv">'+iv+'</select></label>'+
   '<button type="button" class="kib" id="d_pause" aria-label="'+esc(t('Pause'))+'" title="'+esc(t('Pause'))+'">'+ic('pause',16)+'</button>'+
   '<button type="button" class="btn" onclick="newUser()">'+ic('plus',16)+'<span>'+t('New user')+'</span></button></div></div>'+
+ '<section class="card kd3-att" aria-labelledby="att_h"><div class="kc-h"><div><h3 id="att_h">'+t('Needs attention')+'</h3><small class="muted" id="att_sub">&nbsp;</small></div></div><div id="att" class="kd2-attl"><div class="kskel"></div></div></section>'+
  '<section class="kd2-kpis" id="kpis" aria-label="'+esc(t('Users'))+'">'+kpiSkel()+'</section>'+
  '<div class="kgrid">'+
   '<section class="card kd2-net c8"><div class="kc-h"><div><h3>'+t('Network speed')+'</h3><small class="muted ltr" id="n_if">&nbsp;</small></div>'+
    '<div class="kd2-big"><div class="dn"><small>↓ '+t('Download')+'</small><b id="n_rx" class="ltr">—</b></div><div class="upl"><small>↑ '+t('Upload')+'</small><b id="n_tx" class="ltr">—</b></div></div></div>'+
    '<div class="ch kd2-ch" id="ch_net"></div>'+
    '<dl class="kd2-foot ltr"><div><dt>'+t('Peak')+' ↓</dt><dd id="n_prx">—</dd></div><div><dt>'+t('Peak')+' ↑</dt><dd id="n_ptx">—</dd></div><div><dt>'+t('Total since boot')+' ↓</dt><dd id="n_trx">—</dd></div><div><dt>'+t('Total since boot')+' ↑</dt><dd id="n_ttx">—</dd></div></dl></section>'+
-  '<section class="card kd2-res c4"><div class="kc-h"><h3>'+t('Server resources')+'</h3></div><div class="kd2-gg">'+gcard('cpu','CPU',ic('cpu',14))+gcard('ram','RAM',ic('ram',14))+gcard('disk','Storage',ic('disk',14))+gcard('swap','Swap',ic('swap',14))+'</div></section>'+
-  '<section class="card kd2-att c8"><div class="kc-h"><div><h3>'+t('Needs attention')+'</h3><small class="muted" id="att_sub">&nbsp;</small></div><div class="kd2-chips" id="k310strip"></div></div><div id="att" class="kd2-attl"><div class="kskel"></div><div class="kskel"></div></div></section>'+
-  '<section class="card kd2-con c4"><div class="kc-h"><div><h3>'+t('TCP / UDP connections')+'</h3><small class="muted" id="c_sub">&nbsp;</small></div><a class="b2 sm" href="#ports">'+t('Ports')+'</a></div>'+
-   '<div class="kd2-big"><div class="dn"><small>TCP</small><b id="c_tcp" class="ltr">—</b></div><div class="upl"><small>UDP</small><b id="c_udp" class="ltr">—</b></div></div><div class="ch kd2-chs" id="ch_con"></div></section>'+
+  '<section class="card kd2-res c4"><div class="kc-h"><h3>'+t('Panel server')+'</h3></div><div class="kd2-gg">'+gcard('cpu','CPU',ic('cpu',14))+gcard('ram','RAM',ic('ram',14))+gcard('disk','Storage',ic('disk',14))+gcard('swap','Swap',ic('swap',14))+'</div></section>'+
+  '<section class="card c6"><div class="kc-h"><h3>'+t('Panel')+'</h3></div><dl class="kd3-dl" id="d_panel"><div class="kskel"></div></dl></section>'+
+  '<section class="card c6"><div class="kc-h"><h3>'+t('Sales')+'</h3><a class="b2 sm" href="#bot">'+t('Sales bot')+'</a></div><div class="kd3-sales" id="d_sales"><div class="kskel"></div></div></section>'+
  '</div>';
- $('#d_iv').onchange=function(){DB.iv=+this.value;localStorage.setItem('kk_div',DB.iv);dashTimers()};
  $('#d_pause').onclick=function(){DB.paused=!DB.paused;if(!DB.paused)DB.last=null;var l=t(DB.paused?'Resume':'Pause');this.innerHTML=ic(DB.paused?'play':'pause',16);this.title=l;this.setAttribute('aria-label',l);this.setAttribute('aria-pressed',DB.paused);dashLive(DB.paused?'off':'')};
  $('#kpis').onclick=function(e){var b=e.target.closest('[data-go]');if(b)goUsers(b.dataset.go)};
- dashTick();dashSys();dashTimers();dashErrs();
- strip();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page!='dash'){clearInterval(S.timer4);return}strip()},3000)};
+ // the bot and a new version: read once when the page opens (the version check asks GitHub)
+ api('GET','/api/bot').then(function(b){DB.bot=b;attention();dashSide()}).catch(function(){DB.bot={};attention()});
+ api('GET','/api/update/check').then(function(u){DB.upd=u;attention();dashSide()}).catch(function(){});
+ dashTick();dashSys();dashTimers();dashErrs()};
 var KPIS=[['a','Total users','users','all'],['g','Online','k310online','online'],['g','Active','k310ok','active'],['y','Expired / out of data','k310warn','finished'],['r','Disabled','k310off','disabled'],['a','Total traffic','k310traffic','']];
 function kpiOne(x,v,u){return '<button type="button" class="kstat tone-'+x[0]+'"'+(x[3]?' data-go="'+x[3]+'"':' disabled')+'><span class="kstat-l">'+t(x[1])+'</span><span class="kstat-v"><b class="ltr">'+v+'</b>'+(u?'<em>'+u+'</em>':'')+'</span><span class="kstat-i" aria-hidden="true">'+ic(x[2],18)+'</span></button>'}
 function kpiSkel(){return KPIS.map(function(x){return kpiOne(x,'—','')}).join('')}
 window.drawKpis=function(o){var el=$('#kpis');if(el&&o){var v=[o.users,o.online,o.active,o.expired,o.disabled];
  el.innerHTML=KPIS.map(function(x,i){return i<5?kpiOne(x,N(v[i]||0),''):kpiOne(x,N(o.traffic_gb||0),'GB')}).join('')}
- strip()};
-function chip(c,label,val,href){return '<a class="kpill '+c+'" href="'+href+'"><i class="dot '+c+'"></i><span>'+t(label)+'</span><b class="ltr">'+val+'</b></a>'}
-function strip(){var el=$('#k310strip');if(!el)return;var h='';
- var ns=S.nodes||[];if(ns.length){var on=ns.filter(function(n){return n.online||n.id=='local'}).length;h+=chip(on==ns.length?'g':on?'y':'r','Servers online',N(on)+' / '+N(ns.length),'#nodes')}
- var tl=(TN.d&&TN.d.tunnels)||[];if(tl.length){var up=tl.filter(function(x){return x.state=='up'}).length;h+=chip(up==tl.length?'g':up?'y':'r','Tunnels up',N(up)+' / '+N(tl.length),'#tunnels')}
- var sv=((DB.sys||{}).services||[]);if(sv.length){var bad=sv.filter(function(x){return !x.active}).length;h+=chip(bad?'y':'g','Services',bad?N(bad)+' '+t('stopped'):t('all running'),'#vpn')}
- if(el._h!==h){el._h=h;el.innerHTML=h}
- attention()}
-// what needs you now: each problem once, with where to fix it; the last errors of the log under them
-function attention(){var el=$('#att');if(!el)return;var it=[];
- (S.nodes||[]).forEach(function(n){var h=nHealthOf(n),loc=n.id=='local';
-  if(!loc&&!n.online)it.push(['r','nodes',esc(n.name),t('Disconnected')+' · '+t('Last contact')+' '+ago(n.last_sync),'#nodes']);
-  else if(h.c!='g')it.push([h.c,'nodes',esc(n.name),esc(t(h.l))+((h.r&&h.r.length)?' · '+esc(t(h.r.slice().sort(function(a,b){return b[0]-a[0]})[0][1])):''),'#nodes'])});
- ((TN.d&&TN.d.tunnels)||[]).forEach(function(x){if(x.enabled!==false&&x.state&&x.state!='up'&&x.state!='off')it.push([x.state=='partial'?'y':'r','tunnel',esc(x.name||x.id),t('Tunnel')+' · '+t(x.state=='partial'?'Partly down':'Down'),'#tunnels'])});
- (((DB.sys||{}).services)||[]).forEach(function(x){if(!x.active)it.push(['y','cores',esc(SVN[x.key]||x.key),t('Stopped'),'#vpn'])});
+ dashSide();attention()};
+// the panel card and the sales card
+function dashSide(){var p=$('#d_panel'),s=$('#d_sales');if(!p)return;var sy=DB.sys||{},b=DB.bot,u=DB.upd,o=DB.ov||{};
+ var row=function(k,v,c){return '<div><dt>'+t(k)+'</dt><dd>'+(c?'<i class="dot '+c+'"></i>':'')+v+'</dd></div>'};
+ var h=row('Version','<bdi class="ltr">v'+esc(sy.version||'')+'</bdi>'+(u&&u.available?' <a class="kd3-up" href="#settings" onclick="S.stsec=\'upd\'">'+t('Update available')+' · v'+esc(u.latest||'')+'</a>':''));
+ h+=row('Uptime',DB.last?upt(DB.last.uptime):'—');
+ var svs=(sy.services||[]).filter(function(x){return x.key=='panel'||x.key=='web'});
+ var web=svs.filter(function(x){return x.key=='web'})[0];if(web)h+=row('Web server',t(web.active?'Running':'Stopped'),web.active?'g':'r');
+ h+=row('Sales bot',!b?'…':!b.token_set?t('Not set'):b.paused?t('Paused'):b.online?'<bdi class="ltr">@'+esc(b.username||'')+'</bdi>':t('Offline'),!b||!b.token_set?'':b.paused?'y':b.online?'g':'r');
+ if(b&&b.mon_set)h+=row('Report bot',b.mon_online?'<bdi class="ltr">@'+esc(b.mon_username||'')+'</bdi>':t('Offline'),b.mon_online?'g':'r');
+ var ns=(S.nodes||[]).filter(function(n){return n.id!='local'}),tl=(TN.d&&TN.d.tunnels)||[];
+ h+=row('Servers',ns.length?N(ns.filter(function(n){return n.online}).length)+' / '+N(ns.length)+' '+t('online'):'—');
+ if(tl.length)h+=row('Tunnels',N(tl.filter(function(x){return x.state=='up'}).length)+' / '+N(tl.length)+' '+t('up'));
+ if(p._h!==h){p._h=h;p.innerHTML=h}
+ if(s){var sh='<div class="kd3-num"><small>'+t('Total sales')+'</small><b class="ltr">'+N(o.sales||0)+'</b></div><div class="kd3-num"><small>'+t('Revenue')+'</small><b class="ltr">'+N(o.revenue||0)+'</b><em>'+t('Toman')+'</em></div>'+
+  '<a class="kd3-num'+(o.pending_orders?' warn':'')+'" href="#bot"><small>'+t('Pending orders')+'</small><b class="ltr">'+N(o.pending_orders||0)+'</b></a>';
+  if(s._h!==sh){s._h=sh;s.innerHTML=sh}}}
+// what needs you now: one line per problem, with where to fix it; the last errors of the log under them
+function attention(){var el=$('#att');if(!el)return;var it=[],b=DB.bot,u=DB.upd,sy=DB.sys||{};
+ (sy.services||[]).forEach(function(x){if((x.key=='panel'||x.key=='web')&&!x.active)it.push(['r','settings',esc(SVN[x.key]||x.key),t('Stopped'),'#vpn/services'])});
+ if(b&&b.token_set&&!b.paused&&!b.online)it.push(['r','bot',t('Sales bot'),b.error?esc(b.error):t('Offline'),'#bot']);
+ if(b&&b.conflict)it.push(['r','bot',t('Sales bot'),t('Another program uses this bot token (an old panel still running?). Stop it, or make a new token in @BotFather.'),'#bot']);
+ if(b&&b.mon_set&&!b.mon_online)it.push(['y','bot',t('Report bot'),b.mon_error?esc(b.mon_error):t('Offline'),'#bot']);
+ if(b&&b.token_set===false)it.push(['y','bot',t('Sales bot'),t('Not set'),'#bot']);
+ var o=DB.ov||{};if(o.pending_orders)it.push(['y','card',t('Pending orders'),N(o.pending_orders)+' '+t('waiting for approval'),'#bot']);
+ var ns=(S.nodes||[]).filter(function(n){return n.id!='local'&&n.enabled!==false&&!n.online});
+ if(ns.length)it.push(['r','nodes',t('Servers'),N(ns.length)+' '+t('offline')+': '+ns.slice(0,3).map(function(n){return esc(n.name)}).join('، ')+(ns.length>3?' …':''),'#nodes']);
+ var td=((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false&&x.state&&x.state!='up'&&x.state!='off'});
+ if(td.length)it.push(['y','tunnel',t('Tunnels'),N(td.length)+' '+t('down')+': '+td.slice(0,3).map(function(x){return esc(x.name||x.id)}).join('، ')+(td.length>3?' …':''),'#tunnels']);
+ var dk=pc(sy.disk_used,sy.disk_total);if(dk>=85)it.push([dk>=95?'r':'y','disk',t('Disk'),t('Disk is getting full')+' ('+N(Math.round(dk))+'%)','#dash']);
+ if(u&&u.available)it.push(['b','refresh',t('New version'),'v'+esc(u.latest||'')+' — '+t('press to update'),'#settings',1]);
  var er=(DB.errs||[]).slice(-3).reverse(),h='';
- h+=it.length?'<ul class="kd2-list">'+it.slice(0,8).map(function(x){return '<li><a href="'+x[4]+'"><i class="dot '+x[0]+'"></i><span class="ki">'+ic(x[1],16)+'</span><b>'+x[2]+'</b><small>'+x[3]+'</small></a></li>'}).join('')+'</ul>'+
-   (it.length>8?'<p class="muted">+'+N(it.length-8)+'</p>':''):
-  '<div class="kd2-ok"><span>'+ic('check',18)+'</span><div><b>'+t('Everything is working')+'</b><small>'+t('No server, tunnel or service needs you right now.')+'</small></div></div>';
- h+='<div class="kd2-ev"><div class="kd2-evh"><b>'+t('Latest errors')+'</b><a href="#emergency/logs">'+t('All logs')+'</a></div>'+
-  (DB.errs==null?'<div class="kskel"></div>':er.length?er.map(function(x){return '<div class="kd2-evr"><time class="ltr">'+logTime(x.ts)+'</time><span class="ltr">'+esc(String(x.u||'').replace(/\.service$/,''))+'</span><code class="ltr">'+esc(x.m)+'</code></div>'}).join(''):'<p class="muted">'+t('No errors')+'</p>')+'</div>';
+ h+=it.length?'<ul class="kd2-list">'+it.map(function(x){return '<li><a href="'+x[4]+'"'+(x[5]?' onclick="S.stsec=\'upd\'"':'')+'><i class="dot '+x[0]+'"></i><span class="ki">'+ic(x[1],16)+'</span><b>'+x[2]+'</b><small>'+x[3]+'</small></a></li>'}).join('')+'</ul>':
+  '<div class="kd2-ok"><span>'+ic('check',18)+'</span><div><b>'+t('Everything is working')+'</b><small>'+t('The panel, the bot, the servers and the tunnels are fine.')+'</small></div></div>';
+ if(er.length)h+='<div class="kd2-ev"><div class="kd2-evh"><b>'+t('Latest errors')+'</b><a href="#emergency/logs">'+t('All logs')+'</a></div>'+
+  er.map(function(x){return '<div class="kd2-evr"><time class="ltr">'+logTime(x.ts)+'</time><span class="ltr">'+esc(String(x.u||'').replace(/\.service$/,''))+'</span><code class="ltr">'+esc(x.m)+'</code></div>'}).join('')+'</div>';
  var sub=$('#att_sub');if(sub)sub.textContent=it.length?N(it.length)+' '+t('item(s)'):t('All clear');
- var hp=$('#d_health');if(hp){var c=it.some(function(x){return x[0]=='r'})?'r':it.length?'y':'g';hp.className='kpill '+c;hp.innerHTML='<i class="dot '+c+'"></i><span>'+(c=='g'?t('Healthy'):N(it.length)+' '+t('issue(s)'))+'</span>'}
+ var hp=$('#d_health');if(hp){var c=it.some(function(x){return x[0]=='r'})?'r':it.some(function(x){return x[0]=='y'})?'y':'g';hp.className='kpill '+c;hp.innerHTML='<i class="dot '+c+'"></i><span>'+(c=='g'?t('Healthy'):N(it.filter(function(x){return x[0]!='b'}).length)+' '+t('issue(s)'))+'</span>'}
  if(el._h!==h){el._h=h;el.innerHTML=h}}
-function dashErrs(){api('GET','/api/logs?src=all&n=200').then(function(r){DB.errs=(r.lines||[]).filter(function(x){return lgLevel(x)=='e'});attention()}).catch(function(){DB.errs=[];attention()})}
+window.dashSide=dashSide;window.attention=attention;
+window.dashErrs=dashErrs;function dashErrs(){api('GET','/api/logs?src=all&n=200').then(function(r){DB.errs=(r.lines||[]).filter(function(x){return lgLevel(x)=='e'});attention()}).catch(function(){DB.errs=[];attention()})}
 
 // ---------------------------------------------------------------- tunnel map
 // The neon map (glowing fibres, packets that turn into the tunnel colour at the lock, cyan packets
@@ -342,8 +357,7 @@ function markAll(){var sk=V.secOf(S.page)[0];
 window.navMark=function(p){var sk=V.secOf(p)[0];
  $$('#side a[data-sec],#mbar a[data-sec]').forEach(function(a){var on=a.dataset.sec==sk;a.classList.toggle('on',on);if(on)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
  // a section that is not in the bottom bar is open: «More» is lit
- var mm=$('#mbmore');if(mm)mm.classList.toggle('on',!$('#mbar a.on'));
- V.drawSecTabs(p);k38More(0);V.markTabs();markAll()};
+ V.drawSecTabs(p);k38More(0);V.markTabs();markAll();if(window.mbarShow)setTimeout(mbarShow,30)};
 
 // ---------------------------------------------------------------- pages
 window.route=function(){var hs=location.hash||'';
@@ -379,21 +393,26 @@ function tabsShow(){$$('#pg .ku-tabs').forEach(function(r){var a=r.querySelector
  var rr=r.getBoundingClientRect(),ar=a.getBoundingClientRect();if(ar.left<rr.left+16||ar.right>rr.right-16)r.scrollLeft+=(ar.left+ar.width/2)-(rr.left+rr.width/2)})}
 new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();antidpi();reality();tabsShow()}).observe(document.body,{childList:true,subtree:true});
 
-// ---------------------------------------------------------------- users: two columns, data and expiry date
- // (3.40) a clean card: name and status, the data bar, data · days left · connections now / allowed,
- // and three quick buttons (copy link, QR, details); the protocols are in the details sheet
+// ---------------------------------------------------------------- users: one thin row of two lines each
+ // (3.48, back to the list the owner liked) line 1: online dot, name, what they are connected with now (protocol and
+ // exit flag), status and two quick buttons; line 2: data used with a thin bar, days left, connections now / allowed
+ // and, when offline, when they were last seen. A tap on the row opens the details sheet.
  window.uchip=function(u){var st=ustate(u),lv=liveOf(u),conn=Math.max(+u.online_connections||0,lv.length?1:0),on=conn>0,
    dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':''),pc=usage(u),now=Date.now()/1000,
    left=st=='disabled'?'':!u.expires_ts?'∞':u.expires_ts<now?t('Expired'):N(Math.ceil((u.expires_ts-now)/86400))+' '+t('days'),
-   badge=st=='active'?['g',t('Active')]:st=='finished'?['y',t(u.status=='Limited'?'Limited':'Expired')]:['r',t('Disabled')];
-  return '<div class="uchip uc st-'+st+(on?' on':'')+(S.sel[u.id]?' sel':'')+'" role="button" tabindex="0" data-id="'+u.id+'" aria-label="'+esc(u.username)+'">'+
-   '<span class="uc-h"><span class="dot '+dot+'"></span><span class="nm">'+esc(u.username)+'</span><span class="u-st '+badge[0]+'">'+badge[1]+'</span><span class="tick">'+ic('check',13)+'</span></span>'+
-   '<span class="k310bar'+(pc<0?' inf':pc>=90?' hot':pc>=70?' warm':'')+'"><i style="width:'+(pc<0?100:Math.max(3,pc))+'%"></i></span>'+
-   '<span class="uc-m"><b class="ltr" title="'+esc(exactB(u.used_bytes))+'">'+exactB(u.used_bytes,false)+(pc<0?' / ∞':' / '+N(u.traffic_limit_gb)+' GB')+'</b>'+
-    (left?'<span>'+left+'</span>':'')+'<span class="uc-c" title="'+esc(t('Connections'))+'">'+ic('users',13)+'<b class="ltr">'+N(conn)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b></span></span>'+
-   '<span class="uc-a"><button type="button" class="b2 sm" data-q="link" title="'+esc(t('Copy link'))+'" aria-label="'+esc(t('Copy link'))+'">'+ic('link',15)+'</button>'+
-    '<button type="button" class="b2 sm" data-q="qr" title="QR" aria-label="QR">'+ic('qr',15)+'</button>'+
-    '<button type="button" class="b2 sm" data-q="det">'+t('Details')+'</button></span></div>'};
+   badge=st=='active'?['g',t('Active')]:st=='finished'?['y',t(u.status=='Limited'?'Limited':'Expired')]:['r',t('Disabled')],
+   seen=u.last_seen_ts||u.last_seen||0;
+  return '<div class="uchip ur st-'+st+(on?' on':'')+(S.sel[u.id]?' sel':'')+'" role="button" tabindex="0" data-id="'+u.id+'" aria-label="'+esc(u.username)+'">'+
+   '<span class="ur1"><span class="tick">'+ic('check',13)+'</span><span class="dot '+dot+'"></span><span class="nm ltr">'+esc(u.username)+'</span>'+
+    (lv.length?'<span class="ulv">'+liveBadges(lv)+'</span>':'')+
+    '<span class="u-st '+badge[0]+'">'+badge[1]+'</span>'+
+    '<span class="ur-a"><button type="button" class="kib sm" data-q="link" title="'+esc(t('Copy link'))+'" aria-label="'+esc(t('Copy link'))+'">'+ic('link',15)+'</button>'+
+    '<button type="button" class="kib sm" data-q="qr" title="QR" aria-label="QR">'+ic('qr',15)+'</button></span></span>'+
+   '<span class="ur2"><span class="ur-u"><b class="ltr" title="'+esc(exactB(u.used_bytes))+'">'+exactB(u.used_bytes,false)+(pc<0?' / ∞':' / '+N(u.traffic_limit_gb)+' GB')+'</b>'+
+    '<span class="k310bar'+(pc<0?' inf':pc>=90?' hot':pc>=70?' warm':'')+'"><i style="width:'+(pc<0?100:Math.max(3,pc))+'%"></i></span></span>'+
+    (left?'<span class="ur-d">'+ic('clock',13)+left+'</span>':'')+
+    '<span class="ur-d" title="'+esc(t('Connections'))+'">'+ic('users',13)+'<b class="ltr">'+N(conn)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b></span>'+
+    (!on&&seen?'<span class="ur-d muted">'+ago(typeof seen=='number'?seen:Date.parse(seen)/1000)+'</span>':'')+'</span></div>'};
 
 look();
 })();

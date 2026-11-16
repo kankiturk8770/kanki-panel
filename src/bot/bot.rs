@@ -40,6 +40,8 @@ enum Wait {
     Gift(i64),
     /// the admin sends a premium emoji for a button (its key)
     Icon(String),
+    /// the admin sends the app's files one by one: 0 Android arm64, 1 Android armv7, 2 Windows
+    AppFile(usize),
 }
 
 #[derive(Clone)]
@@ -58,6 +60,13 @@ impl Default for Pending {
         Pending { plan: 0, kind: String::new(), target: 0, discount: String::new(), percent: 0, at: now() }
     }
 }
+
+/// The app files an admin sends to the bot, in order: (type, what to send, file endings)
+const APP_STEPS: &[(&str, &str, &[&str])] = &[
+    ("arm64-v8a", "📱 اندروید <b>arm64</b> (گوشی‌های جدید، ۶۴ بیتی) · فایل <code>.apk</code>", &["apk"]),
+    ("armeabi-v7a", "📱 اندروید <b>armv7</b> (گوشی‌های قدیمی، ۳۲ بیتی) · فایل <code>.apk</code>", &["apk"]),
+    ("windows", "💻 <b>ویندوز</b> · فایل <code>.exe</code>، <code>.msi</code> یا <code>.zip</code>", &["exe", "msi", "zip"]),
+];
 
 /// How long a started purchase (`pend`) is kept without any change
 const PEND_TTL: i64 = 86400;
@@ -84,6 +93,9 @@ pub struct Bot {
     members: Mutex<HashMap<i64, i64>>,
     /// the bot's @username (asked from Telegram once)
     me_name: Mutex<String>,
+    /// each chat's current menu message («screen»): the next menu replaces it, so a purchase reads as one page
+    /// that changes step by step instead of a pile of old menus. Never a message that delivered something.
+    screens: Mutex<HashMap<i64, i64>>,
 }
 
 /// One admin's copy of an order receipt: (chat, message, is a photo, text)
@@ -104,7 +116,7 @@ pub(crate) const BTNS: &[(&str, &str, &str)] = &[
     ("renew", "🔁 تمدید", "منوی اصلی"),
     ("guide", "🎬 آموزش اتصال", "منوی اصلی (فقط وقتی آموزشی اضافه شده باشد)"),
     ("ref", "👥 دعوت دوستان", "منوی اصلی"),
-    ("app", "📱 اپ اختصاصی اندروید", "منوی اصلی"),
+    ("app", "📱 دانلود اپ کانکی", "منوی اصلی"),
     ("support", "💬 پشتیبانی", "منوی اصلی"),
     ("guide_acc", "🎬 آموزش اتصال و استفاده از اپ", "زیر پیام اشتراک و دانلود اپ"),
     ("cfg_w", "📥 کانفیگ WireGuard", "زیر پیام اشتراک"),
@@ -140,7 +152,7 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("txt_trial_ready", "🎁 <b>اکانت تست شما آماده است</b>", "بالای پیام اکانت تست"),
     ("txt_bought", "✅ <b>خرید شما با موفقیت انجام شد!</b>", "بالای پیام بعد از خرید"),
     ("txt_renewed", "✅ <b>تمدید شما با موفقیت انجام شد!</b>", "بالای پیام بعد از تمدید"),
-    ("txt_cfg", "⚙️ اگه با برنامه‌ی دیگه‌ای (WireGuard، AmneziaWG، Hiddify…) وصل می‌شید، کانفیگ مخصوصش رو از دکمه‌های زیر بگیرید. همراه هر کانفیگ نوشته شده با کدوم برنامه کار می‌کنه و چطور واردش کنید 👇", "پایین پیام اشتراک"),
+    ("txt_cfg", "⚙️ دستگاهتون رو از دکمه‌های پایین انتخاب کنید تا برنامه، فایل و آموزش قدم‌به‌قدم بیاد؛ یا کانفیگ WireGuard / AmneziaWG و فایل AmneziaVPN رو مستقیم بگیرید 👇", "پایین پیام اشتراک"),
     ("txt_app", "بعد از نصب، «کد ورود» سرویس را در اپ وارد کنید.", "زیر لینک دانلود اپ"),
     ("txt_guides", "🎬 آموزش موردنظرتون رو از پایین انتخاب کنید 👇", "بالای فهرست آموزش‌ها"),
     ("txt_gift", "🎁 <b>کاربر گرامی، سلام</b> 🌷\n\nاز صبر و همراهی همیشگی شما صمیمانه سپاسگزاریم 💛\nبابت اختلالی که پیش آمد پوزش می‌خواهیم و به رسم جبران، هدیه‌ای کوچک از طرف ما به اشتراک شما اضافه شد:", "پیام هدیه‌ی حجم و زمان (جبران)"),
@@ -155,7 +167,7 @@ fn back_view(k: &str) -> &'static str {
     match k {
         "trial_gb" | "trial_days" => "a:trial",
         "card_number" | "card_holder" | "zp_merchant" | "zp_callback" | "np_key" | "np_coins" | "wallet_text" | "ton_address" | "star_usd" => "a:pay",
-        "ref_gb" | "ref_days" => "a:ref",
+        "ref_gb" | "ref_days" | "ref_pct" | "ref_new_pct" | "trial_offer_pct" => "a:ref",
         "app_link" | "win_link" | "support" | "channel" => "a:links",
         _ if k.starts_with("btn_") => "a:btns",
         _ if is_text_key(k) => "a:txts",
@@ -182,6 +194,9 @@ fn key_title(k: &str) -> String {
         "trial_days" => "مدت تست (روز)".into(),
         "ref_gb" => "گیگ هدیه‌ی دعوت".into(),
         "ref_days" => "روز هدیه‌ی دعوت".into(),
+        "ref_pct" => "درصد حجم هر خرید دوست برای دعوت‌کننده (۰ تا ۱۰۰)".into(),
+        "ref_new_pct" => "درصد تخفیف خرید اول دوستِ دعوت‌شده (۰ تا ۹۰)".into(),
+        "trial_offer_pct" => "درصد تخفیف خرید اول بعد از تمام شدن تست (۰ تا ۹۰)".into(),
         "ton_address" => "آدرس کیف پول TON (مثل UQ… از Tonkeeper)".into(),
         "star_usd" => "دلارِ هر استارز (پیش‌فرض 0.013: همان که تلگرام به صاحب ربات می‌دهد)".into(),
         _ => k.to_string(),
@@ -216,6 +231,16 @@ fn keeps(m: &Value) -> bool {
         return true;
     }
     let t = m["text"].as_str().or_else(|| m["caption"].as_str()).unwrap_or("");
+    ["/sub/", "://", "[Interface]"].iter().any(|x| t.contains(x))
+}
+
+/// A text for a link's query (a t.me share link)
+fn url_enc(s: &str) -> String {
+    s.bytes().map(|c| if c.is_ascii_alphanumeric() || b"-_.~".contains(&c) { (c as char).to_string() } else { format!("%{:02X}", c) }).collect()
+}
+
+/// A text that hands the customer something to keep (a subscription link, a config, a code to log in)
+fn delivered(t: &str) -> bool {
     ["/sub/", "://", "[Interface]"].iter().any(|x| t.contains(x))
 }
 
@@ -396,10 +421,10 @@ const V2RAY_HELP: &str = "📲 <b>اتصال با برنامه‌های V2Ray</b
 
 /// The two services a plan can sell: (database value, callback code, button, description in the buy menu)
 const SERVICES: &[(&str, &str, &str, &str)] = &[
-    ("v2ray", "v", "🌐 سرویس استاندارد (V2Ray)",
-     "🌐 <b>سرویس استاندارد (V2Ray / Xray)</b>\n• یک لینک اشتراک، برای v2rayNG، Streisand، V2Box و Nekoray\n• قیمت اقتصادی‌تر؛ مناسب کارهای روزمره و وب‌گردی"),
-    ("vip", "p", "🚀 سرویس VIP ضدتحریم",
-     "🚀 <b>سرویس VIP ضدتحریم</b> (اپ اختصاصی کانکی + AmneziaWG + WireGuard)\n• همه‌ی کشورها و سرورها هم‌زمان، مستقیم و از راه تانل\n• پروتکل‌های اختصاصی کانکی (KANKI MIX و microtun) برای عبور از فیلتر\n• مخصوص بازی (پینگ پایین)، اختلال شدید اینترنت و کاربر حرفه‌ای"),
+    ("v2ray", "v", "🌐 اقتصادی · V2Ray",
+     "🌐 <b>اقتصادی · V2Ray</b>\n• یک لینک اشتراک برای v2rayNG (اندروید)، V2Box و Streisand (آیفون) و v2rayN (ویندوز)\n• همه‌ی سرورها با همون یک لینک؛ سرورها عوض بشن خودش به‌روز می‌شه\n• قیمت کمتر؛ برای وب‌گردی، اینستاگرام، یوتیوب و تلگرام"),
+    ("vip", "p", "⚡️ VIP · V2Ray + WireGuard + Amnezia",
+     "⚡️ <b>VIP همه‌کاره</b>\n• همون لینک V2Ray، به‌اضافه‌ی کانفیگ <b>WireGuard</b> و <b>AmneziaWG</b> و فایل یک‌جای <b>AmneziaVPN</b> (آیفون، اندروید، ویندوز)\n• همه‌ی کشورها، مستقیم و از راه سرور ایران؛ وقتی اینترنت اختلال داره هم وصل می‌مونه\n• 🎁 اپ اختصاصی کانکی (اندروید و ویندوز) هم رایگان همراهشه: با یک کد، سریع‌ترین سرور رو خودش پیدا می‌کنه؛ برای بازی و پینگ پایین"),
 ];
 
 fn service_of_code(c: &str) -> &'static str {
@@ -520,7 +545,7 @@ impl Bot {
             app, token, admins,
             http: reqwest::Client::builder().timeout(std::time::Duration::from_secs(75)).connect_timeout(std::time::Duration::from_secs(15)).build().unwrap_or_default(),
             api: "https://api.telegram.org".into(),
-            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()), order_msgs: Mutex::new(HashMap::new()), members: Mutex::new(HashMap::new()), me_name: Mutex::new(String::new()),
+            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()), order_msgs: Mutex::new(HashMap::new()), members: Mutex::new(HashMap::new()), me_name: Mutex::new(String::new()), screens: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -917,20 +942,64 @@ impl Bot {
         self.edit_ok(chat, mid, text, kb).await;
     }
 
-    /// `edit`, with whether the customer has the text now (edited, or sent as a new message)
+    /// `edit`, with whether the customer has the text now (edited, or sent as a new message).
+    /// Every menu is a «screen»: the chat keeps one, and a new one takes the place of the last (see `screens`).
     async fn edit_ok(&self, chat: i64, mid: i64, text: &str, kb: Option<Value>) -> bool {
         // 0: no message to edit (or one that must stay, see `keeps`): a new one
         if mid == 0 {
-            return self.send(chat, text, kb).await.is_some();
+            let Some(m) = self.send(chat, text, kb).await else { return false };
+            self.new_screen(chat, m["message_id"].as_i64().unwrap_or(0), text).await;
+            return true;
         }
         let mut body = json!({"chat_id": chat, "message_id": mid, "text": text, "parse_mode": "HTML", "disable_web_page_preview": true});
         if let Some(k) = kb.clone() { body["reply_markup"] = k; }
         // a message that cannot be edited any more gets a new one; the same text again (a button tapped
         // twice) is not a reason to send a second message
         match self.call_res("editMessageText", body).await {
-            Ok(_) => true,
-            Err(e) if e.contains("message is not modified") => true,
-            Err(_) => self.send(chat, text, kb).await.is_some(),
+            Ok(_) => {}
+            Err(e) if e.contains("message is not modified") => {}
+            Err(_) => {
+                let Some(m) = self.send(chat, text, kb).await else { return false };
+                self.new_screen(chat, m["message_id"].as_i64().unwrap_or(0), text).await;
+                return true;
+            }
+        }
+        self.new_screen(chat, mid, text).await;
+        true
+    }
+
+    /// `mid` is now the chat's menu: the one before it (another message) is deleted. A message that delivered
+    /// something (a link, a config) is never kept as a screen, so it is never deleted later.
+    async fn new_screen(&self, chat: i64, mid: i64, text: &str) {
+        if chat == 0 || mid == 0 {
+            return;
+        }
+        let keep = delivered(text);
+        let old = {
+            let mut g = self.screens.lock().unwrap_or_else(|e| e.into_inner());
+            if g.len() > 100_000 {
+                g.clear();
+            }
+            if keep { g.remove(&chat) } else { g.insert(chat, mid) }
+        };
+        if let Some(o) = old.filter(|o| *o != mid) {
+            let _ = self.call_res("deleteMessage", json!({"chat_id": chat, "message_id": o})).await;
+        }
+    }
+
+    /// The chat's menu goes away (before a purchase is delivered: the payment page is not needed any more)
+    async fn close_screen(&self, chat: i64) {
+        let old = self.screens.lock().unwrap_or_else(|e| e.into_inner()).remove(&chat);
+        if let Some(o) = old {
+            let _ = self.call_res("deleteMessage", json!({"chat_id": chat, "message_id": o})).await;
+        }
+    }
+
+    /// A customer's typed answer (a name, a code, a link) is removed once it is read, so the chat stays one page
+    async fn drop_typed(&self, m: &Value) {
+        let (chat, id) = (m["chat"]["id"].as_i64().unwrap_or(0), m["message_id"].as_i64().unwrap_or(0));
+        if chat != 0 && id != 0 {
+            let _ = self.call_res("deleteMessage", json!({"chat_id": chat, "message_id": id})).await;
         }
     }
 
@@ -988,6 +1057,11 @@ impl Bot {
                 self.call("editMessageText", json!({"chat_id": chat, "message_id": mid, "text": body, "parse_mode": "HTML", "disable_web_page_preview": true})).await;
             }
         }
+    }
+
+    /// An alert to the bot's admins (the report bot uses this when it has no token of its own)
+    pub(crate) async fn notify_admins_pub(&self, text: &str, kb: Option<Value>) {
+        self.notify_admins(text, kb, None).await
     }
 
     async fn notify_admins(&self, text: &str, kb: Option<Value>, photo: Option<String>) {
@@ -1050,7 +1124,10 @@ impl Bot {
             self.send(chat, &format!("⚠️ حجم این فایل برای تلگرام زیاده؛ از صفحه‌ی لینک اشتراک دانلودش کنید.{}", if l.is_empty() { String::new() } else { format!("\n{}", esc(&l)) }), None).await;
             return;
         }
-        let Some(bytes) = crate::apps::read(&self.app, abi).await else { return };
+        let Some(bytes) = crate::apps::read(&self.app, abi).await else {
+            self.send(chat, "⚠️ ارسال فایل ناموفق بود؛ چند دقیقه‌ی دیگه دوباره امتحان کنید یا به پشتیبانی پیام بدید.", None).await;
+            return;
+        };
         let _ = self.call("sendChatAction", json!({"chat_id": chat, "action": "upload_document"})).await;
         let part = reqwest::multipart::Part::bytes(bytes).file_name(f.file_name()).mime_str("application/vnd.android.package-archive").unwrap();
         let form = reqwest::multipart::Form::new().text("chat_id", chat.to_string()).text("caption", cap).text("parse_mode", "HTML").part("document", part);
@@ -1123,33 +1200,37 @@ impl Bot {
         // a v2ray account: only its subscription link and how to add it to a v2ray app
         if u.service() == "v2ray" {
             return format!(
-                "👤 <b>{}</b>  ·  {}  ·  🌐 سرویس استاندارد (V2Ray)\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n🔗 <b>لینک اشتراک</b> (روش بزنید تا کپی بشه):\n<code>{}</code>\n\n{}",
+                "👤 <b>{}</b>  ·  {}  ·  🌐 اقتصادی (V2Ray)\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n🔗 <b>لینک اشتراک</b> (روش بزنید تا کپی بشه):\n<code>{}</code>\n\n{}",
                 esc(&u.username), st, left, u.used_gb(), left_text(u), u.online, u.max_conn, esc(&crate::api::v2_sub_link(&self.app, u)), V2RAY_HELP
             );
         }
-        let link = self.db().get("app_link");
-        let files = !crate::apps::list(&self.app).is_empty();
-        let step1 = if files {
-            "1️⃣ برنامه رو با دکمه‌ی «📱 دانلود اپ» زیر همین پیام بگیرید و نصب کنید.\n\n".to_string()
-        } else if link.is_empty() {
-            String::new()
-        } else {
-            format!("1️⃣ برنامه رو از لینک زیر نصب کنید:\n{}\n\n", esc(&link))
-        };
-        let step2 = if step1.is_empty() { "با این کد وارد برنامه‌ی کانکی بشید:" } else { "2️⃣ با این کد وارد برنامه بشید:" };
         format!(
-            "👤 <b>{}</b>  ·  {}\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n📱 <b>بهترین راه (پیشنهاد ما): برنامه‌ی کانکی</b>\n{}{}\n<code>{}</code>\n\n🔗 لینک اشتراک (برای برنامه‌های دیگه):\n<code>{}/sub/{}</code>",
-            esc(&u.username), st, left, u.used_gb(), left_text(u), u.online, u.max_conn, step1, step2, u.sub_code(), sub_origin(&self.app), u.sub_code()
+            "👤 <b>{}</b>  ·  {}  ·  ⚡️ VIP\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n{}",
+            esc(&u.username), st, left, u.used_gb(), left_text(u), u.online, u.max_conn, self.keys_text(u)
         )
+    }
+
+    /// What a customer connects with, in the order most of them use: the V2Ray subscription link (v2rayNG, V2Box,
+    /// Streisand, Hiddify), then the Kanki app's code. WireGuard and AmneziaVPN come from the buttons below.
+    fn keys_text(&self, u: &User) -> String {
+        let mut t = String::new();
+        if u.service() == "v2ray" || crate::api::links_text(&self.app, u).is_some() {
+            t.push_str(&format!("🔗 <b>لینک اشتراک V2Ray</b> (v2rayNG · V2Box · Streisand · Hiddify)، روش بزنید کپی می‌شه:\n<code>{}</code>", esc(&crate::api::v2_sub_link(&self.app, u))));
+        } else {
+            t.push_str(&format!("🔗 <b>صفحه‌ی اشتراک</b>:\n<code>{}/sub/{}</code>", sub_origin(&self.app), u.sub_code()));
+        }
+        if u.service() != "v2ray" {
+            t.push_str(&format!("\n\n📱 <b>کد ورود اپ کانکی</b> (اندروید و ویندوز):\n<code>{}</code>", u.sub_code()));
+        }
+        t
     }
 
     /// The message after a purchase, renewal or trial: short, one link to copy and three buttons (the apps, the
     /// video tutorial, support). Everything else (configs, backups) is in the mini app and «📊 سرویس‌های من».
     fn delivery(&self, head: &str, u: &User, plan: &str) -> (String, Value) {
         let exp = if u.expires_at > 0 { crate::channel::fa_datetime(u.expires_at).0 } else { "نامحدود".into() };
-        let link = if u.service() == "v2ray" { crate::api::v2_sub_link(&self.app, u) } else { format!("{}/sub/{}", sub_origin(&self.app), u.sub_code()) };
-        let t = format!("{}\n\n📦 پلن: <b>{}</b>\n👤 حساب: <b>{}</b>\n⏳ انقضا: <b>{}</b>\n\n🔗 <b>لینک اتصال هوشمند شما:</b>\n<code>{}</code>\n\n📲 <b>روی کدوم دستگاه وصل می‌شید؟</b>\nدکمه‌ی دستگاهتون رو بزنید؛ برنامه‌ی مناسب، فایل و آموزش قدم‌به‌قدم همین‌جا میاد 👇",
-            head, esc(plan), esc(&u.username), exp, esc(&link));
+        let t = format!("{}\n\n📦 پلن: <b>{}</b>\n👤 حساب: <b>{}</b>\n⏳ انقضا: <b>{}</b>\n\n{}\n\n📲 <b>روی کدوم دستگاه وصل می‌شید؟</b>\nدکمه‌ی دستگاهتون رو بزنید؛ برنامه‌ی مناسب (v2rayNG، V2Box، AmneziaVPN، WireGuard)، فایل و آموزش قدم‌به‌قدم همین‌جا میاد 👇",
+            head, esc(plan), esc(&u.username), exp, self.keys_text(u));
         let mut rows: Kb = vec![self.how_devices_kb(u.id)];
         let mini = crate::miniapp::url(&self.app);
         if mini.starts_with("https://") {
@@ -1185,18 +1266,17 @@ impl Bot {
         let v2 = u.service() == "v2ray";
         let links = v2 || crate::api::links_text(&self.app, u).is_some();
         let kanki = !v2 && match os {
-            "a" => !crate::apps::list(&self.app).is_empty() || self.db().get("app_link").trim().starts_with("https://"),
-            "w" => self.db().get("win_link").trim().starts_with("https://"),
+            "a" => !crate::apps::phones(&self.app).is_empty() || self.db().get("app_link").trim().starts_with("https://"),
+            "w" => crate::apps::get_file(&self.app, "windows").is_some() || self.db().get("win_link").trim().starts_with("https://"),
             _ => false,
         };
         // AmneziaVPN holds WireGuard, AmneziaWG and the Xray links (not Hysteria2): one backup file
         let amz = (wg && !v2) || crate::xray::panel::user_links(&self.app, u).iter().any(|(_, l)| crate::amnezia::server(l, "").is_some());
+        // in the order most customers use: a V2Ray app first, then AmneziaVPN, the Kanki app, WireGuard
         let mut v: Vec<&'static str> = vec![];
-        if kanki { v.push("k"); }
-        // on an iPhone AmneziaVPN comes first (the Kanki app is not there); a V2Ray account still gets its V2Ray app first elsewhere
-        if amz && (!v2 || os == "i") { v.push("z"); }
         if links { v.push("v"); }
-        if amz && v2 && os != "i" { v.push("z"); }
+        if amz { v.push("z"); }
+        if kanki { v.push("k"); }
         if have.contains(&"wireguard") && !v2 { v.push("g"); }
         v
     }
@@ -1238,10 +1318,14 @@ impl Bot {
             "k" => {
                 let mut rows: Kb = vec![];
                 let get = if os == "w" {
-                    rows.push(store("⬇️ دانلود Kanki VPN برای ویندوز", self.db().get("win_link").trim()));
-                    "1️⃣ برنامه رو با دکمه‌ی پایین دانلود و نصب کنید."
+                    // the Windows file sent to the bot, else the download link
+                    match crate::apps::get_file(&self.app, "windows") {
+                        Some(f) => rows.push(vec![b(&format!("⬇️ Kanki VPN ویندوز · {}", mb(f.size)), "apk:windows")]),
+                        None => rows.push(store("⬇️ دانلود Kanki VPN برای ویندوز", self.db().get("win_link").trim())),
+                    }
+                    "1️⃣ برنامه رو با دکمه‌ی پایین بگیرید و نصب کنید."
                 } else {
-                    let files = crate::apps::list(&self.app);
+                    let files = crate::apps::phones(&self.app);
                     if files.is_empty() {
                         rows.push(store("⬇️ دانلود Kanki VPN", self.db().get("app_link").trim()));
                     }
@@ -1252,7 +1336,7 @@ impl Bot {
                     "1️⃣ فایل نصب رو از دکمه‌ی پایین بگیرید و نصب کنید (اگه مطمئن نیستید «۶۴ بیتی» رو بگیرید)."
                 };
                 rows.push(back);
-                self.send(chat, &format!("⭐️ <b>اپ اختصاصی Kanki VPN</b>\nهمه‌ی سرورها و همه‌ی پروتکل‌ها (حتی پروتکل‌های ضدفیلتر کانکی) با یک کد؛ سرور خوب رو خودش پیدا می‌کنه.\n\n{}\n2️⃣ برنامه رو باز کنید و این <b>کد ورود</b> رو بزنید (روش بزنید کپی می‌شه):\n<code>{}</code>\n3️⃣ دکمه‌ی بزرگ اتصال رو بزنید. تمام ✅", get, u.sub_code()), Some(ik(rows))).await;
+                self.send(chat, &format!("📱 <b>اپ کانکی (Kanki VPN)</b>\nاپ خود ما: همه‌ی سرورها و پروتکل‌ها (حتی پروتکل‌های ضدفیلتر کانکی) با یک کد؛ سریع‌ترین سرور رو خودش پیدا می‌کنه.\n\n{}\n2️⃣ برنامه رو باز کنید و این <b>کد ورود</b> رو بزنید (روش بزنید کپی می‌شه):\n<code>{}</code>\n3️⃣ دکمه‌ی بزرگ اتصال رو بزنید. تمام ✅", get, u.sub_code()), Some(ik(rows))).await;
             }
             "z" => {
                 let url = match os {
@@ -1338,8 +1422,8 @@ impl Bot {
         }
         // the app's install files (sent as a new message, so this account message stays); a v2ray account
         // connects with a v2ray app, not the Kanki app. No rename here: the admin renames when it is needed.
-        if !crate::apps::list(&self.app).is_empty() && u.service() != "v2ray" {
-            rows.push(vec![b("📱 دانلود اپ اختصاصی اندروید", "app2")]);
+        if !crate::apps::phones(&self.app).is_empty() && u.service() != "v2ray" {
+            rows.push(vec![b("📱 دانلود اپ کانکی", "app2")]);
         }
         rows.append(&mut extra);
         ik(rows)
@@ -1558,9 +1642,59 @@ impl Bot {
         ik(rows)
     }
 
-    fn price(&self, p: &Plan, pe: &Pending) -> (i64, f64) {
-        let f = (100 - pe.percent.clamp(0, 100)) as f64 / 100.0;
+    /// The price of a plan for this buyer: a discount code, else (on a new purchase) their first-purchase offer
+    fn price(&self, uid: i64, p: &Plan, pe: &Pending) -> (i64, f64) {
+        let pct = if pe.percent > 0 { pe.percent } else if pe.kind != "renew" { self.offer(uid).0 } else { 0 };
+        let f = (100 - pct.clamp(0, 100)) as f64 / 100.0;
         (((p.toman as f64) * f).round() as i64, ((plan_usd(self.db(), p) * f) * 100.0).round() / 100.0)
+    }
+
+    /// Has this customer ever got a paid order delivered?
+    fn bought(&self, uid: i64) -> bool {
+        self.db().with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE tg_id=?1 AND status='done'", [uid], |r| r.get::<_, i64>(0)).unwrap_or(0)) > 0
+    }
+
+    /// The first-purchase offer of a customer who never bought: (percent, until); (0, 0) when none.
+    /// An invited friend gets it on arrival, a finished trial gets it for two days.
+    fn offer(&self, uid: i64) -> (i64, i64) {
+        let (pct, until): (i64, i64) = self.db().with(|c| c.query_row(
+            "SELECT COALESCE(offer_pct,0), COALESCE(offer_until,0) FROM bot_users WHERE tg_id=?1", [uid], |r| Ok((r.get(0)?, r.get(1)?))).unwrap_or((0, 0)));
+        if pct <= 0 || until <= now() || self.bought(uid) {
+            return (0, 0);
+        }
+        (pct.clamp(1, 90), until)
+    }
+
+    /// The admin's app files page: each file the bot gives (type, version, size, date), and the upload button
+    fn apps_view(&self) -> (String, Value) {
+        let files = crate::apps::list(&self.app);
+        let mut t = "📱 <b>فایل‌های اپ کانکی</b>\n\nفایل‌ها فقط در تلگرام نگه داشته می‌شوند و ربات با یک دکمه به کاربر می‌دهد (اندروید از «دانلود اپ»، ویندوز از راهنمای اتصال ویندوز). فایل تازه‌ی هر نوع جای قبلی را می‌گیرد.\n".to_string();
+        let mut rows: Kb = vec![vec![b("⬆️ فرستادن نسخه‌ی تازه (arm64 ← armv7 ← ویندوز)", "aup")]];
+        if files.is_empty() {
+            t.push_str("\nهنوز فایلی نیست.");
+        }
+        for f in &files {
+            let (title, _) = crate::apps::title(&f.abi);
+            let (d, _) = crate::channel::fa_datetime(f.at);
+            t.push_str(&format!("\n• <b>{}</b>: {}{} · {} · {}{}", title, esc(&f.file_name()), if f.version.is_empty() { String::new() } else { format!(" · v{}", esc(&f.version)) }, mb(f.size), d,
+                if f.tg_only { "" } else { " · روی سرور" }));
+            rows.push(vec![b(&format!("🗑 حذف {}", title), &format!("adel:{}", f.abi))]);
+        }
+        rows.push(vec![b("⬅️ تنظیمات", "ag:s")]);
+        (t, ik(rows))
+    }
+
+    /// For the mini app: the first-purchase discount this customer has now (0 = none)
+    pub(crate) fn offer_pct(&self, uid: i64) -> i64 {
+        self.offer(uid).0
+    }
+
+    /// Gives a customer a first-purchase offer (only a larger one replaces what they have)
+    fn give_offer(&self, uid: i64, pct: i64, secs: i64) -> bool {
+        if pct <= 0 || self.bought(uid) || self.offer(uid).0 >= pct {
+            return false;
+        }
+        self.db().exec("UPDATE bot_users SET offer_pct=?1, offer_until=?2 WHERE tg_id=?3", &[&pct.clamp(1, 90), &(now() + secs), &uid]).unwrap_or(0) == 1
     }
 
     /// Is this payment method offered for these prices? (the same test for the buttons and for the payment)
@@ -1632,8 +1766,6 @@ impl Bot {
         }
         let me = self.clone();
         tokio::spawn(async move { me.background().await });
-        let me2 = self.clone();
-        tokio::spawn(async move { me2.watch().await });
         let mut offset = 0i64;
         loop {
             if self.db().on("bot_paused") {
@@ -1736,8 +1868,16 @@ impl Bot {
         if text.starts_with("/start") {
             let ref_by = text.split_whitespace().nth(1).and_then(|s| s.strip_prefix("ref_")).and_then(|s| s.parse::<i64>().ok())
                 .filter(|r| *r != uid).unwrap_or(0);
+            let known = |id: i64| self.db().with(|c| c.query_row("SELECT COUNT(*) FROM bot_users WHERE tg_id=?1", [id], |r| r.get::<_, i64>(0)).unwrap_or(0)) > 0;
+            // only someone who really uses the bot can invite; only a newcomer can be invited
+            let ref_by = if ref_by > 0 && known(ref_by) { ref_by } else { 0 };
+            let fresh = ref_by > 0 && !known(uid);
             self.touch(uid, &m["from"], ref_by);
             self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid);
+            // a new customer from a friend's link: a first-purchase discount for a week, and the friend hears of it
+            if fresh {
+                self.welcome_friend(uid, ref_by, &name).await;
+            }
             if !self.joined(uid).await {
                 return self.ask_join(chat).await;
             }
@@ -1751,7 +1891,8 @@ impl Bot {
                 self.send(chat, &t, Some(ik(rows))).await;
                 return;
             }
-            self.send(chat, &self.tx("welcome"), Some(self.home_kb(uid))).await;
+            self.drop_typed(m).await;
+            self.edit_ok(chat, 0, &self.tx("welcome"), Some(self.home_kb(uid))).await;
             self.set_menu(uid).await;
             return;
         }
@@ -1773,17 +1914,18 @@ impl Bot {
         self.touch(uid, &m["from"], 0);
         let wait = self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid);
         let Some(w) = wait else {
-            self.send(chat, &self.tx("txt_menu"), Some(self.home_kb(uid))).await;
+            self.edit_ok(chat, 0, &self.tx("txt_menu"), Some(self.home_kb(uid))).await;
             return;
         };
         match w {
             Wait::Receipt(method) => self.got_receipt(uid, chat, &name, &method, m).await,
             Wait::TonTx(oid) => {
+                self.drop_typed(m).await;
                 let again = |me: &Self| me.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::TonTx(oid));
                 let kb = Some(ik(vec![vec![b("🔍 بررسی پرداخت", &format!("tchk:{}", oid))], vec![b(&self.bt("home"), "home")]]));
                 let Some(h) = crate::pay::hash_in(&text) else {
                     again(self);
-                    self.send(chat, "🔗 لینک تراکنش (از Tonviewer یا Tonscan یا تاریخچه‌ی Tonkeeper) یا هش تراکنش رو بفرستید. پرداخت با کامنت درست خودکار تأیید می‌شه.", kb).await;
+                    self.edit_ok(chat, 0, "🔗 لینک تراکنش (از Tonviewer یا Tonscan یا تاریخچه‌ی Tonkeeper) یا هش تراکنش رو بفرستید. پرداخت با کامنت درست خودکار تأیید می‌شه.", kb).await;
                     return;
                 };
                 match self.ton_check(oid, Some(&h)).await {
@@ -1791,26 +1933,28 @@ impl Bot {
                     Ok(false) => {
                         if self.ton_order(oid).is_some() {
                             again(self);
-                            self.send(chat, "⏳ هنوز روی شبکه پیدا نشد؛ چند ثانیه بعد «بررسی پرداخت» رو بزنید.", kb).await;
+                            self.edit_ok(chat, 0, "⏳ هنوز روی شبکه پیدا نشد؛ چند ثانیه بعد «بررسی پرداخت» رو بزنید.", kb).await;
                         }
                     }
                     Err(e) => {
                         if self.ton_order(oid).is_some() { again(self); }
-                        self.send(chat, &format!("⚠️ {}", e), kb).await;
+                        self.edit_ok(chat, 0, &format!("⚠️ {}", e), kb).await;
                     }
                 }
             }
-            Wait::CfgName(next) => match self.check_name(&text, 0) {
-                Ok(n) => {
-                    let _ = self.db().exec("UPDATE bot_users SET cfg_name=?1 WHERE tg_id=?2", &[&n, &uid]);
-                    self.send(chat, &format!("✅ نام کانفیگ شما: <b>{}</b>", esc(&n)), None).await;
-                    self.after_name(uid, chat, &next).await;
+            Wait::CfgName(next) => {
+                self.drop_typed(m).await;
+                match self.check_name(&text, 0) {
+                    Ok(n) => {
+                        let _ = self.db().exec("UPDATE bot_users SET cfg_name=?1 WHERE tg_id=?2", &[&n, &uid]);
+                        self.after_name(uid, chat, &next).await;
+                    }
+                    Err(e) => {
+                        self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::CfgName(next));
+                        self.edit_ok(chat, 0, &e, Some(ik(vec![vec![b(&self.bt("back"), "home")]]))).await;
+                    }
                 }
-                Err(e) => {
-                    self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::CfgName(next));
-                    self.send(chat, &e, Some(ik(vec![vec![b(&self.bt("back"), "home")]]))).await;
-                }
-            },
+            }
             Wait::Rename(id) => {
                 let Some(u) = self.db().user(id).filter(|_| self.admin(uid)) else { return };
                 match self.check_name(&text, id) {
@@ -1832,10 +1976,11 @@ impl Bot {
                 }
             }
             Wait::DiscountUse => {
+                self.drop_typed(m).await;
                 let code = text.to_uppercase();
                 // 5 tries an hour: a code cannot be found by guessing
                 if !self.admin(uid) && !crate::limit::hit("disc", &uid.to_string(), 5, 3600) {
-                    self.send(chat, "⏳ چند بار کد اشتباه زده شد؛ یک ساعت بعد دوباره امتحان کنید.", Some(self.home_kb(uid))).await;
+                    self.edit_ok(chat, 0, "⏳ چند بار کد اشتباه زده شد؛ یک ساعت بعد دوباره امتحان کنید.", Some(self.home_kb(uid))).await;
                     return;
                 }
                 match self.discount_percent(&code) {
@@ -1848,10 +1993,15 @@ impl Bot {
                             pe.at = now();
                             pe.plan
                         };
-                        self.send(chat, &format!("✅ کد تخفیف {}٪ اعمال شد", p), None).await;
                         self.show_plan(chat, None, uid, plan_id).await;
                     }
-                    None => { self.send(chat, "❌ کد تخفیف نامعتبر یا تمام شده است.", Some(self.home_kb(uid))).await; }
+                    None => {
+                        // the plan again, with the code button: the customer can try once more or pay without it
+                        self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::DiscountUse);
+                        let pid = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).map(|p| p.plan).unwrap_or(0);
+                        let back = if pid > 0 { format!("pl:{}", pid) } else { "home".into() };
+                        self.edit_ok(chat, 0, "❌ این کد تخفیف معتبر نیست یا تمام شده.\n\nدوباره بفرستید یا برگردید و بدون کد پرداخت کنید 👇", Some(ik(vec![vec![b(&self.bt("back"), &back)]]))).await;
+                    }
                 }
             }
             other if self.admin(uid) => self.admin_input(uid, chat, other, &text, m).await,
@@ -1905,13 +2055,15 @@ impl Bot {
         let reference = photo.clone().unwrap_or_else(|| m["text"].as_str().unwrap_or("").to_string());
         // the customer has paid by now: the order is kept, and the admin sees when its code is no longer good
         let code_ok = pe.discount.is_empty() || self.discount_percent(&pe.discount) == Some(pe.percent);
-        let (t, u) = self.price(&p, &pe);
+        let (t, u) = self.price(uid, &p, &pe);
         let amount = if method == "card" { t.to_string() } else { u.to_string() };
         let oid = self.new_order(uid, &p, &pe, method, &amount, "pending", &reference);
-        self.send(chat, &format!("✅ رسید سفارش #{} ثبت شد؛ بعد از تأیید، اشتراک خودکار فعال می‌شود.", oid), Some(self.home_kb(uid))).await;
+        self.edit_ok(chat, 0, &format!("✅ <b>رسید سفارش #{} ثبت شد</b>\n\nبعد از تأیید پشتیبانی، اشتراک خودش همین‌جا میاد (معمولاً چند دقیقه). لازم نیست کاری بکنید 🙏", oid), Some(self.home_kb(uid))).await;
+        let offer = if pe.discount.is_empty() && pe.kind != "renew" { self.offer(uid).0 } else { 0 };
         let cap = format!(
-            "🧾 <b>سفارش جدید #{}</b>\n👤 {} · <code>{}</code>\n📦 {} ({})\n💳 {} · {}{}",
+            "🧾 <b>سفارش جدید #{}</b>\n👤 {} · <code>{}</code>\n📦 {} ({})\n💳 {} · {}{}{}",
             oid, esc(name), uid, esc(&p.name), if pe.kind == "renew" { "تمدید" } else { "جدید" }, method, amount,
+            if offer > 0 { format!("\n🎁 تخفیف خرید اول {}٪", offer) } else { String::new() },
             if pe.discount.is_empty() { String::new() } else {
                 format!("\n🎟 {} ({}٪){}", esc(&pe.discount), pe.percent, if code_ok { "" } else { "\n⚠️ این کد تخفیف دیگر معتبر نیست (تمام، حذف یا منقضی شده)" })
             }
@@ -1997,7 +2149,6 @@ impl Bot {
                 let Some(h) = self.name_hint(uid) else { return };
                 let _ = self.db().exec("UPDATE bot_users SET cfg_name=?1 WHERE tg_id=?2", &[&h, &uid]);
                 self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid);
-                self.edit(chat, mid, &format!("✅ نام کانفیگ شما: <b>{}</b>", esc(&h)), None).await;
                 return self.after_name(uid, chat, if d.ends_with("trial") { "trial" } else { "buy" }).await;
             }
             "trial" => {
@@ -2018,11 +2169,8 @@ impl Bot {
                 return self.edit(chat, mid, if d == "my" { "📊 سرویس خودتون رو از پایین انتخاب کنید 👇" } else { "🔁 سرویسی که می‌خواید تمدید کنید رو از پایین انتخاب کنید 👇" }, Some(ik(rows))).await;
             }
             "ref" => {
-                let me = self.my_username().await;
-                let cnt: i64 = self.db().with(|c| c.query_row("SELECT COUNT(*) FROM bot_users WHERE ref_by=?1", [uid], |r| r.get(0)).unwrap_or(0));
-                return self.edit(chat, mid, &format!(
-                    "👥 <b>دعوت دوستان</b>\n\nبا اولین خرید هر دوستی که با لینک شما بیاید، <b>{} گیگ و {} روز</b> هدیه به سرویس شما اضافه می‌شود 🎁\n\n🔗 لینک شما:\n<code>https://t.me/{}?start=ref_{}</code>\n\n👤 تعداد دعوت‌ها: {}",
-                    self.db().get("ref_gb"), self.db().get("ref_days"), me, uid, cnt), Some(ik(vec![back("home")]))).await;
+                let (t, kb) = self.ref_page(uid).await;
+                return self.edit(chat, mid, &t, Some(kb)).await;
             }
             "app" => {
                 let (text, rows) = self.app_menu(true);
@@ -2317,7 +2465,8 @@ impl Bot {
     async fn show_plan(&self, chat: i64, mid: Option<i64>, uid: i64, pid: i64) -> bool {
         let Some(p) = self.plan_on_sale(pid) else { return false };
         let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned().unwrap_or_default();
-        let (t, u) = self.price(&p, &pe);
+        let (t, u) = self.price(uid, &p, &pe);
+        let offer = if pe.percent == 0 && pe.kind != "renew" { self.offer(uid).0 } else { 0 };
         let mut rows: Kb = vec![];
         for (m, k) in [("card", "pay_card"), ("zp", "pay_zp"), ("ton", "pay_ton"), ("stars", "pay_stars"), ("np", "pay_np"), ("wallet", "pay_wallet")] {
             if self.method_ok(m, t, u) {
@@ -2339,17 +2488,16 @@ impl Bot {
         }
         let txt = format!(
             "📦 <b>{}</b>\n{}\nحجم: {} · مدت: {} روز · {} کاربر{}\nقیمت: <b>{}</b>{}{}{}\n\nروش پرداخت را انتخاب کنید:",
-            esc(&p.name), if p.service == "v2ray" { "🌐 سرویس استاندارد (V2Ray): لینک اشتراک برای v2rayNG، Streisand، V2Box" } else { "🚀 سرویس VIP: اپ کانکی، AmneziaWG، WireGuard و همه‌ی سرورها" }, if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, p.days, p.conns,
+            esc(&p.name), if p.service == "v2ray" { "🌐 اقتصادی · V2Ray: یک لینک برای v2rayNG، V2Box، Streisand و v2rayN" } else { "⚡️ VIP: لینک V2Ray + WireGuard + AmneziaVPN (و اپ کانکی رایگان)" }, if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, p.days, p.conns,
             if p.countries > 0 { format!(" · {} کشور", p.countries) } else { String::new() },
-            if p.old_toman > t && pe.percent == 0 { format!("<s>{}</s>  {}", toman(p.old_toman), toman(t)) } else { toman(t) },
+            if offer > 0 && p.toman > t { format!("<s>{}</s>  {}", toman(p.old_toman.max(p.toman)), toman(t)) }
+            else if p.old_toman > t && pe.percent == 0 { format!("<s>{}</s>  {}", toman(p.old_toman), toman(t)) } else { toman(t) },
             if u > 0.0 { format!("  ·  <b>{}$</b>", u) } else { String::new() },
             crypto,
-            if pe.percent > 0 { format!("\n🎟 تخفیف {}٪ اعمال شده", pe.percent) } else { String::new() }
+            if pe.percent > 0 { format!("\n🎟 تخفیف {}٪ اعمال شده", pe.percent) }
+            else if offer > 0 { format!("\n🎁 <b>{}٪ تخفیف خرید اول شما</b> اعمال شده", offer) } else { String::new() }
         );
-        match mid {
-            Some(m) => self.edit_ok(chat, m, &txt, Some(ik(rows))).await,
-            None => self.send(chat, &txt, Some(ik(rows))).await.is_some(),
-        }
+        self.edit_ok(chat, mid.unwrap_or(0), &txt, Some(ik(rows))).await
     }
 
     async fn pay(&self, uid: i64, chat: i64, mid: i64, method: &str) {
@@ -2359,7 +2507,7 @@ impl Bot {
         if !self.discount_still_ok(uid, &pe) {
             return self.discount_gone(uid, chat, &pe).await;
         }
-        let (t, u) = self.price(&p, &pe);
+        let (t, u) = self.price(uid, &p, &pe);
         let db = self.db();
         let home = Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]));
         // an old button (the method was switched off or the plan has no price for it since)
@@ -2435,7 +2583,7 @@ impl Bot {
         if !self.discount_still_ok(uid, &pe) {
             return self.discount_gone(uid, chat, &pe).await;
         }
-        let (t, usd) = self.price(&p, &pe);
+        let (t, usd) = self.price(uid, &p, &pe);
         let home = Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]));
         // an old button: the method switched off since, or a coin that is not offered (any text can come in a button)
         if !self.method_ok("np", t, usd) {
@@ -2536,7 +2684,7 @@ impl Bot {
                 return Ok(false);
             }
             self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&tg);
-            self.send(tg, &format!("✅ پرداخت <b>{} TON</b> سفارش #{} روی شبکه‌ی TON تأیید شد؛ در حال ساخت اشتراک…", crate::pay::ton_text(tx.nano as u64), oid), None).await;
+            self.edit_ok(tg, 0, &format!("✅ پرداخت <b>{} TON</b> سفارش #{} روی شبکه‌ی TON تأیید شد؛ در حال ساخت اشتراک…", crate::pay::ton_text(tx.nano as u64), oid), None).await;
             self.fulfill(oid).await;
             return Ok(true);
         }
@@ -2669,7 +2817,7 @@ impl Bot {
                 let rf: String = self.db().with(|c| c.query_row("SELECT ref FROM orders WHERE id=?1", [oid], |r| r.get(0)).unwrap_or_default());
                 let claimed = self.db().exec("UPDATE orders SET status='paid', ref=?1 WHERE id=?2 AND status='waiting'", &[&format!("{} {}", rf, charge), &oid]).unwrap_or(0);
                 if claimed == 1 {
-                    self.send(uid, &format!("✅ پرداخت <b>{} استارز</b> سفارش #{} تأیید شد؛ در حال ساخت اشتراک…", total, oid), None).await;
+                    self.edit_ok(uid, 0, &format!("✅ پرداخت <b>{} استارز</b> سفارش #{} تأیید شد؛ در حال ساخت اشتراک…", total, oid), None).await;
                     self.fulfill(oid).await;
                 }
             }
@@ -2761,6 +2909,8 @@ impl Bot {
                 // a renewal whose account was gone (target 0) made a new account: it says so
                 let head = if o.3 == "renew" && o.4 > 0 { self.tx("txt_renewed") } else { self.tx("txt_bought") };
                 let (t, kb) = self.delivery(&head, &u, &p.name);
+                // the payment page is done with: the chat ends on what was bought
+                self.close_screen(o.1).await;
                 self.send(o.1, &t, Some(kb)).await;
                 // one use of the code for this paid order, taken only while the code is still good; the price was
                 // already paid, so the order is delivered either way and the admin is told when it was not
@@ -2772,7 +2922,10 @@ impl Bot {
                         self.notify_admins(&format!("⚠️ سفارش #{} با کد تخفیف <code>{}</code> پرداخت و تحویل شد، ولی این کد موقع تحویل دیگر معتبر نبود (تمام، حذف یا منقضی شده).", oid, esc(&o.9)), None, None).await;
                     }
                 }
-                self.reward_referrer(o.1).await;
+                self.pay_bank(o.1, &u).await;
+                self.reward_referrer(o.1, p.gb).await;
+                // a first-purchase offer is used up by the first purchase
+                let _ = self.db().exec("UPDATE bot_users SET offer_pct=0, offer_until=0 WHERE tg_id=?1", &[&o.1]);
                 self.set_menu(o.1).await;
                 let a = self.app.clone();
                 tokio::spawn(async move { sync::sync_all(&a).await });
@@ -2799,25 +2952,109 @@ impl Bot {
         }
     }
 
-    async fn reward_referrer(&self, tg: i64) {
+    /// A friend from someone's invite link bought (`gb` of the plan): the inviter gets `ref_pct`% of that volume on
+    /// every purchase, and on the friend's first one also `ref_gb` GB and `ref_days` days. An inviter without an
+    /// account yet keeps it in the bank and gets it with their own first purchase.
+    async fn reward_referrer(&self, tg: i64, gb: f64) {
         let r: Option<(i64, i64)> = self.db().with(|c| c.query_row(
             "SELECT ref_by, ref_rewarded FROM bot_users WHERE tg_id=?1", [tg], |r| Ok((r.get(0)?, r.get(1)?))).ok());
         let Some((by, done)) = r else { return };
-        if by == 0 || done == 1 { return; }
-        // a referrer without an account yet: the reward stays open and is given on the friend's next purchase
-        let Some(u) = self.db().users_of_tg(by).into_iter().next() else { return };
-        match self.db().exec("UPDATE bot_users SET ref_rewarded=1 WHERE tg_id=?1 AND ref_rewarded=0", &[&tg]) {
-            Ok(1) => {}
-            _ => return,
+        if by == 0 || by == tg {
+            return;
         }
-        let gb: f64 = self.db().get("ref_gb").parse().unwrap_or(0.0);
-        let days: i64 = self.db().get("ref_days").parse().unwrap_or(0);
-        if self.db().extend(u.id, days, gb).is_ok() {
-            self.send(by, &format!("🎁 دوست شما خرید کرد! {} گیگ و {} روز به سرویس {} اضافه شد.", gb, days, esc(&u.username)), None).await;
+        let pct: f64 = self.db().get("ref_pct").parse().unwrap_or(0.0);
+        let mut add_gb = ((gb.max(0.0) * pct.clamp(0.0, 100.0) / 100.0) * 2.0).round() / 2.0;
+        let mut add_days = 0i64;
+        let first = done == 0 && self.db().exec("UPDATE bot_users SET ref_rewarded=1 WHERE tg_id=?1 AND ref_rewarded=0", &[&tg]).unwrap_or(0) == 1;
+        if first {
+            add_gb += self.db().get("ref_gb").parse::<f64>().unwrap_or(0.0).clamp(0.0, 1000.0);
+            add_days += self.db().get("ref_days").parse::<i64>().unwrap_or(0).clamp(0, 365);
+        }
+        if add_gb <= 0.0 && add_days <= 0 {
+            return;
+        }
+        let _ = self.db().exec("UPDATE bot_users SET ref_earned_gb=COALESCE(ref_earned_gb,0)+?1 WHERE tg_id=?2", &[&add_gb, &by]);
+        let what = gift_line(add_days, add_gb);
+        let why = if first { "دوستت اولین خریدش رو کرد" } else { "دوستت دوباره خرید کرد" };
+        // the inviter's account that gains from it: an active one, a limited volume first (it can take the GB)
+        let target = self.db().users_of_tg(by).into_iter().filter(|u| u.active() && u.notes != "trial")
+            .max_by_key(|u| (u.limit_gb > 0.0, u.id));
+        match target {
+            Some(u) if matches!(self.db().gift(u.id, add_days, add_gb), Ok(true)) => {
+                let a = self.app.clone();
+                tokio::spawn(async move { sync::sync_all(&a).await });
+                self.send(by, &format!("🎉 <b>{}!</b>\n\n🎁 هدیه‌ی تو به سرویس <b>{}</b> اضافه شد:\n{}\n\nهر بار که دوستانت خرید یا تمدید کنن، باز هم هدیه می‌گیری 💛", why, esc(&u.username), what),
+                    Some(ik(vec![vec![b(&self.bt("ref"), "ref")]]))).await;
+            }
+            _ => {
+                let _ = self.db().exec("INSERT OR IGNORE INTO bot_users(tg_id,joined) VALUES(?1,?2)", &[&by, &now()]);
+                let _ = self.db().exec("UPDATE bot_users SET ref_bank_gb=COALESCE(ref_bank_gb,0)+?1, ref_bank_days=COALESCE(ref_bank_days,0)+?2 WHERE tg_id=?3", &[&add_gb, &add_days, &by]);
+                self.send(by, &format!("🎉 <b>{}!</b>\n\n🎁 این هدیه برات کنار گذاشته شد:\n{}\n\nبا اولین خرید یا تمدید خودت، به سرویست اضافه می‌شه.", why, what),
+                    Some(ik(vec![vec![b(&self.bt("buy"), "buy")]]))).await;
+            }
+        }
+    }
+
+    /// The gifts kept for someone without a working account (`reward_referrer`) go to the account they just got
+    async fn pay_bank(&self, tg: i64, u: &User) {
+        let (gb, days): (f64, i64) = self.db().with(|c| c.query_row(
+            "SELECT COALESCE(ref_bank_gb,0), COALESCE(ref_bank_days,0) FROM bot_users WHERE tg_id=?1", [tg], |r| Ok((r.get(0)?, r.get(1)?))).unwrap_or((0.0, 0)));
+        if gb <= 0.0 && days <= 0 {
+            return;
+        }
+        // taken once: a second delivery at the same moment finds it empty
+        if self.db().exec("UPDATE bot_users SET ref_bank_gb=0, ref_bank_days=0 WHERE tg_id=?1 AND ref_bank_gb=?2 AND ref_bank_days=?3", &[&tg, &gb, &days]).unwrap_or(0) != 1 {
+            return;
+        }
+        if matches!(self.db().gift(u.id, days, gb), Ok(true)) {
+            self.send(tg, &format!("🎁 <b>هدیه‌های دعوت دوستانت</b> به سرویس <b>{}</b> اضافه شد:\n{}", esc(&u.username), gift_line(days, gb)), None).await;
         } else {
-            // not given: it can be given on a later purchase
-            let _ = self.db().exec("UPDATE bot_users SET ref_rewarded=0 WHERE tg_id=?1", &[&tg]);
+            // an account that cannot take it (unlimited volume and no end date): kept for a later one
+            let _ = self.db().exec("UPDATE bot_users SET ref_bank_gb=ref_bank_gb+?1, ref_bank_days=ref_bank_days+?2 WHERE tg_id=?3", &[&gb, &days, &tg]);
         }
+    }
+
+    /// A new customer from a friend's link: the first-purchase discount, and the friend hears of it
+    async fn welcome_friend(&self, uid: i64, by: i64, name: &str) {
+        let pct: i64 = self.db().get("ref_new_pct").parse().unwrap_or(0);
+        if self.give_offer(uid, pct, 7 * 86400) {
+            self.send(uid, &format!("🎁 <b>خوش اومدی!</b>\nچون با دعوت دوستت اومدی، <b>{}٪ تخفیف</b> خرید اولت تا ۷ روز آماده‌ست؛ موقع پرداخت خودش حساب می‌شه.", pct), None).await;
+        }
+        let n = if name.trim().is_empty() { "یک نفر".to_string() } else { esc(name.trim()) };
+        self.send(by, &format!("👋 <b>{}</b> با لینک دعوت تو وارد ربات شد.\nهر بار که خرید یا تمدید کنه، هدیه‌ی حجم برای تو میاد 🎁", n), None).await;
+    }
+
+    /// The invite page: what both sides get, the link with a share button, and how it went so far
+    async fn ref_page(&self, uid: i64) -> (String, Value) {
+        let me = self.my_username().await;
+        let db = self.db();
+        let (invited, buyers, earned, bank): (i64, i64, f64, f64) = db.with(|c| {
+            let invited = c.query_row("SELECT COUNT(*) FROM bot_users WHERE ref_by=?1", [uid], |r| r.get(0)).unwrap_or(0);
+            let buyers = c.query_row("SELECT COUNT(*) FROM bot_users WHERE ref_by=?1 AND ref_rewarded=1", [uid], |r| r.get(0)).unwrap_or(0);
+            let (e, k) = c.query_row("SELECT COALESCE(ref_earned_gb,0), COALESCE(ref_bank_gb,0) FROM bot_users WHERE tg_id=?1", [uid], |r| Ok((r.get(0)?, r.get(1)?))).unwrap_or((0.0, 0.0));
+            (invited, buyers, e, k)
+        });
+        let link = format!("https://t.me/{}?start=ref_{}", me, uid);
+        let (pct, newp) = (db.get("ref_pct"), db.get("ref_new_pct").parse::<i64>().unwrap_or(0));
+        let (gb, days) = (db.get("ref_gb").parse::<f64>().unwrap_or(0.0), db.get("ref_days").parse::<i64>().unwrap_or(0));
+        let mut t = "👥 <b>دعوت دوستان = اینترنت رایگان</b>\n\n".to_string();
+        if newp > 0 {
+            t.push_str(&format!("🎁 دوستت با لینک تو بیاد: <b>{}٪ تخفیف</b> خرید اولش\n", newp));
+        }
+        if gb > 0.0 || days > 0 {
+            t.push_str(&format!("🥇 اولین خریدش: {} برای تو\n", gift_line(days, gb).replace('\n', " ")));
+        }
+        if pct.parse::<f64>().unwrap_or(0.0) > 0.0 {
+            t.push_str(&format!("♾ <b>هر</b> خرید و تمدیدش (تا همیشه): <b>{}٪ حجم</b> همون خرید برای تو\n", esc(&pct)));
+        }
+        t.push_str(&format!("\n🔗 لینک تو (روش بزنید کپی می‌شه):\n<code>{}</code>\n\n📊 دعوت‌ها: <b>{}</b> · خریدار: <b>{}</b> · هدیه‌ی گرفته: <b>{} گیگ</b>",
+            link, invited, buyers, (earned * 10.0).round() / 10.0));
+        if bank > 0.0 {
+            t.push_str(&format!("\n💰 کنار گذاشته برای خرید بعدیت: <b>{} گیگ</b>", (bank * 10.0).round() / 10.0));
+        }
+        let share = format!("https://t.me/share/url?url={}&text={}", url_enc(&link),
+            url_enc(&if newp > 0 { format!("با این لینک بیا، {}٪ تخفیف خرید اول VPN کانکی 🎁", newp) } else { "VPN پرسرعت کانکی 🚀".to_string() }));
+        (t, ik(vec![vec![b("📤 فرستادن لینک برای دوستان", &format!("url:{}", share))], vec![b(&self.bt("back"), "home")]]))
     }
 
     async fn review(&self, _chat: i64, _mid: i64, q: &Value, approve: bool, oid: i64) {
@@ -2954,14 +3191,24 @@ impl Bot {
     fn adm_kb(&self) -> Value {
         let open: i64 = self.db().with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE status IN ('pending','error')", [], |r| r.get(0)).unwrap_or(0));
         let orders = if open > 0 { format!("📦 سفارش‌ها و مالی · {} باز", open) } else { "📦 سفارش‌ها و مالی".to_string() };
-        ik(vec![
+        let mini = crate::miniapp::url(&self.app);
+        let mut rows: Kb = vec![
             vec![b(&orders, "ag:o")],
             vec![b("👥 کاربران و اتصالات", "ag:u")],
             vec![b("⚙️ تنظیمات و تعرفه پلن‌ها", "ag:s")],
             vec![b("📢 پیام همگانی و ابزارها", "ag:t")],
             vec![b("📡 وضعیت مسیرها", &format!("webapp:miniapp:{}?admin=paths", crate::miniapp::url(&self.app)))],
             vec![b("⬅️ بازگشت", "home")],
-        ])
+        ];
+        // with the report bot the panel's own state lives there; the sales bot is for sales
+        if crate::monitor::on() {
+            rows.remove(4);
+        }
+        // the whole management in one place (3.48): the admin mini app
+        if mini.starts_with("https://") {
+            rows.insert(0, vec![b("⚙️ مدیریت ربات (فروش، پرداخت، پلن‌ها، کانال)", &format!("webapp:miniapp:{}?admin=bot", mini))]);
+        }
+        ik(rows)
     }
 
     /// One group of the admin menu: (title, buttons)
@@ -2983,6 +3230,7 @@ impl Bot {
                 vec![b("📦 پلن‌ها", "a:plans"), b("📂 دسته‌بندی‌ها", "a:cats")],
                 vec![b("🎨 دکمه‌ها و متن‌ها", "a:ui"), b("🎬 آموزش‌ها", "a:guides")],
                 vec![b("👥 دعوت و هدیه", "a:ref"), b("⚙️ تنظیمات عمومی", "a:gen")],
+                vec![b("📱 فایل‌های اپ (اندروید و ویندوز)", "a:apps")],
                 back,
             ]),
             "t" => ("📢 <b>پیام همگانی و ابزارها</b>", vec![
@@ -3130,6 +3378,36 @@ impl Bot {
                 self.edit(chat, mid, "📝 <b>متن پیام‌ها</b>\n\nروی هر پیام بزنید تا متنش را ببینید و عوض کنید.", Some(ik(kb))).await;
                 true
             }
+            "a:apps" => {
+                self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid);
+                let (t, kb) = self.apps_view();
+                self.edit(chat, mid, &t, Some(kb)).await;
+                true
+            }
+            // the admin sends the app's files: arm64, then armv7, then Windows (each can be skipped)
+            "aup" => {
+                set_wait(Wait::AppFile(0));
+                self.edit(chat, mid, &app_step_text(0), Some(app_step_kb())).await;
+                true
+            }
+            "askip" => {
+                let next = match self.waits.lock().unwrap_or_else(|e| e.into_inner()).get(&uid) { Some(Wait::AppFile(n)) => n + 1, _ => APP_STEPS.len() };
+                if next < APP_STEPS.len() {
+                    set_wait(Wait::AppFile(next));
+                    self.edit(chat, mid, &app_step_text(next), Some(app_step_kb())).await;
+                } else {
+                    self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&uid);
+                    let (t, kb) = self.apps_view();
+                    self.edit(chat, mid, &t, Some(kb)).await;
+                }
+                true
+            }
+            d if d.starts_with("adel:") => {
+                crate::apps::drop_type(&self.app, &d[5..]);
+                let (t, kb) = self.apps_view();
+                self.edit(chat, mid, &format!("🗑 حذف شد.\n\n{}", t), Some(kb)).await;
+                true
+            }
             "a:links" => {
                 let show = |k: &str| { let v = db.get(k); if v.is_empty() { "تنظیم نشده".to_string() } else { esc(&v) } };
                 let txt = format!("🔗 <b>لینک‌ها</b>\n\n📱 لینک دانلود اپ:\n{}\n\n💻 لینک دانلود اپ ویندوز:\n{}\n\n💬 پشتیبانی:\n{}\n\n📢 کانال اجباری:\n{}", show("app_link"), show("win_link"), show("support"), show("channel"));
@@ -3198,8 +3476,11 @@ impl Bot {
                 { self.edit(chat, mid, "🎟 <b>کدهای تخفیف</b>", Some(ik(kb))).await; true }
             }
             "da" => { set_wait(Wait::DiscountAdd); { self.edit(chat, mid, "بفرستید: <code>کد درصد تعداد</code>\nمثلاً: <code>NOWRUZ 20 100</code>", back).await; true } }
-            "a:ref" => { self.edit(chat, mid, &format!("👥 <b>هدیه‌ی دعوت</b>\nبه ازای اولین خرید هر دعوت‌شده: {} GB و {} روز", db.get("ref_gb"), db.get("ref_days")),
-                Some(ik(vec![vec![b("✏️ گیگ هدیه", "set:ref_gb"), b("✏️ روز هدیه", "set:ref_days")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
+            "a:ref" => { self.edit(chat, mid, &format!("👥 <b>دعوت و هدیه</b>\n\n🥇 اولین خرید هر دعوت‌شده: <b>{} GB و {} روز</b> برای دعوت‌کننده\n♾ هر خرید و تمدید دعوت‌شده: <b>{}٪</b> حجم همان خرید برای دعوت‌کننده\n🎁 تخفیف خرید اول دعوت‌شده (۷ روز): <b>{}٪</b>\n⏳ تخفیف خرید اول بعد از تمام شدن تست (۴۸ ساعت): <b>{}٪</b>\n\n۰ = خاموش. هدیه‌ی کسی که اشتراک ندارد کنار می‌ماند و با اولین خریدش اضافه می‌شود.",
+                db.get("ref_gb"), db.get("ref_days"), db.get("ref_pct"), db.get("ref_new_pct"), db.get("trial_offer_pct")),
+                Some(ik(vec![vec![b("✏️ گیگ اولین خرید", "set:ref_gb"), b("✏️ روز اولین خرید", "set:ref_days")],
+                    vec![b("✏️ ٪ هر خرید", "set:ref_pct"), b("✏️ ٪ تخفیف دوست", "set:ref_new_pct")],
+                    vec![b("✏️ ٪ تخفیف بعد از تست", "set:trial_offer_pct")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
             "a:bc" => { set_wait(Wait::Broadcast); { self.edit(chat, mid, "📣 پیام را بفرستید (متن، عکس، ویدیو…):", back).await; true } }
             "a:bcp" => {
                 // use the message the admin pinned in this chat; otherwise ask for one
@@ -3737,6 +4018,19 @@ impl Bot {
                     self.send(chat, "⚠️ این آدرس TON درست نیست. آدرس کیف پول رو از Tonkeeper کپی کنید (با UQ یا EQ شروع می‌شه، ۴۸ حرف).", retry(to)).await;
                     return;
                 }
+                // numbers of the referral and offer settings: whole numbers in range (Persian digits too)
+                let digits: String = v.chars().map(|c| match c { '۰'..='۹' => char::from(b'0' + (c as u32 - '۰' as u32) as u8), _ => c }).collect();
+                let num_max = match k.as_str() { "ref_pct" => 100, "ref_new_pct" | "trial_offer_pct" => 90, "ref_days" | "trial_days" => 365, "ref_gb" | "trial_gb" => 1000, _ => -1 };
+                let v = if num_max >= 0 {
+                    match digits.trim().parse::<f64>() {
+                        Ok(x) if x >= 0.0 && x <= num_max as f64 && (k.ends_with("_gb") || x.fract() == 0.0) => digits.trim().to_string(),
+                        _ => {
+                            self.send(chat, &format!("⚠️ یک عدد بین 0 و {} بفرستید.", num_max), retry(to)).await;
+                            return;
+                        }
+                    }
+                } else { v.to_string() };
+                let v = v.as_str();
                 if k == "star_usd" && !v.parse::<f64>().map(|x| x > 0.0005 && x < 1.0).unwrap_or(false) {
                     self.send(chat, "⚠️ یک عدد مثل 0.013 بفرستید.", retry(to)).await;
                     return;
@@ -3752,6 +4046,34 @@ impl Bot {
                     self.txt_view(chat, 0, &k).await;
                 } else {
                     self.admin_view(uid, chat, 0, back_view(&k)).await;
+                }
+            }
+            Wait::AppFile(step) => {
+                let Some((abi, _, ends)) = APP_STEPS.get(step) else { return };
+                let doc = &m["document"];
+                let id = doc["file_id"].as_str().unwrap_or("");
+                let name = doc["file_name"].as_str().unwrap_or("").to_string();
+                let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+                if id.is_empty() || !ends.contains(&ext.as_str()) {
+                    self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::AppFile(step));
+                    self.edit_ok(chat, 0, &format!("⚠️ این فایل نیست. {}\n\n{}", ends.iter().map(|e| format!(".{}", e)).collect::<Vec<_>>().join(" / "), app_step_text(step)), Some(app_step_kb())).await;
+                    return;
+                }
+                // an Android file named for the other phone type is probably the wrong one: say so, keep it anyway
+                let other = *abi != "windows" && crate::apps::abi_of(&name).map(|a| a != *abi).unwrap_or(false);
+                match crate::apps::put_tg(&self.app, abi, id, &name, doc["file_size"].as_u64().unwrap_or(0)) {
+                    Ok(f) => {
+                        let note = format!("✅ <b>{}</b> ذخیره شد{}{}", esc(&f.label()), if f.version.is_empty() { String::new() } else { format!(" (نسخه‌ی {})", esc(&f.version)) },
+                            if other { "\n⚠️ اسم فایل نوع دیگری را نشان می‌دهد؛ اگر اشتباه است دوباره بفرستید." } else { "" });
+                        if step + 1 < APP_STEPS.len() {
+                            self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::AppFile(step + 1));
+                            self.edit_ok(chat, 0, &format!("{}\n\n{}", note, app_step_text(step + 1)), Some(app_step_kb())).await;
+                        } else {
+                            let (t, kb) = self.apps_view();
+                            self.edit_ok(chat, 0, &format!("{}\n\n{}", note, t), Some(kb)).await;
+                        }
+                    }
+                    Err(e) => { self.send(chat, &format!("⚠️ {}", esc(&e)), None).await; }
                 }
             }
             Wait::Icon(k) => {
@@ -4010,61 +4332,6 @@ impl Bot {
 
     // ============================================================ کارهای زمان‌بندی‌شده
 
-    /// Telegram alert to the admins when a node, tunnel server or tunnel stays down for about
-    /// 90 seconds, or a server pair gets lossy (`tunnel::quality`), and another one when it is back.
-    /// Off when the setting `tg_alerts` is "0".
-    async fn watch(self: Arc<Self>) {
-        // after a panel restart the agents need a moment to report again
-        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
-        // key -> (consecutive bad checks, alert already sent)
-        let mut st: HashMap<String, (u32, bool)> = HashMap::new();
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-            if self.db().get("tg_alerts") == "0" {
-                continue;
-            }
-            let nodes: Vec<_> = self.db().nodes().into_iter().filter(|n| n.enabled).collect();
-            let offline: std::collections::HashSet<String> = nodes.iter().filter(|n| !n.online).map(|n| n.id.clone()).collect();
-            let mut items: Vec<(String, String, bool, String)> =
-                nodes.iter().map(|n| (format!("node:{}", n.id), format!("نود {}", n.name), n.online, String::new())).collect();
-            items.extend(crate::tunnel::panel::health(&self.app, &offline));
-            items.extend(crate::tunnel::quality::health(&self.app));
-            let keys: Vec<String> = items.iter().map(|i| i.0.clone()).collect();
-            st.retain(|k, _| keys.contains(k));
-            for (key, name, ok, detail) in items {
-                // the tunnel agent of a VPN server waits longer: when the whole server is down, its own alert
-                // (the node's) comes first and this one is not sent at all
-                let need = if key.starts_with("ts:") && !detail.is_empty() { 5 } else { 3 };
-                let mut msg: Option<String> = None;
-                {
-                    let e = st.entry(key.clone()).or_insert((0, false));
-                    if ok {
-                        if e.1 {
-                            msg = Some(alert_text(&key, &name, true, &detail));
-                        }
-                        *e = (0, false);
-                    } else {
-                        e.0 += 1;
-                        if e.0 >= need && !e.1 {
-                            e.1 = true;
-                            msg = Some(alert_text(&key, &name, false, &detail));
-                        }
-                    }
-                }
-                if let Some(m) = msg {
-                    let path = key.starts_with("pq:");
-                    // path alerts can be turned off in the paths page; server alerts are always sent
-                    if path && !crate::tunnel::quality::alerts_on(&self.app) {
-                        continue;
-                    }
-                    // a path alert opens the paths page of the mini app
-                    let kb = path.then(|| ik(vec![vec![b("📡 وضعیت مسیرها", &format!("webapp:miniapp:{}?admin=paths", crate::miniapp::url(&self.app)))]]));
-                    self.notify_admins(&m, kb, None).await;
-                }
-            }
-        }
-    }
-
     /// Marks unpaid gateway orders that were left too long as expired; returns how many
     fn expire_waiting(&self, t: i64) -> usize {
         self.db().exec(
@@ -4083,7 +4350,12 @@ impl Bot {
         for u in &done {
             crate::api::delete_user(&self.app, u.id);
             if u.tg_id != 0 {
-                self.send(u.tg_id, &format!("🎁 تست رایگان شما (<b>{}</b>) تموم شد.\n\nامیدواریم راضی بوده باشید 🙏 برای ادامه، یک اشتراک بخرید 👇", esc(&u.username)),
+                // a reason to stay: a first-purchase discount for two days
+                let pct: i64 = self.db().get("trial_offer_pct").parse().unwrap_or(0);
+                let off = if self.give_offer(u.tg_id, pct, 2 * 86400) {
+                    format!("\n\n🎁 <b>{}٪ تخفیف خرید اول</b> فقط تا ۴۸ ساعت برای شما فعاله؛ موقع پرداخت خودش حساب می‌شه.", pct)
+                } else { String::new() };
+                self.send(u.tg_id, &format!("🎁 تست رایگان شما (<b>{}</b>) تموم شد.\n\nامیدواریم راضی بوده باشید 🙏 برای ادامه، یک اشتراک بخرید 👇{}", esc(&u.username), off),
                     Some(ik(vec![vec![b(&self.bt("buy"), "buy")]]))).await;
             }
         }
@@ -4170,7 +4442,7 @@ impl Bot {
                 }
             }
             // بکاپ روزانه برای ادمین‌ها
-            if tick.is_multiple_of(24 * 60) && self.db().on("backup_on") {
+            if tick.is_multiple_of(24 * 60) && self.db().on("backup_on") && !crate::monitor::on() {
                 let pass = self.db().get("tgb_pass");
                 if let Ok((bytes, name)) = tokio::task::block_in_place(|| make_archive(&self.app, &pass)) {
                     for a in self.admins.clone() {
@@ -4180,6 +4452,16 @@ impl Bot {
             }
         }
     }
+}
+
+/// One step of sending the app's files: what to send now
+fn app_step_text(step: usize) -> String {
+    let (_, what, _) = APP_STEPS[step.min(APP_STEPS.len() - 1)];
+    format!("⬆️ <b>قدم {} از {}</b>\n\nفایل {} را همین‌جا بفرستید (به‌صورت فایل).\nاگر این نوع را ندارید «رد شدن» را بزنید؛ فایل قبلی‌اش می‌ماند.", step + 1, APP_STEPS.len(), what)
+}
+
+fn app_step_kb() -> Value {
+    ik(vec![vec![b("⏭ رد شدن", "askip")], vec![b("✖️ تمام / انصراف", "a:apps")]])
 }
 
 /// "Which app and how": sent before the config files of one protocol (w = WireGuard, a = AmneziaWG, h = Hysteria2)
@@ -4223,7 +4505,7 @@ const HOW_TARGETS: &[(&str, &str)] = &[("k", "a"), ("k", "w"), ("z", "a"), ("z",
 /// An app of the connection guide: (its name on this device, one line about it)
 fn how_app_line(app: &str, os: &str) -> (&'static str, &'static str) {
     match app {
-        "k" => ("اپ اختصاصی Kanki VPN", "همه‌ی سرورها و پروتکل‌ها با یک کد؛ ساده‌ترین راه"),
+        "k" => ("اپ کانکی (Kanki VPN)", "اپ خود ما: همه‌ی سرورها با یک کد، سریع‌ترین رو خودش انتخاب می‌کنه؛ برای بازی عالیه"),
         "z" => ("AmneziaVPN", "همه‌ی سرورها (WireGuard، AmneziaWG و VLESS / Xray) با یک فایل بکاپ"),
         "v" => (match os { "i" => "V2Box", "w" => "v2rayN", _ => "v2rayNG" }, "با لینک اشتراک؛ کانفیگ‌های VLESS (Xray) و Hysteria2"),
         _ => ("WireGuard", "فقط کانفیگ‌های WireGuard، هر سرور یک فایل"),
@@ -4236,7 +4518,7 @@ fn how_target_title(app: &str, os: &str) -> String {
 }
 
 fn cfg_help(code: &str) -> String {
-    let easy = "\n\n💡 <b>راحت‌ترین راه:</b> برنامه‌ی کانکی؛ فقط «کد ورود» رو واردش کنید و دیگه به این فایل‌ها نیازی ندارید.";
+    let easy = "\n\n💡 <b>راحت‌تر:</b> همه‌ی سرورها با یک فایل توی AmneziaVPN (دکمه‌ی «بکاپ AmneziaVPN»)، یا با کد ورود توی اپ کانکی.";
     match code {
         "w" => format!("📘 <b>کانفیگ WireGuard</b>\n\n\
             ✅ با این برنامه‌ها کار می‌کنه: <b>WireGuard</b>، <b>AmneziaWG</b> و <b>کانکی</b>\n\n\
@@ -4303,7 +4585,7 @@ async fn ton_usd(app: &crate::App) -> Option<f64> {
 
 /// The admin alert of one watched thing: a server (node / tunnel server) down or back, a tunnel cut or
 /// back while both its servers are up, a tunnel's round trip too high or normal again
-fn alert_text(key: &str, name: &str, ok: bool, detail: &str) -> String {
+pub(crate) fn alert_text(key: &str, name: &str, ok: bool, detail: &str) -> String {
     let n = esc(name);
     match (key.split(':').next().unwrap_or(""), ok) {
         ("tu", false) => format!("🔴 <b>{}</b> قطع است (هر دو سرورش آنلاین‌اند)", n),
@@ -4372,7 +4654,7 @@ mod flow_tests {
         let (api, log) = fake_telegram().await;
         let bot = Arc::new(Bot {
             app, token: "TEST".into(), admins: vec![ADMIN], http: reqwest::Client::new(), api,
-            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()), order_msgs: Mutex::new(HashMap::new()), members: Mutex::new(HashMap::new()), me_name: Mutex::new(String::new()),
+            waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()), order_msgs: Mutex::new(HashMap::new()), members: Mutex::new(HashMap::new()), me_name: Mutex::new(String::new()), screens: Mutex::new(HashMap::new()),
         });
         (bot, log)
     }
@@ -4540,11 +4822,13 @@ mod flow_tests {
         // the admin menu: four groups
         tap(&bot, from(ADMIN, "Admin", "admin"), "adm").await;
         let g: Vec<String> = buttons(&log, ADMIN).into_iter().map(|b| b.1).collect();
-        assert_eq!(g.len(), 6);
-        assert_eq!(&g[..4], &["ag:o", "ag:u", "ag:s", "ag:t"]);
-        assert_eq!(g[5], "home");
+        // first the whole management in the admin mini app (3.48), then the four groups
+        assert_eq!(g.len(), 7);
+        assert!(g[0].ends_with("/tg/?admin=bot"), "{}", g[0]);
+        assert_eq!(&g[1..5], &["ag:o", "ag:u", "ag:s", "ag:t"]);
+        assert_eq!(g[6], "home");
         // «📡 وضعیت مسیرها» opens the paths page of the mini app
-        assert!(g[4].ends_with("/tg/?admin=paths"), "{}", g[4]);
+        assert!(g[5].ends_with("/tg/?admin=paths"), "{}", g[5]);
         // an old report message's button still works: read-only, it only refreshes or goes back
         tap(&bot, from(ADMIN, "Admin", "admin"), "a:paths").await;
         let pb: Vec<String> = buttons(&log, ADMIN).into_iter().map(|b| b.1).collect();
@@ -4770,14 +5054,14 @@ mod flow_tests {
         bot.touch(tg, &from(tg, "Reza", "reza"), 0);
         let u = bot.create_account(tg, 50.0, 30, 1, "test").unwrap();
         db.set("app_link", "https://example.com/kanki.apk");
-        // Android: the Kanki app first (recommended), with the login code; Windows offers it only with a https link
+        // Android: the Kanki app first when it is the only way (no V2Ray or AmneziaVPN server here), with the login code; Windows offers it only with a https link
         assert_eq!(bot.how_apps(&u, "a").first(), Some(&"k"));
         assert!(!bot.how_apps(&u, "w").contains(&"k") && !bot.how_apps(&u, "i").contains(&"k"));
         db.set("win_link", "https://github.com/x/KankiVPN-Setup.exe");
         assert_eq!(bot.how_apps(&u, "w").first(), Some(&"k"));
         tap(&bot, from(tg, "Reza", "reza"), &format!("hw:{}:a", u.id)).await;
         let bs = buttons(&log, tg);
-        assert_eq!((bs[0].0.as_str(), bs[0].2.as_str()), ("⭐️ اپ اختصاصی Kanki VPN", "success"), "{:?}", bs);
+        assert_eq!((bs[0].0.as_str(), bs[0].2.as_str()), ("⭐️ اپ کانکی (Kanki VPN)", "success"), "{:?}", bs);
         tap(&bot, from(tg, "Reza", "reza"), &format!("hw:{}:a:k", u.id)).await;
         assert!(last(&log, tg).contains(&u.sub_code()), "{}", last(&log, tg));
         // an app that is not offered for this account (no WireGuard server here): refused
@@ -4819,7 +5103,7 @@ mod flow_tests {
     fn bot_at(app: Arc<App>, api: &str, token: &str) -> Bot {
         Bot { app, token: token.into(), admins: vec![ADMIN], http: reqwest::Client::new(), api: api.into(),
             waits: Mutex::new(HashMap::new()), pend: Mutex::new(HashMap::new()), answered: Mutex::new(Default::default()), gifts: Mutex::new(HashMap::new()),
-            order_msgs: Mutex::new(HashMap::new()), members: Mutex::new(HashMap::new()), me_name: Mutex::new(String::new()) }
+            order_msgs: Mutex::new(HashMap::new()), members: Mutex::new(HashMap::new()), me_name: Mutex::new(String::new()), screens: Mutex::new(HashMap::new()) }
     }
 
     #[tokio::test]
@@ -4853,7 +5137,7 @@ mod flow_tests {
         for _ in 0..5 {
             tap(&bot, from(tg, "Nima", "nima"), "disc").await;
             say(&bot, from(tg, "Nima", "nima"), "GUESS").await;
-            assert!(last(&log, tg).contains("نامعتبر"), "{}", last(&log, tg));
+            assert!(last(&log, tg).contains("معتبر نیست"), "{}", last(&log, tg));
         }
         tap(&bot, from(tg, "Nima", "nima"), "disc").await;
         say(&bot, from(tg, "Nima", "nima"), "GUESS").await;
@@ -5058,9 +5342,12 @@ mod flow_tests {
         // a referrer with no account yet keeps the reward for later
         let friend = 5002;
         bot.touch(friend, &from(friend, "Ali", "ali"), 5099);
-        bot.reward_referrer(friend).await;
+        bot.reward_referrer(friend, 20.0).await;
         let r: i64 = db.with(|c| c.query_row("SELECT ref_rewarded FROM bot_users WHERE tg_id=?1", [friend], |r| r.get(0)).unwrap());
-        assert_eq!(r, 0);
+        assert_eq!(r, 1);
+        // 5 GB and 3 days for the first purchase, and 10% of its 20 GB
+        let bank: (f64, i64) = db.with(|c| c.query_row("SELECT ref_bank_gb, ref_bank_days FROM bot_users WHERE tg_id=5099", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap());
+        assert_eq!(bank, (7.0, 3));
 
         // custom purchase plans are not the admin's plans, and have no on/off
         let custom = crate::shop::custom_plan(db, 25, 30, 1).unwrap_or_else(|_| {
@@ -5130,6 +5417,148 @@ mod flow_tests {
         let mut v: Vec<_> = bot.db().users_of_tg(tg).into_iter().map(|u| (u.id, u.username, u.notes)).collect();
         v.sort();
         v
+    }
+
+    /// The app's files come to the bot from an admin: arm64, armv7, Windows, each in its step; a file of the wrong
+    /// kind is refused; each is kept by Telegram's id only and given to customers from there
+    #[tokio::test]
+    async fn an_admin_sends_the_app_files_to_the_bot() {
+        let (bot, log) = bot().await;
+        let a = || from(ADMIN, "Admin", "admin");
+        tap(&bot, a(), "aup").await;
+        assert!(last(&log, ADMIN).contains("arm64"), "{}", last(&log, ADMIN));
+        let doc = |id: &str, name: &str| json!({"message_id": 50, "from": a(), "chat": {"id": ADMIN}, "document": {"file_id": id, "file_name": name, "file_size": 30_000_000}});
+        // a picture or a .txt is not the app
+        bot.on_message(&doc("X1", "notes.txt")).await;
+        assert!(last(&log, ADMIN).contains("این فایل نیست"));
+        bot.on_message(&doc("A64", "KankiVPN-1.36.0-arm64-v8a.apk")).await;
+        assert!(last(&log, ADMIN).contains("armv7"), "{}", last(&log, ADMIN));
+        tap(&bot, a(), "askip").await;
+        assert!(last(&log, ADMIN).contains("ویندوز"));
+        bot.on_message(&doc("WIN", "KankiVPN-Setup-1.36.0.exe")).await;
+        let files = crate::apps::list(&bot.app);
+        assert_eq!(files.iter().map(|f| (f.abi.as_str(), f.tg.as_str(), f.tg_only)).collect::<Vec<_>>(), vec![("arm64-v8a", "A64", true), ("windows", "WIN", true)]);
+        assert_eq!(files[0].version, "1.36.0");
+        // nothing on the server, so no download link on the subscription page
+        assert_eq!(crate::apps::sub_info(&bot.app, "x"), json!([]));
+        // a customer gets them by Telegram's id: Android from the download menu, Windows from the Windows guide
+        let tg = 8301;
+        bot.touch(tg, &from(tg, "C", "c"), 0);
+        tap(&bot, from(tg, "C", "c"), "apk:arm64-v8a").await;
+        let sent = |id: &str| log.lock().unwrap().iter().any(|(m, v)| m == "sendDocument" && v["chat_id"].as_i64() == Some(tg) && v["document"] == id);
+        assert!(sent("A64"));
+        let u = bot.create_account(tg, 10.0, 30, 1, "x").unwrap();
+        assert!(bot.how_apps(&u, "w").contains(&"k"));
+        tap(&bot, from(tg, "C", "c"), &format!("hw:{}:w:k", u.id)).await;
+        assert!(buttons(&log, tg).iter().any(|b| b.1 == "apk:windows"), "{:?}", buttons(&log, tg));
+        tap(&bot, from(tg, "C", "c"), "apk:windows").await;
+        assert!(sent("WIN"));
+        // a newer file of one type takes the old one's place; the admin can delete one
+        tap(&bot, a(), "aup").await;
+        bot.on_message(&doc("A64b", "KankiVPN-1.37.0-arm64.apk")).await;
+        assert_eq!(crate::apps::get_file(&bot.app, "arm64-v8a").unwrap().tg, "A64b");
+        tap(&bot, a(), "adel:windows").await;
+        assert!(crate::apps::get_file(&bot.app, "windows").is_none());
+        // a customer cannot start it
+        tap(&bot, from(tg, "C", "c"), "aup").await;
+        bot.on_message(&json!({"message_id": 51, "from": from(tg, "C", "c"), "chat": {"id": tg}, "document": {"file_id": "EVIL", "file_name": "a.apk"}})).await;
+        assert_eq!(crate::apps::get_file(&bot.app, "arm64-v8a").unwrap().tg, "A64b");
+    }
+
+    fn deleted(log: &Log, chat: i64) -> Vec<i64> {
+        log.lock().unwrap_or_else(|e| e.into_inner()).iter()
+            .filter(|(m, v)| m == "deleteMessage" && v["chat_id"].as_i64() == Some(chat))
+            .filter_map(|(_, v)| v["message_id"].as_i64()).collect()
+    }
+
+    /// A purchase is one page: each step takes the place of the last, a typed answer is removed once read, the
+    /// payment page goes when the service is delivered, and a message that delivered something is never removed
+    #[tokio::test]
+    async fn a_purchase_reads_as_one_page_and_a_delivery_stays() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        let tg = 8101;
+        let f = || from(tg, "Sara", "sara");
+        bot.touch(tg, &f(), 0);
+        db.exec("UPDATE bot_users SET cfg_name='sara1' WHERE tg_id=?1", &[&tg]).unwrap();
+        let plan = db.with(|c| { c.execute("INSERT INTO plans(name,days,gb,toman,usd,conns,active) VALUES('p20',30,20,100000,0,1,1)", []).unwrap(); c.last_insert_rowid() });
+        // /start: the menu is a new message and the typed /start goes
+        bot.on_message(&json!({"message_id": 40, "from": f(), "chat": {"id": tg}, "text": "/start"})).await;
+        assert!(deleted(&log, tg).contains(&40));
+        // the menu (message 7 of the fake Telegram) is the screen; «buy» edits it in place
+        bot.on_callback(&json!({"id": "a", "from": f(), "data": "buy", "message": {"message_id": 7, "chat": {"id": tg}, "text": "menu"}})).await;
+        bot.on_callback(&json!({"id": "b", "from": f(), "data": format!("pl:{}", plan), "message": {"message_id": 7, "chat": {"id": tg}, "text": "plans"}})).await;
+        assert!(last(&log, tg).contains("p20"));
+        // a discount code typed: removed, and the plan page comes as the one new screen (the old one goes)
+        db.exec("INSERT INTO discounts(code,percent,uses_left) VALUES('OFF20',20,5)", &[]).unwrap();
+        bot.on_callback(&json!({"id": "c", "from": f(), "data": "disc", "message": {"message_id": 7, "chat": {"id": tg}, "text": "plan"}})).await;
+        bot.on_message(&json!({"message_id": 41, "from": f(), "chat": {"id": tg}, "text": "off20"})).await;
+        let d = deleted(&log, tg);
+        assert!(d.contains(&41), "{:?}", d);
+        assert!(last(&log, tg).contains("80,000 تومان") && last(&log, tg).contains("تخفیف 20٪"), "{}", last(&log, tg));
+        // paid and delivered: the payment page is removed, the delivery stays as the last message
+        let o = order(&bot, tg, plan, "new", 0, "approved");
+        let before = deleted(&log, tg).len();
+        bot.fulfill(o).await;
+        assert!(deleted(&log, tg).len() > before);
+        let t = last(&log, tg);
+        assert!(t.contains("خرید شما") && t.contains("/sub/"), "{}", t);
+        // the menu from under the delivery is a new message; the delivery is not deleted by the next screens
+        let n = deleted(&log, tg).len();
+        bot.on_callback(&json!({"id": "d", "from": f(), "data": "home", "message": {"message_id": 7, "chat": {"id": tg}, "text": t}})).await;
+        bot.on_callback(&json!({"id": "e", "from": f(), "data": "ref", "message": {"message_id": 7, "chat": {"id": tg}, "text": "menu"}})).await;
+        assert_eq!(deleted(&log, tg).len(), n, "{:?}", deleted(&log, tg));
+    }
+
+    /// Invites: the friend gets a first-purchase discount, the inviter a gift on every purchase of the friend
+    #[tokio::test]
+    async fn invites_pay_on_every_purchase_and_the_friend_pays_less_once() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        let (host, friend) = (8201, 8202);
+        bot.touch(host, &from(host, "Host", "host"), 0);
+        let mine = bot.create_account(host, 50.0, 30, 1, "order #1").unwrap();
+        db.exec("UPDATE bot_users SET cfg_name='friend1' WHERE tg_id=?1", &[&friend]).ok();
+        // an unknown inviter is not taken; a known one is, once
+        bot.on_message(&json!({"message_id": 1, "from": from(8203, "X", "x"), "chat": {"id": 8203}, "text": "/start ref_999999"})).await;
+        let r: i64 = db.with(|c| c.query_row("SELECT ref_by FROM bot_users WHERE tg_id=8203", [], |r| r.get(0)).unwrap());
+        assert_eq!(r, 0);
+        bot.on_message(&json!({"message_id": 2, "from": from(friend, "Ali", "ali"), "chat": {"id": friend}, "text": format!("/start ref_{}", host)})).await;
+        assert!(last(&log, host).contains("با لینک دعوت تو"), "{}", last(&log, host));
+        // the friend's first purchase: 10% off
+        let plan = db.with(|c| { c.execute("INSERT INTO plans(name,days,gb,toman,usd,conns,active) VALUES('p30',30,30,100000,0,1,1)", []).unwrap(); c.last_insert_rowid() });
+        let p = bot.plan(plan).unwrap();
+        let pe = Pending { plan, kind: "new".into(), ..Default::default() };
+        assert_eq!(bot.price(friend, &p, &pe).0, 90_000);
+        // a renewal never gets it; someone else neither
+        assert_eq!(bot.price(friend, &p, &Pending { plan, kind: "renew".into(), ..Default::default() }).0, 100_000);
+        assert_eq!(bot.price(host, &p, &pe).0, 100_000);
+        // bought: the inviter gets 5 GB + 3 days + 10% of 30 GB, the offer is used up
+        let lim = db.user(mine.id).unwrap().limit_gb;
+        let o = order(&bot, friend, plan, "new", 0, "approved");
+        bot.fulfill(o).await;
+        assert!((db.user(mine.id).unwrap().limit_gb - lim - 8.0).abs() < 1e-6);
+        assert!(last(&log, host).contains("اولین خریدش"), "{}", last(&log, host));
+        assert_eq!(bot.price(friend, &p, &pe).0, 100_000);
+        // the next purchase (a renewal) gives 10% of its volume again, and nothing more
+        let fu = db.users_of_tg(friend)[0].id;
+        let o = order(&bot, friend, plan, "renew", fu, "approved");
+        bot.fulfill(o).await;
+        assert!((db.user(mine.id).unwrap().limit_gb - lim - 11.0).abs() < 1e-6);
+        assert!(last(&log, host).contains("دوباره خرید کرد"));
+        // the invite page shows it
+        tap(&bot, from(host, "Host", "host"), "ref").await;
+        let t = last(&log, host);
+        assert!(t.contains("خریدار: <b>1</b>") && t.contains("11 گیگ"), "{}", t);
+        assert!(buttons(&log, host).iter().any(|b| b.0.contains("فرستادن لینک")));
+        // a finished trial gets a two-day offer
+        let tg = 8204;
+        bot.touch(tg, &from(tg, "T", "t"), 0);
+        let tr = bot.create_account(tg, 1.0, 1, 1, "trial").unwrap();
+        db.exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&(now() - 10), &tr.id]).unwrap();
+        bot.clean_trials().await;
+        assert!(last(&log, tg).contains("تخفیف خرید اول"), "{}", last(&log, tg));
+        assert_eq!(bot.price(tg, &p, &pe).0, 90_000);
     }
 
     fn order(bot: &Bot, tg: i64, plan: i64, kind: &str, target: i64, status: &str) -> i64 {

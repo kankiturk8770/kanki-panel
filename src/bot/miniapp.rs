@@ -50,12 +50,94 @@ pub fn router() -> Router<Arc<App>> {
         .route("/tg/api/admin/emoji/:id", get(admin_emoji))
         // the bot's admins: path quality of every tunnel, and the path alerts switch (3.36)
         .route("/tg/api/admin/paths", get(admin_paths).post(admin_paths_set))
+        // 3.48: the bot's whole management (sales settings, plans, discount codes, the smart channel, the app
+        // message) lives in the admin mini app, not in the web panel: the same routes, reached from here
+        .route("/tg/api/admin/panel", axum::routing::post(admin_panel))
+}
+
+/// The settings the bot's admins change from the mini app (the web panel keeps only the bot's token)
+pub const BOT_KEYS: &[&str] = &[
+    "sales_on", "warn_on", "mini_menu", "support", "app_link", "win_link", "channel", "welcome",
+    "trial_on", "trial_gb", "trial_days", "ref_gb", "ref_days", "ref_pct", "ref_new_pct", "trial_offer_pct",
+    "card_on", "card_number", "card_holder", "wallet_on", "wallet_text", "ton_address", "usdt_address", "usd_rate",
+    "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "ton_on", "stars_on", "star_usd", "toncenter_key",
+    "cp_on", "cp_min_gb", "cp_max_gb", "cp_days", "cp_users", "price_rules",
+];
+
+/// The panel routes the admin mini app may use: (method, path start, exact or the start of a longer path)
+fn bridge_ok(method: &str, path: &str) -> bool {
+    let p = path.split('?').next().unwrap_or("");
+    let exact = |x: &str| p == x;
+    let under = |x: &str| p.starts_with(x) && p.len() > x.len() && !p[x.len()..].contains("..");
+    match method {
+        "GET" => exact("/api/settings") || exact("/api/plans") || exact("/api/discounts") || exact("/api/channel") || exact("/api/app-msg") || exact("/api/overview") || exact("/api/bot"),
+        "PUT" => exact("/api/settings") || exact("/api/plans/category") || under("/api/plans/") || exact("/api/channel") || exact("/api/app-msg"),
+        "POST" => exact("/api/plans") || exact("/api/plans/bulk") || exact("/api/discounts") || exact("/api/channel/preview") || exact("/api/channel/post") || exact("/api/channel/ai-test") || exact("/api/channel/campaign"),
+        "DELETE" => under("/api/plans/") || under("/api/discounts/") || exact("/api/app-msg"),
+        _ => false,
+    }
+}
+
+/// One call of the admin mini app into the panel's own routes: only the sales bot's admins, only the routes above,
+/// and only the bot's settings
+async fn admin_panel(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>, Json(b): Json<Value>) -> Response {
+    let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+    if !crate::bot::bot_admins_raw(&app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) {
+        return fail(StatusCode::FORBIDDEN, "admins only");
+    }
+    let method = b["method"].as_str().unwrap_or("GET").to_ascii_uppercase();
+    let path = b["path"].as_str().unwrap_or("").to_string();
+    if !bridge_ok(&method, &path) {
+        return fail(StatusCode::FORBIDDEN, "not allowed here");
+    }
+    let mut body = b.get("body").cloned().unwrap_or(Value::Null);
+    let settings = path == "/api/settings";
+    if settings && method == "PUT" {
+        // only the bot's own settings (the panel's are the panel's)
+        let mut o = serde_json::Map::new();
+        for (k, v) in body.as_object().cloned().unwrap_or_default() {
+            if BOT_KEYS.contains(&k.as_str()) {
+                o.insert(k, v);
+            }
+        }
+        body = Value::Object(o);
+    }
+    use tower::ServiceExt;
+    let req = axum::http::Request::builder().method(method.as_str()).uri(&path)
+        .header(header::AUTHORIZATION, format!("Bearer {}", crate::auth::internal_token()))
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(if body.is_null() { String::new() } else { body.to_string() }));
+    let Ok(req) = req else { return fail(StatusCode::BAD_REQUEST, "bad request") };
+    let Ok(res) = crate::api::master_router(app.clone()).oneshot(req).await;
+    if settings && method == "GET" {
+        // the bot's settings only
+        let status = res.status();
+        let bytes = axum::body::to_bytes(res.into_body(), 4 * 1024 * 1024).await.unwrap_or_default();
+        let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        let mut o = serde_json::Map::new();
+        for k in BOT_KEYS {
+            if let Some(x) = v.get(*k) {
+                o.insert(k.to_string(), x.clone());
+            }
+        }
+        return (status, [(header::CACHE_CONTROL, "no-store")], Json(Value::Object(o))).into_response();
+    }
+    if path == "/api/bot" {
+        // the bot's state, never its token
+        let bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap_or_default();
+        let mut v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+        if let Some(o) = v.as_object_mut() {
+            o.retain(|k, _| ["online", "paused", "username", "name", "conflict", "error"].contains(&k.as_str()));
+        }
+        return Json(v).into_response();
+    }
+    res
 }
 
 /// The customer of a request, only when they are one of the bot's admins
 fn admin_of(app: &App, h: &HeaderMap, q: &HashMap<String, String>) -> Result<i64, Response> {
     let tg = who(app, h, q)?;
-    let is = crate::bot::bot_admins_raw(app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg);
+    let is = crate::bot::bot_admins_raw(app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) || crate::monitor::is_admin(app, tg);
     if is { Ok(tg) } else { Err(fail(StatusCode::FORBIDDEN, "admins only")) }
 }
 
@@ -164,7 +246,11 @@ fn who(app: &App, h: &HeaderMap, q: &HashMap<String, String>) -> Result<i64, Res
         return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too many requests, wait a minute"));
     }
     let init = h.get("x-tg-init").and_then(|v| v.to_str().ok()).map(|s| s.to_string()).or_else(|| q.get("init").cloned()).unwrap_or_default();
-    verify(&crate::bot::bot_token(app), &init, now(), INIT_MAX_AGE).ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "open this page from the bot"))
+    // the report bot opens the paths page too: its pages are signed with its own token
+    let mon = crate::monitor::mon_token(app);
+    verify(&crate::bot::bot_token(app), &init, now(), INIT_MAX_AGE)
+        .or_else(|| (!mon.is_empty()).then(|| verify(&mon, &init, now(), INIT_MAX_AGE)).flatten())
+        .ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "open this page from the bot"))
 }
 
 /// One of the customer's own accounts
@@ -245,9 +331,10 @@ async fn me(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String
     let trial = bot.as_ref().map(|b| b.trial_open(tg)).unwrap_or(false);
     let apps = !crate::apps::list(&app).is_empty();
     let name_hint = bot.as_ref().and_then(|b| b.name_hint(tg)).unwrap_or_default();
-    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "orders": orders(&app, tg), "need_name": need_name, "name_hint": name_hint, "trial": trial,
+    let offer = bot.as_ref().map(|b| b.offer_pct(tg)).unwrap_or(0);
+    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "orders": orders(&app, tg), "need_name": need_name, "name_hint": name_hint, "trial": trial, "offer": offer,
         "android_app": apps, "app_link": app.db.get("app_link"), "win_link": app.db.get("win_link"), "support": app.db.get("support"),
-        "admin": crate::bot::bot_admins_raw(&app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) }))).into_response()
+        "admin": crate::bot::bot_admins_raw(&app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) || crate::monitor::is_admin(&app, tg) }))).into_response()
 }
 
 /// The config name a first purchase or trial needs (sent as `name`), saved as the bot saves it
@@ -407,6 +494,58 @@ mod tests {
         let mut out: Vec<String> = fields.iter().map(|(k, v)| format!("{}={}", k, enc(v))).collect();
         out.push(format!("hash={}", hash));
         out.join("&")
+    }
+
+    /// The admin mini app reaches only the bot's own panel routes, only for the sales bot's admins, and only the bot's
+    /// settings: never a user, a server, the update source or a panel setting
+    #[tokio::test]
+    async fn the_admin_mini_app_changes_only_the_bots_own_things() {
+        use tower::ServiceExt;
+        let app = crate::kping::tests::test_app();
+        let tok = "123456:ABC-test";
+        app.db.set("bot_token", tok);
+        app.db.set("bot_admins", "500");
+        app.db.set("panel_name", "Mine");
+        let init = |id: i64| signed(tok, &[("user", &format!(r#"{{"id":{}}}"#, id)), ("auth_date", &now().to_string())]);
+        let call = |id: i64, b: Value| {
+            let app = app.clone();
+            let init = init(id);
+            async move {
+                let r = axum::http::Request::builder().method("POST").uri("/tg/api/admin/panel").header("x-tg-init", init)
+                    .header("content-type", "application/json").body(axum::body::Body::from(b.to_string())).unwrap();
+                let res = crate::api::master_router(app).oneshot(r).await.unwrap();
+                let st = res.status().as_u16();
+                let v: Value = serde_json::from_slice(&axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap()).unwrap_or(Value::Null);
+                (st, v)
+            }
+        };
+        // a customer, or a route outside the bot's
+        assert_eq!(call(501, json!({"method": "GET", "path": "/api/settings"})).await.0, 403);
+        for (m, p) in [("GET", "/api/users"), ("POST", "/api/nodes"), ("PUT", "/api/plans/../users/1"), ("GET", "/api/bot/watch"), ("DELETE", "/api/bot")] {
+            assert_eq!(call(500, json!({"method": m, "path": p})).await.0, 403, "{} {}", m, p);
+        }
+        // the bot's settings only: read and written; a panel setting is neither shown nor changed
+        let (st, v) = call(500, json!({"method": "PUT", "path": "/api/settings", "body": {"trial_gb": "3", "panel_name": "Hacked", "update_repo": "evil/x"}})).await;
+        assert_eq!(st, 200, "{}", v);
+        assert_eq!(app.db.get("trial_gb"), "3");
+        assert_eq!(app.db.get("panel_name"), "Mine");
+        let (_, v) = call(500, json!({"method": "GET", "path": "/api/settings"})).await;
+        assert_eq!(v["trial_gb"], "3");
+        assert!(v.get("panel_name").is_none() && v.get("dns").is_none());
+        // plans: added, edited whole, listed
+        assert_eq!(call(500, json!({"method": "POST", "path": "/api/plans", "body": {"name": "p50", "gb": 50, "days": 30, "toman": 100000}})).await.0, 200);
+        let (_, l) = call(500, json!({"method": "GET", "path": "/api/plans"})).await;
+        let id = l[0]["id"].as_i64().unwrap();
+        assert_eq!(call(500, json!({"method": "PUT", "path": format!("/api/plans/{}", id), "body": {"gb": 70, "conns": 2, "badge": "🔥", "old_toman": 130000}})).await.0, 200);
+        let (_, l) = call(500, json!({"method": "GET", "path": "/api/plans"})).await;
+        assert_eq!((l[0]["gb"].as_f64(), l[0]["conns"].as_i64(), l[0]["badge"].as_str(), l[0]["old_toman"].as_i64()), (Some(70.0), Some(2), Some("🔥"), Some(130000)));
+        // discount codes
+        assert_eq!(call(500, json!({"method": "POST", "path": "/api/discounts", "body": {"code": "off20", "percent": 20, "uses": 5}})).await.0, 200);
+        let (_, d) = call(500, json!({"method": "GET", "path": "/api/discounts"})).await;
+        assert!(d.to_string().contains("OFF20"), "{}", d);
+        // the inside key is not a way in from outside: a direct call with any other bearer is refused
+        let r = axum::http::Request::builder().uri("/api/settings").header("authorization", "Bearer x").body(axum::body::Body::empty()).unwrap();
+        assert_eq!(crate::api::master_router(app.clone()).oneshot(r).await.unwrap().status().as_u16(), 401);
     }
 
     #[test]

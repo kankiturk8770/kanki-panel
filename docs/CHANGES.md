@@ -1,3 +1,57 @@
+# v3.48.0 — A tidier panel; the bot is managed inside Telegram
+- **Dashboard: the panel and only what needs you.** «Needs attention» first: the panel's own web server, the sales and report
+  bots, orders waiting for approval, a new version, a nearly full disk, and one line each for servers and tunnels that are down
+  (their details stay in Servers and Tunnels). Then the users, live traffic, the panel server's resources, a «Panel» card (version,
+  uptime, bots, servers, tunnels) and a «Sales» card. The TCP/UDP card is gone. A VPN core that is off or removed on the panel's own
+  server is no longer a problem anywhere (`nHealthOf`, dashboard).
+- **Users: one thin row of two lines** (as before 3.40, thinner): online dot, name, what they are connected with now (protocol and
+  exit flag), status, copy-link and QR; then data used with a thin bar, days left, connections now / allowed and when last seen.
+  Two columns on a desktop.
+- **Phones: every section in the bottom bar**, one row that scrolls sideways (no «More» sheet).
+- **Xray:** outbounds have their own tab (Status, Servers, Tunnel, Inbounds, Outbounds, Routing, Settings); Settings has the core
+  (version, log level, access log), DNS (Xray's own servers, IPv4 only) and the connection policy (handshake, idle, after upload /
+  download, `policy.levels.0`). The core rail no longer makes the page wider than the phone.
+- **The bot is managed in the bot.** Admin panel › «⚙️ Bot management» opens the admin mini app: overview (sales, revenue, open
+  orders, the bot's state), sales and the shop, every payment method, plans (add, edit whole, on/off, delete), discount codes,
+  invites and the free trial, the smart channel, the message in the app, and the buttons. It uses the panel's own routes through
+  `/tg/api/admin/panel`: only the sales bot's admins, only those routes, only the bot's settings (`BOT_KEYS`), with a key that never
+  leaves the process (`auth::internal_token`). The web panel's bot page keeps only the bot itself: token, admins, the report bot and
+  the daily report.
+- **App files through the bot.** Admin panel › Settings › «📱 App files»: send Android arm64, then armv7, then Windows (.exe /
+  .msi / .zip), each can be skipped; a new file takes the old one's place. They are kept only in Telegram (no copy on the server)
+  and customers get them by Telegram's id: Android from «Download the app», Windows from the Windows connection guide.
+- Plans can be edited whole from the panel API (volume, days, users, label, struck-through price).
+- Checked: `cargo test` (new: `an_admin_sends_the_app_files_to_the_bot`, `the_admin_mini_app_changes_only_the_bots_own_things`);
+  every panel page × 6 widths × (Persian dark, English light) with no JS error, no sideways scroll, no `undefined`/`NaN`; the admin
+  mini app's eight parts in Playwright.
+
+# v3.47.0 — Sales bot as one page, invites that pay every time, a report bot, the mini app in the app's look
+- **A purchase is one page.** Every menu of the bot is a «screen» (`Bot::screens`, `new_screen`): the next step takes the place of the
+  last one (edited in place, or a new message and the old menu deleted). A typed name, discount code or TON link is removed once read
+  (`drop_typed`); the payment page goes when the service is delivered (`close_screen` in `fulfill`). A message that delivered something
+  (a link, a config) is never kept as a screen, so it is never deleted (`delivered`).
+- **Names customers know.** The two services are «🌐 اقتصادی · V2Ray» and «⚡️ VIP · V2Ray + WireGuard + Amnezia» (the Kanki app comes
+  free with VIP). The account and the delivery lead with the V2Ray subscription link (`/sub/<code>/v2`, the one v2rayNG / V2Box read;
+  the plain `/sub/` address is the web page), then the Kanki app's code (`keys_text`). The connection guide and the mini app offer the
+  apps in the order most customers use: a V2Ray app, AmneziaVPN, the Kanki app, WireGuard.
+- **Invites pay on every purchase.** The inviter gets `ref_pct`% (default 10) of the volume of **every** purchase and renewal of the friend,
+  plus `ref_gb` / `ref_days` on the first one; someone without an account keeps it in the bank (`ref_bank_gb/days`) until their own first
+  purchase (`pay_bank`). The friend gets `ref_new_pct`% (10) off their first purchase for 7 days, and a finished trial gets
+  `trial_offer_pct`% (10) for 48 hours (`offer`, `give_offer`, used up by the first purchase; a discount code replaces it, a renewal never
+  has it). The inviter hears when a friend arrives and on each purchase. The invite page says all of it, with a share button and the
+  numbers (invited, buyers, GB earned). Only a known bot user can invite, only a newcomer can be invited. Settings in the bot (Admin ›
+  Invites) and in the panel (Sales bot › Sales settings), numbers checked.
+- **Report bot** (`src/bot/monitor.rs`): a second bot with its own token (Sales bot › Overview › Report bot) for the panel's owners:
+  servers offline / back, tunnels cut or slow, lossy paths (the same rules as before, moved out of the sales bot) and the daily backup.
+  `/start` shows the state of servers, tunnels and paths, with buttons to refresh, open the paths page, switch alerts and make a backup
+  now. Strangers get one line. Without its token everything goes to the sales bot's admins as before. The mini app's paths page takes
+  init data signed by either bot.
+- **Mini app in the app's look** («Kanki Glass», the Kanki app's default theme): near-black, one neon green with a teal second colour,
+  dark crystal glass for every card and button, the green fill for main buttons; no backdrop blur (smooth on slow phones). It shows the
+  first-purchase discount in the shop.
+- Checked: `cargo test` (new: `a_purchase_reads_as_one_page_and_a_delivery_stays`, `invites_pay_on_every_purchase_and_the_friend_pays_less_once`,
+  `monitor::tests`); the mini app in Playwright at 360 / 390 / 768 on every tab and the shop, no JS error, no sideways scroll.
+
 # v3.46.2 — Game recorder: the downloaded file's flows keep their own labels
 - In «Download everything (JSON)» the label and domain of each flow could belong to another flow: the report sorts its list of
   flows by packets and the raw list took its labels from the sorted copy. The report sorts a copy now (`record.go`). The page's own

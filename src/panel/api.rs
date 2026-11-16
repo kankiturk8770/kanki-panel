@@ -1165,7 +1165,7 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
 pub const SETTING_KEYS: &[&str] = &[
     "dns", "mtu", "default_protocols", "sales_on", "trial_on", "trial_gb", "trial_days", "card_on", "card_number", "card_holder",
     "wallet_on", "wallet_text", "ton_address", "usdt_address", "usd_rate", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
-    "welcome", "ref_gb", "ref_days", "warn_on", "backup_on", "channel",
+    "welcome", "ref_gb", "ref_days", "ref_pct", "ref_new_pct", "trial_offer_pct", "warn_on", "backup_on", "channel",
     "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "conn_limit_on", "tg_alerts", "logo", "price_rules",
     // v2.8.4: ready values of the "New user" form
     "def_gb", "def_days", "def_conns",
@@ -1319,12 +1319,12 @@ async fn plans_list(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "settings");
     let v: Vec<Value> = app.db.with(|c| {
         // custom purchases (active = 2) are not plans the admin manages
-        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,''),COALESCE(service,'vip') FROM plans WHERE COALESCE(active,1)<>2 ORDER BY toman").unwrap();
+        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(usd,0),COALESCE(conns,1),COALESCE(active,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,''),COALESCE(service,'vip'),COALESCE(badge,''),COALESCE(old_toman,0) FROM plans WHERE COALESCE(active,1)<>2 ORDER BY toman").unwrap();
         let rows: Vec<Value> = s.query_map([], |r| {
             Ok(json!({ "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "days": r.get::<_, i64>(2)?,
                 "gb": r.get::<_, f64>(3)?, "toman": r.get::<_, i64>(4)?, "usd": r.get::<_, f64>(5)?,
                 "conns": r.get::<_, i64>(6)?, "active": r.get::<_, i64>(7)? == 1, "countries": r.get::<_, i64>(8)?, "category": r.get::<_, String>(9)?,
-                "style": r.get::<_, String>(10)?, "service": r.get::<_, String>(11)? }))
+                "style": r.get::<_, String>(10)?, "service": r.get::<_, String>(11)?, "badge": r.get::<_, String>(12)?, "old_toman": r.get::<_, i64>(13)? }))
         }).unwrap().filter_map(|x| x.ok()).collect();
         rows
     });
@@ -1407,6 +1407,23 @@ async fn plans_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
     }
     if let Some(sv) = b["service"].as_str() {
         let _ = app.db.exec("UPDATE plans SET service=?1 WHERE id=?2", &[&plan_service(sv), &id]);
+    }
+    // 3.48: the admin mini app edits a plan whole (volume, days, users, label, the struck-through price)
+    if let Some(g) = num(&b["gb"]) {
+        let _ = app.db.exec("UPDATE plans SET gb=?1 WHERE id=?2", &[&gb_of(g).max(0.0), &id]);
+    }
+    if let Some(d) = num(&b["days"]) {
+        let _ = app.db.exec("UPDATE plans SET days=?1 WHERE id=?2", &[&days_of(d), &id]);
+    }
+    if let Some(c) = num(&b["conns"]) {
+        let _ = app.db.exec("UPDATE plans SET conns=?1 WHERE id=?2", &[&(c.clamp(1.0, 100.0) as i64), &id]);
+    }
+    if let Some(x) = b["badge"].as_str() {
+        let x: String = x.trim().chars().take(30).collect();
+        let _ = app.db.exec("UPDATE plans SET badge=?1 WHERE id=?2", &[&x, &id]);
+    }
+    if let Some(o) = num(&b["old_toman"]) {
+        let _ = app.db.exec("UPDATE plans SET old_toman=?1 WHERE id=?2", &[&(o.max(0.0) as i64), &id]);
     }
     if let Some(nm) = b["name"].as_str().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         let _ = app.db.exec("UPDATE plans SET name=?1 WHERE id=?2", &[&nm.to_string(), &id]);

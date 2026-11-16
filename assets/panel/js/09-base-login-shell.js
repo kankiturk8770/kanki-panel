@@ -109,7 +109,7 @@ function ago(ts){if(!ts)return t('never');var s=Math.max(0,Math.floor(Date.now()
 function leftTxt(ts){if(!ts)return t('Unlimited');var sec=ts-Date.now()/1000;if(sec<=0)return t('Expired');var d=Math.ceil(sec/86400);return sec<86400?t('less than a day'):N(d)+' '+t('days left')}
 
 // ---------------------------------------------------------------- icons (stroke = currentColor)
-var ICO={
+var ICO={clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
  vip:'<path d="M6 4h12l3.5 5L12 20.5 2.5 9 6 4z"/><path d="M2.5 9h19M9 4l-1.5 5L12 20.5 16.5 9 15 4"/>',
  edit:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/>',
  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',

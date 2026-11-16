@@ -155,15 +155,17 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
   :'<div class="card bempty"><span class="bav big">'+ic('bot',30)+'</span><h3>'+t('No sales bot yet')+'</h3><ol class="steps"><li>'+t('In Telegram open @BotFather, send /newbot and copy the token it gives.')+'</li><li>'+t('Get your numeric Telegram ID from @userinfobot.')+'</li><li>'+t('Press Create bot and paste both.')+'</li></ol><button class="btn" id="bt_new2">+ '+t('Create bot')+'</button></div>';
  // (3.41) the bot in parts: Overview (its health, the sales numbers, the daily report), then one part per job
  S.btab=S.btab||'ov';
- var tabs=[['ov','Overview'],['sales','Sales settings'],['plans','Plans'],['disc','Discount codes'],['apk','App files'],['chan','Smart channel'],['appmsg','App message']];
- el.innerHTML='<div class="btabs ku-tabs" id="bt_tabs" role="tablist" aria-label="'+esc(t('Sales bot'))+'">'+tabs.map(function(x){return '<button type="button" role="tab" aria-selected="'+(S.btab==x[0])+'" data-bt="'+x[0]+'" class="'+(S.btab==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
-  '<div data-btp="ov">'+(has?bst:'')+head+'<div class="card" id="bt_watch"></div></div>'+
+ // (3.48) the web panel keeps only the bot itself (token, admins, the report bot, the daily report): sales, payments, plans,
+ // discount codes, the channel and the app message are set in the bot's own admin mini app
+ var tabs=[['ov','Overview']];S.btab='ov';
+ el.innerHTML='<div class="btabs ku-tabs" id="bt_tabs" role="tablist" style="display:none" aria-label="'+esc(t('Sales bot'))+'">'+tabs.map(function(x){return '<button type="button" role="tab" aria-selected="'+(S.btab==x[0])+'" data-bt="'+x[0]+'" class="'+(S.btab==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
+  '<div data-btp="ov">'+(has?bst:'')+head+(has?'<div class="card bmove"><h3>⚙️ '+t('Bot management is in the bot now')+'</h3><p class="sub">'+t('Sales, payments, plans, discount codes, invites, the free trial, the smart channel, the app message and the app files are set inside Telegram: open the bot › Admin panel › «Bot management». The panel keeps only the bot\'s token.')+'</p>'+(b.username?'<a class="btn" target="_blank" rel="noopener" href="https://t.me/'+encodeURIComponent(b.username)+'">'+ic('send',15)+' '+t('Open the bot')+'</a>':'')+'</div>':'')+botMon()+'<div class="card" id="bt_watch"></div></div>'+
   '<div data-btp="sales"><div class="card"><h3>'+ic('settings',16)+' '+t('Sales settings')+'</h3><p class="sub">'+t('How the bot sells: trials, payments, referrals and messages.')+'</p>'+
    '<div class="chips">'+bsChk('sales_on','Sales enabled')+bsChk('warn_on','Warn buyers before expiry / end of data')+'</div>'+
    '<div class="g2f">'+bsIn('support','Support ID','@support',0,1)+bsIn('app_link','App download link','https://…',0,1)+bsIn('channel','Required channel (empty = none)','@channel',0,1)+bsIn('win_link','Windows app download link','https://…',0,1)+'</div>'+
    '<label class="f">'+t('Welcome message')+'</label><textarea data-bs="welcome" rows="3">'+esc((S.bset||{}).welcome||'')+'</textarea>'+
    '<div class="box"><b>'+ic('gift',15)+' '+t('Free trial')+'</b><div class="chips">'+bsChk('trial_on','Give a free trial')+'</div><div class="g2f">'+bsIn('trial_gb','Trial volume (GB)','1','number')+bsIn('trial_days','Trial days','1','number')+'</div></div>'+
-   '<div class="box"><b>'+ic('users',15)+' '+t('Referral reward')+'</b><div class="g2f">'+bsIn('ref_gb','Reward volume (GB)','5','number')+bsIn('ref_days','Reward days','3','number')+'</div></div>'+
+   '<div class="box"><b>'+ic('users',15)+' '+t('Referral reward')+'</b><div class="g2f">'+bsIn('ref_gb','Reward volume (GB)','5','number')+bsIn('ref_days','Reward days','3','number')+'</div><div class="g2f">'+bsIn('ref_pct','Share of every friend purchase (% of its GB)','10','number')+bsIn('ref_new_pct','First-purchase discount of an invited friend (%)','10','number')+'</div><div class="g2f">'+bsIn('trial_offer_pct','First-purchase discount after the trial (%, 48 hours)','10','number')+'<div></div></div></div>'+
    '<div class="box"><b>'+ic('card',15)+' '+t('Card to card')+'</b><div class="chips">'+bsChk('card_on','Accept card to card')+'</div><div class="g2f">'+bsIn('card_number','Card number','6037 ....',0,1)+bsIn('card_holder','Card holder name','')+'</div></div>'+
    '<div class="box"><b>💎 '+t('Crypto payment (TON / USDT)')+'</b><div class="chips">'+bsChk('wallet_on','Accept crypto to my wallet')+'</div>'+
     '<div class="g2f">'+bsIn('ton_address','TON wallet address (Tonkeeper…)','UQ…',0,1)+bsIn('usdt_address','USDT address (TRC20)','T…',0,1)+'</div>'+
@@ -396,6 +398,20 @@ function botModal(edit){var b=S.bot||{};modal(mhead(t(edit?'Edit bot':'Create bo
  '<p class="muted">'+t('The panel restarts for a few seconds after saving.')+'</p><button class="btn" style="width:100%" id="bm_go">'+t('Save')+'</button>');
  $('#bm_go').onclick=function(){var tok=$('#bm_t').value.trim(),ad=$('#bm_a').value.trim();if(!edit&&!tok)return toast(t('Token is required'),1);var me=this,body={admins:ad};if(tok)body.token=tok;me.disabled=true;
   api('PUT','/api/bot',body).then(function(){closeModal();waitRestart()}).catch(function(e){me.disabled=false;fail(e)})}}
+// (3.47) the report bot: a second bot with its own token, only for the panel's owners (servers, tunnels, paths, backups)
+function botMon(){var b=S.bot||{},st=b.mon_set?(b.mon_online?['g','Online']:['r','Offline']):['y','Not set'];
+ return '<div class="card"><h3>🛰 '+t('Report bot')+'</h3><p class="sub">'+t('Alerts about servers, tunnels and paths, and the daily backup, go to a second bot, so the sales bot stays only for customers. Without it they go to the sales bot admins.')+'</p>'+
+  '<p><span class="badge '+st[0]+'"><span class="dot '+st[0]+'"></span> '+t(st[1])+'</span>'+(b.mon_username?' <a class="ltr" target="_blank" rel="noopener" href="https://t.me/'+encodeURIComponent(b.mon_username)+'">@'+esc(b.mon_username)+'</a>':'')+'</p>'+
+  (b.mon_set&&!b.mon_online&&b.mon_error?'<div class="warnbox ltr" style="margin:10px 0">'+esc(b.mon_error)+'</div>':'')+
+  (b.mon_set?'<div class="bmeta"><span>'+t('Report admins')+': <b class="ltr">'+esc(b.mon_admins||b.admins||'—')+'</b></span><span>'+t('Token')+': <b class="ltr">'+esc(b.mon_masked||'')+'</b></span></div>':'<ol class="steps"><li>'+t('In @BotFather make a second bot (/newbot) and copy its token.')+'</li><li>'+t('Paste it here; open the new bot and press Start.')+'</li></ol>')+
+  '<div class="g2f" style="margin-top:10px"><button class="btn" onclick="botMonModal()">'+ic('edit',15)+' '+t(b.mon_set?'Edit':'Set the report bot')+'</button>'+(b.mon_set?'<button class="b2 bd" onclick="botMonOff()">'+ic('trash',15)+' '+t('Turn off')+'</button>':'<div></div>')+'</div></div>'}
+function botMonModal(){var b=S.bot||{};modal(mhead(t('Report bot'))+
+ '<label class="f">'+t('Bot token (from @BotFather)')+'</label><input id="mm_t" class="ltr" autocomplete="off" placeholder="'+(b.mon_set?t('Empty = keep the current token'):'123456789:AA…')+'">'+
+ '<label class="f">'+t('Who gets the reports (numeric IDs, comma separated; empty = the sales bot admins)')+'</label><input id="mm_a" class="ltr" value="'+esc(b.mon_admins||'')+'" placeholder="123456789">'+
+ '<p class="muted">'+t('The panel restarts for a few seconds after saving.')+'</p><button class="btn" style="width:100%" id="mm_go">'+t('Save')+'</button>');
+ $('#mm_go').onclick=function(){var tok=$('#mm_t').value.trim();if(!b.mon_set&&!tok)return toast(t('Token is required'),1);var me=this,body={mon_admins:$('#mm_a').value.trim()};if(tok)body.mon_token=tok;me.disabled=true;
+  api('PUT','/api/bot',body).then(function(){closeModal();waitRestart()}).catch(function(e){me.disabled=false;fail(e)})}}
+function botMonOff(){confirmDo(function(){api('PUT','/api/bot',{mon_clear:true}).then(waitRestart).catch(fail)})}
 function waitRestart(){toast(t('Panel is restarting…'));var n=0;setTimeout(function(){var iv=setInterval(function(){n++;api('GET','/api/me').then(function(){clearInterval(iv);toast(t('Done'));if(S.page=='bot')botLoad()}).catch(function(){if(n>24){clearInterval(iv);location.reload()}})},2500)},3000)}
 
 // ---- traffic & stats page

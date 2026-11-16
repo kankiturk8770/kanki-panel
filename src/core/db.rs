@@ -264,6 +264,13 @@ impl Db {
             "ALTER TABLE bot_users ADD COLUMN cfg_name TEXT DEFAULT ''",
             "ALTER TABLE bot_users ADD COLUMN uname TEXT DEFAULT ''",
             "ALTER TABLE bot_users ADD COLUMN lname TEXT DEFAULT ''",
+            // 3.47: referrals pay on every purchase of a friend; a reward for someone without an account waits
+            // in the bank; what they earned; a first-purchase offer (an invited friend, a finished trial)
+            "ALTER TABLE bot_users ADD COLUMN ref_bank_gb REAL DEFAULT 0",
+            "ALTER TABLE bot_users ADD COLUMN ref_bank_days INTEGER DEFAULT 0",
+            "ALTER TABLE bot_users ADD COLUMN ref_earned_gb REAL DEFAULT 0",
+            "ALTER TABLE bot_users ADD COLUMN offer_pct INTEGER DEFAULT 0",
+            "ALTER TABLE bot_users ADD COLUMN offer_until INTEGER DEFAULT 0",
         ] {
             let _ = c.execute(m, []);
         }
@@ -639,6 +646,9 @@ pub fn default_setting(k: &str) -> &'static str {
         "np_coins" => "usdttrc20,trx,ton",
         "ref_gb" => "5",
         "ref_days" => "3",
+        "ref_pct" => "10",
+        "ref_new_pct" => "10",
+        "trial_offer_pct" => "10",
         "warn_on" => "1",
         "backup_on" => "1",
         "welcome" => "به ربات فروش خوش آمدید 🌟",

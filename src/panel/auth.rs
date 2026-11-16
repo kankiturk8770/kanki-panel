@@ -48,10 +48,25 @@ pub fn identify_quiet(app: &App, h: &HeaderMap) -> Option<(String, Vec<String>)>
     identify_with(app, h, false)
 }
 
+/// The bot's mini app for admins reaches the bot's own panel routes (plans, discounts, sales settings) with this
+/// key: made at start, never written anywhere, never leaves this process (`miniapp::admin_panel` checks the admin
+/// and which route first). It has only the «settings» right.
+pub fn internal_token() -> &'static str {
+    static T: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    T.get_or_init(|| crate::util::rand_token(48))
+}
+
+fn is_internal(h: &HeaderMap) -> bool {
+    util::ct_eq(&bearer(h), internal_token())
+}
+
 fn identify_with(app: &App, h: &HeaderMap, touch: bool) -> Option<(String, Vec<String>)> {
     let t = bearer(h);
     if t.is_empty() {
         return None;
+    }
+    if is_internal(h) {
+        return Some(("bot-admin".into(), vec!["settings".into()]));
     }
     let legacy = app.db.get("api_key");
     if !legacy.is_empty() && util::ct_eq(&t, &legacy) {
@@ -142,6 +157,10 @@ pub fn ip_allowed(app: &App, ip: &str) -> bool {
 }
 
 pub async fn middleware(State(app): St, req: Request, next: Next) -> Response {
+    // a call from inside (the bot's admin mini app, already checked there): no address of its own to check
+    if is_internal(req.headers()) {
+        return next.run(req).await;
+    }
     let path = req.uri().path().to_string();
     let method = req.method().clone();
     let ip = client_ip(req.headers());

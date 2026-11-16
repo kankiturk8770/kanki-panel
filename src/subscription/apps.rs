@@ -25,7 +25,7 @@ const KEY: &str = "app_files";
 /// a bigger file is not an app (and the bot could not send it anyway)
 const MAX: usize = 200 * 1024 * 1024;
 /// phone types, in the order they are shown (the one most phones need first)
-const ABIS: &[&str] = &["arm64-v8a", "armeabi-v7a", "universal", "x86_64"];
+const ABIS: &[&str] = &["arm64-v8a", "armeabi-v7a", "universal", "x86_64", "windows"];
 /// Telegram bots may upload files up to 50 MB
 pub const TG_MAX: u64 = 50 * 1000 * 1000;
 
@@ -40,11 +40,18 @@ pub struct AppFile {
     pub at: i64,
     /// Telegram's id of the file once the bot sent it (sent again by id, without uploading)
     pub tg: String,
+    /// 3.48: sent to the bot by an admin; it lives only in Telegram (no copy on this server, no /dl link)
+    pub tg_only: bool,
+    /// the file's own name when it came through the bot
+    pub name: String,
 }
 
 impl AppFile {
     /// "KankiVPN-1.15.1-arm64.apk"
     pub fn file_name(&self) -> String {
+        if !self.name.is_empty() {
+            return self.name.clone();
+        }
         let v = if self.version.is_empty() { String::new() } else { format!("-{}", self.version) };
         format!("KankiVPN{}-{}.apk", v, short(&self.abi))
     }
@@ -60,6 +67,7 @@ fn short(abi: &str) -> &str {
     match abi {
         "arm64-v8a" => "arm64",
         "armeabi-v7a" => "armv7",
+        "windows" => "Windows",
         x => x,
     }
 }
@@ -70,6 +78,7 @@ pub fn title(abi: &str) -> (&'static str, &'static str) {
         "arm64-v8a" => ("گوشی‌های جدید (۶۴ بیتی)", "بیشتر گوشی‌های امروزی؛ اگر مطمئن نیستی همین را بگیر"),
         "armeabi-v7a" => ("گوشی‌های قدیمی (۳۲ بیتی)", "اگر نسخه‌ی ۶۴ بیتی نصب نشد، این را بگیر"),
         "universal" => ("همه‌ی گوشی‌ها", "روی هر گوشی نصب می‌شود، فقط حجمش بیشتر است"),
+        "windows" => ("ویندوز", "برای کامپیوتر ویندوزی (۱۰ و ۱۱)"),
         _ => ("گوشی‌ها و شبیه‌سازهای x86", "برای شبیه‌ساز اندروید روی کامپیوتر"),
     }
 }
@@ -135,7 +144,7 @@ fn path(app: &App, abi: &str) -> String {
 /// The uploaded files whose file is there, the one most phones need first.
 pub fn list(app: &App) -> Vec<AppFile> {
     let mut v: Vec<AppFile> = serde_json::from_str(&app.db.get(KEY)).unwrap_or_default();
-    v.retain(|f| ABIS.contains(&f.abi.as_str()) && std::path::Path::new(&path(app, &f.abi)).exists());
+    v.retain(|f| ABIS.contains(&f.abi.as_str()) && ((f.tg_only && !f.tg.is_empty()) || std::path::Path::new(&path(app, &f.abi)).exists()));
     v.sort_by_key(|f| ABIS.iter().position(|a| *a == f.abi).unwrap_or(99));
     v
 }
@@ -157,14 +166,45 @@ pub fn set_tg(app: &App, abi: &str, file_id: &str) {
     }
 }
 
+/// The Android files (phones), without the Windows one
+pub fn phones(app: &App) -> Vec<AppFile> {
+    list(app).into_iter().filter(|f| f.abi != "windows").collect()
+}
+
+/// An app file sent to the bot by an admin: kept by Telegram's id only, in place of the one of its type (the old
+/// file of the same type, a server copy too, goes)
+pub fn put_tg(app: &App, abi: &str, file_id: &str, name: &str, size: u64) -> Result<AppFile, String> {
+    if !ABIS.contains(&abi) || file_id.is_empty() {
+        return Err("unknown file type".into());
+    }
+    let _ = std::fs::remove_file(path(app, abi));
+    let f = AppFile { abi: abi.to_string(), version: clean_version(&version_of(name)), size, sha256: String::new(), at: crate::util::now(),
+        tg: file_id.to_string(), tg_only: true, name: name.chars().filter(|c| !c.is_control() && *c != '/' && *c != '\\').take(80).collect() };
+    let mut v: Vec<AppFile> = serde_json::from_str(&app.db.get(KEY)).unwrap_or_default();
+    v.retain(|x| x.abi != abi);
+    v.push(f.clone());
+    save(app, &v);
+    Ok(f)
+}
+
+/// Removes the app file of one type (from the list, and its server copy)
+pub fn drop_type(app: &App, abi: &str) {
+    let _ = std::fs::remove_file(path(app, abi));
+    let mut v: Vec<AppFile> = serde_json::from_str(&app.db.get(KEY)).unwrap_or_default();
+    v.retain(|x| x.abi != abi);
+    save(app, &v);
+}
+
 pub async fn read(app: &App, abi: &str) -> Option<Vec<u8>> {
     tokio::fs::read(path(app, abi)).await.ok()
 }
 
 /// For the subscription page: each file with its download address for this subscriber.
 pub fn sub_info(app: &App, code: &str) -> Value {
+    // a file that lives only in Telegram has no download address here
     json!(list(app)
         .iter()
+        .filter(|f| !f.tg_only)
         .map(|f| {
             let (t, hint) = title(&f.abi);
             json!({ "abi": f.abi, "short": short(&f.abi), "title": t, "hint": hint, "version": f.version, "size": f.size,
@@ -224,7 +264,7 @@ async fn upload(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, St
     if let Err(e) = tokio::fs::rename(&tmp, &dst).await {
         return err(StatusCode::INTERNAL_SERVER_ERROR, &format!("cannot save the file: {}", e));
     }
-    let f = AppFile { abi: abi.into(), version, size: body.len() as u64, sha256: sum, at: crate::util::now(), tg: String::new() };
+    let f = AppFile { abi: abi.into(), version, size: body.len() as u64, sha256: sum, at: crate::util::now(), tg: String::new(), ..Default::default() };
     let mut v = list(&app);
     v.retain(|x| x.abi != abi);
     v.push(f.clone());

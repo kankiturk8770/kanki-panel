@@ -3,7 +3,7 @@
 // inbounds, routing, settings. Every user with Xray ticked is a client of every inbound (or of the
 // inbounds that list them).
 var XR={d:null,q:'',srv:'',tab:'status'};
-var XTABS=[['status','Status'],['servers','Servers'],['tunnel','Tunnel'],['inbounds','Inbounds'],['routing','Routing'],['settings','Settings']];
+var XTABS=[['status','Status'],['servers','Servers'],['tunnel','Tunnel'],['inbounds','Inbounds'],['outbounds','Outbounds'],['routing','Routing'],['settings','Settings']];
 var REALITY_TARGETS=['www.microsoft.com:443','www.apple.com:443','dl.google.com:443','www.speedtest.net:443','www.cloudflare.com:443','www.yahoo.com:443','www.amazon.com:443','addons.mozilla.org:443','www.samsung.com:443','www.nvidia.com:443',
  'www.cisco.com:443','www.mozilla.org:443','www.intel.com:443','www.ebay.com:443','www.bing.com:443','www.asus.com:443','www.digikala.com:443','www.aparat.com:443','divar.ir:443','snapp.ir:443','www.filimo.com:443','www.namava.ir:443'];
 function p_xray(){KAcc.open.xr='';KAcc.open.xrt='';XR.tab=xrTabOf(S.sub);
@@ -14,7 +14,7 @@ function p_xray(){KAcc.open.xr='';KAcc.open.xrt='';XR.tab=xrTabOf(S.sub);
 // the tabs of 3.20 and before: overview was the servers, online clients are on the status tab now
 function xrTabOf(sub){sub=sub||'status';if(sub=='overview')return 'servers';if(sub=='clients')return 'status';return XTABS.some(function(x){return x[0]==sub})?sub:'status'}
 function tab_xray(sub){var k=xrTabOf(sub);if(k!=sub){location.replace('#xray/'+k);return}XR.tab=k;if(XR.d)xrDraw(XR.d);else xrLoad()}
-function xrTabs(d){var el=$('#xr_tabs');if(!el)return;el.innerHTML=kuTabs('xray',XTABS,XR.tab,{servers:d.servers.length,inbounds:d.inbounds.length,routing:(d.rule_list||[]).length+(d.outs||[]).length})}
+function xrTabs(d){var el=$('#xr_tabs');if(!el)return;el.innerHTML=kuTabs('xray',XTABS,XR.tab,{servers:d.servers.length,inbounds:d.inbounds.length,outbounds:(d.outs||[]).length,routing:(d.rule_list||[]).length})}
 function xrLoad(quiet){return api('GET','/api/xray').then(function(d){XR.d=d;if(S.page=='nodes'&&$('#nl_x'))$('#nl_x').innerHTML=xrServers(d);if(S.page!='xray')return d;if(quiet){xrTabs(d);
    if(XR.tab=='status'&&$('#xr_st')){$('#xr_st').innerHTML=xrStats(d);$('#xr_on').innerHTML=xrOnline(d);return d}
    if(XR.tab=='servers'&&$('#xr_srv')){if(!accBusy('xr'))$('#xr_srv').innerHTML=xrServers(d);return d}
@@ -23,7 +23,7 @@ function xrLoad(quiet){return api('GET','/api/xray').then(function(d){XR.d=d;if(
   xrDraw(d);return d}).catch(fail)}
 function xrName(id){var a=(XR.d&&XR.d.agents)||[];for(var i=0;i<a.length;i++)if(a[i].id==id)return a[i].name;return id}
 function xrDraw(d){var el=$('#xr');if(!el)return;xrTabs(d);
- ({status:xrStatus,servers:xrSrvTab,tunnel:xrTunTab,inbounds:xrIbTab,routing:xrRouting,settings:xrSettings}[XR.tab]||xrStatus)(d,el)}
+ ({status:xrStatus,servers:xrSrvTab,tunnel:xrTunTab,inbounds:xrIbTab,outbounds:xrOutTab,routing:xrRouting,settings:xrSettings}[XR.tab]||xrStatus)(d,el)}
 function xrTot(d){return d.inbounds.reduce(function(a,b){return a+(+b.traffic||0)},0)}
 function xrStats(d){var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length,run=d.servers.filter(function(x){return x.status&&x.status.active}).length;
  return kuStats([[t('Running servers'),N(run)+' / '+N(d.servers.length),run<d.servers.length?'y':''],[t('Working inbounds'),N(act)+' / '+N(d.inbounds.length)],
@@ -82,25 +82,33 @@ function xrRouting(d,el){XR.rules=JSON.parse(JSON.stringify(d.rule_list||[]));XR
   pre('xs_bt',d.block_bt,'Block BitTorrent','Torrent traffic gets abuse reports to your servers')+
   pre('xs_ba',d.block_ads,'Block ads','Ad and tracker domains (geosite:category-ads-all)')+
   pre('xs_bi',d.block_ir,'Block Iranian sites','.ir domains and Iranian addresses do not go through the server: they should be opened directly')+'</div>'+
-  '<div class="card"><div class="nh"><div><h3>'+ic('tunnel',16)+' '+t('Outbounds')+'</h3><p class="sub u-m0">'+t('Where traffic leaves the server: directly, or on to another server (chain)')+'</p></div><button class="b2" onclick="xrOutEdit(-1)">'+ic('plus',14)+' '+t('Add outbound')+'</button></div><div class="u-mt3" id="xr_outs"></div>'+
-  '<label class="f">'+t('Default outbound (what no rule catches)')+'</label><select id="xs_def"></select></div>'+
   '<div class="card"><div class="nh"><div><h3>'+ic('ports',16)+' '+t('Routing rules')+'</h3><p class="sub u-m0">'+t('Checked from top to bottom; the first rule that matches decides')+'</p></div><button class="b2" onclick="xrRuleEdit(-1)">'+ic('plus',14)+' '+t('Add rule')+'</button></div><div class="u-mt3" id="xr_rules"></div>'+
   '<label class="f">'+t('Domain strategy')+'</label><select id="xs_ds">'+[['AsIs','AsIs — '+t('by name (fastest)')],['IPIfNonMatch','IPIfNonMatch — '+t('resolve when no name rule matched')],['IPOnDemand','IPOnDemand — '+t('always resolve for IP rules')]].map(function(o){return '<option value="'+o[0]+'"'+((d.domain_strategy||'AsIs')==o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select></div>'+
-  '<details class="secc"><summary>'+ic('term',16)+' '+t('Advanced: raw JSON')+'<span class="chev">'+ic('chev',14)+'</span></summary><div class="bd2"><label class="f">'+t('Advanced: extra routing rules (JSON array)')+'</label><textarea id="xs_r" rows="4" class="ltr" placeholder="[]">'+esc(d.rules)+'</textarea><label class="f">'+t('Advanced: extra outbounds (JSON array, the first one becomes the default)')+'</label><textarea id="xs_o" rows="4" class="ltr" placeholder="[]">'+esc(d.outbounds)+'</textarea></div></details>'+
+  '<details class="secc"><summary>'+ic('term',16)+' '+t('Advanced: raw JSON')+'<span class="chev">'+ic('chev',14)+'</span></summary><div class="bd2"><label class="f">'+t('Advanced: extra routing rules (JSON array)')+'</label><textarea id="xs_r" rows="5" class="ltr" placeholder="[]">'+esc(d.rules)+'</textarea></div></details>'+
   '<div class="sbar"><span class="muted">'+t('Changes reach the servers within a few seconds of saving')+'</span><button class="btn" id="xs_rgo">'+t('Save routing')+'</button></div>';
  xrRoutingDraw();
  $('#xs_rgo').onclick=function(){var me=this;me.disabled=true;
-  api('PUT','/api/xray',{block_private:$('#xs_bp').checked,block_bt:$('#xs_bt').checked,block_ads:$('#xs_ba').checked,block_ir:$('#xs_bi').checked,outs:XR.outs.map(function(o){var c=Object.assign({},o);delete c.error;return c}),rule_list:XR.rules,default_out:$('#xs_def').value,domain_strategy:$('#xs_ds').value,rules:$('#xs_r').value,outbounds:$('#xs_o').value})
+  api('PUT','/api/xray',{block_private:$('#xs_bp').checked,block_bt:$('#xs_bt').checked,block_ads:$('#xs_ba').checked,block_ir:$('#xs_bi').checked,rule_list:XR.rules,domain_strategy:$('#xs_ds').value,rules:$('#xs_r').value})
+   .then(function(){toast(t('Saved'));XR.d=null;return xrLoad()}).catch(fail).then(function(){me.disabled=false})}}
+// the outbounds on their own tab: where traffic leaves the server, the default one, and raw JSON outbounds
+function xrOutTab(d,el){XR.rules=JSON.parse(JSON.stringify(d.rule_list||[]));XR.outs=JSON.parse(JSON.stringify(d.outs||[]));
+ el.innerHTML='<div class="card"><div class="nh"><div><h3>'+ic('tunnel',16)+' '+t('Outbounds')+'</h3><p class="sub u-m0">'+t('Where traffic leaves the server: directly, or on to another server (chain)')+'</p></div><button class="b2" onclick="xrOutEdit(-1)">'+ic('plus',14)+' '+t('Add outbound')+'</button></div><div class="u-mt3" id="xr_outs"></div>'+
+  '<label class="f">'+t('Default outbound (what no rule catches)')+'</label><select id="xs_def"></select></div>'+
+  '<details class="secc"><summary>'+ic('term',16)+' '+t('Advanced: raw JSON')+'<span class="chev">'+ic('chev',14)+'</span></summary><div class="bd2"><label class="f">'+t('Advanced: extra outbounds (JSON array, the first one becomes the default)')+'</label><textarea id="xs_o" rows="5" class="ltr" placeholder="[]">'+esc(d.outbounds)+'</textarea></div></details>'+
+  '<div class="sbar"><span class="muted">'+t('Changes reach the servers within a few seconds of saving')+'</span><button class="btn" id="xs_ogo">'+t('Save outbounds')+'</button></div>';
+ xrRoutingDraw();
+ $('#xs_ogo').onclick=function(){var me=this;me.disabled=true;
+  api('PUT','/api/xray',{outs:XR.outs.map(function(o){var c=Object.assign({},o);delete c.error;return c}),default_out:$('#xs_def').value,outbounds:$('#xs_o').value,rule_list:XR.rules})
    .then(function(){toast(t('Saved'));XR.d=null;return xrLoad()}).catch(fail).then(function(){me.disabled=false})}}
 function xrOutDesc(o){if(o.kind=='socks'||o.kind=='http')return o.kind.toUpperCase()+' '+o.address+':'+o.port;if(o.kind=='link')return (o.link||'').split('://')[0].toUpperCase()+' · '+((o.link||'').split('@')[1]||'').split('?')[0].split('#')[0];if(o.kind=='json')return 'JSON';if(o.kind=='blackhole')return t('Block');return t('Direct')}
 function xrRoutingDraw(){var d=XR.d,def=$('#xs_def');
- $('#xr_outs').innerHTML='<div class="rl"><span class="dot g"></span><div class="nm"><b class="ltr u-ts">direct</b><small>'+t('Straight to the internet from this server')+'</small></div><span class="chipx">'+t('built in')+'</span></div>'+
+ if($('#xr_outs'))$('#xr_outs').innerHTML='<div class="rl"><span class="dot g"></span><div class="nm"><b class="ltr u-ts">direct</b><small>'+t('Straight to the internet from this server')+'</small></div><span class="chipx">'+t('built in')+'</span></div>'+
   '<div class="rl"><span class="dot r"></span><div class="nm"><b class="ltr u-ts">block</b><small>'+t('Dropped')+'</small></div><span class="chipx">'+t('built in')+'</span></div>'+
   XR.outs.map(function(o,i){return '<div class="rl"><span class="dot '+(o.error?'r':'g')+'"></span><div class="nm"><b><bdi>'+esc(o.tag)+'</bdi></b><small><bdi>'+esc(xrOutDesc(o))+'</bdi></small>'+(o.error?'<small style="color:var(--bad)">'+esc(o.error)+'</small>':'')+'</div>'+
    '<button class="ib" onclick="xrOutEdit('+i+')">'+ic('edit',15)+'</button><button class="ib bd" onclick="xrOutDel('+i+')">'+ic('trash',15)+'</button></div>'}).join('');
- var tags=['direct','block'].concat(XR.outs.map(function(o){return o.tag})),cur=def.value||d.default_out||'';
- def.innerHTML='<option value="">direct</option>'+tags.filter(function(x){return x!='direct'}).map(function(x){return '<option'+(cur==x?' selected':'')+'>'+esc(x)+'</option>'}).join('');
- $('#xr_rules').innerHTML=XR.rules.length?XR.rules.map(function(r,i){var m=[];if(r.domain)m.push(r.domain.split(/[\n,]/).filter(Boolean).slice(0,3).join(', '));if(r.ip)m.push(r.ip.split(/[\n,]/).filter(Boolean).slice(0,3).join(', '));if(r.port)m.push(t('port')+' '+r.port);if(r.network)m.push(r.network);if(r.protocol)m.push(r.protocol);
+ var tags=['direct','block'].concat(XR.outs.map(function(o){return o.tag})),cur=def?def.value||d.default_out||'':'';
+ if(def)def.innerHTML='<option value="">direct</option>'+tags.filter(function(x){return x!='direct'}).map(function(x){return '<option'+(cur==x?' selected':'')+'>'+esc(x)+'</option>'}).join('');
+ if($('#xr_rules'))$('#xr_rules').innerHTML=XR.rules.length?XR.rules.map(function(r,i){var m=[];if(r.domain)m.push(r.domain.split(/[\n,]/).filter(Boolean).slice(0,3).join(', '));if(r.ip)m.push(r.ip.split(/[\n,]/).filter(Boolean).slice(0,3).join(', '));if(r.port)m.push(t('port')+' '+r.port);if(r.network)m.push(r.network);if(r.protocol)m.push(r.protocol);
    if((r.inbound||[]).length)m.push(N(r.inbound.length)+' '+t('inbounds'));if((r.users||[]).length)m.push(N(r.users.length)+' '+t('users'));
    return '<div class="rl"'+(r.off?' style="opacity:.55"':'')+'><span class="muted u-b">'+N(i+1)+'</span><div class="nm"><b>'+esc(r.name||t('Rule')+' '+N(i+1))+'</b><small><bdi>'+esc(m.join(' · ')||'—')+'</bdi></small></div><span class="arrow ltr">→ '+esc(r.outbound||'direct')+'</span>'+
     '<label class="sw"><input type="checkbox" '+(r.off?'':'checked')+' onchange="XR.rules['+i+'].off=!this.checked;xrRoutingDraw()"><span></span></label>'+
@@ -144,13 +152,21 @@ function xrRuleEdit(i){var d=XR.d,r=i>=0?Object.assign({},XR.rules[i]):{name:'',
 
 // ---- settings tab
 function xrSettings(d,el){
- el.innerHTML='<div class="card"><h3>'+ic('settings',16)+' '+t('Settings')+'</h3>'+
-  '<div class="srow"><div class="tx"><b>'+t('IPv4 only')+'</b><small>'+t('For servers whose IPv6 does not work well')+'</small></div><label class="sw"><input type="checkbox" id="xs_v4" '+(d.ipv4?'checked':'')+'><span></span></label></div>'+
+ var sw=function(id,on,title,sub){return '<div class="srow"><div class="tx"><b>'+t(title)+'</b><small>'+t(sub)+'</small></div><label class="sw"><input type="checkbox" id="'+id+'" '+(on?'checked':'')+'><span></span></label></div>'};
+ var num=function(id,label,v,ph,hint){return '<div><label class="f">'+t(label)+'</label><input id="'+id+'" class="ltr" type="number" min="0" max="3600" value="'+(v||'')+'" placeholder="'+ph+'">'+(hint?'<p class="hint">'+t(hint)+'</p>':'')+'</div>'};
+ el.innerHTML='<div class="card"><h3>'+ic('xray',16)+' '+t('Xray core')+'</h3>'+
   '<div class="sgrid"><div><label class="f">'+t('Xray-core version')+'</label><input id="xs_v" class="ltr" placeholder="'+t('empty = latest')+'" value="'+esc(d.version)+'"><p class="hint">'+t('A release tag like v26.3.27')+'</p></div>'+
-  '<div><label class="f">'+t('Log level')+'</label><select id="xs_ll">'+['none','error','warning','info','debug'].map(function(x){return '<option'+((d.log_level||'warning')==x?' selected':'')+'>'+x+'</option>'}).join('')+'</select></div>'+
-  '</div>'+
-  '<div class="sbar"><button class="btn" id="xs_go">'+t('Save')+'</button></div></div>';
- $('#xs_go').onclick=function(){api('PUT','/api/xray',{ipv4:$('#xs_v4').checked,version:$('#xs_v').value,log_level:$('#xs_ll').value}).then(function(){toast(t('Saved'));xrLoad()}).catch(fail)}}
+  '<div><label class="f">'+t('Log level')+'</label><select id="xs_ll">'+['none','error','warning','info','debug'].map(function(x){return '<option'+((d.log_level||'warning')==x?' selected':'')+'>'+x+'</option>'}).join('')+'</select></div></div>'+
+  sw('xs_al',d.access_log,'Access log','Write every connection to the log (to find a problem; it grows fast)')+'</div>'+
+  '<div class="card"><h3>'+ic('dns',16)+' '+t('DNS')+'</h3>'+
+  '<label class="f">'+t('DNS servers of Xray (one per line; empty = the server\'s own)')+'</label><textarea id="xs_dns" rows="3" class="ltr" placeholder="1.1.1.1&#10;https://dns.google/dns-query">'+esc((d.dns||'').split(/\s*,\s*/).filter(Boolean).join('\n'))+'</textarea>'+
+  sw('xs_v4',d.ipv4,'IPv4 only','For servers whose IPv6 does not work well')+'</div>'+
+  '<div class="card"><h3>'+ic('clock',16)+' '+t('Connections (policy)')+'</h3><p class="sub u-m0">'+t('In seconds; empty = Xray\'s own default')+'</p>'+
+  '<div class="sgrid">'+num('xs_hs','Handshake',d.handshake,'4')+num('xs_ci','Idle connection',d.conn_idle,'300','Shorter frees the server faster, longer keeps quiet apps connected')+num('xs_uo','After upload ends',d.uplink_only,'2')+num('xs_do','After download ends',d.downlink_only,'5')+'</div></div>'+
+  '<div class="sbar"><span class="muted">'+t('Changes reach the servers within a few seconds of saving')+'</span><button class="btn" id="xs_go">'+t('Save')+'</button></div>';
+ $('#xs_go').onclick=function(){var me=this,n=function(id){return +($('#'+id).value||0)};me.disabled=true;
+  api('PUT','/api/xray',{ipv4:$('#xs_v4').checked,version:$('#xs_v').value,log_level:$('#xs_ll').value,access_log:$('#xs_al').checked,dns:$('#xs_dns').value.split(/\n+/).map(function(x){return x.trim()}).filter(Boolean).join(', '),
+   handshake:n('xs_hs'),conn_idle:n('xs_ci'),uplink_only:n('xs_uo'),downlink_only:n('xs_do')}).then(function(){toast(t('Saved'));xrLoad()}).catch(fail).then(function(){me.disabled=false})}}
 
 // ---- servers
 function xrAddNode(){var go=function(){var d=XR.d,used=d.servers.map(function(x){return x.server}),ag=d.agents.filter(function(a){return used.indexOf(a.id)<0});
