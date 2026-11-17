@@ -110,10 +110,13 @@ fn candidates(app: &App) -> Vec<(String, String, bool, bool)> {
     let nodes = app.db.nodes();
     let mut out = vec![];
     let list = crate::tunnel::panel::servers(app);
+    // where each server is: the location set, else the one guessed from what it does and its IP's country
+    // (an Iran relay with no location set must not count as abroad: an Iran internet cut would remove it)
+    let locs = crate::tunnel::panel::server_locs(app);
     for s in &list {
         let agent_on = crate::tunnel::panel::agent_state(&s.id).map(|(at, ..)| now - at < 300).unwrap_or(false);
         let node_on = !s.node.is_empty() && nodes.iter().any(|n| n.id == s.node && n.online);
-        let ir = s.loc == "iran" || crate::exitgeo::cc(app, &s.node) == "IR";
+        let ir = is_iran(app, s, locs.get(&s.id).map(|x| x.0.as_str()).unwrap_or(""));
         out.push((s.id.clone(), s.name.clone(), ir, agent_on || node_on));
     }
     // VPN nodes with no agent server next to them
@@ -121,6 +124,14 @@ fn candidates(app: &App) -> Vec<(String, String, bool, bool)> {
         out.push((format!("node:{}", n.id), n.name.clone(), crate::exitgeo::cc(app, &n.id) == "IR", n.online));
     }
     out
+}
+
+/// An Iran server, by any sign: its location (set or guessed), the country of its agent's or its node's IP
+fn is_iran(app: &App, s: &crate::tunnel::panel::TServer, loc: &str) -> bool {
+    s.loc == "iran"
+        || loc == "iran"
+        || crate::exitgeo::cc(app, &crate::exitgeo::srv_key(&s.id)) == "IR"
+        || (!s.node.is_empty() && crate::exitgeo::cc(app, &s.node) == "IR")
 }
 
 /// A span for the admin in Persian: whole hours (rounded), or minutes when under an hour
@@ -219,6 +230,33 @@ mod tests {
         assert_eq!(super::span_fa(1200), "20 دقیقه");
         assert_eq!(super::span_fa(0), "1 دقیقه");
         assert_eq!(super::span_fa(3 * 3600 - 600), "3 ساعت");
+    }
+
+    fn test_app() -> (Arc<crate::App>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("kanki-cleanup-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
+        let app = Arc::new(crate::App {
+            db,
+            env: HashMap::new(),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        });
+        (app, dir)
+    }
+
+    #[test]
+    fn an_iran_relay_without_a_location_is_still_iran() {
+        let (app, dir) = test_app();
+        // no location set: one is a tunnel entry (so in Iran), one has an Iran IP, one is a plain exit abroad
+        app.db.set("tun_servers", r#"[{"id":"ir1","name":"Relay","token":"a"},{"id":"ir2","name":"IP","token":"b"},{"id":"de","name":"DE","token":"c"}]"#);
+        app.db.set("tun_list", r#"[{"id":"t1","name":"t","entry":"ir1","exit":"de","port":1,"enabled":true}]"#);
+        app.db.set("exit_geo", r#"{"srv:ir2":{"cc":"IR"}}"#);
+        let c = super::candidates(&app);
+        let ir = |id: &str| c.iter().find(|x| x.0 == id).unwrap().2;
+        assert!(ir("ir1") && ir("ir2") && !ir("de"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

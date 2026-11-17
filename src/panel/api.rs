@@ -419,6 +419,35 @@ fn list_or(v: &Value, def: &str) -> String {
     }
 }
 
+/// Every protocol an account can have (what the user form offers)
+pub const USER_PROTOS: &[&str] = &["wg", "awg", "hy2", "kmix", "mtun", "xray", "dns", "kping"];
+
+/// A typed protocol or server list as it may be saved: known names only, once each. An unknown one was
+/// saved before and gave the user nothing there, without a word.
+fn checked_lists(app: &App, protos: &str, nodes: &str) -> Result<(String, String), String> {
+    let clean = |s: &str| -> Vec<String> {
+        let mut v: Vec<String> = vec![];
+        for x in s.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()) {
+            if !v.iter().any(|y| y == x) {
+                v.push(x.to_string());
+            }
+        }
+        v
+    };
+    let ps = clean(protos);
+    if let Some(bad) = ps.iter().find(|p| !USER_PROTOS.contains(&p.as_str())) {
+        return Err(format!("unknown protocol: {}", bad));
+    }
+    let ns = clean(nodes);
+    if !ns.is_empty() {
+        let known: Vec<String> = app.db.nodes().into_iter().map(|n| n.id).collect();
+        if let Some(bad) = ns.iter().find(|n| !known.contains(n)) {
+            return Err(format!("unknown server: {}", bad));
+        }
+    }
+    Ok((ps.join(","), ns.join(",")))
+}
+
 fn num(v: &Value) -> Option<f64> {
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
 }
@@ -444,14 +473,25 @@ async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     }
     let gb = gb_of(num(&b["traffic_limit_gb"]).or_else(|| num(&b["traffic_limit"])).unwrap_or(0.0)).max(0.0);
     let days = days_of(num(&b["days"]).unwrap_or(30.0));
+    // 0 = no end date; a negative number would have been read as «no end» too
+    if days < 0 {
+        return err(StatusCode::BAD_REQUEST, "the days must be 0 (no end) or more");
+    }
     let conns = num(&b["max_connections"]).unwrap_or(1.0).max(0.0) as i64;
-    let protos = list_or(&b["protocols"], &app.db.get("default_protocols"));
+    // the panel's default list is not the admin's typing: a name it no longer knows is left out, not refused
+    let def: String = app.db.get("default_protocols").split(',').map(|x| x.trim()).filter(|x| USER_PROTOS.contains(x)).collect::<Vec<_>>().join(",");
+    let protos = list_or(&b["protocols"], &def);
     let nodes = list_or(&b["nodes"], "");
+    let (protos, nodes) = match checked_lists(&app, &protos, &nodes) {
+        Ok(x) => x,
+        Err(e) => return err(StatusCode::BAD_REQUEST, &e),
+    };
     let notes = b["notes"].as_str().unwrap_or("");
     let tg = b["tg_id"].as_i64().unwrap_or(0);
-    let mut out = vec![];
-    for i in 0..count {
-        let name = if base.is_empty() {
+    // a date typed in: kept to the same range as when a user is edited
+    let expires_ts = b["expires_ts"].as_i64().map(|t| t.clamp(0, now() + days_of(MAX_DAYS) * 86400));
+    let name_of = |i: i64| -> String {
+        if base.is_empty() {
             "auto".to_string() // USER<n>, lowest free number
         } else if count > 1 {
             // base1, base2 … (still letters and digits only, at most 12 characters)
@@ -459,10 +499,18 @@ async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
             format!("{}{}", base.chars().take(12 - suf.len()).collect::<String>(), suf)
         } else {
             base.clone()
-        };
+        }
+    };
+    // every name is checked first: a name taken half way made some users and still said «error»
+    if !base.is_empty() && (0..count).any(|i| app.db.name_taken(&name_of(i), 0)) {
+        return err(StatusCode::BAD_REQUEST, "this name is already used by another user");
+    }
+    let mut out = vec![];
+    for i in 0..count {
+        let name = name_of(i);
         match app.db.create_user(&name, gb, days, conns, &protos, &nodes, notes, tg) {
             Ok(u) => {
-                if let Some(ts) = b["expires_ts"].as_i64() {
+                if let Some(ts) = expires_ts {
                     let _ = app.db.exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&ts, &u.id]);
                 }
                 out.push(user_json(&app, &app.db.user(u.id).unwrap_or(u)))
@@ -486,15 +534,23 @@ async fn users_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
     let gb = gb_of(num(&b["traffic_limit_gb"]).unwrap_or(u.limit_gb)).max(0.0);
     let exp = match b["expires_ts"].as_i64() {
         Some(t) => t.clamp(0, now() + days_of(MAX_DAYS) * 86400),
+        // 0 = no end date; a negative number is a mistake, not «unlimited»
         None => match num(&b["days"]) {
             Some(d) if d > 0.0 => now() + days_of(d) * 86400,
-            Some(_) => 0,
+            Some(d) if d == 0.0 => 0,
+            Some(_) => return err(StatusCode::BAD_REQUEST, "the days must be 0 (no end) or more"),
             None => u.expires_at,
         },
     };
     let conns = num(&b["max_connections"]).map(|x| x as i64).unwrap_or(u.max_conn).max(0);
     let protos = if b["protocols"].is_null() { u.protocols.clone() } else { list_or(&b["protocols"], "") };
     let nodes = if b["nodes"].is_null() { u.nodes.clone() } else { list_or(&b["nodes"], "") };
+    // only what was typed now is checked (an old name already saved does not block other changes)
+    let typed = (if b["protocols"].is_null() { "" } else { protos.as_str() }, if b["nodes"].is_null() { "" } else { nodes.as_str() });
+    let (protos, nodes) = match checked_lists(&app, typed.0, typed.1) {
+        Ok((p, n)) => (if b["protocols"].is_null() { protos.clone() } else { p }, if b["nodes"].is_null() { nodes.clone() } else { n }),
+        Err(e) => return err(StatusCode::BAD_REQUEST, &e),
+    };
     let notes = b["notes"].as_str().unwrap_or(&u.notes).to_string();
     let enabled = b["enabled"].as_bool().unwrap_or(u.enabled) as i64;
     let mut username = u.username.clone();
@@ -635,7 +691,13 @@ async fn nodes_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respon
         // the certificate seen just now is the one later syncs expect
         app.adopt_node_pin(&addr, &id);
     }
-    spawn_sync(&app);
+    // like a server that joins: it never shares a VPN port with another one (a tunnel entry could not carry both)
+    let a = app.clone();
+    let nid = id.clone();
+    tokio::spawn(async move {
+        let _ = crate::servers::fix_ports_of(&a, Some(&nid)).await;
+        spawn_sync(&a);
+    });
     Json(json!({ "ok": true, "id": id })).into_response()
 }
 
@@ -807,7 +869,13 @@ async fn nodes_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(St
     let Some(n) = app.db.node(&id) else { return err(StatusCode::NOT_FOUND, "not found") };
     match action.as_str() {
         "toggle" => { let _ = app.db.exec("UPDATE nodes SET enabled=1-enabled WHERE id=?1", &[&id]); spawn_sync(&app); }
-        "drain" => { let _ = app.db.exec("UPDATE nodes SET drain=1-drain WHERE id=?1", &[&id]); spawn_sync(&app); }
+        "drain" => {
+            let _ = app.db.exec("UPDATE nodes SET drain=1-drain WHERE id=?1", &[&id]);
+            if let Some(n) = app.db.node(&id) {
+                app.db.drain_changed(&n);
+            }
+            spawn_sync(&app);
+        }
         "maint" | "maintenance" => { let _ = app.db.exec("UPDATE nodes SET maint=1-maint WHERE id=?1", &[&id]); spawn_sync(&app); }
         "sync" => { sync::sync_all(&app).await; }
         "assign-all" | "unassign-all" => {
@@ -951,6 +1019,30 @@ mod token_rights_tests {
         let mut h = HeaderMap::new();
         h.insert(axum::http::header::AUTHORIZATION, format!("Bearer {}", t).parse().unwrap());
         h
+    }
+
+    /// A user is made only with known protocols and servers, a bulk name taken half way makes nobody, a
+    /// negative number of days is refused; an old default list with a name no longer known still works
+    #[tokio::test]
+    async fn new_users_take_only_known_names() {
+        let app = app();
+        let h = token_headers(&app, "users:write");
+        let call = |b: serde_json::Value| { let (a, h) = (app.clone(), h.clone()); async move { super::users_create(State(a), h, Json(b)).await.status() } };
+        assert_eq!(call(json!({"username": "alice1", "protocols": ["wg", "nope"]})).await, StatusCode::BAD_REQUEST);
+        assert_eq!(call(json!({"username": "alice2", "nodes": ["ghost"]})).await, StatusCode::BAD_REQUEST);
+        assert_eq!(call(json!({"username": "alice3", "days": -3})).await, StatusCode::BAD_REQUEST);
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,endpoint_mode) VALUES('n1','DE','https://a','','t','panel')", &[]).unwrap();
+        assert_eq!(call(json!({"username": "alice4", "nodes": ["n1"], "protocols": "wg,wg,awg"})).await, StatusCode::OK);
+        assert_eq!(app.db.users().iter().find(|u| u.username == "alice4").unwrap().protocols, "wg,awg");
+        assert_eq!(call(json!({"username": "bob", "count": 3})).await, StatusCode::OK);
+        // bob1 … bob3 exist: «bob» again stops before making anyone
+        let before = app.db.users().len();
+        assert_eq!(call(json!({"username": "bob", "count": 5})).await, StatusCode::BAD_REQUEST);
+        assert_eq!(app.db.users().len(), before);
+        app.db.set("default_protocols", "wg,ovpn,hy2");
+        assert_eq!(call(json!({"username": "carol1"})).await, StatusCode::OK);
+        assert_eq!(app.db.users().iter().find(|u| u.username == "carol1").unwrap().protocols, "wg,hy2");
+        assert!(app.db.users().iter().all(|u| !u.username.starts_with("alice") || u.username == "alice4"));
     }
 
     #[tokio::test]
@@ -1538,7 +1630,7 @@ fn hy2_link(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Op
 }
 
 pub fn user_nodes(app: &App, u: &User) -> Vec<Node> {
-    app.db.nodes().into_iter().filter(|n| n.usable() && u.on(n)).collect()
+    app.db.nodes().into_iter().filter(|n| n.usable() && app.db.serves(u, n, app.db.drain_keep(n).as_ref())).collect()
 }
 
 /// Which protocols this user can actually use on this node. WireGuard only when the server is
@@ -2032,7 +2124,7 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
         None => (node_id, q.get("via").map(|v| v == "tunnel").unwrap_or(false)),
     };
     let Some(n) = app.db.node(&node_id) else { return (StatusCode::NOT_FOUND, "node").into_response() };
-    if !u.on(&n) {
+    if !app.db.serves(&u, &n, app.db.drain_keep(&n).as_ref()) {
         return (StatusCode::FORBIDDEN, "node not allowed").into_response();
     }
     let info = node_info(&n);

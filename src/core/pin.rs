@@ -136,6 +136,10 @@ impl rustls::client::danger::ServerCertVerifier for Pinned {
 
 /// An HTTP client that pins the peer certificate (TOFU) instead of checking a CA. Use it for
 /// channels that would otherwise run with certificate verification fully off.
+/// How long opening a connection may take. A server whose packets are dropped (filtered, gone) is given up
+/// on after this, not after the whole request timeout: one such server held every sync round for 45 s.
+pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 pub fn pinned_client(pin_file: &Path, timeout: std::time::Duration) -> reqwest::Client {
     let mut cfg = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
         .with_safe_default_protocol_versions()
@@ -146,6 +150,7 @@ pub fn pinned_client(pin_file: &Path, timeout: std::time::Duration) -> reqwest::
     cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
     reqwest::Client::builder()
         .timeout(timeout)
+        .connect_timeout(CONNECT_TIMEOUT)
         .use_preconfigured_tls(cfg)
         .build()
         .expect("pinned http client")

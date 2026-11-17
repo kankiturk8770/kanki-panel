@@ -444,7 +444,8 @@ pub fn joined(app: &App, sid: &str, nid: &str) {
     tp::save_servers(app, &list);
     if km > 0 {
         crate::kmix::set_node_port(app, nid, km);
-        if !chosen.is_empty() && !chosen.iter().any(|c| c == "kmix") {
+        // not ticked (or nothing ticked): off like the others
+        if !chosen.iter().any(|c| c == "kmix") {
             crate::kmix::set_node_off(app, nid, true);
         }
     }
@@ -454,7 +455,7 @@ pub fn joined(app: &App, sid: &str, nid: &str) {
     let p = pick(&mut t, "mtun");
     if p > 0 {
         crate::microtun::set_node_port(app, nid, p);
-        if !chosen.is_empty() && !chosen.iter().any(|c| c == "mtun") {
+        if !chosen.iter().any(|c| c == "mtun") {
             crate::microtun::set_node_off(app, nid, true);
         }
     }
@@ -547,7 +548,19 @@ pub async fn auto_link(app: &App) {
         }
     }
     if changed {
-        tp::save_servers(app, &list);
+        // the name lookups above take time: a server added or changed meanwhile must not be lost, so only
+        // the links found here go into the list as it is now
+        let links: HashMap<String, String> = list.into_iter().map(|s| (s.id, s.node)).collect();
+        let mut now_list = tp::servers(app);
+        for s in now_list.iter_mut() {
+            if let Some(node) = links.get(&s.id) {
+                let gone = !s.node.is_empty() && !ids.contains(&s.node);
+                if s.node.is_empty() || gone {
+                    s.node = node.clone();
+                }
+            }
+        }
+        tp::save_servers(app, &now_list);
     }
 }
 
@@ -1422,6 +1435,8 @@ mod tests {
         tp::save_servers(&app, &list);
         joined(&app, &old.id, "n2");
         assert!(["wg", "awg", "hy2"].iter().all(|c| crate::cores::is_off(&app, "n2", c)));
+        // KANKI MIX and microtun too (they were left on: nothing ticked switched two cores on)
+        assert!(!crate::kmix::settings(&app).node_on("n2") && !crate::microtun::settings(&app).node_on("n2"));
     }
 
     #[test]

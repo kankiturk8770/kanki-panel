@@ -1557,8 +1557,10 @@ impl Bot {
         if countries <= 0 {
             return String::new();
         }
+        // every user read once, not once per server
+        let users = self.db().users();
         let mut ns: Vec<(String, usize)> = self.db().nodes().into_iter().filter(|n| n.enabled && !n.drain && !n.maint).map(|n| {
-            let load = self.db().users().iter().filter(|u| u.on(&n)).count();
+            let load = users.iter().filter(|u| u.on(&n)).count();
             (n.id, load)
         }).collect();
         if (ns.len() as i64) <= countries {

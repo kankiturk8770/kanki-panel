@@ -1,3 +1,48 @@
+# v3.51.2 — From a new user to the tunnels: fixes
+The whole path was read: making a user, the sync to the servers, adding a server, the tunnel agents, the tunnels. Fixed, each with a test:
+- **Auto-remove of offline servers:** an Iran relay with no location set counted as abroad, so an Iran internet cut of a day removed
+  it with all its tunnels. Now a server is Iran by its location, the guess from what it does (`server_locs`) or its IP's country.
+- **Drain (no new users):** only WireGuard and AmneziaWG knew it; KANKI MIX and microtun took new users, opening the subscription
+  made a key there (so the user counted as «already there»), and a Hysteria2-only user who was there was dropped. Now the users on
+  the server when drain goes on are kept (`drain_keep:<node>`), on every core, the subscription and the config files; nobody else.
+  A deleted user's number does not keep its place.
+- **A dead or filtered server held every sync round 45 s** (new users, renewals and the connection limit waited on every server).
+  Opening a connection now gives up after 10 s (`pin::CONNECT_TIMEOUT`, the panel and the agents).
+- **Add server with no core ticked:** WireGuard, AmneziaWG and Hysteria2 stayed off but KANKI MIX and microtun came on. All off now.
+- **Add node by hand** now moves a VPN port another server already uses, like a server that joins with its command.
+- **The server list** is no longer written back from a copy read before a slow name lookup (`auto_link`): a server added in that
+  moment is not lost.
+- **Users:** making several at once checks every name first (a taken name half way made some and still said «error»); a negative
+  number of days is refused (it meant «no end»); a typed end date is kept in range when a user is made too.
+- **Game tunnel FEC:** `0:3`, `8:0` or `1:2:3` were taken; now `data:parity` (1-64 : 1-32) or `off`, else an error.
+- The bot reads the users once, not once per server, when it picks the least loaded servers.
+- **A tunnel that switches transport by itself** (auto rotation, `rotate_tick`) took the next transport even when its port was
+  taken on the protocol it moved to (`tcp` → `kcp` moves the port to UDP: another tunnel, a forwarded port, a VIP tunnel or a
+  service could be there). Such a transport is skipped now (`rotate_clash`).
+- **KPING traffic:** the last report of a user who was just shut by the connection limit, switched off or ran out was dropped (only the
+  users let in right then were counted). Their traffic counts now; «online» still only for the users the exit serves.
+- **`quic` tunnels and downloads:** plain QUIC used Cubic, so a few percent of random loss cut a download through the tunnel to almost
+  nothing (lab: 3 % loss each way, 80 ms: 1.5 MB in 20 s). It uses BBR now, like `hq`: 14.6 to 16.2 MB, the game packets unchanged
+  (p50 83 ms, 0.3-0.6 % lost). Only the sending side changes: old and new servers work together (the gain comes when the sending
+  side is updated).
+- **Users:** an unknown protocol or server is refused (`unknown protocol: …`, `unknown server: …`; it was saved and gave the user
+  nothing there); a name twice in the list is kept once; an old default protocol list with a name no longer known still works.
+- **Smart tunnel test:** its ports are also checked against the ports other tunnels forward on the two servers and what programs hold
+  there now (only against tunnel ports before).
+- **Tested locally:** every transport (`tcp`, `tcpmux`, `ws`, `wss`, `h2`, `dual`, `quic`, `kcp`, `hq`, `game`, `faketcp`), reverse
+  and direct: 100 of 100 UDP packets (60 and 1200 bytes) and a 13 MB TCP download each; the lossy lab (3 % each way, 40 ± 10 ms,
+  game + download) on `game`, `kcp`, `hq`, `quic`, new-new and old ↔ new both ways; the panel with a real tunnel agent (three
+  tunnels made, traffic through them, one changed to another transport, one switched off, one deleted: the agent followed each
+  within seconds); the panel with 3000 users and an agent: about 0.3 % of one CPU at rest.
+- **Libraries with known security faults** (`cargo audit`): `rustls` 0.23.45 → 0.23.46 (a server hello could downgrade later
+  connections, brotli certificates could take 1 GiB before any check, …), `rustls-webpki` 0.103.17 and `webpki-roots` 1.0.12 (distrusted
+  intermediates), SQLite through `rusqlite` 0.31 → 0.43 (`libsqlite3-sys` 0.40, a C SQLite fault), `tokio` 1.54.1. Only `chrono` is
+  still listed (unmaintained, no fault). A database made by the old program opens as it was (users and logins kept).
+- **Whole panel in the browser:** 25 pages × 3 sizes (390, 768, 1440; Persian dark, English light), every tab clicked: no script
+  error, no sideways scroll, no `undefined`/`NaN`. `cargo clippy`: style notes only.
+- Also read (no fault found): the tunnel engine's start/stop, the tunnel frames (`mux`), FEC groups, KPING's packet header and replay
+  window, the VIP handshake pieces.
+
 # v3.51.1 — The rest of the security audit
 The three parts of the 3.51.0 audit that stopped half way (the pages customers and admins open, DNS and the VIP tunnel's wire,
 keys and secrets) were read again. **Read and found sound:** the VIP tunnel's keys and packets (a secret on both sides, X25519 + ML-KEM,

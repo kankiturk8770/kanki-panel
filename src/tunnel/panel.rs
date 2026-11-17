@@ -1133,6 +1133,20 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
             return err(StatusCode::BAD_REQUEST, &format!("port {} is used by the VIP tunnel {}; pick another test port", v.0, v.2));
         }
     }
+    // … nor a port another tunnel forwards there, nor one a program holds there now (the test listens on
+    // TCP and UDP of each port on both servers)
+    for t in tunnels(&app).into_iter().filter(|t| t.enabled && (t.entry == entry || t.entry == exit)) {
+        if let Some(p) = parse_ports(&t.tcp).into_iter().chain(parse_ports(&t.udp)).map(|x| x.0).find(|p| *p >= port && *p < port + span) {
+            return err(StatusCode::BAD_REQUEST, &format!("port {} is used by tunnel {}; pick another test port", p, t.name));
+        }
+    }
+    for sid in [&entry, &exit] {
+        for p in port..port + span {
+            if let Some(e) = port_busy(&app, sid, p, false, &[]).or_else(|| port_busy(&app, sid, p, true, &[])) {
+                return err(StatusCode::BAD_REQUEST, &e);
+            }
+        }
+    }
     let job = ProbeJob {
         id: rand_token(6).to_lowercase(),
         entry,
@@ -1239,6 +1253,7 @@ fn rotate_tick(app: &App) {
     let seen = seen().lock().unwrap_or_else(|e| e.into_inner()).clone();
     let fresh = |sid: &str| seen.get(sid).map(|x| t - x.at < 20).unwrap_or(false);
     let mut list = tunnels(app);
+    let list_before = list.clone();
     let mut changed = false;
     let mut ds = down_since().lock().unwrap_or_else(|e| e.into_inner());
     for tu in list.iter_mut() {
@@ -1261,7 +1276,10 @@ fn rotate_tick(app: &App) {
         let order: Vec<String> = if tu.order.is_empty() { AUTO_ORDER.iter().map(|x| x.to_string()).collect() } else { tu.order.clone() };
         // only transports both agents know (an older agent would run the name as plain TCP)
         let ver = |sid: &str| seen.get(sid).map(|x| x.version.as_str()).unwrap_or("");
-        let Some(next) = next_transport(&order, &tu.transport, |tr| agent_knows(ver(&tu.entry), tr) && agent_knows(ver(&tu.exit), tr)) else {
+        // … and only a transport whose port is free there (tcp → kcp moves the port to UDP, where another
+        // tunnel, a forwarded port, a VIP tunnel or a service may already be)
+        let snapshot = list_before.clone();
+        let Some(next) = next_transport(&order, &tu.transport, |tr| agent_knows(ver(&tu.entry), tr) && agent_knows(ver(&tu.exit), tr) && !rotate_clash(app, &snapshot, tu, tr)) else {
             continue;
         };
         tu.switch_note = format!("{} → {}", tu.transport, next);
@@ -1276,6 +1294,35 @@ fn rotate_tick(app: &App) {
     if changed {
         save_tunnels(app, &list);
     }
+}
+
+/// Would tunnel `tu`, switched to transport `tr` (and to reverse mode, as a switch does), need a port that is
+/// taken on its listening server: by another tunnel (its own port or a forwarded one), by its own forwarded
+/// ports, by a VIP tunnel, or (as the server last said) by another program?
+fn rotate_clash(app: &App, list: &[Tunnel], tu: &Tunnel, tr: &str) -> bool {
+    let listener = &tu.entry;
+    let (tcp, udp) = port_protos(tr);
+    let port = tu.port;
+    let fwd = |l: &[String]| -> Vec<u16> { parse_ports(l).into_iter().map(|p| p.0).collect() };
+    if (tcp && fwd(&tu.tcp).contains(&port)) || (udp && fwd(&tu.udp).contains(&port)) {
+        return true;
+    }
+    for o in list.iter().filter(|o| o.id != tu.id && o.enabled && !(o.kind == "awg" && !o.awg.wrap)) {
+        let o_listener = if o.mode == "direct" { &o.exit } else { &o.entry };
+        let (ot, ou) = port_protos(&o.transport);
+        if o_listener == listener && o.port == port && ((tcp && ot) || (udp && ou)) {
+            return true;
+        }
+        if &o.entry == listener && ((tcp && fwd(&o.tcp).contains(&port)) || (udp && fwd(&o.udp).contains(&port))) {
+            return true;
+        }
+    }
+    if crate::vip::panel::ports_on(app, listener, "").into_iter().any(|v| v.0 == port && ((v.1 && udp) || (!v.1 && tcp))) {
+        return true;
+    }
+    // a protocol the tunnel does not hold now: whoever listens there is someone else
+    let (now_tcp, now_udp) = if tu.mode == "direct" { (false, false) } else { port_protos(&tu.transport) };
+    (tcp && !now_tcp && port_busy(app, listener, port, false, &[]).is_some()) || (udp && !now_udp && port_busy(app, listener, port, true, &[]).is_some())
 }
 
 /// the transport after `cur` in `order` that `ok` allows (wrapping around), or None
@@ -1884,6 +1931,16 @@ async fn server_ports(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
 }
 
 /// Create (no id) or edit (with id) a tunnel.
+/// A game tunnel's FEC as typed: empty (the default), "off" / "0", or "data:parity" with 1-64 data and 1-32
+/// parity shards
+fn fec_ok(f: &str) -> bool {
+    if f.is_empty() || f == "off" || f == "0" {
+        return true;
+    }
+    let Some((d, p)) = f.split_once(':') else { return false };
+    matches!(d.trim().parse::<u8>(), Ok(1..=64)) && matches!(p.trim().parse::<u8>(), Ok(1..=32))
+}
+
 async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
     let mut list = tunnels(&app);
@@ -1942,10 +1999,11 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     if b.get("fec").is_some() {
         let f = s("fec");
-        // "8:3" style, 1-64 data and 1-32 parity shards, or "off"
-        if f.is_empty() || f == "off" || f.split(':').all(|x| x.trim().parse::<u8>().map(|v| v <= 64).unwrap_or(false)) {
-            t.fec = f;
+        // "8:3" style, 1-64 data and 1-32 parity shards, or "off" ("0:3", "8:0" and "1:2:3" were let through)
+        if !fec_ok(&f) {
+            return err(StatusCode::BAD_REQUEST, "FEC is data:parity like 8:3 (data 1-64, parity 1-32) or off");
         }
+        t.fec = f;
     }
     if let Some(d) = b["dup"].as_bool() {
         t.dup = d;
@@ -3570,5 +3628,59 @@ mod guard_tests {
         // the panel's own server has its own switch
         guard_switch(&app, "local", true);
         assert!(guard_wanted(&app, "local"));
+    }
+}
+
+#[cfg(test)]
+mod fec_tests {
+    #[test]
+    fn only_a_real_fec_is_taken() {
+        for ok in ["", "off", "0", "8:3", "8:1", "64:32", "8 : 3"] {
+            assert!(super::fec_ok(ok), "{}", ok);
+        }
+        assert!(super::fec_ok(crate::kping::FEC));
+        for bad in ["0:3", "8:0", "1:2:3", "8", "65:3", "8:33", "a:b", "8:"] {
+            assert!(!super::fec_ok(bad), "{}", bad);
+        }
+    }
+}
+
+#[cfg(test)]
+mod rotate_tests {
+    use super::*;
+    use std::sync::atomic::AtomicI64;
+
+    fn tun(id: &str, entry: &str, tr: &str, port: u16, udp: &[&str]) -> Tunnel {
+        Tunnel { id: id.into(), name: id.into(), entry: entry.into(), exit: "de".into(), mode: "reverse".into(), transport: tr.into(), port, enabled: true, udp: udp.iter().map(|x| x.to_string()).collect(), ..Default::default() }
+    }
+
+    /// A tunnel that switches by itself skips a transport whose port is taken on the protocol it moves to
+    #[test]
+    fn a_switch_does_not_take_a_used_port() {
+        let dir = std::env::temp_dir().join(format!("kanki-rot-test-{}", rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
+        let app = Arc::new(App {
+            db, env: HashMap::new(),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        });
+        // a TCP tunnel on 5000; on the same Iran server another tunnel forwards UDP 5000 (and one listens on UDP 6000)
+        let me = tun("me", "ir", "tcp", 5000, &["51820:51820"]);
+        let other = tun("o", "ir", "tcp", 7000, &["5000:5000"]);
+        let list = vec![me.clone(), other];
+        assert!(rotate_clash(&app, &list, &me, "kcp"));
+        assert!(rotate_clash(&app, &list, &me, "dual"));
+        assert!(!rotate_clash(&app, &list, &me, "ws"));
+        // its own forwarded UDP port is the tunnel port
+        let me2 = tun("me2", "ir", "tcp", 51820, &["51820:51820"]);
+        assert!(rotate_clash(&app, &[me2.clone()], &me2, "kcp"));
+        // another server: free
+        let far = tun("far", "ir2", "tcp", 5000, &[]);
+        assert!(!rotate_clash(&app, &list, &far, "kcp"));
+        let order: Vec<String> = ["kcp", "dual", "ws"].iter().map(|x| x.to_string()).collect();
+        assert_eq!(next_transport(&order, "tcp", |tr| !rotate_clash(&app, &list, &me, tr)).as_deref(), Some("ws"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
