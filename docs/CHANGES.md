@@ -34,6 +34,12 @@ The whole path was read: making a user, the sync to the servers, adding a server
   game + download) on `game`, `kcp`, `hq`, `quic`, new-new and old ↔ new both ways; the panel with a real tunnel agent (three
   tunnels made, traffic through them, one changed to another transport, one switched off, one deleted: the agent followed each
   within seconds); the panel with 3000 users and an agent: about 0.3 % of one CPU at rest.
+- **Libraries with known security faults** (`cargo audit`): `rustls` 0.23.45 → 0.23.46 (a server hello could downgrade later
+  connections, brotli certificates could take 1 GiB before any check, …), `rustls-webpki` 0.103.17 and `webpki-roots` 1.0.12 (distrusted
+  intermediates), SQLite through `rusqlite` 0.31 → 0.43 (`libsqlite3-sys` 0.40, a C SQLite fault), `tokio` 1.54.1. Only `chrono` is
+  still listed (unmaintained, no fault). A database made by the old program opens as it was (users and logins kept).
+- **Whole panel in the browser:** 25 pages × 3 sizes (390, 768, 1440; Persian dark, English light), every tab clicked: no script
+  error, no sideways scroll, no `undefined`/`NaN`. `cargo clippy`: style notes only.
 - Also read (no fault found): the tunnel engine's start/stop, the tunnel frames (`mux`), FEC groups, KPING's packet header and replay
   window, the VIP handshake pieces.
 
