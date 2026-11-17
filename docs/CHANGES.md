@@ -1,3 +1,33 @@
+# v3.51.0 — Security audit (cloudflare/security-audit-skill) and its fixes
+The whole project was reviewed with the security-audit skill (`.claude/skills/security-audit/`, 22 units: admin API, auth and
+headers, subscription, sales bot, mini app and AI writer, tunnel agents and nodes, shell commands, release and update, client
+side, DNS and VIP wire, crypto and secrets). Every issue found is fixed, each with a test:
+- **Mini app admin bridge:** a path with a query (`/api/settings?a=1`) passed the route check but skipped the `BOT_KEYS` filter,
+  so a sales-bot admin could write any panel setting, the update source too (root on every server). The bridge now takes only
+  clean `/api/…` paths (no `?`, `#`, `..`, `//`, `\`). The bots' in-process keys are no longer a login session
+  (`check_session`), and the report bot's key only reads (GET).
+- **Sales-bot chat:** `tg:`/`set:`/`rs:` button data wrote any settings key (the old API key, 2FA, the IP allowlist, the bot
+  token). Now only the bot's own settings, texts and buttons (`bot_key`).
+- **Address headers:** `X-Forwarded-For` is believed only from Caddy on the same machine (a loopback peer); a direct caller is
+  its own address, so it cannot pass the IP allowlist, the login limit or claim 127.0.0.1 (`auth::trust_proxy_only`).
+- **Hysteria binary for agents:** one tunnel server could upload a binary that the panel then gave every other agent (run as
+  root). Uploads are no longer kept; the panel hands out only its own copy or one it downloaded from the release (`.release` mark).
+- **Smart-test tunnels:** an exit with nothing to forward allowed every target, so the entry server could reach loopback
+  services on the exit (the panel too). An empty allowlist now allows nothing (`mux::may_dial`).
+- **KPING reports:** any tunnel server could add traffic or «online» to any account. Only the exit of a route counts, and only
+  for the users the panel gave it.
+- **Join:** one server's join token could re-register (and reset the pinned certificate of) another server's node at the same
+  address. Refused now.
+- **Old API key:** kept only as a hash (`h:<sha256>`), so a backup or a copy of the database does not hand out a full-access key.
+- **Hysteria2 password:** links carry a password made from the code (`hy2::user_pass`), not the subscription code itself (a shared
+  hysteria2:// link no longer opens the subscription). Old links keep working.
+- **Discount codes:** the last use of a code could be put on several open orders and delivered to all; open orders now hold
+  their use.
+- **Channel signature:** escaped to the Telegram tags only (it was raw HTML in the panel's preview).
+- **Smaller:** «Update all» needs a login (it updates the panel itself, like Update › apply); the self-update never installs an
+  older release; `certbot` names never start with `-`; AmneziaWG tunnel options are an allowlist (no `PostUp`); report-bot admins
+  cannot change the sales bot's buttons; CI builds every branch with a read-only token, only the `publish` job of main writes.
+
 # v3.50.0 — The whole panel checked: one design, no duplicates, centered windows
 - **Dashboard = the infrastructure only:** four tiles (online now, servers online, tunnels up, all traffic; each opens its page),
   the live network chart, the panel server's CPU/RAM/disk/swap and the panel card. The users' counts and the sales card left it
