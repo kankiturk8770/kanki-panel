@@ -295,6 +295,7 @@ async fn main() {
     let mk = |insecure: bool| {
         reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(20))
+            .connect_timeout(crate::pin::CONNECT_TIMEOUT)
             .danger_accept_invalid_certs(insecure)
             .build()
             .expect("http")

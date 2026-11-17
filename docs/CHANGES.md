@@ -1,3 +1,22 @@
+# v3.51.2 — From a new user to the tunnels: fixes
+The whole path was read: making a user, the sync to the servers, adding a server, the tunnel agents, the tunnels. Fixed, each with a test:
+- **Auto-remove of offline servers:** an Iran relay with no location set counted as abroad, so an Iran internet cut of a day removed
+  it with all its tunnels. Now a server is Iran by its location, the guess from what it does (`server_locs`) or its IP's country.
+- **Drain (no new users):** only WireGuard and AmneziaWG knew it; KANKI MIX and microtun took new users, opening the subscription
+  made a key there (so the user counted as «already there»), and a Hysteria2-only user who was there was dropped. Now the users on
+  the server when drain goes on are kept (`drain_keep:<node>`), on every core, the subscription and the config files; nobody else.
+  A deleted user's number does not keep its place.
+- **A dead or filtered server held every sync round 45 s** (new users, renewals and the connection limit waited on every server).
+  Opening a connection now gives up after 10 s (`pin::CONNECT_TIMEOUT`, the panel and the agents).
+- **Add server with no core ticked:** WireGuard, AmneziaWG and Hysteria2 stayed off but KANKI MIX and microtun came on. All off now.
+- **Add node by hand** now moves a VPN port another server already uses, like a server that joins with its command.
+- **The server list** is no longer written back from a copy read before a slow name lookup (`auto_link`): a server added in that
+  moment is not lost.
+- **Users:** making several at once checks every name first (a taken name half way made some and still said «error»); a negative
+  number of days is refused (it meant «no end»); a typed end date is kept in range when a user is made too.
+- **Game tunnel FEC:** `0:3`, `8:0` or `1:2:3` were taken; now `data:parity` (1-64 : 1-32) or `off`, else an error.
+- The bot reads the users once, not once per server, when it picks the least loaded servers.
+
 # v3.51.1 — The rest of the security audit
 The three parts of the 3.51.0 audit that stopped half way (the pages customers and admins open, DNS and the VIP tunnel's wire,
 keys and secrets) were read again. **Read and found sound:** the VIP tunnel's keys and packets (a secret on both sides, X25519 + ML-KEM,

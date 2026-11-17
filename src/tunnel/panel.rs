@@ -1884,6 +1884,16 @@ async fn server_ports(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
 }
 
 /// Create (no id) or edit (with id) a tunnel.
+/// A game tunnel's FEC as typed: empty (the default), "off" / "0", or "data:parity" with 1-64 data and 1-32
+/// parity shards
+fn fec_ok(f: &str) -> bool {
+    if f.is_empty() || f == "off" || f == "0" {
+        return true;
+    }
+    let Some((d, p)) = f.split_once(':') else { return false };
+    matches!(d.trim().parse::<u8>(), Ok(1..=64)) && matches!(p.trim().parse::<u8>(), Ok(1..=32))
+}
+
 async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
     let mut list = tunnels(&app);
@@ -1942,10 +1952,11 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     if b.get("fec").is_some() {
         let f = s("fec");
-        // "8:3" style, 1-64 data and 1-32 parity shards, or "off"
-        if f.is_empty() || f == "off" || f.split(':').all(|x| x.trim().parse::<u8>().map(|v| v <= 64).unwrap_or(false)) {
-            t.fec = f;
+        // "8:3" style, 1-64 data and 1-32 parity shards, or "off" ("0:3", "8:0" and "1:2:3" were let through)
+        if !fec_ok(&f) {
+            return err(StatusCode::BAD_REQUEST, "FEC is data:parity like 8:3 (data 1-64, parity 1-32) or off");
         }
+        t.fec = f;
     }
     if let Some(d) = b["dup"].as_bool() {
         t.dup = d;
@@ -3570,5 +3581,19 @@ mod guard_tests {
         // the panel's own server has its own switch
         guard_switch(&app, "local", true);
         assert!(guard_wanted(&app, "local"));
+    }
+}
+
+#[cfg(test)]
+mod fec_tests {
+    #[test]
+    fn only_a_real_fec_is_taken() {
+        for ok in ["", "off", "0", "8:3", "8:1", "64:32", "8 : 3"] {
+            assert!(super::fec_ok(ok), "{}", ok);
+        }
+        assert!(super::fec_ok(crate::kping::FEC));
+        for bad in ["0:3", "8:0", "1:2:3", "8", "65:3", "8:33", "a:b", "8:"] {
+            assert!(!super::fec_ok(bad), "{}", bad);
+        }
     }
 }

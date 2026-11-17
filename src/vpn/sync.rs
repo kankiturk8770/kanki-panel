@@ -515,7 +515,9 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
     let mut map = vec![];
     let lim = limits().lock().unwrap_or_else(|e| e.into_inner());
     let shut = |u: &User, p: &str| lim.is_shut(u.id, &n.id, p);
-    let here: Vec<&User> = users.iter().filter(|u| u.active() && u.on(n)).collect();
+    // drain: no new users here, on any core; the users assigned by name or there when it was drained stay
+    let keep = app.db.drain_keep(n);
+    let here: Vec<&User> = users.iter().filter(|u| u.active() && app.db.serves(u, n, keep.as_ref())).collect();
     // at the limit, KANKI MIX / microtun on this server take only the devices still allowed here
     let room = |proto: &str| -> Vec<User> {
         here.iter()
@@ -538,14 +540,7 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
     req.block = lim.blocks_on(&n.id);
     req.off = off.clone();
     req.mtu = crate::mtu::ifaces(app, n);
-    for u in users.iter().filter(|u| u.active() && u.on(n)) {
-        // drain: no new users here unless explicitly assigned or already present
-        if n.drain && !u.explicit_nodes() {
-            let had = app.db.peer(u.id, &n.id, "wg").is_some() || app.db.peer(u.id, &n.id, "awg").is_some();
-            if !had {
-                continue;
-            }
-        }
+    for u in here.iter().copied() {
         for (proto, on) in [("wg", wg_on), ("awg", awg_on)] {
             if !on || !u.has_proto(proto) || shut(u, proto) {
                 continue;
@@ -1114,5 +1109,53 @@ mod live_tests {
         assert_eq!(g.recent("a", t), 1);
         assert_eq!(g.recent("b", t), 0);
         assert_eq!(g.recent("a", t + GRANT_FOR), 0);
+    }
+}
+
+#[cfg(test)]
+mod drain_tests {
+    use std::collections::HashMap;
+    use std::sync::{atomic::AtomicI64, Arc, Mutex};
+
+    /// A drained server keeps the users it had, on every core, and takes no new one: not even one who
+    /// opened the subscription (that made a key there, and a key was what «already there» meant)
+    #[test]
+    fn a_drained_server_takes_no_new_user() {
+        let dir = std::env::temp_dir().join(format!("kanki-drain-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
+        let app = Arc::new(crate::App {
+            db,
+            env: HashMap::new(),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        });
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,online,endpoint_mode,accept_all) VALUES('n1','DE','https://a','','t',1,'panel',1)", &[]).unwrap();
+        let old = app.db.create_user("old", 0.0, 30, 1, "hy2,kmix", "", "", 0).unwrap();
+        app.db.exec("UPDATE nodes SET drain=1 WHERE id='n1'", &[]).unwrap();
+        let n = app.db.node("n1").unwrap();
+        app.db.drain_changed(&n);
+        let new = app.db.create_user("new", 0.0, 30, 1, "hy2,kmix", "", "", 0).unwrap();
+        let named = app.db.create_user("named", 0.0, 30, 1, "hy2", "n1", "", 0).unwrap();
+        // the new one opens its subscription: the drained server is not in it
+        assert!(crate::api::user_nodes(&app, &new).iter().all(|x| x.id != "n1"));
+        assert!(crate::api::user_nodes(&app, &old).iter().any(|x| x.id == "n1"));
+        let (req, _) = super::desired_for(&app, &app.db.users(), &n);
+        let names: Vec<&String> = req.hy2.values().collect();
+        assert!(names.contains(&&old.username) && names.contains(&&named.username) && !names.contains(&&new.username));
+        assert!(!serde_json::to_string(&req.kmix).unwrap().contains("\"new\""));
+        // its number goes to the next new user: no place on the drained server comes with it
+        app.db.delete_user(old.id);
+        let again = app.db.create_user("again", 0.0, 30, 1, "hy2", "", "", 0).unwrap();
+        assert_eq!(again.id, old.id);
+        assert!(crate::api::user_nodes(&app, &again).iter().all(|x| x.id != "n1"));
+        // drain off: everyone again
+        app.db.exec("UPDATE nodes SET drain=0 WHERE id='n1'", &[]).unwrap();
+        let n = app.db.node("n1").unwrap();
+        app.db.drain_changed(&n);
+        let (req, _) = super::desired_for(&app, &app.db.users(), &n);
+        assert!(req.hy2.values().any(|x| x == &new.username));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

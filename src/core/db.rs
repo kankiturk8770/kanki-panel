@@ -555,6 +555,20 @@ impl Db {
         let _ = self.exec("DELETE FROM devices WHERE user_id=?1", &[&id]);
         let _ = self.exec("DELETE FROM orders WHERE target=?1 AND status NOT IN ('done','approved','pending','waiting','error')", &[&id]);
         let _ = self.exec("UPDATE orders SET target=0 WHERE target=?1", &[&id]);
+        // its number goes to the next new user: that one must not inherit a place on a drained server
+        let keys: Vec<(String, String)> = self.with(|c| {
+            let mut s = c.prepare("SELECT k,v FROM settings WHERE k LIKE 'drain_keep:%'").unwrap();
+            let v: Vec<(String, String)> = s.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().filter_map(|x| x.ok()).collect();
+            v
+        });
+        for (k, v) in keys {
+            if let Ok(mut ids) = serde_json::from_str::<Vec<i64>>(&v) {
+                if ids.contains(&id) {
+                    ids.retain(|x| *x != id);
+                    self.set(&k, &serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into()));
+                }
+            }
+        }
     }
 
     // ---------------- نودها
@@ -568,6 +582,36 @@ impl Db {
 
     pub fn node(&self, id: &str) -> Option<Node> {
         self.nodes().into_iter().find(|n| n.id == id)
+    }
+
+    /// A drained node (no new users) keeps the users that were on it when it was drained: their ids,
+    /// taken once when drain goes on (and for a node drained before this was kept: the first time it
+    /// is asked). None = the node is not drained.
+    pub fn drain_keep(&self, n: &Node) -> Option<std::collections::HashSet<i64>> {
+        if !n.drain {
+            return None;
+        }
+        let key = format!("drain_keep:{}", n.id);
+        let saved = self.get(&key);
+        if let Ok(v) = serde_json::from_str::<Vec<i64>>(&saved) {
+            return Some(v.into_iter().collect());
+        }
+        let ids: Vec<i64> = self.users().iter().filter(|u| u.on(n)).map(|u| u.id).collect();
+        self.set(&key, &serde_json::to_string(&ids).unwrap_or_else(|_| "[]".into()));
+        Some(ids.into_iter().collect())
+    }
+
+    /// Drain switched on (the users on the node now stay) or off (the list is forgotten)
+    pub fn drain_changed(&self, n: &Node) {
+        let key = format!("drain_keep:{}", n.id);
+        self.set(&key, "");
+        let _ = self.drain_keep(n);
+    }
+
+    /// Does this node serve this user? Assigned to it (`User::on`), and on a drained node only users
+    /// assigned by name or already there when it was drained. Every core and the links use this.
+    pub fn serves(&self, u: &User, n: &Node, keep: Option<&std::collections::HashSet<i64>>) -> bool {
+        u.on(n) && (u.explicit_nodes() || keep.map_or(true, |k| k.contains(&u.id)))
     }
 
     // ---------------- پیرها

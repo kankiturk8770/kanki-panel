@@ -39,7 +39,7 @@ const BASE: u32 = u32::from_be_bytes([10, 81, 0, 0]);
 /// so 8:3 sent it four times through each tunnel; KPING itself repairs end to end and copies across the
 /// tunnels. Lab (3.43.1, two tunnels on bad lines): no loss either way, ~40% fewer packets between the
 /// servers, ~25% less CPU, the slowest packets sooner; without any FEC, a little loss on the worse lines.
-const FEC: &str = "8:1";
+pub(crate) const FEC: &str = "8:1";
 
 /// One way in: users dial `iran`, its tunnel brings them to `exit`
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]

@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.51.2 — From a new user to the tunnels
+Iran relays are never auto-removed by mistake, «drain» works on every core, a dead server no longer slows every sync, adding a
+server with no core ticked leaves every core off, and smaller fixes for users and game tunnels.
+
 ## New in 3.51.1 — The rest of the security audit
 The parts left over from 3.51.0 (pages, DNS, the VIP tunnel, keys) were read again and found sound; one small hardening.
 
