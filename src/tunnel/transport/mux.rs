@@ -53,14 +53,15 @@ pub struct Shared {
     pub streams: AtomicU64,
     /// entry: UDP flow id -> (the listening socket, the user's address)
     pub udp_back: Mutex<HashMap<u32, UdpBack>>,
-    /// exit: the only "host:port" targets the entry may ask for (empty = any)
+    /// exit: the only "host:port" targets the entry may ask for (empty = none: a smart-test tunnel forwards
+    /// nothing, it only reaches the test services inside the exit)
     pub allowed: Mutex<HashSet<String>>,
 }
 
 impl Shared {
     fn may_dial(&self, target: &str) -> bool {
         let a = self.allowed.lock().unwrap_or_else(|e| e.into_inner());
-        a.is_empty() || a.contains(target)
+        a.contains(target)
     }
 }
 
@@ -602,6 +603,15 @@ async fn pipe(s: Arc<Session>, id: u32, tcp: TcpStream, mut rx: mpsc::UnboundedR
 #[cfg(test)]
 mod tests {
     use super::oldest_eighth;
+
+    /// An exit with nothing to forward (a smart test) dials nothing the entry names, loopback least of all
+    #[test]
+    fn an_exit_dials_only_what_it_forwards() {
+        let s = super::Shared::default();
+        assert!(!s.may_dial("127.0.0.1:8080") && !s.may_dial("10.0.0.1:22"));
+        s.allowed.lock().unwrap().insert("127.0.0.1:51820".into());
+        assert!(s.may_dial("127.0.0.1:51820") && !s.may_dial("127.0.0.1:8080"));
+    }
 
     #[test]
     fn evicts_the_oldest_eighth() {
