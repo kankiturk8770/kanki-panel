@@ -853,6 +853,11 @@ pub async fn self_update(app: &App) -> Result<String, String> {
     if r.is_empty() {
         return Err("GitHub repo is not configured".into());
     }
+    // never back to an older program (an old release has the bugs fixed since)
+    let latest = latest_version(app).await.unwrap_or_default();
+    if !latest.is_empty() && newer(crate::VERSION, &latest) {
+        return Err(format!("the release ({}) is older than this program ({}): not installed", latest, crate::VERSION));
+    }
     let base = format!("https://github.com/{}/releases/download/latest", r);
     let bin = app.http.get(format!("{}/kanki-panel", base)).timeout(std::time::Duration::from_secs(300)).send().await
         .map_err(|e| e.to_string())?;
