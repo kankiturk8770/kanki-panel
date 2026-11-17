@@ -62,6 +62,10 @@ fn transport_config() -> Arc<TransportConfig> {
     t.send_window(32 * 1024 * 1024);
     t.max_concurrent_bidi_streams(64u32.into());
     t.max_concurrent_uni_streams(0u32.into());
+    // BBR, like hq: with Cubic a few percent of random loss (normal between Iran and abroad) cut a download
+    // through the tunnel to almost nothing (lab, 3 % loss each way, 80 ms: 1.5 MB in 20 s against 14.5 on hq).
+    // Only the sender's pacing changes: an older peer works with it as before.
+    t.congestion_controller_factory(Arc::new(quinn::congestion::BbrConfig::default()));
     Arc::new(t)
 }
 

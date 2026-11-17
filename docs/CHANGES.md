@@ -21,6 +21,19 @@ The whole path was read: making a user, the sync to the servers, adding a server
   service could be there). Such a transport is skipped now (`rotate_clash`).
 - **KPING traffic:** the last report of a user who was just shut by the connection limit, switched off or ran out was dropped (only the
   users let in right then were counted). Their traffic counts now; «online» still only for the users the exit serves.
+- **`quic` tunnels and downloads:** plain QUIC used Cubic, so a few percent of random loss cut a download through the tunnel to almost
+  nothing (lab: 3 % loss each way, 80 ms: 1.5 MB in 20 s). It uses BBR now, like `hq`: 14.6 to 16.2 MB, the game packets unchanged
+  (p50 83 ms, 0.3-0.6 % lost). Only the sending side changes: old and new servers work together (the gain comes when the sending
+  side is updated).
+- **Users:** an unknown protocol or server is refused (`unknown protocol: …`, `unknown server: …`; it was saved and gave the user
+  nothing there); a name twice in the list is kept once; an old default protocol list with a name no longer known still works.
+- **Smart tunnel test:** its ports are also checked against the ports other tunnels forward on the two servers and what programs hold
+  there now (only against tunnel ports before).
+- **Tested locally:** every transport (`tcp`, `tcpmux`, `ws`, `wss`, `h2`, `dual`, `quic`, `kcp`, `hq`, `game`, `faketcp`), reverse
+  and direct: 100 of 100 UDP packets (60 and 1200 bytes) and a 13 MB TCP download each; the lossy lab (3 % each way, 40 ± 10 ms,
+  game + download) on `game`, `kcp`, `hq`, `quic`, new-new and old ↔ new both ways; the panel with a real tunnel agent (three
+  tunnels made, traffic through them, one changed to another transport, one switched off, one deleted: the agent followed each
+  within seconds); the panel with 3000 users and an agent: about 0.3 % of one CPU at rest.
 - Also read (no fault found): the tunnel engine's start/stop, the tunnel frames (`mux`), FEC groups, KPING's packet header and replay
   window, the VIP handshake pieces.
 

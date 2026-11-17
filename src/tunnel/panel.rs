@@ -1133,6 +1133,20 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
             return err(StatusCode::BAD_REQUEST, &format!("port {} is used by the VIP tunnel {}; pick another test port", v.0, v.2));
         }
     }
+    // … nor a port another tunnel forwards there, nor one a program holds there now (the test listens on
+    // TCP and UDP of each port on both servers)
+    for t in tunnels(&app).into_iter().filter(|t| t.enabled && (t.entry == entry || t.entry == exit)) {
+        if let Some(p) = parse_ports(&t.tcp).into_iter().chain(parse_ports(&t.udp)).map(|x| x.0).find(|p| *p >= port && *p < port + span) {
+            return err(StatusCode::BAD_REQUEST, &format!("port {} is used by tunnel {}; pick another test port", p, t.name));
+        }
+    }
+    for sid in [&entry, &exit] {
+        for p in port..port + span {
+            if let Some(e) = port_busy(&app, sid, p, false, &[]).or_else(|| port_busy(&app, sid, p, true, &[])) {
+                return err(StatusCode::BAD_REQUEST, &e);
+            }
+        }
+    }
     let job = ProbeJob {
         id: rand_token(6).to_lowercase(),
         entry,
