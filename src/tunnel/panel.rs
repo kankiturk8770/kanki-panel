@@ -942,10 +942,16 @@ async fn hy2bin_bytes(arch: &str, fetch: bool) -> Option<Vec<u8>> {
             }
         }
     }
+    // the copy in the cache is only used when the panel downloaded it itself (a copy another server gave, from
+    // before 3.51, is not trusted and is downloaded again)
     let cache = format!("{}/hysteria-linux-{}", hy2t::CACHE_DIR, a);
-    if let Ok(b) = tokio::fs::read(&cache).await {
-        if hy2t::looks_like_binary(&b) {
-            return Some(b);
+    let mark = format!("{}.release", cache);
+    let trusted = || std::path::Path::new(&mark).exists();
+    if trusted() {
+        if let Ok(b) = tokio::fs::read(&cache).await {
+            if hy2t::looks_like_binary(&b) {
+                return Some(b);
+            }
         }
     }
     if !fetch {
@@ -954,9 +960,11 @@ async fn hy2bin_bytes(arch: &str, fetch: bool) -> Option<Vec<u8>> {
     // one download at a time (two agents asking at once must not download twice)
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _g = LOCK.lock().await;
-    if let Ok(b) = tokio::fs::read(&cache).await {
-        if hy2t::looks_like_binary(&b) {
-            return Some(b);
+    if trusted() {
+        if let Ok(b) = tokio::fs::read(&cache).await {
+            if hy2t::looks_like_binary(&b) {
+                return Some(b);
+            }
         }
     }
     let http = reqwest::Client::builder().timeout(Duration::from_secs(180)).build().ok()?;
@@ -965,7 +973,9 @@ async fn hy2bin_bytes(arch: &str, fetch: bool) -> Option<Vec<u8>> {
             Ok(r) if r.status().is_success() => match r.bytes().await {
                 Ok(b) if hy2t::looks_like_binary(&b) => {
                     let _ = tokio::fs::create_dir_all(hy2t::CACHE_DIR).await;
-                    let _ = tokio::fs::write(&cache, &b).await;
+                    if tokio::fs::write(&cache, &b).await.is_ok() {
+                        let _ = tokio::fs::write(&mark, url.as_bytes()).await;
+                    }
                     eprintln!("hy2 tunnel: downloaded {} for the agents", url);
                     return Some(b.to_vec());
                 }
@@ -1017,29 +1027,13 @@ async fn agent_hy2bin(State(app): St, Json(b): Json<Value>) -> Response {
     (StatusCode::OK, [("x-sha256", sum)], bytes).into_response()
 }
 
-/// Public (agent token): a tunnel server that has hysteria gives the panel a copy for the others
-async fn agent_hy2bin_put(State(app): St, h: HeaderMap, body: axum::body::Bytes) -> Response {
+/// Public (agent token): older agents offer the panel their own copy of hysteria for the others. It is no longer
+/// kept: what one server sends would run as root on every other server, so the panel only hands out its own copy
+/// or one it downloaded from the release itself.
+async fn agent_hy2bin_put(State(app): St, h: HeaderMap) -> Response {
     let hv = |k: &str| h.get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     if let Err(r) = agent_ok(&app, &hv("x-id"), &hv("x-token")) {
         return r;
-    }
-    let Some(a) = hy2t::arch_name(&hv("x-arch")) else { return err(StatusCode::BAD_REQUEST, "unknown CPU type") };
-    let sum = {
-        use sha2::{Digest, Sha256};
-        let mut s = Sha256::new();
-        s.update(&body);
-        hex::encode(s.finalize())
-    };
-    if !hy2t::looks_like_binary(&body) || sum != hv("x-sha256").to_lowercase() {
-        return err(StatusCode::BAD_REQUEST, "not a hysteria binary");
-    }
-    let cache = format!("{}/hysteria-linux-{}", hy2t::CACHE_DIR, a);
-    if !std::path::Path::new(&cache).exists() {
-        let _ = tokio::fs::create_dir_all(hy2t::CACHE_DIR).await;
-        let tmp = format!("{}.part", cache);
-        if tokio::fs::write(&tmp, &body).await.is_ok() {
-            let _ = tokio::fs::rename(&tmp, &cache).await;
-        }
     }
     Json(json!({ "ok": true })).into_response()
 }
@@ -1539,7 +1533,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/tunnel/binary", post(agent_binary))
         .route("/tunnel/hy2bin", post(agent_hy2bin))
         // a hysteria binary is ~20 MB (the rest of the panel keeps the 2 MiB limit)
-        .route("/tunnel/hy2bin/put", post(agent_hy2bin_put).layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)))
+        .route("/tunnel/hy2bin/put", post(agent_hy2bin_put))
         .route("/api/update-all", post(update_all))
         .route("/api/auto-update", get(auto_update_get).put(auto_update_put))
         .route("/api/emergency", get(emer_get).put(emer_put))
@@ -2982,7 +2976,10 @@ async fn agent_binary(State(app): St, Json(b): Json<Value>) -> Response {
 /// One click: updates every node, asks every tunnel-only server to update from the panel, then the
 /// panel itself. A machine that is both a node and a tunnel server is updated once (through its node).
 async fn update_all(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "admin");
+    // it updates the panel itself too: a login session, like Update › apply (an API token cannot)
+    if let Err(r) = crate::auth::check_session(&app, &h) {
+        return r;
+    }
     Json(run_update_all(&app).await).into_response()
 }
 

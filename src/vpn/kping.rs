@@ -261,6 +261,18 @@ pub fn ingest(app: &App, sid: &str, st: &Value) {
         return;
     }
     let now = crate::util::now();
+    // a server speaks only for itself: an exit's numbers count only when it is the exit of a route, and only for
+    // the users the panel gave it (another server cannot put traffic or "online" on any account)
+    let mut st = st.clone();
+    let allowed: std::collections::HashSet<i64> = cfg_for(app, sid).exit.map(|e| e.users.iter().map(|u| u.uid as i64).collect()).unwrap_or_default();
+    if let Some(x) = st.get_mut("exit").and_then(|x| x.as_object_mut()) {
+        if let Some(u) = x.get_mut("users").and_then(|u| u.as_object_mut()) {
+            u.retain(|k, _| k.parse::<i64>().map(|id| allowed.contains(&id)).unwrap_or(false));
+        }
+        if let Some(o) = x.get_mut("online").and_then(|o| o.as_array_mut()) {
+            o.retain(|v| v.as_i64().map(|id| allowed.contains(&id)).unwrap_or(false));
+        }
+    }
     reports().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), (now, st.clone()));
     let x = &st["exit"];
     crate::dns::panel::count_usage(app, &format!("kping_prev_{}", sid), x);
@@ -681,6 +693,18 @@ pub(crate) mod tests {
         assert_eq!(ip_of_id(1), Some(Ipv4Addr::new(10, 81, 0, 2)));
         assert!(ip_of_id(0).is_none() && ip_of_id(65534).is_none());
         assert_ne!(crate::kpingd::SERVER_ADDR, "10.79.0.1/16");
+    }
+
+    /// A server that is not the exit of a route cannot put traffic or "online" on any account
+    #[test]
+    fn a_report_counts_only_from_the_exit_and_for_its_users() {
+        let app = test_app();
+        let u = app.db.create_user("victim", 10.0, 30, 1, "wg", "", "", 0).unwrap();
+        let rep = json!({ "exit": { "run": "r1", "users": { u.id.to_string(): [5_000_000_000i64, 0] }, "online": [u.id] } });
+        ingest(&app, "stranger", &rep);
+        let after = app.db.user(u.id).unwrap();
+        assert_eq!((after.used_bytes, after.last_seen), (u.used_bytes, u.last_seen));
+        assert!(live_units(crate::util::now()).0.iter().all(|x| x.0 != u.id));
     }
 
     pub(crate) fn test_app() -> Arc<App> {

@@ -412,6 +412,11 @@ pub fn join_server(app: &App, token: &str) -> Option<TServer> {
     tp::servers(app).into_iter().find(|s| !s.join.is_empty() && s.join_exp > now() && crate::util::ct_eq(&s.join, token))
 }
 
+/// The server whose VPN part is node `nid`, when one is
+pub fn node_owner(app: &App, nid: &str) -> Option<String> {
+    tp::servers(app).into_iter().find(|s| s.node == nid).map(|s| s.id)
+}
+
 /// The VPN part of server `sid` joined as node `nid`: linked, the token used up, its KANKI MIX port set.
 pub fn joined(app: &App, sid: &str, nid: &str) {
     let mut list = tp::servers(app);

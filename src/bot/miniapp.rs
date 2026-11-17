@@ -134,7 +134,11 @@ pub const BOT_KEYS: &[&str] = &[
 
 /// The panel routes the admin mini app may use: (method, path start, exact or the start of a longer path)
 fn bridge_ok(method: &str, path: &str) -> bool {
-    let p = path.split('?').next().unwrap_or("");
+    // the path is used as it is: no query or fragment (the filters below compare the whole path), no tricks
+    if !path.starts_with("/api/") || path.contains(['?', '#', '\\']) || path.contains("..") || path.contains("//") {
+        return false;
+    }
+    let p = path;
     let exact = |x: &str| p == x;
     let under = |x: &str| p.starts_with(x) && p.len() > x.len() && !p[x.len()..].contains("..");
     match method {
@@ -215,7 +219,11 @@ async fn admin_buttons(State(app): St, h: HeaderMap, Query(q): Query<HashMap<Str
 }
 
 async fn admin_buttons_save(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>, Json(b): Json<Value>) -> Response {
-    if let Err(r) = admin_of(&app, &h, &q) { return r }
+    // the customers' buttons belong to the sales bot: only its admins change them (the report bot only reads)
+    let tg = match admin_of(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+    if !crate::bot::bot_admins_raw(&app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) {
+        return fail(StatusCode::FORBIDDEN, "admins only");
+    }
     match crate::buttons::save(&app, &b) {
         Ok(()) => Json(crate::buttons::list(&app)).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
@@ -601,6 +609,24 @@ mod tests {
         assert_eq!(st, 200, "{}", v);
         assert_eq!(app.db.get("trial_gb"), "3");
         assert_eq!(app.db.get("panel_name"), "Mine");
+        // the same path with a query or other tricks: refused (the filter compares the whole path)
+        for p in ["/api/settings?a=1", "/api/settings#x", "/api//settings", "/api/settings/"] {
+            let (st, _) = call(500, json!({"method": "PUT", "path": p, "body": {"panel_name": "Hacked", "sub_base": "https://evil"}})).await;
+            assert!(st == 403 || st == 404 || st == 405, "{} {}", p, st);
+            let (_, v) = call(500, json!({"method": "GET", "path": p})).await;
+            assert!(v.get("panel_name").is_none(), "{}", p);
+        }
+        assert_eq!(app.db.get("panel_name"), "Mine");
+        // the bot's in-process keys are not a login session (the update source stays a login's)
+        let mut h = HeaderMap::new();
+        h.insert("authorization", format!("Bearer {}", crate::auth::internal_token()).parse().unwrap());
+        assert!(crate::auth::check_session(&app, &h).is_err());
+        h.insert("authorization", format!("Bearer {}", crate::auth::internal_read_token()).parse().unwrap());
+        assert!(crate::auth::check_session(&app, &h).is_err());
+        let r = axum::http::Request::builder().method("PUT").uri("/api/settings").header("authorization", format!("Bearer {}", crate::auth::internal_read_token()))
+            .header("content-type", "application/json").body(axum::body::Body::from(r#"{"panel_name":"Hacked"}"#)).unwrap();
+        assert_eq!(crate::api::master_router(app.clone()).oneshot(r).await.unwrap().status().as_u16(), 401);
+        assert_eq!(app.db.get("panel_name"), "Mine");
         let (_, v) = call(500, json!({"method": "GET", "path": "/api/settings"})).await;
         assert_eq!(v["trial_gb"], "3");
         assert!(v.get("panel_name").is_none() && v.get("dns").is_none());
@@ -688,7 +714,7 @@ mod tests {
         // the same links the subscription itself holds, so the copied configs and the subscription agree
         assert_eq!(lines[1..].to_vec(), crate::api::v2_links(&app, &u).iter().map(|s| s.as_str()).collect::<Vec<_>>());
         // a standard link every V2Box / v2rayNG reads: the password, host:port, a slash, no empty "?", the name
-        assert!(lines[1].starts_with(&format!("hysteria2://{}@", u.code)) && lines[1].ends_with(":8443/#GERMANY") && !lines[1].contains('?'), "{}", t);
+        assert!(lines[1].starts_with(&format!("hysteria2://{}@", crate::hy2::user_pass(&u.code))) && lines[1].ends_with(":8443/#GERMANY") && !lines[1].contains('?'), "{}", t);
         // a WireGuard-only account has no such link: no button, no file
         let w = app.db.create_user("sara12", 10.0, 30, 1, "wg", "", "", 0).unwrap();
         assert!(crate::api::links_text(&app, &w).is_none());

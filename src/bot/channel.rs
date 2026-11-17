@@ -549,10 +549,11 @@ fn tags(r: &mut impl Rng) -> String {
 fn sign(app: &App) -> String {
     let s = app.db.get("ch_sign");
     let bot = app.db.get("bot_username");
+    // the post is Telegram HTML and the panel shows its preview as HTML: only the plain Telegram tags survive
     if !s.is_empty() {
-        s
+        crate::ai::tg_html(&s)
     } else if !bot.is_empty() {
-        format!("🤖 @{}", bot)
+        format!("🤖 @{}", crate::util::esc(&bot))
     } else {
         String::new()
     }
@@ -1235,5 +1236,20 @@ mod schedule_tests {
     fn slot_parsing_ignores_junk() {
         assert_eq!(super::parse_slots("21:30, 10:00,16:00 25:00 x 10:00"), vec![600, 960, 1290]);
         assert!(super::parse_slots("").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod sign_tests {
+    /// The signature goes into Telegram HTML and the panel's preview: only the plain Telegram tags survive
+    #[test]
+    fn the_signature_carries_no_markup() {
+        let app = crate::kping::tests::test_app();
+        app.db.set("ch_sign", "<b>Kanki</b> <img src=x onerror=alert(1)>");
+        let s = super::sign(&app);
+        assert!(s.contains("<b>Kanki</b>") && !s.contains("<img"), "{}", s);
+        app.db.set("ch_sign", "");
+        app.db.set("bot_username", "a<b");
+        assert!(!super::sign(&app).contains("a<b"));
     }
 }

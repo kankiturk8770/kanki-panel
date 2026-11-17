@@ -78,8 +78,7 @@ fn identify_with(app: &App, h: &HeaderMap, touch: bool) -> Option<(String, Vec<S
     if util::ct_eq(&t, internal_read_token()) {
         return Some(("report-bot".into(), vec!["admin".into()]));
     }
-    let legacy = app.db.get("api_key");
-    if !legacy.is_empty() && util::ct_eq(&t, &legacy) {
+    if legacy_key_ok(&app.db.get("api_key"), &t) {
         return Some(("api-key".into(), vec!["admin".into()]));
     }
     let hash = sha256_hex(&t);
@@ -133,7 +132,8 @@ pub fn check(app: &App, h: &HeaderMap, scope: &str) -> Result<String, Response> 
 #[allow(clippy::result_large_err)] // the error is the ready axum answer (401/403)
 pub fn check_session(app: &App, h: &HeaderMap) -> Result<String, Response> {
     match identify(app, h) {
-        Some((actor, _)) if actor != "api-key" && !actor.starts_with("token:") => Ok(actor),
+        // the in-process keys of the bots are not a login either: they may only do what their own bridge allows
+        Some((actor, _)) if actor != "api-key" && !actor.starts_with("token:") && actor != "bot-admin" && actor != "report-bot" => Ok(actor),
         Some(_) => Err((StatusCode::FORBIDDEN, Json(json!({"error": "login session required"}))).into_response()),
         None => Err(deny()),
     }
@@ -150,6 +150,20 @@ macro_rules! guard {
 }
 
 // ================================================================ middleware: IP policy + audit
+/// The address headers are only believed when they come from Caddy on this machine. A caller that reaches the
+/// panel's port straight (a `PANEL_BIND` other than 127.0.0.1) could otherwise name any address, pass the IP
+/// allowlist and the login limit, or claim 127.0.0.1, which the limits leave alone.
+fn trust_proxy_only(req: &mut Request) {
+    let peer = req.extensions().get::<axum::extract::ConnectInfo<std::net::SocketAddr>>().map(|c| c.0.ip());
+    if let Some(ip) = peer {
+        if !ip.is_loopback() {
+            if let Ok(v) = header::HeaderValue::from_str(&ip.to_string()) {
+                req.headers_mut().insert("x-forwarded-for", v);
+            }
+        }
+    }
+}
+
 fn is_admin_surface(path: &str) -> bool {
     (path.starts_with("/api/") && !path.starts_with("/api/config/")) || path == "/admin" || path.starts_with("/admin/")
 }
@@ -166,11 +180,16 @@ pub fn ip_allowed(app: &App, ip: &str) -> bool {
     true
 }
 
-pub async fn middleware(State(app): St, req: Request, next: Next) -> Response {
+pub async fn middleware(State(app): St, mut req: Request, next: Next) -> Response {
     // a call from inside (the bot's admin mini app, already checked there): no address of its own to check
     if is_internal(req.headers()) {
+        // the report bot only reads
+        if util::ct_eq(&bearer(req.headers()), internal_read_token()) && req.method() != Method::GET {
+            return deny();
+        }
         return next.run(req).await;
     }
+    trust_proxy_only(&mut req);
     let path = req.uri().path().to_string();
     let method = req.method().clone();
     let ip = client_ip(req.headers());
@@ -425,7 +444,7 @@ async fn security_get(State(app): St, h: HeaderMap) -> Response {
         (sessions, tokens, logins, audit)
     });
     let key = app.db.get("api_key");
-    let masked = if key.len() > 8 { format!("{}…{}", &key[..4], &key[key.len() - 4..]) } else { String::new() };
+    let masked = if key.is_empty() { String::new() } else if key.starts_with("h:") { app.db.get("api_key_hint") } else if key.len() > 8 { format!("{}…{}", &key[..4], &key[key.len() - 4..]) } else { String::new() };
     Json(json!({
         "admin_user": admin_user(&app), "totp_on": app.db.on("totp_on"), "force_2fa": app.db.on("force_2fa"),
         "ip_allow": app.db.get("ip_allow"), "ip_deny": app.db.get("ip_deny"), "session_hours": app.db.get("session_hours"),
@@ -500,8 +519,39 @@ async fn policy(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response 
 async fn regen_key(State(app): St, h: HeaderMap) -> Response {
     if let Err(r) = check_session(&app, &h) { return r; }
     let k = rand_token(40);
-    app.db.set("api_key", &k);
+    set_legacy_key(&app.db, &k);
     Json(json!({"api_key": k})).into_response()
+}
+
+/// The old full-access API key is kept only as a hash ("h:<sha256>"), like the API tokens: a copy of the
+/// database (a backup) does not hand out a key that works on the panel. Only its two ends are kept to show.
+pub fn set_legacy_key(db: &crate::db::Db, k: &str) {
+    db.set("api_key", &format!("h:{}", sha256_hex(k)));
+    db.set("api_key_hint", &if k.len() > 8 { format!("{}…{}", &k[..4], &k[k.len() - 4..]) } else { String::new() });
+}
+
+/// Does `t` open the old API key (tests)
+#[cfg(test)]
+pub fn legacy_key_matches(db: &crate::db::Db, t: &str) -> bool {
+    legacy_key_ok(&db.get("api_key"), t)
+}
+
+fn legacy_key_ok(stored: &str, t: &str) -> bool {
+    match stored.strip_prefix("h:") {
+        Some(h) => !h.is_empty() && util::ct_eq(&sha256_hex(t), h),
+        None => !stored.is_empty() && util::ct_eq(t, stored),
+    }
+}
+
+/// At start: a key from before 3.51 (kept as it is) is turned into its hash; none yet: one nobody knows
+pub fn legacy_key_start(db: &crate::db::Db) {
+    let k = db.get("api_key");
+    if k.is_empty() {
+        set_legacy_key(db, &rand_token(40));
+        db.set("api_key_hint", "");
+    } else if !k.starts_with("h:") {
+        set_legacy_key(db, &k);
+    }
 }
 
 async fn totp_setup(State(app): St, h: HeaderMap) -> Response {
@@ -594,6 +644,39 @@ async fn token_delete(State(app): St, h: HeaderMap, Path(id): Path<i64>) -> Resp
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_old_api_key_is_kept_only_as_a_hash() {
+        let app = crate::kping::tests::test_app();
+        app.db.set("api_key", "plainlegacykey0123456789");
+        legacy_key_start(&app.db);
+        assert!(app.db.get("api_key").starts_with("h:") && !app.db.get("api_key").contains("plainlegacy"));
+        let mut h = HeaderMap::new();
+        h.insert("authorization", "Bearer plainlegacykey0123456789".parse().unwrap());
+        assert_eq!(identify_with(&app, &h, false).map(|x| x.0).as_deref(), Some("api-key"));
+        h.insert("authorization", format!("Bearer {}", app.db.get("api_key")).parse().unwrap());
+        assert!(identify_with(&app, &h, false).is_none());
+        // a start again leaves the hash as it is
+        let k = app.db.get("api_key");
+        legacy_key_start(&app.db);
+        assert_eq!(app.db.get("api_key"), k);
+    }
+
+    #[test]
+    fn address_headers_count_only_from_this_machine() {
+        let peer = |ip: &str| {
+            let mut r = Request::builder().uri("/api/login").header("x-forwarded-for", "127.0.0.1").body(axum::body::Body::empty()).unwrap();
+            r.extensions_mut().insert(axum::extract::ConnectInfo(std::net::SocketAddr::new(ip.parse().unwrap(), 5000)));
+            trust_proxy_only(&mut r);
+            client_ip(r.headers())
+        };
+        assert_eq!(peer("203.0.113.9"), "203.0.113.9");
+        assert_eq!(peer("127.0.0.1"), "127.0.0.1");
+        // a call from inside the program (no peer): as it is
+        let mut r = Request::builder().uri("/").header("x-forwarded-for", "198.51.100.1").body(axum::body::Body::empty()).unwrap();
+        trust_proxy_only(&mut r);
+        assert_eq!(client_ip(r.headers()), "198.51.100.1");
+    }
 
     #[test]
     fn a_used_code_step_is_not_taken_again() {
