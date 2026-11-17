@@ -557,6 +557,8 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
             }
         }
         if u.has_proto("hy2") && !is_off("hy2") && !shut(u, "hy2") {
+            // the links carry the derived password; the code itself still works for links made before 3.51
+            req.hy2.insert(crate::hy2::user_pass(&u.code), u.username.clone());
             req.hy2.insert(u.code.clone(), u.username.clone());
             if let Some(a) = lim.allowed(u.id, &n.id, "hy2") {
                 req.hy2_cap.insert(u.username.clone(), a);

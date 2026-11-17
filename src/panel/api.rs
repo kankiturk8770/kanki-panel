@@ -1107,6 +1107,16 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
         Some(n) => Some(n.id.clone()),
         None => app.db.nodes().into_iter().find(|n| n.address == addr).map(|n| n.id),
     };
+    // one server's own join token only ever speaks for that server: it cannot take over (and reset the pinned
+    // certificate of) another server's node that happens to have this address
+    if let (Some(s), Some(id)) = (&server, &existing) {
+        if replacing.is_none() && !s.node.is_empty() && &s.node != id {
+            return err(StatusCode::CONFLICT, "this address belongs to another server's node");
+        }
+        if replacing.is_none() && s.node.is_empty() && crate::servers::node_owner(&app, id).is_some_and(|o| o != s.id) {
+            return err(StatusCode::CONFLICT, "this address belongs to another server's node");
+        }
+    }
     if let Some(n) = &replacing {
         app.forget_node_pins(&n.id, &n.address);
     }
@@ -1524,7 +1534,7 @@ fn hy2_link(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Op
     };
     // no empty "?": some iPhone apps (V2Box, Streisand) refuse a link that ends its address with "/?#"
     let query = if q.is_empty() { String::new() } else { format!("?{}", q.join("&")) };
-    Some(format!("hysteria2://{}@{}/{}#{}", pct(&u.code), addr, query, pct(&name)))
+    Some(format!("hysteria2://{}@{}/{}#{}", pct(&crate::hy2::user_pass(&u.code)), addr, query, pct(&name)))
 }
 
 pub fn user_nodes(app: &App, u: &User) -> Vec<Node> {

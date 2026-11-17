@@ -340,9 +340,7 @@ async fn main() {
         let a = app.clone();
         std::thread::spawn(move || subdomain::ensure_on_start(&a));
     }
-    if app.db.get("api_key").is_empty() {
-        app.db.set("api_key", &util::rand_token(40));
-    }
+    auth::legacy_key_start(&app.db);
     // upgrade legacy sha256 admin hash stored in the db is done at next successful login
 
     kping::light_tunnels(&app);

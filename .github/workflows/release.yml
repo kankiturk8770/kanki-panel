@@ -6,14 +6,17 @@ on:
     branches: ['**']
   workflow_dispatch:
 
+# read only: the build of any branch cannot touch the release; only the publish job below (main) may write
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -57,8 +60,32 @@ jobs:
           grep -m1 '^version' Cargo.toml | cut -d'"' -f2 > version.txt
           cat version.txt
 
-      - name: Publish to Releases (tag "latest")
+      - name: Keep the release files for the publish job
         if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: |
+            kanki-panel
+            kanki-panel.sha256
+            version.txt
+          retention-days: 3
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+
+      - name: Check the files
+        run: sha256sum -c kanki-panel.sha256 && cat version.txt
+
+      - name: Publish to Releases (tag "latest")
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest

@@ -2,7 +2,7 @@
 use crate::api::{origin, sub_origin};
 use crate::backup::make_archive;
 use crate::db::User;
-use crate::util::{cfg_name_from, ct_eq, esc, now, rand_token, valid_cfg_name};
+use crate::util::{cfg_name_from, ct_eq, esc, now, valid_cfg_name};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use crate::{sync, App};
@@ -157,6 +157,14 @@ const TEXTS: &[(&str, &str, &str)] = &[
     ("txt_guides", "🎬 آموزش موردنظرتون رو از پایین انتخاب کنید 👇", "بالای فهرست آموزش‌ها"),
     ("txt_gift", "🎁 <b>کاربر گرامی، سلام</b> 🌷\n\nاز صبر و همراهی همیشگی شما صمیمانه سپاسگزاریم 💛\nبابت اختلالی که پیش آمد پوزش می‌خواهیم و به رسم جبران، هدیه‌ای کوچک از طرف ما به اشتراک شما اضافه شد:", "پیام هدیه‌ی حجم و زمان (جبران)"),
 ];
+
+/// A setting the bot's admins may change from the chat: the bot's settings (as in the mini app), its texts and buttons
+fn bot_key(k: &str) -> bool {
+    if let Some(b) = k.strip_prefix("btn_") {
+        return !b.is_empty() && b.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    }
+    crate::miniapp::BOT_KEYS.contains(&k) || k == "backup_on" || is_text_key(k)
+}
 
 fn is_text_key(k: &str) -> bool {
     TEXTS.iter().any(|t| t.0 == k)
@@ -1725,9 +1733,6 @@ impl Bot {
         if mini.starts_with("https://") && self.db().get("mini_menu") != "0" {
             let _ = self.call("setChatMenuButton", json!({"menu_button": {"type": "web_app", "text": MENU_NEW, "web_app": {"url": mini}}})).await;
         }
-        if self.db().get("api_key").is_empty() {
-            self.db().set("api_key", &rand_token(40));
-        }
         // every chat that got an older menu button text gets the new one, once (a few per second, under Telegram's limit)
         if self.db().get("menu_text_v") != "2" {
             self.db().set("menu_text_v", "2");
@@ -1989,8 +1994,11 @@ impl Bot {
     /// The percent of a discount code that can be used now (it exists, has uses left and is not expired)
     fn discount_percent(&self, code: &str) -> Option<i64> {
         self.db().with(|c| c.query_row(
-            "SELECT percent FROM discounts WHERE code=?1 AND uses_left>0 AND (COALESCE(expires,0)=0 OR expires>?2)",
-            rusqlite::params![code, now()], |r| r.get(0)).ok())
+            // the uses still free: an order that is open (paid or not yet) already holds one, so a last use cannot
+            // be put on several orders at once and delivered to all of them
+            "SELECT percent FROM discounts WHERE code=?1 AND (COALESCE(expires,0)=0 OR expires>?2) AND uses_left > \
+             (SELECT COUNT(*) FROM orders WHERE discount=?1 AND status IN ('waiting','pending','paid','approved') AND created>?3)",
+            rusqlite::params![code, now(), now() - 86400], |r| r.get(0)).ok())
     }
 
     /// Is the discount of this purchase still good (the same code with the same percent)? When it is not, it is
@@ -3755,6 +3763,10 @@ impl Bot {
         let back = Some(ik(vec![vec![b("⬅️ پنل مدیریت", "adm")]]));
         let set_wait = |w: Wait| { self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, w); };
         let (head, rest) = d.split_once(':').unwrap_or((d, ""));
+        // the key comes from the button's data: only the bot's own settings, never the panel's (api_key, 2FA, …)
+        if matches!(head, "tg" | "set" | "rs") && !bot_key(rest) {
+            return;
+        }
         match head {
             "tg" => {
                 db.set(rest, if db.on(rest) { "0" } else { "1" });
@@ -3984,6 +3996,7 @@ impl Bot {
         let kb = Some(self.adm_kb());
         let parts: Vec<&str> = text.split_whitespace().collect();
         match w {
+            Wait::Set(k) if !bot_key(&k) => {}
             Wait::Set(k) => {
                 // premium emoji: kept in message texts (<tg-emoji>); on a button the first one becomes its emoji
                 let kept;
@@ -4641,7 +4654,7 @@ mod flow_tests {
     }
 
     async fn bot() -> (Arc<Bot>, Log) {
-        let dir = std::env::temp_dir().join(format!("kanki-bot-test-{}", rand_token(8)));
+        let dir = std::env::temp_dir().join(format!("kanki-bot-test-{}", crate::util::rand_token(8)));
         std::fs::create_dir_all(&dir).unwrap();
         let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
         db.set("trial_on", "1");
@@ -5068,6 +5081,52 @@ mod flow_tests {
         bot.on_stars_paid(&paid(buyer, 23, "ch2")).await;
         assert!(log.lock().unwrap().iter().any(|(m, v)| m == "refundStarPayment" && v["telegram_payment_charge_id"] == "ch2"));
         assert_eq!(db.users_of_tg(buyer).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_bot_admin_changes_only_the_bots_own_settings() {
+        let (bot, _log) = bot().await;
+        let db = bot.db();
+        db.set("totp_on", "1");
+        db.set("ip_allow", "10.0.0.0/8");
+        let a = || from(ADMIN, "Admin", "admin");
+        // made-up button data for the panel's own settings: nothing changes, nothing is asked
+        tap(&bot, a(), "set:api_key").await;
+        say(&bot, a(), "attackerchosenkey0123456789").await;
+        tap(&bot, a(), "tg:totp_on").await;
+        tap(&bot, a(), "rs:ip_allow").await;
+        tap(&bot, a(), "set:bot_token").await;
+        say(&bot, a(), "1:evil").await;
+        assert!(!crate::auth::legacy_key_matches(db, "attackerchosenkey0123456789"));
+        assert_eq!((db.get("totp_on").as_str(), db.get("ip_allow").as_str()), ("1", "10.0.0.0/8"));
+        assert_ne!(db.get("bot_token"), "1:evil");
+        // the bot's own still work
+        tap(&bot, a(), "set:support").await;
+        say(&bot, a(), "@help").await;
+        assert_eq!(db.get("support"), "@help");
+        let before = db.on("trial_on");
+        tap(&bot, a(), "tg:trial_on").await;
+        assert_ne!(db.on("trial_on"), before);
+    }
+
+    #[tokio::test]
+    async fn a_last_discount_use_goes_to_one_order_only() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        db.set("stars_on", "1");
+        db.exec("INSERT INTO discounts(code,percent,uses_left) VALUES('ONE',50,1)", &[]).unwrap();
+        for buyer in [7691, 7692] {
+            paying(&bot, buyer).await;
+            tap(&bot, from(buyer, "Ali", "ali"), "disc").await;
+            say(&bot, from(buyer, "Ali", "ali"), "ONE").await;
+            tap(&bot, from(buyer, "Ali", "ali"), "pay:stars").await;
+        }
+        let codes: Vec<String> = db.with(|c| {
+            let mut s = c.prepare("SELECT discount FROM orders WHERE tg_id IN (7691,7692) ORDER BY id").unwrap();
+            let v: Vec<String> = s.query_map([], |r| r.get(0)).unwrap().filter_map(|x| x.ok()).collect();
+            v
+        });
+        assert_eq!(codes, vec!["ONE".to_string(), String::new()], "{:?} {}", codes, last(&log, 7692));
     }
 
     #[tokio::test]

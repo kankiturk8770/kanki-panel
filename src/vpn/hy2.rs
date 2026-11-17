@@ -158,3 +158,10 @@ mod tests {
         assert_eq!(moving_known("hy2test-nobody", 1100), Some(0));
     }
 }
+
+/// The Hysteria2 password of an account: made from its subscription code but not the code itself, so a shared
+/// hysteria2:// link does not open the subscription (and every other config) of its owner
+pub fn user_pass(code: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(format!("kanki-hy2|{}", code).as_bytes()))[..32].to_string()
+}

@@ -286,7 +286,9 @@ fn safe(s: &AwgSpec) -> AwgSpec {
     for f in [&mut x.tid, &mut x.iface, &mut x.role, &mut x.private, &mut x.peer_pub, &mut x.psk, &mut x.address, &mut x.peer_ip, &mut x.endpoint, &mut x.fwd_target] {
         *f = one(f);
     }
-    x.params = s.params.iter().filter(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric())).map(|(k, v)| (k.clone(), one(v))).collect();
+    // only the AmneziaWG options (a key such as PostUp would run a command as root)
+    const KEYS: &[&str] = &["Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4", "I1", "I2", "I3", "I4", "I5"];
+    x.params = s.params.iter().filter(|(k, _)| KEYS.contains(&k.as_str())).map(|(k, v)| (k.clone(), one(v))).collect();
     x.routes.retain(|r| cidr_ok(r.trim()));
     x.src_routes.retain(|r| cidr_ok(r.trim()));
     if !x.peer_ip.is_empty() && x.peer_ip.parse::<std::net::IpAddr>().is_err() {

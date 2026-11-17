@@ -42,7 +42,9 @@ pub fn have(domain: &str) -> bool {
 pub fn valid_domain(d: &str) -> bool {
     d.parse::<std::net::IpAddr>().is_err()
         && d.contains('.')
-        && d.split('.').all(|l| !l.is_empty() && l.len() <= 63 && l.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'))
+        && d.len() <= 253
+        // a label never starts or ends with "-" (and so the name can never be read as an option of certbot)
+        && d.split('.').all(|l| !l.is_empty() && l.len() <= 63 && !l.starts_with('-') && !l.ends_with('-') && l.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-'))
 }
 
 /// A file Kanki DNS may serve for Let's Encrypt: `/.well-known/acme-challenge/<token>`.
@@ -864,6 +866,14 @@ pub fn taken_json(v: &[Taken]) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_name_is_never_an_option() {
+        assert!(valid_domain("a-b.example.com"));
+        for d in ["-d.example.com", "--webroot.example.com", "a.-x.com", "a-.example.com", "example", "1.2.3.4"] {
+            assert!(!valid_domain(d), "{}", d);
+        }
+    }
 
     #[test]
     fn listening_sockets_and_loopback() {
