@@ -16,6 +16,13 @@ The whole path was read: making a user, the sync to the servers, adding a server
   number of days is refused (it meant «no end»); a typed end date is kept in range when a user is made too.
 - **Game tunnel FEC:** `0:3`, `8:0` or `1:2:3` were taken; now `data:parity` (1-64 : 1-32) or `off`, else an error.
 - The bot reads the users once, not once per server, when it picks the least loaded servers.
+- **A tunnel that switches transport by itself** (auto rotation, `rotate_tick`) took the next transport even when its port was
+  taken on the protocol it moved to (`tcp` → `kcp` moves the port to UDP: another tunnel, a forwarded port, a VIP tunnel or a
+  service could be there). Such a transport is skipped now (`rotate_clash`).
+- **KPING traffic:** the last report of a user who was just shut by the connection limit, switched off or ran out was dropped (only the
+  users let in right then were counted). Their traffic counts now; «online» still only for the users the exit serves.
+- Also read (no fault found): the tunnel engine's start/stop, the tunnel frames (`mux`), FEC groups, KPING's packet header and replay
+  window, the VIP handshake pieces.
 
 # v3.51.1 — The rest of the security audit
 The three parts of the 3.51.0 audit that stopped half way (the pages customers and admins open, DNS and the VIP tunnel's wire,

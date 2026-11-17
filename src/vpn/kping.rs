@@ -264,13 +264,23 @@ pub fn ingest(app: &App, sid: &str, st: &Value) {
     // a server speaks only for itself: an exit's numbers count only when it is the exit of a route, and only for
     // the users the panel gave it (another server cannot put traffic or "online" on any account)
     let mut st = st.clone();
-    let allowed: std::collections::HashSet<i64> = cfg_for(app, sid).exit.map(|e| e.users.iter().map(|u| u.uid as i64).collect()).unwrap_or_default();
+    // every KPING user of the panel, not only the ones let in right now: the last traffic of a user who was
+    // just shut by the connection limit, expired or ran out of data still counts
+    let s = settings(app);
+    let is_exit = s.on && s.routes.iter().any(|r| r.exit == sid);
+    let allowed: std::collections::HashSet<i64> = if is_exit {
+        app.db.users().iter().filter(|u| u.has_proto(PROTO)).map(|u| u.id).collect()
+    } else {
+        Default::default()
+    };
     if let Some(x) = st.get_mut("exit").and_then(|x| x.as_object_mut()) {
         if let Some(u) = x.get_mut("users").and_then(|u| u.as_object_mut()) {
             u.retain(|k, _| k.parse::<i64>().map(|id| allowed.contains(&id)).unwrap_or(false));
         }
+        // «online» only for the users it serves now (a shut user must not hold a place)
+        let served: std::collections::HashSet<i64> = if is_exit { cfg_for(app, sid).exit.map(|e| e.users.iter().map(|u| u.uid as i64).collect()).unwrap_or_default() } else { Default::default() };
         if let Some(o) = x.get_mut("online").and_then(|o| o.as_array_mut()) {
-            o.retain(|v| v.as_i64().map(|id| allowed.contains(&id)).unwrap_or(false));
+            o.retain(|v| v.as_i64().map(|id| served.contains(&id)).unwrap_or(false));
         }
     }
     reports().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), (now, st.clone()));
@@ -831,6 +841,12 @@ pub(crate) mod tests {
         let before = u.used_bytes;
         ingest(&app, &de, &json!({ "relays": [], "exit": { "port": DEFAULT_PORT, "run": "r1", "users": { u.id.to_string(): [5000, 3000, 2000] }, "online": [u.id] } }));
         assert_eq!(app.db.user(u.id).unwrap().used_bytes - before, 5000);
+        // switched off (or ran out) right then: its last traffic still counts, but it holds no place
+        app.db.exec("UPDATE users SET enabled=0 WHERE id=?1", &[&u.id]).unwrap();
+        ingest(&app, &de, &json!({ "relays": [], "exit": { "port": DEFAULT_PORT, "run": "r1", "users": { u.id.to_string(): [7000, 4000, 3000] }, "online": [u.id] } }));
+        assert_eq!(app.db.user(u.id).unwrap().used_bytes - before, 7000);
+        assert!(live_units(crate::util::now()).0.iter().all(|x| x.0 != u.id));
+        app.db.exec("UPDATE users SET enabled=1 WHERE id=?1", &[&u.id]).unwrap();
         let (_, v) = call(&app, "GET", "/api/kping", Value::Null).await;
         assert_eq!(v["users"], 1);
         assert_eq!(v["routes"][0]["exit_runs"], true);
