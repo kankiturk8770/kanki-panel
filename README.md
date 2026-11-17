@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.51.1 — The rest of the security audit
+The parts left over from 3.51.0 (pages, DNS, the VIP tunnel, keys) were read again and found sound; one small hardening.
+
 ## New in 3.51 — Security audit
 The whole project was reviewed with the security-audit skill and every issue fixed with a test: the mini app's admin bridge,
 the bot's settings buttons, forwarded addresses, the hysteria binary shared between servers, smart-test tunnels, KPING reports,

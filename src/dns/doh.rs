@@ -59,7 +59,7 @@ fn b64url(s: &str) -> Option<Vec<u8>> {
 fn user_of(eng: &Engine, ip: IpAddr, token: Option<&str>) -> Option<i64> {
     match token {
         Some(t) => {
-            let uid = eng.live().cfg.users.iter().find(|u| !u.token.is_empty() && u.token.eq_ignore_ascii_case(t)).map(|u| u.id)?;
+            let uid = eng.live().cfg.users.iter().find(|u| !u.token.is_empty() && crate::util::ct_eq(&u.token.to_ascii_lowercase(), &t.to_ascii_lowercase())).map(|u| u.id)?;
             eng.allow(ip, uid);
             Some(uid)
         }

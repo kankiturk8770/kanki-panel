@@ -1,3 +1,11 @@
+# v3.51.1 — The rest of the security audit
+The three parts of the 3.51.0 audit that stopped half way (the pages customers and admins open, DNS and the VIP tunnel's wire,
+keys and secrets) were read again. **Read and found sound:** the VIP tunnel's keys and packets (a secret on both sides, X25519 + ML-KEM,
+a nonce never used twice, a replay window, every waiting table capped); Kanki DNS (only subscribers' addresses are answered or
+carried, only to routed names, never to private addresses, the relay with its own key); the sealed configs (`kseal1`, a fresh
+random nonce each time); the emergency chat (escaped, password hash, guessing slowed down); the subscription page and the mini
+app (every value from the server escaped). **Changed:** a DoH user token is compared in constant time.
+
 # v3.51.0 — Security audit (cloudflare/security-audit-skill) and its fixes
 The whole project was reviewed with the security-audit skill (`.claude/skills/security-audit/`, 22 units: admin API, auth and
 headers, subscription, sales bot, mini app and AI writer, tunnel agents and nodes, shell commands, release and update, client
