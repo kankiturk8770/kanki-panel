@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.52.2 — Smart test and the firewall
+The smart tunnel test opens its port on both servers while it runs (firewall on) and closes it after; it also shows the route's MTU.
+
 ## New in 3.52.1 — CDN and the connection limit
 Behind a CDN, Xray counts the user's own address, not Cloudflare's: the connection limit counts phones, not CDN edges.
 

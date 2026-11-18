@@ -1,3 +1,11 @@
+# v3.52.2 — Smart tunnel test with the firewall on; the route's MTU
+- **Smart tunnel test with the panel's firewall on:** each test port is now opened, TCP and UDP, on **both** servers for the test
+  (`open_ports`, the test's tunnels), not only on the listening side, and closed again when the test ends (`fw::sync`).
+- **The route's MTU:** the raw ping of the smart test also finds the largest packet that passes the route whole (ICMP with
+  «don't fragment», `path_mtu`) and shows it beside the ping; below 1500 it says bigger packets are dropped on the way.
+- A transport whose tunnel connected but whose data never came back («ping timeout») no longer says «the port is closed»: it
+  says the port is open and the route drops or filters the tunnel's bigger packets.
+
 # v3.52.1 — The CDN path to its end
 Followed the CDN change from the inbound form to every place it reaches (subscription, bot, mini app, Amnezia backup, the Kanki app,
 the Xray server, tunnel copies, the connection limit). One break: Xray counts a user's devices by address, and behind a CDN the

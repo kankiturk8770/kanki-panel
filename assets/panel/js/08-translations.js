@@ -2436,5 +2436,8 @@ var FA={"choose both servers":"هر دو سرور را انتخاب کن",
 "the CDN domain must be another domain than the server's own (else REALITY and TCP break)":"دامنهٔ CDN باید غیر از دامنهٔ خود سرور باشد (وگرنه REALITY و TCP خراب می‌شوند)",
 "Last online":"آخرین آنلاین",
 "through Iran":"از راه ایران",
-"Data used after the account ended":"مصرف بعد از تمام شدن اکانت"
+"Data used after the account ended":"مصرف بعد از تمام شدن اکانت",
+"Connected, but no data passes: the port is open; the route drops the tunnel's bigger packets (MTU) or filters them":"وصل شد ولی داده رد نمی‌شود: پورت باز است؛ مسیر بسته‌های بزرگ‌تر تانل را می‌اندازد (MTU) یا فیلتر می‌کند",
+"This route passes only packets up to":"این مسیر فقط بسته‌های تا",
+"bytes: bigger ones are dropped on the way. Tunnels that fill full packets break here while ping works.":"بایت را رد می‌کند و بزرگ‌ترها وسط راه می‌افتند. تانلی که بستهٔ کامل می‌فرستد این‌جا قطع می‌شود، با این‌که پینگ کار می‌کند."
 };
