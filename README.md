@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.52.1 — CDN and the connection limit
+Behind a CDN, Xray counts the user's own address, not Cloudflare's: the connection limit counts phones, not CDN edges.
+
 ## New in 3.52 — CDN domain for Xray
 Each Xray server can have a separate CDN domain; inbounds that can go through a CDN (WS, HTTPUpgrade, XHTTP, gRPC) give users one
 more link with it, while REALITY and TCP stay on the main domain.

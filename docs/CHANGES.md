@@ -1,3 +1,10 @@
+# v3.52.1 — The CDN path to its end
+Followed the CDN change from the inbound form to every place it reaches (subscription, bot, mini app, Amnezia backup, the Kanki app,
+the Xray server, tunnel copies, the connection limit). One break: Xray counts a user's devices by address, and behind a CDN the
+address is Cloudflare's, so one phone could count as several devices, and shutting one address could shut other users behind the
+same edge. An inbound with the CDN switch now has `sockopt.trustedXForwardedFor: ["CF-Connecting-IP"]`: behind Cloudflare Xray takes
+the user's own address; direct connections are as before. The Kanki app shows the CDN link beside the direct one (same group, «· CDN»).
+
 # v3.52.0 — Xray CDN domain; «connected now» and the data limit; the admins' mini app
 Putting the server's main domain behind a CDN breaks REALITY and plain TCP links. Now each Xray server can have a **second domain
 for the CDN** (Xray › server › «Domain, SSL and CDN»; Cloudflare: orange cloud, SSL mode Full); the main domain stays as it is.
