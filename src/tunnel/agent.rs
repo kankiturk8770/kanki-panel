@@ -60,6 +60,13 @@ pub fn open_ports(specs: &[Spec]) {
             }
             continue;
         }
+        // a smart-test tunnel: its port, TCP and UDP, on both servers while the test runs (the panel's firewall
+        // may be on everywhere); the test's tunnels go when it ends and `fw::sync` closes the port again
+        if s.probe && s.port > 0 {
+            want.push(format!("{}/tcp", s.port));
+            want.push(format!("{}/udp", s.port));
+            continue;
+        }
         if s.listens() && s.port > 0 {
             // quic, kcp, hq and game run over UDP; dual listens on UDP and TCP of the same number;
             // faketcp's packets are TCP on the wire

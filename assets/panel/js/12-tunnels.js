@@ -537,6 +537,7 @@ function tunWhy(r,j){var L=j.results||[],same=L.filter(function(z){return z.mode
  okTr=function(n){return same.some(function(z){return z.transport==n&&tunOk(z)})},
  anyTcp=same.some(function(z){return z.transport!='quic'&&z.transport!='kcp'&&z.transport!='hq'&&tunOk(z)}),udpTr=r.transport=='quic'||r.transport=='kcp'||r.transport=='hq';
  if(!tunOk(r)){
+  if(/ping timeout/.test(r.tcp_error||r.error||'')&&!same.some(tunOk))return t('Connected, but no data passes: the port is open; the route drops the tunnel\'s bigger packets (MTU) or filters them');
   if(udpTr)return anyTcp?t('UDP is probably blocked on this route: the TCP transports pass'):t('Nothing passes in this direction');
   if(r.transport=='wss'&&okTr('ws'))return t('TLS looks filtered: plain WebSocket passes but WSS does not');
   if(r.transport=='ws'&&okTr('wss'))return t('Plain HTTP looks filtered: WSS passes but WebSocket does not');
@@ -557,7 +558,8 @@ function tunSmartDraw(j){var P=TS.prof||'balanced',stg={starting:t('Starting…'
   return '<div class="tsr '+cls+'"><b>'+(isb?'🏆 ':'')+tunTr(r.transport)+'</b>'+(st||nums)+'<em class="ltr">'+(ok?N(tunScore(r,P)):'')+'</em></div>'+
    (why?'<small class="tse">'+esc(why)+'</small>':'')+(raw?'<small class="tse ltr">'+esc(raw)+'</small>':'')};
  var base=L.filter(function(r){return r.baseline})[0];
- var baseRow=base?'<div class="tsbase"><b>📡 '+t('Raw ping (no tunnel)')+'</b>'+(!base.done?'<span class="muted">'+(stg[base.stage]||stg.testing)+'</span>':base.failed?'<span class="r">'+esc(base.error||t('No answer'))+'</span>':'<span class="ltr">'+(base.ping_ms!=null?N(base.ping_ms)+' ms':'—')+(base.loss?' · '+N(base.loss)+'% '+t('loss'):'')+'</span>')+'</div>'+(base&&base.done&&!base.failed?'<small class="tse">'+t('This is the base ping of the route; a good tunnel stays close to it.')+'</small>':''):'';
+ var baseRow=base?'<div class="tsbase"><b>📡 '+t('Raw ping (no tunnel)')+'</b>'+(!base.done?'<span class="muted">'+(stg[base.stage]||stg.testing)+'</span>':base.failed?'<span class="r">'+esc(base.error||t('No answer'))+'</span>':'<span class="ltr">'+(base.ping_ms!=null?N(base.ping_ms)+' ms':'—')+(base.loss?' · '+N(base.loss)+'% '+t('loss'):'')+(base.path_mtu?' · MTU '+N(base.path_mtu):'')+'</span>')+'</div>'+
+  (base&&base.done&&base.path_mtu&&base.path_mtu<1500?'<small class="tse">'+t('This route passes only packets up to')+' <b class="ltr">'+N(base.path_mtu)+'</b> '+t('bytes: bigger ones are dropped on the way. Tunnels that fill full packets break here while ping works.')+'</small>':'')+(base&&base.done&&!base.failed?'<small class="tse">'+t('This is the base ping of the route; a good tunnel stays close to it.')+'</small>':''):'';
  var h='<p class="sub">'+esc(tunSrv(j.entry).name)+' ⇄ '+esc(tunSrv(j.exit).name)+'</p>'+baseRow+
   '<div class="seg" style="margin:6px 0">'+[['balanced',t('Balanced')],['speed',t('Most speed')],['gaming',t('Gaming (low ping)')]].map(function(o){return '<button data-prof="'+o[0]+'" class="'+(P==o[0]?'on':'')+'">'+o[1]+'</button>'}).join('')+'</div>'+
   (j.finished?'':'<div class="tsbar"><i style="width:'+pct+'%"></i></div>');

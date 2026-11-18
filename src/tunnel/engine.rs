@@ -571,10 +571,38 @@ fn baseline_ping(host: &str) -> serde_json::Value {
     };
     let text = String::from_utf8_lossy(&out.stdout);
     match parse_ping(&text) {
-        Some((ms, loss)) => json!({"done": true, "baseline": true, "ping_ms": (ms * 10.0).round() / 10.0, "loss": loss}),
+        Some((ms, loss)) => {
+            // the largest packet that passes the route whole (DF set): a tunnel that sends bigger ones is cut
+            // where nothing tells it so, and then only small packets (ping, the handshake) get through
+            let mtu = path_mtu(|payload| {
+                let n = payload.to_string();
+                std::process::Command::new("ping").args(["-n", "-M", "do", "-s", n.as_str(), "-c", "2", "-w", "3", host]).output()
+                    .map(|o| parse_ping(&String::from_utf8_lossy(&o.stdout)).is_some_and(|(_, l)| l < 100.0)).unwrap_or(false)
+            });
+            json!({"done": true, "baseline": true, "ping_ms": (ms * 10.0).round() / 10.0, "loss": loss, "path_mtu": mtu})
+        }
         None => json!({"done": true, "failed": true, "baseline": true,
             "error": "the exit did not answer ICMP (ping may be blocked between the two servers)"}),
     }
+}
+
+/// The route's MTU (IP packet bytes) from ICMP payloads that pass with "don't fragment": 1500 when a full
+/// packet passes, else the largest found between 576 and 1500 (8-byte steps), None when even 576 does not
+/// pass. `fits(payload)` sends one probe; IP + ICMP headers are 28 bytes.
+pub fn path_mtu(fits: impl Fn(u16) -> bool) -> Option<u16> {
+    if fits(1472) {
+        return Some(1500);
+    }
+    let (mut lo, mut hi) = (548u16, 1472u16);
+    if !fits(lo) {
+        return None;
+    }
+    // lo passes, hi does not
+    while hi - lo > 8 {
+        let mid = lo + (hi - lo) / 2;
+        if fits(mid) { lo = mid } else { hi = mid }
+    }
+    Some(lo + 28)
 }
 
 /// (avg RTT ms, packet-loss %) from `ping` output, or None when nothing came back.
@@ -714,5 +742,19 @@ mod baseline_tests {
 
         let dead = "6 packets transmitted, 0 received, 100% packet loss, time 5100ms\n";
         assert_eq!(parse_ping(dead), None);
+    }
+}
+
+#[cfg(test)]
+mod path_mtu_tests {
+    #[test]
+    fn the_route_mtu_is_found() {
+        assert_eq!(super::path_mtu(|_| true), Some(1500));
+        assert_eq!(super::path_mtu(|_| false), None);
+        // a route that passes 1420-byte packets: found within 8 bytes, never above
+        let m = super::path_mtu(|p| p + 28 <= 1420).unwrap();
+        assert!(m <= 1420 && m > 1420 - 8, "{}", m);
+        let m = super::path_mtu(|p| p + 28 <= 1280).unwrap();
+        assert!(m <= 1280 && m > 1272, "{}", m);
     }
 }
