@@ -89,6 +89,7 @@ h2{font-size:16px;font-weight:900;margin:24px 2px 4px}
 
 /* the three tabs of an account (and buy) */
 .tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px;border-radius:14px;background:var(--bg2);margin:0 0 12px;position:sticky;top:0;z-index:5}
+.adnav button{white-space:nowrap;font-size:13px}
 .tabs.two{grid-template-columns:1fr 1fr}
 .tabs button{min-height:40px;border:0;border-radius:10px;background:transparent;font-weight:800;cursor:pointer;color:var(--hint)}
 .tabs button.on{background:var(--bg);color:var(--tx);box-shadow:0 0 0 1px var(--sep)}
@@ -238,7 +239,6 @@ details.more summary{cursor:pointer;font-weight:800;color:var(--hint);padding:8p
 @keyframes p{50%{opacity:.55}}
 /* the bot's admins: every button with its text, premium emoji and colour (3.34). The preview uses Telegram's own
    chat and button colours, so it reads as the chat and not as this page */
-.adm{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border-radius:18px;border:1px solid var(--sep);background:var(--bg2);color:var(--gold2);font-weight:800;font-size:13px;cursor:pointer}
 .bh{display:flex;align-items:center;gap:8px;margin:4px 2px 12px}
 .bh h1{font-size:18px;font-weight:900;margin:0;flex:1}
 .bh .b{min-height:40px}
@@ -398,7 +398,6 @@ details.app{border-inline-start:3px solid var(--ac)}
 @media (prefers-reduced-motion:reduce){.b,.pc .buy,.step,.ctile,.tabs button,.seg button{transition:none}}
 
 /* 3.48 — the bot's management */
-.ad-top{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
 .ad-tabs{display:flex!important;overflow-x:auto;scrollbar-width:none;grid-auto-flow:unset}
 .ad-tabs::-webkit-scrollbar{display:none}
 .ad-tabs button{flex:0 0 auto;padding:0 14px}
@@ -519,7 +518,7 @@ details.app{border-inline-start:3px solid var(--ac)}
 <script>
 (function(){
 var Q=new URLSearchParams(location.search);
-var A={open:{},ctry:'',list:[],cur:0,plat:'i',view:Q.get('admin')=='btns'?'btns':Q.get('admin')=='paths'?'paths':Q.get('admin')=='bot'?'adm':Q.get('buy')?'buy':'acc',tab:['sub','srv','app'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sub',cat:Q.get('tab')=='custom'?'*custom*':'',svc:['v2ray','game','vip'].indexOf(Q.get('shop'))>=0?Q.get('shop'):'',shop:null,renew:+(Q.get('renew')||0),cb:null};
+var A={adm:['bot','btns','paths'].indexOf(Q.get('admin'))>=0,open:{},ctry:'',list:[],cur:0,plat:'i',view:Q.get('admin')=='btns'?'btns':Q.get('admin')=='paths'?'paths':Q.get('admin')=='bot'?'adm':Q.get('buy')?'buy':'acc',tab:['sub','srv','app'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sub',cat:Q.get('tab')=='custom'?'*custom*':'',svc:['v2ray','game','vip'].indexOf(Q.get('shop'))>=0?Q.get('shop'):'',shop:null,renew:+(Q.get('renew')||0),cb:null};
 function tg(){return window.Telegram&&Telegram.WebApp}
 // the signed init data: from Telegram's script, else from the page address (the script may not load in Iran)
 function initData(){var w=tg();if(w&&w.initData)return w.initData;
@@ -553,7 +552,17 @@ function empty(icon,title,text,btn){document.getElementById('app').innerHTML='<d
 // the account's three tabs; buying is its own view (from the subscription tab, or the only view with no account)
 function sales(){return A.shop&&A.shop.sales&&(A.shop.custom.on||A.shop.plans.length)}
 function tabs(){return '<div class="tabs" role="tablist">'+[['sub','اشتراک من'],['srv','سرورها'],['app','برنامه و راهنما']].map(function(t){return '<button role="tab" aria-selected="'+(A.tab==t[0])+'" data-t="'+t[0]+'" class="'+(A.tab==t[0]?'on':'')+'">'+t[1]+'</button>'}).join('')+'</div>'}
-function render(){if(A.mon)return A.view=='paths'?drawPaths():(A.view='mon',drawMon());if(A.admin&&A.view=='paths')return drawPaths();if(A.admin&&A.view=='adm')return drawAdm();if(A.admin&&(A.view=='btns'||A.view=='btn'))return A.view=='btn'?drawBtn():drawBtns();backBtn(null);
+// 3.52 — the admins' page (?admin=…) is its own app: its own bar (bot settings, buttons, paths), never the admin's
+// own subscription or the shop; the customer's page has no admin buttons
+function admNav(){if(!A.adm)return '';var cur=A.view=='btn'?'btns':A.view;
+ return '<nav class="tabs adnav" role="tablist">'+[['adm','⚙️ تنظیمات ربات'],['btns','🎨 دکمه‌ها'],['paths','📡 مسیرها']].map(function(t){return '<button role="tab" aria-selected="'+(cur==t[0])+'" data-av="'+t[0]+'" class="'+(cur==t[0]?'on':'')+'">'+t[1]+'</button>'}).join('')+'</nav>'}
+function wireAdmNav(){Array.prototype.slice.call(document.querySelectorAll('[data-av]')).forEach(function(b){b.onclick=function(){if(A.view=='paths')pqStop();if(A.view=='btn')bStop();A.view=b.dataset.av;render();window.scrollTo(0,0)}})}
+// in the admins' page «back» goes to its first part, then closes
+function admBack(){return A.view=='adm'?null:function(){if(A.view=='paths')pqStop();if(A.view=='btn')bStop();A.view='adm';render()}}
+function render(){if(A.mon)return A.view=='paths'?drawPaths():(A.view='mon',drawMon());
+ if(A.adm){if(!A.admin)return empty('!','فقط برای ادمین‌ها','این بخش مدیریت ربات است و فقط ادمین‌های ربات بازش می‌کنند.');
+  if(A.view=='paths')return drawPaths();if(A.view=='btn')return drawBtn();if(A.view=='btns')return drawBtns();A.view='adm';return drawAdm()}
+ backBtn(null);
  if(A.view=='buy'&&sales())return drawBuy();if(!A.list.length)return sales()?(A.view='buy',drawBuy()):noAccount();draw()}
 function noAccount(){empty('K','هنوز اشتراکی ندارید','بعد از خرید اشتراک، اطلاعات حساب و کانفیگ‌ها اینجا دیده می‌شن.','<button class="b main" style="min-width:180px" onclick="window.Telegram&&Telegram.WebApp&&Telegram.WebApp.close()">برگشت به ربات</button>')}
 function wireTabs(){Array.prototype.slice.call(document.querySelectorAll('[data-t]')).forEach(function(b){b.onclick=function(){A.tab=b.dataset.t;A.view='acc';render();window.scrollTo(0,0)}})}
@@ -658,7 +667,6 @@ function copyText(t,ok,fallback){var done=function(){buzz('success');toast(ok)};
 function draw(){var u=A.list[A.cur];if(!u)return;var v2=u.service=='v2ray';
  var h='';
  if(A.list.length>1)h+='<div class="accs">'+A.list.map(function(x,i){return '<button class="'+(i==A.cur?'on':'')+'" data-acc="'+i+'"><span class="ltr">'+esc(x.name)+'</span></button>'}).join('')+'</div>';
- if(A.admin)h+='<div class="ad-top"><button class="adm" id="go_adm">⚙️ مدیریت ربات</button><button class="adm" id="go_btns">🎨 دکمه‌ها</button></div>';
  h+=tabs();
  if(A.tab=='srv')h+=srvTab(u,v2);else if(A.tab=='app')h+=appTab(u,v2);else h+=subTab(u,v2);
  document.getElementById('app').innerHTML=h;wireTabs();wire(u)}
@@ -745,8 +753,6 @@ function canDownload(){var w=tg();return !!(w&&w.downloadFile&&w.isVersionAtLeas
 
 function wire(u){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))};
  var sub=u.v2link;
- var gb2=$('#go_btns');if(gb2)gb2.onclick=function(){A.view='btns';render();window.scrollTo(0,0)};
- var ga=$('#go_adm');if(ga)ga.onclick=function(){A.view='adm';AD.d={};render();window.scrollTo(0,0)};
  all('[data-acc]').forEach(function(b){b.onclick=function(){A.cur=+b.dataset.acc;draw()}});
  var rn=$('#rn');if(rn)rn.onclick=function(){A.renew=u.id;A.svc='';A.view='buy';drawBuy();window.scrollTo(0,0)};
  all('[data-p]').forEach(function(b){b.onclick=function(){A.plat=b.dataset.p;draw()}});
@@ -783,9 +789,9 @@ function bFind(k){return ((BB.d&&BB.d.buttons)||[]).filter(function(x){return x.
 function bLoad(){return api('/tg/api/admin/buttons').then(function(d){BB.d=d;return d})}
 function drawBtns(){var el=document.getElementById('app');
  if(!BB.d){el.innerHTML='<div class="skel"></div>';bLoad().then(drawBtns).catch(function(){empty('!','باز نشد','دوباره امتحان کنید.')});return}
- backBtn(A.list.length||sales()?function(){A.view='acc';render()}:null);
+ backBtn(admBack());
  var l=BB.d.buttons,main=l.filter(function(x){return x.main&&!x.hidden});
- var h='<div class="bh"><h1>مدیریت دکمه‌ها</h1><button class="b" id="bprev">نمونه توی چت</button></div>'+
+ var h=admNav()+'<div class="bh"><h1>مدیریت دکمه‌ها</h1><button class="b" id="bprev">نمونه توی چت</button></div>'+
   '<p class="lead">منوی اصلی همین‌طور به مشتری نشان داده می‌شه. روی هر دکمه بزنید تا متن، ایموجی پریمیوم و رنگش رو عوض کنید.</p>'+
   '<div class="tgchat"><div class="tgmsg">به ربات فروش خوش آمدید 🌟<small>12:00</small></div><div class="tgkb">'+main.map(function(x){return '<button data-bk="'+x.key+'">'+bBtn(x)+'</button>'}).join('')+'</div></div>';
  BGR.forEach(function(g){var r=l.filter(function(x){return bGroup(x)==g[0]});if(!r.length)return;
@@ -793,7 +799,7 @@ function drawBtns(){var el=document.getElementById('app');
    if(x.icon)tags.push('<i>⭐ ایموجی پریمیوم</i>');if(x.hidden)tags.push('🚫 پنهان');else if(x.text)tags.push('متن خودتان');
    return '<button class="brow'+(x.hidden?' off':'')+'" data-bk="'+x.key+'">'+bBtn(x)+'<span class="bm"><span>'+esc(x.place)+'</span>'+(tags.length?'<span>'+tags.join(' · ')+'</span>':'')+'</span></button>'}).join('')+'</div></div>'});
  h+='<p class="lead" style="margin-top:16px">ایموجی پریمیوم روی دکمه‌ها وقتی دیده می‌شه که حسابی که ربات رو توی BotFather ساخته، تلگرام پریمیوم داشته باشه.</p>';
- el.innerHTML=h;
+ el.innerHTML=h;wireAdmNav();
  Array.prototype.slice.call(document.querySelectorAll('[data-bk]')).forEach(function(b){b.onclick=function(){BB.k=b.dataset.bk;BB.f=null;A.view='btn';render();window.scrollTo(0,0)}});
  document.getElementById('bprev').onclick=function(){var b=this;b.disabled=true;api('/tg/api/admin/preview').then(function(){b.disabled=false;buzz('success');toast('همه‌ی دکمه‌ها توی چت فرستاده شد')}).catch(function(e){b.disabled=false;buzz('error');toast('تلگرام قبول نکرد: '+e.message)})}}
 function drawBtn(){var x=bFind(BB.k);if(!x){A.view='btns';return render()}
@@ -838,12 +844,12 @@ function pqLoad(){if(PQ.busy)return Promise.resolve();PQ.busy=true;return api('/
 function pqStop(){clearInterval(PQ.t);PQ.t=0}
 function drawPaths(){var el=document.getElementById('app');
  if(!PQ.d){el.innerHTML='<div class="skel"></div>';pqLoad().then(drawPaths).catch(function(){empty('!','باز نشد','دوباره امتحان کنید.')});return}
- backBtn(A.mon?function(){pqStop();M.tab='sum';A.view='mon';render()}:A.list.length||sales()?function(){pqStop();A.view='acc';render()}:null);
+ backBtn(A.mon?function(){pqStop();M.tab='sum';A.view='mon';render()}:admBack());
  // the numbers come once a minute from each tunnel: the page follows by itself while it is open
  if(!PQ.t)PQ.t=setInterval(function(){if(A.view!='paths')return pqStop();(A.mon?mLoad().then(function(){PQ.d=M.d.paths}):pqLoad()).then(drawPaths).catch(function(){})},30000);
  var d=PQ.d,sv=d.servers||[],c={good:0,fine:0,bad:0,down:0};
  sv.forEach(function(x){if(x.state in c)c[x.state]++});
- var h='<div class="pq-top"><h1>وضعیت مسیرها</h1><button class="pq-re" id="pqre" aria-label="تازه کردن">تازه کن</button></div>'+
+ var h=admNav()+'<div class="pq-top"><h1>وضعیت مسیرها</h1><button class="pq-re" id="pqre" aria-label="تازه کردن">تازه کن</button></div>'+
   '<p class="lead">'+pqAgo(d.last)+' · عددها میانگین '+fa(d.limits.window_min)+' دقیقهٔ اخیرند</p>'+
   '<div class="pq-sum"><div><b style="color:var(--ok)">'+fa(c.good)+'</b><small>خوب</small></div><div><b style="color:var(--warn)">'+fa(c.fine)+'</b><small>قابل قبول</small></div><div><b style="color:var(--bad)">'+fa(c.bad)+'</b><small>پر افت</small></div><div><b style="color:var(--bad)">'+fa(c.down)+'</b><small>قطع</small></div></div>'+
   '<button class="pq-alert'+(d.alerts?' on':'')+'" id="pqal" role="switch" aria-checked="'+!!d.alerts+'"><span><b>هشدار مسیر پر افت</b><small>'+(d.alerts?'وقتی مسیری پر افت شد یا خوب شد، ربات پیام می‌ده':'خاموش؛ ربات برای مسیرها پیام نمی‌ده')+'</small><small>آفلاین و آنلاین شدن سرورها همیشه خبر داده می‌شه</small></span><i class="pq-sw"></i></button>';
@@ -857,7 +863,7 @@ function drawPaths(){var el=document.getElementById('app');
     '<span class="chips">'+(t.lanes>0?'<span class="pq-chip ln">بی‌ترتیب</span>':'')+'<span class="pq-chip ltr">'+esc(t.transport)+'</span></span></div>'+
     '<div class="pq-r2">'+(!t.up?'<span class="cut">قطع است</span>':a?'<span>پینگ <strong class="ltr">'+pqNum(a.ping)+'</strong></span><span>افت <strong class="ltr">'+pqNum(a.loss)+'٪</strong></span><span>لرزش <strong class="ltr">'+pqNum(a.jit)+'</strong></span>':'<span>داده در راه است</span>')+'</div></div>'}).join('')+'</div></section>'});
  h+='<p class="pq-foot">هر دقیقه ۲۰ بستهٔ کوچک داخل هر تانل رفت و برگشت می‌کند. پینگ: میانه · افت: بسته‌ای که تا ۱ ثانیه برنگشت · لرزش: تغییر پینگ از هر بسته به بعدی. «بی‌ترتیب»: بستهٔ بازی پشت بستهٔ گم‌شده نمی‌ماند. پر افت یعنی افت بالای '+fa(d.limits.bad_loss)+'٪ یا لرزش بالای '+fa(d.limits.bad_jit)+'ms.</p>';
- el.innerHTML=h;
+ el.innerHTML=h;wireAdmNav();
  document.getElementById('pqre').onclick=function(){var b=this;b.disabled=true;pqLoad().then(function(){buzz('success');drawPaths()}).catch(function(){b.disabled=false;buzz('error');toast('نشد، دوباره امتحان کنید')})};
  document.getElementById('pqal').onclick=function(){var b=this;b.disabled=true;post('/tg/api/admin/paths',{alerts:!d.alerts}).then(function(n){PQ.d=n;buzz('success');toast(n.alerts?'هشدار مسیرها روشن شد':'هشدار مسیرها خاموش شد');drawPaths()}).catch(function(){b.disabled=false;buzz('error');toast('ذخیره نشد')})}}
 
@@ -886,11 +892,11 @@ function adLoad(){var need=[];
  if(AD.tab=='chan'&&!AD.d.chan)need.push(pa('GET','/api/channel').then(function(v){AD.d.chan=v}));
  if(AD.tab=='msg'&&!AD.d.msg)need.push(pa('GET','/api/app-msg').then(function(v){AD.d.msg=v}));
  return Promise.all(need)}
-function drawAdm(){var el=document.getElementById('app');backBtn(function(){A.view='acc';render()});
+function drawAdm(){var el=document.getElementById('app');backBtn(null);
  if(!AD.busy){AD.busy=1;el.innerHTML=admHead()+'<div class="skel"></div>';adLoad().then(function(){AD.busy=0;drawAdm()}).catch(function(e){AD.busy=0;el.innerHTML=admHead()+'<div class="empty"><b>باز نشد</b><p class="muted">'+esc(e.message||'')+'</p></div>';wireAdmTabs()});return}
 }
-function admHead(){return '<div class="bh"><h1>⚙️ مدیریت ربات</h1></div><nav class="ptabs ad-tabs" role="tablist">'+ATABS.map(function(x){return '<button role="tab" data-at="'+x[0]+'" class="'+(AD.tab==x[0]?'on':'')+'">'+x[1]+'</button>'}).join('')+'</nav>'}
-function wireAdmTabs(){Array.prototype.slice.call(document.querySelectorAll('[data-at]')).forEach(function(b){b.onclick=function(){AD.tab=b.dataset.at;drawAdm();window.scrollTo(0,0)}})}
+function admHead(){return admNav()+'<div class="bh"><h1>⚙️ تنظیمات ربات</h1></div><nav class="ptabs ad-tabs" role="tablist">'+ATABS.map(function(x){return '<button role="tab" data-at="'+x[0]+'" class="'+(AD.tab==x[0]?'on':'')+'">'+x[1]+'</button>'}).join('')+'</nav>'}
+function wireAdmTabs(){wireAdmNav();Array.prototype.slice.call(document.querySelectorAll('[data-at]')).forEach(function(b){b.onclick=function(){AD.tab=b.dataset.at;drawAdm();window.scrollTo(0,0)}})}
 // after the data is there: the part of the open tab
 var _drawAdm=drawAdm;drawAdm=function(){if(AD.busy)return;var need=adNeed();if(need)return _drawAdm();
  var el=document.getElementById('app'),s=AD.d.set||{},h=admHead();
@@ -933,7 +939,7 @@ var _drawAdm=drawAdm;drawAdm=function(){if(AD.busy)return;var need=adNeed();if(n
 function adNeed(){var s=AD.d;return !s.set||(AD.tab=='ov'&&!s.ov)||(AD.tab=='plans'&&!s.plans)||(AD.tab=='disc'&&!s.disc)||(AD.tab=='chan'&&!s.chan)||(AD.tab=='msg'&&!s.msg)}
 function wireAdm(){var $=function(q){return document.querySelector(q)},all=function(q){return Array.prototype.slice.call(document.querySelectorAll(q))},app=document.getElementById('app');
  all('[data-go]').forEach(function(b){b.onclick=function(){AD.tab=b.dataset.go;drawAdm()}});
- var bt=$('#ad_btns');if(bt)bt.onclick=function(){A.view='btns';render()};
+ var bt=$('#ad_btns');if(bt)bt.onclick=function(){A.view='btns';render();window.scrollTo(0,0)};
  var sv=$('#ad_save');if(sv)sv.onclick=function(){adSettingsSave(sv,app)};
  // plans
  var pn=$('#pl_new');if(pn)pn.onclick=function(){planEdit(null)};
@@ -1072,6 +1078,8 @@ function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}
  if(!initData())return empty('K','این صفحه رو از ربات باز کنید','مینی‌اپ کانکی فقط از داخل ربات تلگرام باز می‌شه.');
  // the report bot's page: the panel's state only, never the shop
  if(Q.get('mon')){A.mon=true;A.view='mon';M.tab=['sum','srv','tun','paths','err'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sum';var hp=document.getElementById('hp');hp.textContent='گزارش پنل';hp.disabled=true;return render()}
+ if(A.adm){var h2=document.getElementById('hp');h2.textContent='مدیریت ربات';h2.disabled=true;
+  return api('/tg/api/me').then(function(r){A.admin=!!r.admin;render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
  Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.winLink=r[0].win_link||'';A.nameHint=r[0].name_hint||'';A.support=r[0].support||'';A.admin=!!r[0].admin;A.offer=+r[0].offer||0;A.shop=r[1];head();render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
 // wait a moment for Telegram's script, then go on without it
 var n=0;(function go(){if(tg()||n++>15)start();else setTimeout(go,100)})();

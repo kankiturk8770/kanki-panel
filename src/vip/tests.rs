@@ -278,7 +278,21 @@ async fn udp_and_tcp_cross_the_tunnel() {
         assert_eq!(&buf[..n], &msg[..], "size {}", size);
     }
     // TCP: 4 MB both ways through QUIC inside the tunnel
-    let mut c = TcpStream::connect("127.0.0.1:35012").await.unwrap();
+    // the tunnel's TCP port opens a moment after its UDP side: wait for it (up to 3 s) rather than fail at once
+    let mut c = {
+        let mut tries = 0;
+        loop {
+            match TcpStream::connect("127.0.0.1:35012").await {
+                Ok(c) => break c,
+                Err(e) if tries < 30 => {
+                    let _ = e;
+                    tries += 1;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(e) => panic!("the tunnel's TCP port never opened: {}", e),
+            }
+        }
+    };
     let data: Vec<u8> = (0..4_000_000u32).map(|i| (i % 253) as u8).collect();
     let (mut r, mut w) = c.split();
     let d2 = data.clone();
