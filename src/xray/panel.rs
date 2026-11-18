@@ -463,6 +463,15 @@ fn stream(ib: &Inbound) -> Value {
     if ib.proxy_protocol && ib.network != "kcp" {
         st["sockopt"] = json!({ "acceptProxyProtocol": true });
     }
+    // through a CDN the address Xray sees is the CDN's, shared by many users: the connection limit (which
+    // counts devices by address) would count edges, not phones. Behind Cloudflare (its own header is there)
+    // the first address of X-Forwarded-For is the user's. Direct connections send no such header: unchanged.
+    if ib.cdn && ["ws", "httpupgrade", "xhttp", "grpc"].contains(&ib.network.as_str()) {
+        if !st["sockopt"].is_object() {
+            st["sockopt"] = json!({});
+        }
+        st["sockopt"]["trustedXForwardedFor"] = json!(["CF-Connecting-IP"]);
+    }
     st
 }
 
@@ -2232,6 +2241,12 @@ mod tests {
         assert!(link_cdn(&s, &Inbound { port: 9443, ..ws.clone() }, &u).is_none());
         assert!(link_cdn(&s, &Inbound { host: "de.example.com".into(), ..ws.clone() }, &u).is_none());
         assert!(link_cdn(&s, &Inbound { host: "cdn.example.com".into(), ..ws.clone() }, &u).is_some());
+        // the server: behind the CDN Xray takes the user's address from Cloudflare's header (the connection limit
+        // counts phones, not CDN edges); an inbound without the CDN switch is as before
+        let users = vec![u.clone()];
+        assert_eq!(inbound_json(&ws, &users)["streamSettings"]["sockopt"]["trustedXForwardedFor"], json!(["CF-Connecting-IP"]));
+        assert!(inbound_json(&Inbound { cdn: false, ..ws.clone() }, &users)["streamSettings"]["sockopt"].is_null());
+        assert!(inbound_json(&reality, &users)["streamSettings"]["sockopt"].is_null());
     }
 
     #[test]
