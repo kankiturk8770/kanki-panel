@@ -2433,5 +2433,8 @@ var FA={"choose both servers":"هر دو سرور را انتخاب کن",
 "the Host of this inbound must be empty (the CDN sends its own domain)":"Host این اینباند باید خالی باشد (CDN دامنهٔ خودش را می‌فرستد)",
 "Domain, SSL and CDN":"دامنه، SSL و CDN",
 "the CDN address must be a domain (like cdn.example.com), not an IP":"آدرس CDN باید دامنه باشد (مثل cdn.example.com)، نه IP",
-"the CDN domain must be another domain than the server's own (else REALITY and TCP break)":"دامنهٔ CDN باید غیر از دامنهٔ خود سرور باشد (وگرنه REALITY و TCP خراب می‌شوند)"
+"the CDN domain must be another domain than the server's own (else REALITY and TCP break)":"دامنهٔ CDN باید غیر از دامنهٔ خود سرور باشد (وگرنه REALITY و TCP خراب می‌شوند)",
+"Last online":"آخرین آنلاین",
+"through Iran":"از راه ایران",
+"Data used after the account ended":"مصرف بعد از تمام شدن اکانت"
 };

@@ -1,6 +1,8 @@
 //! Who is connected right now, and with what: (protocol, server) per user.
-//! VPN servers report it on every sync round (WireGuard / AmneziaWG handshakes, Hysteria2 and
-//! KANKI MIX sessions), Xray servers say whose traffic moved, Kanki DNS servers send the queries.
+//! Exactly what the connection count of the account counts (`sync.rs`): VPN servers report it on every
+//! sync round (WireGuard / AmneziaWG handshakes, Hysteria2, KANKI MIX and microtun sessions), and the
+//! same round's Xray and KPING devices. So «connected now» and «connections n / max» never disagree.
+//! Kanki DNS is not a connection (it never counts): it is not listed here.
 //! Kept in memory only; a panel restart starts empty and fills again within a sync round.
 use crate::util::now;
 use crate::App;
@@ -19,12 +21,24 @@ fn vpn() -> &'static Mutex<HashMap<String, VpnSeen>> {
 /// How long a report counts. Sync rounds run every few seconds to a minute, so a server that stops
 /// answering drops out of "connected now" after this.
 const VPN_FRESH: i64 = 300;
-const XRAY_FRESH: i64 = 90;
-const DNS_FRESH: i64 = 180;
+/// the Xray and KPING list of the last sync round (rounds run every 10 to 30 seconds)
+const OTHERS_FRESH: i64 = 120;
 
 /// A VPN server's connections from this sync round (replaces its previous list).
 pub fn set_vpn(node_id: &str, node_name: &str, conns: Vec<(i64, String)>) {
     vpn().lock().unwrap_or_else(|e| e.into_inner()).insert(node_id.to_string(), (now(), node_name.to_string(), conns));
+}
+
+/// The Xray and KPING devices of this sync round: (user, "x:<server>" / "kp:<server>", protocol, devices)
+fn others() -> &'static Mutex<(i64, Vec<(i64, String, String, i64)>)> {
+    static S: OnceLock<Mutex<(i64, Vec<(i64, String, String, i64)>)>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new((0, vec![])))
+}
+
+/// The Xray and KPING devices the sync round counted (the VPN servers come through `set_vpn`).
+pub fn set_others(units: &[(i64, String, String, i64)]) {
+    let v = units.iter().filter(|u| u.1.starts_with("x:") || u.1.starts_with("kp:")).cloned().collect();
+    *others().lock().unwrap_or_else(|e| e.into_inner()) = (now(), v);
 }
 
 /// A removed server must not keep showing users as connected.
@@ -78,11 +92,18 @@ fn build(app: &App) -> UserServers {
             names.get(sid).cloned().unwrap_or_else(|| sid.to_string())
         }
     };
-    for (uid, sid) in crate::xray::panel::online_now(XRAY_FRESH) {
-        add(uid, "xray", &name_of(&sid), "", false);
-    }
-    for (uid, sid) in crate::dns::panel::active_users(DNS_FRESH) {
-        add(uid, "dns", &name_of(&sid), "", false);
+    let (at, list) = others().lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if t - at <= OTHERS_FRESH {
+        for (uid, node, p, _) in list {
+            if let Some(sid) = node.strip_prefix("x:") {
+                // where the Xray server's traffic leaves (its own place, or the server it all goes on to)
+                let cc = crate::exitgeo::fields(app, &crate::exitgeo::xray_key(sid))["exit_cc"].as_str().unwrap_or("").to_string();
+                add(uid, &p, &name_of(sid), &cc, false);
+            } else if let Some(sid) = node.strip_prefix("kp:") {
+                let cc = crate::exitgeo::fields(app, sid)["exit_cc"].as_str().unwrap_or("").to_string();
+                add(uid, &p, &name_of(sid), &cc, false);
+            }
+        }
     }
     for v in m.values_mut() {
         v.sort();

@@ -181,8 +181,8 @@ function xrAddNode(){var go=function(){var d=XR.d,used=d.servers.map(function(x)
 /** why an inbound cannot go through a CDN ('' = it can); the same rules as `cdn_unfit` on the panel */
 function xrCdnWhy(ib,cdn){var tls=ib.security=='tls',h=(ib.host||'').trim().toLowerCase();
  if(ib.protocol=='shadowsocks')return 'Shadowsocks cannot go through a CDN';
- if(['ws','httpupgrade','xhttp','grpc'].indexOf(ib.network)<0)return 'only WS, HTTPUpgrade, XHTTP and gRPC go through a CDN';
  if(ib.security=='reality')return 'REALITY cannot go through a CDN';
+ if(['ws','httpupgrade','xhttp','grpc'].indexOf(ib.network)<0)return 'only WS, HTTPUpgrade, XHTTP and gRPC go through a CDN';
  if(tls&&[443,2053,2083,2087,2096,8443].indexOf(+ib.port)<0)return 'with TLS the CDN only passes ports 443, 2053, 2083, 2087, 2096 and 8443';
  if(!tls&&[80,8080,8880,2052,2082,2086,2095].indexOf(+ib.port)<0)return 'without TLS the CDN only passes ports 80, 8080, 8880, 2052, 2082, 2086 and 2095';
  if(ib.network!='grpc'&&h&&h!=(cdn||'').toLowerCase())return 'the Host of this inbound must be empty (the CDN sends its own domain)';

@@ -571,6 +571,9 @@ pub async fn sync_all(app: &Arc<App>) {
     let mut online: HashMap<i64, i64> = HashMap::new();
     let mut seen: HashMap<i64, i64> = HashMap::new();
     let mut add_bytes: HashMap<i64, i64> = HashMap::new();
+    // the same bytes by where they came from ("server · protocol"), to say where a user who was already
+    // out of data or time still moved data
+    let mut by_src: HashMap<i64, Vec<(String, i64)>> = HashMap::new();
     let by_name: HashMap<String, i64> = users.iter().map(|u| (u.username.clone(), u.id)).collect();
     // every live connection of this round: (user, node, protocol, devices)
     let mut units: Vec<(i64, String, String, i64)> = vec![];
@@ -624,8 +627,7 @@ pub async fn sync_all(app: &Arc<App>) {
         jobs.push(async move {
             let want = req.wg.len() + req.awg.len();
             let resp: Result<SyncResp, String> = if local { Ok(apply_local(app, req).await) } else { remote_sync(app, &n, &req).await };
-            let info = if !local && resp.is_ok() { remote_info(app, &n.address, &n.token, n.insecure).await } else { None };
-            (n, map, want, resp, info)
+            (n, map, want, resp)
         });
     }
     let (offs, results) = futures_util::future::join(futures_util::future::join_all(off_jobs), futures_util::future::join_all(jobs)).await;
@@ -639,7 +641,7 @@ pub async fn sync_all(app: &Arc<App>) {
         }
         crate::live::set_vpn(&n.id, &n.name, vec![]);
     }
-    for (n, map, want, resp, info) in results {
+    for (n, map, want, resp) in results {
         let local = n.id == "local";
         let ok = resp.is_ok();
         let state = match &resp {
@@ -656,14 +658,30 @@ pub async fn sync_all(app: &Arc<App>) {
         } else {
             let _ = app.db.exec("UPDATE nodes SET online=0, sync_state=?1 WHERE id=?2", &[&state, &n.id]);
         }
-        if let (false, Some(info)) = (local, info) {
-            crate::srvtraffic::note(app, &format!("n:{}", n.id), &info["stats"]["net"]);
-            let _ = app.db.exec("UPDATE nodes SET info=?1 WHERE id=?2", &[&info.to_string(), &n.id]);
+        if !local && ok {
+            // the server's info (CPU, memory, its network counters) is read beside the round, not in it: a
+            // slow server must not hold the round, or a user who just ran out of data keeps going until it ends
+            // (one read per server at a time)
+            static READING: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+            let fresh = READING.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashSet::new).insert(n.id.clone());
+            if fresh {
+                let (a, n2) = (app.clone(), n.clone());
+                tokio::spawn(async move {
+                    if let Some(info) = remote_info(&a, &n2.address, &n2.token, n2.insecure).await {
+                        crate::srvtraffic::note(&a, &format!("n:{}", n2.id), &info["stats"]["net"]);
+                        let _ = a.db.exec("UPDATE nodes SET info=?1 WHERE id=?2", &[&info.to_string(), &n2.id]);
+                    }
+                    if let Some(s) = READING.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+                        s.remove(&n2.id);
+                    }
+                });
+            }
         }
         let Ok(resp) = resp else {
             crate::live::set_vpn(&n.id, &n.name, vec![]);
             continue;
         };
+        let before = add_bytes.clone();
         // who is connected here right now, and with which protocol (for the panel)
         let mut here: Vec<(i64, String)> = vec![];
         // the node's own clock: its handshake and address times are by it (an older node sends none)
@@ -748,6 +766,13 @@ pub async fn sync_all(app: &Arc<App>) {
             .chain(resp.mtun_online.iter().map(|x| (x.clone(), "mtun"))).collect();
         forget_sessions(&n.id, |uid, proto| users.iter().find(|u| u.id == uid).is_some_and(|u| open_now.contains(&(u.username.clone(), proto))));
         crate::kmix::note_error(&n.id, &resp.kmix_error);
+        for (uid, b) in add_bytes.iter() {
+            let d = b - before.get(uid).copied().unwrap_or(0);
+            if d > 0 {
+                let protos: Vec<&str> = here.iter().filter(|x| x.0 == *uid).map(|x| x.1.as_str()).collect();
+                by_src.entry(*uid).or_default().push((format!("{} · {}", n.name, if protos.is_empty() { "?".to_string() } else { protos.join("+") }), d));
+            }
+        }
         crate::live::set_vpn(&n.id, &n.name, here);
         answered.insert(n.id.clone());
     }
@@ -771,6 +796,8 @@ pub async fn sync_all(app: &Arc<App>) {
     }
     units.extend(ku);
     answered.extend(ka);
+    // what the panel shows as «connected now» is what was counted here
+    crate::live::set_others(&units);
     let changed = {
         let mut l = limits().lock().unwrap_or_else(|e| e.into_inner());
         // a server switched off or removed: what it had goes at once (Xray servers by their reports)
@@ -782,8 +809,33 @@ pub async fn sync_all(app: &Arc<App>) {
         crate::api::spawn_sync(app);
     }
 
+    // a user whose data ran out in this round is taken off every server now, not in the next round
+    // (30 seconds of a fast download is hundreds of megabytes)
+    let ran_out = users.iter().any(|u| {
+        let add = add_bytes.get(&u.id).copied().unwrap_or(0);
+        u.active() && add > 0 && !User { used_bytes: u.used_bytes + add, ..u.clone() }.active()
+    });
+    if ran_out {
+        crate::api::spawn_sync(app);
+    }
+    // a user who has data and time again (renewed, reset) starts with a clean «after the limit»
+    let al = app.db.get("after_limit");
+    if al.len() > 2 {
+        if let Ok(serde_json::Value::Object(mut m)) = serde_json::from_str::<serde_json::Value>(&al) {
+            let n = m.len();
+            m.retain(|k, _| users.iter().any(|u| u.id.to_string() == *k && !u.active()));
+            if m.len() != n {
+                app.db.set("after_limit", &serde_json::Value::Object(m).to_string());
+            }
+        }
+    }
     for u in &users {
         let add = add_bytes.get(&u.id).copied().unwrap_or(0);
+        if add > 0 && !u.active() {
+            for (src, b) in by_src.get(&u.id).cloned().unwrap_or_default() {
+                note_after_limit(app, u, &src, b);
+            }
+        }
         let on = online.get(&u.id).copied().unwrap_or(0);
         let last = seen.get(&u.id).copied().unwrap_or(u.last_seen).max(u.last_seen);
         if add > 0 || on != u.online || last != u.last_seen {
@@ -793,6 +845,46 @@ pub async fn sync_all(app: &Arc<App>) {
             );
         }
     }
+}
+
+/// Data a user moved while already out of data, out of time or switched off (it should be close to
+/// nothing: the last seconds before the servers took them off). Kept per user and source in
+/// `after_limit` (the user's window in the panel shows it) and logged, so a server or protocol that
+/// does not take such a user off is seen at once.
+pub fn note_after_limit(app: &App, u: &User, src: &str, bytes: i64) {
+    if bytes <= 0 {
+        return;
+    }
+    let mut all: serde_json::Value = serde_json::from_str(&app.db.get("after_limit")).unwrap_or(serde_json::json!({}));
+    if !all.is_object() {
+        all = serde_json::json!({});
+    }
+    let k = u.id.to_string();
+    let e = &mut all[&k];
+    if !e.is_object() {
+        *e = serde_json::json!({ "src": {} });
+    }
+    let was = e["src"][src].as_i64().unwrap_or(0);
+    e["src"][src] = serde_json::json!(was + bytes);
+    e["last"] = serde_json::json!(now());
+    // only the users that still exist, at most 500
+    if let Some(m) = all.as_object_mut() {
+        if m.len() > 500 {
+            let mut v: Vec<(String, i64)> = m.iter().map(|(k, v)| (k.clone(), v["last"].as_i64().unwrap_or(0))).collect();
+            v.sort_by_key(|x| x.1);
+            for (k, _) in v.iter().take(m.len() - 500) {
+                m.remove(k);
+            }
+        }
+    }
+    app.db.set("after_limit", &all.to_string());
+    eprintln!("traffic after the limit: user {} ({}) moved {} bytes on {}", u.id, u.username, bytes, src);
+}
+
+/// What a user moved after the limit, by source: { "src": { "<server · protocol>": bytes }, "last": time }
+pub fn after_limit_of(app: &App, uid: i64) -> serde_json::Value {
+    let all: serde_json::Value = serde_json::from_str(&app.db.get("after_limit")).unwrap_or(serde_json::json!({}));
+    all[uid.to_string()].clone()
 }
 
 /// Why a request to a node failed. A certificate pin mismatch is logged and says how to reset it
@@ -1157,5 +1249,28 @@ mod drain_tests {
         let (req, _) = super::desired_for(&app, &app.db.users(), &n);
         assert!(req.hy2.values().any(|x| x == &new.username));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod after_limit_tests {
+    #[test]
+    fn data_after_the_end_is_kept_by_source_and_goes_when_renewed() {
+        let app = crate::kping::tests::test_app();
+        let u = app.db.create_user("trial1", 0.5, 1, 1, "wg,xray", "", "", 0).unwrap();
+        super::note_after_limit(&app, &u, "Germany · wg", 1000);
+        super::note_after_limit(&app, &u, "Germany · wg", 500);
+        super::note_after_limit(&app, &u, "Turkey · xray", 0);
+        let v = super::after_limit_of(&app, u.id);
+        assert_eq!(v["src"]["Germany · wg"], 1500);
+        assert!(v["src"]["Turkey · xray"].is_null());
+        // xray / DNS / KPING counters name the server and protocol of their key
+        app.db.exec("UPDATE users SET used_bytes=?1 WHERE id=?2", &[&(1i64 << 30), &u.id]).unwrap();
+        crate::dns::panel::count_usage(&app, "xray_prev_de1", &serde_json::json!({ "run": "r", "users": { u.id.to_string(): [700] } }));
+        assert_eq!(super::after_limit_of(&app, u.id)["src"]["de1 · xray"], 700);
+        // an active user's counters are not noted
+        let ok = app.db.create_user("paid1", 50.0, 30, 1, "xray", "", "", 0).unwrap();
+        crate::dns::panel::count_usage(&app, "xray_prev_de1", &serde_json::json!({ "run": "r", "users": { ok.id.to_string(): [700] } }));
+        assert!(super::after_limit_of(&app, ok.id).is_null());
     }
 }

@@ -191,11 +191,11 @@ pub fn cdn_unfit(ib: &Inbound, cdn: &str) -> &'static str {
     if ib.protocol == "shadowsocks" {
         return "Shadowsocks cannot go through a CDN";
     }
-    if !["ws", "httpupgrade", "xhttp", "grpc"].contains(&ib.network.as_str()) {
-        return "only WS, HTTPUpgrade, XHTTP and gRPC go through a CDN";
-    }
     if ib.security == "reality" {
         return "REALITY cannot go through a CDN";
+    }
+    if !["ws", "httpupgrade", "xhttp", "grpc"].contains(&ib.network.as_str()) {
+        return "only WS, HTTPUpgrade, XHTTP and gRPC go through a CDN";
     }
     let tls = ib.security == "tls";
     if tls && !CDN_TLS_PORTS.contains(&ib.port) {
@@ -1185,19 +1185,6 @@ pub fn exit_hosts(app: &App) -> Vec<(String, String)> {
 fn last_status() -> &'static Mutex<HashMap<String, (i64, Value)>> {
     static S: OnceLock<Mutex<HashMap<String, (i64, Value)>>> = OnceLock::new();
     S.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// (user id, server) of the users whose Xray traffic moved in the last report of each server,
-/// for reports younger than `fresh` seconds
-pub fn online_now(fresh: i64) -> Vec<(i64, String)> {
-    let t = now();
-    last_status()
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|(_, (at, _))| t - *at <= fresh)
-        .flat_map(|(sid, (_, v))| v["online"].as_array().cloned().unwrap_or_default().into_iter().filter_map(|x| x.as_i64()).map(move |u| (u, sid.clone())).collect::<Vec<_>>())
-        .collect()
 }
 
 pub fn ingest(app: &App, sid: &str, st: &Value) {

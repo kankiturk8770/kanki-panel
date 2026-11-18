@@ -62,10 +62,14 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
  modal('<div class="us-h"><span class="dot '+((u.online_connections>0||liveOf(u).length)?'g':'')+'"></span><b class="ltr nm">'+esc(u.username)+'</b><span class="u-st '+cls+'" id="e_badge">'+lbl+'</span><span class="sp"></span>'+
   '<label class="sw"><input type="checkbox" id="e_sw" '+(u.enabled?'checked':'')+' aria-label="'+t('Enable')+'"><span></span></label><button class="ib" onclick="closeModal()" aria-label="close">✕</button></div>'+
   '<div class="us-tags">'+(tg||'<span class="ptag none">—</span>')+'</div>'+
-  (liveOf(u).length?'<div class="lvlist"><small class="muted" style="width:100%">'+t('Connected now')+'</small>'+liveOf(u).map(function(c){return '<span style="--pc:'+(PCOL[c.p]||'#888')+'"><b>'+esc(pname(c.p))+'</b>'+esc(c.s)+'</span>'}).join('')+'</div>':'<div class="lvlist"><small class="muted">'+t('Not connected right now')+'</small></div>')+
+  (liveOf(u).length?'<div class="lvlist"><small class="muted" style="width:100%">'+t('Connected now')+'</small>'+liveOf(u).map(function(c){return '<span style="--pc:'+(PCOL[c.p]||'#888')+'"><b>'+esc(pname(c.p))+'</b>'+(c.cc?flagOf(c.cc)+' ':'')+esc(c.s)+(c.t?' · '+flagOf('IR')+' '+t('through Iran'):'')+'</span>'}).join('')+'</div>':'<div class="lvlist"><small class="muted">'+t('Not connected right now')+'</small></div>')+
   '<div class="us-st"><div><small>'+t('Used')+'</small><b class="ltr">'+exactB(u.used_bytes)+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+'</b><div class="trk"><div class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?100:Math.max(2,p))+'%"></div></div></div>'+
   '<div><small>'+t('Expiry')+'</small><b>'+jdate(u.expires_ts)+'</b><small>'+leftTxt(u.expires_ts)+'</small></div>'+
   '<div><small>'+t('Connections')+'</small><b class="ltr">'+N(u.online_connections)+' / '+(u.max_connections?N(u.max_connections):'∞')+'</b><small>'+(u.last_seen_ts?ago(u.last_seen_ts)+'<br><span class="ltr">'+jdate(u.last_seen_ts,true)+'</span>':t('never'))+'</small></div></div>'+
+  // (3.52) data moved after the account ran out, and where: a server or protocol that does not take an
+  // ended account off shows here
+  (function(){var al=u.after_limit||{},src=al.src||{},k=Object.keys(src);if(!k.length)return '';
+   return '<div class="warnbox u-mt2"><b>'+t('Data used after the account ended')+'</b><br>'+k.map(function(x){return '<span class="ltr">'+esc(x)+'</span>: <b class="ltr">'+exactB(src[x])+'</b>'}).join('<br>')+'</div>'})()+
   // (3.40) what is only in the details: note, Telegram ID and the devices that opened the link
   (function(){var dv=u.devices||[],rows=[];
    if(u.notes)rows.push('<div><small>'+t('Note')+'</small><span>'+esc(u.notes)+'</span></div>');
