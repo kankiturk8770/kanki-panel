@@ -341,23 +341,6 @@ struct QStore {
     items: std::collections::VecDeque<QEntry>,
 }
 
-/// (user id, server) of the users who asked a Kanki DNS server something in the last `secs` seconds
-pub fn active_users(secs: i64) -> Vec<(i64, String)> {
-    let from = now() - secs;
-    let mut v: Vec<(i64, String)> = vec![];
-    // newest first; reports of different servers interleave, so look at a window instead of
-    // stopping at the first old entry
-    for e in qstore().lock().unwrap_or_else(|e| e.into_inner()).items.iter().rev().take(20_000) {
-        if e.ts < from {
-            continue;
-        }
-        if e.uid > 0 && !v.iter().any(|(u, s)| *u == e.uid && *s == e.sid) {
-            v.push((e.uid, e.sid.clone()));
-        }
-    }
-    v
-}
-
 fn qstore() -> &'static Mutex<QStore> {
     static S: OnceLock<Mutex<QStore>> = OnceLock::new();
     S.get_or_init(|| Mutex::new(QStore::default()))
@@ -521,6 +504,12 @@ pub fn count_usage(app: &App, key: &str, st: &Value) {
         if delta > 0 {
             changed = true;
             if let Ok(id) = uid.parse::<i64>() {
+                if let Some(u) = app.db.user(id).filter(|u| !u.active()) {
+                    // «xray_prev_<server>» → «<server> · xray»
+                    let src = key.splitn(3, '_').collect::<Vec<_>>();
+                    let src = if src.len() == 3 { format!("{} · {}", crate::tunnel::panel::server_names(app).get(src[2]).cloned().unwrap_or_else(|| src[2].to_string()), src[0]) } else { key.to_string() };
+                    crate::sync::note_after_limit(app, &u, &src, delta);
+                }
                 let _ = app.db.exec("UPDATE users SET used_bytes=used_bytes+?1, last_seen=?2 WHERE id=?3", &[&delta, &now(), &id]);
             }
         }

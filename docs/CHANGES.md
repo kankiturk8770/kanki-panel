@@ -1,3 +1,40 @@
+# v3.52.0 — Xray CDN domain; «connected now» and the data limit; the admins' mini app
+Putting the server's main domain behind a CDN breaks REALITY and plain TCP links. Now each Xray server can have a **second domain
+for the CDN** (Xray › server › «Domain, SSL and CDN»; Cloudflare: orange cloud, SSL mode Full); the main domain stays as it is.
+- Each inbound has a switch «☁️ Also a link through the CDN». Users then get one more link with the CDN domain (address, Host and
+  SNI; HTTP/1.1 for WebSocket), beside the direct link and the tunnel copy, named «… · CDN», `via: "cdn"` in the app's list.
+- The inbound form says at once whether the inbound can go through a CDN, and why not (`cdn_unfit`): only WS, HTTPUpgrade, XHTTP
+  and gRPC; never REALITY or Shadowsocks; only the ports Cloudflare passes (TLS: 443, 2053, 2083, 2087, 2096, 8443; plain: 80,
+  8080, 8880, 2052, 2082, 2086, 2095); the inbound's own Host empty. The list shows «☁️ CDN» (live) or «☁️ CDN ✕» (switch on but
+  it cannot). The quick setups «VLESS + WS (CDN)» and «gRPC + TLS (CDN)» switch it on.
+- The panel refuses a CDN «domain» that is an IP or the same as the server's own domain.
+- «Users and links» of an inbound has a ☁️ button that copies a user's CDN link.
+
+**Users: «connected now» and the data limit (owner's report with screenshots)**
+- **The user card showed every protocol the user has** («MIX HY2 AWG WG +3») whenever it did not know the connection. Now it
+  shows only what the user is connected to right now (protocol, exit flag, 🇮🇷 when through Iran), else «not connected» / last
+  online. What the user has is in the edit window.
+- **«Online» and «connections n / max» disagreed** (green dot with 0/1, or 1/1 with «not connected now», Xray without a flag):
+  the count came from the sync round (`units`) and the list from other sources (Xray «traffic moved» in 90 s, DNS queries; KPING
+  was counted but never listed). Now the list is exactly what the round counted (`live::set_others`): WireGuard, AmneziaWG,
+  Hysteria2, KANKI MIX, microtun, Xray (with its exit country) and KPING. DNS is not a connection and is no longer listed.
+- **A test account of 512 MB used 3.6 GB.** Every core does take an ended account off, but only in the next sync round, and one
+  slow or filtered server held each round up to 45 s for the sync and 45 s more for its info (+ 30 s pause): minutes of a fast
+  download. Now a user who runs out in a round starts the next round at once (`ran_out`), and the servers' info is read beside
+  the round (`READING`), so a slow server no longer holds the cut-off.
+- **Data used after the account ended** is kept by server and protocol (`after_limit`, logged too) and shown in the user's window,
+  so if a server or core still lets an ended account through, it is seen by name. It clears when the account is renewed.
+
+**Bot mini app: the admins' page is its own**
+- The customer's page (subscription, volume, configs) had «⚙️ Bot management» and «🎨 Buttons» on top of the admin's own
+  subscription, and «back» in the admin pages went to that subscription. Now the admins' page (`?admin=bot|btns|paths`, the
+  bot's admin buttons) is a page of its own: its title, its bar (bot settings · buttons · paths, `admNav`), «back» to its first
+  part, no shop and no subscription; someone who is not a bot admin sees «admins only». The customer's page has no admin buttons.
+- **The «overview» tab of bot management never opened** («missing scope users:read», since 3.48): the bot's in-process key only
+  had `settings`. It now also reads `users:read`; the bridge still only lets through its fixed routes (`/api/overview` is the one
+  that reads users; `/api/users/…` stays refused, test).
+- A VIP tunnel test connected before the tunnel's TCP port was open (flaky); it waits for it now.
+
 # v3.51.2 — From a new user to the tunnels: fixes
 The whole path was read: making a user, the sync to the servers, adding a server, the tunnel agents, the tunnels. Fixed, each with a test:
 - **Auto-remove of offline servers:** an Iran relay with no location set counted as abroad, so an Iran internet cut of a day removed

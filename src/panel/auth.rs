@@ -73,7 +73,9 @@ fn identify_with(app: &App, h: &HeaderMap, touch: bool) -> Option<(String, Vec<S
         return None;
     }
     if util::ct_eq(&t, internal_token()) {
-        return Some(("bot-admin".into(), vec!["settings".into()]));
+        // the bot's settings, and reading the overview numbers (the bridge in `miniapp::bridge_ok` only lets
+        // through its fixed list of routes, of which `/api/overview` is the only one under users:read)
+        return Some(("bot-admin".into(), vec!["settings".into(), "users:read".into()]));
     }
     if util::ct_eq(&t, internal_read_token()) {
         return Some(("report-bot".into(), vec!["admin".into()]));

@@ -271,6 +271,7 @@ pub fn user_json(app: &App, u: &User) -> Value {
         "tg_id": u.tg_id, "created_at": iso(u.created_at), "last_seen_at": iso(u.last_seen), "last_seen_ts": u.last_seen,
         // connected right now: [{ "p": protocol, "s": server }]
         "live": crate::live::of(app, u.id),
+        "after_limit": crate::sync::after_limit_of(app, u.id),
         // devices and apps that read the subscription: [{ id, kanki, kind: pc | mobile, app, ip, first, last }]
         "devices": crate::devices::of(app, u.id),
     })

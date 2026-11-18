@@ -627,6 +627,10 @@ mod tests {
             .header("content-type", "application/json").body(axum::body::Body::from(r#"{"panel_name":"Hacked"}"#)).unwrap();
         assert_eq!(crate::api::master_router(app.clone()).oneshot(r).await.unwrap().status().as_u16(), 401);
         assert_eq!(app.db.get("panel_name"), "Mine");
+        // the overview tab (its numbers need users:read; only this one route of the bridge reads users)
+        let (st, v) = call(500, json!({"method": "GET", "path": "/api/overview"})).await;
+        assert_eq!(st, 200, "{}", v);
+        assert_eq!(call(500, json!({"method": "GET", "path": "/api/users/1"})).await.0, 403);
         let (_, v) = call(500, json!({"method": "GET", "path": "/api/settings"})).await;
         assert_eq!(v["trial_gb"], "3");
         assert!(v.get("panel_name").is_none() && v.get("dns").is_none());

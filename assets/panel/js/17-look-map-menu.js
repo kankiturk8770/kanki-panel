@@ -405,12 +405,11 @@ new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.ma
  // days left, connections now / allowed and the protocols; three equal buttons: copy link, QR and edit.
  var PSHORT={wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',mtun:'MT',kping:'KP',xray:'XR',dns:'DNS'};
  var gbs=function(g){g=+g||0;return N(g>=100?Math.round(g):g>=10?g.toFixed(1):g.toFixed(2))};
- window.uchip=function(u){var st=ustate(u),lv=liveOf(u),conn=Math.max(+u.online_connections||0,lv.length?1:0),on=conn>0,
+ window.uchip=function(u){var st=ustate(u),lv=liveOf(u),conn=+u.online_connections||0,on=conn>0||lv.length>0,
    dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':''),raw=usageVal(u),now=Date.now()/1000,
    left=!u.expires_ts?'∞':u.expires_ts<now?t('Expired'):N(Math.ceil((u.expires_ts-now)/86400))+' '+t('days'),
    badge=st=='active'?['g',t('Active')]:st=='finished'?['y',t(u.status=='Limited'?'Limited':'Expired')]:['r',t('Disabled')],
    bar=raw<0?'inf':raw>=1?'full':raw>=.8?'warm':'',
-   ps=String(u.protocols||'').split(',').filter(function(p){return PSHORT[p]}),
    seen=u.last_seen_ts||u.last_seen||0,
    btn=function(q,icon,label){return '<button type="button" class="uc-b" data-q="'+q+'" title="'+esc(label)+'" aria-label="'+esc(label)+' · '+esc(u.username)+'">'+ic(icon,16)+'</button>'};
   return '<div class="uchip uc st-'+st+(on?' on':'')+(S.sel[u.id]?' sel':'')+'" role="button" tabindex="0" data-id="'+u.id+'" aria-label="'+esc(u.username)+'">'+
@@ -420,8 +419,10 @@ new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.ma
     (raw<0?'':'<em>'+N(Math.min(999,Math.round(raw*100)))+'%</em>')+'</div>'+
    '<span class="uc-bar '+bar+'" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+(raw<0?0:Math.min(100,Math.round(raw*100)))+'"><i style="width:'+(raw<0?100:Math.max(2,Math.min(100,raw*100)))+'%"></i></span>'+
    '<div class="uc-m"><span title="'+esc(t('Days left'))+'">'+ic('clock',13)+'<b>'+left+'</b></span><span title="'+esc(t('Connections'))+'">'+ic('users',13)+'<b class="ltr">'+N(conn)+'/'+(u.max_connections?N(u.max_connections):'∞')+'</b></span></div>'+
-   '<div class="uc-p">'+(lv.length?'<span class="ulv">'+liveBadges(lv)+'</span>':ps.slice(0,4).map(function(p){return '<i style="--pc:'+PCOL[p]+'">'+PSHORT[p]+'</i>'}).join('')+(ps.length>4?'<i>+'+N(ps.length-4)+'</i>':'')+
-    (!on&&seen?'<small class="muted">'+ago(typeof seen=='number'?seen:Date.parse(seen)/1000)+'</small>':''))+'</div>'+
+   // only what the user is connected to right now (protocol, exit country, through Iran); the configs the
+   // user has are in the edit window
+   '<div class="uc-p">'+(lv.length?'<span class="ulv">'+liveBadges(lv)+'</span>':
+    '<small class="muted">'+(seen?t('Last online')+' '+ago(typeof seen=='number'?seen:Date.parse(seen)/1000):t('Not connected right now'))+'</small>')+'</div>'+
    '<div class="uc-a">'+btn('link','link',t('Copy link'))+btn('qr','qr','QR')+btn('edit','edit',t('Edit'))+'</div></div>'};
 
 look();

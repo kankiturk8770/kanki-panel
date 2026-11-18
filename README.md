@@ -3,6 +3,13 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.52 — CDN domain for Xray
+Each Xray server can have a separate CDN domain; inbounds that can go through a CDN (WS, HTTPUpgrade, XHTTP, gRPC) give users one
+more link with it, while REALITY and TCP stay on the main domain.
+User cards show only what a user is connected to right now, the same as the connection count; an account that runs out is
+cut at once (a slow server no longer delays it), and data used after the end is shown by server and protocol.
+In the bot's mini app the admins' page is its own (no shop, no subscription), and its overview tab opens again.
+
 ## New in 3.51.2 — From a new user to the tunnels
 Iran relays are never auto-removed by mistake, «drain» works on every core, a dead server no longer slows every sync, adding a
 server with no core ticked leaves every core off, and smaller fixes for users and game tunnels.
