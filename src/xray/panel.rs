@@ -72,6 +72,8 @@ pub struct Inbound {
     pub link_port: u16,
     pub link_tls: bool,
     pub link_sni: String,
+    /// users also get a copy of this inbound's link through its server's CDN domain (`XServer::cdn`)
+    pub cdn: bool,
     /// only these user ids (empty = every user with Xray)
     pub only: Vec<i64>,
     /// listen address ("" = every address)
@@ -173,6 +175,45 @@ pub struct XServer {
     /// `address` is a domain: the server gets its certificate with certbot, and the server's TLS
     /// inbounds with the automatic certificate use it
     pub ssl: bool,
+    /// a domain of this server behind a CDN (Cloudflare …), apart from `address`: the inbounds that can
+    /// go through a CDN and have `cdn` on give users one more link with it. The main domain stays as it
+    /// is, so REALITY and TCP links never go through the CDN.
+    pub cdn: String,
+}
+
+/// Ports a CDN (Cloudflare) passes on to the server: with TLS, and without.
+const CDN_TLS_PORTS: &[u16] = &[443, 2053, 2083, 2087, 2096, 8443];
+const CDN_PLAIN_PORTS: &[u16] = &[80, 8080, 8880, 2052, 2082, 2086, 2095];
+
+/// Why this inbound cannot go through a CDN ("" = it can). `cdn` is its server's CDN domain ("" = not
+/// checked against it).
+pub fn cdn_unfit(ib: &Inbound, cdn: &str) -> &'static str {
+    if ib.protocol == "shadowsocks" {
+        return "Shadowsocks cannot go through a CDN";
+    }
+    if !["ws", "httpupgrade", "xhttp", "grpc"].contains(&ib.network.as_str()) {
+        return "only WS, HTTPUpgrade, XHTTP and gRPC go through a CDN";
+    }
+    if ib.security == "reality" {
+        return "REALITY cannot go through a CDN";
+    }
+    let tls = ib.security == "tls";
+    if tls && !CDN_TLS_PORTS.contains(&ib.port) {
+        return "with TLS the CDN only passes ports 443, 2053, 2083, 2087, 2096 and 8443";
+    }
+    if !tls && !CDN_PLAIN_PORTS.contains(&ib.port) {
+        return "without TLS the CDN only passes ports 80, 8080, 8880, 2052, 2082, 2086 and 2095";
+    }
+    let h = ib.host.trim();
+    if ib.network != "grpc" && !h.is_empty() && (cdn.is_empty() || !h.eq_ignore_ascii_case(cdn)) {
+        return "the Host of this inbound must be empty (the CDN sends its own domain)";
+    }
+    ""
+}
+
+/// The CDN domain of a server ("" = none).
+pub fn server_cdn(s: &XraySettings, sid: &str) -> String {
+    s.servers.iter().find(|x| x.server == sid).map(|x| x.cdn.trim().trim_matches('.').to_ascii_lowercase()).filter(|d| is_domain(d)).unwrap_or_default()
 }
 
 /// A domain (not an IP, not empty)?
@@ -977,7 +1018,10 @@ fn links_meta(app: &App, u: &User) -> Vec<LinkMeta> {
         let group = format!("{}:{}", ib.server, ib.id);
         out.push(LinkMeta { name: name.clone(), link: l, server: ib.server.clone(), via: "direct", group: group.clone() });
         if let Some(t) = link_tunnel(app, &s, &named, u) {
-            out.push(LinkMeta { name: t.0, link: t.1, server: ib.server.clone(), via: "tunnel", group });
+            out.push(LinkMeta { name: t.0, link: t.1, server: ib.server.clone(), via: "tunnel", group: group.clone() });
+        }
+        if let Some(c) = link_cdn(&s, &named, u) {
+            out.push(LinkMeta { name: c.0, link: c.1, server: ib.server.clone(), via: "cdn", group });
         }
     }
     out
@@ -1058,6 +1102,35 @@ fn link_tunnel(app: &App, s: &XraySettings, ib: &Inbound, u: &User) -> Option<(S
     let base = if ib.remark.is_empty() { ib.protocol.clone() } else { ib.remark.clone() };
     // the tunnel copy: the Iran flag first, then the arrow to where it leaves
     let name = format!("🇮🇷→{}", base);
+    x.remark = name.clone();
+    let l = link_with(s, &x, u, "")?;
+    Some((name, l))
+}
+
+/// (name, link) of an inbound's copy through its server's CDN domain: None when the inbound's CDN switch
+/// is off, its server has no CDN domain, or the inbound cannot go through a CDN (`cdn_unfit`).
+fn link_cdn(s: &XraySettings, ib: &Inbound, u: &User) -> Option<(String, String)> {
+    if !ib.cdn {
+        return None;
+    }
+    let cdn = server_cdn(s, &ib.server);
+    if cdn.is_empty() || !cdn_unfit(ib, &cdn).is_empty() {
+        return None;
+    }
+    let mut x = ib.clone();
+    x.link_host = cdn.clone();
+    x.link_port = 0;
+    x.link_tls = false;
+    if ib.network != "grpc" {
+        x.host = cdn.clone();
+    }
+    if ib.security == "tls" {
+        x.link_sni = cdn.clone();
+        // the CDN speaks WebSocket only over HTTP/1.1; the rest: what the client picks
+        x.alpn = if ["ws", "httpupgrade"].contains(&ib.network.as_str()) { "http/1.1".into() } else { String::new() };
+    }
+    let base = if ib.remark.is_empty() { ib.protocol.clone() } else { ib.remark.clone() };
+    let name = format!("{} · CDN", base);
     x.remark = name.clone();
     let l = link_with(s, &x, u, "")?;
     Some((name, l))
@@ -1431,7 +1504,7 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
             let (at, status) = st.get(&x.server).cloned().unwrap_or((0, Value::Null));
             json!({ "server": x.server, "name": names.get(&x.server).cloned().unwrap_or_default(), "address": x.address,
                 "effective": server_address(&app, &s, &x.server), "status": status, "status_at": at, "ssl": x.ssl,
-                "domain": server_domain(&s, &x.server) })
+                "domain": server_domain(&s, &x.server), "cdn": server_cdn(&s, &x.server) })
         })
         .collect();
     let users = xray_users(&app);
@@ -1456,6 +1529,10 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
                 }
             }
             v["server_name"] = json!(names.get(&ib.server).cloned().unwrap_or_default());
+            // can it go through a CDN ("" = yes), and is its CDN copy really in the users' links
+            let cdn = server_cdn(&s, &ib.server);
+            v["cdn_unfit"] = json!(cdn_unfit(ib, &cdn));
+            v["cdn_live"] = json!(ib.cdn && !cdn.is_empty() && cdn_unfit(ib, &cdn).is_empty());
             // the private keys never leave the panel in a listing
             v["key"] = json!(if ib.key.is_empty() { "" } else { "set" });
             v["private"] = json!(if ib.private.is_empty() { "" } else { "set" });
@@ -1589,12 +1666,25 @@ async fn put_server(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
         return err(StatusCode::BAD_REQUEST, "SSL needs a domain (like de.example.com), not an IP");
     }
     let address = if ssl { address.to_ascii_lowercase() } else { address };
+    // the CDN domain: kept when the form does not send it
+    let old_cdn = s.servers.iter().find(|x| x.server == sid).map(|x| x.cdn.clone()).unwrap_or_default();
+    let cdn = match b.get("cdn") {
+        Some(v) => v.as_str().unwrap_or("").trim().trim_matches('.').to_ascii_lowercase(),
+        None => old_cdn,
+    };
+    if !cdn.is_empty() && !is_domain(&cdn) {
+        return err(StatusCode::BAD_REQUEST, "the CDN address must be a domain (like cdn.example.com), not an IP");
+    }
+    if !cdn.is_empty() && cdn.eq_ignore_ascii_case(address.trim_matches('.')) {
+        return err(StatusCode::BAD_REQUEST, "the CDN domain must be another domain than the server's own (else REALITY and TCP break)");
+    }
     match s.servers.iter_mut().find(|x| x.server == sid) {
         Some(x) => {
             x.address = address.clone();
             x.ssl = ssl;
+            x.cdn = cdn;
         }
-        None => s.servers.push(XServer { server: sid.clone(), address: address.clone(), ssl }),
+        None => s.servers.push(XServer { server: sid.clone(), address: address.clone(), ssl, cdn }),
     }
     save(&app, &s);
     Json(json!({ "ok": true })).into_response()
@@ -1837,6 +1927,7 @@ async fn inbound_clients(State(app): St, h: HeaderMap, Path(id): Path<String>) -
             json!({
                 "id": u.id, "name": u.username, "active": u.active(), "online": online.contains(&u.id), "used": u.used_bytes, "limit_gb": u.limit_gb,
                 "expires": u.expires_at, "link": link(&app, &s, ib, u).unwrap_or_default(),
+                "cdn_link": link_cdn(&s, ib, u).map(|x| x.1).unwrap_or_default(),
             })
         })
         .collect();
@@ -2061,7 +2152,7 @@ mod tests {
         let (p, q) = reality_keys();
         let x = XraySettings {
             on: true,
-            servers: vec![XServer { server: "de".into(), address: "de.example.com".into(), ssl: false }],
+            servers: vec![XServer { server: "de".into(), address: "de.example.com".into(), ssl: false, ..Default::default() }],
             inbounds: vec![
                 Inbound { id: "t".into(), server: "de".into(), enabled: true, protocol: "trojan".into(), port: 2083, network: "tcp".into(), security: "tls".into(), remark: "tr".into(), ..Default::default() },
                 Inbound { id: "r".into(), server: "de".into(), enabled: true, protocol: "vless".into(), port: 443, network: "tcp".into(), security: "reality".into(),
@@ -2120,6 +2211,40 @@ mod tests {
         assert!(user_links_at(&app, &u)[1].1.contains("@ir2.example.com:9443?"));
         crate::twin::save_core(&app, "de", &json!({ "core": "xray", "host": "" })).unwrap();
         assert!(user_links_at(&app, &u)[1].1.contains("@ir.example.com:443?"));
+    }
+
+    #[test]
+    fn a_cdn_domain_adds_a_link_beside_the_direct_one() {
+        let (p, q) = reality_keys();
+        let srv = XServer { server: "de".into(), address: "de.example.com".into(), ssl: true, cdn: "cdn.example.com".into() };
+        let ws = Inbound { id: "w".into(), server: "de".into(), enabled: true, protocol: "vless".into(), port: 443, network: "ws".into(), security: "tls".into(),
+            path: "/ws".into(), alpn: "h2,http/1.1".into(), cdn: true, ..Default::default() };
+        let grpc = Inbound { id: "g".into(), server: "de".into(), enabled: true, protocol: "trojan".into(), port: 2096, network: "grpc".into(), security: "tls".into(), service: "gx".into(), cdn: true, ..Default::default() };
+        let plain = Inbound { id: "p".into(), server: "de".into(), enabled: true, protocol: "vmess".into(), port: 8080, network: "httpupgrade".into(), security: "none".into(), cdn: true, ..Default::default() };
+        let reality = Inbound { id: "r".into(), server: "de".into(), enabled: true, protocol: "vless".into(), port: 443, network: "tcp".into(), security: "reality".into(),
+            dest: "www.microsoft.com:443".into(), names: "www.microsoft.com".into(), private: p, public: q, short_ids: "abcd".into(), cdn: true, ..Default::default() };
+        let s = XraySettings { on: true, servers: vec![srv], inbounds: vec![ws.clone(), grpc.clone(), plain.clone(), reality.clone()], ..Default::default() };
+        let u = User { id: 3, username: "ali".into(), code: "99887766".into(), enabled: true, protocols: "xray".into(), ..emit::test_user() };
+        // the direct link keeps the server's own domain
+        let d = link_with(&s, &ws, &u, "de.example.com").unwrap();
+        assert!(d.contains("@de.example.com:443?") && !d.contains("cdn.example.com"), "{}", d);
+        // the CDN copy: the CDN domain as address, Host and SNI; HTTP/1.1 for WebSocket
+        let (n, c) = link_cdn(&s, &ws, &u).unwrap();
+        assert!(n.ends_with(" · CDN"));
+        assert!(c.contains("@cdn.example.com:443?") && c.contains("host=cdn.example.com") && c.contains("sni=cdn.example.com") && c.contains("alpn=http%2F1.1"), "{}", c);
+        let (_, g) = link_cdn(&s, &grpc, &u).unwrap();
+        assert!(g.contains("@cdn.example.com:2096?") && g.contains("sni=cdn.example.com") && !g.contains("alpn="), "{}", g);
+        assert!(link_cdn(&s, &plain, &u).unwrap().1.starts_with("vmess://"));
+        // REALITY never goes through the CDN, even with the switch on
+        assert!(link_cdn(&s, &reality, &u).is_none());
+        assert_eq!(cdn_unfit(&reality, "cdn.example.com"), "REALITY cannot go through a CDN");
+        // switch off, no CDN domain, a port the CDN does not pass, a Host of its own: no copy
+        assert!(link_cdn(&s, &Inbound { cdn: false, ..ws.clone() }, &u).is_none());
+        let s2 = XraySettings { servers: vec![XServer { server: "de".into(), address: "de.example.com".into(), ..Default::default() }], ..s.clone() };
+        assert!(link_cdn(&s2, &ws, &u).is_none());
+        assert!(link_cdn(&s, &Inbound { port: 9443, ..ws.clone() }, &u).is_none());
+        assert!(link_cdn(&s, &Inbound { host: "de.example.com".into(), ..ws.clone() }, &u).is_none());
+        assert!(link_cdn(&s, &Inbound { host: "cdn.example.com".into(), ..ws.clone() }, &u).is_some());
     }
 
     #[test]

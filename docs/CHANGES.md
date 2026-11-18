@@ -1,3 +1,15 @@
+# v3.52.0 — Xray: a CDN domain of its own for each server
+Putting the server's main domain behind a CDN breaks REALITY and plain TCP links. Now each Xray server can have a **second domain
+for the CDN** (Xray › server › «Domain, SSL and CDN»; Cloudflare: orange cloud, SSL mode Full); the main domain stays as it is.
+- Each inbound has a switch «☁️ Also a link through the CDN». Users then get one more link with the CDN domain (address, Host and
+  SNI; HTTP/1.1 for WebSocket), beside the direct link and the tunnel copy, named «… · CDN», `via: "cdn"` in the app's list.
+- The inbound form says at once whether the inbound can go through a CDN, and why not (`cdn_unfit`): only WS, HTTPUpgrade, XHTTP
+  and gRPC; never REALITY or Shadowsocks; only the ports Cloudflare passes (TLS: 443, 2053, 2083, 2087, 2096, 8443; plain: 80,
+  8080, 8880, 2052, 2082, 2086, 2095); the inbound's own Host empty. The list shows «☁️ CDN» (live) or «☁️ CDN ✕» (switch on but
+  it cannot). The quick setups «VLESS + WS (CDN)» and «gRPC + TLS (CDN)» switch it on.
+- The panel refuses a CDN «domain» that is an IP or the same as the server's own domain.
+- «Users and links» of an inbound has a ☁️ button that copies a user's CDN link.
+
 # v3.51.2 — From a new user to the tunnels: fixes
 The whole path was read: making a user, the sync to the servers, adding a server, the tunnel agents, the tunnels. Fixed, each with a test:
 - **Auto-remove of offline servers:** an Iran relay with no location set counted as abroad, so an Iran internet cut of a day removed

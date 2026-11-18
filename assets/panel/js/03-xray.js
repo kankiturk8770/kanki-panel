@@ -63,7 +63,7 @@ function xrInbounds(d){var q=(XR.q||'').toLowerCase(),list=d.inbounds.filter(fun
  if(!d.inbounds.length)return '<p class="muted ku-empty">'+t('No inbound yet.')+'</p>';
  if(!list.length)return '<p class="muted ku-empty">'+t('Nothing found')+'</p>';
  return list.map(function(ib){var st=xrState(ib),lim=+ib.total_gb||0,used=+ib.traffic||0,id=esc(ib.id);
-  var tags=kuTag(esc(ib.protocol.toUpperCase()),'a')+kuTag(esc(ib.network.toUpperCase()))+(ib.security!='none'?kuTag(esc(ib.security.toUpperCase()),'g'):'')+(ib.flow?kuTag('Vision'):'')+(ib.link_tls||ib.link_host?kuTag('CDN'):'')+
+  var tags=kuTag(esc(ib.protocol.toUpperCase()),'a')+kuTag(esc(ib.network.toUpperCase()))+(ib.security!='none'?kuTag(esc(ib.security.toUpperCase()),'g'):'')+(ib.flow?kuTag('Vision'):'')+(ib.cdn_live?kuTag('☁️ CDN','g'):ib.cdn?kuTag('☁️ CDN ✕','y'):ib.link_tls||ib.link_host?kuTag('CDN'):'')+
    ((ib.only||[]).length?kuTag(N(ib.only.length)+' '+t('users only'),'y'):'')+kuTag(esc(ib.server_name||ib.server))+kuTag(t(st[1]),st[0]);
   return kuItem({dot:st[0],off:!ib.enabled,name:esc(ib.remark||ib.protocol),tags:tags,addr:esc(xrPublic(d,ib)),
    act:'<button class="b2 sm" onclick="xrClients(\''+id+'\')">'+ic('link',14)+' '+t('Links')+'</button>',menu:'xrIbMenu(\''+id+'\')',
@@ -176,16 +176,26 @@ function xrAddNode(){var go=function(){var d=XR.d,used=d.servers.map(function(x)
   var sv=function(){$('#xa_nw').style.display=$('#xa_sv').value=='__new'?'':'none'};$('#xa_sv').onchange=sv;sv();xrDomainWire();
   $('#xa_go').onclick=function(){var me=this,nw=$('#xa_sv').value=='__new';me.disabled=true;
    (nw?api('POST','/api/tunnels/servers',{name:$('#xa_nm').value||'Xray'}):Promise.resolve({id:$('#xa_sv').value})).then(function(r){
-    return api('POST','/api/xray/servers',{server:r.id,address:$('#xa_ad').value,ssl:$('#xa_ssl').checked}).then(function(){toast(t($('#xa_ssl').checked&&xrIsDomain($('#xa_ad').value)?'Saved: getting SSL (about a minute)':'Saved'));if(nw){me.style.display='none';$('#xa_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}else closeModal();xrLoad()})}).catch(function(e){me.disabled=false;fail(e)})}};
+    return api('POST','/api/xray/servers',{server:r.id,address:$('#xa_ad').value,ssl:$('#xa_ssl').checked,cdn:$('#xa_cdn').value.trim()}).then(function(){toast(t($('#xa_ssl').checked&&xrIsDomain($('#xa_ad').value)?'Saved: getting SSL (about a minute)':'Saved'));if(nw){me.style.display='none';$('#xa_out').innerHTML=tunCmdBox(r,r);$('#tn_cp').onclick=function(){copy($('#tn_cmd').textContent)}}else closeModal();xrLoad()})}).catch(function(e){me.disabled=false;fail(e)})}};
  if(XR.d)go();else xrLoad().then(go)}
+/** why an inbound cannot go through a CDN ('' = it can); the same rules as `cdn_unfit` on the panel */
+function xrCdnWhy(ib,cdn){var tls=ib.security=='tls',h=(ib.host||'').trim().toLowerCase();
+ if(ib.protocol=='shadowsocks')return 'Shadowsocks cannot go through a CDN';
+ if(['ws','httpupgrade','xhttp','grpc'].indexOf(ib.network)<0)return 'only WS, HTTPUpgrade, XHTTP and gRPC go through a CDN';
+ if(ib.security=='reality')return 'REALITY cannot go through a CDN';
+ if(tls&&[443,2053,2083,2087,2096,8443].indexOf(+ib.port)<0)return 'with TLS the CDN only passes ports 443, 2053, 2083, 2087, 2096 and 8443';
+ if(!tls&&[80,8080,8880,2052,2082,2086,2095].indexOf(+ib.port)<0)return 'without TLS the CDN only passes ports 80, 8080, 8880, 2052, 2082, 2086 and 2095';
+ if(ib.network!='grpc'&&h&&h!=(cdn||'').toLowerCase())return 'the Host of this inbound must be empty (the CDN sends its own domain)';
+ return ''}
 function xrIsDomain(v){v=(v||'').trim();return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(v)&&!/^[\d.]+$/.test(v)}
 function xrDomainFields(x){
  return '<label class="f">'+t('Domain of this server (or IP)')+'</label><input id="xa_ad" class="ltr" placeholder="de.example.com" value="'+esc(x.address||'')+'"><p class="hint">'+t('Users connect to this address; empty = the IP the server reports from')+'</p>'+
-  '<div class="srow" id="xa_sslw"><div class="tx"><b>'+t('Get SSL for this domain by itself')+'</b><small>'+t('certbot on this server gets a Let\'s Encrypt certificate for the domain (no e-mail needed) and renews it by itself; every TLS inbound of this server uses it. The domain must point to this server. Whatever uses port 80 (Caddy, nginx, an inbound …) is set aside for a few seconds and comes back by itself.')+'</small></div><label class="sw"><input type="checkbox" id="xa_ssl" '+(x.ssl!==false?'checked':'')+'><span></span></label></div>'}
+  '<div class="srow" id="xa_sslw"><div class="tx"><b>'+t('Get SSL for this domain by itself')+'</b><small>'+t('certbot on this server gets a Let\'s Encrypt certificate for the domain (no e-mail needed) and renews it by itself; every TLS inbound of this server uses it. The domain must point to this server. Whatever uses port 80 (Caddy, nginx, an inbound …) is set aside for a few seconds and comes back by itself.')+'</small></div><label class="sw"><input type="checkbox" id="xa_ssl" '+(x.ssl!==false?'checked':'')+'><span></span></label></div>'+
+  '<label class="f">☁️ '+t('CDN domain of this server (optional)')+'</label><input id="xa_cdn" class="ltr" placeholder="cdn-de.example.com" value="'+esc(x.cdn||'')+'"><p class="hint">'+t('Another domain (not the one above) that points to this server through the CDN (Cloudflare: orange cloud, SSL mode Full). The main domain stays off the CDN, so REALITY and TCP keep working; inbounds with the CDN switch give users one more link with this domain.')+'</p>'}
 function xrDomainWire(){var f=function(){var w=$('#xa_sslw');if(w)w.style.display=xrIsDomain($('#xa_ad').value)?'':'none'};$('#xa_ad').oninput=f;f()}
 function xrSrvEdit(id){var x=XR.d.servers.filter(function(s){return s.server==id})[0];if(!x)return;
- modal(mhead(t('Edit'),x.name)+xrDomainFields({address:x.address,ssl:x.ssl||!x.address})+'<button class="btn u-wfull u-mt3" id="xe_go">'+t('Save')+'</button>');xrDomainWire();
- $('#xe_go').onclick=function(){var ssl=$('#xa_ssl').checked&&xrIsDomain($('#xa_ad').value);api('POST','/api/xray/servers',{server:id,address:$('#xa_ad').value,ssl:ssl}).then(function(){closeModal();toast(t(ssl?'Saved: getting SSL (about a minute)':'Saved'));xrLoad();setTimeout(function(){xrLoad(true)},5000)}).catch(fail)}}
+ modal(mhead(t('Edit'),x.name)+xrDomainFields({address:x.address,ssl:x.ssl||!x.address,cdn:x.cdn})+'<button class="btn u-wfull u-mt3" id="xe_go">'+t('Save')+'</button>');xrDomainWire();
+ $('#xe_go').onclick=function(){var ssl=$('#xa_ssl').checked&&xrIsDomain($('#xa_ad').value);api('POST','/api/xray/servers',{server:id,address:$('#xa_ad').value,ssl:ssl,cdn:$('#xa_cdn').value.trim()}).then(function(){closeModal();toast(t(ssl?'Saved: getting SSL (about a minute)':'Saved'));xrLoad();setTimeout(function(){xrLoad(true)},5000)}).catch(fail)}}
 /** SSL of a server's domain, as the server reports it (certbot runs there) */
 function xrCertErr(x){var st=x.status||{};return x.domain&&st.cert_errors&&st.cert_errors[x.domain]&&!(st.certs||[]).includes(x.domain)?st.cert_errors[x.domain]:''}
 function xrCertChip(x){if(!x.domain)return '';var st=x.status||{};
@@ -205,8 +215,9 @@ function xrClients(id){var ib=XR.d.inbounds.filter(function(x){return x.id==id})
  api('GET','/api/xray/inbounds/'+encodeURIComponent(id)+'/clients').then(function(r){var list=r.clients||[];
   var draw=function(){var q=$('#xc_q').value.toLowerCase();var l=list.filter(function(c){return !q||c.name.toLowerCase().indexOf(q)>=0});
    $('#xc_l').innerHTML=l.length?l.map(function(c,i){return '<div class="vrow"><span class="dot '+(c.online?'g':c.active?'':'r')+'"></span><div class="nm"><b><bdi>'+esc(c.name)+'</bdi></b><small>'+N(bytes(c.used))+(c.limit_gb>0?' / '+N(c.limit_gb)+' GB':'')+(c.active?'':' · '+t('Inactive'))+'</small></div>'+
-    (c.link?'<button class="ib" data-cp="'+i+'" title="'+t('Copy')+'">'+ic('copy',15)+'</button><button class="ib" data-qr="'+i+'" title="QR">'+ic('qr',15)+'</button>':'<span class="muted">'+t('No address')+'</span>')+'</div>'}).join(''):'<p class="muted">'+t('No users with Xray yet: tick Xray in a user\'s form')+'</p>';
-   $$('#xc_l [data-cp]').forEach(function(b){b.onclick=function(){copy(l[+b.dataset.cp].link)}});
+    (c.link?'<button class="ib" data-cp="'+i+'" title="'+t('Copy')+'">'+ic('copy',15)+'</button><button class="ib" data-qr="'+i+'" title="QR">'+ic('qr',15)+'</button>':'<span class="muted">'+t('No address')+'</span>')+
+    (c.cdn_link?'<button class="ib" data-cc="'+i+'" title="'+t('Copy')+' (CDN)">☁️</button>':'')+'</div>'}).join(''):'<p class="muted">'+t('No users with Xray yet: tick Xray in a user\'s form')+'</p>';
+   $$('#xc_l [data-cp]').forEach(function(b){b.onclick=function(){copy(l[+b.dataset.cp].link)}});$$('#xc_l [data-cc]').forEach(function(b){b.onclick=function(){copy(l[+b.dataset.cc].cdn_link)}});
    $$('#xc_l [data-qr]').forEach(function(b){b.onclick=function(){var c=l[+b.dataset.qr];qrInto($('#xc_qr'),c.link);$('#xc_qr').insertAdjacentHTML('afterbegin','<p class="muted ltr" style="margin:10px 0 0;text-align:center">'+esc(c.name)+'</p>')}})};
   $('#xc_q').oninput=draw;draw()}).catch(fail)}
 
@@ -226,7 +237,8 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
    '<div><label class="f">'+t('Port')+'</label><div class="inl"><input id="xi_pt" class="ltr" type="number" min="1" max="65535" value="'+(ib.port||'')+'"><button type="button" class="ib" id="xi_rp" title="'+t('Random free port')+'">🎲</button></div></div>'+
    inp('xi_ls0','Listen address',ib.listen,'0.0.0.0')+'</div>'+
    '<div id="xi_ss" class="g2"><div><label class="f">'+t('Method')+'</label><select id="xi_sm">'+opt(['2022-blake3-aes-128-gcm','2022-blake3-aes-256-gcm','2022-blake3-chacha20-poly1305','chacha20-ietf-poly1305','aes-256-gcm','aes-128-gcm'],ib.ss_method)+'</select></div></div>'+
-   '<div class="chipset u-mt3"><span class="muted">'+t('Quick setup')+':</span>'+[['vr','VLESS + REALITY'],['vx','VLESS + XHTTP + REALITY'],['vw','VLESS + WS (CDN)'],['vg','VLESS + gRPC + REALITY'],['gc','VLESS + gRPC + TLS (CDN)'],['tt','Trojan + TLS'],['ss','Shadowsocks 2022']].map(function(x){return '<button type="button" data-pre="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div></div>'+
+   '<div class="chipset u-mt3"><span class="muted">'+t('Quick setup')+':</span>'+[['vr','VLESS + REALITY'],['vx','VLESS + XHTTP + REALITY'],['vw','VLESS + WS (CDN)'],['vg','VLESS + gRPC + REALITY'],['gc','VLESS + gRPC + TLS (CDN)'],['tt','Trojan + TLS'],['ss','Shadowsocks 2022']].map(function(x){return '<button type="button" data-pre="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div>'+
+   '<div class="u-mt3" id="xi_cdnw">'+ck('xi_cdn','☁️ '+t('Also a link through the CDN'),ib.cdn,'Users get one more link with this server\'s CDN domain, beside the direct one')+'<p class="hint" id="xi_cdnst"></p></div></div>'+
   // transport
   '<div class="fsec" data-fs="tr"><div class="g2"><div><label class="f">'+t('Transport')+'</label><select id="xi_nw">'+opt([['tcp','TCP (RAW)'],['ws','WebSocket'],['grpc','gRPC'],['httpupgrade','HTTPUpgrade'],['xhttp','XHTTP'],['kcp','mKCP']],ib.network)+'</select></div></div>'+
    '<div id="xi_tp" class="g2">'+inp('xi_pa','Path',ib.path,t('random if empty'))+inp('xi_ho','Host',ib.host,'')+'</div>'+
@@ -288,8 +300,11 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
   show('#xi_fl',pr=='vless'&&nw=='tcp'&&sc!='none');show('#xi_tls',sc=='tls');show('#xi_rl',sc=='reality');show('#xi_fpw',sc!='none'||$('#xi_lt').checked);$('#xi_nw').disabled=ss;
   show('#xi_cpem',cm=='pem');show('#xi_cfile',cm=='file');show('#xi_cauto',cm=='auto');sniPh();
   var fbOk=(pr=='vless'||pr=='trojan')&&nw=='tcp'&&sc!='reality';$('#xi_tabs [data-ft="fb"]').style.display=fbOk?'':'none';
-  [].forEach.call($('#xi_sc').options,function(o){if(o.value=='reality')o.disabled=['vless','trojan'].indexOf(pr)<0||['tcp','grpc','xhttp'].indexOf(nw)<0})};
- ['#xi_pr','#xi_nw','#xi_sc','#xi_lt','#xi_hh','#xi_sv'].forEach(function(s){$(s).onchange=ui});ui();
+  [].forEach.call($('#xi_sc').options,function(o){if(o.value=='reality')o.disabled=['vless','trojan'].indexOf(pr)<0||['tcp','grpc','xhttp'].indexOf(nw)<0});
+  var sx=d.servers.filter(function(z){return z.server==$('#xi_sv').value})[0]||{},cdn=sx.cdn||'',why=xrCdnWhy({protocol:pr,network:nw,security:sc,port:+$('#xi_pt').value||0,host:$('#xi_ho').value},cdn),on=$('#xi_cdn').checked;
+  $('#xi_cdnst').innerHTML=why?'<span style="color:var(--warn)">✕ '+t('Does not go through a CDN')+': '+t(why)+'</span>':
+   '<span style="color:var(--ok)">✓ '+t('Goes through a CDN')+'</span>'+(cdn?' · <span class="ltr">'+esc(cdn)+'</span>'+(on?'':' · '+t('switch it on to give users the CDN link')):' · '+t('write this server\'s CDN domain first (Xray › server › Domain and SSL)'))};
+ ['#xi_pr','#xi_nw','#xi_sc','#xi_lt','#xi_hh','#xi_sv','#xi_cdn'].forEach(function(s){$(s).onchange=ui});['#xi_pt','#xi_ho'].forEach(function(s){$(s).addEventListener('input',ui)});ui();
  $('#xi_dp').onchange=function(){if(!this.value)return;$('#xi_de').value=this.value;$('#xi_na').value=this.value.split(':')[0];this.value=''};
  $('#xi_sig').onclick=function(){var r='';for(var i=0;i<8;i++)r+=Math.floor(Math.random()*256).toString(16).padStart(2,'0');$('#xi_si').value=r};
  $('#xi_rp').onclick=function(){$('#xi_pt').value=xrFreePort($('#xi_sv').value,true)};
@@ -300,7 +315,7 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
   var P={vr:['vless','tcp','reality','xtls-rprx-vision',443],vx:['vless','xhttp','reality','',443],vw:['vless','ws','none','',8080],vg:['vless','grpc','reality','',443],gc:['vless','grpc','tls','',443],tt:['trojan','tcp','tls','',443],ss:['shadowsocks','tcp','none','',8388]}[k];
   set('#xi_pr',P[0]);set('#xi_nw',P[1]);set('#xi_sc',P[2]);set('#xi_flw',P[3]);if(!$('#xi_rm').value)$('#xi_rm').value=b.textContent.replace(/\s+/g,'').replace(/\+/g,'-');
   var used=XR.d.inbounds.some(function(x){return x.id!=id&&x.server==$('#xi_sv').value&&x.port==P[4]});$('#xi_pt').value=used?xrFreePort($('#xi_sv').value,true):P[4];
-  if(P[2]=='reality'&&!$('#xi_de').value){$('#xi_de').value='www.microsoft.com:443';$('#xi_na').value='www.microsoft.com'}if(k=='vw')$('#xi_lt').checked=false;ui();toast(t('Filled in: check the Security tab'))}});
+  if(P[2]=='reality'&&!$('#xi_de').value){$('#xi_de').value='www.microsoft.com:443';$('#xi_na').value='www.microsoft.com'}if(k=='vw')$('#xi_lt').checked=false;if(k=='vw'||k=='gc')$('#xi_cdn').checked=true;ui();toast(t('Filled in: check the Security tab'))}});
  $('#xi_go').onclick=function(){var me=this,v=function(i){return $(i).value.trim()};
   var ex=v('#xi_ex'),expire=0;if(ex){var pd=ex.split('-');expire=Math.floor(new Date(+pd[0],+pd[1]-1,+pd[2],23,59,0).getTime()/1000)}
   var b={id:id||'',enabled:ib.enabled!==false,remark:v('#xi_rm'),server:$('#xi_sv').value,protocol:$('#xi_pr').value,port:+v('#xi_pt')||0,listen:v('#xi_ls0'),network:$('#xi_nw').value,security:$('#xi_pr').value=='shadowsocks'?'none':$('#xi_sc').value,
@@ -310,7 +325,7 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
    acme:cm=='auto',cert:cm=='pem'?$('#xi_ce').value.trim():'',key:cm=='pem'?($('#xi_ke').value.trim()||(ib.key=='set'?'set':'')):'',cert_file:cm=='file'?v('#xi_cf'):'',key_file:cm=='file'?v('#xi_kf'):'',fp:$('#xi_fp').value,
    dest:v('#xi_de'),names:v('#xi_na'),private:v('#xi_pk')||(ib.private=='set'?'set':''),public:v('#xi_pb'),short_ids:v('#xi_si'),spx:v('#xi_sx'),xver:+$('#xi_xv').value||0,max_time_diff:+v('#xi_mt')||0,
    sniffing:$('#xi_sn').checked,sniff_dest:$$('.xi_sd').filter(function(c){return c.checked}).map(function(c){return c.value}),sniff_override:$('#xi_so').checked,sniff_meta:$('#xi_sm2').checked,
-   link_host:v('#xi_lh'),link_port:+v('#xi_lp')||0,link_tls:$('#xi_lt').checked,link_sni:v('#xi_ls'),total_gb:+v('#xi_tg')||0,expire:expire,
+   cdn:$('#xi_cdn').checked,link_host:v('#xi_lh'),link_port:+v('#xi_lp')||0,link_tls:$('#xi_lt').checked,link_sni:v('#xi_ls'),total_gb:+v('#xi_tg')||0,expire:expire,
    only:$$('.xi_u').filter(function(c){return c.checked}).map(function(c){return +c.value}),fallbacks:FB.filter(function(f){return String(f.dest).trim()})};
   if(b.private&&b.private!='set'&&!b.public)return toast(t('Public key'),1);
   if(!b.port)return toast(t('the port is required'),1);
