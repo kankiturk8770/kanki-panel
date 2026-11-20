@@ -381,11 +381,11 @@ async fn overview(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "users:read");
     let us = app.db.users();
     let nodes = app.db.nodes();
-    let sales = app.db.with(|c| {
-        c.query_row("SELECT COUNT(*), COALESCE(SUM(CASE WHEN method IN ('card','zp') THEN CAST(amount AS INTEGER) END),0) FROM orders WHERE status='done'", [], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
-        }).unwrap_or((0, 0))
-    });
+    // toman: card, bank gateway, TON and Stars (each kept in toman); the dollar orders are not added in
+    let sales = {
+        let r = crate::bot::revenue(&app.db);
+        (r.count, r.toman())
+    };
     // orders still waiting for the customer's payment or the admin's check
     let pending: i64 = app.db.with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE status IN ('pending','waiting','paid')", [], |r| r.get(0)).unwrap_or(0));
     let mut protos: HashMap<&str, usize> = HashMap::new();

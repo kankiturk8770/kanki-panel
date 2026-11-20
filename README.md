@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.55 — A cleaner sales bot and mini app
+A two-column main menu with standard emoji, a short welcome, services with their lowest price and plans listed by duration,
+uniform plan cards and a custom-plan builder with a fixed price bar; the currency revenue in the stats is right again.
+
 ## New in 3.54 — The servers reach a filtered panel through a CDN
 Settings › «Panel CDN domain»: a second domain behind Cloudflare for the servers only. When the panel's IP is filtered in Iran,
 the Iran servers' agents report through it and come back to the panel's own address when it answers again.

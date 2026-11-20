@@ -509,6 +509,34 @@ details.app{border-inline-start:3px solid var(--ac)}
 .cgo{display:block;width:100%;min-height:50px;margin-top:12px;font-size:15px;background:linear-gradient(135deg,color-mix(in srgb,var(--tc) 55%,#fff),var(--tc) 55%,color-mix(in srgb,var(--tc) 80%,#000))!important;color:#06101C!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 10px 26px -8px var(--tc)!important}
 @media (max-width:380px){.tier button{font-size:11px}.kinds button{font-size:12px}.pcn b,.pcp strong{font-size:18px}}
 @media (prefers-reduced-motion:reduce){.sw,.live i{animation:none}.tier button,.kinds button,.buy2{transition:none}}
+/* 3.55: the shop's tabs at a fixed height, the plan cards all one shape, the custom plan's bar */
+.tier button{height:58px;min-height:58px;white-space:nowrap}
+.tier button span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.kinds button{height:40px;display:flex;align-items:center;justify-content:center}
+.plist{display:grid;grid-template-columns:1fr;gap:14px;margin-top:6px}
+@media (min-width:620px){.plist{grid-template-columns:1fr 1fr}}
+.pc3{position:relative;display:flex;flex-direction:column;padding:16px 14px 14px;border-radius:20px;background:linear-gradient(160deg,rgba(30,40,64,.92),rgba(18,24,38,.9) 55%,rgba(12,16,28,.94));border:1px solid rgba(140,180,255,.14);box-shadow:inset 0 1px 0 rgba(160,200,255,.1),0 14px 30px -20px rgba(0,0,0,.95)}
+.pc3.feat{border-color:color-mix(in srgb,var(--tc) 65%,transparent);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 0 0 1px color-mix(in srgb,var(--tc) 25%,transparent),0 14px 36px -16px color-mix(in srgb,var(--tc) 60%,transparent)}
+.rib3{position:absolute;top:-10px;inset-inline-end:14px;height:22px;line-height:22px;font-size:12px;font-weight:900;padding:0 12px;border-radius:11px;color:#06101C;background:linear-gradient(135deg,#fff 0%,var(--tc) 45%);box-shadow:0 0 16px -2px var(--tc);white-space:nowrap}
+.p3h{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:32px}
+.p3h b{font-size:22px;font-weight:900;line-height:1.2;color:var(--tc)}
+.p3s{flex:none;font-size:12px;font-weight:800;padding:3px 10px;border-radius:10px;color:var(--tc);background:color-mix(in srgb,var(--tc) 12%,transparent);border:1px solid color-mix(in srgb,var(--tc) 35%,transparent);white-space:nowrap}
+.pc3 .spec{margin-top:12px}.pc3 .spec b{font-size:14px}
+.p3f{margin-top:10px;font-size:13px;font-weight:700;color:#D6E0F2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.p3f i{font-style:normal;color:var(--ok,#00E676);font-weight:900;margin-inline-end:6px}
+.p3o{color:var(--ok,#00E676)}
+.p3b{display:flex;align-items:center;gap:12px;margin-top:auto;padding-top:12px;border-top:1px dashed rgba(140,180,255,.14)}
+.pc3 .p3b{margin-top:12px}
+.p3p{flex:1;min-width:0;line-height:1.2}.p3p s{display:block;font-size:12px;color:var(--hint)}
+.p3p strong{font-size:20px;font-weight:900;color:var(--tc)}.p3p small{font-size:12px;color:var(--hint);margin-inline-start:4px}
+.buy3{flex:none;min-width:120px;height:46px;border:0;border-radius:14px;font:inherit;font-size:14px;font-weight:900;cursor:pointer;color:#06101C;background:linear-gradient(135deg,color-mix(in srgb,var(--tc) 55%,#fff),var(--tc) 55%,color-mix(in srgb,var(--tc) 80%,#000));box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 8px 22px -8px var(--tc)}
+.buy3:active{transform:scale(.98)}.buy3:disabled,.cgo2:disabled{opacity:.6}
+.cbar{position:sticky;bottom:0;z-index:6;display:flex;align-items:center;gap:12px;margin:12px -4px 0;padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-radius:18px 18px 0 0;background:rgba(10,14,26,.96);border:1px solid color-mix(in srgb,var(--tc) 40%,transparent);border-bottom:0;box-shadow:0 -10px 30px -12px rgba(0,0,0,.9);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.cbi{flex:1;min-width:0;line-height:1.3}.cbi>small{display:block;font-size:12px;color:var(--hint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cbi strong{font-size:20px;font-weight:900;color:var(--tc)}.cbi strong small{font-size:12px;color:var(--hint)}
+.cgo2{flex:none;min-width:130px;height:48px;border:0;border-radius:14px;font:inherit;font-size:15px;font-weight:900;cursor:pointer;color:#06101C;background:linear-gradient(135deg,color-mix(in srgb,var(--tc) 55%,#fff),var(--tc) 55%,color-mix(in srgb,var(--tc) 80%,#000));box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 8px 22px -8px var(--tc)}
+@media (max-width:380px){.p3h b,.p3p strong,.cbi strong{font-size:18px}.buy3{min-width:104px}.cgo2{min-width:112px}}
+.ad-gh{display:flex;align-items:center;gap:8px;margin:16px 2px 8px;font-size:15px;font-weight:900}.ad-gh small{font-size:12px;font-weight:700;color:var(--hint)}
 </style>
 </head>
 <body>
@@ -573,10 +601,10 @@ var SV={v2ray:['⚡','اقتصادی · V2Ray'],game:['🎮','گیمینگ · Wi
 // a Latin run inside Persian text: kept in one piece and one direction (no «+ V2Ray» at the end of a line)
 function L(x){return '<bdi class="lw">'+x+'</bdi>'}
 var TIER={
- v2ray:{seg:'V2Ray',short:'V2Ray',name:'اقتصادی · '+L('V2Ray'),c:'#00D2FF',ic:'bolt',d:'یک لینک اشتراک برای '+L('v2rayNG')+'، '+L('V2Box')+'، '+L('Streisand')+' و '+L('v2rayN')+'؛ وب‌گردی، دانلود، اینستاگرام و یوتیوب. ارزان‌ترین سرویس.',f:['یک لینک برای همه‌ی سرورها','اندروید، آیفون و ویندوز']},
- game:{seg:'Amnezia · WireGuard',short:'گیمینگ',name:'گیمینگ · '+L('WireGuard + Amnezia'),c:'#00E676',ic:'pad',d:'کانفیگ '+L('WireGuard')+' و '+L('AmneziaWG')+' و فایل یک‌جای '+L('AmneziaVPN')+'؛ پینگ پایین و پایدار برای پابجی و کالاف.',f:['پینگ پایین و پایدار بازی','اتصال تک‌لمسی در اپ کانکی']},
- vip:{seg:'همه‌کاره VIP',short:'VIP',name:'همه‌کاره '+L('VIP'),c:'#FFB300',ic:'crown',d:'هر سه با یک اشتراک: '+L('V2Ray + WireGuard + AmneziaWG')+'. اپ اختصاصی کانکی رایگان همراهشه؛ بهترین برای خانواده و چند دستگاه.',f:[L('V2Ray + WireGuard + Amnezia'),'اپ کانکی رایگان']}};
-var TORDER=['v2ray','game','vip'],KORDER=['تک‌کاربره','چندکاربره','بلندمدت'];
+ v2ray:{seg:'اقتصادی V2Ray',short:'V2Ray',name:'اقتصادی · '+L('V2Ray'),c:'#00D2FF',ic:'bolt',d:'یک لینک اشتراک برای '+L('v2rayNG')+'، '+L('V2Box')+'، '+L('Streisand')+' و '+L('v2rayN')+'؛ وب‌گردی، دانلود، اینستاگرام و یوتیوب. ارزان‌ترین سرویس.',f:['یک لینک برای همه‌ی سرورها','اندروید، آیفون و ویندوز'],k:'یک لینک برای همه سرورها',b:'اقتصادی V2Ray'},
+ game:{seg:'گیمینگ',short:'گیمینگ',name:'گیمینگ · '+L('WireGuard + Amnezia'),c:'#00E676',ic:'pad',d:'کانفیگ '+L('WireGuard')+' و '+L('AmneziaWG')+' و فایل یک‌جای '+L('AmneziaVPN')+'؛ پینگ پایین و پایدار برای پابجی و کالاف.',f:['پینگ پایین و پایدار بازی','اتصال تک‌لمسی در اپ کانکی'],k:'پینگ پایین و پایدار برای بازی',b:'گیمینگ'},
+ vip:{seg:'همه‌کاره VIP',short:'VIP',name:'همه‌کاره '+L('VIP'),c:'#FFB300',ic:'crown',d:'هر سه با یک اشتراک: '+L('V2Ray + WireGuard + AmneziaWG')+'. اپ اختصاصی کانکی رایگان همراهشه؛ بهترین برای خانواده و چند دستگاه.',f:[L('V2Ray + WireGuard + Amnezia'),'اپ کانکی رایگان'],k:'همه پروتکل‌ها + اپ کانکی',b:'VIP'}};
+var TORDER=['vip','game','v2ray'];
 var ICO={
  bolt:'<path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"/>',
  pad:'<path d="M7 7h10a5 5 0 0 1 4.9 6l-.8 3.6a2.6 2.6 0 0 1-4.6 1L15 15.5H9l-1.5 2.1a2.6 2.6 0 0 1-4.6-1L2.1 13A5 5 0 0 1 7 7z"/><path d="M7 10v4M5 12h4"/><circle cx="15.5" cy="11" r=".6"/><circle cx="17.5" cy="13" r=".6"/>',
@@ -595,10 +623,11 @@ function dur(d){return d%30?fa(d)+' روز':(d==30?'یک ماه':fa(d/30)+' ما
 function enT(n){return Math.round(n).toLocaleString('en-US')}
 function durEn(d){return !d?'بی‌پایان':d%30?d+' روزه':(d/30)+' ماهه'}
 function tiersOn(){var sh=A.shop,c=sh.custom;return TORDER.filter(function(k){return c.on||sh.plans.some(function(p){return (p.service||'vip')==k})})}
-function kindsOf(svc){var sh=A.shop,ks=[];sh.plans.forEach(function(p){if((p.service||'vip')==svc&&ks.indexOf(p.category)<0)ks.push(p.category)});
- ks.sort(function(a,b){var x=KORDER.indexOf(a),y=KORDER.indexOf(b);return (x<0?9:x)-(y<0?9:y)});if(sh.custom.on)ks.push('*custom*');return ks}
-function KN(k){return k=='*custom*'?'دلخواه':(k||'سایر')}
-function KI(k){return k=='*custom*'?'calc':/چند/.test(k)?'dev':/بلند|ماهه/.test(k)?'time':'user'}
+// the filters under the services: by duration (one month, several months), then the custom plan
+function kindOf(p){return p.days>0&&p.days<=31?'1':'n'}
+function kindsOf(svc){var sh=A.shop,ks=[];['1','n'].forEach(function(k){if(sh.plans.some(function(p){return (p.service||'vip')==svc&&kindOf(p)==k}))ks.push(k)});
+ if(sh.custom.on)ks.push('*custom*');return ks}
+function KN(k){return k=='*custom*'?'دلخواه':k=='1'?'۱ ماهه':'چندماهه'}
 
 function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){return x.id==A.renew})[0],h='';
  if(A.list.length)backBtn(function(){A.view='acc';A.renew=0;render();window.scrollTo(0,0)});
@@ -614,45 +643,49 @@ function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){retu
  if(ks.length)h+='<nav class="kinds" role="tablist">'+ks.map(function(k){return '<button role="tab" aria-selected="'+(A.cat==k)+'" data-cat="'+esc(k)+'" class="'+(A.cat==k?'on':'')+'">'+esc(KN(k))+'</button>'}).join('')+'</nav>';
  h+='<div class="sbody'+(A.anim?' sw':'')+'">';
  if(A.cat=='*custom*')h+=builder(mine);
- else{var list=sh.plans.filter(function(p){return (p.service||'vip')==A.svc&&p.category==A.cat});list.forEach(function(p){h+=planCard(p)});
+ else{var list=sh.plans.filter(function(p){return (p.service||'vip')==A.svc&&kindOf(p)==A.cat});
+  list.sort(function(a,b){return a.days-b.days||a.conns-b.conns||a.toman-b.toman});
+  if(list.length)h+='<div class="plist">'+list.map(planCard).join('')+'</div>';
   if(!list.length)h+='<div class="empty"><b>فعلاً پلنی برای فروش نیست</b><p class="muted">کمی بعد دوباره سر بزنید یا به پشتیبانی پیام بدید.</p></div>'}
  h+='</div></div>';A.anim='';
  document.getElementById('app').innerHTML=h;wireBuy()}
 
-// the custom plan: volume and days on sliders, users as a segmented control, and what it adds up to
+// the custom plan: volume, days and users on sliders; the price and the buy button stay in a bar at the bottom
 function builder(mine){var c=A.shop.custom,gmin=c.gb[0],gmax=c.gb[1],dmin=c.days[0],dmax=c.days[1],dst=c.days[2]||15;
  var cb=A.cb||(A.cb={g:Math.min(gmax,Math.max(gmin,50)),d:Math.min(dmax,Math.max(dmin,30)),u:1});
  // renewing: never fewer users than the account has (a renewal raises it, never lowers it)
  var from=mine?Math.max(1,Math.min(c.users,mine.connections||1)):1;if(cb.u<from)cb.u=from;if(cb.u>c.users)cb.u=c.users;
- var us=[];for(var i=from;i<=c.users;i++)us.push(i);
- return '<div class="card cb2"><div class="cbh">'+ico('calc')+'<div><b>اشتراک دلخواه '+(A.svc=='game'?'گیمینگ':L(TIER[A.svc].short))+'</b><small>حجم، مدت و تعداد کاربر رو خودتون انتخاب کنید</small></div></div>'+
-  '<div class="sl"><div class="slh"><span>حجم</span><b id="cg"><bdi>'+cb.g+' GB</bdi></b></div><input type="range" id="gr" min="'+gmin+'" max="'+gmax+'" step="5" value="'+cb.g+'" aria-label="حجم"><div class="sle"><span>'+L(gmin+' GB')+'</span><span>'+L(gmax+' GB')+'</span></div></div>'+
-  '<div class="sl"><div class="slh"><span>مدت</span><b id="cd">'+durEn(cb.d)+'</b></div><input type="range" id="dr" min="'+dmin+'" max="'+dmax+'" step="'+dst+'" value="'+cb.d+'" aria-label="مدت"><div class="sle"><span>'+durEn(dmin)+'</span><span>'+durEn(dmax)+'</span></div></div>'+
-  '<span class="lbl">تعداد کاربر (دستگاه هم‌زمان)</span><div class="useg" style="grid-template-columns:repeat('+us.length+',1fr)">'+us.map(function(n){return '<button data-u="'+n+'" class="'+(cb.u==n?'on':'')+'">'+n+' کاربره</button>'}).join('')+'</div>'+
-  '<div class="bd"><div><span>سرویس</span><b>'+TIER[A.svc].name+'</b></div><div><span>حجم</span><b id="bg"><bdi>'+cb.g+' GB</bdi></b></div><div><span>مدت</span><b id="bdd">'+durEn(cb.d)+'</b></div><div><span>تعداد کاربر</span><b id="bu">'+cb.u+' کاربره</b></div>'+
-  '<div class="tot"><span>قیمت نهایی</span><strong id="tp">'+enT(cprice(c,A.svc,cb.g,cb.d,cb.u,true))+' <small>تومان</small></strong></div></div>'+
-  '<button class="b go cgo" id="cbuy">تایید و پرداخت اشتراک دلخواه</button></div>'}
+ var sl=function(id,lbl,min,max,step,v,out,a,b){return '<div class="sl"><div class="slh"><span>'+lbl+'</span><b id="'+out+'">'+v+'</b></div><input type="range" id="'+id+'" min="'+min+'" max="'+max+'" step="'+step+'" value="'+(id=='gr'?cb.g:id=='dr'?cb.d:cb.u)+'" aria-label="'+lbl+'"><div class="sle"><span>'+a+'</span><span>'+b+'</span></div></div>'};
+ return '<div class="card cb2"><div class="cbh">'+ico('calc')+'<div><b>ساخت پلن دلخواه '+(A.svc=='game'?'گیمینگ':L(TIER[A.svc].short))+'</b><small>حجم، مدت و تعداد کاربر رو خودتون انتخاب کنید</small></div></div>'+
+  sl('gr','حجم',gmin,gmax,5,'<bdi>'+fa(cb.g)+' GB</bdi>','cg',fa(gmin)+' گیگ',fa(gmax)+' گیگ')+
+  sl('dr','مدت',dmin,dmax,dst,dur3(cb.d),'cd',dur3(dmin),dur3(dmax))+
+  (c.users>from?sl('ur','تعداد کاربر',from,c.users,1,fa(cb.u)+' کاربر','cu',fa(from)+' کاربر',fa(c.users)+' کاربر'):'')+
+  '</div><div class="cbar" role="region" aria-label="قیمت پلن دلخواه"><div class="cbi"><small id="cbs">'+cbSum(cb)+'</small><strong id="tp">'+tmn(cprice(c,A.svc,cb.g,cb.d,cb.u,true))+' <small>تومان</small></strong></div><button class="cgo2" id="cbuy">خرید اشتراک</button></div>'}
+// «|» between the parts: a «·» beside a Persian digit reads as a Persian zero
+function cbSum(cb){return fa(cb.g)+' گیگ | '+dur3(cb.d)+' | '+fa(cb.u)+' کاربر'}
 
-// a plan as a card: the service's icon (several devices for a multi-user plan), the specs, the features and its ribbon
+// a plan as a card, every card the same four parts: the volume with the service and its ribbon, the specs in three
+// columns, one key feature, and the price beside the buy button at the bottom
 function planCard(p){var T=TIER[p.service||'vip']||TIER.vip,bd=p.badge||'',rib=/پیشنهاد/.test(bd)?'پیشنهاد ویژه':/پرفروش/.test(bd)?'پرفروش‌ترین':bd.replace(/^[^\p{L}\p{N}]+/u,''),old=+p.old_toman||0,off=old>p.toman?Math.round((1-p.toman/old)*100):0;
  var vol=p.gb>0?(Math.round(p.gb*10)/10)+' GB':'نامحدود';
- return '<div class="pc2'+(bd?' feat':'')+'">'+(rib?'<span class="rib2">'+esc(rib)+'</span>':'')+
-  '<div class="pch"><span class="pci">'+ico(p.conns>1?'dev':T.ic)+'</span><div class="pcn"><b><bdi>'+vol+'</bdi></b><small>'+T.name+'</small></div>'+
-  '<div class="pcp">'+(off?'<s>'+enT(old)+'</s>':'')+'<strong>'+enT(p.toman)+'</strong><small>تومان</small></div></div>'+
-  '<div class="spec"><div><small>حجم</small><b><bdi>'+vol+'</bdi></b></div><div><small>مدت</small><b>'+durEn(p.days)+'</b></div><div><small>کاربر</small><b>'+p.conns+' کاربره</b></div></div>'+
-  '<div class="feats">'+T.f.map(function(x){return '<span>'+x+'</span>'}).join('')+(off?'<span class="off2"><bdi dir="ltr">'+off+'%</bdi> تخفیف</span>':'')+'</div>'+
-  '<button class="buy2" data-pid="'+p.id+'">خرید</button></div>'}
+ return '<div class="pc3'+(rib?' feat':'')+'" style="--tc:'+T.c+'">'+(rib?'<span class="rib3">'+esc(rib)+'</span>':'')+
+  '<div class="p3h"><b><bdi>'+vol+'</bdi></b><span class="p3s">'+T.b+'</span></div>'+
+  '<div class="spec"><div><small>حجم</small><b><bdi>'+vol+'</bdi></b></div><div><small>مدت</small><b>'+dur3(p.days)+'</b></div><div><small>تعداد کاربر</small><b>'+fa(p.conns)+' کاربر</b></div></div>'+
+  '<div class="p3f"><i>✓</i>'+T.k+(off?' · <span class="p3o">'+fa(off)+'٪ تخفیف</span>':'')+'</div>'+
+  '<div class="p3b"><div class="p3p">'+(off?'<s>'+tmn(old)+'</s>':'')+'<strong>'+tmn(p.toman)+'</strong><small>تومان</small></div><button class="buy3" data-pid="'+p.id+'">خرید اشتراک</button></div></div>'}
+function tmn(n){return fa(enT(n))}
+function dur3(d){return !d?'بی‌پایان':d%30?fa(d)+' روزه':fa(d/30)+' ماهه'}
 
 function wireBuy(){var $=function(s){return document.querySelector(s)},all=function(s){return Array.prototype.slice.call(document.querySelectorAll(s))},c=A.shop.custom,cb=A.cb;
  var nr=$('#nr');if(nr)nr.onclick=function(){A.renew=0;drawBuy()};
  all('[data-svc]').forEach(function(b){b.onclick=function(){if(A.svc==b.dataset.svc)return;var keep=A.cat=='*custom*';A.svc=b.dataset.svc;A.cat=keep?'*custom*':'';A.anim='t';buzz2();drawBuy()}});
  all('[data-cat]').forEach(function(b){b.onclick=function(){if(A.cat==b.dataset.cat)return;A.cat=b.dataset.cat;A.anim='k';buzz2();drawBuy()}});
  function upd(){if(!cb)return;var t=function(i,v){var e=$(i);if(e)e.innerHTML=v};
-  t('#cg','<bdi>'+cb.g+' GB</bdi>');t('#bg','<bdi>'+cb.g+' GB</bdi>');t('#cd',durEn(cb.d));t('#bdd',durEn(cb.d));t('#bu',cb.u+' کاربره');
-  t('#tp',enT(cprice(c,A.svc,cb.g,cb.d,cb.u,true))+' <small>تومان</small>');
-  [['#gr',c.gb[0],c.gb[1],cb.g],['#dr',c.days[0],c.days[1],cb.d]].forEach(function(x){var e=$(x[0]);if(e)e.style.setProperty('--f',((x[3]-x[1])/Math.max(1,x[2]-x[1])*100)+'%')})}
- if($('#gr')){$('#gr').oninput=function(){cb.g=+this.value;upd()};$('#dr').oninput=function(){cb.d=+this.value;upd()};upd()}
- all('[data-u]').forEach(function(b){b.onclick=function(){cb.u=+b.dataset.u;all('[data-u]').forEach(function(x){x.classList.toggle('on',x==b)});upd()}});
+  t('#cg','<bdi>'+fa(cb.g)+' GB</bdi>');t('#cd',dur3(cb.d));t('#cu',fa(cb.u)+' کاربر');t('#cbs',cbSum(cb));
+  t('#tp',tmn(cprice(c,A.svc,cb.g,cb.d,cb.u,true))+' <small>تومان</small>');
+  [['#gr',c.gb[0],c.gb[1],cb.g],['#dr',c.days[0],c.days[1],cb.d],['#ur',+(($('#ur')||{}).min||1),c.users,cb.u]].forEach(function(x){var e=$(x[0]);if(e)e.style.setProperty('--f',((x[3]-x[1])/Math.max(1,x[2]-x[1])*100)+'%')})}
+ if($('#gr')){$('#gr').oninput=function(){cb.g=+this.value;upd();buzz2()};$('#dr').oninput=function(){cb.d=+this.value;upd();buzz2()};var ur=$('#ur');if(ur)ur.oninput=function(){cb.u=+this.value;upd();buzz2()};upd()}
+
  function closeSoon(t){buzz('success');toast(t);setTimeout(function(){var w=tg();if(w&&w.close)w.close()},1400)}
  function go(q,b){b.disabled=true;api('/tg/api/buy?'+q+(A.renew?'&renew='+A.renew:'')+nameQ()).then(function(){closeSoon('صفحه‌ی پرداخت توی چت ربات اومد')}).catch(function(e){buzz('error');b.disabled=false;toast(why(e,e.why));var n=document.getElementById('cn');if(n&&/name/.test(e.message))n.focus()})}
  var tri=$('#tri');if(tri)tri.onclick=function(){tri.disabled=true;api('/tg/api/trial?x=1'+nameQ()).then(function(){closeSoon('تست رایگان توی چت ربات اومد')}).catch(function(e){buzz('error');tri.disabled=false;toast(why(e,e.why))})};
@@ -921,9 +954,15 @@ var _drawAdm=drawAdm;drawAdm=function(){if(AD.busy)return;var need=adNeed();if(n
    adCard('🎁 تست رایگان',adForm([['trial_on','تست رایگان','sw','یک بار برای هر نفر'],['trial_gb','حجم (گیگ)','num'],['trial_days','مدت (روز)','num'],['trial_offer_pct','٪ تخفیف خرید اول بعد از تمام شدن تست (۴۸ ساعت)','num']],s))+adSaveBar('ad_save');
  }else if(AD.tab=='plans'){var ps=AD.d.plans||[];
   h+='<div class="acts" style="margin:0 0 12px"><button class="b main" id="pl_new">+ پلن تازه</button><button class="b" id="pr_open">💰 قیمت‌گذاری</button></div>';
-  h+=ps.length?ps.map(function(p){return '<div class="card ad-pl'+(p.active?'':' off')+'" data-pl="'+p.id+'"><div class="ad-row"><b><bdi>'+esc(p.name)+'</bdi></b><span class="svc">'+(SV[p.service]||SV.vip)[0]+' '+(p.service=='v2ray'?'V2Ray':p.service=='game'?'گیمینگ':'VIP')+'</span></div>'+
-   '<p class="lead">'+(p.gb>0?fa(p.gb)+' گیگ':'نامحدود')+' · '+(p.days?fa(p.days)+' روز':'بی‌پایان')+' · '+fa(p.conns)+' کاربره · <b>'+adNum(p.toman)+'</b> تومان'+(p.category?' · '+esc(p.category):'')+(p.badge?' · '+esc(p.badge):'')+'</p>'+
-   '<div class="acts"><button class="b" data-pe="'+p.id+'">ویرایش</button><button class="b" data-pt="'+p.id+'">'+(p.active?'خاموش کردن':'روشن کردن')+'</button></div></div>'}).join(''):'<div class="empty"><b>هنوز پلنی نیست</b></div>';
+  // filter (all / on sale / off) and one group a service, so old and switched-off plans do not crowd the list
+  var pf=AD.pf||'on',cnt={all:ps.length,on:ps.filter(function(p){return p.active}).length};cnt.off=cnt.all-cnt.on;
+  h+='<nav class="kinds" role="tablist">'+[['all','همه'],['on','فعال'],['off','غیرفعال']].map(function(x){return '<button role="tab" aria-selected="'+(pf==x[0])+'" data-pf="'+x[0]+'" class="'+(pf==x[0]?'on':'')+'">'+x[1]+' ('+fa(cnt[x[0]])+')</button>'}).join('')+'</nav>';
+  var shown=ps.filter(function(p){return pf=='all'||(pf=='on')==!!p.active});
+  var card=function(p){return '<div class="card ad-pl'+(p.active?'':' off')+'" data-pl="'+p.id+'"><div class="ad-row"><b><bdi>'+esc(p.name)+'</bdi></b><span class="svc">'+(p.active?'🟢':'⚪️')+'</span></div>'+
+   '<p class="lead">'+(p.gb>0?fa(p.gb)+' گیگ':'نامحدود')+' | '+(p.days?fa(p.days)+' روز':'بی‌پایان')+' | '+fa(p.conns)+' کاربره | <b>'+adNum(p.toman)+'</b> تومان'+(p.badge?' | '+esc(p.badge):'')+'</p>'+
+   '<div class="acts"><button class="b" data-pe="'+p.id+'">ویرایش</button><button class="b" data-pt="'+p.id+'">'+(p.active?'خاموش کردن':'روشن کردن')+'</button></div></div>'};
+  h+=shown.length?['vip','game','v2ray'].map(function(k){var g=shown.filter(function(p){return (p.service||'vip')==k}).sort(function(a,b){return a.days-b.days||a.conns-b.conns||a.toman-b.toman});
+   return g.length?'<h3 class="ad-gh">'+(SV[k]||SV.vip)[0]+' '+(k=='v2ray'?'اقتصادی V2Ray':k=='game'?'گیمینگ':'همه‌کاره VIP')+' <small>'+fa(g.length)+' پلن</small></h3>'+g.map(card).join(''):''}).join(''):'<div class="empty"><b>'+(ps.length?'پلنی در این دسته نیست':'هنوز پلنی نیست')+'</b></div>';
  }else if(AD.tab=='disc'){var ds=AD.d.disc||[];
   h+=adCard('کد تازه','<div class="ad-g2"><div><span class="lbl">کد</span><input class="in" id="dc_c" placeholder="OFF20"></div><div><span class="lbl">٪ تخفیف</span><input class="in" id="dc_p" inputmode="numeric" value="10"></div><div><span class="lbl">تعداد استفاده</span><input class="in" id="dc_u" inputmode="numeric" value="100"></div><div><span class="lbl">اعتبار (ساعت، ۰ = همیشه)</span><input class="in" id="dc_h" inputmode="numeric" value="0"></div></div><div class="acts one"><button class="b main" id="dc_add">ساختن کد</button></div>');
   h+=ds.length?'<div class="card">'+ds.map(function(d){return '<div class="row"><div class="nm"><b class="ltr">'+esc(d.code)+'</b><small>'+fa(d.percent)+'٪ · '+fa(d.uses)+' استفاده مانده'+(d.expires?' · تا '+new Date(d.expires*1000).toLocaleDateString('fa-IR'):'')+'</small></div><button class="b" data-dd="'+esc(d.code)+'">حذف</button></div>'}).join('')+'</div>':'<p class="lead">کدی نیست.</p>';
@@ -944,6 +983,7 @@ function wireAdm(){var $=function(q){return document.querySelector(q)},all=funct
  // plans
  var pn=$('#pl_new');if(pn)pn.onclick=function(){planEdit(null)};
  var po=$('#pr_open');if(po)po.onclick=function(){priceEdit()};
+ all('[data-pf]').forEach(function(b){b.onclick=function(){AD.pf=b.dataset.pf;drawAdm()}});
  all('[data-pe]').forEach(function(b){b.onclick=function(){planEdit((AD.d.plans||[]).filter(function(p){return p.id==b.dataset.pe})[0])}});
  all('[data-pt]').forEach(function(b){b.onclick=function(){var p=(AD.d.plans||[]).filter(function(x){return x.id==b.dataset.pt})[0];b.disabled=true;
   pa('PUT','/api/plans/'+p.id,{active:!p.active}).then(function(){AD.d.plans=null;drawAdm()}).catch(function(e){toast(e.message);b.disabled=false})}});

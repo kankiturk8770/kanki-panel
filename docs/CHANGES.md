@@ -1,3 +1,34 @@
+# v3.55.0 — The sales bot and mini app redone: one emoji style, a short welcome, a simpler purchase
+**Bot (`src/bot/bot.rs`)**
+- **Main menu** always two buttons a row: 🛒 خرید اشتراک | 🎁 تست رایگان · 📦 سرویس‌های من | 🔄 تمدید اشتراک · 📱 دانلود اپلیکیشن |
+  📖 آموزش اتصال · 🤝 دعوت از دوستان | 💬 پشتیبانی, and ⚙️ پنل مدیریت for admins. «📖 آموزش اتصال» is always there: with no video
+  yet it opens the written guide of the newest account (device, then app), or buy / trial for someone without one.
+- **Premium emoji on buttons only when the whole row has one** (`paint`): a row of mixed icons and plain emoji looked crooked; such a
+  row keeps its standard emoji.
+- **/start welcome** short and lined up (coverage, gaming with KANKI MIX, protocols in `<code>`, the Kanki app). The new welcome and
+  the main-menu texts replace older custom ones once (`ux_once`, setting `bot_ux_v4`); the admin's later changes stay.
+- **Purchase:** the services each with their lowest price («⚡ اقتصادی (V2Ray) — از ۵۲,۰۰۰ تومان»), then «🎛 ساخت پلن دلخواه» and
+  «💎 ورود به فروشگاه مینی‌اپ»; no long descriptions. A service lists all its plans at once, by duration then users then price
+  («🔹 ۲۰ گیگ | ۱ ماهه | ۱ کاربر — ۸۰,۰۰۰ ت»), no single / multi-user / long-term step. Old category buttons still work.
+- **Delivery:** the link in `<code>`; rows 🤖 اندروید | 🍏 آیفون | 💻 ویندوز · 👤 مدیریت اشتراک (مینی‌اپ) · 🎬 آموزش ویدیویی |
+  💬 پشتیبانی. The app list: ⭐ for the recommended one «(پیشنهادی)», 🛡️ AmneziaVPN, 🚀 V2Ray apps, 📱 Kanki, 🔐 WireGuard, and
+  «🔄 تغییر دستگاه». Every English menu path in the guides is one `<code>` (`Settings › Backup › Restore from backup`) so RTL does
+  not turn it around.
+- **Stats: currency revenue fixed.** TON and Stars orders keep their amount in toman, but «درآمد ارزی» added them up as dollars
+  (`$184000.0`). Now `revenue()`: the toman total split into card / bank gateway, TON (with the TON paid) and Stars (with the
+  stars), and dollars only for the crypto gateway and the wallet. The panel's overview counts TON and Stars in its toman total too.
+
+**Mini app (`assets/bot/miniapp.html`)**
+- Plan cards all one shape: volume, the service badge and the ribbon in a fixed corner; volume | duration | users in three columns;
+  one key feature with a green check; price and «خرید اشتراک» at the bottom. Two columns from 620px.
+- Service tabs (همه‌کاره VIP · گیمینگ · اقتصادی V2Ray) and filters (۱ ماهه · چندماهه · دلخواه) at a fixed height, no wrap at 360px.
+- Custom plan: sliders for volume (10–300 GB), duration (15–180 days, step 15) and users (1–4); the live price and the buy button in a
+  bar that stays at the bottom.
+- Admin › plans: filter همه / فعال / غیرفعال (with counts) and one group a service, sorted by duration.
+
+**Tests:** `cargo test` 423 (new: the menu rows and welcome, the revenue split; purchase and guide tests updated); Playwright of
+the mini app at 360/390/768/1440 (shop, custom, V2Ray, admin plans): no JS error, no sideways scroll, no `undefined`/`NaN`.
+
 # v3.54.0 — The panel's CDN domain: the servers reach a filtered panel
 **When the panel server's IP is filtered in Iran** the Iran servers' agents could not report to the panel any more (the tunnels kept
 working, since the panel dials them), so no change, update or firewall step reached those servers.
