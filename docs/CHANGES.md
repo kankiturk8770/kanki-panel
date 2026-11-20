@@ -1,3 +1,42 @@
+# v3.53.0 — Moving the panel loses nothing; KPING on any UDP tunnel and the VIP tunnel
+**Moving the panel to a new server (Backup › Move, or Servers › the panel server › «Move the panel to a new server or IP»)**
+- **The old panel freezes when the new server takes the backup** (`migrate::frozen`): every change is refused with a clear
+  message (the admin, API keys, the mini app's purchases and trials, a new server joining), the sales and report bots stop
+  reading Telegram (the messages wait there and the new panel reads them), and the rounds with the servers, the TON check, the
+  cleanup, the channel, the Telegram backup and the nightly update pause. The servers keep counting traffic; the new panel reads it
+  from the backup's last values, so no byte is counted twice or missed. Reading, subscriptions, Hysteria2 logins and the servers'
+  own calls go on. The freeze ends when the move is cancelled, or by itself (with a message to the admins) when the command expires
+  and the new server never said it was done. A panel restarted during a move stays frozen. The restored panel never starts frozen.
+- **What only lived on disk now moves too:** the emergency chat's messages when the chat runs on the panel server
+  (`emergency/chat.db`, a consistent copy), and certbot's certificates of the other domains of the server (Xray, Kanki DNS, the
+  emergency chat: archive, renewal file and account; the live links are made again and must point into their own domain's archive).
+  On the new server only what is missing is put back (`kanki-panel restore-files`, run by the installer; a certificate made afresh
+  there is kept).
+- **Restore in the panel (Backup page) could mix the old and the restored database:** the running panel kept its old database open
+  and what it wrote in its last moment (its write-ahead log) was applied to the restored one at the next start. The restored database
+  now waits beside it (`restore.db.pending`) and is put in place at the next start, before the database is opened (`take_pending`).
+- **A restore on a server that does not know its own IP** (the lookup failed) still replaces the old server's IP in the settings.
+- **The panel server's own new IP** (the provider changed it): seen twice a minute apart, the settings that named the old IP get the
+  domain (or the new IP), and the address users connect to (the settings file's ENDPOINT) follows (`migrate::forget_ip`).
+- Lab: a full panel (55 users, 330 keys, 60 bot users, 45 orders, servers, tunnels, VIP, KPING, Xray, plans, discounts, API tokens,
+  app files, node pins, chat messages, certificates) moved to a second panel in its own namespace by the installer's own restore, and
+  restored on a third from the Backup page: every table equal to the backup except the move's own keys and the addresses that named
+  the old IP; every file equal; the old panel's database 40 seconds after the backup equal to the backup.
+
+**KPING: the tunnel between the Iran server and the exit is chosen per route**
+- Route › Edit › «Tunnel between the servers»: Game-FEC (8:1, 8:3, 4:2 or none), KCP, QUIC, HQ, Fake TCP, or **VIP**. The advanced
+  settings of the chosen kind are in their own (blue) box; two boxes above say what is the phone's (Wi-Fi + data, the app's) and what
+  is between the servers (the tunnel's paths).
+- **VIP for KPING:** gaming mode, 1-4 UDP paths at once (2 by default), 1-16 ports on the Iran server, paths moving every N seconds,
+  an optional Fake TCP path; KPING's port on 127.0.0.1 at both ends (`VipTunnel.bind`). With two paths or more KPING sends no copy of
+  its own into the tunnel (VIP sends each packet on two paths); with one path it keeps it. The tunnel is built with the route's
+  button like the others; changing the kind removes the old tunnel (its ports are free for the new one at once: `note_freed`), and
+  deleting the route removes its tunnels. No second tunnel beside a VIP tunnel.
+- The VIP tunnel gives KPING's packets copies and repairs: a packet from a service of the same server (KPING's relay, on 127.0.0.1) counts
+  as marked game traffic, and KPING's exit marks its packets (DSCP EF).
+- Lab (one phone path, the line between the servers 4% of the time out in ~100 ms cuts, 45 s, two runs each): Game-FEC 8:1 lost
+  1.6-5.3% with the slowest 1% at 187-267 ms; VIP with two separate paths 0.8-1.8% and 137 ms; VIP with one path about like Game-FEC.
+
 # v3.52.2 — Smart tunnel test with the firewall on; the route's MTU
 - **Smart tunnel test with the panel's firewall on:** each test port is now opened, TCP and UDP, on **both** servers for the test
   (`open_ports`, the test's tunnels), not only on the listening side, and closed again when the test ends (`fw::sync`).

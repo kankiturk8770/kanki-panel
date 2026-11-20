@@ -1752,7 +1752,8 @@ impl Bot {
         tokio::spawn(async move { me.background().await });
         let mut offset = 0i64;
         loop {
-            if self.db().on("bot_paused") {
+            // paused, or the panel is being moved (the messages wait at Telegram for the new panel)
+            if self.db().on("bot_paused") || crate::migrate::frozen() {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 continue;
             }
@@ -1775,6 +1776,11 @@ impl Bot {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 continue;
             };
+            // frozen during that long poll: these are left at Telegram (the offset does not move on), the
+            // new panel reads them
+            if crate::migrate::frozen() {
+                continue;
+            }
             for u in list {
                 offset = u["update_id"].as_i64().unwrap_or(offset) + 1;
                 let me = self.clone();
@@ -2736,6 +2742,9 @@ impl Bot {
     async fn ton_watch(&self) {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+            if crate::migrate::frozen() {
+                continue;
+            }
             let ids: Vec<(i64, i64)> = self.db().with(|c| {
                 let mut s = c.prepare("SELECT id,created FROM orders WHERE method='ton' AND status='waiting' AND created>?1").unwrap();
                 let v: Vec<(i64, i64)> = s.query_map([now() - 3 * 3600], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().filter_map(|x| x.ok()).collect();
@@ -4383,6 +4392,9 @@ impl Bot {
         let mut tick: u64 = 0;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            if crate::migrate::frozen() {
+                continue;
+            }
             tick += 1;
             // the bot is alive when Telegram accepts its token and the polling is not refused: a long poll
             // that a network on the way cuts while nobody writes must not make it look offline

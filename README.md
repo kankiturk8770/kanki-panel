@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.53 — Move without loss; KPING on VIP
+Moving the panel freezes the old one from the moment the new server takes the backup, so nothing done in between is lost; the
+emergency chat and the other domains' certificates move too. KPING routes can use any UDP tunnel or a VIP tunnel.
+
 ## New in 3.52.2 — Smart test and the firewall
 The smart tunnel test opens its port on both servers while it runs (firewall on) and closes it after; it also shows the route's MTU.
 

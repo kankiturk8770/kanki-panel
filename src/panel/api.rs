@@ -799,6 +799,9 @@ pub(crate) fn spawn_node_removal(app: &Arc<App>, n: Node) {
 pub async fn leftover_loop(app: Arc<App>) {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        if crate::migrate::frozen() {
+            continue;
+        }
         let list = leftovers(&app);
         if list.is_empty() {
             continue;

@@ -468,6 +468,10 @@ impl Mon {
         }
         let mut offset = 0i64;
         loop {
+            if crate::migrate::frozen() {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue;
+            }
             match self.call("getUpdates", json!({"offset": offset, "timeout": 30, "allowed_updates": ["message", "callback_query"]})).await {
                 Ok(Value::Array(list)) => {
                     self.app.db.set("mon_alive", &now().to_string());

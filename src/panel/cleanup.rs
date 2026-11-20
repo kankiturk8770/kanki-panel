@@ -90,7 +90,9 @@ pub fn sweep(app: &App) -> Vec<String> {
 
 pub async fn sweep_loop(app: Arc<App>) {
     loop {
-        sweep(&app);
+        if !crate::migrate::frozen() {
+            sweep(&app);
+        }
         tokio::time::sleep(std::time::Duration::from_secs(86400)).await;
     }
 }
@@ -153,7 +155,9 @@ pub async fn offline_loop(app: Arc<App>) {
     // after a start the agents need a few minutes to report again
     tokio::time::sleep(std::time::Duration::from_secs(600)).await;
     loop {
-        offline_round(&app).await;
+        if !crate::migrate::frozen() {
+            offline_round(&app).await;
+        }
         tokio::time::sleep(std::time::Duration::from_secs(600)).await;
     }
 }

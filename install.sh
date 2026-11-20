@@ -807,6 +807,8 @@ restore_bundle(){
   if [ -d "$W/x/apps" ]; then rm -rf "$DATA/apps"; mkdir -p "$DATA/apps"; find "$W/x/apps" -maxdepth 1 -type f -exec cp {} "$DATA/apps/" \;; fi
   # the certificates of self-signed nodes as first seen (the panel keeps trusting exactly those)
   if [ -d "$W/x/nodepins" ]; then mkdir -p "$DATA/nodepins"; find "$W/x/nodepins" -maxdepth 1 -type f -name '*.pin' -exec cp {} "$DATA/nodepins/" \;; fi
+  # the emergency chat's messages and the certificates of the other domains (Xray, DNS …), as they were
+  "$BIN" restore-files "$W/x" 2>/dev/null | sed 's/^/   /' || true
   ok "Database, settings, keys and app files restored"
   DOMAIN=$(envget DOMAIN); HTTPS_PORT=$(envget HTTPS_PORT); PANEL_PORT=$(envget PANEL_PORT); HY2_PORT=$(envget HY2_PORT)
   WG_PORT=$(grep -m1 '^ListenPort' /etc/wireguard/wg0.conf 2>/dev/null | awk -F= '{gsub(/ /,"",$2);print $2}')

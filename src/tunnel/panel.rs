@@ -1892,6 +1892,25 @@ fn tunnel_needs(t: &Tunnel) -> Vec<(String, u16, bool)> {
     v
 }
 
+/// Ports a tunnel just let go of on a server (KPING changing its tunnel from one kind to the other): the
+/// agent still holds them until its next report, and the tunnel taking them over is no clash.
+fn freed_ports() -> &'static Mutex<Vec<(String, u16, bool, i64)>> {
+    static F: std::sync::OnceLock<Mutex<Vec<(String, u16, bool, i64)>>> = std::sync::OnceLock::new();
+    F.get_or_init(Default::default)
+}
+
+pub fn note_freed(sid: &str, ports: &[(u16, bool)]) {
+    let mut f = freed_ports().lock().unwrap_or_else(|e| e.into_inner());
+    let t = now();
+    f.retain(|x| t - x.3 < 60);
+    f.extend(ports.iter().map(|(p, u)| (sid.to_string(), *p, *u, t)));
+}
+
+pub fn just_freed(sid: &str, port: u16, udp: bool) -> bool {
+    let t = now();
+    freed_ports().lock().unwrap_or_else(|e| e.into_inner()).iter().any(|x| x.0 == sid && x.1 == port && x.2 == udp && t - x.3 < 60)
+}
+
 /// Is a port the tunnel needs already held on its server by something else? (live, from the
 /// servers' own reports). The tunnel's own ports (when it is edited) do not count.
 fn live_clash(app: &App, t: &Tunnel, old: Option<&Tunnel>) -> Option<String> {
@@ -1906,7 +1925,7 @@ fn live_clash(app: &App, t: &Tunnel, old: Option<&Tunnel>) -> Option<String> {
             // the agent itself, also when it runs without systemd (a container, started by hand): no unit
             let ours = unit == "kanki-tunnel.service" || unit.starts_with("kanki-hy2-") || (sid == "local" && unit == "kanki-panel.service")
                 || (unit.is_empty() && prog == "kanki-panel");
-            if ours && own.contains(&(sid.clone(), port, udp)) {
+            if ours && (own.contains(&(sid.clone(), port, udp)) || just_freed(&sid, port, udp)) {
                 continue;
             }
             let srv = if sid == "local" { local_name(app) } else { names.get(&sid).cloned().unwrap_or(sid.clone()) };
@@ -1933,7 +1952,7 @@ async fn server_ports(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
 /// Create (no id) or edit (with id) a tunnel.
 /// A game tunnel's FEC as typed: empty (the default), "off" / "0", or "data:parity" with 1-64 data and 1-32
 /// parity shards
-fn fec_ok(f: &str) -> bool {
+pub(crate) fn fec_ok(f: &str) -> bool {
     if f.is_empty() || f == "off" || f == "0" {
         return true;
     }
@@ -2348,17 +2367,24 @@ pub(crate) async fn save_json(app: Arc<App>, h: HeaderMap, b: Value) -> Response
 
 async fn tunnel_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
     let _ = guard!(app, h, "nodes");
-    let mut list = tunnels(&app);
+    match remove_tunnel(&app, &id) {
+        Some(rid) => Json(json!({ "ok": true, "removal": rid })).into_response(),
+        None => err(StatusCode::NOT_FOUND, "tunnel not found"),
+    }
+}
+
+/// A tunnel goes, with the removal steps on its servers (their id; None = no such tunnel)
+pub fn remove_tunnel(app: &App, id: &str) -> Option<String> {
+    let mut list = tunnels(app);
     let n = list.len();
     list.retain(|t| t.id != id);
     if list.len() == n {
-        return err(StatusCode::NOT_FOUND, "tunnel not found");
+        return None;
     }
-    let gone: Vec<Tunnel> = tunnels(&app).into_iter().filter(|t| t.id == id).collect();
-    save_tunnels(&app, &list);
+    let gone: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.id == id).collect();
+    save_tunnels(app, &list);
     let name = gone.first().map(|t| t.name.clone()).unwrap_or_default();
-    let rid = track("tunnel", &name, tunnel_steps(&app, &gone, ""));
-    Json(json!({ "ok": true, "removal": rid })).into_response()
+    Some(track("tunnel", &name, tunnel_steps(app, &gone, "")))
 }
 
 async fn tunnel_action(State(app): St, h: HeaderMap, Path((id, action)): Path<(String, String)>) -> Response {
@@ -3159,7 +3185,7 @@ fn next_run_ts() -> i64 {
 pub async fn auto_update_loop(app: Arc<App>) {
     loop {
         tokio::time::sleep(Duration::from_secs(60)).await;
-        if app.db.get("auto_update") != "1" {
+        if crate::migrate::frozen() || app.db.get("auto_update") != "1" {
             continue;
         }
         let (day, minute) = tehran_now();

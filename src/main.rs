@@ -236,6 +236,18 @@ async fn main() {
             return;
         }
         // standalone tunnel, no panel and no database: runs the tunnels written in a JSON file
+        // the installer, after it put a moved or restored panel's database in place: the emergency chat's
+        // messages and the certificates of the backup (only what this machine lacks)
+        "restore-files" => {
+            let Some(dir) = args.get(2) else {
+                eprintln!("usage: kanki-panel restore-files <unpacked backup folder>");
+                std::process::exit(1);
+            };
+            for d in backup::restore_extra(dir, false) {
+                println!("restored: {}", d);
+            }
+            return;
+        }
         "tunnel-run" => {
             let Some(path) = args.get(2) else {
                 eprintln!("usage: kanki-panel tunnel-run <tunnel.json>   (see docs/examples/)");
@@ -255,6 +267,8 @@ async fn main() {
     let env = util::load_env(ENV_PATH);
     let data = env.get("DATA_DIR").cloned().unwrap_or_else(|| "/var/lib/kanki".into());
     let _ = std::fs::create_dir_all(&data);
+    // a restore made in the panel last run is put in place before the database is opened
+    backup::take_pending(&data);
     let db = db::Db::open(&format!("{}/kanki.db", data));
 
     if cmd == "reset-admin" {
@@ -337,6 +351,8 @@ async fn main() {
     }
     // the first start on a new server after a move or a restore
     migrate::after_move(&app);
+    migrate::load_frozen(&app);
+    tokio::spawn(migrate::freeze_loop(app.clone()));
     {
         let a = app.clone();
         std::thread::spawn(move || subdomain::ensure_on_start(&a));

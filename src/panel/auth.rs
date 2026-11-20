@@ -183,6 +183,10 @@ pub fn ip_allowed(app: &App, ip: &str) -> bool {
 }
 
 pub async fn middleware(State(app): St, mut req: Request, next: Next) -> Response {
+    // the panel is being moved to a new server: what changes here would be lost there
+    if crate::migrate::frozen() && crate::migrate::refused_while_moving(req.method(), req.uri().path()) {
+        return (StatusCode::SERVICE_UNAVAILABLE, Json(json!({"error": "the panel is moving to a new server: changes wait until the move is done or cancelled (Backup › Move)"}))).into_response();
+    }
     // a call from inside (the bot's admin mini app, already checked there): no address of its own to check
     if is_internal(req.headers()) {
         // the report bot only reads

@@ -294,7 +294,7 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
  tgLoad();restoreBox();
  moveLoad();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page=='backup'&&$('#v37move')&&!$('#modal').classList.contains('on'))moveLoad()},5000)}
 // move the whole panel to a new server
-function moveCard(){return '<div class="card" id="v37move"><h3>🚚 '+t('Move the panel to a new server')+'</h3><p class="sub">'+t("Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.")+'</p><div id="mv_in">'+t('Loading…')+'</div></div>'}
+function moveCard(){return '<div class="card" id="v37move"><h3>🚚 '+t('Move the panel to a new server')+'</h3><p class="sub">'+t("Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.")+' '+t("Also the emergency chat's messages and the certificates of the other domains. From the moment the new server takes the backup this panel is locked, so nothing done in between is lost.")+'</p><div id="mv_in">'+t('Loading…')+'</div></div>'}
 function moveDraw(m){var el=$('#mv_in');if(!el)return;
  var steps='<ol class="steps" style="margin:6px 0 10px;line-height:2"><li><b>'+t("Point the panel's domain to the new server's IP")+'</b><br><small class="muted">'+t('In your DNS (Cloudflare / ArvanCloud): the A record of')+' <span class="ltr">'+esc(m.domain||'')+'</span> '+t('= the IP of the new server, without CDN (DNS only). The old panel keeps working by its IP until the move is done.')+'</small></li>'+
   '<li><b>'+t('Run this on the new server (Ubuntu / Debian, as root)')+'</b><br><small class="muted">'+t('It downloads everything straight from this server, puts it back with the same keys and starts the panel there. Then this panel stops by itself.')+'</small></li></ol>';
@@ -304,8 +304,9 @@ function moveDraw(m){var el=$('#mv_in');if(!el)return;
   $('#mv_go').onclick=function(){var b=this;b.disabled=true;api('POST','/api/migrate/start',{ip:$('#mv_ip').value.trim()}).then(moveLoad).catch(function(e){b.disabled=false;fail(e)})};return}
  el.innerHTML=steps+'<pre class="ltr" id="mv_cmd" style="white-space:pre-wrap;word-break:break-all;font-size:12px;padding:10px;border-radius:12px;background:var(--in);border:1px solid var(--gb2);margin:0">'+esc(m.command)+'</pre>'+
   '<p class="hint">'+t('Valid for 3 hours, one time. It holds the key of the backup: do not share it.')+'</p>'+
+  (m.frozen?'<div class="warnbox" style="margin:8px 0">🔒 '+t("This panel is locked: the new server has its backup, so no change is written here (it would be missing there). The bot leaves its messages at Telegram for the new panel, and the servers keep counting traffic for it. If the move did not work, cancel it to unlock this panel.")+'</div>':'')+
   '<p style="margin:6px 0">'+(m.fetched>0?'<span class="okt">✓ '+t('The new server downloaded the backup')+(m.new_ip?' (<span class="ltr">'+esc(m.new_ip)+'</span>)':'')+'</span>':'<span class="muted">⏳ '+t('Waiting for the new server…')+'</span>')+'</p>'+
-  '<div class="g2"><button class="btn" id="mv_cp">'+t('Copy the command')+'</button><button class="b2 bd" id="mv_x">'+t('Cancel the command')+'</button></div>';
+  '<div class="g2"><button class="btn" id="mv_cp">'+t('Copy the command')+'</button><button class="b2 bd" id="mv_x">'+(m.frozen?t('Cancel the move and unlock this panel'):t('Cancel the command'))+'</button></div>';
  $('#mv_cp').onclick=function(){copy(m.command)};$('#mv_x').onclick=function(){api('DELETE','/api/migrate').then(moveLoad).catch(fail)}}
 function moveLoad(){return api('GET','/api/migrate').then(moveDraw).catch(function(e){var el=$('#mv_in');if(el)el.textContent=e.message||''})}
 // after a restore: which servers are back
