@@ -1,3 +1,26 @@
+# v3.54.0 — The panel's CDN domain: the servers reach a filtered panel
+**When the panel server's IP is filtered in Iran** the Iran servers' agents could not report to the panel any more (the tunnels kept
+working, since the panel dials them), so no change, update or firewall step reached those servers.
+- **Settings › «Panel CDN domain (for the servers)»** (`src/panel/cdn.rs`, `/api/panel-cdn`): another domain, behind Cloudflare
+  (orange cloud, SSL «Full»), pointing at the panel server. The panel adds a Caddy site for it that passes **only** `/tunnel/*`
+  (the agents' reports, the program and the Xray / Hysteria downloads) to the panel; the admin panel, the API, the subscription and
+  the mini app answer 404 there. Caddy shows the panel's own certificate (Cloudflare «Full» does not check the name), so nothing is
+  issued. The port is the panel's HTTPS port when Cloudflare passes it (443, 2053, 2083, 2087, 2096, 8443), else a free one of
+  those. Written again at start after a restore or a move (`cdn::ensure_on_start`).
+- **The agents** (`tunnel::agent`): every answer names the panel's own address and the CDN one (`panel`, `panel_alt`); the agent
+  keeps them in `/etc/kanki/panel.alt`. After three reports that do not reach the panel it goes on through the next address, and
+  every five minutes tries the panel's own address again (8 seconds) and goes back when it answers. A CDN address is checked
+  against the public CAs only, never pinned (an `INSECURE=1` server keeps its pin of the panel). Updates, Xray and Hysteria
+  downloads use the address in use.
+- **A report through the CDN does not change the server's address** in the panel (it would be a Cloudflare edge's): tunnels and
+  flags keep the real one (`cdn::came_through`).
+- **Servers that cannot reach the panel right now** cannot learn the address (they get nothing from the panel): the card shows a
+  one-line command to run once over SSH on such a server (points `PANEL_URL` at the CDN); after its next update it goes back to
+  the panel's own address by itself and keeps the CDN one as the spare.
+- **Lab:** panel + Caddy (both sites) + a real tunnel agent in their own network namespaces: the panel's address dropped →
+  the agent went on through the CDN address in 56 seconds, reports kept arriving, the server's address in the panel stayed;
+  unblocked → back on the panel's own address within five minutes. Through the CDN site only `/tunnel/*` answers.
+
 # v3.53.0 — Moving the panel loses nothing; KPING on any UDP tunnel and the VIP tunnel
 **Moving the panel to a new server (Backup › Move, or Servers › the panel server › «Move the panel to a new server or IP»)**
 - **The old panel freezes when the new server takes the backup** (`migrate::frozen`): every change is refused with a clear

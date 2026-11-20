@@ -14,6 +14,51 @@ const CACHE: &str = "/var/lib/kanki/tunnels.json";
 /// TOFU pin of the panel's certificate for INSECURE installs (see `panel_client`)
 pub const PIN_FILE: &str = "/etc/kanki/panel.pin";
 
+/// The panel's addresses the panel itself named: its own and the CDN one(s) (`cdn.rs`), kept for when it
+/// cannot be reached
+const ALT_FILE: &str = "/etc/kanki/panel.alt";
+
+/// The address the agent talks to the panel through right now, and whether it is a CDN one
+static NOW: Mutex<Option<(String, bool)>> = Mutex::new(None);
+
+/// (address, through a CDN) the agent uses now; None outside the tunnel agent
+pub fn panel_now() -> Option<(String, bool)> {
+    NOW.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+fn good_url(u: &str) -> bool {
+    u.starts_with("https://") && u.len() <= 200 && u[8..].bytes().all(|c| c.is_ascii_alphanumeric() || b".-:[]".contains(&c))
+}
+
+/// What the panel named: (its own address, its CDN addresses)
+fn named(v: &Value) -> (String, Vec<String>) {
+    let main = v["panel"].as_str().map(|s| s.trim().trim_end_matches('/').to_string()).filter(|s| good_url(s)).unwrap_or_default();
+    let alt = v["panel_alt"].as_array().into_iter().flatten().filter_map(|x| x.as_str()).map(|s| s.trim().trim_end_matches('/').to_string()).filter(|s| good_url(s)).take(3).collect();
+    (main, alt)
+}
+
+fn load_named() -> (String, Vec<String>) {
+    std::fs::read_to_string(ALT_FILE).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).map(|v| named(&v)).unwrap_or_default()
+}
+
+fn save_named(main: &str, alt: &[String]) {
+    let _ = std::fs::write(ALT_FILE, json!({ "panel": main, "panel_alt": alt }).to_string());
+}
+
+/// The addresses to try, in order: the panel's own (as it named it, then as installed here), then the CDN
+/// ones. A CDN address is checked against the public CAs only (never pinned: the CDN's certificate is not the
+/// panel's).
+fn candidates(env_url: &str, main: &str, alt: &[String]) -> Vec<(String, bool)> {
+    let mut v: Vec<(String, bool)> = vec![];
+    for u in [main, env_url].into_iter().chain(alt.iter().map(|s| s.as_str())) {
+        let u = u.trim().trim_end_matches('/');
+        if !u.is_empty() && !v.iter().any(|x| x.0 == u) {
+            v.push((u.to_string(), alt.iter().any(|a| a == u)));
+        }
+    }
+    v
+}
+
 /// The HTTP client for talking to the panel. With INSECURE=1 (the agent's curl could not verify
 /// the panel: old CA bundle, IP address, filtering) the certificate is still CA-checked first
 /// with built-in roots; when that fails it is pinned instead: the first certificate seen is
@@ -270,6 +315,14 @@ pub async fn run(version: &str) {
         eprintln!("warning: INSECURE=1 — a panel certificate that is not CA-valid will be pinned on first contact ({})", PIN_FILE);
     }
     let http = panel_client(insecure, Duration::from_secs(20));
+    // the CDN addresses: CA-checked only
+    let http_ca = panel_client(false, Duration::from_secs(20));
+    let (mut main_named, mut alt_named) = load_named();
+    let mut cands = candidates(&panel, &main_named, &alt_named);
+    let mut idx = 0usize;
+    // reports in a row that did not reach the panel through the address in use
+    let mut miss = 0u32;
+    let mut probe_at = std::time::Instant::now();
     // an updated agent also moves the emergency chat onto the new binary
     let _ = tokio::task::spawn_blocking(crate::emergency::restart_if_outdated).await;
     let _ = tokio::task::spawn_blocking(crate::dns::restart_if_outdated).await;
@@ -333,7 +386,41 @@ pub async fn run(version: &str) {
             stats_at = std::time::Instant::now();
         }
         let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st, "kping": kping_st, "vip": vip_st, "stats": stats });
-        match http.post(format!("{}/tunnel/agent", panel)).json(&body).send().await {
+        // on another address: the first one is tried again every five minutes, with a short wait
+        let mut early = None;
+        if idx != 0 && probe_at.elapsed() >= Duration::from_secs(300) {
+            probe_at = std::time::Instant::now();
+            let (b0, a0) = &cands[0];
+            if let Ok(r) = (if *a0 { &http_ca } else { &http }).post(format!("{}/tunnel/agent", b0)).json(&body).timeout(Duration::from_secs(8)).send().await {
+                if r.status().is_success() {
+                    eprintln!("the panel answers at {} again", b0);
+                    idx = 0;
+                    miss = 0;
+                    early = Some(Ok(r));
+                }
+            }
+        }
+        let (base, alt) = cands[idx].clone();
+        *NOW.lock().unwrap_or_else(|e| e.into_inner()) = Some((base.clone(), alt));
+        let http = if alt { &http_ca } else { &http };
+        let res = match early {
+            Some(r) => r,
+            None => http.post(format!("{}/tunnel/agent", base)).json(&body).send().await,
+        };
+        let reached = matches!(&res, Ok(r) if r.status().is_success() || r.status().as_u16() == 410);
+        if reached {
+            miss = 0;
+        } else {
+            miss += 1;
+            // three reports (15 seconds and more) without the panel: the next address
+            if miss >= 3 && cands.len() > 1 {
+                idx = (idx + 1) % cands.len();
+                miss = 0;
+                probe_at = std::time::Instant::now();
+                eprintln!("cannot reach the panel at {}: trying {}", base, cands[idx].0);
+            }
+        }
+        match res {
             Ok(r) if r.status().as_u16() == 410 => {
                 // this server was removed in the panel: everything Kanki put here is removed (a few
                 // answers in a row, so one odd answer does not wipe a working server)
@@ -359,6 +446,16 @@ pub async fn run(version: &str) {
                 gone = 0;
                 crate::dns::qlog_ack(&body["dns"]);
                 if let Ok(v) = r.json::<Value>().await {
+                    // the panel's addresses as it names them now (an older panel names none: kept as they were)
+                    if v.get("panel_alt").is_some() {
+                        let (m, a) = named(&v);
+                        if m != main_named || a != alt_named {
+                            save_named(&m, &a);
+                            (main_named, alt_named) = (m, a);
+                            cands = candidates(&panel, &main_named, &alt_named);
+                            idx = cands.iter().position(|c| c.0 == base).unwrap_or(0);
+                        }
+                    }
                     // the emergency chat: "set" (new config), "keep" (unchanged) or "off"
                     match v["emergency"]["mode"].as_str() {
                         Some("set") => {
@@ -432,7 +529,7 @@ pub async fn run(version: &str) {
                     match v["xray"]["mode"].as_str() {
                         Some("set") => {
                             if let (Ok(c), Some(ver)) = (serde_json::from_value::<crate::xray::XrayCfg>(v["xray"]["cfg"].clone()), v["xray"]["ver"].as_str().map(|s| s.to_string())) {
-                                let (p, i, t) = (panel.clone(), id.clone(), token.clone());
+                                let (p, i, t) = (base.clone(), id.clone(), token.clone());
                                 let force = v["xray"]["force"].as_bool() == Some(true);
                                 let r = tokio::task::spawn_blocking(move || {
                                     if force {
@@ -482,7 +579,7 @@ pub async fn run(version: &str) {
                     subsrv.apply(serde_json::from_value(v["subsrv"].clone()).ok());
                     if v["update"].as_bool() == Some(true) && update_tried.map(|t| t.elapsed() >= Duration::from_secs(60)).unwrap_or(true) {
                         update_tried = Some(std::time::Instant::now());
-                        if let Err(e) = update_from_panel(&http, &panel, &id, &token).await {
+                        if let Err(e) = update_from_panel(http, &base, &id, &token).await {
                             eprintln!("update from the panel failed (tried again in a minute): {}", e);
                         }
                     }
@@ -694,6 +791,23 @@ pub async fn run_file(path: &str) {
 #[cfg(test)]
 mod standalone_tests {
     use super::*;
+
+    #[test]
+    fn the_panel_is_tried_first_then_its_cdn_address() {
+        let v = json!({ "panel": "https://panel.example.com:2053/", "panel_alt": ["https://cdn.example.net:2053", "javascript:x", "https://a b.c", "http://plain.example"] });
+        let (m, a) = named(&v);
+        assert_eq!(m, "https://panel.example.com:2053");
+        assert_eq!(a, vec!["https://cdn.example.net:2053".to_string()]);
+        // installed with the panel's address: that one first, the CDN one only through the CA check
+        let c = candidates("https://panel.example.com:2053", &m, &a);
+        assert_eq!(c, vec![("https://panel.example.com:2053".to_string(), false), ("https://cdn.example.net:2053".to_string(), true)]);
+        // a server pointed at the CDN by hand (it could not reach the panel to update): the panel's own address
+        // comes first again once the panel names it, and the CDN one stays a CDN one
+        let c = candidates("https://cdn.example.net:2053", &m, &a);
+        assert_eq!(c, vec![("https://panel.example.com:2053".to_string(), false), ("https://cdn.example.net:2053".to_string(), true)]);
+        // an older panel names nothing: only the installed address
+        assert_eq!(candidates("https://p.example", "", &[]), vec![("https://p.example".to_string(), false)]);
+    }
 
     const GOOD: &str = r#"{"role":"entry","mode":"direct","transport":"dual","remote":"203.0.113.5:443","token":"0123456789abcdef01234567","tcp":["2222:22"]}"#;
 

@@ -30,6 +30,8 @@ mod backup;
 mod migrate;
 #[path = "panel/cleanup.rs"]
 mod cleanup;
+#[path = "panel/cdn.rs"]
+mod cdn;
 
 // servers: VPN servers (add, edit, remove), cores on/off per server, the second config through a tunnel, exit country (src/servers)
 #[path = "servers/servers.rs"]
@@ -355,7 +357,10 @@ async fn main() {
     tokio::spawn(migrate::freeze_loop(app.clone()));
     {
         let a = app.clone();
-        std::thread::spawn(move || subdomain::ensure_on_start(&a));
+        std::thread::spawn(move || {
+            subdomain::ensure_on_start(&a);
+            cdn::ensure_on_start(&a);
+        });
     }
     auth::legacy_key_start(&app.db);
     // upgrade legacy sha256 admin hash stored in the db is done at next successful login

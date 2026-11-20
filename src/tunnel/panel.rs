@@ -2980,11 +2980,13 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     let status: Vec<Status> = serde_json::from_value(b["status"].clone()).unwrap_or_default();
     note_report(&id, &status, b["xray"]["active"].as_bool() == Some(true), b["dns"]["active"].as_bool() == Some(true));
     crate::srvtraffic::note(&app, &format!("a:{id}"), &b["stats"]["net"]);
-    let fresh_ip = util::client_ip(&h);
+    // through the panel's CDN domain the address is a CDN edge's, not the server's: the last real one stays
+    let via_cdn = crate::cdn::came_through(&app, &h);
+    let fresh_ip = if via_cdn { String::new() } else { util::client_ip(&h) };
     {
         let mut sn = seen().lock().unwrap_or_else(|e| e.into_inner());
         let prev = sn.get(&id).map(|x| x.ip.clone()).unwrap_or_default();
-        let ip = sticky_ip(&prev, &fresh_ip);
+        let ip = if via_cdn { prev } else { sticky_ip(&prev, &fresh_ip) };
         sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status, emergency: b["emergency"].clone(), fw: b["fw"].clone(), listen: b["listen"].clone(), setup: b["setup"].clone(), stats: b["stats"].clone() });
     }
     let ver = b["version"].as_str().unwrap_or("");
@@ -3027,7 +3029,7 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     crate::kping::ingest(&app, &id, &b["kping"]);
     let kping = crate::kping::cfg_for(&app, &id);
     crate::vip::panel::note(&id, &b["vip"]);
-    Json(json!({ "kping": kping, "vip": crate::vip::panel::specs_for(&app, &id), "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app) })).into_response()
+    Json(json!({ "kping": kping, "vip": crate::vip::panel::specs_for(&app, &id), "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app), "panel_alt": crate::cdn::url(&app).into_iter().collect::<Vec<_>>() })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)

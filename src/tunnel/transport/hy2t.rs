@@ -412,7 +412,12 @@ fn agent_env() -> Option<(String, String, String, bool)> {
     if panel.is_empty() || id.is_empty() || token.is_empty() {
         return None;
     }
-    Some((panel, id, token, env.get("INSECURE").map(|v| v == "1").unwrap_or(false)))
+    let insecure = env.get("INSECURE").map(|v| v == "1").unwrap_or(false);
+    // the address the agent reaches the panel through right now (a CDN one is CA-checked, never pinned)
+    match super::agent::panel_now() {
+        Some((now, alt)) => Some((now, id, token, insecure && !alt)),
+        None => Some((panel, id, token, insecure)),
+    }
 }
 
 /// One POST to the panel through the agent's own client (CA-checked, or pinned to

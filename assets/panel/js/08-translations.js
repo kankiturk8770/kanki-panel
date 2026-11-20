@@ -2470,5 +2470,14 @@ var FA={"choose both servers":"هر دو سرور را انتخاب کن",
 "Data used after the account ended":"مصرف بعد از تمام شدن اکانت",
 "Connected, but no data passes: the port is open; the route drops the tunnel's bigger packets (MTU) or filters them":"وصل شد ولی داده رد نمی‌شود: پورت باز است؛ مسیر بسته‌های بزرگ‌تر تانل را می‌اندازد (MTU) یا فیلتر می‌کند",
 "This route passes only packets up to":"این مسیر فقط بسته‌های تا",
-"bytes: bigger ones are dropped on the way. Tunnels that fill full packets break here while ping works.":"بایت را رد می‌کند و بزرگ‌ترها وسط راه می‌افتند. تانلی که بستهٔ کامل می‌فرستد این‌جا قطع می‌شود، با این‌که پینگ کار می‌کند."
+"bytes: bigger ones are dropped on the way. Tunnels that fill full packets break here while ping works.":"بایت را رد می‌کند و بزرگ‌ترها وسط راه می‌افتند. تانلی که بستهٔ کامل می‌فرستد این‌جا قطع می‌شود، با این‌که پینگ کار می‌کند.",
+ "Panel CDN domain (for the servers)":"دامنهٔ CDN پنل (برای سرورها)",
+ "When the panel's IP is filtered in Iran, the Iran servers cannot report to it. Put another domain behind Cloudflare (orange cloud, SSL mode «Full») pointing to this server: the servers then reach the panel through it. Only the servers' path goes through it; the panel and the subscription do not.":"وقتی IP پنل در ایران فیلتر است، سرورهای ایران به پنل نمی‌رسند. یک دامنهٔ دیگر را در Cloudflare (ابر نارنجی، SSL روی «Full») به همین سرور بده: سرورها از راه آن به پنل وصل می‌شوند. فقط راه سرورها از آن می‌گذرد؛ خود پنل و اشتراک نه.",
+ "Servers on this version learn this address by themselves. A server that cannot reach the panel now (so it cannot update): run this once on it over SSH:":"سرورهایی که روی این نسخه‌اند این آدرس را خودشان یاد می‌گیرند. سروری که همین الان به پنل نمی‌رسد (پس آپدیت هم نمی‌گیرد): این را یک بار با SSH روی آن بزن:",
+ "Saved, but the panel could not reach itself through the CDN yet: check the DNS record (orange cloud) and SSL mode «Full» in Cloudflare.":"ذخیره شد، ولی پنل هنوز از راه CDN به خودش نرسید: در Cloudflare رکورد DNS (ابر نارنجی) و SSL روی «Full» را چک کن.",
+ "Use a domain of its own for the CDN, not the panel's domain or the subscription domain":"برای CDN یک دامنهٔ جدا بده، نه دامنهٔ پنل یا دامنهٔ اشتراک",
+ "Write a domain like cdn.example.com (English letters; use the punycode form for a Persian domain)":"دامنه‌ای مثل cdn.example.com بنویس (حروف انگلیسی؛ دامنهٔ فارسی به شکل punycode)",
+ "The panel's site in the Caddyfile has no certificate files. This needs the standard install of the panel":"سایت پنل در Caddyfile فایل گواهی ندارد. این فقط با نصب استاندارد پنل کار می‌کند",
+ "None of the CDN's HTTPS ports (443, 2053, 2083, 2087, 2096, 8443) is free on this server":"هیچ‌کدام از پورت‌های HTTPS که CDN رد می‌کند (443، 2053، 2083، 2087، 2096، 8443) روی این سرور آزاد نیست",
+ "Caddy did not answer for this domain; nothing was changed":"Caddy برای این دامنه جواب نداد؛ چیزی عوض نشد"
 };
