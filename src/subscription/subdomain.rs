@@ -33,7 +33,7 @@ pub fn router() -> Router<Arc<App>> {
     Router::new().route("/api/sub-domain", get(status).post(apply))
 }
 
-fn valid_domain(d: &str) -> bool {
+pub(crate) fn valid_domain(d: &str) -> bool {
     if d.len() < 4 || d.len() > 253 || !d.contains('.') || d.parse::<std::net::IpAddr>().is_ok() {
         return false;
     }

@@ -112,11 +112,11 @@ fn b(t: &str, d: &str) -> (String, String) {
 pub(crate) const BTNS: &[(&str, &str, &str)] = &[
     ("buy", "🛒 خرید اشتراک", "منوی اصلی"),
     ("trial", "🎁 تست رایگان", "منوی اصلی"),
-    ("my", "📊 سرویس‌های من", "منوی اصلی"),
-    ("renew", "🔁 تمدید", "منوی اصلی"),
-    ("guide", "🎬 آموزش اتصال", "منوی اصلی (فقط وقتی آموزشی اضافه شده باشد)"),
-    ("ref", "👥 دعوت دوستان", "منوی اصلی"),
-    ("app", "📱 دانلود اپ کانکی", "منوی اصلی"),
+    ("my", "📦 سرویس‌های من", "منوی اصلی"),
+    ("renew", "🔄 تمدید اشتراک", "منوی اصلی"),
+    ("guide", "📖 آموزش اتصال", "منوی اصلی"),
+    ("ref", "🤝 دعوت از دوستان", "منوی اصلی"),
+    ("app", "📱 دانلود اپلیکیشن", "منوی اصلی"),
     ("support", "💬 پشتیبانی", "منوی اصلی"),
     ("guide_acc", "🎬 آموزش اتصال و استفاده از اپ", "زیر پیام اشتراک و دانلود اپ"),
     ("cfg_w", "📥 کانفیگ WireGuard", "زیر پیام اشتراک"),
@@ -141,11 +141,14 @@ pub(crate) const BTNS: &[(&str, &str, &str)] = &[
 ];
 
 /// Buttons of the main menu, in order; each one can also be hidden (`hide_<key>` = 1).
-pub(crate) const MAIN_BTNS: &[&str] = &["buy", "trial", "my", "renew", "guide", "ref", "app", "support"];
+pub(crate) const MAIN_BTNS: &[&str] = &["buy", "trial", "my", "renew", "app", "guide", "ref", "support"];
+
+/// The welcome (/start and «🏠 منوی اصلی»): short enough for one phone screen
+const WELCOME: &str = "⚡️ <b>به Kanki VPN خوش آمدید</b> ⚡️\nاینترنت آزاد، پرسرعت و پایدار روی تمام اپراتورها (همراه اول، ایرانسل، رایتل، مخابرات و وای‌فای)\n\n▫️ <b>پوشش جهانی:</b> اتصال با یک اشتراک به سرورهای 🇩🇪 آلمان، 🇹🇷 ترکیه، 🇬🇧 انگلیس و 🇸🇪 سوئد\n▫️ <b>ویژه گیمرها (KANKI MIX):</b> پینگ پایین و بدون لگ برای PUBG، Call of Duty و بازی‌های آنلاین\n▫️ <b>چند پروتکل هم‌زمان:</b> <code>WireGuard</code> · <code>AmneziaWG</code> · <code>Hysteria2</code> · <code>Xray</code> (ضدقطعی کامل)\n▫️ <b>اپ اختصاصی کانکی:</b> اتصال تنها با یک لمس + ارتباط مستقیم با پشتیبانی حتی در زمان اختلال اینترنت\n\n👇 برای خرید، تمدید یا دریافت تست رایگان از منوی زیر انتخاب کنید:";
 
 /// Messages the admin can rewrite from the bot: (setting key, default, title). HTML (<b>, <i>, <code>) is allowed.
 const TEXTS: &[(&str, &str, &str)] = &[
-    ("welcome", "به ربات فروش خوش آمدید 🌟", "پیام خوش‌آمد (منوی اصلی)"),
+    ("welcome", WELCOME, "پیام خوش‌آمد (منوی اصلی)"),
     ("txt_menu", "از منوی زیر استفاده کنید 👇", "جواب پیام‌های بی‌ربط"),
     ("txt_cats", "🛍 <b>پلن‌های Kanki VPN</b>\nنوع اشتراک رو از پایین انتخاب کنید 👇", "بالای دسته‌بندی پلن‌ها"),
     ("txt_plans", "سلام 👋\nپلن خودتون رو از پایین انتخاب کنید 👇", "بالای فهرست پلن‌ها"),
@@ -347,28 +350,23 @@ const CAT_LOOK: &[(&str, &str, &str, &str)] = &[
     ("بلندمدت", "⏳", "danger", "۲ و ۳ ماهه، با تخفیف"),
 ];
 
-/// The emoji, colour and line of a category (one not in the table: a folder and a colour by its place)
-fn cat_look(name: &str, i: usize) -> (&'static str, &'static str, &'static str) {
-    match CAT_LOOK.iter().find(|c| c.0 == name) {
-        Some(c) => (c.1, c.2, c.3),
-        None => ("📂", ["primary", "success", "danger"][i % 3], ""),
-    }
+
+/// A plan's button in the shop, all in one shape: «🔹 ۲۰ گیگ | ۱ ماهه | ۱ کاربر — ۷۵,۰۰۰ ت» (and the badge's emoji)
+fn plan_button(p: &Plan, price: i64) -> String {
+    let vol = if p.gb > 0.0 { format!("{} گیگ", fa_num(&p.gb.to_string())) } else { "نامحدود".into() };
+    let dur = match p.days {
+        0 => "بی‌پایان".to_string(),
+        d if d % 30 == 0 => format!("{} ماهه", fa_num(&(d / 30).to_string())),
+        d => format!("{} روزه", fa_num(&d.to_string())),
+    };
+    let cost = if price > 0 { format!("{} ت", fa_num(&toman(price).replace(" تومان", ""))) } else { format!("{}$", p.usd) };
+    let mark = p.badge.split_whitespace().next().filter(|e| e.chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(false));
+    format!("🔹 {} | {} | {} کاربر — {}{}", vol, dur, fa_num(&p.conns.max(1).to_string()), cost, mark.map(|e| format!(" {}", e)).unwrap_or_default())
 }
 
-/// A plan's button in the shop, with English digits and clear separators: «50 گیگ — 2 کاربره — 1 ماهه — 135,000 تومان 🔥»
-fn plan_button(p: &Plan, price: i64) -> String {
-    let mut parts = vec![if p.gb > 0.0 { format!("{} گیگ", p.gb) } else { "نامحدود".into() }];
-    if p.conns > 1 {
-        parts.push(format!("{} کاربره", p.conns));
-    }
-    parts.push(match p.days {
-        0 => "بی‌پایان".to_string(),
-        d if d % 30 == 0 => format!("{} ماهه", d / 30),
-        d => format!("{} روزه", d),
-    });
-    parts.push(if price > 0 { toman(price) } else { format!("{}$", p.usd) });
-    let mark = p.badge.split_whitespace().next().filter(|e| e.chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(false));
-    format!("{}{}", parts.join(" — "), mark.map(|e| format!(" {}", e)).unwrap_or_default())
+/// «۷۵,۰۰۰ تومان»
+fn fa_toman(n: i64) -> String {
+    fa_num(&toman(n))
 }
 
 /// The plans of the price list (`shop::standard_plans`: V2Ray, gaming and VIP) replace the listed ones once, by
@@ -383,6 +381,20 @@ fn kanki_plans_once(db: &crate::db::Db) -> bool {
     crate::shop::load_standard(db) > 0
 }
 
+/// 3.55: the new welcome and main-menu buttons (the owner's layout) replace what was set before, once; after that
+/// the admin's own changes stay
+fn ux_once(db: &crate::db::Db) -> bool {
+    if db.get("bot_ux_v4") == "1" {
+        return false;
+    }
+    db.set("bot_ux_v4", "1");
+    db.set("welcome", "");
+    for k in MAIN_BTNS {
+        db.set(&format!("btn_{}", k), "");
+    }
+    true
+}
+
 /// The chat's menu button (it opens the mini app): for a customer with a working account, and for everyone else.
 /// Short on purpose: the button sits beside the message box and a long text left no room to type.
 /// In English: Telegram (Android) left a short Persian text on this button blank.
@@ -390,31 +402,70 @@ const MENU_MINE: &str = "My Kanki 👤";
 const MENU_NEW: &str = "Kanki 🚀";
 
 /// How to add a v2ray subscription link, under a v2ray account
-const V2RAY_HELP: &str = "📲 <b>اتصال با برنامه‌های V2Ray</b>\n• اندروید: v2rayNG (گوگل‌پلی)\n• آیفون: Streisand یا V2Box (اپ‌استور)\n• ویندوز: v2rayN یا Nekoray\n\n1️⃣ لینک بالا رو کپی کنید.\n2️⃣ توی برنامه: ➕ ← اضافه کردن اشتراک (Subscription) و لینک رو بذارید.\n3️⃣ اشتراک رو به‌روز (Update) کنید، یه سرور رو انتخاب کنید و وصل بشید.\n\nسرورها که عوض بشن، با به‌روز کردن اشتراک خودش درست می‌شه.";
+const V2RAY_HELP: &str = "📲 <b>اتصال با برنامه‌های V2Ray</b>\n• اندروید: v2rayNG (گوگل‌پلی)\n• آیفون: Streisand یا V2Box (اپ‌استور)\n• ویندوز: v2rayN یا Nekoray\n\n1️⃣ لینک بالا رو کپی کنید.\n2️⃣ توی برنامه: ➕ ← اضافه کردن اشتراک (<code>Subscription</code>) و لینک رو بذارید.\n3️⃣ اشتراک رو به‌روز (<code>Update</code>) کنید، یه سرور رو انتخاب کنید و وصل بشید.\n\nسرورها که عوض بشن، با به‌روز کردن اشتراک خودش درست می‌شه.";
+
+/// What the delivered orders brought in. `amount` is toman for card, bank gateway, TON and Stars (the price the
+/// customer paid, at that day's rate), dollars for the crypto gateway and the wallet; TON's nano and the Stars are
+/// the second word of `ref`.
+#[derive(Default, Debug, PartialEq)]
+pub(crate) struct Revenue {
+    pub count: i64,
+    pub card: i64,
+    pub ton: i64,
+    pub ton_nano: u64,
+    pub stars: i64,
+    pub star_count: i64,
+    pub usd: f64,
+}
+
+impl Revenue {
+    pub fn toman(&self) -> i64 {
+        self.card + self.ton + self.stars
+    }
+}
+
+pub(crate) fn revenue(db: &crate::db::Db) -> Revenue {
+    let rows: Vec<(String, String, String)> = db.with(|c| {
+        let Ok(mut st) = c.prepare("SELECT COALESCE(method,''), COALESCE(amount,''), COALESCE(ref,'') FROM orders WHERE status='done'") else { return vec![] };
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map(|it| it.filter_map(|x| x.ok()).collect()).unwrap_or_default()
+    });
+    let mut r = Revenue::default();
+    for (m, amount, rf) in rows {
+        r.count += 1;
+        let t = amount.trim().parse::<f64>().unwrap_or(0.0);
+        let second = rf.split_whitespace().nth(1).unwrap_or("");
+        match m.as_str() {
+            "card" | "zp" => r.card += t as i64,
+            "ton" => {
+                r.ton += t as i64;
+                r.ton_nano += second.parse::<u64>().unwrap_or(0);
+            }
+            "stars" => {
+                r.stars += t as i64;
+                r.star_count += second.parse::<i64>().unwrap_or(0);
+            }
+            _ => r.usd += t,
+        }
+    }
+    r
+}
 
 /// The three services a plan can sell, in the shop's order: (database value, callback code, button, what it is
 /// in the buy menu). The buttons start with Persian so a phone shows them in one direction and they fit in one line.
 const SERVICES: &[(&str, &str, &str, &str)] = &[
-    ("v2ray", "v", "⚡ اقتصادی · V2Ray",
-     "⚡ <b>اقتصادی · V2Ray</b>\n• یک لینک اشتراک برای v2rayNG، V2Box، Streisand و v2rayN\n• وب‌گردی، دانلود، اینستاگرام و یوتیوب؛ اندروید، آیفون و ویندوز\n• ارزان‌ترین سرویس"),
-    ("game", "g", "🎮 گیمینگ · WireGuard + Amnezia",
-     "🎮 <b>گیمینگ · WireGuard + Amnezia</b>\n• کانفیگ WireGuard و AmneziaWG و فایل یک‌جای AmneziaVPN\n• پینگ پایین و پایدار برای پابجی و کالاف\n• توی اپ کانکی با یک لمس وصل می‌شه"),
-    ("vip", "p", "👑 همه‌کاره VIP · هر سه با هم",
-     "👑 <b>همه‌کاره VIP</b>\n• هر سه با یک اشتراک: V2Ray + WireGuard + AmneziaWG\n• 🎁 اپ اختصاصی کانکی (اندروید و ویندوز) رایگان همراهشه\n• بهترین انتخاب برای خانواده و چند دستگاه"),
+    ("v2ray", "v", "⚡ اقتصادی (V2Ray)",
+     "⚡ <b>اقتصادی (V2Ray)</b>\n✓ یک لینک برای همه‌ی سرورها در v2rayNG، V2Box و v2rayN"),
+    ("game", "g", "🎮 گیمینگ (WireGuard + Amnezia)",
+     "🎮 <b>گیمینگ (WireGuard + Amnezia)</b>\n✓ پینگ پایین و پایدار برای PUBG و Call of Duty"),
+    ("vip", "p", "👑 همه‌کاره VIP (تمام پروتکل‌ها + اپ)",
+     "👑 <b>همه‌کاره VIP (تمام پروتکل‌ها + اپ)</b>\n✓ همه‌ی پروتکل‌ها + اپ اختصاصی کانکی، با یک اشتراک"),
 ];
 
-/// A service's short name in a line of text («⚡ اقتصادی · V2Ray»)
-fn service_label(s: &str) -> &'static str {
-    SERVICES.iter().find(|x| x.0 == s).map(|x| x.2).unwrap_or("👑 همه‌کاره VIP · هر سه با هم")
-}
 
 fn service_of_code(c: &str) -> &'static str {
     SERVICES.iter().find(|s| s.1 == c).map(|s| s.0).unwrap_or("")
 }
 
-fn service_code(s: &str) -> &'static str {
-    SERVICES.iter().find(|x| x.0 == s).map(|x| x.1).unwrap_or("")
-}
 
 /// The bot that is running (polling Telegram), for the mini app: a purchase must go to its pending list
 fn running_slot() -> &'static Mutex<Option<Arc<Bot>>> {
@@ -547,8 +598,11 @@ impl Bot {
         };
         for row in rows.iter_mut() {
             let Some(row) = row.as_array_mut() else { continue };
+            // a premium emoji only when every button of the row has one: a row of mixed icons and plain emoji
+            // looks crooked, so then every button keeps its plain (standard) emoji
+            let whole = !by_text.is_empty() && row.iter().all(|btn| btn["text"].as_str().is_some_and(|t| by_text.contains_key(t)));
             for btn in row.iter_mut() {
-                if let Some(id) = btn["text"].as_str().and_then(|t| by_text.get(t)) {
+                if let Some(id) = btn["text"].as_str().and_then(|t| by_text.get(t)).filter(|_| whole) {
                     let plain = crate::buttons::without_lead_emoji(btn["text"].as_str().unwrap_or(""));
                     btn["icon_custom_emoji_id"] = json!(id);
                     btn["text"] = json!(plain);
@@ -619,6 +673,21 @@ impl Bot {
     /// The «custom volume and days» row that opens the mini app's shop (on renewing account `renew` when
     /// > 0); none when the mini app cannot open (no https address) or custom purchase is off
     /// The mini app's shop: with `svc` its custom-plan tab of that service («🧮 دلخواه»), without it the whole shop
+    /// Under the service menu: the custom plan (volume and days of one's own) and the mini app's shop
+    fn shop_rows(&self, renew: i64) -> Kb {
+        let mini = crate::miniapp::url(&self.app);
+        if !mini.starts_with("https://") || !self.db().on("sales_on") {
+            return vec![];
+        }
+        let r = if renew > 0 { format!("&renew={}", renew) } else { String::new() };
+        let mut rows: Kb = vec![];
+        if crate::shop::custom_on(self.db()) {
+            rows.push(vec![b("🎛 ساخت پلن دلخواه (حجم و زمان انتخابی)", &format!("webapp:shop:{}?buy=1&tab=custom{}", mini, r))]);
+        }
+        rows.push(vec![b("💎 ورود به فروشگاه مینی‌اپ", &format!("webapp:shop:{}?buy=1{}", mini, r))]);
+        rows
+    }
+
     fn shop_row(&self, renew: i64, svc: &str) -> Option<Vec<(String, String)>> {
         let mini = crate::miniapp::url(&self.app);
         if !mini.starts_with("https://") || !self.db().on("sales_on") || (!svc.is_empty() && !crate::shop::custom_on(self.db())) {
@@ -628,7 +697,7 @@ impl Bot {
         if svc.is_empty() {
             return Some(vec![b("🛍 فروشگاه کامل در مینی‌اپ", &format!("webapp:shop:{}?buy=1{}", mini, r))]);
         }
-        Some(vec![b("🧮 دلخواه: حجم، روز و کاربر", &format!("webapp:shop:{}?buy=1&shop={}&tab=custom{}", mini, svc, r))])
+        Some(vec![b("🎛 ساخت پلن دلخواه (حجم و زمان انتخابی)", &format!("webapp:shop:{}?buy=1&shop={}&tab=custom{}", mini, svc, r))])
     }
 
     /// For the mini app: false (and the "join the channel" message in the chat) when the required channel is
@@ -1214,20 +1283,22 @@ impl Bot {
     /// video tutorial, support). Everything else (configs, backups) is in the mini app and «📊 سرویس‌های من».
     fn delivery(&self, head: &str, u: &User, plan: &str) -> (String, Value) {
         let exp = if u.expires_at > 0 { crate::channel::fa_datetime(u.expires_at).0 } else { "نامحدود".into() };
-        let t = format!("{}\n\n📦 پلن: <b>{}</b>\n👤 حساب: <b>{}</b>\n⏳ انقضا: <b>{}</b>\n\n{}\n\n📲 <b>روی کدوم دستگاه وصل می‌شید؟</b>\nدکمه‌ی دستگاهتون رو بزنید؛ برنامه‌ی مناسب (v2rayNG، V2Box، AmneziaVPN، WireGuard)، فایل و آموزش قدم‌به‌قدم همین‌جا میاد 👇",
+        let t = format!("{}\n\n📦 پلن: <b>{}</b>\n👤 حساب: <b>{}</b>\n⏳ انقضا: <b>{}</b>\n\n{}\n\n📲 <b>روی کدوم دستگاه وصل می‌شید؟</b> برنامه، فایل و آموزش همین‌جا میاد 👇",
             head, esc(plan), esc(&u.username), exp, self.keys_text(u));
         let mut rows: Kb = vec![self.how_devices_kb(u.id)];
         let mini = crate::miniapp::url(&self.app);
         if mini.starts_with("https://") {
             rows.push(vec![b("👤 مدیریت اشتراک (مینی‌اپ)", &format!("webapp:miniapp:{}", mini))]);
         }
-        // a tutorial not pinned to one app and device (a general one) stays here
+        // the video tutorial (a general one, not pinned to one app and device) beside support
+        let mut last: Vec<(String, String)> = vec![];
         if self.guides().iter().any(|g| g["for"].as_array().map(|a| a.is_empty()).unwrap_or(true)) {
-            rows.push(vec![b("آموزش ویدیویی اتصال 🎥", "guide1")]);
+            last.push(b("🎬 آموزش ویدیویی", "guide1"));
         }
         let sup = self.db().get("support").trim().to_string();
         let sl = if let Some(id) = sup.strip_prefix('@') { Some(format!("https://t.me/{}", id)) } else if sup.starts_with("https://") { Some(sup) } else { None };
-        rows.push(vec![b("پشتیبانی 💬", &sl.map(|l| format!("url:{}", l)).unwrap_or_else(|| "support".into()))]);
+        last.push(b("💬 پشتیبانی", &sl.map(|l| format!("url:{}", l)).unwrap_or_else(|| "support".into())));
+        rows.push(last);
         (t, ik(rows))
     }
 
@@ -1273,15 +1344,16 @@ impl Bot {
         let mut t = format!("{} · <b>اتصال حساب {}</b>\n\nبا کدوم برنامه وصل می‌شید؟ روی هر کدوم بزنید، فایل و آموزش قدم‌به‌قدم همین‌جا میاد 👇\n", dev, esc(&u.username));
         let mut rows: Kb = vec![];
         for (i, a) in apps.iter().enumerate() {
-            let star = if i == 0 { "⭐️ " } else { "" };
             let (name, line) = how_app_line(a, os);
-            t.push_str(&format!("\n{}<b>{}</b>{}: {}", star, name, if i == 0 { " (پیشنهاد ما)" } else { "" }, line));
-            rows.push(vec![b(&format!("{}{}", star, name), &format!("@{}@hw:{}:{}:{}", if i == 0 { "success" } else { "primary" }, u.id, os, a))]);
+            // the recommended one with a star, every other with its own icon
+            let icon = if i == 0 { "⭐" } else { app_icon(a) };
+            t.push_str(&format!("\n{} <b>{}</b>{}: {}", icon, name, if i == 0 { " (پیشنهادی)" } else { "" }, line));
+            rows.push(vec![b(&format!("{} {}{}", icon, name, if i == 0 { " (پیشنهادی)" } else { "" }), &format!("@{}@hw:{}:{}:{}", if i == 0 { "success" } else { "primary" }, u.id, os, a))]);
         }
         if apps.is_empty() {
             t.push_str("\nبرای این دستگاه هنوز راهی برای سرویس شما فعال نیست؛ به پشتیبانی پیام بدید.");
         }
-        rows.push(vec![b("📲 دستگاه دیگه", &format!("hw:{}", u.id))]);
+        rows.push(vec![b("🔄 تغییر دستگاه", &format!("hw:{}", u.id))]);
         (t, rows)
     }
 
@@ -1297,7 +1369,7 @@ impl Bot {
             return self.answer(qid, "این راه برای سرویس شما فعال نیست.", true).await;
         }
         let (name, _) = how_app_line(app, os);
-        let back = vec![b("⬅️ برنامه‌ی دیگه", &format!("hw:{}:{}", u.id, os))];
+        let back = vec![b("🔄 برنامه‌ی دیگر", &format!("hw:{}:{}", u.id, os))];
         let store = |label: &str, url: &str| vec![b(label, &format!("url:{}", url))];
         match app {
             "k" => {
@@ -1330,8 +1402,8 @@ impl Bot {
                     _ => "https://play.google.com/store/apps/details?id=org.amnezia.vpn",
                 };
                 let where_ = match os { "i" => "اپ‌استور", "w" => "سایت گیت‌هاب (فایل Windows)", _ => "گوگل‌پلی" };
-                self.send(chat, &format!("🛡 <b>AmneziaVPN</b>\nهمه‌ی سرورهای شما (WireGuard، AmneziaWG و VLESS / Xray، مستقیم و از راه تانل) با <b>یک فایل</b>.\n\n1️⃣ AmneziaVPN رو از {} نصب کنید (دکمه‌ی پایین).\n2️⃣ فایل بکاپی که الان میاد رو ذخیره کنید{}.\n3️⃣ توی برنامه: ⚙️ تنظیمات ← پشتیبان‌گیری (Backup) ← <b>بازیابی از نسخه‌ی پشتیبان</b> (Restore from backup) ← همین فایل.\n4️⃣ یک سرور رو انتخاب و دکمه‌ی اتصال رو بزنید ✅\n\n⚠️ بازیابی، سرورهای قبلی خود برنامه رو پاک می‌کنه.",
-                    where_, if os == "i" { " (روش بزنید ← اشتراک‌گذاری ← Save to Files)" } else { "" }),
+                self.send(chat, &format!("🛡 <b>AmneziaVPN</b>\nهمه‌ی سرورهای شما (WireGuard، AmneziaWG و VLESS / Xray، مستقیم و از راه تانل) با <b>یک فایل</b>.\n\n1️⃣ AmneziaVPN رو از {} نصب کنید (دکمه‌ی پایین).\n2️⃣ فایل بکاپی که الان میاد رو ذخیره کنید{}.\n3️⃣ توی برنامه: ⚙️ تنظیمات ← پشتیبان‌گیری ← <b>بازیابی از نسخه‌ی پشتیبان</b> ← همین فایل\n   (برنامه‌ی انگلیسی: <code>Settings › Backup › Restore from backup</code>)\n4️⃣ یک سرور رو انتخاب و دکمه‌ی اتصال رو بزنید ✅\n\n⚠️ بازیابی، سرورهای قبلی خود برنامه رو پاک می‌کنه.",
+                    where_, if os == "i" { " (روش بزنید ← اشتراک‌گذاری ← <code>Save to Files</code>)" } else { "" }),
                     Some(ik(vec![store("⬇️ دانلود AmneziaVPN", url), back]))).await;
                 self.send_amnezia(chat, qid, u, os).await;
             }
@@ -1339,11 +1411,11 @@ impl Bot {
                 let link = crate::api::v2_sub_link(&self.app, u);
                 let (get, steps) = match os {
                     "i" => ("https://apps.apple.com/app/v2box-v2ray-client/id6446814690",
-                        "1️⃣ V2Box رو از اپ‌استور نصب کنید (یا Streisand).\n2️⃣ لینک اشتراک پایین رو لمس کنید تا کپی بشه.\n3️⃣ V2Box رو باز کنید: تب <b>Configs</b> ← ➕ بالای صفحه ← <b>Add subscription</b>.\n4️⃣ لینک رو توی <b>URL</b> بذارید (Paste)، یه اسم بدید و <b>Save</b> بزنید؛ صفحه رو پایین بکشید تا کانفیگ‌ها بیان.\n5️⃣ یکی رو انتخاب کنید و از تب <b>Home</b> وصل بشید (اجازه‌ی VPN رو Allow کنید) ✅"),
+                        "1️⃣ V2Box رو از اپ‌استور نصب کنید (یا Streisand).\n2️⃣ لینک اشتراک پایین رو لمس کنید تا کپی بشه.\n3️⃣ V2Box رو باز کنید: <code>Configs › ➕ › Add subscription</code>\n4️⃣ لینک رو توی <code>URL</code> بذارید، یه اسم بدید و <code>Save</code> بزنید؛ صفحه رو پایین بکشید تا کانفیگ‌ها بیان.\n5️⃣ یکی رو انتخاب کنید و از تب <code>Home</code> وصل بشید (اجازه‌ی VPN رو <code>Allow</code> کنید) ✅"),
                     "w" => ("https://github.com/2dust/v2rayN/releases/latest",
-                        "1️⃣ v2rayN رو از گیت‌هاب بگیرید (فایل windows-64-With-Core) و باز کنید.\n2️⃣ لینک اشتراک پایین رو کپی کنید.\n3️⃣ منوی <b>Subscription group</b> ← <b>Subscription group settings</b> ← <b>Add</b>: لینک رو در Url بذارید و ذخیره کنید.\n4️⃣ <b>Subscription group</b> ← <b>Update subscription</b>؛ کانفیگ‌ها میان.\n5️⃣ یکی رو انتخاب، Enter، و پایین پنجره System proxy رو روی Set system proxy بذارید ✅"),
+                        "1️⃣ v2rayN رو از گیت‌هاب بگیرید (فایل <code>windows-64-With-Core</code>) و باز کنید.\n2️⃣ لینک اشتراک پایین رو کپی کنید.\n3️⃣ <code>Subscription group › Subscription group settings › Add</code>: لینک رو در <code>Url</code> بذارید و ذخیره کنید.\n4️⃣ <code>Subscription group › Update subscription</code>؛ کانفیگ‌ها میان.\n5️⃣ یکی رو انتخاب، <code>Enter</code>، و پایین پنجره <code>System proxy › Set system proxy</code> ✅"),
                     _ => ("https://play.google.com/store/apps/details?id=com.v2ray.ang",
-                        "1️⃣ v2rayNG رو از گوگل‌پلی نصب کنید.\n2️⃣ لینک اشتراک پایین رو لمس کنید تا کپی بشه.\n3️⃣ v2rayNG رو باز کنید: ➕ ← <b>Import config from Clipboard</b>. خودش می‌فهمه لینک اشتراکه و توی اشتراک‌ها (Subscription) می‌ذاره.\n4️⃣ منوی ⋮ ← <b>Update subscription</b> تا کانفیگ‌ها بیان.\n5️⃣ یکی رو انتخاب و دکمه‌ی ▶️ پایین صفحه ✅"),
+                        "1️⃣ v2rayNG رو از گوگل‌پلی نصب کنید.\n2️⃣ لینک اشتراک پایین رو لمس کنید تا کپی بشه.\n3️⃣ v2rayNG رو باز کنید: <code>➕ › Import config from Clipboard</code>. خودش می‌فهمه لینک اشتراکه و توی اشتراک‌ها می‌ذاره.\n4️⃣ <code>⋮ › Update subscription</code> تا کانفیگ‌ها بیان.\n5️⃣ یکی رو انتخاب و دکمه‌ی ▶️ پایین صفحه ✅"),
                 };
                 let note = if u.service() == "v2ray" { String::new() } else { "\n\nℹ️ این برنامه‌ها کانفیگ‌های VLESS (Xray) و Hysteria2 رو وصل می‌کنن. برای WireGuard / AmneziaWG، «AmneziaVPN» رو انتخاب کنید (اون VLESS رو هم داره).".to_string() };
                 self.send(chat, &format!("🚀 <b>{}</b>\n\n{}\n\n🔗 <b>لینک اشتراک شما</b> (یک بار اضافه کنید؛ سرورها عوض بشن با Update خودش درست می‌شه):\n<code>{}</code>{}", name, steps, esc(&link), note),
@@ -1355,8 +1427,8 @@ impl Bot {
                     "w" => "https://www.wireguard.com/install/",
                     _ => "https://play.google.com/store/apps/details?id=com.wireguard.android",
                 };
-                let add = if os == "w" { "Import tunnel(s) from file" } else if os == "i" { "➕ ← Create from file or archive" } else { "➕ ← Import from file or archive" };
-                self.send(chat, &format!("🔐 <b>WireGuard</b>\nفقط کانفیگ‌های WireGuard، هر سرور یک فایل جدا.\n\n1️⃣ برنامه‌ی WireGuard رو نصب کنید (دکمه‌ی پایین).\n2️⃣ فایل‌هایی که الان میان رو ذخیره کنید.\n3️⃣ توی برنامه: <b>{}</b> ← فایل یک سرور.\n4️⃣ کلید کنار اسمش رو روشن کنید ✅\n\n💡 برای همه‌ی سرورها با هم، «AmneziaVPN» راحت‌تره.", add),
+                let add = if os == "w" { "Import tunnel(s) from file" } else if os == "i" { "➕ › Create from file or archive" } else { "➕ › Import from file or archive" };
+                self.send(chat, &format!("🔐 <b>WireGuard</b>\nفقط کانفیگ‌های WireGuard، هر سرور یک فایل جدا.\n\n1️⃣ برنامه‌ی WireGuard رو نصب کنید (دکمه‌ی پایین).\n2️⃣ فایل‌هایی که الان میان رو ذخیره کنید.\n3️⃣ توی برنامه: <code>{}</code> ← فایل یک سرور.\n4️⃣ کلید کنار اسمش رو روشن کنید ✅\n\n💡 برای همه‌ی سرورها با هم، «AmneziaVPN» راحت‌تره.", add),
                     Some(ik(vec![store("⬇️ دانلود WireGuard", url), back]))).await;
                 self.send_configs_n(chat, qid, u, "w", false).await;
             }
@@ -1475,11 +1547,11 @@ impl Bot {
             همه‌ی کانفیگ‌های VLESS (Xray) و Hysteria2 شما با همین یک لینک میان و هر وقت سرورها عوض بشن، با «به‌روزرسانی» خودش درست می‌شه.\n\n\
             🍏 <b>آیفون · V2Box</b>\n\
             1️⃣ لینک بالا رو کپی کنید.\n\
-            2️⃣ V2Box ← تب <b>Configs</b> ← ➕ بالای صفحه ← <b>Add subscription</b>\n\
-            3️⃣ لینک رو توی <b>URL</b> بذارید (Paste)، یه اسم بدید و <b>Save</b> بزنید.\n\
-            4️⃣ صفحه رو پایین بکشید تا کانفیگ‌ها بیان؛ یکی رو انتخاب و از تب <b>Home</b> وصل بشید (اجازه‌ی VPN رو Allow کنید).\n\n\
-            🤖 <b>اندروید · v2rayNG:</b> ➕ ← Import config from Clipboard ← منوی ⋮ ← Update subscription\n\
-            💻 <b>ویندوز · v2rayN:</b> Subscription group ← Subscription group settings ← Add ← Update subscription",
+            2️⃣ V2Box: <code>Configs › ➕ › Add subscription</code>\n\
+            3️⃣ لینک رو توی <code>URL</code> بذارید، یه اسم بدید و <code>Save</code> بزنید.\n\
+            4️⃣ صفحه رو پایین بکشید تا کانفیگ‌ها بیان؛ یکی رو انتخاب و از تب <code>Home</code> وصل بشید (اجازه‌ی VPN رو <code>Allow</code> کنید).\n\n\
+            🤖 <b>اندروید · v2rayNG:</b> <code>➕ › Import config from Clipboard</code>، بعد <code>⋮ › Update subscription</code>\n\
+            💻 <b>ویندوز · v2rayN:</b> <code>Subscription group › Subscription group settings › Add</code>، بعد <code>Update subscription</code>",
             esc(&u.username), esc(&link));
         self.send(chat, &t, Some(ik(vec![
             vec![b("⬇️ v2rayNG (اندروید)", "url:https://github.com/2dust/v2rayNG/releases/latest"), b("⬇️ V2Box (آیفون)", "url:https://apps.apple.com/app/v2box-v2ray-client/id6446814690")],
@@ -1499,7 +1571,7 @@ impl Bot {
              خط اول لینک اشتراکه: توی برنامه به‌عنوان اشتراک (Subscription) اضافه‌ش کنید تا هر تغییری روی سرورها خودش به‌روز بشه.\n\
              بقیه‌ی خط‌ها کانفیگ‌ها هستن.\n\n\
              برنامه‌ها: v2rayNG، Hiddify، NekoBox، V2Box، Streisand\n\
-             ➕ ← Import from clipboard (بعد از کپی) یا Import from file (همین فایل).",
+             <code>➕ › Import from clipboard</code> (بعد از کپی) یا <code>Import from file</code> (همین فایل).",
             n
         );
         let file = self.send_doc(chat, text.clone().into_bytes(), &format!("{}-links.txt", u.username), &cap).await;
@@ -1539,9 +1611,9 @@ impl Bot {
             "📦 بکاپ AmneziaVPN · {} سرور\n\n{}\n\
              📲 نصب، قدم به قدم:\n\
              1️⃣ AmneziaVPN رو {} نصب کنید.\n\
-             2️⃣ همین فایل رو ذخیره کنید (Save to Files / Download).\n\
-             3️⃣ AmneziaVPN ← Settings ← Backup ← Restore from backup و فایل رو انتخاب کنید.\n\
-             4️⃣ سرورها به همین ترتیب می‌آیند: اول AmneziaWG مستقیم، بعد از راه ایران (🇮🇷→)، بعد WireGuard و آخر Xray. یکی رو بزنید و Connect ✅\n\n\
+             2️⃣ همین فایل رو ذخیره کنید (<code>Save to Files</code> یا <code>Download</code>).\n\
+             3️⃣ AmneziaVPN: <code>Settings › Backup › Restore from backup</code> و فایل رو انتخاب کنید.\n\
+             4️⃣ سرورها به همین ترتیب می‌آیند: اول AmneziaWG مستقیم، بعد از راه ایران (🇮🇷→)، بعد WireGuard و آخر Xray. یکی رو بزنید و <code>Connect</code> ✅\n\n\
              ⚠️ بازیابی، سرورها و تنظیمات قبلی خود برنامه رو پاک می‌کنه.",
             cfgs.len(), list, app_name
         );
@@ -1605,26 +1677,19 @@ impl Bot {
     }
 
     fn home_kb(&self, uid: i64) -> Value {
-        // visible buttons two per row; the tutorial button gets a row of its own
-        let has_guides = !self.guides().is_empty();
+        // two buttons a row, always in the same order: buy | trial, my | renew, app | tutorial, invite | support
         let mut rows: Kb = vec![];
         let mut pair: Vec<(String, String)> = vec![];
         for k in MAIN_BTNS {
-            if self.db().on(&format!("hide_{}", k)) || (*k == "guide" && !has_guides) {
+            if self.db().on(&format!("hide_{}", k)) {
                 continue;
             }
-            let btn = b(&self.bt(k), k);
-            if *k == "guide" {
-                if !pair.is_empty() { rows.push(std::mem::take(&mut pair)); }
-                rows.push(vec![btn]);
-                continue;
-            }
-            pair.push(btn);
+            pair.push(b(&self.bt(k), k));
             if pair.len() == 2 { rows.push(std::mem::take(&mut pair)); }
         }
         if !pair.is_empty() { rows.push(pair); }
         if self.admin(uid) {
-            rows.push(vec![b("👑 پنل مدیریت", "adm")]);
+            rows.push(vec![b("⚙️ پنل مدیریت", "adm")]);
         }
         ik(rows)
     }
@@ -1727,6 +1792,7 @@ impl Bot {
     // ============================================================ حلقه‌ی اصلی
     pub async fn run(self: Arc<Self>) {
         kanki_plans_once(self.db());
+        ux_once(self.db());
         let me3 = self.clone();
         tokio::spawn(async move { me3.ton_watch().await });
         *running_slot().lock().unwrap_or_else(|e| e.into_inner()) = Some(self.clone());
@@ -1752,7 +1818,8 @@ impl Bot {
         tokio::spawn(async move { me.background().await });
         let mut offset = 0i64;
         loop {
-            if self.db().on("bot_paused") {
+            // paused, or the panel is being moved (the messages wait at Telegram for the new panel)
+            if self.db().on("bot_paused") || crate::migrate::frozen() {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 continue;
             }
@@ -1775,6 +1842,11 @@ impl Bot {
                 tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                 continue;
             };
+            // frozen during that long poll: these are left at Telegram (the offset does not move on), the
+            // new panel reads them
+            if crate::migrate::frozen() {
+                continue;
+            }
             for u in list {
                 offset = u["update_id"].as_i64().unwrap_or(offset) + 1;
                 let me = self.clone();
@@ -2174,7 +2246,14 @@ impl Bot {
                     return self.send_guide(chat, &g[0]).await;
                 }
                 if g.is_empty() {
-                    return self.edit(chat, mid, "هنوز آموزشی اضافه نشده است.", Some(ik(vec![back("home")]))).await;
+                    // no video yet: the written guide of the newest account (device, then app)
+                    let accs = self.db().users_of_tg(uid);
+                    let Some(u) = accs.iter().find(|u| u.active()).or(accs.first()) else {
+                        return self.edit(chat, mid, "📖 <b>آموزش اتصال</b>\n\nآموزش قدم‌به‌قدم بعد از خرید یا تست رایگان، برای دستگاه و برنامه‌ی خودتون همین‌جا میاد 👇",
+                            Some(ik(vec![vec![b(&self.bt("buy"), "buy"), b(&self.bt("trial"), "trial")], back("home")]))).await;
+                    };
+                    return self.edit(chat, mid, &format!("📖 <b>آموزش اتصال</b> · حساب <b>{}</b>\n\nدستگاهتون رو انتخاب کنید؛ برنامه، فایل و آموزش قدم‌به‌قدم همین‌جا میاد 👇", esc(&u.username)),
+                        Some(ik(vec![self.how_devices_kb(u.id), back("home")]))).await;
                 }
                 let mut rows: Kb = g.iter().map(|x| vec![b(&format!("🎬 {}", x["title"].as_str().unwrap_or("")), &format!("gd:{}", x["id"].as_i64().unwrap_or(0)))]).collect();
                 rows.push(back("home"));
@@ -2373,18 +2452,21 @@ impl Bot {
             if on_sale.is_empty() {
                 return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b(&back_lbl, "home")]]))).await;
             }
-            let mut rows: Kb = on_sale.iter().map(|s| vec![b(s.2, &format!("psv:{}:{}", mode, s.1))]).collect();
-            if let Some(r) = self.shop_row(renew, "") {
-                rows.push(r);
+            // one button a service with its lowest price, then the custom plan and the mini app's shop
+            let mut rows: Kb = vec![];
+            for s in &on_sale {
+                let from = list.iter().filter(|p| p.service == s.0).map(|p| p.toman).filter(|t| *t > 0).min().unwrap_or(0);
+                let lbl = if from > 0 { format!("{} — از {}", s.2, fa_toman(from)) } else { s.2.to_string() };
+                rows.push(vec![b(&lbl, &format!("psv:{}:{}", mode, s.1))]);
             }
+            rows.extend(self.shop_rows(renew));
             rows.push(vec![b(&back_lbl, "home")]);
-            let txt = format!("🛍 <b>خرید اشتراک کانکی</b>\n{} نوع سرویس داریم؛ هر کدوم برای یه کار 👇\n\n{}{}\n\nسرویس خودتون رو انتخاب کنید:",
-                if on_sale.len() == 3 { "سه".to_string() } else { on_sale.len().to_string() }, offer_line, on_sale.iter().map(|s| s.3).collect::<Vec<_>>().join("\n\n"));
+            let txt = format!("🛒 <b>خرید اشتراک</b>\n\n{}نوع سرویس رو انتخاب کنید 👇", offer_line);
             return self.edit(chat, mid, &txt, Some(ik(rows))).await;
         }
-        let code = service_code(svc);
         list.retain(|p| p.service == svc);
-        // categories are ordered by their shortest duration, then by name
+        // an old message's category button (pcat:<mode>:<n>:<service>) still lists that category's plans; the menu
+        // itself lists every plan of the service, by duration
         let mut cats: Vec<(i64, String)> = vec![];
         for p in list.iter() {
             if p.category.is_empty() { continue; }
@@ -2395,65 +2477,23 @@ impl Bot {
             }
         }
         cats.sort();
-        let has_other = list.iter().any(|p| p.category.is_empty());
-        // what the customer gets, always said
-        let head = format!("{}\n\n{}", SERVICES.iter().find(|s| s.0 == svc).map(|s| s.3).unwrap_or(""), offer_line);
-        let mut title = format!("{}{}", head, self.tx("txt_plans"));
-        // back from the plans: to the service menu
-        let top = format!("psv:{}", mode);
-        let mut back_to = top.clone();
-        // any volume, days and users of this service, chosen in the mini app (the same price list as the plans)
-        let custom = self.shop_row(renew, svc);
-        if !cats.is_empty() {
-            if sel == "m" {
-                // each kind with its emoji, its colour and its cheapest price; the message says what each is for
-                let mut rows: Kb = vec![];
-                let mut about = vec![];
-                for (i, c) in cats.iter().enumerate() {
-                    let (em, st, line) = cat_look(&c.1, i);
-                    let of: Vec<&Plan> = list.iter().filter(|p| p.category == c.1).collect();
-                    let from = of.iter().map(|p| p.toman).filter(|t| *t > 0).min().unwrap_or(0);
-                    let off = of.iter().any(|p| p.old_toman > p.toman);
-                    let lbl = format!("{} {}{}{}", em, c.1, if from > 0 { format!(" — از {}", toman(from)) } else { String::new() }, if off { " 🏷" } else { "" });
-                    rows.push(vec![b(&lbl, &format!("@{}@pcat:{}:{}:{}", st, mode, i, code))]);
-                    if !line.is_empty() {
-                        about.push(format!("{} <b>{}</b>: {}", em, esc(&c.1), line));
-                    }
-                }
-                if has_other { rows.push(vec![b(&self.bt("other_plans"), &format!("pcat:{}:o:{}", mode, code))]); }
-                if let Some(r) = custom {
-                    rows.push(r);
-                    about.push("🧮 <b>دلخواه</b>: حجم، روز و تعداد کاربر رو خودتون انتخاب کنید".to_string());
-                }
-                rows.push(vec![b(&back_lbl, &top)]);
-                let about = if about.is_empty() { String::new() } else { format!("\n\n{}", about.join("\n")) };
-                return self.edit(chat, mid, &format!("{}{}{}", head, self.tx("txt_cats"), about), Some(ik(rows))).await;
-            }
-            let want: String = if sel == "o" {
-                String::new()
-            } else {
-                sel.parse::<usize>().ok().and_then(|i| cats.get(i)).map(|c| c.1.clone()).unwrap_or_default()
-            };
-            title = if want.is_empty() { "📦 <b>سایر پلن‌ها</b>\nپلن خودتون رو از پایین انتخاب کنید 👇".to_string() } else {
-                let i = cats.iter().position(|c| c.1 == want).unwrap_or(0);
-                let (em, _, line) = cat_look(&want, i);
-                format!("{} · {} <b>{}</b>{}\n\nپلن خودتون رو از پایین انتخاب کنید 👇", service_label(svc), em, esc(&want), if line.is_empty() { String::new() } else { format!("\n{}", line) })
-            };
+        if sel == "o" {
+            list.retain(|p| p.category.is_empty());
+        } else if let Some(c) = sel.parse::<usize>().ok().and_then(|i| cats.get(i)) {
+            let want = c.1.clone();
             list.retain(|p| p.category == want);
-            back_to = format!("pcat:{}:m:{}", mode, code);
         }
-        // ordered by duration, then number of users, then price; the text groups them by duration
+        let back_to = format!("psv:{}", mode);
+        let title = format!("{}\n\n{}پلن خودتون رو انتخاب کنید 👇", SERVICES.iter().find(|s| s.0 == svc).map(|s| s.3).unwrap_or(""), offer_line);
+        // ordered by duration, then number of users, then price
         list.sort_by_key(|x| (x.days, x.conns, x.toman));
         let mut rows: Kb = vec![];
         for p in list.iter() {
             let data = if pattern.contains("{}") { pattern.replace("{}", &p.id.to_string()) } else { format!("{}:{}", pattern, p.id) };
             rows.push(vec![b(&plan_button(p, p.toman), &data)]);
         }
-        if cats.is_empty() {
-            if let Some(r) = custom {
-                rows.push(r);
-                title.push_str("\n\n🧮 حجم و روز دلخواه: قیمت همون‌جا حساب می‌شه.");
-            }
+        if let Some(r) = self.shop_row(renew, svc) {
+            rows.push(r);
         }
         if rows.is_empty() {
             return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b(&back_lbl, &back_to)]]))).await;
@@ -2736,6 +2776,9 @@ impl Bot {
     async fn ton_watch(&self) {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+            if crate::migrate::frozen() {
+                continue;
+            }
             let ids: Vec<(i64, i64)> = self.db().with(|c| {
                 let mut s = c.prepare("SELECT id,created FROM orders WHERE method='ton' AND status='waiting' AND created>?1").unwrap();
                 let v: Vec<(i64, i64)> = s.query_map([now() - 3 * 3600], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().filter_map(|x| x.ok()).collect();
@@ -3277,20 +3320,21 @@ impl Bot {
             "a:stats" => {
                 let us = db.users();
                 let bu: i64 = db.with(|c| c.query_row("SELECT COUNT(*) FROM bot_users", [], |r| r.get(0)).unwrap_or(0));
-                let (cnt, rev): (i64, i64) = db.with(|c| c.query_row(
-                    "SELECT COUNT(*), COALESCE(SUM(CASE WHEN method IN ('card','zp') THEN CAST(amount AS INTEGER) END),0) FROM orders WHERE status='done'",
-                    [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap_or((0, 0)));
+                let r = revenue(db);
                 let today: i64 = db.with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE status='done' AND created>?1", [now() - 86400], |r| r.get(0)).unwrap_or(0));
-                // crypto orders keep their amount in dollars
-                let usd: f64 = db.with(|c| c.query_row(
-                    "SELECT COALESCE(SUM(CASE WHEN method NOT IN ('card','zp') THEN CAST(amount AS REAL) END),0) FROM orders WHERE status='done'",
-                    [], |r| r.get(0)).unwrap_or(0.0));
                 let ns = db.nodes();
+                let mut money = format!("💰 درآمد کل: <b>{}</b>", fa_toman(r.toman()));
+                let lines: Vec<String> = [("💳 کارت / درگاه بانکی", r.card, String::new()),
+                    ("💎 TON", r.ton, if r.ton_nano > 0 { format!(" (≈ {} TON)", crate::pay::ton_text(r.ton_nano)) } else { String::new() }),
+                    ("⭐️ استارز", r.stars, if r.star_count > 0 { format!(" ({} ⭐️)", fa_num(&r.star_count.to_string())) } else { String::new() })]
+                    .into_iter().filter(|x| x.1 > 0).map(|(n, t, x)| format!("   {}: {}{}", n, fa_toman(t), x)).collect();
+                if !lines.is_empty() { money.push_str(&format!("\n{}", lines.join("\n"))); }
+                if r.usd > 0.0 { money.push_str(&format!("\n💵 درآمد دلاری (درگاه ارزی / کیف پول): <b>{:.2}$</b>", r.usd)); }
                 let txt = format!(
-                    "📈 <b>آمار</b>\n\n👥 کاربران: <b>{}</b> (فعال: {})\n🟢 آنلاین: <b>{}</b>\n⛔ منقضی/تمام‌حجم: {}\n📊 مصرف کل: {:.1} GB\n🖥 نودها: {}/{} آنلاین\n\n🤖 کاربران ربات: <b>{}</b>\n🧾 فروش: <b>{}</b> (۲۴ ساعت اخیر: {})\n💰 درآمد ریالی: <b>{}</b>\n💎 درآمد ارزی: <b>{:.2}$</b>",
+                    "📈 <b>آمار</b>\n\n👥 کاربران: <b>{}</b> (فعال: {})\n🟢 آنلاین: <b>{}</b>\n⛔ منقضی/تمام‌حجم: {}\n📊 مصرف کل: {:.1} GB\n🖥 نودها: {}/{} آنلاین\n\n🤖 کاربران ربات: <b>{}</b>\n🧾 فروش: <b>{}</b> (۲۴ ساعت اخیر: {})\n{}",
                     us.len(), us.iter().filter(|u| u.active()).count(), us.iter().filter(|u| u.online > 0).count(),
                     us.iter().filter(|u| !u.active()).count(), us.iter().map(|u| u.used_gb()).sum::<f64>(),
-                    ns.iter().filter(|n| n.online).count(), ns.len(), bu, cnt, today, toman(rev), usd);
+                    ns.iter().filter(|n| n.online).count(), ns.len(), bu, r.count, today, money);
                 { self.edit(chat, mid, &txt, back).await; true }
             }
             "a:pend" => {
@@ -4383,6 +4427,9 @@ impl Bot {
         let mut tick: u64 = 0;
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            if crate::migrate::frozen() {
+                continue;
+            }
             tick += 1;
             // the bot is alive when Telegram accepts its token and the polling is not refused: a long poll
             // that a network on the way cuts while nobody writes must not make it look offline
@@ -4518,6 +4565,11 @@ fn gift_line(days: i64, gb: f64) -> String {
 const HOW_TARGETS: &[(&str, &str)] = &[("k", "a"), ("k", "w"), ("z", "a"), ("z", "i"), ("z", "w"), ("v", "a"), ("v", "i"), ("v", "w"), ("g", "a"), ("g", "i"), ("g", "w")];
 
 /// An app of the connection guide: (its name on this device, one line about it)
+/// The icon of an app in the device menu
+fn app_icon(app: &str) -> &'static str {
+    match app { "k" => "📱", "z" => "🛡️", "v" => "🚀", _ => "🔐" }
+}
+
 fn how_app_line(app: &str, os: &str) -> (&'static str, &'static str) {
     match app {
         "k" => ("اپ کانکی (Kanki VPN)", "اپ خود ما: همه‌ی سرورها با یک کد، سریع‌ترین رو خودش انتخاب می‌کنه؛ برای بازی عالیه"),
@@ -4540,7 +4592,7 @@ fn cfg_help(code: &str) -> String {
             <b>روش وصل شدن با WireGuard:</b>\n\
             1️⃣ برنامه‌ی WireGuard رو از گوگل‌پلی نصب کنید.\n\
             2️⃣ فایل پایین رو دانلود کنید (یک بار روش بزنید).\n\
-            3️⃣ توی برنامه دکمه‌ی ➕ رو بزنید ← «Import from file or archive» ← همین فایل رو انتخاب کنید.\n\
+            3️⃣ توی برنامه: <code>➕ › Import from file or archive</code> ← همین فایل رو انتخاب کنید.\n\
             4️⃣ کلید کنار اسم کانفیگ رو روشن کنید ✅{}", easy),
         "a" => format!("📙 <b>کانفیگ AmneziaWG</b>\n\n\
             ⚠️ این کانفیگ با برنامه‌ی WireGuard معمولی <b>وصل نمی‌شه</b>!\n\
@@ -4548,13 +4600,13 @@ fn cfg_help(code: &str) -> String {
             <b>روش وصل شدن با AmneziaWG:</b>\n\
             1️⃣ برنامه‌ی AmneziaWG رو از گوگل‌پلی نصب کنید.\n\
             2️⃣ فایل پایین رو دانلود کنید (یک بار روش بزنید).\n\
-            3️⃣ توی برنامه دکمه‌ی ➕ رو بزنید ← «Import from file or archive» ← همین فایل رو انتخاب کنید.\n\
+            3️⃣ توی برنامه: <code>➕ › Import from file or archive</code> ← همین فایل رو انتخاب کنید.\n\
             4️⃣ کلید کنار اسم کانفیگ رو روشن کنید ✅{}", easy),
         _ => format!("📗 <b>کانفیگ Hysteria2</b>\n\n\
             ✅ با این برنامه‌ها کار می‌کنه: <b>کانکی</b>، <b>Hiddify</b> و <b>v2rayNG</b>\n\n\
             <b>روش وصل شدن با Hiddify یا v2rayNG:</b>\n\
             1️⃣ روی لینک پایین بزنید تا کپی بشه.\n\
-            2️⃣ توی برنامه دکمه‌ی ➕ رو بزنید ← «Import from clipboard» (وارد کردن از کلیپ‌بورد).\n\
+            2️⃣ توی برنامه: <code>➕ › Import from clipboard</code> (وارد کردن از کلیپ‌بورد).\n\
             3️⃣ کانفیگ رو انتخاب کنید و دکمه‌ی اتصال رو بزنید ✅{}", easy),
     }
 }
@@ -4735,8 +4787,8 @@ mod flow_tests {
         tap(&bot, from(buyer, "Sara", "sara"), &vip).await;
         let bs = buttons(&log, buyer);
         assert!(!bs.iter().any(|b| b.0.contains("دلخواه VIP")), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0 == "50 گیگ — 2 کاربره — 1 ماهه — 300,000 تومان" && b.2 == "success"), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0 == "10 گیگ — 1 ماهه — 90,000 تومان" && b.2 == "danger"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "🔹 ۵۰ گیگ | ۱ ماهه | ۲ کاربر — ۳۰۰,۰۰۰ ت" && b.2 == "success"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "🔹 ۱۰ گیگ | ۱ ماهه | ۱ کاربر — ۹۰,۰۰۰ ت" && b.2 == "danger"), "{:?}", bs);
         assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1&shop=vip&tab=custom" && b.2 == "primary"), "{:?}", bs);
         assert!(!log.lock().unwrap().iter().any(|(_, v)| v.to_string().contains("\"_k\"")), "the colour key is not sent to Telegram");
         // paid by card: the receipt, the admin approves (green / red buttons), the account has the custom volume and days
@@ -4780,7 +4832,7 @@ mod flow_tests {
         tap(&bot, from(buyer, "Nima", "nima"), "buy").await;
         let bs = buttons(&log, buyer);
         assert!(bs.iter().any(|b| b.1 == "psv:b:v") && bs.iter().any(|b| b.1 == "psv:b:p"), "{:?}", bs);
-        assert!(last(&log, buyer).contains("V2Ray") && last(&log, buyer).contains("VIP"));
+        assert!(bs.iter().any(|b| b.0.contains("V2Ray")) && bs.iter().any(|b| b.0.contains("VIP")), "{:?}", bs);
         tap(&bot, from(buyer, "Nima", "nima"), "psv:b:v").await;
         let bs = buttons(&log, buyer);
         let std_id: i64 = db.with(|c| c.query_row("SELECT id FROM plans WHERE name='Std'", [], |r| r.get(0)).unwrap());
@@ -4810,11 +4862,11 @@ mod flow_tests {
         // the short delivery: only the apps, the tutorial (when there is one) and support; no config or backup buttons
         let bs: Vec<String> = buttons(&log, buyer).into_iter().map(|b| b.0).collect();
         assert!(t.contains("روی کدوم دستگاه وصل می‌شید"), "{}", t);
-        assert!(["🤖 اندروید", "🍏 آیفون", "💻 ویندوز"].iter().all(|d| bs.iter().any(|b| b == d)) && bs.iter().any(|b| b.starts_with("پشتیبانی")) && bs.len() <= 5, "{:?}", bs);
+        assert!(["🤖 اندروید", "🍏 آیفون", "💻 ویندوز"].iter().all(|d| bs.iter().any(|b| b == d)) && bs.iter().any(|b| b == "💬 پشتیبانی") && bs.len() <= 6, "{:?}", bs);
         // the connection guide of a v2ray account on an iPhone: only V2Box, with its subscription link
         tap(&bot, from(buyer, "Nima", "nima"), &format!("hw:{}:i", acc[0].id)).await;
         let bs = buttons(&log, buyer);
-        assert_eq!(bs.iter().filter(|b| b.1.starts_with("hw:") && b.1.matches(':').count() == 3).map(|b| b.0.clone()).collect::<Vec<_>>(), vec!["⭐️ V2Box".to_string()], "{:?}", bs);
+        assert_eq!(bs.iter().filter(|b| b.1.starts_with("hw:") && b.1.matches(':').count() == 3).map(|b| b.0.clone()).collect::<Vec<_>>(), vec!["⭐ V2Box (پیشنهادی)".to_string()], "{:?}", bs);
         tap(&bot, from(buyer, "Nima", "nima"), &format!("hw:{}:i:v", acc[0].id)).await;
         let t = last(&log, buyer);
         assert!(t.contains("Add subscription") && t.contains("/v2") && !t.contains("AmneziaVPN"), "{}", t);
@@ -4874,6 +4926,49 @@ mod flow_tests {
     }
 
     #[tokio::test]
+    async fn the_main_menu_in_its_rows_and_the_short_welcome() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        // an older custom welcome and button text give way once to the new layout
+        db.set("welcome", "old long welcome");
+        db.set("btn_my", "📊 old");
+        assert!(ux_once(db));
+        assert!(!ux_once(db));
+        let c = 7801;
+        say(&bot, from(c, "Sara", "sara"), "/start").await;
+        let t = last(&log, c);
+        assert!(t.starts_with("⚡️ <b>به Kanki VPN خوش آمدید</b>") && t.contains("<code>WireGuard</code>"), "{}", t);
+        let l = log.lock().unwrap().clone();
+        let (_, v) = l.iter().rev().find(|(m, v)| m == "sendMessage" && v["chat_id"] == c && v["reply_markup"]["inline_keyboard"].is_array()).unwrap();
+        let rows: Vec<Vec<String>> = v["reply_markup"]["inline_keyboard"].as_array().unwrap().iter()
+            .map(|r| r.as_array().unwrap().iter().map(|b| b["text"].as_str().unwrap().to_string()).collect()).collect();
+        assert_eq!(rows, vec![
+            vec!["🛒 خرید اشتراک", "🎁 تست رایگان"], vec!["📦 سرویس‌های من", "🔄 تمدید اشتراک"],
+            vec!["📱 دانلود اپلیکیشن", "📖 آموزش اتصال"], vec!["🤝 دعوت از دوستان", "💬 پشتیبانی"]]);
+        // the admin's menu has the management row under them
+        say(&bot, from(ADMIN, "Admin", "admin"), "/start").await;
+        let l = log.lock().unwrap().clone();
+        let (_, v) = l.iter().rev().find(|(m, v)| m == "sendMessage" && v["chat_id"] == ADMIN && v["reply_markup"]["inline_keyboard"].is_array()).unwrap();
+        assert_eq!(v["reply_markup"]["inline_keyboard"].as_array().unwrap().last().unwrap()[0]["text"], "⚙️ پنل مدیریت");
+        // the tutorial with no video yet: the buy and trial buttons (no account) instead of «nothing here»
+        tap(&bot, from(c, "Sara", "sara"), "guide").await;
+        assert!(buttons(&log, c).iter().any(|b| b.1 == "trial"), "{:?}", buttons(&log, c));
+    }
+
+    #[tokio::test]
+    async fn revenue_keeps_toman_and_dollars_apart() {
+        let (bot, _log) = bot().await;
+        let db = bot.db();
+        for (m, amount, rf) in [("card", "184000", ""), ("ton", "120000", "KANKI-1-1234 3500000000 abc"), ("stars", "90000", "nonce 450 charge"), ("np", "4.5", ""), ("zp", "50000", "")] {
+            db.exec("INSERT INTO orders(tg_id,plan_id,kind,target,method,amount,status,ref,discount,created) VALUES(1,1,'new',0,?1,?2,'done',?3,'',0)", &[&m, &amount, &rf]).unwrap();
+        }
+        db.exec("INSERT INTO orders(tg_id,plan_id,kind,target,method,amount,status,ref,discount,created) VALUES(1,1,'new',0,'card','999999','pending','','',0)", &[]).unwrap();
+        let r = revenue(db);
+        assert_eq!(r, Revenue { count: 5, card: 234000, ton: 120000, ton_nano: 3_500_000_000, stars: 90000, star_count: 450, usd: 4.5 });
+        assert_eq!(r.toman(), 444000);
+    }
+
+    #[tokio::test]
     async fn kanki_plans_come_once_by_themselves() {
         let (bot, _log) = bot().await;
         let db = bot.db();
@@ -4898,36 +4993,29 @@ mod flow_tests {
         bot.touch(buyer, &from(buyer, "Sara", "sara"), 0);
         db.exec("UPDATE bot_users SET cfg_name='sara' WHERE tg_id=?1", &[&buyer]).unwrap();
         tap(&bot, from(buyer, "Sara", "sara"), "buy").await;
-        // the three services, each said, one button each (Persian first, no brackets), and the whole shop in the mini app
+        // the three services, one button each with its lowest price; then the custom plan and the whole shop in the mini app
         let t = last(&log, buyer);
-        assert!(t.contains("اقتصادی · V2Ray") && t.contains("گیمینگ · WireGuard + Amnezia") && t.contains("همه‌کاره VIP"), "{}", t);
+        assert!(t.contains("نوع سرویس") && !t.contains("•"), "short, no long descriptions: {}", t);
         let bs = buttons(&log, buyer);
         let labels: Vec<&str> = bs.iter().filter(|b| b.1.starts_with("psv:")).map(|b| b.0.as_str()).collect();
-        assert_eq!(labels, vec!["⚡ اقتصادی · V2Ray", "🎮 گیمینگ · WireGuard + Amnezia", "👑 همه‌کاره VIP · هر سه با هم"]);
-        assert!(labels.iter().all(|l| l.chars().count() <= 32 && !l.contains('(')));
-        assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1"), "{:?}", bs);
+        assert_eq!(labels, vec!["⚡ اقتصادی (V2Ray) — از ۵۲,۰۰۰ تومان", "🎮 گیمینگ (WireGuard + Amnezia) — از ۶۴,۰۰۰ تومان", "👑 همه‌کاره VIP (تمام پروتکل‌ها + اپ) — از ۸۰,۰۰۰ تومان"]);
+        assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1" && b.0 == "💎 ورود به فروشگاه مینی‌اپ"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1&tab=custom" && b.0.starts_with("🎛")), "{:?}", bs);
         tap(&bot, from(buyer, "Sara", "sara"), "psv:b:p").await;
-        // each kind: its emoji, its cheapest price and its own colour; the custom plan of this service in the mini app
+        // every plan of the service at once, by duration: «🔹 volume | duration | users — price», the badge's emoji at the end
         let bs = buttons(&log, buyer);
-        let single = bs.iter().find(|b| b.1.starts_with("pcat:b:0")).unwrap();
-        assert_eq!((single.0.as_str(), single.2.as_str()), ("👤 تک‌کاربره — از 80,000 تومان", "primary"), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0 == "👥 چندکاربره — از 135,000 تومان" && b.2 == "success"), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0 == "⏳ بلندمدت — از 145,000 تومان" && b.2 == "danger"), "{:?}", bs);
+        let plans: Vec<&str> = bs.iter().filter(|b| b.1.starts_with("pl:")).map(|b| b.0.as_str()).collect();
+        assert_eq!(plans[0], "🔹 ۲۰ گیگ | ۱ ماهه | ۱ کاربر — ۸۰,۰۰۰ ت", "{:?}", plans);
+        assert!(plans.contains(&"🔹 ۵۰ گیگ | ۱ ماهه | ۱ کاربر — ۱۱۰,۰۰۰ ت 🔥"), "{:?}", plans);
+        assert!(plans.iter().all(|p| p.starts_with("🔹 ")), "{:?}", plans);
+        assert!(plans.iter().position(|p| p.contains("۱ ماهه")).unwrap() < plans.iter().position(|p| p.contains("۳ ماهه")).unwrap(), "{:?}", plans);
         assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1&shop=vip&tab=custom"), "{:?}", bs);
-        assert!(last(&log, buyer).contains("👥 <b>چندکاربره</b>"), "{}", last(&log, buyer));
-        // a plan: English digits, dashes between, the label's emoji at the end
-        tap(&bot, from(buyer, "Sara", "sara"), &single.1).await;
-        let bs = buttons(&log, buyer);
-        assert!(bs.iter().any(|b| b.0 == "20 گیگ — 1 ماهه — 80,000 تومان" && b.2 == "primary"), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0 == "50 گیگ — 1 ماهه — 110,000 تومان 🔥"), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0 == "100 گیگ — 1 ماهه — 170,000 تومان ⭐"), "{:?}", bs);
-        assert!(!bs.iter().any(|b| b.0.contains('۰')), "{:?}", bs);
         // the gaming service: its own plans, 12,000 more than V2Ray; a gaming purchase makes a WireGuard / AmneziaWG account
         tap(&bot, from(buyer, "Sara", "sara"), "pcat:b:0:g").await;
         let bs = buttons(&log, buyer);
-        assert!(bs.iter().any(|b| b.0 == "20 گیگ — 1 ماهه — 64,000 تومان"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "🔹 ۲۰ گیگ | ۱ ماهه | ۱ کاربر — ۶۴,۰۰۰ ت"), "{:?}", bs);
         tap(&bot, from(buyer, "Sara", "sara"), "pcat:b:0:v").await;
-        assert!(buttons(&log, buyer).iter().any(|b| b.0 == "20 گیگ — 1 ماهه — 52,000 تومان"));
+        assert!(buttons(&log, buyer).iter().any(|b| b.0 == "🔹 ۲۰ گیگ | ۱ ماهه | ۱ کاربر — ۵۲,۰۰۰ ت"));
         let u = bot.create_account_svc(buyer, 20.0, 30, 1, "", 0, "game").unwrap();
         assert_eq!((u.protocols.as_str(), u.service()), ("wg,awg,kmix", "game"));
         assert!(bot.account_text(&u).contains("🎮 گیمینگ") && !bot.account_text(&u).contains("/v2"));
@@ -5146,7 +5234,7 @@ mod flow_tests {
         assert_eq!(bot.how_apps(&u, "w").first(), Some(&"k"));
         tap(&bot, from(tg, "Reza", "reza"), &format!("hw:{}:a", u.id)).await;
         let bs = buttons(&log, tg);
-        assert_eq!((bs[0].0.as_str(), bs[0].2.as_str()), ("⭐️ اپ کانکی (Kanki VPN)", "success"), "{:?}", bs);
+        assert_eq!((bs[0].0.as_str(), bs[0].2.as_str()), ("⭐ اپ کانکی (Kanki VPN) (پیشنهادی)", "success"), "{:?}", bs);
         tap(&bot, from(tg, "Reza", "reza"), &format!("hw:{}:a:k", u.id)).await;
         assert!(last(&log, tg).contains(&u.sub_code()), "{}", last(&log, tg));
         // an app that is not offered for this account (no WireGuard server here): refused
@@ -5293,14 +5381,19 @@ mod flow_tests {
         bot.on_message(&json!({"from": from(ADMIN, "Admin", "admin"), "chat": {"id": ADMIN}, "text": "🔥",
             "entities": [{"type": "custom_emoji", "offset": 0, "length": 2, "custom_emoji_id": ID}]})).await;
         assert_eq!(crate::buttons::icons(bot.db()).get("buy").map(|s| s.as_str()), Some(ID));
-        // a customer's menu: the emoji on the button, the plain one of its text gone
+        // alone in its row (beside «trial» without one) it is not used: the row keeps its plain emoji
         let c = 7701;
+        say(&bot, from(c, "Sara", "sara"), "/start").await;
+        assert!(!log.lock().unwrap().iter().any(|(_, v)| v["chat_id"] == c && v.to_string().contains(ID)), "a row of mixed icons");
+        crate::buttons::set_icon(bot.db(), "trial", Some("5368324170671202287"));
+        // a customer's menu: the emoji on the button, the plain one of its text gone
         say(&bot, from(c, "Sara", "sara"), "/start").await;
         let l = log.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let (_, v) = l.iter().rev().find(|(m, v)| m == "sendMessage" && v["chat_id"] == c && v["reply_markup"]["inline_keyboard"].is_array()).expect("a menu");
         let btn = v["reply_markup"]["inline_keyboard"].as_array().unwrap().iter().flat_map(|r| r.as_array().unwrap().clone())
             .find(|b| b["icon_custom_emoji_id"] == ID).expect("the buy button has the emoji");
         assert_eq!(btn["text"], "خرید اشتراک");
+        crate::buttons::set_icon(bot.db(), "trial", None);
         // a text that is not a premium emoji is refused and nothing changes
         tap(&bot, from(ADMIN, "Admin", "admin"), "bic:trial").await;
         say(&bot, from(ADMIN, "Admin", "admin"), "🔥").await;

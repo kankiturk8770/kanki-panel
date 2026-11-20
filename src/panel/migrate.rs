@@ -11,6 +11,13 @@
 //! 3. The new server tells this one it is done: this panel stops (no two panels syncing the nodes or
 //!    answering the bot). Nodes and tunnel servers reach the panel by its domain, so they follow by
 //!    themselves once the domain points to the new IP.
+//!
+//! Nothing written after the backup may be lost: from the moment the new server takes the backup this
+//! panel is frozen (`frozen`). Changes are refused (the admin, the mini app), the bot stops reading
+//! Telegram (its messages wait there for the new panel), and the rounds with the servers, the payment
+//! checks, the cleanup and the channel pause (the servers keep counting traffic; the new panel reads it
+//! from the backup's last values, so no byte is counted twice or missed). The freeze ends when the move
+//! is cancelled, or by itself when the command expires and the new server never said it was done.
 use crate::api::err;
 use crate::guard;
 use crate::util::{now, rand_token, sha256_hex};
@@ -29,6 +36,72 @@ type St = State<Arc<App>>;
 /// how long a move command works
 const VALID: i64 = 3 * 3600;
 
+static FROZEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The panel is being moved: the new server has (or is taking) the backup, so nothing may change here
+pub fn frozen() -> bool {
+    FROZEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn set_frozen(app: &App, on: bool) {
+    FROZEN.store(on, std::sync::atomic::Ordering::Relaxed);
+    app.db.set("mig_frozen", &if on { now().to_string() } else { String::new() });
+}
+
+/// At start: a panel restarted during a move stays frozen
+pub fn load_frozen(app: &App) {
+    FROZEN.store(!app.db.get("mig_frozen").is_empty(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Freezes the panel before its backup is taken: the round with the servers that is running ends first,
+/// and work started a moment before (a bot message, a payment) gets a few seconds to be written.
+async fn freeze(app: &App) {
+    if frozen() {
+        return;
+    }
+    set_frozen(app, true);
+    eprintln!("the panel is moving to a new server: frozen (changes wait for the new panel)");
+    let _round = app.sync_lock.lock().await;
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+}
+
+/// Requests refused while the panel is frozen: every change (the admin's, an API key's, the mini app's
+/// purchases and trials, a new server joining). Reading, the subscriptions, the servers' own calls and
+/// Hysteria2's logins go on, and so do signing in and the move page (to cancel it).
+pub fn refused_while_moving(method: &axum::http::Method, path: &str) -> bool {
+    use axum::http::Method;
+    if path.starts_with("/api/migrate") || path == "/api/login" || path == "/api/logout" {
+        return false;
+    }
+    let change = method != Method::GET && method != Method::HEAD && method != Method::OPTIONS;
+    (path.starts_with("/api/") && change && !path.starts_with("/api/config/"))
+        || path == "/tg/api/buy"
+        || path == "/tg/api/trial"
+        || (path.starts_with("/tg/api/admin/") && change)
+        || path == "/join/register"
+}
+
+/// The freeze ends by itself when the command expired and the new server never said it was done (the
+/// move failed or was left): the panel runs on, and the admin is told.
+pub async fn freeze_loop(app: Arc<App>) {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        if !frozen() {
+            continue;
+        }
+        let exp: i64 = app.db.get("mig_exp").parse().unwrap_or(0);
+        let done: i64 = app.db.get("mig_done").parse().unwrap_or(0);
+        if done == 0 && now() > exp {
+            set_frozen(&app, false);
+            for k in ["mig_token", "mig_pass", "mig_cmd"] {
+                app.db.set(k, "");
+            }
+            eprintln!("the move was not finished in time: the panel runs on here");
+            crate::monitor::notify("⚠️ انتقال پنل تمام نشد (سرور تازه خبر نداد) و فرمانش منقضی شد: پنل روی همین سرور دوباره کار می‌کند.", None).await;
+        }
+    }
+}
+
 pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/migrate", get(status).delete(cancel))
@@ -45,15 +118,28 @@ fn token_ok(app: &App, t: &str) -> bool {
     !want.is_empty() && !t.is_empty() && now() < exp && crate::util::ct_eq(&sha256_hex(t), &want)
 }
 
-/// Keeps this server's public IPv4 in the settings (refreshed every 6 hours): a backup names the
-/// server it was made on, so a restore on another server knows which address to replace.
+/// Keeps this server's public IPv4 in the settings (checked every 30 minutes): a backup names the
+/// server it was made on, so a restore on another server knows which address to replace. When the
+/// server itself gets a new IP (the provider changed it), the settings that named the old one are set
+/// to the new address the same way as after a move (seen twice a minute apart first).
 pub async fn ip_loop(app: Arc<App>) {
     loop {
         let ip = public_ip(&app).await;
-        if !ip.is_empty() {
-            app.db.set("my_ip", &ip);
+        if !ip.is_empty() && !frozen() {
+            let old = app.db.get("my_ip");
+            if !old.is_empty() && old != ip {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                if public_ip(&app).await == ip {
+                    eprintln!("this server's IP changed from {} to {}: the addresses that named the old one are set again", old, ip);
+                    forget_ip(&app, &old, &ip);
+                    app.db.set("my_ip", &ip);
+                    crate::monitor::notify(&format!("ℹ️ آی‌پی سرور پنل عوض شد: {} ← {}. آدرس‌هایی که آی‌پی قبلی را داشتند درست شدند.", ip, old), None).await;
+                }
+            } else {
+                app.db.set("my_ip", &ip);
+            }
         }
-        tokio::time::sleep(std::time::Duration::from_secs(if ip.is_empty() { 600 } else { 6 * 3600 })).await;
+        tokio::time::sleep(std::time::Duration::from_secs(if ip.is_empty() { 600 } else { 1800 })).await;
     }
 }
 
@@ -92,7 +178,7 @@ async fn status(State(app): St, h: HeaderMap) -> Response {
         "active": active, "expires": exp, "command": if active { app.db.get("mig_cmd") } else { String::new() },
         "fetched": app.db.get("mig_fetched").parse::<i64>().unwrap_or(0), "done": app.db.get("mig_done").parse::<i64>().unwrap_or(0),
         "new_ip": app.db.get("mig_new_ip"), "domain": domain, "port": app.env.get("HTTPS_PORT").cloned().unwrap_or_default(),
-        "ip": app.db.get("mig_ip"),
+        "ip": app.db.get("mig_ip"), "frozen": frozen(),
     }))
     .into_response()
 }
@@ -129,6 +215,10 @@ async fn cancel(State(app): St, h: HeaderMap) -> Response {
     for k in ["mig_token", "mig_pass", "mig_exp", "mig_cmd"] {
         app.db.set(k, "");
     }
+    if frozen() {
+        set_frozen(&app, false);
+        eprintln!("the move was cancelled: the panel runs on here");
+    }
     Json(json!({ "ok": true })).into_response()
 }
 
@@ -139,6 +229,8 @@ async fn bundle(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, St
         return (StatusCode::FORBIDDEN, "this move command is not valid (made again, cancelled, or older than 3 hours)").into_response();
     }
     let pass = app.db.get("mig_pass");
+    // nothing changes here from now on: the backup is everything the new panel gets
+    freeze(&app).await;
     let a = app.clone();
     match tokio::task::spawn_blocking(move || crate::backup::make_archive_with(&a, &pass, true)).await {
         Ok(Ok((bytes, _))) => {
@@ -211,30 +303,18 @@ pub fn after_move(app: &App) {
         if app.db.get("restored_seen") != *at {
             app.db.set("restored_seen", at);
             app.db.set("restored_at", at);
+            // the backup of a move was made frozen: the restored panel runs
+            for k in ["mig_frozen", "mig_token", "mig_pass", "mig_cmd", "mig_exp"] {
+                app.db.set(k, "");
+            }
         }
     }
     let old = app.env.get("MOVED_FROM").cloned().unwrap_or_default();
     if old.is_empty() || app.db.get("moved_fix") == old {
         return;
     }
-    let domain = app.env.get("DOMAIN").cloned().unwrap_or_default();
-    for k in ADDR_KEYS {
-        let v = app.db.get(k);
-        if v.trim() == old {
-            app.db.set(k, "");
-        } else if v.contains(&old) && !domain.is_empty() {
-            app.db.set(k, &drop_ip(&v, &old, &domain));
-        }
-    }
-    for k in ADDR_JSON_KEYS {
-        let v = app.db.get(k);
-        if v.contains(&old) {
-            app.db.set(k, &drop_ip(&v, &old, &domain));
-        }
-    }
-    // the panel server's own node row
-    let _ = app.db.exec("UPDATE nodes SET endpoint='', endpoint_mode='panel' WHERE id='local' AND endpoint=?1", &[&old]);
-    for k in ["mig_token", "mig_pass", "mig_exp", "mig_cmd", "mig_fetched", "mig_done", "mig_new_ip", "mig_ip", "my_ip"] {
+    forget_ip(app, &old, "");
+    for k in ["mig_token", "mig_pass", "mig_exp", "mig_cmd", "mig_fetched", "mig_done", "mig_new_ip", "mig_ip", "my_ip", "mig_frozen"] {
         app.db.set(k, "");
     }
     app.db.set("moved_fix", &old);
@@ -242,8 +322,85 @@ pub fn after_move(app: &App) {
     eprintln!("moved from {}: addresses of the old server cleared", old);
 }
 
+/// The settings that named this server's old IP: a bare address is emptied (= this server, found by
+/// itself), a link gets the domain (or `new` when the panel has no domain). The settings file's
+/// ENDPOINT (what users connect to) that was the old IP is overridden by the domain or the new IP.
+pub fn forget_ip(app: &App, old: &str, new: &str) {
+    let domain = app.env.get("DOMAIN").cloned().unwrap_or_default();
+    let host = if domain.is_empty() { new.to_string() } else { domain.clone() };
+    if app.env.get("ENDPOINT").is_some_and(|e| e.trim() == old) && !host.is_empty() {
+        let e = app.db.get("endpoint");
+        if e.trim().is_empty() || e.trim() == old {
+            app.db.set("endpoint", &host);
+        }
+    }
+    for k in ADDR_KEYS {
+        let v = app.db.get(k);
+        if v.trim() == old {
+            // the endpoint setting just set to the new host above stays
+            if !(*k == "endpoint" && !host.is_empty() && app.env.get("ENDPOINT").is_some_and(|e| e.trim() == old)) {
+                app.db.set(k, "");
+            }
+        } else if v.contains(old) && !host.is_empty() {
+            app.db.set(k, &drop_ip(&v, old, &host));
+        }
+    }
+    for k in ADDR_JSON_KEYS {
+        let v = app.db.get(k);
+        if v.contains(old) {
+            app.db.set(k, &drop_ip(&v, old, &host));
+        }
+    }
+    // the panel server's own node row
+    let _ = app.db.exec("UPDATE nodes SET endpoint='', endpoint_mode='panel' WHERE id='local' AND endpoint=?1", &[&old]);
+}
+
 #[cfg(test)]
 mod tests {
+    use axum::http::Method;
+
+    #[test]
+    fn a_frozen_panel_refuses_changes_only() {
+        let r = super::refused_while_moving;
+        for (m, p) in [(Method::POST, "/api/users"), (Method::PUT, "/api/settings"), (Method::DELETE, "/api/users/3"), (Method::POST, "/api/sync"),
+                       (Method::GET, "/tg/api/buy"), (Method::GET, "/tg/api/trial"), (Method::POST, "/tg/api/admin/panel"), (Method::POST, "/join/register"),
+                       (Method::POST, "/api/restore"), (Method::PUT, "/api/bot")] {
+            assert!(r(&m, p), "{} {}", m, p);
+        }
+        for (m, p) in [(Method::GET, "/api/users"), (Method::GET, "/sub/x/v2"), (Method::POST, "/hy2/auth"), (Method::POST, "/api/login"),
+                       (Method::POST, "/api/logout"), (Method::DELETE, "/api/migrate"), (Method::GET, "/api/migrate"), (Method::GET, "/tg/api/me"),
+                       (Method::GET, "/tg/api/admin/monitor"), (Method::POST, "/tunnel/agent"), (Method::GET, "/api/config/3/wg")] {
+            assert!(!r(&m, p), "{} {}", m, p);
+        }
+    }
+
+    #[test]
+    fn a_new_ip_of_this_server_replaces_the_old_one() {
+        let dir = std::env::temp_dir().join(format!("kanki-ip-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut env = std::collections::HashMap::new();
+        env.insert("DOMAIN".to_string(), "p.example.com".to_string());
+        env.insert("ENDPOINT".to_string(), "1.2.3.4".to_string());
+        use std::sync::Mutex;
+        let app = crate::App {
+            db: crate::db::Db::open(dir.join("k.db").to_str().unwrap()), env,
+            hy2_allowed: Mutex::new(Default::default()), limits: Mutex::new(Default::default()), reported: Mutex::new(Default::default()),
+            login_fails: Mutex::new(Default::default()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: std::sync::atomic::AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(Default::default()),
+        };
+        app.db.set("sub_base", "https://1.2.3.4:2053");
+        app.db.set("tun_local_addr", "1.2.3.4");
+        app.db.set("kmix_nodes", r#"{"local":{"host":"1.2.3.4","tun_host":"ir.example.com"}}"#);
+        super::forget_ip(&app, "1.2.3.4", "5.6.7.8");
+        assert_eq!(app.db.get("sub_base"), "https://p.example.com:2053");
+        assert_eq!(app.db.get("tun_local_addr"), "");
+        assert_eq!(app.db.get("kmix_nodes"), r#"{"local":{"host":"","tun_host":"ir.example.com"}}"#);
+        // users connected to the old IP (the settings file's ENDPOINT): now the domain
+        assert_eq!(app.db.get("endpoint"), "p.example.com");
+        assert_eq!(crate::api::panel_endpoint(&app), "p.example.com");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn the_old_ip_goes_from_settings() {
         let x = r#"{"servers":[{"server":"local","address":"1.2.3.4"}],"x":"1.2.3.45"}"#;

@@ -1,3 +1,106 @@
+# v3.55.0 — The sales bot and mini app redone: one emoji style, a short welcome, a simpler purchase
+**Bot (`src/bot/bot.rs`)**
+- **Main menu** always two buttons a row: 🛒 خرید اشتراک | 🎁 تست رایگان · 📦 سرویس‌های من | 🔄 تمدید اشتراک · 📱 دانلود اپلیکیشن |
+  📖 آموزش اتصال · 🤝 دعوت از دوستان | 💬 پشتیبانی, and ⚙️ پنل مدیریت for admins. «📖 آموزش اتصال» is always there: with no video
+  yet it opens the written guide of the newest account (device, then app), or buy / trial for someone without one.
+- **Premium emoji on buttons only when the whole row has one** (`paint`): a row of mixed icons and plain emoji looked crooked; such a
+  row keeps its standard emoji.
+- **/start welcome** short and lined up (coverage, gaming with KANKI MIX, protocols in `<code>`, the Kanki app). The new welcome and
+  the main-menu texts replace older custom ones once (`ux_once`, setting `bot_ux_v4`); the admin's later changes stay.
+- **Purchase:** the services each with their lowest price («⚡ اقتصادی (V2Ray) — از ۵۲,۰۰۰ تومان»), then «🎛 ساخت پلن دلخواه» and
+  «💎 ورود به فروشگاه مینی‌اپ»; no long descriptions. A service lists all its plans at once, by duration then users then price
+  («🔹 ۲۰ گیگ | ۱ ماهه | ۱ کاربر — ۸۰,۰۰۰ ت»), no single / multi-user / long-term step. Old category buttons still work.
+- **Delivery:** the link in `<code>`; rows 🤖 اندروید | 🍏 آیفون | 💻 ویندوز · 👤 مدیریت اشتراک (مینی‌اپ) · 🎬 آموزش ویدیویی |
+  💬 پشتیبانی. The app list: ⭐ for the recommended one «(پیشنهادی)», 🛡️ AmneziaVPN, 🚀 V2Ray apps, 📱 Kanki, 🔐 WireGuard, and
+  «🔄 تغییر دستگاه». Every English menu path in the guides is one `<code>` (`Settings › Backup › Restore from backup`) so RTL does
+  not turn it around.
+- **Stats: currency revenue fixed.** TON and Stars orders keep their amount in toman, but «درآمد ارزی» added them up as dollars
+  (`$184000.0`). Now `revenue()`: the toman total split into card / bank gateway, TON (with the TON paid) and Stars (with the
+  stars), and dollars only for the crypto gateway and the wallet. The panel's overview counts TON and Stars in its toman total too.
+
+**Mini app (`assets/bot/miniapp.html`)**
+- Plan cards all one shape: volume, the service badge and the ribbon in a fixed corner; volume | duration | users in three columns;
+  one key feature with a green check; price and «خرید اشتراک» at the bottom. Two columns from 620px.
+- Service tabs (همه‌کاره VIP · گیمینگ · اقتصادی V2Ray) and filters (۱ ماهه · چندماهه · دلخواه) at a fixed height, no wrap at 360px.
+- Custom plan: sliders for volume (10–300 GB), duration (15–180 days, step 15) and users (1–4); the live price and the buy button in a
+  bar that stays at the bottom.
+- Admin › plans: filter همه / فعال / غیرفعال (with counts) and one group a service, sorted by duration.
+
+**Tests:** `cargo test` 423 (new: the menu rows and welcome, the revenue split; purchase and guide tests updated); Playwright of
+the mini app at 360/390/768/1440 (shop, custom, V2Ray, admin plans): no JS error, no sideways scroll, no `undefined`/`NaN`.
+
+# v3.54.0 — The panel's CDN domain: the servers reach a filtered panel
+**When the panel server's IP is filtered in Iran** the Iran servers' agents could not report to the panel any more (the tunnels kept
+working, since the panel dials them), so no change, update or firewall step reached those servers.
+- **Settings › «Panel CDN domain (for the servers)»** (`src/panel/cdn.rs`, `/api/panel-cdn`): another domain, behind Cloudflare
+  (orange cloud, SSL «Full»), pointing at the panel server. The panel adds a Caddy site for it that passes **only** `/tunnel/*`
+  (the agents' reports, the program and the Xray / Hysteria downloads) to the panel; the admin panel, the API, the subscription and
+  the mini app answer 404 there. Caddy shows the panel's own certificate (Cloudflare «Full» does not check the name), so nothing is
+  issued. The port is the panel's HTTPS port when Cloudflare passes it (443, 2053, 2083, 2087, 2096, 8443), else a free one of
+  those. Written again at start after a restore or a move (`cdn::ensure_on_start`).
+- **The agents** (`tunnel::agent`): every answer names the panel's own address and the CDN one (`panel`, `panel_alt`); the agent
+  keeps them in `/etc/kanki/panel.alt`. After three reports that do not reach the panel it goes on through the next address, and
+  every five minutes tries the panel's own address again (8 seconds) and goes back when it answers. A CDN address is checked
+  against the public CAs only, never pinned (an `INSECURE=1` server keeps its pin of the panel). Updates, Xray and Hysteria
+  downloads use the address in use.
+- **A report through the CDN does not change the server's address** in the panel (it would be a Cloudflare edge's): tunnels and
+  flags keep the real one (`cdn::came_through`).
+- **Servers that cannot reach the panel right now** cannot learn the address (they get nothing from the panel): the card shows a
+  one-line command to run once over SSH on such a server (points `PANEL_URL` at the CDN); after its next update it goes back to
+  the panel's own address by itself and keeps the CDN one as the spare.
+- **Lab:** panel + Caddy (both sites) + a real tunnel agent in their own network namespaces: the panel's address dropped →
+  the agent went on through the CDN address in 56 seconds, reports kept arriving, the server's address in the panel stayed;
+  unblocked → back on the panel's own address within five minutes. Through the CDN site only `/tunnel/*` answers.
+
+# v3.53.0 — Moving the panel loses nothing; KPING on any UDP tunnel and the VIP tunnel
+**Moving the panel to a new server (Backup › Move, or Servers › the panel server › «Move the panel to a new server or IP»)**
+- **The old panel freezes when the new server takes the backup** (`migrate::frozen`): every change is refused with a clear
+  message (the admin, API keys, the mini app's purchases and trials, a new server joining), the sales and report bots stop
+  reading Telegram (the messages wait there and the new panel reads them), and the rounds with the servers, the TON check, the
+  cleanup, the channel, the Telegram backup and the nightly update pause. The servers keep counting traffic; the new panel reads it
+  from the backup's last values, so no byte is counted twice or missed. Reading, subscriptions, Hysteria2 logins and the servers'
+  own calls go on. The freeze ends when the move is cancelled, or by itself (with a message to the admins) when the command expires
+  and the new server never said it was done. A panel restarted during a move stays frozen. The restored panel never starts frozen.
+- **What only lived on disk now moves too:** the emergency chat's messages when the chat runs on the panel server
+  (`emergency/chat.db`, a consistent copy), and certbot's certificates of the other domains of the server (Xray, Kanki DNS, the
+  emergency chat: archive, renewal file and account; the live links are made again and must point into their own domain's archive).
+  On the new server only what is missing is put back (`kanki-panel restore-files`, run by the installer; a certificate made afresh
+  there is kept).
+- **Restore in the panel (Backup page) could mix the old and the restored database:** the running panel kept its old database open
+  and what it wrote in its last moment (its write-ahead log) was applied to the restored one at the next start. The restored database
+  now waits beside it (`restore.db.pending`) and is put in place at the next start, before the database is opened (`take_pending`).
+- **A restore on a server that does not know its own IP** (the lookup failed) still replaces the old server's IP in the settings.
+- **The panel server's own new IP** (the provider changed it): seen twice a minute apart, the settings that named the old IP get the
+  domain (or the new IP), and the address users connect to (the settings file's ENDPOINT) follows (`migrate::forget_ip`).
+- Lab: a full panel (55 users, 330 keys, 60 bot users, 45 orders, servers, tunnels, VIP, KPING, Xray, plans, discounts, API tokens,
+  app files, node pins, chat messages, certificates) moved to a second panel in its own namespace by the installer's own restore, and
+  restored on a third from the Backup page: every table equal to the backup except the move's own keys and the addresses that named
+  the old IP; every file equal; the old panel's database 40 seconds after the backup equal to the backup.
+
+**KPING: the tunnel between the Iran server and the exit is chosen per route**
+- Route › Edit › «Tunnel between the servers»: Game-FEC (8:1, 8:3, 4:2 or none), KCP, QUIC, HQ, Fake TCP, or **VIP**. The advanced
+  settings of the chosen kind are in their own (blue) box; two boxes above say what is the phone's (Wi-Fi + data, the app's) and what
+  is between the servers (the tunnel's paths).
+- **VIP for KPING:** gaming mode, 1-4 UDP paths at once (2 by default), 1-16 ports on the Iran server, paths moving every N seconds,
+  an optional Fake TCP path; KPING's port on 127.0.0.1 at both ends (`VipTunnel.bind`). With two paths or more KPING sends no copy of
+  its own into the tunnel (VIP sends each packet on two paths); with one path it keeps it. The tunnel is built with the route's
+  button like the others; changing the kind removes the old tunnel (its ports are free for the new one at once: `note_freed`), and
+  deleting the route removes its tunnels. No second tunnel beside a VIP tunnel.
+- The VIP tunnel gives KPING's packets copies and repairs: a packet from a service of the same server (KPING's relay, on 127.0.0.1) counts
+  as marked game traffic, and KPING's exit marks its packets (DSCP EF).
+- Lab (one phone path, the line between the servers 4% of the time out in ~100 ms cuts, 45 s, two runs each): Game-FEC 8:1 lost
+  1.6-5.3% with the slowest 1% at 187-267 ms; VIP with two separate paths 0.8-1.8% and 137 ms; VIP with one path about like Game-FEC.
+
+**VIP: KANKI MIX's TCP is never copied, its game always is (both ways)**
+- The Kanki app sends KANKI MIX's game and its KCP (the app's TCP) from two sockets, so the VIP tunnel saw two flows and the KCP flow,
+  never marked, was taken for a game: up to 32-64 KB/s of a download copied and repaired each way. Now the exit takes the server's
+  mark per forwarded port (`port_marked`): once KANKI MIX (or microtun) marks its game on a port, everything it sends there unmarked is
+  its TCP and goes bulk; the entry learns from that (`bulk_flows`): a flow whose answers come back as bulk is bulk from the phone too.
+  A port whose service never marks (WireGuard, AmneziaWG) keeps the old way.
+- Lab with the app's own KANKI MIX client (two sockets) and the real server, a download during the game: the phone's side of the
+  tunnel sent 4 049 realtime packets (the game) and 25 803 bulk instead of 29 630 realtime with copies; half the bytes up; the game
+  still has its copies and repairs both ways; game packets lost 1.4-1.7% instead of 2.3-3.0%.
+
 # v3.52.2 — Smart tunnel test with the firewall on; the route's MTU
 - **Smart tunnel test with the panel's firewall on:** each test port is now opened, TCP and UDP, on **both** servers for the test
   (`open_ports`, the test's tunnels), not only on the listening side, and closed again when the test ends (`fw::sync`).

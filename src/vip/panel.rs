@@ -59,6 +59,10 @@ pub struct VipTunnel {
     pub rekey_secs: u32,
     pub enabled: bool,
     pub created: i64,
+    /// the entry's forwarded ports listen on this address only ("" = every address; KPING's tunnel: 127.0.0.1,
+    /// its relay sits in front of it)
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub bind: String,
 }
 
 impl VipTunnel {
@@ -156,7 +160,7 @@ pub fn specs_for(app: &App, sid: &str) -> Vec<VipSpec> {
             tcp: t.tcp.clone(),
             udp: t.udp.clone(),
             target: t.target.clone(),
-            bind: String::new(),
+            bind: t.bind.clone(),
             mtu: t.mtu,
             burst: t.burst,
             rt_max: t.rt_max,
@@ -472,7 +476,12 @@ pub fn others_on(app: &App, sid: &str) -> Vec<(u16, bool, String)> {
     let kp = crate::kping::settings(app);
     if kp.on {
         for r in kp.routes.iter().filter(|r| r.iran == sid) {
-            v.extend(r.ports().into_iter().map(|p| (p, true, "KPING".to_string())));
+            // a route on a VIP tunnel: its tunnel ports are that VIP tunnel's own (`ports_on` has them)
+            if r.is_vip() {
+                v.push((r.port, true, "KPING".to_string()));
+            } else {
+                v.extend(r.ports().into_iter().map(|p| (p, true, "KPING".to_string())));
+            }
         }
         if kp.routes.iter().any(|r| r.exit == sid) {
             v.push((kp.port, true, "KPING".into()));
@@ -527,7 +536,7 @@ fn clash(app: &App, t: &VipTunnel, old: Option<&VipTunnel>) -> Option<String> {
                 continue;
             }
             let kanki = unit == "kanki-tunnel.service" || unit == "kanki-panel.service" || (unit.is_empty() && prog == "kanki-panel");
-            if kanki && own.contains(&(sid.clone(), port, udp)) {
+            if kanki && (own.contains(&(sid.clone(), port, udp)) || crate::tunnel::panel::just_freed(&sid, port, udp)) {
                 continue;
             }
             if let Some(e) = crate::tunnel::panel::port_busy(app, &sid, port, udp, &[]) {
@@ -540,20 +549,31 @@ fn clash(app: &App, t: &VipTunnel, old: Option<&VipTunnel>) -> Option<String> {
 
 async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
-    let mut list = tunnels(&app);
     let id = b["id"].as_str().unwrap_or("").to_string();
+    let bind = tunnels(&app).into_iter().find(|x| x.id == id).map(|x| x.bind).unwrap_or_default();
+    match save_for(&app, &id, &b, &bind) {
+        Ok(id) => Json(json!({ "ok": true, "id": id })).into_response(),
+        Err((st, e)) => err(st, &e),
+    }
+}
+
+/// A VIP tunnel from a form (`id` "" = a new one), checked alone and against every port of its servers;
+/// its id. `bind`: the address its forwarded ports listen on (KPING: 127.0.0.1).
+pub fn save_for(app: &App, id: &str, b: &Value, bind: &str) -> Result<String, (StatusCode, String)> {
+    let mut list = tunnels(app);
     let old = list.iter().find(|x| x.id == id).cloned();
     let mut t = match (&old, id.is_empty()) {
         (_, true) => defaults(),
         (Some(o), false) => o.clone(),
-        (None, false) => return err(StatusCode::NOT_FOUND, "VIP tunnel not found"),
+        (None, false) => return Err((StatusCode::NOT_FOUND, "VIP tunnel not found".into())),
     };
-    if let Err(e) = apply_body(&mut t, &b) {
-        return err(StatusCode::BAD_REQUEST, &e);
+    t.bind = if bind == "127.0.0.1" { bind.into() } else { String::new() };
+    if let Err(e) = apply_body(&mut t, b) {
+        return Err((StatusCode::BAD_REQUEST, e));
     }
-    let known = |s: &str| s == "local" || crate::tunnel::panel::servers(&app).iter().any(|x| x.id == s);
+    let known = |s: &str| s == "local" || crate::tunnel::panel::servers(app).iter().any(|x| x.id == s);
     if !known(&t.entry) || !known(&t.exit) {
-        return err(StatusCode::BAD_REQUEST, "unknown server");
+        return Err((StatusCode::BAD_REQUEST, "unknown server".into()));
     }
     if t.name.is_empty() {
         t.name = crate::tunnel::panel::default_tunnel_name(&app, &t.entry, &t.exit);
@@ -562,16 +582,29 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         t.name = format!("VIP-{}", &t.id[..4.min(t.id.len())]);
     }
     if t.enabled {
-        if let Some(e) = clash(&app, &t, old.as_ref()) {
-            return err(StatusCode::CONFLICT, &e);
+        if let Some(e) = clash(app, &t, old.as_ref()) {
+            return Err((StatusCode::CONFLICT, e));
         }
     }
     match list.iter_mut().find(|x| x.id == t.id) {
         Some(x) => *x = t.clone(),
         None => list.push(t.clone()),
     }
-    save_all(&app, &list);
-    Json(json!({ "ok": true, "id": t.id })).into_response()
+    save_all(app, &list);
+    Ok(t.id)
+}
+
+/// A tunnel as both its servers report it (None = no such tunnel): up, each path (the listener's view
+/// when it reports, else the dialer's) and the quality of the best one, like a Kanki tunnel's
+pub fn state_of(app: &App, id: &str) -> Option<Value> {
+    let t = tunnels(app).into_iter().find(|t| t.id == id)?;
+    let (se, sx) = (status_of(&t.entry, &t.id), status_of(&t.exit, &t.id));
+    let up = se.as_ref().is_some_and(|s| s.up) && sx.as_ref().is_some_and(|s| s.up);
+    let side = se.or(sx);
+    let paths: Vec<Value> = side.as_ref().map(|s| s.paths.iter().map(|p| json!({ "kind": p.kind, "state": p.state, "rank": p.rank, "rtt": p.rtt_ms, "jit": p.jit_ms, "loss": p.loss, "port": p.port })).collect()).unwrap_or_default();
+    let best = side.as_ref().and_then(|s| s.paths.iter().filter(|p| p.state == 2 && p.rtt_ms > 0.0).min_by(|a, b| a.rtt_ms.partial_cmp(&b.rtt_ms).unwrap_or(std::cmp::Ordering::Equal)).cloned());
+    let q = best.map(|p| json!({ "ping": (p.rtt_ms * 10.0).round() / 10.0, "loss": (p.loss * 10.0).round() / 10.0, "jit": (p.jit_ms * 10.0).round() / 10.0, "n": 1 })).unwrap_or(Value::Null);
+    Some(json!({ "up": up, "paths": paths, "q": q, "enabled": t.enabled }))
 }
 
 async fn del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {

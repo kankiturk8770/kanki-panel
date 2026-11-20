@@ -930,7 +930,7 @@ fn public_discount(db: &crate::db::Db, t: i64) -> Option<(String, i64, i64)> {
 pub async fn channel_loop(app: Arc<App>) {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(120)).await;
-        if !app.db.on("ch_on") || app.db.get("ch_id").is_empty() {
+        if crate::migrate::frozen() || !app.db.on("ch_on") || app.db.get("ch_id").is_empty() {
             continue;
         }
         let t = now();

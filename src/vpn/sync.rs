@@ -974,6 +974,11 @@ pub async fn remote_post_json(app: &App, n: &Node, path: &str, body: &Value) -> 
 /// Forever loop
 pub async fn run(app: Arc<App>) {
     loop {
+        // a panel being moved leaves the servers alone: the new panel takes over from the backup
+        if crate::migrate::frozen() {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            continue;
+        }
         sync_all(&app).await;
         let busy = limits().lock().unwrap_or_else(|e| e.into_inner()).busy();
         tokio::time::sleep(std::time::Duration::from_secs(if busy { 10 } else { 30 })).await;

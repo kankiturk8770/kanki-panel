@@ -1227,6 +1227,16 @@ small{font-size:max(12px,.83em)}
 .kp-tun.ok{border-inline-start-color:var(--kp);background:linear-gradient(90deg,color-mix(in srgb,var(--kp) 14%,var(--c1)),var(--c1) 70%)}
 .kp-tun.ok b{color:var(--kp)}
 .kp-add{display:flex;flex-wrap:wrap;gap:8px;padding:0 16px 12px}
+/* KPING route form: the two legs of the path, and the advanced settings of the tunnel in their own colour */
+.kp-legs{display:grid;gap:8px;margin:12px 0 4px}
+.kp-leg{display:flex;flex-direction:column;gap:4px;padding:8px 12px;border-radius:12px;border:1px solid var(--ln);border-inline-start-width:4px}
+.kp-leg b{font-size:13px;color:var(--t)}
+.kp-leg small{font-size:12px;color:var(--s);line-height:1.6}
+.kp-leg.phone{border-inline-start-color:var(--ok);background:color-mix(in srgb,var(--ok) 6%,transparent)}
+.kp-leg.srv{border-inline-start-color:var(--info);background:color-mix(in srgb,var(--info) 6%,transparent)}
+.kp-adv{margin:8px 0 0;padding:12px;border-radius:12px;border:1px dashed color-mix(in srgb,var(--info) 60%,transparent);background:color-mix(in srgb,var(--info) 8%,transparent)}
+.kp-adv>b{display:block;font-size:13px;color:var(--info);margin-bottom:4px}
+.kp-adv small{display:block;margin-top:8px;line-height:1.6}
 .kp-add select{flex:1 1 200px;min-width:0}
 @media(min-width:900px){
  .kp-path{flex-direction:row;align-items:center;gap:8px;padding:16px}

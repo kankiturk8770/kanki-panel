@@ -35,6 +35,189 @@ fn private_dir(path: &str) -> Result<(), String> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())
 }
 
+/// A restored database waiting in the data folder for the next start
+const PENDING: &str = "restore.db.pending";
+
+/// At start, before the database is opened: a restored database waiting from the last run takes the
+/// place of the old one (and the old one's write-ahead log goes with it).
+pub fn take_pending(data: &str) {
+    let p = format!("{}/{}", data, PENDING);
+    let ok = std::fs::read(&p).map(|b| b.len() > 100 && &b[..15] == b"SQLite format 3").unwrap_or(false);
+    if !ok {
+        let _ = std::fs::remove_file(&p);
+        return;
+    }
+    let _ = std::fs::remove_file(format!("{}/kanki.db-wal", data));
+    let _ = std::fs::remove_file(format!("{}/kanki.db-shm", data));
+    match std::fs::rename(&p, format!("{}/kanki.db", data)) {
+        Ok(()) => eprintln!("the restored database is in place"),
+        Err(e) => eprintln!("the restored database could not be put in place: {}", e),
+    }
+}
+
+/// The emergency chat's messages when the chat runs on this server (they live only in its own database)
+const CHAT_DB: &str = "/var/lib/kanki/emergency/chat.db";
+/// certbot's certificates of this server (Xray, Kanki DNS, the emergency chat … on their own domains)
+const LE_DIR: &str = "/etc/letsencrypt";
+const LE_PARTS: &[&str] = &["archive", "live", "renewal", "accounts"];
+
+/// A consistent copy of an SQLite file that another program may be writing (VACUUM INTO)
+fn sqlite_copy(src: &str, dst: &str) -> bool {
+    let Ok(c) = rusqlite::Connection::open_with_flags(src, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return false };
+    let _ = c.busy_timeout(std::time::Duration::from_secs(10));
+    c.execute(&format!("VACUUM INTO '{}'", dst.replace('\'', "''")), []).is_ok()
+}
+
+/// The extra state of this server in a backup folder: the emergency chat's database (`emergency/chat.db`)
+/// and certbot's certificates (`letsencrypt.tgz`, links kept). The names of the items made, for tar.
+fn extra_into(dir: &str) -> Vec<&'static str> {
+    let mut items = vec![];
+    if std::path::Path::new(CHAT_DB).is_file() {
+        let _ = std::fs::create_dir_all(format!("{}/emergency", dir));
+        if sqlite_copy(CHAT_DB, &format!("{}/emergency/chat.db", dir)) {
+            items.push("emergency");
+        }
+    }
+    let live = std::fs::read_dir(format!("{}/live", LE_DIR)).map(|r| r.flatten().any(|e| e.path().is_dir())).unwrap_or(false);
+    if live {
+        let parts: Vec<String> = LE_PARTS.iter().filter(|p| std::path::Path::new(&format!("{}/{}", LE_DIR, p)).is_dir()).map(|p| format!("letsencrypt/{}", p)).collect();
+        let tgz = format!("{}/letsencrypt.tgz", dir);
+        let mut args: Vec<&str> = vec!["-czf", &tgz, "-C", "/etc"];
+        args.extend(parts.iter().map(|s| s.as_str()));
+        if run("tar", &args, None).is_ok() {
+            items.push("letsencrypt.tgz");
+        }
+    }
+    items
+}
+
+/// Puts back what `extra_into` saved, from an unpacked backup in `x` (also `kanki-panel restore-files`,
+/// which the installer runs on a new server). Only what this machine lacks: a chat database that is
+/// already here is kept unless `replace_chat`, a certificate this machine already has (made afresh for
+/// the same domain) is kept. Nothing is written outside the emergency folder and /etc/letsencrypt, and
+/// the certificate links must point into their own domain's archive.
+pub fn restore_extra(x: &str, replace_chat: bool) -> Vec<String> {
+    restore_extra_to(x, replace_chat, CHAT_DB, LE_DIR)
+}
+
+fn restore_extra_to(x: &str, replace_chat: bool, chat_db: &str, le_dir: &str) -> Vec<String> {
+    let mut done = vec![];
+    let chat = format!("{}/emergency/chat.db", x);
+    let plain = std::fs::symlink_metadata(&chat).map(|m| m.is_file()).unwrap_or(false);
+    let head_ok = std::fs::read(&chat).map(|b| b.len() > 100 && &b[..15] == b"SQLite format 3").unwrap_or(false);
+    if plain && head_ok && (replace_chat || !std::path::Path::new(chat_db).exists()) {
+        // a chat running here has its database open: it stops first (the restore starts it again)
+        if chat_db == CHAT_DB && crate::emergency::running() {
+            let _ = Command::new("systemctl").args(["stop", "kanki-emergency"]).output();
+        }
+        let dirp = std::path::Path::new(chat_db).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        let _ = std::fs::create_dir_all(&dirp);
+        let tmp = format!("{}.restore", chat_db);
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dirp, std::fs::Permissions::from_mode(0o700));
+        if std::fs::copy(&chat, &tmp).is_ok() && std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600)).is_ok() && std::fs::rename(&tmp, chat_db).is_ok() {
+            let _ = std::fs::remove_file(format!("{}-wal", chat_db));
+            let _ = std::fs::remove_file(format!("{}-shm", chat_db));
+            done.push("the emergency chat's messages".to_string());
+        }
+    }
+    let tgz = format!("{}/letsencrypt.tgz", x);
+    if std::fs::symlink_metadata(&tgz).map(|m| m.is_file()).unwrap_or(false) {
+        match le_restore(&tgz, le_dir) {
+            Ok(n) if n > 0 => done.push(format!("{} certificates", n)),
+            Ok(_) => {}
+            Err(e) => eprintln!("restore: certificates: {}", e),
+        }
+    }
+    done
+}
+
+/// a file or folder name certbot makes (a domain, `cert1.pem`, an account id): no path tricks
+fn le_name(s: &str) -> bool {
+    !s.is_empty() && s != "." && s != ".." && s.len() <= 255 && s.bytes().all(|c| c.is_ascii_alphanumeric() || b"-_.@".contains(&c))
+}
+
+/// Copies the plain files of `src` into `dst`, folder by folder (no links), each name checked
+fn copy_tree(src: &std::path::Path, dst: &std::path::Path, depth: usize) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for e in std::fs::read_dir(src)?.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let m = std::fs::symlink_metadata(e.path())?;
+        if !le_name(&name) {
+            continue;
+        }
+        if m.is_dir() && depth < 6 {
+            copy_tree(&e.path(), &dst.join(&name), depth + 1)?;
+        } else if m.is_file() {
+            std::fs::copy(e.path(), dst.join(&name))?;
+        }
+    }
+    Ok(())
+}
+
+/// certbot's folders from a backup: each domain this machine has no certificate for gets its archive,
+/// its renewal file and its live links again (made here, each `../../archive/<domain>/<file>`), and the
+/// account comes along when this machine has none. The number of domains put back.
+fn le_restore(tgz: &str, le_dir: &str) -> Result<usize, String> {
+    let tmp = format!("/tmp/kanki-le-{}", rand_token(12));
+    private_dir(&tmp)?;
+    let res = (|| -> Result<usize, String> {
+        run("tar", &["-xzf", tgz, "-C", &tmp, "--no-same-owner"], None)?;
+        let src = std::path::Path::new(&tmp).join("letsencrypt");
+        let dst = std::path::Path::new(le_dir);
+        let mut n = 0;
+        let live = src.join("live");
+        for e in std::fs::read_dir(&live).map_err(|e| e.to_string())?.flatten() {
+            let d = e.file_name().to_string_lossy().to_string();
+            if !le_name(&d) || !crate::certbot::valid_domain(&d) || !std::fs::symlink_metadata(e.path()).map(|m| m.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            if dst.join("live").join(&d).exists() {
+                continue;
+            }
+            let arch = src.join("archive").join(&d);
+            if !std::fs::symlink_metadata(&arch).map(|m| m.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            // each live link must name a file of this domain's own archive
+            let mut links = vec![];
+            for l in std::fs::read_dir(e.path()).map_err(|e| e.to_string())?.flatten() {
+                let name = l.file_name().to_string_lossy().to_string();
+                let Ok(t) = std::fs::read_link(l.path()) else { continue };
+                let t = t.to_string_lossy().to_string();
+                let Some(file) = t.strip_prefix(&format!("../../archive/{}/", d)) else { continue };
+                if le_name(&name) && le_name(file) && std::fs::symlink_metadata(arch.join(file)).map(|m| m.is_file()).unwrap_or(false) {
+                    links.push((name, t));
+                }
+            }
+            if !links.iter().any(|l| l.0 == "fullchain.pem") || !links.iter().any(|l| l.0 == "privkey.pem") {
+                continue;
+            }
+            copy_tree(&arch, &dst.join("archive").join(&d), 0).map_err(|e| e.to_string())?;
+            let ld = dst.join("live").join(&d);
+            std::fs::create_dir_all(&ld).map_err(|e| e.to_string())?;
+            for (name, t) in links {
+                let _ = std::os::unix::fs::symlink(&t, ld.join(&name));
+            }
+            let conf = src.join("renewal").join(format!("{}.conf", d));
+            if std::fs::symlink_metadata(&conf).map(|m| m.is_file()).unwrap_or(false) {
+                let _ = std::fs::create_dir_all(dst.join("renewal"));
+                let _ = std::fs::copy(&conf, dst.join("renewal").join(format!("{}.conf", d)));
+            }
+            n += 1;
+        }
+        let acc = src.join("accounts");
+        if n > 0 && acc.is_dir() && !dst.join("accounts").exists() {
+            copy_tree(&acc, &dst.join("accounts"), 0).map_err(|e| e.to_string())?;
+        }
+        // the private keys stay readable by root only
+        let _ = Command::new("chmod").args(["-R", "go-rwx", &format!("{}/archive", le_dir), &format!("{}/accounts", le_dir)]).output();
+        Ok(n)
+    })();
+    let _ = std::fs::remove_dir_all(&tmp);
+    res
+}
+
 pub fn db_snapshot(app: &App) -> Option<Vec<u8>> {
     let dir = format!("/tmp/kanki-snap-{}", rand_token(12));
     private_dir(&dir).ok()?;
@@ -120,6 +303,7 @@ pub fn make_archive_with(app: &App, pass: &str, with_apps: bool) -> Result<(Vec<
         // trusting exactly those
         let pins = copy_flat(&format!("{}/nodepins", data), &format!("{}/nodepins", dir));
         let apps = if with_apps { copy_flat(&format!("{}/apps", data), &format!("{}/apps", dir)) } else { 0 };
+        let extra = extra_into(&dir);
         std::fs::write(format!("{}/meta.json", dir), meta(app, apps).to_string()).map_err(|e| e.to_string())?;
         let tgz = format!("{}/out.tar.gz", dir);
         // a panel without a self-signed node has no nodepins folder, and tar fails on a missing item
@@ -130,6 +314,7 @@ pub fn make_archive_with(app: &App, pass: &str, with_apps: bool) -> Result<(Vec<
         if apps > 0 {
             items.push("apps");
         }
+        items.extend(extra);
         let mut args = vec!["-czf", tgz.as_str(), "-C", dir.as_str()];
         args.extend(items);
         run("tar", &args, None)?;
@@ -207,6 +392,7 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<Restore
                         extra.push(format!("{} app files", n));
                     }
                 }
+                extra.extend(restore_extra(&x, true));
             }
         }
         let head = std::fs::read(&dbfile).map_err(|_| "database missing in backup".to_string())?;
@@ -225,9 +411,14 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<Restore
         let ddir = app.data_dir();
         let tmp = format!("{}/restore.db", ddir);
         std::fs::write(&tmp, &head).map_err(|e| e.to_string())?;
-        std::fs::rename(&tmp, format!("{}/kanki.db", ddir)).map_err(|e| e.to_string())?;
-        let _ = std::fs::remove_file(format!("{}/kanki.db-wal", ddir));
-        let _ = std::fs::remove_file(format!("{}/kanki.db-shm", ddir));
+        // a backup taken by a move was made with the panel frozen: the restored panel must run
+        if let Ok(c) = rusqlite::Connection::open(&tmp) {
+            let _ = c.execute("DELETE FROM settings WHERE k IN ('mig_frozen','mig_token','mig_pass','mig_cmd','mig_exp')", []);
+        }
+        // put in place by the next start (`take_pending`), not now: this running panel still has the
+        // old database open, and what it writes before it stops (its write-ahead log) must never land
+        // on the restored one
+        std::fs::rename(&tmp, format!("{}/{}", ddir, PENDING)).map_err(|e| e.to_string())?;
         let mut message = if full { "database + server files restored".to_string() } else { "database restored".to_string() };
         if !extra.is_empty() {
             message.push_str(&format!(" ({})", extra.join(", ")));
@@ -344,6 +535,10 @@ fn restart_services() {
     }
     if std::path::Path::new(CADDYFILE).exists() {
         sc(&["restart", "caddy"]);
+    }
+    // the emergency chat opens its restored messages (it was stopped for them)
+    if std::path::Path::new("/etc/systemd/system/kanki-emergency.service").exists() {
+        sc(&["restart", "kanki-emergency"]);
     }
 }
 
@@ -462,7 +657,10 @@ async fn restore_upload(State(app): St, h: HeaderMap, body: Bytes) -> Response {
             if full {
                 // the old server's files are in place now: set them to this server, then restart
                 let old = r.meta["ip"].as_str().unwrap_or("").to_string();
-                let moved = if !old.is_empty() && !here.is_empty() && old != here { old } else { String::new() };
+                // made on another server (this one's IP is unknown when it could not look it up: the
+                // backup's IP is taken as the old server's; on the same server that only empties
+                // addresses that are found again by themselves)
+                let moved = if !old.is_empty() && old != here { old } else { String::new() };
                 mark_restored(&moved);
                 after_full_restore();
                 tokio::spawn(async {
@@ -676,7 +874,7 @@ const TZ_OFFSET: i64 = 12600;
 pub async fn telegram_loop(app: Arc<App>) {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
-        if !app.db.on("tgb_on") {
+        if crate::migrate::frozen() || !app.db.on("tgb_on") {
             continue;
         }
         let t = now();
@@ -771,5 +969,102 @@ mod tests {
         assert_eq!(super::admin_chat(&ups, "111, 222").as_deref(), Some("111"));
         assert_eq!(super::admin_chat(&ups, "222"), None);
         assert_eq!(super::admin_chat(&ups, ""), None);
+    }
+
+    fn tmpdir(tag: &str) -> String {
+        let d = std::env::temp_dir().join(format!("kanki-bk-test-{}-{}", tag, crate::util::rand_token(8)));
+        std::fs::create_dir_all(&d).unwrap();
+        d.to_string_lossy().to_string()
+    }
+
+    /// certbot's folders of a domain as certbot makes them, under `root/letsencrypt`
+    fn le_tree(root: &str, d: &str, link: &str) {
+        let le = format!("{}/letsencrypt", root);
+        std::fs::create_dir_all(format!("{}/archive/{}", le, d)).unwrap();
+        std::fs::create_dir_all(format!("{}/live/{}", le, d)).unwrap();
+        std::fs::create_dir_all(format!("{}/renewal", le)).unwrap();
+        std::fs::create_dir_all(format!("{}/accounts/acme/x", le)).unwrap();
+        for n in ["cert", "chain", "fullchain", "privkey"] {
+            std::fs::write(format!("{}/archive/{}/{}1.pem", le, d, n), format!("{} {}", d, n)).unwrap();
+            let target = if n == "privkey" { link.to_string() } else { format!("../../archive/{}/{}1.pem", d, n) };
+            std::os::unix::fs::symlink(target, format!("{}/live/{}/{}.pem", le, d, n)).unwrap();
+        }
+        std::fs::write(format!("{}/renewal/{}.conf", le, d), "version = 2").unwrap();
+        std::fs::write(format!("{}/accounts/acme/x/private_key.json", le), "{}").unwrap();
+    }
+
+    #[test]
+    fn certificates_come_back_and_bad_links_do_not() {
+        let src = tmpdir("le-src");
+        le_tree(&src, "xr.example.com", "../../archive/xr.example.com/privkey1.pem");
+        // a link that leaves its own archive: that domain is left out
+        le_tree(&src, "evil.example.com", "/etc/shadow");
+        le_tree(&src, "bad.example.com", "../../archive/xr.example.com/privkey1.pem");
+        let tgz = format!("{}/le.tgz", src);
+        super::run("tar", &["-czf", &tgz, "-C", &src, "letsencrypt"], None).unwrap();
+        let dst = tmpdir("le-dst");
+        // a certificate this machine already has stays as it is
+        std::fs::create_dir_all(format!("{}/live/keep.example.com", dst)).unwrap();
+        le_tree(&src, "keep.example.com", "../../archive/keep.example.com/privkey1.pem");
+        super::run("tar", &["-czf", &tgz, "-C", &src, "letsencrypt"], None).unwrap();
+        assert_eq!(super::le_restore(&tgz, &dst).unwrap(), 1);
+        let key = std::fs::read_to_string(format!("{}/live/xr.example.com/privkey.pem", dst)).unwrap();
+        assert_eq!(key, "xr.example.com privkey");
+        assert_eq!(std::fs::read_link(format!("{}/live/xr.example.com/fullchain.pem", dst)).unwrap().to_string_lossy(), "../../archive/xr.example.com/fullchain1.pem");
+        assert!(std::path::Path::new(&format!("{}/renewal/xr.example.com.conf", dst)).exists());
+        assert!(std::path::Path::new(&format!("{}/accounts/acme/x/private_key.json", dst)).exists());
+        for d in ["evil.example.com", "bad.example.com"] {
+            assert!(!std::path::Path::new(&format!("{}/live/{}", dst, d)).exists(), "{}", d);
+        }
+        assert!(std::fs::read_dir(format!("{}/live/keep.example.com", dst)).unwrap().next().is_none());
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
+    }
+
+    #[test]
+    fn the_chat_comes_back_only_when_it_is_missing_or_asked() {
+        let x = tmpdir("chat-x");
+        std::fs::create_dir_all(format!("{}/emergency", x)).unwrap();
+        let c = rusqlite::Connection::open(format!("{}/emergency/chat.db", x)).unwrap();
+        c.execute_batch("CREATE TABLE m(t TEXT); INSERT INTO m VALUES('from the backup');").unwrap();
+        drop(c);
+        let here = tmpdir("chat-here");
+        let db = format!("{}/emergency/chat.db", here);
+        let le = format!("{}/le", here);
+        assert_eq!(super::restore_extra_to(&x, false, &db, &le).len(), 1);
+        let t: String = rusqlite::Connection::open(&db).unwrap().query_row("SELECT t FROM m", [], |r| r.get(0)).unwrap();
+        assert_eq!(t, "from the backup");
+        // already here: kept by the installer, replaced by a full restore in the panel
+        rusqlite::Connection::open(&db).unwrap().execute("UPDATE m SET t='newer here'", []).unwrap();
+        assert!(super::restore_extra_to(&x, false, &db, &le).is_empty());
+        assert_eq!(super::restore_extra_to(&x, true, &db, &le).len(), 1);
+        // not a database: nothing happens
+        std::fs::write(format!("{}/emergency/chat.db", x), "not sqlite at all, but long enough to pass a length check of a hundred bytes ............................").unwrap();
+        assert!(super::restore_extra_to(&x, true, &db, &le).is_empty());
+        let _ = std::fs::remove_dir_all(&x);
+        let _ = std::fs::remove_dir_all(&here);
+    }
+
+    #[test]
+    fn a_restored_database_waits_for_the_next_start() {
+        let d = tmpdir("pending");
+        let c = rusqlite::Connection::open(format!("{}/kanki.db", d)).unwrap();
+        c.execute_batch("CREATE TABLE t(v TEXT); INSERT INTO t VALUES('old');").unwrap();
+        drop(c);
+        std::fs::write(format!("{}/kanki.db-wal", d), "a log of the old database").unwrap();
+        let n = rusqlite::Connection::open(format!("{}/{}", d, super::PENDING)).unwrap();
+        n.execute_batch("PRAGMA journal_mode=DELETE; CREATE TABLE t(v TEXT); INSERT INTO t VALUES('restored');").unwrap();
+        drop(n);
+        super::take_pending(&d);
+        assert!(!std::path::Path::new(&format!("{}/{}", d, super::PENDING)).exists());
+        assert!(!std::path::Path::new(&format!("{}/kanki.db-wal", d)).exists());
+        let v: String = rusqlite::Connection::open(format!("{}/kanki.db", d)).unwrap().query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, "restored");
+        // a broken file waiting there is thrown away, the database stays
+        std::fs::write(format!("{}/{}", d, super::PENDING), "junk").unwrap();
+        super::take_pending(&d);
+        let v: String = rusqlite::Connection::open(format!("{}/kanki.db", d)).unwrap().query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, "restored");
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

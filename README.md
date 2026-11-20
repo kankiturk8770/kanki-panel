@@ -3,6 +3,18 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.55 — A cleaner sales bot and mini app
+A two-column main menu with standard emoji, a short welcome, services with their lowest price and plans listed by duration,
+uniform plan cards and a custom-plan builder with a fixed price bar; the currency revenue in the stats is right again.
+
+## New in 3.54 — The servers reach a filtered panel through a CDN
+Settings › «Panel CDN domain»: a second domain behind Cloudflare for the servers only. When the panel's IP is filtered in Iran,
+the Iran servers' agents report through it and come back to the panel's own address when it answers again.
+
+## New in 3.53 — Move without loss; KPING on VIP
+Moving the panel freezes the old one from the moment the new server takes the backup, so nothing done in between is lost; the
+emergency chat and the other domains' certificates move too. KPING routes can use any UDP tunnel or a VIP tunnel.
+
 ## New in 3.52.2 — Smart test and the firewall
 The smart tunnel test opens its port on both servers while it runs (firewall on) and closes it after; it also shows the route's MTU.
 

@@ -212,6 +212,8 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  if(a&&!s.local)acts.push('<button class="b2 sm" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',13)+' '+t('Tunnel agent settings')+'</button>');
  if(!s.local)acts.push('<button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+ic('link',13)+' '+t('Show command')+'</button>');
  if(a&&!s.local)acts.push('<button class="b2 sm" onclick="srvReplace(\''+esc(a.id)+'\')">'+ic('move',13)+' '+t('Replace the machine')+'</button>');
+ // the panel server itself moves with everything it holds (Backup › Move)
+ if(s.local)acts.push('<button class="b2 sm" onclick="srvMovePanel()">'+ic('move',13)+' '+t('Move the panel to a new server or IP')+'</button>');
  h+='<div class="kxacts">'+acts.join('')+'</div>';
  if(!s.local)h+='<div class="ku-danger">'+(n&&a&&isIr(s)?'<button class="b2 sm bd" onclick="srvDropVpn(\''+k+'\')">'+t('Remove the VPN from this server')+'</button> ':'')+'<button class="b2 sm bd" onclick="srvDel(\''+k+'\')">'+ic('trash',13)+' '+t('Delete server')+'</button></div>';
  setTimeout(function(){$$('#sx_loc button').forEach(function(b){b.onclick=function(){$$('#sx_loc button').forEach(function(z){z.classList.toggle('on',z==b)});var bb=b.closest('.kxr-b');if(bb)bb.dataset.dirty='1'}})},0);
@@ -295,6 +297,7 @@ function waitTick(){var el=$('#sa_steps');if(!el||!SV.wait||!SV.d)return;var s=f
 
 // The machine of a server died or its IP was filtered: the same server on a new machine. Its settings stay;
 // the command makes the new machine this server again (tunnels, Xray, DNS, its VPN part and SSL come back).
+window.srvMovePanel=function(){location.hash='#backup';var n=0,iv=setInterval(function(){var el=$('#v37move');if(el||++n>40){clearInterval(iv);if(el)el.scrollIntoView({behavior:'smooth',block:'start'})}},150)};
 window.srvReplace=function(id){var s=find(id)||{},a=s.agent||{};
  modal(mhead(t('Replace the machine'),s.name||id)+'<div id="sr_in"><p class="muted" style="margin:0 0 8px">'+t('For a server that is gone (switched off, or its IP filtered). Nothing is deleted: run the new command on the new machine and this server comes back there with its tunnels, Xray, Kanki DNS, its VPN cores and their ports, its users and SSL.')+'</p>'+
   '<label class="f">'+t('New address (IP or domain) other servers dial')+'</label><input id="sr_addr" class="ltr" placeholder="'+esc(t('empty = the address it connects from'))+'" value="'+esc(a.addr||'')+'">'+

@@ -26,6 +26,11 @@ function kpState(x){if(!x.exit_online)return ['r',t('The server abroad is offlin
  if(x.relay&&x.relay.error)return ['r',t('Not running'),'iran'];
  if(!x.relay)return ['y',t('Starting on the Iran server…'),'iran'];
  return ['g',t('Ready'),'']}
+// the tunnel between the Iran server and the exit: its kinds, and how one route's is called
+var KPKINDS=[['game','Game-FEC'],['kcp','KCP'],['quic','QUIC'],['hq','HQ'],['faketcp','Fake TCP'],['vip','VIP']];
+function kpKind(r){return r.kind||'game'}
+function kpKindName(r){var k=kpKind(r);if(k=='game')return 'Game-FEC '+(r.fec||'8:1');if(k=='vip')return 'VIP · '+N(r.vip_paths||2)+' '+t('UDP paths');
+ var o=KPKINDS.filter(function(x){return x[0]==k})[0];return o?o[1]:k}
 function kpCC(sid){var s=window.srvFind?srvFind(sid):null;return s&&s.cc}
 function kpQ(x){var q=x.tunnel_q;return q&&q.n?{ping:q.ping,loss:q.loss,jit:q.jit}:null}
 
@@ -38,7 +43,7 @@ function kpPath(x){var st=kpState(x),r=x.route,q=kpQ(x),stop=st[2];
   hop('ok',ic('phone',18),t('Kanki app'),t('only PUBG')+(rl.online?' · '+N(rl.online)+' '+t('online'):''))+
   '<i class="kp-ln '+(irOk?'ok':'')+'"></i>'+
   hop(irOk?'ok':stop=='iran'?'bad':'',flagOf('IR'),esc(x.iran_name||'?'),esc(x.dial)+(rl.paths?' · '+N(rl.paths)+' '+t('paths'):''))+
-  '<div class="kp-tun '+(tunOk?'ok':x.tunnel_built?'wait':'')+'"><small>Game-FEC 8:3</small><b>'+link+'</b></div>'+
+  '<div class="kp-tun '+(tunOk?'ok':x.tunnel_built?'wait':'')+'"><small>'+esc(kpKindName(r))+'</small><b>'+link+'</b></div>'+
   hop(exitOk?'ok':'bad',flagOf(kpCC(r.exit)),esc(x.exit_name||'?'),'kping0'+(x.exit_stats&&x.exit_stats.fixed?' · '+N(x.exit_stats.fixed)+' '+t('rebuilt'):''))+
   '<i class="kp-ln '+(tunOk?'ok':'')+'"></i>'+
   hop(tunOk?'ok':'',ic('game',18),'PUBG',t('the match'))+'</div>'}
@@ -53,7 +58,7 @@ function kpDraw(d){var el=$('#kp');if(!el)return;var s=d.settings,tab=KP.tab;
   kuGroup(t('Servers abroad'),d.exits.length,'<button class="b2 sm" onclick="kpAddServer()">'+ic('plus',14)+' '+t('Add server abroad')+'</button>',
    '<p class="muted ku-note">'+t('Any server with the Kanki agent can be the exit. A new one needs only the agent: no VPN is installed on it.')+'</p>'+
    d.exits.map(function(o){return kuItem({dot:o.online?'g':'r',flag:flagOf(kpCC(o.id)),name:esc(o.name||o.id),tags:kuTag(t(o.online?'Online':'Offline'),o.online?'g':'r')+(o.agent_only?kuTag(t('Agent only')):'')})}).join(''));return}
- if(tab=='tunnel'){el.innerHTML=kuGroup(t('Tunnel of each route'),d.routes.length,'','<p class="muted ku-note">'+t('Reverse (the server abroad dials Iran), Game-FEC 8:3, and only KPING: the relay on the Iran server puts one copy of each packet into it.')+'</p>'+kpTunnels(d));return}
+ if(tab=='tunnel'){el.innerHTML=kuGroup(t('Tunnel of each route'),d.routes.length,'','<p class="muted ku-note">'+t('Reverse (the server abroad dials Iran) and only KPING. Its kind and settings are in each route (Edit): Game-FEC 8:1 by default, or KCP, QUIC, HQ, Fake TCP, or a VIP tunnel with several UDP paths.')+'</p>'+kpTunnels(d));return}
  if(tab=='users'){el.innerHTML=kpUsers(d);return}
  if(tab=='settings'){el.innerHTML=kpSettings(d);$('#kp_save').onclick=kpSave;return}
  el.innerHTML=(s.on?'':'<div class="warnbox">'+t('KPING is off: no server runs it and no tester gets it.')+'</div>')+kpStats(d)+
@@ -73,10 +78,12 @@ function kpTunnels(d){if(!d.routes.length)return '<p class="muted ku-empty">'+t(
   var dot=!built?'':x.tunnel_up?'g':'y';
   return kuItem({dot:dot,flag:flagOf('IR'),name:esc(x.iran_name||'?')+' → '+esc(x.exit_name||'?'),
    act:'<button class="'+(built?'b2':'btn')+' sm" onclick="kpTunnel('+i+')">'+ic(built?'refresh':'tunnel',14)+' '+t(built?'Build again':'Build tunnel')+'</button>',
-   tags:(built?kuTag(t(x.tunnel_up?'Connected':'Connecting…'),x.tunnel_up?'g':'y'):kuTag(t('Not built'),'y'))+
+   tags:kuTag(esc(kpKindName(x.route)))+(built?kuTag(t(x.tunnel_up?'Connected':'Connecting…'),x.tunnel_up?'g':'y'):kuTag(t('Not built'),'y'))+
+    (x.vip&&x.vip.length?x.vip.map(function(p,j){return kuTag(t('Path')+' '+N(j+1)+' '+esc(p.kind=='udp'?'UDP':p.kind=='ftcp'?'Fake TCP':p.kind)+(p.state==2?' · <span class="ltr">'+N(Math.round(p.rtt))+' ms</span>':''),p.state==2?'g':p.state==1?'y':'r')}).join(''):'')+
     (q?kuTag('<span class="ltr">'+N(q.ping)+' ms</span>')+kuTag(t('loss')+' <span class="ltr">'+N(q.loss)+'%</span>',q.loss>3?'r':q.loss>1?'y':'g')+kuTag(t('jitter')+' <span class="ltr">'+N(q.jit)+' ms</span>'):'')+
     (st[2]=='exit'?kuTag(esc(st[1]),'r'):''),
-   addr:'UDP 127.0.0.1:'+N(x.route.tunnel_port+1)+' → '+esc(x.exit_name||'?')+' 127.0.0.1:'+N(d.settings.port)})+kpTunnel2Item(d,x,i)}).join('')}
+   addr:'UDP 127.0.0.1:'+N(kpInner(x.route))+' → '+esc(x.exit_name||'?')+' 127.0.0.1:'+N(d.settings.port)})+(kpKind(x.route)=='vip'?'':kpTunnel2Item(d,x,i))}).join('')}
+function kpInner(r){return r.tunnel_port+(kpKind(r)=='vip'?(r.vip_hop||4):1)}
 // the route's second tunnel (KPING v3): every packet goes through both, the first copy wins; the relay's probes
 // say how each one is doing
 function kpTq(x,n){var a=x.relay&&x.relay.tunnels;return a&&a[n]?a[n]:null}
@@ -139,21 +146,45 @@ function kpEdit(i){var d=KP.d;if(!d)return;var x=i!=null?d.routes[i]:null,r=x?x.
   '<label class="f">'+t('Server abroad (KPING runs on it)')+'</label><select id="kr_ex">'+opt(exits,r.exit)+'</select>'+
   '<label class="f">'+t('Address users dial')+'</label><input id="kr_ho" class="ltr" placeholder="'+esc(t('automatic: the Iran server\'s address'))+'" value="'+esc(r.host||'')+'">'+
   '<div class="kxf"><div><label class="f">'+t('Users\' port')+' · UDP</label><input id="kr_po" class="ltr" inputmode="numeric" value="'+esc(String(r.port))+'"></div>'+
-  '<div><label class="f">'+t('Tunnel port')+'</label><input id="kr_tp" class="ltr" inputmode="numeric" value="'+esc(String(r.tunnel_port))+'"></div></div></div>'+
+  '<div><label class="f">'+t('Tunnel port')+'</label><input id="kr_tp" class="ltr" inputmode="numeric" value="'+esc(String(r.tunnel_port))+'"></div></div>'+
+  kpTunForm(r)+'</div>'+
   '<div class="kxsave"><button class="b2" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn" id="kr_go">'+t('Save')+'</button></div>');
+ kpTunShow();
  $('#kr_go').onclick=function(){var b={id:r.id||'',iran:$('#kr_ir').value,exit:$('#kr_ex').value,host:$('#kr_ho').value.trim(),port:+unN($('#kr_po').value)||0,tunnel_port:+unN($('#kr_tp').value)||0};
   if(!b.iran||!b.exit)return toast(t('Choose both servers'),1);
+  var tb=kpTunBody();for(var k in tb)b[k]=tb[k];
+  // what the tunnel is made of changed: it is built again with it
+  var tunChanged=!r.id||kpKind(r)!=b.kind||(r.fec||'')!=(b.fec||'')||(b.kind=='vip'&&((r.vip_paths||2)!=b.vip_paths||(r.vip_hop||4)!=b.vip_hop||(r.vip_hop_secs||0)!=b.vip_hop_secs||!!r.vip_ftcp!=b.vip_ftcp))||r.tunnel_port!=b.tunnel_port;
   var go=$('#kr_go');go.disabled=true;
   api('POST','/api/kping/routes',b).then(function(res){closeModal();toast(t('Saved'));
-   // a new route gets its tunnel at once
-   if(!r.id&&res.route)return api('POST','/api/kping/routes/'+encodeURIComponent(res.route.id)+'/tunnel').then(function(){toast(t('Saved')+' · '+t('Tunnel built'))}).catch(fail);
+   if(tunChanged&&res.route)return api('POST','/api/kping/routes/'+encodeURIComponent(res.route.id)+'/tunnel').then(function(){toast(t('Saved')+' · '+t('Tunnel built'))}).catch(fail);
   }).then(function(){return kpLoad()}).catch(function(e){go.disabled=false;fail(e)})}}
+// the tunnel part of the route form: its kind, and the settings of that kind in their own colour
+function kpTunForm(r){var k=kpKind(r),fec=r.fec||'8:1';
+ var o=function(list,cur){return list.map(function(x){return '<option value="'+esc(x[0])+'"'+(x[0]==cur?' selected':'')+'>'+esc(x[1])+'</option>'}).join('')};
+ return '<div class="kp-legs"><div class="kp-leg phone"><b>'+ic('phone',14)+' '+t('Phone → Iran server')+'</b><small>'+t('Two networks (Wi-Fi + mobile data) are the app\'s: with both on, every packet goes on each and the first that arrives wins. Nothing to set here.')+'</small></div>'+
+  '<div class="kp-leg srv"><b>'+ic('tunnel',14)+' '+t('Iran server → server abroad')+'</b><small>'+t('This is the tunnel below. Several paths here (VIP, or a second tunnel) are between the two servers, not the phone\'s networks.')+'</small></div></div>'+
+  '<label class="f">'+t('Tunnel between the servers')+'</label><select id="kr_kind" onchange="kpTunShow()">'+o(KPKINDS.map(function(x){return [x[0],x[0]=='game'?x[1]+' ('+t('suggested')+')':x[1]]}),k)+'</select>'+
+  '<div class="kp-adv" id="kr_adv_game"><b>'+t('Advanced: Game-FEC')+'</b><label class="f">FEC</label><select id="kr_fec">'+o([['8:1','8:1 · '+t('light, suggested for KPING')],['8:3','8:3 · '+t('more repairs')],['4:2','4:2'],['off',t('No FEC')]],fec)+'</select>'+
+   '<small class="muted">'+t('KPING already repairs end to end and sends a second copy into the tunnel: 8:1 is enough.')+'</small></div>'+
+  '<div class="kp-adv" id="kr_adv_vip"><b>'+t('Advanced: VIP tunnel')+'</b>'+
+   '<div class="kxf"><div><label class="f">'+t('UDP paths at the same time')+'</label><select id="kr_vpa">'+o([['1','1'],['2','2 · '+t('suggested')],['3','3'],['4','4']],String(r.vip_paths||2))+'</select></div>'+
+   '<div><label class="f">'+t('UDP ports it holds')+'</label><input id="kr_vho" class="ltr" inputmode="numeric" value="'+esc(String(r.vip_hop||4))+'"></div></div>'+
+   '<div class="kxf"><div><label class="f">'+t('A path moves to another port every (seconds)')+'</label><input id="kr_vhs" class="ltr" inputmode="numeric" value="'+esc(String(r.vip_hop_secs||0))+'"><small class="muted">'+t('0 = never')+'</small></div>'+
+   '<div><label class="f">'+t('Fake TCP path too')+'</label><div id="kr_vft">'+kuSwitch(t('For networks that throttle UDP'),!!r.vip_ftcp,'')+'</div></div></div>'+
+   '<small class="muted">'+t('The game goes on the two best paths at once with repairs; when one of them stalls the other carries it without a jump. Paths only help when they are cut apart: on one shared line between the servers a VIP tunnel is about as good as Game-FEC. With two paths or more KPING\'s own second copy into the tunnel is off (VIP sends each packet on two paths); with one path it stays on. The agents need version 3.44 or newer.')+'</small></div>'+
+  '<div class="kp-adv" id="kr_adv_other"><small class="muted">'+t('KCP, QUIC and HQ resend lost packets and wait for them; Fake TCP looks like a TCP session for networks that throttle UDP. For a game, Game-FEC or VIP is better.')+'</small></div>'}
+function kpTunShow(){var k=($('#kr_kind')||{}).value||'game';
+ ['game','vip','other'].forEach(function(x){var el=$('#kr_adv_'+x);if(el)el.style.display=(x==k||(x=='other'&&k!='game'&&k!='vip'))?'':'none'})}
+function kpTunBody(){var k=$('#kr_kind').value,b={kind:k};
+ if(k=='game')b.fec=$('#kr_fec').value;
+ if(k=='vip'){b.vip_paths=+$('#kr_vpa').value||2;b.vip_hop=Math.min(16,Math.max(1,+unN($('#kr_vho').value)||4));b.vip_hop_secs=+unN($('#kr_vhs').value)||0;
+  var ft=$('#kr_vft input');b.vip_ftcp=!!(ft&&ft.checked)}
+ return b}
 function kpTunnel(i){var x=KP.d&&KP.d.routes[i];if(!x)return;toast(t('Checking…'));
  api('POST','/api/kping/routes/'+encodeURIComponent(x.route.id)+'/tunnel').then(function(){toast(t('Tunnel built'));kpLoad()}).catch(fail)}
 function kpMenu(i){var x=KP.d.routes[i];
  kuMenu(x.iran_name+' → '+x.exit_name,x.dial,[[t('Edit'),'kpEdit('+i+')'],[t(x.tunnel_built?'Build tunnel again':'Build tunnel'),'kpTunnel('+i+')'],[t('Delete route and its tunnel'),'kpDel('+i+')','danger']])}
 function kpDel(i){var x=KP.d.routes[i];if(!confirm(t('Delete this route and its tunnel? Its testers lose it at once.')))return;
- api('DELETE','/api/kping/routes/'+encodeURIComponent(x.route.id)).then(function(res){
-  var all=[];if(res.tunnel&&x.tunnel_built)all.push(api('DELETE','/api/tunnels/'+encodeURIComponent(res.tunnel)).catch(function(){}));
-  if(res.tunnel2)all.push(api('DELETE','/api/tunnels/'+encodeURIComponent(res.tunnel2)).catch(function(){}));
-  return Promise.all(all)}).then(function(){toast(t('Deleted'));kpLoad()}).catch(fail)}
+ // the panel removes the route's tunnels itself
+ api('DELETE','/api/kping/routes/'+encodeURIComponent(x.route.id)).then(function(res){if(res&&res.removal&&window.kdFollowRemoval)kdFollowRemoval(res.removal);toast(t('Deleted'));kpLoad()}).catch(fail)}
