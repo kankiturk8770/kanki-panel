@@ -265,6 +265,12 @@ struct Session {
     frag_id: u32,
     /// each user flow: its copy and repair budget (last refill, bytes left) and when it last came marked
     budget: HashMap<(u8, u32), FlowB>,
+    /// the exit side: each forwarded port whose service marks its game, and when it last did (KANKI MIX,
+    /// microtun): everything it sends without the mark, on any flow, is its TCP
+    port_marked: HashMap<u8, Instant>,
+    /// the entry side: user flows the other side sends back as bulk (that service's TCP, told apart by its
+    /// mark there), and when: what the user sends on them is bulk too
+    bulk_flows: HashMap<(u8, u32), Instant>,
     /// the last round of the slower timers
     tick_at: Option<Instant>,
     // counts
@@ -333,6 +339,8 @@ impl Session {
             guard: Guard { on: false, rate: 0.0, tokens: 0.0, refill_at: now, tick_at: now, bytes: 0, measured: 0.0, clear_since: None },
             frag_id: rand::random(),
             budget: HashMap::new(),
+            port_marked: HashMap::new(),
+            bulk_flows: HashMap::new(),
             tick_at: None,
             st: VipStatus { id: spec.id.clone(), role: spec.role.clone(), ..Default::default() },
             echo_id: 0,
@@ -669,13 +677,24 @@ impl Session {
         if self.budget.len() > 4096 {
             self.budget.retain(|_, b| now.duration_since(b.at) < Duration::from_secs(60));
         }
-        let b = self.budget.entry((pidx, flow)).or_insert(FlowB { at: now, left: if tos.is_none() { UP_BURST } else { PLAIN_BURST }, marked: None });
+        if self.bulk_flows.len() > 4096 {
+            self.bulk_flows.retain(|_, t| now.duration_since(*t) < MARK_KEEP);
+        }
         let game = tos.is_some_and(crate::netq::is_game_tos);
         if game {
-            b.marked = Some(now);
-        } else if tos.is_some() && b.marked.is_some_and(|t| now.duration_since(t) < MARK_KEEP) {
-            // the service marks its game packets and this one is not: its TCP
+            self.port_marked.insert(pidx, now);
+        } else if tos.is_some() && self.port_marked.get(&pidx).is_some_and(|t| now.duration_since(*t) < MARK_KEEP) {
+            // the service on this port marks its game and this packet is not marked: its TCP. KANKI MIX sends
+            // its game and its KCP (the app's TCP) from two sockets of the phone, so they are two flows here:
+            // the mark is per port, not per flow.
             return Class::Bulk;
+        } else if tos.is_none() && self.bulk_flows.get(&(pidx, flow)).is_some_and(|t| now.duration_since(*t) < MARK_KEEP) {
+            // the user's side of a flow the other side found to be TCP (its answers come back as bulk)
+            return Class::Bulk;
+        }
+        let b = self.budget.entry((pidx, flow)).or_insert(FlowB { at: now, left: if tos.is_none() { UP_BURST } else { PLAIN_BURST }, marked: None });
+        if game {
+            b.marked = Some(now);
         }
         let (bps, cap) = if b.marked.is_some_and(|t| now.duration_since(t) < MARK_KEEP) {
             (MARKED_BPS, MARKED_BURST)
@@ -693,9 +712,16 @@ impl Session {
         Class::Game { protect: true }
     }
 
-    fn deliver(&mut self, inner: &[u8], now: Instant) {
+    /// `bulk`: it came in the bulk class (the other side's TCP)
+    fn deliver(&mut self, inner: &[u8], now: Instant, bulk: bool) {
         match wire::inner(inner) {
             Some(Inner::Udp { pidx, flow, data }) => {
+                // a user flow the other side sends as bulk is a TCP: what the user sends on it goes bulk too
+                if bulk {
+                    self.bulk_flows.insert((pidx, flow), now);
+                } else if self.bulk_flows.contains_key(&(pidx, flow)) {
+                    self.bulk_flows.remove(&(pidx, flow));
+                }
                 let _ = self.down.try_send(Down::Udp { pidx, flow, data: data.to_vec() });
             }
             Some(Inner::Quic(d)) => {
@@ -817,7 +843,7 @@ impl Session {
                     }
                     self.st.rt_rx += 1;
                     self.rt_got += 1;
-                    self.deliver(inner, now);
+                    self.deliver(inner, now, false);
                     for (s, b) in self.rt_rx.data(seq, inner, now) {
                         self.rt_rebuilt(s, &b, now);
                     }
@@ -834,7 +860,7 @@ impl Session {
                     }
                     self.st.bulk_rx += 1;
                     self.bulk_got += 1;
-                    self.deliver(inner, now);
+                    self.deliver(inner, now, true);
                     for (s, b) in self.bulk_rx[l].data(seq, inner, now) {
                         self.bulk_rebuilt(l, s, &b, now);
                     }
@@ -864,7 +890,7 @@ impl Session {
         if self.rt_dedup.take(s) {
             self.st.rt_fixed += 1;
             self.rt_got += 1;
-            self.deliver(b, now);
+            self.deliver(b, now, false);
         }
     }
 
@@ -872,7 +898,7 @@ impl Session {
         if self.bulk_dedup[l].take(s) {
             self.st.bulk_fixed += 1;
             self.bulk_got += 1;
-            self.deliver(b, now);
+            self.deliver(b, now, true);
         }
     }
 
@@ -1246,6 +1272,35 @@ mod tests {
             // and its small acknowledgements: also TCP
             assert_eq!(s.class(0, 1, 80, Some(0), at), Class::Bulk);
         }
+    }
+
+    /// KANKI MIX sends its game and its KCP (the app's TCP) from two sockets of the phone: two flows. The exit
+    /// tells them apart by the server's mark on the port, and the entry learns from what comes back: the
+    /// game gets its copies both ways, the TCP never
+    #[test]
+    fn a_tcp_flow_beside_the_game_flow_is_bulk_both_ways() {
+        let mut s = session();
+        let t0 = Instant::now();
+        let ef = Some(crate::netq::GAME_TOS as u8);
+        // the exit: flow 1 (the game) comes marked, flow 2 (KCP) never does; port 3 is a service that never marks
+        assert_eq!(s.class(0, 1, 120, ef, t0), Class::Game { protect: true });
+        for i in 0..200u64 {
+            let at = t0 + Duration::from_millis(i);
+            assert_eq!(s.class(0, 2, 1300, Some(0), at), Class::Bulk, "KCP down at {} ms", i);
+            assert_eq!(s.class(0, 2, 60, Some(0), at), Class::Bulk, "its acks");
+            assert_eq!(s.class(0, 1, 120, ef, at), Class::Game { protect: true }, "the game");
+        }
+        assert_ne!(s.class(3, 9, 1300, Some(0), t0), Class::Bulk, "a port whose service never marks keeps the old way");
+        // the entry: nothing is marked on the users' side; what comes back on flow 2 is bulk, on flow 1 realtime
+        let mut e = session();
+        assert_ne!(e.class(0, 2, 200, None, t0), Class::Bulk, "before anything came back");
+        e.deliver(&wire::inner_udp(0, 2, b"kcp data"), t0, true);
+        e.deliver(&wire::inner_udp(0, 1, b"game"), t0, false);
+        assert_eq!(e.class(0, 2, 200, None, t0), Class::Bulk, "the phone's KCP");
+        assert_eq!(e.class(0, 1, 60, None, t0), Class::Game { protect: true }, "the phone's game");
+        // a flow that turns out to be realtime after all (its answers come marked) is not held as bulk
+        e.deliver(&wire::inner_udp(0, 2, b"game now"), t0, false);
+        assert_ne!(e.class(0, 2, 200, None, t0), Class::Bulk);
     }
 
     /// A packet nobody marked (the user side, a service that does not mark): realtime, small or big, but its
