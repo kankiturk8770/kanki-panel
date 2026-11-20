@@ -139,7 +139,7 @@ async fn entry_udp(bind: String, port: u16, pidx: u8, up: mpsc::Sender<Up>, back
         back.lock().unwrap_or_else(|e| e.into_inner()).insert(id, (tx.clone(), from, now));
         // a user's packet carries no mark the tunnel may trust; a service of this server (KPING's relay
         // sends only the game) counts as one that marks its game
-        let tos = if from.ip().is_loopback() { Some(crate::netq::GAME_TOS as u8) } else { None };
+        let tos = if from.ip().is_loopback() { Some(super::core::LOCAL_TOS) } else { None };
         let _ = up.try_send(Up::Udp { pidx, flow: id, data: buf[..n].to_vec(), tos });
         if now.duration_since(clean) > Duration::from_secs(60) {
             clean = now;

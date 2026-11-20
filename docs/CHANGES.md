@@ -37,6 +37,16 @@
 - Lab (one phone path, the line between the servers 4% of the time out in ~100 ms cuts, 45 s, two runs each): Game-FEC 8:1 lost
   1.6-5.3% with the slowest 1% at 187-267 ms; VIP with two separate paths 0.8-1.8% and 137 ms; VIP with one path about like Game-FEC.
 
+**VIP: KANKI MIX's TCP is never copied, its game always is (both ways)**
+- The Kanki app sends KANKI MIX's game and its KCP (the app's TCP) from two sockets, so the VIP tunnel saw two flows and the KCP flow,
+  never marked, was taken for a game: up to 32-64 KB/s of a download copied and repaired each way. Now the exit takes the server's
+  mark per forwarded port (`port_marked`): once KANKI MIX (or microtun) marks its game on a port, everything it sends there unmarked is
+  its TCP and goes bulk; the entry learns from that (`bulk_flows`): a flow whose answers come back as bulk is bulk from the phone too.
+  A port whose service never marks (WireGuard, AmneziaWG) keeps the old way.
+- Lab with the app's own KANKI MIX client (two sockets) and the real server, a download during the game: the phone's side of the
+  tunnel sent 4 049 realtime packets (the game) and 25 803 bulk instead of 29 630 realtime with copies; half the bytes up; the game
+  still has its copies and repairs both ways; game packets lost 1.4-1.7% instead of 2.3-3.0%.
+
 # v3.52.2 — Smart tunnel test with the firewall on; the route's MTU
 - **Smart tunnel test with the panel's firewall on:** each test port is now opened, TCP and UDP, on **both** servers for the test
   (`open_ports`, the test's tunnels), not only on the listening side, and closed again when the test ends (`fw::sync`).

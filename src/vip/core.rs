@@ -47,6 +47,9 @@ const MARKED_BPS: f64 = 256.0 * 1024.0;
 const MARKED_BURST: f64 = 256.0 * 1024.0;
 /// a flow stays «marking» this long after its last marked packet
 const MARK_KEEP: Duration = Duration::from_secs(120);
+/// the users' side: a packet from a service of this same server (KPING's relay): the game mark, told apart
+/// from a mark read off the wire (the ECN bit set)
+pub const LOCAL_TOS: u8 = crate::netq::GAME_TOS as u8 | 1;
 
 #[derive(Clone, Copy)]
 struct FlowB {
@@ -680,16 +683,19 @@ impl Session {
         if self.bulk_flows.len() > 4096 {
             self.bulk_flows.retain(|_, t| now.duration_since(*t) < MARK_KEEP);
         }
+        // the users' side: a flow the other side found to be TCP (its answers come back as bulk) is bulk here
+        // too, whoever sends it
+        let users = tos.is_none() || tos == Some(LOCAL_TOS);
+        if users && self.bulk_flows.get(&(pidx, flow)).is_some_and(|t| now.duration_since(*t) < MARK_KEEP) {
+            return Class::Bulk;
+        }
         let game = tos.is_some_and(crate::netq::is_game_tos);
-        if game {
+        if game && !users {
             self.port_marked.insert(pidx, now);
-        } else if tos.is_some() && self.port_marked.get(&pidx).is_some_and(|t| now.duration_since(*t) < MARK_KEEP) {
+        } else if !game && tos.is_some() && self.port_marked.get(&pidx).is_some_and(|t| now.duration_since(*t) < MARK_KEEP) {
             // the service on this port marks its game and this packet is not marked: its TCP. KANKI MIX sends
             // its game and its KCP (the app's TCP) from two sockets of the phone, so they are two flows here:
             // the mark is per port, not per flow.
-            return Class::Bulk;
-        } else if tos.is_none() && self.bulk_flows.get(&(pidx, flow)).is_some_and(|t| now.duration_since(*t) < MARK_KEEP) {
-            // the user's side of a flow the other side found to be TCP (its answers come back as bulk)
             return Class::Bulk;
         }
         let b = self.budget.entry((pidx, flow)).or_insert(FlowB { at: now, left: if tos.is_none() { UP_BURST } else { PLAIN_BURST }, marked: None });
