@@ -1,3 +1,40 @@
+# v3.56.0 — Selling better: a short trial with an instant offer, reminders that renew, gifts from the mini app
+**Trial and its offer**
+- The free trial is **300 MB for 3 hours**, one user, once per Telegram account (`trial_mb`, `trial_hours`). Its message: volume,
+  time, the account name and the link to copy, with «📱 دانلود اپ کانکی» and «📖 راهنمای اتصال».
+- **The moment it is used up or two hours in** (whichever comes first) the customer gets the first-purchase offer: **15% for 12
+  hours, code `TEST15`** (`trial_hook`, once; `trial_offer_pct`, `trial_offer_hours`), with «🛒 خرید با 15% تخفیف» and «👑 مشاهده پلن‌های VIP».
+- **Personal codes:** `TEST15` and `BACK20` work only for the customer they were given to, only while they are good, and are used
+  up by the purchase (`personal_code`, `code_percent`); the shop's own discount codes work as before.
+
+**Keeping customers** (`retention`, every 5 minutes, once per account and period)
+- 48 hours before the end or at 85% of the volume: one reminder with «🔄 تمدید همین سرویس»; renewing until a day after the
+  end adds **10% of the plan's volume** (`renew_bonus_pct`, shown in the renewal message).
+- At the end: one short message to renew. **5 days after the end**, nothing renewed and no other working account: the
+  win-back, **20% for 48 hours, code `BACK20`** (`back_pct`, `back_hours`), its button renews with the code already on.
+- Invites: **7 days + 5 GB** for the inviter after the friend's first paid purchase (`ref_days` 7, `ref_gb` 5).
+- These numbers are set once on update (`ux_once`, `bot_ux_v5`), then the admin's own stay; all of them are in the admin mini app ›
+  دعوت و تست and the bot's admin menu.
+
+**The bot's texts**
+- English digits everywhere (prices, volumes, hours, percents, dates). The owner's `/start`; menu «📖 راهنمای اتصال».
+- Service buttons «⚡ اقتصادی (V2Ray) · از 52,000 تومان»; plan buttons «🔹 20 GB | 1 ماهه | 1 کاربر — 80,000 تومان», one colour
+  (the featured one green), with right-to-left marks so Telegram does not turn «20 GB | 1 ماهه» around.
+- Short messages: delivery, reminder, name question, V2Ray help, plan page.
+
+**Admin mini app**
+- **🎁 هدیه** (`/tg/api/admin/gift`, the sales bot's admins only): to buyers only, to every working account, or to accounts picked
+  from a searchable list (buyers first, with what each has left); days and GB from chips or a number; the reason goes into the
+  customer's message; one confirm with the exact count; a one-time key so a double tap gives once; the last 30 gifts listed.
+- Forms two numbers a row; ribbons and service tags with drawn icons; English digits.
+
+**Seeing the bot:** `scripts/bot_tour.js` draws the bot's real messages and buttons (the `bot_tour` test, a fake Telegram) as a
+phone chat, one picture per step, and lists any button text Telegram would cut.
+
+**Tests:** `cargo test` 426 (new: the trial and its offer and codes; the reminder, the renewal gift and the win-back; gifts only
+for the sales admins; earlier ones updated); the bot tour (18 steps) looked at; the mini app at 360/390/768/1440 (shop, custom
+plan, gifts, settings, plans): no JS error, no sideways scroll.
+
 # v3.55.0 — The sales bot and mini app redone: one emoji style, a short welcome, a simpler purchase
 **Bot (`src/bot/bot.rs`)**
 - **Main menu** always two buttons a row: 🛒 خرید اشتراک | 🎁 تست رایگان · 📦 سرویس‌های من | 🔄 تمدید اشتراک · 📱 دانلود اپلیکیشن |

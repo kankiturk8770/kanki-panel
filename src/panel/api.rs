@@ -1291,6 +1291,8 @@ pub const SETTING_KEYS: &[&str] = &[
     "mtu_auto", "mtu_budget",
     // 3.49: the shop's one price list (shop.rs) and what a gaming plan gives
     "pricing", "game_protocols",
+    // 3.56: the short trial, the offers after it, the win-back and the on-time renewal gift (bot.rs)
+    "trial_mb", "trial_hours", "trial_offer_hours", "back_pct", "back_hours", "renew_bonus_pct",
 ];
 
 /// "owner/repo" with only the characters GitHub allows

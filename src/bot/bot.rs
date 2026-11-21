@@ -63,8 +63,8 @@ impl Default for Pending {
 
 /// The app files an admin sends to the bot, in order: (type, what to send, file endings)
 const APP_STEPS: &[(&str, &str, &[&str])] = &[
-    ("arm64-v8a", "📱 اندروید <b>arm64</b> (گوشی‌های جدید، ۶۴ بیتی) · فایل <code>.apk</code>", &["apk"]),
-    ("armeabi-v7a", "📱 اندروید <b>armv7</b> (گوشی‌های قدیمی، ۳۲ بیتی) · فایل <code>.apk</code>", &["apk"]),
+    ("arm64-v8a", "📱 اندروید <b>arm64</b> (گوشی‌های جدید، 64 بیتی) · فایل <code>.apk</code>", &["apk"]),
+    ("armeabi-v7a", "📱 اندروید <b>armv7</b> (گوشی‌های قدیمی، 32 بیتی) · فایل <code>.apk</code>", &["apk"]),
     ("windows", "💻 <b>ویندوز</b> · فایل <code>.exe</code>، <code>.msi</code> یا <code>.zip</code>", &["exe", "msi", "zip"]),
 ];
 
@@ -114,7 +114,7 @@ pub(crate) const BTNS: &[(&str, &str, &str)] = &[
     ("trial", "🎁 تست رایگان", "منوی اصلی"),
     ("my", "📦 سرویس‌های من", "منوی اصلی"),
     ("renew", "🔄 تمدید اشتراک", "منوی اصلی"),
-    ("guide", "📖 آموزش اتصال", "منوی اصلی"),
+    ("guide", "📖 راهنمای اتصال", "منوی اصلی"),
     ("ref", "🤝 دعوت از دوستان", "منوی اصلی"),
     ("app", "📱 دانلود اپلیکیشن", "منوی اصلی"),
     ("support", "💬 پشتیبانی", "منوی اصلی"),
@@ -144,7 +144,7 @@ pub(crate) const BTNS: &[(&str, &str, &str)] = &[
 pub(crate) const MAIN_BTNS: &[&str] = &["buy", "trial", "my", "renew", "app", "guide", "ref", "support"];
 
 /// The welcome (/start and «🏠 منوی اصلی»): short enough for one phone screen
-const WELCOME: &str = "⚡️ <b>به Kanki VPN خوش آمدید</b> ⚡️\nاینترنت آزاد، پرسرعت و پایدار روی تمام اپراتورها (همراه اول، ایرانسل، رایتل، مخابرات و وای‌فای)\n\n▫️ <b>پوشش جهانی:</b> اتصال با یک اشتراک به سرورهای 🇩🇪 آلمان، 🇹🇷 ترکیه، 🇬🇧 انگلیس و 🇸🇪 سوئد\n▫️ <b>ویژه گیمرها (KANKI MIX):</b> پینگ پایین و بدون لگ برای PUBG، Call of Duty و بازی‌های آنلاین\n▫️ <b>چند پروتکل هم‌زمان:</b> <code>WireGuard</code> · <code>AmneziaWG</code> · <code>Hysteria2</code> · <code>Xray</code> (ضدقطعی کامل)\n▫️ <b>اپ اختصاصی کانکی:</b> اتصال تنها با یک لمس + ارتباط مستقیم با پشتیبانی حتی در زمان اختلال اینترنت\n\n👇 برای خرید، تمدید یا دریافت تست رایگان از منوی زیر انتخاب کنید:";
+const WELCOME: &str = "⚡️ <b>به Kanki VPN خوش آمدید</b> ⚡️\nاینترنت آزاد، پرسرعت و بدون قطعی روی تمام اپراتورها\n\n▫️ <b>4 لوکیشن پرسرعت:</b> 🇩🇪 آلمان | 🇹🇷 ترکیه | 🇬🇧 انگلیس | 🇸🇪 سوئد\n▫️ <b>ویژه گیمرها:</b> پینگ پایین و ثابت با پروتکل <code>KANKI MIX</code>\n▫️ <b>اپ اختصاصی کانکی:</b> اتصال با یک لمس + پشتیبانی آنلاین داخل برنامه\n\n👇 از منوی زیر گزینه مورد نظر را انتخاب کنید:";
 
 /// Messages the admin can rewrite from the bot: (setting key, default, title). HTML (<b>, <i>, <code>) is allowed.
 const TEXTS: &[(&str, &str, &str)] = &[
@@ -176,9 +176,9 @@ fn is_text_key(k: &str) -> bool {
 /// Which admin page a setting belongs to (where to go back after editing it).
 fn back_view(k: &str) -> &'static str {
     match k {
-        "trial_gb" | "trial_days" => "a:trial",
+        "trial_mb" | "trial_hours" => "a:trial",
         "card_number" | "card_holder" | "zp_merchant" | "zp_callback" | "np_key" | "np_coins" | "wallet_text" | "ton_address" | "star_usd" => "a:pay",
-        "ref_gb" | "ref_days" | "ref_pct" | "ref_new_pct" | "trial_offer_pct" => "a:ref",
+        "ref_gb" | "ref_days" | "ref_pct" | "ref_new_pct" | "trial_offer_pct" | "trial_offer_hours" | "back_pct" | "back_hours" | "renew_bonus_pct" => "a:ref",
         "app_link" | "win_link" | "support" | "channel" => "a:links",
         _ if k.starts_with("btn_") => "a:btns",
         _ if is_text_key(k) => "a:txts",
@@ -201,13 +201,17 @@ fn key_title(k: &str) -> String {
         "support" => "پشتیبانی (آیدی یا لینک)".into(),
         "win_link" => "لینک دانلود Kanki VPN ویندوز (https://…؛ خالی = در راهنمای اتصال ویندوز پیشنهاد نمی‌شود)".into(),
         "channel" => "کانال اجباری (مثل @mychannel)".into(),
-        "trial_gb" => "حجم تست (گیگ)".into(),
-        "trial_days" => "مدت تست (روز)".into(),
+        "trial_mb" => "حجم تست (MB)".into(),
+        "trial_hours" => "مدت تست (ساعت)".into(),
+        "trial_offer_hours" => "اعتبار تخفیف بعد از تست (ساعت)".into(),
+        "back_pct" => "درصد تخفیف بازگشت مشتری (BACK)".into(),
+        "back_hours" => "اعتبار تخفیف بازگشت (ساعت)".into(),
+        "renew_bonus_pct" => "درصد حجم هدیه‌ی تمدید به‌موقع".into(),
         "ref_gb" => "گیگ هدیه‌ی دعوت".into(),
         "ref_days" => "روز هدیه‌ی دعوت".into(),
-        "ref_pct" => "درصد حجم هر خرید دوست برای دعوت‌کننده (۰ تا ۱۰۰)".into(),
-        "ref_new_pct" => "درصد تخفیف خرید اول دوستِ دعوت‌شده (۰ تا ۹۰)".into(),
-        "trial_offer_pct" => "درصد تخفیف خرید اول بعد از تمام شدن تست (۰ تا ۹۰)".into(),
+        "ref_pct" => "درصد حجم هر خرید دوست برای دعوت‌کننده (0 تا 100)".into(),
+        "ref_new_pct" => "درصد تخفیف خرید اول دوستِ دعوت‌شده (0 تا 90)".into(),
+        "trial_offer_pct" => "درصد تخفیف خرید اول بعد از تمام شدن تست (0 تا 90)".into(),
         "ton_address" => "آدرس کیف پول TON (مثل UQ… از Tonkeeper)".into(),
         "star_usd" => "دلارِ هر استارز (پیش‌فرض 0.013: همان که تلگرام به صاحب ربات می‌دهد)".into(),
         _ => k.to_string(),
@@ -288,7 +292,7 @@ fn toman(n: i64) -> String {
     format!("{} تومان", o)
 }
 
-/// A plan in the admin's list, short: "🟢 🚀 30GB | یک‌ماهه | ۸۵,۰۰۰ ت"
+/// A plan in the admin's list, short: "🟢 🚀 30GB | یک‌ماهه | 85,000 ت"
 fn plan_label(p: &Plan, active: bool) -> String {
     let vol = if p.gb > 0.0 { format!("{}GB", p.gb) } else { "نامحدود".into() };
     let dur = match p.days {
@@ -303,7 +307,9 @@ fn plan_label(p: &Plan, active: bool) -> String {
 }
 
 fn fa_num(s: &str) -> String {
-    s.chars().map(|c| match c.to_digit(10) { Some(d) => "۰۱۲۳۴۵۶۷۸۹".chars().nth(d as usize).unwrap_or(c), None => c }).collect()
+    // every number in the bot is written with English digits (the owner's rule, 3.56): this only turns any
+    // Persian digit into an English one
+    s.chars().map(|c| match c { '۰'..='۹' => char::from(b'0' + (c as u32 - '۰' as u32) as u8), _ => c }).collect()
 }
 
 fn left_text(u: &User) -> String {
@@ -343,30 +349,26 @@ struct Plan {
     old_toman: i64,
 }
 
-/// How each kind of plan looks in the shop: (category, emoji, button colour, one line about it)
-const CAT_LOOK: &[(&str, &str, &str, &str)] = &[
-    ("تک‌کاربره", "👤", "primary", "برای یک گوشی یا یک کامپیوتر"),
-    ("چندکاربره", "👥", "success", "یک اشتراک برای چند دستگاه هم‌زمان (خانواده و دوستان)"),
-    ("بلندمدت", "⏳", "danger", "۲ و ۳ ماهه، با تخفیف"),
-];
 
 
-/// A plan's button in the shop, all in one shape: «🔹 ۲۰ گیگ | ۱ ماهه | ۱ کاربر — ۷۵,۰۰۰ ت» (and the badge's emoji)
+/// A plan's button in the shop, all in one shape and English digits: «🔹 20 GB | 1 ماهه | 1 کاربر — 75,000 تومان»
+/// (and the badge's emoji). A right-to-left mark before each part keeps the parts in order: without it «GB» makes
+/// Telegram lay the button out left to right («20 | 1 GB ماهه»).
 fn plan_button(p: &Plan, price: i64) -> String {
-    let vol = if p.gb > 0.0 { format!("{} گیگ", fa_num(&p.gb.to_string())) } else { "نامحدود".into() };
+    let vol = if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() };
     let dur = match p.days {
         0 => "بی‌پایان".to_string(),
-        d if d % 30 == 0 => format!("{} ماهه", fa_num(&(d / 30).to_string())),
-        d => format!("{} روزه", fa_num(&d.to_string())),
+        d if d % 30 == 0 => format!("{} ماهه", d / 30),
+        d => format!("{} روزه", d),
     };
-    let cost = if price > 0 { format!("{} ت", fa_num(&toman(price).replace(" تومان", ""))) } else { format!("{}$", p.usd) };
+    let cost = if price > 0 { toman(price) } else { format!("{}$", p.usd) };
     let mark = p.badge.split_whitespace().next().filter(|e| e.chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(false));
-    format!("🔹 {} | {} | {} کاربر — {}{}", vol, dur, fa_num(&p.conns.max(1).to_string()), cost, mark.map(|e| format!(" {}", e)).unwrap_or_default())
+    format!("\u{200F}🔹 {} \u{200F}| {} \u{200F}| {} کاربر \u{200F}— {}{}", vol, dur, p.conns.max(1), cost, mark.map(|e| format!(" {}", e)).unwrap_or_default())
 }
 
-/// «۷۵,۰۰۰ تومان»
+/// «75,000 تومان»
 fn fa_toman(n: i64) -> String {
-    fa_num(&toman(n))
+    toman(n)
 }
 
 /// The plans of the price list (`shop::standard_plans`: V2Ray, gaming and VIP) replace the listed ones once, by
@@ -384,13 +386,19 @@ fn kanki_plans_once(db: &crate::db::Db) -> bool {
 /// 3.55: the new welcome and main-menu buttons (the owner's layout) replace what was set before, once; after that
 /// the admin's own changes stay
 fn ux_once(db: &crate::db::Db) -> bool {
-    if db.get("bot_ux_v4") == "1" {
+    if db.get("bot_ux_v5") == "1" {
         return false;
     }
+    db.set("bot_ux_v5", "1");
     db.set("bot_ux_v4", "1");
     db.set("welcome", "");
     for k in MAIN_BTNS {
         db.set(&format!("btn_{}", k), "");
+    }
+    // the owner's sales numbers (3.56): a short trial, the offers after it, the invite gift
+    for (k, v) in [("trial_mb", "300"), ("trial_hours", "3"), ("trial_offer_pct", "15"), ("trial_offer_hours", "12"),
+        ("back_pct", "20"), ("back_hours", "48"), ("renew_bonus_pct", "10"), ("ref_gb", "5"), ("ref_days", "7")] {
+        db.set(k, v);
     }
     true
 }
@@ -402,7 +410,7 @@ const MENU_MINE: &str = "My Kanki 👤";
 const MENU_NEW: &str = "Kanki 🚀";
 
 /// How to add a v2ray subscription link, under a v2ray account
-const V2RAY_HELP: &str = "📲 <b>اتصال با برنامه‌های V2Ray</b>\n• اندروید: v2rayNG (گوگل‌پلی)\n• آیفون: Streisand یا V2Box (اپ‌استور)\n• ویندوز: v2rayN یا Nekoray\n\n1️⃣ لینک بالا رو کپی کنید.\n2️⃣ توی برنامه: ➕ ← اضافه کردن اشتراک (<code>Subscription</code>) و لینک رو بذارید.\n3️⃣ اشتراک رو به‌روز (<code>Update</code>) کنید، یه سرور رو انتخاب کنید و وصل بشید.\n\nسرورها که عوض بشن، با به‌روز کردن اشتراک خودش درست می‌شه.";
+const V2RAY_HELP: &str = "📲 <b>اتصال:</b> لینک بالا رو کپی کن، توی v2rayNG (اندروید)، V2Box (آیفون) یا v2rayN (ویندوز) به‌عنوان اشتراک (<code>Subscription</code>) اضافه کن و <code>Update</code> بزن.";
 
 /// What the delivered orders brought in. `amount` is toman for card, bank gateway, TON and Stars (the price the
 /// customer paid, at that day's rate), dollars for the crypto gateway and the wallet; TON's nano and the Stars are
@@ -455,9 +463,9 @@ pub(crate) fn revenue(db: &crate::db::Db) -> Revenue {
 const SERVICES: &[(&str, &str, &str, &str)] = &[
     ("v2ray", "v", "⚡ اقتصادی (V2Ray)",
      "⚡ <b>اقتصادی (V2Ray)</b>\n✓ یک لینک برای همه‌ی سرورها در v2rayNG، V2Box و v2rayN"),
-    ("game", "g", "🎮 گیمینگ (WireGuard + Amnezia)",
+    ("game", "g", "🎮 گیمینگ (WG + Amnezia)",
      "🎮 <b>گیمینگ (WireGuard + Amnezia)</b>\n✓ پینگ پایین و پایدار برای PUBG و Call of Duty"),
-    ("vip", "p", "👑 همه‌کاره VIP (تمام پروتکل‌ها + اپ)",
+    ("vip", "p", "👑 همه‌کاره VIP",
      "👑 <b>همه‌کاره VIP (تمام پروتکل‌ها + اپ)</b>\n✓ همه‌ی پروتکل‌ها + اپ اختصاصی کانکی، با یک اشتراک"),
 ];
 
@@ -651,11 +659,8 @@ impl Bot {
                     Some((p, _)) => match p.style.as_str() {
                         "success" | "primary" | "danger" => p.style,
                         "none" => String::new(),
-                        // its category's colour (as the category button), else by users
-                        _ => match CAT_LOOK.iter().find(|c| c.0 == p.category) {
-                            Some(c) => c.2.to_string(),
-                            None => if p.conns >= 2 { "success".into() } else { "primary".into() },
-                        },
+                        // one colour for the list, the featured plan (with a badge) stands out in green
+                        _ => if p.badge.trim().is_empty() { String::new() } else { "success".into() },
                     },
                     None => String::new(),
                 }
@@ -682,9 +687,9 @@ impl Bot {
         let r = if renew > 0 { format!("&renew={}", renew) } else { String::new() };
         let mut rows: Kb = vec![];
         if crate::shop::custom_on(self.db()) {
-            rows.push(vec![b("🎛 ساخت پلن دلخواه (حجم و زمان انتخابی)", &format!("webapp:shop:{}?buy=1&tab=custom{}", mini, r))]);
+            rows.push(vec![b("🎛 ساخت پلن دلخواه", &format!("webapp:shop:{}?buy=1&tab=custom{}", mini, r))]);
         }
-        rows.push(vec![b("💎 ورود به فروشگاه مینی‌اپ", &format!("webapp:shop:{}?buy=1{}", mini, r))]);
+        rows.push(vec![b("💎 فروشگاه مینی‌اپ", &format!("webapp:shop:{}?buy=1{}", mini, r))]);
         rows
     }
 
@@ -697,7 +702,7 @@ impl Bot {
         if svc.is_empty() {
             return Some(vec![b("🛍 فروشگاه کامل در مینی‌اپ", &format!("webapp:shop:{}?buy=1{}", mini, r))]);
         }
-        Some(vec![b("🎛 ساخت پلن دلخواه (حجم و زمان انتخابی)", &format!("webapp:shop:{}?buy=1&shop={}&tab=custom{}", mini, svc, r))])
+        Some(vec![b("🎛 ساخت پلن دلخواه", &format!("webapp:shop:{}?buy=1&shop={}&tab=custom{}", mini, svc, r))])
     }
 
     /// For the mini app: false (and the "join the channel" message in the chat) when the required channel is
@@ -1269,12 +1274,12 @@ impl Bot {
     fn keys_text(&self, u: &User) -> String {
         let mut t = String::new();
         if u.service() == "v2ray" || crate::api::links_text(&self.app, u).is_some() {
-            t.push_str(&format!("🔗 <b>لینک اشتراک V2Ray</b> (v2rayNG · V2Box · Streisand · Hiddify)، روش بزنید کپی می‌شه:\n<code>{}</code>", esc(&crate::api::v2_sub_link(&self.app, u))));
+            t.push_str(&format!("🔗 <b>لینک اشتراک (برای کپی لمس کنید):</b>\n<code>{}</code>", esc(&crate::api::v2_sub_link(&self.app, u))));
         } else {
-            t.push_str(&format!("🔗 <b>صفحه‌ی اشتراک</b>:\n<code>{}/sub/{}</code>", sub_origin(&self.app), u.sub_code()));
+            t.push_str(&format!("🔗 <b>صفحه‌ی اشتراک:</b>\n<code>{}/sub/{}</code>", sub_origin(&self.app), u.sub_code()));
         }
         if u.service() != "v2ray" {
-            t.push_str(&format!("\n\n📱 <b>کد ورود اپ کانکی</b> (اندروید و ویندوز):\n<code>{}</code>", u.sub_code()));
+            t.push_str(&format!("\n📱 <b>کد ورود اپ کانکی:</b> <code>{}</code>", u.sub_code()));
         }
         t
     }
@@ -1282,9 +1287,9 @@ impl Bot {
     /// The message after a purchase, renewal or trial: short, one link to copy and three buttons (the apps, the
     /// video tutorial, support). Everything else (configs, backups) is in the mini app and «📊 سرویس‌های من».
     fn delivery(&self, head: &str, u: &User, plan: &str) -> (String, Value) {
-        let exp = if u.expires_at > 0 { crate::channel::fa_datetime(u.expires_at).0 } else { "نامحدود".into() };
-        let t = format!("{}\n\n📦 پلن: <b>{}</b>\n👤 حساب: <b>{}</b>\n⏳ انقضا: <b>{}</b>\n\n{}\n\n📲 <b>روی کدوم دستگاه وصل می‌شید؟</b> برنامه، فایل و آموزش همین‌جا میاد 👇",
-            head, esc(plan), esc(&u.username), exp, self.keys_text(u));
+        let exp = if u.expires_at > 0 { fa_num(&crate::channel::fa_datetime(u.expires_at).0) } else { "نامحدود".into() };
+        let t = format!("{}\n📦 پلن: <b>{}</b>\n⏳ انقضا: <b>{}</b>\n\n{}\n\n👇 دستگاهت رو انتخاب کن تا برنامه و آموزش بیاد:",
+            head, esc(plan), exp, self.keys_text(u));
         let mut rows: Kb = vec![self.how_devices_kb(u.id)];
         let mini = crate::miniapp::url(&self.app);
         if mini.starts_with("https://") {
@@ -1300,6 +1305,18 @@ impl Bot {
         last.push(b("💬 پشتیبانی", &sl.map(|l| format!("url:{}", l)).unwrap_or_else(|| "support".into())));
         rows.push(last);
         (t, ik(rows))
+    }
+
+    /// The trial's message: what it is, the link to copy, and the app and the guide
+    fn trial_delivery(&self, u: &User, mb: i64, hours: i64) -> (String, Value) {
+        let link = if u.service() == "v2ray" || crate::api::links_text(&self.app, u).is_some() {
+            crate::api::v2_sub_link(&self.app, u)
+        } else {
+            format!("{}/sub/{}", sub_origin(&self.app), u.sub_code())
+        };
+        let t = format!("🎁 <b>تست رایگان شما فعال شد</b>\n\n▫️ <b>حجم:</b> {} MB\n▫️ <b>اعتبار:</b> {} ساعت\n▫️ <b>نام اشتراک:</b> <code>{}</code>\n\n🔗 <b>لینک اتصال (برای کپی لمس کنید):</b>\n<code>{}</code>\n\n👇 همین الان برنامه دستگاهت رو باز کن و سرعت و پینگ رو تست بگیر:",
+            mb, hours, esc(&u.username), esc(&link));
+        (t, ik(vec![vec![b("📱 دانلود اپ کانکی", "app2"), b("📖 راهنمای اتصال", &format!("hw:{}", u.id))]]))
     }
 
     // ============================================================ the connection guide: device, then app
@@ -1390,7 +1407,7 @@ impl Bot {
                         let (title, _) = crate::apps::title(&f.abi);
                         rows.push(vec![b(&format!("⬇️ {} · {}", title, mb(f.size)), &format!("apk:{}", f.abi))]);
                     }
-                    "1️⃣ فایل نصب رو از دکمه‌ی پایین بگیرید و نصب کنید (اگه مطمئن نیستید «۶۴ بیتی» رو بگیرید)."
+                    "1️⃣ فایل نصب رو از دکمه‌ی پایین بگیرید و نصب کنید (اگه مطمئن نیستید «64 بیتی» رو بگیرید)."
                 };
                 rows.push(back);
                 self.send(chat, &format!("📱 <b>اپ کانکی (Kanki VPN)</b>\nاپ خود ما: همه‌ی سرورها و پروتکل‌ها (حتی پروتکل‌های ضدفیلتر کانکی) با یک کد؛ سریع‌ترین سرور رو خودش پیدا می‌کنه.\n\n{}\n2️⃣ برنامه رو باز کنید و این <b>کد ورود</b> رو بزنید (روش بزنید کپی می‌شه):\n<code>{}</code>\n3️⃣ دکمه‌ی بزرگ اتصال رو بزنید. تمام ✅", get, u.sub_code()), Some(ik(rows))).await;
@@ -1727,7 +1744,7 @@ impl Bot {
         }
         for f in &files {
             let (title, _) = crate::apps::title(&f.abi);
-            let (d, _) = crate::channel::fa_datetime(f.at);
+            let d = fa_num(&crate::channel::fa_datetime(f.at).0);
             t.push_str(&format!("\n• <b>{}</b>: {}{} · {} · {}{}", title, esc(&f.file_name()), if f.version.is_empty() { String::new() } else { format!(" · v{}", esc(&f.version)) }, mb(f.size), d,
                 if f.tg_only { "" } else { " · روی سرور" }));
             rows.push(vec![b(&format!("🗑 حذف {}", title), &format!("adel:{}", f.abi))]);
@@ -1885,11 +1902,7 @@ impl Bot {
 
     /// The "type a name for your config" message
     fn name_prompt(&self, why: &str) -> String {
-        format!("{}✏️ <b>یک نام برای کانفیگ خودتون بفرستید</b>\n\n\
-            ✅ فقط <b>حروف انگلیسی و عدد</b>، بین ۳ تا ۱۲ حرف، اولش هم حرف باشه. مثل:\n\
-            <code>mahtab87</code>   <code>erfan456</code>   <code>ali2</code>\n\n\
-            ❌ فاصله، ایموجی، استیکر، حروف فارسی و علامت‌ها (مثل _ - . @) ننویسید.\n\n\
-            نام رو همین‌جا تایپ کنید و بفرستید 👇", why)
+        format!("{}✏️ <b>یک نام برای اشتراکت بفرست</b>\n▫️ فقط حروف انگلیسی و عدد، 3 تا 12 حرف\n▫️ مثل <code>mahtab87</code> یا <code>ali2</code>\n\nیا دکمه‌ی پایین رو بزن 👇", why)
     }
 
     /// After the name was asked: go on with the free trial or the plan list.
@@ -1960,7 +1973,7 @@ impl Bot {
             let k = k.trim();
             let _ = self.call("deleteMessage", json!({"chat_id": chat, "message_id": m["message_id"]})).await;
             if k.len() < 32 || !k.chars().all(|c| c.is_ascii_alphanumeric()) {
-                self.send(chat, "⚠️ کلید باید حداقل ۳۲ حرف و فقط حروف انگلیسی و عدد باشه.", None).await;
+                self.send(chat, "⚠️ کلید باید حداقل 32 حرف و فقط حروف انگلیسی و عدد باشه.", None).await;
                 return;
             }
             self.db().set("giveaway_secret", k);
@@ -2039,7 +2052,7 @@ impl Bot {
                     self.edit_ok(chat, 0, "⏳ چند بار کد اشتباه زده شد؛ یک ساعت بعد دوباره امتحان کنید.", Some(self.home_kb(uid))).await;
                     return;
                 }
-                match self.discount_percent(&code) {
+                match self.code_percent(uid, &code) {
                     Some(p) => {
                         let plan_id = {
                             let mut g = self.pend.lock().unwrap_or_else(|e| e.into_inner());
@@ -2065,6 +2078,44 @@ impl Bot {
         }
     }
 
+    /// A setting as a whole number in [lo, hi] (0 when unset or not a number)
+    fn num_set(&self, k: &str, lo: i64, hi: i64) -> i64 {
+        self.db().get(k).trim().parse::<f64>().map(|x| x as i64).unwrap_or(0).clamp(lo, hi)
+    }
+
+    /// The finished trial's code («TEST15») and the win-back code («BACK20»), named after their percent
+    fn test_code(&self) -> String {
+        format!("TEST{}", self.num_set("trial_offer_pct", 0, 90))
+    }
+
+    fn back_code(&self) -> String {
+        format!("BACK{}", self.num_set("back_pct", 0, 90))
+    }
+
+    fn is_personal(&self, code: &str) -> bool {
+        code == self.test_code() || code == self.back_code()
+    }
+
+    /// The percent of a personal code typed by the customer it was given to, while it is good: the trial's code is
+    /// their first-purchase offer (until it ends or they buy), the win-back code is theirs for `back_hours`
+    fn personal_code(&self, uid: i64, code: &str) -> Option<i64> {
+        if code == self.test_code() {
+            let p = self.offer(uid).0;
+            return (p > 0).then_some(p);
+        }
+        if code == self.back_code() {
+            let until: i64 = self.db().get(&format!("pc_back:{}", uid)).parse().unwrap_or(0);
+            let p = self.num_set("back_pct", 0, 90);
+            return (until > now() && p > 0).then_some(p);
+        }
+        None
+    }
+
+    /// A code's percent for this customer: their personal code first, then the shop's discount codes
+    fn code_percent(&self, uid: i64, code: &str) -> Option<i64> {
+        self.personal_code(uid, code).or_else(|| self.discount_percent(code))
+    }
+
     /// The percent of a discount code that can be used now (it exists, has uses left and is not expired)
     fn discount_percent(&self, code: &str) -> Option<i64> {
         self.db().with(|c| c.query_row(
@@ -2078,7 +2129,7 @@ impl Bot {
     /// Is the discount of this purchase still good (the same code with the same percent)? When it is not, it is
     /// taken off the purchase, so the price is shown again without it.
     fn discount_still_ok(&self, uid: i64, pe: &Pending) -> bool {
-        if pe.discount.is_empty() || self.discount_percent(&pe.discount) == Some(pe.percent) {
+        if pe.discount.is_empty() || self.code_percent(uid, &pe.discount) == Some(pe.percent) {
             return true;
         }
         if let Some(x) = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&uid) {
@@ -2113,7 +2164,7 @@ impl Bot {
         let photo = m["photo"].as_array().and_then(|a| a.last()).and_then(|x| x["file_id"].as_str()).map(|s| s.to_string());
         let reference = photo.clone().unwrap_or_else(|| m["text"].as_str().unwrap_or("").to_string());
         // the customer has paid by now: the order is kept, and the admin sees when its code is no longer good
-        let code_ok = pe.discount.is_empty() || self.discount_percent(&pe.discount) == Some(pe.percent);
+        let code_ok = pe.discount.is_empty() || self.code_percent(uid, &pe.discount) == Some(pe.percent);
         let (t, u) = self.price(uid, &p, &pe);
         let amount = if method == "card" { t.to_string() } else { u.to_string() };
         let oid = self.new_order(uid, &p, &pe, method, &amount, "pending", &reference);
@@ -2122,9 +2173,9 @@ impl Bot {
         let cap = format!(
             "🧾 <b>سفارش جدید #{}</b>\n👤 {} · <code>{}</code>\n📦 {} ({})\n💳 {} · {}{}{}",
             oid, esc(name), uid, esc(&p.name), if pe.kind == "renew" { "تمدید" } else { "جدید" }, method, amount,
-            if offer > 0 { format!("\n🎁 تخفیف خرید اول {}٪", offer) } else { String::new() },
+            if offer > 0 { format!("\n🎁 تخفیف خرید اول {}%", offer) } else { String::new() },
             if pe.discount.is_empty() { String::new() } else {
-                format!("\n🎟 {} ({}٪){}", esc(&pe.discount), pe.percent, if code_ok { "" } else { "\n⚠️ این کد تخفیف دیگر معتبر نیست (تمام، حذف یا منقضی شده)" })
+                format!("\n🎟 {} ({}%){}", esc(&pe.discount), pe.percent, if code_ok { "" } else { "\n⚠️ این کد تخفیف دیگر معتبر نیست (تمام، حذف یا منقضی شده)" })
             }
         );
         let kb = ik(vec![vec![b("✅ تأیید", &format!("ap:{}", oid)), b("❌ رد", &format!("rj:{}", oid))]]);
@@ -2285,7 +2336,7 @@ impl Bot {
 
         let (head, rest) = d.split_once(':').unwrap_or((d.as_str(), ""));
         // a button of an older message (a plan, a renewal, a payment method) must not sell while sales are closed
-        if matches!(head, "pcat" | "psv" | "pl" | "rpl" | "pay" | "npc" | "rnw") && self.sales_closed(uid) {
+        if matches!(head, "pcat" | "psv" | "pl" | "rpl" | "pay" | "npc" | "rnw" | "rbk") && self.sales_closed(uid) {
             return self.edit(chat, mid, SALES_CLOSED, Some(ik(vec![back("home")]))).await;
         }
         match head {
@@ -2415,6 +2466,17 @@ impl Bot {
                 }
                 return;
             }
+            "rbk" => {
+                let id: i64 = rest.parse().unwrap_or(0);
+                if self.app.db.user(id).filter(|u| u.tg_id == uid).is_none() {
+                    return;
+                }
+                let code = self.back_code();
+                let pct = self.personal_code(uid, &code).unwrap_or(0);
+                self.pend.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Pending {
+                    kind: "renew".into(), target: id, discount: if pct > 0 { code } else { String::new() }, percent: pct, ..Default::default() });
+                return self.plans_menu(chat, mid, &format!("rpl:{{}}:{}", id)).await;
+            }
             "rnw" => {
                 let id: i64 = rest.parse().unwrap_or(0);
                 // only the owner (or an admin) renews an account
@@ -2447,7 +2509,7 @@ impl Bot {
         let back_lbl = self.bt("back");
         // a first-purchase discount waiting for this customer (an invited friend, a finished trial)
         let offer = if pattern == "pl" { self.offer(chat).0 } else { 0 };
-        let offer_line = if offer > 0 { format!("🎁 <b>{}٪ تخفیف خرید اول شما</b> موقع پرداخت خودش حساب می‌شه.\n\n", offer) } else { String::new() };
+        let offer_line = if offer > 0 { format!("🎁 <b>{}% تخفیف خرید اول شما</b> موقع پرداخت خودش حساب می‌شه.\n\n", offer) } else { String::new() };
         if svc.is_empty() || !on_sale.iter().any(|s| s.0 == svc) {
             if on_sale.is_empty() {
                 return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b(&back_lbl, "home")]]))).await;
@@ -2456,7 +2518,7 @@ impl Bot {
             let mut rows: Kb = vec![];
             for s in &on_sale {
                 let from = list.iter().filter(|p| p.service == s.0).map(|p| p.toman).filter(|t| *t > 0).min().unwrap_or(0);
-                let lbl = if from > 0 { format!("{} — از {}", s.2, fa_toman(from)) } else { s.2.to_string() };
+                let lbl = if from > 0 { format!("{} · از {}", s.2, fa_toman(from)) } else { s.2.to_string() };
                 rows.push(vec![b(&lbl, &format!("psv:{}:{}", mode, s.1))]);
             }
             rows.extend(self.shop_rows(renew));
@@ -2530,17 +2592,17 @@ impl Bot {
         let txt = format!(
             "📦 <b>{}</b>\n{}\nحجم: {} · مدت: {} روز · {} کاربر{}\nقیمت: <b>{}</b>{}{}{}\n\nروش پرداخت را انتخاب کنید:",
             esc(&p.name), match p.service.as_str() {
-                "v2ray" => "⚡ اقتصادی · V2Ray: یک لینک برای v2rayNG، V2Box، Streisand و v2rayN",
-                "game" => "🎮 گیمینگ: کانفیگ WireGuard و AmneziaWG + فایل AmneziaVPN (و اپ کانکی)",
-                _ => "👑 همه‌کاره VIP: لینک V2Ray + WireGuard + AmneziaVPN (و اپ کانکی رایگان)",
+                "v2ray" => "⚡ اقتصادی (V2Ray)",
+                "game" => "🎮 گیمینگ (WG + Amnezia)",
+                _ => "👑 همه‌کاره VIP + اپ کانکی",
             }, if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, p.days, p.conns,
             if p.countries > 0 { format!(" · {} کشور", p.countries) } else { String::new() },
             if offer > 0 && p.toman > t { format!("<s>{}</s>  {}", toman(p.old_toman.max(p.toman)), toman(t)) }
             else if p.old_toman > t && pe.percent == 0 { format!("<s>{}</s>  {}", toman(p.old_toman), toman(t)) } else { toman(t) },
             if u > 0.0 { format!("  ·  <b>{}$</b>", u) } else { String::new() },
             crypto,
-            if pe.percent > 0 { format!("\n🎟 تخفیف {}٪ اعمال شده", pe.percent) }
-            else if offer > 0 { format!("\n🎁 <b>{}٪ تخفیف خرید اول شما</b> اعمال شده", offer) } else { String::new() }
+            if pe.percent > 0 { format!("\n🎟 تخفیف {}% اعمال شده", pe.percent) }
+            else if offer > 0 { format!("\n🎁 <b>{}% تخفیف خرید اول شما</b> اعمال شده", offer) } else { String::new() }
         );
         self.edit_ok(chat, mid.unwrap_or(0), &txt, Some(ik(rows))).await
     }
@@ -2613,7 +2675,7 @@ impl Bot {
                     return self.edit(chat, mid, "⚠️ خطای درگاه زرین‌پال؛ بعداً امتحان کنید.", home).await;
                 };
                 let _ = db.exec("UPDATE orders SET ref=?1 WHERE id=?2", &[&auth, &oid]);
-                self.edit(chat, mid, &format!("🏦 مبلغ: <b>{}</b>\n\n۱. «پرداخت» را بزنید\n۲. بعد از پرداخت «بررسی پرداخت» را بزنید.", toman(t)),
+                self.edit(chat, mid, &format!("🏦 مبلغ: <b>{}</b>\n\n1. «پرداخت» را بزنید\n2. بعد از پرداخت «بررسی پرداخت» را بزنید.", toman(t)),
                     Some(ik(vec![vec![b("💳 پرداخت", &format!("url:https://payment.zarinpal.com/pg/StartPay/{}", auth))],
                                  vec![b("🔍 بررسی پرداخت", &format!("chk:{}", oid))]]))).await;
             }
@@ -2679,7 +2741,7 @@ impl Bot {
         let ton = crate::pay::ton_text(nano);
         let txt = format!(
             "💎 <b>پرداخت با TON</b> · سفارش #{}\n\n💰 مبلغ: <b>{} TON</b>  (= {})\n{}\n\n👛 آدرس کیف پول:\n<code>{}</code>\n\n📝 کامنت (Comment) — <b>حتماً بنویسید</b>:\n<code>{}</code>\n\n\
-             ✅ با دکمه‌ی Tonkeeper مبلغ و کامنت خودشون پر می‌شن.\n🤖 بعد از پرداخت تأیید <b>خودکار</b> است (معمولاً زیر یک دقیقه). می‌تونید «بررسی پرداخت» رو بزنید یا لینک تراکنش (Tonviewer / Tonscan) رو همین‌جا بفرستید.\n⏱ این قیمت تا ۲ ساعت معتبره.",
+             ✅ با دکمه‌ی Tonkeeper مبلغ و کامنت خودشون پر می‌شن.\n🤖 بعد از پرداخت تأیید <b>خودکار</b> است (معمولاً زیر یک دقیقه). می‌تونید «بررسی پرداخت» رو بزنید یا لینک تراکنش (Tonviewer / Tonscan) رو همین‌جا بفرستید.\n⏱ این قیمت تا 2 ساعت معتبره.",
             oid, ton, toman(t), Self::rate_line(&r), esc(&addr), memo);
         let link = format!("url:https://app.tonkeeper.com/transfer/{}?amount={}&text={}", addr, nano, memo);
         self.edit(chat, mid, &txt, Some(ik(vec![
@@ -2737,7 +2799,7 @@ impl Bot {
             return Err("این تراکنش قبل از ثبت این سفارش انجام شده.".into());
         }
         // a real payment into the wallet that does not fit this order by itself: the admins decide
-        let why = if !by_comment { "بدون کامنت سفارش" } else if short { "کمتر از مبلغ سفارش" } else { "بعد از ۲ ساعت (قیمت قدیمی)" };
+        let why = if !by_comment { "بدون کامنت سفارش" } else if short { "کمتر از مبلغ سفارش" } else { "بعد از 2 ساعت (قیمت قدیمی)" };
         let claimed = self.db().exec("UPDATE orders SET status='pending', ref=?1 WHERE id=?2 AND status='waiting'",
             &[&format!("{} {} {}", memo, need, tx.hash), &oid]).unwrap_or(0);
         if claimed != 1 {
@@ -2953,16 +3015,34 @@ impl Bot {
             self.create_account_svc(o.1, p.gb, p.days, p.conns, &format!("order #{}", oid), p.countries, &p.service)
         };
         match res {
-            Ok(u) => {
+            Ok(mut u) => {
                 // a renewal whose account was gone (target 0) made a new account: it says so
-                let head = if o.3 == "renew" && o.4 > 0 { self.tx("txt_renewed") } else { self.tx("txt_bought") };
+                let mut head = if o.3 == "renew" && o.4 > 0 { self.tx("txt_renewed") } else { self.tx("txt_bought") };
+                // renewed after the reminder: the promised extra volume (`renew_bonus_pct` of the plan), once
+                if o.3 == "renew" && o.4 > 0 {
+                    let k = format!("rbonus:{}", o.4);
+                    let until: i64 = self.db().get(&k).parse().unwrap_or(0);
+                    let pct = self.num_set("renew_bonus_pct", 0, 100) as f64;
+                    let add = ((p.gb * pct / 100.0) * 2.0).round() / 2.0;
+                    if until > now() && add > 0.0 {
+                        self.db().set(&k, "");
+                        if matches!(self.db().gift(u.id, 0, add), Ok(true)) {
+                            head.push_str(&format!("\n🎁 هدیه‌ی تمدید به‌موقع: <b>+{} GB</b>", add));
+                            if let Some(x) = self.db().user(u.id) { u = x; }
+                        }
+                    }
+                }
                 let (t, kb) = self.delivery(&head, &u, &p.name);
                 // the payment page is done with: the chat ends on what was bought
                 self.close_screen(o.1).await;
                 self.send(o.1, &t, Some(kb)).await;
                 // one use of the code for this paid order, taken only while the code is still good; the price was
                 // already paid, so the order is delivered either way and the admin is told when it was not
-                if !o.9.is_empty() {
+                if !o.9.is_empty() && self.is_personal(&o.9) {
+                    if o.9 == self.back_code() {
+                        self.db().set(&format!("pc_back:{}", o.1), "");
+                    }
+                } else if !o.9.is_empty() {
                     let used = self.db().exec(
                         "UPDATE discounts SET uses_left=uses_left-1 WHERE code=?1 AND uses_left>0 AND (COALESCE(expires,0)=0 OR expires>?2)",
                         &[&o.9, &now()]).unwrap_or(0);
@@ -3066,7 +3146,7 @@ impl Bot {
     async fn welcome_friend(&self, uid: i64, by: i64, name: &str) {
         let pct: i64 = self.db().get("ref_new_pct").parse().unwrap_or(0);
         if self.give_offer(uid, pct, 7 * 86400) {
-            self.send(uid, &format!("🎁 <b>خوش اومدی!</b>\nچون با دعوت دوستت اومدی، <b>{}٪ تخفیف</b> خرید اولت تا ۷ روز آماده‌ست؛ موقع پرداخت خودش حساب می‌شه.", pct), None).await;
+            self.send(uid, &format!("🎁 <b>خوش اومدی!</b>\nچون با دعوت دوستت اومدی، <b>{}% تخفیف</b> خرید اولت تا 7 روز آماده‌ست؛ موقع پرداخت خودش حساب می‌شه.", pct), None).await;
         }
         let n = if name.trim().is_empty() { "یک نفر".to_string() } else { esc(name.trim()) };
         self.send(by, &format!("👋 <b>{}</b> با لینک دعوت تو وارد ربات شد.\nهر بار که خرید یا تمدید کنه، هدیه‌ی حجم برای تو میاد 🎁", n), None).await;
@@ -3087,13 +3167,13 @@ impl Bot {
         let (gb, days) = (db.get("ref_gb").parse::<f64>().unwrap_or(0.0), db.get("ref_days").parse::<i64>().unwrap_or(0));
         let mut t = "👥 <b>دعوت دوستان = اینترنت رایگان</b>\n\n".to_string();
         if newp > 0 {
-            t.push_str(&format!("🎁 دوستت با لینک تو بیاد: <b>{}٪ تخفیف</b> خرید اولش\n", newp));
+            t.push_str(&format!("🎁 دوستت با لینک تو بیاد: <b>{}% تخفیف</b> خرید اولش\n", newp));
         }
         if gb > 0.0 || days > 0 {
             t.push_str(&format!("🥇 اولین خریدش: {} برای تو\n", gift_line(days, gb).replace('\n', " ")));
         }
         if pct.parse::<f64>().unwrap_or(0.0) > 0.0 {
-            t.push_str(&format!("♾ <b>هر</b> خرید و تمدیدش (تا همیشه): <b>{}٪ حجم</b> همون خرید برای تو\n", esc(&pct)));
+            t.push_str(&format!("♾ <b>هر</b> خرید و تمدیدش (تا همیشه): <b>{}% حجم</b> همون خرید برای تو\n", esc(&pct)));
         }
         t.push_str(&format!("\n🔗 لینک تو (روش بزنید کپی می‌شه):\n<code>{}</code>\n\n📊 دعوت‌ها: <b>{}</b> · خریدار: <b>{}</b> · هدیه‌ی گرفته: <b>{} گیگ</b>",
             link, invited, buyers, (earned * 10.0).round() / 10.0));
@@ -3101,7 +3181,7 @@ impl Bot {
             t.push_str(&format!("\n💰 کنار گذاشته برای خرید بعدیت: <b>{} گیگ</b>", (bank * 10.0).round() / 10.0));
         }
         let share = format!("https://t.me/share/url?url={}&text={}", url_enc(&link),
-            url_enc(&if newp > 0 { format!("با این لینک بیا، {}٪ تخفیف خرید اول VPN کانکی 🎁", newp) } else { "VPN پرسرعت کانکی 🚀".to_string() }));
+            url_enc(&if newp > 0 { format!("با این لینک بیا، {}% تخفیف خرید اول VPN کانکی 🎁", newp) } else { "VPN پرسرعت کانکی 🚀".to_string() }));
         (t, ik(vec![vec![b("📤 فرستادن لینک برای دوستان", &format!("url:{}", share))], vec![b(&self.bt("back"), "home")]]))
     }
 
@@ -3118,6 +3198,7 @@ impl Bot {
         // the button stops loading at once: making the account and sending it can take a few seconds
         self.answer(&qid, if approve { "✅ سفارش تأیید شد؛ کانفیگ برای مشتری ارسال می‌شود" } else { "❌ سفارش رد شد" }, false).await;
         let (date, time) = crate::channel::fa_datetime(now());
+        let (date, time) = (fa_num(&date), fa_num(&time));
         if approve {
             self.mark_order(oid, q, "⏳ تأیید شد؛ در حال ساخت و ارسال کانفیگ…").await;
             self.fulfill(oid).await;
@@ -3208,11 +3289,15 @@ impl Bot {
             self.edit(chat, mid, again, back).await;
             return false;
         }
-        let gb: f64 = self.db().get("trial_gb").parse().unwrap_or(1.0);
-        let days: i64 = self.db().get("trial_days").parse().unwrap_or(1);
-        match self.create_account(uid, gb, days, 1, "trial") {
-            Ok(u) => {
-                let (t, kb) = self.delivery(&self.tx("txt_trial_ready"), &u, "🎁 تست رایگان");
+        // small and short (300 MB for 3 hours): enough to see the speed and the ping, not enough to live on;
+        // one user, and one trial per Telegram account
+        let mb = self.num_set("trial_mb", 10, 10240);
+        let hours = self.num_set("trial_hours", 1, 720);
+        match self.create_account(uid, mb as f64 / 1024.0, 1, 1, "trial") {
+            Ok(mut u) => {
+                let _ = self.db().exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&(now() + hours * 3600), &u.id]);
+                if let Some(x) = self.db().user(u.id) { u = x; }
+                let (t, kb) = self.trial_delivery(&u, mb, hours);
                 if self.edit_ok(chat, mid, &t, Some(kb)).await {
                     self.set_menu(uid).await;
                     return true;
@@ -3331,7 +3416,7 @@ impl Bot {
                 if !lines.is_empty() { money.push_str(&format!("\n{}", lines.join("\n"))); }
                 if r.usd > 0.0 { money.push_str(&format!("\n💵 درآمد دلاری (درگاه ارزی / کیف پول): <b>{:.2}$</b>", r.usd)); }
                 let txt = format!(
-                    "📈 <b>آمار</b>\n\n👥 کاربران: <b>{}</b> (فعال: {})\n🟢 آنلاین: <b>{}</b>\n⛔ منقضی/تمام‌حجم: {}\n📊 مصرف کل: {:.1} GB\n🖥 نودها: {}/{} آنلاین\n\n🤖 کاربران ربات: <b>{}</b>\n🧾 فروش: <b>{}</b> (۲۴ ساعت اخیر: {})\n{}",
+                    "📈 <b>آمار</b>\n\n👥 کاربران: <b>{}</b> (فعال: {})\n🟢 آنلاین: <b>{}</b>\n⛔ منقضی/تمام‌حجم: {}\n📊 مصرف کل: {:.1} GB\n🖥 نودها: {}/{} آنلاین\n\n🤖 کاربران ربات: <b>{}</b>\n🧾 فروش: <b>{}</b> (24 ساعت اخیر: {})\n{}",
                     us.len(), us.iter().filter(|u| u.active()).count(), us.iter().filter(|u| u.online > 0).count(),
                     us.iter().filter(|u| !u.active()).count(), us.iter().map(|u| u.used_gb()).sum::<f64>(),
                     ns.iter().filter(|n| n.online).count(), ns.len(), bu, r.count, today, money);
@@ -3490,9 +3575,9 @@ impl Bot {
                 self.edit(chat, mid, "🎬 ویدیوی آموزش را بفرستید (یا گیف، فایل، عکس یا یک متن).\nاگر زیر ویدیو متنی بنویسید، خط اولش عنوان آموزش و کلش متن زیر ویدیو می‌شود.", Some(ik(vec![vec![b("⬅️ آموزش‌ها", "a:guides")]]))).await;
                 true
             }
-            "a:trial" => { self.edit(chat, mid, &format!("🎁 <b>تست رایگان</b>\nحجم: {} GB · مدت: {} روز", db.get("trial_gb"), db.get("trial_days")),
+            "a:trial" => { self.edit(chat, mid, &format!("🎁 <b>تست رایگان</b>\nحجم: {} MB | مدت: {} ساعت", db.get("trial_mb"), db.get("trial_hours")),
                 Some(ik(vec![vec![b(&format!("{} روشن/خاموش", self.onoff("trial_on")), "tg:trial_on")],
-                    vec![b("✏️ حجم", "set:trial_gb"), b("✏️ مدت", "set:trial_days")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
+                    vec![b("✏️ حجم", "set:trial_mb"), b("✏️ مدت", "set:trial_hours")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
             "a:pay" => {
                 let rate = match crate::pay::rates(&self.app).await {
                     Some(r) => format!("\n\n{}\n⭐️ هر استارز ≈ {} تومان", Self::rate_line(&r), crate::pay::group(crate::pay::star_usd(db) * r.usd_toman)),
@@ -3520,17 +3605,20 @@ impl Bot {
                     let v: Vec<(String, i64, i64)> = s.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap().filter_map(|x| x.ok()).collect();
                     v
                 });
-                let mut kb: Kb = rows.iter().map(|r| vec![b(&format!("🎟 {} · {}٪ · {} بار", r.0, r.1, r.2), "noop"), b("🗑", &format!("dd:{}", r.0))]).collect();
+                let mut kb: Kb = rows.iter().map(|r| vec![b(&format!("🎟 {} · {}% · {} بار", r.0, r.1, r.2), "noop"), b("🗑", &format!("dd:{}", r.0))]).collect();
                 kb.push(vec![b("➕ کد جدید", "da")]);
                 kb.push(vec![b("⬅️ پنل مدیریت", "adm")]);
                 { self.edit(chat, mid, "🎟 <b>کدهای تخفیف</b>", Some(ik(kb))).await; true }
             }
             "da" => { set_wait(Wait::DiscountAdd); { self.edit(chat, mid, "بفرستید: <code>کد درصد تعداد</code>\nمثلاً: <code>NOWRUZ 20 100</code>", back).await; true } }
-            "a:ref" => { self.edit(chat, mid, &format!("👥 <b>دعوت و هدیه</b>\n\n🥇 اولین خرید هر دعوت‌شده: <b>{} GB و {} روز</b> برای دعوت‌کننده\n♾ هر خرید و تمدید دعوت‌شده: <b>{}٪</b> حجم همان خرید برای دعوت‌کننده\n🎁 تخفیف خرید اول دعوت‌شده (۷ روز): <b>{}٪</b>\n⏳ تخفیف خرید اول بعد از تمام شدن تست (۴۸ ساعت): <b>{}٪</b>\n\n۰ = خاموش. هدیه‌ی کسی که اشتراک ندارد کنار می‌ماند و با اولین خریدش اضافه می‌شود.",
-                db.get("ref_gb"), db.get("ref_days"), db.get("ref_pct"), db.get("ref_new_pct"), db.get("trial_offer_pct")),
+            "a:ref" => { self.edit(chat, mid, &format!("👥 <b>دعوت، تخفیف‌ها و نگه‌داشتن مشتری</b>\n\n🥇 اولین خرید دوست: <b>{} GB + {} روز</b> برای دعوت‌کننده\n♾ هر خرید دوست: <b>{}%</b> حجم برای دعوت‌کننده\n🎁 تخفیف خرید اول دوست: <b>{}%</b>\n⚡ بعد از تست ({}): <b>{}%</b> تا {} ساعت\n💙 بازگشت ({}، 5 روز بعد از پایان): <b>{}%</b> تا {} ساعت\n🔄 هدیه‌ی تمدید به‌موقع: <b>{}%</b> حجم\n\n0 = خاموش.",
+                db.get("ref_gb"), db.get("ref_days"), db.get("ref_pct"), db.get("ref_new_pct"), self.test_code(), db.get("trial_offer_pct"), db.get("trial_offer_hours"),
+                self.back_code(), db.get("back_pct"), db.get("back_hours"), db.get("renew_bonus_pct")),
                 Some(ik(vec![vec![b("✏️ گیگ اولین خرید", "set:ref_gb"), b("✏️ روز اولین خرید", "set:ref_days")],
-                    vec![b("✏️ ٪ هر خرید", "set:ref_pct"), b("✏️ ٪ تخفیف دوست", "set:ref_new_pct")],
-                    vec![b("✏️ ٪ تخفیف بعد از تست", "set:trial_offer_pct")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
+                    vec![b("✏️ % هر خرید", "set:ref_pct"), b("✏️ % تخفیف دوست", "set:ref_new_pct")],
+                    vec![b("✏️ % بعد از تست", "set:trial_offer_pct"), b("✏️ ساعت آن", "set:trial_offer_hours")],
+                    vec![b("✏️ % بازگشت", "set:back_pct"), b("✏️ ساعت آن", "set:back_hours")],
+                    vec![b("✏️ % هدیه‌ی تمدید", "set:renew_bonus_pct")], vec![b("⬅️ پنل مدیریت", "adm")]]))).await; true }
             "a:bc" => { set_wait(Wait::Broadcast); { self.edit(chat, mid, "📣 پیام را بفرستید (متن، عکس، ویدیو…):", back).await; true } }
             "a:bcp" => {
                 // use the message the admin pinned in this chat; otherwise ask for one
@@ -3558,13 +3646,13 @@ impl Bot {
                 }
                 let id = db.get("ch_id");
                 let txt = format!(
-                    "📢 <b>کانال هوشمند</b>\n\nکانال: {}\nوضعیت: {}\nهر {} ساعت یک پست (به‌جز ۱ تا ۸ صبح)\nپست‌های ارسال‌شده: {}\n\nربات باید ادمین کانال باشد. تنظیمات کامل در پنل وب > ربات فروش.",
+                    "📢 <b>کانال هوشمند</b>\n\nکانال: {}\nوضعیت: {}\nهر {} ساعت یک پست (به‌جز 1 تا 8 صبح)\nپست‌های ارسال‌شده: {}\n\nربات باید ادمین کانال باشد. تنظیمات کامل در پنل وب > ربات فروش.",
                     if id.is_empty() { "تنظیم نشده".to_string() } else { esc(&id) },
                     if db.on("ch_on") { "🟢 روشن" } else { "⚪️ خاموش" },
                     db.get("ch_hours").parse::<i64>().unwrap_or(8), db.get("ch_count").parse::<i64>().unwrap_or(0)
                 );
                 let kb = ik(vec![
-                    vec![b("📝 پست پیشنهادی", "a:chp"), b("🔥 کمپین تخفیف ۲۰٪", "a:chc")],
+                    vec![b("📝 پست پیشنهادی", "a:chp"), b("🔥 کمپین تخفیف 20%", "a:chc")],
                     vec![b(&format!("{} انتشار خودکار", self.onoff("ch_on")), "a:cht")],
                     vec![b("⬅️ پنل مدیریت", "adm")],
                 ]);
@@ -3607,7 +3695,7 @@ impl Bot {
                     Ok(code) => {
                         let (_, text) = crate::channel::make_post(&self.app, "offer");
                         match crate::channel::send_to_channel(&self.app, &text).await {
-                            Ok(_) => format!("🔥 کمپین ساخته و منتشر شد.\nکد: <code>{}</code> · ۲۰٪ · ۴۸ ساعت", esc(&code)),
+                            Ok(_) => format!("🔥 کمپین ساخته و منتشر شد.\nکد: <code>{}</code> · 20% · 48 ساعت", esc(&code)),
                             Err(e) => format!("کد <code>{}</code> ساخته شد ولی ارسال به کانال نشد: <code>{}</code>", esc(&code), esc(&e)),
                         }
                     }
@@ -4065,7 +4153,7 @@ impl Bot {
                     return;
                 }
                 if k.starts_with("btn_") && v.chars().count() > 60 {
-                    self.send(chat, "⚠️ متن دکمه حداکثر ۶۰ حرف باشد.", retry(to)).await;
+                    self.send(chat, "⚠️ متن دکمه حداکثر 60 حرف باشد.", retry(to)).await;
                     return;
                 }
                 // messages are sent as HTML: make sure Telegram accepts this one before saving it
@@ -4074,12 +4162,12 @@ impl Bot {
                     return;
                 }
                 if k == "ton_address" && crate::pay::raw_address(v).is_none() {
-                    self.send(chat, "⚠️ این آدرس TON درست نیست. آدرس کیف پول رو از Tonkeeper کپی کنید (با UQ یا EQ شروع می‌شه، ۴۸ حرف).", retry(to)).await;
+                    self.send(chat, "⚠️ این آدرس TON درست نیست. آدرس کیف پول رو از Tonkeeper کپی کنید (با UQ یا EQ شروع می‌شه، 48 حرف).", retry(to)).await;
                     return;
                 }
                 // numbers of the referral and offer settings: whole numbers in range (Persian digits too)
                 let digits: String = v.chars().map(|c| match c { '۰'..='۹' => char::from(b'0' + (c as u32 - '۰' as u32) as u8), _ => c }).collect();
-                let num_max = match k.as_str() { "ref_pct" => 100, "ref_new_pct" | "trial_offer_pct" => 90, "ref_days" | "trial_days" => 365, "ref_gb" | "trial_gb" => 1000, _ => -1 };
+                let num_max = match k.as_str() { "ref_pct" | "renew_bonus_pct" => 100, "ref_new_pct" | "trial_offer_pct" | "back_pct" => 90, "ref_days" => 365, "ref_gb" => 1000, "trial_mb" => 10240, "trial_hours" | "trial_offer_hours" | "back_hours" => 720, _ => -1 };
                 let v = if num_max >= 0 {
                     match digits.trim().parse::<f64>() {
                         Ok(x) if x >= 0.0 && x <= num_max as f64 && (k.ends_with("_gb") || x.fract() == 0.0) => digits.trim().to_string(),
@@ -4253,7 +4341,7 @@ impl Bot {
                 let conns: i64 = parts.get(2).and_then(|x| x.parse().ok()).unwrap_or(1);
                 let name = parts.get(3).map(|s| s.to_string()).unwrap_or_else(|| "auto".to_string());
                 if name != "auto" && !valid_cfg_name(&name) {
-                    self.send(chat, "⚠️ نام فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف و اولش حرف (مثل mahtab87).", kb).await;
+                    self.send(chat, "⚠️ نام فقط حروف انگلیسی و عدد، 3 تا 12 حرف و اولش حرف (مثل mahtab87).", kb).await;
                     return;
                 }
                 match db.create_user(&name, gb, days, conns, &db.get("default_protocols"), "", "admin", 0) {
@@ -4316,7 +4404,7 @@ impl Bot {
             Wait::DiscountAdd => {
                 if parts.len() < 3 { self.send(chat, "⚠️ فرمت نادرست است.", kb).await; return; }
                 let pct = parts[1].parse::<i64>().unwrap_or(0);
-                if !(1..=100).contains(&pct) { self.send(chat, "⚠️ درصد تخفیف باید بین ۱ و ۱۰۰ باشد.", kb).await; return; }
+                if !(1..=100).contains(&pct) { self.send(chat, "⚠️ درصد تخفیف باید بین 1 و 100 باشد.", kb).await; return; }
                 let r = db.exec("INSERT OR REPLACE INTO discounts(code,percent,uses_left) VALUES(?1,?2,?3)",
                     &[&parts[0].to_uppercase(), &pct, &parts[2].parse::<i64>().unwrap_or(0)]);
                 self.send(chat, if r.is_ok() { "✅ کد تخفیف ساخته شد" } else { "⚠️ خطا" }, kb).await;
@@ -4339,7 +4427,7 @@ impl Bot {
     // ============================================================ هدیه (جبران قطعی)
     /// Accounts a gift for everyone reaches: on, not a trial, not expired, and with a limited time
     /// (for days) or a limited volume (for GB), since unlimited stays unlimited.
-    fn gift_targets(&self, days: i64, gb: f64) -> Vec<User> {
+    pub(crate) fn gift_targets(&self, days: i64, gb: f64) -> Vec<User> {
         self.db().users().into_iter()
             .filter(|u| u.enabled && u.notes != "trial" && !u.expired())
             .filter(|u| (days > 0 && u.expires_at > 0) || (gb > 0.0 && u.limit_gb > 0.0))
@@ -4348,7 +4436,7 @@ impl Bot {
 
     /// Adds the gift to these accounts and tells each Telegram user once (all their accounts in one
     /// message). Returns (accounts changed, people told).
-    async fn give_gift(&self, users: &[User], days: i64, gb: f64, why: &str) -> (usize, usize) {
+    pub(crate) async fn give_gift(&self, users: &[User], days: i64, gb: f64, why: &str) -> (usize, usize) {
         let db = self.db();
         let mut by_tg: Vec<(i64, Vec<i64>)> = vec![];
         let mut n = 0;
@@ -4403,23 +4491,104 @@ impl Bot {
         self.pend.lock().unwrap_or_else(|e| e.into_inner()).retain(|_, p| t - p.at < PEND_TTL);
     }
 
-    /// Free trials that are over are deleted (their number goes to the next new customer) and the owner is told.
+    /// Free trials that are over are deleted (their number goes to the next new customer). The owner already got
+    /// the offer when the trial ran out or near its end (`trial_hook`); one who did not gets it now.
     async fn clean_trials(&self) {
         let done = self.db().finished_trials();
         for u in &done {
             crate::api::delete_user(&self.app, u.id);
-            if u.tg_id != 0 {
-                // a reason to stay: a first-purchase discount for two days
-                let pct: i64 = self.db().get("trial_offer_pct").parse().unwrap_or(0);
-                let off = if self.give_offer(u.tg_id, pct, 2 * 86400) {
-                    format!("\n\n🎁 <b>{}٪ تخفیف خرید اول</b> فقط تا ۴۸ ساعت برای شما فعاله؛ موقع پرداخت خودش حساب می‌شه.", pct)
-                } else { String::new() };
-                self.send(u.tg_id, &format!("🎁 تست رایگان شما (<b>{}</b>) تموم شد.\n\nامیدواریم راضی بوده باشید 🙏 برای ادامه، یک اشتراک بخرید 👇{}", esc(&u.username), off),
-                    Some(ik(vec![vec![b(&self.bt("buy"), "buy")]]))).await;
+            if u.tg_id != 0 && u.warned & 16 == 0 {
+                self.trial_offer_msg(u.tg_id, true).await;
             }
         }
         if !done.is_empty() {
             sync::sync_all(&self.app).await;
+        }
+    }
+
+    /// The moment a trial is used up (its volume) or two hours in, whichever comes first: the customer has just
+    /// seen the speed, so the first-purchase offer comes now (`trial_offer_pct` for `trial_offer_hours`, code TEST15)
+    async fn trial_hook(&self) {
+        let t = now();
+        for u in self.db().users().into_iter().filter(|u| u.notes == "trial" && u.tg_id != 0 && u.warned & 16 == 0) {
+            let used_up = u.limit_gb > 0.0 && u.used_gb() >= u.limit_gb;
+            if !used_up && t - u.created_at < 2 * 3600 && !u.expired() {
+                continue;
+            }
+            let _ = self.db().exec("UPDATE users SET warned=warned|16 WHERE id=?1", &[&u.id]);
+            self.trial_offer_msg(u.tg_id, used_up || u.expired()).await;
+        }
+    }
+
+    /// The trial's offer: the discount (given now when the customer has none), its code and two buttons
+    async fn trial_offer_msg(&self, tg: i64, over: bool) {
+        let pct = self.num_set("trial_offer_pct", 0, 90);
+        let hours = self.num_set("trial_offer_hours", 1, 720);
+        self.give_offer(tg, pct, hours * 3600);
+        let got = self.offer(tg).0;
+        let head = if over { "⚡ <b>تست رایگان شما به پایان رسید!</b>" } else { "⚡ <b>تست رایگانت داره تموم می‌شه!</b>" };
+        if got <= 0 {
+            // already bought: no offer, only the way to the shop
+            self.send(tg, &format!("{}\nبرای ادامه، اشتراک کاملت رو فعال کن 👇", head), Some(ik(vec![vec![b(&self.bt("buy"), "buy")]]))).await;
+            return;
+        }
+        let t = format!("{}\nسرعت و پینگ رو دیدی؟ همین الان با <b>{}% تخفیف ویژه</b> اشتراک کاملت رو فعال کن (معتبر تا {} ساعت):\n🎟 کد تخفیف: <code>{}</code>",
+            head, got, hours, self.test_code());
+        self.send(tg, &t, Some(ik(vec![vec![b(&format!("🛒 خرید با {}% تخفیف", got), "buy"), b("👑 مشاهده پلن‌های VIP", "psv:b:p")]]))).await;
+    }
+
+    /// Keeping customers, once per account and period (`warned` bits; a renewal or a gift clears them):
+    /// 2 = the renewal reminder, 48 hours before the end or at 85% of the volume, with `renew_bonus_pct`% extra
+    /// volume when renewed now; 4 = the end; 8 = the win-back, 5 days after the end with nothing renewed: the
+    /// BACK20 code for `back_hours`.
+    async fn retention(&self, t: i64) {
+        let users: Vec<User> = self.db().users().into_iter().filter(|u| u.tg_id != 0 && u.notes != "trial").collect();
+        for u in &users {
+            let mut flag = u.warned;
+            let renew = |id: i64, label: &str| vec![vec![b(label, &format!("rnw:{}", id))]];
+            if u.active() {
+                let near_end = u.expires_at > 0 && u.expires_at - t < 48 * 3600;
+                let near_full = u.limit_gb > 0.0 && u.used_gb() >= u.limit_gb * 0.85;
+                if (near_end || near_full) && flag & 2 == 0 {
+                    flag |= 2 | 1;
+                    let _ = self.db().exec("UPDATE users SET warned=?1 WHERE id=?2", &[&flag, &u.id]);
+                    let pct = self.num_set("renew_bonus_pct", 0, 100);
+                    // the extra volume waits for a renewal until a day after the end
+                    let until = if u.expires_at > 0 { u.expires_at.max(t) + 86400 } else { t + 3 * 86400 };
+                    if pct > 0 {
+                        self.db().set(&format!("rbonus:{}", u.id), &until.to_string());
+                    }
+                    let left = if u.limit_gb > 0.0 { format!("{:.1} GB", (u.limit_gb - u.used_gb()).max(0.0)) } else { "نامحدود".into() };
+                    let mut msg = format!("⏳ <b>اشتراک {} رو به پایانه</b>\n▫️ حجم باقی‌مانده: <b>{}</b>\n▫️ زمان باقی‌مانده: <b>{}</b>", esc(&u.username), left, left_text(u));
+                    if pct > 0 {
+                        msg.push_str(&format!("\n🎁 همین الان تمدید کنی، <b>{}% حجم هدیه</b> می‌گیری.", pct));
+                    }
+                    self.send(u.tg_id, &msg, Some(ik(renew(u.id, "🔄 تمدید همین سرویس")))).await;
+                }
+                continue;
+            }
+            if flag & 4 == 0 {
+                flag |= 4;
+                let _ = self.db().exec("UPDATE users SET warned=?1 WHERE id=?2", &[&flag, &u.id]);
+                self.send(u.tg_id, &format!("⛔ <b>اشتراک {} تموم شد.</b>\nبرای وصل شدن دوباره، تمدیدش کن 👇", esc(&u.username)), Some(ik(renew(u.id, "🔄 تمدید همین سرویس")))).await;
+                continue;
+            }
+            // the win-back: ended 5 days ago (not long before: an old account is left alone), nothing renewed,
+            // no other working account
+            let ended = u.expires_at > 0 && t - u.expires_at >= 5 * 86400 && t - u.expires_at < 30 * 86400;
+            let others = users.iter().any(|x| x.tg_id == u.tg_id && x.id != u.id && x.active());
+            if ended && flag & 8 == 0 && !others {
+                flag |= 8;
+                let _ = self.db().exec("UPDATE users SET warned=?1 WHERE id=?2", &[&flag, &u.id]);
+                let (pct, hours) = (self.num_set("back_pct", 0, 90), self.num_set("back_hours", 1, 720));
+                if pct <= 0 {
+                    continue;
+                }
+                self.db().set(&format!("pc_back:{}", u.tg_id), &(t + hours * 3600).to_string());
+                let msg = format!("💙 <b>دلمون برات تنگ شده!</b>\nبرگرد و اشتراک <b>{}</b> رو با <b>{}% تخفیف</b> تمدید کن (معتبر تا {} ساعت):\n🎟 کد تخفیف: <code>{}</code>",
+                    esc(&u.username), pct, hours, self.back_code());
+                self.send(u.tg_id, &msg, Some(ik(vec![vec![b(&format!("🔄 تمدید با {}% تخفیف", pct), &format!("rbk:{}", u.id))]]))).await;
+            }
         }
     }
 
@@ -4461,47 +4630,11 @@ impl Bot {
             // A waiting order keeps a finished trial from being cleaned up.
             self.expire_waiting(now());
             self.prune_pend(now());
+            self.trial_hook().await;
             self.clean_trials().await;
-            // هشدار اتمام حجم/زمان
-            // (every 5 minutes, so the 500 MB warning comes before the data is gone)
+            // keeping customers (every 5 minutes): one renewal reminder per period, the end, and the win-back
             if tick.is_multiple_of(5) && self.db().on("warn_on") {
-                // the low-data warning: when this much is left (MB), 500 unless set in the database
-                let warn_mb: f64 = self.db().get("warn_mb").parse().ok().filter(|v: &f64| *v > 0.0).unwrap_or(500.0);
-                for u in self.db().users().into_iter().filter(|u| u.tg_id != 0) {
-                    let mut flag = u.warned;
-                    let mut msg = None;
-                    if !u.active() && flag & 4 == 0 {
-                        flag |= 4;
-                        msg = Some(format!("⛔ سرویس <b>{}</b> تمام شد. برای ادامه، از «🔁 تمدید» استفاده کنید.", esc(&u.username)));
-                    } else if u.limit_gb > 0.0 && (u.limit_gb - u.used_gb()) * 1024.0 <= warn_mb && flag & 1 == 0 && u.active() {
-                        flag |= 1;
-                        // the warning carries the whole account card (name, what is left, the code and the
-                        // subscription link) and the config buttons, so the customer has everything at hand
-                        let left_mb = ((u.limit_gb - u.used_gb()).max(0.0) * 1024.0).round();
-                        let used = (u.used_gb() / u.limit_gb).clamp(0.0, 1.0);
-                        let full = (used * 10.0).round() as usize;
-                        let bar = format!("{}{} {}%", "▰".repeat(full), "▱".repeat(10 - full), (used * 100.0).round());
-                        let t = format!("⚠️ <b>حجم سرویس {} داره تموم میشه</b>
-فقط <b>{} MB</b> مونده.
-<code>{}</code>
-
-{}", esc(&u.username), left_mb, bar, self.account_text(&u));
-                        let mut renew = vec![vec![b("🔁 تمدید", &format!("rnw:{}", u.id))]];
-                        renew.extend(self.shop_row(u.id, u.service()));
-                        let _ = self.db().exec("UPDATE users SET warned=?1 WHERE id=?2", &[&flag, &u.id]);
-                        self.send(u.tg_id, &t, Some(self.acct_kb(&u, renew))).await;
-                        continue;
-                    } else if u.expires_at > 0 && u.expires_at - now() < 86400 && flag & 2 == 0 && u.active() {
-                        flag |= 2;
-                        msg = Some(format!("⏳ سرویس <b>{}</b> کمتر از ۲۴ ساعت دیگر منقضی می‌شود.", esc(&u.username)));
-                    }
-                    if let Some(t) = msg {
-                        let _ = self.db().exec("UPDATE users SET warned=?1 WHERE id=?2", &[&flag, &u.id]);
-                        let mut rows = vec![vec![b("🔁 تمدید", &format!("rnw:{}", u.id))]];
-                        rows.extend(self.shop_row(u.id, u.service()));
-                        self.send(u.tg_id, &t, Some(ik(rows))).await;
-                    }
-                }
+                self.retention(now()).await;
             }
             // بکاپ روزانه برای ادمین‌ها
             if tick.is_multiple_of(24 * 60) && self.db().on("backup_on") && !crate::monitor::on() {
@@ -4532,7 +4665,7 @@ fn gift_prompt(who: &str) -> String {
 }
 
 /// "days GB [reason]" (Persian digits too) -> (days, GB, reason)
-fn parse_gift(text: &str) -> Result<(i64, f64, String), String> {
+pub(crate) fn parse_gift(text: &str) -> Result<(i64, f64, String), String> {
     let t: String = text.chars().map(|c| match c {
         '۰'..='۹' => char::from(b'0' + (c as u32 - '۰' as u32) as u8),
         '٠'..='٩' => char::from(b'0' + (c as u32 - '٠' as u32) as u8),
@@ -4787,8 +4920,8 @@ mod flow_tests {
         tap(&bot, from(buyer, "Sara", "sara"), &vip).await;
         let bs = buttons(&log, buyer);
         assert!(!bs.iter().any(|b| b.0.contains("دلخواه VIP")), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0 == "🔹 ۵۰ گیگ | ۱ ماهه | ۲ کاربر — ۳۰۰,۰۰۰ ت" && b.2 == "success"), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0 == "🔹 ۱۰ گیگ | ۱ ماهه | ۱ کاربر — ۹۰,۰۰۰ ت" && b.2 == "danger"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "\u{200F}🔹 50 GB \u{200F}| 1 ماهه \u{200F}| 2 کاربر \u{200F}— 300,000 تومان" && b.2.is_empty()), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "\u{200F}🔹 10 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 90,000 تومان" && b.2 == "danger"), "{:?}", bs);
         assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1&shop=vip&tab=custom" && b.2 == "primary"), "{:?}", bs);
         assert!(!log.lock().unwrap().iter().any(|(_, v)| v.to_string().contains("\"_k\"")), "the colour key is not sent to Telegram");
         // paid by card: the receipt, the admin approves (green / red buttons), the account has the custom volume and days
@@ -4861,7 +4994,7 @@ mod flow_tests {
         assert!(t.contains("خرید شما با موفقیت انجام شد") && t.contains("/v2") && t.contains("📦 پلن: <b>Std</b>"), "{}", t);
         // the short delivery: only the apps, the tutorial (when there is one) and support; no config or backup buttons
         let bs: Vec<String> = buttons(&log, buyer).into_iter().map(|b| b.0).collect();
-        assert!(t.contains("روی کدوم دستگاه وصل می‌شید"), "{}", t);
+        assert!(t.contains("دستگاهت رو انتخاب کن"), "{}", t);
         assert!(["🤖 اندروید", "🍏 آیفون", "💻 ویندوز"].iter().all(|d| bs.iter().any(|b| b == d)) && bs.iter().any(|b| b == "💬 پشتیبانی") && bs.len() <= 6, "{:?}", bs);
         // the connection guide of a v2ray account on an iPhone: only V2Box, with its subscription link
         tap(&bot, from(buyer, "Nima", "nima"), &format!("hw:{}:i", acc[0].id)).await;
@@ -4914,7 +5047,7 @@ mod flow_tests {
         assert!(buttons(&log, ADMIN).iter().any(|b| b.1 == "a:plans"));
         tap(&bot, from(ADMIN, "Admin", "admin"), "a:plans").await;
         let bs = buttons(&log, ADMIN);
-        assert!(bs.iter().any(|b| b.0 == "🟢 👑 50GB | یک‌ماهه | ۱۹۰,۰۰۰ ت"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "🟢 👑 50GB | یک‌ماهه | 190,000 ت"), "{:?}", bs);
         // the plan's service can be switched from its page: VIP -> V2Ray -> gaming -> VIP
         let sv = |db: &crate::db::Db| -> String { db.with(|c| c.query_row("SELECT service FROM plans WHERE id=?1", [pro], |r| r.get(0)).unwrap()) };
         tap(&bot, from(ADMIN, "Admin", "admin"), &format!("psw:{}", pro)).await;
@@ -4923,6 +5056,74 @@ mod flow_tests {
         assert_eq!(sv(db), "game");
         tap(&bot, from(ADMIN, "Admin", "admin"), &format!("psw:{}", pro)).await;
         assert_eq!(sv(db), "vip");
+    }
+
+    /// The bot as a customer and an admin see it: every message and button of the main flows, written to
+    /// `TOUR_OUT` (JSON) for a Telegram-like page (`scripts/bot_tour.js`). Run: `TOUR_OUT=/tmp/tour.json cargo test
+    /// --release bot_tour -- --ignored`
+    #[tokio::test]
+    #[ignore]
+    async fn bot_tour() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        db.set("sub_base", "https://sub.example.com");
+        db.set("support", "@kanki_support");
+        kanki_plans_once(db);
+        ux_once(db);
+        let step = |t: &str| log.lock().unwrap().push(("STEP".into(), json!({ "title": t })));
+        let c = 7901;
+        bot.touch(c, &from(c, "Sara", "sara"), 0);
+        step("/start");
+        say(&bot, from(c, "Sara", "sara"), "/start").await;
+        step("🎁 تست رایگان");
+        tap(&bot, from(c, "Sara", "sara"), "trial").await;
+        tap(&bot, from(c, "Sara", "sara"), "cfgsk:trial").await;
+        let tr = db.users_of_tg(c).into_iter().find(|u| u.notes == "trial").unwrap();
+        step("دو ساعت بعد از تست (قیف خرید)");
+        db.exec("UPDATE users SET created_at=?1 WHERE id=?2", &[&(now() - 7300), &tr.id]).unwrap();
+        bot.trial_hook().await;
+        step("🛒 خرید اشتراک");
+        tap(&bot, from(c, "Sara", "sara"), "buy").await;
+        step("👑 همه‌کاره VIP");
+        tap(&bot, from(c, "Sara", "sara"), "psv:b:p").await;
+        let pid = buttons(&log, c).iter().find(|b| b.1.starts_with("pl:")).map(|b| b.1.clone()).unwrap();
+        step("یک پلن");
+        tap(&bot, from(c, "Sara", "sara"), &pid).await;
+        step("کد تخفیف TEST15");
+        tap(&bot, from(c, "Sara", "sara"), "disc").await;
+        say(&bot, from(c, "Sara", "sara"), "TEST15").await;
+        step("تحویل بعد از خرید");
+        let u = bot.create_account(c, 50.0, 30, 1, "order #1").unwrap();
+        let (t, kb) = bot.delivery(&bot.tx("txt_bought"), &u, "VIP 50 GB");
+        bot.send(c, &t, Some(kb)).await;
+        step("راهنمای اتصال › اندروید");
+        tap(&bot, from(c, "Sara", "sara"), &format!("hw:{}:a", u.id)).await;
+        step("📦 سرویس‌های من");
+        tap(&bot, from(c, "Sara", "sara"), "my").await;
+        step("یادآوری تمدید (48 ساعت مانده)");
+        db.exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&(now() + 40 * 3600), &u.id]).unwrap();
+        bot.retention(now()).await;
+        step("پایان اشتراک");
+        db.exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&(now() - 60), &u.id]).unwrap();
+        bot.retention(now()).await;
+        step("5 روز بعد (بازگشت مشتری)");
+        db.exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&(now() - 5 * 86400 - 60), &u.id]).unwrap();
+        bot.retention(now()).await;
+        step("🤝 دعوت از دوستان");
+        tap(&bot, from(c, "Sara", "sara"), "ref").await;
+        step("💬 پشتیبانی");
+        tap(&bot, from(c, "Sara", "sara"), "support").await;
+        step("ادمین › /start و پنل مدیریت");
+        say(&bot, from(ADMIN, "Admin", "admin"), "/start").await;
+        tap(&bot, from(ADMIN, "Admin", "admin"), "adm").await;
+        step("ادمین › آمار");
+        tap(&bot, from(ADMIN, "Admin", "admin"), "a:stats").await;
+        step("ادمین › دعوت و تخفیف‌ها");
+        tap(&bot, from(ADMIN, "Admin", "admin"), "a:ref").await;
+        let out = std::env::var("TOUR_OUT").unwrap_or_else(|_| "/tmp/bot_tour.json".into());
+        let l = log.lock().unwrap().clone();
+        let v: Vec<Value> = l.into_iter().map(|(m, v)| json!({ "m": m, "v": v })).collect();
+        std::fs::write(out, serde_json::to_string(&v).unwrap()).unwrap();
     }
 
     #[tokio::test]
@@ -4937,14 +5138,14 @@ mod flow_tests {
         let c = 7801;
         say(&bot, from(c, "Sara", "sara"), "/start").await;
         let t = last(&log, c);
-        assert!(t.starts_with("⚡️ <b>به Kanki VPN خوش آمدید</b>") && t.contains("<code>WireGuard</code>"), "{}", t);
+        assert!(t.starts_with("⚡️ <b>به Kanki VPN خوش آمدید</b>") && t.contains("<code>KANKI MIX</code>"), "{}", t);
         let l = log.lock().unwrap().clone();
         let (_, v) = l.iter().rev().find(|(m, v)| m == "sendMessage" && v["chat_id"] == c && v["reply_markup"]["inline_keyboard"].is_array()).unwrap();
         let rows: Vec<Vec<String>> = v["reply_markup"]["inline_keyboard"].as_array().unwrap().iter()
             .map(|r| r.as_array().unwrap().iter().map(|b| b["text"].as_str().unwrap().to_string()).collect()).collect();
         assert_eq!(rows, vec![
             vec!["🛒 خرید اشتراک", "🎁 تست رایگان"], vec!["📦 سرویس‌های من", "🔄 تمدید اشتراک"],
-            vec!["📱 دانلود اپلیکیشن", "📖 آموزش اتصال"], vec!["🤝 دعوت از دوستان", "💬 پشتیبانی"]]);
+            vec!["📱 دانلود اپلیکیشن", "📖 راهنمای اتصال"], vec!["🤝 دعوت از دوستان", "💬 پشتیبانی"]]);
         // the admin's menu has the management row under them
         say(&bot, from(ADMIN, "Admin", "admin"), "/start").await;
         let l = log.lock().unwrap().clone();
@@ -4953,6 +5154,92 @@ mod flow_tests {
         // the tutorial with no video yet: the buy and trial buttons (no account) instead of «nothing here»
         tap(&bot, from(c, "Sara", "sara"), "guide").await;
         assert!(buttons(&log, c).iter().any(|b| b.1 == "trial"), "{:?}", buttons(&log, c));
+    }
+
+    /// The short trial: 300 MB for 3 hours, one user; its offer comes when the volume is gone or two hours in
+    /// (once), the TEST15 code works only for that customer and only until they buy or it ends
+    #[tokio::test]
+    async fn the_trial_its_offer_and_the_personal_codes() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        ux_once(db);
+        let c = 7951;
+        bot.touch(c, &from(c, "Sara", "sara"), 0);
+        db.exec("UPDATE bot_users SET cfg_name='sara' WHERE tg_id=?1", &[&c]).unwrap();
+        tap(&bot, from(c, "Sara", "sara"), "trial").await;
+        let tr = db.users_of_tg(c).into_iter().find(|u| u.notes == "trial").unwrap();
+        assert!((tr.limit_gb * 1024.0 - 300.0).abs() < 1.0 && tr.max_conn == 1, "{:?}", (tr.limit_gb, tr.max_conn));
+        assert!((tr.expires_at - now() - 3 * 3600).abs() < 5);
+        assert!(last(&log, c).contains("300 MB") && last(&log, c).contains("3 ساعت"), "{}", last(&log, c));
+        // not yet: an hour in, volume left
+        bot.trial_hook().await;
+        assert!(!last(&log, c).contains("TEST15"));
+        // two hours in: the offer, once
+        db.exec("UPDATE users SET created_at=?1 WHERE id=?2", &[&(now() - 7300), &tr.id]).unwrap();
+        bot.trial_hook().await;
+        assert!(last(&log, c).contains("<code>TEST15</code>") && last(&log, c).contains("12 ساعت"), "{}", last(&log, c));
+        let n = log.lock().unwrap().len();
+        bot.trial_hook().await;
+        assert_eq!(log.lock().unwrap().len(), n, "once");
+        assert_eq!(bot.offer(c).0, 15);
+        // the code is theirs: another customer cannot use it; BACK20 is nobody's yet
+        assert_eq!(bot.code_percent(c, "TEST15"), Some(15));
+        assert_eq!(bot.code_percent(7952, "TEST15"), None);
+        assert_eq!(bot.code_percent(c, "BACK20"), None);
+        // the trial ends: no second offer message (it was sent)
+        db.exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&(now() - 5), &tr.id]).unwrap();
+        let n = log.lock().unwrap().len();
+        bot.clean_trials().await;
+        assert!(!log.lock().unwrap()[n..].iter().any(|(m, v)| m == "sendMessage" && v["chat_id"] == c));
+    }
+
+    /// Keeping customers: one reminder 48 hours before the end (with the extra volume when renewed now), the end,
+    /// and 5 days later the BACK20 code, which only that customer can use, once
+    #[tokio::test]
+    async fn the_reminder_the_renewal_gift_and_the_win_back() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        ux_once(db);
+        db.exec("INSERT INTO plans(name,days,gb,toman,usd,conns,active,service) VALUES('M',30,50,110000,0,1,1,'vip')", &[]).unwrap();
+        let plan: i64 = db.with(|c| c.query_row("SELECT id FROM plans WHERE name='M'", [], |r| r.get(0)).unwrap());
+        let c = 7961;
+        bot.touch(c, &from(c, "Ali", "ali"), 0);
+        let u = bot.create_account(c, 50.0, 30, 1, "order #1").unwrap();
+        db.exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&(now() + 40 * 3600), &u.id]).unwrap();
+        bot.retention(now()).await;
+        assert!(last(&log, c).contains("رو به پایانه") && last(&log, c).contains("10% حجم هدیه"), "{}", last(&log, c));
+        let n = log.lock().unwrap().len();
+        bot.retention(now()).await;
+        assert_eq!(log.lock().unwrap().len(), n, "once a period");
+        // renewed now: the plan's days and volume and 10% more volume
+        let o = order(&bot, c, plan, "renew", u.id, "approved");
+        bot.fulfill(o).await;
+        let r = db.user(u.id).unwrap();
+        assert!((r.limit_gb - (50.0 + 50.0 + 5.0)).abs() < 1e-6 || (r.limit_gb - (50.0 + 5.0)).abs() < 1e-6, "{}", r.limit_gb);
+        assert!(last(&log, c).contains("+5 GB"), "{}", last(&log, c));
+        // a second renewal gets no second gift
+        let lim = r.limit_gb;
+        let o = order(&bot, c, plan, "renew", u.id, "approved");
+        bot.fulfill(o).await;
+        assert!(db.user(u.id).unwrap().limit_gb - lim < 51.0);
+        // the end, then 5 days later the win-back with the code
+        db.exec("UPDATE users SET expires_at=?1, warned=0 WHERE id=?2", &[&(now() - 60), &u.id]).unwrap();
+        bot.retention(now()).await;
+        assert!(last(&log, c).contains("تموم شد"));
+        db.exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&(now() - 5 * 86400 - 60), &u.id]).unwrap();
+        bot.retention(now()).await;
+        assert!(last(&log, c).contains("<code>BACK20</code>"), "{}", last(&log, c));
+        assert_eq!(bot.code_percent(c, "BACK20"), Some(20));
+        assert_eq!(bot.code_percent(7962, "BACK20"), None);
+        // its button: renewing this account with the code already on it
+        tap(&bot, from(c, "Ali", "ali"), &format!("rbk:{}", u.id)).await;
+        let pe = bot.pend.lock().unwrap().get(&c).cloned().unwrap();
+        assert_eq!((pe.discount.as_str(), pe.percent, pe.target), ("BACK20", 20, u.id));
+        // used once: delivered with it, then gone
+        db.exec("INSERT INTO orders(tg_id,plan_id,kind,target,method,amount,status,ref,discount,created) VALUES(?1,?2,'renew',?3,'card','88000','approved','','BACK20',?4)", &[&c, &plan, &u.id, &now()]).unwrap();
+        let o: i64 = db.with(|x| x.query_row("SELECT MAX(id) FROM orders", [], |r| r.get(0)).unwrap());
+        bot.fulfill(o).await;
+        assert_eq!(bot.code_percent(c, "BACK20"), None);
     }
 
     #[tokio::test]
@@ -4998,24 +5285,24 @@ mod flow_tests {
         assert!(t.contains("نوع سرویس") && !t.contains("•"), "short, no long descriptions: {}", t);
         let bs = buttons(&log, buyer);
         let labels: Vec<&str> = bs.iter().filter(|b| b.1.starts_with("psv:")).map(|b| b.0.as_str()).collect();
-        assert_eq!(labels, vec!["⚡ اقتصادی (V2Ray) — از ۵۲,۰۰۰ تومان", "🎮 گیمینگ (WireGuard + Amnezia) — از ۶۴,۰۰۰ تومان", "👑 همه‌کاره VIP (تمام پروتکل‌ها + اپ) — از ۸۰,۰۰۰ تومان"]);
-        assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1" && b.0 == "💎 ورود به فروشگاه مینی‌اپ"), "{:?}", bs);
+        assert_eq!(labels, vec!["⚡ اقتصادی (V2Ray) · از 52,000 تومان", "🎮 گیمینگ (WG + Amnezia) · از 64,000 تومان", "👑 همه‌کاره VIP · از 80,000 تومان"]);
+        assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1" && b.0 == "💎 فروشگاه مینی‌اپ"), "{:?}", bs);
         assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1&tab=custom" && b.0.starts_with("🎛")), "{:?}", bs);
         tap(&bot, from(buyer, "Sara", "sara"), "psv:b:p").await;
         // every plan of the service at once, by duration: «🔹 volume | duration | users — price», the badge's emoji at the end
         let bs = buttons(&log, buyer);
         let plans: Vec<&str> = bs.iter().filter(|b| b.1.starts_with("pl:")).map(|b| b.0.as_str()).collect();
-        assert_eq!(plans[0], "🔹 ۲۰ گیگ | ۱ ماهه | ۱ کاربر — ۸۰,۰۰۰ ت", "{:?}", plans);
-        assert!(plans.contains(&"🔹 ۵۰ گیگ | ۱ ماهه | ۱ کاربر — ۱۱۰,۰۰۰ ت 🔥"), "{:?}", plans);
-        assert!(plans.iter().all(|p| p.starts_with("🔹 ")), "{:?}", plans);
-        assert!(plans.iter().position(|p| p.contains("۱ ماهه")).unwrap() < plans.iter().position(|p| p.contains("۳ ماهه")).unwrap(), "{:?}", plans);
+        assert_eq!(plans[0], "\u{200F}🔹 20 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 80,000 تومان", "{:?}", plans);
+        assert!(plans.contains(&"\u{200F}🔹 50 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 110,000 تومان 🔥"), "{:?}", plans);
+        assert!(plans.iter().all(|p| p.starts_with("\u{200F}🔹 ")), "{:?}", plans);
+        assert!(plans.iter().position(|p| p.contains("1 ماهه")).unwrap() < plans.iter().position(|p| p.contains("3 ماهه")).unwrap(), "{:?}", plans);
         assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1&shop=vip&tab=custom"), "{:?}", bs);
         // the gaming service: its own plans, 12,000 more than V2Ray; a gaming purchase makes a WireGuard / AmneziaWG account
         tap(&bot, from(buyer, "Sara", "sara"), "pcat:b:0:g").await;
         let bs = buttons(&log, buyer);
-        assert!(bs.iter().any(|b| b.0 == "🔹 ۲۰ گیگ | ۱ ماهه | ۱ کاربر — ۶۴,۰۰۰ ت"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "\u{200F}🔹 20 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 64,000 تومان"), "{:?}", bs);
         tap(&bot, from(buyer, "Sara", "sara"), "pcat:b:0:v").await;
-        assert!(buttons(&log, buyer).iter().any(|b| b.0 == "🔹 ۲۰ گیگ | ۱ ماهه | ۱ کاربر — ۵۲,۰۰۰ ت"));
+        assert!(buttons(&log, buyer).iter().any(|b| b.0 == "\u{200F}🔹 20 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 52,000 تومان"));
         let u = bot.create_account_svc(buyer, 20.0, 30, 1, "", 0, "game").unwrap();
         assert_eq!((u.protocols.as_str(), u.service()), ("wg,awg,kmix", "game"));
         assert!(bot.account_text(&u).contains("🎮 گیمینگ") && !bot.account_text(&u).contains("/v2"));
@@ -5466,7 +5753,7 @@ mod flow_tests {
         assert!(bot.pend.lock().unwrap().get(&buyer).map(|p| p.discount.is_empty()).unwrap_or(false));
         tap(&bot, f(), "pay:card").await;
         assert!(last(&log, buyer).contains("100,000"), "{}", last(&log, buyer));
-        say(&bot, f(), "رسید ۲").await;
+        say(&bot, f(), "رسید 2").await;
         let codes: Vec<String> = db.with(|c| {
             let mut s = c.prepare("SELECT discount FROM orders WHERE tg_id=?1 AND status='pending' ORDER BY id").unwrap();
             let v: Vec<String> = s.query_map([buyer], |r| r.get(0)).unwrap().filter_map(|x| x.ok()).collect();
@@ -5526,7 +5813,7 @@ mod flow_tests {
         assert_eq!(r, 1);
         // 5 GB and 3 days for the first purchase, and 10% of its 20 GB
         let bank: (f64, i64) = db.with(|c| c.query_row("SELECT ref_bank_gb, ref_bank_days FROM bot_users WHERE tg_id=5099", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap());
-        assert_eq!(bank, (7.0, 3));
+        assert_eq!(bank, (7.0, 7));
 
         // custom purchase plans are not the admin's plans, and have no on/off
         let custom = crate::shop::custom_plan(db, "vip", 25, 30, 1).unwrap_or_else(|_| {
@@ -5674,7 +5961,7 @@ mod flow_tests {
         bot.on_message(&json!({"message_id": 41, "from": f(), "chat": {"id": tg}, "text": "off20"})).await;
         let d = deleted(&log, tg);
         assert!(d.contains(&41), "{:?}", d);
-        assert!(last(&log, tg).contains("80,000 تومان") && last(&log, tg).contains("تخفیف 20٪"), "{}", last(&log, tg));
+        assert!(last(&log, tg).contains("80,000 تومان") && last(&log, tg).contains("تخفیف 20%"), "{}", last(&log, tg));
         // paid and delivered: the payment page is removed, the delivery stays as the last message
         let o = order(&bot, tg, plan, "new", 0, "approved");
         let before = deleted(&log, tg).len();
@@ -5736,8 +6023,8 @@ mod flow_tests {
         let tr = bot.create_account(tg, 1.0, 1, 1, "trial").unwrap();
         db.exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&(now() - 10), &tr.id]).unwrap();
         bot.clean_trials().await;
-        assert!(last(&log, tg).contains("تخفیف خرید اول"), "{}", last(&log, tg));
-        assert_eq!(bot.price(tg, &p, &pe).0, 90_000);
+        assert!(last(&log, tg).contains("تخفیف ویژه") && last(&log, tg).contains("TEST15"), "{}", last(&log, tg));
+        assert_eq!(bot.price(tg, &p, &pe).0, 85_000);
     }
 
     fn order(bot: &Bot, tg: i64, plan: i64, kind: &str, target: i64, status: &str) -> i64 {
@@ -5866,7 +6153,7 @@ mod flow_tests {
         say(&bot, adm.clone(), "دو 10").await;
         assert!(last(&log, ADMIN).contains("فرمت درست"));
         // Persian digits and a reason
-        say(&bot, adm.clone(), "۲ ۱۰ قطعی دیشب").await;
+        say(&bot, adm.clone(), "2 10 قطعی دیشب").await;
         let confirm = last(&log, ADMIN);
         assert!(confirm.contains("سرویس‌ها: <b>2</b>") && confirm.contains("<b>1</b> نفر"), "{}", confirm);
         assert_eq!(db.user(a1.id).unwrap().limit_gb, 10.0, "nothing before yes");
@@ -5907,7 +6194,7 @@ mod flow_tests {
         // A: a Telegram name with nothing usable (only emoji / fancy letters) is asked for a name first
         let a = from(100, "🌙✨ 𝓜𝓪𝓱", "");
         tap(&bot, a.clone(), "trial").await;
-        assert!(last(&log, 100).contains("یک نام برای کانفیگ"), "{}", last(&log, 100));
+        assert!(last(&log, 100).contains("یک نام برای اشتراکت"), "{}", last(&log, 100));
         assert!(accounts(&bot, 100).is_empty());
         say(&bot, a.clone(), "ma tab!").await;
         assert!(last(&log, 100).contains("قابل قبول نیست"));
@@ -5931,7 +6218,7 @@ mod flow_tests {
         bot.db().exec("UPDATE users SET expires_at=?1 WHERE id=1", &[&(now() - 5)]).unwrap();
         bot.clean_trials().await;
         assert!(accounts(&bot, 100).is_empty());
-        assert!(last(&log, 100).contains("تموم شد"));
+        assert!(last(&log, 100).contains("به پایان رسید"));
         tap(&bot, a.clone(), "trial").await;
         assert!(last(&log, 100).contains("قبلاً تست رایگان"), "a finished trial cannot be taken again");
 
@@ -5973,7 +6260,7 @@ mod flow_tests {
         // a new buyer without a usable name is asked before the plans are shown
         let d = from(400, "علی", "");
         tap(&bot, d.clone(), "buy").await;
-        assert!(last(&log, 400).contains("یک نام برای کانفیگ"));
+        assert!(last(&log, 400).contains("یک نام برای اشتراکت"));
         say(&bot, d.clone(), "ali2").await;
         let o = order(&bot, 400, plan, "new", 0, "approved");
         bot.fulfill(o).await;

@@ -537,6 +537,33 @@ details.app{border-inline-start:3px solid var(--ac)}
 .cgo2{flex:none;min-width:130px;height:48px;border:0;border-radius:14px;font:inherit;font-size:15px;font-weight:900;cursor:pointer;color:#06101C;background:linear-gradient(135deg,color-mix(in srgb,var(--tc) 55%,#fff),var(--tc) 55%,color-mix(in srgb,var(--tc) 80%,#000));box-shadow:inset 0 1px 0 rgba(255,255,255,.5),0 8px 22px -8px var(--tc)}
 @media (max-width:380px){.p3h b,.p3p strong,.cbi strong{font-size:18px}.buy3{min-width:104px}.cgo2{min-width:112px}}
 .ad-gh{display:flex;align-items:center;gap:8px;margin:16px 2px 8px;font-size:15px;font-weight:900}.ad-gh small{font-size:12px;font-weight:700;color:var(--hint)}
+.gcard .lbl{margin-top:10px}
+.gseg{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:4px;border-radius:14px;background:rgba(6,10,20,.6);border:1px solid rgba(140,180,255,.1)}
+.gseg button{height:38px;border:0;border-radius:10px;background:transparent;color:var(--hint);font:inherit;font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap}
+.gseg button.on{color:#06101C;background:var(--gold1,#FFB300)}
+.gch{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.gch button{height:36px;padding:0 12px;border-radius:18px;border:1px solid rgba(140,180,255,.16);background:rgba(255,255,255,.03);color:var(--tx);font:inherit;font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap}
+.gch button.on{border-color:var(--gold1,#FFB300);background:rgba(255,179,0,.14);color:var(--gold1,#FFB300)}
+.gch .gin{width:84px;height:36px;padding:0 10px;margin:0}
+.gpick{margin-top:12px}.gtools{display:flex;gap:8px}.gtools .in{flex:1;margin:0}.gtools .b{flex:none;min-height:40px}
+.glist{max-height:46vh;overflow:auto;margin-top:8px;display:grid;gap:6px;overscroll-behavior:contain}
+.gacc{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:12px;background:rgba(6,10,20,.5);border:1px solid rgba(140,180,255,.08);cursor:pointer}
+.gacc.on{border-color:rgba(255,179,0,.6);background:rgba(255,179,0,.07)}
+.gacc input{width:18px;height:18px;accent-color:var(--gold1,#FFB300);flex:none}
+.gd{width:8px;height:8px;border-radius:50%;flex:none}.gd.ok{background:var(--ok,#00E676)}.gd.warn{background:var(--warn,#FFB300)}.gd.bad{background:var(--bad,#ff5470)}
+.gn{flex:1;min-width:0}.gn b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.gn small{display:block;font-size:12px;color:var(--hint);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gtag{flex:none;font-size:11px;font-weight:800;padding:2px 8px;border-radius:9px;color:var(--ok,#00E676);background:rgba(0,230,118,.1)}
+.gbar{position:sticky;bottom:0;z-index:6;display:flex;align-items:center;gap:12px;margin:0 -16px 12px;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:rgba(9,13,22,.96);border-top:1px solid rgba(255,179,0,.3);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+.gbar>div{flex:1;min-width:0}.gbar b{display:block;font-size:16px}.gbar small{display:block;font-size:12px;color:var(--hint)}.gbar .b{flex:none;min-width:130px}
+.glog{display:grid;gap:8px}.glog>div{padding:8px 10px;border-radius:12px;background:rgba(6,10,20,.5)}.glog b{display:block;font-size:14px;color:var(--gold1,#FFB300)}.glog span,.glog small{display:block;font-size:12px;color:var(--hint)}
+.rib3{display:inline-flex;align-items:center;gap:4px}.rib3 svg{width:13px;height:13px}
+.p3s{display:inline-flex;align-items:center;gap:4px}.p3s svg{width:13px;height:13px}
+.pc3{padding:14px 12px 12px}.pc3 .spec{margin-top:10px;gap:5px}.pc3 .spec div{padding:5px 6px}.p3f{margin-top:8px}.pc3 .p3b{margin-top:10px;padding-top:10px}
+.tdesc{padding:10px 12px}.tdesc p{line-height:1.7}.plist{gap:12px}
+.pc3.feat:before{content:"";position:absolute;inset:-1px;border-radius:inherit;padding:1px;background:linear-gradient(135deg,var(--tc),transparent 40%,transparent 60%,var(--tc));-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:.8;pointer-events:none}
+.afg{display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;align-items:end}.afg .af-w{grid-column:1/-1}.af{min-width:0}
+.afg .lbl{margin-top:8px;font-size:13px}.afg .in{min-height:40px;padding:8px 12px;margin:4px 0 0}.afg .ad-h{display:block;margin-top:2px}
+.afg .ad-sw{margin-top:6px}.afg>.af:not(.af-w):last-child:nth-child(odd){grid-column:1/-1}.ad-card{padding:12px}.ad-card h3{font-size:15px}
 </style>
 </head>
 <body>
@@ -551,7 +578,8 @@ function tg(){return window.Telegram&&Telegram.WebApp}
 // the signed init data: from Telegram's script, else from the page address (the script may not load in Iran)
 function initData(){var w=tg();if(w&&w.initData)return w.initData;
  var h=location.hash.slice(1),m=h.match(/(?:^|&)tgWebAppData=([^&]*)/);return m?decodeURIComponent(m[1]):''}
-function fa(n){return String(n).replace(/\d/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'[d]})}
+// every number is written with English digits (the owner's rule, 3.56)
+function fa(n){return String(n)}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function flag(cc){cc=(cc||'').toUpperCase();if(!/^[A-Z]{2}$/.test(cc))return '';return String.fromCodePoint(0x1F1E6+cc.charCodeAt(0)-65,0x1F1E6+cc.charCodeAt(1)-65)}
 function route(s){var to=flag(s.cc)||'🌐';return s.iran?flag('IR')+'→'+to:to}
@@ -562,14 +590,14 @@ function api(path){return fetch(path,{headers:{'X-Tg-Init':initData()},cache:'no
 var PN={i:'آیفون',a:'اندروید',w:'ویندوز'};
 var ST={Active:['فعال','var(--ok)'],Limited:['حجم تمام شده','var(--warn)'],Expired:['زمان تمام شده','var(--warn)'],Disabled:['غیرفعال','var(--bad)']};
 
-function toman(n){return fa(Math.round(n).toLocaleString('en-US')).replace(/,/g,'٬')+' تومان'}
+function toman(n){return Math.round(n).toLocaleString('en-US')+' تومان'}
 var OST={pending:['در انتظار تأیید','y'],waiting:['در انتظار پرداخت','y'],approved:['تأیید شد','g'],done:['فعال شد','g'],rejected:['رد شد','r'],error:['خطا؛ پشتیبانی پیگیری می‌کنه','r'],expired:['پرداخت نشد؛ منقضی شد','r']};
 function ordersHtml(){if(!A.orders||!A.orders.length)return '';
  return '<h2>سفارش‌های من</h2><div class="card">'+A.orders.map(function(o){var st=OST[o.status]||[o.status||'—','y'],amt=+o.amount;
   return '<div class="row"><div class="nm"><b>'+esc(o.plan||'سفارش')+'</b><small>'+(o.kind=='renew'?'تمدید':'خرید')+'، '+(amt>0&&o.method!='np'&&o.method!='wallet'?toman(amt):'')+(o.created?' '+new Date(o.created*1000).toLocaleDateString('fa-IR'):'')+'</small></div><span class="ost '+st[1]+'">'+st[0]+'</span></div>'}).join('')+'</div>'}
 function nameCard(){if(!A.needName||A.renew)return '';
  return '<div class="card" style="margin-bottom:12px"><span class="lbl" style="margin-top:0">اسم کانفیگ شما</span><input class="in" id="cn" maxlength="12" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="'+esc(A.nameHint||'mahtab87')+'" value="'+esc(A.name||'')+'">'+
-  '<p class="lead" style="margin:6px 2px 0">فقط حروف انگلیسی و عدد، ۳ تا ۱۲ حرف، اولش حرف. توی برنامه با همین اسم می‌بینیدش.'+(A.nameHint?' خالی بذارید تا همون <b class="ltr">'+esc(A.nameHint)+'</b> (از اسم تلگرامتون) بشه.':'')+'</p></div>'}
+  '<p class="lead" style="margin:6px 2px 0">فقط حروف انگلیسی و عدد، 3 تا 12 حرف، اولش حرف. توی برنامه با همین اسم می‌بینیدش.'+(A.nameHint?' خالی بذارید تا همون <b class="ltr">'+esc(A.nameHint)+'</b> (از اسم تلگرامتون) بشه.':'')+'</p></div>'}
 function nameQ(){if(!A.needName||A.renew)return '';var e=document.getElementById('cn'),v=e?e.value.trim():'';A.name=v;return '&name='+encodeURIComponent(v)}
 var NOSEND='ربات نتونست توی چت پیام بده؛ ربات رو توی تلگرام استارت کنید (اگه بلاکش کردید، آنبلاک) و دوباره امتحان کنید';
 function why(e,j){var m=e.message;if(m=='name')return 'اول اسم کانفیگ رو بنویسید';if(m=='bad name')return (j||'اسم کانفیگ درست نیست').replace(/<[^>]+>/g,'').split('\n')[0];
@@ -601,9 +629,9 @@ var SV={v2ray:['⚡','اقتصادی · V2Ray'],game:['🎮','گیمینگ · Wi
 // a Latin run inside Persian text: kept in one piece and one direction (no «+ V2Ray» at the end of a line)
 function L(x){return '<bdi class="lw">'+x+'</bdi>'}
 var TIER={
- v2ray:{seg:'اقتصادی V2Ray',short:'V2Ray',name:'اقتصادی · '+L('V2Ray'),c:'#00D2FF',ic:'bolt',d:'یک لینک اشتراک برای '+L('v2rayNG')+'، '+L('V2Box')+'، '+L('Streisand')+' و '+L('v2rayN')+'؛ وب‌گردی، دانلود، اینستاگرام و یوتیوب. ارزان‌ترین سرویس.',f:['یک لینک برای همه‌ی سرورها','اندروید، آیفون و ویندوز'],k:'یک لینک برای همه سرورها',b:'اقتصادی V2Ray'},
- game:{seg:'گیمینگ',short:'گیمینگ',name:'گیمینگ · '+L('WireGuard + Amnezia'),c:'#00E676',ic:'pad',d:'کانفیگ '+L('WireGuard')+' و '+L('AmneziaWG')+' و فایل یک‌جای '+L('AmneziaVPN')+'؛ پینگ پایین و پایدار برای پابجی و کالاف.',f:['پینگ پایین و پایدار بازی','اتصال تک‌لمسی در اپ کانکی'],k:'پینگ پایین و پایدار برای بازی',b:'گیمینگ'},
- vip:{seg:'همه‌کاره VIP',short:'VIP',name:'همه‌کاره '+L('VIP'),c:'#FFB300',ic:'crown',d:'هر سه با یک اشتراک: '+L('V2Ray + WireGuard + AmneziaWG')+'. اپ اختصاصی کانکی رایگان همراهشه؛ بهترین برای خانواده و چند دستگاه.',f:[L('V2Ray + WireGuard + Amnezia'),'اپ کانکی رایگان'],k:'همه پروتکل‌ها + اپ کانکی',b:'VIP'}};
+ v2ray:{seg:'اقتصادی V2Ray',short:'V2Ray',name:'اقتصادی · '+L('V2Ray'),c:'#00D2FF',ic:'bolt',d:'یک لینک برای همه‌ی سرورها؛ وب‌گردی، اینستاگرام و یوتیوب. ارزان‌ترین سرویس.',f:['یک لینک برای همه‌ی سرورها','اندروید، آیفون و ویندوز'],k:'یک لینک برای همه سرورها',b:'اقتصادی V2Ray'},
+ game:{seg:'گیمینگ',short:'گیمینگ',name:'گیمینگ · '+L('WireGuard + Amnezia'),c:'#00E676',ic:'pad',d:'پینگ پایین و ثابت برای پابجی و کالاف؛ '+L('WireGuard')+' و '+L('AmneziaWG')+'.',f:['پینگ پایین و پایدار بازی','اتصال تک‌لمسی در اپ کانکی'],k:'پینگ پایین و پایدار برای بازی',b:'گیمینگ'},
+ vip:{seg:'همه‌کاره VIP',short:'VIP',name:'همه‌کاره '+L('VIP'),c:'#FFB300',ic:'crown',d:'همه‌ی پروتکل‌ها با یک اشتراک + اپ اختصاصی کانکی رایگان.',f:[L('V2Ray + WireGuard + Amnezia'),'اپ کانکی رایگان'],k:'همه پروتکل‌ها + اپ کانکی',b:'VIP'}};
 var TORDER=['vip','game','v2ray'];
 var ICO={
  bolt:'<path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12z"/>',
@@ -612,6 +640,8 @@ var ICO={
  dev:'<rect x="2" y="5" width="13" height="10" rx="1.6"/><path d="M1 18h15"/><rect x="17" y="8" width="6" height="11" rx="1.4"/>',
  user:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
  time:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+ flame:'<path d="M12 2.5c.6 3.2 3.9 4.9 3.9 8.7A4 4 0 0 1 12 15.2a3.9 3.9 0 0 1-3.9-4c0-1.6.7-2.7 1.6-3.6.2 1.5 1.1 2.2 1.9 2.2.9-2.2-.4-4.8.4-7.3z" fill="currentColor" stroke="none"/><path d="M6.3 12.6A5.8 5.8 0 0 0 12 21.5a5.8 5.8 0 0 0 5.7-8.9"/>',
+ trophy:'<path d="M7 4h10v4.5a5 5 0 0 1-10 0z" fill="currentColor" stroke="none"/><path d="M7 6H4.5a2.5 2.5 0 0 0 2.6 3.4M17 6h2.5a2.5 2.5 0 0 1-2.6 3.4M12 13.5V17M8.5 20.5h7M9.5 17h5v3.5h-5z"/>',
  calc:'<rect x="5" y="2.5" width="14" height="19" rx="2.4"/><path d="M8 7h8M8.5 12h.01M12 12h.01M15.5 12h.01M8.5 16h.01M12 16h.01M15.5 16h.01"/>'};
 function ico(k){return '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+(ICO[k]||'')+'</svg>'}
 // the shop's price list, the same formula as shop.rs Pricing::price (same order of the sums, so the same number)
@@ -619,7 +649,7 @@ function pvol(P,g){var prev=0,v=0;for(var i=0;i<P.tiers.length;i++){var up=+P.ti
 function cprice(P,svc,g,d,u,custom){var s=P.services[svc]||P.services.vip,p=s.base+s.factor*pvol(P,Math.max(0,g))+(Math.max(1,u)-1)*s.user+(d/30-1)*s.month;if(custom)p*=1+P.margin/100;var rd=P.round>0?P.round:1000;return Math.max(rd,Math.round(p/rd)*rd)}
 window.kankiPrice=function(svc,g,d,u){return A.shop?cprice(A.shop.custom,svc,g,d,u,true):0};
 function dur(d){return d%30?fa(d)+' روز':(d==30?'یک ماه':fa(d/30)+' ماه')}
-// plans are written with English digits (a Persian zero is a dot and «۲۰ گیگ · ۱ ماهه» read as 20 GB, 10 months)
+// plans are written with English digits (a Persian zero is a dot and «20 گیگ · 1 ماهه» read as 20 GB, 10 months)
 function enT(n){return Math.round(n).toLocaleString('en-US')}
 function durEn(d){return !d?'بی‌پایان':d%30?d+' روزه':(d/30)+' ماهه'}
 function tiersOn(){var sh=A.shop,c=sh.custom;return TORDER.filter(function(k){return c.on||sh.plans.some(function(p){return (p.service||'vip')==k})})}
@@ -627,7 +657,7 @@ function tiersOn(){var sh=A.shop,c=sh.custom;return TORDER.filter(function(k){re
 function kindOf(p){return p.days>0&&p.days<=31?'1':'n'}
 function kindsOf(svc){var sh=A.shop,ks=[];['1','n'].forEach(function(k){if(sh.plans.some(function(p){return (p.service||'vip')==svc&&kindOf(p)==k}))ks.push(k)});
  if(sh.custom.on)ks.push('*custom*');return ks}
-function KN(k){return k=='*custom*'?'دلخواه':k=='1'?'۱ ماهه':'چندماهه'}
+function KN(k){return k=='*custom*'?'دلخواه':k=='1'?'1 ماهه':'چندماهه'}
 
 function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){return x.id==A.renew})[0],h='';
  if(A.list.length)backBtn(function(){A.view='acc';A.renew=0;render();window.scrollTo(0,0)});
@@ -635,7 +665,7 @@ function drawBuy(){var sh=A.shop,c=sh.custom,mine=A.list.filter(function(x){retu
  var T=TIER[A.svc],ks=kindsOf(A.svc);if(ks.indexOf(A.cat)<0)A.cat=ks[0]||'';
  h+=nameCard();
  // a first-purchase discount (an invited friend, a finished trial): counted on the payment page in the chat
- if(A.offer>0&&!mine)h+='<div class="offer" role="note"><span class="ob">'+fa(A.offer)+'٪</span><div><b>تخفیف خرید اول شما</b><small>موقع پرداخت توی چت خودش از قیمت کم می‌شه.</small></div></div>';
+ if(A.offer>0&&!mine)h+='<div class="offer" role="note"><span class="ob">'+fa(A.offer)+'%</span><div><b>تخفیف خرید اول شما</b><small>موقع پرداخت توی چت خودش از قیمت کم می‌شه.</small></div></div>';
  if(A.trial&&!mine)h+='<div class="card trial2"><div><b>🎁 تست رایگان</b><p class="lead">قبل از خرید امتحان کنید؛ یک بار برای هر نفر.</p></div><button class="b blue" id="tri">گرفتن تست</button></div>';
  if(mine)h+='<p class="lead">تمدید حساب <b class="ltr">'+esc(mine.name)+'</b>: حجم و روز به همین حساب اضافه می‌شه. <button class="b" id="nr">خرید حساب تازه</button></p>';
  h+='<div class="tier" role="tablist" aria-label="نوع سرویس">'+ts.map(function(k){var x=TIER[k];return '<button role="tab" aria-selected="'+(A.svc==k)+'" data-svc="'+k+'" class="'+(A.svc==k?'on':'')+'" style="--tc:'+x.c+'">'+ico(x.ic)+'<span>'+x.seg+'</span></button>'}).join('')+'</div>';
@@ -668,10 +698,11 @@ function cbSum(cb){return fa(cb.g)+' گیگ | '+dur3(cb.d)+' | '+fa(cb.u)+' کا
 // columns, one key feature, and the price beside the buy button at the bottom
 function planCard(p){var T=TIER[p.service||'vip']||TIER.vip,bd=p.badge||'',rib=/پیشنهاد/.test(bd)?'پیشنهاد ویژه':/پرفروش/.test(bd)?'پرفروش‌ترین':bd.replace(/^[^\p{L}\p{N}]+/u,''),old=+p.old_toman||0,off=old>p.toman?Math.round((1-p.toman/old)*100):0;
  var vol=p.gb>0?(Math.round(p.gb*10)/10)+' GB':'نامحدود';
- return '<div class="pc3'+(rib?' feat':'')+'" style="--tc:'+T.c+'">'+(rib?'<span class="rib3">'+esc(rib)+'</span>':'')+
-  '<div class="p3h"><b><bdi>'+vol+'</bdi></b><span class="p3s">'+T.b+'</span></div>'+
+ var ri=/پرفروش/.test(rib)?'trophy':'flame';
+ return '<div class="pc3'+(rib?' feat':'')+'" style="--tc:'+T.c+'">'+(rib?'<span class="rib3">'+ico(ri)+esc(rib)+'</span>':'')+
+  '<div class="p3h"><b><bdi>'+vol+'</bdi></b><span class="p3s">'+ico(T.ic)+T.b+'</span></div>'+
   '<div class="spec"><div><small>حجم</small><b><bdi>'+vol+'</bdi></b></div><div><small>مدت</small><b>'+dur3(p.days)+'</b></div><div><small>تعداد کاربر</small><b>'+fa(p.conns)+' کاربر</b></div></div>'+
-  '<div class="p3f"><i>✓</i>'+T.k+(off?' · <span class="p3o">'+fa(off)+'٪ تخفیف</span>':'')+'</div>'+
+  '<div class="p3f"><i>✓</i>'+T.k+(off?' · <span class="p3o">'+fa(off)+'% تخفیف</span>':'')+'</div>'+
   '<div class="p3b"><div class="p3p">'+(off?'<s>'+tmn(old)+'</s>':'')+'<strong>'+tmn(p.toman)+'</strong><small>تومان</small></div><button class="buy3" data-pid="'+p.id+'">خرید اشتراک</button></div></div>'}
 function tmn(n){return fa(enT(n))}
 function dur3(d){return !d?'بی‌پایان':d%30?fa(d)+' روزه':fa(d/30)+' ماهه'}
@@ -851,7 +882,7 @@ function drawBtn(){var x=bFind(BB.k);if(!x){A.view='btns';return render()}
   '<div class="bsave"><button class="b" id="bcan">انصراف</button><button class="b main" id="bok">ذخیره</button></div></div>';
  document.getElementById('app').innerHTML=h;
  var $=function(s){return document.querySelector(s)};
- var live=function(){$('#blive').innerHTML=bBtn(x,{text:f.text,icon:f.icon,style:f.style});$('#bc').textContent=fa((f.text||'').length)+' از ۶۰ حرف · خالی = متن پیش‌فرض'};live();
+ var live=function(){$('#blive').innerHTML=bBtn(x,{text:f.text,icon:f.icon,style:f.style});$('#bc').textContent=fa((f.text||'').length)+' از 60 حرف · خالی = متن پیش‌فرض'};live();
  $('#bt').oninput=function(){f.text=this.value;live()};
  $('#bdef').onclick=function(){f.text='';$('#bt').value='';live()};
  Array.prototype.slice.call(document.querySelectorAll('[data-c]')).forEach(function(b){b.onclick=function(){f.style=b.dataset.c;drawBtn()}});
@@ -890,12 +921,12 @@ function drawPaths(){var el=document.getElementById('app');
  sv.forEach(function(x){var n=x.now,hr=x.hour;
   h+='<section class="pq-st '+x.state+'"><div class="pq-hd"><span class="fl">'+(x.flag||'🌐')+'</span><b>'+esc(x.name)+'</b><span class="pq-pill">'+PQS[x.state]+'</span></div>';
   if(n)h+='<div class="pq-nums"><div><small>پینگ</small><strong class="ltr">'+pqNum(n.ping)+'<em>ms</em></strong></div><div><small>افت</small><strong class="ltr">'+pqNum(n.loss)+'<em>%</em></strong></div><div><small>لرزش</small><strong class="ltr">'+pqNum(n.jit)+'<em>ms</em></strong></div></div>';
-  if(hr)h+='<p class="pq-hour">ساعت گذشته: افت '+pqNum(hr.loss)+'٪ · لرزش '+pqNum(hr.jit)+' · بدترین پینگ '+pqNum(hr.max)+'</p>';
+  if(hr)h+='<p class="pq-hour">ساعت گذشته: افت '+pqNum(hr.loss)+'% · لرزش '+pqNum(hr.jit)+' · بدترین پینگ '+pqNum(hr.max)+'</p>';
   h+='<div class="pq-line">'+x.tunnels.map(function(t){var a=t.now,st=!t.up?'down':a?a.level:'wait';
    return '<div class="pq-tu '+st+'"><div class="pq-r1"><b class="ltr">'+esc(t.name)+'</b><span class="from">از '+esc(t.from)+'</span>'+
     '<span class="chips">'+(t.lanes>0?'<span class="pq-chip ln">بی‌ترتیب</span>':'')+'<span class="pq-chip ltr">'+esc(t.transport)+'</span></span></div>'+
-    '<div class="pq-r2">'+(!t.up?'<span class="cut">قطع است</span>':a?'<span>پینگ <strong class="ltr">'+pqNum(a.ping)+'</strong></span><span>افت <strong class="ltr">'+pqNum(a.loss)+'٪</strong></span><span>لرزش <strong class="ltr">'+pqNum(a.jit)+'</strong></span>':'<span>داده در راه است</span>')+'</div></div>'}).join('')+'</div></section>'});
- h+='<p class="pq-foot">هر دقیقه ۲۰ بستهٔ کوچک داخل هر تانل رفت و برگشت می‌کند. پینگ: میانه · افت: بسته‌ای که تا ۱ ثانیه برنگشت · لرزش: تغییر پینگ از هر بسته به بعدی. «بی‌ترتیب»: بستهٔ بازی پشت بستهٔ گم‌شده نمی‌ماند. پر افت یعنی افت بالای '+fa(d.limits.bad_loss)+'٪ یا لرزش بالای '+fa(d.limits.bad_jit)+'ms.</p>';
+    '<div class="pq-r2">'+(!t.up?'<span class="cut">قطع است</span>':a?'<span>پینگ <strong class="ltr">'+pqNum(a.ping)+'</strong></span><span>افت <strong class="ltr">'+pqNum(a.loss)+'%</strong></span><span>لرزش <strong class="ltr">'+pqNum(a.jit)+'</strong></span>':'<span>داده در راه است</span>')+'</div></div>'}).join('')+'</div></section>'});
+ h+='<p class="pq-foot">هر دقیقه 20 بستهٔ کوچک داخل هر تانل رفت و برگشت می‌کند. پینگ: میانه · افت: بسته‌ای که تا 1 ثانیه برنگشت · لرزش: تغییر پینگ از هر بسته به بعدی. «بی‌ترتیب»: بستهٔ بازی پشت بستهٔ گم‌شده نمی‌ماند. پر افت یعنی افت بالای '+fa(d.limits.bad_loss)+'% یا لرزش بالای '+fa(d.limits.bad_jit)+'ms.</p>';
  el.innerHTML=h;wireAdmNav();
  document.getElementById('pqre').onclick=function(){var b=this;b.disabled=true;pqLoad().then(function(){buzz('success');drawPaths()}).catch(function(){b.disabled=false;buzz('error');toast('نشد، دوباره امتحان کنید')})};
  document.getElementById('pqal').onclick=function(){var b=this;b.disabled=true;post('/tg/api/admin/paths',{alerts:!d.alerts}).then(function(n){PQ.d=n;buzz('success');toast(n.alerts?'هشدار مسیرها روشن شد':'هشدار مسیرها خاموش شد');drawPaths()}).catch(function(){b.disabled=false;buzz('error');toast('ذخیره نشد')})}}
@@ -905,14 +936,15 @@ function drawPaths(){var el=document.getElementById('app');
 // payments, plans, discount codes, invites and the free trial, the smart channel, the message in the app. Each call
 // goes to the panel's own routes through /tg/api/admin/panel (only the bot's admins, only these routes).
 var AD={tab:'ov',d:{}};
-var ATABS=[['ov','نمای کلی'],['sales','فروش'],['pay','پرداخت'],['plans','پلن‌ها'],['disc','کد تخفیف'],['ref','دعوت و تست'],['chan','کانال'],['msg','پیام اپ']];
+var ATABS=[['ov','نمای کلی'],['gift','🎁 هدیه'],['plans','پلن‌ها'],['sales','فروش'],['pay','پرداخت'],['disc','کد تخفیف'],['ref','دعوت و تست'],['chan','کانال'],['msg','پیام اپ']];
 function pa(method,path,body){return post('/tg/api/admin/panel',{method:method,path:path,body:body==null?null:body})}
-function adNum(n){return fa(Math.round(+n||0).toLocaleString('en-US')).replace(/,/g,'٬')}
+function adNum(n){return Math.round(+n||0).toLocaleString('en-US')}
 // a form from fields: [key, label, kind (sw | text | num | area | ltr), hint]
-function adForm(fields,v){return fields.map(function(f){var k=f[0],val=v[k]==null?'':v[k],on=String(val)=='1'||val===true;
-  if(f[2]=='sw')return '<label class="btog ad-sw"><span><b>'+esc(f[1])+'</b>'+(f[3]?'<small>'+esc(f[3])+'</small>':'')+'</span><input type="checkbox" data-ak="'+k+'"'+(on?' checked':'')+'></label>';
-  if(f[2]=='area')return '<span class="lbl">'+esc(f[1])+'</span><textarea class="in ad-ta" data-ak="'+k+'" rows="3">'+esc(val)+'</textarea>'+(f[3]?'<small class="ad-h">'+esc(f[3])+'</small>':'');
-  return '<span class="lbl">'+esc(f[1])+'</span><input class="in'+(f[2]=='text'?' ad-rtl':'')+'" data-ak="'+k+'"'+(f[2]=='num'?' inputmode="decimal"':'')+' value="'+esc(val)+'">'+(f[3]?'<small class="ad-h">'+esc(f[3])+'</small>':'')}).join('')}
+function adForm(fields,v){return '<div class="afg">'+fields.map(function(f){var k=f[0],val=v[k]==null?'':v[k],on=String(val)=='1'||val===true;
+  if(f[2]=='sw')return '<label class="btog ad-sw af-w"><span><b>'+esc(f[1])+'</b>'+(f[3]?'<small>'+esc(f[3])+'</small>':'')+'</span><input type="checkbox" data-ak="'+k+'"'+(on?' checked':'')+'></label>';
+  if(f[2]=='area')return '<div class="af af-w"><span class="lbl">'+esc(f[1])+'</span><textarea class="in ad-ta" data-ak="'+k+'" rows="3">'+esc(val)+'</textarea>'+(f[3]?'<small class="ad-h">'+esc(f[3])+'</small>':'')+'</div>';
+  // numbers two a row (a hint makes it full width so it is read)
+  return '<div class="af'+(f[2]=='num'&&!f[3]?'':' af-w')+'"><span class="lbl">'+esc(f[1])+'</span><input class="in'+(f[2]=='text'?' ad-rtl':'')+'" data-ak="'+k+'"'+(f[2]=='num'?' inputmode="decimal"':'')+' value="'+esc(val)+'">'+(f[3]?'<small class="ad-h">'+esc(f[3])+'</small>':'')+'</div>'}).join('')+'</div>'}
 function adVals(root){var o={};Array.prototype.slice.call(root.querySelectorAll('[data-ak]')).forEach(function(e){o[e.dataset.ak]=e.type=='checkbox'?(e.checked?'1':'0'):e.value.trim()});return o}
 function adSaveBar(id){return '<div class="bsave"><button class="b" onclick="AD.d={};drawAdm()">بازخوانی</button><button class="b main" id="'+id+'">ذخیره</button></div>'}
 function adCard(title,body,sub){return '<div class="card ad-card"><h3>'+esc(title)+'</h3>'+(sub?'<p class="lead">'+esc(sub)+'</p>':'')+body+'</div>'}
@@ -924,6 +956,7 @@ function adLoad(){var need=[];
  if(AD.tab=='disc'&&!AD.d.disc)need.push(pa('GET','/api/discounts').then(function(v){AD.d.disc=v}));
  if(AD.tab=='chan'&&!AD.d.chan)need.push(pa('GET','/api/channel').then(function(v){AD.d.chan=v}));
  if(AD.tab=='msg'&&!AD.d.msg)need.push(pa('GET','/api/app-msg').then(function(v){AD.d.msg=v}));
+ if(AD.tab=='gift'&&!AD.d.gift)need.push(api('/tg/api/admin/gift').then(function(v){AD.d.gift=v}));
  return Promise.all(need)}
 function drawAdm(){var el=document.getElementById('app');backBtn(null);
  if(!AD.busy){AD.busy=1;el.innerHTML=admHead()+'<div class="skel"></div>';adLoad().then(function(){AD.busy=0;drawAdm()}).catch(function(e){AD.busy=0;el.innerHTML=admHead()+'<div class="empty"><b>باز نشد</b><p class="muted">'+esc(e.message||'')+'</p></div>';wireAdmTabs()});return}
@@ -950,8 +983,10 @@ var _drawAdm=drawAdm;drawAdm=function(){if(AD.busy)return;var need=adNeed();if(n
    adCard('🏦 زرین‌پال',adForm([['zp_on','روشن','sw'],['zp_merchant','مرچنت','ltr'],['zp_callback','آدرس برگشت (اختیاری)','ltr']],s))+
    adCard('🪙 NOWPayments',adForm([['np_on','روشن','sw'],['np_key','کلید API','ltr'],['np_coins','ارزها (با ویرگول)','ltr']],s))+adSaveBar('ad_save');
  }else if(AD.tab=='ref'){
-  h+=adCard('👥 دعوت دوستان',adForm([['ref_gb','گیگ هدیه‌ی اولین خرید دوست','num'],['ref_days','روز هدیه‌ی اولین خرید دوست','num'],['ref_pct','٪ حجم هر خرید و تمدید دوست','num','۰ = خاموش'],['ref_new_pct','٪ تخفیف خرید اول دوستِ دعوت‌شده (۷ روز)','num']],s))+
-   adCard('🎁 تست رایگان',adForm([['trial_on','تست رایگان','sw','یک بار برای هر نفر'],['trial_gb','حجم (گیگ)','num'],['trial_days','مدت (روز)','num'],['trial_offer_pct','٪ تخفیف خرید اول بعد از تمام شدن تست (۴۸ ساعت)','num']],s))+adSaveBar('ad_save');
+  h+=adCard('🎁 تست رایگان',adForm([['trial_on','تست رایگان','sw','یک بار برای هر حساب تلگرام، یک کاربر']],s)+adForm([['trial_mb','حجم (MB)','num'],['trial_hours','مدت (ساعت)','num']],s))+
+   adCard('⚡ تخفیف بعد از تست',adForm([['trial_offer_pct','% تخفیف (کد TEST'+(s.trial_offer_pct||15)+')','num'],['trial_offer_hours','اعتبار (ساعت)','num']],s),'وقتی حجم تست تمام شد یا 2 ساعت گذشت، خودکار فرستاده می‌شود.')+
+   adCard('🔄 نگه‌داشتن مشتری',adForm([['back_pct','% تخفیف بازگشت (BACK'+(s.back_pct||20)+')','num'],['back_hours','اعتبار آن (ساعت)','num'],['renew_bonus_pct','% حجم هدیه‌ی تمدید به‌موقع','num']],s),'یادآوری تمدید: 48 ساعت مانده یا 85% مصرف. بازگشت: 5 روز بعد از پایان، اگر تمدید نشده.')+
+   adCard('👥 دعوت دوستان',adForm([['ref_gb','گیگ هدیه (اولین خرید دوست)','num'],['ref_days','روز هدیه (اولین خرید دوست)','num'],['ref_pct','% حجم هر خرید دوست','num'],['ref_new_pct','% تخفیف خرید اول دوست','num']],s),'0 = خاموش. هدیه فقط بعد از اولین پرداخت موفق دوست.')+adSaveBar('ad_save');
  }else if(AD.tab=='plans'){var ps=AD.d.plans||[];
   h+='<div class="acts" style="margin:0 0 12px"><button class="b main" id="pl_new">+ پلن تازه</button><button class="b" id="pr_open">💰 قیمت‌گذاری</button></div>';
   // filter (all / on sale / off) and one group a service, so old and switched-off plans do not crowd the list
@@ -964,18 +999,19 @@ var _drawAdm=drawAdm;drawAdm=function(){if(AD.busy)return;var need=adNeed();if(n
   h+=shown.length?['vip','game','v2ray'].map(function(k){var g=shown.filter(function(p){return (p.service||'vip')==k}).sort(function(a,b){return a.days-b.days||a.conns-b.conns||a.toman-b.toman});
    return g.length?'<h3 class="ad-gh">'+(SV[k]||SV.vip)[0]+' '+(k=='v2ray'?'اقتصادی V2Ray':k=='game'?'گیمینگ':'همه‌کاره VIP')+' <small>'+fa(g.length)+' پلن</small></h3>'+g.map(card).join(''):''}).join(''):'<div class="empty"><b>'+(ps.length?'پلنی در این دسته نیست':'هنوز پلنی نیست')+'</b></div>';
  }else if(AD.tab=='disc'){var ds=AD.d.disc||[];
-  h+=adCard('کد تازه','<div class="ad-g2"><div><span class="lbl">کد</span><input class="in" id="dc_c" placeholder="OFF20"></div><div><span class="lbl">٪ تخفیف</span><input class="in" id="dc_p" inputmode="numeric" value="10"></div><div><span class="lbl">تعداد استفاده</span><input class="in" id="dc_u" inputmode="numeric" value="100"></div><div><span class="lbl">اعتبار (ساعت، ۰ = همیشه)</span><input class="in" id="dc_h" inputmode="numeric" value="0"></div></div><div class="acts one"><button class="b main" id="dc_add">ساختن کد</button></div>');
-  h+=ds.length?'<div class="card">'+ds.map(function(d){return '<div class="row"><div class="nm"><b class="ltr">'+esc(d.code)+'</b><small>'+fa(d.percent)+'٪ · '+fa(d.uses)+' استفاده مانده'+(d.expires?' · تا '+new Date(d.expires*1000).toLocaleDateString('fa-IR'):'')+'</small></div><button class="b" data-dd="'+esc(d.code)+'">حذف</button></div>'}).join('')+'</div>':'<p class="lead">کدی نیست.</p>';
+  h+=adCard('کد تازه','<div class="ad-g2"><div><span class="lbl">کد</span><input class="in" id="dc_c" placeholder="OFF20"></div><div><span class="lbl">% تخفیف</span><input class="in" id="dc_p" inputmode="numeric" value="10"></div><div><span class="lbl">تعداد استفاده</span><input class="in" id="dc_u" inputmode="numeric" value="100"></div><div><span class="lbl">اعتبار (ساعت، 0 = همیشه)</span><input class="in" id="dc_h" inputmode="numeric" value="0"></div></div><div class="acts one"><button class="b main" id="dc_add">ساختن کد</button></div>');
+  h+=ds.length?'<div class="card">'+ds.map(function(d){return '<div class="row"><div class="nm"><b class="ltr">'+esc(d.code)+'</b><small>'+fa(d.percent)+'% · '+fa(d.uses)+' استفاده مانده'+(d.expires?' · تا '+new Date(d.expires*1000).toLocaleDateString('fa-IR'):'')+'</small></div><button class="b" data-dd="'+esc(d.code)+'">حذف</button></div>'}).join('')+'</div>':'<p class="lead">کدی نیست.</p>';
  }else if(AD.tab=='chan'){var c=AD.d.chan||{};
   h+=adCard('📢 کانال هوشمند',adForm([['on','پست خودکار در کانال','sw'],['id','آیدی کانال (مثل @mychannel)','ltr'],['times','ساعت‌های پست (با ویرگول، مثل 10,18,22)','ltr'],['sign','امضای آخر پست','text'],['ai_on','نویسنده‌ی هوش مصنوعی','sw'],['ai_provider','سرویس هوش مصنوعی (gemini / groq / grok)','ltr'],['ai_model','مدل (خالی = پیش‌فرض)','ltr'],['ai_brief','لحن و موضوع پست‌ها','area']],c),c.ai_has_key?'کلید هوش مصنوعی گذاشته شده'+(c.ai_key_hint?' ('+c.ai_key_hint+')':'')+'.':'')+
    '<div class="card ad-card"><span class="lbl">کلید هوش مصنوعی تازه (خالی = همان قبلی)</span><input class="in" id="ch_key" autocomplete="off"></div>'+
    '<div class="acts"><button class="b" id="ch_prev">نمونه‌ی پست</button><button class="b" id="ch_post">پست الان در کانال</button></div>'+adSaveBar('ch_save');
+ }else if(AD.tab=='gift'){h+=giftView();
  }else if(AD.tab=='msg'){var m=AD.d.msg||{};
-  h+=adCard('📣 پیام داخل اپ کانکی','<span class="lbl">متن پیام (خالی = بدون پیام)</span><textarea class="in ad-ta" id="am_t" rows="4">'+esc(m.text||'')+'</textarea><span class="lbl">تا چند ساعت دیگر (۰ = تا وقتی برداشته شود)</span><input class="in" id="am_h" inputmode="numeric" value="0">','کاربرهای اپ کانکی موقع باز کردن اپ این پیام را می‌بینند.')+
+  h+=adCard('📣 پیام داخل اپ کانکی','<span class="lbl">متن پیام (خالی = بدون پیام)</span><textarea class="in ad-ta" id="am_t" rows="4">'+esc(m.text||'')+'</textarea><span class="lbl">تا چند ساعت دیگر (0 = تا وقتی برداشته شود)</span><input class="in" id="am_h" inputmode="numeric" value="0">','کاربرهای اپ کانکی موقع باز کردن اپ این پیام را می‌بینند.')+
    '<div class="bsave"><button class="b" id="am_del">برداشتن پیام</button><button class="b main" id="am_save">ذخیره</button></div>';
  }
- el.innerHTML=h;wireAdmTabs();wireAdm()};
-function adNeed(){var s=AD.d;return !s.set||(AD.tab=='ov'&&!s.ov)||(AD.tab=='plans'&&!s.plans)||(AD.tab=='disc'&&!s.disc)||(AD.tab=='chan'&&!s.chan)||(AD.tab=='msg'&&!s.msg)}
+ el.innerHTML=h;wireAdmTabs();wireAdm();if(AD.tab=='gift')giftWire()};
+function adNeed(){var s=AD.d;return !s.set||(AD.tab=='gift'&&!s.gift)||(AD.tab=='ov'&&!s.ov)||(AD.tab=='plans'&&!s.plans)||(AD.tab=='disc'&&!s.disc)||(AD.tab=='chan'&&!s.chan)||(AD.tab=='msg'&&!s.msg)}
 function wireAdm(){var $=function(q){return document.querySelector(q)},all=function(q){return Array.prototype.slice.call(document.querySelectorAll(q))},app=document.getElementById('app');
  all('[data-go]').forEach(function(b){b.onclick=function(){AD.tab=b.dataset.go;drawAdm()}});
  var bt=$('#ad_btns');if(bt)bt.onclick=function(){A.view='btns';render();window.scrollTo(0,0)};
@@ -999,17 +1035,57 @@ function wireAdm(){var $=function(q){return document.querySelector(q)},all=funct
  // the app message
  var as=$('#am_save');if(as)as.onclick=function(){var h=+toEn($('#am_h').value)||0;as.disabled=true;pa('PUT','/api/app-msg',{text:$('#am_t').value,minutes:h*60}).then(function(){buzz('success');toast('ذخیره شد');AD.d.msg=null;drawAdm()}).catch(function(e){toast(e.message);as.disabled=false})};
  var ad=$('#am_del');if(ad)ad.onclick=function(){pa('DELETE','/api/app-msg').then(function(){toast('برداشته شد');AD.d.msg=null;drawAdm()}).catch(function(e){toast(e.message)})}}
-function toEn(s){return String(s||'').replace(/[۰-۹]/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)})}
+// ===================================================== 3.56 — gifts of days and volume, from here
+// Who gets it (every working account, only buyers, or the accounts picked from the list), how much (chips or a
+// number), why, one confirm with the exact count, and the last gifts below: no more wrong days or double gifts.
+var GF={to:'buyers',days:2,gb:0,why:'',q:'',pick:{},only:'buyers'};
+function gfDate(t){if(!t)return 'نامحدود';var d=new Date(t*1000);return d.toLocaleDateString('fa-IR-u-nu-latn',{month:'short',day:'numeric'})}
+function gfCan(a){return a.enabled&&!a.expired&&((GF.days>0&&a.expires_at>0)||(GF.gb>0&&a.limit_gb>0))}
+function gfTargets(){var L=(AD.d.gift&&AD.d.gift.accounts)||[];
+ if(GF.to=='ids')return L.filter(function(a){return GF.pick[a.id]});
+ return L.filter(function(a){return gfCan(a)&&(GF.to=='active'||a.bought>0)})}
+function gfChips(k,vals,unit){return '<div class="gch">'+vals.map(function(v){return '<button type="button" data-gk="'+k+'" data-gv="'+v+'" class="'+(GF[k]==v?'on':'')+'">'+(v?'+'+v+' '+unit:'بدون')+'</button>'}).join('')+'<input class="in gin" inputmode="decimal" data-gi="'+k+'" value="'+(GF[k]||'')+'" placeholder="عدد" aria-label="'+unit+'"></div>'}
+function gfRow(a){var on=!!GF.pick[a.id],st=a.active?'ok':a.expired?'bad':'warn';
+ return '<label class="gacc'+(on?' on':'')+'"><input type="checkbox" data-gp="'+a.id+'"'+(on?' checked':'')+'><span class="gd '+st+'"></span><span class="gn"><b><bdi>'+esc(a.name)+'</bdi></b><small>'+[a.tg_name?esc(a.tg_name):'',a.limit_gb>0?a.left_gb+' GB':'نامحدود',gfDate(a.expires_at)].filter(Boolean).map(function(x){return '<bdi>'+x+'</bdi>'}).join(' · ')+'</small></span>'+(a.bought?'<span class="gtag">خریدار</span>':'')+'</label>'}
+function gfList(){var L=(AD.d.gift&&AD.d.gift.accounts)||[],q=GF.q.toLowerCase();
+ return L.filter(function(a){return (GF.only!='buyers'||a.bought>0)&&(!q||(a.name+' '+a.tg_name+' '+a.tg).toLowerCase().indexOf(q)>=0)}).slice(0,150).map(gfRow).join('')||'<p class="lead">کسی پیدا نشد.</p>'}
+function giftView(){var d=AD.d.gift||{},log=d.log||[],n=gfTargets().length;
+ var h='<div class="card ad-card gcard"><h3>🎁 هدیه‌ی تازه</h3><p class="lead">برای جبران قطعی یا قدردانی؛ به هر حساب یک بار اضافه می‌شود و خودش به کاربر پیام می‌دهد.</p>'+
+  '<span class="lbl">به چه کسانی؟</span><div class="gseg" role="tablist">'+[['buyers','فقط خریدارها'],['active','همه‌ی فعال‌ها'],['ids','انتخابی']].map(function(x){return '<button type="button" role="tab" data-gto="'+x[0]+'" class="'+(GF.to==x[0]?'on':'')+'">'+x[1]+'</button>'}).join('')+'</div>'+
+  '<span class="lbl">روز</span>'+gfChips('days',[0,1,2,3,7],'روز')+
+  '<span class="lbl">حجم</span>'+gfChips('gb',[0,1,2,5,10],'GB')+
+  '<span class="lbl">دلیل (در پیام کاربر نوشته می‌شود، اختیاری)</span><input class="in ad-rtl" id="gf_why" maxlength="200" value="'+esc(GF.why)+'" placeholder="مثلاً: قطعی دیشب سرورها">';
+ if(GF.to=='ids')h+='<div class="gpick"><div class="gtools"><input class="in ad-rtl" id="gf_q" placeholder="جستجوی اسم، اسم تلگرام یا آیدی" value="'+esc(GF.q)+'"><button type="button" class="b" id="gf_only">'+(GF.only=='buyers'?'فقط خریدارها':'همه')+'</button></div><div class="glist" id="gf_list">'+gfList()+'</div></div>';
+ h+='</div>';
+ h+='<div class="gbar"><div><b id="gf_n">'+n+' حساب</b><small id="gf_sum">'+gfSum()+'</small></div><button class="b main" id="gf_go"'+(n&&(GF.days||GF.gb)?'':' disabled')+'>ارسال هدیه</button></div>';
+ if(log.length)h+=adCard('هدیه‌های اخیر','<div class="glog">'+log.slice(0,10).map(function(x){return '<div><b>'+[x.days?'+'+x.days+' روز':'',x.gb?'+'+x.gb+' GB':''].filter(Boolean).join(' ')+'</b><span>'+[({active:'همه‌ی فعال‌ها',buyers:'خریدارها',ids:'انتخابی'}[x.to]||esc(x.to)),x.count+' حساب',gfDate(x.at)].map(function(y){return '<bdi>'+y+'</bdi>'}).join(' · ')+'</span>'+(x.why?'<small>'+esc(x.why)+'</small>':'')+'</div>'}).join('')+'</div>');
+ return h}
+function gfSum(){var p=[];if(GF.days)p.push('+'+GF.days+' روز');if(GF.gb)p.push('+'+GF.gb+' GB');return p.join(' و ')||'روز یا حجم رو انتخاب کنید'}
+function gfRefresh(){var n=gfTargets().length,e=function(i){return document.getElementById(i)};if(e('gf_n'))e('gf_n').textContent=n+' حساب';if(e('gf_sum'))e('gf_sum').textContent=gfSum();if(e('gf_go'))e('gf_go').disabled=!(n&&(GF.days||GF.gb))}
+function giftWire(){var all=function(q){return Array.prototype.slice.call(document.querySelectorAll(q))},$=function(q){return document.querySelector(q)};
+ all('[data-gto]').forEach(function(b){b.onclick=function(){GF.to=b.dataset.gto;buzz2();drawAdm()}});
+ all('[data-gk]').forEach(function(b){b.onclick=function(){GF[b.dataset.gk]=+b.dataset.gv;all('[data-gk="'+b.dataset.gk+'"]').forEach(function(x){x.classList.toggle('on',x==b)});var i=$('[data-gi="'+b.dataset.gk+'"]');if(i)i.value=GF[b.dataset.gk]||'';buzz2();gfRefresh()}});
+ all('[data-gi]').forEach(function(i){i.oninput=function(){var v=parseFloat(toEn(i.value))||0,k=i.dataset.gi;GF[k]=k=='days'?Math.round(v):Math.round(v*10)/10;all('[data-gk="'+k+'"]').forEach(function(x){x.classList.toggle('on',+x.dataset.gv==GF[k])});gfRefresh()}});
+ var w=$('#gf_why');if(w)w.oninput=function(){GF.why=w.value};
+ var q=$('#gf_q');if(q)q.oninput=function(){GF.q=q.value;$('#gf_list').innerHTML=gfList();wirePick()};
+ var o=$('#gf_only');if(o)o.onclick=function(){GF.only=GF.only=='buyers'?'all':'buyers';drawAdm()};
+ function wirePick(){all('[data-gp]').forEach(function(c){c.onchange=function(){if(c.checked)GF.pick[c.dataset.gp]=1;else delete GF.pick[c.dataset.gp];c.closest('.gacc').classList.toggle('on',c.checked);gfRefresh()}})}
+ wirePick();
+ var go=$('#gf_go');if(go)go.onclick=function(){var t=gfTargets(),n=t.length;if(!n)return;
+  if(!confirm('هدیه‌ی '+gfSum()+' به '+n+' حساب فرستاده شود؟'))return;go.disabled=true;
+  var nonce=Date.now().toString(36)+Math.random().toString(36).slice(2,10);
+  post('/tg/api/admin/gift',{to:GF.to,ids:GF.to=='ids'?t.map(function(a){return a.id}):[],days:GF.days,gb:GF.gb,why:GF.why,nonce:nonce}).then(function(r){buzz('success');toast('هدیه به '+r.count+' حساب اضافه شد'+(r.told?' و '+r.told+' نفر خبر گرفتند':''));GF.pick={};AD.d.gift=null;drawAdm()}).catch(function(e){buzz('error');toast(e.message||'نشد');go.disabled=false})}}
+function toEn(s){return String(s||'').replace(/[\u06F0-\u06F9]/g,function(d){return d.charCodeAt(0)-0x06F0})}
 // the shop's one price list: every listed plan and every custom plan is priced by it (shop.rs)
 function priceEdit(){var el=document.getElementById('app'),P=(A.shop&&A.shop.custom)||null;
  if(!P){api('/tg/api/shop').then(function(r){A.shop=r;priceEdit()}).catch(function(e){toast(e.message)});return}
  var f=function(k,l,v){return '<div><span class="lbl">'+l+'</span><input class="in" data-pr="'+k+'" inputmode="decimal" value="'+esc(v)+'"></div>'},sv=P.services;
- var h='<div class="bh"><h1>💰 قیمت‌گذاری</h1></div><p class="lead">قیمت = پایه + ضریب × حجم + (کاربر − ۱) × هر کاربر + (روز ÷ ۳۰ − ۱) × هر ماه؛ به هزار گرد می‌شه. پلن‌های دلخواه همین به‌اضافه‌ی سود دلخواه.</p>';
+ var h='<div class="bh"><h1>💰 قیمت‌گذاری</h1></div><p class="lead">قیمت = پایه + ضریب × حجم + (کاربر − 1) × هر کاربر + (روز ÷ 30 − 1) × هر ماه؛ به هزار گرد می‌شه. پلن‌های دلخواه همین به‌اضافه‌ی سود دلخواه.</p>';
  [['v2ray','⚡ اقتصادی · V2Ray'],['game','🎮 گیمینگ'],['vip','👑 همه‌کاره VIP']].forEach(function(x){var o=sv[x[0]];
   h+=adCard(x[1],'<div class="ad-g2">'+f(x[0]+'.base','پایه (تومان)',o.base)+f(x[0]+'.factor','ضریب حجم',o.factor)+f(x[0]+'.user','هر کاربر بیشتر',o.user)+f(x[0]+'.month','هر ماه بیشتر',o.month)+'</div>')});
- h+=adCard('حجم (پله‌ای)','<span class="lbl">تا چند گیگ : تومانِ هر گیگ (۰ = بقیه)</span><input class="in" data-pr="tiers" value="'+esc(P.tiers.map(function(t){return t[0]+':'+t[1]}).join(', '))+'">','مثلاً 20:1500, 50:1000, 100:1200, 0:800');
- h+=adCard('خرید دلخواه','<div class="ad-g2">'+f('margin','٪ سود دلخواه',P.margin)+f('round','گرد کردن (تومان)',P.round)+f('gb0','کمترین گیگ',P.gb[0])+f('gb1','بیشترین گیگ',P.gb[1])+f('d0','کمترین روز',P.days[0])+f('d1','بیشترین روز',P.days[1])+f('d2','گام روز',P.days[2])+f('users','بیشترین کاربر',P.users)+'</div>');
- h+=adCard('پلن‌ها از روی جدول','<p class="lead">۹ پلن برای هر سرویس (۲۷ پلن) با همین قیمت‌ها ساخته می‌شه و پلن‌های فعلی خاموش می‌شن (پاک نمی‌شن).</p><div class="acts one"><button class="b" id="pr_gen">⚡ ساخت دوباره‌ی پلن‌ها</button></div>');
+ h+=adCard('حجم (پله‌ای)','<span class="lbl">تا چند گیگ : تومانِ هر گیگ (0 = بقیه)</span><input class="in" data-pr="tiers" value="'+esc(P.tiers.map(function(t){return t[0]+':'+t[1]}).join(', '))+'">','مثلاً 20:1500, 50:1000, 100:1200, 0:800');
+ h+=adCard('خرید دلخواه','<div class="ad-g2">'+f('margin','% سود دلخواه',P.margin)+f('round','گرد کردن (تومان)',P.round)+f('gb0','کمترین گیگ',P.gb[0])+f('gb1','بیشترین گیگ',P.gb[1])+f('d0','کمترین روز',P.days[0])+f('d1','بیشترین روز',P.days[1])+f('d2','گام روز',P.days[2])+f('users','بیشترین کاربر',P.users)+'</div>');
+ h+=adCard('پلن‌ها از روی جدول','<p class="lead">9 پلن برای هر سرویس (27 پلن) با همین قیمت‌ها ساخته می‌شه و پلن‌های فعلی خاموش می‌شن (پاک نمی‌شن).</p><div class="acts one"><button class="b" id="pr_gen">⚡ ساخت دوباره‌ی پلن‌ها</button></div>');
  h+='<div class="bsave"><button class="b" id="pr_back">برگشت</button><button class="b main" id="pr_save">ذخیره</button></div>';
  el.innerHTML=h;backBtn(function(){drawAdm()});window.scrollTo(0,0);
  var v=function(k){var e=el.querySelector('[data-pr="'+k+'"]');return e?+toEn(e.value):0};
@@ -1018,12 +1094,12 @@ function priceEdit(){var el=document.getElementById('app'),P=(A.shop&&A.shop.cus
   ['v2ray','game','vip'].forEach(function(k){o.services[k]={base:v(k+'.base'),factor:v(k+'.factor'),user:v(k+'.user'),month:v(k+'.month')}});
   o.tiers=toEn(el.querySelector('[data-pr="tiers"]').value).split(/[,،]/).map(function(x){var y=x.split(':');return [+y[0],+y[1]]}).filter(function(x){return x.length==2&&!isNaN(x[0])&&!isNaN(x[1])});
   me.disabled=true;pa('PUT','/api/settings',{pricing:JSON.stringify(o)}).then(function(){return api('/tg/api/shop')}).then(function(r){A.shop=r;buzz('success');toast('ذخیره شد');priceEdit()}).catch(function(e){buzz('error');toast(e.message||'ذخیره نشد');me.disabled=false})};
- document.getElementById('pr_gen').onclick=function(){if(!confirm('پلن‌های فعلی خاموش و ۲۷ پلن تازه از روی جدول ساخته شوند؟'))return;var me=this;me.disabled=true;
+ document.getElementById('pr_gen').onclick=function(){if(!confirm('پلن‌های فعلی خاموش و 27 پلن تازه از روی جدول ساخته شوند؟'))return;var me=this;me.disabled=true;
   pa('POST','/api/plans/standard',{}).then(function(r){buzz('success');toast(fa(r.added||0)+' پلن ساخته شد');AD.d.plans=null;return api('/tg/api/shop')}).then(function(r){A.shop=r;me.disabled=false}).catch(function(e){toast(e.message);me.disabled=false})}}
 // a plan: new or edited, in a sheet over the list
 function planEdit(p){var n=!p;p=p||{name:'',gb:30,days:30,conns:1,toman:0,old_toman:0,badge:'',category:'',service:'vip',active:true};
  var el=document.getElementById('app'),f=function(k,l,v,m){return '<div><span class="lbl">'+l+'</span><input class="in" data-pk="'+k+'"'+(m?' inputmode="decimal"':'')+' value="'+esc(v)+'"></div>'};
- el.innerHTML='<div class="bh"><h1>'+(n?'پلن تازه':'ویرایش پلن')+'</h1></div><div class="card ad-card">'+f('name','اسم',p.name)+'<div class="ad-g2">'+f('gb','حجم (گیگ، ۰ = نامحدود)',p.gb,1)+f('days','مدت (روز)',p.days,1)+f('conns','تعداد کاربر',p.conns,1)+f('toman','قیمت (تومان)',p.toman,1)+f('old_toman','قیمت خط‌خورده (۰ = ندارد)',p.old_toman||0,1)+f('badge','برچسب (مثل 🔥 پیشنهاد ویژه)',p.badge||'')+f('category','دسته (مثل تک‌کاربره)',p.category||'')+
+ el.innerHTML='<div class="bh"><h1>'+(n?'پلن تازه':'ویرایش پلن')+'</h1></div><div class="card ad-card">'+f('name','اسم',p.name)+'<div class="ad-g2">'+f('gb','حجم (گیگ، 0 = نامحدود)',p.gb,1)+f('days','مدت (روز)',p.days,1)+f('conns','تعداد کاربر',p.conns,1)+f('toman','قیمت (تومان)',p.toman,1)+f('old_toman','قیمت خط‌خورده (0 = ندارد)',p.old_toman||0,1)+f('badge','برچسب (مثل 🔥 پیشنهاد ویژه)',p.badge||'')+f('category','دسته (مثل تک‌کاربره)',p.category||'')+
   '<div><span class="lbl">سرویس</span><div class="chips2" id="pl_svc">'+[['v2ray','⚡ V2Ray'],['game','🎮 گیمینگ'],['vip','👑 VIP']].map(function(x){return '<button data-sv="'+x[0]+'" class="'+((p.service||'vip')==x[0]?'on':'')+'">'+x[1]+'</button>'}).join('')+'</div></div></div></div>'+
   '<div class="bsave">'+(n?'<button class="b" id="pl_back">انصراف</button>':'<button class="b" id="pl_del">حذف</button>')+'<button class="b main" id="pl_go">ذخیره</button></div>';
  backBtn(function(){drawAdm()});var svc=p.service||'vip';
@@ -1057,8 +1133,8 @@ function mProblems(){var d=M.d,p=[],b=d.bots||{};
  (d.servers||[]).filter(function(s){return !s.local&&!s.online&&!(d.nodes||[]).some(function(n){return n.name==s.name})}).forEach(function(s){p.push(['r','سرور تانل '+flag(s.cc)+' '+esc(s.name),'آفلاین · آخرین ارتباط '+mAgo(s.last_seen)])});
  (d.tunnels||[]).filter(function(t){return t.enabled!==false&&t.state!='up'&&t.state!='off'}).forEach(function(t){var e=t.entry_status||{},x=t.exit_status||{};
   p.push([t.state=='partial'?'y':'r','تانل '+esc(t.name),(t.state=='partial'?'نیمه‌قطع':'قطع')+' · '+mSrvName(t.entry)+' ← '+mSrvName(t.exit)+((e.error||x.error)?' · '+esc(e.error||x.error):'')])});
- ((d.paths&&d.paths.servers)||[]).filter(function(s){return s.state=='bad'||s.state=='down'}).forEach(function(s){var n=s.now||{};p.push(['y','مسیر '+esc(s.name),'افت '+fa(n.loss||0)+'٪ · پینگ '+fa(n.ping||0)+'ms · لرزش '+fa(n.jit||0)+'ms'])});
- var dk=mPct(d.panel.disk_used,d.panel.disk_total);if(dk>=85)p.push([dk>=95?'r':'y','دیسک سرور پنل',fa(Math.round(dk))+'٪ پر']);
+ ((d.paths&&d.paths.servers)||[]).filter(function(s){return s.state=='bad'||s.state=='down'}).forEach(function(s){var n=s.now||{};p.push(['y','مسیر '+esc(s.name),'افت '+fa(n.loss||0)+'% · پینگ '+fa(n.ping||0)+'ms · لرزش '+fa(n.jit||0)+'ms'])});
+ var dk=mPct(d.panel.disk_used,d.panel.disk_total);if(dk>=85)p.push([dk>=95?'r':'y','دیسک سرور پنل',fa(Math.round(dk))+'% پر']);
  return p.sort(function(a,b){return (a[0]=='r'?0:1)-(b[0]=='r'?0:1)})}
 function drawMon(){var el=document.getElementById('app');backBtn(null);
  if(!M.d){el.innerHTML='<div class="skel"></div>';mLoad().then(drawMon).catch(function(e){empty('!','باز نشد',e.message=='admins only'?'این صفحه فقط برای مدیران پنل است.':'کمی بعد دوباره باز کنید.')});return}
@@ -1076,7 +1152,7 @@ function mSum(){var d=M.d,pr=mProblems(),p=d.panel||{},u=d.users||{},b=d.bots||{
  h+='<div class="ad-nums"><div><small>سرورهای آنلاین</small><b>'+fa(ns.filter(function(n){return n.online}).length)+' / '+fa(ns.length)+'</b></div><div><small>تانل‌های وصل</small><b>'+fa(tl.filter(function(t){return t.state=='up'}).length)+' / '+fa(tl.length)+'</b></div>'+
   '<div><small>کاربر آنلاین</small><b>'+fa(u.online||0)+'</b></div><div><small>کاربر فعال</small><b>'+fa(u.active||0)+'</b></div></div>';
  h+='<div class="card ad-card"><h3>🖥 سرور پنل</h3><p class="lead ltr">'+esc(p.host||'')+' · v'+esc(p.version||'')+' · '+mAgoUp(p.uptime)+'</p>'+
-  mBar('CPU',+p.cpu||0,fa(Math.round(+p.cpu||0))+'٪')+mBar('RAM',mPct(p.mem_used,p.mem_total),mBytes(p.mem_used)+' / '+mBytes(p.mem_total))+mBar('دیسک',mPct(p.disk_used,p.disk_total),mBytes(p.disk_used)+' / '+mBytes(p.disk_total))+
+  mBar('CPU',+p.cpu||0,fa(Math.round(+p.cpu||0))+'%')+mBar('RAM',mPct(p.mem_used,p.mem_total),mBytes(p.mem_used)+' / '+mBytes(p.mem_total))+mBar('دیسک',mPct(p.disk_used,p.disk_total),mBytes(p.disk_used)+' / '+mBytes(p.disk_total))+
   ((p.services||[]).length?'<div class="tags">'+(p.services||[]).map(function(s){return '<span>'+mDot(s.active?'g':'r')+esc(s.key)+'</span>'}).join('')+'</div>':'')+'</div>';
  var bs=function(n,x){return '<div class="mrow">'+mDot(!x.set?'':x.paused?'y':x.online?'g':'r')+'<div><b>'+n+(x.username?' <span class="ltr muted">@'+esc(x.username)+'</span>':'')+'</b><small>'+(!x.set?'تنظیم نشده':x.paused?'متوقف':x.online?'روشن':'قطع'+(x.error?' · '+esc(x.error):''))+'</small></div></div>'};
  h+='<div class="card ad-card"><h3>🤖 ربات‌ها</h3>'+bs('ربات فروش',b.sales||{})+bs('ربات گزارش‌ها',b.report||{})+'<p class="lead">هشدارها: '+(d.alerts_on?'روشن':'خاموش')+'</p></div>';
@@ -1087,7 +1163,7 @@ function mSrv(){var d=M.d,ns=(d.nodes||[]).slice().sort(function(a,b){return (a.
   return '<div class="card ad-card mcard'+(bad?' bad':'')+'"><div class="ad-row">'+mDot(bad?'r':sv.some(function(s){return !s.active&&!loc})?'y':'g')+'<b>'+flag(n.cc)+' '+esc(n.name)+'</b>'+(loc?'<span class="svc">سرور پنل</span>':'')+(n.maint?'<span class="svc">در تعمیر</span>':'')+'</div>'+
    '<p class="lead ltr">'+esc(n.host||'')+(n.info&&n.info.version?' · v'+esc(n.info.version):'')+'</p>'+
    '<p class="lead">'+(bad?'🔴 آفلاین · آخرین ارتباط '+mAgo(n.last_sync):'🟢 آنلاین'+(loc?'':' · آخرین ارتباط '+mAgo(n.last_sync)))+' · '+fa(n.users||0)+' کاربر'+(n.sync_state=='mismatch'?' · ⚠️ همگام نیست':'')+'</p>'+
-   (st.mem_total?mBar('CPU',+st.cpu||0,fa(Math.round(+st.cpu||0))+'٪')+mBar('RAM',mPct(st.mem_used,st.mem_total),fa(Math.round(mPct(st.mem_used,st.mem_total)))+'٪')+mBar('دیسک',mPct(st.disk_used,st.disk_total),fa(Math.round(mPct(st.disk_used,st.disk_total)))+'٪'):'')+
+   (st.mem_total?mBar('CPU',+st.cpu||0,fa(Math.round(+st.cpu||0))+'%')+mBar('RAM',mPct(st.mem_used,st.mem_total),fa(Math.round(mPct(st.mem_used,st.mem_total)))+'%')+mBar('دیسک',mPct(st.disk_used,st.disk_total),fa(Math.round(mPct(st.disk_used,st.disk_total)))+'%'):'')+
    (sv.length?'<div class="tags">'+sv.map(function(s){return '<span>'+mDot(s.active?'g':(loc?'':'r'))+esc(s.key)+'</span>'}).join('')+'</div>':'')+'</div>'}).join('');
  // relays that are only tunnel servers (no VPN part)
  var only=(d.servers||[]).filter(function(s){return !s.local&&!(d.nodes||[]).some(function(n){return n.name==s.name})});
@@ -1100,7 +1176,7 @@ function mTun(){var d=M.d,tl=(d.tunnels||[]).slice().sort(function(a,b){var o={d
   return '<div class="card ad-card mcard'+(c=='r'?' bad':'')+'"><div class="ad-row">'+mDot(c)+'<b class="ltr">'+esc(t.name)+'</b><span class="svc">'+lbl+'</span></div>'+
    '<p class="lead">'+mDot(mSrvUp(t.entry)?'g':'r')+mSrvName(t.entry)+' ← '+mDot(mSrvUp(t.exit)?'g':'r')+mSrvName(t.exit)+'</p>'+
    '<div class="tags"><span class="ltr">'+esc(t.kind=='awg'?'AmneziaWG':t.kind=='hy2'?'Hysteria2':(e.transport||t.transport||''))+'</span>'+(t.port?'<span class="ltr">:'+t.port+'</span>':'')+(t.fec&&t.fec!='off'?'<span class="ltr">FEC '+esc(t.fec)+'</span>':'')+(e.lanes?'<span>بی‌ترتیب</span>':'')+(t.auto?'<span>چرخشی</span>':'')+'</div>'+
-   (t.state!='off'?'<div class="mnums"><div><small>پینگ</small><b>'+(q.ping!=null?fa(q.ping):e.rtt_ms?fa(e.rtt_ms):'—')+' ms</b></div><div><small>افت</small><b>'+(q.loss!=null?fa(q.loss)+'٪':'—')+'</b></div><div><small>لرزش</small><b>'+(q.jit!=null?fa(q.jit)+' ms':'—')+'</b></div>'+
+   (t.state!='off'?'<div class="mnums"><div><small>پینگ</small><b>'+(q.ping!=null?fa(q.ping):e.rtt_ms?fa(e.rtt_ms):'—')+' ms</b></div><div><small>افت</small><b>'+(q.loss!=null?fa(q.loss)+'%':'—')+'</b></div><div><small>لرزش</small><b>'+(q.jit!=null?fa(q.jit)+' ms':'—')+'</b></div>'+
     '<div><small>لینک‌ها</small><b>'+fa(e.links||0)+' / '+fa(e.want||0)+'</b></div><div><small>ترافیک</small><b>'+mBytes((e.rx_bytes||0)+(e.tx_bytes||0))+'</b></div><div><small>جریان UDP</small><b>'+fa(e.udp_flows||0)+'</b></div></div>':'')+
    ((e.error||x.error)?'<p class="lead merr ltr">'+esc(e.error||x.error)+'</p>':'')+(t.switch_note?'<p class="lead">🔁 '+esc(t.switch_note)+' · '+mAgo(t.switched)+'</p>':'')+
    (e.since?'<p class="lead">پایدار از '+mAgo(e.since)+'</p>':'')+'</div>'}).join('')}
