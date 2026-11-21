@@ -473,7 +473,7 @@ struct Facts {
     servers: i64,
     countries: i64,
     discount: Option<(String, i64, i64)>, // code, percent, expires
-    trial: Option<(String, String)>,      // gb, days
+    trial: Option<(String, String)>,      // MB, hours
     ref_gift: Option<(String, String)>,
 }
 
@@ -500,7 +500,7 @@ fn facts(app: &App) -> Facts {
         servers: nodes.len() as i64,
         countries: cc.len() as i64,
         discount,
-        trial: if db.on("trial_on") { Some((db.get("trial_gb"), db.get("trial_days"))) } else { None },
+        trial: if db.on("trial_on") { Some((db.get("trial_mb"), db.get("trial_hours"))) } else { None },
         ref_gift: if db.get("ref_gb").parse::<f64>().unwrap_or(0.0) > 0.0 || db.get("ref_days").parse::<i64>().unwrap_or(0) > 0 {
             Some((db.get("ref_gb"), db.get("ref_days")))
         } else {
@@ -589,7 +589,7 @@ pub fn make_post(app: &App, kind: &str) -> (String, String) {
         "guide" => format!("📖 <b>آموزش اتصال در ۱ دقیقه</b>\n\n{}\n\n{}", pick(&mut r, GUIDE), pick(&mut r, CTA)),
         "trial" => match &f.trial {
             Some((g, d)) => format!(
-                "🎁 <b>تست رایگان!</b>\n\nقبل از خرید، {} گیگ و {} روز رایگان امتحان کن.\n\n{}\n{}\n\n👇 از ربات «تست رایگان» را بزن",
+                "🎁 <b>تست رایگان!</b>\n\nقبل از خرید، {} MB و {} ساعت رایگان امتحان کن.\n\n{}\n{}\n\n👇 از ربات «تست رایگان» را بزن",
                 g, d, pick(&mut r, BENEFIT), pick(&mut r, BENEFIT)
             ),
             None => return make_post(app, "tip"),
@@ -663,7 +663,7 @@ fn facts_text(app: &App, f: &Facts, kind: &str) -> String {
         v.push(format!("Discount code: {} = {}% off{}", c, p, left));
     }
     if let Some((g, d)) = &f.trial {
-        v.push(format!("Free trial: {} GB for {} days, from the bot", g, d));
+        v.push(format!("Free trial: {} MB for {} hours, from the bot", g, d));
     }
     if let Some((g, d)) = &f.ref_gift {
         v.push(format!("Referral gift: {} GB and {} days for each friend who buys with your link", g, d));
