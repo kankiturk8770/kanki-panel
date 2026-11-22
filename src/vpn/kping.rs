@@ -1,11 +1,12 @@
 //! KPING: the hidden game core, in the panel. Only a few users the admin ticks get it, only the Kanki app
 //! receives its config (inside the sealed subscription, never on the subscription page, in links or the
-//! bot), and the app sends only PUBG (plus the DNS and Google services the game logs in with) through it.
+//! bot), and the app sends only the game (plus the DNS and the services it logs in with) through it. Nothing
+//! here is tied to one game: the relay and the exit carry any UDP and TCP as it is.
 //!
-//! The path: phone → Iran server (the KPING relay, a public UDP port) → its own reverse Game-FEC tunnel
+//! The path: phone → Iran server (the KPING relay, a public UDP port) → its own reverse Game-FEC Pro tunnel
 //! → the exit server abroad (`kping0`, NAT out) → the game. Relay and exit run in the tunnel agent of
 //! those servers (`kpingd`): an exit needs no VPN part, only the agent (`agent_only` servers, added from
-//! the KPING page). Plain UDP with copies and light parity, not microtun: see `kpingd` for the wire.
+//! the KPING page). Routes and their tunnels are made on the Tunnels page. Plain UDP with copies and light parity, not microtun: see `kpingd` for the wire.
 use crate::db::User;
 use crate::kpingd::{ExitCfg, KUser, KpCfg, RelayCfg};
 use crate::App;

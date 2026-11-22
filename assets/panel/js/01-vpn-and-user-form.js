@@ -82,7 +82,7 @@ function vhGrid(nodes,o,xr,dn,kp){var el=$('#vh_g');if(!el)return;var pr=o.proto
  var hs=K.map(function(c){var u=c[4][0],all=c[4][1];return card('#'+c[0],PCOL[c[0]],c[2],c[1],c[3],state(u,all),[[t('Servers'),N(u)+' / '+N(all)],[t('Users'),N(pr[c[0]]||0)]])});
  // (3.42) KPING sits beside KANKI MIX (the two game cores), as in the core bar
  if(kp){var kr=kp.routes.filter(function(x){return x.exit_runs&&x.tunnel_up&&x.relay&&!x.relay.error}).length;
-  hs.splice(4,0,card('#kping/status',PCOL.kping,'game','KPING','Hidden game core: only PUBG, only for testers',!kp.settings.on?['r',t('Off')]:!kp.routes.length?['n',t('No route')]:kr==kp.routes.length?['g',t('Running')]:kr?['y',t('Partly down')]:['y',t('Not ready')],[[t('Routes'),N(kr)+' / '+N(kp.routes.length)],[t('Testers'),N(kp.users||0)]]))}
+  hs.splice(4,0,card('#kping/status',PCOL.kping,'game','KPING','Hidden game core for games, only for testers',!kp.settings.on?['r',t('Off')]:!kp.routes.length?['n',t('No route')]:kr==kp.routes.length?['g',t('Running')]:kr?['y',t('Partly down')]:['y',t('Not ready')],[[t('Routes'),N(kr)+' / '+N(kp.routes.length)],[t('Testers'),N(kp.users||0)]]))}
  var h=hs.join('');
  if(xr){var act=xr.inbounds.filter(function(x){return x.enabled&&!x.state}).length;
   h+=card('#xray/status',PCOL.xray,'xray','Xray','VLESS · VMess · Trojan · Shadowsocks',xr.on?(act?['g',t('Running')]:['y',t('No inbound')]):['r',t('Off')],[[t('Inbounds'),N(act)+' / '+N(xr.inbounds.length)],[t('Online now'),N((xr.online||[]).length)]])}
@@ -103,7 +103,7 @@ function ufServices(protos,un){var has=function(p){return protos.indexOf(p)>=0},
   '<label class="sw"><input type="checkbox" class="uf_all" data-for="vpn" '+(vpnOn?'checked':'')+'><span></span></label>');
  h+=card('xray','xray','Xray','Links of every Xray inbound go into the subscription',has('xray'),'<div id="uf_xr" class="muted">…</div>','<label class="sw"><input type="checkbox" class="f_pr" value="xray" '+(has('xray')?'checked':'')+'><span></span></label>');
  h+=card('dns','dns','Kanki DNS','Private DNS for sanctioned sites',has('dns'),'<div id="uf_dn" class="muted">…</div>','<label class="sw"><input type="checkbox" class="f_pr" value="dns" '+(has('dns')?'checked':'')+'><span></span></label>');
- h+=card('kping','game','KPING','Hidden game core, only in the Kanki app (testers only)',has('kping'),'<p class="muted" style="margin:0">'+t('Only PUBG goes through it. Not on the subscription page, in links or in the bot.')+'</p>','<label class="sw"><input type="checkbox" class="f_pr" value="kping" '+(has('kping')?'checked':'')+'><span></span></label>');
+ h+=card('kping','game','KPING','Hidden game core, only in the Kanki app (testers only)',has('kping'),'<p class="muted" style="margin:0">'+t('Only the game goes through it. Not on the subscription page, in links or in the bot.')+'</p>','<label class="sw"><input type="checkbox" class="f_pr" value="kping" '+(has('kping')?'checked':'')+'><span></span></label>');
  setTimeout(ufWire,0);return h}
 function ufWire(){if(!$('#uf_pre'))return;
  var sync=function(){$$('.ufsvc').forEach(function(c){var on=$$('.f_pr',c).some(function(x){return x.checked});c.classList.toggle('on',on);var a=$('.uf_all',c);if(a)a.checked=on})};
