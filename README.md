@@ -3,6 +3,10 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.58 — KPING is a core of every server
+KPING runs on each VPN server like the other cores (on/off and port per server), straight to the server or through its
+Iran tunnel; the KPING routes are gone.
+
 ## New in 3.57.1 — KANKI MIX TCP without FEC
 The KANKI MIX server takes the app's TCP without FEC (app 1.39.0); older apps keep FEC.
 

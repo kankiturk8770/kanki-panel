@@ -1,12 +1,10 @@
-//! KPING: the hidden game core, in the panel. Only a few users the admin ticks get it, only the Kanki app
-//! receives its config (inside the sealed subscription, never on the subscription page, in links or the
-//! bot), and the app sends only the game (plus the DNS and the services it logs in with) through it. Nothing
-//! here is tied to one game: the relay and the exit carry any UDP and TCP as it is.
-//!
-//! The path: phone → Iran server (the KPING relay, a public UDP port) → its own reverse Game-FEC Pro tunnel
-//! → the exit server abroad (`kping0`, NAT out) → the game. Relay and exit run in the tunnel agent of
-//! those servers (`kpingd`): an exit needs no VPN part, only the agent (`agent_only` servers, added from
-//! the KPING page). Routes and their tunnels are made on the Tunnels page. Plain UDP with copies and light parity, not microtun: see `kpingd` for the wire.
+//! KPING: the game core, in the panel. Like KANKI MIX and microtun it runs on every VPN server where it is on
+//! (KPING › servers, or the installer's list of cores): the server's node agent runs the relay on a public UDP port
+//! and the exit behind it on 127.0.0.1 (`kpingd`, `kping0`, NAT out). The app dials the server directly, or the
+//! server's Iran address when its tunnel carries the KPING port (the second config, like every core). Only users
+//! with the KPING protocol get it, and only the Kanki app receives its config (inside the sealed subscription,
+//! never on the subscription page, in links or the bot). Nothing here is tied to one game.
+//! Until 3.57 KPING had routes of its own (an Iran relay and an exit joined by a tunnel); they are gone (3.58).
 use crate::db::User;
 use crate::kpingd::{ExitCfg, KUser, KpCfg, RelayCfg};
 use crate::App;
@@ -29,10 +27,8 @@ pub const PROTO: &str = "kping";
 pub const NAME: &str = "KPING";
 /// UDP port of KPING on an exit (127.0.0.1 only: the tunnel delivers there)
 pub const DEFAULT_PORT: u16 = 4300;
-/// UDP port the app dials on the Iran server, and the port of the tunnel itself there (the tunnel's own
-/// entry for KPING is the next one, on 127.0.0.1)
+/// UDP port the app dials on each server (the relay; servers may have their own)
 pub const DEFAULT_ENTRY_PORT: u16 = 24300;
-pub const DEFAULT_TUNNEL_PORT: u16 = 24301;
 /// users get 10.81.0.2 … by id (microtun is 10.79, its devices 10.80)
 const BASE: u32 = u32::from_be_bytes([10, 81, 0, 0]);
 /// FEC of the tunnel: 8 packets + 3 repair packets (any 3 of 11 may be lost)
@@ -74,6 +70,7 @@ pub struct Route {
 
 /// What a route's tunnel can be: UDP-based Kanki tunnels and fake TCP. (TCP-based ones, a stream behind a
 /// lost packet, are no tunnel for a game.)
+#[allow(dead_code)]
 pub const KINDS: &[&str] = &["game", "kcp", "quic", "hq", "faketcp"];
 
 impl Route {
@@ -116,19 +113,59 @@ pub struct Settings {
     /// parity: one repair packet per this many packets (0 = none). 2: a lost packet is rebuilt as soon as
     /// the next one arrives, so it is late by one packet at most
     pub fec: u8,
+    /// the routes of 3.37-3.57: kept only so an old setting still reads; nothing uses them
     pub routes: Vec<Route>,
+    /// the public UDP port of the relay on each server (servers may have their own, `nodes`)
+    pub public: u16,
+    /// per server: off there, its own port
+    pub nodes: HashMap<String, NodeOpt>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+pub struct NodeOpt {
+    /// KPING off on this server only
+    pub off: bool,
+    /// this server's own public port (0 = `public`)
+    pub port: u16,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { on: true, port: DEFAULT_PORT, mtu: 1332, dup_ms: 10, tun_dup_ms: 20, fec: 2, routes: vec![] }
+        Settings { on: true, port: DEFAULT_PORT, mtu: 1332, dup_ms: 10, tun_dup_ms: 20, fec: 2, routes: vec![], public: DEFAULT_ENTRY_PORT, nodes: HashMap::new() }
     }
+}
+
+impl Settings {
+    pub fn node_on(&self, nid: &str) -> bool {
+        self.on && !self.nodes.get(nid).map(|o| o.off).unwrap_or(false)
+    }
+    pub fn node_port(&self, nid: &str) -> u16 {
+        self.nodes.get(nid).map(|o| o.port).filter(|p| *p > 0).unwrap_or(self.public)
+    }
+}
+
+/// KPING's public port on server `nid`
+pub fn set_node_port(app: &App, nid: &str, port: u16) {
+    let mut s = settings(app);
+    s.nodes.entry(nid.to_string()).or_default().port = port;
+    save(app, &s);
+}
+
+/// KPING off (or on again) on server `nid` only
+pub fn set_node_off(app: &App, nid: &str, off: bool) {
+    let mut s = settings(app);
+    s.nodes.entry(nid.to_string()).or_default().off = off;
+    save(app, &s);
 }
 
 pub fn settings(app: &App) -> Settings {
     let mut s: Settings = serde_json::from_str(&app.db.get("kping_cfg")).unwrap_or_default();
     if s.port == 0 {
         s.port = DEFAULT_PORT;
+    }
+    if s.public == 0 {
+        s.public = DEFAULT_ENTRY_PORT;
     }
     s.mtu = s.mtu.clamp(1200, 1500);
     s.dup_ms = s.dup_ms.min(20);
@@ -167,7 +204,7 @@ pub fn forget_node(app: &App, id: &str) {
     let n = s.routes.len();
     let sid = crate::twin::sid_of_node(app, id);
     s.routes.retain(|r| r.exit != id && r.iran != id && (sid.is_empty() || r.exit != sid));
-    if s.routes.len() != n {
+    if s.routes.len() != n || s.nodes.remove(id).is_some() {
         save(app, &s);
     }
 }
@@ -205,46 +242,35 @@ fn users_of(users: &[User]) -> Vec<&User> {
 }
 
 fn kusers(app: &App, users: &[User]) -> Vec<KUser> {
-    // a user at the account's connection limit whose devices are elsewhere is not let in here
-    let shut: Vec<i64> = {
-        let l = crate::sync::limits().lock().unwrap_or_else(|e| e.into_inner());
-        users.iter().filter(|u| l.shut_proto(u.id, PROTO)).map(|u| u.id).collect()
-    };
     users_of(users)
         .into_iter()
-        .filter(|u| !shut.contains(&u.id))
         .filter_map(|u| Some(KUser { uid: u32::try_from(u.id).ok()?, name: u.username.clone(), key: user_key(app, u), ip: ip_of_id(u.id)?.to_string() }))
         .collect()
 }
 
-/// What tunnel server `sid` runs: the relays of routes that start there, the exit when routes end there
-pub fn cfg_for(app: &App, sid: &str) -> KpCfg {
+/// What a tunnel agent runs of KPING: nothing since 3.58 (KPING runs in the node agent of each VPN server, like the
+/// other cores); an older agent still running a route's relay or exit stops it
+pub fn cfg_for(_app: &App, _sid: &str) -> KpCfg {
+    KpCfg::default()
+}
+
+/// What VPN server `n` runs: its relay on the public port, the exit behind it on 127.0.0.1 (nothing when KPING is
+/// off there). `users`: the users of this server still allowed in by the connection limit.
+pub fn cfg_for_node(app: &App, n: &crate::db::Node, users: &[&User]) -> KpCfg {
     let s = settings(app);
-    if !s.on || !s.routes.iter().any(|r| r.iran == sid || r.exit == sid) {
-        return KpCfg::default();
+    if !s.node_on(&n.id) {
+        return KpCfg { obfs: obfs(app), relays: vec![], exit: None };
     }
-    let users = kusers(app, &app.db.users());
-    // a Game-FEC Pro tunnel repairs the line between the servers by itself, and only when it loses packets:
-    // KPING's own second copy into it would only double the traffic
-    let tl = crate::tunnel::panel::tunnels(app);
-    let pro = |tid: &str| tl.iter().any(|t| t.id == tid && t.transport == "game" && t.fec == "auto");
-    let relays = s
-        .routes
-        .iter()
-        .filter(|r| r.iran == sid && !r.tunnel.is_empty())
-        .map(|r| RelayCfg {
-            port: r.port, to: r.inner(), more: if r.tunnel2.is_empty() { vec![] } else { vec![r.inner2()] }, dup_ms: s.dup_ms,
-            tun_dup_ms: if pro(&r.tunnel) && (r.tunnel2.is_empty() || pro(&r.tunnel2)) { 0 } else { s.tun_dup_ms },
+    let owned: Vec<User> = users.iter().map(|u| (*u).clone()).collect();
+    let users = kusers(app, &owned);
+    KpCfg {
+        obfs: obfs(app),
+        relays: vec![RelayCfg {
+            port: s.node_port(&n.id), to: s.port, more: vec![], dup_ms: s.dup_ms, tun_dup_ms: 0,
             users: users.iter().map(|u| KUser { ip: String::new(), ..u.clone() }).collect(),
-        })
-        .collect();
-    let to_here: Vec<&Route> = s.routes.iter().filter(|r| r.exit == sid).collect();
-    let exit = (!to_here.is_empty()).then(|| ExitCfg {
-        port: s.port, mtu: mtu(app, &s), fec: s.fec,
-        tun_dup_ms: if to_here.iter().all(|r| pro(&r.tunnel) && (r.tunnel2.is_empty() || pro(&r.tunnel2))) { 0 } else { s.tun_dup_ms },
-        users: users.clone(),
-    });
-    KpCfg { obfs: obfs(app), relays, exit }
+        }],
+        exit: Some(ExitCfg { port: s.port, mtu: mtu(app, &s), fec: s.fec, tun_dup_ms: 0, users }),
+    }
 }
 
 /// The tunnel of a KPING route takes its packets only on 127.0.0.1 (the relay sits in front of it)
@@ -284,9 +310,6 @@ pub fn is_tunnel(app: &App, tid: &str) -> bool {
 }
 
 /// The route's tunnel exists and is on
-fn tunnel_ready(app: &App, r: &Route) -> bool {
-    !r.tunnel.is_empty() && crate::tunnel::panel::tunnels(app).iter().any(|t| t.id == r.tunnel && t.enabled)
-}
 
 // ------------------------------------------------------------------ what the servers report
 
@@ -296,93 +319,47 @@ fn reports() -> &'static Mutex<HashMap<String, (i64, Value)>> {
     R.get_or_init(Default::default)
 }
 
-/// A server's KPING report: traffic counts on the user, online users are seen now
-pub fn ingest(app: &App, sid: &str, st: &Value) {
-    if st.is_null() {
-        reports().lock().unwrap_or_else(|e| e.into_inner()).remove(sid);
+/// A VPN server's KPING report (`node`: its id): traffic counts on the user, online users are seen now. A server
+/// speaks only for itself and only while KPING is on there (`serves`), and only for the users with KPING.
+pub fn ingest(app: &App, node: &str, st: &Value, serves: bool) {
+    if st.is_null() || !serves {
+        reports().lock().unwrap_or_else(|e| e.into_inner()).remove(node);
         return;
     }
     let now = crate::util::now();
-    // a server speaks only for itself: an exit's numbers count only when it is the exit of a route, and only for
-    // the users the panel gave it (another server cannot put traffic or "online" on any account)
     let mut st = st.clone();
-    // every KPING user of the panel, not only the ones let in right now: the last traffic of a user who was
-    // just shut by the connection limit, expired or ran out of data still counts
-    let s = settings(app);
-    let is_exit = s.on && s.routes.iter().any(|r| r.exit == sid);
-    let allowed: std::collections::HashSet<i64> = if is_exit {
-        app.db.users().iter().filter(|u| u.has_proto(PROTO)).map(|u| u.id).collect()
-    } else {
-        Default::default()
-    };
+    // every KPING user of the panel, not only the ones let in right now: the last traffic of a user who was just
+    // shut by the connection limit, expired or ran out of data still counts
+    let allowed: std::collections::HashSet<i64> = app.db.users().iter().filter(|u| u.has_proto(PROTO)).map(|u| u.id).collect();
     if let Some(x) = st.get_mut("exit").and_then(|x| x.as_object_mut()) {
         if let Some(u) = x.get_mut("users").and_then(|u| u.as_object_mut()) {
             u.retain(|k, _| k.parse::<i64>().map(|id| allowed.contains(&id)).unwrap_or(false));
         }
-        // «online» only for the users it serves now (a shut user must not hold a place)
-        let served: std::collections::HashSet<i64> = if is_exit { cfg_for(app, sid).exit.map(|e| e.users.iter().map(|u| u.uid as i64).collect()).unwrap_or_default() } else { Default::default() };
         if let Some(o) = x.get_mut("online").and_then(|o| o.as_array_mut()) {
-            o.retain(|v| v.as_i64().map(|id| served.contains(&id)).unwrap_or(false));
+            o.retain(|v| v.as_i64().map(|id| allowed.contains(&id)).unwrap_or(false));
         }
     }
-    reports().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), (now, st.clone()));
+    reports().lock().unwrap_or_else(|e| e.into_inner()).insert(node.to_string(), (now, st.clone()));
     let x = &st["exit"];
-    crate::dns::panel::count_usage(app, &format!("kping_prev_{}", sid), x);
+    crate::dns::panel::count_usage(app, &format!("kping_prev_{}", node), x);
     for id in x["online"].as_array().into_iter().flatten().filter_map(|v| v.as_i64()) {
         let _ = app.db.exec("UPDATE users SET last_seen=?1 WHERE id=?2", &[&now, &id]);
     }
 }
 
-/// KPING in the account's connection limit (all cores and servers together): each user an exit saw in
-/// the last minute is one device on "kp:<server>". Also the servers that answered.
+/// KPING in the account's connection limit (all cores and servers together): each user a server saw in the last
+/// minute is one device on that server. Also the servers that answered.
 pub fn live_units(now: i64) -> (Vec<(i64, String, String, i64)>, std::collections::HashSet<String>) {
     let r = reports().lock().unwrap_or_else(|e| e.into_inner());
     let mut units = vec![];
     let mut answered = std::collections::HashSet::new();
-    for (sid, (t, v)) in r.iter().filter(|(_, (t, _))| now - t < 60) {
-        let _ = t;
-        let node = format!("kp:{}", sid);
+    for (node, (_, v)) in r.iter().filter(|(_, (t, _))| now - t < 60) {
         answered.insert(node.clone());
         for id in v["exit"]["online"].as_array().into_iter().flatten().filter_map(|x| x.as_i64()) {
             units.push((id, node.clone(), PROTO.to_string(), 1));
         }
     }
     (units, answered)
-}
-
-/// The last report of `sid` when fresh (a minute)
-fn report_of(sid: &str) -> Option<Value> {
-    let r = reports().lock().unwrap_or_else(|e| e.into_inner());
-    r.get(sid).filter(|(t, _)| crate::util::now() - t < 60).map(|(_, v)| v.clone())
-}
-
-/// (exit runs, its error)
-fn exit_state(sid: &str) -> (bool, String) {
-    match report_of(sid) {
-        Some(v) => (v["exit"]["port"].as_u64().is_some(), v["exit"]["error"].as_str().unwrap_or("").to_string()),
-        None => (false, String::new()),
-    }
-}
-
-/// the relay of `port` on `sid`: its status, or Null
-fn relay_state(sid: &str, port: u16) -> Value {
-    report_of(sid).and_then(|v| v["relays"].as_array().and_then(|a| a.iter().find(|x| x["port"].as_u64() == Some(port as u64)).cloned())).unwrap_or(Value::Null)
-}
-
-fn online(sid: &str) -> bool {
-    sid == "local" || crate::tunnel::panel::agent_state(sid).is_some_and(|x| crate::util::now() - x.0 < 30)
-}
-
-// ------------------------------------------------------------------ the app's config
-
-/// Where the app dials a route: "host:port"
-fn dial(app: &App, r: &Route) -> String {
-    if r.host.trim().is_empty() {
-        crate::tunnel::panel::dial_addr(app, &r.iran, r.port)
-    } else {
-        let h = r.host.trim();
-        if h.contains(':') && !h.starts_with('[') { format!("[{}]:{}", h, r.port) } else { format!("{}:{}", h, r.port) }
-    }
 }
 
 fn enc(s: &str) -> String {
@@ -397,38 +374,42 @@ pub fn to_url(key: &str, dial: &str, uid: u32, obfs: &str, ip: Ipv4Addr, mtu: u1
     format!("kping://{}@{}?uid={}&obfs={}&ip={}&mtu={}&fec={}#{}", key, dial, uid, obfs, ip, mtu, fec, enc(name))
 }
 
-fn exit_name(app: &App, sid: &str) -> String {
-    let n = crate::tunnel::panel::server_names(app).get(sid).cloned().filter(|n| !n.is_empty());
-    n.unwrap_or_else(|| if sid == "local" { app.env.get("LOCAL_NAME").cloned().unwrap_or_else(|| "Main".into()) } else { sid.to_string() })
-}
-
 /// KPING for the Kanki app (only inside the sealed subscription). Null = not for this user.
-/// [{ id, node, name, url, …exit country }]
+/// [{ id, node, name, url, via, …exit country }]: each server of the user where KPING is on, straight to it, and
+/// through its Iran address when the server's tunnel carries the KPING port (node `<id>@tunnel`, like every core).
 pub fn sub_info(app: &App, u: &User) -> Value {
     let s = settings(app);
     if !s.on || !u.active() || !u.has_proto(PROTO) {
         return Value::Null;
     }
     let (Some(ip), Ok(uid)) = (ip_of_id(u.id), u32::try_from(u.id)) else { return Value::Null };
-    let tservers = crate::tunnel::panel::servers(app);
+    let (key, ob, m) = (user_key(app, u), obfs(app), mtu(app, &s));
     let mut out = vec![];
-    for r in &s.routes {
-        // only once its tunnel exists
-        if !tunnel_ready(app, r) {
+    for n in crate::api::user_nodes(app, u) {
+        if !s.node_on(&n.id) || crate::api::node_info(&n)["kp_port"].is_null() {
             continue;
         }
-        let ename = exit_name(app, &r.exit);
-        let node = if r.exit == "local" { "local".to_string() } else { tservers.iter().find(|x| x.id == r.exit).map(|x| x.node.clone()).unwrap_or_default() };
-        let name = format!("{} · {}", ename, NAME);
-        let url = to_url(&user_key(app, u), &dial(app, r), uid, &obfs(app), ip, mtu(app, &s), s.fec, &name);
-        // `node`: the VPN server of that machine (when it has one), so the app lists KPING under it
-        let mut v = json!({ "id": r.id, "node": node, "name": ename, "url": url });
-        if !node.is_empty() {
-            if let (Some(o), Some(e)) = (v.as_object_mut(), crate::exitgeo::fields(app, &node).as_object()) {
+        let port = s.node_port(&n.id);
+        let host = crate::api::endpoint(app, &n);
+        let direct = if host.contains(':') && !host.starts_with('[') { format!("[{}]:{}", host, port) } else { format!("{}:{}", host, port) };
+        let mut push = |node: String, dial: String, via: &str| {
+            let name = format!("{} · {}", n.name, NAME);
+            let mut v = json!({ "id": format!("{}/{}", node, PROTO), "node": node, "name": n.name, "via": via,
+                "url": to_url(&key, &dial, uid, &ob, ip, m, s.fec, &name) });
+            if let (Some(o), Some(e)) = (v.as_object_mut(), crate::exitgeo::fields(app, &n.id).as_object()) {
                 o.extend(e.clone());
             }
+            out.push(v);
+        };
+        // through the tunnel the server answers on its own address only when it is not behind one already
+        if !crate::direct::through_tunnel(app, &n) {
+            push(n.id.clone(), direct, "direct");
         }
-        out.push(v);
+        if let Some(t) = crate::twin::of_node_core(app, &n, PROTO) {
+            if let Some(p) = t.carried(app, port, false) {
+                push(format!("{}{}", n.id, crate::api::TUNNEL_SUFFIX), t.addr(p), "tunnel");
+            }
+        }
     }
     if out.is_empty() { Value::Null } else { json!(out) }
 }
@@ -440,10 +421,7 @@ type St = State<Arc<App>>;
 pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/api/kping", get(get_all).put(put_settings))
-        .route("/api/kping/routes", post(route_save))
-        .route("/api/kping/routes/:id", axum::routing::delete(route_del))
-        .route("/api/kping/routes/:id/tunnel", post(route_tunnel))
-        .route("/api/kping/routes/:id/tunnel2", post(route_tunnel2).delete(route_tunnel2_del))
+        .route("/api/kping/servers/:id", post(node_set))
         .route("/api/kping/users", post(user_set))
 }
 
@@ -459,57 +437,58 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
     let _ = crate::guard!(app, h, "nodes");
     let s = settings(&app);
     let users = app.db.users();
-    let locs = crate::tunnel::panel::server_locs(&app);
-    let names = crate::tunnel::panel::server_names(&app);
-    let tservers = crate::tunnel::panel::servers(&app);
-    let live = crate::tunnel::panel::live_quality(&app);
-    let name_of = |id: &str| names.get(id).cloned().filter(|n| !n.is_empty()).unwrap_or_else(|| if id == "local" { app.env.get("LOCAL_NAME").cloned().unwrap_or_else(|| "Main".into()) } else { String::new() });
-    let routes: Vec<Value> = s
-        .routes
+    let r = reports().lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let now = crate::util::now();
+    let servers: Vec<Value> = app
+        .db
+        .nodes()
         .iter()
-        .map(|r| {
-            let tun = live.iter().find(|x| x.0.id == r.tunnel);
-            let tun2 = live.iter().find(|x| !r.tunnel2.is_empty() && x.0.id == r.tunnel2);
-            let (runs, err) = exit_state(&r.exit);
-            let rep = report_of(&r.exit);
+        .map(|n| {
+            let info = crate::api::node_info(n);
+            let rep = r.get(&n.id).filter(|(t, _)| now - t < 120).map(|(_, v)| v.clone());
+            let relay = rep.as_ref().and_then(|v| v["relays"].as_array().and_then(|a| a.first().cloned())).unwrap_or(Value::Null);
+            let exit = rep.as_ref().map(|v| v["exit"].clone()).unwrap_or(Value::Null);
+            let tw = crate::twin::of_node_core(&app, n, PROTO).and_then(|t| t.carried(&app, s.node_port(&n.id), false).map(|p| t.addr(p)));
             json!({
-                "route": r,
-                "exit_name": name_of(&r.exit),
-                "exit_online": online(&r.exit),
-                "exit_runs": runs, "exit_error": (!err.is_empty()).then_some(err),
-                // an older agent knows nothing of KPING v2: online, yet it never reports it
-                "exit_knows": rep.is_some() || !online(&r.exit),
-                "exit_stats": rep.map(|v| v["exit"].clone()).unwrap_or(Value::Null),
-                "iran_name": name_of(&r.iran),
-                "iran_online": online(&r.iran),
-                "relay": relay_state(&r.iran, r.port),
-                "dial": dial(&app, r),
-                "tunnel_built": tun.is_some(),
-                "tunnel_up": tun.map(|x| x.1).unwrap_or(false),
-                "tunnel_q": tun.and_then(|x| x.2.clone()).unwrap_or(Value::Null),
-                "tunnel2_built": tun2.is_some(),
-                "tunnel2_up": tun2.map(|x| x.1).unwrap_or(false),
+                "id": n.id, "name": n.name, "online": n.online, "on": s.node_on(&n.id), "port": s.node_port(&n.id),
+                // an older node agent (before 3.58) knows nothing of KPING: it never says it runs
+                "runs": !info["kp_port"].is_null(), "knows": !info["kp_port"].is_null() || rep.is_some(),
+                "relay_error": relay["error"].as_str(), "exit_error": exit["error"].as_str(),
+                "online_users": exit["online"].as_array().map(|a| a.len()).unwrap_or(0),
+                "direct": format!("{}:{}", crate::api::endpoint(&app, n), s.node_port(&n.id)),
+                "tunnel": tw,
             })
         })
         .collect();
-    let all: Vec<(String, String)> = std::iter::once(("local".to_string(), name_of("local"))).chain(tservers.iter().map(|x| (x.id.clone(), x.name.clone()))).collect();
-    let is_iran = |id: &str| locs.get(id).map(|l| l.0 == "iran").unwrap_or(false);
-    let exits: Vec<Value> = all
-        .iter()
-        .filter(|(id, _)| !is_iran(id))
-        .map(|(id, name)| {
-            let t = tservers.iter().find(|x| &x.id == id);
-            json!({ "id": id, "name": name, "online": online(id), "sid": id, "agent_only": t.map(|t| t.node.is_empty()).unwrap_or(false) })
-        })
-        .collect();
-    let irans: Vec<Value> = all.iter().filter(|(id, _)| is_iran(id)).map(|(id, name)| json!({ "id": id, "name": name, "online": online(id) })).collect();
     let with = users_of(&users);
     Json(json!({
-        "settings": s, "routes": routes, "exits": exits, "irans": irans, "mtu_now": mtu(&app, &s),
+        "settings": s, "servers": servers, "mtu_now": mtu(&app, &s),
         "users": with.len(), "online": with.iter().filter(|u| u.online > 0).count(),
         "user_list": users.iter().map(|u| json!({ "id": u.id, "name": u.username, "has": u.has_proto(PROTO), "active": u.active() })).collect::<Vec<_>>(),
     }))
     .into_response()
+}
+
+/// { on?, port? }: KPING on one server
+async fn node_set(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
+    let _ = crate::guard!(app, h, "nodes");
+    if !app.db.nodes().iter().any(|n| n.id == id) {
+        return (StatusCode::NOT_FOUND, Json(json!({ "error": "unknown server" }))).into_response();
+    }
+    if let Some(on) = b["on"].as_bool() {
+        set_node_off(&app, &id, !on);
+    }
+    if !b["port"].is_null() {
+        let Some(p) = port_of(&b["port"]) else { return bad("the port must be 1-65535") };
+        let s = settings(&app);
+        if p != s.node_port(&id) {
+            if crate::servers::all_taken(&app).contains(&p) {
+                return bad("this port is already used");
+            }
+            set_node_port(&app, &id, p);
+        }
+    }
+    Json(json!({ "ok": true })).into_response()
 }
 
 async fn put_settings(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
@@ -518,9 +497,9 @@ async fn put_settings(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     if let Some(on) = b["on"].as_bool() {
         s.on = on;
     }
-    if !b["port"].is_null() {
-        match port_of(&b["port"]) {
-            Some(p) => s.port = p,
+    if !b["public"].is_null() {
+        match port_of(&b["public"]) {
+            Some(p) => s.public = p,
             None => return bad("the port must be 1-65535"),
         }
     }
@@ -541,228 +520,6 @@ async fn put_settings(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     }
     save(&app, &s);
     Json(json!({ "ok": true, "settings": s })).into_response()
-}
-
-/// { id?, exit, iran, host, port, tunnel_port }
-async fn route_save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
-    let _ = crate::guard!(app, h, "nodes");
-    let mut s = settings(&app);
-    let id = b["id"].as_str().unwrap_or("").trim().to_string();
-    let mut r = if id.is_empty() {
-        Route { id: crate::util::rand_token(8).to_lowercase(), port: DEFAULT_ENTRY_PORT, tunnel_port: DEFAULT_TUNNEL_PORT, ..Default::default() }
-    } else {
-        match s.routes.iter().find(|r| r.id == id) {
-            Some(r) => r.clone(),
-            None => return bad("route not found"),
-        }
-    };
-    let tservers = crate::tunnel::panel::servers(&app);
-    let known = |id: &str| id == "local" || tservers.iter().any(|x| x.id == id);
-    let str_of = |k: &str| b[k].as_str().map(|x| x.trim().to_string());
-    if let Some(v) = str_of("exit") {
-        // a VPN node id from an older page: its tunnel server
-        let sid = crate::twin::sid_of_node(&app, &v);
-        r.exit = if !known(&v) && !sid.is_empty() { sid } else { v };
-    }
-    if let Some(v) = str_of("iran") {
-        r.iran = v;
-    }
-    // a new route without ports of its own: the first five in a row that nothing holds on its Iran server
-    // (another route, a tunnel, a VPN core, any program there), so a second route never takes the first one's
-    if id.is_empty() && b["port"].is_null() && b["tunnel_port"].is_null() && known(&r.iran) {
-        if let Some(base) = crate::tunnel::panel::free_ports(&app, &r.iran, DEFAULT_ENTRY_PORT, 5) {
-            r.port = base;
-            r.tunnel_port = base + 1;
-        }
-    }
-    if let Some(v) = str_of("host") {
-        if !v.is_empty() && !crate::twin::valid_host(&v) {
-            return bad("the address must be a domain or an IP");
-        }
-        r.host = v;
-    }
-    if !b["port"].is_null() {
-        match port_of(&b["port"]) {
-            Some(p) => r.port = p,
-            None => return bad("the port must be 1-65535"),
-        }
-    }
-    if !b["tunnel_port"].is_null() {
-        match port_of(&b["tunnel_port"]).filter(|p| *p < 65535) {
-            Some(p) => r.tunnel_port = p,
-            None => return bad("the port must be 1-65534"),
-        }
-    }
-    if !b["tunnel2_port"].is_null() {
-        match port_of(&b["tunnel2_port"]).filter(|p| *p < 65535) {
-            Some(p) => r.tunnel2_port = p,
-            None => return bad("the port must be 1-65534"),
-        }
-    }
-    if let Some(k) = str_of("kind") {
-        let k = if k.is_empty() { "game".to_string() } else { k };
-        if !KINDS.contains(&k.as_str()) {
-            return bad("unknown tunnel kind");
-        }
-        r.kind = k;
-    }
-    if let Some(f) = str_of("fec") {
-        if !f.is_empty() && !crate::tunnel::panel::fec_ok(&f) {
-            return bad("FEC is data:parity, like 8:1 (or off)");
-        }
-        r.fec = f;
-    }
-    if !known(&r.exit) {
-        return bad("choose the server abroad");
-    }
-    if !known(&r.iran) {
-        return bad("choose the Iran server");
-    }
-    if r.exit == r.iran {
-        return bad("the Iran server and the server abroad must differ");
-    }
-    let mine = r.ports();
-    if mine.iter().enumerate().any(|(i, p)| mine[..i].contains(p)) {
-        return bad("the users' port and the tunnel ports must differ");
-    }
-    if s.routes.iter().any(|x| x.id != r.id && x.iran == r.iran && x.ports().iter().any(|p| mine.contains(p))) {
-        return bad("another KPING route already uses this port on this Iran server");
-    }
-    if s.routes.iter().any(|x| x.id != r.id && x.exit == r.exit && x.iran == r.iran) {
-        return bad("this Iran server already leads to this server");
-    }
-    match s.routes.iter_mut().find(|x| x.id == r.id) {
-        Some(x) => *x = r.clone(),
-        None => s.routes.push(r.clone()),
-    }
-    save(&app, &s);
-    Json(json!({ "ok": true, "route": r })).into_response()
-}
-
-async fn route_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
-    let _ = crate::guard!(app, h, "nodes");
-    let mut s = settings(&app);
-    let Some(r) = s.routes.iter().find(|r| r.id == id).cloned() else { return bad("route not found") };
-    s.routes.retain(|x| x.id != id);
-    save(&app, &s);
-    // its tunnels go with it (a Kanki tunnel with the Tunnels page's own removal steps)
-    let mut removal = Value::Null;
-    if !r.tunnel.is_empty() {
-        removal = json!(crate::tunnel::panel::remove_tunnel(&app, &r.tunnel));
-    }
-    if !r.tunnel2.is_empty() {
-        crate::tunnel::panel::remove_tunnel(&app, &r.tunnel2);
-    }
-    Json(json!({ "ok": true, "removal": removal, "tunnel": r.tunnel, "tunnel2": r.tunnel2 })).into_response()
-}
-
-/// The FEC of a route's tunnel: what the route says, else Game-FEC Pro (repairs only when the line loses
-/// packets) when both agents have it (`pro`), else the light fixed `FEC`
-fn tunnel_fec<'a>(r: &'a Route, pro: bool) -> &'a str {
-    if !r.fec.is_empty() {
-        &r.fec
-    } else if pro && r.kind() == "game" {
-        "auto"
-    } else {
-        FEC
-    }
-}
-
-/// A route's Kanki tunnel: reverse (the exit dials Iran), its kind (Game-FEC Pro by default), only KPING's
-/// UDP (Iran 127.0.0.1:`inner` → exit 127.0.0.1:KPING port). Built again in place when it exists.
-fn tunnel_body(app: &App, s: &Settings, r: &Route, pro: bool) -> Value {
-    json!({
-        "id": r.tunnel, "name": format!("{} · {}", NAME, exit_name(app, &r.exit)),
-        "entry": r.iran, "exit": r.exit, "profile": if tunnel_fec(r, pro) == "auto" { "kping" } else { "" },
-        "mode": "reverse", "transport": r.kind(), "fec": tunnel_fec(r, pro), "dup": false,
-        "port": r.tunnel_port, "conns": 1, "tcp": [], "udp": [format!("{}:{}", r.inner(), s.port)],
-        "auto": false, "enabled": true,
-    })
-}
-
-/// The second tunnel of a route: the same as the first, on its own port and KPING entry
-fn tunnel2_body(app: &App, s: &Settings, r: &Route, pro: bool) -> Value {
-    json!({
-        "id": r.tunnel2, "name": format!("{} 2 · {}", NAME, exit_name(app, &r.exit)),
-        "entry": r.iran, "exit": r.exit, "profile": if tunnel_fec(r, pro) == "auto" { "kping" } else { "" },
-        "mode": "reverse", "transport": r.kind(), "fec": tunnel_fec(r, pro), "dup": false,
-        "port": r.port2(), "conns": 1, "tcp": [], "udp": [format!("{}:{}", r.inner2(), s.port)],
-        "auto": false, "enabled": true,
-    })
-}
-
-async fn route_tunnel2(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
-    let _ = crate::guard!(app, h, "nodes");
-    let s = settings(&app);
-    let Some(mut r) = s.routes.iter().find(|r| r.id == id).cloned() else { return bad("route not found") };
-    if r.tunnel.is_empty() {
-        return bad("build the route's first tunnel first");
-    }
-    if !r.tunnel2.is_empty() && !crate::tunnel::panel::tunnels(&app).iter().any(|t| t.id == r.tunnel2) {
-        r.tunnel2.clear();
-    }
-    if r.tunnel2_port == 0 {
-        r.tunnel2_port = r.port2();
-    }
-    let mine = r.ports();
-    if s.routes.iter().any(|x| x.id != r.id && x.iran == r.iran && x.ports().iter().any(|p| mine.contains(p))) {
-        return bad("another KPING route already uses the second tunnel's port on this Iran server");
-    }
-    let mut resp = crate::tunnel::panel::save_json(app.clone(), h.clone(), tunnel2_body(&app, &s, &r, true)).await;
-    // an agent older than Game-FEC Pro: the fixed light FEC
-    if resp.status() == StatusCode::CONFLICT && r.fec.is_empty() {
-        resp = crate::tunnel::panel::save_json(app.clone(), h, tunnel2_body(&app, &s, &r, false)).await;
-    }
-    if resp.status() != StatusCode::OK {
-        return resp;
-    }
-    let Ok(body) = axum::body::to_bytes(resp.into_body(), 1 << 16).await else { return bad("the tunnel was not saved") };
-    let tid = serde_json::from_slice::<Value>(&body).ok().and_then(|v| v["id"].as_str().map(String::from)).unwrap_or_default();
-    let mut s = settings(&app);
-    if let Some(x) = s.routes.iter_mut().find(|x| x.id == id) {
-        x.tunnel2 = tid.clone();
-        x.tunnel2_port = r.tunnel2_port;
-    }
-    save(&app, &s);
-    Json(json!({ "ok": true, "tunnel2": tid })).into_response()
-}
-
-/// The route goes back to one tunnel; the page removes the tunnel itself (its id comes back)
-async fn route_tunnel2_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
-    let _ = crate::guard!(app, h, "nodes");
-    let mut s = settings(&app);
-    let Some(x) = s.routes.iter_mut().find(|x| x.id == id) else { return bad("route not found") };
-    let tid = std::mem::take(&mut x.tunnel2);
-    save(&app, &s);
-    Json(json!({ "ok": true, "tunnel2": tid })).into_response()
-}
-
-async fn route_tunnel(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
-    let _ = crate::guard!(app, h, "nodes");
-    let s = settings(&app);
-    let Some(mut r) = s.routes.iter().find(|r| r.id == id).cloned() else { return bad("route not found") };
-    let engine_has = |tid: &str| crate::tunnel::panel::tunnels(&app).iter().any(|t| t.id == tid);
-    // a tunnel removed on the Tunnels page is made again
-    if !r.tunnel.is_empty() && !engine_has(&r.tunnel) {
-        r.tunnel.clear();
-    }
-    let mut resp = crate::tunnel::panel::save_json(app.clone(), h.clone(), tunnel_body(&app, &s, &r, true)).await;
-    // an agent older than Game-FEC Pro: the fixed light FEC
-    if resp.status() == StatusCode::CONFLICT && r.fec.is_empty() {
-        resp = crate::tunnel::panel::save_json(app.clone(), h, tunnel_body(&app, &s, &r, false)).await;
-    }
-    if resp.status() != StatusCode::OK {
-        return resp;
-    }
-    let Ok(body) = axum::body::to_bytes(resp.into_body(), 1 << 16).await else { return bad("the tunnel was not saved") };
-    let tid = serde_json::from_slice::<Value>(&body).ok().and_then(|v| v["id"].as_str().map(String::from)).unwrap_or_default();
-    let mut s = settings(&app);
-    if let Some(x) = s.routes.iter_mut().find(|x| x.id == id) {
-        x.tunnel = tid.clone();
-        x.tunnel2 = r.tunnel2.clone();
-    }
-    save(&app, &s);
-    Json(json!({ "ok": true, "tunnel": tid })).into_response()
 }
 
 /// { id, on }: KPING for one user
@@ -792,13 +549,14 @@ pub(crate) mod tests {
         assert_ne!(crate::kpingd::SERVER_ADDR, "10.79.0.1/16");
     }
 
-    /// A server that is not the exit of a route cannot put traffic or "online" on any account
+    /// A server where KPING is not on, or a user without KPING, puts no traffic or "online" on an account
     #[test]
-    fn a_report_counts_only_from_the_exit_and_for_its_users() {
+    fn a_report_counts_only_from_a_kping_server_and_for_its_users() {
         let app = test_app();
         let u = app.db.create_user("victim", 10.0, 30, 1, "wg", "", "", 0).unwrap();
         let rep = json!({ "exit": { "run": "r1", "users": { u.id.to_string(): [5_000_000_000i64, 0] }, "online": [u.id] } });
-        ingest(&app, "stranger", &rep);
+        ingest(&app, "stranger", &rep, false);
+        ingest(&app, "local", &rep, true);
         let after = app.db.user(u.id).unwrap();
         assert_eq!((after.used_bytes, after.last_seen), (u.used_bytes, u.last_seen));
         assert!(live_units(crate::util::now()).0.iter().all(|x| x.0 != u.id));
@@ -827,212 +585,41 @@ pub(crate) mod tests {
         (st, serde_json::from_slice(&b).unwrap_or(Value::Null))
     }
 
-    /// A route on each kind of UDP tunnel, and back to Game-FEC Pro; the route's tunnels go with it
+    /// KPING runs on a server like a core: the relay on its public port and the exit on 127.0.0.1, only for users
+    /// with KPING, nothing where it is off; the app gets the server straight and through its tunnel
     #[tokio::test]
-    async fn a_route_rides_any_udp_tunnel() {
+    async fn kping_runs_on_every_server_like_a_core() {
         let app = test_app();
         app.db.set("api_key", "test-key");
-        app.db.set("tun_servers", &json!([{ "id": "ir1", "name": "Tehran", "token": "x", "addr": "ir.example.com", "loc": "iran" },
-                                          { "id": "de1", "name": "Frankfurt", "token": "y", "addr": "de.example.com", "loc": "abroad" }]).to_string());
-        put_on(&app);
-        let (st, v) = call(&app, "POST", "/api/kping/routes", json!({ "exit": "de1", "iran": "ir1", "kind": "kcp" })).await;
-        assert_eq!(st, StatusCode::OK, "{}", v);
-        let rid = v["route"]["id"].as_str().unwrap().to_string();
-        let (st, v) = call(&app, "POST", &format!("/api/kping/routes/{}/tunnel", rid), Value::Null).await;
-        assert_eq!(st, StatusCode::OK, "{}", v);
-        let t1 = v["tunnel"].as_str().unwrap().to_string();
-        assert_eq!(crate::tunnel::panel::tunnels(&app).iter().find(|t| t.id == t1).unwrap().transport, "kcp");
-        // a TCP tunnel is no tunnel for a game
-        let (st, _) = call(&app, "POST", "/api/kping/routes", json!({ "id": rid, "kind": "tcp" })).await;
-        assert_eq!(st, StatusCode::BAD_REQUEST);
-        // the page sees it as the route's tunnel
-        let (_, v) = call(&app, "GET", "/api/kping", Value::Null).await;
-        assert_eq!(v["routes"][0]["tunnel_built"], true);
-        // the app gets KPING once the tunnel exists
-        let u = app.db.create_user("gamer", 10.0, 30, 1, "wg", "", "", 0).unwrap();
-        call(&app, "POST", "/api/kping/users", json!({ "id": u.id, "on": true })).await;
-        assert!(sub_info(&app, &app.db.user(u.id).unwrap()).is_array());
-        // a route of an older panel on the VIP tunnel is refused now
-        let (st, _) = call(&app, "POST", "/api/kping/routes", json!({ "id": rid, "kind": "vip" })).await;
-        assert_eq!(st, StatusCode::BAD_REQUEST);
-        // to Game-FEC Pro: the same tunnel, built again in place
-        let (st, _) = call(&app, "POST", "/api/kping/routes", json!({ "id": rid, "kind": "game", "fec": "8:3" })).await;
+        let u = app.db.create_user("gamer", 10.0, 30, 1, "wg,kping", "", "", 0).unwrap();
+        let v = app.db.create_user("plain", 10.0, 30, 1, "wg", "", "", 0).unwrap();
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,info,online) VALUES('local','Main','','fi.example.com','',?1,1)", &[&json!({ "kp_port": "24300" }).to_string()]).unwrap();
+        let n = app.db.nodes().into_iter().find(|n| n.id == "local").unwrap();
+        let (uu, vv) = (app.db.user(u.id).unwrap(), app.db.user(v.id).unwrap());
+        let c = cfg_for_node(&app, &n, &[&uu, &vv]);
+        assert_eq!(c.relays.len(), 1);
+        assert_eq!((c.relays[0].port, c.relays[0].to), (DEFAULT_ENTRY_PORT, DEFAULT_PORT));
+        let e = c.exit.as_ref().unwrap();
+        assert_eq!(e.port, DEFAULT_PORT);
+        assert_eq!(e.users.iter().map(|x| x.uid as i64).collect::<Vec<_>>(), vec![u.id]);
+        assert!(c.relays[0].users.iter().all(|x| x.ip.is_empty()));
+        // the app's config: straight to the server
+        let si = sub_info(&app, &uu);
+        let a = si.as_array().unwrap();
+        assert_eq!(a.len(), 1);
+        assert_eq!(a[0]["node"], "local");
+        assert_eq!(a[0]["via"], "direct");
+        assert!(a[0]["url"].as_str().unwrap().starts_with("kping://") && a[0]["url"].as_str().unwrap().contains(":24300?"));
+        assert!(sub_info(&app, &vv).is_null());
+        // off on this server: nothing runs, the app gets nothing
+        let (st, _) = call(&app, "POST", "/api/kping/servers/local", json!({ "on": false })).await;
         assert_eq!(st, StatusCode::OK);
-        let (st, v) = call(&app, "POST", &format!("/api/kping/routes/{}/tunnel", rid), Value::Null).await;
-        assert_eq!(st, StatusCode::OK, "{}", v);
-        let g = v["tunnel"].as_str().unwrap().to_string();
-        let gt = crate::tunnel::panel::tunnels(&app).into_iter().find(|t| t.id == g).unwrap();
-        assert_eq!((gt.transport.as_str(), gt.fec.as_str()), ("game", "8:3"));
-        assert_eq!(cfg_for(&app, "ir1").relays[0].tun_dup_ms, settings(&app).tun_dup_ms);
-        // the route goes with its tunnel
-        let (st, _) = call(&app, "DELETE", &format!("/api/kping/routes/{}", rid), Value::Null).await;
-        assert_eq!(st, StatusCode::OK);
-        assert!(crate::tunnel::panel::tunnels(&app).is_empty());
-    }
-
-    /// A second route on the same Iran server gets ports of its own (nothing to type, no clash), and a
-    /// tunnel saved without a port gets a free one there
-    #[tokio::test]
-    async fn new_routes_and_tunnels_find_free_ports() {
-        let app = test_app();
-        app.db.set("api_key", "test-key");
-        app.db.set("tun_servers", &json!([{ "id": "ir1", "name": "Tehran", "token": "x", "addr": "ir.example.com", "loc": "iran" },
-                                          { "id": "de1", "name": "Frankfurt", "token": "y", "addr": "de.example.com", "loc": "abroad" },
-                                          { "id": "tr1", "name": "Istanbul", "token": "z", "addr": "tr.example.com", "loc": "abroad" }]).to_string());
-        put_on(&app);
-        let (st, a) = call(&app, "POST", "/api/kping/routes", json!({ "exit": "de1", "iran": "ir1" })).await;
-        assert_eq!(st, StatusCode::OK, "{}", a);
-        let (st, b) = call(&app, "POST", "/api/kping/routes", json!({ "exit": "tr1", "iran": "ir1" })).await;
-        assert_eq!(st, StatusCode::OK, "{}", b);
-        let pa: Route = serde_json::from_value(a["route"].clone()).unwrap();
-        let pb: Route = serde_json::from_value(b["route"].clone()).unwrap();
-        assert_eq!(pa.port, DEFAULT_ENTRY_PORT);
-        assert!(pa.ports().iter().all(|p| !pb.ports().contains(p)), "{:?} {:?}", pa.ports(), pb.ports());
-        // a tunnel with no port: one nothing holds on its listening server
-        let (st, t) = call(&app, "POST", "/api/tunnels", json!({ "entry": "ir1", "exit": "de1", "mode": "reverse", "transport": "game", "fec": "auto", "profile": "kmix", "udp": "4001" })).await;
-        assert_eq!(st, StatusCode::OK, "{}", t);
-        let tu = crate::tunnel::panel::tunnels(&app).into_iter().find(|x| x.id == t["id"].as_str().unwrap()).unwrap();
-        assert!(tu.port >= 20000 && !pa.ports().contains(&tu.port) && !pb.ports().contains(&tu.port));
-        assert_eq!((tu.fec.as_str(), tu.profile.as_str(), tu.dup), ("auto", "kmix", false));
-        // and an unknown profile is refused
-        let (st, _) = call(&app, "POST", "/api/tunnels", json!({ "id": tu.id, "profile": "nope" })).await;
-        assert_eq!(st, StatusCode::BAD_REQUEST);
-    }
-
-    fn put_on(app: &Arc<App>) {
-        let mut s = settings(app);
-        s.on = true;
-        save(app, &s);
-    }
-
-    /// A route and its tunnel from the panel page: the exit is any server with the tunnel agent (here one
-    /// added from the KPING page, agent only), the tunnel goes through every check of the Tunnels page and
-    /// carries only KPING's inner port, reverse, Game-FEC 8:3; each server gets its part of the config
-    #[tokio::test]
-    async fn one_button_builds_the_routes_own_tunnel() {
-        let app = test_app();
-        app.db.set("api_key", "test-key");
-        let srv = json!([{ "id": "ir1", "name": "Tehran", "token": "x", "addr": "ir.example.com", "loc": "iran" }]);
-        app.db.set("tun_servers", &srv.to_string());
-        // a new exit abroad: only the agent, no VPN part to install
-        let (st, v) = call(&app, "POST", "/api/servers", json!({ "name": "Frankfurt", "loc": "abroad", "agent_only": true })).await;
-        assert_eq!(st, StatusCode::OK, "{}", v);
-        let de = v["id"].as_str().unwrap().to_string();
-        let cmd = v["command"].as_str().unwrap();
-        assert!(!cmd.contains("KANKI_JOIN"), "an agent-only server installs no VPN part: {}", cmd);
-        let (st, v) = call(&app, "GET", "/api/kping", Value::Null).await;
-        assert_eq!(st, StatusCode::OK);
-        assert_eq!(v["irans"][0]["id"], "ir1");
-        assert!(v["exits"].as_array().unwrap().iter().any(|x| x["id"] == de.as_str() && x["agent_only"] == true));
-        let (st, v) = call(&app, "POST", "/api/kping/routes", json!({ "exit": de, "iran": "ir1" })).await;
-        assert_eq!(st, StatusCode::OK, "{}", v);
-        let rid = v["route"]["id"].as_str().unwrap().to_string();
-        // the same pair twice is refused
-        let (st, _) = call(&app, "POST", "/api/kping/routes", json!({ "exit": de, "iran": "ir1" })).await;
-        assert_eq!(st, StatusCode::BAD_REQUEST);
-        // no relay until the tunnel is built
-        assert!(cfg_for(&app, "ir1").relays.is_empty());
-        let (st, v) = call(&app, "POST", &format!("/api/kping/routes/{}/tunnel", rid), Value::Null).await;
-        assert_eq!(st, StatusCode::OK, "{}", v);
-        let tid = v["tunnel"].as_str().unwrap().to_string();
-        let t = crate::tunnel::panel::tunnels(&app).into_iter().find(|t| t.id == tid).unwrap();
-        assert_eq!((t.entry.as_str(), t.exit.as_str(), t.mode.as_str(), t.transport.as_str(), t.fec.as_str(), t.port), ("ir1", de.as_str(), "reverse", "game", "auto", DEFAULT_TUNNEL_PORT));
-        // Game-FEC Pro shaped for KPING: it repairs the line itself, so KPING sends no copy of its own into it
-        assert_eq!(t.profile, "kping");
-        assert_eq!(cfg_for(&app, "ir1").relays[0].tun_dup_ms, 0);
-        assert_eq!(t.udp, vec![format!("{}:{}", DEFAULT_TUNNEL_PORT + 1, DEFAULT_PORT)]);
-        assert!(t.tcp.is_empty());
-        // the tunnel's KPING port listens on 127.0.0.1 only: the relay is the way in
-        let spec = crate::tunnel::panel::specs_of(&app, "ir1").into_iter().find(|s| s.id == tid).unwrap();
-        assert_eq!(spec.bind, "127.0.0.1");
-        // a tunnel built before (Game-FEC 8:3) gets 8:1 once, and only once
-        let mut ts = crate::tunnel::panel::tunnels(&app);
-        ts.iter_mut().for_each(|t| t.fec = "8:3".into());
-        crate::tunnel::panel::save_tunnels(&app, &ts);
-        light_tunnels(&app);
-        assert!(crate::tunnel::panel::tunnels(&app).iter().all(|t| t.fec == "8:1"));
-        let mut ts = crate::tunnel::panel::tunnels(&app);
-        ts.iter_mut().for_each(|t| t.fec = "8:3".into());
-        crate::tunnel::panel::save_tunnels(&app, &ts);
-        light_tunnels(&app);
-        assert!(crate::tunnel::panel::tunnels(&app).iter().all(|t| t.fec == "8:3"), "a choice made later on the Tunnels page stays");
-        ts.iter_mut().for_each(|t| t.fec = "8:1".into());
-        crate::tunnel::panel::save_tunnels(&app, &ts);
-        // building again keeps the same tunnel
-        let (_, v) = call(&app, "POST", &format!("/api/kping/routes/{}/tunnel", rid), Value::Null).await;
-        assert_eq!(v["tunnel"], tid.as_str());
-        assert_eq!(crate::tunnel::panel::tunnels(&app).len(), 1);
-        // v3: a second tunnel to the same exit, on its own port; the relay gets its entry as a second way in
-        let (st, v) = call(&app, "POST", &format!("/api/kping/routes/{}/tunnel2", rid), Value::Null).await;
-        assert_eq!(st, StatusCode::OK, "{}", v);
-        let tid2 = v["tunnel2"].as_str().unwrap().to_string();
-        assert_ne!(tid2, tid);
-        let t2 = crate::tunnel::panel::tunnels(&app).into_iter().find(|t| t.id == tid2).unwrap();
-        assert_eq!((t2.transport.as_str(), t2.port), ("game", DEFAULT_TUNNEL_PORT + 2));
-        assert_eq!(t2.udp, vec![format!("{}:{}", DEFAULT_TUNNEL_PORT + 3, DEFAULT_PORT)]);
-        assert!(is_tunnel(&app, &tid2));
-        // a route whose ports meet the second tunnel's is refused
-        let (st, _) = call(&app, "POST", "/api/kping/routes", json!({ "exit": "local", "iran": "ir1", "port": DEFAULT_TUNNEL_PORT + 3, "tunnel_port": 26000 })).await;
-        assert_eq!(st, StatusCode::BAD_REQUEST);
-        // removing it: the route goes back to one tunnel, its id comes back for the page
-        let (_, v) = call(&app, "DELETE", &format!("/api/kping/routes/{}/tunnel2", rid), Value::Null).await;
-        assert_eq!(v["tunnel2"], tid2.as_str());
-        // the page then removes the tunnel itself; built again, the route has its second tunnel back
-        let (st, _) = call(&app, "DELETE", &format!("/api/tunnels/{}", tid2), Value::Null).await;
-        assert_eq!(st, StatusCode::OK);
-        let (st, v) = call(&app, "POST", &format!("/api/kping/routes/{}/tunnel2", rid), Value::Null).await;
-        assert_eq!(st, StatusCode::OK, "{}", v);
-        let tid2 = v["tunnel2"].as_str().unwrap().to_string();
-        // testers: only by the admin, one by one
-        let u = app.db.create_user("GAMER", 10.0, 30, 1, "wg", "", "", 0).unwrap();
-        let (st, _) = call(&app, "POST", "/api/kping/users", json!({ "id": u.id, "on": true })).await;
-        assert_eq!(st, StatusCode::OK);
-        let u = app.db.user(u.id).unwrap();
-        assert!(u.has_proto(PROTO));
-        // the Iran server relays on the users' port into the tunnel; the exit has the user and the address
-        let ir = cfg_for(&app, "ir1");
-        assert_eq!(ir.relays.len(), 1);
-        assert_eq!((ir.relays[0].port, ir.relays[0].to), (DEFAULT_ENTRY_PORT, DEFAULT_TUNNEL_PORT + 1));
-        assert_eq!(ir.relays[0].more, vec![DEFAULT_TUNNEL_PORT + 3]);
-        assert_eq!(ir.relays[0].users[0].uid as i64, u.id);
-        assert!(ir.exit.is_none());
-        let ex = cfg_for(&app, &de);
-        assert!(ex.relays.is_empty());
-        let x = ex.exit.unwrap();
-        assert_eq!((x.port, x.users[0].ip.clone()), (DEFAULT_PORT, ip_of_id(u.id).unwrap().to_string()));
-        assert_eq!(x.users[0].key, ir.relays[0].users[0].key);
-        // the app's link
-        let info = sub_info(&app, &u);
-        let url = info[0]["url"].as_str().unwrap();
-        assert!(url.starts_with(&format!("kping://{}@ir.example.com:{}?uid={}&", user_key(&app, &u), DEFAULT_ENTRY_PORT, u.id)), "{}", url);
-        // traffic and online from the exit's report
-        let before = u.used_bytes;
-        ingest(&app, &de, &json!({ "relays": [], "exit": { "port": DEFAULT_PORT, "run": "r1", "users": { u.id.to_string(): [5000, 3000, 2000] }, "online": [u.id] } }));
-        assert_eq!(app.db.user(u.id).unwrap().used_bytes - before, 5000);
-        // switched off (or ran out) right then: its last traffic still counts, but it holds no place
-        app.db.exec("UPDATE users SET enabled=0 WHERE id=?1", &[&u.id]).unwrap();
-        ingest(&app, &de, &json!({ "relays": [], "exit": { "port": DEFAULT_PORT, "run": "r1", "users": { u.id.to_string(): [7000, 4000, 3000] }, "online": [u.id] } }));
-        assert_eq!(app.db.user(u.id).unwrap().used_bytes - before, 7000);
-        assert!(live_units(crate::util::now()).0.iter().all(|x| x.0 != u.id));
-        app.db.exec("UPDATE users SET enabled=1 WHERE id=?1", &[&u.id]).unwrap();
-        let (_, v) = call(&app, "GET", "/api/kping", Value::Null).await;
-        assert_eq!(v["users"], 1);
-        assert_eq!(v["routes"][0]["exit_runs"], true);
-        // the route goes, its tunnel id comes back for the page to remove it
-        let (_, v) = call(&app, "DELETE", &format!("/api/kping/routes/{}", rid), Value::Null).await;
-        assert_eq!(v["tunnel"], tid.as_str());
-        assert_eq!(v["tunnel2"], tid2.as_str());
-        // … and the panel already removed them
-        assert!(crate::tunnel::panel::tunnels(&app).is_empty());
-        assert!(settings(&app).routes.is_empty());
-        assert_eq!(cfg_for(&app, &de), KpCfg::default());
-    }
-
-    #[test]
-    fn an_old_route_moves_to_the_tunnel_server() {
-        let app = test_app();
-        app.db.set("tun_servers", &json!([{ "id": "s-de", "name": "Germany", "token": "y", "node": "de" }]).to_string());
-        app.db.set("kping_cfg", &json!({ "routes": [{ "id": "r", "exit": "de", "iran": "ir" }] }).to_string());
-        assert_eq!(settings(&app).routes[0].exit, "s-de");
+        let c = cfg_for_node(&app, &n, &[&uu]);
+        assert!(c.relays.is_empty() && c.exit.is_none());
+        assert!(sub_info(&app, &uu).is_null());
+        let (st, _) = call(&app, "POST", "/api/kping/servers/nope", json!({ "on": true })).await;
+        assert_eq!(st, StatusCode::NOT_FOUND);
+        // a tunnel agent runs nothing of KPING any more
+        assert!(cfg_for(&app, "local").relays.is_empty() && cfg_for(&app, "local").exit.is_none());
     }
 }

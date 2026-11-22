@@ -2522,5 +2522,17 @@ var FA={"1. Asking every server for the new version":"۱. پرسیدن نسخه�
  "Write a domain like cdn.example.com (English letters; use the punycode form for a Persian domain)":"دامنه‌ای مثل cdn.example.com بنویس (حروف انگلیسی؛ دامنهٔ فارسی به شکل punycode)",
  "The panel's site in the Caddyfile has no certificate files. This needs the standard install of the panel":"سایت پنل در Caddyfile فایل گواهی ندارد. این فقط با نصب استاندارد پنل کار می‌کند",
  "None of the CDN's HTTPS ports (443, 2053, 2083, 2087, 2096, 8443) is free on this server":"هیچ‌کدام از پورت‌های HTTPS که CDN رد می‌کند (443، 2053، 2083، 2087، 2096، 8443) روی این سرور آزاد نیست",
- "Caddy did not answer for this domain; nothing was changed":"Caddy برای این دامنه جواب نداد؛ چیزی عوض نشد"
+ "Caddy did not answer for this domain; nothing was changed":"Caddy برای این دامنه جواب نداد؛ چیزی عوض نشد",
+"Add user":"افزودن کاربر",
+"Each server runs KPING like its other cores. Its second config (through Iran) comes from the server's tunnel, like every core: the tunnel must carry the KPING port.":"هر سرور KPING را مثل هسته‌های دیگرش اجرا می‌کند. کانفیگ دومش (از راه ایران) از تانل همان سرور می‌آید، مثل هر هسته: تانل باید پورت KPING را ببرد.",
+"KPING is off: no server runs it and no user gets it.":"KPING خاموش است: هیچ سروری اجرایش نمی‌کند و هیچ کاربری آن را نمی‌گیرد.",
+"KPING on this server":"KPING روی این سرور",
+"KPING runs on each server where it is on (Servers), like every core. Users: choose who gets it. The Kanki app of those users shows KPING in gaming mode, straight to each server and through Iran when the server's tunnel carries the KPING port. KPING is never on the subscription page, in links or in the bot.":"KPING روی هر سروری که روشن است (سرورها) اجرا می‌شود، مثل هر هسته. کاربرها: انتخاب کن چه کسی بگیرد. اپ کانکی این کاربرها KPING را در گیمینگ نشان می‌دهد، مستقیم به هر سرور و از راه ایران وقتی تانل سرور پورت KPING را می‌برد. KPING هیچ‌وقت در صفحهٔ اشتراک، لینک‌ها یا ربات نیست.",
+"No user yet":"هنوز کاربری نیست",
+"Off = it stops on every server and leaves every user's app":"خاموش = روی همهٔ سرورها می‌ایستد و از اپ همهٔ کاربرها می‌رود",
+"Port on the servers":"پورت روی سرورها",
+"The game core on your servers, like every core, only in the Kanki app.":"هستهٔ بازی روی سرورهای شما، مثل هر هسته، فقط در اپ کانکی.",
+"The port the app dials on each server (a server may have its own, Servers › Port). It is opened in the firewall.":"پورتی که اپ روی هر سرور می‌زند (هر سرور می‌تواند پورت خودش را داشته باشد: سرورها › پورت). در فایروال باز می‌شود.",
+"A tunnel that carries the KPING port of a server: KPING copies and repairs end to end itself, so the tunnel repairs only what the line loses.":"تانلی که پورت KPING یک سرور را می‌برد: KPING خودش سرتاسر کپی و ترمیم می‌کند، پس تانل فقط همان چیزی را که خط گم می‌کند ترمیم می‌کند.",
+"The game core, only in the Kanki app":"هستهٔ بازی، فقط در اپ کانکی",
 };

@@ -129,7 +129,7 @@ fn num(v: &Value) -> Option<u16> {
 
 /// The VPN ports of one node: from what it reported, KANKI MIX from the panel's setting (where the
 /// node moves on its next sync).
-fn node_uses(n: &Node, km: &crate::kmix::Settings, mt: Option<&crate::microtun::Settings>) -> Vec<Use> {
+fn node_uses(n: &Node, km: &crate::kmix::Settings, mt: Option<&crate::microtun::Settings>, kp: Option<&crate::kping::Settings>) -> Vec<Use> {
     let i = crate::api::node_info(n);
     let has = |k: &str| i[k].as_str().map(|s| !s.is_empty()).unwrap_or(false);
     let mut v = vec![];
@@ -148,6 +148,8 @@ fn node_uses(n: &Node, km: &crate::kmix::Settings, mt: Option<&crate::microtun::
     push("kmix", if km.node_on(&n.id) && (kmix_installed || kmix_given) { Some(km.node_port(&n.id)) } else { None });
     // microtun: the port the panel wants there (the server moves to it on its next sync)
     push("mtun", mt.and_then(|s| s.node_on(&n.id).then(|| s.node_port(&n.id))));
+    // KPING: the port the panel wants there too
+    push("kping", kp.and_then(|s| s.node_on(&n.id).then(|| s.node_port(&n.id))));
     v
 }
 
@@ -155,9 +157,10 @@ fn node_uses(n: &Node, km: &crate::kmix::Settings, mt: Option<&crate::microtun::
 fn all_uses(app: &App) -> Vec<Use> {
     let km = crate::kmix::settings(app);
     let mt = crate::microtun::settings(app);
+    let kp = crate::kping::settings(app);
     let mut nodes = app.db.nodes();
     nodes.sort_by_key(|n| n.id != "local");
-    nodes.iter().flat_map(|n| node_uses(n, &km, Some(&mt))).collect()
+    nodes.iter().flat_map(|n| node_uses(n, &km, Some(&mt), Some(&kp))).collect()
 }
 
 /// The clashes: the same UDP port used by two different servers. [(port, [(node, proto)])]
@@ -219,6 +222,7 @@ fn pick(taken: &mut HashSet<u16>, proto: &str) -> u16 {
         "wg" | "awg" => &[(51820, 51999), (52000, 52999)],
         "hy2" => &[(8443, 8499), (30000, 30999)],
         "mtun" => &[(4200, 4299), (42000, 42999)],
+        "kping" => &[(24300, 24399), (43000, 43999)],
         _ => &[(4000, 4199), (40000, 40999)],
     };
     for (a, b) in ranges {
@@ -454,6 +458,16 @@ pub fn joined(app: &App, sid: &str, nid: &str) {
             crate::microtun::set_node_off(app, nid, true);
         }
     }
+    // KPING too, like every core (3.58): its own free port, off when not ticked
+    let uses: Vec<Use> = all_uses(app).into_iter().filter(|u| !(u.node == nid && u.proto == "kping")).collect();
+    let mut t = taken(app, &uses);
+    let p = pick(&mut t, "kping");
+    if p > 0 {
+        crate::kping::set_node_port(app, nid, p);
+        if !chosen.iter().any(|c| c == "kping") {
+            crate::kping::set_node_off(app, nid, true);
+        }
+    }
 }
 
 /// The cores picked in the installer's menu for the panel server itself (`CORES=` in kanki.env), put in
@@ -471,6 +485,7 @@ pub fn install_cores(app: &App) {
     }
     crate::kmix::set_node_off(app, "local", !has("kmix"));
     crate::microtun::set_node_off(app, "local", !has("mtun"));
+    crate::kping::set_node_off(app, "local", !has("kping"));
     app.db.set("install_cores_done", "1");
     eprintln!("cores of this server from the installer: {}", if chosen.is_empty() { "none".to_string() } else { chosen.join(",") });
 }
@@ -1501,10 +1516,10 @@ mod tests {
         };
         let mut km = crate::kmix::Settings { on: true, port: 4000, parity: 3, hop: String::new(), gaming: true, nodes: Default::default() };
         // not installed and no port of its own: nothing to hold yet
-        assert!(!node_uses(&n, &km, None).iter().any(|u| u.proto == "kmix"));
+        assert!(!node_uses(&n, &km, None, None).iter().any(|u| u.proto == "kmix"));
         // given 4001 when it joined: held from then on, so the next server gets another one
         km.nodes.insert("n1".into(), crate::kmix::NodeOpt { port: 4001, ..Default::default() });
-        assert!(node_uses(&n, &km, None).contains(&Use { node: "n1".into(), proto: "kmix", port: 4001 }));
+        assert!(node_uses(&n, &km, None, None).contains(&Use { node: "n1".into(), proto: "kmix", port: 4001 }));
     }
 
     #[test]

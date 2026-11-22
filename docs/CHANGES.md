@@ -1,3 +1,16 @@
+# v3.58.0 — KPING is a core of every server
+KPING runs on each VPN server like KANKI MIX and microtun: the server's node agent runs the relay on a public UDP port
+(default 24300, each server may have its own; opened in the firewall) and the exit behind it on 127.0.0.1 (`kping0`, NAT
+out), from the panel's sync (`kping::cfg_for_node`, `kpingd::apply_node`, its own cache `kping-node.json` and firewall
+owner `kpcore`, back after a reboot with `node_from_disk`). On or off per server on the KPING page (Servers tab) or in
+the installer's list of cores; a new server gets a free port. The Kanki app gets KPING straight to each server, and
+through the server's Iran address when the server's tunnel carries the KPING port (`<id>@tunnel`, like every core;
+`twin` knows `kp_port`). Traffic, «online» and the connection limit are counted per server like the other cores.
+The routes of 3.37-3.57 (an Iran relay and an exit joined by a tunnel of their own) are gone: a tunnel agent gets an
+empty KPING config and stops what it ran; the Tunnels page has no KPING routes any more (a Game-FEC Pro tunnel can still
+be shaped for KPING). Lab: relay and exit of one server, the app's own client, 900 of 900 game packets back; the panel
+itself (local node) with a KPING user: the sealed subscription's link, 900 of 900, the traffic counted on the user.
+
 # v3.57.1 — KANKI MIX: TCP without FEC
 FEC only helps the game; TCP sends again by itself, so FEC on it only wasted bandwidth and filled queues. The KANKI MIX server
 now has a second KCP listener without FEC for packets of the new kind `KindKCPPlain` (0x05, `internal/obfs/plain.go`, the

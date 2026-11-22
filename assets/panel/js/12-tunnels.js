@@ -47,7 +47,7 @@ function tmTheme(){var cs=getComputedStyle(document.body),g=function(v,d){return
 // short tunnel names for the map: HQ-QUIC, KCP, WSS, AWG+WS …
 // Game-FEC Pro: the cores it can be shaped for ([value, name, what it does])
 var TPROF=[['','Any core','Game-FEC Pro for whatever goes through: the game repaired, TCP without repairs.'],
- ['kping','KPING','Makes a KPING route: the entry is the Iran server the phones dial, the exit runs KPING. Its ports are found by themselves (the ports below are not used) and its testers are on the KPING page.'],
+ ['kping','KPING','A tunnel that carries the KPING port of a server: KPING copies and repairs end to end itself, so the tunnel repairs only what the line loses.'],
  ['kmix','KANKI MIX','The game packets of KANKI MIX get the repairs; its KCP (lobby, logins, downloads) goes without, so downloads never fill the line of the game.'],
  ['mtun','microtun','Small packets first and at once: microtun never waits for a lost packet, so nothing is held back.'],
  ['wg','WireGuard / AmneziaWG','Every WireGuard packet is repaired as the line needs (WireGuard has no repairs of its own).']];
@@ -61,9 +61,9 @@ function pTunnels(){KAcc.open.tn='';KAcc.draw.tn=function(){var l=$('#tn_list');
  $('#pg').innerHTML='<div class="ku">'+kuHead('tunnel',t('Tunnels'),t('Encrypted tunnels between your servers: users connect to the entry, traffic leaves from the exit'),
   '<button class="btn" onclick="tunEdit()">'+ic('plus',15)+' '+t('Tunnel')+'</button><button class="b2" onclick="tunMore()" aria-label="'+esc(t('More'))+'">⋯ '+t('More')+'</button>')+
  '<div class="card tmapc"><nav class="tmtabs" id="tn_mt" role="tablist"></nav><div id="tn_map"><span class="muted">'+t('Loading…')+'</span></div><div class="tkpi" id="tn_kpi"></div></div>'+
- '<div class="ku-tools tnf" id="tn_f"></div><div id="tn_list"></div><div id="tn_kp"></div></div>';
- tunRefresh();kpLoad(true);clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
-function tunRefresh(quiet){if(S.page=='tunnels'&&Date.now()-KP.at>15000)kpLoad(true);return tunLoad().then(tunDraw).catch(function(e){if(!quiet)fail(e)})}
+ '<div class="ku-tools tnf" id="tn_f"></div><div id="tn_list"></div></div>';
+ tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
+function tunRefresh(quiet){return tunLoad().then(tunDraw).catch(function(e){if(!quiet)fail(e)})}
 // the map shows every Iran server, or one of them (its tunnels side by side); remembered on this browser
 var TNV={v:(function(){try{return localStorage.getItem('kk_tmview')||'all'}catch(e){return 'all'}})()};
 function tunView(v){TNV.v=v;try{localStorage.setItem('kk_tmview',v)}catch(e){}var m=$('#tn_map');if(m)m.dataset.sig='';if(TN.d)tunDraw(TN.d)}
@@ -442,9 +442,6 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   tcp:$('#tw_tcp').value,udp:$('#tw_udp').value,dial:st.tr=='cdn'?$('#tw_cdl').value:$('#tw_dl').value,target:$('#tw_tg').value,sni:st.tr=='cdn'?$('#tw_csni').value:$('#tw_sni').value,path:$('#tw_pa').value,auto:st.tr!='cdn'&&$('#tw_au').checked,host:st.tr=='cdn'?$('#tw_chost').value:$('#tw_host').value,frag:st.tr=='cdn'?$('#tw_frag').checked:$('#tw_frag2').checked,fec:st.tr=='game'?(st.pro?'auto':($('#tw_fec').value||'8:3')):'',dup:st.tr=='game'&&!st.pro&&$('#tw_dup').checked,profile:st.tr=='game'&&st.pro?$('#tw_prof').value:''};if(id)b.id=id;
   if(st.kind=='awg'){var g2=function(k){var e=$(k);return e?e.value:''};b.kind='awg';b.auto=false;b.awg={wrap:st.wrap,port:+g2('#tw_aw_pt')||0,profile:g2('#tw_aw_pf'),mtu:+g2('#tw_aw_mtu')||0,keepalive:+g2('#tw_aw_ka')||0,lockdown:!!($('#tw_aw_lk')&&$('#tw_aw_lk').checked),nat_exit:!!$('#tw_aw_nat').checked,routes:g2('#tw_aw_rt'),src_routes:g2('#tw_aw_sr'),fwd_tcp:g2('#tw_aw_ft'),fwd_udp:g2('#tw_aw_fu'),fwd_target:g2('#tw_aw_tg'),regen_params:!!($('#tw_aw_rp')&&$('#tw_aw_rp').checked),regen_keys:!!($('#tw_aw_rk')&&$('#tw_aw_rk').checked)};if(!st.wrap)b.port=0}
   else if(st.kind=='hy2'){var g3=function(k){var e=$(k);return e?e.value:''};b.kind='hy2';b.auto=false;b.mode='direct';b.transport='tcpmux';b.hy2={port:+g3('#tw_hy_pt')||0,sni:g3('#tw_hy_sni'),obfs:!!$('#tw_hy_ob').checked,up_mbps:+g3('#tw_hy_up')||0,down_mbps:+g3('#tw_hy_dn')||0,src_routes:g3('#tw_hy_sr'),masq:g3('#tw_hy_mq'),mtu:+g3('#tw_hy_mtu')||0,regen:!!($('#tw_hy_rg')&&$('#tw_hy_rg').checked)};b.port=b.hy2.port}else b.kind='';
-  // Game-FEC Pro for KPING: a KPING route (its own ports and tunnel), not a plain tunnel
-  if(!id&&st.tr=='game'&&st.pro&&b.profile=='kping'&&!b.kind){if(!b.entry||!b.exit)return toast(t('Choose both servers'),1);me.disabled=true;
-   kpFromTunnel(b.entry,b.exit).then(function(){closeModal();toast(t('Saved')+' · '+t('Tunnel built'));tunRefresh()}).catch(function(e){me.disabled=false;fail(e)});return}
   me.disabled=true;api('POST','/api/tunnels',b).then(function(){closeModal();toast(id?t('Saved: the tunnel restarts with the new settings'):t('The tunnel is made: it connects in a few seconds'));tunRefresh()}).catch(function(e){me.disabled=false;fail(e)})}}
 
 

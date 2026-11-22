@@ -4,6 +4,11 @@
 ایجنت سرورهای VPN (`node`)، ایجنت سرورهای تانل (`tunnel-agent`) و DNS. وب پنل یک صفحه است و داخل باینری جاسازی می‌شود.
 اپ اندروید جدا است: ریپوی `kanki-app` (اشتراک را از `/sub/...` همین پنل می‌خواند).
 
+## Execution & Output Rules (MANDATORY)
+- Perform all file analysis, coding, refactoring, and build tasks silently in the background.
+- DO NOT output explanations, step-by-step commentary, summaries, or extra text in the chat.
+- Only respond with a single-line completion confirmation once all tasks are finished.
+
 ## قانون‌های قفل‌شده (دستور قطعی صاحب پنل، 2026-11-22)
 1. **سکوت کامل:** بین ابزارها هیچ متن، گزارش پیشرفت یا «حالا X را می‌کنم» ننویس. همه‌ی کارها در پس‌زمینه و بی‌صدا؛ فقط یک پیام آخر وقتی کار ۱۰۰٪ تمام شد.
 2. **امنیت برنچ:** کار روی برنچ جدا؛ هیچ‌وقت بدون تأیید صریح صاحب پنل بعد از تست، push یا merge مستقیم به `main` نه.
@@ -62,7 +67,7 @@ assets/
 | فایل‌های نصب اپ کانکی (`/dl/...`) | `src/subscription/apps.rs` |
 | WireGuard و AmneziaWG، Hysteria2، همگام‌سازی کاربران و محدودیت اتصال | `src/vpn/wg.rs`, `hy2.rs`, `sync.rs` |
 | KANKI MIX / microtun (پنل / سرور) | `src/vpn/kmix.rs` / `microtun.rs`, `mtun.rs` |
-| KPING v2/v3 (پنل): مسیرها (سرور ایران + سرور خارج، هر سرور با ایجنت)، «افزودن سرور خارج» (`agent_only`)، تانل Game-FEC با یک دکمه (۳.۴۳: تانل دوم `tunnel2`، `route_tunnel2`)، تسترها، `cfg_for(sid)` برای ایجنت، `ingest` گزارش، لینک `kping://` فقط در اشتراک رمزشده؛ از ۳.۵۳ نوع تانل هر مسیر (`Route.kind`: Game-FEC، KCP، QUIC، HQ، Fake TCP یا VIP با `vip_body`، `vip::panel::save_for`) | `src/vpn/kping.rs` + `assets/panel/js/19-kping.js` (`kpTunForm`)؛ آزمایشگاه `LAB_TUN_KIND=vip` در `kping_lab` |
+| KPING (پنل، از 3.58 هستهٔ هر سرور: `cfg_for_node`، `sync` (`SyncReq.kping`)، `kpingd::apply_node`، تب سرورها در `19-kping.js`، `twin` با `kp_port`؛ مسیرها و `cfg_for` تانل خالی) — تاریخچه: مسیرها (سرور ایران + سرور خارج، هر سرور با ایجنت)، «افزودن سرور خارج» (`agent_only`)، تانل Game-FEC با یک دکمه (۳.۴۳: تانل دوم `tunnel2`، `route_tunnel2`)، تسترها، `cfg_for(sid)` برای ایجنت، `ingest` گزارش، لینک `kping://` فقط در اشتراک رمزشده؛ از ۳.۵۳ نوع تانل هر مسیر (`Route.kind`: Game-FEC، KCP، QUIC، HQ، Fake TCP یا VIP با `vip_body`، `vip::panel::save_for`) | `src/vpn/kping.rs` + `assets/panel/js/19-kping.js` (`kpTunForm`)؛ آزمایشگاه `LAB_TUN_KIND=vip` در `kping_lab` |
 | KPING v2/v3 (روی سرورها، داخل ایجنت تانل): قالب بسته، کپی و «اولی برنده»، پریتی XOR (v2) و ترمیم پنجره‌ای RLC (v3، `kprlc.rs` = `rlc.go` اپ، بردار مشترک)، رله (ایران، چند تانل و پروب هر تانل) و خروجی (`kping0`)، کپی ۲۰ms روی تکهٔ ایران ↔ خارج | `src/vpn/kpingd.rs` (`Relay`، `Exit`، `apply`، `report`)، `src/vpn/kprlc.rs`؛ آزمایشگاه `scripts/kping_lab.sh` + کلاینت Go `scripts/kping-lab` (همان قالب، بردار تست مشترک) |
 | سرور KANKI MIX (Go؛ سورس اینجاست، نه ریپوی دیگر) | `src/vpn/kmix-server/` (`build.sh`، `go test ./...`) |
 | **ضبط بازی** (KANKI MIX › ضبط بازی): ضبط یک کاربر روی سرور KANKI MIX (هر بستهٔ UDP بازی با اندازه و اندازهٔ روی سیم، KCP، اتصال‌های TCP، نام‌های DNS)، گزارش با برچسب جریان‌ها و مرحله‌ها و «آنچه تانل VIP می‌بیند»، دانلود JSON | `src/vpn/kmix-server/cmd/kanki-server/record.go` (+ `obfs.Tap`)، `kmix::record_local`/`record_api` (`/api/kmix/record`)، `api::agent_kmix_record`، `kr*` در `06-kmix.js` |
@@ -430,6 +435,7 @@ assets/
 ### فهرست نسخه‌ها
 | نسخه | تاریخ | خلاصه | PR |
 |---|---|---|---|
+| 3.58.0 | 2026-11-22 | KPING هستهٔ هر سرور مثل بقیه (رله روی پورت عمومی + خروجی روی 127.0.0.1 در ایجنت نود، روشن/خاموش و پورت هر سرور، مستقیم و از راه تانل ایران همان سرور)؛ مسیرهای KPING حذف | |
 | 3.57.1 | 2026-11-22 | KANKI MIX: TCP اپ بی FEC (شنوندهٔ دوم KCP با نوع 0x05، `obfs/plain.go` یکی با اپ)، اپ قدیمی با FEC مثل قبل | |
 | 3.57.0 | 2026-11-22 | تانل VIP حذف (بکاپ در `backup/`)، Game-FEC Pro (ترمیم به اندازهٔ افت، فقط بازی، سقف دو برابر، هستهٔ همراه)، مسیرهای KPING در صفحهٔ تانل‌ها، پورت آزاد خودکار، کنترل یکسان سرورهای ایران، WireGuard مستقیم فقط اپ کانکی | #109 |
 | 3.56.0 | 2026-11-21 | فروش بهتر: تست 300MB/3h با پیشنهاد لحظه‌ای TEST15، یادآوری تمدید با 10% هدیه، بازگشت BACK20، هدیه از مینی‌اپ ادمین با انتخاب خریدارها، عدد انگلیسی همه‌جا، دیدن ربات با `bot_tour` | |
@@ -496,6 +502,13 @@ assets/
 | 3.20.1 | 2026-10-29 | بکاپ، سرور ایران فقط تانل، gzip صفحه، اسکیل طراحی | |
 
 جزئیات هر نسخه: `docs/CHANGES.md`. گزارش‌های کامل قدیمی (تا 3.23.1) در تاریخچهٔ git همین فایل هستند.
+
+### آخرین کارها — 3.58.0 (2026-11-22، برنچ `ccr-93b13567-5n0xqx`، همراه اپ ۱.۴۰)
+**خواسته (صاحب پنل، عصبانی):** KPING دقیقاً مثل KANKI MIX، microtun، WireGuard و Amnezia روی سرورها نصب شود، نه مسیر جدا. **چه شد:** بالا در `docs/CHANGES.md`.
+**مسیر دنبال‌شده (قانون ۸):** کاربر با پروتکل kping ← `sync::desired_for` (`room("kping")` محدودیت اتصال هر سرور) ← `cfg_for_node` ← نود (`apply_local` ← `kpingd::apply_node`: رله + خروجی + `kping0` + NAT + فایروال `kpcore`) ← گزارش (`SyncResp.kping`) ← `kping::ingest` (حجم، آنلاین) ← `live_units` (محدودیت)؛ اشتراک رمزشده ← `sub_info` (مستقیم + `@tunnel` با `twin::carried`) ← اپ (`cfgSide`). سرور تازه: `servers` پورت آزاد kping و خاموش اگر تیک نخورده؛ نصب پنل: `install_cores`.
+**تست:** `cargo test` ۴۰۰؛ آزمایش واقعی با root: رله و خروجی یک سرور، کلاینت Go خود اپ، ۹۰۰ از ۹۰۰ بسته؛ پنل کامل (`serve`، نود local) با کاربر KPING: لینک اشتراک رمزشده ← ۹۰۰ از ۹۰۰، حجم روی کاربر شمرده شد؛ Playwright صفحهٔ KPING ۴ عرض × فارسی/انگلیسی × ۴ تب بی خطا.
+**امنیت:** مسیر تازهٔ `/api/kping/servers/:id` فقط با ورود و `nodes`، سرور ناشناخته 404، پورت با `all_taken`؛ گزارش KPING فقط از سروری که KPING رویش روشن است و فقط برای کاربرهای KPING؛ پورت خروجی فقط 127.0.0.1؛ کلید و رمز همان قبلی.
+**دیده نشده:** سرور واقعی و تانل ایران واقعی (کپی تانل KPING فقط با تست واحد `twin`).
 
 ### آخرین کارها — 3.57.1 (2026-11-22، برنچ `ccr-93b13567-5n0xqx`، همراه اپ ۱.۳۹.۰)
 **خواسته:** پرامپت اپ: FEC خود KANKI MIX فقط برای بازی، TCP (KCP) هرگز؛ `internal/` دو طرف یکی. **چه شد:** `internal/obfs/plain.go` (هر دو ریپو یکی)، `obfs.go` (نوع KCP هر اتصال، تحویل 0x05 به شنوندهٔ دوم)، `main.go` (شنوندهٔ KCP بی FEC کنار قبلی)، `record.go` (ضبط بازی 0x05 را هم KCP می‌داند)، `assets/bin/kanki-mix-server` دوباره ساخته شد.
