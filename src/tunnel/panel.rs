@@ -120,6 +120,8 @@ pub const PROFILES: &[&str] = &["", "kmix", "kping", "mtun", "wg"];
 /// Game-FEC Pro (FEC "auto", a profile) exists from this agent version on: an older end would drop its
 /// plain payloads
 const GAME_PRO_FROM: &str = "3.57.0";
+/// where a tunnel without a port of its own starts looking for a free one
+const AUTO_TUNNEL_PORT: u16 = 20000;
 
 /// Every transport a tunnel can use (the panel accepts nothing else).
 pub const TRANSPORTS: &[&str] = &["tcp", "tcpmux", "ws", "wss", "quic", "kcp", "cdn", "hq", "h2", "dual", "game", "faketcp"];
@@ -1924,6 +1926,61 @@ fn live_clash(app: &App, t: &Tunnel, old: Option<&Tunnel>) -> Option<String> {
     None
 }
 
+/// The ports a server holds or will hold: what its tunnels listen on and forward there, its KPING relays
+/// (Iran) and exit, and what it reported listening on a moment ago (`ss`, every program)
+pub(crate) fn ports_on_server(app: &App, sid: &str) -> HashSet<u16> {
+    let mut t: HashSet<u16> = HashSet::new();
+    for tu in tunnels(app).iter().filter(|x| x.enabled) {
+        t.extend(tunnel_needs(tu).into_iter().filter(|x| x.0 == sid).map(|x| x.1));
+    }
+    let k = crate::kping::settings(app);
+    for r in &k.routes {
+        if r.iran == sid {
+            t.extend(r.ports());
+        }
+        if r.exit == sid {
+            t.insert(k.port);
+        }
+    }
+    if let Some(l) = listening_on(sid) {
+        t.extend(l.into_iter().map(|x| x.0));
+    }
+    t
+}
+
+/// KPING's ports and every port any server reported holding (for the panel-wide list of taken ports)
+pub(crate) fn held_anywhere(app: &App) -> HashSet<u16> {
+    let mut t: HashSet<u16> = HashSet::new();
+    let k = crate::kping::settings(app);
+    for r in &k.routes {
+        t.extend(r.ports());
+    }
+    for sid in std::iter::once("local".to_string()).chain(servers(app).into_iter().map(|s| s.id)) {
+        if let Some(l) = listening_on(&sid) {
+            t.extend(l.into_iter().map(|x| x.0));
+        }
+    }
+    t
+}
+
+/// The first `need` free ports in a row on server `sid`, from `from` up: free of what that server holds or
+/// will hold (`ports_on_server`) and of every VPN core port of the panel (a tunnel may carry any of them
+/// through this server later). None when 2000 tries found nothing.
+pub(crate) fn free_ports(app: &App, sid: &str, from: u16, need: u16) -> Option<u16> {
+    let mut busy = ports_on_server(app, sid);
+    busy.extend(crate::servers::all_taken(app));
+    let need = need.max(1);
+    let mut p = from.max(1024);
+    for _ in 0..2000 {
+        let end = p.checked_add(need - 1)?;
+        if (p..=end).all(|x| !busy.contains(&x)) {
+            return Some(p);
+        }
+        p = p.checked_add(1)?;
+    }
+    None
+}
+
 /// Live check from the tunnel form: which of these ports are taken on a server
 /// GET /api/tunnels/servers/:id/ports → { known: bool, used: [{port, proto, by}] }
 async fn server_ports(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
@@ -2121,6 +2178,13 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if t.kind == "hy2" {
         if let Err(e) = hy2_checks(&app, &t) {
             return err(StatusCode::CONFLICT, &e);
+        }
+    }
+    // no port written: the first one nothing holds on the listening server (and no VPN core uses anywhere)
+    if t.port == 0 && t.kind != "hy2" {
+        let listener = if t.mode == "direct" { t.exit.clone() } else { t.entry.clone() };
+        if let Some(p) = free_ports(&app, &listener, AUTO_TUNNEL_PORT, 1) {
+            t.port = p;
         }
     }
     if t.port == 0 {

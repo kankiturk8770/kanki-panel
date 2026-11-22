@@ -137,7 +137,7 @@ window.dashErrs=dashErrs;function dashErrs(){api('GET','/api/logs?src=all&n=200'
 // the columns ordered to cut crossings, every tunnel leaving and reaching its server at its own point,
 // and its label (short name · ping) in the middle of its own line, never over a server or another label.
 // on the map: the tunnel's shortest name (HQ-QUIC → HQ-Q, Game-FEC → GFEC …)
-var TMS={'HQ-QUIC':'HQ-Q','Game-FEC':'GFEC','TCP-Mux':'TMUX','FakeTCP':'FTCP','QUIC':'Q'};
+var TMS={'HQ-QUIC':'HQ-Q','Game-FEC':'GFEC','Game-FEC Pro':'GFEC+','TCP-Mux':'TMUX','FakeTCP':'FTCP','QUIC':'Q'};
 function tmShort(x){var n=tunShort(x);return TMS[n]||n.replace('AWG+','A+')}
 // on the map: a server's short name, its country's short code (Germany GR, England UK …) and its number,
 // numbered when two share a code (GR1, GR2); a name with no known country gives its first two letters

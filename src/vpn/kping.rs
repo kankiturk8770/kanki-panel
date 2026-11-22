@@ -562,6 +562,14 @@ async fn route_save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
     if let Some(v) = str_of("iran") {
         r.iran = v;
     }
+    // a new route without ports of its own: the first five in a row that nothing holds on its Iran server
+    // (another route, a tunnel, a VPN core, any program there), so a second route never takes the first one's
+    if id.is_empty() && b["port"].is_null() && b["tunnel_port"].is_null() && known(&r.iran) {
+        if let Some(base) = crate::tunnel::panel::free_ports(&app, &r.iran, DEFAULT_ENTRY_PORT, 5) {
+            r.port = base;
+            r.tunnel_port = base + 1;
+        }
+    }
     if let Some(v) = str_of("host") {
         if !v.is_empty() && !crate::twin::valid_host(&v) {
             return bad("the address must be a domain or an IP");
@@ -835,6 +843,35 @@ pub(crate) mod tests {
         let (st, _) = call(&app, "DELETE", &format!("/api/kping/routes/{}", rid), Value::Null).await;
         assert_eq!(st, StatusCode::OK);
         assert!(crate::tunnel::panel::tunnels(&app).is_empty());
+    }
+
+    /// A second route on the same Iran server gets ports of its own (nothing to type, no clash), and a
+    /// tunnel saved without a port gets a free one there
+    #[tokio::test]
+    async fn new_routes_and_tunnels_find_free_ports() {
+        let app = test_app();
+        app.db.set("api_key", "test-key");
+        app.db.set("tun_servers", &json!([{ "id": "ir1", "name": "Tehran", "token": "x", "addr": "ir.example.com", "loc": "iran" },
+                                          { "id": "de1", "name": "Frankfurt", "token": "y", "addr": "de.example.com", "loc": "abroad" },
+                                          { "id": "tr1", "name": "Istanbul", "token": "z", "addr": "tr.example.com", "loc": "abroad" }]).to_string());
+        put_on(&app);
+        let (st, a) = call(&app, "POST", "/api/kping/routes", json!({ "exit": "de1", "iran": "ir1" })).await;
+        assert_eq!(st, StatusCode::OK, "{}", a);
+        let (st, b) = call(&app, "POST", "/api/kping/routes", json!({ "exit": "tr1", "iran": "ir1" })).await;
+        assert_eq!(st, StatusCode::OK, "{}", b);
+        let pa: Route = serde_json::from_value(a["route"].clone()).unwrap();
+        let pb: Route = serde_json::from_value(b["route"].clone()).unwrap();
+        assert_eq!(pa.port, DEFAULT_ENTRY_PORT);
+        assert!(pa.ports().iter().all(|p| !pb.ports().contains(p)), "{:?} {:?}", pa.ports(), pb.ports());
+        // a tunnel with no port: one nothing holds on its listening server
+        let (st, t) = call(&app, "POST", "/api/tunnels", json!({ "entry": "ir1", "exit": "de1", "mode": "reverse", "transport": "game", "fec": "auto", "profile": "kmix", "udp": "4001" })).await;
+        assert_eq!(st, StatusCode::OK, "{}", t);
+        let tu = crate::tunnel::panel::tunnels(&app).into_iter().find(|x| x.id == t["id"].as_str().unwrap()).unwrap();
+        assert!(tu.port >= 20000 && !pa.ports().contains(&tu.port) && !pb.ports().contains(&tu.port));
+        assert_eq!((tu.fec.as_str(), tu.profile.as_str(), tu.dup), ("auto", "kmix", false));
+        // and an unknown profile is refused
+        let (st, _) = call(&app, "POST", "/api/tunnels", json!({ "id": tu.id, "profile": "nope" })).await;
+        assert_eq!(st, StatusCode::BAD_REQUEST);
     }
 
     fn put_on(app: &Arc<App>) {
