@@ -245,15 +245,18 @@ function nHealth(id){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIC
  '<div class="list">'+((r.services||[]).map(function(s){return '<div class="li"><span>'+esc(s.key)+' <small class="ltr">'+esc(s.unit)+'</small></span><span class="badge '+(s.active?'g':'r')+'">'+esc(s.state)+'</span></div>'}).join(''))+'</div>')}).catch(fail)}
 function nAssign(id,add){var n=findN(id);if(!confirm(t(add?'Add this node to ALL users?':'Remove this node from ALL users?')+(n?' ('+n.name+')':'')))return;
  toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+(add?'assign-all':'unassign-all')).then(function(){toast(t('Done'));loadNodes()}).catch(fail)}
-function updateAll(){if(!confirm(t('Update every node, every tunnel server and the panel itself to the latest version?')))return;toast(t('Updating…'));
- api('POST','/api/update-all').then(function(r){var h='';
+function updateAll(){kAsk(t('Update every node, every tunnel server and the panel itself to the latest version?'),t('Update all'),t('Update all')).then(function(ok){if(ok)updateGo()})}
+function updateGo(){
+ // the steps in the window while the panel asks every server
+ modal(mhead(t('Update all'),'')+'<div class="kxp-steps"><div class="now"><span class="spin"></span><span>'+t('1. Asking every server for the new version')+'</span></div><div class="next"><span class="kxs-n"></span><span>'+t('2. The servers take it by themselves')+'</span></div></div>');
+ api('POST','/api/update-all').then(function(r){var h='<div class="kxp-steps"><div class="ok"><span class="okc">'+ic('check',16)+'</span><span>'+t('1. Asking every server for the new version')+'</span></div><div class="ok"><span class="okc">'+ic('check',16)+'</span><span>'+t('2. The servers take it by themselves')+'</span></div></div>';
   h+='<p><b>'+t('Panel')+':</b> '+esc(String(r.panel))+(r.latest?' · '+esc(r.latest):'')+'</p>';
   if((r.nodes||[]).length)h+='<label class="f">'+t('Nodes')+'</label><div class="list">'+r.nodes.map(function(z){return '<div class="li"><span><b>'+esc(z.name)+'</b>'+(z.ok?'':'<small>'+esc(z.error||t('no answer: update it once with the kanki command'))+'</small>')+'</span><span>'+(z.ok?'✅':'❌')+'</span></div>'}).join('')+'</div>';
   if((r.agents||[]).length)h+='<label class="f">'+t('Tunnel servers (updating by themselves)')+'</label><p class="muted">'+esc(r.agents.join(', '))+'</p>';
   if((r.also_nodes||[]).length)h+='<label class="f">'+t('Both a node and a tunnel server (updated once, through the node)')+'</label><p class="muted">'+esc(r.also_nodes.join(', '))+'</p>';
   if((r.manual||[]).length)h+='<div class="warnbox">'+t('These agents are too old to update remotely. Run the command kanki on them and choose 3 (Update) once:')+' <b>'+esc(r.manual.join(', '))+'</b></div>';
   if(!(r.nodes||[]).length&&!(r.agents||[]).length&&!(r.manual||[]).length&&String(r.panel)=='current')h+='<p>'+t('Everything is already up to date')+'</p>';
-  modal(mhead(t('Update all'),'')+h);setTimeout(function(){if(S.page=='nodes')loadNodes()},8000)}).catch(fail)}
+  modal(mhead(t('Update all'),'')+h);setTimeout(function(){if(S.page=='nodes')loadNodes()},8000)}).catch(function(e){closeModal();fail(e)})}
 
 // ---------------------------------------------------------------- backup
 function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'</h2><p>'+t('Full backup of users, credentials, certificates, VPN settings, nodes and panel state')+'</p></div></div>'+

@@ -468,6 +468,17 @@ pub async fn run(version: &str) {
                         }
                         _ => {}
                     }
+                    // "Restart services" in the panel: the tunnels and KPING stop now and start again below
+                    if v["restart"].as_bool() == Some(true) {
+                        eprintln!("the panel asked: restarting the tunnels and KPING");
+                        mgr.apply(vec![]).await;
+                        let _ = tokio::task::spawn_blocking(|| crate::kpingd::apply(Default::default())).await;
+                        last.clear();
+                    }
+                    // "Sync" in the panel: everything below is applied again now (nothing kept from before)
+                    if v["resync"].as_bool() == Some(true) {
+                        last.clear();
+                    }
                     // "Try SSL again" in the panel: no waiting after earlier failures
                     if v["ssl_retry"].as_bool() == Some(true) {
                         let _ = tokio::task::spawn_blocking(crate::certbot::retry_now).await;

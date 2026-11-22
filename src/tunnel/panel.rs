@@ -1579,6 +1579,8 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/tunnels/servers/:id", delete(server_del).put(server_edit))
         .route("/api/tunnels/servers/:id/free-ports", post(server_free_ports))
         .route("/api/tunnels/servers/:id/ssl-retry", post(server_ssl_retry))
+        .route("/api/tunnels/servers/:id/health", get(server_health))
+        .route("/api/tunnels/servers/:id/agent/:act", post(server_agent_act))
         .route("/api/tunnels/servers/:id/ports", get(server_ports))
         .route("/api/tunnels/servers/:id/firewall", get(server_fw).post(server_fw_close))
         .route("/api/tunnels/servers/:id/firewall-guard", post(server_guard))
@@ -2688,6 +2690,61 @@ fn fw_closes() -> &'static Mutex<HashMap<String, Vec<String>>> {
     S.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// What the admin asked a server's agent to do on its next report: "sync" (apply everything again now) or
+/// "restart" (stop its tunnels and KPING, then start them again)
+fn agent_asks() -> &'static Mutex<HashMap<String, HashSet<String>>> {
+    static S: OnceLock<Mutex<HashMap<String, HashSet<String>>>> = OnceLock::new();
+    S.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// POST /api/tunnels/servers/:id/agent/sync | restart (an agent older than 3.57.0 does not know them: it
+/// keeps doing its usual round, which applies everything every five seconds anyway)
+async fn server_agent_act(State(app): St, h: HeaderMap, Path((id, act)): Path<(String, String)>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    if act != "sync" && act != "restart" {
+        return err(StatusCode::NOT_FOUND, "unknown action");
+    }
+    if !servers(&app).iter().any(|s| s.id == id) {
+        return err(StatusCode::NOT_FOUND, "unknown server");
+    }
+    agent_asks().lock().unwrap_or_else(|e| e.into_inner()).entry(id).or_default().insert(act);
+    Json(json!({ "ok": true })).into_response()
+}
+
+/// GET /api/tunnels/servers/:id/health: what the server's agent said last: when, its version, each tunnel
+/// (links, error), the firewall, the machine and KPING, and what needs a look
+async fn server_health(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let Some(srv) = servers(&app).into_iter().find(|s| s.id == id) else { return err(StatusCode::NOT_FOUND, "unknown server") };
+    let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
+    let Some(x) = sn.get(&id) else {
+        return Json(json!({ "online": false, "seen": false, "issues": ["the agent never reported: run the server's command"] })).into_response();
+    };
+    let age = now() - x.at;
+    let names: HashMap<String, String> = tunnels(&app).into_iter().map(|t| (t.id, t.name)).collect();
+    let tl: Vec<Value> = x
+        .status
+        .iter()
+        .filter(|s| !s.id.starts_with("probe-"))
+        .map(|s| json!({ "id": s.id, "name": names.get(&s.id).cloned().unwrap_or_else(|| s.id.clone()), "role": s.role, "links": s.links, "want": s.want, "rtt_ms": s.rtt_ms, "error": s.error, "transport": s.transport }))
+        .collect();
+    let mut issues: Vec<String> = vec![];
+    if age > 60 {
+        issues.push(format!("no report for {} s", age));
+    }
+    for t in tl.iter().filter(|t| t["links"].as_u64() == Some(0)) {
+        issues.push(format!("tunnel {}: no link{}", t["name"].as_str().unwrap_or(""), t["error"].as_str().filter(|e| !e.is_empty()).map(|e| format!(" ({})", e)).unwrap_or_default()));
+    }
+    if !x.version.is_empty() && ver_lt(&x.version, crate::VERSION) {
+        issues.push(format!("agent v{} is older than the panel (v{})", x.version, crate::VERSION));
+    }
+    Json(json!({
+        "online": age <= 60, "seen": true, "age": age, "version": x.version, "ip": x.ip, "loc": srv.loc,
+        "tunnels": tl, "fw": x.fw, "stats": x.stats, "issues": issues,
+    }))
+    .into_response()
+}
+
 /// "Try SSL again": the server forgets the waits after earlier certbot failures (every SSL of that server)
 pub(crate) fn ask_ssl_retry(id: &str) {
     ssl_retries().lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string());
@@ -3077,6 +3134,7 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     // services to stop for our ports (asked in Health)
     let free = frees().lock().unwrap_or_else(|e| e.into_inner()).remove(&id).unwrap_or_default();
     let ssl_retry = ssl_retries().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+    let asks = agent_asks().lock().unwrap_or_else(|e| e.into_inner()).remove(&id).unwrap_or_default();
     let fw_close = fw_closes().lock().unwrap_or_else(|e| e.into_inner()).remove(&id).unwrap_or_default();
     let (fw_guard, fw_confirm) = guard_answer(&app, &id, &b["fw"]["guard"]);
     let fw_fresh = guard_fresh().lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
@@ -3086,7 +3144,7 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     crate::kping::ingest(&app, &id, &b["kping"]);
     let kping = crate::kping::cfg_for(&app, &id);
     // "vip": [] tells an agent older than 3.57.0 to stop the VIP tunnels it still runs
-    Json(json!({ "kping": kping, "vip": [], "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app), "panel_alt": crate::cdn::url(&app).into_iter().collect::<Vec<_>>() })).into_response()
+    Json(json!({ "kping": kping, "vip": [], "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "resync": asks.contains("sync"), "restart": asks.contains("restart"), "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app), "panel_alt": crate::cdn::url(&app).into_iter().collect::<Vec<_>>() })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)

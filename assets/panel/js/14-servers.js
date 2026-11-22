@@ -5,7 +5,7 @@
 (function(){
 'use strict';
 
-var SV={d:null,wait:null,reg:(function(){try{return localStorage.getItem('kk_reg')||'all'}catch(e){return 'all'}})(),fwOpen:false};
+var SV={d:null,wait:null,tab:{},reg:(function(){try{return localStorage.getItem('kk_reg')||'all'}catch(e){return 'all'}})(),fwOpen:false};
 window.SV=SV;
 
 // ---------------------------------------------------------------- look
@@ -69,10 +69,10 @@ function fwDraw(){var el=$('#svp_fw');if(!el||!FWD)return;var ids=Object.keys(FW
  el.innerHTML=kuGroup('🛡 '+t('Firewall'),on,'<button class="b2 sm" onclick="fwAll('+(on<ids.length)+')">'+t(on<ids.length?'On for every server':'Off for every server')+'</button>',
   '<p class="muted ku-note">'+t('On: every port is closed except SSH and what Kanki uses on that server (cores, Kanki DNS, Xray, tunnels, the panel). A new tunnel opens its own port and a deleted one closes it, by themselves. The panel checks the server still works; if not, the server turns the firewall off again within 3 minutes.')+'</p>'+rows)}
 window.fwSet=function(id,on,box){var msg=on?t('Turn the firewall on for this server? Only SSH and Kanki\'s ports stay open; anything else (a website you run there by hand) is closed.'):t('Turn the firewall off for this server?');
- if(!confirm(msg)){if(box)box.checked=!on;return}
- api('POST','/api/tunnels/servers/'+q(id)+'/firewall-guard',{on:on}).then(function(){toast(t('Sent: the server does it on its next report (a few seconds)'));fwLoad()}).catch(function(e){if(box)box.checked=!on;fail(e)})};
-window.fwAll=function(on){if(!confirm(on?t('Turn the firewall on for EVERY server? On each one only SSH and Kanki\'s ports stay open.'):t('Turn the firewall off for every server?')))return;
- api('POST','/api/firewall/guard',{on:on}).then(function(r){toast(t('Sent')+' · '+N(r.servers)+' '+t('servers'));fwLoad()}).catch(fail)};
+ kAsk(msg,t('Firewall')).then(function(ok){if(!ok){if(box)box.checked=!on;return}
+ api('POST','/api/tunnels/servers/'+q(id)+'/firewall-guard',{on:on}).then(function(){toast(t('Sent: the server does it on its next report (a few seconds)'));fwLoad()}).catch(function(e){if(box)box.checked=!on;fail(e)})})};
+window.fwAll=function(on){kAsk(on?t('Turn the firewall on for EVERY server? On each one only SSH and Kanki\'s ports stay open.'):t('Turn the firewall off for every server?'),t('Firewall')).then(function(ok){if(!ok)return;
+ api('POST','/api/firewall/guard',{on:on}).then(function(r){toast(t('Sent')+' · '+N(r.servers)+' '+t('servers'));fwLoad()}).catch(fail)})};
 window.srvLoad=load;
 
 // ---------------------------------------------------------------- page
@@ -104,6 +104,18 @@ function draw(force){var g=$('#svp_g');if(!g||!SV.d)return;
   if(!on)cnt.off++;else if(h&&h.c!='g')cnt.warn++;else cnt.ok++;if(x.agent&&x.agent.can_update)cnt.upd++});
  var sm=$('#svp_sum');if(sm)sm.innerHTML=kuStats([[t('Servers'),N(cnt.all)],[t('Healthy'),N(cnt.ok),cnt.ok?'g':''],[t('Needs a look'),N(cnt.warn),cnt.warn?'y':''],[t('Not connected'),N(cnt.off),cnt.off?'r':''],[t('Update ready'),N(cnt.upd),cnt.upd?'y':'']])}
 window.srvDraw=draw;
+window.srvTab=function(key,p){SV.tab[key]=p;var b=document.querySelector('.kxr.open[data-key="'+key+'"] .kxr-in');if(!b)return;
+ $$('.sxt button',b).forEach(function(x){var on=x.dataset.t==p;x.classList.toggle('on',on);x.setAttribute('aria-selected',on)});
+ $$('.sxp',b).forEach(function(x){x.hidden=x.dataset.p!=p})};
+// the agent of a server without a VPN part: what it said last, and the panel's asks (sync, restart)
+window.agHealth=function(id){toast(t('Checking…'));api('GET','/api/tunnels/servers/'+q(id)+'/health').then(function(r){var s=find(id)||{};
+ var row=function(l,v){return '<div class="li"><span>'+l+'</span><span class="ltr">'+v+'</span></div>'};
+ var h='<div class="list">'+row(t('Agent'),r.online?'✅ '+t('Connected'):'❌ '+t('Not connected'))+(r.seen?row(t('Last report'),N(r.age)+' s')+row(t('Version'),'v'+esc(r.version||'?')):'')+
+  (r.stats&&r.stats.cpu!=null?row('CPU',N(Math.round(r.stats.cpu))+'%')+row('RAM',N(Math.round(pc(r.stats.mem_used,r.stats.mem_total)))+'%'):'')+'</div>';
+ if((r.tunnels||[]).length)h+='<label class="f">'+t('Tunnels')+'</label><div class="list">'+r.tunnels.map(function(x){return '<div class="li"><span><b>'+esc(x.name)+'</b>'+(x.error?'<small>'+esc(x.error)+'</small>':'')+'</span><span>'+(x.links>0?'✅ '+N(x.links)+'/'+N(x.want):'❌')+'</span></div>'}).join('')+'</div>';
+ h+=(r.issues||[]).length?'<div class="warnbox">'+r.issues.map(esc).join('<br>')+'</div>':'<p>'+t('Everything looks fine')+'</p>';
+ modal(mhead(t('Health'),s.name||id)+h)}).catch(fail)};
+window.agAct=function(id,a){api('POST','/api/tunnels/servers/'+q(id)+'/agent/'+a).then(function(){toast(t(a=='restart'?'Sent: its tunnels and KPING start again in a few seconds':'Sent: the server applies everything again in a few seconds'));setTimeout(function(){load(true)},6000)}).catch(fail)};
 function srvBox(kind,title,icon,rows){
  return kuGroup(icon+' '+t(title),rows.length,'<button class="btn sm" onclick="srvAdd(\''+kind+'\')">'+ic('plus',14)+' '+t(kind=='iran'?'Add an Iran server':'Add an abroad server')+'</button>',
   rows.length?'<div class="kxl">'+rows.map(row).join('')+'</div>':'<p class="muted ku-empty">'+t('No server yet')+'</p>')}
@@ -170,20 +182,25 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  var miss='';
  if(!n&&a){var su=s.setup||null;
   if(s.pending&&!a.last_seen)miss='<div class="kxc-miss"><span>'+t('Waiting for this server: run its command')+'</span><button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+t('Show command')+'</button></div>';
+  // an Iran server is a relay: its tunnels and KPING are its job, a missing VPN part is no problem
+  else if(isIr(s))miss=!a.online?'':'<div class="kxc-ok"><span class="okc">'+ic('check',14)+'</span><span>'+t('Relay / tunnel mode active')+'</span></div>';
   else if(su&&su.state=='running')miss='<div class="kxc-miss"><span class="spin"></span><span>'+t('Installing the VPN part…')+'</span>'+(su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>';
   else miss='<div class="kxc-miss"><span>'+(su&&su.state=='failed'?'<b class="bad2">'+t('VPN install failed')+'</b>':t('VPN is not installed on this server'))+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\','+(isIr(s)?0:1)+')">'+t(su&&su.state=='failed'?'Try again':'Install VPN')+'</button>'+(su&&su.state=='failed'&&su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>'}
  if(n&&!a&&!s.local)miss='<div class="kxc-miss"><span>'+t('Tunnels, Xray and DNS are not installed on this server')+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\',1)">'+t('Install')+'</button></div>';
- // the server itself
- var h='<div class="kxr-line">'+st.join('<span>·</span>')+'</div>'+miss+srvCores(s)+
-  '<div class="kxr-sec">'+t('Server settings')+'</div><div class="kxf">'+
+ // the server in three parts (one shown at a time): settings, cores and network, control and agent
+ var tab=SV.tab[s.key]||'base',part=function(k){return '<div class="sxp" data-p="'+k+'"'+(k==tab?'':' hidden')+'>'};
+ var h='<div class="kxr-line">'+st.join('<span>·</span>')+'</div>'+miss+
+  '<div class="seg sxt" role="tablist">'+[['base','Basic settings'],['net','Cores and network'],['ctl','Control and agent']].map(function(z){return '<button type="button" role="tab" data-t="'+z[0]+'" aria-selected="'+(z[0]==tab)+'" class="'+(z[0]==tab?'on':'')+'" onclick="srvTab(\''+k+'\',\''+z[0]+'\')">'+t(z[1])+'</button>'}).join('')+'</div>'+
+  part('base')+'<div class="kxr-sec">'+t('Server settings')+'</div><div class="kxf">'+
   '<div><label class="f">'+t('Name')+'</label><input id="sx_nm" value="'+esc(s.name)+'" maxlength="40"></div>'+
   '<div><label class="f">'+t('Location')+'</label><div class="seg kxseg" id="sx_loc"><button type="button" data-l="abroad" class="'+(isIr(s)?'':'on')+'">'+t('Abroad')+'</button><button type="button" data-l="iran" class="'+(isIr(s)?'on':'')+'">'+t('Iran')+'</button></div></div>'+
   (a?'<div class="wide"><label class="f">'+t('Address other servers use to reach it (optional)')+'</label><input id="sx_ad" class="ltr" value="'+esc(a.addr||'')+'" placeholder="'+esc(a.ip||'')+'"></div>':'')+
   (s.domain&&!s.local?'<div class="wide"><label class="chk" style="margin:0"><input type="checkbox" id="sx_ssl"'+(s.ssl!==false?' checked':'')+'>'+t('Get SSL by itself (Let\'s Encrypt)')+'</label><small class="muted">'+t('Used by its install command (Show command).')+'</small></div>':'')+
   (n?'<div class="wide"><label class="f">'+t('Note')+'</label><input id="sx_no" value="'+esc(n.note||'')+'"></div>':'')+'</div>';
+ var netH='';
  // its VPN: who is sent there and where they connect
  if(n){var own=!n.endpoint||n.endpoint_mode=='panel',ents=entriesOf(s);
-  h+='<div class="kxr-sec">VPN</div>'+
+  netH+='<div class="kxr-sec">VPN</div>'+
    '<div class="kxsw"><span>'+t('VPN for users')+'<small>'+t(n.enabled?'VPN serves users':'VPN is installed but serves nobody (a relay)')+'</small></span>'+sw('',n.enabled,"srvVpn('"+k+"',this.checked)")+'</div>'+
    '<label class="kxsw" style="cursor:pointer"><span>'+t('Users without their own server list get this server')+'</span><input type="checkbox" id="sx_acc" style="width:auto"'+(n.accept_all?' checked':'')+'></label>'+
    '<div class="kxf" style="margin-top:4px"><div class="wide"><label class="f">'+t('Users connect to')+'</label><input id="sx_ep" class="ltr" value="'+esc(s.local&&own?'':n.endpoint||'')+'" placeholder="'+esc(n.effective_endpoint||'')+'">'+
@@ -194,13 +211,16 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
     '<div style="align-self:end"><label class="chk" style="margin:0"><input type="checkbox" id="sx_ins"'+(n.insecure?' checked':'')+'>'+t('Self-signed certificate (no domain on the server)')+'</label></div></div></details>')+
    ''}
  // its tunnel: a second copy of every config through the Iran address
- if(!isIr(s)&&(n||(s.jobs&&s.jobs.xray))&&s.tunnel)h+=tunBox(s);
- h+='<div class="kxsave"><button class="b2 sm" onclick="accClose(\'srv\')">'+t('Cancel')+'</button><button class="btn sm" onclick="srvSave(\''+k+'\')">'+t('Save')+'</button></div>';
+ if(!isIr(s)&&(n||(s.jobs&&s.jobs.xray))&&s.tunnel)netH+=tunBox(s);
+ // the save button is under both parts that hold fields
+ var save='<div class="kxsave"><button class="b2 sm" onclick="accClose(\'srv\')">'+t('Cancel')+'</button><button class="btn sm" onclick="srvSave(\''+k+'\')">'+t('Save')+'</button></div>';
+ h+=save+'</div>'+part('net')+srvCores(s);
  // health and what can be done
  var stt=(n&&n.info&&n.info.stats)||(a&&a.stats);
- if(stt)h+='<div class="kxm3">'+nMeter('CPU',+stt.cpu||0,N(Math.round(+stt.cpu||0))+'%')+nMeter('RAM',pc(stt.mem_used,stt.mem_total),N(Math.round(pc(stt.mem_used,stt.mem_total)))+'%')+nMeter('Disk',pc(stt.disk_used,stt.disk_total),N(Math.round(pc(stt.disk_used,stt.disk_total)))+'%')+'</div>';
+ if(stt)netH+='<div class="kxm3">'+nMeter('CPU',+stt.cpu||0,N(Math.round(+stt.cpu||0))+'%')+nMeter('RAM',pc(stt.mem_used,stt.mem_total),N(Math.round(pc(stt.mem_used,stt.mem_total)))+'%')+nMeter('Disk',pc(stt.disk_used,stt.disk_total),N(Math.round(pc(stt.disk_used,stt.disk_total)))+'%')+'</div>';
  var hh=n?nHealthOf(n):null;
- if(hh&&hh.r&&hh.r.length&&n.enabled)h+='<ul class="nwhy">'+hh.r.map(function(x){return '<li class="l'+x[0]+'">'+t(x[1])+'</li>'}).join('')+'</ul>';
+ if(hh&&hh.r&&hh.r.length&&n.enabled)netH+='<ul class="nwhy">'+hh.r.map(function(x){return '<li class="l'+x[0]+'">'+t(x[1])+'</li>'}).join('')+'</ul>';
+ h+=netH+(n||(!isIr(s)&&s.tunnel)?save:'')+'</div>'+part('ctl');
  var acts=[];
  if(n){acts.push('<button class="b2 sm" onclick="nHealth(\''+ni+'\')">♡ '+t('Health')+'</button>');
   acts.push('<button class="b2 sm" onclick="nAct(\''+ni+'\',\'sync\')">⇄ '+t('Sync')+'</button>');
@@ -208,6 +228,12 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAct(\''+ni+'\',\'update\')">⇪ '+t('Update agent')+'</button>');
   acts.push('<button class="b2 sm okb" onclick="nAssign(\''+ni+'\',1)">'+ic('plus',13)+' '+t('Add to all users')+'</button>');
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAssign(\''+ni+'\',0)">'+t('Remove from all users')+'</button>')}
+ // a server with only the agent (every Iran server, a KPING exit): the same four controls, on its agent
+ else if(a&&!s.local){var ai=esc(a.id);
+  acts.push('<button class="b2 sm" onclick="agHealth(\''+ai+'\')">♡ '+t('Health')+'</button>');
+  acts.push('<button class="b2 sm" onclick="agAct(\''+ai+'\',\'sync\')">⇄ '+t('Sync')+'</button>');
+  acts.push('<button class="b2 sm" onclick="agAct(\''+ai+'\',\'restart\')">↻ '+t('Restart services')+'</button>');
+  if(!a.can_update)acts.push('<button class="b2 sm" onclick="srvUpdate(\''+k+'\')">⇪ '+t('Update agent')+'</button>')}
  if(a&&!s.local&&a.can_update)acts.push('<button class="b2 sm okb" onclick="srvUpdate(\''+k+'\')">⇪ '+t('Update this server')+'</button>');
  if(a&&!s.local)acts.push('<button class="b2 sm" onclick="tunSrvEdit(\''+esc(a.id)+'\')">'+ic('tunnel',13)+' '+t('Tunnel agent settings')+'</button>');
  if(!s.local)acts.push('<button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+ic('link',13)+' '+t('Show command')+'</button>');
@@ -216,6 +242,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  if(s.local)acts.push('<button class="b2 sm" onclick="srvMovePanel()">'+ic('move',13)+' '+t('Move the panel to a new server or IP')+'</button>');
  h+='<div class="kxacts">'+acts.join('')+'</div>';
  if(!s.local)h+='<div class="ku-danger">'+(n&&a&&isIr(s)?'<button class="b2 sm bd" onclick="srvDropVpn(\''+k+'\')">'+t('Remove the VPN from this server')+'</button> ':'')+'<button class="b2 sm bd" onclick="srvDel(\''+k+'\')">'+ic('trash',13)+' '+t('Delete server')+'</button></div>';
+ h+='</div>';
  setTimeout(function(){$$('#sx_loc button').forEach(function(b){b.onclick=function(){$$('#sx_loc button').forEach(function(z){z.classList.toggle('on',z==b)});var bb=b.closest('.kxr-b');if(bb)bb.dataset.dirty='1'}})},0);
  return h}
 
@@ -234,10 +261,10 @@ function tunBox(s){var tn=s.tunnel||{},n=s.node,ents=entriesOf(s),irs=irHosts(s)
 
 // Save of the open server: its name, place and address (the server), who gets it and where users connect (its VPN)
 // the VPN part off an Iran server (or all of them): tunnels, Xray and Kanki DNS stay
-window.srvDropVpn=function(key){if(!confirm(t('Remove WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from this server? Its tunnels, Xray and Kanki DNS stay. Install VPN brings them back.')))return;
- api('POST','/api/servers/'+q(key)+'/drop-vpn').then(function(r){if(window.kdFollowRemoval)kdFollowRemoval(r.removal);accClose('srv');load(true)}).catch(fail)};
-window.srvDropIranVpn=function(){if(!confirm(t('Remove WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from every Iran server that serves no VPN user? Their tunnels, Xray and Kanki DNS stay.')))return;
- api('POST','/api/servers/drop-iran-vpn').then(function(r){(r.removals||[]).forEach(function(id){if(window.kdFollowRemoval)kdFollowRemoval(id)});toast(t('Done')+' · '+N(r.count||0));load(true)}).catch(fail)};
+window.srvDropVpn=function(key){kAsk(t('Remove WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from this server? Its tunnels, Xray and Kanki DNS stay. Install VPN brings them back.'),'',t('Remove'),1).then(function(ok){if(!ok)return;
+ api('POST','/api/servers/'+q(key)+'/drop-vpn').then(function(r){if(window.kdFollowRemoval)kdFollowRemoval(r.removal);accClose('srv');load(true)}).catch(fail)})};
+window.srvDropIranVpn=function(){kAsk(t('Remove WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from every Iran server that serves no VPN user? Their tunnels, Xray and Kanki DNS stay.'),'',t('Remove'),1).then(function(ok){if(!ok)return;
+ api('POST','/api/servers/drop-iran-vpn').then(function(r){(r.removals||[]).forEach(function(id){if(window.kdFollowRemoval)kdFollowRemoval(id)});toast(t('Done')+' · '+N(r.count||0));load(true)}).catch(fail)})};
 window.srvSave=function(key){var s=find(key);if(!s)return;var n=s.node,a=s.agent,jobs=[];
  var loc=(($$('#sx_loc button.on')[0]||{}).dataset||{}).l||(isIr(s)?'iran':'abroad');
  var b={name:$('#sx_nm').value.trim(),loc:loc};if($('#sx_ad'))b.addr=$('#sx_ad').value.trim();if($('#sx_ssl'))b.ssl=$('#sx_ssl').checked;
@@ -291,9 +318,14 @@ function showCmd(cmd,ports,id){var o=$('#sa_out')||$('#mbox');if(!o)return;
  SV.wait=id||null;waitTick()}
 
 function waitTick(){var el=$('#sa_steps');if(!el||!SV.wait||!SV.d)return;var s=find(SV.wait);if(!s)return;
- var a=s.agent||{},n=s.node,ok=function(b,l){return '<div>'+(b?'<span class="okc">'+ic('check',16)+'</span>':'<span class="spin"></span>')+'<span>'+t(l)+'</span></div>'};
- el.innerHTML=ok(a.online||a.last_seen,a.online||a.last_seen?'Server agent connected':'Waiting for the server to connect…')+ok(!!n,'VPN part installed');
- clearTimeout(SV.wt);if(!n&&$('#modal').classList.contains('on'))SV.wt=setTimeout(function(){api('GET','/api/servers').then(function(d){SV.d=d;waitTick();if(S.page=='nodes')draw()}).catch(function(){})},4000)}
+ var a=s.agent||{},n=s.node,seen=!!(a.online||a.last_seen),ir=isIr(s),vpn=!ir&&s.vpn_wanted!==false&&!(s.cores&&!s.cores.length);
+ // each step: done, now, or still to come (only the first step not done spins)
+ var steps=ir?[[seen,'1. Connect to the server and install the agent'],[seen&&!!a.version,'2. Set up the tunnel and relay core'],[online(s),'3. Done and online']]
+  :[[seen,'1. Connect to the server and install the agent'],[vpn?!!n:seen,vpn?'2. Install and start the VPN cores':'2. No VPN core chosen: agent only'],[vpn?!!(n&&(n.online||s.local)):online(s),'3. Firewall and finish']];
+ var cur=steps.findIndex(function(x){return !x[0]}),done=cur<0;
+ el.innerHTML=steps.map(function(x,i){return '<div class="'+(x[0]?'ok':i==cur?'now':'next')+'">'+(x[0]?'<span class="okc">'+ic('check',16)+'</span>':i==cur?'<span class="spin"></span>':'<span class="kxs-n"></span>')+'<span>'+t(x[1])+'</span></div>'}).join('')+
+  (done?'<p class="kxs-done">'+t('The server is ready')+'</p>':'');
+ clearTimeout(SV.wt);if(!done&&$('#modal').classList.contains('on'))SV.wt=setTimeout(function(){api('GET','/api/servers').then(function(d){SV.d=d;waitTick();if(S.page=='nodes')draw()}).catch(function(){})},4000)}
 
 // The machine of a server died or its IP was filtered: the same server on a new machine. Its settings stay;
 // the command makes the new machine this server again (tunnels, Xray, DNS, its VPN part and SSL come back).

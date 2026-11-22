@@ -180,11 +180,8 @@ impl Lane {
     }
     /// Sends a frame on the lane. false = not sent (lane not agreed yet, frame too big, queue
     /// full): the caller sends it on the stream instead.
-    pub fn send(&self, frame: &[u8]) -> bool {
-        self.send_as(frame, false)
-    }
-    /// The same, for a frame of a flow that is not the game (`bulk`): a carrier that knows the difference
-    /// (Game-FEC Pro) sends it without FEC; on any other it is a frame like the rest
+    /// `bulk`: a frame of a flow that is not the game: a carrier that knows the difference (Game-FEC Pro)
+    /// sends it without FEC; on any other it is a frame like the rest
     pub fn send_as(&self, frame: &[u8], bulk: bool) -> bool {
         if !self.on.load(Ordering::Relaxed) {
             return false;
@@ -261,9 +258,9 @@ mod tests {
         let (p, mut end) = Port::pair();
         let k = [3u8; 32];
         let x = Lane::new(p, &Keys { tx: k, rx: k });
-        assert!(!x.send(b"frame"));
+        assert!(!x.send_as(b"frame", false));
         x.on.store(true, Ordering::Relaxed);
-        assert!(x.send(b"frame"));
+        assert!(x.send_as(b"frame", false));
         let w = end.out.try_recv().unwrap();
         assert_eq!(x.open(&w).unwrap(), b"frame");
     }
@@ -284,7 +281,7 @@ mod tests {
         let k = [5u8; 32];
         let x = Lane::new(p, &Keys { tx: k, rx: k });
         x.on.store(true, Ordering::Relaxed);
-        assert!(x.send(b"shot"));
+        assert!(x.send_as(b"shot", false));
         let a = end.out.try_recv().unwrap();
         assert!(end.out.try_recv().is_err(), "the copy waits");
         tokio::time::sleep(DUP_GAP / 2).await;
@@ -297,7 +294,7 @@ mod tests {
         let (p1, mut e1) = Port::pair();
         let y = Lane::new(p1, &Keys { tx: k, rx: k });
         y.on.store(true, Ordering::Relaxed);
-        assert!(y.send(b"shot"));
+        assert!(y.send_as(b"shot", false));
         assert!(e1.out.try_recv().is_ok() && e1.out.try_recv().is_err());
     }
 

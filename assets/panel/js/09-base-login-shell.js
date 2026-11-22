@@ -219,7 +219,12 @@ document.addEventListener('keydown',function(e){if(e.key=='Escape'&&$('#modal').
 $('#modal').addEventListener('click',function(e){if(e.target.id=='modal')closeModal()});
 function mhead(title,sub){return '<div class="mh"><div><b style="font-size:17px">'+esc(title)+'</b>'+(sub?'<small class="ltr">'+esc(sub)+'</small>':'')+'</div><button class="ib" onclick="closeModal()">✕</button></div>'}
 function sw(id,on,cb){return '<label class="sw"><input type="checkbox" '+(on?'checked':'')+' onchange="'+cb+'"><span></span></label>'}
-function confirmDo(fn){if(confirm(t('Are you sure?')))fn()}
+function confirmDo(fn){kAsk(t('Are you sure?')).then(function(ok){if(ok)fn()})}
+// A question in the window in the middle of the screen (instead of the browser's confirm): resolves true / false
+function kAsk(text,title,ok,danger){return new Promise(function(res){var done=false,end=function(v){if(done)return;done=true;res(v)};
+ modal(mhead(title||t('Are you sure?'))+'<p class="kask">'+esc(text)+'</p><div class="kxsave"><button class="b2" id="ka_no">'+t('Cancel')+'</button><button class="btn'+(danger?' bd':'')+'" id="ka_ok">'+esc(ok||t('Yes'))+'</button></div>');
+ $('#ka_no').onclick=function(){closeModal();end(false)};$('#ka_ok').onclick=function(){closeModal();end(true)};
+ var m=$('#modal'),ob=new MutationObserver(function(){if(!m.classList.contains('on')){ob.disconnect();end(false)}});ob.observe(m,{attributes:true,attributeFilter:['class']})})}
 function dl(blobRes){var a=document.createElement('a');a.href=URL.createObjectURL(blobRes.blob);a.download=blobRes.name||'download';document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},2000)}
 
 // ---------------------------------------------------------------- login

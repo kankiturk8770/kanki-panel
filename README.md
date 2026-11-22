@@ -3,6 +3,11 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.57 — Game-FEC Pro
+The VIP tunnel is gone; Game-FEC Pro repairs only while the line loses packets (never more than twice the traffic) and only the
+game, KPING routes are made on the Tunnels page, new routes and tunnels find free ports, Iran servers get the same controls,
+and direct WireGuard with junk packets goes only to the Kanki app.
+
 ## New in 3.56 — Selling better
 A 300 MB / 3 hour trial with an instant 15% offer (TEST15), one renewal reminder with 10% extra volume, a 20% win-back (BACK20)
 five days after the end, gifts to buyers or picked accounts from the admin mini app, and English digits everywhere.
