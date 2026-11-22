@@ -223,20 +223,24 @@ pub fn cfg_for(app: &App, sid: &str) -> KpCfg {
         return KpCfg::default();
     }
     let users = kusers(app, &app.db.users());
+    // a Game-FEC Pro tunnel repairs the line between the servers by itself, and only when it loses packets:
+    // KPING's own second copy into it would only double the traffic
+    let tl = crate::tunnel::panel::tunnels(app);
+    let pro = |tid: &str| tl.iter().any(|t| t.id == tid && t.transport == "game" && t.fec == "auto");
     let relays = s
         .routes
         .iter()
         .filter(|r| r.iran == sid && !r.tunnel.is_empty())
         .map(|r| RelayCfg {
             port: r.port, to: r.inner(), more: if r.tunnel2.is_empty() { vec![] } else { vec![r.inner2()] }, dup_ms: s.dup_ms,
-            tun_dup_ms: s.tun_dup_ms,
+            tun_dup_ms: if pro(&r.tunnel) && (r.tunnel2.is_empty() || pro(&r.tunnel2)) { 0 } else { s.tun_dup_ms },
             users: users.iter().map(|u| KUser { ip: String::new(), ..u.clone() }).collect(),
         })
         .collect();
     let to_here: Vec<&Route> = s.routes.iter().filter(|r| r.exit == sid).collect();
     let exit = (!to_here.is_empty()).then(|| ExitCfg {
         port: s.port, mtu: mtu(app, &s), fec: s.fec,
-        tun_dup_ms: s.tun_dup_ms,
+        tun_dup_ms: if to_here.iter().all(|r| pro(&r.tunnel) && (r.tunnel2.is_empty() || pro(&r.tunnel2))) { 0 } else { s.tun_dup_ms },
         users: users.clone(),
     });
     KpCfg { obfs: obfs(app), relays, exit }
@@ -651,24 +655,36 @@ async fn route_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Resp
     Json(json!({ "ok": true, "removal": removal, "tunnel": r.tunnel, "tunnel2": r.tunnel2 })).into_response()
 }
 
-/// A route's Kanki tunnel: reverse (the exit dials Iran), its kind (Game-FEC 8:1 by default), only KPING's
+/// The FEC of a route's tunnel: what the route says, else Game-FEC Pro (repairs only when the line loses
+/// packets) when both agents have it (`pro`), else the light fixed `FEC`
+fn tunnel_fec<'a>(r: &'a Route, pro: bool) -> &'a str {
+    if !r.fec.is_empty() {
+        &r.fec
+    } else if pro && r.kind() == "game" {
+        "auto"
+    } else {
+        FEC
+    }
+}
+
+/// A route's Kanki tunnel: reverse (the exit dials Iran), its kind (Game-FEC Pro by default), only KPING's
 /// UDP (Iran 127.0.0.1:`inner` → exit 127.0.0.1:KPING port). Built again in place when it exists.
-fn tunnel_body(app: &App, s: &Settings, r: &Route) -> Value {
+fn tunnel_body(app: &App, s: &Settings, r: &Route, pro: bool) -> Value {
     json!({
         "id": r.tunnel, "name": format!("{} · {}", NAME, exit_name(app, &r.exit)),
-        "entry": r.iran, "exit": r.exit,
-        "mode": "reverse", "transport": r.kind(), "fec": if r.fec.is_empty() { FEC } else { r.fec.as_str() }, "dup": false,
+        "entry": r.iran, "exit": r.exit, "profile": if tunnel_fec(r, pro) == "auto" { "kping" } else { "" },
+        "mode": "reverse", "transport": r.kind(), "fec": tunnel_fec(r, pro), "dup": false,
         "port": r.tunnel_port, "conns": 1, "tcp": [], "udp": [format!("{}:{}", r.inner(), s.port)],
         "auto": false, "enabled": true,
     })
 }
 
 /// The second tunnel of a route: the same as the first, on its own port and KPING entry
-fn tunnel2_body(app: &App, s: &Settings, r: &Route) -> Value {
+fn tunnel2_body(app: &App, s: &Settings, r: &Route, pro: bool) -> Value {
     json!({
         "id": r.tunnel2, "name": format!("{} 2 · {}", NAME, exit_name(app, &r.exit)),
-        "entry": r.iran, "exit": r.exit,
-        "mode": "reverse", "transport": r.kind(), "fec": if r.fec.is_empty() { FEC } else { r.fec.as_str() }, "dup": false,
+        "entry": r.iran, "exit": r.exit, "profile": if tunnel_fec(r, pro) == "auto" { "kping" } else { "" },
+        "mode": "reverse", "transport": r.kind(), "fec": tunnel_fec(r, pro), "dup": false,
         "port": r.port2(), "conns": 1, "tcp": [], "udp": [format!("{}:{}", r.inner2(), s.port)],
         "auto": false, "enabled": true,
     })
@@ -691,7 +707,11 @@ async fn route_tunnel2(State(app): St, h: HeaderMap, Path(id): Path<String>) -> 
     if s.routes.iter().any(|x| x.id != r.id && x.iran == r.iran && x.ports().iter().any(|p| mine.contains(p))) {
         return bad("another KPING route already uses the second tunnel's port on this Iran server");
     }
-    let resp = crate::tunnel::panel::save_json(app.clone(), h, tunnel2_body(&app, &s, &r)).await;
+    let mut resp = crate::tunnel::panel::save_json(app.clone(), h.clone(), tunnel2_body(&app, &s, &r, true)).await;
+    // an agent older than Game-FEC Pro: the fixed light FEC
+    if resp.status() == StatusCode::CONFLICT && r.fec.is_empty() {
+        resp = crate::tunnel::panel::save_json(app.clone(), h, tunnel2_body(&app, &s, &r, false)).await;
+    }
     if resp.status() != StatusCode::OK {
         return resp;
     }
@@ -725,7 +745,11 @@ async fn route_tunnel(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
     if !r.tunnel.is_empty() && !engine_has(&r.tunnel) {
         r.tunnel.clear();
     }
-    let resp = crate::tunnel::panel::save_json(app.clone(), h, tunnel_body(&app, &s, &r)).await;
+    let mut resp = crate::tunnel::panel::save_json(app.clone(), h.clone(), tunnel_body(&app, &s, &r, true)).await;
+    // an agent older than Game-FEC Pro: the fixed light FEC
+    if resp.status() == StatusCode::CONFLICT && r.fec.is_empty() {
+        resp = crate::tunnel::panel::save_json(app.clone(), h, tunnel_body(&app, &s, &r, false)).await;
+    }
     if resp.status() != StatusCode::OK {
         return resp;
     }
@@ -911,7 +935,10 @@ pub(crate) mod tests {
         assert_eq!(st, StatusCode::OK, "{}", v);
         let tid = v["tunnel"].as_str().unwrap().to_string();
         let t = crate::tunnel::panel::tunnels(&app).into_iter().find(|t| t.id == tid).unwrap();
-        assert_eq!((t.entry.as_str(), t.exit.as_str(), t.mode.as_str(), t.transport.as_str(), t.fec.as_str(), t.port), ("ir1", de.as_str(), "reverse", "game", "8:1", DEFAULT_TUNNEL_PORT));
+        assert_eq!((t.entry.as_str(), t.exit.as_str(), t.mode.as_str(), t.transport.as_str(), t.fec.as_str(), t.port), ("ir1", de.as_str(), "reverse", "game", "auto", DEFAULT_TUNNEL_PORT));
+        // Game-FEC Pro shaped for KPING: it repairs the line itself, so KPING sends no copy of its own into it
+        assert_eq!(t.profile, "kping");
+        assert_eq!(cfg_for(&app, "ir1").relays[0].tun_dup_ms, 0);
         assert_eq!(t.udp, vec![format!("{}:{}", DEFAULT_TUNNEL_PORT + 1, DEFAULT_PORT)]);
         assert!(t.tcp.is_empty());
         // the tunnel's KPING port listens on 127.0.0.1 only: the relay is the way in

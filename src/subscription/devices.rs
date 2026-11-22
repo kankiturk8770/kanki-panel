@@ -447,5 +447,37 @@ mod tests {
         h.insert("x-kanki-device", "bad id <x>".parse().unwrap());
         assert!(!wants_seal(&h));
     }
+    /// Direct WireGuard with junk packets (3.57.0): the Kanki app (sealed) gets the server's own WireGuard
+    /// with Jc/Jmin/Jmax; the page, other apps, the plain JSON and the bot never see it
+    #[tokio::test]
+    async fn direct_wireguard_only_reaches_the_kanki_app() {
+        let app = test_app();
+        let info = json!({ "wg_pub": "c2VydmVyLXB1YmxpYy1rZXktMDEyMzQ1Njc4OWFiY2Q=", "wg_port": "51820" });
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,info,online) VALUES('de','Germany','de.example.com','de.example.com','t',?1,1)", &[&info.to_string()]).unwrap();
+        let u = app.db.create_user("GAMER", 10.0, 30, 1, "wg", "", "", 0).unwrap();
+        // the user's keys there (the `wg` tool may be missing on a test machine)
+        app.db.exec("INSERT INTO peers(user_id,node_id,proto,privkey,pubkey,psk,ip) VALUES(?1,'de','wg','cHJpdg==','cHVi','cHNr','10.66.0.2')", &[&u.id]).unwrap();
+        let code = u.sub_code();
+        let app_hdr = [("x-kanki-device", "phone-aaaaaaaa"), ("x-kanki-seal", "kseal1"), ("user-agent", "KankiVPN-Android")];
+        let (_, body, _) = get(&app, &format!("/sub/{}/json", code), &app_hdr).await;
+        let v: Value = serde_json::from_str(&open(&body, &code, "phone-aaaaaaaa")).unwrap();
+        let de = v["nodes"].as_array().unwrap().iter().find(|n| n["id"] == "de").unwrap().clone();
+        assert!(de["protocols"].as_array().unwrap().iter().any(|p| p == "wireguard"), "{}", de);
+        assert_eq!(de["via_proto"]["wireguard"], "direct");
+        let (st, conf, _) = get(&app, &format!("/api/config/{}/wireguard?sub={}&node=de", u.id, code), &app_hdr).await;
+        assert_eq!(st, StatusCode::OK);
+        let conf = open(&conf, &code, "phone-aaaaaaaa");
+        assert!(conf.contains("Jc = 4") && conf.contains("Jmin = 40") && conf.contains("Endpoint = de.example.com:51820"), "{}", conf);
+        // anywhere else: nothing
+        let (_, plain, _) = get(&app, &format!("/sub/{}/json", code), &[("user-agent", "Mozilla/5.0")]).await;
+        let v: Value = serde_json::from_str(&plain).unwrap();
+        assert!(v["nodes"].as_array().unwrap().iter().all(|n| !n["protocols"].as_array().unwrap().iter().any(|p| p == "wireguard")), "{}", plain);
+        let (st, _, _) = get(&app, &format!("/api/config/{}/wireguard?sub={}&node=de", u.id, code), &[("user-agent", "Mozilla/5.0")]).await;
+        assert_eq!(st, StatusCode::FORBIDDEN);
+        let (_, page, _) = get(&app, &format!("/sub/{}", code), &[("user-agent", "Mozilla/5.0")]).await;
+        assert!(!page.contains("data-proto=\"wireguard\""));
+        assert!(crate::api::other_app_links(&app, &app.db.user(u.id).unwrap()).iter().all(|l| !l.starts_with("wireguard://")));
+        let n = app.db.node("de").unwrap();
+        assert!(crate::api::bot_config(&app, &app.db.user(u.id).unwrap(), &n, "wireguard", false).await.is_none(), "the bot gets no direct WireGuard");
+    }
 }
-
