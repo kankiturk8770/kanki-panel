@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.57.1 — KANKI MIX TCP without FEC
+The KANKI MIX server takes the app's TCP without FEC (app 1.39.0); older apps keep FEC.
+
 ## New in 3.57 — Game-FEC Pro
 The VIP tunnel is gone; Game-FEC Pro repairs only while the line loses packets (never more than twice the traffic) and only the
 game, KPING routes are made on the Tunnels page, new routes and tunnels find free ports, Iran servers get the same controls,

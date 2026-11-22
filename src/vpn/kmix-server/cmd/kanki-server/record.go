@@ -175,7 +175,7 @@ func (r *recorder) packet(in bool, kind byte, wire int, p []byte, addr string) {
 	}
 	b.Bytes += int32(wire)
 	switch kind {
-	case obfs.KindKCP:
+	case obfs.KindKCP, obfs.KindKCPPlain:
 		switch kcpKind(p) {
 		case 'd':
 			b.Data++

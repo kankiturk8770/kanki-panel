@@ -1,3 +1,11 @@
+# v3.57.1 — KANKI MIX: TCP without FEC
+FEC only helps the game; TCP sends again by itself, so FEC on it only wasted bandwidth and filled queues. The KANKI MIX server
+now has a second KCP listener without FEC for packets of the new kind `KindKCPPlain` (0x05, `internal/obfs/plain.go`, the
+same file as the app's `kmix-core`): the Kanki app 1.39.0 sends its TCP there; older apps keep KCP with FEC (0x00) as before,
+and the new app falls back to it against an older server. The game path (datagrams) is unchanged. The plain listener's queue
+is capped (4096 packets, the rest dropped; KCP sends again); its packets are inside the same encryption and key check.
+Tests: the app's tunnel tests against this server (plain) and against 3.57.0's (FEC).
+
 # v3.57.0 — Game-FEC Pro, no more VIP tunnel, KPING on the Tunnels page, free ports, the same controls on every server
 **The VIP tunnel is gone** (the owner's decision). Its source is kept in `backup/vip-tunnel-3.56.0.tar.gz` (and in git
 history); nothing of it runs any more. Nothing is carried over: on start the panel drops the old list (`vip_tunnels`) and any
