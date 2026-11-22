@@ -203,11 +203,6 @@ fn taken(app: &App, uses: &[Use]) -> HashSet<u16> {
     for s in tp::servers(app).iter().filter(|s| !s.join.is_empty()) {
         t.extend(s.ports.iter().copied().filter(|p| *p > 0));
     }
-    // the VIP tunnels: their path ports and both ends of what they forward
-    for v in crate::vip::panel::tunnels(app) {
-        t.extend(v.needs().into_iter().map(|x| x.1));
-        t.extend(crate::tunnel::engine::parse_ports(&v.tcp).into_iter().chain(crate::tunnel::engine::parse_ports(&v.udp)).map(|x| x.1));
-    }
     t
 }
 

@@ -198,6 +198,11 @@ pub(crate) fn save_tunnels(app: &App, v: &[Tunnel]) {
     app.db.set("tun_list", &serde_json::to_string(v).unwrap_or_else(|_| "[]".into()));
 }
 
+/// 3.57.0: the VIP tunnel is gone; the list an older panel kept goes too (nothing is carried over)
+pub fn drop_vip(app: &App) {
+    let _ = app.db.exec("DELETE FROM settings WHERE k='vip_tunnels'", &[]);
+}
+
 /// The name of a tunnel nobody named: the Iran server's name, a dash, the abroad server's name
 /// ("Tehran-Germany"); entry first when both are on the same side.
 pub(crate) fn default_tunnel_name(app: &App, entry: &str, exit: &str) -> String {
@@ -1128,11 +1133,6 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
             return err(StatusCode::BAD_REQUEST, &format!("port {} is used by tunnel {}; pick another test port", t.port, t.name));
         }
     }
-    for sid in [&entry, &exit] {
-        if let Some(v) = crate::vip::panel::ports_on(&app, sid, "").into_iter().find(|v| v.0 >= port && v.0 < port + span) {
-            return err(StatusCode::BAD_REQUEST, &format!("port {} is used by the VIP tunnel {}; pick another test port", v.0, v.2));
-        }
-    }
     // … nor a port another tunnel forwards there, nor one a program holds there now (the test listens on
     // TCP and UDP of each port on both servers)
     for t in tunnels(&app).into_iter().filter(|t| t.enabled && (t.entry == entry || t.entry == exit)) {
@@ -1298,7 +1298,7 @@ fn rotate_tick(app: &App) {
 
 /// Would tunnel `tu`, switched to transport `tr` (and to reverse mode, as a switch does), need a port that is
 /// taken on its listening server: by another tunnel (its own port or a forwarded one), by its own forwarded
-/// ports, by a VIP tunnel, or (as the server last said) by another program?
+/// ports, or (as the server last said) by another program?
 fn rotate_clash(app: &App, list: &[Tunnel], tu: &Tunnel, tr: &str) -> bool {
     let listener = &tu.entry;
     let (tcp, udp) = port_protos(tr);
@@ -1316,9 +1316,6 @@ fn rotate_clash(app: &App, list: &[Tunnel], tu: &Tunnel, tr: &str) -> bool {
         if &o.entry == listener && ((tcp && fwd(&o.tcp).contains(&port)) || (udp && fwd(&o.udp).contains(&port))) {
             return true;
         }
-    }
-    if crate::vip::panel::ports_on(app, listener, "").into_iter().any(|v| v.0 == port && ((v.1 && udp) || (!v.1 && tcp))) {
-        return true;
     }
     // a protocol the tunnel does not hold now: whoever listens there is someone else
     let (now_tcp, now_udp) = if tu.mode == "direct" { (false, false) } else { port_protos(&tu.transport) };
@@ -1389,12 +1386,6 @@ pub async fn local_loop(app: Arc<App>) {
         .await
         .unwrap_or(Value::Null);
         crate::kping::ingest(&app, "local", &rep);
-        // the VIP tunnels of the panel's own server
-        let vs = crate::vip::panel::specs_for(&app, "local");
-        let vp = vs.clone();
-        crate::vip::apply(vs).await;
-        let _ = tokio::task::spawn_blocking(move || crate::vip::open_ports(&vp)).await;
-        crate::vip::panel::note_list("local", crate::vip::statuses().await);
         rotate_tick(&app);
         let want: Vec<(u8, String)> = servers(&app)
             .iter()
@@ -1435,10 +1426,6 @@ pub fn health(app: &App, offline_nodes: &HashSet<String>) -> Vec<(String, String
         if up && rtt > 0 {
             out.push((format!("tp:{}", tu.id), format!("تانل {}", tu.name), rtt < TUNNEL_SLOW_MS, rtt.to_string()));
         }
-    }
-    // the VIP tunnels: judged only while both servers report (the server alerts say the rest)
-    for (k, n, up) in crate::vip::panel::health(app) {
-        out.push((k, n, up, String::new()));
     }
     out
 }
@@ -1703,11 +1690,9 @@ pub fn has_port_tunnels(app: &App, sid: &str) -> bool {
 }
 
 /// The tunnels whose ports can be followed from one server to the next: the enabled Kanki port tunnels
-/// (not the layer-3 AmneziaWG links) and the VIP tunnels
+/// (not the layer-3 AmneziaWG links)
 fn route_list(app: &App) -> Vec<Tunnel> {
-    let mut v: Vec<Tunnel> = tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect();
-    v.extend(crate::vip::panel::as_routes(app));
-    v
+    tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect()
 }
 
 
@@ -1892,25 +1877,6 @@ fn tunnel_needs(t: &Tunnel) -> Vec<(String, u16, bool)> {
     v
 }
 
-/// Ports a tunnel just let go of on a server (KPING changing its tunnel from one kind to the other): the
-/// agent still holds them until its next report, and the tunnel taking them over is no clash.
-fn freed_ports() -> &'static Mutex<Vec<(String, u16, bool, i64)>> {
-    static F: std::sync::OnceLock<Mutex<Vec<(String, u16, bool, i64)>>> = std::sync::OnceLock::new();
-    F.get_or_init(Default::default)
-}
-
-pub fn note_freed(sid: &str, ports: &[(u16, bool)]) {
-    let mut f = freed_ports().lock().unwrap_or_else(|e| e.into_inner());
-    let t = now();
-    f.retain(|x| t - x.3 < 60);
-    f.extend(ports.iter().map(|(p, u)| (sid.to_string(), *p, *u, t)));
-}
-
-pub fn just_freed(sid: &str, port: u16, udp: bool) -> bool {
-    let t = now();
-    freed_ports().lock().unwrap_or_else(|e| e.into_inner()).iter().any(|x| x.0 == sid && x.1 == port && x.2 == udp && t - x.3 < 60)
-}
-
 /// Is a port the tunnel needs already held on its server by something else? (live, from the
 /// servers' own reports). The tunnel's own ports (when it is edited) do not count.
 fn live_clash(app: &App, t: &Tunnel, old: Option<&Tunnel>) -> Option<String> {
@@ -1925,7 +1891,7 @@ fn live_clash(app: &App, t: &Tunnel, old: Option<&Tunnel>) -> Option<String> {
             // the agent itself, also when it runs without systemd (a container, started by hand): no unit
             let ours = unit == "kanki-tunnel.service" || unit.starts_with("kanki-hy2-") || (sid == "local" && unit == "kanki-panel.service")
                 || (unit.is_empty() && prog == "kanki-panel");
-            if ours && (own.contains(&(sid.clone(), port, udp)) || just_freed(&sid, port, udp)) {
+            if ours && (own.contains(&(sid.clone(), port, udp))) {
                 continue;
             }
             let srv = if sid == "local" { local_name(app) } else { names.get(&sid).cloned().unwrap_or(sid.clone()) };
@@ -2168,14 +2134,6 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
             }
             if let Some(p) = mine_udp.iter().find(|p| o_udp.contains(p)) {
                 return err(StatusCode::CONFLICT, &format!("UDP port {} is already used by the tunnel \"{}\"", p, o.name));
-            }
-        }
-    }
-    // a port a VIP tunnel holds
-    if t.enabled {
-        for (sid, port, udp) in tunnel_needs(&t) {
-            if let Some(v) = crate::vip::panel::ports_on(&app, &sid, "").into_iter().find(|x| x.0 == port && x.1 == udp) {
-                return err(StatusCode::CONFLICT, &format!("{} port {} is already used by the VIP tunnel \"{}\"", if udp { "UDP" } else { "TCP" }, port, v.2));
             }
         }
     }
@@ -2713,8 +2671,7 @@ pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(
     if id == "local" {
         return Err((StatusCode::BAD_REQUEST, "the panel server cannot be removed".into()));
     }
-    let mut used: Vec<String> = tunnels(app).into_iter().filter(|t| t.entry == id || t.exit == id).map(|t| t.name).collect();
-    used.extend(crate::vip::panel::using(app, id));
+    let used: Vec<String> = tunnels(app).into_iter().filter(|t| t.entry == id || t.exit == id).map(|t| t.name).collect();
     if !used.is_empty() && !with_tunnels {
         return Err((StatusCode::CONFLICT, format!("delete its tunnels first: {}", used.join(", "))));
     }
@@ -2725,7 +2682,6 @@ pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(
         tl.retain(|t| t.entry != id && t.exit != id);
         save_tunnels(app, &tl);
     }
-    crate::vip::panel::forget_server(app, id);
     let mut list = servers(app);
     if !list.iter().any(|s| s.id == id) {
         return Err((StatusCode::NOT_FOUND, "unknown server".into()));
@@ -3028,8 +2984,8 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     let (xray_block, xray_drop) = (crate::xray::panel::shut_on(&id), crate::xray::panel::ip_blocks(&id));
     crate::kping::ingest(&app, &id, &b["kping"]);
     let kping = crate::kping::cfg_for(&app, &id);
-    crate::vip::panel::note(&id, &b["vip"]);
-    Json(json!({ "kping": kping, "vip": crate::vip::panel::specs_for(&app, &id), "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app), "panel_alt": crate::cdn::url(&app).into_iter().collect::<Vec<_>>() })).into_response()
+    // "vip": [] tells an agent older than 3.57.0 to stop the VIP tunnels it still runs
+    Json(json!({ "kping": kping, "vip": [], "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app), "panel_alt": crate::cdn::url(&app).into_iter().collect::<Vec<_>>() })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)

@@ -14,7 +14,6 @@ var SECS=[
  ['users','Users','users',[['users','','Users']],'Users'],
  ['vpnsec','VPN & cores','cores',[['vpn','','Overview'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['kmix','','KANKI MIX'],['kping','','KPING'],['mtun','','microtun'],['xray','status','Xray'],['dns','','DNS']],'Connectivity'],
  ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Connectivity'],
- ['vipsec','VIP tunnel','vip',[['vip','','VIP tunnel']],'Connectivity'],
  ['ports','Ports','ports',[['ports','','Ports']],'Connectivity'],
  ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Connectivity'],
  ['nodes','Servers','nodes',[['nodes','','Servers']],'Infrastructure'],
@@ -99,7 +98,7 @@ window.grpOf=function(p){return V.secOf(p)[4]||''};
 
 // phones (3.48, as the owner liked it): every section in the bottom bar, one row that scrolls sideways inside itself;
 // no «More» sheet. The open section is kept in sight.
-var BARN={dash:'Home',vpnsec:'Cores',netsec:'Tunnels',vipsec:'VIP',traffic:'Traffic',nodes:'Servers',bot:'Bot',emergency:'Chat'};
+var BARN={dash:'Home',vpnsec:'Cores',netsec:'Tunnels',traffic:'Traffic',nodes:'Servers',bot:'Bot',emergency:'Chat'};
 window.navBar=function(){
  return '<nav class="kmb kmb2" id="mbar" aria-label="'+esc(t('Main menu'))+'">'+V.SECS.map(function(s){var f=s[3][0];
   return '<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'">'+ic(s[2],20)+'<span>'+t(BARN[s[0]]||s[1])+'</span></a>'}).join('')+'</nav>'+

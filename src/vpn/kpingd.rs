@@ -1028,7 +1028,7 @@ impl XShared {
     /// back through every tunnel of the session at once (`tos` best first), and the delayed copy only
     /// through the best one
     fn send(&self, pkt: Vec<u8>, tos: &[SocketAddr]) {
-        // marked as the game: a VIP tunnel then gives it copies and repairs (a Kanki tunnel takes no notice)
+        // marked as the game: a Game-FEC Pro tunnel on this server reads the mark
         for to in tos {
             crate::netq::send_to_marked(&self.sock, &pkt, *to, true);
         }
@@ -1718,12 +1718,7 @@ async fn kping_lab() {
     // LAB_TWO=1: a second tunnel between the servers (each can be put behind its own bad line: LAB_TUN_kp, LAB_TUN_kp2)
     let two = std::env::var("LAB_TWO").is_ok_and(|v| v == "1");
     let more = if two { vec![24304] } else { vec![] };
-    // LAB_TUN_KIND=vip: KPING's tunnel is a VIP tunnel (gaming, LAB_VIP_PATHS UDP paths on 24310…, the exit
-    // dials LAB_VIP_DIAL…, each path can be put behind its own bad line), its KPING port 24319 on 127.0.0.1;
-    // with two paths or more KPING sends no copy of its own into it, as the panel sets it
-    let vip = std::env::var("LAB_TUN_KIND").is_ok_and(|v| v == "vip");
-    let vpaths: u8 = std::env::var("LAB_VIP_PATHS").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
-    let (to, tdup) = if vip { (24319, if vpaths >= 2 { 0 } else { tdup }) } else { (24302, tdup) };
+    let to = 24302;
     let relay = Relay::start(&obfs, &RelayCfg { port: 24300, to, more, dup_ms: dup, tun_dup_ms: tdup, users: vec![user.clone()] }).expect("relay");
     let fec: u8 = std::env::var("LAB_FEC").ok().and_then(|s| s.parse().ok()).unwrap_or(2);
     let exit = Exit::start(&obfs, &ExitCfg { port: 4300, mtu: 1332, fec, tun_dup_ms: tdup, users: vec![user] }).expect("exit");
@@ -1739,29 +1734,9 @@ async fn kping_lab() {
     };
     let mut run = vec![];
     let mut specs = vec![tun("mt", 24401, "24400:4200", "")];
-    if !vip {
-        specs.push(tun("kp", 24301, "24302:4300", "127.0.0.1"));
-    }
+    specs.push(tun("kp", 24301, "24302:4300", "127.0.0.1"));
     if two {
         specs.push(tun("kp2", 24303, "24304:4300", "127.0.0.1"));
-    }
-    let mut vips = vec![];
-    if vip {
-        let paths = vpaths;
-        let base = crate::vip::VipSpec {
-            id: "kplab".into(), name: "kplab".into(), secret: "kplab-secret-0123456789".into(), mode: "gaming".into(), stealth: 1, pq: true,
-            hop: paths, udp_paths: paths, udp: vec!["24319:4300".into()], target: "127.0.0.1".into(), bind: "127.0.0.1".into(), ..Default::default()
-        };
-        let dial: u16 = std::env::var("LAB_VIP_DIAL").ok().and_then(|s| s.parse().ok()).unwrap_or(24310);
-        vips.push(crate::vip::core::Running::start(crate::vip::VipSpec { role: "entry".into(), dials: false, port: 24310, ..base.clone() }));
-        vips.push(crate::vip::core::Running::start(crate::vip::VipSpec { role: "exit".into(), dials: true, remote: "127.0.0.1".into(), port: dial, ..base }));
-        for _ in 0..150 {
-            if vips.iter().all(|r| r.status().up) {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        assert!(vips.iter().all(|r| r.status().up), "the VIP tunnel did not come up");
     }
     for s in specs {
         run.push(Running::start(Spec { role: "entry".into(), ..s.clone() }));
@@ -1784,11 +1759,6 @@ async fn kping_lab() {
     tokio::time::sleep(Duration::from_secs(secs)).await;
     println!("relay {}", relay.status());
     println!("exit {}", exit.status());
-    for v in vips {
-        let s = v.status();
-        println!("vip {} rt_tx {} copies {} repairs {} rx {} dups {} rebuilt {} bulk {}", s.role, s.rt_tx, s.rt_copies, s.rt_fix_tx, s.rt_rx, s.rt_dups, s.rt_fixed, s.bulk_tx);
-        v.stop();
-    }
     crate::microtun::apply(MtCfg::default());
     for r in run {
         r.stop();

@@ -1,14 +1,12 @@
 var S={lang:localStorage.getItem('kk_lang')||'fa',theme:localStorage.getItem('kk_theme')||'dark',color:localStorage.getItem('kk_color')||'gold',token:localStorage.getItem('kk_tok')||'',me:null,page:'dash',users:[],nodes:[],ov:null,sel:{},q:'',filter:'all',pf:'all',sort:'new',size:12,pg:1,timer:null,timer2:null};
 // a server is one word everywhere: nodes and tunnel servers are the same servers
 var WFA=[
- // the panel's answers with a port or a name in them (tunnels, the VIP tunnel, KPING, the smart test)
- [/^(UDP|TCP) port (\d+) is already used by the VIP tunnel "([^"]*)"$/,'پورت $1 $2 را تانل VIP «$3» گرفته است'],
+ // the panel's answers with a port or a name in them (tunnels, KPING, the smart test)
  [/^(UDP|TCP) port (\d+) is already used by the tunnel "([^"]*)"$/,'پورت $1 $2 را تانل «$3» گرفته است'],
  [/^(UDP|TCP) port (\d+) is already used by (Kanki DNS|Xray|KPING|WireGuard|AmneziaWG|Hysteria2|KANKI MIX|microtun)$/,'پورت $1 $2 را $3 گرفته است'],
  [/^(UDP|TCP) port (\d+) is already used by the emergency chat$/,'پورت $1 $2 را چت اضطراری گرفته است'],
  [/^(UDP|TCP) port (\d+) on (.+?) is already used by (.+?): pick another port$/,'پورت $1 $2 روی $3 را $4 گرفته است؛ پورت دیگری انتخاب کن'],
  [/^(UDP|TCP) port (\d+) is used twice in this tunnel$/,'پورت $1 $2 در این تانل دو بار آمده'],
- [/^port (\d+) is used by the VIP tunnel (.*); pick another test port$/,'پورت $1 را تانل VIP $2 گرفته؛ پورت تست دیگری انتخاب کن'],
  [/^UDP port ([\d, ]+) is busy$/,'پورت UDP $1 اشغال است'],
  [/^the clocks of the two servers differ by (\d+) s \(more than (\d+) s\): set the time on both$/,'ساعت دو سرور $1 ثانیه با هم فرق دارد (بیش از $2 ثانیه): ساعت هر دو را درست کن'],
  [/^(.+): the link closed$/,'$1: اتصال بسته شد'],
@@ -115,7 +113,6 @@ function leftTxt(ts){if(!ts)return t('Unlimited');var sec=ts-Date.now()/1000;if(
 
 // ---------------------------------------------------------------- icons (stroke = currentColor)
 var ICO={clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
- vip:'<path d="M6 4h12l3.5 5L12 20.5 2.5 9 6 4z"/><path d="M2.5 9h19M9 4l-1.5 5L12 20.5 16.5 9 15 4"/>',
  edit:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/>',
  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
  qr:'<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1.2"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1.2"/><path d="M14 14h3v3M20.5 14v.01M14 20.5h3.5M20.5 17.5v3"/>',
@@ -243,7 +240,7 @@ function loginView(otp){$('#app').innerHTML='';document.body.className='';applyL
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
 // ---------------------------------------------------------------- shell
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['mtun','microtun','game'],['kping','KPING','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['vip','VIP tunnel','vip'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['mtun','microtun','game'],['kping','KPING','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);
