@@ -81,8 +81,8 @@ function vhGrid(nodes,o,xr,dn,kp){var el=$('#vh_g');if(!el)return;var pr=o.proto
  var state=function(u,all){return all==0?['n',t('Not installed')]:u==all?['g',t('Running')]:u==0?['r',t('Down')]:['y',t('Partly down')]};
  // (3.57) three groups: the game cores, the VPN cores, the services; each card as tall as the others
  var by={};K.forEach(function(c){var u=c[4][0],all=c[4][1];by[c[0]]=card('#'+c[0],PCOL[c[0]],c[2],c[1],c[3],state(u,all),[[t('Servers'),N(u)+' / '+N(all)],[t('Users'),N(pr[c[0]]||0)]])});
- if(kp){var kr=kp.routes.filter(function(x){return x.exit_runs&&x.tunnel_up&&x.relay&&!x.relay.error}).length;
-  by.kping=card('#kping/status',PCOL.kping,'game','KPING','Hidden game core for games, only for testers',!kp.settings.on?['r',t('Off')]:!kp.routes.length?['n',t('No route')]:kr==kp.routes.length?['g',t('Running')]:kr?['y',t('Partly down')]:['y',t('Not ready')],[[t('Routes'),N(kr)+' / '+N(kp.routes.length)],[t('Testers'),N(kp.users||0)]])}
+ if(kp){var ks=(kp.servers||[]).filter(function(x){return x.on}),kr=ks.filter(function(x){return x.online&&x.runs&&!x.relay_error&&!x.exit_error}).length;
+  by.kping=card('#kping/status',PCOL.kping,'game','KPING','The game core, only in the Kanki app',!kp.settings.on?['r',t('Off')]:!ks.length?['n',t('Off')]:kr==ks.length?['g',t('Running')]:kr?['y',t('Partly down')]:['y',t('Not ready')],[[t('Servers'),N(kr)+' / '+N(ks.length)],[t('Users'),N(kp.users||0)]])}
  var sv='';
  if(xr){var act=xr.inbounds.filter(function(x){return x.enabled&&!x.state}).length;
   sv+=card('#xray/status',PCOL.xray,'xray','Xray','VLESS · VMess · Trojan · Shadowsocks',xr.on?(act?['g',t('Running')]:['y',t('No inbound')]):['r',t('Off')],[[t('Inbounds'),N(act)+' / '+N(xr.inbounds.length)],[t('Online now'),N((xr.online||[]).length)]])}

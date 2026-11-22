@@ -1379,6 +1379,8 @@ fn run_id() -> &'static str {
 }
 
 const CACHE: &str = "/var/lib/kanki/kping.json";
+/// the node agent's KPING (3.58: KPING as a core of each VPN server), apart from what a tunnel agent ran
+const CACHE_NODE: &str = "/var/lib/kanki/kping-node.json";
 
 /// The last config, so KPING comes back after a reboot even when the panel cannot be reached
 pub fn from_disk() {
@@ -1389,6 +1391,29 @@ pub fn from_disk() {
 
 /// Brings KPING on this server to `cfg` (blocking). Opens the relays' ports in the firewall.
 pub fn apply(cfg: KpCfg) {
+    apply_as(cfg, CACHE, "kping")
+}
+
+/// KPING as a core of this VPN server (the node agent): its own cache file and its own firewall rules, so the
+/// tunnel agent of the same machine (another program, which stops what it ran before 3.58) never closes them
+pub fn apply_node(cfg: KpCfg) -> Value {
+    apply_as(cfg, CACHE_NODE, "kpcore");
+    report()
+}
+
+/// The node agent's last KPING, so it comes back after a reboot even when the panel cannot be reached
+pub fn node_from_disk() {
+    if let Some(c) = std::fs::read_to_string(CACHE_NODE).ok().and_then(|t| serde_json::from_str::<KpCfg>(&t).ok()) {
+        apply_as(c, CACHE_NODE, "kpcore");
+    }
+}
+
+/// The public port of the relay running here (None = KPING does not run)
+pub fn public_port() -> Option<u16> {
+    running().lock().unwrap_or_else(|e| e.into_inner()).relays.first().map(|(x, _)| x.cfg.port)
+}
+
+fn apply_as(cfg: KpCfg, cache: &str, fw_key: &str) {
     let mut r = running().lock().unwrap_or_else(|e| e.into_inner());
     if r.obfs != cfg.obfs {
         r.relays.clear();
@@ -1440,11 +1465,11 @@ pub fn apply(cfg: KpCfg) {
     }
     let ports: Vec<String> = cfg.relays.iter().map(|c| format!("{}/udp", c.port)).collect();
     drop(r);
-    crate::fw::sync("kping", ports);
+    crate::fw::sync(fw_key, ports);
     let text = serde_json::to_string(&cfg).unwrap_or_default();
-    if std::fs::read_to_string(CACHE).ok().as_deref() != Some(text.as_str()) {
+    if std::fs::read_to_string(cache).ok().as_deref() != Some(text.as_str()) {
         let _ = std::fs::create_dir_all("/var/lib/kanki");
-        let _ = std::fs::write(CACHE, text);
+        let _ = std::fs::write(cache, text);
     }
 }
 
@@ -1763,4 +1788,32 @@ async fn kping_lab() {
     for r in run {
         r.stop();
     }
+}
+
+/// KPING as a core of one server (3.58): the relay on the public port and the exit behind it on 127.0.0.1, as the
+/// node agent runs it (`apply_node`), no tunnel. The phone (the lab client) dials 127.0.0.1:24300.
+///   LAB_DIR=… cargo test kping_core_lab -- --ignored --nocapture   (root; then scripts/kping-lab kping …)
+#[cfg(test)]
+#[tokio::test]
+#[ignore]
+async fn kping_core_lab() {
+    let obfs = "ab".repeat(32);
+    let key = "cd".repeat(32);
+    let dir = std::env::var("LAB_DIR").unwrap_or("/tmp".into());
+    let user = KUser { uid: 1, name: "gamer".into(), key: key.clone(), ip: "10.81.0.2".into() };
+    let cfg = KpCfg {
+        obfs: obfs.clone(),
+        relays: vec![RelayCfg { port: 24300, to: 4300, more: vec![], dup_ms: 2, tun_dup_ms: 0, users: vec![KUser { ip: String::new(), ..user.clone() }] }],
+        exit: Some(ExitCfg { port: 4300, mtu: 1332, fec: 2, tun_dup_ms: 0, users: vec![user] }),
+    };
+    let rep = tokio::task::spawn_blocking(move || apply_node(cfg)).await.unwrap();
+    println!("report {}", rep);
+    assert_eq!(public_port(), Some(24300));
+    let kl = crate::kping::to_url(&key, "127.0.0.1:24300", 1, &obfs, Ipv4Addr::new(10, 81, 0, 2), 1332, 2, "lab");
+    std::fs::write(format!("{}/kping.link", dir), kl).unwrap();
+    println!("READY");
+    let secs: u64 = std::env::var("LAB_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(60);
+    tokio::time::sleep(Duration::from_secs(secs)).await;
+    println!("after {}", report());
+    tokio::task::spawn_blocking(|| apply_node(KpCfg::default())).await.unwrap();
 }

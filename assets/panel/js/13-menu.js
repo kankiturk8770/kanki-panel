@@ -64,7 +64,7 @@ function coreDots(el){var draw=function(v){$$('.kcb-t',el).forEach(function(a){v
   var st=function(k){var l=nodes.filter(function(n){return num((n.info||{})[k])}),u=l.filter(up).length;return !l.length?'n':u==l.length?'g':u?'y':'r'};
   var v={wg:st('wg_port'),awg:st('awg_port'),hy2:st('hy2_port'),kmix:st('kmix_port'),mtun:st('mt_port')};
   var xr=r[1];if(xr)v.xray=!xr.on?'r':xr.inbounds.some(function(x){return x.enabled&&!x.state})?'g':'y';
-  var kp=r[2];if(kp&&kp.settings)v.kping=!kp.settings.on?'r':!kp.routes.length?'n':kp.routes.every(function(x){return x.exit_runs&&x.tunnel_up})?'g':'y';
+  var kp=r[2];if(kp&&kp.settings){var ks=(kp.servers||[]).filter(function(x){return x.on});v.kping=!kp.settings.on?'r':!ks.length?'n':ks.every(function(x){return x.online&&x.runs&&!x.relay_error&&!x.exit_error})?'g':'y'}
   var dn=r[3];if(dn){var sv=dn.servers||[],run=sv.filter(function(x){return x.status&&x.status.active}).length;v.dns=!dn.on?'r':!sv.length?'n':run==sv.length?'g':run?'y':'r'}
   CD={at:Date.now(),v:v};if(el.isConnected)draw(v)})}
 // a page that redraws itself (innerHTML) loses the tabs: put them back

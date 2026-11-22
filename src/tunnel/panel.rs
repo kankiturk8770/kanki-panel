@@ -1402,15 +1402,7 @@ pub async fn local_loop(app: Arc<App>) {
             crate::fw::guard_tick(Some(fw_want), fw_confirm)
         })
         .await;
-        // KPING on the panel's own server (an exit, or the relay of a route that starts here)
-        let kp = crate::kping::cfg_for(&app, "local");
-        let rep = tokio::task::spawn_blocking(move || {
-            crate::kpingd::apply(kp);
-            crate::kpingd::report()
-        })
-        .await
-        .unwrap_or(Value::Null);
-        crate::kping::ingest(&app, "local", &rep);
+        // KPING on the panel's own server runs in its node part (like every core, `sync::apply_local`), not here
         rotate_tick(&app);
         let want: Vec<(u8, String)> = servers(&app)
             .iter()
@@ -2422,6 +2414,7 @@ async fn guard_list(State(app): St, h: HeaderMap) -> Response {
 }
 
 /// Saves a tunnel from another part of the panel (KPING builds its own) with every check of the Tunnels page
+#[allow(dead_code)]
 pub(crate) async fn save_json(app: Arc<App>, h: HeaderMap, b: Value) -> Response {
     save(State(app), h, Json(b)).await
 }
@@ -3141,7 +3134,8 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     // the VPN part of this machine, when the admin asked for it (sent until the agent says it started)
     let setup = crate::servers::setup_for(&app, &s, &b["setup"]);
     let (xray_block, xray_drop) = (crate::xray::panel::shut_on(&id), crate::xray::panel::ip_blocks(&id));
-    crate::kping::ingest(&app, &id, &b["kping"]);
+    // KPING runs in each VPN server's node agent since 3.58: a tunnel agent that still runs a route's relay or exit
+    // (3.37-3.57) gets an empty config and stops it
     let kping = crate::kping::cfg_for(&app, &id);
     // "vip": [] tells an agent older than 3.57.0 to stop the VIP tunnels it still runs
     Json(json!({ "kping": kping, "vip": [], "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "resync": asks.contains("sync"), "restart": asks.contains("restart"), "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app), "panel_alt": crate::cdn::url(&app).into_iter().collect::<Vec<_>>() })).into_response()

@@ -87,6 +87,22 @@ func main() {
 	// بسته‌های بازی با علامت EF می‌روند: تانل Game-FEC Pro فقط به آن‌ها FEC می‌دهد (KCP نه)
 	oc.MarkGame = true
 	// ServeConn: بلاک‌رمز داخلی nil (رمزنگاری را خودمان در لایه obfs انجام می‌دهیم)
+	// KCP بی FEC برای اپ تازه (KindKCPPlain): TCP خودش دوباره می‌فرستد، FEC فقط پهنای باند هدر می‌داد
+	plainLn, err := kcp.ServeConn(nil, 0, 0, oc.Plain())
+	if err != nil {
+		log.Fatal(err)
+	}
+	go func() {
+		for {
+			sess, err := plainLn.AcceptKCP()
+			if err != nil {
+				log.Printf("accept (plain): %v", err)
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			go handleSession(sess)
+		}
+	}()
 	ln, err := kcp.ServeConn(nil, *data, *parity, oc)
 	if err != nil {
 		log.Fatal(err)

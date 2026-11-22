@@ -37,7 +37,7 @@ pub struct Opt {
 }
 
 /// The cores that can have their own Iran address
-pub const CORES: [&str; 5] = ["wg", "awg", "hy2", "mtun", "xray"];
+pub const CORES: [&str; 6] = ["wg", "awg", "hy2", "mtun", "xray", "kping"];
 
 pub fn all(app: &App) -> HashMap<String, Opt> {
     serde_json::from_str(&app.db.get(KEY)).unwrap_or_default()
@@ -222,6 +222,7 @@ pub fn core_port(n: &Node, core: &str) -> Option<u16> {
         "hy2" => "hy2_port",
         "mtun" => "mt_port",
         "kmix" => "kmix_port",
+        "kping" => "kp_port",
         _ => return None,
     };
     let i = crate::api::node_info(n);
@@ -261,7 +262,7 @@ pub fn info(app: &App, key: &str, nid: Option<&str>) -> Value {
         }
         let i = crate::api::node_info(&n);
         let num = |k: &str| i[k].as_str().and_then(|s| s.parse::<u16>().ok()).or_else(|| i[k].as_u64().map(|p| p as u16)).filter(|p| *p > 0);
-        for (k, p, c) in [("wg_port", "WireGuard", "wg"), ("awg_port", "AmneziaWG", "awg"), ("hy2_port", "Hysteria2", "hy2"), ("kmix_port", "KANKI MIX", ""), ("mt_port", "microtun", "mtun")] {
+        for (k, p, c) in [("wg_port", "WireGuard", "wg"), ("awg_port", "AmneziaWG", "awg"), ("hy2_port", "Hysteria2", "hy2"), ("kmix_port", "KANKI MIX", ""), ("mt_port", "microtun", "mtun"), ("kp_port", "KPING", "kping")] {
             let Some(port) = num(k) else { continue };
             let Some(h) = core_host(c) else { continue };
             let tw = Twin { host: h.clone(), name: String::new(), sid: sid.clone() };

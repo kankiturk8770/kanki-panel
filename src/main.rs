@@ -333,6 +333,8 @@ async fn main() {
     netq::spawn();
 
     if cmd == "node" {
+        // KPING as a core of this server comes back after a reboot even before the panel answers
+        let _ = tokio::task::spawn_blocking(kpingd::node_from_disk).await;
         let port = app.env.get("NODE_PORT").cloned().unwrap_or_else(|| "2096".into());
         // new installs put Caddy (TLS) in front and bind locally; old installs listened publicly
         let bind = app.env.get("NODE_BIND").cloned().unwrap_or_else(|| "0.0.0.0".into());
@@ -362,6 +364,8 @@ async fn main() {
     auth::legacy_key_start(&app.db);
     // upgrade legacy sha256 admin hash stored in the db is done at next successful login
 
+    // the panel's own server runs KPING in its node part too (synced like the others), back after a restart
+    let _ = tokio::task::spawn_blocking(kpingd::node_from_disk).await;
     kping::drop_vip(&app);
     tunnel::panel::drop_vip(&app);
     kping::light_tunnels(&app);

@@ -53,6 +53,10 @@ type PacketConn struct {
 	ring    *Keyring // حالت چندکاربره (nil = یک کلید مشترک)
 	handler Handler
 	bufPool sync.Pool
+	// kcpKind نوع بسته‌های KCP این اتصال (۰ = KindKCP؛ اپ تازه KindKCPPlain، plain.go)
+	kcpKind byte
+	// plain شنونده‌ی KCP بی FEC (سمت سرور، plain.go؛ nil = ندارد)
+	plain *plainConn
 	// MarkGame (سمت سرور): بسته‌های غیر KCP (بازی و پینگ) با علامت GameTOS می‌روند تا تانل Game-FEC Pro همین سرور
 	// فقط آن‌ها را بازی بداند؛ KCP بی علامت. اگر کرنل علامت را قبول نکرد، بسته ساده می‌رود.
 	MarkGame bool
@@ -122,7 +126,7 @@ func (c *PacketConn) WritePacket(kind byte, b []byte, addr net.Addr) error {
 	out = aead.Seal(out[:nonceSize], out[:nonceSize], plain, nil)
 
 	var err error
-	if !(c.MarkGame && kind != KindKCP && writeMarked(c.conn, out, addr)) {
+	if !(c.MarkGame && kind != KindKCP && kind != KindKCPPlain && writeMarked(c.conn, out, addr)) {
 		_, err = c.conn.WriteTo(out, addr)
 	}
 	if err == nil && ctr != nil {
@@ -191,7 +195,7 @@ func (c *PacketConn) open(pkt []byte, addr net.Addr) (byte, []byte, bool) {
 // ---- رابط net.PacketConn برای KCP ----
 
 func (c *PacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-	if err := c.WritePacket(KindKCP, b, addr); err != nil {
+	if err := c.WritePacket(c.kcpKindOf(), b, addr); err != nil {
 		return 0, err
 	}
 	return len(b), nil
@@ -213,7 +217,10 @@ func (c *PacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
 		if c.Tap != nil {
 			c.Tap(true, kind, m, p, addr)
 		}
-		if kind != KindKCP {
+		if kind == KindKCPPlain && c.kcpKind != KindKCPPlain && c.deliverPlain(p, addr) {
+			continue
+		}
+		if kind != c.kcpKindOf() {
 			if c.handler != nil {
 				c.handler(kind, p, addr)
 			}

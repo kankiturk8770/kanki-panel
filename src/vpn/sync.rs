@@ -31,6 +31,9 @@ pub struct SyncReq {
     /// microtun on this server (None = a panel that does not manage it)
     #[serde(default)]
     pub mtun: Option<crate::mtun::MtCfg>,
+    /// KPING on this server: its relay and exit (None = a panel before 3.58: leave it as it is)
+    #[serde(default)]
+    pub kping: Option<crate::kpingd::KpCfg>,
     /// WireGuard / AmneziaWG / Hysteria2 switched off on this server ("wg", "awg", "hy2"): stopped and
     /// their ports closed (see `cores::apply`); an older agent ignores it but gets no users for them
     #[serde(default)]
@@ -73,6 +76,9 @@ pub struct SyncResp {
     pub mtun_online: Vec<String>,
     #[serde(default)]
     pub mtun_error: String,
+    /// KPING here: `kpingd::report` (Null = nothing runs or an agent before 3.58)
+    #[serde(default)]
+    pub kping: Value,
     /// this server's clock (unix seconds) when it answered: handshake times are compared with it,
     /// not with the panel's clock (an older node sends 0)
     #[serde(default)]
@@ -101,6 +107,10 @@ pub fn local_info(app: &App) -> Value {
     }
     if let (Some(o), Some(k)) = (v.as_object_mut(), crate::microtun::info().as_object()) {
         o.extend(k.clone());
+    }
+    // KPING's public port while it runs here (the panel lists KPING for this server only then)
+    if let (Some(o), Some(p)) = (v.as_object_mut(), crate::kpingd::public_port()) {
+        o.insert("kp_port".into(), json!(p.to_string()));
     }
     v
 }
@@ -183,7 +193,11 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     if let Some(cfg) = req.mtun {
         (mtun, mtun_online, mtun_error) = tokio::task::spawn_blocking(move || crate::microtun::apply(cfg)).await.unwrap_or_else(|_| (HashMap::new(), vec![], "microtun apply crashed".into()));
     }
-    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, mtun, mtun_online, mtun_error, now: now() }
+    let mut kping = Value::Null;
+    if let Some(cfg) = req.kping {
+        kping = tokio::task::spawn_blocking(move || crate::kpingd::apply_node(cfg)).await.unwrap_or(Value::Null);
+    }
+    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, mtun, mtun_online, mtun_error, kping, now: now() }
 }
 
 /// Hysteria2 devices of a user on this server: `open` sessions, `real` of them seen moving data (a
@@ -531,12 +545,14 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
             })
             .collect()
     };
-    let (kmix_users, mtun_users) = (room("kmix"), room("mtun"));
+    let (kmix_users, mtun_users, kping_users) = (room("kmix"), room("mtun"), room(crate::kping::PROTO));
     let kmix_here: Vec<&User> = kmix_users.iter().collect();
     let mtun_here: Vec<&User> = mtun_users.iter().collect();
+    let kping_here: Vec<&User> = kping_users.iter().collect();
     req.kmix = Some(crate::kmix::cfg_for(app, &crate::kmix::settings(app), n, &kmix_here));
     req.kcore = Some(serde_json::json!({}));
     req.mtun = Some(crate::microtun::cfg_for(app, n, &mtun_here));
+    req.kping = Some(crate::kping::cfg_for_node(app, n, &kping_here));
     req.block = lim.blocks_on(&n.id);
     req.off = off.clone();
     req.mtu = crate::mtu::ifaces(app, n);
@@ -601,7 +617,7 @@ pub async fn sync_all(app: &Arc<App>) {
             g.insert(n.id.clone(), now());
         }
         off_jobs.push(async move {
-            let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(serde_json::json!({})), mtun: Some(Default::default()), ..Default::default() };
+            let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(serde_json::json!({})), mtun: Some(Default::default()), kping: Some(Default::default()), ..Default::default() };
             let local = n.id == "local";
             let ok = if local {
                 apply_local(app, empty).await;
@@ -766,6 +782,8 @@ pub async fn sync_all(app: &Arc<App>) {
             .chain(resp.mtun_online.iter().map(|x| (x.clone(), "mtun"))).collect();
         forget_sessions(&n.id, |uid, proto| users.iter().find(|u| u.id == uid).is_some_and(|u| open_now.contains(&(u.username.clone(), proto))));
         crate::kmix::note_error(&n.id, &resp.kmix_error);
+        // KPING: traffic and who is online (counted in the limit below, with the other cores)
+        crate::kping::ingest(app, &n.id, &resp.kping, crate::kping::settings(app).node_on(&n.id));
         for (uid, b) in add_bytes.iter() {
             let d = b - before.get(uid).copied().unwrap_or(0);
             if d > 0 {
