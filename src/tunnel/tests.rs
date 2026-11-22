@@ -673,3 +673,82 @@ async fn faketcp_udp_takes_the_datagram_lane() {
     }
     lane_check("faketcp", 22840).await;
 }
+
+/// Game-FEC Pro: the datagram lane, UDP of every size and TCP as with any game tunnel
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn game_fec_pro_carries_like_game() {
+    let base = 22850;
+    let (mut entry, mut exit) = pair("game", "reverse", base, "token-for-tests-0123456789");
+    for s in [&mut entry, &mut exit] {
+        s.fec = "auto".into();
+    }
+    tcp_echo(base + 2).await;
+    udp_echo(base + 4).await;
+    let e = Running::start(entry);
+    let x = Running::start(exit);
+    assert!(wait_links(&e, 3).await, "no links: {:?}", e.status().error);
+    for _ in 0..80 {
+        if e.status().lanes == 3 && x.status().lanes == 3 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    check_udp(base + 3).await;
+    check_tcp(base + 1, 1_500_000).await;
+    e.stop();
+    x.stop();
+}
+
+/// Game-FEC Pro for KANKI MIX: the server marks its game packets and not its KCP; the exit reads the mark,
+/// the entry learns which flow is not the game (it then goes without FEC), and both flows still come back
+#[cfg(target_os = "linux")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn game_fec_pro_tells_the_game_from_the_kcp_of_kanki_mix() {
+    let base = 22870;
+    let (mut entry, mut exit) = pair("game", "reverse", base, "token-for-tests-0123456789");
+    for s in [&mut entry, &mut exit] {
+        s.fec = "auto".into();
+        s.profile = "kmix".into();
+        s.conns = 1;
+    }
+    // a stand-in KANKI MIX server: "G…" is a game packet (sent back with the game mark), the rest its KCP
+    let srv = std::net::UdpSocket::bind(("127.0.0.1", base + 4)).unwrap();
+    std::thread::spawn(move || {
+        let mut b = vec![0u8; 4096];
+        while let Ok((n, from)) = srv.recv_from(&mut b) {
+            if b[0] == b'G' {
+                crate::netq::send_to_marked(&srv, &b[..n], from, true);
+            } else {
+                let _ = srv.send_to(&b[..n], from);
+            }
+        }
+    });
+    tcp_echo(base + 2).await;
+    let e = Running::start(entry);
+    let x = Running::start(exit);
+    assert!(wait_links(&e, 1).await, "no links: {:?}", e.status().error);
+    for _ in 0..80 {
+        if e.status().lanes == 1 && x.status().lanes == 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let game = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let kcp = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    for u in [&game, &kcp] {
+        u.connect(("127.0.0.1", base + 3)).await.unwrap();
+    }
+    let mut b = vec![0u8; 4096];
+    for i in 0..30u8 {
+        for (u, head) in [(&game, b'G'), (&kcp, b'K')] {
+            let p = vec![head, i, 7, 7, 7, 7, 7, 7];
+            u.send(&p).await.unwrap();
+            let n = tokio::time::timeout(Duration::from_secs(2), u.recv(&mut b)).await.unwrap_or_else(|_| panic!("no reply to {} {}", head as char, i)).unwrap();
+            assert_eq!(&b[..n], &p[..]);
+        }
+    }
+    assert_eq!(e.status().bulk_flows, 1, "the KCP flow is the one bulk flow");
+    check_tcp(base + 1, 300_000).await;
+    e.stop();
+    x.stop();
+}

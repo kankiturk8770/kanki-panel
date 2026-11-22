@@ -65,7 +65,7 @@ function kmAll(on){if(!confirm(t(on?'KANKI MIX for every user?':'Remove KANKI MI
 // Each server's KANKI MIX records one user for a few minutes, where the traffic is open: every game (UDP)
 // packet with its size and time, the TCP connections (downloads) and the DNS names. The report labels each
 // flow (match, game service, download …), splits the time into lobby / match start / match, and shows what
-// the VIP tunnel makes of it. The whole recording downloads as JSON for a closer look.
+// a tunnel has to carry. The whole recording downloads as JSON for a closer look.
 var KR={d:null,sel:'',user:'',secs:1800};
 var KRL={match:'Match',game_udp:'Game service (UDP)',dns:'DNS',quic:'QUIC (web)',ntp:'Clock',download:'Download',web:'Lobby / web',lobby:'Lobby',start:'Match start'};
 function krLoad(quiet){return api('POST','/api/kmix/record',{action:'get'}).then(function(d){KR.d=d;if(S.page=='kmix'&&KM.tab=='record')krDraw(quiet);return d}).catch(function(e){if(!quiet)fail(e)})}
@@ -115,12 +115,9 @@ function krReport(d){var errs=(d.servers||[]).filter(function(x){return x.error}
   '<p class="muted kr-cap">'+t('Game packets a second')+'</p><div class="klegend"><span class="a"><i></i>'+t('Up (phone → server)')+'</span><span class="b"><i></i>'+t('Down (game → phone)')+'</span></div><div class="ch kr-ch">'+areaChart([{v:g('game_up'),c:'a'},{v:g('game_down'),c:'b'}],{h:120,cap:Math.max(2,tl.length)})+'</div>'+
   '<p class="muted kr-cap">'+t('TCP downloads (KB a second)')+'</p><div class="ch kr-ch">'+areaChart([{v:tcp,c:'b'}],{h:80,cap:Math.max(2,tl.length)})+'</div>'+
   '<div class="kr-tm ltr"><span>0:00</span><span>'+krTime(tl.length)+'</span></div>');
- // what the VIP tunnel makes of it
- var v=r.vip||{},pc=function(x){return N(((+x||0)*100).toFixed(1))+'%'};
- // what the VIP tunnel makes of it (3.46.1: every UDP packet is realtime; copies and repairs per flow up to
- // 96 KB at once and 256 KB a second)
+ // the bursts a tunnel has to carry at once
  var mf=match[0];
- h+=kuGroup(t('What the VIP tunnel sees'),null,'',kuLine(t('Biggest burst of game packets in 50 ms (the VIP tunnel copies and repairs up to 96 KB at once)'),'<b class="ltr">'+N(mf?Math.max(mf.down.burst50_bytes,mf.up.burst50_bytes):0)+' B</b>')+
+ h+=kuGroup(t('Game bursts'),null,'',kuLine(t('Biggest burst of game packets in 50 ms'),'<b class="ltr">'+N(mf?Math.max(mf.down.burst50_bytes,mf.up.burst50_bytes):0)+' B</b>')+
   kuLine(t('Game packets a second at most (all of them go first, with copies and repairs)'),'<b class="ltr">↑'+N(mf?mf.up.max_pps:0)+' ↓'+N(mf?mf.down.max_pps:0)+'</b>'));
  // flows
  var hs=['≤64','≤128','≤256','≤512','≤800','≤1100','>1100'],hist=function(a){return a.map(function(x,i){return x?hs[i]+':'+N(x):''}).filter(Boolean).join(' ')};

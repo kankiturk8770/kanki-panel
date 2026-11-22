@@ -1,7 +1,7 @@
 // ضبط ترافیک یک کاربر (برای فهمیدن الگوی بازی): پنل برای چند دقیقه ضبط یک کاربر را روشن می‌کند و
 // این‌جا، جایی که ترافیک باز است، دیده می‌شود هر بسته به کجا می‌رود:
 //   - هر بسته‌ی UDP (مسیر سریع دیتاگرام، یعنی بازی): زمان، جریان، جهت، اندازه‌ی خود بسته، اندازه روی سیم
-//     (همان چیزی که سرور ایران و تانل VIP می‌بینند) و شماره (برای افت بالارو)
+//     (همان چیزی که سرور ایران و تانل می‌بینند) و شماره (برای افت بالارو)
 //   - بسته‌های KCP (ترافیک TCP اپ): در خانه‌های ۱۰۰ میلی‌ثانیه‌ای، داده / فقط ACK / پریتی FEC و کوچک / بزرگ
 //   - هر اتصال TCP: مقصد (دامنه یا IP)، حجم بالا و پایین در خانه‌های ۱۰۰ میلی‌ثانیه‌ای
 //   - پرسش‌های DNS و جواب‌هایشان، تا هر IP اسم دامنه داشته باشد
@@ -33,9 +33,9 @@ const (
 	recMaxStreams = 8192
 	recMaxQueries = 5000
 	recBucketMs   = 100
-	// اندازه‌ای که تانل VIP بسته‌ی بالاتر از آن را «بازی» نمی‌داند (پیش‌فرض `rt_max`) و سقف بسته‌ی کوچک در ثانیه
-	vipRtMax = 512
-	vipHeavy = 300
+	// مرز بسته‌ی «بزرگ» روی سیم و سقف بسته‌ی کوچک در ثانیه (برای شمردن رگبارها)
+	bigWire  = 512
+	heavyPps = 300
 )
 
 // rec ضبط در جریان یا آخرین ضبط (nil = هیچ)
@@ -168,7 +168,7 @@ func (r *recorder) packet(in bool, kind byte, wire int, p []byte, addr string) {
 		dir = 0
 	}
 	b := r.bucket(dir, t)
-	if wire > vipRtMax {
+	if wire > bigWire {
 		b.Big++
 	} else {
 		b.Small++
@@ -443,7 +443,7 @@ type dirRep struct {
 	Bytes  int64   `json:"bytes"`
 	Wire   int64   `json:"wire"`
 	Hist   [7]int  `json:"hist"` // اندازه‌ی خود بسته: ≤64، ≤128، ≤256، ≤512، ≤800، ≤1100، بیشتر
-	Big    int     `json:"big"`  // روی سیم بالای ۵۱۲ (تانل VIP «بازی» حسابش نمی‌کند)
+	Big    int     `json:"big"`  // روی سیم بالای ۵۱۲
 	MaxPps int     `json:"max_pps"`
 	AvgPps float64 `json:"avg_pps"`
 	// بیشترین بسته و بایت در ۲۰ و ۵۰ میلی‌ثانیه (رگبار)
@@ -489,7 +489,7 @@ type phase struct {
 	Label string `json:"label"`
 }
 
-type vipView struct {
+type burstView struct {
 	RtMax int `json:"rt_max"`
 	Heavy int `json:"heavy"`
 	// سهم بسته‌های مسابقه که روی سیم از rt_max بزرگ‌ترند
@@ -500,7 +500,7 @@ type vipView struct {
 	HeavyDown      int `json:"heavy_down"`
 	HeavyUpMatch   int `json:"heavy_up_match"`
 	HeavyDownMatch int `json:"heavy_down_match"`
-	// بیشترین بایت بسته‌های بزرگ پایین‌رو در ۵۰ میلی‌ثانیه (محافظ سرعت VIP حدود ۶۲۰۰ بایت رد می‌کند)
+	// بیشترین بایت بسته‌های بزرگ پایین‌رو در ۵۰ میلی‌ثانیه
 	BigBurst50Down int `json:"big_burst50_down"`
 }
 
@@ -517,7 +517,7 @@ type report struct {
 	Columns   []string    `json:"columns"`
 	Timeline  [][]int64   `json:"timeline"`
 	Phases    []phase     `json:"phases"`
-	Vip       vipView     `json:"vip"`
+	Burst     burstView   `json:"burst"`
 	Queries   []recQuery  `json:"queries"`
 }
 
@@ -630,7 +630,7 @@ func (r *recorder) report(now time.Time) (report, map[string]any) {
 		d.Bytes += int64(e.inner)
 		d.Wire += int64(e.wire)
 		d.Hist[sizeSlot(int(e.inner))]++
-		if int(e.wire) > vipRtMax {
+		if int(e.wire) > bigWire {
 			d.Big++
 		}
 		if int(e.inner) > d.MaxSize {
@@ -715,7 +715,7 @@ func (r *recorder) report(now time.Time) (report, map[string]any) {
 			// همه‌ی UDP بازی (مسابقه و سرویس‌های بازی)؛ DNS و QUIC و ساعت جدا
 			row[0+int(e.dir)]++
 			row[2+int(e.dir)] += int64(e.inner)
-			if reps[e.f].Label == "match" && e.dir == 1 && int(e.wire) > vipRtMax {
+			if reps[e.f].Label == "match" && e.dir == 1 && int(e.wire) > bigWire {
 				bigDown = append(bigDown, e)
 			}
 		default:
@@ -793,8 +793,8 @@ func (r *recorder) report(now time.Time) (report, map[string]any) {
 			out.Phases = append(out.Phases, phase{From: s, To: s, Label: labels[s]})
 		}
 	}
-	// آنچه تانل VIP می‌بیند
-	v := vipView{RtMax: vipRtMax, Heavy: vipHeavy}
+	// رگبارها و بسته‌های بزرگ
+	v := burstView{RtMax: bigWire, Heavy: heavyPps}
 	var mUp, mDown, bUp, bDown int
 	for i := range reps {
 		if reps[i].Label == "match" {
@@ -812,13 +812,13 @@ func (r *recorder) report(now time.Time) (report, map[string]any) {
 	}
 	for s := 0; s < secs; s++ {
 		m, _ := inMatch(s)
-		if tl[s][13] > vipHeavy {
+		if tl[s][13] > heavyPps {
 			v.HeavyUp++
 			if m {
 				v.HeavyUpMatch++
 			}
 		}
-		if tl[s][14] > vipHeavy {
+		if tl[s][14] > heavyPps {
 			v.HeavyDown++
 			if m {
 				v.HeavyDownMatch++
@@ -836,7 +836,7 @@ func (r *recorder) report(now time.Time) (report, map[string]any) {
 			v.BigBurst50Down = bytes
 		}
 	}
-	out.Vip = v
+	out.Burst = v
 	// a copy: reps stays in recording order, so the raw flows below keep their own label and domain
 	out.Flows = append([]flowRep(nil), reps...)
 	sort.SliceStable(out.Flows, func(i, j int) bool {

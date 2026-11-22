@@ -8,8 +8,8 @@ import (
 	"unsafe"
 )
 
-// GameTOS: DSCP EF, the mark a game packet leaves the server with. A VIP tunnel on the same server reads it
-// and gives only these packets copies and repairs; KCP (the app's TCP) goes without the mark.
+// GameTOS: DSCP EF, the mark a game packet leaves the server with. A Game-FEC Pro tunnel on the same server
+// reads it and gives only these packets FEC; KCP (the app's TCP) goes without the mark.
 const GameTOS = 0xb8
 
 // markOOB: IP_TOS and IPV6_TCLASS for one packet; the kernel uses the one of the packet's family and

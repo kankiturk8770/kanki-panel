@@ -73,9 +73,14 @@ pub struct Spec {
     /// a Hysteria2 link instead of a Kanki link (handled by `hy2t`, not by the engine)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hy2: Option<super::hy2t::Hy2Spec>,
-    /// `game`: FEC "data:parity" ("8:3", "" = 8:3, "off" = no FEC) and packet duplication
+    /// `game`: FEC "data:parity" ("8:3", "" = 8:3, "off" = no FEC, "auto" = Game-FEC Pro) and packet
+    /// duplication
     pub fec: String,
     pub dup: bool,
+    /// Game-FEC Pro: the core the tunnel carries ("kmix" | "kping" | "mtun" | "wg" | ""). "kmix" splits
+    /// each flow by the server's game mark: the game with FEC, its KCP (the app's TCP) without
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub profile: String,
 }
 
 impl Spec {
@@ -165,6 +170,9 @@ pub struct Status {
     pub quality: Option<serde_json::Value>,
     /// links whose UDP takes the datagram lane (`game` transport, both ends updated)
     pub lanes: usize,
+    /// Game-FEC Pro, KANKI MIX profile (entry): flows found to be no game (sent without FEC)
+    #[serde(default)]
+    pub bulk_flows: usize,
 }
 
 struct State {
@@ -253,6 +261,9 @@ pub struct Running {
 impl Running {
     pub fn start(spec: Spec) -> Running {
         let shared = Arc::new(Shared::default());
+        if spec.transport == "game" && spec.fec.trim() == "auto" && spec.profile == "kmix" {
+            shared.classify.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
         if spec.role == "exit" {
             // the exit only dials what this tunnel forwards
             let host = spec.target_host();
@@ -345,6 +356,7 @@ impl Running {
             probe: self.state.probe.lock().unwrap_or_else(|e| e.into_inner()).clone(),
             quality: self.state.quality.lock().unwrap_or_else(|e| e.into_inner()).clone(),
             lanes: alive.iter().filter(|s| s.lane_on()).count(),
+            bulk_flows: sh.bulk.lock().unwrap_or_else(|e| e.into_inner()).len(),
         }
     }
 }

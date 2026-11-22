@@ -1714,9 +1714,7 @@ pub(crate) fn forget_server(app: &App, id: &str) {
 /// Ports another service of the panel already uses on that server.
 fn taken_ports(app: &App, sid: &str) -> Vec<u16> {
     let d = crate::dns::panel::settings(app);
-    let mut v = if d.on && d.servers.iter().any(|x| x.server == sid) { vec![53, 80, 443, 853, super::API_PORT] } else { vec![super::API_PORT] };
-    // the ports of the VIP tunnels there (a kcp inbound is UDP)
-    v.extend(crate::vip::panel::ports_on(app, sid, "").into_iter().map(|x| x.0));
+    let v = if d.on && d.servers.iter().any(|x| x.server == sid) { vec![53, 80, 443, 853, super::API_PORT] } else { vec![super::API_PORT] };
     v
 }
 

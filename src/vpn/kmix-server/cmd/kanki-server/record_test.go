@@ -131,8 +131,8 @@ func TestReportLabelsAMatch(t *testing.T) {
 	if len(rep.Streams) != 1 || rep.Streams[0].Label != "download" || rep.Streams[0].Down != 3_000_000 {
 		t.Fatalf("streams %+v", rep.Streams)
 	}
-	if rep.Vip.HeavyUp != 1 || rep.Vip.HeavyUpMatch != 1 || rep.Vip.BigBurst50Down < 10*1260 || rep.Vip.MatchBigDown <= 0 {
-		t.Fatalf("vip %+v", rep.Vip)
+	if rep.Burst.HeavyUp != 1 || rep.Burst.HeavyUpMatch != 1 || rep.Burst.BigBurst50Down < 10*1260 || rep.Burst.MatchBigDown <= 0 {
+		t.Fatalf("burst %+v", rep.Burst)
 	}
 	// مرحله‌ها: لابی، شروع، مسابقه، لابی
 	labels := []string{}

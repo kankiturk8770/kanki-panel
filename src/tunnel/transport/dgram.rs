@@ -48,12 +48,16 @@ pub fn looks_like(p: &[u8]) -> bool {
 /// The relay's half: what the session wants sent, and where received payloads go.
 pub struct RelayEnd {
     pub out: mpsc::Receiver<Vec<u8>>,
+    /// Game-FEC Pro: payloads of flows that are not the game (the KCP of KANKI MIX, downloads): sent
+    /// without FEC
+    pub bulk: mpsc::Receiver<Vec<u8>>,
     pub inbox: mpsc::Sender<Vec<u8>>,
 }
 
 /// The session's half, handed over with the link (`link::Raw::Dg`).
 pub struct Port {
     out: mpsc::Sender<Vec<u8>>,
+    bulk: mpsc::Sender<Vec<u8>>,
     inbox: Mutex<Option<mpsc::Receiver<Vec<u8>>>>,
     /// biggest wire payload the carrier takes (QUIC datagrams may be smaller than MAX_WIRE)
     max: usize,
@@ -74,8 +78,9 @@ impl Port {
     }
     fn pair_with(max: usize, copies: usize) -> (Arc<Port>, RelayEnd) {
         let (out_tx, out_rx) = mpsc::channel(QUEUE);
+        let (bulk_tx, bulk_rx) = mpsc::channel(QUEUE);
         let (in_tx, in_rx) = mpsc::channel(QUEUE);
-        (Arc::new(Port { out: out_tx, inbox: Mutex::new(Some(in_rx)), max: max.min(MAX_WIRE), copies }), RelayEnd { out: out_rx, inbox: in_tx })
+        (Arc::new(Port { out: out_tx, bulk: bulk_tx, inbox: Mutex::new(Some(in_rx)), max: max.min(MAX_WIRE), copies }), RelayEnd { out: out_rx, bulk: bulk_rx, inbox: in_tx })
     }
     /// The received payloads (once: the session's reader takes them)
     pub fn take_inbox(&self) -> Option<mpsc::Receiver<Vec<u8>>> {
@@ -175,11 +180,17 @@ impl Lane {
     }
     /// Sends a frame on the lane. false = not sent (lane not agreed yet, frame too big, queue
     /// full): the caller sends it on the stream instead.
-    pub fn send(&self, frame: &[u8]) -> bool {
+    /// `bulk`: a frame of a flow that is not the game: a carrier that knows the difference (Game-FEC Pro)
+    /// sends it without FEC; on any other it is a frame like the rest
+    pub fn send_as(&self, frame: &[u8], bulk: bool) -> bool {
         if !self.on.load(Ordering::Relaxed) {
             return false;
         }
         let Some(w) = self.seal(frame) else { return false };
+        // only the game relay (one copy, FEC of its own) reads the bulk queue
+        if bulk && self.port.copies == 1 {
+            return self.port.bulk.try_send(w).is_ok();
+        }
         // the copy that counts: when it does not fit, the caller sends the frame on the stream
         let copy = (self.port.copies > 1).then(|| w.clone());
         if self.port.out.try_send(w).is_err() {
@@ -247,9 +258,9 @@ mod tests {
         let (p, mut end) = Port::pair();
         let k = [3u8; 32];
         let x = Lane::new(p, &Keys { tx: k, rx: k });
-        assert!(!x.send(b"frame"));
+        assert!(!x.send_as(b"frame", false));
         x.on.store(true, Ordering::Relaxed);
-        assert!(x.send(b"frame"));
+        assert!(x.send_as(b"frame", false));
         let w = end.out.try_recv().unwrap();
         assert_eq!(x.open(&w).unwrap(), b"frame");
     }
@@ -270,7 +281,7 @@ mod tests {
         let k = [5u8; 32];
         let x = Lane::new(p, &Keys { tx: k, rx: k });
         x.on.store(true, Ordering::Relaxed);
-        assert!(x.send(b"shot"));
+        assert!(x.send_as(b"shot", false));
         let a = end.out.try_recv().unwrap();
         assert!(end.out.try_recv().is_err(), "the copy waits");
         tokio::time::sleep(DUP_GAP / 2).await;
@@ -283,7 +294,7 @@ mod tests {
         let (p1, mut e1) = Port::pair();
         let y = Lane::new(p1, &Keys { tx: k, rx: k });
         y.on.store(true, Ordering::Relaxed);
-        assert!(y.send(b"shot"));
+        assert!(y.send_as(b"shot", false));
         assert!(e1.out.try_recv().is_ok() && e1.out.try_recv().is_err());
     }
 

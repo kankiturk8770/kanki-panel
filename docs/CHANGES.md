@@ -1,3 +1,51 @@
+# v3.57.0 — Game-FEC Pro, no more VIP tunnel, KPING on the Tunnels page, free ports, the same controls on every server
+**The VIP tunnel is gone** (the owner's decision). Its source is kept in `backup/vip-tunnel-3.56.0.tar.gz` (and in git
+history); nothing of it runs any more. Nothing is carried over: on start the panel drops the old list (`vip_tunnels`) and any
+KPING route that rode a VIP tunnel; the panel sends `"vip": []` so an older agent stops what it still runs, and a new agent
+removes `/var/lib/kanki/vip.json` and its firewall rules. The KANKI MIX recording's «what the VIP tunnel sees» is now
+«game bursts» (`burst` in its JSON).
+
+**Game-FEC Pro** (`game` with FEC `auto`, both agents 3.57.0 or newer; the panel refuses it while an agent is older)
+- The repairs follow the line: every half second each end tells the other what it sent and what it lost of the other's
+  (`0xF5`); each end shapes its own groups from what the other lost: under 1 % none, 1–5 % 10:1, 5–10 % 8:1, 10–15 % 5:1,
+  15–30 % 4:2, past 30 % the circuit breaker's 4:4. Never more repair shards than data shards (at most twice the bytes),
+  up at once, down a step only after 3 s of calm. No packet duplication.
+- Only the game is coded: the KCP stream (users' TCP, control) and flows that are not the game go plain (`0xF6`); the game lane
+  is served before the stream (`biased`), so a burst of TCP never holds a game packet.
+- **Core it carries** (tunnel window): KANKI MIX: the exit reads the game mark of each reply (the KANKI MIX server marks only
+  its game packets) and sends the rest as bulk (`UDPB`); the entry learns those flows and sends them without FEC too.
+  KPING: makes a KPING route (below). microtun and WireGuard/AmneziaWG: Game-FEC Pro as above.
+- New tunnels default to Game-FEC Pro; existing tunnels keep their fixed FEC.
+
+**KPING**
+- The KPING page keeps only its own settings (Status with its servers, Testers, Settings); routes and their tunnels are on the
+  Tunnels page («KPING routes», or Tunnel › Game-FEC Pro › core KPING). Old addresses `#kping/servers`, `#kping/tunnel` go there.
+- A route's tunnel is Game-FEC Pro shaped for KPING (fixed 8:1 when an agent is older); on it KPING sends no copy of its own
+  into the tunnel: the tunnel repairs the line only when it loses packets. The relay already drops the phone's second copy
+  (sequence window) before the tunnel; KPING never touches ports (voice and game alike).
+- No text says «only PUBG» any more; nothing in the panel was tied to one game.
+
+**Ports**
+- A new KPING route without ports gets the first five free ones on its Iran server; a tunnel saved without a port gets a free
+  one on its listening server (`free_ports`): free of other tunnels, routes, every VPN core port and what the server says it
+  listens on right now. The panel-wide list for new VPN cores counts KPING and the servers' live listeners too.
+
+**Direct WireGuard for the Kanki app only:** a server reached without a tunnel offers its own WireGuard to the Kanki app
+(sealed subscription and config) with junk packets before the handshake (Jc 4, Jmin 40, Jmax 70: a plain WireGuard server
+ignores them). The page, other apps, the links, the Amnezia backup and the bot never get it (the config answers 403 there).
+
+**Servers page**
+- An open server card has three parts: basic settings, cores and network, control and agent.
+- An Iran server (or a KPING exit) with only the agent has the same controls: Health (`/api/tunnels/servers/:id/health`),
+  Sync and Restart services (`/api/tunnels/servers/:id/agent/sync|restart`, the agent acts on its next report), Update agent.
+- An Iran server shows «Relay / tunnel mode active», never «VPN is not installed» or a VPN spinner.
+- Adding a server shows three steps (Iran: agent, tunnel and relay, online; abroad: agent, VPN cores, finish).
+- «Update all» and other questions on this page ask in the window in the middle (`kAsk`), not the browser's box.
+- Control buttons in an even grid (2 a row on a phone, 3 on a desktop). The cores page is in three groups (game cores, VPN
+  cores, services) with cards of one height.
+
+**Not in this version (needs the app):** the KANKI MIX app's own FEC on its KCP and the app's PUBG-only gate of KPING.
+
 # v3.56.0 — Selling better: a short trial with an instant offer, reminders that renew, gifts from the mini app
 **Trial and its offer**
 - The free trial is **300 MB for 3 hours**, one user, once per Telegram account (`trial_mb`, `trial_hours`). Its message: volume,

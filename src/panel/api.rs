@@ -198,7 +198,6 @@ pub const PANEL_JS: &str = concat!(
     include_str!("../../assets/panel/js/17-look-map-menu.js"),
     // KPING's page; the start code below stays last
     include_str!("../../assets/panel/js/19-kping.js"),
-    include_str!("../../assets/panel/js/20-vip.js"),
     include_str!("../../assets/panel/js/18-start.js")
 );
 
@@ -353,7 +352,6 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::kmix::router())
         .merge(crate::microtun::router())
         .merge(crate::kping::router())
-        .merge(crate::vip::panel::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
         // 2 MiB for every route: login, join and hy2/auth are open to strangers and must not make the
         // server buffer more. Only the backup upload gets a bigger limit (see backup::router).
@@ -1654,6 +1652,21 @@ pub fn node_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     v
 }
 
+/// Direct WireGuard (3.57.0): this server's own WireGuard, straight to it with junk packets before the
+/// handshake (AmneziaWG's Jc/Jmin/Jmax, which a plain WireGuard server ignores), so it passes Iran's DPI
+/// without an Iran relay. Only for the Kanki app (sealed subscription and config); never on the page, in
+/// the links for other apps, the Amnezia backup or the bot (`node_protos` keeps WireGuard tunnel-only there).
+pub fn wg_direct_for_app(app: &App, u: &User, n: &Node) -> bool {
+    let info = node_info(n);
+    u.has_proto("wg")
+        && info["wg_pub"].as_str().is_some_and(|s| !s.is_empty())
+        && !crate::cores::is_off(app, &n.id, "wg")
+        && !crate::direct::through_tunnel(app, n)
+}
+
+/// The junk packets of direct WireGuard: a few random datagrams of 40-70 bytes before each handshake
+pub const WG_DIRECT_JUNK: &str = "Jc = 4\nJmin = 40\nJmax = 70\n";
+
 /// What a server's second entry (its configs through the tunnel) offers this user: each protocol whose
 /// core has an Iran address (its own, or the server's tunnel on the Servers page), and KANKI MIX's own
 /// second config (KANKI MIX page).
@@ -1690,12 +1703,17 @@ pub fn twin_name(app: &App, n: &Node) -> String {
 /// id of the second (through the tunnel) entry of a server in the subscription data
 pub const TUNNEL_SUFFIX: &str = "@tunnel";
 
-fn sub_data(app: &App, u: &User) -> Value {
+fn sub_data(app: &App, u: &User, sealed: bool) -> Value {
     let mut nodes: Vec<Value> = vec![];
     for n in user_nodes(app, u).iter() {
         let tun = crate::kmix::link_tunnel(app, u, n);
+        let mut main = node_protos(app, u, n);
+        // the Kanki app (sealed): direct WireGuard with junk packets too
+        if sealed && !main.contains(&"wireguard") && wg_direct_for_app(app, u, n) {
+            main.insert(0, "wireguard");
+        }
         let mut v = json!({
-            "id": n.id, "name": n.name, "main": n.id == "local", "protocols": node_protos(app, u, n),
+            "id": n.id, "name": n.name, "main": n.id == "local", "protocols": main,
             "hy2": hy2_uri(app, u, n),
             // KANKI MIX: kanki://key@host:port?fec=10-3… (Null = not for this user / not on this server)
             "kmix": crate::kmix::link(app, u, n),
@@ -1712,7 +1730,7 @@ fn sub_data(app: &App, u: &User) -> Value {
         }
         // each protocol of this entry: "tunnel" when its config points at an Iran entry, "direct" when at the
         // server itself (the app labels them; KANKI MIX has its own address setting)
-        v["via_proto"] = via_proto(app, n, node_protos(app, u, n).as_slice(), false);
+        v["via_proto"] = via_proto(app, n, main.as_slice(), false);
         // AmneziaWG: whether its endpoint goes through the tunnel or straight to the server, and the address
         // of the second, direct config ("" = none; the app no longer guesses it from the server's name)
         if v["protocols"].as_array().map(|a| a.iter().any(|p| p == "amneziawg")).unwrap_or(false) {
@@ -1839,7 +1857,12 @@ fn sub_page_of(app: &App, u: &User, kping: bool) -> Response {
     // server-rendered config links keep the exact URL format the Kanki Android app reads
     let mut nodes_html = String::new();
     for n in user_nodes(&app, &u) {
-        let rows: String = node_protos(&app, &u, &n).into_iter().map(|p| proto_row(&app, &u, &n, p, false)).collect();
+        let mut main = node_protos(&app, &u, &n);
+        // the Kanki app (sealed): its direct WireGuard too
+        if kping && !main.contains(&"wireguard") && wg_direct_for_app(&app, &u, &n) {
+            main.insert(0, "wireguard");
+        }
+        let rows: String = main.into_iter().map(|p| proto_row(&app, &u, &n, p, false)).collect();
         if !rows.is_empty() {
             nodes_html.push_str(&format!(
                 "<section class=\"node\" data-node=\"{}\"><h3>{}<small data-i18n=\"{}\"></small></h3>{}</section>",
@@ -1885,7 +1908,7 @@ fn sub_page_of(app: &App, u: &User, kping: bool) -> Response {
         }
         nodes_html.push_str(&format!("<section class=\"node\" data-node=\"dns\"><h3>Kanki DNS</h3>{}</section>", rows));
     }
-    let mut data = sub_data(&app, &u);
+    let mut data = sub_data(&app, &u, kping);
     if kping {
         data["kping"] = crate::kping::sub_info(&app, &u);
     }
@@ -1915,9 +1938,10 @@ async fn sub_xray_qr(State(app): St, Path((code, i)): Path<(String, usize)>) -> 
 async fn sub_json(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
     let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
     crate::devices::note(&app, &u, &h);
-    let mut data = sub_data(&app, &u);
+    let sealed = crate::devices::wants_seal(&h);
+    let mut data = sub_data(&app, &u, sealed);
     // KPING goes only to the Kanki app, sealed (never to the page, links, other apps or the bot)
-    if crate::devices::wants_seal(&h) {
+    if sealed {
         data["kping"] = crate::kping::sub_info(&app, &u);
     }
     crate::devices::reply(&h, &code, Json(data).into_response()).await
@@ -2164,6 +2188,11 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
     if !u.has_proto(p) {
         return (StatusCode::FORBIDDEN, "protocol not allowed").into_response();
     }
+    // WireGuard straight to a server reached without a tunnel: only the Kanki app gets it (with junk packets)
+    let wg_direct = p == "wg" && tw.is_none() && !crate::direct::through_tunnel(&app, &n);
+    if wg_direct && !h.is_some_and(crate::devices::wants_seal) {
+        return (StatusCode::FORBIDDEN, "direct WireGuard is only in the Kanki app").into_response();
+    }
     if p == "wg" && extra == "uri" {
         return text_conf(wg_uri(&app, &u, &n, tw.as_ref()).unwrap_or_default());
     }
@@ -2177,6 +2206,9 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
         "[Interface]\nPrivateKey = {}\nAddress = {}/32\nDNS = {}\nMTU = {}\n",
         peer.privkey, peer.ip, app.db.get("dns"), crate::mtu::client(&app, &n, p, tw.is_some())
     );
+    if wg_direct {
+        s.push_str(WG_DIRECT_JUNK);
+    }
     if p == "awg" {
         let compat = app.db.on("awg_compat");
         let classic = ["Jc", "Jmin", "Jmax", "S1", "S2", "H1", "H2", "H3", "H4"];

@@ -102,9 +102,6 @@ mod monitor;
 // tunnel: tunnels between servers and tunnel servers; the wire protocols in src/tunnel/transport
 mod tunnel;
 
-// vip: the VIP tunnel (several paths at once, its own page and settings; src/vip)
-mod vip;
-
 // xray: Xray-core on the servers and its part of the panel
 mod xray;
 
@@ -365,6 +362,8 @@ async fn main() {
     auth::legacy_key_start(&app.db);
     // upgrade legacy sha256 admin hash stored in the db is done at next successful login
 
+    kping::drop_vip(&app);
+    tunnel::panel::drop_vip(&app);
     kping::light_tunnels(&app);
     tokio::spawn(sync::run(app.clone()));
     // deleted nodes that were off at the time are asked again to remove themselves
