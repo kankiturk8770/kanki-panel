@@ -830,6 +830,7 @@ pub fn statuses() -> Vec<super::engine::Status> {
             probe: None,
             quality: None,
             lanes: 0,
+            bulk_flows: 0,
         });
     }
     out

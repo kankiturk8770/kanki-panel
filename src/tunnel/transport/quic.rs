@@ -116,7 +116,7 @@ const DUP_GAP_MS: u64 = 3;
 pub(super) fn quic_lane(conn: &quinn::Connection) -> Option<Arc<super::dgram::Port>> {
     let max = conn.max_datagram_size()?;
     let (port, end) = super::dgram::Port::pair_twice(max);
-    let super::dgram::RelayEnd { out: mut lane_out, inbox } = end;
+    let super::dgram::RelayEnd { out: mut lane_out, inbox, .. } = end;
     let c1 = conn.clone();
     tokio::spawn(async move {
         let mut last: Vec<u8> = vec![];

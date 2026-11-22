@@ -45,12 +45,36 @@ pub struct FecEncoder {
     /// The open group's data shards (`len (2) | packet`, unpadded).
     shards: Vec<Vec<u8>>,
     opened: Option<Instant>,
+    /// Game-FEC Pro: never more repair shards than data shards in a group (at most twice the bytes,
+    /// whatever the line does), and `parity` may be 0 (a clean line: the data shards alone)
+    cap: bool,
 }
 
 impl FecEncoder {
     /// `data` 1-64 and `parity` 1-32 (checked by the caller).
     pub fn new(data: usize, parity: usize, max_delay: Duration) -> Self {
-        Self { data, parity, max_delay, group: 0, shards: Vec::with_capacity(data), opened: None }
+        Self { data, parity, max_delay, group: 0, shards: Vec::with_capacity(data), opened: None, cap: false }
+    }
+
+    /// Game-FEC Pro: a group of `data` (1-64) with `parity` (0-32) repairs, capped at one repair per data
+    /// shard; it can be reshaped while running (`set_shape`)
+    pub fn adaptive(data: usize, parity: usize, max_delay: Duration) -> Self {
+        Self { cap: true, ..Self::new(data.clamp(1, 64), parity.min(32), max_delay) }
+    }
+
+    /// The next groups' shape (Game-FEC Pro). A group open now keeps its packets; it closes at once when it
+    /// already holds the new size.
+    pub fn set_shape(&mut self, data: usize, parity: usize, send: &mut impl FnMut(Shard<'_>)) {
+        self.data = data.clamp(1, 64);
+        self.parity = parity.min(32);
+        if self.shards.len() >= self.data {
+            self.close(send);
+        }
+    }
+
+    /// (data, parity) of the next groups
+    pub fn shape(&self) -> (usize, usize) {
+        (self.data, self.parity)
     }
 
     /// Adds a packet to the open group: `send` gets its data shard at once, and the group's
@@ -89,7 +113,17 @@ impl FecEncoder {
         // Full groups get `parity`; a group closed early gets as many in proportion, but a sparse one (a game:
         // a packet every 15-30 ms, so one or two in a group) gets all of them: its one repair shard alone was
         // lost together with the packet in any short outage, and a few small shards cost nothing.
-        let m = if k * 2 <= self.data { self.parity } else { (self.parity * k).div_ceil(self.data).max(1) };
+        let mut m = if k * 2 <= self.data { self.parity } else { (self.parity * k).div_ceil(self.data).max(1) };
+        if self.cap {
+            // the circuit breaker: never more than twice the bytes; a clean line sends no repairs
+            m = if self.parity == 0 { 0 } else { m.min(k) };
+        }
+        if m == 0 {
+            self.shards.clear();
+            self.opened = None;
+            self.group = self.group.wrapping_add(1);
+            return;
+        }
         let size = self.shards.iter().map(Vec::len).max().unwrap_or(0).next_multiple_of(2);
         for shard in &mut self.shards {
             shard.resize(size, 0);

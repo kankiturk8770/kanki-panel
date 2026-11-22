@@ -430,7 +430,7 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<FtClient> {
     // KCP -> mask -> fake TCP segment
     let (inner1, raw1, mask1, ka1, st1) = (inner.clone(), raw.clone(), mask.clone(), kcp_addr.clone(), state.clone());
     let (port, lane) = super::dgram::Port::pair_twice(super::dgram::MAX_WIRE);
-    let super::dgram::RelayEnd { out: mut lane_out, inbox: lane_in } = lane;
+    let super::dgram::RelayEnd { out: mut lane_out, inbox: lane_in, .. } = lane;
     let out_task = tokio::spawn(async move {
         let mut a = vec![0u8; 65535];
         let mut w: Vec<u8> = Vec::with_capacity(2048);

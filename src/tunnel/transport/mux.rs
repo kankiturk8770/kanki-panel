@@ -25,6 +25,12 @@ const PONG: u8 = 9;
 /// "I have the datagram lane" (`dgram.rs`): the entry says it, the exit answers it; an end that
 /// does not know the frame ignores it and the link stays stream-only
 const DGOK: u8 = 10;
+/// Game-FEC Pro, KANKI MIX profile: a reply of a flow that is not the game (the server sent it without the
+/// game mark: its KCP, the app's TCP). The entry learns the flow is bulk and sends it without FEC too.
+/// Only between agents of 3.57.0 or newer (the panel allows the profile only then).
+const UDPB: u8 = 11;
+/// most flows whose class the entry remembers
+const MAX_BULK: usize = 8192;
 
 /// bytes one stream may have in flight before the other side says it has written them
 const WINDOW: usize = 512 * 1024;
@@ -56,6 +62,29 @@ pub struct Shared {
     /// exit: the only "host:port" targets the entry may ask for (empty = none: a smart-test tunnel forwards
     /// nothing, it only reaches the test services inside the exit)
     pub allowed: Mutex<HashSet<String>>,
+    /// Game-FEC Pro, KANKI MIX profile: the exit reads the game mark of each reply (a KANKI MIX server marks
+    /// its game packets, not its KCP); the entry keeps the flows found to be bulk (flow id -> last use)
+    pub classify: AtomicBool,
+    pub bulk: Mutex<HashMap<u32, u64>>,
+}
+
+impl Shared {
+    fn is_bulk(&self, id: u32) -> bool {
+        self.classify.load(Ordering::Relaxed) && self.bulk.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&id)
+    }
+    fn note_class(&self, id: u32, bulk: bool) {
+        let mut b = self.bulk.lock().unwrap_or_else(|e| e.into_inner());
+        if !bulk {
+            b.remove(&id);
+            return;
+        }
+        if b.len() >= MAX_BULK && !b.contains_key(&id) {
+            for old in oldest_eighth(b.iter().map(|(k, t)| (*k, *t))) {
+                b.remove(&old);
+            }
+        }
+        b.insert(id, now_ms());
+    }
 }
 
 impl Shared {
@@ -138,10 +167,14 @@ impl Session {
     /// A UDP frame: on the datagram lane when there is one (never waits behind the stream), else
     /// (or when it is too big for one datagram) on the stream
     async fn send_udp_frame(&self, f: Vec<u8>) -> bool {
+        self.send_udp_frame_as(f, false).await
+    }
+    /// The same for a frame of a flow that is not the game (Game-FEC Pro sends it without FEC)
+    async fn send_udp_frame_as(&self, f: Vec<u8>, bulk: bool) -> bool {
         let lane = self.lane.lock().unwrap_or_else(|e| e.into_inner()).clone();
         if let Some(l) = lane {
             // (last_tx is the stream writer's: the watchdog in `send` must still see a stuck stream)
-            if l.send(&f) {
+            if l.send_as(&f, bulk) {
                 return true;
             }
         }
@@ -237,7 +270,8 @@ impl Session {
         p.extend_from_slice(t);
         p.extend_from_slice(data);
         self.shared.tx_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
-        self.send_udp_frame(frame(UDP, id, &p)).await
+        let bulk = self.shared.is_bulk(id);
+        self.send_udp_frame_as(frame(UDP, id, &p), bulk).await
     }
 
     fn deliver(&self, id: u32, data: Vec<u8>) {
@@ -312,7 +346,7 @@ async fn lane_reader(s: Arc<Session>, lane: Arc<super::dgram::Lane>, mut inbox: 
         };
         let Some(w) = w else { break };
         let Some(f) = lane.open(&w) else { continue };
-        if f.len() < 5 || f[0] != UDP {
+        if f.len() < 5 || (f[0] != UDP && f[0] != UDPB) {
             continue;
         }
         s.last_rx.store(now_ms(), Ordering::Relaxed);
@@ -338,7 +372,7 @@ async fn handle(s: &Arc<Session>, f: &[u8]) {
             let (rx_d, credit) = s.add_slot(id);
             tokio::spawn(exit_open(s.clone(), id, target, rx_d, credit));
         }
-        UDP => {
+        UDP | UDPB => {
             if p.is_empty() {
                 return;
             }
@@ -348,7 +382,10 @@ async fn handle(s: &Arc<Session>, f: &[u8]) {
             }
             let data = &p[1 + tl..];
             if s.entry {
-                // a reply from the target: back to the user
+                // a reply from the target: back to the user (and what kind of flow it is)
+                if s.shared.classify.load(Ordering::Relaxed) {
+                    s.shared.note_class(id, t == UDPB);
+                }
                 s.shared.rx_bytes.fetch_add(data.len() as u64, Ordering::Relaxed);
                 let back = s.shared.udp_back.lock().unwrap_or_else(|e| e.into_inner()).get(&id).map(|(sock, addr, _)| (sock.clone(), *addr));
                 if let Some((sock, addr)) = back {
@@ -503,17 +540,44 @@ async fn exit_udp(s: &Arc<Session>, id: u32, target: &str, data: &[u8]) {
     let _ = sock.send(data).await;
 }
 
+/// One reply of a flow, and whether it carried the game mark (only read when the tunnel classifies)
+async fn recv_marked(sock: &UdpSocket, buf: &mut [u8], classify: bool) -> std::io::Result<(usize, bool)> {
+    if !classify {
+        return sock.recv(buf).await.map(|n| (n, true));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        loop {
+            sock.readable().await?;
+            match sock.try_io(tokio::io::Interest::READABLE, || crate::netq::recv_tos(sock.as_raw_fd(), buf)) {
+                Ok((n, tos)) => return Ok((n, tos.is_some_and(crate::netq::is_game_tos))),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    sock.recv(buf).await.map(|n| (n, true))
+}
+
 async fn exit_udp_back(s: Arc<Session>, id: u32, sock: Arc<UdpSocket>) {
     let mut buf = vec![0u8; 65536];
     let mut dead = s.dead_tx.subscribe();
     let mut replied = false;
+    let classify = s.shared.classify.load(Ordering::Relaxed);
+    #[cfg(target_os = "linux")]
+    if classify {
+        use std::os::fd::AsRawFd;
+        crate::netq::want_tos(sock.as_raw_fd());
+    }
     loop {
         let r = tokio::select! {
-            r = tokio::time::timeout(Duration::from_secs(10), sock.recv(&mut buf)) => r,
+            r = tokio::time::timeout(Duration::from_secs(10), recv_marked(&sock, &mut buf, classify)) => r,
             _ = dead.changed() => break,
         };
         match r {
-            Ok(Ok(n)) => {
+            Ok(Ok((n, game))) => {
                 replied = true;
                 if let Some(f) = s.udp_out.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&id) {
                     f.last = now_ms();
@@ -522,7 +586,9 @@ async fn exit_udp_back(s: Arc<Session>, id: u32, sock: Arc<UdpSocket>) {
                 p.push(0);
                 p.extend_from_slice(&buf[..n]);
                 s.shared.tx_bytes.fetch_add(n as u64, Ordering::Relaxed);
-                if !s.send_udp_frame(frame(UDP, id, &p)).await {
+                // a KANKI MIX server marks only its game packets: the rest of the flow is bulk (no FEC)
+                let sent = if game { s.send_udp_frame(frame(UDP, id, &p)).await } else { s.send_udp_frame_as(frame(UDPB, id, &p), true).await };
+                if !sent {
                     break;
                 }
             }

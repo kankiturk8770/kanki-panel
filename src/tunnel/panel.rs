@@ -109,7 +109,17 @@ pub struct Tunnel {
     pub hop: u8,
     /// the route's name, the same on every hop
     pub chain_name: String,
+    /// Game-FEC Pro (`game` with FEC "auto"): the core it carries (`PROFILES`): "kmix" gives the game FEC and
+    /// sends the KCP of KANKI MIX without; "kping", "mtun", "wg" or "" the same Game-FEC Pro for that core
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub profile: String,
 }
+
+/// The cores a Game-FEC Pro tunnel can be shaped for
+pub const PROFILES: &[&str] = &["", "kmix", "kping", "mtun", "wg"];
+/// Game-FEC Pro (FEC "auto", a profile) exists from this agent version on: an older end would drop its
+/// plain payloads
+const GAME_PRO_FROM: &str = "3.57.0";
 
 /// Every transport a tunnel can use (the panel accepts nothing else).
 pub const TRANSPORTS: &[&str] = &["tcp", "tcpmux", "ws", "wss", "quic", "kcp", "cdn", "hq", "h2", "dual", "game", "faketcp"];
@@ -342,6 +352,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             hy2: None,
             fec: t.fec.clone(),
             dup: t.dup,
+            profile: if t.transport == "game" { t.profile.clone() } else { String::new() },
         });
     }
     // a running smart-tunnel test adds one short-lived test tunnel per transport and per direction:
@@ -377,6 +388,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                     hy2: None,
                     fec: String::new(),
                     dup: false,
+                    profile: String::new(),
                 });
             }
             for (mi, mode) in PROBE_MODES.iter().enumerate() {
@@ -409,6 +421,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                         hy2: None,
                         fec: String::new(),
                         dup: false,
+                        profile: String::new(),
                     });
                 }
             }
@@ -704,11 +717,21 @@ fn awg_apply_body(list: &[Tunnel], t: &mut Tunnel, a: &Value) -> Result<(), Stri
 /// TCP and the two ends would never agree. (Agents that have not reported yet are let through.)
 /// The rotation `order` is checked too: the tunnel may switch to any of its entries.
 fn transport_checks(app: &App, t: &Tunnel) -> Result<(), String> {
+    let names: HashMap<String, String> = servers(app).into_iter().map(|s| (s.id, s.name)).collect();
+    let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
+    // Game-FEC Pro sends payloads an older agent drops: both ends must be new
+    if t.enabled && t.transport == "game" && t.fec == "auto" {
+        for sid in [&t.entry, &t.exit] {
+            if let Some(x) = sn.get(sid.as_str()) {
+                if !x.version.is_empty() && ver_lt(&x.version, GAME_PRO_FROM) {
+                    return Err(format!("the agent of \"{}\" is v{}: update it first (Update all), Game-FEC Pro needs {}", names.get(sid.as_str()).cloned().unwrap_or_default(), x.version, GAME_PRO_FROM));
+                }
+            }
+        }
+    }
     if !t.enabled || !std::iter::once(&t.transport).chain(t.order.iter()).any(|tr| is_new_transport(tr)) {
         return Ok(());
     }
-    let names: HashMap<String, String> = servers(app).into_iter().map(|s| (s.id, s.name)).collect();
-    let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
     for tr in std::iter::once(&t.transport).chain(t.order.iter()) {
         for sid in [&t.entry, &t.exit] {
             if let Some(x) = sn.get(sid.as_str()) {
@@ -1919,7 +1942,7 @@ async fn server_ports(State(app): St, h: HeaderMap, Path(id): Path<String>) -> R
 /// A game tunnel's FEC as typed: empty (the default), "off" / "0", or "data:parity" with 1-64 data and 1-32
 /// parity shards
 pub(crate) fn fec_ok(f: &str) -> bool {
-    if f.is_empty() || f == "off" || f == "0" {
+    if f.is_empty() || f == "off" || f == "0" || f == "auto" {
         return true;
     }
     let Some((d, p)) = f.split_once(':') else { return false };
@@ -1992,6 +2015,20 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     if let Some(d) = b["dup"].as_bool() {
         t.dup = d;
+    }
+    if b.get("profile").is_some() {
+        let p = s("profile");
+        if !PROFILES.contains(&p.as_str()) {
+            return err(StatusCode::BAD_REQUEST, "unknown core profile");
+        }
+        t.profile = p;
+    }
+    // Game-FEC Pro: the line decides the repairs, so no fixed copy on top
+    if t.transport == "game" && t.fec == "auto" {
+        t.dup = false;
+    }
+    if t.transport != "game" || t.fec != "auto" {
+        t.profile.clear();
     }
     if b.get("chain").is_some() {
         t.chain = s("chain").chars().filter(|c| c.is_ascii_alphanumeric()).take(16).collect();

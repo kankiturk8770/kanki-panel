@@ -60,7 +60,7 @@ pub async fn client(remote: SocketAddr, token: &str) -> Res<ClientObfs> {
     // KCP's loopback source address, learned from its first packet; shared with the inbound task
     let kcp_addr: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
     let (port, lane) = super::dgram::Port::pair_twice(super::dgram::MAX_WIRE);
-    let super::dgram::RelayEnd { out: mut lane_out, inbox: lane_in } = lane;
+    let super::dgram::RelayEnd { out: mut lane_out, inbox: lane_in, .. } = lane;
     // KCP and the datagram lane -> mask -> peer
     let (inner1, outer1, ka1, mask1) = (inner.clone(), outer.clone(), kcp_addr.clone(), mask.clone());
     let out_task = tokio::spawn(async move {

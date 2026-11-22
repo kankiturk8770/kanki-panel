@@ -15,6 +15,14 @@
 //!
 //! Both ends get the same settings from the panel, so there is no negotiation. Duplication
 //! sends every masked datagram twice (two different masks, so the copies do not look alike).
+//!
+//! **Game-FEC Pro** (FEC `auto`, both agents 3.57.0 or newer): the repairs follow the line. Every
+//! half second each end tells the other how many payloads it sent and how many of the other's it
+//! lost (`0xF5 | sent (4, BE) | loss per mille (2, BE)`), and each end shapes its own FEC groups from
+//! what the other lost: none on a clean line (under 1 %), 10:1 to 5:1 up to 15 %, more past it, never
+//! more repair bytes than data bytes (a 30 %+ outage cannot make it flood). Only the game is coded:
+//! the KCP stream (TCP of the users, control) and flows that are not the game (`dgram` bulk: the KCP of
+//! KANKI MIX, downloads) go as plain payloads, `0xF6 | payload`. Duplication is off.
 
 use super::fec::{FecDecoder, FecEncoder, Shard};
 use super::link::{Bag, BoxIo, Inbox, Res};
@@ -22,6 +30,7 @@ use super::salamander::Mask;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant as StdInstant};
 use tokio::net::UdpSocket;
@@ -37,18 +46,24 @@ pub struct GameOpts {
     pub fec_parity: u8,
     /// send every datagram twice (costs bandwidth, survives burst loss)
     pub dup: bool,
+    /// Game-FEC Pro: FEC that follows the line, only the game coded (FEC "auto")
+    pub pro: bool,
 }
 
 impl GameOpts {
     pub fn fec_on(&self) -> bool {
-        self.fec_data >= 1 && self.fec_parity >= 1
+        self.pro || (self.fec_data >= 1 && self.fec_parity >= 1)
     }
     /// "8:3" style spec string -> options ("" keeps the defaults of the transport)
     pub fn parse(fec: &str, dup: bool) -> GameOpts {
-        let mut g = GameOpts { fec_data: 8, fec_parity: 3, dup };
+        let mut g = GameOpts { fec_data: 8, fec_parity: 3, dup, pro: false };
         let f = fec.trim();
         if f.is_empty() {
             return g;
+        }
+        if f == "auto" {
+            let (d, p) = SHAPES[START];
+            return GameOpts { fec_data: d as u8, fec_parity: p as u8, dup: false, pro: true };
         }
         if f == "off" || f == "0" {
             g.fec_data = 0;
@@ -69,6 +84,81 @@ impl GameOpts {
 
 const FEC_DATA: u8 = 0xF3;
 const FEC_PARITY: u8 = 0xF4;
+/// Game-FEC Pro: what this end sent and what it lost of the other's
+const STAT: u8 = 0xF5;
+/// Game-FEC Pro: a payload without FEC
+const PLAIN: u8 = 0xF6;
+const STAT_EVERY: Duration = Duration::from_millis(500);
+/// Game-FEC Pro, by the loss the other end saw: (data, parity) of a group. Under 1 % nothing, 1-5 %
+/// 10:1, 5-10 % 8:1, 10-15 % 5:1, 15-30 % 4:2, past 30 % the circuit breaker's 4:4 (repairs never more
+/// than the data: twice the bytes at most)
+const SHAPES: [(usize, usize); 6] = [(10, 0), (10, 1), (8, 1), (5, 1), (4, 2), (4, 4)];
+const LEVEL_AT: [u32; 5] = [10, 50, 100, 150, 300];
+/// the shape before the first report: light, so a new link is protected but cheap
+const START: usize = 1;
+/// reports in a row that want less before the repairs go down a step (up at once)
+const CALM: u8 = 6;
+
+fn level_for(loss_permille: u32) -> usize {
+    LEVEL_AT.iter().take_while(|x| loss_permille >= **x).count()
+}
+
+/// One link's loss accounting for Game-FEC Pro (shared by its sending and its receiving half)
+#[derive(Default)]
+pub struct Adapt {
+    sent: AtomicU32,
+    recv: AtomicU32,
+    /// the other end's sent count at its last report we used, and our received count then
+    mark: Mutex<Option<(u32, u32)>>,
+    /// what we lose of the other end's payloads (per mille), what the other end loses of ours
+    in_loss: AtomicU32,
+    out_loss: AtomicU32,
+    /// the repairs now (index into SHAPES), for the panel
+    pub level: AtomicU32,
+}
+
+impl Adapt {
+    fn on_stat(&self, sent: u32, loss: u32) {
+        self.out_loss.store(loss.min(1000), Ordering::Relaxed);
+        let r = self.recv.load(Ordering::Relaxed);
+        let mut m = self.mark.lock().unwrap_or_else(|e| e.into_inner());
+        match *m {
+            Some((ps, pr)) => {
+                let ds = sent.wrapping_sub(ps);
+                // the other end started again (a new relay): count from here
+                if ds > 1 << 24 {
+                    *m = Some((sent, r));
+                    return;
+                }
+                // too few to say anything yet: keep counting from the same mark
+                if ds < 20 {
+                    return;
+                }
+                let dr = r.wrapping_sub(pr).min(ds);
+                let now = (ds - dr) * 1000 / ds;
+                let old = self.in_loss.load(Ordering::Relaxed);
+                self.in_loss.store((old + now).div_ceil(2), Ordering::Relaxed);
+                *m = Some((sent, r));
+            }
+            None => *m = Some((sent, r)),
+        }
+    }
+    /// (what we lose, what the other end loses), per mille
+    pub fn losses(&self) -> (u32, u32) {
+        (self.in_loss.load(Ordering::Relaxed), self.out_loss.load(Ordering::Relaxed))
+    }
+}
+
+/// What a payload is to Game-FEC Pro
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Kind {
+    /// the KCP stream
+    Stream,
+    /// a game datagram (lane)
+    Game,
+    /// a datagram of a flow that is not the game (lane, bulk)
+    Bulk,
+}
 /// a group closes at the latest this long after its first packet (game traffic is latency-bound)
 const FEC_DELAY: Duration = Duration::from_millis(4);
 /// A group closed early (sparse traffic: a game sends one packet every 15-30 ms) has its repair shards spread
@@ -120,6 +210,35 @@ async fn send_masked(sock: &UdpSocket, to: Option<SocketAddr>, mask: &Mask, payl
     }
 }
 
+/// Game-FEC Pro: a report or a plain payload is handled here; everything else goes on to `decode_in`
+/// (None: handled)
+fn pro_in<'a>(ad: Option<&Adapt>, payload: &'a [u8]) -> Option<Result<&'a [u8], ()>> {
+    let Some(ad) = ad else { return Some(Err(())) };
+    match payload.first().copied() {
+        Some(STAT) if payload.len() >= 7 => {
+            ad.on_stat(u32::from_be_bytes([payload[1], payload[2], payload[3], payload[4]]), u16::from_be_bytes([payload[5], payload[6]]) as u32);
+            None
+        }
+        Some(PLAIN) if payload.len() > 1 => {
+            ad.recv.fetch_add(1, Ordering::Relaxed);
+            Some(Ok(&payload[1..]))
+        }
+        _ => {
+            ad.recv.fetch_add(1, Ordering::Relaxed);
+            Some(Err(()))
+        }
+    }
+}
+
+/// The datagrams one incoming payload yields: the Game-FEC Pro kinds first, then `decode_in`
+fn decode_any(dec: Option<&mut FecDecoder>, ad: Option<&Adapt>, payload: &[u8]) -> Vec<Vec<u8>> {
+    match pro_in(ad, payload) {
+        None => vec![],
+        Some(Ok(p)) => vec![p.to_vec()],
+        Some(Err(())) => decode_in(dec, payload),
+    }
+}
+
 /// The KCP datagrams a masked, maybe FEC-coded, incoming payload yields.
 fn decode_in(dec: Option<&mut FecDecoder>, payload: &[u8]) -> Vec<Vec<u8>> {
     match dec {
@@ -151,18 +270,83 @@ struct Out {
     enc: Option<FecEncoder>,
     data: usize,
     later: Vec<(Instant, Vec<u8>)>,
+    /// Game-FEC Pro: the link's accounting, the shape now, reports that wanted less, the next report
+    pro: Option<Arc<Adapt>>,
+    level: usize,
+    calm: u8,
+    next_stat: Instant,
 }
 
 impl Out {
+    #[cfg(test)]
     fn new(g: GameOpts) -> Out {
-        Out { enc: if g.fec_on() { Some(FecEncoder::new(g.fec_data as usize, g.fec_parity as usize, FEC_DELAY)) } else { None }, data: g.fec_data as usize, later: vec![] }
+        Out::with(g, None)
+    }
+    fn with(g: GameOpts, ad: Option<Arc<Adapt>>) -> Out {
+        let pro = if g.pro { Some(ad.unwrap_or_default()) } else { None };
+        let enc = if pro.is_some() {
+            let (d, p) = SHAPES[START];
+            Some(FecEncoder::adaptive(d, p, FEC_DELAY))
+        } else if g.fec_on() {
+            Some(FecEncoder::new(g.fec_data as usize, g.fec_parity as usize, FEC_DELAY))
+        } else {
+            None
+        };
+        if let Some(a) = &pro {
+            a.level.store(START as u32, Ordering::Relaxed);
+        }
+        let data = enc.as_ref().map(|e| e.shape().0).unwrap_or(g.fec_data as usize);
+        Out { enc, data, later: vec![], pro, level: START, calm: 0, next_stat: Instant::now() + STAT_EVERY }
     }
     fn deadline(&self) -> Option<Instant> {
         let a = self.enc.as_ref().and_then(|e| e.deadline());
         let b = self.later.iter().map(|x| x.0).min();
-        match (a, b) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
+        let c = self.pro.as_ref().map(|_| self.next_stat);
+        [a, b, c].into_iter().flatten().min()
+    }
+    /// One masked payload out (counted for Game-FEC Pro)
+    async fn wire(&self, sock: &UdpSocket, to: Option<SocketAddr>, mask: &Mask, p: &[u8]) {
+        if let Some(a) = &self.pro {
+            a.sent.fetch_add(1, Ordering::Relaxed);
+        }
+        send_masked(sock, to, mask, p, false).await;
+    }
+    /// Game-FEC Pro: the report to the other end, and the shape from what it lost of ours
+    async fn report(&mut self, sock: &UdpSocket, to: Option<SocketAddr>, mask: &Mask, dup: bool) {
+        let Some(a) = self.pro.clone() else { return };
+        let now = Instant::now();
+        if now < self.next_stat {
+            return;
+        }
+        self.next_stat = now + STAT_EVERY;
+        let (inl, outl) = a.losses();
+        let mut p = Vec::with_capacity(7);
+        p.push(STAT);
+        p.extend_from_slice(&a.sent.load(Ordering::Relaxed).to_be_bytes());
+        p.extend_from_slice(&(inl.min(1000) as u16).to_be_bytes());
+        send_masked(sock, to, mask, &p, false).await;
+        let want = level_for(outl);
+        if want > self.level {
+            self.level = want;
+            self.calm = 0;
+        } else if want < self.level {
+            self.calm += 1;
+            if self.calm >= CALM {
+                self.level -= 1;
+                self.calm = 0;
+            }
+        } else {
+            self.calm = 0;
+        }
+        a.level.store(self.level as u32, Ordering::Relaxed);
+        let (d, pp) = SHAPES[self.level];
+        if self.enc.as_ref().map(|e| e.shape()) != Some((d, pp)) {
+            self.data = d;
+            let mut jobs: Vec<(Option<u8>, Vec<u8>)> = vec![];
+            if let Some(enc) = &mut self.enc {
+                enc.set_shape(d, pp, &mut |s: Shard<'_>| jobs.push((parity_of(&s), shard_payload(&s))));
+            }
+            self.shards(sock, to, mask, jobs, dup).await;
         }
     }
     fn wait(&mut self, at: Instant, p: Vec<u8>) {
@@ -170,7 +354,7 @@ impl Out {
     }
     /// One payload now (its second copy later when `dup`)
     async fn send(&mut self, sock: &UdpSocket, to: Option<SocketAddr>, mask: &Mask, p: Vec<u8>, dup: bool, now: Instant) {
-        send_masked(sock, to, mask, &p, false).await;
+        self.wire(sock, to, mask, &p).await;
         if dup {
             self.wait(now + DUP_GAP, p);
         }
@@ -195,8 +379,20 @@ impl Out {
         }
     }
     /// Turns one KCP datagram into wire payloads and sends them.
+    #[cfg(test)]
     async fn push(&mut self, sock: &UdpSocket, to: Option<SocketAddr>, mask: &Mask, pkt: &[u8], dup: bool) {
+        self.push_as(sock, to, mask, pkt, dup, Kind::Game).await
+    }
+    /// The same, knowing what it is: with Game-FEC Pro only the game is coded
+    async fn push_as(&mut self, sock: &UdpSocket, to: Option<SocketAddr>, mask: &Mask, pkt: &[u8], dup: bool, kind: Kind) {
         let now = Instant::now();
+        if self.pro.is_some() && kind != Kind::Game {
+            let mut p = Vec::with_capacity(1 + pkt.len());
+            p.push(PLAIN);
+            p.extend_from_slice(pkt);
+            self.wire(sock, to, mask, &p).await;
+            return;
+        }
         match &mut self.enc {
             None => self.send(sock, to, mask, pkt.to_vec(), dup, now).await,
             Some(enc) => {
@@ -221,8 +417,9 @@ impl Out {
             d.into_iter().map(|x| x.1).collect()
         };
         for p in due {
-            send_masked(sock, to, mask, &p, false).await;
+            self.wire(sock, to, mask, &p).await;
         }
+        self.report(sock, to, mask, dup).await;
     }
 }
 
@@ -304,24 +501,28 @@ pub async fn client(remote: SocketAddr, token: &str, g: GameOpts) -> Res<ClientG
     let local = inner.local_addr()?;
     let kcp_addr: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
     let (port, lane) = super::dgram::Port::pair();
-    let super::dgram::RelayEnd { out: mut lane_out, inbox: lane_in } = lane;
+    let super::dgram::RelayEnd { out: mut lane_out, bulk: mut lane_bulk, inbox: lane_in } = lane;
+    let ad: Option<Arc<Adapt>> = g.pro.then(|| Arc::new(Adapt::default()));
 
-    // KCP and the datagram lane -> FEC/dup -> mask -> peer
-    let (inner1, outer1, ka1, mask1) = (inner.clone(), outer.clone(), kcp_addr.clone(), mask.clone());
+    // KCP and the datagram lane -> FEC/dup -> mask -> peer (the game lane first: a burst of the stream
+    // never holds a game packet back)
+    let (inner1, outer1, ka1, mask1, ad1) = (inner.clone(), outer.clone(), kcp_addr.clone(), mask.clone(), ad.clone());
     let out_task = tokio::spawn(async move {
-        let mut out = Out::new(g);
+        let mut out = Out::with(g, ad1);
         let mut a = vec![0u8; 65535];
         loop {
             let dl = out.deadline();
             tokio::select! {
+                biased;
+                Some(w) = lane_out.recv() => out.push_as(&outer1, None, &mask1, &w, g.dup, Kind::Game).await,
+                Some(w) = lane_bulk.recv() => out.push_as(&outer1, None, &mask1, &w, g.dup, Kind::Bulk).await,
                 r = inner1.recv_from(&mut a) => match r {
                     Ok((n, from)) => {
                         *ka1.lock().unwrap_or_else(|e| e.into_inner()) = Some(from);
-                        out.push(&outer1, None, &mask1, &a[..n], g.dup).await;
+                        out.push_as(&outer1, None, &mask1, &a[..n], g.dup, Kind::Stream).await;
                     }
                     Err(_) => break,
                 },
-                Some(w) = lane_out.recv() => out.push(&outer1, None, &mask1, &w, g.dup).await,
                 _ = sleep_until_opt(dl) => out.flush_due(&outer1, None, &mask1, g.dup).await,
             }
         }
@@ -340,7 +541,7 @@ pub async fn client(remote: SocketAddr, token: &str, g: GameOpts) -> Res<ClientG
             let Some(dst) = dst else { continue };
             let Some((s, e)) = mask.open(&mut b[..n]) else { continue };
             let payload = b[s..e].to_vec();
-            for pkt in decode_in(dec.as_mut(), &payload) {
+            for pkt in decode_any(dec.as_mut(), ad.as_deref(), &payload) {
                 if super::dgram::looks_like(&pkt) {
                     // the session checks it (a full queue drops it: too late for a game anyway)
                     let _ = lane_in.try_send(pkt);
@@ -364,6 +565,8 @@ struct Peer {
     dec: Arc<Mutex<FecDecoder>>,
     /// where this client's datagram-lane payloads go (its link's session)
     lane_in: tokio::sync::mpsc::Sender<Vec<u8>>,
+    /// Game-FEC Pro: this client's loss accounting
+    ad: Option<Arc<Adapt>>,
 }
 
 /// The datagram lane of each client, by the address the KCP listener sees it from (its loopback
@@ -391,17 +594,24 @@ impl Drop for ServerGame {
 }
 
 /// KCP and the datagram lane -> FEC/dup -> mask -> client, for one client.
-async fn pump(sock: Arc<UdpSocket>, public: Arc<UdpSocket>, mask: Arc<Mask>, to: SocketAddr, g: GameOpts, mut lane_out: tokio::sync::mpsc::Receiver<Vec<u8>>) {
-    let mut out = Out::new(g);
+struct Lanes {
+    out: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    bulk: tokio::sync::mpsc::Receiver<Vec<u8>>,
+}
+
+async fn pump(sock: Arc<UdpSocket>, public: Arc<UdpSocket>, mask: Arc<Mask>, to: SocketAddr, g: GameOpts, mut lanes: Lanes, ad: Option<Arc<Adapt>>) {
+    let mut out = Out::with(g, ad);
     let mut b = vec![0u8; 65535];
     loop {
         let dl = out.deadline();
         tokio::select! {
+            biased;
+            Some(w) = lanes.out.recv() => out.push_as(&public, Some(to), &mask, &w, g.dup, Kind::Game).await,
+            Some(w) = lanes.bulk.recv() => out.push_as(&public, Some(to), &mask, &w, g.dup, Kind::Bulk).await,
             r = sock.recv(&mut b) => match r {
-                Ok(n) => out.push(&public, Some(to), &mask, &b[..n], g.dup).await,
+                Ok(n) => out.push_as(&public, Some(to), &mask, &b[..n], g.dup, Kind::Stream).await,
                 Err(_) => break,
             },
-            Some(w) = lane_out.recv() => out.push(&public, Some(to), &mask, &w, g.dup).await,
             _ = sleep_until_opt(dl) => out.flush_due(&public, Some(to), &mask, g.dup).await,
         }
     }
@@ -434,7 +644,7 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr, g: GameOpts) 
                 let mut gmap = peers1.lock().unwrap_or_else(|e| e.into_inner());
                 gmap.get_mut(&from).map(|p| {
                     p.last = StdInstant::now();
-                    (p.sock.clone(), p.dec.clone(), p.lane_in.clone())
+                    (p.sock.clone(), p.dec.clone(), p.lane_in.clone(), p.ad.clone())
                 })
             };
             if entry.is_none() && peers1.lock().unwrap_or_else(|e| e.into_inner()).len() < MAX_PEERS {
@@ -446,17 +656,18 @@ pub async fn server(port: u16, token: &str, kcp_local: SocketAddr, g: GameOpts) 
                         if let Ok(a) = sock.local_addr() {
                             ports1.lock().unwrap_or_else(|e| e.into_inner()).insert(a, port);
                         }
-                        let pump = tokio::spawn(pump(sock.clone(), public1.clone(), mask1.clone(), from, g, lane.out));
-                        peers1.lock().unwrap_or_else(|e| e.into_inner()).insert(from, Peer { sock: sock.clone(), last: StdInstant::now(), pump, dec: dec.clone(), lane_in: lane.inbox.clone() });
-                        entry = Some((sock, dec, lane.inbox));
+                        let ad: Option<Arc<Adapt>> = g.pro.then(|| Arc::new(Adapt::default()));
+                        let pump = tokio::spawn(pump(sock.clone(), public1.clone(), mask1.clone(), from, g, Lanes { out: lane.out, bulk: lane.bulk }, ad.clone()));
+                        peers1.lock().unwrap_or_else(|e| e.into_inner()).insert(from, Peer { sock: sock.clone(), last: StdInstant::now(), pump, dec: dec.clone(), lane_in: lane.inbox.clone(), ad: ad.clone() });
+                        entry = Some((sock, dec, lane.inbox, ad));
                     }
                 }
             }
-            let Some((sock, dec, lane_in)) = entry else { continue };
+            let Some((sock, dec, lane_in, ad)) = entry else { continue };
             let packets = {
                 let mut d = dec.lock().unwrap_or_else(|e| e.into_inner());
                 // FEC state lives per peer; without FEC payloads pass through
-                decode_in(if g.fec_on() { Some(&mut *d) } else { None }, &payload)
+                decode_any(if g.fec_on() { Some(&mut *d) } else { None }, ad.as_deref(), &payload)
             };
             for pkt in packets {
                 if super::dgram::looks_like(&pkt) {
@@ -618,7 +829,7 @@ mod tests {
         let tx = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let to = rx.local_addr().unwrap();
         let mask = Mask::new("token-for-tests-0123456789");
-        let mut out = Out::new(GameOpts { fec_data: 8, fec_parity: 3, dup: false });
+        let mut out = Out::new(GameOpts { fec_data: 8, fec_parity: 3, dup: false, pro: false });
         let t0 = StdInstant::now();
         out.push(&tx, Some(to), &mask, &packet(1), false).await;
         // the group closes after FEC_DELAY with one packet: the timer as the relay runs it
@@ -653,5 +864,112 @@ mod tests {
         // claims 200 bytes, carries 3
         let bad = [FEC_DATA, 0, 0, 0, 0, 0, 200, 0, 1, 2, 3];
         assert!(decode_in(Some(&mut dec), &bad).is_empty());
+    }
+    #[test]
+    fn the_repairs_follow_the_loss() {
+        assert_eq!(SHAPES[level_for(0)], (10, 0));
+        assert_eq!(SHAPES[level_for(9)], (10, 0));
+        assert_eq!(SHAPES[level_for(10)], (10, 1));
+        assert_eq!(SHAPES[level_for(70)], (8, 1));
+        assert_eq!(SHAPES[level_for(149)], (5, 1));
+        assert_eq!(SHAPES[level_for(200)], (4, 2));
+        assert_eq!(SHAPES[level_for(1000)], (4, 4));
+        // never more repairs than data
+        assert!(SHAPES.iter().all(|(d, p)| p <= d));
+        assert!(GameOpts::parse("auto", true).pro && !GameOpts::parse("auto", true).dup);
+        assert!(!GameOpts::parse("8:3", false).pro);
+    }
+
+    #[test]
+    fn loss_is_counted_from_the_reports() {
+        let a = Adapt::default();
+        a.on_stat(1000, 0);
+        // the other end sent 100 more, 90 came
+        a.recv.fetch_add(90, Ordering::Relaxed);
+        a.on_stat(1100, 25);
+        assert_eq!(a.losses(), (50, 25), "half of 10 % after one report (smoothed)");
+        a.recv.fetch_add(100, Ordering::Relaxed);
+        a.on_stat(1200, 0);
+        assert_eq!(a.losses().0, 25);
+        // too few to say: the mark stays
+        a.recv.fetch_add(5, Ordering::Relaxed);
+        a.on_stat(1205, 0);
+        assert_eq!(a.losses().0, 25);
+        // the other end started again
+        a.on_stat(3, 0);
+        a.recv.fetch_add(40, Ordering::Relaxed);
+        a.on_stat(43, 0);
+        assert_eq!(a.losses().0, 13);
+    }
+
+    /// Game-FEC Pro on the wire: the stream and bulk go plain, the game is coded; a clean line sends no
+    /// repairs, a bad one sends some but never more than the data (a lone game packet: one repair)
+    #[tokio::test]
+    async fn pro_codes_only_the_game_and_follows_the_line() {
+        let rx = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let tx = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let to = rx.local_addr().unwrap();
+        let mask = Mask::new("token-for-tests-0123456789");
+        let ad = Arc::new(Adapt::default());
+        let mut out = Out::with(GameOpts::parse("auto", false), Some(ad.clone()));
+        let mut b = vec![0u8; 2048];
+        let got = |b: &mut Vec<u8>, n: usize| -> Vec<u8> {
+            let (s, e) = mask.open(&mut b[..n]).unwrap();
+            b[s..e].to_vec()
+        };
+        out.push_as(&tx, Some(to), &mask, b"stream-bytes", false, Kind::Stream).await;
+        let n = rx.recv(&mut b).await.unwrap();
+        assert_eq!(got(&mut b, n), [&[PLAIN][..], b"stream-bytes"].concat());
+        out.push_as(&tx, Some(to), &mask, b"kcp-of-kmix", false, Kind::Bulk).await;
+        let n = rx.recv(&mut b).await.unwrap();
+        assert_eq!(got(&mut b, n)[0], PLAIN);
+        // the other end says it loses 40 %: the next report takes the breaker's shape at once
+        ad.on_stat(0, 400);
+        out.next_stat = Instant::now();
+        out.flush_due(&tx, Some(to), &mask, false).await;
+        let n = rx.recv(&mut b).await.unwrap();
+        assert_eq!(got(&mut b, n)[0], STAT);
+        assert_eq!(out.enc.as_ref().unwrap().shape(), (4, 4));
+        // a lone game packet: the data shard, and after the group closes one repair only (capped)
+        out.push_as(&tx, Some(to), &mask, &packet(3), false, Kind::Game).await;
+        let n = rx.recv(&mut b).await.unwrap();
+        assert_eq!(got(&mut b, n)[0], FEC_DATA);
+        let mut kinds = vec![];
+        let end = tokio::time::sleep(Duration::from_millis(400));
+        tokio::pin!(end);
+        loop {
+            tokio::select! {
+                r = rx.recv(&mut b) => { let n = r.unwrap(); kinds.push(got(&mut b, n)[0]); }
+                _ = sleep_until_opt(out.deadline()) => out.flush_due(&tx, Some(to), &mask, false).await,
+                _ = &mut end => break,
+            }
+        }
+        assert_eq!(kinds.iter().filter(|k| **k == FEC_PARITY).count(), 1, "{:?}", kinds);
+        // a clean line for a while: the repairs go down step by step, to none
+        for _ in 0..(CALM as usize * SHAPES.len()) {
+            ad.on_stat(0, 0);
+            out.next_stat = Instant::now();
+            out.flush_due(&tx, Some(to), &mask, false).await;
+        }
+        assert_eq!(out.enc.as_ref().unwrap().shape(), (10, 0));
+        while tokio::time::timeout(Duration::from_millis(20), rx.recv(&mut b)).await.is_ok() {}
+        out.push_as(&tx, Some(to), &mask, &packet(4), false, Kind::Game).await;
+        let mut kinds = vec![];
+        let end = tokio::time::sleep(Duration::from_millis(300));
+        tokio::pin!(end);
+        loop {
+            tokio::select! {
+                r = rx.recv(&mut b) => { let n = r.unwrap(); kinds.push(got(&mut b, n)[0]); }
+                _ = sleep_until_opt(out.deadline()) => out.flush_due(&tx, Some(to), &mask, false).await,
+                _ = &mut end => break,
+            }
+        }
+        assert!(kinds.contains(&FEC_DATA) && !kinds.contains(&FEC_PARITY), "{:?}", kinds);
+        // and the receiving side reads all three kinds
+        let mut dec = FecDecoder::default();
+        let r = Adapt::default();
+        assert_eq!(decode_any(Some(&mut dec), Some(&r), &[&[PLAIN][..], b"x"].concat()), vec![b"x".to_vec()]);
+        assert!(decode_any(Some(&mut dec), Some(&r), &[STAT, 0, 0, 0, 9, 0, 7]).is_empty());
+        assert_eq!(r.losses().1, 7);
     }
 }
