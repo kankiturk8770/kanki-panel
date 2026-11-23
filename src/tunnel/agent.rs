@@ -287,6 +287,26 @@ async fn update_from_panel(http: &reqwest::Client, panel: &str, id: &str, token:
     std::process::exit(0);
 }
 
+/// 3.58.1: the KPING relay of the first versions ran as a service of its own (`kanki-relay`); KPING lives in the
+/// node now, so a leftover one only holds a port open: stopped, removed, and its port taken off the firewall
+fn drop_old_relay() {
+    let unit = "/etc/systemd/system/kanki-relay.service";
+    if !std::path::Path::new(unit).exists() {
+        return;
+    }
+    // the ports it listened on (":44330" in its command line), to close once it is gone
+    let text = std::fs::read_to_string(unit).unwrap_or_default();
+    let ports: Vec<String> = text.split(':').skip(1).filter_map(|x| x.split(|c: char| !c.is_ascii_digit()).next()?.parse::<u16>().ok())
+        .filter(|p| *p >= 1024).map(|p| format!("{}/udp", p)).collect();
+    let run = |c: &str| { let _ = std::process::Command::new("sh").arg("-c").arg(c).stdin(std::process::Stdio::null()).output(); };
+    run("systemctl disable --now kanki-relay.service >/dev/null 2>&1");
+    let _ = std::fs::remove_file(unit);
+    run("systemctl daemon-reload >/dev/null 2>&1");
+    crate::fw::close("kanki-relay");
+    crate::fw::close_unused(&ports);
+    eprintln!("removed the old kanki-relay service");
+}
+
 pub async fn run(version: &str) {
     let env = crate::util::load_env(ENV_FILE);
     let panel = env.get("PANEL_URL").cloned().unwrap_or_default().trim_end_matches('/').to_string();
@@ -298,6 +318,7 @@ pub async fn run(version: &str) {
         std::process::exit(1);
     }
     eprintln!("kanki tunnel agent {} for {} (server {})", version, panel, id);
+    tokio::task::spawn_blocking(drop_old_relay);
     let mgr = Arc::new(Manager::default());
     let mut last = String::new();
     if let Ok(t) = std::fs::read_to_string(CACHE) {
@@ -338,6 +359,8 @@ pub async fn run(version: &str) {
     // answers in a row that say this server was removed from the panel
     let mut gone = 0u32;
     let (mut stats, mut stats_at) = (serde_json::Value::Null, std::time::Instant::now());
+    // the first report already carries the logs
+    let mut logs_at = std::time::Instant::now().checked_sub(std::time::Duration::from_secs(120)).unwrap_or_else(std::time::Instant::now);
     // the last error of setting up the emergency chat (reported to the panel)
     let emer_err: Mutex<Option<String>> = Mutex::new(None);
     // the last error of setting up Kanki DNS
@@ -384,7 +407,13 @@ pub async fn run(version: &str) {
             stats = tokio::task::spawn_blocking(crate::admin::node_stats).await.unwrap_or_default();
             stats_at = std::time::Instant::now();
         }
-        let body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st, "kping": kping_st, "stats": stats });
+        let mut body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st, "kping": kping_st, "stats": stats });
+        // the last warnings and errors of Kanki's services here, once a minute, for the panel's Logs page (3.58.1)
+        if logs_at.elapsed() >= std::time::Duration::from_secs(60) {
+            logs_at = std::time::Instant::now();
+            let units: Vec<String> = ["kanki-tunnel", "kanki-node", "kanki-mix", "hysteria-server", "wg-quick@wg0", "awg-quick@awg0"].iter().map(|u| u.to_string()).collect();
+            body["logs"] = json!(tokio::task::spawn_blocking(move || crate::admin::journal(&units, 40, true)).await.unwrap_or_default());
+        }
         // on another address: the first one is tried again every five minutes, with a short wait
         let mut early = None;
         if idx != 0 && probe_at.elapsed() >= Duration::from_secs(300) {

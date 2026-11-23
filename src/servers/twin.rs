@@ -163,14 +163,16 @@ impl Twin {
     }
 }
 
-/// `core`: a core with its own Iran address uses it (None = the server's tunnel)
-fn make(app: &App, key: &str, sid: &str, server_name: &str, core: Option<&str>) -> Option<Twin> {
+/// `core`: a core with its own Iran address uses it (None = the server's tunnel). `port`: that core's port here:
+/// with no address typed, the Iran server whose tunnel really carries this port is found by itself (3.58.1: so
+/// one server can send WireGuard through Iran 2 and KANKI MIX through Iran 3 without typing either address).
+fn make(app: &App, key: &str, sid: &str, server_name: &str, core: Option<&str>, port: Option<u16>) -> Option<Twin> {
     let o = all(app).remove(key)?;
     let own = core.and_then(|c| o.cores.get(c)).map(|h| h.trim().to_string()).filter(|h| !h.is_empty());
     let host = match own {
         Some(h) => h,
         None if !o.on => return None,
-        None if o.host.trim().is_empty() && !sid.is_empty() => crate::tunnel::panel::entry_host(app, sid),
+        None if o.host.trim().is_empty() && !sid.is_empty() => auto_host(app, sid, port),
         None => o.host.trim().to_string(),
     };
     if host.is_empty() {
@@ -178,6 +180,22 @@ fn make(app: &App, key: &str, sid: &str, server_name: &str, core: Option<&str>) 
     }
     let name = named(server_name, &o.name);
     Some(Twin { host, name, sid: sid.to_string() })
+}
+
+/// The Iran address of a server's second configs when none is typed: the first server of the tunnel that brings
+/// `port` here (UDP, then TCP), else the first server of any tunnel that ends here
+pub fn auto_host(app: &App, sid: &str, port: Option<u16>) -> String {
+    if let Some(p) = port {
+        for tcp in [false, true] {
+            if let Some((entry, _)) = crate::tunnel::panel::port_entry(app, sid, p, tcp) {
+                let h = crate::tunnel::panel::host_of(app, &entry);
+                if !h.is_empty() {
+                    return h;
+                }
+            }
+        }
+    }
+    crate::tunnel::panel::entry_host(app, sid)
 }
 
 pub fn default_name(server_name: &str) -> String {
@@ -199,19 +217,21 @@ pub fn named(server_name: &str, set: &str) -> String {
     }
 }
 
-/// The tunnel of a VPN server (None = none)
-pub fn of_node(app: &App, n: &Node) -> Option<Twin> {
-    make(app, &key_of_node(app, &n.id), &sid_of_node(app, &n.id), &n.name, None)
-}
 
 /// The tunnel of one core of a VPN server: its own Iran address, else the server's. None = none, or a
 /// tunnel that does not carry this core's port (no second config that would lead nowhere).
 pub fn of_node_core(app: &App, n: &Node, core: &str) -> Option<Twin> {
-    let t = make(app, &key_of_node(app, &n.id), &sid_of_node(app, &n.id), &n.name, Some(core))?;
-    match core_port(n, core) {
+    let port = core_port(n, core);
+    let t = make(app, &key_of_node(app, &n.id), &sid_of_node(app, &n.id), &n.name, Some(core), port)?;
+    match port {
         Some(p) => t.carried(app, p, false).map(|_| t),
         None => Some(t),
     }
+}
+
+/// The tunnel of a VPN server for a port of its own (KANKI MIX): the Iran server that carries it, found by itself
+pub fn of_node_port(app: &App, n: &Node, port: u16) -> Option<Twin> {
+    make(app, &key_of_node(app, &n.id), &sid_of_node(app, &n.id), &n.name, None, Some(port))
 }
 
 /// The UDP port of a core on a VPN server (None = not known yet)
@@ -233,7 +253,7 @@ pub fn core_port(n: &Node, core: &str) -> Option<u16> {
 pub fn of_server(app: &App, sid: &str) -> Option<Twin> {
     let name = crate::tunnel::panel::server_names(app).get(sid).cloned().unwrap_or_else(|| sid.to_string());
     let name = if sid == "local" { app.db.node("local").map(|n| n.name).unwrap_or(name) } else { name };
-    make(app, sid, sid, &name, Some("xray"))
+    make(app, sid, sid, &name, Some("xray"), None)
 }
 
 /// The name of a server's second entry in the app (its tunnel name, set even when only a core has one)
@@ -249,10 +269,19 @@ pub fn info(app: &App, key: &str, nid: Option<&str>) -> Value {
     let sid = if key.starts_with("node:") { String::new() } else { key.to_string() };
     let auto = if sid.is_empty() { String::new() } else { crate::tunnel::panel::entry_host(app, &sid) };
     let host = if o.host.is_empty() { auto.clone() } else { o.host.clone() };
-    // a core's own address, else the server's (None = no second config for that core)
-    let core_host = |c: &str| -> Option<String> {
-        o.cores.get(c).filter(|h| !h.is_empty()).cloned().or_else(|| (o.on && !host.is_empty()).then(|| host.clone()))
+    // a core's own address, else the server's typed one, else the Iran server that carries that core's port
+    // (None = no second config for that core)
+    let core_host = |c: &str, port: Option<u16>| -> Option<String> {
+        if let Some(h) = o.cores.get(c).filter(|h| !h.is_empty()) {
+            return Some(h.clone());
+        }
+        if !o.on {
+            return None;
+        }
+        let h = if o.host.is_empty() && !sid.is_empty() { auto_host(app, &sid, port) } else { host.clone() };
+        (!h.is_empty()).then_some(h)
     };
+    let typed = |c: &str| o.cores.get(c).is_some_and(|h| !h.is_empty()) || !o.host.is_empty();
     let mut ports: Vec<Value> = vec![];
     // where the server's own (main) configs point: its own address, or an Iran entry ("tunnel")
     let mut main_via = "direct";
@@ -264,22 +293,30 @@ pub fn info(app: &App, key: &str, nid: Option<&str>) -> Value {
         let num = |k: &str| i[k].as_str().and_then(|s| s.parse::<u16>().ok()).or_else(|| i[k].as_u64().map(|p| p as u16)).filter(|p| *p > 0);
         for (k, p, c) in [("wg_port", "WireGuard", "wg"), ("awg_port", "AmneziaWG", "awg"), ("hy2_port", "Hysteria2", "hy2"), ("kmix_port", "KANKI MIX", ""), ("mt_port", "microtun", "mtun"), ("kp_port", "KPING", "kping")] {
             let Some(port) = num(k) else { continue };
-            let Some(h) = core_host(c) else { continue };
+            // KANKI MIX: the address its config really uses (its own page's setting, else found by itself)
+            if c.is_empty() {
+                let km = crate::kmix::settings(app);
+                if let Some((h, via)) = crate::kmix::tunnel_target(app, &km, &n, port) {
+                    let own = km.nodes.get(&n.id).is_some_and(|x| !x.tun_host.trim().is_empty());
+                    ports.push(json!({ "proto": p, "core": "kmix", "host": h, "port": port, "via": via, "tcp": false, "carried": true, "auto": !own }));
+                }
+                continue;
+            }
+            let Some(h) = core_host(c, Some(port)) else { continue };
             let tw = Twin { host: h.clone(), name: String::new(), sid: sid.clone() };
             let via = tw.carried(app, port, false);
-            ports.push(json!({ "proto": p, "core": c, "host": h, "port": port, "via": via.unwrap_or(port), "tcp": false, "carried": via.is_some() }));
+            ports.push(json!({ "proto": p, "core": c, "host": h, "port": port, "via": via.unwrap_or(port), "tcp": false, "carried": via.is_some(), "auto": !typed(c) }));
         }
     }
     if !sid.is_empty() {
         let x = crate::xray::panel::settings(app);
-        let xh = core_host("xray");
         for ib in x.inbounds.iter().filter(|ib| ib.enabled && ib.server == sid && ib.link_host.trim().is_empty() && ib.link_port == 0) {
-            let Some(h) = xh.clone() else { break };
+            let Some(h) = core_host("xray", Some(ib.port)) else { break };
             let tcp = ib.network != "kcp";
             let tw = Twin { host: h.clone(), name: String::new(), sid: sid.clone() };
             let name = if ib.remark.is_empty() { format!("Xray {}", ib.protocol) } else { format!("Xray {}", ib.remark) };
             let via = tw.carried(app, ib.port, tcp);
-            ports.push(json!({ "proto": name, "core": "xray", "host": h, "port": ib.port, "via": via.unwrap_or(ib.port), "tcp": tcp, "carried": via.is_some() }));
+            ports.push(json!({ "proto": name, "core": "xray", "host": h, "port": ib.port, "via": via.unwrap_or(ib.port), "tcp": tcp, "carried": via.is_some(), "auto": !typed("xray") }));
         }
     }
     json!({ "on": o.on, "host": o.host, "name": o.name, "auto": auto, "uses": host, "ports": ports, "main_via": main_via, "cores": o.cores })

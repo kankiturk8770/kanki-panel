@@ -989,6 +989,9 @@ var _drawAdm=drawAdm;drawAdm=function(){if(AD.busy)return;var need=adNeed();if(n
    adCard('👥 دعوت دوستان',adForm([['ref_gb','گیگ هدیه (اولین خرید دوست)','num'],['ref_days','روز هدیه (اولین خرید دوست)','num'],['ref_pct','% حجم هر خرید دوست','num'],['ref_new_pct','% تخفیف خرید اول دوست','num']],s),'0 = خاموش. هدیه فقط بعد از اولین پرداخت موفق دوست.')+adSaveBar('ad_save');
  }else if(AD.tab=='plans'){var ps=AD.d.plans||[];
   h+='<div class="acts" style="margin:0 0 12px"><button class="b main" id="pl_new">+ پلن تازه</button><button class="b" id="pr_open">💰 قیمت‌گذاری</button></div>';
+  // what a V2Ray account gets: Xray, and Hysteria2 too (both are read by the v2ray clients)
+  var v2hy=String(s.v2ray_protocols||'xray,hy2').split(',').indexOf('hy2')>=0;
+  h+=adCard('🌐 اکانت V2Ray','<label class="btog ad-sw af-w"><span><b>Hysteria2 هم بدهد</b><small>لینک‌های V2Ray: Xray، و با این Hysteria2</small></span><input type="checkbox" id="v2_hy"'+(v2hy?' checked':'')+'></label>');
   // filter (all / on sale / off) and one group a service, so old and switched-off plans do not crowd the list
   var pf=AD.pf||'on',cnt={all:ps.length,on:ps.filter(function(p){return p.active}).length};cnt.off=cnt.all-cnt.on;
   h+='<nav class="kinds" role="tablist">'+[['all','همه'],['on','فعال'],['off','غیرفعال']].map(function(x){return '<button role="tab" aria-selected="'+(pf==x[0])+'" data-pf="'+x[0]+'" class="'+(pf==x[0]?'on':'')+'">'+x[1]+' ('+fa(cnt[x[0]])+')</button>'}).join('')+'</nav>';
@@ -1018,6 +1021,7 @@ function wireAdm(){var $=function(q){return document.querySelector(q)},all=funct
  var sv=$('#ad_save');if(sv)sv.onclick=function(){adSettingsSave(sv,app)};
  // plans
  var pn=$('#pl_new');if(pn)pn.onclick=function(){planEdit(null)};
+ var v2=$('#v2_hy');if(v2)v2.onchange=function(){v2.disabled=true;pa('PUT','/api/settings',{v2ray_protocols:v2.checked?'xray,hy2':'xray'}).then(function(){buzz('success');toast('ذخیره شد');AD.d.set=null;drawAdm()}).catch(function(e){buzz('error');toast(e.message||'ذخیره نشد');v2.disabled=false})};
  var po=$('#pr_open');if(po)po.onclick=function(){priceEdit()};
  all('[data-pf]').forEach(function(b){b.onclick=function(){AD.pf=b.dataset.pf;drawAdm()}});
  all('[data-pe]').forEach(function(b){b.onclick=function(){planEdit((AD.d.plans||[]).filter(function(p){return p.id==b.dataset.pe})[0])}});

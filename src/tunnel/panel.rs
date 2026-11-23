@@ -215,9 +215,10 @@ pub fn drop_vip(app: &App) {
     let _ = app.db.exec("DELETE FROM settings WHERE k='vip_tunnels'", &[]);
 }
 
-/// The name of a tunnel nobody named: the Iran server's name, a dash, the abroad server's name
-/// ("Tehran-Germany"); entry first when both are on the same side.
-pub(crate) fn default_tunnel_name(app: &App, entry: &str, exit: &str) -> String {
+/// The name of a tunnel nobody named, always one shape (3.58.1): the Iran server (short, "IRAN 2" ← "IR2"),
+/// the abroad server, then the core it carries or its kind ("IR2-ENGLAND-KMIX"); entry first when both are
+/// on the same side.
+pub(crate) fn default_tunnel_name(app: &App, entry: &str, exit: &str, tag: &str) -> String {
     if entry.is_empty() || exit.is_empty() {
         return String::new();
     }
@@ -231,7 +232,21 @@ pub(crate) fn default_tunnel_name(app: &App, entry: &str, exit: &str) -> String 
     let locs = server_locs(app);
     let iran = |id: &str| locs.get(id).map(|l| l.0 == "iran").unwrap_or(false);
     let (a, b) = if iran(exit) && !iran(entry) { (exit, entry) } else { (entry, exit) };
-    let n: String = format!("{}-{}", name(a), name(b)).chars().filter(|c| !c.is_control() && !"<>\"".contains(*c)).collect();
+    let part = |s: String| -> String { s.to_uppercase().split_whitespace().collect::<Vec<_>>().join("") };
+    let short = |s: String| -> String {
+        let u = part(s);
+        match u.strip_prefix("IRAN") {
+            Some(rest) if rest.chars().all(|c| c.is_ascii_digit() || c == '-') => format!("IR{}", rest.trim_start_matches('-')),
+            _ => u,
+        }
+    };
+    let first = if iran(a) { short(name(a)) } else { part(name(a)) };
+    let mut n = format!("{}-{}", first, part(name(b)));
+    if !tag.is_empty() {
+        n.push('-');
+        n.push_str(&tag.to_uppercase());
+    }
+    let n: String = n.chars().filter(|c| !c.is_control() && !"<>\"".contains(*c)).collect();
     n.chars().take(60).collect()
 }
 
@@ -349,7 +364,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             cert: String::new(),
             key: String::new(),
             probe: false,
-            bind: if t.kind == "awgwrap" || crate::kping::is_tunnel(app, &t.id) { "127.0.0.1".into() } else { String::new() },
+            bind: if t.kind == "awgwrap" { "127.0.0.1".into() } else { String::new() },
             awg: None,
             hy2: None,
             fec: t.fec.clone(),
@@ -438,6 +453,16 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
 
 /// What the panel last heard from agent `sid`: (when, version, address, VPN install state).
 /// The machine stats a tunnel server last sent (Null = none yet, or an older agent)
+/// The last warnings and errors each agent reported (server id -> [{ts, p, u, m}])
+fn agent_logs() -> &'static Mutex<HashMap<String, Value>> {
+    static L: OnceLock<Mutex<HashMap<String, Value>>> = OnceLock::new();
+    L.get_or_init(Default::default)
+}
+
+pub(crate) fn agent_log_lines(sid: &str) -> Value {
+    agent_logs().lock().unwrap_or_else(|e| e.into_inner()).get(sid).cloned().unwrap_or_else(|| json!([]))
+}
+
 pub(crate) fn agent_stats(sid: &str) -> Value {
     seen().lock().unwrap_or_else(|e| e.into_inner()).get(sid).map(|x| x.stats.clone()).unwrap_or(Value::Null)
 }
@@ -1698,6 +1723,11 @@ pub fn port_entry_at(app: &App, sid: &str, port: u16, tcp: bool, host: &str) -> 
             return Some(first);
         }
     }
+    // 3.58.1: an address was asked for and no tunnel from it brings the port: not «some other Iran server's
+    // tunnel», which made a config pointing at an Iran server that does not carry the port at all
+    if !host.is_empty() && (list.iter().any(|t| is_host(&t.entry)) || srv.iter().any(|s| is_host(&s.id))) {
+        return None;
+    }
     port_entry(app, sid, port, tcp)
 }
 
@@ -1927,12 +1957,11 @@ pub(crate) fn ports_on_server(app: &App, sid: &str) -> HashSet<u16> {
     for tu in tunnels(app).iter().filter(|x| x.enabled) {
         t.extend(tunnel_needs(tu).into_iter().filter(|x| x.0 == sid).map(|x| x.1));
     }
+    // KPING on a VPN server: its public relay port and the exit on 127.0.0.1
     let k = crate::kping::settings(app);
-    for r in &k.routes {
-        if r.iran == sid {
-            t.extend(r.ports());
-        }
-        if r.exit == sid {
+    if let Some(nid) = node_of_server(app, sid) {
+        if k.on && k.node_on(&nid) {
+            t.insert(k.node_port(&nid));
             t.insert(k.port);
         }
     }
@@ -1942,13 +1971,17 @@ pub(crate) fn ports_on_server(app: &App, sid: &str) -> HashSet<u16> {
     t
 }
 
+/// The VPN node on a tunnel server ("local" for the panel server; None = only the agent)
+fn node_of_server(app: &App, sid: &str) -> Option<String> {
+    if sid == "local" {
+        return Some("local".into());
+    }
+    servers(app).into_iter().find(|x| x.id == sid).map(|x| x.node).filter(|n| !n.is_empty())
+}
+
 /// KPING's ports and every port any server reported holding (for the panel-wide list of taken ports)
 pub(crate) fn held_anywhere(app: &App) -> HashSet<u16> {
     let mut t: HashSet<u16> = HashSet::new();
-    let k = crate::kping::settings(app);
-    for r in &k.routes {
-        t.extend(r.ports());
-    }
     for sid in std::iter::once("local".to_string()).chain(servers(app).into_iter().map(|s| s.id)) {
         if let Some(l) = listening_on(&sid) {
             t.extend(l.into_iter().map(|x| x.0));
@@ -2101,7 +2134,8 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         t.order = o;
     }
     if t.name.is_empty() {
-        t.name = default_tunnel_name(&app, &t.entry, &t.exit);
+        let tag = if !t.profile.is_empty() { t.profile.clone() } else { t.kind.clone() };
+        t.name = default_tunnel_name(&app, &t.entry, &t.exit, &tag);
     }
     if t.name.is_empty() {
         t.name = format!("tunnel-{}", &t.id[..4.min(t.id.len())]);
@@ -3087,6 +3121,9 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     let status: Vec<Status> = serde_json::from_value(b["status"].clone()).unwrap_or_default();
     note_report(&id, &status, b["xray"]["active"].as_bool() == Some(true), b["dns"]["active"].as_bool() == Some(true));
     crate::srvtraffic::note(&app, &format!("a:{id}"), &b["stats"]["net"]);
+    if b["logs"].is_array() {
+        agent_logs().lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), b["logs"].clone());
+    }
     // through the panel's CDN domain the address is a CDN edge's, not the server's: the last real one stays
     let via_cdn = crate::cdn::came_through(&app, &h);
     let fresh_ip = if via_cdn { String::new() } else { util::client_ip(&h) };
@@ -3651,6 +3688,21 @@ mod quality_tests {
         }
     }
 
+    /// a tunnel nobody named always gets one shape: the Iran server short, the abroad server, the core
+    #[test]
+    fn unnamed_tunnels_get_one_shape() {
+        let app = test_app();
+        save_servers(&app, &[
+            TServer { id: "nm_en".into(), name: "England".into(), loc: "abroad".into(), ..Default::default() },
+            TServer { id: "nm_ir".into(), name: "IRAN 2".into(), loc: "iran".into(), ..Default::default() },
+        ]);
+        assert_eq!(default_tunnel_name(&app, "nm_ir", "nm_en", "kmix"), "IR2-ENGLAND-KMIX");
+        // the abroad server dialling in: still the Iran one first
+        assert_eq!(default_tunnel_name(&app, "nm_en", "nm_ir", "game"), "IR2-ENGLAND-GAME");
+        assert_eq!(default_tunnel_name(&app, "nm_ir", "nm_en", ""), "IR2-ENGLAND");
+        assert_eq!(default_tunnel_name(&app, "", "nm_en", "wg"), "");
+    }
+
     #[test]
     fn a_lossy_path_is_one_alert_and_every_tunnel_shows() {
         let app = test_app();
@@ -3775,7 +3827,6 @@ mod fec_tests {
         for ok in ["", "off", "0", "8:3", "8:1", "64:32", "8 : 3"] {
             assert!(super::fec_ok(ok), "{}", ok);
         }
-        assert!(super::fec_ok(crate::kping::FEC));
         for bad in ["0:3", "8:0", "1:2:3", "8", "65:3", "8:33", "a:b", "8:"] {
             assert!(!super::fec_ok(bad), "{}", bad);
         }

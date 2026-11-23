@@ -151,6 +151,29 @@ pub fn apply() {
     if set > 0 || fixed > 0 {
         eprintln!("netq: low-latency network settings applied ({} kernel setting(s), {} queue(s))", set, fixed);
     }
+    journal_cap();
+}
+
+/// (3.58.1) The system log may not fill a small disk: journald keeps at most 200 MB (a 1 GB journal was seen
+/// on a 1-core server). Written once; journald is told only when the file changed.
+pub const JOURNAL_CONF: &str = "/etc/systemd/journald.conf.d/90-kanki.conf";
+pub const JOURNAL_TEXT: &str = "# written by kanki-panel: the system log stays small\n[Journal]\nSystemMaxUse=200M\nRuntimeMaxUse=50M\n";
+
+fn journal_cap() {
+    if !std::path::Path::new("/etc/systemd").is_dir() {
+        return;
+    }
+    if std::fs::read_to_string(JOURNAL_CONF).ok().as_deref() == Some(JOURNAL_TEXT) {
+        return;
+    }
+    let _ = std::fs::create_dir_all("/etc/systemd/journald.conf.d");
+    if std::fs::write(JOURNAL_CONF, JOURNAL_TEXT).is_err() {
+        eprintln!("netq: could not write {}", JOURNAL_CONF);
+        return;
+    }
+    let _ = quiet("systemctl", &["restart", "systemd-journald"]);
+    // the old log above the new cap goes now, not only when it rotates
+    let _ = quiet("journalctl", &["--vacuum-size=200M"]);
 }
 
 /// Runs `apply` in the background (it shells out to `ip`/`tc`, so not on the async threads)

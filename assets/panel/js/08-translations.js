@@ -1,7 +1,19 @@
 // ==================================================================== the panel: login, shell, pages
 "use strict";
 // Persian text of the whole panel
-var FA={"1. Asking every server for the new version":"۱. پرسیدن نسخهٔ تازه از همهٔ سرورها",
+var FA={
+"This address points to an IP that is not one of your servers (an old server?). Fix it or empty it.":"این آدرس به IPی اشاره می‌کند که مال هیچ‌کدام از سرورهای شما نیست (سرور قدیمی؟). درستش کنید یا خالی‌اش کنید.",
+"This server has no tunnel (Servers › Tunnel)":"این سرور تانل ندارد (سرورها › تانل)",
+"No tunnel of this server carries its KPING port":"هیچ تانلی از این سرور پورت KPING آن را نمی‌برد",
+"No tunnel":"بدون تانل",
+"The default port the app dials on every server. A server can have its own: Servers tab › ⋯ › Port. It is opened in the firewall.":"پورت پیش‌فرضی که اپ روی هر سرور می‌زند. هر سرور می‌تواند پورت خودش را داشته باشد: تب سرورها › ⋯ › پورت. در فایروال باز می‌شود.",
+"Automatic MTU is on (Settings › VPN): this field is not used. Now":"MTU خودکار روشن است (تنظیمات › VPN): این فیلد استفاده نمی‌شود. الان",
+"Exit port on each server":"پورت خروجی روی هر سرور",
+"Internal: only the server itself reaches it, never opened in the firewall.":"داخلی: فقط خود سرور به آن می‌رسد و هیچ‌وقت در فایروال باز نمی‌شود.",
+"Enforce the connection limit":"اعمال محدودیت اتصال",
+"A user cannot connect from more devices than their limit, on every protocol.":"هیچ کاربری با هیچ پروتکلی از دستگاه‌های بیشتر از حدش وصل نمی‌شود.",
+"Plain WireGuard through the Iran tunnels":"WireGuard ساده از راه تانل‌های ایران",
+"Off: no plain WireGuard config goes through the tunnels; AmneziaWG through them stays. Iran can drop plain WireGuard handshakes.":"خاموش: کانفیگ WireGuard ساده از راه تانل داده نمی‌شود؛ AmneziaWG از راه تانل می‌ماند. ایران ممکن است دست‌دادن WireGuard ساده را بیندازد.","1. Asking every server for the new version":"۱. پرسیدن نسخهٔ تازه از همهٔ سرورها",
 "2. The servers take it by themselves":"۲. سرورها خودشان آن را می‌گیرند",
 "1. Tunnels: make a KPING route (an Iran server and a server abroad); its Game-FEC Pro tunnel is built with it. 2. Testers: choose who gets it. The Kanki app of a tester then shows KPING in gaming mode. KPING is never on the subscription page, in links or in the bot.":"۱. تانل‌ها: یک مسیر KPING بساز (یک سرور ایران و یک سرور خارج)؛ تانل Game-FEC Pro آن همراهش ساخته می‌شود. ۲. تسترها: انتخاب کن چه کسی بگیرد. اپ کانکی تستر KPING را در حالت گیمینگ نشان می‌دهد. KPING هیچ‌وقت در صفحهٔ اشتراک، لینک‌ها یا ربات نیست.",
 "Agent":"ایجنت",

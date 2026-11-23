@@ -27,6 +27,7 @@ function lgLevel(x){var m=x.m||'';
  if(x.p>=7||/\b(debug|dbg|trace)\b|"level":"debug"/i.test(m))return 'd';return 'i'}
 function logCard(){return '<section class="card klog" id="lgc"><div class="kc-h"><div><h3>'+t('Live log')+'</h3><small class="muted">'+t('Panel and VPN services on this server')+'</small></div>'+
  '<div class="klog-tools"><label class="klog-q"><span class="vh">'+t('Search')+'</span><input id="lg_q" type="search" placeholder="'+esc(t('Search'))+'" value="'+esc(LG.q||'')+'"></label>'+
+ '<label><span class="vh">'+t('Server')+'</span><select id="lg_srv"><option value="">'+t('Panel server')+'</option></select></label>'+
  '<label><span class="vh">'+t('Source')+'</span><select id="lg_src">'+LSRC.map(function(s){return '<option value="'+s[0]+'"'+(s[0]==LG.src?' selected':'')+'>'+t(s[1])+'</option>'}).join('')+'</select></label>'+
  '<button type="button" class="kib" id="lg_pause" aria-pressed="'+LG.paused+'" aria-label="'+esc(t(LG.paused?'Resume':'Pause'))+'" title="'+esc(t(LG.paused?'Resume':'Pause'))+'">'+ic(LG.paused?'play':'pause',16)+'</button>'+
  '<button type="button" class="kib" id="lg_copy" aria-label="'+esc(t('Copy'))+'" title="'+esc(t('Copy'))+'">'+ic('copy',16)+'</button>'+
@@ -35,6 +36,10 @@ function logCard(){return '<section class="card klog" id="lgc"><div class="kc-h"
  '<button type="button" class="b2 sm klog-latest" id="lg_latest" hidden>'+t('Return to latest')+' ↓</button></div></section>'}
 function logWire(){if(!$('#lgc'))return;
  $('#lg_src').onchange=function(){LG.src=this.value;localStorage.setItem('kk_lsrc',LG.src);logLoad()};
+ // another server: the warnings and errors its agent sends once a minute
+ LG.srv=LG.srv||'';api('GET','/api/servers').then(function(r){var sel=$('#lg_srv');if(!sel)return;
+  (r||[]).filter(function(x){return !x.local}).forEach(function(x){var o=document.createElement('option');o.value=x.key;o.textContent=x.name;if(x.key==LG.srv)o.selected=true;sel.appendChild(o)})}).catch(function(){});
+ $('#lg_srv').onchange=function(){LG.srv=this.value;$('#lg_src').disabled=!!LG.srv;logLoad()};
  $('#lg_pause').onclick=function(){LG.paused=!LG.paused;var l=t(LG.paused?'Resume':'Pause');this.innerHTML=ic(LG.paused?'play':'pause',16);this.title=l;this.setAttribute('aria-label',l);this.setAttribute('aria-pressed',LG.paused)};
  $('#lg_rf').onclick=logLoad;
  $('#lg_copy').onclick=function(){copy(logRows().map(function(x){return logTime(x.ts)+' '+x.u+' '+x.m}).join('\n'))};
@@ -43,7 +48,7 @@ function logWire(){if(!$('#lgc'))return;
  var bx=$('#lg_box');bx.onscroll=function(){LG.away=bx.scrollHeight-bx.scrollTop-bx.clientHeight>40;$('#lg_latest').hidden=!LG.away};
  $('#lg_latest').onclick=function(){LG.away=false;bx.scrollTop=bx.scrollHeight;this.hidden=true};
  LG.away=false;logLoad();clearInterval(S.timer3);S.timer3=setInterval(function(){if($('#lgc')&&!LG.paused&&document.visibilityState=='visible')logLoad()},5000)}
-function logLoad(){return api('GET','/api/logs?src='+encodeURIComponent(LG.src)+'&n=300').then(function(r){LG.lines=r.lines||[];LG.err='';logDraw()}).catch(function(e){LG.err=e.message||'error';logDraw()})}
+function logLoad(){return api('GET','/api/logs?src='+encodeURIComponent(LG.src)+'&n=300'+(LG.srv?'&server='+encodeURIComponent(LG.srv):'')).then(function(r){LG.lines=r.lines||[];LG.err='';logDraw()}).catch(function(e){LG.err=e.message||'error';logDraw()})}
 function logRows(){var q=String(LG.q||'').trim().toLowerCase();return LG.lines.filter(function(x){return (LG.lv=='all'||lgLevel(x)==LG.lv)&&(!q||(String(x.m)+' '+String(x.u)).toLowerCase().indexOf(q)>=0)})}
 function logTime(ts){var d=new Date(ts*1000);return p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds())}
 function logDraw(){var tb=$('#lg_tabs'),bx=$('#lg_box');if(!tb||!bx)return;

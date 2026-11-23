@@ -31,72 +31,6 @@ pub const DEFAULT_PORT: u16 = 4300;
 pub const DEFAULT_ENTRY_PORT: u16 = 24300;
 /// users get 10.81.0.2 … by id (microtun is 10.79, its devices 10.80)
 const BASE: u32 = u32::from_be_bytes([10, 81, 0, 0]);
-/// FEC of the tunnel: 8 packets + 3 repair packets (any 3 of 11 may be lost)
-/// KPING's tunnels: one repair shard per group, not three. A game packet travels alone (one every ~17 ms),
-/// so 8:3 sent it four times through each tunnel; KPING itself repairs end to end and copies across the
-/// tunnels. Lab (3.43.1, two tunnels on bad lines): no loss either way, ~40% fewer packets between the
-/// servers, ~25% less CPU, the slowest packets sooner; without any FEC, a little loss on the worse lines.
-pub(crate) const FEC: &str = "8:1";
-
-/// One way in: users dial `iran`, its tunnel brings them to `exit`
-#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
-#[serde(default)]
-pub struct Route {
-    pub id: String,
-    /// the server abroad that runs the exit (tunnel server id; any server with the tunnel agent)
-    pub exit: String,
-    /// the Iran server users connect to (tunnel server id)
-    pub iran: String,
-    /// address the app dials ("" = the Iran server's own address)
-    pub host: String,
-    /// UDP port the app dials on the Iran server (the relay)
-    pub port: u16,
-    /// the tunnel's own port on the Iran server (the exit dials it: reverse); the tunnel takes KPING's
-    /// packets on the next port, on 127.0.0.1
-    pub tunnel_port: u16,
-    /// the tunnel built for this route ("" = not built yet)
-    pub tunnel: String,
-    /// a second tunnel to the same exit (its own port, its own UDP flow): every packet goes through both
-    /// and the first copy wins, so a stall or a throttled flow on one of them costs nothing ("" = none)
-    pub tunnel2: String,
-    /// that tunnel's own port on the Iran server (0 = not chosen yet: the first tunnel's port + 2)
-    pub tunnel2_port: u16,
-    /// what carries KPING between the Iran server and the exit (`KINDS`; "" = "game"): a Kanki tunnel on
-    /// UDP (Game-FEC Pro, KCP, QUIC, HQ) or fake TCP
-    pub kind: String,
-    /// Game-FEC: "data:parity" ("" = `FEC`)
-    pub fec: String,
-}
-
-/// What a route's tunnel can be: UDP-based Kanki tunnels and fake TCP. (TCP-based ones, a stream behind a
-/// lost packet, are no tunnel for a game.)
-#[allow(dead_code)]
-pub const KINDS: &[&str] = &["game", "kcp", "quic", "hq", "faketcp"];
-
-impl Route {
-    pub fn kind(&self) -> &str {
-        if self.kind.is_empty() { "game" } else { &self.kind }
-    }
-    /// the tunnel's entry for KPING on the Iran server (127.0.0.1 only): right after the tunnel's own port
-    pub fn inner(&self) -> u16 {
-        self.tunnel_port.wrapping_add(1)
-    }
-    pub fn port2(&self) -> u16 {
-        if self.tunnel2_port == 0 { self.tunnel_port.wrapping_add(2) } else { self.tunnel2_port }
-    }
-    /// the second tunnel's entry for KPING on the Iran server
-    pub fn inner2(&self) -> u16 {
-        self.port2().wrapping_add(1)
-    }
-    /// every port this route takes on its Iran server
-    pub(crate) fn ports(&self) -> Vec<u16> {
-        let mut v = vec![self.port, self.tunnel_port, self.inner()];
-        if !self.tunnel2.is_empty() || self.tunnel2_port != 0 {
-            v.extend([self.port2(), self.inner2()]);
-        }
-        v
-    }
-}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -113,8 +47,6 @@ pub struct Settings {
     /// parity: one repair packet per this many packets (0 = none). 2: a lost packet is rebuilt as soon as
     /// the next one arrives, so it is late by one packet at most
     pub fec: u8,
-    /// the routes of 3.37-3.57: kept only so an old setting still reads; nothing uses them
-    pub routes: Vec<Route>,
     /// the public UDP port of the relay on each server (servers may have their own, `nodes`)
     pub public: u16,
     /// per server: off there, its own port
@@ -132,7 +64,7 @@ pub struct NodeOpt {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { on: true, port: DEFAULT_PORT, mtu: 1332, dup_ms: 10, tun_dup_ms: 20, fec: 2, routes: vec![], public: DEFAULT_ENTRY_PORT, nodes: HashMap::new() }
+        Settings { on: true, port: DEFAULT_PORT, mtu: 1332, dup_ms: 10, tun_dup_ms: 20, fec: 2, public: DEFAULT_ENTRY_PORT, nodes: HashMap::new() }
     }
 }
 
@@ -171,16 +103,6 @@ pub fn settings(app: &App) -> Settings {
     s.dup_ms = s.dup_ms.min(20);
     s.tun_dup_ms = s.tun_dup_ms.min(30);
     s.fec = s.fec.min(crate::kpingd::MAX_GROUP as u8);
-    // 3.37-3.38 kept the exit as a VPN node id: now it is the tunnel server of that machine
-    let tservers = crate::tunnel::panel::servers(app);
-    for r in s.routes.iter_mut() {
-        if r.exit != "local" && !tservers.iter().any(|x| x.id == r.exit) {
-            let sid = crate::twin::sid_of_node(app, &r.exit);
-            if !sid.is_empty() {
-                r.exit = sid;
-            }
-        }
-    }
     s
 }
 
@@ -188,23 +110,10 @@ fn save(app: &App, s: &Settings) {
     app.db.set("kping_cfg", &serde_json::to_string(s).unwrap_or_default());
 }
 
-/// A removed server (tunnel server or VPN node) takes its routes with it
-/// One route goes (its server is gone)
-pub fn forget_route(app: &App, id: &str) {
-    let mut s = settings(app);
-    let n = s.routes.len();
-    s.routes.retain(|r| r.id != id);
-    if s.routes.len() != n {
-        save(app, &s);
-    }
-}
-
+/// A removed VPN server: its own KPING setting goes with it
 pub fn forget_node(app: &App, id: &str) {
     let mut s = settings(app);
-    let n = s.routes.len();
-    let sid = crate::twin::sid_of_node(app, id);
-    s.routes.retain(|r| r.exit != id && r.iran != id && (sid.is_empty() || r.exit != sid));
-    if s.routes.len() != n || s.nodes.remove(id).is_some() {
+    if s.nodes.remove(id).is_some() {
         save(app, &s);
     }
 }
@@ -273,43 +182,18 @@ pub fn cfg_for_node(app: &App, n: &crate::db::Node, users: &[&User]) -> KpCfg {
     }
 }
 
-/// The tunnel of a KPING route takes its packets only on 127.0.0.1 (the relay sits in front of it)
-/// 3.43.1, once: the tunnels KPING built before with Game-FEC 8:3 get 8:1 too (a choice made on the
-/// Tunnels page stays). Both ends take the tunnel's settings from the panel, so they change together.
-pub fn light_tunnels(app: &App) {
-    if app.db.get("kping_tun_light") == "1" {
+/// 3.58.1, once: the routes of 3.37-3.57 (an Iran relay and a tunnel of their own) are gone for good. A route
+/// left in the settings still made its tunnel listen on 127.0.0.1 only (users could not reach it) and kept its
+/// ports out of the firewall; saving the settings again drops them (the field is no longer read).
+pub fn drop_routes(app: &App) {
+    if app.db.get("kping_routes_gone") == "1" {
         return;
     }
-    let ids: Vec<String> = settings(app).routes.iter().flat_map(|r| [r.tunnel.clone(), r.tunnel2.clone()]).filter(|x| !x.is_empty()).collect();
-    let mut ts = crate::tunnel::panel::tunnels(app);
-    let mut changed = false;
-    for t in ts.iter_mut().filter(|t| ids.contains(&t.id) && t.transport == "game" && (t.fec == "8:3" || t.fec.is_empty())) {
-        t.fec = FEC.into();
-        t.dup = false;
-        changed = true;
-    }
-    if changed {
-        crate::tunnel::panel::save_tunnels(app, &ts);
-    }
-    app.db.set("kping_tun_light", "1");
+    let s = settings(app);
+    save(app, &s);
+    app.db.set("kping_routes_gone", "1");
 }
 
-/// 3.57.0: the VIP tunnel is gone; a route of an older panel that rode one goes with it (nothing is
-/// carried over)
-pub fn drop_vip(app: &App) {
-    let mut s = settings(app);
-    let n = s.routes.len();
-    s.routes.retain(|r| r.kind != "vip");
-    if s.routes.len() != n {
-        save(app, &s);
-    }
-}
-
-pub fn is_tunnel(app: &App, tid: &str) -> bool {
-    settings(app).routes.iter().any(|r| r.tunnel == tid || (!r.tunnel2.is_empty() && r.tunnel2 == tid))
-}
-
-/// The route's tunnel exists and is on
 
 // ------------------------------------------------------------------ what the servers report
 
@@ -443,6 +327,8 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
         .db
         .nodes()
         .iter()
+        // a server whose VPN is off (the panel server without VPN) runs no KPING: not listed (3.58.1)
+        .filter(|n| n.enabled)
         .map(|n| {
             let info = crate::api::node_info(n);
             let rep = r.get(&n.id).filter(|(t, _)| now - t < 120).map(|(_, v)| v.clone());
@@ -456,13 +342,15 @@ async fn get_all(State(app): St, h: HeaderMap) -> Response {
                 "relay_error": relay["error"].as_str(), "exit_error": exit["error"].as_str(),
                 "online_users": exit["online"].as_array().map(|a| a.len()).unwrap_or(0),
                 "direct": format!("{}:{}", crate::api::endpoint(&app, n), s.node_port(&n.id)),
+                // why there is no copy through Iran: the server has no tunnel at all, or no tunnel carries this port
+                "tunnel_why": if tw.is_some() { Value::Null } else if crate::twin::name_of_node(&app, n).is_none() { json!("no_tunnel") } else { json!("not_carried") },
                 "tunnel": tw,
             })
         })
         .collect();
     let with = users_of(&users);
     Json(json!({
-        "settings": s, "servers": servers, "mtu_now": mtu(&app, &s),
+        "settings": s, "servers": servers, "mtu_now": mtu(&app, &s), "mtu_auto": app.db.get("mtu_auto") != "0",
         "users": with.len(), "online": with.iter().filter(|u| u.online > 0).count(),
         "user_list": users.iter().map(|u| json!({ "id": u.id, "name": u.username, "has": u.has_proto(PROTO), "active": u.active() })).collect::<Vec<_>>(),
     }))
@@ -475,16 +363,22 @@ async fn node_set(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b):
     if !app.db.nodes().iter().any(|n| n.id == id) {
         return (StatusCode::NOT_FOUND, Json(json!({ "error": "unknown server" }))).into_response();
     }
+    // everything is checked first and saved together: a refused port must not leave KPING switched on half-way
+    let port = if b["port"].is_null() {
+        None
+    } else {
+        let Some(p) = port_of(&b["port"]) else { return bad("the port must be 1-65535") };
+        // only this server's own ports count: another server may use the same number (3.58.1)
+        if p != settings(&app).node_port(&id) && crate::servers::taken_on(&app, &id).contains(&p) {
+            return bad("this port is already used on this server");
+        }
+        Some(p)
+    };
     if let Some(on) = b["on"].as_bool() {
         set_node_off(&app, &id, !on);
     }
-    if !b["port"].is_null() {
-        let Some(p) = port_of(&b["port"]) else { return bad("the port must be 1-65535") };
-        let s = settings(&app);
-        if p != s.node_port(&id) {
-            if crate::servers::all_taken(&app).contains(&p) {
-                return bad("this port is already used");
-            }
+    if let Some(p) = port {
+        if p != settings(&app).node_port(&id) {
             set_node_port(&app, &id, p);
         }
     }
