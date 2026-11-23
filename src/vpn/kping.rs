@@ -622,4 +622,26 @@ pub(crate) mod tests {
         // a tunnel agent runs nothing of KPING any more
         assert!(cfg_for(&app, "local").relays.is_empty() && cfg_for(&app, "local").exit.is_none());
     }
+
+    #[tokio::test]
+    async fn kping_comes_through_the_tunnel_of_its_server() {
+        let app = test_app();
+        let u = app.db.create_user("gamer", 10.0, 30, 1, "wg,kping", "", "", 0).unwrap();
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,info,online) VALUES('de','Germany','de.example.com','de.example.com','t',?1,1)", &[&json!({ "kp_port": "24300", "wg_port": "51820" }).to_string()]).unwrap();
+        let srv = json!([{ "id": "ir1", "name": "Iran", "token": "x", "addr": "ir.example.com" }, { "id": "s-de", "name": "Germany", "token": "y", "node": "de" }]);
+        app.db.set("tun_servers", &srv.to_string());
+        app.db.set("srv_tunnel", &json!({ "s-de": { "on": true, "host": "ir.example.com" } }).to_string());
+        let uu = app.db.user(u.id).unwrap();
+        let vias = |app: &App| sub_info(app, &uu).as_array().map(|a| a.iter().map(|x| (x["node"].as_str().unwrap().to_string(), x["via"].as_str().unwrap().to_string(), x["url"].as_str().unwrap().to_string())).collect::<Vec<_>>()).unwrap_or_default();
+        // a tunnel that carries the KPING port: a second config through Iran, on the tunnel's own port
+        app.db.set("tun_list", &json!([{ "id": "t1", "name": "g", "entry": "ir1", "exit": "s-de", "transport": "game", "enabled": true, "udp": ["51820", "24400:24300"] }]).to_string());
+        let v = vias(&app);
+        assert_eq!(v.len(), 2, "{:?}", v);
+        assert_eq!((v[0].0.as_str(), v[0].1.as_str()), ("de", "direct"));
+        assert_eq!((v[1].0.as_str(), v[1].1.as_str()), ("de@tunnel", "tunnel"));
+        assert!(v[1].2.contains("ir.example.com:24400"), "{}", v[1].2);
+        // tunnels that do not carry it: straight only
+        app.db.set("tun_list", &json!([{ "id": "t1", "name": "g", "entry": "ir1", "exit": "s-de", "transport": "game", "enabled": true, "udp": ["51820"] }]).to_string());
+        assert_eq!(vias(&app).len(), 1);
+    }
 }
