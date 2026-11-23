@@ -163,20 +163,37 @@ fn all_uses(app: &App) -> Vec<Use> {
     nodes.iter().flat_map(|n| node_uses(n, &km, Some(&mt), Some(&kp))).collect()
 }
 
-/// The clashes: the same UDP port used by two different servers. [(port, [(node, proto)])]
+/// The clashes: one server with the same UDP port for two of its cores (3.58.1: the same port on two different
+/// servers is no clash, each server is its own machine and a tunnel can bring any port to any port).
+/// [(port, [(node, proto)])]
 pub fn clashes(uses: &[Use]) -> Vec<(u16, Vec<(String, &'static str)>)> {
     let mut by: Vec<(u16, Vec<(String, &'static str)>)> = vec![];
     for u in uses {
-        match by.iter_mut().find(|(p, _)| *p == u.port) {
+        match by.iter_mut().find(|(p, v)| *p == u.port && v[0].0 == u.node) {
             Some((_, v)) => v.push((u.node.clone(), u.proto)),
             None => by.push((u.port, vec![(u.node.clone(), u.proto)])),
         }
     }
-    by.retain(|(_, v)| {
-        let first = &v[0].0;
-        v.iter().any(|(n, _)| n != first)
-    });
+    by.retain(|(_, v)| v.len() > 1);
     by
+}
+
+/// The ports one VPN server holds or will hold, other than KPING's own (3.58.1): its cores, its tunnels and
+/// what it reported listening on, and the well-known ones; a new KPING port there must be none of them
+pub(crate) fn taken_on(app: &App, nid: &str) -> HashSet<u16> {
+    let mut t: HashSet<u16> = [22, 53, 80, 443, 853, 2053, 2083, 2087, 2096, 8080, 8880].into_iter().collect();
+    let km = crate::kmix::settings(app);
+    let mt = crate::microtun::settings(app);
+    if let Some(n) = app.db.nodes().into_iter().find(|n| n.id == nid) {
+        t.extend(node_uses(&n, &km, Some(&mt), None).into_iter().map(|u| u.port));
+    }
+    let sid = crate::twin::sid_of_node(app, nid);
+    if !sid.is_empty() {
+        let kp = crate::kping::settings(app);
+        let own = kp.node_port(nid);
+        t.extend(tp::ports_on_server(app, &sid).into_iter().filter(|p| *p != own && *p != kp.port));
+    }
+    t
 }
 
 /// Every port a new VPN port must not be: the VPN ports of all servers, the ports of tunnels (both
@@ -675,7 +692,8 @@ pub fn list_json(app: &App) -> Value {
                        "stats": tp::agent_stats(&s.id),
                        "can_update": at > 0 && t - at < 20 && !ver.is_empty() && ver != crate::VERSION },
             "node": node, "ports": if s.node.is_empty() { json!({}) } else { ports_json(&uses, &s.node) },
-            "planned": s.ports, "pending": pending, "vpn_wanted": s.vpn, "domain": s.domain, "ssl": !s.no_ssl,
+            // the ports a joined server really uses, not the ones planned when it joined (3.58.1)
+            "planned": if !s.node.is_empty() && app.db.node(&s.node).is_some() { node_ports(app, &s.node) } else { s.ports.clone() }, "pending": pending, "vpn_wanted": s.vpn, "domain": s.domain, "ssl": !s.no_ssl,
             "setup": setup, "setup_asked": s.setup_at,
             "jobs": jobs(&s.id), "created": s.created,
             "tunnel": crate::twin::info(app, &s.id, Some(s.node.as_str()).filter(|n| !n.is_empty())),
@@ -808,7 +826,8 @@ async fn replace_machine(State(app): St, h: HeaderMap, Path(id): Path<String>, J
     } else {
         s.replace = false;
     }
-    let need_ports = node_alive && s.ports.len() != 4;
+    // 3.58.1: always the ports the node really uses now (the ones planned at join time could have moved since)
+    let need_ports = node_alive && node_ports(&app, &s.node).iter().all(|p| *p > 0);
     let mut c = s.clone();
     tp::save_servers(&app, &list);
     if need_ports {
@@ -1465,14 +1484,15 @@ mod tests {
     }
 
     #[test]
-    fn same_port_on_two_servers_is_a_clash() {
+    fn only_one_port_twice_on_the_same_server_is_a_clash() {
+        // the same port on different servers: each its own machine, no clash
         let uses = vec![u("local", "wg", 51820), u("local", "kmix", 4000), u("a", "wg", 51819), u("a", "kmix", 4000), u("b", "kmix", 4000)];
-        let c = clashes(&uses);
+        assert!(clashes(&uses).is_empty());
+        // two cores of one server on one port: a clash
+        let c = clashes(&[u("a", "wg", 1), u("a", "awg", 1), u("b", "wg", 1)]);
         assert_eq!(c.len(), 1);
-        assert_eq!(c[0].0, 4000);
-        assert_eq!(c[0].1.len(), 3);
-        // one server using one port twice is not a clash between servers
-        assert!(clashes(&[u("a", "wg", 1), u("a", "awg", 1)]).is_empty());
+        assert_eq!(c[0].0, 1);
+        assert_eq!(c[0].1, vec![("a".to_string(), "wg"), ("a".to_string(), "awg")]);
     }
 
     #[test]

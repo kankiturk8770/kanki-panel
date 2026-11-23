@@ -47,7 +47,7 @@ function dashSys(){if(S.page!='dash'||document.visibilityState!='visible')return
 
 function goNodes(add){S.openAdd=!!add;if(location.hash=='#nodes')route();else location.hash='#nodes'}
 
-function drawSvcs(list){var el=$('#svcs');if(!el)return;list=(list||[]);
+function drawSvcs(list){var el=$('#svcs');if(!el)return;list=(list||[]).filter(function(x){return x.active||['web','panel','node'].indexOf(x.key)>=0});
  if(!list.length){el.innerHTML='<span class="muted">—</span>';return}
  el.innerHTML=list.map(function(x){var fixed=['web','panel','node'].indexOf(x.key)>=0,k=esc(x.key);
   return '<div class="svrow"><div class="sn"><span class="dot '+(x.active?'g':'r')+'"></span><div><b>'+esc(SVN[x.key]||x.key)+'</b><small class="ltr">'+esc(x.unit)+'</small></div></div>'+
@@ -390,7 +390,7 @@ function wireLogo(){var f=$('#lg_file');if(!f)return;
 var STSEC=[
  ['look','Appearance','brush','Name, logo, language and theme of the panel',['panel_name','lang','theme','color','refresh']],
  ['net','Addresses','globe','Panel address, the public VPN address and subscription links',['endpoint','sub_base']],
- ['vpn','VPN & protocols','shield2','DNS, MTU and protocol behaviour on every server',['dns','mtu','mtu_auto','mtu_budget','awg_compat','conn_limit_on']],
+ ['vpn','VPN & protocols','shield2','DNS, MTU and protocol behaviour on every server',['dns','mtu','mtu_auto','mtu_budget','awg_compat','conn_limit_on','wg_tunnel_on']],
  ['newu','New users','users','Ready values for the “New user” form',['default_protocols','def_gb','def_days','def_conns']],
  ['ntf','Notifications','bell','Telegram messages for you and for your buyers',['tg_alerts','warn_on','backup_on']],
  ['srv','Servers','nodes','What happens to a server that stays offline',['autodel_on','autodel_hours','autodel_iran']],
@@ -416,6 +416,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   '<input type="hidden" data-k="color" value="gold"></div>';
  case 'net':return '<div class="sgrid"><div class="full"><label class="f">'+t('Panel address')+'</label><div class="cpy"><input class="ltr" readonly value="'+esc(addr)+'"><button class="b2" type="button" onclick="copy(\''+jsa(addr)+'\')">'+ic('copy',15)+'</button></div></div>'+
   stIn('endpoint','Public VPN host or IP',s.domain||'vpn.example.com','Written inside every user config. Empty = the panel domain.','full')+
+  (s.endpoint_stale?'<div class="warnbox full">'+t('This address points to an IP that is not one of your servers (an old server?). Fix it or empty it.')+'</div>':'')+
   stIn('sub_base','Subscription base URL','https://sub.example.com','Base of the subscription links (for example a CDN domain). Empty = the panel address.','full')+
   '<div class="full box"><b>'+t('Separate subscription domain')+'</b><div class="hint">'+t('A domain that points to this server. The panel gets its SSL by itself and serves only the subscription pages on it, so the panel address stays hidden.')+'</div><div class="cpy"><input class="ltr" id="sd_in" placeholder="sub.example.ir" value="'+esc(s.sub_domain||'')+'"><button class="btn" type="button" id="sd_go">'+t('Set up SSL and use it')+'</button>'+(s.sub_domain?'<button class="b2 bd" type="button" id="sd_rm">'+t('Remove')+'</button>':'')+'</div><div class="hint" id="sd_msg">'+(s.sub_domain?'✓ https://'+esc(s.sub_domain)+'/sub/…':'')+'</div></div>'+
   '<div class="full box" id="pc_box"><b>'+t('Panel CDN domain (for the servers)')+'</b><div class="hint">'+t('When the panel\'s IP is filtered in Iran, the Iran servers cannot report to it. Put another domain behind Cloudflare (orange cloud, SSL mode «Full») pointing to this server: the servers then reach the panel through it. Only the servers\' path goes through it; the panel and the subscription do not.')+'</div><div id="pc_in">'+t('Loading…')+'</div></div>'+
@@ -428,7 +429,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   '<div class="full" style="margin-top:6px">'+stSw('mtu_auto','Automatic MTU','Each config gets the largest MTU whose whole packet stays under the limit below, counting the core and the tunnels on its way. Off = the MTU above for every config.')+'</div>'+
   '<div><label class="f">'+t('Largest packet on mobile data')+'</label><input data-k="mtu_budget" class="ltr" inputmode="numeric" placeholder="1380"><div class="chipset" data-fill="mtu_budget">'+['1340','1380','1420'].map(function(m){return '<button type="button" data-v="'+m+'">'+m+'</button>'}).join('')+'</div><div class="hint">'+t('Bytes of the whole packet (IPv4 + UDP + core). Iran mobile networks pass about 1420-1440; 1380 leaves a safe margin.')+'</div></div>'+
   '<div class="full box"><b>'+t('MTU of every config')+'</b><div class="hint">'+t('Worked out again with every subscription refresh and server sync, so a tunnel that changes type changes the MTU by itself.')+'</div><div id="mtu_rep">'+t('Loading…')+'</div></div>'+
-  '<div class="full" style="margin-top:6px">'+stSw('awg_compat','AmneziaWG compatibility mode','Only Jc/Jmin/Jmax/S1/S2/H1-H4, for old AmneziaWG apps.')+stSw('conn_limit_on','Enforce connection limit (Hysteria2)','A user cannot connect from more devices than his limit.')+'</div></div>';
+  '<div class="full" style="margin-top:6px">'+stSw('awg_compat','AmneziaWG compatibility mode','Only Jc/Jmin/Jmax/S1/S2/H1-H4, for old AmneziaWG apps.')+stSw('conn_limit_on','Enforce the connection limit','A user cannot connect from more devices than their limit, on every protocol.')+stSw('wg_tunnel_on','Plain WireGuard through the Iran tunnels','Off: no plain WireGuard config goes through the tunnels; AmneziaWG through them stays. Iran can drop plain WireGuard handshakes.')+'</div></div>';
  case 'newu':return '<label class="f" style="margin-top:0">'+t('Default protocols for new users')+'</label><input type="hidden" data-k="default_protocols"><div class="pgs" data-multi="default_protocols">'+
   PROTOS.map(function(x){return '<label style="--pc:'+((PCOL[x[0]]))+'"><input type="checkbox" value="'+x[0]+'" class="hide"><i></i>'+x[1]+'</label>'}).join('')+'</div><div class="hint">'+t('Also used by the sales bot when it makes an account.')+'</div>'+
   '<div class="g3" style="margin-top:6px">'+stIn('def_gb','Volume (GB)','30','0 = unlimited','', 'number')+stIn('def_days','Days','30','','', 'number')+stIn('def_conns','Connections','1','','', 'number')+'</div>';
@@ -455,7 +456,7 @@ function pSettings(){var cur=S.stsec||'look';
 function stVal(el){return el.type=='checkbox'?(el.checked?'1':'0'):el.value}
 function stFill(s){$$('#st [data-k]').forEach(function(el){var k=el.dataset.k,v=s[k]==null?'':String(s[k]);
   if(k=='refresh'&&!v)v='10';if(k=='lang'&&!v)v='fa';if(k=='theme'&&!v)v='dark';if(k=='color'&&!v)v='gold';
-  if(k=='conn_limit_on'||k=='tg_alerts'||k=='mtu_auto')v=v=='0'?'0':'1';
+  if(k=='conn_limit_on'||k=='tg_alerts'||k=='mtu_auto'||k=='wg_tunnel_on')v=v=='0'?'0':'1';
   if(el.type=='checkbox')el.checked=v=='1';else el.value=v;el._orig=stVal(el)});
  stSync($('#st'))}
 // pickers and protocol chips follow their hidden input

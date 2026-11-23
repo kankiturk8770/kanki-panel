@@ -210,8 +210,8 @@ pub fn tunnel_target(app: &App, s: &Settings, n: &Node, port: u16) -> Option<(St
         let p = if opt.tun_port > 0 { opt.tun_port } else { route_of(app, n, port).map(|r| r.1).unwrap_or(port) };
         return Some((opt.tun_host.trim().to_string(), p));
     }
-    // the server's tunnel (Servers page) gives every protocol a copy through its Iran address
-    if let Some(t) = crate::twin::of_node(app, n) {
+    // the server's tunnel (Servers page): the Iran server that carries the KANKI MIX port, found by itself
+    if let Some(t) = crate::twin::of_node_port(app, n, port) {
         // a typed port is the admin's word; else only a port the tunnel really carries
         let p = if opt.tun_port > 0 { Some(opt.tun_port) } else { t.carried(app, port, false) };
         if let Some(p) = p {
@@ -785,7 +785,7 @@ async fn all_users(axum::extract::State(app): St, h: axum::http::HeaderMap, axum
     for u in app.db.users() {
         let mut list: Vec<String> = u.protocols.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
         let has = list.iter().any(|x| x == "kmix");
-        if on == has {
+        if on == has || (on && !crate::api::assign_fits(&app, &u, "kmix")) {
             continue;
         }
         if on { list.push("kmix".into()) } else { list.retain(|x| x != "kmix") }

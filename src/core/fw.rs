@@ -25,6 +25,17 @@ struct State {
     /// owner -> the rules it needs ("443/tcp", "4000:4010/udp")
     owners: BTreeMap<String, BTreeSet<String>>,
     guard: Guard,
+    /// every rule Kanki itself ever opened here (3.58.1): one that no owner needs any more is closed by itself
+    opened: BTreeSet<String>,
+}
+
+/// The port ranges the panel gives Kanki's cores (WireGuard/AmneziaWG, Hysteria2, KANKI MIX, microtun, KPING):
+/// an unused open rule in them was left by Kanki (an older version, a moved port), not opened by hand
+fn kanki_range(r: &str) -> bool {
+    let Some(p) = r.split('/').next().and_then(|p| p.parse::<u16>().ok()) else { return false };
+    [(51820, 52999), (8444, 8499), (30000, 30999), (4000, 4299), (40000, 40999), (42000, 42999), (24300, 24399), (43000, 43999)]
+        .iter()
+        .any(|(a, b)| (*a..=*b).contains(&p))
 }
 
 /// The firewall guard of this server
@@ -236,6 +247,7 @@ pub fn sync<I: IntoIterator<Item = String>>(owner: &str, want: I) {
         for r in want.iter().filter(|r| !present.contains(*r)) {
             let _ = sh(&format!("ufw allow {} >/dev/null 2>&1", r));
         }
+        st.opened.extend(want.iter().cloned());
     }
     for r in &close {
         let single = r.split('/').next().and_then(|p| p.parse::<u16>().ok());
@@ -535,6 +547,13 @@ pub fn report() -> serde_json::Value {
             unused.push(r);
         }
     }
+    // 3.58.1: what Kanki opened and nothing uses any more is closed by itself (a removed tunnel, a moved port,
+    // an older version); a rule opened by hand outside Kanki's port ranges is only reported
+    let left_by_kanki: Vec<String> = unused.iter().filter(|r| st.opened.contains(*r) || kanki_range(r)).cloned().collect();
+    if !left_by_kanki.is_empty() {
+        close_unused(&left_by_kanki);
+        unused.retain(|r| !left_by_kanki.contains(r));
+    }
     let active = ufw_here() && ufw_active();
     let v = serde_json::json!({ "owners": st.owners, "unused": unused, "guard": st.guard, "active": active, "ufw": ufw_here() });
     *c.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), v.clone()));
@@ -545,9 +564,10 @@ pub fn report() -> serde_json::Value {
 /// it, not SSH, nothing listens there). Blocking.
 pub fn close_unused(rules: &[String]) {
     let _file = file_lock();
-    let Some(st) = load_checked() else { return };
+    let Some(mut st) = load_checked() else { return };
     let ssh = ssh_ports();
     let hidden = hidden_users();
+    let mut closed = vec![];
     for r in rules.iter().filter(|r| valid_rule(r) && !r.contains(':')) {
         if st.owners.values().any(|v| v.contains(r)) || protected(r, &ssh) || hidden.contains(r) {
             continue;
@@ -558,7 +578,12 @@ pub fn close_unused(rules: &[String]) {
         }
         if sh(&format!("ufw --force delete allow {} >/dev/null 2>&1", r)).0 {
             eprintln!("firewall: closed unused {}", r);
+            closed.push(r.clone());
         }
+    }
+    if !closed.is_empty() {
+        st.opened.retain(|r| !closed.contains(r));
+        save(&st);
     }
     // the next report shows the new state
     *report_cache().lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -609,6 +634,16 @@ mod tests {
         // no temp file is left behind
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_kanki_ranges_are_closed_by_themselves() {
+        for r in ["51828/udp", "4002/udp", "40533/udp", "24314/udp", "8447/udp", "30001/udp"] {
+            assert!(kanki_range(r), "{}", r);
+        }
+        for r in ["80/tcp", "8770/tcp", "8443/tcp", "22/tcp", "443/tcp", "5000/udp", "x/udp"] {
+            assert!(!kanki_range(r), "{}", r);
+        }
     }
 
     #[test]

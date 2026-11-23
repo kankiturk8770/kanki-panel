@@ -11,7 +11,8 @@ function corePage(page,id,icon,title,desc,tabs){tabs=tabs||CTABS;var k=ctabOf(S.
  $('#pg').innerHTML='<div class="ku">'+kuHead(icon,title,desc)+'<nav class="ptabs ku-tabs" id="'+id+'_tabs">'+kuTabs(page,tabs,k)+'</nav><div id="'+id+'">'+t('Loading…')+'</div></div>';return k}
 function coreTabsMark(page,id,k,tabs){var el=$('#'+id+'_tabs');if(el)el.innerHTML=kuTabs(page,tabs||CTABS,k)}
 // an Iran server whose VPN part serves nobody (a relay): not a server of any core
-function srvRelay(s){return !!(s&&s.node&&!s.node.enabled&&(s.loc=='iran'||String(s.cc||'').toUpperCase()=='IR'))}
+// (3.58.1) a server that serves no user (an Iran relay, or the panel without VPN) is left off every core page
+function srvRelay(s){return !!(s&&s.node&&!s.node.enabled)}
 function noRelays(d){if(d&&d.servers&&window.srvByNode)d.servers=d.servers.filter(function(x){return !srvRelay(srvByNode(x.id))});return d}
 function busyTyping(){return document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)}
 

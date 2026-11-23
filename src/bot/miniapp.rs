@@ -133,7 +133,7 @@ pub const BOT_KEYS: &[&str] = &[
     "trial_offer_hours", "back_pct", "back_hours", "renew_bonus_pct",
     "card_on", "card_number", "card_holder", "wallet_on", "wallet_text", "ton_address", "usdt_address", "usd_rate",
     "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "ton_on", "stars_on", "star_usd", "toncenter_key",
-    "cp_on", "cp_min_gb", "cp_max_gb", "cp_days", "cp_users", "price_rules", "pricing", "game_protocols",
+    "cp_on", "cp_min_gb", "cp_max_gb", "cp_days", "cp_users", "price_rules", "pricing", "game_protocols", "v2ray_protocols",
 ];
 
 /// The panel routes the admin mini app may use: (method, path start, exact or the start of a longer path)

@@ -269,24 +269,28 @@ fn live_peer(uid: i64, node: &str, proto: &str, moved: i64, now: i64) -> bool {
 
 /// A Hysteria2 / KANKI MIX / microtun session the server reports: it counts once it moved real data
 /// (1 KB) and then for as long as the server keeps it. A ping logs in and leaves without moving data.
-fn sessions() -> &'static Mutex<HashSet<(i64, String, String)>> {
-    static S: std::sync::OnceLock<Mutex<HashSet<(i64, String, String)>>> = std::sync::OnceLock::new();
+fn sessions() -> &'static Mutex<HashMap<(i64, String, String), i64>> {
+    static S: std::sync::OnceLock<Mutex<HashMap<(i64, String, String), i64>>> = std::sync::OnceLock::new();
     S.get_or_init(Default::default)
 }
 
+/// 3.58.1: a session counts while it moves data, and `LIVE_FOR` after its last data, like WireGuard. Before, it
+/// counted for as long as the server kept it (KANKI MIX ~30 s, Hysteria2 up to minutes), so a one-device user
+/// who switched to another protocol stayed shut out that long: the old session held the one place.
 fn live_session(uid: i64, node: &str, proto: &str, moved: i64) -> bool {
     let mut s = sessions().lock().unwrap_or_else(|e| e.into_inner());
     let key = (uid, node.to_string(), proto.to_string());
-    if moved >= 1024 {
-        s.insert(key);
+    let t = now();
+    if moved >= 1024 || (moved > 0 && s.contains_key(&key)) {
+        s.insert(key, t);
         return true;
     }
-    s.contains(&key)
+    s.get(&key).is_some_and(|last| t - last < LIVE_FOR)
 }
 
 /// Forget the sessions of `node` that are no longer open there
 fn forget_sessions(node: &str, open: impl Fn(i64, &str) -> bool) {
-    sessions().lock().unwrap_or_else(|e| e.into_inner()).retain(|(u, n, p)| n != node || open(*u, p));
+    sessions().lock().unwrap_or_else(|e| e.into_inner()).retain(|(u, n, p), _| n != node || open(*u, p));
 }
 
 /// How long a WireGuard / AmneziaWG key counts as connected after the last data it moved
@@ -410,12 +414,6 @@ impl Limits {
     /// Someone is at the limit: rounds come quicker, so a place that frees up opens soon
     pub fn busy(&self) -> bool {
         !self.open.is_empty()
-    }
-
-    /// Is this protocol shut for the user on every server now? (KPING: its relay and exit let only
-    /// users in whose places are not all taken elsewhere)
-    pub fn shut_proto(&self, user: i64, proto: &str) -> bool {
-        self.open.get(&user).is_some_and(|s| !s.keys().any(|k| k.1 == proto))
     }
 
     /// Is this server and protocol shut for the user now?
@@ -1065,12 +1063,12 @@ mod live_tests {
         l.round(&[(1, "kp:x1".to_string(), "kping".to_string(), 1)], &HashMap::new(), &nodes, &max, 1000);
         l.round(&[(1, "kp:x1".to_string(), "kping".to_string(), 1), (1, "de".to_string(), "wg".to_string(), 1)], &HashMap::new(), &nodes, &max, 1030);
         assert!(l.is_shut(1, "de", "wg"));
-        assert!(!l.shut_proto(1, "kping"));
+        assert!(!l.is_shut(1, "kp:x1", "kping"));
         // the other way round: WireGuard first, KPING is not let in
         let mut l = Limits::default();
         l.round(&[(1, "de".to_string(), "wg".to_string(), 1)], &HashMap::new(), &nodes, &max, 1000);
         l.round(&[(1, "de".to_string(), "wg".to_string(), 1), (1, "kp:x1".to_string(), "kping".to_string(), 1)], &HashMap::new(), &nodes, &max, 1030);
-        assert!(l.shut_proto(1, "kping"));
+        assert!(l.is_shut(1, "kp:x1", "kping"));
         assert!(!l.is_shut(1, "de", "wg"));
     }
 

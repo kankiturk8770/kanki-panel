@@ -733,7 +733,8 @@ impl Server {
         let mut out = vec![];
         for p in &self.sh.peers.read().unwrap_or_else(|e| e.into_inner()).list {
             for d in p.devices.lock().unwrap_or_else(|e| e.into_inner()).iter() {
-                if d.confirmed.load(Ordering::Relaxed) && t - d.last_rx.load(Ordering::Relaxed) < 60 {
+                // 30 s like every other core (3.58.1; was a minute)
+                if d.confirmed.load(Ordering::Relaxed) && t - d.last_rx.load(Ordering::Relaxed) < 30 {
                     out.push(p.name.clone());
                 }
             }

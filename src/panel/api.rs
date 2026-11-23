@@ -438,12 +438,19 @@ fn checked_lists(app: &App, protos: &str, nodes: &str) -> Result<(String, String
     if let Some(bad) = ps.iter().find(|p| !USER_PROTOS.contains(&p.as_str())) {
         return Err(format!("unknown protocol: {}", bad));
     }
-    let ns = clean(nodes);
+    let mut ns = clean(nodes);
     if !ns.is_empty() {
-        let known: Vec<String> = app.db.nodes().into_iter().map(|n| n.id).collect();
-        if let Some(bad) = ns.iter().find(|n| !known.contains(n)) {
+        let all = app.db.nodes();
+        if let Some(bad) = ns.iter().find(|n| !all.iter().any(|x| &x.id == *n)) {
             return Err(format!("unknown server: {}", bad));
         }
+        // (3.58.1) a server whose VPN serves nobody (an Iran relay, the panel without VPN) is never given to a
+        // user: it is left out of the list; a list of only such servers is refused (empty would mean "all")
+        let serving = |id: &String| all.iter().any(|x| &x.id == id && x.enabled);
+        if !ns.iter().any(serving) {
+            return Err("these servers serve no user (VPN off): choose a VPN server, or leave the list empty for all".into());
+        }
+        ns.retain(serving);
     }
     Ok((ps.join(","), ns.join(",")))
 }
@@ -951,12 +958,23 @@ async fn proto_all(State(app): St, h: HeaderMap, Path((proto, action)): Path<(St
     };
     let mut changed = 0;
     for u in app.db.users() {
+        if add && !assign_fits(&app, &u, &proto) {
+            continue;
+        }
         let Some(list) = toggle_proto(&u.protocols, &proto, add) else { continue };
         let _ = app.db.exec("UPDATE users SET protocols=?1 WHERE id=?2", &[&list, &u.id]);
         changed += 1;
     }
     spawn_sync(&app);
     Json(json!({ "ok": true, "changed": changed })).into_response()
+}
+
+/// «Give everyone» a protocol: an account bought as V2Ray or gaming takes only the protocols of its own
+/// service (V2Ray: `v2ray_protocols`, gaming: `game_protocols`); else a V2Ray account turned into VIP and the
+/// bot handed it WireGuard and the app's code (3.58.1). VIP accounts take anything.
+pub(crate) fn assign_fits(app: &App, u: &User, proto: &str) -> bool {
+    let svc = u.service();
+    svc == "vip" || app.db.service_protocols(svc).split(',').any(|p| p.trim() == proto)
 }
 
 /// The protocol list with `p` added or removed; None when it is already that way.
@@ -1046,6 +1064,11 @@ mod token_rights_tests {
         assert_eq!(call(json!({"username": "carol1"})).await, StatusCode::OK);
         assert_eq!(app.db.users().iter().find(|u| u.username == "carol1").unwrap().protocols, "wg,hy2");
         assert!(app.db.users().iter().all(|u| !u.username.starts_with("alice") || u.username == "alice4"));
+        // a server whose VPN serves nobody is left out of a user's list; a list of only such servers is refused
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,endpoint_mode,enabled) VALUES('r1','IR','https://b','','t','panel',0)", &[]).unwrap();
+        assert_eq!(call(json!({"username": "dave1", "nodes": ["r1", "n1"]})).await, StatusCode::OK);
+        assert_eq!(app.db.users().iter().find(|u| u.username == "dave1").unwrap().nodes, "n1");
+        assert_eq!(call(json!({"username": "dave2", "nodes": ["r1"]})).await, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
@@ -1289,6 +1312,8 @@ pub const SETTING_KEYS: &[&str] = &[
     "mtu_auto", "mtu_budget",
     // 3.49: the shop's one price list (shop.rs) and what a gaming plan gives
     "pricing", "game_protocols",
+    // 3.58.1: what a V2Ray account gets, and plain WireGuard through the Iran tunnels on or off
+    "v2ray_protocols", "wg_tunnel_on",
     // 3.56: the short trial, the offers after it, the win-back and the on-time renewal gift (bot.rs)
     "trial_mb", "trial_hours", "trial_offer_hours", "back_pct", "back_hours", "renew_bonus_pct",
 ];
@@ -1318,7 +1343,67 @@ async fn settings_get(State(app): St, h: HeaderMap) -> Response {
     // update source: /etc/kanki/repo, unless KANKI_REPO is set in the environment
     m.insert("update_repo".into(), json!(crate::admin::repo()));
     m.insert("repo_env".into(), json!(std::env::var("KANKI_REPO").map(|s| !s.is_empty()).unwrap_or(false)));
+    m.insert("endpoint_stale".into(), json!(endpoint_stale(&app).await));
     Json(Value::Object(m)).into_response()
+}
+
+/// (3.58.1) The default address (`endpoint`) points to no server of this panel: it resolves, but none of its
+/// IPs is the IP of a VPN server, a tunnel server or the panel itself (an old server that is gone).
+/// Unknown (no endpoint, does not resolve) = false: only a sure mismatch is shown.
+async fn endpoint_stale(app: &App) -> bool {
+    let ep = app.db.get("endpoint").trim().to_string();
+    if ep.is_empty() {
+        return false;
+    }
+    let mut hosts: Vec<String> = Vec::new();
+    for n in app.db.nodes() {
+        for h in [n.address.clone(), n.endpoint.clone()] {
+            let h = h.trim().trim_start_matches("https://").trim_start_matches("http://").split(['/', ':']).next().unwrap_or("").to_string();
+            if !h.is_empty() {
+                hosts.push(h);
+            }
+        }
+    }
+    for t in crate::tunnel::panel::servers(app) {
+        hosts.push(crate::tunnel::panel::host_of(app, &t.id));
+        if let Some(ip) = crate::tunnel::panel::seen_ip(&t.id) {
+            hosts.push(ip);
+        }
+    }
+    hosts.push(crate::tunnel::panel::host_of(app, "local"));
+    for k in ["DOMAIN", "ENDPOINT"] {
+        if let Some(h) = app.env.get(k) {
+            hosts.push(h.clone());
+        }
+    }
+    async fn ips(h: &str) -> Vec<std::net::IpAddr> {
+        let h = h.trim();
+        if h.is_empty() || h.len() > 253 {
+            return vec![];
+        }
+        if let Ok(ip) = h.parse::<std::net::IpAddr>() {
+            return vec![ip];
+        }
+        match tokio::time::timeout(std::time::Duration::from_secs(3), tokio::net::lookup_host((h, 0))).await {
+            Ok(Ok(a)) => a.map(|x| x.ip()).collect(),
+            _ => vec![],
+        }
+    }
+    let want = ips(&ep).await;
+    if want.is_empty() {
+        return false;
+    }
+    let mut known = std::collections::HashSet::new();
+    hosts.sort();
+    hosts.dedup();
+    for h in hosts.iter().filter(|h| h.as_str() != ep) {
+        known.extend(ips(h).await);
+    }
+    // the panel's own public IP, as the agents see it
+    if let Some(ip) = app.db.get("tun_local_addr").parse::<std::net::IpAddr>().ok() {
+        known.insert(ip);
+    }
+    !want.iter().any(|ip| known.contains(ip))
 }
 
 async fn settings_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
@@ -1358,6 +1443,11 @@ async fn settings_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
                 let s = match k.as_str() {
                     "pricing" => pricing.clone().unwrap_or_default(),
                     "game_protocols" => s.split(',').map(|x| x.trim()).filter(|x| crate::db::GAME_PROTOS.contains(x)).collect::<Vec<_>>().join(","),
+                    "v2ray_protocols" => {
+                        let v: Vec<&str> = s.split(',').map(|x| x.trim()).filter(|x| matches!(*x, "xray" | "hy2")).collect();
+                        if v.contains(&"xray") { v.join(",") } else { "xray".into() }
+                    }
+                    "wg_tunnel_on" => if s.trim() == "0" { "0".into() } else { "1".into() },
                     _ => s,
                 };
                 app.db.set(k, s.trim());
@@ -1679,7 +1769,10 @@ pub fn twin_protos(app: &App, u: &User, n: &Node) -> Vec<&'static str> {
     let tun = |c: &str| crate::twin::of_node_core(app, n, c).is_some();
     let mut v = vec![];
     let on = |c: &str| !crate::cores::is_off(app, &n.id, c);
-    if u.has_proto("wg") && has("wg_pub") && on("wg") && tun("wg") { v.push("wireguard"); }
+    // plain WireGuard through the Iran tunnel can be switched off for everyone (3.58.1): from abroad its handshake
+    // was not answered while AmneziaWG on the same tunnel was (Iran's filtering of plain WireGuard is the likely cause)
+    let wg_tunnel = app.db.get("wg_tunnel_on") != "0";
+    if u.has_proto("wg") && has("wg_pub") && on("wg") && wg_tunnel && tun("wg") { v.push("wireguard"); }
     if u.has_proto("awg") && has("awg_pub") && on("awg") && tun("awg") { v.push("amneziawg"); }
     if u.has_proto("hy2") && has("hy2_port") && on("hy2") && tun("hy2") { v.push("hysteria2"); }
     if kmix { v.push("kankimix"); }
@@ -2032,7 +2125,8 @@ pub(crate) fn other_app_links(app: &App, u: &User) -> Vec<String> {
 /// Raw subscription for v2rayNG / Hiddify (Hysteria2 + WireGuard URIs, base64)
 async fn sub_raw(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
     let u = match other_app(&app, &code, &h) { Ok(u) => u, Err(r) => return r };
-    let lines = other_app_links(&app, &u);
+    // a V2Ray account: the same links as /v2 (Xray and Hysteria2), never a WireGuard link (3.58.1)
+    let lines = if u.service() == "v2ray" { v2_links(&app, &u) } else { other_app_links(&app, &u) };
     let used = u.used_bytes.max(0);
     let total = (u.limit_gb * 1_073_741_824.0) as i64;
     let info = format!("upload=0; download={}; total={}; expire={}", used, total, u.expires_at);

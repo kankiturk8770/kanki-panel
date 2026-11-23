@@ -42,7 +42,7 @@ var PD={dir:null,ov:null};
 function pvOff(p,s){var n=s&&s.node,o=(SV.d&&SV.d.core_off)||{};return !!(n&&(o[n.id]||[]).indexOf(p)>=0)}
 window.pvCore=function(p,key,on){api('POST','/api/servers/'+encodeURIComponent(key)+'/core',{core:p,on:on}).then(function(){toast(t('Saved'));return srvLoad(true)}).then(function(){drawPv(p,true)}).catch(fail)};
 function pvState(p,s){var n=s.node,i=(n&&n.info)||{},sv=(i.services||[]).filter(function(x){return x.key==PV[p].svc})[0],port=(s.ports||{})[p]||i[p+'_port'];
- if(!port&&!sv)return ['n',t('not installed'),port];if(pvOff(p,s))return ['n',t('Off on this server'),port];if(!n.enabled)return ['n',t(s.local?'off':'relay'),port];
+ if(pvOff(p,s))return ['n',t('Off on this server'),port];if(!port&&!sv)return ['n',t('not installed'),port];if(!n.enabled)return ['n',t(s.local?'off':'relay'),port];
  if(sv&&!sv.active)return ['r',t('stopped'),port];return ['g',t('running'),port]}
 var PVT={};
 function protoPage(p){var g='pv_'+p;ACC.open[g]='';ACC.open['tn_'+p]='';

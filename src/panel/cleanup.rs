@@ -29,13 +29,9 @@ pub fn sweep(app: &App) -> Vec<String> {
         crate::microtun::forget_node(app, &id);
         gone.push(format!("microtun {}", id));
     }
-    // KPING routes name tunnel servers (agents), not VPN nodes: a route goes only when its Iran server or
-    // its exit is really gone (it used to be checked against the VPN nodes, so every sweep took routes
-    // whose exit is a server with only the agent)
-    let live = |id: &String| agents.contains(id) || nodes.contains(id);
-    for r in crate::kping::settings(app).routes.iter().filter(|r| !live(&r.exit) || !live(&r.iran)) {
-        crate::kping::forget_route(app, &r.id);
-        gone.push(format!("KPING {}", r.id));
+    for id in crate::kping::settings(app).nodes.into_keys().filter(|id| !nodes.contains(id)) {
+        crate::kping::forget_node(app, &id);
+        gone.push(format!("KPING {}", id));
     }
     for id in crate::cores::load(app).into_keys().filter(|id| !nodes.contains(id)) {
         crate::cores::forget(app, &id);
@@ -276,13 +272,11 @@ mod tests {
         crate::microtun::set_node_port(&app, "node-dead", 4201);
         crate::cores::all_off(&app, "node-dead");
         app.db.set("exit_geo", r#"{"node-dead":{"cc":"DE"},"live":{"cc":"TR"},"srv:gone":{"cc":"IR"},"local":{"cc":"FI"}}"#);
-        // KPING routes name agent servers: one on two live servers (the exit has only the agent) stays,
-        // one whose exit is gone goes
-        app.db.set("tun_servers", r#"[{"id":"ir1","name":"Iran","token":"a"},{"id":"xa","name":"Agent only","token":"b"}]"#);
-        app.db.set("kping_cfg", r#"{"routes":[{"id":"keep","exit":"xa","iran":"ir1"},{"id":"dead","exit":"gone-srv","iran":"ir1"}]}"#);
+        // KPING's own setting of the gone server goes too
+        app.db.set("kping_cfg", r#"{"nodes":{"node-dead":{"port":24310},"live":{"port":24311}}}"#);
         let gone = super::sweep(&app);
         let kp = crate::kping::settings(&app);
-        assert_eq!(kp.routes.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), vec!["keep"]);
+        assert!(!kp.nodes.contains_key("node-dead") && kp.nodes.contains_key("live"));
         assert!(!gone.is_empty());
         for k in ["kmix_nodes", "mtun_cfg", "core_off", "exit_geo"] {
             assert!(!app.db.get(k).contains("node-dead"), "{} still names the gone node", k);

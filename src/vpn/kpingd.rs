@@ -1130,7 +1130,9 @@ impl Exit {
         for u in users.values() {
             by.insert(u.uid.to_string(), json!([u.rx + u.tx, u.rx, u.tx]));
             names.insert(u.uid.to_string(), json!(u.name));
-            if u.last.is_some_and(|t| t.elapsed() < Duration::from_secs(60)) {
+            // online = sent something in the last 30 s, the same as every other core (3.58.1; was 60 s, so a phone that
+            // switched to another protocol kept its one place for a minute)
+            if u.last.is_some_and(|t| t.elapsed() < Duration::from_secs(30)) {
                 on.push(u.uid);
             }
         }

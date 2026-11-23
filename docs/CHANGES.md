@@ -1,3 +1,15 @@
+# v3.58.1 — the server audit, fixed
+- **Old KPING routes gone** (`kping::drop_routes`, once): they bound tunnels to 127.0.0.1 and held ports. KPING is only the core of each server.
+- **Services stay what was sold:** «add to all users» never puts a protocol of another service on an account (`assign_fits`); V2Ray accounts that became VIP go back once (`fix_services_once`); `/raw` of a V2Ray account is its V2Ray links. V2Ray = Xray + Hysteria2 (switch in the mini app), gaming and VIP have microtun.
+- **Second config through the Iran tunnel per core:** the Iran address comes from the tunnel that really carries that core's port (`twin::auto_host`, `port_entry_at`); plain WireGuard through the tunnels has its own switch (Settings › VPN, on).
+- **Connection limit:** a device that stopped is free again after 30 s on every core (WG/AWG/Hy2 sessions, KMIX, microtun, KPING), so switching protocol works.
+- **Ports:** a clash is only the same port twice on the same server; KPING port checked against the server's own ports; replace-machine keeps the ports.
+- **Firewall:** ports Kanki opened and no longer uses close by themselves; the old `kanki-relay` service is removed from Iran servers.
+- **Logs of every server** on the Logs page (warnings of the last 24 h, sent by the agent once a minute).
+- **Panel without VPN** is left off the core pages, the dashboard services and users' server lists (a list of only such servers is refused; old lists cleaned once). A core switched off on a server shows «Off», not «not installed».
+- **Tunnel names** one shape: `IR2-ENGLAND-KMIX`. **Settings** warn when the default address points to no server of the panel. **KPING settings:** MTU disabled when automatic, internal exit port shown, port help, «No tunnel» with its reason.
+- **journald** at most 200 MB on every server (`/etc/systemd/journald.conf.d/90-kanki.conf`).
+
 # v3.58.0 — KPING is a core of every server
 KPING runs on each VPN server like KANKI MIX and microtun: the server's node agent runs the relay on a public UDP port
 (default 24300, each server may have its own; opened in the firewall) and the exit behind it on 127.0.0.1 (`kping0`, NAT

@@ -459,7 +459,7 @@ async fn all_users(axum::extract::State(app): St, h: axum::http::HeaderMap, axum
     let mut changed = 0;
     for u in app.db.users() {
         let mut list: Vec<String> = u.protocols.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
-        if on == list.iter().any(|x| x == PROTO) {
+        if on == list.iter().any(|x| x == PROTO) || (on && !crate::api::assign_fits(&app, &u, PROTO)) {
             continue;
         }
         if on { list.push(PROTO.into()) } else { list.retain(|x| x != PROTO) }

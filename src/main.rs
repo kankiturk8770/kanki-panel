@@ -366,9 +366,8 @@ async fn main() {
 
     // the panel's own server runs KPING in its node part too (synced like the others), back after a restart
     let _ = tokio::task::spawn_blocking(kpingd::node_from_disk).await;
-    kping::drop_vip(&app);
     tunnel::panel::drop_vip(&app);
-    kping::light_tunnels(&app);
+    kping::drop_routes(&app);
     tokio::spawn(sync::run(app.clone()));
     // deleted nodes that were off at the time are asked again to remove themselves
     tokio::spawn(api::leftover_loop(app.clone()));

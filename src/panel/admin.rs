@@ -566,14 +566,27 @@ async fn logs(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
             None => return err(StatusCode::BAD_REQUEST, "unknown source"),
         }
     };
+    // another server: the warnings and errors its agent reported (3.58.1)
+    if let Some(sid) = q.get("server").filter(|x| !x.is_empty() && x.as_str() != "local") {
+        return Json(json!({ "src": src, "server": sid, "lines": crate::tunnel::panel::agent_log_lines(sid) })).into_response();
+    }
+    let units: Vec<String> = units.iter().map(|u| u.to_string()).collect();
+    let lines = tokio::task::spawn_blocking(move || journal(&units, n, false)).await.unwrap_or_default();
+    Json(json!({ "src": src, "lines": lines })).into_response()
+}
+
+/// The last `n` lines of these units' journal as [{ts, p, u, m}] (`warnings`: warnings and errors only)
+pub fn journal(units: &[String], n: usize, warnings: bool) -> Vec<Value> {
     let mut args: Vec<String> = vec!["--no-pager".into(), "-o".into(), "json".into(), "-n".into(), n.to_string()];
-    for u in &units {
+    if warnings {
+        args.extend(["-p".to_string(), "warning".to_string(), "--since".to_string(), "-24h".to_string()]);
+    }
+    for u in units {
         args.push("-u".into());
         args.push(u.to_string());
     }
-    let out = tokio::task::spawn_blocking(move || Command::new("journalctl").args(&args).output()).await;
-    let text = match out {
-        Ok(Ok(o)) => String::from_utf8_lossy(&o.stdout).to_string(),
+    let text = match Command::new("journalctl").args(&args).output() {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).to_string(),
         _ => String::new(),
     };
     let mut lines: Vec<Value> = Vec::new();
@@ -590,9 +603,9 @@ async fn logs(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
         let prio: i64 = v["PRIORITY"].as_str().and_then(|x| x.parse().ok()).unwrap_or(6);
         let ts: i64 = v["__REALTIME_TIMESTAMP"].as_str().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0) / 1_000_000;
         let unit = v["_SYSTEMD_UNIT"].as_str().or(v["SYSLOG_IDENTIFIER"].as_str()).unwrap_or("").to_string();
-        lines.push(json!({ "ts": ts, "p": prio, "u": unit, "m": msg }));
+        lines.push(json!({ "ts": ts, "p": prio, "u": unit, "m": msg.chars().take(400).collect::<String>() }));
     }
-    Json(json!({ "src": src, "lines": lines })).into_response()
+    lines
 }
 
 // ---------------------------------------------------------------- daily report (kanki-watch)

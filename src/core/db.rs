@@ -310,7 +310,72 @@ impl Db {
         }
         // keep logs bounded
         trim_logs(&c);
-        Db(Mutex::new(c))
+        let db = Db(Mutex::new(c));
+        db.fix_services_once();
+        db
+    }
+
+    /// 3.58.1, once: the defaults of the three services (VIP and gaming with microtun, V2Ray with Hysteria2), and
+    /// the V2Ray accounts that «give everyone» buttons turned into VIP (KANKI MIX, WireGuard, … added to them) back
+    /// to V2Ray: an account whose last delivered order was a V2Ray plan keeps only Xray and Hysteria2 (and KPING)
+    fn fix_services_once(&self) {
+        if self.get("mig_3581_services") == "1" {
+            return;
+        }
+        let add = |k: &str, p: &str| {
+            let v = self.get(k);
+            if !v.split(',').any(|x| x.trim() == p) {
+                self.set(k, &format!("{},{}", v.trim_end_matches(','), p).trim_start_matches(','));
+            }
+        };
+        add("default_protocols", "mtun");
+        add("game_protocols", "mtun");
+        if self.get("v2ray_protocols").trim() == "xray" {
+            self.set("v2ray_protocols", "xray,hy2");
+        }
+        let v2: String = self.service_protocols("v2ray");
+        let users = self.users();
+        let last_plan: Vec<(i64, String)> = self.with(|c| {
+            let Ok(mut st) = c.prepare(
+                "SELECT o.id, o.target, COALESCE(p.service,'vip') FROM orders o JOIN plans p ON p.id=o.plan_id WHERE o.status='done' ORDER BY o.id",
+            ) else { return vec![] };
+            st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, String>(2)?)))
+                .map(|it| it.flatten().collect::<Vec<_>>()).unwrap_or_default()
+                .into_iter()
+                .filter_map(|(oid, target, svc)| {
+                    // a renewal names its account; a new account carries «order #<id>» in its note
+                    let uid = if target > 0 { target } else { users.iter().find(|u| u.notes == format!("order #{}", oid))?.id };
+                    Some((uid, svc))
+                })
+                .collect()
+        });
+        let mut last: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+        for (uid, svc) in last_plan {
+            last.insert(uid, svc);
+        }
+        for u in &users {
+            if last.get(&u.id).map(|s| s.as_str()) != Some("v2ray") || u.service() == "v2ray" {
+                continue;
+            }
+            let mut list: Vec<String> = v2.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
+            if u.has_proto("kping") {
+                list.push("kping".into());
+            }
+            let _ = self.exec("UPDATE users SET protocols=?1 WHERE id=?2", &[&list.join(","), &u.id]);
+        }
+        // a user's own server list without the servers that serve nobody (VPN off); none left = all servers
+        let serving: Vec<String> = self.nodes().into_iter().filter(|n| n.enabled).map(|n| n.id).collect();
+        for u in &users {
+            if u.nodes.trim().is_empty() {
+                continue;
+            }
+            let kept: Vec<&str> = u.nodes.split(',').map(|x| x.trim()).filter(|x| serving.iter().any(|s| s == x)).collect();
+            let now = kept.join(",");
+            if now != u.nodes {
+                let _ = self.exec("UPDATE users SET nodes=?1 WHERE id=?2", &[&now, &u.id]);
+            }
+        }
+        self.set("mig_3581_services", "1");
     }
 
     /// Keeps the audit and login logs bounded while the panel runs: called after each insert, it trims
@@ -335,7 +400,7 @@ impl Db {
         if service == "game" {
             let v = self.get("game_protocols");
             let ok: Vec<&str> = v.split(',').map(|x| x.trim()).filter(|x| GAME_PROTOS.contains(x)).collect();
-            return if ok.iter().any(|p| matches!(*p, "wg" | "awg")) { ok.join(",") } else { "wg,awg,kmix".into() };
+            return if ok.iter().any(|p| matches!(*p, "wg" | "awg")) { ok.join(",") } else { "wg,awg,kmix,mtun".into() };
         }
         if service == "v2ray" {
             let v = self.get("v2ray_protocols");
@@ -680,11 +745,12 @@ pub fn default_setting(k: &str) -> &'static str {
         "mtu" => "1380",
         "mtu_auto" => "1",
         "mtu_budget" => "1380",
-        "default_protocols" => "wg,awg,hy2,kmix",
-        // what a 'v2ray' plan gives (the v2ray clients read only Xray, and Hysteria2 when added here)
-        "v2ray_protocols" => "xray",
-        // what a 'game' plan gives: WireGuard and AmneziaWG (and the Kanki app's KANKI MIX), no v2ray link
-        "game_protocols" => "wg,awg,kmix",
+        "default_protocols" => "wg,awg,hy2,kmix,mtun",
+        // what a 'v2ray' plan gives: the links the v2ray clients read (Xray and Hysteria2)
+        "v2ray_protocols" => "xray,hy2",
+        // what a 'game' plan gives: WireGuard and AmneziaWG (and the Kanki app's KANKI MIX and microtun), no v2ray link
+        "game_protocols" => "wg,awg,kmix,mtun",
+        "wg_tunnel_on" => "1",
         "kmix_on" => "1",
         "kmix_port" => "4000",
         "kmix_parity" => "3",
@@ -762,7 +828,7 @@ mod tests {
         let s: String = db.with(|c| c.query_row("SELECT service FROM plans WHERE name='old'", [], |r| r.get(0)).unwrap());
         assert_eq!(s, "vip");
         assert_eq!(db.service_protocols("vip"), db.get("default_protocols"));
-        assert_eq!(db.service_protocols("v2ray"), "xray");
+        assert_eq!(db.service_protocols("v2ray"), "xray,hy2");
         db.set("v2ray_protocols", "xray,hy2,wg");
         assert_eq!(db.service_protocols("v2ray"), "xray,hy2");
         db.set("v2ray_protocols", "wg");
@@ -776,11 +842,11 @@ mod tests {
         let u = db.create_user("hy", 10.0, 30, 1, "hy2", "", "", 0).unwrap();
         assert_eq!(u.service(), "vip");
         // the gaming service: WireGuard / AmneziaWG (and the app's KANKI MIX), never a v2ray link
-        assert_eq!(db.service_protocols("game"), "wg,awg,kmix");
+        assert_eq!(db.service_protocols("game"), "wg,awg,kmix,mtun");
         db.set("game_protocols", "awg,xray,hy2");
         assert_eq!(db.service_protocols("game"), "awg");
         db.set("game_protocols", "kmix");
-        assert_eq!(db.service_protocols("game"), "wg,awg,kmix");
+        assert_eq!(db.service_protocols("game"), "wg,awg,kmix,mtun");
         let u = db.create_user("gm", 10.0, 30, 1, "wg,awg,kmix", "", "", 0).unwrap();
         assert_eq!(u.service(), "game");
         let u = db.create_user("gm2", 10.0, 30, 1, "awg,kping", "", "", 0).unwrap();

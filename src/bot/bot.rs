@@ -4989,7 +4989,7 @@ mod flow_tests {
         assert!(edits.iter().any(|e| e["message_id"] == 7) && edits.iter().any(|e| e["message_id"] == 5));
         let acc = db.users_of_tg(buyer);
         assert_eq!(acc.len(), 1);
-        assert_eq!((acc[0].protocols.as_str(), acc[0].service()), ("xray", "v2ray"));
+        assert_eq!((acc[0].protocols.as_str(), acc[0].service()), ("xray,hy2", "v2ray"));
         let t = last(&log, buyer);
         assert!(t.contains("خرید شما با موفقیت انجام شد") && t.contains("/v2") && t.contains("📦 پلن: <b>Std</b>"), "{}", t);
         // the short delivery: only the apps, the tutorial (when there is one) and support; no config or backup buttons
@@ -5304,7 +5304,7 @@ mod flow_tests {
         tap(&bot, from(buyer, "Sara", "sara"), "pcat:b:0:v").await;
         assert!(buttons(&log, buyer).iter().any(|b| b.0 == "\u{200F}🔹 20 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 52,000 تومان"));
         let u = bot.create_account_svc(buyer, 20.0, 30, 1, "", 0, "game").unwrap();
-        assert_eq!((u.protocols.as_str(), u.service()), ("wg,awg,kmix", "game"));
+        assert_eq!((u.protocols.as_str(), u.service()), ("wg,awg,kmix,mtun", "game"));
         assert!(bot.account_text(&u).contains("🎮 گیمینگ") && !bot.account_text(&u).contains("/v2"));
     }
 

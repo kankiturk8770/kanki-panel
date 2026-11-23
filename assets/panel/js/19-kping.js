@@ -27,7 +27,7 @@ function kpState(x){if(!x.on)return ['',t('Off')];
 function kpCC(nid){var s=window.srvFind?srvFind(nid):null;return s&&s.cc}
 function kpItem(x,i){var st=kpState(x);
  return kuItem({dot:st[0],flag:flagOf(kpCC(x.id)),name:esc(x.name||x.id),off:!x.on,
-  tags:kuTag(st[1],st[0])+(x.online_users?kuTag(N(x.online_users)+' '+t('online'),'g'):'')+(x.tunnel?kuTag(t('Tunnel')):''),
+  tags:kuTag(st[1],st[0])+(x.online_users?kuTag(N(x.online_users)+' '+t('online'),'g'):'')+(x.tunnel?kuTag(t('Tunnel')):x.on?'<span title="'+esc(t(x.tunnel_why=='no_tunnel'?'This server has no tunnel (Servers › Tunnel)':'No tunnel of this server carries its KPING port'))+'">'+kuTag(t('No tunnel'))+'</span>':''),
   addr:esc(x.direct)+(x.tunnel?' · '+esc(x.tunnel):''),
   act:'<span class="sw" title="'+esc(t('KPING on this server'))+'"><input type="checkbox" aria-label="'+esc(t('KPING on this server'))+'"'+(x.on?' checked':'')+' onchange="kpNode('+i+',{on:this.checked})"><span></span></span>',
   menu:'kpMenu('+i+')',
@@ -51,17 +51,18 @@ function kpUsers(d){var on=d.user_list.filter(function(u){return u.has}),off=d.u
    act:'<button class="b2 sm" onclick="kpUser('+u.id+',false)">'+t('Remove')+'</button>'})}).join(''):'<p class="muted ku-empty">'+t('No user yet')+'</p>'))}
 function kpSettings(d){var s=d.settings;
  return kuGroup(t('Settings'),null,'','<div class="ku-form">'+
-  '<label class="f">'+t('Port on the servers')+' · UDP</label><input id="kp_pub" class="ltr" inputmode="numeric" value="'+esc(String(s.public))+'"><small class="muted">'+t('The port the app dials on each server (a server may have its own, Servers › Port). It is opened in the firewall.')+'</small>'+
+  '<label class="f">'+t('Port on the servers')+' · UDP</label><input id="kp_pub" class="ltr" inputmode="numeric" value="'+esc(String(s.public))+'"><small class="muted">'+t('The default port the app dials on every server. A server can have its own: Servers tab › ⋯ › Port. It is opened in the firewall.')+'</small>'+
   '<label class="f">'+t('Second copy to the phone on one path (ms)')+'</label><input id="kp_bd" class="ltr" inputmode="numeric" value="'+esc(String(s.dup_ms))+'"><small class="muted">'+t('With Wi-Fi and mobile data both on, each path gets one copy. 0 = no second copy.')+'</small>'+
   '<label class="f">'+t('Parity: one repair packet per')+'</label><input id="kp_fec" class="ltr" inputmode="numeric" value="'+esc(String(s.fec))+'"><small class="muted">'+t('Packets (2-8). It rebuilds one lost packet of the group. 0 = off.')+'</small>'+
-  '<label class="f">MTU</label><input id="kp_mtu" class="ltr" inputmode="numeric" value="'+esc(String(s.mtu))+'"><small class="muted">'+t('Used when automatic MTU is off. Now')+' <span class="ltr">'+N(d.mtu_now)+'</span></small></div>'+
+  '<label class="f">MTU</label><input id="kp_mtu" class="ltr" inputmode="numeric" value="'+esc(String(s.mtu))+'"'+(d.mtu_auto?' disabled':'')+'><small class="muted">'+(d.mtu_auto?t('Automatic MTU is on (Settings › VPN): this field is not used. Now'):t('Used when automatic MTU is off. Now'))+' <span class="ltr">'+N(d.mtu_now)+'</span></small>'+
+  '<label class="f">'+t('Exit port on each server')+'</label><input class="ltr" value="'+esc(String(s.port))+' · 127.0.0.1" disabled><small class="muted">'+t('Internal: only the server itself reaches it, never opened in the firewall.')+'</small></div>'+
   '<div class="ku-save"><button class="btn" id="kp_save">'+t('Save')+'</button></div>')}
 
 // ---------------------------------------------------------------- actions
 function kpPut(b){return api('PUT','/api/kping',b).then(function(){toast(t('Saved'));return kpLoad()}).catch(fail)}
 function kpSave(){var v={};var n=function(id){return unN($(id).value).trim()};
  if(!/^\d+$/.test(n('#kp_pub'))||+n('#kp_pub')<1||+n('#kp_pub')>65535)return toast(t('the port must be 1-65535'),1);
- v.public=+n('#kp_pub');v.dup_ms=+n('#kp_bd')||0;v.fec=+n('#kp_fec')||0;v.mtu=+n('#kp_mtu')||1332;kpPut(v)}
+ v.public=+n('#kp_pub');v.dup_ms=+n('#kp_bd')||0;v.fec=+n('#kp_fec')||0;if(!$('#kp_mtu').disabled)v.mtu=+n('#kp_mtu')||1332;kpPut(v)}
 function kpNode(i,b){var x=KP.d&&KP.d.servers[i];if(!x)return;api('POST','/api/kping/servers/'+encodeURIComponent(x.id),b).then(function(){toast(t('Saved'));kpLoad()}).catch(fail)}
 function kpPort(i){var x=KP.d&&KP.d.servers[i];if(!x)return;
  modal(mhead(t('Port'),esc(x.name||x.id))+'<div class="ku-form"><label class="f">UDP</label><input id="kp_np" class="ltr" inputmode="numeric" value="'+esc(String(x.port))+'"></div><div class="ku-save"><button class="btn" id="kp_npg">'+t('Save')+'</button></div>');
