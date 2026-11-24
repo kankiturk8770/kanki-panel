@@ -3073,11 +3073,7 @@ impl Bot {
     fn set_service(&self, id: i64, service: &str) {
         let Some(u) = self.db().user(id) else { return };
         if u.service() != service {
-            // KPING is ticked by the admin for a few testers only: a purchase keeps it
-            let mut ps = self.db().service_protocols(service);
-            if u.has_proto(crate::kping::PROTO) {
-                ps = if ps.is_empty() { crate::kping::PROTO.to_string() } else { format!("{},{}", ps, crate::kping::PROTO) };
-            }
+            let ps = self.db().service_protocols(service);
             let _ = self.db().exec("UPDATE users SET protocols=?1 WHERE id=?2", &[&ps, &id]);
         }
     }
@@ -5307,7 +5303,7 @@ mod flow_tests {
         tap(&bot, from(buyer, "Sara", "sara"), "pcat:b:0:v").await;
         assert!(buttons(&log, buyer).iter().any(|b| b.0 == "\u{200F}🔹 20 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 52,000 تومان"));
         let u = bot.create_account_svc(buyer, 20.0, 30, 1, "", 0, "game").unwrap();
-        assert_eq!((u.protocols.as_str(), u.service()), ("wg,awg,kmix,mtun", "game"));
+        assert_eq!((u.protocols.as_str(), u.service()), ("wg,awg,kmix", "game"));
         assert!(bot.account_text(&u).contains("🎮 گیمینگ") && !bot.account_text(&u).contains("/v2"));
     }
 

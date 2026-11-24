@@ -29,7 +29,7 @@ struct State {
     opened: BTreeSet<String>,
 }
 
-/// The port ranges the panel gives Kanki's cores (WireGuard/AmneziaWG, Hysteria2, KANKI MIX, microtun, KPING):
+/// The port ranges the panel gives Kanki's cores (WireGuard/AmneziaWG, Hysteria2, KANKI MIX):
 /// an unused open rule in them was left by Kanki (an older version, a moved port), not opened by hand
 fn kanki_range(r: &str) -> bool {
     let Some(p) = r.split('/').next().and_then(|p| p.parse::<u16>().ok()) else { return false };
@@ -674,7 +674,7 @@ fn guard_live() {
     let _ = run("ufw --force disable; ufw --force reset");
     let _ = std::fs::remove_file(STATE);
     let _ = std::fs::remove_file(backup());
-    // a VPN server forwards; the VPN's own forwarding and NAT (like wg-quick or microtun) must survive ufw
+    // a VPN server forwards; the VPN's own forwarding and NAT (like wg-quick) must survive ufw
     let _ = std::fs::write("/proc/sys/net/ipv4/ip_forward", "1");
     let _ = run("iptables -I FORWARD -i kt0 -j ACCEPT; iptables -t nat -A POSTROUTING -s 10.79.0.0/16 ! -o kt0 -j MASQUERADE");
     // a tunnel's ports while ufw is still off: only remembered

@@ -1,5 +1,5 @@
-// Sliding-window random linear repair over GF(256) for the game packets of KANKI MIX (the same code as
-// KPING v3's rlc.go, made smaller for one game flow: blocks up to MaxBlock bytes, 64 kept by the receiver).
+// Sliding-window random linear repair over GF(256) for the game packets of KANKI MIX (blocks up to MaxBlock bytes,
+// 64 kept by the receiver, for one game flow).
 //
 // A repair covers the newest packets of a window [base, base+n) (n <= 16), as a random linear combination
 // of their blocks (block = len (2, BE) | payload), so the lost packets of a window come back as soon as
@@ -335,7 +335,7 @@ func (r *rlcRx) repair(pl []byte, now time.Time) []rebuilt {
 		if col < 0 {
 			col = r.alloc(s)
 		}
-		if col < 0 { // cannot happen after evict; drop the repair, never the program (same as the panel's kprlc.rs)
+		if col < 0 { // cannot happen after evict; drop the repair, never the program
 			r.build = false
 			r.gc()
 			return nil

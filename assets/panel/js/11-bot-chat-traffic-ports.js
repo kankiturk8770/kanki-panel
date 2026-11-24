@@ -261,7 +261,7 @@ function ptLoad(){Promise.all([api('GET','/api/nodes'),api('GET','/api/settings'
 function svcOf(list,k){for(var i=0;i<(list||[]).length;i++)if(list[i].key==k)return list[i];return null}
 function ptRows(n){var loc=n.id=='local',inf=n.info||{},sv=loc&&S.psys?S.psys.services:(inf.services||[]),rows=[],ps=S.pset||{};
  var add=function(k,name,proto,port,svk){if(!port)return;var s=svcOf(sv,svk);rows.push({k:k,name:name,proto:proto,port:String(port),st:s?(s.active?'run':'stop'):'none'})};
- add('wg','WireGuard','UDP',inf.wg_port,'wireguard');add('awg','AmneziaWG','UDP',inf.awg_port,'amneziawg');add('hy2','Hysteria2','UDP',inf.hy2_port,'hysteria2');add('kmix','KANKI MIX','UDP',inf.kmix_port,'kankimix');add('mtun','microtun','UDP',inf.mt_port,'microtun');
+ add('wg','WireGuard','UDP',inf.wg_port,'wireguard');add('awg','AmneziaWG','UDP',inf.awg_port,'amneziawg');add('hy2','Hysteria2','UDP',inf.hy2_port,'hysteria2');add('kmix','KANKI MIX','UDP',inf.kmix_port,'kankimix');
  if(loc){add('web',t('Panel (HTTPS)'),'TCP',ps.https_port||'443','web');add('panel',t('Panel (internal)'),'TCP',ps.web_port,'panel')}
  else{var m=String(n.address||'').match(/:(\d+)(\/|$)/);add('api',t('Node API (HTTPS)'),'TCP',m?m[1]:'443','web')}
  return rows}
@@ -284,9 +284,9 @@ function ptDraw(){var el=$('#pt');if(!el)return;var ns=S.nodes||[];if(!ns.some(f
      '<td data-l="'+esc(t('Status'))+'"><span class="kpill '+sl[0]+'"><i class="dot '+sl[0]+'"></i><span>'+t(sl[1])+'</span></span></td></tr>'}).join('')+'</tbody></table></div>':
    '<p class="muted">'+t('No port information yet. Press Check now.')+'</p>')+'</section>'+
   '<section class="card"><div class="kc-h"><div><h3>'+t('Firewall')+'</h3><small class="muted">'+t('If a port is closed, run this on that server as root:')+'</small></div><button type="button" class="b2 sm" id="pt_fwc">'+ic('copy',15)+' '+t('Copy command')+'</button></div><pre class="cmd ltr">'+esc(fwCmd(rows))+'</pre></section>'+
-  '<section class="card"><div class="kc-h"><h3>'+t('All servers')+'</h3></div><div class="ktbl-w"><table class="ktbl"><thead><tr><th>'+t('Server')+'</th><th>WireGuard</th><th>AmneziaWG</th><th>Hysteria2</th><th>KANKI MIX</th><th>microtun</th><th>'+t('Panel / API')+'</th></tr></thead><tbody>'+
+  '<section class="card"><div class="kc-h"><h3>'+t('All servers')+'</h3></div><div class="ktbl-w"><table class="ktbl"><thead><tr><th>'+t('Server')+'</th><th>WireGuard</th><th>AmneziaWG</th><th>Hysteria2</th><th>KANKI MIX</th><th>'+t('Panel / API')+'</th></tr></thead><tbody>'+
    ns.map(function(x){var rr=ptRows(x),g=function(k,l){var r=rr.filter(function(y){return y.k==k})[0];return '<td data-l="'+esc(l)+'">'+(r?'<span class="kpp"><i class="dot '+(r.st=='run'?'g':r.st=='stop'?'r':'n')+'"></i><b class="ltr">'+esc(r.port)+'</b></span>':'<span class="muted">—</span>')+'</td>'};
-    return '<tr><td class="ktbl-h"><b>'+esc(x.name)+'</b></td>'+g('wg','WireGuard')+g('awg','AmneziaWG')+g('hy2','Hysteria2')+g('kmix','KANKI MIX')+g('mtun','microtun')+(x.id=='local'?g('web',t('Panel / API')):g('api',t('Panel / API')))+'</tr>'}).join('')+'</tbody></table></div></section>';
+    return '<tr><td class="ktbl-h"><b>'+esc(x.name)+'</b></td>'+g('wg','WireGuard')+g('awg','AmneziaWG')+g('hy2','Hysteria2')+g('kmix','KANKI MIX')+(x.id=='local'?g('web',t('Panel / API')):g('api',t('Panel / API')))+'</tr>'}).join('')+'</tbody></table></div></section>';
  el.onclick=function(e){var b=e.target.closest('[data-ps]');if(b){PSEL=b.dataset.ps;ptDraw();return}var c=e.target.closest('[data-cp]');if(c){copy(c.dataset.cp);c.classList.add('done');setTimeout(function(){c.classList.remove('done')},1200);return}
   if(e.target.closest('#pt_fwc'))copy(fwCmd(rows));if(e.target.closest('#pt_chk'))ptCheck(n)}}
 function ptCheck(n){toast(t('Checking…'));if(n.id=='local'){api('GET','/api/system').then(function(s){S.psys=s;ptDraw();toast(t('Done'))}).catch(fail);return}

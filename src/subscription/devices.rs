@@ -324,56 +324,6 @@ mod tests {
         assert_eq!((st, why.as_str()), (StatusCode::NOT_FOUND, "unknown"));
     }
 
-    /// KPING (the game core, a core of each server since 3.58) is only in the sealed answer of a Kanki app, only for
-    /// users with KPING, straight to each server where it runs; the page, other apps and other users never see it
-    #[tokio::test]
-    async fn kping_only_reaches_the_kanki_app_of_its_users() {
-        let app = test_app();
-        let info = json!({ "mt_port": 4200, "kp_port": "24300" });
-        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,info,online) VALUES('de','Germany','de.example.com','de.example.com','t',?1,1)", &[&info.to_string()]).unwrap();
-        let tester = app.db.create_user("GAMER", 10.0, 30, 1, "wg,kping", "", "", 0).unwrap();
-        let other = app.db.create_user("PLAIN", 10.0, 30, 1, "wg", "", "", 0).unwrap();
-        let app_hdr = [("x-kanki-device", "phone-aaaaaaaa"), ("x-kanki-seal", "kseal1"), ("user-agent", "KankiVPN-Android")];
-        let code = tester.sub_code();
-        let (st, body, _) = get(&app, &format!("/sub/{}/json", code), &app_hdr).await;
-        assert_eq!(st, StatusCode::OK);
-        let v: Value = serde_json::from_str(&open(&body, &code, "phone-aaaaaaaa")).unwrap();
-        let k = v["kping"].as_array().unwrap().iter().find(|x| x["node"] == "de").cloned().unwrap();
-        let url = k["url"].as_str().unwrap_or_default().to_string();
-        assert_eq!(k["via"], "direct");
-        assert!(url.starts_with("kping://") && url.contains("@de.example.com:24300?") && url.contains("&ip=10.81.0.2&"), "{}", url);
-        assert!(url.contains(&format!("obfs={}", crate::kping::obfs(&app))) && !url.contains(&crate::microtun::obfs(&app)));
-        assert!(!url.contains(&crate::microtun::user_key(&app, &tester)));
-        // the same subscription anywhere else: no KPING at all
-        let (_, plain, _) = get(&app, &format!("/sub/{}/json", code), &[("user-agent", "Mozilla/5.0")]).await;
-        assert!(!plain.contains("kping") && !plain.contains("24300"), "{}", plain);
-        let (_, page, _) = get(&app, &format!("/sub/{}", code), &[("user-agent", "Mozilla/5.0")]).await;
-        assert!(!page.contains("24300") && !page.contains("10.81."));
-        // the page the Kanki app reads (sealed): its data block carries KPING
-        let (_, page, _) = get(&app, &format!("/sub/{}", code), &app_hdr).await;
-        let page = open(&page, &code, "phone-aaaaaaaa");
-        assert!(page.contains("\"kping\":[") && page.contains("@de.example.com:24300?"), "the app's page has no KPING");
-        let (_, raw, _) = get(&app, &format!("/sub/{}/raw", code), &[("user-agent", "v2rayNG/1.9")]).await;
-        assert!(!raw.contains("24300"));
-        // a user without KPING gets nothing, even in the Kanki app
-        let oc = other.sub_code();
-        let (_, body, _) = get(&app, &format!("/sub/{}/json", oc), &app_hdr).await;
-        assert!(serde_json::from_str::<Value>(&open(&body, &oc, "phone-aaaaaaaa")).unwrap()["kping"].is_null());
-        // the server runs it for that user only, on its own address inside
-        let n = app.db.node("de").unwrap();
-        let t = app.db.user(tester.id).unwrap();
-        let o = app.db.user(other.id).unwrap();
-        let c = crate::kping::cfg_for_node(&app, &n, &[&t, &o]);
-        let x = c.exit.unwrap();
-        assert_eq!((x.port, x.users.len(), x.users[0].ip.as_str()), (4300, 1, "10.81.0.2"));
-        assert_eq!(c.relays[0].port, 24300);
-        // KPING off on that server: gone from the app
-        crate::kping::set_node_off(&app, "de", true);
-        let (_, body, _) = get(&app, &format!("/sub/{}/json", code), &app_hdr).await;
-        let v: Value = serde_json::from_str(&open(&body, &code, "phone-aaaaaaaa")).unwrap();
-        assert!(v["kping"].as_array().map(|a| a.iter().all(|x| x["node"] != "de")).unwrap_or(true));
-    }
-
     #[test]
     fn the_device_list_has_a_cap() {
         let app = test_app();

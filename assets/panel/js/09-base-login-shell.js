@@ -1,9 +1,9 @@
 var S={lang:localStorage.getItem('kk_lang')||'fa',theme:localStorage.getItem('kk_theme')||'dark',color:localStorage.getItem('kk_color')||'gold',token:localStorage.getItem('kk_tok')||'',me:null,page:'dash',users:[],nodes:[],ov:null,sel:{},q:'',filter:'all',pf:'all',sort:'new',size:12,pg:1,timer:null,timer2:null};
 // a server is one word everywhere: nodes and tunnel servers are the same servers
 var WFA=[
- // the panel's answers with a port or a name in them (tunnels, KPING, the smart test)
+ // the panel's answers with a port or a name in them (tunnels, the smart test)
  [/^(UDP|TCP) port (\d+) is already used by the tunnel "([^"]*)"$/,'پورت $1 $2 را تانل «$3» گرفته است'],
- [/^(UDP|TCP) port (\d+) is already used by (Kanki DNS|Xray|KPING|WireGuard|AmneziaWG|Hysteria2|KANKI MIX|microtun)$/,'پورت $1 $2 را $3 گرفته است'],
+ [/^(UDP|TCP) port (\d+) is already used by (Kanki DNS|Xray|WireGuard|AmneziaWG|Hysteria2|KANKI MIX)$/,'پورت $1 $2 را $3 گرفته است'],
  [/^(UDP|TCP) port (\d+) is already used by the emergency chat$/,'پورت $1 $2 را چت اضطراری گرفته است'],
  [/^(UDP|TCP) port (\d+) on (.+?) is already used by (.+?): pick another port$/,'پورت $1 $2 روی $3 را $4 گرفته است؛ پورت دیگری انتخاب کن'],
  [/^(UDP|TCP) port (\d+) is used twice in this tunnel$/,'پورت $1 $2 در این تانل دو بار آمده'],
@@ -201,8 +201,8 @@ function applyLook(){document.documentElement.lang=S.lang;document.documentEleme
  // (3.40) Kanki Glass: one gold, dark or light; the old colour variants are gone
  Array.prototype.slice.call(b).forEach(function(c){if(c.indexOf('c-')==0)b.remove(c)});
  b.add('kg');if($('#side'))b.add('ks');V37.drawLooks()}
-var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['mtun','microtun'],['xray','Xray'],['dns','DNS']];
-function pname(p){if(p=='kping')return 'KPING';for(var i=0;i<PROTOS.length;i++)if(PROTOS[i][0]==p)return PROTOS[i][1];return p}
+var PROTOS=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['xray','Xray'],['dns','DNS']];
+function pname(p){for(var i=0;i<PROTOS.length;i++)if(PROTOS[i][0]==p)return PROTOS[i][1];return p}
 // a window: it takes the keyboard (Tab stays inside, Esc closes) and gives it back to what opened it
 var MF=null;
 function modal(html,cls){var b=$('#mbox'),was=$('#modal').classList.contains('on');b.className='mbox'+(cls?' '+cls:'');b.innerHTML=html;b.scrollTop=0;
@@ -245,7 +245,7 @@ function loginView(otp){$('#app').innerHTML='';document.body.className='';applyL
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
 // ---------------------------------------------------------------- shell
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['mtun','microtun','game'],['kping','KPING','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);

@@ -5,9 +5,9 @@
 
 Prints the account, then every counter the panel keeps per source:
 - WireGuard / AmneziaWG: bytes per server (the `peers` table, the server's own counter)
-- Xray, Kanki DNS, KPING: the last running total per server (settings `xray_prev_*`, `dns_prev_*`, `kping_prev_*`)
+- Xray, Kanki DNS: the last running total per server (settings `xray_prev_*`, `dns_prev_*`)
 - after 3.52: data that came after the account had ended, by server and protocol (`after_limit`)
-Hysteria2, KANKI MIX and microtun are added per round and not kept per source: what the list above
+Hysteria2 and KANKI MIX are added per round and not kept per source: what the list above
 does not explain came through those three.
 """
 import json, sqlite3, sys, datetime
@@ -34,7 +34,7 @@ for node, proto, rx, tx in c.execute("SELECT node_id,proto,rx,tx FROM peers WHER
     known += rx + tx
     print("  %-20s %-4s %s" % (names.get(node, node), proto, gb(rx + tx)))
 print("\nXray / DNS / KPING (running total of the server's counter):")
-for k, v in c.execute("SELECT k,v FROM settings WHERE k LIKE 'xray_prev_%' OR k LIKE 'dns_prev_%' OR k LIKE 'kping_prev_%'"):
+for k, v in c.execute("SELECT k,v FROM settings WHERE k LIKE 'xray_prev_%' OR k LIKE 'dns_prev_%'"):
     try:
         b = int((json.loads(v).get("users") or {}).get(str(uid), 0))
     except Exception:
@@ -42,7 +42,7 @@ for k, v in c.execute("SELECT k,v FROM settings WHERE k LIKE 'xray_prev_%' OR k 
     if b:
         known += b
         print("  %-30s %s" % (k, gb(b)))
-print("\nexplained above: %s of %s; the rest came through Hysteria2, KANKI MIX or microtun" % (gb(known), gb(u[3])))
+print("\nexplained above: %s of %s; the rest came through Hysteria2 or KANKI MIX" % (gb(known), gb(u[3])))
 al = c.execute("SELECT v FROM settings WHERE k='after_limit'").fetchone()
 if al:
     e = (json.loads(al[0]) or {}).get(str(uid))

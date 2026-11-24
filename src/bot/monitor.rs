@@ -527,7 +527,7 @@ mod tests {
 
     #[tokio::test]
     async fn only_the_owners_get_reports_and_its_token_is_its_own() {
-        let app = crate::kping::tests::test_app();
+        let app = crate::test_app();
         app.db.set("bot_token", "111:sales");
         app.db.set("bot_admins", "10,11");
         // no token, or the sales bot's own token: no report bot
@@ -560,7 +560,7 @@ mod tests {
     /// again when it comes back soon; never a new message for each change
     #[tokio::test]
     async fn one_message_per_problem_edited_until_it_is_over() {
-        let app = crate::kping::tests::test_app();
+        let app = crate::test_app();
         app.db.set("bot_token", "111:sales");
         app.db.set("mon_token", "222:report");
         app.db.set("mon_admins", "20,21");
@@ -588,7 +588,7 @@ mod tests {
 
     #[test]
     fn a_server_alert_comes_once_after_three_bad_rounds_and_once_when_back() {
-        let app = crate::kping::tests::test_app();
+        let app = crate::test_app();
         app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,enabled,online,note,insecure,drain,maint,accept_all,endpoint_mode,sync_state) VALUES('n1','DE','1.2.3.4','','s',1,0,'',0,0,0,1,'custom','')", &[]).unwrap();
         let mut st = HashMap::new();
         assert!(check(&app, &mut st).is_empty());

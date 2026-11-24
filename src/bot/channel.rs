@@ -1244,7 +1244,7 @@ mod sign_tests {
     /// The signature goes into Telegram HTML and the panel's preview: only the plain Telegram tags survive
     #[test]
     fn the_signature_carries_no_markup() {
-        let app = crate::kping::tests::test_app();
+        let app = crate::test_app();
         app.db.set("ch_sign", "<b>Kanki</b> <img src=x onerror=alert(1)>");
         let s = super::sign(&app);
         assert!(s.contains("<b>Kanki</b>") && !s.contains("<img"), "{}", s);

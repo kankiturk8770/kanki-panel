@@ -64,16 +64,6 @@ mod wg;
 mod hy2;
 #[path = "vpn/kmix.rs"]
 mod kmix;
-#[path = "vpn/microtun.rs"]
-mod microtun;
-#[path = "vpn/kpingd.rs"]
-mod kpingd;
-#[path = "vpn/kprlc.rs"]
-mod kprlc;
-#[path = "vpn/kping.rs"]
-mod kping;
-#[path = "vpn/mtun.rs"]
-mod mtun;
 #[path = "vpn/sync.rs"]
 mod sync;
 #[path = "vpn/amnezia.rs"]
@@ -139,6 +129,20 @@ pub struct App {
     pub http_insecure: reqwest::Client,
     /// pinned (TOFU) clients for nodes with self-signed certificates, one per node
     pub pin_clients: Mutex<HashMap<String, Arc<reqwest::Client>>>,
+}
+
+/// A panel with an empty database of its own, for the tests
+#[cfg(test)]
+pub(crate) fn test_app() -> std::sync::Arc<App> {
+    let dir = std::env::temp_dir().join(format!("kanki-test-{}", util::rand_token(8)));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::sync::Arc::new(App {
+        db: db::Db::open(dir.join("kanki.db").to_str().unwrap()),
+        env: HashMap::from([("DOMAIN".to_string(), "fi.example.com".to_string())]),
+        hy2_allowed: Mutex::new(Default::default()), limits: Mutex::new(Default::default()), reported: Mutex::new(Default::default()),
+        login_fails: Mutex::new(Default::default()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+        http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(Default::default()),
+    })
 }
 
 impl App {
@@ -231,6 +235,8 @@ async fn main() {
         }
         "tunnel-agent" => {
             netq::spawn();
+            // what microtun and KPING (gone in 3.60) left on this server
+            let _ = tokio::task::spawn_blocking(sync::forget_retired).await;
             tunnel::agent::run(VERSION).await;
             return;
         }
@@ -329,12 +335,12 @@ async fn main() {
 
     // OpenVPN left by a very old version (servers installed before it was dropped)
     let _ = tokio::task::spawn_blocking(admin::drop_legacy_openvpn).await;
+    // and what microtun and KPING (gone in 3.60) left
+    let _ = tokio::task::spawn_blocking(sync::forget_retired).await;
     // short, fair network queues (games): panel and VPN node alike
     netq::spawn();
 
     if cmd == "node" {
-        // KPING as a core of this server comes back after a reboot even before the panel answers
-        let _ = tokio::task::spawn_blocking(kpingd::node_from_disk).await;
         let port = app.env.get("NODE_PORT").cloned().unwrap_or_else(|| "2096".into());
         // new installs put Caddy (TLS) in front and bind locally; old installs listened publicly
         let bind = app.env.get("NODE_BIND").cloned().unwrap_or_else(|| "0.0.0.0".into());
@@ -364,10 +370,7 @@ async fn main() {
     auth::legacy_key_start(&app.db);
     // upgrade legacy sha256 admin hash stored in the db is done at next successful login
 
-    // the panel's own server runs KPING in its node part too (synced like the others), back after a restart
-    let _ = tokio::task::spawn_blocking(kpingd::node_from_disk).await;
     tunnel::panel::drop_vip(&app);
-    kping::drop_routes(&app);
     tokio::spawn(sync::run(app.clone()));
     // deleted nodes that were off at the time are asked again to remove themselves
     tokio::spawn(api::leftover_loop(app.clone()));

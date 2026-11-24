@@ -25,14 +25,6 @@ pub fn sweep(app: &App) -> Vec<String> {
         crate::kmix::forget_node(app, &id);
         gone.push(format!("KANKI MIX {}", id));
     }
-    for id in crate::microtun::node_ids(app).into_iter().filter(|id| !nodes.contains(id)) {
-        crate::microtun::forget_node(app, &id);
-        gone.push(format!("microtun {}", id));
-    }
-    for id in crate::kping::settings(app).nodes.into_keys().filter(|id| !nodes.contains(id)) {
-        crate::kping::forget_node(app, &id);
-        gone.push(format!("KPING {}", id));
-    }
     for id in crate::cores::load(app).into_keys().filter(|id| !nodes.contains(id)) {
         crate::cores::forget(app, &id);
         gone.push(format!("core switches {}", id));
@@ -269,16 +261,11 @@ mod tests {
         app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,online,endpoint_mode) VALUES('live','Live','a','','t',1,'panel')", &[]).unwrap();
         app.db.exec("INSERT INTO users(username,code,nodes) VALUES('u1','c1','node-dead,live'),('u2','c2','node-dead')", &[]).unwrap();
         app.db.set("kmix_nodes", r#"{"node-dead":{"port":4001},"live":{"port":4002}}"#);
-        crate::microtun::set_node_port(&app, "node-dead", 4201);
         crate::cores::all_off(&app, "node-dead");
         app.db.set("exit_geo", r#"{"node-dead":{"cc":"DE"},"live":{"cc":"TR"},"srv:gone":{"cc":"IR"},"local":{"cc":"FI"}}"#);
-        // KPING's own setting of the gone server goes too
-        app.db.set("kping_cfg", r#"{"nodes":{"node-dead":{"port":24310},"live":{"port":24311}}}"#);
         let gone = super::sweep(&app);
-        let kp = crate::kping::settings(&app);
-        assert!(!kp.nodes.contains_key("node-dead") && kp.nodes.contains_key("live"));
         assert!(!gone.is_empty());
-        for k in ["kmix_nodes", "mtun_cfg", "core_off", "exit_geo"] {
+        for k in ["kmix_nodes", "core_off", "exit_geo"] {
             assert!(!app.db.get(k).contains("node-dead"), "{} still names the gone node", k);
         }
         assert!(!app.db.get("exit_geo").contains("srv:gone"));

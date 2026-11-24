@@ -125,7 +125,7 @@ impl User {
     /// them; 'game' when it has WireGuard or AmneziaWG and nothing a v2ray client reads (only the gaming
     /// cores); else 'vip'
     pub fn service(&self) -> &'static str {
-        let ps: Vec<&str> = self.protocols.split(',').map(|x| x.trim()).filter(|x| !x.is_empty() && *x != "kping").collect();
+        let ps: Vec<&str> = self.protocols.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()).collect();
         if ps.contains(&"xray") && ps.iter().all(|p| matches!(*p, "xray" | "hy2")) {
             "v2ray"
         } else if ps.iter().any(|p| matches!(*p, "wg" | "awg")) && ps.iter().all(|p| GAME_PROTOS.contains(p)) {
@@ -312,24 +312,50 @@ impl Db {
         trim_logs(&c);
         let db = Db(Mutex::new(c));
         db.fix_services_once();
+        db.retire_cores_once();
         db
     }
 
-    /// 3.58.1, once: the defaults of the three services (VIP and gaming with microtun, V2Ray with Hysteria2), and
-    /// the V2Ray accounts that «give everyone» buttons turned into VIP (KANKI MIX, WireGuard, … added to them) back
-    /// to V2Ray: an account whose last delivered order was a V2Ray plan keeps only Xray and Hysteria2 (and KPING)
+    /// 3.60, once: microtun and KPING are gone (KANKI MIX does their work, with two paths). An account that had
+    /// one of them gets KANKI MIX in its place (nobody loses the gaming core they paid for); the service
+    /// defaults, and every setting of the two, go.
+    fn retire_cores_once(&self) {
+        if self.get("mig_360_cores") == "1" {
+            return;
+        }
+        let gone = |p: &str| matches!(p, "mtun" | "kping");
+        let clean = |v: &str| -> (String, bool) {
+            let had = v.split(',').any(|x| gone(x.trim()));
+            let mut l: Vec<String> = v.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty() && !gone(x)).collect();
+            if had && !l.iter().any(|x| x == "kmix") {
+                l.push("kmix".into());
+            }
+            (l.join(","), had)
+        };
+        for u in self.users() {
+            let (now, had) = clean(&u.protocols);
+            if had {
+                let _ = self.exec("UPDATE users SET protocols=?1 WHERE id=?2", &[&now, &u.id]);
+            }
+        }
+        for k in ["default_protocols", "game_protocols"] {
+            let v = self.get(k);
+            let (now, had) = clean(&v);
+            if had {
+                self.set(k, &now);
+            }
+        }
+        let _ = self.exec("DELETE FROM settings WHERE k LIKE 'kping%' OR k LIKE 'mtun%' OR k LIKE 'microtun%'", &[]);
+        self.set("mig_360_cores", "1");
+    }
+
+    /// 3.58.1, once: the defaults of the three services (V2Ray with Hysteria2), and the V2Ray accounts that «give
+    /// everyone» buttons turned into VIP (KANKI MIX, WireGuard, … added to them) back to V2Ray: an account whose last
+    /// delivered order was a V2Ray plan keeps only Xray and Hysteria2
     fn fix_services_once(&self) {
         if self.get("mig_3581_services") == "1" {
             return;
         }
-        let add = |k: &str, p: &str| {
-            let v = self.get(k);
-            if !v.split(',').any(|x| x.trim() == p) {
-                self.set(k, &format!("{},{}", v.trim_end_matches(','), p).trim_start_matches(','));
-            }
-        };
-        add("default_protocols", "mtun");
-        add("game_protocols", "mtun");
         if self.get("v2ray_protocols").trim() == "xray" {
             self.set("v2ray_protocols", "xray,hy2");
         }
@@ -357,10 +383,7 @@ impl Db {
             if last.get(&u.id).map(|s| s.as_str()) != Some("v2ray") || u.service() == "v2ray" {
                 continue;
             }
-            let mut list: Vec<String> = v2.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
-            if u.has_proto("kping") {
-                list.push("kping".into());
-            }
+            let list: Vec<String> = v2.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
             let _ = self.exec("UPDATE users SET protocols=?1 WHERE id=?2", &[&list.join(","), &u.id]);
         }
         // a user's own server list without the servers that serve nobody (VPN off); none left = all servers
@@ -400,7 +423,7 @@ impl Db {
         if service == "game" {
             let v = self.get("game_protocols");
             let ok: Vec<&str> = v.split(',').map(|x| x.trim()).filter(|x| GAME_PROTOS.contains(x)).collect();
-            return if ok.iter().any(|p| matches!(*p, "wg" | "awg")) { ok.join(",") } else { "wg,awg,kmix,mtun".into() };
+            return if ok.iter().any(|p| matches!(*p, "wg" | "awg")) { ok.join(",") } else { "wg,awg,kmix".into() };
         }
         if service == "v2ray" {
             let v = self.get("v2ray_protocols");
@@ -737,7 +760,7 @@ fn trim_logs(c: &Connection) {
 }
 
 /// What a 'game' account may have: WireGuard, AmneziaWG and the Kanki app's gaming cores
-pub const GAME_PROTOS: &[&str] = &["wg", "awg", "kmix", "mtun"];
+pub const GAME_PROTOS: &[&str] = &["wg", "awg", "kmix"];
 
 pub fn default_setting(k: &str) -> &'static str {
     match k {
@@ -745,11 +768,11 @@ pub fn default_setting(k: &str) -> &'static str {
         "mtu" => "1380",
         "mtu_auto" => "1",
         "mtu_budget" => "1380",
-        "default_protocols" => "wg,awg,hy2,kmix,mtun",
+        "default_protocols" => "wg,awg,hy2,kmix",
         // what a 'v2ray' plan gives: the links the v2ray clients read (Xray and Hysteria2)
         "v2ray_protocols" => "xray,hy2",
-        // what a 'game' plan gives: WireGuard and AmneziaWG (and the Kanki app's KANKI MIX and microtun), no v2ray link
-        "game_protocols" => "wg,awg,kmix,mtun",
+        // what a 'game' plan gives: WireGuard and AmneziaWG (and the Kanki app's KANKI MIX), no v2ray link
+        "game_protocols" => "wg,awg,kmix",
         "wg_tunnel_on" => "1",
         "kmix_on" => "1",
         "kmix_port" => "4000",
@@ -840,14 +863,12 @@ mod tests {
         let u = db.create_user("hy", 10.0, 30, 1, "hy2", "", "", 0).unwrap();
         assert_eq!(u.service(), "vip");
         // the gaming service: WireGuard / AmneziaWG (and the app's KANKI MIX), never a v2ray link
-        assert_eq!(db.service_protocols("game"), "wg,awg,kmix,mtun");
+        assert_eq!(db.service_protocols("game"), "wg,awg,kmix");
         db.set("game_protocols", "awg,xray,hy2");
         assert_eq!(db.service_protocols("game"), "awg");
         db.set("game_protocols", "kmix");
-        assert_eq!(db.service_protocols("game"), "wg,awg,kmix,mtun");
+        assert_eq!(db.service_protocols("game"), "wg,awg,kmix");
         let u = db.create_user("gm", 10.0, 30, 1, "wg,awg,kmix", "", "", 0).unwrap();
-        assert_eq!(u.service(), "game");
-        let u = db.create_user("gm2", 10.0, 30, 1, "awg,kping", "", "", 0).unwrap();
         assert_eq!(u.service(), "game");
         // the default full list (with Hysteria2) stays VIP
         let u = db.create_user("vip2", 10.0, 30, 1, "wg,awg,hy2,kmix", "", "", 0).unwrap();
@@ -919,6 +940,33 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// 3.60: microtun and KPING go; who had one gets KANKI MIX, and nothing of the two is left
+    #[test]
+    fn microtun_and_kping_are_gone() {
+        let dir = std::env::temp_dir().join(format!("kanki-db-test-{}", crate::util::rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("kanki.db");
+        {
+            let db = Db::open(path.to_str().unwrap());
+            db.create_user("a", 1.0, 30, 1, "wg,mtun", "", "", 0).unwrap();
+            db.create_user("b", 1.0, 30, 1, "kmix,kping", "", "", 0).unwrap();
+            db.create_user("c", 1.0, 30, 1, "xray", "", "", 0).unwrap();
+            db.set("default_protocols", "wg,awg,hy2,kmix,mtun");
+            db.set("game_protocols", "wg,awg,mtun");
+            db.set("kping_cfg", "{}");
+            db.set("mtun_cfg", "{}");
+            db.set("mig_360_cores", "");
+        }
+        let db = Db::open(path.to_str().unwrap());
+        let mut protos: Vec<(String, String)> = db.users().iter().map(|u| (u.username.clone(), u.protocols.clone())).collect();
+        protos.sort();
+        assert_eq!(protos, vec![("a".into(), "wg,kmix".into()), ("b".into(), "kmix".into()), ("c".into(), "xray".into())]);
+        assert_eq!(db.get("default_protocols"), "wg,awg,hy2,kmix");
+        assert_eq!(db.get("game_protocols"), "wg,awg,kmix");
+        assert_eq!((db.get("kping_cfg"), db.get("mtun_cfg")), (String::new(), String::new()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn mixplus_is_cleaned_out() {
         let dir = std::env::temp_dir().join(format!("kanki-db-test-{}", crate::util::rand_token(8)));
@@ -926,7 +974,7 @@ mod tests {
         let path = dir.join("kanki.db");
         {
             let db = Db::open(path.to_str().unwrap());
-            db.create_user("a", 1.0, 30, 1, "wg,kgame,mtun", "", "", 0).unwrap();
+            db.create_user("a", 1.0, 30, 1, "wg,kgame,kmix", "", "", 0).unwrap();
             db.create_user("b", 1.0, 30, 1, "kgame", "", "", 0).unwrap();
             db.create_user("c", 1.0, 30, 1, "awg,khq", "", "", 0).unwrap();
             db.set("default_protocols", "wg,awg,kgame");
@@ -937,7 +985,7 @@ mod tests {
         let db = Db::open(path.to_str().unwrap());
         let mut protos: Vec<(String, String)> = db.users().iter().map(|u| (u.username.clone(), u.protocols.clone())).collect();
         protos.sort();
-        assert_eq!(protos, vec![("a".into(), "wg,mtun".into()), ("b".into(), "".into()), ("c".into(), "awg".into())]);
+        assert_eq!(protos, vec![("a".into(), "wg,kmix".into()), ("b".into(), "".into()), ("c".into(), "awg".into())]);
         assert_eq!(db.get("default_protocols"), "wg,awg");
         assert_eq!(db.get("kgame_cfg"), "");
         assert_eq!(db.get("kc_door"), "");

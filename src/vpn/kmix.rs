@@ -332,6 +332,11 @@ pub fn link(app: &App, u: &User, n: &Node) -> Option<String> {
     }
     let host = link_host(app, &s, n);
     let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
+    // multipath (app 1.44): the Iran tunnel entry of this server is another path of the same config
+    if let Some((th, tp)) = tunnel_target(app, &s, n, port as u16) {
+        let th = if th.contains(':') && !th.starts_with('[') { format!("[{}]", th) } else { th };
+        q.push_str(&format!("&alt={}", crate::util::pct(&format!("{}:{}", th, tp))));
+    }
     Some(format!("kanki://{}@{}:{}?{}#{}", user_key(app, u), host, port, q, crate::util::pct(&n.name)))
 }
 
@@ -352,8 +357,11 @@ pub fn link_tunnel(app: &App, u: &User, n: &Node) -> Option<String> {
     let (host, tport) = tunnel_target(app, &s, n, port)?;
     let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
     let q = first.split_once('?').map(|x| x.1).unwrap_or("").split('#').next().unwrap_or("");
-    // the extra ports exist on the server, not on the Iran address
-    let q: Vec<&str> = q.split('&').filter(|p| !p.starts_with("ports=")).collect();
+    // the extra ports exist on the server, not on the Iran address; the other path of this one is the server itself
+    let direct = first.split_once('@').map(|x| x.1).unwrap_or("").split('?').next().unwrap_or("").to_string();
+    let alt = format!("alt={}", crate::util::pct(&direct));
+    let mut q: Vec<&str> = q.split('&').filter(|p| !p.starts_with("ports=") && !p.starts_with("alt=")).collect();
+    q.push(&alt);
     Some(format!("kanki://{}@{}:{}?{}&via=tunnel#{}", user_key(app, u), host, tport, q.join("&"), crate::util::pct(&format!("{} (Tunnel)", n.name))))
 }
 
@@ -484,8 +492,8 @@ pub fn apply(c: &KmixCfg) -> Result<(), String> {
         let _ = sh("systemctl daemon-reload");
         let _ = sh(&format!("systemctl enable -q {}", UNIT_NAME));
     }
-    // the extra ports never take this server's own port or the port of WireGuard / AmneziaWG / microtun
-    let taken: Vec<u16> = ["wg", "awg"].iter().filter_map(|p| crate::wg::listen_port(p).trim().parse().ok()).chain(crate::microtun::running_port()).chain([port]).collect();
+    // the extra ports never take this server's own port or the port of WireGuard / AmneziaWG
+    let taken: Vec<u16> = ["wg", "awg"].iter().filter_map(|p| crate::wg::listen_port(p).trim().parse().ok()).chain([port]).collect();
     let hop = hop_range(&c.hop).filter(|(a, b)| !hop_holds(*a, *b, &taken));
     sync_hop(hop.map(|(a, b)| (a, b, port)));
     let state = json!({ "port": port, "parity": parity, "hop": hop.map(|(a, b)| format!("{}-{}", a, b)).unwrap_or_default() });
@@ -755,9 +763,7 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
                 return crate::api::err(StatusCode::BAD_REQUEST, &format!("{}: the port {} is inside the extra ports", n.name, p));
             }
             // the extra ports are taken by KANKI MIX: another protocol's port inside them stops working
-            let mt = crate::microtun::settings(&app);
-            let mt_port = if mt.node_on(&n.id) { Some(mt.node_port(&n.id)) } else { None };
-            let others = [("wg_port", "WireGuard"), ("awg_port", "AmneziaWG"), ("hy2_port", "Hysteria2")].into_iter().map(|(k, name)| (port_of(&info[k]), name)).chain([(mt_port, "microtun")]);
+            let others = [("wg_port", "WireGuard"), ("awg_port", "AmneziaWG"), ("hy2_port", "Hysteria2")].into_iter().map(|(k, name)| (port_of(&info[k]), name));
             for (q, name) in others {
                 if let Some(q) = q.filter(|q| (a..=z).contains(q)) {
                     return crate::api::err(StatusCode::BAD_REQUEST, &format!("{}: the extra ports {}-{} hold UDP port {} of {}", n.name, a, z, q, name));
@@ -804,7 +810,7 @@ mod tests {
     #[tokio::test]
     async fn recorder_asks_only_for_kmix_users() {
         use tower::ServiceExt;
-        let app = crate::kping::tests::test_app();
+        let app = crate::test_app();
         app.db.set("api_key", "test-key");
         let call = |b: Value| {
             let app = app.clone();

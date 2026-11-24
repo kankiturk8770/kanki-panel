@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Port of the panel's heavy_bursty_loss_never_panics (kanki-panel src/vpn/kprlc.rs): repairs delivered late and out of
+// Heavy bursty loss never panics: repairs delivered late and out of
 // order under bursty loss must never panic the receiver (1.37 security review: evict freed a column of the window itself).
 func TestHeavyBurstyLossNeverPanics(t *testing.T) {
 	var seed uint64 = 99

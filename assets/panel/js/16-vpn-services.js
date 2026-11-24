@@ -71,7 +71,7 @@ function drawPv(p,force){var g='pv_'+p,el=$('#pv'),tab=PVT[p]||'status';if(!el||
 
 // A core's second config through the tunnel, set on the core's own page: its own Iran address (one tap on
 // an Iran server), else the server's tunnel domain (Servers page). `fold`: closed until opened.
-var CNAME={wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',mtun:'microtun',xray:'Xray'};
+var CNAME={wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',xray:'Xray'};
 window.coreTun=function(core,s,fold){if(!s)return '';var tn=s.tunnel||{},own=(tn.cores||{})[core]||'',srv=tn.on?(tn.host||tn.uses||''):'',use=own||srv,k=esc(s.key),id='ct_'+core+'_'+String(s.key).replace(/[^a-z0-9]/gi,'');
  var x=(tn.ports||[]).filter(function(z){return z.core==core})[0];
  var lost=use&&x&&x.carried===false;
@@ -88,7 +88,7 @@ window.coreTunSet=function(core,key,host){var r=document.querySelector('.kxr.ope
  // opened from the Tunnel table (coreTunEdit): its window closes and the table is drawn again
  if($('#modal').classList.contains('on')&&window.CTG){g=window.CTG;window.CTG='';closeModal()}
  api('PUT','/api/servers/'+encodeURIComponent(key),{tunnel_core:{core:core,host:String(host||'').trim()}}).then(function(){toast(t('Saved'));
-  return srvLoad(true).then(function(){if(g&&/^tn_|^xrt$/.test(g)){if(ACC.draw[g])ACC.draw[g](true);return}if(S.page=='mtun')kcLoad('mtun',true);else if(S.page=='xray'){if(ACC.draw.xr)ACC.draw.xr(true)}else svcReload()})}).catch(fail)};
+  return srvLoad(true).then(function(){if(g&&/^tn_|^xrt$/.test(g)){if(ACC.draw[g])ACC.draw[g](true);return}if(S.page=='xray'){if(ACC.draw.xr)ACC.draw.xr(true)}else svcReload()})}).catch(fail)};
 window.srvByNode=function(nid){return srvByNode(nid)};
 function pvRow(p,s){var st=pvState(p,s),port=st[2];
  var head='<span class="dot '+(st[0]=='n'?'':st[0])+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+'<span class="sp"></span>'+

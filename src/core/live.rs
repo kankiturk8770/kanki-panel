@@ -1,7 +1,7 @@
 //! Who is connected right now, and with what: (protocol, server) per user.
 //! Exactly what the connection count of the account counts (`sync.rs`): VPN servers report it on every
-//! sync round (WireGuard / AmneziaWG handshakes, Hysteria2, KANKI MIX and microtun sessions), and the
-//! same round's Xray and KPING devices. So «connected now» and «connections n / max» never disagree.
+//! sync round (WireGuard / AmneziaWG handshakes, Hysteria2 and KANKI MIX sessions), and the
+//! same round's Xray devices. So «connected now» and «connections n / max» never disagree.
 //! Kanki DNS is not a connection (it never counts): it is not listed here.
 //! Kept in memory only; a panel restart starts empty and fills again within a sync round.
 use crate::util::now;
@@ -21,7 +21,7 @@ fn vpn() -> &'static Mutex<HashMap<String, VpnSeen>> {
 /// How long a report counts. Sync rounds run every few seconds to a minute, so a server that stops
 /// answering drops out of "connected now" after this.
 const VPN_FRESH: i64 = 300;
-/// the Xray and KPING list of the last sync round (rounds run every 10 to 30 seconds)
+/// the Xray list of the last sync round (rounds run every 10 to 30 seconds)
 const OTHERS_FRESH: i64 = 120;
 
 /// A VPN server's connections from this sync round (replaces its previous list).
@@ -29,13 +29,13 @@ pub fn set_vpn(node_id: &str, node_name: &str, conns: Vec<(i64, String)>) {
     vpn().lock().unwrap_or_else(|e| e.into_inner()).insert(node_id.to_string(), (now(), node_name.to_string(), conns));
 }
 
-/// The Xray and KPING devices of this sync round: (user, "x:<server>" / "kp:<server>", protocol, devices)
+/// The Xray devices of this sync round: (user, "x:<server>", protocol, devices)
 fn others() -> &'static Mutex<(i64, Vec<(i64, String, String, i64)>)> {
     static S: OnceLock<Mutex<(i64, Vec<(i64, String, String, i64)>)>> = OnceLock::new();
     S.get_or_init(|| Mutex::new((0, vec![])))
 }
 
-/// The Xray and KPING devices the sync round counted (the VPN servers come through `set_vpn`).
+/// The Xray devices the sync round counted (the VPN servers come through `set_vpn`).
 pub fn set_others(units: &[(i64, String, String, i64)]) {
     let v = units.iter().filter(|u| u.1.starts_with("x:") || u.1.starts_with("kp:")).cloned().collect();
     *others().lock().unwrap_or_else(|e| e.into_inner()) = (now(), v);
@@ -76,7 +76,6 @@ fn build(app: &App) -> UserServers {
             for (uid, p) in conns {
                 let tun = node.as_ref().map(|n| match p.as_str() {
                     "kmix" => kmix.node_tunnel(&n.id),
-                    "mtun" => false,
                     _ => crate::direct::through_tunnel(app, n),
                 }).unwrap_or(false);
                 add(*uid, p, name, &cc, tun);

@@ -43,11 +43,6 @@ pub fn identify(app: &App, h: &HeaderMap) -> Option<(String, Vec<String>)> {
     identify_with(app, h, true)
 }
 
-/// Same as `identify`, but never writes last_seen / last_used (for checking a stored token)
-pub fn identify_quiet(app: &App, h: &HeaderMap) -> Option<(String, Vec<String>)> {
-    identify_with(app, h, false)
-}
-
 /// The bot's mini app for admins reaches the bot's own panel routes (plans, discounts, sales settings) with this
 /// key: made at start, never written anywhere, never leaves this process (`miniapp::admin_panel` checks the admin
 /// and which route first). It has only the «settings» right.
@@ -653,7 +648,7 @@ mod tests {
 
     #[test]
     fn the_old_api_key_is_kept_only_as_a_hash() {
-        let app = crate::kping::tests::test_app();
+        let app = crate::test_app();
         app.db.set("api_key", "plainlegacykey0123456789");
         legacy_key_start(&app.db);
         assert!(app.db.get("api_key").starts_with("h:") && !app.db.get("api_key").contains("plainlegacy"));

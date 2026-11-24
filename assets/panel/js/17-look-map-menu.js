@@ -403,7 +403,7 @@ new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.ma
  // Two cards a row on a phone, more on wider screens; everything an admin checks is on the card itself:
  // status dot, name and status; data used / allowed with its bar (gold, amber from 80%, red when used up);
  // days left, connections now / allowed and the protocols; three equal buttons: copy link, QR and edit.
- var PSHORT={wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',mtun:'MT',kping:'KP',xray:'XR',dns:'DNS'};
+ var PSHORT={wg:'WG',awg:'AWG',hy2:'HY2',kmix:'MIX',xray:'XR',dns:'DNS'};
  var gbs=function(g){g=+g||0;return N(g>=100?Math.round(g):g>=10?g.toFixed(1):g.toFixed(2))};
  window.uchip=function(u){var st=ustate(u),lv=liveOf(u),conn=+u.online_connections||0,on=conn>0||lv.length>0,
    dot=st=='disabled'?'r':st=='finished'?'y':(on?'g':''),raw=usageVal(u),now=Date.now()/1000,

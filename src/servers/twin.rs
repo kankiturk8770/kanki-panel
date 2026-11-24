@@ -31,16 +31,30 @@ pub struct Opt {
     pub host: String,
     /// the name of these configs in the app ("" = "<server name> (تانل)")
     pub name: String,
-    /// core (wg, awg, hy2, mtun, xray) -> the Iran address of that core's second config, even when
+    /// core (wg, awg, hy2, xray) -> the Iran address of that core's second config, even when
     /// the server's own tunnel is off
     pub cores: BTreeMap<String, String>,
 }
 
 /// The cores that can have their own Iran address
-pub const CORES: [&str; 6] = ["wg", "awg", "hy2", "mtun", "xray", "kping"];
+pub const CORES: [&str; 4] = ["wg", "awg", "hy2", "xray"];
 
 pub fn all(app: &App) -> HashMap<String, Opt> {
     serde_json::from_str(&app.db.get(KEY)).unwrap_or_default()
+}
+
+/// 3.60: the Iran addresses set for microtun and KPING (gone) go
+pub fn drop_retired(app: &App) {
+    let mut m = all(app);
+    let mut changed = false;
+    for o in m.values_mut() {
+        let n = o.cores.len();
+        o.cores.retain(|k, _| CORES.contains(&k.as_str()));
+        changed |= o.cores.len() != n;
+    }
+    if changed {
+        store(app, &m);
+    }
 }
 
 fn store(app: &App, m: &HashMap<String, Opt>) {
@@ -125,10 +139,9 @@ pub fn key_of_node(app: &App, nid: &str) -> String {
     if sid.is_empty() { format!("node:{}", nid) } else { sid }
 }
 
-/// A server's tunnel: where its second configs connect and what they are called
+/// A server's tunnel: where its second configs connect
 pub struct Twin {
     pub host: String,
-    pub name: String,
     /// the tunnel server id ("" = no agent: ports stay the server's own)
     sid: String,
 }
@@ -166,7 +179,7 @@ impl Twin {
 /// `core`: a core with its own Iran address uses it (None = the server's tunnel). `port`: that core's port here:
 /// with no address typed, the Iran server whose tunnel really carries this port is found by itself (3.58.1: so
 /// one server can send WireGuard through Iran 2 and KANKI MIX through Iran 3 without typing either address).
-fn make(app: &App, key: &str, sid: &str, server_name: &str, core: Option<&str>, port: Option<u16>) -> Option<Twin> {
+fn make(app: &App, key: &str, sid: &str, _server_name: &str, core: Option<&str>, port: Option<u16>) -> Option<Twin> {
     let o = all(app).remove(key)?;
     let own = core.and_then(|c| o.cores.get(c)).map(|h| h.trim().to_string()).filter(|h| !h.is_empty());
     let host = match own {
@@ -178,8 +191,7 @@ fn make(app: &App, key: &str, sid: &str, server_name: &str, core: Option<&str>, 
     if host.is_empty() {
         return None;
     }
-    let name = named(server_name, &o.name);
-    Some(Twin { host, name, sid: sid.to_string() })
+    Some(Twin { host, sid: sid.to_string() })
 }
 
 /// The Iran address of a server's second configs when none is typed: the first server of the tunnel that brings
@@ -240,9 +252,7 @@ pub fn core_port(n: &Node, core: &str) -> Option<u16> {
         "wg" => "wg_port",
         "awg" => "awg_port",
         "hy2" => "hy2_port",
-        "mtun" => "mt_port",
         "kmix" => "kmix_port",
-        "kping" => "kp_port",
         _ => return None,
     };
     let i = crate::api::node_info(n);
@@ -291,7 +301,7 @@ pub fn info(app: &App, key: &str, nid: Option<&str>) -> Value {
         }
         let i = crate::api::node_info(&n);
         let num = |k: &str| i[k].as_str().and_then(|s| s.parse::<u16>().ok()).or_else(|| i[k].as_u64().map(|p| p as u16)).filter(|p| *p > 0);
-        for (k, p, c) in [("wg_port", "WireGuard", "wg"), ("awg_port", "AmneziaWG", "awg"), ("hy2_port", "Hysteria2", "hy2"), ("kmix_port", "KANKI MIX", ""), ("mt_port", "microtun", "mtun"), ("kp_port", "KPING", "kping")] {
+        for (k, p, c) in [("wg_port", "WireGuard", "wg"), ("awg_port", "AmneziaWG", "awg"), ("hy2_port", "Hysteria2", "hy2"), ("kmix_port", "KANKI MIX", "")] {
             let Some(port) = num(k) else { continue };
             // KANKI MIX: the address its config really uses (its own page's setting, else found by itself)
             if c.is_empty() {
@@ -303,7 +313,7 @@ pub fn info(app: &App, key: &str, nid: Option<&str>) -> Value {
                 continue;
             }
             let Some(h) = core_host(c, Some(port)) else { continue };
-            let tw = Twin { host: h.clone(), name: String::new(), sid: sid.clone() };
+            let tw = Twin { host: h.clone(), sid: sid.clone() };
             let via = tw.carried(app, port, false);
             ports.push(json!({ "proto": p, "core": c, "host": h, "port": port, "via": via.unwrap_or(port), "tcp": false, "carried": via.is_some(), "auto": !typed(c) }));
         }
@@ -313,7 +323,7 @@ pub fn info(app: &App, key: &str, nid: Option<&str>) -> Value {
         for ib in x.inbounds.iter().filter(|ib| ib.enabled && ib.server == sid && ib.link_host.trim().is_empty() && ib.link_port == 0) {
             let Some(h) = core_host("xray", Some(ib.port)) else { break };
             let tcp = ib.network != "kcp";
-            let tw = Twin { host: h.clone(), name: String::new(), sid: sid.clone() };
+            let tw = Twin { host: h.clone(), sid: sid.clone() };
             let name = if ib.remark.is_empty() { format!("Xray {}", ib.protocol) } else { format!("Xray {}", ib.remark) };
             let via = tw.carried(app, ib.port, tcp);
             ports.push(json!({ "proto": name, "core": "xray", "host": h, "port": ib.port, "via": via.unwrap_or(ib.port), "tcp": tcp, "carried": via.is_some(), "auto": !typed("xray") }));
@@ -349,9 +359,9 @@ mod tests {
 
     #[test]
     fn ipv6_gets_brackets() {
-        let t = Twin { host: "2001:db8::1".into(), name: String::new(), sid: String::new() };
+        let t = Twin { host: "2001:db8::1".into(), sid: String::new() };
         assert_eq!(t.addr(443), "[2001:db8::1]:443");
-        let t = Twin { host: "ir.example.com".into(), name: String::new(), sid: String::new() };
+        let t = Twin { host: "ir.example.com".into(), sid: String::new() };
         assert_eq!(t.addr(443), "ir.example.com:443");
     }
 }

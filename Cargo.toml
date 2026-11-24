@@ -1,6 +1,6 @@
 [package]
 name = "kanki-panel"
-version = "3.59.1"
+version = "3.60.0"
 edition = "2021"
 
 [dependencies]
@@ -24,9 +24,8 @@ x25519-dalek = "2"
 chacha20poly1305 = "0.10"
 chacha20 = "0.9"
 hkdf = "0.12"
-# microtun (game VPN over TUN): AES-256-GCM data, AES header mask
+# the sealed subscription of the Kanki app (AES-256-GCM)
 aes-gcm = "0.10"
-aes = "0.8"
 tokio-tungstenite = "0.24"
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }

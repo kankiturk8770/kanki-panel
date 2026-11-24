@@ -315,7 +315,7 @@ mod tests {
 
     #[test]
     fn only_the_cdn_host_counts_as_through_the_cdn() {
-        let app = crate::kping::tests::test_app();
+        let app = crate::test_app();
         let h = |v: &str| {
             let mut m = HeaderMap::new();
             m.insert("host", v.parse().unwrap());

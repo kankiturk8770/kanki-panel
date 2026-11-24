@@ -119,9 +119,8 @@ pub struct Use {
 }
 
 pub const PROTOS: [&str; 4] = ["wg", "awg", "hy2", "kmix"];
-/// every protocol with a port of its own per server: the four above and microtun (its port is given
-/// when the server joins, not in the installer's list of four)
-pub const ALL_PROTOS: [&str; 5] = ["wg", "awg", "hy2", "kmix", "mtun"];
+/// every protocol with a port of its own per server
+pub const ALL_PROTOS: [&str; 4] = PROTOS;
 
 fn num(v: &Value) -> Option<u16> {
     v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())).and_then(|p| u16::try_from(p).ok()).filter(|p| *p > 0)
@@ -129,7 +128,7 @@ fn num(v: &Value) -> Option<u16> {
 
 /// The VPN ports of one node: from what it reported, KANKI MIX from the panel's setting (where the
 /// node moves on its next sync).
-fn node_uses(n: &Node, km: &crate::kmix::Settings, mt: Option<&crate::microtun::Settings>, kp: Option<&crate::kping::Settings>) -> Vec<Use> {
+fn node_uses(n: &Node, km: &crate::kmix::Settings) -> Vec<Use> {
     let i = crate::api::node_info(n);
     let has = |k: &str| i[k].as_str().map(|s| !s.is_empty()).unwrap_or(false);
     let mut v = vec![];
@@ -146,21 +145,15 @@ fn node_uses(n: &Node, km: &crate::kmix::Settings, mt: Option<&crate::microtun::
     // sync installs KANKI MIX there (else the next server added got the same port)
     let kmix_given = km.nodes.get(&n.id).map(|o| o.port > 0).unwrap_or(false);
     push("kmix", if km.node_on(&n.id) && (kmix_installed || kmix_given) { Some(km.node_port(&n.id)) } else { None });
-    // microtun: the port the panel wants there (the server moves to it on its next sync)
-    push("mtun", mt.and_then(|s| s.node_on(&n.id).then(|| s.node_port(&n.id))));
-    // KPING: the port the panel wants there too
-    push("kping", kp.and_then(|s| s.node_on(&n.id).then(|| s.node_port(&n.id))));
     v
 }
 
 /// Every VPN port of every server; the panel server first, then the others in the order they joined
 fn all_uses(app: &App) -> Vec<Use> {
     let km = crate::kmix::settings(app);
-    let mt = crate::microtun::settings(app);
-    let kp = crate::kping::settings(app);
     let mut nodes = app.db.nodes();
     nodes.sort_by_key(|n| n.id != "local");
-    nodes.iter().flat_map(|n| node_uses(n, &km, Some(&mt), Some(&kp))).collect()
+    nodes.iter().flat_map(|n| node_uses(n, &km)).collect()
 }
 
 /// The clashes: one server with the same UDP port for two of its cores (3.58.1: the same port on two different
@@ -176,24 +169,6 @@ pub fn clashes(uses: &[Use]) -> Vec<(u16, Vec<(String, &'static str)>)> {
     }
     by.retain(|(_, v)| v.len() > 1);
     by
-}
-
-/// The ports one VPN server holds or will hold, other than KPING's own (3.58.1): its cores, its tunnels and
-/// what it reported listening on, and the well-known ones; a new KPING port there must be none of them
-pub(crate) fn taken_on(app: &App, nid: &str) -> HashSet<u16> {
-    let mut t: HashSet<u16> = [22, 53, 80, 443, 853, 2053, 2083, 2087, 2096, 8080, 8880].into_iter().collect();
-    let km = crate::kmix::settings(app);
-    let mt = crate::microtun::settings(app);
-    if let Some(n) = app.db.nodes().into_iter().find(|n| n.id == nid) {
-        t.extend(node_uses(&n, &km, Some(&mt), None).into_iter().map(|u| u.port));
-    }
-    let sid = crate::twin::sid_of_node(app, nid);
-    if !sid.is_empty() {
-        let kp = crate::kping::settings(app);
-        let own = kp.node_port(nid);
-        t.extend(tp::ports_on_server(app, &sid).into_iter().filter(|p| *p != own && *p != kp.port));
-    }
-    t
 }
 
 /// Every port a new VPN port must not be: the VPN ports of all servers, the ports of tunnels (both
@@ -223,12 +198,12 @@ fn taken(app: &App, uses: &[Use]) -> HashSet<u16> {
     for s in tp::servers(app).iter().filter(|s| !s.join.is_empty()) {
         t.extend(s.ports.iter().copied().filter(|p| *p > 0));
     }
-    // KPING's ports, and what any server says it holds right now (a program the panel does not know)
+    // what any server says it holds right now (a program the panel does not know)
     t.extend(tp::held_anywhere(app));
     t
 }
 
-/// Every port a new VPN core, tunnel or KPING route must not take (the same list `allocate` uses)
+/// Every port a new VPN core or tunnel must not take (the same list `allocate` uses)
 pub(crate) fn all_taken(app: &App) -> HashSet<u16> {
     taken(app, &all_uses(app))
 }
@@ -238,8 +213,6 @@ fn pick(taken: &mut HashSet<u16>, proto: &str) -> u16 {
     let ranges: &[(u16, u16)] = match proto {
         "wg" | "awg" => &[(51820, 51999), (52000, 52999)],
         "hy2" => &[(8443, 8499), (30000, 30999)],
-        "mtun" => &[(4200, 4299), (42000, 42999)],
-        "kping" => &[(24300, 24399), (43000, 43999)],
         _ => &[(4000, 4199), (40000, 40999)],
     };
     for (a, b) in ranges {
@@ -337,7 +310,7 @@ pub async fn fix_ports_of(app: &Arc<App>, only: Option<&str>) -> Value {
     for (nid, list) in by_node {
         let Some(n) = app.db.node(&nid) else { continue };
         let mut body = json!({});
-        for (p, _, nw) in list.iter().filter(|(p, _, _)| *p != "kmix" && *p != "mtun") {
+        for (p, _, nw) in list.iter().filter(|(p, _, _)| *p != "kmix") {
             body[*p] = json!(nw);
         }
         let mut errs: Vec<String> = vec![];
@@ -362,14 +335,11 @@ pub async fn fix_ports_of(app: &Arc<App>, only: Option<&str>) -> Value {
         }
         let agent = agent_of(app, &nid);
         for (p, old, new) in list {
-            let failed = p != "kmix" && p != "mtun" && errs.iter().any(|e| e.starts_with(p) || e.contains("did not answer"));
+            let failed = p != "kmix" && errs.iter().any(|e| e.starts_with(p) || e.contains("did not answer"));
             if !failed {
                 if p == "kmix" {
                     crate::kmix::set_node_port(app, &nid, new);
                     crate::kmix::move_tunnel_port(app, &nid, old, new);
-                }
-                if p == "mtun" {
-                    crate::microtun::set_node_port(app, &nid, new);
                 }
                 // the tunnels that carry this port to this server follow it
                 if let Some(a) = &agent {
@@ -465,26 +435,6 @@ pub fn joined(app: &App, sid: &str, nid: &str) {
             crate::kmix::set_node_off(app, nid, true);
         }
     }
-    // microtun too: the next free port (4200, 4201 …), so a tunnel entry can carry every server
-    let uses: Vec<Use> = all_uses(app).into_iter().filter(|u| !(u.node == nid && u.proto == "mtun")).collect();
-    let mut t = taken(app, &uses);
-    let p = pick(&mut t, "mtun");
-    if p > 0 {
-        crate::microtun::set_node_port(app, nid, p);
-        if !chosen.iter().any(|c| c == "mtun") {
-            crate::microtun::set_node_off(app, nid, true);
-        }
-    }
-    // KPING too, like every core (3.58): its own free port, off when not ticked
-    let uses: Vec<Use> = all_uses(app).into_iter().filter(|u| !(u.node == nid && u.proto == "kping")).collect();
-    let mut t = taken(app, &uses);
-    let p = pick(&mut t, "kping");
-    if p > 0 {
-        crate::kping::set_node_port(app, nid, p);
-        if !chosen.iter().any(|c| c == "kping") {
-            crate::kping::set_node_off(app, nid, true);
-        }
-    }
 }
 
 /// The cores picked in the installer's menu for the panel server itself (`CORES=` in kanki.env), put in
@@ -501,14 +451,12 @@ pub fn install_cores(app: &App) {
         let _ = crate::cores::set(app, "local", c, !has(c));
     }
     crate::kmix::set_node_off(app, "local", !has("kmix"));
-    crate::microtun::set_node_off(app, "local", !has("mtun"));
-    crate::kping::set_node_off(app, "local", !has("kping"));
     app.db.set("install_cores_done", "1");
     eprintln!("cores of this server from the installer: {}", if chosen.is_empty() { "none".to_string() } else { chosen.join(",") });
 }
 
-/// The six cores a server can run
-pub const ALL_CORES: [&str; 6] = ["wg", "awg", "hy2", "kmix", "mtun", "kping"];
+/// The four cores a server can run
+pub const ALL_CORES: [&str; 4] = ["wg", "awg", "hy2", "kmix"];
 
 /// The known cores of a list, in their order, once each
 pub fn clean_cores(v: &Value) -> Vec<String> {
@@ -765,7 +713,7 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let tun = b["tunnel_host"].as_str().unwrap_or("").trim().to_string();
     let name = if name.is_empty() { format!("server-{}", list.len() + 1) } else { name };
     let mut s = new_server(&app, name, loc, domain, b["vpn"].as_bool());
-    // only the tunnel agent, no VPN part (a KPING exit abroad: it needs nothing else)
+    // only the tunnel agent, no VPN part
     if b["agent_only"].as_bool() == Some(true) {
         s.join.clear();
         s.join_exp = 0;
@@ -1046,7 +994,7 @@ fn node_of_key(app: &App, id: &str) -> Result<String, Response> {
 fn port_user(app: &App, nid: &str, proto: &str, port: u16) -> Option<String> {
     let names: HashMap<String, String> = app.db.nodes().into_iter().map(|n| (n.id, n.name)).collect();
     all_uses(app).into_iter().find(|u| u.port == port && !(u.node == nid && u.proto == proto)).map(|u| {
-        format!("UDP {} is already used by {} ({})", port, names.get(&u.node).cloned().unwrap_or(u.node.clone()), match u.proto { "wg" => "WireGuard", "awg" => "AmneziaWG", "hy2" => "Hysteria2", "mtun" => "microtun", _ => "KANKI MIX" })
+        format!("UDP {} is already used by {} ({})", port, names.get(&u.node).cloned().unwrap_or(u.node.clone()), match u.proto { "wg" => "WireGuard", "awg" => "AmneziaWG", "hy2" => "Hysteria2", _ => "KANKI MIX" })
     })
 }
 
@@ -1078,7 +1026,7 @@ async fn set_ports(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b)
         }
     }
     let mut body = json!({});
-    for (p, port) in want.iter().filter(|(p, _)| *p != "kmix" && *p != "mtun") {
+    for (p, port) in want.iter().filter(|(p, _)| *p != "kmix") {
         body[*p] = json!(port);
     }
     let mut errors: Vec<String> = vec![];
@@ -1093,9 +1041,6 @@ async fn set_ports(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b)
             Some(v) => errors.extend(port_errors(&v).0),
             None => errors.push("the server did not answer: press Update agent on it, then try again".into()),
         }
-    }
-    if let Some((_, port)) = want.iter().find(|(p, _)| *p == "mtun") {
-        crate::microtun::set_node_port(&app, &nid, *port);
     }
     if let Some((_, port)) = want.iter().find(|(p, _)| *p == "kmix") {
         let old = crate::kmix::settings(&app).node_port(&nid);
@@ -1239,7 +1184,7 @@ async fn remove(State(app): St, h: HeaderMap, Path(id): Path<String>, Query(q): 
 }
 
 /// Removes a server from the root: its agent part (tunnels through it, Xray, Kanki DNS, the
-/// subscription link, the emergency chat), its VPN node (users' server lists, KANKI MIX, microtun,
+/// subscription link, the emergency chat), its VPN node (users' server lists, KANKI MIX,
 /// core switches, the second config, direct name, exit country, live sessions, pins) and its reserved
 /// ports; the server itself is told to remove everything. Every way of deleting a server ends here.
 /// Gives the id of the removal to follow.
@@ -1455,7 +1400,6 @@ mod tests {
         assert!(!crate::cores::is_off(&app, "n1", "wg") && !crate::cores::is_off(&app, "n1", "awg"));
         assert!(crate::cores::is_off(&app, "n1", "hy2"));
         assert!(crate::kmix::settings(&app).node_on("n1"));
-        assert!(!crate::microtun::settings(&app).node_on("n1"));
         // a server from before (no cores chosen): everything off, as it always was; its command is the same
         let old = new_server(&app, "Old".into(), "abroad".into(), String::new(), Some(true));
         assert!(!command(&app, &old).contains("--cores"));
@@ -1464,8 +1408,8 @@ mod tests {
         tp::save_servers(&app, &list);
         joined(&app, &old.id, "n2");
         assert!(["wg", "awg", "hy2"].iter().all(|c| crate::cores::is_off(&app, "n2", c)));
-        // KANKI MIX and microtun too (they were left on: nothing ticked switched two cores on)
-        assert!(!crate::kmix::settings(&app).node_on("n2") && !crate::microtun::settings(&app).node_on("n2"));
+        // KANKI MIX too (it was left on: nothing ticked switched a core on)
+        assert!(!crate::kmix::settings(&app).node_on("n2"));
     }
 
     #[test]
@@ -1536,10 +1480,10 @@ mod tests {
         };
         let mut km = crate::kmix::Settings { on: true, port: 4000, parity: 3, hop: String::new(), gaming: true, nodes: Default::default() };
         // not installed and no port of its own: nothing to hold yet
-        assert!(!node_uses(&n, &km, None, None).iter().any(|u| u.proto == "kmix"));
+        assert!(!node_uses(&n, &km).iter().any(|u| u.proto == "kmix"));
         // given 4001 when it joined: held from then on, so the next server gets another one
         km.nodes.insert("n1".into(), crate::kmix::NodeOpt { port: 4001, ..Default::default() });
-        assert!(node_uses(&n, &km, None, None).contains(&Use { node: "n1".into(), proto: "kmix", port: 4001 }));
+        assert!(node_uses(&n, &km).contains(&Use { node: "n1".into(), proto: "kmix", port: 4001 }));
     }
 
     #[test]
