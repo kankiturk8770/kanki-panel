@@ -1,3 +1,11 @@
+# v3.59.0 — KANKI MIX: smart gaming
+- **Shared `internal/game`** (server `src/vpn/kmix-server` and the app's `kmix-core`, the same files): sliding-window RLC repair (KPING v3's code, smaller blocks), a loss meter on first copies, a policy with hysteresis, a flow classifier and a delayed sender.
+- **The line is measured, not guessed:** both sides count the raw loss of the game packets they receive and tell each other every second (`KindStat`, only between new peers). A clean line gets nothing extra (fewer bytes than the old gaming mode). Loss: windowed repairs (`KindRepair`) in proportion to it, a few ms after the packet; runs of lost packets: a repair after every packet over 16; heavy loss: a second copy 25 ms later as well (`KindUDPDownCopy`, `FlagCopy`). Up at once, down only after 8 s of a better line.
+- **Only the game:** DNS, QUIC, big packets and bulk UDP are never copied or repaired; the app flags game flows (`FlagGame`).
+- **Downloads do not fill the line in front of the game** (app: KCP window 128 while playing, 512 after) and **a cut or slowed port moves to the next port of the server** with the same session (app).
+- **Backward compatible:** the 16-byte ping is untouched; old apps get the old `FlagDup` (the copy now 25 ms later), old servers are used the old way.
+- Recorder knows the new kinds. Lab (real server, simulated line, 60 packets/s, on time ≤ 150 ms): clean 100% with 40% fewer bytes than the old gaming mode; 3% loss 100% (was 99.9); bursty 100% (was 98.0); 10% + bursts 100% (was 87.5).
+
 # v3.58.1 — the server audit, fixed
 - **Old KPING routes gone** (`kping::drop_routes`, once): they bound tunnels to 127.0.0.1 and held ports. KPING is only the core of each server.
 - **Services stay what was sold:** «add to all users» never puts a protocol of another service on an account (`assign_fits`); V2Ray accounts that became VIP go back once (`fix_services_once`); `/raw` of a V2Ray account is its V2Ray links. V2Ray = Xray + Hysteria2 (switch in the mini app), gaming and VIP have microtun.

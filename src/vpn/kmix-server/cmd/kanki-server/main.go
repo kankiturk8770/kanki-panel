@@ -230,6 +230,7 @@ type udpFlow struct {
 	downSeq  atomic.Uint32
 	mu       sync.Mutex
 	win      proto.Window
+	s        flowSmart
 }
 
 type dgramRelay struct {
@@ -238,10 +239,11 @@ type dgramRelay struct {
 	mu      sync.Mutex
 	flows   map[flowKey]*udpFlow
 	perSess map[uint64]int
+	sess    map[uint64]*smartSess // apps that report (smart.go)
 }
 
 func newDgramRelay(send func(byte, []byte, net.Addr)) *dgramRelay {
-	return &dgramRelay{send: send, flows: make(map[flowKey]*udpFlow), perSess: make(map[uint64]int)}
+	return &dgramRelay{send: send, flows: make(map[flowKey]*udpFlow), perSess: make(map[uint64]int), sess: make(map[uint64]*smartSess)}
 }
 
 // handle داخل حلقه‌ی خواندن سوکت اصلی صدا زده می‌شود؛ پس هیچ کار کندی اینجا نیست.
@@ -265,14 +267,18 @@ func (r *dgramRelay) handle(kind byte, b []byte, addr net.Addr) {
 			return
 		}
 		f.client.Store(ua)
-		f.dup.Store(h.Flags&proto.FlagDup != 0)
+		if h.Flags&proto.FlagCopy == 0 {
+			f.dup.Store(h.Flags&proto.FlagDup != 0)
+		}
 		f.lastSeen.Store(time.Now().Unix())
 		f.mu.Lock()
 		fresh := f.win.Accept(h.Seq)
 		f.mu.Unlock()
-		if fresh {
-			f.conn.Write(payload)
-		}
+		r.upData(f, h, payload, fresh)
+	case proto.KindRepair:
+		r.onRepairUp(b, addr)
+	case proto.KindStat:
+		r.onStat(b, addr)
 	}
 }
 
@@ -307,6 +313,7 @@ func (r *dgramRelay) getFlow(h proto.UDPUp) *udpFlow {
 	f.lastSeen.Store(time.Now().Unix())
 	r.flows[k] = f
 	r.perSess[k.sess]++
+	r.smartAdd(f)
 	go r.readLoop(f)
 	return f
 }
@@ -330,12 +337,9 @@ func (r *dgramRelay) readLoop(f *udpFlow) {
 			continue // بزرگ‌تر از ظرفیت تونل؛ مثل یک بسته‌ی گم‌شده رفتار می‌شود
 		}
 		f.lastSeen.Store(time.Now().Unix())
-		out = proto.AppendUDPDown(out[:0], f.key.flow, f.downSeq.Add(1), buf[:n])
-		client := f.client.Load()
-		r.send(proto.KindUDPDown, out, client)
-		if f.dup.Load() {
-			r.send(proto.KindUDPDown, out, client)
-		}
+		seq := f.downSeq.Add(1)
+		out = proto.AppendUDPDown(out[:0], f.key.flow, seq, buf[:n])
+		r.sendDown(f, seq, buf[:n], out)
 	}
 }
 
@@ -347,6 +351,7 @@ func (r *dgramRelay) remove(f *udpFlow) {
 		if r.perSess[f.key.sess]--; r.perSess[f.key.sess] <= 0 {
 			delete(r.perSess, f.key.sess)
 		}
+		r.smartDrop(f)
 	}
 	r.mu.Unlock()
 }
@@ -361,6 +366,7 @@ func (r *dgramRelay) janitor() {
 				dead = append(dead, f)
 			}
 		}
+		r.smartGC()
 		r.mu.Unlock()
 		for _, f := range dead {
 			f.conn.Close() // readLoop خودش remove را صدا می‌زند

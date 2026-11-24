@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.59 — KANKI MIX smart gaming
+KANKI MIX measures the line and repairs only the game, only as much as the line loses (nothing on a clean line); downloads never fill the line in front of the game; a slowed port moves to the next one.
+
 ## New in 3.58.1 — the server audit, fixed
 Old KPING routes removed, services stay what was sold, per-core Iran tunnel address, faster connection limit, firewall cleanup, logs of every server, tidy core pages, journald capped.
 

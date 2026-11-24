@@ -186,8 +186,10 @@ func (r *recorder) packet(in bool, kind byte, wire int, p []byte, addr string) {
 		default:
 			b.Other++
 		}
-	case proto.KindPing, proto.KindPong:
+	case proto.KindPing, proto.KindPong, proto.KindStat:
 		b.Ping++
+	case proto.KindRepair:
+		b.Parity++
 	case proto.KindUDPUp:
 		if !in {
 			return
@@ -204,7 +206,7 @@ func (r *recorder) packet(in bool, kind byte, wire int, p []byte, addr string) {
 		if h.DstPort == 53 {
 			r.dnsQuery(t, pl)
 		}
-	case proto.KindUDPDown:
+	case proto.KindUDPDown, proto.KindUDPDownCopy:
 		if in {
 			return
 		}
