@@ -4,6 +4,7 @@
 use super::awg::{self, AwgCfg, AwgSpec};
 use super::hy2t::{self, Hy2Cfg, Hy2Spec};
 use super::kfwd::{FwdCfg, FwdSpec};
+use super::kup::{KupCfg, KupSpec};
 use super::engine::{parse_ports, Manager, Spec, Status};
 use crate::api::err;
 use crate::guard;
@@ -104,6 +105,10 @@ pub struct Tunnel {
     /// kind "fwd": a direct tunnel in the kernel (iptables straight to the exit, or a GRE link)
     #[serde(default, skip_serializing_if = "fwd_unset")]
     pub fwd: FwdCfg,
+    /// kind "kup": KANKI-UP, the official udp2raw between the two servers (one pair per UDP port; the exit's raw
+    /// ports are `port`, `port + 1`, …)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kup: Option<KupCfg>,
     /// game transport: FEC "data:parity" ("8:3"; "off" disables) and packet duplication
     pub fec: String,
     pub dup: bool,
@@ -125,6 +130,8 @@ fn fwd_unset(f: &FwdCfg) -> bool {
 
 /// Direct tunnels (kind "fwd") exist from this agent version on: an older one would run them as a Kanki tunnel
 const FWD_FROM: &str = "3.59.0";
+/// KANKI-UP tunnels (kind "kup") exist from this agent version on
+const KUP_FROM: &str = "3.61.0";
 
 /// The other server's address for a direct tunnel: the public IPv4 it reports from (a name may sit behind a CDN)
 fn fwd_peer(app: &App, sid: &str) -> String {
@@ -362,6 +369,11 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             out.push(Spec { id: t.id.clone(), name: t.name.clone(), role: role.into(), transport: "fwd".into(), tcp: t.tcp.clone(), udp: t.udp.clone(), fwd: Some(f), ..Default::default() });
             continue;
         }
+        if t.kind == "kup" {
+            let k = kup_specs(app, &t, role);
+            out.push(Spec { id: t.id.clone(), name: t.name.clone(), role: role.into(), mode: "direct".into(), transport: "kup".into(), udp: t.udp.clone(), kup: Some(k), ..Default::default() });
+            continue;
+        }
         if t.kind == "hy2" {
             let y = hy2_spec(app, &t, role);
             out.push(Spec { id: t.id.clone(), name: t.name.clone(), role: role.into(), transport: "hy2".into(), hy2: Some(y), ..Default::default() });
@@ -404,6 +416,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             awg: None,
             hy2: None,
             fwd: None,
+            kup: None,
             fec: t.fec.clone(),
             dup: t.dup,
             profile: if t.transport == "game" { t.profile.clone() } else { String::new() },
@@ -441,6 +454,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                     awg: None,
                     hy2: None,
                     fwd: None,
+                    kup: None,
                     fec: String::new(),
                     dup: false,
                     profile: String::new(),
@@ -475,6 +489,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                         awg: None,
                         hy2: None,
                         fwd: None,
+                        kup: None,
                         fec: String::new(),
                         dup: false,
                         profile: String::new(),
@@ -1017,6 +1032,112 @@ fn fwd_apply_body(list: &[Tunnel], t: &mut Tunnel, f: &Value) -> Result<(), Stri
     }
     if !t.target.trim().is_empty() && t.target.trim().parse::<std::net::Ipv4Addr>().is_err() {
         return Err("the target on the exit must be an IPv4 address".into());
+    }
+    Ok(())
+}
+
+/// KANKI-UP: the udp2raw pair of every forwarded UDP port of tunnel `t` on server `role`. The exit's raw port
+/// of the i-th UDP port is `port + i`; the entry dials the exit's public IPv4 (or the address written in `dial`).
+fn kup_specs(app: &App, t: &Tunnel, role: &str) -> Vec<KupSpec> {
+    let cfg = t.kup.clone().unwrap_or_default();
+    let exit_host = if !t.dial.trim().is_empty() { t.dial.trim().to_string() } else { fwd_peer(app, &t.exit) };
+    parse_ports(&t.udp)
+        .into_iter()
+        .enumerate()
+        .map(|(i, (a, b))| {
+            let raw = t.port.saturating_add(i as u16);
+            let (listen, host, port) = if role == "entry" { (a, exit_host.clone(), raw) } else { (raw, t.target.trim().to_string(), b) };
+            KupSpec { tid: t.id.clone(), name: t.name.clone(), role: role.into(), idx: i as u16, listen, host, port, cfg: cfg.clone() }
+        })
+        .collect()
+}
+
+/// The KANKI-UP part of a request: udp2raw's options (only the known values), a key made here the first time.
+/// UDP only, one udp2raw pair per port; ICMP has no port numbers, so it carries one port.
+fn kup_apply_body(t: &mut Tunnel, k: &Value) -> Result<(), String> {
+    let mut c = t.kup.clone().unwrap_or_default();
+    let s = |n: &str| k[n].as_str().map(|v| v.trim().to_string());
+    if let Some(v) = s("raw_mode") {
+        c.raw_mode = v;
+    }
+    if let Some(v) = s("cipher") {
+        c.cipher = v;
+    }
+    if let Some(v) = s("auth") {
+        c.auth = v;
+    }
+    if let Some(v) = k["seq_mode"].as_u64() {
+        c.seq_mode = v.min(255) as u8;
+    }
+    if let Some(v) = k["fix_gro"].as_bool() {
+        c.fix_gro = v;
+    }
+    if let Some(v) = k["anti_replay"].as_bool() {
+        c.anti_replay = v;
+    }
+    if let Some(v) = k["hb_len"].as_u64() {
+        c.hb_len = v.min(65535) as u16;
+    }
+    if let Some(v) = k["mtu_warn"].as_u64() {
+        c.mtu_warn = v.min(65535) as u16;
+    }
+    if let Some(v) = k["sock_buf"].as_u64() {
+        c.sock_buf = v.min(65535) as u16;
+    }
+    if let Some(v) = k["force_sock_buf"].as_bool() {
+        c.force_sock_buf = v;
+    }
+    if let Some(v) = k["lower_level"].as_bool() {
+        c.lower_level = v;
+    }
+    // a key is never sent back to the browser: empty keeps the one there is; "new_key" makes another
+    if k["new_key"].as_bool() == Some(true) || !super::kup::key_ok(&c.key) {
+        c.key = rand_token(32);
+    }
+    c.check()?;
+    t.transport = "kup".into();
+    t.mode = "direct".into();
+    t.auto = false;
+    t.order.clear();
+    if !t.tcp.is_empty() {
+        return Err("KANKI-UP carries UDP ports only (WireGuard, AmneziaWG, KANKI MIX, Hysteria2 …): remove the TCP ports".into());
+    }
+    let n = parse_ports(&t.udp).len();
+    if n > super::kup::MAX_PORTS {
+        return Err(format!("KANKI-UP carries at most {} UDP ports", super::kup::MAX_PORTS));
+    }
+    if c.raw_mode == "icmp" && n > 1 {
+        return Err("in ICMP mode KANKI-UP carries one UDP port (ICMP has no port numbers): make one tunnel per port".into());
+    }
+    if t.port > 0 && (t.port as usize) + n.max(1) - 1 > 65535 {
+        return Err("the raw ports of the exit go past 65535: pick a smaller first port".into());
+    }
+    if !t.target.trim().is_empty() && t.target.trim().parse::<std::net::Ipv4Addr>().is_err() {
+        return Err("the target on the exit must be an IPv4 address".into());
+    }
+    if !t.dial.trim().is_empty() && super::kfwd::resolve(t.dial.trim()).is_none() && !t.dial.trim().chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+        return Err("the exit address is an IPv4 address or a domain".into());
+    }
+    t.kup = Some(c);
+    Ok(())
+}
+
+/// Both ends must know KANKI-UP
+fn kup_checks(app: &App, t: &Tunnel) -> Result<(), String> {
+    if !t.enabled {
+        return Ok(());
+    }
+    let names: HashMap<String, String> = servers(app).into_iter().map(|s| (s.id, s.name)).collect();
+    let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
+    for sid in [&t.entry, &t.exit] {
+        if sid == "local" {
+            continue;
+        }
+        if let Some(x) = sn.get(sid.as_str()) {
+            if !x.version.is_empty() && ver_lt(&x.version, KUP_FROM) {
+                return Err(format!("the agent of \"{}\" is v{}: update it first (Update all), KANKI-UP needs {}", names.get(sid.as_str()).cloned().unwrap_or_default(), x.version, KUP_FROM));
+            }
+        }
     }
     Ok(())
 }
@@ -1921,6 +2042,10 @@ async fn list(State(app): St, h: HeaderMap) -> Response {
             v["wrap_entry"] = status_json(w(&tu.entry).as_ref());
             v["wrap_exit"] = status_json(w(&tu.exit).as_ref());
         }
+        if tu.kind == "kup" {
+            // the key stays on the servers
+            v["kup"]["key"] = json!("");
+        }
         if tu.kind == "fwd" {
             v["fwd"]["entry_ip"] = json!(tu.fwd.entry_ip());
             v["fwd"]["exit_ip"] = json!(tu.fwd.exit_ip());
@@ -2003,6 +2128,22 @@ fn tunnel_needs(t: &Tunnel) -> Vec<(String, u16, bool)> {
     if t.kind == "hy2" || (t.kind == "awg" && !t.awg.wrap) {
         return v;
     }
+    // KANKI-UP: the exit's raw ports (TCP or UDP by the raw mode; ICMP none) and the entry's UDP ports
+    if t.kind == "kup" {
+        let c = t.kup.clone().unwrap_or_default();
+        let n = parse_ports(&t.udp).len();
+        if t.port > 0 && (c.on_tcp() || c.on_udp()) {
+            for i in 0..n {
+                if let Some(p) = t.port.checked_add(i as u16) {
+                    v.push((t.exit.clone(), p, c.on_udp()));
+                }
+            }
+        }
+        for (p, _) in parse_ports(&t.udp) {
+            v.push((t.entry.clone(), p, true));
+        }
+        return v;
+    }
     let listener = if t.mode == "direct" { t.exit.clone() } else { t.entry.clone() };
     let (tcp, udp) = port_protos(&t.transport);
     if t.port > 0 {
@@ -2034,7 +2175,7 @@ fn live_clash(app: &App, t: &Tunnel, old: Option<&Tunnel>) -> Option<String> {
                 continue;
             }
             // the agent itself, also when it runs without systemd (a container, started by hand): no unit
-            let ours = unit == "kanki-tunnel.service" || unit.starts_with("kanki-hy2-") || (sid == "local" && unit == "kanki-panel.service")
+            let ours = unit == "kanki-tunnel.service" || unit.starts_with("kanki-hy2-") || unit.starts_with("kanki-up-") || (sid == "local" && unit == "kanki-panel.service")
                 || (unit.is_empty() && prog == "kanki-panel");
             if ours && (own.contains(&(sid.clone(), port, udp))) {
                 continue;
@@ -2246,6 +2387,7 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
             "awg" => "awg".into(),
             "hy2" => "hy2".into(),
             "fwd" => "fwd".into(),
+            "kup" => "kup".into(),
             _ => String::new(),
         };
     }
@@ -2255,6 +2397,13 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         }
     } else {
         t.fwd = FwdCfg::default();
+    }
+    if t.kind == "kup" {
+        if let Err(e) = kup_apply_body(&mut t, &b["kup"]) {
+            return err(StatusCode::BAD_REQUEST, &e);
+        }
+    } else {
+        t.kup = None;
     }
     if t.kind == "hy2" {
         if let Err(e) = hy2_apply_body(&list, &mut t, &b["hy2"]) {
@@ -2301,10 +2450,17 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
             return err(StatusCode::CONFLICT, &e);
         }
     }
+    if t.kind == "kup" {
+        if let Err(e) = kup_checks(&app, &t) {
+            return err(StatusCode::CONFLICT, &e);
+        }
+    }
     // no port written: the first one nothing holds on the listening server (and no VPN core uses anywhere)
     if t.port == 0 && t.kind != "hy2" && t.kind != "fwd" {
         let listener = if t.mode == "direct" { t.exit.clone() } else { t.entry.clone() };
-        if let Some(p) = free_ports(&app, &listener, AUTO_TUNNEL_PORT, 1) {
+        // KANKI-UP: one raw port per UDP port, in a row
+        let need = if t.kind == "kup" { parse_ports(&t.udp).len().max(1) as u16 } else { 1 };
+        if let Some(p) = free_ports(&app, &listener, AUTO_TUNNEL_PORT, need) {
             t.port = p;
         }
     }
@@ -2324,7 +2480,7 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let my_pr = port_protos(&t.transport);
     // does a tunnel port (of a transport with these protocols) hit one of these forwarded ports?
     let hits = |pr: (bool, bool), port: u16, tcp: &[u16], udp: &[u16]| (pr.0 && tcp.contains(&port)) || (pr.1 && udp.contains(&port));
-    if listener == t.entry && t.port > 0 {
+    if listener == t.entry && t.port > 0 && t.kind != "kup" {
         if my_pr.0 && mine_tcp.contains(&t.port) {
             return err(StatusCode::BAD_REQUEST, "the tunnel port is also in the forwarded TCP ports");
         }
@@ -2333,6 +2489,19 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         }
     }
     for o in list.iter().filter(|o| o.id != t.id && o.enabled && !(o.kind == "awg" && !o.awg.wrap)) {
+        // KANKI-UP holds a row of raw ports: every port either tunnel needs, on each server, by protocol
+        if t.kind == "kup" || o.kind == "kup" {
+            // ICMP has no port numbers: one ICMP KANKI-UP per exit server takes its echo packets
+            let icmp = |x: &Tunnel| x.kind == "kup" && x.kup.as_ref().map(|c| c.raw_mode == "icmp").unwrap_or(false);
+            if icmp(&t) && icmp(o) && o.exit == t.exit {
+                return err(StatusCode::CONFLICT, &format!("the exit already has an ICMP KANKI-UP: \"{}\" (ICMP has no ports, one per server)", o.name));
+            }
+            let theirs = tunnel_needs(o);
+            if let Some((_, p, udp)) = tunnel_needs(&t).into_iter().find(|x| theirs.contains(x)) {
+                return err(StatusCode::CONFLICT, &format!("{} port {} is already used by the tunnel \"{}\"", if udp { "UDP" } else { "TCP" }, p, o.name));
+            }
+            continue;
+        }
         let o_listener: String = if o.mode == "direct" { o.exit.clone() } else { o.entry.clone() };
         let o_pr = port_protos(&o.transport);
         let o_tcp: Vec<u16> = parse_ports(&o.tcp).into_iter().map(|p| p.0).collect();
@@ -4016,5 +4185,63 @@ mod fwd_tests {
         // an agent too old for it
         seen().lock().unwrap().get_mut("fw_de").unwrap().version = "3.58.1".into();
         assert!(fwd_checks(&app, &t).unwrap_err().contains("3.59.0"));
+    }
+
+    /// KANKI-UP: a udp2raw pair per UDP port with a row of raw ports on the exit, the same options on both ends,
+    /// a key that stays, only known values, UDP only, old agents refused, and the cores' ports followed through Iran
+    #[test]
+    fn a_kanki_up_tunnel_gives_each_port_its_udp2raw_pair() {
+        let dir = std::env::temp_dir().join(format!("kanki-kup-test-{}", rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let app = Arc::new(App {
+            db: crate::db::Db::open(dir.join("kanki.db").to_str().unwrap()), env: HashMap::new(),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        });
+        save_servers(&app, &[
+            TServer { id: "ku_ir".into(), name: "IRAN".into(), loc: "iran".into(), addr: "ir.example.com".into(), ..Default::default() },
+            TServer { id: "ku_tr".into(), name: "TR".into(), addr: "tr.example.com".into(), ..Default::default() },
+        ]);
+        {
+            let mut sn = seen().lock().unwrap();
+            sn.insert("ku_ir".into(), Seen { at: now(), ip: "198.51.100.11".into(), version: KUP_FROM.into(), ..Default::default() });
+            sn.insert("ku_tr".into(), Seen { at: now(), ip: "203.0.113.21".into(), version: KUP_FROM.into(), ..Default::default() });
+        }
+        let mut t = Tunnel { id: "kua".into(), name: "u".into(), entry: "ku_ir".into(), exit: "ku_tr".into(), kind: "kup".into(), enabled: true, port: 29000, udp: vec!["51820".into(), "4000".into(), "1443:443".into()], ..Default::default() };
+        kup_apply_body(&mut t, &json!({ "raw_mode": "faketcp", "seq_mode": 4 })).unwrap();
+        let key = t.kup.clone().unwrap().key;
+        assert!(crate::tunnel::kup::key_ok(&key) && t.transport == "kup" && t.mode == "direct");
+        // an edit without a key keeps it; "new_key" makes another
+        kup_apply_body(&mut t, &json!({ "key": "" })).unwrap();
+        assert_eq!(t.kup.clone().unwrap().key, key);
+        let mut t2 = t.clone();
+        kup_apply_body(&mut t2, &json!({ "new_key": true })).unwrap();
+        assert_ne!(t2.kup.unwrap().key, key);
+        // UDP only, one port in ICMP mode, only known values
+        assert!(kup_apply_body(&mut Tunnel { tcp: vec!["443".into()], ..t.clone() }, &json!({})).is_err());
+        assert!(kup_apply_body(&mut t.clone(), &json!({ "raw_mode": "icmp" })).is_err());
+        assert!(kup_apply_body(&mut t.clone(), &json!({ "raw_mode": "faketcp\n--clear" })).is_err());
+        assert!(kup_apply_body(&mut t.clone(), &json!({ "cipher": "rc4" })).is_err());
+        assert!(kup_apply_body(&mut Tunnel { target: "1.2.3.4; reboot".into(), ..t.clone() }, &json!({})).is_err());
+        assert!(kup_apply_body(&mut Tunnel { port: 65535, ..t.clone() }, &json!({})).is_err());
+        assert!(kup_checks(&app, &t).is_ok());
+        save_tunnels(&app, &[t.clone()]);
+        // the entry listens on the users' UDP ports (in port order) and dials the exit's public IPv4 on port + i
+        let e = specs_for(&app, "ku_ir").into_iter().find(|s| s.id == "kua").unwrap().kup.unwrap();
+        assert_eq!(e.iter().map(|w| (w.listen, w.host.as_str(), w.port)).collect::<Vec<_>>(), vec![(1443, "203.0.113.21", 29000), (4000, "203.0.113.21", 29001), (51820, "203.0.113.21", 29002)]);
+        // the exit listens on the raw ports and hands the datagrams to the cores on 127.0.0.1
+        let x = specs_for(&app, "ku_tr").into_iter().find(|s| s.id == "kua").unwrap().kup.unwrap();
+        assert_eq!(x.iter().map(|w| (w.listen, w.host.as_str(), w.port)).collect::<Vec<_>>(), vec![(29000, "", 443), (29001, "", 4000), (29002, "", 51820)]);
+        assert!(e.iter().chain(x.iter()).all(|w| w.cfg == e[0].cfg && w.cfg.seq_mode == 4 && w.cfg.key == key));
+        // what it holds: TCP 29000-29002 on the exit (faketcp), UDP 51820/4000/1443 on the entry
+        let needs = tunnel_needs(&t);
+        assert!(needs.contains(&("ku_tr".into(), 29002, false)) && needs.contains(&("ku_ir".into(), 1443, true)) && !needs.contains(&("ku_tr".into(), 29003, false)));
+        // the second config of KANKI MIX (UDP 4000 of the exit) and WireGuard go through the Iran server
+        assert_eq!(port_entry_at(&app, "ku_tr", 4000, false, ""), Some(("ku_ir".to_string(), 4000)));
+        assert_eq!(port_entry_at(&app, "ku_tr", 443, false, ""), Some(("ku_ir".to_string(), 1443)));
+        // an agent too old for it
+        seen().lock().unwrap().get_mut("ku_tr").unwrap().version = "3.60.1".into();
+        assert!(kup_checks(&app, &t).unwrap_err().contains(KUP_FROM));
     }
 }

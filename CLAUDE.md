@@ -30,7 +30,7 @@ src/
 │   └── kmix-server/   سورس Go سرور KANKI MIX (`build.sh` ← assets/bin/kanki-mix-server؛ CI می‌سازد)
 ├── bot/               ربات تلگرام: bot.rs، shop.rs، miniapp.rs، channel.rs، ai.rs، pay.rs، buttons.rs، monitor.rs (ربات گزارش‌ها)
 ├── tunnel/            تانل‌ها: mod.rs، engine.rs، link.rs، agent.rs، panel.rs (تانل‌ها و سرورهای تانل در پنل)، probe.rs، quality.rs، tests.rs
-│   └── transport/     پروتکل‌های سیم: quic، hq، salamander، h2ws، dual، obfs، mux، fec، game، dgram (لاین بی‌ترتیب UDP گیم)، faketcp، awg، hy2t، kfwd (مستقیم: NAT/GRE)
+│   └── transport/     پروتکل‌های سیم: quic، hq، salamander، h2ws، dual، obfs، mux، fec، game، dgram (لاین بی‌ترتیب UDP گیم)، faketcp، awg، hy2t، kfwd (مستقیم: NAT/GRE)، kup (KANKI-UP: udp2raw)
 ├── xray/              mod.rs (Xray روی سرور)، panel.rs (Xray در پنل و لینک‌ها)
 ├── dns/               DNS کانکی: mod.rs، engine.rs، doh.rs، sni.rs، wire.rs، panel.rs
 └── emergency/         چت اضطراری: mod.rs
@@ -41,7 +41,7 @@ assets/
 ├── emergency/         admin.html (پنل چت اضطراری)
 ├── fonts/             vazirmatn.woff (مشترک پنل، اشتراک و چت)
 ├── dns/               فهرست سرویس‌ها و آیکن‌های DNS
-└── bin/               فایل سرور KANKI MIX
+└── bin/               فایل سرور KANKI MIX، udp2raw رسمی (`udp2raw_amd64.gz` + مجوزش)
 ```
 
 | کار | فایل |
@@ -94,6 +94,7 @@ assets/
 | لاین بی‌ترتیب UDP همهٔ تانل‌های UDP (بسته‌ی بازی پشت بسته‌ی گم‌شده نمی‌ماند؛ فریم `DGOK` در `mux.rs`) | `src/tunnel/transport/dgram.rs` (+ `game.rs`، `obfs.rs`، `faketcp.rs`، `quic::quic_lane` برای quic/hq/dual) |
 | **Game-FEC Pro** (3.57: `game` با FEC `auto`): ترمیم به اندازهٔ افت خط (گزارش `0xF5` هر نیم ثانیه، `SHAPES`، سقف دو برابر)، فقط بازی کد می‌شود (`0xF6` ساده برای KCP و bulk)، هستهٔ همراه `Tunnel.profile` (`kmix`: خروجی علامت EF را می‌خواند، `UDPB` در `mux.rs`) | `src/tunnel/transport/game.rs` (`Adapt`، `Out::report`)، `fec.rs` (`adaptive`، `set_shape`)، `mux.rs` (`classify`، `UDPB`)، `dgram.rs` (`send_as`)، `TPROF` در `12-tunnels.js` |
 | **تانل مستقیم در کرنل** (3.59، نوع `fwd`): `nat` (DNAT ورودی ← IP خروجی) یا `gre` (لینک GRE ‏10.89.N.0/30)، زنجیره‌های `KFWD-*`، آدرس واقعی سرور (`fwd_peer`)، نسخه‌ی ایجنت `FWD_FROM` | `src/tunnel/transport/kfwd.rs`، `panel.rs` (`fwd_apply_body`، `fwd_checks`)، `tw_fw`/`tw_fm` در `12-tunnels.js`؛ آزمایشگاه `scripts/kfwd_lab.sh` |
+| **KANKI-UP** (3.61، نوع `kup`): udp2raw رسمی 20230206.0 (داخل برنامه، gzip، SHA-256 فایل انتشار چک می‌شود) بین دو سرور؛ هر پورت UDP یک جفت (ورودی `-c` روی پورت کاربر، خروجی `-s` روی پورت خام `port + i`)، هر کدام یک واحد systemd `kanki-up-<id>-<i>` با فایل تنظیمات 0600 (کلید در `ps` دیده نمی‌شود)؛ حالت faketcp/easy-faketcp/udp/icmp، همه‌ی گزینه‌ها در فرم؛ پورت‌های خام در فایروال **بسته** می‌مانند (جز easy-faketcp)؛ فقط UDP، ICMP یک پورت و یکی برای هر خروجی | `src/tunnel/transport/kup.rs`، `panel.rs` (`kup_specs`، `kup_apply_body`، `kup_checks`، `tunnel_needs`)، `agent.rs` (`open_ports`)، `#tw_kup` در `12-tunnels.js`؛ آزمایشگاه `scripts/kup_lab.sh` |
 | موتور تانل، لینک رمزشده، ایجنت سرور تانل (`tunnel-agent`, `tunnel-run`)، تست تانل هوشمند | `src/tunnel/engine.rs`, `link.rs`, `agent.rs`, `probe.rs` |
 | پروتکل‌های تانل (QUIC/KCP، hq، h2، game+FEC، faketcp، awg، hy2، mux، obfs) | `src/tunnel/transport/*.rs` |
 | کیفیت مسیرها در ربات (سنجش UDP داخل هر تانل هر دقیقه، «📡 وضعیت مسیرها» صفحهٔ مینی‌اپ `?admin=paths` و `quality::view`، سوییچ هشدار `path_alerts`) | `src/tunnel/quality.rs` (+ `engine::quality_task`، `probe::udp_quality`، `panel::live_quality`/`live_lanes`، `drawPaths` در `miniapp.html`) |
@@ -435,6 +436,7 @@ assets/
 ### فهرست نسخه‌ها
 | نسخه | تاریخ | خلاصه | PR |
 |---|---|---|---|
+| 3.61.0 | 2026-11-25 | تانل KANKI-UP: udp2raw رسمی (FakeTCP/UDP/ICMP رمزشده، بی ارسال دوباره) بین دو سرور برای همه‌ی هسته‌های UDP، با همه‌ی تنظیماتش در فرم تانل | |
 | 3.60.1 | 2026-11-24 | KANKI MIX بی بسته‌ی اضافه روی خط تمیز: پله‌ها فقط از افت واقعی، همراه اپ ۱.۴۴.۱ | |
 | 3.60.0 | 2026-11-24 | KANKI MIX چند مسیر (وای‌فای + دیتا، مستقیم + تانل ایران) هوشمند، همراه اپ ۱.۴۴؛ microtun و KPING از ریشه حذف (پنل، اپ، ویندوز)؛ ردیف‌های تانل‌ها یکدست | |
 | 3.59.1 | 2026-11-24 | صفحهٔ ربات فروش تمیز: بخش‌های مخفی قدیمی، «گزارش روزانه» (kanki-watch) و تنظیمات › اعلان‌ها حذف؛ بکاپ روزانه با سوییچ در ربات گزارش‌ها | |
@@ -507,6 +509,14 @@ assets/
 | 3.20.1 | 2026-10-29 | بکاپ، سرور ایران فقط تانل، gzip صفحه، اسکیل طراحی | |
 
 جزئیات هر نسخه: `docs/CHANGES.md`. گزارش‌های کامل قدیمی (تا 3.23.1) در تاریخچهٔ git همین فایل هستند.
+
+### آخرین کارها — 3.61.0 (2026-11-25، برنچ `ccr-f970ec4f-jrr11c`)
+**خواسته:** udp2raw (سایت و دو فایل صاحب پنل) به‌عنوان تانل «KANKI-UP» در بخش تانل‌های کانکی، با همه‌ی امکاناتش، بی تغییر بی‌جا در کد خودش، برای همه‌ی هسته‌ها و بی تداخل پورت.
+**فایل‌ها:** فایل باینری صاحب پنل بایت‌به‌بایت با `udp2raw_binaries.tar.gz` انتشار رسمی 20230206.0 گیت‌هاب یکی بود (sha256)؛ `udp2raw_amd64` بی تغییر داخل پنل است (پنل فقط x86_64 ساخته می‌شود). سورس فقط برای خواندن گزینه‌ها و پیام‌ها.
+**مسیر:** فرم (`#tw_kup`) ← `/api/tunnels` (`kup_apply_body`: فقط مقدارهای شناخته، کلید ۳۲ حرفی پنل، فقط UDP، ICMP یک پورت؛ پورت خام آزاد پشت هم `free_ports(need)`؛ تداخل با `tunnel_needs` هر دو طرف و هر پروتکل؛ `kup_checks` نسخه) ← `specs_for` (`kup_specs`: ترتیب پورت‌ها همان `parse_ports` هر دو سر، ورودی IPv4 عمومی خروجی یا `dial`) ← ایجنت (`engine::Manager` ← `kup::set_desired` ← فایل 0600 + واحد systemd ← udp2raw) و `open_ports` (فقط پورت‌های UDP ورودی) ← وضعیت از لاگ خود udp2raw (`client_ready`/`server_ready`) ← فهرست تانل‌ها؛ کپی تانل هسته‌ها (`port_entry_at`، KANKI MIX `alt=`)، MTU (`hop_of`: سقف ۱۴۲۸)، کیفیت مسیرها (`transport_name`).
+**تست:** `cargo test` ۳۸۲ (تست‌های تازه: فایل تنظیمات دو سر، مقدار ناشناخته و تزریق خط، وضعیت از لاگ، باینری رسمی، تانل کامل در پنل)؛ `scripts/kup_lab.sh` با udp2raw واقعی و همان فایل‌های تنظیمات بین دو network namespace: faketcp، easy-faketcp، udp، icmp هر کدام ۳۰۰ از ۳۰۰ بسته‌ی بازی، بزرگ‌ترین بار روی خط ۱۵۰۰: ۱۴۰۰ (faketcp) و ۱۴۱۶ (udp/icmp)، بعد از توقف هیچ قانون iptables نماند؛ پنل محلی: ساخت، پورت آزاد خودکار ۲۰۰۰۰–۲۰۰۰۲، رد تداخل TCP/UDP و ICMP دوم، حذف و پاک شدن واحدها و فایل‌ها؛ Playwright فرم ۳۶۰/۳۹۰/۷۶۸/۱۴۴۰ فارسی/انگلیسی بی خطا و اسکرول افقی، ذخیره از فرم.
+**امنیت:** فقط ادمین (`nodes`)؛ هر مقدار فایل تنظیمات از فهرست سفید یا عدد محدود، کلید فقط حرف و عدد، آدرس IPv4 یا نام بی فاصله و خط تازه (تست)؛ کلید هیچ‌وقت به مرورگر نمی‌رود (فهرست خالی می‌دهد) و در `ps` نیست؛ باینری قبل از نوشتن با sha256 انتشار رسمی چک می‌شود و هیچ دانلودی روی سرورها نیست؛ پورت خام باز نمی‌شود تا کرنل RST نفرستد؛ واحدها `NoNewPrivileges`، `PrivateTmp`، `ProtectHome`.
+**دیده نشده:** systemd و دو سرور واقعی (این محیط systemd ندارد؛ واحدها و فایل‌ها نوشته شدند و ساختار udp2raw با همان فایل‌ها در namespace اجرا شد). **رفع جانبی:** دو دکمه‌ی `#tw_fm` در فرم تانل (حالت NAT/GRE و Game-FEC Pro/FEC ثابت) یک id داشتند و دکمه‌های Game-FEC کار نمی‌کردند؛ حالت مستقیم `#tw_fwm` شد.
 
 ### آخرین کارها — 3.60.1 (2026-11-24، همراه اپ ۱.۴۴.۱)
 **علت (ضبط بازی صاحب پنل):** بالارو حدود یک کپی یا ترمیم برای هر بسته‌ی بازی. **رفع:** `internal/game/policy.go` (پله‌ها و آستانه‌ها؛ سرور و اپ یکی)، سرور دوباره ساخته شد. بقیه‌ی علت (یک پینگ گم‌شده = کپی روی دو مسیر) در اپ. **تست:** `go test -race`، آزمایشگاه با همین سرور (عددها در `docs/CHANGES.md`). **امنیت:** فقط آستانه‌ها. **دیده نشده:** سرور واقعی.

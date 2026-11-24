@@ -76,6 +76,9 @@ pub struct Spec {
     /// a direct tunnel in the kernel (iptables / GRE) instead of a Kanki link (handled by `kfwd`)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fwd: Option<super::kfwd::FwdSpec>,
+    /// KANKI-UP: udp2raw pairs (one per forwarded UDP port) instead of a Kanki link (handled by `kup`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kup: Option<Vec<super::kup::KupSpec>>,
     /// `game`: FEC "data:parity" ("8:3", "" = 8:3, "off" = no FEC, "auto" = Game-FEC Pro) and packet
     /// duplication
     pub fec: String,
@@ -711,6 +714,8 @@ impl Manager {
         super::hy2t::set_desired(hy.into_iter().filter_map(|s| s.hy2).collect());
         let (fw, specs): (Vec<Spec>, Vec<Spec>) = specs.into_iter().partition(|s| s.fwd.is_some());
         super::kfwd::set_desired(fw.into_iter().filter_map(|s| s.fwd).collect());
+        let (ku, specs): (Vec<Spec>, Vec<Spec>) = specs.into_iter().partition(|s| s.kup.is_some());
+        super::kup::set_desired(ku.into_iter().filter_map(|s| s.kup).flatten().collect());
         let mut run = self.running.lock().await;
         let keys: Vec<String> = run.keys().cloned().collect();
         for k in keys {
@@ -736,6 +741,7 @@ impl Manager {
         v.extend(tokio::task::spawn_blocking(super::awg::statuses).await.unwrap_or_default());
         v.extend(tokio::task::spawn_blocking(super::hy2t::statuses).await.unwrap_or_default());
         v.extend(super::kfwd::statuses());
+        v.extend(tokio::task::spawn_blocking(super::kup::statuses).await.unwrap_or_default());
         v
     }
 }

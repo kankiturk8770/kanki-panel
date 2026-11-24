@@ -9,7 +9,7 @@ function srvLocSel(id,v){return '<label class="f">'+t('Location')+'</label><sele
 function tunSrv(id){var l=(TN.d&&TN.d.servers)||[];for(var i=0;i<l.length;i++)if(l[i].id==id)return l[i];return {id:id,name:id}}
 function tunStateTxt(s){return {up:t('Connected'),partial:t('Connecting…'),down:t('Disconnected'),off:t('Off')}[s]||s}
 function tunCol(s){return s=='up'?'#3ddc97':s=='partial'?'#f5b942':s=='off'?'#8a8f98':'#ff6b6b'}
-function tunTr(x){return {fwd:t('Direct (kernel)'),nat:'NAT (iptables)',gre:'GRE',tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP',hq:'HQ (masked QUIC)',h2:'H2 (HTTP/2 + TLS)',dual:'Dual (HQ + H2)',cdn:'CDN (whitelist)',game:'Game-FEC Pro',faketcp:'FakeTCP (UDP→TCP)',awg:'AmneziaWG',hy2:'Hysteria2',baseline:t('Raw ping')}[x]||x}
+function tunTr(x){return {fwd:t('Direct (kernel)'),nat:'NAT (iptables)',gre:'GRE',tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP',hq:'HQ (masked QUIC)',h2:'H2 (HTTP/2 + TLS)',dual:'Dual (HQ + H2)',cdn:'CDN (whitelist)',game:'Game-FEC Pro',faketcp:'FakeTCP (UDP→TCP)',kup:'KANKI-UP',awg:'AmneziaWG',hy2:'Hysteria2',baseline:t('Raw ping')}[x]||x}
 var TS_TR=[['tcpmux','TCP Mux'],['tcp','TCP'],['ws','WebSocket'],['wss','WSS (TLS)'],['quic','QUIC'],['kcp','KCP'],['hq','HQ (masked QUIC)'],['h2','H2 (HTTP/2 + TLS)'],['game','Game-FEC Pro'],['faketcp','FakeTCP (UDP→TCP)']];
 // GRE: the panel builds its side by itself; this script builds the other side on the server
 // (a systemd service, so it comes back after a reboot) and, when the panel has a domain, points that
@@ -49,9 +49,12 @@ function tmTheme(){var cs=getComputedStyle(document.body),g=function(v,d){return
 var TPROF=[['','Any core','Game-FEC Pro for whatever goes through: the game repaired, TCP without repairs.'],
  ['kmix','KANKI MIX','The game packets of KANKI MIX get the repairs; its KCP (lobby, logins, downloads) goes without, so downloads never fill the line of the game.'],
  ['wg','WireGuard / AmneziaWG','Every WireGuard packet is repaired as the line needs (WireGuard has no repairs of its own).']];
+// KANKI-UP raw modes: short names and what each one is
+function tunKupMode(m){return {faketcp:'FakeTCP','easy-faketcp':'Easy FakeTCP',udp:'UDP',icmp:'ICMP'}[m||'faketcp']||m}
+var KUPM={faketcp:'Raw TCP packets with a handshake and seq/ack like a real connection (default): passes where UDP is dropped or slowed. The raw port stays closed in the firewall.','easy-faketcp':'A real TCP connection of the kernel carries the raw packets: for networks that drop a handshake they do not see whole. The raw port is opened in the firewall.',udp:'Encrypted raw UDP: no TCP look, for when UDP itself passes but the cores are recognised.',icmp:'Inside ping (ICMP echo) packets: for when TCP and UDP are both cut but ping passes. One UDP port per tunnel.'};
 function tunProf(v){var o=TPROF.filter(function(z){return z[0]==v})[0];return o?t(o[1]):v}
 function tunShort(x){var S={tcpmux:'TCP-Mux',tcp:'TCP',ws:'WS',wss:'WSS',quic:'QUIC',kcp:'KCP',hq:'HQ-QUIC',h2:'H2',dual:'Dual',cdn:'CDN',game:'Game-FEC',faketcp:'FakeTCP'};
- if(x.kind=='fwd')return x.fwd&&x.fwd.mode=='gre'?'GRE':'NAT';if(x.kind=='hy2')return 'Hy2';if(x.kind=='awg')return 'AWG'+(x.awg&&x.awg.wrap?'+'+(S[x.transport]||x.transport):'');return x.transport=='game'&&x.fec=='auto'?'Game-FEC Pro':S[x.transport]||x.transport||'?'}
+ if(x.kind=='fwd')return x.fwd&&x.fwd.mode=='gre'?'GRE':'NAT';if(x.kind=='kup')return 'KANKI-UP';if(x.kind=='hy2')return 'Hy2';if(x.kind=='awg')return 'AWG'+(x.awg&&x.awg.wrap?'+'+(S[x.transport]||x.transport):'');return x.transport=='game'&&x.fec=='auto'?'Game-FEC Pro':S[x.transport]||x.transport||'?'}
 function tmRound(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()}
 
 // ---- the page
@@ -113,11 +116,11 @@ function tunRow(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{}
   '<span class="tn-l2"><span class="tn-flow"><span class="tn-e">'+esc(e.name)+'</span><i class="tn-ar" aria-hidden="true">➔</i><span class="kxr-st tn-p">'+esc(tunShort(x))+(x.state=='up'&&es.rtt_ms?' · <bdi class="ltr">'+es.rtt_ms+' ms</bdi>':'')+'</span>'+
    '<i class="tn-ar" aria-hidden="true">➔</i><span class="tn-x">'+tnFlag(xs)+esc(xs.name)+'</span></span>'+(ports.length?'<small class="ltr tn-ports">'+esc(ports.join(' · '))+'</small>':'')+'</span>';
  return accRow('tn',x.id,head,function(){return tunBody(x)},x.enabled?'':'off')}
-function tunBody(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},err=es.error?e.name+': '+es.error:xx.error?xs.name+': '+xx.error:'',aw=x.kind=='awg'?(x.awg||{}):null,hy=x.kind=='hy2'?(x.hy2||{}):null,fw=x.kind=='fwd'?(x.fwd||{}):null;
+function tunBody(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},err=es.error?e.name+': '+es.error:xx.error?xs.name+': '+xx.error:'',aw=x.kind=='awg'?(x.awg||{}):null,hy=x.kind=='hy2'?(x.hy2||{}):null,fw=x.kind=='fwd'?(x.fwd||{}):null,ku=x.kind=='kup'?(x.kup||{}):null;
  if(aw)err=err||(x.wrap_entry||{}).error||(x.wrap_exit||{}).error||'';
- var info=[[t('Transport'),esc(fw?t('Direct (kernel)')+' · '+(fw.mode=='gre'?'GRE':'NAT'):aw?('AWG'+(aw.wrap?' ⟶ '+tunTr(x.transport):'')):hy?'Hysteria2'+(hy.obfs_on?' + Salamander':''):x.transport=='game'&&x.fec=='auto'?'Game-FEC Pro'+(x.profile?' · '+tunProf(x.profile):''):tunTr(x.transport))],[t('Ping'),es.rtt_ms?'<span class="ltr">'+es.rtt_ms+' ms</span>':'—'],
+ var kn=ku?tunEntryPorts(x.udp).length:0,info=[[t('Transport'),esc(ku?'KANKI-UP · '+tunKupMode(ku.raw_mode)+' · '+(ku.cipher||'')+'/'+(ku.auth||''):fw?t('Direct (kernel)')+' · '+(fw.mode=='gre'?'GRE':'NAT'):aw?('AWG'+(aw.wrap?' ⟶ '+tunTr(x.transport):'')):hy?'Hysteria2'+(hy.obfs_on?' + Salamander':''):x.transport=='game'&&x.fec=='auto'?'Game-FEC Pro'+(x.profile?' · '+tunProf(x.profile):''):tunTr(x.transport))],[t('Ping'),es.rtt_ms?'<span class="ltr">'+es.rtt_ms+' ms</span>':'—'],
   [t('Links'),'<span class="ltr">'+N(es.links||0)+' / '+N(es.want||x.conns||1)+'</span>'],[t('Traffic'),'<span class="ltr">↑'+bytes(es.tx_bytes||0)+' ↓'+bytes(es.rx_bytes||0)+'</span>'],
-  [t('Mode'),x.mode=='direct'?t('direct'):t('reverse')],[t('Port'),'<span class="ltr">'+esc(fw?(fw.mode=='gre'?fw.entry_ip+' ⇄ '+fw.exit_ip:'—'):String(aw?aw.port:x.port))+' · '+esc(x.dial_host||'?')+'</span>']];
+  [t('Mode'),x.mode=='direct'?t('direct'):t('reverse')],[t('Port'),'<span class="ltr">'+esc(ku?(ku.raw_mode=='icmp'?'ICMP':(kn>1?x.port+'–'+(x.port+kn-1):String(x.port))+(ku.raw_mode=='udp'?'/UDP':'/TCP')):fw?(fw.mode=='gre'?fw.entry_ip+' ⇄ '+fw.exit_ip:'—'):String(aw?aw.port:x.port))+' · '+esc(x.dial_host||'?')+'</span>']];
  if(aw)info.push(['AWG','<span class="ltr">'+esc(aw.entry_ip+' ⇄ '+aw.exit_ip+(aw.routes&&aw.routes.length?' · → '+aw.routes.join(' '):'')+(aw.src_routes&&aw.src_routes.length?' · ⇠ '+aw.src_routes.join(' '):''))+'</span>']);
  if(hy&&hy.src_routes&&hy.src_routes.length)info.push(['⇠','<span class="ltr">'+esc(hy.src_routes.join(' '))+'</span>']);
  if(x.auto)info.push([t('Rotating'),esc(x.switch_note?x.switch_note+' · '+ago(x.switched):t('Rotating tunnel'))]);
@@ -175,7 +178,8 @@ function tunEntryPorts(list){var out=[];(Array.isArray(list)?list:String(list||'
  if((m=q.match(/^(\d+)\s*:\s*\d+$/)))out.push(+m[1]);else if((m=q.match(/^(\d+)\s*-\s*(\d+)$/))){for(var i=+m[1];i<=+m[2]&&i-m[1]<512;i++)out.push(i)}else if(/^\d+$/.test(q))out.push(+q)})});return out}
 // ports already taken on a server by the other enabled tunnels (tunnel port + ports opened on the entry)
 function tunPortUse(sid,skip){var u={tcp:{},udp:{}};((TN.d&&TN.d.tunnels)||[]).forEach(function(x){if(x.id==skip||x.enabled===false)return;var l=x.mode=='direct'?x.exit:x.entry;
- if(l==sid){if(tunBoth(x.transport)){u.udp[x.port]=1;u.tcp[x.port]=1}else(tunUdpTr(x.transport)?u.udp:u.tcp)[x.port]=1}
+ if(x.kind=='kup'){var kk=x.kup||{},kc=tunEntryPorts(x.udp).length;if(x.exit==sid&&kk.raw_mode!='icmp')for(var ki=0;ki<kc;ki++)(kk.raw_mode=='udp'?u.udp:u.tcp)[x.port+ki]=1}
+ else if(l==sid){if(tunBoth(x.transport)){u.udp[x.port]=1;u.tcp[x.port]=1}else(tunUdpTr(x.transport)?u.udp:u.tcp)[x.port]=1}
  if(x.entry==sid){tunEntryPorts(x.tcp).forEach(function(p){u.tcp[p]=1});tunEntryPorts(x.udp).forEach(function(p){u.udp[p]=1})}
  if(x.kind=='awg'&&x.awg){if(x.entry==sid||x.exit==sid)u.udp[x.awg.port]=1;if(x.awg.wrap&&x.entry==sid)u.udp[x.awg.wrap_port]=1}});return u}
 function tunFreePort(listener,skip,udp,both){var U=tunPortUse(listener,skip),u=U[udp?'udp':'tcp'];
@@ -228,7 +232,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  var remote=sv.filter(function(s){return !s.local});
  var dE=x.entry||(remote[0]&&remote[0].id)||'',dX=x.exit||'local';
  var opt=function(sel){return srvOptGroups(sv,function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'})};
- var prof=x.conns==8?'speed':x.conns==2?'gaming':'balanced',tr=x.transport||'tcpmux',mode=x.mode||'reverse',kind=(x.kind=='awg'||x.kind=='hy2'||x.kind=='fwd')?x.kind:'',A=x.awg||{},Y=x.hy2||{},F=x.fwd||{};if(tr=='awg'||tr=='hy2'||tr=='fwd')tr='tcpmux';
+ var prof=x.conns==8?'speed':x.conns==2?'gaming':'balanced',tr=x.transport||'tcpmux',mode=x.mode||'reverse',kind=(x.kind=='awg'||x.kind=='hy2'||x.kind=='fwd'||x.kind=='kup')?x.kind:'',A=x.awg||{},Y=x.hy2||{},F=x.fwd||{},K=x.kup||{};if(tr=='awg'||tr=='hy2'||tr=='fwd'||tr=='kup')tr='tcpmux';
  var pro=!id||x.fec=='auto',awp=A.params||{},awpt=Object.keys(awp).map(function(k){return k+'='+awp[k]}).join('  ');
  var TRD={dual:[t('UDP first (masked QUIC); if UDP is cut, HTTP/2 over TLS on the same port number'),['UDP','TCP','TLS']],h2:[t('WebSocket over HTTP/2, TLS 1.3 like a browser, many links in one connection'),['TLS','SNI','H2']],faketcp:[t('UDP traffic inside fake TCP packets (udp2raw style): passes where UDP is cut or slowed; needs root on both servers'),['TCP','UDP']],
   wss:[t('Looks like an HTTPS site, hardest to spot'),['TLS','SNI']],ws:[t('Looks like a WebSocket, works behind a CDN'),['HTTP']],tcpmux:[t('Fast and steady, several links at once'),['TCP']],tcp:[t('One plain link'),['TCP']],
@@ -247,11 +251,28 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   sec(1,'Route','','route')+'<label class="f">'+t('Name')+'</label><input id="tw_nm" value="'+esc(x.name||'')+'" placeholder="'+esc(t('Empty = Iran server-abroad server'))+'">'+
   '<div class="trte"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="tw_en">'+opt(dE)+'</select></div><span class="arr">'+ic('swap',18)+'</span><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="tw_ex">'+opt(dX)+'</select></div></div>'+
   '<label class="f">'+t('Who connects')+'</label><div class="seg" id="tw_md"><button data-v="reverse" class="'+(mode=='reverse'?'on':'')+'">'+t('Exit → entry (reverse, recommended)')+'</button><button data-v="direct" class="'+(mode=='direct'?'on':'')+'">'+t('Entry → exit (direct)')+'</button></div></div>'+
-  sec(2,'Tunnel type','','type')+'<div class="seg" id="tw_kd"><button data-v="" class="'+(kind!='awg'?'on':'')+'">'+t('Kanki tunnel')+'</button><button data-v="awg" class="'+(kind=='awg'?'on':'')+'">🛡 AmneziaWG</button><button data-v="hy2" class="'+(kind=='hy2'?'on':'')+'">⚡ Hysteria2</button><button data-v="fwd" class="'+(kind=='fwd'?'on':'')+'">⇉ '+t('Direct (kernel)')+'</button></div>'+
+  sec(2,'Tunnel type','','type')+'<div class="seg" id="tw_kd"><button data-v="" class="'+(kind!='awg'?'on':'')+'">'+t('Kanki tunnel')+'</button><button data-v="awg" class="'+(kind=='awg'?'on':'')+'">🛡 AmneziaWG</button><button data-v="hy2" class="'+(kind=='hy2'?'on':'')+'">⚡ Hysteria2</button><button data-v="fwd" class="'+(kind=='fwd'?'on':'')+'">⇉ '+t('Direct (kernel)')+'</button><button data-v="kup" class="'+(kind=='kup'?'on':'')+'">⬆ KANKI-UP</button></div>'+
   '<div id="tw_fw" class="box" style="display:none;margin-top:10px"><b>⇉ '+t('Direct tunnel in the kernel')+'</b>'+
   '<small class="muted" style="display:block;margin:4px 0 8px">'+t('No program in the way and nothing added to the packets: the kernel of the entry hands the ports straight to the exit. No encryption of its own (the cores encrypt their traffic); the lightest tunnel there is. Both servers need agent 3.59.0 or newer.')+'</small>'+
-  '<div class="seg" id="tw_fm"><button data-v="nat" class="'+(F.mode!='gre'?'on':'')+'">NAT (iptables)</button><button data-v="gre" class="'+(F.mode=='gre'?'on':'')+'">GRE</button></div>'+
+  '<div class="seg" id="tw_fwm"><button data-v="nat" class="'+(F.mode!='gre'?'on':'')+'">NAT (iptables)</button><button data-v="gre" class="'+(F.mode=='gre'?'on':'')+'">GRE</button></div>'+
   '<small class="muted" id="tw_fmh" style="display:block;margin-top:6px"></small></div>'+
+  '<div id="tw_kup" class="box" style="display:none;margin-top:10px"><b>⬆ KANKI-UP</b>'+
+  '<small class="muted" style="display:block;margin:4px 0 8px">'+t('The official udp2raw between the two servers: the UDP of the cores (WireGuard, AmneziaWG, KANKI MIX, Hysteria2) travels in encrypted raw packets that look like TCP, UDP or ICMP, with no retransmission, so a line that drops or slows UDP still carries the game. One udp2raw pair per UDP port; the exit must be reachable from the entry. Both servers need agent 3.61.0 or newer.')+'</small>'+
+  '<label class="f">'+t('Raw mode')+'</label><div class="seg" id="tw_ku_rm">'+['faketcp','easy-faketcp','udp','icmp'].map(function(m){return '<button type="button" data-v="'+m+'" class="'+((K.raw_mode||'faketcp')==m?'on':'')+'">'+tunKupMode(m)+'</button>'}).join('')+'</div>'+
+  '<small class="muted" id="tw_ku_rmh" style="display:block;margin-top:6px"></small>'+
+  '<div class="g2"><div><label class="f">'+t('Encryption')+'</label><select id="tw_ku_ci">'+[['aes128cbc','AES-128-CBC'],['aes128cfb','AES-128-CFB'],['xor','XOR ('+t('weak')+')'],['none',t('None')]].map(function(o){return '<option value="'+o[0]+'"'+((K.cipher||'aes128cbc')==o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select></div>'+
+  '<div><label class="f">'+t('Authentication')+'</label><select id="tw_ku_au">'+[['md5','MD5'],['hmac_sha1','HMAC-SHA1'],['crc32','CRC32 ('+t('weak')+')'],['simple','Simple ('+t('weak')+')'],['none',t('None')]].map(function(o){return '<option value="'+o[0]+'"'+((K.auth||'md5')==o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select></div></div>'+
+  '<small class="muted" style="display:block">'+t('The key is made by the panel and given to both servers; it never leaves them.')+'</small>'+
+  '<details class="box" style="margin-top:10px"><summary><b>'+t('Advanced')+'</b></summary>'+
+  '<div class="g2"><div><label class="f">'+t('Seq mode (FakeTCP)')+'</label><select id="tw_ku_sq">'+[[3,t('3: almost real seq/ack (default)')],[4,t('4: like 3, no window scale')],[2,t('2: random seq')],[1,t('1: seq every packet')],[0,t('0: static header')]].map(function(o){return '<option value="'+o[0]+'"'+((K.seq_mode==null?3:K.seq_mode)==o[0]?' selected':'')+'>'+o[1]+'</option>'}).join('')+'</select></div>'+
+  '<div><label class="f">'+t('Heartbeat length (0 = default)')+'</label><input id="tw_ku_hb" type="number" class="ltr" min="0" max="1500" value="'+(K.hb_len||0)+'"></div></div>'+
+  '<div class="g2"><div><label class="f">'+t('MTU warning (bytes)')+'</label><input id="tw_ku_mw" type="number" class="ltr" min="576" max="1500" value="'+(K.mtu_warn||1375)+'"></div>'+
+  '<div><label class="f">'+t('Socket buffer (KB)')+'</label><input id="tw_ku_sb" type="number" class="ltr" min="10" max="10240" value="'+(K.sock_buf||1024)+'"></div></div>'+
+  '<label class="chk"><input type="checkbox" id="tw_ku_gro" '+(K.fix_gro===false?'':'checked')+'><span><b>'+t('Fix GRO (recommended)')+'</b><small>'+t('Servers with GRO merge packets into one big one that udp2raw would drop; this splits them again.')+'</small></span></label>'+
+  '<label class="chk"><input type="checkbox" id="tw_ku_ar" '+(K.anti_replay===false?'':'checked')+'><span><b>'+t('Anti-replay')+'</b><small>'+t('A packet recorded and sent again is refused. Keep it on.')+'</small></span></label>'+
+  '<label class="chk"><input type="checkbox" id="tw_ku_fb" '+(K.force_sock_buf?'checked':'')+'><span><b>'+t('Force the socket buffer')+'</b><small>'+t('Past the system limit of the server.')+'</small></span></label>'+
+  '<label class="chk"><input type="checkbox" id="tw_ku_ll" '+(K.lower_level?'checked':'')+'><span><b>'+t('Send at layer 2 (lower level, auto)')+'</b><small>'+t('Past the local firewall of the server; only if packets do not leave without it.')+'</small></span></label>'+
+  (id?'<label class="chk"><input type="checkbox" id="tw_ku_nk"><span><b>'+t('New key')+'</b></span></label>':'')+'</details></div>'+
   '<div id="tw_hy" class="box" style="display:none;margin-top:10px"><b>⚡ Hysteria2 '+t('link between the two servers')+'</b>'+
   '<small class="muted" style="display:block;margin:4px 0 8px">'+t('The exit runs a Hysteria2 server, the entry connects to it (QUIC over UDP, fast on lossy internet). The panel makes the password and a certificate and the entry checks its fingerprint. The agents install Hysteria2 by themselves; your VPN Hysteria2 is not touched.')+'</small>'+
   '<div class="g2"><div><label class="f">'+t('Hysteria2 UDP port (on the exit)')+'</label><input id="tw_hy_pt" type="number" class="ltr" value="'+(Y.port||'')+'"></div><div><label class="f">'+t('SNI (TLS name)')+'</label><input id="tw_hy_sni" class="ltr" value="'+esc(Y.sni||'www.bing.com')+'"></div></div>'+
@@ -309,7 +330,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '<div id="tw_pc"><div class="nh" style="margin-top:12px"><b>'+t('Ports to carry')+'</b><button class="b2 sm" id="tw_vpn">'+ic('ports',14)+' '+t('All ports of the exit server')+'</button></div>'+
   '<div class="corechips" id="tw_cc"></div>'+
   '<small class="muted" id="tw_pn" style="display:block;margin-bottom:6px"></small>'+
-  '<div class="g2"><div><label class="f">TCP</label><input id="tw_tcp" class="ltr" value="'+esc((x.tcp||[]).join(', '))+'" placeholder="443, 2053"></div><div><label class="f">UDP</label><input id="tw_udp" class="ltr" value="'+esc((x.udp||[]).join(', '))+'" placeholder="51820, 51821, 8443"></div></div>'+
+  '<div class="g2"><div id="tw_tcpw"><label class="f">TCP</label><input id="tw_tcp" class="ltr" value="'+esc((x.tcp||[]).join(', '))+'" placeholder="443, 2053"></div><div><label class="f">UDP</label><input id="tw_udp" class="ltr" value="'+esc((x.udp||[]).join(', '))+'" placeholder="51820, 51821, 8443"></div></div>'+
   '<small class="muted">'+t('Users connect to these ports on the entry; they reach the same ports on the exit. Use 8443:443 to change the port, 1000-1010 for a range.')+'</small></div></div>'+
   // everything that is not needed to run the tunnel: folded under «Advanced settings»
   '<div class="adv'+(advOpen?' on':'')+'" id="tw_adv" data-s="more"><button type="button" class="advh" aria-expanded="'+advOpen+'">'+ic('settings',16)+'<span>'+t('Advanced settings')+'</span><i>▾</i></button><div class="advb"><div class="advi">'+
@@ -335,17 +356,18 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  function twTab(k){var f=$('#tw_f');if(!f)return;f.dataset.tab=k;$$('#tw_tabs button').forEach(function(b){b.classList.toggle('on',b.dataset.t==k)});
   if(k=='more'){var a=$('#tw_adv');a.classList.add('on');a.querySelector('.advh').setAttribute('aria-expanded','true')}if(k=='review')twReview();$('#mbox').scrollTop=0}
  function twReview(){var b=$('#tw_rvb');if(!b)return;var v=function(i){var e=$(i);return e?String(e.value||'').trim():''},tx=function(i){var e=$(i);return e&&e.selectedIndex>=0?e.options[e.selectedIndex].text:''};
-  var en=v('#tw_en'),ex=v('#tw_ex'),kd=st.kind=='awg'?'AmneziaWG':st.kind=='hy2'?'Hysteria2':st.kind=='fwd'?t('Direct (kernel)')+' · '+(st.fm=='gre'?'GRE':'NAT'):t('Kanki tunnel'),pt=st.kind=='awg'?v('#tw_aw_pt'):st.kind=='hy2'?v('#tw_hy_pt'):v('#tw_pt');
+  var en=v('#tw_en'),ex=v('#tw_ex'),kd=st.kind=='awg'?'AmneziaWG':st.kind=='hy2'?'Hysteria2':st.kind=='fwd'?t('Direct (kernel)')+' · '+(st.fm=='gre'?'GRE':'NAT'):st.kind=='kup'?'KANKI-UP · '+tunKupMode(st.rm):t('Kanki tunnel'),pt=st.kind=='awg'?v('#tw_aw_pt'):st.kind=='hy2'?v('#tw_hy_pt'):v('#tw_pt');
   var tcp=st.kind=='awg'?v('#tw_aw_ft'):v('#tw_tcp'),udp=st.kind=='awg'?v('#tw_aw_fu'):v('#tw_udp'),dom=st.tr=='cdn'?v('#tw_chost'):v('#tw_sni'),err=[];
   if(en==ex)err.push(t('The entry and the exit must be different'));
-  if(!pt&&!(st.kind=='awg'&&!st.wrap)&&st.kind!='fwd')err.push(t('Tunnel port')+': '+t('empty'));
+  if(!pt&&!(st.kind=='awg'&&!st.wrap)&&st.kind!='fwd'&&st.kind!='kup')err.push(t('Tunnel port')+': '+t('empty'));
+  if(st.kind=='kup'){var kn2=tunEntryPorts(udp).length;if(!kn2)err.push('UDP: '+t('empty'));if(st.rm=='icmp'&&kn2>1)err.push(t('In ICMP mode KANKI-UP carries one UDP port'))}
   if(/⚠/.test(($('#tw_ph')||{}).textContent||''))err.push(t('This port is already used by another tunnel'));
   if(st.tr=='cdn'&&!st.kind&&!v('#tw_chost'))err.push(t('Host: your domain on the CDN')+': '+t('empty'));
   var row=function(l,x,ltr){return '<div><dt>'+l+'</dt><dd'+(ltr?' class="ltr"':'')+'>'+(x?esc(x):'<span class="muted">—</span>')+'</dd></div>'};
   b.innerHTML=(err.length?'<div class="twrv-err" role="alert"><b>'+t('Fix before saving')+'</b><ul>'+err.map(function(e){return '<li>'+esc(e)+'</li>'}).join('')+'</ul></div>':'<div class="twrv-ok">'+ic('check',16)+'<span>'+t('Ready to save')+'</span></div>')+
    '<dl class="twrv-l">'+row(t('Name'),v('#tw_nm')||t('Empty = Iran server-abroad server'))+row(t('Entry (users connect here)'),tx('#tw_en'))+row(t('Exit (traffic leaves here)'),tx('#tw_ex'))+
    row(t('Who connects'),t(st.mode=='direct'?'Entry → exit (direct)':'Exit → entry (reverse, recommended)'))+row(t('Tunnel type'),kd)+(st.kind?'':row(t('Transport'),tunTr(st.tr).replace(/<[^>]+>/g,'')))+
-   row(t('Tunnel port'),pt,1)+row('TCP',tcp,1)+row('UDP',udp,1)+(dom?row(st.tr=='cdn'?t('Domain'):'SNI',dom,1):'')+'</dl>'}
+   row(t('Tunnel port'),pt,1)+(st.kind=='kup'?'':row('TCP',tcp,1))+row('UDP',udp,1)+(dom?row(st.tr=='cdn'?t('Domain'):'SNI',dom,1):'')+'</dl>'}
  $('#tw_f').addEventListener('input',function(){if($('#tw_f').dataset.tab=='review'||window.innerWidth>=900)twReview()});
  $('#tw_f').addEventListener('click',function(){setTimeout(function(){if($('#tw_f')&&($('#tw_f').dataset.tab=='review'||window.innerWidth>=900))twReview()},0)});
  function twTabs(){var f=$('#tw_f');if(!f)return;$$('#tw_tabs button').forEach(function(b){var p=f.querySelector('[data-s="'+b.dataset.t+'"]');b.style.display=p&&p.style.display=='none'?'none':''});
@@ -353,9 +375,11 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  $$('#tw_tabs button').forEach(function(b){b.onclick=function(){twTab(b.dataset.t)}});
  new MutationObserver(twTabs).observe($('#tw_f'),{attributes:true,attributeFilter:['style'],subtree:true});
  setTimeout(twReview,0);
- var st={mode:mode,tr:tr,kind:kind,wrap:!!A.wrap,pro:pro,fm:F.mode=='gre'?'gre':'nat'};
+ var st={mode:mode,tr:tr,kind:kind,wrap:!!A.wrap,pro:pro,fm:F.mode=='gre'?'gre':'nat',rm:K.raw_mode||'faketcp'};
  $('#tw_adv .advh').onclick=function(){var a=$('#tw_adv'),on=a.classList.toggle('on');this.setAttribute('aria-expanded',on)};
  function hint(){var en=$('#tw_en').value,ex=$('#tw_ex').value,l=st.mode=='direct'?ex:en,pt=$('#tw_pt');
+  if(st.kind=='kup'){if(!pt.dataset.touched&&!id)pt.value='';var kn=Math.max(1,tunEntryPorts($('#tw_udp').value).length),kp=+pt.value||0,KU=tunPortUse(ex,id),kb=false;if(kp&&st.rm!='icmp')for(var ki=0;ki<kn;ki++)if((st.rm=='udp'?KU.udp:KU.tcp)[kp+ki])kb=true;
+   $('#tw_ph').textContent=st.rm=='icmp'?t('ICMP has no port: the exit takes the echo packets of this tunnel'):(t('Raw ports on')+' '+tunSrv(ex).name+': '+(kp?(kn>1?kp+'–'+(kp+kn-1):kp):t('empty = a free port by itself'))+(st.rm=='udp'?'/UDP':'/TCP')+' · '+t('one per UDP port, left closed in the firewall (udp2raw reads them first)'))+(en==ex?' · '+t('The entry and the exit must be different'):'')+(kb?' · ⚠ '+t('This port is already used by another tunnel'):'');$('#tw_ph').style.color=kb?'var(--bad)':'';return}
   // fill the port by itself only until the person types one; a field they cleared or typed stays theirs
   if(!pt.dataset.touched&&!(id&&pt.value))pt.value=(st.tr=='cdn'?8080:tunFreePort(l,id,tunUdpTr(st.tr),tunBoth(st.tr)));
   var ls=tunSrv(l),port=pt.value,udp=tunUdpTr(st.tr),both=tunBoth(st.tr),PU=tunPortUse(l,id),busy=port&&(both?(PU.udp[+port]||PU.tcp[+port]):PU[udp?'udp':'tcp'][+port]);
@@ -390,9 +414,10 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  var acc=coreChips({box:'#tw_aw_cc',tcp:'#tw_aw_ft',udp:'#tw_aw_fu',note:'#tw_aw_pn',cores:exitCores,used:entryUse});
  $('#tw_en').onchange=function(){hint();cc.load();acc.load();if(!id)fillPorts(false)};$('#tw_ex').onchange=function(){hint();cc.load();acc.load();if(!id)fillPorts(false)};
  $('#tw_md').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.mode=b.dataset.v;$$('#tw_md button').forEach(function(z){z.classList.toggle('on',z==b)});cdnUi()};
- function kindUi(){var aw=st.kind=='awg',hy=st.kind=='hy2',fw=st.kind=='fwd',tr=(!aw||st.wrap)&&!hy&&!fw;$('#tw_awg').style.display=aw?'block':'none';$('#tw_hy').style.display=hy?'block':'none';$('#tw_fw').style.display=fw?'block':'none';
-  $('#tw_fmh').textContent=t(st.fm=='gre'?'A GRE link between the two servers (24 bytes a packet, in the kernel); the ports go into it. For when the ports of the exit are filtered from Iran but GRE passes. Needs root on both servers.':'The entry forwards its ports straight to the address of the exit (iptables DNAT): zero bytes added. The entry must reach the address of the exit.');$$('#tw_fm button').forEach(function(z){z.classList.toggle('on',z.dataset.v==st.fm)});
-  if(hy||fw)st.mode='direct';var md=$('#tw_md');md.style.display=hy||fw?'none':'';if(md.previousElementSibling)md.previousElementSibling.style.display=hy||fw?'none':'';$('#tw_trw').style.display=tr?'':'none';$('#tw_ptrow').style.display=tr?'':'none';$('#tw_pfw').style.display=tr?'':'none';$('#tw_dsg').style.display=tr?'':'none';$('#tw_ph').style.display=tr?'':'none';$('#tw_pc').style.display=aw?'none':'';$('#tw_aw_lkw').style.display=st.wrap?'':'none';var s5=$('#tw_ptrow').closest('.tws');if(s5)s5.style.display=(!aw||st.wrap)?'':'none';$$('#tw_kd button').forEach(function(z){z.classList.toggle('on',z.dataset.v==st.kind)});cdnUi()}
+ function kindUi(){var aw=st.kind=='awg',hy=st.kind=='hy2',fw=st.kind=='fwd',ku=st.kind=='kup',tr=(!aw||st.wrap)&&!hy&&!fw&&!ku;$('#tw_awg').style.display=aw?'block':'none';$('#tw_hy').style.display=hy?'block':'none';$('#tw_fw').style.display=fw?'block':'none';$('#tw_kup').style.display=ku?'block':'none';$('#tw_tcpw').style.display=ku?'none':'';
+  $('#tw_ku_rmh').textContent=t(KUPM[st.rm]||'');$$('#tw_ku_rm button').forEach(function(z){z.classList.toggle('on',z.dataset.v==st.rm)});
+  $('#tw_fmh').textContent=t(st.fm=='gre'?'A GRE link between the two servers (24 bytes a packet, in the kernel); the ports go into it. For when the ports of the exit are filtered from Iran but GRE passes. Needs root on both servers.':'The entry forwards its ports straight to the address of the exit (iptables DNAT): zero bytes added. The entry must reach the address of the exit.');$$('#tw_fwm button').forEach(function(z){z.classList.toggle('on',z.dataset.v==st.fm)});
+  if(hy||fw||ku)st.mode='direct';var md=$('#tw_md');md.style.display=hy||fw||ku?'none':'';if(md.previousElementSibling)md.previousElementSibling.style.display=hy||fw||ku?'none':'';$('#tw_trw').style.display=tr?'':'none';$('#tw_ptrow').style.display=tr||ku?'':'none';$('#tw_pfw').style.display=tr?'':'none';$('#tw_dsg').style.display=tr?'':'none';$('#tw_ph').style.display=tr||ku?'':'none';$('#tw_pc').style.display=aw?'none':'';$('#tw_aw_lkw').style.display=st.wrap?'':'none';var s5=$('#tw_ptrow').closest('.tws');if(s5)s5.style.display=(!aw||st.wrap)?'':'none';$$('#tw_kd button').forEach(function(z){z.classList.toggle('on',z.dataset.v==st.kind)});cdnUi()}
  // what each transport can disguise: SNI (TLS name), split hello, Host header, path
  var CAM={tcpmux:{n:'TCP Mux has no site name: it is encrypted from the first byte, so there is nothing to disguise.'},tcp:{n:'TCP has no site name: it is encrypted from the first byte, so there is nothing to disguise.'},
   kcp:{n:'KCP is fully encrypted UDP (its header is hidden too); there is no site name to disguise.'},
@@ -410,7 +435,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   $('#tw_camt').textContent=c.sni?t('SNI spoof'):c.host?t('Host / path'):c.cdn?t('CDN'):t('Not needed');
   var g=$('#tw_spg');if(g)g.innerHTML=c.sni?spGuide():'';
   var hp=$('#tw_hpw');if(hp)hp.style.gridTemplateColumns=c.host?'':'1fr';if(hp&&c.cdn){if(hp.parentNode!=$('#tw_cdn'))$('#tw_cdn').insertBefore(hp,$('#tw_cdx'))}else if(hp&&hp.parentNode!=$('#tw_cam'))$('#tw_cam').insertBefore(hp,$('#tw_spg'))}
- function cdnUi(){var on=st.tr=='cdn'&&(st.kind!='awg'||st.wrap);$('#tw_cdn').style.display=on?'block':'none';camUi();var rk=document.querySelector('.rotk');if(rk)rk.style.display=(on||st.kind=='awg'||st.kind=='hy2'||st.kind=='fwd')?'none':'';
+ function cdnUi(){var on=st.tr=='cdn'&&(st.kind!='awg'||st.wrap);$('#tw_cdn').style.display=on?'block':'none';camUi();var rk=document.querySelector('.rotk');if(rk)rk.style.display=(on||st.kind=='awg'||st.kind=='hy2'||st.kind=='fwd'||st.kind=='kup')?'none':'';
   $$('#tw_md button').forEach(function(z){var v=z.dataset.v;z.textContent=on?(v=='reverse'?t('CDN points to the Iran server: the foreign server connects in (recommended)'):t('CDN points to the foreign server: the Iran server connects out')):(v=='reverse'?t('Exit → entry (reverse, recommended)'):t('Entry → exit (direct)'));z.classList.toggle('on',v==st.mode)});
   var h=$('#tw_cdh');if(h)h.textContent=on?(st.mode=='reverse'?t('On the CDN: add the domain, point it to the Iran (entry) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the Iran server.'):t('On the CDN: add the domain, point it to the foreign (exit) server IP, turn WebSocket on, origin = HTTP on the tunnel port below. Open that port on the exit server.')):'';hint()}
  var profNote=function(){var n=$('#tw_profn'),v=$('#tw_prof').value;if(n)n.textContent=t((TPROF.filter(function(o){return o[0]==v})[0]||TPROF[0])[2])};profNote();$('#tw_prof').onchange=profNote;
@@ -428,7 +453,8 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
    $('#tw_aw_ft').value=mp(P.tcp,use.tcp).join(', ');$('#tw_aw_fu').value=mp(P.udp,use.udp).join(', ');acc.paint();
    if(pn)pn.textContent=t('Ports of')+' '+(n?n.name:tunSrv(ex).name)+' '+t('were filled in')+(moved.length?' · '+t('Moved on the entry because they were taken')+': '+moved.join(', '):'')}).catch(fail)};
  $('#tw_kd').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.kind=b.dataset.v;kindUi()};
- $('#tw_fm').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.fm=b.dataset.v;kindUi()};
+ $('#tw_fwm').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.fm=b.dataset.v;kindUi()};
+ $('#tw_ku_rm').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.rm=b.dataset.v;kindUi()};$('#tw_udp').addEventListener('input',hint);
  $('#tw_aw_wrap').onchange=function(){st.wrap=this.checked;kindUi()};$('#tw_aw_pt').oninput=function(){this.dataset.touched=1};
  $('#tw_hy_pt').oninput=function(){this.dataset.touched=1};var h1=$('#tw_hy_c1'),h2=$('#tw_hy_c2');if(h1)h1.onclick=function(){hy2Conf(id,'entry')};if(h2)h2.onclick=function(){hy2Conf(id,'exit')};
  var c1=$('#tw_aw_c1'),c2=$('#tw_aw_c2');if(c1)c1.onclick=function(){awgConf(id,'entry')};if(c2)c2.onclick=function(){awgConf(id,'exit')};
@@ -446,7 +472,8 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   tcp:$('#tw_tcp').value,udp:$('#tw_udp').value,dial:st.tr=='cdn'?$('#tw_cdl').value:$('#tw_dl').value,target:$('#tw_tg').value,sni:st.tr=='cdn'?$('#tw_csni').value:$('#tw_sni').value,path:$('#tw_pa').value,auto:st.tr!='cdn'&&$('#tw_au').checked,host:st.tr=='cdn'?$('#tw_chost').value:$('#tw_host').value,frag:st.tr=='cdn'?$('#tw_frag').checked:$('#tw_frag2').checked,fec:st.tr=='game'?(st.pro?'auto':($('#tw_fec').value||'8:3')):'',dup:st.tr=='game'&&!st.pro&&$('#tw_dup').checked,profile:st.tr=='game'&&st.pro?$('#tw_prof').value:''};if(id)b.id=id;
   if(st.kind=='awg'){var g2=function(k){var e=$(k);return e?e.value:''};b.kind='awg';b.auto=false;b.awg={wrap:st.wrap,port:+g2('#tw_aw_pt')||0,profile:g2('#tw_aw_pf'),mtu:+g2('#tw_aw_mtu')||0,keepalive:+g2('#tw_aw_ka')||0,lockdown:!!($('#tw_aw_lk')&&$('#tw_aw_lk').checked),nat_exit:!!$('#tw_aw_nat').checked,routes:g2('#tw_aw_rt'),src_routes:g2('#tw_aw_sr'),fwd_tcp:g2('#tw_aw_ft'),fwd_udp:g2('#tw_aw_fu'),fwd_target:g2('#tw_aw_tg'),regen_params:!!($('#tw_aw_rp')&&$('#tw_aw_rp').checked),regen_keys:!!($('#tw_aw_rk')&&$('#tw_aw_rk').checked)};if(!st.wrap)b.port=0}
   else if(st.kind=='hy2'){var g3=function(k){var e=$(k);return e?e.value:''};b.kind='hy2';b.auto=false;b.mode='direct';b.transport='tcpmux';b.hy2={port:+g3('#tw_hy_pt')||0,sni:g3('#tw_hy_sni'),obfs:!!$('#tw_hy_ob').checked,up_mbps:+g3('#tw_hy_up')||0,down_mbps:+g3('#tw_hy_dn')||0,src_routes:g3('#tw_hy_sr'),masq:g3('#tw_hy_mq'),mtu:+g3('#tw_hy_mtu')||0,regen:!!($('#tw_hy_rg')&&$('#tw_hy_rg').checked)};b.port=b.hy2.port}
-  else if(st.kind=='fwd'){b.kind='fwd';b.auto=false;b.mode='direct';b.transport='fwd';b.port=0;b.fwd={mode:st.fm}}else b.kind='';
+  else if(st.kind=='fwd'){b.kind='fwd';b.auto=false;b.mode='direct';b.transport='fwd';b.port=0;b.fwd={mode:st.fm}}
+  else if(st.kind=='kup'){var g4=function(k){var e=$(k);return e?e.value:''};b.kind='kup';b.auto=false;b.mode='direct';b.transport='tcpmux';b.tcp='';b.kup={raw_mode:st.rm,cipher:g4('#tw_ku_ci'),auth:g4('#tw_ku_au'),seq_mode:+g4('#tw_ku_sq'),hb_len:+g4('#tw_ku_hb')||0,mtu_warn:+g4('#tw_ku_mw')||1375,sock_buf:+g4('#tw_ku_sb')||1024,fix_gro:$('#tw_ku_gro').checked,anti_replay:$('#tw_ku_ar').checked,force_sock_buf:$('#tw_ku_fb').checked,lower_level:$('#tw_ku_ll').checked,new_key:!!($('#tw_ku_nk')&&$('#tw_ku_nk').checked)}}else b.kind='';
   me.disabled=true;api('POST','/api/tunnels',b).then(function(){closeModal();toast(id?t('Saved: the tunnel restarts with the new settings'):t('The tunnel is made: it connects in a few seconds'));tunRefresh()}).catch(function(e){me.disabled=false;fail(e)})}}
 
 

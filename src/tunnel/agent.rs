@@ -105,6 +105,19 @@ pub fn open_ports(specs: &[Spec]) {
             }
             continue;
         }
+        // KANKI-UP: the users' UDP ports of the entry. The exit's raw ports stay closed on purpose: udp2raw
+        // reads them before the firewall, and an open one would let the kernel answer (RST / unreachable)
+        if let Some(k) = &s.kup {
+            for w in k {
+                if w.role == "entry" {
+                    want.push(format!("{}/udp", w.listen));
+                } else if w.cfg.easy() {
+                    // easy-faketcp: the kernel's own TCP connection, so its port is opened like any listener
+                    want.push(format!("{}/tcp", w.listen));
+                }
+            }
+            continue;
+        }
         // a smart-test tunnel: its port, TCP and UDP, on both servers while the test runs (the panel's firewall
         // may be on everywhere); the test's tunnels go when it ends and `fw::sync` closes the port again
         if s.probe && s.port > 0 {

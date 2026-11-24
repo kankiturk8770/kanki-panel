@@ -62,6 +62,8 @@ pub const KMIX_WIRE: u16 = 1332;
 /// the largest payload of one faketcp segment (`faketcp::MAX_SEG`)
 const FAKETCP_SEG: u16 = 1300;
 
+/// KANKI-UP: the largest outer user packet one udp2raw packet carries on a 1500 path (faketcp: 1400 + 28)
+const KUP_CAP: u16 = 1428;
 /// The cores whose configs carry an MTU the panel sets
 pub const CORES: [&str; 2] = ["wg", "awg"];
 
@@ -124,6 +126,12 @@ fn hop_of(t: &crate::tunnel::panel::Tunnel) -> Hop {
     }
     if t.kind == "hy2" {
         return Hop { name, transport: "hy2".into(), iface: None, wire: 0, fec: None };
+    }
+    // KANKI-UP (udp2raw): the user's whole datagram goes into one raw packet, never cut. Measured on a 1500 link
+    // (scripts/kup_lab.sh): up to 1400 bytes of UDP payload in faketcp, 1416 in udp / icmp; so the user's outer
+    // packet (payload + 28) may be at most 1428
+    if t.kind == "kup" {
+        return Hop { name, transport: "kup".into(), iface: Some(KUP_CAP), wire: 1500, fec: None };
     }
     // a direct tunnel: nat adds nothing; GRE is a kernel link of 1476 (24 bytes a packet)
     if t.kind == "fwd" {
