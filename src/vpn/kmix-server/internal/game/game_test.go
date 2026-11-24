@@ -54,8 +54,8 @@ func TestPolicy(t *testing.T) {
 	}
 	// a report about too few packets does not take the start protection away
 	p.Report(0, 0, 3, now)
-	if pl := p.Plan(now); !pl.Copy {
-		t.Fatalf("an empty first report ended the start plan: %+v", pl)
+	if pl := p.Plan(now); pl.Every == 0 || pl.Copy {
+		t.Fatalf("before a real measure: a light protection, never copies: %+v", pl)
 	}
 	p.Report(0, 0, 100, now)
 	if pl := p.Plan(now); pl.Every != 0 || pl.Copy {
@@ -70,7 +70,7 @@ func TestPolicy(t *testing.T) {
 		t.Fatalf("long bursts without a later copy: %+v", pl)
 	}
 	// a quiet moment does not take it away
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 3; i++ {
 		now = now.Add(time.Second)
 		p.Report(0, 0, 100, now)
 	}
@@ -173,5 +173,12 @@ func TestRepairsAtPlanRates(t *testing.T) {
 			t.Fatalf("plan %+v: %d of %d still lost at 5%%", pl, miss, total)
 		}
 		t.Logf("plan %+v: 5%% loss → %.2f%% lost", pl, float64(miss)*100/total)
+	}
+}
+
+// one short cut in an otherwise clean second is no reason to send more
+func TestLoneBurst(t *testing.T) {
+	if stepFor(0, 5) != 0 || stepFor(5, 5) != 1 || stepFor(20, 5) != 4 {
+		t.Fatal("bursts on a clean line raise the protection")
 	}
 }
