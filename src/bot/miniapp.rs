@@ -675,7 +675,7 @@ mod tests {
     #[tokio::test]
     async fn gifts_only_from_the_sales_bots_admins() {
         use tower::ServiceExt;
-        let app = crate::kping::tests::test_app();
+        let app = crate::test_app();
         let tok = "123456:ABC-test";
         app.db.set("bot_token", tok);
         app.db.set("bot_admins", "500");
@@ -711,7 +711,7 @@ mod tests {
     #[tokio::test]
     async fn the_admin_mini_app_changes_only_the_bots_own_things() {
         use tower::ServiceExt;
-        let app = crate::kping::tests::test_app();
+        let app = crate::test_app();
         let tok = "123456:ABC-test";
         app.db.set("bot_token", tok);
         app.db.set("bot_admins", "500");

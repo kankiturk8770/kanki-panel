@@ -124,7 +124,7 @@ pub fn open_ports(specs: &[Spec]) {
                 want.push(format!("{}/{}", s.port, proto));
             }
         }
-        // a tunnel that takes its users' ports on 127.0.0.1 only (KPING: its relay is the way in)
+        // a tunnel that takes its users' ports on 127.0.0.1 only (a core of this machine behind it)
         if s.role == "entry" && !s.bind.trim().starts_with("127.") {
             for (a, _) in parse_ports(&s.tcp) {
                 want.push(format!("{}/tcp", a));
@@ -287,8 +287,8 @@ async fn update_from_panel(http: &reqwest::Client, panel: &str, id: &str, token:
     std::process::exit(0);
 }
 
-/// 3.58.1: the KPING relay of the first versions ran as a service of its own (`kanki-relay`); KPING lives in the
-/// node now, so a leftover one only holds a port open: stopped, removed, and its port taken off the firewall
+/// 3.58.1: a relay of the first versions ran as a service of its own (`kanki-relay`); a leftover one only holds a
+/// port open: stopped, removed, and its port taken off the firewall
 fn drop_old_relay() {
     let unit = "/etc/systemd/system/kanki-relay.service";
     if !std::path::Path::new(unit).exists() {
@@ -347,8 +347,6 @@ pub async fn run(version: &str) {
     // an updated agent also moves the emergency chat onto the new binary
     let _ = tokio::task::spawn_blocking(crate::emergency::restart_if_outdated).await;
     let _ = tokio::task::spawn_blocking(crate::dns::restart_if_outdated).await;
-    // KPING as it was last time (the panel may not be reachable after a reboot)
-    let _ = tokio::task::spawn_blocking(crate::kpingd::from_disk).await;
     // 3.57.0: the VIP tunnel is gone; what an older agent left behind goes too
     let _ = tokio::task::spawn_blocking(retire_vip).await;
     // certificates close to their end are renewed with what holds port 80 at that moment
@@ -400,14 +398,13 @@ pub async fn run(version: &str) {
         let fw_st = tokio::task::spawn_blocking(crate::fw::report).await.unwrap_or_default();
         let listen = tokio::task::spawn_blocking(crate::certbot::listeners_json).await.unwrap_or_default();
         let setup_st = tokio::task::spawn_blocking(setup_status).await.unwrap_or_default();
-        let kping_st = tokio::task::spawn_blocking(crate::kpingd::report).await.unwrap_or_default();
         // the machine (CPU, memory, disk, uptime, sockets) every 30 seconds: Iran servers have no VPN part
         // that reports it
         if stats_at.elapsed() >= std::time::Duration::from_secs(30) || stats.is_null() {
             stats = tokio::task::spawn_blocking(crate::admin::node_stats).await.unwrap_or_default();
             stats_at = std::time::Instant::now();
         }
-        let mut body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st, "kping": kping_st, "stats": stats });
+        let mut body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st, "stats": stats });
         // the last warnings and errors of Kanki's services here, once a minute, for the panel's Logs page (3.58.1)
         if logs_at.elapsed() >= std::time::Duration::from_secs(60) {
             logs_at = std::time::Instant::now();
@@ -460,7 +457,6 @@ pub async fn run(version: &str) {
                     let _ = tokio::task::spawn_blocking(|| crate::dns::deploy(None)).await;
                     let _ = tokio::task::spawn_blocking(|| crate::xray::deploy(None, None)).await;
                     subsrv.apply(None);
-                    let _ = tokio::task::spawn_blocking(|| crate::kpingd::apply(Default::default())).await;
                     let _ = std::fs::remove_file(CACHE);
                     last.clear();
                     // the Hysteria2 / AmneziaWG tunnel workers stop their units and routes by themselves
@@ -497,11 +493,10 @@ pub async fn run(version: &str) {
                         }
                         _ => {}
                     }
-                    // "Restart services" in the panel: the tunnels and KPING stop now and start again below
+                    // "Restart services" in the panel: the tunnels stop now and start again below
                     if v["restart"].as_bool() == Some(true) {
-                        eprintln!("the panel asked: restarting the tunnels and KPING");
+                        eprintln!("the panel asked: restarting the tunnels");
                         mgr.apply(vec![]).await;
-                        let _ = tokio::task::spawn_blocking(|| crate::kpingd::apply(Default::default())).await;
                         last.clear();
                     }
                     // "Sync" in the panel: everything below is applied again now (nothing kept from before)
@@ -603,11 +598,6 @@ pub async fn run(version: &str) {
                         if let Ok(Err(e)) = tokio::task::spawn_blocking(move || start_setup(&c)).await {
                             eprintln!("VPN install: {}", e);
                         }
-                    }
-                    // KPING (relay and exit): its config; a panel without it sends nothing (left as it is)
-                    if let Some(k) = v.get("kping") {
-                        let cfg: crate::kpingd::KpCfg = serde_json::from_value(k.clone()).unwrap_or_default();
-                        let _ = tokio::task::spawn_blocking(move || crate::kpingd::apply(cfg)).await;
                     }
                     // the subscription listener: its config, or Null (none here)
                     subsrv.apply(serde_json::from_value(v["subsrv"].clone()).ok());

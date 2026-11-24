@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.60 — KANKI MIX on two paths
+KANKI MIX uses the phone's Wi-Fi and mobile data together, and the server and its Iran tunnel, choosing the best path and repairing on the other only as much as the line loses. microtun and KPING are gone.
+
 ## New in 3.59.1 — the sales bot page cleaned up
 The bot page keeps only the bot and the report bot; the old daily report and the second copy of the bot's settings in Settings are gone (they live in the bot and the report bot).
 

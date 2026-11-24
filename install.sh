@@ -402,7 +402,7 @@ EOF
   systemctl restart "$1"
 }
 
-# The six cores, by number; $1 = the default ("" = none: the main server runs only the panel and its
+# The four cores, by number; $1 = the default ("" = none: the main server runs only the panel and its
 # agent). Sets CORES (wg,awg,…).
 pick_cores(){
   local d="$1" v n
@@ -410,13 +410,13 @@ pick_cores(){
   echo "  Which VPN cores should this server run?"
   echo "    0) None: only the panel / the server agent (monitoring)"
   echo "    1) WireGuard     2) AmneziaWG     3) Hysteria2"
-  echo "    4) KANKI MIX     5) microtun      6) KPING (inside the server agent, nothing extra)"
-  read -rp "  Numbers, comma separated (like 1,2 or 1,2,6) [${d:-0}]: " v
+  echo "    4) KANKI MIX"
+  read -rp "  Numbers, comma separated (like 1,2 or 1,2,4) [${d:-0}]: " v
   v="${v:-${d:-0}}"; CORES=""
   for n in $(echo "$v" | tr ', ' '  '); do
     case "$n" in
       1) CORES="$CORES,wg" ;; 2) CORES="$CORES,awg" ;; 3) CORES="$CORES,hy2" ;;
-      4) CORES="$CORES,kmix" ;; 5) CORES="$CORES,mtun" ;; 6) CORES="$CORES,kping" ;;
+      4) CORES="$CORES,kmix" ;;
       0) ;; *) warn "Unknown choice: $n (skipped)" ;;
     esac
   done

@@ -117,7 +117,7 @@ func TestRLCStale(t *testing.T) {
 	}
 }
 
-// the same repair the panel's kprlc test makes (kprlc::tests::same_repair_as_the_app)
+// a fixed repair (the bytes are part of the wire format: both ends must make the same)
 func TestRLCVector(t *testing.T) {
 	var tx rlcTx
 	far := time.Now().Add(10 * time.Second)

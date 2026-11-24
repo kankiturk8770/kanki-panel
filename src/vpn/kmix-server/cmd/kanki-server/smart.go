@@ -113,7 +113,7 @@ func (r *dgramRelay) onStat(b []byte, addr net.Addr) {
 	}
 	s.mu.Unlock()
 	pm, burst, n := sum.Result()
-	out := proto.Stat{Session: st.Session, Version: proto.StatVersion, Caps: proto.CapRepair | proto.CapCopy,
+	out := proto.Stat{Session: st.Session, Version: proto.StatVersion, Caps: proto.CapRepair | proto.CapCopy | proto.CapMulti,
 		Loss: uint16(pm), Burst: byte(min(burst, 255)), Step: byte(s.downPol.Step()), Count: uint16(min(n, 65535))}
 	r.send(proto.KindStat, proto.AppendStat(nil, &out), addr)
 }
@@ -211,8 +211,33 @@ func (r *dgramRelay) sendDown(f *udpFlow, seq uint32, payload, out []byte) {
 	pl := s.downPol.Plan(now)
 	caps := byte(s.caps.Load())
 	lt := laterOf(f.key.sess)
-	if pl.Copy && caps&proto.CapCopy != 0 {
-		lt.Push(game.CopyDelay, out, func(b []byte) { r.send(proto.KindUDPDownCopy, b, f.client.Load()) })
+	// another live path of the phone (multipath): the second copy and the repairs go there, at once (a loss of the
+	// main path does not reach another path, so nothing has to wait for the loss to pass)
+	var alt *net.UDPAddr
+	if caps&proto.CapMulti != 0 {
+		alt = r.paths.other(f.key.sess, client)
+	}
+	// the phone's main path stopped answering: the answers go over the other path too until it says otherwise
+	mirrored := false
+	if alt != nil && caps&proto.CapCopy != 0 && now.UnixNano() < f.mirror.Load() {
+		r.send(proto.KindUDPDownCopy, out, alt)
+		mirrored = true
+	}
+	if pl.Copy && caps&proto.CapCopy != 0 && !mirrored {
+		if alt != nil {
+			r.send(proto.KindUDPDownCopy, out, alt)
+		} else {
+			lt.Push(game.CopyDelay, out, func(b []byte) { r.send(proto.KindUDPDownCopy, b, f.client.Load()) })
+		}
+	}
+	// where the repairs go: the other path when there is one
+	repTo := func() *net.UDPAddr {
+		if alt != nil {
+			if a := r.paths.other(f.key.sess, f.client.Load()); a != nil {
+				return a
+			}
+		}
+		return f.client.Load()
 	}
 	if caps&proto.CapRepair == 0 {
 		return
@@ -232,7 +257,7 @@ func (r *dgramRelay) sendDown(f *udpFlow, seq uint32, payload, out []byte) {
 	}
 	f.mu.Unlock()
 	if rep != nil {
-		lt.Push(game.RepairDelay, rep, func(b []byte) { r.send(proto.KindRepair, b, f.client.Load()) })
+		lt.Push(game.RepairDelay, rep, func(b []byte) { r.send(proto.KindRepair, b, repTo()) })
 	}
 	if pl.Every > 0 {
 		win := pl.Win
@@ -246,7 +271,7 @@ func (r *dgramRelay) sendDown(f *udpFlow, seq uint32, payload, out []byte) {
 			}
 			f.mu.Unlock()
 			if rep != nil {
-				r.send(proto.KindRepair, rep, f.client.Load())
+				r.send(proto.KindRepair, rep, repTo())
 			}
 		})
 	}

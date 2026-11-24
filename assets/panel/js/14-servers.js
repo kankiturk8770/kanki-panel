@@ -115,7 +115,7 @@ window.agHealth=function(id){toast(t('Checking…'));api('GET','/api/tunnels/ser
  if((r.tunnels||[]).length)h+='<label class="f">'+t('Tunnels')+'</label><div class="list">'+r.tunnels.map(function(x){return '<div class="li"><span><b>'+esc(x.name)+'</b>'+(x.error?'<small>'+esc(x.error)+'</small>':'')+'</span><span>'+(x.links>0?'✅ '+N(x.links)+'/'+N(x.want):'❌')+'</span></div>'}).join('')+'</div>';
  h+=(r.issues||[]).length?'<div class="warnbox">'+r.issues.map(esc).join('<br>')+'</div>':'<p>'+t('Everything looks fine')+'</p>';
  modal(mhead(t('Health'),s.name||id)+h)}).catch(fail)};
-window.agAct=function(id,a){api('POST','/api/tunnels/servers/'+q(id)+'/agent/'+a).then(function(){toast(t(a=='restart'?'Sent: its tunnels and KPING start again in a few seconds':'Sent: the server applies everything again in a few seconds'));setTimeout(function(){load(true)},6000)}).catch(fail)};
+window.agAct=function(id,a){api('POST','/api/tunnels/servers/'+q(id)+'/agent/'+a).then(function(){toast(t(a=='restart'?'Sent: its tunnels start again in a few seconds':'Sent: the server applies everything again in a few seconds'));setTimeout(function(){load(true)},6000)}).catch(fail)};
 function srvBox(kind,title,icon,rows){
  return kuGroup(icon+' '+t(title),rows.length,'<button class="btn sm" onclick="srvAdd(\''+kind+'\')">'+ic('plus',14)+' '+t(kind=='iran'?'Add an Iran server':'Add an abroad server')+'</button>',
   rows.length?'<div class="kxl">'+rows.map(row).join('')+'</div>':'<p class="muted ku-empty">'+t('No server yet')+'</p>')}
@@ -163,7 +163,6 @@ function coresOf(s){var n=s.node,i=(n&&n.info)||{},j=s.jobs||{},pt=s.ports||{},o
  var vpn=function(p,name,key,port){if(!n)return;var sv=svc(key);if(!port&&!sv)return;out.push([p,name,!n.enabled||off.indexOf(p)>=0?'':sv&&!sv.active?'r':'g',port])};
  vpn('wg','WireGuard','wireguard',pt.wg||i.wg_port);vpn('awg','AmneziaWG','amneziawg',i.awg_port);vpn('hy2','Hysteria2','hysteria2',pt.hy2||i.hy2_port);
  if(n&&(pt.kmix||i.kmix_port))out.push(['kmix','KANKI MIX',n.enabled?'g':'',pt.kmix||i.kmix_port]);
- if(n&&(pt.mtun||i.mt_port))out.push(['mtun','microtun',n.enabled?'g':'',pt.mtun||i.mt_port]);
  if(j.xray_on)out.push(['xray','Xray','g',j.xray?N(j.xray)+' '+t('inbounds'):'']);
  if(j.dns)out.push(['dns','Kanki DNS','g','']);
  return out}
@@ -182,7 +181,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  var miss='';
  if(!n&&a){var su=s.setup||null;
   if(s.pending&&!a.last_seen)miss='<div class="kxc-miss"><span>'+t('Waiting for this server: run its command')+'</span><button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+t('Show command')+'</button></div>';
-  // an Iran server is a relay: its tunnels and KPING are its job, a missing VPN part is no problem
+  // an Iran server is a relay: its tunnels are its job, a missing VPN part is no problem
   else if(isIr(s))miss=!a.online?'':'<div class="kxc-ok"><span class="okc">'+ic('check',14)+'</span><span>'+t('Relay / tunnel mode active')+'</span></div>';
   else if(su&&su.state=='running')miss='<div class="kxc-miss"><span class="spin"></span><span>'+t('Installing the VPN part…')+'</span>'+(su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>';
   else miss='<div class="kxc-miss"><span>'+(su&&su.state=='failed'?'<b class="bad2">'+t('VPN install failed')+'</b>':t('VPN is not installed on this server'))+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\','+(isIr(s)?0:1)+')">'+t(su&&su.state=='failed'?'Try again':'Install VPN')+'</button>'+(su&&su.state=='failed'&&su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>'}
@@ -228,7 +227,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAct(\''+ni+'\',\'update\')">⇪ '+t('Update agent')+'</button>');
   acts.push('<button class="b2 sm okb" onclick="nAssign(\''+ni+'\',1)">'+ic('plus',13)+' '+t('Add to all users')+'</button>');
   if(!s.local)acts.push('<button class="b2 sm" onclick="nAssign(\''+ni+'\',0)">'+t('Remove from all users')+'</button>')}
- // a server with only the agent (every Iran server, a KPING exit): the same four controls, on its agent
+ // a server with only the agent (every Iran server): the same four controls, on its agent
  else if(a&&!s.local){var ai=esc(a.id);
   acts.push('<button class="b2 sm" onclick="agHealth(\''+ai+'\')">♡ '+t('Health')+'</button>');
   acts.push('<button class="b2 sm" onclick="agAct(\''+ai+'\',\'sync\')">⇄ '+t('Sync')+'</button>');
@@ -282,7 +281,7 @@ window.srvFind=find;
 window.srvUpdate=function(k){api('POST','/api/servers/'+encodeURIComponent(k)+'/update').then(function(r){toast(t('The server takes the new version in a minute')+' (v'+r.version+')');setTimeout(function(){load(true)},60000)}).catch(fail)};
 
 // ---------------------------------------------------------------- add a server (one command)
-var SA_CORES=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['mtun','microtun'],['kping','KPING']];
+var SA_CORES=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX']];
 window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
  modal(mhead(t('Add server'))+
   '<p class="muted" style="margin:0 0 8px">'+t('Everything is installed on the server (VPN, tunnels, Xray, Kanki DNS) with one command. Off = installed, but no user is sent there (an Iran relay).')+'</p>'+

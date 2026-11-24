@@ -185,7 +185,6 @@ pub const PANEL_JS: &str = concat!(
     include_str!("../../assets/panel/js/04-antidpi.js"),
     include_str!("../../assets/panel/js/05-dns.js"),
     include_str!("../../assets/panel/js/06-kmix.js"),
-    include_str!("../../assets/panel/js/07-microtun.js"),
     include_str!("../../assets/panel/js/08-translations.js"),
     include_str!("../../assets/panel/js/09-base-login-shell.js"),
     include_str!("../../assets/panel/js/10-dashboard-users-servers-settings.js"),
@@ -196,8 +195,7 @@ pub const PANEL_JS: &str = concat!(
     include_str!("../../assets/panel/js/15-routes.js"),
     include_str!("../../assets/panel/js/16-vpn-services.js"),
     include_str!("../../assets/panel/js/17-look-map-menu.js"),
-    // KPING's page; the start code below stays last
-    include_str!("../../assets/panel/js/19-kping.js"),
+    // the start code stays last
     include_str!("../../assets/panel/js/18-start.js")
 );
 
@@ -350,8 +348,6 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::dns::panel::router())
         .merge(crate::xray::panel::router())
         .merge(crate::kmix::router())
-        .merge(crate::microtun::router())
-        .merge(crate::kping::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
         // 2 MiB for every route: login, join and hy2/auth are open to strangers and must not make the
         // server buffer more. Only the backup upload gets a bigger limit (see backup::router).
@@ -387,7 +383,7 @@ async fn overview(State(app): St, h: HeaderMap) -> Response {
     // orders still waiting for the customer's payment or the admin's check
     let pending: i64 = app.db.with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE status IN ('pending','waiting','paid')", [], |r| r.get(0)).unwrap_or(0));
     let mut protos: HashMap<&str, usize> = HashMap::new();
-    for p in ["wg", "awg", "hy2", "kmix", "mtun", "xray", "dns"] {
+    for p in ["wg", "awg", "hy2", "kmix", "xray", "dns"] {
         protos.insert(p, us.iter().filter(|u| u.has_proto(p)).count());
     }
     // online: a VPN session, or Xray / Kanki DNS use right now
@@ -420,7 +416,7 @@ fn list_or(v: &Value, def: &str) -> String {
 }
 
 /// Every protocol an account can have (what the user form offers)
-pub const USER_PROTOS: &[&str] = &["wg", "awg", "hy2", "kmix", "mtun", "xray", "dns", "kping"];
+pub const USER_PROTOS: &[&str] = &["wg", "awg", "hy2", "kmix", "xray", "dns"];
 
 /// A typed protocol or server list as it may be saved: known names only, once each. An unknown one was
 /// saved before and gave the user nothing there, without a word.
@@ -775,7 +771,7 @@ fn save_leftovers(app: &App, v: &[Leftover]) {
 /// Asks the node to cut its users off, stop KANKI MIX, remove its VPN services, close their ports and
 /// uninstall its agent (3.6.8+). True when the node confirmed it.
 async fn remove_remote(app: &Arc<App>, n: &Node) -> bool {
-    let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(json!({})), mtun: Some(Default::default()), ..Default::default() };
+    let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(json!({})), ..Default::default() };
     let synced = sync::remote_post_json(app, n, "/agent/sync", &json!(empty)).await.is_some();
     synced && sync::remote_post(app, n, "/agent/remove").await.map(|v| v["ok"].as_bool() == Some(true)).unwrap_or(false)
 }
@@ -850,8 +846,6 @@ pub(crate) fn delete_node(app: &Arc<App>, id: &str) -> Option<Node> {
         let _ = app.db.exec("UPDATE users SET nodes=?1 WHERE id=?2", &[&list, &u.id]);
     }
     crate::kmix::forget_node(app, id);
-    crate::microtun::forget_node(app, id);
-    crate::kping::forget_node(app, id);
     crate::twin::forget(app, &format!("node:{}", id));
     crate::cores::forget(app, id);
     crate::direct::forget(app, id);
@@ -1081,11 +1075,8 @@ mod token_rights_tests {
         let r = crate::admin::bot_put_for_test(app.clone(), h.clone(), json!({"admins": "123"})).await;
         assert_eq!(r.status(), StatusCode::FORBIDDEN);
         assert_eq!(app.db.get("bot_admins"), "");
-        // looking at a token quietly does not mark it as used
+        // using a token marks it as used
         app.db.exec("UPDATE api_tokens SET last_used=0", &[]).unwrap();
-        assert!(crate::auth::identify_quiet(&app, &h).is_some());
-        let used: i64 = app.db.with(|c| c.query_row("SELECT last_used FROM api_tokens", [], |r| r.get(0)).unwrap());
-        assert_eq!(used, 0);
         assert!(crate::auth::identify(&app, &h).is_some());
         let used: i64 = app.db.with(|c| c.query_row("SELECT last_used FROM api_tokens", [], |r| r.get(0)).unwrap());
         assert!(used > 0);
@@ -1814,8 +1805,6 @@ fn sub_data(app: &App, u: &User, sealed: bool) -> Value {
             "kmix_tunnel": tun,
             // MIX+ is gone: always empty, kept for apps that still read the list
             "kcore": [],
-            // microtun: mtun://key@host:port?obfs=…&ip=… (Null = not for this user / not on this server)
-            "mtun": crate::microtun::link(app, u, n, false),
         });
         // the real exit of this server's configs (a tunnel endpoint is in Iran; the traffic leaves here)
         if let (Some(o), Some(e)) = (v.as_object_mut(), crate::exitgeo::fields(app, &n.id).as_object()) {
@@ -1835,9 +1824,7 @@ fn sub_data(app: &App, u: &User, sealed: bool) -> Value {
         // "kmix" too) lists them as a server of their own; "via" and "parent" tell a newer app they are the
         // tunnel configs of that server
         let tp = twin_protos(app, u, n);
-        // a user with only microtun gets the tunnel entry too
-        let mt_tun = crate::microtun::link(app, u, n, true);
-        if !tp.is_empty() || mt_tun.is_some() {
+        if !tp.is_empty() {
             let tw = crate::twin::of_node_core(app, n, "hy2");
             let mut e = v.clone();
             e["id"] = json!(format!("{}{}", n.id, TUNNEL_SUFFIX));
@@ -1847,7 +1834,6 @@ fn sub_data(app: &App, u: &User, sealed: bool) -> Value {
             e["hy2"] = if tp.contains(&"hysteria2") { json!(hy2_link(app, u, n, tw.as_ref())) } else { Value::Null };
             e["kmix"] = json!(tun);
             e["kmix_tunnel"] = Value::Null;
-            e["mtun"] = json!(mt_tun);
             e["via"] = json!("tunnel");
             e["via_proto"] = via_proto(app, n, &tp, true);
             e["parent"] = json!(n.id);
@@ -1940,19 +1926,19 @@ fn sub_user(app: &App, code: &str) -> Result<User, Response> {
 async fn sub_page(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
     let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
     crate::devices::note(&app, &u, &h);
-    // KPING only for the Kanki app, whose answer is sealed (the app reads the data block of this page)
+    // the Kanki app's answer is sealed (it reads the data block of this page; its direct WireGuard is only there)
     let r = sub_page_of(&app, &u, crate::devices::wants_seal(&h));
     crate::devices::reply(&h, &code, r).await
 }
 
-fn sub_page_of(app: &App, u: &User, kping: bool) -> Response {
+fn sub_page_of(app: &App, u: &User, sealed: bool) -> Response {
     let sub = u.sub_code();
     // server-rendered config links keep the exact URL format the Kanki Android app reads
     let mut nodes_html = String::new();
     for n in user_nodes(&app, &u) {
         let mut main = node_protos(&app, &u, &n);
         // the Kanki app (sealed): its direct WireGuard too
-        if kping && !main.contains(&"wireguard") && wg_direct_for_app(&app, &u, &n) {
+        if sealed && !main.contains(&"wireguard") && wg_direct_for_app(&app, &u, &n) {
             main.insert(0, "wireguard");
         }
         let rows: String = main.into_iter().map(|p| proto_row(&app, &u, &n, p, false)).collect();
@@ -2001,10 +1987,7 @@ fn sub_page_of(app: &App, u: &User, kping: bool) -> Response {
         }
         nodes_html.push_str(&format!("<section class=\"node\" data-node=\"dns\"><h3>Kanki DNS</h3>{}</section>", rows));
     }
-    let mut data = sub_data(&app, &u, kping);
-    if kping {
-        data["kping"] = crate::kping::sub_info(&app, &u);
-    }
+    let data = sub_data(&app, &u, sealed);
     let data = serde_json::to_string(&data).unwrap_or_default().replace("</", "<\\/");
     let page = include_str!("../../assets/sub/sub.html")
         .replace("{{TITLE}}", &esc(&u.username))
@@ -2032,11 +2015,7 @@ async fn sub_json(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Res
     let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
     crate::devices::note(&app, &u, &h);
     let sealed = crate::devices::wants_seal(&h);
-    let mut data = sub_data(&app, &u, sealed);
-    // KPING goes only to the Kanki app, sealed (never to the page, links, other apps or the bot)
-    if sealed {
-        data["kping"] = crate::kping::sub_info(&app, &u);
-    }
+    let data = sub_data(&app, &u, sealed);
     crate::devices::reply(&h, &code, Json(data).into_response()).await
 }
 

@@ -725,7 +725,7 @@ function wireBuy(){var $=function(s){return document.querySelector(s)},all=funct
 function buzz2(){var w=tg();try{w&&w.HapticFeedback&&w.HapticFeedback.selectionChanged()}catch(e){}}
 
 var CN={TR:'ترکیه',DE:'آلمان',NL:'هلند',SE:'سوئد',GB:'انگلیس',FI:'فنلاند',FR:'فرانسه',US:'آمریکا',CA:'کانادا',AE:'امارات',IR:'ایران',AM:'ارمنستان',RU:'روسیه',PL:'لهستان',AT:'اتریش',CH:'سوئیس',IT:'ایتالیا',ES:'اسپانیا',RO:'رومانی',BG:'بلغارستان',LV:'لتونی',LT:'لیتوانی',EE:'استونی',NO:'نروژ',DK:'دانمارک',CZ:'چک',HU:'مجارستان',GR:'یونان',CY:'قبرس',GE:'گرجستان',AZ:'آذربایجان',KZ:'قزاقستان',JP:'ژاپن',SG:'سنگاپور',HK:'هنگ‌کنگ',IN:'هند'};
-var PRN={wireguard:'WireGuard',amneziawg:'AmneziaWG',hysteria2:'Hysteria2',kankimix:'KANKI MIX',microtun:'microtun',xray:'Xray',vless:'Xray'};
+var PRN={wireguard:'WireGuard',amneziawg:'AmneziaWG',hysteria2:'Hysteria2',kankimix:'KANKI MIX',xray:'Xray',vless:'Xray'};
 function copyText(t,ok,fallback){var done=function(){buzz('success');toast(ok)};if(navigator.clipboard)navigator.clipboard.writeText(t).then(done,function(){fallback?fallback():prompt(ok,t)});else fallback?fallback():prompt(ok,t)}
 
 function draw(){var u=A.list[A.cur];if(!u)return;var v2=u.service=='v2ray';

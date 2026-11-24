@@ -14,9 +14,9 @@ window.tunNodePorts=function(n){var i=(n&&n.info)||{},tcp=[],udp=[],add=function
 // ---------------------------------------------------------------- one button per core
 // The ports of a server core by core: the VPN ports from what the server reports (`info` of its node),
 // Xray and Kanki DNS from their pages (tunSvcGroups). A core the server does not run has no ports.
-var CORES=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['mtun','microtun'],['xray','Xray'],['dns','Kanki DNS']];
+var CORES=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['xray','Xray'],['dns','Kanki DNS']];
 window.tunCoreGroups=function(info,svc){var i=info||{},one=function(v){v=parseInt(v,10);return v>0&&v<65536?[v]:[]},
- vpn={wg:one(i.wg_port),awg:one(i.awg_port),hy2:one(i.hy2_port),kmix:one(i.kmix_port),mtun:one(i.mt_port)};
+ vpn={wg:one(i.wg_port),awg:one(i.awg_port),hy2:one(i.hy2_port),kmix:one(i.kmix_port)};
  return CORES.map(function(c){var g=svc&&svc[c[0]];return {k:c[0],name:c[1],tcp:g?g.tcp.slice():[],udp:g?g.udp.slice():vpn[c[0]]||[]}})};
 // one item of a port box: "51821:51820" is entry 51821, target 51820; a range is neither
 function pItems(v){return String(v||'').split(/[\s,]+/).filter(Boolean)}

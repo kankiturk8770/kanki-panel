@@ -226,6 +226,7 @@ type udpFlow struct {
 	conn     *net.UDPConn
 	client   atomic.Pointer[net.UDPAddr] // آخرین آدرس کلاینت (با عوض شدن شبکه‌ی گوشی عوض می‌شود)
 	dup      atomic.Bool
+	mirror   atomic.Int64 // UnixNano until which the answers go over the phone's other path too (FlagMirror)
 	lastSeen atomic.Int64
 	downSeq  atomic.Uint32
 	mu       sync.Mutex
@@ -240,10 +241,12 @@ type dgramRelay struct {
 	flows   map[flowKey]*udpFlow
 	perSess map[uint64]int
 	sess    map[uint64]*smartSess // apps that report (smart.go)
+	paths   pathBook              // the addresses of each session (multipath.go)
 }
 
 func newDgramRelay(send func(byte, []byte, net.Addr)) *dgramRelay {
-	return &dgramRelay{send: send, flows: make(map[flowKey]*udpFlow), perSess: make(map[uint64]int), sess: make(map[uint64]*smartSess)}
+	return &dgramRelay{send: send, flows: make(map[flowKey]*udpFlow), perSess: make(map[uint64]int), sess: make(map[uint64]*smartSess),
+		paths: pathBook{m: make(map[uint64]*sessPaths)}}
 }
 
 // handle داخل حلقه‌ی خواندن سوکت اصلی صدا زده می‌شود؛ پس هیچ کار کندی اینجا نیست.
@@ -254,8 +257,11 @@ func (r *dgramRelay) handle(kind byte, b []byte, addr net.Addr) {
 	}
 	switch kind {
 	case proto.KindPing:
-		if len(b) == proto.PingLen && r.allowed(addr, binary.BigEndian.Uint64(b[0:8])) {
-			r.send(proto.KindPong, b, addr)
+		if len(b) == proto.PingLen {
+			if sid := binary.BigEndian.Uint64(b[0:8]); r.allowed(addr, sid) {
+				r.send(proto.KindPong, b, addr)
+				r.paths.note(sid, ua)
+			}
 		}
 	case proto.KindUDPUp:
 		h, payload, err := proto.ParseUDPUp(b)
@@ -266,10 +272,18 @@ func (r *dgramRelay) handle(kind byte, b []byte, addr net.Addr) {
 		if f == nil {
 			return
 		}
-		f.client.Store(ua)
+		// the main address is learned from the first copies only: a second copy or a mirrored packet may come over
+		// another path of the phone (multipath), and the answers must keep going on the best one
 		if h.Flags&proto.FlagCopy == 0 {
+			f.client.Store(ua)
 			f.dup.Store(h.Flags&proto.FlagDup != 0)
+		} else if f.client.Load() == nil {
+			f.client.Store(ua)
 		}
+		if h.Flags&proto.FlagMirror != 0 {
+			f.mirror.Store(time.Now().Add(mirrorFor).UnixNano())
+		}
+		r.paths.note(h.Session, ua)
 		f.lastSeen.Store(time.Now().Unix())
 		f.mu.Lock()
 		fresh := f.win.Accept(h.Seq)
@@ -368,6 +382,7 @@ func (r *dgramRelay) janitor() {
 		}
 		r.smartGC()
 		r.mu.Unlock()
+		r.paths.gc()
 		for _, f := range dead {
 			f.conn.Close() // readLoop خودش remove را صدا می‌زند
 		}

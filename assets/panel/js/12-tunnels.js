@@ -47,9 +47,7 @@ function tmTheme(){var cs=getComputedStyle(document.body),g=function(v,d){return
 // short tunnel names for the map: HQ-QUIC, KCP, WSS, AWG+WS …
 // Game-FEC Pro: the cores it can be shaped for ([value, name, what it does])
 var TPROF=[['','Any core','Game-FEC Pro for whatever goes through: the game repaired, TCP without repairs.'],
- ['kping','KPING','A tunnel that carries the KPING port of a server: KPING copies and repairs end to end itself, so the tunnel repairs only what the line loses.'],
  ['kmix','KANKI MIX','The game packets of KANKI MIX get the repairs; its KCP (lobby, logins, downloads) goes without, so downloads never fill the line of the game.'],
- ['mtun','microtun','Small packets first and at once: microtun never waits for a lost packet, so nothing is held back.'],
  ['wg','WireGuard / AmneziaWG','Every WireGuard packet is repaired as the line needs (WireGuard has no repairs of its own).']];
 function tunProf(v){var o=TPROF.filter(function(z){return z[0]==v})[0];return o?t(o[1]):v}
 function tunShort(x){var S={tcpmux:'TCP-Mux',tcp:'TCP',ws:'WS',wss:'WSS',quic:'QUIC',kcp:'KCP',hq:'HQ-QUIC',h2:'H2',dual:'Dual',cdn:'CDN',game:'Game-FEC',faketcp:'FakeTCP'};
@@ -205,7 +203,7 @@ function tunMerge(a,b){[['tcp'],['udp']].forEach(function(k){k=k[0];(b[k]||[]).f
 var TGUIDE=[
  {p:'WireGuard · AmneziaWG',best:['awg','AmneziaWG link'],also:'Game, KCP',blocked:'FakeTCP, Dual',avoid:'TCP, WS',
   why:'A network card between the two servers: packets go through as they are, with the least overhead.'},
- {p:'microtun · KANKI MIX',best:['game','Game (FEC)'],also:'AmneziaWG link, KCP',blocked:'FakeTCP',avoid:'TCP, WSS, CDN',
+ {p:'KANKI MIX',best:['game','Game (FEC)'],also:'AmneziaWG link, KCP',blocked:'FakeTCP',avoid:'TCP, WSS, CDN',
   why:"For games: a lost packet is rebuilt without waiting. Costs about 37% more traffic between the servers, not the user's data."},
  {p:'Hysteria2',best:['hy2','Hysteria2 link'],also:'HQ-QUIC, KCP',blocked:'Dual',avoid:'TCP, WS',
   why:'QUIC stays QUIC end to end; HQ-QUIC hides it under a mask.'},
@@ -221,7 +219,7 @@ function tunGuideHtml(){
    '<span class="tgb" data-l="'+esc(t('Best tunnel'))+'"><button type="button" class="b2 sm" data-tg="'+i+'">'+esc(t(r.best[1]))+' ＋</button></span>'+
    '<span data-l="'+esc(t('Also good'))+'">'+esc(t(r.also))+'</span><span data-l="'+esc(t('When UDP is blocked'))+'">'+esc(t(r.blocked))+'</span><span class="tgx" data-l="'+esc(t('Better not'))+'">'+esc(r.avoid)+'</span>'+
    '<small class="tgw">'+esc(t(r.why))+'</small></div>'}).join('')+'</div>'+
-  '<p class="sub" style="margin:10px 0 0">'+t('A tunnel per kind of traffic: an AmneziaWG link for WireGuard and AmneziaWG, a Game tunnel for microtun and KANKI MIX, TCP Mux for Xray. Tap a best tunnel to open the form with it, then tap the cores whose ports it should carry.')+'</p>'+
+  '<p class="sub" style="margin:10px 0 0">'+t('A tunnel per kind of traffic: an AmneziaWG link for WireGuard and AmneziaWG, a Game tunnel for KANKI MIX, TCP Mux for Xray. Tap a best tunnel to open the form with it, then tap the cores whose ports it should carry.')+'</p>'+
   '<p class="sub" style="margin:6px 0 0">'+t('Networks in Iran differ: before choosing, «Smart tunnel» tests every transport between your two servers and shows the best one.')+'</p>'}
 function tunGuide(){modal(mhead(t('Which tunnel for which protocol'))+tunGuideHtml(),'wide');
  $$('#mbox [data-tg]').forEach(function(b){b.onclick=function(){var r=TGUIDE[+b.dataset.tg];closeModal();tunEdit(null,tunGuidePre(r.best[0]))}})}
@@ -419,7 +417,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  $('#tw_fm').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.pro=b.dataset.v=='auto';$$('#tw_fm button').forEach(function(z){z.classList.toggle('on',z==b)});$('#tw_pro').style.display=st.pro?'':'none';$('#tw_fix').style.display=st.pro?'none':''};
  $('#tw_tr').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.tr=b.dataset.v;$$('#tw_tr button').forEach(function(z){z.classList.toggle('on',z==b)});cdnUi()};
  $('#tw_vpn').onclick=function(){fillPorts(true)};
- // AmneziaWG: the same ports go into its forward fields (VPN, KANKI MIX, microtun, Xray, DNS of the exit); a port the
+ // AmneziaWG: the same ports go into its forward fields (VPN, KANKI MIX, Xray, DNS of the exit); a port the
  // entry itself uses moves to the next free one there ("4101:4100")
  if($('#tw_aw_vpn'))$('#tw_aw_vpn').onclick=function(){var en=$('#tw_en').value,ex=$('#tw_ex').value,pn=$('#tw_aw_pn');if(en==ex)return;
   Promise.all([tunNodeFor(ex),tunNodeFor(en),tunSvcPorts(ex),tunSvcPorts(en)]).then(function(r){var n=r[0],m=r[1];

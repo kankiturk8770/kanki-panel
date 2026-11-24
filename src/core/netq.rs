@@ -182,26 +182,19 @@ pub fn spawn() {
 }
 
 // ------------------------------------------------------------------ the game mark
-// The VPN cores on a server know what they carry: KANKI MIX tells its game datagrams from KCP (the app's
-// TCP), microtun sees the protocol of every user packet. They send the game packets with DSCP EF; a VIP
-// tunnel on the same server reads the mark (`recv_tos`) and gives copies and repairs to those packets only,
+// KANKI MIX tells its game datagrams from KCP (the app's TCP) and sends the game packets with DSCP EF; a
+// Game-FEC Pro tunnel on the same server reads the mark (`recv_tos`) and gives repairs to those packets only,
 // so the users' TCP is never sent twice.
 
 /// DSCP EF, the game mark
 pub(crate) const GAME_TOS: i32 = 0xb8;
+#[cfg(test)]
 /// the kernel refused the mark once: packets go plain from then on
 static MARK_BROKEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Does this IP packet carry UDP (IPv4 protocol / IPv6 next header 17)
-pub(crate) fn carries_udp(ip: &[u8]) -> bool {
-    match ip.first().map(|b| b >> 4) {
-        Some(4) => ip.get(9) == Some(&17),
-        Some(6) => ip.get(6) == Some(&17),
-        _ => false,
-    }
-}
 
-/// Sends one packet, with the game mark when `game`
+/// Sends one packet, with the game mark when `game` (KANKI MIX does it in Go; the tests stand in for it)
+#[cfg(test)]
 pub(crate) fn send_to_marked(sock: &std::net::UdpSocket, pkt: &[u8], to: std::net::SocketAddr, game: bool) {
     if game && !MARK_BROKEN.load(std::sync::atomic::Ordering::Relaxed) {
         match send_marked(sock, pkt, to) {
@@ -213,6 +206,7 @@ pub(crate) fn send_to_marked(sock: &std::net::UdpSocket, pkt: &[u8], to: std::ne
     let _ = sock.send_to(pkt, to);
 }
 
+#[cfg(test)]
 /// sendmsg with IP_TOS (an IPv4 destination, also on a dual-stack socket) or IPV6_TCLASS
 fn send_marked(sock: &std::net::UdpSocket, pkt: &[u8], to: std::net::SocketAddr) -> std::io::Result<()> {
     use std::net::IpAddr;
@@ -352,16 +346,5 @@ mod tests {
         assert_eq!(got[0], (b"game".to_vec(), Some(0xb8)));
         assert_eq!(got[1], (b"tcp".to_vec(), Some(0)));
         assert!(is_game_tos(0xb8) && is_game_tos(0xb9) && !is_game_tos(0));
-        // IPv4 UDP / TCP and IPv6 UDP
-        let mut v4 = [0u8; 20];
-        v4[0] = 0x45;
-        v4[9] = 17;
-        assert!(carries_udp(&v4));
-        v4[9] = 6;
-        assert!(!carries_udp(&v4));
-        let mut v6 = [0u8; 40];
-        v6[0] = 0x60;
-        v6[6] = 17;
-        assert!(carries_udp(&v6) && !carries_udp(&[]));
     }
 }

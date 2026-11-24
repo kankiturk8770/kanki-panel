@@ -59,7 +59,7 @@ pub struct TServer {
     /// the machine is being replaced (a dead or filtered server moved to a new one): the next join with
     /// `join` updates the existing node `node` instead of adding one, and keeps its cores and ports
     pub replace: bool,
-    /// the cores chosen when the server was added (wg, awg, hy2, kmix, mtun, kping): switched on when it
+    /// the cores chosen when the server was added (wg, awg, hy2, kmix): switched on when it
     /// joins, the rest stay off. Empty = a server from before: everything installed and off, as always.
     pub cores: Vec<String>,
 }
@@ -114,7 +114,7 @@ pub struct Tunnel {
     /// the route's name, the same on every hop
     pub chain_name: String,
     /// Game-FEC Pro (`game` with FEC "auto"): the core it carries (`PROFILES`): "kmix" gives the game FEC and
-    /// sends the KCP of KANKI MIX without; "kping", "mtun", "wg" or "" the same Game-FEC Pro for that core
+    /// sends the KCP of KANKI MIX without; "wg" or "" the same Game-FEC Pro for that core
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub profile: String,
 }
@@ -135,7 +135,7 @@ fn fwd_peer(app: &App, sid: &str) -> String {
 }
 
 /// The cores a Game-FEC Pro tunnel can be shaped for
-pub const PROFILES: &[&str] = &["", "kmix", "kping", "mtun", "wg"];
+pub const PROFILES: &[&str] = &["", "kmix", "wg"];
 /// Game-FEC Pro (FEC "auto", a profile) exists from this agent version on: an older end would drop its
 /// plain payloads
 const GAME_PRO_FROM: &str = "3.57.0";
@@ -232,6 +232,17 @@ pub(crate) fn save_tunnels(app: &App, v: &[Tunnel]) {
 /// 3.57.0: the VIP tunnel is gone; the list an older panel kept goes too (nothing is carried over)
 pub fn drop_vip(app: &App) {
     let _ = app.db.exec("DELETE FROM settings WHERE k='vip_tunnels'", &[]);
+    // 3.60: microtun and KPING are gone; a Game-FEC Pro tunnel shaped for one of them is a plain one now
+    let mut l = tunnels(app);
+    let mut changed = false;
+    for t in l.iter_mut().filter(|t| !PROFILES.contains(&t.profile.as_str())) {
+        t.profile.clear();
+        changed = true;
+    }
+    if changed {
+        save_tunnels(app, &l);
+    }
+    crate::twin::drop_retired(app);
 }
 
 /// The name of a tunnel nobody named, always one shape (3.58.1): the Iran server (short, "IRAN 2" ← "IR2"),
@@ -1509,7 +1520,6 @@ pub async fn local_loop(app: Arc<App>) {
             crate::fw::guard_tick(Some(fw_want), fw_confirm)
         })
         .await;
-        // KPING on the panel's own server runs in its node part (like every core, `sync::apply_local`), not here
         rotate_tick(&app);
         let want: Vec<(u8, String)> = servers(&app)
             .iter()
@@ -2036,20 +2046,12 @@ fn live_clash(app: &App, t: &Tunnel, old: Option<&Tunnel>) -> Option<String> {
     None
 }
 
-/// The ports a server holds or will hold: what its tunnels listen on and forward there, its KPING relays
-/// (Iran) and exit, and what it reported listening on a moment ago (`ss`, every program)
+/// The ports a server holds or will hold: what its tunnels listen on and forward there, and what it reported
+/// listening on a moment ago (`ss`, every program)
 pub(crate) fn ports_on_server(app: &App, sid: &str) -> HashSet<u16> {
     let mut t: HashSet<u16> = HashSet::new();
     for tu in tunnels(app).iter().filter(|x| x.enabled) {
         t.extend(tunnel_needs(tu).into_iter().filter(|x| x.0 == sid).map(|x| x.1));
-    }
-    // KPING on a VPN server: its public relay port and the exit on 127.0.0.1
-    let k = crate::kping::settings(app);
-    if let Some(nid) = node_of_server(app, sid) {
-        if k.on && k.node_on(&nid) {
-            t.insert(k.node_port(&nid));
-            t.insert(k.port);
-        }
     }
     if let Some(l) = listening_on(sid) {
         t.extend(l.into_iter().map(|x| x.0));
@@ -2057,15 +2059,7 @@ pub(crate) fn ports_on_server(app: &App, sid: &str) -> HashSet<u16> {
     t
 }
 
-/// The VPN node on a tunnel server ("local" for the panel server; None = only the agent)
-fn node_of_server(app: &App, sid: &str) -> Option<String> {
-    if sid == "local" {
-        return Some("local".into());
-    }
-    servers(app).into_iter().find(|x| x.id == sid).map(|x| x.node).filter(|n| !n.is_empty())
-}
-
-/// KPING's ports and every port any server reported holding (for the panel-wide list of taken ports)
+/// Every port any server reported holding (for the panel-wide list of taken ports)
 pub(crate) fn held_anywhere(app: &App) -> HashSet<u16> {
     let mut t: HashSet<u16> = HashSet::new();
     for sid in std::iter::once("local".to_string()).chain(servers(app).into_iter().map(|s| s.id)) {
@@ -2546,7 +2540,7 @@ async fn guard_list(State(app): St, h: HeaderMap) -> Response {
     Json(Value::Object(out)).into_response()
 }
 
-/// Saves a tunnel from another part of the panel (KPING builds its own) with every check of the Tunnels page
+/// Saves a tunnel from another part of the panel with every check of the Tunnels page
 #[allow(dead_code)]
 pub(crate) async fn save_json(app: Arc<App>, h: HeaderMap, b: Value) -> Response {
     save(State(app), h, Json(b)).await
@@ -2817,7 +2811,7 @@ fn fw_closes() -> &'static Mutex<HashMap<String, Vec<String>>> {
 }
 
 /// What the admin asked a server's agent to do on its next report: "sync" (apply everything again now) or
-/// "restart" (stop its tunnels and KPING, then start them again)
+/// "restart" (stop its tunnels, then start them again)
 fn agent_asks() -> &'static Mutex<HashMap<String, HashSet<String>>> {
     static S: OnceLock<Mutex<HashMap<String, HashSet<String>>>> = OnceLock::new();
     S.get_or_init(|| Mutex::new(HashMap::new()))
@@ -2838,7 +2832,7 @@ async fn server_agent_act(State(app): St, h: HeaderMap, Path((id, act)): Path<(S
 }
 
 /// GET /api/tunnels/servers/:id/health: what the server's agent said last: when, its version, each tunnel
-/// (links, error), the firewall, the machine and KPING, and what needs a look
+/// (links, error), the firewall and the machine, and what needs a look
 async fn server_health(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
     let _ = guard!(app, h, "nodes");
     let Some(srv) = servers(&app).into_iter().find(|s| s.id == id) else { return err(StatusCode::NOT_FOUND, "unknown server") };
@@ -3270,11 +3264,9 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     // the VPN part of this machine, when the admin asked for it (sent until the agent says it started)
     let setup = crate::servers::setup_for(&app, &s, &b["setup"]);
     let (xray_block, xray_drop) = (crate::xray::panel::shut_on(&id), crate::xray::panel::ip_blocks(&id));
-    // KPING runs in each VPN server's node agent since 3.58: a tunnel agent that still runs a route's relay or exit
-    // (3.37-3.57) gets an empty config and stops it
-    let kping = crate::kping::cfg_for(&app, &id);
-    // "vip": [] tells an agent older than 3.57.0 to stop the VIP tunnels it still runs
-    Json(json!({ "kping": kping, "vip": [], "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "resync": asks.contains("sync"), "restart": asks.contains("restart"), "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app), "panel_alt": crate::cdn::url(&app).into_iter().collect::<Vec<_>>() })).into_response()
+    // "kping": {} tells an agent older than 3.60 to stop a KPING relay or exit it still runs (gone in 3.60), and
+    // "vip": [] one older than 3.57.0 to stop its VIP tunnels
+    Json(json!({ "kping": {}, "vip": [], "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "resync": asks.contains("sync"), "restart": asks.contains("restart"), "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app), "panel_alt": crate::cdn::url(&app).into_iter().collect::<Vec<_>>() })).into_response()
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)

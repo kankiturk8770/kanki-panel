@@ -26,7 +26,7 @@ src/
 ├── panel/             سرور وب پنل مدیریت: api.rs، auth.rs، limit.rs، admin.rs، backup.rs، migrate.rs، cleanup.rs، cdn.rs (دامنهٔ CDN پنل برای سرورها)
 ├── servers/           سرورهای VPN: servers.rs، cores.rs، twin.rs، direct.rs، exitgeo.rs، traffic.rs (ترافیک هر سرور)
 ├── subscription/      اشتراک: subiran.rs، subdomain.rs، devices.rs، apps.rs
-├── vpn/               هسته‌های VPN: wg.rs، hy2.rs، kmix.rs، microtun.rs، mtun.rs، kping.rs، kpingd.rs، kprlc.rs، sync.rs، amnezia.rs، mtu.rs
+├── vpn/               هسته‌های VPN: wg.rs، hy2.rs، kmix.rs، sync.rs، amnezia.rs، mtu.rs
 │   └── kmix-server/   سورس Go سرور KANKI MIX (`build.sh` ← assets/bin/kanki-mix-server؛ CI می‌سازد)
 ├── bot/               ربات تلگرام: bot.rs، shop.rs، miniapp.rs، channel.rs، ai.rs، pay.rs، buttons.rs، monitor.rs (ربات گزارش‌ها)
 ├── tunnel/            تانل‌ها: mod.rs، engine.rs، link.rs، agent.rs، panel.rs (تانل‌ها و سرورهای تانل در پنل)، probe.rs، quality.rs، tests.rs
@@ -52,7 +52,7 @@ assets/
 | API مدیریت (کاربرها، تنظیمات، پلن‌ها)، اشتراک (`sub_data`، `/sub/...`)، لینک WG/AWG/Hy2، دانلود کانفیگ، سرو کردن صفحه‌های پنل (`PANEL_JS`) | `src/panel/api.rs` |
 | ورود، توکن‌های API، 2FA، فهرست IP مجاز | `src/panel/auth.rs` |
 | محدودیت تعداد درخواست (ورود و اشتراک) | `src/panel/limit.rs` |
-| سیستم، سرویس‌ها، لاگ، آپدیت، تنظیم ربات (`/api/bot`)، گزارش روزانه (`watch_*`) | `src/panel/admin.rs` |
+| سیستم، سرویس‌ها، لاگ، آپدیت، تنظیم ربات (`/api/bot`) | `src/panel/admin.rs` |
 | بکاپ و بکاپ تلگرام، انتقال پنل (قفل پنل قدیم از لحظهٔ برداشتن بکاپ `migrate::frozen`، چت اضطراری و گواهی دامنه‌های دیگر `restore_extra`/`kanki-panel restore-files`، بازگردانی در شروع بعدی `take_pending`، IP تازهٔ خود سرور `forget_ip`) | `src/panel/backup.rs`, `migrate.rs`؛ آزمایشگاه انتقال: بخش ۳.۵۳.۰ پایین |
 | پاک‌سازی سرورهای رفته، حذف خودکار سرور آفلاین | `src/panel/cleanup.rs` |
 | **دامنهٔ CDN پنل** (وقتی IP پنل در ایران فیلتر است): سایت Caddy فقط `/tunnel/*`، ایجنت‌ها از راه آن (`panel_alt`، `/etc/kanki/panel.alt`، برگشت به آدرس اصلی هر ۵ دقیقه) | `src/panel/cdn.rs`، `tunnel::agent` (`candidates`، `panel_now`)، `stCdn` در `10-…js` |
@@ -66,15 +66,14 @@ assets/
 | دستگاه‌های هر کاربر (فقط نمایش)، کانفیگ رمزشدهٔ `kseal1` | `src/subscription/devices.rs` |
 | فایل‌های نصب اپ کانکی (`/dl/...`) | `src/subscription/apps.rs` |
 | WireGuard و AmneziaWG، Hysteria2، همگام‌سازی کاربران و محدودیت اتصال | `src/vpn/wg.rs`, `hy2.rs`, `sync.rs` |
-| KANKI MIX / microtun (پنل / سرور) | `src/vpn/kmix.rs` / `microtun.rs`, `mtun.rs` |
-| KPING (پنل، از 3.58 هستهٔ هر سرور: `cfg_for_node`، `sync` (`SyncReq.kping`)، `kpingd::apply_node`، تب سرورها در `19-kping.js`، `twin` با `kp_port`؛ مسیرها و `cfg_for` تانل خالی) — تاریخچه: مسیرها (سرور ایران + سرور خارج، هر سرور با ایجنت)، «افزودن سرور خارج» (`agent_only`)، تانل Game-FEC با یک دکمه (۳.۴۳: تانل دوم `tunnel2`، `route_tunnel2`)، تسترها، `cfg_for(sid)` برای ایجنت، `ingest` گزارش، لینک `kping://` فقط در اشتراک رمزشده؛ از ۳.۵۳ نوع تانل هر مسیر (`Route.kind`: Game-FEC، KCP، QUIC، HQ، Fake TCP یا VIP با `vip_body`، `vip::panel::save_for`) | `src/vpn/kping.rs` + `assets/panel/js/19-kping.js` (`kpTunForm`)؛ آزمایشگاه `LAB_TUN_KIND=vip` در `kping_lab` |
-| KPING v2/v3 (روی سرورها، داخل ایجنت تانل): قالب بسته، کپی و «اولی برنده»، پریتی XOR (v2) و ترمیم پنجره‌ای RLC (v3، `kprlc.rs` = `rlc.go` اپ، بردار مشترک)، رله (ایران، چند تانل و پروب هر تانل) و خروجی (`kping0`)، کپی ۲۰ms روی تکهٔ ایران ↔ خارج | `src/vpn/kpingd.rs` (`Relay`، `Exit`، `apply`، `report`)، `src/vpn/kprlc.rs`؛ آزمایشگاه `scripts/kping_lab.sh` + کلاینت Go `scripts/kping-lab` (همان قالب، بردار تست مشترک) |
+| KANKI MIX (پنل / سرور) | `src/vpn/kmix.rs` (`link`: نشانی دوم `alt=` = ورودی تانل ایران همان سرور) |
 | سرور KANKI MIX (Go؛ سورس اینجاست، نه ریپوی دیگر) | `src/vpn/kmix-server/` (`build.sh`، `go test ./...`) |
 | **ضبط بازی** (KANKI MIX › ضبط بازی): ضبط یک کاربر روی سرور KANKI MIX (هر بستهٔ UDP بازی با اندازه و اندازهٔ روی سیم، KCP، اتصال‌های TCP، نام‌های DNS)، گزارش با برچسب جریان‌ها و مرحله‌ها و «آنچه تانل VIP می‌بیند»، دانلود JSON | `src/vpn/kmix-server/cmd/kanki-server/record.go` (+ `obfs.Tap`)، `kmix::record_local`/`record_api` (`/api/kmix/record`)، `api::agent_kmix_record`، `kr*` در `06-kmix.js` |
 | **بازی هوشمند KANKI MIX** (3.59): سنجش افت خام هر جهت، گزارش دوطرفه (`KindStat`)، ترمیم پنجره‌ای RLC و نسخه‌ی دوم دیرتر فقط برای بسته‌ی بازی و به اندازه‌ی افت (`Policy`، پله‌ها)، شناخت جریان بازی (`Class`)، فرستادن با تأخیر (`Later`)؛ پوشه‌ی `internal/game` در سرور و `kmix-core` اپ **یکی** است | `src/vpn/kmix-server/internal/game/`، `cmd/kanki-server/smart.go` (+ اپ: `kmix-core/mobile/smart.go`)؛ آزمایشگاه `kmix-core/mobile/smart_test.go` (`SRVBIN`/`SRVOLD`/`HOSTIP`) |
+| **چند مسیر KANKI MIX** (3.60، اپ ۱.۴۴): وای‌فای و دیتای گوشی هر کدام سوکت خودشان، هر نشانی سرور (خود سرور، ورودی تانل ایران `alt=`) یک مقصد؛ بسته‌ی اصلی فقط روی بهترین مسیر، نسخه‌ی دوم و ترمیم روی مسیر دیگر و فقط به اندازه‌ی افت؛ مسیر اصلی که جواب ندهد = `FlagMirror` تا روشن شدن؛ سرور نشانی اصلی را فقط از بسته‌ی اصلی یاد می‌گیرد (`CapMulti`) | اپ: `kmix-core/mobile/paths.go`، `cmd/kmix` (`path`/`drop`)، `Hysteria.kt` (`kmixPaths`)؛ سرور: `cmd/kanki-server/multipath.go`، `smart.go` (`sendDown`)؛ آزمایشگاه `TestMultiLab` |
 | علامت بازی (DSCP EF) روی سرورها: فرستادن با علامت و خواندن آن | `src/core/netq.rs` (`send_to_marked`، `recv_tos`)، `internal/obfs/mark_linux.go` |
 | بکاپ اپ AmneziaVPN (یک فایل `.backup`، اسم با پرچم مسیر) | `src/vpn/amnezia.rs` (+ `api::amnezia_configs`) |
-| MTU خودکار هر کانفیگ (هسته + تانل‌های سر راه، `mtu_budget`/`mtu_auto`، رابط `wg0`/`awg0`/`mtun0` سرورها، `GET /api/mtu`) | `src/vpn/mtu.rs` |
+| MTU خودکار هر کانفیگ (هسته + تانل‌های سر راه، `mtu_budget`/`mtu_auto`، رابط `wg0`/`awg0` سرورها، `GET /api/mtu`) | `src/vpn/mtu.rs` |
 | ربات فروش (منو، خرید، پرداخت، دکمه‌ها و رنگشان `Bot::paint`/`STYLE_KEYS`، «همه‌ی لینک‌ها» `send_links`) | `src/bot/bot.rs` |
 | **فروش و نگه‌داشتن مشتری** (3.56): تست 300MB/3h (`trial_ok`، `trial_delivery`)، پیشنهاد لحظه‌ای TEST15 (`trial_hook`)، کدهای شخصی TEST/BACK (`personal_code`، `code_percent`)، یادآوری 48h/85% و هدیهٔ تمدید (`retention`، `rbonus:`)، بازگشت BACK20 (`pc_back:`، دکمهٔ `rbk:`) | `src/bot/bot.rs` |
 | **هدیه از مینی‌اپ ادمین** (خریدارها، همهٔ فعال‌ها، انتخابی؛ کلید یک‌بارمصرف؛ `gift_log`) | `miniapp.rs` (`admin_gift_list`، `admin_gift`، `sales_admin`) + `giftView`/`giftWire` در `miniapp.html` |
@@ -101,7 +100,7 @@ assets/
 | Xray (کانفیگ روی سرور / بخش پنل و لینک‌ها) | `src/xray/mod.rs` / `src/xray/panel.rs` |
 | DNS کانکی | `src/dns/` |
 | چت اضطراری | `src/emergency/mod.rs` + `assets/emergency/admin.html` |
-| **پورت آزاد** (3.57): مسیر KPING و تانل بی پورت، پورت آزاد سرور (تانل‌ها، مسیرها، هسته‌ها، شنونده‌های زندهٔ گزارش ایجنت) | `tunnel::panel::free_ports`، `ports_on_server`، `held_anywhere`، `servers::all_taken` |
+| **پورت آزاد** (3.57): تانل بی پورت، پورت آزاد سرور (تانل‌ها، مسیرها، هسته‌ها، شنونده‌های زندهٔ گزارش ایجنت) | `tunnel::panel::free_ports`، `ports_on_server`، `held_anywhere`، `servers::all_taken` |
 | **WireGuard مستقیم فقط برای اپ کانکی** (3.57، با Jc/Jmin/Jmax) | `api::wg_direct_for_app`، `WG_DIRECT_JUNK`، `build_config` (بی seal ← 403) |
 | کنترل ایجنت از پنل (سلامت، همگام‌سازی، ری‌استارت؛ 3.57) | `tunnel::panel::server_health`، `server_agent_act` (`resync`/`restart` در جواب گزارش)، `agHealth`/`agAct` در `14-servers.js` |
 | اسکریپت پنل (همهٔ صفحه‌ها) | `assets/panel/js/` (پایین ببین) |
@@ -115,19 +114,18 @@ assets/
   |---|---|
   | `01-vpn-and-user-form.js` | فرم کاربر (سرویس‌به‌سرویس)، نمای VPN، تعمیر Xray/DNS |
   | `02-components.js` | **اجزای مشترک**: `kuHead`، `kuTabs`، `kuStats`، `kuGroup`، `kuSwitch`، `kuLine`، `kuItem`، `kuTag`، `kuMenu`؛ `coreTunRows` |
-  | `03-xray.js` / `04-antidpi.js` / `05-dns.js` / `06-kmix.js` / `07-microtun.js` | صفحهٔ هر هسته با تب‌هایش؛ صفحهٔ مشترک هسته‌ها `corePage` و `CTABS` در `06-kmix.js` (KANKI MIX تب خودش «ضبط بازی» را دارد: `KMTABS`، `kr*`) |
+  | `03-xray.js` / `04-antidpi.js` / `05-dns.js` / `06-kmix.js` | صفحهٔ هر هسته با تب‌هایش؛ صفحهٔ مشترک هسته‌ها `corePage` و `CTABS` در `06-kmix.js` (KANKI MIX تب خودش «ضبط بازی» را دارد: `KMTABS`، `kr*`) |
   | `08-translations.js` | دیکشنری فارسی `FA` (هر متن تازه یک خط این‌جا) |
   | `09-base-login-shell.js` | `S`، `t()`، ابزارها، تاریخ شمسی، آیکن‌ها، نمودار، ورود، قاب صفحه |
   | `10-dashboard-users-servers-settings.js` | داشبورد، کاربرها، سرورها (قدیمی)، بکاپ، امنیت، تنظیمات (`stIran` و…)، آپدیت |
-  | `11-bot-chat-traffic-ports.js` | لوگو، صفحهٔ ربات (`pBot`، `botWatch`، پلن‌ها)، چت اضطراری، پیام اپ، کد تخفیف، کانال، ترافیک، پورت‌ها |
+  | `11-bot-chat-traffic-ports.js` | لوگو، صفحهٔ ربات (`pBot`، فقط خود ربات و ربات گزارش‌ها)، چت اضطراری، ترافیک، پورت‌ها |
   | `12-tunnels.js` | صفحهٔ تانل‌ها، نقشه، فرم و جادوگر تانل، راهنما، تانل هوشمند |
-  | `13-menu.js` | بخش‌ها و منو (`SECS`، شش گروه)، **نوار هسته‌ها** (`secTabsHtml`، هشت هسته با DNS و KPING، `coreDots`)، پرچم‌ها، نوار پایین (`navBar`)، شب/روز |
+  | `13-menu.js` | بخش‌ها و منو (`SECS`، شش گروه)، **نوار هسته‌ها** (`secTabsHtml`، شش هسته با DNS، `coreDots`)، پرچم‌ها، نوار پایین (`navBar`)، شب/روز |
   | `14-servers.js` | صفحهٔ «سرورها»: `srvLoad`، `srvBody`، `srvCores`، `tunBox`، `srvSave`، `srvIrHosts` |
   | `15-routes.js` | مسیرهای چندمرحله‌ای |
   | `16-vpn-services.js` | تب‌های سرویس‌های VPN: `protoPage(p)`، `drawPv`، `coreTun` (دامنهٔ تانل هر هسته)، KMIX و Xray هر سرور |
   | `17-look-map-menu.js` | **قاب پنل** (`shell`: منوی کنار یا بالا، سربرگ سه‌بخشی، منوی حساب `kAcct`، برگهٔ «بیشتر» `k38More`)، `route`، داشبورد (`pDash`، `attention`)، نقشهٔ تانل |
   | `18-start.js` | شروع برنامه (باید آخر بماند) |
-  | `19-kping.js` | صفحهٔ KPING فقط تنظیمات خودش (وضعیت و سرورها، تسترها، تنظیمات)؛ مسیرهای KPING در صفحهٔ تانل‌ها (`kpTunDraw`، `kpEdit`، `kpFromTunnel`)، `kpAddServer` سرور خارج فقط با ایجنت. در `concat!` **قبل از** `18-start.js` است |
 - صفحه‌ها تابع `p_<page>` (یا `pBot`، …) هستند؛ تب هر صفحه `tab_<page>(sub)`. هر صفحهٔ تازه فقط از اجزای مشترک ساخته شود. نقشهٔ کامل:
   `docs/UI-MAP.md`؛ فهرست قبل از بازطراحی: `docs/UI-INVENTORY.md`.
 - جستجو: `grep -n "function اسم" assets/panel/js/*.js`؛ کل فایل‌ها را نخوان.
@@ -139,7 +137,7 @@ assets/
 ### دستور طراحی (هر تغییر UI از این پیروی کند)
 - **اسکیل طراحی:** `.claude/skills/frontend-design/` (اسکیل رسمی Anthropic، داخل همین ریپو تا هر جلسه داشته باشد).
   برای هر کار UI اول آن را بخوان. شرح کامل کار بازطراحی: `docs/UI-INVENTORY.md` و `docs/UI-MAP.md`.
-- **ساختار:** هر هسته (WG، AWG، Hy2، KMIX، microtun، Xray، DNS) یک «خانه» با تب‌های ثابت: وضعیت، سرورها، تانل،
+- **ساختار:** هر هسته (WG، AWG، Hy2، KMIX، Xray، DNS) یک «خانه» با تب‌های ثابت: وضعیت، سرورها، تانل،
   تنظیمات، و فقط اگر لازم بود تب مخصوص (Xray: اینباندها و روتینگ؛ DNS: سرویس‌ها و لاگ). هر تنظیم هسته **فقط** همان‌جا.
   صفحهٔ «سرورها» فقط خود سرور + خلاصهٔ فقط‌خواندنی هسته‌ها. دکمهٔ «افزودن» هر چیز فقط یک بار. حذف و صفر کردن در منوی «⋯» با تأیید.
 - **اجزای مشترک (فقط همین‌ها):** سرصفحه (آیکن، عنوان، یک خط توضیح، حداکثر ۲ دکمه)؛ تب‌ها (روی موبایل یک ردیف کشیدنی
@@ -437,6 +435,7 @@ assets/
 ### فهرست نسخه‌ها
 | نسخه | تاریخ | خلاصه | PR |
 |---|---|---|---|
+| 3.60.0 | 2026-11-24 | KANKI MIX چند مسیر (وای‌فای + دیتا، مستقیم + تانل ایران) هوشمند، همراه اپ ۱.۴۴؛ microtun و KPING از ریشه حذف (پنل، اپ، ویندوز)؛ ردیف‌های تانل‌ها یکدست | |
 | 3.59.1 | 2026-11-24 | صفحهٔ ربات فروش تمیز: بخش‌های مخفی قدیمی، «گزارش روزانه» (kanki-watch) و تنظیمات › اعلان‌ها حذف؛ بکاپ روزانه با سوییچ در ربات گزارش‌ها | |
 | 3.59.0 | 2026-11-24 | KANKI MIX بازی هوشمند: افت خط سنجیده می‌شود، فقط بسته‌ی بازی و فقط به اندازه‌ی افت ترمیم می‌شود (خط تمیز هیچ)، همراه اپ ۱.۴۳.۰؛ تانل مستقیم در کرنل (NAT یا GRE) | |
 | 3.58.1 | 2026-11-23 | رفع گزارش بررسی سرورها (۲۹ مورد): حذف مسیرهای قدیم KPING، سرویس هر اکانت، آدرس تانل هر هسته، محدودیت اتصال ۳۰ ثانیه، فایروال، لاگ سرورها، journald | |
@@ -507,6 +506,13 @@ assets/
 | 3.20.1 | 2026-10-29 | بکاپ، سرور ایران فقط تانل، gzip صفحه، اسکیل طراحی | |
 
 جزئیات هر نسخه: `docs/CHANGES.md`. گزارش‌های کامل قدیمی (تا 3.23.1) در تاریخچهٔ git همین فایل هستند.
+
+### آخرین کارها — 3.60.0 (2026-11-24، برنچ `ccr-f970ec4f-jrr11c`، همراه اپ ۱.۴۴.۰ و ویندوز ۱.۳.۶)
+**خواسته (صاحب پنل):** KANKI MIX دو مسیر گوشی (وای‌فای و دیتا) و دو تانل/نشانی را هوشمند و بی بسته‌ی اضافه به کار ببرد؛ microtun و KPING بی بکاپ و بی هیچ اثری از پنل، اندروید و ویندوز بروند؛ تانل‌ها منظم؛ حجم اپ‌ها اگر شد کمتر؛ GRE/NAT هم برای KANKI MIX درست باشد. **چه شد:** `docs/CHANGES.md`.
+**مسیر:** اپ: `startKmix` (نشانی `alt`، مسیرهای VPN بی آن آی‌پی‌ها `routesExcludingAll`) ← `KmixCore.start` (`alt`) ← `kmixPaths` (requestNetwork وای‌فای و دیتا، `bindSocket`، `protect`) ← `path`/`drop` ← `AddSocket` ← `paths.go` (پینگ هر مسیر، `pickPrimary`، `altPath`، `mirroring`) ← `sendUp` ← سرور (`handle`: نشانی اصلی فقط از بسته‌ی اصلی، `paths.note`) ← `sendDown` (نسخه‌ی دوم و ترمیم به `paths.other`) ← گوشی (`sockReadLoop` ← `handleDown`). تانل NAT/GRE: فقط UDP را جابه‌جا می‌کند، پس مسیر تانل همان پورت KANKI MIX است (`tunnel_target` ← `udp_forward`).
+**تست:** `go test -race` هر دو؛ `TestMultiLab` با سرور واقعی و دو خط ساختگی (قطعی ۳۰۰ms روی خط اصلی: یک مسیر ۸۷.۳٪ به‌موقع، دو مسیر ۹۹.۷۹٪؛ خط تمیز ۱.۸۷ ← ۱.۹۱ برابر حجم فقط از پینگ مسیر دوم)؛ `cargo test` ۳۷۷ (تست تازه `microtun_and_kping_are_gone`)؛ `node --check`؛ Playwright تانل‌ها ۳۹۰/۱۴۴۰ بی خطا؛ ویندوز `go test` و `GOOS=windows go vet`؛ اندروید: این محیط SDK ندارد، ساخت در CI.
+**امنیت:** مسیر تازه‌ی هسته (`path`) فقط fd از سوکت یونیکس همان برنامه (`peerCredentials.uid`)، اسم فقط حروف کوچک؛ سرور: نشانی‌های هر نشست حداکثر ۴ و فقط بعد از `allowed` (کلید و سقف دستگاه)، `FlagMirror` فقط جواب همان نشست را به نشانی دیگر همان نشست می‌فرستد؛ پاک‌سازی سرورها فقط دستورهای ثابت iptables بی شل.
+**دیده نشده:** گوشی و سرور واقعی؛ ساخت اندروید (CI).
 
 ### آخرین کارها — 3.59.1 (2026-11-24، برنچ `ccr-f970ec4f-jrr11c`)
 **خواسته:** ایرادهای ربات که در گزارش کامل پنل گفته بودم. **چه شد:** `docs/CHANGES.md`. **مسیر:** صفحهٔ ربات (`botDraw` فقط ربات، آمار و ربات گزارش‌ها) ← `/api/bot`؛ هشدار سرورها ← `monitor::watch` (همیشه، با یا بی ربات گزارش) و سوییچ `m:al`؛ بکاپ روزانه ← `Mon::backups` (سوییچ تازهٔ `m:bo`) یا بی ربات گزارش حلقهٔ ربات فروش (سوییچ `tg:backup_on` فقط همان وقت)؛ هشدار اتمام ← ربات فروش و مینی‌اپ (`BOT_KEYS`)؛ اسکریپت قدیم با هر شروع کنار می‌رود (`old_script_off` در `start`). **تست:** `cargo test` ۴۰۵؛ `node --check`؛ Playwright ربات و تنظیمات ۴ عرض فارسی/انگلیسی بی خطا و اسکرول افقی؛ `/api/bot/watch` ← 404. **امنیت:** فقط حذف (دو مسیر API و یک بخش تنظیمات)؛ سوییچ تازهٔ ربات گزارش فقط برای ادمین‌های همان ربات (همان چک `m:al`). **دیده نشده:** تلگرام واقعی.

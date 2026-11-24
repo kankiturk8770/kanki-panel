@@ -46,7 +46,7 @@ function srvHealth(kind,id){var d=srvData(kind),x=d&&(d.servers||[]).filter(func
   api('POST','/api/tunnels/servers/'+encodeURIComponent(id)+'/free-ports',{units:fr}).then(function(){closeModal();toast(t('Sent: the server frees the ports on its next report (a few seconds)'))}).catch(fail)}}
 // the firewall of a server: ports Kanki opened (closed again when what needed them is removed), and open
 // ports nothing uses any more (opened by an older version for something deleted since, or by hand)
-var FW_NAMES={mtun:'microtun',tunnels:'Tunnels',dns:'Kanki DNS',xray:'Xray',emergency:'Emergency chat',kmix:'KANKI MIX',subsrv:'Subscription link',acme:'SSL (port 80)'};
+var FW_NAMES={tunnels:'Tunnels',dns:'Kanki DNS',xray:'Xray',emergency:'Emergency chat',kmix:'KANKI MIX',subsrv:'Subscription link',acme:'SSL (port 80)'};
 function srvFirewall(id,box){if(!box)return;api('GET','/api/tunnels/servers/'+encodeURIComponent(id)+'/firewall').then(function(f){if(!f||!box.isConnected)return;
  var own=f.owners||{},un=f.unused||[],keys=Object.keys(own);if(!keys.length&&!un.length)return;
  box.innerHTML='<div class="box" style="margin-top:10px;padding:10px 12px"><b>'+t('Firewall (ufw)')+'</b>'+
@@ -67,50 +67,47 @@ function p_vpn(){$('#pg').innerHTML='<div class="ku">'+kuHead('cores',t('VPN & c
   '<a class="kv-tool" href="#antidpi" style="--pc:'+PCOL.awg+'"><span class="cci">'+ic('security',18)+'</span><span><b>'+t('Anti-DPI')+'</b><small>'+t('Tunnels between your servers that filters cannot see')+'</small></span><span class="kv-go" aria-hidden="true">'+ic('chev',16)+'</span></a>'+
   '<div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></section></div>';
  $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};sysSvcLoad();
- var go=function(){Promise.all([api('GET','/api/nodes').catch(function(){return []}),api('GET','/api/overview').catch(function(){return {}}),api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null}),api('GET','/api/kping').catch(function(){return null})]).then(function(r){if(S.page!='vpn')return;S.nodes=r[0]||[];if(r[2])XR.d=r[2];if(r[3])DN.d=r[3];vhGrid(r[0]||[],r[1]||{},r[2],r[3],r[4])})};
+ var go=function(){Promise.all([api('GET','/api/nodes').catch(function(){return []}),api('GET','/api/overview').catch(function(){return {}}),api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null})]).then(function(r){if(S.page!='vpn')return;S.nodes=r[0]||[];if(r[2])XR.d=r[2];if(r[3])DN.d=r[3];vhGrid(r[0]||[],r[1]||{},r[2],r[3])})};
  go();clearInterval(S.timer);S.timer=setInterval(function(){if(document.visibilityState=='visible'&&!$('#modal').classList.contains('on'))go()},8000)}
 // one card per core (3.34): status, servers running it and users; the whole card opens the core's own page
-function vhGrid(nodes,o,xr,dn,kp){var el=$('#vh_g');if(!el)return;var pr=o.protocols||{};
+function vhGrid(nodes,o,xr,dn){var el=$('#vh_g');if(!el)return;var pr=o.protocols||{};
  var up=function(n){return n.id=='local'||n.online},num=function(v){return v!=null&&v!==''&&+v>0};
  // servers that run a core (the agent reports its port) and how many of them are up
  var on=function(k){var l=nodes.filter(function(n){return num((n.info||{})[k])});return [l.filter(up).length,l.length]};
  var K=[['wg','WireGuard','shield2','Standard and fast; through Iran only',on('wg_port')],['awg','AmneziaWG','security','WireGuard with hidden packets; direct or through Iran',on('awg_port')],
-  ['hy2','Hysteria2','globe','QUIC, fast on weak internet',on('hy2_port')],['kmix','KANKI MIX','game','Kanki\'s own game protocol, low ping',on('kmix_port')],['mtun','microtun','game','A light game VPN, small packets sent twice',on('mt_port')]];
+  ['hy2','Hysteria2','globe','QUIC, fast on weak internet',on('hy2_port')],['kmix','KANKI MIX','game','Kanki\'s own game protocol, low ping',on('kmix_port')]];
  var card=function(href,col,icon,name,sub,st,stats){return '<a class="ccard" href="'+href+'" style="--pc:'+col+'"><div class="cc1"><span class="cci">'+ic(icon,20)+'</span><span class="ccs '+st[0]+'"><i></i>'+st[1]+'</span></div>'+
   '<b class="ccn">'+name+'</b><small class="ccd">'+t(sub)+'</small><div class="ccst">'+stats.map(function(x){return '<div><small>'+x[0]+'</small><b class="ltr">'+x[1]+'</b></div>'}).join('')+'</div></a>'};
  var state=function(u,all){return all==0?['n',t('Not installed')]:u==all?['g',t('Running')]:u==0?['r',t('Down')]:['y',t('Partly down')]};
  // (3.57) three groups: the game cores, the VPN cores, the services; each card as tall as the others
  var by={};K.forEach(function(c){var u=c[4][0],all=c[4][1];by[c[0]]=card('#'+c[0],PCOL[c[0]],c[2],c[1],c[3],state(u,all),[[t('Servers'),N(u)+' / '+N(all)],[t('Users'),N(pr[c[0]]||0)]])});
- if(kp){var ks=(kp.servers||[]).filter(function(x){return x.on}),kr=ks.filter(function(x){return x.online&&x.runs&&!x.relay_error&&!x.exit_error}).length;
-  by.kping=card('#kping/status',PCOL.kping,'game','KPING','The game core, only in the Kanki app',!kp.settings.on?['r',t('Off')]:!ks.length?['n',t('Off')]:kr==ks.length?['g',t('Running')]:kr?['y',t('Partly down')]:['y',t('Not ready')],[[t('Servers'),N(kr)+' / '+N(ks.length)],[t('Users'),N(kp.users||0)]])}
  var sv='';
  if(xr){var act=xr.inbounds.filter(function(x){return x.enabled&&!x.state}).length;
   sv+=card('#xray/status',PCOL.xray,'xray','Xray','VLESS · VMess · Trojan · Shadowsocks',xr.on?(act?['g',t('Running')]:['y',t('No inbound')]):['r',t('Off')],[[t('Inbounds'),N(act)+' / '+N(xr.inbounds.length)],[t('Online now'),N((xr.online||[]).length)]])}
  if(dn){var run=dn.servers.filter(function(x){return x.status&&x.status.active}).length;
   sv+=card('#dns/overview',PCOL.dns,'dns','Kanki DNS','Private DNS for sanctioned sites',dn.on?(run?['g',t('Running')]:['y',t('No server')]):['r',t('Off')],[[t('Servers'),N(run)+' / '+N(dn.servers.length)],[t('Users'),N(dn.users||0)]])}
  var grp=function(title,keys,extra){var c=keys.map(function(k){return by[k]||''}).join('')+(extra||'');return c?'<section class="cgrp"><h3 class="cgrp-h">'+t(title)+'</h3><div class="cgrid">'+c+'</div></section>':''};
- el.innerHTML=grp('Game cores',['kmix','kping','mtun'])+grp('VPN cores',['wg','awg','hy2'])+grp('Services',[],sv);
+ el.innerHTML=grp('Game cores',['kmix'])+grp('VPN cores',['wg','awg','hy2'])+grp('Services',[],sv);
  var ups=nodes.filter(up).length,s=$('#vh_s');
  if(s)s.innerHTML=kuStats([[t('Servers online'),N(ups)+' / '+N(nodes.length),ups<nodes.length?'warn':'ok'],[t('Online now'),N(o.online||0),'ok'],[t('Total traffic'),'<span class="ltr">'+N(o.traffic_gb||0)+' GB</span>'],[t('Users'),N(o.users||0)]])}
 
 // ---------------------------------------------------------------- user form: what the user gets, service by service
-function ufServices(protos,un){var has=function(p){return protos.indexOf(p)>=0},vpnOn=has('wg')||has('awg')||has('hy2')||has('kmix')||has('mtun');
+function ufServices(protos,un){var has=function(p){return protos.indexOf(p)>=0},vpnOn=has('wg')||has('awg')||has('hy2')||has('kmix');
  var card=function(key,icon,title,sub,on,body,head){return '<div class="ufsvc'+(on?' on':'')+'" data-svc="'+key+'"><div class="hd"><span class="ni">'+ic(icon,18)+'</span><div class="nm"><b>'+t(title)+'</b><small>'+t(sub)+'</small></div>'+(head||'')+'</div><div class="bd3">'+body+'</div></div>'};
  var nodes=S.nodes||[];
  var h='<label class="f" style="margin-top:12px">'+t('Services of this user')+'</label><div class="chipset" id="uf_pre"><button type="button" data-pre="all">'+t('Everything')+'</button><button type="button" data-pre="vpn">'+t('Kanki VPN only')+'</button><button type="button" data-pre="xray">'+t('Xray only')+'</button><button type="button" data-pre="dns">'+t('DNS only')+'</button></div>';
  h+=card('vpn','nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX',vpnOn,
-  '<div class="ckrow">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX'],['mtun','microtun']].map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(has(p[0])?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>'+
+  '<div class="ckrow">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX']].map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(has(p[0])?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>'+
   (nodes.length>1?'<label class="f">'+t('Servers')+'</label><div class="ckrow">'+nodes.map(function(n){return '<label class="chk"><input type="checkbox" class="f_nd" value="'+esc(n.id)+'" '+(un.length==0||un.indexOf(n.id)>=0?'checked':'')+'>'+esc(n.name)+'</label>'}).join('')+'</div>':''),
   '<label class="sw"><input type="checkbox" class="uf_all" data-for="vpn" '+(vpnOn?'checked':'')+'><span></span></label>');
  h+=card('xray','xray','Xray','Links of every Xray inbound go into the subscription',has('xray'),'<div id="uf_xr" class="muted">…</div>','<label class="sw"><input type="checkbox" class="f_pr" value="xray" '+(has('xray')?'checked':'')+'><span></span></label>');
  h+=card('dns','dns','Kanki DNS','Private DNS for sanctioned sites',has('dns'),'<div id="uf_dn" class="muted">…</div>','<label class="sw"><input type="checkbox" class="f_pr" value="dns" '+(has('dns')?'checked':'')+'><span></span></label>');
- h+=card('kping','game','KPING','Hidden game core, only in the Kanki app (testers only)',has('kping'),'<p class="muted" style="margin:0">'+t('Only the game goes through it. Not on the subscription page, in links or in the bot.')+'</p>','<label class="sw"><input type="checkbox" class="f_pr" value="kping" '+(has('kping')?'checked':'')+'><span></span></label>');
  setTimeout(ufWire,0);return h}
 function ufWire(){if(!$('#uf_pre'))return;
  var sync=function(){$$('.ufsvc').forEach(function(c){var on=$$('.f_pr',c).some(function(x){return x.checked});c.classList.toggle('on',on);var a=$('.uf_all',c);if(a)a.checked=on})};
  $$('.uf_all').forEach(function(a){a.onchange=function(){var c=a.closest('.ufsvc');$$('.f_pr',c).forEach(function(x){x.checked=a.checked});sync()}});
  $$('.ufsvc .f_pr').forEach(function(x){x.addEventListener('change',sync)});
- $$('#uf_pre [data-pre]').forEach(function(b){b.onclick=function(){var k=b.dataset.pre;$$('.ufsvc').forEach(function(c){var on=(k=='all'&&c.dataset.svc!='kping')||c.dataset.svc==k;if(c.dataset.svc=='kping'&&k!='kping')on=$$('.f_pr',c).some(function(x){return x.checked});$$('.f_pr',c).forEach(function(x){x.checked=on})});sync()}});
+ $$('#uf_pre [data-pre]').forEach(function(b){b.onclick=function(){var k=b.dataset.pre;$$('.ufsvc').forEach(function(c){var on=k=='all'||c.dataset.svc==k;$$('.f_pr',c).forEach(function(x){x.checked=on})});sync()}});
  var xr=function(d){var el=$('#uf_xr');if(!el)return;if(!d){el.textContent='—';return}var l=d.inbounds.filter(function(x){return x.enabled});
   el.innerHTML=(d.on?'':'<span style="color:var(--warn)">'+t('Is off in the panel')+'</span> · ')+(l.length?l.map(function(ib){return '<span class="chipx a" style="margin:2px">'+esc(ib.remark||ib.protocol)+' · '+esc(ib.server_name||ib.server)+'</span>'}).join(''):t('No Xray inbound yet')+' · <a href="#xray/inbounds" onclick="closeModal()">'+t('Inbounds')+'</a>')};
  var dn=function(d){var el=$('#uf_dn');if(!el)return;if(!d){el.textContent='—';return}var l=d.servers.filter(function(x){return !x.hidden});

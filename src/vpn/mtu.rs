@@ -23,10 +23,9 @@
 //!   layer never fragments, whatever the client sends. FEC only adds whole parity packets (bandwidth),
 //!   not bytes to a packet. They put no limit on the client MTU.
 //!
-//! Applied (setting `mtu_auto`, on by default; off = the hand-set `mtu` and microtun MTU as before):
+//! Applied (setting `mtu_auto`, on by default; off = the hand-set `mtu` as before):
 //! * WireGuard / AmneziaWG configs and links (`api::wg_uri`, the config file, the Amnezia backup);
-//! * microtun links (`mtu=` in `mtun://`);
-//! * the servers' own interfaces (`wg0`, `awg0`, `mtun0`) on every sync, so the server → phone
+//! * the servers' own interfaces (`wg0`, `awg0`) on every sync, so the server → phone
 //!   direction is just as small (a bigger packet from the internet is cut *inside* the tunnel and
 //!   each piece travels in a packet of its own; the mobile network never sees a fragment).
 //!
@@ -40,7 +39,7 @@
 //! the kernel sizes it; an mKCP inbound never goes over 1352, see `xray::panel::stream`).
 //!
 //! Older configs (MTU 1380 or 1420) keep working: a server takes in packets bigger than its
-//! interface MTU, and TCP through `wg0` / `awg0` / `mtun0` is clamped to it both ways (`mss_rules`).
+//! interface MTU, and TCP through `wg0` / `awg0` is clamped to it both ways (`mss_rules`).
 use crate::db::Node;
 use crate::App;
 use serde_json::{json, Value};
@@ -51,8 +50,6 @@ pub const UDP: u16 = 8;
 pub const TCP: u16 = 20;
 /// WireGuard data packet: type + reserved 4, receiver 4, counter 8, Poly1305 tag 16
 pub const WG: u16 = 32;
-/// microtun data packet: index 4 + counter 8, GCM tag 16 (`mtun::OVERHEAD`)
-pub const MTUN: u16 = crate::mtun::OVERHEAD as u16;
 /// Hysteria2's Salamander mask: 8 bytes of salt
 pub const SALAMANDER: u16 = 8;
 /// below this an interface loses IPv6 (RFC 8200), so a config never goes lower
@@ -66,7 +63,7 @@ pub const KMIX_WIRE: u16 = 1332;
 const FAKETCP_SEG: u16 = 1300;
 
 /// The cores whose configs carry an MTU the panel sets
-pub const CORES: [&str; 3] = ["wg", "awg", "mtun"];
+pub const CORES: [&str; 2] = ["wg", "awg"];
 
 /// Automatic MTU on (the default)
 pub fn auto(app: &App) -> bool {
@@ -90,7 +87,6 @@ pub fn overhead(core: &str, awg_pad: u16) -> Option<u16> {
     match core {
         "wg" => Some(IPV4 + UDP + WG),
         "awg" => Some(IPV4 + UDP + WG + awg_pad),
-        "mtun" => Some(IPV4 + UDP + MTUN),
         _ => None,
     }
 }
@@ -219,16 +215,12 @@ impl Plan {
 }
 
 /// The UDP port of a core on a server (None = it does not run there)
-fn core_port(app: &App, n: &Node, core: &str) -> Option<u16> {
+fn core_port(_app: &App, n: &Node, core: &str) -> Option<u16> {
     let info = crate::api::node_info(n);
     let num = |k: &str| info[k].as_str().and_then(|s| s.parse::<u16>().ok()).or_else(|| info[k].as_u64().map(|p| p as u16)).filter(|p| *p > 0);
     match core {
         "wg" => num("wg_port"),
         "awg" => num("awg_port"),
-        "mtun" => num("mt_port").or_else(|| {
-            let s = crate::microtun::settings(app);
-            s.node_on(&n.id).then(|| s.node_port(&n.id))
-        }),
         _ => None,
     }
 }
@@ -263,10 +255,7 @@ fn plan_with(app: &App, list: &[crate::tunnel::panel::Tunnel], n: &Node, core: &
 }
 
 /// The hand-set MTU (automatic MTU off)
-fn manual(app: &App, core: &str) -> u16 {
-    if core == "mtun" {
-        return crate::microtun::settings(app).mtu;
-    }
+fn manual(app: &App, _core: &str) -> u16 {
     app.db.get("mtu").trim().parse::<u16>().ok().filter(|m| (576..=9000).contains(m)).unwrap_or(1380)
 }
 
@@ -294,14 +283,14 @@ pub fn server(app: &App, n: &Node, core: &str) -> Option<u16> {
 /// takes our TCP MSS rules away and leaves the MTU as it is.
 pub fn ifaces(app: &App, n: &Node) -> HashMap<String, u16> {
     let mut m = HashMap::new();
-    for (core, iface) in [("wg", "wg0"), ("awg", "awg0"), ("mtun", crate::mtun::IFACE)] {
+    for (core, iface) in [("wg", "wg0"), ("awg", "awg0")] {
         m.insert(iface.to_string(), server(app, n, core).unwrap_or(0));
     }
     m
 }
 
-/// The interfaces `apply_ifaces` may touch; microtun sets the MTU of its own (`MtCfg.mtu`)
-const IFACES: [&str; 3] = ["wg0", "awg0", crate::mtun::IFACE];
+/// The interfaces `apply_ifaces` may touch
+const IFACES: [&str; 2] = ["wg0", "awg0"];
 /// comment on our TCP MSS rules, so only ours are ever removed
 const MSS_TAG: &str = "kanki-mtu";
 
@@ -350,14 +339,14 @@ fn applied() -> &'static std::sync::Mutex<HashMap<String, u16>> {
 
 /// On a server: give `wg0` / `awg0` the MTU the panel worked out (only when it differs, only
 /// interfaces that exist; a restart of wg-quick puts its own value back until the next sync), and
-/// clamp TCP to it on `wg0`, `awg0` and `mtun0`. 0 = automatic MTU off: our rules go, the MTU stays.
+/// clamp TCP to it on `wg0` and `awg0`. 0 = automatic MTU off: our rules go, the MTU stays.
 pub fn apply_ifaces(want: &HashMap<String, u16>) {
     for (iface, mtu) in want {
         let mtu = *mtu;
         if !IFACES.contains(&iface.as_str()) || (mtu != 0 && !(MIN..=1500).contains(&mtu)) {
             continue;
         }
-        if mtu != 0 && iface != crate::mtun::IFACE {
+        if mtu != 0 {
             if let Ok(cur) = std::fs::read_to_string(format!("/sys/class/net/{}/mtu", iface)) {
                 if cur.trim().parse::<u16>().ok() != Some(mtu) {
                     let ok = std::process::Command::new("ip").args(["link", "set", "dev", iface, "mtu", &mtu.to_string()]).status().map(|s| s.success()).unwrap_or(false);
@@ -385,6 +374,13 @@ pub fn apply_ifaces(want: &HashMap<String, u16>) {
     }
 }
 
+/// 3.60: the TCP MSS rules of an interface that is gone (microtun's `mtun0`)
+pub fn forget_iface(iface: &str) {
+    for tool in ["iptables", "ip6tables"] {
+        mss_clear(tool, iface);
+    }
+}
+
 // ------------------------------------------------------------------ the panel's report
 
 /// Bytes each layer adds (for the report): (name, bytes, what it is)
@@ -394,7 +390,6 @@ pub fn layers() -> Value {
         { "name": "UDP", "bytes": UDP, "kind": "base" },
         { "name": "WireGuard", "bytes": WG, "kind": "core" },
         { "name": "AmneziaWG", "bytes": WG, "plus": "S4", "kind": "core" },
-        { "name": "microtun", "bytes": MTUN, "kind": "core" },
         { "name": "KANKI MIX", "bytes": KMIX_WIRE + IPV4 + UDP, "kind": "core", "wire": true },
         { "name": "Hysteria2 (Salamander)", "bytes": SALAMANDER, "plus": "QUIC", "kind": "core" },
         { "name": "AmneziaWG link", "bytes": IPV4 + UDP + WG, "kind": "tunnel", "cuts": false },
@@ -439,7 +434,7 @@ pub fn report(app: &App) -> Value {
             json!({ "id": ib.id, "mtu": m, "wire": m + (IPV4 + UDP) as u32, "fits": m + ((IPV4 + UDP) as u32) <= b as u32 })
         })
         .collect();
-    json!({ "auto": auto(app), "budget": b, "manual": manual(app, "wg"), "manual_mtun": manual(app, "mtun"), "layers": layers(), "rows": rows, "xray_kcp": xray })
+    json!({ "auto": auto(app), "budget": b, "manual": manual(app, "wg"), "layers": layers(), "rows": rows, "xray_kcp": xray })
 }
 
 #[cfg(test)]
@@ -457,11 +452,9 @@ mod tests {
         assert_eq!(overhead("wg", 0), Some(60));
         assert_eq!(overhead("awg", 0), Some(60));
         assert_eq!(overhead("awg", 16), Some(76));
-        assert_eq!(overhead("mtun", 0), Some(56));
         assert_eq!(overhead("hy2", 0), None);
-        // 1380 on the mobile network: WireGuard 1320, microtun 1324
+        // 1380 on the mobile network: WireGuard 1320
         assert_eq!(safe(1380, 60), (1320, true));
-        assert_eq!(safe(1380, 56), (1324, true));
         // a path too small for 1280 keeps 1280 and says it does not fit
         assert_eq!(safe(1280, 60), (1280, false));
     }
@@ -469,7 +462,7 @@ mod tests {
     #[test]
     fn a_whole_packet_never_passes_the_budget() {
         for b in [1300u16, 1380, 1420, 1500] {
-            for (core, pad) in [("wg", 0), ("awg", 0), ("awg", 32), ("mtun", 0)] {
+            for (core, pad) in [("wg", 0), ("awg", 0), ("awg", 32)] {
                 let oh = overhead(core, pad).unwrap();
                 let (m, fits) = safe(b, oh);
                 if fits {
@@ -510,7 +503,7 @@ mod tests {
         let c = chains(&list, "de", 4200);
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].len(), 2);
-        // a wrapped link is 1280 unless set: microtun gets the floor and is told it does not fit
+        // a wrapped link is 1280 unless set
         assert_eq!(cap_of(1380, &c[0]), 1280);
         assert_eq!(c[0][0].transport, "awg+");
         // a loop of tunnels stops
@@ -524,7 +517,7 @@ mod tests {
         assert_eq!(r.len(), 2);
         assert!(r.iter().all(|x| x.ends_with(&["--set-mss".to_string(), "1280".to_string()]) && x.contains(&"kanki-mtu-wg0".to_string())));
         assert!(r[0].contains(&"-i".to_string()) && r[1].contains(&"-o".to_string()));
-        assert!(mss_rules("ip6tables", "mtun0", 1324)[0].ends_with(&["--set-mss".to_string(), "1264".to_string()]));
+        assert!(mss_rules("ip6tables", "awg0", 1324)[0].ends_with(&["--set-mss".to_string(), "1264".to_string()]));
     }
 
     /// On a real machine (root, in a network namespace of its own):
@@ -533,12 +526,11 @@ mod tests {
     #[ignore]
     fn mtu_live() {
         let rules = || String::from_utf8_lossy(&std::process::Command::new("iptables").args(["-t", "mangle", "-S", "FORWARD"]).output().unwrap().stdout).to_string();
-        apply_ifaces(&HashMap::from([("wg0".to_string(), 1320), ("mtun0".to_string(), 1324), ("eth0".to_string(), 1300)]));
+        apply_ifaces(&HashMap::from([("wg0".to_string(), 1320), ("eth0".to_string(), 1300)]));
         assert_eq!(std::fs::read_to_string("/sys/class/net/wg0/mtu").unwrap().trim(), "1320");
         let r = rules();
         assert_eq!(r.matches("kanki-mtu-wg0").count(), 2, "{}", r);
         assert_eq!(r.matches("--set-mss 1280").count(), 2);
-        assert_eq!(r.matches("kanki-mtu-mtun0").count(), 2);
         assert!(!r.contains("eth0"));
         // a new value replaces the rules, no second copy
         apply_ifaces(&HashMap::from([("wg0".to_string(), 1300)]));
@@ -547,7 +539,7 @@ mod tests {
         assert!(r.contains("--set-mss 1260") && !r.contains("--set-mss 1280"));
         assert_eq!(std::fs::read_to_string("/sys/class/net/wg0/mtu").unwrap().trim(), "1300");
         // off: the rules go, the MTU stays
-        apply_ifaces(&HashMap::from([("wg0".to_string(), 0), ("mtun0".to_string(), 0)]));
+        apply_ifaces(&HashMap::from([("wg0".to_string(), 0)]));
         assert!(!rules().contains("kanki-mtu"), "{}", rules());
         assert_eq!(std::fs::read_to_string("/sys/class/net/wg0/mtu").unwrap().trim(), "1300");
     }
@@ -588,10 +580,10 @@ mod tests {
     #[tokio::test]
     async fn configs_get_the_mtu_of_their_path_and_follow_the_tunnel() {
         let app = test_app();
-        let info = json!({ "wg_pub": "d2dwdWI=", "wg_port": "51820", "awg_pub": "YXdncHVi", "awg_port": "51821", "mt_port": 4200,
+        let info = json!({ "wg_pub": "d2dwdWI=", "wg_port": "51820", "awg_pub": "YXdncHVi", "awg_port": "51821",
             "awg": [["Jc", "4"], ["S1", "20"], ["S2", "30"], ["S4", "16"], ["H1", "1"], ["H2", "2"], ["H3", "3"], ["H4", "4"]] });
         app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,info) VALUES('de','Germany','de.example.com','de.example.com','t',?1)", &[&info.to_string()]).unwrap();
-        let u = app.db.create_user("ali", 10.0, 30, 1, "wg,awg,mtun", "", "", 0).unwrap();
+        let u = app.db.create_user("ali", 10.0, 30, 1, "wg,awg", "", "", 0).unwrap();
         let n = app.db.node("de").unwrap();
         let conf = |proto: &'static str, tunnel: bool| {
             let (app, u, n) = (app.clone(), u.clone(), n.clone());
@@ -605,7 +597,6 @@ mod tests {
         // (plain WireGuard is given only through Iran: it does not pass straight to a server abroad)
         assert_eq!(client(&app, &n, "wg", false), 1320);
         assert_eq!(mtu_line(&conf("amneziawg", false).await), "MTU = 1304");
-        assert_eq!(client(&app, &n, "mtun", false), 1324);
         // the server and an Iran server with a FakeTCP tunnel bringing every port: still 1380
         let srv = json!([{ "id": "ir1", "name": "Iran", "token": "x", "addr": "ir.example.com" }, { "id": "s-de", "name": "Germany", "token": "y", "node": "de" }]);
         app.db.set("tun_servers", &srv.to_string());
@@ -628,14 +619,11 @@ mod tests {
         assert_eq!(mtu_line(&conf("wireguard", true).await), "MTU = 1280");
         assert_eq!(mtu_line(&conf("amneziawg", true).await), "MTU = 1280");
         assert_eq!(mtu_line(&conf("amneziawg", false).await), "MTU = 1304");
-        let p = plan(&app, &n, "mtun", true).unwrap();
-        assert_eq!((p.cap, p.mtu, p.fits), (1340, 1284, true));
-        let link = crate::microtun::link(&app, &u, &n, true).unwrap_or_default();
-        assert!(link.contains("@ir.example.com:4200?") && link.contains("&mtu=1284&"), "{}", link);
-        assert!(crate::microtun::link(&app, &u, &n, false).unwrap().contains("&mtu=1324&"));
+        let p = plan(&app, &n, "wg", true).unwrap();
+        assert_eq!((p.cap, p.mtu, p.fits), (1340, 1280, true));
         // the server's own interfaces: the smallest of its configs
         let f = ifaces(&app, &n);
-        assert_eq!((f["wg0"], f["awg0"], f["mtun0"]), (1280, 1280, 1284));
+        assert_eq!((f["wg0"], f["awg0"]), (1280, 1280));
         // the report says why
         let r = report(&app);
         assert!(r["rows"].as_array().unwrap().iter().any(|x| x["via"] == "tunnel" && x["hops"][0]["transport"] == "awg" && x["cap"] == 1340));

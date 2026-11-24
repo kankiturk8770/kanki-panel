@@ -28,12 +28,6 @@ pub struct SyncReq {
     /// as "everything off" (it stops it and closes its port). Newer agents ignore it.
     #[serde(default)]
     pub kcore: Option<serde_json::Value>,
-    /// microtun on this server (None = a panel that does not manage it)
-    #[serde(default)]
-    pub mtun: Option<crate::mtun::MtCfg>,
-    /// KPING on this server: its relay and exit (None = a panel before 3.58: leave it as it is)
-    #[serde(default)]
-    pub kping: Option<crate::kpingd::KpCfg>,
     /// WireGuard / AmneziaWG / Hysteria2 switched off on this server ("wg", "awg", "hy2"): stopped and
     /// their ports closed (see `cores::apply`); an older agent ignores it but gets no users for them
     #[serde(default)]
@@ -69,16 +63,6 @@ pub struct SyncResp {
     pub kmix_online: HashMap<String, i64>,
     #[serde(default)]
     pub kmix_error: String,
-    /// microtun: username -> (rx, tx) since the last sync, users online, what failed to start
-    #[serde(default)]
-    pub mtun: HashMap<String, (i64, i64)>,
-    #[serde(default)]
-    pub mtun_online: Vec<String>,
-    #[serde(default)]
-    pub mtun_error: String,
-    /// KPING here: `kpingd::report` (Null = nothing runs or an agent before 3.58)
-    #[serde(default)]
-    pub kping: Value,
     /// this server's clock (unix seconds) when it answered: handshake times are compared with it,
     /// not with the panel's clock (an older node sends 0)
     #[serde(default)]
@@ -104,13 +88,6 @@ pub fn local_info(app: &App) -> Value {
     });
     if let (Some(o), Some(k)) = (v.as_object_mut(), crate::kmix::info().as_object()) {
         o.extend(k.clone());
-    }
-    if let (Some(o), Some(k)) = (v.as_object_mut(), crate::microtun::info().as_object()) {
-        o.extend(k.clone());
-    }
-    // KPING's public port while it runs here (the panel lists KPING for this server only then)
-    if let (Some(o), Some(p)) = (v.as_object_mut(), crate::kpingd::public_port()) {
-        o.insert("kp_port".into(), json!(p.to_string()));
     }
     v
 }
@@ -189,15 +166,43 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     MIXPLUS_GONE.call_once(|| {
         tokio::task::spawn_blocking(|| crate::fw::close("kcore"));
     });
-    let (mut mtun, mut mtun_online, mut mtun_error) = (HashMap::new(), vec![], String::new());
-    if let Some(cfg) = req.mtun {
-        (mtun, mtun_online, mtun_error) = tokio::task::spawn_blocking(move || crate::microtun::apply(cfg)).await.unwrap_or_else(|_| (HashMap::new(), vec![], "microtun apply crashed".into()));
-    }
-    let mut kping = Value::Null;
-    if let Some(cfg) = req.kping {
-        kping = tokio::task::spawn_blocking(move || crate::kpingd::apply_node(cfg)).await.unwrap_or(Value::Null);
-    }
-    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, mtun, mtun_online, mtun_error, kping, now: now() }
+    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, now: now() }
+}
+
+/// 3.60: microtun and KPING are gone (KANKI MIX does their work, with two paths). What they left on a server
+/// that ran them: the firewall rules of their ports, the NAT of their address ranges, their cache files. Once a
+/// start, by the node and by the tunnel agent; every step is harmless where there is nothing to take away.
+pub fn forget_retired() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        for k in ["mtun", "kping", "kpcore"] {
+            crate::fw::close(k);
+        }
+        crate::mtu::forget_iface("mtun0");
+        for f in ["/var/lib/kanki/kping.json", "/var/lib/kanki/kping-node.json"] {
+            let _ = std::fs::remove_file(f);
+        }
+        for (subnet, iface) in [("10.79.0.0/16", "mtun0"), ("10.80.0.0/16", "mtun0"), ("10.81.0.0/16", "kping0")] {
+            let rules: [&[&str]; 4] = [
+                &["-t", "nat", "POSTROUTING", "-s", subnet, "!", "-o", iface, "-j", "MASQUERADE"],
+                &["-t", "filter", "FORWARD", "-i", iface, "-j", "ACCEPT"],
+                &["-t", "filter", "FORWARD", "-o", iface, "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
+                &["-t", "mangle", "FORWARD", "-o", iface, "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--clamp-mss-to-pmtu"],
+            ];
+            for r in rules {
+                // the same rule may have been put in twice; take every copy (at most a few)
+                for _ in 0..4 {
+                    let mut a: Vec<&str> = vec![r[0], r[1], "-D", r[2]];
+                    a.extend(&r[3..]);
+                    let ok = std::process::Command::new("iptables").args(&a).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+                        .status().map(|x| x.success()).unwrap_or(false);
+                    if !ok {
+                        break;
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// Hysteria2 devices of a user on this server: `open` sessions, `real` of them seen moving data (a
@@ -267,7 +272,7 @@ fn live_peer(uid: i64, node: &str, proto: &str, moved: i64, now: i64) -> bool {
     }
 }
 
-/// A Hysteria2 / KANKI MIX / microtun session the server reports: it counts once it moved real data
+/// A Hysteria2 / KANKI MIX session the server reports: it counts once it moved real data
 /// (1 KB) and then for as long as the server keeps it. A ping logs in and leaves without moving data.
 fn sessions() -> &'static Mutex<HashMap<(i64, String, String), i64>> {
     static S: std::sync::OnceLock<Mutex<HashMap<(i64, String, String), i64>>> = std::sync::OnceLock::new();
@@ -301,9 +306,9 @@ const NEW_AFTER: i64 = 120;
 /// The connection limit of an account counts devices, over every server, protocol and app: a config
 /// copied to several devices is several connections. Once a user has as many live devices as allowed,
 /// every other server and protocol is shut for that user (the WireGuard / AmneziaWG key, the Hysteria2,
-/// KANKI MIX or microtun user is taken off there) and an extra device on a config already in use is
-/// dropped by its address (WireGuard / AmneziaWG) or by that server's own device limit (KANKI MIX,
-/// microtun: the places left; Hysteria2: refused at login). The devices that came first keep working;
+/// KANKI MIX user is taken off there) and an extra device on a config already in use is
+/// dropped by its address (WireGuard / AmneziaWG) or by that server's own device limit (KANKI MIX:
+/// the places left; Hysteria2: refused at login). The devices that came first keep working;
 /// once one of them ends, another may connect. Pings and subscription views never count.
 #[derive(Default)]
 pub struct Limits {
@@ -339,7 +344,7 @@ impl Limits {
         let mut at: HashMap<(i64, String, String), usize> = HashMap::new();
         let kept = self.last.iter().filter(|x| !answered.contains(&x.1) && heard.get(&x.1).is_some_and(|t| now - t < CARRY_FOR));
         for x in units.iter().chain(kept) {
-            // the same user, node and protocol twice (two microtun devices) is that many devices
+            // the same user, node and protocol twice (two KANKI MIX devices) is that many devices
             match at.get(&(x.0, x.1.clone(), x.2.clone())) {
                 Some(i) => all[*i].3 += x.3,
                 None => {
@@ -530,7 +535,7 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
     // drain: no new users here, on any core; the users assigned by name or there when it was drained stay
     let keep = app.db.drain_keep(n);
     let here: Vec<&User> = users.iter().filter(|u| u.active() && app.db.serves(u, n, keep.as_ref())).collect();
-    // at the limit, KANKI MIX / microtun on this server take only the devices still allowed here
+    // at the limit, KANKI MIX on this server take only the devices still allowed here
     let room = |proto: &str| -> Vec<User> {
         here.iter()
             .filter(|u| !shut(u, proto))
@@ -543,14 +548,10 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
             })
             .collect()
     };
-    let (kmix_users, mtun_users, kping_users) = (room("kmix"), room("mtun"), room(crate::kping::PROTO));
+    let kmix_users = room("kmix");
     let kmix_here: Vec<&User> = kmix_users.iter().collect();
-    let mtun_here: Vec<&User> = mtun_users.iter().collect();
-    let kping_here: Vec<&User> = kping_users.iter().collect();
     req.kmix = Some(crate::kmix::cfg_for(app, &crate::kmix::settings(app), n, &kmix_here));
     req.kcore = Some(serde_json::json!({}));
-    req.mtun = Some(crate::microtun::cfg_for(app, n, &mtun_here));
-    req.kping = Some(crate::kping::cfg_for_node(app, n, &kping_here));
     req.block = lim.blocks_on(&n.id);
     req.off = off.clone();
     req.mtu = crate::mtu::ifaces(app, n);
@@ -615,7 +616,7 @@ pub async fn sync_all(app: &Arc<App>) {
             g.insert(n.id.clone(), now());
         }
         off_jobs.push(async move {
-            let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(serde_json::json!({})), mtun: Some(Default::default()), kping: Some(Default::default()), ..Default::default() };
+            let empty = SyncReq { kmix: Some(crate::kmix::KmixCfg::default()), kcore: Some(serde_json::json!({})), ..Default::default() };
             let local = n.id == "local";
             let ok = if local {
                 apply_local(app, empty).await;
@@ -756,10 +757,10 @@ pub async fn sync_all(app: &Arc<App>) {
         }
         // data each user moved here this round, per protocol (a session that never moved data is a ping)
         let moved = |name: &String, proto: &str| -> i64 {
-            let m = match proto { "hy2" => &resp.hy2, "kmix" => &resp.kmix, _ => &resp.mtun };
+            let m = if proto == "hy2" { &resp.hy2 } else { &resp.kmix };
             m.get(name).map(|(rx, tx)| rx + tx).unwrap_or(0)
         };
-        for (name, c, proto) in resp.hy2_online.iter().map(|(n, c)| (n, c, "hy2")).chain(resp.kmix_online.iter().map(|(n, c)| (n, c, "kmix"))).chain(resp.mtun_online.iter().map(|n| (n, &1, "mtun"))) {
+        for (name, c, proto) in resp.hy2_online.iter().map(|(n, c)| (n, c, "hy2")).chain(resp.kmix_online.iter().map(|(n, c)| (n, c, "kmix"))) {
             if let Some(uid) = by_name.get(name) {
                 if *c > 0 && live_session(*uid, &n.id, proto, moved(name, proto)) {
                     here.push((*uid, proto.to_string()));
@@ -769,19 +770,16 @@ pub async fn sync_all(app: &Arc<App>) {
                 }
             }
         }
-        for (name, (rx, tx)) in resp.kmix.iter().chain(resp.mtun.iter()) {
+        for (name, (rx, tx)) in resp.kmix.iter() {
             if let Some(uid) = by_name.get(name) {
                 *add_bytes.entry(*uid).or_default() += rx + tx;
             }
         }
         // sessions that ended here are forgotten (a new one has to move data again to count)
         let open_now: HashSet<(String, &str)> = resp.hy2_online.iter().filter(|x| *x.1 > 0).map(|x| (x.0.clone(), "hy2"))
-            .chain(resp.kmix_online.iter().filter(|x| *x.1 > 0).map(|x| (x.0.clone(), "kmix")))
-            .chain(resp.mtun_online.iter().map(|x| (x.clone(), "mtun"))).collect();
+            .chain(resp.kmix_online.iter().filter(|x| *x.1 > 0).map(|x| (x.0.clone(), "kmix"))).collect();
         forget_sessions(&n.id, |uid, proto| users.iter().find(|u| u.id == uid).is_some_and(|u| open_now.contains(&(u.username.clone(), proto))));
         crate::kmix::note_error(&n.id, &resp.kmix_error);
-        // KPING: traffic and who is online (counted in the limit below, with the other cores)
-        crate::kping::ingest(app, &n.id, &resp.kping, crate::kping::settings(app).node_on(&n.id));
         for (uid, b) in add_bytes.iter() {
             let d = b - before.get(uid).copied().unwrap_or(0);
             if d > 0 {
@@ -804,20 +802,12 @@ pub async fn sync_all(app: &Arc<App>) {
     units.extend(xu);
     eps.extend(xe);
     answered.extend(xa);
-    // KPING too: one account, one limit over all six cores
-    let (ku, ka) = crate::kping::live_units(now());
-    for (uid, _, _, devices) in &ku {
-        *online.entry(*uid).or_default() += devices;
-        seen.insert(*uid, now());
-    }
-    units.extend(ku);
-    answered.extend(ka);
     // what the panel shows as «connected now» is what was counted here
     crate::live::set_others(&units);
     let changed = {
         let mut l = limits().lock().unwrap_or_else(|e| e.into_inner());
         // a server switched off or removed: what it had goes at once (Xray servers by their reports)
-        l.keep_nodes(|n| n.starts_with("x:") || n.starts_with("kp:") || enabled.contains(n));
+        l.keep_nodes(|n| n.starts_with("x:") || enabled.contains(n));
         l.round(&units, &eps, &answered, &max, now())
     };
     if changed {
@@ -1052,26 +1042,6 @@ mod live_tests {
         assert!(l.blocks_on("x:ir").is_empty());
     }
 
-    #[test]
-    fn kping_counts_in_the_one_limit_of_the_account() {
-        let mut l = Limits::default();
-        let max: HashMap<i64, i64> = HashMap::from([(1, 1)]);
-        let mut nodes: HashSet<String> = HashSet::new();
-        nodes.insert("de".into());
-        nodes.insert("kp:x1".into());
-        // KPING first, then a second phone on WireGuard: KPING keeps its place, WireGuard is shut
-        l.round(&[(1, "kp:x1".to_string(), "kping".to_string(), 1)], &HashMap::new(), &nodes, &max, 1000);
-        l.round(&[(1, "kp:x1".to_string(), "kping".to_string(), 1), (1, "de".to_string(), "wg".to_string(), 1)], &HashMap::new(), &nodes, &max, 1030);
-        assert!(l.is_shut(1, "de", "wg"));
-        assert!(!l.is_shut(1, "kp:x1", "kping"));
-        // the other way round: WireGuard first, KPING is not let in
-        let mut l = Limits::default();
-        l.round(&[(1, "de".to_string(), "wg".to_string(), 1)], &HashMap::new(), &nodes, &max, 1000);
-        l.round(&[(1, "de".to_string(), "wg".to_string(), 1), (1, "kp:x1".to_string(), "kping".to_string(), 1)], &HashMap::new(), &nodes, &max, 1030);
-        assert!(l.is_shut(1, "kp:x1", "kping"));
-        assert!(!l.is_shut(1, "de", "wg"));
-    }
-
     fn nodes() -> HashSet<String> {
         ["de", "tr"].iter().map(|s| s.to_string()).collect()
     }
@@ -1138,7 +1108,7 @@ mod live_tests {
         assert!(!l.is_shut(1, "tr", "hy2"));
         l.round_t(&[u(1, "de", "wg"), u(1, "tr", "hy2"), u(2, "de", "wg"), u(2, "tr", "wg")], &nodes(), &max, 1030);
         assert!(!l.is_shut(1, "de", "wg") && !l.is_shut(1, "tr", "hy2"));
-        assert!(l.is_shut(1, "tr", "wg") && l.is_shut(1, "de", "mtun"));
+        assert!(l.is_shut(1, "tr", "wg") && l.is_shut(1, "de", "kmix"));
         // no limit (0): never shut
         assert!(!l.is_shut(2, "de", "kmix"));
     }
@@ -1174,15 +1144,15 @@ mod live_tests {
     }
 
     #[test]
-    fn two_microtun_devices_on_one_server_add_up() {
+    fn two_kanki_mix_devices_on_one_server_add_up() {
         let mut l = Limits::default();
         let max: HashMap<i64, i64> = [(1, 2), (2, 1)].into_iter().collect();
-        l.round_t(&[u(1, "de", "mtun"), u(1, "de", "mtun"), u(2, "de", "mtun"), u(2, "de", "mtun")], &nodes(), &max, 1000);
+        l.round_t(&[u(1, "de", "kmix"), u(1, "de", "kmix"), u(2, "de", "kmix"), u(2, "de", "kmix")], &nodes(), &max, 1000);
         // a two-device account keeps both, and nothing else is open
-        assert_eq!(l.allowed(1, "de", "mtun"), Some(2));
+        assert_eq!(l.allowed(1, "de", "kmix"), Some(2));
         assert!(l.is_shut(1, "tr", "wg"));
         // a one-device account gets one place
-        assert_eq!(l.allowed(2, "de", "mtun"), Some(1));
+        assert_eq!(l.allowed(2, "de", "kmix"), Some(1));
     }
 
     #[test]
@@ -1277,7 +1247,7 @@ mod drain_tests {
 mod after_limit_tests {
     #[test]
     fn data_after_the_end_is_kept_by_source_and_goes_when_renewed() {
-        let app = crate::kping::tests::test_app();
+        let app = crate::test_app();
         let u = app.db.create_user("trial1", 0.5, 1, 1, "wg,xray", "", "", 0).unwrap();
         super::note_after_limit(&app, &u, "Germany · wg", 1000);
         super::note_after_limit(&app, &u, "Germany · wg", 500);
@@ -1285,7 +1255,7 @@ mod after_limit_tests {
         let v = super::after_limit_of(&app, u.id);
         assert_eq!(v["src"]["Germany · wg"], 1500);
         assert!(v["src"]["Turkey · xray"].is_null());
-        // xray / DNS / KPING counters name the server and protocol of their key
+        // xray / DNS counters name the server and protocol of their key
         app.db.exec("UPDATE users SET used_bytes=?1 WHERE id=?2", &[&(1i64 << 30), &u.id]).unwrap();
         crate::dns::panel::count_usage(&app, "xray_prev_de1", &serde_json::json!({ "run": "r", "users": { u.id.to_string(): [700] } }));
         assert_eq!(super::after_limit_of(&app, u.id)["src"]["de1 · xray"], 700);

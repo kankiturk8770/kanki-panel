@@ -80,7 +80,7 @@ pub struct Spec {
     /// duplication
     pub fec: String,
     pub dup: bool,
-    /// Game-FEC Pro: the core the tunnel carries ("kmix" | "kping" | "mtun" | "wg" | ""). "kmix" splits
+    /// Game-FEC Pro: the core the tunnel carries ("kmix" | "wg" | ""). "kmix" splits
     /// each flow by the server's game mark: the game with FEC, its KCP (the app's TCP) without
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub profile: String,
@@ -197,7 +197,7 @@ struct State {
 const LANE_HOLD_MS: u64 = 10 * 60_000;
 
 /// Which live link (index into `len` links) carries a connection. With two or more links and both
-/// kinds of traffic going, UDP (games, WireGuard, AmneziaWG, microtun) gets the first half of the
+/// kinds of traffic going, UDP (games, WireGuard, AmneziaWG, KANKI MIX) gets the first half of the
 /// links and TCP (Xray, downloads) the rest: a big TCP download then never sits in the same ordered
 /// link as game packets, so a game packet never waits for a lost download packet to be sent again.
 /// Otherwise each kind uses every link.
