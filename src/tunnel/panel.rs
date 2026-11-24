@@ -1951,10 +1951,26 @@ pub fn has_port_tunnels(app: &App, sid: &str) -> bool {
     route_list(app).iter().any(|t| t.exit == sid)
 }
 
-/// The tunnels whose ports can be followed from one server to the next: the enabled Kanki port tunnels
-/// (not the layer-3 AmneziaWG links)
+/// The tunnels whose ports can be followed from one server to the next: the enabled port tunnels (every kind:
+/// Kanki, KANKI-UP, direct, Hysteria2), and the ports an AmneziaWG link forwards into itself when they land on its
+/// exit (no other target). A layer-3 AmneziaWG link without forwarded ports carries no port of its own.
 fn route_list(app: &App) -> Vec<Tunnel> {
-    tunnels(app).into_iter().filter(|t| t.enabled && t.kind != "awg" && t.kind != "awgwrap").collect()
+    tunnels(app)
+        .into_iter()
+        .filter(|t| t.enabled && t.kind != "awgwrap")
+        .filter_map(|t| {
+            if t.kind != "awg" {
+                return Some(t);
+            }
+            if !t.awg.fwd_target.trim().is_empty() || (t.awg.fwd_tcp.is_empty() && t.awg.fwd_udp.is_empty()) {
+                return None;
+            }
+            let mut x = t.clone();
+            x.tcp = t.awg.fwd_tcp.clone();
+            x.udp = t.awg.fwd_udp.clone();
+            Some(x)
+        })
+        .collect()
 }
 
 

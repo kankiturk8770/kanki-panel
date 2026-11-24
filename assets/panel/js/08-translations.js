@@ -2,6 +2,10 @@
 "use strict";
 // Persian text of the whole panel
 var FA={
+"from the tunnel that carries this port":"از تانلی که همین پورت را می‌برد",
+"Make a tunnel that carries this port: the second config comes by itself":"تانلی بساز که این پورت را ببرد: کانفیگ دوم خودش می‌آید",
+"Tunnel configs":"کانفیگ‌های تانل",
+"Every core gets a second config through the Iran server of the tunnel that carries its port, by itself: change the tunnel and the users get the new address at their next update.":"هر هسته خودش یک کانفیگ دوم از سرور ایرانِ تانلی که پورتش را می‌برد می‌گیرد: تانل را عوض کنی، کاربرها با بروزرسانی بعدی آدرس تازه را می‌گیرند.",
 "0: static header":"۰: سرآیند ثابت",
 "1: seq every packet":"۱: seq هر بسته",
 "2: random seq":"۲: seq تصادفی",

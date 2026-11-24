@@ -726,11 +726,8 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     // «SSL»: on by default abroad, off in Iran (port 80 is often closed there)
     s.no_ssl = !b["ssl"].as_bool().unwrap_or(s.loc != "iran");
-    if !tun.is_empty() {
-        if let Err(e) = crate::twin::save(&app, &s.id, &json!({ "on": true, "host": tun })) {
-            return err(StatusCode::BAD_REQUEST, &e);
-        }
-    }
+    // (an Iran address typed here before 3.61 is not needed: the tunnels give it)
+    let _ = tun;
     list.push(s.clone());
     tp::save_servers(&app, &list);
     Json(json!({ "ok": true, "id": s.id, "command": command(&app, &s), "expires": s.join_exp, "ports": s.ports })).into_response()

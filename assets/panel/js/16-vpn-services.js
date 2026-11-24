@@ -69,26 +69,6 @@ function drawPv(p,force){var g='pv_'+p,el=$('#pv'),tab=PVT[p]||'status';if(!el||
  if(!force&&accBusy(g))return;
  el.innerHTML=kuGroup(t('Servers'),list.length,'',list.length?boxes(g,list,function(s){return pvRow(p,s)}):'<p class="muted ku-empty">'+t('No VPN server yet')+' · <a href="#nodes">'+t('Add server')+'</a></p>')}
 
-// A core's second config through the tunnel, set on the core's own page: its own Iran address (one tap on
-// an Iran server), else the server's tunnel domain (Servers page). `fold`: closed until opened.
-var CNAME={wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',xray:'Xray'};
-window.coreTun=function(core,s,fold){if(!s)return '';var tn=s.tunnel||{},own=(tn.cores||{})[core]||'',srv=tn.on?(tn.host||tn.uses||''):'',use=own||srv,k=esc(s.key),id='ct_'+core+'_'+String(s.key).replace(/[^a-z0-9]/gi,'');
- var x=(tn.ports||[]).filter(function(z){return z.core==core})[0];
- var lost=use&&x&&x.carried===false;
- var line=lost?t('No tunnel carries this port: users get only the direct config')+' <span class="ltr">('+(x.tcp?'TCP':'UDP')+' '+x.port+')</span>':use?t('Users also get')+' <b class="ltr">'+esc(use)+(x?':'+x.via:'')+'</b>'+(own?'':' <small class="muted">('+t('the tunnel domain of the server')+')</small>'):t('No second config: choose an Iran server below.');
- var chips=srvIrHosts(s).map(function(e){return '<button type="button" class="'+(own==e.host?'on':'')+'" onclick="coreTunSet(\''+core+'\',\''+k+'\',\''+jsa(e.host)+'\')">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('');
- var st='<div class="kxr-line"><span class="kxr-st '+(use?'g':'')+'">'+(use?'+ '+t('tunnel'):t('Off'))+'</span><span>'+line+'</span></div>';
- var body='<div class="kxm-row"><div><input id="'+id+'" class="ltr" placeholder="'+esc(srv||'ir.example.com')+'" value="'+esc(own)+'"></div><button class="btn sm" onclick="coreTunSet(\''+core+'\',\''+k+'\',$(\'#'+id+'\').value)">'+t('Save')+'</button>'+
-   (own?'<button class="b2 sm" onclick="coreTunSet(\''+core+'\',\''+k+'\',\'\')">'+t('Same as the server')+'</button>':'')+'</div>'+
-  (chips?'<div class="kxchips">'+chips+'</div>':'<p class="muted" style="font-size:12px;margin:4px 2px">'+t('Add your Iran servers in Servers to pick them here with one tap.')+'</p>')+
-  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('Only for this core. Empty = the tunnel domain of the server (Servers page).')+'</p>';
- var head=t('Second config through the tunnel')+' · '+CNAME[core];
- return fold?'<details class="box" style="margin-top:6px;width:100%"><summary>'+head+(use?' · <span class="ltr">'+esc(use)+'</span>':'')+'</summary>'+st+body+'</details>':'<div class="kxr-sec">'+head+'</div>'+st+body};
-window.coreTunSet=function(core,key,host){var r=document.querySelector('.kxr.open[data-acc]'),g=r&&r.dataset.acc;
- // opened from the Tunnel table (coreTunEdit): its window closes and the table is drawn again
- if($('#modal').classList.contains('on')&&window.CTG){g=window.CTG;window.CTG='';closeModal()}
- api('PUT','/api/servers/'+encodeURIComponent(key),{tunnel_core:{core:core,host:String(host||'').trim()}}).then(function(){toast(t('Saved'));
-  return srvLoad(true).then(function(){if(g&&/^tn_|^xrt$/.test(g)){if(ACC.draw[g])ACC.draw[g](true);return}if(S.page=='xray'){if(ACC.draw.xr)ACC.draw.xr(true)}else svcReload()})}).catch(fail)};
 window.srvByNode=function(nid){return srvByNode(nid)};
 function pvRow(p,s){var st=pvState(p,s),port=st[2];
  var head='<span class="dot '+(st[0]=='n'?'':st[0])+'"></span>'+fl(s.cc)+'<b>'+esc(s.name)+'</b>'+(s.local?'<span class="kxc-tag main">'+t('Panel server')+'</span>':'')+'<span class="sp"></span>'+
@@ -154,23 +134,18 @@ window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')
    if(!list.length)return '<p class="muted ku-empty">'+t('No VPN server yet')+'</p>';
    window.KMT=list;
    return kuTunTable(list.map(function(r){var x=r.k,sc=x.second;
-    return {cc:r.cc,name:x.name,direct:srvDirect(r.s)||x.host||'',tun:sc?sc.host+':'+sc.port:'',note:'',
+    return {cc:r.cc,name:x.name,direct:srvDirect(r.s)||x.host||'',tun:sc?sc.host+':'+sc.port:'',note:sc?t('from the tunnel that carries this port'):t('Make a tunnel that carries this port: the second config comes by itself'),
      st:sc?(x.route_via?['g',t('Through a tunnel')]:['y',t('No tunnel carries the port')]):['',t('Off')],edit:"kmTunEdit('"+esc(x.id)+"')"}}))};
   window.kmTunEdit=function(id){var r=(window.KMT||[]).filter(function(z){return z.k.id==id})[0];if(!r||!KM.d)return;
    modal(mhead(t('Second config through the tunnel'),r.k.name)+kmTunBody(KM.d,r))};
-  function kmTunBody(d,r){var x=r.k,o=(d.settings.nodes||{})[x.id]||{},id=esc(x.id),port=x.port||x.want_port,via=x.route_via;
-   // the server's tunnel domain (Servers page) gives it by itself; the fields below only change it for KANKI MIX
+  function kmTunBody(d,r){var x=r.k,o=(d.settings.nodes||{})[x.id]||{},id=esc(x.id),via=x.route_via;
+   // (3.61) the Iran server of the tunnel that carries the KANKI MIX port gives the address by itself; only on/off and the name here
    return ''+
-   '<label class="kxsw" style="cursor:pointer"><span>'+(x.second?t('Users also get')+' <b class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</b>':t('Write the tunnel domain of this server in Servers: the second config is made by itself.'))+'</span><input type="checkbox" id="km_t21" style="width:auto"'+(o.tun_off?'':' checked')+'></label>'+
-   '<details class="box" style="margin-top:6px" open><summary>'+t('Only for KANKI MIX (optional)')+'</summary>'+
-   '<div class="kxf"><div class="wide"><label class="f">'+t('Iran address')+'</label><input id="km_th1" class="ltr" placeholder="'+esc(t('the tunnel domain of the server'))+'" value="'+esc(o.tun_host||'')+'">'+
-    (function(){var irs=srvIrHosts(r.s&&r.s.key?r.s:null);return irs.length?'<div class="kxchips">'+irs.map(function(e){return '<button type="button" class="'+(o.tun_host==e.host?'on':'')+'" onclick="$(\'#km_th1\').value=\''+jsa(e.host)+'\';$$(\'.kxchips button\',this.parentNode.parentNode).forEach(function(b){b.classList.remove(\'on\')});this.classList.add(\'on\')">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+'</div>':''})()+'</div>'+
-   '<div><label class="f">'+t('Port')+'</label><input id="km_tp1" class="ltr" inputmode="numeric" placeholder="'+esc(String((via&&via.port)||port||''))+'" value="'+esc(o.tun_port?String(o.tun_port):'')+'"></div>'+
-   '<div class="wide"><label class="f">'+t('Name in the app')+'</label><input id="km_tn1" maxlength="40" placeholder="'+esc(x.name+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'"></div></div></details>'+
-   '<div class="kxr-line">'+(via?viaLine(via,x.name):(o.tun_host&&!o.tun_off?'<span class="warnbox" style="margin:0;width:100%">'+t('No Kanki tunnel carries this port to the server. Make a tunnel (or a multi-location route) that carries it, or forward it on that address some other way.')+'</span>':''))+'</div>'+
+   '<label class="kxsw" style="cursor:pointer"><span>'+(x.second?t('Users also get')+' <b class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</b>':t('Make a tunnel that carries this port: the second config comes by itself'))+'</span><input type="checkbox" id="km_t21" style="width:auto"'+(o.tun_off?'':' checked')+'></label>'+
+   '<div class="kxf"><div class="wide"><label class="f">'+t('Name in the app')+'</label><input id="km_tn1" maxlength="40" placeholder="'+esc(x.name+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'"></div></div>'+
+   '<div class="kxr-line">'+(via?viaLine(via,x.name):'')+'</div>'+
     '<div class="kxsave"><button class="b2 sm" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn sm" onclick="kmSaveTun(\''+id+'\')">'+t('Save')+'</button></div>'}
-  window.kmSaveTun=function(id){var m=kmNodes(),o=m[id]||{};o.tun_off=!$('#km_t21').checked;o.tun_host=$('#km_th1').value.trim();
-   var tp=unN($('#km_tp1').value).trim();o.tun_port=tp?+tp:0;o.tun_name=$('#km_tn1').value.trim();m[id]=o;
+  window.kmSaveTun=function(id){var m=kmNodes(),o=m[id]||{};o.tun_off=!$('#km_t21').checked;o.tun_host='';o.tun_port=0;o.tun_name=$('#km_tn1').value.trim();m[id]=o;
    api('PUT','/api/kmix',{nodes:m}).then(function(){toast(t('Saved'));closeModal();kmLoad(true)}).catch(fail)};
   ACC.draw.kmt=function(){var c=$('#km_tun');if(c&&KM.d)c.innerHTML=kmTunRows(KM.d)};
  

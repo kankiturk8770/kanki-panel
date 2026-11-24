@@ -33,18 +33,15 @@ function kuTunTable(rows){if(!rows.length)return '<p class="muted ku-empty">'+t(
    '<td data-l="'+esc(t('Direct address'))+'"><span class="ltr">'+(r.direct?esc(r.direct):'—')+'</span></td>'+
    '<td data-l="'+esc(t('Tunnel address in Iran'))+'">'+(r.tun?'<span class="ltr">'+esc(r.tun)+'</span>':'<span class="muted">'+t('No second config')+'</span>')+(r.note?'<small class="muted">'+r.note+'</small>':'')+'</td>'+
    '<td data-l="'+esc(t('Status'))+'"><span class="kxr-st '+(r.st[0]||'')+'">'+esc(r.st[1])+'</span></td>'+
-   '<td class="ed"><button type="button" class="b2 sm" onclick="'+r.edit+'">'+ic('edit',14)+' '+t('Edit')+'</button></td></tr>'}).join('')+'</tbody></table></div>'}
+   '<td class="ed">'+(r.edit?'<button type="button" class="b2 sm" onclick="'+r.edit+'">'+ic('edit',14)+' '+t('Edit')+'</button>':'')+'</td></tr>'}).join('')+'</tbody></table></div>'}
 // the address users reach a server on directly
 function srvDirect(s){var n=(s&&s.node)||{};return n.effective_endpoint||n.endpoint||(window.srvIp?srvIp(s):'')||''}
 window.CTS={};
+// (3.61) the second config of a core: the Iran server of the tunnel that carries its port, found by itself; nothing to type
 function coreTunRows(core,g,list){
- return kuTunTable(list.map(function(s){var tn=s.tunnel||{},own=(tn.cores||{})[core]||'',srv=tn.on?(tn.host||tn.uses||''):'',use=own||srv,x=(tn.ports||[]).filter(function(z){return z.core==core})[0];
+ return kuTunTable(list.map(function(s){var tn=s.tunnel||{},x=(tn.ports||[]).filter(function(z){return z.core==core})[0];
   CTS[core+'|'+s.key]=s;
   // carried=false: tunnels end at this server but none brings this core's port, so users get no second config
-  var lost=use&&x&&x.carried===false;
-  return {cc:s.cc,name:s.name,direct:srvDirect(s),tun:use&&!lost?use+(x?':'+x.via:''):'',note:lost?t('No tunnel carries this port: users get only the direct config')+' (UDP '+x.port+')':(use&&!own?t('the tunnel domain of the server'):''),
-   st:lost?['r',t('Port not in a tunnel')]:use?['g',x?t('Through a tunnel'):t('On')]:['',t('Off')],edit:"coreTunEdit('"+core+"','"+esc(s.key)+"','"+g+"')"}}))}
-// the old fields of one server's second config, in a window
-window.coreTunEdit=function(core,key,g){var s=CTS[core+'|'+key];if(!s)return;window.CTG=g;
- modal(mhead(t('Second config through the tunnel'),s.name)+coreTun(core,s))}
-
+  var lost=x&&x.carried===false,use=x&&!lost?x.host:'';
+  return {cc:s.cc,name:s.name,direct:srvDirect(s),tun:use?use+':'+x.via:'',note:lost?t('No tunnel carries this port: users get only the direct config')+' ('+(x.tcp?'TCP':'UDP')+' '+x.port+')':(use?t('from the tunnel that carries this port'):t('Make a tunnel that carries this port: the second config comes by itself')),
+   st:lost?['r',t('Port not in a tunnel')]:use?['g',t('Through a tunnel')]:['',t('No tunnel')],edit:''}}))}

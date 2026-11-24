@@ -203,18 +203,9 @@ pub fn tunnel_target(app: &App, s: &Settings, n: &Node, port: u16) -> Option<(St
     if opt.tun_off {
         return None;
     }
-    let p = if opt.tun_port > 0 { opt.tun_port } else { port };
-    if !opt.tun_host.trim().is_empty() {
-        // a typed Iran address: the port is the one the route really carries to this server (a tunnel
-        // that moved it on the way, 4002:4001), unless a port was typed too
-        let p = if opt.tun_port > 0 { opt.tun_port } else { route_of(app, n, port).map(|r| r.1).unwrap_or(port) };
-        return Some((opt.tun_host.trim().to_string(), p));
-    }
-    // the server's tunnel (Servers page): the Iran server that carries the KANKI MIX port, found by itself
+    // the Iran server whose tunnel carries the KANKI MIX port, and the port it gives it there (3.61: never typed)
     if let Some(t) = crate::twin::of_node_port(app, n, port) {
-        // a typed port is the admin's word; else only a port the tunnel really carries
-        let p = if opt.tun_port > 0 { Some(opt.tun_port) } else { t.carried(app, port, false) };
-        if let Some(p) = p {
+        if let Some(p) = t.carried(app, port, false) {
             return Some((t.host, p));
         }
     }
@@ -229,7 +220,7 @@ pub fn tunnel_target(app: &App, s: &Settings, n: &Node, port: u16) -> Option<(St
     // only when a tunnel really forwards the KANKI MIX UDP port (else the config would point at a
     // dead port); the address and port are the tunnel's own entry
     let node_host = if n.id == "local" { String::new() } else { crate::exitgeo::host_of_url(&n.address) };
-    crate::tunnel::panel::udp_forward(app, &n.id, &node_host, &ep_host, p)
+    crate::tunnel::panel::udp_forward(app, &n.id, &node_host, &ep_host, port)
 }
 
 /// The tunnels that bring UDP `port` to server `n`: the servers on the way, first entry first, and the
@@ -241,6 +232,23 @@ pub fn route_of(app: &App, n: &Node, port: u16) -> Option<(Vec<String>, u16)> {
         crate::tunnel::panel::servers(app).into_iter().find(|s| s.node == n.id).map(|s| s.id)?
     };
     crate::tunnel::panel::udp_route(app, &sid, port)
+}
+
+/// 3.61: the Iran addresses and ports typed for KANKI MIX's second config go (the tunnels give them)
+pub fn forget_tunnel_hosts(app: &App) {
+    let mut m: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();
+    let mut changed = false;
+    for o in m.values_mut() {
+        if !o.tun_host.is_empty() || o.tun_port > 0 {
+            o.tun_host.clear();
+            o.tun_port = 0;
+            changed = true;
+        }
+    }
+    if changed {
+        m.retain(|_, o| o.off || o.port > 0 || !o.route.is_empty() || !o.host.is_empty() || o.tun_off || !o.tun_name.is_empty());
+        app.db.set("kmix_nodes", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+    }
 }
 
 /// a host name or IP the panel accepts as a KANKI MIX address
@@ -730,14 +738,12 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
                 return crate::api::err(StatusCode::BAD_REQUEST, "address: a domain or an IP, like de.example.com");
             }
             let route = if v["route"].as_str() == Some("tunnel") { "tunnel".to_string() } else { String::new() };
-            let tun_host = v["tun_host"].as_str().unwrap_or("").trim().to_string();
-            if !tun_host.is_empty() && !valid_host(&tun_host) {
-                return crate::api::err(StatusCode::BAD_REQUEST, "tunnel address: a domain or an IP of the Iran server, like ir.example.com");
-            }
+            // 3.61: the Iran address and port of the second config come from the tunnels, never typed
+            let tun_host = String::new();
             let tun_name: String = v["tun_name"].as_str().unwrap_or("").trim().chars().filter(|c| !c.is_control() && !"<>\"&".contains(*c)).take(40).collect();
             let opt = NodeOpt {
                 off: v["off"].as_bool().unwrap_or(false), port: port_of(&v["port"]).unwrap_or(0), route, host,
-                tun_host, tun_port: port_of(&v["tun_port"]).unwrap_or(0), tun_off: v["tun_off"].as_bool().unwrap_or(false),
+                tun_host, tun_port: 0, tun_off: v["tun_off"].as_bool().unwrap_or(false),
                 tun_name,
             };
             if opt.off || opt.port > 0 || !opt.route.is_empty() || !opt.host.is_empty() || !opt.tun_host.is_empty() || opt.tun_port > 0 || opt.tun_off || !opt.tun_name.is_empty() {

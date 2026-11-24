@@ -247,14 +247,13 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
 
 // The tunnel of a server: on/off, the Iran address (chips: the first server of each tunnel that ends here)
 // and the name; below, each port with the one it gets on that address
-function tunBox(s){var tn=s.tunnel||{},n=s.node,ents=entriesOf(s),irs=irHosts(s),host=tn.on?(tn.host||tn.uses||''):'';
+// (3.61) the address of the second configs is never typed: each port gets the Iran server of the tunnel that carries it
+function tunBox(s){var tn=s.tunnel||{},n=s.node,ents=entriesOf(s);
  var ep=n&&n.endpoint_mode!='panel'?(n.endpoint||''):'',viaIr=ep&&ents.some(function(e){return e.host==ep});
- var rows=(tn.ports||[]).map(function(p){return '<div class="kxtun-p"><b>'+esc(p.proto)+'</b><span class="kxtun-m ltr">'+esc(p.host||tn.uses)+':'+p.via+' → '+(p.tcp?'TCP':'UDP')+' '+p.port+'</span></div>'}).join('');
- return '<div class="kxr-sec">'+t('Tunnel domain')+'</div>'+
-  '<p class="muted" style="font-size:12px;margin:0 2px 6px">'+t('If this server has a tunnel, or will have one, write your Iran server\'s domain here. Every protocol then also gets a second config through it, made by itself.')+' '+t('WireGuard comes only this way.')+'</p>'+
-  '<div class="kxf"><div class="wide"><input id="sx_th" class="ltr" value="'+esc(host)+'" placeholder="ir.example.com">'+
-   (irs.length?'<div class="kxchips">'+irs.map(function(e){return '<button type="button" class="'+(host==e.host?'on':'')+'" onclick="$(\'#sx_th\').value=\''+jsa(e.host)+'\';$(\'#sx_th\').dispatchEvent(new Event(\'input\',{bubbles:true}))">'+(e.mine?'✓ ':'')+esc(e.name)+' · <span class="ltr">'+esc(e.host)+'</span></button>'}).join('')+'</div>':'')+'</div>'+
-  '<div class="wide"><label class="f">'+t('Name of these configs in the app (optional)')+'</label><input id="sx_tn" value="'+esc(tn.name||'')+'" maxlength="40" placeholder="'+esc(s.name+' (تانل)')+'"></div></div>'+
+ var rows=(tn.ports||[]).map(function(p){return '<div class="kxtun-p"><b>'+esc(p.proto)+'</b><span class="kxtun-m ltr">'+(p.carried===false?'— · '+(p.tcp?'TCP':'UDP')+' '+p.port:esc(p.host)+':'+p.via+' → '+(p.tcp?'TCP':'UDP')+' '+p.port)+'</span></div>'}).join('');
+ return '<div class="kxr-sec">'+t('Tunnel configs')+'</div>'+
+  '<p class="muted" style="font-size:12px;margin:0 2px 6px">'+t('Every core gets a second config through the Iran server of the tunnel that carries its port, by itself: change the tunnel and the users get the new address at their next update.')+' '+t('WireGuard comes only this way.')+'</p>'+
+  '<div class="kxf"><div class="wide"><label class="f">'+t('Name of these configs in the app (optional)')+'</label><input id="sx_tn" value="'+esc(tn.name||'')+'" maxlength="40" placeholder="'+esc(s.name+' (تانل)')+'"></div></div>'+
   (viaIr?'<p class="kxtun-w">'+t('Users connect to the Iran address already, so the main configs go through the tunnel too. For direct configs set it to this server\'s own address.')+'</p>':'')+
   (rows?'<div class="kxtun"><div class="muted" style="font-size:12px;margin-bottom:4px">'+t('Ports through the tunnel')+'</div>'+rows+'</div>':'')}
 
@@ -267,7 +266,7 @@ window.srvDropIranVpn=function(){kAsk(t('Remove WireGuard, AmneziaWG, Hysteria2 
 window.srvSave=function(key){var s=find(key);if(!s)return;var n=s.node,a=s.agent,jobs=[];
  var loc=(($$('#sx_loc button.on')[0]||{}).dataset||{}).l||(isIr(s)?'iran':'abroad');
  var b={name:$('#sx_nm').value.trim(),loc:loc};if($('#sx_ad'))b.addr=$('#sx_ad').value.trim();if($('#sx_ssl'))b.ssl=$('#sx_ssl').checked;
- if($('#sx_th')){var th=$('#sx_th').value.trim();b.tunnel={on:!!th,host:th,name:$('#sx_tn').value.trim()}}
+ if($('#sx_tn'))b.tunnel={name:$('#sx_tn').value.trim()};
  jobs.push(api('PUT','/api/servers/'+q(key),b));
  if(n){var ep=$('#sx_ep').value.trim(),nb={note:$('#sx_no')?$('#sx_no').value:n.note,accept_all:$('#sx_acc').checked,endpoint_mode:ep?'custom':'panel',endpoint:ep};
   if(!s.local&&!ep){nb.endpoint_mode='custom';nb.endpoint=srvIp(s)||n.endpoint}
@@ -288,8 +287,6 @@ window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
   '<div id="sa_in"><label class="f">'+t('Server name')+'</label><input id="sa_nm" placeholder="Germany-1" maxlength="40">'+
   '<label class="f">'+t('Location')+'</label><div class="seg kxseg" id="sa_loc"><button type="button" data-l="abroad">'+t('Abroad')+'</button><button type="button" data-l="iran">'+t('Inside Iran (relay / tunnel entry)')+'</button></div>'+
   '<label class="f">'+t('Domain (optional, for a real SSL certificate)')+'</label><input id="sa_dm" class="ltr" placeholder="de1.example.com" autocomplete="off" autocapitalize="off">'+
-  '<div id="sa_tunw"><label class="f">'+t('Tunnel domain (optional)')+'</label><input id="sa_tun" class="ltr" placeholder="ir.example.com" autocomplete="off" autocapitalize="off">'+
-  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('If this server has a tunnel, or will have one, write your Iran server\'s domain here. Every protocol then also gets a second config through it, made by itself.')+'</p></div>'+
   '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_ssl">'+t('Get SSL by itself (Let\'s Encrypt)')+'</label><p class="muted" style="font-size:12px;margin:2px 2px 0">'+t('The domain must point straight at this server (no Cloudflare proxy) and port 80 must be open. Off, or when it fails: a self-signed certificate, the install goes on.')+'</p>'+
   '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_vpn">'+t('Serve VPN users on this server')+'</label>'+
   // the six cores: every one is installed, the ticked ones are switched on when the server joins
@@ -297,13 +294,13 @@ window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
   '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('All are installed; the ticked ones start as soon as the server joins, the rest stay off until you switch them on.')+'</p></div>'+
   '<button class="btn" style="width:100%;margin-top:12px" id="sa_go">'+t('Create command')+'</button></div><div id="sa_out"></div>','wide');
  var showCores=function(){$('#sa_cw').style.display=$('#sa_vpn').checked?'':'none'};
- var setLoc=function(l){loc=l;$$('#sa_loc button').forEach(function(b){b.classList.toggle('on',b.dataset.l==l)});$('#sa_vpn').checked=l!='iran';$('#sa_ssl').checked=l!='iran';$('#sa_tunw').style.display=l=='iran'?'none':'';
+ var setLoc=function(l){loc=l;$$('#sa_loc button').forEach(function(b){b.classList.toggle('on',b.dataset.l==l)});$('#sa_vpn').checked=l!='iran';$('#sa_ssl').checked=l!='iran';
   // abroad: WireGuard and AmneziaWG ticked
   $$('#sa_cw input').forEach(function(x){x.checked=l!='iran'&&(x.dataset.core=='wg'||x.dataset.core=='awg')});showCores()};
  $('#sa_vpn').onchange=showCores;
  $$('#sa_loc button').forEach(function(b){b.onclick=function(){setLoc(b.dataset.l)}});setLoc(loc);
  $('#sa_go').onclick=function(){var me=this;me.disabled=true;
-  api('POST','/api/servers',{name:$('#sa_nm').value,loc:loc,domain:$('#sa_dm').value,vpn:$('#sa_vpn').checked,ssl:$('#sa_ssl').checked,tunnel_host:loc=='iran'?'':$('#sa_tun').value.trim(),
+  api('POST','/api/servers',{name:$('#sa_nm').value,loc:loc,domain:$('#sa_dm').value,vpn:$('#sa_vpn').checked,ssl:$('#sa_ssl').checked,
    cores:$$('#sa_cw input').filter(function(x){return x.checked}).map(function(x){return x.dataset.core})}).then(function(r){
    $('#sa_in').classList.add('hide');showCmd(r.command,r.ports,r.id);load(true)}).catch(function(e){me.disabled=false;fail(e)})}};
 

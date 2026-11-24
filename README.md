@@ -4,7 +4,7 @@ Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** pan
 
 
 ## New in 3.61 — KANKI-UP
-A new Kanki tunnel: the official udp2raw between two servers. The UDP of every core goes in encrypted FakeTCP, UDP or ICMP packets with no retransmission, so a line that drops UDP still carries the game. Every udp2raw option is in the tunnel form.
+A new Kanki tunnel: the official udp2raw between two servers. The UDP of every core goes in encrypted FakeTCP, UDP or ICMP packets with no retransmission, so a line that drops UDP still carries the game. Every udp2raw option is in the tunnel form. The tunnel configs of every core now take the Iran server of the tunnel that carries their port, by themselves: no address to type anywhere.
 
 ## New in 3.60.1
 KANKI MIX sends no extra packets on a clean line; copies and repairs only as much as the real loss needs.
