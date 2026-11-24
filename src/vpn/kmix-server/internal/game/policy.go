@@ -26,9 +26,7 @@ const (
 	// Deadline: a packet older than this is not worth rebuilding for a game
 	Deadline = 250 * time.Millisecond
 	// calmFor: how long the line must be better before the protection goes down a step
-	calmFor = 8 * time.Second
-	// startFor: a new game flow is protected a little before the first report says how the line is
-	startFor = 3 * time.Second
+	calmFor = 4 * time.Second
 	// staleAfter: no report for this long = the peer stopped telling; back to the start plan
 	staleAfter = 6 * time.Second
 )
@@ -40,32 +38,32 @@ const (
 // inside the same run and is lost with it); only a line that loses most of everything gets a copy too.
 var steps = []Plan{
 	{},                              // 0 clean: nothing extra, the game goes as it is
-	{Every: 4, Win: 8},              // 1 a little loss
-	{Every: 3, Win: 10},             // 2
-	{Every: 2, Win: 12},             // 3 a lot of scattered loss
-	{Every: 1, Win: 16},             // 4 runs of lost packets
-	{Every: 1, Win: 16, Copy: true}, // 5 the line loses a big part of everything
+	{Every: 8, Win: 16},             // 1 a little loss (under ~1 %): one repair per 8 packets
+	{Every: 4, Win: 12},             // 2 1-3 %
+	{Every: 2, Win: 12},             // 3 3-8 %
+	{Every: 1, Win: 16},             // 4 8-20 %, or runs of lost packets on a lossy line
+	{Every: 1, Win: 16, Copy: true}, // 5 the line loses a fifth of everything or more
 }
 
 // stepFor: the step the measured loss (permille) and its longest run of lost packets call for
+// A run of lost packets only counts on a line that really loses: one short cut in a clean second is not a
+// reason to send more for the next seconds.
 func stepFor(permille, burst uint32) int {
 	s := 0
 	switch {
-	case permille >= 150:
+	case permille >= 200:
 		s = 5
-	case permille >= 60:
+	case permille >= 80:
 		s = 4
-	case permille >= 25:
+	case permille >= 30:
 		s = 3
-	case permille >= 10:
+	case permille >= 12:
 		s = 2
-	case permille >= 3:
+	case permille >= 4:
 		s = 1
 	}
-	if burst >= 3 {
+	if permille >= 12 && burst >= 4 {
 		s = max(s, 4)
-	} else if burst == 2 {
-		s = max(s, 3)
 	}
 	return s
 }
@@ -131,11 +129,9 @@ func (p *Policy) Plan(now time.Time) Plan {
 	s := p.step
 	fresh := !p.report.IsZero() && now.Sub(p.report) < staleAfter
 	if !fresh {
-		// nothing measured (yet, or not any more): a protection that holds on most lines, until the reports say
-		s = 3
-		if !p.measured && !p.started.IsZero() && now.Sub(p.started) < startFor {
-			s = 5 // the first seconds of a game, before any measure: the strongest (the game is small, it costs little)
-		}
+		// nothing measured (yet, or not any more): only a light protection (a repair every 4 packets), never
+		// copies; the first report comes within a second and says what the line needs
+		s = 1
 	}
 	return steps[s]
 }
