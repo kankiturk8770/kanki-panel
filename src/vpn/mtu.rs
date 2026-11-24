@@ -129,6 +129,10 @@ fn hop_of(t: &crate::tunnel::panel::Tunnel) -> Hop {
     if t.kind == "hy2" {
         return Hop { name, transport: "hy2".into(), iface: None, wire: 0, fec: None };
     }
+    // a direct tunnel: nat adds nothing; GRE is a kernel link of 1476 (24 bytes a packet)
+    if t.kind == "fwd" {
+        return if t.fwd.gre() { Hop { name, transport: "gre".into(), iface: Some(1476), wire: 1500, fec: None } } else { Hop { name, transport: "nat".into(), iface: None, wire: 0, fec: None } };
+    }
     let tr = t.transport.as_str();
     let wire = match tr {
         "quic" | "hq" | "kcp" | "game" => UDP_WIRE + IPV4 + UDP,

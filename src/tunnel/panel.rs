@@ -3,6 +3,7 @@
 
 use super::awg::{self, AwgCfg, AwgSpec};
 use super::hy2t::{self, Hy2Cfg, Hy2Spec};
+use super::kfwd::{FwdCfg, FwdSpec};
 use super::engine::{parse_ports, Manager, Spec, Status};
 use crate::api::err;
 use crate::guard;
@@ -100,6 +101,9 @@ pub struct Tunnel {
     pub awg: AwgCfg,
     /// kind "hy2": a Hysteria2 link (the exit runs the server, the entry the client)
     pub hy2: Hy2Cfg,
+    /// kind "fwd": a direct tunnel in the kernel (iptables straight to the exit, or a GRE link)
+    #[serde(default, skip_serializing_if = "fwd_unset")]
+    pub fwd: FwdCfg,
     /// game transport: FEC "data:parity" ("8:3"; "off" disables) and packet duplication
     pub fec: String,
     pub dup: bool,
@@ -113,6 +117,21 @@ pub struct Tunnel {
     /// sends the KCP of KANKI MIX without; "kping", "mtun", "wg" or "" the same Game-FEC Pro for that core
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub profile: String,
+}
+
+fn fwd_unset(f: &FwdCfg) -> bool {
+    f.mode.is_empty() && f.n == 0
+}
+
+/// Direct tunnels (kind "fwd") exist from this agent version on: an older one would run them as a Kanki tunnel
+const FWD_FROM: &str = "3.59.0";
+
+/// The other server's address for a direct tunnel: the public IPv4 it reports from (a name may sit behind a CDN)
+fn fwd_peer(app: &App, sid: &str) -> String {
+    if let Some(ip) = seen_ip(sid).filter(|ip| ip.parse::<std::net::Ipv4Addr>().is_ok()) {
+        return ip;
+    }
+    host_of(app, sid)
 }
 
 /// The cores a Game-FEC Pro tunnel can be shaped for
@@ -326,6 +345,12 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             out.push(Spec { id: t.id.clone(), name: t.name.clone(), role: role.into(), transport: "awg".into(), awg: Some(a), ..Default::default() });
             continue;
         }
+        if t.kind == "fwd" {
+            let peer = fwd_peer(app, if role == "entry" { &t.exit } else { &t.entry });
+            let f = FwdSpec { tid: t.id.clone(), role: role.into(), mode: t.fwd.mode.clone(), peer, n: t.fwd.n, tcp: t.tcp.clone(), udp: t.udp.clone(), target: t.target.clone() };
+            out.push(Spec { id: t.id.clone(), name: t.name.clone(), role: role.into(), transport: "fwd".into(), tcp: t.tcp.clone(), udp: t.udp.clone(), fwd: Some(f), ..Default::default() });
+            continue;
+        }
         if t.kind == "hy2" {
             let y = hy2_spec(app, &t, role);
             out.push(Spec { id: t.id.clone(), name: t.name.clone(), role: role.into(), transport: "hy2".into(), hy2: Some(y), ..Default::default() });
@@ -367,6 +392,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             bind: if t.kind == "awgwrap" { "127.0.0.1".into() } else { String::new() },
             awg: None,
             hy2: None,
+            fwd: None,
             fec: t.fec.clone(),
             dup: t.dup,
             profile: if t.transport == "game" { t.profile.clone() } else { String::new() },
@@ -403,6 +429,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                     bind: String::new(),
                     awg: None,
                     hy2: None,
+                    fwd: None,
                     fec: String::new(),
                     dup: false,
                     profile: String::new(),
@@ -436,6 +463,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
                         bind: String::new(),
                         awg: None,
                         hy2: None,
+                        fwd: None,
                         fec: String::new(),
                         dup: false,
                         profile: String::new(),
@@ -953,6 +981,60 @@ fn hy2_apply_body(list: &[Tunnel], t: &mut Tunnel, a: &Value) -> Result<(), Stri
 }
 
 /// agents must know Hysteria2 links
+/// The direct tunnel part of a request: the mode, and for GRE a link number no other direct tunnel uses
+fn fwd_apply_body(list: &[Tunnel], t: &mut Tunnel, f: &Value) -> Result<(), String> {
+    if let Some(m) = f["mode"].as_str() {
+        t.fwd.mode = m.to_string();
+    }
+    if t.fwd.mode.is_empty() {
+        t.fwd.mode = "nat".into();
+    }
+    if !matches!(t.fwd.mode.as_str(), "nat" | "gre") {
+        return Err("the direct tunnel is nat or gre".into());
+    }
+    t.transport = "fwd".into();
+    t.port = 0;
+    t.auto = false;
+    t.mode = "direct".into();
+    if t.fwd.gre() {
+        if t.fwd.n == 0 {
+            let used: HashSet<u8> = list.iter().filter(|o| o.kind == "fwd" && o.id != t.id).map(|o| o.fwd.n).collect();
+            t.fwd.n = (1..=250u8).find(|n| !used.contains(n)).ok_or("every GRE link number is in use")?;
+        }
+    } else {
+        t.fwd.n = 0;
+    }
+    if !t.target.trim().is_empty() && t.target.trim().parse::<std::net::Ipv4Addr>().is_err() {
+        return Err("the target on the exit must be an IPv4 address".into());
+    }
+    Ok(())
+}
+
+/// Both ends must know direct tunnels; the two servers must be different machines
+fn fwd_checks(app: &App, t: &Tunnel) -> Result<(), String> {
+    let names: HashMap<String, String> = servers(app).into_iter().map(|s| (s.id, s.name)).collect();
+    let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
+    for sid in [&t.entry, &t.exit] {
+        if sid == "local" {
+            continue;
+        }
+        if let Some(x) = sn.get(sid.as_str()) {
+            if !x.version.is_empty() && ver_lt(&x.version, FWD_FROM) {
+                return Err(format!("the agent of \"{}\" is v{}: update it first (Update all), a direct tunnel needs {}", names.get(sid.as_str()).cloned().unwrap_or_default(), x.version, FWD_FROM));
+            }
+        }
+    }
+    drop(sn);
+    if parse_ports(&t.tcp).is_empty() && parse_ports(&t.udp).is_empty() {
+        return Err("add at least one TCP or UDP port to forward".into());
+    }
+    let (a, b) = (fwd_peer(app, &t.entry), fwd_peer(app, &t.exit));
+    if !a.is_empty() && a == b {
+        return Err("the entry and the exit are the same machine".into());
+    }
+    Ok(())
+}
+
 fn hy2_checks(app: &App, t: &Tunnel) -> Result<(), String> {
     if !t.enabled {
         return Ok(());
@@ -1829,6 +1911,10 @@ async fn list(State(app): St, h: HeaderMap) -> Response {
             v["wrap_entry"] = status_json(w(&tu.entry).as_ref());
             v["wrap_exit"] = status_json(w(&tu.exit).as_ref());
         }
+        if tu.kind == "fwd" {
+            v["fwd"]["entry_ip"] = json!(tu.fwd.entry_ip());
+            v["fwd"]["exit_ip"] = json!(tu.fwd.exit_ip());
+        }
         if tu.kind == "hy2" {
             for k in ["auth", "obfs", "cert", "key"] {
                 v["hy2"][k] = json!("");
@@ -2165,8 +2251,16 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         t.kind = match s("kind").as_str() {
             "awg" => "awg".into(),
             "hy2" => "hy2".into(),
+            "fwd" => "fwd".into(),
             _ => String::new(),
         };
+    }
+    if t.kind == "fwd" {
+        if let Err(e) = fwd_apply_body(&list, &mut t, &b["fwd"]) {
+            return err(StatusCode::BAD_REQUEST, &e);
+        }
+    } else {
+        t.fwd = FwdCfg::default();
     }
     if t.kind == "hy2" {
         if let Err(e) = hy2_apply_body(&list, &mut t, &b["hy2"]) {
@@ -2208,14 +2302,19 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
             return err(StatusCode::CONFLICT, &e);
         }
     }
+    if t.kind == "fwd" {
+        if let Err(e) = fwd_checks(&app, &t) {
+            return err(StatusCode::CONFLICT, &e);
+        }
+    }
     // no port written: the first one nothing holds on the listening server (and no VPN core uses anywhere)
-    if t.port == 0 && t.kind != "hy2" {
+    if t.port == 0 && t.kind != "hy2" && t.kind != "fwd" {
         let listener = if t.mode == "direct" { t.exit.clone() } else { t.entry.clone() };
         if let Some(p) = free_ports(&app, &listener, AUTO_TUNNEL_PORT, 1) {
             t.port = p;
         }
     }
-    if t.port == 0 {
+    if t.port == 0 && t.kind != "fwd" {
         return err(StatusCode::BAD_REQUEST, "the tunnel port is required");
     }
     let hy2_src = t.kind == "hy2" && !t.hy2.src_routes.is_empty();
@@ -2231,7 +2330,7 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let my_pr = port_protos(&t.transport);
     // does a tunnel port (of a transport with these protocols) hit one of these forwarded ports?
     let hits = |pr: (bool, bool), port: u16, tcp: &[u16], udp: &[u16]| (pr.0 && tcp.contains(&port)) || (pr.1 && udp.contains(&port));
-    if listener == t.entry {
+    if listener == t.entry && t.port > 0 {
         if my_pr.0 && mine_tcp.contains(&t.port) {
             return err(StatusCode::BAD_REQUEST, "the tunnel port is also in the forwarded TCP ports");
         }
@@ -2245,15 +2344,15 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         let o_tcp: Vec<u16> = parse_ports(&o.tcp).into_iter().map(|p| p.0).collect();
         let o_udp: Vec<u16> = parse_ports(&o.udp).into_iter().map(|p| p.0).collect();
         // tunnel port against the tunnel port of the other one (a protocol both use)
-        if o_listener == listener && ((my_pr.0 && o_pr.0) || (my_pr.1 && o_pr.1)) && o.port == t.port {
+        if t.port > 0 && o_listener == listener && ((my_pr.0 && o_pr.0) || (my_pr.1 && o_pr.1)) && o.port == t.port {
             return err(StatusCode::CONFLICT, &format!("port {} is already used by the tunnel \"{}\"", t.port, o.name));
         }
         // my tunnel port against the ports the other one opens on its entry
-        if o.entry == listener && hits(my_pr, t.port, &o_tcp, &o_udp) {
+        if t.port > 0 && o.entry == listener && hits(my_pr, t.port, &o_tcp, &o_udp) {
             return err(StatusCode::CONFLICT, &format!("port {} is already used by the tunnel \"{}\"", t.port, o.name));
         }
         // the tunnel port of the other one against the ports I open on my entry
-        if t.entry == o_listener && hits(o_pr, o.port, &mine_tcp, &mine_udp) {
+        if o.port > 0 && t.entry == o_listener && hits(o_pr, o.port, &mine_tcp, &mine_udp) {
             return err(StatusCode::CONFLICT, &format!("port {} is already used by the tunnel \"{}\"", o.port, o.name));
         }
         // forwarded ports against forwarded ports on the same entry
@@ -3870,5 +3969,60 @@ mod rotate_tests {
         let order: Vec<String> = ["kcp", "dual", "ws"].iter().map(|x| x.to_string()).collect();
         assert_eq!(next_transport(&order, "tcp", |tr| !rotate_clash(&app, &list, &me, tr)).as_deref(), Some("ws"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod fwd_tests {
+    use super::*;
+    use std::sync::atomic::AtomicI64;
+
+    /// A direct tunnel: both ends get their spec with the other server's real address, GRE links get their own
+    /// numbers, old agents are refused, and the cores' second config through Iran follows its ports like any tunnel
+    #[test]
+    fn a_direct_tunnel_reaches_both_servers_and_carries_its_ports() {
+        let dir = std::env::temp_dir().join(format!("kanki-fwd-test-{}", rand_token(8)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let app = Arc::new(App {
+            db: crate::db::Db::open(dir.join("kanki.db").to_str().unwrap()), env: HashMap::new(),
+            hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
+            login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
+            http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
+        });
+        save_servers(&app, &[
+            TServer { id: "fw_ir".into(), name: "IRAN".into(), loc: "iran".into(), addr: "ir.example.com".into(), ..Default::default() },
+            TServer { id: "fw_de".into(), name: "DE".into(), addr: "de.example.com".into(), ..Default::default() },
+        ]);
+        {
+            let mut sn = seen().lock().unwrap();
+            sn.insert("fw_ir".into(), Seen { at: now(), ip: "198.51.100.10".into(), version: "3.59.0".into(), ..Default::default() });
+            sn.insert("fw_de".into(), Seen { at: now(), ip: "203.0.113.20".into(), version: "3.59.0".into(), ..Default::default() });
+        }
+        let mut t = Tunnel { id: "fwa".into(), name: "d".into(), entry: "fw_ir".into(), exit: "fw_de".into(), kind: "fwd".into(), enabled: true, udp: vec!["4000".into()], tcp: vec!["8443:443".into()], ..Default::default() };
+        fwd_apply_body(&[], &mut t, &json!({ "mode": "gre" })).unwrap();
+        assert!(t.fwd.gre() && t.fwd.n == 1 && t.port == 0 && t.transport == "fwd");
+        // a second GRE tunnel gets another link number; a bad mode or target is refused
+        let mut t2 = Tunnel { id: "fwb".into(), kind: "fwd".into(), ..t.clone() };
+        t2.fwd = FwdCfg::default();
+        fwd_apply_body(&[t.clone()], &mut t2, &json!({ "mode": "gre" })).unwrap();
+        assert_eq!(t2.fwd.n, 2);
+        assert!(fwd_apply_body(&[], &mut t2.clone(), &json!({ "mode": "rathole" })).is_err());
+        let mut bad = t.clone();
+        bad.target = "1.2.3.4; reboot".into();
+        assert!(fwd_apply_body(&[], &mut bad, &json!({})).is_err());
+        assert!(fwd_checks(&app, &t).is_ok());
+        save_tunnels(&app, &[t.clone()]);
+        // each end: its own spec with the other server's public IPv4, not its name
+        let e = specs_for(&app, "fw_ir").into_iter().find(|s| s.id == "fwa").unwrap();
+        let f = e.fwd.unwrap();
+        assert_eq!((f.role.as_str(), f.peer.as_str(), f.n, f.mode.as_str()), ("entry", "203.0.113.20", 1, "gre"));
+        let x = specs_for(&app, "fw_de").into_iter().find(|s| s.id == "fwa").unwrap().fwd.unwrap();
+        assert_eq!((x.role.as_str(), x.peer.as_str()), ("exit", "198.51.100.10"));
+        // the second config of a core on UDP 4000 of the exit goes through the Iran server, like any tunnel
+        assert_eq!(port_entry_at(&app, "fw_de", 4000, false, ""), Some(("fw_ir".to_string(), 4000)));
+        assert_eq!(port_entry_at(&app, "fw_de", 443, true, ""), Some(("fw_ir".to_string(), 8443)));
+        // an agent too old for it
+        seen().lock().unwrap().get_mut("fw_de").unwrap().version = "3.58.1".into();
+        assert!(fwd_checks(&app, &t).unwrap_err().contains("3.59.0"));
     }
 }

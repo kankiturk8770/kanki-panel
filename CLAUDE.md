@@ -30,7 +30,7 @@ src/
 │   └── kmix-server/   سورس Go سرور KANKI MIX (`build.sh` ← assets/bin/kanki-mix-server؛ CI می‌سازد)
 ├── bot/               ربات تلگرام: bot.rs، shop.rs، miniapp.rs، channel.rs، ai.rs، pay.rs، buttons.rs، monitor.rs (ربات گزارش‌ها)
 ├── tunnel/            تانل‌ها: mod.rs، engine.rs، link.rs، agent.rs، panel.rs (تانل‌ها و سرورهای تانل در پنل)، probe.rs، quality.rs، tests.rs
-│   └── transport/     پروتکل‌های سیم: quic، hq، salamander، h2ws، dual، obfs، mux، fec، game، dgram (لاین بی‌ترتیب UDP گیم)، faketcp، awg، hy2t
+│   └── transport/     پروتکل‌های سیم: quic، hq، salamander، h2ws، dual، obfs، mux، fec، game، dgram (لاین بی‌ترتیب UDP گیم)، faketcp، awg، hy2t، kfwd (مستقیم: NAT/GRE)
 ├── xray/              mod.rs (Xray روی سرور)، panel.rs (Xray در پنل و لینک‌ها)
 ├── dns/               DNS کانکی: mod.rs، engine.rs، doh.rs، sni.rs، wire.rs، panel.rs
 └── emergency/         چت اضطراری: mod.rs
@@ -94,6 +94,7 @@ assets/
 | آزمایشگاه تانل: دو برنامهٔ قدیم/جدید، مسیر پر افت ساختگی، بازی ساختگی + دانلود (`OLD=… NEW=… python3 scripts/tunnel_lab.py kcp new-new 31000`) | `scripts/tunnel_lab.py` |
 | لاین بی‌ترتیب UDP همهٔ تانل‌های UDP (بسته‌ی بازی پشت بسته‌ی گم‌شده نمی‌ماند؛ فریم `DGOK` در `mux.rs`) | `src/tunnel/transport/dgram.rs` (+ `game.rs`، `obfs.rs`، `faketcp.rs`، `quic::quic_lane` برای quic/hq/dual) |
 | **Game-FEC Pro** (3.57: `game` با FEC `auto`): ترمیم به اندازهٔ افت خط (گزارش `0xF5` هر نیم ثانیه، `SHAPES`، سقف دو برابر)، فقط بازی کد می‌شود (`0xF6` ساده برای KCP و bulk)، هستهٔ همراه `Tunnel.profile` (`kmix`: خروجی علامت EF را می‌خواند، `UDPB` در `mux.rs`) | `src/tunnel/transport/game.rs` (`Adapt`، `Out::report`)، `fec.rs` (`adaptive`، `set_shape`)، `mux.rs` (`classify`، `UDPB`)، `dgram.rs` (`send_as`)، `TPROF` در `12-tunnels.js` |
+| **تانل مستقیم در کرنل** (3.59، نوع `fwd`): `nat` (DNAT ورودی ← IP خروجی) یا `gre` (لینک GRE ‏10.89.N.0/30)، زنجیره‌های `KFWD-*`، آدرس واقعی سرور (`fwd_peer`)، نسخه‌ی ایجنت `FWD_FROM` | `src/tunnel/transport/kfwd.rs`، `panel.rs` (`fwd_apply_body`، `fwd_checks`)، `tw_fw`/`tw_fm` در `12-tunnels.js`؛ آزمایشگاه `scripts/kfwd_lab.sh` |
 | موتور تانل، لینک رمزشده، ایجنت سرور تانل (`tunnel-agent`, `tunnel-run`)، تست تانل هوشمند | `src/tunnel/engine.rs`, `link.rs`, `agent.rs`, `probe.rs` |
 | پروتکل‌های تانل (QUIC/KCP، hq، h2، game+FEC، faketcp، awg، hy2، mux، obfs) | `src/tunnel/transport/*.rs` |
 | کیفیت مسیرها در ربات (سنجش UDP داخل هر تانل هر دقیقه، «📡 وضعیت مسیرها» صفحهٔ مینی‌اپ `?admin=paths` و `quality::view`، سوییچ هشدار `path_alerts`) | `src/tunnel/quality.rs` (+ `engine::quality_task`، `probe::udp_quality`، `panel::live_quality`/`live_lanes`، `drawPaths` در `miniapp.html`) |
@@ -436,7 +437,7 @@ assets/
 ### فهرست نسخه‌ها
 | نسخه | تاریخ | خلاصه | PR |
 |---|---|---|---|
-| 3.59.0 | 2026-11-24 | KANKI MIX بازی هوشمند: افت خط سنجیده می‌شود، فقط بسته‌ی بازی و فقط به اندازه‌ی افت ترمیم می‌شود (خط تمیز هیچ)، همراه اپ ۱.۴۳.۰ | |
+| 3.59.0 | 2026-11-24 | KANKI MIX بازی هوشمند: افت خط سنجیده می‌شود، فقط بسته‌ی بازی و فقط به اندازه‌ی افت ترمیم می‌شود (خط تمیز هیچ)، همراه اپ ۱.۴۳.۰؛ تانل مستقیم در کرنل (NAT یا GRE) | |
 | 3.58.1 | 2026-11-23 | رفع گزارش بررسی سرورها (۲۹ مورد): حذف مسیرهای قدیم KPING، سرویس هر اکانت، آدرس تانل هر هسته، محدودیت اتصال ۳۰ ثانیه، فایروال، لاگ سرورها، journald | |
 | 3.58.0 | 2026-11-22 | KPING هستهٔ هر سرور مثل بقیه (رله روی پورت عمومی + خروجی روی 127.0.0.1 در ایجنت نود، روشن/خاموش و پورت هر سرور، مستقیم و از راه تانل ایران همان سرور)؛ مسیرهای KPING حذف | |
 | 3.57.1 | 2026-11-22 | KANKI MIX: TCP اپ بی FEC (شنوندهٔ دوم KCP با نوع 0x05، `obfs/plain.go` یکی با اپ)، اپ قدیمی با FEC مثل قبل | |
@@ -511,7 +512,8 @@ assets/
 **مسیر:** بسته‌ی بازی در اپ ← `Class` ← `sendUp` (اصلی فوری، ترمیم/نسخه‌ی دوم با `Later`) ← سرور `upData`/`onRepairUp` ← سرور بازی؛ برگشت `readLoop` ← `sendDown` ← اپ `gotDown`/`gotRepair` ← TUN؛ گزارش هر ثانیه `statTick` ↔ `onStat`؛ پنجره‌ی KCP `kcpTick`؛ پورت `silentHop` (اندروید `Kmix.kt` `portSpec`، ویندوز `SetPorts`).
 **تست:** `go test -race` هر دو؛ آزمایشگاه با سرور واقعی و خط ساختگی (عددها در CHANGES)؛ اپ قدیمی با سرور تازه و اپ تازه با سرور 3.57.1 (تست‌های تونل قبلی سبز).
 **امنیت:** همه‌ی نوع‌های تازه داخل همان رمز obfs و کلید کاربر؛ گزارش و ترمیم فقط با `allowed` (سقف دستگاه)؛ سقف جلسه‌ها (۵۰ هزار)، رمزگشاهای ترمیم (۲۰۴۸)، صف تأخیر (۳۲ هزار در ۴ تکه، پر = دور ریختن ترمیم/کپی، هرگز بسته‌ی اصلی)؛ ترمیم فقط برای جریانی که از قبل هست و بسته‌ی ساخته‌شده از همان `Window` تکراری‌ها رد می‌شود.
-**دیده نشده:** سرور و گوشی واقعی؛ تانل سبک ایران ↔ خارج (برای KANKI MIX تانل Game بی FEC یا AmneziaWG بی پوشش، هر دو موجود) دست نخورد.
+**دیده نشده:** سرور و گوشی واقعی.
+**دور دوم (همان روز، «تانل GRE یا iptables برای انتقال مستقیم، تمیز، بی اختلال»؛ اپ ۱.۴۳ با دستور صاحب اپ مرج شد، PR #74 اپ):** نوع تانل `fwd` با دو حالت NAT و GRE (`kfwd.rs`). **مسیر:** فرم تانل (`tw_fm`) ← `/api/tunnels` (`fwd_apply_body`، `fwd_checks`، بررسی پورت مثل بقیه) ← `specs_for` (آدرس واقعی هر سرور) ← ایجنت/موتور (`engine` جدا می‌کند ← `kfwd::set_desired` ← iptables و `ip`) ← وضعیت (`statuses`) ← فهرست و نقشه؛ کپی تانل هسته‌ها (`port_entry_at`) و MTU (`mtu::hop_of`). **تست:** `cargo test` ۴۰۷؛ آزمایشگاه namespace (NAT: ۲۰۰/۲۰۰ UDP و ۵/۵ TCP، بعد از حذف هیچ قانون و رابطی نماند)؛ Playwright ۴ عرض فارسی/انگلیسی بی خطا و اسکرول افقی. **امنیت:** فقط ادمین (`nodes`)؛ آدرس‌ها و پورت‌ها قبل از هر دستور چک می‌شوند و دستورها بی شل؛ DNAT فقط بسته‌هایی که مقصدشان خود سرور ورودی است؛ GRE فقط از IP سرور دیگر پذیرفته می‌شود. **نشد:** GRE واقعی (کرنل این محیط `ip_gre` ندارد؛ فقط تست واحد)؛ حجم این تانل شمرده نمی‌شود (کرنل، بی برنامه).
 
 ### آخرین کارها — 3.58.1 (2026-11-23، برنچ `ccr-93b13567-5n0xqx`)
 **خواسته:** گزارش بررسی سرورها (۲۹ مورد) همه رفع شود، مسیرهای قدیم KPING پاک شوند. **چه شد:** `docs/CHANGES.md`.
