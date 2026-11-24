@@ -767,8 +767,6 @@ pub fn default_setting(k: &str) -> &'static str {
         "cp_on" => "1",
         "mini_menu" => "1",
         "trial_on" => "1",
-        "trial_gb" => "1",
-        "trial_days" => "1",
         "card_on" => "1",
         "np_coins" => "usdttrc20,trx,ton",
         "trial_mb" => "300",

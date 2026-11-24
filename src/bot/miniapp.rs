@@ -129,7 +129,7 @@ async fn admin_monitor(State(app): St, h: HeaderMap, Query(q): Query<HashMap<Str
 /// The settings the bot's admins change from the mini app (the web panel keeps only the bot's token)
 pub const BOT_KEYS: &[&str] = &[
     "sales_on", "warn_on", "mini_menu", "support", "app_link", "win_link", "channel", "welcome",
-    "trial_on", "trial_gb", "trial_days", "trial_mb", "trial_hours", "ref_gb", "ref_days", "ref_pct", "ref_new_pct", "trial_offer_pct",
+    "trial_on", "trial_mb", "trial_hours", "ref_gb", "ref_days", "ref_pct", "ref_new_pct", "trial_offer_pct",
     "trial_offer_hours", "back_pct", "back_hours", "renew_bonus_pct",
     "card_on", "card_number", "card_holder", "wallet_on", "wallet_text", "ton_address", "usdt_address", "usd_rate",
     "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "ton_on", "stars_on", "star_usd", "toncenter_key",
@@ -735,9 +735,9 @@ mod tests {
             assert_eq!(call(500, json!({"method": m, "path": p})).await.0, 403, "{} {}", m, p);
         }
         // the bot's settings only: read and written; a panel setting is neither shown nor changed
-        let (st, v) = call(500, json!({"method": "PUT", "path": "/api/settings", "body": {"trial_gb": "3", "panel_name": "Hacked", "update_repo": "evil/x"}})).await;
+        let (st, v) = call(500, json!({"method": "PUT", "path": "/api/settings", "body": {"trial_mb": "300", "panel_name": "Hacked", "update_repo": "evil/x"}})).await;
         assert_eq!(st, 200, "{}", v);
-        assert_eq!(app.db.get("trial_gb"), "3");
+        assert_eq!(app.db.get("trial_mb"), "300");
         assert_eq!(app.db.get("panel_name"), "Mine");
         // the same path with a query or other tricks: refused (the filter compares the whole path)
         for p in ["/api/settings?a=1", "/api/settings#x", "/api//settings", "/api/settings/"] {
@@ -762,7 +762,7 @@ mod tests {
         assert_eq!(st, 200, "{}", v);
         assert_eq!(call(500, json!({"method": "GET", "path": "/api/users/1"})).await.0, 403);
         let (_, v) = call(500, json!({"method": "GET", "path": "/api/settings"})).await;
-        assert_eq!(v["trial_gb"], "3");
+        assert_eq!(v["trial_mb"], "300");
         assert!(v.get("panel_name").is_none() && v.get("dns").is_none());
         // plans: added, edited whole, listed
         assert_eq!(call(500, json!({"method": "POST", "path": "/api/plans", "body": {"name": "p50", "gb": 50, "days": 30, "toman": 100000}})).await.0, 200);
@@ -772,8 +772,8 @@ mod tests {
         let (_, l) = call(500, json!({"method": "GET", "path": "/api/plans"})).await;
         assert_eq!((l[0]["gb"].as_f64(), l[0]["conns"].as_i64(), l[0]["badge"].as_str(), l[0]["old_toman"].as_i64()), (Some(70.0), Some(2), Some("🔥"), Some(130000)));
         // the shop's price list: a wrong one is refused and changes nothing; a good one is kept whole; the plans come from it
-        let (st, _) = call(500, json!({"method": "PUT", "path": "/api/settings", "body": {"pricing": r#"{"margin":500}"#, "trial_gb": "4"}})).await;
-        assert_eq!((st, app.db.get("trial_gb").as_str()), (400, "3"));
+        let (st, _) = call(500, json!({"method": "PUT", "path": "/api/settings", "body": {"pricing": r#"{"margin":500}"#, "trial_mb": "400"}})).await;
+        assert_eq!((st, app.db.get("trial_mb").as_str()), (400, "300"));
         let (st, _) = call(500, json!({"method": "PUT", "path": "/api/settings", "body": {"pricing": r#"{"services":{"vip":{"base":60000}}}"#, "game_protocols": "awg,xray"}})).await;
         assert_eq!(st, 200);
         assert_eq!((crate::shop::pricing(&app.db).vip.base, crate::shop::pricing(&app.db).vip.user), (60000.0, 25000.0));

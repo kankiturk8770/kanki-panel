@@ -275,7 +275,9 @@ fn ik(rows: Kb) -> Value {
             } else {
                 json!({"text": t, "callback_data": d})
             }
-        }).collect())
+        }).collect::<Vec<Value>>())
+        // a row left empty on purpose (a button only shown sometimes) is not sent: Telegram refuses empty rows
+        .filter(|row| !row.is_empty())
         .collect();
     json!({ "inline_keyboard": r })
 }
@@ -3708,7 +3710,8 @@ impl Bot {
                 esc(&db.get("support")), esc(&db.get("channel")), esc(&db.get("app_link"))),
                 Some(ik(vec![
                     vec![b(&format!("{} فروش", self.onoff("sales_on")), "tg:sales_on"), b(&format!("{} هشدار اتمام", self.onoff("warn_on")), "tg:warn_on")],
-                    vec![b(&format!("{} بکاپ روزانه", self.onoff("backup_on")), "tg:backup_on")],
+                    // with the report bot the daily backup is its job (and its switch is there)
+                    if crate::monitor::on() { vec![] } else { vec![b(&format!("{} بکاپ روزانه", self.onoff("backup_on")), "tg:backup_on")] },
                     vec![b("✏️ پشتیبانی", "set:support"), b("✏️ کانال اجباری", "set:channel")],
                     vec![b("✏️ لینک اپ", "set:app_link"), b("✏️ خوش‌آمد", "set:welcome")],
                     vec![b("🎨 دکمه‌ها و متن‌ها", "a:ui")],

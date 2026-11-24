@@ -1292,7 +1292,7 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
 // ============================================================ settings / plans
 
 pub const SETTING_KEYS: &[&str] = &[
-    "dns", "mtu", "default_protocols", "sales_on", "trial_on", "trial_gb", "trial_days", "card_on", "card_number", "card_holder",
+    "dns", "mtu", "default_protocols", "sales_on", "trial_on", "card_on", "card_number", "card_holder",
     "wallet_on", "wallet_text", "ton_address", "usdt_address", "usd_rate", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
     "welcome", "ref_gb", "ref_days", "ref_pct", "ref_new_pct", "trial_offer_pct", "warn_on", "backup_on", "channel",
     "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "conn_limit_on", "tg_alerts", "logo", "price_rules",

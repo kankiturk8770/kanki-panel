@@ -61,6 +61,8 @@ pub async fn notify(text: &str, kb: Option<Value>) {
 
 /// Starts the watcher (always) and the report bot (when it has a token)
 pub fn start(app: Arc<App>) {
+    // the watcher below always runs (through the sales bot when there is no report bot), so the old script is never needed
+    Mon::old_script_off();
     if let Some(m) = Mon::new(app.clone()) {
         *slot().lock().unwrap_or_else(|e| e.into_inner()) = Some(m.clone());
         tokio::spawn(m.clone().run());
@@ -353,10 +355,13 @@ impl Mon {
         if let Some(p) = paths_btn(app) {
             rows.push(vec![p]);
         }
+        let daily = app.db.on("backup_on");
+        t.push_str(&format!("\n💾 بکاپ روزانه: <b>{}</b>", if daily { "روشن" } else { "خاموش" }));
         rows.push(vec![
             json!({"text": if alerts { "🔕 خاموش کردن هشدارها" } else { "🔔 روشن کردن هشدارها" }, "callback_data": "m:al"}),
             json!({"text": "💾 بکاپ الان", "callback_data": "m:bk"}),
         ]);
+        rows.push(vec![json!({"text": if daily { "⏸ خاموش کردن بکاپ روزانه" } else { "▶️ روشن کردن بکاپ روزانه" }, "callback_data": "m:bo"})]);
         (t, json!({"inline_keyboard": rows}))
     }
 
@@ -395,8 +400,8 @@ impl Mon {
         }
     }
 
-    /// The old report script (`kanki-watch`, a cron job on the panel server) sent through the sales bot: with the report
-    /// bot it is not needed. Its cron file is set aside (a file with a dot in its name is not run by cron), not deleted.
+    /// The old report script (`kanki-watch`, a cron job on the panel server) sent through the sales bot: the watcher of
+    /// this file does its work (since 3.48.1), so it is not needed. Its cron file is set aside (a file with a dot in its name is not run by cron), not deleted.
     fn old_script_off() {
         let f = "/etc/cron.d/kanki-watch";
         if std::path::Path::new(f).exists() {
@@ -423,6 +428,11 @@ impl Mon {
                     let on = self.app.db.get("tg_alerts") != "0";
                     self.app.db.set("tg_alerts", if on { "0" } else { "1" });
                     if on { "🔕 هشدارها خاموش شد" } else { "🔔 هشدارها روشن شد" }
+                }
+                "m:bo" => {
+                    let on = self.app.db.on("backup_on");
+                    self.app.db.set("backup_on", if on { "0" } else { "1" });
+                    if on { "⏸ بکاپ روزانه خاموش شد" } else { "▶️ بکاپ روزانه روشن شد" }
                 }
                 "m:bk" => {
                     let _ = self.call("answerCallbackQuery", json!({"callback_query_id": qid, "text": "⏳ در حال ساخت بکاپ…"})).await;
@@ -456,7 +466,6 @@ impl Mon {
     }
 
     async fn run(self: Arc<Self>) {
-        Self::old_script_off();
         let _ = self.call("deleteWebhook", json!({"drop_pending_updates": false})).await;
         // the chat's menu button opens the report page
         let mini = crate::miniapp::url(&self.app);
