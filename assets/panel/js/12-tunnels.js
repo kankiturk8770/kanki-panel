@@ -106,15 +106,22 @@ function tunList(d){var tl=(d.tunnels||[]).filter(function(x){return !TNF.f||x.e
    var title=k?'<i class="tn-dot" style="background:'+col[k]+'"></i>'+esc(tunSrv(k).name):t('Other tunnels');
    return kuGroup(title,null,'<span class="ku-n">'+N(up)+' / '+N(l.length)+' '+t('connected')+'</span>','<div class="kxl">'+l.map(tunRow).join('')+'</div>')}).join('')+
   (chains.length?kuGroup(t('Multi-location tunnels'),chains.length,'',chains.map(function(c){var x=tl.filter(function(z){return z.chain==c})[0];return '<div class="tn-route">'+routeCardOf(x)+'</div>'}).join('')):'')}
+// (3.62) the ports a tunnel carries as small chips: TCP and UDP apart, «443→2083» when the exit port differs, a range as «4000–4010»;
+// past six a «+N» (the tunnel's window lists them all)
+function tnPortList(x){var aw=x.kind=='awg'?(x.awg||{}):null,o={tcp:[],udp:[]},add=function(k,l){(l||[]).forEach(function(v){String(v).split(',').forEach(function(z){z=z.trim();if(z)o[k].push(z)})})};
+ add('tcp',x.tcp);add('udp',x.udp);if(aw){add('tcp',aw.fwd_tcp);add('udp',aw.fwd_udp)}return o}
+function tnPortChip(z){var p=String(z).split(':'),a=p[0].replace('-','–');return '<i dir="ltr">'+esc(a)+(p[1]&&p[1]!=p[0]?'<u>→</u>'+esc(p[1].replace('-','–')):'')+'</i>'}
+function tnPorts(x,all){var o=tnPortList(x),h='';['tcp','udp'].forEach(function(k){var l=o[k];if(!l.length)return;var cut=all?l.length:Math.min(l.length,l.length>6?5:6);
+  h+='<span class="tnpc"><em class="fwp '+k+'">'+k.toUpperCase()+'</em>'+l.slice(0,cut).map(tnPortChip).join('')+(l.length>cut?'<i class="more">+'+N(l.length-cut)+'</i>':'')+'</span>'});
+ return h?'<span class="tnps">'+h+'</span>':''}
 // one tunnel: state, route and name on the first line; transport, ping and ports under it; a tap opens the rest
 function tunRow(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},aw=x.kind=='awg'?(x.awg||{}):null,st=x.state=='up'?'g':x.state=='partial'?'y':x.state=='off'?'':'r';
- var ports=[];if(x.tcp&&x.tcp.length)ports.push('TCP '+x.tcp.join(','));if(x.udp&&x.udp.length)ports.push('UDP '+x.udp.join(','));
- if(aw){if(aw.fwd_tcp&&aw.fwd_tcp.length)ports.push('TCP '+aw.fwd_tcp.join(','));if(aw.fwd_udp&&aw.fwd_udp.length)ports.push('UDP '+aw.fwd_udp.join(','))}
+ var ports=tnPorts(x);
  var head='<span class="dot '+st+'"></span><b>'+esc(x.name||(e.name+' → '+xs.name))+'</b><span class="sp"></span>'+
-  '<span class="kxr-st '+st+'">'+(x.state=='up'&&es.rtt_ms?es.rtt_ms+' ms':tunStateTxt(x.state))+'</span>'+
+  '<span class="kxr-st '+st+'">'+(x.state=='up'&&es.rtt_ms?'<bdi class="ltr">'+N(es.rtt_ms)+' ms</bdi>':tunStateTxt(x.state))+'</span>'+
   // (3.50) the route reads the same everywhere: Iran entry ➔ protocol (and ping) ➔ exit abroad; the ports under it
-  '<span class="tn-l2"><span class="tn-flow"><span class="tn-e">'+esc(e.name)+'</span><i class="tn-ar" aria-hidden="true">➔</i><span class="kxr-st tn-p">'+esc(tunShort(x))+(x.state=='up'&&es.rtt_ms?' · <bdi class="ltr">'+es.rtt_ms+' ms</bdi>':'')+'</span>'+
-   '<i class="tn-ar" aria-hidden="true">➔</i><span class="tn-x">'+tnFlag(xs)+esc(xs.name)+'</span></span>'+(ports.length?'<small class="ltr tn-ports">'+esc(ports.join(' · '))+'</small>':'')+'</span>';
+  '<span class="tn-l2"><span class="tn-flow"><span class="tn-e">'+esc(e.name)+'</span><i class="tn-ar" aria-hidden="true">➔</i><span class="kxr-st tn-p">'+esc(tunShort(x))+'</span>'+
+   '<i class="tn-ar" aria-hidden="true">➔</i><span class="tn-x">'+tnFlag(xs)+esc(xs.name)+'</span></span>'+ports+'</span>';
  return accRow('tn',x.id,head,function(){return tunBody(x)},x.enabled?'':'off')}
 function tunBody(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},xx=x.exit_status||{},err=es.error?e.name+': '+es.error:xx.error?xs.name+': '+xx.error:'',aw=x.kind=='awg'?(x.awg||{}):null,hy=x.kind=='hy2'?(x.hy2||{}):null,fw=x.kind=='fwd'?(x.fwd||{}):null,ku=x.kind=='kup'?(x.kup||{}):null;
  if(aw)err=err||(x.wrap_entry||{}).error||(x.wrap_exit||{}).error||'';
@@ -124,7 +131,9 @@ function tunBody(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{
  if(aw)info.push(['AWG','<span class="ltr">'+esc(aw.entry_ip+' ⇄ '+aw.exit_ip+(aw.routes&&aw.routes.length?' · → '+aw.routes.join(' '):'')+(aw.src_routes&&aw.src_routes.length?' · ⇠ '+aw.src_routes.join(' '):''))+'</span>']);
  if(hy&&hy.src_routes&&hy.src_routes.length)info.push(['⇠','<span class="ltr">'+esc(hy.src_routes.join(' '))+'</span>']);
  if(x.auto)info.push([t('Rotating'),esc(x.switch_note?x.switch_note+' · '+ago(x.switched):t('Rotating tunnel'))]);
+ var ap=tnPorts(x,1);
  return '<div class="tn-info">'+info.map(function(r){return '<div><small>'+r[0]+'</small><b>'+r[1]+'</b></div>'}).join('')+'</div>'+
+  (ap?'<div class="tn-allp"><small>'+t('Ports it carries')+'</small>'+ap+'</div>':'')+
   (err&&x.state!='up'?'<div class="warnbox ltr" style="margin:8px 0 0">'+esc(err)+'</div>':'')+
   kuSwitch(t('Tunnel on'),x.enabled,"tunAct('"+x.id+"','"+(x.enabled?'disable':'enable')+"')")+
   '<div class="kxacts"><button class="btn sm" onclick="tunEdit(\''+x.id+'\')">'+ic('edit',13)+' '+t('Edit')+'</button><button class="b2 sm" onclick="tunAct(\''+x.id+'\',\'restart\')">'+ic('refresh',13)+' '+t('Reconnect')+'</button></div>'+
@@ -551,8 +560,8 @@ function tunSmart(o){if(!TN.d)return tunLoad().then(function(){tunSmart(o)});if(
  api('GET','/api/tunnels/probe').then(function(r){if(r.job&&!r.job.finished)return tunSmartRun();
  var opt=function(sel){return srvOptGroups(sv,function(s){return '<option value="'+esc(s.id)+'"'+(s.id==sel?' selected':'')+'>'+esc(s.name+(s.local?' ('+t('panel')+')':''))+'</option>'})},
   po=function(k,l){return '<option value="'+k+'"'+(TS.prof==k?' selected':'')+'>'+l+'</option>'};
- modal(mhead('⚡ '+t('Smart tunnel'))+'<p class="sub"><b>'+t('Find the best transport')+'</b><br>'+t('Before making the tunnel, every transport (TCP, KCP, WS, WSS, QUIC) is tried in both directions between your two servers. It takes about one to two minutes. Each gets a score from 0 to 100 and the best one is suggested with its reason.')+'</p>'+
-  '<ul class="sub" style="margin:4px 0 8px;padding-inline-start:18px;line-height:1.7"><li>'+t('Scores follow your profile (gaming, balanced, ultra speed)')+'</li><li>'+t('Tells which ones did not pass and probably why')+'</li><li>'+t('If one direction is closed it says so and suggests the other')+'</li><li>'+t('One click applies it in making or editing a tunnel')+'</li><li>'+t('No tunnel is made and nothing changes on the servers')+'</li></ul>'+
+ modal(mhead('⚡ '+t('Smart tunnel'))+'<details class="kadv ts-how"><summary><b>'+t('Find the best transport')+'</b><small>'+t('How it works')+'</small></summary><p class="sub">'+t('Before making the tunnel, every transport (TCP, KCP, WS, WSS, QUIC) is tried in both directions between your two servers. It takes about one to two minutes. Each gets a score from 0 to 100 and the best one is suggested with its reason.')+'</p>'+
+  '<ul class="sub" style="margin:4px 0 8px;padding-inline-start:18px;line-height:1.7"><li>'+t('Scores follow your profile (gaming, balanced, ultra speed)')+'</li><li>'+t('Tells which ones did not pass and probably why')+'</li><li>'+t('If one direction is closed it says so and suggests the other')+'</li><li>'+t('One click applies it in making or editing a tunnel')+'</li><li>'+t('No tunnel is made and nothing changes on the servers')+'</li></ul></details>'+
   (sv.length<2?'<div class="warnbox">'+t('First add your entry server in the “Tunnel servers” menu.')+'</div>':'')+
   '<div class="g2"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="ts_en">'+opt(c.entry||(remote[0]||{}).id)+'</select></div><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="ts_ex">'+opt(c.exit||'local')+'</select></div></div>'+
   '<div class="g2"><div><label class="f">'+t('Profile')+'</label><select id="ts_pf">'+po('balanced',t('Balanced'))+po('speed',t('Most speed'))+po('gaming',t('Gaming (low ping)'))+'</select></div><div><label class="f">'+t('Test ports (first of the range)')+'</label><input id="ts_pt" type="number" class="ltr" value="3990"></div></div>'+

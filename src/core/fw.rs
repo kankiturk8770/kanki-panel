@@ -357,16 +357,28 @@ fn conf_port(path: &str) -> Option<u16> {
 /// Every port Kanki needs open here, whatever ufw says now: SSH, the cores' configs, the web ports in
 /// kanki.env, what Kanki's programs listen on from outside, NAT redirects and every owner's rules.
 fn needed(st: &State) -> BTreeSet<String> {
-    let mut v: BTreeSet<String> = ssh_ports().into_iter().map(|p| rule(p, false)).collect();
-    for f in ["/etc/wireguard/wg0.conf", "/etc/amnezia/amneziawg/awg0.conf"] {
+    labeled(st).into_keys().collect()
+}
+
+/// `needed`, each rule with what it is for (the panel's firewall table, 3.62.0): "ssh", "wg", "awg", "hy2",
+/// "panel", "node", an owner ("tunnels", "dns", "xray" …) or the program that listens there
+fn labeled(st: &State) -> BTreeMap<String, BTreeSet<String>> {
+    let mut v: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut add = |r: String, what: &str| {
+        v.entry(r).or_default().insert(what.to_string());
+    };
+    for p in ssh_ports() {
+        add(rule(p, false), "ssh");
+    }
+    for (f, what) in [("/etc/wireguard/wg0.conf", "wg"), ("/etc/amnezia/amneziawg/awg0.conf", "awg")] {
         if let Some(p) = conf_port(f) {
-            v.insert(rule(p, true));
+            add(rule(p, true), what);
         }
     }
     let env = crate::util::load_env("/etc/kanki/kanki.env");
-    for (k, udp) in [("HY2_PORT", true), ("HTTPS_PORT", false), ("NODE_PUBLIC_PORT", false)] {
+    for (k, udp, what) in [("HY2_PORT", true, "hy2"), ("HTTPS_PORT", false, "panel"), ("NODE_PUBLIC_PORT", false, "node")] {
         if let Some(p) = env.get(k).and_then(|p| p.trim().parse::<u16>().ok()).filter(|p| *p > 0) {
-            v.insert(rule(p, udp));
+            add(rule(p, udp), what);
         }
     }
     for (port, udp, prog, unit) in crate::certbot::public_listeners() {
@@ -375,14 +387,19 @@ fn needed(st: &State) -> BTreeSet<String> {
         // in that range come from the owners' lists
         let take = if udp { prog == "kernel" || (ours(&prog, &unit) && !(32768..=60999).contains(&port)) } else { ours(&prog, &unit) };
         if take {
-            v.insert(rule(port, udp));
+            let name = if prog == "kernel" { "kernel".to_string() } else { unit.trim_end_matches(".service").to_string() };
+            add(rule(port, udp), if name.is_empty() { prog.as_str() } else { name.as_str() });
         }
     }
-    v.extend(hidden_users());
-    for rs in st.owners.values() {
-        v.extend(rs.iter().cloned());
+    for r in hidden_users() {
+        add(r, "nat");
     }
-    v.retain(|r| valid_rule(r));
+    for (o, rs) in &st.owners {
+        for r in rs {
+            add(r.clone(), o);
+        }
+    }
+    v.retain(|r, _| valid_rule(r));
     v
 }
 
@@ -555,7 +572,9 @@ pub fn report() -> serde_json::Value {
         unused.retain(|r| !left_by_kanki.contains(r));
     }
     let active = ufw_here() && ufw_active();
-    let v = serde_json::json!({ "owners": st.owners, "unused": unused, "guard": st.guard, "active": active, "ufw": ufw_here() });
+    // what is open (or would be with the guard on) and what for: the panel's port table of each server
+    let ports: Vec<(String, Vec<String>)> = labeled(&st).into_iter().map(|(r, w)| (r, w.into_iter().collect())).collect();
+    let v = serde_json::json!({ "owners": st.owners, "unused": unused, "guard": st.guard, "active": active, "ufw": ufw_here(), "ports": ports });
     *c.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), v.clone()));
     v
 }
@@ -592,6 +611,20 @@ pub fn close_unused(rules: &[String]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_open_rule_says_what_it_is_for() {
+        let mut st = State::default();
+        st.owners.insert("tunnels".into(), ["20000:20002/udp".to_string(), "22/tcp".to_string()].into_iter().collect());
+        st.owners.insert("dns".into(), ["53/udp".to_string(), "bad rule".to_string()].into_iter().collect());
+        let l = labeled(&st);
+        assert!(l["22/tcp"].contains("ssh") && l["22/tcp"].contains("tunnels"), "{:?}", l);
+        assert!(l["20000:20002/udp"].contains("tunnels"));
+        assert!(l["53/udp"].contains("dns"));
+        assert!(!l.contains_key("bad rule"));
+        // the guard opens exactly what the table shows
+        assert_eq!(needed(&st), l.keys().cloned().collect::<BTreeSet<_>>());
+    }
 
     #[test]
     fn only_plain_rules_reach_ufw() {

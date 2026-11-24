@@ -2712,7 +2712,7 @@ async fn guard_list(State(app): St, h: HeaderMap) -> Response {
     let mut add = |id: &str, name: &str, fw: &Value, version: &str| {
         out.insert(id.to_string(), json!({
             "name": name, "want": guard_wanted(&app, id), "note": app.db.get(&format!("fw_guard_note_{}", id)),
-            "guard": fw["guard"], "active": fw["active"], "ufw": fw["ufw"], "version": version,
+            "guard": fw["guard"], "active": fw["active"], "ufw": fw["ufw"], "version": version, "ports": fw["ports"],
             // an agent older than 3.38.0 reports no guard: it cannot do it yet
             "knows": fw.get("guard").is_some(),
         }));

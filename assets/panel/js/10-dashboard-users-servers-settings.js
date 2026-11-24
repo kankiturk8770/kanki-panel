@@ -14,7 +14,7 @@ function setRing(id,p,val,sub){var f=$('#rf_'+id);if(!f)return;f.setAttribute('s
  $('#gv_'+id).innerHTML=/^[\d۰-۹]/.test(val)?'<bdi class="ltr">'+esc(val)+'</bdi>':esc(val);$('#gs_'+id).textContent=sub||' '}
 function dashTimers(){clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);S.timer=setInterval(dashTick,DB.iv*1000);S.timer2=setInterval(dashSys,10000);S.timer3=setInterval(function(){if(S.page=='dash'&&document.visibilityState=='visible')dashErrs()},30000)}
 function dashLive(state){var l=$('#d_live');if(!l)return;l.className='live'+(state?' '+state:'');$('#d_lt').textContent=state=='bad'?t('Reconnecting…'):state=='off'?t('Paused'):t('Live')}
-function goUsers(f){S.filter=f;S.q='';S.pg=1;S.pf='all';location.hash='#users'}
+function goUsers(f){S.goF=f;S.q='';S.pg=1;S.pf='all';location.hash='#users'}
 function dashTick(){if(S.page!='dash'||DB.paused||document.visibilityState!='visible')return;
  api('GET','/api/live').then(function(l){if(S.page!='dash')return;var p=DB.last,cpu=DB.cpu,rxs=0,txs=0;
   if(p&&l.cpu_total>p.cpu_total){var dT=l.cpu_total-p.cpu_total,dI=l.cpu_idle-p.cpu_idle;cpu=Math.max(0,Math.min(100,100*(1-dI/dT)))}
@@ -70,7 +70,7 @@ function ustate(u){if(!u.enabled)return 'disabled';if(u.status!='Active')return 
 function usage(u){var lim=u.traffic_limit_gb;return lim>0?Math.min(100,Math.round(100*u.traffic_used_gb/lim)):-1}
 function findU(id){for(var i=0;i<S.users.length;i++)if(S.users[i].id==id)return S.users[i]}
 function pUsers(){var pg=$('#pg');
- S.size=+localStorage.getItem('kk_size2')||48;S.sort=localStorage.getItem('kk_sort')||'new';S.pf=S.pf||'all';S.filter=S.filter||'all';S.q=S.q||'';S.pg=1;S.sel={};S.selMode=false;
+ S.size=+localStorage.getItem('kk_size2')||48;S.sort=localStorage.getItem('kk_sort')||'new';S.pf=S.pf||'all';S.filter=S.goF||'online';S.goF='';S.q=S.q||'';S.pg=1;S.sel={};S.selMode=false;
  var fo=[['all','All'],['online','Online'],['active','Active'],['finished','Expired'],['disabled','Disabled'],['offline','Offline']],
   so=[['new','Newest'],['old','Oldest'],['name','Name'],['usage','Most used'],['expiry','Nearest expiry'],['seen','Last seen']],
   po=[['all','All protocols']].concat(PROTOS);
@@ -78,7 +78,7 @@ function pUsers(){var pg=$('#pg');
  pg.innerHTML='<div class="ph"><div><h2>'+t('Users')+'</h2><p id="ucount"></p></div><div class="row"><button type="button" class="kib" id="selm" aria-pressed="false" title="'+t('Select')+'" aria-label="'+t('Select')+'">'+ic('sel',18)+'</button><button type="button" class="kib" id="rf" title="'+t('Refresh')+'" aria-label="'+t('Refresh')+'">'+ic('refresh',17)+'</button><button type="button" class="btn" onclick="newUser()">'+ic('plus',16)+'<span>'+t('New user')+'</span></button></div></div>'+
   // (3.41) the search always in sight; status, sort and protocol beside it on a desktop, behind «Filters» on a phone
  '<div class="ubar" id="ubar"><div class="ubar-q"><div class="srch"><label class="vh" for="q">'+t('Search')+'</label><input id="q" type="search" autocomplete="off" placeholder="'+t('Search by name or note…')+'" value="'+esc(S.q)+'"><button type="button" id="qx" class="'+(S.q?'':'hide')+'" aria-label="'+esc(t('Clear'))+'">✕</button></div>'+
-  '<button type="button" class="b2 ufbtn" id="ufbtn" aria-expanded="false" aria-controls="ufp">'+ic('settings',16)+'<span>'+t('Filters')+'</span><em id="ufn" hidden></em></button></div>'+
+  '</div>'+
   '<div class="ufp" id="ufp"><div class="ufilt" id="ust" role="group" aria-label="'+t('Status')+'"></div>'+
   '<div class="usel"><select id="srt" aria-label="'+t('Sort')+'">'+opt(so,S.sort)+'</select><select id="pf" aria-label="'+t('Protocol')+'">'+opt(po,S.pf,false).replace('>All protocols<','>'+t('All protocols')+'<')+'</select></div></div></div>'+
  '<div class="selbar hide" id="selbar"><label><span class="ck"><input type="checkbox" id="sall"><i></i></span><span>'+t('Select all')+' (<span id="sallc">0</span>)</span></label></div>'+
@@ -91,7 +91,6 @@ function pUsers(){var pg=$('#pg');
  $('#srt').onchange=function(){S.sort=this.value;localStorage.setItem('kk_sort',S.sort);S.pg=1;drawUsers()};
  $('#rf').onclick=function(){loadUsers()};
  $('#selm').onclick=function(){S.selMode=!S.selMode;if(!S.selMode)S.sel={};this.classList.toggle('on',S.selMode);this.setAttribute('aria-pressed',S.selMode);drawUsers()};
- $('#ufbtn').onclick=function(){var o=!$('#ubar').classList.contains('open');$('#ubar').classList.toggle('open',o);this.setAttribute('aria-expanded',o)};
  $('#sall').onchange=function(){var all=this.checked;filtered().forEach(function(u){if(all)S.sel[u.id]=1;else delete S.sel[u.id]});drawUsers()};
  $('#ust').onclick=function(e){var b=e.target.closest('[data-f]');if(!b)return;S.filter=b.dataset.f;S.pg=1;pruneSel();drawUsers();drawStats()};
  $('#ul').onkeydown=function(e){if((e.key=='Enter'||e.key==' ')&&e.target.classList&&e.target.classList.contains('uchip')){e.preventDefault();e.target.click()}};
@@ -108,7 +107,8 @@ function loadUsers(){return Promise.all([api('GET','/api/users'),api('GET','/api
  var live={};S.users.forEach(function(u){live[u.id]=1});Object.keys(S.sel).forEach(function(k){if(!live[k])delete S.sel[k]});drawStats();drawUsers()}).catch(fail)}
 function ufCount(){var n=(S.filter&&S.filter!='all'?1:0)+(S.pf&&S.pf!='all'?1:0)+(S.sort&&S.sort!='new'?1:0),e=$('#ufn');if(!e)return;e.hidden=!n;e.textContent=N(n)}
 function drawStats(){var o=S.ov;if(!o||!$('#ust'))return;
- var c=[['',o.users,'All','all'],['g',o.online,'Online','online'],['g',o.active,'Active','active'],['y',o.expired,'Expired','finished'],['r',o.disabled,'Disabled','disabled']];
+ var on=S.users?S.users.filter(function(u){return u.online_connections>0||liveOf(u).length>0}).length:o.online;
+ var c=[['g',on,'Online','online'],['',Math.max(0,(S.users?S.users.length:o.users)-on),'Offline','offline'],['',o.users,'All','all'],['g',o.active,'Active','active'],['y',o.expired,'Expired','finished'],['r',o.disabled,'Disabled','disabled']];
  $('#ust').innerHTML=c.map(function(x){return '<button type="button" aria-pressed="'+(S.filter==x[3])+'" class="uf'+(S.filter==x[3]?' act':'')+'" data-f="'+x[3]+'">'+(x[0]?'<span class="dot '+x[0]+'"></span>':'')+'<span>'+t(x[2])+'</span><b>'+N(x[1]||0)+'</b></button>'}).join('');
  drawLive()}
 // connected right now, by protocol: a count per protocol, a tap filters the list to it
@@ -246,17 +246,39 @@ function nHealth(id){toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIC
 function nAssign(id,add){var n=findN(id);if(!confirm(t(add?'Add this node to ALL users?':'Remove this node from ALL users?')+(n?' ('+n.name+')':'')))return;
  toast(t('Checking…'));api('POST','/api/nodes/'+encodeURIComponent(id)+'/'+(add?'assign-all':'unassign-all')).then(function(){toast(t('Done'));loadNodes()}).catch(fail)}
 function updateAll(){kAsk(t('Update every node, every tunnel server and the panel itself to the latest version?'),t('Update all'),t('Update all')).then(function(ok){if(ok)updateGo()})}
-function updateGo(){
- // the steps in the window while the panel asks every server
- modal(mhead(t('Update all'),'')+'<div class="kxp-steps"><div class="now"><span class="spin"></span><span>'+t('1. Asking every server for the new version')+'</span></div><div class="next"><span class="kxs-n"></span><span>'+t('2. The servers take it by themselves')+'</span></div></div>');
- api('POST','/api/update-all').then(function(r){var h='<div class="kxp-steps"><div class="ok"><span class="okc">'+ic('check',16)+'</span><span>'+t('1. Asking every server for the new version')+'</span></div><div class="ok"><span class="okc">'+ic('check',16)+'</span><span>'+t('2. The servers take it by themselves')+'</span></div></div>';
-  h+='<p><b>'+t('Panel')+':</b> '+esc(String(r.panel))+(r.latest?' · '+esc(r.latest):'')+'</p>';
-  if((r.nodes||[]).length)h+='<label class="f">'+t('Nodes')+'</label><div class="list">'+r.nodes.map(function(z){return '<div class="li"><span><b>'+esc(z.name)+'</b>'+(z.ok?'':'<small>'+esc(z.error||t('no answer: update it once with the kanki command'))+'</small>')+'</span><span>'+(z.ok?'✅':'❌')+'</span></div>'}).join('')+'</div>';
-  if((r.agents||[]).length)h+='<label class="f">'+t('Tunnel servers (updating by themselves)')+'</label><p class="muted">'+esc(r.agents.join(', '))+'</p>';
-  if((r.also_nodes||[]).length)h+='<label class="f">'+t('Both a node and a tunnel server (updated once, through the node)')+'</label><p class="muted">'+esc(r.also_nodes.join(', '))+'</p>';
-  if((r.manual||[]).length)h+='<div class="warnbox">'+t('These agents are too old to update remotely. Run the command kanki on them and choose 3 (Update) once:')+' <b>'+esc(r.manual.join(', '))+'</b></div>';
-  if(!(r.nodes||[]).length&&!(r.agents||[]).length&&!(r.manual||[]).length&&String(r.panel)=='current')h+='<p>'+t('Everything is already up to date')+'</p>';
-  modal(mhead(t('Update all'),'')+h);setTimeout(function(){if(S.page=='nodes')loadNodes()},8000)}).catch(function(e){closeModal();fail(e)})}
+// (3.62) every server at once, live: one line per server (its flag, its version now) that turns into a green
+// tick when the server runs the new version; the panel asks all of them at the same moment
+var UPD={t:0,until:0,target:'',res:null};
+function updList(d){var l=((d&&d.servers)||[]).slice();l.sort(function(x,y){return (y.local?1:0)-(x.local?1:0)||((x.loc=='iran')-(y.loc=='iran'))||String(x.name).localeCompare(String(y.name))});return l}
+function updVer(s){var a=s.agent,n=s.node,v=[];if(a&&a.version)v.push(a.version);if(n&&n.info&&n.info.version)v.push(n.info.version);return v}
+function updDraw(d){var box=$('#upd_l');if(!box)return;var r=UPD.res||{},tg=UPD.target,l=updList(d),done=0,live=0;
+ var man=r.manual||[],bad={};(r.nodes||[]).forEach(function(z){if(!z.ok)bad[z.name]=z.error||''});
+ box.innerHTML=l.map(function(s){var v=updVer(s),on=!!(s.local||(s.agent&&s.agent.online)||(s.node&&s.node.online)),ok=tg&&v.length&&v.every(function(x){return x==tg});
+  var st,cls;
+  if(!tg){st='<span class="spin"></span>';cls='now'}
+  else if(ok){st='<span class="okc">'+ic('check',16)+'</span>';cls='ok';done++}
+  else if(!on){st='<span class="kxs-n"></span>';cls='next'}
+  else if(man.indexOf(s.name)>=0){st='⚠';cls='warn'}
+  else{st='<span class="spin"></span>';cls='now'}
+  if(on)live++;
+  var why=!tg?t('Asking…'):ok?'v'+esc(tg):!on?t('Not connected: it updates when it comes back'):man.indexOf(s.name)>=0?t('Too old: run kanki on it and choose 3 (Update) once'):
+   (bad[s.name]!=null&&bad[s.name]?esc(bad[s.name])+' · ':'')+(v.length?'v'+esc(v[0])+' → v'+esc(tg):t('Updating…'));
+  return '<div class="upd-r '+cls+'"><span class="upd-i">'+st+'</span><span class="upd-f">'+(s.cc?flagOf(s.cc):'')+'</span><span class="upd-n"><b>'+esc(s.name)+'</b><small>'+why+'</small></span></div>'}).join('');
+ var all=l.length,pct=all?Math.round(100*done/all):0,bar=$('#upd_b');
+ if(bar)bar.innerHTML='<div class="upd-bar"><i style="width:'+pct+'%"></i></div><small>'+(tg?N(done)+' / '+N(all)+' '+t('up to date')+' · v'+esc(tg):t('Asking every server for the new version'))+'</small>';
+ return done==all}
+function updTick(){clearTimeout(UPD.t);if(!$('#upd_l')||!$('#modal').classList.contains('on'))return;
+ api('GET','/api/servers').then(function(d){if(window.SV)SV.d=d;var fin=updDraw(d);if(S.page=='nodes'&&window.srvDraw)srvDraw();
+  if(!fin&&Date.now()<UPD.until)UPD.t=setTimeout(updTick,4000);else if(fin)toast(t('Every server is up to date'))})
+  // the panel restarts onto its new version: a few seconds without answers
+  .catch(function(){if(Date.now()<UPD.until)UPD.t=setTimeout(updTick,5000)})}
+function updateGo(){UPD.res=null;UPD.target='';UPD.until=Date.now()+15*60000;
+ modal(mhead(t('Update all'),'')+'<div id="upd_b" class="upd-h"></div><div class="upd-l" id="upd_l"></div>'+
+  '<p class="muted ku-note">'+t('Every server is asked at once and takes the new version by itself; a tick shows each one that runs it. You can close this window: the update goes on.')+'</p>','wide');
+ var d0=window.SV&&SV.d;if(d0)updDraw(d0);
+ api('POST','/api/update-all').then(function(r){UPD.res=r;UPD.target=r.latest||(d0&&((updList(d0).filter(function(s){return s.local})[0]||{}).agent||{}).version)||'';
+  if(String(r.panel).indexOf('failed')==0)toast(t('Panel')+': '+r.panel);
+  updTick()}).catch(function(e){closeModal();fail(e)})}
 
 // ---------------------------------------------------------------- backup
 function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'</h2><p>'+t('Full backup of users, credentials, certificates, VPN settings, nodes and panel state')+'</p></div></div>'+

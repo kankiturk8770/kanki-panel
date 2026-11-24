@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.62 — a tidy panel
+Servers as tiles with flags (Iran and abroad apart), each opening in a window with four tabs; the same agent controls on every server; «Update all» shows each server getting its green tick live; the firewall shows every open port of a server and what it is for; Users opens on who is online; tunnel ports as tidy chips.
+
 ## New in 3.61 — KANKI-UP
 A new Kanki tunnel: the official udp2raw between two servers. The UDP of every core goes in encrypted FakeTCP, UDP or ICMP packets with no retransmission, so a line that drops UDP still carries the game. Every udp2raw option is in the tunnel form. The tunnel configs of every core now take the Iran server of the tunnel that carries their port, by themselves: no address to type anywhere.
 
