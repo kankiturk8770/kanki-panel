@@ -73,6 +73,9 @@ pub struct Spec {
     /// a Hysteria2 link instead of a Kanki link (handled by `hy2t`, not by the engine)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hy2: Option<super::hy2t::Hy2Spec>,
+    /// a direct tunnel in the kernel (iptables / GRE) instead of a Kanki link (handled by `kfwd`)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fwd: Option<super::kfwd::FwdSpec>,
     /// `game`: FEC "data:parity" ("8:3", "" = 8:3, "off" = no FEC, "auto" = Game-FEC Pro) and packet
     /// duplication
     pub fec: String,
@@ -706,6 +709,8 @@ impl Manager {
         // Hysteria2 links run the official hysteria binary under systemd
         let (hy, specs): (Vec<Spec>, Vec<Spec>) = specs.into_iter().partition(|s| s.hy2.is_some());
         super::hy2t::set_desired(hy.into_iter().filter_map(|s| s.hy2).collect());
+        let (fw, specs): (Vec<Spec>, Vec<Spec>) = specs.into_iter().partition(|s| s.fwd.is_some());
+        super::kfwd::set_desired(fw.into_iter().filter_map(|s| s.fwd).collect());
         let mut run = self.running.lock().await;
         let keys: Vec<String> = run.keys().cloned().collect();
         for k in keys {
@@ -730,6 +735,7 @@ impl Manager {
         let mut v: Vec<Status> = self.running.lock().await.values().map(|r| r.status()).collect();
         v.extend(tokio::task::spawn_blocking(super::awg::statuses).await.unwrap_or_default());
         v.extend(tokio::task::spawn_blocking(super::hy2t::statuses).await.unwrap_or_default());
+        v.extend(super::kfwd::statuses());
         v
     }
 }

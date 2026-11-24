@@ -392,7 +392,6 @@ var STSEC=[
  ['net','Addresses','globe','Panel address, the public VPN address and subscription links',['endpoint','sub_base']],
  ['vpn','VPN & protocols','shield2','DNS, MTU and protocol behaviour on every server',['dns','mtu','mtu_auto','mtu_budget','awg_compat','conn_limit_on','wg_tunnel_on']],
  ['newu','New users','users','Ready values for the “New user” form',['default_protocols','def_gb','def_days','def_conns']],
- ['ntf','Notifications','bell','Telegram messages for you and for your buyers',['tg_alerts','warn_on','backup_on']],
  ['srv','Servers','nodes','What happens to a server that stays offline',['autodel_on','autodel_hours','autodel_iran']],
  ['upd','Update & version','refresh','Version, update source and installing updates',['update_repo']],
  ['io','Export & import','box','Move all settings to another panel or keep a copy',[]]];
@@ -433,9 +432,6 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
  case 'newu':return '<label class="f" style="margin-top:0">'+t('Default protocols for new users')+'</label><input type="hidden" data-k="default_protocols"><div class="pgs" data-multi="default_protocols">'+
   PROTOS.map(function(x){return '<label style="--pc:'+((PCOL[x[0]]))+'"><input type="checkbox" value="'+x[0]+'" class="hide"><i></i>'+x[1]+'</label>'}).join('')+'</div><div class="hint">'+t('Also used by the sales bot when it makes an account.')+'</div>'+
   '<div class="g3" style="margin-top:6px">'+stIn('def_gb','Volume (GB)','30','0 = unlimited','', 'number')+stIn('def_days','Days','30','','', 'number')+stIn('def_conns','Connections','1','','', 'number')+'</div>';
- case 'ntf':return stSw('tg_alerts','Server alerts','Telegram message to the bot admins when a node, tunnel server or tunnel goes offline, and when it is back.')+
-  stSw('warn_on','Warn buyers','The buyer gets a message before his time or data runs out.')+stSw('backup_on','Daily backup to bot admins','An encrypted full backup is sent to the bot admins once a day.')+
-  '<div class="hint" style="margin-top:8px">'+t('These messages are sent by the sales bot; set it up first in')+' <a href="#bot">'+t('Sales bot')+'</a>.</div>';
  case 'upd':return '<div class="vcard"><div><small>'+t('Current version')+'</small><b>v'+esc(S.me.version)+'</b></div><div><small>'+t('Latest version')+'</small><b id="st_lv">…</b></div></div><div class="vmsg" id="st_um">'+t('Checking…')+'</div>'+autoUpdBox()+
   '<div class="row" style="margin-top:10px"><button class="b2" type="button" id="st_chk">'+ic('refresh',15)+' '+t('Check for update')+'</button><button class="btn hide" type="button" id="st_go">'+t('Install update')+'</button></div>'+
   '<div class="sgrid" style="margin-top:8px">'+stIn('update_repo','Update source (GitHub repo)','owner/kanki-panel','Releases of this repository are used for updates, for “Update all” and for new tunnel servers.','full')+'</div>'+
@@ -456,7 +452,7 @@ function pSettings(){var cur=S.stsec||'look';
 function stVal(el){return el.type=='checkbox'?(el.checked?'1':'0'):el.value}
 function stFill(s){$$('#st [data-k]').forEach(function(el){var k=el.dataset.k,v=s[k]==null?'':String(s[k]);
   if(k=='refresh'&&!v)v='10';if(k=='lang'&&!v)v='fa';if(k=='theme'&&!v)v='dark';if(k=='color'&&!v)v='gold';
-  if(k=='conn_limit_on'||k=='tg_alerts'||k=='mtu_auto'||k=='wg_tunnel_on')v=v=='0'?'0':'1';
+  if(k=='conn_limit_on'||k=='mtu_auto'||k=='wg_tunnel_on')v=v=='0'?'0':'1';
   if(el.type=='checkbox')el.checked=v=='1';else el.value=v;el._orig=stVal(el)});
  stSync($('#st'))}
 // pickers and protocol chips follow their hidden input

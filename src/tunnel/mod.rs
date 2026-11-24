@@ -17,6 +17,8 @@ pub mod game;
 pub mod h2ws;
 #[path = "transport/hy2t.rs"]
 pub mod hy2t;
+#[path = "transport/kfwd.rs"]
+pub mod kfwd;
 #[path = "transport/hq.rs"]
 pub mod hq;
 pub mod link;

@@ -2,6 +2,12 @@
 "use strict";
 // Persian text of the whole panel
 var FA={
+"Direct (kernel)":"مستقیم (کرنل)",
+"Direct tunnel in the kernel":"تانل مستقیم در کرنل",
+"No program in the way and nothing added to the packets: the kernel of the entry hands the ports straight to the exit. No encryption of its own (the cores encrypt their traffic); the lightest tunnel there is. Both servers need agent 3.59.0 or newer.":"هیچ برنامه‌ای سر راه نیست و چیزی به بسته‌ها اضافه نمی‌شود: کرنل سرور ورودی پورت‌ها را مستقیم به خروجی می‌دهد. رمزنگاری جدا ندارد (خود هسته‌ها ترافیکشان را رمز می‌کنند)؛ سبک‌ترین تانل ممکن. هر دو سرور ایجنت 3.59.0 یا تازه‌تر لازم دارند.",
+"A GRE link between the two servers (24 bytes a packet, in the kernel); the ports go into it. For when the ports of the exit are filtered from Iran but GRE passes. Needs root on both servers.":"یک لینک GRE بین دو سرور (۲۴ بایت برای هر بسته، داخل کرنل)؛ پورت‌ها داخل آن می‌روند. برای وقتی که پورت‌های خروجی از ایران فیلتر است ولی GRE رد می‌شود. روی هر دو سرور root لازم است.",
+"The entry forwards its ports straight to the address of the exit (iptables DNAT): zero bytes added. The entry must reach the address of the exit.":"سرور ورودی پورت‌هایش را مستقیم به آدرس خروجی می‌فرستد (iptables DNAT): صفر بایت اضافه. سرور ورودی باید به آدرس خروجی برسد.",
+
 "This address points to an IP that is not one of your servers (an old server?). Fix it or empty it.":"این آدرس به IPی اشاره می‌کند که مال هیچ‌کدام از سرورهای شما نیست (سرور قدیمی؟). درستش کنید یا خالی‌اش کنید.",
 "This server has no tunnel (Servers › Tunnel)":"این سرور تانل ندارد (سرورها › تانل)",
 "No tunnel of this server carries its KPING port":"هیچ تانلی از این سرور پورت KPING آن را نمی‌برد",
