@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.63.2
+KANKI-UP and Hysteria2 tunnels no longer show as disconnected while users are on them, and a panel restart no longer reconnects KANKI-UP.
+
 ## New in 3.63.1
 The smart test runs with only KANKI-UP (or another kind) ticked.
 

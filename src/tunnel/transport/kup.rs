@@ -280,6 +280,64 @@ struct Shared {
     since: HashMap<String, u64>,
     /// tunnel id -> the 127.0.0.1 port its measuring pair listens on here (picked once)
     local: HashMap<String, u16>,
+    /// (3.63.2) unit -> what its udp2raw said so far in its current run
+    logs: HashMap<String, LogState>,
+}
+
+/// (3.63.2) What a udp2raw said so far in its current run (one systemd invocation), read a piece at a time
+/// with a cursor into the journal. A tunnel with many users writes two lines for every flow ("new packet",
+/// "conv cleared"), so the last few lines of the log tell nothing: the state line was long gone and a
+/// connected tunnel showed as disconnected.
+#[derive(Default, Clone, Debug)]
+struct LogState {
+    inv: String,
+    cursor: String,
+    /// entry: connected to the exit
+    up: bool,
+    /// exit: the entries ("ip:port") that finished the handshake and were not cleared since
+    ready: Vec<String>,
+    /// the last error it wrote
+    err: String,
+}
+
+/// udp2raw's state lines (both roles) and its errors: all the status needs
+const STATE_PAT: &str = "client_ready|client_idle|server_ready|conn cleared|FATAL|ERROR";
+
+/// the "[ip:port]" right before `marker` in a server line ("[time][INFO][1.2.3.4:5]changed state to …")
+fn peer_before(l: &str, marker: &str) -> Option<String> {
+    let i = l.find(marker)?;
+    let head = &l[..i];
+    let j = head.rfind('[')?;
+    let k = head[j + 1..].trim();
+    (!k.is_empty()).then(|| k.to_string())
+}
+
+/// One log line of a udp2raw into what is known of it
+fn feed(st: &mut LogState, role: &str, l: &str) {
+    if role == "entry" {
+        if l.contains("to client_ready") {
+            st.up = true;
+            st.err.clear();
+        } else if l.contains("back to client_idle") {
+            st.up = false;
+        }
+    } else if let Some(k) = peer_before(l, "]changed state to server_ready") {
+        if !st.ready.contains(&k) {
+            st.ready.push(k);
+        }
+        st.err.clear();
+    } else if let Some(k) = peer_before(l, "]inactive conn cleared") {
+        st.ready.retain(|x| *x != k);
+    }
+    if l.contains("[FATAL]") || l.contains("[ERROR]") {
+        st.err = l.chars().take(300).collect();
+    }
+}
+
+impl LogState {
+    fn connected(&self, role: &str) -> bool {
+        if role == "entry" { self.up } else { !self.ready.is_empty() }
+    }
 }
 
 fn shared() -> &'static Mutex<Shared> {
@@ -365,12 +423,16 @@ fn apply_one(s: &KupSpec) -> Result<(), String> {
     let _ = std::fs::set_permissions(CONF_DIR, std::fs::Permissions::from_mode(0o700));
     let u = s.unit();
     let changed = write_if_changed(&conf_path(s), &conf_text(s, &ip), 0o600)?;
-    let unit_changed = write_if_changed(&format!("{}/{}.service", UNIT_DIR, u), &unit_text(s), 0o644)?;
+    let unit_path = format!("{}/{}.service", UNIT_DIR, u);
+    let old_unit = std::fs::read_to_string(&unit_path).unwrap_or_default();
+    let unit_changed = write_if_changed(&unit_path, &unit_text(s), 0o644)?;
     if unit_changed {
         let _ = run("systemctl", &["daemon-reload"]);
         let _ = run("systemctl", &["enable", "-q", &format!("{}.service", u)]);
     }
-    if changed || unit_changed || !active(&u) {
+    // (3.63.2) a new name of the tunnel only changes the unit's description: no reconnect for that
+    let unit_runs_other = unit_changed && run_lines(&old_unit) != run_lines(&unit_text(s));
+    if changed || unit_runs_other || !active(&u) {
         let (ok, out) = run("systemctl", &["restart", &format!("{}.service", u)]);
         if !ok {
             return Err(format!("systemctl restart {}: {}", u, out.lines().last().unwrap_or("")));
@@ -381,6 +443,11 @@ fn apply_one(s: &KupSpec) -> Result<(), String> {
     Ok(())
 }
 
+/// the lines of a unit file that change how it runs (all but its description)
+fn run_lines(unit: &str) -> Vec<&str> {
+    unit.lines().filter(|l| !l.starts_with("Description=")).collect()
+}
+
 fn remove_unit(u: &str) {
     eprintln!("KANKI-UP {}: removing", u);
     // a normal stop: udp2raw takes its own iptables rule away on SIGTERM
@@ -388,6 +455,7 @@ fn remove_unit(u: &str) {
     let _ = run("systemctl", &["reset-failed", "-q", &format!("{}.service", u)]);
     let _ = std::fs::remove_file(format!("{}/{}.service", UNIT_DIR, u));
     let _ = std::fs::remove_file(format!("{}/{}.conf", CONF_DIR, u));
+    let _ = std::fs::remove_file(format!("{}/{}.cursor", CURSOR_DIR, u));
     let _ = run("systemctl", &["daemon-reload"]);
 }
 
@@ -580,26 +648,124 @@ pub fn set_desired(want: Vec<KupSpec>) {
 pub fn ready_from_log(role: &str, log: &str) -> (bool, String) {
     let lines: Vec<&str> = log.lines().collect();
     let start = lines.iter().rposition(|l| l.contains("Started KANKI-UP")).map(|i| i + 1).unwrap_or(0);
-    let lines = &lines[start..];
-    let (ok, bad) = if role == "entry" { ("to client_ready", "back to client_idle") } else { ("changed state to server_ready", "changed state to server_nothing") };
-    let last_ok = lines.iter().rposition(|l| l.contains(ok));
-    let last_bad = lines.iter().rposition(|l| l.contains(bad));
-    let up = match (last_ok, last_bad) {
-        (Some(a), Some(b)) => a > b,
-        (Some(_), None) => true,
-        _ => false,
+    let mut st = LogState::default();
+    for l in &lines[start..] {
+        feed(&mut st, role, l);
+    }
+    let up = st.connected(role);
+    (up, if up { String::new() } else { st.err })
+}
+
+/// (3.63.2) A unit as systemd sees it: running, its current run (invocation id) and since when (unix time)
+pub(super) fn unit_state(u: &str) -> (bool, String, u64) {
+    let (_, out) = run("systemctl", &["show", "-p", "ActiveState", "-p", "InvocationID", "-p", "ActiveEnterTimestampMonotonic", &format!("{}.service", u)]);
+    let get = |k: &str| out.lines().find_map(|l| l.strip_prefix(k).and_then(|v| v.strip_prefix('='))).unwrap_or("").trim().to_string();
+    let active = get("ActiveState") == "active";
+    let inv = get("InvocationID");
+    let inv = if inv.len() <= 64 && inv.chars().all(|c| c.is_ascii_hexdigit()) { inv } else { String::new() };
+    let mono: u64 = get("ActiveEnterTimestampMonotonic").parse().unwrap_or(0);
+    let up: f64 = std::fs::read_to_string("/proc/uptime").ok().and_then(|t| t.split_whitespace().next().and_then(|x| x.parse().ok())).unwrap_or(0.0);
+    let since = if mono > 0 && up > 0.0 { (crate::util::now() as f64 - (up - mono as f64 / 1e6)).max(0.0) as u64 } else { 0 };
+    (active, inv, since)
+}
+
+/// journalctl here may be built without pattern matching (then every line of the run is read, once), or be
+/// older than `--cursor-file` (systemd 242)
+fn no_grep() -> &'static AtomicBool {
+    static B: AtomicBool = AtomicBool::new(false);
+    &B
+}
+fn no_cursor_file() -> &'static AtomicBool {
+    static B: AtomicBool = AtomicBool::new(false);
+    &B
+}
+pub(super) const CURSOR_DIR: &str = "/run/kanki-kup";
+
+/// (3.63.2) The new lines of unit `u`'s current run `inv` that match `pat`, from where `cursor` was (journalctl
+/// keeps the place in a cursor file, also past the lines that did not match). None: no invocation id here.
+pub(super) fn journal_new(u: &str, inv: &str, cursor: &mut String, pat: &str) -> Option<Vec<String>> {
+    if inv.is_empty() {
+        return None;
+    }
+    let m = format!("_SYSTEMD_INVOCATION_ID={}", inv);
+    let cf = format!("{}/{}.cursor", CURSOR_DIR, u);
+    let mut lines = vec![];
+    for _ in 0..3 {
+        let grep = !no_grep().load(Ordering::Relaxed);
+        let file = !no_cursor_file().load(Ordering::Relaxed);
+        let mut a: Vec<&str> = vec![&m, "-q", "-o", "cat", "--no-pager"];
+        if grep {
+            a.extend(["-g", pat]);
+        }
+        if file {
+            let _ = std::fs::create_dir_all(CURSOR_DIR);
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(CURSOR_DIR, std::fs::Permissions::from_mode(0o700));
+            if cursor.is_empty() {
+                let _ = std::fs::remove_file(&cf);
+            } else {
+                let _ = std::fs::write(&cf, cursor.as_str());
+            }
+            a.extend(["--cursor-file", &cf]);
+        } else {
+            a.push("--show-cursor");
+            if !cursor.is_empty() {
+                a.extend(["--after-cursor", cursor.as_str()]);
+            }
+        }
+        let (ok, out) = run("journalctl", &a);
+        if !ok && grep && out.contains("pattern") {
+            no_grep().store(true, Ordering::Relaxed);
+            continue;
+        }
+        if !ok && file && (out.contains("unrecognized") || out.contains("cursor-file")) {
+            no_cursor_file().store(true, Ordering::Relaxed);
+            continue;
+        }
+        let mut next = String::new();
+        for l in out.lines() {
+            if let Some(c) = l.strip_prefix("-- cursor: ") {
+                next = c.trim().to_string();
+            } else if !l.starts_with("-- ") {
+                lines.push(l.to_string());
+            }
+        }
+        if file {
+            next = std::fs::read_to_string(&cf).unwrap_or_default().trim().to_string();
+        }
+        if !next.is_empty() && next.len() < 512 && !next.contains(['\n', '\r']) {
+            *cursor = next;
+        }
+        break;
+    }
+    Some(lines)
+}
+
+/// (3.63.2) Is the udp2raw of `u` connected, and its last error: its current run's log, the new lines only
+fn log_state(u: &str, role: &str, inv: &str) -> (bool, String) {
+    let mut st = guard().logs.get(u).cloned().filter(|s| s.inv == inv).unwrap_or_else(|| LogState { inv: inv.to_string(), ..Default::default() });
+    let mut cursor = std::mem::take(&mut st.cursor);
+    let Some(lines) = journal_new(u, inv, &mut cursor, STATE_PAT) else {
+        // a systemd without invocation ids: the end of the log since the last start
+        let (_, log) = run("journalctl", &["-u", &format!("{}.service", u), "-n", "3000", "--no-pager", "-o", "cat"]);
+        return ready_from_log(role, &log);
     };
-    let err = if up {
-        String::new()
-    } else {
-        lines.iter().rev().find(|l| l.contains("[FATAL]") || l.contains("[ERROR]")).map(|l| l.chars().take(300).collect()).unwrap_or_default()
-    };
+    st.cursor = cursor;
+    for l in &lines {
+        feed(&mut st, role, l);
+    }
+    let up = st.connected(role);
+    let err = if up { String::new() } else { st.err.clone() };
+    guard().logs.insert(u.to_string(), st);
     (up, err)
 }
 
 pub fn statuses() -> Vec<super::engine::Status> {
     let (want, errors, since) = {
-        let s = guard();
+        let mut s = guard();
+        // what is known of a unit that is gone is let go
+        let units: Vec<String> = s.want.iter().map(|w| w.unit()).collect();
+        s.logs.retain(|u, _| units.contains(u));
         (s.want.clone(), s.errors.clone(), s.since.clone())
     };
     let bytes = counters();
@@ -623,15 +789,16 @@ pub fn statuses() -> Vec<super::engine::Status> {
                 err = e;
                 continue;
             }
-            if !active(&u) {
+            let (on, inv, started) = unit_state(&u);
+            if !on {
                 err = "the udp2raw service is not running".into();
                 continue;
             }
-            let (_, log) = run("journalctl", &["-u", &format!("{}.service", u), "-n", "80", "--no-pager", "-o", "cat"]);
-            let (ok, le) = ready_from_log(&role, &log);
+            let (ok, le) = log_state(&u, &role, &inv);
             if ok {
                 up += 1;
-                let s = since.get(&u).cloned().unwrap_or(0);
+                // started here, or (an agent that restarted since) when systemd started it
+                let s = since.get(&u).cloned().unwrap_or(started);
                 first = if first == 0 { s } else { first.min(s) };
             } else if err.is_empty() {
                 err = if !le.is_empty() {
@@ -759,6 +926,44 @@ mod tests {
         assert!(ready_from_log("exit", "[INFO][1.2.3.4:5]changed state to server_ready\n").0);
         let (up, err) = ready_from_log("exit", "[FATAL]bind fail\n");
         assert!(!up && err.contains("bind fail"));
+    }
+
+    /// (3.63.2) many users: lines of their flows do not hide the state; a server line names its entry
+    #[test]
+    fn the_state_holds_through_many_flows() {
+        let mut st = LogState::default();
+        feed(&mut st, "entry", "[2026-11-25 10:00:00][INFO]changed state from to client_handshake2 to client_ready");
+        for i in 0..5000 {
+            feed(&mut st, "entry", &format!("[2026-11-25 10:00:01][INFO]new packet from 10.0.0.{}:4{},conv_id=abc", i % 200, i));
+            feed(&mut st, "entry", "[2026-11-25 10:03:01][INFO]conv abc cleared");
+        }
+        assert!(st.connected("entry"));
+        feed(&mut st, "entry", "[2026-11-25 10:09:00][INFO]state back to client_idle from  client_ready bc of server-->client direction timeout");
+        assert!(!st.connected("entry"));
+
+        // the exit: an entry that came back on a new port, the old one cleared later: still connected
+        let mut x = LogState::default();
+        feed(&mut x, "exit", "[2026-11-25 10:00:00][INFO][1.2.3.4:5000]changed state to server_ready");
+        feed(&mut x, "exit", "[2026-11-25 10:05:00][INFO][1.2.3.4:6000]changed state to server_ready");
+        feed(&mut x, "exit", "[2026-11-25 10:09:00][INFO][1.2.3.4:5000]inactive conn cleared ");
+        assert!(x.connected("exit"));
+        feed(&mut x, "exit", "[2026-11-25 10:15:00][INFO][1.2.3.4:6000]inactive conn cleared ");
+        assert!(!x.connected("exit"));
+        assert_eq!(peer_before("[t][INFO][9.9.9.9:1]changed state to server_ready", "]changed state to server_ready").as_deref(), Some("9.9.9.9:1"));
+        assert_eq!(peer_before("no marker", "]x"), None);
+    }
+
+    /// (3.63.2) renaming a tunnel does not restart its udp2raw; another port does
+    #[test]
+    fn a_new_name_is_no_reconnect() {
+        let a = spec("entry");
+        let mut b = a.clone();
+        b.name = "another name".into();
+        assert_ne!(unit_text(&a), unit_text(&b));
+        assert_eq!(run_lines(&unit_text(&a)), run_lines(&unit_text(&b)));
+        let mut c = a.clone();
+        c.idx = 3;
+        assert_ne!(run_lines(&unit_text(&a)), run_lines(&unit_text(&c)));
     }
 
     /// the carried binary is the official file of the release
