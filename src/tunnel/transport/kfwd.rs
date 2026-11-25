@@ -88,7 +88,7 @@ fn host_ok(h: &str) -> bool {
 }
 
 /// the other server's IPv4 (a name is looked up; an IPv6-only name is not usable here)
-fn resolve(h: &str) -> Option<Ipv4Addr> {
+pub(crate) fn resolve(h: &str) -> Option<Ipv4Addr> {
     let h = h.trim().trim_start_matches('[').trim_end_matches(']');
     let h = h.rsplit_once(':').filter(|(_, p)| p.chars().all(|c| c.is_ascii_digit())).map(|(a, _)| a).unwrap_or(h);
     if let Ok(ip) = h.parse::<Ipv4Addr>() {

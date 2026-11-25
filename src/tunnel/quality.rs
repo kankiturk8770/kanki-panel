@@ -185,6 +185,7 @@ fn transport_name(t: &str) -> String {
         "awg" => "AmneziaWG".into(),
         "hy2" => "Hysteria2".into(),
         "fwd" => "Direct".into(),
+        "kup" => "KANKI-UP".into(),
         o => o.to_uppercase(),
     }
 }

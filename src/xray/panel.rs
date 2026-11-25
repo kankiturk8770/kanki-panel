@@ -1097,7 +1097,7 @@ fn link_tunnel(app: &App, s: &XraySettings, ib: &Inbound, u: &User) -> Option<(S
     if !ib.link_host.trim().is_empty() || ib.link_port > 0 {
         return None;
     }
-    let tw = crate::twin::of_server(app, &ib.server)?;
+    let tw = crate::twin::of_server(app, &ib.server, ib.port, ib.network != "kcp")?;
     let own = server_address(app, s, &ib.server);
     let mut x = ib.clone();
     x.link_host = tw.host.clone();
@@ -2159,8 +2159,11 @@ mod tests {
         app.db.set("xray_cfg", &serde_json::to_string(&x).unwrap());
         // Iran → Germany: TCP 443 on Iran is 2083 here, 8443 on Iran is 443 here
         let t = crate::tunnel::panel::Tunnel { entry: "ir".into(), exit: "de".into(), tcp: vec!["443:2083".into(), "8443:443".into()], enabled: true, ..Default::default() };
-        app.db.set("tun_list", &serde_json::to_string(&vec![t]).unwrap());
-        app.db.set("srv_tunnel", &json!({ "de": { "on": true, "host": "ir.example.com" } }).to_string());
+        app.db.set("tun_list", &serde_json::to_string(&vec![t.clone()]).unwrap());
+        // the Iran servers: their address is the copies' address, nothing typed anywhere (3.61)
+        let ir = crate::tunnel::panel::TServer { id: "ir".into(), name: "Iran".into(), addr: "ir.example.com".into(), ..Default::default() };
+        let ir2 = crate::tunnel::panel::TServer { id: "ir2".into(), name: "Iran-2".into(), addr: "ir2.example.com".into(), ..Default::default() };
+        crate::tunnel::panel::save_servers(&app, &[ir, ir2]);
         let u = User { id: 3, username: "ali".into(), code: "99887766".into(), enabled: true, protocols: "xray".into(), ..emit::test_user() };
         let l = user_links_at(&app, &u);
         let names: Vec<&str> = l.iter().map(|x| x.0.as_str()).collect();
@@ -2178,21 +2181,22 @@ mod tests {
         assert!(l[1].1.contains("sni=de.example.com"), "{}", l[1].1);
         assert!(l[3].1.contains("@ir.example.com:8443?") && l[3].1.contains("sni=www.microsoft.com"), "{}", l[3].1);
         assert!(l[4].1.contains("@cdn.example.com:"), "{}", l[4].1);
-        // tunnel off: only the server's own links
-        app.db.set("srv_tunnel", "{}");
+        // the tunnel off: only the server's own links
+        let mut off = t.clone();
+        off.enabled = false;
+        app.db.set("tun_list", &serde_json::to_string(&vec![off]).unwrap());
         assert_eq!(user_links_at(&app, &u).len(), 3);
-        // the server's tunnel off, Xray's own Iran address on: Xray still gets its copies through it, on
-        // the port that Iran server's tunnel carries
+        // the tunnel of Trojan's port made with Iran-2: the copy goes through Iran-2, on the port it carries; VLESS
+        // (443) is carried by no tunnel and gets no copy that would lead nowhere
         let t2 = crate::tunnel::panel::Tunnel { id: "b".into(), entry: "ir2".into(), exit: "de".into(), tcp: vec!["9443:2083".into()], enabled: true, ..Default::default() };
-        let ir2 = crate::tunnel::panel::TServer { id: "ir2".into(), name: "Iran-2".into(), addr: "ir2.example.com".into(), ..Default::default() };
-        crate::tunnel::panel::save_servers(&app, &[ir2]);
-        let t1 = crate::tunnel::panel::Tunnel { id: "a".into(), entry: "ir".into(), exit: "de".into(), tcp: vec!["443:2083".into()], enabled: true, ..Default::default() };
-        app.db.set("tun_list", &serde_json::to_string(&vec![t1, t2]).unwrap());
-        crate::twin::save_core(&app, "de", &json!({ "core": "xray", "host": "ir2.example.com" })).unwrap();
+        app.db.set("tun_list", &serde_json::to_string(&vec![t2.clone()]).unwrap());
+        // an address typed before 3.61 (server or Xray's own) changes nothing
+        crate::twin::save_core(&app, "de", &json!({ "core": "xray", "host": "old.example.com" })).unwrap();
+        app.db.set("srv_tunnel", &json!({ "de": { "on": true, "host": "old.example.com", "cores": { "xray": "old.example.com" } } }).to_string());
         let l = user_links_at(&app, &u);
-        // these tunnels carry only 2083: VLESS (443) gets no copy that would lead nowhere
         assert_eq!(l.len(), 4, "{:?}", l);
         assert!(l[1].1.contains("@ir2.example.com:9443?"), "{}", l[1].1);
+        assert!(!l.iter().any(|x| x.1.contains("old.example.com")), "{:?}", l);
         assert!(!l.iter().any(|x| x.0.starts_with("🇮🇷") && x.0.contains("VLESS")), "{:?}", l);
         // the app reads where each link goes and which two are one row
         let v = sub_info(&app, &u);
@@ -2200,11 +2204,11 @@ mod tests {
         assert_eq!(a.iter().map(|x| x["via"].as_str().unwrap()).collect::<Vec<_>>(), vec!["direct", "tunnel", "direct", "direct"]);
         assert_eq!(a[0]["group"], a[1]["group"]);
         assert_ne!(a[0]["group"], a[2]["group"]);
-        // the server's tunnel switched on keeps Xray's own address
-        crate::twin::save(&app, "de", &json!({ "on": true, "host": "ir.example.com" })).unwrap();
-        assert!(user_links_at(&app, &u)[1].1.contains("@ir2.example.com:9443?"));
-        crate::twin::save_core(&app, "de", &json!({ "core": "xray", "host": "" })).unwrap();
-        assert!(user_links_at(&app, &u)[1].1.contains("@ir.example.com:443?"));
+        // the same tunnel moved to the other Iran server: the copy follows it at the next update
+        let mut moved = t2.clone();
+        moved.entry = "ir".into();
+        app.db.set("tun_list", &serde_json::to_string(&vec![moved]).unwrap());
+        assert!(user_links_at(&app, &u)[1].1.contains("@ir.example.com:9443?"));
     }
 
     #[test]

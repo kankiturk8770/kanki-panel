@@ -19,6 +19,8 @@ pub mod h2ws;
 pub mod hy2t;
 #[path = "transport/kfwd.rs"]
 pub mod kfwd;
+#[path = "transport/kup.rs"]
+pub mod kup;
 #[path = "transport/hq.rs"]
 pub mod hq;
 pub mod link;
