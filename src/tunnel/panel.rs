@@ -137,8 +137,19 @@ const METER_FROM: &str = "3.63.0";
 
 /// The other server's address for a direct tunnel: the public IPv4 it reports from (a name may sit behind a CDN)
 fn fwd_peer(app: &App, sid: &str) -> String {
+    // (3.63.2) the last address seen is kept: after a panel restart the entry may ask before the exit reported,
+    // and a written name (or a name that resolves elsewhere) would rewrite the tunnel there and restart it,
+    // twice. A server that moved reports its new address within seconds.
+    let key = format!("tun_peer_ip:{}", sid);
     if let Some(ip) = seen_ip(sid).filter(|ip| ip.parse::<std::net::Ipv4Addr>().is_ok()) {
+        if app.db.get(&key) != ip && !crate::migrate::frozen() {
+            app.db.set(&key, &ip);
+        }
         return ip;
+    }
+    let kept = app.db.get(&key);
+    if kept.parse::<std::net::Ipv4Addr>().is_ok() {
+        return kept;
     }
     host_of(app, sid)
 }

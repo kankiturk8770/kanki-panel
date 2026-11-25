@@ -776,8 +776,36 @@ fn exit_stats(s: &Hy2Spec) -> Option<(i64, u64, u64)> {
     Some((online, rx, tx))
 }
 
-/// entry: is the client connected? (its log says "connected to server" after the last failure)
+/// (3.63.2) what the client said so far in its current run: unit -> (run, cursor, connected, last error)
+fn entry_logs() -> &'static Mutex<HashMap<String, (String, String, bool, String)>> {
+    static L: OnceLock<Mutex<HashMap<String, (String, String, bool, String)>>> = OnceLock::new();
+    L.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// entry: is the client connected? Its log says "connected to server" after the last failure. (3.63.2) Read
+/// through its whole current run a piece at a time: a busy client writes a line for every failed request,
+/// and the last 200 lines showed a connected tunnel as down.
 fn entry_state(unit: &str) -> (bool, String) {
+    let (_, inv, _) = super::kup::unit_state(unit);
+    let mut l = entry_logs().lock().unwrap_or_else(|e| e.into_inner());
+    let mut st = l.get(unit).cloned().filter(|s| s.0 == inv && !inv.is_empty()).unwrap_or((inv.clone(), String::new(), false, String::new()));
+    if let Some(lines) = super::kup::journal_new(unit, &inv, &mut st.1, "connected to server|FATAL|ERROR|failed to initialize client|connect error") {
+        for x in &lines {
+            if x.contains("connected to server") {
+                st.2 = true;
+                st.3.clear();
+            } else if x.contains("FATAL") || x.contains("failed to initialize client") || x.contains("connect error") {
+                st.2 = false;
+            }
+            if x.contains("FATAL") || x.contains("ERROR") {
+                st.3 = x.chars().take(300).collect();
+            }
+        }
+        let r = (st.2, if st.2 { String::new() } else { st.3.clone() });
+        l.insert(unit.to_string(), st);
+        return r;
+    }
+    drop(l);
     let (_, log) = sh(&format!("journalctl -u {}.service -n 200 --no-pager -o cat 2>/dev/null", unit));
     let lines: Vec<&str> = log.lines().collect();
     let last_ok = lines.iter().rposition(|l| l.contains("connected to server"));
@@ -800,6 +828,17 @@ pub fn statuses() -> Vec<super::engine::Status> {
         let s = guard();
         (s.want.clone(), s.errors.clone(), s.since.clone())
     };
+    {
+        // what is known of a client that is gone is let go (and its place in the journal)
+        let units: Vec<String> = want.iter().map(|w| w.unit()).collect();
+        entry_logs().lock().unwrap_or_else(|e| e.into_inner()).retain(|u, _| {
+            let keep = units.contains(u);
+            if !keep {
+                let _ = std::fs::remove_file(format!("{}/{}.cursor", super::kup::CURSOR_DIR, u));
+            }
+            keep
+        });
+    }
     let mut out = vec![];
     for w in want {
         let u = w.unit();
