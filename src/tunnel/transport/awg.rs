@@ -564,6 +564,11 @@ pub fn set_desired(want: Vec<AwgSpec>) {
             w
         })
         .collect();
+    // (3.63) ping, loss and jitter once a minute from the entry, through the link's inner address
+    super::meter::set_targets(
+        "awg",
+        want.iter().filter(|w| w.role == "entry" && !w.peer_ip.is_empty()).map(|w| (w.tid.clone(), super::meter::Target::Ping(w.peer_ip.clone()))).collect(),
+    );
     let run = {
         let mut s = guard();
         let changed = s.want != want;
@@ -640,7 +645,7 @@ pub fn statuses() -> Vec<super::engine::Status> {
             transport: "awg".into(),
             listening: w.endpoint.is_empty(),
             probe: None,
-            quality: None,
+            quality: if alive && w.role == "entry" { super::meter::get(&w.tid) } else { None },
             lanes: 0,
             bulk_flows: 0,
         });

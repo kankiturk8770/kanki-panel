@@ -110,7 +110,10 @@ pub fn open_ports(specs: &[Spec]) {
         if let Some(k) = &s.kup {
             for w in k {
                 if w.role == "entry" {
-                    want.push(format!("{}/udp", w.listen));
+                    // the measuring pair listens on 127.0.0.1 only: nothing to open
+                    if !w.probe {
+                        want.push(format!("{}/udp", w.listen));
+                    }
                 } else if w.cfg.easy() {
                     // easy-faketcp: the kernel's own TCP connection, so its port is opened like any listener
                     want.push(format!("{}/tcp", w.listen));

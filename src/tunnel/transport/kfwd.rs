@@ -140,6 +140,15 @@ pub fn rules(w: &FwdSpec, peer: Ipv4Addr) -> Vec<Rule> {
         (None, true) => w.peer_inner(),
         (None, false) => peer.clone(),
     };
+    // (3.63) what passes, both ways: counted first (no target), by the port the users came to
+    let tag: String = w.tid.chars().filter(|c| c.is_ascii_alphanumeric()).take(24).collect();
+    for (proto, list) in [("tcp", &w.tcp), ("udp", &w.udp)] {
+        for (a, _) in crate::tunnel::engine::parse_ports(list) {
+            for (dir, way) in [("ORIGINAL", "up"), ("REPLY", "down")] {
+                out.push(("filter", s(&["-A", "KFWD-FWD", "-p", proto, "-m", "conntrack", "--ctorigdstport", &a.to_string(), "--ctdir", dir, "-m", "comment", "--comment", &format!("kf:{}:{}", tag, way)])));
+            }
+        }
+    }
     for (proto, list) in [("tcp", &w.tcp), ("udp", &w.udp)] {
         for (a, b) in crate::tunnel::engine::parse_ports(list) {
             let (a, b) = (a.to_string(), b.to_string());
@@ -336,6 +345,15 @@ fn reconcile() {
             g.errors.insert(k, v);
         }
     }
+    // (3.63) ping, loss and jitter once a minute from the entry: through the link (gre) or to the exit (nat)
+    super::meter::set_targets(
+        "fwd",
+        ready
+            .iter()
+            .filter(|(w, p)| w.role == "entry" && !p.is_unspecified())
+            .map(|(w, p)| (w.tid.clone(), super::meter::Target::Ping(if w.gre() { w.peer_inner() } else { p.to_string() })))
+            .collect(),
+    );
     // delay to the other server: through the link (gre) or straight (nat)
     for (w, peer) in ready.iter().filter(|(_, p)| !p.is_unspecified()) {
         let to = if w.gre() { w.peer_inner() } else { peer.to_string() };
@@ -385,8 +403,33 @@ pub fn set_desired(want: Vec<FwdSpec>) {
     });
 }
 
+/// tunnel tag -> (bytes the users sent in, bytes back to them), from the counting rules of the entry
+fn counters() -> HashMap<String, (u64, u64)> {
+    let mut m: HashMap<String, (u64, u64)> = HashMap::new();
+    let (ok, out) = ipt("filter", &s(&["-nvxL", "KFWD-FWD"]));
+    if !ok {
+        return m;
+    }
+    for l in out.lines() {
+        let Some(c) = l.split("/* ").nth(1).and_then(|x| x.split(" */").next()) else { continue };
+        let f: Vec<&str> = c.split(':').collect();
+        if f.len() != 3 || f[0] != "kf" {
+            continue;
+        }
+        let bytes: u64 = l.split_whitespace().nth(1).and_then(|b| b.parse().ok()).unwrap_or(0);
+        let e = m.entry(f[1].to_string()).or_default();
+        if f[2] == "up" {
+            e.0 += bytes;
+        } else {
+            e.1 += bytes;
+        }
+    }
+    m
+}
+
 /// status of every wanted direct tunnel, shaped like the engine's status
 pub fn statuses() -> Vec<super::engine::Status> {
+    let bytes = if guard().want.iter().any(|w| w.role == "entry") { counters() } else { HashMap::new() };
     let g = guard();
     let now = crate::util::now() as u64;
     g.want
@@ -408,9 +451,9 @@ pub fn statuses() -> Vec<super::engine::Status> {
                 role: w.role.clone(),
                 links: if alive { 1 } else { 0 },
                 want: 1,
-                rtt_ms: if alive { rtt.unwrap_or(0) } else { 0 },
-                rx_bytes: 0,
-                tx_bytes: 0,
+                rtt_ms: if alive { rtt.or_else(|| Some(super::meter::rtt(&w.tid)).filter(|r| *r > 0)).unwrap_or(0) } else { 0 },
+                rx_bytes: bytes.get(&w.tid.chars().filter(|c| c.is_ascii_alphanumeric()).take(24).collect::<String>()).map(|b| b.1).unwrap_or(0),
+                tx_bytes: bytes.get(&w.tid.chars().filter(|c| c.is_ascii_alphanumeric()).take(24).collect::<String>()).map(|b| b.0).unwrap_or(0),
                 streams: 0,
                 udp_flows: 0,
                 error,
@@ -418,7 +461,7 @@ pub fn statuses() -> Vec<super::engine::Status> {
                 transport: if w.gre() { "gre".into() } else { "nat".into() },
                 listening: false,
                 probe: None,
-                quality: None,
+                quality: if w.role == "entry" { super::meter::get(&w.tid) } else { None },
                 lanes: 0,
                 bulk_flows: 0,
             }
@@ -494,7 +537,7 @@ mod lab {
             std::thread::sleep(Duration::from_millis(300));
             let st = statuses();
             if std::path::Path::new(&stop).exists() || t0.elapsed() > Duration::from_secs(120) {
-                eprintln!("kfwd lab {}: status {:?}", w.role, st.first().map(|s| (s.links, s.rtt_ms, s.error.clone())));
+                eprintln!("kfwd lab {}: status {:?}", w.role, st.first().map(|s| (s.links, s.rtt_ms, s.tx_bytes, s.rx_bytes, s.quality.clone(), s.error.clone())));
                 break;
             }
         }

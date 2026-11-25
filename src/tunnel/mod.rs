@@ -24,6 +24,7 @@ pub mod kup;
 #[path = "transport/hq.rs"]
 pub mod hq;
 pub mod link;
+pub mod meter;
 #[path = "transport/mux.rs"]
 pub mod mux;
 #[path = "transport/obfs.rs"]
