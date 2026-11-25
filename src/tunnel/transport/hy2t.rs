@@ -108,6 +108,9 @@ pub struct Hy2Spec {
     /// exit: local traffic stats API
     pub stats_port: u16,
     pub stats_secret: String,
+    /// (3.63) the measuring forward: the entry listens on 127.0.0.1:probe and Hysteria takes it to the
+    /// exit's 127.0.0.1:probe, where the agent echoes (0 = an older panel: none)
+    pub probe: u16,
 }
 
 impl Hy2Spec {
@@ -237,10 +240,14 @@ pub fn render(s: &Hy2Spec) -> String {
         }
     }
     let upairs = super::engine::parse_ports(&s.fwd_udp);
-    if !upairs.is_empty() {
+    if !upairs.is_empty() || s.probe > 0 {
         c.push_str("udpForwarding:\n");
         for (a, b) in upairs {
             c.push_str(&format!("  - listen: 0.0.0.0:{}\n    remote: {}\n    timeout: 120s\n", a, q(&format!("{}:{}", target, b))));
+        }
+        // ping, loss and jitter through the tunnel: only for this machine, to the exit's echo
+        if s.probe > 0 {
+            c.push_str(&format!("  - listen: 127.0.0.1:{}\n    remote: 127.0.0.1:{}\n    timeout: 60s\n", s.probe, s.probe));
         }
     }
     if !s.src_routes.is_empty() {
@@ -685,6 +692,16 @@ fn reconcile() {
             }
         }
     }
+    // the measuring: the entry sends through its forward, the exit answers on its echo
+    let mut targets = vec![];
+    for w in want.iter().filter(|w| w.probe > 0) {
+        if w.role == "entry" {
+            targets.push((w.tid.clone(), super::meter::Target::Udp(std::net::SocketAddr::from(([127, 0, 0, 1], w.probe)))));
+        } else {
+            super::meter::echo_on(w.probe);
+        }
+    }
+    super::meter::set_targets("hy2", targets);
     if want.is_empty() {
         return;
     }
@@ -813,12 +830,13 @@ pub fn statuses() -> Vec<super::engine::Status> {
             }
             (if up { 1 } else { 0 }, 0, 0)
         };
+        let (rtt, q) = if links > 0 && w.role == "entry" { (super::meter::rtt(&w.tid), super::meter::get(&w.tid)) } else { (0, None) };
         out.push(super::engine::Status {
             id: w.tid.clone(),
             role: w.role.clone(),
             links,
             want: 1,
-            rtt_ms: 0,
+            rtt_ms: rtt,
             rx_bytes: rx,
             tx_bytes: tx,
             streams: 0,
@@ -828,7 +846,7 @@ pub fn statuses() -> Vec<super::engine::Status> {
             transport: "hy2".into(),
             listening: w.role == "exit",
             probe: None,
-            quality: None,
+            quality: q,
             lanes: 0,
             bulk_flows: 0,
         });
@@ -872,6 +890,16 @@ mod tests {
         assert!(c.contains("udpForwarding:\n  - listen: 0.0.0.0:51820"));
         assert!(c.contains("name: \"khyabcdef1234\""));
         assert!(!c.contains("route:"), "Hysteria must not add routes by itself");
+        // (3.63) the measuring forward: only on this machine, to the exit's own echo
+        let mut p = spec("entry");
+        p.probe = 61003;
+        let c = render(&p);
+        assert!(c.contains("  - listen: 127.0.0.1:61003\n    remote: 127.0.0.1:61003"), "{}", c);
+        let mut q = spec("entry");
+        q.fwd_udp.clear();
+        q.probe = 61003;
+        assert!(render(&q).contains("udpForwarding:\n  - listen: 127.0.0.1:61003"));
+        assert!(!render(&spec("entry")).contains("127.0.0.1:61"));
     }
 
     #[test]

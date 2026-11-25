@@ -29,7 +29,7 @@ src/
 ├── vpn/               هسته‌های VPN: wg.rs، hy2.rs، kmix.rs، sync.rs، amnezia.rs، mtu.rs
 │   └── kmix-server/   سورس Go سرور KANKI MIX (`build.sh` ← assets/bin/kanki-mix-server؛ CI می‌سازد)
 ├── bot/               ربات تلگرام: bot.rs، shop.rs، miniapp.rs، channel.rs، ai.rs، pay.rs، buttons.rs، monitor.rs (ربات گزارش‌ها)
-├── tunnel/            تانل‌ها: mod.rs، engine.rs، link.rs، agent.rs، panel.rs (تانل‌ها و سرورهای تانل در پنل)، probe.rs، quality.rs، tests.rs
+├── tunnel/            تانل‌ها: mod.rs، engine.rs، link.rs، agent.rs، panel.rs (تانل‌ها و سرورهای تانل در پنل)، probe.rs، quality.rs، meter.rs (سنجش تانل‌های غیر کانکی)، tests.rs
 │   └── transport/     پروتکل‌های سیم: quic، hq، salamander، h2ws، dual، obfs، mux، fec، game، dgram (لاین بی‌ترتیب UDP گیم)، faketcp، awg، hy2t، kfwd (مستقیم: NAT/GRE)، kup (KANKI-UP: udp2raw)
 ├── xray/              mod.rs (Xray روی سرور)، panel.rs (Xray در پنل و لینک‌ها)
 ├── dns/               DNS کانکی: mod.rs، engine.rs، doh.rs، sni.rs، wire.rs، panel.rs
@@ -95,6 +95,7 @@ assets/
 | **Game-FEC Pro** (3.57: `game` با FEC `auto`): ترمیم به اندازهٔ افت خط (گزارش `0xF5` هر نیم ثانیه، `SHAPES`، سقف دو برابر)، فقط بازی کد می‌شود (`0xF6` ساده برای KCP و bulk)، هستهٔ همراه `Tunnel.profile` (`kmix`: خروجی علامت EF را می‌خواند، `UDPB` در `mux.rs`) | `src/tunnel/transport/game.rs` (`Adapt`، `Out::report`)، `fec.rs` (`adaptive`، `set_shape`)، `mux.rs` (`classify`، `UDPB`)، `dgram.rs` (`send_as`)، `TPROF` در `12-tunnels.js` |
 | **تانل مستقیم در کرنل** (3.59، نوع `fwd`): `nat` (DNAT ورودی ← IP خروجی) یا `gre` (لینک GRE ‏10.89.N.0/30)، زنجیره‌های `KFWD-*`، آدرس واقعی سرور (`fwd_peer`)، نسخه‌ی ایجنت `FWD_FROM` | `src/tunnel/transport/kfwd.rs`، `panel.rs` (`fwd_apply_body`، `fwd_checks`)، `tw_fw`/`tw_fm` در `12-tunnels.js`؛ آزمایشگاه `scripts/kfwd_lab.sh` |
 | **KANKI-UP** (3.61، نوع `kup`): udp2raw رسمی 20230206.0 (داخل برنامه، gzip، SHA-256 فایل انتشار چک می‌شود) بین دو سرور؛ هر پورت UDP یک جفت (ورودی `-c` روی پورت کاربر، خروجی `-s` روی پورت خام `port + i`)، هر کدام یک واحد systemd `kanki-up-<id>-<i>` با فایل تنظیمات 0600 (کلید در `ps` دیده نمی‌شود)؛ حالت faketcp/easy-faketcp/udp/icmp، همه‌ی گزینه‌ها در فرم؛ پورت‌های خام در فایروال **بسته** می‌مانند (جز easy-faketcp)؛ فقط UDP، ICMP یک پورت و یکی برای هر خروجی | `src/tunnel/transport/kup.rs`، `panel.rs` (`kup_specs`، `kup_apply_body`، `kup_checks`، `tunnel_needs`)، `agent.rs` (`open_ports`)، `#tw_kup` در `12-tunnels.js`؛ آزمایشگاه `scripts/kup_lab.sh` |
+| **سنجش تانل‌های غیر کانکی** (3.63): پینگ، افت و لرزش هر دقیقه KANKI-UP (جفت سنجش udp2raw، `probe`)، Hysteria2 (فوروارد `127.0.0.1:61000+n`)، AmneziaWG و GRE (پینگ آدرس داخلی)، NAT (پینگ خروجی)؛ اکو روی خروجی فقط loopback؛ حجم با قانون‌های شمارش iptables (`KANKI-KUPACCT`، `kf:` در `KFWD-FWD`) | `src/tunnel/meter.rs`، `kup.rs` (`account`، `meter_targets`)، `panel.rs` (`kup_probe_port`)؛ تست هوشمند همه‌ی نوع‌ها: `PROBE_KINDS`، `probe_extra` |
 | موتور تانل، لینک رمزشده، ایجنت سرور تانل (`tunnel-agent`, `tunnel-run`)، تست تانل هوشمند | `src/tunnel/engine.rs`, `link.rs`, `agent.rs`, `probe.rs` |
 | پروتکل‌های تانل (QUIC/KCP، hq، h2، game+FEC، faketcp، awg، hy2، mux، obfs) | `src/tunnel/transport/*.rs` |
 | کیفیت مسیرها در ربات (سنجش UDP داخل هر تانل هر دقیقه، «📡 وضعیت مسیرها» صفحهٔ مینی‌اپ `?admin=paths` و `quality::view`، سوییچ هشدار `path_alerts`) | `src/tunnel/quality.rs` (+ `engine::quality_task`، `probe::udp_quality`، `panel::live_quality`/`live_lanes`، `drawPaths` در `miniapp.html`) |
@@ -437,6 +438,7 @@ assets/
 ### فهرست نسخه‌ها
 | نسخه | تاریخ | خلاصه | PR |
 |---|---|---|---|
+| 3.63.0 | 2026-11-25 | همه‌ی تانل‌ها پینگ، افت، لرزش و حجم واقعی دارند (KANKI-UP، Hysteria2، AmneziaWG، NAT/GRE)؛ «مناسب برای» کنار هر تانل؛ تست هوشمند همه‌ی نوع‌ها را امتحان می‌کند | |
 | 3.62.0 | 2026-11-25 | پنل مرتب: سرورها کاشی با پرچم (ایران و خارج جدا) و پنجره‌ی چهارتبه، کنترل ایجنت روی همه‌ی سرورها، «آپدیت همه» زنده با تیک سبز، فایروال با جدول پورت‌ها، کاربرها اول آنلاین‌ها، پورت‌های تانل چیپ | |
 | 3.61.0 | 2026-11-25 | تانل KANKI-UP: udp2raw رسمی (FakeTCP/UDP/ICMP رمزشده، بی ارسال دوباره) بین دو سرور برای همه‌ی هسته‌های UDP، با همه‌ی تنظیماتش در فرم تانل | |
 | 3.60.1 | 2026-11-24 | KANKI MIX بی بسته‌ی اضافه روی خط تمیز: پله‌ها فقط از افت واقعی، همراه اپ ۱.۴۴.۱ | |
@@ -511,6 +513,14 @@ assets/
 | 3.20.1 | 2026-10-29 | بکاپ، سرور ایران فقط تانل، gzip صفحه، اسکیل طراحی | |
 
 جزئیات هر نسخه: `docs/CHANGES.md`. گزارش‌های کامل قدیمی (تا 3.23.1) در تاریخچهٔ git همین فایل هستند.
+
+### آخرین کارها — 3.63.0 (2026-11-25، برنچ `ccr-f970ec4f-jrr11c`)
+**خواسته (صاحب پنل، عصبانی، به‌حق):** KANKI-UP وصل نشان می‌داد ولی پینگ و هیچ عددی نه؛ «همه‌ی تانل‌ها را چک کن، هیچی جا نماند، کنار هر کدام بنویس برای گیم/پکت‌لاست خوب است، تنظیمات ضعیف را تکمیل کن، هر کدام که می‌شود در تست هوشمند، لیست تست هوشمند مرتب، بعد main».
+**پیدا شد (همه‌ی نوع‌ها):** KANKI-UP پینگ ۰ و حجم ۰ ثابت؛ Hysteria2 پینگ ۰ و حجم ورودی ۰؛ مستقیم NAT/GRE حجم ۰؛ AmneziaWG فقط یک پینگ بی افت؛ هیچ‌کدام در «وضعیت مسیرها»ی ربات نبودند؛ تست هوشمند فقط ترانسپورت‌های کانکی را امتحان می‌کرد. تانل‌های کانکی سالم بودند.
+**مسیر:** `meter.rs` (اکو فقط 127.0.0.1، ۲۰ بسته یا ۱۰ پینگ هر دقیقه) ← `Status.quality`/`rtt_ms` هر نوع ← گزارش ایجنت ← فهرست تانل‌ها (`tunBody` افت و لرزش)، `live_quality` (ربات)؛ KANKI-UP: `kup_probe_port` (ذخیره و یک‌باره برای قدیمی‌ها) ← `kup_specs` (جفت سنجش) ← ایجنت `apply_one` (پورت محلی / اکو) ← `meter_targets`، حجم `account`/`counters`؛ Hysteria2: `hy2_spec.probe` ← `render` (فوروارد) ← `echo_on` خروجی؛ NAT/GRE: قانون‌های شمارش در `rules` ← `counters`؛ AmneziaWG: `set_desired` ← پینگ داخلی؛ تست هوشمند: `probe_start` (`kinds`، `probe_extra` با کلید تازه) ← `specs_for` (تانل‌های تست مثل تانل واقعی) ← `probe_get` (`probe_extra_result`) ← `tunSmartDraw`؛ برچسب‌ها `TSUIT` در فرم، فهرست و تست.
+**تست:** `cargo test` ۳۸۸ (تازه: `meter` سه تست، جفت سنجش KANKI-UP، `probe_port`، `probe_extra` هر شش نوع، `probe_extra_result`، فوروارد Hysteria2)؛ آزمایشگاه udp2raw واقعی در namespace (faketcp و udp): جفت سنجش وصل، ۲۰ از ۲۰ از داخل تانل، شمارش iptables، بعد از توقف هیچ قانونی نماند؛ آزمایشگاه NAT واقعی: حجم هر دو طرف (۷۷۴۹/۸۲۸۰ بایت) و افت/پینگ، تمیز بعد از حذف؛ Playwright تانل‌ها، فرم، تست هوشمند (فرم و نتیجه) و سرورها ۶ عرض فارسی/انگلیسی بی خطا.
+**امنیت:** اکو فقط روی 127.0.0.1 و فقط به فرستنده‌ی loopback جواب می‌دهد (بازتاب از بیرون نه)؛ پینگ فقط IP با حروف امن، بی `-` (تزریق گزینه نه)، دستورها بی شل؛ قانون‌های iptables فقط عدد پورت و شناسه‌ی حرف و عدد؛ جفت سنجش ورودی فقط loopback و در فایروال باز نمی‌شود؛ `kinds` تست فهرست سفید و فقط ادمین (`nodes`)، تانل‌های تست با کلید تازه و با پایان تست برداشته می‌شوند؛ `probe_port` را مرورگر نمی‌تواند بگذارد.
+**دیده نشده / نشد:** GRE واقعی (این کرنل `ip_gre` ندارد)، Hysteria2 و AmneziaWG واقعی (برنامه‌هایشان این‌جا نیست: فقط تست کانفیگ)، سرورهای واقعی. اولین آپدیت: کلاینت Hysteria2 هر تانل یک بار ری‌استارت می‌شود (فوروارد سنجش). تنظیمات تانل‌ها بازبینی شد؛ تنظیم مهم جاافتاده‌ای پیدا نشد.
 
 ### آخرین کارها — 3.62.0 (2026-11-25، برنچ `ccr-f970ec4f-jrr11c`)
 **خواسته (صاحب پنل):** سرورها شبکه‌ای با پرچم و اسم (ایران و خارج جدا)، هسته‌ها مخفف، کلیک = پنجره با بخش‌های مرتب بی لیست بلند؛ همه‌ی سرورها (ایران و خارج) کنترل ایجنت؛ «آپدیت همه» یک‌جا و زنده با تیک سبز؛ فایروال مرتب، کاشی هر سرور و جدول پورت‌های باز با کارشان؛ کاربرها اول آنلاین‌ها، بی دکمه‌ی «فیلتر»؛ تانل‌ها (ردیف‌ها، فرم، تست، پورت‌ها) مرتب.

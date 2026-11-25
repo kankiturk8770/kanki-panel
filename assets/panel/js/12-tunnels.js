@@ -10,6 +10,9 @@ function tunSrv(id){var l=(TN.d&&TN.d.servers)||[];for(var i=0;i<l.length;i++)if
 function tunStateTxt(s){return {up:t('Connected'),partial:t('Connecting…'),down:t('Disconnected'),off:t('Off')}[s]||s}
 function tunCol(s){return s=='up'?'#3ddc97':s=='partial'?'#f5b942':s=='off'?'#8a8f98':'#ff6b6b'}
 function tunTr(x){return {fwd:t('Direct (kernel)'),nat:'NAT (iptables)',gre:'GRE',tcpmux:'TCP Mux',tcp:'TCP',ws:'WebSocket',wss:'WSS (TLS)',quic:'QUIC',kcp:'KCP',hq:'HQ (masked QUIC)',h2:'H2 (HTTP/2 + TLS)',dual:'Dual (HQ + H2)',cdn:'CDN (whitelist)',game:'Game-FEC Pro',faketcp:'FakeTCP (UDP→TCP)',kup:'KANKI-UP',awg:'AmneziaWG',hy2:'Hysteria2',baseline:t('Raw ping')}[x]||x}
+// (3.63) the other tunnel kinds the smart test tries (entry → exit; ping, loss and jitter only)
+var TS_KD=[['kup-faketcp','KANKI-UP · FakeTCP','k:kup'],['kup-udp','KANKI-UP · UDP','k:kup'],['kup-easy-faketcp','KANKI-UP · Easy FakeTCP','k:kup'],['hy2','Hysteria2','k:hy2'],['awg','AmneziaWG','k:awg'],['gre','GRE ('+t('Direct (kernel)')+')','k:fwd']];
+function tsKind(k){var o=TS_KD.filter(function(z){return z[0]==k})[0];return o?o[1]:k}
 var TS_TR=[['tcpmux','TCP Mux'],['tcp','TCP'],['ws','WebSocket'],['wss','WSS (TLS)'],['quic','QUIC'],['kcp','KCP'],['hq','HQ (masked QUIC)'],['h2','H2 (HTTP/2 + TLS)'],['game','Game-FEC Pro'],['faketcp','FakeTCP (UDP→TCP)']];
 // GRE: the panel builds its side by itself; this script builds the other side on the server
 // (a systemd service, so it comes back after a reboot) and, when the panel has a domain, points that
@@ -50,6 +53,16 @@ var TPROF=[['','Any core','Game-FEC Pro for whatever goes through: the game repa
  ['kmix','KANKI MIX','The game packets of KANKI MIX get the repairs; its KCP (lobby, logins, downloads) goes without, so downloads never fill the line of the game.'],
  ['wg','WireGuard / AmneziaWG','Every WireGuard packet is repaired as the line needs (WireGuard has no repairs of its own).']];
 // KANKI-UP raw modes: short names and what each one is
+// (3.63) what each tunnel is good for, from the lab and the field (one list: the form, the tunnel list, the smart test)
+var TSUIT={game:['game','loss','best'],kcp:['game','loss'],faketcp:['game','udpcut'],quic:['speed'],hq:['speed','stealth'],dual:['speed','stealth'],
+ tcpmux:['speed','steady'],tcp:['steady'],ws:['cdn'],wss:['stealth','steady'],h2:['stealth','steady'],cdn:['white'],
+ 'k:awg':['game','light'],'k:hy2':['speed','loss'],'k:fwd':['game','light'],'k:kup':['game','udpcut']};
+var TSUITL={game:['🎮','Good for games'],loss:['📉','Good on lossy lines'],best:['⭐','Recommended when packets are lost'],speed:['🚀','Fast downloads'],
+ steady:['🔗','Steady'],stealth:['🕶','Hard to block'],udpcut:['🧱','When UDP is cut or slowed'],light:['🪶','Lightest, no extra bytes'],cdn:['☁','Behind a CDN'],white:['🏳','Whitelist (only domestic sites open)']};
+function tunSuitKey(x){return x.kind=='awg'||x.kind=='hy2'||x.kind=='fwd'||x.kind=='kup'?'k:'+x.kind:(x.transport||'')}
+// full badges (the form, the smart test) or only the icons (a tunnel row)
+function tunSuit(k,short){var l=TSUIT[k]||[];if(!l.length)return '';
+ return '<span class="tsuit'+(short?' sh':'')+'">'+l.map(function(z){var d=TSUITL[z];return '<i class="ts-'+z+'" title="'+esc(t(d[1]))+'">'+d[0]+(short?'':' '+t(d[1]))+'</i>'}).join('')+'</span>'}
 function tunKupMode(m){return {faketcp:'FakeTCP','easy-faketcp':'Easy FakeTCP',udp:'UDP',icmp:'ICMP'}[m||'faketcp']||m}
 var KUPM={faketcp:'Raw TCP packets with a handshake and seq/ack like a real connection (default): passes where UDP is dropped or slowed. The raw port stays closed in the firewall.','easy-faketcp':'A real TCP connection of the kernel carries the raw packets: for networks that drop a handshake they do not see whole. The raw port is opened in the firewall.',udp:'Encrypted raw UDP: no TCP look, for when UDP itself passes but the cores are recognised.',icmp:'Inside ping (ICMP echo) packets: for when TCP and UDP are both cut but ping passes. One UDP port per tunnel.'};
 function tunProf(v){var o=TPROF.filter(function(z){return z[0]==v})[0];return o?t(o[1]):v}
@@ -117,7 +130,7 @@ function tnPorts(x,all){var o=tnPortList(x),h='';['tcp','udp'].forEach(function(
 // one tunnel: state, route and name on the first line; transport, ping and ports under it; a tap opens the rest
 function tunRow(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{},aw=x.kind=='awg'?(x.awg||{}):null,st=x.state=='up'?'g':x.state=='partial'?'y':x.state=='off'?'':'r';
  var ports=tnPorts(x);
- var head='<span class="dot '+st+'"></span><b>'+esc(x.name||(e.name+' → '+xs.name))+'</b><span class="sp"></span>'+
+ var head='<span class="dot '+st+'"></span><b>'+esc(x.name||(e.name+' → '+xs.name))+'</b>'+tunSuit(tunSuitKey(x),1)+'<span class="sp"></span>'+
   '<span class="kxr-st '+st+'">'+(x.state=='up'&&es.rtt_ms?'<bdi class="ltr">'+N(es.rtt_ms)+' ms</bdi>':tunStateTxt(x.state))+'</span>'+
   // (3.50) the route reads the same everywhere: Iran entry ➔ protocol (and ping) ➔ exit abroad; the ports under it
   '<span class="tn-l2"><span class="tn-flow"><span class="tn-e">'+esc(e.name)+'</span><i class="tn-ar" aria-hidden="true">➔</i><span class="kxr-st tn-p">'+esc(tunShort(x))+'</span>'+
@@ -128,6 +141,8 @@ function tunBody(x){var e=tunSrv(x.entry),xs=tunSrv(x.exit),es=x.entry_status||{
  var kn=ku?tunEntryPorts(x.udp).length:0,info=[[t('Transport'),esc(ku?'KANKI-UP · '+tunKupMode(ku.raw_mode)+' · '+(ku.cipher||'')+'/'+(ku.auth||''):fw?t('Direct (kernel)')+' · '+(fw.mode=='gre'?'GRE':'NAT'):aw?('AWG'+(aw.wrap?' ⟶ '+tunTr(x.transport):'')):hy?'Hysteria2'+(hy.obfs_on?' + Salamander':''):x.transport=='game'&&x.fec=='auto'?'Game-FEC Pro'+(x.profile?' · '+tunProf(x.profile):''):tunTr(x.transport))],[t('Ping'),es.rtt_ms?'<span class="ltr">'+es.rtt_ms+' ms</span>':'—'],
   [t('Links'),'<span class="ltr">'+N(es.links||0)+' / '+N(es.want||x.conns||1)+'</span>'],[t('Traffic'),'<span class="ltr">↑'+bytes(es.tx_bytes||0)+' ↓'+bytes(es.rx_bytes||0)+'</span>'],
   [t('Mode'),x.mode=='direct'?t('direct'):t('reverse')],[t('Port'),'<span class="ltr">'+esc(ku?(ku.raw_mode=='icmp'?'ICMP':(kn>1?x.port+'–'+(x.port+kn-1):String(x.port))+(ku.raw_mode=='udp'?'/UDP':'/TCP')):fw?(fw.mode=='gre'?fw.entry_ip+' ⇄ '+fw.exit_ip:'—'):String(aw?aw.port:x.port))+' · '+esc(x.dial_host||'?')+'</span>']];
+ // (3.63) loss and jitter of the last minute, measured through the tunnel (every kind)
+ var qq=es.quality;if(qq&&qq.n)info.splice(2,0,[t('Loss'),'<span class="ltr '+(qq.loss>=3?'c-r':qq.loss>0?'c-y':'c-g')+'">'+qq.loss+'%</span>'],[t('Jitter'),'<span class="ltr">'+qq.jit+' ms</span>']);
  if(aw)info.push(['AWG','<span class="ltr">'+esc(aw.entry_ip+' ⇄ '+aw.exit_ip+(aw.routes&&aw.routes.length?' · → '+aw.routes.join(' '):'')+(aw.src_routes&&aw.src_routes.length?' · ⇠ '+aw.src_routes.join(' '):''))+'</span>']);
  if(hy&&hy.src_routes&&hy.src_routes.length)info.push(['⇠','<span class="ltr">'+esc(hy.src_routes.join(' '))+'</span>']);
  if(x.auto)info.push([t('Rotating'),esc(x.switch_note?x.switch_note+' · '+ago(x.switched):t('Rotating tunnel'))]);
@@ -260,7 +275,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   sec(1,'Route','','route')+'<label class="f">'+t('Name')+'</label><input id="tw_nm" value="'+esc(x.name||'')+'" placeholder="'+esc(t('Empty = Iran server-abroad server'))+'">'+
   '<div class="trte"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="tw_en">'+opt(dE)+'</select></div><span class="arr">'+ic('swap',18)+'</span><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="tw_ex">'+opt(dX)+'</select></div></div>'+
   '<label class="f">'+t('Who connects')+'</label><div class="seg" id="tw_md"><button data-v="reverse" class="'+(mode=='reverse'?'on':'')+'">'+t('Exit → entry (reverse, recommended)')+'</button><button data-v="direct" class="'+(mode=='direct'?'on':'')+'">'+t('Entry → exit (direct)')+'</button></div></div>'+
-  sec(2,'Tunnel type','','type')+'<div class="seg" id="tw_kd"><button data-v="" class="'+(kind!='awg'?'on':'')+'">'+t('Kanki tunnel')+'</button><button data-v="awg" class="'+(kind=='awg'?'on':'')+'">🛡 AmneziaWG</button><button data-v="hy2" class="'+(kind=='hy2'?'on':'')+'">⚡ Hysteria2</button><button data-v="fwd" class="'+(kind=='fwd'?'on':'')+'">⇉ '+t('Direct (kernel)')+'</button><button data-v="kup" class="'+(kind=='kup'?'on':'')+'">⬆ KANKI-UP</button></div>'+
+  sec(2,'Tunnel type','','type')+'<div class="seg" id="tw_kd"><button data-v="" class="'+(kind!='awg'?'on':'')+'">'+t('Kanki tunnel')+'</button><button data-v="awg" class="'+(kind=='awg'?'on':'')+'">🛡 AmneziaWG</button><button data-v="hy2" class="'+(kind=='hy2'?'on':'')+'">⚡ Hysteria2</button><button data-v="fwd" class="'+(kind=='fwd'?'on':'')+'">⇉ '+t('Direct (kernel)')+'</button><button data-v="kup" class="'+(kind=='kup'?'on':'')+'">⬆ KANKI-UP</button></div><div id="tw_kds"></div>'+
   '<div id="tw_fw" class="box" style="display:none;margin-top:10px"><b>⇉ '+t('Direct tunnel in the kernel')+'</b>'+
   '<small class="muted" style="display:block;margin:4px 0 8px">'+t('No program in the way and nothing added to the packets: the kernel of the entry hands the ports straight to the exit. No encryption of its own (the cores encrypt their traffic); the lightest tunnel there is. Both servers need agent 3.59.0 or newer.')+'</small>'+
   '<div class="seg" id="tw_fwm"><button data-v="nat" class="'+(F.mode!='gre'?'on':'')+'">NAT (iptables)</button><button data-v="gre" class="'+(F.mode=='gre'?'on':'')+'">GRE</button></div>'+
@@ -314,7 +329,7 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
   '</div>'+
   '</div>'+
   '<div id="tw_trw" data-s="tr">'+sec(3,'Transport','<button type="button" class="b2 sm" id="tw_smart">⚡ '+t('Find the best transport')+'</button>')+
-  '<div id="tw_tr" class="trcols">'+trs.map(function(g,gi){return '<div class="trcol trc'+gi+'"><div class="trgl">'+t(g[0])+'</div><div class="tropt">'+g[1].map(function(o){return '<button data-v="'+o[0]+'" class="'+(tr==o[0]?'on':'')+'"><b>'+tunTr(o[0])+o[2].map(function(z){return '<em class="ttg">'+z+'</em>'}).join('')+'</b><small>'+o[1]+'</small></button>'}).join('')+'</div></div>'}).join('')+'</div>'+
+  '<div id="tw_tr" class="trcols">'+trs.map(function(g,gi){return '<div class="trcol trc'+gi+'"><div class="trgl">'+t(g[0])+'</div><div class="tropt">'+g[1].map(function(o){return '<button data-v="'+o[0]+'" class="'+(tr==o[0]?'on':'')+'"><b>'+tunTr(o[0])+o[2].map(function(z){return '<em class="ttg">'+z+'</em>'}).join('')+'</b><small>'+o[1]+'</small>'+tunSuit(o[0])+'</button>'}).join('')+'</div></div>'}).join('')+'</div>'+
   '<small class="muted" style="display:block;margin-top:8px">'+t('On filtered networks WSS and WS usually pass; plain TCP, TCP Mux, QUIC and KCP are often cut. Use “Find the best transport” to test them between these two servers.')+'</small>'+
   '<div id="tw_gm" class="box" style="display:none;margin-top:10px"><b>🎮 '+t('Gaming options')+'</b>'+
   '<div class="seg" id="tw_fm" style="margin-top:8px"><button type="button" data-v="auto" class="'+(pro?'on':'')+'">'+t('Game-FEC Pro (smart)')+'</button><button type="button" data-v="fixed" class="'+(pro?'':'on')+'">'+t('Fixed FEC')+'</button></div>'+
@@ -423,7 +438,8 @@ function tunEdit(id,pre){if(!TN.d)return tunLoad().then(function(){tunEdit(id,pr
  var acc=coreChips({box:'#tw_aw_cc',tcp:'#tw_aw_ft',udp:'#tw_aw_fu',note:'#tw_aw_pn',cores:exitCores,used:entryUse});
  $('#tw_en').onchange=function(){hint();cc.load();acc.load();if(!id)fillPorts(false)};$('#tw_ex').onchange=function(){hint();cc.load();acc.load();if(!id)fillPorts(false)};
  $('#tw_md').onclick=function(e){var b=e.target.closest('button');if(!b)return;st.mode=b.dataset.v;$$('#tw_md button').forEach(function(z){z.classList.toggle('on',z==b)});cdnUi()};
- function kindUi(){var aw=st.kind=='awg',hy=st.kind=='hy2',fw=st.kind=='fwd',ku=st.kind=='kup',tr=(!aw||st.wrap)&&!hy&&!fw&&!ku;$('#tw_awg').style.display=aw?'block':'none';$('#tw_hy').style.display=hy?'block':'none';$('#tw_fw').style.display=fw?'block':'none';$('#tw_kup').style.display=ku?'block':'none';$('#tw_tcpw').style.display=ku?'none':'';
+ function kindUi(){var aw=st.kind=='awg',hy=st.kind=='hy2',fw=st.kind=='fwd',ku=st.kind=='kup',tr=(!aw||st.wrap)&&!hy&&!fw&&!ku;
+  var kds=$('#tw_kds');if(kds)kds.innerHTML=st.kind?tunSuit('k:'+st.kind):'<small class="muted">'+t('Pick the transport below: each one says what it is good for')+'</small>';$('#tw_awg').style.display=aw?'block':'none';$('#tw_hy').style.display=hy?'block':'none';$('#tw_fw').style.display=fw?'block':'none';$('#tw_kup').style.display=ku?'block':'none';$('#tw_tcpw').style.display=ku?'none':'';
   $('#tw_ku_rmh').textContent=t(KUPM[st.rm]||'');$$('#tw_ku_rm button').forEach(function(z){z.classList.toggle('on',z.dataset.v==st.rm)});
   $('#tw_fmh').textContent=t(st.fm=='gre'?'A GRE link between the two servers (24 bytes a packet, in the kernel); the ports go into it. For when the ports of the exit are filtered from Iran but GRE passes. Needs root on both servers.':'The entry forwards its ports straight to the address of the exit (iptables DNAT): zero bytes added. The entry must reach the address of the exit.');$$('#tw_fwm button').forEach(function(z){z.classList.toggle('on',z.dataset.v==st.fm)});
   if(hy||fw||ku)st.mode='direct';var md=$('#tw_md');md.style.display=hy||fw||ku?'none':'';if(md.previousElementSibling)md.previousElementSibling.style.display=hy||fw||ku?'none':'';$('#tw_trw').style.display=tr?'':'none';$('#tw_ptrow').style.display=tr||ku?'':'none';$('#tw_pfw').style.display=tr?'':'none';$('#tw_dsg').style.display=tr?'':'none';$('#tw_ph').style.display=tr||ku?'':'none';$('#tw_pc').style.display=aw?'none':'';$('#tw_aw_lkw').style.display=st.wrap?'':'none';var s5=$('#tw_ptrow').closest('.tws');if(s5)s5.style.display=(!aw||st.wrap)?'':'none';$$('#tw_kd button').forEach(function(z){z.classList.toggle('on',z.dataset.v==st.kind)});cdnUi()}
@@ -565,18 +581,20 @@ function tunSmart(o){if(!TN.d)return tunLoad().then(function(){tunSmart(o)});if(
   (sv.length<2?'<div class="warnbox">'+t('First add your entry server in the “Tunnel servers” menu.')+'</div>':'')+
   '<div class="g2"><div><label class="f">'+t('Entry (users connect here)')+'</label><select id="ts_en">'+opt(c.entry||(remote[0]||{}).id)+'</select></div><div><label class="f">'+t('Exit (traffic leaves here)')+'</label><select id="ts_ex">'+opt(c.exit||'local')+'</select></div></div>'+
   '<div class="g2"><div><label class="f">'+t('Profile')+'</label><select id="ts_pf">'+po('balanced',t('Balanced'))+po('speed',t('Most speed'))+po('gaming',t('Gaming (low ping)'))+'</select></div><div><label class="f">'+t('Test ports (first of the range)')+'</label><input id="ts_pt" type="number" class="ltr" value="3990"></div></div>'+
-  '<label class="f" style="margin-top:10px">'+t('Which methods to test')+'</label>'+
-  '<div class="tschk" id="ts_tr">'+TS_TR.map(function(x){return '<label class="chk sm"><input type="checkbox" value="'+x[0]+'" checked><span>'+x[1]+'</span></label>'}).join('')+'</div>'+
+  '<label class="f" style="margin-top:10px">'+t('Kanki tunnel transports (both directions: ping, speed, UDP)')+'</label>'+
+  '<div class="tschk" id="ts_tr">'+TS_TR.map(function(x){return '<label class="chk sm"><input type="checkbox" value="'+x[0]+'" checked><span>'+x[1]+tunSuit(x[0],1)+'</span></label>'}).join('')+'</div>'+
+  '<label class="f" style="margin-top:10px">'+t('Other tunnels (entry → exit: ping, loss and jitter, what a game feels)')+'</label>'+
+  '<div class="tschk" id="ts_kd">'+TS_KD.map(function(x){return '<label class="chk sm"><input type="checkbox" value="'+x[0]+'" checked><span>'+x[1]+tunSuit(x[2],1)+'</span></label>'}).join('')+'</div>'+
   '<label class="chk sm" style="margin-top:4px"><input type="checkbox" id="ts_base" checked><span><b>'+t('Raw ping (no tunnel)')+'</b> · '+t('the plain ping between the two servers, as a reference')+'</span></label>'+
   '<p class="muted" id="ts_note" style="font-size:12px;margin:8px 0 0"></p>'+
   (r.job&&r.job.finished?'<button class="b2" style="width:100%;margin-top:10px" onclick="tunSmartRun()">'+t('Show the last result')+'</button>':'')+
-  '<button class="btn" style="width:100%;margin-top:10px" id="ts_go">'+t('Start the test')+'</button>');
- var note=function(){var p=+$('#ts_pt').value||3990,n=document.querySelectorAll('#ts_tr input:checked').length||TS_TR.length;
-  $('#ts_note').textContent=t('Takes about a minute. Ports')+' '+N(p)+'–'+N(p+n-1)+' '+t('on the entry')+' · '+N(p+n)+'–'+N(p+2*n-1)+' '+t('on the exit')+' (TCP + UDP) '+t('must be open in the cloud firewall')+'.'};
- ['ts_pt'].forEach(function(k){$('#'+k).onchange=note;$('#'+k).oninput=note});$('#ts_tr').onchange=note;note();
+  '<button class="btn" style="width:100%;margin-top:10px" id="ts_go">'+t('Start the test')+'</button>','wide');
+ var note=function(){var p=+$('#ts_pt').value||3990,n=document.querySelectorAll('#ts_tr input:checked').length||TS_TR.length,k=document.querySelectorAll('#ts_kd input:checked').length;
+  $('#ts_note').textContent=t('Takes about a minute. Ports')+' '+N(p)+'–'+N(p+n-1)+' '+t('on the entry')+' · '+N(p+n)+'–'+N(p+2*n-1+k)+' '+t('on the exit')+' (TCP + UDP) '+t('must be open in the cloud firewall')+'.'};
+ ['ts_pt'].forEach(function(k){$('#'+k).onchange=note;$('#'+k).oninput=note});$('#ts_tr').onchange=note;$('#ts_kd').onchange=note;note();
  $('#ts_pf').onchange=function(){TS.prof=this.value};
- $('#ts_go').onclick=function(){var me=this;me.disabled=true;TS.prof=$('#ts_pf').value;var trs=[].map.call(document.querySelectorAll('#ts_tr input:checked'),function(x){return x.value});if(!trs.length){me.disabled=false;return toast(t('Pick at least one method'),1)}api('POST','/api/tunnels/probe',{entry:$('#ts_en').value,exit:$('#ts_ex').value,port:+$('#ts_pt').value||3990,transports:trs,baseline:$('#ts_base').checked}).then(function(r){if(r&&r.note)toast(t('Not tested, an agent is too old (update it first)')+': '+(r.skipped||[]).join(', '),1);tunSmartRun()}).catch(function(e){me.disabled=false;fail(e)})}}).catch(fail)}
-function tunSmartRun(){modal(mhead('⚡ '+t('Smart tunnel'))+'<div id="ts_box"><span class="muted">'+t('Loading…')+'</span></div>');clearInterval(TS.timer);
+ $('#ts_go').onclick=function(){var me=this;me.disabled=true;TS.prof=$('#ts_pf').value;var trs=[].map.call(document.querySelectorAll('#ts_tr input:checked'),function(x){return x.value}),kds=[].map.call(document.querySelectorAll('#ts_kd input:checked'),function(x){return x.value});if(!trs.length){me.disabled=false;return toast(t('Pick at least one method'),1)}api('POST','/api/tunnels/probe',{entry:$('#ts_en').value,exit:$('#ts_ex').value,port:+$('#ts_pt').value||3990,transports:trs,kinds:kds,baseline:$('#ts_base').checked}).then(function(r){if(r&&r.note)toast(t('Not tested, an agent is too old (update it first)')+': '+(r.skipped||[]).join(', '),1);tunSmartRun()}).catch(function(e){me.disabled=false;fail(e)})}}).catch(fail)}
+function tunSmartRun(){modal(mhead('⚡ '+t('Smart tunnel'))+'<div id="ts_box"><span class="muted">'+t('Loading…')+'</span></div>','wide');clearInterval(TS.timer);
  $('#ts_box').onclick=function(e){var b=e.target.closest('[data-use],[data-prof],[data-ts]');if(!b)return;
   if(b.dataset.prof){TS.prof=b.dataset.prof;if(TS.j)tunSmartDraw(TS.j)}
   else if(b.dataset.use){var u=b.dataset.use.split('|');tunSmartUse(u[0],u[1])}
@@ -613,13 +631,23 @@ function tunSmartDraw(j){var P=TS.prof||'balanced',stg={starting:t('Starting…'
    (why?'<small class="tse">'+esc(why)+'</small>':'')+(raw?'<small class="tse ltr">'+esc(raw)+'</small>':'')};
  var base=L.filter(function(r){return r.baseline})[0];
  var baseRow=base?'<div class="tsbase"><b>📡 '+t('Raw ping (no tunnel)')+'</b>'+(!base.done?'<span class="muted">'+(stg[base.stage]||stg.testing)+'</span>':base.failed?'<span class="r">'+esc(base.error||t('No answer'))+'</span>':'<span class="ltr">'+(base.ping_ms!=null?N(base.ping_ms)+' ms':'—')+(base.loss?' · '+N(base.loss)+'% '+t('loss'):'')+(base.path_mtu?' · MTU '+N(base.path_mtu):'')+'</span>')+'</div>'+
-  (base&&base.done&&base.path_mtu&&base.path_mtu<1500?'<small class="tse">'+t('This route passes only packets up to')+' <b class="ltr">'+N(base.path_mtu)+'</b> '+t('bytes: bigger ones are dropped on the way. Tunnels that fill full packets break here while ping works.')+'</small>':'')+(base&&base.done&&!base.failed?'<small class="tse">'+t('This is the base ping of the route; a good tunnel stays close to it.')+'</small>':''):'';
+  (base&&base.done&&base.path_mtu&&base.path_mtu<1500?'<small class="tse">'+t('This route passes only packets up to')+' <b class="ltr">'+N(base.path_mtu)+'</b> '+t('bytes: bigger ones are dropped on the way. Tunnels that fill full packets break here while ping works.')+'</small>':'')+(base&&base.done&&!base.failed?'<small class="tse">'+t('This is the base ping of the route; a good tunnel stays close to it.')+' '+t('Direct NAT gets exactly this.')+'</small>':''):'';
  var h='<p class="sub">'+esc(tunSrv(j.entry).name)+' ⇄ '+esc(tunSrv(j.exit).name)+'</p>'+baseRow+
   '<div class="seg" style="margin:6px 0">'+[['balanced',t('Balanced')],['speed',t('Most speed')],['gaming',t('Gaming (low ping)')]].map(function(o){return '<button data-prof="'+o[0]+'" class="'+(P==o[0]?'on':'')+'">'+o[1]+'</button>'}).join('')+'</div>'+
   (j.finished?'':'<div class="tsbar"><i style="width:'+pct+'%"></i></div>');
- ['reverse','direct'].forEach(function(m){var rs=L.filter(function(r){return r.mode==m&&!r.baseline}),n=rs.filter(tunOk).length,done=rs.every(function(r){return r.done});
+ ['reverse','direct'].forEach(function(m){var rs=L.filter(function(r){return r.mode==m&&!r.baseline&&!r.kind}),n=rs.filter(tunOk).length,done=rs.every(function(r){return r.done});if(!rs.length)return;
   h+='<div class="nh" style="margin-top:12px"><b>'+tunDirName(m)+'</b><small class="muted">'+(done||j.finished?N(n)+' / '+N(rs.length)+' '+t('passed'):'')+'</small></div>'+
    '<div class="tsh"><b>'+t('Transport')+'</b><span>'+t('Ping')+'</span><span>↓ Mbps</span><span>↑ Mbps</span><span>'+t('UDP loss')+'</span><em>'+t('Score')+'</em></div>'+rs.map(row).join('')});
+ // (3.63) the other kinds: what a game feels (no test download), the best game score marked
+ var KR=L.filter(function(r){return r.kind});
+ if(KR.length){var kok=function(r){return r.done&&!r.error&&r.udp_loss!=null},kb=KR.filter(kok).sort(function(a,b){return (b.scores.gaming||0)-(a.scores.gaming||0)})[0];
+  h+='<div class="nh" style="margin-top:12px"><b>'+t('Other tunnels (entry → exit)')+'</b><small class="muted">'+N(KR.filter(kok).length)+' / '+N(KR.length)+' '+t('passed')+'</small></div>'+
+   '<div class="tsh tsk"><b>'+t('Tunnel')+'</b><span>'+t('Ping')+'</span><span>'+t('Loss')+'</span><span>'+t('Jitter')+'</span><em>'+t('Game score')+'</em></div>'+
+   KR.map(function(r){var ok=kok(r),isb=j.finished&&kb&&r===kb;
+    return '<div class="tsr tsk '+(isb?'best':ok?'':r.done?'bad':'run')+'"><b>'+(isb?'🏆 ':'')+esc(tsKind(r.transport))+'</b>'+
+     (!r.done?'<span class="muted">'+(stg[r.stage]||stg.testing)+'</span>':ok?'<span class="ltr">'+N(r.ping_ms||0)+' ms</span><span class="ltr '+(r.udp_loss>=3?'r':'')+'">'+N(r.udp_loss)+'%</span><span class="ltr">'+N(r.jitter||0)+' ms</span>':'<span class="r">'+esc(t('No connection'))+'</span>')+
+     '<em class="ltr">'+(ok?N(r.scores.gaming||0):'')+'</em></div>'+(r.done&&!ok&&r.error?'<small class="tse">'+esc(t(r.error))+'</small>':'')}).join('');
+  if(j.finished&&kb)h+='<button class="b2" style="width:100%;margin-top:8px" data-use="kind|'+kb.transport+'">'+t('Build the tunnel with')+' '+esc(tsKind(kb.transport))+' · '+N(kb.scores.gaming||0)+'</button>'}
  if(j.finished){var nR=L.filter(function(r){return r.mode=='reverse'&&tunOk(r)}).length,nD=L.filter(function(r){return r.mode=='direct'&&tunOk(r)}).length;
   if(!best)h+='<div class="warnbox">'+t('No transport could connect in either direction. Open the test ports in the cloud firewall of both servers and try again. If only GRE passes between the two servers, add or edit the server with the “Only GRE passes” option.')+'</div>';
   else{
@@ -633,7 +661,10 @@ function tunSmartDraw(j){var P=TS.prof||'balanced',stg={starting:t('Starting…'
   h+='<button class="b2" style="width:100%;margin-top:8px" data-ts="again">'+t('Test again')+'</button>'}
  else h+='<button class="b2 bd" style="width:100%;margin-top:10px" data-ts="stop">'+t('Stop the test')+'</button>';
  $('#ts_box').innerHTML=h}
-function tunSmartUse(mode,tr){api('GET','/api/tunnels/probe').then(function(r){var j=r.job||{},c=TS.ctx||{};closeModal();
+function tunSmartUse(mode,tr){if(mode=='kind'){api('GET','/api/tunnels/probe').then(function(r){var j=r.job||{};closeModal();
+  var pre={entry:j.entry,exit:j.exit,mode:'direct'};if(tr.indexOf('kup-')==0){pre.kind='kup';pre.kup={raw_mode:tr.slice(4)}}else if(tr=='gre'){pre.kind='fwd';pre.fwd={mode:'gre'}}else pre.kind=tr;
+  tunEdit(null,pre);TS.ctx={}}).catch(fail);return}
+ api('GET','/api/tunnels/probe').then(function(r){var j=r.job||{},c=TS.ctx||{};closeModal();
  if(c.apply)tunEdit(c.apply.id,Object.assign({},c.apply.snap,{entry:j.entry,exit:j.exit,mode:mode,transport:tr}));
  else tunEdit(null,{entry:j.entry,exit:j.exit,mode:mode,transport:tr});TS.ctx={}}).catch(fail)}
 

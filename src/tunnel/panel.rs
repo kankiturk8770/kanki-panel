@@ -132,6 +132,8 @@ fn fwd_unset(f: &FwdCfg) -> bool {
 const FWD_FROM: &str = "3.59.0";
 /// KANKI-UP tunnels (kind "kup") exist from this agent version on
 const KUP_FROM: &str = "3.61.0";
+/// (3.63) agents measure the ping and loss of KANKI-UP, Hysteria2, AmneziaWG and direct tunnels from this version on
+const METER_FROM: &str = "3.63.0";
 
 /// The other server's address for a direct tunnel: the public IPv4 it reports from (a name may sit behind a CDN)
 fn fwd_peer(app: &App, sid: &str) -> String {
@@ -246,6 +248,19 @@ pub fn drop_vip(app: &App) {
         t.profile.clear();
         changed = true;
     }
+    // 3.63: KANKI-UP tunnels made before get their measuring pair (a free raw port on the exit)
+    for i in 0..l.len() {
+        if l[i].kind == "kup" && l[i].kup.as_ref().is_some_and(|c| c.probe_port == 0 && c.raw_mode != "icmp") {
+            let mut t = l[i].clone();
+            kup_probe_port(app, &mut t);
+            if t.kup.as_ref().is_some_and(|c| c.probe_port > 0) {
+                l[i] = t;
+                changed = true;
+                // the list saved at once: the next one's free port sees this one
+                save_tunnels(app, &l);
+            }
+        }
+    }
     if changed {
         save_tunnels(app, &l);
     }
@@ -352,6 +367,11 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             all.push(w);
         }
         all.push(t);
+    }
+    if let Some(p) = probe_job().lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if !p.finished && now() - p.started < PROBE_MAX {
+            all.extend(p.extras.iter().cloned());
+        }
     }
     for t in all {
         if !t.enabled || (t.entry != sid && t.exit != sid) || t.entry == t.exit {
@@ -935,6 +955,8 @@ fn hy2_spec(app: &App, t: &Tunnel, role: &str) -> Hy2Spec {
         stats_port: if entry { 0 } else { 61000 + c.n as u16 },
         // the stats API only listens on 127.0.0.1 of the exit; its secret is derived from the password
         stats_secret: if entry { String::new() } else { format!("s{}", &c.auth[..c.auth.len().min(24)]) },
+        // the measuring forward (UDP; the stats API on the same number is TCP)
+        probe: 61000 + c.n as u16,
     }
 }
 
@@ -1041,15 +1063,37 @@ fn fwd_apply_body(list: &[Tunnel], t: &mut Tunnel, f: &Value) -> Result<(), Stri
 fn kup_specs(app: &App, t: &Tunnel, role: &str) -> Vec<KupSpec> {
     let cfg = t.kup.clone().unwrap_or_default();
     let exit_host = if !t.dial.trim().is_empty() { t.dial.trim().to_string() } else { fwd_peer(app, &t.exit) };
-    parse_ports(&t.udp)
+    let mut v: Vec<KupSpec> = parse_ports(&t.udp)
         .into_iter()
         .enumerate()
         .map(|(i, (a, b))| {
             let raw = t.port.saturating_add(i as u16);
             let (listen, host, port) = if role == "entry" { (a, exit_host.clone(), raw) } else { (raw, t.target.trim().to_string(), b) };
-            KupSpec { tid: t.id.clone(), name: t.name.clone(), role: role.into(), idx: i as u16, listen, host, port, cfg: cfg.clone() }
+            KupSpec { tid: t.id.clone(), name: t.name.clone(), role: role.into(), idx: i as u16, listen, host, port, cfg: cfg.clone(), probe: false }
         })
-        .collect()
+        .collect();
+    // (3.63) the small measuring pair: ping, loss and jitter through the tunnel (the agents pick its local ends)
+    if cfg.probe_port > 0 && cfg.raw_mode != "icmp" && (!v.is_empty() || t.id.starts_with("probe-")) {
+        let (listen, host, port) = if role == "entry" { (0, exit_host, cfg.probe_port) } else { (cfg.probe_port, String::new(), 0) };
+        v.push(KupSpec { tid: t.id.clone(), name: t.name.clone(), role: role.into(), idx: v.len() as u16, listen, host, port, cfg, probe: true });
+    }
+    v
+}
+
+/// (3.63) The raw port of a KANKI-UP's measuring pair on the exit: kept while it is still free and out of the
+/// tunnel's own row, else the first free one after the row (ICMP has no ports: none)
+fn kup_probe_port(app: &App, t: &mut Tunnel) {
+    let Some(c) = t.kup.as_mut() else { return };
+    let n = parse_ports(&t.udp).len() as u16;
+    if c.raw_mode == "icmp" || t.port == 0 || n == 0 {
+        c.probe_port = 0;
+        return;
+    }
+    let row = t.port..t.port.saturating_add(n);
+    if c.probe_port > 0 && !row.contains(&c.probe_port) {
+        return;
+    }
+    c.probe_port = free_ports(app, &t.exit, t.port.saturating_add(n), 1).filter(|p| !row.contains(p)).unwrap_or(0);
 }
 
 /// The KANKI-UP part of a request: udp2raw's options (only the known values), a key made here the first time.
@@ -1310,6 +1354,11 @@ async fn agent_hy2bin_put(State(app): St, h: HeaderMap) -> Response {
 // ------------------------------------------------------------------ smart tunnel (test every transport)
 
 const PROBE_TRANSPORTS: &[&str] = &["tcpmux", "tcp", "ws", "wss", "quic", "kcp", "hq", "h2", "game", "faketcp"];
+/// (3.63) the other tunnel kinds a test can try, entry → exit: each one a real tunnel of that kind for the time of
+/// the test, measured with 20 small UDP packets through it (KANKI-UP, Hysteria2) or pings through its link (AmneziaWG,
+/// GRE). They carry no test download: ping, loss and jitter only, what a game feels. Direct NAT adds nothing to the
+/// line, so the raw ping is its number.
+const PROBE_KINDS: &[&str] = &["kup-faketcp", "kup-udp", "kup-easy-faketcp", "hy2", "awg", "gre"];
 /// both directions are measured: the side that listens differs, so the ports differ too
 const PROBE_MODES: &[&str] = &["reverse", "direct"];
 /// a test never runs longer than this (seconds)
@@ -1330,6 +1379,66 @@ struct ProbeJob {
     transports: Vec<String>,
     /// also measure the raw server-to-server ping (no tunnel) as a reference
     baseline: bool,
+    /// (3.63) the other kinds: a tunnel of each, made for the test (keys and all), dropped when it ends
+    extras: Vec<Tunnel>,
+}
+
+/// A tunnel of another kind for a test (`kind` one of PROBE_KINDS), on `port`, with its own keys
+fn probe_extra(app: &App, id: &str, kind: &str, entry: &str, exit: &str, port: u16) -> Result<Tunnel, String> {
+    let mut t = Tunnel {
+        id: format!("probe-{}-x-{}", id, kind.replace('-', "")),
+        name: format!("test {}", kind),
+        entry: entry.into(),
+        exit: exit.into(),
+        enabled: true,
+        mode: "direct".into(),
+        port,
+        token: rand_token(32),
+        ..Default::default()
+    };
+    let list = tunnels(app);
+    match kind {
+        "hy2" => {
+            t.kind = "hy2".into();
+            hy2_apply_body(&list, &mut t, &json!({ "port": port, "obfs": true }))?;
+        }
+        "awg" => {
+            t.kind = "awg".into();
+            awg_apply_body(&list, &mut t, &json!({ "port": port }))?;
+        }
+        "gre" => {
+            t.kind = "fwd".into();
+            fwd_apply_body(&list, &mut t, &json!({ "mode": "gre" }))?;
+        }
+        k => {
+            let m = k.strip_prefix("kup-").ok_or("unknown kind")?;
+            t.kind = "kup".into();
+            kup_apply_body(&mut t, &json!({ "raw_mode": m }))?;
+            t.port = port;
+            if let Some(c) = t.kup.as_mut() {
+                c.probe_port = port;
+            }
+        }
+    }
+    Ok(t)
+}
+
+/// (3.63) one udp-only measurement → the shape of a transport's result (no download, so no speed scores)
+fn probe_extra_result(q: Option<&Value>, error: &str, waited: i64) -> Value {
+    match q {
+        Some(q) if q["loss"].as_f64().unwrap_or(100.0) < 100.0 => {
+            let ping = q["ping"].as_f64().unwrap_or(0.0);
+            let loss = q["loss"].as_f64().unwrap_or(0.0);
+            let ping_s = (1.0 - ping / 400.0).clamp(0.0, 1.0);
+            let udp_s = (1.0 - loss / 100.0).clamp(0.0, 1.0).powi(2);
+            let g = (100.0 * (0.53 * ping_s + 0.47 * udp_s)).round();
+            json!({ "done": true, "udp_only": true, "ping_ms": q["ping"], "udp_ping_ms": q["ping"], "udp_loss": loss, "jitter": q["jit"],
+                "scores": { "gaming": g, "balanced": Value::Null, "speed": Value::Null } })
+        }
+        _ if waited >= 90 => json!({ "done": true, "udp_only": true, "error": if error.is_empty() { "nothing came back through the tunnel" } else { error },
+            "scores": { "gaming": 0, "balanced": Value::Null, "speed": Value::Null } }),
+        _ => json!({ "done": false, "stage": "testing" }),
+    }
 }
 
 fn probe_job() -> &'static Mutex<Option<ProbeJob>> {
@@ -1389,8 +1498,20 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         return err(StatusCode::BAD_REQUEST, &format!("the agents are too old for {}: update them first (Update all)", skipped.join(", ")));
     }
     let baseline = b["baseline"].as_bool().unwrap_or(true);
+    // (3.63) the other kinds asked for (none = all), each only where both agents measure them
+    let kinds: Vec<String> = match b["kinds"].as_array() {
+        Some(a) => a.iter().filter_map(|x| x.as_str()).filter(|x| PROBE_KINDS.contains(x)).map(|x| x.to_string()).collect(),
+        None => PROBE_KINDS.iter().map(|x| x.to_string()).collect(),
+    };
+    let (kinds, too_old): (Vec<String>, Vec<String>) = {
+        let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
+        let ok = |sid: &str| sid == "local" || sn.get(sid).map(|x| !x.version.is_empty() && !ver_lt(&x.version, METER_FROM)).unwrap_or(false);
+        let both = ok(&entry) && ok(&exit);
+        kinds.into_iter().partition(|_| both)
+    };
+    let skipped: Vec<String> = skipped.into_iter().chain(too_old).collect();
     // the test ports must not collide with a tunnel that already listens there (on either server)
-    let span = (transports.len() * PROBE_MODES.len()) as u16;
+    let span = (transports.len() * PROBE_MODES.len() + kinds.len()) as u16;
     for t in tunnels(&app) {
         let l = if t.mode == "direct" { &t.exit } else { &t.entry };
         if (*l == entry || *l == exit) && t.port >= port && t.port < port + span {
@@ -1411,8 +1532,17 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
             }
         }
     }
+    let jid = rand_token(6).to_lowercase();
+    let mut extras = vec![];
+    for (i, k) in kinds.iter().enumerate() {
+        let p = port + (transports.len() * PROBE_MODES.len() + i) as u16;
+        match probe_extra(&app, &jid, k, &entry, &exit, p) {
+            Ok(t) => extras.push(t),
+            Err(e) => return err(StatusCode::BAD_REQUEST, &format!("{}: {}", k, e)),
+        }
+    }
     let job = ProbeJob {
-        id: rand_token(6).to_lowercase(),
+        id: jid,
         entry,
         exit,
         mode: "both".into(),
@@ -1423,6 +1553,7 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         results: vec![],
         transports: transports.clone(),
         baseline,
+        extras,
     };
     let id = job.id.clone();
     *probe_job().lock().unwrap_or_else(|e| e.into_inner()) = Some(job);
@@ -1431,7 +1562,7 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
     } else {
         format!("not tested, an agent is too old for them (update it first): {}", skipped.join(", "))
     };
-    Json(json!({"ok": true, "id": id, "transports": transports, "skipped": skipped, "note": note, "baseline": baseline, "modes": PROBE_MODES})).into_response()
+    Json(json!({"ok": true, "id": id, "transports": transports, "kinds": kinds, "skipped": skipped, "note": note, "baseline": baseline, "modes": PROBE_MODES})).into_response()
 }
 
 async fn probe_get(State(app): St, h: HeaderMap) -> Response {
@@ -1479,6 +1610,22 @@ async fn probe_get(State(app): St, h: HeaderMap) -> Response {
                 r["scores"] = probe_scores(&r);
                 res.push(r);
             }
+        }
+        for x in &p.extras {
+            let es = entry_st.iter().find(|s| s.id == x.id);
+            let xs = exit_st.iter().find(|s| s.id == x.id);
+            let e = es.map(|s| s.error.clone()).filter(|e| !e.is_empty()).or_else(|| xs.map(|s| s.error.clone()).filter(|e| !e.is_empty())).unwrap_or_default();
+            let mut r = probe_extra_result(es.and_then(|s| s.quality.as_ref()), &e, t - p.started);
+            if r["done"].as_bool() != Some(true) {
+                all_done = false;
+            }
+            let k = x.id.rsplit('-').next().unwrap_or("").to_string();
+            r["mode"] = json!("direct");
+            r["transport"] = json!(PROBE_KINDS.iter().find(|z| z.replace('-', "") == k).copied().unwrap_or(""));
+            r["kind"] = json!(true);
+            r["port"] = json!(x.port);
+            r["links"] = json!(es.map(|s| s.links).unwrap_or(0).max(xs.map(|s| s.links).unwrap_or(0)));
+            res.push(r);
         }
         p.results = res;
         if all_done || t - p.started >= PROBE_MAX {
@@ -2075,6 +2222,13 @@ async fn list(State(app): St, h: HeaderMap) -> Response {
         v["state"] = json!(state);
         v["entry_status"] = status_json(es.as_ref());
         v["exit_status"] = status_json(xs.as_ref());
+        // (3.63) a side that cannot count what passes (the Hysteria2 client) shows the other side's numbers,
+        // turned around: what the exit got is what the entry sent
+        let none = |x: &Value| x["rx_bytes"].as_u64().unwrap_or(0) == 0 && x["tx_bytes"].as_u64().unwrap_or(0) == 0;
+        if v["entry_status"].is_object() && v["exit_status"].is_object() && none(&v["entry_status"]) && !none(&v["exit_status"]) {
+            v["entry_status"]["tx_bytes"] = v["exit_status"]["rx_bytes"].clone();
+            v["entry_status"]["rx_bytes"] = v["exit_status"]["tx_bytes"].clone();
+        }
         v["dial_host"] = json!(if !tu.dial.trim().is_empty() { tu.dial.clone() } else { host_of(&app, if tu.mode == "direct" { &tu.exit } else { &tu.entry }) });
         tl.push(v);
     }
@@ -2153,6 +2307,9 @@ fn tunnel_needs(t: &Tunnel) -> Vec<(String, u16, bool)> {
                 if let Some(p) = t.port.checked_add(i as u16) {
                     v.push((t.exit.clone(), p, c.on_udp()));
                 }
+            }
+            if c.probe_port > 0 {
+                v.push((t.exit.clone(), c.probe_port, c.on_udp()));
             }
         }
         for (p, _) in parse_ports(&t.udp) {
@@ -2482,6 +2639,9 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     if t.port == 0 && t.kind != "fwd" {
         return err(StatusCode::BAD_REQUEST, "the tunnel port is required");
+    }
+    if t.kind == "kup" {
+        kup_probe_port(&app, &mut t);
     }
     let hy2_src = t.kind == "hy2" && !t.hy2.src_routes.is_empty();
     if !hy2_src && parse_ports(&t.tcp).is_empty() && parse_ports(&t.udp).is_empty() {
@@ -4256,6 +4416,49 @@ mod fwd_tests {
         // the second config of KANKI MIX (UDP 4000 of the exit) and WireGuard go through the Iran server
         assert_eq!(port_entry_at(&app, "ku_tr", 4000, false, ""), Some(("ku_ir".to_string(), 4000)));
         assert_eq!(port_entry_at(&app, "ku_tr", 443, false, ""), Some(("ku_ir".to_string(), 1443)));
+        // (3.63) the measuring pair: the next free raw port on the exit, its own udp2raw on both sides
+        let mut tp = t.clone();
+        kup_probe_port(&app, &mut tp);
+        assert_eq!(tp.kup.as_ref().unwrap().probe_port, 29003);
+        save_tunnels(&app, &[tp.clone()]);
+        let e = specs_for(&app, "ku_ir").into_iter().find(|s| s.id == "kua").unwrap().kup.unwrap();
+        let pe = e.iter().find(|w| w.probe).unwrap();
+        assert_eq!((pe.listen, pe.port, e.iter().filter(|w| !w.probe).count()), (0, 29003, 3));
+        let x = specs_for(&app, "ku_tr").into_iter().find(|s| s.id == "kua").unwrap().kup.unwrap();
+        let px = x.iter().find(|w| w.probe).unwrap();
+        assert_eq!((px.listen, px.port), (29003, 0));
+        assert!(tunnel_needs(&tp).contains(&("ku_tr".into(), 29003, false)));
+        // kept on the next save; ICMP mode has none
+        kup_probe_port(&app, &mut tp);
+        assert_eq!(tp.kup.as_ref().unwrap().probe_port, 29003);
+        let mut ti = Tunnel { udp: vec!["51820".into()], ..tp.clone() };
+        kup_apply_body(&mut ti, &json!({ "raw_mode": "icmp" })).unwrap();
+        kup_probe_port(&app, &mut ti);
+        assert_eq!(ti.kup.as_ref().unwrap().probe_port, 0);
+        assert!(!specs_for(&app, "ku_ir").into_iter().any(|s| s.kup.is_some_and(|k| k.iter().any(|w| w.probe && w.cfg.raw_mode == "icmp"))));
+        save_tunnels(&app, &[t.clone()]);
+        // (3.63) the smart test's other kinds: a real tunnel of each, with its own keys and port
+        let mut ids = vec![];
+        for (i, k) in PROBE_KINDS.iter().enumerate() {
+            let x = probe_extra(&app, "abc123", k, "ku_ir", "ku_tr", 39000 + i as u16).unwrap_or_else(|e| panic!("{}: {}", k, e));
+            assert!(x.id.starts_with("probe-abc123-x-") && x.enabled && x.entry == "ku_ir");
+            match x.kind.as_str() {
+                "kup" => assert_eq!(x.kup.as_ref().unwrap().probe_port, 39000 + i as u16),
+                "hy2" => assert!(x.hy2.port == 39000 + i as u16 && !x.hy2.auth.is_empty() && !x.hy2.pin.is_empty()),
+                "awg" => assert!(x.awg.port == 39000 + i as u16 && !x.awg.entry_priv.is_empty()),
+                "fwd" => assert!(x.fwd.gre() && x.fwd.n > 0),
+                o => panic!("{}", o),
+            }
+            ids.push(x.id);
+        }
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), PROBE_KINDS.len());
+        // what one run through it means: ping and loss, a game score, nothing for download
+        let r = probe_extra_result(Some(&json!({ "n": 20, "loss": 5.0, "ping": 80, "jit": 2.5 })), "", 10);
+        assert!(r["done"].as_bool().unwrap() && r["udp_loss"].as_f64() == Some(5.0) && r["scores"]["gaming"].as_f64().unwrap() > 50.0 && r["scores"]["speed"].is_null());
+        assert_eq!(probe_extra_result(None, "", 10)["done"].as_bool(), Some(false));
+        assert!(probe_extra_result(Some(&json!({ "loss": 100.0 })), "x", 95)["error"].as_str() == Some("x"));
         // an agent too old for it
         seen().lock().unwrap().get_mut("ku_tr").unwrap().version = "3.60.1".into();
         assert!(kup_checks(&app, &t).unwrap_err().contains(KUP_FROM));

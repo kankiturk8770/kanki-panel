@@ -66,6 +66,8 @@ pub struct KupCfg {
     pub force_sock_buf: bool,
     /// --lower-level auto: send at layer 2 (past the local firewall)
     pub lower_level: bool,
+    /// (3.63) the exit's raw port of the small measuring pair (0 = none; ICMP mode never has one)
+    pub probe_port: u16,
 }
 
 impl Default for KupCfg {
@@ -83,6 +85,7 @@ impl Default for KupCfg {
             sock_buf: 1024,
             force_sock_buf: false,
             lower_level: false,
+            probe_port: 0,
         }
     }
 }
@@ -151,11 +154,18 @@ pub struct KupSpec {
     pub host: String,
     pub port: u16,
     pub cfg: KupCfg,
+    /// (3.63) the measuring pair: the entry listens on 127.0.0.1 (a port it picks), the exit hands to this
+    /// agent's echo; nothing of the users passes through it
+    pub probe: bool,
 }
 
 impl KupSpec {
     pub fn unit(&self) -> String {
-        format!("{}{}-{}", PREFIX, short(&self.tid), self.idx)
+        if self.probe {
+            format!("{}{}-p", PREFIX, short(&self.tid))
+        } else {
+            format!("{}{}-{}", PREFIX, short(&self.tid), self.idx)
+        }
     }
 }
 
@@ -172,7 +182,8 @@ pub fn conf_text(s: &KupSpec, remote_ip: &str) -> String {
     let c = &s.cfg;
     let mut l: Vec<String> = vec![];
     l.push(if s.role == "exit" { "-s".into() } else { "-c".into() });
-    l.push(format!("-l 0.0.0.0:{}", s.listen));
+    // the measuring pair's entry is only for this machine
+    l.push(format!("-l {}:{}", if s.probe && s.role == "entry" { "127.0.0.1" } else { "0.0.0.0" }, s.listen));
     l.push(format!("-r {}:{}", remote_ip, s.port));
     l.push(format!("-k {}", c.key));
     l.push(format!("--raw-mode {}", c.raw_mode));
@@ -222,10 +233,11 @@ fn conf_path(s: &KupSpec) -> String {
 
 fn unit_text(s: &KupSpec) -> String {
     format!(
-        "# written by kanki-panel: changes are overwritten\n[Unit]\nDescription=KANKI-UP tunnel {} ({} {})\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart={} --conf-file {}\nRestart=always\nRestartSec=3\nLimitNOFILE=65536\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\n\n[Install]\nWantedBy=multi-user.target\n",
+        "# written by kanki-panel: changes are overwritten\n[Unit]\nDescription=KANKI-UP tunnel {} ({} {}{})\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nExecStart={} --conf-file {}\nRestart=always\nRestartSec=3\nLimitNOFILE=65536\nNoNewPrivileges=yes\nPrivateTmp=yes\nProtectHome=yes\n\n[Install]\nWantedBy=multi-user.target\n",
         s.name.replace(['\r', '\n'], " "),
         s.role,
         s.idx,
+        if s.probe { ", measuring" } else { "" },
         BIN,
         conf_path(s)
     )
@@ -266,6 +278,8 @@ struct Shared {
     stamp: Option<Instant>,
     errors: HashMap<String, String>,
     since: HashMap<String, u64>,
+    /// tunnel id -> the 127.0.0.1 port its measuring pair listens on here (picked once)
+    local: HashMap<String, u16>,
 }
 
 fn shared() -> &'static Mutex<Shared> {
@@ -317,6 +331,25 @@ fn active(unit: &str) -> bool {
 
 fn apply_one(s: &KupSpec) -> Result<(), String> {
     s.cfg.check()?;
+    // the measuring pair: a local port here (entry) or this agent's echo (exit)
+    let mut s = s.clone();
+    if s.probe {
+        if s.role == "entry" {
+            let p = { guard().local.get(&s.tid).copied() };
+            s.listen = match p {
+                Some(p) => p,
+                None => {
+                    let p = super::meter::free_local_port();
+                    guard().local.insert(s.tid.clone(), p);
+                    p
+                }
+            };
+        } else {
+            s.host.clear();
+            s.port = super::meter::echo_any();
+        }
+    }
+    let s = &s;
     // udp2raw wants an address: the entry looks the exit up here (a name may move to another address)
     let ip = if s.role == "entry" {
         super::kfwd::resolve(&s.host).ok_or_else(|| format!("the address of the exit ({}) is not known", s.host))?.to_string()
@@ -366,6 +399,115 @@ fn clear_leftovers() {
     }
 }
 
+// ------------------------------------------------------------------ what passes (3.63)
+
+/// The chain that counts the users' bytes on the entry: one rule per port and way, no target (it only counts)
+const ACCT: &str = "KANKI-KUPACCT";
+
+fn ipt(args: &[&str]) -> (bool, String) {
+    let mut a = vec!["-w"];
+    a.extend_from_slice(args);
+    run("iptables", &a)
+}
+
+/// comment -> the rule's match, for every users' port of the entries here
+fn acct_wanted(want: &[KupSpec]) -> Vec<(String, Vec<String>)> {
+    let mut v = vec![];
+    for w in want.iter().filter(|w| w.role == "entry" && !w.probe && w.listen > 0) {
+        for (way, flag) in [("in", "--dport"), ("out", "--sport")] {
+            let c = format!("kup:{}:{}:{}", short(&w.tid), w.idx, way);
+            v.push((c.clone(), vec!["-p".into(), "udp".into(), flag.into(), w.listen.to_string(), "-m".into(), "comment".into(), "--comment".into(), c]));
+        }
+    }
+    v
+}
+
+/// The counting rules follow the tunnels; the counters of a rule that stays are kept
+fn account(want: &[KupSpec]) {
+    let rules = acct_wanted(want);
+    let (has, listed) = ipt(&["-S", ACCT]);
+    if rules.is_empty() {
+        if has {
+            for ch in ["INPUT", "OUTPUT"] {
+                while ipt(&["-D", ch, "-j", ACCT]).0 {}
+            }
+            let _ = ipt(&["-F", ACCT]);
+            let _ = ipt(&["-X", ACCT]);
+        }
+        return;
+    }
+    if !has {
+        let _ = ipt(&["-N", ACCT]);
+    }
+    for ch in ["INPUT", "OUTPUT"] {
+        if !ipt(&["-C", ch, "-j", ACCT]).0 {
+            let _ = ipt(&["-I", ch, "1", "-j", ACCT]);
+        }
+    }
+    let prefix = format!("-A {} ", ACCT);
+    let mut present: Vec<String> = vec![];
+    for l in listed.lines().filter(|l| l.starts_with(&prefix)) {
+        let c = l.split("--comment ").nth(1).map(|x| x.split_whitespace().next().unwrap_or("").trim_matches('"').to_string()).unwrap_or_default();
+        if rules.iter().any(|(k, _)| *k == c) && !present.contains(&c) {
+            present.push(c);
+        } else {
+            // a port gone (or a rule twice): the same words after -A, with -D
+            let args: Vec<&str> = l[prefix.len()..].split_whitespace().collect();
+            let mut d = vec!["-D", ACCT];
+            d.extend(args);
+            let _ = ipt(&d);
+        }
+    }
+    for (_, m) in rules.iter().filter(|(c, _)| !present.contains(c)) {
+        let mut a: Vec<&str> = vec!["-A", ACCT];
+        a.extend(m.iter().map(|x| x.as_str()));
+        let _ = ipt(&a);
+    }
+}
+
+/// tunnel (short id) -> (bytes from the users into the tunnel, bytes back to them)
+fn counters() -> HashMap<String, (u64, u64)> {
+    let mut m: HashMap<String, (u64, u64)> = HashMap::new();
+    let (ok, out) = ipt(&["-nvxL", ACCT]);
+    if !ok {
+        return m;
+    }
+    for l in out.lines() {
+        let Some(c) = l.split("/* ").nth(1).and_then(|x| x.split(" */").next()) else { continue };
+        let f: Vec<&str> = c.split(':').collect();
+        if f.len() != 4 || f[0] != "kup" {
+            continue;
+        }
+        let bytes: u64 = l.split_whitespace().nth(1).and_then(|b| b.parse().ok()).unwrap_or(0);
+        let e = m.entry(f[1].to_string()).or_default();
+        if f[3] == "in" {
+            e.0 += bytes;
+        } else {
+            e.1 += bytes;
+        }
+    }
+    m
+}
+
+/// What the meter measures: the measuring pair's local end (a UDP echo through the tunnel), or in ICMP mode
+/// (one pair only, ICMP has no ports) ICMP to the exit: the same packets the tunnel sends
+fn meter_targets(want: &[KupSpec]) {
+    let local = guard().local.clone();
+    let mut t: Vec<(String, super::meter::Target)> = vec![];
+    for w in want.iter().filter(|w| w.role == "entry") {
+        if w.probe {
+            if let Some(p) = local.get(&w.tid) {
+                t.push((w.tid.clone(), super::meter::Target::Udp(std::net::SocketAddr::from(([127, 0, 0, 1], *p)))));
+            }
+        } else if w.idx == 0 && w.cfg.raw_mode == "icmp" {
+            if let Some(ip) = super::kfwd::resolve(&w.host) {
+                t.push((w.tid.clone(), super::meter::Target::Ping(ip.to_string())));
+            }
+        }
+    }
+    super::meter::set_targets("kup", t);
+}
+
 fn reconcile() {
     let want = guard().want.clone();
     let mut removed = false;
@@ -384,6 +526,8 @@ fn reconcile() {
         if removed || guard().stamp.is_none() {
             clear_leftovers();
         }
+        account(&want);
+        meter_targets(&want);
         return;
     }
     let bin = ensure_bin();
@@ -394,6 +538,8 @@ fn reconcile() {
         };
         guard().errors.insert(w.unit(), err);
     }
+    account(&want);
+    meter_targets(&want);
 }
 
 /// Called every few seconds with the KANKI-UP pairs this server should run; the work runs on a thread
@@ -456,9 +602,10 @@ pub fn statuses() -> Vec<super::engine::Status> {
         let s = guard();
         (s.want.clone(), s.errors.clone(), s.since.clone())
     };
-    // one status per tunnel: its pairs together
+    let bytes = counters();
+    // one status per tunnel: its pairs together (the measuring pair is not one of them)
     let mut by: Vec<(String, String, Vec<KupSpec>)> = vec![];
-    for w in want {
+    for w in want.into_iter().filter(|w| !w.probe) {
         match by.iter_mut().find(|x| x.0 == w.tid && x.1 == w.role) {
             Some(x) => x.2.push(w),
             None => by.push((w.tid.clone(), w.role.clone(), vec![w])),
@@ -497,14 +644,18 @@ pub fn statuses() -> Vec<super::engine::Status> {
             }
         }
         let all = up == list.len();
+        // measured on the entry; the exit shows the same ping (its own side knows no more)
+        let q = if role == "entry" { super::meter::get(&tid) } else { None };
+        let rtt = if up > 0 { super::meter::rtt(&tid) } else { 0 };
+        let (into, back) = bytes.get(&short(&tid)).copied().unwrap_or((0, 0));
         out.push(super::engine::Status {
             id: tid,
             role: role.clone(),
             links: up,
             want: list.len(),
-            rtt_ms: 0,
-            rx_bytes: 0,
-            tx_bytes: 0,
+            rtt_ms: rtt,
+            rx_bytes: back,
+            tx_bytes: into,
             streams: 0,
             udp_flows: 0,
             error: if all { String::new() } else { err },
@@ -512,7 +663,7 @@ pub fn statuses() -> Vec<super::engine::Status> {
             transport: "kup".into(),
             listening: role == "exit",
             probe: None,
-            quality: None,
+            quality: q,
             lanes: 0,
             bulk_flows: 0,
         });
@@ -534,7 +685,25 @@ mod tests {
             host: if role == "entry" { "203.0.113.7".into() } else { String::new() },
             port: if role == "entry" { 29001 } else { 51820 },
             cfg: KupCfg { key: "a1b2c3d4e5f60718293a4b5c6d7e8f90".into(), ..Default::default() },
+            probe: false,
         }
+    }
+
+    /// (3.63) the measuring pair: its entry only on 127.0.0.1, a unit of its own, never counted as a users' port
+    #[test]
+    fn the_measuring_pair_stays_on_this_machine() {
+        let mut e = spec("entry");
+        e.probe = true;
+        e.listen = 40123;
+        let c = conf_text(&e, "203.0.113.7");
+        assert!(c.contains("-l 127.0.0.1:40123") && !c.contains("0.0.0.0"), "{}", c);
+        assert!(e.unit().ends_with("-p"));
+        assert_ne!(e.unit(), spec("entry").unit());
+        // the users' pairs are counted, the measuring one is not
+        let rules = acct_wanted(&[spec("entry"), e, spec("exit")]);
+        assert_eq!(rules.len(), 2, "{:?}", rules);
+        assert!(rules[0].1.contains(&"--dport".to_string()) && rules[0].1.contains(&"51820".to_string()));
+        assert!(rules[1].1.contains(&"--sport".to_string()));
     }
 
     /// the options file has the same common options on both sides and the right direction on each
@@ -616,9 +785,40 @@ mod lab {
         let mode = std::env::var("KUP_MODE").unwrap_or_else(|_| "faketcp".into());
         let cfg = KupCfg { key: "a1b2c3d4e5f60718293a4b5c6d7e8f90".into(), raw_mode: mode, ..Default::default() };
         cfg.check().unwrap();
-        let e = KupSpec { tid: "lab".into(), name: "lab".into(), role: "entry".into(), idx: 0, listen: 51820, host: exit.clone(), port: 29000, cfg: cfg.clone() };
-        let x = KupSpec { tid: "lab".into(), name: "lab".into(), role: "exit".into(), idx: 0, listen: 29000, host: String::new(), port: 51820, cfg };
+        let e = KupSpec { tid: "lab".into(), name: "lab".into(), role: "entry".into(), idx: 0, listen: 51820, host: exit.clone(), port: 29000, cfg: cfg.clone(), probe: false };
+        let x = KupSpec { tid: "lab".into(), name: "lab".into(), role: "exit".into(), idx: 0, listen: 29000, host: String::new(), port: 51820, cfg, probe: false };
         std::fs::write(format!("{}/entry.conf", dir), conf_text(&e, &exit)).unwrap();
         std::fs::write(format!("{}/exit.conf", dir), conf_text(&x, "127.0.0.1")).unwrap();
+        // (3.63) the measuring pair: entry 127.0.0.1:41000, exit raw 29099, to an echo on the exit's 127.0.0.1:51821
+        let pe = KupSpec { tid: "lab".into(), name: "lab".into(), role: "entry".into(), idx: 1, listen: 41000, host: exit.clone(), port: 29099, cfg: e.cfg.clone(), probe: true };
+        let px = KupSpec { tid: "lab".into(), name: "lab".into(), role: "exit".into(), idx: 1, listen: 29099, host: String::new(), port: 51821, cfg: e.cfg.clone(), probe: true };
+        std::fs::write(format!("{}/pentry.conf", dir), conf_text(&pe, &exit)).unwrap();
+        std::fs::write(format!("{}/pexit.conf", dir), conf_text(&px, "127.0.0.1")).unwrap();
+    }
+
+    /// Run inside the entry's namespace of scripts/kup_lab.sh: the counting rules and the meter through the
+    /// measuring pair (KUP_METER=1)
+    #[test]
+    #[ignore]
+    fn kup_meter_lab() {
+        if std::env::var("KUP_METER").is_err() {
+            return;
+        }
+        let mut e = KupSpec { tid: "lab".into(), name: "lab".into(), role: "entry".into(), idx: 0, listen: 51820, host: "10.77.0.2".into(), port: 29000, ..Default::default() };
+        e.cfg.key = "a1b2c3d4e5f60718293a4b5c6d7e8f90".into();
+        account(&[e.clone()]);
+        let q = crate::tunnel::meter::udp_series("127.0.0.1:41000".parse().unwrap()).unwrap();
+        println!("measured through the pair: {}", q);
+        // users' packets to the entry port, then the counters
+        let s = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        s.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+        for _ in 0..100 {
+            s.send_to(&[7u8; 100], "127.0.0.1:51820").unwrap();
+            let mut b = [0u8; 200];
+            let _ = s.recv_from(&mut b);
+        }
+        println!("counted: {:?}", counters());
+        account(&[]);
+        println!("after: {:?}", run("iptables", &["-S", ACCT]).0);
     }
 }
