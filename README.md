@@ -3,6 +3,9 @@
 Lightweight **WireGuard · AmneziaWG · Hysteria2 · KANKI MIX · microtun** panel written in Rust, with a built-in Telegram sales bot, multi-node support and a gold UI that matches the Kanki VPN Android app.
 
 
+## New in 3.63.1
+The smart test runs with only KANKI-UP (or another kind) ticked.
+
 ## New in 3.63 — every tunnel measured
 KANKI-UP, Hysteria2, AmneziaWG and the direct NAT / GRE tunnel now show their real ping, loss, jitter and volume, like the Kanki tunnels. Every tunnel says what it is good for (games, lossy lines, UDP cut, downloads …). The smart test also tries KANKI-UP, Hysteria2, AmneziaWG and GRE.
 

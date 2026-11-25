@@ -1467,6 +1467,24 @@ fn probe_scores(r: &Value) -> Value {
     json!({"gaming": f(0.45, 0.15, 0.40), "balanced": f(0.30, 0.40, 0.30), "speed": f(0.10, 0.70, 0.20)})
 }
 
+/// What a smart test was asked for: (Kanki transports, other kinds). Nothing named = all; only other kinds ticked
+/// (3.63.1: KANKI-UP alone) = no Kanki transport at all, not all of them
+fn probe_wanted(b: &Value) -> (Vec<String>, Vec<String>) {
+    let kinds: Vec<String> = match b["kinds"].as_array() {
+        Some(a) => a.iter().filter_map(|x| x.as_str()).filter(|x| PROBE_KINDS.contains(x)).map(|x| x.to_string()).collect(),
+        None => PROBE_KINDS.iter().map(|x| x.to_string()).collect(),
+    };
+    let picked_kinds = b["kinds"].as_array().is_some() && !kinds.is_empty();
+    let transports: Vec<String> = match b["transports"].as_array() {
+        Some(a) => {
+            let picked: Vec<String> = a.iter().filter_map(|x| x.as_str()).filter(|x| PROBE_TRANSPORTS.contains(x)).map(|x| x.to_string()).collect();
+            if picked.is_empty() && !picked_kinds { PROBE_TRANSPORTS.iter().map(|x| x.to_string()).collect() } else { picked }
+        }
+        None => PROBE_TRANSPORTS.iter().map(|x| x.to_string()).collect(),
+    };
+    (transports, kinds)
+}
+
 async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
     let entry = b["entry"].as_str().unwrap_or("").to_string();
@@ -1477,15 +1495,8 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
     }
     let port = b["port"].as_u64().unwrap_or(3990).clamp(1024, 64000) as u16;
     // which transports to test: the ones the admin ticked, or all of them
-    let all: Vec<String> = PROBE_TRANSPORTS.iter().map(|x| x.to_string()).collect();
-    let transports: Vec<String> = match b["transports"].as_array() {
-        Some(a) => {
-            let picked: Vec<String> = a.iter().filter_map(|x| x.as_str())
-                .filter(|x| PROBE_TRANSPORTS.contains(x)).map(|x| x.to_string()).collect();
-            if picked.is_empty() { all } else { picked }
-        }
-        None => all,
-    };
+    let (transports, kinds_wanted) = probe_wanted(&b);
+    let kinds_only = !kinds_wanted.is_empty() && b["kinds"].as_array().is_some();
     // an agent too old for a transport would run it as plain TCP and report plain-TCP numbers
     // under its name: such transports are left out of the test
     let (transports, skipped): (Vec<String>, Vec<String>) = {
@@ -1494,21 +1505,36 @@ async fn probe_start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
         let (ve, vx) = (ver(&entry), ver(&exit));
         transports.into_iter().partition(|tr| agent_knows(&ve, tr) && agent_knows(&vx, tr))
     };
-    if transports.is_empty() {
+    if transports.is_empty() && !kinds_only {
         return err(StatusCode::BAD_REQUEST, &format!("the agents are too old for {}: update them first (Update all)", skipped.join(", ")));
     }
     let baseline = b["baseline"].as_bool().unwrap_or(true);
     // (3.63) the other kinds asked for (none = all), each only where both agents measure them
-    let kinds: Vec<String> = match b["kinds"].as_array() {
-        Some(a) => a.iter().filter_map(|x| x.as_str()).filter(|x| PROBE_KINDS.contains(x)).map(|x| x.to_string()).collect(),
-        None => PROBE_KINDS.iter().map(|x| x.to_string()).collect(),
-    };
+    let kinds = kinds_wanted;
     let (kinds, too_old): (Vec<String>, Vec<String>) = {
         let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
         let ok = |sid: &str| sid == "local" || sn.get(sid).map(|x| !x.version.is_empty() && !ver_lt(&x.version, METER_FROM)).unwrap_or(false);
         let both = ok(&entry) && ok(&exit);
         kinds.into_iter().partition(|_| both)
     };
+    if transports.is_empty() && kinds.is_empty() {
+        // which server it is, by name: not reporting at all, or an agent older than the measuring
+        let sn = seen().lock().unwrap_or_else(|e| e.into_inner());
+        let names: HashMap<String, String> = servers(&app).into_iter().map(|s| (s.id, s.name)).collect();
+        let why: Vec<String> = [&entry, &exit]
+            .into_iter()
+            .filter(|sid| sid.as_str() != "local")
+            .filter_map(|sid| {
+                let n = names.get(sid.as_str()).cloned().unwrap_or_else(|| sid.to_string());
+                match sn.get(sid.as_str()) {
+                    None => Some(format!("\"{}\" is not connected", n)),
+                    Some(x) if x.version.is_empty() || ver_lt(&x.version, METER_FROM) => Some(format!("\"{}\" runs agent v{}", n, if x.version.is_empty() { "?" } else { &x.version })),
+                    _ => None,
+                }
+            })
+            .collect();
+        return err(StatusCode::BAD_REQUEST, &format!("these tests need agent {} on both servers ({}): update them first (Update all)", METER_FROM, why.join(", ")));
+    }
     let skipped: Vec<String> = skipped.into_iter().chain(too_old).collect();
     // the test ports must not collide with a tunnel that already listens there (on either server)
     let span = (transports.len() * PROBE_MODES.len() + kinds.len()) as u16;
@@ -4459,6 +4485,15 @@ mod fwd_tests {
         assert!(r["done"].as_bool().unwrap() && r["udp_loss"].as_f64() == Some(5.0) && r["scores"]["gaming"].as_f64().unwrap() > 50.0 && r["scores"]["speed"].is_null());
         assert_eq!(probe_extra_result(None, "", 10)["done"].as_bool(), Some(false));
         assert!(probe_extra_result(Some(&json!({ "loss": 100.0 })), "x", 95)["error"].as_str() == Some("x"));
+        // (3.63.1) KANKI-UP alone: no Kanki transport is added behind its back
+        let (tr, kd) = probe_wanted(&json!({ "transports": [], "kinds": ["kup-faketcp", "kup-udp"] }));
+        assert!(tr.is_empty() && kd == vec!["kup-faketcp".to_string(), "kup-udp".to_string()]);
+        let (tr, kd) = probe_wanted(&json!({ "transports": ["game"], "kinds": [] }));
+        assert!(tr == vec!["game".to_string()] && kd.is_empty());
+        let (tr, kd) = probe_wanted(&json!({}));
+        assert_eq!((tr.len(), kd.len()), (PROBE_TRANSPORTS.len(), PROBE_KINDS.len()));
+        let (tr, _) = probe_wanted(&json!({ "transports": [], "kinds": [] }));
+        assert_eq!(tr.len(), PROBE_TRANSPORTS.len());
         // an agent too old for it
         seen().lock().unwrap().get_mut("ku_tr").unwrap().version = "3.60.1".into();
         assert!(kup_checks(&app, &t).unwrap_err().contains(KUP_FROM));
