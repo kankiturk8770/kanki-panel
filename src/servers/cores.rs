@@ -22,9 +22,32 @@ fn save(app: &App, m: &HashMap<String, Vec<String>>) {
     app.db.set("core_off", &serde_json::to_string(m).unwrap_or_else(|_| "{}".into()));
 }
 
-/// The cores switched off on node `nid`
+/// The cores off on node `nid`: the ones switched off, and the ones its role does not run
 pub fn off_list(app: &App, nid: &str) -> Vec<String> {
-    load(app).remove(nid).unwrap_or_default()
+    with_role(load(app).remove(nid).unwrap_or_default(), crate::access::node_role(app, nid))
+}
+
+/// Every node's effective off list (switched off, or not run by the node's role)
+pub fn load_effective(app: &App) -> HashMap<String, Vec<String>> {
+    let mut m = load(app);
+    for n in app.db.nodes() {
+        let l = m.remove(&n.id).unwrap_or_default();
+        let l = with_role(l, n.role());
+        if !l.is_empty() {
+            m.insert(n.id, l);
+        }
+    }
+    m
+}
+
+fn with_role(mut l: Vec<String>, role: crate::access::Role) -> Vec<String> {
+    for (c, _, _) in CORES {
+        if !role.allows(c) && !l.iter().any(|x| x == c) {
+            l.push(c.to_string());
+        }
+    }
+    l.sort();
+    l
 }
 
 pub fn is_off(app: &App, nid: &str, core: &str) -> bool {
@@ -35,6 +58,10 @@ pub fn is_off(app: &App, nid: &str, core: &str) -> bool {
 pub fn set(app: &App, nid: &str, core: &str, off: bool) -> Result<(), String> {
     if !CORES.iter().any(|c| c.0 == core) {
         return Err("core: wg, awg or hy2".into());
+    }
+    let role = crate::access::node_role(app, nid);
+    if !off && !role.allows(core) {
+        return Err(role.refusal(core));
     }
     let mut m = load(app);
     let l = m.entry(nid.to_string()).or_default();

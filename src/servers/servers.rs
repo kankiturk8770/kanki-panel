@@ -54,6 +54,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/servers/drop-iran-vpn", post(drop_iran_vpn))
         .route("/api/servers/:id/ports", post(set_ports))
         .route("/api/servers/:id/kmix", post(kmix_switch))
+        .route("/api/servers/:id/role", post(role_set))
         .route("/api/servers/:id/command", get(command_again))
         .route("/api/servers/:id/replace", post(replace_machine))
         .route("/api/servers/:id/update", post(update_one))
@@ -660,7 +661,7 @@ pub fn list_json(app: &App) -> Value {
         .iter()
         .map(|(p, v)| json!({ "port": p, "users": v.iter().map(|(n, pr)| json!({ "node": n, "name": names.get(n).cloned().unwrap_or(n.clone()), "proto": pr })).collect::<Vec<_>>() }))
         .collect();
-    json!({ "servers": out, "clashes": clash, "panel": panel_url(app), "repo": repo(), "version": crate::VERSION, "iran_relays": iran_relays(app).len(), "core_off": crate::cores::load(app) })
+    json!({ "servers": out, "clashes": clash, "panel": panel_url(app), "repo": repo(), "version": crate::VERSION, "iran_relays": iran_relays(app).len(), "core_off": crate::cores::load_effective(app) })
 }
 
 // ------------------------------------------------------------------ add / complete / switch / remove
@@ -1059,9 +1060,35 @@ async fn kmix_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
         Ok(n) => n,
         Err(r) => return r,
     };
-    crate::kmix::set_node_off(&app, &nid, !b["on"].as_bool().unwrap_or(true));
+    let on = b["on"].as_bool().unwrap_or(true);
+    let role = crate::access::node_role(&app, &nid);
+    if on && !role.allows("kmix") {
+        return err(StatusCode::CONFLICT, &role.refusal("kmix"));
+    }
+    crate::kmix::set_node_off(&app, &nid, !on);
     crate::api::spawn_sync(&app);
     Json(json!({ "ok": true })).into_response()
+}
+
+/// { role: gaming | antifilter | hybrid } — what this server may run. The cores the role does not
+/// run stop on the next sync (their own switches are kept and come back with a role that runs them);
+/// its Xray and Kanki DNS stop with it when the role does not run them.
+async fn role_set(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let Some(role) = b["role"].as_str().and_then(crate::access::Role::parse) else {
+        return err(StatusCode::BAD_REQUEST, "role: gaming, antifilter or hybrid");
+    };
+    let nid = match node_of_key(&app, &id) {
+        Ok(n) => n,
+        Err(r) => return r,
+    };
+    match app.db.exec("UPDATE nodes SET role=?1 WHERE id=?2", &[&role.as_str(), &nid]) {
+        Ok(1) => {}
+        Ok(_) => return err(StatusCode::NOT_FOUND, "unknown server"),
+        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "the role could not be saved"),
+    }
+    crate::api::spawn_sync(&app);
+    Json(json!({ "ok": true, "role": role.as_str(), "denied": role.denied(), "off": crate::cores::off_list(&app, &nid) })).into_response()
 }
 
 /// { core: wg|awg|hy2, on: bool } — one core of this server on or off (stopped, port closed, no links)
@@ -1071,7 +1098,13 @@ async fn core_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
         Ok(n) => n,
         Err(r) => return r,
     };
-    if let Err(e) = crate::cores::set(&app, &nid, b["core"].as_str().unwrap_or(""), !b["on"].as_bool().unwrap_or(true)) {
+    let core = b["core"].as_str().unwrap_or("");
+    let on = b["on"].as_bool().unwrap_or(true);
+    let role = crate::access::node_role(&app, &nid);
+    if on && crate::cores::CORES.iter().any(|c| c.0 == core) && !role.allows(core) {
+        return err(StatusCode::CONFLICT, &role.refusal(core));
+    }
+    if let Err(e) = crate::cores::set(&app, &nid, core, !on) {
         return err(StatusCode::BAD_REQUEST, &e);
     }
     crate::api::spawn_sync(&app);
@@ -1474,6 +1507,7 @@ mod tests {
             id: "n1".into(), name: "Germany".into(), address: String::new(), endpoint: String::new(), token: String::new(),
             enabled: true, online: true, last_sync: 0, info: r#"{"wg_pub":"k","wg_port":"51824"}"#.into(), note: String::new(),
             insecure: false, drain: false, maint: false, accept_all: true, endpoint_mode: "custom".into(), sync_state: String::new(),
+            role_raw: String::new(),
         };
         let mut km = crate::kmix::Settings { on: true, port: 4000, parity: 3, hop: String::new(), gaming: true, nodes: Default::default() };
         // not installed and no port of its own: nothing to hold yet

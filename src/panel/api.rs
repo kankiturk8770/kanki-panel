@@ -264,7 +264,7 @@ pub fn user_json(app: &App, u: &User) -> Value {
         "traffic_limit_gb": u.limit_gb, "traffic_used_gb": (u.used_gb() * 100.0).round() / 100.0, "used_bytes": u.used_bytes,
         "expires_at": iso(u.expires_at), "expires_ts": u.expires_at,
         "max_connections": u.max_conn, "online_connections": u.online, "enabled": u.enabled,
-        "status": u.status(), "protocols": u.protocols, "nodes": u.nodes, "notes": u.notes,
+        "status": u.status(), "protocols": u.protocols, "nodes": u.nodes, "notes": u.notes, "tier": u.tier().as_str(),
         "tg_id": u.tg_id, "created_at": iso(u.created_at), "last_seen_at": iso(u.last_seen), "last_seen_ts": u.last_seen,
         // connected right now: [{ "p": protocol, "s": server }]
         "live": crate::live::of(app, u.id),
@@ -327,6 +327,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/sub/:code/raw", get(sub_raw))
         .route("/sub/:code/json", get(sub_json))
         .route("/sub/:code/xray", get(sub_xray))
+        .route("/sub/:code/xjson", get(sub_xray_json))
         .route("/sub/:code/v2", get(sub_v2))
         .route("/sub/:code/xqr/:i", get(sub_xray_qr))
         .route("/api/config/:id/:proto", get(config_file))
@@ -482,7 +483,15 @@ async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     }
     let conns = num(&b["max_connections"]).unwrap_or(1.0).max(0.0) as i64;
     // the panel's default list is not the admin's typing: a name it no longer knows is left out, not refused
-    let def: String = app.db.get("default_protocols").split(',').map(|x| x.trim()).filter(|x| USER_PROTOS.contains(x)).collect::<Vec<_>>().join(",");
+    let tier = match tier_field(&b) {
+        Ok(t) => t,
+        Err(r) => return r,
+    };
+    let def_list = match tier {
+        Some(t) => app.db.service_protocols(t.service()),
+        None => app.db.get("default_protocols"),
+    };
+    let def: String = def_list.split(',').map(|x| x.trim()).filter(|x| USER_PROTOS.contains(x)).collect::<Vec<_>>().join(",");
     let protos = list_or(&b["protocols"], &def);
     let nodes = list_or(&b["nodes"], "");
     let (protos, nodes) = match checked_lists(&app, &protos, &nodes) {
@@ -516,6 +525,12 @@ async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
                 if let Some(ts) = expires_ts {
                     let _ = app.db.exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&ts, &u.id]);
                 }
+                if let Some(t) = tier {
+                    if app.db.exec("UPDATE users SET tier=?1 WHERE id=?2", &[&t.as_str(), &u.id]).is_err() {
+                        spawn_sync(&app);
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, &format!("user {} was made, its tier was not saved", u.username));
+                    }
+                }
                 out.push(user_json(&app, &app.db.user(u.id).unwrap_or(u)))
             }
             Err(e) => {
@@ -529,6 +544,16 @@ async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     }
     spawn_sync(&app);
     Json(json!(out)).into_response()
+}
+
+/// The optional `tier` of a user body: None when it is not sent, 400 when it is not a known tier
+fn tier_field(b: &Value) -> Result<Option<crate::access::Tier>, Response> {
+    match &b["tier"] {
+        Value::Null => Ok(None),
+        Value::String(s) if s.trim().is_empty() => Ok(None),
+        Value::String(s) => crate::access::Tier::parse(s).map(Some).ok_or_else(|| err(StatusCode::BAD_REQUEST, "tier: v2ray, gaming or combo")),
+        _ => Err(err(StatusCode::BAD_REQUEST, "tier: v2ray, gaming or combo")),
+    }
 }
 
 async fn users_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b): Json<Value>) -> Response {
@@ -554,6 +579,10 @@ async fn users_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
         Ok((p, n)) => (if b["protocols"].is_null() { protos.clone() } else { p }, if b["nodes"].is_null() { nodes.clone() } else { n }),
         Err(e) => return err(StatusCode::BAD_REQUEST, &e),
     };
+    let tier = match tier_field(&b) {
+        Ok(t) => t.unwrap_or_else(|| u.tier()),
+        Err(r) => return r,
+    };
     let notes = b["notes"].as_str().unwrap_or(&u.notes).to_string();
     let enabled = b["enabled"].as_bool().unwrap_or(u.enabled) as i64;
     let mut username = u.username.clone();
@@ -569,8 +598,8 @@ async fn users_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
     // a trial that gets more time or data from the admin is not a trial any more (it must not be deleted when it ends)
     let changed_credit = exp != u.expires_at || (gb - u.limit_gb).abs() > f64::EPSILON;
     let r = app.db.exec(
-        "UPDATE users SET username=?1, limit_gb=?2, expires_at=?3, max_conn=?4, protocols=?5, nodes=?6, notes=?7, enabled=?8, warned=0 WHERE id=?9",
-        &[&username, &gb, &exp, &conns, &protos, &nodes, &notes, &enabled, &id],
+        "UPDATE users SET username=?1, limit_gb=?2, expires_at=?3, max_conn=?4, protocols=?5, nodes=?6, notes=?7, enabled=?8, warned=0, tier=?10 WHERE id=?9",
+        &[&username, &gb, &exp, &conns, &protos, &nodes, &notes, &enabled, &id, &tier.as_str()],
     );
     if let Err(e) = r {
         return err(StatusCode::BAD_REQUEST, &e);
@@ -649,7 +678,7 @@ pub(crate) fn node_json(app: &App, n: &Node, users: &[User]) -> Value {
         "id": n.id, "name": n.name, "address": n.address, "endpoint": n.endpoint, "endpoint_mode": n.endpoint_mode,
         "effective_endpoint": endpoint(app, n), "enabled": n.enabled, "online": n.online, "last_sync": n.last_sync,
         "note": n.note, "insecure": n.insecure, "drain": n.drain, "maint": n.maint, "accept_all": n.accept_all,
-        "sync_state": n.sync_state, "users": assigned, "info": info_pub,
+        "sync_state": n.sync_state, "users": assigned, "info": info_pub, "role": n.role().as_str(),
         "plain_http": n.id != "local" && n.address.starts_with("http://"),
         // the country of the server's IP (its flag in the panel); empty while unknown
         "cc": crate::exitgeo::cc(app, &n.id),
@@ -963,12 +992,11 @@ async fn proto_all(State(app): St, h: HeaderMap, Path((proto, action)): Path<(St
     Json(json!({ "ok": true, "changed": changed })).into_response()
 }
 
-/// «Give everyone» a protocol: an account bought as V2Ray or gaming takes only the protocols of its own
-/// service (V2Ray: `v2ray_protocols`, gaming: `game_protocols`); else a V2Ray account turned into VIP and the
-/// bot handed it WireGuard and the app's code (3.58.1). VIP accounts take anything.
-pub(crate) fn assign_fits(app: &App, u: &User, proto: &str) -> bool {
-    let svc = u.service();
-    svc == "vip" || app.db.service_protocols(svc).split(',').any(|p| p.trim() == proto)
+/// «Give everyone» a protocol: only the accounts whose tier has it (a `v2ray` account never gets WireGuard,
+/// a `gaming` one never gets Xray; else a V2Ray account turned into VIP and the bot handed it WireGuard and
+/// the app's code, 3.58.1). `combo` accounts take anything. One user's own list can still be changed by hand.
+pub(crate) fn assign_fits(_app: &App, u: &User, proto: &str) -> bool {
+    u.tier().allows(proto)
 }
 
 /// The protocol list with `p` added or removed; None when it is already that way.
@@ -1685,7 +1713,8 @@ fn hy2_uri(app: &App, u: &User, n: &Node) -> Option<String> {
 fn hy2_link(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Option<String> {
     let info = node_info(n);
     let port = info["hy2_port"].as_str().unwrap_or("");
-    if port.is_empty() || !u.has_proto("hy2") {
+    // a server whose Hysteria2 is switched off (or not run by its role) gives no Hysteria2 link
+    if port.is_empty() || !u.has_proto("hy2") || crate::cores::is_off(app, &n.id, "hy2") {
         return None;
     }
     let mut q = vec![];
@@ -2031,10 +2060,56 @@ fn other_app(app: &App, code: &str, h: &HeaderMap) -> Result<User, Response> {
 async fn sub_v2(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
     let u = match other_app(&app, &code, &h) { Ok(u) => u, Err(r) => return r };
     let lines = v2_links(&app, &u);
+    sub_lines_reply(&app, &u, lines)
+}
+
+/// The `subscription-userinfo` header value (V2Box, v2rayNG, Hiddify show the volume and the end date)
+fn sub_userinfo(u: &User) -> String {
     let total = (u.limit_gb * 1_073_741_824.0) as i64;
-    let info = format!("upload=0; download={}; total={}; expire={}", u.used_bytes.max(0), total, u.expires_at);
-    ([(header::HeaderName::from_static("subscription-userinfo"), info), (header::CONTENT_TYPE, "text/plain; charset=utf-8".to_string())],
+    format!("upload=0; download={}; total={}; expire={}", u.used_bytes.max(0), total, u.expires_at)
+}
+
+/// The `profile-title` header value: the panel's name and the account's, base64 so any language passes
+fn sub_title(app: &App, u: &User) -> String {
+    format!("base64:{}", util::b64(format!("{} · {}", app.db.get("panel_name").trim(), u.username).as_bytes()))
+}
+
+/// The name of the status entry: what is left of the volume and of the days, as the app shows it on
+/// every refresh ("∞" = no limit / no end date)
+pub(crate) fn status_name(u: &User, now_ts: i64) -> String {
+    let left = if u.limit_gb > 0.0 { format!("{:.2} GB", (u.limit_gb - u.used_gb()).max(0.0)) } else { "∞".to_string() };
+    let days = if u.expires_at > 0 { ((u.expires_at - now_ts).max(0) + 86399) / 86400 } else { -1 };
+    let days = if days < 0 { "∞".to_string() } else { days.to_string() };
+    let state = if u.active() { String::new() } else { format!("⛔ {} · ", u.status()) };
+    format!("{}📊 {} left · ⏳ {} days", state, left, days)
+}
+
+/// The status entry: a VLESS line to this device itself (127.0.0.1, port 1) that carries no traffic, only
+/// its name with the live remaining volume and days, so the app shows them at the top of the list
+pub(crate) fn status_line(u: &User, now_ts: i64) -> String {
+    format!("vless://00000000-0000-0000-0000-000000000000@127.0.0.1:1?type=tcp&security=none&encryption=none#{}", pct(&status_name(u, now_ts)))
+}
+
+/// A base64 subscription of `lines` with the status entry first (accounts with Xray or Hysteria2) and the
+/// headers the apps read
+fn sub_lines_reply(app: &App, u: &User, mut lines: Vec<String>) -> Response {
+    if u.has_proto("xray") || u.has_proto("hy2") {
+        lines.insert(0, status_line(u, now()));
+    }
+    ([(header::HeaderName::from_static("subscription-userinfo"), sub_userinfo(u)),
+      (header::HeaderName::from_static("profile-title"), sub_title(app, u)),
+      (header::CONTENT_TYPE, "text/plain; charset=utf-8".to_string())],
      util::b64(lines.join("\n").as_bytes())).into_response()
+}
+
+/// Every Xray link of a user as a full Xray client config (a JSON array, which v2rayNG imports as profiles)
+async fn sub_xray_json(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
+    let u = match other_app(&app, &code, &h) { Ok(u) => u, Err(r) => return r };
+    match crate::xray::panel::user_client_configs(&app, &u) {
+        Ok(v) => ([(header::HeaderName::from_static("subscription-userinfo"), sub_userinfo(&u)),
+                   (header::HeaderName::from_static("profile-title"), sub_title(&app, &u))], Json(v)).into_response(),
+        Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "a link of this subscription could not be turned into a config"),
+    }
 }
 
 /// The links of the combined subscription: one Hysteria2 link per server (through its tunnel when it has one)
@@ -2069,10 +2144,7 @@ pub fn links_text(app: &App, u: &User) -> Option<String> {
 async fn sub_xray(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Response {
     let u = match other_app(&app, &code, &h) { Ok(u) => u, Err(r) => return r };
     let lines: Vec<String> = crate::xray::panel::user_links(&app, &u).into_iter().map(|x| x.1).collect();
-    let total = (u.limit_gb * 1_073_741_824.0) as i64;
-    let info = format!("upload=0; download={}; total={}; expire={}", u.used_bytes.max(0), total, u.expires_at);
-    ([(header::HeaderName::from_static("subscription-userinfo"), info), (header::CONTENT_TYPE, "text/plain; charset=utf-8".to_string())],
-     util::b64(lines.join("\n").as_bytes())).into_response()
+    sub_lines_reply(&app, &u, lines)
 }
 
 /// Every standard link of a user for other apps (Hysteria2 and WireGuard URIs, then Xray)
@@ -2106,11 +2178,7 @@ async fn sub_raw(State(app): St, Path(code): Path<String>, h: HeaderMap) -> Resp
     let u = match other_app(&app, &code, &h) { Ok(u) => u, Err(r) => return r };
     // a V2Ray account: the same links as /v2 (Xray and Hysteria2), never a WireGuard link (3.58.1)
     let lines = if u.service() == "v2ray" { v2_links(&app, &u) } else { other_app_links(&app, &u) };
-    let used = u.used_bytes.max(0);
-    let total = (u.limit_gb * 1_073_741_824.0) as i64;
-    let info = format!("upload=0; download={}; total={}; expire={}", used, total, u.expires_at);
-    ([(header::HeaderName::from_static("subscription-userinfo"), info), (header::CONTENT_TYPE, "text/plain; charset=utf-8".to_string())],
-     util::b64(lines.join("\n").as_bytes())).into_response()
+    sub_lines_reply(&app, &u, lines)
 }
 
 /// The WireGuard link, to the server's endpoint or through its tunnel (`tw`)

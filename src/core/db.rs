@@ -42,7 +42,7 @@ pub fn peer_ip(base: &str, user_id: i64) -> Option<String> {
     (third <= 255).then(|| format!("{}.{}.{}", base, third, fourth))
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct User {
     pub id: i64,
     pub username: String,
@@ -60,6 +60,9 @@ pub struct User {
     pub last_seen: i64,
     pub online: i64,
     pub warned: i64,
+    /// the stored tier ('v2ray' | 'gaming' | 'combo'; empty = not set yet, see `tier()`)
+    #[serde(rename = "tier_stored")]
+    pub tier_raw: String,
 }
 
 impl User {
@@ -81,7 +84,14 @@ impl User {
             last_seen: r.get(13)?,
             online: r.get(14)?,
             warned: r.get(15)?,
+            tier_raw: r.get::<_, Option<String>>(16)?.unwrap_or_default(),
         })
+    }
+
+    /// The account's tier: the stored one, or (a row from before tiers, or one written without it) the
+    /// tier its protocols make
+    pub fn tier(&self) -> crate::access::Tier {
+        crate::access::Tier::parse(&self.tier_raw).unwrap_or_else(|| tier_of_protocols(&self.protocols))
     }
 
     pub fn sub_code(&self) -> String {
@@ -167,6 +177,9 @@ pub struct Node {
     pub accept_all: bool,
     pub endpoint_mode: String,
     pub sync_state: String,
+    /// 'gaming' | 'antifilter' | 'hybrid' (see `crate::access::Role`)
+    #[serde(rename = "role")]
+    pub role_raw: String,
 }
 
 impl Node {
@@ -188,7 +201,12 @@ impl Node {
             accept_all: r.get::<_, i64>(13)? == 1,
             endpoint_mode: r.get(14)?,
             sync_state: r.get(15)?,
+            role_raw: r.get::<_, Option<String>>(16)?.unwrap_or_default(),
         })
+    }
+
+    pub fn role(&self) -> crate::access::Role {
+        crate::access::Role::of(&self.role_raw)
     }
 
     /// Node takes new users and shows on the subscription page (not in maintenance). A node in maintenance is
@@ -211,8 +229,42 @@ pub struct Peer {
     pub tx: i64,
 }
 
-const USER_COLS: &str = "id,username,code,limit_gb,used_bytes,expires_at,max_conn,enabled,protocols,nodes,notes,tg_id,created_at,last_seen,online,warned";
-const NODE_COLS: &str = "id,name,address,endpoint,token,enabled,online,last_sync,info,note,insecure,drain,maint,accept_all,endpoint_mode,sync_state";
+const USER_COLS: &str = "id,username,code,limit_gb,used_bytes,expires_at,max_conn,enabled,protocols,nodes,notes,tg_id,created_at,last_seen,online,warned,tier";
+const NODE_COLS: &str = "id,name,address,endpoint,token,enabled,online,last_sync,info,note,insecure,drain,maint,accept_all,endpoint_mode,sync_state,role";
+
+/// The tier an account's protocol list makes: what the plans' services gave (`User::service`)
+pub fn tier_of_protocols(protocols: &str) -> crate::access::Tier {
+    let u = User { protocols: protocols.to_string(), ..User::default() };
+    crate::access::Tier::of_service(u.service())
+}
+
+/// Adds a column when the table does not have it yet (a real error, unlike «already there», is returned)
+fn add_column(c: &Connection, table: &str, col: &str, decl: &str) -> rusqlite::Result<()> {
+    let mut st = c.prepare(&format!("PRAGMA table_info({})", table))?;
+    let have = st.query_map([], |r| r.get::<_, String>(1))?.collect::<rusqlite::Result<Vec<String>>>()?;
+    if !have.iter().any(|n| n == col) {
+        c.execute(&format!("ALTER TABLE {} ADD COLUMN {} {}", table, col, decl), [])?;
+    }
+    Ok(())
+}
+
+/// 3.64 schema: the tier of each account and the role of each server, both with a default that keeps
+/// what runs today (servers: hybrid; accounts: the tier their protocols already make, set once)
+fn migrate_access(c: &Connection) -> rusqlite::Result<()> {
+    add_column(c, "nodes", "role", "TEXT NOT NULL DEFAULT 'hybrid'")?;
+    add_column(c, "users", "tier", "TEXT NOT NULL DEFAULT ''")?;
+    c.execute("UPDATE nodes SET role='hybrid' WHERE role IS NULL OR role NOT IN ('gaming','antifilter','hybrid')", [])?;
+    let tx = c.unchecked_transaction()?;
+    let rows: Vec<(i64, String)> = {
+        let mut st = tx.prepare("SELECT id, protocols FROM users WHERE tier IS NULL OR tier NOT IN ('v2ray','gaming','combo')")?;
+        let v = st.query_map([], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default())))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        v
+    };
+    for (id, protos) in rows {
+        tx.execute("UPDATE users SET tier=?1 WHERE id=?2", params![tier_of_protocols(&protos).as_str(), id])?;
+    }
+    tx.commit()
+}
 
 impl Db {
     pub fn open(path: &str) -> Db {
@@ -308,6 +360,7 @@ impl Db {
             let _ = c.execute("UPDATE users SET notes='' WHERE notes='trial' AND UPPER(username) NOT LIKE '%-TEST'", []);
             let _ = c.execute("INSERT OR REPLACE INTO settings(k,v) VALUES('mig_trial_notes','1')", []);
         }
+        migrate_access(&c).expect("schema: server roles and user tiers");
         // keep logs bounded
         trim_logs(&c);
         let db = Db(Mutex::new(c));
@@ -562,8 +615,8 @@ impl Db {
         }
         let id = self.with(|c| {
             c.execute(
-                "INSERT INTO users(id,username,code,limit_gb,expires_at,max_conn,protocols,nodes,notes,tg_id,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
-                params![n, name, code, limit_gb, exp, max_conn, protocols, nodes, notes, tg_id, now()],
+                "INSERT INTO users(id,username,code,limit_gb,expires_at,max_conn,protocols,nodes,notes,tg_id,created_at,tier) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+                params![n, name, code, limit_gb, exp, max_conn, protocols, nodes, notes, tg_id, now(), tier_of_protocols(protocols).as_str()],
             )
             .map(|_| c.last_insert_rowid())
             .map_err(|e| if e.to_string().contains("UNIQUE") { "this username already exists".to_string() } else { e.to_string() })

@@ -103,6 +103,17 @@ type ReceiptCopy = (i64, i64, bool, String);
 
 type Kb = Vec<Vec<(String, String)>>;
 
+/// `a` with the names of `b` it does not have yet added at the end (comma lists)
+fn union_list(a: &str, b: &str) -> String {
+    let mut v: Vec<&str> = a.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()).collect();
+    for x in b.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()) {
+        if !v.contains(&x) {
+            v.push(x);
+        }
+    }
+    v.join(",")
+}
+
 fn b(t: &str, d: &str) -> (String, String) {
     (t.to_string(), d.to_string())
 }
@@ -2999,7 +3010,7 @@ impl Bot {
                 // a plan for more users raises the account to it (a renewal never lowers it)
                 let _ = self.db().exec("UPDATE users SET max_conn=?1 WHERE id=?2 AND max_conn>0 AND max_conn<?1", &[&p.conns, &o.4]);
                 self.db().promote_trial(o.4);
-                self.set_service(o.4, &p.service);
+                self.set_service(o.4, &p.service, true)?;
                 self.db().user(o.4).ok_or("not found".into())
             })
         } else if let Some(t) = trial {
@@ -3010,7 +3021,7 @@ impl Bot {
                 .exec("UPDATE users SET expires_at=?1, limit_gb=?2, max_conn=?3, notes=?4, warned=0, enabled=1 WHERE id=?5", &[&exp, &lim, &p.conns, &note, &t.id])
                 .and_then(|_| {
                     self.db().promote_trial(t.id);
-                    self.set_service(t.id, &p.service);
+                    self.set_service(t.id, &p.service, false)?;
                     self.db().user(t.id).ok_or("not found".into())
                 })
         } else {
@@ -3068,14 +3079,22 @@ impl Bot {
         }
     }
 
-    /// An account bought (or renewed) with a plan of the other service gets that service's protocols; an account
-    /// already of the plan's service keeps its own list (an admin may have changed it)
-    fn set_service(&self, id: i64, service: &str) {
-        let Some(u) = self.db().user(id) else { return };
-        if u.service() != service {
-            let ps = self.db().service_protocols(service);
-            let _ = self.db().exec("UPDATE users SET protocols=?1 WHERE id=?2", &[&ps, &id]);
+    /// The tier and protocols of an account a plan of `service` was delivered to. A plan of the account's own
+    /// tier keeps its list (an admin may have changed it). `upgrade` (a renewal of a paid account): a plan of
+    /// another tier unlocks it on top, the account becomes `combo` and gets the new service's protocols added
+    /// (nothing it had is taken away). Else (a trial turned into the purchase) the account takes exactly the
+    /// plan's tier and protocols.
+    fn set_service(&self, id: i64, service: &str, upgrade: bool) -> Result<(), String> {
+        let u = self.db().user(id).ok_or("not found")?;
+        let have = u.tier();
+        let bought = crate::access::Tier::of_service(service);
+        let next = if upgrade { have.with(bought) } else { bought };
+        if next == have && (upgrade || u.service() == service) {
+            return Ok(());
         }
+        let add = self.db().service_protocols(service);
+        let ps = if upgrade { union_list(&u.protocols, &add) } else { add };
+        self.db().exec("UPDATE users SET protocols=?1, tier=?2 WHERE id=?3", &[&ps, &next.as_str(), &id]).map(|_| ())
     }
 
     /// A friend from someone's invite link bought (`gb` of the plan): the inviter gets `ref_pct`% of that volume on
@@ -4860,6 +4879,40 @@ mod flow_tests {
 
     const ADMIN: i64 = 9000;
 
+    /// A purchase enables only its tier's cores; a renewal with the other tier unlocks it on top (combo,
+    /// nothing taken away); a trial turned into a purchase takes exactly the plan's tier
+    #[tokio::test]
+    async fn purchases_follow_the_tier_and_upgrades_unlock_the_other_one() {
+        use crate::access::Tier;
+        let (bot, _log) = bot().await;
+        let v = bot.create_account_svc(7201, 20.0, 30, 1, "", 0, "v2ray").unwrap();
+        assert_eq!((v.protocols.as_str(), v.tier()), ("xray,hy2", Tier::V2ray));
+        let g = bot.create_account_svc(7202, 20.0, 30, 1, "", 0, "game").unwrap();
+        assert_eq!((g.protocols.as_str(), g.tier()), ("wg,awg,kmix", Tier::Gaming));
+        // the same tier again: an admin's own change of the list stays
+        bot.db().exec("UPDATE users SET protocols='xray' WHERE id=?1", &[&v.id]).unwrap();
+        bot.set_service(v.id, "v2ray", true).unwrap();
+        assert_eq!(bot.db().user(v.id).unwrap().protocols, "xray");
+        // V2Ray renewed with a gaming plan: combo, Xray kept and the gaming cores added
+        bot.set_service(v.id, "game", true).unwrap();
+        let u = bot.db().user(v.id).unwrap();
+        assert_eq!((u.protocols.as_str(), u.tier_raw.as_str()), ("xray,wg,awg,kmix", "combo"));
+        // a combo account renewed with a V2Ray plan stays combo and keeps its list as it is
+        bot.set_service(v.id, "v2ray", true).unwrap();
+        let u = bot.db().user(v.id).unwrap();
+        assert_eq!((u.protocols.as_str(), u.tier()), ("xray,wg,awg,kmix", Tier::Combo));
+        // gaming renewed with V2Ray: combo
+        bot.set_service(g.id, "v2ray", true).unwrap();
+        assert_eq!(bot.db().user(g.id).unwrap().protocols, "wg,awg,kmix,xray,hy2");
+        // a trial (every core) bought as V2Ray: only Xray and Hysteria2
+        let t = bot.create_account_svc(7203, 1.0, 1, 1, "trial", 0, "vip").unwrap();
+        bot.set_service(t.id, "v2ray", false).unwrap();
+        let t = bot.db().user(t.id).unwrap();
+        assert_eq!((t.protocols.as_str(), t.tier()), ("xray,hy2", Tier::V2ray));
+        // an account that is gone is an error, not a silent no-op
+        assert!(bot.set_service(99_999, "v2ray", true).is_err());
+    }
+
     /// The buttons of the last message to a chat: (text, callback data or web app url, colour)
     fn buttons(log: &Log, chat: i64) -> Vec<(String, String, String)> {
         let l = log.lock().unwrap_or_else(|e| e.into_inner());
@@ -5009,7 +5062,7 @@ mod flow_tests {
         // a second tap on approve: already decided
         tap_id(&bot, from(ADMIN, "Admin", "admin"), &format!("ap:{}", oid), "qap2").await;
         assert_eq!(answers(&log, "qap2"), vec!["این سفارش قبلاً بررسی شده.".to_string()]);
-        // renewing it with the VIP plan makes it a full account
+        // renewing it with the VIP plan makes it a full (combo) account: the VIP protocols on top of the ones it had
         let pro: i64 = db.with(|c| c.query_row("SELECT id FROM plans WHERE name='Pro'", [], |r| r.get(0)).unwrap());
         bot.start_purchase(buyer, pro, acc[0].id).await;
         tap(&bot, from(buyer, "Nima", "nima"), "pay:card").await;
@@ -5017,7 +5070,8 @@ mod flow_tests {
         let oid: i64 = buttons(&log, ADMIN).iter().find(|b| b.1.starts_with("ap:")).unwrap().1[3..].parse().unwrap();
         tap(&bot, from(ADMIN, "Admin", "admin"), &format!("ap:{}", oid)).await;
         let u = db.user(acc[0].id).unwrap();
-        assert_eq!((u.protocols, db.users_of_tg(buyer).len()), (db.get("default_protocols"), 1));
+        assert_eq!((u.protocols.as_str(), u.tier(), db.users_of_tg(buyer).len()), ("xray,hy2,wg,awg,kmix", crate::access::Tier::Combo, 1));
+        assert!(db.get("default_protocols").split(',').all(|p| u.has_proto(p)), "{}", u.protocols);
         // the services first, every time (even with one on sale), then its plans
         db.exec("UPDATE plans SET active=0 WHERE name='Std'", &[]).unwrap();
         tap(&bot, from(buyer, "Nima", "nima"), "buy").await;

@@ -99,8 +99,17 @@ pub fn settings(app: &App) -> Settings {
         parity: db.get("kmix_parity").parse().ok().filter(|p| *p <= 10).unwrap_or(3),
         hop: valid_hop(&db.get("kmix_hop")).unwrap_or_default(),
         gaming: db.get("kmix_gaming") != "0",
-        nodes: serde_json::from_str(&db.get("kmix_nodes")).unwrap_or_default(),
+        nodes: role_nodes(app, serde_json::from_str(&db.get("kmix_nodes")).unwrap_or_default()),
     }
+}
+
+/// The per-server options with KANKI MIX off on every server whose role does not run it (not saved:
+/// the server's own switch comes back when its role allows KANKI MIX again)
+fn role_nodes(app: &App, mut m: HashMap<String, NodeOpt>) -> HashMap<String, NodeOpt> {
+    for n in app.db.nodes().into_iter().filter(|n| !n.role().allows("kmix")) {
+        m.entry(n.id).or_default().off = true;
+    }
+    m
 }
 
 /// Gives server `node_id` its own KANKI MIX port (it moves there on its next sync).
@@ -729,7 +738,9 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
         Some("") => String::new(),
         Some(x) => match valid_hop(x) { Some(v) => v, None => return crate::api::err(StatusCode::BAD_REQUEST, "extra ports: first-last, like 4001-4010 (at most 1000 ports)") },
     };
-    let mut nodes = cur.nodes.clone();
+    // the saved per-server options (not the ones a server's role switched off for now)
+    let saved: HashMap<String, NodeOpt> = serde_json::from_str(&app.db.get("kmix_nodes")).unwrap_or_default();
+    let mut nodes = saved.clone();
     if let Some(o) = b["nodes"].as_object() {
         nodes.clear();
         for (id, v) in o {
@@ -749,6 +760,13 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
             if opt.off || opt.port > 0 || !opt.route.is_empty() || !opt.host.is_empty() || !opt.tun_host.is_empty() || opt.tun_port > 0 || opt.tun_off || !opt.tun_name.is_empty() {
                 nodes.insert(id.clone(), opt);
             }
+        }
+    }
+    // a server whose role does not run KANKI MIX shows it off; that is not the admin's own switch
+    for n in app.db.nodes().into_iter().filter(|n| !n.role().allows("kmix")) {
+        let own = saved.get(&n.id).map(|o| o.off).unwrap_or(false);
+        if let Some(o) = nodes.get_mut(&n.id) {
+            o.off = own;
         }
     }
     // a port that clashes with WireGuard / AmneziaWG / Hysteria2 of a server, or inside the extra ports

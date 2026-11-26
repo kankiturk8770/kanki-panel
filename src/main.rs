@@ -17,6 +17,11 @@ mod fw;
 mod live;
 #[path = "core/netq.rs"]
 mod netq;
+#[path = "core/access.rs"]
+mod access;
+#[cfg(test)]
+#[path = "core/access_tests.rs"]
+mod access_tests;
 
 // panel: the admin panel's web server and API, login and tokens, request limits, system and updates, backups (src/panel)
 #[path = "panel/api.rs"]

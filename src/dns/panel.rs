@@ -229,7 +229,8 @@ pub fn explain(s: &DnsSettings, name: &str) -> Option<(String, String, String, b
 /// The config of server `sid` and its version, or None when it runs no DNS.
 pub fn cfg_for(app: &App, sid: &str) -> Option<(DnsCfg, String)> {
     let s = settings(app);
-    if !s.on {
+    // a server whose role (antifilter) does not run Kanki DNS gets none, whatever was set up on it before
+    if !s.on || !crate::access::server_allows(app, sid, "dns") {
         return None;
     }
     let srv = s.servers.iter().find(|x| x.server == sid)?;
@@ -706,6 +707,10 @@ async fn put_server(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
     let names = crate::tunnel::panel::server_names(&app);
     if !names.contains_key(&sid) {
         return err(StatusCode::BAD_REQUEST, "pick a server (add it first with its one-line install command)");
+    }
+    let role = crate::access::server_role(&app, &sid);
+    if !role.allows("dns") {
+        return err(StatusCode::CONFLICT, &role.refusal("dns"));
     }
     let mut s = settings(&app);
     let mut x = s.servers.iter().find(|x| x.server == sid).cloned().unwrap_or(DnsSrv { server: sid.clone(), ..Default::default() });

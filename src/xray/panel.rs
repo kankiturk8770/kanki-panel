@@ -74,6 +74,11 @@ pub struct Inbound {
     pub link_sni: String,
     /// users also get a copy of this inbound's link through its server's CDN domain (`XServer::cdn`)
     pub cdn: bool,
+    /// the explicit CDN address users dial: a domain behind the CDN, or a clean IP of the CDN (then the
+    /// CDN's domain comes from Host or the server's CDN domain). "" = the server's own address. When set,
+    /// every link, subscription line and client config of this inbound goes through it, never straight
+    /// to the server.
+    pub cdn_address: String,
     /// only these user ids (empty = every user with Xray)
     pub only: Vec<i64>,
     /// listen address ("" = every address)
@@ -792,6 +797,41 @@ pub fn link_outbound(link: &str) -> Result<Value, String> {
     }
 }
 
+/// Local ports of the generated client configs: SOCKS5 (with UDP) and HTTP, on 127.0.0.1 only
+const CLIENT_SOCKS_PORT: u16 = 10808;
+const CLIENT_HTTP_PORT: u16 = 10809;
+
+/// A complete Xray client config for one share link (what Xray-core, v2rayNG or V2Box import as a JSON
+/// profile): local SOCKS and HTTP proxies, the link's outbound, direct and block, private addresses
+/// direct; DNS from the panel's DNS setting. Built from the link itself, so it always dials what the
+/// link dials (the CDN address when the inbound has one).
+pub fn client_config(app: &App, name: &str, link: &str) -> Result<Value, String> {
+    let mut proxy = link_outbound(link)?;
+    proxy["tag"] = json!("proxy");
+    let dns: Vec<String> = app.db.get("dns").split(',').map(|x| x.trim().to_string()).filter(|x| x.parse::<std::net::IpAddr>().is_ok()).collect();
+    let mut c = json!({
+        "remarks": name,
+        "log": { "loglevel": "warning" },
+        "inbounds": [
+            { "tag": "socks", "listen": "127.0.0.1", "port": CLIENT_SOCKS_PORT, "protocol": "socks",
+              "settings": { "auth": "noauth", "udp": true },
+              "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"] } },
+            { "tag": "http", "listen": "127.0.0.1", "port": CLIENT_HTTP_PORT, "protocol": "http", "settings": {} },
+        ],
+        "outbounds": [proxy, { "tag": "direct", "protocol": "freedom" }, { "tag": "block", "protocol": "blackhole" }],
+        "routing": { "domainStrategy": "AsIs", "rules": [{ "type": "field", "ip": ["geoip:private"], "outboundTag": "direct" }] },
+    });
+    if !dns.is_empty() {
+        c["dns"] = json!({ "servers": dns });
+    }
+    Ok(c)
+}
+
+/// Every Xray link of a user as a full client config, in the order of the subscription
+pub fn user_client_configs(app: &App, u: &User) -> Result<Vec<Value>, String> {
+    links_meta(app, u).into_iter().map(|m| client_config(app, &m.name, &m.link)).collect()
+}
+
 // ------------------------------------------------------------------ inbound traffic and limits
 
 /// Traffic of each inbound (id -> bytes), kept across restarts until the admin resets it.
@@ -842,12 +882,20 @@ pub fn ib_state(ib: &Inbound, used: i64) -> &'static str {
 fn runnable(app: &App) -> XraySettings {
     let mut s = settings(app);
     let t = ib_traffic(app);
-    s.inbounds.retain(|ib| ib.enabled && ib_state(ib, t.get(&ib.id).copied().unwrap_or(0)).is_empty());
+    // an inbound on a server whose role (gaming) does not run Xray neither runs nor gives links
+    let mut allowed: HashMap<String, bool> = HashMap::new();
+    s.inbounds.retain(|ib| {
+        let ok = *allowed.entry(ib.server.clone()).or_insert_with(|| crate::access::server_allows(app, &ib.server, "xray"));
+        ok && ib.enabled && ib_state(ib, t.get(&ib.id).copied().unwrap_or(0)).is_empty()
+    });
     s
 }
 
 /// The Xray config of server `sid` and its version, or None when it runs no Xray.
 pub fn cfg_for(app: &App, sid: &str) -> Option<(XrayCfg, String)> {
+    if !crate::access::server_allows(app, sid, "xray") {
+        return None;
+    }
     let s = runnable(app);
     let domain = server_domain(&s, sid);
     // a server with its own domain gets its SSL right away, even before it has an inbound
@@ -879,7 +927,73 @@ fn host_port(h: &str, p: u16) -> String {
 
 /// The share link of one inbound for one user.
 pub fn link(app: &App, s: &XraySettings, ib: &Inbound, u: &User) -> Option<String> {
+    if let Some(x) = cdn_view(s, ib) {
+        return link_with(s, &x, u, "");
+    }
     link_with(s, ib, u, &server_address(app, s, &ib.server))
+}
+
+/// The domain the CDN serves for this inbound: `cdn_address` itself when it is a domain, else (a clean
+/// CDN IP) the inbound's Host, else its server's CDN domain ("" = none)
+fn cdn_front(s: &XraySettings, ib: &Inbound) -> String {
+    let a = ib.cdn_address.trim().trim_matches('.').to_ascii_lowercase();
+    if is_domain(&a) {
+        return a;
+    }
+    let h = ib.host.trim().trim_matches('.').to_ascii_lowercase();
+    if is_domain(&h) {
+        return h;
+    }
+    server_cdn(s, &ib.server)
+}
+
+/// The inbound as its links see it when it has a `cdn_address`: dialled at that address, with the CDN's
+/// domain as Host and SNI (None = no CDN address)
+fn cdn_view(s: &XraySettings, ib: &Inbound) -> Option<Inbound> {
+    let addr = ib.cdn_address.trim().trim_matches('.');
+    if addr.is_empty() {
+        return None;
+    }
+    let front = cdn_front(s, ib);
+    let mut x = ib.clone();
+    x.link_host = addr.to_string();
+    if ib.network != "grpc" && x.host.trim().is_empty() {
+        x.host = front.clone();
+    }
+    let tls = ib.security == "tls" || ib.link_tls;
+    if tls && x.link_sni.is_empty() && ib.sni.trim().is_empty() {
+        x.link_sni = front;
+    }
+    if ib.security == "tls" && ["ws", "httpupgrade"].contains(&ib.network.as_str()) {
+        // the CDN speaks WebSocket only over HTTP/1.1
+        x.alpn = "http/1.1".into();
+    }
+    Some(x)
+}
+
+/// Checks (and tidies) an inbound's `cdn_address`: a domain or an IP, an inbound that can go through a
+/// CDN, a CDN domain to send when it is an IP, and not together with a typed link address
+fn check_cdn_address(s: &XraySettings, ib: &mut Inbound) -> Result<(), String> {
+    let a = ib.cdn_address.trim().trim_matches('.').to_ascii_lowercase();
+    ib.cdn_address = a.clone();
+    if a.is_empty() {
+        return Ok(());
+    }
+    if a.len() > 253 || (!is_domain(&a) && a.parse::<std::net::IpAddr>().is_err()) {
+        return Err("the CDN address is a domain (like cdn.example.com) or an IP of the CDN".into());
+    }
+    if !ib.link_host.trim().is_empty() {
+        return Err("use either the CDN address or the link address, not both".into());
+    }
+    let front = cdn_front(s, ib);
+    if front.is_empty() {
+        return Err("a CDN IP needs the CDN's domain: write it in Host, or give the server its CDN domain".into());
+    }
+    let why = cdn_unfit(ib, &front);
+    if !why.is_empty() {
+        return Err(why.into());
+    }
+    Ok(())
 }
 
 fn link_with(_s: &XraySettings, ib: &Inbound, u: &User, server_addr: &str) -> Option<String> {
@@ -1025,7 +1139,8 @@ fn links_meta(app: &App, u: &User) -> Vec<LinkMeta> {
         let named = Inbound { remark: name.clone(), plain_name: true, ..ib.clone() };
         let Some(l) = link(app, &s, &named, u) else { continue };
         let group = format!("{}:{}", ib.server, ib.id);
-        out.push(LinkMeta { name: name.clone(), link: l, server: ib.server.clone(), via: "direct", group: group.clone() });
+        let via = if ib.cdn_address.trim().is_empty() { "direct" } else { "cdn" };
+        out.push(LinkMeta { name: name.clone(), link: l, server: ib.server.clone(), via, group: group.clone() });
         if let Some(t) = link_tunnel(app, &s, &named, u) {
             out.push(LinkMeta { name: t.0, link: t.1, server: ib.server.clone(), via: "tunnel", group: group.clone() });
         }
@@ -1094,7 +1209,7 @@ fn pretty_names(app: &App, _s: &XraySettings, list: &[&Inbound]) -> HashMap<Stri
 /// to this inbound; TLS keeps the server's own name. None = the server has no tunnel, or the link already
 /// goes through another address (a CDN or a typed link address).
 fn link_tunnel(app: &App, s: &XraySettings, ib: &Inbound, u: &User) -> Option<(String, String)> {
-    if !ib.link_host.trim().is_empty() || ib.link_port > 0 {
+    if !ib.link_host.trim().is_empty() || ib.link_port > 0 || !ib.cdn_address.trim().is_empty() {
         return None;
     }
     let tw = crate::twin::of_server(app, &ib.server, ib.port, ib.network != "kcp")?;
@@ -1119,7 +1234,8 @@ fn link_tunnel(app: &App, s: &XraySettings, ib: &Inbound, u: &User) -> Option<(S
 /// (name, link) of an inbound's copy through its server's CDN domain: None when the inbound's CDN switch
 /// is off, its server has no CDN domain, or the inbound cannot go through a CDN (`cdn_unfit`).
 fn link_cdn(s: &XraySettings, ib: &Inbound, u: &User) -> Option<(String, String)> {
-    if !ib.cdn {
+    // with its own CDN address the main link already goes through the CDN
+    if !ib.cdn || !ib.cdn_address.trim().is_empty() {
         return None;
     }
     let cdn = server_cdn(s, &ib.server);
@@ -1479,6 +1595,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/xray/inbounds/:id/clone", post(clone_inbound))
         .route("/api/xray/inbounds/:id/clients", get(inbound_clients))
         .route("/api/xray/inbounds/:id/json", get(inbound_preview))
+        .route("/api/xray/inbounds/:id/client/:uid", get(inbound_client_config))
         .route("/api/xray/outs/check", post(check_out))
         .route("/api/xray/keys", post(new_keys))
         .route("/api/xray/reality/test", post(reality_test))
@@ -1654,6 +1771,10 @@ async fn put_server(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
     let sid = b["server"].as_str().unwrap_or("").trim().to_string();
     if sid != "local" && !crate::tunnel::panel::server_names(&app).contains_key(&sid) {
         return err(StatusCode::BAD_REQUEST, "pick a server (add it first with its one-line install command)");
+    }
+    let role = crate::access::server_role(&app, &sid);
+    if !role.allows("xray") {
+        return err(StatusCode::CONFLICT, &role.refusal("xray"));
     }
     let mut s = settings(&app);
     let address = b["address"].as_str().unwrap_or("").trim().trim_matches('.').to_string();
@@ -1843,6 +1964,13 @@ async fn put_inbound(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
     if !s.servers.iter().any(|x| x.server == ib.server) {
         return err(StatusCode::BAD_REQUEST, "pick one of the Xray servers");
     }
+    let role = crate::access::server_role(&app, &ib.server);
+    if !role.allows("xray") {
+        return err(StatusCode::CONFLICT, &role.refusal("xray"));
+    }
+    if let Err(e) = check_cdn_address(&s, &mut ib) {
+        return err(StatusCode::BAD_REQUEST, &e);
+    }
     if taken_ports(&app, &ib.server).contains(&ib.port) || s.inbounds.iter().any(|o| o.id != ib.id && o.server == ib.server && o.port == ib.port) {
         return err(StatusCode::BAD_REQUEST, "this port is already used on that server");
     }
@@ -1935,6 +2063,24 @@ async fn inbound_preview(State(app): St, h: HeaderMap, Path(id): Path<String>) -
     Json(inbound_json(ib, &xray_users(&app))).into_response()
 }
 
+/// The share link and the full client config of one inbound for one user (the admin's preview: the
+/// inbound may be stopped; the user must have Xray)
+async fn inbound_client_config(State(app): St, h: HeaderMap, Path((id, uid)): Path<(String, i64)>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let s = settings(&app);
+    let Some(ib) = s.inbounds.iter().find(|x| x.id == id) else { return err(StatusCode::NOT_FOUND, "no such inbound") };
+    let Some(u) = app.db.user(uid) else { return err(StatusCode::NOT_FOUND, "no such user") };
+    if !u.has_proto("xray") {
+        return err(StatusCode::BAD_REQUEST, "this user does not have Xray");
+    }
+    let Some(l) = link(&app, &s, ib, &u) else { return err(StatusCode::CONFLICT, "this inbound's server has no address yet") };
+    let name = if ib.remark.is_empty() { format!("{}-{}", ib.protocol, u.username) } else { format!("{}-{}", ib.remark, u.username) };
+    match client_config(&app, &name, &l) {
+        Ok(c) => Json(json!({ "link": l, "config": c })).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+    }
+}
+
 /// Build one outbound without saving it (the form shows what Xray will get).
 async fn check_out(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
@@ -1951,7 +2097,9 @@ async fn check_out(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respon
 async fn new_keys(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "nodes");
     let (p, q) = reality_keys();
-    Json(json!({ "private": p, "public": q, "short_id": hex::encode(rand::random::<[u8; 8]>()) })).into_response()
+    // short ids of every length Xray takes (2 to 16 hex digits), and a client UUID
+    let short_ids: Vec<String> = [1usize, 2, 4, 8].iter().map(|n| hex::encode((0..*n).map(|_| rand::random::<u8>()).collect::<Vec<u8>>())).collect();
+    Json(json!({ "private": p, "public": q, "short_id": short_ids[3], "short_ids": short_ids, "uuid": user_uuid(&rand_token(24)) })).into_response()
 }
 
 async fn preview(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
@@ -2386,6 +2534,117 @@ mod emit {
         User {
             id: 0, username: String::new(), code: String::new(), limit_gb: 0.0, used_bytes: 0, expires_at: 0, max_conn: 0, enabled: true,
             protocols: String::new(), nodes: String::new(), notes: String::new(), tg_id: 0, created_at: 0, last_seen: 0, online: 0, warned: 0,
+            tier_raw: String::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod cdn_tests {
+    use super::*;
+
+    fn ws_tls(cdn_address: &str) -> Inbound {
+        Inbound {
+            id: "c1".into(), remark: "DE".into(), enabled: true, server: "local".into(), protocol: "vless".into(), port: 443,
+            network: "ws".into(), security: "tls".into(), path: "/ws".into(), cdn_address: cdn_address.into(), ..Default::default()
+        }
+    }
+
+    fn settings_with(ibs: Vec<Inbound>, cdn: &str) -> XraySettings {
+        XraySettings {
+            on: true,
+            servers: vec![XServer { server: "local".into(), address: "203.0.113.9".into(), cdn: cdn.into(), ..Default::default() }],
+            inbounds: ibs,
+            secret: "s".into(),
+            ..Default::default()
+        }
+    }
+
+    fn user() -> User {
+        User { id: 7, username: "ali".into(), code: "1234567890".into(), enabled: true, protocols: "xray,hy2".into(), limit_gb: 10.0, ..Default::default() }
+    }
+
+    fn outbound_of(l: &str) -> Value {
+        link_outbound(l).unwrap()
+    }
+
+    #[test]
+    fn a_cdn_address_is_dialled_with_the_cdn_domain_as_host_and_sni() {
+        let app = crate::test_app();
+        let u = user();
+        // a domain behind the CDN: dialled, and it is also the Host and the SNI
+        let s = settings_with(vec![], "");
+        let ib = ws_tls("Edge.Example.com.");
+        let mut checked = ib.clone();
+        check_cdn_address(&s, &mut checked).unwrap();
+        assert_eq!(checked.cdn_address, "edge.example.com");
+        let o = outbound_of(&link(&app, &s, &checked, &u).unwrap());
+        assert_eq!(o["settings"]["vnext"][0]["address"], "edge.example.com");
+        assert_eq!(o["settings"]["vnext"][0]["port"], 443);
+        assert_eq!(o["streamSettings"]["wsSettings"]["host"], "edge.example.com");
+        assert_eq!(o["streamSettings"]["tlsSettings"]["serverName"], "edge.example.com");
+        assert_eq!(o["streamSettings"]["tlsSettings"]["alpn"], json!(["http/1.1"]));
+        // a clean CDN IP: dialled, the CDN domain comes from the server's CDN domain
+        let s = settings_with(vec![], "front.example.com");
+        let mut ip = ws_tls("104.16.1.1");
+        check_cdn_address(&s, &mut ip).unwrap();
+        let o = outbound_of(&link(&app, &s, &ip, &u).unwrap());
+        assert_eq!(o["settings"]["vnext"][0]["address"], "104.16.1.1");
+        assert_eq!(o["streamSettings"]["wsSettings"]["host"], "front.example.com");
+        assert_eq!(o["streamSettings"]["tlsSettings"]["serverName"], "front.example.com");
+        // no CDN address: straight to the server's own address
+        let o = outbound_of(&link(&app, &s, &ws_tls(""), &u).unwrap());
+        assert_eq!(o["settings"]["vnext"][0]["address"], "203.0.113.9");
+    }
+
+    #[test]
+    fn a_cdn_address_is_refused_where_a_cdn_cannot_carry_the_inbound() {
+        let s = settings_with(vec![], "");
+        let check = |ib: Inbound| check_cdn_address(&s, &mut ib.clone());
+        assert!(check(ws_tls("")).is_ok());
+        for bad in ["a b.example.com", "exa_mple.com", "https://edge.example.com", "edge.example.com/x", "localhost", &"a".repeat(300)] {
+            assert!(check(ws_tls(bad)).is_err(), "{}", bad);
+        }
+        let r = check(Inbound { security: "reality".into(), network: "tcp".into(), ..ws_tls("edge.example.com") });
+        assert_eq!(r.unwrap_err(), "REALITY cannot go through a CDN");
+        assert!(check(Inbound { network: "tcp".into(), ..ws_tls("edge.example.com") }).is_err());
+        assert!(check(Inbound { protocol: "shadowsocks".into(), ..ws_tls("edge.example.com") }).is_err());
+        assert!(check(Inbound { port: 8444, ..ws_tls("edge.example.com") }).is_err());
+        assert!(check(Inbound { link_host: "x.example.com".into(), ..ws_tls("edge.example.com") }).is_err());
+        // an IP alone does not say which domain the CDN serves
+        assert!(check(ws_tls("104.16.1.1")).is_err());
+        assert!(check(Inbound { host: "front.example.com".into(), ..ws_tls("104.16.1.1") }).is_ok());
+    }
+
+    #[test]
+    fn with_a_cdn_address_every_link_and_config_goes_through_it() {
+        let app = crate::test_app();
+        let u = app.db.create_user("ali", 10.0, 30, 1, "xray", "", "", 0).unwrap();
+        let s = settings_with(vec![ws_tls("edge.example.com"), Inbound { id: "d1".into(), port: 2096, ..ws_tls("") }], "front.example.com");
+        app.db.set("xray_cfg", &serde_json::to_string(&s).unwrap());
+        let m = links_meta(&app, &u);
+        // the CDN inbound: one link, through the CDN (no direct or server-CDN copy); the other: direct + its server-CDN copy is off
+        let c1: Vec<&LinkMeta> = m.iter().filter(|x| x.group.ends_with(":c1")).collect();
+        assert_eq!(c1.len(), 1);
+        assert_eq!(c1[0].via, "cdn");
+        assert!(c1[0].link.contains("@edge.example.com:443"), "{}", c1[0].link);
+        let d1: Vec<&LinkMeta> = m.iter().filter(|x| x.group.ends_with(":d1")).collect();
+        assert_eq!((d1.len(), d1[0].via), (1, "direct"));
+        assert!(d1[0].link.contains("@203.0.113.9:2096"), "{}", d1[0].link);
+        // the full client configs follow the links
+        let cfgs = user_client_configs(&app, &u).unwrap();
+        assert_eq!(cfgs.len(), 2);
+        let addr = |c: &Value| c["outbounds"][0]["settings"]["vnext"][0]["address"].as_str().unwrap_or("").to_string();
+        assert_eq!(addr(&cfgs[0]), "edge.example.com");
+        assert_eq!(addr(&cfgs[1]), "203.0.113.9");
+        for c in &cfgs {
+            assert_eq!(c["outbounds"][0]["tag"], "proxy");
+            assert_eq!(c["inbounds"][0]["listen"], "127.0.0.1");
+            assert_eq!(c["inbounds"][0]["port"], CLIENT_SOCKS_PORT);
+            assert!(c["outbounds"].as_array().unwrap().iter().any(|o| o["tag"] == "direct"));
+            assert!(c["dns"]["servers"].as_array().is_some_and(|d| !d.is_empty()));
+        }
+        // a link that is not ours cannot become a config
+        assert!(client_config(&app, "x", "http://203.0.113.9/").is_err());
     }
 }
