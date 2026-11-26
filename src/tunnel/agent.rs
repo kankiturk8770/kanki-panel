@@ -828,6 +828,12 @@ pub async fn run_file(path: &str) {
     }
 }
 
+/// An older agent kept its VIP tunnels in `/var/lib/kanki/vip.json` and their firewall rules under "vip"
+fn retire_vip() {
+    let _ = std::fs::remove_file("/var/lib/kanki/vip.json");
+    crate::fw::sync("vip", Vec::<String>::new());
+}
+
 #[cfg(test)]
 mod standalone_tests {
     use super::*;
@@ -906,10 +912,4 @@ mod standalone_tests {
         let entry = parse_spec_file(GOOD).unwrap();
         assert_eq!(firewall_list(&entry), vec!["2222/tcp".to_string()]);
     }
-}
-
-/// An older agent kept its VIP tunnels in `/var/lib/kanki/vip.json` and their firewall rules under "vip"
-fn retire_vip() {
-    let _ = std::fs::remove_file("/var/lib/kanki/vip.json");
-    crate::fw::sync("vip", Vec::<String>::new());
 }

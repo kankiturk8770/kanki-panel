@@ -4,7 +4,7 @@
 # Checks: packets go and come back, the largest UDP payload that passes, and that nothing is left after.
 #   sudo KUP_MODE=faketcp scripts/kup_lab.sh        (modes: faketcp easy-faketcp udp icmp)
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 MODE=${KUP_MODE:-faketcp}
 D=$(mktemp -d)
 BIN=$D/udp2raw
@@ -27,8 +27,8 @@ SRV=$!
 sleep 1
 ip netns exec kupA "$BIN" --conf-file "$D/entry.conf" > "$D/entry.log" 2>&1 &
 CLI=$!
-for i in $(seq 1 40); do grep -q "client_ready" "$D/entry.log" && break; sleep 0.25; done
-grep -q "client_ready" "$D/entry.log" && echo "$MODE: connected" || { echo "$MODE: NOT connected"; tail -n 5 "$D/entry.log" "$D/exit.log"; }
+for _ in $(seq 1 40); do grep -q "client_ready" "$D/entry.log" && break; sleep 0.25; done
+if grep -q "client_ready" "$D/entry.log"; then echo "$MODE: connected"; else echo "$MODE: NOT connected"; tail -n 5 "$D/entry.log" "$D/exit.log"; fi
 ip netns exec kupA python3 -c '
 import socket,time
 s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM); s.settimeout(0.5)

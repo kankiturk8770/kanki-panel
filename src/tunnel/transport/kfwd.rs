@@ -5,6 +5,7 @@
 //!     added, zero copies in user space; needs the entry to reach the exit's address (Iran → abroad).
 //!   - `gre`: a GRE link between the two servers (kernel, 24 bytes a packet, no encryption), the entry
 //!     forwards its ports into the link. For when the exit's ports are filtered but GRE passes.
+//!
 //! Every rule lives in chains of its own (`KFWD-*`), rebuilt as a whole when the wanted tunnels change,
 //! so a tunnel that goes leaves nothing behind. Commands run without a shell, with values checked here.
 

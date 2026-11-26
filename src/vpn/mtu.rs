@@ -97,7 +97,7 @@ pub fn overhead(core: &str, awg_pad: u16) -> Option<u16> {
 /// fits (false = the path is so small that even the 1280 floor is cut: fix the tunnel)
 pub fn safe(cap: u16, overhead: u16) -> (u16, bool) {
     let m = cap.saturating_sub(overhead);
-    (m.max(MIN).min(1500), m >= MIN)
+    (m.clamp(MIN, 1500), m >= MIN)
 }
 
 // ------------------------------------------------------------------ the tunnels on the way
@@ -556,7 +556,7 @@ mod tests {
     fn kmix_server_matches() {
         let src = include_str!("kmix-server/internal/obfs/obfs.go");
         assert!(src.contains(&format!("MaxWire    = {}", KMIX_WIRE)), "KMIX_WIRE must follow the Go server");
-        assert!(KMIX_WIRE + 40 + UDP <= DEFAULT_BUDGET);
+        const { assert!(KMIX_WIRE + 40 + UDP <= DEFAULT_BUDGET) };
     }
 
     #[test]

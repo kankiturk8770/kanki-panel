@@ -53,7 +53,7 @@ pub fn group(n: f64) -> String {
     let s = (n.round() as i64).to_string();
     let mut o = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             o.push(',');
         }
         o.push(c);
@@ -260,7 +260,7 @@ pub fn same_memo(a: &str, b: &str) -> bool {
 pub fn hash_in(text: &str) -> Option<String> {
     // each word whole (a bare base64 hash has '/' in it), then the parts of a link
     let words: Vec<&str> = text.split_whitespace().collect();
-    let parts = words.iter().flat_map(|w| w.split(|c: char| c == '/' || c == '?' || c == '#' || c == '&' || c == '='));
+    let parts = words.iter().flat_map(|w| w.split(['/', '?', '#', '&', '=']));
     for w in words.iter().copied().chain(parts) {
         let w = w.trim_matches(|c: char| c == '"' || c == '\'' || c == '<' || c == '>' || c == '.' || c == ',');
         if w.len() == 64 && w.chars().all(|c| c.is_ascii_hexdigit()) {

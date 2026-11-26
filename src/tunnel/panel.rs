@@ -4336,7 +4336,7 @@ mod rotate_tests {
         assert!(!rotate_clash(&app, &list, &me, "ws"));
         // its own forwarded UDP port is the tunnel port
         let me2 = tun("me2", "ir", "tcp", 51820, &["51820:51820"]);
-        assert!(rotate_clash(&app, &[me2.clone()], &me2, "kcp"));
+        assert!(rotate_clash(&app, std::slice::from_ref(&me2), &me2, "kcp"));
         // another server: free
         let far = tun("far", "ir2", "tcp", 5000, &[]);
         assert!(!rotate_clash(&app, &list, &far, "kcp"));

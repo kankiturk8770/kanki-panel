@@ -481,7 +481,7 @@ async fn serve(c: SubCfg, status: Arc<Mutex<Value>>) {
                 }
                 _ = tick.tick() => {
                     ticks += 1;
-                    if ticks % 30 == 0 {
+                    if ticks.is_multiple_of(30) {
                         // close to its end: renew now (certbot's own timer cannot answer Let's Encrypt
                         // while nothing listens on port 80), then show the new date or the reason
                         let d = c.domain.clone();

@@ -18,7 +18,7 @@ use super::link::{Bag, BoxIo, Inbox, Res};
 use super::salamander::Mask;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::os::fd::RawFd;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
@@ -131,47 +131,38 @@ fn parse_packet(b: &[u8]) -> Option<Packet<'_>> {
 // ------------------------------------------------------------------ raw sockets
 
 struct Raw {
-    send_fd: RawFd,
-    recv: tokio::io::unix::AsyncFd<RawFd>,
-}
-
-impl Drop for Raw {
-    fn drop(&mut self) {
-        unsafe {
-            libc::close(self.send_fd);
-            libc::close(*self.recv.get_ref());
-        }
-    }
+    send_fd: OwnedFd,
+    recv: tokio::io::unix::AsyncFd<OwnedFd>,
 }
 
 fn raw_pair() -> std::io::Result<Raw> {
+    // SAFETY: plain libc calls; each returned descriptor is checked and, once valid, immediately moved
+    // into an OwnedFd so that it has exactly one owner and is closed on every path (including errors).
+    let send_fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_RAW) };
+    if send_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let send_fd = unsafe { OwnedFd::from_raw_fd(send_fd) };
+    let recv_fd = unsafe { libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_TCP) };
+    if recv_fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let recv_fd = unsafe { OwnedFd::from_raw_fd(recv_fd) };
+    let one: libc::c_int = 1;
     unsafe {
-        let send_fd = libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_RAW);
-        if send_fd < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        let recv_fd = libc::socket(libc::AF_INET, libc::SOCK_RAW, libc::IPPROTO_TCP);
-        if recv_fd < 0 {
-            let e = std::io::Error::last_os_error();
-            libc::close(send_fd);
-            return Err(e);
-        }
-        let one: libc::c_int = 1;
-        libc::setsockopt(send_fd, libc::IPPROTO_IP, libc::IP_HDRINCL, &one as *const _ as *const libc::c_void, 4);
-        let nonblock = |fd: RawFd| {
-            let fl = libc::fcntl(fd, libc::F_GETFL);
-            libc::fcntl(fd, libc::F_SETFL, fl | libc::O_NONBLOCK);
-        };
-        nonblock(send_fd);
-        nonblock(recv_fd);
-        match tokio::io::unix::AsyncFd::new(recv_fd) {
-            Ok(recv) => Ok(Raw { send_fd, recv }),
-            Err(e) => {
-                libc::close(send_fd);
-                libc::close(recv_fd);
-                Err(e)
-            }
-        }
+        libc::setsockopt(send_fd.as_raw_fd(), libc::IPPROTO_IP, libc::IP_HDRINCL, &one as *const _ as *const libc::c_void, 4);
+    }
+    let nonblock = |fd: RawFd| unsafe {
+        let fl = libc::fcntl(fd, libc::F_GETFL);
+        libc::fcntl(fd, libc::F_SETFL, fl | libc::O_NONBLOCK);
+    };
+    nonblock(send_fd.as_raw_fd());
+    nonblock(recv_fd.as_raw_fd());
+    // SAFETY: recv_fd is a valid, open socket owned solely by the OwnedFd handed over here, and
+    // OwnedFd::as_raw_fd always returns that same descriptor until the AsyncFd (and so the OwnedFd) drops.
+    match unsafe { tokio::io::unix::AsyncFd::register(recv_fd) } {
+        Ok(recv) => Ok(Raw { send_fd, recv }),
+        Err(e) => Err(e.into_parts().1),
     }
 }
 
@@ -182,13 +173,13 @@ impl Raw {
         sa.sin_port = dst.port().to_be();
         sa.sin_addr = libc::in_addr { s_addr: u32::from_be_bytes(dst.ip().octets()).to_be() };
         let r = unsafe {
-            libc::sendto(self.send_fd, pkt.as_ptr() as *const libc::c_void, pkt.len(), 0, &sa as *const _ as *const libc::sockaddr, std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t)
+            libc::sendto(self.send_fd.as_raw_fd(), pkt.as_ptr() as *const libc::c_void, pkt.len(), 0, &sa as *const _ as *const libc::sockaddr, std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t)
         };
         if r < 0 {
             // a raw send can block momentarily; wait and try once more
             tokio::time::sleep(Duration::from_millis(2)).await;
             let r = unsafe {
-                libc::sendto(self.send_fd, pkt.as_ptr() as *const libc::c_void, pkt.len(), 0, &sa as *const _ as *const libc::sockaddr, std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t)
+                libc::sendto(self.send_fd.as_raw_fd(), pkt.as_ptr() as *const libc::c_void, pkt.len(), 0, &sa as *const _ as *const libc::sockaddr, std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t)
             };
             if r < 0 {
                 return Err(std::io::Error::last_os_error());
@@ -202,7 +193,7 @@ impl Raw {
         loop {
             let mut g = self.recv.readable().await?;
             match g.try_io(|fd| {
-                let n = unsafe { libc::recv(*fd.get_ref(), buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
+                let n = unsafe { libc::recv(fd.get_ref().as_raw_fd(), buf.as_mut_ptr() as *mut libc::c_void, buf.len(), 0) };
                 if n < 0 {
                     Err(std::io::Error::last_os_error())
                 } else {

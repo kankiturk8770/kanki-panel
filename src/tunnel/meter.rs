@@ -210,7 +210,7 @@ fn serve_echo(sock: UdpSocket) {
         loop {
             if let Ok((k, from)) = sock.recv_from(&mut buf) {
                 // only the measuring packets: small, from this machine (udp2raw / hysteria on loopback)
-                if k >= 16 && k <= 256 && from.ip().is_loopback() {
+                if (16..=256).contains(&k) && from.ip().is_loopback() {
                     let _ = sock.send_to(&buf[..k], from);
                 }
             }

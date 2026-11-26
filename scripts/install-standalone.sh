@@ -166,14 +166,14 @@ systemctl restart "$NAME"
 # 6. firewall (only when ufw is active); the cloud provider's own firewall is up to you
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "^Status: active"; then
   for p in $PORTS; do ufw allow "$p" >/dev/null || true; done
-  ok "ufw: opened $(echo $PORTS)"
+  ok "ufw: opened $(xargs <<< "$PORTS")"
 fi
 
 # 7. did it start?
 sleep 4
 if systemctl is-active --quiet "$NAME"; then
   ok "The tunnel service is running and starts at every boot."
-  echo "   Ports to open in the firewall of this server (also in your cloud panel): $(echo $PORTS)"
+  echo "   Ports to open in the firewall of this server (also in your cloud panel): $(xargs <<< "$PORTS")"
   echo "   Watch it:   journalctl -u $NAME -f"
   echo "   Change it:  edit $CONF, then: systemctl restart $NAME"
   echo "   Stop it:    systemctl stop $NAME     Remove it: bash $0 --uninstall"

@@ -513,7 +513,7 @@ pub async fn conn_allowed(app: &App, username: &str) -> bool {
     let t = std::time::Instant::now();
     let mut g = grants().lock().unwrap_or_else(|e| e.into_inner());
     let here = live + g.recent(username, t);
-    let ok = elsewhere + here < max && cap.map_or(true, |c| here < c);
+    let ok = elsewhere + here < max && cap.is_none_or(|c| here < c);
     if ok {
         g.note(username, t);
     }

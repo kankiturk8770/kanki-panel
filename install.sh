@@ -178,7 +178,7 @@ EOF
       warn "WireGuard keeps its port $cur (users' files use it); to move it run 'kanki', option 8"; WG_PORT=$cur
     fi
   fi
-  systemctl enable -q --now wg-quick@wg0 && ok "WireGuard is running" || warn "WireGuard failed to start"
+  if systemctl enable -q --now wg-quick@wg0; then ok "WireGuard is running"; else warn "WireGuard failed to start"; fi
 }
 
 setup_amneziawg(){
@@ -216,7 +216,7 @@ EOF
       warn "AmneziaWG keeps its port $cur (users' files use it); to move it run 'kanki', option 8"; AWG_PORT=$cur
     fi
   fi
-  systemctl enable -q --now awg-quick@awg0 && ok "AmneziaWG is running" || warn "AmneziaWG failed to start (the server may need a reboot)"
+  if systemctl enable -q --now awg-quick@awg0; then ok "AmneziaWG is running"; else warn "AmneziaWG failed to start (the server may need a reboot)"; fi
 }
 
 tls_perms(){
@@ -325,7 +325,7 @@ acl:
     - reject(localhost)
 EOF
   systemctl enable -q hysteria-server.service 2>/dev/null || true
-  systemctl restart hysteria-server.service && ok "Hysteria2 is running" || warn "Hysteria2 failed to start"
+  if systemctl restart hysteria-server.service; then ok "Hysteria2 is running"; else warn "Hysteria2 failed to start"; fi
 }
 
 install_caddy(){
@@ -373,7 +373,7 @@ $1 {
 }
 EOF
   systemctl enable -q caddy
-  systemctl restart caddy && ok "Caddy is running" || { journalctl -u caddy -n 15 --no-pager; warn "Caddy failed to start (is the port free?)"; }
+  if systemctl restart caddy; then ok "Caddy is running"; else journalctl -u caddy -n 15 --no-pager; warn "Caddy failed to start (is the port free?)"; fi
 }
 
 open_ports(){
@@ -383,7 +383,7 @@ open_ports(){
 }
 
 service(){ # $1=name $2=args
-  cat > /etc/systemd/system/$1.service <<EOF
+  cat > "/etc/systemd/system/$1.service" <<EOF
 [Unit]
 Description=Kanki ($1)
 After=network-online.target wg-quick@wg0.service
@@ -851,8 +851,8 @@ restore_bundle(){
   service kanki-panel serve
   open_ports 80/tcp "$HTTPS_PORT/tcp" "${WG_PORT:+$WG_PORT/udp}" "${AWG_PORT:+$AWG_PORT/udp}" "${HY2_PORT:+$HY2_PORT/udp}"
   say "Checking the panel ..."
-  local i up=0
-  for i in $(seq 1 30); do curl -fs -o /dev/null "http://127.0.0.1:$PANEL_PORT/admin" && { up=1; break; }; sleep 1; done
+  local up=0
+  for _ in $(seq 1 30); do curl -fs -o /dev/null "http://127.0.0.1:$PANEL_PORT/admin" && { up=1; break; }; sleep 1; done
   [ "$up" = 1 ] || die "The panel did not start here (journalctl -u kanki-panel -n 30)"
   ok "The panel runs on this server"
 }
@@ -907,7 +907,7 @@ move_panel(){
 restore_file(){
   local W=/root/kanki-restore F PASS
   echo; say "Restore the panel from a backup file"
-  ask F "Path of the backup file on this server" "$(ls -t /root/*.kbk /root/*.tar.gz 2>/dev/null | head -1)"
+  ask F "Path of the backup file on this server" "$(find /root -maxdepth 1 -type f \( -name '*.kbk' -o -name '*.tar.gz' \) -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)"
   [ -f "$F" ] || die "No file at $F: upload the backup to /root first (SFTP), then run this again"
   need_repo; base_packages; download_bin
   rm -rf "$W"; mkdir -p "$W/x"; chmod 700 "$W"

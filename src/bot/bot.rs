@@ -679,8 +679,8 @@ impl Bot {
 
     /// The «custom volume and days» row that opens the mini app's shop (on renewing account `renew` when
     /// > 0); none when the mini app cannot open (no https address) or custom purchase is off
-    /// The mini app's shop: with `svc` its custom-plan tab of that service («🧮 دلخواه»), without it the whole shop
-    /// Under the service menu: the custom plan (volume and days of one's own) and the mini app's shop
+    /// > The mini app's shop: with `svc` its custom-plan tab of that service («🧮 دلخواه»), without it the whole shop
+    /// > Under the service menu: the custom plan (volume and days of one's own) and the mini app's shop
     fn shop_rows(&self, renew: i64) -> Kb {
         let mini = crate::miniapp::url(&self.app);
         if !mini.starts_with("https://") || !self.db().on("sales_on") {

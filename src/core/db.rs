@@ -699,7 +699,7 @@ impl Db {
     /// Does this node serve this user? Assigned to it (`User::on`), and on a drained node only users
     /// assigned by name or already there when it was drained. Every core and the links use this.
     pub fn serves(&self, u: &User, n: &Node, keep: Option<&std::collections::HashSet<i64>>) -> bool {
-        u.on(n) && (u.explicit_nodes() || keep.map_or(true, |k| k.contains(&u.id)))
+        u.on(n) && (u.explicit_nodes() || keep.is_none_or(|k| k.contains(&u.id)))
     }
 
     // ---------------- پیرها

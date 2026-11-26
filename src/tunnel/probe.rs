@@ -231,7 +231,7 @@ pub async fn udp_quality(s: &Arc<Session>, shared: &Arc<Shared>, flow: u32) -> R
 
 /// {n, loss, ping, jit, max} of one echo run (round trips in the order the packets were sent)
 pub fn summarize(got: &[Option<u64>]) -> Value {
-    let ok: Vec<u64> = got.iter().map(|r| r.filter(|&ms| ms <= LATE_MS)).flatten().collect();
+    let ok: Vec<u64> = got.iter().filter_map(|r| r.filter(|&ms| ms <= LATE_MS)).collect();
     let n = got.len().max(1) as f64;
     let loss = ((got.len() - ok.len()) as f64 * 100.0 / n * 10.0).round() / 10.0;
     let mut sorted = ok.clone();

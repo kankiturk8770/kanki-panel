@@ -152,7 +152,7 @@ pub async fn run(app: Arc<App>) {
         let net = tokio::task::spawn_blocking(crate::admin::nic_sample).await.unwrap_or_default();
         note(&app, "local", &net);
         n += 1;
-        if n % 2 == 0 {
+        if n.is_multiple_of(2) {
             save(&app);
         }
     }

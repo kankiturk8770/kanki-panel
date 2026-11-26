@@ -540,7 +540,7 @@ async fn users_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
         // 0 = no end date; a negative number is a mistake, not «unlimited»
         None => match num(&b["days"]) {
             Some(d) if d > 0.0 => now() + days_of(d) * 86400,
-            Some(d) if d == 0.0 => 0,
+            Some(0.0) => 0,
             Some(_) => return err(StatusCode::BAD_REQUEST, "the days must be 0 (no end) or more"),
             None => u.expires_at,
         },
@@ -1391,7 +1391,7 @@ async fn endpoint_stale(app: &App) -> bool {
         known.extend(ips(h).await);
     }
     // the panel's own public IP, as the agents see it
-    if let Some(ip) = app.db.get("tun_local_addr").parse::<std::net::IpAddr>().ok() {
+    if let Ok(ip) = app.db.get("tun_local_addr").parse::<std::net::IpAddr>() {
         known.insert(ip);
     }
     !want.iter().any(|ip| known.contains(ip))
@@ -1935,13 +1935,13 @@ fn sub_page_of(app: &App, u: &User, sealed: bool) -> Response {
     let sub = u.sub_code();
     // server-rendered config links keep the exact URL format the Kanki Android app reads
     let mut nodes_html = String::new();
-    for n in user_nodes(&app, &u) {
-        let mut main = node_protos(&app, &u, &n);
+    for n in user_nodes(app, u) {
+        let mut main = node_protos(app, u, &n);
         // the Kanki app (sealed): its direct WireGuard too
-        if sealed && !main.contains(&"wireguard") && wg_direct_for_app(&app, &u, &n) {
+        if sealed && !main.contains(&"wireguard") && wg_direct_for_app(app, u, &n) {
             main.insert(0, "wireguard");
         }
-        let rows: String = main.into_iter().map(|p| proto_row(&app, &u, &n, p, false)).collect();
+        let rows: String = main.into_iter().map(|p| proto_row(app, u, &n, p, false)).collect();
         if !rows.is_empty() {
             nodes_html.push_str(&format!(
                 "<section class=\"node\" data-node=\"{}\"><h3>{}<small data-i18n=\"{}\"></small></h3>{}</section>",
@@ -1950,16 +1950,16 @@ fn sub_page_of(app: &App, u: &User, sealed: bool) -> Response {
         }
         // the configs through the server's tunnel: its second entry, under its own heading (the app names
         // each config by the last heading before it)
-        let rows: String = twin_protos(&app, &u, &n).into_iter().map(|p| proto_row(&app, &u, &n, p, true)).collect();
+        let rows: String = twin_protos(app, u, &n).into_iter().map(|p| proto_row(app, u, &n, p, true)).collect();
         if !rows.is_empty() {
             nodes_html.push_str(&format!(
                 "<section class=\"node\" data-node=\"{}{}\" data-via=\"tunnel\"><h3>{}<small data-i18n=\"tunnel\"></small></h3>{}</section>",
-                esc(&n.id), TUNNEL_SUFFIX, esc(&twin_name(&app, &n)), rows
+                esc(&n.id), TUNNEL_SUFFIX, esc(&twin_name(app, &n)), rows
             ));
         }
     }
     // Xray links (copy / QR) and the user's Kanki DNS addresses
-    let xl = crate::xray::panel::user_links(&app, &u);
+    let xl = crate::xray::panel::user_links(app, u);
     if !xl.is_empty() {
         let mut rows = String::new();
         for (i, (name, l)) in xl.iter().enumerate() {
@@ -1971,7 +1971,7 @@ fn sub_page_of(app: &App, u: &User, sealed: bool) -> Response {
         }
         nodes_html.push_str(&format!("<section class=\"node\" data-node=\"xray\"><h3>Xray</h3>{}</section>", rows));
     }
-    let dns = crate::dns::panel::sub_info(&app, &u);
+    let dns = crate::dns::panel::sub_info(app, u);
     if let Some(list) = dns["servers"].as_array().filter(|l| !l.is_empty()) {
         let mut rows = String::new();
         for x in list {
@@ -1987,7 +1987,7 @@ fn sub_page_of(app: &App, u: &User, sealed: bool) -> Response {
         }
         nodes_html.push_str(&format!("<section class=\"node\" data-node=\"dns\"><h3>Kanki DNS</h3>{}</section>", rows));
     }
-    let data = sub_data(&app, &u, sealed);
+    let data = sub_data(app, u, sealed);
     let data = serde_json::to_string(&data).unwrap_or_default().replace("</", "<\\/");
     let page = include_str!("../../assets/sub/sub.html")
         .replace("{{TITLE}}", &esc(&u.username))

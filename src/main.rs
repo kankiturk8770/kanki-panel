@@ -1,4 +1,7 @@
 //! Kanki Panel: WireGuard / AmneziaWG / Hysteria2 panel with a built-in Telegram sales bot
+// Handlers return `Result<_, axum::response::Response>` so `?` can short-circuit straight to an HTTP reply
+// (boxing it would only add an allocation per error), and the shared-state tuples are private to one module each.
+#![allow(clippy::result_large_err, clippy::type_complexity)]
 // core: database, shared helpers, SSL, pinned certificates, firewall, live numbers (src/core)
 #[path = "core/db.rs"]
 mod db;
