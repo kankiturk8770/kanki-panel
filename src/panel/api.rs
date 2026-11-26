@@ -2361,13 +2361,13 @@ fn wg_uri(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Opti
 }
 
 async fn config_file_extra(st: St, Path((id, proto, extra)): Path<(i64, String, String)>, q: Query<HashMap<String, String>>, h: HeaderMap) -> Response {
-    let code = q.0.get("sub").cloned().unwrap_or_default();
+    let code = q.0.get("sub").cloned().filter(|s| !s.is_empty()).or_else(|| crate::sublink::header_code(&h)).unwrap_or_default();
     let r = build_config(st, id, proto, q.0, &extra, Some(&h)).await;
     crate::devices::reply(&h, &code, r).await
 }
 
 async fn config_file(st: St, Path((id, proto)): Path<(i64, String)>, q: Query<HashMap<String, String>>, h: HeaderMap) -> Response {
-    let code = q.0.get("sub").cloned().unwrap_or_default();
+    let code = q.0.get("sub").cloned().filter(|s| !s.is_empty()).or_else(|| crate::sublink::header_code(&h)).unwrap_or_default();
     let r = build_config(st, id, proto, q.0, "", Some(&h)).await;
     crate::devices::reply(&h, &code, r).await
 }
@@ -2445,7 +2445,14 @@ async fn users_amnezia(State(app): St, h: HeaderMap, Path((id, platform)): Path<
 
 /// `h`: the request of an app (its device is remembered); None = the panel's own bots
 async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String, String>, extra: &str, h: Option<&HeaderMap>) -> Response {
-    let sub = q.get("sub").cloned().unwrap_or_default();
+    // the code in the link (`?sub=`), or (app 1.45) in `X-Kanki-Sub` so it is never in a URL; the account must be
+    // the one of the path's id either way
+    let sub = q
+        .get("sub")
+        .cloned()
+        .filter(|s| !s.is_empty())
+        .or_else(|| h.and_then(crate::sublink::header_code))
+        .unwrap_or_default();
     let code = parse_code(&sub).map(|x| x.1).unwrap_or(sub);
     let Some(u) = app.db.user_by_code(id, &code) else { return crate::devices::miss() };
     if let Some(h) = h {

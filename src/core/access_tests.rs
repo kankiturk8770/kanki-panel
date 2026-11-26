@@ -669,6 +669,19 @@ async fn kmix_links_have_no_fec_and_one_entry_per_iran_tunnel() {
     assert!(body.contains("@ir2.example.net:4100?"), "{}", body);
     let (st, _) = get_text(&app, &format!("/api/config/{}/wireguard?sub={}&node=n1~2%40tunnel", u.id, u.code)).await;
     assert_eq!(st, StatusCode::NOT_FOUND);
+    // app 1.45: the code in X-Kanki-Sub instead of the URL; another account's id with it, a wrong or a missing code: nothing
+    let hdr = format!("/api/config/{}/kankimix?node=n1~2%40tunnel", u.id);
+    let (st, _, body) = get_with(&app, &hdr, &[("x-kanki-sub", u.code.as_str())]).await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(body.contains("@ir2.example.net:4100?"), "{}", body);
+    let other = format!("/api/config/{}/kankimix?node=n1~2%40tunnel", u.id + 1000);
+    for (uri, code) in [(hdr.as_str(), "kanki-1-wrongcode"), (other.as_str(), u.code.as_str()), (hdr.as_str(), "bad code!")] {
+        let (st, _, body) = get_with(&app, uri, &[("x-kanki-sub", code)]).await;
+        assert_ne!(st, StatusCode::OK, "{} {}", uri, code);
+        assert!(!body.contains("kanki://"), "{}", body);
+    }
+    let (st, _, _) = get_with(&app, &hdr, &[]).await;
+    assert_ne!(st, StatusCode::OK);
     for bad in ["n1~9%40tunnel", "n1~x%40tunnel", "~2%40tunnel"] {
         let (st, _) = get_text(&app, &format!("{}{}", base, bad)).await;
         assert_ne!(st, StatusCode::OK, "{}", bad);
