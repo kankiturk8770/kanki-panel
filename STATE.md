@@ -216,3 +216,8 @@
 ### Still open
 - The client side (kanki-app `kmix-core`) does not send `KindHello` or hinted packets yet: until it does, every app uses
   the old path. The server side, the panel and the tests are ready for it.
+
+## Phase 6 — 3.67.1: config downloads by header (done)
+- `/api/config/<uid>/<proto>[/<extra>]` takes the subscription code from `X-Kanki-Sub` (or `Authorization: Bearer`)
+  when `?sub=` is absent (app 1.45 never puts the code in a URL); the account must match the path's id; sealed
+  answers use the same code. Tests: header ok, wrong code / other account's id / no code refused.
