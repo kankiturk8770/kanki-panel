@@ -129,3 +129,40 @@
 ### Still open
 - `REALITY_TARGETS` (the suggestion list in the Xray form) still names public sites; nothing is filled in from it by itself.
 - Rollout order: update the panel first, then «Update all» (new nodes refuse the bare token of an older panel).
+
+## Phase 4 — 3.66.0: the Telegram bot, clean and tier-aware (done)
+
+### Right-to-left layout (`bot.rs`: `rtl_lines`, `rtl_body`)
+- Every HTML text / caption the bot sends (`call_res`) gets U+200F in front of each line that holds Persian, so a line
+  that starts with a Latin word (`1️⃣ v2rayNG …`) no longer flips and its period stays at the end. Outside every tag (a
+  tapped `<code>` copies only its content); `<pre>` lines, Latin-only lines and plain-text calls are left alone; a text
+  that would pass Telegram's limit (4096 / 1024) with the marks goes as it was.
+- The fake Telegram of the tests strips the marks and counts them in `_rlm`.
+
+### Purchase flow
+- `SERVICES` buttons: «ضد فیلتر (V2Ray / Hysteria)», «گیمینگ (WireGuard / Amnezia / KankiMix)», «ترکیبی (همه سرویس‌ها)»; the
+  lowest prices are lines of the text (`service_name`).
+- Plans: one numbered line each in the text (`plan_line`), short numbered buttons (`plan_no` + `price_short`) in rows of 2
+  (≤ 4 plans) or 3 (`grid`). `plan_button` is gone.
+- Plan page: payment methods two a row, «کد تخفیف دارم» beside «بازگشت». Card number in `<code>` as digits only
+  (`card_digits`); crypto coins three a row with a way back; prompts in short lines.
+- «سرویس‌های من» / renewal: accounts two a row.
+
+### Delivery (tier = `User::tier()`)
+- `keys_text`: the Kanki activation code alone in `<code>` always; the V2Ray subscription link (hashed, `<code>`) only for
+  `v2ray` / `combo` (`tier_has_sub`), first for a V2Ray account. Same in `account_text`, `delivery`, `trial_delivery`.
+- `account_btn`: «🌐 صفحه‌ی حساب», a URL button to `sub_origin()/sub/h/<hash>` (origin from the panel's settings, never typed).
+- `acct_kb` offers the V2Ray link only to its tiers; `cfg:<id>:v` of a gaming account answers why not.
+
+### Setup guides
+- Device menu: the tier's apps first (`tier_apps`) and marked ✅ (green), the first «(پیشنهادی)»; the tier named on top.
+- v2rayNG (Android): 4 steps; buttons «دانلود مستقیم v2rayNG (arm64)» / «دانلود نسخه عمومی (Universal)» to the 2.4.2 files
+  and the release page as fallback (`V2RAYNG_*`); no Google Play. The same buttons under the V2Ray link message.
+- AmneziaVPN (Android): «دانلود از Google Play» (`AMNEZIA_PLAY`), 4 steps. iOS / Windows / WireGuard / Kanki app: the same short
+  lines.
+
+### Tests
+- `flow_tests::the_delivery_and_the_guides_follow_the_tier` (code always, sub link only for v2ray/combo, hashed account
+  button without the code, marks sent, gaming menu without V2Ray, v2rayNG buttons and URLs, AmneziaVPN Play and 4 steps),
+  `persian_lines_start_right_to_left_and_nothing_else_changes`, `a_card_number_is_copied_as_digits`; the purchase tests now
+  check the tier labels, the price lines, the numbered buttons and their 2–3 columns.

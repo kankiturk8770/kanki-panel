@@ -1,5 +1,5 @@
 //! ربات تلگرام داخلی: فروش، پرداخت، سرویس‌ها، مدیریت کامل
-use crate::api::{origin, sub_origin};
+use crate::api::origin;
 use crate::backup::make_archive;
 use crate::db::User;
 use crate::util::{cfg_name_from, ct_eq, esc, now, valid_cfg_name};
@@ -229,6 +229,58 @@ fn key_title(k: &str) -> String {
     }
 }
 
+/// U+200F RIGHT-TO-LEFT MARK
+const RLM: char = '\u{200F}';
+
+/// Whether `c` is a letter of the Persian / Arabic script
+fn persian_char(c: char) -> bool {
+    matches!(c as u32, 0x0600..=0x06FF | 0x0750..=0x077F | 0xFB50..=0xFDFF | 0xFE70..=0xFEFF)
+}
+
+/// Every line of an HTML message that holds Persian starts right to left (3.66). Telegram takes a line's
+/// direction from its first letter, so `1️⃣ v2rayNG رو نصب کنید.` was laid out left to right and its period
+/// jumped to the start. A RIGHT-TO-LEFT MARK in front of such a line fixes it; it sits outside every tag, so
+/// what a tap on a `<code>` copies is unchanged. Lines in `<pre>` (copied whole) and lines without Persian (a
+/// link alone) are left as they are; a line already marked is not marked twice.
+pub(crate) fn rtl_lines(html: &str) -> String {
+    let mut out = String::with_capacity(html.len() + 64);
+    let mut in_pre = false;
+    for (i, line) in html.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let starts_pre = line.contains("<pre");
+        let mark = !in_pre && !starts_pre && !line.starts_with(RLM) && line.chars().any(persian_char);
+        if mark {
+            out.push(RLM);
+        }
+        out.push_str(line);
+        if starts_pre {
+            in_pre = true;
+        }
+        if line.contains("</pre>") {
+            in_pre = false;
+        }
+    }
+    out
+}
+
+/// `rtl_lines` on the text or caption of an HTML Bot API call (plain texts, alerts and the like stay as they are)
+fn rtl_body(body: &mut Value) {
+    if body["parse_mode"].as_str() != Some("HTML") {
+        return;
+    }
+    // Telegram's limits (in characters): a message that would pass them with the marks goes as it was
+    for (k, max) in [("text", 4096), ("caption", 1024)] {
+        if let Some(t) = body[k].as_str() {
+            let fixed = rtl_lines(t);
+            if fixed.chars().count() <= max {
+                body[k] = json!(fixed);
+            }
+        }
+    }
+}
+
 /// The media of a message the admin sent for a tutorial: (kind, file id or text).
 fn media_of(m: &Value) -> Option<(String, String)> {
     let id = |v: &Value| v["file_id"].as_str().map(|s| s.to_string());
@@ -367,7 +419,8 @@ struct Plan {
 /// A plan's button in the shop, all in one shape and English digits: «🔹 20 GB | 1 ماهه | 1 کاربر — 75,000 تومان»
 /// (and the badge's emoji). A right-to-left mark before each part keeps the parts in order: without it «GB» makes
 /// Telegram lay the button out left to right («20 | 1 GB ماهه»).
-fn plan_button(p: &Plan, price: i64) -> String {
+/// A plan in one line of the plan list: «<b>50 GB</b> · 1 ماهه · 2 کاربر — <b>110,000 تومان</b> 🔥»
+fn plan_line(p: &Plan, price: i64) -> String {
     let vol = if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() };
     let dur = match p.days {
         0 => "بی‌پایان".to_string(),
@@ -376,7 +429,19 @@ fn plan_button(p: &Plan, price: i64) -> String {
     };
     let cost = if price > 0 { toman(price) } else { format!("{}$", p.usd) };
     let mark = p.badge.split_whitespace().next().filter(|e| e.chars().next().map(|c| !c.is_alphanumeric()).unwrap_or(false));
-    format!("\u{200F}🔹 {} \u{200F}| {} \u{200F}| {} کاربر \u{200F}— {}{}", vol, dur, p.conns.max(1), cost, mark.map(|e| format!(" {}", e)).unwrap_or_default())
+    format!("<b>{}</b> · {} · {} کاربر — <b>{}</b>{}", vol, dur, p.conns.max(1), cost, mark.map(|e| format!(" {}", e)).unwrap_or_default())
+}
+
+/// A plan's price on its short button: «110,000 ت» (or «5$»)
+fn price_short(p: &Plan, price: i64) -> String {
+    if price > 0 { toman(price).replace(" تومان", " ت") } else { format!("{}$", p.usd) }
+}
+
+/// A card number as a bank app takes it: its digits only (spaces and dashes of the admin's copy dropped);
+/// anything else (an IBAN with letters) stays as typed
+fn card_digits(s: &str) -> String {
+    let t = s.trim();
+    if t.chars().all(|c| c.is_ascii_digit() || c == ' ' || c == '-') { t.chars().filter(|c| c.is_ascii_digit()).collect() } else { t.to_string() }
 }
 
 /// «75,000 تومان»
@@ -423,7 +488,34 @@ const MENU_MINE: &str = "My Kanki 👤";
 const MENU_NEW: &str = "Kanki 🚀";
 
 /// How to add a v2ray subscription link, under a v2ray account
-const V2RAY_HELP: &str = "📲 <b>اتصال:</b> لینک بالا رو کپی کن، توی v2rayNG (اندروید)، V2Box (آیفون) یا v2rayN (ویندوز) به‌عنوان اشتراک (<code>Subscription</code>) اضافه کن و <code>Update</code> بزن.";
+const V2RAY_HELP: &str = "📲 <b>اتصال:</b>\nلینک بالا را لمس کنید تا کپی شود.\nدر v2rayNG، V2Box یا v2rayN آن را به‌عنوان <b>اشتراک</b> اضافه کنید و <code>Update</code> را بزنید.";
+
+/// v2rayNG for Android: the release the guide points to, and its two install files (3.66)
+const V2RAYNG_RELEASE: &str = "https://github.com/2dust/v2rayNG/releases/tag/2.4.2";
+const V2RAYNG_ARM64: &str = "https://github.com/2dust/v2rayNG/releases/download/2.4.2/v2rayNG_2.4.2_arm64-v8a.apk";
+const V2RAYNG_UNIVERSAL: &str = "https://github.com/2dust/v2rayNG/releases/download/2.4.2/v2rayNG_2.4.2_universal.apk";
+/// AmneziaVPN for Android, on Google Play
+const AMNEZIA_PLAY: &str = "https://play.google.com/store/apps/details?id=org.amnezia.vpn";
+
+/// The tier's short name for one line ("🎮 گیمینگ")
+fn tier_name(t: crate::access::Tier) -> &'static str {
+    match t { crate::access::Tier::V2ray => "🛡 ضد فیلتر", crate::access::Tier::Gaming => "🎮 گیمینگ", crate::access::Tier::Combo => "👑 ترکیبی" }
+}
+
+/// Whether an account of this tier gets the V2Ray subscription link (a gaming one connects without it)
+fn tier_has_sub(t: crate::access::Tier) -> bool {
+    matches!(t, crate::access::Tier::V2ray | crate::access::Tier::Combo)
+}
+
+/// The apps that fit a tier, in the order they are recommended: v = a V2Ray app, k = the Kanki app,
+/// z = AmneziaVPN, g = WireGuard
+fn tier_apps(t: crate::access::Tier) -> &'static [&'static str] {
+    match t {
+        crate::access::Tier::V2ray => &["v"],
+        crate::access::Tier::Gaming => &["k", "z", "g"],
+        crate::access::Tier::Combo => &["k", "z", "v", "g"],
+    }
+}
 
 /// What the delivered orders brought in. `amount` is toman for card, bank gateway, TON and Stars (the price the
 /// customer paid, at that day's rate), dollars for the crypto gateway and the wallet; TON's nano and the Stars are
@@ -474,13 +566,28 @@ pub(crate) fn revenue(db: &crate::db::Db) -> Revenue {
 /// The three services a plan can sell, in the shop's order: (database value, callback code, button, what it is
 /// in the buy menu). The buttons start with Persian so a phone shows them in one direction and they fit in one line.
 const SERVICES: &[(&str, &str, &str, &str)] = &[
-    ("v2ray", "v", "⚡ اقتصادی (V2Ray)",
-     "⚡ <b>اقتصادی (V2Ray)</b>\n✓ یک لینک برای همه‌ی سرورها در v2rayNG، V2Box و v2rayN"),
-    ("game", "g", "🎮 گیمینگ (WG + Amnezia)",
-     "🎮 <b>گیمینگ (WireGuard + Amnezia)</b>\n✓ پینگ پایین و پایدار برای PUBG و Call of Duty"),
-    ("vip", "p", "👑 همه‌کاره VIP",
-     "👑 <b>همه‌کاره VIP (تمام پروتکل‌ها + اپ)</b>\n✓ همه‌ی پروتکل‌ها + اپ اختصاصی کانکی، با یک اشتراک"),
+    ("v2ray", "v", "ضد فیلتر (V2Ray / Hysteria)",
+     "🛡 <b>ضد فیلتر</b> · V2Ray / Hysteria\nیک لینک اشتراک برای همه‌ی سرورها."),
+    ("game", "g", "گیمینگ (WireGuard / Amnezia / KankiMix)",
+     "🎮 <b>گیمینگ</b> · WireGuard / Amnezia / KankiMix\nپینگ پایین و پایدار برای بازی."),
+    ("vip", "p", "ترکیبی (همه سرویس‌ها)",
+     "👑 <b>ترکیبی</b> · همه‌ی سرویس‌ها\nهمه‌ی پروتکل‌ها و اپ کانکی، با یک اشتراک."),
 ];
+
+/// The short name of a plan's service, for one line ("🛡 ضد فیلتر")
+fn service_name(svc: &str) -> &'static str {
+    match svc { "v2ray" => "🛡 ضد فیلتر", "game" => "🎮 گیمینگ", _ => "👑 ترکیبی" }
+}
+
+/// Buttons in rows of `cols` (the last row may be shorter)
+fn grid(items: Vec<(String, String)>, cols: usize) -> Kb {
+    items.chunks(cols.max(1)).map(|c| c.to_vec()).collect()
+}
+
+/// The number of a plan in the list: 1️⃣ … 9️⃣, then 10, 11 …
+fn plan_no(i: usize) -> String {
+    if (1..=9).contains(&i) { format!("{}\u{fe0f}\u{20e3}", i) } else { i.to_string() }
+}
 
 
 fn service_of_code(c: &str) -> &'static str {
@@ -940,7 +1047,8 @@ impl Bot {
     }
 
     /// A Bot API call with Telegram's reason when it fails
-    async fn call_res(&self, m: &str, body: Value) -> Result<Value, String> {
+    async fn call_res(&self, m: &str, mut body: Value) -> Result<Value, String> {
+        rtl_body(&mut body);
         let plain = body.clone();
         let mut painted = body;
         self.paint(&mut painted, true);
@@ -1269,44 +1377,49 @@ impl Bot {
     fn account_text(&self, u: &User) -> String {
         let left = if u.limit_gb > 0.0 { format!("{:.2} GB", (u.limit_gb - u.used_gb()).max(0.0)) } else { "نامحدود".into() };
         let st = if u.active() { "🟢 فعال" } else { "🔴 غیرفعال" };
-        // a v2ray account: only its subscription link and how to add it to a v2ray app
-        if u.service() == "v2ray" {
-            return format!(
-                "👤 <b>{}</b>  ·  {}  ·  ⚡ اقتصادی · V2Ray\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n🔗 <b>لینک اشتراک</b> (روش بزنید تا کپی بشه):\n<code>{}</code>\n\n{}",
-                esc(&u.username), st, left, u.used_gb(), left_text(u), u.online, u.max_conn, esc(&crate::api::v2_sub_link(&self.app, u)), V2RAY_HELP
-            );
-        }
-        format!(
-            "👤 <b>{}</b>  ·  {}  ·  {}\n📦 حجم باقی‌مانده: <b>{}</b>  (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال: {}/{}\n\n{}",
-            esc(&u.username), st, if u.service() == "game" { "🎮 گیمینگ" } else { "👑 VIP" }, left, u.used_gb(), left_text(u), u.online, u.max_conn, self.keys_text(u)
-        )
+        let t = format!(
+            "👤 <b>{}</b> · {}\n{}\n\n📦 حجم باقی‌مانده: <b>{}</b> (مصرف: {:.2} GB)\n⏳ زمان باقی‌مانده: <b>{}</b>\n🔌 اتصال‌ها: <b>{}/{}</b>\n\n{}",
+            esc(&u.username), st, tier_name(u.tier()), left, u.used_gb(), left_text(u), u.online, u.max_conn, self.keys_text(u)
+        );
+        if u.tier() == crate::access::Tier::V2ray { format!("{}\n\n{}", t, V2RAY_HELP) } else { t }
     }
 
-    /// What a customer connects with, in the order most of them use: the V2Ray subscription link (v2rayNG, V2Box,
-    /// Streisand, Hiddify), then the Kanki app's code. WireGuard and AmneziaVPN come from the buttons below.
+    /// What a customer connects with, each alone in its <code> so one tap copies it: the Kanki app's activation
+    /// code, and the V2Ray subscription link only for a V2Ray or combined account (a gaming one has no use for
+    /// it). A V2Ray account sees its link first.
     fn keys_text(&self, u: &User) -> String {
-        let mut t = String::new();
-        if u.service() == "v2ray" || crate::api::links_text(&self.app, u).is_some() {
-            t.push_str(&format!("🔗 <b>لینک اشتراک (برای کپی لمس کنید):</b>\n<code>{}</code>", esc(&crate::api::v2_sub_link(&self.app, u))));
-        } else {
-            t.push_str(&format!("🔗 <b>صفحه‌ی اشتراک:</b>\n<code>{}/sub/{}</code>", sub_origin(&self.app), u.sub_code()));
+        let code = format!("📱 <b>کد فعال‌سازی اپ کانکی</b> (لمس کنید تا کپی شود):\n<code>{}</code>", esc(&u.sub_code()));
+        if !tier_has_sub(u.tier()) {
+            return code;
         }
-        if u.service() != "v2ray" {
-            t.push_str(&format!("\n📱 <b>کد ورود اپ کانکی:</b> <code>{}</code>", u.sub_code()));
-        }
-        t
+        let link = format!("🔗 <b>لینک اشتراک V2Ray</b> (لمس کنید تا کپی شود):\n<code>{}</code>", esc(&crate::api::v2_sub_link(&self.app, u)));
+        if u.tier() == crate::access::Tier::V2ray { format!("{}\n\n{}", link, code) } else { format!("{}\n\n{}", code, link) }
     }
 
-    /// The message after a purchase, renewal or trial: short, one link to copy and three buttons (the apps, the
-    /// video tutorial, support). Everything else (configs, backups) is in the mini app and «📊 سرویس‌های من».
+    /// The button to the account's own page (hashed link, the code is not in it), when the panel has an address
+    fn account_btn(&self, u: &User) -> Option<(String, String)> {
+        let origin = crate::api::sub_origin(&self.app);
+        (origin.starts_with("https://") || origin.starts_with("http://"))
+            .then(|| b("🌐 صفحه‌ی حساب", &format!("url:{}/sub/h/{}", origin, crate::sublink::hash_of(&self.app, u))))
+    }
+
+    /// The message after a purchase or renewal: plan and end date, the activation code (and the subscription link
+    /// for its tier), then the device chooser, the account page, the mini app, a tutorial and support.
     fn delivery(&self, head: &str, u: &User, plan: &str) -> (String, Value) {
         let exp = if u.expires_at > 0 { fa_num(&crate::channel::fa_datetime(u.expires_at).0) } else { "نامحدود".into() };
-        let t = format!("{}\n📦 پلن: <b>{}</b>\n⏳ انقضا: <b>{}</b>\n\n{}\n\n👇 دستگاهت رو انتخاب کن تا برنامه و آموزش بیاد:",
-            head, esc(plan), exp, self.keys_text(u));
+        let t = format!("{}\n\n📦 پلن: <b>{}</b>\n{}\n⏳ انقضا: <b>{}</b>\n\n{}\n\n👇 دستگاهتان را انتخاب کنید تا برنامه و آموزش بیاید.",
+            head, esc(plan), tier_name(u.tier()), exp, self.keys_text(u));
         let mut rows: Kb = vec![self.how_devices_kb(u.id)];
+        let mut mid: Vec<(String, String)> = vec![];
+        if let Some(a) = self.account_btn(u) {
+            mid.push(a);
+        }
         let mini = crate::miniapp::url(&self.app);
         if mini.starts_with("https://") {
-            rows.push(vec![b("👤 مدیریت اشتراک (مینی‌اپ)", &format!("webapp:miniapp:{}", mini))]);
+            mid.push(b("👤 مدیریت اشتراک", &format!("webapp:miniapp:{}", mini)));
+        }
+        if !mid.is_empty() {
+            rows.push(mid);
         }
         // the video tutorial (a general one, not pinned to one app and device) beside support
         let mut last: Vec<(String, String)> = vec![];
@@ -1320,16 +1433,15 @@ impl Bot {
         (t, ik(rows))
     }
 
-    /// The trial's message: what it is, the link to copy, and the app and the guide
+    /// The trial's message: what it is, what to copy (as for its tier), the device guide and the account page
     fn trial_delivery(&self, u: &User, mb: i64, hours: i64) -> (String, Value) {
-        let link = if u.service() == "v2ray" || crate::api::links_text(&self.app, u).is_some() {
-            crate::api::v2_sub_link(&self.app, u)
-        } else {
-            format!("{}/sub/{}", sub_origin(&self.app), u.sub_code())
-        };
-        let t = format!("🎁 <b>تست رایگان شما فعال شد</b>\n\n▫️ <b>حجم:</b> {} MB\n▫️ <b>اعتبار:</b> {} ساعت\n▫️ <b>نام اشتراک:</b> <code>{}</code>\n\n🔗 <b>لینک اتصال (برای کپی لمس کنید):</b>\n<code>{}</code>\n\n👇 همین الان برنامه دستگاهت رو باز کن و سرعت و پینگ رو تست بگیر:",
-            mb, hours, esc(&u.username), esc(&link));
-        (t, ik(vec![vec![b("📱 دانلود اپ کانکی", "app2"), b("📖 راهنمای اتصال", &format!("hw:{}", u.id))]]))
+        let t = format!("🎁 <b>تست رایگان شما فعال شد</b>\n\n▫️ حجم: <b>{} MB</b>\n▫️ اعتبار: <b>{} ساعت</b>\n▫️ نام اشتراک: <b>{}</b>\n\n{}\n\n👇 دستگاهتان را انتخاب کنید و سرعت و پینگ را امتحان کنید.",
+            mb, hours, esc(&u.username), self.keys_text(u));
+        let mut rows: Kb = vec![self.how_devices_kb(u.id)];
+        if let Some(a) = self.account_btn(u) {
+            rows.push(vec![a]);
+        }
+        (t, ik(rows))
     }
 
     // ============================================================ the connection guide: device, then app
@@ -1364,6 +1476,9 @@ impl Bot {
         if amz { v.push("z"); }
         if kanki { v.push("k"); }
         if have.contains(&"wireguard") && !v2 { v.push("g"); }
+        // the apps of the account's tier first, in the tier's order (3.66); the rest keep theirs
+        let fit = tier_apps(u.tier());
+        v.sort_by_key(|a| fit.iter().position(|f| f == a).unwrap_or(fit.len()));
         v
     }
 
@@ -1371,17 +1486,20 @@ impl Bot {
     fn how_device(&self, u: &User, os: &str) -> (String, Kb) {
         let apps = self.how_apps(u, os);
         let dev = match os { "i" => "🍏 آیفون / آیپد", "w" => "💻 ویندوز", _ => "🤖 اندروید" };
-        let mut t = format!("{} · <b>اتصال حساب {}</b>\n\nبا کدوم برنامه وصل می‌شید؟ روی هر کدوم بزنید، فایل و آموزش قدم‌به‌قدم همین‌جا میاد 👇\n", dev, esc(&u.username));
+        let fit = tier_apps(u.tier());
+        let mut t = format!("{} · <b>اتصال حساب {}</b>\nسرویس شما: <b>{}</b>\n\nبرنامه‌های مناسب سرویس شما با ✅ مشخص شده‌اند.\nروی هر کدام بزنید تا فایل و آموزش بیاید 👇\n", dev, esc(&u.username), tier_name(u.tier()));
         let mut rows: Kb = vec![];
         for (i, a) in apps.iter().enumerate() {
             let (name, line) = how_app_line(a, os);
-            // the recommended one with a star, every other with its own icon
-            let icon = if i == 0 { "⭐" } else { app_icon(a) };
-            t.push_str(&format!("\n{} <b>{}</b>{}: {}", icon, name, if i == 0 { " (پیشنهادی)" } else { "" }, line));
-            rows.push(vec![b(&format!("{} {}{}", icon, name, if i == 0 { " (پیشنهادی)" } else { "" }), &format!("@{}@hw:{}:{}:{}", if i == 0 { "success" } else { "primary" }, u.id, os, a))]);
+            // the tier's apps marked (the first one is the recommended one), the rest with their own icon
+            let ok = fit.contains(a);
+            let icon = if ok { "✅" } else { app_icon(a) };
+            let tag = if i == 0 && ok { " (پیشنهادی)" } else { "" };
+            t.push_str(&format!("\n{} <b>{}</b>{}\n{}", icon, name, tag, line));
+            rows.push(vec![b(&format!("{} {}{}", icon, name, tag), &format!("@{}@hw:{}:{}:{}", if ok { "success" } else { "primary" }, u.id, os, a))]);
         }
         if apps.is_empty() {
-            t.push_str("\nبرای این دستگاه هنوز راهی برای سرویس شما فعال نیست؛ به پشتیبانی پیام بدید.");
+            t.push_str("\nبرای این دستگاه هنوز راهی برای سرویس شما فعال نیست.\nبه پشتیبانی پیام بدهید.");
         }
         rows.push(vec![b("🔄 تغییر دستگاه", &format!("hw:{}", u.id))]);
         (t, rows)
@@ -1410,7 +1528,7 @@ impl Bot {
                         Some(f) => rows.push(vec![b(&format!("⬇️ Kanki VPN ویندوز · {}", mb(f.size)), "apk:windows")]),
                         None => rows.push(store("⬇️ دانلود Kanki VPN برای ویندوز", self.db().get("win_link").trim())),
                     }
-                    "1️⃣ برنامه رو با دکمه‌ی پایین بگیرید و نصب کنید."
+                    "1️⃣ برنامه را با دکمه‌ی پایین بگیرید و نصب کنید."
                 } else {
                     let files = crate::apps::phones(&self.app);
                     if files.is_empty() {
@@ -1420,36 +1538,36 @@ impl Bot {
                         let (title, _) = crate::apps::title(&f.abi);
                         rows.push(vec![b(&format!("⬇️ {} · {}", title, mb(f.size)), &format!("apk:{}", f.abi))]);
                     }
-                    "1️⃣ فایل نصب رو از دکمه‌ی پایین بگیرید و نصب کنید (اگه مطمئن نیستید «64 بیتی» رو بگیرید)."
+                    "1️⃣ فایل نصب را از دکمه‌ی پایین بگیرید و نصب کنید.\n   اگر مطمئن نیستید، «64 بیتی» را بگیرید."
                 };
                 rows.push(back);
-                self.send(chat, &format!("📱 <b>اپ کانکی (Kanki VPN)</b>\nاپ خود ما: همه‌ی سرورها و پروتکل‌ها (حتی پروتکل‌های ضدفیلتر کانکی) با یک کد؛ سریع‌ترین سرور رو خودش پیدا می‌کنه.\n\n{}\n2️⃣ برنامه رو باز کنید و این <b>کد ورود</b> رو بزنید (روش بزنید کپی می‌شه):\n<code>{}</code>\n3️⃣ دکمه‌ی بزرگ اتصال رو بزنید. تمام ✅", get, u.sub_code()), Some(ik(rows))).await;
+                self.send(chat, &format!("📱 <b>اپ کانکی (Kanki VPN)</b>\nهمه‌ی سرورها و پروتکل‌ها با یک کد.\nسریع‌ترین سرور را خودش پیدا می‌کند.\n\n{}\n2️⃣ برنامه را باز کنید و این <b>کد فعال‌سازی</b> را وارد کنید:\n<code>{}</code>\n3️⃣ دکمه‌ی بزرگ اتصال را بزنید ✅", get, esc(&u.sub_code())), Some(ik(rows))).await;
             }
             "z" => {
-                let url = match os {
-                    "i" => "https://apps.apple.com/app/amneziavpn/id1600529900",
-                    "w" => "https://github.com/amnezia-vpn/amnezia-client/releases/latest",
-                    _ => "https://play.google.com/store/apps/details?id=org.amnezia.vpn",
+                let (url, store_btn) = match os {
+                    "i" => ("https://apps.apple.com/app/amneziavpn/id1600529900", "⬇️ دانلود از App Store"),
+                    "w" => ("https://github.com/amnezia-vpn/amnezia-client/releases/latest", "⬇️ دانلود از GitHub"),
+                    _ => (AMNEZIA_PLAY, "⬇️ دانلود از Google Play"),
                 };
-                let where_ = match os { "i" => "اپ‌استور", "w" => "سایت گیت‌هاب (فایل Windows)", _ => "گوگل‌پلی" };
-                self.send(chat, &format!("🛡 <b>AmneziaVPN</b>\nهمه‌ی سرورهای شما (WireGuard، AmneziaWG و VLESS / Xray، مستقیم و از راه تانل) با <b>یک فایل</b>.\n\n1️⃣ AmneziaVPN رو از {} نصب کنید (دکمه‌ی پایین).\n2️⃣ فایل بکاپی که الان میاد رو ذخیره کنید{}.\n3️⃣ توی برنامه: ⚙️ تنظیمات ← پشتیبان‌گیری ← <b>بازیابی از نسخه‌ی پشتیبان</b> ← همین فایل\n   (برنامه‌ی انگلیسی: <code>Settings › Backup › Restore from backup</code>)\n4️⃣ یک سرور رو انتخاب و دکمه‌ی اتصال رو بزنید ✅\n\n⚠️ بازیابی، سرورهای قبلی خود برنامه رو پاک می‌کنه.",
-                    where_, if os == "i" { " (روش بزنید ← اشتراک‌گذاری ← <code>Save to Files</code>)" } else { "" }),
-                    Some(ik(vec![store("⬇️ دانلود AmneziaVPN", url), back]))).await;
+                let save = if os == "i" { "\n   (فایل را لمس کنید، بعد <code>Save to Files</code>)" } else { "" };
+                self.send(chat, &format!("🛡 <b>AmneziaVPN</b>\nهمه‌ی سرورهای شما با <b>یک فایل</b>.\n\n1️⃣ برنامه را با دکمه‌ی پایین نصب کنید.\n2️⃣ فایل بکاپی که الان می‌آید را ذخیره کنید.{}\n3️⃣ در برنامه: <b>تنظیمات › پشتیبان‌گیری › بازیابی</b> و همین فایل را انتخاب کنید.\n   <code>Settings › Backup › Restore from backup</code>\n4️⃣ یک سرور انتخاب کنید و دکمه‌ی اتصال را بزنید ✅\n\n⚠️ بازیابی، سرورهای قبلی برنامه را پاک می‌کند.", save),
+                    Some(ik(vec![store(store_btn, url), back]))).await;
                 self.send_amnezia(chat, qid, u, os).await;
             }
             "v" => {
                 let link = crate::api::v2_sub_link(&self.app, u);
-                let (get, steps) = match os {
-                    "i" => ("https://apps.apple.com/app/v2box-v2ray-client/id6446814690",
-                        "1️⃣ V2Box رو از اپ‌استور نصب کنید (یا Streisand).\n2️⃣ لینک اشتراک پایین رو لمس کنید تا کپی بشه.\n3️⃣ V2Box رو باز کنید: <code>Configs › ➕ › Add subscription</code>\n4️⃣ لینک رو توی <code>URL</code> بذارید، یه اسم بدید و <code>Save</code> بزنید؛ صفحه رو پایین بکشید تا کانفیگ‌ها بیان.\n5️⃣ یکی رو انتخاب کنید و از تب <code>Home</code> وصل بشید (اجازه‌ی VPN رو <code>Allow</code> کنید) ✅"),
-                    "w" => ("https://github.com/2dust/v2rayN/releases/latest",
-                        "1️⃣ v2rayN رو از گیت‌هاب بگیرید (فایل <code>windows-64-With-Core</code>) و باز کنید.\n2️⃣ لینک اشتراک پایین رو کپی کنید.\n3️⃣ <code>Subscription group › Subscription group settings › Add</code>: لینک رو در <code>Url</code> بذارید و ذخیره کنید.\n4️⃣ <code>Subscription group › Update subscription</code>؛ کانفیگ‌ها میان.\n5️⃣ یکی رو انتخاب، <code>Enter</code>، و پایین پنجره <code>System proxy › Set system proxy</code> ✅"),
-                    _ => ("https://play.google.com/store/apps/details?id=com.v2ray.ang",
-                        "1️⃣ v2rayNG رو از گوگل‌پلی نصب کنید.\n2️⃣ لینک اشتراک پایین رو لمس کنید تا کپی بشه.\n3️⃣ v2rayNG رو باز کنید: <code>➕ › Import config from Clipboard</code>. خودش می‌فهمه لینک اشتراکه و توی اشتراک‌ها می‌ذاره.\n4️⃣ <code>⋮ › Update subscription</code> تا کانفیگ‌ها بیان.\n5️⃣ یکی رو انتخاب و دکمه‌ی ▶️ پایین صفحه ✅"),
+                let (steps, mut rows): (&str, Kb) = match os {
+                    "i" => ("1️⃣ V2Box را از App Store نصب کنید (دکمه‌ی پایین).\n2️⃣ لینک اشتراک پایین را لمس کنید تا کپی شود.\n3️⃣ در V2Box بزنید: <code>Configs › ➕ › Add subscription</code>\n   لینک را در <code>URL</code> بگذارید و <code>Save</code> را بزنید.\n4️⃣ یک سرور انتخاب کنید و از <code>Home</code> وصل شوید ✅",
+                        vec![store("⬇️ دانلود V2Box از App Store", "https://apps.apple.com/app/v2box-v2ray-client/id6446814690")]),
+                    "w" => ("1️⃣ v2rayN را از GitHub بگیرید (فایل <code>windows-64-With-Core</code>).\n2️⃣ لینک اشتراک پایین را لمس کنید تا کپی شود.\n3️⃣ در v2rayN: <code>Subscription group › Settings › Add</code>\n   لینک را در <code>Url</code> بگذارید و ذخیره کنید، بعد <code>Update subscription</code>.\n4️⃣ یک سرور انتخاب کنید و <code>Set system proxy</code> را بزنید ✅",
+                        vec![store("⬇️ دانلود v2rayN از GitHub", "https://github.com/2dust/v2rayN/releases/latest")]),
+                    _ => ("1️⃣ v2rayNG را با یکی از دکمه‌های پایین دانلود و نصب کنید.\n   اگر مطمئن نیستید، «نسخه عمومی» را بگیرید.\n2️⃣ لینک اشتراک پایین را لمس کنید تا کپی شود.\n3️⃣ در v2rayNG دکمه‌ی <b>➕</b> و بعد <code>Import config from Clipboard</code> را بزنید.\n4️⃣ از منوی <b>⋮</b> گزینه‌ی <code>Update subscription</code> را بزنید، یک سرور انتخاب کنید و ▶️ را بزنید ✅",
+                        vec![store("⬇️ دانلود مستقیم v2rayNG (arm64)", V2RAYNG_ARM64), store("⬇️ دانلود نسخه عمومی (Universal)", V2RAYNG_UNIVERSAL), store("📄 صفحه‌ی دانلود در GitHub", V2RAYNG_RELEASE)]),
                 };
-                let note = if u.service() == "v2ray" { String::new() } else { "\n\nℹ️ این برنامه‌ها کانفیگ‌های VLESS (Xray) و Hysteria2 رو وصل می‌کنن. برای WireGuard / AmneziaWG، «AmneziaVPN» رو انتخاب کنید (اون VLESS رو هم داره).".to_string() };
-                self.send(chat, &format!("🚀 <b>{}</b>\n\n{}\n\n🔗 <b>لینک اشتراک شما</b> (یک بار اضافه کنید؛ سرورها عوض بشن با Update خودش درست می‌شه):\n<code>{}</code>{}", name, steps, esc(&link), note),
-                    Some(ik(vec![store(&format!("⬇️ دانلود {}", name), get), back]))).await;
+                let note = if u.tier() == crate::access::Tier::V2ray { String::new() } else { "\n\nℹ️ این برنامه کانفیگ‌های Xray و Hysteria2 را وصل می‌کند.\nبرای WireGuard و AmneziaWG، «AmneziaVPN» را انتخاب کنید.".to_string() };
+                rows.push(back);
+                self.send(chat, &format!("🚀 <b>{}</b>\n\n{}\n\n🔗 <b>لینک اشتراک شما</b> (لمس کنید تا کپی شود):\n<code>{}</code>{}", name, steps, esc(&link), note),
+                    Some(ik(rows))).await;
             }
             "g" => {
                 let url = match os {
@@ -1458,7 +1576,7 @@ impl Bot {
                     _ => "https://play.google.com/store/apps/details?id=com.wireguard.android",
                 };
                 let add = if os == "w" { "Import tunnel(s) from file" } else if os == "i" { "➕ › Create from file or archive" } else { "➕ › Import from file or archive" };
-                self.send(chat, &format!("🔐 <b>WireGuard</b>\nفقط کانفیگ‌های WireGuard، هر سرور یک فایل جدا.\n\n1️⃣ برنامه‌ی WireGuard رو نصب کنید (دکمه‌ی پایین).\n2️⃣ فایل‌هایی که الان میان رو ذخیره کنید.\n3️⃣ توی برنامه: <code>{}</code> ← فایل یک سرور.\n4️⃣ کلید کنار اسمش رو روشن کنید ✅\n\n💡 برای همه‌ی سرورها با هم، «AmneziaVPN» راحت‌تره.", add),
+                self.send(chat, &format!("🔐 <b>WireGuard</b>\nهر سرور یک فایل جدا.\n\n1️⃣ برنامه‌ی WireGuard را نصب کنید (دکمه‌ی پایین).\n2️⃣ فایل‌هایی که الان می‌آیند را ذخیره کنید.\n3️⃣ در برنامه بزنید: <code>{}</code>\n   و فایل یک سرور را انتخاب کنید.\n4️⃣ کلید کنار اسمش را روشن کنید ✅\n\n💡 همه‌ی سرورها با هم: «AmneziaVPN».", add),
                     Some(ik(vec![store("⬇️ دانلود WireGuard", url), back]))).await;
                 self.send_configs_n(chat, qid, u, "w", false).await;
             }
@@ -1497,8 +1615,12 @@ impl Bot {
         if have.contains(&"wireguard") || have.contains(&"amneziawg") || crate::xray::panel::user_links(&self.app, u).iter().any(|(_, l)| crate::amnezia::server(l, "").is_some()) {
             rows.push(vec![b(&self.bt("amz"), &format!("amz:{}", u.id))]);
         }
-        // one subscription link brings every Xray and Hysteria2 config into a V2Ray app (no separate configs)
-        if crate::api::links_text(&self.app, u).is_some() || u.service() == "v2ray" {
+        if let Some(a) = self.account_btn(u) {
+            rows.push(vec![a]);
+        }
+        // one subscription link brings every Xray and Hysteria2 config into a V2Ray app (no separate configs); only a
+        // V2Ray or combined account is offered it
+        if tier_has_sub(u.tier()) && (crate::api::links_text(&self.app, u).is_some() || u.service() == "v2ray") {
             rows.push(vec![b("🚀 لینک اشتراک V2Ray (v2rayNG · V2Box)", &format!("cfg:{}:v", u.id))]);
         }
         // the WireGuard / AmneziaWG files of each server, side by side
@@ -1531,6 +1653,11 @@ impl Bot {
             return self.send_links(chat, qid, u).await;
         }
         if code == "v" {
+            // a gaming account has no V2Ray subscription (3.66): an old button of it gets the reason
+            if !tier_has_sub(u.tier()) {
+                self.answer(qid, "سرویس شما لینک اشتراک V2Ray ندارد؛ از راهنمای اتصال، اپ کانکی یا AmneziaVPN را بگیرید.", true).await;
+                return false;
+            }
             return self.send_v2_sub(chat, u).await;
         }
         let (proto, title) = match code { "w" => ("wireguard", "WireGuard"), "a" => ("amneziawg", "AmneziaWG"), _ => ("hysteria2", "Hysteria2") };
@@ -1573,18 +1700,22 @@ impl Bot {
     /// config into v2rayNG / V2Box / Hiddify / v2rayN, and keeps them up to date
     pub(crate) async fn send_v2_sub(&self, chat: i64, u: &User) -> bool {
         let link = crate::api::v2_sub_link(&self.app, u);
-        let t = format!("🚀 <b>لینک اشتراک V2Ray</b> · {}\n\n<code>{}</code>\n☝️ روش بزنید تا کپی بشه.\n\n\
-            همه‌ی کانفیگ‌های VLESS (Xray) و Hysteria2 شما با همین یک لینک میان و هر وقت سرورها عوض بشن، با «به‌روزرسانی» خودش درست می‌شه.\n\n\
+        let t = format!("🚀 <b>لینک اشتراک V2Ray</b> · {}\n\n<code>{}</code>\n☝️ لمس کنید تا کپی شود.\n\n\
+            همه‌ی کانفیگ‌های Xray و Hysteria2 با همین یک لینک می‌آیند.\n\
+            سرورها عوض شوند، با <code>Update</code> درست می‌شود.\n\n\
+            🤖 <b>اندروید · v2rayNG</b>\n\
+            دکمه‌ی <b>➕</b>، بعد <code>Import config from Clipboard</code>\n\
+            و از منوی <b>⋮</b>: <code>Update subscription</code>\n\n\
             🍏 <b>آیفون · V2Box</b>\n\
-            1️⃣ لینک بالا رو کپی کنید.\n\
-            2️⃣ V2Box: <code>Configs › ➕ › Add subscription</code>\n\
-            3️⃣ لینک رو توی <code>URL</code> بذارید، یه اسم بدید و <code>Save</code> بزنید.\n\
-            4️⃣ صفحه رو پایین بکشید تا کانفیگ‌ها بیان؛ یکی رو انتخاب و از تب <code>Home</code> وصل بشید (اجازه‌ی VPN رو <code>Allow</code> کنید).\n\n\
-            🤖 <b>اندروید · v2rayNG:</b> <code>➕ › Import config from Clipboard</code>، بعد <code>⋮ › Update subscription</code>\n\
-            💻 <b>ویندوز · v2rayN:</b> <code>Subscription group › Subscription group settings › Add</code>، بعد <code>Update subscription</code>",
+            <code>Configs › ➕ › Add subscription</code>\n\
+            لینک را در <code>URL</code> بگذارید و <code>Save</code> را بزنید.\n\n\
+            💻 <b>ویندوز · v2rayN</b>\n\
+            <code>Subscription group › Settings › Add</code>\n\
+            بعد <code>Update subscription</code>",
             esc(&u.username), esc(&link));
         self.send(chat, &t, Some(ik(vec![
-            vec![b("⬇️ v2rayNG (اندروید)", "url:https://github.com/2dust/v2rayNG/releases/latest"), b("⬇️ V2Box (آیفون)", "url:https://apps.apple.com/app/v2box-v2ray-client/id6446814690")],
+            vec![b("⬇️ دانلود مستقیم v2rayNG (arm64)", &format!("url:{}", V2RAYNG_ARM64)), b("⬇️ دانلود نسخه عمومی (Universal)", &format!("url:{}", V2RAYNG_UNIVERSAL))],
+            vec![b("📄 v2rayNG در GitHub", &format!("url:{}", V2RAYNG_RELEASE)), b("⬇️ V2Box (آیفون)", "url:https://apps.apple.com/app/v2box-v2ray-client/id6446814690")],
         ]))).await.is_some()
     }
 
@@ -1636,7 +1767,7 @@ impl Bot {
             }
             list.push_str(&line);
         }
-        let app_name = match plat { "iOS" => "از اپ‌استور", "Android" => "از گوگل‌پلی", _ => "از amnezia.org" };
+        let app_name = match plat { "iOS" => "از App Store", "Android" => "از Google Play", _ => "از GitHub" };
         let cap = format!(
             "📦 بکاپ AmneziaVPN · {} سرور\n\n{}\n\
              📲 نصب، قدم به قدم:\n\
@@ -2287,9 +2418,10 @@ impl Bot {
                     return self.edit(chat, mid, "هنوز سرویسی ندارید. از «خرید اشتراک» شروع کنید 🛒", Some(ik(vec![back("home")]))).await;
                 }
                 let pre = if d == "my" { "acc" } else { "rnw" };
-                let mut rows: Kb = accs.iter().map(|u| vec![b(&format!("{} {}", if u.active() { "🟢" } else { "🔴" }, u.username), &format!("{}:{}", pre, u.id))]).collect();
+                // two a row: the state and the name of each account
+                let mut rows: Kb = grid(accs.iter().map(|u| b(&format!("{} {}", if u.active() { "🟢" } else { "🔴" }, u.username), &format!("{}:{}", pre, u.id))).collect(), 2);
                 rows.push(back("home"));
-                return self.edit(chat, mid, if d == "my" { "📊 سرویس خودتون رو از پایین انتخاب کنید 👇" } else { "🔁 سرویسی که می‌خواید تمدید کنید رو از پایین انتخاب کنید 👇" }, Some(ik(rows))).await;
+                return self.edit(chat, mid, if d == "my" { "📦 <b>سرویس‌های من</b>\nسرویس را انتخاب کنید 👇" } else { "🔁 <b>تمدید</b>\nسرویسی را که می‌خواهید تمدید کنید انتخاب کنید 👇" }, Some(ik(rows))).await;
             }
             "ref" => {
                 let (t, kb) = self.ref_page(uid).await;
@@ -2342,7 +2474,7 @@ impl Bot {
             }
             "disc" => {
                 self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::DiscountUse);
-                return self.edit(chat, mid, "🎟 کد تخفیف را بفرستید:", Some(ik(vec![back("home")]))).await;
+                return self.edit(chat, mid, "🎟 <b>کد تخفیف</b>\nکد را همین‌جا بفرستید 👇", Some(ik(vec![back("home")]))).await;
             }
             _ => {}
         }
@@ -2527,16 +2659,17 @@ impl Bot {
             if on_sale.is_empty() {
                 return self.edit(chat, mid, "هنوز پلنی تعریف نشده است.", Some(ik(vec![vec![b(&back_lbl, "home")]]))).await;
             }
-            // one button a service with its lowest price, then the custom plan and the mini app's shop
+            // one button a service (its name only), its lowest price in the text; then the custom plan and the shop
             let mut rows: Kb = vec![];
+            let mut lines = String::new();
             for s in &on_sale {
                 let from = list.iter().filter(|p| p.service == s.0).map(|p| p.toman).filter(|t| *t > 0).min().unwrap_or(0);
-                let lbl = if from > 0 { format!("{} · از {}", s.2, fa_toman(from)) } else { s.2.to_string() };
-                rows.push(vec![b(&lbl, &format!("psv:{}:{}", mode, s.1))]);
+                lines.push_str(&format!("\n{}{}", service_name(s.0), if from > 0 { format!(" · از <b>{}</b>", fa_toman(from)) } else { String::new() }));
+                rows.push(vec![b(s.2, &format!("psv:{}:{}", mode, s.1))]);
             }
             rows.extend(self.shop_rows(renew));
             rows.push(vec![b(&back_lbl, "home")]);
-            let txt = format!("🛒 <b>خرید اشتراک</b>\n\n{}نوع سرویس رو انتخاب کنید 👇", offer_line);
+            let txt = format!("🛒 <b>خرید اشتراک</b>\n{}\n\n{}نوع سرویس را انتخاب کنید 👇", lines, offer_line);
             return self.edit(chat, mid, &txt, Some(ik(rows))).await;
         }
         list.retain(|p| p.service == svc);
@@ -2559,14 +2692,19 @@ impl Bot {
             list.retain(|p| p.category == want);
         }
         let back_to = format!("psv:{}", mode);
-        let title = format!("{}\n\n{}پلن خودتون رو انتخاب کنید 👇", SERVICES.iter().find(|s| s.0 == svc).map(|s| s.3).unwrap_or(""), offer_line);
         // ordered by duration, then number of users, then price
         list.sort_by_key(|x| (x.days, x.conns, x.toman));
-        let mut rows: Kb = vec![];
-        for p in list.iter() {
+        // each plan one line in the text (volume, duration, users, price); its button only its number and price,
+        // so two or three fit side by side
+        let mut lines = String::new();
+        let mut btns: Vec<(String, String)> = vec![];
+        for (i, p) in list.iter().enumerate() {
             let data = if pattern.contains("{}") { pattern.replace("{}", &p.id.to_string()) } else { format!("{}:{}", pattern, p.id) };
-            rows.push(vec![b(&plan_button(p, p.toman), &data)]);
+            lines.push_str(&format!("\n{} {}", plan_no(i + 1), plan_line(p, p.toman)));
+            btns.push(b(&format!("{} {}", plan_no(i + 1), price_short(p, p.toman)), &data));
         }
+        let title = format!("{}\n{}\n\n{}شماره‌ی پلن را انتخاب کنید 👇", SERVICES.iter().find(|s| s.0 == svc).map(|s| s.3).unwrap_or(""), lines, offer_line);
+        let mut rows: Kb = grid(btns, if list.len() > 4 { 3 } else { 2 });
         if let Some(r) = self.shop_row(renew, svc) {
             rows.push(r);
         }
@@ -2583,14 +2721,17 @@ impl Bot {
         let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned().unwrap_or_default();
         let (t, u) = self.price(uid, &p, &pe);
         let offer = if pe.percent == 0 && pe.kind != "renew" { self.offer(uid).0 } else { 0 };
-        let mut rows: Kb = vec![];
+        let mut methods: Vec<(String, String)> = vec![];
         for (m, k) in [("card", "pay_card"), ("zp", "pay_zp"), ("ton", "pay_ton"), ("stars", "pay_stars"), ("np", "pay_np"), ("wallet", "pay_wallet")] {
             if self.method_ok(m, t, u) {
-                rows.push(vec![b(&self.bt(k), &format!("pay:{}", m))]);
+                methods.push(b(&self.bt(k), &format!("pay:{}", m)));
             }
         }
-        if pe.discount.is_empty() { rows.push(vec![b(&self.bt("disc"), "disc")]); }
-        rows.push(vec![b(&self.bt("back"), "home")]);
+        let mut rows: Kb = grid(methods, 2);
+        let mut last = vec![];
+        if pe.discount.is_empty() { last.push(b(&self.bt("disc"), "disc")); }
+        last.push(b(&self.bt("back"), "home"));
+        rows.push(last);
         // the same price in TON and in Stars, at today's rate (when those are offered)
         let (ton_on, stars_on) = (self.method_ok("ton", t, u), self.method_ok("stars", t, u));
         let mut crypto = String::new();
@@ -2603,12 +2744,8 @@ impl Bot {
             }
         }
         let txt = format!(
-            "📦 <b>{}</b>\n{}\nحجم: {} · مدت: {} روز · {} کاربر{}\nقیمت: <b>{}</b>{}{}{}\n\nروش پرداخت را انتخاب کنید:",
-            esc(&p.name), match p.service.as_str() {
-                "v2ray" => "⚡ اقتصادی (V2Ray)",
-                "game" => "🎮 گیمینگ (WG + Amnezia)",
-                _ => "👑 همه‌کاره VIP + اپ کانکی",
-            }, if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, p.days, p.conns,
+            "📦 <b>{}</b>\n{}\n\n▫️ حجم: <b>{}</b>\n▫️ مدت: <b>{} روز</b> · {} کاربر{}\n💰 قیمت: <b>{}</b>{}{}{}\n\nروش پرداخت را انتخاب کنید 👇",
+            esc(&p.name), service_name(&p.service), if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, p.days, p.conns,
             if p.countries > 0 { format!(" · {} کشور", p.countries) } else { String::new() },
             if offer > 0 && p.toman > t { format!("<s>{}</s>  {}", toman(p.old_toman.max(p.toman)), toman(t)) }
             else if p.old_toman > t && pe.percent == 0 { format!("<s>{}</s>  {}", toman(p.old_toman), toman(t)) } else { toman(t) },
@@ -2638,8 +2775,8 @@ impl Bot {
             "card" => {
                 self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::Receipt("card".into()));
                 self.edit(chat, mid, &format!(
-                    "💳 <b>کارت به کارت</b>\n\nمبلغ: <b>{}</b>\nشماره کارت:\n<code>{}</code>\nبه نام: {}\n\n📸 بعد از واریز، <b>عکس رسید</b> را همین‌جا بفرستید.",
-                    toman(t), esc(&db.get("card_number")), esc(&db.get("card_holder"))), home).await;
+                    "💳 <b>کارت به کارت</b>\n\n💰 مبلغ: <b>{}</b>\n💳 شماره کارت (لمس کنید تا کپی شود):\n<code>{}</code>\n👤 به نام: <b>{}</b>\n\n📸 بعد از واریز، <b>عکس رسید</b> را همین‌جا بفرستید.",
+                    toman(t), esc(&card_digits(&db.get("card_number"))), esc(&db.get("card_holder"))), home).await;
             }
             "wallet" => {
                 self.waits.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Wait::Receipt("wallet".into()));
@@ -2666,16 +2803,18 @@ impl Bot {
                 if !extra.trim().is_empty() {
                     txt.push_str(&format!("\n\n{}", esc(&extra)));
                 }
-                txt.push_str("\n\n👆 روی آدرس بزنید تا کپی شود.\n📸 بعد از پرداخت، <b>عکس رسید یا TXID</b> را همین‌جا بفرستید.");
+                txt.push_str("\n\n👆 آدرس را لمس کنید تا کپی شود.\n📸 بعد از پرداخت، <b>عکس رسید یا TXID</b> را همین‌جا بفرستید.");
                 rows.push(vec![b("⬅️ بازگشت", "home")]);
                 self.edit(chat, mid, &txt, Some(ik(rows))).await;
             }
             "ton" => self.ton_start(uid, chat, mid, &p, &pe, t).await,
             "stars" => self.stars_start(uid, chat, mid, &p, &pe, t).await,
             "np" => {
-                let rows: Kb = db.get("np_coins").split(',').filter(|c| !c.trim().is_empty())
-                    .map(|c| vec![b(&c.trim().to_uppercase(), &format!("npc:{}", c.trim()))]).collect();
-                self.edit(chat, mid, "🪙 ارز پرداخت را انتخاب کنید:", Some(ik(rows))).await;
+                let coins: Vec<(String, String)> = db.get("np_coins").split(',').filter(|c| !c.trim().is_empty())
+                    .map(|c| b(&c.trim().to_uppercase(), &format!("npc:{}", c.trim()))).collect();
+                let mut rows = grid(coins, 3);
+                rows.push(vec![b("⬅️ بازگشت", "home")]);
+                self.edit(chat, mid, "🪙 <b>پرداخت ارزی</b>\nارز پرداخت را انتخاب کنید 👇", Some(ik(rows))).await;
             }
             "zp" => {
                 let oid = self.new_order(uid, &p, &pe, "zp", &t.to_string(), "waiting", "");
@@ -3757,7 +3896,7 @@ impl Bot {
         let txt = format!(
             "📦 <b>{}</b>  {}\n\n🛍 نوع سرویس: <b>{}</b>\n📅 مدت: {} روز\n📊 حجم: {}\n💰 قیمت: {} · {}$\n👤 تعداد کاربر: {}\n🌍 کشورها: {}\n📂 دسته: {}\n🏷 برچسب: {}\n💸 قیمت خط‌خورده: {}",
             esc(&p.name), if active { "🟢 فعال" } else { "⚪️ غیرفعال" },
-            match p.service.as_str() { "v2ray" => "⚡ اقتصادی (V2Ray): فقط لینک اشتراک Xray", "game" => "🎮 گیمینگ: WireGuard و AmneziaWG (و KANKI MIX اپ)", _ => "👑 VIP: همه‌ی پروتکل‌ها و اپ کانکی" }, p.days,
+            match p.service.as_str() { "v2ray" => "🛡 ضد فیلتر: V2Ray / Hysteria (لینک اشتراک)", "game" => "🎮 گیمینگ: WireGuard / Amnezia / KankiMix", _ => "👑 ترکیبی: همه‌ی سرویس‌ها و اپ کانکی" }, p.days,
             if p.gb > 0.0 { format!("{} GB", p.gb) } else { "نامحدود".into() }, toman(p.toman), p.usd, p.conns,
             if p.countries > 0 { p.countries.to_string() } else { "همه".into() },
             if p.category.is_empty() { "بدون دسته".to_string() } else { esc(&p.category) },
@@ -4552,7 +4691,7 @@ impl Bot {
         }
         let t = format!("{}\nسرعت و پینگ رو دیدی؟ همین الان با <b>{}% تخفیف ویژه</b> اشتراک کاملت رو فعال کن (معتبر تا {} ساعت):\n🎟 کد تخفیف: <code>{}</code>",
             head, got, hours, self.test_code());
-        self.send(tg, &t, Some(ik(vec![vec![b(&format!("🛒 خرید با {}% تخفیف", got), "buy"), b("👑 مشاهده پلن‌های VIP", "psv:b:p")]]))).await;
+        self.send(tg, &t, Some(ik(vec![vec![b(&format!("🛒 خرید با {}% تخفیف", got), "buy"), b("👑 پلن‌های ترکیبی", "psv:b:p")]]))).await;
     }
 
     /// Keeping customers, once per account and period (`warned` bits; a renewal or a gift clears them):
@@ -4723,10 +4862,10 @@ fn app_icon(app: &str) -> &'static str {
 
 fn how_app_line(app: &str, os: &str) -> (&'static str, &'static str) {
     match app {
-        "k" => ("اپ کانکی (Kanki VPN)", "اپ خود ما: همه‌ی سرورها با یک کد، سریع‌ترین رو خودش انتخاب می‌کنه؛ برای بازی عالیه"),
-        "z" => ("AmneziaVPN", "همه‌ی سرورها (WireGuard، AmneziaWG و VLESS / Xray) با یک فایل بکاپ"),
-        "v" => (match os { "i" => "V2Box", "w" => "v2rayN", _ => "v2rayNG" }, "با لینک اشتراک؛ کانفیگ‌های VLESS (Xray) و Hysteria2"),
-        _ => ("WireGuard", "فقط کانفیگ‌های WireGuard، هر سرور یک فایل"),
+        "k" => ("اپ کانکی (Kanki VPN)", "همه‌ی سرورها با یک کد؛ برای بازی عالی است."),
+        "z" => ("AmneziaVPN", "همه‌ی سرورها با یک فایل بکاپ."),
+        "v" => (match os { "i" => "V2Box", "w" => "v2rayN", _ => "v2rayNG" }, "با لینک اشتراک (Xray و Hysteria2)."),
+        _ => ("WireGuard", "هر سرور یک فایل جدا."),
     }
 }
 
@@ -4845,7 +4984,14 @@ mod flow_tests {
             move |axum::extract::Path((_bot, m)): axum::extract::Path<(String, String)>, body: String| {
                 let l = l2.clone();
                 async move {
-                    let v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+                    let mut v: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+                    // the right-to-left marks (`rtl_lines`) are counted apart, so the texts compare as written
+                    for k in ["text", "caption"] {
+                        if let Some(t) = v[k].as_str().map(|t| t.to_string()) {
+                            v["_rlm"] = json!(t.matches(RLM).count());
+                            v[k] = json!(t.replace(RLM, ""));
+                        }
+                    }
                     let bad_edit = m == "editMessageText" && v["message_id"].as_i64() == Some(0);
                     l.lock().unwrap_or_else(|e| e.into_inner()).push((m, v));
                     // like Telegram: a message that does not exist cannot be edited
@@ -4924,6 +5070,13 @@ mod flow_tests {
         )).collect()
     }
 
+    /// The rows of the keyboard of the last message to `chat`
+    fn last_kb(log: &Log, chat: i64) -> Vec<Vec<Value>> {
+        let l = log.lock().unwrap_or_else(|e| e.into_inner());
+        let Some((_, v)) = l.iter().rev().find(|(m, v)| (m == "sendMessage" || m == "editMessageText") && v["chat_id"].as_i64() == Some(chat)) else { return vec![] };
+        v["reply_markup"]["inline_keyboard"].as_array().cloned().unwrap_or_default().iter().map(|r| r.as_array().cloned().unwrap_or_default()).collect()
+    }
+
     #[tokio::test]
     async fn the_mini_app_asks_a_config_name_and_gives_the_trial_once() {
         let (bot, log) = bot().await;
@@ -4968,12 +5121,15 @@ mod flow_tests {
         // first the services (here only VIP is on sale) and the whole shop in the mini app
         let bs = buttons(&log, buyer);
         assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1"), "{:?}", bs);
-        let vip = bs.iter().find(|b| b.0.starts_with("👑")).unwrap().1.clone();
+        let vip = bs.iter().find(|b| b.1.ends_with(":p")).unwrap().1.clone();
         tap(&bot, from(buyer, "Sara", "sara"), &vip).await;
         let bs = buttons(&log, buyer);
         assert!(!bs.iter().any(|b| b.0.contains("دلخواه VIP")), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0 == "\u{200F}🔹 50 GB \u{200F}| 1 ماهه \u{200F}| 2 کاربر \u{200F}— 300,000 تومان" && b.2.is_empty()), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0 == "\u{200F}🔹 10 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 90,000 تومان" && b.2 == "danger"), "{:?}", bs);
+        // each plan a line in the text, its button its number and price
+        let t = last(&log, buyer);
+        assert!(t.contains("<b>50 GB</b> · 1 ماهه · 2 کاربر — <b>300,000 تومان</b>") && t.contains("<b>10 GB</b> · 1 ماهه · 1 کاربر — <b>90,000 تومان</b>"), "{}", t);
+        assert!(bs.iter().any(|b| b.0.ends_with(" 300,000 ت") && b.2.is_empty()), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0.ends_with(" 90,000 ت") && b.2 == "danger"), "{:?}", bs);
         assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1&shop=vip&tab=custom" && b.2 == "primary"), "{:?}", bs);
         assert!(!log.lock().unwrap().iter().any(|(_, v)| v.to_string().contains("\"_k\"")), "the colour key is not sent to Telegram");
         // paid by card: the receipt, the admin approves (green / red buttons), the account has the custom volume and days
@@ -5017,7 +5173,7 @@ mod flow_tests {
         tap(&bot, from(buyer, "Nima", "nima"), "buy").await;
         let bs = buttons(&log, buyer);
         assert!(bs.iter().any(|b| b.1 == "psv:b:v") && bs.iter().any(|b| b.1 == "psv:b:p"), "{:?}", bs);
-        assert!(bs.iter().any(|b| b.0.contains("V2Ray")) && bs.iter().any(|b| b.0.contains("VIP")), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0 == "ضد فیلتر (V2Ray / Hysteria)") && bs.iter().any(|b| b.0 == "ترکیبی (همه سرویس‌ها)"), "{:?}", bs);
         tap(&bot, from(buyer, "Nima", "nima"), "psv:b:v").await;
         let bs = buttons(&log, buyer);
         let std_id: i64 = db.with(|c| c.query_row("SELECT id FROM plans WHERE name='Std'", [], |r| r.get(0)).unwrap());
@@ -5046,12 +5202,12 @@ mod flow_tests {
         assert!(t.contains("خرید شما با موفقیت انجام شد") && t.contains("/v2") && t.contains("📦 پلن: <b>Std</b>"), "{}", t);
         // the short delivery: only the apps, the tutorial (when there is one) and support; no config or backup buttons
         let bs: Vec<String> = buttons(&log, buyer).into_iter().map(|b| b.0).collect();
-        assert!(t.contains("دستگاهت رو انتخاب کن"), "{}", t);
-        assert!(["🤖 اندروید", "🍏 آیفون", "💻 ویندوز"].iter().all(|d| bs.iter().any(|b| b == d)) && bs.iter().any(|b| b == "💬 پشتیبانی") && bs.len() <= 6, "{:?}", bs);
+        assert!(t.contains("دستگاهتان را انتخاب کنید"), "{}", t);
+        assert!(["🤖 اندروید", "🍏 آیفون", "💻 ویندوز"].iter().all(|d| bs.iter().any(|b| b == d)) && bs.iter().any(|b| b == "💬 پشتیبانی") && bs.len() <= 7, "{:?}", bs);
         // the connection guide of a v2ray account on an iPhone: only V2Box, with its subscription link
         tap(&bot, from(buyer, "Nima", "nima"), &format!("hw:{}:i", acc[0].id)).await;
         let bs = buttons(&log, buyer);
-        assert_eq!(bs.iter().filter(|b| b.1.starts_with("hw:") && b.1.matches(':').count() == 3).map(|b| b.0.clone()).collect::<Vec<_>>(), vec!["⭐ V2Box (پیشنهادی)".to_string()], "{:?}", bs);
+        assert_eq!(bs.iter().filter(|b| b.1.starts_with("hw:") && b.1.matches(':').count() == 3).map(|b| b.0.clone()).collect::<Vec<_>>(), vec!["✅ V2Box (پیشنهادی)".to_string()], "{:?}", bs);
         tap(&bot, from(buyer, "Nima", "nima"), &format!("hw:{}:i:v", acc[0].id)).await;
         let t = last(&log, buyer);
         assert!(t.contains("Add subscription") && t.contains("/v2") && !t.contains("AmneziaVPN"), "{}", t);
@@ -5338,24 +5494,33 @@ mod flow_tests {
         assert!(t.contains("نوع سرویس") && !t.contains("•"), "short, no long descriptions: {}", t);
         let bs = buttons(&log, buyer);
         let labels: Vec<&str> = bs.iter().filter(|b| b.1.starts_with("psv:")).map(|b| b.0.as_str()).collect();
-        assert_eq!(labels, vec!["⚡ اقتصادی (V2Ray) · از 52,000 تومان", "🎮 گیمینگ (WG + Amnezia) · از 64,000 تومان", "👑 همه‌کاره VIP · از 80,000 تومان"]);
+        assert_eq!(labels, vec!["ضد فیلتر (V2Ray / Hysteria)", "گیمینگ (WireGuard / Amnezia / KankiMix)", "ترکیبی (همه سرویس‌ها)"]);
+        // the lowest prices are in the text, one line a service
+        for l in ["🛡 ضد فیلتر · از <b>52,000 تومان</b>", "🎮 گیمینگ · از <b>64,000 تومان</b>", "👑 ترکیبی · از <b>80,000 تومان</b>"] {
+            assert!(t.contains(l), "{}: {}", l, t);
+        }
         assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1" && b.0 == "💎 فروشگاه مینی‌اپ"), "{:?}", bs);
         assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1&tab=custom" && b.0.starts_with("🎛")), "{:?}", bs);
         tap(&bot, from(buyer, "Sara", "sara"), "psv:b:p").await;
-        // every plan of the service at once, by duration: «🔹 volume | duration | users — price», the badge's emoji at the end
+        // every plan of the service at once, by duration: one numbered line each in the text (volume, duration,
+        // users, price, the badge's emoji), and short numbered buttons two or three a row
+        let t = last(&log, buyer);
+        assert!(t.contains("1\u{fe0f}\u{20e3} <b>20 GB</b> · 1 ماهه · 1 کاربر — <b>80,000 تومان</b>"), "{}", t);
+        assert!(t.contains("<b>50 GB</b> · 1 ماهه · 1 کاربر — <b>110,000 تومان</b> 🔥"), "{}", t);
+        assert!(t.find("1 ماهه").unwrap() < t.find("3 ماهه").unwrap(), "{}", t);
+        let rows = last_kb(&log, buyer);
+        let plan_rows: Vec<usize> = rows.iter().map(|r| r.iter().filter(|b| b["callback_data"].as_str().unwrap_or("").starts_with("pl:")).count()).filter(|n| *n > 0).collect();
+        assert!(plan_rows.len() > 1 && plan_rows.iter().all(|n| (1..=3).contains(n)) && plan_rows[0] >= 2, "{:?}", plan_rows);
         let bs = buttons(&log, buyer);
         let plans: Vec<&str> = bs.iter().filter(|b| b.1.starts_with("pl:")).map(|b| b.0.as_str()).collect();
-        assert_eq!(plans[0], "\u{200F}🔹 20 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 80,000 تومان", "{:?}", plans);
-        assert!(plans.contains(&"\u{200F}🔹 50 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 110,000 تومان 🔥"), "{:?}", plans);
-        assert!(plans.iter().all(|p| p.starts_with("\u{200F}🔹 ")), "{:?}", plans);
-        assert!(plans.iter().position(|p| p.contains("1 ماهه")).unwrap() < plans.iter().position(|p| p.contains("3 ماهه")).unwrap(), "{:?}", plans);
+        assert_eq!(plans[0], "1\u{fe0f}\u{20e3} 80,000 ت", "{:?}", plans);
         assert!(bs.iter().any(|b| b.1 == "https://sub.example.com/tg/?buy=1&shop=vip&tab=custom"), "{:?}", bs);
         // the gaming service: its own plans, 12,000 more than V2Ray; a gaming purchase makes a WireGuard / AmneziaWG account
         tap(&bot, from(buyer, "Sara", "sara"), "pcat:b:0:g").await;
         let bs = buttons(&log, buyer);
-        assert!(bs.iter().any(|b| b.0 == "\u{200F}🔹 20 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 64,000 تومان"), "{:?}", bs);
+        assert!(bs.iter().any(|b| b.0.ends_with(" 64,000 ت")), "{:?}", bs);
         tap(&bot, from(buyer, "Sara", "sara"), "pcat:b:0:v").await;
-        assert!(buttons(&log, buyer).iter().any(|b| b.0 == "\u{200F}🔹 20 GB \u{200F}| 1 ماهه \u{200F}| 1 کاربر \u{200F}— 52,000 تومان"));
+        assert!(buttons(&log, buyer).iter().any(|b| b.0.ends_with(" 52,000 ت")));
         let u = bot.create_account_svc(buyer, 20.0, 30, 1, "", 0, "game").unwrap();
         assert_eq!((u.protocols.as_str(), u.service()), ("wg,awg,kmix", "game"));
         assert!(bot.account_text(&u).contains("🎮 گیمینگ") && !bot.account_text(&u).contains("/v2"));
@@ -5574,7 +5739,7 @@ mod flow_tests {
         assert_eq!(bot.how_apps(&u, "w").first(), Some(&"k"));
         tap(&bot, from(tg, "Reza", "reza"), &format!("hw:{}:a", u.id)).await;
         let bs = buttons(&log, tg);
-        assert_eq!((bs[0].0.as_str(), bs[0].2.as_str()), ("⭐ اپ کانکی (Kanki VPN) (پیشنهادی)", "success"), "{:?}", bs);
+        assert_eq!((bs[0].0.as_str(), bs[0].2.as_str()), ("✅ اپ کانکی (Kanki VPN) (پیشنهادی)", "success"), "{:?}", bs);
         tap(&bot, from(tg, "Reza", "reza"), &format!("hw:{}:a:k", u.id)).await;
         assert!(last(&log, tg).contains(&u.sub_code()), "{}", last(&log, tg));
         // an app that is not offered for this account (no WireGuard server here): refused
@@ -5594,6 +5759,100 @@ mod flow_tests {
         tap(&bot, from(tg, "Reza", "reza"), &format!("cfg:{}:v", u.id)).await;
         let t = last(&log, tg);
         assert!(t.contains("لینک اشتراک V2Ray") && t.contains("/v2") && t.contains("Add subscription"), "{}", t);
+    }
+
+    /// 3.66: the delivery as the tier: the activation code always (alone in its <code>), the V2Ray subscription link
+    /// only for a V2Ray or combined account, the account page as a button with no code in it; the device menu marks
+    /// the tier's apps; v2rayNG comes from its GitHub release with two direct files, AmneziaVPN from Google Play
+    #[tokio::test]
+    async fn the_delivery_and_the_guides_follow_the_tier() {
+        let (bot, log) = bot().await;
+        let tg = 7551;
+        // one server with AmneziaWG, so a gaming account can use AmneziaVPN
+        bot.db().exec("INSERT INTO nodes(id,name,address,endpoint,token,endpoint_mode,info) VALUES('local','DE','','','t','panel',?1)", &[&r#"{"awg_pub":"k","awg_port":"51821"}"#]).unwrap();
+        bot.touch(tg, &from(tg, "Mina", "mina"), 0);
+        let v = bot.create_account_svc(tg, 20.0, 30, 1, "", 0, "v2ray").unwrap();
+        let g = bot.create_account_svc(tg, 20.0, 30, 1, "", 0, "game").unwrap();
+        let c = bot.create_account_svc(tg, 20.0, 30, 1, "", 0, "vip").unwrap();
+        let code_of = |u: &User| format!("<code>{}</code>", u.sub_code());
+        for (u, sub) in [(&v, true), (&g, false), (&c, true)] {
+            let (t, kb) = bot.delivery("✅ <b>خرید</b>", u, "P");
+            assert!(t.contains(&code_of(u)) && t.contains("کد فعال‌سازی اپ کانکی"), "{}", t);
+            let link = crate::api::v2_sub_link(&bot.app, u);
+            assert_eq!(t.contains(&format!("<code>{}</code>", link)), sub, "{:?}: {}", u.tier(), t);
+            assert_eq!(t.contains("لینک اشتراک V2Ray"), sub, "{}", t);
+            // the account page: a URL button, hashed, never the code
+            let kb = kb.to_string();
+            assert!(kb.contains("/sub/h/") && !kb.contains(&u.code), "{}", kb);
+            // the account message and its buttons say the same
+            assert_eq!(bot.account_text(u).contains("لینک اشتراک V2Ray"), sub);
+            if !sub {
+                assert!(!bot.acct_kb(u, vec![]).to_string().contains(&format!("cfg:{}:v", u.id)));
+            }
+        }
+        // every Persian line of a sent message starts right to left; the copied code stays clean
+        bot.send(tg, &bot.delivery("✅ <b>خرید</b>", &g, "P").0, None).await;
+        let sent = log.lock().unwrap().iter().rev().find(|(m, x)| m == "sendMessage" && x["chat_id"] == tg).map(|x| x.1.clone()).unwrap();
+        assert!(sent["_rlm"].as_u64().unwrap_or(0) >= 3, "{}", sent);
+        assert!(sent["text"].as_str().unwrap().contains(&code_of(&g)));
+        // the device menu of a gaming account: its apps marked, none of a V2Ray app
+        bot.db().set("app_link", "https://example.com/kanki.apk");
+        let (t, rows) = bot.how_device(&g, "a");
+        assert!(t.contains("🎮 گیمینگ") && t.contains("✅"), "{}", t);
+        let first = &rows[0][0];
+        assert!(first.0.starts_with("✅ ") && first.0.contains("(پیشنهادی)") && first.1.starts_with("@success@"), "{:?}", rows);
+        assert!(!rows.iter().flatten().any(|b| b.1.ends_with(":v")), "{:?}", rows);
+        // v2rayNG on Android: the two files and the release page, no Google Play
+        tap(&bot, from(tg, "Mina", "mina"), &format!("hw:{}:a:v", v.id)).await;
+        let t = last(&log, tg);
+        assert!(!t.contains("گوگل‌پلی") && !t.contains("Google Play") && t.contains(&crate::api::v2_sub_link(&bot.app, &v)), "{}", t);
+        let kb = last_kb(&log, tg);
+        let urls: Vec<(String, String)> = kb.iter().flatten().filter_map(|b| b["url"].as_str().map(|u| (b["text"].as_str().unwrap_or("").to_string(), u.to_string()))).collect();
+        for (label, url) in [("⬇️ دانلود مستقیم v2rayNG (arm64)", V2RAYNG_ARM64), ("⬇️ دانلود نسخه عمومی (Universal)", V2RAYNG_UNIVERSAL), ("📄 صفحه‌ی دانلود در GitHub", V2RAYNG_RELEASE)] {
+            assert!(urls.iter().any(|x| x.0 == label && x.1 == url), "{} {:?}", label, urls);
+        }
+        assert!(urls.iter().all(|x| !x.1.contains("play.google.com")), "{:?}", urls);
+        // AmneziaVPN on Android: Google Play, with its button
+        tap(&bot, from(tg, "Mina", "mina"), &format!("hw:{}:a:z", g.id)).await;
+        let msgs: Vec<Value> = log.lock().unwrap().iter().filter(|(m, x)| m == "sendMessage" && x["chat_id"] == tg).map(|x| x.1.clone()).collect();
+        let amz = msgs.iter().rev().find(|x| x["text"].as_str().unwrap_or("").contains("AmneziaVPN")).unwrap();
+        assert!(amz["reply_markup"].to_string().contains(AMNEZIA_PLAY) && amz["reply_markup"].to_string().contains("دانلود از Google Play"), "{}", amz);
+        let steps = amz["text"].as_str().unwrap();
+        assert!(["1️⃣", "2️⃣", "3️⃣", "4️⃣"].iter().all(|n| steps.contains(n)) && !steps.contains("5️⃣"), "{}", steps);
+    }
+
+    #[test]
+    fn persian_lines_start_right_to_left_and_nothing_else_changes() {
+        let t = "1️⃣ v2rayNG رو نصب کنید.\n<code>https://x.test/sub/h/ab</code>\n\n<pre>کد\nخط دوم</pre>\nline only\n\u{200F}قبلاً";
+        let r = rtl_lines(t);
+        let lines: Vec<&str> = r.split('\n').collect();
+        assert_eq!(lines[0], "\u{200F}1️⃣ v2rayNG رو نصب کنید.");
+        assert_eq!(lines[1], "<code>https://x.test/sub/h/ab</code>", "a link alone is left as it is");
+        assert_eq!(lines[2], "");
+        assert_eq!((lines[3], lines[4]), ("<pre>کد", "خط دوم</pre>"), "nothing inside <pre>");
+        assert_eq!(lines[5], "line only");
+        assert_eq!(lines[6], "\u{200F}قبلاً", "never twice");
+        // a code inside a Persian line: the mark is before the line, outside the tag
+        let r = rtl_lines("کد: <code>kanki-1-123</code>");
+        assert!(r.starts_with('\u{200F}') && r.contains("<code>kanki-1-123</code>"));
+        // a plain-text call (no HTML) and a message too long with the marks are sent as they are
+        let mut plain = json!({"text": "سلام"});
+        rtl_body(&mut plain);
+        assert_eq!(plain["text"], "سلام");
+        let long = "س\n".repeat(2048);
+        let mut big = json!({"text": long.clone(), "parse_mode": "HTML"});
+        rtl_body(&mut big);
+        assert_eq!(big["text"].as_str().unwrap(), long);
+    }
+
+    #[test]
+    fn a_card_number_is_copied_as_digits() {
+        assert_eq!(card_digits(" 6037-9918 1234 5678 "), "6037991812345678");
+        assert_eq!(card_digits("IR12 0000 0000"), "IR12 0000 0000");
+        assert_eq!(plan_no(3), "3\u{fe0f}\u{20e3}");
+        assert_eq!(plan_no(12), "12");
+        let g = grid((0..5).map(|i| b(&i.to_string(), "x")).collect(), 3);
+        assert_eq!(g.iter().map(|r| r.len()).collect::<Vec<_>>(), vec![3, 2]);
     }
 
     /// A fake Telegram that says «too many requests» to the first `busy` calls, then takes them
