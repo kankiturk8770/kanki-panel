@@ -84,16 +84,16 @@ async fn a_role_switches_off_what_it_does_not_run_and_hybrid_gives_it_back() {
     let n = || app.db.node("n1").unwrap();
     assert!(crate::api::node_protos(&app, &u, &n()).contains(&"hysteria2"));
 
-    // gaming: Hysteria2 and AmneziaWG off (no link either), and they cannot be switched on
+    // gaming: Hysteria2 off (no link either) and it cannot be switched on; AmneziaWG is a gaming core too
     assert_eq!(set_role("gaming").await, StatusCode::OK);
-    assert_eq!(crate::cores::off_list(&app, "n1"), vec!["awg", "hy2"]);
+    assert_eq!(crate::cores::off_list(&app, "n1"), vec!["hy2"]);
     assert_eq!(core("hy2", true).await, StatusCode::CONFLICT);
-    assert_eq!(core("awg", true).await, StatusCode::CONFLICT);
+    assert_eq!(core("awg", true).await, StatusCode::OK);
     assert_eq!(core("wg", true).await, StatusCode::OK);
     assert_eq!(kmix(true).await, StatusCode::OK);
     assert!(crate::kmix::settings(&app).node_on("n1"));
     let p = crate::api::node_protos(&app, &u, &n());
-    assert!(!p.contains(&"hysteria2") && !p.contains(&"amneziawg"), "{:?}", p);
+    assert!(!p.contains(&"hysteria2") && p.contains(&"amneziawg"), "{:?}", p);
     // the admin's own switch is not touched by the role (switching a core off is always allowed)
     assert_eq!(core("hy2", false).await, StatusCode::OK);
     assert_eq!(core("hy2", true).await, StatusCode::CONFLICT);
@@ -380,4 +380,66 @@ async fn the_sub_link_shows_only_what_the_account_has() {
     assert_ne!(st, StatusCode::OK);
     let (st, _, _) = get_raw(&app, "/sub/kanki-1-%27%20OR%201=1/v2").await;
     assert_ne!(st, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn one_switch_per_core_on_each_server() {
+    let app = crate::test_app();
+    add_node(&app, "local");
+    add_node(&app, "n2");
+    let mut list = crate::tunnel::panel::servers(&app);
+    list.push(crate::tunnel::panel::TServer { id: "a2".into(), name: "NL".into(), node: "n2".into(), ..Default::default() });
+    crate::tunnel::panel::save_servers(&app, &list);
+    let admin = token(&app, "nodes");
+    let set = |key: &'static str, b: Value| {
+        let (app, admin) = (app.clone(), admin.clone());
+        async move { call(&app, Method::POST, &format!("/api/servers/{}/cores", key), Some(&admin), Some(b)).await }
+    };
+    // strangers and bad input change nothing
+    let (st, _) = call(&app, Method::POST, "/api/servers/a2/cores", None, Some(json!({"wg": false}))).await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+    let weak = token(&app, "users:write");
+    let (st, _) = call(&app, Method::POST, "/api/servers/a2/cores", Some(&weak), Some(json!({"wg": false}))).await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    for bad in [json!({"wg": "yes"}), json!({"openvpn": true}), json!([true]), json!({"wg": 1})] {
+        assert_eq!(set("a2", bad.clone()).await.0, StatusCode::BAD_REQUEST, "{}", bad);
+    }
+    assert_eq!(set("ghost", json!({"wg": true})).await.0, StatusCode::NOT_FOUND);
+    // every core on a hybrid server: Xray and DNS get their entries with nothing typed
+    let (st, v) = set("a2", json!({"wg": true, "awg": true, "kmix": true, "dns": true, "xray": true, "hy2": true})).await;
+    assert_eq!(st, StatusCode::OK, "{}", v);
+    for c in ["wg", "awg", "kmix", "dns", "xray", "hy2"] {
+        assert_eq!(v["state"]["cores"][c]["on"], true, "{}: {}", c, v);
+    }
+    assert!(crate::xray::panel::has_server(&app, "a2") && crate::dns::panel::has_server(&app, "a2"));
+    // Xray off keeps its server entry and inbounds; it just stops (no config for the agent)
+    let mut xs = crate::xray::panel::settings(&app);
+    xs.on = true;
+    xs.inbounds.push(crate::xray::panel::Inbound { id: "i2".into(), enabled: true, server: "a2".into(), protocol: "vless".into(), port: 2096, network: "ws".into(), security: "none".into(), ..Default::default() });
+    app.db.set("xray_cfg", &serde_json::to_string(&xs).unwrap());
+    assert!(crate::xray::panel::cfg_for(&app, "a2").is_some());
+    let (st, v) = set("a2", json!({"xray": false, "dns": false, "hy2": false})).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!((v["state"]["cores"]["xray"]["on"].as_bool(), v["state"]["cores"]["hy2"]["on"].as_bool()), (Some(false), Some(false)));
+    assert!(crate::xray::panel::cfg_for(&app, "a2").is_none() && crate::dns::panel::cfg_for(&app, "a2").is_none());
+    assert_eq!(crate::xray::panel::settings(&app).inbounds.len(), 1);
+    assert!(crate::cores::is_off(&app, "n2", "hy2"));
+    let (_, v) = set("a2", json!({"xray": true})).await;
+    assert_eq!(v["state"]["cores"]["xray"]["on"], true);
+    assert!(crate::xray::panel::cfg_for(&app, "a2").is_some());
+    // a role still has the last word: nothing changes when one asked core is not allowed
+    app.db.exec("UPDATE nodes SET role='gaming' WHERE id='n2'", &[]).unwrap();
+    let (st, _) = set("a2", json!({"wg": false, "hy2": true})).await;
+    assert_eq!(st, StatusCode::CONFLICT);
+    assert!(!crate::cores::is_off(&app, "n2", "wg"));
+    // a server without its VPN part cannot switch a VPN core on
+    let mut list = crate::tunnel::panel::servers(&app);
+    list.push(crate::tunnel::panel::TServer { id: "a3".into(), name: "IR".into(), ..Default::default() });
+    crate::tunnel::panel::save_servers(&app, &list);
+    assert_eq!(set("a3", json!({"wg": true})).await.0, StatusCode::CONFLICT);
+    assert_eq!(set("a3", json!({"xray": true})).await.0, StatusCode::OK);
+    // the servers list carries every switch
+    let (_, l) = call(&app, Method::GET, "/api/servers", Some(&admin), None).await;
+    let a3 = l["servers"].as_array().unwrap().iter().find(|s| s["key"] == "a3").unwrap().clone();
+    assert_eq!((a3["switches"]["cores"]["xray"]["on"].as_bool(), a3["switches"]["cores"]["wg"]["can"].as_bool()), (Some(true), Some(false)));
 }

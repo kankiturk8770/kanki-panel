@@ -91,27 +91,29 @@ function vhGrid(nodes,o,xr,dn){var el=$('#vh_g');if(!el)return;var pr=o.protocol
  var ups=nodes.filter(up).length,s=$('#vh_s');
  if(s)s.innerHTML=kuStats([[t('Servers online'),N(ups)+' / '+N(nodes.length),ups<nodes.length?'warn':'ok'],[t('Online now'),N(o.online||0),'ok'],[t('Total traffic'),'<span class="ltr">'+N(o.traffic_gb||0)+' GB</span>'],[t('Users'),N(o.users||0)]])}
 
-// ---------------------------------------------------------------- user form: what the user gets, service by service
-function ufServices(protos,un){var has=function(p){return protos.indexOf(p)>=0},vpnOn=has('wg')||has('awg')||has('hy2')||has('kmix');
- var card=function(key,icon,title,sub,on,body,head){return '<div class="ufsvc'+(on?' on':'')+'" data-svc="'+key+'"><div class="hd"><span class="ni">'+ic(icon,18)+'</span><div class="nm"><b>'+t(title)+'</b><small>'+t(sub)+'</small></div>'+(head||'')+'</div><div class="bd3">'+body+'</div></div>'};
- var nodes=S.nodes||[];
- var h='<label class="f" style="margin-top:12px">'+t('Services of this user')+'</label><div class="chipset" id="uf_pre"><button type="button" data-pre="all">'+t('Everything')+'</button><button type="button" data-pre="vpn">'+t('Kanki VPN only')+'</button><button type="button" data-pre="xray">'+t('Xray only')+'</button><button type="button" data-pre="dns">'+t('DNS only')+'</button></div>';
- h+=card('vpn','nodes','Kanki VPN','WireGuard · AmneziaWG · Hysteria2 · KANKI MIX',vpnOn,
-  '<div class="ckrow">'+[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX']].map(function(p){return '<label class="pchk" style="--pc:'+PCOL[p[0]]+'"><input type="checkbox" class="f_pr" value="'+p[0]+'" '+(has(p[0])?'checked':'')+'><i></i>'+p[1]+'</label>'}).join('')+'</div>'+
-  (nodes.length>1?'<label class="f">'+t('Servers')+'</label><div class="ckrow">'+nodes.map(function(n){return '<label class="chk"><input type="checkbox" class="f_nd" value="'+esc(n.id)+'" '+(un.length==0||un.indexOf(n.id)>=0?'checked':'')+'>'+esc(n.name)+'</label>'}).join('')+'</div>':''),
-  '<label class="sw"><input type="checkbox" class="uf_all" data-for="vpn" '+(vpnOn?'checked':'')+'><span></span></label>');
- h+=card('xray','xray','Xray','Links of every Xray inbound go into the subscription',has('xray'),'<div id="uf_xr" class="muted">…</div>','<label class="sw"><input type="checkbox" class="f_pr" value="xray" '+(has('xray')?'checked':'')+'><span></span></label>');
- h+=card('dns','dns','Kanki DNS','Private DNS for sanctioned sites',has('dns'),'<div id="uf_dn" class="muted">…</div>','<label class="sw"><input type="checkbox" class="f_pr" value="dns" '+(has('dns')?'checked':'')+'><span></span></label>');
+// ---------------------------------------------------------------- user form: tier and one switch per core (3.64)
+// The tier says what the user bought: «give everyone» buttons and purchases only hand out its cores. Ticking a
+// tier ticks its cores; every core can still be switched by hand (a core outside the tier is marked so).
+var TIER_NAMES={v2ray:'V2Ray',gaming:'Gaming',combo:'Combo'};
+var TIER_CORES={v2ray:['xray','hy2'],gaming:['wg','awg','kmix'],combo:['wg','awg','hy2','kmix','xray','dns']};
+var UF_CORES=[['wg','WireGuard','shield2'],['awg','AmneziaWG','security'],['kmix','KANKI MIX','game'],['hy2','Hysteria2','globe'],['xray','Xray','xray'],['dns','Kanki DNS','dns']];
+function tierOfProtos(protos){var has=function(p){return protos.indexOf(p)>=0},ps=protos.filter(Boolean);
+ if(has('xray')&&ps.every(function(p){return p=='xray'||p=='hy2'}))return 'v2ray';
+ if((has('wg')||has('awg'))&&ps.every(function(p){return TIER_CORES.gaming.indexOf(p)>=0}))return 'gaming';return 'combo'}
+function ufServices(protos,un,tier){var has=function(p){return protos.indexOf(p)>=0},nodes=S.nodes||[];tier=tier||tierOfProtos(protos);
+ var h='<label class="f" style="margin-top:12px" id="uf_tl">'+t('Subscription tier')+'</label>'+
+  '<div class="seg uf-tier" id="uf_tier" role="radiogroup" aria-labelledby="uf_tl">'+['v2ray','gaming','combo'].map(function(k){
+   return '<button type="button" role="radio" data-tier="'+k+'" aria-checked="'+(k==tier)+'" class="'+(k==tier?'on':'')+'"><b>'+t(TIER_NAMES[k])+'</b><small>'+t({v2ray:'Xray + Hysteria2',gaming:'WireGuard + AmneziaWG + KANKI MIX',combo:'Every core'}[k])+'</small></button>'}).join('')+'</div>'+
+  '<label class="f" id="uf_cl">'+t('Cores of this user')+'</label><div class="uf-cores" role="group" aria-labelledby="uf_cl">'+UF_CORES.map(function(c){
+   return '<label class="uf-core" style="--pc:'+(PCOL[c[0]]||'var(--a)')+'" data-core="'+c[0]+'"><span class="ni">'+ic(c[2],16)+'</span><span class="nm"><b>'+c[1]+'</b><small class="uf-out">'+t('Outside the tier')+'</small></span>'+
+    '<span class="sw"><input type="checkbox" class="f_pr" value="'+c[0]+'" '+(has(c[0])?'checked':'')+' aria-label="'+esc(c[1])+'"><span></span></span></label>'}).join('')+'</div>'+
+  (nodes.length>1?'<label class="f">'+t('Servers')+'</label><div class="ckrow">'+nodes.map(function(n){return '<label class="chk"><input type="checkbox" class="f_nd" value="'+esc(n.id)+'" '+(un.length==0||un.indexOf(n.id)>=0?'checked':'')+'>'+esc(n.name)+'</label>'}).join('')+'</div>':'');
  setTimeout(ufWire,0);return h}
-function ufWire(){if(!$('#uf_pre'))return;
- var sync=function(){$$('.ufsvc').forEach(function(c){var on=$$('.f_pr',c).some(function(x){return x.checked});c.classList.toggle('on',on);var a=$('.uf_all',c);if(a)a.checked=on})};
- $$('.uf_all').forEach(function(a){a.onchange=function(){var c=a.closest('.ufsvc');$$('.f_pr',c).forEach(function(x){x.checked=a.checked});sync()}});
- $$('.ufsvc .f_pr').forEach(function(x){x.addEventListener('change',sync)});
- $$('#uf_pre [data-pre]').forEach(function(b){b.onclick=function(){var k=b.dataset.pre;$$('.ufsvc').forEach(function(c){var on=k=='all'||c.dataset.svc==k;$$('.f_pr',c).forEach(function(x){x.checked=on})});sync()}});
- var xr=function(d){var el=$('#uf_xr');if(!el)return;if(!d){el.textContent='—';return}var l=d.inbounds.filter(function(x){return x.enabled});
-  el.innerHTML=(d.on?'':'<span style="color:var(--warn)">'+t('Is off in the panel')+'</span> · ')+(l.length?l.map(function(ib){return '<span class="chipx a" style="margin:2px">'+esc(ib.remark||ib.protocol)+' · '+esc(ib.server_name||ib.server)+'</span>'}).join(''):t('No Xray inbound yet')+' · <a href="#xray/inbounds" onclick="closeModal()">'+t('Inbounds')+'</a>')};
- var dn=function(d){var el=$('#uf_dn');if(!el)return;if(!d){el.textContent='—';return}var l=d.servers.filter(function(x){return !x.hidden});
-  el.innerHTML=(d.on?'':'<span style="color:var(--warn)">'+t('Is off in the panel')+'</span> · ')+(l.length?l.map(function(x){return '<span class="chipx b" style="margin:2px">'+(x.role=='relay'?'🇮🇷 ':'🌍 ')+esc(x.name||x.server)+'</span>'}).join(''):t('No DNS server yet')+' · <a href="#dns/servers" onclick="closeModal()">'+t('Add DNS server')+'</a>')};
- if(XR.d)xr(XR.d);api('GET','/api/xray').then(function(d){XR.d=d;xr(d)}).catch(function(){xr(null)});
- if(DN.d)dn(DN.d);api('GET','/api/dns').then(function(d){DN.d=d;dn(d)}).catch(function(){dn(null)})}
+function ufTier(){var b=$('#uf_tier [aria-checked=true]');return b?b.dataset.tier:'combo'}
+function ufWire(){if(!$('#uf_tier'))return;
+ var mark=function(){var k=ufTier();$$('.uf-core').forEach(function(c){var on=$('.f_pr',c).checked;c.classList.toggle('on',on);c.classList.toggle('out',on&&TIER_CORES[k].indexOf(c.dataset.core)<0)})};
+ $$('#uf_tier [data-tier]').forEach(function(b){b.onclick=function(){var k=b.dataset.tier;
+  $$('#uf_tier [data-tier]').forEach(function(x){var on=x==b;x.classList.toggle('on',on);x.setAttribute('aria-checked',on)});
+  $$('.uf-core .f_pr').forEach(function(x){x.checked=TIER_CORES[k].indexOf(x.value)>=0});mark()}});
+ $$('.uf-core .f_pr').forEach(function(x){x.addEventListener('change',mark)});mark()}
 

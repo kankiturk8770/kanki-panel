@@ -2237,3 +2237,24 @@ body.light .kcb-t.on{background:linear-gradient(180deg,rgba(245,196,81,.32),rgba
 #ts_box .seg{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
 #ts_box .seg button{min-width:0;white-space:normal;line-height:1.2;padding:6px 4px}
 .kxr-h .tsuit.sh{margin-inline-start:4px}
+
+/* ---- 3.64: user tier, one switch per core (user form and servers), centered edit window, Xray users */
+.mbox.uedit{width:min(620px,100%);max-height:calc(100dvh - 32px);overflow:auto}
+.uf-tier{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.uf-tier button{display:flex;flex-direction:column;gap:2px;min-height:var(--h-touch,44px)}
+.uf-tier button b{font-size:13px}.uf-tier button small{color:var(--s);font-size:10.5px;line-height:1.4}
+.uf-cores,.core-sw{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+@media(min-width:720px){.core-sw{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:360px){.uf-tier,.uf-cores,.core-sw{grid-template-columns:1fr}}
+.uf-core,.csw{display:flex;align-items:center;gap:8px;min-height:var(--h-touch,44px);padding:7px 10px;border:1px solid var(--ln);border-radius:12px;background:var(--in);cursor:pointer;min-width:0}
+.uf-core.on,.csw.on{border-color:color-mix(in srgb,var(--pc) 60%,transparent);background:color-mix(in srgb,var(--pc) 10%,var(--in))}
+.uf-core .ni{color:var(--pc);display:inline-flex;flex:none}
+.uf-core .nm,.csw .nm{flex:1;min-width:0}
+.uf-core .nm b,.csw .nm b{display:block;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.csw .nm small{display:block;color:var(--s);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.uf-core .uf-out{display:none;color:var(--warn);font-size:10.5px}
+.uf-core.out .uf-out{display:block}
+.csw.dis{cursor:not-allowed;opacity:.6}
+.csw .sw input:disabled+span{cursor:not-allowed}
+.dot.x{background:#e0a020}
+.vrow.xu .nm{min-width:0}.vrow.xu .trk{margin-top:4px}

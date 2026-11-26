@@ -36,6 +36,35 @@
   guard incl. concurrent bulk edits, migration of an old DB, sub output), `xray::panel::cdn_tests`,
   `bot::flow_tests::purchases_follow_the_tier_and_upgrades_unlock_the_other_one`.
 
-### Not in Phase 1
-- Admin UI (servers role picker, tier selector, `cdn_address` field) and bot texts for the tiers.
-- A role for an agent-only server (no VPN node yet) — it stays `hybrid` until its VPN part joins.
+## Phase 2 — frontend (done)
+
+### Backend additions for the UI
+- `Role::Gaming` also runs AmneziaWG (gaming tier already had WG + AWG + KANKI MIX).
+- Per-server switches for the agent cores: `access::{agent_off, set_agent_off, server_runs}` (setting `agent_core_off`);
+  Xray (`xray::panel::{runnable,cfg_for}`) and DNS (`dns::panel::cfg_for`) run only where the switch is on.
+- `POST /api/servers/:key/cores` (atomic, role-checked) and `switches` in `GET /api/servers`; `POST /api/servers`
+  sets up Xray / DNS when ticked. `ensure_server` (Xray) / `ensure_exit` (DNS) create entries with nothing typed.
+- Account page: `web_only` strips KANKI MIX from the browser page (rows and data block); `/sub/<code>/v2qr`.
+
+### Admin panel (`assets/panel`)
+- Users: «Edit» opens `userEditModal` (centered window, class `uedit`); the form has the tier selector
+  (V2Ray / Gaming / Combo presets the cores) and one switch per core (Xray is a single switch, no inbound list);
+  a core outside the tier is marked. «Xray users» filter tab on the Users page (`#users`, `goUsers('xray')`).
+- Servers: Cores tab = six switches (`SW_CORES`, `srvCores`) posting to `/cores`; the add window has the same six.
+- Xray: «Xray users» tab (`xrUsersTab`) with per-user configs (`xrUserCfgs`) and the full client config window
+  (`xrClientCfg`: copy, copy link, download); the same `{ }` button in an inbound's user list; inbound form has
+  «آدرس CDN (برای عبور ترافیک از CDN)» (`cdn_address`, hidden for REALITY / Shadowsocks / TCP / mKCP); the
+  short-ID and key buttons use `/api/xray/keys` (`short_ids`).
+
+### Account page (`assets/sub/sub.html`)
+- Volume bar (what is left, orange < 30 %, red < 10 %), days count-down with its bar, status, connections.
+- Cards only for this account's cores: V2Ray apps (sub link copy + QR + every Hysteria2 / Xray config),
+  WireGuard / AmneziaWG (`.conf`, QR, keys per country), Kanki DNS. No KANKI MIX anywhere on the web page.
+
+### Tests added
+- `access_tests::one_switch_per_core_on_each_server` (401/403, bad input, atomic refusal, Xray/DNS off keeps settings),
+  `api::account_page_tests` (KANKI MIX hidden for browsers, kept for the app; v2 QR access).
+
+### Still open
+- A role for an agent-only server (no VPN node yet) stays `hybrid` until its VPN part joins.
+- Bot texts for the tiers.

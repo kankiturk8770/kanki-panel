@@ -885,7 +885,7 @@ fn runnable(app: &App) -> XraySettings {
     // an inbound on a server whose role (gaming) does not run Xray neither runs nor gives links
     let mut allowed: HashMap<String, bool> = HashMap::new();
     s.inbounds.retain(|ib| {
-        let ok = *allowed.entry(ib.server.clone()).or_insert_with(|| crate::access::server_allows(app, &ib.server, "xray"));
+        let ok = *allowed.entry(ib.server.clone()).or_insert_with(|| crate::access::server_runs(app, &ib.server, "xray"));
         ok && ib.enabled && ib_state(ib, t.get(&ib.id).copied().unwrap_or(0)).is_empty()
     });
     s
@@ -893,7 +893,7 @@ fn runnable(app: &App) -> XraySettings {
 
 /// The Xray config of server `sid` and its version, or None when it runs no Xray.
 pub fn cfg_for(app: &App, sid: &str) -> Option<(XrayCfg, String)> {
-    if !crate::access::server_allows(app, sid, "xray") {
+    if !crate::access::server_runs(app, sid, "xray") {
         return None;
     }
     let s = runnable(app);
@@ -1818,6 +1818,21 @@ async fn del_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
     let st = crate::tunnel::panel::step(&app, &id, "xray", "");
     let rid = crate::tunnel::panel::track("xray", &st.name.clone(), vec![st]);
     Json(json!({ "ok": true, "removal": rid })).into_response()
+}
+
+/// Xray on server `sid` from the server's own core switch: an Xray server entry with the address it
+/// reports (nothing to type); one that is already there stays as it is
+pub(crate) fn ensure_server(app: &App, sid: &str) {
+    let mut s = settings(app);
+    if !s.servers.iter().any(|x| x.server == sid) {
+        s.servers.push(XServer { server: sid.to_string(), ..Default::default() });
+        save(app, &s);
+    }
+}
+
+/// Is `sid` one of the Xray servers?
+pub(crate) fn has_server(app: &App, sid: &str) -> bool {
+    settings(app).servers.iter().any(|x| x.server == sid)
 }
 
 /// The server was removed from the panel: its Xray inbounds and its Xray entry go (its agent removes

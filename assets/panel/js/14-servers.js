@@ -189,9 +189,19 @@ function coresOf(s){var n=s.node,i=(n&&n.info)||{},j=s.jobs||{},pt=s.ports||{},o
  if(j.xray_on)out.push(['xray','Xray','g',j.xray?N(j.xray)+' '+t('inbounds'):'']);
  if(j.dns)out.push(['dns','Kanki DNS','g','']);
  return out}
-function srvCores(s){var out=coresOf(s);if(!out.length)return '';
- return '<div class="kxr-sec">'+t('Cores on this server')+'</div><div class="ku-cores">'+out.map(function(c){return '<a href="#'+c[0]+'/servers"><span class="dot '+c[2]+'"></span>'+c[1]+(c[3]?'<small class="ltr">'+esc(String(c[3]))+'</small>':'')+'</a>'}).join('')+'</div>'+
-  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('Each core is set on its own page: tap one to open it.')+'</p>'}
+// (3.64) one switch per core: tick exactly what this server runs. A core that cannot run here (no VPN part, no
+// agent, or not allowed by the server's role) is shown off with the reason; a core switched off keeps its settings.
+var SW_CORES=[['wg','WireGuard'],['awg','AmneziaWG'],['kmix','KANKI MIX'],['dns','Kanki DNS'],['xray','Xray'],['hy2','Hysteria2']];
+function srvCores(s){var sw=(s.switches&&s.switches.cores)||{},live={};coresOf(s).forEach(function(c){live[c[0]]=c});
+ return '<div class="kxr-sec">'+t('Cores on this server')+(s.switches&&s.switches.role&&s.switches.role!='hybrid'?'<small>'+t('Role')+': '+esc(t(s.switches.role))+'</small>':'')+'</div>'+
+  '<div class="core-sw" role="group" aria-label="'+esc(t('Cores on this server'))+'">'+SW_CORES.map(function(c){var x=sw[c[0]]||{can:false,on:false,why:''},l=live[c[0]];
+   return '<label class="csw'+(x.on?' on':'')+(x.can?'':' dis')+'" style="--pc:'+(PCOL[c[0]]||'var(--a)')+'"'+(x.why?' title="'+esc(t(x.why))+'"':'')+'>'+
+    '<span class="nm"><b>'+c[1]+'</b><small>'+(x.can?(l&&l[3]?'<span class="ltr">'+esc(String(l[3]))+'</span>':t(x.on?'On':'Off')):esc(t(x.why||'Not available')))+'</small></span>'+
+    '<span class="sw"><input type="checkbox" data-csw="'+c[0]+'" data-key="'+esc(s.key)+'"'+(x.on?' checked':'')+(x.can||x.on?'':' disabled')+' aria-label="'+esc(c[1])+'"><span></span></span></label>'}).join('')+'</div>'+
+  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('Switched off, a core stops and closes its port; its settings stay for when it is switched on again.')+'</p>'}
+// a core switch was flipped: the panel switches it, the server follows on its next sync
+document.addEventListener('change',function(e){var x=e.target;if(!x||!x.dataset||!x.dataset.csw)return;var b={};b[x.dataset.csw]=x.checked;x.disabled=true;
+ api('POST','/api/servers/'+encodeURIComponent(x.dataset.key)+'/cores',b).then(function(){toast(t('Saved'));load(true)}).catch(function(err){x.checked=!x.checked;x.disabled=false;fail(err)})});
 function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  var st=[];
  if(!s.local)st.push(t('agent')+': <b>'+(a?(a.online?t('Connected'):t('Not connected')):'—')+'</b>');
@@ -301,7 +311,7 @@ window.srvFind=find;
 window.srvUpdate=function(k){api('POST','/api/servers/'+encodeURIComponent(k)+'/update').then(function(r){toast(t('The server takes the new version in a minute')+' (v'+r.version+')');setTimeout(function(){load(true)},60000)}).catch(fail)};
 
 // ---------------------------------------------------------------- add a server (one command)
-var SA_CORES=[['wg','WireGuard'],['awg','AmneziaWG'],['hy2','Hysteria2'],['kmix','KANKI MIX']];
+var SA_CORES=[['wg','WireGuard',1],['awg','AmneziaWG',1],['kmix','KANKI MIX',1],['dns','Kanki DNS',0],['xray','Xray',0],['hy2','Hysteria2',1]];
 window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
  modal(mhead(t('Add server'))+
   '<p class="muted" style="margin:0 0 8px">'+t('Everything is installed on the server (VPN, tunnels, Xray, Kanki DNS) with one command. Off = installed, but no user is sent there (an Iran relay).')+'</p>'+
@@ -311,10 +321,12 @@ window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
   '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_ssl">'+t('Get SSL by itself (Let\'s Encrypt)')+'</label><p class="muted" style="font-size:12px;margin:2px 2px 0">'+t('The domain must point straight at this server (no Cloudflare proxy) and port 80 must be open. Off, or when it fails: a self-signed certificate, the install goes on.')+'</p>'+
   '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_vpn">'+t('Serve VPN users on this server')+'</label>'+
   // the six cores: every one is installed, the ticked ones are switched on when the server joins
-  '<div id="sa_cw"><label class="f">'+t('Cores switched on')+'</label><div class="sa-cores">'+SA_CORES.map(function(c){return '<label class="chk"><input type="checkbox" data-core="'+c[0]+'">'+c[1]+'</label>'}).join('')+'</div>'+
-  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('All are installed; the ticked ones start as soon as the server joins, the rest stay off until you switch them on.')+'</p></div>'+
+  '<div id="sa_cw"><label class="f">'+t('Cores switched on')+'</label><div class="core-sw sa-cores">'+SA_CORES.map(function(c){return '<label class="csw" style="--pc:'+(PCOL[c[0]]||'var(--a)')+'" data-vpn="'+c[2]+'"><span class="nm"><b>'+c[1]+'</b><small>'+t(c[2]?'VPN part':'Server agent')+'</small></span><span class="sw"><input type="checkbox" data-core="'+c[0]+'" aria-label="'+esc(c[1])+'"><span></span></span></label>'}).join('')+'</div>'+
+  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('All are installed; the ticked ones start as soon as the server joins, the rest stay off until you switch them on (Servers › the server › Cores).')+'</p></div>'+
   '<button class="btn" style="width:100%;margin-top:12px" id="sa_go">'+t('Create command')+'</button></div><div id="sa_out"></div>','wide');
- var showCores=function(){$('#sa_cw').style.display=$('#sa_vpn').checked?'':'none'};
+ // without the VPN part only the agent's cores (Xray, Kanki DNS) can be ticked
+ var showCores=function(){var v=$('#sa_vpn').checked;$$('#sa_cw .csw').forEach(function(l){var off=l.dataset.vpn=='1'&&!v,x=$('input',l);l.classList.toggle('dis',off);x.disabled=off;if(off)x.checked=false;l.classList.toggle('on',x.checked)})};
+ $$('#sa_cw input').forEach(function(x){x.addEventListener('change',showCores)});
  var setLoc=function(l){loc=l;$$('#sa_loc button').forEach(function(b){b.classList.toggle('on',b.dataset.l==l)});$('#sa_vpn').checked=l!='iran';$('#sa_ssl').checked=l!='iran';
   // abroad: WireGuard and AmneziaWG ticked
   $$('#sa_cw input').forEach(function(x){x.checked=l!='iran'&&(x.dataset.core=='wg'||x.dataset.core=='awg')});showCores()};

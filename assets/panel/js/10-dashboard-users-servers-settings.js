@@ -108,7 +108,8 @@ function loadUsers(){return Promise.all([api('GET','/api/users'),api('GET','/api
 function ufCount(){var n=(S.filter&&S.filter!='all'?1:0)+(S.pf&&S.pf!='all'?1:0)+(S.sort&&S.sort!='new'?1:0),e=$('#ufn');if(!e)return;e.hidden=!n;e.textContent=N(n)}
 function drawStats(){var o=S.ov;if(!o||!$('#ust'))return;
  var on=S.users?S.users.filter(function(u){return u.online_connections>0||liveOf(u).length>0}).length:o.online;
- var c=[['g',on,'Online','online'],['',Math.max(0,(S.users?S.users.length:o.users)-on),'Offline','offline'],['',o.users,'All','all'],['g',o.active,'Active','active'],['y',o.expired,'Expired','finished'],['r',o.disabled,'Disabled','disabled']];
+ var xr=S.users?S.users.filter(function(u){return hasP(u,'xray')}).length:0;
+ var c=[['g',on,'Online','online'],['',Math.max(0,(S.users?S.users.length:o.users)-on),'Offline','offline'],['',o.users,'All','all'],['g',o.active,'Active','active'],['y',o.expired,'Expired','finished'],['r',o.disabled,'Disabled','disabled'],['x',xr,'Xray users','xray']];
  $('#ust').innerHTML=c.map(function(x){return '<button type="button" aria-pressed="'+(S.filter==x[3])+'" class="uf'+(S.filter==x[3]?' act':'')+'" data-f="'+x[3]+'">'+(x[0]?'<span class="dot '+x[0]+'"></span>':'')+'<span>'+t(x[2])+'</span><b>'+N(x[1]||0)+'</b></button>'}).join('');
  drawLive()}
 // connected right now, by protocol: a count per protocol, a tap filters the list to it
@@ -132,7 +133,7 @@ function filtered(){var q=S.q.trim().toLowerCase(),f=S.filter;
   if(q&&(u.username+' '+u.notes+' '+(u.tg_id||'')).toLowerCase().indexOf(q)<0)return false;
   if(S.pf&&S.pf!='all'&&!hasP(u,S.pf))return false;
   if(S.lv&&!liveOf(u).some(function(c){return c.p==S.lv}))return false;
-  if(f=='online')return u.online_connections>0||liveOf(u).length>0;if(f=='offline')return !(u.online_connections>0||liveOf(u).length>0);if(f!='all')return ustate(u)==f;return true});
+  if(f=='xray')return hasP(u,'xray');if(f=='online')return u.online_connections>0||liveOf(u).length>0;if(f=='offline')return !(u.online_connections>0||liveOf(u).length>0);if(f!='all')return ustate(u)==f;return true});
  out.sort(SORTS[S.sort]||SORTS.new);return out}
 function pruneSel(){var ok={};filtered().forEach(function(u){ok[u.id]=1});Object.keys(S.sel).forEach(function(k){if(!ok[k])delete S.sel[k]})}
 function drawUsers(){var el=$('#ul');if(!el)return;var list=filtered(),pages=Math.max(1,Math.ceil(list.length/S.size));if(S.pg>pages)S.pg=pages;if(S.pg<1)S.pg=1;
@@ -201,7 +202,7 @@ function ufForm(u){var protos=u?u.protocols.split(','):((S.me&&S.me.default_prot
  h+='<div><label class="f">'+t('Connections')+'</label><input type="number" min="0" id="f_conn" value="'+(u?u.max_connections:Math.max(1,+me0.def_conns||1))+'"></div>';
  h+='<div class="full"><div class="qchips" id="qg" style="margin-top:0"><span class="muted">'+t('Quick add volume')+'</span>'+[5,10,20,50,100].map(function(n){return '<button type="button" data-qg="'+n+'">+'+N(n)+' GB</button>'}).join('')+'</div></div>';
  if(!u)h+='<div><label class="f">'+t('Count')+'</label><input type="number" min="1" max="200" id="f_count" value="1"></div><div></div>';
- h+='</div>'+ufServices(protos,un);
+ h+='</div>'+ufServices(protos,un,u?u.tier:'');
  return h+'<input id="f_note" placeholder="'+t('Note')+'" value="'+esc(u?u.notes:'')+'" style="margin-top:8px">'}
 function wireForm(u){$('#f_date').oninput=prevExp;$('#f_time').oninput=prevExp;
  $('#f_inf').onclick=function(){$('#f_date').value='';prevExp()};$('#f_gbinf').onclick=function(){$('#f_gb').value=0};
@@ -209,7 +210,7 @@ function wireForm(u){$('#f_date').oninput=prevExp;$('#f_time').oninput=prevExp;
  $('#qg').onclick=function(e){var b=e.target.closest('[data-qg]');if(b)qGB(+b.dataset.qg,u)};prevExp()}
 function formBody(){var ts=readExp();if(isNaN(ts)){toast(t('Invalid date'),1);return null}
  var pr=$$('.f_pr').filter(function(x){return x.checked}).map(function(x){return x.value}),nd=$$('.f_nd'),ns=nd.filter(function(x){return x.checked}).map(function(x){return x.value});if(ns.length==nd.length)ns=[];
- return {expires_ts:ts,traffic_limit_gb:+$('#f_gb').value||0,max_connections:+$('#f_conn').value||0,protocols:pr,nodes:ns,notes:$('#f_note').value}}
+ return {expires_ts:ts,traffic_limit_gb:+$('#f_gb').value||0,max_connections:+$('#f_conn').value||0,protocols:pr,nodes:ns,notes:$('#f_note').value,tier:ufTier()}}
 function newUser(){modal(mhead(t('New user'))+ufForm(null)+'<button class="btn" style="width:100%;margin-top:12px" id="f_save">'+t('Create')+'</button>','wide');wireForm(null);
  $('#f_save').onclick=function(){var b=formBody();if(!b)return;b.username=$('#f_name').value.trim();if(b.username&&!nameOk(b.username))return toast(t(NAME_ERR),1);b.count=+$('#f_count').value||1;var me=this;me.disabled=true;
   api('POST','/api/users',b).then(function(r){toast(t('Saved'));return loadUsers().then(function(){var u=r&&r.length==1&&findU(r[0].id);if(u)editUser(u.id,'link');else closeModal()})}).catch(function(e){me.disabled=false;fail(e)})}}

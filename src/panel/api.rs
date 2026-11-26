@@ -330,6 +330,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/sub/:code/xjson", get(sub_xray_json))
         .route("/sub/:code/v2", get(sub_v2))
         .route("/sub/:code/xqr/:i", get(sub_xray_qr))
+        .route("/sub/:code/v2qr", get(sub_v2_qr))
         .route("/api/config/:id/:proto", get(config_file))
         .route("/api/config/:id/:proto/:extra", get(config_file_extra))
         .route("/hy2/auth", post(hy2_auth))
@@ -1970,6 +1971,10 @@ fn sub_page_of(app: &App, u: &User, sealed: bool) -> Response {
         if sealed && !main.contains(&"wireguard") && wg_direct_for_app(app, u, &n) {
             main.insert(0, "wireguard");
         }
+        // KANKI MIX is the Kanki app's own core: a browser never sees it (no row, no address)
+        if !sealed {
+            main.retain(|p| *p != "kankimix");
+        }
         let rows: String = main.into_iter().map(|p| proto_row(app, u, &n, p, false)).collect();
         if !rows.is_empty() {
             nodes_html.push_str(&format!(
@@ -1979,7 +1984,7 @@ fn sub_page_of(app: &App, u: &User, sealed: bool) -> Response {
         }
         // the configs through the server's tunnel: its second entry, under its own heading (the app names
         // each config by the last heading before it)
-        let rows: String = twin_protos(app, u, &n).into_iter().map(|p| proto_row(app, u, &n, p, true)).collect();
+        let rows: String = twin_protos(app, u, &n).into_iter().filter(|p| sealed || *p != "kankimix").map(|p| proto_row(app, u, &n, p, true)).collect();
         if !rows.is_empty() {
             nodes_html.push_str(&format!(
                 "<section class=\"node\" data-node=\"{}{}\" data-via=\"tunnel\"><h3>{}<small data-i18n=\"tunnel\"></small></h3>{}</section>",
@@ -2016,7 +2021,10 @@ fn sub_page_of(app: &App, u: &User, sealed: bool) -> Response {
         }
         nodes_html.push_str(&format!("<section class=\"node\" data-node=\"dns\"><h3>Kanki DNS</h3>{}</section>", rows));
     }
-    let data = sub_data(app, u, sealed);
+    let mut data = sub_data(app, u, sealed);
+    if !sealed {
+        web_only(&mut data);
+    }
     let data = serde_json::to_string(&data).unwrap_or_default().replace("</", "<\\/");
     let page = include_str!("../../assets/sub/sub.html")
         .replace("{{TITLE}}", &esc(&u.username))
@@ -2028,6 +2036,35 @@ fn sub_page_of(app: &App, u: &User, sealed: bool) -> Response {
         .replace("{{NODES}}", &nodes_html)
         .replace("{{DATA}}", &data);
     ([(header::CACHE_CONTROL, "no-store")], Html(page)).into_response()
+}
+
+/// The data block of the page a browser gets: KANKI MIX (the Kanki app's own core, read by the app from
+/// its sealed page and `/json`) leaves every server entry, and a server left with nothing goes
+pub(crate) fn web_only(data: &mut Value) {
+    if let Some(list) = data["nodes"].as_array_mut() {
+        for n in list.iter_mut() {
+            if let Some(o) = n.as_object_mut() {
+                o.remove("kmix");
+                o.remove("kmix_tunnel");
+            }
+            if let Some(p) = n["protocols"].as_array_mut() {
+                p.retain(|x| x.as_str() != Some("kankimix"));
+            }
+        }
+        list.retain(|n| n["protocols"].as_array().map(|p| !p.is_empty()).unwrap_or(true));
+    }
+}
+
+/// QR code of the combined subscription link (Hysteria2 + Xray) for v2rayNG / V2Box
+async fn sub_v2_qr(State(app): St, Path(code): Path<String>) -> Response {
+    let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
+    if !(u.has_proto("xray") || u.has_proto("hy2")) {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
+    match util::qr_svg(&v2_sub_link(&app, &u)) {
+        Some(svg) => ([(header::CONTENT_TYPE, "image/svg+xml".to_string()), (header::CACHE_CONTROL, "no-store".to_string())], svg).into_response(),
+        None => (StatusCode::PAYLOAD_TOO_LARGE, "too large for a QR code").into_response(),
+    }
 }
 
 /// QR code of the user's i-th Xray link
@@ -2503,5 +2540,67 @@ mod panel_js_tests {
             let text = std::fs::read_to_string(&p).unwrap();
             assert!(text.ends_with('\n') || p.file_name().unwrap().to_string_lossy().starts_with("18-"), "{:?}", p);
         }
+    }
+}
+
+#[cfg(test)]
+mod account_page_tests {
+    async fn body(r: axum::response::Response) -> String {
+        String::from_utf8(axum::body::to_bytes(r.into_body(), 1 << 22).await.unwrap().to_vec()).unwrap()
+    }
+
+    /// KANKI MIX is the Kanki app's own core: a browser's account page has no row, no address and no data
+    /// of it; the app's sealed page and the app API (`/json`) keep it, and the other cores stay on the page
+    #[tokio::test]
+    async fn the_browser_page_never_shows_kanki_mix() {
+        let app = crate::test_app();
+        let info = r#"{"wg_pub":"Zm9vYmFyYmF6cXV4cXV1eGZvb2JhcmJhenF1eHF1dXg=","wg_port":"51820","awg_pub":"Zm9vYmFyYmF6cXV4cXV1eGZvb2JhcmJhenF1eHF1dXg=","awg_port":"51821","kmix_port":4000}"#;
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,endpoint_mode,info) VALUES('n1','DE','https://127.0.0.1:9','198.51.100.7','t','custom',?1)", &[&info]).unwrap();
+        let u = app.db.create_user("mixer", 10.0, 30, 1, "wg,awg,kmix", "", "", 0).unwrap();
+        let n = app.db.node("n1").unwrap();
+        assert!(crate::kmix::link(&app, &u, &n).is_some(), "the account has a KANKI MIX link to hide");
+        let web = body(super::sub_page_of(&app, &u, false)).await;
+        let app_page = body(super::sub_page_of(&app, &u, true)).await;
+        assert!(!web.contains("data-proto=\"kankimix\"") && !web.contains("/kankimix?") && !web.contains("kanki://"), "browser page leaks KANKI MIX");
+        assert!(web.contains("data-proto=\"amneziawg\""), "the other cores stay");
+        assert!(app_page.contains("data-proto=\"kankimix\"") && app_page.contains("/kankimix?"), "the app's page keeps KANKI MIX");
+        // the data block of the browser page: no KANKI MIX link, no «kankimix» protocol
+        let data = |page: &str| -> serde_json::Value {
+            let a = page.find("<script type=\"application/json\" id=\"data\">").unwrap();
+            let rest = &page[a..];
+            let s = rest.find('>').unwrap() + 1;
+            let e = rest.find("</script>").unwrap();
+            serde_json::from_str(&rest[s..e].replace("<\\/", "</")).unwrap()
+        };
+        let d = data(&web);
+        for n in d["nodes"].as_array().unwrap() {
+            assert!(n.get("kmix").is_none() && n.get("kmix_tunnel").is_none(), "{}", n);
+            assert!(!n["protocols"].as_array().unwrap().iter().any(|p| p == "kankimix"), "{}", n);
+        }
+        assert!(data(&app_page)["nodes"].as_array().unwrap().iter().any(|n| n["kmix"].is_string()));
+        // the app API is untouched
+        assert!(super::sub_data(&app, &u, false)["nodes"].as_array().unwrap().iter().any(|n| n["kmix"].is_string()));
+        // a node left with only KANKI MIX disappears from the browser's data
+        let mut only = serde_json::json!({ "nodes": [{ "id": "a", "protocols": ["kankimix"], "kmix": "kanki://x" }, { "id": "b", "protocols": ["hysteria2", "kankimix"] }] });
+        super::web_only(&mut only);
+        assert_eq!(only["nodes"], serde_json::json!([{ "id": "b", "protocols": ["hysteria2"] }]));
+    }
+
+    /// The QR of the V2Ray subscription link: only for accounts with Xray or Hysteria2, only with a real code
+    #[tokio::test]
+    async fn the_v2_qr_is_only_for_v2ray_accounts() {
+        use tower::ServiceExt;
+        let app = crate::test_app();
+        let v = app.db.create_user("vq", 10.0, 30, 1, "xray,hy2", "", "", 0).unwrap();
+        let g = app.db.create_user("gq", 10.0, 30, 1, "wg", "", "", 0).unwrap();
+        let get = |uri: String| {
+            let app = app.clone();
+            async move { crate::api::master_router(app).oneshot(axum::http::Request::get(uri).body(axum::body::Body::empty()).unwrap()).await.unwrap() }
+        };
+        let r = get(format!("/sub/{}/v2qr", v.sub_code())).await;
+        assert_eq!(r.status(), axum::http::StatusCode::OK);
+        assert_eq!(r.headers()["content-type"], "image/svg+xml");
+        assert_eq!(get(format!("/sub/{}/v2qr", g.sub_code())).await.status(), axum::http::StatusCode::NOT_FOUND);
+        assert_ne!(get(format!("/sub/kanki-{}-{}/v2qr", v.id, g.code)).await.status(), axum::http::StatusCode::OK);
     }
 }

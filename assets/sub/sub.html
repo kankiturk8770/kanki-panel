@@ -40,20 +40,6 @@ button,input{font:inherit;color:inherit}
 .pill:before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
 .pill.warn{border-color:var(--warn);color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,transparent)}
 .pill.bad{border-color:var(--bad);color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,transparent)}
-/* rings */
-.rings{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.rbox{display:flex;flex-direction:column;align-items:center;text-align:center;border:1px solid var(--ln);border-radius:18px;padding:12px 8px;background:var(--in)}
-.rw{position:relative;width:min(132px,100%);aspect-ratio:1}
-.rw svg{width:100%;height:100%;display:block;direction:ltr}
-.rb{fill:none;stroke:rgba(127,127,127,.2);stroke-width:9}
-.rf{fill:none;stroke:url(#gg);stroke-width:9;stroke-linecap:round;stroke-dasharray:0 327;transition:stroke-dasharray 1s cubic-bezier(.2,.8,.2,1)}
-.rf.warn{stroke:var(--warn)}.rf.bad{stroke:var(--bad)}
-.rc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px}
-.rc b{font-size:24px;line-height:1.1;direction:ltr;unicode-bidi:isolate}
-.rc small{color:var(--s);font-size:11px}
-.rl{margin-top:9px;font-weight:700;font-size:13px}
-.rs{color:var(--s);font-size:11px;margin-top:3px;direction:ltr;unicode-bidi:isolate}
-@media(prefers-reduced-motion:reduce){.rf{transition:none}}
 /* stat tiles */
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
 @media(max-width:620px){.stats{grid-template-columns:repeat(2,1fr)}}
@@ -164,11 +150,6 @@ body.light{color-scheme:light}
 .av{width:40px;height:40px;border-radius:13px;font-size:18px}
 .hi h1{font-size:16px}.hi p{font-size:11px;margin-top:1px}
 .pill{padding:3px 9px;font-size:11px}
-.rings{gap:8px}
-.rbox{padding:9px 6px;border-radius:15px}
-.rw{width:min(86px,100%)}
-.rc b{font-size:17px}.rc small{font-size:10px}
-.rl{margin-top:6px;font-size:12px}.rs{font-size:10px}
 .stats{gap:6px;margin-bottom:9px}
 .stat{padding:7px 6px;border-radius:13px}
 .stat small{font-size:10px;margin-bottom:2px}.stat b{font-size:13px}
@@ -195,6 +176,37 @@ html[lang=en] body{font-weight:500;letter-spacing:.012em}
 html[lang=en] small,html[lang=en] .muted,html[lang=en] .sub{font-weight:500}
 .ltr,code,pre,[dir=ltr]{font-weight:500;letter-spacing:.012em}
 b .ltr,.ltr b,b.ltr,strong.ltr{font-weight:700}
+/* ---- 3.64: the account at a glance (volume bar, days left) and one card per core */
+.hs{display:flex;flex-direction:column;align-items:flex-end;gap:6px;flex:none}
+.hc{font-size:11px;padding:4px 9px}
+.usage .uh,.days{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.usage small,.days small{display:block;color:var(--s);font-size:11px}
+.usage .uh b{display:block;font-size:22px;line-height:1.25;direction:ltr;unicode-bidi:isolate;text-align:start}
+.usage .ur{text-align:end}.usage .ur b{font-size:13px}
+.bar{position:relative;height:12px;border-radius:99px;background:rgba(127,127,127,.18);overflow:hidden;margin-top:10px}
+.bar.thin{height:7px;flex-basis:100%;margin-top:4px}
+.bar i{position:absolute;inset-block:0;inset-inline-start:0;width:0;border-radius:inherit;background:linear-gradient(90deg,var(--gd),var(--g),var(--gl));transition:width .9s cubic-bezier(.2,.8,.2,1)}
+.bar.hot i{background:linear-gradient(90deg,#c0392b,var(--bad))}.bar.mid i{background:linear-gradient(90deg,#b86e00,var(--warn))}
+.bl{display:flex;justify-content:space-between;gap:8px;margin-top:6px;font-size:11.5px;color:var(--s)}
+.days .dn{display:flex;align-items:baseline;gap:6px}.days .dn b{font-size:30px;line-height:1;color:var(--g);direction:ltr;unicode-bidi:isolate}
+.days .dn small{font-size:13px;color:var(--t)}.days .dd{text-align:end}.days .dd b{font-size:13px;direction:ltr;unicode-bidi:isolate}
+.stats.two{grid-template-columns:1fr 1fr}
+@media(prefers-reduced-motion:reduce){.bar i{transition:none}}
+.subl{display:flex;gap:6px;margin-top:8px}
+.subl input{flex:1;min-width:0;direction:ltr;text-align:left;background:var(--in);border:1px solid color-mix(in srgb,var(--pc) 35%,transparent);border-radius:12px;padding:8px 10px;font-size:11.5px;color:var(--s)}
+.subl .btn,.subl .b2{flex:none;padding:8px 12px;font-size:12px}
+.pc .subl .btn{background:var(--pc);color:#fff}
+.pc .subl .b2,.xrow .b2,.krow .b2{color:var(--pc);border-color:color-mix(in srgb,var(--pc) 50%,transparent);background:color-mix(in srgb,var(--pc) 10%,transparent)}
+.lsec{margin:12px 2px 2px;font-size:11.5px;font-weight:800;color:var(--pc)}
+.xrow,.krow{display:flex;align-items:center;gap:8px;border:1px solid color-mix(in srgb,var(--pc) 28%,transparent);border-radius:14px;padding:7px 8px;margin-top:6px;background:var(--in)}
+.xrow .xn2,.krow .cn{flex:1;min-width:0;margin:0}
+.xrow .xn2 b{display:block;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xrow .xn2 small{display:block;color:var(--s);font-size:10.5px;direction:ltr;unicode-bidi:isolate;text-align:start}
+.xrow .xb,.krow .kb{display:flex;gap:5px;flex:none}
+.xrow .b2,.xrow .btn,.krow .b2,.krow .btn{padding:6px 9px;font-size:11.5px;border-radius:10px}
+.krow .btn{background:var(--pc);color:#fff;box-shadow:0 0 10px color-mix(in srgb,var(--pc) 40%,transparent)}
+.krow small.via{color:var(--s);font-size:10.5px;font-weight:400;margin-inline-start:4px}
+@media(max-width:420px){.xrow,.krow{flex-wrap:wrap}.xrow .xb,.krow .kb{width:100%}.xrow .xb>*,.krow .kb>*{flex:1}}
 </style>
 </head>
 <body>
@@ -208,39 +220,25 @@ b .ltr,.ltr b,b.ltr,strong.ltr{font-weight:700}
   <section class="card hero">
     <div class="av" id="av">K</div>
     <div class="hi"><h1 id="un">{{TITLE}}</h1><p data-i18n="ready">Your VPN subscription is ready</p></div>
-    <span class="pill" id="st">{{STATUS}}</span>
+    <div class="hs"><span class="pill" id="st">{{STATUS}}</span><button class="chip hc" id="cpu" data-act="copy" data-i18n="copy_page">Copy page link</button></div>
   </section>
 
-  <section class="card">
-    <div class="rings">
-      <div class="rbox">
-        <div class="rw"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="rb" cx="60" cy="60" r="52"/><circle class="rf" id="f_data" cx="60" cy="60" r="52" transform="rotate(-90 60 60)"/></svg>
-          <div class="rc"><b id="b_left">—</b><small id="u_left"></small></div></div>
-        <div class="rl" data-i18n="left_data">Data remaining</div>
-        <div class="rs" id="b_data"></div>
-      </div>
-      <div class="rbox">
-        <div class="rw"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="rb" cx="60" cy="60" r="52"/><circle class="rf" id="f_time" cx="60" cy="60" r="52" transform="rotate(-90 60 60)"/></svg>
-          <div class="rc"><b id="b_time">—</b><small id="u_time"></small></div></div>
-        <div class="rl" data-i18n="left_time">Time remaining</div>
-        <div class="rs" id="b_exp"></div>
-      </div>
-    </div>
+  <section class="card usage" aria-labelledby="ul_h">
+    <div class="uh"><div><small id="ul_h" data-i18n="left_data">Data remaining</small><b id="b_left">—</b></div><div class="ur"><small data-i18n="used">Used</small><b id="b_data">—</b></div></div>
+    <div class="bar" id="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-labelledby="ul_h"><i id="bar_f"></i></div>
+    <div class="bl"><span id="p_used"></span><span id="p_left"></span></div>
   </section>
 
-  <div class="stats">
-    <div class="stat"><small data-i18n="used">Used</small><b id="s_used">—</b></div>
-    <div class="stat"><small data-i18n="exp_date">Expiry</small><b id="s_exp">—</b></div>
+  <section class="card days" aria-labelledby="dl_h">
+    <div class="dn"><b id="b_time">—</b><small id="u_time"></small></div>
+    <div class="dd"><small id="dl_h" data-i18n="left_time">Time remaining</small><b id="b_exp">—</b></div>
+    <div class="bar thin" id="tbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-labelledby="dl_h"><i id="tbar_f"></i></div>
+  </section>
+
+  <div class="stats two">
     <div class="stat"><small data-i18n="conns">Connections</small><b id="s_conn">—</b></div>
     <div class="stat"><small data-i18n="last_seen">Last connection</small><b id="s_seen">—</b></div>
   </div>
-
-  <section class="card linkc">
-    <b data-i18n="sub_link">Subscription link</b>
-    <div class="lrow"><input id="subu" readonly aria-label="subscription link"><button class="btn" id="cpu" data-act="copy" data-i18n="copy">Copy</button></div>
-    <div class="lrow"><input id="rawu" readonly aria-label="raw subscription"><button class="b2" id="cpr" data-act="copy" data-i18n="copy">Copy</button></div>
-    <small class="hint" data-i18n="raw_hint">Second link is for v2rayNG / Hiddify</small>
-  </section>
 
   <section class="card appc" id="apps" hidden>
     <div class="ah"><div class="aico">K</div><div><b><span data-i18n="app_title">Kanki VPN app</span> <span id="a_ver" class="aver"></span></b><small data-i18n="app_sub">Pick the version for your phone, then sign in with your subscription code</small></div></div>
@@ -265,8 +263,8 @@ b .ltr,.ltr b,b.ltr,strong.ltr{font-weight:700}
 (function(){
 "use strict";
 var D=JSON.parse(document.getElementById('data').textContent);
-var T={fa:{vpn_sub:'اشتراک VPN',ready:'اشتراک VPN شما آماده استفاده است',left_data:'حجم باقی‌مانده',used:'مصرف‌شده',conns:'اتصال همزمان',last_seen:'آخرین اتصال',exp_date:'تاریخ انقضا',left_time:'زمان باقی‌مانده',your_configs:'کانفیگ‌های شما',dl_conf:'دانلود کانفیگ',show_info:'نمایش اطلاعات',qr:'دانلود QR Code',get_uri:'دریافت URI',copy_uri:'کپی URI',main_server:'سرور اصلی',node:'نود',tunnel:'از راه تانل ایران',unlimited:'نامحدود',expired:'منقضی',never:'هنوز وصل نشده',days:'روز',hours:'ساعت',s_ago:'ثانیه پیش',m_ago:'دقیقه پیش',h_ago:'ساعت پیش',Active:'فعال',Disabled:'غیرفعال',Expired:'منقضی',Limited:'اتمام حجم',copied:'کپی شد',copy:'کپی',no_cfg:'هنوز کانفیگی برای شما فعال نشده',loading:'در حال دریافت…',sub_link:'لینک اشتراک',raw_hint:'لینک دوم برای v2rayNG و Hiddify است',help:'راهنما و پشتیبانی',help_sub:'اپ را نصب کن یا با پشتیبانی در تماس باش',get_app:'دانلود اپ',support:'پشتیبانی',of:'از',c_tunnel:'تانل',c_direct:'مستقیم',dl_s:'دانلود',qr_s:'QR',copy_s:'کپی',wg_sub:'همه از راه تانل',awg_sub:'تانل یا مستقیم؛ هرکدوم بهتر جواب داد',hy_sub:'از راه تانل · کشورهای فعال',xr_sub:'برای v2rayNG و V2Box؛ همه یکجا میاد',copy_all:'کپی همه‌ی کانفیگ‌ها',copy_sub:'کپی لینک ساب',cfgs:'کانفیگ',v2_sub:'برای v2rayNG، V2Box و Hiddify',v2_hint:'لینک اشتراک ترکیبی شامل کانفیگ‌های Xray و Hysteria',all_hint:'همه‌ی کانفیگ‌ها یکجا: «لینک دوم» بالای صفحه رو کپی کن و توی V2Box، v2rayNG یا Hiddify به‌عنوان اشتراک اضافه کن.',km_sub:'پروتکل اختصاصی کانکی',km_txt:'مخصوص گیم و پینگ کم، با کمترین لگ. فقط داخل اپ Kanki VPN کار می‌کنه و کانفیگ‌هاش خودکار میاد: اپ رو باز کن و از دکمه‌ی 🔗 بالای صفحه «بروزرسانی» رو بزن.',app_title:'اپ Kanki VPN',app_sub:'نسخه‌ی گوشی‌ات رو بگیر و با کد اشتراکت وارد شو',dl:'دانلود',rec:'پیشنهادی',a_arm64:'گوشی‌های جدید (۶۴ بیتی)',h_arm64:'بیشتر گوشی‌های امروزی؛ اگر مطمئن نیستی همین رو بگیر',a_armv7:'گوشی‌های قدیمی (۳۲ بیتی)',h_armv7:'اگه نسخه‌ی ۶۴ بیتی نصب نشد، این رو بگیر',a_universal:'همه‌ی گوشی‌ها',h_universal:'روی هر گوشی نصب می‌شه، فقط حجمش بیشتره',a_x86_64:'شبیه‌ساز اندروید (x86)',h_x86_64:'برای شبیه‌ساز اندروید روی کامپیوتر',app_only:'فقط داخل اپ Kanki VPN · اپ رو باز کن و «بروزرسانی» رو بزن'},
-en:{vpn_sub:'VPN Subscription',ready:'Your VPN subscription is ready',left_data:'Data remaining',used:'Used',conns:'Connections',last_seen:'Last connection',exp_date:'Expiry',left_time:'Time remaining',your_configs:'Your configs',dl_conf:'Download config',show_info:'Show info',qr:'QR Code',get_uri:'Get URI',copy_uri:'Copy URI',main_server:'Main server',node:'Node',tunnel:'Through the Iran tunnel',unlimited:'Unlimited',expired:'Expired',never:'Never',days:'days',hours:'hours',s_ago:'s ago',m_ago:'min ago',h_ago:'h ago',Active:'Active',Disabled:'Disabled',Expired:'Expired',Limited:'Out of data',copied:'Copied',copy:'Copy',no_cfg:'No configs are active for you yet',loading:'Loading…',sub_link:'Subscription link',raw_hint:'Second link is for v2rayNG / Hiddify',help:'Help',help_sub:'Install the app or contact support',get_app:'Get the app',support:'Support',of:'of',c_tunnel:'Tunnel',c_direct:'Direct',dl_s:'Download',qr_s:'QR',copy_s:'Copy',wg_sub:'All through the tunnel',awg_sub:'Tunnel or direct, whichever works better',hy_sub:'Through the tunnel · these countries',xr_sub:'For v2rayNG and V2Box, all at once',copy_all:'Copy all configs',copy_sub:'Copy sub link',cfgs:'configs',v2_sub:'For v2rayNG, V2Box and Hiddify',v2_hint:'Combined subscription link with the Xray and Hysteria configs',all_hint:'Every config at once: copy the second link at the top and add it as a subscription in V2Box, v2rayNG or Hiddify.',km_sub:'Kanki’s own protocol',km_txt:'Made for games and low ping. It works only in the Kanki VPN app and its configs come by themselves: open the app and tap Refresh (🔗 at the top).',app_title:'Kanki VPN app',app_sub:'Pick the version for your phone, then sign in with your subscription code',dl:'Download',rec:'Recommended',a_arm64:'New phones (64-bit)',h_arm64:'Most phones today; take this one if unsure',a_armv7:'Older phones (32-bit)',h_armv7:'If the 64-bit one does not install, take this one',a_universal:'Every phone',h_universal:'Installs on any phone, only bigger',a_x86_64:'Android emulator (x86)',h_x86_64:'For an Android emulator on a computer',app_only:'Only in the Kanki VPN app · open the app and tap Refresh'}};
+var T={fa:{vpn_sub:'اشتراک VPN',ready:'اشتراک VPN شما آماده استفاده است',left_data:'حجم باقی‌مانده',used:'مصرف‌شده',conns:'اتصال همزمان',last_seen:'آخرین اتصال',exp_date:'تاریخ انقضا',left_time:'زمان باقی‌مانده',your_configs:'کانفیگ‌های شما',dl_conf:'دانلود کانفیگ',show_info:'نمایش اطلاعات',qr:'دانلود QR Code',get_uri:'دریافت URI',copy_uri:'کپی URI',main_server:'سرور اصلی',node:'نود',tunnel:'از راه تانل ایران',unlimited:'نامحدود',expired:'منقضی',never:'هنوز وصل نشده',days:'روز',hours:'ساعت',s_ago:'ثانیه پیش',m_ago:'دقیقه پیش',h_ago:'ساعت پیش',Active:'فعال',Disabled:'غیرفعال',Expired:'منقضی',Limited:'اتمام حجم',copied:'کپی شد',copy:'کپی',no_cfg:'هنوز کانفیگی برای شما فعال نشده',loading:'در حال دریافت…',sub_link:'لینک اشتراک',raw_hint:'لینک دوم برای v2rayNG و Hiddify است',help:'راهنما و پشتیبانی',help_sub:'اپ را نصب کن یا با پشتیبانی در تماس باش',get_app:'دانلود اپ',support:'پشتیبانی',of:'از',c_tunnel:'تانل',c_direct:'مستقیم',dl_s:'دانلود',qr_s:'QR',copy_s:'کپی',wg_sub:'همه از راه تانل',awg_sub:'تانل یا مستقیم؛ هرکدوم بهتر جواب داد',hy_sub:'از راه تانل · کشورهای فعال',xr_sub:'برای v2rayNG و V2Box؛ همه یکجا میاد',copy_all:'کپی همه‌ی کانفیگ‌ها',copy_sub:'کپی لینک ساب',cfgs:'کانفیگ',v2_sub:'برای v2rayNG، V2Box و Hiddify',v2_hint:'لینک اشتراک ترکیبی شامل کانفیگ‌های Xray و Hysteria',all_hint:'همه‌ی کانفیگ‌ها یکجا: «لینک دوم» بالای صفحه رو کپی کن و توی V2Box، v2rayNG یا Hiddify به‌عنوان اشتراک اضافه کن.',km_sub:'پروتکل اختصاصی کانکی',km_txt:'مخصوص گیم و پینگ کم، با کمترین لگ. فقط داخل اپ Kanki VPN کار می‌کنه و کانفیگ‌هاش خودکار میاد: اپ رو باز کن و از دکمه‌ی 🔗 بالای صفحه «بروزرسانی» رو بزن.',app_title:'اپ Kanki VPN',app_sub:'نسخه‌ی گوشی‌ات رو بگیر و با کد اشتراکت وارد شو',dl:'دانلود',rec:'پیشنهادی',a_arm64:'گوشی‌های جدید (۶۴ بیتی)',h_arm64:'بیشتر گوشی‌های امروزی؛ اگر مطمئن نیستی همین رو بگیر',a_armv7:'گوشی‌های قدیمی (۳۲ بیتی)',h_armv7:'اگه نسخه‌ی ۶۴ بیتی نصب نشد، این رو بگیر',a_universal:'همه‌ی گوشی‌ها',h_universal:'روی هر گوشی نصب می‌شه، فقط حجمش بیشتره',a_x86_64:'شبیه‌ساز اندروید (x86)',h_x86_64:'برای شبیه‌ساز اندروید روی کامپیوتر',app_only:'فقط داخل اپ Kanki VPN · اپ رو باز کن و «بروزرسانی» رو بزن',copy_page:'کپی لینک صفحه',used_s:'مصرف شده',left_s:'باقی‌مانده',conf_s:'فایل ‎.conf',keys_s:'کلیدها',v2_title:'اپ‌های V2Ray'},
+en:{vpn_sub:'VPN Subscription',ready:'Your VPN subscription is ready',left_data:'Data remaining',used:'Used',conns:'Connections',last_seen:'Last connection',exp_date:'Expiry',left_time:'Time remaining',your_configs:'Your configs',dl_conf:'Download config',show_info:'Show info',qr:'QR Code',get_uri:'Get URI',copy_uri:'Copy URI',main_server:'Main server',node:'Node',tunnel:'Through the Iran tunnel',unlimited:'Unlimited',expired:'Expired',never:'Never',days:'days',hours:'hours',s_ago:'s ago',m_ago:'min ago',h_ago:'h ago',Active:'Active',Disabled:'Disabled',Expired:'Expired',Limited:'Out of data',copied:'Copied',copy:'Copy',no_cfg:'No configs are active for you yet',loading:'Loading…',sub_link:'Subscription link',raw_hint:'Second link is for v2rayNG / Hiddify',help:'Help',help_sub:'Install the app or contact support',get_app:'Get the app',support:'Support',of:'of',c_tunnel:'Tunnel',c_direct:'Direct',dl_s:'Download',qr_s:'QR',copy_s:'Copy',wg_sub:'All through the tunnel',awg_sub:'Tunnel or direct, whichever works better',hy_sub:'Through the tunnel · these countries',xr_sub:'For v2rayNG and V2Box, all at once',copy_all:'Copy all configs',copy_sub:'Copy sub link',cfgs:'configs',v2_sub:'For v2rayNG, V2Box and Hiddify',v2_hint:'Combined subscription link with the Xray and Hysteria configs',all_hint:'Every config at once: copy the second link at the top and add it as a subscription in V2Box, v2rayNG or Hiddify.',km_sub:'Kanki’s own protocol',km_txt:'Made for games and low ping. It works only in the Kanki VPN app and its configs come by themselves: open the app and tap Refresh (🔗 at the top).',app_title:'Kanki VPN app',app_sub:'Pick the version for your phone, then sign in with your subscription code',dl:'Download',rec:'Recommended',a_arm64:'New phones (64-bit)',h_arm64:'Most phones today; take this one if unsure',a_armv7:'Older phones (32-bit)',h_armv7:'If the 64-bit one does not install, take this one',a_universal:'Every phone',h_universal:'Installs on any phone, only bigger',a_x86_64:'Android emulator (x86)',h_x86_64:'For an Android emulator on a computer',app_only:'Only in the Kanki VPN app · open the app and tap Refresh',copy_page:'Copy page link',used_s:'used',left_s:'left',conf_s:'.conf file',keys_s:'Keys',v2_title:'V2Ray apps'}};
 // browser storage can be closed (private mode, blocked site data): the page works without it
 function lsGet(k){try{return localStorage.getItem(k)}catch(e){return null}}
 function lsSet(k,v){try{localStorage.setItem(k,v)}catch(e){}}
@@ -287,10 +285,10 @@ function fmt(ts,time){var d=new Date(ts*1000),s;
 function ago(ts){var s=Math.max(0,Math.floor(Date.now()/1000-ts));
  if(s<60)return N(s)+' '+t('s_ago');if(s<3600)return N(Math.floor(s/60))+' '+t('m_ago');if(s<86400)return N(Math.floor(s/3600))+' '+t('h_ago');return fmt(ts)}
 function gb(x){return N((x>=100?x.toFixed(0):x.toFixed(2))+' GB')}
-// ---- ring: frac = 0..1 of the circle that is filled
-var CIRC=2*Math.PI*52;
-function ring(id,frac){var e=$(id);frac=Math.max(0,Math.min(1,frac));
- e.style.strokeDasharray=(CIRC*frac).toFixed(1)+' '+CIRC.toFixed(1);e.setAttribute('class','rf'+(frac<.05?' bad':frac<.15?' warn':''))}
+// ---- bars: frac = 0..1 of the bar that is filled (what is left); orange under 30%, red under 10%
+function bar(id,frac){var e=$(id),f=$(id+'_f');frac=Math.max(0,Math.min(1,frac));
+ f.style.width=(frac*100).toFixed(1)+'%';e.setAttribute('aria-valuenow',Math.round(frac*100));
+ e.className='bar'+(e.classList.contains('thin')?' thin':'')+(frac<=.1?' hot':frac<=.3?' mid':'')}
 var fr={data:0,time:0},first=true;
 function logoOk(x){return /^data:image\/(png|jpeg|webp|gif|svg\+xml);base64,[A-Za-z0-9+\/=]+$/.test(x||'')}
 function render(){
@@ -302,29 +300,26 @@ function render(){
  $('av').textContent=(D.username||'K').charAt(0).toUpperCase();
  // status pill: green = active, orange = out of data / expired, red = disabled
  var st=$('st');st.textContent=t(D.status);st.className='pill'+(D.active?'':(D.status=='Disabled'?' bad':' warn'));
- // data ring
- var unl=!(D.limit_gb>0),left=unl?0:Math.max(0,D.limit_gb-D.used_gb);
- $('b_left').textContent=unl?'∞':N((left>=100?left.toFixed(0):left.toFixed(1)));
- $('u_left').textContent=unl?t('unlimited'):'GB';
+ // volume: a bar of what is used, the rest written beside it
+ var unl=!(D.limit_gb>0),left=unl?0:Math.max(0,D.limit_gb-D.used_gb),usedF=unl?0:Math.min(1,D.used_gb/D.limit_gb);
+ $('b_left').textContent=unl?t('unlimited'):gb(left);
  $('b_data').textContent=gb(D.used_gb)+' / '+(unl?'∞':gb(D.limit_gb));
- fr.data=unl?1:left/D.limit_gb;
- // time ring
+ $('p_used').textContent=unl?gb(D.used_gb)+' '+t('used_s'):N(Math.round(usedF*100))+'% '+t('used_s');
+ $('p_left').textContent=unl?'∞':N(Math.round((1-usedF)*100))+'% '+t('left_s');
+ fr.data=unl?1:1-usedF;
+ // days: the count down, and a bar of the time that is left
  var now=Date.now()/1000,exp=D.expires_ts;
  if(exp>0){var s=exp-now;
   if(s<=0){$('b_time').textContent=N(0);$('u_time').textContent=t('expired');fr.time=0}
   else{var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),span=exp-(D.created_ts||now-30*86400);if(span<=0)span=30*86400;
-   $('b_time').textContent=N(d>0?d:h);$('u_time').textContent=d>0?t('days'):t('hours');fr.time=s/span}
+   $('b_time').textContent=N(d>0?d:h);$('u_time').textContent=(d>0?t('days'):t('hours'))+' '+t('left_s');fr.time=Math.min(1,s/span)}
   $('b_exp').textContent=fmt(exp,true)}
- else{$('b_time').textContent='∞';$('u_time').textContent=t('unlimited');$('b_exp').textContent='';fr.time=1}
- if(!first){ring('f_data',fr.data);ring('f_time',fr.time)}
- // tiles
- $('s_used').textContent=gb(D.used_gb);
- $('s_exp').textContent=exp>0?fmt(exp):'∞';
+ else{$('b_time').textContent='∞';$('u_time').textContent=t('unlimited');$('b_exp').textContent='∞';fr.time=1}
+ if(!first){bar('bar',fr.data);bar('tbar',fr.time)}
  $('s_conn').textContent=N(D.online)+' / '+(D.max_conn>0?N(D.max_conn):'∞');
  $('s_seen').textContent=D.last_seen_ts>0?ago(D.last_seen_ts):t('never');
- // links
- var base=(D.sub_base||location.origin)+'/sub/'+D.sub;
- $('subu').value=base;$('cpu').dataset.text=base;$('rawu').value=base+'/raw';$('cpr').dataset.text=base+'/raw';
+ // this page's own link (the Kanki app signs in with it)
+ $('cpu').dataset.text=(D.sub_base||location.origin)+'/sub/'+D.sub;
  $('ver').textContent=pn+' v'+D.version;
  var nodes=$('nodes');nodes.querySelectorAll('.node').forEach(function(n){if(!n.querySelector('.row'))n.remove()});
  if(!nodes.querySelector('.node'))nodes.innerHTML='<div class="card empty">'+t('no_cfg')+'</div>';
@@ -332,58 +327,56 @@ function render(){
  helpLinks();
  appFiles();
 }
-// ---- configs by protocol. The server's sections (#nodes) stay in the page as they are, the Kanki app
-// reads them; people see the same buttons grouped: one card per protocol, a row per country, the
-// configs through the tunnel and the direct ones side by side. KANKI MIX is one card (app only).
+// ---- configs by core. The server's sections (#nodes) stay in the page as they are (the Kanki app reads
+// them); people see one card per core this account has: V2Ray apps (the subscription link, its QR and
+// every Hysteria2 / Xray config), WireGuard and AmneziaWG (a .conf, a QR and the keys per country),
+// Kanki DNS. KANKI MIX is the Kanki app's own core and never shows here.
 function cfgView(){var box=$('cfg'),src=$('nodes');box.innerHTML='';
  var NB={};(D.nodes||[]).forEach(function(n){NB[n.id]=n});
  var G={},order=[],rows=0;
  src.querySelectorAll('.node').forEach(function(sec){var id=sec.dataset.node||'';if(id=='xray'||id=='dns')return;
   var info=NB[id]||{},base=info.parent||id.replace(/@tunnel$/,'');if(order.indexOf(base)<0)order.push(base);
-  sec.querySelectorAll('.row.proto').forEach(function(r){var p=r.dataset.proto,acts=r.querySelector('.acts');if(!acts)return;
+  sec.querySelectorAll('.row.proto').forEach(function(r){var p=r.dataset.proto,acts=r.querySelector('.acts');if(!acts||p=='kankimix')return;
    var via=(info.via_proto&&info.via_proto[p])||(sec.dataset.via=='tunnel'?'tunnel':'direct');
    G[p]=G[p]||{};G[p][base]=G[p][base]||{};G[p][base][via]=acts;rows++})});
- if(!rows&&!src.querySelector('[data-node=xray],[data-node=dns]'))return;
+ var xs=src.querySelector('[data-node=xray]'),ds=src.querySelector('[data-node=dns]');
+ if(!rows&&!xs&&!ds){box.innerHTML='<div class="card empty">'+t('no_cfg')+'</div>';src.style.display='none';return}
  // a server's flag and country (where its traffic really leaves), else the name the panel gives it
  var where=function(base){var n=NB[base]||{},cc=String(n.exit_cc||'').toUpperCase(),nm='',ok=/^[A-Z]{2}$/.test(cc);
   if(ok){nm=(L=='fa'&&{GB:'انگلیس',US:'آمریکا',AE:'امارات'}[cc])||'';if(!nm)try{nm=new Intl.DisplayNames([L],{type:'region'}).of(cc)}catch(e){nm=cc}}
   return {fl:ok?String.fromCodePoint(127397+cc.charCodeAt(0),127397+cc.charCodeAt(1)):'🌐',nm:nm||n.name||base,city:nm?n.exit_city||'':''}};
- var place=function(base){var w=where(base);
-  return '<div class="cn"><span class="fl">'+w.fl+'</span><span>'+esc(w.nm)+'</span>'+(w.city?'<small>'+esc(w.city)+'</small>':'')+'</div>'};
- // the buttons of one config, short: download / QR (WireGuard, AmneziaWG), copy / QR (Hysteria2)
- var cell=function(acts,p){if(!acts)return '<div class="cell none">—</div>';var h='';
-  var dl=acts.querySelector('a.btn'),cp=acts.querySelector('[data-act=copy]'),qr=acts.querySelector('[data-act=qr]');
-  if(dl)h+='<a class="btn" href="'+esc(dl.getAttribute('href'))+'">⬇ '+t('dl_s')+'</a>';
-  if(cp)h+='<button class="b2" data-act="copy" data-text="'+esc(cp.dataset.text)+'">'+t('copy_s')+'</button>';
-  if(qr)h+='<button class="b2" data-act="qr" data-url="'+esc(qr.dataset.url)+'">'+t('qr_s')+'</button>';
-  return '<div class="cell">'+(h||'—')+'</div>'};
- var head=function(p,l,title,subt){return '<div class="pch"><i class="pl">'+l+'</i><div><b>'+title+'</b><small>'+subt+'</small></div></div>'};
- var card=function(p,l,title,subt){var g=G[p];if(!g)return '';var bases=order.filter(function(b){return g[b]});
-  var two=bases.some(function(b){return g[b].tunnel})&&bases.some(function(b){return g[b].direct});
-  var h=head(p,l,title,subt);
-  if(two){h+='<div class="cols"><span>'+t('c_tunnel')+'</span><span>'+t('c_direct')+'</span></div>';
-   bases.forEach(function(b){h+='<div class="crow">'+place(b)+'<div class="cells">'+cell(g[b].tunnel,p)+cell(g[b].direct,p)+'</div></div>'})}
-  else bases.forEach(function(b){var a=g[b].tunnel||g[b].direct;h+='<div class="crow inline">'+place(b)+cell(a,p)+'</div>'});
+ var place=function(base,via){var w=where(base);
+  return '<div class="cn"><span class="fl">'+w.fl+'</span><span>'+esc(w.nm)+'</span>'+(w.city?'<small>'+esc(w.city)+'</small>':'')+(via?'<small class="via">'+t(via=='tunnel'?'c_tunnel':'c_direct')+'</small>':'')+'</div>'};
+ var head=function(l,title,subt){return '<div class="pch"><i class="pl">'+l+'</i><div><b>'+title+'</b><small>'+subt+'</small></div></div>'};
+ // WireGuard / AmneziaWG: per country (and per way in: tunnel / direct) a .conf, its QR and the keys
+ var keyCard=function(p,l,title,subt){var g=G[p];if(!g)return '';var h=head(l,title,subt);
+  order.forEach(function(b){var c=g[b];if(!c)return;['tunnel','direct'].forEach(function(via){var a=c[via];if(!a)return;
+   var dl=a.querySelector('a.btn'),qr=a.querySelector('[data-act=qr]'),inf=a.querySelector('[data-act=info]'),uri=a.querySelector('[data-act=uri]');
+   h+='<div class="krow">'+place(b,c.tunnel&&c.direct?via:'')+'<div class="kb">'+
+    (dl?'<a class="btn" href="'+esc(dl.getAttribute('href'))+'" download>⬇ '+t('conf_s')+'</a>':'')+
+    (qr?'<button class="b2" data-act="qr" data-url="'+esc(qr.dataset.url)+'">'+t('qr_s')+'</button>':'')+
+    (inf?'<button class="b2" data-act="info" data-url="'+esc(inf.dataset.url)+'">🔑 '+t('keys_s')+'</button>':'')+
+    (uri?'<button class="b2" data-act="uri" data-url="'+esc(uri.dataset.url)+'">URI</button>':'')+'</div></div>'})});
   return '<section class="pc" data-p="'+p+'">'+h+'</section>'};
- var html=card('wireguard','W','WireGuard',t('wg_sub'))+card('amneziawg','A','AmneziaWG',t('awg_sub'));
- var chips=function(bs){return '<div class="kfl">'+bs.map(function(b){var w=where(b);return '<span>'+w.fl+' '+esc(w.nm)+'</span>'}).join('')+'</div>'};
- // Hysteria2 + Xray in one card (V2Ray apps read both): Hysteria2 one config per country, the one through
- // the tunnel (a server without a tunnel: its own), as flags; one button copies every link of both, one
- // per line (v2rayNG imports them at once); the yellow one copies the combined subscription link
- var hb=[],hl=[],xl=[],xs=src.querySelector('[data-node=xray]');
- if(G.hysteria2)order.forEach(function(b){var g=G.hysteria2[b],a=g&&(g.tunnel||g.direct),c=a&&a.querySelector('[data-act=copy]');if(c){hb.push(b);hl.push(c.dataset.text)}});
- if(xs)xl=[].map.call(xs.querySelectorAll('.row.proto [data-act=copy]'),function(c){return c.dataset.text});
- if(hl.length||xl.length){var tags=(hl.length?'<span class="tg">Hysteria2 · '+N(hl.length)+'</span>':'')+(xl.length?'<span class="tg">Xray · '+N(xl.length)+'</span>':'');
-  html+='<section class="pc" data-p="v2">'+head('v2','V','Hysteria2 + Xray',t('v2_sub'))+'<div class="tgs">'+tags+'</div>'+(hb.length?chips(hb):'')+
-   '<div class="pb two"><button class="b2" data-act="copy" data-text="'+esc(hl.concat(xl).join('\n'))+'">📋 '+t('copy_all')+'</button>'+
-   '<button class="btn" data-act="copy" data-text="'+esc((D.sub_base||location.origin)+'/sub/'+D.sub+'/v2')+'">🔗 '+t('copy_sub')+'</button></div>'+
-   '<p class="xn">'+t('v2_hint')+'</p></section>'}
- // KANKI MIX: one card, the countries it runs in
- if(G.kankimix){var kb=order.filter(function(b){return G.kankimix[b]});
-  html+='<section class="pc" data-p="kankimix">'+head('kankimix','K','KANKI MIX',t('km_sub'))+'<p class="kmx">'+t('km_txt')+'</p>'+
-   '<div class="kfl">'+kb.map(function(b){var w=where(b);return '<span>'+w.fl+' '+esc(w.nm)+'</span>'}).join('')+'</div></section>'}
+ var html=keyCard('wireguard','W','WireGuard',t('wg_sub'))+keyCard('amneziawg','A','AmneziaWG',t('awg_sub'));
+ // V2Ray apps: the combined subscription link (copy, QR), then every config of it to copy or scan
+ var hy=[],xr=[];
+ if(G.hysteria2)order.forEach(function(b){['tunnel','direct'].forEach(function(via){var a=G.hysteria2[b][via],c=a&&a.querySelector('[data-act=copy]'),q=a&&a.querySelector('[data-act=qr]');
+  if(c)hy.push({b:b,via:G.hysteria2[b].tunnel&&G.hysteria2[b].direct?via:'',text:c.dataset.text,qr:q?q.dataset.url:''})})});
+ if(xs)xs.querySelectorAll('.row.proto').forEach(function(r){var c=r.querySelector('[data-act=copy]'),q=r.querySelector('[data-act=qr]'),nm=r.querySelector('.ph b'),pr=r.querySelector('.ph small');
+  if(c)xr.push({name:nm?nm.textContent:'Xray',proto:pr?pr.textContent:'',text:c.dataset.text,qr:q?q.dataset.url:''})});
+ if(hy.length||xr.length){var sl=(D.sub_base||location.origin)+'/sub/'+D.sub+'/v2';
+  var tags=(hy.length?'<span class="tg">Hysteria2 · '+N(hy.length)+'</span>':'')+(xr.length?'<span class="tg">Xray · '+N(xr.length)+'</span>':'');
+  var line=function(name,sub2,x){return '<div class="xrow"><div class="xn2"><b>'+name+'</b><small>'+esc(sub2)+'</small></div><div class="xb">'+
+   '<button class="b2" data-act="copy" data-text="'+esc(x.text)+'">'+t('copy_s')+'</button>'+(x.qr?'<button class="b2" data-act="qr" data-url="'+esc(x.qr)+'">'+t('qr_s')+'</button>':'')+'</div></div>'};
+  html+='<section class="pc" data-p="v2">'+head('V',t('v2_title'),t('v2_sub'))+'<div class="tgs">'+tags+'</div>'+
+   '<div class="lsec">'+t('sub_link')+'</div><div class="subl"><input readonly value="'+esc(sl)+'" aria-label="'+esc(t('sub_link'))+'">'+
+   '<button class="btn" data-act="copy" data-text="'+esc(sl)+'">'+t('copy_s')+'</button><button class="b2" data-act="qr" data-url="/sub/'+esc(D.sub)+'/v2qr">'+t('qr_s')+'</button></div>'+
+   '<p class="xn">'+t('v2_hint')+'</p>'+
+   (hy.length?'<div class="lsec">Hysteria2</div>'+hy.map(function(x){var w=where(x.b);return line(w.fl+' '+esc(w.nm),x.via?t(x.via=='tunnel'?'c_tunnel':'c_direct'):'hysteria2',x)}).join(''):'')+
+   (xr.length?'<div class="lsec">Xray</div>'+xr.map(function(x){return line(esc(x.name),x.proto,x)}).join(''):'')+
+   '<div class="pb"><button class="b2" data-act="copy" data-text="'+esc(hy.concat(xr).map(function(x){return x.text}).join('\n'))+'">📋 '+t('copy_all')+'</button></div></section>'}
  // Kanki DNS: as the server wrote it
- var ds=src.querySelector('[data-node=dns]');
  if(ds){var dc=ds.cloneNode(true);dc.className='pc';dc.dataset.p='dns';dc.removeAttribute('data-node');html+=dc.outerHTML}
  box.innerHTML=html;src.style.display='none'}
 // ---- the app's install files uploaded in the panel (one per phone type, the first fits most phones)
@@ -421,10 +414,9 @@ document.addEventListener('click',function(e){var b=e.target.closest('[data-act]
 $('lang').onclick=function(){L=L=='fa'?'en':'fa';lsSet('kk_lang',L);render()};
 var th=lsGet('kk_theme')||'dark';if(th=='light')document.body.classList.add('light');
 $('th').onclick=function(){document.body.classList.toggle('light');lsSet('kk_theme',document.body.classList.contains('light')?'light':'dark')};
-// first paint: texts now, rings start empty and fill up once (animation)
-ring('f_data',0);ring('f_time',0);
+// first paint: texts now, the bars start empty (CSS) and fill up once (animation)
 render();
-requestAnimationFrame(function(){requestAnimationFrame(function(){first=false;ring('f_data',fr.data);ring('f_time',fr.time)})});
+requestAnimationFrame(function(){requestAnimationFrame(function(){first=false;bar('bar',fr.data);bar('tbar',fr.time)})});
 })();
 </script>
 </body>

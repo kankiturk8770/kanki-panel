@@ -3351,6 +3351,7 @@ pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(
     mark_removed(app, id);
     crate::dns::panel::forget_server(app, id);
     crate::xray::panel::forget_server(app, id);
+    crate::access::forget_agent(app, id);
     crate::subiran::forget_server(app, id);
     if app.db.get("emer_server") == id {
         app.db.set("emer_server", "");

@@ -1,6 +1,6 @@
 //! Who may run and who may use which core.
 //!
-//! A server has a role: `gaming` servers run only the gaming cores (KANKI MIX, WireGuard, Kanki DNS),
+//! A server has a role: `gaming` servers run only the gaming cores (KANKI MIX, WireGuard, AmneziaWG, Kanki DNS),
 //! `antifilter` servers only the anti-filter cores (Xray, Hysteria2, AmneziaWG), `hybrid` servers
 //! (every server made before roles existed) run everything. A core the role does not allow counts as
 //! switched off on that server, whatever its own switch says, so changing the role takes effect on
@@ -105,7 +105,8 @@ impl Role {
 
     pub fn allows(self, core: &str) -> bool {
         match self {
-            Role::Gaming => matches!(core, "kmix" | "wg" | "dns"),
+            // AmneziaWG is WireGuard with hidden packets: as good for games as WireGuard itself
+            Role::Gaming => matches!(core, "kmix" | "wg" | "awg" | "dns"),
             Role::Antifilter => matches!(core, "xray" | "hy2" | "awg"),
             Role::Hybrid => true,
         }
@@ -152,9 +153,57 @@ pub fn server_role(app: &App, sid: &str) -> Role {
         .unwrap_or(Role::Hybrid)
 }
 
-/// May agent server `sid` run `core` (xray / dns)?
+/// May agent server `sid` run `core` (xray / dns) by its role?
 pub fn server_allows(app: &App, sid: &str, core: &str) -> bool {
     server_role(app, sid).allows(core)
+}
+
+/// The cores of the server agent (Xray, Kanki DNS) that have their own switch on each server
+pub const AGENT_CORES: &[&str] = &["xray", "dns"];
+
+/// agent server id -> its agent cores switched off (their settings stay; switching back on restores them)
+fn agent_off_map(app: &App) -> std::collections::HashMap<String, Vec<String>> {
+    serde_json::from_str(&app.db.get("agent_core_off")).unwrap_or_default()
+}
+
+/// The agent cores switched off on agent server `sid`
+pub fn agent_off(app: &App, sid: &str) -> Vec<String> {
+    agent_off_map(app).remove(sid).unwrap_or_default()
+}
+
+/// Switches agent core `core` (xray | dns) of agent server `sid` off, or back on
+pub fn set_agent_off(app: &App, sid: &str, core: &str, off: bool) -> Result<(), String> {
+    if !AGENT_CORES.contains(&core) {
+        return Err("core: xray or dns".into());
+    }
+    let mut m = agent_off_map(app);
+    let l = m.entry(sid.to_string()).or_default();
+    l.retain(|c| c != core);
+    if off {
+        l.push(core.to_string());
+    }
+    l.sort();
+    if l.is_empty() {
+        m.remove(sid);
+    }
+    let v = serde_json::to_string(&m).map_err(|e| e.to_string())?;
+    app.db.set("agent_core_off", &v);
+    Ok(())
+}
+
+/// A removed server's switches go with it
+pub fn forget_agent(app: &App, sid: &str) {
+    let mut m = agent_off_map(app);
+    if m.remove(sid).is_some() {
+        if let Ok(v) = serde_json::to_string(&m) {
+            app.db.set("agent_core_off", &v);
+        }
+    }
+}
+
+/// Does agent server `sid` run `core` (xray / dns): its role allows it and its switch is on?
+pub fn server_runs(app: &App, sid: &str, core: &str) -> bool {
+    server_allows(app, sid, core) && !agent_off(app, sid).iter().any(|c| c == core)
 }
 
 #[cfg(test)]
@@ -166,12 +215,14 @@ mod tests {
         for c in ["kmix", "wg", "dns"] {
             assert!(Role::Gaming.allows(c) && !Role::Antifilter.allows(c), "{}", c);
         }
-        for c in ["xray", "hy2", "awg"] {
+        for c in ["xray", "hy2"] {
             assert!(Role::Antifilter.allows(c) && !Role::Gaming.allows(c), "{}", c);
         }
+        // AmneziaWG runs on both
+        assert!(Role::Gaming.allows("awg") && Role::Antifilter.allows("awg"));
         assert!(SERVER_CORES.iter().all(|c| Role::Hybrid.allows(c)));
         assert!(Role::Hybrid.denied().is_empty());
-        assert_eq!(Role::Gaming.denied(), vec!["awg", "hy2", "xray"]);
+        assert_eq!(Role::Gaming.denied(), vec!["hy2", "xray"]);
         assert_eq!(Role::Antifilter.denied(), vec!["wg", "kmix", "dns"]);
         // a row from before roles, or a value nobody knows, is hybrid; never a role that takes cores away
         assert_eq!(Role::of(""), Role::Hybrid);

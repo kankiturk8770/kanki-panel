@@ -230,7 +230,7 @@ pub fn explain(s: &DnsSettings, name: &str) -> Option<(String, String, String, b
 pub fn cfg_for(app: &App, sid: &str) -> Option<(DnsCfg, String)> {
     let s = settings(app);
     // a server whose role (antifilter) does not run Kanki DNS gets none, whatever was set up on it before
-    if !s.on || !crate::access::server_allows(app, sid, "dns") {
+    if !s.on || !crate::access::server_runs(app, sid, "dns") {
         return None;
     }
     let srv = s.servers.iter().find(|x| x.server == sid)?;
@@ -796,6 +796,34 @@ async fn del_server(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
     let st = crate::tunnel::panel::step(&app, &id, "dns", "");
     let rid = crate::tunnel::panel::track("dns", &st.name.clone(), vec![st]);
     Json(json!({ "ok": true, "removal": rid })).into_response()
+}
+
+/// Kanki DNS on server `sid` from the server's own core switch: an exit with the next free label (the
+/// same checks as adding it on the DNS page); one that is already there stays as it is
+pub(crate) fn ensure_exit(app: &App, sid: &str) -> Result<(), String> {
+    let mut s = settings(app);
+    if s.servers.iter().any(|x| x.server == sid) {
+        return Ok(());
+    }
+    if let Some(p) = crate::tunnel::panel::emer_port_on(app, sid).filter(|p| crate::tunnel::panel::DNS_PORTS.contains(p)) {
+        return Err(format!("the emergency chat uses port {} on this server, and Kanki DNS needs 53, 80, 443 and 853: move the chat to another port first", p));
+    }
+    let mut n = s.servers.len() + 1;
+    let label = loop {
+        let l = format!("s{}", n);
+        if !s.servers.iter().any(|o| o.label == l) {
+            break l;
+        }
+        n += 1;
+    };
+    s.servers.push(DnsSrv { server: sid.to_string(), role: "exit".into(), label, ..Default::default() });
+    save(app, &mut s);
+    Ok(())
+}
+
+/// Is `sid` one of the Kanki DNS servers?
+pub(crate) fn has_server(app: &App, sid: &str) -> bool {
+    settings(app).servers.iter().any(|x| x.server == sid)
 }
 
 /// The server was removed from the panel: it and the relays that sent their connections to it leave

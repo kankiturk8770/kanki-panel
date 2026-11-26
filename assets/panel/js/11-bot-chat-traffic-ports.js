@@ -61,7 +61,7 @@ function logDraw(){var tb=$('#lg_tabs'),bx=$('#lg_box');if(!tb||!bx)return;
  // follow the newest line, unless you have scrolled back to read
  if(LG.away)bx.scrollTop=top;else bx.scrollTop=bx.scrollHeight}
 
-function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(u),
+function editUser(id,tab){var u=findU(id);if(!u)return;if(tab=='edit')return userEditModal(id);var p=usage(u),st=ustate(u),
   tg=(u.protocols||'').split(',').filter(function(x){return x}).map(function(x){return '<span class="ptag" style="--pc:'+(PCOL[x]||'#999')+'">'+esc(pname(x))+'</span>'}).join(''),
   cls=st=='active'?'g':st=='finished'?'y':'r',lbl=t(st=='active'?'Active':st=='finished'?(u.status=='Limited'?'Limited':'Expired'):'Disabled'),cur='';
  modal('<div class="us-h"><span class="dot '+((u.online_connections>0||liveOf(u).length)?'g':'')+'"></span><b class="ltr nm">'+esc(u.username)+'</b><span class="u-st '+cls+'" id="e_badge">'+lbl+'</span><span class="sp"></span>'+
@@ -86,10 +86,7 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
   '<div id="us_p"></div>','usheet');
  function show(k){var el=$('#us_p');cur=k;$$('#us_q [data-t]').forEach(function(b){b.classList.toggle('on',b.dataset.t==k)});
   if(!k){el.innerHTML='';return}
-  if(k=='edit'){el.innerHTML=ufForm(u)+'<button class="btn" style="width:100%;margin-top:10px" id="f_save">'+t('Save changes')+'</button><button class="lnk" id="s_rg">'+ic('refresh',14)+' '+t('New link (the old one stops working)')+'</button>';wireForm(u);
-   $('#f_save').onclick=function(){var b=formBody();if(!b)return;var nm=$('#f_name').value.trim();if(nm&&nm!=u.username){if(!nameOk(nm))return toast(t(NAME_ERR),1);b.username=nm}var me=this;me.disabled=true;
-    api('PUT','/api/users/'+u.id,b).then(function(){toast(t('Saved'));closeModal();loadUsers()}).catch(function(e){me.disabled=false;fail(e)})};
-   $('#s_rg').onclick=function(){confirmDo(function(){api('POST','/api/users/'+u.id+'/regen').then(function(){toast(t('Done'));return loadUsers()}).then(function(){editUser(id,'link')}).catch(fail)})};return}
+  if(k=='edit'){userEditModal(u.id);return}
   if(k=='link'){el.innerHTML='<small class="muted">'+t('Subscription link')+' · '+t('Created')+' '+(u.created_at?jdate(Date.parse(u.created_at)/1000):'—')+'</small><div class="lk">'+esc(u.link)+'</div>'+
     '<div class="g2" style="gap:8px"><button class="btn" id="s_cp">'+ic('copy',16)+' '+t('Copy link')+'</button><a class="b2" style="text-decoration:none;text-align:center" target="_blank" rel="noopener" href="'+esc(u.link)+'">'+ic('ext',16)+' '+t('Open page')+'</a></div>'+
     '<div class="us-cfg"><small class="muted">'+t('Configs')+'</small><div id="sx"></div></div>'+
@@ -104,6 +101,15 @@ function editUser(id,tab){var u=findU(id);if(!u)return;var p=usage(u),st=ustate(
  $('#e_sw').onchange=function(){var cb=this;cb.disabled=true;api('POST','/api/users/'+u.id+'/toggle').then(function(r){cb.disabled=false;u.enabled=r.enabled;u.status=r.status;var s2=ustate(u),b=$('#e_badge');
    if(b){b.className='u-st '+(s2=='active'?'g':s2=='finished'?'y':'r');b.textContent=t(s2=='active'?'Active':s2=='finished'?(u.status=='Limited'?'Limited':'Expired'):'Disabled')}toast(t('Done'));loadUsers()}).catch(function(e){cb.checked=!cb.checked;cb.disabled=false;fail(e)})};
  if(tab)show(tab)}
+
+// (3.64) the edit form of one user: a window of its own in the middle of the screen, never a form further down
+function userEditModal(id){var u=findU(id);if(!u)return;
+ modal(mhead(t('Edit user'),u.username)+ufForm(u)+'<button class="btn" style="width:100%;margin-top:12px" id="f_save">'+t('Save changes')+'</button>'+
+  '<button class="lnk" id="s_rg">'+ic('refresh',14)+' '+t('New link (the old one stops working)')+'</button>','wide uedit');wireForm(u);
+ $('#f_save').onclick=function(){var b=formBody();if(!b)return;var nm=$('#f_name').value.trim();if(nm&&nm!=u.username){if(!nameOk(nm))return toast(t(NAME_ERR),1);b.username=nm}var me=this;me.disabled=true;
+  api('PUT','/api/users/'+u.id,b).then(function(){toast(t('Saved'));closeModal();loadUsers()}).catch(function(e){me.disabled=false;fail(e)})};
+ $('#s_rg').onclick=function(){confirmDo(function(){api('POST','/api/users/'+u.id+'/regen').then(function(){toast(t('Done'));return loadUsers()}).then(function(){editUser(id,'link')}).catch(fail)})};
+ var f=$('#f_name');if(f)try{f.focus({preventScroll:true})}catch(e){}}
 
 // ---- Telegram sales bot page
 function pBot(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Telegram sales bot')+'</h2><p>'+t('Create and manage the sales bot')+'</p></div><div id="bt_top"></div></div><div id="bt">'+t('Loading…')+'</div>';botLoad()}

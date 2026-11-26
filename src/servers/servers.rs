@@ -55,6 +55,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/servers/:id/ports", post(set_ports))
         .route("/api/servers/:id/kmix", post(kmix_switch))
         .route("/api/servers/:id/role", post(role_set))
+        .route("/api/servers/:id/cores", post(cores_set))
         .route("/api/servers/:id/command", get(command_again))
         .route("/api/servers/:id/replace", post(replace_machine))
         .route("/api/servers/:id/update", post(update_one))
@@ -619,7 +620,7 @@ pub fn list_json(app: &App) -> Value {
         "key": "local", "name": nodes.iter().find(|n| n.id == "local").map(|n| n.name.clone()).unwrap_or_else(|| "Main".into()),
         "local": true, "loc": locs.get("local").map(|x| x.0.clone()).unwrap_or_default(), "cc": crate::exitgeo::cc(app, "local"),
         "agent": { "id": "local", "online": true, "last_seen": t, "version": crate::VERSION, "addr": app.db.get("tun_local_addr") },
-        "node": node_v("local"), "ports": ports_json(&uses, "local"), "jobs": jobs("local"), "command": Value::Null,
+        "node": node_v("local"), "ports": ports_json(&uses, "local"), "jobs": jobs("local"), "command": Value::Null, "switches": cores_state(app, "local"),
         "tunnel": crate::twin::info(app, "local", Some("local")),
     }));
     let mut linked: HashSet<String> = HashSet::new();
@@ -644,7 +645,7 @@ pub fn list_json(app: &App) -> Value {
             // the ports a joined server really uses, not the ones planned when it joined (3.58.1)
             "planned": if !s.node.is_empty() && app.db.node(&s.node).is_some() { node_ports(app, &s.node) } else { s.ports.clone() }, "pending": pending, "vpn_wanted": s.vpn, "domain": s.domain, "ssl": !s.no_ssl,
             "setup": setup, "setup_asked": s.setup_at,
-            "jobs": jobs(&s.id), "created": s.created,
+            "jobs": jobs(&s.id), "created": s.created, "switches": cores_state(app, &s.id),
             "tunnel": crate::twin::info(app, &s.id, Some(s.node.as_str()).filter(|n| !n.is_empty())),
         }));
     }
@@ -653,7 +654,7 @@ pub fn list_json(app: &App) -> Value {
         out.push(json!({
             "key": format!("node:{}", n.id), "name": n.name, "local": false,
             "loc": if crate::exitgeo::cc(app, &n.id) == "IR" { "iran" } else { "abroad" }, "cc": crate::exitgeo::cc(app, &n.id),
-            "agent": Value::Null, "node": node_v(&n.id), "ports": ports_json(&uses, &n.id), "jobs": Value::Null,
+            "agent": Value::Null, "node": node_v(&n.id), "ports": ports_json(&uses, &n.id), "jobs": Value::Null, "switches": cores_state(app, &format!("node:{}", n.id)),
             "tunnel": crate::twin::info(app, &format!("node:{}", n.id), Some(n.id.as_str())),
         }));
     }
@@ -731,6 +732,17 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = tun;
     list.push(s.clone());
     tp::save_servers(&app, &list);
+    // Xray and Kanki DNS run in the agent, which the server has from its first start: ticked, they are set
+    // up for it now (the agent picks them up when it connects)
+    let ticked = |c: &str| b["cores"].as_array().is_some_and(|a| a.iter().any(|x| x.as_str() == Some(c)));
+    if ticked("xray") {
+        crate::xray::panel::ensure_server(&app, &s.id);
+    }
+    if ticked("dns") {
+        if let Err(e) = crate::dns::panel::ensure_exit(&app, &s.id) {
+            return Json(json!({ "ok": true, "id": s.id, "command": command(&app, &s), "expires": s.join_exp, "ports": s.ports, "warning": e })).into_response();
+        }
+    }
     Json(json!({ "ok": true, "id": s.id, "command": command(&app, &s), "expires": s.join_exp, "ports": s.ports })).into_response()
 }
 
@@ -1068,6 +1080,113 @@ async fn kmix_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
     crate::kmix::set_node_off(&app, &nid, !on);
     crate::api::spawn_sync(&app);
     Json(json!({ "ok": true })).into_response()
+}
+
+/// The six cores of a server in the panel's order
+pub const SWITCH_CORES: [&str; 6] = ["wg", "awg", "kmix", "dns", "xray", "hy2"];
+
+/// The VPN node and the agent server of a server key ("local", an agent id, or "node:<id>")
+fn parts_of_key(app: &App, key: &str) -> (Option<String>, Option<String>) {
+    if key == "local" {
+        return (app.db.node("local").map(|n| n.id), Some("local".into()));
+    }
+    if let Some(n) = key.strip_prefix("node:") {
+        return (app.db.node(n).map(|x| x.id), agent_of(app, n));
+    }
+    match tp::servers(app).into_iter().find(|s| s.id == key) {
+        Some(s) => (Some(s.node).filter(|n| !n.is_empty() && app.db.node(n).is_some()), Some(s.id)),
+        None => (None, None),
+    }
+}
+
+/// What each core of a server can do and does now: { core: { can, on, why } }. `can` false = the part
+/// it runs in is missing (no VPN node: WireGuard, AmneziaWG, Hysteria2, KANKI MIX; no agent: Xray, DNS)
+/// or the server's role does not run it (`why` says which).
+pub fn cores_state(app: &App, key: &str) -> Value {
+    let (node, agent) = parts_of_key(app, key);
+    let role = node.as_deref().map(|n| crate::access::node_role(app, n)).or_else(|| agent.as_deref().map(|a| crate::access::server_role(app, a))).unwrap_or(crate::access::Role::Hybrid);
+    let km = crate::kmix::settings(app);
+    let mut m = serde_json::Map::new();
+    for c in SWITCH_CORES {
+        let vpn = c != "xray" && c != "dns";
+        let (can, on, why) = if !role.allows(c) {
+            (false, false, role.refusal(c))
+        } else if vpn {
+            match &node {
+                None => (false, false, "the VPN part is not installed on this server".to_string()),
+                Some(n) if c == "kmix" => (true, km.node_on(n), String::new()),
+                Some(n) => (true, !crate::cores::is_off(app, n, c), String::new()),
+            }
+        } else {
+            match &agent {
+                None => (false, false, "the server agent is not installed on this server".to_string()),
+                Some(a) => {
+                    let has = if c == "xray" { crate::xray::panel::has_server(app, a) } else { crate::dns::panel::has_server(app, a) };
+                    (true, has && crate::access::server_runs(app, a, c), String::new())
+                }
+            }
+        };
+        m.insert(c.to_string(), json!({ "can": can, "on": on, "why": why }));
+    }
+    json!({ "role": role.as_str(), "cores": m })
+}
+
+/// { wg?, awg?, kmix?, dns?, xray?, hy2?: bool } — switches the given cores of this server on or off at
+/// once. Everything is checked before anything changes; a core switched off keeps its settings (Xray
+/// inbounds, the DNS entry), switching it on again brings them back. Xray and DNS switched on for the
+/// first time get a server entry with what the server reports (nothing to type).
+async fn cores_set(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
+    let _ = guard!(app, h, "nodes");
+    let Some(obj) = b.as_object() else { return err(StatusCode::BAD_REQUEST, "send { core: true | false }") };
+    let (node, agent) = parts_of_key(&app, &id);
+    if node.is_none() && agent.is_none() {
+        return err(StatusCode::NOT_FOUND, "unknown server");
+    }
+    let mut want: Vec<(&'static str, bool)> = vec![];
+    for (k, v) in obj {
+        let Some(c) = SWITCH_CORES.iter().find(|c| **c == k.as_str()) else { return err(StatusCode::BAD_REQUEST, &format!("unknown core: {}", k.chars().take(20).collect::<String>())) };
+        let Some(on) = v.as_bool() else { return err(StatusCode::BAD_REQUEST, "each core is true or false") };
+        want.push((c, on));
+    }
+    let st = cores_state(&app, &id);
+    for (c, on) in &want {
+        let x = &st["cores"][*c];
+        if *on && x["can"].as_bool() != Some(true) {
+            let why = x["why"].as_str().unwrap_or("this core cannot run here").to_string();
+            return err(StatusCode::CONFLICT, &why);
+        }
+    }
+    for (c, on) in want {
+        let r = match c {
+            "kmix" => node.as_deref().map(|n| crate::kmix::set_node_off(&app, n, !on)).ok_or_else(|| "no VPN part".to_string()),
+            "xray" | "dns" => match agent.as_deref() {
+                Some(a) => (|| {
+                    if on && c == "xray" {
+                        crate::xray::panel::ensure_server(&app, a);
+                    }
+                    if on && c == "dns" {
+                        crate::dns::panel::ensure_exit(&app, a)?;
+                    }
+                    // switching off a core that was never set up changes nothing
+                    if !on && !(if c == "xray" { crate::xray::panel::has_server(&app, a) } else { crate::dns::panel::has_server(&app, a) }) {
+                        return Ok(());
+                    }
+                    crate::access::set_agent_off(&app, a, c, !on)
+                })(),
+                None => Ok(()),
+            },
+            _ => match node.as_deref() {
+                Some(n) => crate::cores::set(&app, n, c, !on),
+                None => Ok(()),
+            },
+        };
+        if let Err(e) = r {
+            crate::api::spawn_sync(&app);
+            return err(StatusCode::CONFLICT, &e);
+        }
+    }
+    crate::api::spawn_sync(&app);
+    Json(json!({ "ok": true, "state": cores_state(&app, &id) })).into_response()
 }
 
 /// { role: gaming | antifilter | hybrid } — what this server may run. The cores the role does not

@@ -3,7 +3,7 @@
 // inbounds, routing, settings. Every user with Xray ticked is a client of every inbound (or of the
 // inbounds that list them).
 var XR={d:null,q:'',srv:'',tab:'status'};
-var XTABS=[['status','Status'],['servers','Servers'],['tunnel','Tunnel'],['inbounds','Inbounds'],['outbounds','Outbounds'],['routing','Routing'],['settings','Settings']];
+var XTABS=[['status','Status'],['servers','Servers'],['tunnel','Tunnel'],['inbounds','Inbounds'],['users','Xray users'],['outbounds','Outbounds'],['routing','Routing'],['settings','Settings']];
 var REALITY_TARGETS=['www.microsoft.com:443','www.apple.com:443','dl.google.com:443','www.speedtest.net:443','www.cloudflare.com:443','www.yahoo.com:443','www.amazon.com:443','addons.mozilla.org:443','www.samsung.com:443','www.nvidia.com:443',
  'www.cisco.com:443','www.mozilla.org:443','www.intel.com:443','www.ebay.com:443','www.bing.com:443','www.asus.com:443','www.digikala.com:443','www.aparat.com:443','divar.ir:443','snapp.ir:443','www.filimo.com:443','www.namava.ir:443'];
 function p_xray(){KAcc.open.xr='';KAcc.open.xrt='';XR.tab=xrTabOf(S.sub);
@@ -23,7 +23,7 @@ function xrLoad(quiet){return api('GET','/api/xray').then(function(d){XR.d=d;if(
   xrDraw(d);return d}).catch(fail)}
 function xrName(id){var a=(XR.d&&XR.d.agents)||[];for(var i=0;i<a.length;i++)if(a[i].id==id)return a[i].name;return id}
 function xrDraw(d){var el=$('#xr');if(!el)return;xrTabs(d);
- ({status:xrStatus,servers:xrSrvTab,tunnel:xrTunTab,inbounds:xrIbTab,outbounds:xrOutTab,routing:xrRouting,settings:xrSettings}[XR.tab]||xrStatus)(d,el)}
+ ({status:xrStatus,servers:xrSrvTab,tunnel:xrTunTab,inbounds:xrIbTab,users:xrUsersTab,outbounds:xrOutTab,routing:xrRouting,settings:xrSettings}[XR.tab]||xrStatus)(d,el)}
 function xrTot(d){return d.inbounds.reduce(function(a,b){return a+(+b.traffic||0)},0)}
 function xrStats(d){var act=d.inbounds.filter(function(x){return x.enabled&&!x.state}).length,run=d.servers.filter(function(x){return x.status&&x.status.active}).length;
  return kuStats([[t('Running servers'),N(run)+' / '+N(d.servers.length),run<d.servers.length?'y':''],[t('Working inbounds'),N(act)+' / '+N(d.inbounds.length)],
@@ -58,7 +58,7 @@ function xrIbTab(d,el){
   kuGroup(t('Inbounds'),d.inbounds.length,'<button class="btn sm" onclick="xrInbound()">'+ic('plus',14)+' '+t('New inbound')+'</button>','<div id="xr_ib">'+xrInbounds(d)+'</div>');
  $('#xr_q').oninput=function(){XR.q=this.value;$('#xr_ib').innerHTML=xrInbounds(XR.d)};$('#xr_sf').onchange=function(){XR.srv=this.value;$('#xr_ib').innerHTML=xrInbounds(XR.d)}}
 // the address users connect to: the inbound's own link address, else its server's public address
-function xrPublic(d,ib){var s=d.servers.filter(function(x){return x.server==ib.server})[0]||{};return (ib.link_host||s.effective||s.address||'?')+':'+(ib.link_port||ib.port)}
+function xrPublic(d,ib){var s=d.servers.filter(function(x){return x.server==ib.server})[0]||{};return (ib.cdn_address?'☁️ '+ib.cdn_address:(ib.link_host||s.effective||s.address||'?'))+':'+(ib.link_port||ib.port)}
 function xrInbounds(d){var q=(XR.q||'').toLowerCase(),list=d.inbounds.filter(function(ib){return (!XR.srv||ib.server==XR.srv)&&(!q||[ib.remark,ib.protocol,ib.network,ib.security,String(ib.port),ib.server_name].join(' ').toLowerCase().indexOf(q)>=0)});
  if(!d.inbounds.length)return '<p class="muted ku-empty">'+t('No inbound yet.')+'</p>';
  if(!list.length)return '<p class="muted ku-empty">'+t('Nothing found')+'</p>';
@@ -216,8 +216,10 @@ function xrClients(id){var ib=XR.d.inbounds.filter(function(x){return x.id==id})
   var draw=function(){var q=$('#xc_q').value.toLowerCase();var l=list.filter(function(c){return !q||c.name.toLowerCase().indexOf(q)>=0});
    $('#xc_l').innerHTML=l.length?l.map(function(c,i){return '<div class="vrow"><span class="dot '+(c.online?'g':c.active?'':'r')+'"></span><div class="nm"><b><bdi>'+esc(c.name)+'</bdi></b><small>'+N(bytes(c.used))+(c.limit_gb>0?' / '+N(c.limit_gb)+' GB':'')+(c.active?'':' · '+t('Inactive'))+'</small></div>'+
     (c.link?'<button class="ib" data-cp="'+i+'" title="'+t('Copy')+'">'+ic('copy',15)+'</button><button class="ib" data-qr="'+i+'" title="QR">'+ic('qr',15)+'</button>':'<span class="muted">'+t('No address')+'</span>')+
-    (c.cdn_link?'<button class="ib" data-cc="'+i+'" title="'+t('Copy')+' (CDN)">☁️</button>':'')+'</div>'}).join(''):'<p class="muted">'+t('No users with Xray yet: tick Xray in a user\'s form')+'</p>';
-   $$('#xc_l [data-cp]').forEach(function(b){b.onclick=function(){copy(l[+b.dataset.cp].link)}});$$('#xc_l [data-cc]').forEach(function(b){b.onclick=function(){copy(l[+b.dataset.cc].cdn_link)}});
+    (c.cdn_link?'<button class="ib" data-cc="'+i+'" title="'+t('Copy')+' (CDN)">☁️</button>':'')+
+    (c.link?'<button class="ib" data-cf="'+i+'" title="'+t('Full client config')+'" aria-label="'+t('Full client config')+'">{ }</button>':'')+'</div>'}).join(''):'<p class="muted">'+t('No users with Xray yet: tick Xray in a user\'s form')+'</p>';
+   $$('#xc_l [data-cp]').forEach(function(b){b.onclick=function(){copy(l[+b.dataset.cp].link)}});
+   $$('#xc_l [data-cf]').forEach(function(b){b.onclick=function(){var c=l[+b.dataset.cf];xrClientCfg(id,c.id,c.name)}});$$('#xc_l [data-cc]').forEach(function(b){b.onclick=function(){copy(l[+b.dataset.cc].cdn_link)}});
    $$('#xc_l [data-qr]').forEach(function(b){b.onclick=function(){var c=l[+b.dataset.qr];qrInto($('#xc_qr'),c.link);$('#xc_qr').insertAdjacentHTML('afterbegin','<p class="muted ltr" style="margin:10px 0 0;text-align:center">'+esc(c.name)+'</p>')}})};
   $('#xc_q').oninput=draw;draw()}).catch(fail)}
 
@@ -238,7 +240,11 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
    inp('xi_ls0','Listen address',ib.listen,'0.0.0.0')+'</div>'+
    '<div id="xi_ss" class="g2"><div><label class="f">'+t('Method')+'</label><select id="xi_sm">'+opt(['2022-blake3-aes-128-gcm','2022-blake3-aes-256-gcm','2022-blake3-chacha20-poly1305','chacha20-ietf-poly1305','aes-256-gcm','aes-128-gcm'],ib.ss_method)+'</select></div></div>'+
    '<div class="chipset u-mt3"><span class="muted">'+t('Quick setup')+':</span>'+[['vr','VLESS + REALITY'],['vx','VLESS + XHTTP + REALITY'],['vw','VLESS + WS (CDN)'],['vg','VLESS + gRPC + REALITY'],['gc','VLESS + gRPC + TLS (CDN)'],['tt','Trojan + TLS'],['ss','Shadowsocks 2022']].map(function(x){return '<button type="button" data-pre="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div>'+
-   '<div class="u-mt3" id="xi_cdnw">'+ck('xi_cdn','☁️ '+t('Also a link through the CDN'),ib.cdn,'Users get one more link with this server\'s CDN domain, beside the direct one')+'<p class="hint" id="xi_cdnst"></p></div></div>'+
+   '<div class="u-mt3" id="xi_cdnw">'+ck('xi_cdn','☁️ '+t('Also a link through the CDN'),ib.cdn,'Users get one more link with this server\'s CDN domain, beside the direct one')+'<p class="hint" id="xi_cdnst"></p></div>'+
+   // (3.64) the explicit CDN address: filled, every link and client config of this inbound goes through the CDN
+   '<div class="u-mt3" id="xi_cdaw"><label class="f" for="xi_cda">'+t('CDN address (to route the traffic through a CDN)')+'</label>'+
+   '<input id="xi_cda" class="ltr" autocomplete="off" spellcheck="false" maxlength="253" value="'+esc(ib.cdn_address||'')+'" placeholder="'+esc(t('domain behind the CDN, or a clean CDN IP'))+'">'+
+   '<small class="muted" id="xi_cdah">'+t('Filled in: the users\' links and configs of this inbound connect to this address, so their traffic passes through the CDN. Empty: they connect straight to the server.')+'</small></div></div>'+
   // transport
   '<div class="fsec" data-fs="tr"><div class="g2"><div><label class="f">'+t('Transport')+'</label><select id="xi_nw">'+opt([['tcp','TCP (RAW)'],['ws','WebSocket'],['grpc','gRPC'],['httpupgrade','HTTPUpgrade'],['xhttp','XHTTP'],['kcp','mKCP']],ib.network)+'</select></div></div>'+
    '<div id="xi_tp" class="g2">'+inp('xi_pa','Path',ib.path,t('random if empty'))+inp('xi_ho','Host',ib.host,'')+'</div>'+
@@ -302,13 +308,17 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
   var fbOk=(pr=='vless'||pr=='trojan')&&nw=='tcp'&&sc!='reality';$('#xi_tabs [data-ft="fb"]').style.display=fbOk?'':'none';
   [].forEach.call($('#xi_sc').options,function(o){if(o.value=='reality')o.disabled=['vless','trojan'].indexOf(pr)<0||['tcp','grpc','xhttp'].indexOf(nw)<0});
   var sx=d.servers.filter(function(z){return z.server==$('#xi_sv').value})[0]||{},cdn=sx.cdn||'',why=xrCdnWhy({protocol:pr,network:nw,security:sc,port:+$('#xi_pt').value||0,host:$('#xi_ho').value},cdn),on=$('#xi_cdn').checked;
+  // the CDN address only for an inbound a CDN can carry (never REALITY, Shadowsocks or plain TCP / mKCP)
+  var hard=xrCdnWhy({protocol:pr,network:nw,security:sc,port:+$('#xi_pt').value||0,host:''},''),cda=$('#xi_cda');
+  if(cda){var ok=!hard||/^with(out)? TLS/.test(hard);cda.disabled=!ok;show('#xi_cdaw',ok);if(!ok)cda.value='';
+   $('#xi_cdah').innerHTML=ok&&hard?'<span style="color:var(--warn)">'+t(hard)+'</span>':t('Filled in: the users\' links and configs of this inbound connect to this address, so their traffic passes through the CDN. Empty: they connect straight to the server.')}
   $('#xi_cdnst').innerHTML=why?'<span style="color:var(--warn)">✕ '+t('Does not go through a CDN')+': '+t(why)+'</span>':
    '<span style="color:var(--ok)">✓ '+t('Goes through a CDN')+'</span>'+(cdn?' · <span class="ltr">'+esc(cdn)+'</span>'+(on?'':' · '+t('switch it on to give users the CDN link')):' · '+t('write this server\'s CDN domain first (Xray › server › Domain and SSL)'))};
  ['#xi_pr','#xi_nw','#xi_sc','#xi_lt','#xi_hh','#xi_sv','#xi_cdn'].forEach(function(s){$(s).onchange=ui});['#xi_pt','#xi_ho'].forEach(function(s){$(s).addEventListener('input',ui)});ui();
  $('#xi_dp').onchange=function(){if(!this.value)return;$('#xi_de').value=this.value;$('#xi_na').value=this.value.split(':')[0];this.value=''};
- $('#xi_sig').onclick=function(){var r='';for(var i=0;i<8;i++)r+=Math.floor(Math.random()*256).toString(16).padStart(2,'0');$('#xi_si').value=r};
+ $('#xi_sig').onclick=function(){var b=this;b.disabled=true;api('POST','/api/xray/keys').then(function(k){b.disabled=false;$('#xi_si').value=(k.short_ids||[k.short_id]).join(',')}).catch(function(e){b.disabled=false;fail(e)})};
  $('#xi_rp').onclick=function(){$('#xi_pt').value=xrFreePort($('#xi_sv').value,true)};
- $('#xi_kg').onclick=function(){api('POST','/api/xray/keys').then(function(k){$('#xi_pk').value=k.private;$('#xi_pb').value=k.public;if(!$('#xi_si').value)$('#xi_si').value=k.short_id}).catch(fail)};
+ $('#xi_kg').onclick=function(){api('POST','/api/xray/keys').then(function(k){$('#xi_pk').value=k.private;$('#xi_pb').value=k.public;if(!$('#xi_si').value)$('#xi_si').value=(k.short_ids||[k.short_id]).join(',')}).catch(fail)};
  $('#xi_uq').oninput=function(){var q=this.value.toLowerCase();$$('#xi_ul [data-un]').forEach(function(l){l.style.display=!q||l.dataset.un.indexOf(q)>=0?'':'none'})};
  $('#xi_ua').onclick=function(){$$('.xi_u').forEach(function(c){if(c.parentNode.style.display!='none')c.checked=true})};$('#xi_un').onclick=function(){$$('.xi_u').forEach(function(c){c.checked=false})};
  $$('[data-pre]').forEach(function(b){b.onclick=function(){var k=b.dataset.pre,set=function(i,v){$(i).value=v};
@@ -325,7 +335,7 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
    acme:cm=='auto',cert:cm=='pem'?$('#xi_ce').value.trim():'',key:cm=='pem'?($('#xi_ke').value.trim()||(ib.key=='set'?'set':'')):'',cert_file:cm=='file'?v('#xi_cf'):'',key_file:cm=='file'?v('#xi_kf'):'',fp:$('#xi_fp').value,
    dest:v('#xi_de'),names:v('#xi_na'),private:v('#xi_pk')||(ib.private=='set'?'set':''),public:v('#xi_pb'),short_ids:v('#xi_si'),spx:v('#xi_sx'),xver:+$('#xi_xv').value||0,max_time_diff:+v('#xi_mt')||0,
    sniffing:$('#xi_sn').checked,sniff_dest:$$('.xi_sd').filter(function(c){return c.checked}).map(function(c){return c.value}),sniff_override:$('#xi_so').checked,sniff_meta:$('#xi_sm2').checked,
-   cdn:$('#xi_cdn').checked,link_host:v('#xi_lh'),link_port:+v('#xi_lp')||0,link_tls:$('#xi_lt').checked,link_sni:v('#xi_ls'),total_gb:+v('#xi_tg')||0,expire:expire,
+   cdn:$('#xi_cdn').checked,cdn_address:$('#xi_cda')&&!$('#xi_cda').disabled?$('#xi_cda').value.trim():'',link_host:v('#xi_lh'),link_port:+v('#xi_lp')||0,link_tls:$('#xi_lt').checked,link_sni:v('#xi_ls'),total_gb:+v('#xi_tg')||0,expire:expire,
    only:$$('.xi_u').filter(function(c){return c.checked}).map(function(c){return +c.value}),fallbacks:FB.filter(function(f){return String(f.dest).trim()})};
   if(b.private&&b.private!='set'&&!b.public)return toast(t('Public key'),1);
   if(!b.port)return toast(t('the port is required'),1);
@@ -338,3 +348,39 @@ function xrCertAuto(ib){
 function xrFreePort(sid,random){var used=(XR.d&&XR.d.inbounds||[]).filter(function(x){return x.server==sid}).map(function(x){return +x.port}),bad=[53,80,853,10085,10853,10854];
  if(!random&&used.indexOf(443)<0)return 443;for(var i=0;i<200;i++){var p=10000+Math.floor(Math.random()*50000);if(used.indexOf(p)<0&&bad.indexOf(p)<0)return p}return 20000}
 
+
+// ---------------------------------------------------------------- (3.64) Xray users and their full client configs
+// every user with Xray ticked: state, volume, days, and per inbound its link and the complete client config
+// that Xray-core / v2rayNG import (built by the panel from the same link, CDN address included)
+function xrUsersTab(d,el){el.innerHTML='<div class="card"><div class="nh"><div><h3>'+t('Xray users')+'</h3><small class="muted">'+t('Users with Xray ticked; open one for its links and full client configs')+'</small></div>'+
+  '<div class="row"><button class="b2 sm" onclick="goUsers(\'xray\')">'+ic('users',14)+' '+t('Open in Users')+'</button></div></div>'+
+  '<div class="srch u-mb2"><label class="vh" for="xu_q">'+t('Search')+'</label><input id="xu_q" type="search" autocomplete="off" placeholder="'+t('Search by name or note…')+'"></div><div id="xu_l">'+t('Loading…')+'</div></div>';
+ var draw=function(list){var box=$('#xu_l');if(!box)return;var q=($('#xu_q').value||'').trim().toLowerCase();
+  var l=list.filter(function(u){return hasP(u,'xray')&&(!q||(u.username+' '+(u.notes||'')).toLowerCase().indexOf(q)>=0)});
+  if(!l.length){box.innerHTML='<p class="muted ku-empty">'+t(list.some(function(u){return hasP(u,'xray')})?'Nothing matches':'No users with Xray yet: tick Xray in a user\'s form')+'</p>';return}
+  box.innerHTML=l.map(function(u){var st=ustate(u),p=usage(u);
+   return '<div class="vrow xu"><span class="dot '+(u.online_connections>0?'g':st=='active'?'':st=='finished'?'y':'r')+'"></span><div class="nm"><b class="ltr"><bdi>'+esc(u.username)+'</bdi></b>'+
+    '<small>'+exactB(u.used_bytes)+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+' · '+leftTxt(u.expires_ts)+' · '+esc(t(TIER_NAMES[u.tier]||'Combo'))+'</small>'+
+    '<div class="trk"><div class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?100:Math.max(2,p))+'%"></div></div></div>'+
+    '<button class="b2 sm" data-xc="'+u.id+'">'+ic('xray',14)+' '+t('Configs')+'</button><button class="ib" data-xe="'+u.id+'" title="'+t('Edit')+'" aria-label="'+t('Edit')+'">'+ic('edit',15)+'</button></div>'}).join('')};
+ var got=function(list){S.users=list;draw(list);$('#xu_q').oninput=function(){draw(S.users||[])};
+  $('#xu_l').onclick=function(e){var c=e.target.closest('[data-xc]'),ed=e.target.closest('[data-xe]');if(c)xrUserCfgs(+c.dataset.xc);if(ed)userEditModal(+ed.dataset.xe)}};
+ if(S.users)got(S.users);api('GET','/api/users').then(function(l){if(S.page=='xray'&&XR.tab=='users')got(l)}).catch(fail)}
+// the inbounds a user gets (on, and not limited to other users), each with its link and full config
+function xrUserCfgs(uid){var d=XR.d,u=findU(uid);if(!d||!u)return;
+ var ibs=d.inbounds.filter(function(ib){return ib.enabled&&(!ib.only||!ib.only.length||ib.only.indexOf(uid)>=0)});
+ modal(mhead(t('Xray configs'),u.username)+(ibs.length?'<div class="list">'+ibs.map(function(ib){var st=xrState(ib);
+   return '<div class="vrow"><span class="dot '+st[0]+'"></span><div class="nm"><b>'+esc(ib.remark||ib.protocol)+'</b><small class="ltr">'+esc(ib.protocol+' · '+(ib.network||'tcp')+' · '+(ib.security||'none')+' · '+xrName(ib.server))+(ib.cdn_address?' · ☁️ '+esc(ib.cdn_address):'')+'</small></div>'+
+    '<button class="b2 sm" data-cf="'+esc(ib.id)+'">{ } '+t('Full client config')+'</button></div>'}).join('')+'</div>':'<p class="muted">'+t('No Xray inbound yet')+'</p>'),'wide');
+ $$('#mbox [data-cf]').forEach(function(b){b.onclick=function(){xrClientCfg(b.dataset.cf,uid,u.username)}})}
+// one inbound, one user: the share link and the complete client config, to copy or download
+function xrClientCfg(ibid,uid,name){api('GET','/api/xray/inbounds/'+encodeURIComponent(ibid)+'/client/'+encodeURIComponent(uid)).then(function(r){
+  var tx=JSON.stringify(r.config,null,2);
+  modal(mhead(t('Full client config'),name)+'<label class="f">'+t('Share link')+'</label><div class="lk ltr">'+esc(r.link)+'</div>'+
+   '<pre class="ltr" style="max-height:48vh;overflow:auto;white-space:pre;font-size:12px">'+esc(tx)+'</pre>'+
+   '<div class="g3" style="gap:8px;margin-top:10px"><button class="btn" id="xcf_cp">'+ic('copy',15)+' '+t('Copy config')+'</button><button class="b2" id="xcf_cl">'+ic('link',15)+' '+t('Copy link')+'</button><button class="b2" id="xcf_dl">'+ic('dl',15)+' '+t('Download')+'</button></div>','wide');
+  $('#xcf_cp').onclick=function(){copy(tx)};$('#xcf_cl').onclick=function(){copy(r.link)};
+  $('#xcf_dl').onclick=function(){dlText(String(name||'client').replace(/[^A-Za-z0-9_-]/g,'_')+'-'+String(ibid).replace(/[^A-Za-z0-9_-]/g,'_')+'.json',tx,'application/json')}}).catch(fail)}
+// a text the browser saves as a file
+function dlText(fname,text,type){var a=document.createElement('a'),u=URL.createObjectURL(new Blob([text],{type:type||'text/plain'}));
+ a.href=u;a.download=fname;document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(function(){URL.revokeObjectURL(u)},2000)}
