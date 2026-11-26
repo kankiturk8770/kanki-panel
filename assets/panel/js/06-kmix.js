@@ -18,7 +18,7 @@ function busyTyping(){return document.activeElement&&/INPUT|TEXTAREA|SELECT/.tes
 
 // KANKI MIX has one tab of its own: the game recorder
 var KMTABS=CTABS.concat([['record','Game recorder']]);
-function p_kmix(){KAcc.open.km='';KAcc.open.kmt='';var k=corePage('kmix','km','game','KANKI MIX',t('Our own protocol on every VPN server: game packets go straight (no queue, sent twice in gaming mode), websites over KCP + FEC.'),KMTABS);if(!k)return;KM.tab=k;
+function p_kmix(){KAcc.open.km='';KAcc.open.kmt='';var k=corePage('kmix','km','game','KANKI MIX',t('Our own protocol on every VPN server: game packets go straight (no queue, repaired only as much as the line loses), websites over KCP without FEC.'),KMTABS);if(!k)return;KM.tab=k;
  kmLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!busyTyping())kmLoad(true)},8000)}
 function tab_kmix(sub){var k=ctabOf(sub,KMTABS);if(k!=sub){location.replace('#kmix/'+k);return}KM.tab=k;coreTabsMark('kmix','km',k,KMTABS);if(KM.d)kmDraw(KM.d);else kmLoad()}
 function kmLoad(quiet){return srvLoad(true).then(function(){return api('GET','/api/kmix')}).then(function(d){KM.d=noRelays(d);if(S.page!='kmix')return d;
@@ -29,8 +29,16 @@ function kmLoad(quiet){return srvLoad(true).then(function(){return api('GET','/a
    return d}
   kmDraw(d);return d}).catch(fail)}
 function kmRun(x){return x.active===true}
-function kmStats(d){var run=d.servers.filter(kmRun).length,on=d.servers.filter(function(x){return x.on}).length;
- return kuStats([[t('Running servers'),N(run)+' / '+N(on),run<on?'y':''],[t('Users with KANKI MIX'),N(d.users)+' / '+N(d.users_total)],[t('Online now'),N(d.online),d.online?'g':''],[t('Total traffic'),'<span class="ltr">'+N(d.traffic_gb)+' GB</span>']])}
+// (3.67) the live numbers every server sends with its sync: sessions, gaming ones, the loss the apps measured
+function kmHealthSum(d){var s={sessions:0,gaming:0,hinted:0,lw:0,ls:0,any:false};(d.servers||[]).forEach(function(x){var h=x.health;if(!h)return;s.any=true;
+ s.sessions+=h.sessions||0;s.gaming+=h.gaming||0;s.hinted+=h.hinted||0;if(h.loss_permille!=null&&h.loss_sessions){s.lw+=h.loss_permille*h.loss_sessions;s.ls+=h.loss_sessions}});
+ s.loss=s.ls?s.lw/s.ls:null;return s}
+function kmLossTxt(pm){return pm==null?'—':'<span class="ltr">'+N((pm/10).toFixed(1))+'%</span>'}
+function kmLossCol(pm){return pm==null?'':pm<10?'g':pm<40?'y':'r'}
+function kmStats(d){var run=d.servers.filter(kmRun).length,on=d.servers.filter(function(x){return x.on}).length,h=kmHealthSum(d);
+ var rows=[[t('Running servers'),N(run)+' / '+N(on),run<on?'y':''],[t('Users with KANKI MIX'),N(d.users)+' / '+N(d.users_total)],[t('Online now'),N(d.online),d.online?'g':''],[t('Total traffic'),'<span class="ltr">'+N(d.traffic_gb)+' GB</span>']];
+ if(h.any)rows=rows.concat([[t('Live sessions'),N(h.sessions)+(h.gaming?' · 🎮 '+N(h.gaming):''),h.sessions?'g':''],[t('Average loss (games)'),kmLossTxt(h.loss),kmLossCol(h.loss)]]);
+ return kuStats(rows)}
 function kmState(x){if(!x.on)return ['','Off on this server'];if(kmRun(x))return ['g','Running'];if(x.error)return ['r','Not running'];return ['y','Waiting for the server…']}
 function kmDraw(d){var el=$('#km');if(!el)return;var s=d.settings;
  if(KM.tab=='record'){krDraw();return}

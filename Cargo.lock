@@ -892,7 +892,7 @@ dependencies = [
 
 [[package]]
 name = "kanki-panel"
-version = "3.66.0"
+version = "3.67.0"
 dependencies = [
  "aes-gcm",
  "axum",

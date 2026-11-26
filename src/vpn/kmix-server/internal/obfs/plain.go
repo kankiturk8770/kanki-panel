@@ -28,6 +28,8 @@ type plainPkt struct {
 // plainConn نیمه‌ی KCP بی FEC همان سوکت (سمت سرور): بسته‌هایش را حلقه‌ی خواندن اصلی می‌دهد.
 type plainConn struct {
 	parent *PacketConn
+	// kind the answers go with: KindKCPPlain, or KindKCP for an old app on a link with no FEC (Bare)
+	kind   byte
 	ch     chan plainPkt
 	done   chan struct{}
 	once   sync.Once
@@ -47,9 +49,39 @@ func (c *PacketConn) kcpKindOf() byte {
 // Plain (سمت سرور) یک net.PacketConn برای شنونده‌ی KCP بی FEC؛ فقط یک بار و پیش از شروع خواندن صدا زده شود.
 func (c *PacketConn) Plain() net.PacketConn {
 	if c.plain == nil {
-		c.plain = &plainConn{parent: c, ch: make(chan plainPkt, plainQueue), done: make(chan struct{})}
+		c.plain = &plainConn{parent: c, kind: KindKCPPlain, ch: make(chan plainPkt, plainQueue), done: make(chan struct{})}
 	}
 	return c.plain
+}
+
+// Bare (server side, panel 3.67) a net.PacketConn for a KCP listener without FEC that takes the KindKCP packets
+// of an app on a link with FEC off (fec=10-0): an app from before KindKCPPlain sends KCP without FEC framing
+// then, and its answers must come back as KindKCP, also without FEC. Called once, before reading starts.
+func (c *PacketConn) Bare() net.PacketConn {
+	if c.bare == nil {
+		c.bare = &plainConn{parent: c, kind: KindKCP, ch: make(chan plainPkt, plainQueue), done: make(chan struct{})}
+	}
+	return c.bare
+}
+
+// FECFramed: a KCP packet that carries kcp-go's FEC header (seqid 4, flag 2 little endian: 0x00f1 data, 0x00f2
+// parity). A KCP segment without it has its command (81-84) where the flag would be, so the two never mix.
+func FECFramed(p []byte) bool {
+	return len(p) >= 6 && (p[4] == 0xf1 || p[4] == 0xf2) && p[5] == 0
+}
+
+// deliverBare a KindKCP packet without FEC framing to the listener without FEC (false = there is none)
+func (c *PacketConn) deliverBare(p []byte, addr net.Addr) bool {
+	if c.bare == nil || FECFramed(p) {
+		return false
+	}
+	b := make([]byte, len(p))
+	copy(b, p)
+	select {
+	case c.bare.ch <- plainPkt{b, addr}:
+	default:
+	}
+	return true
 }
 
 // deliverPlain یک بسته‌ی KindKCPPlain را به شنونده‌اش می‌دهد (کپی، چون بافر خواندن دوباره استفاده می‌شود)
@@ -76,7 +108,7 @@ func (p *plainConn) ReadFrom(b []byte) (int, net.Addr, error) {
 }
 
 func (p *plainConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-	if err := p.parent.WritePacket(KindKCPPlain, b, addr); err != nil {
+	if err := p.parent.WritePacket(p.kind, b, addr); err != nil {
 		return 0, err
 	}
 	return len(b), nil

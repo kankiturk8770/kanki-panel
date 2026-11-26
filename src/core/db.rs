@@ -832,7 +832,8 @@ pub fn default_setting(k: &str) -> &'static str {
         "wg_tunnel_on" => "1",
         "kmix_on" => "1",
         "kmix_port" => "4000",
-        "kmix_parity" => "3",
+        // KANKI MIX: no FEC on KCP unless set (3.67); the server keeps the old parity for links still on phones
+        "kmix_parity" => "0",
         "kmix_gaming" => "1",
         "panel_name" => "Kanki Panel",
         "lang" => "fa",

@@ -47,6 +47,9 @@ type Keyring struct {
 	// امتحان همه‌ی کلیدها گران است؛ هر IP در ثانیه حداکثر scanPerSec بار (ضد سیل بسته‌ی بی‌معنی)
 	smu   sync.Mutex
 	scans map[netip.Addr]*scanBucket
+
+	// routing hints of protocol 3 clients (hints.go)
+	hints *hintTable
 }
 
 const scanPerSec = 20
@@ -74,7 +77,7 @@ func (k *Keyring) mayScan(ip netip.Addr) bool {
 }
 
 func NewKeyring() *Keyring {
-	k := &Keyring{counters: map[string]*counter{}, byAddr: map[netip.AddrPort]*addrEntry{}, scans: map[netip.Addr]*scanBucket{}}
+	k := &Keyring{counters: map[string]*counter{}, byAddr: map[netip.AddrPort]*addrEntry{}, scans: map[netip.Addr]*scanBucket{}, hints: newHintTable()}
 	go k.pruneLoop()
 	return k
 }
@@ -115,6 +118,7 @@ func (k *Keyring) Set(keys map[string]string) error {
 		}
 	}
 	k.amu.Unlock()
+	k.hints.retain(func(u *User) *User { return byKey[u.Name+"\x00"+string(u.Key)] })
 	return nil
 }
 
@@ -174,6 +178,17 @@ func (k *Keyring) open(pkt []byte, a net.Addr, out []byte) (*User, []byte, bool)
 	if !ok {
 		return nil, nil, false
 	}
+	// a hinted packet (protocol 3): its user in O(1), whatever address it comes from (a roaming phone, another
+	// path of the same session); the address is learned for the answers
+	if len(pkt) >= HintLen+overhead {
+		if h := k.hints.lookup(pkt[:HintLen]); h != nil {
+			if p, err := h.u.aead.Open(out[:0], pkt[HintLen:HintLen+nonceSize], pkt[HintLen+nonceSize:], nil); err == nil {
+				k.learn(ap, h.u)
+				h.u.ctr.rx.Add(int64(len(pkt)))
+				return h.u, p, true
+			}
+		}
+	}
 	k.amu.RLock()
 	e := k.byAddr[ap]
 	k.amu.RUnlock()
@@ -182,6 +197,14 @@ func (k *Keyring) open(pkt []byte, a net.Addr, out []byte) (*User, []byte, bool)
 			e.seen.Store(time.Now().UnixNano())
 			e.u.ctr.rx.Add(int64(len(pkt)))
 			return e.u, p, true
+		}
+		// a hinted packet from a known address whose hint has ended: the same user's key, one more try
+		if len(pkt) >= HintLen+overhead {
+			if p, err := e.u.aead.Open(out[:0], pkt[HintLen:HintLen+nonceSize], pkt[HintLen+nonceSize:], nil); err == nil {
+				e.seen.Store(time.Now().UnixNano())
+				e.u.ctr.rx.Add(int64(len(pkt)))
+				return e.u, p, true
+			}
 		}
 	}
 	if !k.mayScan(ap.Addr()) {
@@ -207,6 +230,23 @@ func (k *Keyring) open(pkt []byte, a net.Addr, out []byte) (*User, []byte, bool)
 		return u, p, true
 	}
 	return nil, nil, false
+}
+
+// learn: address ap belongs to user u now (only written when it changed)
+func (k *Keyring) learn(ap netip.AddrPort, u *User) {
+	now := time.Now().UnixNano()
+	k.amu.RLock()
+	e := k.byAddr[ap]
+	k.amu.RUnlock()
+	if e != nil && e.u == u {
+		e.seen.Store(now)
+		return
+	}
+	ne := &addrEntry{u: u}
+	ne.seen.Store(now)
+	k.amu.Lock()
+	k.byAddr[ap] = ne
+	k.amu.Unlock()
 }
 
 // sealer کلید رمز کردن بسته‌ای که به این آدرس می‌رود.
@@ -256,5 +296,6 @@ func (k *Keyring) pruneLoop() {
 			}
 		}
 		k.smu.Unlock()
+		k.hints.expire()
 	}
 }

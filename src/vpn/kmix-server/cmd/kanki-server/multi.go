@@ -13,6 +13,7 @@ package main
 //	GET  /traffic?clear=1   {"ali": {"tx": 123, "rx": 456}}   بایت روی سیم از آخرین clear
 //	GET  /online            {"ali": 1}                        دستگاه‌های فعال (۳۰ ثانیه‌ی اخیر)
 //	POST /reload            فایل کاربران دوباره خوانده می‌شود
+//	GET  /health            sessions, gaming, hinted, loss_permille … (health.go)
 
 import (
 	"crypto/subtle"
@@ -153,7 +154,7 @@ func watchUsers(ring *obfs.Keyring, path string) {
 	}
 }
 
-func serveAPI(addr, secret string, ring *obfs.Keyring, usersPath string) {
+func serveAPI(addr, secret string, ring *obfs.Keyring, usersPath string, relay *dgramRelay) {
 	authed := func(r *http.Request) bool {
 		return secret != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte(secret)) == 1
 	}
@@ -179,6 +180,14 @@ func serveAPI(addr, secret string, ring *obfs.Keyring, usersPath string) {
 			return
 		}
 		writeJSON(w, userSessions.online())
+	})
+	// live health for the panel (health.go)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if !authed(r) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		writeJSON(w, health(relay, time.Now()))
 	})
 	mux.HandleFunc("/reload", func(w http.ResponseWriter, r *http.Request) {
 		if !authed(r) || r.Method != http.MethodPost {

@@ -626,3 +626,112 @@ async fn the_four_xray_presets_save_and_the_fragment_reaches_the_clients() {
     let c2 = crate::xray::panel::client_config(&app, "b", &bad).unwrap();
     assert!(c2["outbounds"].as_array().unwrap().iter().all(|o| o["tag"] != "fragment"));
 }
+
+/// 3.67: KANKI MIX's links carry no FEC unless the admin sets it (fec=10-0, which every app reads as «no
+/// parity»), the server keeps the old parity for links still on phones, and every Iran server whose tunnel carries
+/// the port is a separate entry the user can pick (the first one stays the `@tunnel` entry of before)
+#[tokio::test]
+async fn kmix_links_have_no_fec_and_one_entry_per_iran_tunnel() {
+    let app = crate::test_app();
+    let info = r#"{"kmix_port":4000}"#;
+    app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,endpoint_mode,info) VALUES('n1','Germany','https://de.example.net:9','de.example.net','t','panel',?1)", &[&info]).unwrap();
+    let mut list = crate::tunnel::panel::servers(&app);
+    for (id, name, addr, node) in [("kde", "DE", "de.example.net", "n1"), ("kir1", "Tehran", "ir1.example.net", ""), ("kir2", "Shiraz", "ir2.example.net", "")] {
+        list.push(crate::tunnel::panel::TServer { id: id.into(), name: name.into(), addr: addr.into(), node: node.into(), ..Default::default() });
+        crate::tunnel::panel::test_seen(id, crate::VERSION);
+    }
+    crate::tunnel::panel::save_servers(&app, &list);
+    let t1 = crate::tunnel::panel::Tunnel { id: "t1".into(), entry: "kir1".into(), exit: "kde".into(), enabled: true, udp: vec!["4000".into()], ..Default::default() };
+    let t2 = crate::tunnel::panel::Tunnel { id: "t2".into(), entry: "kir2".into(), exit: "kde".into(), enabled: true, udp: vec!["4100:4000".into()], ..Default::default() };
+    crate::tunnel::panel::save_tunnels(&app, &[t1, t2]);
+    let u = app.db.create_user("mixer", 10.0, 30, 1, "kmix", "", "", 0).unwrap();
+    let n = app.db.node("n1").unwrap();
+    // no FEC by default, in a form every app reads (fec=0 alone would be read as 10-3); the server is told the old
+    // parity for links already on phones
+    let direct = crate::kmix::link(&app, &u, &n).unwrap();
+    assert!(direct.contains("fec=10-0") && !direct.contains("fec=10-3"), "{}", direct);
+    let s = crate::kmix::settings(&app);
+    let cfg = crate::kmix::cfg_for(&app, &s, &n, &[&u]);
+    assert_eq!((cfg.parity, cfg.legacy_parity), (0, 3));
+    // both Iran entries are other paths of the direct config
+    let alt = crate::util::pct("ir1.example.net:4000,ir2.example.net:4100");
+    assert!(direct.contains(&format!("alt={}", alt)), "{}", direct);
+    // the first Iran entry is the `@tunnel` entry as before, the second its own entry
+    assert!(crate::kmix::link_tunnel(&app, &u, &n).unwrap().contains("@ir1.example.net:4000?"));
+    let extra = crate::kmix::link_tunnels(&app, &u, &n);
+    assert_eq!(extra.len(), 1, "{:?}", extra);
+    assert_eq!(extra[0].0, "n1~2@tunnel");
+    assert!(extra[0].1.contains("Shiraz") && extra[0].2.contains("@ir2.example.net:4100?") && extra[0].2.contains("via=tunnel"), "{:?}", extra);
+    // the Kanki app downloads it by its entry id; another protocol has no second Iran entry
+    let base = format!("/api/config/{}/kankimix?sub={}&node=", u.id, u.code);
+    let (st, body) = get_text(&app, &format!("{}n1~2%40tunnel", base)).await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(body.contains("@ir2.example.net:4100?"), "{}", body);
+    let (st, _) = get_text(&app, &format!("/api/config/{}/wireguard?sub={}&node=n1~2%40tunnel", u.id, u.code)).await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+    for bad in ["n1~9%40tunnel", "n1~x%40tunnel", "~2%40tunnel"] {
+        let (st, _) = get_text(&app, &format!("{}{}", base, bad)).await;
+        assert_ne!(st, StatusCode::OK, "{}", bad);
+    }
+    // the subscription data: the extra entry is a tunnel entry of n1
+    let data = crate::api::sub_data_for_tests(&app, &u);
+    let e = data["nodes"].as_array().unwrap().iter().find(|x| x["id"] == "n1~2@tunnel").unwrap();
+    assert_eq!((e["via"].as_str(), e["parent"].as_str(), e["protocols"][0].as_str()), (Some("tunnel"), Some("n1"), Some("kankimix")));
+    // the admin leaves Shiraz out: no extra entry, one alt
+    let mut nodes = s.nodes.clone();
+    nodes.insert("n1".into(), crate::kmix::NodeOpt { tun_skip: vec!["kir2".into()], ..Default::default() });
+    app.db.set("kmix_nodes", &serde_json::to_string(&nodes).unwrap());
+    assert!(crate::kmix::link_tunnels(&app, &u, &n).is_empty());
+    assert!(!crate::kmix::link(&app, &u, &n).unwrap().contains("ir2.example.net"));
+    // FEC set again: the links say it, and it becomes the parity kept for later
+    let admin = token(&app, "nodes");
+    let (st, _) = call(&app, Method::PUT, "/api/kmix", Some(&admin), Some(json!({"parity": 5}))).await;
+    assert_eq!(st, StatusCode::OK);
+    let s = crate::kmix::settings(&app);
+    assert_eq!((s.parity, s.legacy_parity), (5, 5));
+    let (st, _) = call(&app, Method::PUT, "/api/kmix", Some(&admin), Some(json!({"parity": 0, "nodes": {"n1": {"tun_skip": ["kir2", "bad id;rm"]}}}))).await;
+    assert_eq!(st, StatusCode::OK);
+    let s = crate::kmix::settings(&app);
+    assert_eq!((s.parity, s.legacy_parity), (0, 5));
+    assert_eq!(s.nodes["n1"].tun_skip, vec!["kir2".to_string()]);
+}
+
+async fn get_text(app: &Arc<App>, uri: &str) -> (StatusCode, String) {
+    let res = crate::api::master_router(app.clone()).oneshot(Request::get(uri).body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let st = res.status();
+    let b = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    (st, String::from_utf8_lossy(&b).to_string())
+}
+
+/// 3.67: a server's KANKI MIX health rides its (signed) sync answer; only known, bounded numbers are kept and
+/// shown on the KANKI MIX page; an older node sends none and its answer still reads
+#[tokio::test]
+async fn kmix_health_comes_with_the_sync_and_is_cleaned() {
+    let old: crate::sync::SyncResp = serde_json::from_str(r#"{"kmix":{},"now":1}"#).unwrap();
+    assert!(old.kmix_health.is_null());
+    let raw = json!({"sessions": 12, "gaming": 5, "hinted": 4, "users": 40, "loss_permille": 7, "loss_sessions": 9,
+        "fec_parity": 0, "fec_legacy": 3, "hop": {"want": "4001-4010<script>", "active": true}, "extra": "<b>x</b>"});
+    crate::kmix::note_health("hn1", &raw);
+    let h = crate::kmix::health_of("hn1");
+    assert_eq!((h["sessions"].as_i64(), h["gaming"].as_i64(), h["loss_permille"].as_i64()), (Some(12), Some(5), Some(7)));
+    assert_eq!((h["hop"]["want"].as_str(), h["hop"]["active"].as_bool()), (Some("4001-4010"), Some(true)));
+    assert!(h.get("extra").is_none() && h["at"].as_i64().unwrap_or(0) > 0);
+    // nonsense numbers are dropped, not shown
+    crate::kmix::note_health("hn1", &json!({"sessions": -4, "loss_permille": 5000}));
+    let h = crate::kmix::health_of("hn1");
+    assert!(h["sessions"].is_null() && h["loss_permille"].is_null());
+    // a sync answer without it forgets it
+    crate::kmix::note_health("hn1", &Value::Null);
+    assert!(crate::kmix::health_of("hn1").is_null());
+    // the page lists it per server (admin only)
+    let app = crate::test_app();
+    app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,endpoint_mode,info) VALUES('hn2','DE','https://x:9','x','t','panel','{\"kmix_port\":4000}')", &[]).unwrap();
+    crate::kmix::note_health("hn2", &raw);
+    let (st, _) = call(&app, Method::GET, "/api/kmix", None, None).await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+    let admin = token(&app, "nodes");
+    let (st, v) = call(&app, Method::GET, "/api/kmix", Some(&admin), None).await;
+    assert_eq!(st, StatusCode::OK);
+    let s = v["servers"].as_array().unwrap().iter().find(|x| x["id"] == "hn2").unwrap();
+    assert_eq!(s["health"]["hinted"], 4);
+}

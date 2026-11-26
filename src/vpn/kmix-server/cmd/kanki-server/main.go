@@ -35,6 +35,9 @@ var (
 	keyHex = flag.String("key", "", "کلید ۳۲ بایتی به صورت hex (خالی = تولید تصادفی و چاپ)")
 	data   = flag.Int("fec-data", 10, "تعداد shard داده FEC")
 	parity = flag.Int("fec-parity", 3, "تعداد shard parity FEC")
+	// the parity of the links apps may still hold from before FEC went off (fec-parity 0): KCP that comes with FEC
+	// framing is answered with it; KCP without framing goes to the listener without FEC (panel 3.67)
+	fecLegacy = flag.Int("fec-legacy", 3, "parity for KCP that comes with FEC when fec-parity is 0")
 
 	// حالت چندکاربره (پنل): هر کاربر کلید خودش؛ -key لازم نیست
 	usersPath = flag.String("users", "", "فایل JSON کاربران (حالت چندکاربره)")
@@ -71,7 +74,7 @@ func main() {
 		}
 		go watchUsers(ring, *usersPath)
 		if *apiAddr != "" {
-			go serveAPI(*apiAddr, *apiSecret, ring, *usersPath)
+			go serveAPI(*apiAddr, *apiSecret, ring, *usersPath, relay)
 		}
 		relay.ring = ring
 		relayRing = ring
@@ -103,12 +106,28 @@ func main() {
 			go handleSession(sess)
 		}
 	}()
-	ln, err := kcp.ServeConn(nil, *data, *parity, oc)
+	// KCP of an old app on a link with FEC off (fec=10-0): no FEC either way (plain.go, Bare)
+	bareLn, err := kcp.ServeConn(nil, 0, 0, oc.Bare())
+	if err != nil {
+		log.Fatal(err)
+	}
+	go func() {
+		for {
+			sess, err := bareLn.AcceptKCP()
+			if err != nil {
+				log.Printf("accept (no FEC): %v", err)
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			go handleSession(sess)
+		}
+	}()
+	ln, err := kcp.ServeConn(nil, *data, legacyParity(), oc)
 	if err != nil {
 		log.Fatal(err)
 	}
 	go relay.janitor()
-	log.Printf("[kanki-server] پروتکل ۲ | گوش می‌دهم روی udp %s | FEC %d+%d", *listen, *data, *parity)
+	log.Printf("[kanki-server] پروتکل ۳ | گوش می‌دهم روی udp %s | FEC %d+%d (با FEC آمده: %d)", *listen, *data, *parity, legacyParity())
 
 	for {
 		sess, err := ln.AcceptKCP()
@@ -208,7 +227,8 @@ func relayTCP(st *smux.Stream, target string, tap *tcpTap) {
 			tc.CloseWrite() // اپ دیگر چیزی نمی‌فرستد؛ مقصد هنوز می‌تواند جواب بدهد
 		}
 	}()
-	io.Copy(countW{st, tap, 1}, rc)
+	// while the user's game plays, the download is paced so it never queues in front of it (limiter.go)
+	io.Copy(countW{st, tap, 1}, pacedReader{r: rc, user: tap.user, l: downLimit})
 	// مقصد اتصال را بست → استریم را ببند تا اپ فوراً بفهمد. smux نیم‌بسته ندارد؛ قبلاً اینجا
 	// منتظر اپ می‌ماندیم و اپ منتظر ما، و هر اتصال تا ۳۰ ثانیه آویزان می‌ماند.
 	st.Close()
@@ -223,6 +243,7 @@ type flowKey struct {
 
 type udpFlow struct {
 	key      flowKey
+	dstPort  int // the far end's port (DNS flows are never a game)
 	conn     *net.UDPConn
 	client   atomic.Pointer[net.UDPAddr] // آخرین آدرس کلاینت (با عوض شدن شبکه‌ی گوشی عوض می‌شود)
 	dup      atomic.Bool
@@ -242,11 +263,12 @@ type dgramRelay struct {
 	perSess map[uint64]int
 	sess    map[uint64]*smartSess // apps that report (smart.go)
 	paths   pathBook              // the addresses of each session (multipath.go)
+	gaming  map[uint64]int64      // sessions that said gaming mode in a hello, when (hello.go)
 }
 
 func newDgramRelay(send func(byte, []byte, net.Addr)) *dgramRelay {
 	return &dgramRelay{send: send, flows: make(map[flowKey]*udpFlow), perSess: make(map[uint64]int), sess: make(map[uint64]*smartSess),
-		paths: pathBook{m: make(map[uint64]*sessPaths)}}
+		paths: pathBook{m: make(map[uint64]*sessPaths)}, gaming: make(map[uint64]int64)}
 }
 
 // handle داخل حلقه‌ی خواندن سوکت اصلی صدا زده می‌شود؛ پس هیچ کار کندی اینجا نیست.
@@ -285,15 +307,32 @@ func (r *dgramRelay) handle(kind byte, b []byte, addr net.Addr) {
 		}
 		r.paths.note(h.Session, ua)
 		f.lastSeen.Store(time.Now().Unix())
+		// a game packet: the user's downloads give way to it while it plays (limiter.go)
+		if f.s.game.Load() || h.Flags&proto.FlagGame != 0 {
+			downLimit.noteGame(r.userOf(addr), time.Now())
+		}
 		f.mu.Lock()
 		fresh := f.win.Accept(h.Seq)
 		f.mu.Unlock()
 		r.upData(f, h, payload, fresh)
+	case proto.KindHello:
+		r.onHello(b, addr)
 	case proto.KindRepair:
 		r.onRepairUp(b, addr)
 	case proto.KindStat:
 		r.onStat(b, addr)
 	}
+}
+
+// userOf the user name of an address ("" with one key, where everyone is one user)
+func (r *dgramRelay) userOf(addr net.Addr) string {
+	if r.ring == nil {
+		return ""
+	}
+	if u := r.ring.UserOf(addr); u != nil {
+		return u.Name
+	}
+	return ""
 }
 
 // allowed در حالت چندکاربره سقف دستگاه هم‌زمان کاربر را اعمال می‌کند.
@@ -323,8 +362,12 @@ func (r *dgramRelay) getFlow(h proto.UDPUp) *udpFlow {
 	if err != nil {
 		return nil
 	}
-	f := &udpFlow{key: k, conn: c}
+	f := &udpFlow{key: k, conn: c, dstPort: target.Port}
 	f.lastSeen.Store(time.Now().Unix())
+	// a session in gaming mode (hello.go): every flow but DNS is a game from its first packet
+	if at, ok := r.gaming[k.sess]; ok && target.Port != dnsPort && time.Since(time.Unix(0, at)) < sessIdle {
+		f.s.game.Store(true)
+	}
 	r.flows[k] = f
 	r.perSess[k.sess]++
 	r.smartAdd(f)
@@ -381,7 +424,9 @@ func (r *dgramRelay) janitor() {
 			}
 		}
 		r.smartGC()
+		r.gamingGC(time.Now())
 		r.mu.Unlock()
+		downLimit.gc(time.Now())
 		r.paths.gc()
 		for _, f := range dead {
 			f.conn.Close() // readLoop خودش remove را صدا می‌زند
@@ -397,6 +442,18 @@ func tuneKCP(s *kcp.UDPSession) {
 	s.SetStreamMode(true)
 	s.SetWriteDelay(false)
 	s.SetACKNoDelay(true)
+}
+
+// legacyParity the parity of KCP that comes with FEC framing: the configured one, or (FEC off) the one the old
+// links held
+func legacyParity() int {
+	if *parity > 0 {
+		return *parity
+	}
+	if *fecLegacy > 0 {
+		return *fecLegacy
+	}
+	return 3
 }
 
 var (

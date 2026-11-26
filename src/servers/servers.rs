@@ -1681,7 +1681,7 @@ mod tests {
             insecure: false, drain: false, maint: false, accept_all: true, endpoint_mode: "custom".into(), sync_state: String::new(),
             role_raw: String::new(),
         };
-        let mut km = crate::kmix::Settings { on: true, port: 4000, parity: 3, hop: String::new(), gaming: true, nodes: Default::default() };
+        let mut km = crate::kmix::Settings { on: true, port: 4000, parity: 3, legacy_parity: 3, hop: String::new(), gaming: true, nodes: Default::default() };
         // not installed and no port of its own: nothing to hold yet
         assert!(!node_uses(&n, &km).iter().any(|u| u.proto == "kmix"));
         // given 4001 when it joined: held from then on, so the next server gets another one

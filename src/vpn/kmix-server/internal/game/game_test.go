@@ -62,8 +62,8 @@ func TestPolicy(t *testing.T) {
 		t.Fatalf("clean line still protected: %+v", pl)
 	}
 	p.Report(80, 1, 100, now)
-	if pl := p.Plan(now); pl.Every != 1 {
-		t.Fatalf("8%% loss: %+v", pl)
+	if pl := p.Plan(now); pl.Every != 4 || pl.Copy {
+		t.Fatalf("8%% loss: one repair per 4 packets (3× the loss), no copies: %+v", pl)
 	}
 	p.Report(200, 8, 100, now)
 	if pl := p.Plan(now); !pl.Copy {
@@ -142,7 +142,8 @@ func TestLater(t *testing.T) {
 
 // the repairs of one flow at the plans' rates bring back the packets a lossy line drops
 func TestRepairsAtPlanRates(t *testing.T) {
-	for _, pl := range steps[1:] {
+	for _, loss := range []uint32{5, 12, 30, 80, 200} {
+		pl := planFor(loss, 0)
 		rng := rand.New(rand.NewSource(3))
 		var tx Tx
 		var rx Rx
@@ -178,7 +179,45 @@ func TestRepairsAtPlanRates(t *testing.T) {
 
 // one short cut in an otherwise clean second is no reason to send more
 func TestLoneBurst(t *testing.T) {
-	if stepFor(0, 5) != 0 || stepFor(5, 5) != 1 || stepFor(20, 5) != 4 {
+	if planFor(0, 5) != (Plan{}) || planFor(5, 5).Every <= 2 || planFor(20, 5).Every > 2 {
 		t.Fatal("bursts on a clean line raise the protection")
+	}
+}
+
+// panel 3.67: nothing at all on a clean line; on a lossy one the repairs follow the loss (about 3 repairs for
+// every packet lost), never a fixed big step
+func TestRepairsFollowTheLoss(t *testing.T) {
+	for _, pm := range []uint32{0, 1, 2, 3} {
+		if pl := planFor(pm, 0); pl != (Plan{}) {
+			t.Fatalf("%d‰ (clean): %+v", pm, pl)
+		}
+	}
+	prev := 0
+	for pm := uint32(cleanBelow); pm <= 1000; pm++ {
+		c := cost(planFor(pm, 0))
+		if c < prev {
+			t.Fatalf("less protection for more loss at %d‰: %d < %d", pm, c, prev)
+		}
+		prev = c
+		// in proportion: between the loss and 4× it (the floor of one repair per 64 packets and the copy aside)
+		if pm < copyFrom && pm*repairFactor >= 1000/maxEvery {
+			if lo, hi := int(pm), int(pm)*4+1; c < lo || c > hi {
+				t.Fatalf("%d‰ costs %d per 1000, not in proportion [%d, %d]", pm, c, lo, hi)
+			}
+		}
+	}
+	// a measured clean line after a lossy one: the repairs stop within a calm while, not at once
+	var p Policy
+	now := time.Now()
+	p.Report(50, 0, 100, now)
+	p.Report(0, 0, 100, now.Add(time.Second))
+	if p.Plan(now.Add(time.Second)).Every == 0 {
+		t.Fatal("dropped at the first clean second")
+	}
+	for i := 2; i < 40; i++ {
+		p.Report(0, 0, 100, now.Add(time.Duration(i)*time.Second))
+	}
+	if pl := p.Plan(now.Add(39 * time.Second)); pl != (Plan{}) {
+		t.Fatalf("still sending on a clean line: %+v", pl)
 	}
 }

@@ -113,7 +113,12 @@ window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')
    '<span class="kxr-st '+(st[0]||'')+'">'+t(st[1])+'</span>'+(x.second?'<span class="kxr-st g">+ '+t('tunnel')+'</span>':'')+'<small class="ltr">UDP '+N(port)+'</small>';
   return accRow('km',x.id,head,function(){return kmBody(d,r)})}
  function kmBody(d,r){var x=r.k,o=(d.settings.nodes||{})[x.id]||{},id=esc(x.id),port=x.port||x.want_port,tun=o.route=='tunnel',ni=id,via=x.route_via;
+  var hl=x.health,hp=hl&&hl.hop||{};
   var h='<div class="kxr-line"><span><b>'+t(kmState(x)[1])+'</b></span><span>·</span><span>'+N(x.users)+' '+t('users')+'</span><span>·</span><span class="ltr">'+esc(x.endpoint||'?')+':'+esc(String(port))+(x.parity!=null?' · FEC 10+'+esc(String(x.parity)):'')+'</span></div>'+
+   // (3.67) live: sessions, gaming ones, those on routing hints (new apps), the loss the apps measured, the extra ports
+   (hl&&!hl.old?'<div class="kxr-line"><span>'+t('Live sessions')+': <b>'+N(hl.sessions||0)+'</b></span><span>·</span><span>🎮 '+N(hl.gaming||0)+'</span><span>·</span><span>'+t('Fast roaming')+': '+N(hl.hinted||0)+'</span><span>·</span><span>'+t('Average loss (games)')+': <b class="'+kmLossCol(hl.loss_permille)+'">'+kmLossTxt(hl.loss_permille)+'</b></span>'+
+    (hp.want?'<span>·</span><span>'+t('Extra ports')+' <span class="ltr">'+esc(hp.want)+'</span>: <b class="'+(hp.active?'g':'r')+'">'+t(hp.active?'Active':'Not active')+'</b></span>':'')+'</div>':
+    hl&&hl.old?'<div class="kxr-line"><span class="muted">'+t('Update this server to see its live numbers')+'</span></div>':'')+
    '<div class="kxsw"><span>'+t('KANKI MIX on this server')+'</span>'+sw('',x.on,"kmNodeOn('"+id+"',this.checked)")+'</div>'+
    '<div class="kxr-sec">'+t('Port of this server')+'</div><div class="kxm-row"><div><input id="km_p1" class="ltr" inputmode="numeric" value="'+esc(String(port||''))+'"></div><button class="btn sm" id="km_ps">'+t('Save port')+'</button></div><div class="kxm-warn" id="km_pw"></div>'+
    '<div class="kxr-sec">'+t('Route')+'</div><div class="kxf"><div><select id="km_rt1"><option value=""'+(tun?'':' selected')+'>'+t("Direct (the server's own address)")+' · '+esc(x.direct_host||'?')+'</option><option value="tunnel"'+(tun?' selected':'')+'>'+t('Through the tunnel (Iran server)')+' · '+esc(x.tunnel_host||'?')+'</option></select></div>'+
@@ -143,9 +148,12 @@ window.p_wg=function(){protoPage('wg')};window.p_awg=function(){protoPage('awg')
    return ''+
    '<label class="kxsw" style="cursor:pointer"><span>'+(x.second?t('Users also get')+' <b class="ltr">'+esc(x.second.host)+':'+esc(String(x.second.port))+'</b>':t('Make a tunnel that carries this port: the second config comes by itself'))+'</span><input type="checkbox" id="km_t21" style="width:auto"'+(o.tun_off?'':' checked')+'></label>'+
    '<div class="kxf"><div class="wide"><label class="f">'+t('Name in the app')+'</label><input id="km_tn1" maxlength="40" placeholder="'+esc(x.name+' ('+t('tunnel')+')')+'" value="'+esc(o.tun_name||'')+'"></div></div>'+
+   // (3.67) the other Iran servers whose tunnels carry the port: each its own entry in the app, on or off here
+   ((x.entries||[]).filter(function(e){return !e.first}).length?'<label class="f">'+t('More Iran entries (each a separate config in the app)')+'</label>'+
+    (x.entries||[]).filter(function(e){return !e.first}).map(function(e){return '<label class="kxsw" style="cursor:pointer"><span>'+esc(e.name)+' · <b class="ltr">'+esc(e.host)+':'+esc(String(e.port))+'</b></span><input type="checkbox" class="km_ent" data-sid="'+esc(e.sid)+'" style="width:auto"'+(e.on?' checked':'')+'></label>'}).join(''):'')+
    '<div class="kxr-line">'+(via?viaLine(via,x.name):'')+'</div>'+
     '<div class="kxsave"><button class="b2 sm" onclick="closeModal()">'+t('Cancel')+'</button><button class="btn sm" onclick="kmSaveTun(\''+id+'\')">'+t('Save')+'</button></div>'}
-  window.kmSaveTun=function(id){var m=kmNodes(),o=m[id]||{};o.tun_off=!$('#km_t21').checked;o.tun_host='';o.tun_port=0;o.tun_name=$('#km_tn1').value.trim();m[id]=o;
+  window.kmSaveTun=function(id){var m=kmNodes(),o=m[id]||{};o.tun_off=!$('#km_t21').checked;o.tun_host='';o.tun_port=0;o.tun_name=$('#km_tn1').value.trim();o.tun_skip=$$('.km_ent').filter(function(c){return !c.checked}).map(function(c){return c.dataset.sid});m[id]=o;
    api('PUT','/api/kmix',{nodes:m}).then(function(){toast(t('Saved'));closeModal();kmLoad(true)}).catch(fail)};
   ACC.draw.kmt=function(){var c=$('#km_tun');if(c&&KM.d)c.innerHTML=kmTunRows(KM.d)};
  

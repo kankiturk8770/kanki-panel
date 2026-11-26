@@ -31,49 +31,70 @@ const (
 	staleAfter = 6 * time.Second
 )
 
-// the steps, from a clean line to a broken one; each costs more than the one before. The game itself is a few
-// tens of KB a second, so protecting it well costs little; on a clean line nothing is added at all. A repair is
-// as long as the longest packet it covers, so for scattered loss few repairs over short windows are the
-// cheapest; a run of lost packets needs a repair after every packet over a long window (a copy a moment later is
-// inside the same run and is lost with it); only a line that loses most of everything gets a copy too.
-var steps = []Plan{
-	{},                              // 0 clean: nothing extra, the game goes as it is
-	{Every: 8, Win: 16},             // 1 a little loss (under ~1 %): one repair per 8 packets
-	{Every: 4, Win: 12},             // 2 1-3 %
-	{Every: 2, Win: 12},             // 3 3-8 %
-	{Every: 1, Win: 16},             // 4 8-20 %, or runs of lost packets on a lossy line
-	{Every: 1, Win: 16, Copy: true}, // 5 the line loses a fifth of everything or more
+// How much to send (panel 3.67): on a clean line nothing at all; on a lossy one repairs in proportion to the loss
+// the other side measured, never a fixed step that costs more than the line needs.
+//
+//	loss < cleanBelow ‰           nothing (no repair, no copy)
+//	otherwise                     one repair per Every packets, Every = 1000 / (loss‰ × repairFactor), 1..maxEvery
+//	runs of lost packets          at most every 2 packets (a copy a moment later is inside the same run)
+//	loss ≥ copyFrom ‰             a copy of every packet too
+//
+// So the repairs are about repairFactor times the packets the line loses: enough to rebuild them, and on a line
+// that loses little only a trickle (one repair per 64 packets of a game at 0.5 %). A repair covers the newest Win
+// packets of the flow.
+const (
+	cleanBelow   = 4
+	repairFactor = 3
+	maxEvery     = 64
+	copyFrom     = 200
+	burstLoss    = 12
+	burstRun     = 4
+	winWide      = 16
+	winNarrow    = 12
+)
+
+// planFor: the plan the measured loss (permille) and its longest run of lost packets call for
+func planFor(permille, burst uint32) Plan {
+	if permille < cleanBelow {
+		return Plan{}
+	}
+	every := int((2000/(permille*repairFactor) + 1) / 2) // rounded
+	every = min(max(every, 1), maxEvery)
+	// a run of lost packets only counts on a line that really loses: one short cut in a clean second is not a
+	// reason to send more for the next seconds
+	if permille >= burstLoss && burst >= burstRun {
+		every = min(every, 2)
+	}
+	win := winWide
+	if every > 1 && every <= 4 {
+		win = winNarrow
+	}
+	return Plan{Every: every, Win: win, Copy: permille >= copyFrom}
 }
 
-// stepFor: the step the measured loss (permille) and its longest run of lost packets call for
-// A run of lost packets only counts on a line that really loses: one short cut in a clean second is not a
-// reason to send more for the next seconds.
-func stepFor(permille, burst uint32) int {
-	s := 0
-	switch {
-	case permille >= 200:
-		s = 5
-	case permille >= 80:
-		s = 4
-	case permille >= 30:
-		s = 3
-	case permille >= 12:
-		s = 2
-	case permille >= 4:
-		s = 1
+// cost: what a plan adds for every 1000 packets of the game
+func cost(p Plan) int {
+	c := 0
+	if p.Every > 0 {
+		c = 1000 / p.Every
 	}
-	if permille >= 12 && burst >= 4 {
-		s = max(s, 4)
+	if p.Copy {
+		c += 1000
 	}
-	return s
+	return c
 }
+
+// startPlan: a game flow before the first real measure (it comes within a second): a light protection, never
+// copies; also when the other side stopped telling
+var startPlan = Plan{Every: winWide, Win: winWide}
 
 // Policy: the plan of one direction, from what the other side measured on it. It goes up at once when
-// the line gets worse and down one step only after calmFor of a better line, so a quiet second never takes
-// the protection away in the middle of a fight.
+// the line gets worse and down only after calmFor of a better line (halfway each time), so a quiet second never
+// takes the protection away in the middle of a fight.
 type Policy struct {
 	mu       sync.Mutex
-	step     int
+	permille uint32
+	burst    uint32
 	started  time.Time
 	report   time.Time
 	better   time.Time // since when the reports ask for less
@@ -100,20 +121,25 @@ func (p *Policy) Report(permille, burst, n uint32, now time.Time) {
 		}
 		return
 	}
-	want := stepFor(permille, burst)
 	if !p.measured {
 		// the first real measure replaces the start guess, up or down
-		p.measured, p.step, p.better, p.report = true, want, time.Time{}, now
+		p.measured, p.permille, p.burst, p.better, p.report = true, permille, burst, time.Time{}, now
 		return
 	}
+	want, have := cost(planFor(permille, burst)), cost(planFor(p.permille, p.burst))
 	switch {
-	case want > p.step:
-		p.step, p.better = want, time.Time{}
-	case want < p.step:
+	case want > have:
+		p.permille, p.burst, p.better = permille, burst, time.Time{}
+	case want < have:
 		if p.better.IsZero() {
 			p.better = now
 		} else if now.Sub(p.better) >= calmFor {
-			p.step--
+			// halfway down, never below what is measured now
+			p.permille = max(permille, p.permille/2)
+			if p.permille < cleanBelow {
+				p.permille = permille
+			}
+			p.burst = burst
 			p.better = now
 		}
 	default:
@@ -126,19 +152,31 @@ func (p *Policy) Report(permille, burst, n uint32, now time.Time) {
 func (p *Policy) Plan(now time.Time) Plan {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	s := p.step
 	fresh := !p.report.IsZero() && now.Sub(p.report) < staleAfter
-	if !fresh {
-		// nothing measured (yet, or not any more): only a light protection (a repair every 4 packets), never
-		// copies; the first report comes within a second and says what the line needs
-		s = 1
+	if !fresh || !p.measured {
+		return startPlan
 	}
-	return steps[s]
+	return planFor(p.permille, p.burst)
 }
 
-// Step: the current step (0..5), for the stats
+// Step: how hard this direction is protected now, 0..5 (0 = nothing is sent besides the game), for the peer
+// (KindStat) and the stats
 func (p *Policy) Step() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.step
+	pl := planFor(p.permille, p.burst)
+	switch {
+	case pl.Copy:
+		return 5
+	case pl.Every == 0:
+		return 0
+	case pl.Every <= 2:
+		return 4
+	case pl.Every <= 5:
+		return 3
+	case pl.Every <= 15:
+		return 2
+	default:
+		return 1
+	}
 }

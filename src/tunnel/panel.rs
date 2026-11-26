@@ -2113,6 +2113,22 @@ pub fn port_entry_at(app: &App, sid: &str, port: u16, tcp: bool, host: &str) -> 
     port_entry(app, sid, port, tcp)
 }
 
+/// Every Iran entry whose tunnel brings UDP `port` to server `sid`, one per entry server, in the order of the
+/// tunnels: (entry server id, the port it gives there). Empty = no tunnel carries the port (panel 3.67: each is
+/// a separate KANKI MIX entry of the server).
+pub fn udp_entries(app: &App, sid: &str, port: u16) -> Vec<(String, u16)> {
+    let list: Vec<Tunnel> = route_list(app);
+    let mut out: Vec<(String, u16)> = vec![];
+    for t in list.iter().filter(|t| t.exit == sid) {
+        let Some((a, _)) = crate::tunnel::engine::parse_ports(&t.udp).into_iter().find(|(_, b)| *b == port) else { continue };
+        let first = walk_back_by(&list, &t.entry, a, false).pop().unwrap_or_else(|| (t.entry.clone(), a));
+        if !out.iter().any(|x| x.0 == first.0) {
+            out.push(first);
+        }
+    }
+    out
+}
+
 /// Some Kanki port tunnel (not a layer-3 AmneziaWG one, which carries every port) ends at server `sid`.
 /// A server with one carries only the ports its tunnels list: a second config on any other port would
 /// lead nowhere. A server with none has its tunnel set up elsewhere (or a layer-3 one): its ports stay.

@@ -166,3 +166,53 @@
   button without the code, marks sent, gaming menu without V2Ray, v2rayNG buttons and URLs, AmneziaVPN Play and 4 steps),
   `persian_lines_start_right_to_left_and_nothing_else_changes`, `a_card_number_is_copied_as_digits`; the purchase tests now
   check the tier labels, the price lines, the numbered buttons and their 2–3 columns.
+
+## Phase 5 — 3.67.0: KANKI MIX protocol 3 (server + panel), old apps unchanged (done)
+
+### Routing hints and roaming (`internal/obfs/hints.go`, `internal/proto/hello.go`, `cmd/kanki-server/hello.go`)
+- New kinds `KindHello` (0x09, client→server: session, version, caps, send time) and `KindHelloAck` (0x0A: the same +
+  an 8-byte hint + its life). Both ride inside the obfs AEAD with the user's key; an old server drops unknown kinds
+  silently, an old app never sends one. A hello older/newer than 2 min gets nothing (no replayed hint).
+- A protocol 3 client puts the hint in front of its packets: `[8B hint][12B nonce][AEAD…]`. `Keyring.open` looks the
+  hint up first (O(1) map → that one user's key), learns the new address for the answers, then the old way (known
+  address, then the rate-limited scan of every key) for old clients. A hinted packet from a known address with an
+  ended hint is still opened with that user's key.
+- Hints: random, unique, `HintTTL` 10 min, the newest 4 per session, 200 000 in all; a removed user's hints end at
+  `Keyring.Set`; expired ones pruned every minute.
+- `HelloCapGaming`: every UDP flow of the session except DNS (port 53) is a game from its first packet; the session gets
+  smart protection at once (`smartFromHello`: caps repair/copy/multi).
+
+### Gaming path
+- `limiter.go`: while a user's game plays (a game packet within 2 s), their TCP downloads are paced by a per-user token
+  bucket on the read from the far server (TCP flow control, nothing dropped); AIMD from the app's loss reports (>15 ‰ ×0.7,
+  <5 ‰ +96 KB/s, 160 KB/s–5 MB/s); no limit with no game.
+- `internal/game/policy.go`: repairs in proportion to the measured loss — none under 4 ‰, else one per
+  `round(1000 / (3·loss‰))` packets (1–64), at most every 2 on runs of loss, a copy at ≥ 200 ‰; down halfway per calm 4 s.
+  `startPlan` (one per 16) only before the first measure or when reports stop.
+- KCP: links say `fec=10-0` (parity default 0, `kmix_parity` default changed; `fec=0` alone is read by apps as 10-3).
+  The server has a third listener without FEC for `KindKCP` without FEC framing (`obfs.Bare`, `FECFramed`: byte 4 =
+  0xf1/0xf2), and answers framed KCP with `-fec-legacy` (the last parity above 0, setting `kmix_parity_legacy`, default 3),
+  so links still on phones keep working. kcp-go also decodes either form on input.
+
+### Panel
+- Multiple Iran entries (`kmix::tunnel_entries`, `tunnel::panel::udp_entries`): every Iran server whose tunnel carries
+  the KANKI MIX UDP port, nothing typed (3.61 rule kept). The first stays the `<id>@tunnel` entry; the others are entries
+  `<id>~<k>@tunnel` (k = 2…4; the app reads any id ending in `@tunnel` as a tunnel entry) in the data block, the page and
+  `/api/config/…kankimix?node=`; other protocols refuse them (404). The direct link's `alt` lists all of them (the app uses
+  two). `NodeOpt.tun_skip` leaves an Iran server out (KANKI MIX page › Tunnel, a switch each; ids validated).
+- Telemetry: Go `GET /health` (sessions, gaming, hinted, users, weighted average loss ‰ of the last minute, fec) +
+  node-side `hop_state` (NAT rule really in place) → `SyncResp.kmix_health` (serde default: older nodes read as Null) on
+  the signed `/agent/sync` → `kmix::note_health` (only known bounded numbers kept) → `GET /api/kmix` `servers[].health`.
+  UI: status tiles «نشست‌های زنده» / «میانگین افت (بازی)», and a live line per server (sessions, gaming, fast roaming,
+  loss, extra ports active).
+
+### Tests
+- Go: `hints_test.go` (O(1) roaming even with the IP's scans used up, old format beside, unknown/ended hints, removed
+  user, load under `-race`), `hello_test.go` over real UDP (hello → hint, roam to a new socket, game from the first packet,
+  DNS not, answers to the new address, replayed hello refused; old ping unchanged; KCP 10-0 and 10-3 both echo; limiter;
+  health average), `game_test.go` (zero on clean, proportional cost, calm-down).
+- Rust: `access_tests::{kmix_links_have_no_fec_and_one_entry_per_iran_tunnel, kmix_health_comes_with_the_sync_and_is_cleaned}`.
+
+### Still open
+- The client side (kanki-app `kmix-core`) does not send `KindHello` or hinted packets yet: until it does, every app uses
+  the old path. The server side, the panel and the tests are ready for it.

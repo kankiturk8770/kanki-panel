@@ -50,6 +50,8 @@ pub struct KmixCfg {
     pub on: bool,
     pub port: u16,
     pub parity: u8,
+    /// the parity of KCP that still comes with FEC (links apps hold from before FEC went off); 0 = 3
+    pub legacy_parity: u8,
     /// extra UDP ports "first-last" sent on to `port` (the app picks one at random), "" = none
     pub hop: String,
     pub users: Vec<KmixUser>,
@@ -78,13 +80,33 @@ pub struct NodeOpt {
     pub tun_off: bool,
     /// the name of the second config in the app ("" = "<server name> (تانل)")
     pub tun_name: String,
+    /// the Iran servers (tunnel server ids) whose tunnels also carry the port but are not offered as an entry of
+    /// their own (panel 3.67; the first one is the second config above)
+    pub tun_skip: Vec<String>,
 }
+
+/// One Iran entry of a server's KANKI MIX: the Iran server, its address and the port it gives (panel 3.67)
+#[derive(Clone, Debug, PartialEq)]
+pub struct TunEntry {
+    /// the Iran server's id ("" = not known: an address given by the server's endpoint)
+    pub sid: String,
+    pub host: String,
+    pub port: u16,
+    /// its name in the app
+    pub name: String,
+}
+
+/// At most this many Iran entries a server offers (the first is the second config of before)
+pub const MAX_TUN_ENTRIES: usize = 4;
 
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub on: bool,
     pub port: u16,
+    /// FEC parity of the links (KCP of apps from before KindKCPPlain); 0 = no FEC (the default, panel 3.67)
     pub parity: u8,
+    /// the last parity above 0 (the links apps may still hold): KCP that comes with FEC is answered with it
+    pub legacy_parity: u8,
     pub hop: String,
     /// gaming mode (each game packet sent twice) on by default in the app
     pub gaming: bool,
@@ -96,7 +118,10 @@ pub fn settings(app: &App) -> Settings {
     Settings {
         on: db.get("kmix_on") != "0",
         port: db.get("kmix_port").parse().ok().filter(|p| *p > 0).unwrap_or(DEFAULT_PORT),
-        parity: db.get("kmix_parity").parse().ok().filter(|p| *p <= 10).unwrap_or(3),
+        // FEC for TCP is off unless set (3.67): KCP resends by itself, parity only cost bandwidth; newer apps use
+        // KCP without FEC anyway (KindKCPPlain)
+        parity: db.get("kmix_parity").parse().ok().filter(|p| *p <= 10).unwrap_or(0),
+        legacy_parity: db.get("kmix_parity_legacy").parse().ok().filter(|p| *p > 0 && *p <= 10).unwrap_or(3),
         hop: valid_hop(&db.get("kmix_hop")).unwrap_or_default(),
         gaming: db.get("kmix_gaming") != "0",
         nodes: role_nodes(app, serde_json::from_str(&db.get("kmix_nodes")).unwrap_or_default()),
@@ -303,7 +328,7 @@ pub fn cfg_for(app: &App, s: &Settings, n: &Node, users: &[&User]) -> KmixCfg {
         .filter(|u| u.has_proto("kmix"))
         .map(|u| KmixUser { name: u.username.clone(), key: user_key(app, u), max: if limit_on { u.max_conn } else { 0 } })
         .collect();
-    KmixCfg { on: true, port: s.node_port(&n.id), parity: s.parity, hop: s.hop.clone(), users }
+    KmixCfg { on: true, port: s.node_port(&n.id), parity: s.parity, legacy_parity: s.legacy_parity, hop: s.hop.clone(), users }
 }
 
 /// The last apply error of each server (shown on the KANKI MIX page)
@@ -349,10 +374,11 @@ pub fn link(app: &App, u: &User, n: &Node) -> Option<String> {
     }
     let host = link_host(app, &s, n);
     let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
-    // multipath (app 1.44): the Iran tunnel entry of this server is another path of the same config
-    if let Some((th, tp)) = tunnel_target(app, &s, n, port as u16) {
-        let th = if th.contains(':') && !th.starts_with('[') { format!("[{}]", th) } else { th };
-        q.push_str(&format!("&alt={}", crate::util::pct(&format!("{}:{}", th, tp))));
+    // multipath (app 1.44): the Iran tunnel entries of this server are other paths of the same config (3.67: every
+    // one offered, the app takes the first two)
+    let alts: Vec<String> = tunnel_entries(app, &s, n, port as u16).into_iter().map(|e| bracket_host(&e.host) + ":" + &e.port.to_string()).collect();
+    if !alts.is_empty() {
+        q.push_str(&format!("&alt={}", crate::util::pct(&alts.join(","))));
     }
     Some(format!("kanki://{}@{}:{}?{}#{}", user_key(app, u), host, port, q, crate::util::pct(&n.name)))
 }
@@ -364,6 +390,83 @@ pub fn tunnel_name(app: &App, n: &Node) -> String {
     crate::twin::named(&n.name, &name)
 }
 
+/// An IPv6 address in brackets, anything else as it is
+fn bracket_host(h: &str) -> String {
+    if h.contains(':') && !h.starts_with('[') { format!("[{}]", h) } else { h.to_string() }
+}
+
+/// Every Iran entry of server `n` for KANKI MIX `port`, the second config of before first (its address the way it
+/// always was found), then the other Iran servers whose tunnels carry the same port, minus the ones the admin
+/// left out; at most MAX_TUN_ENTRIES. Nothing is typed: every address comes from the tunnels (3.61).
+pub fn tunnel_entries(app: &App, s: &Settings, n: &Node, port: u16) -> Vec<TunEntry> {
+    let opt = s.nodes.get(&n.id).cloned().unwrap_or_default();
+    let Some((host, tport)) = tunnel_target(app, s, n, port) else { return vec![] };
+    let sid = crate::twin::sid_of_node(app, &n.id);
+    let all = if sid.is_empty() { vec![] } else { crate::tunnel::panel::udp_entries(app, &sid, port) };
+    let names = crate::tunnel::panel::server_names(app);
+    let first_sid = all.iter().find(|(e, _)| crate::tunnel::panel::host_of(app, e) == host).map(|x| x.0.clone()).unwrap_or_default();
+    let mut out = vec![TunEntry { sid: first_sid, host: host.clone(), port: tport, name: tunnel_name(app, n) }];
+    for (e, p) in all {
+        if out.len() >= MAX_TUN_ENTRIES {
+            break;
+        }
+        let h = crate::tunnel::panel::host_of(app, &e);
+        if h.is_empty() || out.iter().any(|x| x.host == h || x.sid == e) || opt.tun_skip.iter().any(|x| x == &e) {
+            continue;
+        }
+        let via = names.get(&e).cloned().unwrap_or_else(|| e.clone());
+        out.push(TunEntry { sid: e, host: h, port: p, name: crate::twin::named(&n.name, &format!("تانل {}", via)) });
+    }
+    out
+}
+
+/// The user's link through Iran entry `e` of server `n`: the same key and options as the direct one, the entry's
+/// address, and the server itself as the other path
+fn link_via(app: &App, u: &User, n: &Node, e: &TunEntry, display: &str) -> Option<String> {
+    let first = link(app, u, n)?;
+    let q = first.split_once('?').map(|x| x.1).unwrap_or("").split('#').next().unwrap_or("");
+    // the extra ports exist on the server, not on the Iran address; the other path of this one is the server itself
+    let direct = first.split_once('@').map(|x| x.1).unwrap_or("").split('?').next().unwrap_or("").to_string();
+    let alt = format!("alt={}", crate::util::pct(&direct));
+    let mut q: Vec<&str> = q.split('&').filter(|p| !p.starts_with("ports=") && !p.starts_with("alt=")).collect();
+    q.push(&alt);
+    Some(format!("kanki://{}@{}:{}?{}&via=tunnel#{}", user_key(app, u), bracket_host(&e.host), e.port, q.join("&"), crate::util::pct(display)))
+}
+
+/// The other Iran entries of a server, each its own entry in the subscription (3.67): (entry id in the
+/// subscription, its name, the user's link). The first Iran entry stays the server's `@tunnel` entry.
+pub fn link_tunnels(app: &App, u: &User, n: &Node) -> Vec<(String, String, String)> {
+    let s = settings(app);
+    let Some(port) = crate::api::node_info(n)["kmix_port"].as_u64().filter(|p| *p > 0) else { return vec![] };
+    tunnel_entries(app, &s, n, port as u16)
+        .into_iter()
+        .enumerate()
+        .skip(1)
+        .filter_map(|(i, e)| link_via(app, u, n, &e, &e.name).map(|l| (extra_id(&n.id, i + 1), e.name.clone(), l)))
+        .collect()
+}
+
+/// The subscription id of Iran entry `k` (2, 3 …) of server `nid`: "<nid>~<k>@tunnel" (an app reads every id that
+/// ends in "@tunnel" as a tunnel entry)
+pub fn extra_id(nid: &str, k: usize) -> String {
+    format!("{}~{}{}", nid, k, crate::api::TUNNEL_SUFFIX)
+}
+
+/// The server and the entry number of an extra entry id without its "@tunnel" ("n2~3" -> ("n2", 3))
+pub fn parse_extra(id: &str) -> Option<(&str, usize)> {
+    let (nid, k) = id.rsplit_once('~')?;
+    let k: usize = k.parse().ok().filter(|k| (2..=MAX_TUN_ENTRIES).contains(k))?;
+    (!nid.is_empty()).then_some((nid, k))
+}
+
+/// The user's link through Iran entry `k` (2, 3 …) of server `n`
+pub fn link_tunnel_k(app: &App, u: &User, n: &Node, k: usize) -> Option<String> {
+    let s = settings(app);
+    let port = crate::api::node_info(n)["kmix_port"].as_u64().filter(|p| *p > 0)? as u16;
+    let e = tunnel_entries(app, &s, n, port).into_iter().nth(k.checked_sub(1)?)?;
+    link_via(app, u, n, &e, &e.name)
+}
+
 /// The user's second link for one server, through the tunnel (the Iran address): the same key and
 /// options as the first, another address. None = no second config there.
 pub fn link_tunnel(app: &App, u: &User, n: &Node) -> Option<String> {
@@ -372,7 +475,7 @@ pub fn link_tunnel(app: &App, u: &User, n: &Node) -> Option<String> {
     let info = crate::api::node_info(n);
     let port = info["kmix_port"].as_u64().filter(|p| *p > 0)? as u16;
     let (host, tport) = tunnel_target(app, &s, n, port)?;
-    let host = if host.contains(':') && !host.starts_with('[') { format!("[{}]", host) } else { host };
+    let host = bracket_host(&host);
     let q = first.split_once('?').map(|x| x.1).unwrap_or("").split('#').next().unwrap_or("");
     // the extra ports exist on the server, not on the Iran address; the other path of this one is the server itself
     let direct = first.split_once('@').map(|x| x.1).unwrap_or("").split('?').next().unwrap_or("").to_string();
@@ -494,6 +597,7 @@ pub fn apply(c: &KmixCfg) -> Result<(), String> {
     }
     let port = if c.port > 0 { c.port } else { DEFAULT_PORT };
     let parity = c.parity.min(10);
+    let legacy = if c.legacy_parity == 0 { 3 } else { c.legacy_parity.min(10) };
     std::fs::create_dir_all(DIR).map_err(|e| format!("cannot make {}: {}", DIR, e))?;
     let bin_changed = ensure_bin()?;
     let (api_port, api_secret) = api_conf()?;
@@ -501,8 +605,8 @@ pub fn apply(c: &KmixCfg) -> Result<(), String> {
     let users = serde_json::to_string(&json!({ "users": c.users })).map_err(|e| e.to_string())?;
     let users_changed = write_if_changed(USERS_FILE, &users, 0o600)?;
     let unit = format!(
-        "# written by kanki-panel\n[Unit]\nDescription=KANKI MIX (Kanki VPN)\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nEnvironmentFile={env}\nExecStart={bin} -listen :{port} -users {users} -api 127.0.0.1:{api} -fec-data {d} -fec-parity {p}\nRestart=always\nRestartSec=3\nLimitNOFILE=1048576\n\n[Install]\nWantedBy=multi-user.target\n",
-        env = ENV_FILE, bin = BIN, port = port, users = USERS_FILE, api = api_port, d = FEC_DATA, p = parity
+        "# written by kanki-panel\n[Unit]\nDescription=KANKI MIX (Kanki VPN)\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nEnvironmentFile={env}\nExecStart={bin} -listen :{port} -users {users} -api 127.0.0.1:{api} -fec-data {d} -fec-parity {p} -fec-legacy {l}\nRestart=always\nRestartSec=3\nLimitNOFILE=1048576\n\n[Install]\nWantedBy=multi-user.target\n",
+        env = ENV_FILE, bin = BIN, port = port, users = USERS_FILE, api = api_port, d = FEC_DATA, p = parity, l = legacy
     );
     let unit_changed = write_if_changed(UNIT, &unit, 0o644)?;
     if unit_changed {
@@ -593,6 +697,74 @@ pub async fn record_local(b: &Value) -> Value {
         return json!({"error": format!("KANKI MIX: HTTP {}", r.status().as_u16())});
     }
     r.json::<Value>().await.unwrap_or_else(|_| json!({"error": "KANKI MIX sent no JSON"}))
+}
+
+/// KANKI MIX's live health on this server for the panel (3.67): what its /health says (sessions, gaming
+/// sessions, sessions with routing hints, the loss the apps measured on the game's answers, the FEC), and whether
+/// the extra ports really lead to it (the NAT rule is in place). Null when KANKI MIX does not run here; an older
+/// server without /health gives only the extra ports.
+pub async fn health() -> Value {
+    let Some((port, secret)) = api_here() else { return Value::Null };
+    static C: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    let c = C.get_or_init(|| reqwest::Client::builder().timeout(std::time::Duration::from_secs(3)).build().unwrap_or_default());
+    let mut v = match c.get(format!("http://127.0.0.1:{}/health", port)).header("Authorization", secret).send().await {
+        Ok(r) if r.status().is_success() => r.json::<Value>().await.unwrap_or_else(|_| json!({})),
+        Ok(_) => json!({ "old": true }),
+        Err(e) => json!({ "error": e.without_url().to_string() }),
+    };
+    let hop = tokio::task::spawn_blocking(hop_state).await.unwrap_or_else(|_| json!({ "want": "", "active": false }));
+    v["hop"] = hop;
+    v
+}
+
+/// The extra ports this server should forward and whether the NAT rule doing it is there. Blocking.
+fn hop_state() -> Value {
+    let st: Value = std::fs::read_to_string(STATE_FILE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let want = st["hop"].as_str().unwrap_or("").to_string();
+    let active = !want.is_empty()
+        && sh("iptables -t nat -S PREROUTING 2>/dev/null").1.lines().any(|l| l.contains(HOP_TAG) && l.contains(&format!("--dport {}", want.replace('-', ":"))));
+    json!({ "want": want, "active": active })
+}
+
+/// The last health each server reported (in memory: the next sync brings it again)
+fn healths() -> &'static Mutex<HashMap<String, (i64, Value)>> {
+    static H: std::sync::OnceLock<Mutex<HashMap<String, (i64, Value)>>> = std::sync::OnceLock::new();
+    H.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// A server's sync answer carried its KANKI MIX health (Null = none: forgotten)
+pub fn note_health(node_id: &str, v: &Value) {
+    let mut g = healths().lock().unwrap_or_else(|e| e.into_inner());
+    if v.is_null() {
+        g.remove(node_id);
+    } else {
+        g.insert(node_id.to_string(), (crate::util::now(), clean_health(v)));
+    }
+}
+
+/// Only the known numbers of a health answer, bounded (it comes from the server; it is shown in the panel)
+fn clean_health(v: &Value) -> Value {
+    let n = |k: &str| v[k].as_i64().filter(|x| (0..=10_000_000).contains(x)).map(Value::from).unwrap_or(Value::Null);
+    let want: String = v["hop"]["want"].as_str().unwrap_or("").chars().filter(|c| c.is_ascii_digit() || *c == '-').take(11).collect();
+    json!({
+        "sessions": n("sessions"), "gaming": n("gaming"), "hinted": n("hinted"), "users": n("users"),
+        "loss_permille": v["loss_permille"].as_i64().filter(|x| (0..=1000).contains(x)), "loss_sessions": n("loss_sessions"),
+        "fec_parity": n("fec_parity"), "fec_legacy": n("fec_legacy"),
+        "hop": { "want": want, "active": v["hop"]["active"].as_bool().unwrap_or(false) },
+        "old": v["old"].as_bool().unwrap_or(false),
+    })
+}
+
+/// The last health of a server and when it came (Null = none yet)
+pub fn health_of(node_id: &str) -> Value {
+    match healths().lock().unwrap_or_else(|e| e.into_inner()).get(node_id) {
+        Some((at, v)) => {
+            let mut v = v.clone();
+            v["at"] = json!(at);
+            v
+        }
+        None => Value::Null,
+    }
 }
 
 /// What this server reports about KANKI MIX (for the links and the panel)
@@ -706,6 +878,8 @@ async fn get_all(axum::extract::State(app): St, h: axum::http::HeaderMap) -> axu
             // the Kanki tunnels that bring this server's port (["Iran", "Turkey"]), Null = none: a typed
             // Iran address then needs a forward made some other way
             "route_via": info["kmix_port"].as_u64().and_then(|p| route_of(&app, n, p as u16)).map(|(v, p)| json!({"via": v, "port": p})),
+            // 3.67: every Iran entry that carries the port (the first is the second config), with whether it is offered
+            "entries": info["kmix_port"].as_u64().map(|p| entries_json(&app, &s, n, p as u16)).unwrap_or_else(|| json!([])),
             "on": s.node_on(&n.id), "want_port": s.node_port(&n.id),
             "port": info["kmix_port"], "parity": info["kmix_parity"], "hop": info["kmix_hop"],
             "active": info["kmix_active"], "installed": !info["kmix_port"].is_null(), "users": here,
@@ -713,6 +887,8 @@ async fn get_all(axum::extract::State(app): St, h: axum::http::HeaderMap) -> axu
             "version": info["version"],
             // the other UDP ports of this server (a clash with them is refused)
             "used_ports": [info["wg_port"], info["awg_port"], info["hy2_port"]],
+            // 3.67: live numbers from the server's last sync (Null = none yet, or an older server)
+            "health": health_of(&n.id),
         })
     }).collect();
     let online = with.iter().filter(|u| u.online > 0).count();
@@ -720,6 +896,21 @@ async fn get_all(axum::extract::State(app): St, h: axum::http::HeaderMap) -> axu
         "settings": settings_json(&s), "servers": servers, "users": with.len(), "users_total": users.len(),
         "online": online, "traffic_gb": (with.iter().map(|u| u.used_gb()).sum::<f64>() * 10.0).round() / 10.0,
     })).into_response()
+}
+
+/// The Iran entries of a server for the KANKI MIX page: each that carries the port, the ones the admin left out too
+/// (`on` false), so they can be switched back on
+fn entries_json(app: &App, s: &Settings, n: &Node, port: u16) -> Value {
+    let skip = s.nodes.get(&n.id).map(|o| o.tun_skip.clone()).unwrap_or_default();
+    let mut all = s.clone();
+    if let Some(o) = all.nodes.get_mut(&n.id) {
+        o.tun_skip.clear();
+    }
+    json!(tunnel_entries(app, &all, n, port)
+        .into_iter()
+        .enumerate()
+        .map(|(i, e)| json!({ "sid": e.sid, "host": e.host, "port": e.port, "name": e.name, "first": i == 0, "on": !skip.contains(&e.sid) }))
+        .collect::<Vec<_>>())
 }
 
 fn port_of(v: &Value) -> Option<u16> {
@@ -756,8 +947,14 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
                 off: v["off"].as_bool().unwrap_or(false), port: port_of(&v["port"]).unwrap_or(0), route, host,
                 tun_host, tun_port: 0, tun_off: v["tun_off"].as_bool().unwrap_or(false),
                 tun_name,
+                // the Iran servers not offered as an entry of their own: ids of tunnel servers only, a few
+                tun_skip: v["tun_skip"].as_array().map(|a| {
+                    a.iter().filter_map(|x| x.as_str()).map(|x| x.trim().to_string())
+                        .filter(|x| !x.is_empty() && x.len() <= 40 && x.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+                        .take(16).collect()
+                }).unwrap_or_default(),
             };
-            if opt.off || opt.port > 0 || !opt.route.is_empty() || !opt.host.is_empty() || !opt.tun_host.is_empty() || opt.tun_port > 0 || opt.tun_off || !opt.tun_name.is_empty() {
+            if opt.off || opt.port > 0 || !opt.route.is_empty() || !opt.host.is_empty() || !opt.tun_host.is_empty() || opt.tun_port > 0 || opt.tun_off || !opt.tun_name.is_empty() || !opt.tun_skip.is_empty() {
                 nodes.insert(id.clone(), opt);
             }
         }
@@ -770,7 +967,9 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
         }
     }
     // a port that clashes with WireGuard / AmneziaWG / Hysteria2 of a server, or inside the extra ports
-    let next = Settings { on: b["on"].as_bool().unwrap_or(cur.on), port, parity, hop, gaming: b["gaming"].as_bool().unwrap_or(cur.gaming), nodes };
+    // the last parity above 0 is kept: links apps still hold may carry it (the server answers them with it)
+    let legacy_parity = if parity > 0 { parity } else { cur.legacy_parity };
+    let next = Settings { on: b["on"].as_bool().unwrap_or(cur.on), port, parity, legacy_parity, hop, gaming: b["gaming"].as_bool().unwrap_or(cur.gaming), nodes };
     for n in app.db.nodes() {
         if !next.node_on(&n.id) {
             continue;
@@ -799,6 +998,7 @@ async fn put_settings(axum::extract::State(app): St, h: axum::http::HeaderMap, a
     db.set("kmix_on", if next.on { "1" } else { "0" });
     db.set("kmix_port", &next.port.to_string());
     db.set("kmix_parity", &next.parity.to_string());
+    db.set("kmix_parity_legacy", &next.legacy_parity.to_string());
     db.set("kmix_hop", &next.hop);
     db.set("kmix_gaming", if next.gaming { "1" } else { "0" });
     db.set("kmix_nodes", &serde_json::to_string(&next.nodes).unwrap_or_else(|_| "{}".into()));
@@ -864,7 +1064,7 @@ mod tests {
 
     #[test]
     fn route_and_host_options() {
-        let mut s = Settings { on: true, port: 4000, parity: 3, hop: String::new(), gaming: true, nodes: HashMap::new() };
+        let mut s = Settings { on: true, port: 4000, parity: 3, legacy_parity: 3, hop: String::new(), gaming: true, nodes: HashMap::new() };
         assert!(!s.node_tunnel("de"));
         s.nodes.insert("de".into(), NodeOpt { route: "tunnel".into(), ..Default::default() });
         assert!(s.node_tunnel("de"));
@@ -905,7 +1105,7 @@ mod tests {
 
     #[test]
     fn settings_per_node() {
-        let mut s = Settings { on: true, port: 4000, parity: 3, hop: String::new(), gaming: true, nodes: HashMap::new() };
+        let mut s = Settings { on: true, port: 4000, parity: 3, legacy_parity: 3, hop: String::new(), gaming: true, nodes: HashMap::new() };
         s.nodes.insert("n1".into(), NodeOpt { off: false, port: 5000, ..Default::default() });
         s.nodes.insert("n2".into(), NodeOpt { off: true, port: 0, ..Default::default() });
         assert_eq!(s.node_port("n1"), 5000);

@@ -63,6 +63,10 @@ pub struct SyncResp {
     pub kmix_online: HashMap<String, i64>,
     #[serde(default)]
     pub kmix_error: String,
+    /// KANKI MIX's live health on this server (3.67, `kmix::health`): sessions, gaming, hinted, the loss the
+    /// apps measured, the extra ports; Null = an older node, or KANKI MIX off
+    #[serde(default)]
+    pub kmix_health: Value,
     /// this server's clock (unix seconds) when it answered: handshake times are compared with it,
     /// not with the panel's clock (an older node sends 0)
     #[serde(default)]
@@ -153,7 +157,7 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
         *rep.entry(k.clone()).or_default() += v;
     }
     *app.reported.lock().unwrap_or_else(|e| e.into_inner()) = rep;
-    let (mut kmix, mut kmix_online, mut kmix_error) = (HashMap::new(), HashMap::new(), String::new());
+    let (mut kmix, mut kmix_online, mut kmix_error, mut kmix_health) = (HashMap::new(), HashMap::new(), String::new(), Value::Null);
     if let Some(cfg) = req.kmix {
         // traffic first: a restart below would lose what was not read yet
         kmix = crate::kmix::traffic().await;
@@ -166,13 +170,14 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
         }
         *last_kmix_err().lock().unwrap_or_else(|e| e.into_inner()) = Some(kmix_error.clone()).filter(|e| !e.is_empty());
         kmix_online = crate::kmix::online().await;
+        kmix_health = crate::kmix::health().await;
     }
     // the firewall rule an older version opened for MIX+ is closed once
     static MIXPLUS_GONE: std::sync::Once = std::sync::Once::new();
     MIXPLUS_GONE.call_once(|| {
         tokio::task::spawn_blocking(|| crate::fw::close("kcore"));
     });
-    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, now: now() }
+    SyncResp { wg: w, awg: a, hy2, hy2_online, kmix, kmix_online, kmix_error, kmix_health, now: now() }
 }
 
 /// 3.60: microtun and KPING are gone (KANKI MIX does their work, with two paths). What they left on a server
@@ -817,6 +822,7 @@ pub async fn sync_all(app: &Arc<App>) {
             .chain(resp.kmix_online.iter().filter(|x| *x.1 > 0).map(|x| (x.0.clone(), "kmix"))).collect();
         forget_sessions(&n.id, |uid, proto| users.iter().find(|u| u.id == uid).is_some_and(|u| open_now.contains(&(u.username.clone(), proto))));
         crate::kmix::note_error(&n.id, &resp.kmix_error);
+        crate::kmix::note_health(&n.id, &resp.kmix_health);
         for (uid, b) in add_bytes.iter() {
             let d = b - before.get(uid).copied().unwrap_or(0);
             if d > 0 {

@@ -1413,7 +1413,7 @@ var FA={
  "Optional, created if empty":"خالی بماند: خودکار USER1، USER2 و…",
  "Other":"بدون دسته",
  "Other sites answered by":"جواب سایت‌های دیگر از",
- "Our own protocol on every VPN server: game packets go straight (no queue, sent twice in gaming mode), websites over KCP + FEC.":"پروتکل خودمان روی همه‌ی سرورهای VPN: بسته‌های بازی مستقیم می‌روند (بدون صف، در حالت گیمینگ دوتایی)، سایت‌ها روی KCP + FEC.",
+ "Our own protocol on every VPN server: game packets go straight (no queue, repaired only as much as the line loses), websites over KCP without FEC.":"پروتکل خودمان روی همه‌ی سرورهای VPN: بسته‌های بازی مستقیم می‌روند (بی صف، ترمیم فقط به اندازه‌ی افت خط) و سایت‌ها روی KCP بدون FEC.",
  "Our own protocol: games, low ping":"پروتکل خودمان: بازی، پینگ کم",
  "Our own protocols on the nodes":"پروتکل‌های خودمان روی نودها",
  "Outbounds":"خروجی‌ها (اوت‌باند)",
@@ -2630,5 +2630,12 @@ var FA={
 "The client splits its TLS hello so a filter cannot read the SNI from one packet (in the links and full configs)":"کاربر بسته‌ی شروع TLS را تکه‌تکه می‌فرستد تا فیلتر نتواند SNI را از یک بسته بخواند (در لینک‌ها و کانفیگ کامل)",
 "a site you trust":"سایتی که به آن اطمینان دارید",
 "Filled in":"پر شد",
+"Live sessions":"نشست‌های زنده",
+"Average loss (games)":"میانگین افت (بازی)",
+"Fast roaming":"جابه‌جایی سریع",
+"Extra ports":"پورت‌های اضافه",
+"Not active":"فعال نیست",
+"Update this server to see its live numbers":"برای دیدن آمار زنده، این سرور را به‌روز کنید",
+"More Iran entries (each a separate config in the app)":"ورودی‌های دیگر ایران (هر کدام یک کانفیگ جدا در اپ)",
 "WireGuard, AmneziaWG, Hysteria2 and KANKI MIX are not installed here yet: switching one on installs them (a few minutes), inside Iran as abroad.":"وایرگارد، امنزیا، هیستریا۲ و KANKI MIX هنوز روی این سرور نصب نیستند: با روشن کردن هر کدام خودکار نصب می‌شوند (چند دقیقه)، داخل ایران هم مثل خارج."
 };

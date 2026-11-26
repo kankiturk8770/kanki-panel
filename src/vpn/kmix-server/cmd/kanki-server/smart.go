@@ -103,6 +103,11 @@ func (r *dgramRelay) onStat(b []byte, addr net.Addr) {
 	s.upStep.Store(int32(st.Step))
 	s.at.Store(now.UnixNano())
 	s.downPol.Report(uint32(st.Loss), uint32(st.Burst), uint32(st.Count), now)
+	// the same loss steers the user's downloads while their game plays (limiter.go)
+	if st.Count >= 10 {
+		downLimit.report(r.userOf(addr), st.Loss)
+	}
+	noteLoss(st.Session, st.Loss, st.Count, now)
 
 	var sum game.Sum
 	s.mu.Lock()

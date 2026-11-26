@@ -57,6 +57,8 @@ type PacketConn struct {
 	kcpKind byte
 	// plain شنونده‌ی KCP بی FEC (سمت سرور، plain.go؛ nil = ندارد)
 	plain *plainConn
+	// bare the listener without FEC for KindKCP sent with FEC off (server side, plain.go; nil = none)
+	bare *plainConn
 	// MarkGame (سمت سرور): بسته‌های غیر KCP (بازی و پینگ) با علامت GameTOS می‌روند تا تانل Game-FEC Pro همین سرور
 	// فقط آن‌ها را بازی بداند؛ KCP بی علامت. اگر کرنل علامت را قبول نکرد، بسته ساده می‌رود.
 	MarkGame bool
@@ -218,6 +220,9 @@ func (c *PacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
 			c.Tap(true, kind, m, p, addr)
 		}
 		if kind == KindKCPPlain && c.kcpKind != KindKCPPlain && c.deliverPlain(p, addr) {
+			continue
+		}
+		if kind == KindKCP && c.kcpKind == 0 && c.deliverBare(p, addr) {
 			continue
 		}
 		if kind != c.kcpKindOf() {
