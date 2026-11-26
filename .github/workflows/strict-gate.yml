@@ -1,0 +1,40 @@
+name: Strict Engineering Gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  quality-and-security-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Block Placeholders & Dummy Code
+        run: |
+          if grep -rnE '\b(TODO|FIXME|PLACEHOLDER)\b|todo!\(\)|unimplemented!\(\)' --include='*.go' --include='*.rs' --include='*.kt' --include='*.sh' . ; then
+            echo "ERROR: Found banned placeholder or incomplete code."
+            exit 1
+          fi
+
+      - name: Check Shell Scripts
+        run: |
+          sh_files=$(find . -name '*.sh' -not -path './.git/*')
+          if [ -n "$sh_files" ]; then
+            echo "$sh_files" | xargs shellcheck
+          fi
+
+      - name: Verify Go
+        if: hashFiles('**/go.mod') != ''
+        run: |
+          find . -name 'go.mod' -execdir sh -c 'go vet ./... && go test -race ./...' \;
+
+      - name: Verify Rust
+        if: hashFiles('**/Cargo.toml') != ''
+        run: |
+          find . -name 'Cargo.toml' -execdir sh -c 'cargo clippy --all-targets -- -D warnings && cargo test' \;
+
+      - name: Verify Kotlin / Android
+        if: hashFiles('**/gradlew') != ''
+        run: |
+          find . -name 'gradlew' -execdir sh -c 'chmod +x gradlew && ./gradlew testDebugUnitTest' \;
