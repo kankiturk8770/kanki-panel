@@ -263,6 +263,9 @@ fn migrate_access(c: &Connection) -> rusqlite::Result<()> {
     for (id, protos) in rows {
         tx.execute("UPDATE users SET tier=?1 WHERE id=?2", params![tier_of_protocols(&protos).as_str(), id])?;
     }
+    // 3.65: the emergency chat is gone; its settings (the message signing key, the admin password hash,
+    // its certificate and key) are not kept
+    tx.execute(r"DELETE FROM settings WHERE k LIKE 'emer\_%' ESCAPE '\'", [])?;
     tx.commit()
 }
 

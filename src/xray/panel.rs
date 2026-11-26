@@ -118,6 +118,28 @@ pub struct Inbound {
     pub fallbacks: Vec<Fallback>,
     /// TLS: the certificate of the SNI domain from certbot on the server (Let's Encrypt, renewed by itself)
     pub acme: bool,
+    /// TLS only: the client splits its TLS ClientHello (3.65), so a filter that reads the SNI from the
+    /// first packet does not see it whole. Links carry `fragment=<FRAGMENT>`, and the full client configs
+    /// send the proxy through a freedom outbound that fragments.
+    pub fragment: bool,
+}
+
+/// The client-side fragment the links of a `fragment` inbound carry: packets, length, interval (ms)
+pub const FRAGMENT: (&str, &str, &str) = ("tlshello", "100-200", "10-20");
+
+/// `fragment=packets,length,interval` of a link, when it has one in a form Xray takes
+fn link_fragment(link: &str) -> Option<(String, String, String)> {
+    let q = link.split('#').next()?.split_once('?')?.1;
+    let v = q.split('&').find_map(|kv| kv.strip_prefix("fragment="))?;
+    let v = v.replace("%2C", ",").replace("%2c", ",");
+    let mut it = v.split(',');
+    let (p, l, i) = (it.next()?.to_string(), it.next()?.to_string(), it.next()?.to_string());
+    let range = |x: &str| {
+        let (a, b) = x.split_once('-').unwrap_or((x, x));
+        !a.is_empty() && !b.is_empty() && a.len() <= 5 && b.len() <= 5 && a.bytes().chain(b.bytes()).all(|c| c.is_ascii_digit())
+    };
+    let packets_ok = p == "tlshello" || range(&p);
+    (it.next().is_none() && packets_ok && range(&l) && range(&i)).then_some((p, l, i))
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -808,6 +830,14 @@ const CLIENT_HTTP_PORT: u16 = 10809;
 pub fn client_config(app: &App, name: &str, link: &str) -> Result<Value, String> {
     let mut proxy = link_outbound(link)?;
     proxy["tag"] = json!("proxy");
+    // a fragment link (3.65): the proxy dials through a freedom outbound that splits the TLS ClientHello
+    let frag = link_fragment(link).map(|(p, l, i)| json!({ "tag": "fragment", "protocol": "freedom", "settings": { "fragment": { "packets": p, "length": l, "interval": i } } }));
+    if frag.is_some() {
+        if !proxy["streamSettings"].is_object() {
+            proxy["streamSettings"] = json!({});
+        }
+        proxy["streamSettings"]["sockopt"] = json!({ "dialerProxy": "fragment" });
+    }
     let dns: Vec<String> = app.db.get("dns").split(',').map(|x| x.trim().to_string()).filter(|x| x.parse::<std::net::IpAddr>().is_ok()).collect();
     let mut c = json!({
         "remarks": name,
@@ -823,6 +853,9 @@ pub fn client_config(app: &App, name: &str, link: &str) -> Result<Value, String>
     });
     if !dns.is_empty() {
         c["dns"] = json!({ "servers": dns });
+    }
+    if let (Some(f), Some(o)) = (frag, c["outbounds"].as_array_mut()) {
+        o.push(f);
     }
     Ok(c)
 }
@@ -1079,6 +1112,9 @@ fn link_with(_s: &XraySettings, ib: &Inbound, u: &User, server_addr: &str) -> Op
     }
     if sec == "tls" && !ib.alpn.is_empty() && !ib.link_tls {
         q.push(format!("alpn={}", pct(&list(&ib.alpn).join(","))));
+    }
+    if sec == "tls" && ib.fragment {
+        q.push(format!("fragment={},{},{}", FRAGMENT.0, FRAGMENT.1, FRAGMENT.2));
     }
     if sec == "reality" {
         q.push(format!("pbk={}", ib.public));
@@ -1929,6 +1965,8 @@ async fn put_inbound(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
     }
     if ib.security != "tls" {
         ib.acme = false;
+        // the fragment splits a TLS ClientHello: nothing to split without TLS (REALITY keeps its own)
+        ib.fragment = false;
     }
     if ib.acme {
         // empty SNI = the domain of the server (its certificate is shared)

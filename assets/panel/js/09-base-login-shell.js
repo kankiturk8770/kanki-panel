@@ -4,8 +4,7 @@ var WFA=[
  // the panel's answers with a port or a name in them (tunnels, the smart test)
  [/^(UDP|TCP) port (\d+) is already used by the tunnel "([^"]*)"$/,'پورت $1 $2 را تانل «$3» گرفته است'],
  [/^(UDP|TCP) port (\d+) is already used by (Kanki DNS|Xray|WireGuard|AmneziaWG|Hysteria2|KANKI MIX)$/,'پورت $1 $2 را $3 گرفته است'],
- [/^(UDP|TCP) port (\d+) is already used by the emergency chat$/,'پورت $1 $2 را چت اضطراری گرفته است'],
- [/^(UDP|TCP) port (\d+) on (.+?) is already used by (.+?): pick another port$/,'پورت $1 $2 روی $3 را $4 گرفته است؛ پورت دیگری انتخاب کن'],
+  [/^(UDP|TCP) port (\d+) on (.+?) is already used by (.+?): pick another port$/,'پورت $1 $2 روی $3 را $4 گرفته است؛ پورت دیگری انتخاب کن'],
  [/^(UDP|TCP) port (\d+) is used twice in this tunnel$/,'پورت $1 $2 در این تانل دو بار آمده'],
  [/^UDP port ([\d, ]+) is busy$/,'پورت UDP $1 اشغال است'],
  [/^the clocks of the two servers differ by (\d+) s \(more than (\d+) s\): set the time on both$/,'ساعت دو سرور $1 ثانیه با هم فرق دارد (بیش از $2 ثانیه): ساعت هر دو را درست کن'],
@@ -139,6 +138,7 @@ var ICO={clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
  swap:'<path d="M6 8h12l-3.2-3.2M18 16H6l3.2 3.2"/>',
  image:'<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-4.5 3.5 3 3-2.5 4.5 4"/>',
  chev:'<path d="M6 9l6 6 6-6"/>',
+ logs:'<path d="M6 3.5h9l3.5 3.5v13.5H6z"/><path d="M15 3.5V7h3.5M9 11h6M9 14.5h6M9 18h4"/>',
  sos:'<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.5"/><path d="M6 6l3.5 3.5M18 6l-3.5 3.5M6 18l3.5-3.5M18 18l-3.5-3.5"/>',
  bell:'<path d="M6 16.5V11a6 6 0 1 1 12 0v5.5l1.5 2H4.5z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
  globe:'<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5c2.6 2.6 3.8 5.4 3.8 8.5S14.6 17.9 12 20.5C9.4 17.9 8.2 15.1 8.2 12S9.4 6.1 12 3.5z"/>',
@@ -245,7 +245,7 @@ function loginView(otp){$('#app').innerHTML='';document.body.className='';applyL
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
 
 // ---------------------------------------------------------------- shell
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['emergency','Emergency chat','sos'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['logs','Logs','logs'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);

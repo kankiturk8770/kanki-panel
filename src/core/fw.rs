@@ -1,5 +1,5 @@
 //! The firewall (ufw) ports Kanki opens, kept per service ("owner": the tunnels, Kanki DNS, Xray, the
-//! emergency chat, KANKI MIX …), so a port is closed again as soon as what needed it is removed: a
+//! KANKI MIX …), so a port is closed again as soon as what needed it is removed: a
 //! deleted tunnel, a DNS server taken out of the panel, an Xray inbound, a server removed from the panel.
 //!
 //! A port is closed only when no other owner still needs it, never for SSH, and never while a program

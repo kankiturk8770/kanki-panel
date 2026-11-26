@@ -139,6 +139,11 @@ impl rustls::client::danger::ServerCertVerifier for Pinned {
 /// How long opening a connection may take. A server whose packets are dropped (filtered, gone) is given up
 /// on after this, not after the whole request timeout: one such server held every sync round for 45 s.
 pub const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// A kept-alive connection to a server or the panel is reused this long when idle (the polls every few
+/// seconds keep it open: no new TCP and TLS handshake for each)
+pub const POOL_IDLE: std::time::Duration = std::time::Duration::from_secs(90);
+/// TCP keepalive on those connections, so a NAT on the way does not drop them while idle
+pub const TCP_KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub fn pinned_client(pin_file: &Path, timeout: std::time::Duration) -> reqwest::Client {
     let mut cfg = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
@@ -152,6 +157,8 @@ pub fn pinned_client(pin_file: &Path, timeout: std::time::Duration) -> reqwest::
         .timeout(timeout)
         .connect_timeout(CONNECT_TIMEOUT)
         .use_preconfigured_tls(cfg)
+        .pool_idle_timeout(POOL_IDLE)
+        .tcp_keepalive(TCP_KEEPALIVE)
         .build()
         .expect("pinned http client")
 }

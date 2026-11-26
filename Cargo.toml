@@ -1,6 +1,6 @@
 [package]
 name = "kanki-panel"
-version = "3.64.0"
+version = "3.65.0"
 edition = "2021"
 
 [dependencies]
@@ -42,7 +42,7 @@ libc = "0.2"
 h2 = "0.4"
 http = "1"
 bytes = "1"
-# emergency chat server (signing + serving axum over TLS)
+# signing (ring) and serving axum over TLS (Kanki DNS over HTTPS)
 ring = "0.17"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
 # the panel page and script are sent gzipped once compressed (850 KB → ~250 KB on a phone)

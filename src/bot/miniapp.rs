@@ -843,7 +843,9 @@ mod tests {
         let u = app.db.create_user("mahtab87", 10.0, 30, 1, "hy2", "", "", 0).unwrap();
         let t = crate::api::links_text(&app, &u).expect("a Hysteria2 user has links");
         let lines: Vec<&str> = t.lines().collect();
-        assert_eq!(lines[0], format!("https://panel.example.com/sub/{}/v2", u.sub_code()));
+        // hashed (3.65): the code itself is never in the link
+        assert_eq!(lines[0], format!("https://panel.example.com/sub/h/{}/v2", crate::sublink::hash_of(&app, &u)));
+        assert!(!lines[0].contains(&u.code));
         assert!(lines.len() >= 2 && lines[1..].iter().all(|l| l.starts_with("hysteria2://")), "{}", t);
         // the same links the subscription itself holds, so the copied configs and the subscription agree
         assert_eq!(lines[1..].to_vec(), crate::api::v2_links(&app, &u).iter().map(|s| s.as_str()).collect::<Vec<_>>());

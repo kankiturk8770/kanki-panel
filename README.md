@@ -485,12 +485,10 @@ kanki-panel/
 │   │   └── transport/      the wire protocols: quic, hq, salamander, h2ws, dual, obfs, mux, fec, game, faketcp, awg, hy2t
 │   ├── xray/               mod.rs (Xray on a server), panel.rs (Xray in the panel, links)
 │   ├── dns/                Kanki DNS (engine, DoH, SNI, panel)
-│   └── emergency/          the emergency chat
 ├── assets/
 │   ├── panel/              index.html, panel.css, js/01…18-*.js (the panel script in parts, joined in order)
 │   ├── bot/                miniapp.html (the bot's mini app)
 │   ├── sub/                sub.html (the user's subscription page)
-│   ├── emergency/          admin.html (emergency chat admin)
 │   ├── fonts/              Vazirmatn (shared)
 │   ├── dns/, bin/          DNS service lists, the KANKI MIX server binary
 ├── docs/                   INSTALL.md, API.md, CHANGES.md, HQ-TUNNEL.md, STANDALONE-FA.md, examples/, systemd/

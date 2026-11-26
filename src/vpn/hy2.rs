@@ -142,6 +142,90 @@ pub fn ensure_acl() {
     eprintln!("hysteria2: its users can no longer reach this server's loopback (acl added)");
 }
 
+/// The key Hysteria's login check sends to `/hy2/auth` (3.65). Hysteria cannot sign a request, so its
+/// auth URL carries a key only this machine knows (`?k=`, file mode 0600); with the key in place a call
+/// without it, or with another, is refused even from the loopback.
+pub const AUTH_KEY_FILE: &str = "/etc/kanki/hy2-auth.key";
+
+/// The key `/hy2/auth` asks for (None = not set up here yet: loopback only, as before)
+pub fn auth_key() -> Option<String> {
+    std::fs::read_to_string(AUTH_KEY_FILE).ok().map(|k| k.trim().to_string()).filter(|k| k.len() >= 32)
+}
+
+/// `conf` with the key on its `/hy2/auth` URL: (new config, key in it). A URL that already has a key keeps
+/// it; None when the config has no such URL (no Hysteria here, or an auth this panel did not write).
+pub fn with_auth_key(conf: &str, key: &str) -> Option<(String, String)> {
+    let mut out = String::with_capacity(conf.len() + 80);
+    let mut used: Option<String> = None;
+    for line in conf.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\n', '\r']);
+        let t = body.trim_start();
+        if used.is_none() {
+            if let Some(url) = t.strip_prefix("url:").map(|u| u.trim()) {
+                if url.starts_with("http://127.0.0.1:") && url.contains("/hy2/auth") {
+                    if let Some((_, k)) = url.split_once("?k=") {
+                        used = Some(k.to_string());
+                        out.push_str(line);
+                        continue;
+                    }
+                    let indent = &body[..body.len() - t.len()];
+                    out.push_str(&format!("{}url: {}?k={}{}", indent, url, key, &line[body.len()..]));
+                    used = Some(key.to_string());
+                    continue;
+                }
+            }
+        }
+        out.push_str(line);
+    }
+    used.filter(|k| k.len() >= 32 && k.bytes().all(|c| c.is_ascii_alphanumeric())).map(|k| (out, k))
+}
+
+/// Puts the key on this machine's Hysteria auth URL once (restarting Hysteria) and keeps it in
+/// `AUTH_KEY_FILE`, where `/hy2/auth` reads it. If Hysteria does not start with it, the old config comes
+/// back and no key is asked for. Blocking.
+pub fn ensure_auth_key() {
+    const CONF: &str = "/etc/hysteria/config.yaml";
+    let Ok(t) = std::fs::read_to_string(CONF) else { return };
+    let Some((new, key)) = with_auth_key(&t, &crate::util::rand_token(48)) else { return };
+    let save_key = |k: &str| {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let r = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(AUTH_KEY_FILE).and_then(|mut f| f.write_all(k.as_bytes()));
+        if let Err(e) = r {
+            eprintln!("hysteria2: cannot keep the auth key: {}", e);
+        }
+    };
+    if new == t {
+        // the config already carries a key: the file must know it
+        if auth_key().as_deref() != Some(key.as_str()) {
+            save_key(&key);
+        }
+        return;
+    }
+    let active = || std::process::Command::new("systemctl").args(["is-active", "--quiet", "hysteria-server.service"]).status().map(|s| s.success()).unwrap_or(false);
+    let was_active = active();
+    if let Err(e) = std::fs::write(CONF, &new) {
+        eprintln!("hysteria2: cannot write its config: {}", e);
+        return;
+    }
+    if let Err(e) = std::process::Command::new("systemctl").args(["try-restart", "hysteria-server.service"]).status() {
+        eprintln!("hysteria2: cannot restart it: {}", e);
+    }
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    if was_active && !active() {
+        if let Err(e) = std::fs::write(CONF, &t) {
+            eprintln!("hysteria2: cannot put its previous config back: {}", e);
+        }
+        if let Err(e) = std::process::Command::new("systemctl").args(["restart", "hysteria-server.service"]).status() {
+            eprintln!("hysteria2: cannot restart it: {}", e);
+        }
+        eprintln!("hysteria2: it did not start with the auth key, the previous config is back");
+        return;
+    }
+    save_key(&key);
+    eprintln!("hysteria2: its login check now carries a key only this server knows");
+}
+
 /// The Hysteria2 password of an account: made from its subscription code but not the code itself, so a shared
 /// hysteria2:// link does not open the subscription (and every other config) of its owner
 pub fn user_pass(code: &str) -> String {
@@ -152,6 +236,24 @@ pub fn user_pass(code: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_auth_url_gets_a_key_once() {
+        let conf = "listen: :8443\nauth:\n  type: http\n  http:\n    url: http://127.0.0.1:2096/hy2/auth\ntrafficStats:\n  listen: 127.0.0.1:9999\n";
+        let key = "a".repeat(48);
+        let (new, k) = with_auth_key(conf, &key).unwrap();
+        assert_eq!(k, key);
+        assert!(new.contains(&format!("    url: http://127.0.0.1:2096/hy2/auth?k={}\n", key)));
+        assert_eq!(new.replace(&format!("?k={}", key), ""), conf);
+        // a second time: the key already there is kept, nothing changes
+        let (again, k2) = with_auth_key(&new, &"b".repeat(48)).unwrap();
+        assert_eq!((again.as_str(), k2.as_str()), (new.as_str(), key.as_str()));
+        // no such URL (no Hysteria, or an auth somebody else wrote): left alone
+        assert!(with_auth_key("auth:\n  type: password\n  password: x\n", &key).is_none());
+        assert!(with_auth_key("auth:\n  http:\n    url: https://example.net/auth\n", &key).is_none());
+        // a key too short to be ours is not trusted
+        assert!(with_auth_key("    url: http://127.0.0.1:1/hy2/auth?k=short\n", &key).is_none());
+    }
 
     #[test]
     fn only_connections_that_moved_data_are_devices() {

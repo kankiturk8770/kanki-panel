@@ -63,7 +63,7 @@ function fwState(x){var g=x.guard||{};
 function fwLoad(){api('GET','/api/firewall/guard').then(function(d){FWD=d;fwDraw()}).catch(function(){})}
 // (3.62) what each open port is for, in plain words
 var FW_FOR={ssh:'SSH',wg:'WireGuard',awg:'AmneziaWG',hy2:'Hysteria2',kmix:'KANKI MIX',panel:'Panel (web)',node:'VPN part (panel link)',nat:'Forwarded port (NAT)',kernel:'WireGuard / AmneziaWG',
- tunnels:'Tunnels',dns:'Kanki DNS','kanki-dns':'Kanki DNS',xray:'Xray',emergency:'Emergency chat',subsrv:'Subscription link',acme:'SSL (Let\'s Encrypt)',caddy:'Web (Caddy)','kanki-panel':'Kanki panel',
+ tunnels:'Tunnels',dns:'Kanki DNS','kanki-dns':'Kanki DNS',xray:'Xray',subsrv:'Subscription link',acme:'SSL (Let\'s Encrypt)',caddy:'Web (Caddy)','kanki-panel':'Kanki panel',
  'hysteria-server':'Hysteria2','kanki-mix':'KANKI MIX','kanki-mix-server':'KANKI MIX',sshd:'SSH','kanki-tunnel':'Tunnels','kanki-node':'VPN part (panel link)'};
 function fwFor(w){w=String(w||'');if(FW_FOR[w])return t(FW_FOR[w]);if(/^kanki-up/.test(w))return 'KANKI-UP';if(/^xray/.test(w))return 'Xray';if(/^kanki-tunnel/.test(w))return t('Tunnels');return w}
 // the server of a firewall row (for its flag): the panel's own is "local"
@@ -102,7 +102,7 @@ window.pNodes=function(){ACC.open.srv='';
  $('#pg').innerHTML='<div class="ku">'+kuHead('nodes',t('Servers'),t('The panel runs on one server. Every other server is a node: add it with one command, then switch on here what it runs.'),
   '<button class="btn" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="b2" onclick="srvAdd()">'+ic('plus',15)+' '+t('Server')+'</button>')+
   '<div id="svp_sum">'+kuStats([[t('Online'),'—'],[t('Needs a look'),'—'],[t('Not connected'),'—'],[t('Update ready'),'—']])+'</div>'+
-  '<div id="svp_clash"></div><div id="svp_relay"></div><div id="svp_g">'+t('Loading…')+'</div><div id="svp_fw"></div></div>';
+  '<div id="svp_clash"></div><div id="svp_g">'+t('Loading…')+'</div><div id="svp_fw"></div></div>';
  load();autoRefresh(function(){load(true)});
  if(S.openAdd){S.openAdd=false;setTimeout(srvAdd,150)}};
 ACC.draw.srv=function(){draw(true)};
@@ -111,7 +111,6 @@ function draw(force){var g=$('#svp_g');if(!g||!SV.d)return;
  var cl=SV.d.clashes||[];
  $('#svp_clash').innerHTML=cl.length?'<div class="kxp-clash"><div><b>⚠ '+t('Port clash')+'</b><br>'+cl.map(function(c){return 'UDP <b class="ltr">'+N(c.port)+'</b> '+t('is used by')+' '+c.users.map(function(u){return esc(u.name)+' ('+protoName(u.proto)+')'}).join('، ')}).join('<br>')+
   '<p class="muted" style="margin:6px 0 0">'+t('One tunnel entry cannot carry the same port to two servers. Fix moves the later server to a free port; tunnels that carry the old port follow.')+'</p></div><button class="btn" onclick="srvFixPorts()">'+t('Fix ports')+'</button></div>':'';
- var rl=SV.d.iran_relays||0;$('#svp_relay').innerHTML=rl?'<div class="warnbox ku-relay"><span>'+t('Iran servers that still run VPN services nobody uses')+': <b>'+N(rl)+'</b></span><button class="b2 sm" onclick="srvDropIranVpn()">'+t('Remove the VPN from them')+'</button></div>':'';
  var list=(SV.d.servers||[]).slice(),by=function(x,y){return (y.local?1:0)-(x.local?1:0)||String(x.name).localeCompare(String(y.name))};
  var ab=list.filter(function(x){return !isIr(x)}).sort(by),ir=list.filter(isIr).sort(by);
  g.innerHTML=srvBox('abroad','Abroad servers','🌍',ab)+srvBox('iran','Iran servers',fl('IR'),ir);
@@ -148,7 +147,7 @@ function stOf(s){var n=s.node,on=online(s),h=n?nHealthOf(n):null,col=!on?'r':h&&
  return {col:col,txt:!on?t('Not connected'):col=='y'?t('Needs a look'):t('Online')}}
 function verOf(s){var n=s.node,a=s.agent;return (a&&a.version)||(n&&n.info&&n.info.version)||''}
 function tile(s){var st=stOf(s),cores=coresOf(s),a=s.agent,n=s.node,stt=(n&&n.info&&n.info.stats)||(a&&a.stats)||null;
- var tag=s.local?'<span class="svt-t main">'+t('Panel')+'</span>':a&&a.can_update?'<span class="svt-t upd">'+t('Update')+'</span>':n&&!n.enabled&&!isIr(s)?'<span class="svt-t">'+t('relay')+'</span>':'';
+ var tag=s.local?'<span class="svt-t main">'+t('Panel')+'</span>':a&&a.can_update?'<span class="svt-t upd">'+t('Update')+'</span>':n&&!n.enabled?'<span class="svt-t">'+t('relay')+'</span>':'';
  // the busiest of CPU, RAM and disk, with its name
  var hot=0,hn='';if(stt&&online(s))[['CPU',+stt.cpu||0],['RAM',pc(stt.mem_used,stt.mem_total)],[t('Disk'),pc(stt.disk_used,stt.disk_total)]].forEach(function(z){if(z[1]>=hot){hot=z[1];hn=z[0]}});
  return '<button type="button" class="svt'+(online(s)?'':' off')+'" onclick="srvOpen(\''+esc(s.key)+'\')" title="'+esc(s.name)+' · '+esc(st.txt)+'">'+
@@ -198,7 +197,7 @@ function srvCores(s){var sw=(s.switches&&s.switches.cores)||{},live={};coresOf(s
    return '<label class="csw'+(x.on?' on':'')+(x.can?'':' dis')+'" style="--pc:'+(PCOL[c[0]]||'var(--a)')+'"'+(x.why?' title="'+esc(t(x.why))+'"':'')+'>'+
     '<span class="nm"><b>'+c[1]+'</b><small>'+(x.can?(l&&l[3]?'<span class="ltr">'+esc(String(l[3]))+'</span>':t(x.on?'On':'Off')):esc(t(x.why||'Not available')))+'</small></span>'+
     '<span class="sw"><input type="checkbox" data-csw="'+c[0]+'" data-key="'+esc(s.key)+'"'+(x.on?' checked':'')+(x.can||x.on?'':' disabled')+' aria-label="'+esc(c[1])+'"><span></span></span></label>'}).join('')+'</div>'+
-  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('Switched off, a core stops and closes its port; its settings stay for when it is switched on again.')+'</p>'}
+  '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('Switched off, a core stops and closes its port; its settings stay for when it is switched on again.')+(s.switches&&s.switches.vpn_part===false&&s.agent?' '+t('WireGuard, AmneziaWG, Hysteria2 and KANKI MIX are not installed here yet: switching one on installs them (a few minutes), inside Iran as abroad.'):'')+'</p>'}
 // a core switch was flipped: the panel switches it, the server follows on its next sync
 document.addEventListener('change',function(e){var x=e.target;if(!x||!x.dataset||!x.dataset.csw)return;var b={};b[x.dataset.csw]=x.checked;x.disabled=true;
  api('POST','/api/servers/'+encodeURIComponent(x.dataset.key)+'/cores',b).then(function(){toast(t('Saved'));load(true)}).catch(function(err){x.checked=!x.checked;x.disabled=false;fail(err)})});
@@ -213,10 +212,9 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  var miss='';
  if(!n&&a){var su=s.setup||null;
   if(s.pending&&!a.last_seen)miss='<div class="kxc-miss"><span>'+t('Waiting for this server: run its command')+'</span><button class="b2 sm" onclick="srvCmd(\''+k+'\')">'+t('Show command')+'</button></div>';
-  // an Iran server is a relay: its tunnels are its job, a missing VPN part is no problem
-  else if(isIr(s))miss=!a.online?'':'<div class="kxc-ok"><span class="okc">'+ic('check',14)+'</span><span>'+t('Relay / tunnel mode active')+'</span></div>';
-  else if(su&&su.state=='running')miss='<div class="kxc-miss"><span class="spin"></span><span>'+t('Installing the VPN part…')+'</span>'+(su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>';
-  else miss='<div class="kxc-miss"><span>'+(su&&su.state=='failed'?'<b class="bad2">'+t('VPN install failed')+'</b>':t('VPN is not installed on this server'))+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\','+(isIr(s)?0:1)+')">'+t(su&&su.state=='failed'?'Try again':'Install VPN')+'</button>'+(su&&su.state=='failed'&&su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>'}
+  // inside Iran or abroad, the same (3.65): no VPN part yet = a relay; switching a VPN core on (Cores) installs it
+  else if(su&&su.state=='running'||(s.switches&&s.switches.installing&&!(su&&su.state=='failed')))miss='<div class="kxc-miss"><span class="spin"></span><span>'+t('Installing the VPN part…')+'</span>'+(su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>';
+  else miss='<div class="kxc-miss"><span>'+(su&&su.state=='failed'?'<b class="bad2">'+t('VPN install failed')+'</b>':t('VPN is not installed on this server'))+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\',1)">'+t(su&&su.state=='failed'?'Try again':'Install VPN')+'</button>'+(su&&su.state=='failed'&&su.tail?'<pre>'+esc(su.tail)+'</pre>':'')+'</div>'}
  if(n&&!a&&!s.local)miss='<div class="kxc-miss"><span>'+t('Tunnels, Xray and DNS are not installed on this server')+'</span><button class="b2 sm" onclick="srvComplete(\''+k+'\',1)">'+t('Install')+'</button></div>';
  // the server in three parts (one shown at a time): settings, cores and network, control and agent
  var tab=SV.tab[s.key]||'base',part=function(k){return '<div class="sxp" data-p="'+k+'"'+(k==tab?'':' hidden')+'>'};
@@ -269,7 +267,7 @@ function srvBody(s){var k=esc(s.key),a=s.agent,n=s.node,ni=n?esc(n.id):'';
  // the panel server itself moves with everything it holds (Backup › Move)
  if(s.local)srvB.push(bt('',"srvMovePanel()",ic('move',13),'Move the panel to a new server or IP'));
  h+=grp(t('VPN part'),n?(n.online||s.local?t('Connected'):t('Not connected')):'',vpnB)+grp(t('Agent'),a&&!s.local?(a.online?t('Connected'):t('Not connected'))+(a.version?' · v'+esc(a.version):''):'',agB)+grp(t('Server'),'',srvB);
- if(!s.local)h+='<div class="ku-danger">'+(n&&a&&isIr(s)?'<button class="b2 sm bd" onclick="srvDropVpn(\''+k+'\')">'+t('Remove the VPN from this server')+'</button> ':'')+'<button class="b2 sm bd" onclick="srvDel(\''+k+'\')">'+ic('trash',13)+' '+t('Delete server')+'</button></div>';
+ if(!s.local)h+='<div class="ku-danger">'+(n&&a?'<button class="b2 sm bd" onclick="srvDropVpn(\''+k+'\')">'+t('Remove the VPN from this server')+'</button> ':'')+'<button class="b2 sm bd" onclick="srvDel(\''+k+'\')">'+ic('trash',13)+' '+t('Delete server')+'</button></div>';
  h+='</div>';
  // its firewall: the switch and every open port with what it is for
  if(s.local||a){var fk=s.local?'local':a.id;h+=part('fw')+(FWD&&FWD[fk]?(FWD[fk].knows?fwHead(fk):'')+fwTable(fk):'<p class="muted">'+t('Loading…')+'</p>')+'</div>'}
@@ -292,8 +290,6 @@ function tunBox(s){var tn=s.tunnel||{},n=s.node,ents=entriesOf(s);
 // the VPN part off an Iran server (or all of them): tunnels, Xray and Kanki DNS stay
 window.srvDropVpn=function(key){kAsk(t('Remove WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from this server? Its tunnels, Xray and Kanki DNS stay. Install VPN brings them back.'),'',t('Remove'),1).then(function(ok){if(!ok)return;
  api('POST','/api/servers/'+q(key)+'/drop-vpn').then(function(r){if(window.kdFollowRemoval)kdFollowRemoval(r.removal);srvClose();load(true)}).catch(fail)})};
-window.srvDropIranVpn=function(){kAsk(t('Remove WireGuard, AmneziaWG, Hysteria2 and KANKI MIX from every Iran server that serves no VPN user? Their tunnels, Xray and Kanki DNS stay.'),'',t('Remove'),1).then(function(ok){if(!ok)return;
- api('POST','/api/servers/drop-iran-vpn').then(function(r){(r.removals||[]).forEach(function(id){if(window.kdFollowRemoval)kdFollowRemoval(id)});toast(t('Done')+' · '+N(r.count||0));load(true)}).catch(fail)})};
 window.srvSave=function(key){var s=find(key);if(!s)return;var n=s.node,a=s.agent,jobs=[];
  var loc=(($$('#sx_loc button.on')[0]||{}).dataset||{}).l||(isIr(s)?'iran':'abroad');
  var b={name:$('#sx_nm').value.trim(),loc:loc};if($('#sx_ad'))b.addr=$('#sx_ad').value.trim();if($('#sx_ssl'))b.ssl=$('#sx_ssl').checked;
@@ -316,7 +312,7 @@ window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
  modal(mhead(t('Add server'))+
   '<p class="muted" style="margin:0 0 8px">'+t('Everything is installed on the server (VPN, tunnels, Xray, Kanki DNS) with one command. Off = installed, but no user is sent there (an Iran relay).')+'</p>'+
   '<div id="sa_in"><label class="f">'+t('Server name')+'</label><input id="sa_nm" placeholder="Germany-1" maxlength="40">'+
-  '<label class="f">'+t('Location')+'</label><div class="seg kxseg" id="sa_loc"><button type="button" data-l="abroad">'+t('Abroad')+'</button><button type="button" data-l="iran">'+t('Inside Iran (relay / tunnel entry)')+'</button></div>'+
+  '<label class="f">'+t('Location')+'</label><div class="seg kxseg" id="sa_loc"><button type="button" data-l="abroad">'+t('Abroad')+'</button><button type="button" data-l="iran">'+t('Inside Iran')+'</button></div>'+
   '<label class="f">'+t('Domain (optional, for a real SSL certificate)')+'</label><input id="sa_dm" class="ltr" placeholder="de1.example.com" autocomplete="off" autocapitalize="off">'+
   '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_ssl">'+t('Get SSL by itself (Let\'s Encrypt)')+'</label><p class="muted" style="font-size:12px;margin:2px 2px 0">'+t('The domain must point straight at this server (no Cloudflare proxy) and port 80 must be open. Off, or when it fails: a self-signed certificate, the install goes on.')+'</p>'+
   '<label class="chk" style="margin-top:10px"><input type="checkbox" id="sa_vpn">'+t('Serve VPN users on this server')+'</label>'+
@@ -327,9 +323,9 @@ window.srvAdd=function(loc){loc=loc=='iran'?'iran':'abroad';
  // without the VPN part only the agent's cores (Xray, Kanki DNS) can be ticked
  var showCores=function(){var v=$('#sa_vpn').checked;$$('#sa_cw .csw').forEach(function(l){var off=l.dataset.vpn=='1'&&!v,x=$('input',l);l.classList.toggle('dis',off);x.disabled=off;if(off)x.checked=false;l.classList.toggle('on',x.checked)})};
  $$('#sa_cw input').forEach(function(x){x.addEventListener('change',showCores)});
- var setLoc=function(l){loc=l;$$('#sa_loc button').forEach(function(b){b.classList.toggle('on',b.dataset.l==l)});$('#sa_vpn').checked=l!='iran';$('#sa_ssl').checked=l!='iran';
-  // abroad: WireGuard and AmneziaWG ticked
-  $$('#sa_cw input').forEach(function(x){x.checked=l!='iran'&&(x.dataset.core=='wg'||x.dataset.core=='awg')});showCores()};
+ // inside Iran and abroad the same cores and defaults (3.65); only SSL starts off in Iran (port 80 is often closed there)
+ var setLoc=function(l){loc=l;$$('#sa_loc button').forEach(function(b){b.classList.toggle('on',b.dataset.l==l)});$('#sa_ssl').checked=l!='iran'};
+ $('#sa_vpn').checked=true;$$('#sa_cw input').forEach(function(x){x.checked=x.dataset.core=='wg'||x.dataset.core=='awg'});showCores();
  $('#sa_vpn').onchange=showCores;
  $$('#sa_loc button').forEach(function(b){b.onclick=function(){setLoc(b.dataset.l)}});setLoc(loc);
  $('#sa_go').onclick=function(){var me=this;me.disabled=true;
@@ -347,10 +343,9 @@ function showCmd(cmd,ports,id){var o=$('#sa_out')||$('#mbox');if(!o)return;
  SV.wait=id||null;waitTick()}
 
 function waitTick(){var el=$('#sa_steps');if(!el||!SV.wait||!SV.d)return;var s=find(SV.wait);if(!s)return;
- var a=s.agent||{},n=s.node,seen=!!(a.online||a.last_seen),ir=isIr(s),vpn=!ir&&s.vpn_wanted!==false&&!(s.cores&&!s.cores.length);
+ var a=s.agent||{},n=s.node,seen=!!(a.online||a.last_seen),vpn=!!(s.planned&&s.planned.length)||!!n;
  // each step: done, now, or still to come (only the first step not done spins)
- var steps=ir?[[seen,'1. Connect to the server and install the agent'],[seen&&!!a.version,'2. Set up the tunnel and relay core'],[online(s),'3. Done and online']]
-  :[[seen,'1. Connect to the server and install the agent'],[vpn?!!n:seen,vpn?'2. Install and start the VPN cores':'2. No VPN core chosen: agent only'],[vpn?!!(n&&(n.online||s.local)):online(s),'3. Firewall and finish']];
+ var steps=[[seen,'1. Connect to the server and install the agent'],[vpn?!!n:seen,vpn?'2. Install and start the VPN cores':'2. No VPN core chosen: agent only'],[vpn?!!(n&&(n.online||s.local)):online(s),'3. Firewall and finish']];
  var cur=steps.findIndex(function(x){return !x[0]}),done=cur<0;
  el.innerHTML=steps.map(function(x,i){return '<div class="'+(x[0]?'ok':i==cur?'now':'next')+'">'+(x[0]?'<span class="okc">'+ic('check',16)+'</span>':i==cur?'<span class="spin"></span>':'<span class="kxs-n"></span>')+'<span>'+t(x[1])+'</span></div>'}).join('')+
   (done?'<p class="kxs-done">'+t('The server is ready')+'</p>':'');

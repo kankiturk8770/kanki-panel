@@ -273,7 +273,9 @@ fn an_old_database_gets_roles_and_tiers_without_losing_a_service() {
              CREATE TABLE nodes(id TEXT PRIMARY KEY, name TEXT, address TEXT, endpoint TEXT, token TEXT,
                 enabled INTEGER DEFAULT 1, online INTEGER DEFAULT 0, last_sync INTEGER DEFAULT 0, info TEXT DEFAULT '{}');
              INSERT INTO users(username,code,protocols) VALUES('a','1','xray,hy2'),('b','2','wg,awg,kmix'),('c','3','wg,awg,hy2,kmix'),('d','4','');
-             INSERT INTO nodes(id,name,address,endpoint,token) VALUES('n1','DE','https://x','','t');",
+             INSERT INTO nodes(id,name,address,endpoint,token) VALUES('n1','DE','https://x','','t');
+             CREATE TABLE settings(k TEXT PRIMARY KEY, v TEXT);
+             INSERT INTO settings VALUES('emer_sign','private key'),('emer_admin','hash'),('emerald','kept');",
         )
         .unwrap();
     }
@@ -287,6 +289,10 @@ fn an_old_database_gets_roles_and_tiers_without_losing_a_service() {
     let want = vec![("a".to_string(), "v2ray".to_string()), ("b".into(), "gaming".into()), ("c".into(), "combo".into()), ("d".into(), "combo".into())];
     assert_eq!(tiers(&db), want);
     assert_eq!(db.node("n1").unwrap().role(), Role::Hybrid);
+    // the emergency chat's secrets are gone (3.65); other settings stay
+    assert_eq!(db.get("emer_sign"), "");
+    assert_eq!(db.get("emer_admin"), "");
+    assert_eq!(db.get("emerald"), "kept");
     // nobody lost a protocol, and a second start changes nothing
     assert_eq!(by_name(&db).iter().map(|u| u.protocols.clone()).collect::<Vec<_>>(), vec!["xray,hy2", "wg,awg,kmix", "wg,awg,hy2,kmix", ""]);
     db.exec("UPDATE users SET tier='combo' WHERE username='a'", &[]).unwrap();
@@ -432,7 +438,8 @@ async fn one_switch_per_core_on_each_server() {
     let (st, _) = set("a2", json!({"wg": false, "hy2": true})).await;
     assert_eq!(st, StatusCode::CONFLICT);
     assert!(!crate::cores::is_off(&app, "n2", "wg"));
-    // a server without its VPN part cannot switch a VPN core on
+    // a server without its VPN part (3.65): a VPN core switched on installs it, which needs its agent
+    // connected; this one never reported, so it is refused and nothing is asked
     let mut list = crate::tunnel::panel::servers(&app);
     list.push(crate::tunnel::panel::TServer { id: "a3".into(), name: "IR".into(), ..Default::default() });
     crate::tunnel::panel::save_servers(&app, &list);
@@ -441,5 +448,181 @@ async fn one_switch_per_core_on_each_server() {
     // the servers list carries every switch
     let (_, l) = call(&app, Method::GET, "/api/servers", Some(&admin), None).await;
     let a3 = l["servers"].as_array().unwrap().iter().find(|s| s["key"] == "a3").unwrap().clone();
-    assert_eq!((a3["switches"]["cores"]["xray"]["on"].as_bool(), a3["switches"]["cores"]["wg"]["can"].as_bool()), (Some(true), Some(false)));
+    assert_eq!((a3["switches"]["cores"]["xray"]["on"].as_bool(), a3["switches"]["cores"]["wg"]["can"].as_bool()), (Some(true), Some(true)));
+    assert_eq!((a3["switches"]["cores"]["wg"]["on"].as_bool(), a3["switches"]["vpn_part"].as_bool()), (Some(false), Some(false)));
+}
+
+/// 3.65: a server inside Iran without its VPN part has the same six switches as one abroad: a VPN core
+/// switched on asks its agent to install the VPN part, and starts when it joins
+#[tokio::test]
+async fn an_iran_server_switches_on_vpn_cores_like_one_abroad() {
+    let app = crate::test_app();
+    let mut list = crate::tunnel::panel::servers(&app);
+    list.push(crate::tunnel::panel::TServer { id: "ir65".into(), name: "Tehran".into(), loc: "iran".into(), token: "t".repeat(40), ..Default::default() });
+    crate::tunnel::panel::save_servers(&app, &list);
+    let admin = token(&app, "nodes");
+    // strangers and a weak token change nothing
+    let (st, _) = call(&app, Method::POST, "/api/servers/ir65/cores", None, Some(json!({"wg": true}))).await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+    let weak = token(&app, "users:write");
+    let (st, _) = call(&app, Method::POST, "/api/servers/ir65/cores", Some(&weak), Some(json!({"wg": true}))).await;
+    assert_eq!(st, StatusCode::FORBIDDEN);
+    // the agent is not connected: refused, nothing asked
+    let (st, _) = call(&app, Method::POST, "/api/servers/ir65/cores", Some(&admin), Some(json!({"wg": true}))).await;
+    assert_eq!(st, StatusCode::CONFLICT);
+    assert!(crate::tunnel::panel::servers(&app).iter().any(|s| s.id == "ir65" && s.join.is_empty() && s.cores.is_empty()));
+    // every switch can be flipped, the VPN ones too
+    let st0 = crate::servers::cores_state(&app, "ir65");
+    for c in ["wg", "awg", "kmix", "dns", "xray", "hy2"] {
+        assert_eq!(st0["cores"][c]["can"], true, "{}: {}", c, st0);
+    }
+    crate::tunnel::panel::test_seen("ir65", crate::VERSION);
+    // two switches flipped at the same time: both are asked for, one install
+    let (a, b) = tokio::join!(
+        call(&app, Method::POST, "/api/servers/ir65/cores", Some(&admin), Some(json!({"wg": true}))),
+        call(&app, Method::POST, "/api/servers/ir65/cores", Some(&admin), Some(json!({"kmix": true}))),
+    );
+    assert_eq!((a.0, b.0), (StatusCode::OK, StatusCode::OK), "{} {}", a.1, b.1);
+    let s = crate::tunnel::panel::servers(&app).into_iter().find(|s| s.id == "ir65").unwrap();
+    assert_eq!(s.cores, vec!["wg".to_string(), "kmix".to_string()]);
+    assert!(s.vpn && s.setup_at > 0 && s.join.len() == 40 && s.ports.len() == 4);
+    let st1 = crate::servers::cores_state(&app, "ir65");
+    assert_eq!((st1["installing"].as_bool(), st1["cores"]["wg"]["on"].as_bool(), st1["cores"]["awg"]["on"].as_bool()), (Some(true), Some(true), Some(false)));
+    // one switched off again before it joins: it does not start
+    let (st, _) = call(&app, Method::POST, "/api/servers/ir65/cores", Some(&admin), Some(json!({"wg": false}))).await;
+    assert_eq!(st, StatusCode::OK);
+    let s = crate::tunnel::panel::servers(&app).into_iter().find(|s| s.id == "ir65").unwrap();
+    assert_eq!(s.cores, vec!["kmix".to_string()]);
+    // the same join token: the running install was not asked twice
+    assert_eq!(s.join.len(), 40);
+}
+
+/// GET `uri` with extra headers: status, headers, body
+async fn get_with(app: &Arc<App>, uri: &str, hs: &[(&str, &str)]) -> (StatusCode, axum::http::HeaderMap, String) {
+    let mut r = Request::get(uri).header("user-agent", "v2rayNG/1.9");
+    for (k, v) in hs {
+        r = r.header(*k, *v);
+    }
+    let res = crate::api::master_router(app.clone()).oneshot(r.body(axum::body::Body::empty()).unwrap()).await.unwrap();
+    let (st, h) = (res.status(), res.headers().clone());
+    let b = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+    (st, h, String::from_utf8_lossy(&b).to_string())
+}
+
+/// 3.65: the same subscription without the code in the URL: a hashed link (the one the panel hands out) and
+/// the code in a header; wrong hashes, codes and kinds get the plain miss answer
+#[tokio::test]
+async fn the_subscription_works_without_its_code_in_the_url() {
+    let app = crate::test_app();
+    with_xray(&app);
+    let id = user(&app, "hashuser", "xray,hy2", Tier::V2ray);
+    let other = user(&app, "hashother", "xray,hy2", Tier::V2ray);
+    let u = app.db.user(id).unwrap();
+    let (st, _, by_code) = get_raw(&app, &format!("/sub/{}/v2", u.sub_code())).await;
+    assert_eq!(st, StatusCode::OK);
+    // the link the panel gives: no code in it, the same lines
+    let link = crate::api::v2_sub_link(&app, &u);
+    assert!(!link.contains(&u.code) && link.contains("/sub/h/"), "{}", link);
+    let path = &link[link.find("/sub/h/").unwrap()..];
+    let (st, h, body) = get_raw(&app, path).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(lines_of(&body), lines_of(&by_code));
+    assert_eq!((h["cache-control"].to_str().unwrap(), h["referrer-policy"].to_str().unwrap()), ("no-store", "no-referrer"));
+    assert!(h.contains_key("subscription-userinfo"));
+    // the code in a header, nothing in the URL
+    for hs in [[("x-kanki-sub", u.sub_code())], [("authorization", format!("Bearer {}", u.sub_code()))]] {
+        let (st, _, body) = get_with(&app, "/sub/me/v2", &[(hs[0].0, hs[0].1.as_str())]).await;
+        assert_eq!(st, StatusCode::OK);
+        assert_eq!(lines_of(&body), lines_of(&by_code));
+    }
+    // the hash of one account never opens another; a guessed hash, a wrong code, no header, an unknown kind:
+    // the same plain 404
+    let o = app.db.user(other).unwrap();
+    let oh = crate::sublink::hash_of(&app, &o);
+    let (_, _, ob) = get_raw(&app, &format!("/sub/h/{}/v2", oh)).await;
+    assert_ne!(lines_of(&ob), lines_of(&by_code));
+    let wrong_code = format!("kanki-{}-0000000000000000000", u.id);
+    for (uri, hs) in [
+        (format!("/sub/h/{}/v2", "0".repeat(40)), vec![]),
+        (format!("/sub/h/{}/v2", &oh[..39]), vec![]),
+        (format!("{}/admin", path.trim_end_matches("/v2")), vec![]),
+        ("/sub/me/v2".to_string(), vec![]),
+        ("/sub/me/v2".to_string(), vec![("x-kanki-sub", wrong_code.as_str())]),
+        ("/sub/me/v2".to_string(), vec![("x-kanki-sub", "kanki-1-x/../../api")]),
+    ] {
+        let (st, _, _) = get_with(&app, &uri, &hs).await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "{} {:?}", uri, hs);
+    }
+    // a new code: the old hashed link stops at once
+    app.db.exec("UPDATE users SET code='9999999999999999999' WHERE id=?1", &[&id]).unwrap();
+    let (st, _, _) = get_raw(&app, path).await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+}
+
+/// 3.65: the four presets of the Xray inbound window, as the window sends them, are taken as they are;
+/// the TLS fragment of the Trojan preset reaches the links and the full client configs, and never stays on
+/// an inbound without TLS
+#[tokio::test]
+async fn the_four_xray_presets_save_and_the_fragment_reaches_the_clients() {
+    let app = crate::test_app();
+    let xs = crate::xray::panel::XraySettings {
+        on: true,
+        servers: vec![crate::xray::panel::XServer { server: "local".into(), address: "srv.example.net".into(), ssl: true, ..Default::default() }],
+        secret: "s".into(),
+        ..Default::default()
+    };
+    app.db.set("xray_cfg", &serde_json::to_string(&xs).unwrap());
+    let admin = token(&app, "nodes");
+    let presets = [
+        // REALITY: the target and its names are the admin's to type (no domain is put in for them)
+        json!({"remark": "reality", "enabled": true, "server": "local", "protocol": "vless", "port": 21443, "network": "tcp", "security": "reality", "flow": "xtls-rprx-vision", "fp": "chrome", "dest": "", "names": ""}),
+        json!({"remark": "cdn", "enabled": true, "server": "local", "protocol": "vless", "port": 21444, "network": "xhttp", "security": "tls", "acme": true, "mode": "auto", "path": "/xh", "fp": "chrome", "alpn": "h2,http/1.1"}),
+        json!({"remark": "iran-tunnel", "enabled": true, "server": "local", "protocol": "vless", "port": 21445, "network": "xhttp", "security": "none", "mode": "auto", "path": "/t"}),
+        json!({"remark": "trojan-pro", "enabled": true, "server": "local", "protocol": "trojan", "port": 21446, "network": "grpc", "security": "tls", "acme": true, "service": "tg", "fp": "chrome", "fragment": true}),
+    ];
+    // a stranger and a weak token cannot add one
+    let (st, _) = call(&app, Method::POST, "/api/xray/inbounds", None, Some(presets[2].clone())).await;
+    assert_eq!(st, StatusCode::UNAUTHORIZED);
+    // REALITY without its target is refused (the window marks the two fields); with them it is taken
+    let (st, v) = call(&app, Method::POST, "/api/xray/inbounds", Some(&admin), Some(presets[0].clone())).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{}", v);
+    let mut reality = presets[0].clone();
+    reality["dest"] = json!("target.example.org:443");
+    reality["names"] = json!("target.example.org");
+    reality["fragment"] = json!(true);
+    for b in [reality, presets[1].clone(), presets[2].clone(), presets[3].clone()] {
+        let (st, v) = call(&app, Method::POST, "/api/xray/inbounds", Some(&admin), Some(b.clone())).await;
+        assert_eq!(st, StatusCode::OK, "{}: {}", b["remark"], v);
+    }
+    let s = crate::xray::panel::settings(&app);
+    let by = |r: &str| s.inbounds.iter().find(|i| i.remark == r).cloned().unwrap();
+    let r = by("reality");
+    assert_eq!((r.flow.as_str(), r.fp.as_str(), r.network.as_str(), r.fragment), ("xtls-rprx-vision", "chrome", "tcp", false));
+    assert!(!r.private.is_empty() && !r.public.is_empty() && !r.short_ids.is_empty());
+    let c = by("cdn");
+    assert!(c.acme && c.network == "xhttp" && c.security == "tls");
+    let t = by("iran-tunnel");
+    assert_eq!((t.security.as_str(), t.mode.as_str()), ("none", "auto"));
+    let tp = by("trojan-pro");
+    assert!(tp.fragment && tp.security == "tls");
+    // the links and the client configs of a user
+    let id = user(&app, "presetuser", "xray", Tier::V2ray);
+    let u = app.db.user(id).unwrap();
+    let links = crate::xray::panel::user_links(&app, &u);
+    let tl = links.iter().find(|l| l.1.starts_with("trojan://")).map(|l| l.1.clone()).unwrap_or_else(|| panic!("{:?}", links));
+    assert!(tl.contains("fragment=tlshello,100-200,10-20") && tl.contains("type=grpc") && tl.contains("security=tls"), "{}", tl);
+    assert!(links.iter().filter(|l| !l.1.starts_with("trojan://")).all(|l| !l.1.contains("fragment=")), "{:?}", links);
+    let rl = links.iter().find(|l| l.1.contains("security=reality")).map(|l| l.1.clone()).unwrap();
+    assert!(rl.contains("flow=xtls-rprx-vision") && rl.contains("fp=chrome"), "{}", rl);
+    let cfg = crate::xray::panel::client_config(&app, "t", &tl).unwrap();
+    let outs = cfg["outbounds"].as_array().unwrap();
+    let frag = outs.iter().find(|o| o["tag"] == "fragment").expect("a fragment outbound");
+    assert_eq!(frag["settings"]["fragment"], json!({"packets": "tlshello", "length": "100-200", "interval": "10-20"}));
+    assert_eq!(outs[0]["streamSettings"]["sockopt"]["dialerProxy"], "fragment");
+    // a link without it gets no fragment outbound; a malformed fragment is not copied into a config
+    let plain = crate::xray::panel::client_config(&app, "r", &rl).unwrap();
+    assert!(plain["outbounds"].as_array().unwrap().iter().all(|o| o["tag"] != "fragment"));
+    let bad = tl.replace("fragment=tlshello,100-200,10-20", "fragment=tlshello,1;rm,1");
+    let c2 = crate::xray::panel::client_config(&app, "b", &bad).unwrap();
+    assert!(c2["outbounds"].as_array().unwrap().iter().all(|o| o["tag"] != "fragment"));
 }

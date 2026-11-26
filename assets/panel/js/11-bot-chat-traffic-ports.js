@@ -133,55 +133,8 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
  w('#bt_test',function(){toast(t('Checking…'));api('POST','/api/bot/test').then(function(r){toast(r.ok?'✓ @'+(r.username||''):(r.error||t('Failed')),!r.ok)}).catch(fail)});
  w('#bt_pause',function(){api('POST','/api/bot/pause').then(function(){toast(t('Done'));botLoad()}).catch(fail)});
  w('#bt_del',function(){confirmDo(function(){api('DELETE','/api/bot').then(waitRestart).catch(fail)})});}
-// ---- Emergency chat: a small chat server on a server inside Iran, for when the international internet is cut
-function pEmergency(){var k=S.sub=='logs'?'logs':'chat';
- $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Emergency chat')+'</h2><p>'+t('Talk to your customers and send them configs when the international internet is cut')+'</p></div></div>'+
-  '<nav class="ptabs ku-tabs" aria-label="'+esc(t('Emergency chat'))+'">'+kuTabs('emergency',[['chat','Chat'],['logs','Logs']],k)+'</nav><div id="emv"></div>';
- tab_emergency(k)}
-// the chat is the page; the logs are a view of their own so a long log never pushes the chat away
-window.tab_emergency=function(k){k=k=='logs'?'logs':'chat';var v=$('#emv');if(!v)return;
- $$('#pg .ptabs a').forEach(function(a){var on=a.getAttribute('href')=='#emergency/'+k;a.classList.toggle('on',on);if(on)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')});
- clearInterval(S.timer3);
- if(k=='logs'){v.innerHTML=logCard();logWire()}else{v.innerHTML='<div id="em">'+t('Loading…')+'</div>';emLoad()}};
-function emLoad(){Promise.all([api('GET','/api/emergency'),api('GET','/api/tunnels')]).then(function(r){var e=r[0],sv=(r[1].servers||[]),el=$('#em');if(!el)return;
- var srvOpt=srvOptGroups(sv,function(x){return '<option value="'+esc(x.id)+'"'+(x.id==e.server?' selected':'')+'>'+esc(x.name+(x.local?' ('+t('panel')+')':''))+(x.online?'':' · '+t('Disconnected'))+'</option>'});
- var cur=sv.filter(function(x){return x.id==e.server})[0],old=cur&&!cur.local&&cur.version&&verLt(cur.version,'3.3.0');
- var st=e.status||null,stHtml=!e.on?'<span class="badge">'+t('Off')+'</span>':!st?'<span class="badge r">'+t('Waiting for the server…')+'</span>':st.active?'<span class="badge g"><span class="dot g"></span> '+t('Running')+'</span>':'<span class="badge r">'+t('Not running')+'</span>';
- el.innerHTML='<div class="card"><h3>'+t('How it works')+'</h3><ol class="sub" style="margin:6px 0;padding-inline-start:18px;line-height:2">'+
-   '<li>'+t('Choose a server inside Iran (one of your tunnel servers) and a domain that points to it (ArvanCloud CDN or plain DNS).')+'</li>'+
-   '<li>'+t('The panel installs the emergency chat on that server by itself and keeps the list of your customers there while the internet works.')+'</li>'+
-   '<li>'+t('When the internet is cut, customers tap the emergency button in the Kanki app and write to you; you answer and send configs from the address below, from inside Iran.')+'</li>'+
-   '<li>'+t('Your messages are signed: the app only trusts messages that really come from you, even over plain HTTP.')+'</li></ol></div>'+
-  '<div class="card"><div class="row" style="justify-content:space-between"><h3 style="margin:0">'+t('Status')+'</h3>'+stHtml+'</div>'+
-   (e.on&&e.url?'<p style="margin:10px 0 4px">'+t('Admin chat address (open it from inside Iran)')+':</p><p class="ltr"><a href="'+esc(e.url)+'/admin" target="_blank" rel="noopener">'+esc(e.url)+'/admin</a></p>':'')+
-   (st&&st.active?'<p>'+t('Unread messages')+': <b>'+N(st.unread||0)+'</b></p>':'')+
-   (st&&st.error?'<div class="warnbox ltr">'+esc(st.error)+'</div>':'')+
-   (old?'<div class="warnbox">'+t('The agent of this server is old: press “Update all” in Tunnel servers first.')+'</div>':'')+
-   (e.on&&e.ssl=='http'?'<div class="warnbox">'+t('Without a certificate (HTTP) the chat works, but messages and your password are not encrypted on the way. Get an SSL certificate before the internet is cut and paste it below. Your configs stay safe: they are signed.')+'</div>':'')+
-   '<p class="hint">'+t('Customers known to the chat')+': '+N(e.customers||0)+(e.key?' · '+t('Signing key')+' …<span class="ltr">'+esc(e.key)+'</span>':'')+'</p></div>'+
-  '<div class="card"><h3>'+t('Settings')+'</h3>'+
-   '<label class="chk"><input type="checkbox" id="em_on" '+(e.on?'checked':'')+'><span><b>'+t('Emergency chat is on')+'</b></span></label>'+
-   '<label class="f">'+t('Server inside Iran')+'</label><select id="em_sv">'+srvOpt+'</select>'+
-   '<div class="g2"><div><label class="f">'+t('Domain')+'</label><input id="em_d" class="ltr" placeholder="chat.kanki.pro" value="'+esc(e.domain||'')+'"></div>'+
-   '<div><label class="f">'+t('Port')+'</label><input id="em_p" type="number" class="ltr" list="em_pl" value="'+(e.port||8080)+'">'+
-    '<datalist id="em_pl">'+[8080,8880,2052,2082,2086,2095,2053,2083,2087,2096,8443,80,443].map(function(p){return '<option value="'+p+'">'}).join('')+'</datalist></div></div>'+
-   '<small class="muted">'+t('With ArvanCloud CDN use a port it forwards (80, 8080, 443, 2053, 8443 …). Open the port on the server.')+' '+
-    t('HTTP (CDN SSL or no SSL): 8080, 8880, 2052, 2082, 2086, 2095 · HTTPS (own SSL): 2053, 2083, 2087, 2096, 8443. Keep 80 and 443 free when Kanki DNS runs on this server.')+'</small>'+
-   '<label class="f">'+t('Admin password of the chat')+'</label><input id="em_pw" type="password" autocomplete="new-password" placeholder="'+(e.has_password?t('unchanged'):t('at least 10 characters'))+'">'+
-   '<label class="f">SSL</label><select id="em_ssl">'+[['auto','Automatic SSL (Let’s Encrypt, recommended)'],['cdn','SSL from the CDN (ArvanCloud)'],['manual','My own certificate'],['http','No SSL (HTTP)']].map(function(o){return '<option value="'+o[0]+'"'+(e.ssl==o[0]?' selected':'')+'>'+t(o[1])+'</option>'}).join('')+'</select>'+
-   '<small class="muted" id="em_sslh"></small>'+
-   '<div id="em_pem" style="display:none"><label class="f">'+t('Certificate (PEM, full chain)')+'</label><textarea id="em_c" rows="4" class="ltr" placeholder="-----BEGIN CERTIFICATE-----"></textarea>'+
-    '<label class="f">'+t('Private key (PKCS#8 PEM)')+'</label><textarea id="em_k" rows="4" class="ltr" placeholder="-----BEGIN PRIVATE KEY-----"></textarea></div>'+
-   '<button class="btn" style="width:100%;margin-top:12px" id="em_go">'+t('Save')+'</button>'+
-   '<button class="b2 bd" style="width:100%;margin-top:8px" id="em_rk">'+t('New signing key')+'</button>'+
-   '<p class="hint">'+t('A new signing key is only needed if the server was compromised. Apps learn the new key when they refresh their subscription, so do it while the internet still works.')+'</p></div>';
- $('#em_go').onclick=function(){var me=this,b={on:$('#em_on').checked,server:$('#em_sv').value,domain:$('#em_d').value,port:+$('#em_p').value||0,password:$('#em_pw').value,cert:$('#em_c').value,key:$('#em_k').value,ssl:$('#em_ssl').value};
-  me.disabled=true;api('PUT','/api/emergency',b).then(function(){toast(t('Saved: the server sets it up in a few seconds'));emLoad()}).catch(function(x){me.disabled=false;fail(x)})};
- var sslH={auto:'The server gets and renews a free certificate by itself. Do it before the internet is cut. Port 80 of the server must be free and the domain must point to it (ArvanCloud: DNS or CDN both work).',cdn:'ArvanCloud shows HTTPS to the users with its own certificate and talks to the server on the port above with HTTP. In ArvanCloud set the origin port to this port.',manual:'Paste a certificate you already have.',http:'Works, but messages and your password travel unencrypted. Configs stay safe: they are signed.'};
- var sslUi=function(){var v=$('#em_ssl').value;$('#em_pem').style.display=v=='manual'?'':'none';$('#em_sslh').textContent=t(sslH[v]||'')};$('#em_ssl').onchange=sslUi;sslUi();
- $('#em_rk').onclick=function(){confirmDo(function(){api('POST','/api/emergency/rekey').then(function(){toast(t('Done'));emLoad()}).catch(fail)})};
- clearTimeout(S.emT);S.emT=setTimeout(function(){if($('#em')&&!$('#modal').classList.contains('on')&&document.activeElement.tagName!='INPUT'&&document.activeElement.tagName!='TEXTAREA')emLoad()},8000)
-}).catch(fail)}
+// ---- Logs: the last warnings and errors of Kanki's services on every server (3.65: a page of its own)
+function pLogs(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Logs')+'</h2></div></div><div id="lgv">'+logCard()+'</div>';logWire()}
 function verLt(a,b){var p=function(v){return String(v).replace(/^v/,'').split('.').map(function(x){return +x||0})},x=p(a),y=p(b);for(var i=0;i<3;i++){if((x[i]||0)!=(y[i]||0))return (x[i]||0)<(y[i]||0)}return false}
 
 function botModal(edit){var b=S.bot||{};modal(mhead(t(edit?'Edit bot':'Create bot'))+

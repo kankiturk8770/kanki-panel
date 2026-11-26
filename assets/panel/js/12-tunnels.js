@@ -161,7 +161,7 @@ function tunSrvCard(s){var nt=((TN.d&&TN.d.tunnels)||[]).filter(function(x){retu
   '<div class="g'+(s.local?'1':'3')+'"><button class="b2" onclick="tunSrvEdit(\''+s.id+'\')">'+ic('edit',15)+' '+t('Edit')+'</button>'+(s.local?'':'<button class="b2" onclick="tunSrvCmd(\''+s.id+'\')">'+ic('link',15)+' '+t('Command')+'</button><button class="b2 bd" onclick="tunSrvDel(\''+s.id+'\')">'+ic('trash',15)+' '+t('Delete')+'</button>')+'</div></div>'}
 function tunAct(id,a){api('POST','/api/tunnels/'+id+'/'+a).then(function(){toast(a=='restart'?t('The tunnel reconnects in a few seconds'):t('Done'));tunRefresh()}).catch(fail)}
 function tunDel(id){if(!confirm(t('Delete this tunnel? It stops on both servers and its ports are closed in their firewalls.')))return;api('DELETE','/api/tunnels/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)}
-function tunSrvDel(id){if(!confirm(t('Remove this server from the panel? Within a few seconds it removes everything Kanki installed there (tunnels, Kanki DNS, Xray, emergency chat, subscription link), closes the ports Kanki opened and uninstalls its agent.')))return;api('DELETE','/api/tunnels/servers/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)}
+function tunSrvDel(id){if(!confirm(t('Remove this server from the panel? Within a few seconds it removes everything Kanki installed there (tunnels, Kanki DNS, Xray, subscription link), closes the ports Kanki opened and uninstalls its agent.')))return;api('DELETE','/api/tunnels/servers/'+id).then(function(){toast(t('Done'));tunRefresh()}).catch(fail)}
 
 // ---- servers
 function tunCmdBox(s,d){

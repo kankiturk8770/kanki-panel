@@ -224,7 +224,7 @@ mod cert_tests {
     }
 }
 
-/// TCP ports the other tunnels, Kanki DNS and the emergency chat use on server `sid`.
+/// TCP ports the other tunnels and Kanki DNS use on server `sid`.
 fn taken_ports(app: &App, sid: &str) -> Vec<u16> {
     let mut v = vec![80];
     for s in crate::tunnel::panel::specs_of(app, sid).iter().filter(|s| s.id != TUNNEL_ID) {
@@ -237,11 +237,6 @@ fn taken_ports(app: &App, sid: &str) -> Vec<u16> {
     }
     if let Some((c, _)) = crate::dns::panel::cfg_for(app, sid) {
         v.extend([c.dns_port, c.dot_port, c.https_port, c.http_port]);
-    }
-    if app.db.get("emer_server") == sid {
-        if let Some((c, _)) = crate::tunnel::panel::emer_cfg(app) {
-            v.push(c.port);
-        }
     }
     v
 }

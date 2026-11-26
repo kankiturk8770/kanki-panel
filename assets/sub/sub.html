@@ -365,13 +365,13 @@ function cfgView(){var box=$('cfg'),src=$('nodes');box.innerHTML='';
   if(c)hy.push({b:b,via:G.hysteria2[b].tunnel&&G.hysteria2[b].direct?via:'',text:c.dataset.text,qr:q?q.dataset.url:''})})});
  if(xs)xs.querySelectorAll('.row.proto').forEach(function(r){var c=r.querySelector('[data-act=copy]'),q=r.querySelector('[data-act=qr]'),nm=r.querySelector('.ph b'),pr=r.querySelector('.ph small');
   if(c)xr.push({name:nm?nm.textContent:'Xray',proto:pr?pr.textContent:'',text:c.dataset.text,qr:q?q.dataset.url:''})});
- if(hy.length||xr.length){var sl=(D.sub_base||location.origin)+'/sub/'+D.sub+'/v2';
+ if(hy.length||xr.length){var sp=D.sub_hash?'/sub/h/'+D.sub_hash:'/sub/'+D.sub,sl=(D.sub_base||location.origin)+sp+'/v2';
   var tags=(hy.length?'<span class="tg">Hysteria2 · '+N(hy.length)+'</span>':'')+(xr.length?'<span class="tg">Xray · '+N(xr.length)+'</span>':'');
   var line=function(name,sub2,x){return '<div class="xrow"><div class="xn2"><b>'+name+'</b><small>'+esc(sub2)+'</small></div><div class="xb">'+
    '<button class="b2" data-act="copy" data-text="'+esc(x.text)+'">'+t('copy_s')+'</button>'+(x.qr?'<button class="b2" data-act="qr" data-url="'+esc(x.qr)+'">'+t('qr_s')+'</button>':'')+'</div></div>'};
   html+='<section class="pc" data-p="v2">'+head('V',t('v2_title'),t('v2_sub'))+'<div class="tgs">'+tags+'</div>'+
    '<div class="lsec">'+t('sub_link')+'</div><div class="subl"><input readonly value="'+esc(sl)+'" aria-label="'+esc(t('sub_link'))+'">'+
-   '<button class="btn" data-act="copy" data-text="'+esc(sl)+'">'+t('copy_s')+'</button><button class="b2" data-act="qr" data-url="/sub/'+esc(D.sub)+'/v2qr">'+t('qr_s')+'</button></div>'+
+   '<button class="btn" data-act="copy" data-text="'+esc(sl)+'">'+t('copy_s')+'</button><button class="b2" data-act="qr" data-url="'+esc(sp)+'/v2qr">'+t('qr_s')+'</button></div>'+
    '<p class="xn">'+t('v2_hint')+'</p>'+
    (hy.length?'<div class="lsec">Hysteria2</div>'+hy.map(function(x){var w=where(x.b);return line(w.fl+' '+esc(w.nm),x.via?t(x.via=='tunnel'?'c_tunnel':'c_direct'):'hysteria2',x)}).join(''):'')+
    (xr.length?'<div class="lsec">Xray</div>'+xr.map(function(x){return line(esc(x.name),x.proto,x)}).join(''):'')+

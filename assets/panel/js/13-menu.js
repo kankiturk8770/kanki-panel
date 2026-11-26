@@ -19,7 +19,7 @@ var SECS=[
  ['nodes','Servers','nodes',[['nodes','','Servers']],'Infrastructure'],
  ['bot','Sales bot','bot',[['bot','','Sales bot']],'Sales'],
  ['antidpi','Anti-DPI','security',[['antidpi','','Anti-DPI']],'Operations & System'],
- ['emergency','Emergency chat','sos',[['emergency','','Emergency chat']],'Operations & System'],
+ ['logs','Logs','logs',[['logs','','Logs']],'Operations & System'],
  ['backup','Backup','backup',[['backup','','Backup']],'Operations & System'],
  ['security','Security','shield2',[['security','','Security']],'Operations & System'],
  ['settings','Settings','settings',[['settings','','Settings']],'Operations & System']];
@@ -97,7 +97,7 @@ window.grpOf=function(p){return V.secOf(p)[4]||''};
 
 // phones (3.48, as the owner liked it): every section in the bottom bar, one row that scrolls sideways inside itself;
 // no «More» sheet. The open section is kept in sight.
-var BARN={dash:'Home',vpnsec:'Cores',netsec:'Tunnels',traffic:'Traffic',nodes:'Servers',bot:'Bot',emergency:'Chat'};
+var BARN={dash:'Home',vpnsec:'Cores',netsec:'Tunnels',traffic:'Traffic',nodes:'Servers',bot:'Bot',logs:'Logs'};
 window.navBar=function(){
  return '<nav class="kmb kmb2" id="mbar" aria-label="'+esc(t('Main menu'))+'">'+V.SECS.map(function(s){var f=s[3][0];
   return '<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'">'+ic(s[2],20)+'<span>'+t(BARN[s[0]]||s[1])+'</span></a>'}).join('')+'</nav>'+

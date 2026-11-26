@@ -103,7 +103,13 @@ pub async fn local_info_async(app: &Arc<App>) -> Value {
 pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     static ACL: std::sync::Once = std::sync::Once::new();
     if !ACL.is_completed() {
-        let _ = tokio::task::spawn_blocking(|| ACL.call_once(crate::hy2::ensure_acl)).await;
+        let _ = tokio::task::spawn_blocking(|| {
+            ACL.call_once(|| {
+                crate::hy2::ensure_acl();
+                crate::hy2::ensure_auth_key();
+            })
+        })
+        .await;
     }
     *app.hy2_allowed.lock().unwrap_or_else(|e| e.into_inner()) = req.hy2.clone();
     *app.limits.lock().unwrap_or_else(|e| e.into_inner()) = req.limits.clone();
@@ -175,6 +181,7 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
 pub fn forget_retired() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
+        retire_emergency();
         for k in ["mtun", "kping", "kpcore"] {
             crate::fw::close(k);
         }
@@ -203,6 +210,36 @@ pub fn forget_retired() {
             }
         }
     });
+}
+
+/// 3.65: the emergency chat is gone. What it left on a server that ran it goes with it: the service, its
+/// firewall port, its config (the message signing key and the admin password hash) and its messages.
+fn retire_emergency() {
+    const UNIT_FILE: &str = "/etc/systemd/system/kanki-emergency.service";
+    if std::path::Path::new(UNIT_FILE).exists() {
+        match std::process::Command::new("systemctl").args(["disable", "--now", "-q", "kanki-emergency.service"]).output() {
+            Ok(o) if !o.status.success() => eprintln!("retire emergency chat: systemctl disable failed ({})", o.status),
+            Ok(_) => {}
+            Err(e) => eprintln!("retire emergency chat: cannot run systemctl: {}", e),
+        }
+        remove_logged(UNIT_FILE, false);
+        if let Err(e) = std::process::Command::new("systemctl").arg("daemon-reload").output() {
+            eprintln!("retire emergency chat: cannot reload systemd: {}", e);
+        }
+    }
+    crate::fw::close("emergency");
+    remove_logged("/etc/kanki/emergency.json", false);
+    remove_logged("/var/lib/kanki/emergency", true);
+}
+
+/// Removes a file or a folder; a missing one is fine, any other failure is logged
+fn remove_logged(path: &str, dir: bool) {
+    let r = if dir { std::fs::remove_dir_all(path) } else { std::fs::remove_file(path) };
+    if let Err(e) = r {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("cannot remove {}: {}", path, e);
+        }
+    }
 }
 
 /// Hysteria2 devices of a user on this server: `open` sessions, `real` of them seen moving data (a
@@ -910,10 +947,47 @@ const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 /// … and to a switched-off server (it only gets its empty user list)
 const OFF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
+/// The first version whose node agent takes only signed requests (`sign`)
+pub const SIGN_FROM: &str = "3.65.0";
+
+/// Whether node `n` may still be from before signed requests: it never reported a version of 3.65 or
+/// newer. Only such a node may get the bare token, and only after it refused the signed request.
+fn node_legacy(n: &Node) -> bool {
+    let v = serde_json::from_str::<Value>(&n.info).ok().and_then(|i| i["version"].as_str().map(|s| s.to_string())).unwrap_or_default();
+    v.is_empty() || crate::admin::newer(SIGN_FROM, &v)
+}
+
+/// A request to a node's agent, signed with its token (3.65): the token itself is not sent. A node that
+/// may be from before (`legacy`) and refuses it (401) gets the same request once more with the bare
+/// token, as before; a node known to be newer never sees the token. One client per node (kept-alive
+/// connections are reused round after round).
+#[allow(clippy::too_many_arguments)]
+async fn node_call(app: &App, key: &str, addr: &str, token: &str, insecure: bool, method: reqwest::Method, path: &str, body: Option<Vec<u8>>, timeout: std::time::Duration, legacy: bool) -> Result<reqwest::Response, String> {
+    let c = app.node_client(key, insecure);
+    let url = format!("{}{}", addr.trim_end_matches('/'), path);
+    let build = |bare: bool| {
+        let raw = body.clone().unwrap_or_default();
+        let mut rb = c.request(method.clone(), &url).timeout(timeout);
+        if body.is_some() {
+            rb = rb.header(reqwest::header::CONTENT_TYPE, "application/json").body(raw.clone());
+        }
+        rb = crate::sign::sign(rb, token, method.as_str(), path, &raw);
+        if bare {
+            rb = rb.header("X-Node-Token", token);
+        }
+        rb
+    };
+    let r = build(false).send().await.map_err(|e| node_err(addr, &e))?;
+    if r.status() == reqwest::StatusCode::UNAUTHORIZED && legacy {
+        return build(true).send().await.map_err(|e| node_err(addr, &e));
+    }
+    Ok(r)
+}
+
 async fn remote_sync(app: &App, n: &Node, req: &SyncReq) -> Result<SyncResp, String> {
     // a sync answers within seconds; the self-signed client's long timeout is for updates
-    let r = app.node_client(&n.id, n.insecure).post(format!("{}/agent/sync", n.address.trim_end_matches('/')))
-        .header("X-Node-Token", &n.token).json(req).timeout(SYNC_TIMEOUT).send().await.map_err(|e| node_err(&n.address, &e))?;
+    let body = serde_json::to_vec(req).map_err(|e| e.to_string())?;
+    let r = node_call(app, &n.id, &n.address, &n.token, n.insecure, reqwest::Method::POST, "/agent/sync", Some(body), SYNC_TIMEOUT, node_legacy(n)).await?;
     if !r.status().is_success() {
         return Err(format!("the node answered {}", r.status()));
     }
@@ -956,9 +1030,10 @@ pub async fn remote_info(app: &App, addr: &str, token: &str, insecure: bool) -> 
 
 /// `remote_info` with the reason it failed
 pub async fn remote_info_res(app: &App, addr: &str, token: &str, insecure: bool) -> Result<Value, String> {
-    // keyed by address: for a node being added this is also the TOFU first contact
-    let r = app.node_client(addr, insecure).get(format!("{}/agent/info", addr.trim_end_matches('/')))
-        .header("X-Node-Token", token).timeout(SYNC_TIMEOUT).send().await.map_err(|e| node_err(addr, &e))?;
+    // keyed by address: for a node being added this is also the TOFU first contact. A node the panel
+    // already knows as newer never gets the bare token; one being added may still be from before.
+    let legacy = app.db.nodes().into_iter().find(|n| n.address.trim_end_matches('/') == addr.trim_end_matches('/')).map(|n| node_legacy(&n)).unwrap_or(true);
+    let r = node_call(app, addr, addr, token, insecure, reqwest::Method::GET, "/agent/info", None, SYNC_TIMEOUT, legacy).await?;
     if !r.status().is_success() {
         return Err(format!("the node answered {}", r.status()));
     }
@@ -966,15 +1041,26 @@ pub async fn remote_info_res(app: &App, addr: &str, token: &str, insecure: bool)
 }
 
 pub async fn remote_post(app: &App, n: &Node, path: &str) -> Option<Value> {
-    let r = app.node_client(&n.id, n.insecure).post(format!("{}{}", n.address.trim_end_matches('/'), path))
-        .header("X-Node-Token", &n.token).timeout(std::time::Duration::from_secs(120)).send().await.ok()?;
-    r.json::<Value>().await.ok()
+    let r = node_call(app, &n.id, &n.address, &n.token, n.insecure, reqwest::Method::POST, path, None, std::time::Duration::from_secs(120), node_legacy(n)).await;
+    match r {
+        Ok(r) => r.json::<Value>().await.map_err(|e| eprintln!("node {}: {} answered: {}", n.name, path, e)).ok(),
+        Err(e) => {
+            eprintln!("node {}: {}: {}", n.name, path, e);
+            None
+        }
+    }
 }
 
 pub async fn remote_post_json(app: &App, n: &Node, path: &str, body: &Value) -> Option<Value> {
-    let r = app.node_client(&n.id, n.insecure).post(format!("{}{}", n.address.trim_end_matches('/'), path))
-        .header("X-Node-Token", &n.token).json(body).timeout(std::time::Duration::from_secs(60)).send().await.ok()?;
-    r.json::<Value>().await.ok()
+    let raw = serde_json::to_vec(body).ok()?;
+    let r = node_call(app, &n.id, &n.address, &n.token, n.insecure, reqwest::Method::POST, path, Some(raw), std::time::Duration::from_secs(60), node_legacy(n)).await;
+    match r {
+        Ok(r) => r.json::<Value>().await.map_err(|e| eprintln!("node {}: {} answered: {}", n.name, path, e)).ok(),
+        Err(e) => {
+            eprintln!("node {}: {}: {}", n.name, path, e);
+            None
+        }
+    }
 }
 
 /// Forever loop

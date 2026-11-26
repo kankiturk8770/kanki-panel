@@ -55,29 +55,14 @@ pub fn take_pending(data: &str) {
     }
 }
 
-/// The emergency chat's messages when the chat runs on this server (they live only in its own database)
-const CHAT_DB: &str = "/var/lib/kanki/emergency/chat.db";
-/// certbot's certificates of this server (Xray, Kanki DNS, the emergency chat … on their own domains)
+/// certbot's certificates of this server (Xray, Kanki DNS … on their own domains)
 const LE_DIR: &str = "/etc/letsencrypt";
 const LE_PARTS: &[&str] = &["archive", "live", "renewal", "accounts"];
 
-/// A consistent copy of an SQLite file that another program may be writing (VACUUM INTO)
-fn sqlite_copy(src: &str, dst: &str) -> bool {
-    let Ok(c) = rusqlite::Connection::open_with_flags(src, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return false };
-    let _ = c.busy_timeout(std::time::Duration::from_secs(10));
-    c.execute(&format!("VACUUM INTO '{}'", dst.replace('\'', "''")), []).is_ok()
-}
-
-/// The extra state of this server in a backup folder: the emergency chat's database (`emergency/chat.db`)
-/// and certbot's certificates (`letsencrypt.tgz`, links kept). The names of the items made, for tar.
+/// The extra state of this server in a backup folder: certbot's certificates (`letsencrypt.tgz`, links
+/// kept). The names of the items made, for tar.
 fn extra_into(dir: &str) -> Vec<&'static str> {
     let mut items = vec![];
-    if std::path::Path::new(CHAT_DB).is_file() {
-        let _ = std::fs::create_dir_all(format!("{}/emergency", dir));
-        if sqlite_copy(CHAT_DB, &format!("{}/emergency/chat.db", dir)) {
-            items.push("emergency");
-        }
-    }
     let live = std::fs::read_dir(format!("{}/live", LE_DIR)).map(|r| r.flatten().any(|e| e.path().is_dir())).unwrap_or(false);
     if live {
         let parts: Vec<String> = LE_PARTS.iter().filter(|p| std::path::Path::new(&format!("{}/{}", LE_DIR, p)).is_dir()).map(|p| format!("letsencrypt/{}", p)).collect();
@@ -92,35 +77,16 @@ fn extra_into(dir: &str) -> Vec<&'static str> {
 }
 
 /// Puts back what `extra_into` saved, from an unpacked backup in `x` (also `kanki-panel restore-files`,
-/// which the installer runs on a new server). Only what this machine lacks: a chat database that is
-/// already here is kept unless `replace_chat`, a certificate this machine already has (made afresh for
-/// the same domain) is kept. Nothing is written outside the emergency folder and /etc/letsencrypt, and
-/// the certificate links must point into their own domain's archive.
-pub fn restore_extra(x: &str, replace_chat: bool) -> Vec<String> {
-    restore_extra_to(x, replace_chat, CHAT_DB, LE_DIR)
+/// which the installer runs on a new server). Only what this machine lacks: a certificate this machine
+/// already has (made afresh for the same domain) is kept. Nothing is written outside /etc/letsencrypt, and
+/// the certificate links must point into their own domain's archive. A chat database in an old backup
+/// (the emergency chat, gone in 3.65) is left out.
+pub fn restore_extra(x: &str) -> Vec<String> {
+    restore_extra_to(x, LE_DIR)
 }
 
-fn restore_extra_to(x: &str, replace_chat: bool, chat_db: &str, le_dir: &str) -> Vec<String> {
+fn restore_extra_to(x: &str, le_dir: &str) -> Vec<String> {
     let mut done = vec![];
-    let chat = format!("{}/emergency/chat.db", x);
-    let plain = std::fs::symlink_metadata(&chat).map(|m| m.is_file()).unwrap_or(false);
-    let head_ok = std::fs::read(&chat).map(|b| b.len() > 100 && &b[..15] == b"SQLite format 3").unwrap_or(false);
-    if plain && head_ok && (replace_chat || !std::path::Path::new(chat_db).exists()) {
-        // a chat running here has its database open: it stops first (the restore starts it again)
-        if chat_db == CHAT_DB && crate::emergency::running() {
-            let _ = Command::new("systemctl").args(["stop", "kanki-emergency"]).output();
-        }
-        let dirp = std::path::Path::new(chat_db).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-        let _ = std::fs::create_dir_all(&dirp);
-        let tmp = format!("{}.restore", chat_db);
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&dirp, std::fs::Permissions::from_mode(0o700));
-        if std::fs::copy(&chat, &tmp).is_ok() && std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600)).is_ok() && std::fs::rename(&tmp, chat_db).is_ok() {
-            let _ = std::fs::remove_file(format!("{}-wal", chat_db));
-            let _ = std::fs::remove_file(format!("{}-shm", chat_db));
-            done.push("the emergency chat's messages".to_string());
-        }
-    }
     let tgz = format!("{}/letsencrypt.tgz", x);
     if std::fs::symlink_metadata(&tgz).map(|m| m.is_file()).unwrap_or(false) {
         match le_restore(&tgz, le_dir) {
@@ -392,7 +358,7 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<Restore
                         extra.push(format!("{} app files", n));
                     }
                 }
-                extra.extend(restore_extra(&x, true));
+                extra.extend(restore_extra(&x));
             }
         }
         let head = std::fs::read(&dbfile).map_err(|_| "database missing in backup".to_string())?;
@@ -535,10 +501,6 @@ fn restart_services() {
     }
     if std::path::Path::new(CADDYFILE).exists() {
         sc(&["restart", "caddy"]);
-    }
-    // the emergency chat opens its restored messages (it was stopped for them)
-    if std::path::Path::new("/etc/systemd/system/kanki-emergency.service").exists() {
-        sc(&["restart", "kanki-emergency"]);
     }
 }
 
@@ -1022,25 +984,16 @@ mod tests {
     }
 
     #[test]
-    fn the_chat_comes_back_only_when_it_is_missing_or_asked() {
+    fn a_chat_database_in_an_old_backup_is_left_out() {
         let x = tmpdir("chat-x");
         std::fs::create_dir_all(format!("{}/emergency", x)).unwrap();
         let c = rusqlite::Connection::open(format!("{}/emergency/chat.db", x)).unwrap();
         c.execute_batch("CREATE TABLE m(t TEXT); INSERT INTO m VALUES('from the backup');").unwrap();
         drop(c);
         let here = tmpdir("chat-here");
-        let db = format!("{}/emergency/chat.db", here);
         let le = format!("{}/le", here);
-        assert_eq!(super::restore_extra_to(&x, false, &db, &le).len(), 1);
-        let t: String = rusqlite::Connection::open(&db).unwrap().query_row("SELECT t FROM m", [], |r| r.get(0)).unwrap();
-        assert_eq!(t, "from the backup");
-        // already here: kept by the installer, replaced by a full restore in the panel
-        rusqlite::Connection::open(&db).unwrap().execute("UPDATE m SET t='newer here'", []).unwrap();
-        assert!(super::restore_extra_to(&x, false, &db, &le).is_empty());
-        assert_eq!(super::restore_extra_to(&x, true, &db, &le).len(), 1);
-        // not a database: nothing happens
-        std::fs::write(format!("{}/emergency/chat.db", x), "not sqlite at all, but long enough to pass a length check of a hundred bytes ............................").unwrap();
-        assert!(super::restore_extra_to(&x, true, &db, &le).is_empty());
+        assert!(super::restore_extra_to(&x, &le).is_empty());
+        assert!(!std::path::Path::new(&format!("{}/emergency", here)).exists());
         let _ = std::fs::remove_dir_all(&x);
         let _ = std::fs::remove_dir_all(&here);
     }

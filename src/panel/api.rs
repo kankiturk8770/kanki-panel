@@ -331,6 +331,11 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/sub/:code/v2", get(sub_v2))
         .route("/sub/:code/xqr/:i", get(sub_xray_qr))
         .route("/sub/:code/v2qr", get(sub_v2_qr))
+        // the same without the code in the URL (3.65, `sublink`): a hashed link, or the code in a header
+        .route("/sub/h/:hash", get(sub_hashed))
+        .route("/sub/h/:hash/:kind", get(sub_hashed_kind))
+        .route("/sub/me", get(sub_header))
+        .route("/sub/me/:kind", get(sub_header_kind))
         .route("/api/config/:id/:proto", get(config_file))
         .route("/api/config/:id/:proto/:extra", get(config_file_extra))
         .route("/hy2/auth", post(hy2_auth))
@@ -358,7 +363,8 @@ pub fn master_router(app: Arc<App>) -> Router {
 }
 
 pub fn node_router(app: Arc<App>) -> Router {
-    Router::new()
+    // every /agent/ route takes only requests the panel signed with this node's token (3.65)
+    let agent = Router::new()
         .route("/agent/info", get(agent_info))
         .route("/agent/sync", post(agent_sync))
         .route("/agent/repair", post(agent_repair))
@@ -367,8 +373,32 @@ pub fn node_router(app: Arc<App>) -> Router {
         .route("/agent/remove", post(agent_remove))
         .route("/agent/setup-tunnel", post(agent_setup_tunnel))
         .route("/agent/kmix/record", post(agent_kmix_record))
+        .route_layer(axum::middleware::from_fn_with_state(app.clone(), node_signed));
+    Router::new()
+        .merge(agent)
+        // the Hysteria server of this machine (it cannot sign): loopback and its own key, see `hy2_auth`
         .route("/hy2/auth", post(hy2_auth))
+        .layer(axum::extract::DefaultBodyLimit::max(NODE_BODY_MAX))
         .with_state(app)
+}
+
+/// The largest request a node takes (a sync carries every user of the panel)
+const NODE_BODY_MAX: usize = 2 * 1024 * 1024;
+
+/// A request to this node's agent must be signed by the panel with the node token (`sign`): an unsigned
+/// one (the bare token of before 3.65 too), an old one, a changed one or one seen before is refused with
+/// 401 before any handler runs.
+async fn node_signed(State(app): St, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let want = app.env.get("NODE_TOKEN").map(|s| s.trim().to_string()).unwrap_or_default();
+    let (parts, body) = req.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, NODE_BODY_MAX).await else {
+        return err(StatusCode::PAYLOAD_TOO_LARGE, "request too large");
+    };
+    let path = parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/").to_string();
+    if let Err(r) = crate::sign::verify(&want, &parts.headers, parts.method.as_str(), &path, &bytes, now()) {
+        return err(StatusCode::UNAUTHORIZED, r.text());
+    }
+    next.run(axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes))).await
 }
 
 // ============================================================ overview
@@ -1883,7 +1913,9 @@ fn sub_data(app: &App, u: &User, sealed: bool) -> Value {
         }
     }
     json!({
-        "id": u.id, "username": u.username, "sub": u.sub_code(), "status": u.status(), "active": u.active(),
+        "id": u.id, "username": u.username, "sub": u.sub_code(),
+        // the hashed form of the code (3.65): the links to copy into other apps carry this, not the code
+        "sub_hash": crate::sublink::hash_of(app, u), "status": u.status(), "active": u.active(),
         "limit_gb": u.limit_gb, "used_gb": u.used_gb(), "expires_ts": u.expires_at, "created_ts": u.created_at,
         "online": u.online, "max_conn": u.max_conn, "last_seen_ts": u.last_seen,
         "panel_name": app.db.get("panel_name"), "version": crate::VERSION, "nodes": nodes,
@@ -1894,9 +1926,6 @@ fn sub_data(app: &App, u: &User, sealed: bool) -> Value {
         // the subscription link's base when an Iran server serves it (empty = the page's own address)
         "sub_base": crate::subiran::origin(app).unwrap_or_default(),
         "app_msg": app_msg(app, &u.username),
-        // the emergency chat on the server inside Iran, and the key that signs the admin's messages
-        "emergency": crate::tunnel::panel::emer_url(app),
-        "emergency_key": crate::tunnel::panel::emer_pub(app),
         // Kanki DNS: the user's token and each DNS server's addresses (Null = no DNS for this user)
         "dns": crate::dns::panel::sub_info(app, u),
         // Xray share links of this user (Null = no Xray)
@@ -2162,9 +2191,70 @@ pub(crate) fn v2_links(app: &App, u: &User) -> Vec<String> {
     lines
 }
 
-/// The combined subscription link (Hysteria2 + Xray) that v2rayNG, Hiddify, NekoBox and V2Box keep up to date
+/// The combined subscription link (Hysteria2 + Xray) that v2rayNG, Hiddify, NekoBox and V2Box keep up to date.
+/// Hashed (3.65): the code itself never goes into a URL a proxy or CDN may log.
 pub fn v2_sub_link(app: &App, u: &User) -> String {
-    format!("{}/sub/{}/v2", sub_origin(app), u.sub_code())
+    format!("{}/sub/h/{}/v2", sub_origin(app), crate::sublink::hash_of(app, u))
+}
+
+/// One subscription answer for an account found without its code in the URL: the same as
+/// `/sub/<code>/<kind>`, never cached and never handed on as a referrer
+async fn sub_kind(app: Arc<App>, u: User, kind: &str, h: HeaderMap) -> Response {
+    let code = u.sub_code();
+    let mut r = match kind {
+        "" => sub_page(State(app), Path(code), h).await,
+        "raw" => sub_raw(State(app), Path(code), h).await,
+        "json" => sub_json(State(app), Path(code), h).await,
+        "xray" => sub_xray(State(app), Path(code), h).await,
+        "xjson" => sub_xray_json(State(app), Path(code), h).await,
+        "v2" => sub_v2(State(app), Path(code), h).await,
+        "v2qr" => sub_v2_qr(State(app), Path(code)).await,
+        _ => return crate::devices::miss(),
+    };
+    let hd = r.headers_mut();
+    hd.insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
+    hd.insert(header::REFERRER_POLICY, header::HeaderValue::from_static("no-referrer"));
+    r
+}
+
+async fn sub_hashed(State(app): St, Path(hash): Path<String>, h: HeaderMap) -> Response {
+    match crate::sublink::user_by_hash(&app, &hash) {
+        Some(u) => sub_kind(app, u, "", h).await,
+        None => crate::devices::miss(),
+    }
+}
+
+async fn sub_hashed_kind(State(app): St, Path((hash, kind)): Path<(String, String)>, h: HeaderMap) -> Response {
+    if !crate::sublink::KINDS.contains(&kind.as_str()) {
+        return crate::devices::miss();
+    }
+    match crate::sublink::user_by_hash(&app, &hash) {
+        Some(u) => sub_kind(app, u, &kind, h).await,
+        None => crate::devices::miss(),
+    }
+}
+
+/// The code in `X-Kanki-Sub` (or `Authorization: Bearer`): the account it names, or the miss answer
+fn header_user(app: &App, h: &HeaderMap) -> Result<User, Response> {
+    let code = crate::sublink::header_code(h).ok_or_else(crate::devices::miss)?;
+    sub_user(app, &code)
+}
+
+async fn sub_header(State(app): St, h: HeaderMap) -> Response {
+    match header_user(&app, &h) {
+        Ok(u) => sub_kind(app, u, "", h).await,
+        Err(r) => r,
+    }
+}
+
+async fn sub_header_kind(State(app): St, Path(kind): Path<String>, h: HeaderMap) -> Response {
+    if !crate::sublink::KINDS.contains(&kind.as_str()) {
+        return crate::devices::miss();
+    }
+    match header_user(&app, &h) {
+        Ok(u) => sub_kind(app, u, &kind, h).await,
+        Err(r) => r,
+    }
 }
 
 /// The subscription link first, then each Hysteria2 and Xray link, one per line: copied or saved as a file, it goes
@@ -2422,11 +2512,16 @@ async fn build_config(State(app): St, id: i64, proto: String, q: HashMap<String,
 
 // ============================================================ Hysteria2 auth (local only, blocked at Caddy)
 
-async fn hy2_auth(State(app): St, peer: axum::extract::ConnectInfo<std::net::SocketAddr>, h: HeaderMap, Json(b): Json<Value>) -> Response {
+async fn hy2_auth(State(app): St, peer: axum::extract::ConnectInfo<std::net::SocketAddr>, uri: axum::http::Uri, h: HeaderMap, Json(b): Json<Value>) -> Response {
     // only the Hysteria server on this machine asks (http://127.0.0.1/…): not through Caddy (it adds an
     // X-Forwarded-For) and not from outside (old node installs listen on every address); otherwise
     // anyone could test subscription codes without a limit
     if !peer.0.ip().is_loopback() || h.contains_key("x-forwarded-for") {
+        return Json(json!({ "ok": false })).into_response();
+    }
+    // and with the key only Hysteria's config on this machine has (3.65): another local program cannot
+    // test codes either
+    if !hy2_key_ok(crate::hy2::auth_key().as_deref(), uri.query()) {
         return Json(json!({ "ok": false })).into_response();
     }
     let auth = b["auth"].as_str().unwrap_or("").to_string();
@@ -2439,66 +2534,44 @@ async fn hy2_auth(State(app): St, peer: axum::extract::ConnectInfo<std::net::Soc
     Json(json!({ "ok": false })).into_response()
 }
 
-// ============================================================ node agent
-
-fn node_authed(app: &App, h: &HeaderMap) -> bool {
-    let t = h.get("X-Node-Token").and_then(|v| v.to_str().ok()).unwrap_or("");
-    match app.env.get("NODE_TOKEN") {
-        Some(want) if !want.is_empty() && !t.is_empty() => util::ct_eq(t, want),
-        _ => false,
-    }
+/// The `k` of `/hy2/auth?k=…` against this machine's key (none set up yet: nothing to check)
+pub(crate) fn hy2_key_ok(want: Option<&str>, query: Option<&str>) -> bool {
+    let Some(want) = want else { return true };
+    let got = query.unwrap_or("").split('&').find_map(|kv| kv.strip_prefix("k=")).unwrap_or("");
+    !got.is_empty() && util::ct_eq(got, want)
 }
 
-async fn agent_info(State(app): St, h: HeaderMap) -> Response {
-    if !node_authed(&app, &h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
+// ============================================================ node agent
+
+async fn agent_info(State(app): St) -> Response {
     Json(sync::local_info_async(&app).await).into_response()
 }
 
-async fn agent_sync(State(app): St, h: HeaderMap, Json(req): Json<SyncReq>) -> Response {
-    if !node_authed(&app, &h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
+async fn agent_sync(State(app): St, Json(req): Json<SyncReq>) -> Response {
     Json(sync::apply_local(&app, req).await).into_response()
 }
 
-async fn agent_repair(State(app): St, h: HeaderMap) -> Response {
-    if !node_authed(&app, &h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
+async fn agent_repair(State(_): St) -> Response {
     Json(tokio::task::spawn_blocking(crate::admin::repair_services).await.unwrap_or_else(|_| json!({"ok": false}))).into_response()
 }
 
-async fn agent_ports(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
-    if !node_authed(&app, &h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
+async fn agent_ports(State(_): St, Json(b): Json<Value>) -> Response {
     Json(tokio::task::spawn_blocking(move || crate::admin::set_ports(&b)).await.unwrap_or_else(|_| json!({"ok": false}))).into_response()
 }
 
 /// The panel asks this node's KANKI MIX about the game recorder (`kmix::record_local`)
-async fn agent_kmix_record(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
-    if !node_authed(&app, &h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
+async fn agent_kmix_record(State(_): St, Json(b): Json<Value>) -> Response {
     Json(crate::kmix::record_local(&b).await).into_response()
 }
 
 /// The panel deleted this node: everything the node runs is removed (just after this answer)
-async fn agent_remove(State(app): St, h: HeaderMap) -> Response {
-    if !node_authed(&app, &h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
+async fn agent_remove(State(_): St) -> Response {
     std::thread::spawn(crate::admin::remove_node);
     Json(json!({"ok": true})).into_response()
 }
 
 /// The panel asks this node to run the server agent too (tunnels, Xray, Kanki DNS on the same machine)
-async fn agent_setup_tunnel(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
-    if !node_authed(&app, &h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
+async fn agent_setup_tunnel(State(_): St, Json(b): Json<Value>) -> Response {
     let (panel, id, token) = (b["panel"].as_str().unwrap_or(""), b["id"].as_str().unwrap_or(""), b["token"].as_str().unwrap_or(""));
     let insecure = b["insecure"].as_bool().unwrap_or(false);
     let r = tokio::task::spawn_blocking({
@@ -2513,10 +2586,7 @@ async fn agent_setup_tunnel(State(app): St, h: HeaderMap, Json(b): Json<Value>) 
     }
 }
 
-async fn agent_update(State(app): St, h: HeaderMap) -> Response {
-    if !node_authed(&app, &h) {
-        return err(StatusCode::UNAUTHORIZED, "bad token");
-    }
+async fn agent_update(State(app): St) -> Response {
     match crate::admin::self_update(&app).await {
         // (the tunnel agent of this machine, which runs the same file, was restarted by self_update)
         Ok(v) => Json(json!({"ok": true, "version": v})).into_response(),

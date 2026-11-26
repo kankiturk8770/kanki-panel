@@ -19,6 +19,11 @@ mod live;
 mod netq;
 #[path = "core/access.rs"]
 mod access;
+#[path = "core/sign.rs"]
+mod sign;
+#[cfg(test)]
+#[path = "core/sign_tests.rs"]
+mod sign_tests;
 #[cfg(test)]
 #[path = "core/access_tests.rs"]
 mod access_tests;
@@ -64,6 +69,8 @@ mod subdomain;
 mod devices;
 #[path = "subscription/apps.rs"]
 mod apps;
+#[path = "subscription/sublink.rs"]
+mod sublink;
 
 // vpn: the VPN cores and syncing users to the servers (src/vpn)
 #[path = "vpn/wg.rs"]
@@ -106,8 +113,6 @@ mod xray;
 // dns: Kanki DNS
 mod dns;
 
-// emergency: the emergency chat on a server inside Iran
-mod emergency;
 
 use std::collections::HashMap;
 use std::sync::atomic::AtomicI64;
@@ -142,11 +147,19 @@ pub struct App {
 /// A panel with an empty database of its own, for the tests
 #[cfg(test)]
 pub(crate) fn test_app() -> std::sync::Arc<App> {
+    test_app_env(&[])
+}
+
+/// `test_app` with more settings of kanki.env (a node's NODE_TOKEN …)
+#[cfg(test)]
+pub(crate) fn test_app_env(extra: &[(&str, &str)]) -> std::sync::Arc<App> {
     let dir = std::env::temp_dir().join(format!("kanki-test-{}", util::rand_token(8)));
     std::fs::create_dir_all(&dir).unwrap();
+    let mut env = HashMap::from([("DOMAIN".to_string(), "fi.example.com".to_string())]);
+    env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
     std::sync::Arc::new(App {
         db: db::Db::open(dir.join("kanki.db").to_str().unwrap()),
-        env: HashMap::from([("DOMAIN".to_string(), "fi.example.com".to_string())]),
+        env,
         hy2_allowed: Mutex::new(Default::default()), limits: Mutex::new(Default::default()), reported: Mutex::new(Default::default()),
         login_fails: Mutex::new(Default::default()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
         http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(Default::default()),
@@ -231,11 +244,6 @@ async fn main() {
             usage();
             return;
         }
-        // the emergency chat server on an Iran server (started by the tunnel agent)
-        "emergency" => {
-            emergency::run().await;
-            return;
-        }
         // Kanki DNS on a DNS server (started by the agent)
         "dns" => {
             dns::run().await;
@@ -249,14 +257,14 @@ async fn main() {
             return;
         }
         // standalone tunnel, no panel and no database: runs the tunnels written in a JSON file
-        // the installer, after it put a moved or restored panel's database in place: the emergency chat's
-        // messages and the certificates of the backup (only what this machine lacks)
+        // the installer, after it put a moved or restored panel's database in place: the certificates of
+        // the backup (only what this machine lacks)
         "restore-files" => {
             let Some(dir) = args.get(2) else {
                 eprintln!("usage: kanki-panel restore-files <unpacked backup folder>");
                 std::process::exit(1);
             };
-            for d in backup::restore_extra(dir, false) {
+            for d in backup::restore_extra(dir) {
                 println!("restored: {}", d);
             }
             return;
@@ -323,6 +331,8 @@ async fn main() {
         reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(20))
             .connect_timeout(crate::pin::CONNECT_TIMEOUT)
+            .pool_idle_timeout(crate::pin::POOL_IDLE)
+            .tcp_keepalive(crate::pin::TCP_KEEPALIVE)
             .danger_accept_invalid_certs(insecure)
             .build()
             .expect("http")
@@ -394,10 +404,8 @@ async fn main() {
     // this server's public IP, written into every backup
     tokio::spawn(migrate::ip_loop(app.clone()));
     tokio::spawn(tunnel::panel::auto_update_loop(app.clone()));
-    // an updated panel also moves an emergency chat on this server onto the new binary
-    tokio::task::spawn_blocking(emergency::restart_if_outdated);
     tokio::spawn(xray::panel::local_loop(app.clone()));
-    // certificates of this server (Xray, emergency chat) that are close to their end
+    // certificates of this server (Xray, Kanki DNS) that are close to their end
     certbot::renew_loop();
     tokio::spawn(backup::telegram_loop(app.clone()));
     servers::install_cores(&app);

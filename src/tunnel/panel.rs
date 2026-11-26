@@ -63,6 +63,9 @@ pub struct TServer {
     /// the cores chosen when the server was added (wg, awg, hy2, kmix): switched on when it
     /// joins, the rest stay off. Empty = a server from before: everything installed and off, as always.
     pub cores: Vec<String>,
+    /// its agent has sent a signed report (3.65): from then on an unsigned one (the bare token of an
+    /// older agent) is refused for it
+    pub signed: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -212,8 +215,6 @@ struct Seen {
     version: String,
     ip: String,
     status: Vec<Status>,
-    /// the emergency chat on this server (Null when it does not run one)
-    emergency: Value,
     /// the firewall ports Kanki opened here, and the open ones nothing uses (see `fw::report`)
     fw: Value,
     /// every port listened on from outside: [[port, udp, program, unit], ...] (Null = older agent)
@@ -570,6 +571,12 @@ pub(crate) fn agent_state(sid: &str) -> Option<(i64, String, String, Value)> {
     seen().lock().unwrap_or_else(|e| e.into_inner()).get(sid).map(|x| (x.at, x.version.clone(), x.ip.clone(), x.setup.clone()))
 }
 
+/// Tests: agent `sid` reported just now with `version`
+#[cfg(test)]
+pub(crate) fn test_seen(sid: &str, version: &str) {
+    seen().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), Seen { at: now(), version: version.to_string(), ..Default::default() });
+}
+
 /// The tunnels server `sid` runs (for the port checks of other features).
 pub(crate) fn specs_of(app: &App, sid: &str) -> Vec<Spec> {
     specs_for(app, sid)
@@ -605,8 +612,8 @@ fn clean_loc(v: &str) -> String {
     if v == "iran" || v == "abroad" { v.to_string() } else { String::new() }
 }
 
-/// Where a server whose location is not set probably is, from what it does: a DNS relay, the emergency
-/// chat, the Iran subscription and a tunnel entry are inside Iran; a DNS exit or a tunnel exit is abroad.
+/// Where a server whose location is not set probably is, from what it does: a DNS relay, the Iran
+/// subscription and a tunnel entry are inside Iran; a DNS exit or a tunnel exit is abroad.
 pub(crate) fn guess_loc(sid: &str, list: &[Tunnel], dns_role: &str, iran_jobs: bool) -> String {
     if dns_role == "relay" || iran_jobs || list.iter().any(|t| t.entry == sid && t.exit != sid) {
         "iran".into()
@@ -631,7 +638,7 @@ pub(crate) fn server_locs(app: &App) -> HashMap<String, (String, bool)> {
             continue;
         }
         let role = dns.servers.iter().find(|x| x.server == s.id).map(|x| x.role.clone()).unwrap_or_default();
-        let jobs = app.db.get("emer_server") == s.id || crate::subiran::settings(app).server == s.id;
+        let jobs = crate::subiran::settings(app).server == s.id;
         m.insert(s.id.clone(), (guess_loc(&s.id, &list, &role, jobs), true));
     }
     // a server's IP country beats a guess (an Iran IP = Iran server, any other = abroad)
@@ -1790,30 +1797,10 @@ pub async fn local_loop(app: Arc<App>) {
         note_report("local", &st, false, false);
         seen().lock().unwrap_or_else(|e| e.into_inner()).insert(
             "local".into(),
-            Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, emergency: Value::Null, fw: Value::Null, listen: Value::Null, setup: Value::Null, stats: Value::Null },
+            Seen { at: now(), version: crate::VERSION.into(), ip: host_of(&app, "local"), status: st, fw: Value::Null, listen: Value::Null, setup: Value::Null, stats: Value::Null },
         );
         // the newest live measurements of every tunnel, for the path-quality report
         super::quality::ingest(&app);
-        // the emergency chat may run on the panel server itself
-        let want = if app.db.get("emer_server") == "local" { emer_cfg(&app) } else { None };
-        let st = tokio::task::spawn_blocking(move || {
-            let r = match &want {
-                // a new config, or the chat stopped: (re)install and start it
-                Some((c, ver)) if crate::emergency::applied_ver() != *ver || !crate::emergency::running() => crate::emergency::deploy(Some((c, ver))),
-                Some(_) => Ok(()),
-                None => crate::emergency::deploy(None),
-            };
-            let mut s = crate::emergency::status();
-            if let Err(e) = r {
-                s["error"] = json!(e);
-            }
-            s
-        })
-        .await
-        .unwrap_or(Value::Null);
-        if let Some(x) = seen().lock().unwrap_or_else(|e| e.into_inner()).get_mut("local") {
-            x.emergency = st;
-        }
         // the firewall guard of the panel's own server
         let g = tokio::task::spawn_blocking(|| crate::fw::report()["guard"].clone()).await.unwrap_or(Value::Null);
         let (fw_want, fw_confirm) = guard_answer(&app, "local", &g);
@@ -2011,8 +1998,6 @@ pub fn router() -> Router<Arc<App>> {
         .route("/tunnel/hy2bin/put", post(agent_hy2bin_put))
         .route("/api/update-all", post(update_all))
         .route("/api/auto-update", get(auto_update_get).put(auto_update_put))
-        .route("/api/emergency", get(emer_get).put(emer_put))
-        .route("/api/emergency/rekey", post(emer_rekey))
 }
 
 fn status_json(st: Option<&Status>) -> Value {
@@ -2317,7 +2302,6 @@ fn holder_name(prog: &str, unit: &str) -> String {
     match unit {
         "kanki-dns.service" => "Kanki DNS".into(),
         "kanki-xray.service" => "Xray".into(),
-        "kanki-emergency.service" => "the emergency chat".into(),
         "kanki-mix.service" => "KANKI MIX".into(),
         "kanki-tunnel.service" => "another Kanki tunnel or the subscription link".into(),
         "kanki-panel.service" => "the panel itself or one of its tunnels".into(),
@@ -3325,7 +3309,7 @@ async fn server_del(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
 }
 
 /// Removes an agent server from the panel. Its agent sees it is gone, removes what Kanki installed
-/// (tunnels, Kanki DNS, Xray, emergency chat, subscription listener), closes the firewall ports it
+/// (tunnels, Kanki DNS, Xray, subscription listener), closes the firewall ports it
 /// opened and uninstalls itself. Refused while tunnels still use it.
 pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(), (StatusCode, String)> {
     if id == "local" {
@@ -3353,233 +3337,29 @@ pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(
     crate::xray::panel::forget_server(app, id);
     crate::access::forget_agent(app, id);
     crate::subiran::forget_server(app, id);
-    if app.db.get("emer_server") == id {
-        app.db.set("emer_server", "");
-    }
     crate::exitgeo::forget(app, &[crate::exitgeo::srv_key(id), crate::exitgeo::xray_key(id)]);
     seen().lock().unwrap_or_else(|e| e.into_inner()).remove(id);
     Ok(())
 }
 
-// ------------------------------------------------------------------ emergency chat (runs on a server inside Iran)
-
-/// The config the chosen server runs, and its version (a hash, so it is sent only on change)
-pub(crate) fn emer_cfg(app: &App) -> Option<(crate::emergency::EmerCfg, String)> {
-    if app.db.get("emer_on") != "1" || app.db.get("emer_sign").is_empty() || app.db.get("emer_admin").is_empty() {
-        return None;
-    }
-    let users = app
-        .db
-        .users()
-        .into_iter()
-        .map(|u| crate::emergency::EUser { h: crate::emergency::user_hash(&u.sub_code()), c: u.created_at, u: u.username })
-        .collect();
-    let c = crate::emergency::EmerCfg {
-        port: app.db.get("emer_port").parse().unwrap_or(0),
-        cert: if emer_ssl(app) == "manual" { app.db.get("emer_cert") } else { String::new() },
-        key: if emer_ssl(app) == "manual" { app.db.get("emer_key") } else { String::new() },
-        admin_hash: app.db.get("emer_admin"),
-        sign_key: app.db.get("emer_sign"),
-        name: app.db.get("panel_name"),
-        users,
-        acme_domain: if emer_ssl(app) == "auto" { app.db.get("emer_domain") } else { String::new() },
-    };
-    if c.port == 0 {
-        return None;
-    }
-    let ver = util::sha256_hex(&serde_json::to_string(&c).unwrap_or_default());
-    Some((c, ver))
-}
-
-/// "auto" (Let's Encrypt on the Iran server), "cdn" (the CDN does HTTPS, the server plain HTTP),
-/// "manual" (pasted PEM) or "http"
-fn emer_ssl(app: &App) -> String {
-    let m = app.db.get("emer_ssl");
-    if !m.is_empty() {
-        return m;
-    }
-    if app.db.get("emer_cert").is_empty() { "http".into() } else { "manual".into() }
-}
-
-/// The address the app talks to: http(s)://domain[:port]. Empty when the chat is off.
-pub(crate) fn emer_url(app: &App) -> String {
-    if app.db.get("emer_on") != "1" {
-        return String::new();
-    }
-    let mode = emer_ssl(app);
-    if mode == "cdn" {
-        let d = app.db.get("emer_domain");
-        return if d.is_empty() { String::new() } else { format!("https://{}", d) };
-    }
-    let tls = mode == "auto" || mode == "manual";
-    let port: u16 = app.db.get("emer_port").parse().unwrap_or(0);
-    let d = app.db.get("emer_domain");
-    if d.is_empty() || port == 0 {
-        return String::new();
-    }
-    let def = if tls { 443 } else { 80 };
-    format!("{}://{}{}", if tls { "https" } else { "http" }, d, if port == def { String::new() } else { format!(":{}", port) })
-}
-
-/// Ports Kanki DNS listens on: the emergency chat cannot use them on a DNS server.
-pub(crate) const DNS_PORTS: [u16; 4] = [53, 80, 443, 853];
-
-/// The emergency chat's port when the chat is on and runs on server `sid`.
-pub(crate) fn emer_port_on(app: &App, sid: &str) -> Option<u16> {
-    (app.db.get("emer_on") == "1" && app.db.get("emer_server") == sid).then(|| app.db.get("emer_port").parse().ok()).flatten()
-}
-
-/// Ports a CDN (ArvanCloud, Cloudflare) passes on: HTTP and HTTPS. Suggested for the emergency chat.
-const CDN_PORTS: &str = "HTTP: 80, 8080, 8880, 2052, 2082, 2086, 2095 · HTTPS: 443, 2053, 2083, 2087, 2096, 8443";
-
-/// The public key the app checks admin messages with (empty when the chat is off)
-pub(crate) fn emer_pub(app: &App) -> String {
-    if app.db.get("emer_on") != "1" { String::new() } else { app.db.get("emer_pub") }
-}
-
-async fn emer_get(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "settings");
-    let sid = app.db.get("emer_server");
-    let st = seen().lock().unwrap_or_else(|e| e.into_inner()).get(&sid).map(|x| x.emergency.clone()).unwrap_or(Value::Null);
-    let users = app.db.users().len();
-    Json(json!({
-        "on": app.db.get("emer_on") == "1", "server": sid, "domain": app.db.get("emer_domain"),
-        "port": app.db.get("emer_port").parse::<u16>().unwrap_or(0), "tls": !app.db.get("emer_cert").is_empty(), "ssl": emer_ssl(&app),
-        "has_password": !app.db.get("emer_admin").is_empty(), "url": emer_url(&app), "status": st, "customers": users,
-        "key": app.db.get("emer_pub").chars().rev().take(12).collect::<String>(),
-    }))
-    .into_response()
-}
-
-fn host_ok(d: &str) -> bool {
-    if d.parse::<std::net::IpAddr>().is_ok() {
-        return true;
-    }
-    !d.is_empty()
-        && d.len() <= 253
-        && d.contains('.')
-        && d.split('.').all(|l| !l.is_empty() && l.len() <= 63 && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') && !l.starts_with('-') && !l.ends_with('-'))
-}
-
-/// { on, server, domain, port, cert, key, password, clear_tls }. Everything is checked first;
-/// nothing is saved when one value is wrong.
-async fn emer_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
-    let _ = guard!(app, h, "settings");
-    let s = |k: &str| b[k].as_str().unwrap_or("").trim().to_string();
-    let on = b["on"].as_bool().unwrap_or(false);
-    let server = if b.get("server").is_some() { s("server") } else { app.db.get("emer_server") };
-    if on && !(server == "local" || servers(&app).iter().any(|x| x.id == server)) {
-        return err(StatusCode::BAD_REQUEST, "choose the server inside Iran");
-    }
-    let domain = if b.get("domain").is_some() {
-        s("domain").trim_start_matches("https://").trim_start_matches("http://").trim_end_matches('/').to_lowercase()
-    } else {
-        app.db.get("emer_domain")
-    };
-    if !domain.is_empty() && !host_ok(&domain) {
-        return err(StatusCode::BAD_REQUEST, "enter a domain like chat.example.com");
-    }
-    let port = match b["port"].as_u64() {
-        Some(p) if p == 0 || p > 65535 || p == 22 => return err(StatusCode::BAD_REQUEST, "choose a port between 1 and 65535 (not 22)"),
-        Some(p) => p.to_string(),
-        None => app.db.get("emer_port"),
-    };
-    let (cert, key) = (s("cert"), s("key"));
-    let tls = if !cert.is_empty() || !key.is_empty() {
-        if !cert.contains("BEGIN CERTIFICATE") {
-            return err(StatusCode::BAD_REQUEST, "the certificate must be PEM (-----BEGIN CERTIFICATE-----)");
-        }
-        if !key.contains("BEGIN PRIVATE KEY") {
-            return err(StatusCode::BAD_REQUEST, "the key must be PKCS#8 PEM (-----BEGIN PRIVATE KEY-----). Convert it: openssl pkcs8 -topk8 -nocrypt -in key.pem");
-        }
-        Some((cert, key))
-    } else if b["clear_tls"].as_bool() == Some(true) {
-        Some((String::new(), String::new()))
-    } else {
-        None
-    };
-    let pw = b["password"].as_str().unwrap_or("");
-    if !pw.is_empty() && pw.chars().count() < 10 {
-        return err(StatusCode::BAD_REQUEST, "the password must be at least 10 characters");
-    }
-    // the port must be free on that server: Kanki DNS (53, 80, 443, 853) and Xray inbounds run there too
-    if on {
-        let p: u16 = port.parse().unwrap_or(0);
-        let dns = crate::dns::panel::settings(&app);
-        if dns.on && dns.servers.iter().any(|x| x.server == server) && DNS_PORTS.contains(&p) {
-            return err(StatusCode::BAD_REQUEST, &format!("Kanki DNS runs on this server and needs ports 53, 80, 443 and 853: choose another port for the chat ({})", CDN_PORTS));
-        }
-        let xr = crate::xray::panel::settings(&app);
-        if xr.on && xr.inbounds.iter().any(|ib| ib.enabled && ib.server == server && ib.port == p) {
-            return err(StatusCode::BAD_REQUEST, &format!("an Xray inbound uses port {} on this server: choose another port for the chat ({})", p, CDN_PORTS));
-        }
-        if let Some(e) = port_busy(&app, &server, p, false, &["kanki-emergency.service"]) {
-            return err(StatusCode::CONFLICT, &e);
-        }
-    }
-    if on {
-        if pw.is_empty() && app.db.get("emer_admin").is_empty() {
-            return err(StatusCode::BAD_REQUEST, "set the admin password of the emergency chat");
-        }
-        if domain.is_empty() || port.is_empty() {
-            return err(StatusCode::BAD_REQUEST, "enter the domain and the port");
-        }
-    }
-    let sign = if app.db.get("emer_sign").is_empty() {
-        match crate::emergency::gen_sign_key() {
-            Ok(k) => Some(k),
-            Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e),
-        }
-    } else {
-        None
-    };
-    let ssl = s("ssl");
-    if !ssl.is_empty() && !["auto", "cdn", "manual", "http"].contains(&ssl.as_str()) {
-        return err(StatusCode::BAD_REQUEST, "unknown SSL mode");
-    }
-    if ssl == "auto" && domain.parse::<std::net::IpAddr>().is_ok() {
-        return err(StatusCode::BAD_REQUEST, "automatic SSL needs a domain, not an IP");
-    }
-    if ssl == "manual" && tls.as_ref().map(|t| t.0.is_empty()).unwrap_or(app.db.get("emer_cert").is_empty()) {
-        return err(StatusCode::BAD_REQUEST, "paste the certificate and the key, or choose another SSL mode");
-    }
-    // all checked: save
-    if !ssl.is_empty() {
-        app.db.set("emer_ssl", &ssl);
-    }
-    app.db.set("emer_server", &server);
-    app.db.set("emer_domain", &domain);
-    app.db.set("emer_port", &port);
-    if let Some((c, k)) = tls {
-        app.db.set("emer_cert", &c);
-        app.db.set("emer_key", &k);
-    }
-    if !pw.is_empty() {
-        app.db.set("emer_admin", &util::hash_password(pw));
-    }
-    if let Some((k, p)) = sign {
-        app.db.set("emer_sign", &k);
-        app.db.set("emer_pub", &p);
-    }
-    app.db.set("emer_on", if on { "1" } else { "" });
-    Json(json!({ "ok": true, "url": emer_url(&app) })).into_response()
-}
-
-/// a new signing key: apps trust it after they refresh their subscription (while the internet works)
-async fn emer_rekey(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "settings");
-    match crate::emergency::gen_sign_key() {
-        Ok((k, p)) => {
-            app.db.set("emer_sign", &k);
-            app.db.set("emer_pub", &p);
-            Json(json!({ "ok": true })).into_response()
-        }
-        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+/// Server `id` signs its reports from now on: unsigned ones are refused for it
+fn mark_signed(app: &App, id: &str) {
+    let mut list = servers(app);
+    if let Some(x) = list.iter_mut().find(|x| x.id == id && !x.signed) {
+        x.signed = true;
+        save_servers(app, &list);
+        eprintln!("server {}: its agent signs its reports, unsigned ones are refused from now on", id);
     }
 }
 
-/// Public: a tunnel agent reports its tunnels and gets the list it should run.
-async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+/// The path a server agent signs its report for (the same behind any proxy or CDN)
+pub const REPORT_PATH: &str = "/tunnel/agent";
+
+/// Public: a tunnel agent reports its tunnels and gets the list it should run. The report is signed with
+/// the server's token (3.65, `sign`); an agent from before sends the bare token in the body, which is
+/// taken only until that server has once sent a signed report.
+async fn agent_report(State(app): St, h: HeaderMap, raw: axum::body::Bytes) -> Response {
+    let Ok(b) = serde_json::from_slice::<Value>(&raw) else { return err(StatusCode::BAD_REQUEST, "send a JSON report") };
     let id = b["id"].as_str().unwrap_or("").to_string();
     let token = b["token"].as_str().unwrap_or("").to_string();
     let Some(s) = servers(&app).into_iter().find(|s| s.id == id) else {
@@ -3591,7 +3371,16 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         }
         return (StatusCode::NOT_FOUND, "this panel does not know this server").into_response();
     };
-    if token.is_empty() || !util::ct_eq(&token, &s.token) {
+    if crate::sign::is_signed(&h) {
+        if let Err(r) = crate::sign::verify(&s.token, &h, "POST", REPORT_PATH, &raw, now()) {
+            return err(StatusCode::UNAUTHORIZED, r.text());
+        }
+        if !s.signed {
+            mark_signed(&app, &id);
+        }
+    } else if s.signed {
+        return err(StatusCode::UNAUTHORIZED, crate::sign::Refusal::Unsigned.text());
+    } else if token.is_empty() || !util::ct_eq(&token, &s.token) {
         return err(StatusCode::FORBIDDEN, "wrong token");
     }
     let status: Vec<Status> = serde_json::from_value(b["status"].clone()).unwrap_or_default();
@@ -3607,18 +3396,13 @@ async fn agent_report(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         let mut sn = seen().lock().unwrap_or_else(|e| e.into_inner());
         let prev = sn.get(&id).map(|x| x.ip.clone()).unwrap_or_default();
         let ip = if via_cdn { prev } else { sticky_ip(&prev, &fresh_ip) };
-        sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status, emergency: b["emergency"].clone(), fw: b["fw"].clone(), listen: b["listen"].clone(), setup: b["setup"].clone(), stats: b["stats"].clone() });
+        sn.insert(id.clone(), Seen { at: now(), version: b["version"].as_str().unwrap_or("").to_string(), ip, status, fw: b["fw"].clone(), listen: b["listen"].clone(), setup: b["setup"].clone(), stats: b["stats"].clone() });
     }
     let ver = b["version"].as_str().unwrap_or("");
     let until = app.db.get("tun_update_until").parse::<i64>().unwrap_or(0).max(update_one_until(&app, &id));
     let update = now() < until && !ver.is_empty() && ver != crate::VERSION;
-    // the emergency chat: only the chosen server runs it; the config is sent only when it changed
-    let emergency = match (app.db.get("emer_server") == id).then(|| emer_cfg(&app)).flatten() {
-        // same config and running: nothing to do (a stopped chat gets the config again, so it restarts)
-        Some((_, v)) if b["emer_ver"].as_str() == Some(v.as_str()) && b["emergency"]["active"].as_bool() == Some(true) => json!({ "mode": "keep" }),
-        Some((c, v)) => json!({ "mode": "set", "ver": v, "cfg": c }),
-        None => json!({ "mode": "off" }),
-    };
+    // the emergency chat is gone (3.65): an agent from before stops it until it updates
+    let emergency = json!({ "mode": "off" });
     // Kanki DNS: usage since the last report, and the config when it changed
     crate::dns::panel::ingest(&app, &id, &b["dns"]);
     // a repair asked in the panel: the config goes again with "force", so the server restarts it

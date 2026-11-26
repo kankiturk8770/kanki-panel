@@ -69,7 +69,14 @@ pub fn panel_client(insecure: bool, timeout: Duration) -> reqwest::Client {
     if insecure {
         crate::pin::pinned_client(std::path::Path::new(PIN_FILE), timeout)
     } else {
-        reqwest::Client::builder().timeout(timeout).build().expect("http")
+        // one kept-alive connection carries every report (no new TCP and TLS handshake each 5 seconds)
+        reqwest::Client::builder()
+            .timeout(timeout)
+            .connect_timeout(crate::pin::CONNECT_TIMEOUT)
+            .pool_idle_timeout(crate::pin::POOL_IDLE)
+            .tcp_keepalive(crate::pin::TCP_KEEPALIVE)
+            .build()
+            .expect("http")
     }
 }
 
@@ -360,8 +367,6 @@ pub async fn run(version: &str) {
     // reports in a row that did not reach the panel through the address in use
     let mut miss = 0u32;
     let mut probe_at = std::time::Instant::now();
-    // an updated agent also moves the emergency chat onto the new binary
-    let _ = tokio::task::spawn_blocking(crate::emergency::restart_if_outdated).await;
     let _ = tokio::task::spawn_blocking(crate::dns::restart_if_outdated).await;
     // 3.57.0: the VIP tunnel is gone; what an older agent left behind goes too
     let _ = tokio::task::spawn_blocking(retire_vip).await;
@@ -375,26 +380,18 @@ pub async fn run(version: &str) {
     let (mut stats, mut stats_at) = (serde_json::Value::Null, std::time::Instant::now());
     // the first report already carries the logs
     let mut logs_at = std::time::Instant::now().checked_sub(std::time::Duration::from_secs(120)).unwrap_or_else(std::time::Instant::now);
-    // the last error of setting up the emergency chat (reported to the panel)
-    let emer_err: Mutex<Option<String>> = Mutex::new(None);
     // the last error of setting up Kanki DNS
     let dns_err: Mutex<Option<String>> = Mutex::new(None);
     // the last error of setting up Xray
     let xray_err: Mutex<Option<String>> = Mutex::new(None);
     // the subscription's HTTPS listener (when this Iran server serves it)
     let mut subsrv = crate::subiran::Runner::from_disk();
+    // the panel took a signed report (it never gets the bare token again) / it is older (since when)
+    let mut signed_ok = false;
+    let (mut listen, mut listen_at) = (serde_json::Value::Null, std::time::Instant::now());
+    let mut panel_old: Option<std::time::Instant> = None;
     loop {
         let st = mgr.statuses().await;
-        let (emer_ver, mut emer_st) = tokio::task::spawn_blocking(|| (crate::emergency::applied_ver(), crate::emergency::status()))
-            .await
-            .unwrap_or_default();
-        if let Some(e) = emer_err.lock().unwrap_or_else(|e| e.into_inner()).clone() {
-            if emer_st.is_object() {
-                emer_st["error"] = json!(e);
-            } else {
-                emer_st = json!({ "active": false, "error": e });
-            }
-        }
         let (dns_ver, mut dns_st) = tokio::task::spawn_blocking(|| (crate::dns::applied_ver(), crate::dns::status())).await.unwrap_or_default();
         if let Some(e) = dns_err.lock().unwrap_or_else(|e| e.into_inner()).clone() {
             if dns_st.is_object() {
@@ -412,7 +409,11 @@ pub async fn run(version: &str) {
             }
         }
         let fw_st = tokio::task::spawn_blocking(crate::fw::report).await.unwrap_or_default();
-        let listen = tokio::task::spawn_blocking(crate::certbot::listeners_json).await.unwrap_or_default();
+        // what listens here changes rarely: read every 15 seconds, not on every report
+        if listen_at.elapsed() >= Duration::from_secs(15) || listen.is_null() {
+            listen = tokio::task::spawn_blocking(crate::certbot::listeners_json).await.unwrap_or_default();
+            listen_at = std::time::Instant::now();
+        }
         let setup_st = tokio::task::spawn_blocking(setup_status).await.unwrap_or_default();
         // the machine (CPU, memory, disk, uptime, sockets) every 30 seconds: Iran servers have no VPN part
         // that reports it
@@ -420,19 +421,31 @@ pub async fn run(version: &str) {
             stats = tokio::task::spawn_blocking(crate::admin::node_stats).await.unwrap_or_default();
             stats_at = std::time::Instant::now();
         }
-        let mut body = json!({ "id": id, "token": token, "version": version, "status": st, "emer_ver": emer_ver, "emergency": emer_st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st, "stats": stats });
+        // signed with the token (3.65); the bare token goes along only to a panel from before (`panel_old`)
+        if panel_old.is_some_and(|t| t.elapsed() >= Duration::from_secs(600)) {
+            panel_old = None;
+        }
+        let mut body = json!({ "id": id, "version": version, "status": st, "dns_ver": dns_ver, "dns": dns_st, "xray_ver": xray_ver, "xray": xray_st, "subsrv": subsrv.status(), "fw": fw_st, "listen": listen, "setup": setup_st, "stats": stats });
         // the last warnings and errors of Kanki's services here, once a minute, for the panel's Logs page (3.58.1)
         if logs_at.elapsed() >= std::time::Duration::from_secs(60) {
             logs_at = std::time::Instant::now();
             let units: Vec<String> = ["kanki-tunnel", "kanki-node", "kanki-mix", "hysteria-server", "wg-quick@wg0", "awg-quick@awg0"].iter().map(|u| u.to_string()).collect();
             body["logs"] = json!(tokio::task::spawn_blocking(move || crate::admin::journal(&units, 40, true)).await.unwrap_or_default());
         }
+        if panel_old.is_some() {
+            body["token"] = json!(token);
+        }
+        let raw = serde_json::to_vec(&body).unwrap_or_default();
+        let post = |c: &reqwest::Client, base: &str| {
+            let rb = c.post(format!("{}{}", base, crate::tunnel::panel::REPORT_PATH)).header(reqwest::header::CONTENT_TYPE, "application/json").body(raw.clone());
+            crate::sign::sign(rb, &token, "POST", crate::tunnel::panel::REPORT_PATH, &raw)
+        };
         // on another address: the first one is tried again every five minutes, with a short wait
         let mut early = None;
         if idx != 0 && probe_at.elapsed() >= Duration::from_secs(300) {
             probe_at = std::time::Instant::now();
             let (b0, a0) = &cands[0];
-            if let Ok(r) = (if *a0 { &http_ca } else { &http }).post(format!("{}/tunnel/agent", b0)).json(&body).timeout(Duration::from_secs(8)).send().await {
+            if let Ok(r) = post(if *a0 { &http_ca } else { &http }, b0).timeout(Duration::from_secs(8)).send().await {
                 if r.status().is_success() {
                     eprintln!("the panel answers at {} again", b0);
                     idx = 0;
@@ -446,8 +459,19 @@ pub async fn run(version: &str) {
         let http = if alt { &http_ca } else { &http };
         let res = match early {
             Some(r) => r,
-            None => http.post(format!("{}/tunnel/agent", base)).json(&body).send().await,
+            None => post(http, &base).send().await,
         };
+        // a panel from before 3.65 does not read the signature and wants the token: it goes along for ten
+        // minutes, then a signed report alone is tried again. Once a signed report alone was taken, the
+        // token never goes again.
+        match &res {
+            Ok(r) if r.status() == reqwest::StatusCode::FORBIDDEN && panel_old.is_none() && !signed_ok => {
+                eprintln!("the panel did not take the signed report: it is older, the token goes along for now");
+                panel_old = Some(std::time::Instant::now());
+            }
+            Ok(r) if r.status().is_success() && panel_old.is_none() && !signed_ok => signed_ok = true,
+            _ => {}
+        }
         let reached = matches!(&res, Ok(r) if r.status().is_success() || r.status().as_u16() == 410);
         if reached {
             miss = 0;
@@ -469,7 +493,6 @@ pub async fn run(version: &str) {
                 if gone >= 3 {
                     eprintln!("the panel removed this server: removing every tunnel and service Kanki installed here");
                     mgr.apply(vec![]).await;
-                    let _ = tokio::task::spawn_blocking(|| crate::emergency::deploy(None)).await;
                     let _ = tokio::task::spawn_blocking(|| crate::dns::deploy(None)).await;
                     let _ = tokio::task::spawn_blocking(|| crate::xray::deploy(None, None)).await;
                     subsrv.apply(None);
@@ -494,20 +517,6 @@ pub async fn run(version: &str) {
                             cands = candidates(&panel, &main_named, &alt_named);
                             idx = cands.iter().position(|c| c.0 == base).unwrap_or(0);
                         }
-                    }
-                    // the emergency chat: "set" (new config), "keep" (unchanged) or "off"
-                    match v["emergency"]["mode"].as_str() {
-                        Some("set") => {
-                            if let (Ok(c), Some(ver)) = (serde_json::from_value::<crate::emergency::EmerCfg>(v["emergency"]["cfg"].clone()), v["emergency"]["ver"].as_str().map(|s| s.to_string())) {
-                                let r = tokio::task::spawn_blocking(move || crate::emergency::deploy(Some((&c, &ver)))).await.unwrap_or(Err("deploy crashed".into()));
-                                *emer_err.lock().unwrap_or_else(|e| e.into_inner()) = r.err();
-                            }
-                        }
-                        Some("off") => {
-                            let r = tokio::task::spawn_blocking(|| crate::emergency::deploy(None)).await.unwrap_or(Ok(()));
-                            *emer_err.lock().unwrap_or_else(|e| e.into_inner()) = r.err();
-                        }
-                        _ => {}
                     }
                     // "Restart services" in the panel: the tunnels stop now and start again below
                     if v["restart"].as_bool() == Some(true) {

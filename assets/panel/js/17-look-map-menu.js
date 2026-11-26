@@ -122,7 +122,7 @@ function attention(){var el=$('#att');if(!el)return;var it=[],b=DB.bot,u=DB.upd,
  var er=(DB.errs||[]).slice(-3).reverse(),h='';
  h+=it.length?'<ul class="kd2-list">'+it.map(function(x){return '<li><a href="'+x[4]+'"'+(x[5]?' onclick="S.stsec=\'upd\'"':'')+'><i class="dot '+x[0]+'"></i><span class="ki">'+ic(x[1],16)+'</span><b>'+x[2]+'</b><small>'+x[3]+'</small></a></li>'}).join('')+'</ul>':
   '<div class="kd2-ok"><span>'+ic('check',18)+'</span><div><b>'+t('Everything is working')+'</b><small>'+t('The panel, the bot, the servers and the tunnels are fine.')+'</small></div></div>';
- if(er.length)h+='<div class="kd2-ev"><div class="kd2-evh"><b>'+t('Latest errors')+'</b><a href="#emergency/logs">'+t('All logs')+'</a></div>'+
+ if(er.length)h+='<div class="kd2-ev"><div class="kd2-evh"><b>'+t('Latest errors')+'</b><a href="#logs">'+t('All logs')+'</a></div>'+
   er.map(function(x){return '<div class="kd2-evr"><time class="ltr">'+logTime(x.ts)+'</time><span class="ltr">'+esc(String(x.u||'').replace(/\.service$/,''))+'</span><code class="ltr">'+esc(x.m)+'</code></div>'}).join('')+'</div>';
  var sub=$('#att_sub');if(sub)sub.textContent=it.length?N(it.length)+' '+t('item(s)'):t('All clear');
  var hp=$('#d_health');if(hp){var c=it.some(function(x){return x[0]=='r'})?'r':it.some(function(x){return x[0]=='y'})?'y':'g';hp.className='kpill '+c;hp.innerHTML='<i class="dot '+c+'"></i><span>'+(c=='g'?t('Healthy'):N(it.filter(function(x){return x[0]!='b'}).length)+' '+t('issue(s)'))+'</span>'}
@@ -369,13 +369,15 @@ window.route=function(){var hs=location.hash||'';
  // old addresses: one name and one place for each thing
  if(hs=='#xray'){location.replace('#xray/status');return}
  if(hs.slice(1).split('/')[0]=='servers'){location.replace('#nodes');return}
+ // the emergency chat is gone (3.65): its old logs link opens the Logs page
+ if(hs.slice(1).split('/')[0]=='emergency'){location.replace('#logs');return}
  Object.keys(KAcc.open).forEach(function(k){KAcc.open[k]=''});
  var h=(hs||'#dash').slice(1).split('/'),p=h[0];S.sub=h[1]||'';if(!PAGES.some(function(x){return x[0]==p})){p='dash';S.sub=''}S.page=p;
  var sec=V.secOf(p),tb=$('#tbt');if(tb){var lbl=(sec[3].filter(function(x){return x[0]==p})[0]||[])[2]||pgOf(p)[1];
   $('#tbsec').textContent=t(sec[4]);tb.textContent=sec[3].length>1?t(sec[1])+' › '+t(lbl):t(sec[1]);
   document.title=t(sec[3].length>1?lbl:sec[1])+' · '+((S.me&&S.me.panel_name)||'Kanki Panel')}
  navMark(p,S.sub);clearPageTimers();window.scrollTo(0,0);
- (({dash:pDash,users:pUsers,nodes:pNodes,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,emergency:pEmergency,backup:pBackup,security:pSecurity,settings:pSettings})[p]||window['p_'+p])();
+ (({dash:pDash,users:pUsers,nodes:pNodes,tunnels:pTunnels,traffic:pTraffic,ports:pPorts,bot:pBot,logs:pLogs,backup:pBackup,security:pSecurity,settings:pSettings})[p]||window['p_'+p])();
  V.watchPg();V.drawSecTabs(S.page);
 };
 

@@ -320,7 +320,7 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
  tgLoad();restoreBox();
  moveLoad();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page=='backup'&&$('#v37move')&&!$('#modal').classList.contains('on'))moveLoad()},5000)}
 // move the whole panel to a new server
-function moveCard(){return '<div class="card" id="v37move"><h3>🚚 '+t('Move the panel to a new server')+'</h3><p class="sub">'+t("Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.")+' '+t("Also the emergency chat's messages and the certificates of the other domains. From the moment the new server takes the backup this panel is locked, so nothing done in between is lost.")+'</p><div id="mv_in">'+t('Loading…')+'</div></div>'}
+function moveCard(){return '<div class="card" id="v37move"><h3>🚚 '+t('Move the panel to a new server')+'</h3><p class="sub">'+t("Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.")+' '+t("Also the certificates of the other domains. From the moment the new server takes the backup this panel is locked, so nothing done in between is lost.")+'</p><div id="mv_in">'+t('Loading…')+'</div></div>'}
 function moveDraw(m){var el=$('#mv_in');if(!el)return;
  var steps='<ol class="steps" style="margin:6px 0 10px;line-height:2"><li><b>'+t("Point the panel's domain to the new server's IP")+'</b><br><small class="muted">'+t('In your DNS (Cloudflare / ArvanCloud): the A record of')+' <span class="ltr">'+esc(m.domain||'')+'</span> '+t('= the IP of the new server, without CDN (DNS only). The old panel keeps working by its IP until the move is done.')+'</small></li>'+
   '<li><b>'+t('Run this on the new server (Ubuntu / Debian, as root)')+'</b><br><small class="muted">'+t('It downloads everything straight from this server, puts it back with the same keys and starts the panel there. Then this panel stops by itself.')+'</small></li></ol>';
@@ -586,9 +586,9 @@ function stImport(inp){var f=inp.files&&inp.files[0];if(!f)return;var rd=new Fil
 
 // ---------------------------------------------------------------- update
 // automatic update every night at 03:30 Tehran time (the same as “Update all”)
-function autoUpdBox(){return '<label class="chk" style="margin:10px 0"><input type="checkbox" id="au_on"><span><b>🌙 '+t('Automatic update')+'</b><small id="au_txt" style="display:block;margin-top:2px">'+t('Every night at 03:30 Tehran time, if GitHub has a new version: the panel, the nodes, the tunnel servers and the emergency chat are updated by themselves.')+'</small></span></label>'}
+function autoUpdBox(){return '<label class="chk" style="margin:10px 0"><input type="checkbox" id="au_on"><span><b>🌙 '+t('Automatic update')+'</b><small id="au_txt" style="display:block;margin-top:2px">'+t('Every night at 03:30 Tehran time, if GitHub has a new version: the panel, the nodes and the tunnel servers are updated by themselves.')+'</small></span></label>'}
 function auTxt(r){var el=$('#au_txt');if(!el||!r)return;var f=function(ts,o){return new Date(ts*1000).toLocaleString(S.lang=='fa'?'fa-IR':'en-GB',Object.assign({timeZone:'Asia/Tehran',hour:'2-digit',minute:'2-digit'},o))};
- var x=t('Every night at 03:30 Tehran time, if GitHub has a new version: the panel, the nodes, the tunnel servers and the emergency chat are updated by themselves.');
+ var x=t('Every night at 03:30 Tehran time, if GitHub has a new version: the panel, the nodes and the tunnel servers are updated by themselves.');
  if(r.on)x+=' · '+t('Next run')+': '+f(r.next,{weekday:'short'});
  if(r.last&&r.last.ts)x+=' · '+t('Last run')+': '+f(r.last.ts,{month:'short',day:'numeric'})+' — '+r.last.msg;el.textContent=x}
 function autoUpdWire(){var c=$('#au_on');if(!c||c._w)return;c._w=1;

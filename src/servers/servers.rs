@@ -2,7 +2,7 @@
 //!
 //! The panel runs on one server ("local"). Every other server is a node of the panel and is added
 //! with ONE command, which installs everything a server can do: the VPN (WireGuard, AmneziaWG,
-//! Hysteria2, KANKI MIX: the node agent) and the server agent (tunnels, Xray, Kanki DNS, emergency
+//! Hysteria2, KANKI MIX: the node agent) and the server agent (tunnels, Xray, Kanki DNS
 //! chat). What a server actually runs is then switched on in the panel, nothing more is typed on it.
 //!
 //! Inside, a server is still two records that run as two services on the machine: a VPN node (the
@@ -51,7 +51,6 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/servers/:id/vpn", post(vpn_switch))
         .route("/api/servers/:id/drop-vpn", post(drop_vpn))
         .route("/api/servers/:id/core", post(core_switch))
-        .route("/api/servers/drop-iran-vpn", post(drop_iran_vpn))
         .route("/api/servers/:id/ports", post(set_ports))
         .route("/api/servers/:id/kmix", post(kmix_switch))
         .route("/api/servers/:id/role", post(role_set))
@@ -598,7 +597,6 @@ pub fn list_json(app: &App) -> Value {
     let tl = tp::tunnels(app);
     let xr = crate::xray::panel::settings(app);
     let dn = crate::dns::panel::settings(app);
-    let emer = app.db.get("emer_server");
     let subs = crate::subiran::settings(app).server;
     let t = now();
     let names: HashMap<String, String> = nodes.iter().map(|n| (n.id.clone(), n.name.clone())).collect();
@@ -609,7 +607,6 @@ pub fn list_json(app: &App) -> Value {
             "xray": xr.inbounds.iter().filter(|i| i.server == sid).count(),
             "xray_on": xr.on && xr.servers.iter().any(|x| x.server == sid),
             "dns": dn.servers.iter().find(|x| x.server == sid).map(|x| x.role.clone()).unwrap_or_default(),
-            "emergency": emer == sid,
             "subsrv": subs == sid,
         })
     };
@@ -662,7 +659,7 @@ pub fn list_json(app: &App) -> Value {
         .iter()
         .map(|(p, v)| json!({ "port": p, "users": v.iter().map(|(n, pr)| json!({ "node": n, "name": names.get(n).cloned().unwrap_or(n.clone()), "proto": pr })).collect::<Vec<_>>() }))
         .collect();
-    json!({ "servers": out, "clashes": clash, "panel": panel_url(app), "repo": repo(), "version": crate::VERSION, "iran_relays": iran_relays(app).len(), "core_off": crate::cores::load_effective(app) })
+    json!({ "servers": out, "clashes": clash, "panel": panel_url(app), "repo": repo(), "version": crate::VERSION, "core_off": crate::cores::load_effective(app) })
 }
 
 // ------------------------------------------------------------------ add / complete / switch / remove
@@ -677,10 +674,11 @@ fn clean_domain(d: &str) -> String {
     if ok { d } else { String::new() }
 }
 
-/// A new server. A relay in Iran carries tunnels only: no VPN part is installed and no VPN port is
-/// held for it, unless `vpn` is asked for (Install VPN on it later does the same).
-fn new_server(app: &App, name: String, loc: String, domain: String, vpn: Option<bool>) -> TServer {
-    let with_vpn = loc != "iran" || vpn == Some(true);
+/// A new server. Inside Iran or abroad, the same rules (3.65): the VPN part is installed when it serves
+/// users or a VPN core is ticked (`with_vpn`); otherwise only the server agent, and switching a VPN core
+/// on later installs the VPN part by itself (`ask_vpn_install`).
+fn new_server(app: &App, name: String, loc: String, domain: String, vpn: Option<bool>, with_vpn: bool) -> TServer {
+    let with_vpn = with_vpn || vpn == Some(true);
     TServer {
         id: format!("t{}", rand_token(7).to_lowercase()),
         name,
@@ -688,7 +686,7 @@ fn new_server(app: &App, name: String, loc: String, domain: String, vpn: Option<
         created: now(),
         join: if with_vpn { rand_token(40) } else { String::new() },
         join_exp: if with_vpn { now() + JOIN_VALID } else { 0 },
-        vpn: vpn.unwrap_or(loc != "iran"),
+        vpn: vpn.unwrap_or(with_vpn),
         ports: if with_vpn { allocate(app) } else { vec![] },
         loc,
         domain,
@@ -696,9 +694,9 @@ fn new_server(app: &App, name: String, loc: String, domain: String, vpn: Option<
     }
 }
 
-/// An Iran relay made without the VPN part: its command installs only the server agent
+/// A server made without the VPN part: its command installs only the server agent
 fn agent_only(s: &TServer) -> bool {
-    s.node.is_empty() && (s.loc == "iran" || !s.vpn) && s.join.is_empty()
+    s.node.is_empty() && s.join.is_empty()
 }
 
 /// { name, loc: iran|abroad, domain?, vpn? } -> a new server and the one command for it
@@ -714,7 +712,8 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     // its tunnel domain (the Iran server's): every config gets its copy through it once the server joins
     let tun = b["tunnel_host"].as_str().unwrap_or("").trim().to_string();
     let name = if name.is_empty() { format!("server-{}", list.len() + 1) } else { name };
-    let mut s = new_server(&app, name, loc, domain, b["vpn"].as_bool());
+    let cores = clean_cores(&b["cores"]);
+    let mut s = new_server(&app, name, loc, domain, b["vpn"].as_bool(), !cores.is_empty());
     // only the tunnel agent, no VPN part
     if b["agent_only"].as_bool() == Some(true) {
         s.join.clear();
@@ -722,9 +721,9 @@ async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         s.ports.clear();
         s.vpn = false;
     }
-    // the cores to switch on when it joins (the add window: WireGuard and AmneziaWG ticked abroad)
-    if s.vpn {
-        s.cores = clean_cores(&b["cores"]);
+    // the cores to switch on when it joins
+    if !s.join.is_empty() {
+        s.cores = cores;
     }
     // «SSL»: on by default abroad, off in Iran (port 80 is often closed there)
     s.no_ssl = !b["ssl"].as_bool().unwrap_or(s.loc != "iran");
@@ -759,7 +758,7 @@ async fn update_one(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Res
 
 /// { addr }: this server moves to a new machine (the old one died, or its IP was filtered). Gives the
 /// same command with a fresh join token: run on the new machine, the agent comes back as this server
-/// (its tunnels, Xray, Kanki DNS, the emergency chat and the subscription relay come back by themselves)
+/// (its tunnels, Xray, Kanki DNS and the subscription relay come back by themselves)
 /// and its VPN part re-registers as the same node (same cores, ports and users; SSL is taken again for
 /// its domain). `addr` is the new IP or domain other servers dial ("" = the address it reports from).
 async fn replace_machine(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
@@ -951,36 +950,75 @@ async fn complete(State(app): St, h: HeaderMap, Path(id): Path<String>, body: Op
             _ => err(StatusCode::BAD_GATEWAY, "this server's agent is older: press Update on it first, then try again"),
         };
     }
-    let mut list = tp::servers(&app);
-    let Some(s) = list.iter_mut().find(|s| s.id == id) else { return err(StatusCode::NOT_FOUND, "unknown server") };
+    let serve = b["vpn"].as_bool().unwrap_or(true);
+    let domain = b["domain"].as_str().map(clean_domain);
+    match ask_vpn_install(&app, &id, serve, domain, &[]) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err((code, e)) => err(code, &e),
+    }
+}
+
+/// Asks the agent of server `id` to install the VPN part (it runs the installer itself and joins as a
+/// node); `cores` are switched on when it joins, on top of the ones already asked for. The same for a
+/// server inside Iran and abroad. A request still running only takes the new cores.
+pub(crate) fn ask_vpn_install(app: &App, id: &str, serve: bool, domain: Option<String>, cores: &[&str]) -> Result<(), (StatusCode, String)> {
+    let _g = install_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let mut list = tp::servers(app);
+    let Some(s) = list.iter_mut().find(|s| s.id == id) else { return Err((StatusCode::NOT_FOUND, "unknown server".into())) };
     if !s.node.is_empty() {
-        return err(StatusCode::BAD_REQUEST, "this server already has everything installed");
+        return Err((StatusCode::BAD_REQUEST, "this server already has everything installed".into()));
+    }
+    let add = |s: &mut TServer| {
+        for c in cores {
+            if ALL_CORES.contains(c) && !s.cores.iter().any(|x| x == c) {
+                s.cores.push(c.to_string());
+            }
+        }
+        s.cores = clean_cores(&json!(s.cores));
+    };
+    if s.setup_at > 0 && !s.join.is_empty() && s.join_exp > now() {
+        add(s);
+        s.vpn = s.vpn || serve;
+        tp::save_servers(app, &list);
+        return Ok(());
     }
     let (at, ver, _, _) = tp::agent_state(&s.id).unwrap_or_default();
     if at == 0 || now() - at > 60 {
-        return err(StatusCode::CONFLICT, "this server is not connected to the panel right now");
+        return Err((StatusCode::CONFLICT, "this server is not connected to the panel right now".into()));
     }
     if ver.is_empty() || ver_lt(&ver, SETUP_FROM) {
-        return err(StatusCode::CONFLICT, "this server's agent is older: press Update all first (it takes a minute), then try again");
+        return Err((StatusCode::CONFLICT, "this server's agent is older: press Update all first (it takes a minute), then try again".into()));
     }
-    if let Some(d) = b["domain"].as_str() {
-        s.domain = clean_domain(d);
+    if let Some(d) = domain {
+        s.domain = d;
     }
-    s.vpn = b["vpn"].as_bool().unwrap_or(s.loc != "iran");
+    add(s);
+    s.vpn = serve;
     s.join = rand_token(40);
     s.join_exp = now() + JOIN_VALID;
     s.setup_at = now();
     let need = s.ports.len() != 4;
-    tp::save_servers(&app, &list);
+    tp::save_servers(app, &list);
     if need {
-        let ports = allocate(&app);
-        let mut list = tp::servers(&app);
+        let ports = allocate(app);
+        let mut list = tp::servers(app);
         if let Some(x) = list.iter_mut().find(|x| x.id == id) {
             x.ports = ports;
         }
-        tp::save_servers(&app, &list);
+        tp::save_servers(app, &list);
     }
-    Json(json!({ "ok": true })).into_response()
+    Ok(())
+}
+
+/// One change at a time to the VPN cores asked for an install (two switches flipped together both count)
+fn install_lock() -> &'static std::sync::Mutex<()> {
+    static L: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    L.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+/// The VPN cores asked to be switched on when the VPN part being installed on agent server `sid` joins
+fn install_wanted(app: &App, sid: &str) -> Option<Vec<String>> {
+    tp::servers(app).into_iter().find(|s| s.id == sid && s.node.is_empty() && s.setup_at > 0 && !s.join.is_empty() && s.join_exp > now()).map(|s| s.cores)
 }
 
 /// The VPN node of a server key ("local", "node:<id>" or an agent server linked to a node)
@@ -1113,6 +1151,9 @@ pub fn cores_state(app: &App, key: &str) -> Value {
             (false, false, role.refusal(c))
         } else if vpn {
             match &node {
+                // an agent server without its VPN part (inside Iran or abroad): switching a VPN core on
+                // installs it (`ask_vpn_install`); the cores asked for show on until it joins
+                None if agent.is_some() => (true, agent.as_deref().and_then(|a| install_wanted(app, a)).is_some_and(|w| w.iter().any(|x| x == c)), String::new()),
                 None => (false, false, "the VPN part is not installed on this server".to_string()),
                 Some(n) if c == "kmix" => (true, km.node_on(n), String::new()),
                 Some(n) => (true, !crate::cores::is_off(app, n, c), String::new()),
@@ -1128,7 +1169,9 @@ pub fn cores_state(app: &App, key: &str) -> Value {
         };
         m.insert(c.to_string(), json!({ "can": can, "on": on, "why": why }));
     }
-    json!({ "role": role.as_str(), "cores": m })
+    // the VPN part is not there yet: a VPN core switched on installs it; `installing` while it runs
+    let installing = node.is_none() && agent.as_deref().is_some_and(|a| install_wanted(app, a).is_some());
+    json!({ "role": role.as_str(), "cores": m, "vpn_part": node.is_some(), "installing": installing })
 }
 
 /// { wg?, awg?, kmix?, dns?, xray?, hy2?: bool } — switches the given cores of this server on or off at
@@ -1156,9 +1199,37 @@ async fn cores_set(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b)
             return err(StatusCode::CONFLICT, &why);
         }
     }
+    // no VPN part yet (inside Iran or abroad): the VPN cores switched on install it, and start when it
+    // joins; the ones switched off are taken out of that list
+    if node.is_none() {
+        if let Some(a) = agent.as_deref() {
+            let on: Vec<&str> = want.iter().filter(|(c, on)| *on && ALL_CORES.contains(c)).map(|(c, _)| *c).collect();
+            let off: Vec<&str> = want.iter().filter(|(c, on)| !*on && ALL_CORES.contains(c)).map(|(c, _)| *c).collect();
+            if !on.is_empty() {
+                if let Err((code, e)) = ask_vpn_install(&app, a, true, None, &on) {
+                    return err(code, &e);
+                }
+            }
+            if !off.is_empty() {
+                let _g = install_lock().lock().unwrap_or_else(|e| e.into_inner());
+                let mut list = tp::servers(&app);
+                if let Some(s) = list.iter_mut().find(|s| s.id == a) {
+                    s.cores.retain(|c| !off.contains(&c.as_str()));
+                    tp::save_servers(&app, &list);
+                }
+            }
+        }
+    }
     for (c, on) in want {
         let r = match c {
-            "kmix" => node.as_deref().map(|n| crate::kmix::set_node_off(&app, n, !on)).ok_or_else(|| "no VPN part".to_string()),
+            // no VPN part yet: asked for above, switched on when it joins
+            "kmix" => match node.as_deref() {
+                Some(n) => {
+                    crate::kmix::set_node_off(&app, n, !on);
+                    Ok(())
+                }
+                None => Ok(()),
+            },
             "xray" | "dns" => match agent.as_deref() {
                 Some(a) => (|| {
                     if on && c == "xray" {
@@ -1251,18 +1322,6 @@ async fn vpn_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b
     Json(json!({ "ok": true })).into_response()
 }
 
-/// The Iran servers that still run a VPN part that serves nobody (a relay made before 3.20.1): the
-/// keys of their VPN nodes
-fn iran_relays(app: &App) -> Vec<String> {
-    let nodes = app.db.nodes();
-    tp::servers(app)
-        .into_iter()
-        .filter(|s| !s.node.is_empty() && (s.loc == "iran" || crate::exitgeo::cc(app, &s.node) == "IR"))
-        .filter(|s| nodes.iter().any(|n| n.id == s.node && !n.enabled))
-        .map(|s| s.node)
-        .collect()
-}
-
 /// Takes the VPN part off one server and keeps the rest (tunnels, Xray, Kanki DNS): its node leaves the
 /// panel and the server stops and removes WireGuard, AmneziaWG, Hysteria2 and KANKI MIX, closes their
 /// ports and frees them (the same as deleting a node; the server agent stays)
@@ -1290,13 +1349,6 @@ async fn drop_vpn(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Respo
         Some(rid) => Json(json!({ "ok": true, "removal": rid })).into_response(),
         None => err(StatusCode::NOT_FOUND, "unknown server"),
     }
-}
-
-/// Every Iran relay at once (see `iran_relays`)
-async fn drop_iran_vpn(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "nodes");
-    let ids: Vec<String> = iran_relays(&app).into_iter().filter_map(|nid| drop_node(&app, &nid)).collect();
-    Json(json!({ "ok": true, "count": ids.len(), "removals": ids })).into_response()
 }
 
 /// Removes the whole server: its agent (tunnels must be deleted first) and its VPN node.
@@ -1333,7 +1385,7 @@ async fn remove(State(app): St, h: HeaderMap, Path(id): Path<String>, Query(q): 
 }
 
 /// Removes a server from the root: its agent part (tunnels through it, Xray, Kanki DNS, the
-/// subscription link, the emergency chat), its VPN node (users' server lists, KANKI MIX,
+/// subscription link), its VPN node (users' server lists, KANKI MIX,
 /// core switches, the second config, direct name, exit country, live sessions, pins) and its reserved
 /// ports; the server itself is told to remove everything. Every way of deleting a server ends here.
 /// Gives the id of the removal to follow.
@@ -1485,7 +1537,7 @@ mod tests {
         let app = test_app();
         app.db.set("api_key", "test-key");
         // a session is needed to replace a machine: a login of the admin
-        let de = new_server(&app, "Germany".into(), "abroad".into(), "de.example.com".into(), Some(true));
+        let de = new_server(&app, "Germany".into(), "abroad".into(), "de.example.com".into(), Some(true), true);
         let mut list = tp::servers(&app);
         list.push(de.clone());
         tp::save_servers(&app, &list);
@@ -1537,7 +1589,7 @@ mod tests {
     #[test]
     fn the_chosen_cores_are_switched_on_when_the_server_joins() {
         let app = test_app();
-        let mut de = new_server(&app, "Germany".into(), "abroad".into(), String::new(), Some(true));
+        let mut de = new_server(&app, "Germany".into(), "abroad".into(), String::new(), Some(true), true);
         de.cores = clean_cores(&json!(["awg", "wg", "nope", "kmix"]));
         assert_eq!(de.cores, vec!["wg", "awg", "kmix"]);
         let mut list = tp::servers(&app);
@@ -1550,7 +1602,7 @@ mod tests {
         assert!(crate::cores::is_off(&app, "n1", "hy2"));
         assert!(crate::kmix::settings(&app).node_on("n1"));
         // a server from before (no cores chosen): everything off, as it always was; its command is the same
-        let old = new_server(&app, "Old".into(), "abroad".into(), String::new(), Some(true));
+        let old = new_server(&app, "Old".into(), "abroad".into(), String::new(), Some(true), true);
         assert!(!command(&app, &old).contains("--cores"));
         let mut list = tp::servers(&app);
         list.push(old.clone());
@@ -1562,18 +1614,19 @@ mod tests {
     }
 
     #[test]
-    fn an_iran_relay_gets_only_the_tunnel_agent() {
+    fn iran_and_abroad_follow_the_same_rules() {
         let app = test_app();
-        let ir = new_server(&app, "IRAN1".into(), "iran".into(), String::new(), None);
-        assert!(ir.ports.is_empty() && ir.join.is_empty() && !ir.vpn && agent_only(&ir));
-        let cmd = command(&app, &ir);
-        assert!(cmd.contains("KANKI_TUNNEL=") && !cmd.contains("KANKI_JOIN") && !cmd.contains("KANKI_PORTS"));
-        // asked for: the VPN part is installed there too
-        let ir2 = new_server(&app, "IRAN2".into(), "iran".into(), String::new(), Some(true));
-        assert!(ir2.ports.len() == 4 && !ir2.join.is_empty() && !agent_only(&ir2));
-        // abroad: as before
-        let de = new_server(&app, "GERMANY".into(), "abroad".into(), String::new(), None);
-        assert!(de.ports.len() == 4 && de.vpn && command(&app, &de).contains("KANKI_JOIN="));
+        for loc in ["iran", "abroad"] {
+            // nothing to serve and no VPN core ticked: only the server agent
+            let relay = new_server(&app, format!("{loc}-relay"), loc.into(), String::new(), Some(false), false);
+            assert!(relay.ports.is_empty() && relay.join.is_empty() && !relay.vpn && agent_only(&relay), "{loc}");
+            let cmd = command(&app, &relay);
+            assert!(cmd.contains("KANKI_TUNNEL=") && !cmd.contains("KANKI_JOIN") && !cmd.contains("KANKI_PORTS"), "{loc}");
+            // a VPN core ticked: the VPN part comes too, inside Iran exactly as abroad
+            let full = new_server(&app, format!("{loc}-full"), loc.into(), String::new(), None, true);
+            assert!(full.ports.len() == 4 && !full.join.is_empty() && full.vpn && !agent_only(&full), "{loc}");
+            assert!(command(&app, &full).contains("KANKI_JOIN="), "{loc}");
+        }
     }
 
     #[test]

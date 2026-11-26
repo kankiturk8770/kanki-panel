@@ -223,9 +223,22 @@ function xrClients(id){var ib=XR.d.inbounds.filter(function(x){return x.id==id})
    $$('#xc_l [data-qr]').forEach(function(b){b.onclick=function(){var c=l[+b.dataset.qr];qrInto($('#xc_qr'),c.link);$('#xc_qr').insertAdjacentHTML('afterbegin','<p class="muted ltr" style="margin:10px 0 0;text-align:center">'+esc(c.name)+'</p>')}})};
   $('#xc_q').oninput=draw;draw()}).catch(fail)}
 
+// ---- the four recommended presets (key, name, what it is for, the fields it sets)
+var XR_PRESETS=[
+ ['rd','Direct REALITY','VLESS · TCP · REALITY · Vision',{protocol:'vless',network:'tcp',security:'reality',flow:'xtls-rprx-vision',fp:'chrome',port:443}],
+ ['cdn','For CDN','VLESS · XHTTP · TLS',{protocol:'vless',network:'xhttp',security:'tls',mode:'auto',fp:'chrome',alpn:['h2','http/1.1'],port:443,cdn:true}],
+ ['irt','For the Iran tunnel','VLESS · XHTTP · no TLS (the tunnel encrypts)',{protocol:'vless',network:'xhttp',security:'none',mode:'auto',port:8080}],
+ ['tp','Pro direct (Trojan)','Trojan · gRPC · TLS · Fragment',{protocol:'trojan',network:'grpc',security:'tls',fp:'chrome',alpn:['h2'],port:2083,fragment:true}]];
+// opens tab `tab` of the form and marks the fields the admin still has to fill (the first gets the focus)
+function xrMark(ids,tab){xrUnmark();var b=$('#xi_tabs [data-ft="'+tab+'"]');if(b)b.click();
+ ids.forEach(function(i,n){var e=$(i);if(!e)return;e.classList.remove('xmark');void e.offsetWidth;e.classList.add('xmark');if(!n)e.focus()})}
+
+function xrUnmark(){document.querySelectorAll('.xmark').forEach(function(e){e.classList.remove('xmark')})}
+document.addEventListener('input',function(e){if(e.target&&e.target.classList&&e.target.classList.contains('xmark'))e.target.classList.remove('xmark')});
+
 // ---- the inbound form
 function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInbound(id)});if(!d.servers.length){toast(t('Add an Xray server first'),1);return xrAddNode()}
- var ib=d.inbounds.filter(function(x){return x.id==id})[0]||{enabled:true,protocol:'vless',network:'tcp',security:'reality',port:xrFreePort(d.servers[0].server),server:d.servers[0].server,flow:'xtls-rprx-vision',dest:'www.microsoft.com:443',names:'www.microsoft.com',fp:'chrome',sniffing:true,ss_method:'2022-blake3-aes-128-gcm',only:[],fallbacks:[],sniff_dest:[]};
+ var ib=d.inbounds.filter(function(x){return x.id==id})[0]||{enabled:true,protocol:'vless',network:'tcp',security:'reality',port:xrFreePort(d.servers[0].server),server:d.servers[0].server,flow:'xtls-rprx-vision',dest:'',names:'',fp:'chrome',sniffing:true,ss_method:'2022-blake3-aes-128-gcm',only:[],fallbacks:[],sniff_dest:[]};
  var opt=function(list,v){return list.map(function(o){o=[].concat(o);return '<option value="'+esc(o[0])+'"'+(String(o[0])==String(v)?' selected':'')+'>'+esc(o[1]||o[0])+'</option>'}).join('')};
  var inp=function(idn,label,v,ph,type){return '<div><label class="f">'+t(label)+'</label><input id="'+idn+'" class="ltr"'+(type?' type="'+type+'"':'')+' value="'+esc(v==null?'':v)+'" placeholder="'+esc(ph||'')+'"></div>'};
  var ck=function(idn,label,on,sub){return '<div class="srow"><div class="tx"><b>'+t(label)+'</b>'+(sub?'<small>'+t(sub)+'</small>':'')+'</div><label class="sw"><input type="checkbox" id="'+idn+'" '+(on?'checked':'')+'><span></span></label></div>'};
@@ -239,6 +252,7 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
    '<div><label class="f">'+t('Port')+'</label><div class="inl"><input id="xi_pt" class="ltr" type="number" min="1" max="65535" value="'+(ib.port||'')+'"><button type="button" class="ib" id="xi_rp" title="'+t('Random free port')+'">🎲</button></div></div>'+
    inp('xi_ls0','Listen address',ib.listen,'0.0.0.0')+'</div>'+
    '<div id="xi_ss" class="g2"><div><label class="f">'+t('Method')+'</label><select id="xi_sm">'+opt(['2022-blake3-aes-128-gcm','2022-blake3-aes-256-gcm','2022-blake3-chacha20-poly1305','chacha20-ietf-poly1305','aes-256-gcm','aes-128-gcm'],ib.ss_method)+'</select></div></div>'+
+   '<div class="xpre u-mt3" role="group" aria-label="'+esc(t('Recommended presets'))+'"><span class="muted">'+t('Recommended presets')+':</span>'+XR_PRESETS.map(function(x){return '<button type="button" class="xpre-b" data-pre4="'+x[0]+'"><b>'+t(x[1])+'</b><small>'+t(x[2])+'</small></button>'}).join('')+'</div>'+
    '<div class="chipset u-mt3"><span class="muted">'+t('Quick setup')+':</span>'+[['vr','VLESS + REALITY'],['vx','VLESS + XHTTP + REALITY'],['vw','VLESS + WS (CDN)'],['vg','VLESS + gRPC + REALITY'],['gc','VLESS + gRPC + TLS (CDN)'],['tt','Trojan + TLS'],['ss','Shadowsocks 2022']].map(function(x){return '<button type="button" data-pre="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div>'+
    '<div class="u-mt3" id="xi_cdnw">'+ck('xi_cdn','☁️ '+t('Also a link through the CDN'),ib.cdn,'Users get one more link with this server\'s CDN domain, beside the direct one')+'<p class="hint" id="xi_cdnst"></p></div>'+
    // (3.64) the explicit CDN address: filled, every link and client config of this inbound goes through the CDN
@@ -260,12 +274,13 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
    '<div id="xi_tls"><div class="g2">'+inp('xi_sni','SNI',ib.sni,'example.com')+'<div><label class="f">'+t('Lowest TLS version')+'</label><select id="xi_tm">'+opt([['',t('Default')],'1.2','1.3'],ib.tls_min||'')+'</select></div></div>'+
     '<label class="f">ALPN</label><div class="ckrow">'+['h3','h2','http/1.1'].map(function(a){return '<label class="chk"><input type="checkbox" class="xi_al" value="'+a+'" '+((alpn.length?alpn:['h2','http/1.1']).indexOf(a)>=0?'checked':'')+'>'+a+'</label>'}).join('')+'</div>'+
     ck('xi_rs','Refuse unknown SNI',ib.reject_sni,'Only connections for the name above are answered')+
+    ck('xi_fg','TLS Fragment (client side)',ib.fragment,'The client splits its TLS hello so a filter cannot read the SNI from one packet (in the links and full configs)')+
     '<label class="f">'+t('Certificate')+'</label><div class="ftabs u-mb2"><button type="button" data-cm="auto" class="'+(ib.acme?'on':'')+'">'+t('Automatic (Let\'s Encrypt)')+'</button><button type="button" data-cm="pem" class="'+(ib.cert_file||ib.acme?'':'on')+'">'+t('Paste (PEM)')+'</button><button type="button" data-cm="file" class="'+(ib.cert_file&&!ib.acme?'on':'')+'">'+t('Files on the server')+'</button></div>'+
     '<div id="xi_cauto">'+xrCertAuto(ib)+'</div>'+
     '<div id="xi_cpem"><textarea id="xi_ce" rows="3" class="ltr" placeholder="-----BEGIN CERTIFICATE-----">'+esc(ib.cert||'')+'</textarea><textarea id="xi_ke" rows="3" class="ltr" style="margin-top:6px" placeholder="'+(ib.key=='set'?t('unchanged'):'-----BEGIN PRIVATE KEY-----')+'"></textarea></div>'+
     '<div id="xi_cfile" class="g2">'+inp('xi_cf','Certificate file',ib.cert_file,'/etc/letsencrypt/live/x/fullchain.pem')+inp('xi_kf','Key file',ib.key_file,'/etc/letsencrypt/live/x/privkey.pem')+'</div></div>'+
-   '<div id="xi_rl"><label class="f">'+t('Target (dest)')+'</label><div class="inl"><input id="xi_de" class="ltr" value="'+esc(ib.dest||'')+'" placeholder="www.microsoft.com:443"><select id="xi_dp" style="flex:0 0 140px"><option value="">'+t('Suggestions')+'</option>'+REALITY_TARGETS.map(function(x){return '<option>'+x+'</option>'}).join('')+'</select></div>'+
-    '<div class="g2">'+inp('xi_na','Server names',ib.names,'www.microsoft.com')+'<div><label class="f">'+t('Short IDs')+'</label><div class="inl"><input id="xi_si" class="ltr" value="'+esc(ib.short_ids||'')+'"><button type="button" class="ib" id="xi_sig" title="'+t('New')+'">🎲</button></div></div>'+
+   '<div id="xi_rl"><label class="f">'+t('Target (dest)')+'</label><div class="inl"><input id="xi_de" class="ltr" value="'+esc(ib.dest||'')+'" placeholder="'+esc(t('a site you trust')+' :443')+'"><select id="xi_dp" style="flex:0 0 140px"><option value="">'+t('Suggestions')+'</option>'+REALITY_TARGETS.map(function(x){return '<option>'+x+'</option>'}).join('')+'</select></div>'+
+    '<div class="g2">'+inp('xi_na','Server names',ib.names,t('a site you trust'))+'<div><label class="f">'+t('Short IDs')+'</label><div class="inl"><input id="xi_si" class="ltr" value="'+esc(ib.short_ids||'')+'"><button type="button" class="ib" id="xi_sig" title="'+t('New')+'">🎲</button></div></div>'+
     inp('xi_pk','Private key',ib.private=='set'?'':ib.private,ib.private=='set'?t('unchanged'):'')+inp('xi_pb','Public key',ib.public,'')+inp('xi_sx','spiderX',ib.spx,'/')+
     '<div><label class="f">xver</label><select id="xi_xv">'+opt([0,1,2],ib.xver||0)+'</select></div>'+inp('xi_mt','Largest clock difference (ms, 0 = off)',ib.max_time_diff||'','0','number')+'</div>'+
     '<button type="button" class="b2 u-mt2" id="xi_kg">'+ic('refresh',14)+' '+t('New keys')+'</button></div>'+
@@ -325,14 +340,31 @@ function xrInbound(id){var d=XR.d;if(!d)return xrLoad().then(function(){xrInboun
   var P={vr:['vless','tcp','reality','xtls-rprx-vision',443],vx:['vless','xhttp','reality','',443],vw:['vless','ws','none','',8080],vg:['vless','grpc','reality','',443],gc:['vless','grpc','tls','',443],tt:['trojan','tcp','tls','',443],ss:['shadowsocks','tcp','none','',8388]}[k];
   set('#xi_pr',P[0]);set('#xi_nw',P[1]);set('#xi_sc',P[2]);set('#xi_flw',P[3]);if(!$('#xi_rm').value)$('#xi_rm').value=b.textContent.replace(/\s+/g,'').replace(/\+/g,'-');
   var used=XR.d.inbounds.some(function(x){return x.id!=id&&x.server==$('#xi_sv').value&&x.port==P[4]});$('#xi_pt').value=used?xrFreePort($('#xi_sv').value,true):P[4];
-  if(P[2]=='reality'&&!$('#xi_de').value){$('#xi_de').value='www.microsoft.com:443';$('#xi_na').value='www.microsoft.com'}if(k=='vw')$('#xi_lt').checked=false;if(k=='vw'||k=='gc')$('#xi_cdn').checked=true;ui();toast(t('Filled in: check the Security tab'))}});
+  if(P[2]=='reality'&&!$('#xi_de').value)xrMark(['#xi_de','#xi_na'],'sec');if(k=='vw')$('#xi_lt').checked=false;if(k=='vw'||k=='gc')$('#xi_cdn').checked=true;ui();toast(t('Filled in: check the Security tab'))}});
+ // the four recommended presets (3.65): every field they need, nothing the admin must choose (a REALITY
+ // target, a CDN address) is made up; those fields are marked instead
+ $$('[data-pre4]').forEach(function(b){b.onclick=function(){var k=b.dataset.pre4,P=XR_PRESETS.filter(function(x){return x[0]==k})[0],c=P[3],set=function(i,v){var e=$(i);if(e)e.value=v};xrUnmark();
+  set('#xi_pr',c.protocol);set('#xi_nw',c.network);set('#xi_sc',c.security);set('#xi_flw',c.flow||'');set('#xi_fp',c.fp||'chrome');if(c.mode)set('#xi_md',c.mode);
+  if(c.alpn)$$('.xi_al').forEach(function(x){x.checked=c.alpn.indexOf(x.value)>=0});
+  $('#xi_fg').checked=!!c.fragment;$('#xi_cdn').checked=false;$('#xi_lt').checked=false;if(c.network!='tcp')$('#xi_hh').checked=false;
+  if(!c.cdn&&$('#xi_cda'))$('#xi_cda').value='';
+  // TLS: the server's own certificate (Let's Encrypt) when it has a domain
+  if(c.security=='tls'&&srvDom()){cm='auto';$$('[data-cm]').forEach(function(x){x.classList.toggle('on',x.dataset.cm==cm)})}
+  // the name: the preset's, unless the admin wrote one (another preset's name is replaced)
+  var rm=$('#xi_rm').value.trim();if(!rm||XR_PRESETS.some(function(x){return t(x[1])==rm}))$('#xi_rm').value=t(P[1]);
+  var used=XR.d.inbounds.some(function(x){return x.id!=id&&x.server==$('#xi_sv').value&&x.port==c.port});$('#xi_pt').value=used?xrFreePort($('#xi_sv').value,true):c.port;
+  ui();
+  if(c.security=='reality'&&(!$('#xi_de').value||!$('#xi_na').value))xrMark(['#xi_de','#xi_na'],'sec');
+  else if(c.cdn)xrMark(['#xi_cda'],'b');
+  else if(c.security=='tls'&&!srvDom()&&!$('#xi_sni').value)xrMark(['#xi_sni'],'sec');
+  toast(t('Filled in')+': '+t(P[1]))}});
  $('#xi_go').onclick=function(){var me=this,v=function(i){return $(i).value.trim()};
   var ex=v('#xi_ex'),expire=0;if(ex){var pd=ex.split('-');expire=Math.floor(new Date(+pd[0],+pd[1]-1,+pd[2],23,59,0).getTime()/1000)}
   var b={id:id||'',enabled:ib.enabled!==false,remark:v('#xi_rm'),server:$('#xi_sv').value,protocol:$('#xi_pr').value,port:+v('#xi_pt')||0,listen:v('#xi_ls0'),network:$('#xi_nw').value,security:$('#xi_pr').value=='shadowsocks'?'none':$('#xi_sc').value,
    path:v('#xi_pa'),host:v('#xi_ho'),mode:$('#xi_md').value,service:v('#xi_svn'),header:$('#xi_hh').checked?'http':'',flow:$('#xi_flw').value,ss_method:$('#xi_sm').value,ss_key:ib.ss_key||'',
    heartbeat:+v('#xi_hb')||0,x_padding:v('#xi_xp'),authority:v('#xi_au'),multi_mode:$('#xi_mm').checked,kcp_mtu:+v('#xi_km')||0,kcp_tti:+v('#xi_kt')||0,kcp_up:+v('#xi_ku')||0,kcp_down:+v('#xi_kd')||0,kcp_cong:$('#xi_kg2').checked,proxy_protocol:$('#xi_pp').checked,
    sni:v('#xi_sni'),alpn:$$('.xi_al').filter(function(c){return c.checked}).map(function(c){return c.value}).join(','),tls_min:$('#xi_tm').value,reject_sni:$('#xi_rs').checked,
-   acme:cm=='auto',cert:cm=='pem'?$('#xi_ce').value.trim():'',key:cm=='pem'?($('#xi_ke').value.trim()||(ib.key=='set'?'set':'')):'',cert_file:cm=='file'?v('#xi_cf'):'',key_file:cm=='file'?v('#xi_kf'):'',fp:$('#xi_fp').value,
+   acme:cm=='auto',cert:cm=='pem'?$('#xi_ce').value.trim():'',key:cm=='pem'?($('#xi_ke').value.trim()||(ib.key=='set'?'set':'')):'',cert_file:cm=='file'?v('#xi_cf'):'',key_file:cm=='file'?v('#xi_kf'):'',fp:$('#xi_fp').value,fragment:$('#xi_pr').value!='shadowsocks'&&$('#xi_sc').value=='tls'&&$('#xi_fg').checked,
    dest:v('#xi_de'),names:v('#xi_na'),private:v('#xi_pk')||(ib.private=='set'?'set':''),public:v('#xi_pb'),short_ids:v('#xi_si'),spx:v('#xi_sx'),xver:+$('#xi_xv').value||0,max_time_diff:+v('#xi_mt')||0,
    sniffing:$('#xi_sn').checked,sniff_dest:$$('.xi_sd').filter(function(c){return c.checked}).map(function(c){return c.value}),sniff_override:$('#xi_so').checked,sniff_meta:$('#xi_sm2').checked,
    cdn:$('#xi_cdn').checked,cdn_address:$('#xi_cda')&&!$('#xi_cda').disabled?$('#xi_cda').value.trim():'',link_host:v('#xi_lh'),link_port:+v('#xi_lp')||0,link_tls:$('#xi_lt').checked,link_sni:v('#xi_ls'),total_gb:+v('#xi_tg')||0,expire:expire,

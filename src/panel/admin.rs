@@ -254,7 +254,7 @@ pub fn wipe_all_if_last() {
     if unit("kanki-panel") || unit("kanki-node") || unit("kanki-tunnel") {
         return;
     }
-    for u in ["kanki-xray", "kanki-dns", "kanki-emergency", "kanki-mix", "kanki-gre"] {
+    for u in ["kanki-xray", "kanki-dns", "kanki-mix", "kanki-gre"] {
         let _ = Command::new("sh").arg("-c").arg(format!("systemctl disable --now -q {u} 2>/dev/null; rm -f /etc/systemd/system/{u}.service")).status();
     }
     let _ = Command::new("systemctl").arg("daemon-reload").status();

@@ -68,3 +68,64 @@
 ### Still open
 - A role for an agent-only server (no VPN node yet) stays `hybrid` until its VPN part joins.
 - Bot texts for the tiers.
+
+## Phase 3 — 3.65.0: one server agent, signed requests, hashed sub links, Xray presets (done)
+
+### Emergency chat removed
+- `src/emergency/`, `assets/emergency/`, `/api/emergency*`, the `emer_*` settings (deleted by `db::migrate_access`, signing
+  key and admin hash included), the sub data fields `emergency` / `emergency_key`, backup of `chat.db`, the UI page and
+  translations. The Android app only parsed those fields (no UI), it tolerates their absence.
+- Servers clean up after it on start (`sync::retire_emergency`, via `forget_retired`): service, unit, firewall port,
+  `/etc/kanki/emergency.json`, `/var/lib/kanki/emergency`. Agents from before get `"emergency": {"mode":"off"}`.
+- The logs that lived under it are their own page: `#logs` (`pLogs`); old `#emergency/...` links redirect there.
+
+### Iran = abroad (`servers.rs`)
+- `new_server(.., with_vpn)`: the VPN part is installed when it serves users or a VPN core is ticked — same rule for both
+  locations (only the SSL default still differs: port 80 is often closed in Iran).
+- `cores_state`: an agent server without its VPN part can switch every core (`can: true`); `vpn_part`, `installing`.
+- `cores_set`: a VPN core switched on there calls `ask_vpn_install` (shared with `/complete`; agent must be connected and
+  ≥ `SETUP_FROM`; cores merged into `TServer.cores`, switched on at `joined`); off removes it. `install_lock` serializes.
+- Gone: `iran_relays`, `POST /api/servers/drop-iran-vpn`, the Iran-only UI branches (relay box, «relay mode» note,
+  Iran-only steps, Iran-only «Remove the VPN»).
+
+### Signed panel ↔ agent requests (`src/core/sign.rs`)
+- Headers `x-kanki-ts`, `x-kanki-nonce`, `x-kanki-sig` = HMAC-SHA256(token, "kanki-sig-v1\n ts\n nonce\n METHOD\n path\n
+  sha256(body)"); window `MAX_SKEW` = 300 s; replayed nonces refused (bounded cache, 50 000).
+- Node: every `/agent/*` route behind `api::node_signed` (2 MiB cap). Unsigned / bare `X-Node-Token` → 401.
+- Panel → node: `sync::node_call` signs; the bare token is sent only as a retry after a 401 from a node that never reported
+  ≥ `SIGN_FROM` (3.65.0).
+- Server agent → panel `/tunnel/agent` (`REPORT_PATH`): signed; the panel accepts the bare body token only until the server's
+  first signed report (`TServer.signed` ratchet). The agent adds the token only if the panel answers 403 (older panel),
+  re-tried without it every 10 min, never again once a signed report was taken.
+- `/hy2/auth` (Hysteria cannot sign): loopback as before plus `?k=` key — `hy2::ensure_auth_key` adds it to Hysteria's auth URL
+  once (rollback if Hysteria does not start) and keeps it in `/etc/kanki/hy2-auth.key` (0600).
+- Connection reuse: `pin::{POOL_IDLE, TCP_KEEPALIVE}` on every panel/agent client; the agent reads its listeners every 15 s
+  instead of every report.
+- Not signed yet (token in body/header as before): `/tunnel/binary`, the hy2 tunnel binary, the Xray zip download, `auth.rs`
+  agent routes.
+
+### Subscription codes out of URLs (`src/subscription/sublink.rs`)
+- `/sub/h/<hash>[/<kind>]`: hash = HMAC-SHA256(setting `sub_link_key`, code)[..40]; index cached, rebuilt at most every 5 s
+  on a miss; a found user is re-checked against its current code. `v2_sub_link`, the bot, mini app and account page
+  (`sub_hash`) hand out this form.
+- `/sub/me[/<kind>]` with `X-Kanki-Sub: <code>` or `Authorization: Bearer <code>`.
+- Both answer `Cache-Control: no-store`, `Referrer-Policy: no-referrer`; `/sub/<code>/…` keeps working.
+- Still with the code in the URL: the account page's own config links (`/api/config/…?sub=`), part of the app contract.
+
+### Xray presets (`03-xray.js`, `XR_PRESETS`)
+- «REALITY مستقیم» VLESS/TCP/REALITY/vision/chrome · «مخصوص CDN» VLESS/XHTTP/TLS (marks `cdn_address`) · «مخصوص تانل ایران»
+  VLESS/XHTTP auto/none · «مستقیم حرفه‌ای (Trojan)» Trojan/gRPC/TLS/fragment. No domain is filled in: the REALITY target
+  and the CDN address are marked for the admin (`xrMark`); the old default/presets no longer prefill a REALITY target.
+- `Inbound.fragment` (TLS only, cleared otherwise): links get `fragment=tlshello,100-200,10-20`; `client_config` adds a
+  `fragment` freedom outbound and `sockopt.dialerProxy`.
+
+### Tests
+- `sign::tests` (pass once, every change refused, concurrent replay), `sign_tests` (node 401s incl. bare token, replay, body
+  swap, other route, oversize 413; agent report ratchet; hy2 key), `access_tests::{an_iran_server_switches_on_vpn_cores_like_one_abroad
+  (incl. two concurrent switches), the_subscription_works_without_its_code_in_the_url, the_four_xray_presets_save_and_the_fragment_reaches_the_clients}`,
+  `servers::tests::iran_and_abroad_follow_the_same_rules`, `sublink::tests`, `hy2::tests::the_auth_url_gets_a_key_once`,
+  migration test (emer_* deleted), `backup::tests::a_chat_database_in_an_old_backup_is_left_out`.
+
+### Still open
+- `REALITY_TARGETS` (the suggestion list in the Xray form) still names public sites; nothing is filled in from it by itself.
+- Rollout order: update the panel first, then «Update all» (new nodes refuse the bare token of an older panel).
