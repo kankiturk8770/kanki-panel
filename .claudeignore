@@ -1,0 +1,16 @@
+.git/
+target/
+vendor/
+build/
+dist/
+.gradle/
+node_modules/
+*.log
+*.lock
+go.sum
+Cargo.lock
+package-lock.json
+*.apk
+*.aab
+*.so
+*.bin
