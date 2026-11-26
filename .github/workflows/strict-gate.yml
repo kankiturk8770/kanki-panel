@@ -27,14 +27,23 @@ jobs:
       - name: Verify Go
         if: hashFiles('**/go.mod') != ''
         run: |
-          find . -name 'go.mod' -execdir sh -c 'go vet ./... && go test -race ./...' \;
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
+            (cd "$(dirname "$f")" && go vet ./... && go test -race ./...)
+          done < <(find . -name 'go.mod' -not -path './.git/*' -print0)
 
       - name: Verify Rust
         if: hashFiles('**/Cargo.toml') != ''
         run: |
-          find . -name 'Cargo.toml' -execdir sh -c 'cargo clippy --all-targets -- -D warnings && cargo test' \;
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
+            (cd "$(dirname "$f")" && cargo clippy --all-targets -- -D warnings && cargo test)
+          done < <(find . -name 'Cargo.toml' -not -path './.git/*' -print0)
 
       - name: Verify Kotlin / Android
         if: hashFiles('**/gradlew') != ''
         run: |
-          find . -name 'gradlew' -execdir sh -c 'chmod +x gradlew && ./gradlew testDebugUnitTest' \;
+          set -euo pipefail
+          while IFS= read -r -d '' f; do
+            (cd "$(dirname "$f")" && chmod +x gradlew && ./gradlew testDebugUnitTest)
+          done < <(find . -name 'gradlew' -not -path './.git/*' -print0)
