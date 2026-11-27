@@ -182,7 +182,6 @@ pub const PANEL_JS: &str = concat!(
     include_str!("../../assets/panel/js/01-vpn-and-user-form.js"),
     include_str!("../../assets/panel/js/02-components.js"),
     include_str!("../../assets/panel/js/03-xray.js"),
-    include_str!("../../assets/panel/js/04-antidpi.js"),
     include_str!("../../assets/panel/js/05-dns.js"),
     include_str!("../../assets/panel/js/06-kmix.js"),
     include_str!("../../assets/panel/js/08-translations.js"),
@@ -356,6 +355,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .route("/sub/:code/xjson", get(sub_xray_json))
         .route("/sub/:code/v2", get(sub_v2))
         .route("/sub/:code/xqr/:i", get(sub_xray_qr))
+        .route("/sub/:code/xl/:i", get(sub_xray_link))
         .route("/sub/:code/v2qr", get(sub_v2_qr))
         // the same without the code in the URL (3.65, `sublink`): a hashed link, or the code in a header
         .route("/sub/h/:hash", get(sub_hashed))
@@ -769,12 +769,17 @@ pub fn node_info(n: &Node) -> Value {
 
 pub(crate) fn node_json(app: &App, n: &Node, users: &[User]) -> Value {
     let info_pub = node_info(n);
-    let assigned = users.iter().filter(|u| u.on(n)).count();
+    // 3.71: the same count as the cores' cards: users that this server really serves (its role, a drained server's
+    // kept users) with a core of this server, and per core
+    let keep = app.db.drain_keep(n);
+    let served: Vec<&User> = users.iter().filter(|u| app.db.serves(u, n, keep.as_ref())).collect();
+    let by: HashMap<&str, usize> = ["wg", "awg", "hy2", "kmix"].iter().map(|p| (*p, served.iter().filter(|u| u.has_proto(p)).count())).collect();
+    let assigned = served.iter().filter(|u| ["wg", "awg", "hy2", "kmix"].iter().any(|p| u.has_proto(p))).count();
     json!({
         "id": n.id, "name": n.name, "address": n.address, "endpoint": n.endpoint, "endpoint_mode": n.endpoint_mode,
         "effective_endpoint": endpoint(app, n), "enabled": n.enabled, "online": n.online, "last_sync": n.last_sync,
         "note": n.note, "insecure": n.insecure, "drain": n.drain, "maint": n.maint, "accept_all": n.accept_all,
-        "sync_state": n.sync_state, "users": assigned, "info": info_pub, "role": n.role().as_str(),
+        "sync_state": n.sync_state, "users": assigned, "users_by": by, "info": info_pub, "role": n.role().as_str(),
         "plain_http": n.id != "local" && n.address.starts_with("http://"),
         // the country of the server's IP (its flag in the panel); empty while unknown
         "cc": crate::exitgeo::cc(app, &n.id),
@@ -2057,6 +2062,8 @@ fn sub_data(app: &App, u: &User, sealed: bool) -> Value {
     }
     json!({
         "id": u.id, "username": u.username, "sub": u.sub_code(),
+        // 3.71: the account's plan, so the page shows only that plan's sections
+        "tier": u.tier().as_str(), "tier_name": u.tier().label(),
         // the hashed form of the code (3.65): the links to copy into other apps carry this, not the code
         "sub_hash": crate::sublink::hash_of(app, u), "status": u.status(), "active": u.active(),
         "limit_gb": u.limit_gb, "used_gb": u.used_gb(), "expires_ts": u.expires_at, "created_ts": u.created_at,
@@ -2100,8 +2107,10 @@ fn proto_row(app: &App, u: &User, n: &Node, p: &str, tunnel: bool) -> String {
         "hysteria2" => {
             let tw = if tunnel { crate::twin::of_node_core(app, n, "hy2") } else { None };
             if let Some(hu) = hy2_link(app, u, n, tw.as_ref()) {
-                btns.push_str(&format!("<code class=\"uri\">{}</code>", esc(&hu)));
-                btns.push_str(&format!("<button class=\"b2\" data-act=\"copy\" data-text=\"{}\" data-i18n=\"copy_uri\">Copy URI</button>", esc(&hu)));
+                // 3.71: never the link itself in the page (it carries the password and obfs-password): a masked
+                // form to read, and the copy button fetches the link when it is tapped
+                btns.push_str(&format!("<code class=\"uri\">{}</code>", esc(&mask_uri(&hu))));
+                btns.push_str(&format!("<button class=\"b2\" data-act=\"copy\" data-fetch=\"/api/config/{}/{}?sub={}&amp;node={}\" data-i18n=\"copy_uri\">Copy URI</button>", u.id, p, sub, node));
                 btns.push_str(&format!("<button class=\"b2\" data-act=\"qr\" data-url=\"/api/config/{}/{}/qr?sub={}&amp;node={}\" data-i18n=\"qr\">QR Code</button>", u.id, p, sub, node));
             }
         }
@@ -2180,8 +2189,8 @@ fn sub_page_of(app: &App, u: &User, sealed: bool) -> Response {
         for (i, (name, l)) in xl.iter().enumerate() {
             let proto = l.split("://").next().unwrap_or("xray").to_uppercase();
             rows.push_str(&format!(
-                "<div class=\"row proto\" data-proto=\"xray\"><div class=\"ph\"><i class=\"pl pl-xray\">X</i><div><b>{}</b><small>{}</small></div></div><div class=\"acts\"><code class=\"uri\">{}</code><button class=\"b2\" data-act=\"copy\" data-text=\"{}\" data-i18n=\"copy_uri\">Copy URI</button><button class=\"b2\" data-act=\"qr\" data-url=\"/sub/{}/xqr/{}\" data-i18n=\"qr\">QR Code</button></div></div>",
-                esc(if name.is_empty() { &proto } else { name }), esc(&proto), esc(l), esc(l), sub, i
+                "<div class=\"row proto\" data-proto=\"xray\"><div class=\"ph\"><i class=\"pl pl-xray\">X</i><div><b>{}</b><small>{}</small></div></div><div class=\"acts\"><code class=\"uri\">{}</code><button class=\"b2\" data-act=\"copy\" data-fetch=\"/sub/{}/xl/{}\" data-i18n=\"copy_uri\">Copy URI</button><button class=\"b2\" data-act=\"qr\" data-url=\"/sub/{}/xqr/{}\" data-i18n=\"qr\">QR Code</button></div></div>",
+                esc(if name.is_empty() { &proto } else { name }), esc(&proto), esc(&mask_uri(l)), sub, i, sub, i
             ));
         }
         nodes_html.push_str(&format!("<section class=\"node\" data-node=\"xray\"><h3>Xray</h3>{}</section>", rows));
@@ -2206,27 +2215,91 @@ fn sub_page_of(app: &App, u: &User, sealed: bool) -> Response {
     if !sealed {
         web_only(&mut data);
     }
-    let data = serde_json::to_string(&data).unwrap_or_default().replace("</", "<\\/");
-    let page = include_str!("../../assets/sub/sub.html")
-        .replace("{{TITLE}}", &esc(&u.username))
-        .replace("{{SUB}}", &sub)
-        .replace("{{STATUS}}", u.status())
-        .replace("{{EXP}}", &iso(u.expires_at))
-        .replace("{{LIM}}", &format!("{:.6}", u.limit_gb))
-        .replace("{{USED}}", &format!("{:.6}", u.used_gb()))
-        .replace("{{NODES}}", &nodes_html)
-        .replace("{{DATA}}", &data);
+    let data = script_json(&data);
+    // one pass over the template: a value that holds «{{…}}» (a server's name) is never filled in again
+    let page = fill(include_str!("../../assets/sub/sub.html"), &[
+        ("TITLE", esc(&u.username)),
+        ("SUB", esc(&sub)),
+        ("STATUS", u.status().to_string()),
+        ("EXP", iso(u.expires_at)),
+        ("LIM", format!("{:.6}", u.limit_gb)),
+        ("USED", format!("{:.6}", u.used_gb())),
+        ("NODES", nodes_html),
+        ("DATA", data),
+    ]);
     ([(header::CACHE_CONTROL, "no-store")], Html(page)).into_response()
 }
 
+/// JSON for a `<script type="application/json">` block: `<`, `>`, `&` and the two JS line separators as
+/// `\uXXXX`, so no value (a note, a server's name) can close the block or open a comment
+pub(crate) fn script_json(v: &Value) -> String {
+    let s = serde_json::to_string(v).unwrap_or_else(|_| "{}".into());
+    let mut out = String::with_capacity(s.len() + 16);
+    for c in s.chars() {
+        match c {
+            '<' => out.push_str("\\u003c"),
+            '>' => out.push_str("\\u003e"),
+            '&' => out.push_str("\\u0026"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Fills `{{KEY}}` marks of a template in one pass (a filled-in value is never read for marks again)
+pub(crate) fn fill(tpl: &str, vals: &[(&str, String)]) -> String {
+    let mut out = String::with_capacity(tpl.len() + 4096);
+    let mut rest = tpl;
+    while let Some(i) = rest.find("{{") {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + 2..];
+        match after.find("}}").map(|j| (&after[..j], j)) {
+            Some((k, j)) if vals.iter().any(|(n, _)| *n == k) => {
+                if let Some((_, v)) = vals.iter().find(|(n, _)| *n == k) {
+                    out.push_str(v);
+                }
+                rest = &after[j + 2..];
+            }
+            _ => {
+                out.push_str("{{");
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// A share link to read on a page without its secrets: `scheme://••••@host:port` (the part before `@`, the
+/// query and the name are left out)
+pub(crate) fn mask_uri(l: &str) -> String {
+    let (scheme, rest) = l.split_once("://").unwrap_or(("link", l));
+    let rest = rest.split(['?', '#']).next().unwrap_or("");
+    let host = rest.rsplit_once('@').map(|x| x.1).unwrap_or(rest).trim_end_matches('/');
+    // a base64 body (vmess://…, ss without @) shows nothing of itself
+    let host = if host.contains(':') && host.len() <= 80 { host } else { "" };
+    if host.is_empty() { format!("{}://••••", scheme) } else { format!("{}://••••@{}", scheme, host) }
+}
+
 /// The data block of the page a browser gets: KANKI MIX (the Kanki app's own core, read by the app from
-/// its sealed page and `/json`) leaves every server entry, and a server left with nothing goes
+/// its sealed page and `/json`) leaves every server entry, and a server left with nothing goes. 3.71: no link
+/// with a password either (Hysteria2, Xray): the page fetches one when its copy button is tapped.
 pub(crate) fn web_only(data: &mut Value) {
+    if let Some(list) = data["xray"].as_array_mut() {
+        for x in list.iter_mut() {
+            if let Some(o) = x.as_object_mut() {
+                o.remove("link");
+            }
+        }
+    }
     if let Some(list) = data["nodes"].as_array_mut() {
         for n in list.iter_mut() {
             if let Some(o) = n.as_object_mut() {
                 o.remove("kmix");
                 o.remove("kmix_tunnel");
+                o.remove("hy2");
             }
             if let Some(p) = n["protocols"].as_array_mut() {
                 p.retain(|x| x.as_str() != Some("kankimix"));
@@ -2245,6 +2318,15 @@ async fn sub_v2_qr(State(app): St, Path(code): Path<String>) -> Response {
     match util::qr_svg(&v2_sub_link(&app, &u)) {
         Some(svg) => ([(header::CONTENT_TYPE, "image/svg+xml".to_string()), (header::CACHE_CONTROL, "no-store".to_string())], svg).into_response(),
         None => (StatusCode::PAYLOAD_TOO_LARGE, "too large for a QR code").into_response(),
+    }
+}
+
+/// The user's i-th Xray link as text (the page's copy button; the link is not in the page itself)
+async fn sub_xray_link(State(app): St, Path((code, i)): Path<(String, usize)>) -> Response {
+    let u = match sub_user(&app, &code) { Ok(u) => u, Err(r) => return r };
+    match crate::xray::panel::user_links(&app, &u).into_iter().nth(i) {
+        Some((_, l)) => ([(header::CONTENT_TYPE, "text/plain; charset=utf-8"), (header::CACHE_CONTROL, "no-store")], l).into_response(),
+        None => (StatusCode::NOT_FOUND, "not found").into_response(),
     }
 }
 
@@ -2789,6 +2871,53 @@ mod panel_js_tests {
 mod account_page_tests {
     async fn body(r: axum::response::Response) -> String {
         String::from_utf8(axum::body::to_bytes(r.into_body(), 1 << 22).await.unwrap().to_vec()).unwrap()
+    }
+
+    /// 3.71: the account page holds no Hysteria2 / Xray secret in its markup or (browser) data, a value that closes
+    /// the script block or holds a template mark cannot break out, and the page says the account's plan
+    #[tokio::test]
+    async fn the_account_page_leaks_no_secret_and_cannot_be_broken_out_of() {
+        let app = crate::test_app();
+        let info = r#"{"hy2_port":"8443","wg_pub":"Zm9vYmFyYmF6cXV4cXV1eGZvb2JhcmJhenF1eHF1dXg=","wg_port":"51820"}"#;
+        // a server name that tries to close the data block, open a comment and fill a template mark again
+        app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,endpoint_mode,info,online) VALUES('local','</script><script>alert(1)</script><!-- {{DATA}} \u{2028}','https://127.0.0.1:9','198.51.100.7','t','custom',?1,1)", &[&info]).unwrap();
+        let u = app.db.create_user("hyuser", 10.0, 30, 1, "xray,hy2", "", "", 0).unwrap();
+        let n = app.db.node("local").unwrap();
+        let link = super::hy2_link(&app, &u, &n, None).expect("a Hysteria2 link");
+        let pass = link.split("://").nth(1).unwrap().split('@').next().unwrap().to_string();
+        assert!(pass.len() >= 8);
+        let web = body(super::sub_page_of(&app, &u, false)).await;
+        // no password anywhere in the browser's page, no «hysteria2://<secret>@»
+        assert!(!web.contains(&pass), "the browser page carries the Hysteria2 password");
+        assert!(!web.contains("obfs-password="), "obfs password in the page");
+        assert!(web.contains("hysteria2://••••@"), "a masked link to read");
+        assert!(web.contains("data-fetch=\"/api/config/"), "the copy button fetches the link");
+        // exactly one data block, closed where the template closes it
+        let a = web.find("<script type=\"application/json\" id=\"data\">").unwrap();
+        let rest = &web[a..];
+        let s = rest.find('>').unwrap() + 1;
+        let e = rest.find("</script>").unwrap();
+        let raw = &rest[s..e];
+        assert!(!raw.contains('<') && !raw.contains('>') && !raw.contains('\u{2028}'), "{}", raw);
+        let d: serde_json::Value = serde_json::from_str(raw).unwrap();
+        assert_eq!(d["nodes"][0]["name"], "</script><script>alert(1)</script><!-- {{DATA}} \u{2028}");
+        assert!(d["nodes"][0].get("hy2").is_none());
+        assert_eq!((d["tier"].as_str(), d["tier_name"].as_str()), (Some("v2ray"), Some("ضد فیلتر V2Ray")));
+        // the page has no other «<script>» than its own two, and «{{DATA}}» from the name was not filled in
+        assert_eq!(web.matches("<script").count(), 2, "only the page's own scripts");
+        // the Kanki app's sealed page keeps the link in its data block (the app reads it there)
+        let app_page = body(super::sub_page_of(&app, &u, true)).await;
+        assert!(app_page.contains("\"hy2\""));
+    }
+
+    #[test]
+    fn template_marks_are_filled_once_and_links_are_masked() {
+        let out = super::fill("a{{X}}b{{Y}}c{{Z}}", &[("X", "{{Y}}".to_string()), ("Y", "2".to_string())]);
+        assert_eq!(out, "a{{Y}}b2c{{Z}}");
+        assert_eq!(super::mask_uri("hysteria2://secret@de.example.net:8443/?obfs=salamander&obfs-password=x#DE"), "hysteria2://••••@de.example.net:8443");
+        assert_eq!(super::mask_uri("vless://uuid@1.2.3.4:443?security=reality&pbk=k#n"), "vless://••••@1.2.3.4:443");
+        assert_eq!(super::mask_uri("vmess://eyJhZGQiOiIxLjIuMy40In0="), "vmess://••••");
+        assert_eq!(super::script_json(&serde_json::json!({"a": "</script>&\u{2029}"})), "{\"a\":\"\\u003c/script\\u003e\\u0026\\u2029\"}");
     }
 
     /// KANKI MIX is the Kanki app's own core: a browser's account page has no row, no address and no data

@@ -617,6 +617,17 @@ fn ver_lt(a: &str, b: &str) -> bool {
     crate::admin::newer(b, a)
 }
 
+/// The ports a server's agent reported listening on (with the program and its unit), or Null when it has not said
+fn listen_json(sid: &str) -> Value {
+    match tp::listening_on(sid) {
+        Some(l) => json!(l
+            .into_iter()
+            .map(|(port, udp, prog, unit)| json!({ "port": port, "proto": if udp { "UDP" } else { "TCP" }, "prog": prog, "unit": unit }))
+            .collect::<Vec<_>>()),
+        None => Value::Null,
+    }
+}
+
 fn ports_json(uses: &[Use], nid: &str) -> Value {
     let mut m = json!({});
     for u in uses.iter().filter(|u| u.node == nid) {
@@ -668,7 +679,11 @@ pub fn list_json(app: &App) -> Value {
     for s in &srv {
         let st = tp::agent_state(&s.id);
         let (at, ver, ip, setup) = st.clone().unwrap_or_default();
-        let node = if s.node.is_empty() { Value::Null } else { node_v(&s.node) };
+        let mut node = if s.node.is_empty() { Value::Null } else { node_v(&s.node) };
+        // 3.71: one name for one machine everywhere (Servers, Tunnels, Firewall, Ports): the server's own name
+        if let Some(o) = node.as_object_mut() {
+            o.insert("name".into(), json!(s.name));
+        }
         if !node.is_null() {
             linked.insert(s.node.clone());
         }
@@ -681,6 +696,8 @@ pub fn list_json(app: &App) -> Value {
                        "can_setup": !ver.is_empty() && !ver_lt(&ver, SETUP_FROM),
                        // the machine itself (Iran servers too, with no VPN part) and one-tap update from the panel
                        "stats": tp::agent_stats(&s.id),
+                       // 3.71: what listens on it now (Ports page; an Iran server without a VPN part too)
+                       "listen": listen_json(&s.id),
                        "can_update": at > 0 && t - at < 20 && !ver.is_empty() && ver != crate::VERSION },
             "node": node, "ports": if s.node.is_empty() { json!({}) } else { ports_json(&uses, &s.node) },
             // the ports a joined server really uses, not the ones planned when it joined (3.58.1)

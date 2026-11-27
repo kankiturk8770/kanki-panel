@@ -79,16 +79,15 @@ window.pDash=function(){dbReset();DB.bot=null;
  dashTick();dashSys();dashTimers();dashErrs()};
 // (3.50) the strip is the infrastructure at a glance: who is online now, servers and tunnels up, all traffic.
 // The users' own numbers live on the Users page (its filter chips), not here.
-var KPIS=[['g','Online now','k310online','online'],['a','Servers online','nodes','nodes'],['a','Tunnels up','tunnel','tunnels'],['a','Total traffic','k310traffic','traffic']];
+var KPIS=[['g','Online now','k310online','online'],['a','VPN exits online','nodes','nodes'],['a','Tunnels up','tunnel','tunnels'],['a','Total traffic','k310traffic','traffic']];
 function kpiOne(x,v,u,tone){return '<button type="button" class="kstat tone-'+(tone||x[0])+'" data-go="'+x[3]+'"><span class="kstat-l">'+t(x[1])+'</span><span class="kstat-v"><b class="ltr">'+v+'</b>'+(u?'<em>'+u+'</em>':'')+'</span><span class="kstat-i" aria-hidden="true">'+ic(x[2],18)+'</span></button>'}
 function kpiSkel(){return KPIS.map(function(x){return kpiOne(x,'—','')}).join('')}
 // every server the panel knows (agents and older VPN-only nodes), and its tunnels
-function infra(){var sv=((TN.d&&TN.d.servers)||[]).filter(function(x){return !x.local}),names={};sv.forEach(function(x){names[x.name]=1});
- var all=sv.map(function(x){return {name:x.name,on:!!x.online}}).concat((S.nodes||[]).filter(function(n){return n.id!='local'&&n.enabled!==false&&!names[n.name]}).map(function(n){return {name:n.name,on:!!n.online}}));
- var tl=((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false});
- return {srv:all,up:all.filter(function(x){return x.on}).length,tl:tl,tup:tl.filter(function(x){return x.state=='up'}).length}}
+function infra(){var f=fleet(),tl=((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false});
+ var rem=f.all.filter(function(x){return !x.local});
+ return {srv:rem,up:rem.filter(function(x){return x.on}).length,f:f,tl:tl,tup:tl.filter(function(x){return x.state=='up'}).length}}
 window.drawKpis=function(o){var el=$('#kpis');if(el&&o){var f=infra();
- var h=kpiOne(KPIS[0],N(o.online||0),'')+kpiOne(KPIS[1],f.srv.length?N(f.up)+' / '+N(f.srv.length):'—','',f.up<f.srv.length?'y':'g')+
+ var h=kpiOne(KPIS[0],N(o.online||0),'')+kpiOne(KPIS[1],N(f.f.vpnUp)+' / '+N(f.f.vpn.length),'',f.f.vpnUp<f.f.vpn.length?'y':'g')+
   kpiOne(KPIS[2],f.tl.length?N(f.tup)+' / '+N(f.tl.length):'—','',f.tup<f.tl.length?'y':'g')+kpiOne(KPIS[3],N(o.traffic_gb||0),'GB');
  if(el._h!==h){el._h=h;el.innerHTML=h}}
  dashSide();attention()};
@@ -101,7 +100,7 @@ function dashSide(){var p=$('#d_panel');if(!p)return;var sy=DB.sys||{},b=DB.bot,
  var web=svs.filter(function(x){return x.key=='web'})[0];if(web)h+=row('Web server',t(web.active?'Running':'Stopped'),web.active?'g':'r');
  h+=row('Sales bot',!b?'…':!b.token_set?t('Not set'):b.paused?t('Paused'):b.online?'<bdi class="ltr">@'+esc(b.username||'')+'</bdi>':t('Offline'),!b||!b.token_set?'':b.paused?'y':b.online?'g':'r');
  if(b&&b.mon_set)h+=row('Report bot',b.mon_online?'<bdi class="ltr">@'+esc(b.mon_username||'')+'</bdi>':t('Offline'),b.mon_online?'g':'r');
- var f=infra();h+=row('Servers',f.srv.length?'<bdi class="ltr">'+N(f.up)+' / '+N(f.srv.length)+'</bdi> '+t('online'):'—',f.srv.length?(f.up<f.srv.length?'y':'g'):'');
+ var f=infra();h+=row('Servers','<bdi class="ltr">'+N(f.f.up)+' / '+N(f.f.all.length)+'</bdi> '+t('online')+' · '+t('VPN exits')+' <bdi class="ltr">'+N(f.f.vpnUp)+' / '+N(f.f.vpn.length)+'</bdi>',f.f.up<f.f.all.length?'y':'g');
  if(f.tl.length)h+=row('Tunnels','<bdi class="ltr">'+N(f.tup)+' / '+N(f.tl.length)+'</bdi> '+t('up'),f.tup<f.tl.length?'y':'g');
  if(p._h!==h){p._h=h;p.innerHTML=h}
 }
@@ -113,6 +112,9 @@ function attention(){var el=$('#att');if(!el)return;var it=[],b=DB.bot,u=DB.upd,
  if(b&&b.mon_set&&!b.mon_online)it.push(['y','bot',t('Report bot'),b.mon_error?esc(b.mon_error):t('Offline'),'#bot']);
  if(b&&b.token_set===false)it.push(['y','bot',t('Sales bot'),t('Not set'),'#bot']);
  var o=DB.ov||{};if(o.pending_orders)it.push(['y','card',t('Pending orders'),N(o.pending_orders)+' '+t('waiting for approval'),'#bot']);
+ // (3.71) errors of the last 30 minutes (Caddy, the panel, a VPN service): never «everything is working» while they come
+ var rec=(DB.errs||[]).filter(function(x){return x.ts>Date.now()/1000-1800}),byU={};rec.forEach(function(x){var u=errUnit(x);byU[u]=(byU[u]||0)+1});
+ Object.keys(byU).slice(0,3).forEach(function(u){var last=rec.filter(function(x){return errUnit(x)==u}).pop();it.push(['y','logs',esc(u),N(byU[u])+' '+t('errors in 30 minutes')+' · '+esc(errText(last)),'#logs'])});
  var ns=infra().srv.filter(function(n){return !n.on});
  if(ns.length)it.push(['r','nodes',t('Servers'),N(ns.length)+' '+t('offline')+': '+ns.slice(0,3).map(function(n){return esc(n.name)}).join('، ')+(ns.length>3?' …':''),'#nodes']);
  var td=((TN.d&&TN.d.tunnels)||[]).filter(function(x){return x.enabled!==false&&x.state&&x.state!='up'&&x.state!='off'});
@@ -123,11 +125,18 @@ function attention(){var el=$('#att');if(!el)return;var it=[],b=DB.bot,u=DB.upd,
  h+=it.length?'<ul class="kd2-list">'+it.map(function(x){return '<li><a href="'+x[4]+'"'+(x[5]?' onclick="S.stsec=\'upd\'"':'')+'><i class="dot '+x[0]+'"></i><span class="ki">'+ic(x[1],16)+'</span><b>'+x[2]+'</b><small>'+x[3]+'</small></a></li>'}).join('')+'</ul>':
   '<div class="kd2-ok"><span>'+ic('check',18)+'</span><div><b>'+t('Everything is working')+'</b><small>'+t('The panel, the bot, the servers and the tunnels are fine.')+'</small></div></div>';
  if(er.length)h+='<div class="kd2-ev"><div class="kd2-evh"><b>'+t('Latest errors')+'</b><a href="#logs">'+t('All logs')+'</a></div>'+
-  er.map(function(x){return '<div class="kd2-evr"><time class="ltr">'+logTime(x.ts)+'</time><span class="ltr">'+esc(String(x.u||'').replace(/\.service$/,''))+'</span><code class="ltr">'+esc(x.m)+'</code></div>'}).join('')+'</div>';
+  er.map(function(x){return '<div class="kd2-evr"><time class="ltr">'+logTime(x.ts)+'</time><span class="ltr">'+esc(errUnit(x))+'</span><span class="kd2-evm" dir="auto">'+esc(errText(x))+'</span></div>'}).join('')+'</div>';
  var sub=$('#att_sub');if(sub)sub.textContent=it.length?N(it.length)+' '+t('item(s)'):t('All clear');
  var hp=$('#d_health');if(hp){var c=it.some(function(x){return x[0]=='r'})?'r':it.some(function(x){return x[0]=='y'})?'y':'g';hp.className='kpill '+c;hp.innerHTML='<i class="dot '+c+'"></i><span>'+(c=='g'?t('Healthy'):N(it.filter(function(x){return x[0]!='b'}).length)+' '+t('issue(s)'))+'</span>'}
  if(el._h!==h){el._h=h;el.innerHTML=h}}
 window.dashSide=dashSide;window.attention=attention;
+// (3.71) a log line as a person reads it: the service's short name, and of a JSON line (Caddy writes JSON) its message,
+// the failing host and the error, never the raw object
+function errUnit(x){var u=String(x.u||'').replace(/\.service$/,'');return ({caddy:'Caddy (Web)','kanki-panel':'Kanki Panel','hysteria-server':'Hysteria2','kanki-server':'KANKI MIX'})[u]||u||'system'}
+function errText(x){var m=String((x&&x.m)||'').trim(),j=null,i=m.indexOf('{');if(i>=0)try{j=JSON.parse(m.slice(i))}catch(e){j=null}
+ if(j){var parts=[j.msg||j.message||'',j.error||j.err||'',(j.request&&j.request.host)||j.host||j.server_name||''].filter(Boolean);if(parts.length)m=parts.join(' · ')}
+ m=m.replace(/^\S+\s+\S+\s+(ERROR|WARN|error|warn)\s+/,'');return m.length>140?m.slice(0,137)+'…':m}
+window.errText=errText;window.errUnit=errUnit;
 window.dashErrs=dashErrs;function dashErrs(){api('GET','/api/logs?src=all&n=200').then(function(r){DB.errs=(r.lines||[]).filter(function(x){return lgLevel(x)=='e'});attention()}).catch(function(){DB.errs=[];attention()})}
 
 // ---------------------------------------------------------------- tunnel map
@@ -365,9 +374,11 @@ window.navMark=function(p){var sk=V.secOf(p)[0];
  V.drawSecTabs(p);k38More(0);V.markTabs();markAll();if(window.mbarShow)setTimeout(mbarShow,30)};
 
 // ---------------------------------------------------------------- pages
-window.route=function(){var hs=location.hash||'';
+window.route=function(){var hs=location.hash||'';S.navAt=Date.now();
  // old addresses: one name and one place for each thing
  if(hs=='#xray'){location.replace('#xray/status');return}
+ // (3.71) the Anti-DPI page is gone: its inbound methods are the Xray inbound presets, its transports the Tunnels
+ if(hs.slice(1).split('/')[0]=='antidpi'){location.replace('#xray/inbounds');return}
  if(hs.slice(1).split('/')[0]=='servers'){location.replace('#nodes');return}
  // the emergency chat is gone (3.65): its old logs link opens the Logs page
  if(hs.slice(1).split('/')[0]=='emergency'){location.replace('#logs');return}
@@ -381,9 +392,6 @@ window.route=function(){var hs=location.hash||'';
  V.watchPg();V.drawSecTabs(S.page);
 };
 
-// Anti-DPI: the methods fold to one line (name, tags, make); a tap shows what each one is for
-function antidpi(){if(S.page!='antidpi')return;$$('#pg .g2>.box').forEach(function(b){if(b.classList.contains('kd-tpl'))return;b.classList.add('kd-tpl');
- b.addEventListener('click',function(e){if(e.target.closest('button'))return;b.classList.toggle('open')})})}
 // REALITY: test the suggested targets from the panel server and mark the ones that work
 function reality(){var sel=$('#xi_dp');if(!sel||$('#kd_rt'))return;
  sel.insertAdjacentHTML('afterend','<button type="button" class="b2 sm" id="kd_rt">'+t('Test the sites')+'</button>');
@@ -399,7 +407,7 @@ function reality(){var sel=$('#xi_dp');if(!sel||$('#kd_rt'))return;
 function tabsShow(){$$('#pg .ku-tabs,#st .stn').forEach(function(r){var a=r.querySelector('.on');if(!a||r._on===a||r.scrollWidth<=r.clientWidth+1)return;r._on=a;
  var rr=r.getBoundingClientRect(),ar=a.getBoundingClientRect();if(ar.left<rr.left+16||ar.right>rr.right-16)r.scrollLeft+=(ar.left+ar.width/2)-(rr.left+rr.width/2)})}
 window.tabsShow=tabsShow;
-new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();antidpi();reality();tabsShow()}).observe(document.body,{childList:true,subtree:true});
+new MutationObserver(function(){if($('#kpis'))V.kpiIcons();if($('#sectabs'))V.markTabs();reality();tabsShow()}).observe(document.body,{childList:true,subtree:true});
 
 // ---------------------------------------------------------------- users: one card each (3.50)
  // Two cards a row on a phone, more on wider screens; everything an admin checks is on the card itself:

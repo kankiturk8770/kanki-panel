@@ -5,8 +5,8 @@ var DTABS=[['overview','Status','dash'],['servers','Servers','srv'],['pubg','PUB
 var UPSTREAMS=[['Cloudflare','1.1.1.1, 1.0.0.1'],['Google','8.8.8.8, 8.8.4.4'],['Quad9','9.9.9.9, 149.112.112.112'],['AdGuard (no ads)','94.140.14.14, 94.140.15.15'],['OpenDNS','208.67.222.222, 208.67.220.220']];
 function p_dns(){DN.tab=S.sub||'overview';
  $('#pg').innerHTML='<div class="ku">'+kuHead('dns',t('Kanki DNS'),t('Private smart DNS for your subscribers: sanctioned services go through your servers, everything else goes direct'))+
-  '<nav class="ptabs ku-tabs" id="dn_tabs"></nav><div id="dn">'+t('Loading…')+'</div></div>';
- dnsLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))&&['overview','servers','users'].indexOf(DN.tab)>=0)dnsLoad(true)},5000)}
+  '<nav class="ptabs ku-tabs" id="dn_tabs"></nav><div id="dn">'+skel()+'</div></div>';
+ dnsLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))&&['overview','servers','users'].indexOf(DN.tab)>=0)dnsLoad(true)},refreshMs())}
 function tab_dns(sub){DN.tab=sub||'overview';if(DN.d)dnsDraw(DN.d);else dnsLoad()}
 function dnsTabs(d){var el=$('#dn_tabs');if(!el)return;var cnt={servers:d.servers.length,users:d.users};
  el.innerHTML=kuTabs('dns',DTABS,DN.tab,cnt)}
@@ -100,10 +100,12 @@ function dnsServicesTab(d,el){var cat=d.catalog||{},secs=cat.sections||[],svcs=c
    api('PUT','/api/dns',{off:off,opt:opt,custom:$('#dn_cu').value.split('\n').map(function(x){return x.trim()}).filter(Boolean)}).then(function(){toast(t('Saved'));dnsLoad()}).catch(fail)};
   $('#dn_svs').onclick=save;$('#dn_svs2').onclick=save};
  var cnt=function(sec){var all=0,on=0;$$('.dn_g',sec).forEach(function(c){if(c.disabled)return;all++;if(c.checked)on++});$('[data-cnt]',sec).textContent=N(on)+' / '+N(all)+' '+t('on')};
- if(DN.icons)draw(DN.icons);else fetch('/assets/dns-icons.json').then(function(r){return r.json()}).then(function(j){DN.icons=j.icons||{};draw(DN.icons)}).catch(function(){DN.icons={};draw({})})}
+ // (3.71) the list replaces the old tab at once; the icons fill in when they come, only if this tab is still open
+ if(DN.icons)return draw(DN.icons);draw({});
+ fetch('/assets/dns-icons.json').then(function(r){return r.json()}).then(function(j){DN.icons=j.icons||{};if(DN.tab=='services'&&el.isConnected&&!(document.activeElement&&document.activeElement.id=='dn_sq'))draw(DN.icons)}).catch(function(){DN.icons={}})}
 
 // ---- users tab
-function dnsUsersTab(d,el){el.innerHTML='<div class="card"><div class="nh"><div><h3>'+t('DNS users')+'</h3><p class="sub u-m0">'+t('Addresses each user registered (allowed now) and their queries since the DNS services started')+'</p></div><input id="dn_uq" placeholder="'+t('Search')+'…" style="max-width:220px"></div><div class="u-mt3" id="dn_ul">'+t('Loading…')+'</div></div>';
+function dnsUsersTab(d,el){el.innerHTML='<div class="card"><div class="nh"><div><h3>'+t('DNS users')+'</h3><p class="sub u-m0">'+t('Addresses each user registered (allowed now) and their queries since the DNS services started')+'</p></div><input id="dn_uq" placeholder="'+t('Search')+'…" style="max-width:220px"></div><div class="u-mt3" id="dn_ul">'+skel()+'</div></div>';
  $('#dn_uq').oninput=function(){dnsUsersDraw()};dnsUsersLoad()}
 function dnsUsersLoad(){api('GET','/api/dns/users').then(function(r){DN.users=r.users||[];dnsUsersDraw()}).catch(fail)}
 function dnsUsersDraw(){var el=$('#dn_ul');if(!el)return;var q=($('#dn_uq')&&$('#dn_uq').value||'').toLowerCase(),l=(DN.users||[]).filter(function(u){return !q||u.name.toLowerCase().indexOf(q)>=0});
@@ -125,7 +127,7 @@ function dnsLogTab(d,el){var us=(DN.users||[]);
   '<select class="u-mws" id="dl_k"><option value="">'+t('All queries')+'</option><option value="routed">'+t('Routed only')+'</option><option value="direct">'+t('Direct only')+'</option></select>'+
   '<input id="dl_q" class="ltr u-mw" placeholder="igamecj.com">'+
   '<select class="u-mws" id="dl_v"><option value="names">'+t('Grouped by name')+'</option><option value="items">'+t('Each query')+'</option></select></div>'+
-  '<div class="u-mt3" id="dl_o">'+t('Loading…')+'</div></div>';
+  '<div class="u-mt3" id="dl_o">'+skel()+'</div></div>';
  var f=DN.lg;$('#dl_k').value=f.kind;$('#dl_q').value=f.q;$('#dl_v').value=f.view;
  var fill=function(){var sel=$('#dl_u');if(!sel)return;sel.innerHTML='<option value="0">'+t('All users')+'</option>'+(DN.users||[]).map(function(u){return '<option value="'+u.id+'">'+esc(u.name)+'</option>'}).join('');sel.value=String(f.user)};
  if(us.length)fill();else api('GET','/api/dns/users').then(function(r){DN.users=r.users||[];fill()}).catch(function(){});
@@ -210,7 +212,7 @@ function dnsPubgTab(d,el){var sv=dnsPubgSvc(d),mode=dnsPubgMode(d),fa=S.lang!='e
    return '<div class="vrow u-wrap u-ais"><label class="sw u-fnone"><input type="checkbox" class="pg_g" data-k="'+esc(g.key)+'" '+(on?'checked':'')+'><span></span></label><div class="nm"><b>'+esc(g.label)+' <small class="muted">('+N(g.domains.length)+')</small></b>'+(g.note?'<small>'+esc(g.note)+'</small>':'')+
     '<div class="chs u-mt2">'+g.domains.map(function(x){return '<span class="chipx ltr">*.'+esc(x)+'</span>'}).join('')+'</div></div></div>'}).join('')+
   '<div class="sbar"><button class="btn" id="pg_save">'+t('Save')+'</button></div></div>'+
-  '<div class="card"><div class="nh"><div><h3>'+t('PUBG names your users asked')+'</h3><p class="sub u-m0">'+t('From the query log: a direct name that the game needs can be added here.')+'</p></div><button class="b2" id="pg_re">'+t('Refresh')+'</button></div><div class="u-mt3" id="pg_log">'+t('Loading…')+'</div></div>'+
+  '<div class="card"><div class="nh"><div><h3>'+t('PUBG names your users asked')+'</h3><p class="sub u-m0">'+t('From the query log: a direct name that the game needs can be added here.')+'</p></div><button class="b2" id="pg_re">'+t('Refresh')+'</button></div><div class="u-mt3" id="pg_log">'+skel()+'</div></div>'+
   '<p class="hint">'+t('PUBG on PC (Krafton)')+': '+t('It is in Services › Games › Other games.')+'</p>';
  $$('#pg_modes [data-pm]').forEach(function(b){b.onclick=function(){var m=PUBG_MODES.filter(function(x){return x[0]==b.dataset.pm})[0];dnsPubgSave(d,m[2]).catch(fail)}});
  $('#pg_save').onclick=function(){dnsPubgSave(d,$$('.pg_g').filter(function(c){return c.checked}).map(function(c){return c.dataset.k})).catch(fail)};

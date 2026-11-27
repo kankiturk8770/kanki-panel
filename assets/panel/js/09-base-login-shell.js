@@ -50,7 +50,21 @@ function jsa(s){return esc(String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'
 function toast(m,e){var x=$('#toast');x.textContent=m;x.className=e?'e':'';x.style.display='block';clearTimeout(x._t);x._t=setTimeout(function(){x.style.display='none'},2600)}
 // a delete that leaves work on servers shows its progress (kdFollowRemoval)
 var DELRX=/^\/api\/(tunnels\/servers\/[^/?]+|tunnels\/(?!servers|probe|cdntest)[^/?]+|servers\/[^/?]+|nodes\/[^/?]+|xray\/servers\/[^/?]+|dns\/servers\/[^/?]+)(\?.*)?$/;
+// (3.71) a page's own placeholder while its data comes: grey blocks, not a «Loading…» line
+function skel(){return '<div class="kskel-page" role="status" aria-label="'+esc(t('Loading…'))+'"><i></i><i></i></div>'}
+// (3.71) stale-while-revalidate for the pages: a page opened again shows the copy of its data read less than two
+// minutes ago at once, the real request runs at the same time, and the page draws itself again when the answer
+// differs. Only GETs a page makes while it opens are served from the copy; any change (POST, PUT, DELETE) drops
+// every copy, so nothing saved ever shows its old value.
+var SWR={};
+function swrFresh(p,pg,txt){var old=SWR[p];SWR[p]={at:Date.now(),j:txt};if(old&&old.j!==txt&&S.page==pg){clearTimeout(S.swrT);S.swrT=setTimeout(function(){
+ if(S.page!=pg||$('#modal').classList.contains('on')||(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))return;
+ var y=window.scrollY;S.noSwr=1;try{route()}finally{S.noSwr=0}window.scrollTo(0,y)},60)}}
 function api(m,p,b,raw){var u=p;
+ if(m=='GET'&&!raw&&!S.noSwr&&S.navAt&&Date.now()-S.navAt<400){var c=SWR[p];if(c&&Date.now()-c.at<120000){var pg=S.page;
+  fetch(p,{headers:{'X-Kanki-Admin':'1'},credentials:'same-origin'}).then(function(r){return r.ok?r.text():null}).then(function(x){if(x!=null)swrFresh(p,pg,x)}).catch(function(){});
+  try{return Promise.resolve(JSON.parse(c.j))}catch(e){delete SWR[p]}}}
+ if(m!='GET')SWR={};
  // a tunnel server is made in Servers
  if(m=='POST'&&p=='/api/tunnels/servers'&&b&&!b.gre_ip&&!b.addr){p='/api/servers';b={name:b.name,loc:b.loc||'abroad',vpn:b.loc!='iran'};raw=undefined}
  // 3.68: the session is an HttpOnly cookie the page never sees; this header makes it count (another site cannot send it)
@@ -59,7 +73,7 @@ function api(m,p,b,raw){var u=p;
  if(raw&&raw.headers)for(var k in raw.headers)o.headers[k]=raw.headers[k];
  var pr=fetch(p,o).then(function(r){if(r.status==401&&p!='/api/login'){logout(true);throw new Error('unauthorized')}
   if(raw&&raw.blob)return r.ok?r.blob().then(function(bl){return{blob:bl,name:((r.headers.get('content-disposition')||'').match(/filename="([^"]+)"/)||[])[1]}}):r.json().then(function(j){throw new Error(j.error||r.status)});
-  return r.text().then(function(x){var j;try{j=x?JSON.parse(x):{}}catch(e){j={error:x}}if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})});
+  return r.text().then(function(x){var j;try{j=x?JSON.parse(x):{}}catch(e){j={error:x}}if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}if(m=='GET'&&!raw&&x)SWR[p]={at:Date.now(),j:x};return j})});
  if(m=='DELETE'&&DELRX.test(u||''))pr.then(function(r){if(r&&r.removal)kdFollowRemoval(r.removal)},function(){});
  pr.then(function(){netNote(false)},function(e){if(isNetErr(e))netNote(true)});
  return pr}
@@ -80,8 +94,10 @@ function copy(s){s=String(s==null?'':s);if(navigator.clipboard&&window.isSecureC
 function bytes(n){n=+n||0;var u=['B','KB','MB','GB','TB'],i=0;while(n>=1024&&i<4){n/=1024;i++}return n.toFixed(i>=3?2:0)+' '+u[i]}
 function gbtxt(g){g=+g||0;return g<1?Math.round(g*1024)+' MB':g.toFixed(2)+' GB'}
 // the exact amount, unit by unit: "56 GB 69 MB 412 KB" (kb=false: without the KB)
-function exactB(n,kb){n=Math.max(0,Math.floor(+n||0));var g=Math.floor(n/1073741824),m=Math.floor(n%1073741824/1048576),k=Math.floor(n%1048576/1024),b=n%1024,o=[];
- if(g)o.push(g+' GB');if(m)o.push(m+' MB');if(k&&kb!==false)o.push(k+' KB');if(!o.length)o.push(n<1024?b+' B':k?k+' KB':'0 MB');return N(o.join(' '))}
+// (3.71) one clean number with one unit: «12.19 GB», «193.4 MB», «739 KB»
+function exactB(n){n=Math.max(0,+n||0);if(n>=1073741824)return N((n/1073741824).toFixed(2)+' GB');if(n>=1048576)return N((n/1048576).toFixed(1)+' MB');if(n>=1024)return N(Math.round(n/1024)+' KB');return N(Math.round(n)+' B')}
+// money with thousand separators: «۲,۲۵۳,۰۰۰ تومان»
+function money(n){return N(Math.round(+n||0).toLocaleString('en-US'))+' '+t('Toman')}
 
 // ---------------------------------------------------------------- Persian digits + Jalali (Shamsi) calendar
 var PD='۰۱۲۳۴۵۶۷۸۹',AD='٠١٢٣٤٥٦٧٨٩';
@@ -98,16 +114,32 @@ function j2g(jy,jm,jd){jy+=1595;var days=-355668+365*jy+dv(jy,33)*8+dv(jy%33+3,4
  for(gm=0;gm<13&&gd>sa[gm];gm++)gd-=sa[gm];return [gy,gm,gd]}
 function p2(n){return (n<10?'0':'')+n}
 // Jalali "1405/07/11" in Persian mode, "2026-10-03" in English mode (+ " HH:MM")
-function jdate(ts,time){if(!ts)return '∞';var d=new Date(ts*1000),s;
- if(S.lang=='fa'){var j=g2j(d.getFullYear(),d.getMonth()+1,d.getDate());s=j[0]+'/'+p2(j[1])+'/'+p2(j[2])}else s=d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
- if(time)s+=' '+p2(d.getHours())+':'+p2(d.getMinutes());return N(s)}
+// (3.71) every date and time of the panel is Tehran time (UTC+3:30, no summer time), the zone the server's schedules
+// (nightly backup, nightly update) run in, whatever zone the browser is set to
+var TZ_TEHRAN=12600;
+function jdate(ts,time){if(!ts)return '∞';var d=new Date((ts+TZ_TEHRAN)*1000),s;
+ if(S.lang=='fa'){var j=g2j(d.getUTCFullYear(),d.getUTCMonth()+1,d.getUTCDate());s=j[0]+'/'+p2(j[1])+'/'+p2(j[2])}else s=d.getUTCFullYear()+'-'+p2(d.getUTCMonth()+1)+'-'+p2(d.getUTCDate());
+ if(time)s+=' '+p2(d.getUTCHours())+':'+p2(d.getUTCMinutes());return N(s)}
 function fmtDate(ts,withTime){return jdate(ts,withTime)}
+// (3.71) one count of the servers for every page: each machine once (an agent and its VPN node are one server),
+// `vpn` = the VPN exits (a VPN part that carries users: not the panel-only or Iran-only roles, not switched off),
+// `all` = every machine, the panel and the Iran entries included
+function fleet(){var sv=(window.TN&&TN.d&&TN.d.servers)||[],nodes=S.nodes||[],seen={},all=[];
+ var role=function(n){return (n&&n.role)||'hybrid'},isVpn=function(n){return !!n&&n.enabled!==false&&role(n)!='panel'&&role(n)!='iran'};
+ sv.forEach(function(x){var n=x.node?nodes.filter(function(z){return z.id==x.node})[0]:x.local?nodes.filter(function(z){return z.id=='local'})[0]:null;if(n)seen[n.id]=1;
+  all.push({name:x.name,local:!!x.local,on:!!(x.local||x.online),vpn:isVpn(n),iran:x.loc=='iran'})});
+ nodes.forEach(function(n){if(seen[n.id])return;if(n.id=='local'&&sv.some(function(x){return x.local}))return;all.push({name:n.name,local:n.id=='local',on:n.id=='local'||!!n.online,vpn:isVpn(n),iran:false})});
+ var vpn=all.filter(function(x){return x.vpn});
+ return {all:all,up:all.filter(function(x){return x.on}).length,vpn:vpn,vpnUp:vpn.filter(function(x){return x.on}).length}}
 // how long ago, to the minute ("1 hour and 45 minutes ago"); a week or more: the date and time
-function ago(ts){if(!ts)return t('never');var s=Math.max(0,Math.floor(Date.now()/1000-ts));if(s<60)return N(s)+' '+t('seconds ago');
+// (3.71) the number first and the whole phrase isolated, so it never turns around inside a left-to-right box
+// («۲ ثانیه پیش», never «ثانیه پیش ۲»); under 5 seconds «just now»
+function bidi(x){return S.lang=='fa'?'\u2067'+x+'\u2069':x}
+function ago(ts){if(!ts)return t('never');var s=Math.max(0,Math.floor(Date.now()/1000-ts));if(s<5)return t('just now');if(s<60)return bidi(N(s)+' '+t('seconds ago'));
  var u=function(n,one,many){return N(n)+' '+t(n==1?one:many)},d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
- if(s<3600)return u(m,'minute','minutes')+' '+t('ago');
- if(s<86400)return u(h,'hour','hours')+(m?' '+t('and')+' '+u(m,'minute','minutes'):'')+' '+t('ago');
- if(d<7)return u(d,'day','days')+(h?' '+t('and')+' '+u(h,'hour','hours'):'')+' '+t('ago');
+ if(s<3600)return bidi(u(m,'minute','minutes')+' '+t('ago'));
+ if(s<86400)return bidi(u(h,'hour','hours')+(m?' '+t('and')+' '+u(m,'minute','minutes'):'')+' '+t('ago'));
+ if(d<7)return bidi(u(d,'day','days')+(h?' '+t('and')+' '+u(h,'hour','hours'):'')+' '+t('ago'));
  return jdate(ts,true)}
 function leftTxt(ts){if(!ts)return t('Unlimited');var sec=ts-Date.now()/1000;if(sec<=0)return t('Expired');var d=Math.ceil(sec/86400);return sec<86400?t('less than a day'):N(d)+' '+t('days left')}
 
@@ -246,7 +278,7 @@ function loginView(otp){$('#app').innerHTML='';document.body.className='';applyL
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';loginView()}
 
 // ---------------------------------------------------------------- shell
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['logs','Logs','logs'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['xray','Xray','xray'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['logs','Logs','logs'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);
@@ -256,7 +288,9 @@ window.addEventListener('hashchange',function(){if(!S.token||!S.me)return;var h=
  if(h[0]==S.page&&window['tab_'+S.page]&&$('#pg .ptabs')){S.sub=h[1]||'';navMark(S.page,S.sub);window['tab_'+S.page](S.sub);return}route()});
 // every refresh timer of a page; route() stops them all when another page opens
 function clearPageTimers(){clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);if(window.TS&&TS.timer){clearInterval(TS.timer);TS.timer=0}}
-function autoRefresh(fn){clearInterval(S.timer);var sec=Math.max(5,(S.me&&S.me.refresh)||10);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')fn()},sec*1000)}
+// (3.71) how often a page reads its data again: the admin's choice, 15 s by default (the panel often runs on 1 GB of RAM)
+function refreshMs(){return Math.max(5,(S.me&&+S.me.refresh)||15)*1000}
+function autoRefresh(fn){clearInterval(S.timer);var sec=refreshMs()/1000;S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')fn()},sec*1000)}
 function boot(){api('GET','/api/me').then(function(me){S.token='cookie';S.me=me;try{localStorage.setItem('kk_logo',me.logo||'')}catch(e){}if(me.panel_name)document.title=me.panel_name;
   if(!localStorage.getItem('kk_color')&&me.color)S.color=me.color;if(!localStorage.getItem('kk_lang')&&me.lang)S.lang=me.lang;if(!localStorage.getItem('kk_theme')&&me.theme)S.theme=me.theme;
   applyLook();shell();route()}).catch(function(e){if(e.message!='unauthorized')loginView()})}

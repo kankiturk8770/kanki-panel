@@ -64,7 +64,7 @@ function drawPv(p,force){var g='pv_'+p,el=$('#pv'),tab=PVT[p]||'status';if(!el||
   el.innerHTML=(p=='wg'?'<div class="warnbox">'+t('WireGuard reaches users only through a tunnel: choose its Iran server below.')+'</div>':'')+
    kuGroup(t('Second config through the tunnel'),list.length,'','<p class="muted ku-note">'+t('Only for this core. Empty = the tunnel domain of the server (Servers page).')+'</p><div id="pv_tun">'+pvTunRows(p)+'</div>');return}
  if(tab=='settings'){if(!force)return;
-  el.innerHTML=(p=='awg'?'<div id="pv_dir">'+t('Loading…')+'</div>':kuGroup(t('Settings'),null,'','<p class="muted ku-note">'+t('This protocol has no settings of its own: the port of each server is in the Servers tab, the second config in the Tunnel tab.')+'</p>'));
+  el.innerHTML=(p=='awg'?'<div id="pv_dir">'+skel()+'</div>':kuGroup(t('Settings'),null,'','<p class="muted ku-note">'+t('This protocol has no settings of its own: the port of each server is in the Servers tab, the second config in the Tunnel tab.')+'</p>'));
   if(p=='awg')dirDraw();return}
  if(!force&&accBusy(g))return;
  el.innerHTML=kuGroup(t('Servers'),list.length,'',list.length?boxes(g,list,function(s){return pvRow(p,s)}):'<p class="muted ku-empty">'+t('No VPN server yet')+' · <a href="#nodes">'+t('Add server')+'</a></p>')}

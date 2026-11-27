@@ -25,6 +25,13 @@ pub const SERVICES: &[(&str, &str)] = &[
     ("node", "kanki-node"),
 ];
 
+/// 3.71: the CPU cores of this machine: the `processor` lines of /proc/cpuinfo, else what the process may use
+/// (some ARM kernels and containers list none), never 0
+fn cpu_count() -> usize {
+    let n = std::fs::read_to_string("/proc/cpuinfo").map(|s| s.lines().filter(|l| l.starts_with("processor")).count()).unwrap_or(0);
+    if n > 0 { n } else { std::thread::available_parallelism().map(|x| x.get()).unwrap_or(1) }
+}
+
 fn sh(cmd: &str, args: &[&str]) -> String {
     Command::new(cmd).args(args).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()
 }
@@ -346,7 +353,7 @@ async fn qr(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String
 /// CPU, memory, disk and connections of this server, sent with the node info so the panel can judge its health
 pub fn node_stats() -> Value {
     let load: Vec<f64> = read("/proc/loadavg").split_whitespace().take(3).filter_map(|x| x.parse().ok()).collect();
-    let cores = read("/proc/cpuinfo").lines().filter(|l| l.starts_with("processor")).count().max(1);
+    let cores = cpu_count();
     let (mut mt, mut ma, mut swt, mut swf) = (0f64, 0f64, 0f64, 0f64);
     for l in read("/proc/meminfo").lines() {
         let v: f64 = l.split_whitespace().nth(1).and_then(|x| x.parse().ok()).unwrap_or(0.0);
@@ -409,7 +416,7 @@ async fn system(State(app): St, h: HeaderMap) -> Response {
 
 fn system_info() -> Value {
     let load: Vec<f64> = read("/proc/loadavg").split_whitespace().take(3).filter_map(|x| x.parse().ok()).collect();
-    let cpus = read("/proc/cpuinfo").lines().filter(|l| l.starts_with("processor")).count().max(1);
+    let cpus = cpu_count();
     let mut mt = 0f64;
     let mut ma = 0f64;
     for l in read("/proc/meminfo").lines() {
@@ -520,7 +527,7 @@ async fn live(State(app): St, h: HeaderMap) -> Response {
     let cpu_total: f64 = cf.iter().take(8).sum();
     let cpu_idle: f64 = cf.get(3).copied().unwrap_or(0.0) + cf.get(4).copied().unwrap_or(0.0);
     let load: Vec<f64> = read("/proc/loadavg").split_whitespace().take(3).filter_map(|x| x.parse().ok()).collect();
-    let cores = read("/proc/cpuinfo").lines().filter(|l| l.starts_with("processor")).count().max(1);
+    let cores = cpu_count();
     let (mut mt, mut ma, mut swt, mut swf) = (0f64, 0f64, 0f64, 0f64);
     for l in read("/proc/meminfo").lines() {
         let v: f64 = l.split_whitespace().nth(1).and_then(|x| x.parse().ok()).unwrap_or(0.0);

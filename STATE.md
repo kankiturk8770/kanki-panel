@@ -1,5 +1,64 @@
 # STATE
 
+## 3.71.0 — Phase 4: account page safety, five-tab panel, dead code out, UI bugs from the video audit (done; branch `ccr-94a1e97e-wsl617`)
+Kept as they were: the HttpOnly cookie login, step-up password prompts (`/api/security/*`, backup passphrase reveal),
+`POST /api/users/:id/upgrade`, the server role selector, the default-tier selector, every API the bot / mini app uses.
+
+Account page (`assets/sub/sub.html`, `api::sub_page_of`)
+- No flash: the shell stays hidden (`html:not(.ready)`) until the script filled it, a spinner meanwhile, shown anyway
+  after 3 s (CSS animation) or without JS (`<noscript>`). The English labels stay in the markup (the app's fallback
+  reads «Data remaining»).
+- No secret in the markup: Hysteria2 / Xray rows show `scheme://••••@host:port` (`mask_uri`); their copy buttons
+  fetch the link when tapped (`data-fetch`: `/api/config/<id>/hysteria2?…`, new `GET /sub/:code/xl/:i`); «copy all»
+  fetches them all. The browser's data block drops `nodes[].hy2` and `xray[].link` (`web_only`); the app's sealed
+  page keeps them.
+- Data block: `script_json` escapes `<`, `>`, `&`, U+2028/2029 as `\uXXXX`; the template is filled in one pass
+  (`fill`), so a name holding `{{DATA}}` or `</script>` cannot break out.
+- Three plans: `tier` / `tier_name` in the data; a plan pill; v2ray shows only the V2Ray card, gaming WG / AWG / DNS and
+  the Kanki app, vip everything. Footer translated; relative times isolated (`۲ ثانیه پیش`, «همین الان» under 5 s).
+
+Navigation (`13-menu.js`): five sections in the side menu and the phone bar (each a fifth of the width):
+Home (Dashboard, Logs) · Users · Infrastructure (Servers + role, Cores, WG, AWG, HY2, KANKI MIX, Xray, DNS, Tunnels,
+Ports & firewall) · Reports (Traffic, Bot) · Settings (Settings, Security, Backup & move). Live dots only on core tabs.
+
+Removed
+- `assets/panel/js/04-antidpi.js` (the Anti-DPI page): its inbound methods are the Xray editor's presets, its
+  transports the Tunnels page; `#antidpi` redirects to `#xray/inbounds`; the cores page links both.
+- Settings › Export & import (`stExport`, `stImport`, `ST_SKIP`, the `io` section, the Backup page's link to it): it
+  duplicated Backup and wrote payment keys to a plain JSON file.
+- 772 Persian strings no script or server answer used any more (`08-translations.js` 276 KB → 184 KB); the CSS of the
+  removed parts. No shop / plan / discount / channel editor was left in the web UI; their APIs stay (the mini app).
+
+Fixes
+- Dashboard: errors of the last 30 min make it «Needs attention» with a readable line (`errText`: the message, host
+  and error of a Caddy JSON line, not the raw object). CPU: smoothed and held near the load average; cores from
+  `/proc/cpuinfo`, else `available_parallelism`.
+- One server count (`fleet()`): every machine once; «VPN exits» = VPN part that serves users (not panel / iran roles,
+  not off). Dashboard KPI, panel card and the cores page use it. Node `users` = users the server really serves with
+  one of its cores, `users_by` per core (same as the cores' cards). KANKI MIX: one «online now» (live sessions when
+  the servers report them).
+- Users: opens on «All»; plan filter chips; a VIP upgrade box in the user window (`POST /api/users/:id/upgrade`);
+  amounts `12.19 GB`; money `۲,۲۵۳,۰۰۰ تومان` (`money`).
+- Mobile: one core per full-width row in the user form, plan buttons stacked, dark text on the gold VIP plan; protocol
+  chips wrap under the name; list rows and stat titles wrap; page tabs scroll whole; the settings save bar sits above
+  the phone bar and the page has room under its last card.
+- Xray: no flow (no «Vision» badge) unless VLESS + TCP + TLS/REALITY; unique names (empty = `PROTOCOL-TRANSPORT`, a used
+  one `-2`, `-3`, clones too).
+- DNS › Services replaces the old tab at once (icons fill in later, only if still open). Tunnels: the map's Iran tab and
+  the list's server filter are one choice. Ports: every server from `/api/servers` (Iran servers without a VPN part
+  from what their agent reports listening, `agent.listen`); one name per machine (a server's node takes its name).
+- Times: every panel date is Tehran time (the nightly backup at 03:00 showed as 04:30 in a browser on UTC+5).
+- Texts: «2FA code required» and the other 2FA answers, «توقف», «باز», «گزارش‌ها»; «لاگ اتصال‌ها» was already right.
+- Speed: refresh default 15 s (setting `refresh`; panels on 5 / 10 moved once), every page timer uses it
+  (`refreshMs`); pages opened again show their last data at once (`SWR`, ≤ 2 min, dropped on any change) and redraw
+  when the real answer differs; grey skeletons (`skel()`) instead of «Loading…».
+
+Tests added: `account_page_tests::{the_account_page_leaks_no_secret_and_cannot_be_broken_out_of,
+template_marks_are_filled_once_and_links_are_masked}`, `access_tests::inbound_names_are_unique_and_vision_is_only_where_it_works`.
+Checked in Chromium (390 px): login, the five sections and every tab, no script error; the user form; the account page.
+
+Not done: an audit-log page (no UI existed; the audit chain is kept and shown as `audit_intact`).
+
 ## 3.70.0 — Phase 3: bot / mini app hardening, one account with three plans, server roles (done; branch `ccr-94a1e97e-wsl617`)
 Nothing a user has changes: subscription codes (old ones and the 39-digit ones of 3.69), keyed credentials, links and
 every protocol an account has today stay as they are. Only the stored tier name `combo` is now `vip`.

@@ -2305,6 +2305,8 @@ async fn list(State(app): St, h: HeaderMap) -> Response {
         let x = seen.get(&s.id).cloned().unwrap_or_default();
         srv.push(json!({
             "id": s.id, "name": s.name, "local": false, "addr": s.addr, "host": host_of(&app, &s.id),
+            // 3.71: its VPN node (one machine counted once on every page)
+            "node": s.node,
             "ip": x.ip, "online": x.at > 0 && t - x.at < 20, "last_seen": x.at, "version": x.version,
             "gre_ip": s.gre_ip, "gre_n": s.gre_n, "gre_panel_ip": s.gre_panel_ip,
             "loc": locs.get(&s.id).map(|x| x.0.clone()).unwrap_or_default(), "loc_guess": locs.get(&s.id).map(|x| x.1).unwrap_or(true), "cc": cc_of(&s.id),

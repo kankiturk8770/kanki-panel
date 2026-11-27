@@ -12,12 +12,14 @@ function gcard(id,title,icon){return '<div class="kg-gauge" id="gc_'+id+'">'+
 function setRing(id,p,val,sub){var f=$('#rf_'+id);if(!f)return;f.setAttribute('stroke-dasharray',(p*2.136).toFixed(1)+' 213.6');
  $('#gc_'+id).className='kg-gauge'+(p>=90?' hot':p>=70?' warm':'');$('#rt_'+id).textContent=N(Math.round(p))+'%';
  $('#gv_'+id).innerHTML=/^[\d۰-۹]/.test(val)?'<bdi class="ltr">'+esc(val)+'</bdi>':esc(val);$('#gs_'+id).textContent=sub||' '}
-function dashTimers(){clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);S.timer=setInterval(dashTick,DB.iv*1000);S.timer2=setInterval(dashSys,10000);S.timer3=setInterval(function(){if(S.page=='dash'&&document.visibilityState=='visible')dashErrs()},30000)}
+function dashTimers(){clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);S.timer=setInterval(dashTick,DB.iv*1000);S.timer2=setInterval(dashSys,refreshMs());S.timer3=setInterval(function(){if(S.page=='dash'&&document.visibilityState=='visible')dashErrs()},30000)}
 function dashLive(state){var l=$('#d_live');if(!l)return;l.className='live'+(state?' '+state:'');$('#d_lt').textContent=state=='bad'?t('Reconnecting…'):state=='off'?t('Paused'):t('Live')}
 function goUsers(f){S.goF=f;S.q='';S.pg=1;S.pf='all';location.hash='#users'}
 function dashTick(){if(S.page!='dash'||DB.paused||document.visibilityState!='visible')return;
  api('GET','/api/live').then(function(l){if(S.page!='dash')return;var p=DB.last,cpu=DB.cpu,rxs=0,txs=0;
-  if(p&&l.cpu_total>p.cpu_total){var dT=l.cpu_total-p.cpu_total,dI=l.cpu_idle-p.cpu_idle;cpu=Math.max(0,Math.min(100,100*(1-dI/dT)))}
+  if(p&&l.cpu_total>p.cpu_total){var dT=l.cpu_total-p.cpu_total,dI=l.cpu_idle-p.cpu_idle,inst=Math.max(0,Math.min(100,100*(1-dI/dT)));
+   // (3.71) an average that follows the CPU over ~10 s, held near what the load average says: one busy moment is not a busy server
+   cpu=p?(DB.cpu*0.7+inst*0.3):inst;var ld=100*((l.load&&l.load[0])||0)/(l.cores||1);if(cpu>ld+35)cpu=(cpu+ld+35)/2}
   else if(!p)cpu=Math.min(100,100*((l.load&&l.load[0])||0)/(l.cores||1));
   if(p&&l.ts>p.ts){var sec=(l.ts-p.ts)/1000;rxs=Math.max(0,(l.net_rx-p.net_rx)/sec);txs=Math.max(0,(l.net_tx-p.net_tx)/sec)}
   DB.last=l;DB.cpu=cpu;
@@ -28,7 +30,7 @@ function dashTick(){if(S.page!='dash'||DB.paused||document.visibilityState!='vis
 function dashDraw(rxs,txs){var l=DB.last;if(!l||!$('#d_sub'))return;
  $('#d_sub').textContent=(l.host||'server')+' · '+(l.kernel||'')+' · '+t('Uptime')+' '+upt(l.uptime);
  var cpu=DB.cpu,rp=pc(l.mem_used,l.mem_total),sp=pc(l.swap_used,l.swap_total);
- setRing('cpu',cpu,N((l.load||[0])[0]),t('Load')+' · '+N(l.cores)+' '+t('Cores'));
+ setRing('cpu',cpu,N(((l.load||[0])[0]||0).toFixed(2)),t('Load')+' · '+N(l.cores>0?l.cores:(navigator.hardwareConcurrency?'?':'—'))+' '+t('CPU cores'));
  setRing('ram',rp,N(bytes(l.mem_used))+' / '+N(bytes(l.mem_total)),'');
  setRing('swap',sp,l.swap_total>0?N(bytes(l.swap_used))+' / '+N(bytes(l.swap_total)):t('No swap'),'');
  $('#ch_cpu').innerHTML=areaChart([{v:DB.h.cpu,c:'a'}],{h:54,max:100,cap:DB.max});
@@ -70,7 +72,7 @@ function ustate(u){if(!u.enabled)return 'disabled';if(u.status!='Active')return 
 function usage(u){var lim=u.traffic_limit_gb;return lim>0?Math.min(100,Math.round(100*u.traffic_used_gb/lim)):-1}
 function findU(id){for(var i=0;i<S.users.length;i++)if(S.users[i].id==id)return S.users[i]}
 function pUsers(){var pg=$('#pg');
- S.size=+localStorage.getItem('kk_size2')||48;S.sort=localStorage.getItem('kk_sort')||'new';S.pf=S.pf||'all';S.filter=S.goF||'online';S.goF='';S.q=S.q||'';S.pg=1;S.sel={};S.selMode=false;
+ S.size=+localStorage.getItem('kk_size2')||48;S.sort=localStorage.getItem('kk_sort')||'new';S.pf=S.pf||'all';S.filter=S.goF||'all';S.goF='';S.q=S.q||'';S.pg=1;S.sel={};S.selMode=false;
  var fo=[['all','All'],['online','Online'],['active','Active'],['finished','Expired'],['disabled','Disabled'],['offline','Offline']],
   so=[['new','Newest'],['old','Oldest'],['name','Name'],['usage','Most used'],['expiry','Nearest expiry'],['seen','Last seen']],
   po=[['all','All protocols']].concat(PROTOS);
@@ -82,7 +84,7 @@ function pUsers(){var pg=$('#pg');
   '<div class="ufp" id="ufp"><div class="ufilt" id="ust" role="group" aria-label="'+t('Status')+'"></div>'+
   '<div class="usel"><select id="srt" aria-label="'+t('Sort')+'">'+opt(so,S.sort)+'</select><select id="pf" aria-label="'+t('Protocol')+'">'+opt(po,S.pf,false).replace('>All protocols<','>'+t('All protocols')+'<')+'</select></div></div></div>'+
  '<div class="selbar hide" id="selbar"><label><span class="ck"><input type="checkbox" id="sall"><i></i></span><span>'+t('Select all')+' (<span id="sallc">0</span>)</span></label></div>'+
- '<div class="uchips" id="ul"><div class="empty2">'+t('Loading…')+'</div></div><div class="pager2" id="pager"></div>'+
+ '<div class="uchips" id="ul"><div class="empty2">'+skel()+'</div></div><div class="pager2" id="pager"></div>'+
  '<div class="bulk hide" id="bulk" role="toolbar" aria-label="'+esc(t('Selected users'))+'"><span class="cnt" id="bcnt" aria-live="polite"></span><div class="bulk-a"><button type="button" class="b2" data-b="enable">'+t('Enable')+'</button><button type="button" class="b2" data-b="disable">'+t('Disable')+'</button><button type="button" class="b2" data-b="reset">'+t('Reset traffic')+'</button><button type="button" class="b2" data-b="extend">'+t('Extend')+'</button><button type="button" class="b2 bd" data-b="delete">'+t('Delete')+'</button></div><button type="button" class="kib" data-b="clear" title="'+t('Clear selection')+'" aria-label="'+t('Clear selection')+'">✕</button></div>';
  $('#q').oninput=function(){S.q=this.value;$('#qx').classList.toggle('hide',!this.value);S.pg=1;pruneSel();drawUsers()};
  $('#qx').onclick=function(){$('#q').value='';S.q='';this.classList.add('hide');S.pg=1;pruneSel();drawUsers()};
@@ -109,7 +111,10 @@ function ufCount(){var n=(S.filter&&S.filter!='all'?1:0)+(S.pf&&S.pf!='all'?1:0)
 function drawStats(){var o=S.ov;if(!o||!$('#ust'))return;
  var on=S.users?S.users.filter(function(u){return u.online_connections>0||liveOf(u).length>0}).length:o.online;
  var xr=S.users?S.users.filter(function(u){return hasP(u,'xray')}).length:0;
- var c=[['g',on,'Online','online'],['',Math.max(0,(S.users?S.users.length:o.users)-on),'Offline','offline'],['',o.users,'All','all'],['g',o.active,'Active','active'],['y',o.expired,'Expired','finished'],['r',o.disabled,'Disabled','disabled'],['x',xr,'Xray users','xray']];
+ // (3.71) «All» first (and the page opens on it), then the states, then the three plans
+ var tc=function(k){return S.users?S.users.filter(function(u){return tierKey(u.tier)==k}).length:0};
+ var c=[['',o.users,'All','all'],['g',on,'Online','online'],['',Math.max(0,(S.users?S.users.length:o.users)-on),'Offline','offline'],['g',o.active,'Active','active'],['y',o.expired,'Expired','finished'],['r',o.disabled,'Disabled','disabled'],['x',xr,'Xray users','xray'],
+  ['',tc('v2ray'),'Anti-filter','t:v2ray'],['',tc('gaming'),'Gaming','t:gaming'],['',tc('vip'),'VIP','t:vip']];
  $('#ust').innerHTML=c.map(function(x){return '<button type="button" aria-pressed="'+(S.filter==x[3])+'" class="uf'+(S.filter==x[3]?' act':'')+'" data-f="'+x[3]+'">'+(x[0]?'<span class="dot '+x[0]+'"></span>':'')+'<span>'+t(x[2])+'</span><b>'+N(x[1]||0)+'</b></button>'}).join('');
  drawLive()}
 // connected right now, by protocol: a count per protocol, a tap filters the list to it
@@ -133,7 +138,7 @@ function filtered(){var q=S.q.trim().toLowerCase(),f=S.filter;
   if(q&&(u.username+' '+u.notes+' '+(u.tg_id||'')).toLowerCase().indexOf(q)<0)return false;
   if(S.pf&&S.pf!='all'&&!hasP(u,S.pf))return false;
   if(S.lv&&!liveOf(u).some(function(c){return c.p==S.lv}))return false;
-  if(f=='xray')return hasP(u,'xray');if(f=='online')return u.online_connections>0||liveOf(u).length>0;if(f=='offline')return !(u.online_connections>0||liveOf(u).length>0);if(f!='all')return ustate(u)==f;return true});
+  if(f.indexOf('t:')==0)return tierKey(u.tier)==f.slice(2);if(f=='xray')return hasP(u,'xray');if(f=='online')return u.online_connections>0||liveOf(u).length>0;if(f=='offline')return !(u.online_connections>0||liveOf(u).length>0);if(f!='all')return ustate(u)==f;return true});
  out.sort(SORTS[S.sort]||SORTS.new);return out}
 function pruneSel(){var ok={};filtered().forEach(function(u){ok[u.id]=1});Object.keys(S.sel).forEach(function(k){if(!ok[k])delete S.sel[k]})}
 function drawUsers(){var el=$('#ul');if(!el)return;var list=filtered(),pages=Math.max(1,Math.ceil(list.length/S.size));if(S.pg>pages)S.pg=pages;if(S.pg<1)S.pg=1;
@@ -286,7 +291,7 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
  '<div class="kgrid"><section class="card c6"><h3>'+t('Backup file')+'</h3><p class="sub">'+t('Encrypted archive. File name includes date and time.')+'</p><div class="kfr"><input id="bk_p" type="password" aria-label="'+esc(t('Passphrase'))+'" placeholder="'+t('Empty = panel backup passphrase')+'"><button class="btn" id="bk_go">'+ic('dl',16)+'<span>'+t('Download backup')+'</span></button></div></section>'+
  '<section class="card c6 kdanger"><h3>'+t('Restore')+'</h3><p class="sub">'+t('Pick a backup file; if encrypted, enter its passphrase.')+'</p><div class="kfr"><label class="b2">'+ic('dl',16)+'<span>'+t('Choose file')+'</span><input type="file" id="rs_f" class="hide"></label><input id="rs_p" type="password" aria-label="'+esc(t('Passphrase'))+'" placeholder="'+t('Empty = panel backup passphrase')+'"></div><small class="muted ltr" id="rs_n">'+t('No file chosen')+'</small>'+
  '<label class="chk"><input type="checkbox" id="rs_full">'+t('Also restore server keys & configs (same/new server migration)')+'</label><div class="kfoot"><span class="muted" id="rs_st" aria-live="polite"></span><button class="b2 bd" id="rs_go">'+t('Restore backup')+'</button></div></section></div>'+
- '<div class="klink"><span>'+ic('settings',18)+'</span><div><b>'+t('Settings only')+'</b><small>'+t('Export or import just the panel settings, without users or keys.')+'</small></div><a class="b2 sm" href="#settings" onclick="S.stsec=\'io\'">'+t('Settings › Export & import')+'</a></div>'+moveCard()+
+ moveCard()+
  '<div class="card" style="margin-top:12px"><div class="row" style="justify-content:space-between"><div><h3>🌙 '+t('Nightly backup to the bot')+'</h3><p class="sub">'+t('Every night the database is cleaned and an encrypted backup is sent to Telegram')+'</p></div><label class="ku-sw ku-sw-in"><span class="ku-swt"><b>'+t('On')+'</b></span><span class="sw"><input type="checkbox" id="tg_on"><span></span></span></label></div>'+
  '<div class="g2"><div><label class="f">'+t('When')+'</label><div class="row" style="flex-wrap:nowrap;gap:6px"><select id="tg_m" style="width:auto"><option value="nightly">'+t('Every night at')+'</option><option value="hours">'+t('Every … hours')+'</option></select><input id="tg_at" class="ltr" style="max-width:90px" placeholder="03:00"><input id="tg_h" type="number" min="1" style="max-width:90px"></div><small class="muted">'+t('Iran time')+'</small></div>'+
  '<div><label class="f">'+t('Chat ID')+'</label><input id="tg_chat" class="ltr" placeholder="'+t('Auto after /start (or first bot admin)')+'"></div></div>'+
@@ -322,7 +327,7 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
  tgLoad();restoreBox();
  moveLoad();clearInterval(S.timer4);S.timer4=setInterval(function(){if(S.page=='backup'&&$('#v37move')&&!$('#modal').classList.contains('on'))moveLoad()},5000)}
 // move the whole panel to a new server
-function moveCard(){return '<div class="card" id="v37move"><h3>🚚 '+t('Move the panel to a new server')+'</h3><p class="sub">'+t("Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.")+' '+t("Also the certificates of the other domains. From the moment the new server takes the backup this panel is locked, so nothing done in between is lost.")+'</p><div id="mv_in">'+t('Loading…')+'</div></div>'}
+function moveCard(){return '<div class="card" id="v37move"><h3>🚚 '+t('Move the panel to a new server')+'</h3><p class="sub">'+t("Everything moves: users, servers, tunnels, DNS, Xray, bot and plans, the panel settings, the keys of this server's WireGuard / AmneziaWG / Hysteria2 (users' configs keep working), the certificate and the app files.")+' '+t("Also the certificates of the other domains. From the moment the new server takes the backup this panel is locked, so nothing done in between is lost.")+'</p><div id="mv_in">'+skel()+'</div></div>'}
 function moveDraw(m){var el=$('#mv_in');if(!el)return;
  var steps='<ol class="steps" style="margin:6px 0 10px;line-height:2"><li><b>'+t("Point the panel's domain to the new server's IP")+'</b><br><small class="muted">'+t('In your DNS (Cloudflare / ArvanCloud): the A record of')+' <span class="ltr">'+esc(m.domain||'')+'</span> '+t('= the IP of the new server, without CDN (DNS only). The old panel keeps working by its IP until the move is done.')+'</small></li>'+
   '<li><b>'+t('Run this on the new server (Ubuntu / Debian, as root)')+'</b><br><small class="muted">'+t('It downloads everything straight from this server, puts it back with the same keys and starts the panel there. Then this panel stops by itself.')+'</small></li></ol>';
@@ -348,7 +353,7 @@ function restoreBox(){var pg=$('#pg');if(!pg||S.page!='backup'||$('#svp_rs'))ret
   var ph=$('#pg .ph');if(ph)ph.parentNode.insertBefore(c,ph.nextSibling)}).catch(function(){})}
 
 // ---------------------------------------------------------------- security
-function pSecurity(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Security')+'</h2><p>'+t('Login, 2FA, sessions and IP access')+'</p></div></div><div id="sec">'+t('Loading…')+'</div>';loadSec()}
+function pSecurity(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Security')+'</h2><p>'+t('Login, 2FA, sessions and IP access')+'</p></div></div><div id="sec">'+skel()+'</div>';loadSec()}
 // what to fix first, in colour: 2FA off (red), the old full-access API key (yellow), no IP allow list (grey)
 function secStatus(s){var r=[[s.totp_on?'g':'r',t('Two-step login (2FA)'),s.totp_on?t('On'):t('Off: turn it on below, the panel is open on the internet')],
   [s.legacy_key?'y':'g',t('Old API key'),s.legacy_key?t('Still there, with full access: delete it below if nothing uses it'):t('None')],
@@ -421,9 +426,7 @@ var STSEC=[
  ['vpn','VPN & protocols','shield2','DNS, MTU and protocol behaviour on every server',['dns','mtu','mtu_auto','mtu_budget','awg_compat','conn_limit_on','wg_tunnel_on']],
  ['newu','New users','users','Ready values for the “New user” form',['default_tier','def_gb','def_days','def_conns']],
  ['srv','Servers','nodes','What happens to a server that stays offline',['autodel_on','autodel_hours','autodel_iran']],
- ['upd','Update & version','refresh','Version, update source and installing updates',['update_repo']],
- ['io','Export & import','box','Move all settings to another panel or keep a copy',[]]];
-var ST_SKIP=['web_bind','web_port','domain','https_port','repo_env'];
+ ['upd','Update & version','refresh','Version, update source and installing updates',['update_repo']]];
 function stSw(k,title,desc){return '<div class="srow"><div class="tx"><b>'+t(title)+'</b><small>'+t(desc)+'</small></div><label class="sw"><input type="checkbox" data-k="'+k+'"><span></span></label></div>'}
 function stIn(k,label,ph,hint,cls,type){return '<div class="'+(cls||'')+'"><label class="f">'+t(label)+'</label><input data-k="'+k+'"'+(type?' type="'+type+'" min="0"':'')+' class="'+(type?'':'ltr')+'" placeholder="'+esc(ph||'')+'">'+(hint?'<div class="hint">'+t(hint)+'</div>':'')+'</div>'}
 function stPick(k,items,cls){return '<input type="hidden" data-k="'+k+'"><div class="'+cls+'" data-pick="'+k+'">'+items.join('')+'</div>'}
@@ -434,7 +437,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
    stSw('autodel_iran','Iran servers too','Off by default: when Iran\'s internet is cut, its servers can be away for days, and removing them takes every tunnel with them.')+
    '<p class="muted" style="font-size:12px">'+t('Only when other servers are online: if every server is away at once, it is the panel\'s own network and nothing is removed. The panel server is never removed.')+'</p>';
  case 'look':return '<div class="sgrid">'+stIn('panel_name','Panel name','Kanki Panel','Shown in the menu, the browser tab and the login page.')+
-  '<div><label class="f">'+t('Auto refresh')+'</label><select data-k="refresh">'+[5,10,30,60].map(function(n){return '<option value="'+n+'">'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select><div class="hint">'+t('How often lists and the dashboard refresh themselves.')+'</div></div>'+
+  '<div><label class="f">'+t('Auto refresh')+'</label><select data-k="refresh">'+[5,10,15,30,60].map(function(n){return '<option value="'+n+'">'+N(n)+' '+t('seconds')+'</option>'}).join('')+'</select><div class="hint">'+t('How often lists and the dashboard refresh themselves.')+'</div></div>'+
   '<div class="full"><label class="f">'+t('Logo')+'</label><div class="row" style="gap:10px"><div class="'+logoCls()+'" id="lg_prev" style="width:52px;height:52px;border-radius:15px">'+logoInner(((S.me&&S.me.panel_name)||'K').charAt(0))+'</div>'+
   '<label class="b2" for="lg_file" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">'+ic('image',16)+' '+t('Choose image')+'</label><input type="file" id="lg_file" accept="image/*" class="hide">'+
   '<button class="b2 bd'+(curLogo()?'':' hide')+'" id="lg_rm">'+t('Remove')+'</button></div><div class="hint">'+t('Saved at once. Shown in the header, the menu, the login page and the subscription page.')+'</div></div>'+
@@ -446,8 +449,8 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   (s.endpoint_stale?'<div class="warnbox full">'+t('This address points to an IP that is not one of your servers (an old server?). Fix it or empty it.')+'</div>':'')+
   stIn('sub_base','Subscription base URL','https://sub.example.com','Base of the subscription links (for example a CDN domain). Empty = the panel address.','full')+
   '<div class="full box"><b>'+t('Separate subscription domain')+'</b><div class="hint">'+t('A domain that points to this server. The panel gets its SSL by itself and serves only the subscription pages on it, so the panel address stays hidden.')+'</div><div class="cpy"><input class="ltr" id="sd_in" placeholder="sub.example.ir" value="'+esc(s.sub_domain||'')+'"><button class="btn" type="button" id="sd_go">'+t('Set up SSL and use it')+'</button>'+(s.sub_domain?'<button class="b2 bd" type="button" id="sd_rm">'+t('Remove')+'</button>':'')+'</div><div class="hint" id="sd_msg">'+(s.sub_domain?'✓ https://'+esc(s.sub_domain)+'/sub/…':'')+'</div></div>'+
-  '<div class="full box" id="pc_box"><b>'+t('Panel CDN domain (for the servers)')+'</b><div class="hint">'+t('When the panel\'s IP is filtered in Iran, the Iran servers cannot report to it. Put another domain behind Cloudflare (orange cloud, SSL mode «Full») pointing to this server: the servers then reach the panel through it. Only the servers\' path goes through it; the panel and the subscription do not.')+'</div><div id="pc_in">'+t('Loading…')+'</div></div>'+
-  '<div class="full box" id="si_box"><b>'+t('Serve the subscription from an Iran server')+'</b><div class="hint">'+t('For ISPs that block the panel domain: a tunnel server inside Iran serves the subscription pages with its own SSL and carries them to the panel through a hidden tunnel. Subscription links use it once it works.')+'</div><div id="si_in">'+t('Loading…')+'</div></div>'+
+  '<div class="full box" id="pc_box"><b>'+t('Panel CDN domain (for the servers)')+'</b><div class="hint">'+t('When the panel\'s IP is filtered in Iran, the Iran servers cannot report to it. Put another domain behind Cloudflare (orange cloud, SSL mode «Full») pointing to this server: the servers then reach the panel through it. Only the servers\' path goes through it; the panel and the subscription do not.')+'</div><div id="pc_in">'+skel()+'</div></div>'+
+  '<div class="full box" id="si_box"><b>'+t('Serve the subscription from an Iran server')+'</b><div class="hint">'+t('For ISPs that block the panel domain: a tunnel server inside Iran serves the subscription pages with its own SSL and carries them to the panel through a hidden tunnel. Subscription links use it once it works.')+'</div><div id="si_in">'+skel()+'</div></div>'+
   '<div class="full">'+'<div class="srow"><div class="tx"><b>'+t('Use this address on every node too')+'</b><small>'+t('Nodes that have their own address switch back to this one when you save.')+'</small></div><label class="sw"><input type="checkbox" id="st_all"><span></span></label></div></div>'+
   '<div class="full box"><b>'+t('Web panel')+'</b><div class="g2"><div><label class="f">'+t('Web bind')+'</label><input class="ltr" readonly value="'+esc(s.web_bind)+'"></div><div><label class="f">'+t('Web port')+'</label><input class="ltr" readonly value="'+esc(s.web_port)+'"></div></div><div class="hint">'+t('Bind and port are where the panel itself listens; changing them needs a panel restart. File:')+' <span class="ltr">/etc/kanki/kanki.env</span></div></div></div>';
  case 'vpn':return '<div class="sgrid"><div><label class="f">DNS</label><input data-k="dns" class="ltr" placeholder="1.1.1.1, 8.8.8.8"><div class="chipset" data-fill="dns">'+
@@ -455,7 +458,7 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   '<div><label class="f">MTU</label><input data-k="mtu" class="ltr" inputmode="numeric" placeholder="1380"><div class="chipset" data-fill="mtu">'+['1280','1380','1420'].map(function(m){return '<button type="button" data-v="'+m+'">'+m+'</button>'}).join('')+'</div><div class="hint">'+t('Lower it (1280) if some sites do not open on mobile data.')+'</div></div>'+
   '<div class="full" style="margin-top:6px">'+stSw('mtu_auto','Automatic MTU','Each config gets the largest MTU whose whole packet stays under the limit below, counting the core and the tunnels on its way. Off = the MTU above for every config.')+'</div>'+
   '<div><label class="f">'+t('Largest packet on mobile data')+'</label><input data-k="mtu_budget" class="ltr" inputmode="numeric" placeholder="1380"><div class="chipset" data-fill="mtu_budget">'+['1340','1380','1420'].map(function(m){return '<button type="button" data-v="'+m+'">'+m+'</button>'}).join('')+'</div><div class="hint">'+t('Bytes of the whole packet (IPv4 + UDP + core). Iran mobile networks pass about 1420-1440; 1380 leaves a safe margin.')+'</div></div>'+
-  '<div class="full box"><b>'+t('MTU of every config')+'</b><div class="hint">'+t('Worked out again with every subscription refresh and server sync, so a tunnel that changes type changes the MTU by itself.')+'</div><div id="mtu_rep">'+t('Loading…')+'</div></div>'+
+  '<div class="full box"><b>'+t('MTU of every config')+'</b><div class="hint">'+t('Worked out again with every subscription refresh and server sync, so a tunnel that changes type changes the MTU by itself.')+'</div><div id="mtu_rep">'+skel()+'</div></div>'+
   '<div class="full" style="margin-top:6px">'+stSw('awg_compat','AmneziaWG compatibility mode','Only Jc/Jmin/Jmax/S1/S2/H1-H4, for old AmneziaWG apps.')+stSw('conn_limit_on','Enforce the connection limit','A user cannot connect from more devices than their limit, on every protocol.')+stSw('wg_tunnel_on','Plain WireGuard through the Iran tunnels','Off: no plain WireGuard config goes through the tunnels; AmneziaWG through them stays. Iran can drop plain WireGuard handshakes.')+'</div></div>';
  case 'newu':return '<label class="f" style="margin-top:0" for="st_dtier">'+t('Default tier for new users')+'</label><select id="st_dtier" data-k="default_tier">'+
   ['v2ray','gaming','vip'].map(function(k){return '<option value="'+k+'">'+t(TIER_NAMES[k])+' · '+TIER_CORES[k].join(', ')+'</option>'}).join('')+'</select>'+
@@ -466,13 +469,9 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   '<div class="sgrid" style="margin-top:8px">'+stIn('update_repo','Update source (GitHub repo)','owner/kanki-panel','Releases of this repository are used for updates, for “Update all” and for new tunnel servers.','full')+'</div>'+
   (s.repo_env?'<div class="warnbox">'+t('KANKI_REPO in /etc/kanki/kanki.env is set; it wins over this field.')+'</div>':'')+
   '<div class="hint">'+t('Nodes and tunnel servers are updated together with')+' <a href="#nodes">'+t('Nodes')+' › '+t('Update all')+'</a>.</div>';
- case 'io':return '<div class="ioc"><div><b>'+ic('dl',18)+' '+t('Export')+'</b><p>'+t('A JSON file with every panel and sales setting. It holds payment keys too, keep it private. Users are not in it; use Backup for that.')+'</p><button class="btn" type="button" id="st_exp">'+t('Download settings')+'</button></div>'+
-  '<div><b>'+ic('refresh',18)+' '+t('Import')+'</b><p>'+t('Pick a settings file exported from a Kanki panel. Only known settings are taken; users, nodes and keys are not touched.')+'</p><label class="b2" for="st_imf" style="cursor:pointer;display:inline-flex;gap:6px;align-items:center">'+ic('dl',15)+' '+t('Choose file')+'</label><input type="file" id="st_imf" accept=".json,application/json" class="hide"></div></div>'+
-  // the full backup (users, keys, certificates) and restoring it live in Backup: one place for that
-  '<div class="klink"><span>'+ic('backup',18)+'</span><div><b>'+t('Full backup and restore')+'</b><small>'+t('Users, keys, certificates and settings together, with history and automatic backups.')+'</small></div><a class="b2 sm" href="#backup">'+t('Open Backup')+'</a></div>';
  }return ''}
 function pSettings(){var cur=S.stsec||'look';
- $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Settings')+'</h2><p>'+t('Everything about how the panel looks and works, in one place')+'</p></div></div><div id="st">'+t('Loading…')+'</div>';
+ $('#pg').innerHTML='<div class="ph"><div><h2>'+t('Settings')+'</h2><p>'+t('Everything about how the panel looks and works, in one place')+'</p></div></div><div id="st">'+skel()+'</div>';
  api('GET','/api/settings').then(function(s){if(!$('#st'))return;S.st=s;if(!STSEC.some(function(x){return x[0]==cur}))cur='look';
   $('#st').innerHTML='<div class="stw"><div class="stn" role="tablist">'+STSEC.map(function(x){return '<button type="button" data-sec="'+x[0]+'" class="'+(x[0]==cur?'on':'')+'"><span class="si">'+ic(x[2],17)+'</span>'+t(x[1])+'<em></em></button>'}).join('')+'</div><div>'+
   STSEC.map(function(x){return '<section class="sts card'+(x[0]==cur?' on':'')+'" data-sec="'+x[0]+'"><div class="sth"><span class="phi">'+ic(x[2],20)+'</span><div><b>'+t(x[1])+'</b><small>'+t(x[3])+'</small></div></div>'+stBody(x[0],s)+
@@ -509,9 +508,8 @@ function stWire(){
  $$('.sts [data-save]').forEach(function(b){b.onclick=function(){stSave(b.closest('.sts'),b)}});
  var ck=$('#st_chk');if(ck)ck.onclick=function(){stUpdate(true)};
  var go=$('#st_go');if(go)go.onclick=function(){go.disabled=true;api('POST','/api/update/apply').then(function(r){toast('v'+r.version+' ✓');setTimeout(function(){location.reload()},5000)}).catch(function(e){go.disabled=false;fail(e)})};
- var ex=$('#st_exp');if(ex)ex.onclick=stExport;
  var sg=$('#sd_go');if(sg)sg.onclick=function(){stSub($('#sd_in').value.trim())};var sr=$('#sd_rm');if(sr)sr.onclick=function(){confirmDo(function(){stSub('')})};
- var im=$('#st_imf');if(im)im.onchange=function(){stImport(im)}}
+}
 function stSave(sec,btn){var id=sec.dataset.sec,body={};$$('[data-k]',sec).forEach(function(el){body[el.dataset.k]=stVal(el)});
  if(id=='newu'&&!TIER_CORES[body.default_tier])return toast(t('Choose a tier'),1);
  if(id=='upd'&&body.update_repo&&!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(body.update_repo))return toast(t('Write it as owner/repo'),1);
@@ -579,16 +577,6 @@ function stUpdate(force){autoUpdWire();var m=$('#st_um');if(!m||(!force&&m._done
  api('GET','/api/update/check').then(function(r){$('#st_lv').textContent=r.latest?'v'+r.latest:'—';
   m.className='vmsg '+(r.error?'er':(r.available?'up':'ok'));m.textContent=r.error?t(r.error):(r.available?t('A new version is available.'):t('You are on the latest version.'));
   $('#st_go').classList.toggle('hide',!r.available)}).catch(function(e){m.className='vmsg er';m.textContent=t(e.message||'')})}
-function stExport(){api('GET','/api/settings').then(function(s){var o={};Object.keys(s).forEach(function(k){if(ST_SKIP.indexOf(k)<0)o[k]=s[k]});
- var d=new Date(),name='kanki-settings-'+d.getFullYear()+p2(d.getMonth()+1)+p2(d.getDate())+'.json';
- dl({blob:new Blob([JSON.stringify({kanki_settings:1,version:S.me.version,settings:o},null,2)],{type:'application/json'}),name:name});toast(t('Done'))}).catch(fail)}
-function stImport(inp){var f=inp.files&&inp.files[0];if(!f)return;var rd=new FileReader();
- rd.onload=function(){var j;try{j=JSON.parse(rd.result)}catch(e){inp.value='';return toast(t('This is not a settings file'),1)}
-  var o=j&&j.settings&&typeof j.settings=='object'?j.settings:null;if(!o){inp.value='';return toast(t('This is not a settings file'),1)}
-  ST_SKIP.forEach(function(k){delete o[k]});var n=Object.keys(o).length;
-  if(!confirm(t('Replace the current settings with the file?')+' ('+N(n)+')')){inp.value='';return}
-  api('PUT','/api/settings',o).then(function(){toast(t('Saved'));S.stsec='io';boot()}).catch(fail)};
- rd.readAsText(f)}
 
 // ---------------------------------------------------------------- update
 // automatic update every night at 03:30 Tehran time (the same as “Update all”)

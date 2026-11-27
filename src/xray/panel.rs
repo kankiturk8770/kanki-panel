@@ -1898,6 +1898,15 @@ fn taken_ports(app: &App, sid: &str) -> Vec<u16> {
     v
 }
 
+/// `base`, or `base-2`, `base-3` … so no two inbounds (other than `id` itself) share a name
+fn unique_remark(list: &[Inbound], id: &str, base: &str) -> String {
+    let taken = |n: &str| list.iter().any(|x| x.id != id && x.remark.eq_ignore_ascii_case(n));
+    if !taken(base) {
+        return base.to_string();
+    }
+    (2..1000).map(|i| format!("{}-{}", base, i)).find(|n| !taken(n)).unwrap_or_else(|| format!("{}-{}", base, rand_token(4)))
+}
+
 async fn put_inbound(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
     let mut s = settings(&app);
@@ -1952,6 +1961,13 @@ async fn put_inbound(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
             ib.ss_key = b64_std(&k);
         }
     }
+    // 3.71: Vision exists only for VLESS over TCP with TLS / REALITY: any other inbound keeps no flow (and no badge)
+    if !(ib.protocol == "vless" && ib.network == "tcp" && ib.security != "none") {
+        ib.flow.clear();
+    }
+    // 3.71: an inbound's name is unique: empty gets PROTOCOL-TRANSPORT, a name already used gets -2, -3 …
+    let base = if ib.remark.trim().is_empty() { format!("{}-{}", ib.protocol.to_uppercase(), ib.network.to_uppercase()) } else { ib.remark.trim().to_string() };
+    ib.remark = unique_remark(&s.inbounds, &ib.id, &base);
     if ib.security == "reality" {
         if ib.protocol != "vless" && ib.protocol != "trojan" {
             return err(StatusCode::BAD_REQUEST, "REALITY works with VLESS (and Trojan)");
@@ -2089,7 +2105,7 @@ async fn clone_inbound(State(app): St, h: HeaderMap, Path(id): Path<String>) -> 
     ib.id = rand_token(6).to_lowercase();
     ib.port = port;
     ib.enabled = false;
-    ib.remark = format!("{} copy", ib.remark).trim().to_string();
+    ib.remark = unique_remark(&s.inbounds, &ib.id, format!("{} copy", ib.remark).trim());
     s.inbounds.push(ib.clone());
     save(&app, &s);
     Json(json!({ "ok": true, "id": ib.id })).into_response()

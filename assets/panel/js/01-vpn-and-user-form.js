@@ -62,13 +62,14 @@ function protoAll(p,add){var nm=p=='xray'?'Xray':'DNS';
   srvReload(p);if(S.page=='users')loadUsers()}).catch(fail)}
 
 // ---------------------------------------------------------------- the VPN services page: Kanki VPN | Xray
-function p_vpn(){$('#pg').innerHTML='<div class="ku">'+kuHead('cores',t('VPN & cores'),t('Every core your users get, each on its own card'))+'<div id="vh_s"></div><div id="vh_g">'+t('Loading…')+'</div>'+
+function p_vpn(){$('#pg').innerHTML='<div class="ku">'+kuHead('cores',t('VPN & cores'),t('Every core your users get, each on its own card'))+'<div id="vh_s"></div><div id="vh_g">'+skel()+'</div>'+
   '<section class="card kv-svc"><div class="kc-h"><div><h3>'+t('Tools & background services')+'</h3><small class="muted">'+t('Start, stop or restart the VPN services')+'</small></div></div>'+
-  '<a class="kv-tool" href="#antidpi" style="--pc:'+PCOL.awg+'"><span class="cci">'+ic('security',18)+'</span><span><b>'+t('Anti-DPI')+'</b><small>'+t('Tunnels between your servers that filters cannot see')+'</small></span><span class="kv-go" aria-hidden="true">'+ic('chev',16)+'</span></a>'+
+  '<a class="kv-tool" href="#xray/inbounds" style="--pc:'+PCOL.xray+'"><span class="cci">'+ic('security',18)+'</span><span><b>'+t('Anti-DPI inbounds')+'</b><small>'+t('REALITY, CDN and the other presets of the Xray inbound editor')+'</small></span><span class="kv-go" aria-hidden="true">'+ic('chev',16)+'</span></a>'+
+  '<a class="kv-tool" href="#tunnels" style="--pc:'+PCOL.awg+'"><span class="cci">'+ic('tunnel',18)+'</span><span><b>'+t('Anti-DPI transports')+'</b><small>'+t('Tunnels between your servers that filters cannot see')+'</small></span><span class="kv-go" aria-hidden="true">'+ic('chev',16)+'</span></a>'+
   '<div id="svcs" class="svcs"><span class="muted">'+t('Loading…')+'</span></div></section></div>';
  $('#svcs').onclick=function(e){var b=e.target.closest('[data-svc]');if(b&&!b.disabled)svc(b.dataset.svc,b.dataset.act)};sysSvcLoad();
  var go=function(){Promise.all([api('GET','/api/nodes').catch(function(){return []}),api('GET','/api/overview').catch(function(){return {}}),api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null})]).then(function(r){if(S.page!='vpn')return;S.nodes=r[0]||[];if(r[2])XR.d=r[2];if(r[3])DN.d=r[3];vhGrid(r[0]||[],r[1]||{},r[2],r[3])})};
- go();clearInterval(S.timer);S.timer=setInterval(function(){if(document.visibilityState=='visible'&&!$('#modal').classList.contains('on'))go()},8000)}
+ go();clearInterval(S.timer);S.timer=setInterval(function(){if(document.visibilityState=='visible'&&!$('#modal').classList.contains('on'))go()},refreshMs())}
 // one card per core (3.34): status, servers running it and users; the whole card opens the core's own page
 function vhGrid(nodes,o,xr,dn){var el=$('#vh_g');if(!el)return;var pr=o.protocols||{};
  var up=function(n){return n.id=='local'||n.online},num=function(v){return v!=null&&v!==''&&+v>0};
@@ -89,12 +90,13 @@ function vhGrid(nodes,o,xr,dn){var el=$('#vh_g');if(!el)return;var pr=o.protocol
  var grp=function(title,keys,extra){var c=keys.map(function(k){return by[k]||''}).join('')+(extra||'');return c?'<section class="cgrp"><h3 class="cgrp-h">'+t(title)+'</h3><div class="cgrid">'+c+'</div></section>':''};
  el.innerHTML=grp('Game cores',['kmix'])+grp('VPN cores',['wg','awg','hy2'])+grp('Services',[],sv);
  var ups=nodes.filter(up).length,s=$('#vh_s');
- if(s)s.innerHTML=kuStats([[t('Servers online'),N(ups)+' / '+N(nodes.length),ups<nodes.length?'warn':'ok'],[t('Online now'),N(o.online||0),'ok'],[t('Total traffic'),'<span class="ltr">'+N(o.traffic_gb||0)+' GB</span>'],[t('Users'),N(o.users||0)]])}
+ var ex=nodes.filter(function(n){return n.enabled!==false&&n.role!='panel'&&n.role!='iran'}),exUp=ex.filter(up).length;
+ if(s)s.innerHTML=kuStats([[t('VPN exits online'),N(exUp)+' / '+N(ex.length),exUp<ex.length?'warn':'ok'],[t('Online now'),N(o.online||0),'ok'],[t('Total traffic'),'<span class="ltr">'+N(o.traffic_gb||0)+' GB</span>'],[t('Users'),N(o.users||0)]])}
 
 // ---------------------------------------------------------------- user form: tier and one switch per core (3.64)
 // The tier says what the user bought (3.70: one account, one code, three plans): only the tier's cores can be
 // switched on; a core outside the tier is locked (the server refuses it too). Ticking a tier ticks its cores.
-var TIER_NAMES={v2ray:'V2Ray',gaming:'Gaming',vip:'VIP'};
+var TIER_NAMES={v2ray:'Anti-filter V2Ray',gaming:'Gaming WireGuard',vip:'VIP All-in-One'};
 var TIER_CORES={v2ray:['xray','hy2'],gaming:['kmix','awg','wg','dns'],vip:['xray','hy2','kmix','awg','wg','dns']};
 function tierKey(k){return k=='combo'?'vip':(TIER_CORES[k]?k:'')}
 var UF_CORES=[['wg','WireGuard','shield2'],['awg','AmneziaWG','security'],['kmix','KANKI MIX','game'],['hy2','Hysteria2','globe'],['xray','Xray','xray'],['dns','Kanki DNS','dns']];

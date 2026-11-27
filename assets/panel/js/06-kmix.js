@@ -8,7 +8,7 @@ var CTABS=[['status','Status'],['servers','Servers'],['tunnel','Tunnel'],['setti
 function ctabOf(sub,tabs){return (tabs||CTABS).some(function(x){return x[0]==sub})?sub:'status'}
 // a core page: the head, its tabs and the body (#<id>); old addresses (#kmix) open the status tab
 function corePage(page,id,icon,title,desc,tabs){tabs=tabs||CTABS;var k=ctabOf(S.sub,tabs);if(S.sub&&k!=S.sub){location.replace('#'+page+'/'+k);return ''}
- $('#pg').innerHTML='<div class="ku">'+kuHead(icon,title,desc)+'<nav class="ptabs ku-tabs" id="'+id+'_tabs">'+kuTabs(page,tabs,k)+'</nav><div id="'+id+'">'+t('Loading…')+'</div></div>';return k}
+ $('#pg').innerHTML='<div class="ku">'+kuHead(icon,title,desc)+'<nav class="ptabs ku-tabs" id="'+id+'_tabs">'+kuTabs(page,tabs,k)+'</nav><div id="'+id+'">'+skel()+'</div></div>';return k}
 function coreTabsMark(page,id,k,tabs){var el=$('#'+id+'_tabs');if(el)el.innerHTML=kuTabs(page,tabs||CTABS,k)}
 // an Iran server whose VPN part serves nobody (a relay): not a server of any core
 // (3.58.1) a server that serves no user (an Iran relay, or the panel without VPN) is left off every core page
@@ -19,7 +19,7 @@ function busyTyping(){return document.activeElement&&/INPUT|TEXTAREA|SELECT/.tes
 // KANKI MIX has one tab of its own: the game recorder
 var KMTABS=CTABS.concat([['record','Game recorder']]);
 function p_kmix(){KAcc.open.km='';KAcc.open.kmt='';var k=corePage('kmix','km','game','KANKI MIX',t('Our own protocol on every VPN server: game packets go straight (no queue, repaired only as much as the line loses), websites over KCP without FEC.'),KMTABS);if(!k)return;KM.tab=k;
- kmLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!busyTyping())kmLoad(true)},8000)}
+ kmLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!busyTyping())kmLoad(true)},refreshMs())}
 function tab_kmix(sub){var k=ctabOf(sub,KMTABS);if(k!=sub){location.replace('#kmix/'+k);return}KM.tab=k;coreTabsMark('kmix','km',k,KMTABS);if(KM.d)kmDraw(KM.d);else kmLoad()}
 function kmLoad(quiet){return srvLoad(true).then(function(){return api('GET','/api/kmix')}).then(function(d){KM.d=noRelays(d);if(S.page!='kmix')return d;
   if(quiet){if(KM.tab=='status'&&$('#km_st')){$('#km_st').innerHTML=kmStats(d);return d}
@@ -36,8 +36,10 @@ function kmHealthSum(d){var s={sessions:0,gaming:0,hinted:0,lw:0,ls:0,any:false}
 function kmLossTxt(pm){return pm==null?'—':'<span class="ltr">'+N((pm/10).toFixed(1))+'%</span>'}
 function kmLossCol(pm){return pm==null?'':pm<10?'g':pm<40?'y':'r'}
 function kmStats(d){var run=d.servers.filter(kmRun).length,on=d.servers.filter(function(x){return x.on}).length,h=kmHealthSum(d);
- var rows=[[t('Running servers'),N(run)+' / '+N(on),run<on?'y':''],[t('Users with KANKI MIX'),N(d.users)+' / '+N(d.users_total)],[t('Online now'),N(d.online),d.online?'g':''],[t('Total traffic'),'<span class="ltr">'+N(d.traffic_gb)+' GB</span>']];
- if(h.any)rows=rows.concat([[t('Live sessions'),N(h.sessions)+(h.gaming?' · 🎮 '+N(h.gaming):''),h.sessions?'g':''],[t('Average loss (games)'),kmLossTxt(h.loss),kmLossCol(h.loss)]]);
+ var rows=[[t('Running servers'),N(run)+' / '+N(on),run<on?'y':''],[t('Users with KANKI MIX'),N(d.users)+' / '+N(d.users_total)],[t('Online now'),N(h.any?h.sessions:d.online)+(h.any&&h.gaming?' · 🎮 '+N(h.gaming):''),(h.any?h.sessions:d.online)?'g':''],[t('Total traffic'),'<span class="ltr">'+N(d.traffic_gb)+' GB</span>']];
+ // (3.71) one «online now»: the live sessions the servers report when they report them (the same number as before
+ // under two names that could disagree), else the users seen in the last minute
+ if(h.any)rows=rows.concat([[t('Average loss (games)'),kmLossTxt(h.loss),kmLossCol(h.loss)]]);
  return kuStats(rows)}
 function kmState(x){if(!x.on)return ['','Off on this server'];if(kmRun(x))return ['g','Running'];if(x.error)return ['r','Not running'];return ['y','Waiting for the server…']}
 function kmDraw(d){var el=$('#km');if(!el)return;var s=d.settings;

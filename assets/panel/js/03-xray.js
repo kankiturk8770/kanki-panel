@@ -9,8 +9,8 @@ var REALITY_TARGETS=['www.microsoft.com:443','www.apple.com:443','dl.google.com:
 function p_xray(){KAcc.open.xr='';KAcc.open.xrt='';XR.tab=xrTabOf(S.sub);
  if(XR.tab!=(S.sub||'')){location.replace('#xray/'+XR.tab);return}
  $('#pg').innerHTML='<div class="ku">'+kuHead('xray','Xray',t('VLESS, VMess, Trojan and Shadowsocks inbounds. Every user with Xray ticked gets the link of every inbound.'))+
-  '<nav class="ptabs ku-tabs" id="xr_tabs"></nav><div id="xr">'+t('Loading…')+'</div></div>';
- xrLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))&&['status','servers','inbounds'].indexOf(XR.tab)>=0)xrLoad(true)},5000);srvLoad(true)}
+  '<nav class="ptabs ku-tabs" id="xr_tabs"></nav><div id="xr">'+skel()+'</div></div>';
+ xrLoad();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible'&&!(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))&&['status','servers','inbounds'].indexOf(XR.tab)>=0)xrLoad(true)},refreshMs());srvLoad(true)}
 // the tabs of 3.20 and before: overview was the servers, online clients are on the status tab now
 function xrTabOf(sub){sub=sub||'status';if(sub=='overview')return 'servers';if(sub=='clients')return 'status';return XTABS.some(function(x){return x[0]==sub})?sub:'status'}
 function tab_xray(sub){var k=xrTabOf(sub);if(k!=sub){location.replace('#xray/'+k);return}XR.tab=k;if(XR.d)xrDraw(XR.d);else xrLoad()}
@@ -211,7 +211,7 @@ function xrClone(id){api('POST','/api/xray/inbounds/'+encodeURIComponent(id)+'/c
 function xrReset(id){if(!confirm(t('Reset the traffic of this inbound to zero?')))return;api('POST','/api/xray/inbounds/'+encodeURIComponent(id)+'/reset').then(function(){toast(t('Done'));xrLoad()}).catch(fail)}
 function xrIbJson(id){api('GET','/api/xray/inbounds/'+encodeURIComponent(id)+'/json').then(function(v){xrJsonModal('JSON',v)}).catch(fail)}
 function xrClients(id){var ib=XR.d.inbounds.filter(function(x){return x.id==id})[0]||{};
- modal(mhead(t('Users and links'),ib.remark)+'<input id="xc_q" placeholder="'+t('Search')+'…" style="margin-bottom:8px"><div id="xc_l">'+t('Loading…')+'</div><div id="xc_qr"></div>','wide');
+ modal(mhead(t('Users and links'),ib.remark)+'<input id="xc_q" placeholder="'+t('Search')+'…" style="margin-bottom:8px"><div id="xc_l">'+skel()+'</div><div id="xc_qr"></div>','wide');
  api('GET','/api/xray/inbounds/'+encodeURIComponent(id)+'/clients').then(function(r){var list=r.clients||[];
   var draw=function(){var q=$('#xc_q').value.toLowerCase();var l=list.filter(function(c){return !q||c.name.toLowerCase().indexOf(q)>=0});
    $('#xc_l').innerHTML=l.length?l.map(function(c,i){return '<div class="vrow"><span class="dot '+(c.online?'g':c.active?'':'r')+'"></span><div class="nm"><b><bdi>'+esc(c.name)+'</bdi></b><small>'+N(bytes(c.used))+(c.limit_gb>0?' / '+N(c.limit_gb)+' GB':'')+(c.active?'':' · '+t('Inactive'))+'</small></div>'+
@@ -386,13 +386,13 @@ function xrFreePort(sid,random){var used=(XR.d&&XR.d.inbounds||[]).filter(functi
 // that Xray-core / v2rayNG import (built by the panel from the same link, CDN address included)
 function xrUsersTab(d,el){el.innerHTML='<div class="card"><div class="nh"><div><h3>'+t('Xray users')+'</h3><small class="muted">'+t('Users with Xray ticked; open one for its links and full client configs')+'</small></div>'+
   '<div class="row"><button class="b2 sm" onclick="goUsers(\'xray\')">'+ic('users',14)+' '+t('Open in Users')+'</button></div></div>'+
-  '<div class="srch u-mb2"><label class="vh" for="xu_q">'+t('Search')+'</label><input id="xu_q" type="search" autocomplete="off" placeholder="'+t('Search by name or note…')+'"></div><div id="xu_l">'+t('Loading…')+'</div></div>';
+  '<div class="srch u-mb2"><label class="vh" for="xu_q">'+t('Search')+'</label><input id="xu_q" type="search" autocomplete="off" placeholder="'+t('Search by name or note…')+'"></div><div id="xu_l">'+skel()+'</div></div>';
  var draw=function(list){var box=$('#xu_l');if(!box)return;var q=($('#xu_q').value||'').trim().toLowerCase();
   var l=list.filter(function(u){return hasP(u,'xray')&&(!q||(u.username+' '+(u.notes||'')).toLowerCase().indexOf(q)>=0)});
   if(!l.length){box.innerHTML='<p class="muted ku-empty">'+t(list.some(function(u){return hasP(u,'xray')})?'Nothing matches':'No users with Xray yet: tick Xray in a user\'s form')+'</p>';return}
   box.innerHTML=l.map(function(u){var st=ustate(u),p=usage(u);
    return '<div class="vrow xu"><span class="dot '+(u.online_connections>0?'g':st=='active'?'':st=='finished'?'y':'r')+'"></span><div class="nm"><b class="ltr"><bdi>'+esc(u.username)+'</bdi></b>'+
-    '<small>'+exactB(u.used_bytes)+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+' · '+leftTxt(u.expires_ts)+' · '+esc(t(TIER_NAMES[u.tier]||'Combo'))+'</small>'+
+    '<small>'+exactB(u.used_bytes)+' / '+(u.traffic_limit_gb>0?N(gbtxt(u.traffic_limit_gb)):'∞')+' · '+leftTxt(u.expires_ts)+' · '+esc(t(TIER_NAMES[tierKey(u.tier)]||'VIP'))+'</small>'+
     '<div class="trk"><div class="fil '+(p>85?'hot':'')+'" style="width:'+(p<0?100:Math.max(2,p))+'%"></div></div></div>'+
     '<button class="b2 sm" data-xc="'+u.id+'">'+ic('xray',14)+' '+t('Configs')+'</button><button class="ib" data-xe="'+u.id+'" title="'+t('Edit')+'" aria-label="'+t('Edit')+'">'+ic('edit',15)+'</button></div>'}).join('')};
  var got=function(list){S.users=list;draw(list);$('#xu_q').oninput=function(){draw(S.users||[])};

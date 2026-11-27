@@ -9,22 +9,17 @@
 // (3.41) the menu in six groups: what you look at, who uses it, how they connect, the machines,
 // selling, and running the panel. The cores are one section: its tabs are the core bar (the eight
 // cores side by side, DNS among them); the VPN overview opens it.
+// (3.71) five sections, the same on a desktop and in the phone's bottom bar; each one's pages are its tabs:
+// Home (dashboard, logs) · Users · Infrastructure (servers and their roles, the cores, tunnels, ports) ·
+// Reports (traffic, the bot) · Settings (settings, security, backup and move)
 var SECS=[
- ['dash','Dashboard','dash',[['dash','','Dashboard']],'Overview'],
+ ['home','Home','dash',[['dash','','Dashboard'],['logs','','Logs']],'Overview'],
  ['users','Users','users',[['users','','Users']],'Users'],
- ['vpnsec','VPN & cores','cores',[['vpn','','Overview'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['kmix','','KANKI MIX'],['xray','status','Xray'],['dns','','DNS']],'Connectivity'],
- ['netsec','Tunnels','tunnel',[['tunnels','','Tunnels']],'Connectivity'],
- ['ports','Ports','ports',[['ports','','Ports']],'Connectivity'],
- ['traffic','Traffic & stats','traffic',[['traffic','','Traffic & stats']],'Connectivity'],
- ['nodes','Servers','nodes',[['nodes','','Servers']],'Infrastructure'],
- ['bot','Sales bot','bot',[['bot','','Sales bot']],'Sales'],
- ['antidpi','Anti-DPI','security',[['antidpi','','Anti-DPI']],'Operations & System'],
- ['logs','Logs','logs',[['logs','','Logs']],'Operations & System'],
- ['backup','Backup','backup',[['backup','','Backup']],'Operations & System'],
- ['security','Security','shield2',[['security','','Security']],'Operations & System'],
- ['settings','Settings','settings',[['settings','','Settings']],'Operations & System']];
-// the eight cores, the same weight each (the core bar)
-var CORES=SECS[2][3].slice(1).map(function(x){return x[0]});
+ ['infra','Infrastructure','nodes',[['nodes','','Servers'],['vpn','','Cores'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['kmix','','KANKI MIX'],['xray','status','Xray'],['dns','','DNS'],['tunnels','','Tunnels'],['ports','','Ports & firewall']],'Infrastructure'],
+ ['reports','Reports','traffic',[['traffic','','Traffic'],['bot','','Bot']],'Reports'],
+ ['settings','Settings','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup & move']],'System']];
+// the cores: their tabs carry a live dot
+var CORES=['wg','awg','hy2','kmix','xray','dns'];
 function secOf(p){for(var i=0;i<SECS.length;i++)if(SECS[i][3].some(function(x){return x[0]==p}))return SECS[i];return SECS[0]}
 window.V37={secOf:secOf,SECS:SECS,CORES:CORES,watchPg:watchPg,drawSecTabs:drawSecTabs};
 
@@ -34,9 +29,9 @@ window.V37={secOf:secOf,SECS:SECS,CORES:CORES,watchPg:watchPg,drawSecTabs:drawSe
 function secTabsHtml(p){var s=secOf(p);if(s[3].length<2)return '';
  var ov=s[3][0],cur=function(x){return x[0]==p};
  return '<div class="kcb" id="sectabs" data-p="'+p+'"><a href="#'+ov[0]+'" class="kcb-ov'+(cur(ov)?' on':'')+'"'+(cur(ov)?' aria-current="page"':'')+'>'+ic(s[2],16)+'<span>'+t(ov[2])+'</span></a>'+
-  '<div class="kcb-wrap"><div class="kcb-rail" role="tablist" aria-label="'+esc(t('Cores'))+'">'+
-  s[3].slice(1).map(function(x){var on=cur(x);return '<a role="tab" href="#'+x[0]+(x[1]?'/'+x[1]:'')+'" data-core="'+x[0]+'" class="kcb-t'+(on?' on':'')+'" aria-selected="'+on+'" tabindex="'+(on||(p==ov[0]&&x[0]==CORES[0])?0:-1)+'"'+(on?' aria-current="page"':'')+'>'+
-   '<i class="tdot" aria-hidden="true"></i><span>'+t(x[2])+'</span><em class="kcb-st"></em></a>'}).join('')+'</div></div></div>'}
+  '<div class="kcb-wrap"><div class="kcb-rail" role="tablist" aria-label="'+esc(t(s[1]))+'">'+
+  s[3].slice(1).map(function(x,i){var on=cur(x),core=CORES.indexOf(x[0])>=0;return '<a role="tab" href="#'+x[0]+(x[1]?'/'+x[1]:'')+'"'+(core?' data-core="'+x[0]+'"':'')+' class="kcb-t'+(on?' on':'')+'" aria-selected="'+on+'" tabindex="'+(on||(p==ov[0]&&i==0)?0:-1)+'"'+(on?' aria-current="page"':'')+'>'+
+   (core?'<i class="tdot" aria-hidden="true"></i>':'')+'<span>'+t(x[2])+'</span>'+(core?'<em class="kcb-st"></em>':'')+'</a>'}).join('')+'</div></div></div>'}
 function railEdges(r){var w=r.parentNode,max=r.scrollWidth-r.clientWidth,x=Math.abs(r.scrollLeft);
  w.classList.toggle('more-s',x>2);w.classList.toggle('more-e',x<max-2)}
 function railShow(r){var a=r.querySelector('.on');if(!a)return;var rr=r.getBoundingClientRect(),ar=a.getBoundingClientRect();
@@ -56,7 +51,7 @@ function drawSecTabs(p){var pg=$('#pg');if(!pg)return;var old=$('#sectabs'),h=se
  wireRail(el);coreDots(el)}
 // a live dot on each core: green running everywhere, yellow partly, red down, grey not set up
 var CD={at:0,v:null},WORD={g:'Running',y:'Partly down',r:'Down',n:'Not set up'};
-function coreDots(el){var draw=function(v){$$('.kcb-t',el).forEach(function(a){var st=v[a.dataset.core]||'n',i=a.querySelector('.tdot'),w=a.querySelector('.kcb-st');
+function coreDots(el){if(!el.querySelector('[data-core]'))return;var draw=function(v){$$('.kcb-t[data-core]',el).forEach(function(a){var st=v[a.dataset.core]||'n',i=a.querySelector('.tdot'),w=a.querySelector('.kcb-st');
   i.className='tdot '+st;w.textContent=t(WORD[st]);a.title=t(WORD[st])})};
  if(CD.v&&Date.now()-CD.at<20000)return draw(CD.v);
  Promise.all([api('GET','/api/nodes').catch(function(){return []}),api('GET','/api/xray').catch(function(){return null}),api('GET','/api/dns').catch(function(){return null})]).then(function(r){
@@ -97,7 +92,7 @@ window.grpOf=function(p){return V.secOf(p)[4]||''};
 
 // phones (3.48, as the owner liked it): every section in the bottom bar, one row that scrolls sideways inside itself;
 // no «More» sheet. The open section is kept in sight.
-var BARN={dash:'Home',vpnsec:'Cores',netsec:'Tunnels',traffic:'Traffic',nodes:'Servers',bot:'Bot',logs:'Logs'};
+var BARN={home:'Home',users:'Users',infra:'Infrastructure',reports:'Reports',settings:'Settings'};
 window.navBar=function(){
  return '<nav class="kmb kmb2" id="mbar" aria-label="'+esc(t('Main menu'))+'">'+V.SECS.map(function(s){var f=s[3][0];
   return '<a href="#'+f[0]+'" data-p="'+f[0]+'" data-sec="'+s[0]+'">'+ic(s[2],20)+'<span>'+t(BARN[s[0]]||s[1])+'</span></a>'}).join('')+'</nav>'+

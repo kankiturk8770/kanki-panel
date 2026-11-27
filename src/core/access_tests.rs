@@ -968,3 +968,44 @@ async fn the_panel_upgrades_an_account_in_place() {
     assert_eq!(ok, 1);
     assert_eq!(app.db.user(v3).unwrap().tier(), Tier::Vip);
 }
+
+/// 3.71: inbounds get unique names (empty = PROTOCOL-TRANSPORT, a used one -2, -3 …) and only VLESS over TCP with
+/// TLS / REALITY keeps a Vision flow (a WS inbound has no flow, so no «Vision» badge)
+#[tokio::test]
+async fn inbound_names_are_unique_and_vision_is_only_where_it_works() {
+    let app = crate::test_app();
+    let xs = crate::xray::panel::XraySettings {
+        on: true,
+        servers: vec![crate::xray::panel::XServer { server: "local".into(), address: "srv.example.net".into(), ..Default::default() }],
+        secret: "s".into(),
+        ..Default::default()
+    };
+    app.db.set("xray_cfg", &serde_json::to_string(&xs).unwrap());
+    assert_eq!(call(&app, Method::POST, "/api/xray/inbounds", None, Some(json!({}))).await.0, StatusCode::UNAUTHORIZED);
+    let admin = token(&app, "nodes");
+    let mk = |b: Value| {
+        let (app, admin) = (app.clone(), admin.clone());
+        async move { call(&app, Method::POST, "/api/xray/inbounds", Some(&admin), Some(b)).await }
+    };
+    let (st, v) = mk(json!({"server": "local", "protocol": "vless", "network": "ws", "security": "none", "port": 21001, "flow": "xtls-rprx-vision", "remark": "KANKI-XRAY"})).await;
+    assert_eq!(st, StatusCode::OK, "{}", v);
+    let (st, v) = mk(json!({"server": "local", "protocol": "shadowsocks", "network": "tcp", "port": 21002, "remark": "kanki-xray"})).await;
+    assert_eq!(st, StatusCode::OK, "{}", v);
+    let (st, v) = mk(json!({"server": "local", "protocol": "trojan", "network": "grpc", "security": "none", "port": 21003})).await;
+    assert_eq!(st, StatusCode::OK, "{}", v);
+    let (st, v) = mk(json!({"server": "local", "protocol": "trojan", "network": "grpc", "security": "none", "port": 21004, "remark": ""})).await;
+    assert_eq!(st, StatusCode::OK, "{}", v);
+    let s = crate::xray::panel::settings(&app);
+    let by_port = |p: u16| s.inbounds.iter().find(|i| i.port == p).unwrap().clone();
+    assert_eq!(by_port(21001).remark, "KANKI-XRAY");
+    assert!(by_port(21001).flow.is_empty(), "a WS inbound keeps no Vision flow");
+    assert_eq!(by_port(21002).remark, "kanki-xray-2");
+    assert_eq!(by_port(21003).remark, "TROJAN-GRPC");
+    assert_eq!(by_port(21004).remark, "TROJAN-GRPC-2");
+    // saving an inbound again keeps its own name
+    let mut again = serde_json::to_value(by_port(21003)).unwrap();
+    again["port"] = json!(21003);
+    let (st, _) = mk(again).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(crate::xray::panel::settings(&app).inbounds.iter().find(|i| i.port == 21003).unwrap().remark, "TROJAN-GRPC");
+}

@@ -78,11 +78,12 @@ function pTunnels(){KAcc.open.tn='';KAcc.draw.tn=function(){var l=$('#tn_list');
   '<button class="btn" onclick="tunEdit()">'+ic('plus',15)+' '+t('Tunnel')+'</button><button class="b2" onclick="tunMore()" aria-label="'+esc(t('More'))+'">⋯ '+t('More')+'</button>')+
  '<div class="card tmapc"><nav class="tmtabs" id="tn_mt" role="tablist"></nav><div id="tn_map"><span class="muted">'+t('Loading…')+'</span></div><div class="tkpi" id="tn_kpi"></div></div>'+
  '<div class="ku-tools tnf" id="tn_f"></div><div id="tn_list"></div></div>';
- tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
+ tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},refreshMs())}
 function tunRefresh(quiet){return tunLoad().then(tunDraw).catch(function(e){if(!quiet)fail(e)})}
 // the map shows every Iran server, or one of them (its tunnels side by side); remembered on this browser
 var TNV={v:(function(){try{return localStorage.getItem('kk_tmview')||'all'}catch(e){return 'all'}})()};
-function tunView(v){TNV.v=v;try{localStorage.setItem('kk_tmview',v)}catch(e){}var m=$('#tn_map');if(m)m.dataset.sig='';if(TN.d)tunDraw(TN.d)}
+// (3.71) the map's Iran tab and the list's server filter are one choice: picking one sets the other
+function tunView(v){TNV.v=v;TNF.f=v=='all'?'':v;KAcc.open.tn='';try{localStorage.setItem('kk_tmview',v);localStorage.setItem('kk_tnf',TNF.f)}catch(e){}var m=$('#tn_map');if(m)m.dataset.sig='';if(TN.d)tunDraw(TN.d)}
 function tunDraw(d){var m=$('#tn_map'),sl=$('#tn_srv');if(!m&&!sl)return;var sv=d.servers||[],tl=d.tunnels||[];
  var irs=tmIran(sv),col=tmIrCol(sv);if(TNV.v!='all'&&!col[TNV.v])TNV.v='all';
  var vt=TNV.v=='all'?tl:tl.filter(function(x){return x.entry==TNV.v||x.exit==TNV.v});
@@ -96,15 +97,18 @@ function tunDraw(d){var m=$('#tn_map'),sl=$('#tn_srv');if(!m&&!sl)return;var sv=
   tunFilterBar(d);if(!accBusy('tn'))$('#tn_list').innerHTML=tunList(d)}
  if(sl){var k=$('#tn_skpi');if(k)k.innerHTML='<div><small>'+t('Servers online')+'</small><b style="color:'+(on==sv.length&&sv.length?'var(--ok)':'inherit')+'">'+N(on)+' / '+N(sv.length)+'</b></div><div><small>'+t('Tunnels connected')+'</small><b>'+N(up)+' / '+N(tl.length)+'</b></div><div><small>'+t('Through the tunnels')+'</small><b class="ltr">↑ '+bytes(tx)+' · ↓ '+bytes(rx)+'</b></div>';
   sl.innerHTML=SRV_GROUPS.map(function(g){var l=sv.filter(function(s){return srvLoc(s)==g[0]});return l.length?'<h3 style="grid-column:1/-1;margin:6px 0 0">'+t(g[1])+' <small class="muted">'+N(l.length)+'</small></h3>'+l.map(tunSrvCard).join(''):''}).join('')}}
-function pServers(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnel servers')+'</h2><p>'+t('Servers that only carry tunnels get a small agent: no VPN is installed on them')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="tunServerAdd()">+ '+t('Server')+'</button></div></div><div class="card" style="padding:10px"><div class="tkpi" id="tn_skpi" style="margin:0"></div></div><div class="ncards" id="tn_srv">'+t('Loading…')+'</div>';
- tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},3000)}
+function pServers(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Tunnel servers')+'</h2><p>'+t('Servers that only carry tunnels get a small agent: no VPN is installed on them')+'</p></div><div class="row" style="gap:6px"><button class="b2" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="btn" onclick="tunServerAdd()">+ '+t('Server')+'</button></div></div><div class="card" style="padding:10px"><div class="tkpi" id="tn_skpi" style="margin:0"></div></div><div class="ncards" id="tn_srv">'+skel()+'</div>';
+ tunRefresh();clearInterval(S.timer);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')tunRefresh(true)},refreshMs())}
 // the rarer tools of the page
 // a server's flag on this page, only when its country is known (the tunnel list has no country for most)
 function tnFlag(s){return s&&s.cc?flagOf(s.cc)+' ':''}
 function tunMore(){kuMenu(t('Tunnels'),'',[['? '+t('Tunnel guide'),'tunGuide()'],['⚡ '+t('Smart tunnel'),'tunSmart()'],['⛓ '+t('Multi-location tunnel'),'routeEdit()'],['⇪ '+t('Update all'),'updateAll()']])}
 // the list under the map: only the tunnels of one server when one is picked ("" = all)
 var TNF={f:(function(){try{return localStorage.getItem('kk_tnf')||''}catch(e){return ''}})()};
-function tunFilter(v){TNF.f=v;try{localStorage.setItem('kk_tnf',v)}catch(e){}KAcc.open.tn='';if(TN.d){tunFilterBar(TN.d);$('#tn_list').innerHTML=tunList(TN.d)}}
+function tunFilter(v){TNF.f=v;try{localStorage.setItem('kk_tnf',v)}catch(e){}KAcc.open.tn='';
+ // an Iran server picked in the list also turns the map to it (another server: the whole map)
+ var sv=TN.d?(TN.d.servers||[]).filter(function(s){return s.id==v})[0]:null;TNV.v=sv&&srvLoc(sv)=='iran'?v:'all';try{localStorage.setItem('kk_tmview',TNV.v)}catch(e){}
+ var m=$('#tn_map');if(m)m.dataset.sig='';if(TN.d){tunDraw(TN.d);if($('#tn_list')){tunFilterBar(TN.d);$('#tn_list').innerHTML=tunList(TN.d)}}}
 function tunFilterBar(d){var el=$('#tn_f');if(!el)return;var tl=d.tunnels||[],sv=(d.servers||[]).filter(function(s){return tl.some(function(x){return x.entry==s.id||x.exit==s.id})});
  if(TNF.f&&!sv.some(function(s){return s.id==TNF.f}))TNF.f='';
  var b=function(id,label,n){return '<button type="button" class="'+(TNF.f==id?'on':'')+'" onclick="tunFilter(\''+esc(id)+'\')">'+label+(n!=null?'<em>'+N(n)+'</em>':'')+'</button>'};

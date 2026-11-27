@@ -299,6 +299,11 @@ fn migrate_phase3(c: &Connection) -> rusqlite::Result<()> {
             tx.execute("UPDATE users SET tier=?1 WHERE id=?2", params![next.as_str(), id])?;
         }
     }
+    // 3.71: the pages refresh every 15 s by default; a panel still on the old defaults (5 or 10 s) moves to 15 once
+    if tx.query_row("SELECT 1 FROM settings WHERE k='mig_371_refresh'", [], |_| Ok(())).optional()?.is_none() {
+        tx.execute("UPDATE settings SET v='15' WHERE k='refresh' AND v IN ('5','10')", [])?;
+        tx.execute("INSERT OR REPLACE INTO settings(k,v) VALUES('mig_371_refresh','1')", [])?;
+    }
     let done: bool = tx.query_row("SELECT 1 FROM settings WHERE k='mig_370_awg_keep'", [], |_| Ok(())).optional()?.is_some();
     if !done {
         let off: std::collections::HashMap<String, Vec<String>> = tx
@@ -1082,7 +1087,7 @@ pub fn default_setting(k: &str) -> &'static str {
         "lang" => "fa",
         "theme" => "dark",
         "color" => "gold",
-        "refresh" => "10",
+        "refresh" => "15",
         "session_hours" => "24",
         "awg_compat" => "0",
         "tgb_hours" => "24",

@@ -102,7 +102,7 @@ window.pNodes=function(){ACC.open.srv='';
  $('#pg').innerHTML='<div class="ku">'+kuHead('nodes',t('Servers'),t('The panel runs on one server. Every other server is a node: add it with one command, then switch on here what it runs.'),
   '<button class="btn" onclick="updateAll()">⇪ '+t('Update all')+'</button><button class="b2" onclick="srvAdd()">'+ic('plus',15)+' '+t('Server')+'</button>')+
   '<div id="svp_sum">'+kuStats([[t('Online'),'—'],[t('Needs a look'),'—'],[t('Not connected'),'—'],[t('Update ready'),'—']])+'</div>'+
-  '<div id="svp_clash"></div><div id="svp_g">'+t('Loading…')+'</div><div id="svp_fw"></div></div>';
+  '<div id="svp_clash"></div><div id="svp_g">'+skel()+'</div><div id="svp_fw"></div></div>';
  load();autoRefresh(function(){load(true)});
  if(S.openAdd){S.openAdd=false;setTimeout(srvAdd,150)}};
 ACC.draw.srv=function(){draw(true)};
