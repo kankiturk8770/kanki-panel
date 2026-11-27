@@ -595,7 +595,7 @@ fn db_path(app: &App) -> String {
 }
 
 async fn db_clean(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "backup");
+    if let Err(r) = crate::auth::check_session(&app, &h) { return r; } // 3.68: a login session only, never an API token
     // VACUUM can take seconds on a big database: not on an async worker
     let a = app.clone();
     let r = tokio::task::spawn_blocking(move || clean_db(&a)).await.unwrap_or_else(|_| json!({}));
@@ -623,7 +623,7 @@ fn file_response(bytes: Vec<u8>, name: &str) -> Response {
 
 /// Old API: plain SQLite file
 async fn backup_legacy(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "backup");
+    if let Err(r) = crate::auth::check_session(&app, &h) { return r; } // 3.68: a login session only, never an API token
     let a = app.clone();
     match tokio::task::spawn_blocking(move || db_snapshot(&a)).await.ok().flatten() {
         Some(b) => file_response(b, &format!("kanki-backup-{}.db", stamp(now()))),
@@ -632,7 +632,7 @@ async fn backup_legacy(State(app): St, h: HeaderMap) -> Response {
 }
 
 async fn backup_download(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
-    let _ = guard!(app, h, "backup");
+    if let Err(r) = crate::auth::check_session(&app, &h) { return r; } // 3.68: a login session only, never an API token
     // empty = the panel's own backup passphrase, so a download is never left unencrypted
     let mut pass = b["passphrase"].as_str().unwrap_or("").to_string();
     if pass.is_empty() {

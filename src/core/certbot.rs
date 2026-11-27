@@ -424,7 +424,18 @@ impl Responder {
             while !st.load(std::sync::atomic::Ordering::Relaxed) {
                 match l.accept() {
                     Ok((s, _)) => {
-                        std::thread::spawn(move || answer(s));
+                        // 3.68: at most 64 at once (each has a 5 s read timeout): slow clients cannot make threads
+                        // without end while certbot runs
+                        static BUSY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+                        if BUSY.fetch_add(1, std::sync::atomic::Ordering::AcqRel) >= 64 {
+                            BUSY.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+                            drop(s);
+                            continue;
+                        }
+                        std::thread::spawn(move || {
+                            answer(s);
+                            BUSY.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+                        });
                     }
                     Err(_) => std::thread::sleep(std::time::Duration::from_millis(50)),
                 }
@@ -448,6 +459,7 @@ fn answer(mut s: std::net::TcpStream) {
     use std::io::{Read, Write};
     let _ = s.set_nonblocking(false);
     let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+    let _ = s.set_write_timeout(Some(std::time::Duration::from_secs(5)));
     let _ = s.set_write_timeout(Some(std::time::Duration::from_secs(5)));
     let mut buf = Vec::new();
     let mut tmp = [0u8; 2048];

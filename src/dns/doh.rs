@@ -29,8 +29,12 @@ where
         .layer(Extension(Peer(ip)))
         .with_state(eng);
     let svc = hyper_util::service::TowerToHyperService::new(app);
-    let b = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
-    let _ = b.serve_connection(hyper_util::rt::TokioIo::new(stream), svc).await;
+    // 3.68 (slowloris): a request head must come within 10 s, and one connection lives at most 30 minutes
+    let mut b = hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new());
+    b.http1().timer(hyper_util::rt::TokioTimer::new()).header_read_timeout(std::time::Duration::from_secs(10));
+    b.http2().timer(hyper_util::rt::TokioTimer::new()).keep_alive_interval(Some(std::time::Duration::from_secs(30))).keep_alive_timeout(std::time::Duration::from_secs(20));
+    let conn = b.serve_connection(hyper_util::rt::TokioIo::new(stream), svc);
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(1800), conn).await;
 }
 
 /// base64url without padding (the `dns` parameter of a GET)

@@ -442,7 +442,7 @@ fn system_info() -> Value {
 }
 
 async fn service_action(State(app): St, h: HeaderMap, Path((name, action)): Path<(String, String)>) -> Response {
-    let _ = guard!(app, h, "admin");
+    if let Err(r) = crate::auth::check_session(&app, &h) { return r; } // 3.68: a login session only, never an API token
     let Some((_, unit)) = SERVICES.iter().find(|(k, _)| *k == name) else {
         return err(StatusCode::BAD_REQUEST, "unknown service");
     };

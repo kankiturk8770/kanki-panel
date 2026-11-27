@@ -19,7 +19,6 @@
 //! from the backup's last values, so no byte is counted twice or missed). The freeze ends when the move
 //! is cancelled, or by itself when the command expires and the new server never said it was done.
 use crate::api::err;
-use crate::guard;
 use crate::util::{now, rand_token, sha256_hex};
 use crate::App;
 use axum::extract::State;
@@ -177,7 +176,7 @@ fn command(app: &App, ip: &str, token: &str, pass: &str) -> String {
 }
 
 async fn status(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "backup");
+    if let Err(r) = crate::auth::check_session(&app, &h) { return r; } // 3.68: a login session only, never an API token
     let exp: i64 = app.db.get("mig_exp").parse().unwrap_or(0);
     let active = !app.db.get("mig_token").is_empty() && now() < exp;
     let domain = app.env.get("DOMAIN").cloned().unwrap_or_default();
@@ -192,7 +191,7 @@ async fn status(State(app): St, h: HeaderMap) -> Response {
 
 /// { ip?: this server's IP (empty = found by itself) } → the command for the new server
 async fn start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
-    let _ = guard!(app, h, "backup");
+    if let Err(r) = crate::auth::check_session(&app, &h) { return r; } // 3.68: a login session only, never an API token
     if app.env.get("DOMAIN").map(|d| d.trim().is_empty()).unwrap_or(true) {
         return err(StatusCode::BAD_REQUEST, "the panel has no domain: a move needs the panel on a domain (the nodes and tunnel servers follow the domain)");
     }
@@ -218,7 +217,7 @@ async fn start(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
 }
 
 async fn cancel(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "backup");
+    if let Err(r) = crate::auth::check_session(&app, &h) { return r; } // 3.68: a login session only, never an API token
     for k in ["mig_token", "mig_pass", "mig_exp", "mig_cmd"] {
         app.db.set(k, "");
     }

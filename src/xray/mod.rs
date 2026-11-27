@@ -42,8 +42,10 @@ fn sh(cmd: &str) -> (bool, String) {
     }
 }
 
+/// One word for `sh -c`: POSIX single quotes, a quote inside written as '\'' (3.68: escaped, never dropped, so the
+/// word reaches the program exactly as it is)
 fn q(s: &str) -> String {
-    format!("'{}'", s.replace('\'', ""))
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 pub fn zip_name() -> Option<&'static str> {
@@ -694,6 +696,13 @@ pub fn status() -> Value {
 
 #[cfg(test)]
 mod loopback_tests {
+    #[test]
+    fn shell_words_keep_every_character() {
+        let w = "a'b; rm -rf / $(x) `y` \"z\"";
+        let out = std::process::Command::new("sh").arg("-c").arg(format!("printf %s {}", super::q(w))).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), w);
+    }
+
     #[test]
     fn reads_who_is_online_and_puts_blocks_first() {
         let out = r#"{ "users": ["user>>>u7>>>online", "user>>>u12>>>online", "user>>>x>>>online", "user>>>u7>>>online"] }"#;

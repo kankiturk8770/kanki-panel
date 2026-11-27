@@ -162,13 +162,19 @@ pub fn totp_step(secret_b32: &str, code: &str, at: i64) -> Option<u64> {
 
 // ---------------------------------------------------------------- network helpers
 /// Real client IP. The panel only listens on 127.0.0.1 behind Caddy, which sets X-Forwarded-For.
+/// Only the rightmost hop counts (the one Caddy or the Iran relay appended; anything a client wrote before it is
+/// ignored), and only when it is an address. 3.68: no header (or garbage) is "0.0.0.0", one shared bucket of the
+/// limits, never 127.0.0.1 (which looked like this machine itself).
 pub fn client_ip(h: &HeaderMap) -> String {
     h.get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(',').next_back())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "127.0.0.1".into())
+        .and_then(|s| s.trim().parse::<IpAddr>().ok())
+        .map(|ip| match ip {
+            IpAddr::V6(v) => v.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(IpAddr::V6(v)).to_string(),
+            v4 => v4.to_string(),
+        })
+        .unwrap_or_else(|| "0.0.0.0".into())
 }
 
 pub fn user_agent(h: &HeaderMap) -> String {

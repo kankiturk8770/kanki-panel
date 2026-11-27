@@ -168,9 +168,20 @@ pub fn clean_url(s: &str) -> String {
 
 // ------------------------------------------------------------------ config text
 
+/// A YAML double-quoted scalar (3.68: escaped, never stripped): \\ and \" escaped, control characters as \uXXXX
 fn q(s: &str) -> String {
-    // every value we write is made of safe characters, but quote it anyway
-    format!("\"{}\"", s.replace(['\\', '"', '\r', '\n'], ""))
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn conf_path(s: &Hy2Spec) -> String {
@@ -762,8 +773,12 @@ fn exit_stats(s: &Hy2Spec) -> Option<(i64, u64, u64)> {
         return None;
     }
     let get = |path: &str| -> Option<serde_json::Value> {
-        let (ok, out) = sh(&format!("curl -fsS --max-time 2 -H 'Authorization: {}' http://127.0.0.1:{}/{}", s.stats_secret.replace('\'', ""), s.stats_port, path));
-        if ok { serde_json::from_str(&out).ok() } else { None }
+        // no shell: the secret and the URL are arguments of their own (3.68)
+        let o = std::process::Command::new("curl")
+            .args(["-fsS", "--max-time", "2", "-H", &format!("Authorization: {}", s.stats_secret), &format!("http://127.0.0.1:{}/{}", s.stats_port, path)])
+            .output()
+            .ok()?;
+        if o.status.success() { serde_json::from_slice(&o.stdout).ok() } else { None }
     };
     let online: i64 = get("online")?.as_object().map(|o| o.values().filter_map(|v| v.as_i64()).sum()).unwrap_or(0);
     let (mut rx, mut tx) = (0u64, 0u64);
@@ -896,6 +911,12 @@ pub fn statuses() -> Vec<super::engine::Status> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn yaml_values_are_escaped_not_cut() {
+        assert_eq!(q("pa\"ss\\w\nx"), "\"pa\\\"ss\\\\w\\u000ax\"");
+        assert_eq!(q("plain-Value_1.2"), "\"plain-Value_1.2\"");
+    }
 
     fn spec(role: &str) -> Hy2Spec {
         Hy2Spec {
