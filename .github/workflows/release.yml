@@ -101,6 +101,14 @@ jobs:
             echo "::error::MINISIGN_SECRET_KEY (secret) and KANKI_UPDATE_PUBKEY (variable) must be set to publish"
             exit 1
           fi
+          # a public key whose 32 key bytes are all zero is a placeholder, not a key: nothing could ever be verified
+          keyhex=$(printf '%s' "$KANKI_UPDATE_PUBKEY" | base64 -d 2>/dev/null | od -An -tx1 -v | tr -d ' \n')
+          if [ "${#keyhex}" -ne 84 ] || [ -z "$(printf '%s' "${keyhex:20}" | tr -d '0')" ]; then
+            echo "::error::KANKI_UPDATE_PUBKEY is not a real minisign public key (make one with: minisign -G -W)"
+            exit 1
+          fi
+          # the runner's package lists are empty until updated (minisign is in Ubuntu's universe)
+          sudo apt-get update -qq >/dev/null
           sudo apt-get install -y -qq minisign >/dev/null
           key=$(mktemp)
           trap 'rm -f "$key"' EXIT
