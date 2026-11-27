@@ -1,7 +1,7 @@
 //! Moving the whole panel to a new server (Backup › Move to a new server).
 //!
 //! 1. The admin points the panel's domain to the new server's IP and presses "Make the move command".
-//!    The panel makes a one-time token and a passphrase (valid 3 hours) and shows one command.
+//!    The panel makes a one-time token and a passphrase (valid 30 minutes, one download) and shows one command.
 //! 2. The admin runs it on the new server (a fresh Ubuntu / Debian). The installer downloads the full
 //!    backup straight from this server (by this server's IP, so the domain may already point away),
 //!    encrypted with the passphrase that is only in the command, never sent over the wire. It puts
@@ -22,19 +22,19 @@ use crate::api::err;
 use crate::guard;
 use crate::util::{now, rand_token, sha256_hex};
 use crate::App;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 type St = State<Arc<App>>;
 
 /// how long a move command works
-const VALID: i64 = 3 * 3600;
+/// How long a move command works (3.68: 30 minutes, was 3 hours)
+const VALID: i64 = 30 * 60;
 
 static FROZEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -87,6 +87,13 @@ pub async fn freeze_loop(app: Arc<App>) {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         if !frozen() {
+            // 3.68: an expired command is wiped at once (its token hash and passphrase do not stay in the settings)
+            let exp: i64 = app.db.get("mig_exp").parse().unwrap_or(0);
+            if exp > 0 && now() > exp && !app.db.get("mig_cmd").is_empty() {
+                for k in ["mig_token", "mig_pass", "mig_cmd", "mig_exp"] {
+                    app.db.set(k, "");
+                }
+            }
             continue;
         }
         let exp: i64 = app.db.get("mig_exp").parse().unwrap_or(0);
@@ -223,10 +230,24 @@ async fn cancel(State(app): St, h: HeaderMap) -> Response {
 }
 
 /// The full backup for the new server, encrypted with the move passphrase.
-async fn bundle(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    let t = q.get("t").cloned().unwrap_or_default();
+/// The move token (3.68): only in the `X-Kanki-Move` header, never in a URL a proxy logs
+fn move_token(h: &HeaderMap) -> String {
+    h.get("x-kanki-move").and_then(|v| v.to_str().ok()).map(|v| v.trim().to_string()).unwrap_or_default()
+}
+
+async fn bundle(State(app): St, h: HeaderMap) -> Response {
+    let t = move_token(&h);
     if !token_ok(&app, &t) {
-        return (StatusCode::FORBIDDEN, "this move command is not valid (made again, cancelled, or older than 3 hours)").into_response();
+        return (StatusCode::FORBIDDEN, "this move command is not valid (made again, cancelled, used, or older than 30 minutes)").into_response();
+    }
+    // used once: a second download (someone who saw the command) is refused
+    {
+        static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _g = ONE.lock().unwrap_or_else(|e| e.into_inner());
+        if app.db.get("mig_fetched").parse::<i64>().unwrap_or(0) > 0 {
+            return (StatusCode::FORBIDDEN, "this move command was used already: make a new one").into_response();
+        }
+        app.db.set("mig_fetched", &now().to_string());
     }
     let pass = app.db.get("mig_pass");
     // nothing changes here from now on: the backup is everything the new panel gets
@@ -234,7 +255,6 @@ async fn bundle(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, St
     let a = app.clone();
     match tokio::task::spawn_blocking(move || crate::backup::make_archive_with(&a, &pass, true)).await {
         Ok(Ok((bytes, _))) => {
-            app.db.set("mig_fetched", &now().to_string());
             app.db.set("mig_new_ip", &crate::util::client_ip(&h));
             ([(header::CONTENT_TYPE, "application/octet-stream"), (header::CACHE_CONTROL, "no-store")], bytes).into_response()
         }
@@ -244,13 +264,13 @@ async fn bundle(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, St
 }
 
 /// The new server runs the panel: this one stops for good (its token is used up).
-async fn done(State(app): St, Query(q): Query<HashMap<String, String>>) -> Response {
-    let t = q.get("t").cloned().unwrap_or_default();
+async fn done(State(app): St, h: HeaderMap) -> Response {
+    let t = move_token(&h);
     if !token_ok(&app, &t) {
         return (StatusCode::FORBIDDEN, "not valid").into_response();
     }
     app.db.set("mig_done", &now().to_string());
-    for k in ["mig_token", "mig_pass", "mig_cmd"] {
+    for k in ["mig_token", "mig_pass", "mig_cmd", "mig_exp"] {
         app.db.set(k, "");
     }
     eprintln!("the panel was moved to a new server: this panel stops");

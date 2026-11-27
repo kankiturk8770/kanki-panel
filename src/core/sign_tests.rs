@@ -129,10 +129,11 @@ async fn a_server_agent_signs_its_reports_and_cannot_go_back() {
 #[test]
 fn hysteria_must_send_this_machines_key_once_it_has_one() {
     let key = "k".repeat(48);
-    assert!(crate::api::hy2_key_ok(None, None), "no key set up yet: loopback only, as before");
-    assert!(crate::api::hy2_key_ok(Some(&key), Some(&format!("k={}", key))));
-    assert!(crate::api::hy2_key_ok(Some(&key), Some(&format!("x=1&k={}", key))));
+    assert!(!crate::api::hy2_key_ok(None, false, None), "3.68: no key file is no login (fail closed)");
+    assert!(crate::api::hy2_key_ok(None, true, None), "an older Hysteria kept without the key on purpose");
+    assert!(crate::api::hy2_key_ok(Some(&key), false, Some(&format!("k={}", key))));
+    assert!(crate::api::hy2_key_ok(Some(&key), true, Some(&format!("x=1&k={}", key))));
     for q in [None, Some(""), Some("k="), Some("k=kkk"), Some("kk=x")] {
-        assert!(!crate::api::hy2_key_ok(Some(&key), q), "{:?}", q);
+        assert!(!crate::api::hy2_key_ok(Some(&key), true, q), "{:?}", q);
     }
 }

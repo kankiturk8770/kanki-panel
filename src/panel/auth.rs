@@ -24,9 +24,41 @@ fn bad(msg: &str) -> Response {
     (StatusCode::BAD_REQUEST, Json(json!({"error": msg}))).into_response()
 }
 
+/// The admin page's session cookie (3.68): HttpOnly, so the page's script never holds the session
+pub const SESSION_COOKIE: &str = "kanki_session";
+/// The header the admin page sends with every call: a cookie only counts with it, and a page of another site
+/// cannot add it (CSRF)
+pub const ADMIN_HEADER: &str = "x-kanki-admin";
+/// A login session that was not used for this long ends (3.68; `session_idle_min` changes it)
+const SESSION_IDLE_MIN: i64 = 120;
+
 fn bearer(h: &HeaderMap) -> String {
     let t = h.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).unwrap_or("");
-    t.trim_start_matches("Bearer ").trim().to_string()
+    let t = t.trim_start_matches("Bearer ").trim().to_string();
+    if !t.is_empty() {
+        return t;
+    }
+    if h.get(ADMIN_HEADER).and_then(|v| v.to_str().ok()) != Some("1") {
+        return String::new();
+    }
+    cookie(h, SESSION_COOKIE).unwrap_or_default()
+}
+
+/// One cookie's value
+fn cookie(h: &HeaderMap, name: &str) -> Option<String> {
+    h.get_all(header::COOKIE).iter().filter_map(|v| v.to_str().ok()).flat_map(|v| v.split(';')).find_map(|kv| {
+        let (k, v) = kv.trim().split_once('=')?;
+        (k == name && !v.is_empty() && v.len() <= 128 && v.bytes().all(|c| c.is_ascii_alphanumeric())).then(|| v.to_string())
+    })
+}
+
+/// `Set-Cookie` of a session (`max_age` 0 = remove it)
+fn session_cookie(token: &str, max_age: i64) -> String {
+    format!("{}={}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={}", SESSION_COOKIE, token, max_age)
+}
+
+fn idle_limit(app: &App) -> i64 {
+    app.db.get("session_idle_min").parse::<i64>().unwrap_or(SESSION_IDLE_MIN).clamp(5, 24 * 60) * 60
 }
 
 pub fn admin_user(app: &App) -> String {
@@ -78,10 +110,14 @@ fn identify_with(app: &App, h: &HeaderMap, touch: bool) -> Option<(String, Vec<S
     }
     // 3.68: the old unrestricted `api_key` no longer opens anything (API tokens with scopes and an end replace it)
     let hash = sha256_hex(&t);
+    // 3.68: a session also ends after `idle_limit` without a request (read before the database lock is taken)
+    let idle_from = now() - idle_limit(app);
     let sess: Option<(String, String)> = app.db.with(|c| {
-        c.query_row("SELECT id, username FROM sessions WHERE hash=?1 AND expires>?2", rusqlite::params![hash, now()], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
+        c.query_row(
+            "SELECT id, username FROM sessions WHERE hash=?1 AND expires>?2 AND last_seen>?3",
+            rusqlite::params![hash, now(), idle_from],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .ok()
     });
     if let Some((id, user)) = sess {
@@ -112,10 +148,22 @@ pub fn has_scope(scopes: &[String], need: &str) -> bool {
 /// Route guard: Ok(actor) or a 401/403 response
 #[allow(clippy::result_large_err)] // the error is the ready axum answer (401/403)
 pub fn check(app: &App, h: &HeaderMap, scope: &str) -> Result<String, Response> {
+    check_gate(app, h, scope, true)
+}
+
+/// `check` without the «2FA required» gate: the routes the page needs to show the security settings and turn
+/// 2FA on (`/api/me`, `GET /api/security`)
+#[allow(clippy::result_large_err)]
+fn check_open(app: &App, h: &HeaderMap, scope: &str) -> Result<String, Response> {
+    check_gate(app, h, scope, false)
+}
+
+#[allow(clippy::result_large_err)]
+fn check_gate(app: &App, h: &HeaderMap, scope: &str, gate: bool) -> Result<String, Response> {
     match identify(app, h) {
         None => Err(deny()),
         // 3.68: «2FA required» means it: a login session does nothing but set up 2FA until it is on
-        Some((actor, _)) if is_login_session(&actor) && app.db.on("force_2fa") && !app.db.on("totp_on") => {
+        Some((actor, _)) if gate && is_login_session(&actor) && app.db.on("force_2fa") && !app.db.on("totp_on") => {
             Err((StatusCode::FORBIDDEN, Json(json!({"error": "2FA is required by policy: turn it on first (Security › 2FA)", "need_2fa": true}))).into_response())
         }
         Some((actor, scopes)) => {
@@ -242,7 +290,13 @@ pub async fn middleware(State(app): St, mut req: Request, next: Next) -> Respons
     if path == "/api/login" && !hit("login", &ip, LOGIN.0, LOGIN.1) {
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "too many requests, wait a minute"}))).into_response();
     }
-    let limited = sub && !crate::limit::exempt(&ip);
+    // 3.68: no address is exempt (a caller without a proxy header was taken for "this machine" and never limited)
+    let limited = sub;
+    if let Some((name, max, win)) = crate::limit::public_path_limit(&path) {
+        if !hit(name, &ip, max, win) {
+            return (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, "60")], "too many requests").into_response();
+        }
+    }
     if limited && (over("sub_miss", &ip, SUB_MISS.0, SUB_MISS.1) || !hit("sub", &ip, SUB.0, SUB.1)) {
         return (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, "60")], "too many requests").into_response();
     }
@@ -504,15 +558,21 @@ async fn login(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         "INSERT INTO sessions(id,hash,username,ip,ua,created,last_seen,expires) VALUES(?1,?2,?3,?4,?5,?6,?6,?7)",
         &[&id, &sha256_hex(&t), &u, &ip, &user_agent(&h), &now(), &(now() + hours * 3600)],
     );
-    let _ = app.db.exec("DELETE FROM sessions WHERE expires<?1", &[&now()]);
+    let _ = app.db.exec("DELETE FROM sessions WHERE expires<?1 OR last_seen<?2", &[&now(), &(now() - idle_limit(&app))]);
     log_login(&app, &u, &ip, if app.db.on("totp_on") { "password+2fa" } else { "password" }, true);
-    Json(json!({ "token": t })).into_response()
+    // 3.68: the admin page gets the session as an HttpOnly cookie only; a script that logs in on purpose
+    // (`X-Kanki-Token-Login: 1`) still gets it in the answer
+    let cookie = session_cookie(&t, hours * 3600);
+    let body = if h.get("x-kanki-token-login").and_then(|v| v.to_str().ok()) == Some("1") { json!({ "ok": true, "token": t }) } else { json!({ "ok": true }) };
+    ([(header::SET_COOKIE, cookie)], Json(body)).into_response()
 }
 
 async fn logout(State(app): St, h: HeaderMap) -> Response {
     let t = bearer(&h);
-    let _ = app.db.exec("DELETE FROM sessions WHERE hash=?1", &[&sha256_hex(&t)]);
-    Json(json!({"ok": true})).into_response()
+    if !t.is_empty() {
+        let _ = app.db.exec("DELETE FROM sessions WHERE hash=?1", &[&sha256_hex(&t)]);
+    }
+    ([(header::SET_COOKIE, session_cookie("", 0))], Json(json!({"ok": true}))).into_response()
 }
 
 pub fn ui_settings(app: &App) -> Value {
@@ -526,9 +586,10 @@ pub fn ui_settings(app: &App) -> Value {
 }
 
 async fn me(State(app): St, h: HeaderMap) -> Response {
-    let actor = guard!(app, h, "users:read");
+    let actor = match check_open(&app, &h, "users:read") { Ok(a) => a, Err(r) => return r };
     let mut v = ui_settings(&app);
     v["user"] = json!(actor);
+    v["need_2fa"] = json!(app.db.on("force_2fa") && !app.db.on("totp_on"));
     v["totp_on"] = json!(app.db.on("totp_on"));
     v["force_2fa"] = json!(app.db.on("force_2fa"));
     v["default_protocols"] = json!(app.db.get("default_protocols"));
@@ -541,7 +602,7 @@ fn current_session_id(app: &App, h: &HeaderMap) -> String {
 }
 
 async fn security_get(State(app): St, h: HeaderMap) -> Response {
-    let _ = guard!(app, h, "admin");
+    if let Err(r) = check_open(&app, &h, "admin") { return r; }
     let cur = current_session_id(&app, &h);
     let (sessions, tokens, logins, audit) = app.db.with(|c| {
         let mut s = c.prepare("SELECT id,username,ip,ua,created,last_seen,expires FROM sessions WHERE expires>?1 ORDER BY last_seen DESC").unwrap();
@@ -918,6 +979,39 @@ mod tests {
         // a too short password is refused
         let short = json!({"current": "the-right-password", "password": "short-pass1"});
         assert_eq!(call(Method::POST, "/api/security/password", short).await, StatusCode::BAD_REQUEST);
+    }
+
+    /// The admin page's session: an HttpOnly cookie that counts only with the page's own header, and ends after
+    /// it was idle
+    #[tokio::test]
+    async fn the_session_cookie_needs_the_admin_header_and_ends_when_idle() {
+        use tower::ServiceExt;
+        let app = crate::test_app();
+        app.db.set("admin_user", "admin");
+        app.db.set("admin_pass", &util::hash_password("the-right-password"));
+        let r = Request::post("/api/login").header("content-type", "application/json").header("x-forwarded-for", "203.0.113.60")
+            .body(axum::body::Body::from(json!({"username": "admin", "password": "the-right-password"}).to_string())).unwrap();
+        let res = crate::api::master_router(app.clone()).oneshot(r).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        let set = res.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap().to_string();
+        assert!(set.contains("HttpOnly") && set.contains("Secure") && set.contains("SameSite=Strict"), "{}", set);
+        let body = axum::body::to_bytes(res.into_body(), 1 << 16).await.unwrap();
+        assert!(!String::from_utf8_lossy(&body).contains("token"), "the page never sees the session");
+        let tok = set.split(';').next().unwrap().split_once('=').unwrap().1.to_string();
+        let me = |admin: bool| {
+            let (app, tok) = (app.clone(), tok.clone());
+            async move {
+                let mut r = Request::get("/api/me").header("cookie", format!("{}={}", SESSION_COOKIE, tok)).header("x-forwarded-for", "203.0.113.60");
+                if admin {
+                    r = r.header(ADMIN_HEADER, "1");
+                }
+                crate::api::master_router(app).oneshot(r.body(axum::body::Body::empty()).unwrap()).await.unwrap().status()
+            }
+        };
+        assert_eq!(me(true).await, StatusCode::OK);
+        assert_eq!(me(false).await, StatusCode::UNAUTHORIZED, "a cookie alone (another site's form) is nothing");
+        app.db.exec("UPDATE sessions SET last_seen=?1", &[&(now() - SESSION_IDLE_MIN * 60 - 5)]).unwrap();
+        assert_eq!(me(true).await, StatusCode::UNAUTHORIZED, "idle too long");
     }
 
     #[test]

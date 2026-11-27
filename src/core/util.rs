@@ -645,6 +645,10 @@ pub fn b64(data: &[u8]) -> String {
 /// SVG QR code (None if data too large)
 pub fn qr_svg(data: &str) -> Option<String> {
     use qrcode::render::svg;
+    // 3.68: nothing longer than a QR code can hold is even tried (no work for oversized input)
+    if data.is_empty() || data.len() > 4096 {
+        return None;
+    }
     let code = qrcode::QrCode::new(data.as_bytes()).ok()?;
     Some(
         code.render::<svg::Color>()

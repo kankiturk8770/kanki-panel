@@ -65,14 +65,43 @@ pub fn is_sub_path(path: &str) -> bool {
     path.starts_with("/sub/") || path.starts_with("/api/config/")
 }
 
-/// Our own machine (the Iran relay and local tools reach the panel from here): never limited
-pub fn exempt(ip: &str) -> bool {
-    ip == "127.0.0.1" || ip == "::1" || ip.is_empty()
+/// The other public paths (3.68): (table, max, window seconds) per address. An app download is 5 a minute;
+/// the installer's files, a move and a join a few; the tunnel agents report often (several servers may share
+/// one address behind NAT).
+pub fn public_path_limit(path: &str) -> Option<(&'static str, u32, i64)> {
+    if path.starts_with("/sub/") && path.contains("/app/") {
+        return Some(("sub_app", 5, 60));
+    }
+    if path.starts_with("/dl/") {
+        return Some(("dl", 20, 60));
+    }
+    if path.starts_with("/move/") {
+        return Some(("move", 30, 60));
+    }
+    if path.starts_with("/join/") {
+        return Some(("join", 10, 60));
+    }
+    if path.starts_with("/tunnel/") {
+        return Some(("tunnel", 600, 60));
+    }
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_public_path_has_its_limit() {
+        assert_eq!(public_path_limit("/sub/kanki-1-x/app/arm64-v8a").map(|x| x.1), Some(5));
+        assert_eq!(public_path_limit("/join/register").map(|x| x.0), Some("join"));
+        assert_eq!(public_path_limit("/dl/kanki-panel").map(|x| x.0), Some("dl"));
+        assert!(public_path_limit("/sub/kanki-1-x").is_none() && public_path_limit("/api/users").is_none());
+        for _ in 0..5 {
+            assert!(hit("sub_app", "198.51.100.9", 5, 60));
+        }
+        assert!(!hit("sub_app", "198.51.100.9", 5, 60));
+    }
 
     #[test]
     fn stops_after_the_limit() {

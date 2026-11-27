@@ -169,7 +169,29 @@ pub fn ensure_acl() {
 /// without it, or with another, is refused even from the loopback.
 pub const AUTH_KEY_FILE: &str = "/etc/kanki/hy2-auth.key";
 
-/// The key `/hy2/auth` asks for (None = not set up here yet: loopback only, as before)
+/// Kanki had to keep Hysteria without the key (an older Hysteria did not start with it): only then does
+/// `/hy2/auth` answer without a key (3.68: otherwise a missing key file means no login at all)
+pub const KEYLESS_MARK: &str = "/etc/kanki/hy2-auth.keyless";
+
+pub fn keyless_allowed() -> bool {
+    std::path::Path::new(KEYLESS_MARK).exists()
+}
+
+fn set_keyless(on: bool) {
+    let r = if on {
+        std::fs::write(KEYLESS_MARK, "the Hysteria of this server runs without the /hy2/auth key\n")
+    } else {
+        match std::fs::remove_file(KEYLESS_MARK) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            x => x,
+        }
+    };
+    if let Err(e) = r {
+        eprintln!("hysteria2: {}: {}", KEYLESS_MARK, e);
+    }
+}
+
+/// The key `/hy2/auth` asks for (None = no key file)
 pub fn auth_key() -> Option<String> {
     std::fs::read_to_string(AUTH_KEY_FILE).ok().map(|k| k.trim().to_string()).filter(|k| k.len() >= 32)
 }
@@ -222,6 +244,7 @@ pub fn ensure_auth_key() {
         if auth_key().as_deref() != Some(key.as_str()) {
             save_key(&key);
         }
+        set_keyless(false);
         return;
     }
     let active = || std::process::Command::new("systemctl").args(["is-active", "--quiet", "hysteria-server.service"]).status().map(|s| s.success()).unwrap_or(false);
@@ -242,9 +265,11 @@ pub fn ensure_auth_key() {
             eprintln!("hysteria2: cannot restart it: {}", e);
         }
         eprintln!("hysteria2: it did not start with the auth key, the previous config is back");
+        set_keyless(true);
         return;
     }
     save_key(&key);
+    set_keyless(false);
     eprintln!("hysteria2: its login check now carries a key only this server knows");
 }
 

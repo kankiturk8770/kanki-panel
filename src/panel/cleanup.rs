@@ -86,7 +86,9 @@ pub async fn sweep_loop(app: Arc<App>) {
 /// cut its servers can be away for days, and removing them would take every tunnel with them)
 pub fn auto_settings(app: &App) -> (bool, i64, bool) {
     let hours = app.db.get("autodel_hours").parse::<i64>().unwrap_or(24).clamp(1, 24 * 30);
-    (app.db.get("autodel_on") != "0", hours, app.db.get("autodel_iran") == "1")
+    // 3.68: off unless the admin switched it on («1»); a server that stays offline is only reported (the warning
+    // at half the time still comes through the report bot)
+    (app.db.get("autodel_on") == "1", hours, app.db.get("autodel_iran") == "1")
 }
 
 /// Every server the panel could remove: (key, name, Iran, online now)

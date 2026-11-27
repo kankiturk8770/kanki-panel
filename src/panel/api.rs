@@ -276,6 +276,32 @@ pub fn user_json(app: &App, u: &User) -> Value {
 
 // ============================================================ routes
 
+/// The admin page's Content-Security-Policy (3.68): only this panel's own script, styles, fonts and API; no
+/// frames, plugins or other origins. (The panel's markup still has inline handlers, hence 'unsafe-inline'.)
+pub const ADMIN_CSP: &str = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
+/// Every SVG answer (QR codes) is a sandboxed document: a script inside one can never run on the panel's origin
+pub const SVG_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+
+/// Headers every answer of the panel gets (3.68): the CSP of the admin page and of SVG images, nosniff, and
+/// `no-store` on every subscription answer that did not set its own caching
+async fn security_headers(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let path = req.uri().path().to_string();
+    let mut r = next.run(req).await;
+    let svg = r.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(|v| v.starts_with("image/svg")).unwrap_or(false);
+    let h = r.headers_mut();
+    h.insert(header::X_CONTENT_TYPE_OPTIONS, header::HeaderValue::from_static("nosniff"));
+    if svg {
+        h.insert(header::CONTENT_SECURITY_POLICY, header::HeaderValue::from_static(SVG_CSP));
+    } else if path == "/admin" {
+        h.insert(header::CONTENT_SECURITY_POLICY, header::HeaderValue::from_static(ADMIN_CSP));
+        h.insert(header::X_FRAME_OPTIONS, header::HeaderValue::from_static("DENY"));
+    }
+    if path.starts_with("/sub/") && !h.contains_key(header::CACHE_CONTROL) {
+        h.insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
+    }
+    r
+}
+
 pub fn master_router(app: Arc<App>) -> Router {
     Router::new()
         .route("/", get(|| async { Redirect::to("/admin") }))
@@ -356,6 +382,7 @@ pub fn master_router(app: Arc<App>) -> Router {
         .merge(crate::xray::panel::router())
         .merge(crate::kmix::router())
         .layer(axum::middleware::from_fn_with_state(app.clone(), crate::auth::middleware))
+        .layer(axum::middleware::from_fn(security_headers))
         // 2 MiB for every route: login, join and hy2/auth are open to strangers and must not make the
         // server buffer more. Only the backup upload gets a bigger limit (see backup::router).
         .layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024))
@@ -865,9 +892,12 @@ pub(crate) fn spawn_node_removal(app: &Arc<App>, n: Node) {
     });
 }
 
-/// Every minute the deleted nodes that did not answer are asked again to remove themselves, for ten
-/// minutes (a server gone for good is not asked forever); one whose address belongs to a node added
-/// again is left alone
+/// How long a deleted node that does not answer is asked again (3.68: 72 hours, was 10 minutes)
+const LEFTOVER_TTL: i64 = 72 * 3600;
+
+/// The deleted nodes that did not answer are asked again to remove themselves (every minute for ten minutes,
+/// then every 30 minutes, until `LEFTOVER_TTL`; a server gone for good is not asked forever); one whose address
+/// belongs to a node added again is left alone
 pub async fn leftover_loop(app: Arc<App>) {
     loop {
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
@@ -881,8 +911,16 @@ pub async fn leftover_loop(app: Arc<App>) {
         let used: Vec<String> = app.db.nodes().into_iter().map(|n| n.address).collect();
         let tried: Vec<String> = list.iter().map(|x| x.id.clone()).collect();
         let mut keep = vec![];
+        let minute = now() / 60;
         for x in list {
-            if now() - x.at > 600 || used.contains(&x.address) {
+            let age = now() - x.at;
+            // 3.68: asked every minute for the first ten, then every 30 minutes, for 72 hours (a server that was
+            // only down for a while still removes its users and services when it comes back)
+            if age > LEFTOVER_TTL || used.contains(&x.address) {
+                continue;
+            }
+            if age > 600 && minute % 30 != 0 {
+                keep.push(x);
                 continue;
             }
             let n = Node { id: x.id.clone(), name: x.name.clone(), address: x.address.clone(), token: x.token.clone(), insecure: x.insecure, ..Default::default() };
@@ -1355,6 +1393,20 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
 
 // ============================================================ settings / plans
 
+/// The settings `GET /api/settings` shows masked (3.68)
+pub const MASKED_SETTINGS: &[&str] = &["np_key", "zp_merchant", "toncenter_key", "card_number"];
+/// What a masked value starts with: one sent back unchanged is not saved over the real value
+pub const MASK: &str = "••••";
+
+/// `••••` and the last 4 characters ("" stays "")
+pub fn mask_secret(v: &str) -> String {
+    if v.is_empty() {
+        return String::new();
+    }
+    let tail: String = v.chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+    if v.chars().count() <= 8 { MASK.to_string() } else { format!("{}{}", MASK, tail) }
+}
+
 pub const SETTING_KEYS: &[&str] = &[
     "dns", "mtu", "default_protocols", "sales_on", "trial_on", "card_on", "card_number", "card_holder",
     "wallet_on", "wallet_text", "ton_address", "usdt_address", "usd_rate", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
@@ -1393,9 +1445,11 @@ async fn settings_get(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "settings");
     let mut m = serde_json::Map::new();
     for k in SETTING_KEYS {
-        m.insert(k.to_string(), json!(app.db.get(k)));
+        let v = app.db.get(k);
+        // 3.68: payment keys never leave the panel whole: their last 4 characters show that one is set
+        m.insert(k.to_string(), json!(if MASKED_SETTINGS.contains(k) { mask_secret(&v) } else { v }));
     }
-    // removing servers that stay offline is on by default, after 24 hours
+    // removing servers that stay offline: off unless switched on (3.68), after 24 hours
     let (on, hours, _) = crate::cleanup::auto_settings(&app);
     m.insert("autodel_on".into(), json!(if on { "1" } else { "0" }));
     m.insert("autodel_hours".into(), json!(hours.to_string()));
@@ -1504,6 +1558,10 @@ async fn settings_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         for (k, v) in o {
             if SETTING_KEYS.contains(&k.as_str()) {
                 let s = match v { Value::String(s) => s.clone(), Value::Bool(x) => if *x { "1".into() } else { "0".into() }, other => other.to_string() };
+                // the masked value of a GET sent back as it was: the stored one stays
+                if MASKED_SETTINGS.contains(&k.as_str()) && s.starts_with(MASK) {
+                    continue;
+                }
                 let s = match k.as_str() {
                     "pricing" => pricing.clone().unwrap_or_default(),
                     "game_protocols" => s.split(',').map(|x| x.trim()).filter(|x| crate::db::GAME_PROTOS.contains(x)).collect::<Vec<_>>().join(","),
@@ -2589,7 +2647,7 @@ async fn hy2_auth(State(app): St, peer: axum::extract::ConnectInfo<std::net::Soc
     }
     // and with the key only Hysteria's config on this machine has (3.65): another local program cannot
     // test codes either
-    if !hy2_key_ok(crate::hy2::auth_key().as_deref(), uri.query()) {
+    if !hy2_key_ok(crate::hy2::auth_key().as_deref(), crate::hy2::keyless_allowed(), uri.query()) {
         return Json(json!({ "ok": false })).into_response();
     }
     let auth = b["auth"].as_str().unwrap_or("").to_string();
@@ -2602,9 +2660,10 @@ async fn hy2_auth(State(app): St, peer: axum::extract::ConnectInfo<std::net::Soc
     Json(json!({ "ok": false })).into_response()
 }
 
-/// The `k` of `/hy2/auth?k=…` against this machine's key (none set up yet: nothing to check)
-pub(crate) fn hy2_key_ok(want: Option<&str>, query: Option<&str>) -> bool {
-    let Some(want) = want else { return true };
+/// The `k` of `/hy2/auth?k=…` against this machine's key. 3.68: no key file = no login (fail closed), except
+/// where Kanki knowingly kept an older Hysteria without the key (`keyless`)
+pub(crate) fn hy2_key_ok(want: Option<&str>, keyless: bool, query: Option<&str>) -> bool {
+    let Some(want) = want else { return keyless };
     let got = query.unwrap_or("").split('&').find_map(|kv| kv.strip_prefix("k=")).unwrap_or("");
     !got.is_empty() && util::ct_eq(got, want)
 }

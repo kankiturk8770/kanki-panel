@@ -579,7 +579,8 @@ impl Db {
     }
 
     pub fn user_by_code(&self, id: i64, code: &str) -> Option<User> {
-        self.user(id).filter(|u| u.code == code)
+        // constant time (3.68): how much of a guessed code is right cannot be timed
+        self.user(id).filter(|u| crate::util::ct_eq(&u.code, code))
     }
 
     /// The account whose code part is `code` (an app sent only the digits, without `kanki-<id>-`): None when

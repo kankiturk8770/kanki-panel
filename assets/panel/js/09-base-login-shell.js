@@ -1,4 +1,4 @@
-var S={lang:localStorage.getItem('kk_lang')||'fa',theme:localStorage.getItem('kk_theme')||'dark',color:localStorage.getItem('kk_color')||'gold',token:localStorage.getItem('kk_tok')||'',me:null,page:'dash',users:[],nodes:[],ov:null,sel:{},q:'',filter:'all',pf:'all',sort:'new',size:12,pg:1,timer:null,timer2:null};
+var S={lang:localStorage.getItem('kk_lang')||'fa',theme:localStorage.getItem('kk_theme')||'dark',color:localStorage.getItem('kk_color')||'gold',token:'',me:null,page:'dash',users:[],nodes:[],ov:null,sel:{},q:'',filter:'all',pf:'all',sort:'new',size:12,pg:1,timer:null,timer2:null};
 // a server is one word everywhere: nodes and tunnel servers are the same servers
 var WFA=[
  // the panel's answers with a port or a name in them (tunnels, the smart test)
@@ -53,7 +53,8 @@ var DELRX=/^\/api\/(tunnels\/servers\/[^/?]+|tunnels\/(?!servers|probe|cdntest)[
 function api(m,p,b,raw){var u=p;
  // a tunnel server is made in Servers
  if(m=='POST'&&p=='/api/tunnels/servers'&&b&&!b.gre_ip&&!b.addr){p='/api/servers';b={name:b.name,loc:b.loc||'abroad',vpn:b.loc!='iran'};raw=undefined}
- var o={method:m,headers:{}};if(S.token)o.headers.Authorization='Bearer '+S.token;
+ // 3.68: the session is an HttpOnly cookie the page never sees; this header makes it count (another site cannot send it)
+ var o={method:m,headers:{'X-Kanki-Admin':'1'},credentials:'same-origin'};
  if(b!==undefined&&!(b instanceof Blob)&&!(b instanceof ArrayBuffer)){o.headers['Content-Type']='application/json';o.body=JSON.stringify(b)}else if(b!==undefined)o.body=b;
  if(raw&&raw.headers)for(var k in raw.headers)o.headers[k]=raw.headers[k];
  var pr=fetch(p,o).then(function(r){if(r.status==401&&p!='/api/login'){logout(true);throw new Error('unauthorized')}
@@ -237,12 +238,12 @@ function loginView(otp){$('#app').innerHTML='';document.body.className='';applyL
  '<div id="otpw" class="'+(otp?'':'hide')+'"><label class="f">'+t('2FA code')+'</label><input id="lo" inputmode="numeric" maxlength="6" class="ltr" autocomplete="one-time-code"></div>'+
  '<button class="btn" style="width:100%;margin-top:14px" id="lb">'+t('Login')+'</button>'+
  '<div class="row" style="justify-content:center;margin-top:10px"><button class="ib" id="ll" title="'+t('Language')+'" aria-label="'+t('Language')+'">'+(S.lang=='fa'?'EN':'FA')+'</button><button class="ib" id="lt" title="'+t('Light / dark')+'" aria-label="'+t('Light / dark')+'">'+sun()+'</button></div></div></div>';
- function go(){api('POST','/api/login',{username:$('#lu').value,password:$('#lp').value,otp:$('#lo').value}).then(function(r){S.token=r.token;localStorage.setItem('kk_tok',r.token);boot()}).catch(function(e){if(e.data&&e.data.need_otp){$('#otpw').classList.remove('hide');$('#lo').focus()}fail(e)})}
+ function go(){api('POST','/api/login',{username:$('#lu').value,password:$('#lp').value,otp:$('#lo').value}).then(function(){S.token='cookie';boot()}).catch(function(e){if(e.data&&e.data.need_otp){$('#otpw').classList.remove('hide');$('#lo').focus()}fail(e)})}
  $('#lb').onclick=go;$$('#lu,#lp,#lo').forEach(function(i){i.onkeydown=function(e){if(e.key=='Enter')go()}});
  $('#ll').onclick=function(){S.lang=S.lang=='fa'?'en':'fa';localStorage.setItem('kk_lang',S.lang);loginView(!$('#otpw').classList.contains('hide'))};
  $('#lt').onclick=function(){S.theme=S.theme=='light'?'dark':'light';localStorage.setItem('kk_theme',S.theme);applyLook();this.innerHTML=sun()};
 }
-function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';localStorage.removeItem('kk_tok');loginView()}
+function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';loginView()}
 
 // ---------------------------------------------------------------- shell
 var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['xray','Xray','xray'],['antidpi','Anti-DPI tunnels','security'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['logs','Logs','logs'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
@@ -256,7 +257,7 @@ window.addEventListener('hashchange',function(){if(!S.token||!S.me)return;var h=
 // every refresh timer of a page; route() stops them all when another page opens
 function clearPageTimers(){clearInterval(S.timer);clearInterval(S.timer2);clearInterval(S.timer3);clearInterval(S.timer4);if(window.TS&&TS.timer){clearInterval(TS.timer);TS.timer=0}}
 function autoRefresh(fn){clearInterval(S.timer);var sec=Math.max(5,(S.me&&S.me.refresh)||10);S.timer=setInterval(function(){if(!$('#modal').classList.contains('on')&&document.visibilityState=='visible')fn()},sec*1000)}
-function boot(){api('GET','/api/me').then(function(me){S.me=me;try{localStorage.setItem('kk_logo',me.logo||'')}catch(e){}if(me.panel_name)document.title=me.panel_name;
+function boot(){api('GET','/api/me').then(function(me){S.token='cookie';S.me=me;try{localStorage.setItem('kk_logo',me.logo||'')}catch(e){}if(me.panel_name)document.title=me.panel_name;
   if(!localStorage.getItem('kk_color')&&me.color)S.color=me.color;if(!localStorage.getItem('kk_lang')&&me.lang)S.lang=me.lang;if(!localStorage.getItem('kk_theme')&&me.theme)S.theme=me.theme;
   applyLook();shell();route()}).catch(function(e){if(e.message!='unauthorized')loginView()})}
 

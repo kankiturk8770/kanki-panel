@@ -327,9 +327,16 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/qr", get(qr))
 }
 
+/// The longest text the admin QR endpoint takes
+const QR_MAX: usize = 2048;
+
 async fn qr(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
     let _ = guard!(app, h, "users:read");
     let text = q.get("text").cloned().unwrap_or_default();
+    // 3.68: a QR code holds at most ~2.9 KB; longer input is refused before any work
+    if text.is_empty() || text.len() > QR_MAX {
+        return err(StatusCode::BAD_REQUEST, "text: 1 to 2048 bytes");
+    }
     match crate::util::qr_svg(&text) {
         Some(svg) => ([(axum::http::header::CONTENT_TYPE, "image/svg+xml")], svg).into_response(),
         None => err(StatusCode::BAD_REQUEST, "too large"),
@@ -754,9 +761,16 @@ async fn bot_pause(State(app): St, h: HeaderMap) -> Response {
 }
 
 // ---------------------------------------------------------------- bulk
+/// The most users one bulk request may change
+const BULK_MAX: usize = 1000;
+
 async fn bulk(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "users:write");
     let ids: Vec<i64> = b["ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect()).unwrap_or_default();
+    // 3.68: one request changes at most this many users (each change is a database write and a sync)
+    if ids.len() > BULK_MAX {
+        return err(StatusCode::BAD_REQUEST, &format!("at most {} users at once", BULK_MAX));
+    }
     let action = b["action"].as_str().unwrap_or("").to_string();
     for id in &ids {
         let _ = crate::api::user_action(&app, *id, &action, &b);

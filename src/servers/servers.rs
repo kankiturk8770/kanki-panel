@@ -1451,7 +1451,13 @@ async fn dl_bin(State(app): St, Query(q): Query<HashMap<String, String>>) -> Res
     if !dl_ok(&app, &q) {
         return (StatusCode::FORBIDDEN, "not allowed").into_response();
     }
-    if q.get("arch").map(|a| a.as_str()) != Some(std::env::consts::ARCH) {
+    // 3.68: only the two CPU names the installer sends (and only this server's own)
+    let arch = q.get("arch").map(|a| a.as_str()).unwrap_or("");
+    if !matches!(arch, "x86_64" | "aarch64" | "amd64" | "arm64") {
+        return (StatusCode::BAD_REQUEST, "arch: amd64 or arm64").into_response();
+    }
+    let norm = match arch { "amd64" => "x86_64", "arm64" => "aarch64", a => a };
+    if norm != std::env::consts::ARCH {
         return (StatusCode::CONFLICT, "another CPU type: download from GitHub").into_response();
     }
     // sent from the file in pieces, not read whole for every download

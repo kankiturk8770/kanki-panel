@@ -900,17 +900,20 @@ move_panel(){
   rm -rf "$W"; mkdir -p "$W"; chmod 700 "$W"
   say "Downloading the full backup from the old server ..."
   # by the old server's IP: the domain may already point here
-  local URL="https://$D:$P/move/bundle?t=$T"
+  # the token goes in a header (never in a URL a proxy logs); a panel from before 3.68 only reads it from the URL
+  local URL="https://$D:$P/move/bundle" OLDURL="https://$D:$P/move/bundle?t=$T"
   local K=""
-  if ! curl -fsS --retry 3 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL"; then
+  if ! curl -fsS --retry 3 --max-time 900 --resolve "$D:$P:$OLD" -H "X-Kanki-Move: $T" -o "$W/b.kbk" "$URL" \
+     && ! curl -fsS --retry 3 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$OLDURL"; then
     # the token is sent without a checked certificate only when the admin says so here
     curl -sk --max-time 20 --resolve "$D:$P:$OLD" -o /dev/null "https://$D:$P/" 2>/dev/null \
-      || die "Could not download the backup from $OLD:$P. Is the old panel still running? Is the command older than 3 hours (make a new one)?"
+      || die "Could not download the backup from $OLD:$P. Is the old panel still running? Is the command older than 30 minutes (make a new one)?"
     warn "The old server answers, but its certificate for $D cannot be checked from here."
     yes_no "Download the backup anyway without checking the certificate?" N || die "Stopped: nothing was moved"
     K=k
-    curl -fsSk --retry 2 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$URL" \
-      || die "Could not download the backup from $OLD:$P. Is the command older than 3 hours (make a new one)?"
+    curl -fsSk --retry 2 --max-time 900 --resolve "$D:$P:$OLD" -H "X-Kanki-Move: $T" -o "$W/b.kbk" "$URL" \
+      || curl -fsSk --retry 2 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$OLDURL" \
+      || die "Could not download the backup from $OLD:$P. Is the command older than 30 minutes (make a new one)?"
   fi
   KANKI_BK_PASS="$PASS" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "$W/b.kbk" -out "$W/b.tgz" -pass env:KANKI_BK_PASS \
     || die "The backup could not be opened (wrong or damaged): make a new command in the old panel"
@@ -919,8 +922,9 @@ move_panel(){
   ok "Backup downloaded ($(du -h "$W/b.kbk" | cut -f1))"
   restore_bundle "$W" "$OLD"
   # the old panel stops (no two panels for the same nodes and bot)
-  if curl -fsS -X POST --max-time 20 --resolve "$D:$P:$OLD" "https://$D:$P/move/done?t=$T" >/dev/null 2>&1 \
-     || { [ "$K" = k ] && curl -fsSk -X POST --max-time 20 --resolve "$D:$P:$OLD" "https://$D:$P/move/done?t=$T" >/dev/null 2>&1; }; then
+  if curl -fsS -X POST --max-time 20 --resolve "$D:$P:$OLD" -H "X-Kanki-Move: $T" "https://$D:$P/move/done" >/dev/null 2>&1 \
+     || curl -fsS -X POST --max-time 20 --resolve "$D:$P:$OLD" "https://$D:$P/move/done?t=$T" >/dev/null 2>&1 \
+     || { [ "$K" = k ] && curl -fsSk -X POST --max-time 20 --resolve "$D:$P:$OLD" -H "X-Kanki-Move: $T" "https://$D:$P/move/done" >/dev/null 2>&1; }; then
     ok "The old panel ($OLD) was told to stop"
   else
     warn "The old panel could not be told: stop it there with: systemctl disable --now kanki-panel"
