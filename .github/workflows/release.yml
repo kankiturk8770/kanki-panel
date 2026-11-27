@@ -93,7 +93,8 @@ jobs:
   publish:
     needs: build
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-22.04
+    # 24.04: minisign is in its package archive (22.04 has none)
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -123,7 +124,7 @@ jobs:
           fi
           # the public half of the secret key: the same one the build put into the program
           KANKI_UPDATE_PUBKEY=$(printf '%s\n' "$MINISIGN_SECRET_KEY" | python3 scripts/minisign_pub.py)
-          # the runner's package lists are empty until updated (minisign is in Ubuntu's universe)
+          # the runner's package lists are empty until updated (minisign is in Ubuntu 24.04's universe)
           sudo apt-get update -qq >/dev/null
           sudo apt-get install -y -qq minisign >/dev/null
           key=$(mktemp)
