@@ -46,47 +46,35 @@ pub fn ct_eq(a: &str, b: &str) -> bool {
     d == 0
 }
 
-fn pbkdf2_sha256(pass: &[u8], salt: &[u8], iters: u32) -> [u8; 32] {
-    type H = Hmac<Sha256>;
-    let mac = <H as Mac>::new_from_slice(pass).expect("hmac key");
-    let mut m = mac.clone();
-    m.update(salt);
-    m.update(&1u32.to_be_bytes());
-    let mut u = [0u8; 32];
-    u.copy_from_slice(&m.finalize().into_bytes());
-    let mut t = u;
-    for _ in 1..iters {
-        let mut m = mac.clone();
-        m.update(&u);
-        u.copy_from_slice(&m.finalize().into_bytes());
-        for i in 0..32 {
-            t[i] ^= u[i];
-        }
-    }
-    t
-}
+/// PBKDF2-HMAC-SHA256 iterations of new hashes (3.68; OWASP's figure for SHA-256). Older hashes (120 000) still
+/// open and are rewritten with this count at the next login.
+pub const PBKDF2_ITERS: u32 = 600_000;
+/// Fewer iterations than this are not accepted at all (a stored hash someone weakened)
+const PBKDF2_MIN: u32 = 100_000;
+const PBKDF2_MAX: u32 = 10_000_000;
 
-const PBKDF2_ITERS: u32 = 120_000;
-
-/// "pbkdf2$iters$salt$hash" (legacy "salt$sha256" still accepted on check)
+/// "pbkdf2$<iters>$<salt>$<hex>" with `ring`'s PBKDF2 (audited, constant-time check)
 pub fn hash_password(pass: &str) -> String {
     let salt = rand_token(16);
-    let h = pbkdf2_sha256(pass.as_bytes(), salt.as_bytes(), PBKDF2_ITERS);
-    format!("pbkdf2${}${}${}", PBKDF2_ITERS, salt, hex::encode(h))
+    let mut out = [0u8; 32];
+    let iters = std::num::NonZeroU32::new(PBKDF2_ITERS).unwrap_or(std::num::NonZeroU32::MIN);
+    ring::pbkdf2::derive(ring::pbkdf2::PBKDF2_HMAC_SHA256, iters, salt.as_bytes(), pass.as_bytes(), &mut out);
+    format!("pbkdf2${}${}${}", PBKDF2_ITERS, salt, hex::encode(out))
 }
 
+/// Whether `pass` opens `stored`. The salted SHA-256 of before 3.13 ("salt$sha256") is still recognised so its
+/// admin can log in once; the login then replaces it (`needs_rehash`).
 pub fn check_password(stored: &str, pass: &str) -> bool {
     if let Some(rest) = stored.strip_prefix("pbkdf2$") {
         let parts: Vec<&str> = rest.splitn(3, '$').collect();
         if parts.len() != 3 {
             return false;
         }
-        let iters: u32 = parts[0].parse().unwrap_or(0);
-        if iters == 0 {
+        let Some(iters) = parts[0].parse::<u32>().ok().filter(|i| (PBKDF2_MIN..=PBKDF2_MAX).contains(i)).and_then(std::num::NonZeroU32::new) else {
             return false;
-        }
-        let h = pbkdf2_sha256(pass.as_bytes(), parts[1].as_bytes(), iters);
-        return ct_eq(&hex::encode(h), parts[2]);
+        };
+        let Ok(want) = hex::decode(parts[2]) else { return false };
+        return ring::pbkdf2::verify(ring::pbkdf2::PBKDF2_HMAC_SHA256, iters, parts[1].as_bytes(), pass.as_bytes(), &want).is_ok();
     }
     match stored.split_once('$') {
         Some((salt, h)) => ct_eq(&sha256_hex(&format!("{}{}", salt, pass)), h),
@@ -96,6 +84,11 @@ pub fn check_password(stored: &str, pass: &str) -> bool {
 
 pub fn is_legacy_hash(stored: &str) -> bool {
     !stored.starts_with("pbkdf2$")
+}
+
+/// The hash is older or weaker than what `hash_password` makes now: rewrite it at this login
+pub fn needs_rehash(stored: &str) -> bool {
+    is_legacy_hash(stored) || stored.strip_prefix("pbkdf2$").and_then(|r| r.split('$').next()).and_then(|i| i.parse::<u32>().ok()).map(|i| i < PBKDF2_ITERS).unwrap_or(true)
 }
 
 // ---------------------------------------------------------------- TOTP (RFC 6238)
@@ -151,10 +144,6 @@ fn hotp(key: &[u8], counter: u64) -> u32 {
     bin % 1_000_000
 }
 
-/// Accepts the current 30s step and one step either side
-pub fn totp_check(secret_b32: &str, code: &str) -> bool {
-    totp_step(secret_b32, code, now()).is_some()
-}
 
 /// The 30s step `code` belongs to (the step of `at`, or one either side), None when it is wrong.
 /// A caller that remembers the last step it accepted can refuse the same code a second time.
@@ -785,6 +774,25 @@ mod totp_tests {
 #[cfg(test)]
 mod private_tests {
     use super::*;
+
+    #[test]
+    fn passwords_of_every_era_open_and_old_ones_are_rewritten() {
+        let new = hash_password("correct horse battery");
+        assert!(new.starts_with("pbkdf2$600000$") && check_password(&new, "correct horse battery") && !check_password(&new, "wrong"));
+        assert!(!needs_rehash(&new));
+        // a 3.13 – 3.67 hash (120 000 rounds, RFC 8018 PBKDF2-HMAC-SHA256): still opens, is rewritten
+        let mut out = [0u8; 32];
+        ring::pbkdf2::derive(ring::pbkdf2::PBKDF2_HMAC_SHA256, std::num::NonZeroU32::new(120_000).unwrap(), b"saltsaltsaltsalt", b"old-pass", &mut out);
+        let old = format!("pbkdf2$120000$saltsaltsaltsalt${}", hex::encode(out));
+        assert!(check_password(&old, "old-pass") && needs_rehash(&old));
+        // the salted SHA-256 before that: opens once, then rewritten
+        let legacy = format!("abc${}", sha256_hex("abcold-pass"));
+        assert!(check_password(&legacy, "old-pass") && needs_rehash(&legacy));
+        // a weakened stored hash (few rounds) never opens
+        let mut weak = [0u8; 32];
+        ring::pbkdf2::derive(ring::pbkdf2::PBKDF2_HMAC_SHA256, std::num::NonZeroU32::new(1).unwrap(), b"s", b"p", &mut weak);
+        assert!(!check_password(&format!("pbkdf2$1$s${}", hex::encode(weak)), "p"));
+    }
 
     #[test]
     fn log_lines_lose_their_secrets() {

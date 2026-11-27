@@ -1099,7 +1099,7 @@ mod token_rights_tests {
 
     fn token_headers(app: &crate::App, scopes: &str) -> HeaderMap {
         let t = "test-token-0123456789";
-        app.db.exec("INSERT INTO api_tokens(name,hash,prefix,scopes,created,last_used) VALUES('t',?1,'test',?2,0,0)", &[&crate::util::sha256_hex(t), &scopes]).unwrap();
+        app.db.exec("INSERT INTO api_tokens(name,hash,prefix,scopes,created,last_used,expires) VALUES('t',?1,'test',?2,0,0,?3)", &[&crate::util::sha256_hex(t), &scopes, &(crate::util::now() + 3600)]).unwrap();
         let mut h = HeaderMap::new();
         h.insert(axum::http::header::AUTHORIZATION, format!("Bearer {}", t).parse().unwrap());
         h

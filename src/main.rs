@@ -222,6 +222,21 @@ fn usage() {
     println!("kanki-panel {}\n\nCommands:\n  serve                      run the main panel (default)\n  node                       run the node agent\n  tunnel-agent               run the tunnel agent (servers that only carry tunnels)\n  dns                        run Kanki DNS from /etc/kanki/dns.json (started by the agent)\n  tunnel-run <file.json>     run a standalone tunnel from a JSON file (no panel); add --check to only validate it\n  hash-password <pass>       print a password hash\n  reset-admin <user> <pass>  reset admin login, sessions and 2FA\n  reset-security             clear IP allow/deny lists and disable 2FA\n  set-bot <token> <admins>   set / change the Telegram sales bot (empty token = remove)\n  version", VERSION);
 }
 
+/// A secret given to the command line: "-" or nothing = the first line of stdin (3.68: so it is not in the
+/// process list for other users to read); anything else is taken as it is, for scripts of older versions
+fn secret_arg(a: Option<&String>) -> String {
+    match a.map(|s| s.as_str()) {
+        Some(v) if v != "-" => v.to_string(),
+        _ => {
+            let mut line = String::new();
+            if let Err(e) = std::io::stdin().read_line(&mut line) {
+                eprintln!("could not read stdin: {}", e);
+            }
+            line.trim_end_matches(['\n', '\r']).to_string()
+        }
+    }
+}
+
 /// The data folder 0700; the database, its WAL and shared memory, the env file and the WireGuard configs 0600;
 /// Hysteria's config root:hysteria 0640 (its service reads it). Logged, never fatal: the panel must start.
 fn secure_files(data: &str) {
@@ -290,7 +305,14 @@ async fn main() {
 
     match cmd {
         "hash-password" => {
-            println!("{}", util::hash_password(args.get(2).map(|s| s.as_str()).unwrap_or("")));
+            // 3.68: the password comes on stdin ("-" or no argument), never as an argument other users could read
+            let p = secret_arg(args.get(2));
+            println!("{}", util::hash_password(&p));
+            return;
+        }
+        // what this binary understands, for install.sh (it may be newer or older than the binary it runs)
+        "features" => {
+            println!("stdin-secrets");
             return;
         }
         "version" | "--version" | "-v" => {
@@ -357,10 +379,17 @@ async fn main() {
     secure_files(&data);
 
     if cmd == "reset-admin" {
-        let (Some(u), Some(p)) = (args.get(2), args.get(3)) else {
-            eprintln!("usage: kanki-panel reset-admin <user> <pass>");
+        auth::audit_db(&db, "cli", "CLI", "reset-admin", 0, "local", "");
+        let Some(u) = args.get(2) else {
+            eprintln!("usage: kanki-panel reset-admin <user> -   (the password on stdin)");
             std::process::exit(1);
         };
+        let p = secret_arg(args.get(3));
+        if p.chars().count() < auth::MIN_PASSWORD {
+            eprintln!("the password must be at least {} characters", auth::MIN_PASSWORD);
+            std::process::exit(1);
+        }
+        let p = &p;
         if auth::reserved_admin_name(u.trim()) {
             eprintln!("this username is reserved (api-key, token:…), pick another");
             std::process::exit(1);
@@ -374,7 +403,8 @@ async fn main() {
         return;
     }
     if cmd == "set-bot" {
-        let token = args.get(2).cloned().unwrap_or_default();
+        auth::audit_db(&db, "cli", "CLI", "set-bot", 0, "local", "");
+        let token = secret_arg(args.get(2));
         let admins = args.get(3).cloned().unwrap_or_default();
         db.set("bot_token", token.trim());
         db.set("bot_admins", admins.trim());
@@ -383,6 +413,7 @@ async fn main() {
         return;
     }
     if cmd == "reset-security" {
+        auth::audit_db(&db, "cli", "CLI", "reset-security", 0, "local", "");
         db.set("ip_allow", "");
         db.set("ip_deny", "");
         db.set("totp_on", "0");

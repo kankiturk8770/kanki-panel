@@ -17,7 +17,7 @@ fn add_node(app: &App, id: &str) {
 fn token(app: &App, scopes: &str) -> String {
     let t = format!("tok-{}", crate::util::rand_token(20));
     app.db
-        .exec("INSERT INTO api_tokens(name,hash,prefix,scopes,created,last_used) VALUES('t',?1,'tok',?2,0,0)", &[&crate::util::sha256_hex(&t), &scopes])
+        .exec("INSERT INTO api_tokens(name,hash,prefix,scopes,created,last_used,expires) VALUES('t',?1,'tok',?2,0,0,?3)", &[&crate::util::sha256_hex(&t), &scopes, &(crate::util::now() + 3600)])
         .unwrap();
     format!("Bearer {}", t)
 }

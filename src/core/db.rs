@@ -239,6 +239,16 @@ pub fn tier_of_protocols(protocols: &str) -> crate::access::Tier {
 }
 
 /// Adds a column when the table does not have it yet (a real error, unlike «already there», is returned)
+/// 3.68: every API token ends (tokens made before get 90 days from now), and each audit row carries the hash of
+/// the row before it (tamper evidence)
+fn migrate_hardening(c: &Connection) -> rusqlite::Result<()> {
+    add_column(c, "api_tokens", "expires", "INTEGER NOT NULL DEFAULT 0")?;
+    c.execute("UPDATE api_tokens SET expires=?1 WHERE expires=0", [crate::util::now() + 90 * 86400])?;
+    add_column(c, "audit", "chain", "TEXT NOT NULL DEFAULT ''")?;
+    add_column(c, "audit", "detail", "TEXT NOT NULL DEFAULT ''")?;
+    Ok(())
+}
+
 fn add_column(c: &Connection, table: &str, col: &str, decl: &str) -> rusqlite::Result<()> {
     let mut st = c.prepare(&format!("PRAGMA table_info({})", table))?;
     let have = st.query_map([], |r| r.get::<_, String>(1))?.collect::<rusqlite::Result<Vec<String>>>()?;
@@ -364,6 +374,7 @@ impl Db {
             let _ = c.execute("INSERT OR REPLACE INTO settings(k,v) VALUES('mig_trial_notes','1')", []);
         }
         migrate_access(&c).expect("schema: server roles and user tiers");
+        migrate_hardening(&c).expect("schema: token expiry and audit chain (3.68)");
         // keep logs bounded
         trim_logs(&c);
         let db = Db(Mutex::new(c));

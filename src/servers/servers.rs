@@ -1535,8 +1535,9 @@ mod tests {
     async fn a_replaced_machine_comes_back_as_the_same_server() {
         use tower::ServiceExt;
         let app = test_app();
-        app.db.set("api_key", "test-key");
-        // a session is needed to replace a machine: a login of the admin
+        // a session is needed to replace a machine: an API token (even with every scope) is not a login
+        let key = crate::util::rand_token(40);
+        app.db.exec("INSERT INTO api_tokens(name,hash,prefix,scopes,created,expires) VALUES('t',?1,'kk',?2,?3,?4)", &[&crate::util::sha256_hex(&key), &"admin", &now(), &(now() + 3600)]).unwrap();
         let de = new_server(&app, "Germany".into(), "abroad".into(), "de.example.com".into(), Some(true), true);
         let mut list = tp::servers(&app);
         list.push(de.clone());
@@ -1562,7 +1563,8 @@ mod tests {
                 (st, serde_json::from_slice::<Value>(&b).unwrap_or(Value::Null))
             }
         };
-        let (st, _) = call("Bearer test-key", json!({ "addr": "5.6.7.8" })).await;
+        let bearer: &'static str = Box::leak(format!("Bearer {}", key).into_boxed_str());
+        let (st, _) = call(bearer, json!({ "addr": "5.6.7.8" })).await;
         assert_eq!(st, StatusCode::FORBIDDEN);
         let tok = crate::util::rand_token(40);
         app.db.exec("INSERT INTO sessions(id,username,hash,created,expires,last_seen) VALUES('s1','admin',?1,?2,?3,?2)", &[&crate::util::sha256_hex(&tok), &now(), &(now() + 3600)]).unwrap();

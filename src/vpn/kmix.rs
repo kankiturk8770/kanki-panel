@@ -1058,11 +1058,12 @@ mod tests {
     async fn recorder_asks_only_for_kmix_users() {
         use tower::ServiceExt;
         let app = crate::test_app();
-        app.db.set("api_key", "test-key");
+        let key = crate::auth::test_session(&app);
         let call = |b: Value| {
             let app = app.clone();
+            let key = key.clone();
             async move {
-                let r = axum::http::Request::builder().method("POST").uri("/api/kmix/record").header("authorization", "Bearer test-key")
+                let r = axum::http::Request::builder().method("POST").uri("/api/kmix/record").header("authorization", format!("Bearer {}", key))
                     .header("content-type", "application/json").body(axum::body::Body::from(b.to_string())).unwrap();
                 let res = crate::api::master_router(app).oneshot(r).await.unwrap();
                 let st = res.status();

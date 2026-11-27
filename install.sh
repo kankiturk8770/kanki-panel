@@ -392,6 +392,23 @@ open_ports(){
   fi
 }
 
+# bin_secret <secret> <command> [args...]: runs the panel binary with the secret on stdin (not in the process
+# list); a binary from before 3.68 only takes it as an argument
+bin_secret(){
+  local sec="$1" cmd="$2"; shift 2
+  if "$BIN" features 2>/dev/null | grep -q '^stdin-secrets$'; then
+    case "$cmd" in
+      reset-admin) printf '%s\n' "$sec" | "$BIN" "$cmd" "$@" - ;;
+      *) printf '%s\n' "$sec" | "$BIN" "$cmd" - "$@" ;;
+    esac
+  else
+    case "$cmd" in
+      reset-admin) "$BIN" "$cmd" "$@" "$sec" ;;
+      *) "$BIN" "$cmd" "$sec" "$@" ;;
+    esac
+  fi
+}
+
 service(){ # $1=name $2=args
   cat > "/etc/systemd/system/$1.service" <<EOF
 [Unit]
@@ -476,8 +493,8 @@ install_panel(){
   ask_port HTTPS_PORT "Panel HTTPS port" 2053
   ask ADMIN_USER "Admin username" admin
   while true; do
-    read -rsp "Admin password (min 8 chars): " ADMIN_PASS; echo
-    [ ${#ADMIN_PASS} -ge 8 ] && break; warn "Too short"
+    read -rsp "Admin password (min 12 chars): " ADMIN_PASS; echo
+    [ ${#ADMIN_PASS} -ge 12 ] && break; warn "Too short"
   done
   ask ENDPOINT "Public host/IP users connect to (empty = same as panel domain)" "$DOMAIN"
   ask LOCAL_NAME "Name of this server shown to users (e.g. Germany)" Main
@@ -506,7 +523,7 @@ HTTPS_PORT=$HTTPS_PORT
 PANEL_BIND=127.0.0.1
 PANEL_PORT=$PANEL_PORT
 ADMIN_USER=$ADMIN_USER
-ADMIN_PASS=$($BIN hash-password "$ADMIN_PASS")
+ADMIN_PASS=$(bin_secret "$ADMIN_PASS" hash-password)
 LOCAL_NAME=$LOCAL_NAME
 BOT_TOKEN=$BOT_TOKEN
 BOT_ADMINS=$BOT_ADMINS
@@ -711,14 +728,14 @@ set_bot(){
   echo "Plans, prices, payments and trials are managed inside the bot (Admin panel button)."
   read -rsp "Bot token from @BotFather (empty = remove bot): " T; echo
   A=""; [ -n "$T" ] && ask A "Admin numeric Telegram ID(s), comma separated"
-  $BIN set-bot "$T" "$A"
+  bin_secret "$T" set-bot "$A"
   systemctl restart kanki-panel && ok "Done. Send /start to your bot."
 }
 
 reset_admin(){
   ask U "New admin username" admin
-  while true; do read -rsp "New password (min 8 chars): " P; echo; [ ${#P} -ge 8 ] && break; warn "Too short"; done
-  $BIN reset-admin "$U" "$P"
+  while true; do read -rsp "New password (min 12 chars): " P; echo; [ ${#P} -ge 12 ] && break; warn "Too short"; done
+  bin_secret "$P" reset-admin "$U"
   systemctl restart kanki-panel && ok "Admin login reset (2FA disabled, all sessions logged out)"
 }
 

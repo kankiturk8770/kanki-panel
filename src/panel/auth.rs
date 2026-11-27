@@ -8,6 +8,7 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -75,9 +76,7 @@ fn identify_with(app: &App, h: &HeaderMap, touch: bool) -> Option<(String, Vec<S
     if util::ct_eq(&t, internal_read_token()) {
         return Some(("report-bot".into(), vec!["admin".into()]));
     }
-    if legacy_key_ok(&app.db.get("api_key"), &t) {
-        return Some(("api-key".into(), vec!["admin".into()]));
-    }
+    // 3.68: the old unrestricted `api_key` no longer opens anything (API tokens with scopes and an end replace it)
     let hash = sha256_hex(&t);
     let sess: Option<(String, String)> = app.db.with(|c| {
         c.query_row("SELECT id, username FROM sessions WHERE hash=?1 AND expires>?2", rusqlite::params![hash, now()], |r| {
@@ -92,7 +91,7 @@ fn identify_with(app: &App, h: &HeaderMap, touch: bool) -> Option<(String, Vec<S
         return Some((user, vec!["admin".into()]));
     }
     let tok: Option<(i64, String, String)> = app.db.with(|c| {
-        c.query_row("SELECT id, name, scopes FROM api_tokens WHERE hash=?1", rusqlite::params![hash], |r| {
+        c.query_row("SELECT id, name, scopes FROM api_tokens WHERE hash=?1 AND expires>?2", rusqlite::params![hash, now()], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?))
         })
         .ok()
@@ -115,6 +114,10 @@ pub fn has_scope(scopes: &[String], need: &str) -> bool {
 pub fn check(app: &App, h: &HeaderMap, scope: &str) -> Result<String, Response> {
     match identify(app, h) {
         None => Err(deny()),
+        // 3.68: «2FA required» means it: a login session does nothing but set up 2FA until it is on
+        Some((actor, _)) if is_login_session(&actor) && app.db.on("force_2fa") && !app.db.on("totp_on") => {
+            Err((StatusCode::FORBIDDEN, Json(json!({"error": "2FA is required by policy: turn it on first (Security › 2FA)", "need_2fa": true}))).into_response())
+        }
         Some((actor, scopes)) => {
             if has_scope(&scopes, scope) {
                 Ok(actor)
@@ -123,6 +126,11 @@ pub fn check(app: &App, h: &HeaderMap, scope: &str) -> Result<String, Response> 
             }
         }
     }
+}
+
+/// The actor is an admin's login session (not an API token or one of the bots' in-process keys)
+fn is_login_session(actor: &str) -> bool {
+    actor != "api-key" && !actor.starts_with("token:") && actor != "bot-admin" && actor != "report-bot"
 }
 
 /// Session-only guard (security-sensitive actions can't be done with API tokens)
@@ -188,7 +196,13 @@ pub async fn middleware(State(app): St, mut req: Request, next: Next) -> Respons
         if util::ct_eq(&bearer(req.headers()), internal_read_token()) && req.method() != Method::GET {
             return deny();
         }
-        return next.run(req).await;
+        // 3.68: what the bot's admin mini app changes is in the audit too
+        let (method, path) = (req.method().clone(), req.uri().path().to_string());
+        let res = next.run(req).await;
+        if method != Method::GET {
+            audit(&app, "bot-admin", method.as_str(), &path, res.status().as_u16() as i64, "internal", "");
+        }
+        return res;
     }
     trust_proxy_only(&mut req);
     let path = req.uri().path().to_string();
@@ -200,8 +214,12 @@ pub async fn middleware(State(app): St, mut req: Request, next: Next) -> Respons
     if is_admin_surface(&path) && !ip_allowed(&app, &ip) {
         return (StatusCode::FORBIDDEN, "forbidden").into_response();
     }
-    // the restore upload may be up to 128 MiB: do not read a byte of it for someone who is not signed in
-    if path == "/api/restore" && identify(&app, req.headers()).is_none() {
+    // the restore (128 MiB) and app (200 MiB) uploads, and any other big body: not a byte is read for someone who
+    // is not signed in (3.68: the app upload and every body over 1 MiB too)
+    let big = req.headers().get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).map(|n| n > 1 << 20).unwrap_or(false)
+        || req.headers().get(header::TRANSFER_ENCODING).is_some();
+    let upload = path == "/api/restore" || (path == "/api/apps" && req.method() == Method::POST) || (big && path.starts_with("/api/") && path != "/api/login");
+    if upload && identify_with(&app, req.headers(), false).is_none() {
         return deny();
     }
     // the hysteria upload of a tunnel agent may be big: check its server token before reading the body
@@ -214,7 +232,9 @@ pub async fn middleware(State(app): St, mut req: Request, next: Next) -> Respons
     // HTTPS only: Caddy says when a request came to it over plain http
     let sub = crate::limit::is_sub_path(&path);
     let plain = req.headers().get("x-forwarded-proto").and_then(|v| v.to_str().ok()).map(|v| v.eq_ignore_ascii_case("http")).unwrap_or(false);
-    if plain && (sub || path == "/api/login") {
+    // 3.68: every API, the Telegram mini app's API, the move and the join paths too
+    let https_only = sub || path.starts_with("/api/") || path.starts_with("/tg/api/") || path.starts_with("/move/") || path.starts_with("/join/");
+    if plain && https_only {
         return (StatusCode::FORBIDDEN, "HTTPS only").into_response();
     }
     // spam and guessing: the login, and the subscription paths (an address that keeps asking for unknown codes waits)
@@ -226,21 +246,93 @@ pub async fn middleware(State(app): St, mut req: Request, next: Next) -> Respons
     if limited && (over("sub_miss", &ip, SUB_MISS.0, SUB_MISS.1) || !hit("sub", &ip, SUB.0, SUB.1)) {
         return (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, "60")], "too many requests").into_response();
     }
-    let audited = path.starts_with("/api/") && method != Method::GET && path != "/api/login" && !path.starts_with("/api/config/");
-    let actor = if audited { identify(&app, req.headers()).map(|a| a.0).unwrap_or_else(|| "anonymous".into()) } else { String::new() };
+    let audited = (path.starts_with("/api/") && method != Method::GET && path != "/api/login" && !path.starts_with("/api/config/"))
+        || sensitive_read(&method, &path)
+        || path.starts_with("/move/")
+        || (path.starts_with("/join/") && method != Method::GET);
+    let actor = if audited { identify_with(&app, req.headers(), false).map(|a| a.0) } else { None };
     let res = next.run(req).await;
     if limited && res.headers().get("x-kanki-reason").is_some_and(|v| v == "unknown") {
         hit("sub_miss", &ip, SUB_MISS.0, SUB_MISS.1);
     }
     if audited {
         let st = res.status().as_u16() as i64;
-        let _ = app.db.exec(
-            "INSERT INTO audit(ts,actor,method,path,status,ip) VALUES(?1,?2,?3,?4,?5,?6)",
-            &[&now(), &actor, &method.as_str(), &path, &st, &ip],
-        );
-        app.db.note_log_row();
+        match actor {
+            Some(a) => audit(&app, &a, method.as_str(), &path, st, &ip, ""),
+            // 3.68: refused calls of someone not signed in are counted, not written: a flood of them cannot push
+            // the real entries out of the 5000-row audit. Token-checked paths (/move, /join) are always written.
+            None if (st == 401 || st == 403) && path.starts_with("/api/") => {
+                hit("audit_anon", &ip, u32::MAX, 3600);
+            }
+            None => audit(&app, "anonymous", method.as_str(), &path, st, &ip, ""),
+        }
     }
     res
+}
+
+/// Reads that hand out secrets: written in the audit like changes (backup, VPN server configs, a server's
+/// install command)
+fn sensitive_read(m: &Method, path: &str) -> bool {
+    *m == Method::GET
+        && (path == "/api/backup" || path.ends_with("/awgconf/entry") || path.ends_with("/awgconf/exit") || path.contains("/awgconf/") || path.contains("/hy2conf/")
+            || (path.starts_with("/api/servers/") && path.ends_with("/command")))
+}
+
+/// One audit row, chained to the one before it: `chain` = sha256(chain of the last row | this row's fields), so
+/// a row changed or removed in the middle shows (3.68). The last chain is read and the row written under the
+/// database lock, so two requests never build on the same row.
+pub fn audit(app: &App, actor: &str, method: &str, path: &str, status: i64, ip: &str, detail: &str) {
+    audit_db(&app.db, actor, method, path, status, ip, detail);
+}
+
+/// `audit` on a bare database (the command line, before the panel runs)
+pub fn audit_db(db: &crate::db::Db, actor: &str, method: &str, path: &str, status: i64, ip: &str, detail: &str) {
+    let r: rusqlite::Result<()> = db.with(|c| {
+        let prev: String = c.query_row("SELECT chain FROM audit ORDER BY id DESC LIMIT 1", [], |r| r.get(0)).optional()?.unwrap_or_default();
+        let ts = now();
+        let chain = audit_link(&prev, ts, actor, method, path, status, ip, detail);
+        c.execute(
+            "INSERT INTO audit(ts,actor,method,path,status,ip,detail,chain) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            rusqlite::params![ts, actor, method, path, status, ip, detail, chain],
+        )?;
+        Ok(())
+    });
+    if let Err(e) = r {
+        eprintln!("audit: a row could not be written: {}", e);
+    }
+    db.note_log_row();
+}
+
+#[allow(clippy::too_many_arguments)]
+fn audit_link(prev: &str, ts: i64, actor: &str, method: &str, path: &str, status: i64, ip: &str, detail: &str) -> String {
+    sha256_hex(&format!("{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}", prev, ts, actor, method, path, status, ip, detail))
+}
+
+/// The id of the first audit row whose chain does not follow from the row before it (None = intact). Rows
+/// written before 3.68 (no chain) and the oldest kept row (its parent was trimmed) start the check.
+pub fn audit_broken(app: &App) -> Option<i64> {
+    type Row = (i64, i64, String, String, String, i64, String, String, String);
+    let rows: Vec<Row> = app.db.with(|c| {
+        let mut st = c.prepare("SELECT id,ts,actor,method,path,status,ip,detail,chain FROM audit ORDER BY id").ok()?;
+        let it = st
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)))
+            .ok()?;
+        Some(it.filter_map(|x| x.ok()).collect())
+    })?;
+    let mut prev: Option<String> = None;
+    for (id, ts, actor, method, path, status, ip, detail, chain) in rows {
+        if chain.is_empty() {
+            prev = None;
+            continue;
+        }
+        if let Some(p) = &prev {
+            if audit_link(p, ts, &actor, &method, &path, status, &ip, &detail) != chain {
+                return Some(id);
+            }
+        }
+        prev = Some(chain);
+    }
+    None
 }
 
 // ================================================================ routes
@@ -314,12 +406,31 @@ fn undo_fail(app: &App, ip: &str) {
 
 /// A stored hash with the same work as a real one: checked when the username is wrong, so the answer
 /// takes as long as for a wrong password (the time does not tell whether the name exists).
-const DUMMY_HASH: &str = "pbkdf2$120000$kankidummysalt00$0000000000000000000000000000000000000000000000000000000000000000";
+const DUMMY_HASH: &str = "pbkdf2$600000$kankidummysalt00$0000000000000000000000000000000000000000000000000000000000000000";
 
 /// Checks the admin password off the async worker threads (PBKDF2 takes about a tenth of a second of CPU)
+/// At most this many password checks at once (each is ~0.3 s of one core): a burst of logins cannot take every
+/// worker thread or the whole CPU (3.68)
+const PASSWORD_CHECKS: usize = 2;
+
 async fn password_ok(stored: &str, pass: &str) -> bool {
+    static GATE: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    let gate = GATE.get_or_init(|| tokio::sync::Semaphore::new(PASSWORD_CHECKS));
+    let Ok(_permit) = gate.acquire().await else { return false };
     let (st, pw) = (stored.to_string(), pass.to_string());
     tokio::task::spawn_blocking(move || util::check_password(&st, &pw)).await.unwrap_or(false)
+}
+
+/// Wrong 2FA codes from everywhere together (3.68): after 10 in 10 minutes no code is checked until the window
+/// passes, so many addresses together cannot try the million codes either
+const TOTP_FAILS: (u32, i64) = (10, 600);
+
+fn totp_locked() -> bool {
+    crate::limit::over("totp_all", "all", TOTP_FAILS.0, TOTP_FAILS.1)
+}
+
+fn totp_failed() {
+    crate::limit::hit("totp_all", "all", TOTP_FAILS.0, TOTP_FAILS.1);
 }
 
 /// Checks a 2FA code and remembers its 30s step: the same code (or an older one) is not accepted twice.
@@ -367,15 +478,23 @@ async fn login(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         if otp.is_empty() {
             return (StatusCode::UNAUTHORIZED, Json(json!({"error": "2FA code required", "need_otp": true}))).into_response();
         }
+        if totp_locked() {
+            return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "too many wrong 2FA codes, wait 10 minutes", "need_otp": true}))).into_response();
+        }
         if !totp_fresh(&app, &app.db.get("totp_secret"), otp) {
             fail(&app, &ip);
+            totp_failed();
             log_login(&app, &u, &ip, "totp", false);
             return (StatusCode::UNAUTHORIZED, Json(json!({"error": "wrong 2FA code", "need_otp": true}))).into_response();
         }
     }
-    // transparently upgrade old sha256 hashes
-    if util::is_legacy_hash(&stored) {
-        app.db.set("admin_pass", &util::hash_password(p));
+    // an old hash (salted SHA-256, or fewer PBKDF2 rounds) is rewritten with today's rounds
+    if util::needs_rehash(&stored) {
+        let pw = p.to_string();
+        match tokio::task::spawn_blocking(move || util::hash_password(&pw)).await {
+            Ok(h) => app.db.set("admin_pass", &h),
+            Err(e) => eprintln!("login: the password hash could not be upgraded: {}", e),
+        }
     }
     app.login_fails.lock().unwrap_or_else(|e| e.into_inner()).remove(&ip);
     let t = rand_token(48);
@@ -453,12 +572,35 @@ async fn security_get(State(app): St, h: HeaderMap) -> Response {
         "admin_user": admin_user(&app), "totp_on": app.db.on("totp_on"), "force_2fa": app.db.on("force_2fa"),
         "ip_allow": app.db.get("ip_allow"), "ip_deny": app.db.get("ip_deny"), "session_hours": app.db.get("session_hours"),
         "my_ip": client_ip(&h), "current_session": cur,
+        // 3.68: the audit's hash chain is unbroken (no row was changed or removed in the middle)
+        "audit_intact": audit_broken(&app).is_none(),
         "sessions": sessions, "tokens": tokens, "logins": logins, "audit": audit,
         "legacy_key": masked, "scopes": SCOPES,
         // the panel listens only on this machine, behind Caddy's HTTPS (old installs listened on every address)
         "https_only": app.env.get("PANEL_BIND").map(|b| b == "127.0.0.1" || b == "::1" || b == "localhost").unwrap_or(true),
     }))
     .into_response()
+}
+
+/// The shortest admin password (3.68)
+pub const MIN_PASSWORD: usize = 12;
+/// How long a 2FA secret waits to be confirmed (3.68)
+const TOTP_PENDING_SECS: i64 = 600;
+
+/// Step-up for the security settings (3.68): the admin's password again in `current`, with the login's lock per
+/// address, so a stolen session alone cannot change the IP policy, 2FA or make API tokens
+#[allow(clippy::result_large_err)] // the error is the ready axum answer
+async fn step_up(app: &App, h: &HeaderMap, b: &Value) -> Result<(), Response> {
+    let ip = client_ip(h);
+    if !begin_try(app, &ip) {
+        return Err((StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "too many attempts, try again in an hour"}))).into_response());
+    }
+    if !password_ok(&admin_pass_hash(app), b["current"].as_str().unwrap_or("")).await {
+        log_login(app, &admin_user(app), &ip, "step-up", false);
+        return Err((StatusCode::FORBIDDEN, Json(json!({"error": "your current password is needed for this (wrong or missing)", "need_password": true}))).into_response());
+    }
+    undo_fail(app, &ip);
+    Ok(())
 }
 
 async fn change_password(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
@@ -476,8 +618,8 @@ async fn change_password(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> 
     undo_fail(&app, &ip);
     let user = b["username"].as_str().unwrap_or("").trim();
     let pass = b["password"].as_str().unwrap_or("");
-    if pass.len() < 8 {
-        return bad("password must be at least 8 characters");
+    if pass.chars().count() < MIN_PASSWORD {
+        return bad(&format!("password must be at least {} characters", MIN_PASSWORD));
     }
     if reserved_admin_name(user) {
         return bad("this username is reserved, pick another");
@@ -498,6 +640,7 @@ async fn change_password(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> 
 
 async fn policy(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if let Err(r) = check_session(&app, &h) { return r; }
+    if let Err(r) = step_up(&app, &h, &b).await { return r; }
     let allow = b["ip_allow"].as_str().unwrap_or("").trim().to_string();
     let deny_l = b["ip_deny"].as_str().unwrap_or("").trim().to_string();
     let ip = client_ip(&h);
@@ -522,9 +665,7 @@ async fn policy(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response 
 
 async fn regen_key(State(app): St, h: HeaderMap) -> Response {
     if let Err(r) = check_session(&app, &h) { return r; }
-    let k = rand_token(40);
-    set_legacy_key(&app.db, &k);
-    Json(json!({"api_key": k})).into_response()
+    (StatusCode::GONE, Json(json!({"error": "the full-access API key was removed in 3.68: make an API token with only the scopes it needs (Security › API tokens)"}))).into_response()
 }
 
 /// The old full-access API key is kept only as a hash ("h:<sha256>"), like the API tokens: a copy of the
@@ -534,12 +675,24 @@ pub fn set_legacy_key(db: &crate::db::Db, k: &str) {
     db.set("api_key_hint", &if k.len() > 8 { format!("{}…{}", &k[..4], &k[k.len() - 4..]) } else { String::new() });
 }
 
+/// A signed-in admin session for the tests: its bearer token
+#[cfg(test)]
+pub fn test_session(app: &App) -> String {
+    let t = rand_token(32);
+    let _ = app.db.exec(
+        "INSERT INTO sessions(id,hash,username,ip,ua,created,last_seen,expires) VALUES(?1,?2,'admin','203.0.113.1','test',?3,?3,?4)",
+        &[&rand_token(8), &sha256_hex(&t), &now(), &(now() + 3600)],
+    );
+    t
+}
+
 /// Does `t` open the old API key (tests)
 #[cfg(test)]
 pub fn legacy_key_matches(db: &crate::db::Db, t: &str) -> bool {
     legacy_key_ok(&db.get("api_key"), t)
 }
 
+#[cfg(test)]
 fn legacy_key_ok(stored: &str, t: &str) -> bool {
     match stored.strip_prefix("h:") {
         Some(h) => !h.is_empty() && util::ct_eq(&sha256_hex(t), h),
@@ -558,14 +711,17 @@ pub fn legacy_key_start(db: &crate::db::Db) {
     }
 }
 
-async fn totp_setup(State(app): St, h: HeaderMap) -> Response {
+async fn totp_setup(State(app): St, h: HeaderMap, b: Option<Json<Value>>) -> Response {
     if let Err(r) = check_session(&app, &h) { return r; }
+    let b = b.map(|x| x.0).unwrap_or(Value::Null);
+    if let Err(r) = step_up(&app, &h, &b).await { return r; }
     // a new secret only after the current one is turned off with its own code
     if app.db.on("totp_on") {
         return bad("2FA is already on; turn it off with its code first");
     }
     let secret = util::totp_secret();
     app.db.set("totp_pending", &secret);
+    app.db.set("totp_pending_at", &now().to_string());
     let label = format!("{}:{}", app.db.get("panel_name"), admin_user(&app));
     let uri = format!("otpauth://totp/{}?secret={}&issuer={}&digits=6&period=30", util::pct(&label), secret, util::pct(&app.db.get("panel_name")));
     Json(json!({"secret": secret, "uri": uri, "qr": util::qr_svg(&uri).unwrap_or_default()})).into_response()
@@ -580,11 +736,23 @@ async fn totp_enable(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Resp
     if pending.is_empty() {
         return bad("start setup first");
     }
-    if !util::totp_check(&pending, b["code"].as_str().unwrap_or("")) {
+    // 3.68: a secret waits 10 minutes to be confirmed, then setup starts again
+    let at: i64 = app.db.get("totp_pending_at").parse().unwrap_or(0);
+    if now() - at > TOTP_PENDING_SECS {
+        app.db.set("totp_pending", "");
+        return bad("the setup took longer than 10 minutes: start it again");
+    }
+    if totp_locked() {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "too many wrong 2FA codes, wait 10 minutes"}))).into_response();
+    }
+    // the code that turns 2FA on is used up (its 30-second step cannot log in afterwards)
+    if !totp_fresh(&app, &pending, b["code"].as_str().unwrap_or("")) {
+        totp_failed();
         return bad("wrong code, check your phone clock");
     }
     app.db.set("totp_secret", &pending);
     app.db.set("totp_pending", "");
+    app.db.set("totp_pending_at", "");
     app.db.set("totp_on", "1");
     Json(json!({"ok": true})).into_response()
 }
@@ -594,7 +762,12 @@ async fn totp_disable(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     if app.db.on("force_2fa") {
         return bad("2FA is enforced by policy; turn enforcement off first");
     }
+    if let Err(r) = step_up(&app, &h, &b).await { return r; }
+    if totp_locked() {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "too many wrong 2FA codes, wait 10 minutes"}))).into_response();
+    }
     if app.db.on("totp_on") && !totp_fresh(&app, &app.db.get("totp_secret"), b["code"].as_str().unwrap_or("")) {
+        totp_failed();
         return bad("wrong code");
     }
     app.db.set("totp_on", "0");
@@ -617,6 +790,7 @@ async fn revoke_session(State(app): St, h: HeaderMap, Path(id): Path<String>) ->
 
 async fn token_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     if let Err(r) = check_session(&app, &h) { return r; }
+    if let Err(r) = step_up(&app, &h, &b).await { return r; }
     let name = b["name"].as_str().unwrap_or("").trim().to_string();
     if name.is_empty() {
         return bad("name required");
@@ -627,14 +801,20 @@ async fn token_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
     if scopes.is_empty() {
         return bad("pick at least one scope");
     }
+    // 3.68: every token ends: 1 to 365 days (90 when not given)
+    let days = b["days"].as_i64().unwrap_or(90);
+    if !(1..=365).contains(&days) {
+        return bad("days: 1 to 365");
+    }
+    let expires = now() + days * 86400;
     let t = format!("kk_{}", rand_token(44));
     let prefix: String = t.chars().take(8).collect();
     let r = app.db.exec(
-        "INSERT INTO api_tokens(name,hash,prefix,scopes,created) VALUES(?1,?2,?3,?4,?5)",
-        &[&name, &sha256_hex(&t), &prefix, &scopes.join(","), &now()],
+        "INSERT INTO api_tokens(name,hash,prefix,scopes,created,expires) VALUES(?1,?2,?3,?4,?5,?6)",
+        &[&name, &sha256_hex(&t), &prefix, &scopes.join(","), &now(), &expires],
     );
     match r {
-        Ok(_) => Json(json!({"token": t})).into_response(),
+        Ok(_) => Json(json!({"token": t, "expires": expires})).into_response(),
         Err(e) => bad(&e),
     }
 }
@@ -650,20 +830,112 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_old_api_key_is_kept_only_as_a_hash() {
+    fn the_old_api_key_is_kept_only_as_a_hash_and_opens_nothing() {
         let app = crate::test_app();
         app.db.set("api_key", "plainlegacykey0123456789");
         legacy_key_start(&app.db);
         assert!(app.db.get("api_key").starts_with("h:") && !app.db.get("api_key").contains("plainlegacy"));
         let mut h = HeaderMap::new();
+        // 3.68: the old full-access key opens nothing any more, as its plain text or its hash
         h.insert("authorization", "Bearer plainlegacykey0123456789".parse().unwrap());
-        assert_eq!(identify_with(&app, &h, false).map(|x| x.0).as_deref(), Some("api-key"));
+        assert!(identify_with(&app, &h, false).is_none());
         h.insert("authorization", format!("Bearer {}", app.db.get("api_key")).parse().unwrap());
         assert!(identify_with(&app, &h, false).is_none());
         // a start again leaves the hash as it is
         let k = app.db.get("api_key");
         legacy_key_start(&app.db);
         assert_eq!(app.db.get("api_key"), k);
+    }
+
+    #[test]
+    fn the_audit_chain_shows_a_changed_row() {
+        let app = crate::test_app();
+        for i in 0..5 {
+            audit(&app, "admin", "POST", &format!("/api/users/{}", i), 200, "203.0.113.1", "");
+        }
+        assert_eq!(audit_broken(&app), None);
+        let mid: i64 = app.db.with(|c| c.query_row("SELECT id FROM audit ORDER BY id LIMIT 1 OFFSET 2", [], |r| r.get(0)).unwrap());
+        app.db.exec("UPDATE audit SET actor='someone-else' WHERE id=?1", &[&mid]).unwrap();
+        assert_eq!(audit_broken(&app), Some(mid));
+    }
+
+    /// Refused calls of strangers are not written (a flood cannot evict the real audit rows); a signed-in change is
+    #[tokio::test]
+    async fn strangers_cannot_fill_the_audit() {
+        use tower::ServiceExt;
+        let app = crate::test_app();
+        let count = || app.db.with(|c| c.query_row("SELECT COUNT(*) FROM audit", [], |r| r.get::<_, i64>(0)).unwrap());
+        for _ in 0..20 {
+            let r = Request::post("/api/users").header("content-type", "application/json").header("x-forwarded-for", "198.51.100.7")
+                .body(axum::body::Body::from("{}")).unwrap();
+            let res = crate::api::master_router(app.clone()).oneshot(r).await.unwrap();
+            assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        }
+        assert_eq!(count(), 0);
+        // and a stranger's big upload is refused before its body is read
+        let r = Request::post("/api/apps").header("content-length", "209715200").header("x-forwarded-for", "198.51.100.7")
+            .body(axum::body::Body::empty()).unwrap();
+        assert_eq!(crate::api::master_router(app.clone()).oneshot(r).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+        let r = Request::get("/api/users").header("x-forwarded-proto", "http").header("x-forwarded-for", "198.51.100.7")
+            .body(axum::body::Body::empty()).unwrap();
+        assert_eq!(crate::api::master_router(app.clone()).oneshot(r).await.unwrap().status(), StatusCode::FORBIDDEN, "plain http to the API");
+    }
+
+    /// A stolen session is not enough for the security settings: the password again (step-up); and «2FA
+    /// required» stops a session from doing anything else until 2FA is on
+    #[tokio::test]
+    async fn security_changes_need_the_password_and_forced_2fa_blocks() {
+        use tower::ServiceExt;
+        let app = crate::test_app();
+        app.db.set("admin_user", "admin");
+        app.db.set("admin_pass", &util::hash_password("the-right-password"));
+        let t = test_session(&app);
+        let call = |m: Method, uri: &'static str, body: Value| {
+            let (app, t) = (app.clone(), t.clone());
+            async move {
+                let r = Request::builder().method(m).uri(uri).header("authorization", format!("Bearer {}", t)).header("content-type", "application/json")
+                    .header("x-forwarded-for", "203.0.113.50").body(axum::body::Body::from(body.to_string())).unwrap();
+                crate::api::master_router(app).oneshot(r).await.unwrap().status()
+            }
+        };
+        let pol = json!({"ip_allow": "", "ip_deny": "", "session_hours": 24, "force_2fa": false});
+        assert_eq!(call(Method::POST, "/api/security/policy", pol.clone()).await, StatusCode::FORBIDDEN);
+        let mut wrong = pol.clone();
+        wrong["current"] = json!("wrong-password");
+        assert_eq!(call(Method::POST, "/api/security/policy", wrong).await, StatusCode::FORBIDDEN);
+        let mut ok = pol.clone();
+        ok["current"] = json!("the-right-password");
+        assert_eq!(call(Method::POST, "/api/security/policy", ok).await, StatusCode::OK);
+        // «2FA required» while 2FA is off (a restore, an old database): the session must turn it on first
+        app.db.set("force_2fa", "1");
+        // 2FA is not on yet: an ordinary admin call is refused, setting up 2FA is not
+        assert_eq!(call(Method::GET, "/api/users", Value::Null).await, StatusCode::FORBIDDEN);
+        assert_eq!(call(Method::POST, "/api/security/2fa/setup", json!({"current": "the-right-password"})).await, StatusCode::OK);
+        // the pending secret ends after 10 minutes
+        app.db.set("totp_pending_at", &(now() - TOTP_PENDING_SECS - 1).to_string());
+        assert_eq!(call(Method::POST, "/api/security/2fa/enable", json!({"code": "000000"})).await, StatusCode::BAD_REQUEST);
+        assert_eq!(app.db.get("totp_pending"), "");
+        // a too short password is refused
+        let short = json!({"current": "the-right-password", "password": "short-pass1"});
+        assert_eq!(call(Method::POST, "/api/security/password", short).await, StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn an_api_token_stops_at_its_end() {
+        let app = crate::test_app();
+        let ins = |t: &str, exp: i64| {
+            app.db.exec("INSERT INTO api_tokens(name,hash,prefix,scopes,created,expires) VALUES('t',?1,'kk',?2,?3,?4)", &[&sha256_hex(t), &"admin", &now(), &exp]).unwrap();
+        };
+        ins("kk_live", now() + 60);
+        ins("kk_dead", now() - 1);
+        ins("kk_never", 0);
+        let who = |t: &str| {
+            let mut h = HeaderMap::new();
+            h.insert("authorization", format!("Bearer {}", t).parse().unwrap());
+            identify_with(&app, &h, false).map(|x| x.0)
+        };
+        assert_eq!(who("kk_live").as_deref(), Some("token:t"));
+        assert!(who("kk_dead").is_none() && who("kk_never").is_none());
     }
 
     #[test]
@@ -705,7 +977,7 @@ mod tests {
 
     #[test]
     fn the_dummy_hash_has_the_real_work() {
-        assert!(DUMMY_HASH.starts_with("pbkdf2$120000$"));
+        assert!(DUMMY_HASH.starts_with(&format!("pbkdf2${}$", util::PBKDF2_ITERS)));
         assert!(!util::check_password(DUMMY_HASH, "anything"));
     }
 }
