@@ -49,11 +49,26 @@ jobs:
       - name: Tests (a real entry and exit on this machine, TCP and UDP)
         run: cargo test -- --nocapture --test-threads=4 || cargo test -- --nocapture --test-threads=1
 
-      # 3.69: the release signing public key (repository variable KANKI_UPDATE_PUBKEY, the base64 line of
-      # minisign.pub) goes into the program: it checks every update with it before running it
-      - name: Build
+      # 3.69: the release signing public key goes into the program: it checks every update with it before running
+      # it. 3.72: it is the public half of the secret MINISIGN_SECRET_KEY itself (so the two can never disagree);
+      # the variable KANKI_UPDATE_PUBKEY is used only when the secret is not there
+      - name: The update key
         env:
-          KANKI_UPDATE_PUBKEY: ${{ vars.KANKI_UPDATE_PUBKEY }}
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          VAR_KEY: ${{ vars.KANKI_UPDATE_PUBKEY }}
+        run: |
+          set -euo pipefail
+          k="${VAR_KEY:-}"
+          if [ -n "${MINISIGN_SECRET_KEY:-}" ]; then
+            k=$(printf '%s\n' "$MINISIGN_SECRET_KEY" | python3 scripts/minisign_pub.py)
+            if [ -n "${VAR_KEY:-}" ] && [ "$k" != "$VAR_KEY" ]; then
+              echo "::warning::the variable KANKI_UPDATE_PUBKEY is not the public key of MINISIGN_SECRET_KEY: the secret's own public key is used"
+            fi
+          fi
+          echo "KANKI_UPDATE_PUBKEY=$k" >> "$GITHUB_ENV"
+          echo "update key: ${k:-none}"
+
+      - name: Build
         run: cargo build --release
 
       - name: Package
@@ -82,6 +97,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      # only scripts/ (the update key's public half), before the release files arrive (a checkout cleans the folder)
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+
       - uses: actions/download-artifact@v4
         with:
           name: release
@@ -94,25 +115,25 @@ jobs:
       - name: Sign the program
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-          KANKI_UPDATE_PUBKEY: ${{ vars.KANKI_UPDATE_PUBKEY }}
         run: |
           set -euo pipefail
-          if [ -z "${MINISIGN_SECRET_KEY:-}" ] || [ -z "${KANKI_UPDATE_PUBKEY:-}" ]; then
-            echo "::error::MINISIGN_SECRET_KEY (secret) and KANKI_UPDATE_PUBKEY (variable) must be set to publish"
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "::error::the secret MINISIGN_SECRET_KEY (a key made with: minisign -G -W) must be set to publish"
             exit 1
           fi
-          # a public key whose 32 key bytes are all zero is a placeholder, not a key: nothing could ever be verified
-          keyhex=$(printf '%s' "$KANKI_UPDATE_PUBKEY" | base64 -d 2>/dev/null | od -An -tx1 -v | tr -d ' \n')
-          if [ "${#keyhex}" -ne 84 ] || [ -z "$(printf '%s' "${keyhex:20}" | tr -d '0')" ]; then
-            echo "::error::KANKI_UPDATE_PUBKEY is not a real minisign public key (make one with: minisign -G -W)"
-            exit 1
-          fi
+          # the public half of the secret key: the same one the build put into the program
+          KANKI_UPDATE_PUBKEY=$(printf '%s\n' "$MINISIGN_SECRET_KEY" | python3 scripts/minisign_pub.py)
           # the runner's package lists are empty until updated (minisign is in Ubuntu's universe)
           sudo apt-get update -qq >/dev/null
           sudo apt-get install -y -qq minisign >/dev/null
           key=$(mktemp)
           trap 'rm -f "$key"' EXIT
-          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          # the key file as minisign writes it (a secret saved without its comment line gets one)
+          if printf '%s\n' "$MINISIGN_SECRET_KEY" | head -n1 | grep -q '^untrusted comment:'; then
+            printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          else
+            printf 'untrusted comment: minisign secret key\n%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          fi
           minisign -S -s "$key" -m kanki-panel -x kanki-panel.minisig -t "kanki-panel $(cat version.txt)"
           minisign -V -P "$KANKI_UPDATE_PUBKEY" -m kanki-panel -x kanki-panel.minisig
 
