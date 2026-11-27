@@ -136,6 +136,14 @@ function botDraw(){var b=S.bot||{},el=$('#bt');if(!el)return;var has=!!b.token_s
  w('#bt_test',function(){toast(t('Checking…'));api('POST','/api/bot/test').then(function(r){toast(r.ok?'✓ @'+(r.username||''):(r.error||t('Failed')),!r.ok)}).catch(fail)});
  w('#bt_pause',function(){api('POST','/api/bot/pause').then(function(){toast(t('Done'));botLoad()}).catch(fail)});
  w('#bt_del',function(){confirmDo(function(){api('DELETE','/api/bot').then(waitRestart).catch(fail)})});}
+// ---- (3.71) Audit (Reports): who changed what, and the sign-ins, from the hash-chained audit (read-only)
+function p_audit(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Audit')+'</h2><p>'+t('Who changed what in the panel, and every sign-in')+'</p></div></div><div id="au">'+skel()+'</div>';
+ api('GET','/api/security').then(function(s){var el=$('#au');if(!el)return;var au=s.audit||[],lg=s.logins||[];
+  var row=function(x){var ok=x.status<400;return '<div class="vrow"><span class="dot '+(ok?'g':'r')+'"></span><div class="nm"><b class="ltr">'+esc(x.method)+' '+esc(x.path)+'</b><small>'+esc(x.actor||'—')+' · <span class="ltr">'+esc(x.ip||'')+'</span> · '+ago(x.ts)+'</small></div><span class="ku-n ltr">'+N(x.status)+'</span></div>'};
+  var lrow=function(x){return '<div class="vrow"><span class="dot '+(x.ok?'g':'r')+'"></span><div class="nm"><b class="ltr">'+esc(x.username||'—')+'</b><small><span class="ltr">'+esc(x.ip||'')+'</span> · '+esc(x.method||'')+' · '+ago(x.ts)+'</small></div><span class="ku-n">'+t(x.ok?'OK':'Failed')+'</span></div>'};
+  el.innerHTML=kuStats([[t('Changes'),N(au.length)],[t('Failed'),N(au.filter(function(x){return x.status>=400}).length),au.some(function(x){return x.status>=400})?'y':''],[t('Sign-ins'),N(lg.length)],[t('Chain'),t(s.audit_intact?'Intact':'Broken'),s.audit_intact?'g':'r']])+
+   kuGroup(t('Changes'),au.length,'',au.length?au.map(row).join(''):'<p class="muted ku-empty">'+t('Nothing yet')+'</p>')+
+   kuGroup(t('Sign-ins'),lg.length,'',lg.length?lg.map(lrow).join(''):'<p class="muted ku-empty">'+t('Nothing yet')+'</p>')}).catch(fail)}
 // ---- Logs: the last warnings and errors of Kanki's services on every server (3.65: a page of its own)
 function pLogs(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Logs')+'</h2></div></div><div id="lgv">'+logCard()+'</div>';logWire()}
 function verLt(a,b){var p=function(v){return String(v).replace(/^v/,'').split('.').map(function(x){return +x||0})},x=p(a),y=p(b);for(var i=0;i<3;i++){if((x[i]||0)!=(y[i]||0))return (x[i]||0)<(y[i]||0)}return false}

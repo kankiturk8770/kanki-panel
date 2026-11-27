@@ -278,7 +278,7 @@ function loginView(otp){$('#app').innerHTML='';document.body.className='';applyL
 function logout(silent){if(!silent&&S.token)api('POST','/api/logout').catch(function(){});S.token='';loginView()}
 
 // ---------------------------------------------------------------- shell
-var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['xray','Xray','xray'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['logs','Logs','logs'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
+var PAGES=[['dash','Dashboard','dash'],['users','Users','users'],['vpn','VPN services','shield2'],['nodes','Servers','nodes'],['kmix','KANKI MIX','game'],['xray','Xray','xray'],['dns','Kanki DNS','dns'],['servers','Tunnel servers','srv'],['tunnels','Tunnels','tunnel'],['traffic','Traffic & stats','traffic'],['ports','Port management','ports'],['bot','Sales bot','bot'],['logs','Logs','logs'],['audit','Audit','shield2'],['backup','Backup','backup'],['security','Security','security'],['settings','Settings','settings']];
 function pgOf(k){for(var i=0;i<PAGES.length;i++)if(PAGES[i][0]==k)return PAGES[i];return PAGES[0]}
 function decoratePh(){var ph=$('#pg .ph');if(!ph||ph.querySelector('.phi'))return;var d=ph.firstElementChild;if(!d||d.tagName!='DIV')return;
  var inner=document.createElement('div');while(d.firstChild)inner.appendChild(d.firstChild);

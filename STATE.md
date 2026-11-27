@@ -19,7 +19,7 @@ Account page (`assets/sub/sub.html`, `api::sub_page_of`)
 
 Navigation (`13-menu.js`): five sections in the side menu and the phone bar (each a fifth of the width):
 Home (Dashboard, Logs) · Users · Infrastructure (Servers + role, Cores, WG, AWG, HY2, KANKI MIX, Xray, DNS, Tunnels,
-Ports & firewall) · Reports (Traffic, Bot) · Settings (Settings, Security, Backup & move). Live dots only on core tabs.
+Ports & firewall) · Reports (Traffic, Bot, Audit) · Settings (Settings, Security, Backup & move). Live dots only on core tabs.
 
 Removed
 - `assets/panel/js/04-antidpi.js` (the Anti-DPI page): its inbound methods are the Xray editor's presets, its
@@ -57,7 +57,8 @@ Tests added: `account_page_tests::{the_account_page_leaks_no_secret_and_cannot_b
 template_marks_are_filled_once_and_links_are_masked}`, `access_tests::inbound_names_are_unique_and_vision_is_only_where_it_works`.
 Checked in Chromium (390 px): login, the five sections and every tab, no script error; the user form; the account page.
 
-Not done: an audit-log page (no UI existed; the audit chain is kept and shown as `audit_intact`).
+Reports › Audit (`p_audit`, from `GET /api/security`, admin login only): the last 100 changes (method, path, status, who,
+from where, when), the last 50 sign-ins, and whether the audit's hash chain is intact.
 
 ## 3.70.0 — Phase 3: bot / mini app hardening, one account with three plans, server roles (done; branch `ccr-94a1e97e-wsl617`)
 Nothing a user has changes: subscription codes (old ones and the 39-digit ones of 3.69), keyed credentials, links and

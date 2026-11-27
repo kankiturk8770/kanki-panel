@@ -16,7 +16,7 @@ var SECS=[
  ['home','Home','dash',[['dash','','Dashboard'],['logs','','Logs']],'Overview'],
  ['users','Users','users',[['users','','Users']],'Users'],
  ['infra','Infrastructure','nodes',[['nodes','','Servers'],['vpn','','Cores'],['wg','','WireGuard'],['awg','','AmneziaWG'],['hy2','','Hysteria2'],['kmix','','KANKI MIX'],['xray','status','Xray'],['dns','','DNS'],['tunnels','','Tunnels'],['ports','','Ports & firewall']],'Infrastructure'],
- ['reports','Reports','traffic',[['traffic','','Traffic'],['bot','','Bot']],'Reports'],
+ ['reports','Reports','traffic',[['traffic','','Traffic'],['bot','','Bot'],['audit','','Audit']],'Reports'],
  ['settings','Settings','settings',[['settings','','Settings'],['security','','Security'],['backup','','Backup & move']],'System']];
 // the cores: their tabs carry a live dot
 var CORES=['wg','awg','hy2','kmix','xray','dns'];
