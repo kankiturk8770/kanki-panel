@@ -120,6 +120,9 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
     let hy2_names: HashSet<String> = req.hy2.values().cloned().collect();
     let block = req.block.clone();
     let _ = tokio::task::spawn_blocking(move || crate::wg::set_blocked(&block)).await;
+    // WireGuard / AmneziaWG users never reach the management ports or private networks (3.68)
+    let env = app.env.clone();
+    let _ = tokio::task::spawn_blocking(move || crate::isolate::apply(&env)).await;
     let off = req.off.clone();
     let _ = tokio::task::spawn_blocking(move || crate::cores::apply(&off)).await;
     let (wgv, awgv, mtu) = (req.wg, req.awg, req.mtu);

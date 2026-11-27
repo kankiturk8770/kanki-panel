@@ -642,9 +642,9 @@ pub fn build_config(s: &XraySettings, sid: &str, users: &[User]) -> Value {
     // (127.0.0.1:10085, no password), the panel and the other local services listen there
     rules.push(json!({ "type": "field", "ip": ["127.0.0.0/8", "::1/128"], "outboundTag": "block" }));
     rules.push(json!({ "type": "field", "domain": ["full:localhost", "domain:localhost"], "outboundTag": "block" }));
-    if s.block_private {
-        rules.push(json!({ "type": "field", "ip": PRIVATE_NETS, "outboundTag": "block" }));
-    }
+    // 3.68: private and link-local networks (the provider's other machines, cloud metadata at 169.254.169.254)
+    // are always blocked for users, whatever «block private networks» says (it is kept for old settings files)
+    rules.push(json!({ "type": "field", "ip": PRIVATE_NETS, "outboundTag": "block" }));
     if s.block_bt {
         rules.push(json!({ "type": "field", "protocol": ["bittorrent"], "outboundTag": "block" }));
     }
@@ -1590,6 +1590,8 @@ async fn reality_test(State(app): St, h: HeaderMap, Json(b): Json<RealityTest>) 
 /// "host[:port]" → the TLS 1.3 handshake time in ms and whether HTTP/2 was picked
 async fn probe_reality(target: &str) -> Result<(u64, bool), String> {
     let (host, port) = split_target(target)?;
+    // 3.68 SSRF guard: a REALITY target is a public site, never this server or a private network
+    let addr = crate::util::public_host(&host, port, false).await?.into_iter().next().ok_or_else(|| "the name does not resolve".to_string())?;
     let roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
     let mut cfg = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
         .with_protocol_versions(&[&rustls::version::TLS13])
@@ -1600,7 +1602,7 @@ async fn probe_reality(target: &str) -> Result<(u64, bool), String> {
     let name = rustls::pki_types::ServerName::try_from(host.clone()).map_err(|_| "bad name".to_string())?;
     let t0 = std::time::Instant::now();
     let go = async {
-        let tcp = tokio::net::TcpStream::connect((host.as_str(), port)).await.map_err(|e| format!("connect: {}", e))?;
+        let tcp = tokio::net::TcpStream::connect(addr).await.map_err(|e| format!("connect: {}", e))?;
         let tls = tokio_rustls::TlsConnector::from(Arc::new(cfg)).connect(name, tcp).await.map_err(|e| format!("tls: {}", e))?;
         Ok::<bool, String>(tls.get_ref().1.alpn_protocol() == Some(b"h2".as_slice()))
     };

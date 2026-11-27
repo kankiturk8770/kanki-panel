@@ -109,6 +109,18 @@ fn ufw(args: &str) {
     let _ = Command::new("sh").arg("-c").arg(format!("command -v ufw >/dev/null 2>&1 && ufw {} >/dev/null 2>&1", args)).status();
 }
 
+/// The cores this server has switched off (the last list the panel sent that was applied here); an
+/// unreadable file means none (as before the panel ever sent one)
+pub fn switched_off() -> std::collections::BTreeSet<String> {
+    match std::fs::read_to_string(LAST) {
+        Ok(t) => serde_json::from_str::<Vec<String>>(&t).map(|v| v.into_iter().collect()).unwrap_or_else(|e| {
+            eprintln!("cores: {} is not readable ({}); treating every core as on", LAST, e);
+            Default::default()
+        }),
+        Err(_) => Default::default(),
+    }
+}
+
 /// Applies the panel's list on this server. Only what changed since the last list is touched, so a
 /// service stopped by hand (Dashboard > Services) is not started again by every sync. Blocking.
 pub fn apply(off: &[String]) {

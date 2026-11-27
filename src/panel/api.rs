@@ -723,6 +723,11 @@ async fn nodes_list(State(app): St, h: HeaderMap) -> Response {
     Json(json!(v)).into_response()
 }
 
+/// Servers of this panel may be in one private network (set by the installer or by hand in kanki.env)
+fn private_nodes_ok(app: &App) -> bool {
+    app.env.get("ALLOW_PRIVATE_NODES").map(|v| v.trim() == "1").unwrap_or(false)
+}
+
 async fn nodes_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
     let name = b["name"].as_str().unwrap_or("").trim().to_string();
@@ -735,6 +740,11 @@ async fn nodes_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respon
     }
     if !addr.starts_with("http://") && !addr.starts_with("https://") {
         return err(StatusCode::BAD_REQUEST, "API address must start with https:// (or http:// for old nodes)");
+    }
+    // 3.68 SSRF guard: never this server's own loopback or metadata; private networks only when the install says
+    // its servers share one (ALLOW_PRIVATE_NODES=1 in kanki.env)
+    if let Err(e) = crate::util::public_url(&addr, private_nodes_ok(&app)).await {
+        return err(StatusCode::BAD_REQUEST, &format!("API address: {}", e));
     }
     let info = match sync::remote_info_res(&app, &addr, &token, insecure).await {
         Ok(i) => i,
@@ -1265,6 +1275,10 @@ async fn node_join_register(State(app): St, Json(b): Json<Value>) -> Response {
     let insecure = b["insecure"].as_bool().unwrap_or(false);
     if token.is_empty() || !addr.starts_with("https://") {
         return err(StatusCode::BAD_REQUEST, "address (https://...) and node_token are required");
+    }
+    // 3.68 SSRF guard: a joining server cannot point the panel at the panel's own loopback or cloud metadata
+    if let Err(e) = crate::util::public_url(&addr, private_nodes_ok(&app)).await {
+        return err(StatusCode::BAD_REQUEST, &format!("address: {}", e));
     }
     let name = if name.is_empty() { format!("node-{}", rand_token(4).to_lowercase()) } else { name };
     // the same server registering twice (re-run after a firewall fix, or a reinstall with a new

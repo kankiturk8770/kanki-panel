@@ -902,7 +902,9 @@ async fn http(eng: &Arc<Engine>, mut s: TcpStream, ip: IpAddr) {
             },
             None => "{\"ok\":false}".into(),
         };
-        let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+        // 3.68: plain-HTTP registration is deprecated (the token crosses the network in clear); it keeps working
+        // for the apps that still use it, and points at the HTTPS one (`/r/<token>` on the DoH host)
+        let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nDeprecation: true\r\nLink: </r/>; rel=\"successor-version\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
         let _ = s.write_all(resp.as_bytes()).await;
         return;
     }
@@ -1052,7 +1054,8 @@ async fn carry(eng: &Arc<Engine>, client: TcpStream, pre: Vec<u8>, name: &str, p
     } else {
         drop(live);
         let mut got = None;
-        for ip in eng.lookup(name).await.into_iter().take(4) {
+        // only public addresses: a routed name that resolves to this server or a private network is not carried
+        for ip in eng.lookup(name).await.into_iter().filter(|ip| crate::util::public_ip(std::net::IpAddr::V4(*ip))).take(4) {
             if let Ok(Ok(u)) = tokio::time::timeout(Duration::from_secs(6), TcpStream::connect((ip, port))).await {
                 got = Some(u);
                 break;

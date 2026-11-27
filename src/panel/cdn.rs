@@ -154,11 +154,17 @@ fn tail(s: &str) -> String {
 }
 
 fn write_and_reload(content: &str) -> Result<(), String> {
-    std::fs::write(CADDYFILE, content).map_err(|e| format!("cannot write {}: {}", CADDYFILE, e))?;
-    let (ok, out) = run("caddy", &["validate", "--config", CADDYFILE, "--adapter", "caddyfile"]);
+    // 3.68: validated as a file of its own first; the live Caddyfile only ever holds a config Caddy accepts
+    let tmp = format!("{}.kanki-new", CADDYFILE);
+    std::fs::write(&tmp, content).map_err(|e| format!("cannot write {}: {}", tmp, e))?;
+    let (ok, out) = run("caddy", &["validate", "--config", &tmp, "--adapter", "caddyfile"]);
     if !ok {
+        if let Err(e) = std::fs::remove_file(&tmp) {
+            eprintln!("cdn: {} could not be removed: {}", tmp, e);
+        }
         return Err(format!("Caddy rejected the new config: {}", tail(&out)));
     }
+    std::fs::rename(&tmp, CADDYFILE).map_err(|e| format!("cannot write {}: {}", CADDYFILE, e))?;
     if run("systemctl", &["reload", "caddy"]).0 {
         return Ok(());
     }

@@ -323,6 +323,14 @@ acl:
     - reject(127.0.0.0/8)
     - reject(::1)
     - reject(localhost)
+    - reject(0.0.0.0/8)
+    - reject(10.0.0.0/8)
+    - reject(100.64.0.0/10)
+    - reject(169.254.0.0/16)
+    - reject(172.16.0.0/12)
+    - reject(192.168.0.0/16)
+    - reject(fc00::/7)
+    - reject(fe80::/10)
 EOF
   systemctl enable -q hysteria-server.service 2>/dev/null || true
   if systemctl restart hysteria-server.service; then ok "Hysteria2 is running"; else warn "Hysteria2 failed to start"; fi

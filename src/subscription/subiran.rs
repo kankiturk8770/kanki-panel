@@ -539,7 +539,19 @@ pub fn proxy_head(head: &str, client: &str) -> Option<String> {
 }
 
 async fn handle(tcp: tokio::net::TcpStream, client: String, acc: tokio_rustls::TlsAcceptor, upstream: &str) -> Result<(), String> {
-    let mut tls = tokio::time::timeout(Duration::from_secs(10), acc.accept(tcp)).await.map_err(|_| "tls timeout")?.map_err(|e| e.to_string())?;
+    let tls = tokio::time::timeout(Duration::from_secs(10), acc.accept(tcp)).await.map_err(|_| "tls timeout")?.map_err(|e| e.to_string())?;
+    relay(tls, client, upstream).await
+}
+
+/// Longest a relayed answer may take, and longest it may stay silent (a client that stops reading cannot
+/// hold a slot of the relay)
+const ANSWER_MAX: Duration = Duration::from_secs(600);
+const IDLE_MAX: Duration = Duration::from_secs(60);
+
+/// One request of an app or browser, already past TLS: its head (paths and headers checked by `proxy_head`,
+/// every app header kept: X-Kanki-Sub, X-Kanki-Device, X-Kanki-Seal, Authorization) goes to the panel, the
+/// answer comes back byte for byte (no redirect, no rewrite)
+pub(crate) async fn relay<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(mut tls: S, client: String, upstream: &str) -> Result<(), String> {
     // the request head
     let mut buf = Vec::with_capacity(2048);
     let mut tmp = [0u8; 4096];
@@ -577,14 +589,37 @@ async fn handle(tcp: tokio::net::TcpStream, client: String, acc: tokio_rustls::T
     up.write_all(head.as_bytes()).await.map_err(|e| e.to_string())?;
     // the answer goes back as it comes; GET has no body, so nothing more is sent to the panel
     let (mut ur, _uw) = up.into_split();
-    let _ = tokio::time::timeout(Duration::from_secs(600), tokio::io::copy(&mut ur, &mut tls)).await;
-    let _ = tls.shutdown().await;
-    Ok(())
+    let copied = tokio::time::timeout(ANSWER_MAX, async {
+        let mut buf = vec![0u8; 16 << 10];
+        loop {
+            let n = match tokio::time::timeout(IDLE_MAX, ur.read(&mut buf)).await {
+                Ok(Ok(0)) => return Ok(()),
+                Ok(Ok(n)) => n,
+                Ok(Err(e)) => return Err(e.to_string()),
+                Err(_) => return Err("the panel went silent".to_string()),
+            };
+            match tokio::time::timeout(IDLE_MAX, tls.write_all(&buf[..n])).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(e.to_string()),
+                Err(_) => return Err("the client stopped reading".to_string()),
+            }
+        }
+    })
+    .await
+    .map_err(|_| "answer took too long".to_string())
+    .and_then(|r| r);
+    if let Err(e) = tls.shutdown().await {
+        if copied.is_ok() {
+            return Err(e.to_string());
+        }
+    }
+    copied
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn the_panel_dials_the_subscription_domain_not_the_server_address() {
@@ -631,6 +666,50 @@ mod tests {
         assert!(proxy_head("POST /sub/abc HTTP/1.1\r\nHost: x\r\n\r\n", "1.1.1.1").is_none());
         assert!(proxy_head("GET /sub/abc HTTP/2\r\n\r\n", "1.1.1.1").is_none());
         assert!(proxy_head("GET /sub/abc HTTP/1.1\r\nHost: x\r\n folded\r\n\r\n", "1.1.1.1").is_none());
+    }
+
+    /// The Kanki app through the relay: GET /sub/me with the code in X-Kanki-Sub and a sealed answer asked for
+    /// (X-Kanki-Device + X-Kanki-Seal), and a config download with Authorization: Bearer, reach the real panel
+    /// router unchanged and come back 200 (sealed with the code and device the app sent)
+    #[tokio::test]
+    async fn the_app_headers_pass_the_relay() {
+        let app = crate::test_app();
+        let u = app.db.create_user("relayuser", 0.0, 0, 1, "wg", "", "", 0).unwrap();
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let up = l.local_addr().unwrap().to_string();
+        let router = crate::api::master_router(app.clone());
+        tokio::spawn(async move {
+            let _ = axum::serve(l, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await;
+        });
+        let ask = |head: String| {
+            let up = up.clone();
+            async move {
+                let (mut cli, srv) = tokio::io::duplex(4 << 20);
+                let t = tokio::spawn(async move { relay(srv, "203.0.113.7".into(), &up).await });
+                cli.write_all(head.as_bytes()).await.unwrap();
+                let mut out = Vec::new();
+                cli.read_to_end(&mut out).await.unwrap();
+                t.await.unwrap().unwrap();
+                String::from_utf8_lossy(&out).to_string()
+            }
+        };
+        let code = u.sub_code();
+        let dev = "phone-relay-0001";
+        let me = ask(format!(
+            "GET /sub/me HTTP/1.1\r\nHost: relay.example:2053\r\nUser-Agent: KankiVPN-Android\r\nX-Kanki-Sub: {code}\r\nX-Kanki-Device: {dev}\r\nX-Kanki-Seal: kseal1\r\n\r\n"
+        ))
+        .await;
+        assert!(me.starts_with("HTTP/1.1 200"), "{}", &me[..me.len().min(200)]);
+        let body = me.split("\r\n\r\n").nth(1).unwrap_or("");
+        assert!(body.starts_with("kseal1."), "the answer is sealed for the app");
+        // the bare /sub/<code> path of an older app, and a wrong code (404, not a redirect)
+        let old = ask(format!("GET /sub/{code} HTTP/1.1\r\nHost: r\r\nUser-Agent: KankiVPN-Android\r\n\r\n")).await;
+        assert!(old.starts_with("HTTP/1.1 200"));
+        let miss = ask("GET /sub/me HTTP/1.1\r\nHost: r\r\nX-Kanki-Sub: kanki-1-wrongwrong\r\n\r\n".into()).await;
+        assert!(miss.starts_with("HTTP/1.1 404"), "{}", &miss[..miss.len().min(80)]);
+        // admin paths never pass
+        let admin = ask("GET /api/users HTTP/1.1\r\nHost: r\r\nAuthorization: Bearer x\r\n\r\n".into()).await;
+        assert!(admin.starts_with("HTTP/1.1 404"));
     }
 
     #[test]

@@ -11,13 +11,16 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"io"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -26,6 +29,7 @@ import (
 	"github.com/xtaci/kcp-go/v5"
 	"github.com/xtaci/smux"
 
+	"kanki-tunnel/internal/egress"
 	"kanki-tunnel/internal/obfs"
 	"kanki-tunnel/internal/proto"
 )
@@ -205,14 +209,18 @@ func handleStream(st *smux.Stream, user string) {
 		return
 	}
 	if cmd[0] == proto.CmdTCP {
-		relayTCP(st, proto.JoinAddr(host, port), &tcpTap{user: user, host: host, port: port})
+		relayTCP(st, host, port, &tcpTap{user: user, host: host, port: port})
 	}
 }
 
-func relayTCP(st *smux.Stream, target string, tap *tcpTap) {
-	rc, err := net.DialTimeout("tcp", target, 10*time.Second)
+func relayTCP(st *smux.Stream, host string, port uint16, tap *tcpTap) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	rc, err := egress.DialTCP(ctx, host, port, 10*time.Second)
+	cancel()
 	if err != nil {
-		log.Printf("dial %s: %v", target, err)
+		if !errors.Is(err, egress.ErrBlocked) {
+			log.Printf("dial %s: %v", proto.JoinAddr(host, port), err)
+		}
 		return
 	}
 	defer rc.Close()
@@ -355,7 +363,8 @@ func (r *dgramRelay) getFlow(h proto.UDPUp) *udpFlow {
 		return nil
 	}
 	target := h.Target()
-	if target.IP.IsUnspecified() || target.IP.IsLoopback() || target.Port == 0 {
+	ta, ok := netip.AddrFromSlice(target.IP)
+	if !ok || !egress.Allowed(ta) || target.Port == 0 {
 		return nil
 	}
 	c, err := net.DialUDP("udp", nil, target)

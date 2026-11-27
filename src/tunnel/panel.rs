@@ -1930,6 +1930,13 @@ async fn cdn_test(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respons
     if edges.is_empty() {
         return err(StatusCode::BAD_REQUEST, "add at least one CDN edge address");
     }
+    // 3.68 SSRF guard: a CDN edge is a public address, never this server or a private network
+    for e in &edges {
+        let (h, p) = e.rsplit_once(':').map(|(h, p)| (h, p.parse::<u16>().unwrap_or(443))).unwrap_or((e.as_str(), 443));
+        if let Err(why) = crate::util::public_host(h, p, false).await {
+            return err(StatusCode::BAD_REQUEST, &format!("{}: {}", e, why));
+        }
+    }
     let mut snis = list("sni");
     if snis.is_empty() {
         snis.push(String::new());
@@ -2464,6 +2471,32 @@ pub(crate) fn fec_ok(f: &str) -> bool {
     matches!(d.trim().parse::<u8>(), Ok(1..=64)) && matches!(p.trim().parse::<u8>(), Ok(1..=32))
 }
 
+/// The ports a user tunnel may not use: (entry ports it may not listen on, exit ports it may not deliver to)
+pub fn management_ports(app: &App) -> (Vec<u16>, Vec<u16>) {
+    let env_port = |k: &str, d: u16| app.env.get(k).and_then(|p| p.trim().parse::<u16>().ok()).filter(|p| *p > 0).unwrap_or(d);
+    let entry = vec![22];
+    let mut exit = vec![22, env_port("PANEL_PORT", 8080), env_port("NODE_PORT", 2096), 29332, crate::xray::API_PORT];
+    exit.sort_unstable();
+    exit.dedup();
+    (entry, exit)
+}
+
+/// Why these port lists of a tunnel are refused (None = fine)
+fn management_forward(app: &App, tcp: &[String], udp: &[String]) -> Option<String> {
+    let (entry, exit) = management_ports(app);
+    for (proto, list) in [("tcp", tcp), ("udp", udp)] {
+        for (a, b) in parse_ports(list) {
+            if proto == "tcp" && entry.contains(&a) {
+                return Some(format!("port {}/tcp is SSH on the entry server: a tunnel cannot listen there", a));
+            }
+            if proto == "tcp" && exit.contains(&b) {
+                return Some(format!("port {}/tcp is a management port (SSH, panel or node agent): a tunnel cannot deliver there", b));
+            }
+        }
+    }
+    None
+}
+
 async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
     let mut list = tunnels(&app);
@@ -2504,6 +2537,11 @@ async fn save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     }
     if b.get("udp").is_some() {
         t.udp = clean_list(&b["udp"]);
+    }
+    // 3.68: a tunnel never takes the entry's SSH port and never delivers to the exit's management ports (SSH, the
+    // panel, the node agent): a forward there would hand the panel or the shell to anyone who reaches the entry
+    if let Some(why) = management_forward(&app, &t.tcp, &t.udp) {
+        return err(StatusCode::BAD_REQUEST, &why);
     }
     for k in ["target", "sni", "path", "dial", "host"] {
         if b.get(k).is_some() {

@@ -27,6 +27,55 @@ struct State {
     guard: Guard,
     /// every rule Kanki itself ever opened here (3.58.1): one that no owner needs any more is closed by itself
     opened: BTreeSet<String>,
+    /// 3.68: unused rules that could not be closed (ufw kept them, or something outside Kanki opens them again):
+    /// rule -> when Kanki stopped trying. They are reported, not retried every minute (the log spam of
+    /// "closed unused 51820/udp" every ~64 s on a panel-only server)
+    gave_up: BTreeMap<String, i64>,
+}
+
+/// how long an unused rule that could not be closed is left alone before one more try
+const GIVE_UP_SECS: i64 = 24 * 3600;
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
+
+/// rule numbers in `ufw status numbered` for exactly `r` (v4 and v6), highest first (deleting one renumbers
+/// the ones after it)
+fn numbered(status: &str, r: &str) -> Vec<u32> {
+    let mut v: Vec<u32> = status
+        .lines()
+        .filter_map(|l| {
+            let l = l.trim_start();
+            let rest = l.strip_prefix('[')?;
+            let (n, tail) = rest.split_once(']')?;
+            let f: Vec<&str> = tail.split_whitespace().filter(|x| *x != "(v6)").collect();
+            (f.first() == Some(&r) && f.get(1) == Some(&"ALLOW")).then(|| n.trim().parse().ok()).flatten()
+        })
+        .collect();
+    v.sort_unstable_by(|a, b| b.cmp(a));
+    v.dedup();
+    v
+}
+
+/// Deletes the allow rule `r` and says whether ufw really no longer has it. `ufw delete allow X` exits 0 even
+/// for a rule it does not find (one added as `proto udp to any port X`, with a comment, …): then the rule is
+/// deleted by its numbers.
+fn ufw_delete(r: &str) -> bool {
+    if !valid_rule(r) {
+        return false;
+    }
+    let _ = sh(&format!("ufw --force delete allow {} >/dev/null 2>&1", r));
+    let (_, status) = sh("ufw status 2>/dev/null");
+    if !status_rules(&status).contains(r) {
+        return true;
+    }
+    let (_, num) = sh("ufw status numbered 2>/dev/null");
+    for n in numbered(&num, r) {
+        let _ = sh(&format!("ufw --force delete {} >/dev/null 2>&1", n));
+    }
+    let (_, status) = sh("ufw status 2>/dev/null");
+    !status_rules(&status).contains(r)
 }
 
 /// The port ranges the panel gives Kanki's cores (WireGuard/AmneziaWG, Hysteria2, KANKI MIX):
@@ -257,9 +306,13 @@ pub fn sync<I: IntoIterator<Item = String>>(owner: &str, want: I) {
                 continue;
             }
         }
-        if sh(&format!("ufw --force delete allow {} >/dev/null 2>&1", r)).0 {
+        if ufw_delete(r) {
             eprintln!("firewall: closed {} (no longer used by {})", r, owner);
+        } else {
+            eprintln!("firewall: {} could not be closed; it is left as it is (reported as unused)", r);
+            st.gave_up.insert(r.clone(), unix_now());
         }
+        st.opened.remove(r);
     }
     if want.is_empty() {
         st.owners.remove(owner);
@@ -356,6 +409,33 @@ fn conf_port(path: &str) -> Option<u16> {
 
 /// Every port Kanki needs open here, whatever ufw says now: SSH, the cores' configs, the web ports in
 /// kanki.env, what Kanki's programs listen on from outside, NAT redirects and every owner's rules.
+/// Every UDP port something on this server uses, except what only `owner` itself opened (single ports and
+/// each port of a range, at most 20000 ports). Blocking.
+pub fn udp_ports_in_use(owner: &str) -> Vec<u16> {
+    let st = load();
+    let mut v = vec![];
+    for (r, what) in labeled(&st) {
+        if !r.ends_with("/udp") || (what.len() == 1 && what.contains(owner)) {
+            continue;
+        }
+        let p = r.trim_end_matches("/udp");
+        let (a, b) = match p.split_once(':') {
+            Some((a, b)) => (a.parse::<u16>().unwrap_or(0), b.parse::<u16>().unwrap_or(0)),
+            None => (p.parse::<u16>().unwrap_or(0), p.parse::<u16>().unwrap_or(0)),
+        };
+        if a == 0 || b < a {
+            continue;
+        }
+        v.extend(a..=b);
+        if v.len() > 20000 {
+            break;
+        }
+    }
+    v.sort_unstable();
+    v.dedup();
+    v
+}
+
 fn needed(st: &State) -> BTreeSet<String> {
     labeled(st).into_keys().collect()
 }
@@ -370,13 +450,23 @@ fn labeled(st: &State) -> BTreeMap<String, BTreeSet<String>> {
     for p in ssh_ports() {
         add(rule(p, false), "ssh");
     }
+    // 3.68: a core switched off in the panel (or not allowed by the server's role, e.g. role=panel) keeps its
+    // config file but needs no port. Counting it made the guard open 51820/udp and the unused-rule cleanup close
+    // it again on every tick ("firewall: closed unused 51820/udp" every ~64 s).
+    let off = crate::cores::switched_off();
     for (f, what) in [("/etc/wireguard/wg0.conf", "wg"), ("/etc/amnezia/amneziawg/awg0.conf", "awg")] {
+        if off.contains(what) {
+            continue;
+        }
         if let Some(p) = conf_port(f) {
             add(rule(p, true), what);
         }
     }
     let env = crate::util::load_env("/etc/kanki/kanki.env");
     for (k, udp, what) in [("HY2_PORT", true, "hy2"), ("HTTPS_PORT", false, "panel"), ("NODE_PUBLIC_PORT", false, "node")] {
+        if off.contains(what) {
+            continue;
+        }
         if let Some(p) = env.get(k).and_then(|p| p.trim().parse::<u16>().ok()).filter(|p| *p > 0) {
             add(rule(p, udp), what);
         }
@@ -550,7 +640,9 @@ pub fn report() -> serde_json::Value {
     let mut unused: Vec<String> = vec![];
     if ufw_here() && ufw_active() {
         let (_, status) = sh("ufw status 2>/dev/null");
-        let owned: BTreeSet<&String> = st.owners.values().flatten().collect();
+        // what an owner or the guard itself needs is never "unused" (the two must not fight over one rule)
+        let need = needed(&st);
+        let owned: BTreeSet<&String> = st.owners.values().flatten().chain(need.iter()).collect();
         let ssh = ssh_ports();
         let hidden = hidden_users();
         for r in allowed_rules(&status) {
@@ -566,7 +658,13 @@ pub fn report() -> serde_json::Value {
     }
     // 3.58.1: what Kanki opened and nothing uses any more is closed by itself (a removed tunnel, a moved port,
     // an older version); a rule opened by hand outside Kanki's port ranges is only reported
-    let left_by_kanki: Vec<String> = unused.iter().filter(|r| st.opened.contains(*r) || kanki_range(r)).cloned().collect();
+    let t = unix_now();
+    let left_by_kanki: Vec<String> = unused
+        .iter()
+        .filter(|r| st.opened.contains(*r) || kanki_range(r))
+        .filter(|r| st.gave_up.get(*r).is_none_or(|at| t - at >= GIVE_UP_SECS))
+        .cloned()
+        .collect();
     if !left_by_kanki.is_empty() {
         close_unused(&left_by_kanki);
         unused.retain(|r| !left_by_kanki.contains(r));
@@ -587,6 +685,7 @@ pub fn close_unused(rules: &[String]) {
     let ssh = ssh_ports();
     let hidden = hidden_users();
     let mut closed = vec![];
+    let mut stuck = vec![];
     for r in rules.iter().filter(|r| valid_rule(r) && !r.contains(':')) {
         if st.owners.values().any(|v| v.contains(r)) || protected(r, &ssh) || hidden.contains(r) {
             continue;
@@ -595,13 +694,24 @@ pub fn close_unused(rules: &[String]) {
         if p == 0 || crate::certbot::listening(p, r.ends_with("/udp")) {
             continue;
         }
-        if sh(&format!("ufw --force delete allow {} >/dev/null 2>&1", r)).0 {
+        if ufw_delete(r) {
             eprintln!("firewall: closed unused {}", r);
             closed.push(r.clone());
+        } else {
+            eprintln!("firewall: unused {} could not be closed; not retried for a day", r);
+            stuck.push(r.clone());
         }
     }
-    if !closed.is_empty() {
-        st.opened.retain(|r| !closed.contains(r));
+    if !closed.is_empty() || !stuck.is_empty() {
+        // closed or not, it is no longer tracked as Kanki's own: the next report does not try it again
+        st.opened.retain(|r| !closed.contains(r) && !stuck.contains(r));
+        for r in &closed {
+            st.gave_up.remove(r);
+        }
+        let t = unix_now();
+        for r in stuck {
+            st.gave_up.insert(r, t);
+        }
         save(&st);
     }
     // the next report shows the new state
@@ -624,6 +734,17 @@ mod tests {
         assert!(!l.contains_key("bad rule"));
         // the guard opens exactly what the table shows
         assert_eq!(needed(&st), l.keys().cloned().collect::<BTreeSet<_>>());
+    }
+
+    #[test]
+    fn numbered_rules_are_found_highest_first() {
+        let st = "Status: active\n\n     To                         Action      From\n     --                         ------      ----\n[ 1] 22/tcp                     ALLOW IN    Anywhere\n[ 2] 51820/udp                  ALLOW IN    Anywhere                   # wg\n[ 3] 51821/udp                  ALLOW IN    Anywhere\n[12] 51820/udp (v6)             ALLOW IN    Anywhere (v6)\n";
+        assert_eq!(numbered(st, "51820/udp"), vec![12, 2]);
+        assert_eq!(numbered(st, "51821/udp"), vec![3]);
+        assert!(numbered(st, "5182/udp").is_empty());
+        // an old state without gave_up still reads
+        let old: State = serde_json::from_str(r#"{"owners":{},"opened":["51820/udp"]}"#).unwrap();
+        assert!(old.gave_up.is_empty() && old.opened.contains("51820/udp"));
     }
 
     #[test]

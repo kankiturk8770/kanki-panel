@@ -42,10 +42,48 @@ pub(crate) fn valid_domain(d: &str) -> bool {
     })
 }
 
+/// Servers that still talk to the panel through this domain (pre-3.9 installs): `/tunnel`, `/join` and `/dl` stay
+/// on it while one of them was seen in the last 30 days (and for 30 days after the update that brought this rule)
+const LEGACY_DAYS: i64 = 30;
+static LEGACY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// Whether old servers still need the agent paths on the subscription domain (read from the settings)
+pub fn legacy_agents(app: &App) -> bool {
+    let now = crate::util::now();
+    let since = app.db.get("sub_domain_legacy_since").trim().parse::<i64>().unwrap_or(0);
+    let since = if since == 0 {
+        app.db.set("sub_domain_legacy_since", &now.to_string());
+        now
+    } else {
+        since
+    };
+    let seen = app.db.get("sub_domain_agent_seen").trim().parse::<i64>().unwrap_or(0);
+    now - since.max(seen) < LEGACY_DAYS * 86400
+}
+
+/// An agent path asked through the subscription domain: remembered (at most once an hour) so those paths stay
+pub fn note_agent_host(app: &App, host: &str, path: &str) {
+    if !(path.starts_with("/tunnel/") || path.starts_with("/join/") || path.starts_with("/dl/")) {
+        return;
+    }
+    let d = app.db.get("sub_domain");
+    let h = host.split(':').next().unwrap_or("").trim().to_ascii_lowercase();
+    if d.is_empty() || h != d.trim().to_ascii_lowercase() {
+        return;
+    }
+    let now = crate::util::now();
+    if now - app.db.get("sub_domain_agent_seen").trim().parse::<i64>().unwrap_or(0) > 3600 {
+        app.db.set("sub_domain_agent_seen", &now.to_string());
+    }
+}
+
+/// The site of the subscription domain. Only the subscription, config, font and Telegram-shop paths pass; the
+/// Telegram admin API and the admin panel's own assets never (3.68).
 fn block(domain: &str, port: &str) -> String {
+    let legacy = if LEGACY.load(std::sync::atomic::Ordering::Relaxed) { " /tunnel/* /join/* /dl/*" } else { "" };
     format!(
-        "{b}\n{d} {{\n  @pub path /sub/* /api/config/* /assets/* /tg/* /tunnel/* /join/* /dl/*\n  handle @pub {{\n    reverse_proxy 127.0.0.1:{p}\n  }}\n  handle {{\n    respond 404\n  }}\n  header {{\n    Strict-Transport-Security \"max-age=31536000\"\n    X-Content-Type-Options nosniff\n    Referrer-Policy no-referrer\n    -Server\n  }}\n}}\n{e}\n",
-        b = BEGIN, d = domain, p = port, e = END
+        "{b}\n{d} {{\n  @deny path /tg/api/admin/* /assets/panel/*\n  handle @deny {{\n    respond 404\n  }}\n  @pub path /sub/* /api/config/* /assets/* /tg/*{l}\n  handle @pub {{\n    reverse_proxy 127.0.0.1:{p}\n  }}\n  handle {{\n    respond 404\n  }}\n  header {{\n    Strict-Transport-Security \"max-age=31536000\"\n    X-Content-Type-Options nosniff\n    Referrer-Policy no-referrer\n    -Server\n  }}\n}}\n{e}\n",
+        b = BEGIN, d = domain, p = port, e = END, l = legacy
     )
 }
 
@@ -112,11 +150,18 @@ fn reload() -> Result<(), String> {
 }
 
 fn write_and_reload(content: &str) -> Result<(), String> {
-    std::fs::write(CADDYFILE, content).map_err(|e| format!("cannot write {}: {}", CADDYFILE, e))?;
-    let (ok, out) = run("caddy", &["validate", "--config", CADDYFILE, "--adapter", "caddyfile"]);
+    // 3.68: the new text is validated in a file of its own first; the live Caddyfile is only replaced (atomically)
+    // by a config Caddy accepts
+    let tmp = format!("{}.kanki-new", CADDYFILE);
+    std::fs::write(&tmp, content).map_err(|e| format!("cannot write {}: {}", tmp, e))?;
+    let (ok, out) = run("caddy", &["validate", "--config", &tmp, "--adapter", "caddyfile"]);
     if !ok {
+        if let Err(e) = std::fs::remove_file(&tmp) {
+            eprintln!("subscription domain: {} could not be removed: {}", tmp, e);
+        }
         return Err(format!("Caddy rejected the new config: {}", tail(&out)));
     }
+    std::fs::rename(&tmp, CADDYFILE).map_err(|e| format!("cannot write {}: {}", CADDYFILE, e))?;
     reload()
 }
 
@@ -165,6 +210,7 @@ fn caddy_error() -> String {
 /// At start: the subscription domain is set but the Caddyfile has no (or an older) block for it — after
 /// a restore or a move the installer wrote a fresh Caddyfile — so it is written again.
 pub fn ensure_on_start(app: &App) {
+    LEGACY.store(legacy_agents(app), std::sync::atomic::Ordering::Relaxed);
     let d = app.db.get("sub_domain").trim().to_string();
     let Some(port) = app.env.get("PANEL_PORT").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) else { return };
     let Ok(old) = std::fs::read_to_string(CADDYFILE) else { return };
@@ -226,6 +272,7 @@ async fn apply(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
         return err(StatusCode::BAD_REQUEST, "The domain does not resolve yet. Add an A record that points to this server's IP, wait a few minutes and try again");
     }
 
+    LEGACY.store(legacy_agents(&app), std::sync::atomic::Ordering::Relaxed);
     let new = build(&old, Some(&d), &port);
     let r = tokio::task::spawn_blocking(move || write_and_reload(&new)).await.unwrap_or_else(|e| Err(e.to_string()));
     if let Err(e) = r {

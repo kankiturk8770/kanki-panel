@@ -75,6 +75,8 @@ mod sublink;
 // vpn: the VPN cores and syncing users to the servers (src/vpn)
 #[path = "vpn/wg.rs"]
 mod wg;
+#[path = "vpn/isolate.rs"]
+mod isolate;
 #[path = "vpn/hy2.rs"]
 mod hy2;
 #[path = "vpn/kmix.rs"]
@@ -361,7 +363,16 @@ async fn main() {
     if cmd == "node" {
         let port = app.env.get("NODE_PORT").cloned().unwrap_or_else(|| "2096".into());
         // new installs put Caddy (TLS) in front and bind locally; old installs listened publicly
-        let bind = app.env.get("NODE_BIND").cloned().unwrap_or_else(|| "0.0.0.0".into());
+        // 3.68: without NODE_BIND a node with Caddy in front (NODE_PUBLIC_PORT set by the installer) binds only to
+        // 127.0.0.1; an old plain-HTTP node (no Caddy) keeps 0.0.0.0 so the panel still reaches it
+        let bind = app.env.get("NODE_BIND").cloned().unwrap_or_else(|| {
+            if app.env.get("NODE_PUBLIC_PORT").is_some_and(|p| !p.trim().is_empty()) {
+                "127.0.0.1".into()
+            } else {
+                eprintln!("kanki node: NODE_BIND is not set and there is no TLS front: listening on 0.0.0.0 (reinstall the node to get TLS)");
+                "0.0.0.0".into()
+            }
+        });
         let addr = format!("{}:{}", bind, port);
         eprintln!("kanki node agent {} on {}", VERSION, addr);
         let l = tokio::net::TcpListener::bind(&addr).await.expect("bind");

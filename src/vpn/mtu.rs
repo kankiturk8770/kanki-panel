@@ -320,6 +320,20 @@ fn mss_rules(tool: &str, iface: &str, mtu: u16) -> Vec<Vec<String>> {
         .collect()
 }
 
+/// Every TCP MSS rule of `iface` is in place (iptables -C; ip6tables only where it exists)
+fn mss_present(iface: &str, mtu: u16) -> bool {
+    ["iptables", "ip6tables"].iter().all(|tool| {
+        let here = std::process::Command::new(tool).arg("-V").output().map(|o| o.status.success()).unwrap_or(false);
+        !here || mss_rules(tool, iface, mtu).iter().all(|r| {
+            let mut c = r.clone();
+            if let Some(a) = c.iter_mut().find(|x| *x == "-A") {
+                *a = "-C".into();
+            }
+            run_quiet(&c)
+        })
+    })
+}
+
 fn run_quiet(args: &[String]) -> bool {
     std::process::Command::new(&args[0]).args(&args[1..]).output().map(|o| o.status.success()).unwrap_or(false)
 }
@@ -365,7 +379,9 @@ pub fn apply_ifaces(want: &HashMap<String, u16>) {
             }
         }
         let mut done = applied().lock().unwrap_or_else(|e| e.into_inner());
-        if done.get(iface) == Some(&mtu) {
+        // 3.68: the same MTU is skipped only while our rules are still there (a ufw reload or `iptables -F`
+        // drops them: they are put back on the next sync instead of never)
+        if done.get(iface) == Some(&mtu) && (mtu == 0 || mss_present(iface, mtu)) {
             continue;
         }
         for tool in ["iptables", "ip6tables"] {

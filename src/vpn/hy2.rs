@@ -114,19 +114,39 @@ pub async fn kick(port: &str, secret: &str, ids: &[String]) {
     let _ = client().post(&url).header("Authorization", secret).json(&ids).send().await;
 }
 
-/// Hysteria2 must not let its users reach this server's own loopback (the panel, the stats API and
-/// the other local services listen there). Configs written before 3.22.2 have no ACL: it is added
-/// once and Hysteria restarted. Blocking.
+/// What Hysteria2's users may not reach (3.68): this server's loopback (the panel, the stats API, `/hy2/auth`
+/// and the other local services), private and link-local networks (the provider's other machines, cloud
+/// metadata at 169.254.169.254).
+pub const ACL: &str = "acl:\n  inline:\n    - reject(127.0.0.0/8)\n    - reject(::1)\n    - reject(localhost)\n    - reject(0.0.0.0/8)\n    - reject(10.0.0.0/8)\n    - reject(100.64.0.0/10)\n    - reject(169.254.0.0/16)\n    - reject(172.16.0.0/12)\n    - reject(192.168.0.0/16)\n    - reject(fc00::/7)\n    - reject(fe80::/10)\n";
+
+/// The ACL that 3.22.2 to 3.67 wrote (loopback only): replaced by `ACL`
+const OLD_ACL: &str = "acl:\n  inline:\n    - reject(127.0.0.0/8)\n    - reject(::1)\n    - reject(localhost)\n";
+
+/// The config with Kanki's ACL: added when there is none, the old loopback-only one is widened; an ACL the
+/// admin wrote by hand is left alone (None = nothing to change)
+pub fn with_acl(t: &str) -> Option<String> {
+    if t.contains(ACL) {
+        return None;
+    }
+    if t.contains(OLD_ACL) {
+        return Some(t.replacen(OLD_ACL, ACL, 1));
+    }
+    if t.lines().any(|l| l.trim_start().starts_with("acl:")) {
+        return None;
+    }
+    Some(if t.ends_with('\n') { format!("{}{}", t, ACL) } else { format!("{}\n{}", t, ACL) })
+}
+
+/// Hysteria2 must not let its users reach this server's own loopback or private networks. Configs written
+/// before have no ACL or the loopback-only one: Kanki's is put in once and Hysteria restarted (back to the
+/// old config if it does not start with it). Blocking.
 pub fn ensure_acl() {
     const CONF: &str = "/etc/hysteria/config.yaml";
     let Ok(t) = std::fs::read_to_string(CONF) else { return };
-    if t.lines().any(|l| l.trim_start().starts_with("acl:")) {
-        return;
-    }
-    let add = "acl:\n  inline:\n    - reject(127.0.0.0/8)\n    - reject(::1)\n    - reject(localhost)\n";
-    let new = if t.ends_with('\n') { format!("{}{}", t, add) } else { format!("{}\n{}", t, add) };
+    let Some(new) = with_acl(&t) else { return };
     let was_active = std::process::Command::new("systemctl").args(["is-active", "--quiet", "hysteria-server.service"]).status().map(|s| s.success()).unwrap_or(false);
-    if std::fs::write(CONF, new).is_err() {
+    if let Err(e) = crate::util::write_private(CONF, &new) {
+        eprintln!("hysteria2: the ACL could not be written: {}", e);
         return;
     }
     let _ = std::process::Command::new("systemctl").args(["try-restart", "hysteria-server.service"]).status();
@@ -134,12 +154,14 @@ pub fn ensure_acl() {
     let active = std::process::Command::new("systemctl").args(["is-active", "--quiet", "hysteria-server.service"]).status().map(|s| s.success()).unwrap_or(false);
     if was_active && !active {
         // an older Hysteria that does not take this ACL: the users come first, the old config goes back
-        let _ = std::fs::write(CONF, &t);
+        if let Err(e) = crate::util::write_private(CONF, &t) {
+            eprintln!("hysteria2: the previous config could not be put back: {}", e);
+        }
         let _ = std::process::Command::new("systemctl").args(["restart", "hysteria-server.service"]).status();
-        eprintln!("hysteria2: it did not start with the loopback ACL, the previous config is back");
+        eprintln!("hysteria2: it did not start with the ACL, the previous config is back");
         return;
     }
-    eprintln!("hysteria2: its users can no longer reach this server's loopback (acl added)");
+    eprintln!("hysteria2: its users can no longer reach this server's loopback or private networks (acl)");
 }
 
 /// The key Hysteria's login check sends to `/hy2/auth` (3.65). Hysteria cannot sign a request, so its
@@ -236,6 +258,20 @@ pub fn user_pass(code: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_acl_is_added_or_widened_never_doubled() {
+        let base = "listen: :8443\nauth:\n  type: http\n";
+        let a = with_acl(base).unwrap();
+        assert!(a.contains("reject(169.254.0.0/16)") && a.contains("reject(10.0.0.0/8)"));
+        assert_eq!(with_acl(&a), None);
+        let old = format!("{}{}", base, OLD_ACL);
+        let w = with_acl(&old).unwrap();
+        assert_eq!(w.matches("acl:").count(), 1);
+        assert!(w.contains("reject(192.168.0.0/16)"));
+        // the admin's own ACL stays
+        assert_eq!(with_acl("acl:\n  inline:\n    - direct(all)\n"), None);
+    }
 
     #[test]
     fn the_auth_url_gets_a_key_once() {

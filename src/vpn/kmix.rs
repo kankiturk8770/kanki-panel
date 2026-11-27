@@ -503,13 +503,29 @@ fn write_if_changed(path: &str, text: &str, mode: u32) -> Result<bool, String> {
     if std::fs::read_to_string(path).map(|t| t == text).unwrap_or(false) {
         return Ok(false);
     }
-    let tmp = format!("{}.new", path);
-    std::fs::write(&tmp, text).map_err(|e| format!("cannot write {}: {}", path, e))?;
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode));
+    // 3.68: the temp file has its final mode from its first byte (users.json holds every user's key: 0600,
+    // never readable by others for a moment), is synced, then renamed over the old one
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let tmp = format!("{}.{}.new", path, std::process::id());
+    let res = (|| -> std::io::Result<()> {
+        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(mode).open(&tmp)?;
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(mode))?;
+        }
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if let Err(e) = res {
+        if let Err(r) = std::fs::remove_file(&tmp) {
+            if r.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("kmix: {} could not be removed: {}", tmp, r);
+            }
+        }
+        return Err(format!("cannot write {}: {}", path, e));
     }
-    std::fs::rename(&tmp, path).map_err(|e| format!("cannot write {}: {}", path, e))?;
     Ok(true)
 }
 
@@ -614,7 +630,14 @@ pub fn apply(c: &KmixCfg) -> Result<(), String> {
         let _ = sh(&format!("systemctl enable -q {}", UNIT_NAME));
     }
     // the extra ports never take this server's own port or the port of WireGuard / AmneziaWG
-    let taken: Vec<u16> = ["wg", "awg"].iter().filter_map(|p| crate::wg::listen_port(p).trim().parse().ok()).chain([port]).collect();
+    // 3.68: and no UDP port anything else on this server uses (Hysteria2, DNS, tunnels, Xray, SSH: every rule of
+    // the firewall state and every listener), so the REDIRECT never swallows another service's packets
+    let taken: Vec<u16> = ["wg", "awg"]
+        .iter()
+        .filter_map(|p| crate::wg::listen_port(p).trim().parse().ok())
+        .chain([port])
+        .chain(crate::fw::udp_ports_in_use("kmix"))
+        .collect();
     let hop = hop_range(&c.hop).filter(|(a, b)| !hop_holds(*a, *b, &taken));
     sync_hop(hop.map(|(a, b)| (a, b, port)));
     let state = json!({ "port": port, "parity": parity, "hop": hop.map(|(a, b)| format!("{}-{}", a, b)).unwrap_or_default() });

@@ -192,6 +192,9 @@ pub async fn middleware(State(app): St, mut req: Request, next: Next) -> Respons
     }
     trust_proxy_only(&mut req);
     let path = req.uri().path().to_string();
+    if let Some(host) = req.headers().get(header::HOST).and_then(|v| v.to_str().ok()) {
+        crate::subdomain::note_agent_host(&app, host, &path);
+    }
     let method = req.method().clone();
     let ip = client_ip(req.headers());
     if is_admin_surface(&path) && !ip_allowed(&app, &ip) {

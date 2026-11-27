@@ -100,10 +100,16 @@ pub fn set_blocked(list: &[String]) {
     let mut want: Vec<String> = list.iter().filter(|x| block_rule(x).is_some()).cloned().collect();
     want.sort();
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-    if last.as_ref() == Some(&want) {
+    const CH: &str = "KANKI-LIMIT";
+    // 3.68: unchanged list and the jump still in INPUT (both tools): nothing to do. A ufw reload that dropped
+    // the jump rebuilds the chain at once instead of leaving the connection limit off until the list changes.
+    let jumped = |t: &str| {
+        let here = Command::new(t).arg("-V").output().map(|o| o.status.success()).unwrap_or(false);
+        !here || Command::new(t).args(["-w", "-C", "INPUT", "-p", "udp", "-j", CH]).output().map(|o| o.status.success()).unwrap_or(false)
+    };
+    if last.as_ref() == Some(&want) && jumped("iptables") && jumped("ip6tables") {
         return;
     }
-    const CH: &str = "KANKI-LIMIT";
     for t in ["iptables", "ip6tables"] {
         let sh = |a: &str| Command::new("sh").arg("-c").arg(format!("{} -w {} 2>/dev/null", t, a)).status().map(|s| s.success()).unwrap_or(false);
         let _ = sh(&format!("-N {}", CH));

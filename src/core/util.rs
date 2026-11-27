@@ -241,6 +241,128 @@ pub fn gb(bytes: i64) -> f64 {
 }
 
 /// KEY=VALUE env file
+/// An address on the public internet: not loopback, private (RFC 1918, CGNAT, ULA), link-local (cloud
+/// metadata 169.254.169.254), unspecified, multicast, broadcast or reserved. The SSRF guard of every request the
+/// panel makes to an address an admin or a client typed (3.68).
+pub fn public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v) => {
+            let o = v.octets();
+            !(v.is_private() || v.is_loopback() || v.is_link_local() || v.is_unspecified() || v.is_broadcast() || v.is_multicast()
+                || o[0] == 0 || o[0] >= 240 || (o[0] == 100 && (o[1] & 0xC0) == 64) || (o[0] == 192 && o[1] == 0 && o[2] == 0)
+                || (o[0] == 198 && (o[1] & 0xFE) == 18))
+        }
+        IpAddr::V6(v) => {
+            if let Some(m) = v.to_ipv4_mapped() {
+                return public_ip(IpAddr::V4(m));
+            }
+            let s = v.segments();
+            !(v.is_loopback() || v.is_unspecified() || v.is_multicast() || (s[0] & 0xfe00) == 0xfc00 || (s[0] & 0xffc0) == 0xfe80)
+        }
+    }
+}
+
+/// `host` (a name or an address) resolves only to public addresses; Err names the reason. With `allow_private`
+/// only loopback, link-local, unspecified and multicast are refused (servers of one private network).
+pub async fn public_host(host: &str, port: u16, allow_private: bool) -> Result<Vec<std::net::SocketAddr>, String> {
+    let h = host.trim().trim_start_matches('[').trim_end_matches(']');
+    if h.is_empty() || h.eq_ignore_ascii_case("localhost") || h.to_ascii_lowercase().ends_with(".localhost") {
+        return Err("that address is this server itself".into());
+    }
+    let addrs: Vec<std::net::SocketAddr> = tokio::time::timeout(std::time::Duration::from_secs(5), tokio::net::lookup_host((h, port)))
+        .await
+        .map_err(|_| "the name did not resolve in time".to_string())?
+        .map_err(|_| "the name does not resolve".to_string())?
+        .collect();
+    if addrs.is_empty() {
+        return Err("the name does not resolve".into());
+    }
+    let local = |ip: IpAddr| {
+        let ip = match ip {
+            IpAddr::V6(v) => v.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(IpAddr::V6(v)),
+            x => x,
+        };
+        ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() || match ip {
+            IpAddr::V4(v) => v.is_link_local() || v.is_broadcast() || v.octets()[0] == 0,
+            IpAddr::V6(v) => (v.segments()[0] & 0xffc0) == 0xfe80,
+        }
+    };
+    for a in &addrs {
+        if local(a.ip()) || (!allow_private && !public_ip(a.ip())) {
+            return Err(format!("{} is a local or private address", a.ip()));
+        }
+    }
+    Ok(addrs)
+}
+
+/// The host and port of an http(s) URL, checked with `public_host`
+pub async fn public_url(url: &str, allow_private: bool) -> Result<(), String> {
+    let u = reqwest::Url::parse(url.trim()).map_err(|_| "not a valid URL".to_string())?;
+    if u.scheme() != "https" && u.scheme() != "http" {
+        return Err("only http(s) addresses".into());
+    }
+    if !u.username().is_empty() || u.password().is_some() {
+        return Err("an address with a user name is not allowed".into());
+    }
+    let host = u.host_str().ok_or_else(|| "the address has no host".to_string())?;
+    let port = u.port_or_known_default().unwrap_or(443);
+    public_host(host, port, allow_private).await.map(|_| ())
+}
+
+/// Writes `text` to `path` readable by its owner only (0600): a temp file in the same directory (made 0600 before
+/// a byte is written), fsync, then rename over the old file, so a reader never sees half a file and a crash never
+/// leaves an empty one.
+pub fn write_private(path: &str, text: &str) -> std::io::Result<()> {
+    write_private_bytes(path, text.as_bytes())
+}
+
+pub fn write_private_bytes(path: &str, data: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let p = std::path::Path::new(path);
+    let dir = p.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
+    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let tmp = dir.join(format!(".{}.{}.{}.tmp", name, std::process::id(), rand_token(6)));
+    let res = (|| {
+        let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+        f.write_all(data)?;
+        f.sync_all()?;
+        std::fs::rename(&tmp, p)?;
+        if let Ok(d) = std::fs::File::open(dir) {
+            d.sync_all()?;
+        }
+        Ok(())
+    })();
+    if res.is_err() {
+        if let Err(e) = std::fs::remove_file(&tmp) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("could not remove {}: {}", tmp.display(), e);
+            }
+        }
+    }
+    res
+}
+
+/// Sets `mode` on `path` when it exists (a missing file is fine: nothing to protect)
+pub fn chmod_if_present(path: &str, mode: u32) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    match std::fs::metadata(path) {
+        Ok(m) if m.permissions().mode() & 0o7777 == mode => Ok(()),
+        Ok(_) => std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// A directory only its owner can enter (0700), made when missing
+pub fn private_dir(path: &str) -> std::io::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    match std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path) {
+        Ok(()) => chmod_if_present(path, 0o700),
+        Err(e) => Err(e),
+    }
+}
+
 pub fn load_env(path: &str) -> HashMap<String, String> {
     let mut m = HashMap::new();
     // read as bytes: one line that is not valid UTF-8 (a name typed in another encoding) must not
@@ -538,5 +660,54 @@ mod totp_tests {
         assert_eq!(totp_step(&secret, &format!("{:06}", hotp(&key, step - 1)), at), Some(step - 1));
         assert_eq!(totp_step(&secret, &format!("{:06}", hotp(&key, step + 5)), at), None);
         assert_eq!(totp_step(&secret, "12345", at), None);
+    }
+}
+
+#[cfg(test)]
+mod private_tests {
+    use super::*;
+
+    #[test]
+    fn only_public_addresses_pass_the_ssrf_guard() {
+        for a in ["127.0.0.1", "10.0.0.1", "172.16.5.5", "192.168.0.1", "169.254.169.254", "100.64.1.1", "0.0.0.0", "::1", "fd00::1", "fe80::1", "::ffff:127.0.0.1", "224.0.0.1", "255.255.255.255"] {
+            assert!(!public_ip(a.parse().unwrap()), "{}", a);
+        }
+        for a in ["1.1.1.1", "8.8.8.8", "172.32.0.1", "2606:4700:4700::1111"] {
+            assert!(public_ip(a.parse().unwrap()), "{}", a);
+        }
+    }
+
+    #[tokio::test]
+    async fn local_targets_are_refused_by_name_and_url() {
+        assert!(public_host("localhost", 80, true).await.is_err());
+        assert!(public_host("127.0.0.1", 8080, true).await.is_err());
+        assert!(public_host("169.254.169.254", 80, true).await.is_err());
+        assert!(public_host("10.0.0.5", 2096, false).await.is_err());
+        assert!(public_host("10.0.0.5", 2096, true).await.is_ok());
+        assert!(public_url("https://127.0.0.1:29332/api/users", false).await.is_err());
+        assert!(public_url("https://u:p@1.1.1.1/", false).await.is_err());
+        assert!(public_url("file:///etc/passwd", false).await.is_err());
+        assert!(public_url("https://1.1.1.1/", false).await.is_ok());
+    }
+
+    #[test]
+    fn private_files_are_0600_and_replace_atomically() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("kanki-priv-{}", rand_token(8)));
+        let d = dir.to_str().unwrap().to_string();
+        private_dir(&d).unwrap();
+        assert_eq!(std::fs::metadata(&d).unwrap().permissions().mode() & 0o777, 0o700);
+        let f = format!("{}/users.json", d);
+        write_private(&f, "one").unwrap();
+        write_private(&f, "two").unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "two");
+        assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
+        // no temp file is left behind
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1);
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+        chmod_if_present(&f, 0o600).unwrap();
+        assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
+        chmod_if_present(&format!("{}/missing", d), 0o600).unwrap();
+        std::fs::remove_dir_all(&d).unwrap();
     }
 }
