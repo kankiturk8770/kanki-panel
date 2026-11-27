@@ -425,10 +425,17 @@ pub fn tunnel_entries(app: &App, s: &Settings, n: &Node, port: u16) -> Vec<TunEn
 fn link_via(app: &App, u: &User, n: &Node, e: &TunEntry, display: &str) -> Option<String> {
     let first = link(app, u, n)?;
     let q = first.split_once('?').map(|x| x.1).unwrap_or("").split('#').next().unwrap_or("");
-    // the extra ports exist on the server, not on the Iran address; the other path of this one is the server itself
+    // the extra ports exist on the server; 3.69: on the Iran address too when its tunnel forwards them
+    // (`kmix_hop_map`), else they stay out of the link (the client would hop onto closed ports). The other path
+    // of this one is the server itself
     let direct = first.split_once('@').map(|x| x.1).unwrap_or("").split('?').next().unwrap_or("").to_string();
     let alt = format!("alt={}", crate::util::pct(&direct));
     let mut q: Vec<&str> = q.split('&').filter(|p| !p.starts_with("ports=") && !p.starts_with("alt=")).collect();
+    let port = crate::api::node_info(n)["kmix_port"].as_u64().and_then(|p| u16::try_from(p).ok()).unwrap_or(0);
+    let hops = crate::tunnel::panel::kmix_hops_at(app, &n.id, &e.host, e.port, port).map(|r| format!("ports={}", r));
+    if let Some(h) = &hops {
+        q.push(h);
+    }
     q.push(&alt);
     Some(format!("kanki://{}@{}:{}?{}&via=tunnel#{}", user_key(app, u), bracket_host(&e.host), e.port, q.join("&"), crate::util::pct(display)))
 }
@@ -474,13 +481,18 @@ pub fn link_tunnel(app: &App, u: &User, n: &Node) -> Option<String> {
     let s = settings(app);
     let info = crate::api::node_info(n);
     let port = info["kmix_port"].as_u64().filter(|p| *p > 0)? as u16;
-    let (host, tport) = tunnel_target(app, &s, n, port)?;
-    let host = bracket_host(&host);
+    let (raw_host, tport) = tunnel_target(app, &s, n, port)?;
+    let host = bracket_host(&raw_host);
     let q = first.split_once('?').map(|x| x.1).unwrap_or("").split('#').next().unwrap_or("");
-    // the extra ports exist on the server, not on the Iran address; the other path of this one is the server itself
+    // the extra ports exist on the server; 3.69: on the Iran address too when its tunnel forwards them, else they
+    // stay out of the link. The other path of this one is the server itself
     let direct = first.split_once('@').map(|x| x.1).unwrap_or("").split('?').next().unwrap_or("").to_string();
     let alt = format!("alt={}", crate::util::pct(&direct));
     let mut q: Vec<&str> = q.split('&').filter(|p| !p.starts_with("ports=") && !p.starts_with("alt=")).collect();
+    let hops = crate::tunnel::panel::kmix_hops_at(app, &n.id, &raw_host, tport, port).map(|r| format!("ports={}", r));
+    if let Some(h) = &hops {
+        q.push(h);
+    }
     q.push(&alt);
     Some(format!("kanki://{}@{}:{}?{}&via=tunnel#{}", user_key(app, u), host, tport, q.join("&"), crate::util::pct(&format!("{} (Tunnel)", n.name))))
 }

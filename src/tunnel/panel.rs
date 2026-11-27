@@ -66,6 +66,9 @@ pub struct TServer {
     /// its agent has sent a signed report (3.65): from then on an unsigned one (the bare token of an
     /// older agent) is refused for it
     pub signed: bool,
+    /// 3.69: its agent signed a download request (program, Hysteria2, Xray): the token in the body is refused for
+    /// it from then on
+    pub signed_dl: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -362,7 +365,7 @@ fn cdn_remote(t: &Tunnel) -> String {
 }
 
 /// The tunnels server `sid` has to run.
-fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
+pub(crate) fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
     let mut out = vec![];
     // an AmneziaWG link that travels inside a Kanki transport gets one more (engine) tunnel that
     // carries its UDP: entry 127.0.0.1:wrap_port -> exit 127.0.0.1:port
@@ -411,6 +414,10 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             out.push(Spec { id: t.id.clone(), name: t.name.clone(), role: role.into(), transport: "hy2".into(), hy2: Some(y), ..Default::default() });
             continue;
         }
+        // 3.69: a Kanki tunnel that carries a server's KANKI MIX port carries its hop ports too (client port
+        // hopping through the Iran entry); worked out at each sync from what the server runs
+        let mut udp = t.udp.clone();
+        udp.extend(kmix_hop_map(app, &t).into_iter().map(|(a, b)| format!("{}:{}", a, b)));
         let mode = if t.mode == "direct" { "direct" } else { "reverse" };
         // the side that listens is the entry in reverse mode and the exit in direct mode
         let listener = if mode == "reverse" { &t.entry } else { &t.exit };
@@ -439,7 +446,7 @@ fn specs_for(app: &App, sid: &str) -> Vec<Spec> {
             frag: t.frag,
             path: t.path.clone(),
             tcp: t.tcp.clone(),
-            udp: t.udp.clone(),
+            udp,
             target: t.target.clone(),
             cert: String::new(),
             key: String::new(),
@@ -1260,30 +1267,30 @@ async fn hy2_conf(State(app): St, h: HeaderMap, Path((id, side)): Path<(String, 
     Json(json!({ "conf": body, "side": role, "file": format!("{}.yaml", sp.unit()) })).into_response()
 }
 
-/// The hysteria binary for a CPU type: the panel server's own (same type), a copy kept in
-/// CACHE_DIR (downloaded by the panel or given by another server), or downloaded now.
+/// The hysteria binary for a CPU type, 3.69: only the pinned release (`release::hy2_sha256`): the panel server's own
+/// copy when it is exactly that file, a copy kept in CACHE_DIR that still has the pinned hash, or downloaded now
+/// from the pinned release (and checked before it is kept).
 async fn hy2bin_bytes(arch: &str, fetch: bool) -> Option<Vec<u8>> {
     let a = hy2t::arch_name(arch)?;
+    let want = crate::release::hy2_sha256(a)?;
     if arch == std::env::consts::ARCH {
         for p in ["/usr/local/bin/hysteria", "/usr/bin/hysteria"] {
             if let Ok(b) = tokio::fs::read(p).await {
-                if hy2t::looks_like_binary(&b) {
+                if crate::release::matches(&b, want) {
                     return Some(b);
                 }
             }
         }
     }
-    // the copy in the cache is only used when the panel downloaded it itself (a copy another server gave, from
-    // before 3.51, is not trusted and is downloaded again)
-    let cache = format!("{}/hysteria-linux-{}", hy2t::CACHE_DIR, a);
-    let mark = format!("{}.release", cache);
-    let trusted = || std::path::Path::new(&mark).exists();
-    if trusted() {
-        if let Ok(b) = tokio::fs::read(&cache).await {
-            if hy2t::looks_like_binary(&b) {
-                return Some(b);
-            }
+    let cache = format!("{}/hysteria-linux-{}-{}", hy2t::CACHE_DIR, a, crate::release::HY2_VERSION);
+    let cached = || async {
+        match tokio::fs::read(&cache).await {
+            Ok(b) if crate::release::matches(&b, want) => Some(b),
+            _ => None,
         }
+    };
+    if let Some(b) = cached().await {
+        return Some(b);
     }
     if !fetch {
         return None;
@@ -1291,26 +1298,23 @@ async fn hy2bin_bytes(arch: &str, fetch: bool) -> Option<Vec<u8>> {
     // one download at a time (two agents asking at once must not download twice)
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _g = LOCK.lock().await;
-    if trusted() {
-        if let Ok(b) = tokio::fs::read(&cache).await {
-            if hy2t::looks_like_binary(&b) {
-                return Some(b);
-            }
-        }
+    if let Some(b) = cached().await {
+        return Some(b);
     }
     let http = reqwest::Client::builder().timeout(Duration::from_secs(180)).build().ok()?;
     for url in hy2t::download_urls(arch) {
         match http.get(&url).send().await {
             Ok(r) if r.status().is_success() => match r.bytes().await {
-                Ok(b) if hy2t::looks_like_binary(&b) => {
-                    let _ = tokio::fs::create_dir_all(hy2t::CACHE_DIR).await;
-                    if tokio::fs::write(&cache, &b).await.is_ok() {
-                        let _ = tokio::fs::write(&mark, url.as_bytes()).await;
+                Ok(b) if crate::release::matches(&b, want) => {
+                    if let Err(e) = tokio::fs::create_dir_all(hy2t::CACHE_DIR).await {
+                        eprintln!("hy2 tunnel: {}: {}", hy2t::CACHE_DIR, e);
+                    } else if let Err(e) = tokio::fs::write(&cache, &b).await {
+                        eprintln!("hy2 tunnel: {}: {}", cache, e);
                     }
-                    eprintln!("hy2 tunnel: downloaded {} for the agents", url);
+                    eprintln!("hy2 tunnel: downloaded {} (pinned SHA-256 checked) for the agents", url);
                     return Some(b.to_vec());
                 }
-                Ok(_) => eprintln!("hy2 tunnel: {} is not a program (filtered?)", url),
+                Ok(_) => eprintln!("hy2 tunnel: {} is not the pinned release (filtered or changed?): not used", url),
                 Err(e) => eprintln!("hy2 tunnel: {}: {}", url, e),
             },
             Ok(r) => eprintln!("hy2 tunnel: {}: {}", url, r.status()),
@@ -1320,53 +1324,84 @@ async fn hy2bin_bytes(arch: &str, fetch: bool) -> Option<Vec<u8>> {
     None
 }
 
+/// 3.69: a server agent's download request (`/tunnel/binary`, `/tunnel/hy2bin`, `/tunnel/xraybin`): signed with
+/// its token (`sign`, path `path`), or, until that server once signed one, the token in the body as before.
+/// The server on success.
+#[allow(clippy::result_large_err)] // the error is the ready axum answer
+pub(crate) fn agent_dl_auth(app: &App, h: &HeaderMap, path: &str, raw: &[u8], b: &Value) -> Result<TServer, Response> {
+    let id = b["id"].as_str().unwrap_or("");
+    let Some(s) = servers(app).into_iter().find(|s| s.id == id) else {
+        return Err((StatusCode::GONE, "unknown server").into_response());
+    };
+    if crate::sign::is_signed(h) {
+        if let Err(r) = crate::sign::verify(&s.token, h, "POST", path, raw, now()) {
+            return Err(err(StatusCode::UNAUTHORIZED, r.text()));
+        }
+        if !s.signed_dl {
+            let mut list = servers(app);
+            if let Some(x) = list.iter_mut().find(|x| x.id == s.id) {
+                x.signed_dl = true;
+                save_servers(app, &list);
+            }
+        }
+        return Ok(s);
+    }
+    if s.signed_dl {
+        return Err(err(StatusCode::UNAUTHORIZED, crate::sign::Refusal::Unsigned.text()));
+    }
+    let token = b["token"].as_str().unwrap_or("");
+    if token.is_empty() || !util::ct_eq(token, &s.token) {
+        return Err(err(StatusCode::FORBIDDEN, "wrong token"));
+    }
+    Ok(s)
+}
+
+/// 3.69: the answer to a signed request of a server agent is signed too (its token, bound to the request's
+/// nonce, the status and the body); an answer to an unsigned one (an agent from before) is left unsigned
+pub(crate) fn signed_answer(token: &str, h: &HeaderMap, status: StatusCode, headers: &[(&'static str, String)], body: Vec<u8>) -> Response {
+    let sig = crate::sign::nonce_of(h).map(|n| crate::sign::reply_headers(token, &n, status.as_u16(), &body)).unwrap_or_default();
+    let mut res = (status, body).into_response();
+    for (k, v) in headers.iter().chain(sig.iter()) {
+        if let Ok(v) = axum::http::HeaderValue::from_str(v) {
+            res.headers_mut().insert(*k, v);
+        }
+    }
+    res
+}
+
+/// `signed_answer` of a JSON value
+pub(crate) fn signed_json(token: &str, h: &HeaderMap, status: StatusCode, v: &Value) -> Response {
+    signed_answer(token, h, status, &[("content-type", "application/json".to_string())], serde_json::to_vec(v).unwrap_or_default())
+}
+
 /// a tunnel server's id and token are right (used before a big upload is read)
 pub fn agent_token_ok(app: &App, id: &str, token: &str) -> bool {
     !token.is_empty() && servers(app).into_iter().any(|s| s.id == id && util::ct_eq(token, &s.token))
 }
 
-#[allow(clippy::result_large_err)] // the error is the ready axum answer (401/403)
-fn agent_ok(app: &App, id: &str, token: &str) -> Result<(), Response> {
-    let Some(s) = servers(app).into_iter().find(|s| s.id == id) else {
-        return Err((StatusCode::GONE, "unknown server").into_response());
-    };
-    if token.is_empty() || !util::ct_eq(token, &s.token) {
-        return Err(err(StatusCode::FORBIDDEN, "wrong token"));
-    }
-    Ok(())
-}
 
 /// Public (agent token): the hysteria binary for a tunnel server that cannot download it itself.
 /// With "check": only says whether the panel already has one for that CPU type.
-async fn agent_hy2bin(State(app): St, Json(b): Json<Value>) -> Response {
-    if let Err(r) = agent_ok(&app, b["id"].as_str().unwrap_or(""), b["token"].as_str().unwrap_or("")) {
-        return r;
-    }
+pub const HY2BIN_PATH: &str = "/tunnel/hy2bin";
+
+async fn agent_hy2bin(State(app): St, h: HeaderMap, raw: axum::body::Bytes) -> Response {
+    let Ok(b) = serde_json::from_slice::<Value>(&raw) else { return err(StatusCode::BAD_REQUEST, "send JSON") };
+    let s = match agent_dl_auth(&app, &h, HY2BIN_PATH, &raw, &b) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
     let arch = b["arch"].as_str().unwrap_or("").to_string();
+    // 3.69: an agent from before asks whether the panel has a copy, then uploads its own when it has none. Nothing
+    // is ever taken from an agent (it would run as root on every other server): the answer is always «have»,
+    // the panel gets the pinned release itself when one is asked for
     if b["check"].as_bool() == Some(true) {
-        return Json(json!({ "have": hy2bin_bytes(&arch, false).await.is_some() })).into_response();
+        return signed_json(&s.token, &h, StatusCode::OK, &json!({ "have": true }));
     }
     let Some(bytes) = hy2bin_bytes(&arch, true).await else {
         return err(StatusCode::NOT_FOUND, "the panel has no hysteria for this CPU type and cannot download it either");
     };
-    let sum = {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        h.update(&bytes);
-        hex::encode(h.finalize())
-    };
-    (StatusCode::OK, [("x-sha256", sum)], bytes).into_response()
-}
-
-/// Public (agent token): older agents offer the panel their own copy of hysteria for the others. It is no longer
-/// kept: what one server sends would run as root on every other server, so the panel only hands out its own copy
-/// or one it downloaded from the release itself.
-async fn agent_hy2bin_put(State(app): St, h: HeaderMap) -> Response {
-    let hv = |k: &str| h.get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-    if let Err(r) = agent_ok(&app, &hv("x-id"), &hv("x-token")) {
-        return r;
-    }
-    Json(json!({ "ok": true })).into_response()
+    let sum = crate::release::sha256_hex(&bytes);
+    signed_answer(&s.token, &h, StatusCode::OK, &[("x-sha256", sum)], bytes)
 }
 
 // ------------------------------------------------------------------ smart tunnel (test every transport)
@@ -2002,7 +2037,6 @@ pub fn router() -> Router<Arc<App>> {
         .route("/tunnel/binary", post(agent_binary))
         .route("/tunnel/hy2bin", post(agent_hy2bin))
         // a hysteria binary is ~20 MB (the rest of the panel keeps the 2 MiB limit)
-        .route("/tunnel/hy2bin/put", post(agent_hy2bin_put))
         .route("/api/update-all", post(update_all))
         .route("/api/auto-update", get(auto_update_get).put(auto_update_put))
 }
@@ -2134,6 +2168,59 @@ pub fn udp_entries(app: &App, sid: &str, port: u16) -> Vec<(String, u16)> {
         }
     }
     out
+}
+
+/// 3.69: the KANKI MIX hop ports tunnel `t` carries besides the main port, as (entry port, port on the exit). When
+/// the tunnel is a Kanki tunnel (the engine forwards any UDP list) that carries the main KANKI MIX port of the
+/// server at its exit, every hop port of that server (`kmix_hop`, as the server reports it runs) is forwarded
+/// from the same port number on the entry to the main port. Nothing when one of those entry ports is already
+/// used by another tunnel at that entry or by the tunnel itself: then the link through it has no `ports=` (the
+/// client never hops onto a port that leads nowhere).
+pub fn kmix_hop_map(app: &App, t: &Tunnel) -> Vec<(u16, u16)> {
+    if !t.enabled || !t.kind.is_empty() || t.entry == t.exit {
+        return vec![];
+    }
+    let nid = if t.exit == "local" { "local".to_string() } else { servers(app).into_iter().find(|s| s.id == t.exit).map(|s| s.node).unwrap_or_default() };
+    if nid.is_empty() || !crate::kmix::settings(app).node_on(&nid) {
+        return vec![];
+    }
+    let Some(n) = app.db.node(&nid) else { return vec![] };
+    let info = crate::api::node_info(&n);
+    let Some(port) = info["kmix_port"].as_u64().and_then(|p| u16::try_from(p).ok()).filter(|p| *p > 0) else { return vec![] };
+    let Some((a, b)) = info["kmix_hop"].as_str().and_then(crate::kmix::hop_range) else { return vec![] };
+    let own = crate::tunnel::engine::parse_ports(&t.udp);
+    if !own.iter().any(|(_, x)| *x == port) {
+        return vec![];
+    }
+    // the entry ports already taken there: this tunnel's own and every other tunnel's at the same entry
+    let mut taken: std::collections::HashSet<u16> = own.iter().map(|(x, _)| *x).collect();
+    for o in tunnels(app).into_iter().filter(|o| o.enabled && o.id != t.id && o.entry == t.entry) {
+        taken.extend(crate::tunnel::engine::parse_ports(&o.udp).into_iter().map(|(x, _)| x));
+        if o.kind == "awg" {
+            taken.extend(crate::tunnel::engine::parse_ports(&o.awg.fwd_udp).into_iter().map(|(x, _)| x));
+        }
+    }
+    if (a..=b).any(|h| taken.contains(&h)) {
+        return vec![];
+    }
+    (a..=b).map(|h| (h, port)).collect()
+}
+
+/// The hop range a client may use at the Iran entry `host` (port `tport`) that leads to KANKI MIX `port` of node
+/// `nid` ("4001-4010"), when the tunnel there forwards it (`kmix_hop_map`)
+pub fn kmix_hops_at(app: &App, nid: &str, host: &str, tport: u16, port: u16) -> Option<String> {
+    let sid = crate::twin::sid_of_node(app, nid);
+    if sid.is_empty() {
+        return None;
+    }
+    tunnels(app).into_iter().filter(|t| t.exit == sid && host_of(app, &t.entry) == host).find_map(|t| {
+        let carries = crate::tunnel::engine::parse_ports(&t.udp).into_iter().any(|(a, b)| a == tport && b == port);
+        let hops = kmix_hop_map(app, &t);
+        match (carries, hops.first(), hops.last()) {
+            (true, Some(f), Some(l)) => Some(format!("{}-{}", f.0, l.0)),
+            _ => None,
+        }
+    })
 }
 
 /// Some Kanki port tunnel (not a layer-3 AmneziaWG one, which carries every port) ends at server `sid`.
@@ -3169,7 +3256,8 @@ async fn server_add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Respo
     save_servers(&app, &list);
     let s = list.iter().find(|x| x.id == s.id).cloned().unwrap_or(s);
     let gre = gre_info(&app, &s).await;
-    Json(json!({ "ok": true, "id": s.id, "token": s.token, "name": s.name, "panel": crate::servers::panel_url(&app), "repo": crate::admin::repo(), "gre": gre })).into_response()
+    crate::servers::panel_pin(&app).await;
+    Json(json!({ "ok": true, "id": s.id, "token": s.token, "name": s.name, "panel": crate::servers::panel_url(&app), "repo": crate::admin::repo(), "gre": gre, "pin": crate::servers::panel_pin_word() })).into_response()
 }
 
 async fn server_edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
@@ -3208,7 +3296,8 @@ async fn server_edit(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
     save_servers(&app, &list);
     let cur = list.iter().find(|x| x.id == id).cloned().unwrap_or_default();
     let gre = gre_info(&app, &cur).await;
-    Json(json!({ "ok": true, "token": token, "panel": crate::servers::panel_url(&app), "repo": crate::admin::repo(), "gre": gre })).into_response()
+    crate::servers::panel_pin(&app).await;
+    Json(json!({ "ok": true, "token": token, "panel": crate::servers::panel_url(&app), "repo": crate::admin::repo(), "gre": gre, "pin": crate::servers::panel_pin_word() })).into_response()
 }
 
 /// Services the admin asked to stop on a server because they hold ports Kanki DNS or Xray need there
@@ -3381,12 +3470,12 @@ pub(crate) fn delete_server(app: &App, id: &str, with_tunnels: bool) -> Result<(
         save_tunnels(app, &tl);
     }
     let mut list = servers(app);
-    if !list.iter().any(|s| s.id == id) {
+    let Some(token) = list.iter().find(|s| s.id == id).map(|s| s.token.clone()) else {
         return Err((StatusCode::NOT_FOUND, "unknown server".into()));
-    }
+    };
     list.retain(|s| s.id != id);
     save_servers(app, &list);
-    mark_removed(app, id);
+    mark_removed(app, id, &token);
     crate::dns::panel::forget_server(app, id);
     crate::xray::panel::forget_server(app, id);
     crate::access::forget_agent(app, id);
@@ -3421,6 +3510,10 @@ async fn agent_report(State(app): St, h: HeaderMap, raw: axum::body::Bytes) -> R
         // told nothing that makes it remove anything
         if was_removed(&app, &id) {
             note_gone(&id);
+            // 3.69: signed with its old token when the report was (the agent only trusts a signed «gone» then)
+            if let Some(tok) = removed_token(&app, &id).filter(|t| crate::sign::verify(t, &h, "POST", REPORT_PATH, &raw, now()).is_ok()) {
+                return signed_answer(&tok, &h, StatusCode::GONE, &[], b"this server is not in the panel any more".to_vec());
+            }
             return (StatusCode::GONE, "this server is not in the panel any more").into_response();
         }
         return (StatusCode::NOT_FOUND, "this panel does not know this server").into_response();
@@ -3487,19 +3580,19 @@ async fn agent_report(State(app): St, h: HeaderMap, raw: axum::body::Bytes) -> R
     let (xray_block, xray_drop) = (crate::xray::panel::shut_on(&id), crate::xray::panel::ip_blocks(&id));
     // "kping": {} tells an agent older than 3.60 to stop a KPING relay or exit it still runs (gone in 3.60), and
     // "vip": [] one older than 3.57.0 to stop its VIP tunnels
-    Json(json!({ "kping": {}, "vip": [], "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "resync": asks.contains("sync"), "restart": asks.contains("restart"), "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app), "panel_alt": crate::cdn::url(&app).into_iter().collect::<Vec<_>>() })).into_response()
+    signed_json(&s.token, &h, StatusCode::OK, &json!({ "kping": {}, "vip": [], "tunnels": specs_for(&app, &id), "update": update, "emergency": emergency, "dns": dns, "xray": xray, "xray_block": xray_block, "xray_drop": xray_drop, "subsrv": subsrv, "free": free, "ssl_retry": ssl_retry, "resync": asks.contains("sync"), "restart": asks.contains("restart"), "fw_close": fw_close, "fw_guard": fw_guard, "fw_confirm": fw_confirm, "fw_fresh": fw_fresh, "setup": setup, "panel": crate::servers::panel_url(&app), "panel_alt": crate::cdn::url(&app).into_iter().collect::<Vec<_>>() }))
 }
 
 /// The panel's own binary for a tunnel agent that was asked to update (same file everywhere)
-async fn agent_binary(State(app): St, Json(b): Json<Value>) -> Response {
-    let id = b["id"].as_str().unwrap_or("").to_string();
-    let token = b["token"].as_str().unwrap_or("").to_string();
-    let Some(s) = servers(&app).into_iter().find(|s| s.id == id) else {
-        return (StatusCode::GONE, "unknown server").into_response();
+pub const BINARY_PATH: &str = "/tunnel/binary";
+
+async fn agent_binary(State(app): St, h: HeaderMap, raw: axum::body::Bytes) -> Response {
+    let Ok(b) = serde_json::from_slice::<Value>(&raw) else { return err(StatusCode::BAD_REQUEST, "send JSON") };
+    let s = match agent_dl_auth(&app, &h, BINARY_PATH, &raw, &b) {
+        Ok(s) => s,
+        Err(r) => return r,
     };
-    if token.is_empty() || !util::ct_eq(&token, &s.token) {
-        return err(StatusCode::FORBIDDEN, "wrong token");
-    }
+    let id = s.id.clone();
     if now() >= app.db.get("tun_update_until").parse::<i64>().unwrap_or(0).max(update_one_until(&app, &id)) {
         return err(StatusCode::CONFLICT, "no update was requested");
     }
@@ -3508,13 +3601,14 @@ async fn agent_binary(State(app): St, Json(b): Json<Value>) -> Response {
     }
     let Ok(path) = crate::util::exe_path() else { return err(StatusCode::INTERNAL_SERVER_ERROR, "no binary") };
     let Ok(bytes) = std::fs::read(&path) else { return err(StatusCode::INTERNAL_SERVER_ERROR, "cannot read the binary") };
-    let sum = {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        h.update(&bytes);
-        hex::encode(h.finalize())
+    let sum = crate::release::sha256_hex(&bytes);
+    // 3.69: the release signature goes along (the agent checks it with its own built-in key); the panel checks
+    // first that it is the signature of this very file, so a stale one is not handed out
+    let sig = crate::release::own_signature().filter(|s| crate::release::verify_update(&bytes, s).is_ok());
+    let Some(sig) = sig else {
+        return err(StatusCode::CONFLICT, "this panel's program has no release signature (installed by hand): update the panel first, then the servers");
     };
-    (StatusCode::OK, [("x-sha256", sum)], bytes).into_response()
+    signed_answer(&s.token, &h, StatusCode::OK, &[("x-sha256", sum), ("x-minisig", crate::util::b64(sig.as_bytes()))], bytes)
 }
 
 /// One click: updates every node, asks every tunnel-only server to update from the panel, then the
@@ -3645,7 +3739,8 @@ fn next_run_ts() -> i64 {
 pub async fn auto_update_loop(app: Arc<App>) {
     loop {
         tokio::time::sleep(Duration::from_secs(60)).await;
-        if crate::migrate::frozen() || app.db.get("auto_update") != "1" {
+        // 3.69: nothing updates by itself in a build without the release signing key
+        if crate::migrate::frozen() || app.db.get("auto_update") != "1" || !crate::release::signing_active() {
             continue;
         }
         let (day, minute) = tehran_now();
@@ -3671,18 +3766,51 @@ pub async fn auto_update_loop(app: Arc<App>) {
 async fn auto_update_get(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "admin");
     let last: Value = serde_json::from_str(&app.db.get("auto_update_last")).unwrap_or(Value::Null);
-    Json(json!({ "on": app.db.get("auto_update") == "1", "next": next_run_ts(), "last": last })).into_response()
+    let signed = crate::release::signing_active();
+    Json(json!({ "on": signed && app.db.get("auto_update") == "1", "signed": signed, "next": next_run_ts(), "last": last })).into_response()
 }
 
 async fn auto_update_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "admin");
     let on = b["on"].as_bool().unwrap_or(false);
+    // 3.69: off until signed updates are active in this build (an unsigned file would run as root every night)
+    if on && !crate::release::signing_active() {
+        return err(StatusCode::CONFLICT, "automatic update needs a build with the release signing key (signed updates): update by hand for now");
+    }
     app.db.set("auto_update", if on { "1" } else { "" });
     Json(json!({ "ok": true, "on": on, "next": next_run_ts() })).into_response()
 }
 
 #[cfg(test)]
 mod auto_update_tests {
+    /// A build without the release key (every test build) keeps the automatic update off, even when asked
+    #[tokio::test]
+    async fn automatic_update_stays_off_without_signed_updates() {
+        use tower::ServiceExt;
+        assert!(!crate::release::signing_active());
+        let app = crate::test_app();
+        app.db.set("auto_update", "1");
+        let t = crate::auth::test_session(&app);
+        let call = |m: &str, body: &str| {
+            let (app, t) = (app.clone(), t.clone());
+            let r = axum::http::Request::builder().method(m).uri("/api/auto-update").header("authorization", format!("Bearer {}", t))
+                .header("content-type", "application/json").header("x-forwarded-for", "203.0.113.70").body(axum::body::Body::from(body.to_string())).unwrap();
+            async move {
+                let res = crate::api::master_router(app).oneshot(r).await.unwrap();
+                let st = res.status();
+                let b = axum::body::to_bytes(res.into_body(), 1 << 16).await.unwrap();
+                (st, serde_json::from_slice::<serde_json::Value>(&b).unwrap_or_default())
+            }
+        };
+        let (st, v) = call("GET", "").await;
+        assert_eq!((st.as_u16(), v["on"].as_bool(), v["signed"].as_bool()), (200, Some(false), Some(false)));
+        let (st, _) = call("PUT", r#"{"on":true}"#).await;
+        assert_eq!(st.as_u16(), 409);
+        // a self update refuses before it downloads anything
+        app.db.set("auto_update", "");
+        assert!(crate::admin::self_update(&app).await.unwrap_err().contains("signing key"));
+    }
+
     #[test]
     fn next_run_is_0330_tehran_within_a_day() {
         let n = super::next_run_ts();
@@ -3876,11 +4004,23 @@ fn removed_ids(app: &App) -> std::collections::HashMap<String, i64> {
     serde_json::from_str(&app.db.get("tun_removed")).unwrap_or_default()
 }
 
-fn mark_removed(app: &App, id: &str) {
+fn mark_removed(app: &App, id: &str, token: &str) {
     let mut m = removed_ids(app);
     m.retain(|_, t| now() - *t < 60 * 86400);
     m.insert(id.to_string(), now());
     app.db.set("tun_removed", &serde_json::to_string(&m).unwrap_or_else(|_| "{}".into()));
+    // 3.69: its token is kept as long (sealed at rest), so the «gone» answer can be signed: an agent that knows the
+    // panel signs uninstalls itself only on a signed one, never on one a man in the middle made up
+    let mut t: std::collections::HashMap<String, String> = serde_json::from_str(&app.db.get("tun_removed_tok")).unwrap_or_default();
+    t.retain(|k, _| m.contains_key(k));
+    t.insert(id.to_string(), token.to_string());
+    app.db.set("tun_removed_tok", &serde_json::to_string(&t).unwrap_or_else(|_| "{}".into()));
+}
+
+/// The token a removed server had (to sign the «gone» answer with)
+fn removed_token(app: &App, id: &str) -> Option<String> {
+    let t: std::collections::HashMap<String, String> = serde_json::from_str(&app.db.get("tun_removed_tok")).unwrap_or_default();
+    t.get(id).cloned().filter(|x| !x.is_empty())
 }
 
 pub(crate) fn was_removed(app: &App, id: &str) -> bool {

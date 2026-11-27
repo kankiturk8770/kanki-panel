@@ -58,6 +58,66 @@ pub struct SubCfg {
     pub port: u16,
     /// where the panel is reached on that server ("127.0.0.1:<port>", through the tunnel)
     pub upstream: String,
+    /// 3.69: the key the relay signs each request's client address with (`relay_header`); "" = a panel from
+    /// before (nothing is signed, the panel sees the relay's own address as before)
+    pub relay_key: String,
+}
+
+/// The header a trusted Iran relay adds: `v1;<ts>;<nonce>;<hex HMAC>` over the client address and the request line
+pub const RELAY_HEADER: &str = "x-kanki-relay";
+/// How old a relayed request may be (the relay and the panel both keep their clocks with NTP)
+const RELAY_SKEW: i64 = 120;
+
+/// The relay key of the subscription relay: HMAC of its own secret (the hidden tunnel's token), never stored apart
+pub fn relay_key(s: &SubIran) -> String {
+    use hmac::{Hmac, Mac};
+    if s.token.is_empty() {
+        return String::new();
+    }
+    let Ok(mut m) = Hmac::<sha2::Sha256>::new_from_slice(s.token.as_bytes()) else { return String::new() };
+    m.update(b"kanki-relay-key-v1");
+    hex::encode(m.finalize().into_bytes())
+}
+
+fn relay_mac(key: &str, ts: i64, nonce: &str, client: &str, method: &str, target: &str) -> Option<hmac::Hmac<sha2::Sha256>> {
+    use hmac::Mac;
+    let mut m = hmac::Hmac::<sha2::Sha256>::new_from_slice(key.as_bytes()).ok()?;
+    m.update(format!("kanki-relay-v1\n{}\n{}\n{}\n{}\n{}", ts, nonce, client, method, target).as_bytes());
+    Some(m)
+}
+
+/// The value of `RELAY_HEADER` for one request
+pub fn relay_header(key: &str, client: &str, method: &str, target: &str, ts: i64) -> String {
+    use hmac::Mac;
+    let nonce = hex::encode(rand::random::<[u8; 16]>());
+    let sig = relay_mac(key, ts, &nonce, client, method, target).map(|m| hex::encode(m.finalize().into_bytes())).unwrap_or_default();
+    format!("v1;{};{};{}", ts, nonce, sig)
+}
+
+/// The panel's side: the client address a relayed request carries, when its header was made with this panel's relay
+/// key for exactly this request (method, path) and this address, recently and only once
+pub fn verified_client(app: &App, h: &axum::http::HeaderMap, method: &str, target: &str, now: i64) -> Option<String> {
+    use hmac::Mac;
+    let v = h.get(RELAY_HEADER)?.to_str().ok()?;
+    let key = relay_key(&settings(app));
+    if key.is_empty() {
+        return None;
+    }
+    let mut it = v.split(';');
+    let (ver, ts, nonce, sig) = (it.next()?, it.next()?, it.next()?, it.next()?);
+    if ver != "v1" || it.next().is_some() || nonce.len() != 32 || !nonce.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let ts: i64 = ts.parse().ok()?;
+    if (now - ts).abs() > RELAY_SKEW || ts < crate::sign::floor() {
+        return None;
+    }
+    // the address the relay named (the rightmost one: the relay adds exactly one)
+    let client = h.get("x-forwarded-for")?.to_str().ok()?.split(',').next_back()?.trim().to_string();
+    client.parse::<std::net::IpAddr>().ok()?;
+    let sig = hex::decode(sig).ok()?;
+    relay_mac(&key, ts, nonce, &client, method, target)?.verify_slice(&sig).ok()?;
+    crate::sign::remember(&format!("relay-{}", nonce.to_ascii_lowercase()), ts, now).then_some(client)
 }
 
 pub fn settings(app: &App) -> SubIran {
@@ -160,7 +220,7 @@ pub fn cfg_for(app: &App, sid: &str) -> Value {
     if !on(&s) || s.server != sid {
         return Value::Null;
     }
-    json!(SubCfg { domain: s.domain.clone(), port: s.port, upstream: format!("127.0.0.1:{}", upstream_port(app, &s)) })
+    json!(SubCfg { domain: s.domain.clone(), port: s.port, upstream: format!("127.0.0.1:{}", upstream_port(app, &s)), relay_key: relay_key(&s) })
 }
 
 fn last_status() -> &'static Mutex<HashMap<String, Value>> {
@@ -468,9 +528,9 @@ async fn serve(c: SubCfg, status: Arc<Mutex<Value>>) {
                 a = l.accept() => {
                     let Ok((tcp, peer)) = a else { continue };
                     let Ok(permit) = busy.clone().try_acquire_owned() else { continue };
-                    let (acc, up) = (acc.clone(), c.upstream.clone());
+                    let (acc, up, key) = (acc.clone(), c.upstream.clone(), c.relay_key.clone());
                     tokio::spawn(async move {
-                        let _ = handle(tcp, peer.ip().to_string(), acc, &up).await;
+                        let _ = handle(tcp, peer.ip().to_string(), acc, &up, &key).await;
                         drop(permit);
                     });
                 }
@@ -513,7 +573,7 @@ pub fn allowed_path(target: &str) -> bool {
 
 /// The request head sent on to the panel, or None when it is not a subscription request. One request
 /// per connection: the panel closes it after the answer, so a second request cannot slip through.
-pub fn proxy_head(head: &str, client: &str) -> Option<String> {
+pub fn proxy_head(head: &str, client: &str, key: &str) -> Option<String> {
     let mut lines = head.split("\r\n");
     let mut first = lines.next()?.split(' ');
     let (method, target, ver) = (first.next()?, first.next()?, first.next()?);
@@ -528,19 +588,24 @@ pub fn proxy_head(head: &str, client: &str) -> Option<String> {
             return None;
         }
         let name = l.split(':').next().unwrap_or("").trim().to_ascii_lowercase();
-        if ["connection", "keep-alive", "proxy-connection", "upgrade", "x-forwarded-for", "x-forwarded-proto", "x-real-ip", "forwarded", "te", "transfer-encoding", "content-length"].contains(&name.as_str()) {
+        if ["connection", "keep-alive", "proxy-connection", "upgrade", "x-forwarded-for", "x-forwarded-proto", "x-real-ip", "forwarded", "te", "transfer-encoding", "content-length", RELAY_HEADER].contains(&name.as_str()) {
             continue;
         }
         out.push_str(l);
         out.push_str("\r\n");
     }
-    out.push_str(&format!("X-Forwarded-For: {}\r\nX-Forwarded-Proto: https\r\nConnection: close\r\n\r\n", client));
+    out.push_str(&format!("X-Forwarded-For: {}\r\nX-Forwarded-Proto: https\r\n", client));
+    // 3.69: the client's address signed for the panel, so its limits count each client, not the relay
+    if !key.is_empty() {
+        out.push_str(&format!("X-Kanki-Relay: {}\r\n", relay_header(key, client, method, target, crate::util::now())));
+    }
+    out.push_str("Connection: close\r\n\r\n");
     Some(out)
 }
 
-async fn handle(tcp: tokio::net::TcpStream, client: String, acc: tokio_rustls::TlsAcceptor, upstream: &str) -> Result<(), String> {
+async fn handle(tcp: tokio::net::TcpStream, client: String, acc: tokio_rustls::TlsAcceptor, upstream: &str, key: &str) -> Result<(), String> {
     let tls = tokio::time::timeout(Duration::from_secs(10), acc.accept(tcp)).await.map_err(|_| "tls timeout")?.map_err(|e| e.to_string())?;
-    relay(tls, client, upstream).await
+    relay(tls, client, upstream, key).await
 }
 
 /// Longest a relayed answer may take, and longest it may stay silent (a client that stops reading cannot
@@ -551,7 +616,7 @@ const IDLE_MAX: Duration = Duration::from_secs(60);
 /// One request of an app or browser, already past TLS: its head (paths and headers checked by `proxy_head`,
 /// every app header kept: X-Kanki-Sub, X-Kanki-Device, X-Kanki-Seal, Authorization) goes to the panel, the
 /// answer comes back byte for byte (no redirect, no rewrite)
-pub(crate) async fn relay<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(mut tls: S, client: String, upstream: &str) -> Result<(), String> {
+pub(crate) async fn relay<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(mut tls: S, client: String, upstream: &str, key: &str) -> Result<(), String> {
     // the request head
     let mut buf = Vec::with_capacity(2048);
     let mut tmp = [0u8; 4096];
@@ -573,7 +638,7 @@ pub(crate) async fn relay<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpi
     .await
     .map_err(|_| "read timeout")??;
     let reply = |code: &str| format!("HTTP/1.1 {}\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", code, code.len(), code);
-    let Some(head) = std::str::from_utf8(&buf[..end]).ok().and_then(|h| proxy_head(h, &client)) else {
+    let Some(head) = std::str::from_utf8(&buf[..end]).ok().and_then(|h| proxy_head(h, &client, key)) else {
         let _ = tls.write_all(reply("404 Not Found").as_bytes()).await;
         let _ = tls.shutdown().await;
         return Ok(());
@@ -657,15 +722,15 @@ mod tests {
     #[test]
     fn head_is_rewritten_for_the_panel() {
         // a header hidden behind a bare line feed is refused (it would get past the filter)
-        assert!(proxy_head("GET /sub/abc HTTP/1.1\r\nUser-Agent: x\nX-Forwarded-For: 127.0.0.1\r\n\r\n", "5.6.7.8").is_none());
-        assert!(proxy_head("GET /sub/abc HTTP/1.1\r\nUser-Agent: x\rX-Forwarded-For: 127.0.0.1\r\n\r\n", "5.6.7.8").is_none());
+        assert!(proxy_head("GET /sub/abc HTTP/1.1\r\nUser-Agent: x\nX-Forwarded-For: 127.0.0.1\r\n\r\n", "5.6.7.8", "").is_none());
+        assert!(proxy_head("GET /sub/abc HTTP/1.1\r\nUser-Agent: x\rX-Forwarded-For: 127.0.0.1\r\n\r\n", "5.6.7.8", "").is_none());
         let h = "GET /sub/abc HTTP/1.1\r\nHost: sub.example.com:2053\r\nConnection: keep-alive\r\nX-Forwarded-For: 6.6.6.6\r\nUser-Agent: v2rayNG\r\n\r\n";
-        let out = proxy_head(h, "5.6.7.8").unwrap();
+        let out = proxy_head(h, "5.6.7.8", "").unwrap();
         assert_eq!(out, "GET /sub/abc HTTP/1.1\r\nHost: sub.example.com:2053\r\nUser-Agent: v2rayNG\r\nX-Forwarded-For: 5.6.7.8\r\nX-Forwarded-Proto: https\r\nConnection: close\r\n\r\n");
-        assert!(proxy_head("GET /admin HTTP/1.1\r\nHost: x\r\n\r\n", "1.1.1.1").is_none());
-        assert!(proxy_head("POST /sub/abc HTTP/1.1\r\nHost: x\r\n\r\n", "1.1.1.1").is_none());
-        assert!(proxy_head("GET /sub/abc HTTP/2\r\n\r\n", "1.1.1.1").is_none());
-        assert!(proxy_head("GET /sub/abc HTTP/1.1\r\nHost: x\r\n folded\r\n\r\n", "1.1.1.1").is_none());
+        assert!(proxy_head("GET /admin HTTP/1.1\r\nHost: x\r\n\r\n", "1.1.1.1", "").is_none());
+        assert!(proxy_head("POST /sub/abc HTTP/1.1\r\nHost: x\r\n\r\n", "1.1.1.1", "").is_none());
+        assert!(proxy_head("GET /sub/abc HTTP/2\r\n\r\n", "1.1.1.1", "").is_none());
+        assert!(proxy_head("GET /sub/abc HTTP/1.1\r\nHost: x\r\n folded\r\n\r\n", "1.1.1.1", "").is_none());
     }
 
     /// The Kanki app through the relay: GET /sub/me with the code in X-Kanki-Sub and a sealed answer asked for
@@ -681,11 +746,13 @@ mod tests {
         tokio::spawn(async move {
             let _ = axum::serve(l, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await;
         });
+        save(&app, &SubIran { token: "relay-tunnel-token-0123456789".into(), ..Default::default() });
+        let key = relay_key(&settings(&app));
         let ask = |head: String| {
-            let up = up.clone();
+            let (up, key) = (up.clone(), key.clone());
             async move {
                 let (mut cli, srv) = tokio::io::duplex(4 << 20);
-                let t = tokio::spawn(async move { relay(srv, "203.0.113.7".into(), &up).await });
+                let t = tokio::spawn(async move { relay(srv, "203.0.113.7".into(), &up, &key).await });
                 cli.write_all(head.as_bytes()).await.unwrap();
                 let mut out = Vec::new();
                 cli.read_to_end(&mut out).await.unwrap();
@@ -710,6 +777,56 @@ mod tests {
         // admin paths never pass
         let admin = ask("GET /api/users HTTP/1.1\r\nHost: r\r\nAuthorization: Bearer x\r\n\r\n".into()).await;
         assert!(admin.starts_with("HTTP/1.1 404"));
+    }
+
+    /// 3.69: the relay's signed client address: taken only for exactly the request it was made for, once, recently,
+    /// with this panel's key; the limits then count that client, not the relay
+    #[tokio::test]
+    async fn the_relay_signs_its_clients_address() {
+        use axum::http::{HeaderMap, HeaderValue};
+        let app = crate::test_app();
+        save(&app, &SubIran { token: "relay-tunnel-token-abcdef012345".into(), ..Default::default() });
+        let key = relay_key(&settings(&app));
+        let now = crate::util::now();
+        let hm = |client: &str, v: &str| {
+            let mut h = HeaderMap::new();
+            h.insert("x-forwarded-for", HeaderValue::from_str(client).unwrap());
+            h.insert(RELAY_HEADER, HeaderValue::from_str(v).unwrap());
+            h
+        };
+        let v = relay_header(&key, "203.0.113.20", "GET", "/sub/x", now);
+        assert_eq!(verified_client(&app, &hm("203.0.113.20", &v), "GET", "/sub/x", now).as_deref(), Some("203.0.113.20"));
+        // the same header again (captured): refused
+        assert_eq!(verified_client(&app, &hm("203.0.113.20", &v), "GET", "/sub/x", now), None);
+        // another address, path or method under a good header: refused
+        let v = relay_header(&key, "203.0.113.20", "GET", "/sub/x", now);
+        assert_eq!(verified_client(&app, &hm("203.0.113.21", &v), "GET", "/sub/x", now), None);
+        assert_eq!(verified_client(&app, &hm("203.0.113.20", &v), "GET", "/sub/y", now), None);
+        assert_eq!(verified_client(&app, &hm("203.0.113.20", &v), "HEAD", "/sub/x", now), None);
+        // old, another key, junk
+        let old = relay_header(&key, "203.0.113.20", "GET", "/sub/x", now - RELAY_SKEW - 5);
+        assert_eq!(verified_client(&app, &hm("203.0.113.20", &old), "GET", "/sub/x", now), None);
+        let other = relay_header("another-key", "203.0.113.20", "GET", "/sub/x", now);
+        assert_eq!(verified_client(&app, &hm("203.0.113.20", &other), "GET", "/sub/x", now), None);
+        assert_eq!(verified_client(&app, &hm("203.0.113.20", "v1;x;y;z"), "GET", "/sub/x", now), None);
+        // through the whole panel from an address that is not this machine (PANEL_BIND public): a signed relay
+        // request counts its client; an unsigned one with a made-up address counts the sender
+        use tower::ServiceExt;
+        let send = |xff: &str, relay: Option<String>| {
+            let mut r = axum::http::Request::get("/sub/me").header("x-kanki-sub", "kanki-1-nosuchcode000").header("x-forwarded-for", xff);
+            if let Some(v) = relay {
+                r = r.header(RELAY_HEADER, v);
+            }
+            let mut r = r.body(axum::body::Body::empty()).unwrap();
+            r.extensions_mut().insert(axum::extract::ConnectInfo(std::net::SocketAddr::from(([198, 51, 100, 40], 5555))));
+            crate::api::master_router(app.clone()).oneshot(r)
+        };
+        let signed = relay_header(&key, "203.0.113.30", "GET", "/sub/me", crate::util::now());
+        assert_eq!(send("203.0.113.30", Some(signed)).await.unwrap().status(), axum::http::StatusCode::NOT_FOUND);
+        assert!(crate::limit::over("sub_miss", "203.0.113.30", 1, 3600), "the relayed client is counted");
+        assert_eq!(send("203.0.113.31", None).await.unwrap().status(), axum::http::StatusCode::NOT_FOUND);
+        assert!(!crate::limit::over("sub_miss", "203.0.113.31", 1, 3600), "a made-up address is not believed");
+        assert!(crate::limit::over("sub_miss", "198.51.100.40", 1, 3600), "the sender is counted");
     }
 
     #[test]

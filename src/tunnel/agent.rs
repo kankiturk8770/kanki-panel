@@ -18,6 +18,75 @@ pub const PIN_FILE: &str = "/etc/kanki/panel.pin";
 /// cannot be reached
 const ALT_FILE: &str = "/etc/kanki/panel.alt";
 
+/// 3.69: what this agent learned about signing, kept across restarts (a restart must not reopen the fallback):
+/// `signed_ok` = the panel took a signed report (the bare token is never sent with a report again);
+/// `panel_signs` = the panel signs its answers (from then on an unsigned or wrongly signed answer is refused,
+/// and the token never goes in a body again)
+const SIG_STATE: &str = "/var/lib/kanki/agent-sig.json";
+
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone, Copy, Debug, PartialEq)]
+#[serde(default)]
+pub struct SigState {
+    pub signed_ok: bool,
+    pub panel_signs: bool,
+}
+
+fn sig_cell() -> &'static Mutex<Option<SigState>> {
+    static S: Mutex<Option<SigState>> = Mutex::new(None);
+    &S
+}
+
+pub fn sig_state() -> SigState {
+    let mut g = sig_cell().lock().unwrap_or_else(|e| e.into_inner());
+    *g.get_or_insert_with(|| std::fs::read_to_string(SIG_STATE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default())
+}
+
+/// Moves the ratchet forward (never back) and keeps it on disk
+fn raise_sig_state(f: impl Fn(&mut SigState)) {
+    let mut g = sig_cell().lock().unwrap_or_else(|e| e.into_inner());
+    let mut st = g.unwrap_or_else(|| std::fs::read_to_string(SIG_STATE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default());
+    let before = st;
+    f(&mut st);
+    st.signed_ok |= before.signed_ok;
+    st.panel_signs |= before.panel_signs;
+    *g = Some(st);
+    if st != before {
+        if let Err(e) = crate::util::write_private(SIG_STATE, &serde_json::to_string(&st).unwrap_or_default()) {
+            eprintln!("agent: {} could not be written: {}", SIG_STATE, e);
+        }
+    }
+}
+
+/// 3.69: the body and signature headers of a download request to the panel (`path`): `fields` plus the server id;
+/// the token goes in the body only to a panel not yet known to sign its answers (an older one reads only that)
+pub fn signed_body(id: &str, token: &str, path: &str, fields: Value) -> (Vec<u8>, Vec<(&'static str, String)>) {
+    let mut b = if fields.is_object() { fields } else { json!({}) };
+    b["id"] = json!(id);
+    if !sig_state().panel_signs {
+        b["token"] = json!(token);
+    }
+    let raw = serde_json::to_vec(&b).unwrap_or_default();
+    let headers = crate::sign::headers(token, "POST", path, &raw);
+    (raw, headers)
+}
+
+/// 3.69: an answer of the panel to a signed request: a signed one must check out (and teaches the agent that the
+/// panel signs); an unsigned one is taken only from a panel never seen signing
+pub fn check_reply(token: &str, nonce: &str, h: &reqwest::header::HeaderMap, status: u16, body: &[u8]) -> Result<(), String> {
+    if crate::sign::reply_signed(h) {
+        crate::sign::verify_reply(token, nonce, h, status, body, crate::util::now()).map_err(|r| format!("the panel's answer: {}", r.text()))?;
+        if !sig_state().panel_signs {
+            eprintln!("the panel signs its answers: unsigned ones are refused from now on");
+            raise_sig_state(|s| s.panel_signs = true);
+        }
+        return Ok(());
+    }
+    if sig_state().panel_signs {
+        return Err("the panel's answer is not signed (the panel signed before): refused".into());
+    }
+    Ok(())
+}
+
 /// The address the agent talks to the panel through right now, and whether it is a CDN one
 static NOW: Mutex<Option<(String, bool)>> = Mutex::new(None);
 
@@ -281,30 +350,35 @@ fn uninstall_self() {
 /// Downloads the panel's own binary (same file, same machine type), checks its sha256, swaps it in
 /// and exits; systemd starts the new one. Used when the panel asks for an update (Update all).
 async fn update_from_panel(http: &reqwest::Client, panel: &str, id: &str, token: &str) -> Result<(), String> {
-    let r = http
-        .post(format!("{}/tunnel/binary", panel))
-        .json(&json!({ "id": id, "token": token, "arch": std::env::consts::ARCH }))
-        .timeout(Duration::from_secs(300))
-        .send()
-        .await
-        .map_err(|e| crate::pin::error_text(&e))?;
+    let path = crate::tunnel::panel::BINARY_PATH;
+    let (raw, hs) = signed_body(id, token, path, json!({ "arch": std::env::consts::ARCH }));
+    let nonce = hs.iter().find(|(k, _)| *k == crate::sign::NONCE).map(|(_, v)| v.clone()).unwrap_or_default();
+    let rb = hs.into_iter().fold(http.post(format!("{}{}", panel, path)).header(reqwest::header::CONTENT_TYPE, "application/json").body(raw), |rb, (k, v)| rb.header(k, v));
+    let r = rb.timeout(Duration::from_secs(300)).send().await.map_err(|e| crate::pin::error_text(&e))?;
     if !r.status().is_success() {
         return Err(format!("the panel answered {}", r.status()));
     }
+    let (status, rh) = (r.status().as_u16(), r.headers().clone());
     let want = r.headers().get("x-sha256").and_then(|v| v.to_str().ok()).unwrap_or("").to_lowercase();
+    // 3.69: the release signature of the program (base64 of its .minisig), checked with the key built into this
+    // agent before the file is ever started; a panel without one (installed by hand, an older one) is refused
+    let sig = r.headers().get("x-minisig").and_then(|v| v.to_str().ok()).and_then(crate::tunnel::link::b64decode).map(|b| String::from_utf8_lossy(&b).to_string());
     let bytes = r.bytes().await.map_err(|e| e.to_string())?;
-    let got = {
-        use sha2::{Digest, Sha256};
-        let mut h = Sha256::new();
-        h.update(&bytes);
-        hex::encode(h.finalize())
-    };
-    if want.is_empty() || want != got {
+    check_reply(token, &nonce, &rh, status, &bytes)?;
+    if want.is_empty() || !crate::release::matches(&bytes, &want) {
         return Err("checksum mismatch, update aborted".into());
+    }
+    let sig = sig.ok_or("the panel sent no release signature: update aborted (update the panel first, or this server by hand)")?;
+    let v = crate::release::verify_update(&bytes, &sig).map_err(|e| format!("signature check failed, update aborted: {}", e))?;
+    if v.version().is_some_and(|sv| crate::admin::newer(crate::VERSION, &sv)) {
+        return Err("the panel's program is older than this one: not installed".into());
     }
     let path = crate::util::exe_path().map_err(|e| e.to_string())?;
     // off the async workers: they carry the tunnels while the new file is written and test-run
     tokio::task::spawn_blocking(move || crate::util::swap_program(&path, &bytes)).await.map_err(|e| e.to_string())??;
+    if let Err(e) = crate::release::save_own_signature(&sig) {
+        eprintln!("update: {}", e);
+    }
     crate::util::restart_siblings();
     eprintln!("updated from the panel: restarting");
     std::process::exit(0);
@@ -353,6 +427,17 @@ pub async fn run(version: &str) {
             last = t;
         }
     }
+    // 3.69: the panel's certificate key from the join command (PANEL_PIN=ca:sha256//… | self:sha256//…) is the
+    // pin from the very first contact (no trust on first use); a pin file already there (renewals) is kept
+    let given = env.get("PANEL_PIN").map(|s| s.trim().to_string()).unwrap_or_default();
+    if let Some((mode, pin)) = given.split_once(':') {
+        if !std::path::Path::new(PIN_FILE).exists() {
+            match crate::pin::preset(std::path::Path::new(PIN_FILE), pin, mode == "ca") {
+                Ok(()) => eprintln!("the panel's certificate key from the join command is pinned ({})", PIN_FILE),
+                Err(e) => eprintln!("PANEL_PIN in {}: {}", ENV_FILE, e),
+            }
+        }
+    }
     // INSECURE=1: a CA-valid certificate is still accepted (and re-pinned), anything else is
     // pinned on first contact (see `panel_client`)
     if insecure {
@@ -386,8 +471,9 @@ pub async fn run(version: &str) {
     let xray_err: Mutex<Option<String>> = Mutex::new(None);
     // the subscription's HTTPS listener (when this Iran server serves it)
     let mut subsrv = crate::subiran::Runner::from_disk();
-    // the panel took a signed report (it never gets the bare token again) / it is older (since when)
-    let mut signed_ok = false;
+    // the panel took a signed report (it never gets the bare token again) / it is older (since when). 3.69: kept
+    // on disk, so a restart does not send the token again
+    let mut signed_ok = sig_state().signed_ok;
     let (mut listen, mut listen_at) = (serde_json::Value::Null, std::time::Instant::now());
     let mut panel_old: Option<std::time::Instant> = None;
     loop {
@@ -438,28 +524,32 @@ pub async fn run(version: &str) {
         let raw = serde_json::to_vec(&body).unwrap_or_default();
         let post = |c: &reqwest::Client, base: &str| {
             let rb = c.post(format!("{}{}", base, crate::tunnel::panel::REPORT_PATH)).header(reqwest::header::CONTENT_TYPE, "application/json").body(raw.clone());
-            crate::sign::sign(rb, &token, "POST", crate::tunnel::panel::REPORT_PATH, &raw)
+            crate::sign::sign_nonce(rb, &token, "POST", crate::tunnel::panel::REPORT_PATH, &raw)
         };
         // on another address: the first one is tried again every five minutes, with a short wait
         let mut early = None;
         if idx != 0 && probe_at.elapsed() >= Duration::from_secs(300) {
             probe_at = std::time::Instant::now();
             let (b0, a0) = &cands[0];
-            if let Ok(r) = post(if *a0 { &http_ca } else { &http }, b0).timeout(Duration::from_secs(8)).send().await {
+            let (rb, n0) = post(if *a0 { &http_ca } else { &http }, b0);
+            if let Ok(r) = rb.timeout(Duration::from_secs(8)).send().await {
                 if r.status().is_success() {
                     eprintln!("the panel answers at {} again", b0);
                     idx = 0;
                     miss = 0;
-                    early = Some(Ok(r));
+                    early = Some((Ok(r), n0));
                 }
             }
         }
         let (base, alt) = cands[idx].clone();
         *NOW.lock().unwrap_or_else(|e| e.into_inner()) = Some((base.clone(), alt));
         let http = if alt { &http_ca } else { &http };
-        let res = match early {
+        let (res, nonce) = match early {
             Some(r) => r,
-            None => post(http, &base).send().await,
+            None => {
+                let (rb, n) = post(http, &base);
+                (rb.send().await, n)
+            }
         };
         // a panel from before 3.65 does not read the signature and wants the token: it goes along for ten
         // minutes, then a signed report alone is tried again. Once a signed report alone was taken, the
@@ -469,7 +559,10 @@ pub async fn run(version: &str) {
                 eprintln!("the panel did not take the signed report: it is older, the token goes along for now");
                 panel_old = Some(std::time::Instant::now());
             }
-            Ok(r) if r.status().is_success() && panel_old.is_none() && !signed_ok => signed_ok = true,
+            Ok(r) if r.status().is_success() && panel_old.is_none() && !signed_ok => {
+                signed_ok = true;
+                raise_sig_state(|s| s.signed_ok = true);
+            }
             _ => {}
         }
         let reached = matches!(&res, Ok(r) if r.status().is_success() || r.status().as_u16() == 410);
@@ -488,9 +581,21 @@ pub async fn run(version: &str) {
         match res {
             Ok(r) if r.status().as_u16() == 410 => {
                 // this server was removed in the panel: everything Kanki put here is removed (a few
-                // answers in a row, so one odd answer does not wipe a working server)
-                gone += 1;
-                if gone >= 3 {
+                // answers in a row, so one odd answer does not wipe a working server). 3.69: from a panel that
+                // signs, only a signed «gone» counts
+                let rh = r.headers().clone();
+                let b = r.bytes().await.unwrap_or_default();
+                let trusted = match check_reply(&token, &nonce, &rh, 410, &b) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        false
+                    }
+                };
+                if trusted {
+                    gone += 1;
+                }
+                if trusted && gone >= 3 {
                     eprintln!("the panel removed this server: removing every tunnel and service Kanki installed here");
                     mgr.apply(vec![]).await;
                     let _ = tokio::task::spawn_blocking(|| crate::dns::deploy(None)).await;
@@ -507,7 +612,20 @@ pub async fn run(version: &str) {
                 fails = 0;
                 gone = 0;
                 crate::dns::qlog_ack(&body["dns"]);
-                if let Ok(v) = r.json::<Value>().await {
+                let (rst, rh) = (r.status().as_u16(), r.headers().clone());
+                // 3.69: the answer is signed by a panel from 3.69 on (bound to this report's nonce): a changed or
+                // replayed one is not applied
+                let answer = match r.bytes().await {
+                    Ok(b) => match check_reply(&token, &nonce, &rh, rst, &b) {
+                        Ok(()) => serde_json::from_slice::<Value>(&b).ok(),
+                        Err(e) => {
+                            eprintln!("{}", e);
+                            None
+                        }
+                    },
+                    Err(_) => None,
+                };
+                if let Some(v) = answer {
                     // the panel's addresses as it names them now (an older panel names none: kept as they were)
                     if v.get("panel_alt").is_some() {
                         let (m, a) = named(&v);

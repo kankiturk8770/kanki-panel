@@ -1,5 +1,5 @@
-//! Backup & restore: encrypted archive (AES-256 + PBKDF2 via openssl) with the database,
-//! server keys/configs and certificates; scheduled Telegram backups.
+//! Backup & restore: an authenticated archive (3.69: AES-256-GCM + PBKDF2, `bkcrypt`; the old openssl AES-CBC
+//! files are still read) with the database, server keys/configs and certificates; scheduled Telegram backups.
 use crate::api::err;
 use crate::guard;
 use crate::util::{now, rand_token, stamp};
@@ -139,7 +139,8 @@ fn le_restore(tgz: &str, le_dir: &str) -> Result<usize, String> {
     let tmp = format!("{}/kanki-le-{}", work_dir(), rand_token(12));
     private_dir(&tmp)?;
     let res = (|| -> Result<usize, String> {
-        run("tar", &["-xzf", tgz, "-C", &tmp, "--no-same-owner"], None)?;
+        let data = std::fs::read(tgz).map_err(|e| e.to_string())?;
+        crate::bkcrypt::unpack(&data, std::path::Path::new(&tmp), true)?;
         let src = std::path::Path::new(&tmp).join("letsencrypt");
         let dst = std::path::Path::new(le_dir);
         let mut n = 0;
@@ -244,7 +245,7 @@ fn run(cmd: &str, args: &[&str], pass: Option<&str>) -> Result<(), String> {
     }
 }
 
-/// Returns (bytes, file name). Encrypted when a passphrase is given.
+/// Returns (bytes, file name), sealed with `pass` (3.69: an empty one is refused, never a plain archive)
 pub fn make_archive(app: &App, pass: &str) -> Result<(Vec<u8>, String), String> {
     make_archive_with(app, pass, false)
 }
@@ -285,6 +286,9 @@ fn meta(app: &App, apps: usize) -> Value {
 /// `with_apps`: also the app install files uploaded in the panel (a download and a move take them;
 /// the nightly Telegram backup does not, a bot cannot send files over 50 MB).
 pub fn make_archive_with(app: &App, pass: &str, with_apps: bool) -> Result<(Vec<u8>, String), String> {
+    if pass.is_empty() {
+        return Err("no backup passphrase: a backup is never made unencrypted".into());
+    }
     let dir = format!("{}/kanki-bk-{}", work_dir(), rand_token(12));
     private_dir(&dir)?;
     std::fs::create_dir_all(format!("{}/files", dir)).map_err(|e| e.to_string())?;
@@ -321,15 +325,45 @@ pub fn make_archive_with(app: &App, pass: &str, with_apps: bool) -> Result<(Vec<
         args.extend(items);
         run("tar", &args, None)?;
         let name_base = format!("kanki-backup-{}", stamp(now()));
-        if pass.is_empty() {
-            return Ok((std::fs::read(&tgz).map_err(|e| e.to_string())?, format!("{}.tar.gz", name_base)));
+        // 3.69: never a plain archive (it holds every secret opened), sealed with AES-256-GCM
+        let plain = std::fs::read(&tgz).map_err(|e| e.to_string())?;
+        if let Err(e) = crate::util::shred_remove(&tgz) {
+            eprintln!("backup: the plain archive could not be wiped: {}", e);
         }
-        let enc = format!("{}/out.kbk", dir);
-        run("openssl", &["enc", "-aes-256-cbc", "-salt", "-pbkdf2", "-iter", "200000", "-in", &tgz, "-out", &enc, "-pass", "env:KANKI_BK_PASS"], Some(pass))?;
-        Ok((std::fs::read(&enc).map_err(|e| e.to_string())?, format!("{}.kbk", name_base)))
+        Ok((crate::bkcrypt::seal(&plain, pass)?, format!("{}.kbk", name_base)))
     })();
     let _ = std::fs::remove_dir_all(&dir);
     res
+}
+
+/// The installer's restore and move (`kanki-panel backup-unpack`): a backup file of any format (sealed, the
+/// openssl one from before 3.69, a plain .tar.gz from very old panels) unpacked into the empty folder `dir`
+pub fn unpack_file(file: &str, dir: &str, pass: &str) -> Result<usize, String> {
+    let data = std::fs::read(file).map_err(|e| format!("{}: {}", file, e))?;
+    private_dir(dir)?;
+    if std::fs::read_dir(dir).map_err(|e| e.to_string())?.next().is_some() {
+        return Err(format!("{} is not empty", dir));
+    }
+    let tgz = if crate::bkcrypt::is_sealed(&data) {
+        crate::bkcrypt::open(&data, pass)?
+    } else if data.len() > 8 && &data[..8] == b"Salted__" {
+        let w = format!("{}/kanki-un-{}", work_dir(), rand_token(12));
+        private_dir(&w)?;
+        let (enc, out) = (format!("{}/in.kbk", w), format!("{}/in.tgz", w));
+        let r = std::fs::write(&enc, &data).map_err(|e| e.to_string()).and_then(|_| {
+            run("openssl", &["enc", "-d", "-aes-256-cbc", "-pbkdf2", "-iter", "200000", "-in", &enc, "-out", &out, "-pass", "env:KANKI_BK_PASS"], Some(pass))
+                .map_err(|_| "wrong passphrase or damaged file".to_string())
+        }).and_then(|_| std::fs::read(&out).map_err(|e| e.to_string()));
+        if let Err(e) = std::fs::remove_dir_all(&w) {
+            eprintln!("backup: {} could not be removed: {}", w, e);
+        }
+        r?
+    } else if data.len() > 2 && data[0] == 0x1f && data[1] == 0x8b {
+        data
+    } else {
+        return Err("not a Kanki backup file".into());
+    };
+    crate::bkcrypt::unpack(&tgz, std::path::Path::new(dir), false)
 }
 
 /// What a restore did: a message, and the meta of the backup (Null for an old one)
@@ -352,7 +386,14 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<Restore
             std::fs::write(&dbfile, data).map_err(|e| e.to_string())?;
         } else {
             let tgz = format!("{}/in.tar.gz", dir);
-            if data.len() > 8 && &data[..8] == b"Salted__" {
+            if crate::bkcrypt::is_sealed(data) {
+                if pass.is_empty() {
+                    return Err("this backup is encrypted, enter the passphrase".to_string());
+                }
+                let plain = crate::bkcrypt::open(data, pass)?;
+                std::fs::write(&tgz, plain).map_err(|e| e.to_string())?;
+            } else if data.len() > 8 && &data[..8] == b"Salted__" {
+                // a backup from before 3.69 (openssl AES-256-CBC, no MAC): still read
                 if pass.is_empty() {
                     return Err("this backup is encrypted, enter the passphrase".to_string());
                 }
@@ -366,7 +407,9 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<Restore
                 return Err("not a Kanki backup file".to_string());
             }
             let x = format!("{}/x", dir);
-            run("tar", &["-xzf", &tgz, "-C", &x], None).map_err(|_| "archive is damaged".to_string())?;
+            // 3.69: unpacked in Rust, entry by entry: no link, no path out of the folder (Zip-Slip)
+            let packed = std::fs::read(&tgz).map_err(|e| e.to_string())?;
+            crate::bkcrypt::unpack(&packed, std::path::Path::new(&x), false)?;
             dbfile = format!("{}/kanki.db", x);
             meta = std::fs::read_to_string(format!("{}/meta.json", x)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
             if full {
@@ -561,6 +604,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/api/restore/check", get(restore_check))
         .route("/api/tgbackup", get(tgb_get).put(tgb_put))
         .route("/api/tgbackup/test", post(tgb_test))
+        .route("/api/tgbackup/reveal", post(tgb_reveal))
         .route("/api/tgbackup/send", post(tgb_send))
         .route("/api/db/clean", post(db_clean))
 }
@@ -602,15 +646,48 @@ async fn db_clean(State(app): St, h: HeaderMap) -> Response {
     Json(json!({"ok": true, "result": r})).into_response()
 }
 
-/// The panel's own backup passphrase; made once (random) so nightly backups are never plain.
+/// The panel's own backup passphrase; made once (random) so a backup is never plain. 3.69: kept outside the
+/// database (`bkcrypt::pass_file`, 0600); the one a panel from before kept in the settings moves there once (the
+/// same value, so the backups made with it still open) and leaves the database. "" only when the file cannot be
+/// read or written: then no backup is made.
 pub fn backup_pass(app: &App) -> String {
-    let p = app.db.get("tgb_pass");
-    if !p.is_empty() {
-        return p;
+    match backup_pass_res(app) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("backup: the passphrase file: {}", e);
+            String::new()
+        }
     }
-    let p = rand_token(20);
-    app.db.set("tgb_pass", &p);
-    p
+}
+
+static PASS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub fn backup_pass_res(app: &App) -> Result<String, String> {
+    let _g = PASS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let file = crate::bkcrypt::pass_file(&app.env);
+    let old = app.db.get("tgb_pass");
+    if let Some(p) = crate::bkcrypt::read_pass(&file)? {
+        if !old.is_empty() {
+            app.db.set("tgb_pass", "");
+        }
+        return Ok(p);
+    }
+    let p = if old.is_empty() { rand_token(32) } else { old.clone() };
+    crate::bkcrypt::write_pass(&file, &p)?;
+    if !old.is_empty() {
+        app.db.set("tgb_pass", "");
+        eprintln!("backup: the backup passphrase moved out of the database into {}", file);
+    }
+    Ok(p)
+}
+
+/// The admin chose a new passphrase (checked: 12 characters and more)
+fn set_backup_pass(app: &App, p: &str) -> Result<(), String> {
+    crate::bkcrypt::check_new_pass(p)?;
+    let _g = PASS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    crate::bkcrypt::write_pass(&crate::bkcrypt::pass_file(&app.env), p)?;
+    app.db.set("tgb_pass", "");
+    Ok(())
 }
 
 fn file_response(bytes: Vec<u8>, name: &str) -> Response {
@@ -621,14 +698,11 @@ fn file_response(bytes: Vec<u8>, name: &str) -> Response {
     ).into_response()
 }
 
-/// Old API: plain SQLite file
+/// Old API: it handed out the database (every secret opened) unencrypted. 3.69: gone; `POST /api/backup` gives
+/// the sealed archive.
 async fn backup_legacy(State(app): St, h: HeaderMap) -> Response {
-    if let Err(r) = crate::auth::check_session(&app, &h) { return r; } // 3.68: a login session only, never an API token
-    let a = app.clone();
-    match tokio::task::spawn_blocking(move || db_snapshot(&a)).await.ok().flatten() {
-        Some(b) => file_response(b, &format!("kanki-backup-{}.db", stamp(now()))),
-        None => err(StatusCode::INTERNAL_SERVER_ERROR, "backup failed"),
-    }
+    if let Err(r) = crate::auth::check_session(&app, &h) { return r; }
+    err(StatusCode::GONE, "the unencrypted backup is gone: POST /api/backup gives the encrypted one")
 }
 
 async fn backup_download(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
@@ -636,10 +710,12 @@ async fn backup_download(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> 
     // empty = the panel's own backup passphrase, so a download is never left unencrypted
     let mut pass = b["passphrase"].as_str().unwrap_or("").to_string();
     if pass.is_empty() {
-        pass = backup_pass(&app);
-    }
-    if pass.len() < 6 {
-        return err(StatusCode::BAD_REQUEST, "passphrase must be at least 6 characters");
+        pass = match backup_pass_res(&app) {
+            Ok(p) => p,
+            Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &format!("the backup passphrase: {}", e)),
+        };
+    } else if let Err(e) = crate::bkcrypt::check_new_pass(&pass) {
+        return err(StatusCode::BAD_REQUEST, &e);
     }
     // the app install files go in too, unless asked not to (they can be big)
     let apps = b["apps"].as_bool().unwrap_or(true);
@@ -727,7 +803,9 @@ async fn tgb_get(State(app): St, h: HeaderMap) -> Response {
     let t = app.db.get("tgb_token");
     Json(json!({
         "on": app.db.on("tgb_on"), "token_set": !t.is_empty(), "uses_bot_token": t.is_empty() && !crate::bot::bot_token(&app).is_empty(),
-        "chat": app.db.get("tgb_chat"), "hours": app.db.get("tgb_hours"), "pass_set": true, "pass": backup_pass(&app),
+        // 3.69: the passphrase itself never comes with a GET (`POST /api/tgbackup/reveal` with the password)
+        "chat": app.db.get("tgb_chat"), "hours": app.db.get("tgb_hours"), "pass_set": !backup_pass(&app).is_empty(),
+        "pass_weak": backup_pass(&app).chars().count() < crate::bkcrypt::PASS_MIN, "pass_min": crate::bkcrypt::PASS_MIN,
         "mode": if app.db.get("tgb_mode") == "hours" { "hours" } else { "nightly" }, "at": tgb_at(&app),
         "cleaned": app.db.get("db_cleaned").parse::<i64>().unwrap_or(0),
         "db_size": std::fs::metadata(db_path(&app)).map(|m| m.len()).unwrap_or(0),
@@ -747,10 +825,16 @@ async fn tgb_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response
         app.db.set("tgb_hours", &hh.clamp(1, 24 * 30).to_string());
     }
     if let Some(p) = b["pass"].as_str().filter(|s| !s.is_empty()) {
-        if p.len() < 6 {
-            return err(StatusCode::BAD_REQUEST, "passphrase must be at least 6 characters");
+        // the key of every later backup: a login session and the password again
+        if let Err(r) = crate::auth::check_session(&app, &h) {
+            return r;
         }
-        app.db.set("tgb_pass", p);
+        if let Err(r) = crate::auth::step_up(&app, &h, &b).await {
+            return r;
+        }
+        if let Err(e) = set_backup_pass(&app, p) {
+            return err(StatusCode::BAD_REQUEST, &e);
+        }
     }
     if let Some(on) = b["on"].as_bool() {
         app.db.set("tgb_on", if on { "1" } else { "0" });
@@ -766,6 +850,20 @@ async fn tgb_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response
         }
     }
     Json(json!({"ok": true})).into_response()
+}
+
+/// The backup passphrase, shown once on purpose: a login session and the admin's password again (step-up)
+async fn tgb_reveal(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    if let Err(r) = crate::auth::check_session(&app, &h) {
+        return r;
+    }
+    if let Err(r) = crate::auth::step_up(&app, &h, &b).await {
+        return r;
+    }
+    match backup_pass_res(&app) {
+        Ok(p) => ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "pass": p }))).into_response(),
+        Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, &e),
+    }
 }
 
 async fn tg_call(app: &App, token: &str, method: &str, body: Value) -> Option<Value> {
@@ -929,18 +1027,23 @@ mod archive_tests {
         let db = crate::db::Db::open(dir.join("kanki.db").to_str().unwrap());
         let app = Arc::new(App {
             db,
-            env: HashMap::from([("DATA_DIR".to_string(), dir.to_string_lossy().to_string())]),
+            env: HashMap::from([("DATA_DIR".to_string(), dir.to_string_lossy().to_string()), ("BACKUP_PASS_FILE".to_string(), dir.join("backup.pass").to_string_lossy().to_string())]),
             hy2_allowed: Mutex::new(HashMap::new()), limits: Mutex::new(HashMap::new()), reported: Mutex::new(HashMap::new()),
             login_fails: Mutex::new(HashMap::new()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
             http: reqwest::Client::new(), http_insecure: reqwest::Client::new(), pin_clients: Mutex::new(HashMap::new()),
         });
         assert!(!dir.join("nodepins").exists());
-        let (bytes, name) = super::make_archive(&app, "").expect("backup without nodepins");
-        assert!(name.ends_with(".tar.gz") && !bytes.is_empty());
+        // 3.69: never without a passphrase
+        assert!(super::make_archive(&app, "").is_err());
+        let (bytes, name) = super::make_archive(&app, "a-long-enough-pass").expect("backup without nodepins");
+        assert!(name.ends_with(".kbk") && crate::bkcrypt::is_sealed(&bytes));
         // with a pin it is taken along
         std::fs::create_dir_all(dir.join("nodepins")).unwrap();
         std::fs::write(dir.join("nodepins/a.pin"), "x").unwrap();
-        assert!(super::make_archive(&app, "").is_ok());
+        assert!(super::make_archive(&app, "a-long-enough-pass").is_ok());
+        // nothing is left in the work folder (the plain archive and the snapshot are gone)
+        let left: Vec<_> = std::fs::read_dir(dir.join("tmp")).map(|r| r.flatten().map(|e| e.file_name()).collect()).unwrap_or_default();
+        assert!(left.is_empty(), "{:?}", left);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
@@ -1068,5 +1171,56 @@ mod tests {
         let v: String = rusqlite::Connection::open(format!("{}/kanki.db", d)).unwrap().query_row("SELECT v FROM t", [], |r| r.get(0)).unwrap();
         assert_eq!(v, "restored");
         let _ = std::fs::remove_dir_all(&d);
+    }
+}
+
+#[cfg(test)]
+mod pass_tests {
+    use axum::http::{Method, Request, StatusCode};
+    use serde_json::{json, Value};
+    use tower::ServiceExt;
+
+    async fn call(app: &std::sync::Arc<crate::App>, auth: &str, m: Method, uri: &str, body: Value) -> (StatusCode, Value) {
+        let r = Request::builder().method(m).uri(uri).header("authorization", format!("Bearer {}", auth)).header("content-type", "application/json")
+            .header("x-forwarded-for", "203.0.113.60").body(axum::body::Body::from(body.to_string())).unwrap();
+        let res = crate::api::master_router(app.clone()).oneshot(r).await.unwrap();
+        let st = res.status();
+        let b = axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap();
+        (st, serde_json::from_slice(&b).unwrap_or(Value::Null))
+    }
+
+    /// The backup passphrase: moved out of the database, never in a GET, shown only with the password again, and a
+    /// new one has 12 characters at least. The old plain database download is gone.
+    #[tokio::test]
+    async fn the_backup_passphrase_stays_out_of_the_database_and_out_of_gets() {
+        let app = crate::test_app();
+        app.db.set("admin_user", "admin");
+        app.db.set("admin_pass", &crate::util::hash_password("the-right-password"));
+        // a panel from before kept it in the settings: it moves to the file, the same value
+        app.db.set("tgb_pass", "old-pass-from-before");
+        let t = crate::auth::test_session(&app);
+        let (st, v) = call(&app, &t, Method::GET, "/api/tgbackup", Value::Null).await;
+        assert_eq!(st, StatusCode::OK);
+        assert!(v.get("pass").is_none() && v["pass_set"] == json!(true), "{}", v);
+        assert_eq!(app.db.get("tgb_pass"), "");
+        let file = crate::bkcrypt::pass_file(&app.env);
+        assert_eq!(crate::bkcrypt::read_pass(&file).unwrap().as_deref(), Some("old-pass-from-before"));
+        // shown only with the password
+        assert_eq!(call(&app, &t, Method::POST, "/api/tgbackup/reveal", json!({})).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call(&app, &t, Method::POST, "/api/tgbackup/reveal", json!({"current": "wrong-password"})).await.0, StatusCode::FORBIDDEN);
+        let (st, v) = call(&app, &t, Method::POST, "/api/tgbackup/reveal", json!({"current": "the-right-password"})).await;
+        assert_eq!((st, v["pass"].as_str()), (StatusCode::OK, Some("old-pass-from-before")));
+        // a stranger gets nothing
+        assert_eq!(call(&app, "not-a-session", Method::POST, "/api/tgbackup/reveal", json!({"current": "the-right-password"})).await.0, StatusCode::UNAUTHORIZED);
+        // a new one: 12 characters and the password again
+        assert_eq!(call(&app, &t, Method::PUT, "/api/tgbackup", json!({"pass": "a-new-long-pass", "current": "wrong-password"})).await.0, StatusCode::FORBIDDEN);
+        assert_eq!(call(&app, &t, Method::PUT, "/api/tgbackup", json!({"pass": "short-pass", "current": "the-right-password"})).await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(call(&app, &t, Method::PUT, "/api/tgbackup", json!({"pass": "a-new-long-pass", "current": "the-right-password"})).await.0, StatusCode::OK);
+        assert_eq!(crate::bkcrypt::read_pass(&file).unwrap().as_deref(), Some("a-new-long-pass"));
+        assert_eq!(app.db.get("tgb_pass"), "");
+        // the unencrypted database download is gone
+        assert_eq!(call(&app, &t, Method::GET, "/api/backup", Value::Null).await.0, StatusCode::GONE);
+        // a download with a passphrase of its own needs 12 characters too
+        assert_eq!(call(&app, &t, Method::POST, "/api/backup", json!({"passphrase": "short"})).await.0, StatusCode::BAD_REQUEST);
     }
 }

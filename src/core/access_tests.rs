@@ -771,3 +771,64 @@ async fn the_bare_code_in_the_header_finds_its_account() {
         assert_eq!(st, StatusCode::NOT_FOUND, "{}", bad);
     }
 }
+
+/// 3.69: a Kanki tunnel that carries a server's KANKI MIX port carries its hop ports too (the Iran entry forwards
+/// 4001-4010 to the main port), and the link through it keeps `ports=`; where an entry cannot forward them (a port
+/// already taken there, another tunnel kind) the link has no `ports=` at all
+#[tokio::test]
+async fn kmix_hop_ports_follow_the_iran_tunnel_or_stay_out_of_its_link() {
+    let app = crate::test_app();
+    let info = r#"{"kmix_port":4000,"kmix_hop":"4001-4010"}"#;
+    app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,endpoint_mode,info) VALUES('h1','Germany','https://de.example.net:9','de.example.net','t','panel',?1)", &[&info]).unwrap();
+    let mut list = crate::tunnel::panel::servers(&app);
+    for (id, name, addr, node) in [("hde", "DE", "de.example.net", "h1"), ("hir1", "Tehran", "ir1.example.net", ""), ("hir2", "Shiraz", "ir2.example.net", "")] {
+        list.push(crate::tunnel::panel::TServer { id: id.into(), name: name.into(), addr: addr.into(), node: node.into(), ..Default::default() });
+        crate::tunnel::panel::test_seen(id, crate::VERSION);
+    }
+    crate::tunnel::panel::save_servers(&app, &list);
+    let t1 = crate::tunnel::panel::Tunnel { id: "h1t".into(), entry: "hir1".into(), exit: "hde".into(), enabled: true, udp: vec!["4000".into()], ..Default::default() };
+    let t2 = crate::tunnel::panel::Tunnel { id: "h2t".into(), entry: "hir2".into(), exit: "hde".into(), enabled: true, udp: vec!["4100:4000".into()], ..Default::default() };
+    // another tunnel at the Shiraz entry already listens on 4005: that entry cannot take the hop range
+    let t3 = crate::tunnel::panel::Tunnel { id: "h3t".into(), entry: "hir2".into(), exit: "hde".into(), enabled: true, udp: vec!["4005:51820".into()], ..Default::default() };
+    crate::tunnel::panel::save_tunnels(&app, &[t1, t2, t3]);
+    let u = app.db.create_user("hopper", 10.0, 30, 1, "kmix", "", "", 0).unwrap();
+    let n = app.db.node("h1").unwrap();
+    // what the Tehran agent runs: the main port and every hop port to the main port
+    let spec = crate::tunnel::panel::specs_for(&app, "hir1").into_iter().find(|s| s.id == "h1t").unwrap();
+    let ports = crate::tunnel::engine::parse_ports(&spec.udp);
+    assert!(ports.contains(&(4000, 4000)));
+    for h in 4001..=4010u16 {
+        assert!(ports.contains(&(h, 4000)), "{} in {:?}", h, spec.udp);
+    }
+    // the exit runs the same list (it delivers each to the main port)
+    let exit = crate::tunnel::panel::specs_for(&app, "hde").into_iter().find(|s| s.id == "h1t").unwrap();
+    assert_eq!(exit.udp, spec.udp);
+    // Shiraz: nothing added
+    let spec2 = crate::tunnel::panel::specs_for(&app, "hir2").into_iter().find(|s| s.id == "h2t").unwrap();
+    assert_eq!(spec2.udp, vec!["4100:4000".to_string()]);
+    // the links: the direct one and the Tehran one hop, the Shiraz one does not offer ports that lead nowhere
+    assert!(crate::kmix::link(&app, &u, &n).unwrap().contains("ports=4001-4010"));
+    let tehran = crate::kmix::link_tunnel(&app, &u, &n).unwrap();
+    assert!(tehran.contains("@ir1.example.net:4000?") && tehran.contains("ports=4001-4010"), "{}", tehran);
+    let extra = crate::kmix::link_tunnels(&app, &u, &n);
+    let shiraz = &extra.iter().find(|e| e.2.contains("@ir2.example.net:4100?")).unwrap().2;
+    assert!(!shiraz.contains("ports="), "{}", shiraz);
+    // a tunnel of another kind (KANKI-UP: one udp2raw pair per port) carries only what it lists
+    let mut tl = crate::tunnel::panel::tunnels(&app);
+    if let Some(t) = tl.iter_mut().find(|t| t.id == "h1t") {
+        t.kind = "kup".into();
+    }
+    crate::tunnel::panel::save_tunnels(&app, &tl);
+    assert!(crate::tunnel::panel::kmix_hop_map(&app, &crate::tunnel::panel::tunnels(&app)[0]).is_empty());
+    let tehran = crate::kmix::link_tunnel(&app, &u, &n).unwrap_or_default();
+    assert!(!tehran.contains("ports="), "{}", tehran);
+    // a server without a hop range: nothing to forward
+    app.db.exec("UPDATE nodes SET info=?1 WHERE id='h1'", &[&r#"{"kmix_port":4000}"#]).unwrap();
+    let mut tl = crate::tunnel::panel::tunnels(&app);
+    if let Some(t) = tl.iter_mut().find(|t| t.id == "h1t") {
+        t.kind = String::new();
+    }
+    crate::tunnel::panel::save_tunnels(&app, &tl);
+    let spec = crate::tunnel::panel::specs_for(&app, "hir1").into_iter().find(|s| s.id == "h1t").unwrap();
+    assert_eq!(spec.udp, vec!["4000".to_string()]);
+}

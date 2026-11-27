@@ -300,10 +300,10 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
   if(!confirm(t('Restore this backup? Everything in the panel is replaced by what is in the file.')+'\n'+f.name))return;
   me.disabled=true;st.textContent=t('Restoring…');
   api('POST','/api/restore',f,{headers:{'X-Passphrase':$('#rs_p').value,'X-Full':$('#rs_full').checked?'1':'0','Content-Type':'application/octet-stream'}}).then(function(){st.textContent=t('Restore done, panel is restarting…');toast(t('Restore done, panel is restarting…'));setTimeout(function(){location.reload()},4000)}).catch(function(e){me.disabled=false;st.textContent=t('Failed')+': '+(e.message||'');fail(e)})};
- var tg={},showPw=false,kb=function(n){return n>1048576?N((n/1048576).toFixed(1))+' MB':N(Math.round(n/1024))+' KB'};
+ var tg={},showPw=false,tgPw='',kb=function(n){return n>1048576?N((n/1048576).toFixed(1))+' MB':N(Math.round(n/1024))+' KB'};
  function tgDraw(){if(!$('#tg_on'))return;$('#tg_on').checked=!!tg.on;$('#tg_chat').value=tg.chat||'';$('#tg_h').value=tg.hours||24;$('#tg_at').value=tg.at||'03:00';$('#tg_m').value=tg.mode||'nightly';
   var hrs=tg.mode=='hours';$('#tg_at').style.display=hrs?'none':'';$('#tg_h').style.display=hrs?'':'none';
-  $('#tg_pw').textContent=showPw?(tg.pass||''):'••••••••••';
+  $('#tg_pw').textContent=showPw&&tgPw?tgPw:'••••••••••'+(tg.pass_weak?' ⚠ '+t('shorter than 12 characters: choose a new one'):'');
   $('#tg_tn').textContent=tg.token_set?'✓':(tg.uses_bot_token?t('Empty = use the sales bot token'):'');
   $('#tg_st').innerHTML='<span><span class="dot '+(tg.status=='ok'?'g':tg.status?'r':'')+'"></span> '+(tg.on?t('On'):t('Off'))+'</span><small class="ltr">'+(tg.last?t('Last')+': '+fmtDate(tg.last,1)+' · '+esc(tg.status):'')+'</small>';
   $('#db_inf').textContent=t('Database size')+': '+kb(tg.db_size||0)+(tg.cleaned?' · '+t('Last cleaned')+': '+ago(tg.cleaned):'')}
@@ -311,8 +311,10 @@ function pBackup(){$('#pg').innerHTML='<div class="ph"><div><h2>'+t('Backup')+'<
  function tgBody(){return{token:$('#tg_tok').value,chat:$('#tg_chat').value,hours:+$('#tg_h').value||24,at:$('#tg_at').value||'03:00',mode:$('#tg_m').value,on:$('#tg_on').checked}}
  $('#tg_m').onchange=function(){tg.mode=this.value;tgDraw()};
  $('#tg_on').onchange=function(){api('PUT','/api/tgbackup',tgBody()).then(function(){toast(t('Saved'));tgLoad()}).catch(fail)};
- $('#tg_eye').onclick=function(){showPw=!showPw;tgDraw()};$('#tg_cp').onclick=function(){copy(tg.pass||'')};
- $('#tg_pch').onclick=function(){var p=prompt(t('New backup passphrase (min 6). Old backups still need the old one.'));if(!p)return;api('PUT','/api/tgbackup',{pass:p}).then(function(){toast(t('Saved'));tgLoad()}).catch(fail)};
+ // 3.69: the passphrase never comes with the page: shown only after the password again (step-up)
+ function tgReveal(cb){if(tgPw)return cb(tgPw);askPass(function(pw){api('POST','/api/tgbackup/reveal',{current:pw}).then(function(r){closeModal();tgPw=r.pass||'';cb(tgPw)}).catch(fail)})}
+ $('#tg_eye').onclick=function(){if(showPw){showPw=false;tgDraw();return}tgReveal(function(){showPw=true;tgDraw()})};$('#tg_cp').onclick=function(){tgReveal(function(p){copy(p)})};
+ $('#tg_pch').onclick=function(){var p=prompt(t('New backup passphrase (min 12). Old backups still need the old one.'));if(!p)return;if(p.length<12)return toast(t('New backup passphrase (min 12). Old backups still need the old one.'),1);askPass(function(pw){api('PUT','/api/tgbackup',{pass:p,current:pw}).then(function(){closeModal();tgPw='';showPw=false;toast(t('Saved'));tgLoad()}).catch(fail)})};
  $('#tg_save').onclick=function(){api('PUT','/api/tgbackup',tgBody()).then(function(){toast(t('Saved'));tgLoad()}).catch(fail)};
  $('#tg_test').onclick=function(){api('PUT','/api/tgbackup',tgBody()).then(function(){return api('POST','/api/tgbackup/test')}).then(function(r){toast(r.ok?'✓ @'+r.bot+' → '+r.chat:'failed',!r.ok);tgLoad()}).catch(fail)};
  $('#tg_send').onclick=function(){toast(t('Checking…'));api('POST','/api/tgbackup/send').then(function(){toast(t('Done'));tgLoad()}).catch(function(e){fail(e);tgLoad()})};
@@ -595,7 +597,7 @@ function auTxt(r){var el=$('#au_txt');if(!el||!r)return;var f=function(ts,o){ret
  if(r.on)x+=' · '+t('Next run')+': '+f(r.next,{weekday:'short'});
  if(r.last&&r.last.ts)x+=' · '+t('Last run')+': '+f(r.last.ts,{month:'short',day:'numeric'})+' — '+r.last.msg;el.textContent=x}
 function autoUpdWire(){var c=$('#au_on');if(!c||c._w)return;c._w=1;
- api('GET','/api/auto-update').then(function(r){c.checked=r.on;auTxt(r)}).catch(function(){c.closest('label').style.display='none'});
+ api('GET','/api/auto-update').then(function(r){c.checked=r.on;if(r.signed===false){c.disabled=true;c.closest('label').title=t('Needs a build with signed updates (minisign)')}auTxt(r)}).catch(function(){c.closest('label').style.display='none'});
  c.onchange=function(){var on=c.checked;api('PUT','/api/auto-update',{on:on}).then(function(){toast(on?t('Automatic update is on'):t('Automatic update is off'));return api('GET','/api/auto-update').then(auTxt)}).catch(function(e){c.checked=!on;fail(e)})}}
 function updateModal(){modal(mhead(t('Update')+' '+((S.me&&S.me.panel_name)||''))+'<div class="g2"><div class="pc" style="flex-direction:column"><small class="muted">'+t('Current version')+'</small><b class="ltr" id="u_c">v'+esc(S.me.version)+'</b></div><div class="pc" style="flex-direction:column"><small class="muted">'+t('Latest version')+'</small><b class="ltr" id="u_l">…</b></div></div><p id="u_m" class="muted"></p>'+autoUpdBox()+
  '<div class="row" style="justify-content:center"><button class="btn" id="u_chk">'+t('Check for update')+'</button><button class="btn hide" id="u_go">'+t('Install update')+'</button></div><p class="muted">'+t('Updates come from the GitHub releases of your repo.')+'</p>');

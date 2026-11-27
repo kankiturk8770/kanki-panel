@@ -49,7 +49,11 @@ jobs:
       - name: Tests (a real entry and exit on this machine, TCP and UDP)
         run: cargo test -- --nocapture --test-threads=4 || cargo test -- --nocapture --test-threads=1
 
+      # 3.69: the release signing public key (repository variable KANKI_UPDATE_PUBKEY, the base64 line of
+      # minisign.pub) goes into the program: it checks every update with it before running it
       - name: Build
+        env:
+          KANKI_UPDATE_PUBKEY: ${{ vars.KANKI_UPDATE_PUBKEY }}
         run: cargo build --release
 
       - name: Package
@@ -85,6 +89,25 @@ jobs:
       - name: Check the files
         run: sha256sum -c kanki-panel.sha256 && cat version.txt
 
+      # 3.69: signed with minisign (secret MINISIGN_SECRET_KEY: a key made with `minisign -G -W`; variable
+      # KANKI_UPDATE_PUBKEY: its public key). No signature, no release: the servers refuse an unsigned program.
+      - name: Sign the program
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          KANKI_UPDATE_PUBKEY: ${{ vars.KANKI_UPDATE_PUBKEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ] || [ -z "${KANKI_UPDATE_PUBKEY:-}" ]; then
+            echo "::error::MINISIGN_SECRET_KEY (secret) and KANKI_UPDATE_PUBKEY (variable) must be set to publish"
+            exit 1
+          fi
+          sudo apt-get install -y -qq minisign >/dev/null
+          key=$(mktemp)
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$key"
+          minisign -S -s "$key" -m kanki-panel -x kanki-panel.minisig -t "kanki-panel $(cat version.txt)"
+          minisign -V -P "$KANKI_UPDATE_PUBKEY" -m kanki-panel -x kanki-panel.minisig
+
       - name: Publish to Releases (tag "latest")
         uses: softprops/action-gh-release@v2
         with:
@@ -94,4 +117,5 @@ jobs:
           files: |
             kanki-panel
             kanki-panel.sha256
+            kanki-panel.minisig
             version.txt

@@ -23,7 +23,7 @@ static KEY: OnceLock<[u8; 32]> = OnceLock::new();
 /// The settings whose values are sealed
 pub const SEALED_SETTINGS: &[&str] = &[
     "totp_secret", "totp_pending", "sub_link_key", "kmix_secret", "bot_token", "mon_token", "tgb_token", "tgb_pass", "ai_key", "np_key",
-    "zp_merchant", "toncenter_key", "card_number", "giveaway_secret", "join_token", "tun_servers", "xray_cfg", "dns_cfg",
+    "zp_merchant", "toncenter_key", "card_number", "giveaway_secret", "join_token", "tun_servers", "xray_cfg", "dns_cfg", "cred_key", "tun_removed_tok", "node_sig",
 ];
 
 pub fn sealed_setting(k: &str) -> bool {

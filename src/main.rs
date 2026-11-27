@@ -23,6 +23,10 @@ mod netq;
 mod access;
 #[path = "core/sign.rs"]
 mod sign;
+#[path = "core/creds.rs"]
+mod creds;
+#[path = "core/release.rs"]
+mod release;
 #[cfg(test)]
 #[path = "core/sign_tests.rs"]
 mod sign_tests;
@@ -41,6 +45,8 @@ mod limit;
 mod admin;
 #[path = "panel/backup.rs"]
 mod backup;
+#[path = "panel/bkcrypt.rs"]
+mod bkcrypt;
 #[path = "panel/migrate.rs"]
 mod migrate;
 #[path = "panel/cleanup.rs"]
@@ -159,10 +165,12 @@ pub(crate) fn test_app() -> std::sync::Arc<App> {
 pub(crate) fn test_app_env(extra: &[(&str, &str)]) -> std::sync::Arc<App> {
     let dir = std::env::temp_dir().join(format!("kanki-test-{}", util::rand_token(8)));
     std::fs::create_dir_all(&dir).unwrap();
-    let mut env = HashMap::from([("DOMAIN".to_string(), "fi.example.com".to_string())]);
+    let mut env = HashMap::from([("DOMAIN".to_string(), "fi.example.com".to_string()), ("BACKUP_PASS_FILE".to_string(), dir.join("backup.pass").to_string_lossy().to_string())]);
     env.extend(extra.iter().map(|(k, v)| (k.to_string(), v.to_string())));
+    let db = db::Db::open(dir.join("kanki.db").to_str().unwrap());
+    creds::init(&db);
     std::sync::Arc::new(App {
-        db: db::Db::open(dir.join("kanki.db").to_str().unwrap()),
+        db,
         env,
         hy2_allowed: Mutex::new(Default::default()), limits: Mutex::new(Default::default()), reported: Mutex::new(Default::default()),
         login_fails: Mutex::new(Default::default()), sync_lock: tokio::sync::Mutex::new(()), bot_alive: AtomicI64::new(0),
@@ -201,6 +209,9 @@ impl App {
             let _ = std::fs::remove_file(self.node_pin_file(key));
             g.remove(&pin_key(key));
         }
+        drop(g);
+        // 3.69: a reinstalled node starts its signing ratchet again (with its new token)
+        crate::sync::forget_node_sig(self, &[id, addr]);
     }
     /// The pin a node's first contact made (keyed by address) also becomes the pin of its id,
     /// so the certificate the admin added is the one later syncs expect.
@@ -348,6 +359,24 @@ async fn main() {
             }
             return;
         }
+        // 3.69: the installer opens a backup with these (any format the panel ever made), never with
+        // `openssl` + `tar` straight: the archive is authenticated and unpacked entry by entry
+        // usage: KANKI_BK_PASS=… kanki-panel backup-unpack <backup file> <empty folder>
+        "backup-unpack" => {
+            let (Some(file), Some(dir)) = (args.get(2), args.get(3)) else {
+                eprintln!("usage: KANKI_BK_PASS=<passphrase> kanki-panel backup-unpack <backup file> <empty folder>");
+                std::process::exit(1);
+            };
+            let pass = std::env::var("KANKI_BK_PASS").unwrap_or_default();
+            match backup::unpack_file(file, dir, &pass) {
+                Ok(n) => println!("unpacked {} entries", n),
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
         "tunnel-run" => {
             let Some(path) = args.get(2) else {
                 eprintln!("usage: kanki-panel tunnel-run <tunnel.json>   (see docs/examples/)");
@@ -375,8 +404,12 @@ async fn main() {
     if sealed {
         db.migrate_secrets();
     }
+    // 3.69: the key of the keyed account credentials (made once)
+    creds::init(&db);
     // 3.68: the data folder (database, its WAL, keys, backups' work files) is root's alone
     secure_files(&data);
+    // 3.69: no signed request made before this start is taken (the nonces seen before a restart are gone)
+    sign::init_floor(&format!("{}/sig-floor-{}", data, if cmd == "node" { "node" } else { "panel" }));
 
     if cmd == "reset-admin" {
         auth::audit_db(&db, "cli", "CLI", "reset-admin", 0, "local", "");

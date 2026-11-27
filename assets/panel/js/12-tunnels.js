@@ -25,7 +25,9 @@ function tunGreScript(g){var n=g.n,hosts=!g.is_ip,
   '(ufw allow from '+g.panel_ip+' proto gre >/dev/null 2>&1 || true)','systemctl daemon-reload && systemctl enable --now kanki-gre'].join('\n')}
 function tunCmd(s,d){var repo=(d&&d.repo)||'',panel=(d&&d.panel)||location.origin,g=d&&d.gre,pre='';
  if(g&&g.panel_ip){pre=tunGreScript(g)+'\n';if(g.is_ip)panel='https://10.77.'+g.n+'.1'+(g.port?':'+g.port:'')}
- return pre+(repo?'KANKI_REPO='+repo+' ':'')+'KANKI_TUNNEL='+s.id+':'+s.token+' KANKI_PANEL='+panel+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'kankiturk8770/kanki-panel')+'/main/install.sh)'}
+ // 3.69: the panel's certificate key, so the new server trusts exactly this panel from its first contact
+ var pin=(d&&d.pin&&/^(ca|self):sha256\/\/[A-Za-z0-9+\/=]{44}$/.test(d.pin))?"KANKI_PANEL_PIN='"+d.pin+"' ":'';
+ return pre+(repo?'KANKI_REPO='+repo+' ':'')+pin+'KANKI_TUNNEL='+s.id+':'+s.token+' KANKI_PANEL='+panel+' bash <(curl -fsSL https://raw.githubusercontent.com/'+(repo||'kankiturk8770/kanki-panel')+'/main/install.sh)'}
 
 // ---- the live map (canvas): entries on one side, exits on the other.
 // Each connected tunnel is a glowing fibre: packets leave the entry plain, pass the lock in the middle

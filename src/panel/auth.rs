@@ -252,7 +252,18 @@ pub async fn middleware(State(app): St, mut req: Request, next: Next) -> Respons
         }
         return res;
     }
-    trust_proxy_only(&mut req);
+    // 3.69: the trusted Iran subscription relay signs each client's address (`subiran::relay_header`): that address
+    // counts for the limits (one abusive client no longer locks out every Iranian user behind the relay). A header
+    // that does not check out is dropped and the request is taken like any other.
+    let target = req.uri().path_and_query().map(|p| p.as_str().to_string()).unwrap_or_default();
+    let relayed = crate::subiran::verified_client(&app, req.headers(), req.method().as_str(), &target, util::now());
+    req.headers_mut().remove(crate::subiran::RELAY_HEADER);
+    match relayed.and_then(|ip| header::HeaderValue::from_str(&ip).ok()) {
+        Some(v) => {
+            req.headers_mut().insert("x-forwarded-for", v);
+        }
+        None => trust_proxy_only(&mut req),
+    }
     let path = req.uri().path().to_string();
     if let Some(host) = req.headers().get(header::HOST).and_then(|v| v.to_str().ok()) {
         crate::subdomain::note_agent_host(&app, host, &path);
@@ -270,12 +281,16 @@ pub async fn middleware(State(app): St, mut req: Request, next: Next) -> Respons
     if upload && identify_with(&app, req.headers(), false).is_none() {
         return deny();
     }
-    // the hysteria upload of a tunnel agent may be big: check its server token before reading the body
-    if path == "/tunnel/hy2bin/put" {
-        let hv = |k: &str| req.headers().get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
-        if !crate::tunnel::panel::agent_token_ok(&app, &hv("x-id"), &hv("x-token")) {
-            return deny();
+    // 3.69: a restore replaces the whole panel: only a login session gets its 128 MiB read (an API token is
+    // refused here, before the body, not after it was buffered)
+    if path == "/api/restore" {
+        if let Err(r) = check_session(&app, req.headers()) {
+            return r;
         }
+    }
+    // 3.69: the hysteria upload of agents from before is gone (nothing an agent sends is run anywhere)
+    if path == "/tunnel/hy2bin/put" {
+        return (StatusCode::GONE, "gone").into_response();
     }
     // HTTPS only: Caddy says when a request came to it over plain http
     let sub = crate::limit::is_sub_path(&path);
@@ -651,7 +666,7 @@ const TOTP_PENDING_SECS: i64 = 600;
 /// Step-up for the security settings (3.68): the admin's password again in `current`, with the login's lock per
 /// address, so a stolen session alone cannot change the IP policy, 2FA or make API tokens
 #[allow(clippy::result_large_err)] // the error is the ready axum answer
-async fn step_up(app: &App, h: &HeaderMap, b: &Value) -> Result<(), Response> {
+pub(crate) async fn step_up(app: &App, h: &HeaderMap, b: &Value) -> Result<(), Response> {
     let ip = client_ip(h);
     if !begin_try(app, &ip) {
         return Err((StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": "too many attempts, try again in an hour"}))).into_response());
@@ -937,6 +952,15 @@ mod tests {
         let r = Request::post("/api/apps").header("content-length", "209715200").header("x-forwarded-for", "198.51.100.7")
             .body(axum::body::Body::empty()).unwrap();
         assert_eq!(crate::api::master_router(app.clone()).oneshot(r).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+        // the restore (128 MiB): a stranger, and an API token, are refused before a byte is read
+        let r = Request::post("/api/restore").header("content-length", "134217728").header("x-forwarded-for", "198.51.100.7")
+            .body(axum::body::Body::empty()).unwrap();
+        assert_eq!(crate::api::master_router(app.clone()).oneshot(r).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+        let tok = "kk-restore-token-0123456789abcdef";
+        app.db.exec("INSERT INTO api_tokens(name,hash,prefix,scopes,created,expires) VALUES('t',?1,'kk',?2,?3,?4)", &[&sha256_hex(tok), &"admin", &now(), &(now() + 3600)]).unwrap();
+        let r = Request::post("/api/restore").header("content-length", "134217728").header("authorization", format!("Bearer {}", tok))
+            .header("x-forwarded-for", "198.51.100.7").body(axum::body::Body::empty()).unwrap();
+        assert_eq!(crate::api::master_router(app.clone()).oneshot(r).await.unwrap().status(), StatusCode::FORBIDDEN);
         let r = Request::get("/api/users").header("x-forwarded-proto", "http").header("x-forwarded-for", "198.51.100.7")
             .body(axum::body::Body::empty()).unwrap();
         assert_eq!(crate::api::master_router(app.clone()).oneshot(r).await.unwrap().status(), StatusCode::FORBIDDEN, "plain http to the API");

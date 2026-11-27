@@ -366,7 +366,7 @@ impl Mon {
     }
 
     async fn backup_to(&self, chats: &[i64], caption: &str) -> bool {
-        let pass = self.app.db.get("tgb_pass");
+        let pass = crate::backup::backup_pass(&self.app);
         let app = self.app.clone();
         let Ok(Ok((bytes, name))) = tokio::task::spawn_blocking(move || crate::backup::make_archive(&app, &pass)).await else { return false };
         let mut ok = false;

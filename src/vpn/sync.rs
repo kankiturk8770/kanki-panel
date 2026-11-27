@@ -620,7 +620,7 @@ fn desired_for(app: &App, users: &[User], n: &Node) -> (SyncReq, Vec<(i64, Strin
         }
         if u.has_proto("hy2") && !is_off("hy2") && !shut(u, "hy2") {
             // the links carry the derived password; the code itself still works for links made before 3.51
-            req.hy2.insert(crate::hy2::user_pass(&u.code), u.username.clone());
+            req.hy2.insert(crate::creds::hy2_pass(u), u.username.clone());
             req.hy2.insert(u.code.clone(), u.username.clone());
             if let Some(a) = lim.allowed(u.id, &n.id, "hy2") {
                 req.hy2_cap.insert(u.username.clone(), a);
@@ -967,10 +967,67 @@ const OFF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 pub const SIGN_FROM: &str = "3.65.0";
 
 /// Whether node `n` may still be from before signed requests: it never reported a version of 3.65 or
-/// newer. Only such a node may get the bare token, and only after it refused the signed request.
-fn node_legacy(n: &Node) -> bool {
+/// newer. Only such a node may get the bare token, and only after it refused the signed request. 3.69: never
+/// again once it took a signed request (`NodeSig::signed`, kept in the database: a restart of the panel or a
+/// version that reads wrong cannot reopen the fallback).
+fn node_legacy(app: &App, n: &Node) -> bool {
+    if node_sig(app, &n.id).signed || node_sig(app, &n.address).signed {
+        return false;
+    }
     let v = serde_json::from_str::<Value>(&n.info).ok().and_then(|i| i["version"].as_str().map(|s| s.to_string())).unwrap_or_default();
     v.is_empty() || crate::admin::newer(SIGN_FROM, &v)
+}
+
+/// 3.69: what the panel learned about a node's signing, kept per node id and per address (`node_sig` setting,
+/// sealed): it took a signed request (`signed`: no bare token ever again), it signs its answers (`replies`:
+/// an unsigned or wrongly signed answer is refused from then on)
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone, Copy, Debug, PartialEq)]
+#[serde(default)]
+pub struct NodeSig {
+    pub signed: bool,
+    pub replies: bool,
+}
+
+static NODE_SIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub fn node_sig(app: &App, key: &str) -> NodeSig {
+    let m: HashMap<String, NodeSig> = serde_json::from_str(&app.db.get("node_sig")).unwrap_or_default();
+    m.get(key).copied().unwrap_or_default()
+}
+
+/// Moves a node's ratchet forward (never back)
+fn raise_node_sig(app: &App, key: &str, signed: bool, replies: bool) {
+    let _g = NODE_SIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut m: HashMap<String, NodeSig> = serde_json::from_str(&app.db.get("node_sig")).unwrap_or_default();
+    let cur = m.get(key).copied().unwrap_or_default();
+    let next = NodeSig { signed: cur.signed || signed, replies: cur.replies || replies };
+    if next != cur {
+        m.insert(key.to_string(), next);
+        app.db.set("node_sig", &serde_json::to_string(&m).unwrap_or_default());
+    }
+}
+
+/// A node was deleted or re-joined (a reinstall starts from nothing): its ratchet goes with it
+pub fn forget_node_sig(app: &App, keys: &[&str]) {
+    let _g = NODE_SIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut m: HashMap<String, NodeSig> = serde_json::from_str(&app.db.get("node_sig")).unwrap_or_default();
+    let before = m.len();
+    m.retain(|k, _| !keys.contains(&k.as_str()));
+    if m.len() != before {
+        app.db.set("node_sig", &serde_json::to_string(&m).unwrap_or_default());
+    }
+}
+
+/// A node's answer, read whole and checked (3.69): (status, body)
+pub struct NodeAnswer {
+    pub status: reqwest::StatusCode,
+    pub body: bytes::Bytes,
+}
+
+impl NodeAnswer {
+    pub fn json<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
+        serde_json::from_slice(&self.body).map_err(|e| e.to_string())
+    }
 }
 
 /// A request to a node's agent, signed with its token (3.65): the token itself is not sent. A node that
@@ -978,7 +1035,7 @@ fn node_legacy(n: &Node) -> bool {
 /// token, as before; a node known to be newer never sees the token. One client per node (kept-alive
 /// connections are reused round after round).
 #[allow(clippy::too_many_arguments)]
-async fn node_call(app: &App, key: &str, addr: &str, token: &str, insecure: bool, method: reqwest::Method, path: &str, body: Option<Vec<u8>>, timeout: std::time::Duration, legacy: bool) -> Result<reqwest::Response, String> {
+async fn node_call(app: &App, key: &str, addr: &str, token: &str, insecure: bool, method: reqwest::Method, path: &str, body: Option<Vec<u8>>, timeout: std::time::Duration, legacy: bool) -> Result<NodeAnswer, String> {
     let c = app.node_client(key, insecure);
     let url = format!("{}{}", addr.trim_end_matches('/'), path);
     let build = |bare: bool| {
@@ -987,27 +1044,52 @@ async fn node_call(app: &App, key: &str, addr: &str, token: &str, insecure: bool
         if body.is_some() {
             rb = rb.header(reqwest::header::CONTENT_TYPE, "application/json").body(raw.clone());
         }
-        rb = crate::sign::sign(rb, token, method.as_str(), path, &raw);
+        let (mut rb, nonce) = crate::sign::sign_nonce(rb, token, method.as_str(), path, &raw);
         if bare {
             rb = rb.header("X-Node-Token", token);
         }
-        rb
+        (rb, nonce)
     };
-    let r = build(false).send().await.map_err(|e| node_err(addr, &e))?;
+    let (rb, nonce) = build(false);
+    let r = rb.send().await.map_err(|e| node_err(addr, &e))?;
     if r.status() == reqwest::StatusCode::UNAUTHORIZED && legacy {
-        return build(true).send().await.map_err(|e| node_err(addr, &e));
+        // a node from before 3.65: the bare token as before (its answer is not signed either)
+        let (rb, _) = build(true);
+        let r = rb.send().await.map_err(|e| node_err(addr, &e))?;
+        let status = r.status();
+        let body = r.bytes().await.map_err(|e| node_err(addr, &e))?;
+        return Ok(NodeAnswer { status, body });
     }
-    Ok(r)
+    let status = r.status();
+    let h = r.headers().clone();
+    let body = r.bytes().await.map_err(|e| node_err(addr, &e))?;
+    // 3.69: the node's answer, signed and bound to this request (a node from 3.69 on): a changed or replayed one is
+    // refused; once a node signed, an unsigned answer is refused too
+    let keys = [key, addr];
+    if crate::sign::reply_signed(&h) {
+        crate::sign::verify_reply(token, &nonce, &h, status.as_u16(), &body, crate::util::now()).map_err(|r| format!("{}: the answer {}", addr, r.text()))?;
+        for k in keys {
+            raise_node_sig(app, k, status.is_success(), true);
+        }
+    } else if keys.iter().any(|k| node_sig(app, k).replies) {
+        return Err(format!("{}: the answer is not signed (this node signed before): refused", addr));
+    } else if status.is_success() {
+        // a node of 3.65 – 3.68: it took the signed request; the bare token never goes to it again
+        for k in keys {
+            raise_node_sig(app, k, true, false);
+        }
+    }
+    Ok(NodeAnswer { status, body })
 }
 
 async fn remote_sync(app: &App, n: &Node, req: &SyncReq) -> Result<SyncResp, String> {
     // a sync answers within seconds; the self-signed client's long timeout is for updates
     let body = serde_json::to_vec(req).map_err(|e| e.to_string())?;
-    let r = node_call(app, &n.id, &n.address, &n.token, n.insecure, reqwest::Method::POST, "/agent/sync", Some(body), SYNC_TIMEOUT, node_legacy(n)).await?;
-    if !r.status().is_success() {
-        return Err(format!("the node answered {}", r.status()));
+    let r = node_call(app, &n.id, &n.address, &n.token, n.insecure, reqwest::Method::POST, "/agent/sync", Some(body), SYNC_TIMEOUT, node_legacy(app, n)).await?;
+    if !r.status.is_success() {
+        return Err(format!("the node answered {}", r.status));
     }
-    r.json::<SyncResp>().await.map_err(|e| e.to_string())
+    r.json::<SyncResp>()
 }
 
 /// Nodes that were just told to update restart onto the new program: their info (and so the version the
@@ -1048,18 +1130,19 @@ pub async fn remote_info(app: &App, addr: &str, token: &str, insecure: bool) -> 
 pub async fn remote_info_res(app: &App, addr: &str, token: &str, insecure: bool) -> Result<Value, String> {
     // keyed by address: for a node being added this is also the TOFU first contact. A node the panel
     // already knows as newer never gets the bare token; one being added may still be from before.
-    let legacy = app.db.nodes().into_iter().find(|n| n.address.trim_end_matches('/') == addr.trim_end_matches('/')).map(|n| node_legacy(&n)).unwrap_or(true);
+    let legacy = !node_sig(app, addr).signed
+        && app.db.nodes().into_iter().find(|n| n.address.trim_end_matches('/') == addr.trim_end_matches('/')).map(|n| node_legacy(app, &n)).unwrap_or(true);
     let r = node_call(app, addr, addr, token, insecure, reqwest::Method::GET, "/agent/info", None, SYNC_TIMEOUT, legacy).await?;
-    if !r.status().is_success() {
-        return Err(format!("the node answered {}", r.status()));
+    if !r.status.is_success() {
+        return Err(format!("the node answered {}", r.status));
     }
-    r.json::<Value>().await.map_err(|e| e.to_string())
+    r.json::<Value>()
 }
 
 pub async fn remote_post(app: &App, n: &Node, path: &str) -> Option<Value> {
-    let r = node_call(app, &n.id, &n.address, &n.token, n.insecure, reqwest::Method::POST, path, None, std::time::Duration::from_secs(120), node_legacy(n)).await;
+    let r = node_call(app, &n.id, &n.address, &n.token, n.insecure, reqwest::Method::POST, path, None, std::time::Duration::from_secs(120), node_legacy(app, n)).await;
     match r {
-        Ok(r) => r.json::<Value>().await.map_err(|e| eprintln!("node {}: {} answered: {}", n.name, path, e)).ok(),
+        Ok(r) => r.json::<Value>().map_err(|e| eprintln!("node {}: {} answered: {}", n.name, path, e)).ok(),
         Err(e) => {
             eprintln!("node {}: {}: {}", n.name, path, e);
             None
@@ -1069,9 +1152,9 @@ pub async fn remote_post(app: &App, n: &Node, path: &str) -> Option<Value> {
 
 pub async fn remote_post_json(app: &App, n: &Node, path: &str, body: &Value) -> Option<Value> {
     let raw = serde_json::to_vec(body).ok()?;
-    let r = node_call(app, &n.id, &n.address, &n.token, n.insecure, reqwest::Method::POST, path, Some(raw), std::time::Duration::from_secs(60), node_legacy(n)).await;
+    let r = node_call(app, &n.id, &n.address, &n.token, n.insecure, reqwest::Method::POST, path, Some(raw), std::time::Duration::from_secs(60), node_legacy(app, n)).await;
     match r {
-        Ok(r) => r.json::<Value>().await.map_err(|e| eprintln!("node {}: {} answered: {}", n.name, path, e)).ok(),
+        Ok(r) => r.json::<Value>().map_err(|e| eprintln!("node {}: {} answered: {}", n.name, path, e)).ok(),
         Err(e) => {
             eprintln!("node {}: {}: {}", n.name, path, e);
             None

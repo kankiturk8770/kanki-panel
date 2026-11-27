@@ -36,8 +36,11 @@ type St = State<Arc<App>>;
 /// still gets it, and an agent can install the VPN part without downloading anything)
 pub const INSTALL_SH: &str = include_str!("../../install.sh");
 
-/// how long a server's join token works
-const JOIN_VALID: i64 = 6 * 3600;
+/// how long a server's join token works (3.69: 15 minutes, single use; was 6 hours)
+pub const JOIN_VALID: i64 = 15 * 60;
+/// the token of a VPN install the panel asks the agent for itself: it never leaves the signed channel and the
+/// install (packages from slow mirrors) runs before it is used
+const SETUP_JOIN_VALID: i64 = 45 * 60;
 /// the agent version that can install the VPN part when the panel asks
 const SETUP_FROM: &str = "3.9.0";
 
@@ -62,6 +65,7 @@ pub fn router() -> Router<Arc<App>> {
         .route("/dl/install.sh", get(dl_script))
         .route("/dl/kanki-panel", get(dl_bin))
         .route("/dl/kanki-panel.sha256", get(dl_sum))
+        .route("/dl/kanki-panel.minisig", get(dl_sig))
 }
 
 // ------------------------------------------------------------------ addresses
@@ -85,12 +89,52 @@ fn repo() -> String {
     if r.is_empty() { "kankiturk8770/kanki-panel".into() } else { r }
 }
 
+/// (pin, CA-valid, when read) of the panel's own certificate
+fn pin_cache() -> &'static std::sync::Mutex<Option<(String, bool, i64)>> {
+    static C: std::sync::Mutex<Option<(String, bool, i64)>> = std::sync::Mutex::new(None);
+    &C
+}
+
+/// 3.69: the public key pin of the panel's certificate as a new server sees it (`pin::probe` of `panel_url`), read
+/// again every 10 minutes (a renewal), kept for the join commands. None when it cannot be read: the command then
+/// has no pin and the server pins on first contact as before.
+pub async fn panel_pin(app: &App) -> Option<(String, bool)> {
+    if let Some((p, ca, at)) = pin_cache().lock().unwrap_or_else(|e| e.into_inner()).clone() {
+        if now() - at < 600 {
+            return Some((p, ca));
+        }
+    }
+    let url = reqwest::Url::parse(&panel_url(app)).ok()?;
+    let host = url.host_str()?.to_string();
+    let port = url.port_or_known_default()?;
+    match crate::pin::probe(&host, port, None).await {
+        Ok((p, ca)) => {
+            *pin_cache().lock().unwrap_or_else(|e| e.into_inner()) = Some((p.clone(), ca, now()));
+            Some((p, ca))
+        }
+        Err(e) => {
+            eprintln!("join: the panel's own certificate could not be read at {}:{} ({}): commands carry no pin", host, port, e);
+            None
+        }
+    }
+}
+
+/// `ca:sha256//…` / `self:sha256//…` for KANKI_PANEL_PIN (the last pin read; "" = none)
+pub fn panel_pin_word() -> String {
+    pin_cache().lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|(p, ca, _)| format!("{}:{}", if *ca { "ca" } else { "self" }, p)).unwrap_or_default()
+}
+
 /// The one command that makes a machine this server: everything installed, joined to the panel.
 fn command(app: &App, s: &TServer) -> String {
     let panel = panel_url(app);
     let repo = repo();
     let ports = s.ports.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",");
     let mut env = format!("KANKI_REPO='{}' KANKI_PANEL='{}' KANKI_TUNNEL='{}:{}'", repo, panel, s.id, s.token);
+    // 3.69: the panel's certificate key, so the new server trusts exactly this panel from its first contact
+    let pin = panel_pin_word();
+    if !pin.is_empty() {
+        env.push_str(&format!(" KANKI_PANEL_PIN='{}'", pin));
+    }
     if !s.join.is_empty() {
         env.push_str(&format!(" KANKI_JOIN='{}' KANKI_PORTS='{}'", s.join, ports));
     }
@@ -701,6 +745,7 @@ fn agent_only(s: &TServer) -> bool {
 
 /// { name, loc: iran|abroad, domain?, vpn? } -> a new server and the one command for it
 async fn add(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    panel_pin(&app).await;
     let _ = guard!(app, h, "nodes");
     let mut list = tp::servers(&app);
     let name = b["name"].as_str().unwrap_or("").trim().chars().take(40).collect::<String>();
@@ -769,6 +814,7 @@ async fn replace_machine(State(app): St, h: HeaderMap, Path(id): Path<String>, J
     if !addr.is_empty() && !crate::twin::valid_host(&addr) {
         return err(StatusCode::BAD_REQUEST, "the new address must be an IP or a domain");
     }
+    panel_pin(&app).await;
     let mut list = tp::servers(&app);
     let Some(s) = list.iter_mut().find(|s| s.id == id) else { return err(StatusCode::NOT_FOUND, "unknown server") };
     if b.get("addr").is_some() {
@@ -812,6 +858,7 @@ fn node_ports(app: &App, nid: &str) -> Vec<u16> {
 /// The command of a server again (a new join token when the old one ran out)
 async fn command_again(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Response {
     let _ = guard!(app, h, "nodes");
+    panel_pin(&app).await;
     let mut list = tp::servers(&app);
     let Some(s) = list.iter_mut().find(|s| s.id == id) else { return err(StatusCode::NOT_FOUND, "unknown server") };
     let relay = agent_only(s);
@@ -995,7 +1042,7 @@ pub(crate) fn ask_vpn_install(app: &App, id: &str, serve: bool, domain: Option<S
     add(s);
     s.vpn = serve;
     s.join = rand_token(40);
-    s.join_exp = now() + JOIN_VALID;
+    s.join_exp = now() + SETUP_JOIN_VALID;
     s.setup_at = now();
     let need = s.ports.len() != 4;
     tp::save_servers(app, &list);
@@ -1509,6 +1556,17 @@ async fn dl_sum(State(app): St, Query(q): Query<HashMap<String, String>>) -> Res
     match tokio::task::spawn_blocking(own_sum).await.ok().flatten() {
         Some(s) => format!("{}  kanki-panel\n", s).into_response(),
         None => (StatusCode::INTERNAL_SERVER_ERROR, "no binary").into_response(),
+    }
+}
+
+/// 3.69: the release signature of the program this panel runs (the installer keeps it for the agents)
+async fn dl_sig(State(app): St, Query(q): Query<HashMap<String, String>>) -> Response {
+    if !dl_ok(&app, &q) {
+        return (StatusCode::FORBIDDEN, "not allowed").into_response();
+    }
+    match crate::release::own_signature() {
+        Some(s) => ([(header::CONTENT_TYPE, "text/plain")], s).into_response(),
+        None => (StatusCode::NOT_FOUND, "no signature").into_response(),
     }
 }
 

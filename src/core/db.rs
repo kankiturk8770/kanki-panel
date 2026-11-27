@@ -63,6 +63,10 @@ pub struct User {
     /// the stored tier ('v2ray' | 'gaming' | 'combo'; empty = not set yet, see `tier()`)
     #[serde(rename = "tier_stored")]
     pub tier_raw: String,
+    /// 3.69: 1 = the Xray / Hysteria2 credentials are keyed by the panel (`creds`); 0 = derived from the code as
+    /// before (every account made earlier)
+    #[serde(skip)]
+    pub cred: i64,
 }
 
 impl User {
@@ -85,6 +89,7 @@ impl User {
             online: r.get(14)?,
             warned: r.get(15)?,
             tier_raw: r.get::<_, Option<String>>(16)?.unwrap_or_default(),
+            cred: r.get::<_, Option<i64>>(17)?.unwrap_or(0),
         })
     }
 
@@ -229,7 +234,10 @@ pub struct Peer {
     pub tx: i64,
 }
 
-const USER_COLS: &str = "id,username,code,limit_gb,used_bytes,expires_at,max_conn,enabled,protocols,nodes,notes,tg_id,created_at,last_seen,online,warned,tier";
+/// Digits of a new subscription code (3.69: 39 = more than 128 bits; accounts from before keep theirs)
+pub const CODE_DIGITS: usize = 39;
+
+const USER_COLS: &str = "id,username,code,limit_gb,used_bytes,expires_at,max_conn,enabled,protocols,nodes,notes,tg_id,created_at,last_seen,online,warned,tier,cred";
 const NODE_COLS: &str = "id,name,address,endpoint,token,enabled,online,last_sync,info,note,insecure,drain,maint,accept_all,endpoint_mode,sync_state,role";
 
 /// The tier an account's protocol list makes: what the plans' services gave (`User::service`)
@@ -246,6 +254,8 @@ fn migrate_hardening(c: &Connection) -> rusqlite::Result<()> {
     c.execute("UPDATE api_tokens SET expires=?1 WHERE expires=0", [crate::util::now() + 90 * 86400])?;
     add_column(c, "audit", "chain", "TEXT NOT NULL DEFAULT ''")?;
     add_column(c, "audit", "detail", "TEXT NOT NULL DEFAULT ''")?;
+    // 3.69: accounts made from now on get keyed credentials; every row there is now keeps the old ones (0)
+    add_column(c, "users", "cred", "INTEGER NOT NULL DEFAULT 0")?;
     Ok(())
 }
 
@@ -584,9 +594,9 @@ impl Db {
     }
 
     /// The account whose code part is `code` (an app sent only the digits, without `kanki-<id>-`): None when
-    /// it is not 10 to 32 digits, or when no account or more than one account has it.
+    /// it is not 10 to 39 digits, or when no account or more than one account has it.
     pub fn user_by_bare_code(&self, code: &str) -> Option<User> {
-        if !(10..=32).contains(&code.len()) || !code.bytes().all(|c| c.is_ascii_digit()) {
+        if !(10..=CODE_DIGITS).contains(&code.len()) || !code.bytes().all(|c| c.is_ascii_digit()) {
             return None;
         }
         let ids: Vec<i64> = self.with(|c| {
@@ -666,7 +676,8 @@ impl Db {
     /// The user's id is always the lowest free number, so the numbers of deleted users are used again.
     #[allow(clippy::too_many_arguments)]
     pub fn create_user(&self, username: &str, limit_gb: f64, days: i64, max_conn: i64, protocols: &str, nodes: &str, notes: &str, tg_id: i64) -> Result<User, String> {
-        let code = crate::util::rand_digits(19);
+        // 3.69: 39 digits = more than 128 bits (19 gave 63)
+        let code = crate::util::rand_digits(CODE_DIGITS);
         let days = clamp_days(days);
         let exp = if days > 0 { now() + days * 86400 } else { 0 };
         let _g = SLOT.lock().unwrap_or_else(|e| e.into_inner());
@@ -685,8 +696,8 @@ impl Db {
         }
         let id = self.with(|c| {
             c.execute(
-                "INSERT INTO users(id,username,code,limit_gb,expires_at,max_conn,protocols,nodes,notes,tg_id,created_at,tier) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
-                params![n, name, code, limit_gb, exp, max_conn, protocols, nodes, notes, tg_id, now(), tier_of_protocols(protocols).as_str()],
+                "INSERT INTO users(id,username,code,limit_gb,expires_at,max_conn,protocols,nodes,notes,tg_id,created_at,tier,cred) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                params![n, name, code, limit_gb, exp, max_conn, protocols, nodes, notes, tg_id, now(), tier_of_protocols(protocols).as_str(), crate::creds::KEYED],
             )
             .map(|_| c.last_insert_rowid())
             .map_err(|e| if e.to_string().contains("UNIQUE") { "this username already exists".to_string() } else { e.to_string() })

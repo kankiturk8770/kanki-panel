@@ -385,12 +385,19 @@ pub fn arch_name(arch: &str) -> Option<&'static str> {
 }
 
 /// where the binary is downloaded from: GitHub, then the project's own download server
+/// 3.69: the pinned release only (`release::HY2_VERSION`); what comes from there is checked against its SHA-256
 pub fn download_urls(arch: &str) -> Vec<String> {
     let Some(a) = arch_name(arch) else { return vec![] };
+    let v = crate::release::HY2_VERSION;
     vec![
-        format!("https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-{}", a),
-        format!("https://download.hysteria.network/app/latest/hysteria-linux-{}", a),
+        format!("https://github.com/apernet/hysteria/releases/download/app%2F{}/hysteria-linux-{}", v, a),
+        format!("https://download.hysteria.network/app/{}/hysteria-linux-{}", v, a),
     ]
+}
+
+/// The pinned SHA-256 of this machine's Hysteria2 release file
+fn pinned_here() -> Option<&'static str> {
+    arch_name(std::env::consts::ARCH).and_then(crate::release::hy2_sha256)
 }
 
 /// a real Linux program of a sane size (a filtered network often answers with an HTML page)
@@ -400,16 +407,15 @@ pub fn looks_like_binary(b: &[u8]) -> bool {
 
 pub const CACHE_DIR: &str = "/var/lib/kanki/hy2bin";
 
-fn sha256_hex(b: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(b);
-    hex::encode(h.finalize())
-}
 
-/// checks a downloaded file and moves it to /usr/local/bin/hysteria
+/// checks a downloaded file and moves it to /usr/local/bin/hysteria. 3.69: only the pinned release: its SHA-256 is
+/// checked before the file is ever started
 fn take(tmp: &str) -> bool {
-    let ok = std::fs::read(tmp).map(|b| looks_like_binary(&b)).unwrap_or(false) && {
+    let pinned = pinned_here().is_some_and(|want| std::fs::read(tmp).map(|b| crate::release::matches(&b, want)).unwrap_or(false));
+    if !pinned {
+        eprintln!("hy2 tunnel: the downloaded file is not the pinned Hysteria2 {} release: not used", crate::release::HY2_VERSION);
+    }
+    let ok = pinned && std::fs::read(tmp).map(|b| looks_like_binary(&b)).unwrap_or(false) && {
         let _ = sh(&format!("chmod 755 {}", tmp));
         sh(&format!("{} version 2>&1 | grep -qi version", tmp)).0
     };
@@ -459,161 +465,75 @@ fn panel_post(insecure: bool, timeout: Duration, url: &str, headers: &[(&str, St
     })
 }
 
-/// asks the panel for the binary of this CPU type (it has its own, a cached one, or downloads it)
+/// asks the panel for the binary of this CPU type (its own pinned copy, a cached one, or it downloads it). 3.69: the
+/// request is signed (`agent::signed_body`), and the file must be the pinned release whatever the panel says
 fn from_panel(tmp: &str) -> Result<(), String> {
     let Some((panel, id, token, insecure)) = agent_env() else { return Err("not a tunnel agent".into()) };
-    let body = serde_json::json!({ "id": id, "token": token, "arch": std::env::consts::ARCH }).to_string();
-    let json = [("content-type", "application/json".to_string())];
-    let (want, bytes) = panel_post(insecure, Duration::from_secs(300), &format!("{}/tunnel/hy2bin", panel), &json, body.into_bytes())
+    let want = pinned_here().ok_or("no pinned Hysteria2 release for this CPU type")?;
+    let path = crate::tunnel::panel::HY2BIN_PATH;
+    let (body, mut headers) = super::agent::signed_body(&id, &token, path, serde_json::json!({ "arch": std::env::consts::ARCH }));
+    headers.push(("content-type", "application/json".to_string()));
+    let (_, bytes) = panel_post(insecure, Duration::from_secs(300), &format!("{}{}", panel, path), &headers, body)
         .map_err(|e| format!("the panel did not give it ({})", e))?;
-    if want.is_empty() || want != sha256_hex(&bytes) {
-        return Err("the file from the panel was damaged on the way".into());
+    if !crate::release::matches(&bytes, want) {
+        return Err(format!("the file from the panel is not the pinned Hysteria2 {} release", crate::release::HY2_VERSION));
     }
     std::fs::write(tmp, &bytes).map_err(|e| format!("cannot write {}: {}", tmp, e))
 }
 
-/// the official installer (the same `get.hy2.sh` the panel's install.sh uses), saved to a file;
-/// GitHub's copy of the same script when get.hy2.sh cannot be reached
-fn fetch_installer() -> Option<String> {
-    // not a fixed name in /tmp: another local user could put a link or a script of their own there,
-    // and this one runs as root
-    let _ = std::fs::create_dir_all("/var/lib/kanki");
-    let path = "/var/lib/kanki/hy2-install.sh";
-    let _ = std::fs::remove_file(path);
-    for url in ["https://get.hy2.sh/", "https://raw.githubusercontent.com/apernet/hysteria/master/scripts/install_server.sh"] {
-        if sh(&format!("curl -fsSL --connect-timeout 10 --max-time 60 -o {} '{}' 2>&1", path, url)).0
-            && std::fs::read_to_string(path).map(|t| t.starts_with("#!") && t.contains("hysteria")).unwrap_or(false)
-        {
-            return Some(path.into());
-        }
-    }
-    let _ = std::fs::remove_file(path);
-    None
-}
-
-/// runs the installer the way a root shell would (it uses tput and $HOME; the agent's service has neither)
-fn run_installer(script: &str, args: &str) -> String {
-    let (_, out) = sh(&format!("TERM=dumb HOME=/root bash {} {} 2>&1", script, args));
-    // its last error line, without colour codes
-    out.lines()
-        .rev()
-        .find(|l| l.contains("error") || l.contains("rror:"))
-        .map(|l| l.chars().filter(|c| !c.is_control()).collect::<String>().replace("[0m", "").replace("[31m", ""))
-        .unwrap_or_default()
-}
-
-/// Gets the official binary onto this server, the same way the panel installs Hysteria2 for users:
-/// 1. the official installer `get.hy2.sh`, exactly like install.sh does;
-/// 2. the same GitHub file that installer downloads (also download.hysteria.network), installed
-///    with the same installer (`--local`): the installer first asks api.hy2.io for the newest
-///    version and gives up when only that site is unreachable, even if GitHub works;
-/// 3. the panel (its own copy, one given by the other server of the tunnel, or one it downloads).
+/// Gets the pinned Hysteria2 release onto this server (3.69: no remote install script runs as root any more):
+/// 1. the pinned release file from GitHub or download.hysteria.network;
+/// 2. the copy the panel server keeps for its agents (when this server is the panel itself);
+/// 3. the panel (a signed request; it hands out only the pinned release).
+///
+/// Every file's SHA-256 is checked before it is started or put in place (`take`).
 fn ensure_bin() -> Result<String, String> {
     if let Some(b) = find_bin() {
         return Ok(b);
     }
-    eprintln!("hy2 tunnel: installing Hysteria2 ...");
+    eprintln!("hy2 tunnel: installing Hysteria2 {} ...", crate::release::HY2_VERSION);
     let mut why = vec![];
-    let script = fetch_installer();
-    match &script {
-        Some(sc) => {
-            let e = run_installer(sc, "");
-            if let Some(b) = find_bin() {
-                eprintln!("hy2 tunnel: installed with get.hy2.sh");
-                return Ok(b);
-            }
-            why.push(format!("get.hy2.sh: {}", if e.is_empty() { "failed".into() } else { e }));
-        }
-        None => why.push("get.hy2.sh: unreachable".into()),
-    }
     let tmp = "/usr/local/bin/.hysteria.kanki-new";
-    let _ = std::fs::create_dir_all("/usr/local/bin");
-    let install = |tmp: &str| -> bool {
-        if let Some(sc) = &script {
-            let ok = std::fs::read(tmp).map(|b| looks_like_binary(&b)).unwrap_or(false);
-            if ok {
-                let _ = run_installer(sc, &format!("--local {}", tmp));
-                if find_bin().is_some() {
-                    let _ = std::fs::remove_file(tmp);
-                    return true;
-                }
-            }
-        }
-        take(tmp)
-    };
+    if let Err(e) = std::fs::create_dir_all("/usr/local/bin") {
+        return Err(format!("/usr/local/bin: {}", e));
+    }
     for url in download_urls(std::env::consts::ARCH) {
         let (ok, out) = sh(&format!("curl -fsSL --connect-timeout 10 --max-time 180 -o {} '{}' 2>&1", tmp, url));
-        if ok && install(tmp) {
+        if ok && take(tmp) {
             eprintln!("hy2 tunnel: installed from {}", url);
             return find_bin().ok_or_else(|| "install failed".to_string());
         }
-        let _ = std::fs::remove_file(tmp);
-        why.push(format!("{}: {}", url.split('/').nth(2).unwrap_or(""), if ok { "not a program (filtered?)".to_string() } else { out.lines().last().unwrap_or("unreachable").trim().to_string() }));
+        remove_quiet(tmp);
+        why.push(format!("{}: {}", url.split('/').nth(2).unwrap_or(""), if ok { "not the pinned release (filtered?)".to_string() } else { out.lines().last().unwrap_or("unreachable").trim().to_string() }));
     }
     // a copy the panel server keeps for its agents (when this server is the panel itself)
     if let Some(a) = arch_name(std::env::consts::ARCH) {
-        let c = format!("{}/hysteria-linux-{}", CACHE_DIR, a);
-        if std::path::Path::new(&c).exists() && sh(&format!("cp -f {} {}", c, tmp)).0 && install(tmp) {
+        let c = format!("{}/hysteria-linux-{}-{}", CACHE_DIR, a, crate::release::HY2_VERSION);
+        if std::path::Path::new(&c).exists() && std::fs::copy(&c, tmp).is_ok() && take(tmp) {
             return find_bin().ok_or_else(|| "install failed".to_string());
         }
     }
     match from_panel(tmp) {
-        Ok(()) if install(tmp) => {
+        Ok(()) if take(tmp) => {
             eprintln!("hy2 tunnel: installed from the panel");
             return find_bin().ok_or_else(|| "install failed".to_string());
         }
         Ok(()) => why.push("panel: the file is not a working program".into()),
         Err(e) => why.push(format!("panel: {}", e)),
     }
+    remove_quiet(tmp);
     Err(format!(
-        "Hysteria2 could not be installed on this server ({}). It is installed by itself as soon as one source works: once the other server of the tunnel has it, it is passed on through the panel.",
+        "Hysteria2 could not be installed on this server ({}). It is installed by itself as soon as one source works: the panel downloads the pinned release for its servers.",
         why.join("; ")
     ))
 }
 
-/// After this server has the binary: give the panel a copy if it has none for this CPU type, so
-/// servers that cannot download it (Iran) get it from the panel. Once per run.
-fn share_with_panel(bin: &str) {
-    static DONE: AtomicBool = AtomicBool::new(false);
-    if DONE.load(Ordering::SeqCst) {
-        return;
+fn remove_quiet(p: &str) {
+    if let Err(e) = std::fs::remove_file(p) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("hy2 tunnel: {}: {}", p, e);
+        }
     }
-    let Some((panel, id, token, insecure)) = agent_env() else {
-        DONE.store(true, Ordering::SeqCst);
-        return;
-    };
-    let url = format!("{}/tunnel/hy2bin", panel);
-    let body = serde_json::json!({ "id": id, "token": token, "arch": std::env::consts::ARCH, "check": true }).to_string();
-    let json = [("content-type", "application/json".to_string())];
-    let out = match panel_post(insecure, Duration::from_secs(20), &url, &json, body.into_bytes()) {
-        Ok((_, out)) => out,
-        Err(e) => {
-            if e.contains(crate::pin::MISMATCH) {
-                eprintln!("hy2 tunnel: not sharing the binary: {}", e);
-            }
-            return; // an older panel or no answer: try again next round
-        }
-    };
-    let have = serde_json::from_slice::<serde_json::Value>(&out).ok().and_then(|v| v["have"].as_bool()).unwrap_or(true);
-    if !have {
-        let Ok(bytes) = std::fs::read(bin) else { return };
-        if !looks_like_binary(&bytes) {
-            DONE.store(true, Ordering::SeqCst);
-            return;
-        }
-        let headers = [
-            ("x-id", id),
-            ("x-token", token),
-            ("x-arch", std::env::consts::ARCH.to_string()),
-            ("x-sha256", sha256_hex(&bytes)),
-            ("content-type", "application/octet-stream".to_string()),
-        ];
-        if panel_post(insecure, Duration::from_secs(600), &format!("{}/put", url), &headers, bytes).is_err() {
-            return;
-        }
-        eprintln!("hy2 tunnel: gave the panel a copy of hysteria for the other servers");
-    }
-    DONE.store(true, Ordering::SeqCst);
 }
 
 fn write_if_changed(path: &str, text: &str, mode: u32) -> Result<bool, String> {
@@ -727,9 +647,6 @@ fn reconcile() {
             }
         }
     };
-    if let Ok(b) = &bin {
-        share_with_panel(b);
-    }
     for w in &want {
         let err = match &bin {
             Err(e) => e.clone(),

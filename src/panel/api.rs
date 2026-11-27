@@ -425,8 +425,25 @@ async fn node_signed(State(app): St, req: axum::extract::Request, next: axum::mi
     if let Err(r) = crate::sign::verify(&want, &parts.headers, parts.method.as_str(), &path, &bytes, now()) {
         return err(StatusCode::UNAUTHORIZED, r.text());
     }
-    next.run(axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes))).await
+    let nonce = crate::sign::nonce_of(&parts.headers);
+    let res = next.run(axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes))).await;
+    // 3.69: the answer is signed too (the node's token, bound to the panel's request): a changed SyncResp or one
+    // played back from before is refused by the panel
+    let Some(nonce) = nonce else { return res };
+    let (mut rp, body) = res.into_parts();
+    let Ok(body) = axum::body::to_bytes(body, NODE_REPLY_MAX).await else {
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "answer too large");
+    };
+    for (k, v) in crate::sign::reply_headers(&want, &nonce, rp.status.as_u16(), &body) {
+        if let Ok(v) = axum::http::HeaderValue::from_str(&v) {
+            rp.headers.insert(k, v);
+        }
+    }
+    Response::from_parts(rp, axum::body::Body::from(body))
 }
+
+/// The largest answer of a node's agent route that is signed (a sync answer is a few KB to a few MB)
+const NODE_REPLY_MAX: usize = 64 << 20;
 
 // ============================================================ overview
 
@@ -700,7 +717,8 @@ pub fn user_action(app: &App, id: i64, action: &str, b: &Value) -> Result<(), St
             let _ = app.db.exec("DELETE FROM peers WHERE user_id=?1", &[&id]);
             // a new link: the device list starts again
             crate::devices::clear(app, id);
-            app.db.exec("UPDATE users SET code=?1 WHERE id=?2", &[&util::rand_digits(19), &id]).map(|_| ())
+            // 3.69: a new code of 39 digits, and keyed credentials from now on (`creds`)
+            app.db.exec("UPDATE users SET code=?1, cred=?2 WHERE id=?3", &[&util::rand_digits(crate::db::CODE_DIGITS), &crate::creds::KEYED, &id]).map(|_| ())
         }
         "delete" => {
             delete_user(app, id);
@@ -1246,14 +1264,16 @@ mod proto_all_tests {
 
 // ============================================================ node join (one-time token)
 
-/// Admin: make a one-time token (valid for 1 hour). The new server runs the installer with it and registers itself.
+/// Admin: make a one-time token (3.69: valid for 15 minutes). The new server runs the installer with it and registers itself.
 async fn node_join_token(State(app): St, h: HeaderMap) -> Response {
     let _ = guard!(app, h, "nodes");
     let token = rand_token(40);
-    let exp = now() + 3600;
+    // 3.69: 15 minutes, one use
+    let exp = now() + crate::servers::JOIN_VALID;
     app.db.set("join_token", &token);
     app.db.set("join_expires", &exp.to_string());
-    Json(json!({ "token": token, "expires": exp, "panel": crate::servers::panel_url(&app), "repo": crate::admin::repo() })).into_response()
+    crate::servers::panel_pin(&app).await;
+    Json(json!({ "token": token, "expires": exp, "panel": crate::servers::panel_url(&app), "repo": crate::admin::repo(), "pin": crate::servers::panel_pin_word() })).into_response()
 }
 
 /// The panel-wide join token, taken out of the settings while one registration runs. Dropped
@@ -1844,7 +1864,7 @@ fn hy2_link(app: &App, u: &User, n: &Node, tw: Option<&crate::twin::Twin>) -> Op
     };
     // no empty "?": some iPhone apps (V2Box, Streisand) refuse a link that ends its address with "/?#"
     let query = if q.is_empty() { String::new() } else { format!("?{}", q.join("&")) };
-    Some(format!("hysteria2://{}@{}/{}#{}", pct(&crate::hy2::user_pass(&u.code)), addr, query, pct(&name)))
+    Some(format!("hysteria2://{}@{}/{}#{}", pct(&crate::creds::hy2_pass(u)), addr, query, pct(&name)))
 }
 
 pub fn user_nodes(app: &App, u: &User) -> Vec<Node> {

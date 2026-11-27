@@ -66,12 +66,21 @@ pub fn release_url(version: &str, zip: &str) -> String {
 }
 
 /// Install Xray-core (from GitHub, or through the panel when GitHub is not reachable). Blocking.
+/// 3.69: only the pinned release (`release::XRAY_VERSION`, its zip's SHA-256 checked before it is unpacked or
+/// run). An Xray already installed here stays as it is (no restart for the change): "" (the newest) keeps a
+/// copy installed as "latest" before.
 fn install(version: &str, panel: Option<(&str, &str, &str)>) -> Result<(), String> {
-    let want = if version.trim().is_empty() { "latest" } else { version.trim() };
+    let asked = version.trim();
     let have = std::fs::read_to_string(BIN_VER_FILE).unwrap_or_default();
-    if std::path::Path::new(BIN).exists() && have.trim() == want {
+    let have = have.trim();
+    if std::path::Path::new(BIN).exists() && (have == asked || (asked.is_empty() && (have == "latest" || have == crate::release::XRAY_VERSION))) {
         return Ok(());
     }
+    if !asked.is_empty() && asked != crate::release::XRAY_VERSION {
+        return Err(format!("Xray-core {} is not the pinned release ({}): choose it or leave the version empty", asked, crate::release::XRAY_VERSION));
+    }
+    let version = crate::release::XRAY_VERSION;
+    let want = version;
     // a failed install is tried again after a pause, not on every round (every 15 s it filled the log)
     if let Some((at, ver, e)) = last_fail().lock().unwrap_or_else(|e| e.into_inner()).clone() {
         if ver == want && at.elapsed() < std::time::Duration::from_secs(300) {
@@ -93,18 +102,28 @@ fn last_fail() -> &'static Mutex<Option<(std::time::Instant, String, String)>> {
 
 fn install_now(version: &str, want: &str, panel: Option<(&str, &str, &str)>) -> Result<(), String> {
     let zip = zip_name().ok_or("this CPU type has no Xray build")?;
+    let sum = crate::release::xray_sha256(zip).ok_or("no pinned Xray-core release for this CPU type")?;
     let direct = release_url(version, zip);
+    // 3.69: the request to the panel is signed (headers made here, right before it runs)
     let via_panel = match panel {
-        Some((url, id, token)) => format!(
-            " || curl -fsS --max-time 300 -H 'content-type: application/json' --data {} -o \"$T/x.zip\" {}",
-            q(&json!({ "id": id, "token": token, "zip": zip, "version": version }).to_string()),
-            q(&format!("{}/tunnel/xraybin", url))
-        ),
+        Some((url, id, token)) => {
+            let path = crate::xray::panel::XRAYBIN_PATH;
+            let (body, hs) = crate::tunnel::agent::signed_body(id, token, path, json!({ "zip": zip, "version": version }));
+            let hdrs: String = hs.iter().map(|(k, v)| format!(" -H {}", q(&format!("{}: {}", k, v)))).collect();
+            format!(
+                " || curl -fsS --max-time 300 -H 'content-type: application/json'{} --data-binary {} -o \"$T/x.zip\" {}",
+                hdrs,
+                q(&String::from_utf8_lossy(&body)),
+                q(&format!("{}{}", url, path))
+            )
+        }
         None => String::new(),
     };
+    // nothing of the zip is unpacked or run before its SHA-256 is the pinned one
     let script = format!(
         "set -e; mkdir -p /var/lib/kanki/tmp; T=$(mktemp -d -p /var/lib/kanki/tmp); trap 'rm -rf \"$T\"' EXIT; \
          (curl -fsSL --max-time 300 -o \"$T/x.zip\" {direct}{via_panel}); \
+         echo {sum}'  '\"$T/x.zip\" | sha256sum -c --status - || {{ echo 'the Xray-core zip is not the pinned release' >&2; exit 1; }}; \
          if command -v unzip >/dev/null 2>&1; then unzip -o -q \"$T/x.zip\" -d \"$T/x\"; \
          else python3 -c 'import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \"$T/x.zip\" \"$T/x\"; fi; \
          test -s \"$T/x/xray\"; chmod 755 \"$T/x/xray\"; \"$T/x/xray\" version >/dev/null; \
@@ -112,6 +131,7 @@ fn install_now(version: &str, want: &str, panel: Option<(&str, &str, &str)>) -> 
          install -m 755 \"$T/x/xray\" {bin}.new && mv -f {bin}.new {bin}",
         direct = q(&direct),
         via_panel = via_panel,
+        sum = sum,
         assets = ASSET_DIR,
         bin = BIN
     );

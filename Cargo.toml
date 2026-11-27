@@ -1,6 +1,6 @@
 [package]
 name = "kanki-panel"
-version = "3.68.0"
+version = "3.69.0"
 edition = "2021"
 
 [dependencies]
@@ -49,6 +49,10 @@ hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
 flate2 = "1"
 # the bot's admin mini app reaches the bot's own panel routes inside the process (miniapp::admin_panel)
 tower = { version = "0.5", features = ["util"] }
+# 3.69: backups are unpacked in Rust, every entry checked (no links, no path outside the folder)
+tar = { version = "0.4", default-features = false }
+# 3.69: minisign's prehashed signatures (BLAKE2b-512) for the signed releases
+blake2 = "0.10"
 
 [dev-dependencies]
 

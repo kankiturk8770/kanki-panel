@@ -15,7 +15,7 @@ if [ "$(id -u)" != "0" ]; then
   command -v sudo >/dev/null || die "Please run as root (this server has no sudo)"
   say "Not root: running again with sudo ..."
   keep=()
-  for v in KANKI_REPO KANKI_JOIN KANKI_PANEL KANKI_TUNNEL KANKI_DOMAIN KANKI_EMAIL KANKI_SSL KANKI_MOVE KANKI_PORTS KANKI_LOCAL_BIN; do
+  for v in KANKI_REPO KANKI_JOIN KANKI_PANEL KANKI_PANEL_PIN KANKI_TUNNEL KANKI_DOMAIN KANKI_EMAIL KANKI_SSL KANKI_MOVE KANKI_PORTS KANKI_LOCAL_BIN KANKI_UPDATE_PUBKEY; do
     if [ -n "${!v:-}" ]; then keep+=("$v=${!v}"); fi
   done
   # started as a file (the "kanki" command): run that file. Started as `bash <(curl ...)` or
@@ -38,6 +38,31 @@ ENV_DIR=/etc/kanki; ENV=$ENV_DIR/kanki.env; BIN=/usr/local/bin/kanki-panel; TLS=
 mkdir -p "$ENV_DIR"; chmod 711 "$ENV_DIR"
 
 rand(){ tr -dc 'A-Za-z0-9' </dev/urandom | head -c "${1:-24}"; }
+
+# 3.69: the third-party programs installed as root are fixed releases whose SHA-256 is written here (the same
+# values the panel program carries, src/core/release.rs); nothing is run before its hash matched, and no remote
+# install script runs at all
+HY2_VER=v2.14.0
+CADDY_VER=2.11.9
+pin_sha(){ # $1=name-arch: the SHA-256 of that release file
+  case "$1" in
+    hy2-amd64) echo fc25edff9948708cb00a4ff01f3bccde677660aca050133bb1ad46c6860362d2;;
+    hy2-arm64) echo e7c52241299fe85aba11e9d36e85d8d88ddbb5799ac0e33d272219d20e313bab;;
+    hy2-arm) echo 50a7a9ac1ab0660ebfae0651f03faa234c7d99d0701806e10a7f5060857647ab;;
+    hy2-386) echo a30c618690b4aecf521c10ea2ec199aa13cff54696d3cecd5fa4502abdb2985a;;
+    caddy-amd64) echo 5b8cb7faf8726a2028ad96a66e54e6e81e8f361bc6175e5d22bbd997cc5177fb;;
+    caddy-arm64) echo 5e377cff994fc9362a6fcf695c53f226cfca3a3ef85bd3a3687cf252d6310165;;
+    caddy-armv7) echo 8c191dd2688c30dbe19793a0a3f532ede64547c5a70a47eebf7d8ab43a4d7514;;
+    *) return 1;;
+  esac
+}
+# $1=url $2=file $3=sha256: downloaded, kept only when its hash is the pinned one
+fetch_pinned(){
+  local url="$1" out="$2" want="$3" got
+  curl -fsSL --connect-timeout 10 --max-time 300 -o "$out" "$url" 2>/dev/null || { rm -f "$out"; return 1; }
+  got=$(sha256sum "$out" | cut -d' ' -f1)
+  if [ "$got" != "$want" ]; then warn "$url: SHA-256 does not match the pinned release, not used"; rm -f "$out"; return 1; fi
+}
 rnum(){ shuf -i "$1"-"$2" -n 1; }
 pubip(){ # the public IPv4; an error page from the lookup service is never taken for an address
   local ip; ip=$(curl -fs4 --max-time 8 https://api.ipify.org 2>/dev/null | tr -d '[:space:]')
@@ -72,6 +97,17 @@ for a in "$@"; do case "$a" in --cores=*) KANKI_CORES="${a#--cores=}" ;; esac; d
 KANKI_CORES="${KANKI_CORES:-}"
 # one-command tunnel server (Tunnels > + Server): KANKI_TUNNEL=ID:TOKEN
 KANKI_TUNNEL="${KANKI_TUNNEL:-}"
+# 3.69: the panel's certificate key from the join command (ca:sha256//… or self:sha256//…): every request to the
+# panel checks it (curl --pinnedpubkey), and the agent starts with it as its pin (no trust on first use)
+KANKI_PANEL_PIN="${KANKI_PANEL_PIN:-}"
+PIN_OPTS=()
+if [ -n "$KANKI_PANEL_PIN" ]; then
+  case "${KANKI_PANEL_PIN%%:*}" in ca|self) ;; *) echo "KANKI_PANEL_PIN is malformed: copy the full command from the panel" >&2; exit 1;; esac
+  printf '%s' "${KANKI_PANEL_PIN#*:}" | grep -Eq '^sha256//[A-Za-z0-9+/]{43}=$' || { echo "KANKI_PANEL_PIN is malformed: copy the full command from the panel" >&2; exit 1; }
+  PIN_OPTS=(--pinnedpubkey "${KANKI_PANEL_PIN#*:}")
+  # a self-signed panel: no CA can vouch for it, the key alone is checked
+  if [ "${KANKI_PANEL_PIN%%:*}" = self ]; then PIN_OPTS+=(-k); fi
+fi
 envget(){ grep -m1 "^$1=" "$ENV" 2>/dev/null | cut -d= -f2-; }
 free_port(){ # $1=var $2=preferred port: keep it when free, otherwise take a random free one (no questions)
   local p="$2"
@@ -80,6 +116,18 @@ free_port(){ # $1=var $2=preferred port: keep it when free, otherwise take a ran
 need_repo(){
   [ -n "$REPO" ] || REPO="$DEFAULT_REPO"
   echo "$REPO" > $ENV_DIR/repo
+}
+
+# 3.69: the release signature (minisign) of the program is kept next to it, so the panel can hand it to the
+# agents that update from it (they check it with the key built into them). Checked here too when this machine
+# has minisign and the public key was given (KANKI_UPDATE_PUBKEY); a signature that does not match stops.
+keep_sig(){ # $1=folder with kanki-panel $2=url of its .minisig
+  local o=(); if [ -n "${PIN_SIG:-}" ]; then o=("${PIN_OPTS[@]}"); fi
+  curl -fsL "${o[@]}" --max-time 30 -o "$1/kanki-panel.minisig" "$2" 2>/dev/null || { rm -f "$1/kanki-panel.minisig"; return 0; }
+  if [ -n "${KANKI_UPDATE_PUBKEY:-}" ] && command -v minisign >/dev/null; then
+    minisign -Vq -P "$KANKI_UPDATE_PUBKEY" -m "$1/kanki-panel" -x "$1/kanki-panel.minisig" || return 1
+  fi
+  install -m 600 "$1/kanki-panel.minisig" "$ENV_DIR/kanki-panel.minisig"
 }
 
 # The program from the panel itself (a new server is given a token for it): works where GitHub is
@@ -92,9 +140,10 @@ download_from_panel(){
   q="id=$id&t=$t&arch=$(uname -m)"
   say "Downloading Kanki from the panel ($base) ..."
   local d; d=$(mktemp -d) || return 1
-  curl -fsL --retry 2 --max-time 300 -o "$d/kanki-panel" "$base/dl/kanki-panel?$q" 2>/dev/null || { rm -rf "$d"; return 1; }
-  curl -fsL --max-time 30 -o "$d/kanki-panel.sha256" "$base/dl/kanki-panel.sha256?$q" 2>/dev/null || { rm -rf "$d"; return 1; }
+  curl -fsL "${PIN_OPTS[@]}" --retry 2 --max-time 300 -o "$d/kanki-panel" "$base/dl/kanki-panel?$q" 2>/dev/null || { rm -rf "$d"; return 1; }
+  curl -fsL "${PIN_OPTS[@]}" --max-time 30 -o "$d/kanki-panel.sha256" "$base/dl/kanki-panel.sha256?$q" 2>/dev/null || { rm -rf "$d"; return 1; }
   (cd "$d" && sha256sum -c kanki-panel.sha256 >/dev/null 2>&1) || { warn "The panel's copy did not check out; trying GitHub"; rm -rf "$d"; return 1; }
+  PIN_SIG=1 keep_sig "$d" "$base/dl/kanki-panel.minisig?$q" || { warn "The panel's copy has a wrong signature; trying GitHub"; rm -rf "$d"; return 1; }
   install -m 755 "$d/kanki-panel" "$BIN"
   rm -rf "$d"
 }
@@ -130,6 +179,7 @@ download_bin(){
   curl -fsL --retry 3 --max-time 60 "$base/kanki-panel.sha256" -o "$d/kanki-panel.sha256" \
     || die "Could not download kanki-panel.sha256, aborting (the binary was not verified)"
   (cd "$d" && sha256sum -c kanki-panel.sha256 >/dev/null) || die "Checksum mismatch, aborting"
+  keep_sig "$d" "$base/kanki-panel.minisig" || die "Signature mismatch, aborting"
   install -m 755 "$d/kanki-panel" "$BIN"
   rm -rf "$d"
   install_menu
@@ -252,22 +302,21 @@ self_signed(){
   tls_perms
 }
 
-# The official installer (get.hy2.sh). It first asks api.hy2.io for the newest version and gives up
-# when only that site is blocked: then the same GitHub file is downloaded and handed to the same
-# installer (--local), so the result is identical.
+# 3.69: the pinned Hysteria2 release, its SHA-256 checked before it is installed (no get.hy2.sh: a remote script
+# run as root); the service is the one the official installer makes (hy2_unit)
 hy2_install(){
   command -v hysteria >/dev/null && return 0
-  bash <(curl -fsSL https://get.hy2.sh/ 2>/dev/null) >/dev/null 2>&1; command -v hysteria >/dev/null && return 0
-  local a f=/tmp/kanki-hysteria.bin s=/tmp/kanki-hy2-install.sh u
-  case "$(uname -m)" in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; armv7*|armv6*) a=arm;; i?86) a=386;; riscv64) a=riscv64;; s390x) a=s390x;; *) return 1;; esac
-  curl -fsSL --max-time 60 -o $s https://get.hy2.sh/ 2>/dev/null || curl -fsSL --max-time 60 -o $s https://raw.githubusercontent.com/apernet/hysteria/master/scripts/install_server.sh 2>/dev/null || s=""
-  for u in "https://github.com/apernet/hysteria/releases/latest/download/hysteria-linux-$a" "https://download.hysteria.network/app/latest/hysteria-linux-$a"; do
-    if curl -fsSL --connect-timeout 10 --max-time 180 -o $f "$u" 2>/dev/null && [ "$(head -c4 $f | tail -c3)" = "ELF" ]; then
-      if [ -n "$s" ]; then bash $s --local $f >/dev/null 2>&1; else install -Dm755 $f /usr/local/bin/hysteria && hy2_unit; fi
+  local a f want u
+  case "$(uname -m)" in x86_64|amd64) a=amd64;; aarch64|arm64) a=arm64;; armv7*|armv6*) a=arm;; i?86) a=386;; *) return 1;; esac
+  want=$(pin_sha "hy2-$a") || return 1
+  f=$(mktemp -p /var/lib/kanki 2>/dev/null || mktemp) || return 1
+  for u in "https://github.com/apernet/hysteria/releases/download/app%2F$HY2_VER/hysteria-linux-$a" "https://download.hysteria.network/app/$HY2_VER/hysteria-linux-$a"; do
+    if fetch_pinned "$u" "$f" "$want"; then
+      install -Dm755 "$f" /usr/local/bin/hysteria && hy2_unit
+      rm -f "$f"; command -v hysteria >/dev/null && return 0
     fi
-    rm -f $f; command -v hysteria >/dev/null && { rm -f $s; return 0; }
   done
-  rm -f $s; return 1
+  rm -f "$f"; return 1
 }
 # The service the official installer makes (user "hysteria", the same unit), for when only the
 # program itself could be downloaded
@@ -343,14 +392,17 @@ install_caddy(){
     apt-get update -qq; apt-get install -y -qq caddy >/dev/null 2>&1 || true
   fi
   if ! command -v caddy >/dev/null; then
-    local ca cf
-    case "$(uname -m)" in x86_64|amd64) ca=amd64;; aarch64|arm64) ca=arm64;; *) die "Caddy could not be installed (no package and no download for $(uname -m))";; esac
-    cf=$(mktemp) || die "mktemp failed"
-    # the downloaded program must really run here before it takes the place of /usr/bin/caddy
-    if curl -fsSL --max-time 300 "https://caddyserver.com/api/download?os=linux&arch=$ca" -o "$cf" && chmod 755 "$cf" && "$cf" version >/dev/null 2>&1; then
-      mv -f "$cf" /usr/bin/caddy
+    local ca cd want
+    case "$(uname -m)" in x86_64|amd64) ca=amd64;; aarch64|arm64) ca=arm64;; armv7*) ca=armv7;; *) die "Caddy could not be installed (no package and no download for $(uname -m))";; esac
+    want=$(pin_sha "caddy-$ca") || die "Caddy could not be installed (no pinned release for $ca)"
+    cd=$(mktemp -d) || die "mktemp failed"
+    # 3.69: the pinned release from GitHub, its SHA-256 checked before anything of it runs (the build server's
+    # download was made on request and could not be checked)
+    if fetch_pinned "https://github.com/caddyserver/caddy/releases/download/v$CADDY_VER/caddy_${CADDY_VER}_linux_$ca.tar.gz" "$cd/c.tgz" "$want" \
+       && tar -xzf "$cd/c.tgz" -C "$cd" caddy && [ -f "$cd/caddy" ] && [ ! -L "$cd/caddy" ] && chmod 755 "$cd/caddy" && "$cd/caddy" version >/dev/null 2>&1; then
+      mv -f "$cd/caddy" /usr/bin/caddy; rm -rf "$cd"
     else
-      rm -f "$cf"; die "Caddy could not be downloaded"
+      rm -rf "$cd"; die "Caddy could not be downloaded"
     fi
     id caddy >/dev/null 2>&1 || useradd --system --home /var/lib/caddy --create-home --shell /usr/sbin/nologin caddy
     mkdir -p /etc/caddy
@@ -615,7 +667,7 @@ register_node(){ # tells the panel about this node; needs DOMAIN NODE_PUBLIC_POR
   body="{\"token\":\"$KANKI_JOIN\",\"name\":\"$name\",\"address\":\"https://$host:$NODE_PUBLIC_PORT\",\"endpoint\":\"$host\",\"node_token\":\"$NODE_TOKEN\",\"insecure\":$ins}"
   say "Telling the panel about this node ..."
   # the tokens go only over a checked certificate (or the plain http:// address the panel gave)
-  res=$(curl -sS -m 90 -X POST -H 'Content-Type: application/json' -d "$body" "$KANKI_PANEL/join/register" 2>&1) || {
+  res=$(curl -sS "${PIN_OPTS[@]}" -m 90 -X POST -H 'Content-Type: application/json' -d "$body" "$KANKI_PANEL/join/register" 2>&1) || {
     # only to say why: the panel answers when its certificate is not checked (nothing is sent)
     if curl -sk -m 15 -o /dev/null "$KANKI_PANEL/" 2>/dev/null; then
       res="the panel's certificate cannot be checked from this server, so the tokens were not sent ($res)"
@@ -659,15 +711,21 @@ install_tunnel_agent(){
   command -v curl >/dev/null || { apt-get update -qq; apt-get install -y -qq curl ca-certificates >/dev/null; }
   download_bin
   # any HTTP answer means the panel is reachable; only a TLS problem needs the insecure flag
-  code=$(curl -s -m 15 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$KANKI_PANEL/tunnel/agent" 2>/dev/null || true)
-  if [ -z "$code" ] || [ "$code" = "000" ]; then
+  code=$(curl -s "${PIN_OPTS[@]}" -m 15 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$KANKI_PANEL/tunnel/agent" 2>/dev/null || true)
+  # 3.69: with the panel's pin from the command the agent checks exactly that key (a self-signed panel included)
+  if [ -n "$KANKI_PANEL_PIN" ]; then
+    [ "${KANKI_PANEL_PIN%%:*}" = self ] && ins=1
+    if [ -z "$code" ] || [ "$code" = "000" ]; then warn "This server cannot reach $KANKI_PANEL with the pinned certificate right now. The agent keeps trying by itself."; fi
+  elif [ -z "$code" ] || [ "$code" = "000" ]; then
     code=$(curl -sk -m 15 -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$KANKI_PANEL/tunnel/agent" 2>/dev/null || true)
     if [ -n "$code" ] && [ "$code" != "000" ]; then ins=1; warn "The panel's certificate is not trusted from here; continuing without checking it."
     else warn "This server cannot reach $KANKI_PANEL right now. The agent keeps trying by itself."; fi
   fi
   mkdir -p "$ENV_DIR" /var/lib/kanki
   umask 077
-  printf 'PANEL_URL=%s\nAGENT_ID=%s\nAGENT_TOKEN=%s\nINSECURE=%s\n' "$KANKI_PANEL" "$id" "$tok" "$ins" > "$ENV_DIR/tunnel.env"
+  printf 'PANEL_URL=%s\nAGENT_ID=%s\nAGENT_TOKEN=%s\nINSECURE=%s\nPANEL_PIN=%s\n' "$KANKI_PANEL" "$id" "$tok" "$ins" "$KANKI_PANEL_PIN" > "$ENV_DIR/tunnel.env"
+  # the pin of the command replaces one an earlier install took on first contact
+  if [ -n "$KANKI_PANEL_PIN" ]; then rm -f "$ENV_DIR/panel.pin"; fi
   umask 022
   # long-distance TCP links keep their speed better with BBR
   if modprobe tcp_bbr 2>/dev/null || grep -qw bbr /proc/sys/net/ipv4/tcp_available_congestion_control 2>/dev/null; then
@@ -915,9 +973,9 @@ move_panel(){
       || curl -fsSk --retry 2 --max-time 900 --resolve "$D:$P:$OLD" -o "$W/b.kbk" "$OLDURL" \
       || die "Could not download the backup from $OLD:$P. Is the command older than 30 minutes (make a new one)?"
   fi
-  KANKI_BK_PASS="$PASS" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "$W/b.kbk" -out "$W/b.tgz" -pass env:KANKI_BK_PASS \
+  # 3.69: opened and unpacked by the panel program (authenticated, no link or path out of the folder)
+  KANKI_BK_PASS="$PASS" "$BIN" backup-unpack "$W/b.kbk" "$W/x" >/dev/null \
     || die "The backup could not be opened (wrong or damaged): make a new command in the old panel"
-  mkdir -p "$W/x"; tar -xzf "$W/b.tgz" -C "$W/x" || die "The backup is damaged"
   [ -f "$W/x/kanki.db" ] && [ -f "$W/x/files$ENV" ] || die "The backup has no database or settings"
   ok "Backup downloaded ($(du -h "$W/b.kbk" | cut -f1))"
   restore_bundle "$W" "$OLD"
@@ -945,15 +1003,14 @@ restore_file(){
   ask F "Path of the backup file on this server" "$(find /root -maxdepth 1 -type f \( -name '*.kbk' -o -name '*.tar.gz' \) -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)"
   [ -f "$F" ] || die "No file at $F: upload the backup to /root first (SFTP), then run this again"
   need_repo; base_packages; download_bin
-  rm -rf "$W"; mkdir -p "$W/x"; chmod 700 "$W"
-  if [ "$(head -c 8 "$F")" = "Salted__" ]; then
-    read -rsp "Backup passphrase: " PASS; echo
-    KANKI_BK_PASS="$PASS" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in "$F" -out "$W/b.tgz" -pass env:KANKI_BK_PASS 2>/dev/null \
-      || { rm -rf "$W"; die "Wrong passphrase or damaged file"; }
-  else
-    cp "$F" "$W/b.tgz"
-  fi
-  tar -xzf "$W/b.tgz" -C "$W/x" 2>/dev/null || { rm -rf "$W"; die "The backup is damaged"; }
+  rm -rf "$W"; mkdir -p "$W"; chmod 700 "$W"
+  PASS=""
+  case "$(head -c 8 "$F")" in
+    Salted__|KANKIBK2) read -rsp "Backup passphrase: " PASS; echo;;
+  esac
+  # 3.69: opened and unpacked by the panel program (authenticated, no link or path out of the folder)
+  KANKI_BK_PASS="$PASS" "$BIN" backup-unpack "$F" "$W/x" >/dev/null \
+    || { rm -rf "$W"; die "Wrong passphrase or damaged file"; }
   [ -f "$W/x/kanki.db" ] && [ -f "$W/x/files$ENV" ] || { rm -rf "$W"; die "The backup has no database or settings"; }
   # made on another server: its IP is replaced in the panel's addresses (see meta.json of the backup)
   local OLDIP ME0; OLDIP=$(grep -o '"ip":"[0-9.]*"' "$W/x/meta.json" 2>/dev/null | cut -d'"' -f4); ME0=$(pubip)

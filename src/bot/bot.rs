@@ -4795,7 +4795,7 @@ impl Bot {
             }
             // بکاپ روزانه برای ادمین‌ها
             if tick.is_multiple_of(24 * 60) && self.db().on("backup_on") && !crate::monitor::on() {
-                let pass = self.db().get("tgb_pass");
+                let pass = crate::backup::backup_pass(&self.app);
                 if let Ok((bytes, name)) = tokio::task::block_in_place(|| make_archive(&self.app, &pass)) {
                     for a in self.admins.clone() {
                         self.send_doc(a, bytes.clone(), &name, "💾 بکاپ خودکار روزانه").await;

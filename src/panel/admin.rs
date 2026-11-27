@@ -599,7 +599,7 @@ pub fn known_secrets(app: &App) -> Vec<String> {
 /// The settings that hold secrets (masked in logs and answers, sealed at rest)
 pub const SECRET_SETTINGS: &[&str] = &[
     "totp_secret", "totp_pending", "sub_link_key", "kmix_secret", "bot_token", "mon_token", "tgb_token", "tgb_pass", "ai_key", "np_key",
-    "zp_merchant", "toncenter_key", "card_number", "giveaway_secret", "join_token", "api_key",
+    "zp_merchant", "toncenter_key", "card_number", "giveaway_secret", "join_token", "api_key", "cred_key",
 ];
 
 fn redact_lines(app: &App, lines: &mut [Value]) {
@@ -813,16 +813,16 @@ async fn update_check(State(app): St, h: HeaderMap) -> Response {
     }
 }
 
-/// Download, verify sha256, swap binary, restart
+/// Download, verify the minisign signature (3.69: with the key built into this program, before the file is ever
+/// started), verify sha256, swap binary, restart
 pub async fn self_update(app: &App) -> Result<String, String> {
+    // a build without the release key updates nothing by itself (an unsigned file would run as root)
+    if !crate::release::signing_active() {
+        return Err("this build has no update signing key: signed updates are off, update by hand (install.sh)".into());
+    }
     let r = repo();
     if r.is_empty() {
         return Err("GitHub repo is not configured".into());
-    }
-    // never back to an older program (an old release has the bugs fixed since)
-    let latest = latest_version(app).await.unwrap_or_default();
-    if !latest.is_empty() && newer(crate::VERSION, &latest) {
-        return Err(format!("the release ({}) is older than this program ({}): not installed", latest, crate::VERSION));
     }
     let base = format!("https://github.com/{}/releases/download/latest", r);
     let bin = app.http.get(format!("{}/kanki-panel", base)).timeout(std::time::Duration::from_secs(300)).send().await
@@ -831,25 +831,33 @@ pub async fn self_update(app: &App) -> Result<String, String> {
         return Err(format!("download failed ({})", bin.status()));
     }
     let bytes = bin.bytes().await.map_err(|e| e.to_string())?;
+    let sig = app.http.get(format!("{}/kanki-panel.minisig", base)).send().await.map_err(|e| e.to_string())?;
+    if !sig.status().is_success() {
+        return Err(format!("the release has no signature ({}): update aborted", sig.status()));
+    }
+    let sig = sig.text().await.map_err(|e| e.to_string())?;
+    let v = crate::release::verify_update(&bytes, &sig).map_err(|e| format!("signature check failed, update aborted: {}", e))?;
+    // never back to an older program: the version is the signed one (a replayed old release is refused)
+    let signed_ver = v.version().ok_or("the signature names no version: update aborted")?;
+    if newer(crate::VERSION, &signed_ver) {
+        return Err(format!("the release ({}) is older than this program ({}): not installed", signed_ver, crate::VERSION));
+    }
     let sum = app.http.get(format!("{}/kanki-panel.sha256", base)).send().await.map_err(|e| e.to_string())?
         .text().await.map_err(|e| e.to_string())?;
     let want = sum.split_whitespace().next().unwrap_or("").to_lowercase();
-    let got = {
-        use sha2::{Digest, Sha256};
-        let mut hs = Sha256::new();
-        hs.update(&bytes);
-        hex::encode(hs.finalize())
-    };
-    if want.is_empty() || want != got {
+    if want.is_empty() || !crate::release::matches(&bytes, &want) {
         return Err("checksum mismatch, update aborted".into());
     }
     let path = crate::util::exe_path().map_err(|e| e.to_string())?;
-    // writing the file and test-running it (up to 20 s) must not hold an async worker
+    // writing the file and test-running it (up to 20 s) must not hold an async worker; only a signed file gets here
     tokio::task::spawn_blocking(move || crate::util::swap_program(&path, &bytes)).await.map_err(|e| e.to_string())??;
+    // the agents that update from this panel check the same signature
+    if let Err(e) = crate::release::save_own_signature(&sig) {
+        eprintln!("update: {}", e);
+    }
     crate::util::restart_siblings();
-    let v = latest_version(app).await.unwrap_or_default();
     restart_self();
-    Ok(v)
+    Ok(signed_ver)
 }
 
 async fn update_apply(State(app): St, h: HeaderMap) -> Response {

@@ -1,5 +1,103 @@
 # STATE
 
+## 3.69.0 — Phase 2: supply chain, mutual fleet signing, Iran relay, KANKI MIX hops, authenticated backups (done; branch `ccr-94a1e97e-wsl617`)
+Nothing a user has changes: existing subscription codes, WireGuard/AWG/KANKI MIX/Hysteria2/Xray credentials and links
+stay byte for byte (only accounts made or renewed from now on get the new code length and keyed credentials).
+
+Phase 1 re-check (fixed here)
+- `/api/restore` (128 MiB): a login session is checked in the middleware before the body (an API token was buffered,
+  then refused). `/api/apps` (200 MiB) was already pre-auth. Test: `auth::tests::strangers_cannot_fill_the_audit`.
+- Leaks found and closed: `GET /api/tgbackup` returned the backup passphrase in plaintext; `GET /api/xray/config/:id`
+  and `/api/xray/inbounds/:id/json` returned REALITY `privateKey` (now `xray::panel::mask_private`). Bot/report/AI/
+  payment tokens were already masked. Panel JS already used the HttpOnly cookie + `X-Kanki-Admin` and step-up.
+
+Supply chain (`src/core/release.rs`)
+- Pinned SHA-256: Hysteria2 `app/v2.14.0` (amd64/arm64/arm/386, from its hashes.txt), Xray-core `v26.11.9` (3 zips,
+  from the `.dgst` files), Caddy `2.11.9` (amd64/arm64/armv7 tarballs; release publishes SHA-512, SHA-256 computed from
+  the same files). install.sh carries the same values (a test compares them).
+- Hysteria2 (agent `hy2t::ensure_bin`, panel `/tunnel/hy2bin`, install.sh `hy2_install`): pinned release only, hash
+  checked before the file is started or moved in place; `get.hy2.sh` (remote root script) removed everywhere. An already
+  installed hysteria keeps running.
+- Xray (`xray::install`): pinned release only, `sha256sum -c` before unzip/exec; `/tunnel/xraybin` hands out only the
+  pinned zip. An installed Xray (`latest` or the admin's version) is kept, no restart; a new install of another version
+  is refused with a message.
+- Caddy fallback (no distro package): pinned GitHub tarball, hash checked, then run (no caddyserver.com build).
+- `/tunnel/hy2bin/put` (agent uploads): 410; the `check` call always answers `have: true`, so agents of before never upload.
+- Self-update (`admin::self_update`, node `/agent/update`, agent `update_from_panel`): minisign signature (Ed25519,
+  plain or BLAKE2b-prehashed) verified with the key compiled in from `KANKI_UPDATE_PUBKEY` BEFORE `swap_program` runs
+  `<file> version`; the version comes from the signed trusted comment (`kanki-panel <ver>`), downgrades refused. The
+  signature is kept in `/etc/kanki/kanki-panel.minisig`, served to agents (`x-minisig` on `/tunnel/binary`,
+  `/dl/kanki-panel.minisig`). A build without the key updates nothing by itself and auto-update stays off
+  (`GET /api/auto-update` → `signed: false`, PUT on → 409).
+- Release workflow: builds with `vars.KANKI_UPDATE_PUBKEY`, signs with `secrets.MINISIGN_SECRET_KEY` (a key made with
+  `minisign -G -W`), verifies, publishes `kanki-panel.minisig`; without both set the publish job fails (no unsigned release).
+
+Signing between panel, nodes and agents (`src/core/sign.rs`)
+- Replies are signed: `x-kanki-rts`, `x-kanki-rsig` = HMAC-SHA256(token, "kanki-reply-v1\n rts\n request nonce\n status\n
+  sha256(body)"). Nodes sign every `/agent/*` answer (`api::node_signed`); the panel signs its answers to agent reports,
+  the «gone» of a removed server (its old token kept 60 days, sealed: `tun_removed_tok`), and `/tunnel/{binary,hy2bin,xraybin}`.
+- Requests to `/tunnel/{binary,hy2bin,xraybin}` are signed by 3.69 agents; the body token is taken only until that server
+  signed one (`TServer.signed_dl`).
+- Ratchets persisted: agent `/var/lib/kanki/agent-sig.json` (`signed_ok`: the bare token never goes with a report again;
+  `panel_signs`: unsigned/bad answers refused, the token never goes in a body again). Panel `node_sig` setting (sealed)
+  per node id and address: `signed` (no `X-Node-Token` fallback ever again, also across panel restarts), `replies`
+  (unsigned answers refused). A re-join (`forget_node_pins`) resets a node's entry.
+- Replay floor: a signed request made before the program started (or before the newest time taken before a restart,
+  kept in `<data>/sig-floor-{panel,node}`) is refused, so the in-memory nonce cache no longer reopens a 300 s window.
+- Rollout: panel first, then «Update all». Nodes/agents of 3.65–3.68 keep syncing (unsigned answers accepted until
+  the peer once signed).
+
+Join and pins (`src/core/pin.rs`)
+- Pins are SPKI (`sha256//<base64>`, curl's `--pinnedpubkey` form) with a mode: `ca` follows CA-valid renewals, `self`
+  takes only the pinned key (a CA-valid cert with another key no longer replaces a self-signed pin). Old pin files
+  (cert fingerprint) are read and upgraded on their first match.
+- Join tokens: panel-wide and per-server commands 15 min, single use; the agent-driven VPN install (never leaves the
+  signed channel) 45 min. Commands carry `KANKI_PANEL_PIN='ca|self:sha256//…'` (the panel probes its own public
+  address, `servers::panel_pin`, cached 10 min): install.sh uses `curl --pinnedpubkey` for every panel call, the agent
+  starts with that pin (`PANEL_PIN` in tunnel.env), no TOFU.
+
+Iran subscription relay (`subiran`)
+- Option chosen: HMAC-authenticated relay. The relay adds `X-Kanki-Relay: v1;ts;nonce;HMAC(relay_key, ts, nonce,
+  client, method, target)` (`relay_key` = HMAC of the hidden tunnel's token, sent in `SubCfg`); the panel middleware
+  takes that client address for the limits only when it checks out (120 s, nonce once, floor); otherwise the header is
+  dropped and the request is taken as before. Clients cannot send the header through the relay (stripped).
+
+KANKI MIX hops through Iran tunnels
+- `tunnel::panel::kmix_hop_map`: a Kanki (engine) tunnel that carries a server's main KANKI MIX port also forwards the
+  server's hop range (as it reports `kmix_hop`) from the same port numbers on the entry to the main port, added at each
+  sync in `specs_for`; not when any of those entry ports is used by another tunnel there, and not for other kinds.
+- Links through an Iran entry carry `ports=` only when that entry forwards them (`kmix_hops_at`), else none.
+
+Backups (`src/panel/bkcrypt.rs`)
+- New format `KANKIBK2`: AES-256-GCM, PBKDF2-HMAC-SHA256 600k, header as AAD. Old openssl AES-CBC (`Salted__`) and plain
+  .tar.gz are still restored. A backup is never made without a passphrase.
+- Passphrase lives in `/etc/kanki/backup.pass` (0600, `BACKUP_PASS_FILE` overrides); the old `tgb_pass` setting moves
+  there once (same value, old backups open) and leaves the DB. Min 12 chars for a new one (step-up), never in a GET;
+  `POST /api/tgbackup/reveal` with the password shows it. Bot/report-bot backups no longer used the raw setting.
+- `GET /api/backup` (plain DB) → 410. Restores unpack in Rust (`bkcrypt::unpack`): no absolute path, no `..`, no
+  link/hardlink/device, nothing written through a link, entry and size caps; certbot's tree keeps only relative links.
+  install.sh uses `kanki-panel backup-unpack` (any format) instead of openssl + tar. The plain archive is wiped after sealing.
+
+Accounts (`src/core/creds.rs`)
+- New and regenerated codes: 39 digits (> 128 bits); bare-code lookup takes 10–39 digits. `users.cred = 1` accounts get
+  Xray UUID/password/SS-2022 key and Hysteria2 password as HMAC-SHA256 under `cred_key` (sealed setting, travels in
+  backups); `cred = 0` (every existing row) keeps the old derivation exactly.
+
+Tests added
+- `bkcrypt::tests` (GCM tamper/iteration cap, pass rules, Zip-Slip/symlink/hardlink/device/duplicate), `backup::pass_tests`
+  (pass out of DB and GETs, reveal step-up, 12 chars, GET /api/backup 410), `release::tests` (real Ed25519 minisign
+  sigs both modes, forged comment, wrong key/id, pins vs install.sh), `sign::tests` (floor, reply binding),
+  `sign_tests::{the_panel_signs_its_answers_to_the_agents, agent_downloads_are_signed_and_cannot_go_back_to_the_body_token
+  (incl. concurrent replays), node_answers_are_signed_and_the_ratchet_holds}`, `pin::tests` (SPKI, self vs CA mode,
+  preset, legacy upgrade, probe), `subiran::tests::the_relay_signs_its_clients_address`, `creds::tests`,
+  `access_tests::kmix_hop_ports_follow_the_iran_tunnel_or_stay_out_of_its_link`, `auto_update_tests` (off without key).
+
+Needs the owner
+- Make a minisign key (`minisign -G -W`), put the secret key in the repo secret `MINISIGN_SECRET_KEY` and the public
+  key line in the repo variable `KANKI_UPDATE_PUBKEY`. Until then releases do not publish and servers update by hand.
+- New pins must be added to `release.rs` and install.sh together when Hysteria2/Xray/Caddy are bumped.
+- Not done: L4 SNI passthrough for the relay (HMAC chosen); `age` public-key backups (AES-GCM chosen).
+
 ## 3.68.0 — Phase 1 security hardening (done; branch `ccr-94a1e97e-wsl617`)
 Nothing a user has changes: same subscription codes, same WireGuard/AWG/KANKI MIX/Hysteria2/Xray keys and links.
 

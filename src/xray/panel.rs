@@ -337,7 +337,8 @@ pub fn user_uuid(code: &str) -> String {
     format!("{}-{}-{}-{}-{}", &s[..8], &s[8..12], &s[12..16], &s[16..20], &s[20..32])
 }
 
-fn user_pass(code: &str) -> String {
+/// The Trojan / Shadowsocks password of an account from before 3.69 (`creds::xray_pass` picks)
+pub(crate) fn user_pass(code: &str) -> String {
     sha256_hex(&format!("kanki-pass|{}", code))[..24].to_string()
 }
 
@@ -357,9 +358,14 @@ fn b64_url(b: &[u8]) -> String {
     crate::util::b64(b).replace('+', "-").replace('/', "_").trim_end_matches('=').to_string()
 }
 
-fn ss_user_key(code: &str, method: &str) -> String {
-    let h = hex::decode(sha256_hex(&format!("kanki-ss|{}", code))).unwrap_or_default();
-    b64_std(&h[..ss_key_len(method)])
+/// The Shadowsocks 2022 key bytes of an account from before 3.69 (`creds::ss_bytes` picks)
+pub(crate) fn ss_legacy_bytes(code: &str) -> Vec<u8> {
+    hex::decode(sha256_hex(&format!("kanki-ss|{}", code))).unwrap_or_default()
+}
+
+fn ss_user_key(u: &User, method: &str) -> String {
+    let h = crate::creds::ss_bytes(u);
+    b64_std(&h[..ss_key_len(method).min(h.len())])
 }
 
 /// A REALITY key pair: (private, public), base64url without padding like `xray x25519`.
@@ -390,19 +396,19 @@ fn clients(ib: &Inbound, users: &[User]) -> Vec<Value> {
             let email = format!("u{}", u.id);
             match ib.protocol.as_str() {
                 "vless" => {
-                    let mut c = json!({ "id": user_uuid(&u.code), "email": email });
+                    let mut c = json!({ "id": crate::creds::xray_uuid(u), "email": email });
                     if !ib.flow.is_empty() && ib.network == "tcp" && ib.security != "none" {
                         c["flow"] = json!(ib.flow);
                     }
                     c
                 }
-                "vmess" => json!({ "id": user_uuid(&u.code), "email": email }),
-                "trojan" => json!({ "password": user_pass(&u.code), "email": email }),
+                "vmess" => json!({ "id": crate::creds::xray_uuid(u), "email": email }),
+                "trojan" => json!({ "password": crate::creds::xray_pass(u), "email": email }),
                 _ => {
                     if is_2022(&ib.ss_method) {
-                        json!({ "password": ss_user_key(&u.code, &ib.ss_method), "email": email })
+                        json!({ "password": ss_user_key(u, &ib.ss_method), "email": email })
                     } else {
-                        json!({ "method": ib.ss_method, "password": user_pass(&u.code), "email": email })
+                        json!({ "method": ib.ss_method, "password": crate::creds::xray_pass(u), "email": email })
                     }
                 }
             }
@@ -1061,7 +1067,7 @@ fn link_with(_s: &XraySettings, ib: &Inbound, u: &User, server_addr: &str) -> Op
     let net = if ib.network.is_empty() { "tcp" } else { ib.network.as_str() };
     if ib.protocol == "vmess" {
         let mut v = json!({
-            "v": "2", "ps": name, "add": host, "port": port.to_string(), "id": user_uuid(&u.code), "aid": "0", "scy": "auto",
+            "v": "2", "ps": name, "add": host, "port": port.to_string(), "id": crate::creds::xray_uuid(u), "aid": "0", "scy": "auto",
             "net": net, "type": if ib.header == "http" { "http" } else { "none" }, "host": ib.host, "path": if net == "grpc" { ib.service.clone() } else { path.clone() },
             "tls": if sec == "tls" { "tls" } else { "" }, "sni": sni, "fp": if sec == "tls" { fp.as_str() } else { "" },
         });
@@ -1071,7 +1077,7 @@ fn link_with(_s: &XraySettings, ib: &Inbound, u: &User, server_addr: &str) -> Op
         return Some(format!("vmess://{}", b64_std(v.to_string().as_bytes())));
     }
     if ib.protocol == "shadowsocks" {
-        let pass = if is_2022(&ib.ss_method) { format!("{}:{}", ib.ss_key, ss_user_key(&u.code, &ib.ss_method)) } else { user_pass(&u.code) };
+        let pass = if is_2022(&ib.ss_method) { format!("{}:{}", ib.ss_key, ss_user_key(u, &ib.ss_method)) } else { crate::creds::xray_pass(u) };
         let ui = b64_url(format!("{}:{}", ib.ss_method, pass).as_bytes());
         return Some(format!("ss://{}@{}#{}", ui, host_port(&host, port), pct(&name)));
     }
@@ -1124,13 +1130,13 @@ fn link_with(_s: &XraySettings, ib: &Inbound, u: &User, server_addr: &str) -> Op
         q.push(format!("spx={}", pct(if ib.spx.is_empty() { "/" } else { ib.spx.as_str() })));
     }
     let cred = if ib.protocol == "trojan" {
-        user_pass(&u.code)
+        crate::creds::xray_pass(u)
     } else {
         if !ib.flow.is_empty() && net == "tcp" && ib.security != "none" {
             q.push(format!("flow={}", ib.flow));
         }
         q.push("encryption=none".into());
-        user_uuid(&u.code)
+        crate::creds::xray_uuid(u)
     };
     Some(format!("{}://{}@{}?{}#{}", ib.protocol, cred, host_port(&host, port), q.join("&"), pct(&name)))
 }
@@ -2115,7 +2121,29 @@ async fn inbound_preview(State(app): St, h: HeaderMap, Path(id): Path<String>) -
     let _ = guard!(app, h, "nodes");
     let s = settings(&app);
     let Some(ib) = s.inbounds.iter().find(|x| x.id == id) else { return err(StatusCode::NOT_FOUND, "no such inbound") };
-    Json(inbound_json(ib, &xray_users(&app))).into_response()
+    let mut v = inbound_json(ib, &xray_users(&app));
+    mask_private(&mut v);
+    Json(v).into_response()
+}
+
+/// 3.69: a preview never carries a private key (REALITY `privateKey`, an inline TLS `key`, a WireGuard
+/// `secretKey`): the server gets them through its signed sync, the admin's browser does not need them
+pub(crate) fn mask_private(v: &mut Value) {
+    match v {
+        Value::Object(m) => {
+            for (k, x) in m.iter_mut() {
+                let filled = x.as_str().is_some_and(|s| !s.is_empty()) || x.as_array().is_some_and(|a| !a.is_empty());
+                let secret = matches!(k.as_str(), "privateKey" | "secretKey" | "key") && filled;
+                if secret {
+                    *x = json!("••••");
+                } else {
+                    mask_private(x);
+                }
+            }
+        }
+        Value::Array(a) => a.iter_mut().for_each(mask_private),
+        _ => {}
+    }
 }
 
 /// The share link and the full client config of one inbound for one user (the admin's preview: the
@@ -2161,46 +2189,65 @@ async fn preview(State(app): St, h: HeaderMap, Path(id): Path<String>) -> Respon
     let _ = guard!(app, h, "nodes");
     // what the server really gets (no stopped inbounds, certificates filled in)
     let s = runnable(&app);
-    Json(build_config(&s, &id, &xray_users(&app))).into_response()
+    let mut v = build_config(&s, &id, &xray_users(&app));
+    mask_private(&mut v);
+    Json(v).into_response()
 }
 
-/// An agent that cannot reach GitHub gets the Xray-core release zip through the panel.
-async fn agent_xraybin(State(app): St, Json(b): Json<Value>) -> Response {
-    if !crate::tunnel::panel::agent_token_ok(&app, b["id"].as_str().unwrap_or(""), b["token"].as_str().unwrap_or("")) {
-        return err(StatusCode::FORBIDDEN, "wrong token");
-    }
+pub const XRAYBIN_PATH: &str = "/tunnel/xraybin";
+
+/// An agent that cannot reach GitHub gets the Xray-core release zip through the panel. 3.69: a signed request (or
+/// the body token until that server signed one), and only the pinned release (`release::XRAY_VERSION`), checked
+/// against its SHA-256 before it is kept or handed out.
+async fn agent_xraybin(State(app): St, h: HeaderMap, raw: axum::body::Bytes) -> Response {
+    let Ok(b) = serde_json::from_slice::<Value>(&raw) else { return err(StatusCode::BAD_REQUEST, "send JSON") };
+    let s = match crate::tunnel::panel::agent_dl_auth(&app, &h, XRAYBIN_PATH, &raw, &b) {
+        Ok(s) => s,
+        Err(r) => return r,
+    };
     let zip = b["zip"].as_str().unwrap_or("");
-    if !["Xray-linux-64.zip", "Xray-linux-arm64-v8a.zip", "Xray-linux-arm32-v7a.zip"].contains(&zip) {
-        return err(StatusCode::BAD_REQUEST, "unknown file");
-    }
+    let Some(want) = crate::release::xray_sha256(zip) else { return err(StatusCode::BAD_REQUEST, "unknown file") };
     let version = b["version"].as_str().unwrap_or("");
-    if !version.is_empty() && !(version.starts_with('v') && version[1..].chars().all(|c| c.is_ascii_digit() || c == '.')) {
-        return err(StatusCode::BAD_REQUEST, "bad version");
+    if !version.is_empty() && version != crate::release::XRAY_VERSION {
+        return err(StatusCode::CONFLICT, &format!("only the pinned Xray-core {} is handed out", crate::release::XRAY_VERSION));
     }
-    let cache = format!("/var/lib/kanki/xraybin/{}-{}", if version.is_empty() { "latest" } else { version }, zip);
-    let fresh = std::fs::metadata(&cache).and_then(|m| m.modified()).map(|t| t.elapsed().map(|e| e.as_secs() < 86400).unwrap_or(false)).unwrap_or(false);
-    if !fresh {
-        static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-        let _g = LOCK.lock().await;
-        let http = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(300)).build() {
-            Ok(h) => h,
-            Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
-        };
-        match http.get(super::release_url(version, zip)).send().await {
-            Ok(r) if r.status().is_success() => match r.bytes().await {
-                Ok(bytes) if bytes.starts_with(b"PK") => {
-                    let _ = tokio::fs::create_dir_all("/var/lib/kanki/xraybin").await;
-                    let _ = tokio::fs::write(&cache, &bytes).await;
-                }
-                _ => return err(StatusCode::BAD_GATEWAY, "the panel could not download Xray-core"),
-            },
-            _ => return err(StatusCode::BAD_GATEWAY, "the panel could not download Xray-core"),
+    let cache = format!("/var/lib/kanki/xraybin/{}-{}", crate::release::XRAY_VERSION, zip);
+    let cached = || async {
+        match tokio::fs::read(&cache).await {
+            Ok(b) if crate::release::matches(&b, want) => Some(b),
+            _ => None,
         }
-    }
-    match tokio::fs::read(&cache).await {
-        Ok(bytes) => (StatusCode::OK, bytes).into_response(),
-        Err(_) => err(StatusCode::NOT_FOUND, "no Xray-core"),
-    }
+    };
+    let bytes = match cached().await {
+        Some(b) => b,
+        None => {
+            static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+            let _g = LOCK.lock().await;
+            match cached().await {
+                Some(b) => b,
+                None => {
+                    let http = match reqwest::Client::builder().timeout(std::time::Duration::from_secs(300)).build() {
+                        Ok(h) => h,
+                        Err(e) => return err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()),
+                    };
+                    let got = match http.get(super::release_url(crate::release::XRAY_VERSION, zip)).send().await {
+                        Ok(r) if r.status().is_success() => r.bytes().await.ok(),
+                        _ => None,
+                    };
+                    let Some(got) = got.filter(|b| crate::release::matches(b, want)) else {
+                        return err(StatusCode::BAD_GATEWAY, "the panel could not download the pinned Xray-core release");
+                    };
+                    if let Err(e) = tokio::fs::create_dir_all("/var/lib/kanki/xraybin").await {
+                        eprintln!("xray: /var/lib/kanki/xraybin: {}", e);
+                    } else if let Err(e) = tokio::fs::write(&cache, &got).await {
+                        eprintln!("xray: {}: {}", cache, e);
+                    }
+                    got.to_vec()
+                }
+            }
+        }
+    };
+    crate::tunnel::panel::signed_answer(&s.token, &h, StatusCode::OK, &[("x-sha256", want.to_string())], bytes)
 }
 
 #[cfg(test)]
@@ -2256,7 +2303,7 @@ mod tests {
         assert_eq!(o["protocol"], "vless");
         assert_eq!(o["settings"]["vnext"][0]["address"], "1.2.3.4");
         assert_eq!(o["settings"]["vnext"][0]["port"], 443);
-        assert_eq!(o["settings"]["vnext"][0]["users"][0]["id"], user_uuid(&u.code));
+        assert_eq!(o["settings"]["vnext"][0]["users"][0]["id"], crate::creds::xray_uuid(&u));
         assert_eq!(o["settings"]["vnext"][0]["users"][0]["flow"], "xtls-rprx-vision");
         assert_eq!(o["streamSettings"]["realitySettings"]["publicKey"], q);
         assert_eq!(o["streamSettings"]["realitySettings"]["shortId"], "abcd");
@@ -2456,8 +2503,8 @@ mod tests {
 
     #[test]
     fn ss2022_keys_have_the_right_size() {
-        assert_eq!(crate::tunnel::link::b64decode(&ss_user_key("x", "2022-blake3-aes-128-gcm")).unwrap().len(), 16);
-        assert_eq!(crate::tunnel::link::b64decode(&ss_user_key("x", "2022-blake3-aes-256-gcm")).unwrap().len(), 32);
+        assert_eq!(crate::tunnel::link::b64decode(&ss_user_key(&User { code: "x".into(), ..Default::default() }, "2022-blake3-aes-128-gcm")).unwrap().len(), 16);
+        assert_eq!(crate::tunnel::link::b64decode(&ss_user_key(&User { code: "x".into(), ..Default::default() }, "2022-blake3-aes-256-gcm")).unwrap().len(), 32);
     }
 }
 
@@ -2589,7 +2636,7 @@ mod emit {
         User {
             id: 0, username: String::new(), code: String::new(), limit_gb: 0.0, used_bytes: 0, expires_at: 0, max_conn: 0, enabled: true,
             protocols: String::new(), nodes: String::new(), notes: String::new(), tg_id: 0, created_at: 0, last_seen: 0, online: 0, warned: 0,
-            tier_raw: String::new(),
+            tier_raw: String::new(), cred: 0,
         }
     }
 }
