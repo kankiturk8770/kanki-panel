@@ -53,7 +53,7 @@ CI fix: the KANKI MIX relay tests put their game server on the machine's own add
 runners, which 3.68 closed to users: the egress lab switch is read on first use (`sync.OnceValue`) and the package's
 `TestMain` opens private ranges for its tests only.
 
-Panel blinking (`09-base-login-shell.js`, `13-menu.js`, `17-look-map-menu.js`, `panel.css`)
+Panel blinking, 3.72.1 (`09-base-login-shell.js`, `13-menu.js`, `17-look-map-menu.js`, `panel.css`)
 - A page opened again is drawn once: the 3.71 cache's fresh answer only refreshes the copy (`swrFresh`), it no longer
   redraws the page a second time (every page blinked once and the core bar was rebuilt).
 - The section bar is built once per section and kept (`TB`): moving WireGuard → KANKI MIX moves only the lit tab
