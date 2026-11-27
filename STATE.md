@@ -49,6 +49,10 @@ SNI and missing PROXY header get nothing), only_acme_challenges_pass_port_80, th
 `access_tests::the_audit_tab_reads_the_chain_the_changes_and_the_sign_ins` (401/403, last 100 changes newest first, last 50
 sign-ins, chain intact then broken, the Kanki DNS switch through settings, DNS config and app data).
 
+CI fix: the KANKI MIX relay tests put their game server on the machine's own address, a private one (10.x) on CI
+runners, which 3.68 closed to users: the egress lab switch is read on first use (`sync.OnceValue`) and the package's
+`TestMain` opens private ranges for its tests only.
+
 Needs the owner: after «Update all», nothing; port 80 of the Iran server must be free (not a tunnel's) for the panel's
 certificate. Turn off plain-HTTP Kanki DNS when users run Kanki VPN 1.45.2.
 

@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -42,7 +43,8 @@ var private = []netip.Prefix{
 	netip.MustParsePrefix("fc00::/7"),
 }
 
-var labPrivate = os.Getenv("KMIX_LAB_ALLOW_PRIVATE") == "1"
+// labPrivate is read on first use (not at start), so a test binary may set the variable before its first check
+var labPrivate = sync.OnceValue(func() bool { return os.Getenv("KMIX_LAB_ALLOW_PRIVATE") == "1" })
 
 // ErrBlocked is the answer for a destination users may not reach
 var ErrBlocked = errors.New("destination not allowed")
@@ -57,7 +59,7 @@ func Allowed(ip netip.Addr) bool {
 		if !p.Contains(ip) {
 			continue
 		}
-		if labPrivate {
+		if labPrivate() {
 			for _, q := range private {
 				if q.Contains(ip) {
 					return true
