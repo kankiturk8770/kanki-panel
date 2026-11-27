@@ -1,34 +1,39 @@
 //! Who may run and who may use which core.
 //!
 //! A server has a role: `gaming` servers run only the gaming cores (KANKI MIX, WireGuard, AmneziaWG, Kanki DNS),
-//! `antifilter` servers only the anti-filter cores (Xray, Hysteria2, AmneziaWG), `hybrid` servers
-//! (every server made before roles existed) run everything. A core the role does not allow counts as
-//! switched off on that server, whatever its own switch says, so changing the role takes effect on
-//! the next sync and switching back to `hybrid` restores what the admin had chosen.
+//! `antifilter` servers only the anti-filter cores (Xray, Hysteria2), `panel` (the panel's own machine) and `iran`
+//! (an Iran entry that only carries tunnels) run no VPN core and get no VPN user, `hybrid` servers (every server
+//! made before roles existed) run everything. A core the role does not allow counts as switched off on that server,
+//! whatever its own switch says, so changing the role takes effect on the next sync and switching back to `hybrid`
+//! restores what the admin had chosen. An antifilter server that ran AmneziaWG before 3.70 keeps it
+//! (`antifilter_awg_keep`, set once by the migration) so nobody on it is cut off.
 //!
-//! A user has a tier: `v2ray` (Xray + Hysteria2), `gaming` (WireGuard + AmneziaWG + KANKI MIX) or
-//! `combo` (every core). Purchases and the «give everyone» buttons only hand out what the tier allows;
-//! an admin may still tick any protocol on one user by hand.
+//! A user has one of three tiers, one account and one subscription code whatever the tier:
+//! `v2ray` «ضد فیلتر V2Ray» (Xray + Hysteria2), `gaming` «گیمینگ WireGuard» (KANKI MIX + AmneziaWG + WireGuard + DNS),
+//! `vip` «ترکیبی VIP» (every core). An account only ever has the protocols of its tier (`Tier::clamp`); an upgrade
+//! to `vip` adds the rest on the same account.
 use crate::App;
 
 /// The cores a user of each tier gets
 pub const V2RAY_PROTOS: &[&str] = &["xray", "hy2"];
 pub const GAMING_PROTOS: &[&str] = crate::db::GAME_PROTOS;
+/// Every user protocol, in the order a full (vip) account lists them
+pub const VIP_PROTOS: &[&str] = &["xray", "hy2", "kmix", "awg", "wg", "dns"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tier {
     V2ray,
     Gaming,
-    Combo,
+    Vip,
 }
 
 impl Tier {
-    /// The stored name ("game" and "vip", the names of the plans' services, are read as well)
+    /// The stored name ("game" is the plans' name of gaming; "combo" the name of vip before 3.70)
     pub fn parse(s: &str) -> Option<Tier> {
         match s.trim().to_ascii_lowercase().as_str() {
             "v2ray" => Some(Tier::V2ray),
             "gaming" | "game" => Some(Tier::Gaming),
-            "combo" | "vip" => Some(Tier::Combo),
+            "vip" | "combo" => Some(Tier::Vip),
             _ => None,
         }
     }
@@ -37,13 +42,22 @@ impl Tier {
         match self {
             Tier::V2ray => "v2ray",
             Tier::Gaming => "gaming",
-            Tier::Combo => "combo",
+            Tier::Vip => "vip",
+        }
+    }
+
+    /// The name customers see
+    pub fn label(self) -> &'static str {
+        match self {
+            Tier::V2ray => "ضد فیلتر V2Ray",
+            Tier::Gaming => "گیمینگ WireGuard",
+            Tier::Vip => "ترکیبی VIP",
         }
     }
 
     /// The tier a plan of `service` sells ('v2ray', 'game' or 'vip'; anything else is 'vip')
     pub fn of_service(service: &str) -> Tier {
-        Tier::parse(service).unwrap_or(Tier::Combo)
+        Tier::parse(service).unwrap_or(Tier::Vip)
     }
 
     /// The plans' name of the service (what `Db::service_protocols` takes)
@@ -51,21 +65,47 @@ impl Tier {
         match self {
             Tier::V2ray => "v2ray",
             Tier::Gaming => "game",
-            Tier::Combo => "vip",
+            Tier::Vip => "vip",
+        }
+    }
+
+    /// Every protocol this tier is entitled to
+    pub fn protocols(self) -> &'static [&'static str] {
+        match self {
+            Tier::V2ray => V2RAY_PROTOS,
+            Tier::Gaming => GAMING_PROTOS,
+            Tier::Vip => VIP_PROTOS,
         }
     }
 
     pub fn allows(self, proto: &str) -> bool {
-        match self {
-            Tier::V2ray => V2RAY_PROTOS.contains(&proto),
-            Tier::Gaming => GAMING_PROTOS.contains(&proto),
-            Tier::Combo => true,
-        }
+        self.protocols().contains(&proto)
     }
 
-    /// The tier after buying `other` on top of this one: two different tiers make `combo`
+    /// `list` without what this tier is not entitled to (order kept, no duplicates)
+    pub fn clamp(self, list: &str) -> String {
+        let mut out: Vec<&str> = vec![];
+        for p in list.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()) {
+            if self.allows(p) && !out.contains(&p) {
+                out.push(p);
+            }
+        }
+        out.join(",")
+    }
+
+    /// The protocols of `list` this tier is not entitled to
+    pub fn outside(self, list: &str) -> Vec<String> {
+        list.split(',').map(|x| x.trim()).filter(|x| !x.is_empty() && !self.allows(x)).map(|x| x.to_string()).collect()
+    }
+
+    /// The tier after buying `other` on top of this one: two different tiers make `vip`
     pub fn with(self, other: Tier) -> Tier {
-        if self == other { self } else { Tier::Combo }
+        if self == other { self } else { Tier::Vip }
+    }
+
+    /// Can an account of this tier be upgraded in place to `to`? (only to vip, from the other two)
+    pub fn upgrades_to(self, to: Tier) -> bool {
+        to == Tier::Vip && self != Tier::Vip
     }
 }
 
@@ -74,6 +114,10 @@ pub enum Role {
     Gaming,
     Antifilter,
     Hybrid,
+    /// the panel's own machine: no VPN core, no VPN user
+    Panel,
+    /// an Iran entry: carries tunnels to the servers abroad, runs no VPN core itself
+    Iran,
 }
 
 /// Every core a role decides about (wg, awg, hy2, kmix are VPN cores of the node; xray and dns run
@@ -86,6 +130,8 @@ impl Role {
             "gaming" => Some(Role::Gaming),
             "antifilter" => Some(Role::Antifilter),
             "hybrid" => Some(Role::Hybrid),
+            "panel" => Some(Role::Panel),
+            "iran" => Some(Role::Iran),
             _ => None,
         }
     }
@@ -100,6 +146,8 @@ impl Role {
             Role::Gaming => "gaming",
             Role::Antifilter => "antifilter",
             Role::Hybrid => "hybrid",
+            Role::Panel => "panel",
+            Role::Iran => "iran",
         }
     }
 
@@ -107,9 +155,15 @@ impl Role {
         match self {
             // AmneziaWG is WireGuard with hidden packets: as good for games as WireGuard itself
             Role::Gaming => matches!(core, "kmix" | "wg" | "awg" | "dns"),
-            Role::Antifilter => matches!(core, "xray" | "hy2" | "awg"),
+            Role::Antifilter => matches!(core, "xray" | "hy2"),
             Role::Hybrid => true,
+            Role::Panel | Role::Iran => false,
         }
+    }
+
+    /// Does a server of this role take VPN users at all?
+    pub fn serves_users(self) -> bool {
+        !matches!(self, Role::Panel | Role::Iran)
     }
 
     /// The cores of `SERVER_CORES` this role does not run
@@ -123,7 +177,27 @@ impl Role {
     }
 }
 
-fn core_name(core: &str) -> &'static str {
+/// Antifilter servers that ran AmneziaWG before 3.70 and keep it
+fn awg_kept(app: &App, nid: &str) -> bool {
+    serde_json::from_str::<Vec<String>>(&app.db.get("antifilter_awg_keep")).unwrap_or_default().iter().any(|x| x == nid)
+}
+
+/// May VPN node `nid` run `core` by its role (with the AmneziaWG kept on old antifilter servers)?
+pub fn node_allows(app: &App, nid: &str, core: &str) -> bool {
+    let role = node_role(app, nid);
+    role.allows(core) || (role == Role::Antifilter && core == "awg" && awg_kept(app, nid))
+}
+
+/// The role a node may be set to: a node that is the panel's own machine may only be `panel` or `hybrid`
+/// (a panel that is also a VPN server, as before roles); `panel` only for that node
+pub fn role_fits(nid: &str, role: Role) -> Result<(), String> {
+    if role == Role::Panel && nid != "local" {
+        return Err("only the panel's own server (local) can have the role panel".into());
+    }
+    Ok(())
+}
+
+pub fn core_name(core: &str) -> &'static str {
     match core {
         "wg" => "WireGuard",
         "awg" => "AmneziaWG",
@@ -212,18 +286,23 @@ mod tests {
 
     #[test]
     fn roles_split_the_cores_and_hybrid_keeps_everything() {
-        for c in ["kmix", "wg", "dns"] {
+        for c in ["kmix", "wg", "awg", "dns"] {
             assert!(Role::Gaming.allows(c) && !Role::Antifilter.allows(c), "{}", c);
         }
         for c in ["xray", "hy2"] {
             assert!(Role::Antifilter.allows(c) && !Role::Gaming.allows(c), "{}", c);
         }
-        // AmneziaWG runs on both
-        assert!(Role::Gaming.allows("awg") && Role::Antifilter.allows("awg"));
         assert!(SERVER_CORES.iter().all(|c| Role::Hybrid.allows(c)));
         assert!(Role::Hybrid.denied().is_empty());
         assert_eq!(Role::Gaming.denied(), vec!["hy2", "xray"]);
-        assert_eq!(Role::Antifilter.denied(), vec!["wg", "kmix", "dns"]);
+        assert_eq!(Role::Antifilter.denied(), vec!["wg", "awg", "kmix", "dns"]);
+        // the panel and an Iran entry run no VPN core and carry no user
+        for r in [Role::Panel, Role::Iran] {
+            assert_eq!(r.denied().len(), SERVER_CORES.len());
+            assert!(!r.serves_users());
+        }
+        assert!(Role::Gaming.serves_users() && Role::Antifilter.serves_users() && Role::Hybrid.serves_users());
+        assert!(role_fits("local", Role::Panel).is_ok() && role_fits("n2", Role::Panel).is_err() && role_fits("n2", Role::Iran).is_ok());
         // a row from before roles, or a value nobody knows, is hybrid; never a role that takes cores away
         assert_eq!(Role::of(""), Role::Hybrid);
         assert_eq!(Role::of("GAMING "), Role::Gaming);
@@ -232,25 +311,33 @@ mod tests {
     }
 
     #[test]
-    fn tiers_allow_only_their_cores_and_upgrades_make_combo() {
-        assert!(Tier::V2ray.allows("xray") && Tier::V2ray.allows("hy2"));
+    fn three_tiers_have_exactly_their_cores() {
+        assert_eq!(Tier::V2ray.protocols(), &["xray", "hy2"]);
         for p in ["wg", "awg", "kmix", "dns"] {
-            assert!(!Tier::V2ray.allows(p), "{}", p);
+            assert!(!Tier::V2ray.allows(p) && Tier::Gaming.allows(p), "{}", p);
         }
-        for p in ["wg", "awg", "kmix"] {
-            assert!(Tier::Gaming.allows(p), "{}", p);
-        }
-        for p in ["xray", "hy2", "dns"] {
+        for p in ["xray", "hy2"] {
             assert!(!Tier::Gaming.allows(p), "{}", p);
         }
-        assert!(["wg", "awg", "kmix", "xray", "hy2", "dns"].iter().all(|p| Tier::Combo.allows(p)));
-        assert_eq!(Tier::V2ray.with(Tier::Gaming), Tier::Combo);
-        assert_eq!(Tier::Gaming.with(Tier::V2ray), Tier::Combo);
+        assert!(VIP_PROTOS.iter().all(|p| Tier::Vip.allows(p)));
+        // nothing outside the six cores, whatever the tier
+        assert!(!Tier::Vip.allows("ovpn") && !Tier::Vip.allows(""));
+        assert_eq!(Tier::V2ray.clamp("wg,xray,awg,hy2,xray"), "xray,hy2");
+        assert_eq!(Tier::Gaming.clamp("xray,kmix,wg,dns,hy2"), "kmix,wg,dns");
+        assert_eq!(Tier::Gaming.outside("xray,kmix"), vec!["xray".to_string()]);
+        assert_eq!(Tier::V2ray.with(Tier::Gaming), Tier::Vip);
+        assert_eq!(Tier::Gaming.with(Tier::V2ray), Tier::Vip);
         assert_eq!(Tier::V2ray.with(Tier::V2ray), Tier::V2ray);
-        assert_eq!(Tier::Combo.with(Tier::Gaming), Tier::Combo);
+        assert_eq!(Tier::Vip.with(Tier::Gaming), Tier::Vip);
         assert_eq!(Tier::of_service("game"), Tier::Gaming);
-        assert_eq!(Tier::of_service("vip"), Tier::Combo);
-        assert_eq!(Tier::of_service(""), Tier::Combo);
+        assert_eq!(Tier::of_service("vip"), Tier::Vip);
+        assert_eq!(Tier::of_service(""), Tier::Vip);
+        // the name before 3.70 still reads
+        assert_eq!(Tier::parse("combo"), Some(Tier::Vip));
+        assert_eq!(Tier::Vip.as_str(), "vip");
         assert_eq!(Tier::parse("v2ray").map(|t| t.service()), Some("v2ray"));
+        // only v2ray / gaming go up, and only to vip
+        assert!(Tier::V2ray.upgrades_to(Tier::Vip) && Tier::Gaming.upgrades_to(Tier::Vip));
+        assert!(!Tier::Vip.upgrades_to(Tier::Vip) && !Tier::V2ray.upgrades_to(Tier::Gaming));
     }
 }

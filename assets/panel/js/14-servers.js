@@ -192,12 +192,18 @@ function coresOf(s){var n=s.node,i=(n&&n.info)||{},j=s.jobs||{},pt=s.ports||{},o
 // agent, or not allowed by the server's role) is shown off with the reason; a core switched off keeps its settings.
 var SW_CORES=[['wg','WireGuard'],['awg','AmneziaWG'],['kmix','KANKI MIX'],['dns','Kanki DNS'],['xray','Xray'],['hy2','Hysteria2']];
 function srvCores(s){var sw=(s.switches&&s.switches.cores)||{},live={};coresOf(s).forEach(function(c){live[c[0]]=c});
- return '<div class="kxr-sec">'+t('Cores on this server')+(s.switches&&s.switches.role&&s.switches.role!='hybrid'?'<small>'+t('Role')+': '+esc(t(s.switches.role))+'</small>':'')+'</div>'+
+ var role=(s.switches&&s.switches.role)||'hybrid',roles=s.node?(s.node.id=='local'?['hybrid','panel','gaming','antifilter']:['hybrid','gaming','antifilter','iran']):[];
+ return '<div class="kxr-sec">'+t('Cores on this server')+(role!='hybrid'?'<small>'+t('Role')+': '+esc(t(role))+'</small>':'')+'</div>'+
+  // (3.70) the server's role: panel and iran run no VPN core and carry no user; gaming = KANKI MIX / AmneziaWG / WireGuard; antifilter = Xray / Hysteria2
+  (roles.length?'<label class="f" for="srole_'+esc(s.key)+'">'+t('Role')+'</label><select id="srole_'+esc(s.key)+'" data-srole="'+esc(s.key)+'">'+roles.map(function(r){return '<option value="'+r+'"'+(r==role?' selected':'')+'>'+esc(t(r))+'</option>'}).join('')+'</select>':'')+
   '<div class="core-sw" role="group" aria-label="'+esc(t('Cores on this server'))+'">'+SW_CORES.map(function(c){var x=sw[c[0]]||{can:false,on:false,why:''},l=live[c[0]];
    return '<label class="csw'+(x.on?' on':'')+(x.can?'':' dis')+'" style="--pc:'+(PCOL[c[0]]||'var(--a)')+'"'+(x.why?' title="'+esc(t(x.why))+'"':'')+'>'+
     '<span class="nm"><b>'+c[1]+'</b><small>'+(x.can?(l&&l[3]?'<span class="ltr">'+esc(String(l[3]))+'</span>':t(x.on?'On':'Off')):esc(t(x.why||'Not available')))+'</small></span>'+
     '<span class="sw"><input type="checkbox" data-csw="'+c[0]+'" data-key="'+esc(s.key)+'"'+(x.on?' checked':'')+(x.can||x.on?'':' disabled')+' aria-label="'+esc(c[1])+'"><span></span></span></label>'}).join('')+'</div>'+
   '<p class="muted" style="font-size:12px;margin:4px 2px 0">'+t('Switched off, a core stops and closes its port; its settings stay for when it is switched on again.')+(s.switches&&s.switches.vpn_part===false&&s.agent?' '+t('WireGuard, AmneziaWG, Hysteria2 and KANKI MIX are not installed here yet: switching one on installs them (a few minutes), inside Iran as abroad.'):'')+'</p>'}
+// (3.70) a role was picked: the panel saves it, the server follows on its next sync
+document.addEventListener('change',function(e){var x=e.target;if(!x||!x.dataset||!x.dataset.srole)return;x.disabled=true;
+ api('POST','/api/servers/'+encodeURIComponent(x.dataset.srole)+'/role',{role:x.value}).then(function(){toast(t('Saved'));load(true)}).catch(function(err){x.disabled=false;fail(err)})});
 // a core switch was flipped: the panel switches it, the server follows on its next sync
 document.addEventListener('change',function(e){var x=e.target;if(!x||!x.dataset||!x.dataset.csw)return;var b={};b[x.dataset.csw]=x.checked;x.disabled=true;
  api('POST','/api/servers/'+encodeURIComponent(x.dataset.key)+'/cores',b).then(function(){toast(t('Saved'));load(true)}).catch(function(err){x.checked=!x.checked;x.disabled=false;fail(err)})});

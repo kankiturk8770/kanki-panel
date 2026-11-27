@@ -1,5 +1,76 @@
 # STATE
 
+## 3.70.0 — Phase 3: bot / mini app hardening, one account with three plans, server roles (done; branch `ccr-94a1e97e-wsl617`)
+Nothing a user has changes: subscription codes (old ones and the 39-digit ones of 3.69), keyed credentials, links and
+every protocol an account has today stay as they are. Only the stored tier name `combo` is now `vip`.
+
+Mini app (`src/bot/miniapp.rs`, `assets/bot/miniapp.html`)
+- Init data ONLY in `X-Tg-Init` (max 4 KiB); `?init=` is gone everywhere. `INIT_MAX_AGE` 24 h → 1 h.
+- `/tg/api/{buy,trial,send,upgrade,file}` are POST with a JSON body (16 KiB cap) and a one-time `X-Tg-Nonce`
+  (16–64 `[A-Za-z0-9_-]`, table `tg_nonces`): missing/bad 400, replayed 409. The admin bridge (non-GET),
+  `/admin/buttons` POST and `/admin/paths` POST need a nonce too. GET on a changing route → 405.
+- Customer routes take only init data signed by the SALES bot token (`who`); the report bot's never names a customer.
+  Admin routes check the numeric id against the list of the bot that signed (`signed_by` → `Signer`): sales routes
+  (gift, bridge, buttons save, ask, preview) only sales admins signed by the sales bot; paths/monitor/buttons read
+  either bot's own admins. New `GET /tg/api/admin/whoami` (the admin pages open with it instead of `/tg/api/me`).
+- `/tg/api/file`: `POST {uid,p}` → one-time ticket (`tg_tickets`, 120 s, bound to tg id + account + platform,
+  deleted on use with `DELETE … RETURNING`); `GET ?t=` serves it (Telegram's downloadFile cannot send headers). The
+  account is re-checked to still belong to the ticket holder. Other customers' accounts are 404 on every route.
+- Bridge path check: only `[A-Za-z0-9/_.-]`, ≤ 128 bytes, no `..`, `//`, trailing `/`, `%`-escapes or `\`; an id
+  after a prefix is one plain segment. Emoji ids digits only; the page loads emoji pictures as header-fetched blobs.
+- Gift one-time keys persisted in SQLite (`gift_nonces`), no longer an in-memory map.
+
+Payments and deliveries (`src/bot/bot.rs`, `pay.rs`, `shop.rs`, `core/db.rs`)
+- `Db::immediate` = `BEGIN IMMEDIATE` … COMMIT / ROLLBACK; `db::txn::*` are the connection-level account changes
+  (create_user, renew_plan, gift, promote_trial, upgrade_tier, use_payment); `Db` methods call them.
+- `fulfill` → `deliver_tx` in ONE transaction: order `done` (never from `rejected`/`failed`), account
+  create/renew/trial-convert/upgrade, discount `uses_left-1`, renewal bonus, referral bank, inviter reward, offer reset.
+  Any error rolls all of it back, then the order is `error` and the admins told. Upgrade plans only pay their own
+  account's upgrade (`upgrade:<id>` category, checked in `deliver_tx`, `pay`, `np_start`, receipts).
+- Payment ledger `pay_tx(id PK)`: TON hashes, Stars charges, `np:<id>` / `zp:<ref_id>`; recorded in the same
+  transaction that moves the order out of `waiting` (`claim_payment`); backfilled from paid orders at migration.
+- TON: only `finality == finalized` (missing = not final), message destination = the transaction's wallet, `recent()`
+  keeps only transactions of exactly our wallet, no successful bounce, exact comment (trim only; case and inner spaces
+  count), integer nanoton ≥ the order's.
+- Gateways: `gateway_state` → `GwState::{Paid, Waiting, Partial, Failed, Error}` (`np_state`, `zp_state`, 15 s
+  timeouts). `partially_paid` → order `partial` + customer + admins; `failed`/`expired`/`refunded`, ZarinPal -51/-54/-55/-50
+  → `failed` + customer; a failed verify call decides nothing.
+- Receipts: rejection sets `rejected` + `decided` time; the customer gets a clear notice; after 2 rejected receipts in
+  24 h no new receipt is taken (`REJECT_LIMIT`). Trial claim + account, prize claim + account: one transaction each.
+- Referrals: self, missing inviter and loops (A↔B) give nothing; reward + bank inside the delivery transaction.
+
+Three plans, one account (`src/core/access.rs`)
+- `Tier::{V2ray, Gaming, Vip}`: v2ray = xray, hy2 · gaming = kmix, awg, wg, dns · vip = all six. `combo` reads as vip.
+  `Tier::clamp/outside/upgrades_to/label`. `service_protocols`: game = admin's wg/awg choice + KANKI MIX + DNS always;
+  vip = every core (no longer `default_protocols`).
+- Panel: `POST /api/users` without tier/protocols uses setting `default_tier` (default vip) and exactly its cores;
+  protocols outside the tier → 400 on create and edit; a tier change without a list takes the new tier's cores.
+  «New user» settings section = a default-tier select (`default_tier`, validated); the user form locks out-of-tier cores.
+- In-place upgrade: `POST /api/users/:id/upgrade {tier:"vip"}` (users:write) and the bot button «⬆️ ارتقا به ترکیبی VIP»
+  (`upg:<id>`) / mini app `POST /tg/api/upgrade`. Price = vip − own service for what is left (`shop::upgrade_price`),
+  paid with a hidden plan; id, code, credentials, quota, usage and expiry unchanged; only from v2ray/gaming, once.
+- Migration (`migrate_phase3`): `combo` → `vip`; any account whose tier does not cover its protocols → `vip`.
+
+Server roles
+- `Role::{Gaming, Antifilter, Hybrid, Panel, Iran}`: gaming = kmix, wg, awg, dns · antifilter = xray, hy2 · panel/iran =
+  no core and no VPN user (`Db::serves`). `panel` only for node `local`. Antifilter servers that had AmneziaWG on keep it
+  (`antifilter_awg_keep`, set once; `access::node_allows`). Role select in the server's Cores tab.
+
+Tests added
+- `miniapp::tests::{changes_are_one_time_posts_from_the_sales_bot_only, the_backup_download_is_a_one_time_ticket_of_ones_own_account,
+  admin_routes_check_the_signing_bots_own_admins}`; `flow_tests::{one_order_delivered_at_once_many_times_gives_one_account,
+  a_failed_delivery_rolls_everything_back, an_upgrade_to_vip_keeps_the_same_account, a_trial_asked_at_once_many_times_is_given_once,
+  rejected_receipts_stop_more_fake_ones, referrals_never_loop, gateway_answers_map_to_one_state_each}`, the TON test (exact comment,
+  permanent ledger); `pay::tests` (finality missing, bounce, wrong destination); `access_tests::{a_369_database_keeps_every_user_and_payment,
+  panel_and_iran_servers_carry_no_vpn_user, the_panel_upgrades_an_account_in_place}`; tier tests rewritten.
+
+Not done / needs the owner
+- No bot flow-map source exists in either repo; nothing to fix there (the bot's own texts were updated).
+- The Kanki app needs no change: gaming accounts now carry `kmix` and `dns`, which the app already unlocks from the
+  subscription data.
+- Telegram's `answerCallbackQuery`/receipt photos are unchanged; ZarinPal is still checked when the customer taps
+  «check» (NOWPayments every minute).
+
 ## 3.69.0 — Phase 2: supply chain, mutual fleet signing, Iran relay, KANKI MIX hops, authenticated backups (done; branch `ccr-94a1e97e-wsl617`)
 Nothing a user has changes: existing subscription codes, WireGuard/AWG/KANKI MIX/Hysteria2/Xray credentials and links
 stay byte for byte (only accounts made or renewed from now on get the new code length and keyed credentials).

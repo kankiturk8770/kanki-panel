@@ -225,6 +225,44 @@ pub fn custom_plan(db: &Db, svc: &str, gb: i64, days: i64, users: i64) -> Result
     })
 }
 
+/// The price of upgrading account `u` in place to vip: what vip costs for what is left of it (its remaining
+/// volume and days, its users) minus what its own service costs for the same, never below one rounding step.
+/// An account without an end date is priced for 30 days, one without a volume limit for the largest volume sold.
+pub fn upgrade_price(p: &Pricing, u: &crate::db::User) -> i64 {
+    let now = crate::util::now();
+    let days = if u.expires_at > 0 { ((u.expires_at - now).max(0) + 86399) / 86400 } else { 30 };
+    let gb = if u.limit_gb > 0.0 { (u.limit_gb - u.used_gb()).max(0.0) } else { p.max_gb as f64 };
+    let users = u.max_conn.max(1);
+    let have = u.tier().service();
+    let rd = if p.round > 0.0 { p.round } else { 1000.0 };
+    let diff = p.price("vip", gb, days.max(1), users, false) - p.price(have, gb, days.max(1), users, false);
+    ((diff as f64 / rd).round() * rd).max(rd) as i64
+}
+
+/// The plan an in-place upgrade of account `u` to vip is paid with: hidden (active 2), its category names the
+/// account (`upgrade:<id>`), no days and no volume (the upgrade never changes them). A fresh row each time, so the
+/// price is today's. Err when the account cannot be upgraded.
+pub fn upgrade_plan(db: &Db, u: &crate::db::User) -> Result<(i64, i64), String> {
+    if !u.tier().upgrades_to(crate::access::Tier::Vip) {
+        return Err("this account is already vip".into());
+    }
+    if !u.active() {
+        return Err("only an active account can be upgraded; renew it first".into());
+    }
+    let toman = upgrade_price(&pricing(db), u);
+    let name = format!("ارتقا به ترکیبی VIP · {}", u.username);
+    db.with(|c| {
+        c.execute("INSERT INTO plans(name,days,gb,toman,usd,conns,countries,active,category,service) VALUES(?1,0,0,?2,0,?3,0,2,?4,'vip')",
+            rusqlite::params![name, toman, u.max_conn.max(1), format!("upgrade:{}", u.id)]).map_err(|e| e.to_string())?;
+        Ok((c.last_insert_rowid(), toman))
+    })
+}
+
+/// The account an upgrade plan is for (None for every other plan)
+pub fn upgrade_target(category: &str) -> Option<i64> {
+    category.strip_prefix("upgrade:").and_then(|x| x.parse().ok()).filter(|x: &i64| *x > 0)
+}
+
 /// The listed plans of every service: (service, name, days, gb, users, toman, badge, category)
 pub const BADGE_OFFER: &str = "🔥 پیشنهاد ویژه";
 pub const BADGE_BEST: &str = "⭐ پرفروش‌ترین";

@@ -3,8 +3,15 @@
 //!
 //! Who is asking comes only from Telegram's signed init data (`Telegram.WebApp.initData`), checked with
 //! the bot token (core.telegram.org/bots/webapps, "Validating data received via the Mini App"); a customer
-//! sees only the accounts with their own Telegram id. Every call is a GET, so the page and its API also
-//! work on the subscription domain, which passes only GET and a few paths.
+//! sees only the accounts with their own Telegram id.
+//!
+//! 3.70 hardening: the init data comes ONLY in the `X-Tg-Init` header (never in a URL, where proxies and logs keep
+//! it) and is good for `INIT_MAX_AGE`; every call that changes something (`/tg/api/buy`, `/trial`, `/send`,
+//! `/upgrade`, `/file`, the admin writes) is a POST with a one-time `X-Tg-Nonce` kept in SQLite (a replayed request
+//! is refused); customer routes take only init data signed by the SALES bot (the report bot's never names a
+//! customer); the admin routes check the numeric Telegram id against the admin list of the bot that signed it.
+//! The AmneziaVPN backup is downloaded with a one-time ticket (`/tg/api/file` POST → `?t=`): Telegram's
+//! downloadFile cannot send headers, and the ticket names one account of the caller, for 2 minutes, once.
 
 use crate::db::User;
 use crate::util::{now, pct_decode};
@@ -13,7 +20,7 @@ use axum::{
     extract::{Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use hmac::{Hmac, Mac};
@@ -24,8 +31,10 @@ use std::sync::Arc;
 
 type St = State<Arc<App>>;
 
-/// How long a signed init data stays good (Telegram signs it when the mini app opens)
-const INIT_MAX_AGE: i64 = 24 * 3600;
+/// How long a signed init data stays good (Telegram signs it when the mini app opens; 3.70: 1 hour, was 24)
+const INIT_MAX_AGE: i64 = 3600;
+/// How long a download ticket stays good
+const TICKET_TTL: i64 = 120;
 
 /// The address of the mini app: always on the panel's own address (its domain or subscription domain), never
 /// on the Iran subscription relay. Telegram itself is filtered in Iran, so whoever opens the bot already gets
@@ -38,11 +47,13 @@ pub fn router() -> Router<Arc<App>> {
     Router::new()
         .route("/tg/", get(page))
         .route("/tg/api/me", get(me))
-        .route("/tg/api/send", get(send))
-        .route("/tg/api/file", get(file))
+        .route("/tg/api/send", post(send))
+        .route("/tg/api/file", get(file).post(file_ticket))
         .route("/tg/api/shop", get(shop))
-        .route("/tg/api/buy", get(buy))
-        .route("/tg/api/trial", get(trial))
+        .route("/tg/api/buy", post(buy))
+        .route("/tg/api/trial", post(trial))
+        .route("/tg/api/upgrade", post(upgrade))
+        .route("/tg/api/admin/whoami", get(admin_whoami))
         // the bot's admins: button texts, premium emoji and colours (3.34, bot/buttons.rs)
         .route("/tg/api/admin/buttons", get(admin_buttons).post(admin_buttons_save))
         .route("/tg/api/admin/ask", get(admin_ask))
@@ -84,8 +95,8 @@ fn pick(v: &Value, keys: &[&str]) -> Value {
 /// The report bot's page: the panel server, both bots, every server (health, resources, cores) and every tunnel
 /// (state, both ends, ping, loss, transport), the last errors, and the paths. Only for the report bot's (or the sales
 /// bot's) admins; no token, key or password of anything is in it.
-async fn admin_monitor(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    if let Err(r) = admin_of(&app, &h, &q) { return r }
+async fn admin_monitor(State(app): St, h: HeaderMap) -> Response {
+    if let Err(r) = admin_of(&app, &h) { return r }
     let (sys, nodes, tun, logs, ov) = tokio::join!(read_inside(&app, "/api/system"), read_inside(&app, "/api/nodes"),
         read_inside(&app, "/api/tunnels"), read_inside(&app, "/api/logs?src=all&n=400"), read_inside(&app, "/api/overview"));
     let nodes: Vec<Value> = nodes.as_array().cloned().unwrap_or_default().iter().map(|n| {
@@ -138,13 +149,16 @@ pub const BOT_KEYS: &[&str] = &[
 
 /// The panel routes the admin mini app may use: (method, path start, exact or the start of a longer path)
 fn bridge_ok(method: &str, path: &str) -> bool {
-    // the path is used as it is: no query or fragment (the filters below compare the whole path), no tricks
-    if !path.starts_with("/api/") || path.contains(['?', '#', '\\']) || path.contains("..") || path.contains("//") {
+    // the path is used as it is: no query or fragment (the filters below compare the whole path), no tricks.
+    // 3.70: only plain path characters (no %-escapes, so no encoded `..`, `/` or `\\` either), at most 128 bytes,
+    // and an id after a known prefix is one plain segment
+    if path.len() > 128 || !path.starts_with("/api/") || !path.bytes().all(|c| c.is_ascii_alphanumeric() || b"/_-.".contains(&c))
+        || path.contains("..") || path.contains("//") || path.ends_with('/') {
         return false;
     }
     let p = path;
     let exact = |x: &str| p == x;
-    let under = |x: &str| p.starts_with(x) && p.len() > x.len() && !p[x.len()..].contains("..");
+    let under = |x: &str| p.starts_with(x) && p.len() > x.len() && !p[x.len()..].contains(['/', '.']);
     match method {
         "GET" => exact("/api/settings") || exact("/api/plans") || exact("/api/discounts") || exact("/api/channel") || exact("/api/app-msg") || exact("/api/overview") || exact("/api/bot"),
         "PUT" => exact("/api/settings") || exact("/api/plans/category") || under("/api/plans/") || exact("/api/channel") || exact("/api/app-msg"),
@@ -156,12 +170,13 @@ fn bridge_ok(method: &str, path: &str) -> bool {
 
 /// One call of the admin mini app into the panel's own routes: only the sales bot's admins, only the routes above,
 /// and only the bot's settings
-async fn admin_panel(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>, Json(b): Json<Value>) -> Response {
-    let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
-    if !crate::bot::bot_admins_raw(&app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) {
-        return fail(StatusCode::FORBIDDEN, "admins only");
-    }
+async fn admin_panel(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    if let Err(r) = sales_admin(&app, &h) { return r }
     let method = b["method"].as_str().unwrap_or("GET").to_ascii_uppercase();
+    // a change through the bridge is a one-time request like every other change of the mini app
+    if method != "GET" {
+        if let Err(r) = fresh_nonce(&app, &h) { return r }
+    }
     let path = b["path"].as_str().unwrap_or("").to_string();
     if !bridge_ok(&method, &path) {
         return fail(StatusCode::FORBIDDEN, "not allowed here");
@@ -211,19 +226,22 @@ async fn admin_panel(State(app): St, h: HeaderMap, Query(q): Query<HashMap<Strin
 }
 
 /// The sales bot's own admins (the report bot's admins only read)
-fn sales_admin(app: &App, h: &HeaderMap, q: &HashMap<String, String>) -> Result<i64, Response> {
-    let tg = admin_of(app, h, q)?;
-    if crate::bot::bot_admins_raw(app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) {
-        Ok(tg)
-    } else {
-        Err(fail(StatusCode::FORBIDDEN, "admins only"))
+fn sales_admin(app: &App, h: &HeaderMap) -> Result<i64, Response> {
+    match signed_by(app, h)? {
+        (tg, Signer::Sales) if is_sales_admin(app, tg) => Ok(tg),
+        _ => Err(fail(StatusCode::FORBIDDEN, "admins only")),
     }
+}
+
+/// The sales bot's admin list (numeric Telegram ids only; anything else in it names nobody)
+fn is_sales_admin(app: &App, tg: i64) -> bool {
+    tg > 0 && crate::bot::bot_admins_raw(app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg)
 }
 
 /// The gift page: every customer account (not trials) with what a gift can add to it, newest buyers first,
 /// and the last gifts given
-async fn admin_gift_list(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    if let Err(r) = sales_admin(&app, &h, &q) { return r }
+async fn admin_gift_list(State(app): St, h: HeaderMap) -> Response {
+    if let Err(r) = sales_admin(&app, &h) { return r }
     let names: HashMap<i64, String> = app.db.with(|c| {
         let Ok(mut st) = c.prepare("SELECT tg_id, COALESCE(name,'') FROM bot_users") else { return HashMap::new() };
         st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))).map(|it| it.filter_map(|x| x.ok()).collect()).unwrap_or_default()
@@ -244,17 +262,12 @@ async fn admin_gift_list(State(app): St, h: HeaderMap, Query(q): Query<HashMap<S
     ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "log": log }))).into_response()
 }
 
-/// Gift requests already done (their one-time key, when): a double tap or a resent request gives once
-fn gift_nonces() -> &'static std::sync::Mutex<HashMap<String, i64>> {
-    static N: std::sync::OnceLock<std::sync::Mutex<HashMap<String, i64>>> = std::sync::OnceLock::new();
-    N.get_or_init(Default::default)
-}
 
 /// Gives days and volume: `{to: "active" | "buyers" | "ids", ids: [...], days, gb, why, nonce}`. "active" is every
 /// working account a gift can grow (as the bot's «gift for everyone»), "buyers" the same but only for those who
 /// paid at least once, "ids" exactly the picked accounts (an expired one comes back, as for one person in the bot).
-async fn admin_gift(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>, Json(b): Json<Value>) -> Response {
-    let tg = match sales_admin(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+async fn admin_gift(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    let tg = match sales_admin(&app, &h) { Ok(t) => t, Err(r) => return r };
     let Some(bot) = crate::bot::running() else { return fail(StatusCode::SERVICE_UNAVAILABLE, "the bot is off") };
     let num = |k: &str| b[k].as_f64().or_else(|| b[k].as_str().and_then(|s| s.trim().parse().ok())).unwrap_or(0.0);
     let why: String = b["why"].as_str().unwrap_or("").trim().chars().take(200).collect();
@@ -266,12 +279,11 @@ async fn admin_gift(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String
     if nonce.len() < 8 {
         return fail(StatusCode::BAD_REQUEST, "nonce");
     }
-    {
-        let mut n = gift_nonces().lock().unwrap_or_else(|e| e.into_inner());
-        n.retain(|_, at| crate::util::now() - *at < 3600);
-        if n.insert(nonce, crate::util::now()).is_some() {
-            return fail(StatusCode::CONFLICT, "this gift was already given");
-        }
+    // 3.70: the gift's one-time key is kept in SQLite for good (a restart no longer forgets it)
+    match app.db.with(|c| c.execute("INSERT OR IGNORE INTO gift_nonces(nonce, at) VALUES(?1, ?2)", rusqlite::params![nonce, now()])) {
+        Ok(1) => {}
+        Ok(_) => return fail(StatusCode::CONFLICT, "this gift was already given"),
+        Err(_) => return fail(StatusCode::INTERNAL_SERVER_ERROR, "the gift could not be recorded"),
     }
     let to = b["to"].as_str().unwrap_or("");
     let users: Vec<crate::db::User> = match to {
@@ -301,23 +313,37 @@ async fn admin_gift(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String
 }
 
 /// The customer of a request, only when they are one of the bot's admins
-fn admin_of(app: &App, h: &HeaderMap, q: &HashMap<String, String>) -> Result<i64, Response> {
-    let tg = who(app, h, q)?;
-    let is = crate::bot::bot_admins_raw(app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) || crate::monitor::is_admin(app, tg);
+/// (3.70: an admin of the bot that SIGNED the init data: a sales-bot page for the sales bot's admins, a report-bot
+/// page for the report bot's; never one bot's page with the other's list)
+fn admin_of(app: &App, h: &HeaderMap) -> Result<i64, Response> {
+    let (tg, by) = signed_by(app, h)?;
+    let is = match by {
+        Signer::Sales => is_sales_admin(app, tg),
+        Signer::Report => tg > 0 && crate::monitor::is_admin(app, tg),
+    };
     if is { Ok(tg) } else { Err(fail(StatusCode::FORBIDDEN, "admins only")) }
 }
 
-async fn admin_buttons(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    if let Err(r) = admin_of(&app, &h, &q) { return r }
+/// GET /tg/api/admin/whoami: whether the page's signer is an admin (the admin pages open with this; the report
+/// bot's page cannot call the customer routes)
+async fn admin_whoami(State(app): St, h: HeaderMap) -> Response {
+    let (tg, by) = match signed_by(&app, &h) { Ok(x) => x, Err(r) => return r };
+    let admin = match by {
+        Signer::Sales => is_sales_admin(&app, tg),
+        Signer::Report => tg > 0 && crate::monitor::is_admin(&app, tg),
+    };
+    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "admin": admin, "sales": by == Signer::Sales && admin }))).into_response()
+}
+
+async fn admin_buttons(State(app): St, h: HeaderMap) -> Response {
+    if let Err(r) = admin_of(&app, &h) { return r }
     ([(header::CACHE_CONTROL, "no-store")], Json(crate::buttons::list(&app))).into_response()
 }
 
-async fn admin_buttons_save(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>, Json(b): Json<Value>) -> Response {
+async fn admin_buttons_save(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
     // the customers' buttons belong to the sales bot: only its admins change them (the report bot only reads)
-    let tg = match admin_of(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
-    if !crate::bot::bot_admins_raw(&app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) {
-        return fail(StatusCode::FORBIDDEN, "admins only");
-    }
+    if let Err(r) = sales_admin(&app, &h) { return r }
+    if let Err(r) = fresh_nonce(&app, &h) { return r }
     match crate::buttons::save(&app, &b) {
         Ok(()) => Json(crate::buttons::list(&app)).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({ "error": e }))).into_response(),
@@ -325,15 +351,16 @@ async fn admin_buttons_save(State(app): St, h: HeaderMap, Query(q): Query<HashMa
 }
 
 /// The paths page: every server abroad with its tunnels and their loss, ping and jitter (read-only)
-async fn admin_paths(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    if let Err(r) = admin_of(&app, &h, &q) { return r }
+async fn admin_paths(State(app): St, h: HeaderMap) -> Response {
+    if let Err(r) = admin_of(&app, &h) { return r }
     ([(header::CACHE_CONTROL, "no-store")], Json(crate::tunnel::quality::view(&app))).into_response()
 }
 
 /// The only thing the paths page changes: whether the bot sends path alerts (`{"alerts": bool}`).
 /// Server offline / online alerts are always sent.
-async fn admin_paths_set(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>, Json(b): Json<Value>) -> Response {
-    if let Err(r) = admin_of(&app, &h, &q) { return r }
+async fn admin_paths_set(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Response {
+    if let Err(r) = admin_of(&app, &h) { return r }
+    if let Err(r) = fresh_nonce(&app, &h) { return r }
     let Some(on) = b["alerts"].as_bool() else { return fail(StatusCode::BAD_REQUEST, "alerts: true or false") };
     app.db.set("path_alerts", if on { "1" } else { "0" });
     Json(crate::tunnel::quality::view(&app)).into_response()
@@ -341,7 +368,7 @@ async fn admin_paths_set(State(app): St, h: HeaderMap, Query(q): Query<HashMap<S
 
 /// «Set the emoji»: the bot asks this admin, in the chat, for the premium emoji of button `key`
 async fn admin_ask(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    let tg = match admin_of(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+    let tg = match sales_admin(&app, &h) { Ok(t) => t, Err(r) => return r };
     let Some(bot) = crate::bot::running() else { return fail(StatusCode::SERVICE_UNAVAILABLE, "the bot is off") };
     match bot.ask_icon(q.get("key").map(|s| s.as_str()).unwrap_or(""), Some(tg)).await {
         Ok(_) => Json(json!({ "ok": true })).into_response(),
@@ -350,8 +377,8 @@ async fn admin_ask(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String,
 }
 
 /// Every button, as customers see them, to this admin's chat
-async fn admin_preview(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    let tg = match admin_of(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+async fn admin_preview(State(app): St, h: HeaderMap) -> Response {
+    let tg = match sales_admin(&app, &h) { Ok(t) => t, Err(r) => return r };
     let Some(bot) = crate::bot::running() else { return fail(StatusCode::SERVICE_UNAVAILABLE, "the bot is off") };
     match bot.preview_buttons(Some(tg)).await {
         Ok(_) => Json(json!({ "ok": true })).into_response(),
@@ -359,9 +386,12 @@ async fn admin_preview(State(app): St, h: HeaderMap, Query(q): Query<HashMap<Str
     }
 }
 
-/// The picture of a premium emoji (`init` in the query: an <img> sends no headers)
-async fn admin_emoji(State(app): St, h: HeaderMap, axum::extract::Path(id): axum::extract::Path<String>, Query(q): Query<HashMap<String, String>>) -> Response {
-    if let Err(r) = admin_of(&app, &h, &q) { return r }
+/// The picture of a premium emoji (3.70: fetched with the header like every call; the page shows it as a blob)
+async fn admin_emoji(State(app): St, h: HeaderMap, axum::extract::Path(id): axum::extract::Path<String>) -> Response {
+    if let Err(r) = admin_of(&app, &h) { return r }
+    if id.is_empty() || id.len() > 64 || !id.bytes().all(|c| c.is_ascii_digit()) {
+        return fail(StatusCode::BAD_REQUEST, "id");
+    }
     match crate::buttons::emoji_image(&app, &id).await {
         Some((b, kind)) => ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "private, max-age=86400")], b).into_response(),
         None => fail(StatusCode::NOT_FOUND, "no picture"),
@@ -410,23 +440,105 @@ fn undelivered() -> Response {
     (StatusCode::BAD_GATEWAY, [(header::CACHE_CONTROL, "no-store")], Json(json!({ "ok": false, "error": "not delivered" }))).into_response()
 }
 
-/// The customer of a request (init data in the X-Tg-Init header, or `init` in the query for downloads)
-fn who(app: &App, h: &HeaderMap, q: &HashMap<String, String>) -> Result<i64, Response> {
+/// Which bot signed a page's init data
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Signer {
+    Sales,
+    Report,
+}
+
+/// The init data of a request: only the `X-Tg-Init` header (at most 4 KiB)
+fn init_of(h: &HeaderMap) -> Result<String, Response> {
+    let init = h.get("x-tg-init").and_then(|v| v.to_str().ok()).unwrap_or("");
+    if init.is_empty() || init.len() > 4096 {
+        return Err(fail(StatusCode::UNAUTHORIZED, "open this page from the bot"));
+    }
+    Ok(init.to_string())
+}
+
+fn paced(h: &HeaderMap) -> Result<(), Response> {
     if !crate::limit::hit("tg", &crate::util::client_ip(h), 120, 60) {
         return Err(fail(StatusCode::TOO_MANY_REQUESTS, "too many requests, wait a minute"));
     }
-    let init = h.get("x-tg-init").and_then(|v| v.to_str().ok()).map(|s| s.to_string()).or_else(|| q.get("init").cloned()).unwrap_or_default();
-    // the report bot opens the paths page too: its pages are signed with its own token
+    Ok(())
+}
+
+/// The Telegram id of a request and the bot that signed it (sales bot first)
+fn signed_by(app: &App, h: &HeaderMap) -> Result<(i64, Signer), Response> {
+    paced(h)?;
+    let init = init_of(h)?;
+    if let Some(tg) = verify(&crate::bot::bot_token(app), &init, now(), INIT_MAX_AGE) {
+        return Ok((tg, Signer::Sales));
+    }
     let mon = crate::monitor::mon_token(app);
-    verify(&crate::bot::bot_token(app), &init, now(), INIT_MAX_AGE)
-        .or_else(|| (!mon.is_empty()).then(|| verify(&mon, &init, now(), INIT_MAX_AGE)).flatten())
-        .ok_or_else(|| fail(StatusCode::UNAUTHORIZED, "open this page from the bot"))
+    if !mon.is_empty() {
+        if let Some(tg) = verify(&mon, &init, now(), INIT_MAX_AGE) {
+            return Ok((tg, Signer::Report));
+        }
+    }
+    Err(fail(StatusCode::UNAUTHORIZED, "open this page from the bot"))
+}
+
+/// The customer of a request: init data signed by the SALES bot only (the report bot's never names a customer)
+fn who(app: &App, h: &HeaderMap) -> Result<i64, Response> {
+    match signed_by(app, h)? {
+        (tg, Signer::Sales) if tg > 0 => Ok(tg),
+        _ => Err(fail(StatusCode::UNAUTHORIZED, "open this page from the bot")),
+    }
+}
+
+/// A change's one-time `X-Tg-Nonce` (16–64 of A-Z a-z 0-9 _ -): kept in SQLite while the init data could still be
+/// good, so the same request sent again is refused (409)
+fn fresh_nonce(app: &App, h: &HeaderMap) -> Result<(), Response> {
+    let n = h.get("x-tg-nonce").and_then(|v| v.to_str().ok()).unwrap_or("");
+    if n.len() < 16 || n.len() > 64 || !n.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-') {
+        return Err(fail(StatusCode::BAD_REQUEST, "nonce"));
+    }
+    let tg = signed_by(app, h).map(|x| x.0).unwrap_or(0);
+    let r = app.db.with(|c| {
+        c.execute("DELETE FROM tg_nonces WHERE at<?1", [now() - INIT_MAX_AGE - 600])?;
+        c.execute("INSERT OR IGNORE INTO tg_nonces(nonce, tg_id, at) VALUES(?1, ?2, ?3)", rusqlite::params![n, tg, now()])
+    });
+    match r {
+        Ok(1) => Ok(()),
+        Ok(_) => Err(fail(StatusCode::CONFLICT, "this request was already sent")),
+        Err(_) => Err(fail(StatusCode::INTERNAL_SERVER_ERROR, "the request could not be recorded")),
+    }
+}
+
+/// The JSON body of a change (at most 16 KiB, an object)
+fn body_of(b: &[u8]) -> Result<Value, Response> {
+    if b.len() > 16 * 1024 {
+        return Err(fail(StatusCode::PAYLOAD_TOO_LARGE, "too large"));
+    }
+    if b.is_empty() {
+        return Ok(json!({}));
+    }
+    match serde_json::from_slice::<Value>(b) {
+        Ok(v) if v.is_object() => Ok(v),
+        _ => Err(fail(StatusCode::BAD_REQUEST, "body: a JSON object")),
+    }
+}
+
+/// A field of a change's body as text ("" when absent; numbers as their digits), at most 64 characters
+fn field(b: &Value, k: &str) -> String {
+    let v = match &b[k] {
+        Value::String(s) => s.trim().to_string(),
+        Value::Number(n) => n.to_string(),
+        _ => String::new(),
+    };
+    v.chars().take(64).collect()
+}
+
+/// A positive whole number of a change's body (0 when absent or not one)
+fn int(b: &Value, k: &str) -> i64 {
+    b[k].as_i64().or_else(|| b[k].as_str().and_then(|s| s.trim().parse().ok())).filter(|x| *x > 0).unwrap_or(0)
 }
 
 /// One of the customer's own accounts
-fn account(app: &App, tg: i64, q: &HashMap<String, String>) -> Result<User, Response> {
-    let id: i64 = q.get("uid").and_then(|x| x.parse().ok()).unwrap_or(0);
-    app.db.user(id).filter(|u| u.tg_id == tg && tg != 0).ok_or_else(|| fail(StatusCode::NOT_FOUND, "account"))
+fn account(app: &App, tg: i64, id: i64) -> Result<User, Response> {
+    // anyone else's account is «not found», never «forbidden» (no hint that the number exists)
+    app.db.user(id).filter(|u| u.tg_id == tg && tg > 0 && id > 0).ok_or_else(|| fail(StatusCode::NOT_FOUND, "account"))
 }
 
 async fn page() -> Response {
@@ -463,6 +575,9 @@ fn account_json(app: &App, u: &User) -> Value {
         "link": format!("{}/sub/{}", crate::api::sub_origin(app), u.sub_code()),
         // "v2ray": only the subscription for v2ray apps (the page then leaves out the AmneziaWG / WireGuard parts)
         "service": u.service(),
+        // 3.70: the account's tier and, for v2ray / gaming, the price of becoming vip in place
+        "tier": u.tier().as_str(), "tier_name": u.tier().label(),
+        "upgrade": if u.tier().upgrades_to(crate::access::Tier::Vip) && u.active() && u.notes != "trial" { json!(crate::shop::upgrade_price(&crate::shop::pricing(&app.db), u)) } else { Value::Null },
         "v2link": crate::api::v2_sub_link(app, u),
         "code": u.sub_code(),
         "wg": protos.contains(&"wireguard"), "awg": protos.contains(&"amneziawg"), "hy2": protos.contains(&"hysteria2"),
@@ -482,19 +597,22 @@ fn bot_of(app: &Arc<App>) -> Option<Arc<crate::bot::Bot>> {
 /// The customer's last orders: (id, plan, toman, status, method, created)
 fn orders(app: &App, tg: i64) -> Vec<Value> {
     app.db.with(|c| {
-        let mut s = c.prepare("SELECT o.id, COALESCE(p.name,''), COALESCE(o.amount,''), COALESCE(o.status,''), COALESCE(o.method,''), COALESCE(o.created,0), COALESCE(o.kind,'') \
-            FROM orders o LEFT JOIN plans p ON p.id=o.plan_id WHERE o.tg_id=?1 ORDER BY o.id DESC LIMIT 10").unwrap();
-        let v: Vec<Value> = s.query_map([tg], |r| Ok(json!({
+        let Ok(mut s) = c.prepare("SELECT o.id, COALESCE(p.name,''), COALESCE(o.amount,''), COALESCE(o.status,''), COALESCE(o.method,''), COALESCE(o.created,0), COALESCE(o.kind,'') \
+            FROM orders o LEFT JOIN plans p ON p.id=o.plan_id WHERE o.tg_id=?1 ORDER BY o.id DESC LIMIT 10") else { return vec![] };
+        let rows = s.query_map([tg], |r| Ok(json!({
             "id": r.get::<_, i64>(0)?, "plan": r.get::<_, String>(1)?, "amount": r.get::<_, String>(2)?, "status": r.get::<_, String>(3)?,
             "method": r.get::<_, String>(4)?, "created": r.get::<_, i64>(5)?, "kind": r.get::<_, String>(6)?,
-        }))).unwrap().filter_map(|x| x.ok()).collect();
-        v
+        })));
+        match rows {
+            Ok(it) => it.filter_map(|x| x.ok()).collect(),
+            Err(_) => vec![],
+        }
     })
 }
 
 /// GET /tg/api/me: every account of the customer, their last orders, and what the shop still needs
-async fn me(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+async fn me(State(app): St, h: HeaderMap) -> Response {
+    let tg = match who(&app, &h) { Ok(t) => t, Err(r) => return r };
     let list: Vec<Value> = app.db.users_of_tg(tg).iter().map(|u| account_json(&app, u)).collect();
     let bot = bot_of(&app);
     let need_name = bot.as_ref().map(|b| b.needs_name(tg)).unwrap_or(false);
@@ -504,25 +622,33 @@ async fn me(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String
     let offer = bot.as_ref().map(|b| b.offer_pct(tg)).unwrap_or(0);
     ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "accounts": list, "orders": orders(&app, tg), "need_name": need_name, "name_hint": name_hint, "trial": trial, "offer": offer,
         "android_app": apps, "app_link": app.db.get("app_link"), "win_link": app.db.get("win_link"), "support": app.db.get("support"),
-        "admin": crate::bot::bot_admins_raw(&app).split(',').filter_map(|x| x.trim().parse::<i64>().ok()).any(|a| a == tg) || crate::monitor::is_admin(&app, tg) }))).into_response()
+        "admin": is_sales_admin(&app, tg) || crate::monitor::is_admin(&app, tg) }))).into_response()
 }
 
 /// The config name a first purchase or trial needs (sent as `name`), saved as the bot saves it
-fn name_ok(bot: &crate::bot::Bot, tg: i64, q: &HashMap<String, String>) -> Result<(), Response> {
+fn name_ok(bot: &crate::bot::Bot, tg: i64, b: &Value) -> Result<(), Response> {
     if !bot.needs_name(tg) {
         return Ok(());
     }
     // left empty: the name made from the Telegram name, when there is one
-    let typed = q.get("name").map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).or_else(|| bot.name_hint(tg));
+    let typed = Some(field(b, "name")).filter(|s| !s.is_empty()).or_else(|| bot.name_hint(tg));
     match typed.as_deref() {
         None => Err(fail(StatusCode::BAD_REQUEST, "name")),
         Some(n) => bot.set_name(tg, n).map(|_| ()).map_err(|e| (StatusCode::BAD_REQUEST, Json(json!({ "error": "bad name", "why": e }))).into_response()),
     }
 }
 
-/// GET /tg/api/trial (&name=..): the free trial, delivered in the chat
-async fn trial(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+/// Who a change is from (sales-bot init data) after its one-time nonce, and its JSON body
+fn change(app: &App, h: &HeaderMap, raw: &[u8]) -> Result<(i64, Value), Response> {
+    let tg = who(app, h)?;
+    let b = body_of(raw)?;
+    fresh_nonce(app, h)?;
+    Ok((tg, b))
+}
+
+/// POST /tg/api/trial {name?}: the free trial, delivered in the chat
+async fn trial(State(app): St, h: HeaderMap, raw: axum::body::Bytes) -> Response {
+    let (tg, b) = match change(&app, &h, &raw) { Ok(x) => x, Err(r) => return r };
     let Some(bot) = bot_of(&app) else { return fail(StatusCode::SERVICE_UNAVAILABLE, "the bot is off") };
     if !bot.trial_open(tg) {
         return fail(StatusCode::FORBIDDEN, "no trial");
@@ -530,7 +656,7 @@ async fn trial(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Str
     if !bot.mini_gate(tg).await {
         return fail(StatusCode::FORBIDDEN, "join the channel");
     }
-    if let Err(r) = name_ok(&bot, tg, &q) {
+    if let Err(r) = name_ok(&bot, tg, &b) {
         return r;
     }
     if !bot.mini_trial(tg).await {
@@ -539,12 +665,13 @@ async fn trial(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Str
     Json(json!({ "ok": true })).into_response()
 }
 
-/// GET /tg/api/send?uid=..&what=amz:i|amz:a|amz:w|cfg:w[:CC]|cfg:a[:CC]|cfg:h|cfg:l|cfg:v|app:a (l = every link with the subscription, app = the Kanki app files): the bot sends it to the customer's chat
-async fn send(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
-    let u = match account(&app, tg, &q) { Ok(u) => u, Err(r) => return r };
+/// POST /tg/api/send {uid, what: amz:i|amz:a|amz:w|cfg:w[:CC]|cfg:a[:CC]|cfg:h|cfg:l|cfg:v|app:a} (l = every link
+/// with the subscription, app = the Kanki app files): the bot sends it to the customer's chat
+async fn send(State(app): St, h: HeaderMap, raw: axum::body::Bytes) -> Response {
+    let (tg, b) = match change(&app, &h, &raw) { Ok(x) => x, Err(r) => return r };
+    let u = match account(&app, tg, int(&b, "uid")) { Ok(u) => u, Err(r) => return r };
     let Some(bot) = crate::bot::Bot::new(app.clone()) else { return fail(StatusCode::SERVICE_UNAVAILABLE, "the bot is off") };
-    let what = q.get("what").map(|s| s.as_str()).unwrap_or("");
+    let what = field(&b, "what");
     match what.split_once(':') {
         Some(("amz", p)) if crate::amnezia::platform(p).is_some() => {
             if crate::amnezia::backup(&crate::api::amnezia_configs(&app, &u).await, "iOS").is_none() {
@@ -555,7 +682,7 @@ async fn send(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
             }
         }
         // cfg:w:TR / cfg:a:TR = the files of one country; cfg:v = the V2Ray subscription link with how to add it
-        Some(("cfg", c)) if ["w", "a", "h", "l", "v"].contains(&c.split(':').next().unwrap_or("")) && c.len() <= 8 => {
+        Some(("cfg", c)) if ["w", "a", "h", "l", "v"].contains(&c.split(':').next().unwrap_or("")) && c.len() <= 8 && c.bytes().all(|x| x.is_ascii_alphanumeric() || x == b':') => {
             if !bot.send_configs(tg, "", &u, c).await {
                 return undelivered();
             }
@@ -571,11 +698,41 @@ async fn send(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
     Json(json!({ "ok": true })).into_response()
 }
 
-/// GET /tg/api/file?uid=..&p=i|a|w&init=..: the AmneziaVPN backup as a download (Telegram's downloadFile)
+/// POST /tg/api/file {uid, p: i|a|w}: a one-time ticket for the AmneziaVPN backup of one of the caller's own
+/// accounts (Telegram's downloadFile then fetches `GET /tg/api/file?t=<ticket>`, which sends no headers)
+async fn file_ticket(State(app): St, h: HeaderMap, raw: axum::body::Bytes) -> Response {
+    let (tg, b) = match change(&app, &h, &raw) { Ok(x) => x, Err(r) => return r };
+    let u = match account(&app, tg, int(&b, "uid")) { Ok(u) => u, Err(r) => return r };
+    let p = field(&b, "p");
+    if crate::amnezia::platform(&p).is_none() {
+        return fail(StatusCode::BAD_REQUEST, "p");
+    }
+    let t = crate::util::rand_token(32);
+    let r = app.db.with(|c| {
+        c.execute("DELETE FROM tg_tickets WHERE exp<?1", [now()])?;
+        c.execute("INSERT INTO tg_tickets(token, tg_id, uid, p, exp) VALUES(?1, ?2, ?3, ?4, ?5)", rusqlite::params![t, tg, u.id, p, now() + TICKET_TTL])
+    });
+    if r.is_err() {
+        return fail(StatusCode::INTERNAL_SERVER_ERROR, "the ticket could not be made");
+    }
+    ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "url": format!("{}/tg/api/file?t={}", crate::api::origin(&app), t) }))).into_response()
+}
+
+/// GET /tg/api/file?t=<ticket>: the AmneziaVPN backup as a download, once, for the account the ticket names
+/// (still the ticket holder's own account at the time of the download)
 async fn file(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
-    let u = match account(&app, tg, &q) { Ok(u) => u, Err(r) => return r };
-    let Some(plat) = crate::amnezia::platform(q.get("p").map(|s| s.as_str()).unwrap_or("")) else { return fail(StatusCode::BAD_REQUEST, "p") };
+    if let Err(r) = paced(&h) { return r }
+    let t = q.get("t").map(|s| s.as_str()).unwrap_or("");
+    if t.len() < 20 || t.len() > 80 || !t.bytes().all(|c| c.is_ascii_alphanumeric()) {
+        return fail(StatusCode::UNAUTHORIZED, "open this page from the bot");
+    }
+    // taken once: the row goes in the same statement that reads it
+    let row: Option<(i64, i64, String, i64)> = app.db.with(|c| {
+        c.query_row("DELETE FROM tg_tickets WHERE token=?1 RETURNING tg_id, uid, p, exp", [t], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).ok()
+    });
+    let Some((tg, uid, p, _)) = row.filter(|x| x.3 >= now()) else { return fail(StatusCode::UNAUTHORIZED, "this download link has expired") };
+    let u = match account(&app, tg, uid) { Ok(u) => u, Err(r) => return r };
+    let Some(plat) = crate::amnezia::platform(&p) else { return fail(StatusCode::BAD_REQUEST, "p") };
     let Some(body) = crate::amnezia::backup(&crate::api::amnezia_configs(&app, &u).await, plat) else {
         return fail(StatusCode::NOT_FOUND, "no WireGuard or AmneziaWG config");
     };
@@ -591,18 +748,21 @@ async fn file(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
 }
 
 /// GET /tg/api/shop: the plans on sale (with their button colour) and the custom purchase rules
-async fn shop(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    if let Err(r) = who(&app, &h, &q) {
+async fn shop(State(app): St, h: HeaderMap) -> Response {
+    if let Err(r) = who(&app, &h) {
         return r;
     }
     let plans: Vec<Value> = app.db.with(|c| {
-        let mut s = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(conns,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,''),COALESCE(service,'vip'),COALESCE(badge,''),COALESCE(old_toman,0) FROM plans WHERE active=1 ORDER BY days, conns, toman").unwrap();
-        let v: Vec<Value> = s.query_map([], |r| Ok(json!({
+        let Ok(mut s) = c.prepare("SELECT id,name,COALESCE(days,0),COALESCE(gb,0),COALESCE(toman,0),COALESCE(conns,1),COALESCE(countries,0),COALESCE(category,''),COALESCE(style,''),COALESCE(service,'vip'),COALESCE(badge,''),COALESCE(old_toman,0) FROM plans WHERE active=1 ORDER BY days, conns, toman") else { return vec![] };
+        let rows = s.query_map([], |r| Ok(json!({
             "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "days": r.get::<_, i64>(2)?, "gb": r.get::<_, f64>(3)?,
             "toman": r.get::<_, i64>(4)?, "conns": r.get::<_, i64>(5)?, "countries": r.get::<_, i64>(6)?, "category": r.get::<_, String>(7)?,
             "style": r.get::<_, String>(8)?, "service": r.get::<_, String>(9)?, "badge": r.get::<_, String>(10)?, "old_toman": r.get::<_, i64>(11)?,
-        }))).unwrap().filter_map(|x| x.ok()).collect();
-        v
+        })));
+        match rows {
+            Ok(it) => it.filter_map(|x| x.ok()).collect(),
+            Err(_) => vec![],
+        }
     });
     let on = app.db.on("sales_on");
     // the header's badge: how many servers answer now (only counts, never a name or an address)
@@ -612,22 +772,22 @@ async fn shop(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
     ([(header::CACHE_CONTROL, "no-store")], Json(json!({ "sales": on, "plans": plans, "custom": crate::shop::custom_json(&app.db), "live": live }))).into_response()
 }
 
-/// GET /tg/api/buy?pid=.. or ?svc=..&gb=..&days=..&users=.. (&renew=<account>): the bot shows that plan and the
+/// POST /tg/api/buy {pid} or {svc, gb, days, users} (+ renew: <account>, name): the bot shows that plan and the
 /// payment methods in the customer's chat
-async fn buy(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, String>>) -> Response {
-    let tg = match who(&app, &h, &q) { Ok(t) => t, Err(r) => return r };
+async fn buy(State(app): St, h: HeaderMap, raw: axum::body::Bytes) -> Response {
+    let (tg, b) = match change(&app, &h, &raw) { Ok(x) => x, Err(r) => return r };
     if !app.db.on("sales_on") {
         return fail(StatusCode::FORBIDDEN, "sales are off");
     }
-    let n = |k: &str| q.get(k).and_then(|x| x.parse::<i64>().ok()).unwrap_or(0);
-    let pid = if n("pid") > 0 {
-        let on_sale: bool = app.db.with(|c| c.query_row("SELECT COUNT(*) FROM plans WHERE id=?1 AND active=1", [n("pid")], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0);
+    let pid = if int(&b, "pid") > 0 {
+        let on_sale: bool = app.db.with(|c| c.query_row("SELECT COUNT(*) FROM plans WHERE id=?1 AND active=1", [int(&b, "pid")], |r| r.get::<_, i64>(0)).unwrap_or(0) > 0);
         if !on_sale {
             return fail(StatusCode::NOT_FOUND, "plan");
         }
-        n("pid")
+        int(&b, "pid")
     } else {
-        match crate::shop::custom_plan(&app.db, q.get("svc").map(|x| x.as_str()).unwrap_or("vip"), n("gb"), n("days"), n("users").max(1)) {
+        let svc = Some(field(&b, "svc")).filter(|s| !s.is_empty()).unwrap_or_else(|| "vip".into());
+        match crate::shop::custom_plan(&app.db, &svc, int(&b, "gb"), int(&b, "days"), int(&b, "users").max(1)) {
             Ok(id) => id,
             Err(e) => return fail(StatusCode::BAD_REQUEST, &e),
         }
@@ -637,16 +797,39 @@ async fn buy(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Strin
     if !bot.mini_gate(tg).await {
         return fail(StatusCode::FORBIDDEN, "join the channel");
     }
-    let renewing = n("renew") > 0 && app.db.user(n("renew")).map(|u| u.tg_id == tg).unwrap_or(false);
-    if !renewing {
-        if let Err(r) = name_ok(&bot, tg, &q) {
+    let renew = int(&b, "renew");
+    // a renewal names one of the buyer's own accounts (anyone else's is refused, never renewed)
+    if renew > 0 && account(&app, tg, renew).is_err() {
+        return fail(StatusCode::NOT_FOUND, "account");
+    }
+    if renew == 0 {
+        if let Err(r) = name_ok(&bot, tg, &b) {
             return r;
         }
     }
-    if !bot.start_purchase(tg, pid, n("renew")).await {
+    if !bot.start_purchase(tg, pid, renew).await {
         return undelivered();
     }
     Json(json!({ "ok": true })).into_response()
+}
+
+/// POST /tg/api/upgrade {uid}: a v2ray / gaming account of the caller to vip on the same account (the price
+/// difference); the bot shows the price and the payment methods in the chat
+async fn upgrade(State(app): St, h: HeaderMap, raw: axum::body::Bytes) -> Response {
+    let (tg, b) = match change(&app, &h, &raw) { Ok(x) => x, Err(r) => return r };
+    let u = match account(&app, tg, int(&b, "uid")) { Ok(u) => u, Err(r) => return r };
+    if !app.db.on("sales_on") {
+        return fail(StatusCode::FORBIDDEN, "sales are off");
+    }
+    if !u.tier().upgrades_to(crate::access::Tier::Vip) {
+        return fail(StatusCode::CONFLICT, "this account is already vip");
+    }
+    let Some(bot) = crate::bot::running() else { return fail(StatusCode::SERVICE_UNAVAILABLE, "the bot is off") };
+    match bot.start_upgrade(tg, u.id).await {
+        Ok(true) => Json(json!({ "ok": true })).into_response(),
+        Ok(false) => undelivered(),
+        Err(e) => fail(StatusCode::BAD_REQUEST, &e),
+    }
 }
 
 #[cfg(test)]
@@ -722,6 +905,7 @@ mod tests {
             let init = init(id);
             async move {
                 let r = axum::http::Request::builder().method("POST").uri("/tg/api/admin/panel").header("x-tg-init", init)
+                    .header("x-tg-nonce", crate::util::rand_token(24))
                     .header("content-type", "application/json").body(axum::body::Body::from(b.to_string())).unwrap();
                 let res = crate::api::master_router(app).oneshot(r).await.unwrap();
                 let st = res.status().as_u16();
@@ -854,5 +1038,142 @@ mod tests {
         // a WireGuard-only account has no such link: no button, no file
         let w = app.db.create_user("sara12", 10.0, 30, 1, "wg", "", "", 0).unwrap();
         assert!(crate::api::links_text(&app, &w).is_none());
+    }
+
+    /// One request to the mini app's API: (status, JSON)
+    async fn hit(app: &Arc<App>, m: &str, uri: &str, init: Option<&str>, nonce: Option<&str>, body: Option<Value>) -> (u16, Value) {
+        use tower::ServiceExt;
+        let mut r = axum::http::Request::builder().method(m).uri(uri);
+        if let Some(i) = init {
+            r = r.header("x-tg-init", i);
+        }
+        if let Some(n) = nonce {
+            r = r.header("x-tg-nonce", n);
+        }
+        if body.is_some() {
+            r = r.header("content-type", "application/json");
+        }
+        let r = r.body(axum::body::Body::from(body.map(|b| b.to_string()).unwrap_or_default())).unwrap();
+        let res = crate::api::master_router(app.clone()).oneshot(r).await.unwrap();
+        let st = res.status().as_u16();
+        let v: Value = serde_json::from_slice(&axum::body::to_bytes(res.into_body(), 1 << 20).await.unwrap()).unwrap_or(Value::Null);
+        (st, v)
+    }
+
+    /// 3.70: changes are POSTs with a one-time nonce, the init data only in the header, the report bot's init data
+    /// names no customer, and nobody reaches another customer's account
+    #[tokio::test]
+    async fn changes_are_one_time_posts_from_the_sales_bot_only() {
+        let app = crate::test_app();
+        let (sales, report) = ("123456:SALES-test", "654321:REPORT-test");
+        app.db.set("bot_token", sales);
+        app.db.set("mon_token", report);
+        app.db.set("bot_admins", "500");
+        app.db.set("mon_admins", "600");
+        app.db.set("sales_on", "1");
+        let mine = app.db.create_user("owner1", 10.0, 30, 1, "wg,awg", "", "order #1", 700).unwrap();
+        let theirs = app.db.create_user("other1", 10.0, 30, 1, "wg,awg", "", "order #2", 701).unwrap();
+        let init = |tok: &str, id: i64| signed(tok, &[("user", &format!(r#"{{"id":{}}}"#, id)), ("auth_date", &now().to_string())]);
+        let me = init(sales, 700);
+        // no init data, or init data in the URL (old style): not a customer
+        assert_eq!(hit(&app, "GET", "/tg/api/me", None, None, None).await.0, 401);
+        assert_eq!(hit(&app, "GET", &format!("/tg/api/me?init={}", pct_enc(&me)), None, None, None).await.0, 401);
+        assert_eq!(hit(&app, "GET", "/tg/api/me", Some(&me), None, None).await.0, 200);
+        // the report bot's init data never names a customer, even for the same Telegram id
+        assert_eq!(hit(&app, "GET", "/tg/api/me", Some(&init(report, 700)), None, None).await.0, 401);
+        assert_eq!(hit(&app, "POST", "/tg/api/send", Some(&init(report, 700)), Some("n0000000000000000001"), Some(json!({"uid": mine.id, "what": "cfg:w"}))).await.0, 401);
+        // an old init data (over an hour) is refused
+        let old = signed(sales, &[("user", r#"{"id":700}"#), ("auth_date", &(now() - INIT_MAX_AGE - 5).to_string())]);
+        assert_eq!(hit(&app, "GET", "/tg/api/me", Some(&old), None, None).await.0, 401);
+        // the changing routes are POST only
+        for p in ["/tg/api/buy", "/tg/api/trial", "/tg/api/send", "/tg/api/upgrade"] {
+            assert_eq!(hit(&app, "GET", &format!("{}?uid={}&what=cfg:w&pid=1", p, mine.id), Some(&me), None, None).await.0, 405, "{}", p);
+        }
+        // without a nonce, with a bad one, and the same one twice
+        assert_eq!(hit(&app, "POST", "/tg/api/send", Some(&me), None, Some(json!({"uid": mine.id, "what": "zz"}))).await.0, 400);
+        assert_eq!(hit(&app, "POST", "/tg/api/send", Some(&me), Some("short"), Some(json!({"uid": mine.id, "what": "zz"}))).await.0, 400);
+        assert_eq!(hit(&app, "POST", "/tg/api/send", Some(&me), Some("nonce-aaaaaaaaaaaa-1"), Some(json!({"uid": mine.id, "what": "zz"}))).await.0, 400);
+        assert_eq!(hit(&app, "POST", "/tg/api/send", Some(&me), Some("nonce-aaaaaaaaaaaa-1"), Some(json!({"uid": mine.id, "what": "zz"}))).await.0, 409);
+        // another customer's account: «not found» on every route (IDOR)
+        assert_eq!(hit(&app, "POST", "/tg/api/send", Some(&me), Some("nonce-aaaaaaaaaaaa-2"), Some(json!({"uid": theirs.id, "what": "cfg:w"}))).await.0, 404);
+        assert_eq!(hit(&app, "POST", "/tg/api/file", Some(&me), Some("nonce-aaaaaaaaaaaa-3"), Some(json!({"uid": theirs.id, "p": "a"}))).await.0, 404);
+        assert_eq!(hit(&app, "POST", "/tg/api/upgrade", Some(&me), Some("nonce-aaaaaaaaaaaa-4"), Some(json!({"uid": theirs.id}))).await.0, 404);
+        assert_eq!(hit(&app, "POST", "/tg/api/buy", Some(&me), Some("nonce-aaaaaaaaaaaa-5"), Some(json!({"pid": 999999, "renew": theirs.id}))).await.0, 404);
+        // a body that is not an object, or too big
+        assert_eq!(hit(&app, "POST", "/tg/api/send", Some(&me), Some("nonce-aaaaaaaaaaaa-6"), Some(json!([1, 2]))).await.0, 400);
+        assert_eq!(hit(&app, "POST", "/tg/api/send", Some(&me), Some("nonce-aaaaaaaaaaaa-7"), Some(json!({"x": "y".repeat(20_000)}))).await.0, 413);
+    }
+
+    /// 3.70: the AmneziaVPN backup is fetched with a one-time ticket of the caller's own account
+    #[tokio::test]
+    async fn the_backup_download_is_a_one_time_ticket_of_ones_own_account() {
+        let app = crate::test_app();
+        let tok = "123456:SALES-test";
+        app.db.set("bot_token", tok);
+        let mine = app.db.create_user("owner2", 10.0, 30, 1, "wg,awg", "", "order #1", 710).unwrap();
+        let me = signed(tok, &[("user", r#"{"id":710}"#), ("auth_date", &now().to_string())]);
+        // the old URL with the init data in it: refused
+        assert_eq!(hit(&app, "GET", &format!("/tg/api/file?uid={}&p=a&init={}", mine.id, pct_enc(&me)), None, None, None).await.0, 401);
+        let (st, v) = hit(&app, "POST", "/tg/api/file", Some(&me), Some("ticket-aaaaaaaaaaaa-1"), Some(json!({"uid": mine.id, "p": "a"}))).await;
+        assert_eq!(st, 200, "{}", v);
+        let url = v["url"].as_str().unwrap().to_string();
+        let t = url.split("t=").nth(1).unwrap().to_string();
+        assert!(!url.contains(&mine.code) && t.len() >= 20);
+        // the first use takes it (no config on this test panel: 404, but the ticket is used), the second is refused
+        let first = hit(&app, "GET", &format!("/tg/api/file?t={}", t), None, None, None).await.0;
+        assert!(first == 200 || first == 404, "{}", first);
+        assert_eq!(hit(&app, "GET", &format!("/tg/api/file?t={}", t), None, None, None).await.0, 401);
+        // a made-up or expired ticket
+        assert_eq!(hit(&app, "GET", "/tg/api/file?t=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", None, None, None).await.0, 401);
+        app.db.with(|c| c.execute("INSERT INTO tg_tickets(token,tg_id,uid,p,exp) VALUES('BBBBBBBBBBBBBBBBBBBBBBBB',710,?1,'a',?2)", rusqlite::params![mine.id, now() - 1])).unwrap();
+        assert_eq!(hit(&app, "GET", "/tg/api/file?t=BBBBBBBBBBBBBBBBBBBBBBBB", None, None, None).await.0, 401);
+        // a ticket of an account that changed hands meanwhile gives nothing
+        let (_, v) = hit(&app, "POST", "/tg/api/file", Some(&me), Some("ticket-aaaaaaaaaaaa-2"), Some(json!({"uid": mine.id, "p": "a"}))).await;
+        let t = v["url"].as_str().unwrap().split("t=").nth(1).unwrap().to_string();
+        app.db.exec("UPDATE users SET tg_id=999 WHERE id=?1", &[&mine.id]).unwrap();
+        assert_eq!(hit(&app, "GET", &format!("/tg/api/file?t={}", t), None, None, None).await.0, 404);
+    }
+
+    /// 3.70: an admin route checks the numeric id against the list of the bot that SIGNED the page, and the bridge
+    /// takes no encoded or traversing path
+    #[tokio::test]
+    async fn admin_routes_check_the_signing_bots_own_admins() {
+        let app = crate::test_app();
+        let (sales, report) = ("123456:SALES-test", "654321:REPORT-test");
+        app.db.set("bot_token", sales);
+        app.db.set("mon_token", report);
+        app.db.set("bot_admins", "500, x, -1");
+        app.db.set("mon_admins", "600");
+        let init = |tok: &str, id: i64| signed(tok, &[("user", &format!(r#"{{"id":{}}}"#, id)), ("auth_date", &now().to_string())]);
+        // the report bot's admin reads the paths page; the sales bot's admin signed by the report bot does not
+        assert_eq!(hit(&app, "GET", "/tg/api/admin/paths", Some(&init(report, 600)), None, None).await.0, 200);
+        assert_eq!(hit(&app, "GET", "/tg/api/admin/paths", Some(&init(report, 500)), None, None).await.0, 403);
+        assert_eq!(hit(&app, "GET", "/tg/api/admin/paths", Some(&init(sales, 600)), None, None).await.0, 403);
+        assert_eq!(hit(&app, "GET", "/tg/api/admin/paths", Some(&init(sales, -1)), None, None).await.0, 403);
+        let (_, v) = hit(&app, "GET", "/tg/api/admin/whoami", Some(&init(report, 600)), None, None).await;
+        assert_eq!((v["admin"].as_bool(), v["sales"].as_bool()), (Some(true), Some(false)));
+        // the sales bot's own routes: never from the report bot, even for an id in both lists
+        app.db.set("mon_admins", "600,500");
+        assert_eq!(hit(&app, "GET", "/tg/api/admin/gift", Some(&init(report, 500)), None, None).await.0, 403);
+        assert_eq!(hit(&app, "POST", "/tg/api/admin/panel", Some(&init(report, 500)), Some("bridge-aaaaaaaaaaa-1"), Some(json!({"method": "GET", "path": "/api/plans"}))).await.0, 403);
+        assert_eq!(hit(&app, "POST", "/tg/api/admin/buttons", Some(&init(report, 600)), Some("bridge-aaaaaaaaaaa-2"), Some(json!({"buttons": {}}))).await.0, 403);
+        // a change through the bridge needs its one-time nonce
+        let a = init(sales, 500);
+        assert_eq!(hit(&app, "POST", "/tg/api/admin/panel", Some(&a), None, Some(json!({"method": "PUT", "path": "/api/settings", "body": {"trial_mb": "200"}}))).await.0, 400);
+        assert_eq!(hit(&app, "POST", "/tg/api/admin/panel", Some(&a), Some("bridge-aaaaaaaaaaa-3"), Some(json!({"method": "PUT", "path": "/api/settings", "body": {"trial_mb": "200"}}))).await.0, 200);
+        assert_eq!(hit(&app, "POST", "/tg/api/admin/panel", Some(&a), Some("bridge-aaaaaaaaaaa-3"), Some(json!({"method": "PUT", "path": "/api/settings", "body": {"trial_mb": "250"}}))).await.0, 409);
+        assert_eq!(app.db.get("trial_mb"), "200");
+        // encoded or traversing paths never reach a route
+        for p in ["/api/plans/%2e%2e/users", "/api/plans/..%2fusers", "/api/plans/1/../../users", "/api/plans/1%2F..%2F..%2Fusers", "/api/discounts/a/b",
+                  "/api/plans/\\..\\users", "/api/plans/1?x", "/api/settings%00", "/api/plans/1.json"] {
+            assert!(!bridge_ok("DELETE", p) && !bridge_ok("PUT", p) && !bridge_ok("GET", p), "{}", p);
+        }
+        assert!(bridge_ok("DELETE", "/api/plans/12") && bridge_ok("DELETE", "/api/discounts/OFF20"));
+        // an emoji id is digits only
+        assert_eq!(hit(&app, "GET", "/tg/api/admin/emoji/..%2f..%2fetc", Some(&a), None, None).await.0, 400);
+    }
+
+    fn pct_enc(s: &str) -> String {
+        s.bytes().map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else { format!("%{:02X}", b) }).collect()
     }
 }

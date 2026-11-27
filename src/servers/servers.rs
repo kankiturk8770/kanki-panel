@@ -1194,7 +1194,11 @@ pub fn cores_state(app: &App, key: &str) -> Value {
     let mut m = serde_json::Map::new();
     for c in SWITCH_CORES {
         let vpn = c != "xray" && c != "dns";
-        let (can, on, why) = if !role.allows(c) {
+        let allowed = match &node {
+            Some(n) if vpn => crate::access::node_allows(app, n, c),
+            _ => role.allows(c),
+        };
+        let (can, on, why) = if !allowed {
             (false, false, role.refusal(c))
         } else if vpn {
             match &node {
@@ -1307,18 +1311,21 @@ async fn cores_set(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b)
     Json(json!({ "ok": true, "state": cores_state(&app, &id) })).into_response()
 }
 
-/// { role: gaming | antifilter | hybrid } — what this server may run. The cores the role does not
+/// { role: gaming | antifilter | hybrid | panel | iran } — what this server may run (panel and iran: no VPN core, no user). The cores the role does not
 /// run stop on the next sync (their own switches are kept and come back with a role that runs them);
 /// its Xray and Kanki DNS stop with it when the role does not run them.
 async fn role_set(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(b): Json<Value>) -> Response {
     let _ = guard!(app, h, "nodes");
     let Some(role) = b["role"].as_str().and_then(crate::access::Role::parse) else {
-        return err(StatusCode::BAD_REQUEST, "role: gaming, antifilter or hybrid");
+        return err(StatusCode::BAD_REQUEST, "role: gaming, antifilter, hybrid, panel or iran");
     };
     let nid = match node_of_key(&app, &id) {
         Ok(n) => n,
         Err(r) => return r,
     };
+    if let Err(e) = crate::access::role_fits(&nid, role) {
+        return err(StatusCode::BAD_REQUEST, &e);
+    }
     match app.db.exec("UPDATE nodes SET role=?1 WHERE id=?2", &[&role.as_str(), &nid]) {
         Ok(1) => {}
         Ok(_) => return err(StatusCode::NOT_FOUND, "unknown server"),
@@ -1338,7 +1345,7 @@ async fn core_switch(State(app): St, h: HeaderMap, Path(id): Path<String>, Json(
     let core = b["core"].as_str().unwrap_or("");
     let on = b["on"].as_bool().unwrap_or(true);
     let role = crate::access::node_role(&app, &nid);
-    if on && crate::cores::CORES.iter().any(|c| c.0 == core) && !role.allows(core) {
+    if on && crate::cores::CORES.iter().any(|c| c.0 == core) && !crate::access::node_allows(&app, &nid, core) {
         return err(StatusCode::CONFLICT, &role.refusal(core));
     }
     if let Err(e) = crate::cores::set(&app, &nid, core, !on) {

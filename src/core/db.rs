@@ -259,6 +259,66 @@ fn migrate_hardening(c: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// 3.70: one permanent row per payment id (TON tx hash, Stars charge, gateway id) so a payment can never pay twice;
+/// the mini app's replay nonces, gift nonces and one-time download tickets live in SQLite (not in memory); the
+/// `combo` tier is called `vip`; an account whose stored tier does not cover a protocol it has gets `vip`
+/// (nobody loses a core they have). Antifilter servers that run AmneziaWG today keep it (`antifilter_awg_keep`).
+fn migrate_phase3(c: &Connection) -> rusqlite::Result<()> {
+    // when an admin decided an order (approved / rejected): rejected receipts limit new ones
+    add_column(c, "orders", "decided", "INTEGER NOT NULL DEFAULT 0")?;
+    c.execute_batch(
+        "CREATE TABLE IF NOT EXISTS pay_tx(id TEXT PRIMARY KEY, method TEXT NOT NULL, oid INTEGER NOT NULL, at INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS tg_nonces(nonce TEXT PRIMARY KEY, tg_id INTEGER NOT NULL, at INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS gift_nonces(nonce TEXT PRIMARY KEY, at INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS tg_tickets(token TEXT PRIMARY KEY, tg_id INTEGER NOT NULL, uid INTEGER NOT NULL, p TEXT NOT NULL, exp INTEGER NOT NULL);",
+    )?;
+    let tx = c.unchecked_transaction()?;
+    // payments already used by a paid order (its id is the last word of its ref)
+    let paid: Vec<(i64, String, String, i64)> = {
+        let mut st = tx.prepare("SELECT id, method, COALESCE(ref,''), COALESCE(created,0) FROM orders WHERE method IN ('ton','stars') AND status IN ('paid','done','pending','approved','error')")?;
+        let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        v
+    };
+    for (oid, method, rf, at) in paid {
+        let w: Vec<&str> = rf.split_whitespace().collect();
+        if w.len() >= 3 {
+            tx.execute("INSERT OR IGNORE INTO pay_tx(id, method, oid, at) VALUES(?1, ?2, ?3, ?4)", params![w[w.len() - 1], method, oid, at])?;
+        }
+    }
+    tx.execute("UPDATE users SET tier='vip' WHERE tier='combo'", [])?;
+    let rows: Vec<(i64, String, String)> = {
+        let mut st = tx.prepare("SELECT id, COALESCE(protocols,''), COALESCE(tier,'') FROM users")?;
+        let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        v
+    };
+    for (id, protos, tier) in rows {
+        let t = crate::access::Tier::parse(&tier).unwrap_or_else(|| tier_of_protocols(&protos));
+        let covered = protos.split(',').map(|p| p.trim()).filter(|p| !p.is_empty()).all(|p| t.allows(p));
+        let next = if covered { t } else { crate::access::Tier::Vip };
+        if next.as_str() != tier {
+            tx.execute("UPDATE users SET tier=?1 WHERE id=?2", params![next.as_str(), id])?;
+        }
+    }
+    let done: bool = tx.query_row("SELECT 1 FROM settings WHERE k='mig_370_awg_keep'", [], |_| Ok(())).optional()?.is_some();
+    if !done {
+        let off: std::collections::HashMap<String, Vec<String>> = tx
+            .query_row("SELECT v FROM settings WHERE k='core_off'", [], |r| r.get::<_, String>(0))
+            .optional()?
+            .and_then(|v| serde_json::from_str(&v).ok())
+            .unwrap_or_default();
+        let ids: Vec<String> = {
+            let mut st = tx.prepare("SELECT id FROM nodes WHERE role='antifilter'")?;
+            let v = st.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+            v
+        };
+        let keep: Vec<String> = ids.into_iter().filter(|id| !off.get(id).is_some_and(|l| l.iter().any(|c| c == "awg"))).collect();
+        let v = serde_json::to_string(&keep).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+        tx.execute("INSERT OR REPLACE INTO settings(k,v) VALUES('antifilter_awg_keep', ?1)", [v])?;
+        tx.execute("INSERT OR REPLACE INTO settings(k,v) VALUES('mig_370_awg_keep','1')", [])?;
+    }
+    tx.commit()
+}
+
 fn add_column(c: &Connection, table: &str, col: &str, decl: &str) -> rusqlite::Result<()> {
     let mut st = c.prepare(&format!("PRAGMA table_info({})", table))?;
     let have = st.query_map([], |r| r.get::<_, String>(1))?.collect::<rusqlite::Result<Vec<String>>>()?;
@@ -273,10 +333,10 @@ fn add_column(c: &Connection, table: &str, col: &str, decl: &str) -> rusqlite::R
 fn migrate_access(c: &Connection) -> rusqlite::Result<()> {
     add_column(c, "nodes", "role", "TEXT NOT NULL DEFAULT 'hybrid'")?;
     add_column(c, "users", "tier", "TEXT NOT NULL DEFAULT ''")?;
-    c.execute("UPDATE nodes SET role='hybrid' WHERE role IS NULL OR role NOT IN ('gaming','antifilter','hybrid')", [])?;
+    c.execute("UPDATE nodes SET role='hybrid' WHERE role IS NULL OR role NOT IN ('gaming','antifilter','hybrid','panel','iran')", [])?;
     let tx = c.unchecked_transaction()?;
     let rows: Vec<(i64, String)> = {
-        let mut st = tx.prepare("SELECT id, protocols FROM users WHERE tier IS NULL OR tier NOT IN ('v2ray','gaming','combo')")?;
+        let mut st = tx.prepare("SELECT id, protocols FROM users WHERE tier IS NULL OR tier NOT IN ('v2ray','gaming','combo','vip')")?;
         let v = st.query_map([], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default())))?.collect::<rusqlite::Result<Vec<_>>>()?;
         v
     };
@@ -385,6 +445,7 @@ impl Db {
         }
         migrate_access(&c).expect("schema: server roles and user tiers");
         migrate_hardening(&c).expect("schema: token expiry and audit chain (3.68)");
+        migrate_phase3(&c).expect("schema: payment ledger, mini app nonces, vip tier (3.70)");
         // keep logs bounded
         trim_logs(&c);
         let db = Db(Mutex::new(c));
@@ -494,20 +555,50 @@ impl Db {
         f(&c)
     }
 
+    /// Runs `f` inside one `BEGIN IMMEDIATE` transaction (the write lock is taken first, so another process on
+    /// the same file waits instead of reading half a change): committed when `f` returns Ok, rolled back on Err.
+    /// `f` must use only the connection it is given (calling `self.with` inside would wait on itself).
+    pub fn immediate<T>(&self, f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
+        let c = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        c.execute_batch("BEGIN IMMEDIATE").map_err(|e| e.to_string())?;
+        match f(&c) {
+            Ok(v) => match c.execute_batch("COMMIT") {
+                Ok(()) => Ok(v),
+                Err(e) => {
+                    let msg = e.to_string();
+                    c.execute_batch("ROLLBACK").map_err(|r| format!("{}; rollback: {}", msg, r))?;
+                    Err(msg)
+                }
+            },
+            Err(e) => {
+                c.execute_batch("ROLLBACK").map_err(|r| format!("{}; rollback: {}", e, r))?;
+                Err(e)
+            }
+        }
+    }
+
     // ---------------- تنظیمات
-    /// The protocols an account of a plan's service gets ('v2ray', 'game' or 'vip')
+    /// The protocols an account of a plan's service gets ('v2ray', 'game' or 'vip'). The tier decides, never the
+    /// «New user» defaults: gaming = the admin's WireGuard / AmneziaWG choice + KANKI MIX + DNS (free with it),
+    /// v2ray = Xray (+ Hysteria2), vip = every core.
     pub fn service_protocols(&self, service: &str) -> String {
         if service == "game" {
             let v = self.get("game_protocols");
-            let ok: Vec<&str> = v.split(',').map(|x| x.trim()).filter(|x| GAME_PROTOS.contains(x)).collect();
-            return if ok.iter().any(|p| matches!(*p, "wg" | "awg")) { ok.join(",") } else { "wg,awg,kmix".into() };
+            let mut ok: Vec<&str> = v.split(',').map(|x| x.trim()).filter(|x| matches!(*x, "wg" | "awg")).collect();
+            if ok.is_empty() {
+                ok = vec!["awg", "wg"];
+            }
+            let mut out = vec!["kmix"];
+            out.extend(ok);
+            out.push("dns");
+            return out.join(",");
         }
         if service == "v2ray" {
             let v = self.get("v2ray_protocols");
             let ok: Vec<&str> = v.split(',').map(|x| x.trim()).filter(|x| matches!(*x, "xray" | "hy2")).collect();
             if ok.contains(&"xray") { ok.join(",") } else { "xray".into() }
         } else {
-            self.get("default_protocols")
+            crate::access::VIP_PROTOS.join(",")
         }
     }
 
@@ -580,12 +671,7 @@ impl Db {
     }
 
     pub fn user(&self, id: i64) -> Option<User> {
-        self.with(|c| {
-            c.query_row(&format!("SELECT {} FROM users WHERE id=?1", USER_COLS), params![id], User::from_row)
-                .optional()
-                .ok()
-                .flatten()
-        })
+        self.with(|c| txn::user(c, id))
     }
 
     pub fn user_by_code(&self, id: i64, code: &str) -> Option<User> {
@@ -619,44 +705,17 @@ impl Db {
     /// Lowest free user number: id n is unused and no user is called USERn / USERn-TEST.
     /// Deleted users free their number, so the next new user takes it again.
     pub fn next_slot(&self) -> i64 {
-        let rows: Vec<(i64, String)> = self.with(|c| {
-            let mut out = vec![];
-            if let Ok(mut st) = c.prepare("SELECT id, username FROM users") {
-                if let Ok(it) = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))) {
-                    for x in it.flatten() {
-                        out.push(x);
-                    }
-                }
-            }
-            out
-        });
-        let ids: std::collections::HashSet<i64> = rows.iter().map(|x| x.0).collect();
-        let names: std::collections::HashSet<String> = rows.iter().map(|x| x.1.to_uppercase()).collect();
-        let mut n = 1i64;
-        while ids.contains(&n) || names.contains(&format!("USER{}", n)) || names.contains(&format!("USER{}-TEST", n)) {
-            n += 1;
-        }
-        n
+        self.with(txn::next_slot)
     }
 
     /// Is this name used by another user (any upper / lower case)?
     pub fn name_taken(&self, name: &str, except: i64) -> bool {
-        self.with(|c| c.query_row("SELECT COUNT(*) FROM users WHERE UPPER(username)=UPPER(?1) AND id<>?2", params![name, except], |r| r.get::<_, i64>(0)).unwrap_or(1)) > 0
+        self.with(|c| txn::name_taken(c, name, except))
     }
 
     /// `base` when it is free, else base2, base3, … (kept within 12 characters)
     pub fn free_name(&self, base: &str) -> String {
-        if !self.name_taken(base, 0) {
-            return base.to_string();
-        }
-        for i in 2..10_000 {
-            let suf = i.to_string();
-            let cand = format!("{}{}", base.chars().take(12 - suf.len()).collect::<String>(), suf);
-            if !self.name_taken(&cand, 0) {
-                return cand;
-            }
-        }
-        format!("{}{}", base.chars().take(6).collect::<String>(), crate::util::rand_digits(6))
+        self.with(|c| txn::free_name(c, base))
     }
 
     /// Free trials whose time or data is over: they are deleted so their number is given to the next new user.
@@ -676,47 +735,15 @@ impl Db {
     /// The user's id is always the lowest free number, so the numbers of deleted users are used again.
     #[allow(clippy::too_many_arguments)]
     pub fn create_user(&self, username: &str, limit_gb: f64, days: i64, max_conn: i64, protocols: &str, nodes: &str, notes: &str, tg_id: i64) -> Result<User, String> {
-        // 3.69: 39 digits = more than 128 bits (19 gave 63)
-        let code = crate::util::rand_digits(CODE_DIGITS);
-        let days = clamp_days(days);
-        let exp = if days > 0 { now() + days * 86400 } else { 0 };
         let _g = SLOT.lock().unwrap_or_else(|e| e.into_inner());
-        let n = self.next_slot();
-        let name = match username.trim() {
-            "" | "auto" => format!("USER{}", n),
-            "auto-test" => format!("USER{}-TEST", n),
-            x => match x.strip_prefix("pick:") {
-                Some(base) => self.free_name(base),
-                None => x.to_string(),
-            },
-        };
-        // mahtab87 and MAHTAB87 would look like the same customer
-        if self.name_taken(&name, 0) {
-            return Err("this name is already used by another user".into());
-        }
-        let id = self.with(|c| {
-            c.execute(
-                "INSERT INTO users(id,username,code,limit_gb,expires_at,max_conn,protocols,nodes,notes,tg_id,created_at,tier,cred) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
-                params![n, name, code, limit_gb, exp, max_conn, protocols, nodes, notes, tg_id, now(), tier_of_protocols(protocols).as_str(), crate::creds::KEYED],
-            )
-            .map(|_| c.last_insert_rowid())
-            .map_err(|e| if e.to_string().contains("UNIQUE") { "this username already exists".to_string() } else { e.to_string() })
-        })?;
-        self.user(id).ok_or_else(|| "not found".into())
+        self.with(|c| txn::create_user(c, username, limit_gb, days, max_conn, protocols, nodes, notes, tg_id))
     }
 
     /// A trial that is bought / renewed / extended becomes a normal account (never deleted as a finished trial);
     /// an old style name USER<n>-TEST becomes USER<n>.
     pub fn promote_trial(&self, id: i64) {
-        let _ = self.exec("UPDATE users SET notes='' WHERE id=?1 AND notes='trial'", &[&id]);
-        if let Some(u) = self.user(id) {
-            let up = u.username.to_uppercase();
-            if let Some(base) = up.strip_suffix("-TEST") {
-                let taken: i64 = self.with(|c| c.query_row("SELECT COUNT(*) FROM users WHERE UPPER(username)=?1", [base], |r| r.get(0)).unwrap_or(1));
-                if base.starts_with("USER") && taken == 0 {
-                    let _ = self.exec("UPDATE users SET username=?1 WHERE id=?2", &[&base.to_string(), &id]);
-                }
-            }
+        if let Err(e) = self.with(|c| txn::promote_trial(c, id)) {
+            eprintln!("promote trial {}: {}", id, e);
         }
     }
 
@@ -738,29 +765,13 @@ impl Db {
     /// days 0 = no end date, GB 0 = unlimited volume. An unlimited account renewed with a limited plan
     /// gets the plan's GB on top of what it already used, so it is not cut off right after paying.
     pub fn renew_plan(&self, id: i64, days: i64, gb: f64) -> Result<(), String> {
-        let u = self.user(id).ok_or("user not found")?;
-        let (days, gb) = (clamp_days(days), clamp_gb(gb));
-        let base = if u.expires_at > now() { u.expires_at } else { now() };
-        let exp = if days > 0 { base.saturating_add(days * 86400) } else { 0 };
-        let lim = if gb > 0.0 { added_limit(&u, gb) } else { 0.0 };
-        self.exec("UPDATE users SET expires_at=?1, limit_gb=?2, warned=0 WHERE id=?3", &[&exp, &lim, &id]).map(|_| ())
+        self.with(|c| txn::renew_plan(c, id, days, gb))
     }
 
     /// هدیه (جبران قطعی): روز به انقضا و حجم به سقف اضافه می‌شود، ولی زمان یا حجم نامحدود
     /// نامحدود می‌ماند (برخلاف extend که از نامحدود، محدود می‌سازد). true = چیزی عوض شد.
     pub fn gift(&self, id: i64, days: i64, add_gb: f64) -> Result<bool, String> {
-        let u = self.user(id).ok_or("user not found")?;
-        let (days, add_gb) = (clamp_days(days), clamp_gb(add_gb));
-        let exp = if days > 0 && u.expires_at > 0 { u.expires_at.max(now()).saturating_add(days * 86400) } else { u.expires_at };
-        let lim = if add_gb > 0.0 && u.limit_gb > 0.0 {
-            if u.over_quota() { u.used_gb() + add_gb } else { u.limit_gb + add_gb }
-        } else {
-            u.limit_gb
-        };
-        if exp == u.expires_at && lim == u.limit_gb {
-            return Ok(false);
-        }
-        self.exec("UPDATE users SET expires_at=?1, limit_gb=?2, warned=0 WHERE id=?3", &[&exp, &lim, &id]).map(|_| true)
+        self.with(|c| txn::gift(c, id, days, add_gb))
     }
 
     pub fn count(&self, sql: &str) -> i64 {
@@ -833,7 +844,8 @@ impl Db {
     /// Does this node serve this user? Assigned to it (`User::on`), and on a drained node only users
     /// assigned by name or already there when it was drained. Every core and the links use this.
     pub fn serves(&self, u: &User, n: &Node, keep: Option<&std::collections::HashSet<i64>>) -> bool {
-        u.on(n) && (u.explicit_nodes() || keep.is_none_or(|k| k.contains(&u.id)))
+        // a panel or Iran-entry server never carries VPN users (3.70)
+        n.role().serves_users() && u.on(n) && (u.explicit_nodes() || keep.is_none_or(|k| k.contains(&u.id)))
     }
 
     // ---------------- پیرها
@@ -888,13 +900,164 @@ fn added_limit(u: &User, add: f64) -> f64 {
     if u.limit_gb <= 0.0 || u.over_quota() { u.used_gb() + add } else { u.limit_gb + add }
 }
 
+/// The account changes that must happen inside one transaction with other rows (an order, a discount, a claim):
+/// each takes the open connection (see `Db::immediate`); `Db`'s own methods of the same names call these.
+pub mod txn {
+    use super::*;
+
+    pub fn user(c: &Connection, id: i64) -> Option<User> {
+        c.query_row(&format!("SELECT {} FROM users WHERE id=?1", USER_COLS), params![id], User::from_row).optional().ok().flatten()
+    }
+
+    pub fn name_taken(c: &Connection, name: &str, except: i64) -> bool {
+        c.query_row("SELECT COUNT(*) FROM users WHERE UPPER(username)=UPPER(?1) AND id<>?2", params![name, except], |r| r.get::<_, i64>(0)).unwrap_or(1) > 0
+    }
+
+    /// Lowest free user number: id n is unused and no user is called USERn / USERn-TEST.
+    pub fn next_slot(c: &Connection) -> i64 {
+        let mut rows: Vec<(i64, String)> = vec![];
+        if let Ok(mut st) = c.prepare("SELECT id, username FROM users") {
+            if let Ok(it) = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))) {
+                rows.extend(it.flatten());
+            }
+        }
+        let ids: std::collections::HashSet<i64> = rows.iter().map(|x| x.0).collect();
+        let names: std::collections::HashSet<String> = rows.iter().map(|x| x.1.to_uppercase()).collect();
+        let mut n = 1i64;
+        while ids.contains(&n) || names.contains(&format!("USER{}", n)) || names.contains(&format!("USER{}-TEST", n)) {
+            n += 1;
+        }
+        n
+    }
+
+    /// `base` when it is free, else base2, base3, … (kept within 12 characters)
+    pub fn free_name(c: &Connection, base: &str) -> String {
+        if !name_taken(c, base, 0) {
+            return base.to_string();
+        }
+        for i in 2..10_000 {
+            let suf = i.to_string();
+            let cand = format!("{}{}", base.chars().take(12 - suf.len()).collect::<String>(), suf);
+            if !name_taken(c, &cand, 0) {
+                return cand;
+            }
+        }
+        format!("{}{}", base.chars().take(6).collect::<String>(), crate::util::rand_digits(6))
+    }
+
+    /// See `Db::create_user`. The tier is the one the protocols make (the caller sets another one when it sells one).
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_user(c: &Connection, username: &str, limit_gb: f64, days: i64, max_conn: i64, protocols: &str, nodes: &str, notes: &str, tg_id: i64) -> Result<User, String> {
+        // 3.69: 39 digits = more than 128 bits (19 gave 63)
+        let code = crate::util::rand_digits(CODE_DIGITS);
+        let days = clamp_days(days);
+        let exp = if days > 0 { now() + days * 86400 } else { 0 };
+        let n = next_slot(c);
+        let name = match username.trim() {
+            "" | "auto" => format!("USER{}", n),
+            "auto-test" => format!("USER{}-TEST", n),
+            x => match x.strip_prefix("pick:") {
+                Some(base) => free_name(c, base),
+                None => x.to_string(),
+            },
+        };
+        // mahtab87 and MAHTAB87 would look like the same customer
+        if name_taken(c, &name, 0) {
+            return Err("this name is already used by another user".into());
+        }
+        c.execute(
+            "INSERT INTO users(id,username,code,limit_gb,expires_at,max_conn,protocols,nodes,notes,tg_id,created_at,tier,cred) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+            params![n, name, code, limit_gb, exp, max_conn, protocols, nodes, notes, tg_id, now(), tier_of_protocols(protocols).as_str(), crate::creds::KEYED],
+        )
+        .map_err(|e| if e.to_string().contains("UNIQUE") { "this username already exists".to_string() } else { e.to_string() })?;
+        let id = c.last_insert_rowid();
+        user(c, id).ok_or_else(|| "not found".into())
+    }
+
+    /// See `Db::promote_trial`
+    pub fn promote_trial(c: &Connection, id: i64) -> Result<(), String> {
+        c.execute("UPDATE users SET notes='' WHERE id=?1 AND notes='trial'", [id]).map_err(|e| e.to_string())?;
+        if let Some(u) = user(c, id) {
+            let up = u.username.to_uppercase();
+            if let Some(base) = up.strip_suffix("-TEST") {
+                let taken: i64 = c.query_row("SELECT COUNT(*) FROM users WHERE UPPER(username)=?1", [base], |r| r.get(0)).map_err(|e| e.to_string())?;
+                if base.starts_with("USER") && taken == 0 {
+                    c.execute("UPDATE users SET username=?1 WHERE id=?2", params![base, id]).map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// See `Db::renew_plan`
+    pub fn renew_plan(c: &Connection, id: i64, days: i64, gb: f64) -> Result<(), String> {
+        let u = user(c, id).ok_or("user not found")?;
+        let (days, gb) = (clamp_days(days), clamp_gb(gb));
+        let base = if u.expires_at > now() { u.expires_at } else { now() };
+        let exp = if days > 0 { base.saturating_add(days * 86400) } else { 0 };
+        let lim = if gb > 0.0 { added_limit(&u, gb) } else { 0.0 };
+        c.execute("UPDATE users SET expires_at=?1, limit_gb=?2, warned=0 WHERE id=?3", params![exp, lim, id]).map(|_| ()).map_err(|e| e.to_string())
+    }
+
+    /// See `Db::gift`
+    pub fn gift(c: &Connection, id: i64, days: i64, add_gb: f64) -> Result<bool, String> {
+        let u = user(c, id).ok_or("user not found")?;
+        let (days, add_gb) = (clamp_days(days), clamp_gb(add_gb));
+        let exp = if days > 0 && u.expires_at > 0 { u.expires_at.max(now()).saturating_add(days * 86400) } else { u.expires_at };
+        let lim = if add_gb > 0.0 && u.limit_gb > 0.0 {
+            if u.over_quota() { u.used_gb() + add_gb } else { u.limit_gb + add_gb }
+        } else {
+            u.limit_gb
+        };
+        if exp == u.expires_at && lim == u.limit_gb {
+            return Ok(false);
+        }
+        c.execute("UPDATE users SET expires_at=?1, limit_gb=?2, warned=0 WHERE id=?3", params![exp, lim, id]).map(|_| true).map_err(|e| e.to_string())
+    }
+
+    /// In-place upgrade of account `id` to tier `to` (only v2ray/gaming -> vip): the protocols `add` join what it
+    /// has, the tier changes; its id, subscription code, credentials, volume, usage and end date stay exactly.
+    pub fn upgrade_tier(c: &Connection, id: i64, to: crate::access::Tier, add: &str) -> Result<User, String> {
+        let u = user(c, id).ok_or("user not found")?;
+        let from = u.tier();
+        if !from.upgrades_to(to) {
+            return Err(format!("an account of tier {} cannot be upgraded to {}", from.as_str(), to.as_str()));
+        }
+        let mut list: Vec<String> = u.protocols.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
+        for p in add.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()) {
+            if !list.iter().any(|x| x == p) {
+                list.push(p.to_string());
+            }
+        }
+        let ps = to.clamp(&list.join(","));
+        // only from the tier read above: two upgrades at once change it once
+        let n = c.execute("UPDATE users SET protocols=?1, tier=?2 WHERE id=?3 AND tier=?4", params![ps, to.as_str(), id, u.tier_raw])
+            .map_err(|e| e.to_string())?;
+        if n != 1 {
+            return Err("the account changed meanwhile".into());
+        }
+        user(c, id).ok_or_else(|| "not found".into())
+    }
+
+    /// Records a payment id (TON tx hash, Stars charge, gateway payment) as used by order `oid`; false when it
+    /// already paid an order (the row is permanent, so a payment can never pay twice)
+    pub fn use_payment(c: &Connection, id: &str, method: &str, oid: i64) -> Result<bool, String> {
+        if id.trim().is_empty() {
+            return Err("empty payment id".into());
+        }
+        c.execute("INSERT OR IGNORE INTO pay_tx(id, method, oid, at) VALUES(?1, ?2, ?3, ?4)", params![id.trim(), method, oid, now()])
+            .map(|n| n == 1)
+            .map_err(|e| e.to_string())
+    }
+}
+
 fn trim_logs(c: &Connection) {
     let _ = c.execute("DELETE FROM audit WHERE id <= (SELECT id FROM audit ORDER BY id DESC LIMIT 1 OFFSET ?1)", [AUDIT_KEEP]);
     let _ = c.execute("DELETE FROM login_log WHERE id <= (SELECT id FROM login_log ORDER BY id DESC LIMIT 1 OFFSET ?1)", [LOGIN_LOG_KEEP]);
 }
 
 /// What a 'game' account may have: WireGuard, AmneziaWG and the Kanki app's gaming cores
-pub const GAME_PROTOS: &[&str] = &["wg", "awg", "kmix"];
+pub const GAME_PROTOS: &[&str] = &["kmix", "awg", "wg", "dns"];
 
 pub fn default_setting(k: &str) -> &'static str {
     match k {
@@ -903,10 +1066,12 @@ pub fn default_setting(k: &str) -> &'static str {
         "mtu_auto" => "1",
         "mtu_budget" => "1380",
         "default_protocols" => "wg,awg,hy2,kmix",
+        // 3.70: the tier of a user made in the panel without one (its protocols come from the tier)
+        "default_tier" => "vip",
         // what a 'v2ray' plan gives: the links the v2ray clients read (Xray and Hysteria2)
         "v2ray_protocols" => "xray,hy2",
         // what a 'game' plan gives: WireGuard and AmneziaWG (and the Kanki app's KANKI MIX), no v2ray link
-        "game_protocols" => "wg,awg,kmix",
+        "game_protocols" => "awg,wg",
         "wg_tunnel_on" => "1",
         "kmix_on" => "1",
         "kmix_port" => "4000",
@@ -983,7 +1148,8 @@ mod tests {
         db.exec("INSERT INTO plans(name,days,gb,toman) VALUES('old',30,10,1000)", &[]).unwrap();
         let s: String = db.with(|c| c.query_row("SELECT service FROM plans WHERE name='old'", [], |r| r.get(0)).unwrap());
         assert_eq!(s, "vip");
-        assert_eq!(db.service_protocols("vip"), db.get("default_protocols"));
+        // 3.70: vip is every core, whatever the «New user» defaults say
+        assert_eq!(db.service_protocols("vip"), "xray,hy2,kmix,awg,wg,dns");
         assert_eq!(db.service_protocols("v2ray"), "xray,hy2");
         db.set("v2ray_protocols", "xray,hy2,wg");
         assert_eq!(db.service_protocols("v2ray"), "xray,hy2");
@@ -998,11 +1164,12 @@ mod tests {
         let u = db.create_user("hy", 10.0, 30, 1, "hy2", "", "", 0).unwrap();
         assert_eq!(u.service(), "vip");
         // the gaming service: WireGuard / AmneziaWG (and the app's KANKI MIX), never a v2ray link
-        assert_eq!(db.service_protocols("game"), "wg,awg,kmix");
+        // 3.70: KANKI MIX and DNS always come with it
+        assert_eq!(db.service_protocols("game"), "kmix,awg,wg,dns");
         db.set("game_protocols", "awg,xray,hy2");
-        assert_eq!(db.service_protocols("game"), "awg");
+        assert_eq!(db.service_protocols("game"), "kmix,awg,dns");
         db.set("game_protocols", "kmix");
-        assert_eq!(db.service_protocols("game"), "wg,awg,kmix");
+        assert_eq!(db.service_protocols("game"), "kmix,awg,wg,dns");
         let u = db.create_user("gm", 10.0, 30, 1, "wg,awg,kmix", "", "", 0).unwrap();
         assert_eq!(u.service(), "game");
         // the default full list (with Hysteria2) stays VIP

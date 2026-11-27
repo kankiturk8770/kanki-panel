@@ -193,7 +193,7 @@ function qGB(n,u){var cur=+$('#f_gb').value||0,used=u?u.traffic_used_gb:0,base=c
 // user / config names: English letters and digits, 3-12, starting with a letter (WireGuard apps refuse other names)
 var NAME_ERR='name: English letters and digits only, 3-12 characters, starting with a letter (like mahtab87)';
 function nameOk(v){return /^[A-Za-z][A-Za-z0-9]{2,11}$/.test(v)}
-function ufForm(u){var protos=u?u.protocols.split(','):((S.me&&S.me.default_protocols)||'wg,awg,hy2').split(','),un=u?u.nodes.split(',').filter(Boolean):[],
+function ufForm(u){var protos=u?u.protocols.split(','):[],un=u?u.nodes.split(',').filter(Boolean):[],
   me0=S.me||{},dd=Math.max(1,+me0.def_days||30),exp=u?u.expires_ts:Math.floor(Date.now()/1000)+dd*86400,h='<div class="g2f">';
  h+='<div class="full"><label class="f">'+t('Username')+'</label><input id="f_name" class="ltr" autocomplete="off" value="'+esc(u?u.username:'')+'" placeholder="'+(u?'':t('Optional, created if empty'))+'" maxlength="12"><small class="muted">'+t('English letters and digits, 3-12, starting with a letter (like mahtab87). No spaces, emoji or symbols.')+'</small></div>';
  h+='<div class="full"><label class="f">'+t('Expiry date')+' <small>('+t(S.lang=='fa'?'Date (Jalali)':'Date')+')</small></label><div class="jd"><input id="f_date" class="ltr" inputmode="numeric" autocomplete="off" placeholder="'+N(S.lang=='fa'?'1405/01/01':'2026-01-31')+'" value="'+esc(dateVal(exp))+'"><input id="f_time" type="time" value="'+timeVal(exp)+'"><button type="button" class="ib" id="f_inf" title="'+t('Unlimited')+'">∞</button></div><div class="muted" id="f_prev" style="margin-top:5px"></div>'+
@@ -419,7 +419,7 @@ var STSEC=[
  ['look','Appearance','brush','Name, logo, language and theme of the panel',['panel_name','lang','theme','color','refresh']],
  ['net','Addresses','globe','Panel address, the public VPN address and subscription links',['endpoint','sub_base']],
  ['vpn','VPN & protocols','shield2','DNS, MTU and protocol behaviour on every server',['dns','mtu','mtu_auto','mtu_budget','awg_compat','conn_limit_on','wg_tunnel_on']],
- ['newu','New users','users','Ready values for the “New user” form',['default_protocols','def_gb','def_days','def_conns']],
+ ['newu','New users','users','Ready values for the “New user” form',['default_tier','def_gb','def_days','def_conns']],
  ['srv','Servers','nodes','What happens to a server that stays offline',['autodel_on','autodel_hours','autodel_iran']],
  ['upd','Update & version','refresh','Version, update source and installing updates',['update_repo']],
  ['io','Export & import','box','Move all settings to another panel or keep a copy',[]]];
@@ -457,8 +457,9 @@ function stBody(id,s){var addr='https://'+(s.domain||'')+(s.https_port&&s.https_
   '<div><label class="f">'+t('Largest packet on mobile data')+'</label><input data-k="mtu_budget" class="ltr" inputmode="numeric" placeholder="1380"><div class="chipset" data-fill="mtu_budget">'+['1340','1380','1420'].map(function(m){return '<button type="button" data-v="'+m+'">'+m+'</button>'}).join('')+'</div><div class="hint">'+t('Bytes of the whole packet (IPv4 + UDP + core). Iran mobile networks pass about 1420-1440; 1380 leaves a safe margin.')+'</div></div>'+
   '<div class="full box"><b>'+t('MTU of every config')+'</b><div class="hint">'+t('Worked out again with every subscription refresh and server sync, so a tunnel that changes type changes the MTU by itself.')+'</div><div id="mtu_rep">'+t('Loading…')+'</div></div>'+
   '<div class="full" style="margin-top:6px">'+stSw('awg_compat','AmneziaWG compatibility mode','Only Jc/Jmin/Jmax/S1/S2/H1-H4, for old AmneziaWG apps.')+stSw('conn_limit_on','Enforce the connection limit','A user cannot connect from more devices than their limit, on every protocol.')+stSw('wg_tunnel_on','Plain WireGuard through the Iran tunnels','Off: no plain WireGuard config goes through the tunnels; AmneziaWG through them stays. Iran can drop plain WireGuard handshakes.')+'</div></div>';
- case 'newu':return '<label class="f" style="margin-top:0">'+t('Default protocols for new users')+'</label><input type="hidden" data-k="default_protocols"><div class="pgs" data-multi="default_protocols">'+
-  PROTOS.map(function(x){return '<label style="--pc:'+((PCOL[x[0]]))+'"><input type="checkbox" value="'+x[0]+'" class="hide"><i></i>'+x[1]+'</label>'}).join('')+'</div><div class="hint">'+t('Also used by the sales bot when it makes an account.')+'</div>'+
+ case 'newu':return '<label class="f" style="margin-top:0" for="st_dtier">'+t('Default tier for new users')+'</label><select id="st_dtier" data-k="default_tier">'+
+  ['v2ray','gaming','vip'].map(function(k){return '<option value="'+k+'">'+t(TIER_NAMES[k])+' · '+TIER_CORES[k].join(', ')+'</option>'}).join('')+'</select>'+
+  '<div class="hint">'+t('A new user gets exactly the cores of its tier; the tier is never widened by a default.')+'</div>'+
   '<div class="g3" style="margin-top:6px">'+stIn('def_gb','Volume (GB)','30','0 = unlimited','', 'number')+stIn('def_days','Days','30','','', 'number')+stIn('def_conns','Connections','1','','', 'number')+'</div>';
  case 'upd':return '<div class="vcard"><div><small>'+t('Current version')+'</small><b>v'+esc(S.me.version)+'</b></div><div><small>'+t('Latest version')+'</small><b id="st_lv">…</b></div></div><div class="vmsg" id="st_um">'+t('Checking…')+'</div>'+autoUpdBox()+
   '<div class="row" style="margin-top:10px"><button class="b2" type="button" id="st_chk">'+ic('refresh',15)+' '+t('Check for update')+'</button><button class="btn hide" type="button" id="st_go">'+t('Install update')+'</button></div>'+
@@ -512,14 +513,14 @@ function stWire(){
  var sg=$('#sd_go');if(sg)sg.onclick=function(){stSub($('#sd_in').value.trim())};var sr=$('#sd_rm');if(sr)sr.onclick=function(){confirmDo(function(){stSub('')})};
  var im=$('#st_imf');if(im)im.onchange=function(){stImport(im)}}
 function stSave(sec,btn){var id=sec.dataset.sec,body={};$$('[data-k]',sec).forEach(function(el){body[el.dataset.k]=stVal(el)});
- if(id=='newu'&&!body.default_protocols)return toast(t('Choose at least one protocol'),1);
+ if(id=='newu'&&!TIER_CORES[body.default_tier])return toast(t('Choose a tier'),1);
  if(id=='upd'&&body.update_repo&&!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(body.update_repo))return toast(t('Write it as owner/repo'),1);
  if(id=='vpn'&&body.mtu&&!(+body.mtu>=1200&&+body.mtu<=1500))return toast(t('MTU must be between 1200 and 1500'),1);
  if(id=='vpn'&&body.mtu_budget&&!(+body.mtu_budget>=1300&&+body.mtu_budget<=1500))return toast(t('The largest packet must be between 1300 and 1500'),1);
  var all=id=='net'&&$('#st_all')&&$('#st_all').checked;btn.disabled=true;stState(sec,'saving');
  api('PUT','/api/settings',body).then(function(){return all?api('POST','/api/settings/apply-endpoint'):null}).then(function(){
   Object.assign(S.st,body);$$('[data-k]',sec).forEach(function(el){el._orig=stVal(el)});stDirty(sec);stState(sec,'saved');toast(t('Saved'));
-  if(id=='newu'&&S.me){S.me.default_protocols=body.default_protocols;S.me.def_gb=body.def_gb;S.me.def_days=body.def_days;S.me.def_conns=body.def_conns}
+  if(id=='newu'&&S.me){S.me.default_tier=body.default_tier;S.me.def_gb=body.def_gb;S.me.def_days=body.def_days;S.me.def_conns=body.def_conns}
   if(id=='look'){S.lang=body.lang;S.theme=body.theme;S.color=body.color;localStorage.setItem('kk_lang',S.lang);localStorage.setItem('kk_theme',S.theme);localStorage.setItem('kk_color',S.color);S.stsec='look';boot()}
   if(id=='upd')stUpdate(true);if(id=='vpn')stMtu()}).catch(function(e){stState(sec,'fail');btn.disabled=false;fail(e)})}
 // a page change or a closed tab with unsaved settings: the browser asks first

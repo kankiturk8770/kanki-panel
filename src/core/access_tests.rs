@@ -80,7 +80,7 @@ async fn a_role_switches_off_what_it_does_not_run_and_hybrid_gives_it_back() {
         let (app, admin) = (app.clone(), admin.clone());
         async move { call(&app, Method::POST, "/api/servers/node:n1/kmix", Some(&admin), Some(json!({ "on": on }))).await.0 }
     };
-    let u = app.db.user(user(&app, "mixed", "wg,awg,hy2,kmix", Tier::Combo)).unwrap();
+    let u = app.db.user(user(&app, "mixed", "wg,awg,hy2,kmix", Tier::Vip)).unwrap();
     let n = || app.db.node("n1").unwrap();
     assert!(crate::api::node_protos(&app, &u, &n()).contains(&"hysteria2"));
 
@@ -99,9 +99,9 @@ async fn a_role_switches_off_what_it_does_not_run_and_hybrid_gives_it_back() {
     assert_eq!(core("hy2", true).await, StatusCode::CONFLICT);
     assert!(crate::cores::load(&app).get("n1").map(|l| l.contains(&"hy2".to_string())).unwrap_or(false));
 
-    // antifilter: WireGuard and KANKI MIX off
+    // antifilter: WireGuard, AmneziaWG and KANKI MIX off (3.70: AmneziaWG is a gaming core)
     assert_eq!(set_role("antifilter").await, StatusCode::OK);
-    assert_eq!(crate::cores::off_list(&app, "n1"), vec!["hy2", "wg"]);
+    assert_eq!(crate::cores::off_list(&app, "n1"), vec!["awg", "hy2", "wg"]);
     assert_eq!(kmix(true).await, StatusCode::CONFLICT);
     assert!(!crate::kmix::settings(&app).node_on("n1"));
     // saving the KANKI MIX page meanwhile does not turn the role's «off» into the admin's own
@@ -166,7 +166,7 @@ async fn give_everyone_only_reaches_the_tiers_that_have_the_core() {
     let app = crate::test_app();
     let v2 = user(&app, "vtwo", "xray,hy2", Tier::V2ray);
     let gm = user(&app, "gamer", "wg,awg", Tier::Gaming);
-    let co = user(&app, "combo", "hy2", Tier::Combo);
+    let co = user(&app, "combo", "hy2", Tier::Vip);
     let (st, _) = call(&app, Method::POST, "/api/protocols/wg/assign-all", None, None).await;
     assert_eq!(st, StatusCode::UNAUTHORIZED);
     let weak = token(&app, "users:read");
@@ -183,12 +183,13 @@ async fn give_everyone_only_reaches_the_tiers_that_have_the_core() {
     call(&app, Method::POST, "/api/protocols/xray/assign-all", Some(&admin), None).await;
     assert!(has(v2, "xray") && !has(gm, "xray") && has(co, "xray"));
     call(&app, Method::POST, "/api/protocols/dns/assign-all", Some(&admin), None).await;
-    assert!(!has(v2, "dns") && !has(gm, "dns") && has(co, "dns"));
+    // 3.70: DNS comes free with gaming
+    assert!(!has(v2, "dns") && has(gm, "dns") && has(co, "dns"));
 
-    // the admin may still tick WireGuard on one V2Ray account by hand; its tier stays and keeps guarding
+    // 3.70: a core outside the tier cannot be ticked on one account by hand either; the tier stays
     let (st, v) = call(&app, Method::PUT, &format!("/api/users/{}", v2), Some(&admin), Some(json!({"protocols": "xray,hy2,wg"}))).await;
-    assert_eq!((st, v["tier"].as_str()), (StatusCode::OK, Some("v2ray")));
-    assert!(has(v2, "wg"));
+    assert_eq!(st, StatusCode::BAD_REQUEST, "{}", v);
+    assert!(!has(v2, "wg") && app.db.user(v2).unwrap().tier() == Tier::V2ray);
     call(&app, Method::POST, "/api/protocols/awg/assign-all", Some(&admin), None).await;
     assert!(!has(v2, "awg"));
     // a bad tier is refused, a good one is kept
@@ -234,7 +235,7 @@ async fn concurrent_give_everyone_never_crosses_a_tier() {
     }
     for id in &gms {
         let u = app.db.user(*id).unwrap();
-        assert!(["xray", "hy2", "dns"].iter().all(|p| !u.has_proto(p)), "{}: {}", u.username, u.protocols);
+        assert!(["xray", "hy2"].iter().all(|p| !u.has_proto(p)), "{}: {}", u.username, u.protocols);
         assert!(u.has_proto("wg"));
     }
 }
@@ -247,10 +248,25 @@ async fn new_users_take_the_protocols_of_their_tier() {
     assert_eq!(st, StatusCode::OK, "{}", v);
     assert_eq!((v[0]["protocols"].as_str(), v[0]["tier"].as_str()), (Some("xray,hy2"), Some("v2ray")));
     let (st, v) = call(&app, Method::POST, "/api/users", Some(&admin), Some(json!({"username": "gonly", "tier": "gaming"}))).await;
-    assert_eq!((st, v[0]["protocols"].as_str(), v[0]["tier"].as_str()), (StatusCode::OK, Some("wg,awg,kmix"), Some("gaming")));
-    // no tier: the panel's default list, and the tier it makes
+    assert_eq!((st, v[0]["protocols"].as_str(), v[0]["tier"].as_str()), (StatusCode::OK, Some("kmix,awg,wg,dns"), Some("gaming")));
+    // no tier: the «New user» default tier with exactly its cores; the old default list never adds a core
+    app.db.set("default_protocols", "wg,awg,hy2,kmix,xray,dns");
     let (_, v) = call(&app, Method::POST, "/api/users", Some(&admin), Some(json!({"username": "plain"}))).await;
-    assert_eq!(v[0]["tier"].as_str(), Some("combo"));
+    assert_eq!((v[0]["tier"].as_str(), v[0]["protocols"].as_str()), (Some("vip"), Some("xray,hy2,kmix,awg,wg,dns")));
+    app.db.set("default_tier", "v2ray");
+    let (_, v) = call(&app, Method::POST, "/api/users", Some(&admin), Some(json!({"username": "plain2"}))).await;
+    assert_eq!((v[0]["tier"].as_str(), v[0]["protocols"].as_str()), (Some("v2ray"), Some("xray,hy2")));
+    // a gaming account is never put on the Xray inbounds: the «Xray users» count stays the real one
+    let xray_users = app.db.users().iter().filter(|u| u.has_proto("xray")).count();
+    assert_eq!(xray_users, 3);
+    // cores outside the tier are refused, nothing is made
+    let before = app.db.users().len();
+    let (st, _) = call(&app, Method::POST, "/api/users", Some(&admin), Some(json!({"username": "mixed2", "tier": "gaming", "protocols": ["wg", "xray"]}))).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
+    assert_eq!(app.db.users().len(), before);
+    // the setting takes only a known tier
+    let (st, _) = call(&app, Method::PUT, "/api/settings", Some(&token(&app, "settings")), Some(json!({"default_tier": "everything"}))).await;
+    assert_eq!(st, StatusCode::BAD_REQUEST);
     let before = app.db.users().len();
     let (st, _) = call(&app, Method::POST, "/api/users", Some(&admin), Some(json!({"username": "bad", "tier": "everything"}))).await;
     assert_eq!(st, StatusCode::BAD_REQUEST);
@@ -286,7 +302,7 @@ fn an_old_database_gets_roles_and_tiers_without_losing_a_service() {
     };
     let tiers = |db: &crate::db::Db| by_name(db).iter().map(|u| (u.username.clone(), u.tier_raw.clone())).collect::<Vec<_>>();
     let db = crate::db::Db::open(path.to_str().unwrap());
-    let want = vec![("a".to_string(), "v2ray".to_string()), ("b".into(), "gaming".into()), ("c".into(), "combo".into()), ("d".into(), "combo".into())];
+    let want = vec![("a".to_string(), "v2ray".to_string()), ("b".into(), "gaming".into()), ("c".into(), "vip".into()), ("d".into(), "vip".into())];
     assert_eq!(tiers(&db), want);
     assert_eq!(db.node("n1").unwrap().role(), Role::Hybrid);
     // the emergency chat's secrets are gone (3.65); other settings stay
@@ -298,7 +314,7 @@ fn an_old_database_gets_roles_and_tiers_without_losing_a_service() {
     db.exec("UPDATE users SET tier='combo' WHERE username='a'", &[]).unwrap();
     drop(db);
     let db = crate::db::Db::open(path.to_str().unwrap());
-    assert_eq!(by_name(&db)[0].tier(), Tier::Combo);
+    assert_eq!(by_name(&db)[0].tier(), Tier::Vip);
 }
 
 /// GET `uri`: status, headers, body
@@ -831,4 +847,124 @@ async fn kmix_hop_ports_follow_the_iran_tunnel_or_stay_out_of_its_link() {
     crate::tunnel::panel::save_tunnels(&app, &tl);
     let spec = crate::tunnel::panel::specs_for(&app, "hir1").into_iter().find(|s| s.id == "h1t").unwrap();
     assert_eq!(spec.udp, vec!["4000".to_string()]);
+}
+
+/// 3.70: a 3.69 database moves to the three-plan model without anyone losing a core or a code: `combo` becomes
+/// `vip`, an account whose tier did not cover its cores becomes `vip`, an antifilter server that runs AmneziaWG keeps
+/// it, and a TON / Stars payment already used stays used
+#[test]
+fn a_369_database_keeps_every_user_and_payment() {
+    let dir = std::env::temp_dir().join(format!("kanki-mig370-{}", crate::util::rand_token(8)));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("kanki.db");
+    let codes: Vec<(String, String, String)> = {
+        let db = crate::db::Db::open(path.to_str().unwrap());
+        let a = db.create_user("olda", 10.0, 30, 1, "wg,awg,hy2,kmix", "", "", 0).unwrap();
+        let b = db.create_user("oldb", 10.0, 30, 1, "xray,hy2,wg", "", "", 0).unwrap();
+        let c = db.create_user("oldc", 10.0, 30, 1, "kmix,wg", "", "", 0).unwrap();
+        // as 3.69 left them: «combo», a v2ray tier with WireGuard ticked by hand, gaming
+        db.exec("UPDATE users SET tier='combo' WHERE id=?1", &[&a.id]).unwrap();
+        db.exec("UPDATE users SET tier='v2ray' WHERE id=?1", &[&b.id]).unwrap();
+        db.exec("UPDATE users SET tier='gaming' WHERE id=?1", &[&c.id]).unwrap();
+        db.exec("INSERT INTO nodes(id,name,address,endpoint,token,role) VALUES('af1','AF','https://x','','t','antifilter'),('af2','AF2','https://y','','t','antifilter')", &[]).unwrap();
+        db.set("core_off", r#"{"af2":["awg"]}"#);
+        db.exec("INSERT INTO orders(tg_id,plan_id,kind,target,method,amount,status,ref,created) VALUES(1,1,'new',0,'ton','1','done','KANKI-1-AB 100 HASHONE',1),(1,1,'new',0,'stars','1','done','n 5 CHARGE1',1),(1,1,'new',0,'ton','1','waiting','KANKI-3-AB 100',1)", &[]).unwrap();
+        db.exec("DELETE FROM settings WHERE k='mig_370_awg_keep'", &[]).unwrap();
+        db.with(|c| c.execute("DELETE FROM pay_tx", [])).unwrap();
+        vec![a, b, c].into_iter().map(|u| (u.username, u.code, u.protocols)).collect()
+    };
+    let db = crate::db::Db::open(path.to_str().unwrap());
+    let by = |n: &str| db.users().into_iter().find(|u| u.username == n).unwrap();
+    for (name, code, protos) in &codes {
+        let u = by(name);
+        assert_eq!((&u.code, &u.protocols), (code, protos), "{}", name);
+        assert!(u.protocols.split(',').all(|p| u.tier().allows(p)), "{}: {} {}", name, u.tier_raw, u.protocols);
+    }
+    assert_eq!(by("olda").tier_raw, "vip");
+    assert_eq!(by("oldb").tier_raw, "vip");
+    assert_eq!(by("oldc").tier_raw, "gaming");
+    let keep: Vec<String> = serde_json::from_str(&db.get("antifilter_awg_keep")).unwrap();
+    assert_eq!(keep, vec!["af1".to_string()]);
+    let used: Vec<String> = db.with(|c| {
+        let mut s = c.prepare("SELECT id FROM pay_tx ORDER BY id").unwrap();
+        let v: Vec<String> = s.query_map([], |r| r.get(0)).unwrap().map(|x| x.unwrap()).collect();
+        v
+    });
+    assert_eq!(used, vec!["CHARGE1".to_string(), "HASHONE".to_string()]);
+    // opening again changes nothing
+    drop(db);
+    let db = crate::db::Db::open(path.to_str().unwrap());
+    assert_eq!(db.with(|c| c.query_row("SELECT COUNT(*) FROM pay_tx", [], |r| r.get::<_, i64>(0)).unwrap()), 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 3.70: roles keep VPN users where they belong: the panel's own server and an Iran entry carry none and run no
+/// VPN core; an old antifilter server keeps its AmneziaWG
+#[tokio::test]
+async fn panel_and_iran_servers_carry_no_vpn_user() {
+    let app = crate::test_app();
+    add_node(&app, "local");
+    add_node(&app, "ir1");
+    add_node(&app, "af1");
+    app.db.exec("UPDATE nodes SET accept_all=1", &[]).unwrap();
+    let admin = token(&app, "nodes");
+    let u = app.db.user(user(&app, "vipu", "xray,hy2,kmix,awg,wg,dns", Tier::Vip)).unwrap();
+    let set = |id: &'static str, r: &'static str| {
+        let (app, admin) = (app.clone(), admin.clone());
+        async move { call(&app, Method::POST, &format!("/api/servers/node:{}/role", id), Some(&admin), Some(json!({"role": r}))).await.0 }
+    };
+    // unauthenticated, and a role a server cannot have
+    assert_eq!(call(&app, Method::POST, "/api/servers/node:ir1/role", None, Some(json!({"role": "iran"}))).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(set("ir1", "panel").await, StatusCode::BAD_REQUEST);
+    assert_eq!(set("ir1", "iran").await, StatusCode::OK);
+    assert_eq!(set("local", "panel").await, StatusCode::OK);
+    let nodes: Vec<String> = crate::api::user_nodes(&app, &u).into_iter().map(|n| n.id).collect();
+    assert!(!nodes.contains(&"ir1".to_string()) && !nodes.contains(&"local".to_string()), "{:?}", nodes);
+    for nid in ["ir1", "local"] {
+        let off = crate::cores::off_list(&app, nid);
+        assert!(["wg", "awg", "hy2"].iter().all(|c| off.contains(&c.to_string())), "{} {:?}", nid, off);
+    }
+    // an antifilter server that ran AmneziaWG before 3.70 keeps it; another one does not get it
+    app.db.set("antifilter_awg_keep", r#"["af1"]"#);
+    assert_eq!(set("af1", "antifilter").await, StatusCode::OK);
+    assert!(!crate::cores::off_list(&app, "af1").contains(&"awg".to_string()));
+    app.db.set("antifilter_awg_keep", "[]");
+    assert!(crate::cores::off_list(&app, "af1").contains(&"awg".to_string()));
+    let (st, _) = call(&app, Method::POST, "/api/servers/node:af1/core", Some(&admin), Some(json!({"core": "awg", "on": true}))).await;
+    assert_eq!(st, StatusCode::CONFLICT);
+}
+
+/// 3.70: the panel's in-place upgrade keeps the account and refuses what is not an upgrade
+#[tokio::test]
+async fn the_panel_upgrades_an_account_in_place() {
+    let app = crate::test_app();
+    let g = user(&app, "gup", "kmix,awg,wg,dns", Tier::Gaming);
+    app.db.exec("UPDATE users SET used_bytes=12345 WHERE id=?1", &[&g]).unwrap();
+    let before = app.db.user(g).unwrap();
+    assert_eq!(call(&app, Method::POST, &format!("/api/users/{}/upgrade", g), None, None).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(call(&app, Method::POST, &format!("/api/users/{}/upgrade", g), Some(&token(&app, "users:read")), None).await.0, StatusCode::FORBIDDEN);
+    let admin = token(&app, "users:write");
+    let (st, v) = call(&app, Method::POST, &format!("/api/users/{}/upgrade", g), Some(&admin), Some(json!({"tier": "vip"}))).await;
+    assert_eq!(st, StatusCode::OK, "{}", v);
+    let u = app.db.user(g).unwrap();
+    assert_eq!((u.id, &u.code, u.limit_gb, u.used_bytes, u.expires_at, u.cred), (before.id, &before.code, before.limit_gb, before.used_bytes, before.expires_at, before.cred));
+    assert_eq!((u.tier(), u.protocols.as_str()), (Tier::Vip, "kmix,awg,wg,dns,xray,hy2"));
+    // again, or to another tier: refused, nothing changes
+    assert_eq!(call(&app, Method::POST, &format!("/api/users/{}/upgrade", g), Some(&admin), None).await.0, StatusCode::BAD_REQUEST);
+    let v2 = user(&app, "vup", "xray,hy2", Tier::V2ray);
+    assert_eq!(call(&app, Method::POST, &format!("/api/users/{}/upgrade", v2), Some(&admin), Some(json!({"tier": "gaming"}))).await.0, StatusCode::BAD_REQUEST);
+    assert_eq!(app.db.user(v2).unwrap().tier(), Tier::V2ray);
+    // two upgrades at once: one changes it
+    let v3 = user(&app, "vup3", "xray", Tier::V2ray);
+    let mut tasks = vec![];
+    for _ in 0..6 {
+        let (app, admin) = (app.clone(), admin.clone());
+        tasks.push(tokio::spawn(async move { call(&app, Method::POST, &format!("/api/users/{}/upgrade", v3), Some(&admin), None).await.0 }));
+    }
+    let mut ok = 0;
+    for t in tasks {
+        if t.await.unwrap() == StatusCode::OK { ok += 1; }
+    }
+    assert_eq!(ok, 1);
+    assert_eq!(app.db.user(v3).unwrap().tier(), Tier::Vip);
 }

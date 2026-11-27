@@ -586,19 +586,22 @@ function route(s){var to=flag(s.cc)||'🌐';return s.iran?flag('IR')+'→'+to:to
 function gb(x){return x>=100?fa(Math.round(x)):fa((Math.round(x*10)/10).toString())}
 function toast(t){var e=document.getElementById('toast');e.textContent=t;e.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(function(){e.classList.remove('on')},2600)}
 function buzz(k){var w=tg();try{w&&w.HapticFeedback&&w.HapticFeedback.notificationOccurred(k)}catch(e){}}
+// 3.70: the init data goes only in the header; every change is a POST with a one-time nonce (a replay is refused)
+function nonce(){var a=new Uint8Array(18);(window.crypto||window.msCrypto).getRandomValues(a);return Array.prototype.map.call(a,function(x){return ('0'+x.toString(16)).slice(-2)}).join('')}
+function act(path,body){return fetch(path,{method:'POST',headers:{'X-Tg-Init':initData(),'X-Tg-Nonce':nonce(),'Content-Type':'application/json'},body:JSON.stringify(body||{}),cache:'no-store'}).then(function(r){return r.json().catch(function(){return{}}).then(function(j){if(!r.ok){var e=new Error(j.error||r.status);e.why=j.why;throw e}return j})})}
 function api(path){return fetch(path,{headers:{'X-Tg-Init':initData()},cache:'no-store'}).then(function(r){return r.json().catch(function(){return{}}).then(function(j){if(!r.ok){var e=new Error(j.error||r.status);e.why=j.why;throw e}return j})})}
 var PN={i:'آیفون',a:'اندروید',w:'ویندوز'};
 var ST={Active:['فعال','var(--ok)'],Limited:['حجم تمام شده','var(--warn)'],Expired:['زمان تمام شده','var(--warn)'],Disabled:['غیرفعال','var(--bad)']};
 
 function toman(n){return Math.round(n).toLocaleString('en-US')+' تومان'}
-var OST={pending:['در انتظار تأیید','y'],waiting:['در انتظار پرداخت','y'],approved:['تأیید شد','g'],done:['فعال شد','g'],rejected:['رد شد','r'],error:['خطا؛ پشتیبانی پیگیری می‌کنه','r'],expired:['پرداخت نشد؛ منقضی شد','r']};
+var OST={pending:['در انتظار تأیید','y'],waiting:['در انتظار پرداخت','y'],approved:['تأیید شد','g'],done:['فعال شد','g'],rejected:['رسید رد شد','r'],failed:['پرداخت ناموفق','r'],partial:['پرداخت ناقص؛ پشتیبانی پیگیری می‌کنه','r'],error:['خطا؛ پشتیبانی پیگیری می‌کنه','r'],expired:['پرداخت نشد؛ منقضی شد','r']};
 function ordersHtml(){if(!A.orders||!A.orders.length)return '';
  return '<h2>سفارش‌های من</h2><div class="card">'+A.orders.map(function(o){var st=OST[o.status]||[o.status||'—','y'],amt=+o.amount;
-  return '<div class="row"><div class="nm"><b>'+esc(o.plan||'سفارش')+'</b><small>'+(o.kind=='renew'?'تمدید':'خرید')+'، '+(amt>0&&o.method!='np'&&o.method!='wallet'?toman(amt):'')+(o.created?' '+new Date(o.created*1000).toLocaleDateString('fa-IR'):'')+'</small></div><span class="ost '+st[1]+'">'+st[0]+'</span></div>'}).join('')+'</div>'}
+  return '<div class="row"><div class="nm"><b>'+esc(o.plan||'سفارش')+'</b><small>'+(o.kind=='renew'?'تمدید':o.kind=='upgrade'?'ارتقا به VIP':'خرید')+'، '+(amt>0&&o.method!='np'&&o.method!='wallet'?toman(amt):'')+(o.created?' '+new Date(o.created*1000).toLocaleDateString('fa-IR'):'')+'</small></div><span class="ost '+st[1]+'">'+st[0]+'</span></div>'}).join('')+'</div>'}
 function nameCard(){if(!A.needName||A.renew)return '';
  return '<div class="card" style="margin-bottom:12px"><span class="lbl" style="margin-top:0">اسم کانفیگ شما</span><input class="in" id="cn" maxlength="12" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="'+esc(A.nameHint||'mahtab87')+'" value="'+esc(A.name||'')+'">'+
   '<p class="lead" style="margin:6px 2px 0">فقط حروف انگلیسی و عدد، 3 تا 12 حرف، اولش حرف. توی برنامه با همین اسم می‌بینیدش.'+(A.nameHint?' خالی بذارید تا همون <b class="ltr">'+esc(A.nameHint)+'</b> (از اسم تلگرامتون) بشه.':'')+'</p></div>'}
-function nameQ(){if(!A.needName||A.renew)return '';var e=document.getElementById('cn'),v=e?e.value.trim():'';A.name=v;return '&name='+encodeURIComponent(v)}
+function nameQ(o){o=o||{};if(!A.needName||A.renew)return o;var e=document.getElementById('cn'),v=e?e.value.trim():'';A.name=v;o.name=v;return o}
 var NOSEND='ربات نتونست توی چت پیام بده؛ ربات رو توی تلگرام استارت کنید (اگه بلاکش کردید، آنبلاک) و دوباره امتحان کنید';
 function why(e,j){var m=e.message;if(m=='name')return 'اول اسم کانفیگ رو بنویسید';if(m=='bad name')return (j||'اسم کانفیگ درست نیست').replace(/<[^>]+>/g,'').split('\n')[0];
  if(m=='join the channel')return 'اول عضو کانال بشید؛ ربات لینکش رو توی چت فرستاد';if(m=='the bot is off')return 'ربات الان در دسترس نیست؛ کمی بعد امتحان کنید';
@@ -718,10 +721,10 @@ function wireBuy(){var $=function(s){return document.querySelector(s)},all=funct
  if($('#gr')){$('#gr').oninput=function(){cb.g=+this.value;upd();buzz2()};$('#dr').oninput=function(){cb.d=+this.value;upd();buzz2()};var ur=$('#ur');if(ur)ur.oninput=function(){cb.u=+this.value;upd();buzz2()};upd()}
 
  function closeSoon(t){buzz('success');toast(t);setTimeout(function(){var w=tg();if(w&&w.close)w.close()},1400)}
- function go(q,b){b.disabled=true;api('/tg/api/buy?'+q+(A.renew?'&renew='+A.renew:'')+nameQ()).then(function(){closeSoon('صفحه‌ی پرداخت توی چت ربات اومد')}).catch(function(e){buzz('error');b.disabled=false;toast(why(e,e.why));var n=document.getElementById('cn');if(n&&/name/.test(e.message))n.focus()})}
- var tri=$('#tri');if(tri)tri.onclick=function(){tri.disabled=true;api('/tg/api/trial?x=1'+nameQ()).then(function(){closeSoon('تست رایگان توی چت ربات اومد')}).catch(function(e){buzz('error');tri.disabled=false;toast(why(e,e.why))})};
- var cbuy=$('#cbuy');if(cbuy)cbuy.onclick=function(){go('svc='+A.svc+'&gb='+cb.g+'&days='+cb.d+'&users='+cb.u,cbuy)};
- all('[data-pid]').forEach(function(b){b.onclick=function(){go('pid='+b.dataset.pid,b)}})}
+ function go(q,b){b.disabled=true;if(A.renew)q.renew=A.renew;act('/tg/api/buy',nameQ(q)).then(function(){closeSoon('صفحه‌ی پرداخت توی چت ربات اومد')}).catch(function(e){buzz('error');b.disabled=false;toast(why(e,e.why));var n=document.getElementById('cn');if(n&&/name/.test(e.message))n.focus()})}
+ var tri=$('#tri');if(tri)tri.onclick=function(){tri.disabled=true;act('/tg/api/trial',nameQ()).then(function(){closeSoon('تست رایگان توی چت ربات اومد')}).catch(function(e){buzz('error');tri.disabled=false;toast(why(e,e.why))})};
+ var cbuy=$('#cbuy');if(cbuy)cbuy.onclick=function(){go({svc:A.svc,gb:+cb.g,days:+cb.d,users:+cb.u},cbuy)};
+ all('[data-pid]').forEach(function(b){b.onclick=function(){go({pid:+b.dataset.pid},b)}})}
 function buzz2(){var w=tg();try{w&&w.HapticFeedback&&w.HapticFeedback.selectionChanged()}catch(e){}}
 
 var CN={TR:'ترکیه',DE:'آلمان',NL:'هلند',SE:'سوئد',GB:'انگلیس',FI:'فنلاند',FR:'فرانسه',US:'آمریکا',CA:'کانادا',AE:'امارات',IR:'ایران',AM:'ارمنستان',RU:'روسیه',PL:'لهستان',AT:'اتریش',CH:'سوئیس',IT:'ایتالیا',ES:'اسپانیا',RO:'رومانی',BG:'بلغارستان',LV:'لتونی',LT:'لیتوانی',EE:'استونی',NO:'نروژ',DK:'دانمارک',CZ:'چک',HU:'مجارستان',GR:'یونان',CY:'قبرس',GE:'گرجستان',AZ:'آذربایجان',KZ:'قزاقستان',JP:'ژاپن',SG:'سنگاپور',HK:'هنگ‌کنگ',IN:'هند'};
@@ -762,6 +765,7 @@ function subTab(u,v2){var st=ST[u.status]||ST.Active,lim=u.limit_gb>0,left=lim?M
   '</div>';
  h+=(u.links||v2)?'<div class="acts"><button class="b" id="v2_chat">لینک V2Ray توی چت</button><button class="b" data-t="app">راهنمای اتصال</button></div>':'<div class="acts one"><button class="b" data-t="app">راهنمای اتصال</button></div>';
  if(sales())h+='<div class="acts one"><button class="b go" id="rn">تمدید یا افزایش حجم همین حساب</button></div>';
+ if(sales()&&u.upgrade)h+='<div class="acts one"><button class="b" id="upg">⬆️ ارتقا به ترکیبی VIP · '+toman(u.upgrade)+'</button></div>';
  return h+ordersHtml()}
 
 // tab 2: one tile per country; a tapped country shows what can be taken for it
@@ -819,6 +823,7 @@ function wire(u){var $=function(s){return document.querySelector(s)},all=functio
  var sub=u.v2link;
  all('[data-acc]').forEach(function(b){b.onclick=function(){A.cur=+b.dataset.acc;draw()}});
  var rn=$('#rn');if(rn)rn.onclick=function(){A.renew=u.id;A.svc='';A.view='buy';drawBuy();window.scrollTo(0,0)};
+ var upg=$('#upg');if(upg)upg.onclick=function(){upg.disabled=true;act('/tg/api/upgrade',{uid:u.id}).then(function(){buzz('success');toast('صفحه‌ی پرداخت ارتقا توی چت ربات اومد');setTimeout(function(){var w=tg();if(w&&w.close)w.close()},1400)}).catch(function(e){buzz('error');upg.disabled=false;toast(e.message=='not delivered'?NOSEND:'نشد، دوباره امتحان کنید')})};
  all('[data-p]').forEach(function(b){b.onclick=function(){A.plat=b.dataset.p;draw()}});
  all('[data-cc]').forEach(function(b){b.onclick=function(){A.ctry=b.dataset.cc;draw()}});
  all('details.app').forEach(function(d,i){d.addEventListener('toggle',function(){if(d.open){A.open[A.plat]=d.dataset.k;all('details.app').forEach(function(x){if(x!=d)x.open=false})}})});
@@ -827,10 +832,10 @@ function wire(u){var $=function(s){return document.querySelector(s)},all=functio
  var cp=$('#cp');if(cp)cp.onclick=function(){copyText(sub,'لینک اشتراک کپی شد')};
  all('[data-cpv]').forEach(function(b){b.onclick=function(){copyText(sub,'لینک اشتراک کپی شد')}});
  all('#cc').forEach(function(b){b.onclick=function(){copyText(u.code,'کد ورود کپی شد')}});
- function send(what,b){b.disabled=true;api('/tg/api/send?uid='+u.id+'&what='+what).then(function(){buzz('success');toast('توی چت ربات فرستاده شد')}).catch(function(e){buzz('error');toast(e.message=='not delivered'?NOSEND:/config/.test(e.message)?'برای این حساب فعال نیست':'نشد، دوباره امتحان کنید')}).then(function(){b.disabled=false})}
+ function send(what,b){b.disabled=true;act('/tg/api/send',{uid:u.id,what:what}).then(function(){buzz('success');toast('توی چت ربات فرستاده شد')}).catch(function(e){buzz('error');toast(e.message=='not delivered'?NOSEND:/config/.test(e.message)?'برای این حساب فعال نیست':'نشد، دوباره امتحان کنید')}).then(function(){b.disabled=false})}
  all('#amz_chat,[data-amz]').forEach(function(c){c.onclick=function(){send('amz:'+A.plat,c)}});
  var d=$('#amz_dl');if(d)d.onclick=function(){var w=tg();
-  w.downloadFile({url:location.origin+'/tg/api/file?uid='+u.id+'&p='+A.plat+'&init='+encodeURIComponent(initData()),file_name:u.name.replace(/[^A-Za-z0-9_-]/g,'')+'.backup'})};
+  act('/tg/api/file',{uid:u.id,p:A.plat}).then(function(t){w.downloadFile({url:t.url,file_name:u.name.replace(/[^A-Za-z0-9_-]/g,'')+'.backup'})}).catch(function(){buzz('error');toast('نشد، دوباره امتحان کنید')})};
  var ad=$('#app_dl');if(ad)ad.onclick=function(){send('app:a',ad)};
  var v2c=$('#v2_chat');if(v2c)v2c.onclick=function(){send('cfg:v',v2c)};
  all('[data-cfg]').forEach(function(b){b.onclick=function(){send('cfg:'+b.dataset.cfg,b)}})}
@@ -840,13 +845,16 @@ function wire(u){var $=function(s){return document.querySelector(s)},all=functio
 // premium emoji itself is sent to the bot in the chat (a web page cannot read one); this page follows by itself.
 var BB={d:null,f:null,poll:0};
 var BGR=[['main','منوی اصلی'],['sub','زیر پیام اشتراک'],['pay','صفحه‌ی پرداخت'],['other','بقیه']];
-function post(path,body){return fetch(path,{method:'POST',headers:{'X-Tg-Init':initData(),'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().catch(function(){return{}}).then(function(j){if(!r.ok)throw new Error(j.error||r.status);return j})})}
+function post(path,body){return fetch(path,{method:'POST',headers:{'X-Tg-Init':initData(),'X-Tg-Nonce':nonce(),'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json().catch(function(){return{}}).then(function(j){if(!r.ok)throw new Error(j.error||r.status);return j})})}
+// a premium emoji's picture: fetched with the header (never the init data in a URL), shown as a blob
+var EMO={};function emoLoad(){Array.prototype.forEach.call(document.querySelectorAll('img[data-emo]'),function(im){var id=im.getAttribute('data-emo');
+ if(EMO[id]){im.src=EMO[id];return}fetch('/tg/api/admin/emoji/'+encodeURIComponent(id),{headers:{'X-Tg-Init':initData()}}).then(function(r){if(!r.ok)throw 0;return r.blob()}).then(function(b){EMO[id]=URL.createObjectURL(b);im.src=EMO[id]}).catch(function(){im.replaceWith(document.createTextNode('⭐'))})})}
 function backBtn(fn){var w=tg();if(!w||!w.BackButton)return;try{if(BB.back)w.BackButton.offClick(BB.back);BB.back=fn;if(fn){w.BackButton.onClick(fn);w.BackButton.show()}else w.BackButton.hide()}catch(e){}}
 function bGroup(x){return x.main?'main':/^(pay_|disc$)/.test(x.key)?'pay':/اشتراک/.test(x.place)?'sub':'other'}
 function bColour(x,st){st=st==null?x.style:st;return st==''?x.style_default||'':st=='none'?'':st}
 // with a premium emoji the plain one at the start goes, as in the bot
 function bShown(txt,icon){if(!icon)return txt;var m=String(txt).trim().match(/^(\S+)\s+(.+)$/);return m&&!/[\p{L}\p{N}]/u.test(m[1])?m[2]:txt}
-function bEmo(id,big){return id?'<img alt="" src="/tg/api/admin/emoji/'+encodeURIComponent(id)+'?init='+encodeURIComponent(initData())+'" onerror="this.replaceWith(document.createTextNode(\'⭐\'))">':''}
+function bEmo(id,big){if(!id)return '';setTimeout(emoLoad,0);return '<img alt="" data-emo="'+esc(String(id))+'">'}
 function bBtn(x,o){o=o||{};var icon=o.icon==null?x.icon:o.icon,txt=o.text==null?(x.text||x.default):(o.text||x.default);
  return '<span class="tgb '+(bColour(x,o.style)||'')+'">'+(icon?'<i class="tge">'+bEmo(icon)+'</i>':'')+'<span>'+esc(bShown(txt,icon))+'</span></span>'}
 function bFind(k){return ((BB.d&&BB.d.buttons)||[]).filter(function(x){return x.key==k})[0]}
@@ -1199,7 +1207,7 @@ function start(){var w=tg();if(w){try{w.ready();w.expand()}catch(e){}
  // the report bot's page: the panel's state only, never the shop
  if(Q.get('mon')){A.mon=true;A.view='mon';M.tab=['sum','srv','tun','paths','err'].indexOf(Q.get('tab'))>=0?Q.get('tab'):'sum';var hp=document.getElementById('hp');hp.textContent='گزارش پنل';hp.disabled=true;return render()}
  if(A.adm){var h2=document.getElementById('hp');h2.textContent='مدیریت ربات';h2.disabled=true;
-  return api('/tg/api/me').then(function(r){A.admin=!!r.admin;render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
+  return api('/tg/api/admin/whoami').then(function(r){A.admin=!!r.admin;render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
  Promise.all([api('/tg/api/me'),api('/tg/api/shop').catch(function(){return null})]).then(function(r){A.list=r[0].accounts||[];if(A.renew&&!A.list.some(function(x){return x.id==A.renew}))A.renew=0;A.orders=r[0].orders||[];A.needName=!!r[0].need_name;A.trial=!!r[0].trial;A.androidApp=!!r[0].android_app;A.appLink=r[0].app_link||'';A.winLink=r[0].win_link||'';A.nameHint=r[0].name_hint||'';A.support=r[0].support||'';A.admin=!!r[0].admin;A.offer=+r[0].offer||0;A.shop=r[1];head();render()}).catch(function(e){empty('!','باز نشد',e.message=='open this page from the bot'?'این صفحه رو از ربات باز کنید.':'اتصال برقرار نشد؛ کمی بعد دوباره باز کنید.')})}
 // wait a moment for Telegram's script, then go on without it
 var n=0;(function go(){if(tg()||n++>15)start();else setTimeout(go,100)})();

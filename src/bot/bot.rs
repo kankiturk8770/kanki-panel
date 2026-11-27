@@ -104,6 +104,282 @@ type ReceiptCopy = (i64, i64, bool, String);
 type Kb = Vec<Vec<(String, String)>>;
 
 /// `a` with the names of `b` it does not have yet added at the end (comma lists)
+/// What one delivery needs, read before the database is locked (`Bot::fulfill`)
+struct Deliver {
+    oid: i64,
+    tg: i64,
+    kind: String,
+    target: i64,
+    discount: String,
+    personal: bool,
+    back: bool,
+    name: String,
+    nodes: String,
+    protocols: String,
+    vip_protocols: String,
+    bonus_pct: f64,
+    refs: RefCfg,
+}
+
+/// What a delivery did (for the messages sent after the commit)
+struct Delivered {
+    user: User,
+    code_ok: bool,
+    bonus_gb: f64,
+    bank: Option<(f64, i64)>,
+    referral: Option<RefOut>,
+}
+
+/// The referral settings
+#[derive(Clone, Copy)]
+struct RefCfg {
+    pct: f64,
+    gb: f64,
+    days: i64,
+}
+
+impl RefCfg {
+    fn read(db: &crate::db::Db) -> RefCfg {
+        RefCfg {
+            pct: db.get("ref_pct").parse::<f64>().unwrap_or(0.0).clamp(0.0, 100.0),
+            gb: db.get("ref_gb").parse::<f64>().unwrap_or(0.0).clamp(0.0, 1000.0),
+            days: db.get("ref_days").parse::<i64>().unwrap_or(0).clamp(0, 365),
+        }
+    }
+}
+
+/// An inviter's reward: who, how much, and the account it went to (None = kept in their bank)
+struct RefOut {
+    by: i64,
+    first: bool,
+    gb: f64,
+    days: i64,
+    account: Option<String>,
+}
+
+/// Rejected receipts in 24 hours after which a customer's new receipts are refused for the rest of the 24 hours
+const REJECT_LIMIT: i64 = 2;
+
+/// A gateway's answer about one payment
+#[derive(Debug, PartialEq)]
+enum GwState {
+    /// paid in full; the gateway's own payment / reference id
+    Paid(String),
+    Waiting,
+    /// less than the order arrived
+    Partial(String),
+    /// failed, expired, refunded or refused by the gateway
+    Failed(String),
+    /// the check itself failed (network, an answer not understood): nothing is decided
+    Error(String),
+}
+
+/// NOWPayments `GET /v1/payment/<id>`: only `finished` / `confirmed` of this order (its `order_id`) and this payment
+/// pays; `partially_paid` is partial; `failed` / `expired` / `refunded` are final failures
+fn np_state(v: &Value, oid: i64, pay_id: &str) -> GwState {
+    let id = v["payment_id"].as_i64().map(|x| x.to_string()).or_else(|| v["payment_id"].as_str().map(|s| s.to_string())).unwrap_or_default();
+    if !id.is_empty() && id != pay_id.trim() {
+        return GwState::Error("another payment".into());
+    }
+    if let Some(o) = v["order_id"].as_str() {
+        if o != oid.to_string() {
+            return GwState::Error("another order".into());
+        }
+    }
+    match v["payment_status"].as_str().unwrap_or("") {
+        "finished" | "confirmed" => GwState::Paid(if id.is_empty() { pay_id.trim().to_string() } else { id }),
+        "partially_paid" => GwState::Partial(format!("{} از {} {}", v["actually_paid"], v["pay_amount"], v["pay_currency"].as_str().unwrap_or(""))),
+        "failed" => GwState::Failed("ناموفق".into()),
+        "expired" => GwState::Failed("منقضی".into()),
+        "refunded" => GwState::Failed("بازگشت داده شد".into()),
+        "waiting" | "confirming" | "sending" => GwState::Waiting,
+        other => GwState::Error(format!("unknown status {}", other)),
+    }
+}
+
+/// ZarinPal `verify`: 100 (verified now) and 101 (verified before) pay with their `ref_id`; -51 (the payment
+/// failed) and -54 / -55 (authority unknown / expired) are failures; -50 (amount differs) is a failure the admins
+/// see; anything else is a failed check, decided later
+fn zp_state(v: &Value, authority: &str) -> GwState {
+    if let Some(code) = v["data"]["code"].as_i64() {
+        if code == 100 || code == 101 {
+            let rf = v["data"]["ref_id"].as_i64().map(|x| x.to_string()).or_else(|| v["data"]["ref_id"].as_str().map(|s| s.to_string())).unwrap_or_default();
+            return GwState::Paid(if rf.is_empty() { authority.trim().to_string() } else { rf });
+        }
+    }
+    let err = v["errors"]["code"].as_i64().or_else(|| v["data"]["code"].as_i64()).unwrap_or(0);
+    match err {
+        -51 => GwState::Failed("پرداخت ناموفق".into()),
+        -54 | -55 => GwState::Failed("منقضی یا نامعتبر".into()),
+        -50 => GwState::Failed("مبلغ پرداخت با سفارش نمی‌خواند".into()),
+        0 => GwState::Error("no answer code".into()),
+        c => GwState::Error(format!("verify {}", c)),
+    }
+}
+
+fn sqlerr(e: rusqlite::Error) -> String {
+    e.to_string()
+}
+
+fn users_of_tg_tx(c: &rusqlite::Connection, tg: i64) -> Result<Vec<User>, String> {
+    let ids: Vec<i64> = {
+        let mut st = c.prepare("SELECT id FROM users WHERE tg_id=?1 ORDER BY id").map_err(sqlerr)?;
+        let v = st.query_map([tg], |r| r.get::<_, i64>(0)).map_err(sqlerr)?.collect::<rusqlite::Result<Vec<_>>>().map_err(sqlerr)?;
+        v
+    };
+    Ok(ids.into_iter().filter_map(|id| crate::db::txn::user(c, id)).collect())
+}
+
+fn setting_tx(c: &rusqlite::Connection, k: &str) -> Result<String, String> {
+    use rusqlite::OptionalExtension;
+    Ok(c.query_row("SELECT v FROM settings WHERE k=?1", [k], |r| r.get::<_, String>(0)).optional().map_err(sqlerr)?.unwrap_or_default())
+}
+
+/// The tier and protocols of an account a plan of `service` was delivered to. A plan of the account's own tier
+/// keeps its list (an admin may have narrowed it). `upgrade` (a renewal of a paid account): a plan of another
+/// tier unlocks it on top, the account becomes `vip` and gets the new service's protocols added (nothing it had
+/// is taken away). Else (a trial turned into the purchase) the account takes exactly the plan's tier and protocols.
+fn service_tx(c: &rusqlite::Connection, id: i64, service: &str, add: &str, upgrade: bool) -> Result<(), String> {
+    let u = crate::db::txn::user(c, id).ok_or("not found")?;
+    let have = u.tier();
+    let bought = crate::access::Tier::of_service(service);
+    let next = if upgrade { have.with(bought) } else { bought };
+    if next == have && (upgrade || u.service() == service) {
+        return Ok(());
+    }
+    let ps = if upgrade { next.clamp(&union_list(&u.protocols, add)) } else { next.clamp(add) };
+    c.execute("UPDATE users SET protocols=?1, tier=?2 WHERE id=?3", rusqlite::params![ps, next.as_str(), id]).map(|_| ()).map_err(sqlerr)
+}
+
+/// The gifts kept in `tg`'s bank go to account `uid` (taken once; kept when the account cannot take them)
+fn bank_tx(c: &rusqlite::Connection, tg: i64, uid: i64) -> Result<Option<(f64, i64)>, String> {
+    use rusqlite::OptionalExtension;
+    let row: Option<(f64, i64)> = c.query_row("SELECT COALESCE(ref_bank_gb,0), COALESCE(ref_bank_days,0) FROM bot_users WHERE tg_id=?1", [tg],
+        |r| Ok((r.get(0)?, r.get(1)?))).optional().map_err(sqlerr)?;
+    let Some((gb, days)) = row else { return Ok(None) };
+    if gb <= 0.0 && days <= 0 {
+        return Ok(None);
+    }
+    if !crate::db::txn::gift(c, uid, days, gb)? {
+        return Ok(None);
+    }
+    c.execute("UPDATE bot_users SET ref_bank_gb=0, ref_bank_days=0 WHERE tg_id=?1", [tg]).map_err(sqlerr)?;
+    Ok(Some((gb, days)))
+}
+
+/// A friend `tg` bought `gb` GB: the inviter gets `pct`% of that volume on every purchase, and on the friend's first
+/// one also `gb`/`days` of the settings. Never for an invite of oneself or an invite loop (A invited B and B, A).
+fn referral_tx(c: &rusqlite::Connection, tg: i64, gb: f64, cfg: &RefCfg) -> Result<Option<RefOut>, String> {
+    use rusqlite::OptionalExtension;
+    let row: Option<(i64, i64)> = c.query_row("SELECT COALESCE(ref_by,0), COALESCE(ref_rewarded,0) FROM bot_users WHERE tg_id=?1", [tg],
+        |r| Ok((r.get(0)?, r.get(1)?))).optional().map_err(sqlerr)?;
+    let Some((by, done)) = row else { return Ok(None) };
+    if by == 0 || by == tg {
+        return Ok(None);
+    }
+    let back: i64 = c.query_row("SELECT COALESCE(ref_by,0) FROM bot_users WHERE tg_id=?1", [by], |r| r.get(0)).optional().map_err(sqlerr)?.unwrap_or(0);
+    if back == tg {
+        return Ok(None);
+    }
+    let mut add_gb = ((gb.max(0.0) * cfg.pct / 100.0) * 2.0).round() / 2.0;
+    let mut add_days = 0i64;
+    let first = done == 0 && c.execute("UPDATE bot_users SET ref_rewarded=1 WHERE tg_id=?1 AND COALESCE(ref_rewarded,0)=0", [tg]).map_err(sqlerr)? == 1;
+    if first {
+        add_gb += cfg.gb;
+        add_days += cfg.days;
+    }
+    if add_gb <= 0.0 && add_days <= 0 {
+        return Ok(None);
+    }
+    c.execute("UPDATE bot_users SET ref_earned_gb=COALESCE(ref_earned_gb,0)+?1 WHERE tg_id=?2", rusqlite::params![add_gb, by]).map_err(sqlerr)?;
+    // the inviter's account that gains from it: an active one, a limited volume first (it can take the GB)
+    let target = users_of_tg_tx(c, by)?.into_iter().filter(|u| u.active() && u.notes != "trial").max_by_key(|u| (u.limit_gb > 0.0, u.id));
+    if let Some(u) = target {
+        if crate::db::txn::gift(c, u.id, add_days, add_gb)? {
+            return Ok(Some(RefOut { by, first, gb: add_gb, days: add_days, account: Some(u.username) }));
+        }
+    }
+    c.execute("INSERT OR IGNORE INTO bot_users(tg_id,joined) VALUES(?1,?2)", rusqlite::params![by, now()]).map_err(sqlerr)?;
+    c.execute("UPDATE bot_users SET ref_bank_gb=COALESCE(ref_bank_gb,0)+?1, ref_bank_days=COALESCE(ref_bank_days,0)+?2 WHERE tg_id=?3",
+        rusqlite::params![add_gb, add_days, by]).map_err(sqlerr)?;
+    Ok(Some(RefOut { by, first, gb: add_gb, days: add_days, account: None }))
+}
+
+/// Every database change of one delivery (inside `Db::immediate`); Ok(None) = already delivered / not deliverable
+fn deliver_tx(c: &rusqlite::Connection, d: &Deliver, p: &Plan) -> Result<Option<Delivered>, String> {
+    use crate::db::txn;
+    // an upgrade plan pays only the upgrade of its own account, and an upgrade only with such a plan (never a
+    // new account with «no end, no limit» for the price of an upgrade)
+    match (d.kind == "upgrade", crate::shop::upgrade_target(&p.category)) {
+        (true, Some(t)) if t == d.target => {}
+        (false, None) => {}
+        _ => return Err("the plan and the order do not match (upgrade)".into()),
+    }
+    // only the call that really flips the status delivers (a double tap, the watcher and the button at once)
+    let claimed = c.execute("UPDATE orders SET status='done' WHERE id=?1 AND status NOT IN ('done','rejected','failed')", [d.oid]).map_err(sqlerr)?;
+    if claimed != 1 {
+        return Ok(None);
+    }
+    let mut bonus_gb = 0.0;
+    let user = if d.kind == "upgrade" {
+        // the same account, the same code, volume and end date: only the tier and its protocols
+        let u = txn::user(c, d.target).ok_or("the account to upgrade is gone")?;
+        if u.tg_id != d.tg {
+            return Err("the account to upgrade is not the buyer's".into());
+        }
+        txn::upgrade_tier(c, d.target, crate::access::Tier::of_service(&p.service), &d.vip_protocols)?
+    } else if d.kind == "renew" && d.target > 0 {
+        txn::renew_plan(c, d.target, p.days, p.gb)?;
+        // a plan for more users raises the account to it (a renewal never lowers it)
+        c.execute("UPDATE users SET max_conn=?1 WHERE id=?2 AND max_conn>0 AND max_conn<?1", rusqlite::params![p.conns, d.target]).map_err(sqlerr)?;
+        txn::promote_trial(c, d.target)?;
+        service_tx(c, d.target, &p.service, &d.protocols, true)?;
+        // renewed after the reminder: the promised extra volume (`renew_bonus_pct` of the plan), once
+        let k = format!("rbonus:{}", d.target);
+        let until: i64 = setting_tx(c, &k)?.parse().unwrap_or(0);
+        let add = ((p.gb * d.bonus_pct / 100.0) * 2.0).round() / 2.0;
+        if until > now() && add > 0.0 {
+            c.execute("UPDATE settings SET v='' WHERE k=?1", [&k]).map_err(sqlerr)?;
+            if txn::gift(c, d.target, 0, add)? {
+                bonus_gb = add;
+            }
+        }
+        txn::user(c, d.target).ok_or("not found")?
+    } else if let Some(t) = users_of_tg_tx(c, d.tg)?.into_iter().find(|u| u.notes == "trial" || u.username.to_uppercase().ends_with("-TEST")) {
+        // a buyer who still has a free-trial account gets that same account (USER<n>-TEST -> USER<n>)
+        let exp = if p.days > 0 { now() + p.days * 86400 } else { 0 };
+        let lim = if p.gb > 0.0 { t.used_gb() + p.gb } else { 0.0 };
+        let note = format!("order #{}", d.oid);
+        c.execute("UPDATE users SET expires_at=?1, limit_gb=?2, max_conn=?3, notes=?4, warned=0, enabled=1 WHERE id=?5",
+            rusqlite::params![exp, lim, p.conns, note, t.id]).map_err(sqlerr)?;
+        txn::promote_trial(c, t.id)?;
+        service_tx(c, t.id, &p.service, &d.protocols, false)?;
+        txn::user(c, t.id).ok_or("not found")?
+    } else {
+        let u = txn::create_user(c, &d.name, p.gb, p.days, p.conns, &d.protocols, &d.nodes, &format!("order #{}", d.oid), d.tg)?;
+        let tier = crate::access::Tier::of_service(&p.service);
+        c.execute("UPDATE users SET tier=?1 WHERE id=?2", rusqlite::params![tier.as_str(), u.id]).map_err(sqlerr)?;
+        txn::user(c, u.id).ok_or("not found")?
+    };
+    // one use of the code for this paid order, taken only while the code is still good; the price was already
+    // paid, so the order is delivered either way and the admin is told when it was not
+    let mut code_ok = true;
+    if d.personal {
+        if d.back {
+            c.execute("UPDATE settings SET v='' WHERE k=?1", [format!("pc_back:{}", d.tg)]).map_err(sqlerr)?;
+        }
+    } else if !d.discount.is_empty() {
+        code_ok = c.execute("UPDATE discounts SET uses_left=uses_left-1 WHERE code=?1 AND uses_left>0 AND (COALESCE(expires,0)=0 OR expires>?2)",
+            rusqlite::params![d.discount, now()]).map_err(sqlerr)? == 1;
+    }
+    let bank = bank_tx(c, d.tg, user.id)?;
+    let referral = if d.kind == "upgrade" { None } else { referral_tx(c, d.tg, p.gb, &d.refs)? };
+    // a first-purchase offer is used up by the first purchase
+    c.execute("UPDATE bot_users SET offer_pct=0, offer_until=0 WHERE tg_id=?1", [d.tg]).map_err(sqlerr)?;
+    let user = txn::user(c, user.id).ok_or("not found")?;
+    Ok(Some(Delivered { user, code_ok, bonus_gb, bank, referral }))
+}
+
 fn union_list(a: &str, b: &str) -> String {
     let mut v: Vec<&str> = a.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()).collect();
     for x in b.split(',').map(|x| x.trim()).filter(|x| !x.is_empty()) {
@@ -499,12 +775,12 @@ const AMNEZIA_PLAY: &str = "https://play.google.com/store/apps/details?id=org.am
 
 /// The tier's short name for one line ("🎮 گیمینگ")
 fn tier_name(t: crate::access::Tier) -> &'static str {
-    match t { crate::access::Tier::V2ray => "🛡 ضد فیلتر", crate::access::Tier::Gaming => "🎮 گیمینگ", crate::access::Tier::Combo => "👑 ترکیبی" }
+    match t { crate::access::Tier::V2ray => "🛡 ضد فیلتر", crate::access::Tier::Gaming => "🎮 گیمینگ", crate::access::Tier::Vip => "👑 ترکیبی" }
 }
 
 /// Whether an account of this tier gets the V2Ray subscription link (a gaming one connects without it)
 fn tier_has_sub(t: crate::access::Tier) -> bool {
-    matches!(t, crate::access::Tier::V2ray | crate::access::Tier::Combo)
+    matches!(t, crate::access::Tier::V2ray | crate::access::Tier::Vip)
 }
 
 /// The apps that fit a tier, in the order they are recommended: v = a V2Ray app, k = the Kanki app,
@@ -513,7 +789,7 @@ fn tier_apps(t: crate::access::Tier) -> &'static [&'static str] {
     match t {
         crate::access::Tier::V2ray => &["v"],
         crate::access::Tier::Gaming => &["k", "z", "g"],
-        crate::access::Tier::Combo => &["k", "z", "v", "g"],
+        crate::access::Tier::Vip => &["k", "z", "v", "g"],
     }
 }
 
@@ -883,6 +1159,24 @@ impl Bot {
     /// From the mini app: buy plan `pid` (a new account, or more for the buyer's account `renew`); the bot
     /// shows the plan and the payment methods in the chat, exactly as after tapping the plan in the bot.
     /// False when the bot could not message the customer.
+    /// An in-place upgrade of the customer's account `id` to vip: the price difference as a hidden plan, then the
+    /// payment methods in the chat as for any plan. Err says why it cannot be upgraded.
+    pub(crate) async fn start_upgrade(&self, uid: i64, id: i64) -> Result<bool, String> {
+        let u = self.app.db.user(id).filter(|u| u.tg_id == uid && uid > 0).ok_or("account")?;
+        let (pid, _) = crate::shop::upgrade_plan(self.db(), &u)?;
+        self.pend.lock().unwrap_or_else(|e| e.into_inner()).insert(uid, Pending { plan: pid, kind: "upgrade".into(), target: u.id, ..Default::default() });
+        Ok(self.show_plan(uid, None, uid, pid).await)
+    }
+
+    /// Whether a pending purchase may pay plan `p`: an upgrade plan only as the upgrade of its own account, and an
+    /// upgrade only with its plan
+    fn plan_fits(p: &Plan, pe: &Pending) -> bool {
+        match crate::shop::upgrade_target(&p.category) {
+            Some(t) => pe.kind == "upgrade" && pe.target == t,
+            None => pe.kind != "upgrade",
+        }
+    }
+
     pub(crate) async fn start_purchase(&self, uid: i64, pid: i64, renew: i64) -> bool {
         {
             let mut g = self.pend.lock().unwrap_or_else(|e| e.into_inner());
@@ -1620,6 +1914,10 @@ impl Bot {
         }
         // one subscription link brings every Xray and Hysteria2 config into a V2Ray app (no separate configs); only a
         // V2Ray or combined account is offered it
+        // 3.70: a v2ray / gaming account can become vip in place (same code, volume and end date)
+        if u.tier().upgrades_to(crate::access::Tier::Vip) && u.active() && u.notes != "trial" && self.db().on("sales_on") {
+            rows.push(vec![b("⬆️ ارتقا به ترکیبی VIP (همین اشتراک)", &format!("upg:{}", u.id))]);
+        }
         if tier_has_sub(u.tier()) && (crate::api::links_text(&self.app, u).is_some() || u.service() == "v2ray") {
             rows.push(vec![b("🚀 لینک اشتراک V2Ray (v2rayNG · V2Box)", &format!("cfg:{}:v", u.id))]);
         }
@@ -1781,10 +2079,6 @@ impl Bot {
         self.send_doc(chat, body.into_bytes(), &crate::amnezia::file_name(&u.username), &cap).await
     }
 
-    fn create_account(&self, tg: i64, gb: f64, days: i64, conns: i64, notes: &str) -> Result<User, String> {
-        self.create_account_n(tg, gb, days, conns, notes, 0)
-    }
-
     /// The `countries` least-loaded servers (0 = every server, the normal case).
     fn pick_nodes(&self, countries: i64) -> String {
         if countries <= 0 {
@@ -1816,12 +2110,19 @@ impl Bot {
         cfg_name_from(&format!("{}{}", first, last)).or_else(|| cfg_name_from(&uname))
     }
 
+    #[cfg(test)]
+    fn create_account(&self, tg: i64, gb: f64, days: i64, conns: i64, notes: &str) -> Result<User, String> {
+        self.create_account_n(tg, gb, days, conns, notes, 0)
+    }
+
+    #[cfg(test)]
     fn create_account_n(&self, tg: i64, gb: f64, days: i64, conns: i64, notes: &str, countries: i64) -> Result<User, String> {
         self.create_account_svc(tg, gb, days, conns, notes, countries, "vip")
     }
 
     /// A new account for a plan of `service` ("vip": every protocol; "v2ray": only the v2ray subscription)
     #[allow(clippy::too_many_arguments)]
+    #[cfg(test)]
     fn create_account_svc(&self, tg: i64, gb: f64, days: i64, conns: i64, notes: &str, countries: i64, service: &str) -> Result<User, String> {
         // the customer's own name (mahtab87; mahtab872 … when taken); USER<n> only when there is no usable name.
         // The number (id) is always the lowest free one, so a deleted trial's number goes to the next customer.
@@ -1857,7 +2158,7 @@ impl Bot {
 
     /// The price of a plan for this buyer: a discount code, else (on a new purchase) their first-purchase offer
     fn price(&self, uid: i64, p: &Plan, pe: &Pending) -> (i64, f64) {
-        let pct = if pe.percent > 0 { pe.percent } else if pe.kind != "renew" { self.offer(uid).0 } else { 0 };
+        let pct = if pe.percent > 0 { pe.percent } else if pe.kind == "new" || pe.kind.is_empty() { self.offer(uid).0 } else { 0 };
         let f = (100 - pct.clamp(0, 100)) as f64 / 100.0;
         (((p.toman as f64) * f).round() as i64, ((plan_usd(self.db(), p) * f) * 100.0).round() / 100.0)
     }
@@ -2304,7 +2605,15 @@ impl Bot {
             self.send(chat, "⏳ رسیدهای شما در صف بررسی‌اند؛ برای رسید بیشتر یک ساعت بعد بفرستید یا به پشتیبانی پیام بدید.", None).await;
             return;
         }
+        // receipts an admin rejected: after REJECT_LIMIT in 24 hours no new one is taken (fake receipts)
+        if !self.admin(uid) && self.rejected_recently(uid) >= REJECT_LIMIT {
+            self.send(chat, "⛔️ چند رسید شما در ۲۴ ساعت گذشته رد شده؛ تا پایان این مدت رسید جدید پذیرفته نمی‌شود. برای پیگیری با پشتیبانی تماس بگیرید.", None).await;
+            return;
+        }
         let Some(p) = self.plan_on_sale(pe.plan) else { return };
+        if !Self::plan_fits(&p, &pe) {
+            return;
+        }
         let photo = m["photo"].as_array().and_then(|a| a.last()).and_then(|x| x["file_id"].as_str()).map(|s| s.to_string());
         let reference = photo.clone().unwrap_or_else(|| m["text"].as_str().unwrap_or("").to_string());
         // the customer has paid by now: the order is kept, and the admin sees when its code is no longer good
@@ -2316,7 +2625,7 @@ impl Bot {
         let offer = if pe.discount.is_empty() && pe.kind != "renew" { self.offer(uid).0 } else { 0 };
         let cap = format!(
             "🧾 <b>سفارش جدید #{}</b>\n👤 {} · <code>{}</code>\n📦 {} ({})\n💳 {} · {}{}{}",
-            oid, esc(name), uid, esc(&p.name), if pe.kind == "renew" { "تمدید" } else { "جدید" }, method, amount,
+            oid, esc(name), uid, esc(&p.name), match pe.kind.as_str() { "renew" => "تمدید", "upgrade" => "ارتقا به VIP", _ => "جدید" }, method, amount,
             if offer > 0 { format!("\n🎁 تخفیف خرید اول {}%", offer) } else { String::new() },
             if pe.discount.is_empty() { String::new() } else {
                 format!("\n🎟 {} ({}%){}", esc(&pe.discount), pe.percent, if code_ok { "" } else { "\n⚠️ این کد تخفیف دیگر معتبر نیست (تمام، حذف یا منقضی شده)" })
@@ -2585,11 +2894,16 @@ impl Bot {
                 if o.6 == "done" {
                     return self.answer(&qid, "این سفارش قبلاً فعال شده ✅", true).await;
                 }
-                if self.check_gateway(oid).await {
-                    self.edit(chat, mid, "✅ پرداخت تأیید شد؛ در حال ساخت اشتراک…", None).await;
-                    return self.fulfill(oid).await;
+                if o.6 != "waiting" {
+                    let why = match o.6.as_str() { "failed" => "این پرداخت ناموفق یا منقضی شده؛ دوباره خرید کنید.", "partial" => "این پرداخت ناقص بوده؛ پشتیبانی پیگیری می‌کند.", "rejected" => "این سفارش رد شده است.", _ => "این سفارش در حال بررسی است." };
+                    return self.answer(&qid, why, true).await;
                 }
-                return self.answer(&qid, "هنوز پرداختی تأیید نشده است.", true).await;
+                if self.settle_gateway(oid).await {
+                    return self.edit(chat, mid, "✅ پرداخت تأیید و اشتراک تحویل شد.", None).await;
+                }
+                let st = self.order(oid).map(|x| x.6).unwrap_or_default();
+                let msg = match st.as_str() { "failed" => "❌ پرداخت ناموفق یا منقضی شد.", "partial" => "⚠️ پرداخت ناقص بود؛ پیام جدا فرستاده شد.", _ => "هنوز پرداختی تأیید نشده است." };
+                return self.answer(&qid, msg, true).await;
             }
             "acc" => {
                 let id: i64 = rest.parse().unwrap_or(0);
@@ -2632,6 +2946,18 @@ impl Bot {
                 return self.plans_menu(chat, mid, &format!("rpl:{{}}:{}", id)).await;
             }
             "ap" | "rj" if self.admin(uid) => return self.review(chat, mid, q, head == "ap", rest.parse().unwrap_or(0)).await,
+            // 3.70: upgrade one of the customer's own accounts to vip in place
+            "upg" => {
+                let id: i64 = rest.parse().unwrap_or(0);
+                if !self.db().on("sales_on") {
+                    return self.answer(&qid, "فروش فعلاً بسته است.", true).await;
+                }
+                if let Err(e) = self.start_upgrade(uid, id).await {
+                    let why = if e.contains("already vip") { "این اشتراک همین حالا ترکیبی VIP است." } else if e.contains("active") { "اول اشتراک را تمدید کنید، بعد ارتقا دهید." } else { "این اشتراک پیدا نشد." };
+                    return self.answer(&qid, why, true).await;
+                }
+                return;
+            }
             _ => {}
         }
         if self.admin(uid) {
@@ -2761,6 +3087,9 @@ impl Bot {
         let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned();
         let Some(pe) = pe else { return };
         let Some(p) = self.plan_on_sale(pe.plan) else { return };
+        if !Self::plan_fits(&p, &pe) {
+            return self.edit(chat, mid, "⚠️ این پلن برای این خرید نیست؛ از «خرید اشتراک» دوباره شروع کنید.", Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]))).await;
+        }
         if !self.discount_still_ok(uid, &pe) {
             return self.discount_gone(uid, chat, &pe).await;
         }
@@ -2839,6 +3168,9 @@ impl Bot {
         let pe = self.pend.lock().unwrap_or_else(|e| e.into_inner()).get(&uid).cloned();
         let Some(pe) = pe else { return };
         let Some(p) = self.plan_on_sale(pe.plan) else { return };
+        if !Self::plan_fits(&p, &pe) {
+            return self.edit(chat, mid, "⚠️ این پلن برای این خرید نیست؛ از «خرید اشتراک» دوباره شروع کنید.", Some(ik(vec![vec![b("⬅️ بازگشت", "home")]]))).await;
+        }
         if !self.discount_still_ok(uid, &pe) {
             return self.discount_gone(uid, chat, &pe).await;
         }
@@ -2905,9 +3237,30 @@ impl Bot {
 
     /// A transaction hash already used for an order (one payment pays one order)
     fn tx_used(&self, hash: &str) -> bool {
-        // the hash is the last word of a paid order's ref (instr: no LIKE wildcards in a payment id)
+        // 3.70: every used payment has its permanent row in `pay_tx`; the hash is also the last word of a paid
+        // order's ref (orders from before; instr: no LIKE wildcards in a payment id). A read error counts as used.
         let word = format!(" {}", hash);
-        self.db().with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE method IN ('ton','stars') AND instr(ref || ' ', ?1 || ' ')>0", [word], |r| r.get::<_, i64>(0)).unwrap_or(0)) > 0
+        self.db().with(|c| {
+            let ledger = c.query_row("SELECT COUNT(*) FROM pay_tx WHERE id=?1", [hash.trim()], |r| r.get::<_, i64>(0)).unwrap_or(1);
+            let refs = c.query_row("SELECT COUNT(*) FROM orders WHERE method IN ('ton','stars') AND instr(ref || ' ', ?1 || ' ')>0", [word], |r| r.get::<_, i64>(0)).unwrap_or(1);
+            ledger + refs
+        }) > 0
+    }
+
+    /// Order `oid` moves from `waiting` to `to` with payment `pay_id` (method `method`) recorded as used, both in one
+    /// transaction: false when the order is no longer waiting or the payment already paid another order
+    fn claim_payment(&self, oid: i64, to: &str, rf: &str, method: &str, pay_id: &str) -> Result<bool, String> {
+        self.db().immediate(|c| {
+            let n = c.execute("UPDATE orders SET status=?1, ref=?2 WHERE id=?3 AND status='waiting'", rusqlite::params![to, rf, oid]).map_err(sqlerr)?;
+            if n != 1 {
+                return Ok(false);
+            }
+            if !crate::db::txn::use_payment(c, pay_id, method, oid)? {
+                // rolls the status back as well
+                return Err("payment already used".into());
+            }
+            Ok(true)
+        }).or_else(|e| if e == "payment already used" { Ok(false) } else { Err(e) })
     }
 
     /// (memo, nanoTON, created) of a TON order that is still waiting for its payment
@@ -2937,9 +3290,7 @@ impl Bot {
         let early = tx.at < created - 120;
         if by_comment && !late && !short && !early {
             // one call only gets past this (the watcher and the button can find it at the same moment)
-            let claimed = self.db().exec("UPDATE orders SET status='paid', ref=?1 WHERE id=?2 AND status='waiting'",
-                &[&format!("{} {} {}", memo, need, tx.hash), &oid]).unwrap_or(0);
-            if claimed != 1 {
+            if !self.claim_payment(oid, "paid", &format!("{} {} {}", memo, need, tx.hash), "ton", &tx.hash)? {
                 return Ok(false);
             }
             self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&tg);
@@ -2952,9 +3303,7 @@ impl Bot {
         }
         // a real payment into the wallet that does not fit this order by itself: the admins decide
         let why = if !by_comment { "بدون کامنت سفارش" } else if short { "کمتر از مبلغ سفارش" } else { "بعد از 2 ساعت (قیمت قدیمی)" };
-        let claimed = self.db().exec("UPDATE orders SET status='pending', ref=?1 WHERE id=?2 AND status='waiting'",
-            &[&format!("{} {} {}", memo, need, tx.hash), &oid]).unwrap_or(0);
-        if claimed != 1 {
+        if !self.claim_payment(oid, "pending", &format!("{} {} {}", memo, need, tx.hash), "ton", &tx.hash)? {
             return Ok(false);
         }
         self.waits.lock().unwrap_or_else(|e| e.into_inner()).remove(&tg);
@@ -3077,8 +3426,14 @@ impl Bot {
         match self.stars_order(uid, sp["invoice_payload"].as_str().unwrap_or(""), currency, total) {
             Some(oid) => {
                 let rf: String = self.db().with(|c| c.query_row("SELECT ref FROM orders WHERE id=?1", [oid], |r| r.get(0)).unwrap_or_default());
-                let claimed = self.db().exec("UPDATE orders SET status='paid', ref=?1 WHERE id=?2 AND status='waiting'", &[&format!("{} {}", rf, charge), &oid]).unwrap_or(0);
-                if claimed == 1 {
+                let claimed = match self.claim_payment(oid, "paid", &format!("{} {}", rf, charge), "stars", &charge) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        self.notify_admins(&format!("⚠️ پرداخت استارز سفارش #{} ثبت نشد: <code>{}</code>\nشناسه: <code>{}</code>", oid, esc(&e), esc(&charge)), None, None).await;
+                        false
+                    }
+                };
+                if claimed {
                     self.edit_ok(uid, 0, &format!("✅ پرداخت <b>{} استارز</b> سفارش #{} تأیید شد؛ در حال ساخت اشتراک…", total, oid), None).await;
                     self.fulfill(oid).await;
                 }
@@ -3100,201 +3455,191 @@ impl Bot {
         ).ok())
     }
 
-    async fn check_gateway(&self, oid: i64) -> bool {
-        let Some(o) = self.order(oid) else { return false };
+    /// What the payment gateway says about a waiting gateway order (NOWPayments `np`, ZarinPal `zp`)
+    async fn gateway_state(&self, oid: i64) -> GwState {
+        let Some(o) = self.order(oid) else { return GwState::Error("no such order".into()) };
         if o.5 == "np" {
-            let r = self.http.get(format!("https://api.nowpayments.io/v1/payment/{}", o.8)).header("x-api-key", self.db().get("np_key")).send().await;
-            if let Ok(r) = r {
-                if let Ok(v) = r.json::<Value>().await {
-                    return matches!(v["payment_status"].as_str(), Some("finished") | Some("confirmed"));
-                }
-            }
-        } else if o.5 == "zp" {
+            let r = self.http.get(format!("https://api.nowpayments.io/v1/payment/{}", o.8)).header("x-api-key", self.db().get("np_key"))
+                .timeout(std::time::Duration::from_secs(15)).send().await;
+            let v = match r {
+                Ok(r) => match r.json::<Value>().await {
+                    Ok(v) => v,
+                    Err(e) => return GwState::Error(format!("NOWPayments answer: {}", e)),
+                },
+                Err(e) => return GwState::Error(format!("NOWPayments: {}", e)),
+            };
+            return np_state(&v, oid, &o.8);
+        }
+        if o.5 == "zp" {
             let amount: i64 = o.7.parse().unwrap_or(0);
             let r = self.http.post("https://payment.zarinpal.com/pg/v4/payment/verify.json").json(&json!({
                 "merchant_id": self.db().get("zp_merchant"), "amount": amount * 10, "authority": o.8
-            })).send().await;
-            if let Ok(r) = r {
-                if let Ok(v) = r.json::<Value>().await {
-                    return matches!(v["data"]["code"].as_i64(), Some(100) | Some(101));
-                }
-            }
+            })).timeout(std::time::Duration::from_secs(15)).send().await;
+            let v = match r {
+                Ok(r) => match r.json::<Value>().await {
+                    Ok(v) => v,
+                    Err(e) => return GwState::Error(format!("ZarinPal answer: {}", e)),
+                },
+                Err(e) => return GwState::Error(format!("ZarinPal: {}", e)),
+            };
+            return zp_state(&v, &o.8);
         }
-        false
+        GwState::Error("not a gateway order".into())
     }
 
+    /// Settles a waiting gateway order by what the gateway says: paid → recorded (its payment id once, for good)
+    /// and delivered; partly paid / failed / expired → the order is closed as that and the customer (and, for a
+    /// partial payment, the admins) told; still waiting or a failed check → nothing changes. True = delivered.
+    async fn settle_gateway(&self, oid: i64) -> bool {
+        let Some(o) = self.order(oid) else { return false };
+        if o.6 != "waiting" {
+            return false;
+        }
+        match self.gateway_state(oid).await {
+            GwState::Paid(id) => {
+                let rf = format!("{} {}", o.8, id);
+                match self.claim_payment(oid, "paid", &rf, &o.5, &format!("{}:{}", o.5, id)) {
+                    Ok(true) => {
+                        self.fulfill(oid).await;
+                        true
+                    }
+                    Ok(false) => false,
+                    Err(e) => {
+                        self.notify_admins(&format!("⚠️ پرداخت درگاه سفارش #{} ثبت نشد: <code>{}</code>", oid, esc(&e)), None, None).await;
+                        false
+                    }
+                }
+            }
+            GwState::Partial(what) => {
+                if self.db().exec("UPDATE orders SET status='partial' WHERE id=?1 AND status='waiting'", &[&oid]).unwrap_or(0) == 1 {
+                    self.send(o.1, &format!("⚠️ پرداخت سفارش #{} <b>کامل نشد</b> ({}).\nاشتراک فقط با پرداخت کامل ساخته می‌شود؛ پشتیبانی برای تکمیل یا بازگشت وجه با شما در تماس است: {}", oid, esc(&what), esc(&self.db().get("support"))), None).await;
+                    self.notify_admins(&format!("⚠️ سفارش #{} ناقص پرداخت شد ({}).\nمشتری: <code>{}</code>", oid, esc(&what), o.1), None, None).await;
+                }
+                false
+            }
+            GwState::Failed(why) => {
+                if self.db().exec("UPDATE orders SET status='failed' WHERE id=?1 AND status='waiting'", &[&oid]).unwrap_or(0) == 1 {
+                    self.send(o.1, &format!("❌ پرداخت سفارش #{} انجام نشد ({}). مبلغی کسر نشده باشد چیزی ساخته نمی‌شود؛ می‌توانید دوباره خرید کنید.", oid, esc(&why)), None).await;
+                }
+                false
+            }
+            GwState::Waiting | GwState::Error(_) => false,
+        }
+    }
+
+    /// Delivers a paid / approved order exactly once. Everything the order changes in the database happens in ONE
+    /// `BEGIN IMMEDIATE` transaction: the order flips to `done`, the account is made / renewed / upgraded, the
+    /// discount code loses one use, the gifts kept in the bank and the inviter's reward are applied. Any failure
+    /// rolls all of it back (the order is then marked `error` for the admins, nothing half done stays). A
+    /// rejected or failed order is never delivered.
     async fn fulfill(&self, oid: i64) {
         let Some(o) = self.order(oid) else { return };
-        if o.6 == "done" { return; }
+        if matches!(o.6.as_str(), "done" | "rejected" | "failed") {
+            return;
+        }
         // the plan was deleted after the order was placed: the paid order stays (as an error, in the admin's
         // open orders) and both sides are told, instead of being closed with nothing delivered
         let Some(p) = self.plan(o.2) else {
-            let marked = self.db().exec("UPDATE orders SET status='error' WHERE id=?1 AND status NOT IN ('done','error')", &[&oid]).unwrap_or(0);
+            let marked = self.db().exec("UPDATE orders SET status='error' WHERE id=?1 AND status NOT IN ('done','error','rejected','failed')", &[&oid]).unwrap_or(0);
             if marked == 1 {
                 self.notify_admins(&format!("⚠️ سفارش #{} پرداخت شده ولی پلن آن (#{}) حذف شده و اشتراکی ساخته نشد.\nمشتری: <code>{}</code>\nلطفاً اشتراک را دستی بسازید یا تمدید کنید.", oid, o.2, o.1), None, None).await;
             }
             self.send(o.1, &format!("⚠️ پرداخت سفارش #{} ثبت شد ولی پلن آن دیگر وجود ندارد و اشتراک خودکار ساخته نشد.\nپشتیبانی آن را دستی پیگیری می‌کند؛ پرداخت شما محفوظ است.", oid), None).await;
             return;
         };
-        // every update runs in its own task, so a double tap on "check payment" runs this twice at the
-        // same time: only the call that really flips the status may deliver the service
-        match self.db().exec("UPDATE orders SET status='done' WHERE id=?1 AND status<>'done'", &[&oid]) {
-            Ok(1) => {}
-            _ => return,
-        }
-        // a buyer who still has a free-trial account gets that same account (USER<n>-TEST -> USER<n>)
-        let trial = self.db().users_of_tg(o.1).into_iter().find(|u| u.notes == "trial" || u.username.to_uppercase().ends_with("-TEST"));
-        let res: Result<User, String> = if o.3 == "renew" && o.4 > 0 {
-            self.db().renew_plan(o.4, p.days, p.gb).and_then(|_| {
-                // a plan for more users raises the account to it (a renewal never lowers it)
-                let _ = self.db().exec("UPDATE users SET max_conn=?1 WHERE id=?2 AND max_conn>0 AND max_conn<?1", &[&p.conns, &o.4]);
-                self.db().promote_trial(o.4);
-                self.set_service(o.4, &p.service, true)?;
-                self.db().user(o.4).ok_or("not found".into())
-            })
-        } else if let Some(t) = trial {
-            let exp = if p.days > 0 { crate::util::now() + p.days * 86400 } else { 0 };
-            let lim = if p.gb > 0.0 { t.used_gb() + p.gb } else { 0.0 };
-            let note = format!("order #{}", oid);
-            self.db()
-                .exec("UPDATE users SET expires_at=?1, limit_gb=?2, max_conn=?3, notes=?4, warned=0, enabled=1 WHERE id=?5", &[&exp, &lim, &p.conns, &note, &t.id])
-                .and_then(|_| {
-                    self.db().promote_trial(t.id);
-                    self.set_service(t.id, &p.service, false)?;
-                    self.db().user(t.id).ok_or("not found".into())
-                })
-        } else {
-            self.create_account_svc(o.1, p.gb, p.days, p.conns, &format!("order #{}", oid), p.countries, &p.service)
+        // everything read from settings before the database is locked
+        let ctx = Deliver {
+            oid,
+            tg: o.1,
+            kind: o.3.clone(),
+            target: o.4,
+            discount: o.9.clone(),
+            personal: !o.9.is_empty() && self.is_personal(&o.9),
+            back: !o.9.is_empty() && o.9 == self.back_code(),
+            name: match self.cfg_name_for(o.1) { Some(n) => format!("pick:{}", n), None => "auto".to_string() },
+            nodes: self.pick_nodes(p.countries),
+            protocols: self.db().service_protocols(&p.service),
+            vip_protocols: self.db().service_protocols("vip"),
+            bonus_pct: self.num_set("renew_bonus_pct", 0, 100) as f64,
+            refs: RefCfg::read(self.db()),
         };
-        match res {
-            Ok(mut u) => {
-                // a renewal whose account was gone (target 0) made a new account: it says so
-                let mut head = if o.3 == "renew" && o.4 > 0 { self.tx("txt_renewed") } else { self.tx("txt_bought") };
-                // renewed after the reminder: the promised extra volume (`renew_bonus_pct` of the plan), once
-                if o.3 == "renew" && o.4 > 0 {
-                    let k = format!("rbonus:{}", o.4);
-                    let until: i64 = self.db().get(&k).parse().unwrap_or(0);
-                    let pct = self.num_set("renew_bonus_pct", 0, 100) as f64;
-                    let add = ((p.gb * pct / 100.0) * 2.0).round() / 2.0;
-                    if until > now() && add > 0.0 {
-                        self.db().set(&k, "");
-                        if matches!(self.db().gift(u.id, 0, add), Ok(true)) {
-                            head.push_str(&format!("\n🎁 هدیه‌ی تمدید به‌موقع: <b>+{} GB</b>", add));
-                            if let Some(x) = self.db().user(u.id) { u = x; }
-                        }
-                    }
-                }
-                let (t, kb) = self.delivery(&head, &u, &p.name);
-                // the payment page is done with: the chat ends on what was bought
-                self.close_screen(o.1).await;
-                self.send(o.1, &t, Some(kb)).await;
-                // one use of the code for this paid order, taken only while the code is still good; the price was
-                // already paid, so the order is delivered either way and the admin is told when it was not
-                if !o.9.is_empty() && self.is_personal(&o.9) {
-                    if o.9 == self.back_code() {
-                        self.db().set(&format!("pc_back:{}", o.1), "");
-                    }
-                } else if !o.9.is_empty() {
-                    let used = self.db().exec(
-                        "UPDATE discounts SET uses_left=uses_left-1 WHERE code=?1 AND uses_left>0 AND (COALESCE(expires,0)=0 OR expires>?2)",
-                        &[&o.9, &now()]).unwrap_or(0);
-                    if used == 0 {
-                        self.notify_admins(&format!("⚠️ سفارش #{} با کد تخفیف <code>{}</code> پرداخت و تحویل شد، ولی این کد موقع تحویل دیگر معتبر نبود (تمام، حذف یا منقضی شده).", oid, esc(&o.9)), None, None).await;
-                    }
-                }
-                self.pay_bank(o.1, &u).await;
-                self.reward_referrer(o.1, p.gb).await;
-                // a first-purchase offer is used up by the first purchase
-                let _ = self.db().exec("UPDATE bot_users SET offer_pct=0, offer_until=0 WHERE tg_id=?1", &[&o.1]);
-                self.set_menu(o.1).await;
-                let a = self.app.clone();
-                tokio::spawn(async move { sync::sync_all(&a).await });
-            }
+        let res = self.db().immediate(|c| deliver_tx(c, &ctx, &p));
+        let out = match res {
+            Ok(Some(out)) => out,
+            // another call delivered it (or it was rejected) meanwhile
+            Ok(None) => return,
             Err(e) => {
-                let _ = self.db().exec("UPDATE orders SET status='error' WHERE id=?1", &[&oid]);
+                let _ = self.db().exec("UPDATE orders SET status='error' WHERE id=?1 AND status NOT IN ('done','rejected','failed')", &[&oid]);
                 self.notify_admins(&format!("⚠️ خطا در سفارش #{}: <code>{}</code>", oid, esc(&e)), None, None).await;
                 self.send(o.1, "⚠️ پرداخت ثبت شد ولی ساخت اشتراک خطا داد؛ پشتیبانی پیگیری می‌کند.", None).await;
+                return;
             }
+        };
+        let u = out.user;
+        let renewed = o.3 == "renew" && o.4 > 0;
+        let mut head = if o.3 == "upgrade" {
+            format!("⬆️ <b>اشتراک شما به {} ارتقا یافت</b>\nهمان کد اشتراک، همان حجم و همان تاریخ پایان؛ پروتکل‌های جدید باز شد.", crate::access::Tier::Vip.label())
+        } else if renewed {
+            self.tx("txt_renewed")
+        } else {
+            self.tx("txt_bought")
+        };
+        if out.bonus_gb > 0.0 {
+            head.push_str(&format!("\n🎁 هدیه‌ی تمدید به‌موقع: <b>+{} GB</b>", out.bonus_gb));
         }
+        let (t, kb) = self.delivery(&head, &u, &p.name);
+        // the payment page is done with: the chat ends on what was bought
+        self.close_screen(o.1).await;
+        self.send(o.1, &t, Some(kb)).await;
+        if !out.code_ok {
+            self.notify_admins(&format!("⚠️ سفارش #{} با کد تخفیف <code>{}</code> پرداخت و تحویل شد، ولی این کد موقع تحویل دیگر معتبر نبود (تمام، حذف یا منقضی شده).", oid, esc(&o.9)), None, None).await;
+        }
+        if let Some((gb, days)) = out.bank {
+            self.send(o.1, &format!("🎁 <b>هدیه‌های دعوت دوستانت</b> به سرویس <b>{}</b> اضافه شد:\n{}", esc(&u.username), gift_line(days, gb)), None).await;
+        }
+        if let Some(r) = out.referral {
+            self.tell_referrer(&r).await;
+        }
+        self.set_menu(o.1).await;
+        let a = self.app.clone();
+        tokio::spawn(async move { sync::sync_all(&a).await });
     }
 
-    /// The tier and protocols of an account a plan of `service` was delivered to. A plan of the account's own
-    /// tier keeps its list (an admin may have changed it). `upgrade` (a renewal of a paid account): a plan of
-    /// another tier unlocks it on top, the account becomes `combo` and gets the new service's protocols added
-    /// (nothing it had is taken away). Else (a trial turned into the purchase) the account takes exactly the
-    /// plan's tier and protocols.
+    /// The tier and protocols of an account a plan of `service` was delivered to (see `service_tx`)
+    #[cfg(test)]
     fn set_service(&self, id: i64, service: &str, upgrade: bool) -> Result<(), String> {
-        let u = self.db().user(id).ok_or("not found")?;
-        let have = u.tier();
-        let bought = crate::access::Tier::of_service(service);
-        let next = if upgrade { have.with(bought) } else { bought };
-        if next == have && (upgrade || u.service() == service) {
-            return Ok(());
-        }
         let add = self.db().service_protocols(service);
-        let ps = if upgrade { union_list(&u.protocols, &add) } else { add };
-        self.db().exec("UPDATE users SET protocols=?1, tier=?2 WHERE id=?3", &[&ps, &next.as_str(), &id]).map(|_| ())
+        self.db().immediate(|c| service_tx(c, id, service, &add, upgrade))
     }
 
-    /// A friend from someone's invite link bought (`gb` of the plan): the inviter gets `ref_pct`% of that volume on
-    /// every purchase, and on the friend's first one also `ref_gb` GB and `ref_days` days. An inviter without an
-    /// account yet keeps it in the bank and gets it with their own first purchase.
+    /// A friend from someone's invite link bought (`gb` of the plan): the inviter's reward, in one transaction
+    #[cfg(test)]
     async fn reward_referrer(&self, tg: i64, gb: f64) {
-        let r: Option<(i64, i64)> = self.db().with(|c| c.query_row(
-            "SELECT ref_by, ref_rewarded FROM bot_users WHERE tg_id=?1", [tg], |r| Ok((r.get(0)?, r.get(1)?))).ok());
-        let Some((by, done)) = r else { return };
-        if by == 0 || by == tg {
-            return;
-        }
-        let pct: f64 = self.db().get("ref_pct").parse().unwrap_or(0.0);
-        let mut add_gb = ((gb.max(0.0) * pct.clamp(0.0, 100.0) / 100.0) * 2.0).round() / 2.0;
-        let mut add_days = 0i64;
-        let first = done == 0 && self.db().exec("UPDATE bot_users SET ref_rewarded=1 WHERE tg_id=?1 AND ref_rewarded=0", &[&tg]).unwrap_or(0) == 1;
-        if first {
-            add_gb += self.db().get("ref_gb").parse::<f64>().unwrap_or(0.0).clamp(0.0, 1000.0);
-            add_days += self.db().get("ref_days").parse::<i64>().unwrap_or(0).clamp(0, 365);
-        }
-        if add_gb <= 0.0 && add_days <= 0 {
-            return;
-        }
-        let _ = self.db().exec("UPDATE bot_users SET ref_earned_gb=COALESCE(ref_earned_gb,0)+?1 WHERE tg_id=?2", &[&add_gb, &by]);
-        let what = gift_line(add_days, add_gb);
-        let why = if first { "دوستت اولین خریدش رو کرد" } else { "دوستت دوباره خرید کرد" };
-        // the inviter's account that gains from it: an active one, a limited volume first (it can take the GB)
-        let target = self.db().users_of_tg(by).into_iter().filter(|u| u.active() && u.notes != "trial")
-            .max_by_key(|u| (u.limit_gb > 0.0, u.id));
-        match target {
-            Some(u) if matches!(self.db().gift(u.id, add_days, add_gb), Ok(true)) => {
+        let cfg = RefCfg::read(self.db());
+        match self.db().immediate(|c| referral_tx(c, tg, gb, &cfg)) {
+            Ok(Some(r)) => {
+                self.tell_referrer(&r).await;
                 let a = self.app.clone();
                 tokio::spawn(async move { sync::sync_all(&a).await });
-                self.send(by, &format!("🎉 <b>{}!</b>\n\n🎁 هدیه‌ی تو به سرویس <b>{}</b> اضافه شد:\n{}\n\nهر بار که دوستانت خرید یا تمدید کنن، باز هم هدیه می‌گیری 💛", why, esc(&u.username), what),
-                    Some(ik(vec![vec![b(&self.bt("ref"), "ref")]]))).await;
             }
-            _ => {
-                let _ = self.db().exec("INSERT OR IGNORE INTO bot_users(tg_id,joined) VALUES(?1,?2)", &[&by, &now()]);
-                let _ = self.db().exec("UPDATE bot_users SET ref_bank_gb=COALESCE(ref_bank_gb,0)+?1, ref_bank_days=COALESCE(ref_bank_days,0)+?2 WHERE tg_id=?3", &[&add_gb, &add_days, &by]);
-                self.send(by, &format!("🎉 <b>{}!</b>\n\n🎁 این هدیه برات کنار گذاشته شد:\n{}\n\nبا اولین خرید یا تمدید خودت، به سرویست اضافه می‌شه.", why, what),
-                    Some(ik(vec![vec![b(&self.bt("buy"), "buy")]]))).await;
-            }
+            Ok(None) => {}
+            Err(e) => self.notify_admins(&format!("⚠️ هدیه‌ی دعوت برای خرید <code>{}</code> ثبت نشد: <code>{}</code>", tg, esc(&e)), None, None).await,
         }
     }
 
-    /// The gifts kept for someone without a working account (`reward_referrer`) go to the account they just got
-    async fn pay_bank(&self, tg: i64, u: &User) {
-        let (gb, days): (f64, i64) = self.db().with(|c| c.query_row(
-            "SELECT COALESCE(ref_bank_gb,0), COALESCE(ref_bank_days,0) FROM bot_users WHERE tg_id=?1", [tg], |r| Ok((r.get(0)?, r.get(1)?))).unwrap_or((0.0, 0)));
-        if gb <= 0.0 && days <= 0 {
-            return;
-        }
-        // taken once: a second delivery at the same moment finds it empty
-        if self.db().exec("UPDATE bot_users SET ref_bank_gb=0, ref_bank_days=0 WHERE tg_id=?1 AND ref_bank_gb=?2 AND ref_bank_days=?3", &[&tg, &gb, &days]).unwrap_or(0) != 1 {
-            return;
-        }
-        if matches!(self.db().gift(u.id, days, gb), Ok(true)) {
-            self.send(tg, &format!("🎁 <b>هدیه‌های دعوت دوستانت</b> به سرویس <b>{}</b> اضافه شد:\n{}", esc(&u.username), gift_line(days, gb)), None).await;
-        } else {
-            // an account that cannot take it (unlimited volume and no end date): kept for a later one
-            let _ = self.db().exec("UPDATE bot_users SET ref_bank_gb=ref_bank_gb+?1, ref_bank_days=ref_bank_days+?2 WHERE tg_id=?3", &[&gb, &days, &tg]);
+    /// Tells an inviter what their friend's purchase gave them
+    async fn tell_referrer(&self, r: &RefOut) {
+        let what = gift_line(r.days, r.gb);
+        let why = if r.first { "دوستت اولین خریدش رو کرد" } else { "دوستت دوباره خرید کرد" };
+        match &r.account {
+            Some(name) => {
+                self.send(r.by, &format!("🎉 <b>{}!</b>\n\n🎁 هدیه‌ی تو به سرویس <b>{}</b> اضافه شد:\n{}\n\nهر بار که دوستانت خرید یا تمدید کنن، باز هم هدیه می‌گیری 💛", why, esc(name), what),
+                    Some(ik(vec![vec![b(&self.bt("ref"), "ref")]]))).await;
+            }
+            None => {
+                self.send(r.by, &format!("🎉 <b>{}!</b>\n\n🎁 این هدیه برات کنار گذاشته شد:\n{}\n\nبا اولین خرید یا تمدید خودت، به سرویست اضافه می‌شه.", why, what),
+                    Some(ik(vec![vec![b(&self.bt("buy"), "buy")]]))).await;
+            }
         }
     }
 
@@ -3341,6 +3686,11 @@ impl Bot {
         (t, ik(vec![vec![b("📤 فرستادن لینک برای دوستان", &format!("url:{}", share))], vec![b(&self.bt("back"), "home")]]))
     }
 
+    /// Receipts of `uid` an admin rejected in the last 24 hours (a read error counts as the limit)
+    fn rejected_recently(&self, uid: i64) -> i64 {
+        self.db().with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE tg_id=?1 AND status='rejected' AND decided>?2", rusqlite::params![uid, now() - 86400], |r| r.get(0)).unwrap_or(REJECT_LIMIT))
+    }
+
     async fn review(&self, _chat: i64, _mid: i64, q: &Value, approve: bool, oid: i64) {
         let qid = q["id"].as_str().unwrap_or("").to_string();
         let Some(o) = self.order(oid) else {
@@ -3348,7 +3698,7 @@ impl Bot {
         };
         // approve and reject tapped together (or twice): only the first decision counts
         let to = if approve { "approved" } else { "rejected" };
-        if !matches!(self.db().exec("UPDATE orders SET status=?1 WHERE id=?2 AND status IN ('pending','error')", &[&to, &oid]), Ok(1)) {
+        if !matches!(self.db().exec("UPDATE orders SET status=?1, decided=?3 WHERE id=?2 AND status IN ('pending','error')", &[&to, &oid, &now()]), Ok(1)) {
             return self.answer(&qid, "این سفارش قبلاً بررسی شده.", true).await;
         }
         // the button stops loading at once: making the account and sending it can take a few seconds
@@ -3367,7 +3717,9 @@ impl Bot {
             self.mark_order(oid, q, &note).await;
         } else {
             self.mark_order(oid, q, &format!("❌ این سفارش در تاریخ {} و ساعت {} رد شد", date, time)).await;
-            self.send(o.1, &format!("❌ رسید سفارش #{} تأیید نشد. پشتیبانی: {}", oid, esc(&self.db().get("support"))), None).await;
+            let left = REJECT_LIMIT - self.rejected_recently(o.1);
+            let warn = if left <= 0 { "\n⛔️ به دلیل رسیدهای ردشده‌ی پیاپی، تا ۲۴ ساعت رسید جدید پذیرفته نمی‌شود.".to_string() } else { String::new() };
+            self.send(o.1, &format!("❌ <b>رسید سفارش #{} رد شد</b> و اشتراکی ساخته نشد.\nاگر واقعاً پرداخت کرده‌اید، با پشتیبانی تماس بگیرید: {}{}", oid, esc(&self.db().get("support")), warn), None).await;
         }
         self.order_msgs.lock().unwrap_or_else(|e| e.into_inner()).remove(&oid);
     }
@@ -3389,18 +3741,32 @@ impl Bot {
             return;
         }
         let key = format!("{}:{}:{}", c.tag, c.gid, c.n);
-        let claimed = self.db().exec("INSERT OR IGNORE INTO claims(id, tg_id, user_id, created) VALUES(?1, ?2, 0, ?3)", &[&key, &uid, &now()]).unwrap_or(0);
-        if claimed == 0 {
-            self.send(chat, "✅ این جایزه قبلاً تحویل داده شده.\nاکانتت رو از «سرویس‌های من» ببین.", home).await;
-            return;
-        }
         // ElClasicoP (the prediction) / ElClasicoW1 … (the draw); a number is added when the name is taken
         let base: String = c.tag.chars().take(9).collect();
         let base = if c.n == 0 { format!("{}P", base) } else { format!("{}W{}", base, c.n) };
         let notes = format!("giveaway {}", key);
-        match self.db().create_user(&format!("pick:{}", base), c.gb as f64, c.days, 1, &self.db().get("default_protocols"), &self.pick_nodes(0), &notes, uid) {
+        let protos = self.db().service_protocols("vip");
+        let nodes = self.pick_nodes(0);
+        // the claim row and the account in ONE transaction: a double tap or a forwarded link gets one account,
+        // and a failed account leaves the prize unclaimed
+        let made = self.db().immediate(|cx| {
+            if cx.execute("INSERT OR IGNORE INTO claims(id, tg_id, user_id, created) VALUES(?1, ?2, 0, ?3)", rusqlite::params![key, uid, now()]).map_err(sqlerr)? != 1 {
+                return Ok(None);
+            }
+            let u = crate::db::txn::create_user(cx, &format!("pick:{}", base), c.gb as f64, c.days, 1, &protos, &nodes, &notes, uid)?;
+            cx.execute("UPDATE claims SET user_id=?1 WHERE id=?2", rusqlite::params![u.id, key]).map_err(sqlerr)?;
+            Ok(Some(u))
+        });
+        let made = match made {
+            Ok(None) => {
+                self.send(chat, "✅ این جایزه قبلاً تحویل داده شده.\nاکانتت رو از «سرویس‌های من» ببین.", home).await;
+                return;
+            }
+            Ok(Some(u)) => Ok(u),
+            Err(e) => Err(e),
+        };
+        match made {
             Ok(u) => {
-                let _ = self.db().exec("UPDATE claims SET user_id=?1 WHERE id=?2", &[&u.id, &key]);
                 let a = self.app.clone();
                 tokio::spawn(async move { sync::sync_all(&a).await });
                 let head = format!("🎁 <b>جایزه‌ی قرعه‌کشی شما آماده است</b> ({} گیگ، {} روزه)", c.gb, c.days);
@@ -3408,8 +3774,7 @@ impl Bot {
                 self.notify_admins(&format!("🎁 جایزه‌ی قرعه‌کشی تحویل شد: <b>{}</b> ({} گیگ، {} روز) · {} · <code>{}</code>", esc(&u.username), c.gb, c.days, esc(&key), uid), None, None).await;
             }
             Err(e) => {
-                // nothing was created: the claim can be tried again
-                let _ = self.db().exec("DELETE FROM claims WHERE id=?1", &[&key]);
+                // rolled back: nothing was created, the claim can be tried again
                 self.notify_admins(&format!("⚠️ خطای ساخت جایزه‌ی قرعه‌کشی {}: <code>{}</code>", esc(&key), esc(&e)), None, None).await;
                 self.send(chat, "⚠️ ساخت اکانت جایزه ناموفق بود؛ کمی بعد دوباره امتحان کنید.", home).await;
             }
@@ -3439,20 +3804,38 @@ impl Bot {
             self.edit(chat, mid, again, back).await;
             return false;
         }
-        // claim it first so a double tap cannot create two accounts
-        let claimed = self.db().exec("UPDATE bot_users SET trial_used=1 WHERE tg_id=?1 AND COALESCE(trial_used,0)=0", &[&uid]).unwrap_or(0);
-        if claimed == 0 {
-            self.edit(chat, mid, again, back).await;
-            return false;
-        }
         // small and short (300 MB for 3 hours): enough to see the speed and the ping, not enough to live on;
         // one user, and one trial per Telegram account
         let mb = self.num_set("trial_mb", 10, 10240);
         let hours = self.num_set("trial_hours", 1, 720);
-        match self.create_account(uid, mb as f64 / 1024.0, 1, 1, "trial") {
-            Ok(mut u) => {
-                let _ = self.db().exec("UPDATE users SET expires_at=?1 WHERE id=?2", &[&(now() + hours * 3600), &u.id]);
-                if let Some(x) = self.db().user(u.id) { u = x; }
+        let name = match self.cfg_name_for(uid) { Some(n) => format!("pick:{}", n), None => "auto-test".to_string() };
+        let protos = self.db().service_protocols("vip");
+        // the claim and the account in ONE transaction: a double tap (or the bot and the mini app at once) gets
+        // one trial, and a failed account leaves the trial unclaimed
+        let made = self.db().immediate(|c| {
+            c.execute("INSERT OR IGNORE INTO bot_users(tg_id,joined) VALUES(?1,?2)", rusqlite::params![uid, now()]).map_err(sqlerr)?;
+            if c.execute("UPDATE bot_users SET trial_used=1 WHERE tg_id=?1 AND COALESCE(trial_used,0)=0", [uid]).map_err(sqlerr)? != 1 {
+                return Ok(None);
+            }
+            if users_of_tg_tx(c, uid)?.iter().any(|u| u.notes == "trial") {
+                return Ok(None);
+            }
+            let u = crate::db::txn::create_user(c, &name, mb as f64 / 1024.0, 1, 1, &protos, "", "trial", uid)?;
+            c.execute("UPDATE users SET expires_at=?1 WHERE id=?2", rusqlite::params![now() + hours * 3600, u.id]).map_err(sqlerr)?;
+            crate::db::txn::user(c, u.id).map(Some).ok_or_else(|| "not found".to_string())
+        });
+        let made = match made {
+            Ok(Some(u)) => Ok(u),
+            Ok(None) => {
+                self.edit(chat, mid, again, back).await;
+                return false;
+            }
+            Err(e) => Err(e),
+        };
+        match made {
+            Ok(u) => {
+                let a = self.app.clone();
+                tokio::spawn(async move { sync::sync_all(&a).await });
                 let (t, kb) = self.trial_delivery(&u, mb, hours);
                 if self.edit_ok(chat, mid, &t, Some(kb)).await {
                     self.set_menu(uid).await;
@@ -3466,8 +3849,7 @@ impl Bot {
                 false
             }
             Err(e) => {
-                // nothing was created: give the trial back
-                let _ = self.db().exec("UPDATE bot_users SET trial_used=0 WHERE tg_id=?1", &[&uid]);
+                // rolled back: nothing was created and the trial is still theirs
                 self.notify_admins(&format!("⚠️ خطای ساخت تست: <code>{}</code>", esc(&e)), None, None).await;
                 self.edit(chat, mid, "⚠️ ساخت اکانت تست ناموفق بود.", back).await;
                 false
@@ -4501,7 +4883,7 @@ impl Bot {
                     self.send(chat, "⚠️ نام فقط حروف انگلیسی و عدد، 3 تا 12 حرف و اولش حرف (مثل mahtab87).", kb).await;
                     return;
                 }
-                match db.create_user(&name, gb, days, conns, &db.get("default_protocols"), "", "admin", 0) {
+                match db.create_user(&name, gb, days, conns, &db.service_protocols("vip"), "", "admin", 0) {
                     Ok(u) => {
                         let a = self.app.clone();
                         tokio::spawn(async move { sync::sync_all(&a).await });
@@ -4779,9 +5161,7 @@ impl Bot {
                 v
             });
             for oid in waiting {
-                if self.check_gateway(oid).await {
-                    self.fulfill(oid).await;
-                }
+                self.settle_gateway(oid).await;
             }
             // gateway orders never paid: ZarinPal after a day, NOWPayments after the two days it is checked for.
             // A waiting order keeps a finished trial from being cleaned up.
@@ -5034,22 +5414,22 @@ mod flow_tests {
         let v = bot.create_account_svc(7201, 20.0, 30, 1, "", 0, "v2ray").unwrap();
         assert_eq!((v.protocols.as_str(), v.tier()), ("xray,hy2", Tier::V2ray));
         let g = bot.create_account_svc(7202, 20.0, 30, 1, "", 0, "game").unwrap();
-        assert_eq!((g.protocols.as_str(), g.tier()), ("wg,awg,kmix", Tier::Gaming));
+        assert_eq!((g.protocols.as_str(), g.tier()), ("kmix,awg,wg,dns", Tier::Gaming));
         // the same tier again: an admin's own change of the list stays
         bot.db().exec("UPDATE users SET protocols='xray' WHERE id=?1", &[&v.id]).unwrap();
         bot.set_service(v.id, "v2ray", true).unwrap();
         assert_eq!(bot.db().user(v.id).unwrap().protocols, "xray");
-        // V2Ray renewed with a gaming plan: combo, Xray kept and the gaming cores added
+        // V2Ray renewed with a gaming plan: vip, Xray kept and the gaming cores (with DNS) added
         bot.set_service(v.id, "game", true).unwrap();
         let u = bot.db().user(v.id).unwrap();
-        assert_eq!((u.protocols.as_str(), u.tier_raw.as_str()), ("xray,wg,awg,kmix", "combo"));
-        // a combo account renewed with a V2Ray plan stays combo and keeps its list as it is
+        assert_eq!((u.protocols.as_str(), u.tier_raw.as_str()), ("xray,kmix,awg,wg,dns", "vip"));
+        // a vip account renewed with a V2Ray plan stays vip and keeps its list as it is
         bot.set_service(v.id, "v2ray", true).unwrap();
         let u = bot.db().user(v.id).unwrap();
-        assert_eq!((u.protocols.as_str(), u.tier()), ("xray,wg,awg,kmix", Tier::Combo));
-        // gaming renewed with V2Ray: combo
+        assert_eq!((u.protocols.as_str(), u.tier()), ("xray,kmix,awg,wg,dns", Tier::Vip));
+        // gaming renewed with V2Ray: vip
         bot.set_service(g.id, "v2ray", true).unwrap();
-        assert_eq!(bot.db().user(g.id).unwrap().protocols, "wg,awg,kmix,xray,hy2");
+        assert_eq!(bot.db().user(g.id).unwrap().protocols, "kmix,awg,wg,dns,xray,hy2");
         // a trial (every core) bought as V2Ray: only Xray and Hysteria2
         let t = bot.create_account_svc(7203, 1.0, 1, 1, "trial", 0, "vip").unwrap();
         bot.set_service(t.id, "v2ray", false).unwrap();
@@ -5226,8 +5606,8 @@ mod flow_tests {
         let oid: i64 = buttons(&log, ADMIN).iter().find(|b| b.1.starts_with("ap:")).unwrap().1[3..].parse().unwrap();
         tap(&bot, from(ADMIN, "Admin", "admin"), &format!("ap:{}", oid)).await;
         let u = db.user(acc[0].id).unwrap();
-        assert_eq!((u.protocols.as_str(), u.tier(), db.users_of_tg(buyer).len()), ("xray,hy2,wg,awg,kmix", crate::access::Tier::Combo, 1));
-        assert!(db.get("default_protocols").split(',').all(|p| u.has_proto(p)), "{}", u.protocols);
+        assert_eq!((u.protocols.as_str(), u.tier(), db.users_of_tg(buyer).len()), ("xray,hy2,kmix,awg,wg,dns", crate::access::Tier::Vip, 1));
+        assert!(crate::access::VIP_PROTOS.iter().all(|p| u.has_proto(p)), "{}", u.protocols);
         // the services first, every time (even with one on sale), then its plans
         db.exec("UPDATE plans SET active=0 WHERE name='Std'", &[]).unwrap();
         tap(&bot, from(buyer, "Nima", "nima"), "buy").await;
@@ -5522,7 +5902,7 @@ mod flow_tests {
         tap(&bot, from(buyer, "Sara", "sara"), "pcat:b:0:v").await;
         assert!(buttons(&log, buyer).iter().any(|b| b.0.ends_with(" 52,000 ت")));
         let u = bot.create_account_svc(buyer, 20.0, 30, 1, "", 0, "game").unwrap();
-        assert_eq!((u.protocols.as_str(), u.service()), ("wg,awg,kmix", "game"));
+        assert_eq!((u.protocols.as_str(), u.service()), ("kmix,awg,wg,dns", "game"));
         assert!(bot.account_text(&u).contains("🎮 گیمینگ") && !bot.account_text(&u).contains("/v2"));
     }
 
@@ -5606,8 +5986,13 @@ mod flow_tests {
         tap_id(&bot, from(buyer, "Ali", "ali"), &format!("tchk:{}", oid), "q1").await;
         assert!(answers(&log, "q1")[0].contains("هنوز"), "{:?}", answers(&log, "q1"));
         assert!(db.users_of_tg(buyer).is_empty());
+        // 3.70: the comment must be the order's exactly (another case is not it)
+        txs.lock().unwrap().push(ton_tx(9, 252_000_000, &memo.to_lowercase(), now()));
+        tap_id(&bot, from(buyer, "Ali", "ali"), &format!("tchk:{}", oid), "q1b").await;
+        assert_eq!(last_order(&bot, buyer).2, "waiting");
+        assert!(db.users_of_tg(buyer).is_empty());
         // its own comment and amount: delivered once
-        txs.lock().unwrap().push(ton_tx(2, 252_000_000, &memo.to_lowercase(), now()));
+        txs.lock().unwrap().push(ton_tx(2, 252_000_000, &memo, now()));
         tap_id(&bot, from(buyer, "Ali", "ali"), &format!("tchk:{}", oid), "q2").await;
         assert_eq!(last_order(&bot, buyer).2, "done");
         assert_eq!(db.users_of_tg(buyer).len(), 1);
@@ -5621,6 +6006,11 @@ mod flow_tests {
         say(&bot, from(buyer, "Ali", "ali"), &format!("https://tonviewer.com/transaction/{}", hex::encode([2u8; 32]))).await;
         assert!(last(&log, buyer).contains("⚠️"), "{}", last(&log, buyer));
         assert_eq!(last_order(&bot, buyer).2, "waiting");
+        // the ledger keeps the payment used for good, even when the first order's ref no longer names it
+        let used: i64 = db.with(|c| c.query_row("SELECT COUNT(*) FROM pay_tx WHERE method='ton' AND oid=?1", [oid], |r| r.get(0)).unwrap());
+        assert_eq!(used, 1);
+        db.exec("UPDATE orders SET ref='' WHERE id=?1", &[&oid]).unwrap();
+        assert!(bot.tx_used(&crate::util::b64(&[2u8; 32])));
         assert_eq!(db.users_of_tg(buyer).len(), 1);
         // a payment short of the amount, with the right comment: not delivered, the admins decide
         let memo2 = last_order(&bot, buyer).3.split_whitespace().next().unwrap().to_string();
@@ -6578,6 +6968,230 @@ mod flow_tests {
         bot.fulfill(o).await;
         assert_eq!(accounts(&bot, 400), vec![(3, "ali2".into(), format!("order #{}", o))]);
     }
+
+    /// A paid order waiting for delivery: (order id, plan id) of a plan of `service`
+    fn paid_order(bot: &Bot, buyer: i64, service: &str, kind: &str, target: i64, discount: &str) -> (i64, i64) {
+        let db = bot.db();
+        db.exec("INSERT INTO plans(name,days,gb,toman,usd,conns,active,service) VALUES(?1,30,20,100000,0,1,1,?2)", &[&format!("P{}{}", service, buyer), &service]).unwrap();
+        let pid = db.with(|c| c.last_insert_rowid());
+        db.exec("INSERT INTO orders(tg_id,plan_id,kind,target,method,amount,status,ref,discount,created) VALUES(?1,?2,?3,?4,'card','100000','approved','r',?5,?6)",
+            &[&buyer, &pid, &kind, &target, &discount, &now()]).unwrap();
+        (db.with(|c| c.last_insert_rowid()), pid)
+    }
+
+    fn status(bot: &Bot, oid: i64) -> String {
+        bot.db().with(|c| c.query_row("SELECT status FROM orders WHERE id=?1", [oid], |r| r.get(0)).unwrap())
+    }
+
+    /// 3.70: many deliveries of one order at the same moment make one account and take one use of its code
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn one_order_delivered_at_once_many_times_gives_one_account() {
+        let (bot, _log) = bot().await;
+        let db = bot.db();
+        db.exec("INSERT INTO discounts(code,percent,uses_left) VALUES('ONCE10',10,5)", &[]).unwrap();
+        let buyer = 7801;
+        bot.touch(buyer, &from(buyer, "Reza", "reza"), 0);
+        let (oid, _) = paid_order(&bot, buyer, "vip", "new", 0, "ONCE10");
+        let mut tasks = vec![];
+        for _ in 0..12 {
+            let b = bot.clone();
+            tasks.push(tokio::spawn(async move { b.fulfill(oid).await }));
+        }
+        for t in tasks {
+            t.await.unwrap();
+        }
+        assert_eq!(status(&bot, oid), "done");
+        let acc = db.users_of_tg(buyer);
+        assert_eq!(acc.len(), 1);
+        // the 39-digit code of 3.69 and keyed credentials, delivered right to left
+        assert_eq!(acc[0].code.len(), crate::db::CODE_DIGITS);
+        assert!(acc[0].code.bytes().all(|c| c.is_ascii_digit()));
+        let uses: i64 = db.with(|c| c.query_row("SELECT uses_left FROM discounts WHERE code='ONCE10'", [], |r| r.get(0)).unwrap());
+        assert_eq!(uses, 4);
+        // a rejected order is never delivered, whoever calls
+        let (rj, _) = paid_order(&bot, 7802, "vip", "new", 0, "");
+        db.exec("UPDATE orders SET status='rejected' WHERE id=?1", &[&rj]).unwrap();
+        bot.fulfill(rj).await;
+        assert!(db.users_of_tg(7802).is_empty());
+        assert_eq!(status(&bot, rj), "rejected");
+    }
+
+    /// 3.70: a delivery that fails half way leaves nothing behind (no account, no used code, no reward), the order
+    /// is marked for the admins
+    #[tokio::test]
+    async fn a_failed_delivery_rolls_everything_back() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        db.exec("INSERT INTO discounts(code,percent,uses_left) VALUES('ROLL10',10,3)", &[]).unwrap();
+        db.set("ref_gb", "5");
+        let (inviter, buyer) = (7811, 7812);
+        bot.touch(inviter, &from(inviter, "Ali", "ali"), 0);
+        bot.touch(buyer, &from(buyer, "Sara", "sara"), inviter);
+        db.exec("UPDATE bot_users SET ref_bank_gb=3 WHERE tg_id=?1", &[&buyer]).unwrap();
+        // an upgrade of an account that is gone: fails after the order was claimed inside the transaction
+        let (oid, pid) = paid_order(&bot, buyer, "vip", "upgrade", 424242, "ROLL10");
+        db.exec("UPDATE plans SET category='upgrade:424242', gb=0, days=0 WHERE id=?1", &[&pid]).unwrap();
+        bot.fulfill(oid).await;
+        assert_eq!(status(&bot, oid), "error");
+        assert!(db.users_of_tg(buyer).is_empty());
+        let uses: i64 = db.with(|c| c.query_row("SELECT uses_left FROM discounts WHERE code='ROLL10'", [], |r| r.get(0)).unwrap());
+        assert_eq!(uses, 3);
+        let (bank, rewarded): (f64, i64) = db.with(|c| c.query_row("SELECT ref_bank_gb, ref_rewarded FROM bot_users WHERE tg_id=?1", [buyer], |r| Ok((r.get(0)?, r.get(1)?))).unwrap());
+        assert_eq!((bank, rewarded), (3.0, 0));
+        assert!(log.lock().unwrap().iter().any(|(m, v)| m == "sendMessage" && v["chat_id"].as_i64() == Some(ADMIN) && v["text"].as_str().unwrap_or("").contains("خطا در سفارش")));
+        // an upgrade plan bought as a NEW account (no end, no limit for the price of an upgrade): refused
+        let (abuse, apid) = paid_order(&bot, buyer, "vip", "new", 0, "");
+        db.exec("UPDATE plans SET category='upgrade:1', gb=0, days=0 WHERE id=?1", &[&apid]).unwrap();
+        bot.fulfill(abuse).await;
+        assert_eq!(status(&bot, abuse), "error");
+        assert!(db.users_of_tg(buyer).is_empty());
+    }
+
+    /// 3.70: a v2ray (or gaming) account becomes vip in place: same id, code, volume, use and end date
+    #[tokio::test]
+    async fn an_upgrade_to_vip_keeps_the_same_account() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        db.set("card_on", "1");
+        db.set("card_number", "6037000011112222");
+        db.set("sales_on", "1");
+        let buyer = 7821;
+        bot.touch(buyer, &from(buyer, "Mina", "mina"), 0);
+        let v = db.create_user("mina1", 40.0, 20, 1, "xray,hy2", "", "order #1", buyer).unwrap();
+        db.exec("UPDATE users SET used_bytes=?1 WHERE id=?2", &[&(5i64 * 1024 * 1024 * 1024), &v.id]).unwrap();
+        let v = db.user(v.id).unwrap();
+        // the account message offers it; another customer's account cannot be upgraded
+        assert!(bot.acct_kb(&v, vec![]).to_string().contains(&format!("upg:{}", v.id)));
+        tap(&bot, from(7822, "X", "x"), &format!("upg:{}", v.id)).await;
+        assert!(db.with(|c| c.query_row("SELECT COUNT(*) FROM plans WHERE category=?1", [format!("upgrade:{}", v.id)], |r| r.get::<_, i64>(0)).unwrap()) == 0);
+        tap(&bot, from(buyer, "Mina", "mina"), &format!("upg:{}", v.id)).await;
+        let (pid, toman): (i64, i64) = db.with(|c| c.query_row("SELECT id, toman FROM plans WHERE category=?1", [format!("upgrade:{}", v.id)], |r| Ok((r.get(0)?, r.get(1)?))).unwrap());
+        assert!(toman > 0);
+        assert_eq!(toman, crate::shop::upgrade_price(&crate::shop::pricing(db), &v));
+        tap(&bot, from(buyer, "Mina", "mina"), "pay:card").await;
+        say(&bot, from(buyer, "Mina", "mina"), "رسید").await;
+        let oid: i64 = buttons(&log, ADMIN).iter().find(|b| b.1.starts_with("ap:")).unwrap().1[3..].parse().unwrap();
+        let (kind, target, plan): (String, i64, i64) = db.with(|c| c.query_row("SELECT kind,target,plan_id FROM orders WHERE id=?1", [oid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap());
+        assert_eq!((kind.as_str(), target, plan), ("upgrade", v.id, pid));
+        assert!(last(&log, ADMIN).contains("ارتقا به VIP"), "{}", last(&log, ADMIN));
+        tap(&bot, from(ADMIN, "Admin", "admin"), &format!("ap:{}", oid)).await;
+        let u = db.user(v.id).unwrap();
+        assert_eq!(db.users_of_tg(buyer).len(), 1);
+        assert_eq!((u.id, u.code.as_str(), u.limit_gb, u.used_bytes, u.expires_at), (v.id, v.code.as_str(), v.limit_gb, v.used_bytes, v.expires_at));
+        assert_eq!((u.tier(), u.protocols.as_str()), (crate::access::Tier::Vip, "xray,hy2,kmix,awg,wg,dns"));
+        assert!(last(&log, buyer).contains("ارتقا یافت"), "{}", last(&log, buyer));
+        // a vip account is not offered it again, and the panel API refuses it too
+        assert!(!bot.acct_kb(&u, vec![]).to_string().contains("upg:"));
+        assert!(db.immediate(|c| crate::db::txn::upgrade_tier(c, u.id, crate::access::Tier::Vip, "")).is_err());
+    }
+
+    /// 3.70: a free trial asked many times at once (the bot and the mini app) gives one account
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_trial_asked_at_once_many_times_is_given_once() {
+        let (bot, _log) = bot().await;
+        let uid = 7831;
+        bot.touch(uid, &from(uid, "Kia", "kia"), 0);
+        let mut tasks = vec![];
+        for _ in 0..10 {
+            let b = bot.clone();
+            tasks.push(tokio::spawn(async move { b.trial_ok(uid, uid, 0).await }));
+        }
+        let mut given = 0;
+        for t in tasks {
+            if t.await.unwrap() { given += 1; }
+        }
+        assert!(given <= 1);
+        assert_eq!(bot.db().users_of_tg(uid).len(), 1);
+        assert!(!bot.trial_open(uid));
+    }
+
+    /// 3.70: rejected receipts are told to the customer, and after two in a day no more receipts are taken
+    #[tokio::test]
+    async fn rejected_receipts_stop_more_fake_ones() {
+        let (bot, log) = bot().await;
+        let db = bot.db();
+        db.set("card_on", "1");
+        db.set("card_number", "6037000011112222");
+        db.exec("INSERT INTO plans(name,days,gb,toman,usd,conns,active,service) VALUES('Rj',30,30,85000,0,1,1,'vip')", &[]).unwrap();
+        let pid: i64 = db.with(|c| c.query_row("SELECT id FROM plans WHERE name='Rj'", [], |r| r.get(0)).unwrap());
+        let buyer = 7841;
+        bot.touch(buyer, &from(buyer, "Fake", "fake"), 0);
+        db.exec("UPDATE bot_users SET cfg_name='fake1' WHERE tg_id=?1", &[&buyer]).unwrap();
+        for i in 0..2 {
+            tap(&bot, from(buyer, "Fake", "fake"), &format!("pl:{}", pid)).await;
+            tap(&bot, from(buyer, "Fake", "fake"), "pay:card").await;
+            say(&bot, from(buyer, "Fake", "fake"), "رسید").await;
+            let oid: i64 = buttons(&log, ADMIN).iter().rev().find(|b| b.1.starts_with("rj:")).unwrap().1[3..].parse().unwrap();
+            tap(&bot, from(ADMIN, "Admin", "admin"), &format!("rj:{}", oid)).await;
+            assert_eq!(status(&bot, oid), "rejected");
+            let t = last(&log, buyer);
+            assert!(t.contains("رد شد"), "{}", t);
+            assert_eq!(t.contains("۲۴ ساعت"), i == 1, "{}", t);
+            // an admin tapping approve after the rejection changes nothing
+            tap_id(&bot, from(ADMIN, "Admin", "admin"), &format!("ap:{}", oid), &format!("late{}", i)).await;
+            assert_eq!(status(&bot, oid), "rejected");
+        }
+        let orders_before: i64 = db.with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE tg_id=?1", [buyer], |r| r.get(0)).unwrap());
+        tap(&bot, from(buyer, "Fake", "fake"), &format!("pl:{}", pid)).await;
+        tap(&bot, from(buyer, "Fake", "fake"), "pay:card").await;
+        say(&bot, from(buyer, "Fake", "fake"), "رسید").await;
+        let orders_after: i64 = db.with(|c| c.query_row("SELECT COUNT(*) FROM orders WHERE tg_id=?1", [buyer], |r| r.get(0)).unwrap());
+        assert_eq!(orders_before, orders_after);
+        assert!(last(&log, buyer).contains("پذیرفته نمی‌شود"), "{}", last(&log, buyer));
+        assert!(db.users_of_tg(buyer).is_empty());
+    }
+
+    /// 3.70: no reward for inviting oneself or for an invite loop, and the reward is given once per purchase
+    #[tokio::test]
+    async fn referrals_never_loop() {
+        let (bot, _log) = bot().await;
+        let db = bot.db();
+        db.set("ref_gb", "5");
+        let (a, b2) = (7851, 7852);
+        bot.touch(a, &from(a, "A", "a"), 0);
+        bot.touch(b2, &from(b2, "B", "b"), a);
+        // a loop made in the database (B invited A as well): neither side is rewarded
+        db.exec("UPDATE bot_users SET ref_by=?1 WHERE tg_id=?2", &[&b2, &a]).unwrap();
+        bot.reward_referrer(b2, 20.0).await;
+        bot.reward_referrer(a, 20.0).await;
+        let earned: f64 = db.with(|c| c.query_row("SELECT COALESCE(SUM(ref_earned_gb),0) FROM bot_users WHERE tg_id IN (?1,?2)", [a, b2], |r| r.get(0)).unwrap());
+        assert_eq!(earned, 0.0);
+        // oneself
+        db.exec("UPDATE bot_users SET ref_by=tg_id WHERE tg_id=?1", &[&a]).unwrap();
+        bot.reward_referrer(a, 20.0).await;
+        let earned: f64 = db.with(|c| c.query_row("SELECT COALESCE(ref_earned_gb,0) FROM bot_users WHERE tg_id=?1", [a], |r| r.get(0)).unwrap());
+        assert_eq!(earned, 0.0);
+        // /start with one's own invite link stores nothing
+        say(&bot, from(7853, "C", "c"), "/start ref_7853").await;
+        let r: i64 = db.with(|c| c.query_row("SELECT ref_by FROM bot_users WHERE tg_id=7853", [], |r| r.get(0)).unwrap());
+        assert_eq!(r, 0);
+    }
+
+    #[test]
+    fn gateway_answers_map_to_one_state_each() {
+        // NOWPayments: only this payment of this order, paid in full, pays
+        let np = |st: &str, extra: Value| { let mut v = json!({"payment_id": 55, "order_id": "9", "payment_status": st, "actually_paid": 1.5, "pay_amount": 3, "pay_currency": "usdttrc20"});
+            if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) { for (k, x) in e { o.insert(k.clone(), x.clone()); } } v };
+        assert_eq!(np_state(&np("finished", json!({})), 9, "55"), GwState::Paid("55".into()));
+        assert_eq!(np_state(&np("confirmed", json!({})), 9, "55"), GwState::Paid("55".into()));
+        assert!(matches!(np_state(&np("partially_paid", json!({})), 9, "55"), GwState::Partial(_)));
+        for st in ["failed", "expired", "refunded"] {
+            assert!(matches!(np_state(&np(st, json!({})), 9, "55"), GwState::Failed(_)), "{}", st);
+        }
+        assert_eq!(np_state(&np("waiting", json!({})), 9, "55"), GwState::Waiting);
+        assert!(matches!(np_state(&np("finished", json!({"order_id": "10"})), 9, "55"), GwState::Error(_)));
+        assert!(matches!(np_state(&np("finished", json!({"payment_id": 56})), 9, "55"), GwState::Error(_)));
+        assert!(matches!(np_state(&np("weird", json!({})), 9, "55"), GwState::Error(_)));
+        // ZarinPal: 100 / 101 pay, -51 / -54 / -50 fail, anything else is decided later
+        assert_eq!(zp_state(&json!({"data": {"code": 100, "ref_id": 201}, "errors": []}), "A1"), GwState::Paid("201".into()));
+        assert_eq!(zp_state(&json!({"data": {"code": 101, "ref_id": 201}}), "A1"), GwState::Paid("201".into()));
+        assert!(matches!(zp_state(&json!({"data": [], "errors": {"code": -51}}), "A1"), GwState::Failed(_)));
+        assert!(matches!(zp_state(&json!({"data": [], "errors": {"code": -50}}), "A1"), GwState::Failed(_)));
+        assert!(matches!(zp_state(&json!({"data": [], "errors": {"code": -54}}), "A1"), GwState::Failed(_)));
+        assert!(matches!(zp_state(&json!({"data": [], "errors": {"code": -9}}), "A1"), GwState::Error(_)));
+        assert!(matches!(zp_state(&json!({}), "A1"), GwState::Error(_)));
+    }
+
 }
 
 #[cfg(test)]

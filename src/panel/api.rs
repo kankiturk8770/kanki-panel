@@ -562,17 +562,25 @@ async fn users_create(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
         Ok(t) => t,
         Err(r) => return r,
     };
-    let def_list = match tier {
-        Some(t) => app.db.service_protocols(t.service()),
-        None => app.db.get("default_protocols"),
-    };
-    let def: String = def_list.split(',').map(|x| x.trim()).filter(|x| USER_PROTOS.contains(x)).collect::<Vec<_>>().join(",");
-    let protos = list_or(&b["protocols"], &def);
+    // 3.70: the tier decides the protocols. No tier and no protocols: the «New user» default tier (setting
+    // `default_tier`) with exactly its protocols, never every core; protocols without a tier: the tier they make.
+    let typed_protos = list_or(&b["protocols"], "");
     let nodes = list_or(&b["nodes"], "");
-    let (protos, nodes) = match checked_lists(&app, &protos, &nodes) {
+    let (typed_protos, nodes) = match checked_lists(&app, &typed_protos, &nodes) {
         Ok(x) => x,
         Err(e) => return err(StatusCode::BAD_REQUEST, &e),
     };
+    let tier = match tier {
+        Some(t) => t,
+        None if !typed_protos.is_empty() => crate::db::tier_of_protocols(&typed_protos),
+        None => crate::access::Tier::parse(&app.db.get("default_tier")).unwrap_or(crate::access::Tier::Vip),
+    };
+    let protos = if typed_protos.is_empty() { app.db.service_protocols(tier.service()) } else { typed_protos };
+    let outside = tier.outside(&protos);
+    if !outside.is_empty() {
+        return err(StatusCode::BAD_REQUEST, &format!("outside the {} tier: {}", tier.as_str(), outside.join(", ")));
+    }
+    let tier = Some(tier);
     let notes = b["notes"].as_str().unwrap_or("");
     let tg = b["tg_id"].as_i64().unwrap_or(0);
     // a date typed in: kept to the same range as when a user is edited
@@ -626,8 +634,8 @@ fn tier_field(b: &Value) -> Result<Option<crate::access::Tier>, Response> {
     match &b["tier"] {
         Value::Null => Ok(None),
         Value::String(s) if s.trim().is_empty() => Ok(None),
-        Value::String(s) => crate::access::Tier::parse(s).map(Some).ok_or_else(|| err(StatusCode::BAD_REQUEST, "tier: v2ray, gaming or combo")),
-        _ => Err(err(StatusCode::BAD_REQUEST, "tier: v2ray, gaming or combo")),
+        Value::String(s) => crate::access::Tier::parse(s).map(Some).ok_or_else(|| err(StatusCode::BAD_REQUEST, "tier: v2ray, gaming or vip")),
+        _ => Err(err(StatusCode::BAD_REQUEST, "tier: v2ray, gaming or vip")),
     }
 }
 
@@ -658,6 +666,12 @@ async fn users_update(State(app): St, h: HeaderMap, Path(id): Path<i64>, Json(b)
         Ok(t) => t.unwrap_or_else(|| u.tier()),
         Err(r) => return r,
     };
+    // 3.70: an account has only its tier's protocols. A new tier without a list gets that tier's protocols.
+    let protos = if b["protocols"].is_null() && tier != u.tier() { app.db.service_protocols(tier.service()) } else { protos };
+    let outside = tier.outside(&protos);
+    if !outside.is_empty() {
+        return err(StatusCode::BAD_REQUEST, &format!("outside the {} tier: {}", tier.as_str(), outside.join(", ")));
+    }
     let notes = b["notes"].as_str().unwrap_or(&u.notes).to_string();
     let enabled = b["enabled"].as_bool().unwrap_or(u.enabled) as i64;
     let mut username = u.username.clone();
@@ -723,6 +737,12 @@ pub fn user_action(app: &App, id: i64, action: &str, b: &Value) -> Result<(), St
         "delete" => {
             delete_user(app, id);
             Ok(())
+        }
+        // 3.70: v2ray / gaming -> vip on the same account (same id, code, volume and end date)
+        "upgrade" => {
+            let to = b["tier"].as_str().and_then(crate::access::Tier::parse).unwrap_or(crate::access::Tier::Vip);
+            let add = app.db.service_protocols(to.service());
+            app.db.immediate(|c| crate::db::txn::upgrade_tier(c, id, to, &add)).map(|_| ())
         }
         _ => Err("unknown action".into()),
     }
@@ -1179,9 +1199,10 @@ mod token_rights_tests {
         let before = app.db.users().len();
         assert_eq!(call(json!({"username": "bob", "count": 5})).await, StatusCode::BAD_REQUEST);
         assert_eq!(app.db.users().len(), before);
+        // 3.70: the old default list never decides the cores of a new user; the default tier does
         app.db.set("default_protocols", "wg,ovpn,hy2");
         assert_eq!(call(json!({"username": "carol1"})).await, StatusCode::OK);
-        assert_eq!(app.db.users().iter().find(|u| u.username == "carol1").unwrap().protocols, "wg,hy2");
+        assert_eq!(app.db.users().iter().find(|u| u.username == "carol1").unwrap().protocols, "xray,hy2,kmix,awg,wg,dns");
         assert!(app.db.users().iter().all(|u| !u.username.starts_with("alice") || u.username == "alice4"));
         // a server whose VPN serves nobody is left out of a user's list; a list of only such servers is refused
         app.db.exec("INSERT INTO nodes(id,name,address,endpoint,token,endpoint_mode,enabled) VALUES('r1','IR','https://b','','t','panel',0)", &[]).unwrap();
@@ -1428,7 +1449,7 @@ pub fn mask_secret(v: &str) -> String {
 }
 
 pub const SETTING_KEYS: &[&str] = &[
-    "dns", "mtu", "default_protocols", "sales_on", "trial_on", "card_on", "card_number", "card_holder",
+    "dns", "mtu", "default_protocols", "default_tier", "sales_on", "trial_on", "card_on", "card_number", "card_holder",
     "wallet_on", "wallet_text", "ton_address", "usdt_address", "usd_rate", "np_on", "np_key", "np_coins", "zp_on", "zp_merchant", "zp_callback", "support", "app_link",
     "welcome", "ref_gb", "ref_days", "ref_pct", "ref_new_pct", "trial_offer_pct", "warn_on", "backup_on", "channel",
     "panel_name", "lang", "theme", "color", "refresh", "endpoint", "sub_base", "awg_compat", "conn_limit_on", "tg_alerts", "logo", "price_rules",
@@ -1584,12 +1605,16 @@ async fn settings_put(State(app): St, h: HeaderMap, Json(b): Json<Value>) -> Res
                 }
                 let s = match k.as_str() {
                     "pricing" => pricing.clone().unwrap_or_default(),
-                    "game_protocols" => s.split(',').map(|x| x.trim()).filter(|x| crate::db::GAME_PROTOS.contains(x)).collect::<Vec<_>>().join(","),
+                    "game_protocols" => s.split(',').map(|x| x.trim()).filter(|x| matches!(*x, "wg" | "awg")).collect::<Vec<_>>().join(","),
                     "v2ray_protocols" => {
                         let v: Vec<&str> = s.split(',').map(|x| x.trim()).filter(|x| matches!(*x, "xray" | "hy2")).collect();
                         if v.contains(&"xray") { v.join(",") } else { "xray".into() }
                     }
                     "wg_tunnel_on" => if s.trim() == "0" { "0".into() } else { "1".into() },
+                    "default_tier" => match crate::access::Tier::parse(&s) {
+                        Some(t) => t.as_str().to_string(),
+                        None => return err(StatusCode::BAD_REQUEST, "default_tier: v2ray, gaming or vip"),
+                    },
                     _ => s,
                 };
                 app.db.set(k, s.trim());

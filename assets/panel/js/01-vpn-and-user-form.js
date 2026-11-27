@@ -92,26 +92,31 @@ function vhGrid(nodes,o,xr,dn){var el=$('#vh_g');if(!el)return;var pr=o.protocol
  if(s)s.innerHTML=kuStats([[t('Servers online'),N(ups)+' / '+N(nodes.length),ups<nodes.length?'warn':'ok'],[t('Online now'),N(o.online||0),'ok'],[t('Total traffic'),'<span class="ltr">'+N(o.traffic_gb||0)+' GB</span>'],[t('Users'),N(o.users||0)]])}
 
 // ---------------------------------------------------------------- user form: tier and one switch per core (3.64)
-// The tier says what the user bought: «give everyone» buttons and purchases only hand out its cores. Ticking a
-// tier ticks its cores; every core can still be switched by hand (a core outside the tier is marked so).
-var TIER_NAMES={v2ray:'V2Ray',gaming:'Gaming',combo:'Combo'};
-var TIER_CORES={v2ray:['xray','hy2'],gaming:['wg','awg','kmix'],combo:['wg','awg','hy2','kmix','xray','dns']};
+// The tier says what the user bought (3.70: one account, one code, three plans): only the tier's cores can be
+// switched on; a core outside the tier is locked (the server refuses it too). Ticking a tier ticks its cores.
+var TIER_NAMES={v2ray:'V2Ray',gaming:'Gaming',vip:'VIP'};
+var TIER_CORES={v2ray:['xray','hy2'],gaming:['kmix','awg','wg','dns'],vip:['xray','hy2','kmix','awg','wg','dns']};
+function tierKey(k){return k=='combo'?'vip':(TIER_CORES[k]?k:'')}
 var UF_CORES=[['wg','WireGuard','shield2'],['awg','AmneziaWG','security'],['kmix','KANKI MIX','game'],['hy2','Hysteria2','globe'],['xray','Xray','xray'],['dns','Kanki DNS','dns']];
 function tierOfProtos(protos){var has=function(p){return protos.indexOf(p)>=0},ps=protos.filter(Boolean);
  if(has('xray')&&ps.every(function(p){return p=='xray'||p=='hy2'}))return 'v2ray';
- if((has('wg')||has('awg'))&&ps.every(function(p){return TIER_CORES.gaming.indexOf(p)>=0}))return 'gaming';return 'combo'}
-function ufServices(protos,un,tier){var has=function(p){return protos.indexOf(p)>=0},nodes=S.nodes||[];tier=tier||tierOfProtos(protos);
+ if((has('wg')||has('awg'))&&ps.every(function(p){return TIER_CORES.gaming.indexOf(p)>=0}))return 'gaming';return 'vip'}
+function ufServices(protos,un,tier){tier=tierKey(tier)||(protos.length?tierOfProtos(protos):'');var nodes=S.nodes||[];
+ // a new user: the «New user» default tier with exactly its cores (never every core by default)
+ if(!tier){tier=tierKey((S.me&&S.me.default_tier)||'vip')||'vip';protos=TIER_CORES[tier].slice()}
+ var has=function(p){return protos.indexOf(p)>=0};
  var h='<label class="f" style="margin-top:12px" id="uf_tl">'+t('Subscription tier')+'</label>'+
-  '<div class="seg uf-tier" id="uf_tier" role="radiogroup" aria-labelledby="uf_tl">'+['v2ray','gaming','combo'].map(function(k){
-   return '<button type="button" role="radio" data-tier="'+k+'" aria-checked="'+(k==tier)+'" class="'+(k==tier?'on':'')+'"><b>'+t(TIER_NAMES[k])+'</b><small>'+t({v2ray:'Xray + Hysteria2',gaming:'WireGuard + AmneziaWG + KANKI MIX',combo:'Every core'}[k])+'</small></button>'}).join('')+'</div>'+
+  '<div class="seg uf-tier" id="uf_tier" role="radiogroup" aria-labelledby="uf_tl">'+['v2ray','gaming','vip'].map(function(k){
+   return '<button type="button" role="radio" data-tier="'+k+'" aria-checked="'+(k==tier)+'" class="'+(k==tier?'on':'')+'"><b>'+t(TIER_NAMES[k])+'</b><small>'+t({v2ray:'Xray + Hysteria2',gaming:'KANKI MIX + AmneziaWG + WireGuard + DNS',vip:'Every core'}[k])+'</small></button>'}).join('')+'</div>'+
   '<label class="f" id="uf_cl">'+t('Cores of this user')+'</label><div class="uf-cores" role="group" aria-labelledby="uf_cl">'+UF_CORES.map(function(c){
    return '<label class="uf-core" style="--pc:'+(PCOL[c[0]]||'var(--a)')+'" data-core="'+c[0]+'"><span class="ni">'+ic(c[2],16)+'</span><span class="nm"><b>'+c[1]+'</b><small class="uf-out">'+t('Outside the tier')+'</small></span>'+
     '<span class="sw"><input type="checkbox" class="f_pr" value="'+c[0]+'" '+(has(c[0])?'checked':'')+' aria-label="'+esc(c[1])+'"><span></span></span></label>'}).join('')+'</div>'+
   (nodes.length>1?'<label class="f">'+t('Servers')+'</label><div class="ckrow">'+nodes.map(function(n){return '<label class="chk"><input type="checkbox" class="f_nd" value="'+esc(n.id)+'" '+(un.length==0||un.indexOf(n.id)>=0?'checked':'')+'>'+esc(n.name)+'</label>'}).join('')+'</div>':'');
  setTimeout(ufWire,0);return h}
-function ufTier(){var b=$('#uf_tier [aria-checked=true]');return b?b.dataset.tier:'combo'}
+function ufTier(){var b=$('#uf_tier [aria-checked=true]');return b?b.dataset.tier:'vip'}
 function ufWire(){if(!$('#uf_tier'))return;
- var mark=function(){var k=ufTier();$$('.uf-core').forEach(function(c){var on=$('.f_pr',c).checked;c.classList.toggle('on',on);c.classList.toggle('out',on&&TIER_CORES[k].indexOf(c.dataset.core)<0)})};
+ var mark=function(){var k=ufTier();$$('.uf-core').forEach(function(c){var x=$('.f_pr',c),out=TIER_CORES[k].indexOf(c.dataset.core)<0;
+  if(out)x.checked=false;x.disabled=out;c.classList.toggle('on',x.checked);c.classList.toggle('out',out)})};
  $$('#uf_tier [data-tier]').forEach(function(b){b.onclick=function(){var k=b.dataset.tier;
   $$('#uf_tier [data-tier]').forEach(function(x){var on=x==b;x.classList.toggle('on',on);x.setAttribute('aria-checked',on)});
   $$('.uf-core .f_pr').forEach(function(x){x.checked=TIER_CORES[k].indexOf(x.value)>=0});mark()}});

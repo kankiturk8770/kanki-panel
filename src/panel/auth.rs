@@ -608,6 +608,7 @@ async fn me(State(app): St, h: HeaderMap) -> Response {
     v["totp_on"] = json!(app.db.on("totp_on"));
     v["force_2fa"] = json!(app.db.on("force_2fa"));
     v["default_protocols"] = json!(app.db.get("default_protocols"));
+    v["default_tier"] = json!(crate::access::Tier::parse(&app.db.get("default_tier")).unwrap_or(crate::access::Tier::Vip).as_str());
     Json(v).into_response()
 }
 

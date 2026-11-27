@@ -219,7 +219,18 @@ pub fn incoming(v: &Value) -> Vec<TonIn> {
         if source.is_empty() || m["bounced"].as_bool().unwrap_or(false) || t["emulated"].as_bool().unwrap_or(false) {
             return None;
         }
-        if t["finality"].as_str().map(|f| f != "finalized").unwrap_or(false) {
+        // 3.70: only what the chain finalized (an answer without the field is not taken as final)
+        if t["finality"].as_str() != Some("finalized") {
+            return None;
+        }
+        // the message must be addressed to the wallet the transaction belongs to
+        if let (Some(dst), Some(acc)) = (m["destination"].as_str(), t["account"].as_str()) {
+            if raw_address(dst).as_deref().map(|d| d.eq_ignore_ascii_case(acc)) != Some(true) && !dst.eq_ignore_ascii_case(acc) {
+                return None;
+            }
+        }
+        // a bounce phase that sent the money back: it did not stay
+        if d_bad(&t["description"]) {
             return None;
         }
         // a bounce or any message out of the wallet in the same transaction: the money did not stay
@@ -249,10 +260,15 @@ pub fn incoming(v: &Value) -> Vec<TonIn> {
     }).filter(|x| !x.hash.is_empty()).collect()
 }
 
-/// A comment as the buyer may have typed it: no spaces, upper case ("kanki-12-ab3" = "KANKI-12-AB3")
+/// 3.70: the order's comment exactly (only spaces around it are ignored; the Tonkeeper button fills it in)
 pub fn same_memo(a: &str, b: &str) -> bool {
-    let n = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>().to_uppercase();
-    !a.trim().is_empty() && n(a) == n(b)
+    let (a, b) = (a.trim(), b.trim());
+    !a.is_empty() && crate::util::ct_eq(a, b)
+}
+
+/// A transaction whose bounce phase sent the money back (whatever the rest of it says)
+fn d_bad(d: &Value) -> bool {
+    d["bounce"]["type"].as_str() == Some("ok")
 }
 
 /// The transaction hash in what a buyer sent: a Tonviewer / Tonscan / Tonkeeper link or the bare hash
@@ -303,8 +319,10 @@ async fn tc_get(app: &crate::App, path: &str) -> Result<Value, String> {
 /// The payments into the wallet since a time (newest first; up to 256, so a flood of tiny spam payments
 /// cannot push an order's payment out of the list within its hours)
 pub async fn recent(app: &crate::App, address: &str, since: i64) -> Result<Vec<TonIn>, String> {
+    let me = raw_address(address).ok_or("bad address")?;
     let v = tc_get(app, &format!("/transactions?account={}&start_utime={}&limit=256&sort=desc", address.trim(), since.max(0))).await?;
-    Ok(incoming(&v))
+    // only payments into exactly this wallet
+    Ok(incoming(&v).into_iter().filter(|t| t.account == me).collect())
 }
 
 /// The payment into this wallet with this hash: the transaction's own hash, or the hash of the message that
@@ -403,13 +421,23 @@ mod tests {
             tx("D", "252000000", "KANKI-9-X1", json!([]), json!({"finality": "pending"})),
             // emulated, not on the chain
             tx("E", "252000000", "KANKI-9-X1", json!([]), json!({"emulated": true})),
+            // no finality at all: not taken as final
+            tx("F", "252000000", "KANKI-9-X1", json!([]), json!({"finality": null})),
+            // bounced (the description says so) or its compute phase failed
+            tx("G", "252000000", "KANKI-9-X1", json!([]), json!({"description": {"aborted": false, "bounce": {"type": "ok"}, "credit_ph": {"credit": "252000000"}}})),
+            // a message addressed to another wallet
+            tx("I", "252000000", "KANKI-9-X1", json!([]), json!({"in_msg": {"source": "0:ADDC", "destination": "0:1111111111111111111111111111111111111111111111111111111111111111", "value": "252000000", "bounced": false}})),
         ]});
         let got = incoming(&v);
         assert_eq!(got.len(), 1, "{:?}", got);
         assert_eq!(got[0].hash, "A");
         assert_eq!(got[0].nano, 252_000_000);
         assert_eq!(got[0].comment, "KANKI-7-X1");
-        assert!(same_memo(" kanki-7-x1 ", "KANKI-7-X1"));
+        assert!(same_memo(" KANKI-7-X1 ", "KANKI-7-X1"));
+        // 3.70: exactly the order's comment
+        assert!(!same_memo("kanki-7-x1", "KANKI-7-X1"));
+        assert!(!same_memo("KANKI-7-X 1", "KANKI-7-X1"));
+        assert!(!same_memo("KANKI-7-X1X", "KANKI-7-X1"));
         assert!(!same_memo("", ""));
     }
 

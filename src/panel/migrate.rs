@@ -76,6 +76,7 @@ pub fn refused_while_moving(method: &axum::http::Method, path: &str) -> bool {
     (path.starts_with("/api/") && change && !path.starts_with("/api/config/"))
         || path == "/tg/api/buy"
         || path == "/tg/api/trial"
+        || path == "/tg/api/upgrade"
         || (path.starts_with("/tg/api/admin/") && change)
         || path == "/join/register"
 }
@@ -382,7 +383,7 @@ mod tests {
     fn a_frozen_panel_refuses_changes_only() {
         let r = super::refused_while_moving;
         for (m, p) in [(Method::POST, "/api/users"), (Method::PUT, "/api/settings"), (Method::DELETE, "/api/users/3"), (Method::POST, "/api/sync"),
-                       (Method::GET, "/tg/api/buy"), (Method::GET, "/tg/api/trial"), (Method::POST, "/tg/api/admin/panel"), (Method::POST, "/join/register"),
+                       (Method::POST, "/tg/api/buy"), (Method::POST, "/tg/api/trial"), (Method::POST, "/tg/api/admin/panel"), (Method::POST, "/join/register"),
                        (Method::POST, "/api/restore"), (Method::PUT, "/api/bot")] {
             assert!(r(&m, p), "{} {}", m, p);
         }
