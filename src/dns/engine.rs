@@ -109,12 +109,18 @@ struct CacheEntry {
     ttl: u32,
 }
 
+/// 3.72: wrong registration tokens one address may send before it waits
+const REG_FAILS: u32 = 10;
+const REG_WINDOW: std::time::Duration = std::time::Duration::from_secs(600);
+
 pub struct Engine {
     pub live: RwLock<Arc<Live>>,
     gate: Mutex<Gate>,
     stats: Mutex<HashMap<i64, Arc<UserStat>>>,
     cache: Mutex<HashMap<(String, u16, u16), CacheEntry>>,
     rate: Mutex<HashMap<IpAddr, (f64, Instant)>>,
+    /// 3.72: failed registrations per address (wrong token): at most `REG_FAILS` in `REG_WINDOW`
+    reg_fail: Mutex<HashMap<IpAddr, (u32, Instant)>>,
     pub conns: AtomicUsize,
     pub errors: Mutex<Vec<String>>,
     /// queries answered: all, routed to us, from the cache, refused (not a subscriber)
@@ -159,6 +165,7 @@ impl Engine {
             stats: Mutex::new(HashMap::new()),
             cache: Mutex::new(HashMap::new()),
             rate: Mutex::new(HashMap::new()),
+            reg_fail: Mutex::new(HashMap::new()),
             conns: AtomicUsize::new(0),
             errors: Mutex::new(vec![]),
             q_total: AtomicU64::new(0),
@@ -191,6 +198,44 @@ impl Engine {
 
     pub fn qlog_last(&self) -> u64 {
         self.qseq.load(Ordering::Relaxed)
+    }
+
+    /// 3.72: may `ip` try a registration now? (fewer than `REG_FAILS` wrong tokens in the last `REG_WINDOW`)
+    pub fn reg_allowed(&self, ip: IpAddr) -> bool {
+        let g = self.reg_fail.lock().unwrap_or_else(|e| e.into_inner());
+        g.get(&ip).map(|(n, at)| *n < REG_FAILS || at.elapsed() > REG_WINDOW).unwrap_or(true)
+    }
+
+    /// 3.72: a wrong token from `ip` (the table is bounded: old entries go first, all of them past 50 000)
+    pub fn reg_failed(&self, ip: IpAddr) {
+        let mut g = self.reg_fail.lock().unwrap_or_else(|e| e.into_inner());
+        if g.len() > 50_000 {
+            g.retain(|_, (_, at)| at.elapsed() < REG_WINDOW);
+            if g.len() > 50_000 {
+                g.clear();
+            }
+        }
+        let e = g.entry(ip).or_insert((0, Instant::now()));
+        if e.1.elapsed() > REG_WINDOW {
+            *e = (0, Instant::now());
+        }
+        e.0 += 1;
+    }
+
+    /// 3.72: the user of a registration token: only the token's own shape (20 hex), compared in constant time with
+    /// every user's (no early exit, no map lookup on the typed value)
+    pub fn token_user(&self, token: &str) -> Option<i64> {
+        let t = token.trim_end_matches('/').to_ascii_lowercase();
+        if t.len() != 20 || !t.bytes().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        let mut found = None;
+        for u in self.live().cfg.users.iter() {
+            if !u.token.is_empty() && crate::util::ct_eq(&u.token.to_ascii_lowercase(), &t) && found.is_none() {
+                found = Some(u.id);
+            }
+        }
+        found
     }
 
     pub fn live(&self) -> Arc<Live> {
@@ -890,16 +935,25 @@ async fn http(eng: &Arc<Engine>, mut s: TcpStream, ip: IpAddr) {
     }
     let live = eng.live();
     if live.own(&host) || host.parse::<IpAddr>().is_ok() {
-        let body = match path.strip_prefix("/kdns/r/").map(|t| t.trim_end_matches('/').to_ascii_lowercase()) {
-            Some(t) => match live.by_token.get(&t) {
-                Some(u) => {
-                    let id = u.id;
-                    drop(live);
-                    eng.allow(ip, id);
-                    format!("{{\"ok\":true,\"ip\":\"{}\"}}", ip)
-                }
-                None => "{\"ok\":false}".into(),
-            },
+        // 3.72: the admin closed plain-HTTP registration (every app registers over HTTPS now)
+        if live.cfg.plain_register == Some(false) && path.starts_with("/kdns/r/") {
+            let _ = s.write_all(b"HTTP/1.1 410 Gone\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nLink: </r/>; rel=\"successor-version\"\r\nContent-Length: 12\r\nConnection: close\r\n\r\n{\"ok\":false}").await;
+            return;
+        }
+        drop(live);
+        if !eng.reg_allowed(ip) {
+            let _ = s.write_all(b"HTTP/1.1 429 Too Many Requests\r\nRetry-After: 600\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+            return;
+        }
+        let body = match path.strip_prefix("/kdns/r/").map(|t| eng.token_user(t)) {
+            Some(Some(id)) => {
+                eng.allow(ip, id);
+                format!("{{\"ok\":true,\"ip\":\"{}\"}}", ip)
+            }
+            Some(None) => {
+                eng.reg_failed(ip);
+                "{\"ok\":false}".into()
+            }
             None => "{\"ok\":false}".into(),
         };
         // 3.68: plain-HTTP registration is deprecated (the token crosses the network in clear); it keeps working
@@ -1121,6 +1175,53 @@ async fn pump(a: TcpStream, b: TcpStream, stat: Option<Arc<UserStat>>) {
 mod tests {
 
     use super::*;
+
+    /// One plain-HTTP request to the engine's port-80 handler from `ip`: the answer's status line
+    async fn http_req(eng: &Arc<Engine>, path: &str, ip: IpAddr) -> String {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let a = l.local_addr().unwrap();
+        let mut c = tokio::net::TcpStream::connect(a).await.unwrap();
+        let (srv, _) = l.accept().await.unwrap();
+        c.write_all(format!("GET {} HTTP/1.1\r\nHost: 203.0.113.7\r\n\r\n", path).as_bytes()).await.unwrap();
+        let e = eng.clone();
+        let t = tokio::spawn(async move { http(&e, srv, ip).await });
+        let mut out = Vec::new();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), tokio::io::AsyncReadExt::read_to_end(&mut c, &mut out)).await;
+        let _ = t.await;
+        String::from_utf8_lossy(&out).lines().next().unwrap_or("").to_string()
+    }
+
+    /// 3.72: plain-HTTP registration: the token only in its own shape and in constant time, wrong tokens limited per
+    /// address (the right one from another address still works), and the admin's switch closes it (410)
+    #[tokio::test]
+    async fn plain_http_registration_is_limited_and_can_be_closed() {
+        let tok = "0123456789abcdef0123";
+        let mut c = cfg();
+        c.users.push(DnsUser { id: 7, name: "t".into(), token: tok.into(), ..Default::default() });
+        let eng = Engine::new(c.clone());
+        let me: IpAddr = "198.51.100.20".parse().unwrap();
+        assert!(http_req(&eng, &format!("/kdns/r/{}", tok.to_uppercase()), me).await.starts_with("HTTP/1.1 200"));
+        assert_eq!(eng.who(me), Some(7));
+        assert_eq!(eng.token_user("0123456789abcdef012"), None, "a shorter token is not a prefix match");
+        assert_eq!(eng.token_user("aaaa1111"), None, "only the 20-hex shape");
+        assert_eq!(eng.token_user(&format!("{}/", tok)), Some(7));
+        // ten wrong tokens from one address: it waits; another address is not affected
+        let bad: IpAddr = "198.51.100.21".parse().unwrap();
+        for i in 0..10 {
+            let l = http_req(&eng, &format!("/kdns/r/{:020x}", i), bad).await;
+            assert!(l.starts_with("HTTP/1.1 200"), "{}", l);
+        }
+        assert!(http_req(&eng, &format!("/kdns/r/{}", tok), bad).await.starts_with("HTTP/1.1 429"));
+        assert_eq!(eng.who(bad), None);
+        let other: IpAddr = "198.51.100.22".parse().unwrap();
+        assert!(http_req(&eng, &format!("/kdns/r/{}", tok), other).await.starts_with("HTTP/1.1 200"));
+        // the panel closed plain HTTP: 410, nothing registered
+        c.plain_register = Some(false);
+        eng.reload(c);
+        let late: IpAddr = "198.51.100.23".parse().unwrap();
+        assert!(http_req(&eng, &format!("/kdns/r/{}", tok), late).await.starts_with("HTTP/1.1 410"));
+        assert_eq!(eng.who(late), None);
+    }
 
     fn cfg() -> DnsCfg {
         DnsCfg {

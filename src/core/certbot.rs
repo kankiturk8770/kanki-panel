@@ -287,6 +287,59 @@ pub fn ensure(domain: &str, restart: &[&str]) -> Result<(), String> {
     obtain(domain)
 }
 
+/// 3.72: a certificate on THIS server for a domain that points to ANOTHER server (the Iran subscription relay, which
+/// passes TLS through untouched and forwards only `/.well-known/acme-challenge/` from its port 80 to here). Let's
+/// Encrypt is answered from `WEBROOT` (the panel serves it, `subiran::router`); nothing on this server's port 80 is
+/// touched. Blocking; the same back-off after a failure as `ensure`.
+pub fn ensure_webroot(domain: &str) -> Result<(), String> {
+    if !valid_domain(domain) {
+        return Err(format!("SSL: {} is not a domain", domain));
+    }
+    let _ = std::fs::create_dir_all(STATE_DIR);
+    if have(domain) && !expiring(domain) {
+        return Ok(());
+    }
+    let fail_file = format!("{}/{}.fail", STATE_DIR, domain);
+    if let Ok(t) = std::fs::read_to_string(&fail_file) {
+        let n: u32 = t.lines().next().and_then(|l| l.trim().parse().ok()).unwrap_or(1);
+        let wait = (600u64 << (n.saturating_sub(1)).min(8)).min(86400);
+        let age = std::fs::metadata(&fail_file).ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).map(|e| e.as_secs()).unwrap_or(u64::MAX);
+        if age < wait {
+            return Err(t.lines().skip(1).collect::<Vec<_>>().join(" "));
+        }
+    }
+    let fail = |why: String| {
+        let n: u32 = std::fs::read_to_string(&fail_file).ok().and_then(|t| t.lines().next().and_then(|l| l.trim().parse().ok())).unwrap_or(0) + 1;
+        if let Err(e) = std::fs::write(&fail_file, format!("{}\n{}", n, why)) {
+            eprintln!("certbot: {}: {}", fail_file, e);
+        }
+        Err(why)
+    };
+    if !sh("command -v certbot").0 {
+        let _ = sh("export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq certbot >/dev/null 2>&1 || (apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq certbot >/dev/null 2>&1)");
+        if !sh("command -v certbot").0 {
+            return fail("SSL: certbot could not be installed (apt install certbot)".into());
+        }
+    }
+    write_deploy_hook();
+    if let Err(e) = std::fs::create_dir_all(format!("{}/.well-known/acme-challenge", WEBROOT)) {
+        return fail(format!("SSL: {}: {}", WEBROOT, e));
+    }
+    let lock = if sh("command -v flock").0 { format!("flock -w 300 {}/.lock ", STATE_DIR) } else { String::new() };
+    let (ok, out) = sh(&format!(
+        "{}timeout 240 certbot certonly --webroot -w {} -d {} --cert-name {} --keep-until-expiring --non-interactive --agree-tos --register-unsafely-without-email --key-type ecdsa 2>&1",
+        lock, WEBROOT, domain, domain
+    ));
+    if ok && have(domain) && !expiring(domain) {
+        let _ = std::fs::remove_file(&fail_file);
+        let _ = std::fs::write(ours_file(domain), "1");
+        eprintln!("certbot: {} done (webroot, through the relay)", domain);
+        return Ok(());
+    }
+    let why = out.lines().rev().find(|l| l.contains("Detail") || l.contains("Problem") || l.contains("Error")).unwrap_or("certbot failed").trim().to_string();
+    fail(format!("SSL for {} on the panel (through the Iran server's port 80) failed: {}", domain, why))
+}
+
 /// Run certbot for `domain` (a new certificate, or a renewal when it is due). Blocking.
 fn obtain(domain: &str) -> Result<(), String> {
     let fail_file = format!("{}/{}.fail", STATE_DIR, domain);

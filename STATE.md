@@ -1,5 +1,57 @@
 # STATE
 
+## 3.72.0 — Zero-knowledge Iran relay, Kanki DNS over HTTPS only (switch), live Xray user changes (done; branch `ccr-94a1e97e-wsl617`)
+Nothing a user has changes; every step works with not-yet-updated servers and apps.
+
+Iran subscription relay: TLS passthrough (`subiran.rs`)
+- The Iran agent (≥ `PASS_FROM` 3.72.0) no longer opens TLS: it reads only the ClientHello's server name (`sni_of`;
+  another name is dropped before anything is sent on), puts a PROXY v2 header (`proxy_v2`, the client's address) in
+  front and copies the encrypted bytes through the hidden tunnel's new second port (Iran 10856 → panel 10857). It holds
+  no certificate (its old one is forgotten) and never sees a code, header or cookie.
+- The panel's TLS listener (`panel_loop`, `panel_tls_one`) binds the panel's own address, takes only connections from
+  the tunnel's local end (loopback / `PANEL_BIND`: the hidden tunnel's token authenticates the Iran server), requires the
+  PROXY v2 header first (5 s; v1, LOCAL, UDP, UNIX, > 216 bytes refused), opens TLS with the panel's certificate, then
+  hands the request to the same `relay()` as before: path filter, `X-Forwarded-For` + the signed `X-Kanki-Relay`, so the
+  limits count each client, never the relay.
+- Certificate: the panel takes it for the Iran domain with `certbot --webroot` (`certbot::ensure_webroot`); the Iran
+  agent relays only `GET /.well-known/acme-challenge/<token>` from its port 80 (`acme_one`, nothing else, no headers
+  passed) to the panel, which answers from its webroot (`/.well-known/acme-challenge/:token`). Renewals take the same
+  way. Nothing to set in Caddy; the domain's A record stays on the Iran server and its port 80 must be free there.
+- Rollout (`mode`): «terminate» (older agent, or the admin's own tunnel carries the panel: the 3.69 HMAC termination,
+  still accepted), «acme» (new agent relays port 80 while the panel takes its certificate), «passthrough» (the panel's
+  certificate has > 3 days). The switch happens by itself at the next sync after «Update all»; Settings › Iran link
+  shows the mode. Certificate warnings in passthrough watch the panel's own certificate.
+
+Kanki DNS registration (`dns/engine.rs`, `dns/doh.rs`, `dns/panel.rs`)
+- Security › «ثبت DNS کانکی روی HTTP بی‌رمز» (`allow_plain_http_kdns`, default on): off → the apps get no
+  `register_http`, the DNS servers answer 410 on `/kdns/r/…` (`DnsCfg.plain_register`, None from an older panel = open).
+  Kanki VPN 1.45.2 registers over HTTPS first (kanki-app branch), so the switch can be turned off once users updated.
+- Both `/kdns/r/<token>` and `/r/<token>`: only the 20-hex token shape, compared in constant time with every user's
+  (`Engine::token_user`, no map lookup on the typed value); 10 wrong tokens per address in 10 minutes, then 429
+  (`reg_allowed` / `reg_failed`, bounded table). The right token from another address is never affected.
+
+Xray: revoked users (`xray/mod.rs`, `xray/panel.rs`)
+- Checked on the pinned Xray-core: `RemoveUser` (`api rmu`) stops new connections of the user; a connection already
+  open is not cut (Xray has no API to close one user's streams). Before 3.72 any user change rewrote the config and
+  restarted Xray: every user was disconnected.
+- Now a change of users alone (`same_but_users`) is done live (`user_diff`, `apply_users`: `rmu` / `adu`), nobody else is
+  disconnected; a revoked user (deleted, disabled, out of days or volume) also gets a routing rule in front
+  (`krevoked` → block) for the life of that Xray process. Any other config change still restarts Xray.
+- Default policy when the admin set none (`POLICY_DEFAULT`): handshake 4 s, connIdle 120 s (Xray: 300), uplinkOnly 1 s,
+  downlinkOnly 1 s. Enforced at once: no new connection, no new stream inside an open mux connection. After a timeout:
+  an idle open connection within 120 s, a half-closed one within 1 s. A connection that keeps moving data lasts until
+  its client closes it (cutting it would need killing sockets by address, which would cut others behind the same NAT).
+
+Tests added: `subiran::pass_tests::{proxy_v2_carries_the_client_and_nothing_else_is_taken,
+the_iran_relay_passes_tls_untouched_and_the_panel_answers (real TLS, recorded tunnel bytes: no code/path/cookie, wrong
+SNI and missing PROXY header get nothing), only_acme_challenges_pass_port_80, the_server_name_is_read_from_a_real_client_hello}`,
+`dns::engine::tests::plain_http_registration_is_limited_and_can_be_closed`, `xray::tests::users_alone_change_live_and_revoked_ones_are_blocked_first`,
+`access_tests::the_audit_tab_reads_the_chain_the_changes_and_the_sign_ins` (401/403, last 100 changes newest first, last 50
+sign-ins, chain intact then broken, the Kanki DNS switch through settings, DNS config and app data).
+
+Needs the owner: after «Update all», nothing; port 80 of the Iran server must be free (not a tunnel's) for the panel's
+certificate. Turn off plain-HTTP Kanki DNS when users run Kanki VPN 1.45.2.
+
 ## 3.71.0 — Phase 4: account page safety, five-tab panel, dead code out, UI bugs from the video audit (done; branch `ccr-94a1e97e-wsl617`)
 Kept as they were: the HttpOnly cookie login, step-up password prompts (`/api/security/*`, backup passphrase reveal),
 `POST /api/users/:id/upgrade`, the server role selector, the default-tier selector, every API the bot / mini app uses.

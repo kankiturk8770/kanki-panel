@@ -366,10 +366,17 @@ function secStatus(s){var r=[[s.totp_on?'g':'r',t('Two-step login (2FA)'),s.totp
 // (3.41) four parts instead of one long page: the state (and recent logins), signing in (password, 2FA,
 // session length), who is signed in (sessions and API tokens), and where from (IP lists, the firewall)
 var SECV=[['ov','Overview'],['login','Login'],['sess','Sessions'],['acc','Access']];
-function loadSec(){api('GET','/api/security').then(function(s){S.sec=s;var el=$('#sec');if(!el)return;
+function secKdns(){var c=$('#sec_kdns');if(!c)return;c.onchange=function(){var on=c.checked,go=function(){c.disabled=true;
+  api('PUT','/api/settings',{allow_plain_http_kdns:on?'1':'0'}).then(function(){toast(t('Saved'));loadSec()}).catch(function(e){c.checked=!on;c.disabled=false;fail(e)})};
+ if(on)go();else confirmDo(go)}}
+function loadSec(){api('GET','/api/security').then(function(s){S.sec=s;var el=$('#sec');if(!el)return;setTimeout(secKdns,0);
  var open=!s.ip_allow&&!s.ip_deny,lg=(s.logins||[]).slice(0,8),v=S.secv||'ov',pol='<div class="kfoot"><span class="muted">'+t('Session length, enforced 2FA and the IP lists are saved together')+'</span><button class="btn" onclick="savePolicy()">'+t('Save security policy')+'</button></div>';
  el.innerHTML='<div class="btabs ku-tabs" id="sec_tabs" role="tablist" aria-label="'+esc(t('Security'))+'">'+SECV.map(function(x){return '<button type="button" role="tab" data-sv="'+x[0]+'" aria-selected="'+(v==x[0])+'" class="'+(v==x[0]?'on':'')+'">'+t(x[1])+'</button>'}).join('')+'</div>'+
  '<div data-sp="ov">'+secStatus(s)+kuStats([[t('Current account'),'<span class="ltr">'+esc(s.admin_user)+'</span>'],['2FA',s.totp_on?t('On'):t('Off'),s.totp_on?'g':'r'],[t('Active sessions'),N(s.sessions.length)],[t('Network policy'),open?t('Open'):t('Restricted')]])+
+  // (3.72) Kanki DNS: the old plain-HTTP registration (the token crosses the network in clear) can be closed for good
+  '<section class="card"><div class="kc-h"><div><h3>'+t('Kanki DNS registration over plain HTTP')+'</h3><small class="muted">'+t('Kanki VPN 1.45.2 and later register over HTTPS. Close plain HTTP once your users have updated: older apps then cannot turn on Kanki DNS until they update.')+'</small></div>'+
+  '<label class="ku-sw ku-sw-in"><span class="ku-swt"><b>'+t(s.allow_plain_http_kdns?'Open':'Closed')+'</b></span><span class="sw"><input type="checkbox" id="sec_kdns" '+(s.allow_plain_http_kdns?'checked':'')+' aria-label="'+esc(t('Kanki DNS registration over plain HTTP'))+'"><span></span></span></label></div>'+
+  (s.allow_plain_http_kdns?'<div class="warnbox">'+t('Open: the DNS token of a user can be read on the network while an old app registers.')+'</div>':'')+'</section>'+
   '<section class="card"><div class="kc-h"><div><h3>'+t('Login history')+'</h3><small class="muted">'+t('Last logins to the panel')+'</small></div></div><div class="list">'+(lg.map(function(l){return '<div class="li"><span><b>'+esc(l.username||'—')+'</b><small class="ltr">'+esc(l.ip)+' · '+fmtDate(l.ts,1)+'</small></span><span class="badge '+(l.ok?'g':'r')+'">'+(l.ok?'OK':'FAIL')+'</span></div>'}).join('')||'<span class="muted">—</span>')+'</div></section></div>'+
  '<div data-sp="login"><div class="kgrid"><section class="card c6"><h3>'+t('Change login')+'</h3><label class="f" for="cp_cur">'+t('Current password')+'</label><input type="password" id="cp_cur" autocomplete="current-password"><label class="f" for="cp_u">'+t('New username (optional)')+'</label><input id="cp_u" class="ltr" placeholder="'+esc(s.admin_user)+'"><label class="f" for="cp_p">'+t('New password (min 12)')+'</label><input type="password" id="cp_p" autocomplete="new-password"><div class="kfoot"><span></span><button class="btn" onclick="chPass()">'+t('Save')+'</button></div></section>'+
   '<section class="card c6"><div class="kc-h"><div><h3>'+t('Two-step login')+'</h3><small class="muted">'+t('TOTP with apps like Google Authenticator / 2FAS')+'</small></div><span class="kpill '+(s.totp_on?'g':'r')+'"><i class="dot '+(s.totp_on?'g':'r')+'"></i><span>'+(s.totp_on?t('On'):t('Off'))+'</span></span></div>'+
@@ -549,6 +556,9 @@ function stIran(){var box=$('#si_in');if(!box)return;api('GET','/api/sub-iran').
    if(why.length==0&&pn.runs&&!pn.links)why.push(t('The panel cannot reach {a}: open port {p}/TCP in the firewall of the Iran data center for connections from abroad.').replace('{a}','<span class="ltr">'+esc(td.dial||'')+'</span>').replace('{p}',td.port)+er(pn.error));
    if(why.length==0&&ir.error)why.push(esc(ir.error));
    if(why.length)msg+='<br>'+t('Why')+': '+why.join('<br>')}}
+ // (3.72) how the Iran server relays: TLS untouched (it holds no certificate and reads no request) or, until its agent
+ // is updated / the panel has its certificate, the older termination
+ if(r.server&&r.mode)msg+='<br>'+t('Relay mode')+': <b>'+t({passthrough:'TLS passthrough (the Iran server sees nothing)',acme:'Taking the certificate on the panel…',terminate:'TLS on the Iran server (update its agent for passthrough)'}[r.mode]||r.mode)+'</b>';
  box.innerHTML='<div class="g3"><div><label class="f">'+t('Tunnel server')+'</label><select id="si_srv"><option value="">—</option>'+(r.agents||[]).filter(function(a){return a.loc=='iran'||a.id==r.server}).map(function(a){return '<option value="'+esc(a.id)+'"'+(a.id==r.server?' selected':'')+'>'+esc(a.name)+(a.ip?' ('+esc(a.ip)+')':'')+'</option>'}).join('')+'</select></div>'+
   '<div><label class="f">'+t('Domain')+'</label><input class="ltr" id="si_dom" placeholder="sub.example.com" value="'+esc(r.domain||'')+'"></div>'+
   '<div><label class="f">'+t('Port')+'</label><input class="ltr" id="si_port" inputmode="numeric" value="'+esc(String(r.port||2053))+'"></div></div>'+

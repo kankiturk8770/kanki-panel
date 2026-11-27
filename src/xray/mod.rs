@@ -201,7 +201,21 @@ pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) 
     let _ = std::fs::write(EXTRA_CERTS, c.certs.join("\n"));
     let partial = certs_for(&mut config, &c.certs);
     let text = serde_json::to_string_pretty(&config).map_err(|e| e.to_string())?;
-    let changed = std::fs::read_to_string(CONF_FILE).map(|t| t != text).unwrap_or(true);
+    let old_text = std::fs::read_to_string(CONF_FILE).ok();
+    let changed = old_text.as_deref().map(|t| t != text).unwrap_or(true);
+    // 3.72: only users came or went (nothing else of the config changed): done live with Xray's API, nobody else is
+    // disconnected (a restart dropped every user's connections); a revoked user's new connections and mux streams are
+    // refused at once by a routing rule
+    let old: Value = old_text.as_deref().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
+    let live = changed && !partial && running() && !std::path::Path::new(FORCE_FILE).exists() && std::fs::read_to_string(UNIT).is_ok() && same_but_users(&old, &config);
+    let mut hot = false;
+    if live {
+        let (add, gone) = user_diff(&old, &config);
+        if apply_users(&add, &gone).is_ok() {
+            hot = true;
+            note_revoked(&gone, &config);
+        }
+    }
     if changed {
         // Xray tells the format by the extension: the file being checked must end in .json
         let tmp = format!("{}/config.new.json", CONF_DIR);
@@ -231,7 +245,7 @@ pub fn deploy(cfg: Option<(&XrayCfg, &str)>, panel: Option<(&str, &str, &str)>) 
         let _ = sh("systemctl enable -q kanki-xray.service");
     }
     let active = sh("systemctl is-active --quiet kanki-xray.service").0;
-    if changed || unit_changed || forced || !active {
+    if (changed && !hot) || unit_changed || forced || !active {
         // the traffic not read yet would be lost with the restart
         collect();
         let (ok, out) = sh("systemctl restart kanki-xray.service 2>&1");
@@ -505,6 +519,98 @@ fn collect() {
     c.online = online;
 }
 
+/// The config with every inbound's clients taken out (what must be equal for a live user change)
+fn without_clients(v: &Value) -> Value {
+    let mut v = v.clone();
+    for ib in v["inbounds"].as_array_mut().into_iter().flatten() {
+        if let Some(s) = ib["settings"].as_object_mut() {
+            s.remove("clients");
+        }
+    }
+    v
+}
+
+/// Do two configs differ only in their inbounds' clients (and are both real configs)?
+fn same_but_users(old: &Value, new: &Value) -> bool {
+    old["inbounds"].is_array() && new["inbounds"].is_array() && without_clients(old) == without_clients(new)
+}
+
+/// One user of one inbound: (inbound tag, protocol, email, the client object)
+type Client = (String, String, String, Value);
+
+fn clients(v: &Value) -> Vec<Client> {
+    let mut out = vec![];
+    for ib in v["inbounds"].as_array().into_iter().flatten() {
+        let (tag, proto) = (ib["tag"].as_str().unwrap_or(""), ib["protocol"].as_str().unwrap_or(""));
+        for c in ib["settings"]["clients"].as_array().into_iter().flatten() {
+            if let (false, Some(e)) = (tag.is_empty(), c["email"].as_str()) {
+                out.push((tag.to_string(), proto.to_string(), e.to_string(), c.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// (to add, to remove): a user whose client changed (a new code: new keys) is removed and added again
+fn user_diff(old: &Value, new: &Value) -> (Vec<Client>, Vec<Client>) {
+    let (o, n) = (clients(old), clients(new));
+    let add = n.iter().filter(|x| !o.contains(x)).cloned().collect();
+    let gone = o.iter().filter(|x| !n.contains(x)).cloned().collect();
+    (add, gone)
+}
+
+/// Removes and adds users in the running Xray. A removal of a user already out (the connection limit) is fine; an
+/// add that fails is an error (the caller restarts Xray instead). Blocking.
+fn apply_users(add: &[Client], gone: &[Client]) -> Result<(), String> {
+    let server = format!("--server=127.0.0.1:{}", API_PORT);
+    for (tag, _, email, _) in gone {
+        let (ok, out) = sh(&format!("{} api rmu {} -tag={} {} 2>&1", BIN, server, q(tag), q(email)));
+        if !ok && !out.to_ascii_lowercase().contains("not found") {
+            eprintln!("xray: remove {} from {}: {}", email, tag, out.lines().last().unwrap_or(""));
+        }
+    }
+    if add.is_empty() {
+        return Ok(());
+    }
+    let body = json!({ "inbounds": add.iter().map(|(tag, proto, _, c)| json!({ "tag": tag, "protocol": proto, "settings": { "clients": [c] } })).collect::<Vec<_>>() });
+    let tmp = format!("{}/hot-adu.json", CONF_DIR);
+    std::fs::write(&tmp, body.to_string()).map_err(|e| e.to_string())?;
+    let (ok, out) = sh(&format!("{} api adu {} {} 2>&1", BIN, server, q(&tmp)));
+    if let Err(e) = std::fs::remove_file(&tmp) {
+        eprintln!("xray: {}: {}", tmp, e);
+    }
+    if ok { Ok(()) } else { Err(out.lines().last().unwrap_or("adu failed").to_string()) }
+}
+
+/// Users revoked live (deleted, disabled, out of days or volume) while this Xray process runs: a routing rule
+/// sends anything new of theirs to `block` (a new connection, a stream inside an open mux connection). A restart
+/// clears it: the restarted Xray does not know them at all.
+fn revoked() -> &'static Mutex<(std::collections::BTreeSet<String>, String)> {
+    static R: std::sync::OnceLock<Mutex<(std::collections::BTreeSet<String>, String)>> = std::sync::OnceLock::new();
+    R.get_or_init(Default::default)
+}
+
+/// The users of `gone` that are in no inbound of `now` any more are revoked (one re-keyed is not)
+fn note_revoked(gone: &[Client], now: &Value) {
+    let still: std::collections::HashSet<String> = clients(now).into_iter().map(|x| x.2).collect();
+    let pid = sh("systemctl show -p MainPID --value kanki-xray.service 2>/dev/null").1.trim().to_string();
+    {
+        let mut r = revoked().lock().unwrap_or_else(|e| e.into_inner());
+        if r.1 != pid {
+            r.0.clear();
+            r.1 = pid;
+        }
+        for (_, _, e, _) in gone {
+            if !still.contains(e) {
+                r.0.insert(e.clone());
+            }
+        }
+        // a user that came back is not blocked any more
+        r.0.retain(|e| !still.contains(e));
+    }
+    refresh_rules();
+}
+
 /// The users taken out of the running Xray (connection limit), and the Xray process that was for
 fn blocked() -> &'static Mutex<(std::collections::HashSet<i64>, String)> {
     static B: std::sync::OnceLock<Mutex<(std::collections::HashSet<i64>, String)>> = std::sync::OnceLock::new();
@@ -609,24 +715,42 @@ fn online_users(out: &str) -> Vec<i64> {
 /// Connection limit: extra devices of a user on this server, dropped by address (user, source IP) with a
 /// routing rule put in front of the config's own rules, live (Xray's routing API; nobody is disconnected).
 /// A restart of Xray loads the config's rules alone, so they are put in again. Blocking.
+/// The extra devices dropped now (kept for `refresh_rules`)
+fn ip_drop() -> &'static Mutex<Vec<(i64, String)>> {
+    static D: std::sync::OnceLock<Mutex<Vec<(i64, String)>>> = std::sync::OnceLock::new();
+    D.get_or_init(Default::default)
+}
+
 pub fn set_ip_blocks(list: &[(i64, String)]) {
+    let mut want: Vec<(i64, String)> = list.iter().filter(|(_, ip)| ip.parse::<std::net::IpAddr>().is_ok()).cloned().collect();
+    want.sort();
+    *ip_drop().lock().unwrap_or_else(|e| e.into_inner()) = want;
+    refresh_rules();
+}
+
+/// Loads the routing rules of the connection limit (dropped devices) and of the revoked users in front of the
+/// config's own rules, live. Blocking.
+fn refresh_rules() {
     if !std::path::Path::new(UNIT).exists() || !running() {
         return;
     }
-    static LAST: Mutex<(Vec<(i64, String)>, String)> = Mutex::new((Vec::new(), String::new()));
+    static LAST: Mutex<(Vec<(i64, String)>, Vec<String>, String)> = Mutex::new((Vec::new(), Vec::new(), String::new()));
     static WARNED: std::sync::Once = std::sync::Once::new();
-    let mut want: Vec<(i64, String)> = list.iter().filter(|(_, ip)| ip.parse::<std::net::IpAddr>().is_ok()).cloned().collect();
-    want.sort();
+    let want = ip_drop().lock().unwrap_or_else(|e| e.into_inner()).clone();
     let pid = sh("systemctl show -p MainPID --value kanki-xray.service 2>/dev/null").1.trim().to_string();
+    let gone: Vec<String> = {
+        let r = revoked().lock().unwrap_or_else(|e| e.into_inner());
+        if r.1 == pid { r.0.iter().cloned().collect() } else { vec![] }
+    };
     let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
     // after a restart the config's rules are loaded without ours
-    let fresh = last.1 != pid;
-    if (last.0 == want && !fresh) || (want.is_empty() && fresh) {
-        last.1 = pid;
+    let fresh = last.2 != pid;
+    if (last.0 == want && last.1 == gone && !fresh) || (want.is_empty() && gone.is_empty() && fresh) {
+        last.2 = pid;
         return;
     }
     let conf: Value = std::fs::read_to_string(CONF_FILE).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
-    let routing = with_ip_blocks(&conf["routing"], &want);
+    let routing = with_blocks(&conf["routing"], &want, &gone);
     let tmp = format!("{}/rules.json", CONF_DIR);
     let ok = std::fs::write(&tmp, json!({ "routing": routing }).to_string()).is_ok()
         && {
@@ -638,15 +762,20 @@ pub fn set_ip_blocks(list: &[(i64, String)]) {
         };
     let _ = std::fs::remove_file(&tmp);
     if ok {
-        *last = (want, pid);
+        *last = (want, gone, pid);
     }
 }
 
 /// The config's routing with a rule for each dropped (user, address) in front (all of them are loaded
 /// again at once: Xray replaces the whole list)
-fn with_ip_blocks(routing: &Value, list: &[(i64, String)]) -> Value {
+fn with_blocks(routing: &Value, list: &[(i64, String)], revoked: &[String]) -> Value {
     let mut r = if routing.is_object() { routing.clone() } else { json!({}) };
-    let mut rules: Vec<Value> = list.iter().map(|(id, ip)| json!({ "type": "field", "ruleTag": format!("klimit-{}-{}", id, ip), "user": [format!("u{}", id)], "source": [ip], "outboundTag": "block" })).collect();
+    let mut rules: Vec<Value> = vec![];
+    // 3.72: revoked users first: nothing new of theirs leaves this server
+    if !revoked.is_empty() {
+        rules.push(json!({ "type": "field", "ruleTag": "krevoked", "user": revoked, "outboundTag": "block" }));
+    }
+    rules.extend(list.iter().map(|(id, ip)| json!({ "type": "field", "ruleTag": format!("klimit-{}-{}", id, ip), "user": [format!("u{}", id)], "source": [ip], "outboundTag": "block" })));
     rules.extend(routing["rules"].as_array().cloned().unwrap_or_default());
     r["rules"] = json!(rules);
     r
@@ -728,13 +857,46 @@ mod loopback_tests {
         let out = r#"{ "users": ["user>>>u7>>>online", "user>>>u12>>>online", "user>>>x>>>online", "user>>>u7>>>online"] }"#;
         assert_eq!(super::online_users(out), vec![7, 12]);
         let routing = serde_json::json!({ "domainStrategy": "AsIs", "rules": [{ "type": "field", "ip": ["127.0.0.0/8"], "outboundTag": "block" }] });
-        let r = super::with_ip_blocks(&routing, &[(7, "5.6.7.8".to_string())]);
+        let r = super::with_blocks(&routing, &[(7, "5.6.7.8".to_string())], &[]);
         let rules = r["rules"].as_array().unwrap();
         assert_eq!(rules.len(), 2);
         assert_eq!(rules[0]["user"][0], "u7");
         assert_eq!(rules[0]["source"][0], "5.6.7.8");
         assert_eq!(rules[1]["ip"][0], "127.0.0.0/8");
         assert_eq!(r["domainStrategy"], "AsIs");
+    }
+
+    /// 3.72: a change of users alone is done live (removed and added through the API, revoked users blocked by a
+    /// routing rule in front); any other change of the config still restarts Xray
+    #[test]
+    fn users_alone_change_live_and_revoked_ones_are_blocked_first() {
+        let base = serde_json::json!({ "log": {"loglevel": "warning"}, "inbounds": [
+            { "tag": "vless-1", "protocol": "vless", "port": 443, "settings": { "clients": [{ "id": "a", "email": "u7" }, { "id": "b", "email": "u8" }], "decryption": "none" } },
+            { "tag": "ss-1", "protocol": "shadowsocks", "port": 8388, "settings": { "clients": [{ "password": "p", "email": "u7" }] } }
+        ], "routing": { "rules": [{ "type": "field", "ip": ["127.0.0.0/8"], "outboundTag": "block" }] } });
+        // u7 gone, u9 new, u8 re-keyed
+        let mut next = base.clone();
+        next["inbounds"][0]["settings"]["clients"] = serde_json::json!([{ "id": "c", "email": "u8" }, { "id": "d", "email": "u9" }]);
+        next["inbounds"][1]["settings"]["clients"] = serde_json::json!([]);
+        assert!(super::same_but_users(&base, &next));
+        let (add, gone) = super::user_diff(&base, &next);
+        let names = |l: &[super::Client]| { let mut v: Vec<String> = l.iter().map(|x| format!("{}/{}", x.0, x.2)).collect(); v.sort(); v };
+        assert_eq!(names(&add), vec!["vless-1/u8", "vless-1/u9"]);
+        assert_eq!(names(&gone), vec!["ss-1/u7", "vless-1/u7", "vless-1/u8"]);
+        // a port, a setting or an inbound changed: not live
+        let mut port = next.clone();
+        port["inbounds"][0]["port"] = serde_json::json!(444);
+        assert!(!super::same_but_users(&base, &port));
+        let mut lvl = next.clone();
+        lvl["log"]["loglevel"] = serde_json::json!("debug");
+        assert!(!super::same_but_users(&base, &lvl));
+        assert!(!super::same_but_users(&serde_json::Value::Null, &next));
+        // the revoked rule comes first, then the dropped devices, then the config's own rules
+        let r = super::with_blocks(&base["routing"], &[(8, "5.6.7.8".to_string())], &["u7".to_string()]);
+        let rules = r["rules"].as_array().unwrap();
+        assert_eq!((rules[0]["ruleTag"].as_str(), rules[0]["user"][0].as_str(), rules[0]["outboundTag"].as_str()), (Some("krevoked"), Some("u7"), Some("block")));
+        assert_eq!(rules[1]["user"][0], "u8");
+        assert_eq!(rules[2]["ip"][0], "127.0.0.0/8");
     }
 
     #[test]

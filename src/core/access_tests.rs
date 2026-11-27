@@ -1009,3 +1009,52 @@ async fn inbound_names_are_unique_and_vision_is_only_where_it_works() {
     assert_eq!(st, StatusCode::OK);
     assert_eq!(crate::xray::panel::settings(&app).inbounds.iter().find(|i| i.port == 21003).unwrap().remark, "TROJAN-GRPC");
 }
+
+/// 3.71/3.72: the Audit tab's source (`GET /api/security`): only an admin reads it; it gives the last 100 changes newest
+/// first, the last 50 sign-ins and whether the audit's hash chain is intact (a changed row shows), and the Kanki DNS
+/// plain-HTTP switch, which reaches the DNS servers' config and the apps' data
+#[tokio::test]
+async fn the_audit_tab_reads_the_chain_the_changes_and_the_sign_ins() {
+    let app = crate::test_app();
+    assert_eq!(call(&app, Method::GET, "/api/security", None, None).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(call(&app, Method::GET, "/api/security", Some(&token(&app, "users:read")), None).await.0, StatusCode::FORBIDDEN);
+    for i in 0..120 {
+        crate::auth::audit(&app, "admin", "POST", &format!("/api/users/{}", i), 200, "203.0.113.1", "");
+    }
+    for i in 0..60 {
+        app.db.exec("INSERT INTO login_log(ts,username,ip,method,ok) VALUES(?1,'admin','203.0.113.2','password',?2)", &[&(1_000 + i as i64), &((i % 2) as i64)]).unwrap();
+    }
+    let admin = token(&app, "admin");
+    let (st, v) = call(&app, Method::GET, "/api/security", Some(&admin), None).await;
+    assert_eq!(st, StatusCode::OK, "{}", v);
+    let au = v["audit"].as_array().unwrap();
+    assert_eq!(au.len(), 100);
+    // newest first: the last change written leads (the GET itself is a read, never a row)
+    assert_eq!(au[0]["path"], "/api/users/119");
+    assert!(au.iter().all(|x| x["method"] == "POST" && x["status"] == 200));
+    let lg = v["logins"].as_array().unwrap();
+    assert_eq!(lg.len(), 50);
+    assert_eq!(lg[0]["ts"], 1_059);
+    assert!(lg.iter().any(|x| x["ok"] == true) && lg.iter().any(|x| x["ok"] == false));
+    assert_eq!(v["audit_intact"], true);
+    assert_eq!(v["allow_plain_http_kdns"], true);
+    // a row changed in the middle: the tab says so
+    let mid: i64 = app.db.with(|c| c.query_row("SELECT id FROM audit ORDER BY id LIMIT 1 OFFSET 50", [], |r| r.get(0)).unwrap());
+    app.db.exec("UPDATE audit SET path='/api/nothing' WHERE id=?1", &[&mid]).unwrap();
+    let (_, v) = call(&app, Method::GET, "/api/security", Some(&admin), None).await;
+    assert_eq!(v["audit_intact"], false);
+
+    // Kanki DNS: one server, one user with DNS; plain HTTP open by default, then closed by the admin
+    app.db.set("dns_cfg", &json!({"on": true, "base": "dns.example.test", "servers": [{"server": "local", "role": "exit", "label": "de", "ip": "198.51.100.9"}]}).to_string());
+    let u = app.db.user(user(&app, "dnsuser", "kmix,awg,wg,dns", Tier::Gaming)).unwrap();
+    let reg = |app: &Arc<App>| crate::dns::panel::sub_info(app, &app.db.user(u.id).unwrap())["servers"][0]["register_http"].as_str().unwrap_or("").to_string();
+    assert!(reg(&app).starts_with("http://198.51.100.9/kdns/r/"));
+    assert_eq!(crate::dns::panel::cfg_for(&app, "local").unwrap().0.plain_register, Some(true));
+    assert_eq!(call(&app, Method::PUT, "/api/settings", Some(&token(&app, "users:read")), Some(json!({"allow_plain_http_kdns": "0"}))).await.0, StatusCode::FORBIDDEN);
+    let (st, _) = call(&app, Method::PUT, "/api/settings", Some(&token(&app, "settings")), Some(json!({"allow_plain_http_kdns": false}))).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(reg(&app), "", "no plain-HTTP address is handed out any more");
+    assert_eq!(crate::dns::panel::cfg_for(&app, "local").unwrap().0.plain_register, Some(false));
+    let (_, v) = call(&app, Method::GET, "/api/security", Some(&admin), None).await;
+    assert_eq!(v["allow_plain_http_kdns"], false);
+}

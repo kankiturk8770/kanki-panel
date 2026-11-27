@@ -545,6 +545,8 @@ async fn main() {
     // certificates of this server (Xray, Kanki DNS) that are close to their end
     certbot::renew_loop();
     tokio::spawn(backup::telegram_loop(app.clone()));
+    // 3.72: the Iran subscription relay's TLS passthrough (the panel holds the certificate and opens TLS)
+    tokio::spawn(subiran::panel_loop(app.clone()));
     servers::install_cores(&app);
     tokio::spawn(cleanup::sweep_loop(app.clone()));
     tokio::spawn(cleanup::offline_loop(app.clone()));

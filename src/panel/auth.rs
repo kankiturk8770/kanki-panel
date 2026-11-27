@@ -651,6 +651,8 @@ async fn security_get(State(app): St, h: HeaderMap) -> Response {
         "my_ip": client_ip(&h), "current_session": cur,
         // 3.68: the audit's hash chain is unbroken (no row was changed or removed in the middle)
         "audit_intact": audit_broken(&app).is_none(),
+        // 3.72: Kanki DNS registration over plain HTTP (old apps) is still open
+        "allow_plain_http_kdns": app.db.get("allow_plain_http_kdns") != "0",
         "sessions": sessions, "tokens": tokens, "logins": logins, "audit": audit,
         "legacy_key": masked, "scopes": SCOPES,
         // the panel listens only on this machine, behind Caddy's HTTPS (old installs listened on every address)

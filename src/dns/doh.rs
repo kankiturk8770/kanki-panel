@@ -115,7 +115,20 @@ async fn qt_post(State(e): St, Extension(p): Extension<Peer>, Path(t): Path<Stri
 
 /// The app calls this whenever its network changes: the caller's address is allowed for this user.
 async fn register(State(e): St, Extension(p): Extension<Peer>, Path(t): Path<String>) -> Response {
-    let ok = user_of(&e, p.0, Some(&t)).is_some();
+    // 3.72: wrong tokens are counted per address (10 in 10 minutes, then 429); the token is checked in constant time
+    if !e.reg_allowed(p.0) {
+        return (StatusCode::TOO_MANY_REQUESTS, [(header::CACHE_CONTROL, "no-store")], axum::Json(serde_json::json!({ "ok": false }))).into_response();
+    }
+    let ok = match e.token_user(&t) {
+        Some(uid) => {
+            e.allow(p.0, uid);
+            true
+        }
+        None => {
+            e.reg_failed(p.0);
+            false
+        }
+    };
     let code = if ok { StatusCode::OK } else { StatusCode::NOT_FOUND };
     (code, [(header::CACHE_CONTROL, "no-store")], axum::Json(serde_json::json!({ "ok": ok, "ip": p.0.to_string() }))).into_response()
 }

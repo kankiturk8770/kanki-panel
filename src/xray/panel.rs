@@ -256,6 +256,9 @@ pub fn server_domain(s: &XraySettings, sid: &str) -> String {
     s.servers.iter().find(|x| x.server == sid && x.ssl && is_domain(&x.address)).map(|x| x.address.trim().trim_matches('.').to_ascii_lowercase()).unwrap_or_default()
 }
 
+/// 3.72: the connection policy when the admin set none: handshake, connIdle, uplinkOnly, downlinkOnly (seconds)
+pub const POLICY_DEFAULT: (u32, u32, u32, u32) = (4, 120, 1, 1);
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(default)]
 pub struct XraySettings {
@@ -679,10 +682,10 @@ pub fn build_config(s: &XraySettings, sid: &str, users: &[User]) -> Value {
         "outbounds": outbounds,
         "routing": { "domainStrategy": strategy, "rules": rules },
     });
-    for (k, v) in [("handshake", s.handshake), ("connIdle", s.conn_idle), ("uplinkOnly", s.uplink_only), ("downlinkOnly", s.downlink_only)] {
-        if v > 0 {
-            cfg["policy"]["levels"]["0"][k] = json!(v);
-        }
+    // 3.72: tighter than Xray's own (4 / 300 / 2 / 5 s) unless the admin set them: a revoked user's idle connection
+    // ends within 2 minutes, a half-closed one within a second (an active stream ends when its client closes it)
+    for (k, v, d) in [("handshake", s.handshake, POLICY_DEFAULT.0), ("connIdle", s.conn_idle, POLICY_DEFAULT.1), ("uplinkOnly", s.uplink_only, POLICY_DEFAULT.2), ("downlinkOnly", s.downlink_only, POLICY_DEFAULT.3)] {
+        cfg["policy"]["levels"]["0"][k] = json!(if v > 0 { v } else { d });
     }
     let dns = csv(&s.dns);
     if !dns.is_empty() {

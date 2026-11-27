@@ -68,6 +68,9 @@ pub struct DnsCfg {
     pub ip_hours: u64,
     /// no certificate in the config: this server gets its own for `host` with certbot
     pub acme: bool,
+    /// 3.72: registration over plain HTTP (`http://<ip>/kdns/r/<token>`, the token crosses the network in clear).
+    /// None (a panel from before) and Some(true) keep it; Some(false) closes it (the admin's Security switch)
+    pub plain_register: Option<bool>,
 }
 
 /// The DNS token of a subscription code: changes when the user's link is renewed.

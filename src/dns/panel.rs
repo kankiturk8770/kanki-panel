@@ -258,6 +258,7 @@ pub fn cfg_for(app: &App, sid: &str) -> Option<(DnsCfg, String)> {
         exit_addr: if relay { format!("127.0.0.1:{}", RELAY_LOCAL_PORT) } else { String::new() },
         relay_key: if relay { relay_key(&s, &srv.exit) } else if has_relays { relay_key(&s, sid) } else { String::new() },
         ip_hours: s.ip_hours,
+        plain_register: Some(app.db.get("allow_plain_http_kdns") != "0"),
     };
     let ver = sha256_hex(&serde_json::to_string(&c).unwrap_or_default())[..16].to_string();
     Some((c, ver))
@@ -553,7 +554,8 @@ pub fn sub_info(app: &App, u: &User) -> Value {
                 "dot": if tls { if manual { format!("{}.{}", token, host) } else { host.clone() } } else { String::new() },
                 "doh": if tls { format!("https://{}/dns-query/{}", host, token) } else { String::new() },
                 "register": if tls { format!("https://{}/r/{}", host, token) } else { String::new() },
-                "register_http": if ip.is_empty() { String::new() } else { format!("http://{}/kdns/r/{}", ip, token) },
+                // 3.72: no plain-HTTP address once the admin closed it (Security › Kanki DNS)
+                "register_http": if ip.is_empty() || app.db.get("allow_plain_http_kdns") == "0" { String::new() } else { format!("http://{}/kdns/r/{}", ip, token) },
             })
         })
         .collect();

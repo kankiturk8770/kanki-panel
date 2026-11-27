@@ -1073,6 +1073,8 @@ pub fn default_setting(k: &str) -> &'static str {
         "default_protocols" => "wg,awg,hy2,kmix",
         // 3.70: the tier of a user made in the panel without one (its protocols come from the tier)
         "default_tier" => "vip",
+        // 3.72: Kanki DNS registration over plain HTTP stays open until the admin closes it (apps before 1.45.2 use it)
+        "allow_plain_http_kdns" => "1",
         // what a 'v2ray' plan gives: the links the v2ray clients read (Xray and Hysteria2)
         "v2ray_protocols" => "xray,hy2",
         // what a 'game' plan gives: WireGuard and AmneziaWG (and the Kanki app's KANKI MIX), no v2ray link

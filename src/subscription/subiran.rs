@@ -61,6 +61,11 @@ pub struct SubCfg {
     /// 3.69: the key the relay signs each request's client address with (`relay_header`); "" = a panel from
     /// before (nothing is signed, the panel sees the relay's own address as before)
     pub relay_key: String,
+    /// 3.72: relay Let's Encrypt's port 80 (only `/.well-known/acme-challenge/`) to the panel; false from a panel before
+    pub acme: bool,
+    /// 3.72: "" = terminate TLS here (as before); else where the encrypted connections go untouched (the hidden
+    /// tunnel's port to the panel's TLS listener): passthrough, this server holds no certificate and sees no request
+    pub passthrough: String,
 }
 
 /// The header a trusted Iran relay adds: `v1;<ts>;<nonce>;<hex HMAC>` over the client address and the request line
@@ -207,7 +212,8 @@ pub fn specs(app: &App, sid: &str) -> Vec<Spec> {
         token: s.token.clone(),
         conns: 4,
         path: "/".into(),
-        tcp: vec![format!("{}:{}", LOCAL_PORT, port)],
+        // 3.72: a second port to the panel's TLS listener once the Iran agent can pass TLS through
+        tcp: if agent_passes(&s.server) { vec![format!("{}:{}", LOCAL_PORT, port), format!("{}:{}", LOCAL_TLS_PORT, PANEL_TLS_PORT)] } else { vec![format!("{}:{}", LOCAL_PORT, port)] },
         target: host,
         bind: "127.0.0.1".into(),
         ..Default::default()
@@ -220,7 +226,15 @@ pub fn cfg_for(app: &App, sid: &str) -> Value {
     if !on(&s) || s.server != sid {
         return Value::Null;
     }
-    json!(SubCfg { domain: s.domain.clone(), port: s.port, upstream: format!("127.0.0.1:{}", upstream_port(app, &s)), relay_key: relay_key(&s) })
+    let m = mode(app, &s);
+    json!(SubCfg {
+        domain: s.domain.clone(),
+        port: s.port,
+        upstream: format!("127.0.0.1:{}", upstream_port(app, &s)),
+        relay_key: relay_key(&s),
+        acme: m != "terminate",
+        passthrough: if m == "passthrough" { format!("127.0.0.1:{}", LOCAL_TLS_PORT) } else { String::new() },
+    })
 }
 
 fn last_status() -> &'static Mutex<HashMap<String, Value>> {
@@ -230,8 +244,16 @@ fn last_status() -> &'static Mutex<HashMap<String, Value>> {
 
 /// What the agent of server `sid` reported about the listener.
 pub fn ingest(app: &Arc<App>, sid: &str, st: &Value) {
-    last_status().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), st.clone());
     let s = settings(app);
+    // 3.72: in passthrough the certificate is the panel's own: its end date is what the warning watches
+    let mut st = st.clone();
+    if st["mode"].as_str() == Some("passthrough") {
+        if let (Some(o), serde_json::Value::Object(h)) = (st.as_object_mut(), crate::certbot::health(&s.domain)) {
+            o.extend(h);
+        }
+    }
+    let st = &st;
+    last_status().lock().unwrap_or_else(|e| e.into_inner()).insert(sid.to_string(), st.clone());
     if on(&s) && s.server == sid {
         if let Some(text) = cert_warning(st, crate::util::now(), &app.db.get("subiran_cert_warned")) {
             app.db.set("subiran_cert_warned", &crate::util::now().to_string());
@@ -304,7 +326,7 @@ fn taken_ports(app: &App, sid: &str) -> Vec<u16> {
 // ------------------------------------------------------------------ admin API
 
 pub fn router() -> Router<Arc<App>> {
-    Router::new().route("/api/sub-iran", get(get_cfg).put(put_cfg))
+    Router::new().route("/api/sub-iran", get(get_cfg).put(put_cfg)).route("/.well-known/acme-challenge/:token", get(acme_challenge))
 }
 
 async fn get_cfg(State(app): St, h: HeaderMap) -> Response {
@@ -341,6 +363,8 @@ async fn get_cfg(State(app): St, h: HeaderMap) -> Response {
         "server": s.server, "domain": s.domain, "port": if s.port == 0 { DEFAULT_PORT } else { s.port }, "ready": s.ready,
         "link": if on(&s) { link_base(&s.domain, s.port) } else { String::new() },
         "agents": agents, "status": status, "tunnel": tunnel, "tunnel_detail": detail,
+        // 3.72: "passthrough" (zero-knowledge), "acme" (the panel is taking its certificate) or "terminate" (HMAC)
+        "mode": mode(&app, &s),
     }))
     .into_response()
 }
@@ -409,6 +433,7 @@ const SSL_USER: &str = "kanki-subsrv";
 pub struct Runner {
     cfg: Option<SubCfg>,
     task: Option<tokio::task::JoinHandle<()>>,
+    acme: Option<tokio::task::JoinHandle<()>>,
     status: Arc<Mutex<Value>>,
 }
 
@@ -429,12 +454,18 @@ impl Runner {
         if let Some(t) = self.task.take() {
             t.abort();
         }
+        if let Some(t) = self.acme.take() {
+            t.abort();
+        }
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = Value::Null;
         match &want {
             Some(c) => {
                 eprintln!("subscription: https://{}:{}", c.domain, c.port);
                 let _ = std::fs::write(CACHE, serde_json::to_string(c).unwrap_or_default());
-                self.task = Some(tokio::spawn(serve(c.clone(), self.status.clone())));
+                self.task = Some(if c.passthrough.is_empty() { tokio::spawn(serve(c.clone(), self.status.clone())) } else { tokio::spawn(serve_pass(c.clone(), self.status.clone())) });
+                if c.acme {
+                    self.acme = Some(tokio::spawn(acme_serve(c.domain.clone(), c.upstream.clone(), self.status.clone())));
+                }
             }
             None => {
                 let _ = std::fs::remove_file(CACHE);
@@ -444,7 +475,11 @@ impl Runner {
         if let Some(old) = &self.cfg {
             let same_domain = want.as_ref().map(|w| w.domain == old.domain).unwrap_or(false);
             let (d, keep) = (old.domain.clone(), want.as_ref().map(|w| w.port));
+            let acme_off = !want.as_ref().map(|w| w.acme).unwrap_or(false);
             tokio::task::spawn_blocking(move || {
+                if acme_off {
+                    crate::fw::close("subsrv-acme");
+                }
                 match keep {
                     Some(p) => crate::fw::sync("subsrv", vec![crate::fw::rule(p, false)]),
                     None => crate::fw::close("subsrv"),
@@ -679,6 +714,606 @@ pub(crate) async fn relay<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpi
         }
     }
     copied
+}
+
+// ------------------------------------------------------------------ 3.72: TLS passthrough (zero-knowledge Iran relay)
+//
+// The Iran server no longer terminates TLS. It reads only the TLS ClientHello's server name (to drop strangers), puts a
+// PROXY protocol v2 header with the client's address in front, and sends the encrypted bytes through the hidden tunnel
+// to a TLS listener of the panel (loopback only, reached only through that tunnel, whose token authenticates the Iran
+// server). The panel holds the certificate of the subscription domain (Let's Encrypt over the Iran server's port 80,
+// which forwards only `/.well-known/acme-challenge/`), opens TLS, and sends the request on as before with the client's
+// address signed (`relay`), so its limits count each client. The Iran server never sees a code, a header or a cookie.
+//
+// Rollout: the panel offers the new mode only to an agent of `PASS_FROM` or later; until the panel's own certificate
+// for the domain exists, the agent keeps the HMAC termination (and also relays port 80 for Let's Encrypt), then the
+// panel's answer switches it to passthrough. An older agent keeps the HMAC termination, which the panel still accepts.
+
+/// the first agent version that relays TLS untouched and Let's Encrypt's port 80
+pub const PASS_FROM: &str = "3.72.0";
+/// on the Iran server: the hidden tunnel's local port that leads to the panel's TLS listener
+const LOCAL_TLS_PORT: u16 = 10856;
+/// on the panel: its TLS listener for the relay (loopback, reached only through the hidden tunnel)
+pub const PANEL_TLS_PORT: u16 = 10857;
+
+/// a.b.c >= b.b.c (a missing or odd part is 0)
+fn ver_ge(a: &str, b: &str) -> bool {
+    let p = |v: &str| v.trim_start_matches('v').split(['.', '-']).take(3).map(|x| x.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
+    p(a) >= p(b)
+}
+
+/// Does the Iran server's agent relay TLS untouched (reported version `PASS_FROM` or later)?
+fn agent_passes(sid: &str) -> bool {
+    crate::tunnel::panel::agent_state(sid).map(|x| ver_ge(&x.1, PASS_FROM)).unwrap_or(false)
+}
+
+/// The panel's own certificate of the subscription domain exists and has more than 3 days left
+fn panel_cert_ok(domain: &str) -> bool {
+    crate::certbot::have(domain) && crate::certbot::not_after(domain).map(|e| e > crate::util::now() + 3 * 86400).unwrap_or(false)
+}
+
+/// The mode of the relay: "passthrough", "acme" (the agent relays port 80 while the panel takes its certificate) or
+/// "terminate" (the HMAC termination of 3.69, for an older agent or when the admin's own tunnel carries the panel)
+pub fn mode(app: &App, s: &SubIran) -> &'static str {
+    if !on(s) || !agent_passes(&s.server) || upstream_port(app, s) != LOCAL_PORT {
+        "terminate"
+    } else if panel_cert_ok(&s.domain) {
+        "passthrough"
+    } else {
+        "acme"
+    }
+}
+
+/// PROXY protocol v2 header: PROXY command, TCP over IPv4 or IPv6, `src` -> `dst`
+pub fn proxy_v2(src: std::net::SocketAddr, dst: std::net::SocketAddr) -> Vec<u8> {
+    let mut v = b"\r\n\r\n\0\r\nQUIT\n".to_vec();
+    v.push(0x21);
+    match (src, dst) {
+        (std::net::SocketAddr::V4(a), std::net::SocketAddr::V4(b)) => {
+            v.push(0x11);
+            v.extend_from_slice(&12u16.to_be_bytes());
+            v.extend_from_slice(&a.ip().octets());
+            v.extend_from_slice(&b.ip().octets());
+            v.extend_from_slice(&a.port().to_be_bytes());
+            v.extend_from_slice(&b.port().to_be_bytes());
+        }
+        _ => {
+            let six = |x: std::net::SocketAddr| match x {
+                std::net::SocketAddr::V4(a) => a.ip().to_ipv6_mapped(),
+                std::net::SocketAddr::V6(a) => *a.ip(),
+            };
+            v.push(0x21);
+            v.extend_from_slice(&36u16.to_be_bytes());
+            v.extend_from_slice(&six(src).octets());
+            v.extend_from_slice(&six(dst).octets());
+            v.extend_from_slice(&src.port().to_be_bytes());
+            v.extend_from_slice(&dst.port().to_be_bytes());
+        }
+    }
+    v
+}
+
+/// Reads a PROXY protocol v2 header and gives the client's address (an IPv4-mapped IPv6 address as IPv4). Only the
+/// PROXY command over TCP is taken: LOCAL, UDP, UNIX, v1 text or anything malformed is an error (the connection drops).
+pub async fn read_proxy_v2<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> Result<std::net::IpAddr, String> {
+    let mut h = [0u8; 16];
+    r.read_exact(&mut h).await.map_err(|e| e.to_string())?;
+    if &h[..12] != b"\r\n\r\n\0\r\nQUIT\n" || h[12] != 0x21 {
+        return Err("not a PROXY v2 header".into());
+    }
+    let len = u16::from_be_bytes([h[14], h[15]]) as usize;
+    if len > 216 {
+        return Err("PROXY header too long".into());
+    }
+    let mut body = vec![0u8; len];
+    r.read_exact(&mut body).await.map_err(|e| e.to_string())?;
+    match h[13] {
+        0x11 if len >= 12 => Ok(std::net::IpAddr::from([body[0], body[1], body[2], body[3]])),
+        0x21 if len >= 36 => {
+            let mut a = [0u8; 16];
+            a.copy_from_slice(&body[..16]);
+            let ip = std::net::Ipv6Addr::from(a);
+            Ok(ip.to_ipv4_mapped().map(std::net::IpAddr::V4).unwrap_or(std::net::IpAddr::V6(ip)))
+        }
+        _ => Err("PROXY header: only TCP over IPv4 / IPv6".into()),
+    }
+}
+
+/// The server name of a TLS ClientHello in `b` (the first record), None when `b` is not one or has none
+pub fn sni_of(b: &[u8]) -> Option<String> {
+    // record: type 22 (handshake), version, length
+    if b.len() < 5 || b[0] != 22 {
+        return None;
+    }
+    let rl = u16::from_be_bytes([b[3], b[4]]) as usize;
+    let rec = b.get(5..5 + rl)?;
+    // handshake: type 1 (ClientHello), 3-byte length
+    if rec.len() < 4 || rec[0] != 1 {
+        return None;
+    }
+    let mut i = 4 + 2 + 32;
+    let sid = *rec.get(i)? as usize;
+    i += 1 + sid;
+    let cs = u16::from_be_bytes([*rec.get(i)?, *rec.get(i + 1)?]) as usize;
+    i += 2 + cs;
+    let cm = *rec.get(i)? as usize;
+    i += 1 + cm;
+    let el = u16::from_be_bytes([*rec.get(i)?, *rec.get(i + 1)?]) as usize;
+    i += 2;
+    let ext = rec.get(i..i + el)?;
+    let mut j = 0;
+    while j + 4 <= ext.len() {
+        let t = u16::from_be_bytes([ext[j], ext[j + 1]]);
+        let l = u16::from_be_bytes([ext[j + 2], ext[j + 3]]) as usize;
+        let d = ext.get(j + 4..j + 4 + l)?;
+        if t == 0 {
+            // server_name_list: length, then (type 0 = host_name, length, name)
+            if d.len() < 5 || d[2] != 0 {
+                return None;
+            }
+            let nl = u16::from_be_bytes([d[3], d[4]]) as usize;
+            let name = std::str::from_utf8(d.get(5..5 + nl)?).ok()?;
+            return Some(name.to_ascii_lowercase());
+        }
+        j += 4 + l;
+    }
+    None
+}
+
+/// Reads the first TLS record (the ClientHello) from a client: (bytes read, its server name)
+async fn read_hello<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> Result<(Vec<u8>, Option<String>), String> {
+    let mut b = vec![0u8; 5];
+    r.read_exact(&mut b).await.map_err(|e| e.to_string())?;
+    if b[0] != 22 {
+        return Err("not TLS".into());
+    }
+    let rl = u16::from_be_bytes([b[3], b[4]]) as usize;
+    if rl > 16 * 1024 + 256 {
+        return Err("record too long".into());
+    }
+    b.resize(5 + rl, 0);
+    r.read_exact(&mut b[5..]).await.map_err(|e| e.to_string())?;
+    let name = sni_of(&b);
+    Ok((b, name))
+}
+
+/// One client on the Iran server in passthrough mode: its ClientHello must name the subscription domain; then the
+/// PROXY header and every byte go to the panel's TLS listener, and back, untouched (never decrypted here).
+pub(crate) async fn pass_one(mut tcp: tokio::net::TcpStream, domain: &str, upstream: &str) -> Result<(), String> {
+    let peer = tcp.peer_addr().map_err(|e| e.to_string())?;
+    let local = tcp.local_addr().map_err(|e| e.to_string())?;
+    let (hello, name) = tokio::time::timeout(Duration::from_secs(10), read_hello(&mut tcp)).await.map_err(|_| "hello timeout")??;
+    if name.as_deref() != Some(domain.trim().to_ascii_lowercase().as_str()) {
+        return Err("another server name".into());
+    }
+    let mut up = tokio::time::timeout(Duration::from_secs(10), tokio::net::TcpStream::connect(upstream)).await.map_err(|_| "panel timeout")?.map_err(|e| e.to_string())?;
+    let mut first = proxy_v2(peer, local);
+    first.extend_from_slice(&hello);
+    up.write_all(&first).await.map_err(|e| e.to_string())?;
+    match tokio::time::timeout(ANSWER_MAX, tokio::io::copy_bidirectional(&mut tcp, &mut up)).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(_) => Err("connection took too long".into()),
+    }
+}
+
+/// Let's Encrypt on the Iran server's port 80: only `GET /.well-known/acme-challenge/<token>` goes on to the panel
+/// (plain HTTP through the hidden tunnel; the panel answers from its webroot); anything else gets 404
+pub(crate) async fn acme_one<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(mut c: S, domain: &str, upstream: &str) -> Result<(), String> {
+    let mut buf = Vec::with_capacity(1024);
+    let mut tmp = [0u8; 1024];
+    let read = tokio::time::timeout(Duration::from_secs(5), async {
+        while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            if buf.len() > 4096 {
+                return Err("head too big".to_string());
+            }
+            let n = c.read(&mut tmp).await.map_err(|e| e.to_string())?;
+            if n == 0 {
+                return Err("closed".to_string());
+            }
+            buf.extend_from_slice(&tmp[..n]);
+        }
+        Ok(())
+    })
+    .await;
+    let token = match read {
+        Ok(Ok(())) => std::str::from_utf8(&buf).ok().and_then(|h| {
+            let mut f = h.lines().next()?.split(' ');
+            let (m, t) = (f.next()?, f.next()?);
+            let tok = t.strip_prefix("/.well-known/acme-challenge/")?;
+            (m == "GET" && !tok.is_empty() && tok.len() <= 128 && tok.bytes().all(|x| x.is_ascii_alphanumeric() || x == b'-' || x == b'_')).then(|| tok.to_string())
+        }),
+        _ => None,
+    };
+    let Some(tok) = token else {
+        let _ = c.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
+        return Ok(());
+    };
+    let mut up = tokio::time::timeout(Duration::from_secs(10), tokio::net::TcpStream::connect(upstream)).await.map_err(|_| "panel timeout")?.map_err(|e| e.to_string())?;
+    up.write_all(format!("GET /.well-known/acme-challenge/{} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", tok, domain).as_bytes()).await.map_err(|e| e.to_string())?;
+    let mut ans = Vec::new();
+    tokio::time::timeout(Duration::from_secs(10), (&mut up).take(65536).read_to_end(&mut ans)).await.map_err(|_| "panel silent")?.map_err(|e| e.to_string())?;
+    c.write_all(&ans).await.map_err(|e| e.to_string())?;
+    c.shutdown().await.map_err(|e| e.to_string())
+}
+
+/// The relay's port 80 for Let's Encrypt (agent): runs while the panel wants it; an error (port 80 taken) is reported
+async fn acme_serve(domain: String, upstream: String, status: Arc<Mutex<Value>>) {
+    let l = match tokio::net::TcpListener::bind(("0.0.0.0", 80)).await {
+        Ok(l) => l,
+        Err(e) => {
+            if let Value::Object(o) = &mut *status.lock().unwrap_or_else(|e| e.into_inner()) {
+                o.insert("acme".into(), json!(format!("port 80: {}", e)));
+            }
+            return;
+        }
+    };
+    if let Err(e) = tokio::task::spawn_blocking(|| crate::fw::sync("subsrv-acme", vec![crate::fw::rule(80, false)])).await {
+        eprintln!("subscription: firewall: {}", e);
+    }
+    if let Value::Object(o) = &mut *status.lock().unwrap_or_else(|e| e.into_inner()) {
+        o.insert("acme".into(), json!("on"));
+    }
+    let busy = Arc::new(tokio::sync::Semaphore::new(64));
+    loop {
+        let Ok((c, _)) = l.accept().await else { continue };
+        let Ok(permit) = busy.clone().try_acquire_owned() else { continue };
+        let (d, u) = (domain.clone(), upstream.clone());
+        tokio::spawn(async move {
+            if let Err(e) = acme_one(c, &d, &u).await {
+                eprintln!("subscription: port 80: {}", e);
+            }
+            drop(permit);
+        });
+    }
+}
+
+/// The agent in passthrough mode: no certificate here, the encrypted connections go to the panel
+async fn serve_pass(c: SubCfg, status: Arc<Mutex<Value>>) {
+    // the certificate this server took before is not needed (or renewed) any more
+    let d = c.domain.clone();
+    if let Err(e) = tokio::task::spawn_blocking(move || crate::certbot::forget(&d, SSL_USER)).await {
+        eprintln!("subscription: {}", e);
+    }
+    loop {
+        let l = match tokio::net::TcpListener::bind(("0.0.0.0", c.port)).await {
+            Ok(l) => l,
+            Err(e) => {
+                *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({ "active": false, "ssl": true, "mode": "passthrough", "domain": c.domain, "port": c.port, "error": format!("port {}: {}", c.port, e) });
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                continue;
+            }
+        };
+        let port = c.port;
+        if let Err(e) = tokio::task::spawn_blocking(move || crate::fw::sync("subsrv", vec![crate::fw::rule(port, false)])).await {
+            eprintln!("subscription: firewall: {}", e);
+        }
+        *status.lock().unwrap_or_else(|e| e.into_inner()) = json!({ "active": true, "ssl": true, "mode": "passthrough", "domain": c.domain, "port": c.port, "error": "" });
+        let busy = Arc::new(tokio::sync::Semaphore::new(1024));
+        loop {
+            let Ok((tcp, _)) = l.accept().await else { continue };
+            let Ok(permit) = busy.clone().try_acquire_owned() else { continue };
+            let (d, up) = (c.domain.clone(), c.passthrough.clone());
+            tokio::spawn(async move {
+                if let Err(e) = pass_one(tcp, &d, &up).await {
+                    if e != "another server name" {
+                        eprintln!("subscription: {}", e);
+                    }
+                }
+                drop(permit);
+            });
+        }
+    }
+}
+
+// ------------------------------------------------------------------ the panel's side of the passthrough
+
+/// The panel's TLS listener for the relay: only from this machine (the hidden tunnel delivers here), a PROXY v2 header
+/// first (5 s), then TLS with the panel's certificate of the subscription domain, then the request like any relayed one
+async fn panel_tls_one(app: Arc<App>, tcp: tokio::net::TcpStream, acc: tokio_rustls::TlsAcceptor) -> Result<(), String> {
+    let peer = tcp.peer_addr().map_err(|e| e.to_string())?;
+    let (host, port) = panel_target(&app);
+    // the pinned allowlist: only the local end of the authenticated hidden tunnel reaches this port
+    let allowed = peer.ip().is_loopback() || host.parse::<std::net::IpAddr>().map(|h| h == peer.ip()).unwrap_or(false);
+    if !allowed {
+        return Err(format!("{} is not the relay's tunnel", peer.ip()));
+    }
+    let mut tcp = tcp;
+    let client = tokio::time::timeout(Duration::from_secs(5), read_proxy_v2(&mut tcp)).await.map_err(|_| "PROXY header timeout")??;
+    let tls = tokio::time::timeout(Duration::from_secs(10), acc.accept(tcp)).await.map_err(|_| "tls timeout")?.map_err(|e| e.to_string())?;
+    let key = relay_key(&settings(&app));
+    relay(tls, client.to_string(), &format!("{}:{}", host, port), &key).await
+}
+
+/// Runs on the panel: takes the certificate of the subscription domain through the relay's port 80, and listens for
+/// the relay's encrypted connections while the relay is in passthrough (or about to be). Checked every minute.
+pub async fn panel_loop(app: Arc<App>) {
+    let acc: Arc<std::sync::RwLock<Option<tokio_rustls::TlsAcceptor>>> = Arc::new(std::sync::RwLock::new(None));
+    let mut listening: Option<tokio::task::JoinHandle<()>> = None;
+    let mut stamp: Option<(String, Option<std::time::SystemTime>)> = None;
+    let mut tick = tokio::time::interval(Duration::from_secs(60));
+    loop {
+        tick.tick().await;
+        let s = settings(&app);
+        let m = mode(&app, &s);
+        if m == "terminate" {
+            if let Some(t) = listening.take() {
+                t.abort();
+            }
+            continue;
+        }
+        if !panel_cert_ok(&s.domain) {
+            let d = s.domain.clone();
+            match tokio::task::spawn_blocking(move || crate::certbot::ensure_webroot(&d)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => eprintln!("subscription relay: {}", e),
+                Err(e) => eprintln!("subscription relay: {}", e),
+            }
+        }
+        if !crate::certbot::have(&s.domain) {
+            continue;
+        }
+        // a new or renewed certificate: new connections get it
+        let now = cert_stamp(&s.domain);
+        if stamp.as_ref() != Some(&(s.domain.clone(), now)) {
+            match acceptor(&s.domain) {
+                Ok(a) => {
+                    *acc.write().unwrap_or_else(|e| e.into_inner()) = Some(a);
+                    stamp = Some((s.domain.clone(), now));
+                }
+                Err(e) => {
+                    eprintln!("subscription relay: {}", e);
+                    continue;
+                }
+            }
+        }
+        if listening.as_ref().map(|t| t.is_finished()).unwrap_or(true) {
+            let (host, _) = panel_target(&app);
+            let l = match tokio::net::TcpListener::bind((host.as_str(), PANEL_TLS_PORT)).await {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("subscription relay: {}:{}: {}", host, PANEL_TLS_PORT, e);
+                    continue;
+                }
+            };
+            let (a2, acc2) = (app.clone(), acc.clone());
+            listening = Some(tokio::spawn(async move {
+                let busy = Arc::new(tokio::sync::Semaphore::new(1024));
+                loop {
+                    let Ok((tcp, _)) = l.accept().await else { continue };
+                    let Some(a) = acc2.read().unwrap_or_else(|e| e.into_inner()).clone() else { continue };
+                    let Ok(permit) = busy.clone().try_acquire_owned() else { continue };
+                    let app = a2.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = panel_tls_one(app, tcp, a).await {
+                            eprintln!("subscription relay: {}", e);
+                        }
+                        drop(permit);
+                    });
+                }
+            }));
+        }
+    }
+}
+
+/// `GET /.well-known/acme-challenge/<token>`: the panel's answer to Let's Encrypt for the relay's domain (the Iran
+/// server's port 80 forwards only these requests here)
+async fn acme_challenge(axum::extract::Path(token): axum::extract::Path<String>) -> Response {
+    match crate::certbot::challenge(&format!("/.well-known/acme-challenge/{}", token)) {
+        Some(t) => ([(axum::http::header::CONTENT_TYPE, "text/plain")], t).into_response(),
+        None => (StatusCode::NOT_FOUND, "").into_response(),
+    }
+}
+
+#[cfg(test)]
+mod pass_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    const NAME: &str = "sub.example.test";
+
+    #[tokio::test]
+    async fn proxy_v2_carries_the_client_and_nothing_else_is_taken() {
+        let a: std::net::SocketAddr = "203.0.113.9:51000".parse().unwrap();
+        let b: std::net::SocketAddr = "198.51.100.2:2053".parse().unwrap();
+        let mut h = proxy_v2(a, b);
+        h.extend_from_slice(b"rest");
+        let mut r = &h[..];
+        assert_eq!(read_proxy_v2(&mut r).await.unwrap().to_string(), "203.0.113.9");
+        assert_eq!(r, b"rest", "only the header is read");
+        let a6: std::net::SocketAddr = "[2001:db8::7]:1".parse().unwrap();
+        let h6 = proxy_v2(a6, b);
+        assert_eq!(read_proxy_v2(&mut &h6[..]).await.unwrap().to_string(), "2001:db8::7");
+        // v1 text, LOCAL, UDP, a too long body, a cut one: refused
+        assert!(read_proxy_v2(&mut &b"PROXY TCP4 1.2.3.4 5.6.7.8 1 2\r\n"[..]).await.is_err());
+        let mut local = proxy_v2(a, b);
+        local[12] = 0x20;
+        assert!(read_proxy_v2(&mut &local[..]).await.is_err());
+        let mut udp = proxy_v2(a, b);
+        udp[13] = 0x12;
+        assert!(read_proxy_v2(&mut &udp[..]).await.is_err());
+        let mut long = proxy_v2(a, b);
+        long[14] = 0xff;
+        assert!(read_proxy_v2(&mut &long[..]).await.is_err());
+        assert!(read_proxy_v2(&mut &proxy_v2(a, b)[..20]).await.is_err());
+        assert!(ver_ge("3.72.0", PASS_FROM) && ver_ge("v3.80.1", PASS_FROM) && !ver_ge("3.71.9", PASS_FROM) && !ver_ge("", PASS_FROM));
+    }
+
+    fn server_tls() -> (tokio_rustls::TlsAcceptor, rustls::pki_types::CertificateDer<'static>) {
+        let ck = rcgen::generate_simple_self_signed(vec![NAME.to_string()]).unwrap();
+        let cert = rustls::pki_types::CertificateDer::from(ck.cert.der().to_vec());
+        let key = rustls::pki_types::PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(ck.key_pair.serialize_der()));
+        let mut c = rustls::ServerConfig::builder_with_provider(crate::tunnel::link::provider())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert.clone()], key)
+            .unwrap();
+        c.alpn_protocols = vec![b"http/1.1".to_vec()];
+        (tokio_rustls::TlsAcceptor::from(Arc::new(c)), cert)
+    }
+
+    fn client(cert: rustls::pki_types::CertificateDer<'static>) -> tokio_rustls::TlsConnector {
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(cert).unwrap();
+        let c = rustls::ClientConfig::builder_with_provider(crate::tunnel::link::provider()).with_safe_default_protocol_versions().unwrap().with_root_certificates(roots).with_no_client_auth();
+        tokio_rustls::TlsConnector::from(Arc::new(c))
+    }
+
+    /// The Iran relay in passthrough: the panel opens TLS, the relay passes only encrypted bytes after the PROXY
+    /// header (no code, no header, no path readable there), a wrong server name or a missing PROXY header gets nothing
+    #[tokio::test]
+    async fn the_iran_relay_passes_tls_untouched_and_the_panel_answers() {
+        // the panel's web listener
+        let web = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let web_port = web.local_addr().unwrap().port();
+        let app = crate::test_app_env(&[("PANEL_PORT", &web_port.to_string())]);
+        let router = crate::api::master_router(app.clone());
+        tokio::spawn(async move {
+            let _ = axum::serve(web, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await;
+        });
+        save(&app, &SubIran { server: "ir1".into(), domain: NAME.into(), port: 2053, token: "relay-tunnel-token-0123456789".into(), ..Default::default() });
+        let u = app.db.create_user("passuser", 0.0, 0, 1, "wg", "", "", 0).unwrap();
+        // the panel's TLS listener for the relay
+        let (acc, cert) = server_tls();
+        let ptls = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let ptls_addr = ptls.local_addr().unwrap().to_string();
+        let a2 = app.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((tcp, _)) = ptls.accept().await else { break };
+                let (app, acc) = (a2.clone(), acc.clone());
+                tokio::spawn(async move {
+                    let _ = panel_tls_one(app, tcp, acc).await;
+                });
+            }
+        });
+        // what goes through the hidden tunnel, recorded on its way (the Iran side of the tunnel)
+        let seen = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let tap = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let tap_addr = tap.local_addr().unwrap().to_string();
+        let (seen2, up) = (seen.clone(), ptls_addr.clone());
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut c, _)) = tap.accept().await else { break };
+                let (seen, up) = (seen2.clone(), up.clone());
+                tokio::spawn(async move {
+                    let mut p = tokio::net::TcpStream::connect(&up).await.unwrap();
+                    let (mut cr, mut cw) = c.split();
+                    let (mut pr, mut pw) = p.split();
+                    let to = async {
+                        let mut b = [0u8; 4096];
+                        loop {
+                            let n = cr.read(&mut b).await.unwrap_or(0);
+                            if n == 0 { let _ = pw.shutdown().await; break }
+                            seen.lock().unwrap().extend_from_slice(&b[..n]);
+                            if pw.write_all(&b[..n]).await.is_err() { break }
+                        }
+                    };
+                    let back = tokio::io::copy(&mut pr, &mut cw);
+                    let _ = tokio::join!(to, back);
+                });
+            }
+        });
+        // the Iran server's listener
+        let iran = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let iran_addr = iran.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((tcp, _)) = iran.accept().await else { break };
+                let up = tap_addr.clone();
+                tokio::spawn(async move {
+                    let _ = pass_one(tcp, NAME, &up).await;
+                });
+            }
+        });
+        let conn = client(cert);
+        let ask = |name: &'static str, req: String| {
+            let conn = conn.clone();
+            async move {
+                let tcp = tokio::net::TcpStream::connect(iran_addr).await.unwrap();
+                let sn = rustls::pki_types::ServerName::try_from(name).unwrap();
+                let mut t = match conn.connect(sn, tcp).await { Ok(t) => t, Err(_) => return String::new() };
+                t.write_all(req.as_bytes()).await.unwrap();
+                let mut out = Vec::new();
+                let _ = t.read_to_end(&mut out).await;
+                String::from_utf8_lossy(&out).to_string()
+            }
+        };
+        let code = u.sub_code();
+        let ans = ask(NAME, format!("GET /sub/me HTTP/1.1\r\nHost: {NAME}:2053\r\nUser-Agent: KankiVPN-Android\r\nX-Kanki-Sub: {code}\r\nCookie: secret-cookie\r\n\r\n")).await;
+        assert!(ans.starts_with("HTTP/1.1 200"), "{}", &ans[..ans.len().min(200)]);
+        // the tunnel carried a PROXY header and TLS only: no code, no path, no cookie
+        let raw = seen.lock().unwrap().clone();
+        assert!(raw.starts_with(b"\r\n\r\n\0\r\nQUIT\n"), "the PROXY header first");
+        let text = String::from_utf8_lossy(&raw);
+        assert!(!text.contains(&u.code) && !text.contains("/sub/me") && !text.contains("secret-cookie") && !text.contains("X-Kanki-Sub"));
+        // admin paths still never pass (the panel filters after it opened TLS)
+        let admin = ask(NAME, "GET /api/users HTTP/1.1\r\nHost: r\r\n\r\n".into()).await;
+        assert!(admin.starts_with("HTTP/1.1 404"), "{}", &admin[..admin.len().min(80)]);
+        // another server name: the relay drops it before anything reaches the panel
+        seen.lock().unwrap().clear();
+        assert_eq!(ask("other.example.test", "GET /sub/me HTTP/1.1\r\n\r\n".into()).await, "");
+        assert!(seen.lock().unwrap().is_empty());
+        // straight to the panel's TLS listener without a PROXY header: nothing
+        let mut raw = tokio::net::TcpStream::connect(&ptls_addr).await.unwrap();
+        raw.write_all(b"\x16\x03\x01\x00\x05hello-not-a-proxy-header").await.unwrap();
+        let mut b = Vec::new();
+        let _ = tokio::time::timeout(Duration::from_secs(8), raw.read_to_end(&mut b)).await;
+        assert!(b.is_empty());
+    }
+
+    /// The relay's port 80 passes only Let's Encrypt's challenge path on, exactly, to the panel
+    #[tokio::test]
+    async fn only_acme_challenges_pass_port_80() {
+        let up = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let up_addr = up.local_addr().unwrap().to_string();
+        let got = Arc::new(Mutex::new(String::new()));
+        let g2 = got.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut c, _)) = up.accept().await else { break };
+                let mut b = [0u8; 2048];
+                let n = c.read(&mut b).await.unwrap_or(0);
+                *g2.lock().unwrap() = String::from_utf8_lossy(&b[..n]).to_string();
+                let _ = c.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nkey").await;
+            }
+        });
+        let ask = |req: &'static str| {
+            let up = up_addr.clone();
+            async move {
+                let (mut cli, srv) = tokio::io::duplex(1 << 16);
+                let t = tokio::spawn(async move { acme_one(srv, NAME, &up).await });
+                cli.write_all(req.as_bytes()).await.unwrap();
+                let mut out = Vec::new();
+                cli.read_to_end(&mut out).await.unwrap();
+                let _ = t.await;
+                String::from_utf8_lossy(&out).to_string()
+            }
+        };
+        let ok = ask("GET /.well-known/acme-challenge/AbC_d-9 HTTP/1.1\r\nHost: x\r\nCookie: c\r\n\r\n").await;
+        assert!(ok.ends_with("key"), "{}", ok);
+        let sent = got.lock().unwrap().clone();
+        assert!(sent.starts_with("GET /.well-known/acme-challenge/AbC_d-9 HTTP/1.1\r\nHost: sub.example.test\r\n") && !sent.contains("Cookie"), "{}", sent);
+        got.lock().unwrap().clear();
+        for bad in ["GET /sub/kanki-1-123 HTTP/1.1\r\n\r\n", "GET /.well-known/acme-challenge/../x HTTP/1.1\r\n\r\n", "POST /.well-known/acme-challenge/a HTTP/1.1\r\n\r\n", "GET /.well-known/acme-challenge/ HTTP/1.1\r\n\r\n"] {
+            assert!(ask(bad).await.starts_with("HTTP/1.1 404"), "{}", bad);
+        }
+        assert!(got.lock().unwrap().is_empty(), "nothing else reached the panel");
+    }
+
+    #[test]
+    fn the_server_name_is_read_from_a_real_client_hello() {
+        let (_, cert) = server_tls();
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(cert).unwrap();
+        let cfg = rustls::ClientConfig::builder_with_provider(crate::tunnel::link::provider()).with_safe_default_protocol_versions().unwrap().with_root_certificates(roots).with_no_client_auth();
+        let mut c = rustls::ClientConnection::new(Arc::new(cfg), rustls::pki_types::ServerName::try_from(NAME).unwrap()).unwrap();
+        let mut hello = Vec::new();
+        c.write_tls(&mut hello).unwrap();
+        assert_eq!(sni_of(&hello).as_deref(), Some(NAME));
+        assert!(sni_of(&hello[..20]).is_none() && sni_of(b"GET / HTTP/1.1\r\n").is_none() && sni_of(&[]).is_none());
+    }
 }
 
 #[cfg(test)]
