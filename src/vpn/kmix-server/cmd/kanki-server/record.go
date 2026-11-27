@@ -27,7 +27,9 @@ import (
 )
 
 const (
-	recMaxSecs    = 3600
+	// 3.68: a recording ends by itself after 5 minutes, and its events stay under ~10 MiB (16 bytes each; with
+	// the flows, streams and queries the whole recording stays under 20 MiB)
+	recMaxSecs    = 300
 	recMaxEvents  = 600_000
 	recMaxFlows   = 4096
 	recMaxStreams = 8192

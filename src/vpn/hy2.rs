@@ -10,12 +10,18 @@ fn client() -> &'static reqwest::Client {
 
 /// Per-user traffic since last call (clear=1)
 pub async fn traffic(port: &str, secret: &str) -> HashMap<String, (i64, i64)> {
+    traffic_by(port, secret, false).await
+}
+
+/// `traffic` with POST (KANKI MIX's own API takes the clearing read only as POST, 3.68; Hysteria's takes GET)
+pub async fn traffic_by(port: &str, secret: &str, post: bool) -> HashMap<String, (i64, i64)> {
     let mut m = HashMap::new();
     if port.is_empty() {
         return m;
     }
     let url = format!("http://127.0.0.1:{}/traffic?clear=1", port);
-    if let Ok(r) = client().get(&url).header("Authorization", secret).send().await {
+    let req = if post { client().post(&url) } else { client().get(&url) };
+    if let Ok(r) = req.header("Authorization", secret).send().await {
         if let Ok(v) = r.json::<serde_json::Value>().await {
             if let Some(o) = v.as_object() {
                 for (k, x) in o {
@@ -27,6 +33,29 @@ pub async fn traffic(port: &str, secret: &str) -> HashMap<String, (i64, i64)> {
         }
     }
     m
+}
+
+/// Ends the live connections of these users at once (Hysteria's `POST /kick`, 3.68): a user who was deleted,
+/// disabled, frozen, expired or ran out of data is cut off now, not when their connection drops by itself
+pub async fn kick(port: &str, secret: &str, names: &[String]) {
+    if port.is_empty() || names.is_empty() {
+        return;
+    }
+    let url = format!("http://127.0.0.1:{}/kick", port);
+    match client().post(&url).header("Authorization", secret).json(&names).send().await {
+        Ok(r) if r.status().is_success() => {}
+        Ok(r) => eprintln!("hysteria2: kick of {} users answered {}", names.len(), r.status()),
+        Err(e) => eprintln!("hysteria2: kick of {} users failed: {}", names.len(), e.without_url()),
+    }
+}
+
+/// The names that were allowed before and are not any more (the users to kick)
+pub fn revoked(before: &HashMap<String, String>, now: &HashMap<String, String>) -> Vec<String> {
+    let keep: std::collections::HashSet<&String> = now.values().collect();
+    let mut v: Vec<String> = before.values().filter(|n| !keep.contains(n)).cloned().collect();
+    v.sort();
+    v.dedup();
+    v
 }
 
 /// Online connections per user
@@ -103,15 +132,6 @@ pub fn moving_known(user: &str, now: i64) -> Option<i64> {
     let g = moved().lock().unwrap_or_else(|e| e.into_inner());
     let m = g.as_ref()?;
     Some(count_moving(m, Some(user), now).get(user).copied().unwrap_or(0))
-}
-
-/// Disconnect users right away
-pub async fn kick(port: &str, secret: &str, ids: &[String]) {
-    if port.is_empty() || ids.is_empty() {
-        return;
-    }
-    let url = format!("http://127.0.0.1:{}/kick", port);
-    let _ = client().post(&url).header("Authorization", secret).json(&ids).send().await;
 }
 
 /// What Hysteria2's users may not reach (3.68): this server's loopback (the panel, the stats API, `/hy2/auth`
@@ -283,6 +303,16 @@ pub fn user_pass(code: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_users_that_left_are_kicked() {
+        let m = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<HashMap<_, _>>();
+        let before = m(&[("p1", "ali"), ("p2", "sara"), ("p3", "reza")]);
+        // sara's password changed (still allowed), reza was disabled
+        let now = m(&[("p1", "ali"), ("p9", "sara")]);
+        assert_eq!(revoked(&before, &now), vec!["reza".to_string()]);
+        assert!(revoked(&now, &now).is_empty());
+    }
 
     #[test]
     fn the_acl_is_added_or_widened_never_doubled() {

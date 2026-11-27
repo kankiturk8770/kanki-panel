@@ -915,8 +915,8 @@ mod tests {
 
     #[test]
     fn sites_a_web_server_serves() {
-        let caddy = "{\n  auto_https off\n}\n(common) {\n  header -Server\n}\n# old\ndl.kankipro.cafe {\n    root * /var/www/dl\n    file_server\n}\nhttps://a.example.com:2053, b.example.com {\n  handle {\n    respond 404\n  }\n}\n";
-        assert_eq!(caddy_sites(caddy), vec!["dl.kankipro.cafe", "https://a.example.com:2053", "b.example.com"]);
+        let caddy = "{\n  auto_https off\n}\n(common) {\n  header -Server\n}\n# old\ndl.example.net {\n    root * /var/www/dl\n    file_server\n}\nhttps://a.example.com:2053, b.example.com {\n  handle {\n    respond 404\n  }\n}\n";
+        assert_eq!(caddy_sites(caddy), vec!["dl.example.net", "https://a.example.com:2053", "b.example.com"]);
         assert_eq!(nginx_names("server {\n  listen 80;\n  server_name  x.com www.x.com;\n}\nserver { server_name _; }"), vec!["x.com", "www.x.com"]);
     }
 

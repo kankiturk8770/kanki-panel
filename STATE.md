@@ -1,5 +1,65 @@
 # STATE
 
+## 3.68.0 — Phase 1 security hardening (done; branch `ccr-94a1e97e-wsl617`)
+Nothing a user has changes: same subscription codes, same WireGuard/AWG/KANKI MIX/Hysteria2/Xray keys and links.
+
+Relay and network
+- `subiran::relay` (transport-generic) forwards `/sub/me`, `/sub/*`, `/api/config/*` with X-Kanki-Sub / Device / Seal /
+  Authorization untouched; 60 s idle and 10 min caps. Test `the_app_headers_pass_the_relay` (real router, sealed answer).
+- Firewall loop fixed: the guard counted wg/awg/hy2 ports of switched-off cores (`cores::switched_off`) and `report()`
+  closed what the guard reopened every ~64 s. Deletion is verified (`ufw status`, then by rule number); rules that
+  cannot be closed go to `gave_up` for 24 h.
+- Egress isolation: KANKI MIX `internal/egress` (resolve once, no loopback/private/link-local/metadata; lab override
+  `KMIX_LAB_ALLOW_PRIVATE=1` keeps loopback/metadata closed), Hysteria2 ACL widened (old ACL upgraded in place), Xray
+  private nets always blocked, WG/AWG `KANKI-ISO-IN`/`KANKI-ISO-FWD` chains (iptables + ip6tables, self-healing).
+  KANKI-LIMIT and the TCP MSS rules are rebuilt when a ufw reload dropped them.
+- SSRF guard `util::public_host/public_url`: node add/join (`ALLOW_PRIVATE_NODES=1` for one private network), CDN test,
+  REALITY test, DNS transparent forwarder. AI provider URLs are constants (nothing to guard).
+- Tunnels may not listen on SSH or deliver to SSH/panel/node/Xray API ports (on save). KMIX hop range avoids every
+  UDP port in use. Caddy configs are validated as a temp file before they replace the live one. Subscription-domain
+  block: `/tg/api/admin/*` and `/assets/panel/*` denied; `/tunnel /join /dl` kept only while pre-3.9 agents use the
+  domain (30 days after the last one seen). `NODE_BIND` defaults to 127.0.0.1 when Caddy fronts the node.
+- `/kdns/r/<token>` over plain HTTP still works (the Android app uses `register_http`) but answers `Deprecation: true`.
+
+Files and secrets
+- Startup: data dir and `<data>/tmp` 0700; kanki.db(-wal,-shm), kanki.env, wg0/awg0 0600; Hysteria config
+  root:hysteria 0640 (its service reads it). Units get PrivateTmp + NoNewPrivileges (new installs and a drop-in).
+  UMask=0077 is not used: the panel writes files caddy and hysteria read.
+- `util::write_private` (0600 from the first byte, fsync, rename, owner kept); KMIX users.json atomic 0600.
+- Secrets sealed at rest (`core/secrets.rs`, AES-256-GCM, `KANKI_MASTER_KEY` in kanki.env, made once): the settings in
+  `SEALED_SETTINGS` and peer privkey/psk; plaintext rows sealed at start; backups/moves carry them opened.
+- VACUUM snapshots only in `<data>/tmp`, zeroed and removed; backup/restore work dirs moved out of /tmp.
+- PSKs go to `wg set` on stdin. `GET /api/logs` lines redacted (`util::redact` + the panel's own secrets).
+
+Auth and abuse
+- PBKDF2 via `ring` at 600k rounds; old hashes open once and are rewritten; global 2-at-a-time gate.
+- Min 12-char passwords; step-up (`current`) for policy, 2FA setup/disable, API tokens; `totp_pending` 10 min;
+  enabling 2FA uses up its code; global 10/10 min 2FA throttle; `force_2fa` blocks login sessions until 2FA is on.
+- Admin session = `kanki_session` cookie (HttpOnly, Secure, SameSite=Strict) that counts only with
+  `X-Kanki-Admin: 1`; idle end `session_idle_min` (120); `X-Kanki-Token-Login: 1` still returns a token for scripts.
+- API tokens must end (1-365 days; old ones got 90 days); legacy `api_key` removed (410).
+- HTTPS-only for /api, /tg/api, /move, /join; pre-auth before any body over 1 MiB and /api/apps.
+- Backup, move, db clean and service actions: login sessions only. Payment keys masked in GET /api/settings.
+- CSP on /admin, `sandbox` CSP on every SVG; QR input max 2048/4096 bytes; `no-store` on every /sub answer.
+- Limits: /sub/:code/app 5/min, /dl 20, /move 30, /join 10, /tunnel 600 per minute; bulk users max 1000; no
+  limiter exemption; `client_ip` = rightmost hop only and only a real address.
+- Audit rows hash-chained (`audit_broken`, shown as `audit_intact`); strangers' 401/403 not written; sensitive
+  reads, /move, /join, bot-admin changes and CLI resets audited. `/hy2/auth` fail-closed without its key file unless
+  `/etc/kanki/hy2-auth.keyless` marks a deliberately keyless Hysteria.
+- /move: 30 min, token in `X-Kanki-Move`, one download, command wiped on expiry. Secrets on CLI via stdin
+  (`features` tells install.sh). DoH header timeout 10 s / 30 min per connection; ACME responder max 64 at once.
+- Auto-removal of offline servers off by default; leftover nodes asked for 72 h.
+
+Revocation and KANKI MIX API
+- Hysteria2: users that left the allow-list are kicked at each sync. KANKI MIX reload already drops a removed
+  user's addresses and hints (packets stop decrypting). Xray: removed/over-limit users are taken out via its API
+  (no new connections); Xray has no API to cut an open stream.
+- KMIX `/traffic?clear=1` POST only; recordings max 5 min, ~10 MiB of events.
+
+Not done (needs a decision or a live test)
+- `install.sh` `set -euo pipefail`: kept `set -e`; switching a 1000-line installer to `-u` untested could break installs.
+- `curl -k` in install.sh is left only where nothing secret is sent (reachability checks).
+
 ## 3.67.2 — bare subscription code in the header (done)
 - `/sub/me[/<kind>]` with `X-Kanki-Sub: <digits>` (only the code part, 10–32 digits, no `kanki-<id>-`) finds the
   account by `Db::user_by_bare_code` (parameterized, exactly one match, constant-time compare); none or two → 404.

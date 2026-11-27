@@ -115,7 +115,13 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
         })
         .await;
     }
-    *app.hy2_allowed.lock().unwrap_or_else(|e| e.into_inner()) = req.hy2.clone();
+    // 3.68: users no longer allowed (deleted, disabled, frozen, expired, over their data) are cut off at once
+    let gone = {
+        let mut cur = app.hy2_allowed.lock().unwrap_or_else(|e| e.into_inner());
+        let gone = crate::hy2::revoked(&cur, &req.hy2);
+        *cur = req.hy2.clone();
+        gone
+    };
     *app.limits.lock().unwrap_or_else(|e| e.into_inner()) = req.limits.clone();
     let hy2_names: HashSet<String> = req.hy2.values().cloned().collect();
     let block = req.block.clone();
@@ -135,6 +141,7 @@ pub async fn apply_local(app: &App, req: SyncReq) -> SyncResp {
         .unwrap_or_default();
     let port = app.env.get("HY2_STATS_PORT").cloned().unwrap_or_default();
     let secret = app.env.get("HY2_SECRET").cloned().unwrap_or_default();
+    crate::hy2::kick(&port, &secret, &gone).await;
     let hy2 = crate::hy2::traffic(&port, &secret).await;
     let mut hy2_online = crate::hy2::online(&port, &secret).await;
     // a ping session next to a real one is no device: where Hysteria tells which of its connections

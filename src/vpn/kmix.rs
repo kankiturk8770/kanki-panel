@@ -681,7 +681,7 @@ fn api_here() -> Option<(String, String)> {
 /// Per-user traffic since the last read: username -> (rx, tx) bytes on the wire
 pub async fn traffic() -> HashMap<String, (i64, i64)> {
     match api_here() {
-        Some((p, s)) => crate::hy2::traffic(&p, &s).await,
+        Some((p, s)) => crate::hy2::traffic_by(&p, &s, true).await,
         None => HashMap::new(),
     }
 }
@@ -839,7 +839,8 @@ async fn record_api(axum::extract::State(app): St, h: axum::http::HeaderMap, axu
         if !names.contains(&user) {
             return crate::api::err(StatusCode::BAD_REQUEST, "pick a user that has KANKI MIX");
         }
-        let secs = b["secs"].as_u64().unwrap_or(600).clamp(60, 3600);
+        // 3.68: a recording stops by itself after 5 minutes at most (the server caps it too)
+        let secs = b["secs"].as_u64().unwrap_or(300).clamp(60, 300);
         body = json!({"action": "start", "user": user, "secs": secs});
     }
     let want = b["node"].as_str().unwrap_or("").to_string();

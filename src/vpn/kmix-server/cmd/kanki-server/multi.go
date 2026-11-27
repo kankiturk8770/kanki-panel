@@ -10,7 +10,7 @@ package main
 //
 // API (فقط روی 127.0.0.1، هدر Authorization: secret؛ همان شکل API آمار Hysteria2):
 //
-//	GET  /traffic?clear=1   {"ali": {"tx": 123, "rx": 456}}   بایت روی سیم از آخرین clear
+//	POST /traffic?clear=1   {"ali": {"tx": 123, "rx": 456}}   بایت روی سیم از آخرین clear
 //	GET  /online            {"ali": 1}                        دستگاه‌های فعال (۳۰ ثانیه‌ی اخیر)
 //	POST /reload            فایل کاربران دوباره خوانده می‌شود
 //	GET  /health            sessions, gaming, hinted, loss_permille … (health.go)
@@ -168,8 +168,14 @@ func serveAPI(addr, secret string, ring *obfs.Keyring, usersPath string, relay *
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		// 3.68: reading and clearing the counters is a change: POST only (a GET only reads)
+		clear := r.URL.Query().Get("clear") == "1"
+		if clear && r.Method != http.MethodPost {
+			http.Error(w, "clear=1 needs POST", http.StatusMethodNotAllowed)
+			return
+		}
 		out := map[string]map[string]int64{}
-		for name, t := range ring.Traffic(r.URL.Query().Get("clear") == "1") {
+		for name, t := range ring.Traffic(clear) {
 			out[name] = map[string]int64{"rx": t[0], "tx": t[1]}
 		}
 		writeJSON(w, out)

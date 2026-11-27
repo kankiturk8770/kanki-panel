@@ -2,7 +2,7 @@
 //!
 //! A server behind the Iran tunnel gives configs whose endpoint is the Iran server. The app also offers
 //! the same AmneziaWG config straight to the server ("direct"), for when the tunnel is down. Its address
-//! is `<code>.<base>`, like `fr.kankipro.cafe`: the admin points that name at the server, so the server
+//! is `<code>.<base>`, like `fr.example.net`: the admin points that name at the server, so the server
 //! can change its IP without a new app. Germany keeps `g` (the app used it first); a second server in the
 //! same country gets a number (`fr2`). A name, once given to a server, stays with it.
 //!
