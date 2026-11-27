@@ -309,6 +309,73 @@ pub async fn public_url(url: &str, allow_private: bool) -> Result<(), String> {
     public_host(host, port, allow_private).await.map(|_| ())
 }
 
+/// A log line with its secrets masked (3.68, `GET /api/logs`): Telegram bot tokens, subscription codes
+/// (`kanki-<id>-<code>` keeps `kanki-<id>-`), WireGuard keys and other base64 keys, long hex secrets, the values of
+/// `sub=`/`token=`/`key=`/`secret=`/`pass=`/`password=`, a `Bearer` token, and every string of `known` (the
+/// panel's own secrets, at least 8 characters).
+pub fn redact(line: &str, known: &[String]) -> String {
+    let mut out = line.to_string();
+    for k in known.iter().filter(|k| k.len() >= 8) {
+        if out.contains(k.as_str()) {
+            out = out.replace(k.as_str(), "[secret]");
+        }
+    }
+    let word = |c: char| c.is_ascii_alphanumeric() || "_+/=:-.".contains(c);
+    let mut res = String::with_capacity(out.len());
+    let mut bearer = false;
+    let mut i = 0;
+    let b: Vec<char> = out.chars().collect();
+    while i < b.len() {
+        if !word(b[i]) {
+            res.push(b[i]);
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < b.len() && word(b[i]) {
+            i += 1;
+        }
+        let w: String = b[start..i].iter().collect();
+        let masked = if bearer { "[secret]".to_string() } else { redact_word(&w) };
+        bearer = w.eq_ignore_ascii_case("bearer");
+        res.push_str(&masked);
+    }
+    res
+}
+
+fn redact_word(w: &str) -> String {
+    // key=value: the value of a secret-looking key, otherwise each side on its own
+    if let Some((k, v)) = w.split_once('=').filter(|(k, v)| !k.is_empty() && !v.is_empty()) {
+        let kl = k.to_ascii_lowercase();
+        if ["sub", "token", "key", "secret", "pass", "password", "psk", "privatekey", "auth", "code"].iter().any(|x| kl.ends_with(x)) {
+            return format!("{}=[secret]", k);
+        }
+        return format!("{}={}", redact_word(k), redact_word(v));
+    }
+    // a Telegram bot token: <digits>:<35 characters>
+    if let Some((id, rest)) = w.split_once(':') {
+        if (6..=12).contains(&id.len()) && id.bytes().all(|c| c.is_ascii_digit()) && rest.len() >= 30 {
+            return format!("{}:[secret]", id);
+        }
+    }
+    // a subscription code: <letters>-<digits>-<code>
+    let parts: Vec<&str> = w.splitn(3, '-').collect();
+    if parts.len() == 3 && (2..=12).contains(&parts[0].len()) && parts[0].bytes().all(|c| c.is_ascii_alphabetic())
+        && !parts[1].is_empty() && parts[1].bytes().all(|c| c.is_ascii_digit()) && parts[2].len() >= 4
+        && parts[2].bytes().all(|c| c.is_ascii_alphanumeric())
+    {
+        return format!("{}-{}-[secret]", parts[0], parts[1]);
+    }
+    // WireGuard / base64 keys (44 with '='), long base64 or hex secrets
+    let b64 = w.len() >= 40 && w.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'+' || c == b'/' || c == b'=' || c == b'-' || c == b'_');
+    let hex = w.len() >= 32 && w.bytes().all(|c| c.is_ascii_hexdigit());
+    let mixed = w.bytes().any(|c| c.is_ascii_digit()) && w.bytes().any(|c| c.is_ascii_alphabetic());
+    if hex || (b64 && mixed) {
+        return "[secret]".into();
+    }
+    w.to_string()
+}
+
 /// Writes `text` to `path` readable by its owner only (0600): a temp file in the same directory (made 0600 before
 /// a byte is written), fsync, then rename over the old file, so a reader never sees half a file and a crash never
 /// leaves an empty one.
@@ -318,13 +385,18 @@ pub fn write_private(path: &str, text: &str) -> std::io::Result<()> {
 
 pub fn write_private_bytes(path: &str, data: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
     let p = std::path::Path::new(path);
+    // the file keeps its owner (Hysteria's config belongs to the `hysteria` user, which must still read it)
+    let owner = std::fs::metadata(p).ok().map(|m| (m.uid(), m.gid()));
     let dir = p.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(std::path::Path::new("."));
     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file");
     let tmp = dir.join(format!(".{}.{}.{}.tmp", name, std::process::id(), rand_token(6)));
     let res = (|| {
         let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+        if let Some((u, g)) = owner {
+            std::os::unix::fs::fchown(&f, Some(u), Some(g))?;
+        }
         f.write_all(data)?;
         f.sync_all()?;
         std::fs::rename(&tmp, p)?;
@@ -341,6 +413,53 @@ pub fn write_private_bytes(path: &str, data: &[u8]) -> std::io::Result<()> {
         }
     }
     res
+}
+
+/// Overwrites a file with zeros (synced) before removing it: a snapshot of the database or a key never stays
+/// readable in free blocks of the data folder as long as the filesystem writes in place
+pub fn shred_remove(path: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let len = match std::fs::metadata(path) {
+        Ok(m) => m.len(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    {
+        let mut f = std::fs::OpenOptions::new().write(true).open(path)?;
+        let zero = vec![0u8; 64 << 10];
+        let mut left = len;
+        while left > 0 {
+            let n = left.min(zero.len() as u64) as usize;
+            f.write_all(&zero[..n])?;
+            left -= n as u64;
+        }
+        f.sync_all()?;
+    }
+    std::fs::remove_file(path)
+}
+
+/// The id of a system group (None when there is no such group)
+pub fn gid_of(group: &str) -> Option<u32> {
+    let c = std::ffi::CString::new(group).ok()?;
+    // SAFETY: `c` is a valid NUL-terminated string that lives across the call; getgrnam returns NULL or a pointer
+    // to a static struct that is read at once (gr_gid) and not kept
+    let g = unsafe { libc::getgrnam(c.as_ptr()) };
+    if g.is_null() {
+        return None;
+    }
+    // SAFETY: checked non-null above; only the plain integer field is read
+    Some(unsafe { (*g).gr_gid })
+}
+
+/// A config a service of its own reads (Hysteria runs as `hysteria`): owned by root, group of the service,
+/// 0640 (no one else reads it). Without that group the file is left as it is.
+pub fn service_readable(path: &str, group: &str) -> std::io::Result<()> {
+    let Some(gid) = gid_of(group) else { return Ok(()) };
+    match std::os::unix::fs::chown(path, Some(0), Some(gid)) {
+        Ok(()) => chmod_if_present(path, 0o640),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Sets `mode` on `path` when it exists (a missing file is fine: nothing to protect)
@@ -666,6 +785,23 @@ mod totp_tests {
 #[cfg(test)]
 mod private_tests {
     use super::*;
+
+    #[test]
+    fn log_lines_lose_their_secrets() {
+        let wg = "aGVsbG8gd29ybGQgdGhpcyBpcyBhIHdpcmVndWFyZCE=";
+        let l = format!(
+            "sub kanki-12-4821930012345678901 GET /api/config/3/wg?sub=kanki-3-abcdef12&node=x bot 123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw key {} Authorization: Bearer abc.def hex 0123456789abcdef0123456789abcdef pass=hunter22 mine s3cretValue99",
+            wg
+        );
+        let r = redact(&l, &["s3cretValue99".to_string()]);
+        for leak in ["4821930012345678901", "abcdef12", "AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw", wg, "abc.def", "0123456789abcdef0123456789abcdef", "hunter22", "s3cretValue99"] {
+            assert!(!r.contains(leak), "{} in {}", leak, r);
+        }
+        assert!(r.contains("kanki-12-[secret]") && r.contains("node=x") && r.contains("123456789:[secret]"), "{}", r);
+        // an ordinary line stays as it is
+        let plain = "firewall: closed unused 51820/udp (no longer used by wg) at 2026-11-27 12:00";
+        assert_eq!(redact(plain, &[]), plain);
+    }
 
     #[test]
     fn only_public_addresses_pass_the_ssrf_guard() {

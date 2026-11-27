@@ -146,8 +146,13 @@ fn run(cmd: &str, args: &[&str], stdin: Option<&str>) -> Option<String> {
     }
     let mut ch = c.spawn().ok()?;
     if let Some(s) = stdin {
+        // the pipe is closed when `i` goes, so the tool sees the end of its input
         if let Some(mut i) = ch.stdin.take() {
-            let _ = i.write_all(s.as_bytes());
+            if i.write_all(s.as_bytes()).is_err() {
+                let _ = ch.kill();
+                let _ = ch.wait();
+                return None;
+            }
         }
     }
     let out = ch.wait_with_output().ok()?;
@@ -246,22 +251,10 @@ pub fn apply(proto: &str, desired: &[PeerSpec]) -> HashMap<String, PeerStat> {
         if current.contains_key(&p.pubkey) {
             continue;
         }
-        // the key file is created for the owner only (0600) and never overwrites an existing file
-        let path = format!("/tmp/kanki-psk-{}", crate::util::rand_token(16));
-        let wrote = {
-            use std::os::unix::fs::OpenOptionsExt;
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&path)
-                .and_then(|mut f| f.write_all(p.psk.as_bytes()))
-                .is_ok()
-        };
-        if wrote {
-            let allowed = format!("{}/32", p.ip);
-            let _ = run(t, &["set", i, "peer", p.pubkey.as_str(), "preshared-key", path.as_str(), "allowed-ips", allowed.as_str()], None);
-            let _ = std::fs::remove_file(&path);
+        // 3.68: the preshared key goes to `wg set` on its stdin (`/dev/stdin`), never through a file on disk
+        let allowed = format!("{}/32", p.ip);
+        if run(t, &["set", i, "peer", p.pubkey.as_str(), "preshared-key", "/dev/stdin", "allowed-ips", allowed.as_str()], Some(&p.psk)).is_none() {
+            eprintln!("{}: peer {}… could not be added", proto, p.pubkey.chars().take(8).collect::<String>());
         }
     }
     with_removed(dump(proto), removed)

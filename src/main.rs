@@ -7,6 +7,8 @@
 mod db;
 #[path = "core/util.rs"]
 mod util;
+#[path = "core/secrets.rs"]
+mod secrets;
 #[path = "core/certbot.rs"]
 mod certbot;
 #[path = "core/pin.rs"]
@@ -220,6 +222,59 @@ fn usage() {
     println!("kanki-panel {}\n\nCommands:\n  serve                      run the main panel (default)\n  node                       run the node agent\n  tunnel-agent               run the tunnel agent (servers that only carry tunnels)\n  dns                        run Kanki DNS from /etc/kanki/dns.json (started by the agent)\n  tunnel-run <file.json>     run a standalone tunnel from a JSON file (no panel); add --check to only validate it\n  hash-password <pass>       print a password hash\n  reset-admin <user> <pass>  reset admin login, sessions and 2FA\n  reset-security             clear IP allow/deny lists and disable 2FA\n  set-bot <token> <admins>   set / change the Telegram sales bot (empty token = remove)\n  version", VERSION);
 }
 
+/// The data folder 0700; the database, its WAL and shared memory, the env file and the WireGuard configs 0600;
+/// Hysteria's config root:hysteria 0640 (its service reads it). Logged, never fatal: the panel must start.
+fn secure_files(data: &str) {
+    if let Err(e) = util::private_dir(data) {
+        eprintln!("permissions: {}: {}", data, e);
+    }
+    if let Err(e) = util::private_dir(&format!("{}/tmp", data)) {
+        eprintln!("permissions: {}/tmp: {}", data, e);
+    }
+    for f in ["kanki.db", "kanki.db-wal", "kanki.db-shm"] {
+        if let Err(e) = util::chmod_if_present(&format!("{}/{}", data, f), 0o600) {
+            eprintln!("permissions: {}/{}: {}", data, f, e);
+        }
+    }
+    for f in [ENV_PATH, "/etc/wireguard/wg0.conf", "/etc/amnezia/amneziawg/awg0.conf"] {
+        if let Err(e) = util::chmod_if_present(f, 0o600) {
+            eprintln!("permissions: {}: {}", f, e);
+        }
+    }
+    if let Err(e) = util::service_readable("/etc/hysteria/config.yaml", "hysteria") {
+        eprintln!("permissions: /etc/hysteria/config.yaml: {}", e);
+    }
+    harden_units();
+}
+
+/// Units installed before 3.68 get the hardening of new installs as a drop-in (PrivateTmp, NoNewPrivileges);
+/// it takes effect at their next restart
+fn harden_units() {
+    const DROP: &str = "# written by kanki-panel 3.68\n[Service]\nPrivateTmp=true\nNoNewPrivileges=true\n";
+    let mut wrote = false;
+    for unit in ["kanki-panel", "kanki-node", "kanki-tunnel"] {
+        if !std::path::Path::new(&format!("/etc/systemd/system/{}.service", unit)).exists() {
+            continue;
+        }
+        let dir = format!("/etc/systemd/system/{}.service.d", unit);
+        let f = format!("{}/10-kanki-hardening.conf", dir);
+        if std::fs::read_to_string(&f).map(|t| t == DROP).unwrap_or(false) {
+            continue;
+        }
+        if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&f, DROP)) {
+            eprintln!("hardening: {}: {}", f, e);
+            continue;
+        }
+        wrote = true;
+    }
+    if wrote {
+        match std::process::Command::new("systemctl").arg("daemon-reload").status() {
+            Ok(s) if s.success() => {}
+            other => eprintln!("hardening: systemctl daemon-reload: {:?}", other),
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -292,7 +347,14 @@ async fn main() {
     let _ = std::fs::create_dir_all(&data);
     // a restore made in the panel last run is put in place before the database is opened
     backup::take_pending(&data);
+    // 3.68: secrets at rest are sealed with the master key of the env file (made once when missing)
+    let sealed = secrets::init(ENV_PATH);
     let db = db::Db::open(&format!("{}/kanki.db", data));
+    if sealed {
+        db.migrate_secrets();
+    }
+    // 3.68: the data folder (database, its WAL, keys, backups' work files) is root's alone
+    secure_files(&data);
 
     if cmd == "reset-admin" {
         let (Some(u), Some(p)) = (args.get(2), args.get(3)) else {

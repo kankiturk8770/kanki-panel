@@ -332,6 +332,8 @@ acl:
     - reject(fc00::/7)
     - reject(fe80::/10)
 EOF
+  # its own user reads it, no one else (it holds the obfs password and the stats secret)
+  if getent group hysteria >/dev/null; then chown root:hysteria /etc/hysteria/config.yaml && chmod 640 /etc/hysteria/config.yaml; fi
   systemctl enable -q hysteria-server.service 2>/dev/null || true
   if systemctl restart hysteria-server.service; then ok "Hysteria2 is running"; else warn "Hysteria2 failed to start"; fi
 }
@@ -401,6 +403,10 @@ ExecStart=$BIN $2
 Restart=always
 RestartSec=3
 LimitNOFILE=65535
+# its own /tmp, and nothing it starts can gain privileges (setuid); UMask stays default: the panel writes
+# files other services read (Caddyfile for caddy, Hysteria's config for hysteria) and sets their modes itself
+PrivateTmp=true
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
@@ -579,7 +585,7 @@ EOF
   echo; ok "Node installed! In the panel go to Nodes > Add node and enter:"
   echo -e "   API address:  ${C}https://${DOMAIN:-$IP}:$NODE_PUBLIC_PORT${N}"
   echo -e "   Endpoint:     ${C}${DOMAIN:-$IP}${N}"
-  echo -e "   Node token:   ${C}$NODE_TOKEN${N}"
+  echo -e "   Node token:   ${C}saved in $ENV${N} (show it once with: grep '^NODE_TOKEN=' $ENV)"
   [ -n "$INSECURE" ] && echo -e "   ${Y}No domain: tick 'Self-signed certificate' when adding the node.${N}"
   echo "   Tip: allow port $NODE_PUBLIC_PORT only from the main panel IP for extra safety."
 }
@@ -605,7 +611,7 @@ register_node(){ # tells the panel about this node; needs DOMAIN NODE_PUBLIC_POR
     echo "   2) Or add it by hand in the panel: Nodes > Add node > manual, with these values:"
     echo -e "      API address:  ${C}https://$host:$NODE_PUBLIC_PORT${N}"
     echo -e "      Endpoint:     ${C}$host${N}"
-    echo -e "      Node token:   ${C}$NODE_TOKEN${N}"
+    echo -e "      Node token:   ${C}saved in $ENV${N} (show it once with: grep '^NODE_TOKEN=' $ENV)"
     [ -n "$INSECURE" ] && echo "      (tick 'Self-signed certificate')"
     return 1
   fi
@@ -798,7 +804,7 @@ restore_bundle(){
       # Hysteria2 runs as its own user: its config and the certificate must stay readable for it
       # (the same modes a normal install and the renewal hook give them)
       case "$f" in
-        /etc/hysteria/config.yaml) install -m 644 "$W/x/files$f" "$f";;
+        /etc/hysteria/config.yaml) if getent group hysteria >/dev/null; then install -m 640 -o root -g hysteria "$W/x/files$f" "$f"; else install -m 644 "$W/x/files$f" "$f"; fi;;
         $TLS/*.pem) getent group kankitls >/dev/null || groupadd kankitls; install -m 640 -g kankitls "$W/x/files$f" "$f";;
         *) install -m 600 "$W/x/files$f" "$f";;
       esac

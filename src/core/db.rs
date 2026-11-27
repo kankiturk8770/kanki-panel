@@ -496,17 +496,53 @@ impl Db {
                 .optional()
                 .ok()
                 .flatten()
+                .map(|v| if crate::secrets::sealed_setting(k) { crate::secrets::open(k, &v) } else { v })
                 .unwrap_or_else(|| default_setting(k).to_string())
         })
     }
 
     pub fn set(&self, k: &str, v: &str) {
+        // 3.68: secrets are stored sealed (secrets.rs); everything else as it is
+        let stored = if crate::secrets::sealed_setting(k) { crate::secrets::seal(k, v) } else { v.to_string() };
         self.with(|c| {
             let _ = c.execute(
                 "INSERT INTO settings(k,v) VALUES(?1,?2) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
-                params![k, v],
+                params![k, stored],
             );
         });
+    }
+
+    /// 3.68: seals the secrets written before (plain settings and peer keys), in one transaction. Idempotent.
+    pub fn migrate_secrets(&self) {
+        let r: rusqlite::Result<(usize, usize)> = self.with(|c| {
+            let tx = c.unchecked_transaction()?;
+            let mut n = 0;
+            for k in crate::secrets::SEALED_SETTINGS {
+                let v: Option<String> = tx.query_row("SELECT v FROM settings WHERE k=?1", params![k], |r| r.get(0)).optional()?;
+                if let Some(v) = v.filter(|v| !v.is_empty() && !v.starts_with(crate::secrets::PREFIX)) {
+                    tx.execute("UPDATE settings SET v=?1 WHERE k=?2", params![crate::secrets::seal(k, &v), k])?;
+                    n += 1;
+                }
+            }
+            let rows: Vec<(i64, String, String)> = {
+                let mut st = tx.prepare("SELECT rowid, privkey, psk FROM peers WHERE privkey NOT LIKE 'enc1:%' OR psk NOT LIKE 'enc1:%'")?;
+                let it = st.query_map([], |r| Ok((r.get(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default(), r.get::<_, Option<String>>(2)?.unwrap_or_default())))?;
+                it.collect::<rusqlite::Result<_>>()?
+            };
+            for (id, pk, psk) in &rows {
+                tx.execute(
+                    "UPDATE peers SET privkey=?1, psk=?2 WHERE rowid=?3",
+                    params![crate::secrets::seal(&crate::secrets::peer_label("privkey"), pk), crate::secrets::seal(&crate::secrets::peer_label("psk"), psk), id],
+                )?;
+            }
+            tx.commit()?;
+            Ok((n, rows.len()))
+        });
+        match r {
+            Ok((0, 0)) => {}
+            Ok((s, p)) => eprintln!("secrets: {} settings and {} peer keys sealed at rest", s, p),
+            Err(e) => eprintln!("secrets: sealing the stored secrets failed (nothing changed): {}", e),
+        }
     }
 
     pub fn on(&self, k: &str) -> bool {
@@ -788,9 +824,9 @@ impl Db {
                         user_id: r.get(0)?,
                         node_id: r.get(1)?,
                         proto: r.get(2)?,
-                        privkey: r.get(3)?,
+                        privkey: crate::secrets::open(&crate::secrets::peer_label("privkey"), &r.get::<_, String>(3)?),
                         pubkey: r.get(4)?,
-                        psk: r.get(5)?,
+                        psk: crate::secrets::open(&crate::secrets::peer_label("psk"), &r.get::<_, String>(5)?),
                         ip: r.get(6)?,
                         rx: r.get(7)?,
                         tx: r.get(8)?,
@@ -817,7 +853,7 @@ impl Db {
         };
         let _ = self.exec(
             "INSERT OR IGNORE INTO peers(user_id,node_id,proto,privkey,pubkey,psk,ip) VALUES(?1,?2,?3,?4,?5,?6,?7)",
-            &[&user_id, &node, &proto, &privk, &pubk, &psk, &ip],
+            &[&user_id, &node, &proto, &crate::secrets::seal(&crate::secrets::peer_label("privkey"), &privk), &pubk, &crate::secrets::seal(&crate::secrets::peer_label("psk"), &psk), &ip],
         );
         self.peer(user_id, node, proto)
     }

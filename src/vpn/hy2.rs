@@ -145,7 +145,7 @@ pub fn ensure_acl() {
     let Ok(t) = std::fs::read_to_string(CONF) else { return };
     let Some(new) = with_acl(&t) else { return };
     let was_active = std::process::Command::new("systemctl").args(["is-active", "--quiet", "hysteria-server.service"]).status().map(|s| s.success()).unwrap_or(false);
-    if let Err(e) = crate::util::write_private(CONF, &new) {
+    if let Err(e) = crate::util::write_private(CONF, &new).and_then(|_| crate::util::service_readable(CONF, "hysteria")) {
         eprintln!("hysteria2: the ACL could not be written: {}", e);
         return;
     }
@@ -154,7 +154,7 @@ pub fn ensure_acl() {
     let active = std::process::Command::new("systemctl").args(["is-active", "--quiet", "hysteria-server.service"]).status().map(|s| s.success()).unwrap_or(false);
     if was_active && !active {
         // an older Hysteria that does not take this ACL: the users come first, the old config goes back
-        if let Err(e) = crate::util::write_private(CONF, &t) {
+        if let Err(e) = crate::util::write_private(CONF, &t).and_then(|_| crate::util::service_readable(CONF, "hysteria")) {
             eprintln!("hysteria2: the previous config could not be put back: {}", e);
         }
         let _ = std::process::Command::new("systemctl").args(["restart", "hysteria-server.service"]).status();

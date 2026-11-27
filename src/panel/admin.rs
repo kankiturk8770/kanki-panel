@@ -566,11 +566,43 @@ async fn logs(State(app): St, h: HeaderMap, Query(q): Query<HashMap<String, Stri
     };
     // another server: the warnings and errors its agent reported (3.58.1)
     if let Some(sid) = q.get("server").filter(|x| !x.is_empty() && x.as_str() != "local") {
-        return Json(json!({ "src": src, "server": sid, "lines": crate::tunnel::panel::agent_log_lines(sid) })).into_response();
+        let mut lines = crate::tunnel::panel::agent_log_lines(sid);
+        if let Some(a) = lines.as_array_mut() {
+            redact_lines(&app, a);
+        }
+        return Json(json!({ "src": src, "server": sid, "lines": lines })).into_response();
     }
     let units: Vec<String> = units.iter().map(|u| u.to_string()).collect();
-    let lines = tokio::task::spawn_blocking(move || journal(&units, n, false)).await.unwrap_or_default();
+    let mut lines = tokio::task::spawn_blocking(move || journal(&units, n, false)).await.unwrap_or_default();
+    redact_lines(&app, &mut lines);
     Json(json!({ "src": src, "lines": lines })).into_response()
+}
+
+/// The panel's own secrets (settings, env): never shown in a log line, whatever printed them
+pub fn known_secrets(app: &App) -> Vec<String> {
+    let mut v: Vec<String> = SECRET_SETTINGS.iter().map(|k| app.db.get(k)).filter(|s| s.trim().len() >= 8).collect();
+    for k in ["NODE_TOKEN", "HY2_SECRET", "HY2_OBFS", "KANKI_MASTER_KEY"] {
+        if let Some(x) = app.env.get(k).filter(|x| x.trim().len() >= 8) {
+            v.push(x.trim().to_string());
+        }
+    }
+    v
+}
+
+/// The settings that hold secrets (masked in logs and answers, sealed at rest)
+pub const SECRET_SETTINGS: &[&str] = &[
+    "totp_secret", "totp_pending", "sub_link_key", "kmix_secret", "bot_token", "mon_token", "tgb_token", "tgb_pass", "ai_key", "np_key",
+    "zp_merchant", "toncenter_key", "card_number", "giveaway_secret", "join_token", "api_key",
+];
+
+fn redact_lines(app: &App, lines: &mut [Value]) {
+    let known = known_secrets(app);
+    for l in lines.iter_mut() {
+        if let Some(m) = l["m"].as_str() {
+            let r = crate::util::redact(m, &known);
+            l["m"] = json!(r);
+        }
+    }
 }
 
 /// The last `n` lines of these units' journal as [{ts, p, u, m}] (`warnings`: warnings and errors only)

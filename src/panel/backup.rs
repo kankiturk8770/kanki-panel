@@ -35,6 +35,17 @@ fn private_dir(path: &str) -> Result<(), String> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())
 }
 
+/// 3.68: backup and restore work inside `<data>/tmp` (0700), never the shared /tmp
+fn work_dir() -> String {
+    let data = crate::util::load_env("/etc/kanki/kanki.env").get("DATA_DIR").cloned().unwrap_or_else(|| "/var/lib/kanki".into());
+    let d = format!("{}/tmp", data);
+    if let Err(e) = crate::util::private_dir(&d) {
+        eprintln!("backup: {} could not be made ({}); using the system temp folder", d, e);
+        return std::env::temp_dir().to_string_lossy().to_string();
+    }
+    d
+}
+
 /// A restored database waiting in the data folder for the next start
 const PENDING: &str = "restore.db.pending";
 
@@ -125,7 +136,7 @@ fn copy_tree(src: &std::path::Path, dst: &std::path::Path, depth: usize) -> std:
 /// its renewal file and its live links again (made here, each `../../archive/<domain>/<file>`), and the
 /// account comes along when this machine has none. The number of domains put back.
 fn le_restore(tgz: &str, le_dir: &str) -> Result<usize, String> {
-    let tmp = format!("/tmp/kanki-le-{}", rand_token(12));
+    let tmp = format!("{}/kanki-le-{}", work_dir(), rand_token(12));
     private_dir(&tmp)?;
     let res = (|| -> Result<usize, String> {
         run("tar", &["-xzf", tgz, "-C", &tmp, "--no-same-owner"], None)?;
@@ -184,13 +195,38 @@ fn le_restore(tgz: &str, le_dir: &str) -> Result<usize, String> {
     res
 }
 
+/// A consistent copy of the database. 3.68: made only inside `<data>/tmp` (0700; never the shared /tmp), read,
+/// then overwritten and removed at once.
 pub fn db_snapshot(app: &App) -> Option<Vec<u8>> {
-    let dir = format!("/tmp/kanki-snap-{}", rand_token(12));
-    private_dir(&dir).ok()?;
+    let base = format!("{}/tmp", app.data_dir());
+    if let Err(e) = crate::util::private_dir(&base) {
+        eprintln!("backup: {} could not be made: {}", base, e);
+        return None;
+    }
+    let dir = format!("{}/snap-{}", base, rand_token(12));
+    if let Err(e) = crate::util::private_dir(&dir) {
+        eprintln!("backup: {} could not be made: {}", dir, e);
+        return None;
+    }
     let path = format!("{}/snap.db", dir);
+    // the path is made here from fixed parts and a random token (letters and digits): nothing to quote
     let ok = app.db.with(|c| c.execute(&format!("VACUUM INTO '{}'", path), [])).is_ok();
+    // 3.68: the copy carries its secrets opened, so it restores on a server with another master key (the archive
+    // has its own protection; the restored panel seals them again at its first start)
+    let ok = ok && match crate::secrets::plain_copy(&path) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("backup: the snapshot's secrets could not be opened: {}", e);
+            false
+        }
+    };
     let b = if ok { std::fs::read(&path).ok() } else { None };
-    let _ = std::fs::remove_dir_all(&dir);
+    if let Err(e) = crate::util::shred_remove(&path) {
+        eprintln!("backup: the snapshot could not be wiped: {}", e);
+    }
+    if let Err(e) = std::fs::remove_dir_all(&dir) {
+        eprintln!("backup: {} could not be removed: {}", dir, e);
+    }
     b
 }
 
@@ -249,7 +285,7 @@ fn meta(app: &App, apps: usize) -> Value {
 /// `with_apps`: also the app install files uploaded in the panel (a download and a move take them;
 /// the nightly Telegram backup does not, a bot cannot send files over 50 MB).
 pub fn make_archive_with(app: &App, pass: &str, with_apps: bool) -> Result<(Vec<u8>, String), String> {
-    let dir = format!("/tmp/kanki-bk-{}", rand_token(12));
+    let dir = format!("{}/kanki-bk-{}", work_dir(), rand_token(12));
     private_dir(&dir)?;
     std::fs::create_dir_all(format!("{}/files", dir)).map_err(|e| e.to_string())?;
     let res = (|| -> Result<(Vec<u8>, String), String> {
@@ -304,7 +340,7 @@ pub struct Restored {
 
 /// Accepts .kbk (encrypted), .tar.gz, or a raw SQLite file from older versions
 pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<Restored, String> {
-    let dir = format!("/tmp/kanki-rs-{}", rand_token(12));
+    let dir = format!("{}/kanki-rs-{}", work_dir(), rand_token(12));
     private_dir(&dir)?;
     std::fs::create_dir_all(format!("{}/x", dir)).map_err(|e| e.to_string())?;
     let res = (|| -> Result<Restored, String> {
@@ -345,7 +381,20 @@ pub fn restore(app: &App, data: &[u8], pass: &str, full: bool) -> Result<Restore
                     if let Some(parent) = std::path::Path::new(f).parent() {
                         let _ = std::fs::create_dir_all(parent);
                     }
-                    std::fs::copy(&src, f).map_err(|e| format!("{}: {}", f, e))?;
+                    // 3.68: secrets come back 0600 with the owner the file had (Hysteria's config stays the
+                    // `hysteria` user's); the TLS files keep the mode they had (Caddy's group reads them)
+                    let data = std::fs::read(&src).map_err(|e| format!("{}: {}", f, e))?;
+                    let keep = {
+                        use std::os::unix::fs::PermissionsExt;
+                        std::fs::metadata(f).ok().map(|m| m.permissions().mode() & 0o7777)
+                    };
+                    crate::util::write_private_bytes(f, &data).map_err(|e| format!("{}: {}", f, e))?;
+                    if *f == "/etc/hysteria/config.yaml" {
+                        crate::util::service_readable(f, "hysteria").map_err(|e| format!("{}: {}", f, e))?;
+                    } else if f.starts_with("/etc/kanki/tls/") || *f == "/etc/kanki/repo" {
+                        let mode = keep.unwrap_or(if *f == "/etc/kanki/repo" { 0o644 } else { 0o640 });
+                        crate::util::chmod_if_present(f, mode).map_err(|e| format!("{}: {}", f, e))?;
+                    }
                 }
                 let ddir = app.data_dir();
                 let pins = copy_flat(&format!("{}/nodepins", x), &format!("{}/nodepins", ddir));
