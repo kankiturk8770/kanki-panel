@@ -2272,6 +2272,10 @@ async fn sub_hashed_kind(State(app): St, Path((hash, kind)): Path<(String, Strin
 /// The code in `X-Kanki-Sub` (or `Authorization: Bearer`): the account it names, or the miss answer
 fn header_user(app: &App, h: &HeaderMap) -> Result<User, Response> {
     let code = crate::sublink::header_code(h).ok_or_else(crate::devices::miss)?;
+    // 3.67.2: an app may send only the digits of the code (what a user typed); the page then names the full code
+    if !code.contains('-') {
+        return app.db.user_by_bare_code(&code).ok_or_else(crate::devices::miss);
+    }
     sub_user(app, &code)
 }
 

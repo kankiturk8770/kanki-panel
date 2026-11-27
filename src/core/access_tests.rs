@@ -748,3 +748,26 @@ async fn kmix_health_comes_with_the_sync_and_is_cleaned() {
     let s = v["servers"].as_array().unwrap().iter().find(|x| x["id"] == "hn2").unwrap();
     assert_eq!(s["health"]["hinted"], 4);
 }
+
+/// 3.67.2: an app may send only the digits of the code; the page (not sealed) names the full code, and digits that
+/// are wrong, shared by two accounts or not digits at all get the plain miss answer
+#[tokio::test]
+async fn the_bare_code_in_the_header_finds_its_account() {
+    let app = crate::test_app();
+    with_xray(&app);
+    let id = user(&app, "bareuser", "xray,hy2", Tier::V2ray);
+    let u = app.db.user(id).unwrap();
+    let (st, _, page) = get_with(&app, "/sub/me", &[("x-kanki-sub", u.code.as_str())]).await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(page.contains(&u.sub_code()), "the page names the full code");
+    let (st, _, v2) = get_with(&app, "/sub/me/v2", &[("x-kanki-sub", u.code.as_str())]).await;
+    assert_eq!(st, StatusCode::OK);
+    assert!(!v2.is_empty());
+    // two accounts with the same digits: neither is given
+    let twin = user(&app, "baretwin", "xray,hy2", Tier::V2ray);
+    app.db.exec("UPDATE users SET code=?1 WHERE id=?2", &[&u.code, &twin]).unwrap();
+    for bad in [u.code.as_str(), "0000000000000000000", "123", "12345678901234567890123456789012345"] {
+        let (st, _, _) = get_with(&app, "/sub/me", &[("x-kanki-sub", bad)]).await;
+        assert_eq!(st, StatusCode::NOT_FOUND, "{}", bad);
+    }
+}

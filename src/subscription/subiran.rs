@@ -635,8 +635,8 @@ mod tests {
 
     #[test]
     fn link_base_hides_443() {
-        assert_eq!(link_base("sub.kanki.pro", 2053), "https://sub.kanki.pro:2053");
-        assert_eq!(link_base("sub.kanki.pro", 443), "https://sub.kanki.pro");
+        assert_eq!(link_base("sub.example.net", 2053), "https://sub.example.net:2053");
+        assert_eq!(link_base("sub.example.net", 443), "https://sub.example.net");
     }
 
     #[test]

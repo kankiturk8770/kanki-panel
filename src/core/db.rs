@@ -535,6 +535,25 @@ impl Db {
         self.user(id).filter(|u| u.code == code)
     }
 
+    /// The account whose code part is `code` (an app sent only the digits, without `kanki-<id>-`): None when
+    /// it is not 10 to 32 digits, or when no account or more than one account has it.
+    pub fn user_by_bare_code(&self, code: &str) -> Option<User> {
+        if !(10..=32).contains(&code.len()) || !code.bytes().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        let ids: Vec<i64> = self.with(|c| {
+            let mut out = vec![];
+            if let Ok(mut st) = c.prepare("SELECT id FROM users WHERE code=?1 LIMIT 2") {
+                if let Ok(it) = st.query_map(params![code], |r| r.get::<_, i64>(0)) {
+                    out.extend(it.flatten());
+                }
+            }
+            out
+        });
+        let [id] = ids.as_slice() else { return None };
+        self.user(*id).filter(|u| crate::util::ct_eq(&u.code, code))
+    }
+
     pub fn users_of_tg(&self, tg: i64) -> Vec<User> {
         self.users().into_iter().filter(|u| u.tg_id == tg).collect()
     }

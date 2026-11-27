@@ -1,5 +1,12 @@
 # STATE
 
+## 3.67.2 — bare subscription code in the header (done)
+- `/sub/me[/<kind>]` with `X-Kanki-Sub: <digits>` (only the code part, 10–32 digits, no `kanki-<id>-`) finds the
+  account by `Db::user_by_bare_code` (parameterized, exactly one match, constant-time compare); none or two → 404.
+  The answer is the plain page (the app asks without `X-Kanki-Seal`, since the seal key needs the full code); the app
+  reads the full code from it and logs in sealed as before. Test: `the_bare_code_in_the_header_finds_its_account`.
+- Kanki app 1.45.1 depends on it only for bare codes; `kanki-<id>-<code>` and `/sub/h/` work on 3.65+.
+
 ## Phase 1 — server roles, user tiers, Xray CDN address, subscription status (done)
 
 ### Schema (forward-only, `src/core/db.rs` → `migrate_access`)
