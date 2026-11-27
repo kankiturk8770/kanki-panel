@@ -34,8 +34,9 @@ function secTabsHtml(p){var s=secOf(p);if(s[3].length<2)return '';
    (core?'<i class="tdot" aria-hidden="true"></i>':'')+'<span>'+t(x[2])+'</span>'+(core?'<em class="kcb-st"></em>':'')+'</a>'}).join('')+'</div></div></div>'}
 function railEdges(r){var w=r.parentNode,max=r.scrollWidth-r.clientWidth,x=Math.abs(r.scrollLeft);
  w.classList.toggle('more-s',x>2);w.classList.toggle('more-e',x<max-2)}
+// (3.72) at once, never an animation: a sliding bar looked like it jumped from one core to another
 function railShow(r){var a=r.querySelector('.on');if(!a)return;var rr=r.getBoundingClientRect(),ar=a.getBoundingClientRect();
- if(ar.left<rr.left+8||ar.right>rr.right-8)try{r.scrollBy({left:(ar.left+ar.width/2)-(rr.left+rr.width/2),behavior:'smooth'})}catch(e){r.scrollLeft+=(ar.left+ar.width/2)-(rr.left+rr.width/2)}}
+ if(ar.left<rr.left+8||ar.right>rr.right-8)r.scrollLeft+=(ar.left+ar.width/2)-(rr.left+rr.width/2)}
 function wireRail(el){var r=el.querySelector('.kcb-rail');if(!r)return;
  r.addEventListener('scroll',function(){railEdges(r)},{passive:true});
  r.addEventListener('keydown',function(e){var k=e.key,ts=$$('.kcb-t',r),i=ts.indexOf(document.activeElement);if(i<0)return;
@@ -44,10 +45,19 @@ function wireRail(el){var r=el.querySelector('.kcb-rail');if(!r)return;
   try{ts[j].scrollIntoView({block:'nearest',inline:'nearest'})}catch(_){}});
  window.addEventListener('resize',function(){if(r.isConnected)railEdges(r)});
  requestAnimationFrame(function(){railShow(r);railEdges(r)})}
+// (3.72) the bar of a section is built once and kept: a page that draws itself again gets the very same bar back
+// (where it was scrolled, its dots), and moving to another page of the section keeps the bar's scroll
+var TB={el:null,p:'',x:0};
 function drawSecTabs(p){var pg=$('#pg');if(!pg)return;var old=$('#sectabs'),h=secTabsHtml(p);
- if(!h){if(old)old.remove();return}
+ if(!h){if(old)old.remove();TB={el:null,p:'',x:0};return}
  if(old&&old.parentNode==pg&&pg.firstChild==old&&old.dataset.p==p)return;
- if(old)old.remove();var d=document.createElement('div');d.innerHTML=h;var el=d.firstChild;pg.insertBefore(el,pg.firstChild);
+ // the same section: the very same bar comes back (its scroll, its dots); markTabs lights the open tab, nothing is rebuilt
+ if(TB.el&&(TB.p==p||secOf(TB.p)[0]==secOf(p)[0])){if(old&&old!==TB.el)old.remove();TB.el.dataset.p=p;TB.p=p;
+  if(pg.firstChild!==TB.el)pg.insertBefore(TB.el,pg.firstChild);var r0=TB.el.querySelector('.kcb-rail');if(r0){r0.scrollLeft=TB.x;requestAnimationFrame(function(){railShow(r0)})}return}
+ if(old)old.remove();if(TB.el&&TB.el!==old&&TB.el.parentNode)TB.el.remove();
+ var d=document.createElement('div');d.innerHTML=h;var el=d.firstChild;pg.insertBefore(el,pg.firstChild);
+ TB={el:el,p:p,x:0};var r=el.querySelector('.kcb-rail');
+ if(r){r.addEventListener('scroll',function(){if(TB.el===el)TB.x=r.scrollLeft},{passive:true})}
  wireRail(el);coreDots(el)}
 // a live dot on each core: green running everywhere, yellow partly, red down, grey not set up
 var CD={at:0,v:null},WORD={g:'Running',y:'Partly down',r:'Down',n:'Not set up'};

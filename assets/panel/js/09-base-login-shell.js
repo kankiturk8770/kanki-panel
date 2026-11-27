@@ -57,9 +57,18 @@ function skel(){return '<div class="kskel-page" role="status" aria-label="'+esc(
 // differs. Only GETs a page makes while it opens are served from the copy; any change (POST, PUT, DELETE) drops
 // every copy, so nothing saved ever shows its old value.
 var SWR={};
-function swrFresh(p,pg,txt){var old=SWR[p];SWR[p]={at:Date.now(),j:txt};if(old&&old.j!==txt&&S.page==pg){clearTimeout(S.swrT);S.swrT=setTimeout(function(){
- if(S.page!=pg||$('#modal').classList.contains('on')||(document.activeElement&&/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)))return;
- var y=window.scrollY;S.noSwr=1;try{route()}finally{S.noSwr=0}window.scrollTo(0,y)},60)}}
+// (3.72) the fresh answer only refreshes the copy: the page itself is never drawn a second time right after it opened
+// (that second drawing made every page blink once and rebuilt the core tabs, which then slid back to the open one);
+// the page's own refresh (15 s) shows the newer numbers in place
+function swrFresh(p,pg,txt){SWR[p]={at:Date.now(),j:txt}}
+// (3.72) a page part redrawn with exactly the HTML it already shows is left alone: rebuilding the same nodes every
+// refresh made the panel blink (pictures, dots and bars drawn again, scroll and focus inside lost). Only inside the
+// page (#pg), and only while nothing else changed that part since (its HTML is compared as the browser keeps it).
+(function(){var d=Object.getOwnPropertyDescriptor(Element.prototype,'innerHTML');if(!d||!d.set||!d.get)return;
+ var inPage=function(el){return el.isConnected&&el.closest&&!!el.closest('#pg')};
+ Object.defineProperty(Element.prototype,'innerHTML',{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){var s=String(v);
+  if(this.__kr===s&&inPage(this)&&d.get.call(this)===this.__kn)return;
+  d.set.call(this,s);if(inPage(this)){this.__kr=s;this.__kn=d.get.call(this)}else this.__kr=undefined}})})();
 function api(m,p,b,raw){var u=p;
  if(m=='GET'&&!raw&&!S.noSwr&&S.navAt&&Date.now()-S.navAt<400){var c=SWR[p];if(c&&Date.now()-c.at<120000){var pg=S.page;
   fetch(p,{headers:{'X-Kanki-Admin':'1'},credentials:'same-origin'}).then(function(r){return r.ok?r.text():null}).then(function(x){if(x!=null)swrFresh(p,pg,x)}).catch(function(){});

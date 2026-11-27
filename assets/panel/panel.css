@@ -2060,7 +2060,7 @@ body.light .mbox{box-shadow:0 24px 64px rgba(40,30,10,.28)}
 .modal.on .mbox{animation:kgIn .2s ease-out}
 @media(prefers-reduced-motion:reduce){.modal.on .mbox{animation:none}}
 /* the core bar: one row of the eight cores that swipes sideways and snaps to a core; the open core is gold glass */
-.kcb-rail{scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+.kcb-rail{scroll-snap-type:x mandatory;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
 .kcb-t{scroll-snap-align:center}
 .kcb-t.on{color:var(--t);font-weight:800;background:linear-gradient(180deg,rgba(245,196,81,.22),rgba(245,196,81,.08));box-shadow:inset 0 0 0 1px rgba(245,196,81,.5),0 0 14px -6px rgba(245,196,81,.7)}
 body.light .kcb-t.on{background:linear-gradient(180deg,rgba(245,196,81,.32),rgba(245,196,81,.14));box-shadow:inset 0 0 0 1px rgba(185,131,24,.55)}

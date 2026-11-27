@@ -44,7 +44,7 @@ document.addEventListener('keydown',function(e){var sh=$('#msheet');
 // a section whose tabs are sub pages of one page (Xray): mark the tab of the sub page, not all of them
 function markTabs(){var el=$('#sectabs');if(!el)return;var as=$$('a.kcb-t,a.kcb-ov',el),h=location.hash||'',hit=as.filter(function(a){return a.getAttribute('href')==h});
  if(!hit.length){var p='#'+S.page;hit=as.filter(function(a){return a.getAttribute('href').split('/')[0]==p}).slice(0,1)}
- as.forEach(function(a){var on=hit.indexOf(a)>=0;a.classList.toggle('on',on);if(a.classList.contains('kcb-t'))a.setAttribute('aria-selected',on);if(on)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')})}
+ as.forEach(function(a){var on=hit.indexOf(a)>=0;a.classList.toggle('on',on);if(a.classList.contains('kcb-t')){a.setAttribute('aria-selected',on);a.tabIndex=on?0:-1}if(on)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')})}
 V.markTabs=markTabs;
 
 
